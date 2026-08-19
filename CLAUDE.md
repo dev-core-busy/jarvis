@@ -3573,6 +3573,36 @@ im Audit-Log); ohne sie beweist ein „gehalten" nichts.
    shell_execute-Eintrag. Der Beobachter-Hook meldet abgewiesene Aufrufe bewusst nicht als
    Schritt (er sitzt NACH der Schranke).
 
+### Vorfall 2026-08-19: Dateien erzeugt, aber kein Download-Chip
+**Gemeldet von ECHT:** Prompt „Du benötigst zwei Excel-Dateien. Eine Master und eine Slave …" –
+„angeblich wurden zwei Ergebnis-Dateien gebaut, aber nicht als Download angeboten". Nachgemessen:
+die Dateien **waren** da (`data/documents/<cap>__Master_Template.xlsx` u. a., korrekt auf den
+Melder registriert), im Protokoll stand aber `dateien: []`.
+- **Ursache:** `office_create_excel` legt die Datei **selbst** in `data/documents` ab und nennt die
+  `/api/documents/…`-URL in **seinem Werkzeug-Ergebnis**. Die Endantwort nennt danach nur noch den
+  Klarnamen („**Master_Template.xlsx** – Leere Master-Tabelle"). Der Runner rief `_deliver_docs`
+  aber **nur einmal mit der Endantwort** – dort steht keine URL, und die Namensraterei greift nicht
+  auf eine Datei, die schon einen Capability-Namen trägt. **Der Chat-Weg macht es richtig:** er
+  ruft `_deliver_docs` nach **jedem** Tool-Ergebnis (`agent.py`, Zeile ~2200) UND mit der Antwort.
+- **Fix:** neuer Beobachter `agent._ergebnis_hook(name, result_str)` in `_run_headless` (direkt
+  nach `_maybe_delegate`, wo `result_str` endgültig ist – das Gegenstück zum vorhandenen
+  `_schritt_hook`). Der Runner sammelt die Ergebnistexte (`_ERGEBNIS_MAX = 40`) und lässt
+  `_deliver_docs` danach über **Ergebnisse UND Endantwort** laufen – mit **demselben**
+  `delivered`-Set, also je Datei genau ein Chip.
+- **Merkregel: ein headless-Aufrufer, der Dateien ausliefern will, braucht die
+  WERKZEUG-ERGEBNISSE.** Die Endantwort eines Modells nennt Dateien in Prosa, nicht als URL. Wer
+  nur sie auswertet, verliert genau die Dateien, die ein Werkzeug ordentlich erzeugt und
+  registriert hat.
+- **Belegt mit echtem Modell und echtem Office-Skill** (DEV, im venv): Werkzeug-Ergebnis
+  `✅ 'Probe_Master.xlsx' wurde erstellt. [📥 … ](/api/documents/dc4c…__Probe_Master.xlsx)`,
+  Endantwort nur mit Klarnamen → **alter Weg 0 Chips, neuer Weg 1 Chip**, keine Doppelten.
+- **FALLSTRICK im eigenen Wächter, zum wiederholten Mal:** die Reihenfolge-Prüfung benutzte
+  `lauf_code.index(...)`. Das **wirft**, statt fehlzuschlagen – die Gegenprobe brach ab und sah
+  damit aus wie ein bestandener Lauf (0 statt 2 FAIL). Jetzt `.find()` mit `>= 0`-Prüfung. **Nie
+  `.index()` in einer Testprüfung.**
+- **Die vor dem Fix erzeugten Dateien sind nicht verloren** – sie liegen in `data/documents` und
+  sind dem Ersteller zugeordnet; „Erneut ausführen" auf der Karte erzeugt die Chips nachträglich.
+
 ### Zwei BESTANDS-Befunde, die diese Messung aufgedeckt hat
 1. **Die Injektionsheuristik war rein ENGLISCH.** `security_guard._PATTERN_DEFS` kannte
    „ignore all previous instructions", aber nicht „IGNORIERE ALLE VORHERIGEN ANWEISUNGEN".

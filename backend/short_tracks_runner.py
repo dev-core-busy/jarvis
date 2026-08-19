@@ -182,6 +182,8 @@ def _arbeitskopie(quelle: Path) -> Path | None:
 
 # ── Inhalt lesbar machen ────────────────────────────────────────────────────
 
+_ERGEBNIS_MAX = 40          # Werkzeug-Ergebnisse je Lauf, aus denen Chips
+                            # gelesen werden (Deckel gegen Speicherwachstum)
 _TEXT_ENDUNGEN = {"csv", "tsv", "txt", "md", "json", "xml", "html", "htm", "log",
                   "yaml", "yml", "ini", "sql"}
 _BILD_ENDUNGEN = {"png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff"}
@@ -894,6 +896,21 @@ async def _lauf(job: dict, dump: dict, auftrag: str,
         del job["schritte"][:-60]      # Deckel: die Karte zeigt die letzten
     agent._schritt_hook = _schritt
 
+    # Ergebnistexte der Werkzeuge einsammeln. GRUND (gemeldet 2026-08-19 von
+    # ECHT): `office_create_excel` legt die Datei selbst in `data/documents` ab
+    # und nennt die `/api/documents/...`-URL in SEINEM ERGEBNIS. Die Endantwort
+    # nennt danach nur noch den Klarnamen ("**Master_Template.xlsx** – Layout").
+    # `_deliver_docs` nur ueber die Endantwort laufen zu lassen heisst also: die
+    # Datei ist erzeugt, registriert und liegt da – aber es gibt keinen Chip.
+    # Der Chat-Weg ruft `_deliver_docs` genau deshalb nach JEDEM Tool-Ergebnis.
+    ergebnisse: list[str] = []
+
+    def _ergebnis(name: str, text) -> None:
+        if len(ergebnisse) >= _ERGEBNIS_MAX:
+            return
+        ergebnisse.append(str(text or "")[:6000])
+    agent._ergebnis_hook = _ergebnis
+
     # Profil, Denktiefe und Schrittgrenze laufen ueber DIESELBEN Attribute wie
     # bei den Rollen-Agenten (``_role_profile_id``/``_role_max_steps``, gelesen
     # von ``_resolve_profile_for_user`` und ``_max_steps``). Eigene Attribute
@@ -944,14 +961,21 @@ async def _lauf(job: dict, dump: dict, auftrag: str,
                 schon.add(str(Path(pfad).resolve()))
             except Exception:  # noqa: BLE001
                 pass
-    try:
-        await agent._deliver_docs(sammler, antwort, schon,
-                                  job.get("owner_roh") or job.get("owner") or "",
-                                  since=job.get("gestartet") or 0.0)
-    except Exception as e:  # noqa: BLE001
-        # Ein fehlender Chip ist aergerlich, ein verlorener Ergebnistext waere
-        # schlimmer – deshalb nur protokollieren.
-        print("[Tracks] Ergebnisdateien nicht ermittelbar: %s" % e, flush=True)
+    # ERST die Werkzeug-Ergebnisse (dort stehen die URLs), DANN die Endantwort
+    # (dort stehen die Klarnamen). Dasselbe `schon`-Set ueber alle Aufrufe –
+    # so entsteht je Datei genau EIN Chip, egal ueber welchen Weg sie gefunden
+    # wurde.
+    for _text in ergebnisse + [antwort]:
+        if not _text:
+            continue
+        try:
+            await agent._deliver_docs(sammler, _text, schon,
+                                      job.get("owner_roh") or job.get("owner") or "",
+                                      since=job.get("gestartet") or 0.0)
+        except Exception as e:  # noqa: BLE001
+            # Ein fehlender Chip ist aergerlich, ein verlorener Ergebnistext
+            # waere schlimmer – deshalb nur protokollieren.
+            print("[Tracks] Ergebnisdateien nicht ermittelbar: %s" % e, flush=True)
     chips = _chips_lesen(sammler.md)
 
     # Die Pfade aus dem Anzeigetext entfernen: der Chip ist der EINZIGE Weg zur

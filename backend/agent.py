@@ -2681,6 +2681,23 @@ KRITISCH – Autonomie-Regeln:
                     result_str = await self._maybe_delegate(
                         result_str, tool_name=tool_name, tool_args=tool_args)
 
+                    # Beobachter fuer das ERGEBNIS eines Werkzeugs.
+                    #
+                    # NOETIG, WEIL DER CHAT-WEG DASSELBE TUT: dort laeuft `_deliver_docs`
+                    # nicht nur ueber die Endantwort, sondern ueber JEDES Tool-Ergebnis –
+                    # und genau dort steht die `/api/documents/...`-URL, die
+                    # `office_create_*` zurueckgibt. Die Endantwort nennt meist nur den
+                    # Klarnamen ("**Master.xlsx** – Layout-Vorlage"). Ein headless-Aufrufer
+                    # ohne diesen Hook sieht die URL nie und liefert die Datei deshalb
+                    # NICHT aus, obwohl sie erzeugt wurde (gemeldet 2026-08-19 aus Short
+                    # Tracks auf ECHT: zwei Excel-Dateien gebaut, kein Download-Chip).
+                    _ehook = getattr(self, "_ergebnis_hook", None)
+                    if _ehook is not None:
+                        try:
+                            _ehook(tool_name, result_str)
+                        except Exception as _he:  # noqa: BLE001
+                            print(f"[Agent] Ergebnis-Hook: {_he}", flush=True)
+
                     # Screenshot-Bild erkennen (IMAGE_BASE64:pfad|base64data)
                     image_part = None
                     if isinstance(result, str) and result.startswith("IMAGE_BASE64:"):

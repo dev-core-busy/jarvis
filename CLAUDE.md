@@ -4064,6 +4064,138 @@ Servers schreiben) im echten venv auf DEV, dazu Bestand grün: 365 Short Tracks,
   hängen am bereits aktiven Office-Skill und stehen über `BASIS_WERKZEUGE` sofort in jeder
   vorhandenen Ablage zur Verfügung.
 
+## Formular-PDFs: Adressdaten ueber die GEOMETRIE statt aus dem Fliesstext (2026-08-19)
+**Der Vorfall:** `nexus\andrea.ladd` bat an drei Tagen SIEBEN Mal darum, aus
+`Einsender_KIM_Anbindung_compressed.pdf` (54 Seiten, je Seite EIN ausgefuelltes Formular mit
+Name/Strasse/PLZ/Telefon/Fax/E-Mail/BSNR/LANR) die Adressen zu ziehen. Kein Lauf lieferte ein
+brauchbares Ergebnis. Aus den echten Protokollen auf ECHT:
+
+    Anhang-Text im Prompt:      82.018 Zeichen
+    llm_max_tokens auf ECHT:     8.192  (Denk- UND Antworttoken zusammen)
+    -> zwei Laeufe endeten mit steps=0 und "max_tokens erreicht"
+    Ein Lauf mit 15 Schritten endete mit dem Satz
+    "Lass mich das Script Schritt fuer Schritt aufbauen." – ohne Ergebnis.
+
+- **DER SCHWERSTE BEFUND STAND NICHT IM PROTOKOLL:** der EINE Lauf, der eine Datei erzeugte,
+  lieferte 16 von 54 Zeilen – und darin **falsche Adressen**. Fuer die erste Praxis stand dort
+  `54321 Absenderstadt`; richtig ist `12345 Musterstadt` (am gerenderten Blatt geprueft) – die
+  uebernommene Angabe war die PLZ des ABSENDERS aus dem Briefkopf. Solche Werte sind gefaehrlicher als eine leere
+  Tabelle: sie sehen plausibel aus, und niemand prueft 54 Adressen nach.
+
+**DREI URSACHEN, jede fuer sich hinreichend:**
+1. **Der Wert steht UEBER seiner Beschriftung, nicht daneben.** Gemessen: Beschriftung und
+   Eintrag liegen 11–19 px auseinander, der Zeilenabstand betraegt 37 px. Jedes zeilenbasierte
+   Verfahren (`pdftotext -layout`, "nimm die naechste Zeile") ordnet deshalb ZWANGSLAEUFIG
+   falsch zu. Genau das steht im Protokoll: `Name: -> NAECHSTE 'Am Beispielweg'` – das ist die
+   Strasse.
+2. **Die Textebene ist beschaedigt.** Sie liefert `12395` statt `12345`, `55 4S 33` statt
+   `55 44 33`, `12345 6789` statt `123456789`, `llgner` statt `Ilgner`. Bei Adressdaten
+   sind Ziffern der Inhalt.
+3. **Die Menge.** 54 Formulare als Fliesstext im Prompt sind eine Aufgabe, die das Modell "im
+   Kopf" abarbeiten soll, waehrend derselbe Prompt sein Token-Budget bereits aufbraucht.
+
+**DIE LOESUNG ist dieselbe Regel wie bei `tabellen.py`: die Daten gehen NIE durch das
+Sprachmodell.** Neues Werkzeug `pdf_formular_extrakt` (`skills/office/pdf_formular.py`, im
+Office-Skill angehaengt wie die Tabellen-Werkzeuge): das Modell nennt die Datei, die Zuordnung
+passiert im Backend ueber die GEOMETRIE der Seite, zurueck kommt eine fertige Tabelle plus
+Bilanz – auf Wunsch direkt als .xlsx.
+
+### Wie die Zuordnung funktioniert – die gelernte Schablone
+Ein Formular-PDF besteht aus vielen gleich aufgebauten Seiten; gemessen streuen die
+Feldpositionen ueber 54 Seiten um **weniger als 1 % der Seitenhoehe**. Die Texterkennung
+verliest dagegen die BESCHRIFTUNGEN je Seite unterschiedlich (`LANR(s):` wurde zu `LANRIS)`,
+`LANAI)`, `LANR6S)`; `Anmerkungen:` zu `Ah markNgerE`; `Name:` zu `Nana`).
+**Die Position ist verlaesslich, der Labeltext nicht** – also wird zuerst eine Schablone
+gelernt (wo liegt welches Feld, wie heisst es nach dem Mehrheitsentscheid ueber alle Seiten),
+und erst danach werden die Werte an diesen Positionen geholt.
+
+**Sieben Mechanismen, jeder aus einem konkreten Fehlschlag entstanden:**
+| Mechanismus | ohne ihn |
+|---|---|
+| Wert = Bruchstuecke UEBER der Beschriftung | jedes Feld um eins verschoben |
+| Cluster gegen den MEDIAN + Namensaehnlichkeit | 'Name' verschluckt Strasse/PLZ/Telefon |
+| Ausrichtung je Seite (`seitenversatz`) | schief eingezogene Scans verrutschen |
+| Wertspalte gelernt (x-Histogramm) | Praxisstempel landet in 'Anmerkungen' |
+| Lueckenabbruch (8 % der Blattbreite) | Stempel klebt am Wert |
+| zwei Grenzen (Label-Erkennung / Fliesstext) | entweder 'Ort:' faellt aus oder mehrzeilige Werte |
+| Rettung verlesener Beschriftungen | Seite ohne lesbares 'Name:' verliert den Namen |
+
+- **Die Quellenwahl wird GEMESSEN, nicht geraten.** Erste Fassung fragte
+  `pdf_text_verdacht` und fiel bei einem Importfehler still auf 'Textebene' zurueck – Ergebnis
+  am echten PDF: wieder `12395 Musterstadt`. **Eine Pruefung, die im Zweifel die unsichere Quelle
+  waehlt, ist schlimmer als keine.** Jetzt werden BEIDE Wege an zwei Seiten wirklich gelesen und
+  verglichen (zusammenhaengende lange Nummern, PLZ, E-Mails gegen zerhackte Woerter) – rein
+  RELATIV, weil eine absolute Schadensschwelle zwangslaeufig auch echte Fachdaten trifft
+  (ICD-10 `O61.0`, Pflegekategorie `A4S1` – die Lehre vom 2026-08-13).
+- **`OMP_THREAD_LIMIT=1` ist der Unterschied zwischen brauchbar und unbrauchbar.** Tesseract
+  belegt intern alle Kerne; mehrere Seiten gleichzeitig lassen die Instanzen um dieselben Kerne
+  kaempfen. Gemessen an 8 Seiten: **69,1 s ohne, 4,5 s mit** – Faktor 15, fuer das ganze
+  Dokument 466 s gegen 31 s. Deshalb wird `tesseract` direkt mit EIGENER Umgebung aufgerufen
+  statt ueber `pytesseract`: die Variable global zu setzen traefe auch Embeddings und
+  Bildmodelle des Dienstes.
+- **Blockweise rendern (8 Seiten), in DATEIEN.** Poppler parst das PDF bei jedem Aufruf neu –
+  seitenweise waren das 54 Durchlaeufe; alles auf einmal in den Speicher waeren 200 MB Bilder.
+- **`deu` allein, nicht `deu+eng`:** ein Drittel schneller UND besser (46 von 54 Strassen gegen
+  54 von 54). Zwei Sprachmodelle gleichzeitig erhoehen die Auswahl an Deutungen – bei Ziffern
+  ist das ein Nachteil.
+- **Doppelte Beschriftungen je Seite werden zu eigenen Spalten** (`… (2)`) statt sich
+  gegenseitig zu ueberschreiben, mit Hinweis im Bericht: enthaelt eine Seite zwei Formulare,
+  waere ein stilles Ueberschreiben genau der Datenverlust, den das Modul beseitigt.
+- **Kopf-/Fusszeilen fallen ueber ZWEI Wege heraus:** Felder ausserhalb des dichten Feldblocks
+  (Luecke > 4× Feldabstand) und Werte, die auf fast allen Seiten dieselben sind. Bei kurzen
+  Werten zaehlt nur exakte Gleichheit – ueber Aehnlichkeit verschwanden im eigenen Test
+  'Person 1'/'Person 2' als vermeintliche Fusszeile.
+- **`pfad_parameter = ("path",)`** – der Dispatch prueft den Pfad generisch ueber
+  `authorize_fs("read", …)`; ohne das waere das Werkzeug die bequemste Umgehung des
+  Pfad-Confinements und der Eigentuemer-Schranke in `data/documents`.
+- **Der Anhang-Hinweis lenkte bis dahin in den gescheiterten Weg** („z. B. pdfplumber per
+  Shell"). Er nennt jetzt `pdf_formular_extrakt` – aber nur, wenn das Werkzeug wirklich geladen
+  ist, und ueber `get_or_create_main()` statt `main_agent`: der Hauptagent entsteht erst beim
+  ersten Auftrag, sonst faellt der Hinweis ausgerechnet beim ERSTEN Anhang nach einem Neustart
+  lautlos aus (dieselbe Lazy-Falle wie bei `/api/context/stats`).
+
+### Verifiziert
+38 Pruefungen (`tests/test_pdf_formular.py`, ohne fastapi lauffaehig, `backend.config` als Stub
+mit Exit-2-Schranke). **Die Testdaten sind SYNTHETISCH** – das echte PDF enthaelt Namen und
+Anschriften von Arztpraxen und gehoert nicht in ein oeffentliches Repo; nachgebaut ist die
+Geometrie. Bestand gruen: 120 Endpunkt-Rechte, 50 Skill-Audit, 49 Office-Vorlage, 146 xlsx.
+- **Gegenproben greifen einzeln:** Wert-ueber-Label ausgebaut → 8 FAIL, Boilerplate-Laenge →
+  7, Seitenausrichtung → 2, Label-Rettung → 1, Stempelfilter → 1, Lueckenabbruch → 1;
+  Clustering nur bei gemeinsamem Ausbau beider Schutzmechanismen (→ 4 FAIL) – der Test prueft
+  die EIGENSCHAFT, nicht eine Implementierung.
+- **FALLSTRICK, der den Test fast wertlos gemacht haette:** vier von fuenf Gegenproben blieben
+  zuerst gruen, zwei brachen mit `KeyError`/`ValueError` ab statt fehlzuschlagen. Ursachen:
+  `[...]`-Zugriffe und `.index()` in Pruefungen (nie tun – ein abgebrochener Lauf sieht aus wie
+  ein bestandener), und Testfaelle, die den jeweiligen Mechanismus gar nicht trafen (der
+  Stempel lag auf Label-Hoehe und wurde schon vom y-Fenster gefiltert). Die Einzelmechanismen
+  werden jetzt zusaetzlich DIREKT geprueft, nicht nur ueber den Gesamtlauf.
+- **Am echten PDF gemessen – auf ECHT im Produktiv-venv:** 54 Seiten, 12 Felder, **54/54 bei
+  Name, Strasse, PLZ/Ort und Telefon**, 88 s. Seite 1 vollstaendig korrekt inklusive
+  `12345 Musterstadt`, `123456789`, `Ilgner`. Die Luecken sind ECHT: Seite 8 enthaelt kein
+  einziges `@`, die 20 fehlenden E-Mails waren im Formular leer.
+
+### Ausgerollt
+Auf DEV **und ECHT** (md5-gleich, Dienste aktiv, Portal/Settings 200). Dazu auf ECHT
+`llm_max_tokens` **8192 → 32768** (Sicherung `/root/settings.json.bak-maxtok-20260819-125106`,
+feldweise verglichen: genau dieser eine Wert geaendert). 8192 waren die zweite Ursache – bei
+einem Reasoning-Modell reichen sie fuer 82.000 Zeichen Anhang nicht, zwei Laeufe endeten ohne
+einen einzigen Werkzeugaufruf.
+- **NOCH NICHT geprueft:** ein echter Agentenlauf auf ECHT. Dort gibt es keinen
+  `AGENT_API_KEY`, der Lauf laesst sich von aussen nicht ausloesen. Auf DEV hat das Modell
+  `pdf_formular_extrakt` von sich aus gewaehlt und dreimal aufgerufen.
+
+### Eigener Fehler beim Deploy: `/dev/null` ueberschrieben (behoben)
+`install -o jarvis -m 644 <datei> /dev/null` als Ausgabe-Unterdrueckung gedacht – `install`
+SCHREIBT aber dorthin und ersetzte das Zeichengeraet durch eine regulaere 793-KB-Datei. Folge:
+`scp` scheiterte („Connection closed"), jedes `2>/dev/null` lief in „Keine Berechtigung". Die
+Dienste liefen weiter (Portal 200), der Schaden war rund 17 Minuten aktiv.
+Repariert mit `rm -f /dev/null && mknod -m 666 /dev/null c 1 3 && chown root:root /dev/null`.
+**Merkregel: `/dev/null` ist NIE ein Ziel fuer `install`, `cp` oder `tee`** – zum Unterdruecken
+gehoert `>/dev/null` ans Kommando, nicht als Argument hinein. Und beim Deploy zweier gleich
+benannter Dateien (`skills/office/main.py` UND `backend/main.py`) niemals `basename` als
+Zielnamen benutzen: der zweite ueberschrieb den ersten (aufgefallen an der Dateigroesse,
+wiederhergestellt aus der Sicherung, kein Ausfall).
+
 ## Benutzer-Chat ist ein Skill (2026-08-19)
 Der Bereich `/userchat` (Direktnachrichten zwischen angemeldeten Benutzern) hängt seit dem
 Umbau am Skill **`userchat`**, Vorgabe **AUS**. Code: `skills/userchat/` (Manifest + leeres
@@ -4279,7 +4411,7 @@ Code: `backend/tools/knowledge.py` (`pdf_text_verdacht`, `text_guete`, `_ocr_gew
 ## Zwei Python-Welten: die Agent-Shell ist NICHT das venv (Vorfall + Fix 2026-08-18)
 **Der Vorfall:** `nexus\andrea.ladd` bat in /chat darum, 54 Adressen aus einem PDF „in eine
 Exceltabelle" zu extrahieren. Herausgekommen ist eine **CSV mit falsch zugeordneten Feldern**
-(Straße = „Herr M. Al-lthawi, FA für Augenheilkunde", E-Mail = „4-6"), und der zweite Anlauf
+(Straße = „Herr M. llgner, FA für Augenheilkunde", E-Mail = „4-6"), und der zweite Anlauf
 endete nach 15 Schritten **ohne jedes Ergebnis** – die letzte Zeile war eine Ankündigung
 („Lass mich das Script Schritt für Schritt aufbauen."). Im Protokoll stehen als Ursache:
 `ModuleNotFoundError: No module named 'openpyxl'` · `'pandas'` · `'pdfplumber'`.

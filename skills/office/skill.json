@@ -9,7 +9,11 @@
     "office_create_excel",
     "office_create_powerpoint",
     "office_read",
-    "office_to_pdf"
+    "office_to_pdf",
+    "xlsx_inspect",
+    "xlsx_read_range",
+    "xlsx_merge",
+    "xlsx_edit"
   ],
   "category": "automation",
   "icon": "book",

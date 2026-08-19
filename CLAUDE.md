@@ -3847,6 +3847,139 @@ in `settings.json` bleibt allein der Skill-Eintrag.
   welche Werkzeug-Bereiche freigeschaltet werden (Vorgabe: nur „Lesen + Dokumente erzeugen"). **Als Skill kostet die Funktion einen Skill-Slot** – FREE/BASIC
   erlauben fünf aktive Skills.
 
+## Excel: bestehende Tabellen BEARBEITEN statt neu aufbauen (Vorfall + Umbau 2026-08-19)
+**Gemeldet von ECHT:** der Short-Track „Tabellen zusammenführen" (Prompt: *„Eine Master und eine
+Slave. Die Master gibt das Layout vor, die Slave liefert Daten … Liefere die erweiterte Master
+Tabelle als xlsx"*) bot **fünf Dateien** zum Download an, obwohl eine bestellt war – „NICHTS davon
+ist brauchbar". Nachgemessen an den echten Artefakten, nicht vermutet:
+
+| | |
+|---|---|
+| Eingabe `IBSv3_Monatsstatistik.xlsx` | 13 Blätter · 362.195 Zellen · **32.779 Formeln** · 763 KB |
+| `office_read` erzeugt daraus | 1.265.130 Zeichen Text |
+| Deckel **im Werkzeug** (still) | 20.000 → 1,58 % |
+| Deckel **im Agenten** | 5.000 → **0,40 %** |
+| Das Modell sah | Blatt `2004`, angeschnitten mitten in einer Summenzeile |
+| Ergebnis 1 `erweiterte_master.xlsx` | **2 Zeilen** |
+| Ergebnis 2 `…Master_2004.xlsx` | **0 Zeilen – komplett leer** |
+| Ergebnis 3 | 4.764 Zeilen, aber nur aus dem einen sichtbaren Blatt |
+
+**VIER URSACHEN, jede für sich hinreichend:**
+1. **Zwei Deckel hintereinander, und nur der zweite meldete sich.** `office_read` kürzte
+   stillschweigend von 1.265.130 auf 20.000 („… [gekuerzt]" am ENDE), danach kappte
+   `_ergebnis_kappen` auf 5.000 und meldete korrekt „5.000 von 20.014". **Die Kürzungsmeldung war
+   damit selbst eine Lüge:** das Modell hielt sich für zu drei Vierteln informiert und hatte 0,4 %.
+2. **Es gab kein Werkzeug, das eine BESTEHENDE .xlsx bearbeitet.** Der Office-Skill konnte
+   `office_read` (Text) und `office_create_excel` (von Null). Nichts dazwischen – jede Zelle musste
+   als JSON-Argument durch das Sprachmodell. Bei 362.195 Zellen ist das nicht „ungenau", sondern
+   strukturell unmöglich.
+3. **Der Auftrag war mit diesen Werkzeugen prinzipiell unerfüllbar.** „Die Master gibt das Layout
+   vor" – `office_create_excel` baut neu, die 32.779 Formeln, 530 Spaltenbreiten und 12 verbundenen
+   Bereiche sind **per Konstruktion** verloren, selbst wenn jede Zahl stimmte.
+4. **Ein stiller Fehlschlag mit Erfolgsmeldung.** Der leere Aufruf trug den Parameter `" sheets"` –
+   **mit führendem Leerzeichen**. Er landete in `**kwargs`, wurde wortlos verworfen, es wurde nichts
+   geschrieben, und das Werkzeug antwortete **„✅ erstellt"**. Zweiter Weg in dieselbe leere Datei:
+   `sheets` kam als JSON-**String** statt als Objekt, `isinstance(…, dict)` war False, der Code fiel
+   in den Einzelblatt-Zweig und schrieb ebenfalls nichts.
+
+**DIE REGEL DES UMBAUS: die Daten gehen NIE durch das Sprachmodell.** Das Modell bekommt die
+STRUKTUR und beschreibt die TRANSFORMATION; ausgeführt wird sie im Backend auf der echten Datei.
+Code: `skills/office/tabellen.py` (neu), Änderungen in `skills/office/main.py`, `backend/agent.py`,
+`backend/short_tracks.py`, `backend/short_tracks_runner.py`.
+
+- **Vier neue Werkzeuge** (im Office-Skill, im Bereich `basis` der Short Tracks):
+  `xlsx_inspect` (Aufbau, Kopfzeilen, Datentypen, Beispielzeilen – Ausgabe klein **unabhängig von
+  der Dateigröße**), `xlsx_read_range` (begrenzter Ausschnitt **mit Bilanz**), `xlsx_merge` (Join
+  über Schlüsselspalten), `xlsx_edit` (einzelne Zellen).
+- **`xlsx_merge`/`xlsx_edit` ÖFFNEN die Originaldatei und schreiben hinein** (`read_only=False`,
+  **`data_only=False`**). Letzteres ist nicht optional: mit `data_only=True` ersetzt openpyxl beim
+  Speichern **jede Formel durch ihren zuletzt berechneten Wert** – die Mappe wäre still zu einer
+  Wertetabelle geworden.
+- **Jede Kürzung wird BEZIFFERT, und der Hinweis steht VORNE.** `office_read` schreibt
+  `[GEKUERZT: 20000 von 1265130 Zeichen (1 %)]` **an den Anfang** – am Ende hätte ihn der
+  Agenten-Deckel selbst weggeschnitten (genau das war Ursache 1). Dazu `ergebnis_max = 21000`,
+  damit überhaupt nur EINE Kürzung stattfindet.
+- **Eine zu große Tabelle liefert KEIN Fragment**, sondern den Struktur-Überblick plus den Verweis
+  auf die Tabellen-Werkzeuge (`_xlsx_zu_gross`). Ein ehrlicher Verweis ist jeder Teilantwort
+  überlegen – aus einem 0,4-%-Fragment wurde eine Tabelle mit zwei Zeilen.
+- **Fehlschläge sind LAUT.** Unbekannte Parameter werden **beim Namen genannt** (`_unbekannte`),
+  `sheets`/`rows` als JSON-String werden tolerant geparst statt verworfen, „keine Daten übergeben"
+  ist ein Fehler **ohne Datei**, und ein `xlsx_merge` ohne einen einzigen Schlüsseltreffer erzeugt
+  **nichts** – sondern nennt Beispiel-Schlüsselwerte **beider** Seiten, damit das Modell die
+  Schlüsselwahl korrigieren kann.
+- **`_norm()` normiert Schlüsselwerte** (Text `"2004"` gegen Zahl `2004`, `2004.0` wie `2004`). Ohne
+  das trifft in gemischt getippten Tabellen KEINE Zeile, und der Lauf endet in „nichts zugeordnet",
+  obwohl alles passt.
+- **openpyxl verliert Diagramme, Bilder und Pivot-Tabellen** beim Öffnen-und-Speichern. Das ist
+  nicht reparierbar – deshalb wird es **erkannt und im Ergebnis genannt** (`_verluste`), statt es zu
+  verschweigen. Ein Benutzer, dessen Auswertung kommentarlos verschwindet, ist schlechter dran als
+  einer, der es vorher liest.
+- **DER GEFÄHRLICHSTE FUND KAM AUS DEM EIGENEN TEST: `_buchstabe_zu_index("Unbekannt")` ergab
+  Spalte 4.498.495.991.152.** Jedes Wort ist `.isalpha()` und wurde als Spaltenbuchstabe gelesen.
+  Hier starb der Merge wenigstens laut beim Speichern – **„Ort" ergibt Spalte 10.628 und hätte
+  klaglos in eine Spalte weit außerhalb der Tabelle geschrieben.** Drei Schranken, jede einzeln
+  getestet: `len ≤ 3` + `isascii()` (ein Umlaut ist `.isalpha()`!), Wertgrenze `≤ 16384` (XFD), und
+  **die eigentliche Schranke: ein Verweis JENSEITS der Kopfzeilenbreite wird abgelehnt** – nur so
+  fällt ein vertippter Spaltenname als Fehler auf, statt still danebenzuschreiben.
+- **Pfad-Freigabe GENERISCH über das Attribut `pfad_parameter`** (`agent.py`-Dispatch, gelesen mit
+  `getattr(tool, "pfad_parameter", None)`). Das Werkzeug deklariert seine Pfadfelder selbst, der
+  Dispatch prüft sie mit `authorize_fs("read", …)` – damit ist ein **künftiges** Tabellen-Werkzeug
+  automatisch abgesichert (dieselbe Lehre wie bei den MCP-Gates: eine Regel erwischt neue Quellen
+  von selbst, eine Aufzählung nie). Ohne das wären sie die bequemste Umgehung des Pfad-Confinements
+  **und** der Eigentümer-Schranke in `data/documents` – ein `xlsx_read_range` auf den Anhang eines
+  fremden Benutzers.
+- **Der System-Prompt sagte das Gegenteil** („Eine angeforderte EXCEL-Tabelle also mit
+  `office_create_excel` erzeugen") – dieselbe Fehlerklasse wie `WA_TASK_PROMPT`, `--gradient` und
+  der EWS-URL-Hinweis. Jetzt: `office_create_excel` nur für **neu anzulegende** Tabellen, bei
+  vorhandenen ausdrücklich die `xlsx_*`-Werkzeuge, „**TIPPE TABELLENDATEN NIEMALS AB**", und eine
+  eigene Regel für gemeldete Kürzungen. Ein Wächter prüft die AUSSAGE, nicht den Wortlaut.
+
+### Short Tracks: nur das Endergebnis wird angeboten
+Die fünf Chips waren die Nebenwirkung des Fixes vom selben Tag (`4bec5fb`, `_ergebnis_hook`): seit
+dem läuft `_deliver_docs` über **alle** Werkzeug-Ergebnisse, also wurde jedes Zwischenprodukt zum
+Chip. `_endergebnis_filtern()` liefert nur noch aus, was die **Abschluss-Antwort nennt**.
+- **Zwei Schranken gegen Datenverlust:** nennt die Antwort KEINE der Dateien, gilt weiter alles als
+  Ergebnis (sonst wäre ein ungenau formulierendes Modell der Grund, dass die gute Datei
+  verschwindet – genau der Fehler, der am selben Tag behoben wurde). Und Zwischenprodukte werden im
+  Text **namentlich genannt** und bleiben auf Platte abrufbar; sie sind nur kein Chip.
+- **Verglichen wird auf WORTGRENZE** (`\b`), nicht als Teilstring: `Master.xlsx` steckt in
+  `erweiterte_master.xlsx` – mit Teilstring-Vergleich hätte der Filter genau nichts bewirkt (in der
+  Gegenprobe nachgewiesen). `\b` behandelt `_` als Wortzeichen und trennt beides korrekt.
+- Der Hinweis wird **NACH** `_clean_doc_refs` angehängt: die Bereinigung entfernt Dateinamen aus dem
+  LLM-Text und würde sonst genau die Namen herausschneiden, die den Hinweis brauchbar machen.
+
+### Verifiziert
+115 Prüfungen (`tests/test_xlsx_tabellen.py`, ohne fastapi lauffähig, `backend.config` als Attrappe;
+**Sandkasten-Schranke mit Exit 2**, weil die Werkzeuge sonst nach `data/documents` des laufenden
+Servers schreiben) im echten venv auf DEV, dazu Bestand grün: 365 Short Tracks, 165 Office-Vorlage,
+50 Skill-Audit, 120 Endpunkt-Rechte, 152 Shell-Redirects, 465 E-Mail.
+- **Gegenproben greifen einzeln:** stiller Fehlschlag zurück → 1 FAIL · keine Inhaltsprüfung → 3 ·
+  `isascii` weg → 1 · Wertgrenze weg → 1 · Breitengrenze weg → 1 · Merge liefert trotz 0 Treffern
+  eine Datei → 4 · Kürzungsmeldung wieder hinten → 1 · Wortgrenze → Teilstring → 3 ·
+  `pfad_parameter` weg → 2 · große Mappe wieder als Fragment → 5.
+- **ZWEI EIGENE TESTS WAREN ZUNÄCHST WERTLOS**, beide durch die Gegenprobe aufgefallen: die Prüfung
+  „ohne Treffer keine Datei" benutzte eine Schlüsselspalte, die es im Slave gar nicht gibt – damit
+  griff die frühere Prüfung „Spalte nicht gefunden" und der eigentliche Zweig wurde **nie erreicht**
+  (Gegenprobe blieb grün, obwohl die Schranke ausgebaut war). Und eine Prüfung mit `split(...)[1]`
+  **brach ab statt fehlzuschlagen**. Merkregel, zum wiederholten Mal: nie `.index()`/`[1]` in einem
+  Wächter – und **eine Gegenprobe, die nicht beißt, ist ein Testmangel, kein Beweis**.
+- **An der ECHTEN Produktionsdatei gemessen (rein lesend, kein Deploy auf ECHT):** `xlsx_inspect`
+  liefert **alle 13 Blätter** mit Dimensionen, Kopfzeilen und Beispielzeilen in **13.706 Zeichen** –
+  unter dem Deckel, kommt also **vollständig** beim Modell an (vorher: 0,4 %, ein Blatt).
+  `xlsx_read_range` meldet „Zeile 1 bis 5 von 37 · NICHT gezeigt: 32 weitere Zeilen · NICHT gezeigt:
+  229 weitere Spalten".
+- **Ende-zu-Ende auf DEV mit echtem Modell**, Original-Wortlaut der Ablage: das Modell ruft
+  `xlsx_inspect` (Master) → `xlsx_inspect` (Slave) → `xlsx_merge(schluessel=['Jahr','Monat'])` –
+  **kein `office_create_excel`** (im Audit-Log belegt). Ergebnis: 12 von 12 Zeilen korrekt befüllt,
+  **13 Formeln erhalten**, Spaltenbreite erhalten, Summenformel intakt. Testreste danach entfernt.
+- **FALLSTRICK bei der Regressionsprüfung:** `tests/test_short_tracks.py` meldete auf DEV 1 FAIL,
+  der **nicht** von der Änderung stammte – die Testdatei dort war vom Stand `89f54c4` und kannte die
+  Reset-Prüfungen noch nicht. Mit dem aktuellen Stand: 365/365. **Vor jedem „das ist eine
+  Regression" die Testdatei auf dem Zielserver gegen das Repo prüfen** (md5), nicht nur den Code.
+- **Auf ECHT noch NICHT ausgerollt.** Beim Ausrollen ist nichts zu konfigurieren: die Werkzeuge
+  hängen am bereits aktiven Office-Skill und stehen über `BASIS_WERKZEUGE` sofort in jeder
+  vorhandenen Ablage zur Verfügung.
+
 ## Benutzer-Chat ist ein Skill (2026-08-19)
 Der Bereich `/userchat` (Direktnachrichten zwischen angemeldeten Benutzern) hängt seit dem
 Umbau am Skill **`userchat`**, Vorgabe **AUS**. Code: `skills/userchat/` (Manifest + leeres

@@ -765,6 +765,59 @@ def _chips_lesen(md: list[str]) -> list[dict]:
     return raus
 
 
+def _endergebnis_filtern(chips: list[dict], antwort: str) -> tuple[list[dict], list[dict]]:
+    """Trennt ENDERGEBNIS von Zwischenprodukten. Gibt (chips, zwischen) zurueck.
+
+    WARUM (gemeldet von ECHT, 2026-08-19): ein Lauf "Tabellen zusammenfuehren"
+    bot FUENF Downloads an, obwohl einer bestellt war – der Agent hatte sich
+    unterwegs eine Master-, eine Slave- und mehrere Zwischentabellen gebaut, und
+    seit dem Fix vom selben Tag laeuft ``_deliver_docs`` ueber ALLE
+    Werkzeug-Ergebnisse. Jedes Zwischenprodukt wurde damit zum Chip.
+
+    Die Regel: ausgeliefert wird, was die ABSCHLUSS-ANTWORT nennt. Das Modell
+    sagt dort, was sein Ergebnis ist – und nur das ist die Antwort auf die
+    Aufgabe.
+
+    ZWEI SCHRANKEN, die verhindern, dass daraus Datenverlust wird:
+      * Nennt die Antwort KEINE der Dateien, gilt weiter alles als Ergebnis.
+        Sonst waere ein Modell, das seine Datei nur ungenau beschreibt, der
+        Grund dafuer, dass die gute Datei verschwindet – genau der Fehler, der
+        am selben Tag behoben wurde.
+      * Zwischenprodukte werden dem Benutzer im Text GENANNT und bleiben auf
+        Platte abrufbar; sie sind nur kein Chip.
+    """
+    if not chips:
+        return [], []
+    text = (antwort or "").lower()
+
+    def _genannt(wort: str) -> bool:
+        """Kommt der Name als EIGENES Wort vor?
+
+        Ein blosser Teilstring-Vergleich reicht NICHT: 'Master.xlsx' steckt in
+        'erweiterte_master.xlsx', und damit galt im ersten Testlauf auch die
+        Zwischendatei als Endergebnis – der Filter haette genau nichts bewirkt.
+        ``\\b`` behandelt '_' als Wortzeichen, deshalb trennt es
+        'erweiterte_master' korrekt von 'master'.
+        """
+        if not wort:
+            return False
+        return re.search(r"\b" + re.escape(wort) + r"\b", text) is not None
+
+    ende, zwischen = [], []
+    for c in chips:
+        name = (c.get("name") or "").strip()
+        # Ohne Endung vergleichen: das Modell schreibt mal "Master_erweitert",
+        # mal "Master_erweitert.xlsx".
+        stamm = name.rsplit(".", 1)[0].lower()
+        if _genannt(name.lower()) or (len(stamm) >= 4 and _genannt(stamm)):
+            ende.append(c)
+        else:
+            zwischen.append(c)
+    if not ende:
+        return chips, []          # nichts erkannt -> nichts wegnehmen
+    return ende, zwischen
+
+
 def _kein_ergebnis(antwort: str) -> bool:
     """True, wenn der Lauf formal endete, aber KEIN Ergebnis geliefert hat.
 
@@ -982,7 +1035,7 @@ async def _lauf(job: dict, dump: dict, auftrag: str,
             # Ein fehlender Chip ist aergerlich, ein verlorener Ergebnistext
             # waere schlimmer – deshalb nur protokollieren.
             print("[Tracks] Ergebnisdateien nicht ermittelbar: %s" % e, flush=True)
-    chips = _chips_lesen(sammler.md)
+    chips, zwischen = _endergebnis_filtern(_chips_lesen(sammler.md), antwort)
 
     # Die Pfade aus dem Anzeigetext entfernen: der Chip ist der EINZIGE Weg zur
     # Datei (gleiche Regel wie im Chat), und ein Pfad im Text verleitet den
@@ -991,6 +1044,21 @@ async def _lauf(job: dict, dump: dict, auftrag: str,
         antwort = agent._clean_doc_refs(antwort)
     except Exception:  # noqa: BLE001
         pass
+
+    # ERST DANACH der Zwischenprodukt-Hinweis: er ist selbst erzeugt und
+    # geprueft, waehrend `_clean_doc_refs` Dateinamen und -pfade aus dem
+    # LLM-Text entfernt. Umgekehrt herum wuerde die Bereinigung genau die Namen
+    # wieder herausschneiden, die den Hinweis erst brauchbar machen.
+    #
+    # Zwischenprodukte werden BENANNT, nicht verschwiegen: ohne diesen Satz
+    # sieht der Benutzer nicht, dass der Lauf noch etwas erzeugt hat – und ohne
+    # die Namen kann er nicht danach fragen.
+    if zwischen:
+        antwort = (antwort or "").rstrip() + (
+            "\n\n_(Beim Bearbeiten sind %d Zwischendatei(en) entstanden, die nicht "
+            "als Ergebnis angeboten werden: %s. Frage danach, wenn du eine davon "
+            "brauchst.)_" % (len(zwischen), ", ".join(z["name"] for z in zwischen[:8])
+                             + (" …" if len(zwischen) > 8 else "")))
     return antwort, chips
 
 

@@ -15641,11 +15641,43 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                         if _dest is not None:
                             _wo_pdf = (f"{_work.as_posix()} (per Shell lesbar) bzw. "
                                        if _work else "")
+                            # Nur nennen, was wirklich im Werkzeugkasten liegt:
+                            # der Office-Skill ist abschaltbar, und ein Hinweis
+                            # auf ein fehlendes Werkzeug endet in "Tool nicht
+                            # gefunden" (gleiche Regel wie bei _lese_tools).
+                            # get_or_create_main() und NICHT main_agent: der
+                            # Hauptagent wird erst beim ersten Auftrag erzeugt.
+                            # Nach einem Dienstneustart waere die Liste sonst
+                            # leer – ausgerechnet beim ersten Anhang, und der
+                            # Hinweis fiele lautlos aus (dieselbe Lazy-Falle
+                            # wie bei /api/context/stats). Der Auftrag laeuft
+                            # unmittelbar danach ohnehin auf diesem Agenten.
+                            try:
+                                _ag = agent_manager.main_agent or agent_manager.get_or_create_main()
+                                _tool_namen = {getattr(t, "name", "")
+                                               for t in getattr(_ag, "_tool_instances", [])}
+                            except Exception:
+                                _tool_namen = set()
+                            _formular_tip = ""
+                            if "pdf_formular_extrakt" in _tool_namen:
+                                # Der wichtigste Hinweis fuer mehrseitige
+                                # Formulare. Ohne ihn versucht das Modell, die
+                                # Felder aus dem Fliesstext oben abzuschreiben –
+                                # und ordnet sie zwangslaeufig falsch zu, weil
+                                # der eingetragene Wert im PDF UEBER seiner
+                                # Beschriftung steht (Vorfall 2026-08-12/19).
+                                _formular_tip = (
+                                    " WENN JEDE SEITE GLEICH AUFGEBAUT IST (Formular mit "
+                                    "'Name:', 'Strasse:', 'Telefon:' … und einem Datensatz je "
+                                    "Seite), dann NIMM 'pdf_formular_extrakt' – es liefert eine "
+                                    "fertige Tabelle mit einer Zeile je Seite. Tippe solche "
+                                    "Angaben NIEMALS aus dem Text oben ab und baue dafuer auch "
+                                    "kein eigenes Skript.")
                             _text_prepend.append(
                                 f"[Die Datei liegt zusaetzlich unter: {_wo_pdf}'{_dest.name}'. "
                                 f"Der Text oben ist bereits extrahiert – die Datei brauchst du "
-                                f"nur fuer Seiten/Tabellen/Bilder, die darin nicht stehen "
-                                f"(z. B. pdfplumber per Shell). Fuer Shell-Skripte IMMER den "
+                                f"nur fuer Seiten/Tabellen/Bilder, die darin nicht stehen."
+                                f"{_formular_tip} Fuer Shell-Skripte IMMER den "
                                 f"/tmp-Pfad verwenden, data/documents ist fuer die Shell gesperrt.]")
                     except Exception as _pe:
                         print(f"[attach] PDF-Extraktion fehlgeschlagen ({_name}): {_pe}", flush=True)

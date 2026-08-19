@@ -1212,4 +1212,13 @@ def get_tools():
         tools.extend(get_tabellen_tools())
     except Exception as e:  # noqa: BLE001
         print(f"[Office] Tabellen-Werkzeuge nicht geladen: {e}", flush=True)
+    # Formular-PDFs (eine Seite = ein Datensatz). Aus demselben Grund
+    # angehaengt und einzeln abgesichert wie die Tabellen-Werkzeuge: faellt
+    # der Import aus (pdfplumber/pytesseract fehlt), bleibt der Office-Skill
+    # mit allen uebrigen Werkzeugen benutzbar.
+    try:
+        from skills.office.pdf_formular import get_pdf_formular_tools
+        tools.extend(get_pdf_formular_tools())
+    except Exception as e:  # noqa: BLE001
+        print(f"[Office] PDF-Formular-Werkzeug nicht geladen: {e}", flush=True)
     return tools

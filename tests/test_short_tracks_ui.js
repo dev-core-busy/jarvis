@@ -42,6 +42,10 @@ const APP = fs.readFileSync(path.join(ROOT, 'frontend/js/app.js'), 'utf8');
 const SKILLS = fs.readFileSync(path.join(ROOT, 'frontend/js/skills.js'), 'utf8');
 const SKILLCFG = fs.readFileSync(path.join(ROOT, 'frontend/js/skillcfg.js'), 'utf8');
 const PORTAL_HTML = fs.readFileSync(path.join(ROOT, 'frontend/portal.html'), 'utf8');
+// Symbole (Muelleimer/Kreuz) – im Browser das ERSTE Skript jeder Seite.
+// Module wie chat.js/knowledge.js rufen JarvisIcons.trash() beim Rendern auf;
+// ohne diese Zeile bricht das Zeichnen mit 'JarvisIcons is not defined' ab.
+const ICONS_JS = fs.readFileSync(path.join(ROOT, 'frontend/js/icons.js'), 'utf8');
 
 /* Der Bereichskatalog kommt UEBERSETZT vom Server (Name und Hinweis stehen dort
    neben der Werkzeugliste, damit Text und Wirkung nicht auseinanderlaufen). Die

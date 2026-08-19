@@ -45,6 +45,10 @@ const CHATLIB = fs.readFileSync(P('frontend/js/chatlib.js'), 'utf8');
 const CHATJS = fs.readFileSync(P('frontend/js/chat.js'), 'utf8');
 const I18N = fs.readFileSync(P('frontend/js/i18n.js'), 'utf8');
 const CSS = fs.readFileSync(P('frontend/css/chat-bubbles.css'), 'utf8');
+// Symbole (Muelleimer/Kreuz) – im Browser das ERSTE Skript jeder Seite.
+// Module wie chat.js/knowledge.js rufen JarvisIcons.trash() beim Rendern auf;
+// ohne diese Zeile bricht das Zeichnen mit 'JarvisIcons is not defined' ab.
+const ICONS_JS = fs.readFileSync(path.join(ROOT, 'frontend/js/icons.js'), 'utf8');
 
 // ─── Umgebung: chatlib.js in ein jsdom-Fenster laden ─────────────────────────
 function fenster() {

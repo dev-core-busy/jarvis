@@ -339,7 +339,7 @@
             const url = `/api/issues/${encodeURIComponent(issue.id)}/attachments/${encodeURIComponent(name)}?token=${encodeURIComponent(_token())}`;
             const isImg = /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(name);
             const delBtn = canEdit
-                ? `<button class="jv-iss-attach-del" data-name="${_escape(name)}" title="Loeschen">✕</button>`
+                ? `<button class="jv-iss-attach-del" data-name="${_escape(name)}" title="Loeschen">${JarvisIcons.trash()}</button>`
                 : '';
             if (isImg) {
                 return `<div class="jv-iss-attach-item">

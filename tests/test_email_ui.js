@@ -40,6 +40,10 @@ const APP = fs.readFileSync(path.join(ROOT, 'frontend/js/app.js'), 'utf8');
 const SKILLS = fs.readFileSync(path.join(ROOT, 'frontend/js/skills.js'), 'utf8');
 const PORTAL_HTML = fs.readFileSync(path.join(ROOT, 'frontend/portal.html'), 'utf8');
 const PICKER = fs.readFileSync(path.join(ROOT, 'frontend/js/ldap_picker.js'), 'utf8');
+// Symbole (Muelleimer/Kreuz) – im Browser das ERSTE Skript jeder Seite.
+// Module wie chat.js/knowledge.js rufen JarvisIcons.trash() beim Rendern auf;
+// ohne diese Zeile bricht das Zeichnen mit 'JarvisIcons is not defined' ab.
+const ICONS_JS = fs.readFileSync(path.join(ROOT, 'frontend/js/icons.js'), 'utf8');
 
 // Der Bereichskatalog kommt UEBERSETZT vom Server (Name und Hinweis stehen dort
 // neben der Werkzeugliste, damit Text und Wirkung nicht auseinanderlaufen). Die
@@ -191,6 +195,7 @@ function bauePortal(opt) {
     };
     w.confirm = () => (opt.confirm === undefined ? true : opt.confirm);
     w.eval(I18N);
+    w.eval(ICONS_JS);
     w.eval(PORTAL_JS);
     return { dom, w, rufe, hatRegeln: () => regeln, hatKonto: () => konto };
 }
@@ -860,9 +865,17 @@ function baueReiter(opt) {
     const farbig = zeilen.join('\n').match(FARBIG) || [];
     pruefe(farbig.length === 0,
         'keine farbig voreingestellten Emoji im ausgelieferten Markup', farbig.join(' '));
-    ['⏸', '▶', '⟳', '✎', '✕'].forEach(function (z) {
+    ['⏸', '▶', '⟳', '✎'].forEach(function (z) {
         pruefe(PORTAL_JS.indexOf(z) > -1, 'monochromes Zeichen vorhanden: ' + z);
     });
+    // Das frueher hier gepruefte ✕ war der LOESCHEN-Knopf. Seit der
+    // Symbol-Entscheidung vom 2026-08-19 traegt er den Muelleimer
+    // (Muelleimer = loeschen, × = schliessen – frontend/js/icons.js), und ein
+    // ✕ gibt es in dieser Datei folgerichtig nicht mehr.
+    pruefe(PORTAL_JS.indexOf('JarvisIcons.trash()') > -1,
+        'der Loeschen-Knopf holt den Muelleimer aus dem zentralen Modul');
+    pruefe(PORTAL_JS.indexOf('✕') === -1,
+        'kein ✕ mehr in email_portal.js (es war der Loeschknopf)');
 }
 
 /* ═══════════════════════════════════════════════════════════════════════ */

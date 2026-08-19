@@ -177,6 +177,11 @@ _EXTERNAL_WRITE_TOOLS = {
     "jira_create_issue", "jira_add_comment",
 }
 
+# Wie viel eines Werkzeug-Ergebnisses in den Kontext geht. Ein Werkzeug darf
+# ueber das Attribut `ergebnis_max` mehr verlangen (z.B. jira_get_issue fuer
+# den vollstaendigen Kommentarverlauf).
+_TOOL_ERGEBNIS_MAX = 5000
+
 _BLOCKED_TOOLS_FOR_LDAP = {
     "spawn_agent",         # Keine Sub-Agents (koennten Shell/FS ungefiltert nutzen)
     "write_clipboard",     # Kein Clipboard-Schreibzugriff
@@ -2149,7 +2154,7 @@ KRITISCH – Autonomie-Regeln:
                     if _stopped:
                         _tool_stopped = True
                         break
-                    result_str = str(result)[:5000]
+                    result_str = self._ergebnis_kappen(tool_name, result)
 
                     # Screenshot-Bild erkennen (IMAGE_BASE64:pfad|base64data)
                     image_part = None
@@ -2671,7 +2676,7 @@ KRITISCH – Autonomie-Regeln:
                     tool_name = fc.name
                     tool_args = dict(fc.args) if fc.args else {}
                     result = await self._execute_tool(tool_name, tool_args)
-                    result_str = str(result)[:5000]
+                    result_str = self._ergebnis_kappen(tool_name, result)
 
                     # Delegation auch in headless-Kanaelen (Cron/WhatsApp/Telegram):
                     # dort gibt es kein WebSocket, der Rollen-Lauf braucht keins.
@@ -3829,6 +3834,35 @@ KRITISCH – Autonomie-Regeln:
     # "in diesem Lauf entstanden" zu gelten. Deckt die Anhaenge ab, die der
     # Nutzer unmittelbar vor dem Absenden hochlaedt.
     _DELIVER_TOLERANCE_SEC = 120
+
+    def _ergebnis_kappen(self, tool_name: str, result) -> str:
+        """Werkzeug-Ergebnis auf die Kontextgrenze kuerzen – MIT Ausweis.
+
+        Der Deckel schuetzt den Kontext: ein einzelnes Ergebnis darf ihn nicht
+        fuellen. Zwei Dinge sind daran wichtig:
+
+        * **Ein Werkzeug darf mehr verlangen** (`ergebnis_max`). `jira_get_issue`
+          soll den vollstaendigen Kommentarverlauf liefern koennen – mit einem
+          festen 5000er-Schnitt waere "alle Kommentare" eine Zusage, die diese
+          Stelle sofort wieder kassiert (die Kommentare stehen am ENDE der
+          Ausgabe und fielen als Erstes heraus).
+        * **Wird gekuerzt, steht es im Text.** Vorher wurde stillschweigend
+          abgeschnitten: das Modell hielt die Ausgabe fuer vollstaendig und
+          antwortete auf einem Ausschnitt, ohne es sagen zu koennen.
+        """
+        text = str(result)
+        grenze = _TOOL_ERGEBNIS_MAX
+        try:
+            eigen = int(getattr(self.tools_map.get(tool_name), "ergebnis_max", 0) or 0)
+            if eigen > 0:
+                grenze = eigen
+        except Exception:  # noqa: BLE001
+            pass
+        if len(text) <= grenze:
+            return text
+        return (text[:grenze] +
+                "\n\n[… gekuerzt: %d von %d Zeichen gezeigt. Frage gezielt nach dem "
+                "fehlenden Teil, statt den Rest zu erraten.]" % (grenze, len(text)))
 
     async def _deliver_docs(self, ws, text, delivered, username: str = "",
                             since: float = 0.0):

@@ -32,6 +32,10 @@ const CHARTS_JS = fs.readFileSync(path.join(ROOT, 'frontend/js/charts.js'), 'utf
 const MERMAID_JS = fs.readFileSync(path.join(ROOT, 'frontend/js/mermaid_blocks.js'), 'utf8');
 const CHATLIB_JS = fs.readFileSync(path.join(ROOT, 'frontend/js/chatlib.js'), 'utf8');
 const THEME_CSS = fs.readFileSync(path.join(ROOT, 'frontend/css/theme.css'), 'utf8');
+// Symbole (Muelleimer/Kreuz) – im Browser das ERSTE Skript jeder Seite.
+// Module wie chat.js/knowledge.js rufen JarvisIcons.trash() beim Rendern auf;
+// ohne diese Zeile bricht das Zeichnen mit 'JarvisIcons is not defined' ab.
+const ICONS_JS = fs.readFileSync(path.join(ROOT, 'frontend/js/icons.js'), 'utf8');
 
 const b64 = (s) => Buffer.from(s, 'utf8').toString('base64');
 
@@ -419,6 +423,7 @@ function weiter() {
     {
         const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://localhost/chat', runScripts: 'outside-only' });
         ergaenzeFehlendes(dom.window);
+        dom.window.eval(ICONS_JS);
         dom.window.eval(CHATLIB_JS);
         const rm = dom.window.JarvisChatLib && dom.window.JarvisChatLib.renderMarkdown;
         check('renderMarkdown ist erreichbar', typeof rm === 'function');

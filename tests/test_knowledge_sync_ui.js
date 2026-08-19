@@ -36,6 +36,10 @@ const SYNC = fs.readFileSync(path.join(ROOT, 'frontend/js/knowledge_sync.js'), '
 const KNOW = fs.readFileSync(path.join(ROOT, 'frontend/js/knowledge.js'), 'utf8');
 const APP = fs.readFileSync(path.join(ROOT, 'frontend/js/app.js'), 'utf8');
 const CSS = fs.readFileSync(path.join(ROOT, 'frontend/css/style.css'), 'utf8');
+// Symbole (Muelleimer/Kreuz) – im Browser das ERSTE Skript jeder Seite.
+// Module wie chat.js/knowledge.js rufen JarvisIcons.trash() beim Rendern auf;
+// ohne diese Zeile bricht das Zeichnen mit 'JarvisIcons is not defined' ab.
+const ICONS_JS = fs.readFileSync(path.join(ROOT, 'frontend/js/icons.js'), 'utf8');
 
 const PEERS = [
     {
@@ -105,6 +109,7 @@ function bauen(opt) {
         return j({});
     };
     w.eval(I18N);
+    w.eval(ICONS_JS);
     w.eval(SYNC);
     return { dom, w, rufe, KS: w.KnowledgeSync };
 }
@@ -452,6 +457,7 @@ abschnitt('Teil 3: Freigabe-Dialog (Rolle Geber)');
 abschnitt('Teil 4: 🔗-Symbol in der Ordnerliste');
 {
     const { dom, w } = bauen();
+    w.eval(ICONS_JS);
     w.eval(KNOW);
     const km = w.knowledgeManager;
     const wurzel = km._folderNodeHtml('data/knowledge', true, true, false);
@@ -486,9 +492,11 @@ abschnitt('Teil 4: 🔗-Symbol in der Ordnerliste');
         'ein nicht freigegebener Ordner traegt keine Marke');
     pruefe(!km._folderNodeHtml('data/knowledge/technik', true, false, false).includes('is-shared'),
         'Unterordner erbt die Markierung nicht (er hat keine eigene Freigabe)');
-    // Reihenfolge: Freigabe VOR dem Loeschen – ✕ bleibt aussen
-    pruefe(wurzel.indexOf('kb-btn-share') < wurzel.lastIndexOf('✕'),
-        'das ✕ bleibt das letzte Symbol');
+    // Reihenfolge: Freigabe VOR dem Loeschen – der Loeschknopf bleibt aussen.
+    // Er traegt seit 2026-08-19 den Muelleimer statt eines ✕ (Symbol-Regel:
+    // Muelleimer = loeschen, × = schliessen, siehe frontend/js/icons.js).
+    pruefe(wurzel.indexOf('kb-btn-share') < wurzel.lastIndexOf('jv-ico-trash'),
+        'der Loeschknopf bleibt das letzte Symbol');
     dom.window.close();
 }
 
@@ -519,6 +527,7 @@ abschnitt('Teil 4a: Ordnerliste zeichnet sofort, Marken kommen nach');
         }
         return echtesFetch(u, o);
     };
+    w.eval(ICONS_JS);
     w.eval(KNOW);
     const km = w.knowledgeManager;
     await km.fetchStats();
@@ -776,6 +785,7 @@ pruefe(/\.kbsync-field > \.kb-input/.test(block),
 abschnitt('Teil 6: Spiegel-Marke in der Ordnerliste');
 {
     const { dom, w } = bauen();
+    w.eval(ICONS_JS);
     w.eval(KNOW);
     const km = w.knowledgeManager;
 
@@ -843,6 +853,7 @@ abschnitt('Teil 6: Spiegel-Marke in der Ordnerliste');
         }
         return echtesFetch(u, o);
     };
+    w.eval(ICONS_JS);
     w.eval(KNOW);
     const km = w.knowledgeManager;
     await km.fetchStats();
@@ -903,6 +914,7 @@ abschnitt('Teil 6: Spiegel-Marke in der Ordnerliste');
         }
         return echtesFetch(u, o);
     };
+    w.eval(ICONS_JS);
     w.eval(KNOW);
     const km = w.knowledgeManager;
     await km.fetchStats();

@@ -120,7 +120,7 @@
                         <span class="skill-toggle-slider"></span>
                     </label>
                     ${!isSystem
-                        ? `<button class="sk-btn sk-btn-rm" title="Deinstallieren">✕</button>`
+                        ? `<button class="sk-btn sk-btn-rm" title="Deinstallieren">${JarvisIcons.trash()}</button>`
                         : ''}
                 </div>`;
 

@@ -707,7 +707,7 @@ class JarvisVisionManager {
                         </div>
                         <div class="vis-profile-actions">
                             <button class="vis-btn-sm" onclick="visionManager._editProfile('${p.id}')" title="${window.t('common.edit')}">✏</button>
-                            <button class="vis-btn-sm vis-btn-danger" onclick="visionManager._deleteProfile('${p.id}')" title="${window.t('vis.delete_title')}">✕</button>
+                            <button class="vis-btn-sm vis-btn-danger" onclick="visionManager._deleteProfile('${p.id}')" title="${window.t('vis.delete_title')}">${JarvisIcons.trash()}</button>
                         </div>
                     </div>
                     <div class="vis-profile-action-config">

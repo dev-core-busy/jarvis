@@ -664,7 +664,7 @@
             return '<div class="wi-item" data-path="' + esc(f.path) + '">'
                 + '<a class="nm wi-flink" href="' + esc(url) + '" target="_blank" rel="noopener" title="' + esc(t('wissen.open_file')) + '">' + esc(f.name) + '</a>'
                 + chips
-                + '<button type="button" class="sec-btn small danger wi-file-del" title="' + esc(t('wissen.delete_file')) + '">×</button>'
+                + '<button type="button" class="sec-btn small danger wi-file-del" title="' + esc(t('wissen.delete_file')) + '">' + JarvisIcons.trash() + '</button>'
                 + '</div>';
         }).join('');
         box.querySelectorAll('.wi-file-del').forEach(function (btn) {
@@ -738,7 +738,7 @@
     }
 
     // Q&A-Audit: eine editierbare Zeile pro Frage-Antwort-Paar
-    // (Checkbox = freigeben, Textfelder = korrigieren, × = loeschen).
+    // (Checkbox = freigeben, Textfelder = korrigieren, Muelleimer = loeschen).
     function qaRowHtml(p, i) {
         return '<div class="wi-qa-row" data-qid="' + esc(p.id || String(i)) + '" style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;">'
             + '<input type="checkbox" class="wi-qa-keep" ' + (p.approved !== false ? 'checked' : '') + ' title="' + esc(t('wissen.qa_keep')) + '" style="margin-top:8px;">'
@@ -746,7 +746,7 @@
             + '<input class="wi-input wi-qa-q" value="' + esc(p.q || '') + '" placeholder="' + esc(t('wissen.qa_q_ph')) + '" style="margin-bottom:4px;font-weight:600;">'
             + '<textarea class="wi-input wi-qa-a" rows="2" placeholder="' + esc(t('wissen.qa_a_ph')) + '" style="resize:vertical;">' + esc(p.a || '') + '</textarea>'
             + '</div>'
-            + '<button type="button" class="sec-btn small danger wi-qa-del" title="' + esc(t('wissen.qa_del')) + '" style="margin-top:6px;">×</button>'
+            + '<button type="button" class="sec-btn small danger wi-qa-del" title="' + esc(t('wissen.qa_del')) + '" style="margin-top:6px;">' + JarvisIcons.trash() + '</button>'
             + '</div>';
     }
 
@@ -999,7 +999,7 @@
                         var delta = row.getBoundingClientRect().top - vorher;
                         if (delta) window.scrollBy(0, delta);
                     });
-                    var del = document.createElement('button'); del.className = 'sec-btn small danger'; del.textContent = '×';
+                    var del = document.createElement('button'); del.className = 'sec-btn small danger'; JarvisIcons.setTrash(del);
                     del.addEventListener('click', function () { deletePending(it.id, false); });
                     row.appendChild(cb); row.appendChild(nm); row.appendChild(rev); row.appendChild(del);
                     box.appendChild(row);

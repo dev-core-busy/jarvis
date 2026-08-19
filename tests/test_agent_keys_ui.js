@@ -42,6 +42,9 @@ function section(t) { console.log('\n\x1b[1m' + t + '\x1b[0m'); }
 
 const HTML = fs.readFileSync(path.join(ROOT, 'frontend/settings.html'), 'utf8');
 const APP = fs.readFileSync(path.join(ROOT, 'frontend/js/app.js'), 'utf8');
+// Symbole (Muelleimer/Kreuz) – im Browser das ERSTE Skript jeder Seite.
+// Module wie chat.js/knowledge.js rufen JarvisIcons.trash() beim Rendern auf;
+// ohne diese Zeile bricht das Zeichnen mit 'JarvisIcons is not defined' ab.
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
 
 // Der Bestand wie auf ECHT: genau ein benannter Key.
@@ -101,7 +104,7 @@ async function ladeApp(dom) {
     // und ruft fetch; ist es undefined, bricht die Funktion ab, bevor sie
     // window._openSettingsModal setzt.
     w.fetch = appFetch;
-    for (const f of ['frontend/js/i18n.js', 'frontend/js/theme.js', 'frontend/js/app.js']) {
+    for (const f of ['frontend/js/icons.js', 'frontend/js/i18n.js', 'frontend/js/theme.js', 'frontend/js/app.js']) {
         try { w.eval(read(f)); } catch (e) { console.log('    (Modul ' + f + ': ' + e.message + ')'); }
     }
     if (!w.t) w.t = (k) => k;
@@ -203,7 +206,7 @@ async function ladeApp(dom) {
         if (String(url).startsWith('/api/agent/keys')) return j({ keys: [] });
         return appFetch(url, opts);
     };
-    for (const f of ['frontend/js/i18n.js', 'frontend/js/theme.js', 'frontend/js/app.js']) {
+    for (const f of ['frontend/js/icons.js', 'frontend/js/i18n.js', 'frontend/js/theme.js', 'frontend/js/app.js']) {
         try { w3.eval(read(f)); } catch (e) {}
     }
     if (!w3.t) w3.t = (k) => k;
@@ -221,7 +224,7 @@ async function ladeApp(dom) {
         if (String(url).startsWith('/api/agent/keys')) return Promise.reject(new Error('Netz weg'));
         return appFetch(url, opts);
     };
-    for (const f of ['frontend/js/i18n.js', 'frontend/js/theme.js', 'frontend/js/app.js']) {
+    for (const f of ['frontend/js/icons.js', 'frontend/js/i18n.js', 'frontend/js/theme.js', 'frontend/js/app.js']) {
         try { w4.eval(read(f)); } catch (e) {}
     }
     if (!w4.t) w4.t = (k) => k;

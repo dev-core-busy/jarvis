@@ -426,3 +426,9 @@ header {
     left: 0;
     color: var(--accent);
 }
+/* Symbole fuer Bedienelemente – PROJEKTWEITE ENTSCHEIDUNG 2026-08-19:
+   Muelleimer = LOESCHEN, × = SCHLIESSEN. Zentral in frontend/css/theme.css
+   bzw. frontend/js/icons.js; diese Oberflaeche ist eine eigenstaendige
+   Flask-Anwendung und braucht die Regel deshalb hier noch einmal. */
+.jv-ico { width: 1em; height: 1em; display: inline-block; vertical-align: -0.125em; flex-shrink: 0; }
+.jv-ico-trash { width: 1.05em; height: 1.05em; }

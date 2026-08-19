@@ -579,7 +579,7 @@
                 + '<button class="em-icon-btn" data-act="edit" title="'
                 + T('common.edit', 'Bearbeiten') + '">✎</button>'
                 + '<button class="em-icon-btn is-danger" data-act="del" title="'
-                + T('common.delete', 'Löschen') + '">✕</button>'
+                + T('common.delete', 'Löschen') + '">' + JarvisIcons.trash() + '</button>'
                 + '</div></div></div>';
         });
         box.innerHTML = h;

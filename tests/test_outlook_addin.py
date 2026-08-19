@@ -525,8 +525,13 @@ pruefe("Jarvis E-Mail" not in TASKPANE,
 # Erklaerung an.
 def _ohne_kommentare(js: str) -> str:
     ohne_block = re.sub(r"/\*.*?\*/", "", js, flags=re.S)
-    return "\n".join(z for z in ohne_block.splitlines()
+    ohne = "\n".join(z for z in ohne_block.splitlines()
                      if not z.lstrip().startswith("//"))
+    # `JarvisIcons` ist der Name des globalen Symbol-Moduls (frontend/js/icons.js),
+    # also ein BEZEICHNER und kein Oberflaechentext – er erscheint nirgends im
+    # Fenster. Geprueft wird, was ein Benutzer LIEST; ohne diese Zeile schlaegt
+    # der Waechter am Aufruf `JarvisIcons.trash()` an.
+    return ohne.replace("JarvisIcons", "")
 
 
 pruefe("Jarvis" not in _ohne_kommentare(ADDINJS),

@@ -81,7 +81,7 @@ async function baueSeite() {
     };
     window.requestAnimationFrame = (cb) => setTimeout(cb, 0);
 
-    for (const datei of ['frontend/js/i18n.js', 'frontend/js/wissen.js']) {
+    for (const datei of ['frontend/js/icons.js', 'frontend/js/i18n.js', 'frontend/js/wissen.js']) {
         window.eval(fs.readFileSync(path.join(ROOT, datei), 'utf8'));
     }
     window.document.dispatchEvent(new window.Event('DOMContentLoaded', { bubbles: true }));

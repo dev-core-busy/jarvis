@@ -258,7 +258,7 @@
                         <span class="skill-toggle-slider"></span>
                     </label>
                     ${!isSystem
-                        ? `<button class="sk-btn sk-btn-rm" title="${window.t('common.delete')}">✕</button>`
+                        ? `<button class="sk-btn sk-btn-rm" title="${window.t('common.delete')}">${JarvisIcons.trash()}</button>`
                         : '<span class="sk-btn sk-btn-ghost" aria-hidden="true"></span>'}
                 </div>`;
 
@@ -775,7 +775,7 @@
 
             document.body.appendChild(overlay);
 
-            // Schließen via ×-Button
+            // Schließen via ×-Button (× = schliessen, siehe icons.js)
             overlay.querySelector('.sk-info-close').addEventListener('click', () => overlay.remove());
             // Schließen via Backdrop-Klick
             overlay.addEventListener('click', (e) => {

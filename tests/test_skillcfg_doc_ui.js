@@ -66,6 +66,7 @@ async function baueSeite() {
     window.navigator.clipboard = { writeText: (t) => { kopiert.push(t); return Promise.resolve(); } };
 
     window.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8'));
+    window.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/icons.js'), 'utf8'));
     window.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/chatlib.js'), 'utf8'));
     window.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/skillcfg.js'), 'utf8'));
     return { dom, window, calls, kopiert };

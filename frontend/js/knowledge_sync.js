@@ -215,7 +215,7 @@
                     <button class="kb-hdr-btn" data-kbsync="edit" data-id="${esc(p.id)}"
                         title="${esc(T('kbsync.edit_title', 'Bearbeiten'))}">✏️</button>
                     <button class="kb-hdr-btn is-danger" data-kbsync="del" data-id="${esc(p.id)}"
-                        title="${esc(T('kbsync.del_title', 'Standort entfernen'))}">✕</button>
+                        title="${esc(T('kbsync.del_title', 'Standort entfernen'))}">${JarvisIcons.trash()}</button>
                 </div>
                 <div class="kbsync-meta">
                     <code>${esc(p.target_folder)}</code>
@@ -550,7 +550,7 @@
                         esc(s.enabled ? T('kbsync.share_pause', '⏸ Pausieren')
                                       : T('kbsync.share_resume', '▶ Fortsetzen'))}</button>
                     <button class="kb-hdr-btn" id="kbsync-share-rotate">${esc(T('kbsync.share_rotate', '↻ Neues Token'))}</button>
-                    <button class="kb-hdr-btn is-danger" id="kbsync-share-revoke">${esc(T('kbsync.share_revoke', '✕ Freigabe widerrufen'))}</button>
+                    <button class="kb-hdr-btn is-danger" id="kbsync-share-revoke">${JarvisIcons.trash()} ${esc(T('kbsync.share_revoke', 'Freigabe widerrufen'))}</button>
                 </div>
                 <h3 style="margin-top:18px;">${esc(T('kbsync.share_pulls', 'Wer hat geholt?'))}</h3>
                 ${abrufe.length ? `<table class="kbsync-pulls"><thead><tr>

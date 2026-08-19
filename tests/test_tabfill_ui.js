@@ -190,6 +190,10 @@ const I18NTXT = fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8');
 });
 
 const CSS = fs.readFileSync(path.join(ROOT, 'frontend/css/theme.css'), 'utf8');
+// Symbole (Muelleimer/Kreuz) – im Browser das ERSTE Skript jeder Seite.
+// Module wie chat.js/knowledge.js rufen JarvisIcons.trash() beim Rendern auf;
+// ohne diese Zeile bricht das Zeichnen mit 'JarvisIcons is not defined' ab.
+const ICONS_JS = fs.readFileSync(path.join(ROOT, 'frontend/js/icons.js'), 'utf8');
 pruefe(CSS.indexOf('.jv-tabfill-hint') > -1,
     'die Hinweis-Regel steht in theme.css (nicht style.css – das laedt nur /settings und /wissen)');
 pruefe(!/\.jv-tabfill-hint[^{]*\{[^}]*#[0-9a-fA-F]{3}/.test(CSS),

@@ -196,7 +196,7 @@
                 knopfe.appendChild(bE);
                 var bD = document.createElement('button');
                 bD.className = 'kb-hdr-btn is-danger';
-                bD.textContent = '×';
+                JarvisIcons.setTrash(bD);
                 bD.title = T('roles.delete', 'Löschen');
                 bD.setAttribute('aria-label', bD.title);
                 bD.onclick = function () { self.remove(r); };

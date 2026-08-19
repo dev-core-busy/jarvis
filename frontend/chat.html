@@ -7,7 +7,7 @@
          bleibt dadurch immer sichtbar. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
     <title>Jarvis Chat</title>
-    <link rel="stylesheet" href="/static/css/theme.css?v=11">
+    <link rel="stylesheet" href="/static/css/theme.css?v=12">
     <link rel="stylesheet" href="/static/css/chat.css?v=44">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=6">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
@@ -174,7 +174,7 @@
                  var(--accent-light) ist nur eine 10%-Alpha-Toenung fuer Hintergruende! --><span id="ctx-indicator-pill" data-i18n-title="chat.ctx_info" title="Kurzzeitgedächtnis dieses Chats: Anzahl der gemerkten Gesprächseinträge und Füllstand in % bis zur automatischen Komprimierung. Die KI nutzt diese Einträge als Kontext für ihre Antworten." style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;background:rgba(var(--accent-rgb),0.12);border:1px solid rgba(var(--accent-rgb),0.3);font-size:0.73rem;color:var(--accent);cursor:help;user-select:none;">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
                 <span id="ctx-indicator-text" data-i18n="chat.ctx_active">Kontext aktiv</span>
-                <button id="ctx-indicator-clear" data-i18n-title="chat.ctx_reset" title="Kontext zurücksetzen" style="background:none;border:none;cursor:pointer;padding:0 0 0 4px;color:var(--text-secondary);line-height:1;font-size:0.85rem;display:flex;align-items:center;" onclick="window._clearUserContext()">✕</button>
+                <button id="ctx-indicator-clear" data-i18n-title="chat.ctx_reset" title="Kontext zurücksetzen" style="background:none;border:none;cursor:pointer;padding:0 0 0 4px;color:var(--text-secondary);line-height:1;font-size:0.85rem;display:flex;align-items:center;" onclick="window._clearUserContext()"><svg class="jv-ico jv-ico-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>
             </span>
             <!-- Debug-Umschalter (nur Symbol): Zwischenschritte dauerhaft einblenden -->
             <button id="ctx-debug-toggle" type="button" aria-pressed="false" title="Debug ist ausgeschaltet · Debug-Ansicht: Zwischenschritte anzeigen"
@@ -214,7 +214,7 @@
 
 <!-- Lightbox -->
 <div id="uc-lightbox" class="uc-lightbox">
-    <button id="uc-lb-close" class="uc-lb-close">✕</button>
+    <button id="uc-lb-close" class="uc-lb-close" data-i18n-title="common.close" title="Schließen">✕</button>
     <button id="uc-lb-prev" class="uc-lb-nav">‹</button>
     <img id="uc-lb-img" class="uc-lb-img" alt="">
     <button id="uc-lb-next" class="uc-lb-nav">›</button>
@@ -332,19 +332,20 @@ sudo update-ca-certificates</code></pre>
     </div>
 </div>
 
-<script src="/static/js/i18n.js?v=75"></script>
+<script src="/static/js/icons.js?v=1"></script>
+<script src="/static/js/i18n.js?v=76"></script>
 <script src="/static/js/tabfill.js?v=1"></script>
 <!-- Gemeinsame Chat-Helfer (escapeHtml, renderMarkdown, History, Edit-Workflow) -->
-<script src="/static/js/chatlib.js?v=15"></script>
-<script src="/static/js/issues.js?v=6"></script>
+<script src="/static/js/chatlib.js?v=16"></script>
+<script src="/static/js/issues.js?v=7"></script>
 <script src="/static/js/branding.js?v=23"></script>
-<script src="/static/js/security_incidents.js?v=12"></script>
+<script src="/static/js/security_incidents.js?v=13"></script>
 <!-- Wissensgruppen-Filter (Checkbox-Auswahl der genutzten Gruppen) -->
 <script src="/static/js/kbgroups.js?v=4"></script>
 <script src="/static/js/kbgroupfilter.js?v=7"></script>
 <script src="/static/js/profile_switcher.js?v=5"></script>
 <script src="/static/js/sessions.js?v=4"></script>
-<script src="/static/js/chat.js?v=97"></script>
+<script src="/static/js/chat.js?v=98"></script>
 <!-- Interaktive Charts (```chartjs) – Chart.js lokal gevendort (CSP: kein CDN) -->
 <script src="/static/js/vendor/chart.umd.min.js?v=1"></script>
 <!-- Chart.js-Plugins (MIT). MUESSEN nach chart.umd.min.js kommen – ihre

@@ -201,6 +201,135 @@ def _kopfzeile(ws, zeile: int = 1) -> list[str]:
     return []
 
 
+# Wie viele Zeilen am Blattanfang fuer die Kopfzeilen-Erkennung angesehen werden.
+KOPF_SUCHTIEFE = 12
+
+
+def _hat_beschriftungen(row) -> bool:
+    """Enthaelt die Zeile echte Spaltennamen?
+
+    Echt heisst: Text, der WEDER eine Formel (``=B1``) NOCH eine reine Zahl ist.
+    Die Formel-Bedingung stammt aus der echten Datei von ECHT: in den Blaettern
+    2019-2026 ist die wiederholte Kopfzeile in Zeile 3 keine Beschriftung,
+    sondern ein VERWEIS auf Zeile 1 (``=B1``, ``=C1``, …). Weil die Mappe mit
+    ``data_only=False`` geoeffnet wird (sonst verlieren wir beim Speichern alle
+    Formeln), steht dort der Formeltext – als Spaltenname unbrauchbar.
+    """
+    gefuellt = [c for c in row if c is not None and str(c).strip() != ""]
+    if len(gefuellt) < 2:
+        return False
+    echte = [c for c in gefuellt
+             if isinstance(c, str)
+             and not c.lstrip().startswith("=")
+             and not c.strip().replace(".", "").replace(",", "").isdigit()]
+    return len(echte) / len(gefuellt) >= 0.5
+
+
+def _kopfzeile_raten(ws) -> tuple[int, int]:
+    """Ermittelt (Beschriftungszeile, erste Datenzeile).
+
+    DASS DAS ZWEI VERSCHIEDENE DINGE SIND, hat erst die echte Datei gezeigt:
+    in Blatt '2019' stehen die Spaltennamen in Zeile 1, Zeile 3 wiederholt sie
+    als FORMEL (``=B1``), und die Daten beginnen in Zeile 4. Wer beides
+    gleichsetzt, liest entweder ``=B1`` als Spaltennamen (Zeile 3) oder haelt
+    die Zeilen 2 und 3 fuer Daten (Zeile 1).
+
+    WARUM DAS NOETIG IST – an der echten Datei von ECHT gemessen: die 13 Blaetter
+    sind UNTERSCHIEDLICH gebaut.
+
+        Blatt 2004  Z1 = Kopfzeile,          Daten ab Z2
+        Blatt 2015  Z1 = Nummerncodes, Z2 leer, Z3 = Kopfzeile,  Daten ab Z4
+        Blatt 2019  Z1 = Kopfzeile, Z2 leer, Z3 = Kopfzeile (wiederholt, mit
+                    Abschnittsnamen in Spalte A), Daten ab Z4
+
+    Mit der festen Vorgabe "Zeile 1" liest man in Blatt 2015 also eine Liste von
+    Nummern als Spaltennamen – und findet anschliessend keinen einzigen
+    Schluessel. Das Modell muesste das von sich aus bemerken und ``kopfzeile``
+    mitgeben; darauf ist kein Verlass.
+
+    DER ANKER IST DER DATENANFANG, NICHT DIE BESCHRIFTUNG. Gesucht wird die erste
+    ueberwiegend NUMERISCHE Zeile; die Kopfzeile ist die letzte nicht-leere Zeile
+    darueber. Das trifft alle drei Bauformen oben – und bei zwei Kopfzeilen
+    (2019/2026) die UNTERE, was richtig ist: sie steht unmittelbar ueber den
+    Daten, und die Zeilen dazwischen wuerden sonst als Datenzeilen mitgelesen.
+
+    ENTSCHEIDEND IST DER TYP, NICHT DER AUSSEHEN-EINDRUCK: gezaehlt wird nur
+    ``int``/``float``. In Blatt 2015 stehen in Zeile 1 Werte wie
+    ``"00000000083"`` – als TEXT gespeichert. Wer sie als Zahl zaehlt, haelt
+    Zeile 1 fuer den Datenanfang und landet wieder bei der falschen Kopfzeile.
+    """
+    zeilen: list[tuple[int, tuple]] = []
+    try:
+        for i, row in enumerate(ws.iter_rows(min_row=1, max_row=KOPF_SUCHTIEFE,
+                                             max_col=40, values_only=True), start=1):
+            zeilen.append((i, row))
+    except Exception:  # noqa: BLE001
+        return 1, 2
+
+    erste_daten = 0
+    for i, row in zeilen:
+        gefuellt = [c for c in row if c is not None and str(c).strip() != ""]
+        if len(gefuellt) < 3:          # zu duenn, um den Datenanfang zu belegen
+            continue
+        zahlen = [c for c in gefuellt
+                  if isinstance(c, (int, float)) and not isinstance(c, bool)]
+        if len(zahlen) / len(gefuellt) >= 0.5:
+            erste_daten = i
+            break
+
+    if erste_daten <= 1:
+        # Keine Datenzeile gefunden (reine Texttabelle) oder die Daten beginnen
+        # schon in Zeile 1 – dann ist Zeile 1 die beste verfuegbare Annahme.
+        return 1, 2
+
+    # Die BESCHRIFTUNGSZEILE ist die unterste Zeile oberhalb der Daten, die
+    # wirklich Namen enthaelt. Eine Formel-Wiederholung (``=B1``) wird dabei
+    # uebersprungen und die darueberliegende echte Beschriftung genommen.
+    ueber = list(reversed(zeilen[: erste_daten - 1]))
+    for i, row in ueber:
+        if _hat_beschriftungen(row):
+            return i, erste_daten
+    # Keine brauchbare Beschriftung gefunden: die letzte nicht-leere Zeile ist
+    # immer noch die beste Annahme (besser als blind Zeile 1).
+    for i, row in ueber:
+        if any(c is not None and str(c).strip() != "" for c in row):
+            return i, erste_daten
+    return 1, erste_daten
+
+
+def _kz(ws, vorgabe) -> tuple[int, int, bool]:
+    """Loest die Kopfzeilen-Angabe auf: (Beschriftungszeile, erste Datenzeile,
+    automatisch_erkannt).
+
+    ``0`` bzw. eine fehlende Angabe heisst AUTOMATISCH. Das ist ein bewusster
+    Sentinel und keine Falsyness-Pruefung: Zeile 0 gibt es in Excel nicht, und
+    ein ausdrueckliches ``kopfzeile: 1`` muss von "nicht angegeben"
+    unterscheidbar bleiben – sonst wuerde die Erkennung eine bewusste Vorgabe
+    ueberstimmen.
+
+    Bei ausdruecklicher Angabe beginnen die Daten unmittelbar darunter: wer die
+    Zeile selbst nennt, meint den einfachen Aufbau.
+    """
+    try:
+        n = int(vorgabe or 0)
+    except Exception:  # noqa: BLE001
+        n = 0
+    if n >= 1:
+        return n, n + 1, False
+    kopf, daten = _kopfzeile_raten(ws)
+    return kopf, daten, True
+
+
+def _kz_text(zeile: int, automatisch: bool, daten_ab: int = 0) -> str:
+    t = f"Zeile {zeile}" + (" (automatisch erkannt)" if automatisch
+                            else " (vorgegeben)")
+    # Den Datenanfang nur nennen, wenn er NICHT direkt darunter liegt – sonst
+    # ist es Rauschen. Weicht er ab, ist er die wichtigere der beiden Zahlen.
+    if daten_ab and daten_ab != zeile + 1:
+        t += f", Daten ab Zeile {daten_ab}"
+    return t
+
+
 def _spalte_aufloesen(kopf: list[str], bez) -> int | None:
     """Findet eine Spalte ueber Kopfzeilen-Namen, Buchstabe oder 1-basierte Zahl.
 
@@ -334,12 +463,12 @@ class InspectTool(BaseTool):
             "type": "OBJECT",
             "properties": {
                 "path": {"type": "STRING", "description": "Dateiname, /api/documents/-URL oder Pfad der .xlsx."},
-                "kopfzeile": {"type": "INTEGER", "description": "Zeilennummer der Kopfzeile (Standard 1)."},
+                "kopfzeile": {"type": "INTEGER", "description": "Zeilennummer der Kopfzeile. Weglassen = je Blatt automatisch erkennen (empfohlen)."},
             },
             "required": ["path"],
         }
 
-    async def execute(self, path: str = "", kopfzeile: int = 1, **kwargs) -> str:
+    async def execute(self, path: str = "", kopfzeile: int = 0, **kwargs) -> str:
         unbekannt = _unbekannte(kwargs)
         if unbekannt:
             return unbekannt
@@ -348,18 +477,23 @@ class InspectTool(BaseTool):
         except TabellenFehler as e:
             return f"Fehler: {e}"
 
-        try:
-            kz = max(1, int(kopfzeile or 1))
-        except Exception:  # noqa: BLE001
-            kz = 1
-
         groesse = p.stat().st_size
-        zeilen = [f"Datei: {p.name.split('__', 1)[-1]}  "
-                  f"({groesse // 1024} KB, {len(wb.worksheets)} Blatt/Blaetter)"]
-
+        # Die Blatt-Beschreibungen werden ZUERST gesammelt und erst danach
+        # zusammengesetzt – Warnung und Wegweiser gehoeren an den ANFANG.
+        # An der echten Datei gemessen: 13 Blaetter ergeben 14.134 Zeichen, der
+        # Deckel liegt bei 14.000 – die am Ende angehaengte Warnung wurde also
+        # abgeschnitten. Genau derselbe Fehler wie bei office_read: ein Hinweis
+        # am Textende ueberlebt die Kuerzung nicht, die er erklaeren soll.
+        zeilen: list[str] = []
+        abweichend: list[str] = []
         for ws in wb.worksheets:
             n_z = ws.max_row or 0
             n_s = ws.max_column or 0
+            # JE BLATT erkennen, nicht einmal fuer die Mappe: die 13 Blaetter der
+            # echten Datei haben ihre Kopfzeile teils in Z1, teils in Z3.
+            kz, ab, auto = _kz(ws, kopfzeile)
+            if auto and (kz != 1 or ab != 2):
+                abweichend.append(f"'{ws.title}' -> Kopfzeile {kz}, Daten ab {ab}")
             zeilen.append("")
             zeilen.append(f"# Blatt '{ws.title}'  {n_z} Zeilen x {n_s} Spalten")
 
@@ -370,42 +504,57 @@ class InspectTool(BaseTool):
                 txt = " | ".join(f"{_spaltenbuchstabe(i)}={_kurz(k, 40)}"
                                  for i, k in gezeigt)
                 rest = len(benannt) - len(gezeigt)
-                zeilen.append(f"  Kopfzeile (Zeile {kz}): {txt}"
+                zeilen.append(f"  Kopfzeile {_kz_text(kz, auto, ab)}: {txt}"
                               + (f"  … (+{rest} weitere benannte Spalten, "
                                  f"{len(benannt)} von {n_s} insgesamt)" if rest else ""))
             else:
-                zeilen.append(f"  Kopfzeile (Zeile {kz}): keine Beschriftungen gefunden")
+                zeilen.append(f"  Kopfzeile {_kz_text(kz, auto, ab)}: "
+                              f"keine Beschriftungen gefunden")
 
             # Beispielzeilen direkt unter der Kopfzeile.
             gezeigt_z = 0
-            for row in ws.iter_rows(min_row=kz + 1, max_row=kz + BEISPIEL_ZEILEN,
+            for row in ws.iter_rows(min_row=ab, max_row=ab + BEISPIEL_ZEILEN - 1,
                                     max_col=BEISPIEL_SPALTEN, values_only=True):
                 gezeigt_z += 1
                 werte = " | ".join(_kurz(c, 30) for c in row)
-                zeilen.append(f"  Zeile {kz + gezeigt_z}: {werte}"
+                zeilen.append(f"  Zeile {ab + gezeigt_z - 1}: {werte}"
                               + (f"  … (+{n_s - BEISPIEL_SPALTEN} Spalten)"
                                  if n_s > BEISPIEL_SPALTEN else ""))
             if not gezeigt_z:
                 zeilen.append("  (keine Datenzeilen unter der Kopfzeile)")
 
+        n_blaetter = len(wb.worksheets)   # VOR close() – danach nicht mehr lesbar
         wb.close()
 
         # Formeln/Layout: ein ZWEITER Durchlauf waere teuer, deshalb nur die
         # Frage "gibt es sie ueberhaupt" – und die entscheidet, ob der Neubau
         # per office_create_excel ueberhaupt in Frage kommt.
         hinweis = self._formel_hinweis(p)
-        if hinweis:
-            zeilen.append("")
-            zeilen.append(hinweis)
 
-        zeilen.append("")
-        zeilen.append(
+        kopf_block = [f"Datei: {p.name.split('__', 1)[-1]}  "
+                      f"({groesse // 1024} KB, {n_blaetter} Blatt/Blaetter)"]
+        if abweichend:
+            # AUSDRUECKLICH BENENNEN. Ein Blatt, dessen Kopfzeile nicht in Zeile 1
+            # steht, ist der haeufigste Grund fuer "kein Schluessel hat getroffen" –
+            # und die Erkennung arbeitet zwar automatisch, kann aber danebenliegen.
+            # Wer die Zahlen sieht, kann sie in den anderen Werkzeugen ueberstimmen.
+            kopf_block.append(
+                "ACHTUNG – nicht jedes Blatt ist gleich gebaut: "
+                + "; ".join(abweichend[:12])
+                + (f" (+{len(abweichend) - 12} weitere)" if len(abweichend) > 12 else "")
+                + ". Die anderen Werkzeuge erkennen das ebenfalls selbst; mit "
+                  "'kopfzeile' kannst du es ueberstimmen, wenn die Erkennung "
+                  "danebenliegt."
+            )
+        kopf_block.append(
             "NAECHSTER SCHRITT: einzelne Bereiche mit xlsx_read_range ansehen, "
             "Daten mit xlsx_merge zusammenfuehren oder Zellen mit xlsx_edit "
             "schreiben. Baue die Tabelle NICHT mit office_create_excel neu auf – "
             "dabei gehen Formeln und Layout verloren."
         )
-        return _deckeln("\n".join(zeilen))
+        if hinweis:
+            kopf_block.append(hinweis)
+        return _deckeln("\n".join(kopf_block + zeilen))
 
     def _formel_hinweis(self, p: Path) -> str:
         """Zaehlt Formeln stichprobenartig ueber den XML-Rohtext.
@@ -484,12 +633,14 @@ class ReadRangeTool(BaseTool):
                 "ab_zeile": {"type": "INTEGER", "description": "Erste zu lesende Zeile (1-basiert, Standard 1)."},
                 "zeilen": {"type": "INTEGER", "description": f"Anzahl Zeilen (Standard {LESE_ZEILEN_VORGABE}, hoechstens {LESE_ZEILEN_MAX})."},
                 "spalten": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "Nur diese Spalten (Kopfzeilen-Name, Buchstabe oder Nummer). Leer = alle."},
+                "kopfzeile": {"type": "INTEGER", "description": "Zeilennummer der Kopfzeile. Weglassen = automatisch erkennen (empfohlen)."},
             },
             "required": ["path"],
         }
 
     async def execute(self, path: str = "", blatt: str = "", ab_zeile: int = 1,
-                      zeilen: int = 0, spalten=None, **kwargs) -> str:
+                      zeilen: int = 0, spalten=None, kopfzeile: int = 0,
+                      **kwargs) -> str:
         unbekannt = _unbekannte(kwargs)
         if unbekannt:
             return unbekannt
@@ -513,8 +664,11 @@ class ReadRangeTool(BaseTool):
         gesamt_z = ws.max_row or 0
         gesamt_s = ws.max_column or 0
 
-        # Spaltenauswahl gegen die Kopfzeile aufloesen.
-        kopf = _kopfzeile(ws, 1)
+        # Spaltenauswahl gegen die Kopfzeile aufloesen – die stand bis zum
+        # Feinschliff fest auf Zeile 1 und traf damit in Blatt '2015' der echten
+        # Datei eine Liste von Nummerncodes statt der Spaltennamen.
+        kz, _ab, kz_auto = _kz(ws, kopfzeile)
+        kopf = _kopfzeile(ws, kz)
         auswahl: list[int] | None = None
         if spalten:
             if not isinstance(spalten, (list, tuple)):
@@ -529,7 +683,7 @@ class ReadRangeTool(BaseTool):
                 wb.close()
                 return "Fehler: " + _spalten_bericht(kopf, fehlend)
 
-        kopf_txt = ("Spalten: " + " | ".join(
+        kopf_txt = ("Spalten (Kopfzeile " + _kz_text(kz, kz_auto, _ab) + "): " + " | ".join(
             f"{_spaltenbuchstabe(i)}={_kurz(kopf[i - 1] if i <= len(kopf) else '', 40)}"
             for i in (auswahl or range(1, min(gesamt_s, BEISPIEL_SPALTEN) + 1))))
 
@@ -603,7 +757,7 @@ class MergeTool(BaseTool):
                 "schluessel": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "Spalten, ueber die zugeordnet wird (muessen in BEIDEN vorkommen), z.B. [\"Jahr\", \"Monat\"]."},
                 "spalten": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "Welche Slave-Spalten uebernommen werden. Leer = alle gleichnamigen ausser den Schluesseln."},
                 "modus": {"type": "STRING", "description": "'aktualisieren' (nur vorhandene Master-Zeilen, Standard), 'anfuegen' (nur neue Zeilen) oder 'beides'."},
-                "kopfzeile": {"type": "INTEGER", "description": "Zeilennummer der Kopfzeile in beiden Tabellen (Standard 1)."},
+                "kopfzeile": {"type": "INTEGER", "description": "Zeilennummer der Kopfzeile in BEIDEN Tabellen. Weglassen = je Tabelle automatisch erkennen (empfohlen)."},
                 "leere_uebernehmen": {"type": "BOOLEAN", "description": "Leere Slave-Werte in den Master schreiben (Standard false = vorhandenen Master-Wert stehen lassen)."},
             },
             "required": ["master", "slave", "ziel", "schluessel"],
@@ -612,7 +766,7 @@ class MergeTool(BaseTool):
     async def execute(self, master: str = "", slave: str = "", ziel: str = "",
                       master_blatt: str = "", slave_blatt: str = "",
                       schluessel=None, spalten=None, modus: str = "aktualisieren",
-                      kopfzeile: int = 1, leere_uebernehmen: bool = False,
+                      kopfzeile: int = 0, leere_uebernehmen: bool = False,
                       **kwargs) -> str:
         unbekannt = _unbekannte(kwargs)
         if unbekannt:
@@ -631,11 +785,6 @@ class MergeTool(BaseTool):
             return (f"Fehler: 'modus' war {modus!r}. Erlaubt sind "
                     f"'aktualisieren', 'anfuegen' oder 'beides'.")
         try:
-            kz = max(1, int(kopfzeile or 1))
-        except Exception:  # noqa: BLE001
-            kz = 1
-
-        try:
             # Master SCHREIBEND (kein read_only) – nur so bleibt das Layout.
             wb_m, p_m = _oeffnen(master, schreibend=True)
             ws_m = _blatt(wb_m, master_blatt)
@@ -644,8 +793,13 @@ class MergeTool(BaseTool):
         except TabellenFehler as e:
             return f"Fehler: {e}"
 
-        kopf_m = _kopfzeile(ws_m, kz)
-        kopf_s = _kopfzeile(ws_s, kz)
+        # JE SEITE erkennen. Master und Slave sind haeufig verschieden gebaut –
+        # eine gemeinsame Zeilennummer waere fuer eine der beiden falsch. Eine
+        # ausdrueckliche Angabe gilt weiterhin fuer beide.
+        kz_m, ab_m, auto_m = _kz(ws_m, kopfzeile)
+        kz_s, ab_s, auto_s = _kz(ws_s, kopfzeile)
+        kopf_m = _kopfzeile(ws_m, kz_m)
+        kopf_s = _kopfzeile(ws_s, kz_s)
 
         # ── Schluessel in beiden Tabellen aufloesen ────────────────────────
         k_m, k_s, fehlt_m, fehlt_s = [], [], [], []
@@ -722,7 +876,7 @@ class MergeTool(BaseTool):
         index: dict[tuple, list] = {}
         doppelte = 0
         slave_zeilen = 0
-        for row in ws_s.iter_rows(min_row=kz + 1, values_only=True):
+        for row in ws_s.iter_rows(min_row=ab_s, values_only=True):
             if all(c is None for c in row):
                 continue
             slave_zeilen += 1
@@ -737,7 +891,8 @@ class MergeTool(BaseTool):
         if not index:
             wb_m.close(); wb_s.close()
             return (f"Fehler: der Slave enthaelt keine auswertbaren Zeilen unter "
-                    f"der Kopfzeile (Zeile {kz}). Stimmt 'kopfzeile' und "
+                    f"der Kopfzeile ({_kz_text(kz_s, auto_s, ab_s)}). Stimmt "
+                    f"'kopfzeile' und "
                     f"'slave_blatt'?")
 
         # ── Master durchgehen und schreiben ───────────────────────────────
@@ -748,7 +903,7 @@ class MergeTool(BaseTool):
         benutzte_keys: set = set()
         beispiel_master: list[str] = []
 
-        for r in range(kz + 1, (ws_m.max_row or kz) + 1):
+        for r in range(ab_m, (ws_m.max_row or ab_m) + 1):
             werte = [ws_m.cell(row=r, column=i).value for i in k_m]
             if all(v is None for v in werte):
                 continue
@@ -774,7 +929,7 @@ class MergeTool(BaseTool):
         # ── Nicht zugeordnete Slave-Zeilen anfuegen ───────────────────────
         angefuegt = 0
         if art in ("anfuegen", "beides"):
-            ziel_zeile = (ws_m.max_row or kz) + 1
+            ziel_zeile = (ws_m.max_row or ab_m) + 1
             for key, row in index.items():
                 if key in benutzte_keys:
                     continue
@@ -807,8 +962,11 @@ class MergeTool(BaseTool):
                 f"{', '.join(beispiel_master) or '(keine)'}\n"
                 f"Schluesselwerte im Slave  (Beispiele): "
                 f"{', '.join(beispiel_slave) or '(keine)'}\n"
+                f"Gelesene Kopfzeilen: Master {_kz_text(kz_m, auto_m, ab_m)}, "
+                f"Slave {_kz_text(kz_s, auto_s, ab_s)}.\n"
                 f"Pruefe mit xlsx_inspect, ob 'schluessel' in beiden Tabellen "
-                f"dieselbe Bedeutung hat und ob 'kopfzeile' stimmt."
+                f"dieselbe Bedeutung hat. Stimmt eine der Kopfzeilen nicht, gib "
+                f"'kopfzeile' ausdruecklich mit."
             )
 
         verluste = _verluste(wb_m)
@@ -823,11 +981,16 @@ class MergeTool(BaseTool):
             return f"Fehler beim Speichern: {e}"
         wb_m.close(); wb_s.close()
 
+        # DIE BENUTZTEN KOPFZEILEN GEHOEREN IN DEN BERICHT. Die Erkennung
+        # arbeitet automatisch – eine Automatik, deren Ergebnis niemand sieht,
+        # ist nicht ueberpruefbar. Steht die Zahl da, faellt ein Fehlgriff sofort
+        # auf und laesst sich mit 'kopfzeile' ueberstimmen.
         bericht = [
             f"Master '{p_m.name.split('__', 1)[-1]}' Blatt '{ws_m.title}': "
-            f"{master_zeilen} Datenzeilen.",
+            f"{master_zeilen} Datenzeilen, Kopfzeile {_kz_text(kz_m, auto_m, ab_m)}.",
             f"Slave Blatt '{ws_s.title}': {slave_zeilen} Datenzeilen, "
-            f"{len(index)} verschiedene Schluessel.",
+            f"{len(index)} verschiedene Schluessel, "
+            f"Kopfzeile {_kz_text(kz_s, auto_s, ab_s)}.",
             f"Uebernommene Spalten ({len(paare)}): "
             + ", ".join(n for _a, _b, n in paare[:25])
             + (f" … (+{len(paare) - 25})" if len(paare) > 25 else ""),

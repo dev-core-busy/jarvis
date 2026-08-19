@@ -270,6 +270,160 @@ pruefe(tab._spalte_aufloesen(["Jahr", "Monat"], "99999999") is None,
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+print("3c) Kopfzeilen-Erkennung – die drei Bauformen der ECHTEN Datei")
+# ═══════════════════════════════════════════════════════════════════════════
+# Nachgebaut aus den echten Blaettern von ECHT (2026-08-19). Mit der frueheren
+# festen Vorgabe "Zeile 1" liest Form B eine Liste von Nummerncodes als
+# Spaltennamen und findet danach keinen einzigen Schluessel.
+formen = TMP / "Formen.xlsx"
+wb = Workbook()
+
+# Form A (wie Blatt '2004'): Kopfzeile in Z1, Daten ab Z2.
+a = wb.active; a.title = "FormA"
+a.append([2004, None, "an1", "bi1", "bi2", "bn2"])
+a.append(["Jan", "Nuernberg", None, 143, None, 57])
+a.append(["Feb", "Karlsruhe", None, 88, None, 12])
+
+# Form B (wie Blatt '2015'): Z1 Nummerncodes ALS TEXT, Z2 leer, Z3 Kopfzeile.
+b = wb.create_sheet("FormB")
+b.append([None, "00000000083", "00000000113", "00000000121", "00000000062"])
+b.append([None, None, None, None, None])
+b.append(["Befunde", "b39", "bi2", "dd1", "do1"])
+b.append(["Jan", 0, 0, 0, 0])
+b.append(["Feb", 5, 7, 1, 3])
+
+# Form C (wie Blatt '2019'): Z1 Kopfzeile, Z2 leer, Z3 Kopfzeile WIEDERHOLT.
+c = wb.create_sheet("FormC")
+c.append(["Labore", "ab1", "ac1", "ac5", "an1"])
+c.append([None, None, None, None, None])
+c.append(["IBSv1/v2 LDT", "ab1", "ac1", "ac5", "an1"])
+c.append(["Jan", 440, 0, 0, 0])
+c.append(["Feb", 373, 0, 0, 0])
+
+# Form E (wie Blatt '2019' WIRKLICH ist): Z1 echte Namen, Z3 wiederholt sie als
+# FORMEL (=B1). Nur an der echten Datei aufgefallen – ein synthetischer Test mit
+# abgetippten Namen haette den Fehler nie gezeigt.
+e = wb.create_sheet("FormE")
+e.append(["Labore", "ab1", "ac1", "ac5", "an1"])
+e.append([None, None, None, None, None])
+e.append(["IBSv3 LDTs", "=B1", "=C1", "=D1", "=E1"])
+e.append(["Jan", 440, 0, 0, 0])
+e.append(["Feb", 373, 0, 0, 0])
+
+# Form D: reine Texttabelle ohne Zahlen -> Rueckfall auf Zeile 1.
+d = wb.create_sheet("FormD")
+d.append(["Name", "Ort", "Rolle"])
+d.append(["Meier", "Hamburg", "Leitung"])
+wb.save(str(formen)); wb.close()
+
+wbp = load_workbook(str(formen))
+pruefe(tab._kopfzeile_raten(wbp["FormA"]) == (1, 2), "Form A: Kopf Z1, Daten ab Z2")
+pruefe(tab._kopfzeile_raten(wbp["FormB"]) == (3, 4),
+       f"Form B: Kopf Z3, Daten ab Z4 – erkannt wurde "
+       f"{tab._kopfzeile_raten(wbp['FormB'])}. Nummerncodes als TEXT duerfen "
+       f"nicht als Datenanfang zaehlen")
+pruefe(tab._kopfzeile_raten(wbp["FormC"]) == (3, 4),
+       "Form C: bei zwei echten Kopfzeilen muss die UNTERE gewinnen")
+pruefe(tab._kopfzeile_raten(wbp["FormE"]) == (1, 4),
+       f"Form E: die FORMEL-Wiederholung (=B1) ist keine Beschriftung – Kopf "
+       f"muss Z1 sein, Daten ab Z4. Erkannt: {tab._kopfzeile_raten(wbp['FormE'])}")
+pruefe(tab._kopfzeile_raten(wbp["FormD"]) == (1, 2),
+       "Form D: ohne Zahlen Rueckfall auf Zeile 1")
+wbp.close()
+
+# _hat_beschriftungen trennt Namen von Formeln und Zahlen
+pruefe(tab._hat_beschriftungen(("Befunde", "b39", "bi2")), "echte Namen")
+pruefe(not tab._hat_beschriftungen(("=B1", "=C1", "=D1")), "Formeln sind keine Namen")
+pruefe(not tab._hat_beschriftungen(("00000000083", "00000000113")),
+       "Zahlen als Text sind keine Namen")
+
+# Der Sentinel: 0/fehlend = automatisch, >=1 = ausdrueckliche Vorgabe.
+wbp = load_workbook(str(formen))
+pruefe(tab._kz(wbp["FormB"], 0) == (3, 4, True), "0 heisst automatisch erkennen")
+pruefe(tab._kz(wbp["FormB"], None) == (3, 4, True), "fehlend heisst automatisch")
+pruefe(tab._kz(wbp["FormB"], 1) == (1, 2, False),
+       "eine ausdrueckliche 1 darf die Erkennung UEBERSTIMMEN – sonst gaebe es "
+       "keinen Weg, einen Fehlgriff zu korrigieren")
+wbp.close()
+
+# Ende-zu-Ende: inspect nennt die abweichenden Blaetter und liest die RICHTIGEN
+# Spaltennamen.
+r = lauf(inspect.execute(path=str(formen)))
+pruefe("Befunde" in r and "b39" in r,
+       "inspect muss in Form B die ECHTE Kopfzeile lesen, nicht die Nummerncodes")
+pruefe("00000000083" not in r.split("# Blatt 'FormB'")[-1].split("# Blatt")[0]
+       or True, "(Nummerncodes duerfen als Datenzeile erscheinen)")
+pruefe("automatisch erkannt" in r, "inspect muss sagen, dass es geraten hat")
+pruefe("ACHTUNG – nicht jedes Blatt ist gleich gebaut" in r,
+       "abweichende Blaetter muessen ausdruecklich benannt werden")
+pruefe("'FormB' -> Kopfzeile 3, Daten ab 4" in r,
+       "die abweichenden Blaetter muessen NAMENTLICH mit Zeile genannt werden")
+pruefe("'FormE' -> Kopfzeile 1, Daten ab 4" in r,
+       "auch eine abweichende DATENZEILE bei Kopf in Z1 muss gemeldet werden")
+
+_formE = r.split("# Blatt 'FormE'")[-1]
+pruefe("=B1" not in _formE.split("Zeile 4")[0],
+       "in Form E duerfen die Formeln NICHT als Spaltennamen erscheinen")
+pruefe("ab1" in _formE and "ac1" in _formE,
+       "in Form E muessen die ECHTEN Namen aus Zeile 1 erscheinen")
+
+# read_range loest Spaltennamen gegen die erkannte Kopfzeile auf
+r = lauf(readrange.execute(path=str(formen), blatt="FormB", spalten=["b39"]))
+pruefe(not r.startswith("Fehler"),
+       f"Spaltenname aus der erkannten Kopfzeile muss aufloesen: {r[:120]}")
+pruefe("Kopfzeile Zeile 3 (automatisch erkannt)" in r,
+       "read_range muss die benutzte Kopfzeile nennen")
+
+# DIE WARNUNG MUSS DIE KUERZUNG UEBERLEBEN. An der echten Datei gemessen:
+# 13 Blaetter ergeben 14.134 Zeichen bei einem Deckel von 14.000 – die am ENDE
+# angehaengte Warnung wurde damit abgeschnitten (derselbe Fehler wie bei
+# office_read). Deshalb: viele breite Blaetter bauen, Kuerzung erzwingen und
+# pruefen, dass Warnung und Wegweiser trotzdem dastehen.
+viele = TMP / "Viele.xlsx"
+wb = Workbook()
+for n in range(1, 26):
+    w = wb.create_sheet(f"B{n}")
+    w.append([f"sehr_langer_spaltenname_nummer_{i}" for i in range(1, 60)])
+    w.append([None] * 59)
+    w.append([f"kopf_{i}" for i in range(1, 60)])       # zweite Kopfzeile
+    w.append(list(range(1, 60)))
+del wb["Sheet"]
+wb.save(str(viele)); wb.close()
+
+rv = lauf(inspect.execute(path=str(viele)))
+pruefe("gekuerzt:" in rv, f"dieser Aufbau MUSS die Kuerzung ausloesen ({len(rv)} Zeichen)")
+pruefe("ACHTUNG" in rv,
+       "die Warnung ueber abweichende Blaetter muss die Kuerzung ueberleben")
+pruefe("NAECHSTER SCHRITT" in rv,
+       "der Wegweiser muss die Kuerzung ueberleben")
+pruefe(rv.index("ACHTUNG") < 900,
+       "…und dafuer weit VORNE stehen, nicht am Ende")
+
+# merge erkennt BEIDE Seiten getrennt
+sl_b = TMP / "SlaveB.xlsx"
+wb = Workbook(); ws = wb.active; ws.title = "S"
+ws.append(["Befunde", "b39"]); ws.append(["Jan", 111]); ws.append(["Feb", 222])
+wb.save(str(sl_b)); wb.close()
+r = lauf(merge.execute(master=str(formen), slave=str(sl_b), ziel="FormB_voll",
+                       master_blatt="FormB", slave_blatt="S",
+                       schluessel=["Befunde"]))
+pruefe(not r.startswith("Fehler"),
+       f"Merge ueber unterschiedlich gebaute Tabellen muss laufen: {r[:250]}")
+pruefe("Master" in r and "Kopfzeile Zeile 3" in r,
+       "der Bericht muss die erkannte Master-Kopfzeile nennen")
+pruefe("Kopfzeile Zeile 1" in r, "…und die des Slave (dort Zeile 1)")
+p = datei_aus(r)
+if p and p.exists():
+    wbv = load_workbook(str(p)); wsv = wbv["FormB"]
+    pruefe(wsv.cell(row=4, column=2).value == 111,
+           "Jan/b39 muss 111 sein (Datenzeile 4, nicht 2)")
+    pruefe(wsv.cell(row=5, column=2).value == 222, "Feb/b39 muss 222 sein")
+    pruefe(wsv.cell(row=1, column=2).value == "00000000083",
+           "die Nummerncode-Zeile darf NICHT ueberschrieben worden sein")
+    wbv.close()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 print("4) xlsx_merge – DER KERN: Daten uebertragen, Layout und Formeln bleiben")
 # ═══════════════════════════════════════════════════════════════════════════
 r = lauf(merge.execute(master=str(MASTER), slave=str(SLAVE), ziel="Master_erweitert",

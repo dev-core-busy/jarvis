@@ -126,13 +126,20 @@ BEREICHE: dict[str, dict] = {
         # OHNE "(Pflicht)" im Namen: die Kennzeichnung ist das Feld `pflicht`,
         # und beide Oberflaechen zeigen sie selbst an. Im Namen stand sie am
         # 2026-08-18 doppelt ("… (Pflicht) (Pflicht)", im Screenshot gesehen).
-        "de": "Lesen + Dokumente erzeugen",
-        "en": "Read + create documents",
+        "de": "Lesen, Tabellen bearbeiten + Dokumente erzeugen",
+        "en": "Read, edit tables + create documents",
         "tools": list(BASIS_WERKZEUGE),
         "hinweis_de": "Abgelegte Datei lesen (PDF, Office, CSV) und Word, Excel, "
-                      "PowerPoint, PDF oder ein Diagramm als Ergebnis erzeugen.",
+                      "PowerPoint, PDF oder ein Diagramm als Ergebnis erzeugen. "
+                      "Enthält auch die Tabellen-Werkzeuge: eine vorhandene "
+                      "Excel-Datei ansehen, zwei Tabellen über gemeinsame Spalten "
+                      "zusammenführen und einzelne Zellen ändern – dabei bleiben "
+                      "Formeln, Spaltenbreiten und Formatierung erhalten.",
         "hinweis_en": "Read the dropped file (PDF, Office, CSV) and produce Word, "
-                      "Excel, PowerPoint, PDF or a chart as the result.",
+                      "Excel, PowerPoint, PDF or a chart as the result. Also "
+                      "includes the table tools: inspect an existing Excel file, "
+                      "merge two tables via shared columns and change individual "
+                      "cells – formulas, column widths and formatting are kept.",
     },
     "wissen": {
         "de": "Wissensdatenbank (lesend)", "en": "Knowledge base (read)",
@@ -160,17 +167,36 @@ BEREICHE: dict[str, dict] = {
         "hinweis_en": "Tickets, Confluence, customer records and SAP READ-ONLY – "
                       "and only as far as the triggering user is authorised.",
     },
+    # DIESER TEXT WIRD VON NICHT-TECHNISCHEN BENUTZERN GELESEN. Er stand bis
+    # 2026-08-19 als "Auswertung mit pandas/openpyxl in der Sandbox" da – zwei
+    # Bibliotheksnamen, aus denen niemand ableiten kann, was der Haken bewirkt
+    # oder wann man ihn braucht. Wer eine Sicherheitsentscheidung treffen soll,
+    # muss die FOLGE verstehen, nicht die verwendete Technik.
     "shell": {
-        "de": "Shell / Python (Auswertung)", "en": "Shell / Python (analysis)",
+        "de": "Eigene Rechenschritte (Programm ausführen)",
+        "en": "Custom computations (run a program)",
         "tools": ["shell_execute"],
-        "hinweis_de": "Auswertung mit pandas/openpyxl in der Sandbox. ACHTUNG: der "
-                      "weiteste Werkzeugkasten – eine präparierte Datei hat hier "
-                      "die größte Angriffsfläche, und alle Netzwerk-Benutzer teilen "
-                      "denselben Sandbox-Benutzer samt /tmp.",
-        "hinweis_en": "Analysis with pandas/openpyxl inside the sandbox. CAUTION: "
-                      "the widest toolset – a crafted file has the largest attack "
-                      "surface here, and all network users share one sandbox user "
-                      "including /tmp.",
+        "hinweis_de": "Der Assistent darf sich für diese Ablage ein kleines "
+                      "Programm schreiben und ausführen, um die Daten selbst "
+                      "durchzurechnen. Nötig nur für Auswertungen, die über "
+                      "Lesen, Zusammenführen und Ändern hinausgehen – zum "
+                      "Beispiel Statistik über viele Dateien hinweg oder eine "
+                      "ungewöhnliche Umformung. Für den Normalfall reicht der "
+                      "Bereich „Lesen, Tabellen bearbeiten“. "
+                      "ACHTUNG: das ist der weiteste Werkzeugkasten. Eine "
+                      "präparierte Datei kann hier am meisten anrichten, und "
+                      "alle Netzwerk-Benutzer teilen sich denselben "
+                      "Arbeitsbereich auf dem Server. Im Zweifel ausgeschaltet "
+                      "lassen.",
+        "hinweis_en": "The assistant may write and run a small program for this "
+                      "drop in order to process the data itself. Only needed for "
+                      "analyses beyond reading, merging and editing – for example "
+                      "statistics across many files or an unusual transformation. "
+                      "For the normal case the area „Read, edit tables“ is "
+                      "sufficient. "
+                      "CAUTION: this is the widest toolset. A crafted file can do "
+                      "the most damage here, and all network users share the same "
+                      "working area on the server. When in doubt, leave it off.",
     },
 }
 

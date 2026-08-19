@@ -775,8 +775,14 @@
                 'Prüfe den Text – du kannst ihn hier ändern. Gesendet wird erst auf Knopfdruck.')) +
                 // Welcher Stil GEWIRKT hat, nicht welcher gewaehlt wurde: eine
                 // Anzeige darf keinen Zustand behaupten, den sie nicht kennt.
+                // Bei automatischer Wahl MUSS das dabeistehen: nur so ist
+                // erkennbar, dass die Form nicht vom Benutzer bestimmt wurde
+                // (und eine Manipulation faellt auf).
                 (_vorschlag.stil ? ' · ' + esc(T('mail.style_used', 'Stil')) + ': ' +
-                    esc(_vorschlag.stil) : '') + '</p>');
+                    esc(_vorschlag.stil) +
+                    (_vorschlag.stil_quelle === 'auto'
+                        ? ' (' + esc(T('mail.style_auto_mark', 'automatisch')) + ')' : '')
+                    : '') + '</p>');
             if (_vorschlag.stil_hinweis) {
                 teile.push('<div class="ad-warn" style="margin-top:6px;">' +
                     esc(_vorschlag.stil_hinweis) + '</div>');
@@ -802,7 +808,7 @@
             if (_stile.length) {
                 teile.push('<div class="ad-field">' +
                     '<label>' + esc(T('mail.style_pick', 'Stil')) + '</label>' +
-                    '<select id="ad-reply-stil">' + stilOptionen(_stilWahl) + '</select></div>');
+                    '<select id="ad-reply-stil">' + stilOptionen(_stilWahl, true) + '</select></div>');
             }
             teile.push('<button class="ad-btn ad-btn-primary ad-btn-block" id="ad-reply-make">' +
                 esc(T('addin.reply_make', 'Antwort vorschlagen')) + '</button>');
@@ -880,7 +886,8 @@
         })
             .then(function (d) {
                 _vorschlag = { text: d.text || '', an: d.an || '', betreff: d.betreff || '',
-                               stil: d.stil || '', stil_hinweis: d.stil_hinweis || '' };
+                               stil: d.stil || '', stil_hinweis: d.stil_hinweis || '',
+                               stil_quelle: d.stil_quelle || '' };
                 zeichneNachricht();
                 melde('ad-reply-status', '');
             })
@@ -1459,7 +1466,13 @@
 
     /* Optionen fuer ein Stil-Pulldown. Leer = Standard bzw. der im Prompt einer
        Regel genannte Stil, "-" = ausdruecklich ohne Stil. */
-    function stilOptionen(gewaehlt) {
+    /* `mitAuto` NUR fuer die Antwort-Vorschau: dort liest ein Mensch den
+       Vorschlag, bevor er ihn absendet. Im REGEL-Formular gibt es die
+       automatische Wahl bewusst nicht – eine Regel feuert ohne Anwesenden,
+       und die Stilwahl haenge dann am Text des Absenders. Das Backend lehnt
+       den Wert dort ebenfalls ab (`mail_rules`), das hier ist die zweite
+       Schicht. */
+    function stilOptionen(gewaehlt, mitAuto) {
         var std = _stile.filter(function (e) { return e.standard; })[0];
         // Der Standard steht als ERSTER Eintrag, mit `*` und mit dem Wert "" –
         // "" heisst "nichts ausdruecklich gewaehlt", nur so greift in einer
@@ -1469,6 +1482,12 @@
         var h = '<option value=""' + (gewaehlt ? '' : ' selected') + '>' + (std
             ? esc(std.name) + ' *'
             : esc(T('mail.style_opt_none', 'kein Stil'))) + '</option>';
+        // Erst ab ZWEI Stilen: bei einem einzigen waehlt „automatisch" immer
+        // denselben, der Eintrag waere ein Schalter ohne Wirkung.
+        if (mitAuto && _stile.length > 1) {
+            h += '<option value="auto"' + (gewaehlt === 'auto' ? ' selected' : '') +
+                '>' + esc(T('mail.style_opt_auto', 'automatisch wählen (KI)')) + '</option>';
+        }
         h += _stile.filter(function (e) { return !e.standard; }).map(function (e) {
             return '<option value="' + esc(e.id) + '"' +
                 (gewaehlt === e.id ? ' selected' : '') + '>' + esc(e.name) + '</option>';

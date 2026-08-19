@@ -329,8 +329,8 @@
                 <h3 class="em-sub-head"><span data-i18n="mail.styles_head">Stile für Antworten</span>
                     <button type="button" class="em-info" data-help="em-help-styles" aria-expanded="false"
                         data-i18n-title="mail.help" title="Erklärung anzeigen">&#9432;</button></h3>
-                <p class="em-hint" data-i18n="mail.styles_hint">Lege so viele Schreibweisen an, wie du brauchst – zum Beispiel „Förmlich", „Locker" oder „Kurz &amp; knapp". Der Stil bestimmt nur, WIE ein Text klingt (Anrede, Ton, Signatur); ob überhaupt geantwortet wird, entscheidet allein deine Regel. Beim Antworten in Outlook wählst du den Stil im Pulldown; eine Regel benutzt den bei ihr eingestellten Stil, sonst den Standard.</p>
-                <div class="em-help" id="em-help-styles" data-i18n="mail.help_styles">Der Standard-Stil (●) gilt überall dort, wo nichts anderes gewählt ist. Du kannst einen Stil auch im Text einer Regel ansprechen, zum Beispiel „Antworte im Stil ‚Förmlich'" – der Name wird aufgelöst, bevor das Sprachmodell läuft. Ist der Stil im Regel-Formular ausgewählt, gewinnt diese Auswahl.</div>
+                <p class="em-hint" data-i18n="mail.styles_hint">Lege so viele Schreibweisen an, wie du brauchst – zum Beispiel „Förmlich", „Locker" oder „Kurz &amp; knapp". Der Stil bestimmt nur, WIE ein Text klingt (Anrede, Ton, Signatur); ob überhaupt geantwortet wird, entscheidet allein deine Regel. Beim Antworten in Outlook wählst du den Stil im Pulldown – dort steht auch „automatisch wählen (KI)“: dann sucht das Sprachmodell selbst den passenden aus. Eine Regel benutzt den bei ihr eingestellten Stil, sonst den Standard.</p>
+                <div class="em-help" id="em-help-styles" data-i18n="mail.help_styles">Der Standard-Stil (●) gilt überall dort, wo nichts anderes gewählt ist. Du kannst einen Stil auch im Text einer Regel ansprechen, zum Beispiel „Antworte im Stil ‚Förmlich'" – der Name wird aufgelöst, bevor das Sprachmodell läuft. Ist der Stil im Regel-Formular ausgewählt, gewinnt diese Auswahl. Beim Antworten in Outlook kannst du außerdem „automatisch wählen (KI)“ einstellen: dann entscheidet das Sprachmodell anhand der eingegangenen Nachricht, und welchen Stil es genommen hat, steht über dem Vorschlag. In Regeln gibt es das bewusst nicht – die laufen ohne dich.</div>
                 <div id="em-stile-list" style="margin-top:10px;"></div>
                 <div class="em-row">
                     <button class="em-btn" id="em-stil-neu" data-i18n="mail.style_new">Neuer Stil</button>
@@ -417,12 +417,12 @@
     </div>
 </div>
 
-<script src="/static/js/i18n.js?v=49"></script>
+<script src="/static/js/i18n.js?v=50"></script>
 <script src="/static/js/tabfill.js?v=1"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=23"></script>
 <script src="/static/js/sessions.js?v=6"></script>
-<script src="/static/js/email_portal.js?v=7"></script>
+<script src="/static/js/email_portal.js?v=8"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist).
      Der Ein/Aus-Schalter haengt sich VOR #btn-theme-toggle – deshalb muss der
      Theme-Knopf oben diese Id tragen. -->

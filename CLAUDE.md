@@ -3627,6 +3627,36 @@ Melder registriert), im Protokoll stand aber `dateien: []`.
    unangetastet** (sie liest `violations`). Fehlerklasse: „eine Zusage, die der Code nicht
    hält" – zum wiederholten Mal in diesem Projekt.
 
+### Reset je Ablage (2026-08-19)
+Jede Ablagen-Karte hat einen Knopf **⟳ Zurücksetzen**: er verwirft alle EIGENEN Aufträge dieser
+Ablage, damit sofort ein neuer Lauf gestartet werden kann. Code: `short_tracks_runner.reset_dump`,
+`POST /api/tracks/dumps/{dump_id}/reset`, Knopf in `tracks.js::resetDump`.
+- **Ein laufender Auftrag wird WIRKLICH abgebrochen** (`task.cancel()`), nicht nur ausgeblendet.
+  Dafür gibt es jetzt das Task-Register `_tasks` (beim Start eintragen, im `finally` entfernen):
+  ohne die Referenz behielte ein hängender Lauf seinen Platz in der Warteschlange – und genau für
+  den Fall drückt jemand „Zurücksetzen". `DELETE /api/tracks/jobs/{id}` bleibt daneben bestehen und
+  nimmt weiterhin nur EINEN **abgeschlossenen** Auftrag aus der Liste.
+- **Der Status wird VOR dem Abbruch gesetzt** – das `finally` in `_fuehre_aus` schreibt den
+  Protokolleintrag, und „läuft" wäre dort eine Aussage, die nicht stimmt. Danach `_pumpe()`, damit
+  der frei gewordene Platz sofort nachbesetzt wird und andere Ablagen nicht stehen bleiben.
+- **Angefasst werden ausschliesslich die EIGENEN Aufträge dieser Ablage** – fremde und die anderer
+  Ablagen bleiben unberührt, das **Protokoll ebenfalls**: ein Reset räumt die Anzeige, nicht die
+  Historie.
+- **Der Knopf hängt NICHT an `darfAendern`**: auch bei einer globalen Ablage darf ihn jeder
+  benutzen, der sie benutzt – er räumt ja nur die eigenen Läufe. Und der Endpunkt prüft bewusst
+  **nicht** `darf_benutzen` (das verlangt eine AKTIVE Ablage): gerade eine abgeschaltete will man
+  aufräumen können. Unbekannte/fremde Ablage → **404**, kein Existenz-Orakel.
+- **Rückfrage nur, wenn wirklich etwas läuft** – sonst wäre sie ein Klick für nichts.
+- **Zweimal dieselbe Falle im eigenen Test:** `r[0].url` bzw. `querySelector(...).click()` auf ein
+  fehlendes Element **bricht ab, statt fehlzuschlagen** – die Gegenprobe lieferte dann gar keine
+  Zahl und sah aus wie ein bestandener Lauf. Beide Stellen defensiv gemacht; erst danach greifen
+  die Gegenproben (8/4/3 FAIL). Gleiche Klasse wie `.index()` in Python.
+- **Verifiziert:** 365 Backend-Prüfungen + 239 UI-Prüfungen; Gegenproben greifen einzeln (kein
+  `cancel()` → 1 FAIL, fremde Jobs mit erfasst → 2, kein `_pumpe()` → 1). Live auf DEV: Route
+  liefert 401 ohne Token (Phantasie-Route zum Vergleich 404), `reset_dump` entfernt 2 Aufträge,
+  bricht den laufenden Task nachweislich ab (`cancelled: True`) und lässt die andere Ablage stehen.
+  Optisch in Dunkel und Hell abgenommen.
+
 ### Karten maximieren (Nachtrag 2026-08-18)
 Beide Karten (`Ablagen`, `Letzte Läufe`) haben einen Knopf **⤢** in der Kopfzeile. Ein
 vorhandenes Maximieren-Muster gab es im Projekt nicht (`grep` auf „maximier/fullscreen/is-max"
@@ -3751,6 +3781,84 @@ in `settings.json` bleibt allein der Skill-Eintrag.
   gesperrt) und unter *Einstellungen → Short Tracks* die Grenzen prüfen sowie entscheiden,
   welche Werkzeug-Bereiche freigeschaltet werden (Vorgabe: nur „Lesen + Dokumente erzeugen"). **Als Skill kostet die Funktion einen Skill-Slot** – FREE/BASIC
   erlauben fünf aktive Skills.
+
+## Benutzer-Chat ist ein Skill (2026-08-19)
+Der Bereich `/userchat` (Direktnachrichten zwischen angemeldeten Benutzern) hängt seit dem
+Umbau am Skill **`userchat`**, Vorgabe **AUS**. Code: `skills/userchat/` (Manifest + leeres
+`get_tools()`), Gates in `backend/main.py`, Kachel in `frontend/portal.html`.
+Test: `tests/test_userchat_skill.py` (50).
+
+- **Zwei Entscheidungen des Nutzers, beide gegen meinen ersten Vorschlag:**
+  **Vorgabe AUS** wie bei E-Mail/Short Tracks (keine Migration auf „an") und **KEINE eigene
+  Freigabeliste** – der Skill-Schalter ist die einzige Schranke.
+  Die Begründung für die fehlende Liste steht im Docstring von `require_userchat_access`:
+  der Bereich startet keinen Agenten, ruft kein Sprachmodell und führt keine Werkzeuge aus.
+  Er lässt Menschen miteinander reden, die sich ohnehin beide anmelden dürfen – eine Liste
+  wäre eine Schranke vor einer offenen Tür. Wer sie später doch braucht, muss **drei** Stellen
+  nachziehen (Dependency, `/api/me`, `/ws/users`), sonst hängt die Kachel an einer anderen
+  Bedingung als der Zugriff.
+- **FÜNF Tore, und jedes einzelne ist nötig** – Tokens sind zustandslose HMAC-Zeichenketten
+  und überleben das Abschalten des Skills; ein offener Tab merkt davon von sich aus nichts:
+  | Tor | Verhalten bei Skill AUS |
+  |---|---|
+  | `GET /userchat` | 404 (leere Hülle, wie `/email`, `/tracks`) |
+  | `/api/userchat/unread\|users\|search` + `/api/users/online` | 403 mit Klartext-Weg (`require_userchat_access`) |
+  | `WS /ws/users` | `area_off` + close, **VOR** dem Registrieren des Clients |
+  | `/api/me` → `permissions.userchat` | `false` → Portal-Kachel bleibt versteckt |
+  | Ungelesen-Badge im Portal | Poll startet gar nicht erst (`_ucAn`) |
+- **`area_off` ist ein EIGENER Nachrichtentyp, kein generisches `error`.** `userchat.js`
+  verbindet nach jedem Close **alle 3 Sekunden** neu und kennt im `error`-Zweig nur
+  „Nicht autorisiert" – jede andere Meldung fällt dort still durch. Ein Skill, der während
+  einer offenen Sitzung abgeschaltet wird, hätte damit eine unsichtbare Endlosschleife gegen
+  einen Bereich erzeugt, den es nicht mehr gibt. Genau diese Falle hat `session_invalid` für
+  den Rechte-Entzug schon einmal geschlossen (der Kommentar steht dort daneben).
+  `area_off` setzt `_sessionInvalid`, stoppt den Timer, meldet den Grund und geht aufs Portal.
+  **Es verwirft KEINE Tokens** – die Anmeldung ist gültig, nur der Bereich ist zu; ein Logout
+  hier würde den Benutzer auch aus `/chat` werfen.
+  **Live belegt:** die Nachricht kommt beim Client an, obwohl dessen eigenes `send` des Tokens
+  schon in den Close läuft (`ConnectionClosedOK` beim Senden, `area_off` beim Empfangen).
+- **Zwei fest verdrahtete Grenzen sind jetzt Skill-Config:** `history_max` (200 Nachrichten je
+  Unterhaltung, war `_UC_HISTORY_MAX`) und `attachment_max_mb` (5 MB, waren `7_000_000` roh im
+  Code). Beides sind **Funktionen**, keine Modulkonstanten – der Wert muss ohne Dienstneustart
+  greifen (gleiche Begründung wie `documents.retention_days()`), und `_uc_cfg_int` begrenzt
+  hart, weil die Zahl auch von Hand in die settings.json geschrieben werden kann.
+  Ein eigener Reiter existiert bewusst nicht: ohne Eintrag in `TARGETS`/`SKILL_TABS` fällt das
+  Zahnrad auf den generischen Skill-Dialog zurück, und für zwei Zahlen lohnt kein Panel.
+- **Der Skill stellt KEINE Agent-Werkzeuge bereit, und das ist Absicht.** Ein `userchat_send`
+  wäre ein Versandweg im Namen des angemeldeten Benutzers, den ein Modell – und damit eine
+  Prompt-Injektion – auswählen könnte. Ein Test hält `tools: []` fest.
+- **Der Verlauf wird beim Abschalten NICHT angefasst.** `_uc_load_history()` läuft weiter beim
+  Start (der Skill kann zur Laufzeit eingeschaltet werden, dann muss die Historie da sein).
+  Gelöscht wird `data/userchat_history.json` nur beim Deinstallieren mit ausdrücklichem
+  „Daten entfernen" – dafür steht sie in `data_dirs` (die Purge-Logik verkraftet dort auch
+  eine Datei, `target.unlink()`).
+- **Verifiziert:** 50 Prüfungen (`tests/test_userchat_skill.py`, ohne fastapi lauffähig – die
+  Funktionen werden per `ast` aus `main.py` geschnitten, die vier Config-Helfer laufen isoliert
+  gegen eine Attrappe; `backend.config` wird ausdrücklich NICHT importiert, der echte Import
+  schriebe die Live-`settings.json` zurück) + 120 Endpunkt-Rechte unverändert grün.
+  Gegenproben greifen einzeln: WS-Prüfung ausgebaut → 2 FAIL, ein Endpunkt zurück auf
+  `require_auth` → 2, `permissions.userchat` entfernt → 1, Badge ohne Wache → 1, Grenzwert
+  wieder hart verdrahtet → 3, `area_off` zurück auf `error` → 1, `area_off` verwirft Tokens → 1.
+  **Live auf DEV, beide Zustände:** Skill AUS → `/userchat` 404, alle vier Endpunkte 403 mit
+  Klartext, `permissions.userchat: false`, WS liefert `area_off`; Skill AN → 200/200/200,
+  `permissions.userchat: true`, WS liefert `connected`. Danach vollständig zurückgebaut
+  (`data/settings.json` md5-gleich zur Sicherung `/root/settings.json.bak-uc`), Dienst aktiv,
+  `/portal` und `/settings` HTTP 200. Optisch in Dunkel UND Hell abgenommen (statische
+  Vorschau mit dem echten Markup und dem echten CSS, beide Zustände).
+- **BEIM AUSROLLEN IST DAS EINE ABSCHALTENDE ÄNDERUNG:** der Benutzer-Chat läuft auf ECHT im
+  Betrieb und ist nach dem Update **weg**, bis ein Administrator unter *Einstellungen → Skills*
+  den Skill „Benutzer-Chat" einschaltet. Kein Datenverlust – die Verläufe bleiben liegen.
+  **Als Skill kostet die Funktion einen Skill-Slot** (FREE/BASIC: fünf aktive Skills).
+- **Auf ECHT noch NICHT ausgerollt.**
+
+### Support-Agent-Kachel versteckt (2026-08-19)
+Die Portal-Kachel *Support-Agent* trägt `hidden` und wird von **keiner** Bedingung wieder
+eingeblendet – ein fester Zustand, kein Feature-Gate (Vorgabe des Nutzers: „bis zum Umbau
+verstecken"). Die Seite `/supportagent` bleibt erreichbar, bestehende Lesezeichen laufen also
+weiter. Zum Wiederanzeigen genügt es, `hidden` an `#pt-card-agent` zu entfernen.
+Der Wächter prüft beides: `hidden` im Markup UND dass der Skriptteil `pt-card-agent` nicht
+anfasst – ohne die zweite Prüfung wäre ein später ergänztes `classList.remove('hidden')`
+unsichtbar. Der Umbau selbst steht in der Memory `open-todos`.
 
 ## PDF-Textqualität: beschädigte Textebene erkennen und OCR entscheiden lassen (2026-08-13)
 **Der Vorfall (2026-08-12, ECHT):** `Einsender_KIM_Anbindung_compressed.pdf` (8,9 MB, 54 Seiten)

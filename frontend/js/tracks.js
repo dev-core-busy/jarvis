@@ -313,6 +313,12 @@
                     (d.beschreibung ? '<div class="st-dump-desc">' + esc(d.beschreibung) + '</div>' : '') +
                   '</div>' +
                   '<div class="st-dump-acts">' +
+                    // Zuruecksetzen darf JEDER, der die Ablage benutzt – er
+                    // raeumt ausschliesslich seine EIGENEN Auftraege. Deshalb
+                    // ausserhalb von `darfAendern`.
+                    '<button class="st-icon-btn" data-act="reset" title="' +
+                        esc(T('tracks.reset', 'Zurücksetzen – Läufe dieser Ablage verwerfen')) +
+                        '">&#10227;</button>' +
                     (darfAendern
                         ? '<button class="st-icon-btn" data-act="edit" title="' +
                               esc(T('tracks.edit', 'Bearbeiten')) + '">&#9998;</button>' +
@@ -355,6 +361,29 @@
         }
     }
 
+    /* Alle EIGENEN Auftraege dieser Ablage verwerfen – zurueck auf Anfang.
+
+       Rueckfrage NUR, wenn gerade etwas laeuft oder wartet: dann wird ein Lauf
+       wirklich abgebrochen. Ist die Ablage ohnehin fertig, waere eine
+       Bestaetigung nur ein Klick mehr fuer nichts. */
+    function resetDump(d) {
+        var aktiv = _jobs.filter(function (j) {
+            return j.dump_id === d.id &&
+                   (j.status === 'wartet' || j.status === 'laeuft');
+        }).length;
+        if (aktiv && !window.confirm(T('tracks.reset_ask',
+                'Es läuft noch ein Auftrag dieser Ablage. Wirklich abbrechen und zurücksetzen?'))) {
+            return;
+        }
+        sende('/api/tracks/dumps/' + encodeURIComponent(d.id) + '/reset', 'POST')
+            .then(function (r) {
+                toast(T('tracks.reset_done', 'Zurückgesetzt – {n} Lauf/Läufe entfernt.')
+                    .replace(/\{n\}/g, r.entfernt || 0));
+                return ladeJobs();
+            })
+            .catch(function (er) { toast(er.message, true); });
+    }
+
     function bindeKarte(karte, d) {
         var drop = karte.querySelector('[data-act="drop"]');
         var edit = karte.querySelector('[data-act="edit"]');
@@ -366,6 +395,11 @@
         if (del) del.addEventListener('click', function (e) {
             e.stopPropagation();
             loescheDump(d);
+        });
+        var res = karte.querySelector('[data-act="reset"]');
+        if (res) res.addEventListener('click', function (e) {
+            e.stopPropagation();
+            resetDump(d);
         });
         // Eine abgeschaltete Ablage bekommt GAR KEINE Drop-Bindung: der Server
         // weist den Versuch mit 404 ab, und eine Flaeche, die zum Fehlgriff

@@ -527,6 +527,18 @@
                 if (window.SecurityIncidents) window.SecurityIncidents.fetchAndShowBlocked();
                 break;
 
+            case 'area_off':
+                // Der Benutzer-Chat-Skill wurde abgeschaltet, waehrend dieser Tab
+                // offen war. Reconnect ANHALTEN (sonst 3s-Schleife gegen einen
+                // Bereich, den es nicht mehr gibt) und zurueck aufs Portal – dort
+                // ist die Kachel weg, der Zustand also erklaert.
+                // Tokens bleiben: die Anmeldung ist gueltig, nur der Bereich ist zu.
+                _sessionInvalid = true;
+                clearTimeout(reconnectTimer);
+                if (msg.message) alert(msg.message);
+                window.location.replace('/portal');
+                break;
+
             case 'session_invalid':
                 // Anmeldeberechtigung entzogen -> Hinweis, Keys leeren, KEIN Reconnect
                 // (sonst stille 3s-Reconnect-Schleife gegen den 403).

@@ -130,6 +130,12 @@ function baue(opt) {
             return gib({ ok: true, jobs: jobs, zaehler: { neu: neu, aktiv: aktiv } });
         }
         if (pfad === '/api/tracks/jobs/seen') { return gib({ ok: true, anzahl: 1 }); }
+        if (/\/api\/tracks\/dumps\/[^/]+\/reset$/.test(pfad)) {
+            const id = pfad.split('/')[4];
+            const vorher = jobs.length;
+            jobs = jobs.filter(j => j.dump_id !== id);
+            return gib({ ok: true, entfernt: vorher - jobs.length, abgebrochen: 0 });
+        }
         if (pfad === '/api/tracks/drop') {
             if (opt.dropFehler) return gib({ ok: false, error: opt.dropFehler,
                                              abgewiesen: opt.abgewiesen || [] }, 400);
@@ -1150,6 +1156,81 @@ abschnitt('8. Verdrahtung, Portal, i18n, CSS');
     for (const m of (TR_JS + ADMIN_JS).matchAll(/T\('((?:tracks|tracksadm)\.[^']+)'/g)) keys.add(m[1]);
     const fehltI18n = [...keys].filter(k => (I18N.match(new RegExp("'" + k.replace('.', '\\.') + "'", 'g')) || []).length < 2);
     pruefe(fehltI18n.length === 0, keys.size + ' i18n-Schluessel in DE UND EN', String(fehltI18n));
+}
+
+abschnitt('9. Reset je Ablage');
+/* ═══════════════════════════════════════════════════════════════════════ */
+{
+    // Ohne aktiven Lauf: kein confirm, direkt zuruecksetzen.
+    const { w, rufe } = baue({ jobs: [
+        { id: 'j1', dump_id: 'aaaaaaaaaaaa', dump: 'Rechnung', titel: 'a.pdf',
+          status: 'fertig', schritte: [], ergebnis: 'fertig', dateien: [], fehler: '' },
+        { id: 'j2', dump_id: 'bbbbbbbbbbbb', dump: 'Andere', titel: 'b.pdf',
+          status: 'fertig', schritte: [], ergebnis: 'fertig', dateien: [], fehler: '' } ] });
+    await warte(80);
+    const k = karte(w, 'aaaaaaaaaaaa');
+    const b = k.querySelector('[data-act="reset"]');
+    pruefe(!!b, 'jede Ablage hat einen Reset-Knopf');
+    let gefragt = false;
+    w.confirm = () => { gefragt = true; return true; };
+    if (b) b.click();
+    await warte(80);
+    pruefe(!gefragt, 'ohne laufenden Auftrag wird NICHT gefragt (kein Klick fuer nichts)');
+    const r = rufe.filter(x => /\/reset$/.test(String(x.url).split('?')[0]));
+    pruefe(r.length === 1 && r[0].methode === 'POST',
+        'genau EIN POST auf den Reset-Endpunkt', JSON.stringify(r.map(x => x.url + ' ' + x.methode)));
+    // Defensiv: ohne Treffer waere `r[0].url` ein TypeError – der Test wuerde
+    // ABBRECHEN statt fehlzuschlagen, und ein Abbruch ist von einem bestandenen
+    // Lauf nicht zu unterscheiden (dieselbe Falle wie bei `.index()` in Python).
+    pruefe(r.length > 0 && /\/api\/tracks\/dumps\/aaaaaaaaaaaa\/reset$/.test(r[0].url),
+        'und zwar fuer DIESE Ablage');
+    await warte(60);
+    pruefe(!!karte(w, 'bbbbbbbbbbbb').querySelector('[data-jobs="bbbbbbbbbbbb"]'),
+        'die andere Ablage bleibt stehen');
+    w.close();
+}
+{
+    // Mit laufendem Auftrag: Rueckfrage – und ein "Nein" sendet nichts.
+    const { w, rufe } = baue({ jobs: [
+        { id: 'j1', dump_id: 'aaaaaaaaaaaa', dump: 'Rechnung', titel: 'a.pdf',
+          status: 'laeuft', schritte: [{ t: 1, werkzeug: 'office_create_excel' }],
+          ergebnis: '', dateien: [], fehler: '' } ] });
+    await warte(80);
+    const k = karte(w, 'aaaaaaaaaaaa');
+    let gefragt = 0;
+    w.confirm = () => { gefragt++; return false; };
+    // Defensiv: fehlt der Knopf, wuerde `.click()` auf null den Test ABBRECHEN
+    // statt fehlzuschlagen – und ein Abbruch sieht aus wie ein Erfolg.
+    const rb = k.querySelector('[data-act="reset"]');
+    pruefe(!!rb, 'Reset-Knopf vorhanden');
+    if (rb) rb.click();
+    await warte(60);
+    pruefe(gefragt === 1, 'bei laufendem Auftrag wird gefragt');
+    pruefe(rufe.filter(x => /\/reset$/.test(String(x.url).split('?')[0])).length === 0,
+        'ein "Nein" sendet NICHTS');
+    w.confirm = () => true;
+    if (rb) rb.click();
+    await warte(80);
+    pruefe(rufe.filter(x => /\/reset$/.test(String(x.url).split('?')[0])).length === 1,
+        'nach Bestaetigung genau ein Aufruf');
+    w.close();
+}
+{
+    // Auch bei einer GLOBALEN Ablage und ohne Admin-Rechte: der Reset raeumt
+    // nur die eigenen Auftraege, deshalb darf ihn jeder benutzen.
+    const { w } = baue({ admin: false });
+    await warte(80);
+    const g = w.document.querySelector('.st-dump[data-dump] [data-act="reset"]');
+    pruefe(!!g, 'der Knopf haengt nicht an darfAendern');
+    const global = Array.prototype.slice.call(w.document.querySelectorAll('.st-dump'))
+        .filter(c => c.querySelector('.st-badge.is-global'))[0];
+    if (global) {
+        pruefe(!!global.querySelector('[data-act="reset"]'),
+            'auch die globale Ablage hat ihn (ohne Bearbeiten/Loeschen)');
+        pruefe(!global.querySelector('[data-act="del"]'),
+            'Gegenprobe: Loeschen hat sie fuer Nicht-Admins NICHT');
+    }
+    w.close();
 }
 
 /* ═══════════════════════════════════════════════════════════════════════ */

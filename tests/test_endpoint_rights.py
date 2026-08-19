@@ -244,6 +244,10 @@ section("Regel: Lesen darf nicht freier sein als Schreiben")
 # SCHWAECHERER Dependency? Das war das Muster hinter zwei Vorfaellen.
 RANK = {"require_local_auth": 3, "require_admin_or_knowledge_editor": 2,
         "require_knowledge_editor": 2, "require_sap_access": 2,
+        "require_email_access": 2, "require_tracks_access": 2,
+        # Bereichs-Schranke ohne eigene Freigabeliste: prueft NUR, ob der Skill
+        # "userchat" an ist. Damit auf der Ebene von require_auth, nicht darueber.
+        "require_userchat_access": 1,
         "require_auth_pwchange": 1, "require_auth": 1, "require_auth_or_query": 1,
         "require_admin_or_query": 3, "require_auth_or_agent": 1}
 

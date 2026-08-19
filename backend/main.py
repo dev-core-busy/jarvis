@@ -325,7 +325,48 @@ _uc_clients: dict[str, list[WebSocket]] = {}
 # Nachrichten-Historie: conv_key → [msg, ...]
 _uc_history: dict[str, list] = {}
 _UC_HISTORY_FILE = Path("data/userchat_history.json")
-_UC_HISTORY_MAX  = 200   # max. Nachrichten pro Konversation
+
+# Der Bereich haengt seit 2026-08-19 am Skill "userchat" (Vorgabe AUS). Die
+# Gespraechslogik bleibt hier, weil sie an Prozess-Zustand haengt (offene
+# WebSockets); der Skill liefert nur Schalter und Grenzwerte.
+_UC_SKILL = "userchat"
+
+
+def _uc_skill_config() -> dict:
+    """Konfiguration des Benutzer-Chat-Skills – lazy und fehlertolerant.
+    Fehlt der Skill oder ist er aus, gelten die Vorgaben dieses Moduls."""
+    try:
+        return (config.get_skill_states().get(_UC_SKILL, {}) or {}).get("config", {}) or {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _uc_cfg_int(schluessel: str, vorgabe: int, unten: int, oben: int) -> int:
+    """Zahl aus der Skill-Config, hart begrenzt. Die Grenzen sind kein Zierrat:
+    der Wert kommt aus einem Formular und kann auch von Hand in die
+    settings.json geschrieben werden."""
+    try:
+        n = int(str(_uc_skill_config().get(schluessel, "")).strip() or vorgabe)
+    except Exception:  # noqa: BLE001
+        return vorgabe
+    return max(unten, min(n, oben))
+
+
+def _uc_history_max() -> int:
+    """Max. Nachrichten je Unterhaltung (Vorgabe 200).
+
+    Bewusst eine FUNKTION und keine Modulkonstante – der Wert ist im
+    Skill-Dialog aenderbar und muss ohne Dienstneustart greifen (gleiche
+    Begruendung wie ``documents.retention_days()``)."""
+    return _uc_cfg_int("history_max", 200, 20, 5000)
+
+
+def _uc_attachment_max_b64() -> int:
+    """Groesse eines Anhangs in base64-Zeichen (Vorgabe 5 MB binaer).
+
+    Gemessen wird die uebertragene base64-Laenge, weil genau die im Verlauf
+    landet; Faktor 4/3 plus Reserve gegenueber der Binaergroesse."""
+    return int(_uc_cfg_int("attachment_max_mb", 5, 1, 25) * 1_400_000)
 
 def _uc_conv_key(u1: str, u2: str) -> str:
     """Kanonischer Konversations-Schlüssel: NORMALISIERTE Logins (ohne Domain-
@@ -1262,6 +1303,29 @@ async def require_tracks_access(request: Request, user: str = Depends(require_au
         detail="Kein Zugriff auf Short Tracks – nicht in der Benutzerliste/-Gruppe "
                "freigeschaltet (Einstellungen → Sicherheit → Berechtigungen → "
                "Short-Tracks-Zugriff; ggf. neu einloggen für Gruppen-Aktualisierung)")
+
+
+async def require_userchat_access(request: Request, user: str = Depends(require_auth)) -> str:
+    """FastAPI Dependency: Benutzer-Chat (→ /api/userchat/*, /api/users/online).
+
+    ANDERS ALS BEI SAP/E-MAIL/SHORT TRACKS gibt es hier BEWUSST KEINE eigene
+    Freigabeliste (Entscheidung des Nutzers vom 2026-08-19): der Skill-Schalter
+    ist die einzige Schranke. Begruendung: der Bereich startet keinen Agenten,
+    ruft kein Sprachmodell und fuehrt keine Werkzeuge aus – er laesst Menschen
+    miteinander reden, die sich ohnehin beide anmelden duerfen. Eine Liste waere
+    eine Schranke vor einer offenen Tuer.
+
+    Wer das spaeter doch braucht, ergaenzt hier ein ``_user_may_use_userchat``
+    nach dem Muster von ``_user_may_use_email`` – und muss dann auch
+    ``/api/me`` (permissions.userchat) und den WebSocket ``/ws/users``
+    nachziehen, sonst haengt die Kachel an einer anderen Bedingung als der
+    Zugriff.
+    """
+    if _skill_active(_UC_SKILL):
+        return user
+    raise HTTPException(status_code=403,
+        detail="Der Benutzer-Chat ist nicht aktiv – der Skill 'Benutzer-Chat' "
+               "muss unter Einstellungen → Skills eingeschaltet werden.")
 
 
 def _is_kb_group_editor(user: str, group: dict) -> bool:
@@ -2202,7 +2266,14 @@ async def chat_page():
 
 @app.get("/userchat", response_class=HTMLResponse)
 async def userchat_page():
-    """User-zu-User-Chat-UI ausliefern."""
+    """User-zu-User-Chat-UI ausliefern – nur wenn der Skill aktiv ist.
+
+    Die Seite ist eine leere Huelle; jeder Datenabruf haengt an
+    ``require_userchat_access`` und der WebSocket prueft selbst. Eine normale
+    Navigation traegt keinen Authorization-Header (der Token liegt im
+    localStorage), deshalb wird hier nur der Skill-Zustand geprueft."""
+    if not _skill_active(_UC_SKILL):
+        return HTMLResponse("<h1>404 – Benutzer-Chat nicht aktiv</h1>", status_code=404)
     f = FRONTEND_DIR / "userchat.html"
     return HTMLResponse(
         content=f.read_text(encoding="utf-8"),
@@ -2379,7 +2450,7 @@ async def gated_redoc(request: Request, user: str = Depends(require_admin_or_que
 
 
 @app.get("/api/users/online")
-async def get_online_users(user: str = Depends(require_auth)):
+async def get_online_users(user: str = Depends(require_userchat_access)):
     """Gibt Liste der aktuell im User-Chat verbundenen User zurück."""
     users = [u for u, conns in _uc_clients.items() if conns]
     return JSONResponse({"users": users})
@@ -2390,7 +2461,7 @@ _UC_NON_USERS = {"api", "jarvis", "root", "unknown", "anonymous", "system", "ki_
 
 
 @app.get("/api/userchat/unread")
-async def userchat_unread(user: str = Depends(require_auth)):
+async def userchat_unread(user: str = Depends(require_userchat_access)):
     """Anzahl ungelesener Benutzerchat-Nachrichten fuer den aktuellen Nutzer –
     fuer die Badge auf der /portal-Karte. Zaehlt Nachrichten, die AN den Nutzer
     gehen (to == user, ueber alle Schreibweisen via _norm_login) und noch nicht
@@ -2405,7 +2476,7 @@ async def userchat_unread(user: str = Depends(require_auth)):
 
 
 @app.get("/api/userchat/users")
-async def userchat_known_users(user: str = Depends(require_auth)):
+async def userchat_known_users(user: str = Depends(require_userchat_access)):
     """Bekannte Chat-Partner für den Benutzerchat: alle Benutzer, die Jarvis schon
     genutzt haben (Konversations-Log), plus Userchat-Historie-Partner und aktuell
     Verbundene – mit Online-Status. So kann man auch offline Kollegen anschreiben.
@@ -2437,7 +2508,7 @@ async def userchat_known_users(user: str = Depends(require_auth)):
 
 
 @app.post("/api/userchat/search")
-async def userchat_search(request: Request, user: str = Depends(require_auth)):
+async def userchat_search(request: Request, user: str = Depends(require_userchat_access)):
     """AD-Verzeichnissuche für den Benutzerchat (jeder angemeldete Nutzer darf
     suchen). Nutzt NUR das Service-Konto (verlangt kein Passwort vom Domain-User);
     ohne Service-Konto leer + Hinweis. Bildet den gefundenen sAMAccountName auf das
@@ -2481,6 +2552,24 @@ async def userchat_ws(ws: WebSocket):
     await ws.accept()
     username: str | None = None
     try:
+        # Skill-Schranke ZUERST – sie haengt nicht am Benutzer, und ohne sie
+        # liefe eine offene Seite nach dem Abschalten des Skills weiter
+        # (Token bleiben gueltig, der Tab merkt davon nichts).
+        #
+        # EIGENER Nachrichtentyp, kein generisches "error": der Client verbindet
+        # nach einem Close alle 3 Sekunden neu. Ein Fehler, den er nicht kennt,
+        # ergaebe eine stille Endlosschleife gegen einen Bereich, der aus ist –
+        # genau die Falle, die "session_invalid" fuer den Rechte-Entzug schon
+        # einmal geschlossen hat. `area_off` haelt den Reconnect an und schickt
+        # den Benutzer aufs Portal. NICHT "session_invalid": die Anmeldung ist
+        # voellig in Ordnung, nur der Bereich ist zu – Tokens verwerfen waere
+        # eine Abmeldung ohne Grund.
+        if not _skill_active(_UC_SKILL):
+            await ws.send_json({"type": "area_off",
+                                "message": "Der Benutzer-Chat ist nicht mehr aktiv. "
+                                           "Ein Administrator hat den Bereich abgeschaltet."})
+            await ws.close()
+            return
         # Erste Nachricht muss Auth-Token enthalten
         raw = await asyncio.wait_for(ws.receive_json(), timeout=10.0)
         token_str = raw.get("token", "")
@@ -2564,11 +2653,12 @@ async def userchat_ws(ws: WebSocket):
                     "application/pdf",
                 }
                 clean_atts = []
+                _att_max = _uc_attachment_max_b64()
                 for _a in raw_atts[:5]:
                     _am = (_a.get("mime_type","") or "").strip().lower()
                     _ad = _a.get("data","")
                     _an = _a.get("name","datei")[:80]
-                    if _am in _UC_OK_MIME and _ad and len(_ad) <= 7_000_000:  # ~5 MB binary
+                    if _am in _UC_OK_MIME and _ad and len(_ad) <= _att_max:
                         clean_atts.append({"name": _an, "mime_type": _am, "data": _ad})
                 msg_id = str(uuid.uuid4())[:8]
                 # from/to KANONISCH (normalisiert) speichern -> keine Doppel-Schluessel
@@ -2588,8 +2678,9 @@ async def userchat_ws(ws: WebSocket):
                 if key not in _uc_history:
                     _uc_history[key] = []
                 _uc_history[key].append(msg)
-                if len(_uc_history[key]) > _UC_HISTORY_MAX:
-                    _uc_history[key] = _uc_history[key][-_UC_HISTORY_MAX:]
+                _hist_max = _uc_history_max()
+                if len(_uc_history[key]) > _hist_max:
+                    _uc_history[key] = _uc_history[key][-_hist_max:]
                 _uc_save_history()
                 # An Empfänger senden (auch wenn offline – erhält Nachricht via Historie)
                 await _uc_send_to_user(to_user, msg)
@@ -4182,6 +4273,11 @@ async def get_me(user: str = Depends(require_auth)):
             # der Einstellungs-Reiter unabhaengig vom Skill-Zustand bedienbar
             # bleibt.
             "tracks": _user_may_use_tracks(user) and _skill_active("short-tracks"),
+            # Benutzer-Chat: haengt NUR am Skill-Zustand – eine eigene Freigabe
+            # gibt es bewusst nicht (Begruendung in require_userchat_access).
+            # Das Portal blendet Kachel UND Ungelesen-Badge daran ein; ohne das
+            # liefe der Badge-Poll bei ausgeschaltetem Skill in einen 403.
+            "userchat": _skill_active(_UC_SKILL),
             "internet": _user_has_internet_access(user),
         },
         "license_banner": banner,
@@ -9118,6 +9214,33 @@ async def tracks_job_delete(job_id: str, user: str = Depends(require_tracks_acce
                                                    "nicht abgeschlossen."},
                             status_code=404)
     return JSONResponse({"ok": True})
+
+
+@app.post("/api/tracks/dumps/{dump_id}/reset")
+async def tracks_dump_reset(dump_id: str, user: str = Depends(require_tracks_access)):
+    """Alle eigenen Auftraege EINER Ablage verwerfen – zurueck auf Anfang.
+
+    Anders als ``DELETE /api/tracks/jobs/{id}`` (nimmt EINEN abgeschlossenen
+    Auftrag aus der Liste) raeumt das hier die ganze Ablage und bricht dabei
+    auch einen laufenden oder wartenden Auftrag ab – genau dafuer gibt es den
+    Knopf: um nach einem haengenden Lauf sofort neu starten zu koennen.
+
+    Fremde Auftraege und die anderer Ablagen bleiben unberuehrt, das Protokoll
+    ebenfalls: zurueckgesetzt wird die Anzeige, nicht die Historie.
+    """
+    from backend import short_tracks as _st, short_tracks_runner as _str
+    d = _st.holen(dump_id)
+    # `darf_benutzen` waere hier zu eng: es verlangt eine AKTIVE Ablage. Gerade
+    # eine abgeschaltete will man aber aufraeumen koennen. Massgeblich ist die
+    # Sichtbarkeit – und angefasst werden ohnehin nur die EIGENEN Auftraege.
+    _sichtbar = d and (d.get("global") or
+                       _st.norm_user(d.get("owner")) == _st.norm_user(user))
+    if not _sichtbar:
+        # 404 statt 403: ob es eine fremde Ablage gibt, ist selbst eine Auskunft.
+        return JSONResponse({"ok": False, "error": "Ablage nicht gefunden."},
+                            status_code=404)
+    z = await _str.reset_dump(dump_id, user)
+    return JSONResponse({"ok": True, **z})
 
 
 @app.get("/api/tracks/log")

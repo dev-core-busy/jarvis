@@ -364,7 +364,10 @@
             <div class="pt-card-title" data-i18n="portal.card_chat">Chat</div>
             <div class="pt-card-desc" data-i18n="portal.card_chat_desc">Mit dem KI-Assistenten chatten.</div>
         </a>
-        <a class="pt-card" href="/userchat">
+        <!-- Benutzer-Chat: haengt am Skill "userchat" (permissions.userchat).
+             Eine eigene Freigabeliste gibt es bewusst nicht – der Bereich
+             startet keinen Agenten und fuehrt keine Werkzeuge aus. -->
+        <a class="pt-card hidden" id="pt-card-userchat" href="/userchat">
             <span class="pt-card-badge hidden" id="pt-userchat-badge" data-i18n-title="portal.unread_msgs" title="Ungelesene Nachrichten"></span>
             <div class="pt-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
             <div class="pt-card-title" data-i18n="chat.user_chat">Benutzer-Chat</div>
@@ -407,7 +410,13 @@
             <div class="pt-card-title" data-i18n="portal.card_wissen">Wissen</div>
             <div class="pt-card-desc" data-i18n="portal.card_wissen_desc">Dateien hochladen und Wissen deines Bereichs pflegen.</div>
         </a>
-        <a class="pt-card" href="/supportagent">
+        <!-- Support-Agent: BEWUSST FÜR ALLE AUSGEBLENDET (2026-08-19, Vorgabe des
+             Nutzers) – die Kachel wird umgebaut und ist bis dahin versteckt.
+             KEIN JS blendet sie ein: es gibt hier absichtlich keine Bedingung,
+             sondern einen festen Zustand. Die Seite /supportagent selbst bleibt
+             erreichbar (bestehende Lesezeichen/Links laufen weiter). Zum
+             Wiederanzeigen genügt es, `hidden` zu entfernen. -->
+        <a class="pt-card hidden" id="pt-card-agent" href="/supportagent">
             <div class="pt-card-icon" style="background:transparent;padding:0;overflow:hidden;">
                 <img src="/static/jira_agent_symbol.png" alt="" style="width:44px;height:44px;object-fit:contain;">
             </div>
@@ -558,6 +567,10 @@ sudo update-ca-certificates</code></pre>
     var t = tok();
     if (!t) { window.location.replace('/'); return; }
     var H = { 'Authorization': 'Bearer ' + t };
+    // Ist der Benutzer-Chat-Skill an? Kommt aus /api/me (permissions.userchat)
+    // und steuert Kachel UND Ungelesen-Poll. Hier oben deklariert, damit die
+    // Reihenfolge nicht von der Hebung einer spaeteren var abhaengt.
+    var _ucAn = false;
 
     fetch('/api/me', { headers: H }).then(function(r){
         // Sicherheitsschicht: gesperrtes Konto -> Sperr-Bildschirm statt Portal.
@@ -596,6 +609,16 @@ sudo update-ca-certificates</code></pre>
             var trCard = document.getElementById('pt-card-tracks');
             if (trCard) trCard.classList.remove('hidden');
             refreshTracks();
+        }
+        // Benutzer-Chat: ebenfalls nur am Skill-Zustand. Der Ungelesen-Poll
+        // startet ERST hier – bei ausgeschaltetem Skill antwortet
+        // /api/userchat/unread mit 403, und ein Badge-Poll, der alle 30 s in
+        // einen 403 laeuft, ist Laerm ohne Aussage.
+        if (d.permissions && d.permissions.userchat) {
+            var ucCard = document.getElementById('pt-card-userchat');
+            if (ucCard) ucCard.classList.remove('hidden');
+            _ucAn = true;
+            refreshUnread();
         }
         // Lizenz-Warnung (nur Admin, nur wenn wirklich etwas zu melden ist:
         // Widerruf, fremde Hardware, unbrauchbarer Schlüssel, ablaufende Frist).
@@ -638,10 +661,12 @@ sudo update-ca-certificates</code></pre>
         if (d && d.ok && d.groups && d.groups.length) { var c = document.getElementById('pt-card-wissen'); if (c) c.classList.remove('hidden'); }
     }).catch(function(){});
 
-    // Ungelesen-Badge auf der Benutzerchat-Karte
+    // Ungelesen-Badge auf der Benutzerchat-Karte. Laeuft nur, wenn der Skill
+    // aktiv ist (`_ucAn`, gesetzt aus permissions.userchat) – der erste Aufruf
+    // kommt von dort, nicht beim Seitenaufbau.
     function refreshUnread(){
         var badge = document.getElementById('pt-userchat-badge');
-        if (!badge) return;
+        if (!badge || !_ucAn) return;
         fetch('/api/userchat/unread', { headers: H }).then(function(r){ return r.ok ? r.json() : null; })
             .then(function(d){
                 var n = (d && d.unread) || 0;
@@ -649,7 +674,6 @@ sudo update-ca-certificates</code></pre>
                 else { badge.classList.add('hidden'); }
             }).catch(function(){});
     }
-    refreshUnread();
 
     // Short-Tracks-Zaehler: fertige, noch nicht angesehene Laeufe. Eigener,
     // winziger Endpunkt statt der vollen Auftragsliste – die enthaelt

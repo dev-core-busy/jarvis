@@ -1,0 +1,43 @@
+{
+    "name": "Benutzer-Chat",
+    "description": "Direktnachrichten zwischen angemeldeten Benutzern (Bereich /userchat): Textnachrichten, Anhaenge, Lesebestaetigung, Reaktionen und Online-Anzeige. Kein KI-Chat – hier reden Menschen miteinander.",
+    "version": "1.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": [],
+    "category": "kommunikation",
+    "icon": "users",
+    "system": false,
+    "enabled": false,
+    "dependencies": [],
+    "system_packages": [],
+    "data_dirs": ["data/userchat_history.json"],
+    "config_schema": {
+        "history_max": {
+            "type": "number",
+            "label": "Nachrichten je Unterhaltung",
+            "description": "Wie viele Nachrichten je Zweiergespraech aufbewahrt werden. Aeltere fallen heraus, sobald eine neue dazukommt. Erlaubt 20 bis 5000 (Vorgabe 200). Grosse Werte lassen data/userchat_history.json wachsen – die Datei wird bei jeder Nachricht vollstaendig geschrieben.",
+            "default": 200,
+            "required": false
+        },
+        "attachment_max_mb": {
+            "type": "number",
+            "label": "Groesse je Anhang (MB)",
+            "description": "Groessere Anhaenge werden beim Senden verworfen; die Nachricht selbst geht durch. Erlaubt 1 bis 25 (Vorgabe 5). Anhaenge liegen base64-kodiert in derselben Verlaufsdatei, hohe Werte gehen also unmittelbar zu Lasten von Speicher und Ladezeit.",
+            "default": 5,
+            "required": false
+        }
+    },
+    "knowledge_docs": [],
+    "permissions": [],
+    "help": {
+        "details": "Schaltet den Bereich /userchat frei (Kachel 'Benutzer-Chat' im Portal). Zwei angemeldete Benutzer schreiben sich direkt: Text, Bilder/Audio/Video/PDF als Anhang, Tippanzeige, gelesen-Status, Reaktionen. Gespraechspartner sind alle Personen, die Jarvis schon genutzt haben; ist ein AD-Dienstkonto hinterlegt, laesst sich zusaetzlich im Verzeichnis suchen.\n\nRECHTELAGE: Es gibt bewusst KEINE eigene Freigabeliste – der Skill-Schalter ist die einzige Schranke. Wer sich anmelden darf, darf mitreden; wer nicht, kommt gar nicht erst an einen Token. Der Bereich startet keinen Agenten, ruft kein Sprachmodell und fuehrt keine Werkzeuge aus.\n\nIst der Skill aus, liefert /userchat eine 404, die Endpunkte /api/userchat/* antworten mit 403, der WebSocket wird abgewiesen und die Portal-Kachel erscheint nicht. Vorhandene Verlaeufe bleiben dabei liegen und sind nach dem Wiedereinschalten unveraendert da; geloescht werden sie nur beim Deinstallieren mit ausdruecklichem 'Daten entfernen'.",
+        "tools": [],
+        "use_cases": [
+            "Kollegen direkt aus dem Portal anschreiben",
+            "Screenshot oder PDF an eine andere Person schicken",
+            "Sehen, wer gerade angemeldet ist"
+        ],
+        "notes": "Der Skill stellt keine Agent-Werkzeuge bereit – das Sprachmodell kann darueber weder mitlesen noch schreiben."
+    }
+}

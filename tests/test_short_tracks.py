@@ -660,6 +660,64 @@ check(run._chips_lesen([_endantwort]) == [],
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════
+section("12b. Reset je Ablage: zurueck auf Anfang")
+# ═══════════════════════════════════════════════════════════════════════════
+
+async def _reset_test():
+    run._jobs.clear(); run._reihe.clear(); run._laufend.clear(); run._tasks.clear()
+    grenzen(gleichzeitig=1)
+
+    async def _lange():
+        await asyncio.sleep(30)
+
+    # Ausgangslage: ein laufender + ein wartender Auftrag der Ablage d1, dazu
+    # ein fertiger von d2 und einer eines FREMDEN Benutzers auf d1.
+    def _job(jid, dump_id, owner, status):
+        j = run._job_neu({"id": dump_id, "name": dump_id}, owner, "T-" + jid)
+        j["id"] = jid
+        j["status"] = status
+        run._jobs[jid] = j
+        return j
+
+    _job("j1", "d1", U, "laeuft")
+    _job("j2", "d1", U, "wartet")
+    _job("j3", "d2", U, "fertig")
+    _job("j4", "d1", "fremder", "fertig")
+    run._laufend.add("j1")
+    run._reihe.append("j2")
+    t = asyncio.get_running_loop().create_task(_lange())
+    run._tasks["j1"] = t
+
+    z = await run.reset_dump("d1", U)
+    await asyncio.sleep(0)          # dem Cancel einen Tick geben
+    return z, t
+
+
+_z, _task = asyncio.run(_reset_test())
+check(_z["entfernt"] == 2 and _z["abgebrochen"] == 2,
+      "meldet entfernte und abgebrochene Auftraege", str(_z))
+check("j1" not in run._jobs and "j2" not in run._jobs,
+      "die Auftraege DIESER Ablage sind weg")
+check("j3" in run._jobs, "eine ANDERE Ablage bleibt unberuehrt")
+check("j4" in run._jobs, "der Auftrag eines FREMDEN bleibt unberuehrt")
+check("j1" not in run._laufend and "j2" not in run._reihe,
+      "Warteschlange und Laufliste sind bereinigt")
+check(_task.cancelled() or _task.done(),
+      "ein LAUFENDER Auftrag wird wirklich abgebrochen, nicht nur ausgeblendet")
+check("j1" not in run._tasks, "die Task-Referenz ist aufgeraeumt")
+
+_code_reset = abschnitt(CODE_RUN, "async def reset_dump", "def stop_alle")
+check("_pumpe()" in _code_reset,
+      "danach wird nachbesetzt – ein Reset haelt fremde Ablagen nicht an")
+check('j["status"] = "fehler"' in _code_reset and
+      _code_reset.find('j["status"]') < _code_reset.find("cancel()"),
+      "Status VOR dem Abbruch – sonst steht 'laeuft' im Protokolleintrag")
+check("protokoll" not in _code_reset.lower(),
+      "das Protokoll wird NICHT angefasst (Anzeige raeumen, nicht Historie)")
+
+
+
 section("13. Warteschlange")
 
 async def _reihe_test():
@@ -919,6 +977,18 @@ for datei in ("data/short_tracks.json", "data/short_tracks_log.jsonl"):
 section("19. Endpunkte: Rechte und Reihenfolge")
 
 MAIN = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
+# Endpunkt
+check('@app.post("/api/tracks/dumps/{dump_id}/reset")' in MAIN,
+      "Route POST /api/tracks/dumps/{id}/reset")
+_ep = abschnitt(MAIN, '@app.post("/api/tracks/dumps/{dump_id}/reset")', "@app.get(\"/api/tracks/log\")")
+check("Depends(require_tracks_access)" in _ep, "haengt an der Zugriffs-Freigabe")
+check("status_code=404" in _ep, "fremde/unbekannte Ablage -> 404 (kein Existenz-Orakel)")
+# Auf den AUFRUF pruefen und im kommentarfreien Code: der Endpunkt ERKLAERT in
+# einem Kommentar, warum `darf_benutzen` hier zu eng waere – ein Waechter, der
+# den Namen im Fliesstext findet, prueft seine eigene Begruendung.
+check("darf_benutzen(" not in nur_code(_ep),
+      "eine ABGESCHALTETE Ablage laesst sich ebenfalls aufraeumen "
+      "(kein darf_benutzen-Aufruf)")
 tracks_teil = abschnitt(MAIN, "#  Short Tracks (/tracks)", "# ─── Jira (Reiter")
 check(tracks_teil, "der Endpunkt-Block ist auffindbar")
 

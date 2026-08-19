@@ -80,6 +80,11 @@ MAX_JOBS = 400
 _jobs: dict[str, dict] = {}
 _reihe: list[str] = []            # wartende Job-Ids, in Ankunftsreihenfolge
 _laufend: set[str] = set()
+# Die laufenden asyncio-Tasks je Auftrag. NOETIG fuer den Reset: ohne die
+# Referenz laesst sich ein Lauf nur aus der ANZEIGE nehmen, waehrend er im
+# Hintergrund weiterlaeuft und seinen Platz in der Warteschlange behaelt –
+# dann waere "zuruecksetzen, um neu zu starten" eine halbe Zusage.
+_tasks: dict[str, "asyncio.Task"] = {}
 _lock = asyncio.Lock()
 
 
@@ -724,7 +729,7 @@ async def _pumpe() -> None:
             _laufend.add(job_id)
             j["status"] = "laeuft"
             j["gestartet"] = time.time()
-            asyncio.create_task(_fuehre_aus(job_id))
+            _tasks[job_id] = asyncio.create_task(_fuehre_aus(job_id))
 
 
 # ── Ein Lauf ────────────────────────────────────────────────────────────────
@@ -846,6 +851,7 @@ async def _fuehre_aus(job_id: str) -> None:
         j["beendet"] = time.time()
         async with _lock:
             _laufend.discard(job_id)
+            _tasks.pop(job_id, None)
         try:
             st.lauf_vermerken(j["dump_id"])
         except Exception:  # noqa: BLE001
@@ -986,6 +992,54 @@ async def _lauf(job: dict, dump: dict, auftrag: str,
     except Exception:  # noqa: BLE001
         pass
     return antwort, chips
+
+
+async def reset_dump(dump_id: str, user: str) -> dict:
+    """Alle Auftraege EINER Ablage dieses Benutzers verwerfen.
+
+    Der Weg zurueck zu einem sauberen Anfang: die Karte ist danach leer, und ein
+    neuer Lauf kann sofort starten.
+
+    **Ein laufender Auftrag wird WIRKLICH abgebrochen** (``task.cancel()``),
+    nicht nur aus der Liste genommen. Sonst behielte er seinen Platz in der
+    Warteschlange, und ein gerade haengender Lauf – genau der Fall, fuer den man
+    einen Reset braucht – bliebe eine Bremse.
+
+    Es werden ausschliesslich EIGENE Auftraege dieser Ablage angefasst; fremde
+    und die anderer Ablagen bleiben unberuehrt. Das PROTOKOLL bleibt in jedem
+    Fall erhalten – ein Reset raeumt die Anzeige, nicht die Historie.
+    """
+    un = st.norm_user(user)
+    ids = [jid for jid, j in _jobs.items()
+           if j.get("dump_id") == dump_id and j.get("owner") == un]
+    abgebrochen = 0
+    async with _lock:
+        for jid in ids:
+            j = _jobs.get(jid) or {}
+            if j.get("status") in ("wartet", "laeuft"):
+                abgebrochen += 1
+                # Status VOR dem Abbruch setzen: das `finally` in `_fuehre_aus`
+                # schreibt den Protokolleintrag, und "laeuft" waere dort eine
+                # Aussage, die nicht stimmt.
+                j["status"] = "fehler"
+                j["fehler"] = "Zurueckgesetzt."
+                t = _tasks.pop(jid, None)
+                if t is not None and not t.done():
+                    t.cancel()
+            _laufend.discard(jid)
+            if jid in _reihe:
+                try:
+                    _reihe.remove(jid)
+                except ValueError:  # noqa: PERF203
+                    pass
+            _jobs.pop(jid, None)
+    # Freigewordene Plaetze sofort nachbesetzen – ein Reset darf die
+    # Warteschlange anderer Ablagen nicht anhalten.
+    try:
+        await _pumpe()
+    except Exception as e:  # noqa: BLE001
+        print("[Tracks] Warteschlange nach Reset: %s" % e, flush=True)
+    return {"entfernt": len(ids), "abgebrochen": abgebrochen}
 
 
 def stop_alle() -> int:

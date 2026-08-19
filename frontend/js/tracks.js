@@ -322,8 +322,12 @@
                     (darfAendern
                         ? '<button class="st-icon-btn" data-act="edit" title="' +
                               esc(T('tracks.edit', 'Bearbeiten')) + '">&#9998;</button>' +
+                          // MUELLEIMER = LOESCHEN (Regel in js/icons.js). Hier
+                          // verschwindet die Ablage dauerhaft aus der Registry –
+                          // ein × waere "schliessen" und damit falsch.
                           '<button class="st-icon-btn is-danger" data-act="del" title="' +
-                              esc(T('tracks.delete', 'Löschen')) + '">&#10005;</button>'
+                              esc(T('tracks.delete', 'Löschen')) + '">' +
+                              JarvisIcons.trash() + '</button>'
                         : '') +
                   '</div>' +
                 '</div>' +
@@ -595,6 +599,9 @@
                   (j.status === 'fertig' || j.status === 'fehler'
                       ? '<button class="st-icon-btn" data-jobdel="' + esc(j.id) +
                         '" title="' + esc(T('tracks.job_hide', 'Aus der Liste nehmen')) +
+                        // × ist hier RICHTIG: der Auftrag wird nur aus der
+                        // Anzeige genommen, das Protokoll bleibt (siehe
+                        // `job_entfernen`). Kein dauerhaftes Loeschen.
                         '" style="width:22px;height:22px;font-size:.7rem;">&#10005;</button>'
                       : '') +
                 '</div>' +

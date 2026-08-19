@@ -3692,6 +3692,32 @@ Melder registriert), im Protokoll stand aber `dateien: []`.
    unangetastet** (sie liest `violations`). Fehlerklasse: „eine Zusage, die der Code nicht
    hält" – zum wiederholten Mal in diesem Projekt.
 
+### Gemeldet 2026-08-19: × statt Mülleimer am Löschen-Knopf der Ablagen
+Die Regel steht in `frontend/js/icons.js`: **Mülleimer = löschen, × = schliessen.** In
+`tracks.js` fuehrte „Ablage löschen" weiter ein `×`. Zwei Ursachen, und die zweite ist die
+wichtigere:
+1. **Die Datei wurde beim Icon-Umbau übersehen** – jetzt `JarvisIcons.trash()`.
+2. **DER WÄCHTER WAR BLIND.** `tests/test_icon_semantik.js` prüfte auf die ZEICHEN `×✕✖`, nicht auf
+   die HTML-**Entity** `&#10005;` – und er prüfte **zeilenweise**, während ein Knopf hier über
+   mehrere Zeilen zusammengesetzt wird (`'<button …' + title + '">×</button>'`). Dadurch sah er
+   weder `<button` noch die Beschriftung in derselben Zeile. Beides behoben: die Entities gehören
+   ins Muster, und geprüft wird ein **Fenster** von Zeilen (−3/+1).
+   **Gegenprobe, die das belegt:** mit dem Fehler meldet der geschärfte Wächter 35/36, der alte
+   36/36. Nach der Schärfung ist das ganze Frontend regelkonform (36/36).
+- **`&times;` an fünf weiteren Stellen bleibt** – das sind Schliessen-Knöpfe (`btn-close-banner`,
+  `btn-close-modal`, `jv-iss-close`, `vis-modal-close`), dort ist × richtig.
+- **Der Knopf „Aus der Liste nehmen" am Auftrag behält ebenfalls das ×** und trägt jetzt eine
+  Begründung im Code: er blendet nur aus, das Protokoll bleibt (`job_entfernen`). Ein Test hält
+  beide Richtungen fest.
+- **FALLSTRICK, den der Fix ausgelöst hat:** `tests/test_short_tracks_ui.js` lud `icons.js` nicht.
+  Ohne `JarvisIcons` bricht `tracks.js` mitten im Template-String ab – das Rendern scheitert
+  **komplett**, der Test sah gar keine Karten (`Cannot read properties of null`). Die echte Seite
+  bindet es als erstes Skript ein; der Test tut das jetzt auch (an allen vier Aufbauten).
+- **Verifiziert:** 36/36 Icon-Prüfungen, 242 UI-Prüfungen (davon drei neue zum Symbol), 365
+  Backend-Prüfungen, 99 Add-in-Prüfungen. Gegenprobe: `×` zurück → 2 FAIL im UI-Test.
+  Optisch abgenommen (Dunkel und Hell): Mülleimer in gleicher Grösse wie ⟳ und ✎, kein
+  Layout-Bruch; die globale Ablage zeigt für Nicht-Admins weiterhin nur ⟳.
+
 ### Reset je Ablage (2026-08-19)
 Jede Ablagen-Karte hat einen Knopf **⟳ Zurücksetzen**: er verwirft alle EIGENEN Aufträge dieser
 Ablage, damit sofort ein neuer Lauf gestartet werden kann. Code: `short_tracks_runner.reset_dump`,

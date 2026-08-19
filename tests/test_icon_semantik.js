@@ -46,7 +46,10 @@ const rel = (p) => path.relative(ROOT, p);
 // also jedes beliebige Emoji, z.B. das 📂 des Verschieben-Knopfes. Genau
 // dieser Fehlalarm ist beim ersten Lauf aufgetreten (die Warnung dazu steht in
 // CLAUDE.md seit dem Add-in-Umbau).
-const KREUZE = /[×✕✖⨯🗙]/u;
+// Auch die HTML-ENTITIES, nicht nur die Zeichen. GEMELDET 2026-08-19: in
+// `tracks.js` stand `&#10005;` am Loeschen-Knopf – der Waechter war blind
+// dafuer und meldete nichts, obwohl die Regel verletzt war.
+const KREUZE = /[×✕✖⨯🗙]|&times;|&#215;|&#x?2715;?|&#10005;|&#10006;/iu;
 // Loesch-Woerter in Beschriftungen. Bewusst ENG: "clear" allein trifft sonst
 // CSS-Eigenschaften und "close" enthaelt kein Loeschen.
 const LOESCHWORT = /l[oö]sch|entfern|delete|remove|deinstall|uninstall|widerruf|purge|leeren/i;
@@ -116,10 +119,14 @@ for (const p of UI) {
     const zeilen = fs.readFileSync(p, 'utf8').split('\n');
     zeilen.forEach((z, i) => {
         if (!KREUZE.test(z)) return;
-        if (AUSNAHMEN.some((a) => a.test(z))) return;
-        // Nur Zeilen, die auch wirklich ein BEDIENELEMENT sind.
-        if (!/<button|textContent|innerHTML|icon:\s*['"]/.test(z)) return;
-        if (!LOESCHWORT.test(z)) return;
+        // FENSTER statt Einzelzeile: ein Knopf wird regelmaessig ueber mehrere
+        // Zeilen zusammengesetzt ('<button …' + title + '">×</button>'). Die
+        // zeilenweise Pruefung sah weder das `<button` noch die Beschriftung
+        // und liess `tracks.js` durch (gemeldet 2026-08-19).
+        const fenster = zeilen.slice(Math.max(0, i - 3), i + 2).join('\n');
+        if (AUSNAHMEN.some((a) => a.test(fenster))) return;
+        if (!/<button|textContent|innerHTML|icon:\s*['"]/.test(fenster)) return;
+        if (!LOESCHWORT.test(fenster)) return;
         verstoesse.push(`${rel(p)}:${i + 1}  ${z.trim().slice(0, 90)}`);
     });
 }

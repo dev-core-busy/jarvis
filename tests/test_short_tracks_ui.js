@@ -38,6 +38,11 @@ const TR_JS = fs.readFileSync(path.join(ROOT, 'frontend/js/tracks.js'), 'utf8');
 const ADMIN_JS = fs.readFileSync(path.join(ROOT, 'frontend/js/short_tracks_admin.js'), 'utf8');
 const SET_HTML = fs.readFileSync(path.join(ROOT, 'frontend/settings.html'), 'utf8');
 const I18N = fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8');
+// icons.js MUSS mitgeladen werden – die echte Seite bindet es als erstes
+// Skript ein, und `tracks.js` ruft `JarvisIcons.trash()` mitten in einem
+// Template-String. Fehlt es, bricht das Rendern hart ab und der Test sieht
+// gar keine Karten (so passiert am 2026-08-19).
+const ICONS = fs.readFileSync(path.join(ROOT, 'frontend/js/icons.js'), 'utf8');
 const APP = fs.readFileSync(path.join(ROOT, 'frontend/js/app.js'), 'utf8');
 const SKILLS = fs.readFileSync(path.join(ROOT, 'frontend/js/skills.js'), 'utf8');
 const SKILLCFG = fs.readFileSync(path.join(ROOT, 'frontend/js/skillcfg.js'), 'utf8');
@@ -189,6 +194,7 @@ function baue(opt) {
     };
     w.confirm = () => (opt.confirm === undefined ? true : opt.confirm);
     // FormData/File brauchen jsdom-eigene Klassen – die gibt es dort.
+    w.eval(ICONS);
     w.eval(I18N);
     w.eval(TR_JS);
     // Die Ruf-Liste zusaetzlich am Fenster ablegen, damit auch Bloecke, die nur
@@ -230,6 +236,17 @@ abschnitt('1. Berechtigungs-Weiche und das Brett');
         'Beschreibung steht auf der Karte');
     pruefe(karte(w, 'bbbbbbbbbbbb').querySelector('.st-badge.is-global') !== null,
         'globale Ablage ist an einer Marke erkennbar (nicht nur an der Farbe)');
+    // MUELLEIMER = LOESCHEN (Regel in js/icons.js). Am 2026-08-19 stand hier ein
+    // × – dauerhaftes Loeschen mit dem Symbol fuer "schliessen".
+    const _del = karte(w, 'aaaaaaaaaaaa').querySelector('[data-act="del"]');
+    pruefe(!!_del && !!_del.querySelector('svg.jv-ico-trash'),
+        'der Loeschen-Knopf fuehrt den Muelleimer, kein ×');
+    pruefe(!!_del && !/[×✕]/.test(_del.textContent || ''), 'und kein Kreuz-Zeichen daneben');
+    // Gegenrichtung: "Aus der Liste nehmen" blendet nur aus (Protokoll bleibt)
+    // und behaelt deshalb das ×.
+    pruefe(!/jv-ico-trash/.test(TR_JS.slice(TR_JS.indexOf('data-jobdel'),
+                                            TR_JS.indexOf('data-jobdel') + 400)),
+        'der Ausblenden-Knopf behaelt das × (kein dauerhaftes Loeschen)');
     pruefe(karte(w, 'cccccccccccc').classList.contains('is-off'),
         'abgeschaltete Ablage ist abgeschwaecht');
     pruefe(karte(w, 'cccccccccccc').querySelector('.st-badge') !== null,
@@ -849,6 +866,7 @@ abschnitt('7. Einstellungs-Reiter: zwei Knoepfe = zwei Teilmengen');
         return gib({ ok: true, bereiche: ['basis', 'wissen'] });
     };
     w.confirm = () => true;
+    w.eval(ICONS);
     w.eval(I18N);
     w.eval(ADMIN_JS);
     pruefe(typeof w.TracksAdmin === 'object', 'TracksAdmin ist verfuegbar');
@@ -939,6 +957,7 @@ abschnitt('7b. Der gemeldete Fehler: im Reiter liess sich kein Haken setzen');
             grenzen: { gleichzeitig: 2, max_datei_mb: 50, max_dateien: 20, max_dumps: 10 },
             global: [], benutzer: [], laufend: 0, wartend: 0 }) });
     };
+    w.eval(ICONS);
     w.eval(I18N);
     w.eval(ADMIN_JS);
     w.TracksAdmin.onShow();
@@ -995,6 +1014,7 @@ abschnitt('7b. Der gemeldete Fehler: im Reiter liess sich kein Haken setzen');
         return Promise.resolve({ ok: false, status: 403,
             json: () => Promise.resolve({ ok: false, error: 'Kein Zugriff' }) });
     };
+    w.eval(ICONS);
     w.eval(I18N);
     w.eval(ADMIN_JS);
     w.TracksAdmin.onShow();

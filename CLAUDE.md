@@ -3960,6 +3960,64 @@ Code: `skills/office/tabellen.py` (neu), Änderungen in `skills/office/main.py`,
   vorhandenen ausdrücklich die `xlsx_*`-Werkzeuge, „**TIPPE TABELLENDATEN NIEMALS AB**", und eine
   eigene Regel für gemeldete Kürzungen. Ein Wächter prüft die AUSSAGE, nicht den Wortlaut.
 
+### Feinschliff: Beschriftungszeile ≠ Datenanfang (gleicher Tag)
+Die erste Fassung nahm „Kopfzeile = Zeile 1" an und ließ das Modell `kopfzeile` mitgeben. Darauf
+ist kein Verlass – und an der echten Datei gemessen wären **9 von 13 Blättern falsch gelesen
+worden**:
+
+| Blatt | Zeile 1 | Zeile 3 | Daten ab |
+|---|---|---|---|
+| 2004, 2016–2018 | **Beschriftung** | Daten | Z2 |
+| 2015 | Nummerncodes **als Text** | **Beschriftung** | Z4 |
+| 2019–2026 | **Beschriftung** | Wiederholung **als FORMEL** (`=B1`) | Z4 |
+
+- **`_kopfzeile_raten()` gibt ein PAAR zurück: (Beschriftungszeile, erste Datenzeile).** Dass das
+  zwei verschiedene Dinge sind, hat erst die echte Datei gezeigt: in 2019–2026 stehen die Namen in
+  Z1, die Daten beginnen aber erst in Z4. Wer beides gleichsetzt, liest entweder `=B1` als
+  Spaltennamen (Z3) oder hält Z2/Z3 für Datenzeilen (Z1).
+- **Der Anker ist der DATENANFANG, nicht die Beschriftung:** gesucht wird die erste überwiegend
+  numerische Zeile, die Beschriftung ist die unterste *brauchbare* Zeile darüber.
+- **Gezählt wird der TYP (`int`/`float`), nicht der Augenschein.** In Blatt 2015 stehen
+  `"00000000083"` als **Text**; wer sie als Zahl zählt, hält Zeile 1 für den Datenanfang und landet
+  wieder bei der falschen Kopfzeile.
+- **`_hat_beschriftungen()` verwirft Formel-Zeilen.** Weil die Mappe mit `data_only=False` geöffnet
+  wird (sonst gehen beim Speichern alle Formeln verloren), steht in Z3 der **Formeltext** `=B1` –
+  als Spaltenname unbrauchbar. Die Erkennung überspringt solche Zeilen und nimmt die echte
+  Beschriftung darüber.
+- **Sentinel `kopfzeile: 0` = automatisch** (bewusst, keine Falsyness-Prüfung: Zeile 0 gibt es
+  nicht, und ein ausdrückliches `kopfzeile: 1` muss die Erkennung überstimmen können).
+  **`xlsx_merge` erkennt beide Seiten GETRENNT** – Master und Slave sind oft verschieden gebaut.
+- **Jede Ausgabe nennt die benutzte Zeile** („Kopfzeile Zeile 1 (automatisch erkannt), Daten ab
+  Zeile 4"), und der „kein Treffer"-Fehler nennt sie ebenfalls. Eine Automatik, deren Ergebnis
+  niemand sieht, ist nicht überprüfbar.
+- **DERSELBE FEHLER WIE BEI `office_read`, eine Ebene höher:** die Warnung „nicht jedes Blatt ist
+  gleich gebaut" stand am ENDE der `xlsx_inspect`-Ausgabe – bei der echten Datei sind das **14.134
+  Zeichen bei einem Deckel von 14.000**, die Warnung wurde also abgeschnitten. Sie steht jetzt mit
+  dem Wegweiser ganz oben; gekürzt wird nur noch Blatt-Detail. **Merkregel: ein Hinweis, der eine
+  Kürzung erklärt, darf nicht an der Stelle stehen, die gekürzt wird.**
+- **Verifiziert:** 146 Prüfungen, 7 Gegenproben greifen einzeln (Erkennung aus → 2 FAIL,
+  Text-Zahlen zählen → 9, obere statt untere Zeile → 1, Formel-Erkennung aus → 6, Sentinel aus → 1,
+  gemeinsame Kopfzeile im Merge → 3, Warnung wieder ans Ende → 2). An der echten Datei: **alle 13
+  Blätter korrekt** aufgelöst, echte Spaltennamen statt `=B1`. **Ende-zu-Ende auf DEV** mit einem
+  Master in der 2019-Bauform: das Modell gibt `kopfzeile` gar nicht an, die Daten landen in Z4–Z7,
+  die Formelzeile Z3 bleibt unangetastet, alle 7 Formeln erhalten.
+- **FALLSTRICK im eigenen Test (zum wiederholten Mal):** der neu eingefügte Kürzungs-Block
+  **überschrieb `r`** vor den nachfolgenden Prüfungen desselben Abschnitts – genau die Falle, die
+  für den Anwesenheits-Test schon in diesem Dokument steht. Ein neuer Block braucht eine EIGENE
+  Variable oder muss den Ausgangsdatensatz neu laden.
+
+### „pandas" stand in einem Text für nicht-technische Benutzer
+Der Bereich `shell` hieß „Shell / Python (Auswertung)" mit dem Hinweis „Auswertung mit
+pandas/openpyxl in der Sandbox" – **zwei Bibliotheksnamen, aus denen niemand ableiten kann, was der
+Haken bewirkt oder wann man ihn braucht.** Diesen Text liest der Admin beim Freischalten UND der
+Benutzer beim Zuschneiden seiner Ablage. Jetzt: „Eigene Rechenschritte (Programm ausführen)" mit
+einer Erklärung in Folgen statt in Technik – was passiert, wann man es braucht, was die Alternative
+ist, und die Empfehlung, es im Zweifel aus zu lassen. `basis` heißt jetzt „Lesen, Tabellen
+bearbeiten + Dokumente erzeugen" und nennt die neuen Tabellen-Werkzeuge.
+**Merkregel: in einem Oberflächentext beschreibt man die WIRKUNG, nicht die eingesetzte Technik** –
+ein Bibliotheksname ist für die Zielgruppe keine Information (gleiche Klasse wie das abgelehnte
+„(PrePrompt)" beim Postfach-Formular).
+
 ### Short Tracks: nur das Endergebnis wird angeboten
 Die fünf Chips waren die Nebenwirkung des Fixes vom selben Tag (`4bec5fb`, `_ergebnis_hook`): seit
 dem läuft `_deliver_docs` über **alle** Werkzeug-Ergebnisse, also wurde jedes Zwischenprodukt zum

@@ -5907,6 +5907,32 @@ wurden (die waren sauber: 0 Commits ueber alle Refs).
   `git fetch` + `git reset --soft origin/master` auf die neue Historie gesetzt (Dateien
   unangetastet) – **ohne diesen Schritt scheitert der naechste Update-Pull** an der Divergenz
   (nachgemessen: `git merge-base --is-ancestor` meldete DIVERGIERT).
+- **NACHSPIEL 2026-08-18: `--soft` war der falsche Reset – beide Server wurden dadurch
+  UNAKTUALISIERBAR.** `git reset --soft` setzt NUR HEAD; Index und Arbeitsbaum bleiben stehen.
+  Damit lag auf beiden Servern der ALTE Baum weiter im Index und galt als „lokale Aenderung":
+  - **ECHT:** drei Eintraege – `.gitignore`, `android/app/build.gradle.kts` (mit dem Kennwort im
+    Klartext) und der **Index-Eintrag des kompromittierten Keystore**. Die Update-Pill stashte
+    sie, zog, und der `stash pop` blieb an `.gitignore` haengen: `UU` **ohne MERGE_HEAD** – das
+    ist der Rueckstand eines Pops, nicht eines Merges (wer nach einem abgebrochenen Merge sucht,
+    findet nichts). Ab da meldete jeder weitere Update-Versuch nur noch diesen Konflikt.
+  - **DEV:** dort war der Index sogar zwei Wochen alt – letzter echter Pull `c432c02` (~04.08.),
+    seither kam alles per `scp`. `git status` meldete 164 Dateien als **geloescht**, die physisch
+    vorhanden waren, und `git diff HEAD` zeigte 43.589 geloeschte Zeilen. **Nicht der Arbeitsbaum
+    war kaputt, nur der Index** – `git diff HEAD` vergleicht ueber den Index, eine Datei ohne
+    Index-Eintrag sieht darin wie geloescht aus, obwohl sie danebenliegt (sie taucht zusaetzlich
+    als `??` auf, was man beim Filtern von untracked leicht uebersieht).
+  - **Reparatur:** `git reset origin/master` (mixed) heilt HEAD UND Index, ohne den Arbeitsbaum
+    anzufassen – erst danach zeigt `git status` die WIRKLICHEN Abweichungen. Auf ECHT genuegten
+    `git checkout HEAD -- .gitignore` (die Stash-Seite des Konflikts war leer) und
+    `git reset HEAD -- android/jarvis-release.jks`.
+  - **FALLSTRICK: `git rm --cached` scheitert bei sparse-checkout.** Auf ECHT ist `/android/`
+    ausgeblendet, die Datei lag also nur im Index (`S`-Bit), nicht im Arbeitsbaum; git lehnt mit
+    „ausserhalb Ihrer partiellen Checkout-Definition" ab und wollte `--sparse`.
+    `git reset -- <pfad>` kennt diese Schranke nicht und ist hier der richtige Weg.
+  - **Merkregel: nach einem Historie-Rewrite gehoert der INDEX geprueft, nicht nur HEAD.**
+    Richtig ist `git reset --hard <stand>` (nach Sicherung von `git diff origin/master`) oder
+    mindestens ein Blick auf `git status` – ein `--soft` laesst ausgerechnet die Dateien als
+    „lokale Aenderung" stehen, die man gerade aus der Historie entfernt hat.
 - **⚠ FOLGE FUER INSTALLATIONEN:** ein Signaturwechsel ist kein Update. Sideload-Nutzer muessen
   deinstallieren und neu installieren; ueber Play Store laeuft es ueber App Signing.
 - **Der neue Keystore ist NICHT im Repo und NICHT auf den Servern** – er liegt nur im lokalen

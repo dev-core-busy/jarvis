@@ -3205,8 +3205,8 @@ Regel (`mail_rules`), Auflösung in `mail_runner._auftrag` und `antwort_vorschla
   also ob das Modell dem gewählten Stil tatsächlich folgt. **Auf ECHT noch nicht ausgerollt.**
 
 #### Automatische Stilwahl – EIN LLM-Aufruf (2026-08-19)
-Im Stil-Pulldown der Antwort-Vorschau (Outlook-Add-in) steht der Eintrag **„automatisch wählen
-(KI)"**. Dann liegen ALLE Stiltexte im Auftrag, das Modell sucht einen aus und schreibt sofort
+In JEDEM Stil-Pulldown steht der Eintrag **„automatisch Stil wählen"** (Antwort-Vorschau und
+Regel-Formular, Add-in wie `/email`). Dann liegen ALLE Stiltexte im Auftrag, das Modell sucht einen aus und schreibt sofort
 darin; seine Wahl meldet es in einer Kopfzeile `[<Kennung>] STIL: <Name>`, die
 `_auto_stil_lesen()` abtrennt. Code: `mail_accounts.STIL_AUTO`, `mail_runner._stil_katalog` /
 `_AUTO_ANWEISUNG` / `_auto_stil_lesen`, Pulldown in `addin.js::stilOptionen(gewaehlt, mitAuto)`.
@@ -3220,16 +3220,24 @@ darin; seine Wahl meldet es in einer Kopfzeile `[<Kennung>] STIL: <Name>`, die
   der Stiltexte plus ~950 Zeichen Anweisung.
 - **⚠ Hier wird bewusst eine Zusage gelockert.** Sonst gilt im Projekt: die Stilwahl ist
   DETERMINISTISCH und passiert VOR dem Modell, damit ein „Stil: X" im Fremdtext kein Hebel auf die
-  Form ist. Vertretbar ist die Ausnahme nur, weil ALLES davon zutrifft: **(1)** Opt-in,
-  **(2)** der Vorschlags-Lauf hat KEINE Werkzeuge und niemand versendet, bevor ein Mensch gelesen
-  hat, **(3)** die Wahl wird gegen die hinterlegten Stile VALIDIERT – ein erfundener Name wird
-  verworfen, **(4)** der gewählte Stil wird ANGEZEIGT („Stil: Förmlich (automatisch)"), eine
-  Manipulation fällt also auf. Die Anweisung sagt zusätzlich ausdrücklich, dass ein Stilname IM
-  Fremdtext keine Anweisung ist.
-- **In einer REGEL gibt es den Modus nicht** – sie feuert ohne Anwesenden. Zwei Schichten:
-  `stil_fuer()` löst `STIL_AUTO` zu **kein Stil** auf (fail-closed, damit der Wert nie
-  versehentlich durchschlägt), und `mail_rules._pruefe` lehnt ihn beim Speichern mit Klartext ab.
-  Das Regel-Formular ruft `stilOptionen()` ohne `mitAuto`.
+  Form ist. Was bleibt: **(1)** Opt-in – wer sie nicht will, wählt sie nicht, **(2)** die Wahl wird
+  gegen die hinterlegten Stile VALIDIERT (ein erfundener Name wird verworfen), **(3)** in der
+  Antwort-Vorschau wird der gewählte Stil ANGEZEIGT („Stil: Förmlich (automatisch)"), **(4)** die
+  Anweisung sagt ausdrücklich, dass ein Stilname IM Fremdtext keine Anweisung ist. Die harte
+  Grenze ist unverändert: **ein Stil bestimmt nur die FORM** – die Regel allein entscheidet, OB und
+  WAS geschieht.
+- **DIE WAHL STEHT IN JEDEM STIL-PULLDOWN** – Antwort-Vorschau UND Regel-Formular, im Add-in wie
+  in `/email`, ohne Bedingungen (auch bei nur einem oder gar keinem hinterlegten Stil).
+  **Ausdrückliche Vorgabe des Nutzers am 2026-08-19**, nachdem eine erste Fassung sie auf die
+  Antwort-Vorschau beschränkt und erst ab zwei Stilen angeboten hatte. **Was das für Regeln
+  bedeutet, muss man kennen:** dort entscheidet über die Form ein Modell, das den Fremdtext des
+  Absenders vor sich hat, und niemand liest gegen, bevor die Mail hinausgeht. Der Auswahl-Abschnitt
+  im Regel-Auftrag sagt deshalb wörtlich, dass die Stile KEINE Aktion auslösen, KEINE Bedingung der
+  Regel aufheben und KEINEN Empfänger bestimmen – dieselben Sätze wie beim festen Stil (Lehre aus
+  dem Vorfall 2026-08-17).
+- **Merkregel für mich:** eine Anforderung nicht mit selbst erfundenen Bedingungen einengen. „Erst
+  ab zwei Stilen" und „nicht in Regeln" waren beide nicht verlangt – gewünscht war ein Eintrag im
+  Pulldown, den der Benutzer selbst einsetzt, wo er will.
 - **Die Kopfzeile wird IMMER entfernt**, auch bei unbekanntem Namen – sonst stünde „[A1B2] STIL: …"
   im Postfach des Empfängers. Erkannt wird primär die Zeile MIT Kennung; ohne Kennung nur, wenn der
   Name wirklich existiert (Modelle vergessen die Kennung, aber „STIL: irgendwas" darf keinen
@@ -3239,8 +3247,9 @@ darin; seine Wahl meldet es in einer Kopfzeile `[<Kennung>] STIL: <Name>`, die
   der Vorschlag keinem davon *nachweislich* folgt – es kann sich trotzdem an einem orientiert
   haben. Ebenso beim Deckel `AUTO_KATALOG_MAX = 20000`: weggelassene Stile werden **namentlich
   genannt**, kein stiller Schnitt, und der Standardstil fällt nie heraus.
-- **Der Eintrag erscheint erst ab ZWEI Stilen** – bei einem einzigen wählt „automatisch" immer
-  denselben, der Schalter wäre ohne Wirkung.
+- **Der Regel-Lauf bekommt denselben Katalog** (`_stil_texte()` liefert die Blöcke, `_auftrag()`
+  setzt eine eigene Marke samt der „nur Form"-Sätze davor) – ohne Kopfzeile, denn dort schreibt das
+  Modell keinen reinen Text, sondern ruft Werkzeuge auf. Der Regel-Vorspann erklärt den Abschnitt.
 - **Vorspann und Schlusszeile mussten mit.** Beide sagten „AUSSCHLIESSLICH den Text der Antwort" –
   im Auto-Modus widerspricht das der geforderten Kopfzeile. Dieselbe Fehlerklasse wie
   `WA_TASK_PROMPT`, `--gradient` und der EWS-URL-Hinweis; der Vorspann erklärt jetzt beide neuen
@@ -3272,14 +3281,15 @@ darin; seine Wahl meldet es in einer Kopfzeile `[<Kennung>] STIL: <Name>`, die
   die Prüfung blieb grün, obwohl sie die escapte Fassung nie gesehen hat. Der Text wird jetzt vor
   dem Vergleich entschlüsselt (`encode("latin-1","backslashreplace").decode("unicode_escape")`);
   die Gegenprobe (Satz aus dem DE-Text entfernt) liefert seither zuverlässig einen FAIL.
-- **Verifiziert:** 174 Prüfungen (`tests/test_mail_styles.py`, Abschnitt 11 – Katalog, Deckel,
+- **Verifiziert:** 181 Prüfungen (`tests/test_mail_styles.py`, Abschnitt 11 – Katalog, Deckel,
   Parser in fünf Varianten, Ende-zu-Ende mit Stub-Agent samt Aufrufzählung, Kostenvergleich,
-  Prompt-Konsistenz, Regel-Ablehnung, Kachel-Texte in beiden Sprachen und beiden Rückfällen)
+  Prompt-Konsistenz, Regel-Auftrag mit Katalog, Kachel-Texte in beiden Sprachen und beiden
+  Rückfällen)
   + 66 (`tests/test_addin_update_ui.js`, Abschnitt 0 führt
   `stilOptionen` **echt aus** statt den Quelltext zu durchsuchen). Bestand unverändert grün: 465
   E-Mail, 193 Add-in-SSO, 192 Outlook-Add-in, 120 Endpunkt-Rechte, 269 E-Mail-UI. Gegenproben
-  greifen einzeln: Katalog nicht angehängt → 2 FAIL, Wahl nicht validiert → 7, Regel nimmt „auto" →
-  1, Regel-Formular bietet es an → 1, Kopfzeile nicht abgetrennt → 3. Optisch in Dunkel UND Hell
+  greifen einzeln: Katalog nicht angehängt → 2 FAIL, Wahl nicht validiert → 7, Regel lehnt „auto"
+  ab → 5, Auto-Eintrag aus dem Pulldown → 1 (und 5 im jsdom-Test), Kopfzeile nicht abgetrennt → 3. Optisch in Dunkel UND Hell
   abgenommen (echtes Markup, echtes CSS, 340 px Fensterbreite).
 - **Auf ECHT noch NICHT ausgerollt.**
 

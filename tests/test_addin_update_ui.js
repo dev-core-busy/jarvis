@@ -115,30 +115,29 @@ abschnitt('0. Stil-Pulldown: die automatische Wahl wird ECHT ausgefuehrt');
     const w0 = dom0.window;
     const von = ADDINJS.indexOf('function stilOptionen(');
     const src = ADDINJS.slice(von, von + ADDINJS.slice(von).indexOf('\n    }') + 6);
-    const opt = (stile, gewaehlt, mitAuto) => {
+    const opt = (stile, gewaehlt) => {
         w0.eval('var _stile = ' + JSON.stringify(stile) + ';' +
                 'function esc(s){return String(s==null?"":s);}' +
                 'function T(k,f){return f;}' + src);
-        return w0.eval('stilOptionen(' + JSON.stringify(gewaehlt || '') + ',' +
-                       (mitAuto ? 'true' : 'false') + ')');
+        return w0.eval('stilOptionen(' + JSON.stringify(gewaehlt || '') + ')');
     };
-    const drei = [{ id: 'a', name: 'Foermlich', standard: true },
+    const zwei = [{ id: 'a', name: 'Foermlich', standard: true },
                   { id: 'b', name: 'Locker', standard: false }];
-    pruefe(/value="auto"/.test(opt(drei, '', true)),
-        'mit mitAuto=true erscheint der Eintrag "auto"');
-    pruefe(!/value="auto"/.test(opt(drei, '', false)),
-        'ohne das Flag NICHT – das Regel-Formular bekommt ihn nie');
-    pruefe(!/value="auto"/.test(opt([drei[0]], '', true)),
-        'bei nur EINEM Stil nicht (er waere ein Schalter ohne Wirkung)');
-    pruefe(!/value="auto"/.test(opt([], '', true)), 'ohne Stile nicht');
-    pruefe(/value="auto"[^>]*selected/.test(opt(drei, 'auto', true)),
+    // KEINE Bedingungen: der Eintrag steht in jedem Stil-Pulldown, unabhaengig
+    // von der Anzahl der Stile und unabhaengig davon, wer ihn zeichnet
+    // (Antwort-Vorschau wie Regel-Formular).
+    pruefe(/value="auto"/.test(opt(zwei, '')), 'der Eintrag "auto" ist da');
+    pruefe(/value="auto"/.test(opt([zwei[0]], '')), 'auch bei nur EINEM Stil');
+    pruefe(/value="auto"/.test(opt([], '')), 'auch ohne hinterlegte Stile');
+    pruefe(/value="auto"[^>]*selected/.test(opt(zwei, 'auto')),
         'eine getroffene Auto-Wahl bleibt beim Neuzeichnen ausgewaehlt');
-    pruefe(!/selected/.test(opt(drei, 'auto', true).split('value="auto"')[0]),
+    pruefe(!/selected/.test(opt(zwei, 'auto').split('value="auto"')[0]),
         'dann ist NICHT zusaetzlich der Standard vorgewaehlt');
-    const h = opt(drei, '', true);
+    const h = opt(zwei, '');
     pruefe(h.indexOf('value="auto"') > h.indexOf('Foermlich') &&
            h.indexOf('value="auto"') < h.indexOf('Locker'),
         'der Eintrag steht direkt hinter dem Standard, vor den uebrigen Stilen');
+    pruefe(!/mitAuto/.test(ADDINJS), 'keine Bedingung mehr im Quelltext');
     w0.close();
 }
 

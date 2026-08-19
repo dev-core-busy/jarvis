@@ -493,6 +493,11 @@
         var h = '<option value=""' + (gewaehlt ? '' : ' selected') + '>' + (std
             ? esc(std.name) + ' *'
             : esc(T('mail.style_opt_none', 'kein Stil'))) + '</option>';
+        // „automatisch Stil waehlen": das Modell bekommt alle Stile und sucht
+        // sich einen aus. Steht auch hier im Regel-Formular zur Verfuegung
+        // (Vorgabe des Nutzers, 2026-08-19).
+        h += '<option value="auto"' + (gewaehlt === 'auto' ? ' selected' : '') +
+            '>' + esc(T('mail.style_opt_auto', 'automatisch Stil wählen')) + '</option>';
         // Der Standard wird NICHT zusaetzlich mit eigener Kennung gelistet – er
         // waere sonst zweimal in der Liste, und genau das war das Problem.
         h += _stile.filter(function (e) { return !e.standard; }).map(function (e) {

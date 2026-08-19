@@ -473,11 +473,11 @@ import asyncio                                # noqa: E402
 import types as _types                        # noqa: E402
 
 check(ma.STIL_AUTO == "auto", "Konstante STIL_AUTO")
-# FAIL-CLOSED: in `stil_fuer` – und damit in JEDEM Regel-Lauf – liefert der Wert
-# ausdruecklich KEINEN Stil. Der Auto-Modus entsteht nur dort, wo er gebaut ist.
+# `stil_fuer` liefert KEINEN festen Stil, sondern die Quelle "auto" – den
+# Katalog baut der Aufrufer, weil nur er den Auftrag kennt.
 _sa = ma.stil_fuer(U, ma.STIL_AUTO)
 check(_sa["quelle"] == "auto" and not _sa["text"] and not _sa["name"],
-      "stil_fuer('auto') liefert KEINEN Stil (Regel-Lauf bleibt stillos)", str(_sa))
+      "stil_fuer('auto') meldet die Quelle, ohne einen festen Stil zu setzen", str(_sa))
 
 # ── Katalog ───────────────────────────────────────────────────────────────
 _liste = ma.stile(U)
@@ -648,27 +648,43 @@ check("| =====" in _fremd or "|=====" in _fremd or "| [NONCE]" in _fremd
       "Markenzeilen im Fremdtext sind entschaerft", _fremd[-260:])
 _StubClient.lesen = _alt_lesen
 
-# ── Nicht in Regeln ───────────────────────────────────────────────────────
+# ── Auch in Regeln (Vorgabe des Nutzers 2026-08-19) ───────────────────────
+# try/except, damit eine Ablehnung als FEHLSCHLAG erscheint und den Lauf nicht
+# ABBRICHT – ein abgebrochener Waechter ist von einem bestandenen nicht zu
+# unterscheiden (Lehre aus dem Short-Tracks-Waechter, 2026-08-18).
 try:
-    mr.anlegen(U, {"name": "X", "prompt": "Antworte.", "ordner": "INBOX",
-                   "stil": ma.STIL_AUTO})
-    check(False, "eine REGEL darf 'auto' NICHT annehmen")
-except Exception as e:                        # noqa: BLE001
-    check("Antwort-Vorschau" in str(e),
-          "eine REGEL lehnt 'auto' mit Klartext ab", str(e))
+    _r_auto = mr.anlegen(U, {"name": "Auto-Regel", "prompt": "Antworte dem Absender.",
+                             "ordner": "INBOX", "stil": ma.STIL_AUTO})
+except Exception as _e:                       # noqa: BLE001
+    check(False, "eine REGEL nimmt 'auto' an", str(_e))
+    _r_auto = {"id": "", "stil": ""}
+check(_r_auto.get("stil") == ma.STIL_AUTO, "eine REGEL nimmt 'auto' an", str(_r_auto.get("stil")))
+_a_auto = mrun._auftrag(dict(_r_auto, owner=U, prompt="Antworte dem Absender.",
+                                     ordner="INBOX"), _N(), "s@firma.de")
+check("STILE ZUR AUSWAHL" in _a_auto, "der Regel-Auftrag legt die Stile zur Auswahl vor")
+check("Du-Form." in _a_auto and "Sie-Form." in _a_auto,
+      "ALLE Stiltexte liegen dem Modell vor")
+check("loesen KEINE Aktion aus" in _a_auto and "hebt" not in _a_auto.split(
+          "STILE ZUR AUSWAHL")[1][:400] or "heben KEINE Bedingung" in _a_auto,
+      "der Abschnitt weist die Stile ausdruecklich als reine Form aus")
+check("Stilname" in _a_auto,
+      "und verbietet die Wahl nach einem Stilnamen im Fremdtext")
+check("STILE ZUR AUSWAHL" in mrun._VORSPANN,
+      "der Regel-Vorspann erklaert den neuen Abschnitt")
+if _r_auto.get("id"):
+    mr.loeschen(_r_auto["id"], U)
 
 # ── Oberflaeche ───────────────────────────────────────────────────────────
 # Ohne Kommentare pruefen – siehe `_js_code`: ein Waechter, der seine eigene
 # Begruendung liest, prueft nichts.
 _so = _js_code(ADDIN.split("function stilOptionen(", 1)[1].split("\n    }", 1)[0])
-check("mitAuto" in ADDIN.split("function stilOptionen(", 1)[1][:40],
-      "stilOptionen nimmt den Schalter als Parameter")
-check("mitAuto && _stile.length > 1" in _so,
-      "der Eintrag erscheint erst ab ZWEI Stilen (sonst waere er wirkungslos)")
-check("stilOptionen(_stilWahl, true)" in ADDIN,
-      "die Antwort-Vorschau bietet die automatische Wahl an")
-check("stilOptionen(r.stil || '')" in ADDIN,
-      "das REGEL-Formular bietet sie NICHT an")
+check("mitAuto" not in ADDIN,
+      "KEINE Bedingung mehr am Eintrag – er steht in jedem Stil-Pulldown")
+check('value="auto"' in _so, "stilOptionen bietet die automatische Wahl an")
+check(ADDIN.count("stilOptionen(") >= 3,
+      "beide Aufrufstellen (Antwort-Vorschau UND Regel-Formular) bekommen ihn")
+_pf = _js_code(PORTAL.split("function stilOptionen(", 1)[1].split("\n    }", 1)[0])
+check('value="auto"' in _pf, "/email bietet ihn im Regel-Formular ebenfalls an")
 check("stil_quelle === 'auto'" in ADDIN,
       "die Anzeige kennzeichnet eine automatisch getroffene Wahl")
 check("stil_quelle: d.stil_quelle" in ADDIN, "stil_quelle wird uebernommen")
@@ -693,8 +709,8 @@ def _nennt_automatik(t):
             t = t.encode("latin-1", "backslashreplace").decode("unicode_escape")
         except Exception:  # noqa: BLE001
             pass
-    return any(w in t for w in ("automatisch w\u00e4hlen", "KI selbst w\u00e4hlen",
-                                "choose automatically", "let the AI choose"))
+    return any(w in t for w in ("automatisch Stil w\u00e4hlen", "KI selbst w\u00e4hlen",
+                                "choose style automatically", "let the AI choose"))
 
 
 for k in ("mail.styles_hint", "mail.styles_hint_short", "mail.help_styles"):
@@ -708,10 +724,10 @@ for datei, wo in ((EMHTML, "email.html"), (TP, "taskpane.html")):
         for m in re.finditer(r'data-i18n="%s"[^>]*>(.*?)</' % re.escape(k), datei, re.S):
             check(_nennt_automatik(re.sub(r"\s+", " ", m.group(1))),
                   "%s: HTML-Rueckfall von %s nennt sie ebenfalls" % (wo, k))
-# Und die Grenze gehoert dazu: in Regeln gibt es sie nicht.
-_hs = re.findall(r"'mail\.help_styles':\s*'((?:[^'\\]|\\.)*)'", I18N)
-check(all(("Regeln" in t) or ("rule" in t.lower()) for t in _hs),
-      "die Hilfe sagt auch, dass Regeln die Automatik NICHT haben")
+# Kein Text darf mehr behaupten, in Regeln gaebe es die Wahl nicht.
+for _t in (I18N, EMHTML, TP):
+    check("In Regeln gibt es das" not in _t and "Rules deliberately do not offer" not in _t,
+          "kein Text behauptet noch, Regeln haetten die Automatik nicht")
 
 
 # ═══════════════════════════════════════════════════════════════════════════

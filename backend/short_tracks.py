@@ -110,6 +110,15 @@ BASIS_WERKZEUGE = (
     "office_read", "filesystem",
     "office_create_word", "office_create_excel", "office_create_powerpoint",
     "office_to_pdf", "office_template_info", "create_chart",
+    # Tabellen ANSEHEN und BEARBEITEN statt neu aufbauen. Gehoeren in den
+    # Basis-Bereich und nicht hinter eine eigene Freigabe: sie sind der
+    # verlaessliche Weg fuer jede Excel-Aufgabe (Vorfall 2026-08-19 – ohne sie
+    # bleibt dem Modell nur das Abtippen aller Daten durch das Sprachmodell),
+    # und sie koennen nichts, was `office_read`/`office_create_excel` nicht
+    # auch koennten: dieselben Dateien lesen, eine neue Datei in
+    # data/documents schreiben. Die Pfad-Freigabe prueft der Dispatch ueber
+    # das Attribut `pfad_parameter`.
+    "xlsx_inspect", "xlsx_read_range", "xlsx_merge", "xlsx_edit",
 )
 
 BEREICHE: dict[str, dict] = {

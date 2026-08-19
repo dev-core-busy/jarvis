@@ -833,8 +833,11 @@ Regeln:
     OEFFNE NIEMALS einen Browser auf dem Desktop, um ein Bild zu zeigen (kein browser_control, kein desktop_*). Gib die vom Tool zurueckgegebene Markdown-Bildreferenz ![..](url) UNVERAENDERT in deiner Antwort aus.
 
 16. OFFICE-DOKUMENTE (Word/Excel/PowerPoint/PDF):
-    - Fuer EINFACHE Dokumente (Text, Tabellen, Bullet-Folien) die office_*-Tools nutzen: office_create_word / office_create_excel / office_create_powerpoint, PDF-Export via office_to_pdf. Diese Werkzeuge laufen IM BACKEND und sind damit unabhaengig von Python-Modulen in der Shell – sie sind der verlaessliche Weg. Eine angeforderte EXCEL-Tabelle also mit office_create_excel erzeugen.
-    - Eine gewuenschte Excel-Datei NIEMALS per openpyxl/pandas selbst zusammenbauen und NIEMALS ersatzweise als CSV liefern – dafuer ist office_create_excel da.
+    - Fuer EINFACHE Dokumente (Text, Tabellen, Bullet-Folien) die office_*-Tools nutzen: office_create_word / office_create_excel / office_create_powerpoint, PDF-Export via office_to_pdf. Diese Werkzeuge laufen IM BACKEND und sind damit unabhaengig von Python-Modulen in der Shell – sie sind der verlaessliche Weg. Eine NEU anzulegende EXCEL-Tabelle also mit office_create_excel erzeugen.
+    - Eine gewuenschte Excel-Datei NIEMALS ersatzweise als CSV liefern – dafuer ist office_create_excel da.
+    - LIEGT DIE TABELLE SCHON VOR (Anhang, abgelegte Datei, frueheres Ergebnis), ist office_create_excel der FALSCHE Weg: es baut eine neue Datei aus Werten, die DU tippst – damit gehen Formeln, Spaltenbreiten und Formate verloren, und bei mehr als ein paar hundert Zellen wird das Ergebnis zwangslaeufig unvollstaendig. Nimm die Tabellen-Werkzeuge: xlsx_inspect (Aufbau, Kopfzeilen, Beispielzeilen – IMMER der erste Schritt), xlsx_read_range (begrenzter Ausschnitt), xlsx_merge (zwei Tabellen ueber Schluesselspalten zusammenfuehren), xlsx_edit (einzelne Zellen schreiben). Sie arbeiten auf der Originaldatei; die Daten laufen nicht durch dich.
+    - TIPPE TABELLENDATEN NIEMALS AB. Wenn du Werte aus einer Datei in eine andere uebertragen sollst, benenne die Spalten und ueberlass das Uebertragen xlsx_merge. Alles, was du selbst abschreibst, ist auf ein paar Zeilen begrenzt und fehleranfaellig.
+    - MELDET EIN WERKZEUG EINE KUERZUNG ("GEKUERZT: x von y Zeichen") oder sagt es, die Tabelle sei zu gross: dann hast du den Rest NICHT gesehen. Ziehe daraus keine Schluesse ueber die Gesamtheit und liefere kein Ergebnis, das so tut als kenntest du alle Daten – hole den fehlenden Teil gezielt nach oder sage dem Benutzer, was du nicht pruefen konntest.
     - PRAESENTATIONEN IMMER ueber office_create_powerpoint: es benutzt die HAUSVORLAGE (16:9, echte Masterfolien, Farben/Schrift aus dem Branding). Schicke KEINE Farb-, Schrift- oder Groessenangaben mit – die kommen aus der Vorlage, eigene Werte brechen das Design beim Bearbeiten. Nutze stattdessen die inhaltlichen Angaben: 'layout' je Folie ('inhalt', 'abschnitt' fuer Kapiteltrenner, 'zwei' fuer zwei Spalten, 'nurtitel'), '> ' fuer Unterpunkte und 'notes' fuer Sprechernotizen. Welche Layouts eine Vorlage anbietet, zeigt office_template_info. Baue eine Praesentation NICHT von Hand mit python-pptx zusammen – damit verlierst du die Masterfolien und das Ergebnis sieht nach Standard-Office aus.
     - Fuer KOMPLEXE Inhalte, die diese Tools nicht abdecken (z.B. Diagramme/Schemata, Boxen mit Verbindungspfeilen, Formen, individuelles Layout), MUSST du python-pptx/python-docx/openpyxl via shell_execute verwenden (z.B. Folien mit add_shape(MSO_SHAPE.RECTANGLE) + Connectors). Diese Pakete sind auf einem eingerichteten Server vorhanden (python-pptx, python-docx, openpyxl) und ueber shell_execute nutzbar – auch fuer eingeschraenkte Benutzer im Sandbox-Modus. Lehne eine grafische Darstellung also nicht vorschnell mit der Begruendung ab, es sei nichts installiert. Eine Nachinstallation (pip) ist weder noetig noch moeglich.
     - DATEN-CHARTS/DIAGRAMME (Balken, Linien, Torten, Streu-, Histogramm etc. aus Zahlen/Tabellen): rendere ein PNG mit matplotlib bzw. seaborn via shell_execute nach /tmp (z.B. plt.savefig("/tmp/chart.png", dpi=150)). matplotlib und seaborn sind auf einem eingerichteten Server vorhanden und funktionieren headless (Backend Agg wird automatisch gesetzt) – auch im Sandbox-Modus; fuer Datenanalyse stehen pandas und numpy bereit. Das erzeugte PNG wird automatisch inline im Chat angezeigt. Behaupte das Fehlen dieser Pakete also nicht ungeprueft. Unterschied: matplotlib = gerenderte Datencharts; python-pptx-Formen = schematische Diagramme in einer Office-Datei.
@@ -1303,7 +1306,9 @@ KRITISCH – Autonomie-Regeln:
             if shell_da:
                 teile.append(
                     "Die OFFICE-WERKZEUGE (office_create_word/_excel/_powerpoint, "
-                    "office_read, office_to_pdf, office_template_info) sind auf "
+                    "office_read, office_to_pdf, office_template_info) und die "
+                    "TABELLEN-WERKZEUGE (xlsx_inspect/_read_range/_merge/_edit) "
+                    "sind auf "
                     "diesem System nicht verfuegbar (Skill nicht aktiv). Erzeuge "
                     "Dokumente deshalb IMMER ueber den in Punkt 16 beschriebenen "
                     "Weg mit python-docx/openpyxl/python-pptx via shell_execute "
@@ -3050,6 +3055,34 @@ KRITISCH – Autonomie-Regeln:
                             # Gleiche Abwaegung wie bei filesystem: ein geratener
                             # Pfad ist keine Attacke, ein Secret-/System-Ziel schon.
                             _viol_soft = not _sbx.fs_target_sensitive(_spath)
+                elif getattr(self.tools_map.get(name), "pfad_parameter", None):
+                    # GENERISCHE Pfad-Freigabe fuer Werkzeuge, die Dateien ueber
+                    # einen Pfad-Parameter anfassen (xlsx_inspect/_read_range/
+                    # _merge/_edit). Das Werkzeug DEKLARIERT seine Pfadfelder
+                    # selbst (`pfad_parameter`), der Dispatch prueft sie – damit
+                    # ist ein kuenftiges Tabellen-Werkzeug automatisch
+                    # abgesichert, statt hier nachgetragen werden zu muessen
+                    # (dieselbe Lehre wie bei den MCP-Gates: eine Regel erwischt
+                    # neue Quellen von selbst, eine Aufzaehlung nie).
+                    #
+                    # Ohne diese Pruefung waeren sie die bequemste Umgehung des
+                    # Pfad-Confinements UND der Eigentuemer-Schranke in
+                    # data/documents – ein xlsx_read_range auf den Anhang eines
+                    # fremden Benutzers.
+                    for _pf in getattr(self.tools_map.get(name), "pfad_parameter", ()):
+                        _pv = str(args.get(_pf) or "")
+                        if not _pv:
+                            continue
+                        _ok, _why = _sbx.authorize_fs("read", _pv)
+                        if not _ok:
+                            print(f"[AGENT] BLOCKED {name} {_pf}={_pv!r} fuer '{_uname}': {_why}", flush=True)
+                            result = f"Zugriff verweigert: {_why}."
+                            _ldap_blocked = True
+                            _viol = ("fs-deny", f"{name} {_pv}")
+                            # Gleiche Abwaegung wie bei filesystem/create_chart:
+                            # ein geratener Pfad ist keine Attacke.
+                            _viol_soft = not _sbx.fs_target_sensitive(_pv)
+                            break
                 elif name == "shell_execute":
                     _cmd = args.get("command", "")
                     # Heredoc-Koerper (z.B. eingebetteter Python-Code) NICHT als Shell-

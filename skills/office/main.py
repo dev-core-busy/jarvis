@@ -230,6 +230,60 @@ class CreateExcelTool(BaseTool):
                        rows=None, sheets=None, **kwargs) -> str:
         if not filename:
             return "Fehler: 'filename' ist Pflicht."
+
+        # ── LAUTER Fehlschlag statt leerer Datei (Vorfall ECHT 2026-08-19) ──
+        # Das Modell rief dieses Werkzeug mit dem Parameter " sheets" auf – mit
+        # FUEHRENDEM LEERZEICHEN. Der landete in **kwargs, wurde wortlos
+        # verworfen, `sheets`/`rows`/`headers` blieben None, es wurde eine LEERE
+        # Mappe gespeichert – und die Antwort lautete "✅ erstellt". Der Benutzer
+        # bekam eine 0-Zeilen-Datei als Ergebnis angeboten, und das Modell hatte
+        # keine Chance, den Fehler zu bemerken.
+        unbekannt = [k for k in kwargs if not k.startswith("_")]
+        if unbekannt:
+            return ("Fehler: unbekannte Parameter " + ", ".join(repr(k) for k in unbekannt)
+                    + ". Achte auf die genaue Schreibweise (auch auf fuehrende "
+                      "Leerzeichen im Parameternamen). Erlaubt sind: filename, "
+                      "sheet_name, headers, rows, sheets.")
+
+        # `sheets` als JSON-STRING statt als Objekt ist der zweite Weg in
+        # dieselbe leere Datei: `isinstance(sheets, dict)` war False, der Code
+        # fiel in den Einzelblatt-Zweig, und dort war ebenfalls nichts zu
+        # schreiben. Tolerant parsen statt still verwerfen.
+        if isinstance(sheets, str) and sheets.strip():
+            try:
+                sheets = json.loads(sheets)
+            except Exception:
+                return ("Fehler: 'sheets' kam als Text an und ist kein gueltiges "
+                        "JSON. Uebergib ein Objekt "
+                        "{\"Blattname\": {\"headers\": [...], \"rows\": [[...]]}}.")
+        if isinstance(rows, str) and rows.strip():
+            try:
+                rows = json.loads(rows)
+            except Exception:
+                return ("Fehler: 'rows' kam als Text an und ist kein gueltiges "
+                        "JSON. Uebergib eine 2D-Liste [[...], [...]].")
+
+        if sheets is not None and not isinstance(sheets, dict):
+            return (f"Fehler: 'sheets' muss ein Objekt sein "
+                    f"(Blattname -> {{headers, rows}}), war aber "
+                    f"{type(sheets).__name__}.")
+        if rows is not None and not isinstance(rows, (list, tuple)):
+            return (f"Fehler: 'rows' muss eine 2D-Liste sein, war aber "
+                    f"{type(rows).__name__}.")
+
+        # Nichts zu schreiben = Fehler. Eine leere Tabelle ist niemals das,
+        # was jemand bestellt hat.
+        hat_inhalt = bool(
+            (isinstance(sheets, dict) and any(
+                (v or {}).get("headers") or (v or {}).get("rows")
+                for v in sheets.values() if isinstance(v, dict)))
+            or headers or rows
+        )
+        if not hat_inhalt:
+            return ("Fehler: es wurden keine Daten uebergeben – es wurde KEINE "
+                    "Datei erzeugt. Gib entweder 'rows' (mit optionalem "
+                    "'headers') fuer ein Blatt an oder 'sheets' fuer mehrere.")
+
         try:
             from openpyxl import Workbook
         except Exception as e:
@@ -889,7 +943,58 @@ class TemplateInfoTool(BaseTool):
 # ─────────────────────────────────────────────────────────────────────────
 # Lesen
 # ─────────────────────────────────────────────────────────────────────────
+# Ab dieser Textmenge ist eine Tabelle ueber office_read nicht mehr sinnvoll
+# lesbar: der Agent kappt Werkzeug-Ergebnisse, und was ankaeme, waere ein
+# Bruchteil, den das Modell fuer das Ganze haelt. Statt eines Fragments gibt es
+# dann den STRUKTUR-Ueberblick und den Verweis auf die Tabellen-Werkzeuge.
+_XLSX_TEXT_MAX = 18000
+
+
+def _xlsx_zu_gross(p: Path, wb, blocks: list) -> str:
+    """Antwort fuer eine Tabelle, die als Text nicht sinnvoll uebergeben werden kann.
+
+    DAS IST KEIN FEHLER, SONDERN DIE RICHTIGE ANTWORT. Im Vorfall vom
+    2026-08-19 lieferte office_read fuer eine Mappe mit 362.195 Zellen ein
+    0,4-%-Fragment; das Modell baute daraus eine "zusammengefuehrte" Tabelle
+    mit zwei Zeilen. Ein ehrlicher Verweis auf das passende Werkzeug ist jeder
+    Teilantwort ueberlegen.
+    """
+    zeilen = [f"Diese Tabelle ist zu gross, um sie als Text zu uebergeben "
+              f"({sum(len(b) for b in blocks)}+ Zeichen). "
+              f"Es wurde NICHTS davon gelesen – hier nur der Aufbau:", ""]
+    try:
+        for ws in wb.worksheets:
+            zeilen.append(f"  Blatt '{ws.title}': {ws.max_row or 0} Zeilen "
+                          f"x {ws.max_column or 0} Spalten")
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        wb.close()
+    except Exception:  # noqa: BLE001
+        pass
+    zeilen += [
+        "",
+        "BENUTZE STATTDESSEN:",
+        "  xlsx_inspect     – Aufbau, Kopfzeilen, Datentypen, Beispielzeilen",
+        "  xlsx_read_range  – einen begrenzten Ausschnitt wirklich lesen",
+        "  xlsx_merge       – zwei Tabellen zusammenfuehren (Daten laufen nicht",
+        "                     durch dich; Formeln und Layout bleiben erhalten)",
+        "  xlsx_edit        – einzelne Zellen schreiben",
+        "",
+        "Tippe die Daten NICHT ab und baue die Tabelle NICHT mit "
+        "office_create_excel nach – bei dieser Groesse wird das Ergebnis "
+        "zwangslaeufig unvollstaendig.",
+    ]
+    return "\n".join(zeilen)
+
+
 class ReadDocumentTool(BaseTool):
+    # Der Ergebnis-Deckel des Agenten (5.000) wuerde den ohnehin schon
+    # gekuerzten Text ein zweites Mal kappen. 20.000 entspricht dem eigenen
+    # Deckel unten, damit genau EINE Kuerzung stattfindet – und die wird
+    # beziffert.
+    ergebnis_max = 21000
+
     @property
     def name(self) -> str:
         return "office_read"
@@ -899,7 +1004,9 @@ class ReadDocumentTool(BaseTool):
         return (
             "Liest den Textinhalt eines Office-Dokuments (.docx, .xlsx, .pptx) und gibt ihn "
             "als Text zurueck. 'path' kann ein Dateiname aus data/documents/, eine "
-            "/api/documents/-URL oder ein beliebiger Server-Pfad sein."
+            "/api/documents/-URL oder ein beliebiger Server-Pfad sein. "
+            "FUER TABELLENDATEN ist xlsx_inspect der richtige Einstieg – dieses "
+            "Werkzeug macht aus einer Mappe Fliesstext und kann sie nicht bearbeiten."
         )
 
     def parameters_schema(self) -> dict:
@@ -929,10 +1036,19 @@ class ReadDocumentTool(BaseTool):
                 from openpyxl import load_workbook
                 wb = load_workbook(str(p), read_only=True, data_only=True)
                 blocks = []
+                zu_gross = None
                 for ws in wb.worksheets:
                     blocks.append(f"# Blatt: {ws.title}")
                     for row in ws.iter_rows(values_only=True):
                         blocks.append(" | ".join("" if c is None else str(c) for c in row))
+                    # Sobald absehbar ist, dass ohnehin fast alles wegfaellt,
+                    # wird gar nicht erst weitergelesen – die Antwort ist dann
+                    # der Verweis auf xlsx_inspect, kein Fragment.
+                    if sum(len(b) for b in blocks) > _XLSX_TEXT_MAX * 4:
+                        zu_gross = True
+                        break
+                if zu_gross or sum(len(b) for b in blocks) > _XLSX_TEXT_MAX:
+                    return _xlsx_zu_gross(p, wb, blocks)
                 text = "\n".join(blocks)
             elif ext == ".pptx":
                 from pptx import Presentation
@@ -949,8 +1065,20 @@ class ReadDocumentTool(BaseTool):
         except Exception as e:
             return f"Fehler beim Lesen: {e}"
 
+        # KUERZUNG WIRD BEZIFFERT – UND STEHT VORNE.
+        # Vorher stand hier ein blosses "… [gekuerzt]" am ENDE. Zwei Deckel
+        # hintereinander machten daraus im Vorfall vom 2026-08-19 eine
+        # doppelte Luege: office_read kuerzte still von 1.265.130 auf 20.000,
+        # danach kappte der Agent auf 5.000 und meldete "5.000 von 20.014" –
+        # das Modell hielt sich fuer gut informiert und sah 0,4 % der Datei.
+        # Der Hinweis muss deshalb (a) die ECHTE Gesamtgroesse nennen und
+        # (b) AM ANFANG stehen, damit ihn der Deckel des Agenten nicht
+        # ebenfalls abschneidet.
         if len(text) > 20000:
-            text = text[:20000] + "\n… [gekuerzt]"
+            text = (f"[GEKUERZT: {20000} von {len(text)} Zeichen "
+                    f"({20000 * 100 // max(1, len(text))} %). Der Rest FEHLT. "
+                    f"Ziehe daraus keine Schluesse ueber die Gesamtheit – frage "
+                    f"gezielt nach dem fehlenden Teil.]\n\n" + text[:20000])
         return text or "(leeres Dokument)"
 
 
@@ -1067,7 +1195,7 @@ class ExportPdfTool(BaseTool):
 
 
 def get_tools():
-    return [
+    tools = [
         CreateWordTool(),
         CreateExcelTool(),
         CreatePowerPointTool(),
@@ -1075,3 +1203,13 @@ def get_tools():
         ReadDocumentTool(),
         ExportPdfTool(),
     ]
+    # Tabellen-Werkzeuge (ansehen/bearbeiten statt neu aufbauen). Bewusst in
+    # einem eigenen Modul und hier ANGEHAENGT statt eingebaut: faellt der Import
+    # aus (alte openpyxl-Version, Teil-Deploy), bleibt der Office-Skill mit
+    # seinen bisherigen Werkzeugen benutzbar, statt komplett auszufallen.
+    try:
+        from skills.office.tabellen import get_tabellen_tools
+        tools.extend(get_tabellen_tools())
+    except Exception as e:  # noqa: BLE001
+        print(f"[Office] Tabellen-Werkzeuge nicht geladen: {e}", flush=True)
+    return tools

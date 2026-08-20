@@ -572,6 +572,15 @@ pruefe("addin.dateiname()" in MAIN, "der Endpunkt fragt den Branding-Namen ab")
 _ico = MAIN.split('@app.get("/addin/icon-{groesse}.png")', 1)
 pruefe(len(_ico) == 2, "Endpunkt /addin/icon-{groesse}.png existiert")
 _ico = _ico[1].split("@app.", 1)[0]
+# Seit dem Excel-Add-in (2026-08-20) liegt die Logik im GEMEINSAMEN Helfer
+# `_addin_icon_response` – beide Add-ins benutzen ihn, damit ein Branding-Fix
+# nicht nur eines von beiden erreicht. Wer ab hier nur den Routen-Rumpf prueft,
+# misst eine leere Huelle und alle Aussagen darunter werden trivial falsch.
+if "_addin_icon_response" in _ico:
+    _h = MAIN.split("def _addin_icon_response", 1)
+    pruefe(len(_h) == 2, "der gemeinsame Icon-Helfer ist vorhanden")
+    if len(_h) == 2:
+        _ico += _h[1].split("\n@app.", 1)[0]
 pruefe("Depends(" not in _ico,
        "ohne Anmeldung – die Symbole holt der Client bzw. Exchange ohne Sitzung")
 pruefe("ICON_GROESSEN" in _ico and "status_code=404" in _ico,

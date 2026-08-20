@@ -1499,6 +1499,12 @@ KRITISCH – Autonomie-Regeln:
         except Exception as e:
             print(f"[AGENT {self.agent_id}] CreateChartTool nicht geladen: {e}", flush=True)
 
+        # HINWEIS: `excel_vorschlag` steht hier BEWUSST NICHT MEHR. Es kommt seit
+        # dem Umbau zum Skill aus `skills/excel-addin/` und damit ueber
+        # skill_manager.get_enabled_tools() – ist der Skill aus, gibt es das
+        # Werkzeug nicht. Wer es hier wieder anhaengt, macht den Schalter
+        # wirkungslos.
+
         # Bildgenerierung (ueber das aktive LLM-Profil; kein Provider-Wechsel)
         try:
             from backend.tools.image_gen import GenerateImageTool

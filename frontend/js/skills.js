@@ -83,6 +83,7 @@
         sap:               'sap',
         email:             'email',
         'short-tracks':    'tracks',
+        'excel-addin':     'excel',
         kundenverwaltung:  'kundenverwaltung',
         support_assistant: 'support',
         knowledge:         'knowledge',

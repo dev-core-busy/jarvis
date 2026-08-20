@@ -1522,6 +1522,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 <button class="settings-tab-btn" data-settings-tab="sap" id="settings-tab-btn-sap" style="display:none;">SAP</button>
                 <button class="settings-tab-btn" data-settings-tab="email" id="settings-tab-btn-email" style="display:none;" data-i18n="settings.tab.email">E-Mail</button>
                 <button class="settings-tab-btn" data-settings-tab="tracks" id="settings-tab-btn-tracks" style="display:none;" data-i18n="settings.tab.tracks">Short Tracks</button>
+                <button class="settings-tab-btn" data-settings-tab="excel" id="settings-tab-btn-excel" style="display:none;" data-i18n="settings.tab.excel">Excel</button>
                 <button class="settings-tab-btn" data-settings-tab="kundenverwaltung" id="settings-tab-btn-kundenverwaltung" style="display:none;" data-i18n="settings.tab.kundenverwaltung">Kundenverwaltung</button>
                 <button class="settings-tab-btn" data-settings-tab="support" id="settings-tab-btn-support" style="display:none;">Support</button>
                 <button class="settings-tab-btn" data-settings-tab="google" id="settings-tab-btn-google" style="display:none;" data-i18n="settings.tab.google">Google</button>
@@ -3160,6 +3161,89 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                      absichtlich KEINE fremden Prompts: er ist zum Einrichten da,
                      nicht zum Mitlesen (gleiche Entscheidung wie beim
                      E-Mail-Reiter). -->
+                <!-- ══ Excel-Assistent ══
+                     Der Reiter ist zum VERTEILEN da: hier holt der Administrator
+                     das Manifest, das die Arbeitsplaetze in Excel einbinden.
+                     Anders als beim Outlook-Add-in gibt es dafuer keinen
+                     Exchange-Katalog – Add-ins fuer Arbeitsmappen verteilt ein
+                     Exchange nicht. -->
+                <div id="settings-tab-excel" class="settings-tab-content" style="display:none;">
+                    <div class="kb-container">
+                        <p class="kb-hint">Der <b>Excel-Assistent</b> bringt Jarvis als Aufgabenfenster nach Excel: der Benutzer fragt etwas zu der Arbeitsmappe, die er gerade geöffnet hat, und bekommt eine Antwort – oder einen Änderungsvorschlag, den er <b>vor dem Schreiben</b> Zelle für Zelle sieht. Wer den Assistenten benutzen darf, legen Sie unter <b>Sicherheit → Berechtigungen → Excel-Zugriff</b> fest; ohne Eintrag darf niemand.</p>
+
+                        <div class="kb-section" id="xa-sect-install">
+                            <div class="kb-section-header kb-collapse-header" id="xa-sect-install-hdr">
+                                <h3>Add-in verteilen</h3>
+                                <span class="sk-openclaw-toggle" id="xa-sect-install-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="xa-sect-install-body">
+                                <p class="kb-hint" style="margin-bottom:10px;">Das Manifest wird bei jedem Abruf <b>für diesen Server</b> erzeugt – die enthaltenen Adressen zeigen auf ihn. Laden Sie es herunter und legen Sie es in einen freigegebenen Ordner im Netz; die Arbeitsplätze tragen diesen Ordner einmalig in den Excel-Optionen als vertrauenswürdigen Katalog ein (per Gruppenrichtlinie ausrollbar).</p>
+                                <div class="xa-row">
+                                    <a class="btn-primary xa-dl" id="xa-download" href="/excel-addin/manifest.xml">Manifest herunterladen</a>
+                                    <span class="kb-hint" id="xa-version"></span>
+                                </div>
+                                <p class="kb-hint" id="xa-warn" style="display:none;margin-top:8px;"></p>
+
+                                <div style="margin-top:12px;">
+                                    <button type="button" class="xa-toggle" id="xa-guide-btn" aria-expanded="false">Anleitung für den Arbeitsplatz anzeigen</button>
+                                    <div id="xa-guide" style="display:none;margin-top:8px;">
+                                        <ol class="xa-steps">
+                                            <li>Manifest-Datei in einen Ordner legen, den alle Arbeitsplätze lesen können (z. B. <code>\\server\freigabe\office-addins</code>).</li>
+                                            <li>In Excel: <b>Datei → Optionen → Trust Center → Einstellungen für das Trust Center → Kataloge vertrauenswürdiger Add-Ins</b>.</li>
+                                            <li>Den Ordnerpfad eintragen, <b>Katalog anzeigen</b> ankreuzen, mit <b>OK</b> bestätigen und Excel neu starten.</li>
+                                            <li>In Excel: <b>Start → Add-Ins → Weitere Add-Ins → FREIGEGEBENER ORDNER</b>, dort den Assistenten auswählen und hinzufügen.</li>
+                                            <li>Der Knopf erscheint danach im Menüband unter <b>Start</b>. Beim ersten Öffnen meldet sich der Benutzer mit seinen gewohnten Zugangsdaten an.</li>
+                                        </ol>
+                                        <p class="kb-hint" style="margin-top:8px;"><b>Voraussetzungen:</b> Excel 2019 oder neuer, Microsoft 365, Excel im Web oder Excel für Mac. Das Aufgabenfenster lädt <code>office.js</code> aus dem Microsoft-Netz – ist dieses gesperrt, bleibt das Fenster bedienbar, kann aber die Tabelle nicht lesen und sagt das im Klartext.</p>
+                                        <p class="kb-hint" style="margin-top:6px;"><b>Aktualisierungen:</b> Aufgabenfenster und Logik liegen auf diesem Server und erreichen jede Installation beim nächsten Öffnen – dafür ist nichts zu tun. Nur wenn sich das <b>Manifest</b> ändert (Menüband, Berechtigungen, Adressen), muss es neu verteilt werden; das Fenster weist die Benutzer dann selbst darauf hin.</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="kb-section" id="xa-sect-limits">
+                            <div class="kb-section-header kb-collapse-header" id="xa-sect-limits-hdr">
+                                <h3>Grenzen</h3>
+                                <span class="sk-openclaw-toggle" id="xa-sect-limits-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="xa-sect-limits-body">
+                                <div class="form-group">
+                                    <label>Nachforderungen je Frage (1–5)</label>
+                                    <input type="number" id="xa-l-runden" min="1" max="5">
+                                    <span class="kb-hint">Reicht der Überblick über die Mappe nicht, darf das Modell gezielt einen Zellbereich nachfordern; das Fenster liest ihn und fragt erneut. <b>1 = keine Nachforderung.</b> Der Deckel verhindert, dass ein Modell in einer Schleife immer weitere Bereiche verlangt.</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>Zellen-Einträge je Vorschlag (10–500)</label>
+                                    <input type="number" id="xa-l-aenderungen" min="10" max="500">
+                                    <span class="kb-hint">Höchstzahl der Einträge, die <b>ein</b> Vorschlag umfassen darf. Das ist keine Schikane: eine Liste, die niemand mehr durchsieht, macht die Bestätigung wertlos.</span>
+                                </div>
+                                <div class="xa-row">
+                                    <button class="btn-primary" id="xa-save">Speichern</button>
+                                    <span class="kb-hint" id="xa-save-status"></span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="kb-section" id="xa-sect-info">
+                            <div class="kb-section-header kb-collapse-header" id="xa-sect-info-hdr">
+                                <h3>Was der Assistent darf – und was nicht</h3>
+                                <span class="sk-openclaw-toggle" id="xa-sect-info-tog">▶</span>
+                            </div>
+                            <div class="kb-collapse-body" id="xa-sect-info-body" style="display:none;">
+                                <ul class="xa-facts">
+                                    <li><b>Geschrieben wird nie ohne Bestätigung.</b> Der Server schlägt vor; das Fenster zeigt jede Zelle mit altem und neuem Inhalt, der Benutzer entscheidet.</li>
+                                    <li><b>Der Lauf ist immer unprivilegiert</b> und hat als einziges Werkzeug <code>excel_vorschlag</code> – er kann weder ins Dateisystem noch ins Netz greifen.</li>
+                                    <li><b>Formeln, die aus der Mappe herausgreifen, werden abgewiesen</b> (WEBSERVICE/WEBDIENST, RTD, CALL, REGISTER, DDE), bevor der Vorschlag im Fenster ankommt. Ein WEBSERVICE-Aufruf könnte Zellinhalte an eine fremde Adresse schicken, sobald die Mappe neu berechnet.</li>
+                                    <li><b>Es geht nie ein ganzes Blatt an den Server</b>, sondern der Aufbau: Blattnamen, Spaltenüberschriften, Datentypen, wenige Beispielzeilen und die markierte Auswahl.</li>
+                                    <li><b>Zellinhalte gelten als Fremdtext</b> – eine zugesandte Tabelle kann versuchen, den Assistenten zu steuern. Der Auftrag trägt eine Echtheitskennung, nachgebaute Abschnittsmarken werden entschärft.</li>
+                                    <li><b>Strg+Z holt die Änderung nicht zurück:</b> Schreibvorgänge eines Add-ins landen nicht im Undo-Stack von Excel. Das Fenster bietet dafür einen eigenen Rückweg an.</li>
+                                    <li><b>Jeder Benutzer meldet sich im Fenster an.</b> Anders als das Outlook-Add-in kann sich der Assistent nicht selbst anmelden – das dafür nötige Token gibt es nur für Postfächer. In Excel am Arbeitsplatz läuft das Fenster in einem <b>eigenen Browser-Kontext</b> (WebView2 bzw. WKWebView auf dem Mac); eine Anmeldung in Chrome oder Edge gilt dort <b>nicht</b>. Die Anmeldung ist einmalig und bleibt bestehen, bis der Office-Cache geleert oder das Add-in entfernt wird. Nur in <i>Excel im Web</i> läuft das Fenster im echten Browser und übernimmt eine dort bestehende Jarvis-Anmeldung.</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div id="settings-tab-tracks" class="settings-tab-content" style="display:none;">
                     <div class="kb-container">
                         <p class="kb-hint" data-i18n-html="tracksadm.intro">Der Bereich <b>Short Tracks</b> stellt jedem Benutzer <b>Ablagen</b> zur Verfügung: Felder mit einer hinterlegten Aufgabe. Wer eine Datei darauf zieht, löst sie aus. <b>Der Lauf trägt immer die Rechte dessen, der ablegt</b> – nie mehr. Die Ablagen selbst werden im Bereich <b>Short Tracks</b> (Kachel im Portal) gepflegt; hier stehen nur die Vorgaben für alle.</p>
@@ -3841,6 +3925,35 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 </div>
                                     </div>
                                 </details>
+                                <!-- ── Unter-Container: Excel-Add-in ──
+                                     Startet VERSTECKT und wird von app.js am Zustand des Skills
+                                     "excel-addin" eingeblendet – gleiches Muster wie
+                                     sec-sub-email und sec-sub-tracks. Ohne aktiven Skill waere
+                                     die Freigabe eine Freigabe fuer nichts. -->
+                                <details class="sec-sub" data-sub="excel" id="sec-sub-excel" style="display:none;">
+                                    <summary><span>Excel-Zugriff</span><span class="sec-sub-hint">– Wer darf den Tabellen-Assistenten in Excel benutzen?</span></summary>
+                                    <div class="sec-sub-body">
+                                <p class="kb-hint" style="margin-bottom:10px;">Steuert den Zugriff auf das <b>Excel-Add-in</b> (Chatfenster auf die geöffnete Arbeitsmappe). Wie bei E-Mail, SAP und Short Tracks ausdrücklich freizuschalten: leer = <b>niemand</b> – ausdrücklich <b>auch keine lokalen Administratoren</b>. <b>Warum es die Freigabe gibt:</b> beim Fragen geht der Aufbau der geöffneten Mappe an den Server (Blattnamen, Spaltenüberschriften, Beispielzeilen und die markierte Auswahl). Das ist derselbe Vorgang wie im Chat – die Tabellen, die in Excel offen sind, enthalten aber typischerweise mehr Geschäftsdaten als ein getippter Beitrag. Geschrieben wird nie ohne Bestätigung: jede Zelle wird mit altem und neuem Inhalt angezeigt. Das Manifest zum Verteilen liegt unter <code>/excel-addin/manifest.xml</code>.</p>
+
+                                <div class="form-group" style="margin-bottom:8px;">
+                                    <label>
+                                        <span>Erlaubte Benutzer</span>
+                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– Benutzernamen kommagetrennt, z.B. <code>mueller,schmidt</code></span>
+                                    </label>
+                                    <input type="text" id="excel-allowed-users" placeholder="Leer = niemand (auch keine lokalen Admins)" style="width:60%;box-sizing:border-box;">
+                                </div>
+                                <div class="form-group" style="margin-bottom:8px;">
+                                    <label>
+                                        <span>Excel-Gruppe (AD-Gruppe)</span>
+                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;" data-i18n="security.ad_group_hint">– zusätzlich zur Benutzerliste (ODER: Liste oder Gruppe genügt)</span>
+                                    </label>
+                                    <textarea id="excel-allowed-group" rows="1" placeholder="z.B. CN=Excel-Assistent,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;"></textarea>
+                                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
+                                        <span data-i18n="security.ad_group_cache_hint">⚠ Gruppen-Mitgliedschaft wird beim Login ermittelt. Mit Service-Konto (Verzeichnis-Suche) wird sie automatisch nachgeprüft (Standard: alle 10 Min.) – Änderungen wirken dann ohne Neuanmeldung.</span>
+                                    </div>
+                                </div>
+                                    </div>
+                                </details>
 
                                 <!-- ── Unter-Container: Internet-Zugang ── -->
                                 <details class="sec-sub" data-sub="internet">
@@ -3986,8 +4099,10 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             var _mailG = document.getElementById('email-allowed-group'); if (_mailG) _mailG.value = d.email_group || '';
                                             var _trU = document.getElementById('tracks-allowed-users'); if (_trU) _trU.value = d.tracks_users || '';
                                             var _trG = document.getElementById('tracks-allowed-group'); if (_trG) _trG.value = d.tracks_group || '';
+                                            var _xlU = document.getElementById('excel-allowed-users'); if (_xlU) _xlU.value = d.excel_users || '';
+                                            var _xlG = document.getElementById('excel-allowed-group'); if (_xlG) _xlG.value = d.excel_group || '';
                                             // Token-Listen (Chips) aller AD-Felder neu aufbauen (nach dem Setzen aller Werte)
-                                            ['ad-allowed-users','ad-allowed-group','ad-knowledge-editors','ad-knowledge-editors-group','ad-internet-users','ad-internet-group','ad-admins','ad-admins-group','sap-allowed-users','sap-allowed-group','email-allowed-users','email-allowed-group','tracks-allowed-users','tracks-allowed-group'].forEach(function(_id){ var _e=document.getElementById(_id); if(_e) _e.dispatchEvent(new Event('change')); });
+                                            ['ad-allowed-users','ad-allowed-group','ad-knowledge-editors','ad-knowledge-editors-group','ad-internet-users','ad-internet-group','ad-admins','ad-admins-group','sap-allowed-users','sap-allowed-group','email-allowed-users','email-allowed-group','tracks-allowed-users','tracks-allowed-group','excel-allowed-users','excel-allowed-group'].forEach(function(_id){ var _e=document.getElementById(_id); if(_e) _e.dispatchEvent(new Event('change')); });
                                             _adUpdateStatus(d);
                                         } catch(e) {}
                                     }
@@ -4170,6 +4285,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                                     email_allowed_group:       (document.getElementById('email-allowed-group')||{}).value ? document.getElementById('email-allowed-group').value.trim() : '',
                                                     tracks_allowed_users:      (document.getElementById('tracks-allowed-users')||{}).value ? document.getElementById('tracks-allowed-users').value.trim() : '',
                                                     tracks_allowed_group:      (document.getElementById('tracks-allowed-group')||{}).value ? document.getElementById('tracks-allowed-group').value.trim() : '',
+                                                    excel_allowed_users:       (document.getElementById('excel-allowed-users')||{}).value ? document.getElementById('excel-allowed-users').value.trim() : '',
+                                                    excel_allowed_group:       (document.getElementById('excel-allowed-group')||{}).value ? document.getElementById('excel-allowed-group').value.trim() : '',
                                                 })
                                             });
                                             if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -4502,7 +4619,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/branding.js?v=23"></script>
     <script src="/static/js/theme.js?v=2"></script>
     <script src="/static/js/security_incidents.js?v=29"></script>
-    <script src="/static/js/ldap_picker.js?v=9"></script>
+    <script src="/static/js/ldap_picker.js?v=10"></script>
+    <script src="/static/js/excel_admin.js?v=1"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
     <script src="/static/js/sessions.js?v=4"></script>
     <script src="/static/js/agent_roles.js?v=2"></script>

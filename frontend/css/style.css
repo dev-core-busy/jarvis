@@ -8032,3 +8032,43 @@ body.light .kb-mirror-mark { color: color-mix(in srgb, var(--info) 72%, #000); }
  * is_mount-Aufruf). Bewusst eine EIGENE Farbe: „unbekannt" als „getrennt"
  * darzustellen waere eine Behauptung, die die Anzeige nicht kennt. */
 .kb-mount-status.unknown { background: var(--warning); box-shadow: 0 0 6px var(--warning); }
+
+/* ═══ Excel-Assistent (Einstellungen → Excel) ═══════════════════════════
+ * Praefix `xa-`, damit nichts mit `xl-` (Aufgabenfenster) kollidiert – das
+ * eine liegt in settings.html, das andere im Add-in, und eine gemeinsame
+ * Klasse waere beim naechsten Feinschliff eine Falle.
+ */
+.xa-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    margin-top: 10px; }
+/* `.btn-primary` traegt im Projekt `width:100%` – in einer Flex-Zeile fuellt
+ * das die ganze Breite und schiebt den Versionshinweis in die naechste Zeile
+ * (dieselbe Falle wie beim Entfernen-Knopf der PPTX-Vorlage). */
+.xa-row .btn-primary, .xa-row .btn-secondary { flex: 0 0 auto; width: auto; }
+/* Der Download ist ein LINK: der Endpunkt liefert Content-Disposition, es
+ * braucht kein JS. Ein <a> mit Knopf-Klasse ist ohne diese Zeile
+ * unterstrichen (Lehre von .em-btn und .ad-upd a). */
+.xa-dl { text-decoration: none; display: inline-block; }
+.xa-steps { margin: 6px 0 0 0; padding-left: 1.3rem; line-height: 1.7;
+    font-size: 0.82rem; color: var(--text-secondary); }
+.xa-steps li { margin-bottom: 6px; }
+.xa-steps b { color: var(--text-primary); }
+.xa-facts { margin: 4px 0 0 0; padding-left: 1.15rem; line-height: 1.65;
+    font-size: 0.82rem; color: var(--text-secondary); }
+.xa-facts li { margin-bottom: 7px; }
+.xa-facts b { color: var(--text-primary); }
+
+/* Aufklapp-Knopf im Excel-Reiter.
+ * BEWUSST NICHT `.kb-hdr-btn`: die Klasse setzt `border: 1px solid
+ * var(--border-color)` – diese Variable ist im Projekt NIRGENDS definiert
+ * (sie heisst `--border`), der Shorthand ist damit ungueltig und der Rahmen
+ * faellt ersatzlos aus. Der Knopf sieht dann aus wie Fliesstext (im Screenshot
+ * aufgefallen). Das betrifft 27 Regeln in dieser Datei und gehoert in einem
+ * eigenen Durchgang mit optischer Abnahme berichtigt – hier wird deshalb nur
+ * die richtige Variable benutzt, statt den Bestand im Vorbeigehen umzubauen. */
+.xa-toggle { display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--bg-glass);
+    color: var(--text-secondary); font-family: inherit; font-size: 0.8rem;
+    line-height: 1.4; }
+.xa-toggle:hover { background: rgba(var(--fg-rgb), .08); color: var(--text-primary);
+    border-color: var(--accent); }

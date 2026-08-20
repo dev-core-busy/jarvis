@@ -331,6 +331,22 @@ _UC_HISTORY_FILE = Path("data/userchat_history.json")
 # WebSockets); der Skill liefert nur Schalter und Grenzwerte.
 _UC_SKILL = "userchat"
 
+# Excel-Add-in. SYSTEM-SKILL MIT VORGABE AN (wie cron/shell/filesystem) – er
+# laesst sich abschalten, aber nicht deinstallieren.
+#
+# Dass er von Haus aus an ist, oeffnet fuer sich genommen NICHTS: ohne Eintrag
+# unter Sicherheit → Berechtigungen → Excel-Zugriff darf niemand den Assistenten
+# benutzen ("leer = niemand", `_user_may_use_excel`). Die Freigabe ist damit die
+# einzige verbleibende Schranke vor dem Bereich – wer sie je auf "leer = alle"
+# umstellt, gibt ihn nach dem naechsten Update jedem angemeldeten Benutzer frei.
+#
+# Der Skill liefert das Werkzeug `excel_vorschlag`;
+# Manifest, Aufgabenfenster und der Endpunkt liegen im Kern, weil ein Skill
+# keine Routen registrieren kann (gleiche Aufteilung wie bei SAP und den
+# Rollen-Agenten). Der Verzeichnisname ist massgeblich – `disable_skill` und
+# `_skill_active` erwarten ihn, nicht den Anzeigenamen aus dem Manifest.
+_EXCEL_SKILL = "excel-addin"
+
 
 def _uc_skill_config() -> dict:
     """Konfiguration des Benutzer-Chat-Skills – lazy und fehlertolerant.
@@ -1303,6 +1319,52 @@ async def require_tracks_access(request: Request, user: str = Depends(require_au
         detail="Kein Zugriff auf Short Tracks – nicht in der Benutzerliste/-Gruppe "
                "freigeschaltet (Einstellungen → Sicherheit → Berechtigungen → "
                "Short-Tracks-Zugriff; ggf. neu einloggen für Gruppen-Aktualisierung)")
+
+
+def _user_may_use_excel(user: str) -> bool:
+    """Prädikat: Darf der Benutzer das Excel-Add-in nutzen (→ /api/excel/*)?
+
+    Zuschnitt 1:1 wie ``_user_may_use_email``/``_user_may_use_sap``/
+    ``_user_may_use_tracks``: Benutzerliste ODER Gruppe, **leer = niemand**
+    (ausdrücklich auch keine lokalen Administratoren), **kein Admin-Bypass**.
+
+    WARUM ES DIE FREIGABE ÜBERHAUPT BRAUCHT: über das Add-in stellt ein
+    Benutzer Fragen an ein Sprachmodell, und der Inhalt seiner Arbeitsmappe
+    geht dabei an den Server. Das ist derselbe Vorgang wie in /chat – aber die
+    Tabellen, die in Excel offen sind, enthalten typischerweise mehr
+    Geschäftsdaten als ein getippter Chatbeitrag. Wer entscheiden will, wessen
+    Mappen dort hineinlaufen, tut es an derselben Stelle wie bei E-Mail und SAP.
+
+    **KEIN eigener Skill** (anders als E-Mail und Short Tracks): das Add-in
+    bringt keine Werkzeuge mit, die es ohne ihn nicht gäbe – es ist ein
+    Chatfenster auf die geöffnete Mappe. Ein Skill würde nur einen Skill-Slot
+    kosten (FREE/BASIC erlauben fünf) und einen zweiten Schalter neben dieser
+    Freigabe schaffen, der dasselbe steuert.
+    """
+    u = (user or "").strip()
+    if not u:
+        return False
+    users_raw = config.get_setting("excel_allowed_users", "").strip()
+    grp = config.get_setting("excel_allowed_group", "").strip()
+    if not users_raw and not grp:
+        return False
+    plain = _norm_login(u)
+    if users_raw and plain in {_norm_login(x) for x in users_raw.split(",") if x.strip()}:
+        return True
+    if grp and _member_of_any_group(_user_group_dns_cache.get(plain, []), grp):
+        return True
+    return False
+
+
+async def require_excel_access(request: Request, user: str = Depends(require_auth)) -> str:
+    """FastAPI Dependency: Prüft die Excel-Add-in-Berechtigung (→ /api/excel/*)."""
+    if _user_may_use_excel(user):
+        return user
+    raise HTTPException(status_code=403,
+        detail="Kein Zugriff auf den Tabellen-Assistenten – nicht in der "
+               "Benutzerliste/-Gruppe freigeschaltet (Einstellungen → Sicherheit "
+               "→ Berechtigungen → Excel-Zugriff; ggf. neu einloggen für "
+               "Gruppen-Aktualisierung)")
 
 
 async def require_userchat_access(request: Request, user: str = Depends(require_auth)) -> str:
@@ -4278,6 +4340,12 @@ async def get_me(user: str = Depends(require_auth)):
             # Das Portal blendet Kachel UND Ungelesen-Badge daran ein; ohne das
             # liefe der Badge-Poll bei ausgeschaltetem Skill in einen 403.
             "userchat": _skill_active(_UC_SKILL),
+            # Excel-Add-in: Freigabe UND aktiver Skill – gleiche Logik wie bei
+            # sap/email/tracks. Das Aufgabenfenster fragt den Wert ab und sagt
+            # im Klartext, was fehlt, statt den Benutzer bei jeder Frage in
+            # einen 403 laufen zu lassen. Der Endpunkt /api/excel/ask prueft
+            # weiterhin beides selbst.
+            "excel": _user_may_use_excel(user) and _skill_active(_EXCEL_SKILL),
             "internet": _user_has_internet_access(user),
         },
         "license_banner": banner,
@@ -5150,6 +5218,10 @@ async def save_settings(request: Request, user: str = Depends(require_local_auth
         config.save_setting("tracks_allowed_users", body["tracks_allowed_users"])
     if "tracks_allowed_group" in body:
         config.save_setting("tracks_allowed_group", body["tracks_allowed_group"])
+    if "excel_allowed_users" in body:
+        config.save_setting("excel_allowed_users", body["excel_allowed_users"])
+    if "excel_allowed_group" in body:
+        config.save_setting("excel_allowed_group", body["excel_allowed_group"])
     if "ad_bind_user" in body:
         _bu = (body["ad_bind_user"] or "").strip()
         config.save_setting("ad_bind_user", _bu)
@@ -5301,6 +5373,8 @@ async def get_ad_status(user: str = Depends(require_local_auth)):
         "email_group": config.get_setting("email_allowed_group", ""),
         "tracks_users": config.get_setting("tracks_allowed_users", ""),
         "tracks_group": config.get_setting("tracks_allowed_group", ""),
+        "excel_users": config.get_setting("excel_allowed_users", ""),
+        "excel_group": config.get_setting("excel_allowed_group", ""),
         # Beide Felder sind ODER-verknuepft (jeder Weg genuegt allein), deshalb
         # gibt es den Modus `users_group` – ein Modus, der einen der beiden Werte
         # verschweigt, ist genau die Anzeige, die den Login-Fehler vom
@@ -8116,34 +8190,19 @@ async def addin_link_loesen(username: str, admin: str = Depends(require_local_au
     return JSONResponse({"ok": True, "entfernt": n})
 
 
-@app.get("/addin/icon-{groesse}.png")
-async def addin_icon(groesse: int):
-    """Menueband-Symbol des Add-ins – folgt dem Branding.
+def _addin_icon_response(groesse: int, unterordner: str):
+    """Menueband-Symbol in ``groesse`` px – Branding-Logo, sonst eingebaut.
 
-    Das Symbol steht neben dem Namen im Menueband JEDES Arbeitsplatzes. Bis zum
-    2026-08-17 zeigte das Manifest fest auf die Jarvis-Zeichen unter
-    ``/static/addin/`` – die Beschriftung trug also die Marke, das Bild daneben
-    nicht (gemeldet mit Screenshot).
-
-    Reihenfolge: rundes Branding-Logo (Dunkel-Variante, wie in der Kopfzeile der
-    Oberflaechen) → skaliert auf die angeforderte Kantenlaenge → sonst das
-    eingebaute Zeichen. **Fail-safe in diese Richtung**: ein Symbol, das nicht
-    geliefert wird, laesst Outlook den Knopf ohne Bild zeichnen; das eingebaute
-    Zeichen ist der bessere Ausgang als ein Loch.
-
-    Kein SVG: Office rendert im Menueband Rastergrafik, und Pillow kann SVG
-    ohnehin nicht lesen – ein hochgeladenes SVG-Logo faellt deshalb bewusst auf
-    das eingebaute Zeichen zurueck, statt einen Fehler zu erzeugen.
-
-    Ohne Anmeldung, wie das Manifest selbst: die Bilder holt der Client (bzw.
-    der Exchange-Server) ohne Sitzung, und ``/api/branding/logo`` gibt dasselbe
-    Logo ohnehin offen heraus.
+    Gemeinsam fuer BEIDE Add-ins (Outlook und Excel); sie unterscheiden sich
+    nur im Ordner mit den eingebauten Zeichen. Eine zweite Fassung waere genau
+    das Drift-Muster, das in diesem Projekt schon mehrfach teuer war – ein
+    Branding-Fix wuerde sonst nur eines der beiden erreichen.
     """
     from backend import addin as _addin
     if groesse not in _addin.ICON_GROESSEN:
         return JSONResponse({"error": "Groesse nicht vorgesehen"}, status_code=404)
 
-    fallback = FRONTEND_DIR / "addin" / f"icon-{groesse}.png"
+    fallback = FRONTEND_DIR / unterordner / f"icon-{groesse}.png"
 
     def _eingebaut():
         if fallback.exists():
@@ -8176,6 +8235,32 @@ async def addin_icon(groesse: int):
                     headers={"Cache-Control": "public, max-age=300"})
 
 
+@app.get("/addin/icon-{groesse}.png")
+async def addin_icon(groesse: int):
+    """Menueband-Symbol des Add-ins – folgt dem Branding.
+
+    Das Symbol steht neben dem Namen im Menueband JEDES Arbeitsplatzes. Bis zum
+    2026-08-17 zeigte das Manifest fest auf die Jarvis-Zeichen unter
+    ``/static/addin/`` – die Beschriftung trug also die Marke, das Bild daneben
+    nicht (gemeldet mit Screenshot).
+
+    Reihenfolge: rundes Branding-Logo (Dunkel-Variante, wie in der Kopfzeile der
+    Oberflaechen) → skaliert auf die angeforderte Kantenlaenge → sonst das
+    eingebaute Zeichen. **Fail-safe in diese Richtung**: ein Symbol, das nicht
+    geliefert wird, laesst Outlook den Knopf ohne Bild zeichnen; das eingebaute
+    Zeichen ist der bessere Ausgang als ein Loch.
+
+    Kein SVG: Office rendert im Menueband Rastergrafik, und Pillow kann SVG
+    ohnehin nicht lesen – ein hochgeladenes SVG-Logo faellt deshalb bewusst auf
+    das eingebaute Zeichen zurueck, statt einen Fehler zu erzeugen.
+
+    Ohne Anmeldung, wie das Manifest selbst: die Bilder holt der Client (bzw.
+    der Exchange-Server) ohne Sitzung, und ``/api/branding/logo`` gibt dasselbe
+    Logo ohnehin offen heraus.
+    """
+    return _addin_icon_response(groesse, "addin")
+
+
 @app.get("/addin/taskpane.html", response_class=HTMLResponse)
 async def addin_taskpane():
     """Aufgabenfenster des Outlook-Add-ins.
@@ -8189,6 +8274,229 @@ async def addin_taskpane():
         return HTMLResponse("<h1>404 – Add-in nicht installiert</h1>", status_code=404)
     return HTMLResponse(content=f.read_text(encoding="utf-8"),
                         headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Excel-Add-in: Chatfenster auf die geoeffnete Arbeitsmappe
+# ───────────────────────────────────────────────────────────────────────────
+#  Die Mappe liegt im CLIENT, der Agent auf dem SERVER. Es gibt deshalb kein
+#  Werkzeug, das in die geoeffnete Mappe schreibt: das Fenster liefert einen
+#  Ueberblick mit, der Agent schlaegt ueber ``excel_vorschlag`` Aenderungen vor,
+#  und geschrieben wird erst nach ausdruecklicher Bestaetigung im Fenster.
+#  Die Begruendung im Einzelnen steht in ``backend/excel_ask.py``.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Eigener Agent mit eigener Sperre – gleiche Begruendung wie beim SAP-Bereich:
+# eine Auswertung laeuft Sekunden bis Minuten und duerfte den geteilten
+# Hauptagenten nicht fuer alle anderen blockieren.
+_excel_agent = None
+_excel_agent_lock = asyncio.Lock()
+
+# Werkzeug-Zuschnitt des Laufs. **Die leere Menge waere "keine Werkzeuge", None
+# waere "keine Beschraenkung"** – hier ist beides falsch, es ist genau eines.
+# Bewusst NUR excel_vorschlag: der Lauf soll die Mappe beschreiben und Formeln
+# entwerfen, nicht im Dateisystem arbeiten oder ins Netz greifen. Wer hier etwas
+# ergaenzt, vergroessert die Flaeche, auf der eine praeparierte Tabelle wirken
+# kann (die Zellinhalte gehen mit in den Auftrag).
+_EXCEL_TOOLS = {"excel_vorschlag"}
+
+
+@app.get("/excel-addin/manifest.xml")
+async def excel_addin_manifest(request: Request):
+    """XML-Manifest des Excel-Add-ins, passend zu DIESEM Server erzeugt.
+
+    Gleiche Begruendung wie beim Outlook-Manifest: ohne Anmeldung (beim
+    Sideloading holt es der Client ohne Sitzung, und der Inhalt ist keine
+    Auskunft) und erzeugt statt als Datei gepflegt (jede URL darin muss auf
+    diesen Server zeigen).
+
+    **Anders als beim Outlook-Add-in gibt es keinen Exchange-Katalog**, der die
+    Datei verteilt – der Administrator legt sie in einen freigegebenen Ordner,
+    den die Arbeitsplaetze in den Excel-Optionen als vertrauenswuerdigen
+    Katalog eingetragen haben.
+    """
+    from backend import excel_addin
+    basis = excel_addin.basis_url(request)
+    if not basis:
+        return JSONResponse({"ok": False, "error": "Basis-URL nicht ermittelbar."},
+                            status_code=500)
+    if excel_addin.ist_lokale_basis(basis):
+        # Fail-closed, gleiche Falle wie beim Outlook-Manifest: mit "localhost"
+        # laesst es sich klaglos installieren und das Fenster bleibt danach
+        # leer – ein Fehler, den niemand mit diesem Abruf in Verbindung bringt.
+        return JSONResponse(
+            {"ok": False,
+             "error": "Dieses Manifest wurde ueber '%s' abgerufen und wuerde auf "
+                      "jedem Arbeitsplatz ins Leere zeigen. Rufe die Adresse auf, "
+                      "unter der die Arbeitsplaetze den Server erreichen – oder "
+                      "setze JARVIS_ADDIN_BASE (bzw. die Einstellung "
+                      "'addin_base_url') auf diese Adresse." % basis},
+            status_code=400)
+    return Response(
+        content=excel_addin.manifest(basis),
+        media_type="application/xml",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Content-Disposition": 'attachment; filename="%s"'
+                                   % excel_addin.dateiname(),
+        })
+
+
+@app.get("/api/excel-addin/version")
+async def excel_addin_version():
+    """Manifest-Version, die dieser Server AKTUELL fuer Excel ausliefert.
+
+    Gegenstueck zum Abfrageparameter ``mv`` in der Taskpane-URL. Bewusst ohne
+    Anmeldung und mit ``no-store`` – sonst beantwortet der Cache die Frage
+    "gibt es etwas Neues" mit der Antwort von gestern.
+    """
+    from backend import excel_addin
+    return JSONResponse(
+        {"ok": True, "version": excel_addin.EXCEL_ADDIN_VERSION},
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+
+
+@app.get("/excel-addin/icon-{groesse}.png")
+async def excel_addin_icon(groesse: int):
+    """Menueband-Symbol des Excel-Add-ins – folgt dem Branding."""
+    return _addin_icon_response(groesse, "excel-addin")
+
+
+@app.get("/excel-addin/taskpane.html", response_class=HTMLResponse)
+async def excel_addin_taskpane():
+    """Aufgabenfenster des Excel-Add-ins.
+
+    Leere Huelle ohne Rechtepruefung: eine Navigation aus Excel traegt keinen
+    Authorization-Kopf. Angemeldet wird im Fenster selbst, und jeder Datenabruf
+    haengt serverseitig an ``require_excel_access``.
+    """
+    f = FRONTEND_DIR / "excel-addin" / "taskpane.html"
+    if not f.exists():
+        return HTMLResponse("<h1>404 – Add-in nicht installiert</h1>", status_code=404)
+    return HTMLResponse(content=f.read_text(encoding="utf-8"),
+                        headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+
+
+@app.post("/api/excel/ask")
+async def excel_ask_endpoint(request: Request,
+                             user: str = Depends(require_excel_access)):
+    """Beantwortet eine Frage zur geoeffneten Arbeitsmappe.
+
+    Body::
+
+        {"frage": "…",
+         "ueberblick": {…},          # von excel.js::ueberblickLesen()
+         "vorgeschichte": [{rolle, text}, …],
+         "nachgeladen": [{bereich, text}, …],
+         "runde": 1}
+
+    Antwort::
+
+        {"ok": true, "text": "…",
+         "aenderungen": [{blatt, adresse, formel|wert, begruendung}, …],
+         "abgelehnt": [{adresse, grund}, …],
+         "zusammenfassung": "…",
+         "brauche": ["Blatt!A1:D200", …]}
+
+    Der Lauf ist **unprivilegiert** – ``privileged`` steht hart auf ``False``
+    und ist ausdruecklich KEIN Feld der Anfrage. Ueber diesen Weg gibt es keinen
+    Zugang zu Systemrechten, auch nicht fuer einen Administrator.
+    """
+    from backend import excel_ask
+
+    # Skill-Schranke. BEWUSST HIER und nicht als Dependency: der Unterschied
+    # zwischen "nicht freigeschaltet" (403) und "der Assistent ist gar nicht
+    # aktiv" ist fuer den Benutzer wesentlich – im zweiten Fall hilft kein
+    # Eintrag in der Freigabeliste, sondern nur ein Administrator, der den
+    # Skill einschaltet. Ohne aktiven Skill fehlt ausserdem `excel_vorschlag`,
+    # der Lauf koennte also ohnehin nichts vorschlagen.
+    if not _skill_active(_EXCEL_SKILL):
+        return JSONResponse(
+            {"ok": False, "skill_aktiv": False,
+             "error": "Der Excel-Assistent ist nicht aktiv. Ein Administrator "
+                      "aktiviert ihn unter Einstellungen → Skills."},
+            status_code=400)
+
+    body = await request.json()
+    frage = str(body.get("frage") or "").strip()[:excel_ask.MAX_FRAGE_LEN]
+    if not frage:
+        return JSONResponse({"ok": False, "error": "Keine Frage übermittelt."},
+                            status_code=400)
+    ueberblick = body.get("ueberblick")
+    if not isinstance(ueberblick, dict):
+        ueberblick = {}
+    vorgeschichte = body.get("vorgeschichte")
+    nachgeladen = body.get("nachgeladen")
+    try:
+        runde = int(body.get("runde") or 1)
+    except Exception:  # noqa: BLE001
+        runde = 1
+
+    # Sicherheitsschicht wie in Chat/Avatar/SAP: der Freitext geht in einen
+    # Agentenlauf, also gilt hier dieselbe Jailbreak-Pruefung. Der ZELLINHALT
+    # laeuft bewusst NICHT hier durch – er ist Fremdtext, und eine Sperre
+    # daraufhin waere ein Weg, einen Benutzer per zugesandter Tabelle
+    # auszusperren (gleiche Ueberlegung wie bei den E-Mail-Regeln).
+    if await _sec_inspect_user(frage, user, "excel"):
+        return JSONResponse({"detail": "security_blocked",
+                             "message": "Konto wegen eines Sicherheitsverstosses gesperrt."},
+                            status_code=423)
+
+    auftrag, _kennung = excel_ask.auftrag(
+        frage, ueberblick,
+        vorgeschichte=vorgeschichte if isinstance(vorgeschichte, list) else None,
+        nachgeladen=nachgeladen if isinstance(nachgeladen, list) else None)
+
+    global _excel_agent
+    from backend.agent import JarvisAgent
+    async with _excel_agent_lock:
+        if _excel_agent is None:
+            _excel_agent = JarvisAgent(label="Excel-Assistent")
+        _excel_agent._current_username = user
+        # HARTE Schranke: sie sitzt in _execute_tool VOR der Ausfuehrung, nicht
+        # nur in der Werkzeugliste, die das Modell sieht. Modelle rufen auch
+        # nicht deklarierte Werkzeuge auf.
+        _excel_agent._role_tools = set(_EXCEL_TOOLS)
+        # Sammelliste ANLEGEN, bevor der Lauf startet: das Werkzeug haengt an
+        # dieselbe Liste an. Eine Liste und kein Ersetzen des ContextVar-Werts,
+        # damit die Aenderung auch dann sichtbar ist, wenn der Kontext beim
+        # Wechsel in einen anderen Task kopiert wurde.
+        sammler = excel_ask.neuer_puffer()
+        try:
+            antwort = await _excel_agent.run_task_headless(
+                auftrag,
+                actor={"user": user, "privileged": False,
+                       "internet": _user_has_internet_access(user)},
+            )
+        except Exception as e:  # noqa: BLE001
+            print(f"[excel] Lauf fehlgeschlagen: {e}", flush=True)
+            return JSONResponse({"ok": False, "error": f"Auswertung fehlgeschlagen: {e}"},
+                                status_code=500)
+        finally:
+            excel_ask.puffer_loeschen()
+
+    text, brauche = excel_ask.nachforderung_lesen(antwort or "")
+    # Ab der letzten Runde wird nicht mehr nachgefordert – sonst laeuft ein
+    # Modell, das immer weiter Bereiche verlangt, in eine Schleife, die den
+    # Benutzer nur Zeit kostet.
+    if runde >= excel_ask.MAX_RUNDEN:
+        brauche = []
+
+    aenderungen: list = []
+    abgelehnt: list = []
+    zusammenfassung = ""
+    for eintrag in sammler:
+        aenderungen.extend(eintrag.get("aenderungen") or [])
+        abgelehnt.extend(eintrag.get("abgelehnt") or [])
+        if eintrag.get("zusammenfassung") and not zusammenfassung:
+            zusammenfassung = eintrag["zusammenfassung"]
+
+    return JSONResponse({"ok": True, "text": text or "",
+                         "aenderungen": aenderungen,
+                         "abgelehnt": abgelehnt,
+                         "zusammenfassung": zusammenfassung,
+                         "brauche": brauche,
+                         "runde": runde})
 
 
 @app.get("/email", response_class=HTMLResponse)

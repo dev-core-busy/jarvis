@@ -1,0 +1,43 @@
+{
+    "name": "Excel-Assistent",
+    "description": "Chatfenster in Excel auf die gerade geoeffnete Arbeitsmappe. Der Benutzer fragt etwas zur Tabelle ('was faellt an Spalte D auf?', 'trage in G2:G40 die Marge ein'); geantwortet wird von einem Agentenlauf auf dem Server. Aenderungen werden IMMER erst als Vorschlag angezeigt und muessen bestaetigt werden, bevor eine Zelle geschrieben wird.",
+    "version": "1.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": ["excel_vorschlag"],
+    "category": "system",
+    "icon": "table",
+    "system": true,
+    "enabled": true,
+    "dependencies": [],
+    "data_dirs": [],
+    "config_schema": {
+        "max_runden": {
+            "type": "number",
+            "label": "Nachforderungen je Frage",
+            "description": "Reicht der Ueberblick ueber die Mappe nicht, darf das Modell gezielt einen Zellbereich nachfordern; das Fenster liest ihn und fragt erneut. Der Deckel verhindert, dass ein Modell in einer Schleife immer weitere Bereiche verlangt. 1 = keine Nachforderung.",
+            "default": 3
+        },
+        "max_aenderungen": {
+            "type": "number",
+            "label": "Zellen-Eintraege je Vorschlag",
+            "description": "Hoechstzahl der Eintraege, die EIN Vorschlag umfassen darf. Der Deckel ist keine Schikane: eine Diff-Liste, die niemand mehr durchsieht, macht die Bestaetigung wertlos.",
+            "default": 200
+        }
+    },
+    "knowledge_docs": [],
+    "permissions": [],
+    "help": {
+        "details": "Bringt Jarvis als Aufgabenfenster nach Excel. Der Administrator laedt im Reiter 'Excel' das Manifest herunter und legt es in einen freigegebenen Ordner, den die Arbeitsplaetze in den Excel-Optionen als vertrauenswuerdigen Katalog eintragen - einen Exchange-Katalog wie fuer Outlook-Add-ins gibt es fuer Arbeitsmappen nicht. Wer den Assistenten benutzen darf, wird unter Einstellungen -> Sicherheit -> Berechtigungen -> Excel-Zugriff festgelegt; ohne Eintrag darf niemand. Mit der Frage geht der AUFBAU der geoeffneten Mappe an den Server (Blattnamen, Spaltenueberschriften, Datentypen, wenige Beispielzeilen und die markierte Auswahl) - nie das ganze Blatt, weil ein Ausschnitt einer grossen Tabelle zu Zahlen fuehrt, die plausibel aussehen und falsch sind.",
+        "tools": [
+            {"name": "excel_vorschlag", "label": "Aenderung vorschlagen", "desc": "Sammelt Zellaenderungen und legt sie dem Benutzer zur Bestaetigung vor. Schreibt selbst NICHTS."}
+        ],
+        "use_cases": [
+            "Was faellt an Spalte D auf?",
+            "Trage in G2:G40 die Marge aus Netto und Einkauf ein",
+            "Pruefe die Summenzeile auf Fehler",
+            "Erklaer mir, was die Formel in B12 rechnet"
+        ],
+        "notes": "Geschrieben wird ausschliesslich im Aufgabenfenster und erst nach ausdruecklicher Bestaetigung: der Server schlaegt vor, der Benutzer sieht jede Zelle mit altem und neuem Inhalt. Der Lauf ist immer unprivilegiert und hat als einziges Werkzeug excel_vorschlag - er kann also weder ins Dateisystem noch ins Netz greifen. Formeln, die aus der Mappe herausgreifen (WEBSERVICE/WEBDIENST, RTD, CALL, REGISTER, DDE), werden abgewiesen, bevor der Vorschlag im Fenster ankommt; ein WEBSERVICE-Aufruf koennte Zellinhalte an eine fremde Adresse schieben, sobald die Mappe neu berechnet. Zellinhalte sind Fremdtext (eine zugesandte Tabelle): der Auftrag traegt eine Echtheitskennung, nachgebaute Abschnittsmarken werden entschaerft. Office.js-Schreibvorgaenge landen NICHT im Undo-Stack von Excel - Strg+Z holt sie nicht zurueck, das Fenster bietet dafuer einen eigenen Rueckweg. Kein SSO: anders als das Outlook-Add-in kann sich das Fenster nicht kennwortlos anmelden (das Exchange-Identity-Token ist eine Postfach-Schnittstelle und in Excel nicht vorhanden)."
+    }
+}

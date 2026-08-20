@@ -613,6 +613,22 @@
         }
         window.initTracksCollapse = _initTracksCollapse;
 
+        // ── Excel-Tab Collapse ─────────────────────────────────────────────
+        // Gleiche Begruendung wie bei Short Tracks: _collapseInit merkt sich den
+        // Auf-/Zu-Zustand je Container im localStorage und nimmt Klicks auf
+        // Knoepfe und Felder in der Kopfzeile aus. Ohne diesen Eintrag traegt das
+        // Markup zwar die Klassen kb-collapse-header/-body, aber NICHTS bindet
+        // sie – die Container lassen sich dann nicht auf- und zuklappen
+        // (gemeldet 2026-08-20).
+        function _initExcelCollapse() {
+            _collapseInit([
+                { hdr: 'xa-sect-install-hdr', body: 'xa-sect-install-body', tog: 'xa-sect-install-tog' },
+                { hdr: 'xa-sect-limits-hdr',  body: 'xa-sect-limits-body',  tog: 'xa-sect-limits-tog'  },
+                { hdr: 'xa-sect-info-hdr',    body: 'xa-sect-info-body',    tog: 'xa-sect-info-tog'    },
+            ]);
+        }
+        window.initExcelCollapse = _initExcelCollapse;
+
         // ── Vision-Tab Collapse ────────────────────────────────────────────
         function _initVisionCollapse() {
             _collapseInit([
@@ -648,7 +664,8 @@
         const tabsSkillCfg = SKILLCFG_TABS.map(n => document.getElementById('settings-tab-' + n));
         const tabEmail   = document.getElementById('settings-tab-email');
         const tabTracks  = document.getElementById('settings-tab-tracks');
-        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabBranding, tabConfluence, tabJira, tabSap, tabEmail, tabTracks, tabKundenverwaltung, tabSupport, tabMcp, tabTelemetry, tabSecurity, tabCron].concat(tabsSkillCfg);
+        const tabExcel   = document.getElementById('settings-tab-excel');
+        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabBranding, tabConfluence, tabJira, tabSap, tabEmail, tabTracks, tabExcel, tabKundenverwaltung, tabSupport, tabMcp, tabTelemetry, tabSecurity, tabCron].concat(tabsSkillCfg);
 
         settingsTabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -745,6 +762,10 @@
                     tabTracks.style.display = '';
                     tabTracks.classList.add('active');
                     if (window.TracksAdmin) window.TracksAdmin.onShow();
+                } else if (target === 'excel' && tabExcel) {
+                    tabExcel.style.display = '';
+                    tabExcel.classList.add('active');
+                    if (window.ExcelAdmin) window.ExcelAdmin.onShow();
                 } else if (target === 'kundenverwaltung' && tabKundenverwaltung) {
                     tabKundenverwaltung.style.display = '';
                     tabKundenverwaltung.classList.add('active');
@@ -976,6 +997,25 @@
             }
         };
 
+        // ── Excel-Assistent: Berechtigungsblock nur bei aktivem Skill ──
+        // Der REITER wird von skillcfg.js::updateTabs() geschaltet (er steht dort
+        // in TAB_BUTTONS). Hier geht es nur um den Block in Sicherheit →
+        // Berechtigungen – dieselbe Begruendung wie bei sec-sub-email,
+        // sec-sub-sap und sec-sub-tracks.
+        window.updateExcelSecVisibility = async function updateExcelSecVisibility() {
+            const box = document.getElementById('sec-sub-excel');
+            if (!box) return;
+            try {
+                const skills = await _skillsOnce();
+                const sp = Array.isArray(skills)
+                    ? skills.find(s => s.dir_name === 'excel-addin')
+                    : null;
+                box.style.display = (sp && sp.enabled) ? '' : 'none';
+            } catch (e) {
+                // Fehler ignorieren – der Block bleibt versteckt
+            }
+        };
+
         // ── E-Mail-Tab: nur sichtbar wenn 'email'-Skill aktiviert ──
         // Gleiches Muster wie beim SAP-Reiter, inklusive des Berechtigungsblocks
         // in Sicherheit → Berechtigungen: ohne aktiven Skill waere die Freigabe
@@ -1157,6 +1197,7 @@
             await updateSapTabVisibility();
             await updateEmailTabVisibility();
             await updateTracksSecVisibility();
+            await updateExcelSecVisibility();
             await updateKundenverwaltungTabVisibility();
             await updateSupportTabVisibility();
             await updateReminderSectionVisibility();

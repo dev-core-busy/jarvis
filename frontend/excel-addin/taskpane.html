@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tabellen-Assistent</title>
+    <link rel="stylesheet" href="/static/css/theme.css?v=12">
+    <link rel="icon" href="/static/excel-addin/icon-32.png" type="image/png">
+    <!--
+        ═══════════════════════════════════════════════════════════════════
+        Excel-Add-in – Aufgabenfenster
+        ───────────────────────────────────────────────────────────────────
+        Ein Chat auf die GERADE GEOEFFNETE Arbeitsmappe. Der Benutzer fragt,
+        der Server antwortet – und wenn etwas geaendert werden soll, sieht der
+        Benutzer jede Zelle mit altem und neuem Inhalt, bevor geschrieben wird.
+
+        DAS FENSTER IST SCHMAL (regulaer 320 px). Durchgehend EINE Spalte;
+        die Diff-Ansicht ist deshalb eine Liste und keine Tabelle mit vier
+        Spalten – die waere hier unlesbar.
+
+        Praefix `xl-` fuer alles hier, damit nichts mit `ad-` (Outlook-Add-in),
+        `em-` (/email) oder `sp-` (/sap) kollidiert.
+
+        Farben ausschliesslich ueber die Theme-Variablen aus theme.css. Office
+        liefert KEINE Theme-Information an das Fenster, deshalb folgt es dem
+        gespeicherten Jarvis-Theme (localStorage) wie die uebrigen Seiten.
+        ═══════════════════════════════════════════════════════════════════
+    -->
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body { height: 100%; }
+        body { font-family: var(--font-body); background: var(--bg-primary);
+               color: var(--text-primary); font-size: 13px; overflow-x: hidden;
+               display: flex; flex-direction: column; }
+        .hidden { display: none !important; }
+
+        /* ── Kopf ── */
+        .xl-top { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+            border-bottom: 1px solid var(--border); background: var(--bg-glass);
+            flex: 0 0 auto; }
+        /* Marken-Kreis. `topbar-avatar` ist der Haken, an dem branding.js ein
+           Firmenlogo bzw. die Initiale einsetzt – ohne diese Klasse bliebe hier
+           das Jarvis-Zeichen stehen, waehrend das Menueband die Marke traegt. */
+        .xl-logo { width: 24px; height: 24px; border-radius: 50%; flex: 0 0 auto;
+            background: var(--gradient); color: #fff; font-weight: 700;
+            font-size: 11px; display: flex; align-items: center;
+            justify-content: center; overflow: hidden; }
+        .xl-logo img { display: block; }
+        .xl-title { font-weight: 600; font-size: 13px; flex: 1 1 auto; min-width: 0;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .xl-iconbtn { background: none; border: none; color: var(--text-secondary);
+            cursor: pointer; padding: 4px; border-radius: 6px; line-height: 1;
+            font-size: 12px; font-weight: 700; font-family: inherit; flex: 0 0 auto;
+            display: inline-flex; align-items: center; justify-content: center; }
+        .xl-iconbtn svg { width: 16px; height: 16px; }
+        .xl-iconbtn:hover { background: rgba(var(--accent-rgb), .14); color: var(--accent); }
+
+        /* ── Bezugszeile: worauf sich der Chat gerade bezieht ──
+           STEHT KLEBEND UNTER DEM KOPF UND IST NICHT SCHMUECKEND. Ohne sie
+           weiss der Benutzer nicht, ob der Assistent seine aktuelle Auswahl
+           schon kennt – und eine Antwort ueber „die markierten Zellen" waere
+           nicht ueberpruefbar. */
+        .xl-ctx { flex: 0 0 auto; padding: 6px 10px; border-bottom: 1px solid var(--border);
+            background: var(--bg-secondary); font-size: 11px; color: var(--text-muted);
+            line-height: 1.45; }
+        .xl-ctx b { color: var(--text-secondary); font-weight: 600; }
+
+        /* ── Verlauf ── */
+        .xl-chat { flex: 1 1 auto; overflow-y: auto; padding: 10px; }
+        .xl-msg { margin-bottom: 10px; line-height: 1.5; font-size: 12.5px;
+            word-break: break-word; }
+        .xl-msg-user { border-left: 3px solid var(--accent); padding-left: 8px;
+            color: var(--text-secondary); }
+        .xl-msg-bot { white-space: pre-wrap; }
+        .xl-msg-err { color: var(--danger); }
+        /* Zwischenstand. Deckkraft statt harter Farbe, damit es in Hell und
+           Dunkel gleichermassen zurueckhaltend wirkt. */
+        .xl-msg-wait { color: var(--text-muted); font-style: italic; }
+
+        /* ── Diff ──
+           Jede Zelle EINE Zeile: Adresse, dann alt → neu untereinander. Eine
+           vierspaltige Tabelle waere bei 320 px nicht lesbar. */
+        .xl-diff { border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+            border-radius: 9px; background: var(--bg-secondary); padding: 9px 10px;
+            margin-bottom: 10px; }
+        .xl-diff-head { font-weight: 600; font-size: 12.5px; margin-bottom: 2px; }
+        .xl-diff-sum { font-size: 11.5px; color: var(--text-secondary);
+            line-height: 1.45; margin-bottom: 7px; }
+        .xl-diff-list { max-height: 260px; overflow-y: auto; padding-right: 4px; }
+        .xl-cell { padding: 6px 0; border-bottom: 1px solid rgba(var(--fg-rgb), .08);
+            font-size: 11.5px; line-height: 1.5; }
+        .xl-cell:last-child { border-bottom: none; }
+        .xl-cell-adr { font-weight: 600; color: var(--text-primary); }
+        .xl-cell-alt, .xl-cell-neu { display: block; word-break: break-all;
+            font-family: var(--font-mono, monospace); font-size: 11px; }
+        .xl-cell-alt { color: var(--text-muted); text-decoration: line-through;
+            text-decoration-color: color-mix(in srgb, var(--danger) 60%, transparent); }
+        /* NICHT `var(--success)` pur: gemessen ergibt #10b981 auf weissem Grund
+           nur 2,54:1 – deutlich unter WCAG AA (4,5:1). Und das ist ausgerechnet
+           der Text, den der Benutzer vor dem Bestaetigen pruefen soll: was in
+           die Zelle geschrieben wird.
+           Die Beimischung von `--text-primary` wirkt in BEIDE Richtungen, weil
+           die Variable dem Thema folgt: in Hell dunkelt sie ab, in Dunkel hellt
+           sie auf. Die Aussage "gruen = neu" bleibt erhalten. */
+        .xl-cell-neu { color: color-mix(in srgb, var(--success) 62%, var(--text-primary));
+            font-weight: 600; }
+        .xl-cell-why { color: var(--text-muted); font-size: 10.5px; margin-top: 2px; }
+        /* Abgewiesene Eintraege werden GEZEIGT, nicht verschwiegen – sonst haelt
+           der Benutzer den gekuerzten Vorschlag fuer den ganzen. */
+        .xl-rej { margin-top: 8px; padding: 7px 9px; border-radius: 7px;
+            font-size: 11px; line-height: 1.5;
+            border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+            background: color-mix(in srgb, var(--danger) 8%, transparent); }
+        .xl-rej b { color: var(--danger); }
+
+        /* ── Eingabe ── */
+        .xl-input { flex: 0 0 auto; border-top: 1px solid var(--border);
+            padding: 8px 10px; background: var(--bg-glass); }
+        .xl-input textarea { width: 100%; padding: 7px 8px; border-radius: 7px;
+            font-size: 12.5px; border: 1px solid var(--border);
+            background: rgba(var(--fg-rgb), .04); color: var(--text-primary);
+            font-family: inherit; resize: vertical; min-height: 4.2rem;
+            line-height: 1.45; }
+        .xl-input textarea:focus { outline: none; border-color: var(--accent); }
+
+        .xl-btn { background: none; border: 1px solid var(--border); color: var(--text-secondary);
+            padding: 6px 10px; border-radius: 7px; cursor: pointer; font-size: 12px;
+            font-family: inherit; white-space: nowrap; flex: 0 0 auto; }
+        .xl-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--text-primary); }
+        .xl-btn:disabled { opacity: .5; cursor: default; }
+        /* .btn-primary im Projekt hat width:100% – in einer Flex-Zeile fuellt das
+           die ganze Breite. Deshalb hier eigene Klasse mit flex:0 0 auto. */
+        .xl-btn-primary { background: var(--gradient); border: none; color: #fff; font-weight: 600; }
+        .xl-btn-primary:hover:not(:disabled) { filter: brightness(1.08); color: #fff; }
+        .xl-btn-danger { color: var(--danger);
+            border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+        .xl-btn-block { display: block; width: 100%; text-align: center; }
+        .xl-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 7px; }
+        .xl-status { font-size: 11.5px; color: var(--text-muted); line-height: 1.45;
+            word-break: break-word; }
+
+        /* ── Anmeldung ── */
+        .xl-body { padding: 12px 10px 40px; }
+        .xl-field { display: flex; flex-direction: column; gap: 3px; margin-bottom: 9px; }
+        .xl-field > label { font-size: 11.5px; font-weight: 600; color: var(--text-secondary); }
+        .xl-field input { width: 100%; padding: 6px 8px; border-radius: 7px; font-size: 12.5px;
+            border: 1px solid var(--border); background: rgba(var(--fg-rgb), .04);
+            color: var(--text-primary); font-family: inherit; }
+        .xl-field input:focus { outline: none; border-color: var(--accent); }
+        .xl-hint { color: var(--text-muted); font-size: 11.5px; line-height: 1.5; }
+        .xl-sep { height: 1px; background: var(--border); margin: 10px 0; }
+        .xl-warn { border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+            background: color-mix(in srgb, var(--danger) 8%, transparent);
+            color: var(--text-primary); border-radius: 8px; padding: 8px 10px;
+            font-size: 11.5px; line-height: 1.55; margin-bottom: 10px; }
+
+        /* ── Band "neue Fassung verfuegbar" ──
+           Akzentfarbe statt --danger: ein veraltetes Manifest ist kein Fehler.
+           DECKENDE Flaeche, weil es ueber dem Kopf liegt. */
+        .xl-upd { flex: 0 0 auto; background: var(--bg-secondary);
+            border-bottom: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+            box-shadow: inset 3px 0 0 var(--accent);
+            padding: 8px 10px; font-size: 11.5px; line-height: 1.5; }
+        .xl-upd-head { font-weight: 600; color: var(--text-primary); margin-bottom: 3px; }
+        .xl-upd-text { color: var(--text-secondary); }
+        /* Ein <a> mit Knopf-Klasse ist ohne diese Zeile unterstrichen. */
+        .xl-upd a.xl-btn { text-decoration: none; display: inline-block; margin-top: 6px; }
+
+        /* ── Bestaetigungsdialog ──
+           GEMELDET 2026-08-19 fuer das Outlook-Add-in: in Office-Aufgabenfenstern
+           (WebView2) sind alert/confirm/prompt je nach Host unterdrueckt.
+           `confirm()` liefert dann keinen Wert, und `if (!confirm(...)) return;`
+           bricht WORTLOS ab – der Knopf sieht kaputt aus. Deshalb ein eigener
+           Dialog mit DECKENDER Flaeche. */
+        .xl-ask { position: fixed; inset: 0; z-index: 60; display: flex;
+            align-items: center; justify-content: center; padding: 14px;
+            background: rgba(0, 0, 0, .55); }
+        .xl-ask.hidden { display: none; }
+        .xl-ask-box { width: 100%; max-width: 300px; background: var(--bg-secondary);
+            border: 1px solid var(--border); border-radius: 10px; padding: 14px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, .35); }
+        .xl-ask-text { font-size: .84rem; color: var(--text-primary);
+            white-space: pre-line; margin-bottom: 12px; }
+        .xl-ask-row { display: flex; gap: 8px; justify-content: flex-end; }
+
+        code { font-size: .9em; padding: 0 3px; border-radius: 3px;
+            background: rgba(var(--fg-rgb), .08); word-break: break-all; }
+        a { color: var(--accent); }
+    </style>
+</head>
+<body>
+<script>try{if(localStorage.getItem('jarvis_theme')==='light')document.body.classList.add('light');}catch(e){}</script>
+
+<!-- ═══ Band: veraltetes Manifest ═══
+     Faengt den EINEN Teil, der sich nicht von selbst aktualisiert. Das Fenster
+     samt Logik liegt auf dem Server und ist bei jedem Oeffnen frisch; das
+     MANIFEST dagegen wird bei Installation aus Datei oder Ordner nie
+     aktualisiert. Startet verborgen: eingeblendet wird nur, wenn die Abweichung
+     BELEGT ist – nie auf Vermutung. -->
+<div id="xl-upd" class="xl-upd hidden"></div>
+
+<!-- Bestaetigungsdialog: ersetzt window.confirm (siehe CSS-Kommentar). -->
+<div id="xl-ask" class="xl-ask hidden" role="alertdialog" aria-modal="true"
+     aria-labelledby="xl-ask-text">
+  <div class="xl-ask-box">
+    <div class="xl-ask-text" id="xl-ask-text"></div>
+    <div class="xl-ask-row">
+      <button class="xl-btn" id="xl-ask-no" data-i18n="addin.ask_no">Abbrechen</button>
+      <button class="xl-btn" id="xl-ask-yes" data-i18n="addin.ask_yes">Ja</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Anmeldung ═══ -->
+<div id="xl-login" class="hidden">
+    <div class="xl-top">
+        <div class="xl-logo topbar-avatar">J</div>
+        <span class="xl-title"><span class="brand-app-name">Jarvis</span>
+            <span data-i18n="xl.title">Tabellen-Assistent</span></span>
+    </div>
+    <div class="xl-body">
+        <p class="xl-hint" id="xl-login-hint"></p>
+        <!-- Zustand der Excel-Anbindung SCHON HIER: office.js kommt aus dem Netz
+             von Microsoft, und ein Firmennetz, das den Zugang sperrt, ist die
+             haeufigste Ursache dafuer, dass sich ein Aufgabenfenster merkwuerdig
+             verhaelt. Stuende die Aussage erst hinter der Anmeldung, koennte
+             genau derjenige sie nicht lesen, der dort haengenbleibt. -->
+        <p class="xl-status" id="xl-login-office" style="margin-top:6px;"></p>
+        <div class="xl-sep"></div>
+        <div class="xl-field">
+            <label data-i18n="login.username">Benutzername</label>
+            <input type="text" id="xl-user" autocomplete="username" autocapitalize="none" spellcheck="false">
+        </div>
+        <div class="xl-field">
+            <label data-i18n="login.password">Passwort</label>
+            <input type="password" id="xl-pass" autocomplete="current-password">
+        </div>
+        <div class="xl-field hidden" id="xl-totp-wrap">
+            <label>Code (2FA)</label>
+            <input type="text" id="xl-totp" inputmode="numeric" autocomplete="one-time-code">
+        </div>
+        <button class="xl-btn xl-btn-primary xl-btn-block" id="xl-do-login"
+                data-i18n="login.submit">Anmelden</button>
+        <p class="xl-status" id="xl-login-status" style="margin-top:8px;"></p>
+    </div>
+</div>
+
+<!-- ═══ Anwendung ═══ -->
+<div id="xl-app" class="hidden" style="display:flex;flex-direction:column;height:100%;">
+    <div class="xl-top">
+        <div class="xl-logo topbar-avatar">J</div>
+        <span class="xl-title"><span class="brand-app-name">Jarvis</span>
+            <span data-i18n="xl.title">Tabellen-Assistent</span></span>
+        <!-- Sinnbilder als SVG, nicht als Textzeichen: '◐' und '⏻' werden je
+             nach Schrift als Kaestchen oder winziger Punkt gerendert. Dieselben
+             Pfade wie in taskpane.html des Outlook-Add-ins. -->
+        <button class="xl-iconbtn" id="xl-lang" title="DE/EN">DE</button>
+        <button class="xl-iconbtn" id="xl-theme" title="Hell/Dunkel umschalten" data-i18n-title="chat.theme">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        </button>
+        <button class="xl-iconbtn" id="xl-logout" title="Abmelden" data-i18n-title="chat.logout">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        </button>
+    </div>
+
+    <div class="xl-ctx" id="xl-ctx"></div>
+
+    <div class="xl-chat" id="xl-chat"></div>
+
+    <div class="xl-input">
+        <textarea id="xl-frage" rows="3"
+                  data-i18n-placeholder="xl.ph"
+                  placeholder="Frage zur geöffneten Tabelle – z. B. „Was fällt an Spalte D auf?“ oder „Trage in G2:G40 die Marge ein“"></textarea>
+        <div class="xl-row">
+            <button class="xl-btn xl-btn-primary" id="xl-send" data-i18n="xl.send">Fragen</button>
+            <button class="xl-btn" id="xl-undo" style="display:none;"
+                    data-i18n="xl.undo">Letzte Änderung zurücknehmen</button>
+            <span class="xl-status" id="xl-status" style="flex:1 1 100%;"></span>
+        </div>
+    </div>
+</div>
+
+<!--
+    Office.js kommt vom Microsoft-Netz – das ist die von Microsoft vorgegebene
+    Einbindung. Faellt sie aus (Arbeitsplatz ohne Internet), sagt das Fenster
+    das im Klartext, statt weiss zu bleiben.
+    `async` IST PFLICHT, NICHT `defer`: ein defer-Skript wird zwar spaeter
+    ausgefuehrt, aber `DOMContentLoaded` WARTET darauf – und excel.js startet an
+    genau diesem Ereignis. Mit `defer` bliebe das Fenster weiss, solange die
+    Anfrage laeuft (bei gesperrtem Microsoft-Netz 30–75 s TCP-Zeitgrenze), und
+    die Wartegrenze in `officeErmitteln` kaeme nie zum Zug.
+-->
+<script async src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+<script src="/static/js/icons.js?v=1"></script>
+<script src="/static/js/i18n.js?v=56"></script>
+<script src="/static/js/theme.js?v=2"></script>
+<!-- Branding: Markenfarben, Markenname (.brand-app-name) und Firmenlogo
+     (.topbar-avatar). /api/branding haengt an KEINER Anmeldung, die Marke steht
+     also schon auf dem Anmeldebildschirm richtig da. -->
+<script src="/static/js/branding.js?v=23"></script>
+<script src="/static/excel-addin/excel.js?v=1"></script>
+</body>
+</html>

@@ -186,10 +186,93 @@
         code { font-size: .9em; padding: 0 3px; border-radius: 3px;
             background: rgba(var(--fg-rgb), .08); word-break: break-all; }
         a { color: var(--accent); }
+
+        /* Startanzeige – siehe Begruendung am Element selbst. Sie ist der
+           EINZIGE Bereich, der sichtbar startet; alles andere blendet JS ein.
+           Deckende Flaeche, weil sie im Fehlerfall ueber allem liegt. */
+        .xl-boot { padding: 14px; font-size: .82rem; color: var(--text-secondary);
+            background: var(--bg-primary); line-height: 1.5; }
+        .xl-boot-head { font-weight: 600; color: var(--text-primary);
+            margin-bottom: 6px; }
+        .xl-boot ul { margin: 6px 0 0 16px; }
+        .xl-boot li { margin-bottom: 3px; }
+        .xl-boot-err { color: var(--danger); word-break: break-word;
+            margin-top: 8px; font-family: ui-monospace, monospace;
+            font-size: .76rem; }
     </style>
 </head>
 <body>
 <script>try{if(localStorage.getItem('jarvis_theme')==='light')document.body.classList.add('light');}catch(e){}</script>
+
+<!-- ═══ Startanzeige ═══
+     GEMELDET am 2026-08-21: das Fenster blieb in Excel WEISS – "ohne jede
+     weitere Reaktion". Das war kein Zufall, sondern Bauart: `#xl-login` UND
+     `#xl-app` starten `hidden`, eingeblendet wird erst in `zeigeLogin()` bzw.
+     `zeigeApp()`. Scheitert davor irgendetwas – ein WebView ohne `fetch`, ein
+     Skript, das nicht geladen wird, ein Syntaxfehler – dann blendet niemand
+     etwas ein, und der Benutzer sieht eine leere Flaeche ohne einen Hinweis,
+     was fehlt. Aus der Ferne ist so ein Fehler nicht zu stellen.
+
+     Dieser Block ist deshalb der einzige, der SICHTBAR startet, und wird von
+     `zeigeLogin()`/`zeigeApp()` wieder entfernt. Bleibt er stehen, hat das
+     Fenster ein Problem – und sagt es. Das behebt die Ursache nicht, aber es
+     macht sie lesbar; ein Fenster, das schweigt, ist der schlimmere Fehler. -->
+<div id="xl-boot" class="xl-boot">
+    <div class="xl-boot-head" data-i18n="xl.boot_head">Assistent wird geladen…</div>
+    <div id="xl-boot-detail" class="hidden">
+        <div data-i18n="xl.boot_stuck">Das dauert länger als erwartet. Häufige Ursachen:</div>
+        <ul>
+            <li data-i18n="xl.boot_c1">Das Zertifikat dieses Servers ist auf diesem Rechner nicht als vertrauenswürdig hinterlegt. Ein Aufgabenfenster fragt nicht nach – es bleibt leer.</li>
+            <li data-i18n="xl.boot_c2">Die Excel-Verbindung (office.js von Microsoft) ist im Netz gesperrt.</li>
+            <li data-i18n="xl.boot_c3">Diese Excel-Fassung ist zu alt für das Aufgabenfenster (nötig ist Excel 2019 oder Microsoft 365).</li>
+        </ul>
+        <div id="xl-boot-err" class="xl-boot-err"></div>
+    </div>
+</div>
+<script>
+/* Faengt Fehler, die VOR oder WAEHREND des Startens auftreten – auch einen
+   Syntaxfehler in excel.js, der sonst spurlos bliebe. Bewusst inline und ganz
+   oben: eine externe Datei koennte selbst diejenige sein, die nicht laedt. */
+(function () {
+    function aufklappen() {
+        var d = document.getElementById('xl-boot-detail');
+        if (d) d.classList.remove('hidden');
+    }
+    /* Ein bereits gemeldeter Grund wird NIE ueberschrieben – der erste ist der
+       ursaechliche, spaetere Fehler sind meist seine Folge. Und der Wachhund
+       unten darf ihn schon gar nicht mit Leere ersetzen; genau das hat er in
+       der ersten Fassung getan, sodass die konkrete Zeile wieder verschwand. */
+    function zeige(text) {
+        try {
+            aufklappen();
+            var e = document.getElementById('xl-boot-err');
+            if (e && !e.textContent) e.textContent = String(text || '').slice(0, 300);
+        } catch (x) { }
+    }
+    /* `true` = Erfassungsphase, und das ist hier KEIN Detail: ein Skript oder
+       Stylesheet, das gar nicht erst laedt, feuert sein `error` am ELEMENT und
+       steigt NICHT bis zum Fenster auf. Ohne die Erfassungsphase bliebe genau
+       der wahrscheinlichste Fall in einem abgeschotteten Netz unsichtbar –
+       eine Datei, die der Arbeitsplatz nicht abrufen kann. */
+    window.addEventListener('error', function (ev) {
+        var z = ev && ev.target;
+        if (z && (z.src || z.href)) {
+            zeige('Nicht ladbar: ' + (z.src || z.href));
+        } else {
+            zeige((ev && ev.message) || 'Fehler beim Laden');
+        }
+    }, true);
+    window.addEventListener('unhandledrejection', function (ev) {
+        zeige((ev && ev.reason && ev.reason.message) || 'Fehler beim Laden');
+    });
+    /* Wachhund: kein Fehler, aber auch kein Fortschritt (haeufigster Fall –
+       eine Ressource, die gar nicht erst antwortet). */
+    setTimeout(function () {
+        var b = document.getElementById('xl-boot');
+        if (b && !b.classList.contains('hidden')) aufklappen();
+    }, 9000);
+})();
+</script>
 
 <!-- ═══ Band: veraltetes Manifest ═══
      Faengt den EINEN Teil, der sich nicht von selbst aktualisiert. Das Fenster
@@ -292,12 +375,12 @@
 -->
 <script async src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
 <script src="/static/js/icons.js?v=1"></script>
-<script src="/static/js/i18n.js?v=56"></script>
+<script src="/static/js/i18n.js?v=57"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <!-- Branding: Markenfarben, Markenname (.brand-app-name) und Firmenlogo
      (.topbar-avatar). /api/branding haengt an KEINER Anmeldung, die Marke steht
      also schon auf dem Anmeldebildschirm richtig da. -->
 <script src="/static/js/branding.js?v=23"></script>
-<script src="/static/excel-addin/excel.js?v=1"></script>
+<script src="/static/excel-addin/excel.js?v=2"></script>
 </body>
 </html>

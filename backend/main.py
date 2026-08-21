@@ -9898,11 +9898,61 @@ async def jira_matching_tickets_api(crm: str = "", crm_number: str = "", number:
 
 # ─── Support-Assistent (/support) ────────────────────────────────────
 
+_MANIFEST_ENABLED_CACHE: dict[str, bool] = {}
+
+
+def _manifest_enabled(name: str) -> bool:
+    """Vorgabe aus `skills/<name>/skill.json` – der Zustand OHNE Eintrag.
+
+    Bewusst ein direkter Dateizugriff statt `_get_skill_manager()`: die
+    Funktion haengt an `/api/me` und damit an jedem Seitenaufbau; ein
+    Discover-Lauf ueber alle Skills waere dort zu teuer. Ergebnis wird
+    gemerkt – das Manifest aendert sich nur mit einem Deploy.
+
+    Fehlt das Verzeichnis, ist der Skill nicht installiert → False. Das ist
+    die zweite Haelfte der Zusage des Docstrings unten ("installiert UND
+    aktiviert"); ueber `skill_states` allein waere sie nicht pruefbar.
+    """
+    if name in _MANIFEST_ENABLED_CACHE:
+        return _MANIFEST_ENABLED_CACHE[name]
+    wert = False
+    try:
+        f = Path(__file__).parent.parent / "skills" / name / "skill.json"
+        if f.exists():
+            import json as _json
+            wert = bool(_json.loads(f.read_text(encoding="utf-8")).get("enabled", True))
+    except Exception:  # noqa: BLE001
+        wert = False
+    _MANIFEST_ENABLED_CACHE[name] = wert
+    return wert
+
+
 def _skill_active(name: str) -> bool:
-    """True, wenn der Skill installiert UND aktiviert ist."""
+    """True, wenn der Skill installiert UND aktiviert ist.
+
+    FALLSTRICK, der am 2026-08-21 gemeldet wurde: `get_skill_states()` liefert
+    NUR, was in der settings.json steht – der Manifest-Standard wird dort NICHT
+    eingemischt. Ein Skill, den nie jemand umgeschaltet hat, hat dort auch
+    keinen Eintrag; `st.get("enabled")` war damit `None` und dieser Wachposten
+    meldete "aus", obwohl der SkillManager den Skill laedt und seine Werkzeuge
+    bereitstellt (`manager.py`: `state.get("enabled", skill_info.get(...))`).
+
+    Sichtbar wurde das erst mit `excel-addin` – dem einzigen ueber
+    `_skill_active` abgesicherten Skill, dessen Manifest `enabled: true` sagt.
+    Auf ECHT fehlte deshalb die Portal-Kachel und `/excel` antwortete 404,
+    waehrend der Skill lief. Alle uebrigen stehen im Manifest auf `false`, dort
+    war das Ergebnis zufaellig richtig.
+
+    Dieselbe Fehlerklasse wie bei der Lizenz-Zaehlung (CLAUDE.md, "aktive
+    Skills sind mehr, als in settings.json stehen"). Wer hier etwas aendert,
+    muss es gegen `backend/skills/manager.py` tun – die beiden duerfen nicht
+    auseinanderlaufen.
+    """
     try:
         st = config.get_skill_states().get(name, {}) or {}
-        return bool(st.get("enabled"))
+        if "enabled" in st:
+            return bool(st["enabled"])
+        return _manifest_enabled(name)
     except Exception:
         return False
 

@@ -196,9 +196,16 @@
             margin-bottom: 6px; }
         .xl-boot ul { margin: 6px 0 0 16px; }
         .xl-boot li { margin-bottom: 3px; }
+        /* Vorgabe ist die kurze TECHNISCHE Zeile (eine URL, eine
+           Ausnahme-Meldung) – dafuer Monospace und Warnfarbe. */
         .xl-boot-err { color: var(--danger); word-break: break-word;
             margin-top: 8px; font-family: ui-monospace, monospace;
             font-size: .76rem; }
+        /* Steht die Ursache fest, ist der Text ein ERKLAERENDER FLIESSTEXT und
+           kein Fehlerstring. In Monospace und durchgehend Warnfarbe waeren
+           mehrere Saetze kaum lesbar – gemessen am 2026-08-21 am echten Fall. */
+        .xl-boot-err.is-text { font-family: inherit; font-size: .82rem;
+            color: var(--text-secondary); word-break: normal; }
     </style>
 </head>
 <body>
@@ -220,12 +227,18 @@
 <div id="xl-boot" class="xl-boot">
     <div class="xl-boot-head" data-i18n="xl.boot_head">Assistent wird geladen…</div>
     <div id="xl-boot-detail" class="hidden">
-        <div data-i18n="xl.boot_stuck">Das dauert länger als erwartet. Häufige Ursachen:</div>
-        <ul>
-            <li data-i18n="xl.boot_c1">Das Zertifikat dieses Servers ist auf diesem Rechner nicht als vertrauenswürdig hinterlegt. Ein Aufgabenfenster fragt nicht nach – es bleibt leer.</li>
-            <li data-i18n="xl.boot_c2">Die Excel-Verbindung (office.js von Microsoft) ist im Netz gesperrt.</li>
-            <li data-i18n="xl.boot_c3">Diese Excel-Fassung ist zu alt für das Aufgabenfenster (nötig ist Excel 2019 oder Microsoft 365).</li>
-        </ul>
+        <!-- Die Vermutungsliste wird AUSGEBLENDET, sobald die Ursache
+             feststeht (`bootFehler(text, true)`). Drei Vermutungen neben der
+             gemessenen Antwort zu zeigen, macht die Meldung schwaecher, nicht
+             vollstaendiger. -->
+        <div id="xl-boot-generic">
+            <div data-i18n="xl.boot_stuck">Das dauert länger als erwartet. Häufige Ursachen:</div>
+            <ul>
+                <li data-i18n="xl.boot_c1">Das Zertifikat dieses Servers ist auf diesem Rechner nicht als vertrauenswürdig hinterlegt. Ein Aufgabenfenster fragt nicht nach – es bleibt leer.</li>
+                <li data-i18n="xl.boot_c2">Die Excel-Verbindung (office.js von Microsoft) ist im Netz gesperrt.</li>
+                <li data-i18n="xl.boot_c3">Diese Excel-Fassung benutzt für Aufgabenfenster noch den Internet Explorer – das betrifft die Kaufversionen bis einschließlich Office 2019.</li>
+            </ul>
+        </div>
         <div id="xl-boot-err" class="xl-boot-err"></div>
     </div>
 </div>

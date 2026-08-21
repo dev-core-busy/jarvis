@@ -93,6 +93,18 @@ EXCEL_ADDIN_VERSION = "1.0.0.0"
 # HOEHER WAERE EIN FEHLER, kein Fortschritt: der Anforderungssatz entscheidet,
 # welche Excel-Staende das Add-in ueberhaupt installieren koennen. 1.7 kam mit
 # Office 2019/M365 und ist auf allem verfuegbar, was heute im Einsatz ist.
+#
+# SENKEN HILFT ABER AUCH NICHT – Lehre vom 2026-08-21. Auf einem Office
+# Professional Plus 2019 war der Anforderungssatz ERFUELLT: das Add-in liess
+# sich installieren, der Menueband-Knopf erschien, das Fenster ging auf – und
+# blieb weiss. Die Kaufversionen bis einschliesslich Office 2019 stellen
+# Aufgabenfenstern den Trident-WebView (Internet Explorer) bereit, und der
+# beherrscht nur ES5 und keine CSS-Variablen. Das ist eine Grenze des WEBVIEW,
+# nicht des API-Satzes: wer hier die Zahl herunterdreht, aendert daran nichts
+# und verliert nur Funktionen. WebView2 setzt Microsoft 365 bzw. Office LTSC
+# 2021 voraus und laesst sich fuer Kaufversionen nicht erzwingen (kein
+# Registry-Schalter; die Laufzeitumgebung von Hand zu installieren genuegt
+# nicht). Die Absage an den Benutzer steht in `excel.js::start()`.
 EXCEL_API_MIN = "1.7"
 
 # EIGENER Namensraum – NICHT der aus addin.py. Die Kennung wird aus der

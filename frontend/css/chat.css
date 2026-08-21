@@ -749,7 +749,7 @@ body.light .welcome-card { background: rgba(var(--shadow-rgb), 0.03); }
     transition: color .15s, opacity .15s;
     opacity: .6;
 }
-.msg-row.user:hover .msg-edit-btn { opacity: 1; color: var(--text); }
+.msg-row.user:hover .msg-edit-btn { opacity: 1; color: var(--text-primary); }
 .msg-edit-btn:hover { opacity: 1 !important; }
 .msg-edit-btn:focus-visible {
     outline: 1px solid var(--accent);
@@ -776,13 +776,18 @@ body.light .welcome-card { background: rgba(var(--shadow-rgb), 0.03); }
 }
 
 /* ─── Edit-Modus innerhalb der Bubble ─────────────────────────── */
+/* ACHTUNG, hier gilt NICHT das Muster aus style.css: chat.css laesst --fg-rgb
+   im Hell-Theme bewusst auf Weiss stehen (siehe body.light oben). Eine Toenung
+   auf --fg-rgb waere hier also in BEIDEN Themes weiss – im Hellen ein
+   unsichtbares Eingabefeld. Deshalb wie die uebrigen Chat-Flaechen: Toenung auf
+   --shadow-rgb, den Hell-Wert ausdruecklich darunter (analog --code-bg). */
 .msg-edit-area {
     width: 100%;
     min-height: 60px;
-    background: rgba(var(--shadow-rgb), .25);
+    background: rgba(var(--shadow-rgb), 0.25);
     border: 1px solid var(--accent);
     border-radius: 8px;
-    color: var(--text);
+    color: var(--text-primary);
     font-family: inherit;
     font-size: 14px;
     line-height: 1.5;
@@ -791,6 +796,9 @@ body.light .welcome-card { background: rgba(var(--shadow-rgb), 0.03); }
     outline: none;
     box-sizing: border-box;
 }
+/* Im Hellen liegt das Feld auf einer hellen Bubble: 25 % Schwarz waeren ein
+   grauer Kasten (gemeldet 2026-08-20). Derselbe Wert wie --code-bg in Hell. */
+body.light .msg-edit-area { background: rgba(var(--shadow-rgb), 0.07); }
 .msg-edit-area:focus {
     box-shadow: 0 0 8px rgba(var(--accent-rgb), .25);
 }

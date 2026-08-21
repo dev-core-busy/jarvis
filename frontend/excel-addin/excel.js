@@ -1087,10 +1087,21 @@
     /* Zeigt die Startanzeige mit Klartext-Grund – fuer den Fall, dass das
        Fenster GAR NICHT arbeiten kann und deshalb weder Anmeldung noch App
        sinnvoll waeren. */
-    function bootFehler(text) {
+    function bootFehler(text, genau) {
         var d = $('xl-boot-detail'), f = $('xl-boot-err');
         if (d) d.classList.remove('hidden');
         if (f) f.textContent = text || '';
+        // Steht die Ursache fest, verschwindet die Vermutungsliste: drei
+        // "haeufige Ursachen" neben der gemessenen Antwort lassen den
+        // Benutzer raten, obwohl nichts mehr zu raten ist.
+        if (genau) {
+            var g = $('xl-boot-generic');
+            if (g) g.classList.add('hidden');
+            if (f) f.classList.add('is-text');
+            var k = document.querySelector('.xl-boot-head');
+            if (k) k.textContent = T('xl.boot_head_stop',
+                'Der Assistent kann in dieser Excel-Fassung nicht laufen');
+        }
     }
 
     function start() {
@@ -1101,12 +1112,28 @@
         // kosten, nie die ganze Anzeige.
         try { binden(); } catch (e) { }
 
-        // Ohne `fetch` kann das Fenster nichts abrufen – aber es muss das
-        // SAGEN statt leer zu bleiben. Der Aufruf in `versionPruefen()` waere
-        // sonst ein ReferenceError, der `start()` vor jeder Anzeige beendet.
+        // Fehlendes `fetch` ist KEINE vage Vermutung, sondern die Signatur des
+        // Trident-WebView (Internet Explorer). Den benutzen die KAUFVERSIONEN
+        // bis einschliesslich Office 2019 fuer Aufgabenfenster – am 2026-08-21
+        // an einem echten Office Professional Plus 2019 gemessen. Microsoft
+        // laesst sie nicht auf WebView2 umstellen (kein Registry-Schalter, die
+        // Laufzeitumgebung von Hand zu installieren aendert nichts); WebView2
+        // setzt Microsoft 365 bzw. Office LTSC 2021 voraus.
+        //
+        // Trident kann nur ES5 – und vor allem KEINE CSS-Variablen, auf denen
+        // die gesamte Oberflaeche dieses Projekts beruht (109 Fundstellen im
+        // Fenster, dazu color-mix). Eine Unterstuetzung waere deshalb kein
+        // Nachbessern, sondern ein zweites Designsystem. Microsofts eigene
+        // Empfehlung fuer diese WebViews ist ausdruecklich eine klare Absage
+        // an den Benutzer – genau die steht hier.
+        //
+        // Ohne diese Pruefung waere der `fetch`-Aufruf in `versionPruefen()`
+        // ein ReferenceError, der `start()` vor jeder Anzeige beendet: das
+        // gemeldete weisse Fenster.
         if (typeof fetch !== 'function') {
             bootFehler(T('xl.no_fetch',
-                'Dieses Aufgabenfenster läuft in einer veralteten Browser-Umgebung. Nötig ist Excel 2019 oder Microsoft 365 (mit WebView2).'));
+                'Dieses Excel benutzt für Aufgabenfenster noch den Internet Explorer. Das betrifft die Kaufversionen bis einschließlich Office 2019 – sie lassen sich nicht umstellen. Der Assistent braucht Microsoft 365 oder Office LTSC 2021 (oder neuer). Bis dahin: dieselben Tabellenfunktionen stehen im Browser im Portal zur Verfügung – Datei dort in den Chat legen.'),
+                true);
             return;
         }
 

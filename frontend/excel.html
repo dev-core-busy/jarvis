@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Excel-Assistent</title>
     <link rel="stylesheet" href="/static/css/theme.css?v=13">
+    <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
+    <link rel="stylesheet" href="/static/css/avatar.css?v=8">
     <link rel="icon" href="/static/excel-addin/icon-32.png" type="image/png">
     <!--
         ═══════════════════════════════════════════════════════════════════
@@ -31,25 +33,47 @@
                color: var(--text-primary); min-height: 100vh; }
         .hidden { display: none !important; }
 
-        .xp-top { display: flex; align-items: center; gap: 12px; padding: 12px 20px;
-            border-bottom: 1px solid var(--border); background: var(--bg-glass);
+        /* ── Titelleiste ──
+           WORTGLEICH zu /email, /tracks, /sap und /support. Bis 2026-08-21
+           hatte diese Seite eine eigene Fassung (`.xp-top`, `.xp-iconbtn`,
+           ein einzelner DE/EN-Umschalter, kein Abmelden) – gemeldet wurde sie
+           als "das Home Symbol fehlt", tatsaechlich wich die ganze Leiste ab.
+           Wer zwischen den Bereichen wechselt, muss die Knoepfe am selben
+           Platz und in derselben Form finden; hier etwas Eigenes zu bauen ist
+           kein Gestaltungsspielraum, sondern Drift. */
+        .topbar { display: flex; align-items: center; justify-content: space-between;
+            padding: 10px 16px; border-bottom: 1px solid var(--border);
+            background: var(--bg-glass); backdrop-filter: blur(8px);
             position: sticky; top: 0; z-index: 30; }
-        .xp-logo { width: 32px; height: 32px; border-radius: 50%; flex: 0 0 auto;
-            background: var(--gradient); color: #fff; font-weight: 700; font-size: 14px;
-            display: flex; align-items: center; justify-content: center; overflow: hidden; }
-        .xp-logo img { display: block; }
-        .xp-title { font-weight: 600; font-size: 15px; flex: 1 1 auto; min-width: 0; }
+        .topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+        .topbar-right { display: flex; align-items: center; gap: 4px; }
+        .topbar-avatar { width: 32px; height: 32px; border-radius: 50%;
+            background: var(--gradient); display: flex; align-items: center;
+            justify-content: center; font-size: 14px; font-weight: 700; color: #fff;
+            flex-shrink: 0; overflow: hidden; }
+        .topbar-avatar img { display: block; }
+        .topbar-title { font-size: 19px; font-weight: 600; white-space: nowrap; }
+
         /* `text-decoration: none` ist Pflicht, weil der Haus-Knopf ein <a> ist
            (er navigiert, dafuer braucht es kein JS) und weiter unten `a` die
            Akzentfarbe samt Unterstreichung bekommt. Gleiche Falle wie bei
            `.xp-btn` darunter und beim Download-Knopf in /email. */
-        .xp-iconbtn { background: none; border: none; color: var(--text-secondary);
-            cursor: pointer; padding: 6px; border-radius: 8px; line-height: 1;
-            font-size: 13px; font-weight: 700; font-family: inherit; flex: 0 0 auto;
+        .btn-theme { background: none; border: none; color: var(--text-muted);
+            padding: 4px 8px; border-radius: 8px; cursor: pointer;
             text-decoration: none;
-            display: inline-flex; align-items: center; justify-content: center; }
-        .xp-iconbtn svg { width: 18px; height: 18px; }
-        .xp-iconbtn:hover { background: rgba(var(--accent-rgb), .14); color: var(--accent); }
+            display: flex; align-items: center; justify-content: center;
+            transition: color .2s, background .2s; }
+        .btn-theme:hover { background: rgba(var(--accent-rgb), .12); color: var(--accent); }
+        .btn-theme svg { width: 20px; height: 20px; }
+
+        .lang-toggle { display: flex; gap: 2px; background: rgba(var(--fg-rgb, 148,163,184), .05);
+            border: 1px solid rgba(var(--fg-rgb, 148,163,184), .1); border-radius: 8px; padding: 2px; }
+        .lang-toggle-btn { background: transparent; border: none; color: var(--text-secondary);
+            font-size: .72rem; font-weight: 700; letter-spacing: .04em; padding: 3px 10px;
+            border-radius: 6px; cursor: pointer; font-family: var(--font-body);
+            transition: background .15s, color .15s; }
+        .lang-toggle-btn:hover { color: var(--text-primary); }
+        .lang-toggle-btn.active { background: rgba(var(--accent-rgb), .35); color: var(--text-primary); }
 
         .xp-wrap { max-width: 860px; margin: 0 auto; padding: 22px 20px 60px; }
         .xp-lead { color: var(--text-secondary); line-height: 1.65; font-size: .92rem;
@@ -114,25 +138,41 @@
 <body>
 <script>try{if(localStorage.getItem('jarvis_theme')==='light')document.body.classList.add('light');}catch(e){}</script>
 
-<div class="xp-top">
-    <div class="xp-logo topbar-avatar">J</div>
-    <span class="xp-title"><span class="brand-app-name">Jarvis</span>
-        <span data-i18n="xp.title">Excel-Assistent</span></span>
-    <button class="xp-iconbtn" id="xp-lang" title="DE/EN">DE</button>
-    <!-- HAUS, nicht Zurueck-Pfeil, und RECHTS in der Knopfleiste: genau so
-         steht der Weg zum Portal auf /email, /tracks, /sap und /wissen
-         (`nav.home`). Bis 2026-08-21 sass hier links ein Pfeil mit eigenem
-         Schluessel `portal.back` - dieselbe Aussage an anderer Stelle mit
-         anderem Zeichen, und deshalb wurde er als fehlend gemeldet. Ein
-         Bedienelement, das es ueberall gibt, muss ueberall gleich aussehen
-         und am selben Platz sitzen. -->
-    <a href="/portal" class="xp-iconbtn" title="Startseite" data-i18n-title="nav.home">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-    </a>
-    <button class="xp-iconbtn" id="xp-theme" title="Hell/Dunkel umschalten" data-i18n-title="chat.theme">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-    </button>
-</div>
+<!-- ═══ Titelleiste ═══
+     BAUGLEICH zu /email, /tracks, /sap und /support – Aufbau, Klassen,
+     Reihenfolge und Symbole. Gemeldet wurde am 2026-08-21 "das Home Symbol
+     fehlt"; tatsaechlich wich die ganze Leiste ab (eigene Klassen, ein
+     einzelner DE/EN-Umschalter, kein Abmelden, links ein Zurueck-Pfeil).
+
+     Sprache und Thema brauchen hier KEINEN eigenen Code: `i18n.js` verdrahtet
+     `.lang-toggle-btn` samt Aktiv-Zustand, `theme.js` `#btn-theme-toggle`
+     samt Sonne/Mond. Die frueheren Eigenbauten in excel_portal.js waren
+     Verdopplung mit abweichendem Verhalten. -->
+<header class="topbar">
+    <div class="topbar-left">
+        <div class="topbar-avatar">J</div>
+        <span class="topbar-title"><span class="brand-app-name">Jarvis</span>
+            <span data-i18n="xp.title">Excel-Assistent</span></span>
+    </div>
+    <div class="topbar-right">
+        <div class="lang-toggle" id="xp-lang-toggle">
+            <button class="lang-toggle-btn" data-lang="de" onclick="window.setLang && window.setLang('de')" title="Deutsch">DE</button>
+            <button class="lang-toggle-btn" data-lang="en" onclick="window.setLang && window.setLang('en')" title="English">EN</button>
+        </div>
+        <!-- Als <a>, nicht als Knopf mit JS: die Seite navigiert nur. So macht
+             es auch /sap; /email und /tracks nehmen dafuer einen Knopf, das
+             Zeichen und der Platz sind identisch. -->
+        <a href="/portal" class="btn-theme" title="Startseite" data-i18n-title="nav.home">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        </a>
+        <button class="btn-theme" id="btn-theme-toggle" title="Hell/Dunkel umschalten" data-i18n-title="chat.theme">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        </button>
+        <button class="btn-theme" id="xp-logout-btn" title="Abmelden" data-i18n-title="chat.logout">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        </button>
+    </div>
+</header>
 
 <div class="xp-wrap">
     <!-- Fehlt die Freigabe, steht der Grund GANZ OBEN – und die Seite bietet
@@ -185,7 +225,19 @@
 <script src="/static/js/i18n.js?v=57"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=23"></script>
+<!-- sessions.js liefert `JarvisSession.logout()`: das Abmelde-Signal MUSS
+     raus, BEVOR der Token verworfen wird (danach ist es nicht mehr
+     authentifizierbar), und mit `keepalive`, weil die Seite unmittelbar
+     danach wegnavigiert. Ohne diese Datei bliebe der Benutzer in der
+     Anwesenheitsliste bis zu zwei Minuten als "online" stehen. -->
+<script src="/static/js/sessions.js?v=6"></script>
+<script src="/static/js/excel_portal.js?v=2"></script>
+<!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist).
+     Der Ein/Aus-Schalter haengt sich VOR #btn-theme-toggle – deshalb muss der
+     Theme-Knopf oben diese Id tragen. -->
+<script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
+<script src="/static/vendor/clippy/clippy.min.js"></script>
+<script src="/static/js/avatar.js?v=13"></script>
 <script src="/static/js/activity.js?v=1"></script>
-<script src="/static/js/excel_portal.js?v=1"></script>
 </body>
 </html>

@@ -21,6 +21,8 @@
     'use strict';
 
     var TOKEN_KEYS = ['jarvis_token', 'jarvis_chat_token', 'jarvis_uc_token'];
+    // Zuletzt gezeichnete Sprache – siehe Begruendung an `binde()`.
+    var _lang = '';
 
     function $(id) { return document.getElementById(id); }
     function T(key, fallback) {
@@ -89,18 +91,40 @@
             }).catch(function () { });
     }
 
+    /* SPRACHE UND THEMA WERDEN HIER NICHT MEHR VERDRAHTET (seit 2026-08-21).
+       `i18n.js` bedient `.lang-toggle-btn` samt Aktiv-Zustand, `theme.js`
+       bedient `#btn-theme-toggle` samt Sonne/Mond. Die frueheren Eigenbauten
+       (`xp-lang`, `xp-theme`) waren Verdopplung MIT abweichendem Verhalten –
+       ein einzelner Umschaltknopf statt des DE|EN-Paars, das jede andere
+       Bereichsseite zeigt. Genau das wurde gemeldet.
+
+       Geblieben ist nur, was wirklich seitenspezifisch ist: das Abmelden und
+       das Neuzeichnen des Sperrhinweises beim Sprachwechsel. */
     function binde() {
         var e;
-        if ((e = $('xp-theme'))) e.addEventListener('click', function () {
-            if (window.toggleTheme) window.toggleTheme();
+        if ((e = $('xp-logout-btn'))) e.addEventListener('click', function () {
+            // Signal MUSS raus, BEVOR der Token verworfen wird (danach ist die
+            // Abmeldung nicht mehr authentifizierbar); `keepalive` steckt in
+            // JarvisSession, weil die Seite unmittelbar danach wegnavigiert.
+            var p = (window.JarvisSession ? window.JarvisSession.logout()
+                                          : Promise.resolve());
+            TOKEN_KEYS.forEach(function (k) {
+                try { localStorage.removeItem(k); } catch (x) { }
+            });
+            p.catch(function () { }).then(function () {
+                window.location.replace('/');
+            });
         });
-        if ((e = $('xp-lang'))) e.addEventListener('click', function () {
-            var neu = (window._lang === 'en') ? 'de' : 'en';
-            if (window.setLang) window.setLang(neu);
-            var b = $('xp-lang');
-            if (b) b.textContent = neu.toUpperCase();
-            // Der Sperrhinweis wird per innerHTML gesetzt – applyLang()
-            // erreicht ihn nicht.
+
+        /* Der Sperrhinweis wird per innerHTML gesetzt – `applyLang()` erreicht
+           ihn nicht und wuerde ihn in der alten Sprache stehen lassen. Der
+           Vergleich verhindert die Endlosschleife: `applyLang()` feuert dieses
+           Ereignis bei JEDEM Aufruf, nicht nur bei einem echten Wechsel
+           (Lehre vom Short-Tracks-Reiter, 2026-08-18). */
+        window.addEventListener('jarvis-lang-changed', function () {
+            var lg = (window._lang || 'de');
+            if (lg === _lang) return;
+            _lang = lg;
             var w = $('xp-noaccess');
             if (w && !w.classList.contains('hidden')) pruefeZugang();
         });
@@ -129,6 +153,11 @@
     }
 
     function start() {
+        // Sprache SOFORT merken, nicht erst beim ersten Zeichnen: `applyLang()`
+        // laeuft ebenfalls beim Seitenaufbau und feuert dabei
+        // `jarvis-lang-changed`. Mit leerem `_lang` gaelte das als Wechsel und
+        // loeste einen ueberfluessigen zweiten Abruf aus.
+        _lang = (window._lang || 'de');
         binde();
         pruefeZugang();
     }

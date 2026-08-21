@@ -253,5 +253,53 @@ for (const s of SEITEN) {
 pruefe('es wurden ueberhaupt Portal-Knoepfe gefunden', geprueft >= 4,
     `nur ${geprueft} Seite(n)`);
 
+abschnitt('10 – Titelleiste der Bereichsseiten ist baugleich');
+
+/* Gemeldet am 2026-08-21 ("es sind weitere Unterschiede in /excel, z.B. DE/EN"):
+   die Seite hatte eine komplett eigene Leiste – eigene Klassen, ein EINZELNER
+   Umschaltknopf statt des DE|EN-Paars, kein Abmelden. Wer zwischen den
+   Bereichen wechselt, sucht dann jedes Mal neu.
+
+   GEPRUEFT WIRD EINE MINDESTAUSSTATTUNG, keine exakte Gleichheit: /sap traegt
+   zusaetzlich Verlauf, Anweisungen, Issues und Zertifikat und ist damit eine
+   Obermenge. Eine Gleichheitspruefung wuerde erzwingen, dass alle Seiten
+   dieselben Zusatzknoepfe haben – das waere Gleichmacherei statt Konsistenz.
+
+   Die Chat-artigen Seiten (/chat, /support, /userchat) stehen bewusst NICHT in
+   der Gruppe: sie sind aelter und benutzen ein eigenes Vokabular
+   (`header.theme`, `nav.settings`). Sie anzugleichen ist eine eigene Aufgabe. */
+const BEREICHSSEITEN = ['email.html', 'tracks.html', 'sap.html', 'excel.html'];
+const PFLICHT_KEYS = ['nav.home', 'chat.theme', 'chat.logout'];
+
+for (const name of BEREICHSSEITEN) {
+    const datei = path.join(ROOT, 'frontend', name);
+    if (!fs.existsSync(datei)) { pruefe(`${name} existiert`, false); continue; }
+    const roh = fs.readFileSync(datei, 'utf8').replace(/<!--[\s\S]*?-->/g, '');
+    const m = roh.match(/<header class="topbar">[\s\S]*?<\/header>/);
+    pruefe(`${name}: hat eine <header class="topbar">`, !!m);
+    // KEIN `continue`: fehlt die Leiste, sollen die Einzelpruefungen ebenfalls
+    // FEHLSCHLAGEN statt still uebersprungen zu werden. Eine Gegenprobe, die
+    // nur eine einzige Zeile rot faerbt, verschweigt das Ausmass – und ein
+    // Waechter, der ueberspringt, sieht aus wie einer, der bestanden hat.
+    const kopf = m ? m[0] : '';
+
+    const langBtns = (kopf.match(/class="lang-toggle-btn"/g) || []).length;
+    pruefe(`${name}: DE|EN als Paar (nicht ein Umschaltknopf)`, langBtns === 2,
+        `gefunden: ${langBtns}`);
+    pruefe(`${name}: DE und EN sind beide belegt`,
+        /data-lang="de"/.test(kopf) && /data-lang="en"/.test(kopf));
+    // theme.js verdrahtet genau diese Id – eine eigene waere ein Eigenbau.
+    pruefe(`${name}: Thema-Knopf traegt id="btn-theme-toggle"`,
+        /id="btn-theme-toggle"/.test(kopf));
+    for (const k of PFLICHT_KEYS) {
+        pruefe(`${name}: Leiste hat ${k}`,
+            kopf.includes(`data-i18n-title="${k}"`));
+    }
+    // Abmelden ohne sessions.js meldet sich nicht am Server ab – der Benutzer
+    // bliebe bis zu zwei Minuten als "online" stehen.
+    pruefe(`${name}: laedt sessions.js (fuer die Abmeldung)`,
+        /src="\/static\/js\/sessions\.js/.test(roh));
+}
+
 console.log(`\n\x1b[1mErgebnis: ${ok}/${ok + fail}\x1b[0m`);
 process.exit(fail === 0 ? 0 : 1);

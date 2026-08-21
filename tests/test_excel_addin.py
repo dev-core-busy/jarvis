@@ -787,6 +787,96 @@ for _name, _txt in _ANMELDE_DATEIEN.items():
            and "ohne alles herein" not in _txt,
            "%s: keine pauschale Zusage einer automatischen Anmeldung" % _name)
 
+# ══════════════════════════════════════════════════════════════════════
+abschnitt("13. Portal-Kachel und Benutzerseite")
+# GEMELDET 2026-08-20 von ECHT: ein freigegebener Benutzer hatte keine Kachel.
+# Es gab auch keine – der Manifest-Download lag ausschliesslich im
+# Administrator-Reiter. Wer freigeschaltet war, sah im Portal nichts und kam an
+# das Add-in nicht heran. Ein Bereich ohne Weg hinein ist kein Bereich.
+
+PORTAL = (ROOT / "frontend" / "portal.html").read_text(encoding="utf-8")
+pruefe('id="pt-card-excel"' in PORTAL, "Portal-Kachel vorhanden")
+pruefe('href="/excel"' in PORTAL, "sie fuehrt auf /excel")
+# Sichtbar nur mit Freigabe UND aktivem Skill – beides steckt in
+# permissions.excel. Eine Kachel, die in einen 403 fuehrt, ist schlimmer als
+# keine.
+pruefe("d.permissions && d.permissions.excel" in PORTAL,
+       "sie haengt an permissions.excel")
+_m3 = re.search(r'id="pt-card-excel"[^>]*class="([^"]*)"', PORTAL) \
+      or re.search(r'class="([^"]*)"[^>]*id="pt-card-excel"', PORTAL)
+pruefe(_m3 is not None and "hidden" in _m3.group(1),
+       "sie startet versteckt", _m3.group(1) if _m3 else "?")
+
+XLHTML = (ROOT / "frontend" / "excel.html")
+pruefe(XLHTML.exists(), "Benutzerseite frontend/excel.html vorhanden")
+XP = XLHTML.read_text(encoding="utf-8") if XLHTML.exists() else ""
+XPJS_P = ROOT / "frontend" / "js" / "excel_portal.js"
+pruefe(XPJS_P.exists(), "frontend/js/excel_portal.js vorhanden")
+XPJS = XPJS_P.read_text(encoding="utf-8") if XPJS_P.exists() else ""
+
+# Der Zweck der Seite: der Benutzer kommt an das Manifest.
+pruefe('href="/excel-addin/manifest.xml"' in XP,
+       "die Seite bietet den Manifest-Download an")
+pruefe("Trust Center" in XP, "sie erklaert den Weg in Excel")
+
+# Fehlt die Freigabe, wird der Download NICHT angeboten – ein Manifest, das man
+# einbindet und das sich danach nicht anmelden laesst, ist die schlechtere
+# Erfahrung als ein klarer Satz.
+pruefe("permissions.excel" in XPJS, "sie prueft die Freigabe ueber /api/me")
+pruefe("xp-dl-card" in XPJS and "classList.add('hidden')" in XPJS,
+       "ohne Freigabe wird der Download-Block ausgeblendet")
+# Fail-closed: fehlt `permissions` ganz (aelteres Backend), gilt gesperrt.
+pruefe("!(d && d.permissions && d.permissions.excel)" in XPJS,
+       "fail-closed bei fehlendem permissions-Objekt")
+
+# Route
+_page = funktion("excel_page")
+pruefe(bool(_page), "Route /excel vorhanden")
+pruefe("_skill_active(_EXCEL_SKILL)" in _page,
+       "ohne aktiven Skill gibt es die Seite nicht (404)")
+pruefe("Depends(" not in _page,
+       "keine Dependency – eine Navigation traegt keinen Authorization-Kopf")
+pruefe('"/excel"' in MAIN, "die Route ist registriert")
+
+# DIE data-i18n-html-FALLE: applyLang() setzt den innerHTML OHNE zu pruefen, ob
+# der Schluessel existiert. Fehlt er, ersetzt der ERSTE Sprachwechsel den
+# Inhalt durch den Schluesselnamen – die Anleitung waere weg. Beim Bauen genau
+# so passiert (fuenf fehlende Schluessel).
+_keys = set(re.findall(r'data-i18n(?:-html|-title)?="([a-z0-9_.]+)"', XP))
+_keys |= set(re.findall(r"T\('([a-z0-9_.]+)'", XPJS))
+_fehlend = sorted(k for k in _keys if I18N.count("'%s':" % k) < 2)
+pruefe(bool(_keys), "die Seite benutzt i18n-Schluessel (%d)" % len(_keys))
+pruefe(not _fehlend,
+       "JEDER Schluessel der Seite ist in DE UND EN vorhanden", _fehlend)
+# Bei data-i18n-html muss die Auszeichnung im Text stecken – sonst waere sie
+# nach dem ersten Sprachwechsel verloren.
+for _k in ("xp.steps", "xp.use_list"):
+    _m4 = re.search(r"'%s':\s*'(.*?)',\n" % re.escape(_k), I18N, re.S)
+    pruefe(_m4 is not None and "<li>" in _m4.group(1),
+           "%s traegt seine Auszeichnung im Uebersetzungstext" % _k)
+
+# DIE UMGEKEHRTE FALLE, und sie ist die haeufigere: ein Element mit `data-i18n`
+# (ohne -html), dessen Uebersetzungstext HTML enthaelt. applyLang() setzt dort
+# den textContent – die Auszeichnung erscheint dann als sichtbarer Text
+# ("Der Assistent arbeitet <b>in Excel</b>: ..."). Genau so stand es auf der
+# Seite, und nur der Screenshot hat es gezeigt: die Schluessel-Pruefung oben
+# war gruen, weil der Schluessel ja existiert.
+_falsch = []
+for _k in sorted(set(re.findall(r'data-i18n="([a-z0-9_.]+)"', XP))):
+    _m5 = re.search(r"'%s':\s*'(.*?)',\n" % re.escape(_k), I18N, re.S)
+    if _m5 and re.search(r"<[a-z]+>", _m5.group(1)):
+        _falsch.append(_k)
+pruefe(not _falsch,
+       "kein data-i18n auf einem Text MIT Auszeichnung (dort braucht es "
+       "data-i18n-html)", _falsch)
+
+# Skripte muessen existieren, sonst bleibt die Seite tot.
+for _js in re.findall(r'/static/(js/[a-z_]+\.js)', XP):
+    pruefe((ROOT / "frontend" / _js).exists(), "eingebunden und vorhanden: " + _js)
+_pi = XP.find('js/i18n.js')
+_pp = XP.find('js/excel_portal.js')
+pruefe(_pi > 0 and _pp > _pi, "excel_portal.js laedt NACH i18n.js")
+
 print("\n" + "=" * 52)
 print("Bestanden: %d / Fehlgeschlagen: %d" % (_ok, _fail))
 sys.exit(1 if _fail else 0)

@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Excel-Assistent</title>
+    <link rel="stylesheet" href="/static/css/theme.css?v=13">
+    <link rel="icon" href="/static/excel-addin/icon-32.png" type="image/png">
+    <!--
+        ═══════════════════════════════════════════════════════════════════
+        Excel-Assistent – Benutzerseite
+        ───────────────────────────────────────────────────────────────────
+        WOFUER ES DIESE SEITE GIBT: das eigentliche Werkzeug ist das
+        Aufgabenfenster IN Excel. Ein freigegebener Benutzer muss es aber
+        erst dort hineinbekommen – und dafuer braucht er das Manifest und
+        die Schritte, es einzubinden. Bis 2026-08-20 lag beides nur im
+        Administrator-Reiter; wer freigeschaltet war, sah im Portal nichts
+        und hatte keinen Weg zum Add-in (gemeldet).
+
+        Die Seite macht deshalb genau drei Dinge: Zustand zeigen, Manifest
+        anbieten, den Weg erklaeren. Sie ist KEIN zweiter Chat – gefragt wird
+        in Excel, nicht hier.
+
+        Praefix `xp-` (excel portal), damit nichts mit `xl-` (Aufgabenfenster)
+        oder `xa-` (Admin-Reiter) kollidiert.
+        ═══════════════════════════════════════════════════════════════════
+    -->
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: var(--font-body); background: var(--bg-primary);
+               color: var(--text-primary); min-height: 100vh; }
+        .hidden { display: none !important; }
+
+        .xp-top { display: flex; align-items: center; gap: 12px; padding: 12px 20px;
+            border-bottom: 1px solid var(--border); background: var(--bg-glass);
+            position: sticky; top: 0; z-index: 30; }
+        .xp-logo { width: 32px; height: 32px; border-radius: 50%; flex: 0 0 auto;
+            background: var(--gradient); color: #fff; font-weight: 700; font-size: 14px;
+            display: flex; align-items: center; justify-content: center; overflow: hidden; }
+        .xp-logo img { display: block; }
+        .xp-title { font-weight: 600; font-size: 15px; flex: 1 1 auto; min-width: 0; }
+        .xp-iconbtn { background: none; border: none; color: var(--text-secondary);
+            cursor: pointer; padding: 6px; border-radius: 8px; line-height: 1;
+            font-size: 13px; font-weight: 700; font-family: inherit; flex: 0 0 auto;
+            display: inline-flex; align-items: center; justify-content: center; }
+        .xp-iconbtn svg { width: 18px; height: 18px; }
+        .xp-iconbtn:hover { background: rgba(var(--accent-rgb), .14); color: var(--accent); }
+
+        .xp-wrap { max-width: 860px; margin: 0 auto; padding: 22px 20px 60px; }
+        .xp-lead { color: var(--text-secondary); line-height: 1.65; font-size: .92rem;
+            margin-bottom: 20px; }
+        .xp-card { border: 1px solid var(--border); border-radius: 12px;
+            background: var(--bg-secondary); padding: 16px 18px; margin-bottom: 16px; }
+        .xp-card h2 { font-size: 1rem; font-weight: 600; margin-bottom: 8px; }
+        .xp-card p { color: var(--text-secondary); line-height: 1.6; font-size: .86rem; }
+
+        /* Zustands-Pille: `align-self` ist Pflicht, sonst wird sie im
+           senkrechten Flex-Container ueber die ganze Breite gezogen und sieht
+           wie ein Eingabefeld aus (Fehler vom 2026-08-11 beim Standort-Sync). */
+        .xp-pill { display: inline-flex; align-items: center; gap: 6px;
+            align-self: flex-start; padding: 3px 10px; border-radius: 12px;
+            font-size: .76rem; font-weight: 600; white-space: nowrap;
+            background: rgba(var(--fg-rgb), .06); border: 1px solid var(--border);
+            color: var(--text-secondary); margin-bottom: 10px; }
+        .xp-pill.is-ok { color: var(--success);
+            border-color: color-mix(in srgb, var(--success) 45%, transparent);
+            background: color-mix(in srgb, var(--success) 12%, transparent); }
+        .xp-pill.is-off { color: var(--danger);
+            border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+            background: color-mix(in srgb, var(--danger) 12%, transparent); }
+
+        .xp-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+            margin-top: 12px; }
+        /* `.btn-primary` gibt es hier nicht (theme.css), deshalb eigene Knoepfe.
+           Der Download ist ein LINK – der Endpunkt liefert Content-Disposition,
+           es braucht kein JS. Ohne `text-decoration:none` waere er
+           unterstrichen (Lehre von .em-btn und .ad-upd a). */
+        .xp-btn { display: inline-block; text-decoration: none; flex: 0 0 auto;
+            padding: 9px 16px; border-radius: 9px; font-size: .86rem;
+            font-weight: 600; cursor: pointer; font-family: inherit;
+            background: var(--gradient); color: #fff; border: none; }
+        .xp-btn:hover { filter: brightness(1.08); color: #fff; }
+        .xp-btn-sec { background: none; border: 1px solid var(--border);
+            color: var(--text-secondary); font-weight: 400; }
+        .xp-btn-sec:hover { border-color: var(--accent); color: var(--text-primary);
+            filter: none; }
+        .xp-hint { font-size: .78rem; color: var(--text-muted); line-height: 1.5; }
+
+        .xp-steps { margin: 10px 0 0 0; padding-left: 1.35rem; line-height: 1.75;
+            font-size: .86rem; color: var(--text-secondary); }
+        .xp-steps li { margin-bottom: 8px; }
+        .xp-steps b { color: var(--text-primary); }
+        .xp-facts { margin: 8px 0 0 0; padding-left: 1.2rem; line-height: 1.65;
+            font-size: .84rem; color: var(--text-secondary); }
+        .xp-facts li { margin-bottom: 7px; }
+        .xp-facts b { color: var(--text-primary); }
+
+        .xp-warn { border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+            background: color-mix(in srgb, var(--danger) 8%, transparent);
+            border-radius: 10px; padding: 12px 14px; font-size: .86rem;
+            line-height: 1.6; margin-bottom: 16px; }
+        .xp-warn b { color: var(--danger); }
+
+        code { font-size: .88em; padding: 1px 5px; border-radius: 4px;
+            background: rgba(var(--fg-rgb), .08); word-break: break-all; }
+        a { color: var(--accent); }
+    </style>
+</head>
+<body>
+<script>try{if(localStorage.getItem('jarvis_theme')==='light')document.body.classList.add('light');}catch(e){}</script>
+
+<div class="xp-top">
+    <a href="/portal" class="xp-iconbtn" title="Zum Portal" data-i18n-title="portal.back">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><polyline points="12 19 5 12 12 5"/></svg>
+    </a>
+    <div class="xp-logo topbar-avatar">J</div>
+    <span class="xp-title"><span class="brand-app-name">Jarvis</span>
+        <span data-i18n="xp.title">Excel-Assistent</span></span>
+    <button class="xp-iconbtn" id="xp-lang" title="DE/EN">DE</button>
+    <button class="xp-iconbtn" id="xp-theme" title="Hell/Dunkel umschalten" data-i18n-title="chat.theme">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+    </button>
+</div>
+
+<div class="xp-wrap">
+    <!-- Fehlt die Freigabe, steht der Grund GANZ OBEN – und die Seite bietet
+         den Download trotzdem nicht an. Ein Manifest, das man einbindet und
+         das sich danach nicht anmelden laesst, ist die schlechtere Erfahrung. -->
+    <div class="xp-warn hidden" id="xp-noaccess"></div>
+
+    <p class="xp-lead" data-i18n-html="xp.lead">Der Assistent arbeitet <b>in Excel</b>: du öffnest ein Fenster neben deiner Tabelle, stellst dort deine Frage und bekommst eine Antwort – oder einen Änderungsvorschlag, den du vor dem Schreiben Zelle für Zelle siehst. Damit das geht, muss das Add-in einmalig in dein Excel eingebunden werden.</p>
+
+    <div class="xp-card" id="xp-dl-card">
+        <h2 data-i18n="xp.get_head">1. Add-in holen</h2>
+        <p data-i18n="xp.get_text">Lade die Manifest-Datei herunter und lege sie in einen Ordner, den du in Excel als Katalog einträgst. Falls deine Administration das bereits für alle eingerichtet hat, kannst du diesen Schritt überspringen – dann findest du den Assistenten direkt unter „Add-Ins“.</p>
+        <div class="xp-row">
+            <a class="xp-btn" id="xp-download" href="/excel-addin/manifest.xml"
+               data-i18n="xp.download">Manifest herunterladen</a>
+            <span class="xp-hint" id="xp-version"></span>
+        </div>
+    </div>
+
+    <div class="xp-card">
+        <h2 data-i18n="xp.steps_head">2. In Excel einbinden</h2>
+        <ol class="xp-steps" data-i18n-html="xp.steps">
+            <li>Datei in einen Ordner legen, auf den du zugreifen kannst (bei einer Freigabe im Netz: den Pfad von der Administration erfragen).</li>
+            <li>In Excel: <b>Datei → Optionen → Trust Center → Einstellungen für das Trust Center → Kataloge vertrauenswürdiger Add-Ins</b>.</li>
+            <li>Den Ordnerpfad eintragen, <b>Katalog anzeigen</b> ankreuzen, mit <b>OK</b> bestätigen und Excel neu starten.</li>
+            <li>In Excel: <b>Start → Add-Ins → Weitere Add-Ins → FREIGEGEBENER ORDNER</b>, den Assistenten auswählen und hinzufügen.</li>
+            <li>Der Knopf steht danach im Menüband unter <b>Start</b>. Beim ersten Öffnen meldest du dich mit deinen gewohnten Zugangsdaten an.</li>
+        </ol>
+        <p class="xp-hint" style="margin-top:10px;" data-i18n-html="xp.steps_note"><b>Zur Anmeldung:</b> Das Fenster in Excel hat einen eigenen Speicher – eine Anmeldung im Browser gilt dort nicht. Du meldest dich einmal im Fenster an, danach bleibt es angemeldet.</p>
+    </div>
+
+    <div class="xp-card">
+        <h2 data-i18n="xp.use_head">3. Was du fragen kannst</h2>
+        <ul class="xp-facts" data-i18n-html="xp.use_list">
+            <li>„Was fällt an Spalte D auf?“ – der Assistent sieht den Aufbau deiner Blätter und deine aktuelle Markierung.</li>
+            <li>„Trage in G2:G40 die Marge aus Netto und Einkauf ein“ – du bekommst einen Vorschlag mit altem und neuem Inhalt je Zelle und entscheidest, ob er übernommen wird.</li>
+            <li>„Erklär mir, was die Formel in B12 rechnet.“</li>
+            <li>„Prüf die Summenzeile auf Fehler.“</li>
+        </ul>
+        <p class="xp-hint" style="margin-top:10px;" data-i18n-html="xp.use_note"><b>Es wird nie ohne deine Bestätigung geschrieben.</b> Und weil <b>Strg+Z</b> Änderungen eines Add-ins nicht zurückholt, hat das Fenster einen eigenen Knopf dafür.</p>
+    </div>
+</div>
+
+<script src="/static/js/i18n.js?v=57"></script>
+<script src="/static/js/theme.js?v=2"></script>
+<script src="/static/js/branding.js?v=23"></script>
+<script src="/static/js/activity.js?v=1"></script>
+<script src="/static/js/excel_portal.js?v=1"></script>
+</body>
+</html>

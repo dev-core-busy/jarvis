@@ -187,8 +187,10 @@ def _arbeitskopie(quelle: Path) -> Path | None:
 
 # ── Inhalt lesbar machen ────────────────────────────────────────────────────
 
-_ERGEBNIS_MAX = 40          # Werkzeug-Ergebnisse je Lauf, aus denen Chips
-                            # gelesen werden (Deckel gegen Speicherwachstum)
+# Werkzeug-Ergebnisse je Lauf, aus denen Chips gelesen werden (Deckel gegen
+# Speicherwachstum). Der Puffer haelt die LETZTEN _ERGEBNIS_MAX Ergebnisse, nicht
+# die ersten – Begruendung an ``_ergebnis`` in ``_lauf``.
+_ERGEBNIS_MAX = 40
 _TEXT_ENDUNGEN = {"csv", "tsv", "txt", "md", "json", "xml", "html", "htm", "log",
                   "yaml", "yml", "ini", "sql"}
 _BILD_ENDUNGEN = {"png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff"}
@@ -964,10 +966,19 @@ async def _lauf(job: dict, dump: dict, auftrag: str,
     # Der Chat-Weg ruft `_deliver_docs` genau deshalb nach JEDEM Tool-Ergebnis.
     ergebnisse: list[str] = []
 
+    # RINGPUFFER, NICHT DECKEL-VON-VORNE. Die erste Fassung verwarf ab dem
+    # 41. Aufruf (`if len(ergebnisse) >= _ERGEBNIS_MAX: return`) – und die
+    # `/api/documents/`-URL des ERGEBNISSES steht immer im LETZTEN Ergebnis.
+    # Gemessen auf ECHT am 2026-08-20: ein Lauf "Tabellen zusammenfuehren"
+    # brauchte 54 Aufrufe (53x xlsx_read_range, dann xlsx_edit als 54.). Die
+    # fertige Datei lag mit 35 KB in data/documents, `dateien` im Protokoll war
+    # LEER, und das Modell schrieb "Die Datei ist über den Download-Chip
+    # verfügbar" – es gab keinen. Der Deckel warf genau das weg, worauf es
+    # ankommt: dieselbe Fehlerklasse wie die Kuerzung am falschen Ende bei
+    # `office_read` (dort stand der Hinweis hinter dem Schnitt).
     def _ergebnis(name: str, text) -> None:
-        if len(ergebnisse) >= _ERGEBNIS_MAX:
-            return
         ergebnisse.append(str(text or "")[:6000])
+        del ergebnisse[:-_ERGEBNIS_MAX]     # nur die letzten behalten
     agent._ergebnis_hook = _ergebnis
 
     # Profil, Denktiefe und Schrittgrenze laufen ueber DIESELBEN Attribute wie

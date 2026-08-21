@@ -932,8 +932,17 @@
         band.classList.remove('hidden');
     }
 
+    /* Nimmt die Startanzeige weg – siehe `#xl-boot` in taskpane.html.
+       Wird von JEDEM Weg gerufen, der etwas Sichtbares einblendet; solange sie
+       steht, hat das Fenster den Start nicht geschafft. */
+    function bootWeg() {
+        var b = $('xl-boot');
+        if (b) b.classList.add('hidden');
+    }
+
     /* ── Anmeldung ─────────────────────────────────────────────────────── */
     function zeigeLogin(hinweis) {
+        bootWeg();
         $('xl-app').classList.add('hidden');
         $('xl-login').classList.remove('hidden');
         $('xl-login-hint').textContent = hinweis ||
@@ -944,6 +953,7 @@
     }
 
     function zeigeApp() {
+        bootWeg();
         $('xl-login').classList.add('hidden');
         $('xl-app').classList.remove('hidden');
         ctxZeigen();
@@ -1074,11 +1084,36 @@
         });
     }
 
+    /* Zeigt die Startanzeige mit Klartext-Grund – fuer den Fall, dass das
+       Fenster GAR NICHT arbeiten kann und deshalb weder Anmeldung noch App
+       sinnvoll waeren. */
+    function bootFehler(text) {
+        var d = $('xl-boot-detail'), f = $('xl-boot-err');
+        if (d) d.classList.remove('hidden');
+        if (f) f.textContent = text || '';
+    }
+
     function start() {
-        binden();
-        versionPruefen();
-        officeErmitteln().then(function () {
-            zeichneUpdBand();
+        // JEDER Schritt einzeln abgesichert. Bis 2026-08-21 brach `start()`
+        // beim ersten Fehler ab – und weil Anmeldung UND App verborgen
+        // starten, blieb dann ein WEISSES Fenster ohne jede Meldung zurueck
+        // (genau so gemeldet). Ein Teilausfall darf hoechstens eine Funktion
+        // kosten, nie die ganze Anzeige.
+        try { binden(); } catch (e) { }
+
+        // Ohne `fetch` kann das Fenster nichts abrufen – aber es muss das
+        // SAGEN statt leer zu bleiben. Der Aufruf in `versionPruefen()` waere
+        // sonst ein ReferenceError, der `start()` vor jeder Anzeige beendet.
+        if (typeof fetch !== 'function') {
+            bootFehler(T('xl.no_fetch',
+                'Dieses Aufgabenfenster läuft in einer veralteten Browser-Umgebung. Nötig ist Excel 2019 oder Microsoft 365 (mit WebView2).'));
+            return;
+        }
+
+        try { versionPruefen(); } catch (e) { }
+
+        var weiter = function () {
+            try { zeichneUpdBand(); } catch (e) { }
             if (token()) {
                 pruefeFreigabe('');
             } else {
@@ -1097,7 +1132,14 @@
                     }).catch(function () { });
                 } catch (e) { }
             }
-        });
+        };
+        // Beide Zweige fuehren weiter: scheitert die Excel-Ermittlung, laeuft
+        // das Fenster ohne Tabellenbezug – aber es laeuft.
+        try {
+            officeErmitteln().then(weiter, weiter);
+        } catch (e) {
+            weiter();
+        }
     }
 
     if (document.readyState === 'loading') {

@@ -394,6 +394,16 @@
             <div class="pt-card-title" data-i18n="portal.card_email">E-Mail</div>
             <div class="pt-card-desc" data-i18n="portal.card_email_desc">Eigenes Postfach anbinden und Regeln hinterlegen, die eingehende E-Mails automatisch bearbeiten.</div>
         </a>
+        <!-- Excel-Assistent: fuehrt NICHT in einen Chat, sondern auf die Seite,
+             auf der der Benutzer das Add-in fuer sein Excel holt. Ohne diese
+             Kachel kaeme er an das Manifest gar nicht heran – der Download lag
+             bis 2026-08-20 nur im Admin-Reiter (gemeldet).
+             Sichtbar bei permissions.excel (Freigabe UND aktiver Skill). -->
+        <a class="pt-card hidden" id="pt-card-excel" href="/excel">
+            <div class="pt-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="19"/><line x1="15" y1="13" x2="9" y2="19"/></svg></div>
+            <div class="pt-card-title" data-i18n="portal.card_excel">Excel-Assistent</div>
+            <div class="pt-card-desc" data-i18n="portal.card_excel_desc">Jarvis als Aufgabenfenster in Excel: Fragen zur geöffneten Tabelle stellen und Änderungen vorschlagen lassen.</div>
+        </a>
         <!-- Short Tracks: Ablagen mit gespeichertem Prompt. Sichtbar, sobald der
              Skill aktiv ist (permissions.tracks) – eine eigene Freigabeliste gibt
              es bewusst nicht, der Bereich kann nichts, was der Benutzer nicht
@@ -604,6 +614,11 @@ sudo update-ca-certificates</code></pre>
         if (d.permissions && d.permissions.email) {
             var mailCard = document.getElementById('pt-card-email');
             if (mailCard) mailCard.classList.remove('hidden');
+        }
+        // Excel-Assistent: Freigabe UND aktiver Skill (wie sap/email).
+        if (d.permissions && d.permissions.excel) {
+            var xlCard = document.getElementById('pt-card-excel');
+            if (xlCard) xlCard.classList.remove('hidden');
         }
         // Short Tracks: haengt NUR am Skill-Zustand (keine eigene Freigabe).
         if (d.permissions && d.permissions.tracks) {

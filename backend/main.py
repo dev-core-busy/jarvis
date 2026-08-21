@@ -8362,6 +8362,33 @@ async def excel_addin_icon(groesse: int):
     return _addin_icon_response(groesse, "excel-addin")
 
 
+@app.get("/excel", response_class=HTMLResponse)
+async def excel_page():
+    """Benutzerseite des Excel-Assistenten (Portal-Kachel).
+
+    WOFUER ES SIE GIBT: das eigentliche Werkzeug ist das Aufgabenfenster IN
+    Excel – aber ein freigegebener Benutzer muss es erst dorthin bekommen, und
+    dafuer braucht er das Manifest samt Anleitung. Bis 2026-08-20 lag beides
+    ausschliesslich im Administrator-Reiter; wer freigeschaltet war, sah im
+    Portal nichts und hatte keinen Weg zum Add-in (gemeldet).
+
+    Wie ``/tracks`` und ``/email``: die Berechtigung wird HIER NICHT geprueft –
+    eine normale Navigation traegt keinen Authorization-Header, der Token liegt
+    im localStorage. Unkritisch, weil die Seite eine leere Huelle ist; sie holt
+    als Erstes ``/api/me`` und zeigt einem Unberechtigten den Grund, statt den
+    Download anzubieten. Der Skill-Zustand entscheidet dagegen ueber 404 –
+    ohne aktiven Skill gibt es den Bereich nicht.
+    """
+    if not _skill_active(_EXCEL_SKILL):
+        return HTMLResponse("<h1>404 – Der Excel-Assistent ist nicht aktiv</h1>",
+                            status_code=404)
+    f = FRONTEND_DIR / "excel.html"
+    if not f.exists():
+        return HTMLResponse("<h1>404 – Seite nicht gefunden</h1>", status_code=404)
+    return HTMLResponse(content=f.read_text(encoding="utf-8"),
+                        headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+
+
 @app.get("/excel-addin/taskpane.html", response_class=HTMLResponse)
 async def excel_addin_taskpane():
     """Aufgabenfenster des Excel-Add-ins.

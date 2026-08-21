@@ -212,5 +212,46 @@ pruefe('kein i18n-Text behauptet "× = löschen"', falscheTexte.length === 0,
 pruefe('der Auditier-Hinweis nennt den Muelleimer', /Mülleimer = löschen/.test(I18N));
 pruefe('englische Fassung ebenso', /trash = delete/.test(I18N));
 
+abschnitt('9 – Weg zum Portal ist ueberall dasselbe HAUS');
+
+/* Gemeldet am 2026-08-21: "unter /excel fehlt das Home Symbol". Es fehlte
+   nicht wirklich – dort sass links ein ZURUECK-PFEIL, waehrend jede andere
+   Bereichsseite rechts in der Knopfleiste ein Haus fuehrt. Dieselbe Aussage
+   mit anderem Zeichen an anderer Stelle wird als fehlend wahrgenommen, und
+   genau so wurde sie gemeldet.
+
+   REGEL STATT LISTE, wie im ganzen Test: geprueft wird JEDE Seite, die ueber
+   ein Bedienelement aufs Portal fuehrt – eine kuenftige Seite ist damit
+   automatisch erfasst. Wer keines hat (portal.html selbst), wird nicht
+   geprueft. */
+const HAUS = 'M3 9l9-7 9 7v11';
+const ZURUECK_PFEIL = /M19 12H5/;            // <- der Pfeil aus dem Fehlerfall
+const PORTAL_STEUERELEMENT =
+    /<a\b[^>]*href="\/portal"[^>]*>[\s\S]{0,600}?<\/a>|<button\b[^>]*id="[a-z]+-portal-btn"[^>]*>[\s\S]{0,600}?<\/button>/gi;
+
+let geprueft = 0;
+for (const s of SEITEN) {
+    if (path.basename(s) === 'portal.html') continue;
+    // Kommentare raus: mein eigener Begruendungs-Kommentar in excel.html nennt
+    // `nav.home` und den alten Schluessel. Ein Waechter, der seine eigene
+    // Begruendung liest, prueft nichts – im Projekt schon mehrfach passiert.
+    const roh = fs.readFileSync(s, 'utf8').replace(/<!--[\s\S]*?-->/g, '');
+    const treffer = roh.match(PORTAL_STEUERELEMENT) || [];
+    if (!treffer.length) continue;
+    geprueft++;
+    for (const t of treffer) {
+        pruefe(`${path.basename(s)}: Portal-Knopf traegt das Haus`,
+            t.includes(HAUS), t.replace(/\s+/g, ' ').slice(0, 110));
+        pruefe(`${path.basename(s)}: Portal-Knopf traegt nav.home`,
+            /data-i18n-title="nav\.home"/.test(t), t.replace(/\s+/g, ' ').slice(0, 110));
+        pruefe(`${path.basename(s)}: kein Zurueck-Pfeil statt Haus`,
+            !ZURUECK_PFEIL.test(t), t.replace(/\s+/g, ' ').slice(0, 110));
+    }
+}
+// Ohne diese Zeile waere der ganze Abschnitt gruen, sobald das Suchmuster
+// nicht mehr trifft – ein Waechter, der nichts findet, meldet sonst Erfolg.
+pruefe('es wurden ueberhaupt Portal-Knoepfe gefunden', geprueft >= 4,
+    `nur ${geprueft} Seite(n)`);
+
 console.log(`\n\x1b[1mErgebnis: ${ok}/${ok + fail}\x1b[0m`);
 process.exit(fail === 0 ? 0 : 1);

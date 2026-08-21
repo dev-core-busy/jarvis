@@ -1521,15 +1521,15 @@ class JarvisKnowledgeManager {
                     <span style="color:var(--text-muted);font-size:0.75rem;">${esc(f.path)}</span>
                 </button>`).join('');
             modal.innerHTML = `
-                <div style="background:var(--bg-glass);border:1px solid var(--border-color);border-radius:12px;max-width:560px;width:90vw;max-height:75vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
-                    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border-color);">
+                <div style="background:var(--bg-glass);border:1px solid var(--border);border-radius:12px;max-width:560px;width:90vw;max-height:75vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
+                    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border);">
                         <span style="font-weight:600;font-size:0.9rem;color:var(--text-primary);">
                             ${T('knowledge.move_title', 'Zielordner wählen')} (${esc(String(label))})
                         </span>
                         <button id="kb-move-close" style="background:none;border:none;color:var(--text-secondary);font-size:1.2rem;cursor:pointer;padding:2px 6px;border-radius:4px;" title="${T('common.close', 'Schließen')}">✕</button>
                     </div>
                     <div style="padding:8px;overflow:auto;flex:1;">${rows}</div>
-                    <div style="padding:10px 16px;border-top:1px solid var(--border-color);color:var(--text-muted);font-size:0.75rem;">
+                    <div style="padding:10px 16px;border-top:1px solid var(--border);color:var(--text-muted);font-size:0.75rem;">
                         ${T('knowledge.move_hint', 'Die Vektor-Einträge ziehen mit um – kein Neu-Indizieren nötig.')}
                     </div>
                 </div>`;
@@ -1841,16 +1841,16 @@ class JarvisKnowledgeManager {
         modal.id = 'kb-file-view-modal';
         modal.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);';
         modal.innerHTML = `
-            <div style="background:var(--bg-glass);border:1px solid var(--border-color);border-radius:12px;max-width:800px;width:90vw;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
-                <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border-color);">
+            <div style="background:var(--bg-glass);border:1px solid var(--border);border-radius:12px;max-width:800px;width:90vw;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border);">
                     <span style="font-weight:600;font-size:0.9rem;color:var(--text-primary);">📄 ${fileName}</span>
                     <button id="kb-file-view-close" style="background:none;border:none;color:var(--text-secondary);font-size:1.2rem;cursor:pointer;padding:2px 6px;border-radius:4px;" title="${window.t('common.close') || 'Schließen'}">✕</button>
                 </div>
                 <div id="kb-file-view-body" style="padding:16px;overflow:auto;flex:1;font-family:monospace;font-size:0.8rem;line-height:1.5;color:var(--text-primary);white-space:pre-wrap;word-break:break-word;">
                     <div style="text-align:center;padding:20px;color:var(--text-muted);">${window.t('common.loading')}</div>
                 </div>
-                <div style="padding:10px 16px;border-top:1px solid var(--border-color);display:flex;justify-content:flex-end;">
-                    <button id="kb-file-view-close2" style="padding:6px 16px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-glass);color:var(--text-primary);cursor:pointer;font-size:0.85rem;">${window.t('common.close') || 'Schließen'}</button>
+                <div style="padding:10px 16px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;">
+                    <button id="kb-file-view-close2" style="padding:6px 16px;border-radius:6px;border:1px solid var(--border);background:var(--bg-glass);color:var(--text-primary);cursor:pointer;font-size:0.85rem;">${window.t('common.close') || 'Schließen'}</button>
                 </div>
             </div>`;
         document.body.appendChild(modal);

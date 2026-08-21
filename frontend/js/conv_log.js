@@ -132,7 +132,7 @@ class ConvLogManager {
 
     _showError(msg) {
         if (this._container) {
-            this._container.innerHTML = `<div class="conv-log-empty" style="color:var(--accent-red)">${msg}</div>`;
+            this._container.innerHTML = `<div class="conv-log-empty" style="color:var(--danger)">${msg}</div>`;
         }
     }
 

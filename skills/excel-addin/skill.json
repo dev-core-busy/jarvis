@@ -4,7 +4,9 @@
     "version": "1.0.0",
     "author": "Jarvis",
     "module": "main",
-    "tools": ["excel_vorschlag"],
+    "tools": [
+        "excel_vorschlag"
+    ],
     "category": "system",
     "icon": "table",
     "system": true,
@@ -12,6 +14,13 @@
     "dependencies": [],
     "data_dirs": [],
     "config_schema": {
+        "katalog_pfad": {
+            "type": "string",
+            "label": "Netzwerkpfad des Add-in-Katalogs",
+            "description": "Ordner im Netz, in dem SIE das Manifest abgelegt haben - z.B. \\\\server\\freigabe\\office-addins, ein verbundenes Laufwerk oder eine SharePoint-Adresse. Ist hier etwas eingetragen, zeigt die Benutzerseite /excel diesen Pfad ANSTELLE des Download-Knopfes: der Benutzer laedt dann nichts herunter, sondern traegt den Pfad in den Excel-Optionen als vertrauenswuerdigen Katalog ein. Leer = jeder Benutzer laedt sich das Manifest selbst herunter. Das Feld aendert NICHTS an der Verteilung - es sagt den Benutzern nur, wohin Sie die Datei gelegt haben.",
+            "default": "",
+            "required": false
+        },
         "max_runden": {
             "type": "number",
             "label": "Nachforderungen je Frage",
@@ -28,9 +37,13 @@
     "knowledge_docs": [],
     "permissions": [],
     "help": {
-        "details": "Bringt Jarvis als Aufgabenfenster nach Excel. Der Administrator laedt im Reiter 'Excel' das Manifest herunter und legt es in einen freigegebenen Ordner, den die Arbeitsplaetze in den Excel-Optionen als vertrauenswuerdigen Katalog eintragen - einen Exchange-Katalog wie fuer Outlook-Add-ins gibt es fuer Arbeitsmappen nicht. Wer den Assistenten benutzen darf, wird unter Einstellungen -> Sicherheit -> Berechtigungen -> Excel-Zugriff festgelegt; ohne Eintrag darf niemand. Mit der Frage geht der AUFBAU der geoeffneten Mappe an den Server (Blattnamen, Spaltenueberschriften, Datentypen, wenige Beispielzeilen und die markierte Auswahl) - nie das ganze Blatt, weil ein Ausschnitt einer grossen Tabelle zu Zahlen fuehrt, die plausibel aussehen und falsch sind.",
+        "details": "Bringt Jarvis als Aufgabenfenster nach Excel. Der Administrator laedt im Reiter 'Excel' das Manifest herunter und legt es in einen freigegebenen Ordner, den die Arbeitsplaetze in den Excel-Optionen als vertrauenswuerdigen Katalog eintragen - einen Exchange-Katalog wie fuer Outlook-Add-ins gibt es fuer Arbeitsmappen nicht. Traegt er den Ordner danach im Feld 'Netzwerkpfad des Katalogs' ein, zeigt die Benutzerseite /excel diesen PFAD anstelle des Download-Knopfes - der Benutzer laedt dann nichts mehr herunter (und damit auch keine zweite Kopie, die niemand aktualisiert), sondern traegt nur noch den Ordner in seine Excel-Optionen ein. Bleibt das Feld leer, holt sich jeder Benutzer das Manifest wie bisher selbst. Wer den Assistenten benutzen darf, wird unter Einstellungen -> Sicherheit -> Berechtigungen -> Excel-Zugriff festgelegt; ohne Eintrag darf niemand. Mit der Frage geht der AUFBAU der geoeffneten Mappe an den Server (Blattnamen, Spaltenueberschriften, Datentypen, wenige Beispielzeilen und die markierte Auswahl) - nie das ganze Blatt, weil ein Ausschnitt einer grossen Tabelle zu Zahlen fuehrt, die plausibel aussehen und falsch sind.",
         "tools": [
-            {"name": "excel_vorschlag", "label": "Aenderung vorschlagen", "desc": "Sammelt Zellaenderungen und legt sie dem Benutzer zur Bestaetigung vor. Schreibt selbst NICHTS."}
+            {
+                "name": "excel_vorschlag",
+                "label": "Aenderung vorschlagen",
+                "desc": "Sammelt Zellaenderungen und legt sie dem Benutzer zur Bestaetigung vor. Schreibt selbst NICHTS."
+            }
         ],
         "use_cases": [
             "Was faellt an Spalte D auf?",

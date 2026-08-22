@@ -3185,6 +3185,22 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 </div>
                                 <p class="kb-hint" id="xa-warn" style="display:none;margin-top:8px;"></p>
 
+                                <!-- Der uebliche Weg im Haus ist NICHT, dass jeder
+                                     Benutzer herunterlaedt: die Datei liegt einmal
+                                     in einer Freigabe. Steht der Pfad hier, zeigt
+                                     /excel ihn ANSTELLE des Download-Knopfes. -->
+                                <div class="form-group" style="margin-top:14px;">
+                                    <label for="xa-katalog">Netzwerkpfad des Katalogs (optional)</label>
+                                    <input type="text" id="xa-katalog" maxlength="260"
+                                           placeholder="z. B. \\server\freigabe\office-addins"
+                                           style="width:100%;box-sizing:border-box;font-family:var(--font-mono,monospace);">
+                                    <span class="kb-hint">Der Ordner, in den <b>Sie</b> das Manifest gelegt haben. Ist hier etwas eingetragen, sieht der Benutzer auf <code>/excel</code> <b>diesen Pfad statt des Download-Knopfes</b> – er lädt dann nichts herunter, sondern trägt den Pfad nur noch in seine Excel-Optionen ein. Leer lassen, wenn sich jeder das Manifest selbst holen soll. <b>Das Feld verteilt nichts</b> – es sagt den Benutzern nur, wohin Sie die Datei gelegt haben.</span>
+                                </div>
+                                <div class="xa-row">
+                                    <button class="btn-primary" id="xa-katalog-save">Pfad speichern</button>
+                                    <span class="kb-hint" id="xa-katalog-status"></span>
+                                </div>
+
                                 <div style="margin-top:12px;">
                                     <button type="button" class="xa-toggle" id="xa-guide-btn" aria-expanded="false">Anleitung für den Arbeitsplatz anzeigen</button>
                                     <div id="xa-guide" style="display:none;margin-top:8px;">
@@ -4635,7 +4651,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
     <script src="/static/js/icons.js?v=1"></script>
-    <script src="/static/js/i18n.js?v=164"></script>
+    <script src="/static/js/i18n.js?v=165"></script>
 <script src="/static/js/tabfill.js?v=1"></script>
     <script src="/static/js/cron.js?v=20"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -4664,7 +4680,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/theme.js?v=2"></script>
     <script src="/static/js/security_incidents.js?v=29"></script>
     <script src="/static/js/ldap_picker.js?v=10"></script>
-    <script src="/static/js/excel_admin.js?v=1"></script>
+    <script src="/static/js/excel_admin.js?v=2"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
     <script src="/static/js/sessions.js?v=4"></script>
     <script src="/static/js/agent_roles.js?v=2"></script>

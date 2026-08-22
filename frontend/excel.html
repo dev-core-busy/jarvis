@@ -115,6 +115,21 @@
             filter: none; }
         .xp-hint { font-size: .78rem; color: var(--text-muted); line-height: 1.5; }
 
+        /* Der Katalog-Pfad. Monospace und umbrechend, weil UNC-Pfade lang sind
+           und Zeichen enthalten, die in einer Proportionalschrift kaum
+           auseinanderzuhalten sind (l/I/1, O/0). DECKENDE Flaeche – der Kasten
+           liegt auf Karteninhalt (gleiche Lehre wie .cs-key und .em-paused). */
+        .xp-pfad { margin-top: 10px; padding: 10px 12px; border-radius: 8px;
+            background: var(--bg-primary); border: 1px solid var(--accent);
+            font-family: var(--font-mono, monospace); font-size: .84rem;
+            line-height: 1.5; color: var(--text-primary);
+            word-break: break-all; user-select: all; }
+        /* `.xp-row` ist ein Flex-Container und wuerde das hidden-Attribut
+           ueberstimmen (Fehler vom 2026-08-17 bei .sp-row). Hier greift das
+           zwar keinen der beiden Bloecke, die Regel steht aber vorsorglich –
+           der naechste Block bekommt sonst denselben Fehler. */
+        .xp-row[hidden], .xp-steps[hidden] { display: none; }
+
         .xp-steps { margin: 10px 0 0 0; padding-left: 1.35rem; line-height: 1.75;
             font-size: .86rem; color: var(--text-secondary); }
         .xp-steps li { margin-bottom: 8px; }
@@ -191,21 +206,50 @@
     <p class="xp-lead" data-i18n-html="xp.lead">Der Assistent arbeitet <b>in Excel</b>: du öffnest ein Fenster neben deiner Tabelle, stellst dort deine Frage und bekommst eine Antwort – oder einen Änderungsvorschlag, den du vor dem Schreiben Zelle für Zelle siehst. Damit das geht, muss das Add-in einmalig in dein Excel eingebunden werden.</p>
 
     <div class="xp-card" id="xp-dl-card">
-        <h2 data-i18n="xp.get_head">1. Add-in holen</h2>
-        <p data-i18n="xp.get_text">Lade die Manifest-Datei herunter und lege sie in einen Ordner, den du in Excel als Katalog einträgst. Falls deine Administration das bereits für alle eingerichtet hat, kannst du diesen Schritt überspringen – dann findest du den Assistenten direkt unter „Add-Ins“.</p>
-        <div class="xp-row">
-            <a class="xp-btn" id="xp-download" href="/excel-addin/manifest.xml"
-               data-i18n="xp.download">Manifest herunterladen</a>
-            <span class="xp-hint" id="xp-version"></span>
+        <!-- ZWEI SICH AUSSCHLIESSENDE FAELLE, gesteuert von excel_portal.js:
+             hat die Administration einen Katalog-Pfad hinterlegt, ist der
+             Download der falsche Weg (der Benutzer laedt eine zweite Kopie
+             herunter, die niemand aktualisiert). Dann steht hier der Pfad. -->
+        <h2 id="xp-get-head" data-i18n="xp.get_head">1. Add-in holen</h2>
+
+        <div id="xp-dl-block">
+            <p data-i18n="xp.get_text">Lade die Manifest-Datei herunter und lege sie in einen Ordner, den du in Excel als Katalog einträgst. Falls deine Administration das bereits für alle eingerichtet hat, kannst du diesen Schritt überspringen – dann findest du den Assistenten direkt unter „Add-Ins“.</p>
+            <div class="xp-row">
+                <a class="xp-btn" id="xp-download" href="/excel-addin/manifest.xml"
+                   data-i18n="xp.download">Manifest herunterladen</a>
+                <span class="xp-hint" id="xp-version"></span>
+            </div>
+        </div>
+
+        <div id="xp-pfad-block" hidden>
+            <p data-i18n="xp.pfad_text">Deine Administration hat das Add-in bereits im Netz abgelegt – du musst nichts herunterladen. Trage in Excel diesen Ordner als Katalog ein:</p>
+            <div class="xp-pfad" id="xp-pfad"></div>
+            <div class="xp-row" style="margin-top:10px;">
+                <button type="button" class="xp-btn" id="xp-pfad-copy"
+                        data-i18n="xp.pfad_copy">Pfad kopieren</button>
+                <span class="xp-hint" id="xp-pfad-status"></span>
+            </div>
         </div>
     </div>
 
     <div class="xp-card">
         <h2 data-i18n="xp.steps_head">2. In Excel einbinden</h2>
-        <ol class="xp-steps" data-i18n-html="xp.steps">
+        <!-- Erster Schritt hat zwei Fassungen: mit hinterlegtem Katalog-Pfad
+             waere "Datei in einen Ordner legen" das Gegenteil dessen, was oben
+             steht ("du musst nichts herunterladen"). Zwei getrennte Listen und
+             nicht eine, in der JS ein <li> austauscht – `applyLang()` setzt
+             `data-i18n-html` bei jedem Sprachwechsel neu und wuerde die
+             Aenderung wortlos zurueckdrehen. -->
+        <ol class="xp-steps" id="xp-steps-dl" data-i18n-html="xp.steps">
             <li>Datei in einen Ordner legen, auf den du zugreifen kannst (bei einer Freigabe im Netz: den Pfad von der Administration erfragen).</li>
             <li>In Excel: <b>Datei → Optionen → Trust Center → Einstellungen für das Trust Center → Kataloge vertrauenswürdiger Add-Ins</b>.</li>
             <li>Den Ordnerpfad eintragen, <b>Katalog anzeigen</b> ankreuzen, mit <b>OK</b> bestätigen und Excel neu starten.</li>
+            <li>In Excel: <b>Start → Add-Ins → Weitere Add-Ins → FREIGEGEBENER ORDNER</b>, den Assistenten auswählen und hinzufügen.</li>
+            <li>Der Knopf steht danach im Menüband unter <b>Start</b>. Beim ersten Öffnen meldest du dich mit deinen gewohnten Zugangsdaten an.</li>
+        </ol>
+        <ol class="xp-steps" id="xp-steps-pfad" data-i18n-html="xp.steps_pfad" hidden>
+            <li>In Excel: <b>Datei → Optionen → Trust Center → Einstellungen für das Trust Center → Kataloge vertrauenswürdiger Add-Ins</b>.</li>
+            <li>Den Pfad von oben eintragen, <b>Katalog anzeigen</b> ankreuzen, mit <b>OK</b> bestätigen und Excel neu starten.</li>
             <li>In Excel: <b>Start → Add-Ins → Weitere Add-Ins → FREIGEGEBENER ORDNER</b>, den Assistenten auswählen und hinzufügen.</li>
             <li>Der Knopf steht danach im Menüband unter <b>Start</b>. Beim ersten Öffnen meldest du dich mit deinen gewohnten Zugangsdaten an.</li>
         </ol>
@@ -230,7 +274,7 @@
      Modul waere dort ein harter Fehler mitten im Zusammenbauen und die Liste
      bliebe leer (so geschehen in tracks.js). -->
 <script src="/static/js/icons.js?v=1"></script>
-<script src="/static/js/i18n.js?v=57"></script>
+<script src="/static/js/i18n.js?v=58"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=24"></script>
 <!-- sessions.js liefert `JarvisSession.logout()`: das Abmelde-Signal MUSS
@@ -239,7 +283,7 @@
      danach wegnavigiert. Ohne diese Datei bliebe der Benutzer in der
      Anwesenheitsliste bis zu zwei Minuten als "online" stehen. -->
 <script src="/static/js/sessions.js?v=6"></script>
-<script src="/static/js/excel_portal.js?v=2"></script>
+<script src="/static/js/excel_portal.js?v=3"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist).
      Der Ein/Aus-Schalter haengt sich VOR #btn-theme-toggle – deshalb muss der
      Theme-Knopf oben diese Id tragen. -->

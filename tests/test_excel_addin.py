@@ -877,6 +877,138 @@ _pi = XP.find('js/i18n.js')
 _pp = XP.find('js/excel_portal.js')
 pruefe(_pi > 0 and _pp > _pi, "excel_portal.js laedt NACH i18n.js")
 
+
+# ════════════════════════════════════════════════════════════════════════════
+abschnitt("14. Katalog-Pfad statt Download")
+# ════════════════════════════════════════════════════════════════════════════
+# Der uebliche Weg im Haus ist NICHT, dass jeder Benutzer herunterlaedt: der
+# Administrator legt das Manifest einmal in eine Freigabe. Ist der Pfad
+# hinterlegt, zeigt /excel ihn ANSTELLE des Download-Knopfes.
+
+from backend import excel_addin as _xa   # noqa: E402
+
+_echte_cfg = excel_addin._skill_config
+def _cfg(d):
+    excel_addin._skill_config = lambda: d
+try:
+    _cfg({})
+    pruefe(_xa.katalog_pfad() == "", "Ohne Eintrag ist der Pfad leer (= Download)")
+    _cfg({"katalog_pfad": "  \\\\srv\\freigabe\\addins  "})
+    pruefe(_xa.katalog_pfad() == "\\\\srv\\freigabe\\addins",
+           "Pfad wird getrimmt", _xa.katalog_pfad())
+    # Steuerzeichen raus: der Wert geht in eine Weboberflaeche und in einen
+    # Kopiervorgang. Ein Zeilenumbruch haette dort nichts zu suchen.
+    _cfg({"katalog_pfad": "X:\\a\r\nY:\\b"})
+    pruefe("\n" not in _xa.katalog_pfad() and "\r" not in _xa.katalog_pfad(),
+           "Steuerzeichen werden entfernt", repr(_xa.katalog_pfad()))
+    # Aber KEINE Formpruefung: UNC, Laufwerk und SharePoint sind alle gueltig.
+    for _form in ("\\\\srv\\f", "X:\\addins",
+                  "https://firma.sharepoint.com/sites/it/addins"):
+        _cfg({"katalog_pfad": _form})
+        pruefe(_xa.katalog_pfad() == _form, "Form bleibt unangetastet: " + _form)
+    _cfg({"katalog_pfad": "z" * 400})
+    pruefe(len(_xa.katalog_pfad()) == _xa.KATALOG_PFAD_MAX,
+           "Pfad ist gedeckelt", len(_xa.katalog_pfad()))
+    _cfg({"katalog_pfad": None})
+    pruefe(_xa.katalog_pfad() == "", "None -> leer (kein Absturz)")
+finally:
+    excel_addin._skill_config = _echte_cfg
+
+# FUNKTION, keine Modulkonstante – der Wert ist im Reiter aenderbar und muss
+# ohne Dienstneustart greifen.
+pruefe(callable(getattr(_xa, "katalog_pfad", None)),
+       "katalog_pfad ist eine Funktion")
+_XASRC = (ROOT / "backend" / "excel_addin.py").read_text(encoding="utf-8")
+pruefe("KATALOG_PFAD =" not in _XASRC,
+       "... und es gibt keine eingefrorene Konstante daneben")
+
+# Manifest kennt das Feld, Reiter zeigt es, Code liest es.
+_MAN = json.loads((ROOT / "skills" / "excel-addin" / "skill.json")
+                  .read_text(encoding="utf-8"))
+pruefe("katalog_pfad" in _MAN.get("config_schema", {}),
+       "Manifest kennt 'katalog_pfad'")
+
+# Endpunkt: hinter der Excel-Freigabe, NICHT am unangemeldeten Versions-
+# Endpunkt – ein UNC-Pfad nennt Servernamen und Freigabe des Hauses.
+_ep = MAIN[MAIN.find('@app.get("/api/excel/katalog")'):]
+_ep = _ep[:_ep.find('@app.get("/excel-addin/icon')]
+pruefe(bool(_ep), "Endpunkt /api/excel/katalog vorhanden")
+pruefe("require_excel_access" in _ep, "... haengt an require_excel_access")
+pruefe("katalog_pfad()" in _ep, "... und liefert den aufgeloesten Pfad")
+_ver = MAIN[MAIN.find('@app.get("/api/excel-addin/version")'):]
+_ver = _ver[:_ver.find('@app.get("/api/excel/katalog")')]
+pruefe("katalog" not in _ver.lower(),
+       "Der UNANGEMELDETE Versions-Endpunkt nennt den Pfad NICHT")
+
+# Admin-Reiter
+pruefe('id="xa-katalog"' in SET, "Reiter hat das Eingabefeld")
+pruefe('id="xa-katalog-save"' in SET, "... mit eigenem Speichern-Knopf")
+pruefe("xa-katalog-save" in XA and "speichereKatalog" in XA,
+       "excel_admin.js bindet ihn")
+# Eigene Teilmenge senden: `update_skill_config` merged, ein Knopf mit dem
+# ganzen Formularstand ueberschriebe den jeweils anderen Teil.
+_sk = XA[XA.find("function speichereKatalog"):]
+_sk = _sk[:_sk.find("function ", 10)]
+pruefe(len(_sk) > 100 and "speichereKatalog" in _sk,
+       "Wächter schneidet wirklich speichereKatalog aus", len(_sk))
+pruefe("katalog_pfad: pfad" in _sk and "max_runden" not in _sk,
+       "Der Pfad-Knopf sendet NUR den Pfad")
+_sg = XA[XA.find("function speichere()"):]
+_sg = _sg[:_sg.find("function ", 10)]
+pruefe("katalog_pfad" not in _sg, "... und der Grenzen-Knopf NICHT den Pfad")
+pruefe("c.katalog_pfad || ''" in XA,
+       "Leerer Pfad wird als leer geladen (nicht auf eine Vorgabe gehoben)")
+
+# Benutzerseite: die beiden Bloecke schliessen sich aus.
+for _id in ("xp-dl-block", "xp-pfad-block", "xp-pfad", "xp-pfad-copy",
+            "xp-steps-dl", "xp-steps-pfad", "xp-get-head"):
+    pruefe('id="%s"' % _id in XP, "Markup vorhanden: #" + _id)
+pruefe('id="xp-pfad-block" hidden' in XP,
+       "Der Pfad-Block startet verborgen (sonst blitzt er beim Laden auf)")
+pruefe('id="xp-steps-pfad"' in XP and 'hidden>' in XP,
+       "Die Pfad-Schrittliste ebenfalls")
+XPJS = XPJS_P.read_text(encoding="utf-8")
+pruefe("/api/excel/katalog" in XPJS, "Seite holt den Pfad")
+pruefe("kasten.textContent = pfad" in XPJS,
+       "Pfad wird per textContent gesetzt (Freitext aus dem Reiter)")
+pruefe("innerHTML = pfad" not in XPJS and "innerHTML=pfad" not in XPJS,
+       "... und NICHT per innerHTML")
+_lk = XPJS[XPJS.find("function ladeKatalog"):]
+_lk = _lk[:_lk.find("function bindeKopieren")]
+pruefe("dl.hidden = true" in _lk and "pb.hidden = false" in _lk,
+       "Mit Pfad wird der Download ERSETZT, nicht ergaenzt")
+pruefe("s1.hidden = true" in _lk and "s2.hidden = false" in _lk,
+       "... und die Anleitung mitgetauscht")
+# REIHENFOLGE: pruefeAdresse() blendet die ganze Karte aus – mit Pfad wuerde es
+# damit auch den Pfad verbergen, obwohl der Benutzer nichts herunterlaedt.
+_pz = XPJS[XPJS.find("function pruefeZugang"):]
+pruefe("ladeKatalog().then(" in _pz, "Pfad wird ZUERST geholt")
+_nach = _pz[_pz.find("ladeKatalog().then("):]
+_nach = _nach[:_nach.find("});")]
+pruefe("if (hatPfad) return;" in _nach and "pruefeAdresse();" in _nach,
+       "... und die Adresspruefung laeuft NUR ohne Pfad "
+       "(sonst verschwindet der Pfad mit der Karte)")
+pruefe("ladeVersion();" in _nach,
+       "... die Fassungsnummer ebenso (sie gilt nicht fuer die Datei "
+       "in der Freigabe)")
+# Ein `hidden`-Block in einem Flex-Container braucht die CSS-Regel.
+pruefe(".xp-steps[hidden]" in XP and ".xp-row[hidden]" in XP,
+       "hidden-Attribut ist gegen display:flex abgesichert")
+pruefe(".xp-pfad {" in XP and "var(--bg-primary)" in XP,
+       "Der Pfad-Kasten hat eine DECKENDE Flaeche")
+for _k in ("xp.get_head_pfad", "xp.pfad_text", "xp.pfad_copy", "xp.pfad_copied",
+           "xp.pfad_copyfail", "xp.steps_pfad"):
+    pruefe(I18N.count("'%s'" % _k) == 2, "%s in DE und EN" % _k)
+# Beide Schrittlisten muessen zum selben Ziel fuehren.
+import re as _re
+_a = len(_re.findall(r"<li>", [z for z in I18N.splitlines()
+                               if "'xp.steps':" in z][0]))
+_b = len(_re.findall(r"<li>", [z for z in I18N.splitlines()
+                               if "'xp.steps_pfad':" in z][0]))
+pruefe(_a == _b + 1,
+       "Die Pfad-Liste hat genau einen Schritt weniger (das Herunterladen)",
+       (_a, _b))
+
 print("\n" + "=" * 52)
 print("Bestanden: %d / Fehlgeschlagen: %d" % (_ok, _fail))
 sys.exit(1 if _fail else 0)

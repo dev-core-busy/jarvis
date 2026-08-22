@@ -8444,6 +8444,24 @@ async def excel_addin_version():
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 
+@app.get("/api/excel/katalog")
+async def excel_katalog(user: str = Depends(require_excel_access)):
+    """Netzwerkpfad des Add-in-Katalogs, sofern die Administration einen pflegt.
+
+    HINTER DER FREIGABE, nicht am unangemeldeten Versions-Endpunkt: ein
+    UNC-Pfad nennt Servernamen und Freigabe des Hauses. Das ist keine
+    Zugangsdatenpreisgabe, aber es ist auch nichts, was jeder erfahren muss,
+    der den Server erreicht.
+
+    Leerer Pfad = die Administration verteilt nicht zentral; die Benutzerseite
+    bietet dann wie bisher den Download an.
+    """
+    from backend import excel_addin
+    return JSONResponse({"ok": True, "pfad": excel_addin.katalog_pfad()},
+                        headers={"Cache-Control": "no-cache, no-store, "
+                                                  "must-revalidate"})
+
+
 @app.get("/excel-addin/icon-{groesse}.png")
 async def excel_addin_icon(groesse: int):
     """Menueband-Symbol des Excel-Add-ins – folgt dem Branding."""

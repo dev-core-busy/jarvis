@@ -96,6 +96,20 @@ def marken_slug() -> str:
     return "JARVIS"
 
 
+def marken_anzeige() -> str:
+    """Assistenten-Name unveraendert (fuer Fliesstext), sonst "Jarvis"."""
+    try:
+        from backend.config import config  # noqa: PLC0415
+        st = config.get_skill_states().get("branding", {}) or {}
+        if st.get("enabled"):
+            wert = ((st.get("config", {}) or {}).get("assistant_name") or "").strip()
+            if wert:
+                return wert[:64]
+    except Exception:  # noqa: BLE001
+        pass
+    return "Jarvis"
+
+
 def schluessel_prefix() -> str:
     return marken_slug() + "-" + SCHLUESSEL_KERN
 

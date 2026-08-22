@@ -471,6 +471,31 @@ check("{MARKE}" not in _fertig and "{marke_slug}" not in _fertig
 check("NEXI_CSA_KEY" in _fertig and "~/.nexi-csa-key" in _fertig,
       "Die fertige Datei nennt die Kennungen dieser Installation")
 
+# Die ADRESSE gehoert genauso hinein. Ein Beispiel wie
+# "https://dein-server.firma.de" ist Arbeit, die der Benutzer heraussuchen
+# muss – der Server kennt seine Adresse (vom Nutzer gemeldet).
+check("{adresse}" in _tpl, "Vorlage hat einen Adress-Platzhalter")
+_mit = _fertig.replace("{adresse}", "https://jarvis.firma.test")
+check("https://jarvis.firma.test" in _mit and "{adresse}" not in _mit,
+      "Adresse wird eingesetzt")
+check("dein-server" not in _tpl and "your-server" not in _tpl
+      and "firma.de" not in _tpl,
+      "Keine erfundene Beispiel-Adresse mehr in der Vorlage")
+check("csa-url" in _tpl and "printf" in _tpl,
+      "Vorlage enthaelt den fertigen Befehl zum Ablegen")
+
+_ep_adr = _MAIN[_MAIN.find('@app.get("/claude/skill.md")'):]
+_ep_adr = _ep_adr[:_ep_adr.find('@app.get("/api/claude/status")')]
+check("basis_url" in _ep_adr, "Endpunkt leitet die Adresse aus der Anfrage ab")
+check("request" in _ep_adr.split("\n")[1], "... und nimmt dafuer das Request-Objekt")
+
+# Anleitung im Bereich: derselbe Platzhalter, gefuellt von branding.js.
+_BR = (ROOT / "frontend" / "js" / "branding.js").read_text(encoding="utf-8")
+check("{adresse}" in _BR and "location.origin" in _BR,
+      "branding.js fuellt {adresse} mit der echten Adresse")
+check("dein-server" not in _I18N and "firma.de" not in _I18N.split("csub.guide_body")[1][:4000],
+      "Keine erfundene Beispiel-Adresse mehr in der Anleitung")
+
 # Und die Anleitung darf NICHT mehr auffordern, sie selbst anzulegen.
 _I18N = (ROOT / "frontend" / "js" / "i18n.js").read_text(encoding="utf-8")
 check("/claude/skill.md" in _I18N, "Anleitung verlinkt den Download")

@@ -282,7 +282,7 @@
                     <h4>2. Zugang auf deinem Rechner hinterlegen</h4>
                     <p>Zwei Angaben, beide <b>außerhalb</b> des Projektordners – ein Schlüssel gehört nie ins Repo:</p>
                     <pre><code>printf '%s' '{MARKE}-CSA-1.…dein Schlüssel…' &gt; ~/.{marke_slug}-csa-key
-printf '%s' 'https://dein-{marke_slug}.firma.de'   &gt; ~/.{marke_slug}-csa-url
+printf '%s' '{adresse}'   &gt; ~/.{marke_slug}-csa-url
 chmod 600 ~/.{marke_slug}-csa-key</code></pre>
                     <p>Alternativ als Umgebungsvariablen <code>{MARKE}_CSA_KEY</code> und <code>{MARKE}_CSA_URL</code>. Eine feste Vorgabe für die Adresse gibt es bewusst nicht: derselbe Client arbeitet gegen jede {marke}-Installation, und eine falsche Adresse sähe wie ein Schlüsselproblem aus.</p>
 

@@ -92,10 +92,20 @@ rechnet der Server selbst.
 
 ## Voraussetzungen
 
-- **Schluessel** in `{MARKE}_CSA_KEY` oder `~/.{marke_slug}-csa-key` – in {marke} unter
-  `/claude` erzeugen. **Nie ins Repo.**
-- **Adresse** in `{MARKE}_CSA_URL` oder `~/.{marke_slug}-csa-url`. Es gibt bewusst
-  keine Vorgabe: derselbe Client laeuft gegen jede {marke}-Installation.
+Diese Datei ist bereits auf DIESE Installation ausgestellt – die beiden Befehle
+unten sind vollstaendig, es fehlt nur der Schluessel:
+
+```bash
+printf '%s' 'HIER-DEINEN-SCHLUESSEL-EINSETZEN' > ~/.{marke_slug}-csa-key
+printf '%s' '{adresse}' > ~/.{marke_slug}-csa-url
+chmod 600 ~/.{marke_slug}-csa-key
+```
+
+- **Schluessel** in `{MARKE}_CSA_KEY` oder `~/.{marke_slug}-csa-key` – in {marke}
+  unter `{adresse}/claude` erzeugen. **Nie ins Repo.**
+- **Adresse** ist oben schon eingesetzt: `{adresse}`. (Ueber `{MARKE}_CSA_URL`
+  bzw. die Datei laesst sich der Client auch gegen eine andere Installation
+  richten – eine feste Vorgabe im Code gibt es bewusst nicht.)
 - Der lokale Stand muss auf `origin/master` liegen und die Zieldateien duerfen
   keine ungespeicherten Aenderungen haben – der Client prueft beides und bricht
   sonst ab.

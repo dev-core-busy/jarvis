@@ -42,17 +42,73 @@ import secrets
 from contextvars import ContextVar
 
 # ── Deckel ────────────────────────────────────────────────────────────────
-# Alle drei begrenzen, was EIN Vorschlag anrichten kann. Sie sind keine
-# Schikane: ohne sie kann eine einzelne Antwort die halbe Mappe ueberschreiben,
-# und die Diff-Ansicht waere dann so lang, dass sie niemand mehr liest – womit
-# die Bestaetigung ihren Sinn verliert.
-MAX_AENDERUNGEN = 200          # Eintraege in einem Vorschlag
+# Alle begrenzen, was EIN Vorschlag anrichten kann. Sie sind keine Schikane:
+# ohne sie kann eine einzelne Antwort die halbe Mappe ueberschreiben, und die
+# Diff-Ansicht waere dann so lang, dass sie niemand mehr liest – womit die
+# Bestaetigung ihren Sinn verliert.
 MAX_ZELLEN_JE_BEREICH = 5000   # Zellen, die EIN Eintrag abdecken darf
 MAX_ZELLEN_GESAMT = 20000      # Zellen ueber alle Eintraege
 MAX_FORMEL_LEN = 2000
 MAX_FRAGE_LEN = 4000
 MAX_UEBERBLICK_LEN = 24000     # Ueberblick, der in den Auftrag geht
-MAX_RUNDEN = 3                 # Nachforderungen je Frage (Fenster zaehlt mit)
+
+# ── Einstellbare Deckel ───────────────────────────────────────────────────
+# Diese zwei stehen im Manifest (``config_schema``) und im Admin-Reiter. Sie
+# werden ueber die FUNKTIONEN unten gelesen, nicht ueber diese Namen – siehe
+# die Begruendung an ``max_aenderungen()``.
+MAX_AENDERUNGEN_VORGABE = 200   # Eintraege in einem Vorschlag
+MAX_RUNDEN_VORGABE = 3          # Nachforderungen je Frage (Fenster zaehlt mit)
+
+SKILL_NAME = "excel-addin"
+
+
+def skill_config() -> dict:
+    """Konfiguration des Skills (Administrator-Teil).
+
+    Lazy und fehlertolerant: der Skill kann fehlen oder aus sein – dann gibt es
+    ein leeres dict und es gelten die Vorgaben dieses Moduls.
+    """
+    try:
+        from backend.config import config  # noqa: PLC0415
+        st = config.get_skill_states().get(SKILL_NAME, {}) or {}
+        return st.get("config", {}) or {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _cfg_int(schluessel: str, vorgabe: int, unten: int, oben: int) -> int:
+    """Zahl aus der Skill-Config, hart begrenzt.
+
+    Die Begrenzung ist kein Zierrat: die Werte kommen aus einem Formular und
+    koennen auch von Hand in die settings.json geschrieben werden.
+    """
+    try:
+        n = int(str(skill_config().get(schluessel, "")).strip() or vorgabe)
+    except Exception:  # noqa: BLE001
+        return vorgabe
+    return max(unten, min(n, oben))
+
+
+def max_aenderungen() -> int:
+    """Eintraege, die EIN Vorschlag umfassen darf (Vorgabe 200).
+
+    Bewusst eine FUNKTION und keine Modulkonstante – der Wert ist im
+    Admin-Reiter aenderbar und muss ohne Dienstneustart greifen (gleiche
+    Begruendung wie ``documents.retention_days()``).
+    """
+    return _cfg_int("max_aenderungen", MAX_AENDERUNGEN_VORGABE, 10, 500)
+
+
+def max_runden() -> int:
+    """Nachforderungen je Frage (Vorgabe 3, 1 = keine Nachforderung).
+
+    Der Wert gilt an ZWEI Stellen: hier auf dem Server (der die Nachforderung
+    ab der letzten Runde verwirft) und im Aufgabenfenster, das mitzaehlt. Das
+    Fenster bekommt ihn deshalb mit jeder Antwort von ``/api/excel/ask``
+    mitgeliefert – eine zweite, hart verdrahtete Zahl im Client waere genau die
+    Drift, die dieser Umbau beseitigt.
+    """
+    return _cfg_int("max_runden", MAX_RUNDEN_VORGABE, 1, 5)
 
 
 # ── Formel-Sperrliste ─────────────────────────────────────────────────────
@@ -198,8 +254,9 @@ def aenderungen_pruefen(roh) -> tuple[list, list]:
     if not isinstance(roh, list):
         return ([], [{"grund": "Die Änderungsliste ist keine Liste."}])
 
+    grenze = max_aenderungen()
     gesamt = 0
-    for eintrag in roh[:MAX_AENDERUNGEN]:
+    for eintrag in roh[:grenze]:
         if not isinstance(eintrag, dict):
             abgelehnt.append({"grund": "Eintrag ist kein Objekt."})
             continue
@@ -258,10 +315,10 @@ def aenderungen_pruefen(roh) -> tuple[list, list]:
             sauber["begruendung"] = str(eintrag["begruendung"])[:300]
         gueltig.append(sauber)
 
-    if isinstance(roh, list) and len(roh) > MAX_AENDERUNGEN:
+    if isinstance(roh, list) and len(roh) > grenze:
         abgelehnt.append({"grund": "Es wurden %d Änderungen vorgeschlagen – "
                                    "übernommen werden höchstens %d."
-                                   % (len(roh), MAX_AENDERUNGEN)})
+                                   % (len(roh), grenze)})
     return (gueltig, abgelehnt)
 
 
@@ -516,7 +573,7 @@ def auftrag(frage: str, ueberblick: dict, vorgeschichte: list | None = None,
     teile.append("")
 
     if nachgeladen:
-        for eintrag in nachgeladen[:MAX_RUNDEN]:
+        for eintrag in nachgeladen[:max_runden()]:
             if not isinstance(eintrag, dict):
                 continue
             bereich = _markensicher(eintrag.get("bereich"))

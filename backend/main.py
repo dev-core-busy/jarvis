@@ -8511,7 +8511,9 @@ async def excel_ask_endpoint(request: Request,
          "aenderungen": [{blatt, adresse, formel|wert, begruendung}, …],
          "abgelehnt": [{adresse, grund}, …],
          "zusammenfassung": "…",
-         "brauche": ["Blatt!A1:D200", …]}
+         "brauche": ["Blatt!A1:D200", …],
+         "runde": 1,
+         "max_runden": 3}          # Deckel des Servers, das Fenster zaehlt mit
 
     Der Lauf ist **unprivilegiert** – ``privileged`` steht hart auf ``False``
     und ist ausdruecklich KEIN Feld der Anfrage. Ueber diesen Weg gibt es keinen
@@ -8593,8 +8595,10 @@ async def excel_ask_endpoint(request: Request,
     text, brauche = excel_ask.nachforderung_lesen(antwort or "")
     # Ab der letzten Runde wird nicht mehr nachgefordert – sonst laeuft ein
     # Modell, das immer weiter Bereiche verlangt, in eine Schleife, die den
-    # Benutzer nur Zeit kostet.
-    if runde >= excel_ask.MAX_RUNDEN:
+    # Benutzer nur Zeit kostet. Der Deckel ist im Admin-Reiter einstellbar und
+    # wird HIER gelesen, damit eine Aenderung ohne Dienstneustart greift.
+    grenze_runden = excel_ask.max_runden()
+    if runde >= grenze_runden:
         brauche = []
 
     aenderungen: list = []
@@ -8606,12 +8610,20 @@ async def excel_ask_endpoint(request: Request,
         if eintrag.get("zusammenfassung") and not zusammenfassung:
             zusammenfassung = eintrag["zusammenfassung"]
 
+    # ``max_runden`` geht MIT der Antwort hinaus, statt das Fenster einen
+    # eigenen Endpunkt fragen zu lassen: der Wert wird genau dort gebraucht, wo
+    # die Antwort ausgewertet wird, kostet so keinen zusaetzlichen Roundtrip und
+    # kann nicht veralten. Er ersetzt die frueher hart verdrahtete Zahl in
+    # excel.js – zwei Quellen fuer denselben Deckel waren die Drift, die hier
+    # beseitigt wurde. (Nicht ueber /api/excel-addin/version: der haengt an
+    # KEINER Anmeldung und ist die Manifest-Version, keine Konfiguration.)
     return JSONResponse({"ok": True, "text": text or "",
                          "aenderungen": aenderungen,
                          "abgelehnt": abgelehnt,
                          "zusammenfassung": zusammenfassung,
                          "brauche": brauche,
-                         "runde": runde})
+                         "runde": runde,
+                         "max_runden": grenze_runden})
 
 
 @app.get("/email", response_class=HTMLResponse)

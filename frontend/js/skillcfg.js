@@ -32,6 +32,7 @@
         claude_bridge:      { container: 'skcfg-claude_bridge' },
         agent_autonomy_kit: { container: 'skcfg-agent_autonomy_kit' },
         avatar:             { container: 'skcfg-avatar' },
+        claude_subagent:    { container: 'skcfg-claude_subagent' },
         whatsapp:           { container: 'skcfg-whatsapp', exclude: ['debug_mode'] },
         knowledge:          { container: 'skcfg-knowledge', only: ['max_file_size_mb'] },
     };
@@ -48,6 +49,7 @@
         agent_orchestrator: 'settings-tab-btn-orchestrator',
         agent_autonomy_kit: 'settings-tab-btn-autonomy',
         avatar:             'settings-tab-btn-avatar',
+        claude_subagent:    'settings-tab-btn-claudesub',
         // Wie agent_orchestrator: hier, aber NICHT in TARGETS – der Reiter zeigt
         // eine handgebaute Oberflaeche (short_tracks_admin.js), kein
         // manifest-generiertes Formular.

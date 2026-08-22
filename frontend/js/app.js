@@ -660,7 +660,8 @@
         const tabSupport = document.getElementById('settings-tab-support');
         // Reiter, deren Inhalt generisch aus dem Skill-Manifest kommt (skillcfg.js)
         const SKILLCFG_TABS = ['telegram', 'browser_control', 'claude_bridge',
-                               'agent_orchestrator', 'agent_autonomy_kit', 'avatar'];
+                               'agent_orchestrator', 'agent_autonomy_kit', 'avatar',
+                               'claude_subagent'];
         const tabsSkillCfg = SKILLCFG_TABS.map(n => document.getElementById('settings-tab-' + n));
         const tabEmail   = document.getElementById('settings-tab-email');
         const tabTracks  = document.getElementById('settings-tab-tracks');

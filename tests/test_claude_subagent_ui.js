@@ -325,36 +325,39 @@ async function baueSeite(zustand) {
         check(mitJarvis.length === 0,
               'Kein rohes "Jarvis" in den eigenen i18n-Texten',
               [...new Set(mitJarvis)].join(', '));
-        const ohneSpan = seite.replace(/<span class="brand-app-name">Jarvis<\/span>/g, '');
+        // JS-BEZEICHNER sind kein Anzeigetext: `window.JarvisIssues` ist der
+        // globale Name aus issues.js und wird von sechs weiteren Seiten
+        // benutzt – ihn umzubenennen waere Unsinn. Geprueft wird der TEXT.
+        const ohneSpan = seite
+            .replace(/<span class="brand-app-name">Jarvis<\/span>/g, '')
+            .replace(/window\.Jarvis[A-Za-z]*/g, '')
+            .replace(/jarvis_theme/g, '');
         check(ohneSpan.indexOf('Jarvis') < 0,
-              'Kein rohes "Jarvis" in claude.html (ausser im brand-app-name-Span)');
+              'Kein rohes "Jarvis" im ANZEIGETEXT von claude.html',
+              (ohneSpan.match(/.{0,25}Jarvis.{0,25}/) || [''])[0]);
 
         // Die technischen Kennungen duerfen NICHT gebrandet werden – sie sind
         // Teil des Protokolls bzw. Dateinamen auf dem Rechner des Benutzers.
-        // ── UND AUCH DIE KENNUNGEN SIND PRODUKTNEUTRAL ────────────────────
-        // Erst als "technisch, bleibt" eingestuft – falsch: der Benutzer LIEST
-        // sie in der Anleitung, und der Schluessel selbst begann mit
-        // "JARVIS-CSA-1.". In einem White-Label-System verraet das den
-        // Produktnamen unabhaengig vom Branding. Vom Nutzer gemeldet.
-        check(i18n.indexOf('SUBAGENT_KEY') >= 0 && i18n.indexOf('.subagent-url') >= 0,
-              'Anleitung nennt die neutralen Kennungen');
-        const kennungen = ['JARVIS_CSA', 'JARVIS-CSA', 'jarvis-csa', 'jarvis-delegate'];
-        const alt = kennungen.filter(k => i18n.indexOf(k) >= 0 || seite.indexOf(k) >= 0);
-        check(alt.length === 0, 'Keine alten Jarvis-Kennungen mehr', alt.join(', '));
-
-        // Die harte Zusage: im sichtbaren Text steht der Produktname NIRGENDS –
-        // weder gross noch klein, weder in Prosa noch in einem Beispiel.
-        const sichtbar = eigene.map(m => m[2]).join(' ');
-        const treffer = sichtbar.match(/.{0,25}[Jj]arvis.{0,25}/g) || [];
-        check(treffer.length === 0,
-              'Kein "jarvis" in irgendeinem Bereichs-Text (auch klein geschrieben)',
-              treffer.slice(0, 2).join(' | '));
+        // ── DIE KENNUNGEN TRAGEN DEN MARKENNAMEN ──────────────────────────
+        // NICHT neutralisieren (das war ein Missverstaendnis meinerseits): der
+        // Benutzer LIEST sie in der Anleitung, und der Schluessel selbst faengt
+        // damit an. Sie tragen deshalb den Platzhalter, den branding.js mit dem
+        // ASSISTENTEN-NAMEN fuellt.
+        check(i18n.indexOf('{MARKE}_CSA_KEY') >= 0 && i18n.indexOf('{marke_slug}-csa-url') >= 0,
+              'Anleitung nennt die Kennungen mit Marken-Platzhalter');
+        const neutral = ['SUBAGENT_KEY', 'SUBAGENT_URL', '.subagent-key', '.subagent-url'];
+        const nRest = neutral.filter(k => i18n.indexOf(k) >= 0 || seite.indexOf(k) >= 0);
+        check(nRest.length === 0, 'Keine neutralisierten Kennungen mehr', nRest.join(', '));
 
         // ── VERHALTEN, nicht Schreibweise: loest branding.js den Platzhalter? ──
         for (const fall of [
             { label: 'ohne Branding', b: { active: false }, erwartet: 'Jarvis' },
-            { label: 'mit Firmenname', b: { active: true, company_name: 'Nexus AG' },
-              erwartet: 'Nexus AG' },
+            // NUR Firmenname -> weiterhin "Jarvis". KEIN Rueckfall auf den
+            // Firmennamen (Vorgabe des Nutzers): das Feld heisst "Name des
+            // Assistenten" und ist genau dafuer da; der Firmenname ist das
+            // Unternehmen, nicht der Assistent.
+            { label: 'nur Firmenname', b: { active: true, company_name: 'Nexus AG' },
+              erwartet: 'Jarvis' },
             { label: 'mit Assistenten-Name', b: { active: true, company_name: 'Nexus AG',
               assistant_name: 'Nexi' }, erwartet: 'Nexi' },
         ]) {
@@ -387,14 +390,15 @@ async function baueSeite(zustand) {
                 { url: 'https://jarvis.test/claude', runScripts: 'outside-only' });
             const w4 = dom4.window;
             w4.fetch = () => Promise.resolve({ ok: true, status: 200,
-                json: () => Promise.resolve({ active: true, company_name: 'Nexus AG' }) });
+                json: () => Promise.resolve({ active: true, company_name: 'Nexus AG',
+                                             assistant_name: 'Nexi' }) });
             w4.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/branding.js'), 'utf8'));
             await schlaf(120);
             // So verhaelt sich applyLang: es setzt den i18n-Text NEU.
             w4.document.getElementById('z').textContent = 'an {marke} abgeben';
             w4.dispatchEvent(new w4.Event('jarvis-lang-changed'));
             await schlaf(60);
-            check(w4.document.getElementById('z').textContent.indexOf('Nexus AG') >= 0,
+            check(w4.document.getElementById('z').textContent.indexOf('Nexi') >= 0,
                   'Nach einem Sprachwechsel wird erneut eingesetzt',
                   w4.document.getElementById('z').textContent);
             dom4.window.close();
@@ -478,6 +482,17 @@ async function baueSeite(zustand) {
                 check(/id="[a-z-]*settings[a-z-]*"[^>]*data-i18n-title="nav\.settings"/.test(q)
                       || /data-i18n-title="nav\.settings"/.test(q),
                       `${f}: hat ein Zahnrad in der Titelleiste`);
+                // Issues/Feedback gehoert genauso auf JEDE Bereichsseite –
+                // es fehlte auf denselben vier Seiten wie das Zahnrad.
+                check(/data-i18n-title="sup\.issues"/.test(q),
+                      `${f}: hat den Issues-Knopf`);
+                check(/js\/issues\.js/.test(q),
+                      `${f}: bindet issues.js ein (sonst tut der Knopf nichts)`);
+                // Gleiche Reihenfolge wie ueberall: Thema -> Issues -> Zahnrad.
+                const pIss = q.search(/data-i18n-title="sup\.issues"/);
+                const pSet = q.search(/data-i18n-title="nav\.settings"/);
+                check(pIss >= 0 && pSet >= 0 && pIss < pSet,
+                      `${f}: Issues steht vor den Einstellungen`);
             }
             check(bereiche.length >= 6,
                   `Bereichsseiten erkannt (${bereiche.length})`, bereiche.join(', '));

@@ -96,7 +96,7 @@ section("1. Schluessel – Erzeugung, Pruefung, Widerruf")
 
 _e = cs.schluessel_erzeugen("nexus\\andreas.bender")
 _schluessel = _e["schluessel"]
-check(_schluessel.startswith(cs.SCHLUESSEL_PREFIX), "Schluessel traegt das Praefix")
+check(_schluessel.startswith(cs.schluessel_prefix()), "Schluessel traegt das Marken-Praefix")
 check(len(_schluessel) > 50, "Schluessel ist lang genug", f"{len(_schluessel)}")
 check(cs.benutzer_zu_schluessel(_schluessel) == "andreas.bender",
       "Schluessel loest auf den normierten Benutzer auf",
@@ -119,11 +119,11 @@ check("schluessel" not in json.dumps(cs.schluessel_info("andreas.bender")),
       "schluessel_info gibt das Geheimnis nicht heraus")
 
 # Falsche/kaputte Schluessel
-check(cs.benutzer_zu_schluessel(cs.SCHLUESSEL_PREFIX + "abc.falsch") is None,
+check(cs.benutzer_zu_schluessel(cs.schluessel_prefix() + "abc.falsch") is None,
       "Falsches Geheimnis -> None")
 check(cs.benutzer_zu_schluessel("voellig-anderes-format") is None,
       "Fremdes Format -> None")
-check(cs.benutzer_zu_schluessel(cs.SCHLUESSEL_PREFIX + "nurkennung") is None,
+check(cs.benutzer_zu_schluessel(cs.schluessel_prefix() + "nurkennung") is None,
       "Fehlender dritter Teil -> None")
 check(cs.benutzer_zu_schluessel("") is None, "Leerer Schluessel -> None")
 
@@ -374,10 +374,16 @@ _SEITE = (ROOT / "frontend" / "claude.html").read_text(encoding="utf-8")
 check(re.search(r"\d{1,3}(\.\d{1,3}){3}", nur_code(_CLIENT)) is None,
       "Client enthaelt keine hart verdrahtete IP")
 check("VORGABE_URL" not in _CLIENT, "Keine Vorgabe-URL mehr im Client")
-check("SUBAGENT_URL" in _CLIENT and ".subagent-url" in _CLIENT,
-      "Adresse kommt aus Umgebung ODER Datei")
-check("SUBAGENT_KEY" in _CLIENT and ".subagent-key" in _CLIENT,
-      "Schluessel kommt aus Umgebung ODER Datei")
+# Der Client kann die Marke NICHT kennen (sie liegt auf dem Server), sucht die
+# markenspezifischen Namen also nach dem MUSTER `<MARKE>_CSA_<X>` bzw.
+# `~/.<marke>-csa-<x>`. Nur so kann in der Anleitung der Assistenten-Name stehen.
+check('_CSA_" + end' in _CLIENT and '".*-csa-"' in _CLIENT,
+      "Client sucht Kennungen nach dem Muster, nicht nach festem Namen")
+check("_aus_umgebung_oder_datei" in _CLIENT
+      and _CLIENT.count("_aus_umgebung_oder_datei") >= 3,
+      "Schluessel UND Adresse gehen ueber denselben Weg")
+check("SUBAGENT_KEY" not in _CLIENT and ".subagent-key" not in _CLIENT,
+      "Keine neutralisierten Kennungen mehr im Client")
 
 # Die frueher behauptete DEV-Beschraenkung war FALSCH: der Arbeitsbereich wird
 # frisch von origin/master geklont, ein sparse-checkout des Servers wirkt nur
@@ -410,8 +416,8 @@ check("lohnt nicht" in _te or "lohnt sich" in _te,
 _gb = _I18N[_I18N.find("'csub.guide_body'"):]
 _gb = _gb[:_gb.find("\n        'csub.jobs_head'")]
 check("800" in _gb and "Faktor" in _gb, "Anleitung nennt Ersparnis und Faktor")
-check(".subagent-url" in _gb and ".subagent-key" in _gb,
-      "Anleitung nennt beide Zugangsangaben")
+check("{marke_slug}-csa-url" in _gb and "{marke_slug}-csa-key" in _gb,
+      "Anleitung nennt beide Zugangsangaben MIT Marken-Platzhalter")
 
 print("\n" + "=" * 62)
 print(f"  {_ok} OK, {_fail} FAIL")

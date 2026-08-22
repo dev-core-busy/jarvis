@@ -468,13 +468,28 @@
     //
     // Reihenfolge wie im Backend (`mail_accounts.kategorie_name`):
     // Assistenten-Name → Firmenname → "Jarvis".
+    // AUSSCHLIESSLICH der Assistenten-Name aus dem Branding (Vorgabe des
+    // Nutzers). KEIN Rueckfall auf den Firmennamen: das Feld heisst "Name des
+    // Assistenten" und ist genau dafuer da – der Firmenname ist das Unternehmen,
+    // nicht der Assistent.
     function markeName() {
         var b = _current;
         if (b && b.active) {
-            var n = assistantNameOf(b) || (b.company_name || '').trim();
+            var n = (b.assistant_name || '').trim();
             if (n) return n;
         }
         return 'Jarvis';
+    }
+
+    // Slug-Form der Marke fuer Dateinamen, Umgebungsvariablen und
+    // Schluessel-Praefixe: "Nexus AG" -> "nexus" bzw. "NEXUS". Ein Leerzeichen
+    // oder Umlaut im Dateinamen waere unbrauchbar, deshalb nur a-z0-9 und nur
+    // das erste Wort.
+    function markeSlug(gross) {
+        var s = markeName().toLowerCase()
+            .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
+            .replace(/[^a-z0-9]+/g, ' ').trim().split(' ')[0] || 'jarvis';
+        return gross ? s.toUpperCase() : s;
     }
 
     // ⚠ DER ROHTEXT MUSS GEMERKT WERDEN. Der erste Durchlauf laeuft, BEVOR
@@ -489,15 +504,22 @@
 
     function markeEinsetzen() {
         var name = markeName();
+        // Drei Platzhalter: {marke} = Anzeigename, {marke_slug} = klein und
+        // dateinamentauglich, {MARKE} = gross (Umgebungsvariablen).
+        function fuellen(s) {
+            return s.split('{marke_slug}').join(markeSlug(false))
+                    .split('{MARKE}').join(markeSlug(true))
+                    .split('{marke}').join(name);
+        }
         // 1. Bekannte Fundstellen neu setzen (korrigiert einen zu fruehen Lauf).
         _markeText = _markeText.filter(function (e) {
             if (!e.k || !e.k.parentNode) return false;      // Knoten ist weg
-            e.k.nodeValue = e.roh.split('{marke}').join(name);
+            e.k.nodeValue = fuellen(e.roh);
             return true;
         });
         _markeAttr = _markeAttr.filter(function (e) {
             if (!e.el || !e.el.isConnected) return false;
-            e.el.setAttribute(e.attr, e.roh.split('{marke}').join(name));
+            e.el.setAttribute(e.attr, fuellen(e.roh));
             return true;
         });
         // 2. Neue Fundstellen aufnehmen (i18n rendert Texte spaeter nach).
@@ -508,17 +530,17 @@
         var neu = [];
         var k;
         while ((k = lauf.nextNode())) {
-            if (k.nodeValue && k.nodeValue.indexOf('{marke}') >= 0) neu.push(k);
+            if (k.nodeValue && /\{marke(_slug)?\}|\{MARKE\}/.test(k.nodeValue)) neu.push(k);
         }
         neu.forEach(function (k) {
             _markeText.push({ k: k, roh: k.nodeValue });
-            k.nodeValue = k.nodeValue.split('{marke}').join(name);
+            k.nodeValue = fuellen(k.nodeValue);
         });
         ['title', 'aria-label', 'placeholder'].forEach(function (attr) {
             document.querySelectorAll('[' + attr + '*="{marke}"]').forEach(function (el) {
                 var roh = el.getAttribute(attr);
                 _markeAttr.push({ el: el, attr: attr, roh: roh });
-                el.setAttribute(attr, roh.split('{marke}').join(name));
+                el.setAttribute(attr, fuellen(roh));
             });
         });
     }

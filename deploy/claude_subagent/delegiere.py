@@ -6,15 +6,16 @@ PATCH zurueck. Der Patch wird NICHT automatisch angewandt – das entscheidet
 Claude nach dem Lesen.
 
 ZUGANG – je Jarvis-Installation zu setzen, es gibt KEINE Vorgabe
-    Schluessel  $SUBAGENT_KEY  oder  ~/.subagent-key
-    Adresse     $SUBAGENT_URL  oder  ~/.subagent-url
+    Schluessel  <MARKE>_CSA_KEY  oder  ~/.<marke>-csa-key
+    Adresse     <MARKE>_CSA_URL  oder  ~/.<marke>-csa-url
+    <MARKE> = Name des Assistenten aus dem Branding (z.B. NEXI/.nexi-).
 
     Bewusst KEIN voreingestellter Host: derselbe Client laeuft gegen jede
     Jarvis-Installation. Eine Vorgabe waere die Adresse genau einer davon – bei
     der naechsten falsch, und der Fehler saehe wie ein Schluesselproblem aus
     (ein fremder Server kennt den Schluessel nicht und antwortet 401).
 
-    Der Schluessel gehoert NICHT ins Repo. ~/.subagent-key liegt ausserhalb,
+    Der Schluessel gehoert NICHT ins Repo. ~/.<marke>-csa-key liegt ausserhalb,
     die Umgebungsvariable erst recht.
 
 AUFRUF
@@ -45,27 +46,42 @@ def fehler(text: str, code: int = 1):
     sys.exit(code)
 
 
+def _aus_umgebung_oder_datei(endung: str, was: str) -> str:
+    """Sucht `<MARKE>_CSA_<ENDUNG>` bzw. `~/.<marke>-csa-<endung>`.
+
+    Der MARKENNAME steckt in beiden Namen – so steht in der Anleitung der Name
+    des Assistenten und nicht "Jarvis". Der Client kann die Marke aber nicht
+    kennen (sie liegt auf dem Server), deshalb wird nach dem MUSTER gesucht
+    statt nach einem festen Namen.
+    """
+    end = endung.upper()
+    for name, wert in os.environ.items():
+        if name.upper().endswith("_CSA_" + end) and wert.strip():
+            return wert.strip()
+    treffer = sorted(Path.home().glob(".*-csa-" + endung.lower()))
+    for p in treffer:
+        inhalt = p.read_text(encoding="utf-8").strip()
+        if inhalt:
+            return inhalt
+    return ""
+
+
 def schluessel() -> str:
-    k = os.environ.get("SUBAGENT_KEY", "").strip()
+    k = _aus_umgebung_oder_datei("key", "Schluessel")
     if k:
         return k
-    p = Path.home() / ".subagent-key"
-    if p.is_file():
-        return p.read_text(encoding="utf-8").strip()
-    fehler("Kein Delegations-Schluessel. Setze $SUBAGENT_KEY oder lege "
-           "~/.subagent-key an (erzeugt wird er in Jarvis unter /claude).", 2)
+    fehler("Kein Delegations-Schluessel. Setze <MARKE>_CSA_KEY oder lege "
+           "~/.<marke>-csa-key an – <MARKE> ist der Name des Assistenten aus "
+           "dem Branding (steht im Bereich /claude in der Anleitung).", 2)
 
 
 def basis_url() -> str:
-    u = os.environ.get("SUBAGENT_URL", "").strip()
+    u = _aus_umgebung_oder_datei("url", "Adresse")
     if not u:
-        p = Path.home() / ".subagent-url"
-        if p.is_file():
-            u = p.read_text(encoding="utf-8").strip()
-    if not u:
-        fehler("Keine Jarvis-Adresse. Setze $SUBAGENT_URL oder lege "
-               "~/.subagent-url an (z.B. https://jarvis.firma.de). Es gibt "
-               "bewusst keine Vorgabe – der Client laeuft gegen jede "
+        fehler("Keine Server-Adresse. Setze <MARKE>_CSA_URL oder lege "
+               "~/.<marke>-csa-url an – <MARKE> ist der Name des Assistenten "
+               "aus dem Branding (steht im Bereich /claude in der Anleitung). "
+               "Es gibt bewusst keine Vorgabe: der Client laeuft gegen jede "
                "Installation.", 2)
     if not u.startswith(("http://", "https://")):
         u = "https://" + u

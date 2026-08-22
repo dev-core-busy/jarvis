@@ -189,6 +189,10 @@
             <button class="btn-theme" id="btn-theme-toggle" title="Hell/Dunkel umschalten" data-i18n-title="chat.theme">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
             </button>
+            <button class="btn-theme" id="cs-issues-btn" data-i18n-title="sup.issues" title="Issues / Feedback"
+                    onclick="window.JarvisIssues && window.JarvisIssues.open()">
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            </button>
             <!-- Einstellungen: nur fuer Admins, wird von claude_portal.js eingeblendet -->
             <button class="btn-theme" id="cs-settings-btn" data-i18n-title="nav.settings" title="Einstellungen" style="display:none;">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -277,10 +281,10 @@
 
                     <h4>2. Zugang auf deinem Rechner hinterlegen</h4>
                     <p>Zwei Angaben, beide <b>außerhalb</b> des Projektordners – ein Schlüssel gehört nie ins Repo:</p>
-                    <pre><code>printf '%s' 'CSA-1.…dein Schlüssel…' &gt; ~/.subagent-key
-printf '%s' 'https://dein-server.firma.de'   &gt; ~/.subagent-url
-chmod 600 ~/.subagent-key</code></pre>
-                    <p>Alternativ als Umgebungsvariablen <code>SUBAGENT_KEY</code> und <code>SUBAGENT_URL</code>. Eine feste Vorgabe für die Adresse gibt es bewusst nicht: derselbe Client arbeitet gegen jede {marke}-Installation, und eine falsche Adresse sähe wie ein Schlüsselproblem aus.</p>
+                    <pre><code>printf '%s' '{MARKE}-CSA-1.…dein Schlüssel…' &gt; ~/.{marke_slug}-csa-key
+printf '%s' 'https://dein-{marke_slug}.firma.de'   &gt; ~/.{marke_slug}-csa-url
+chmod 600 ~/.{marke_slug}-csa-key</code></pre>
+                    <p>Alternativ als Umgebungsvariablen <code>{MARKE}_CSA_KEY</code> und <code>{MARKE}_CSA_URL</code>. Eine feste Vorgabe für die Adresse gibt es bewusst nicht: derselbe Client arbeitet gegen jede {marke}-Installation, und eine falsche Adresse sähe wie ein Schlüsselproblem aus.</p>
 
                     <h4>3. Skill in Claude Code ablegen</h4>
                     <p>Die Datei <code>.claude/skills/code-delegate/SKILL.md</code> im Projekt anlegen (Vorlage im Repo unter <code>deploy/claude_subagent/</code>). Claude findet den Skill dann selbst, sobald eine Aufgabe dazu passt. Der Client <code>deploy/claude_subagent/delegiere.py</code> ist versioniert und muss nicht kopiert werden.</p>
@@ -351,5 +355,6 @@ python3 $S warten "$ID" &gt; /tmp/patch.diff</code></pre>
 <script src="/static/js/sessions.js?v=6"></script>
 <script src="/static/js/claude_portal.js?v=2"></script>
 <script src="/static/js/activity.js?v=1"></script>
+<script src="/static/js/issues.js?v=7"></script>
 </body>
 </html>

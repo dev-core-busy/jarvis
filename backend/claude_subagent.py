@@ -70,7 +70,34 @@ STATE_PATH = PROJECT_ROOT / "data" / "claude_subagent.json"
 # fuer unprivilegierte Laeufe. Genau deshalb kann der Lauf unprivilegiert sein.
 ARBEIT_ROOT = Path("/tmp/claude_subagent")
 
-SCHLUESSEL_PREFIX = "CSA-1."
+# Schluessel-Praefix: <MARKE>-CSA-1.<kennung>.<geheimnis>
+# Der Benutzer sieht den Schluessel und kopiert ihn – er traegt deshalb den
+# ASSISTENTEN-NAMEN aus dem Branding, nicht "Jarvis" (Vorgabe des Nutzers).
+# Dieselbe Quelle wie ``mail_accounts.kategorie_name``, aber OHNE Rueckfall auf
+# den Firmennamen: das Feld heisst "Name des Assistenten".
+SCHLUESSEL_KERN = "CSA-1."
+
+
+def marken_slug() -> str:
+    """Assistenten-Name als ASCII-Grosswort fuer den Schluessel-Praefix."""
+    try:
+        from backend.config import config  # noqa: PLC0415
+        st = config.get_skill_states().get("branding", {}) or {}
+        if st.get("enabled"):
+            wert = ((st.get("config", {}) or {}).get("assistant_name") or "").strip()
+            if wert:
+                s = (wert.lower().replace("ä", "ae").replace("ö", "oe")
+                     .replace("ü", "ue").replace("ß", "ss"))
+                s = re.sub(r"[^a-z0-9]+", " ", s).strip().split(" ")[0]
+                if s:
+                    return s.upper()[:16]
+    except Exception:  # noqa: BLE001
+        pass
+    return "JARVIS"
+
+
+def schluessel_prefix() -> str:
+    return marken_slug() + "-" + SCHLUESSEL_KERN
 
 # ─── Grenzen ─────────────────────────────────────────────────────────────────
 # Notbremsen, KEINE Aufbewahrungs-Schranken (siehe die Lehre zu Stueckzahlen im
@@ -204,7 +231,7 @@ def schluessel_erzeugen(user: str) -> dict:
         raise ValueError("Kein Benutzer angegeben")
     kennung = uuid.uuid4().hex[:12]
     geheimnis = secrets.token_urlsafe(32)
-    voll = SCHLUESSEL_PREFIX + kennung + "." + geheimnis
+    voll = schluessel_prefix() + kennung + "." + geheimnis
     with _lock:
         daten = _laden()
         daten["schluessel"] = [k for k in daten["schluessel"]
@@ -255,9 +282,14 @@ def benutzer_zu_schluessel(token: str) -> str | None:
     verraet ueber die Laufzeit, wie viele Zeichen stimmen.
     """
     tok = (token or "").strip()
-    if not tok.startswith(SCHLUESSEL_PREFIX):
+    # NICHT auf den AKTUELLEN Praefix pruefen: er traegt den Assistenten-Namen,
+    # und der kann sich aendern – ein ausgegebener Schluessel wuerde sonst
+    # ungueltig, sobald jemand das Branding umbenennt. Massgeblich ist der
+    # unveraenderliche Kern "CSA-1."; das Geheimnis ist ohnehin der dritte Teil.
+    schnitt = tok.find(SCHLUESSEL_KERN)
+    if schnitt < 0:
         return None
-    teile = tok[len(SCHLUESSEL_PREFIX):].split(".", 1)
+    teile = tok[schnitt + len(SCHLUESSEL_KERN):].split(".", 1)
     if len(teile) != 2 or not teile[0] or not teile[1]:
         return None
     kennung, geheimnis = teile

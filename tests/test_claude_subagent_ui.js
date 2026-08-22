@@ -306,6 +306,85 @@ async function baueSeite(zustand) {
               'Wenn das Manifest einen Reiter nennt, gibt es ihn auch');
     }
 
+    // ══════════════════════════════════════════════════════════════════════
+    section('7. Im Branding-Fall steht der Markenname da, nicht "Jarvis"');
+    // branding.js ersetzt "Jarvis" nur in .brand-app-name, im Seitentitel und in
+    // Platzhalter-Attributen. Text, den applyLang() aus i18n.js setzt, erreicht
+    // es NICHT – ein White-Label-System verriete dort das Produkt dahinter.
+    // Deshalb schreiben die Texte {marke}; branding.js loest es zentral auf.
+    {
+        const i18n = fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8');
+        const seite = fs.readFileSync(path.join(ROOT, 'frontend/claude.html'), 'utf8');
+
+        // Kein rohes "Jarvis" mehr in den eigenen Texten – ausser im
+        // brand-app-name-Span, den branding.js selbst bedient.
+        const eigene = [...i18n.matchAll(
+            /'(csub\.[a-z_]+|portal\.card_claudesub[a-z_]*)':\s*'((?:[^'\\]|\\.)*)'/g)];
+        check(eigene.length >= 20, 'Eigene i18n-Schluessel gefunden', String(eigene.length));
+        const mitJarvis = eigene.filter(m => m[2].indexOf('Jarvis') >= 0).map(m => m[1]);
+        check(mitJarvis.length === 0,
+              'Kein rohes "Jarvis" in den eigenen i18n-Texten',
+              [...new Set(mitJarvis)].join(', '));
+        const ohneSpan = seite.replace(/<span class="brand-app-name">Jarvis<\/span>/g, '');
+        check(ohneSpan.indexOf('Jarvis') < 0,
+              'Kein rohes "Jarvis" in claude.html (ausser im brand-app-name-Span)');
+
+        // Die technischen Kennungen duerfen NICHT gebrandet werden – sie sind
+        // Teil des Protokolls bzw. Dateinamen auf dem Rechner des Benutzers.
+        check(i18n.indexOf('JARVIS_CSA_KEY') >= 0 && i18n.indexOf('jarvis-csa-url') >= 0,
+              'Technische Kennungen sind unangetastet geblieben');
+
+        // ── VERHALTEN, nicht Schreibweise: loest branding.js den Platzhalter? ──
+        for (const fall of [
+            { label: 'ohne Branding', b: { active: false }, erwartet: 'Jarvis' },
+            { label: 'mit Firmenname', b: { active: true, company_name: 'Nexus AG' },
+              erwartet: 'Nexus AG' },
+            { label: 'mit Assistenten-Name', b: { active: true, company_name: 'Nexus AG',
+              assistant_name: 'Nexi' }, erwartet: 'Nexi' },
+        ]) {
+            const dom3 = new JSDOM(
+                '<body><p data-i18n-html="x">Codeaufgaben an {marke} abgeben</p>' +
+                '<button title="an {marke} senden">k</button></body>',
+                { url: 'https://jarvis.test/claude', runScripts: 'outside-only' });
+            const w3 = dom3.window;
+            w3.fetch = () => Promise.resolve({ ok: true, status: 200,
+                                               json: () => Promise.resolve(fall.b) });
+            w3.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/branding.js'), 'utf8'));
+            await schlaf(120);
+            const p3 = w3.document.querySelector('p');
+            check(p3.textContent.indexOf('{marke}') < 0,
+                  `[${fall.label}] Platzhalter ist aufgeloest`, p3.textContent);
+            check(p3.textContent.indexOf(fall.erwartet) >= 0,
+                  `[${fall.label}] "${fall.erwartet}" steht im Text`, p3.textContent);
+            const b3 = w3.document.querySelector('button');
+            check(b3.getAttribute('title').indexOf(fall.erwartet) >= 0,
+                  `[${fall.label}] auch im title-Attribut`, b3.getAttribute('title'));
+            check(typeof w3.jarvisMarke === 'function' && w3.jarvisMarke() === fall.erwartet,
+                  `[${fall.label}] window.jarvisMarke() liefert den Namen`,
+                  typeof w3.jarvisMarke === 'function' ? w3.jarvisMarke() : 'fehlt');
+            dom3.window.close();
+        }
+
+        // applyLang() bringt den Platzhalter zurueck -> muss erneut greifen.
+        {
+            const dom4 = new JSDOM('<body><p id="z">an {marke} abgeben</p></body>',
+                { url: 'https://jarvis.test/claude', runScripts: 'outside-only' });
+            const w4 = dom4.window;
+            w4.fetch = () => Promise.resolve({ ok: true, status: 200,
+                json: () => Promise.resolve({ active: true, company_name: 'Nexus AG' }) });
+            w4.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/branding.js'), 'utf8'));
+            await schlaf(120);
+            // So verhaelt sich applyLang: es setzt den i18n-Text NEU.
+            w4.document.getElementById('z').textContent = 'an {marke} abgeben';
+            w4.dispatchEvent(new w4.Event('jarvis-lang-changed'));
+            await schlaf(60);
+            check(w4.document.getElementById('z').textContent.indexOf('Nexus AG') >= 0,
+                  'Nach einem Sprachwechsel wird erneut eingesetzt',
+                  w4.document.getElementById('z').textContent);
+            dom4.window.close();
+        }
+    }
+
     console.log('\n' + '='.repeat(62));
     console.log(`  ${ok} OK, ${fail} FAIL`);
     console.log('='.repeat(62));

@@ -455,6 +455,74 @@
         });
     }
 
+    // ── Marken-Platzhalter {marke} in Fliesstext ────────────────────────────
+    // WARUM ES DAS BRAUCHT: setBrandLabels() ersetzt "Jarvis" nur in
+    // `.brand-app-name`, im Seitentitel und in Platzhalter-Attributen. Text, den
+    // `applyLang()` aus i18n.js per textContent/innerHTML setzt, erreicht es
+    // NICHT – dort bliebe "Jarvis" stehen und ein White-Label-System verriete
+    // das Produkt dahinter. Die Loesung fuer Begruessungen (applyAssistantName)
+    // haengt an festen Selektoren und skaliert nicht.
+    //
+    // Deshalb: i18n-Texte schreiben `{marke}`, und dieser Durchlauf setzt den
+    // Namen ein – zentral, damit es nicht jede Seite einzeln loesen muss.
+    //
+    // Reihenfolge wie im Backend (`mail_accounts.kategorie_name`):
+    // Assistenten-Name → Firmenname → "Jarvis".
+    function markeName() {
+        var b = _current;
+        if (b && b.active) {
+            var n = assistantNameOf(b) || (b.company_name || '').trim();
+            if (n) return n;
+        }
+        return 'Jarvis';
+    }
+
+    // ⚠ DER ROHTEXT MUSS GEMERKT WERDEN. Der erste Durchlauf laeuft, BEVOR
+    // /api/branding geantwortet hat – ohne Marke ersetzt er {marke} durch
+    // "Jarvis", und danach gibt es keinen Platzhalter mehr, den der spaetere
+    // Durchlauf korrigieren koennte. Das Ergebnis waere ein gebrandetes System,
+    // in dem trotzdem "Jarvis" steht (vom Test gefunden, nicht vom Lesen).
+    // Deshalb: Fundstellen samt Rohtext merken und bei JEDEM Durchlauf neu aus
+    // dem Rohtext setzen.
+    var _markeText = [];   // [{ k: Textknoten, roh: string }]
+    var _markeAttr = [];   // [{ el, attr, roh }]
+
+    function markeEinsetzen() {
+        var name = markeName();
+        // 1. Bekannte Fundstellen neu setzen (korrigiert einen zu fruehen Lauf).
+        _markeText = _markeText.filter(function (e) {
+            if (!e.k || !e.k.parentNode) return false;      // Knoten ist weg
+            e.k.nodeValue = e.roh.split('{marke}').join(name);
+            return true;
+        });
+        _markeAttr = _markeAttr.filter(function (e) {
+            if (!e.el || !e.el.isConnected) return false;
+            e.el.setAttribute(e.attr, e.roh.split('{marke}').join(name));
+            return true;
+        });
+        // 2. Neue Fundstellen aufnehmen (i18n rendert Texte spaeter nach).
+        var lauf;
+        try {
+            lauf = document.createTreeWalker(document.body, 4 /* SHOW_TEXT */, null);
+        } catch (e) { return; }
+        var neu = [];
+        var k;
+        while ((k = lauf.nextNode())) {
+            if (k.nodeValue && k.nodeValue.indexOf('{marke}') >= 0) neu.push(k);
+        }
+        neu.forEach(function (k) {
+            _markeText.push({ k: k, roh: k.nodeValue });
+            k.nodeValue = k.nodeValue.split('{marke}').join(name);
+        });
+        ['title', 'aria-label', 'placeholder'].forEach(function (attr) {
+            document.querySelectorAll('[' + attr + '*="{marke}"]').forEach(function (el) {
+                var roh = el.getAttribute(attr);
+                _markeAttr.push({ el: el, attr: attr, roh: roh });
+                el.setAttribute(attr, roh.split('{marke}').join(name));
+            });
+        });
+    }
+
     function applyBranding(b) {
         if (!b || !b.active) return;
         _current = b;
@@ -465,6 +533,7 @@
         applyAssistantName(b);
         // Fuer nicht-DOM-Texte (z.B. TTS-Vorschau in chat.js/app.js) bereitstellen
         window.brandAssistantName = assistantNameOf(b);
+        markeEinsetzen();
         var lu = effectiveLogoUrl(b, isLight);
         applyLogo(b, lu);
         applyNameLogo(b, nlu);
@@ -513,7 +582,24 @@
         refreshBranding();
     }
 
+    // {marke} MUSS auch ohne Branding aufgeloest werden – refreshBranding()
+    // bricht bei inaktivem Skill vorzeitig ab, und ein roher Platzhalter in der
+    // Oberflaeche waere schlimmer als "Jarvis".
+    function markeStart() { try { markeEinsetzen(); } catch (e) { /* egal */ } }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', markeStart);
+    } else {
+        markeStart();
+    }
+    // applyLang() setzt data-i18n-Texte NEU und bringt den Platzhalter damit
+    // zurueck – nach jedem Sprachlauf erneut einsetzen. (Das Ereignis feuert bei
+    // JEDEM applyLang-Aufruf, nicht nur bei einem echten Wechsel; der Durchlauf
+    // ist idempotent und ohne Treffer praktisch kostenlos.)
+    window.addEventListener('jarvis-lang-changed', markeStart);
+
     window.refreshBranding = refreshBranding;
+    // Marken-Name fuer Nicht-DOM-Texte (Meldungen, die JS selbst zusammenbaut).
+    window.jarvisMarke = markeName;
     // Branding auf DYNAMISCH neu gerenderte Inhalte erneut anwenden (z.B. neue
     // Chat-Begruessung bei "Neuer Chat"), ohne erneuten Netz-Abruf.
     window.applyBrandingNow = function () {

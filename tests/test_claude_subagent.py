@@ -419,6 +419,65 @@ check("800" in _gb and "Faktor" in _gb, "Anleitung nennt Ersparnis und Faktor")
 check("{marke_slug}-csa-url" in _gb and "{marke_slug}-csa-key" in _gb,
       "Anleitung nennt beide Zugangsangaben MIT Marken-Platzhalter")
 
+section("9. SKILL.md ist HERUNTERLADBAR, kein Verweis")
+
+# "Lege die Datei selbst an" ist keine Anleitung – und `.claude/` ist
+# gitignored, die Vorlage existiert auf einer Installation gar nicht. Sie muss
+# also im Repo liegen UND ueber einen Endpunkt fertig ausgeliefert werden.
+_TPL = ROOT / "deploy" / "claude_subagent" / "SKILL.md"
+check(_TPL.is_file(), "Vorlage liegt versioniert im Repo (deploy/claude_subagent/SKILL.md)")
+_tpl = _TPL.read_text(encoding="utf-8") if _TPL.is_file() else ""
+check("{MARKE}_CSA_KEY" in _tpl and "{marke_slug}-csa-key" in _tpl,
+      "Vorlage traegt die Marken-Platzhalter")
+check("code-delegate" in _tpl, "Vorlage nennt den Skill-Ordner")
+
+_MAIN = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
+check('"/claude/skill.md"' in _MAIN, "Endpunkt /claude/skill.md vorhanden")
+_ep = _MAIN[_MAIN.find('@app.get("/claude/skill.md")'):]
+_ep = _ep[:_ep.find("@app.get(\"/api/claude/status\")")]
+check("attachment" in _ep and "SKILL.md" in _ep,
+      "... liefert als Download (Content-Disposition attachment)")
+check("marken_slug" in _ep and "marken_anzeige" in _ep,
+      "... setzt beide Marken-Formen ein")
+check("PlainTextResponse" not in _ep,
+      "... benutzt keine nicht importierte Response-Klasse")
+
+# JEDER Grossbuchstaben-Bezeichner im Endpunkt muss in main.py auch existieren.
+# Ein Quelltext-Test, der den Endpunkt nur LIEST, faengt genau das nicht: die
+# erste Fassung benutzte `PROJECT_ROOT`, das es in main.py gar nicht gibt –
+# NameError beim ersten Abruf, gefunden erst live (HTTP 500).
+import re as _re2
+# Kommentare UND Zeichenketten entfernen: sonst treffen deutsche Woerter
+# ("DIESER", "NICHT") und Platzhalter ("{MARKE}") die Suche. Vierter Fall
+# dieser Art im Projekt – ein Waechter, der seine eigene Begruendung liest.
+_ep_code = _re2.sub(r'"""(?:.|\n)*?"""', "", _ep)
+_ep_code = "\n".join(z.split("#")[0] for z in _ep_code.splitlines())
+_ep_code = _re2.sub(r'"[^"]*"|\'[^\']*\'', '""', _ep_code)
+_bez = set(_re2.findall(r"\b([A-Z][A-Z0-9_]{3,})\b", _ep_code))
+_fehlend = [b for b in sorted(_bez)
+            if not _re2.search(r"(?m)^\s*" + b + r"\s*[:=]|^from .* import .*\b" + b + r"\b|"
+                               r"^import .*\b" + b + r"\b", _MAIN)]
+check(not _fehlend, "Alle Konstanten des Endpunkts sind in main.py definiert",
+      ", ".join(_fehlend))
+
+# Die Ersetzung wirklich AUSFUEHREN, nicht nur den Code lesen.
+_marke = "NEXI"
+_fertig = (_tpl.replace("{MARKE}", _marke)
+               .replace("{marke_slug}", _marke.lower())
+               .replace("{marke}", "Nexi"))
+check("{MARKE}" not in _fertig and "{marke_slug}" not in _fertig
+      and "{marke}" not in _fertig,
+      "Nach der Ersetzung bleibt KEIN Platzhalter stehen")
+check("NEXI_CSA_KEY" in _fertig and "~/.nexi-csa-key" in _fertig,
+      "Die fertige Datei nennt die Kennungen dieser Installation")
+
+# Und die Anleitung darf NICHT mehr auffordern, sie selbst anzulegen.
+_I18N = (ROOT / "frontend" / "js" / "i18n.js").read_text(encoding="utf-8")
+check("/claude/skill.md" in _I18N, "Anleitung verlinkt den Download")
+check("Vorlage im Repo unter" not in _I18N,
+      "Anleitung fordert NICHT mehr zum Selbstanlegen auf")
+
+
 print("\n" + "=" * 62)
 print(f"  {_ok} OK, {_fail} FAIL")
 print("=" * 62)

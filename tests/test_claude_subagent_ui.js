@@ -124,7 +124,11 @@ async function baueSeite(zustand) {
             check(!!k && k.querySelectorAll('h4').length >= 5,
                   `[${lang}] Ueberschriften erhalten`,
                   k ? String(k.querySelectorAll('h4').length) : 'Kasten weg');
-            check(!!k && k.querySelectorAll('pre').length >= 2,
+            // Die ZAHL ist nicht die Aussage – gepruft wird, dass die
+            // Auszeichnung den Sprachwechsel ueberlebt. Eine feste Zahl ist
+            // eine Zeitbombe (der Shell-Block aus Schritt 4 ist bewusst weg,
+            // weil ihn Claude ausfuehrt und nicht der Benutzer).
+            check(!!k && k.querySelectorAll('pre').length >= 1,
                   `[${lang}] Code-Bloecke erhalten`,
                   k ? String(k.querySelectorAll('pre').length) : '-');
             check(!!k && k.querySelectorAll('table').length === 1,
@@ -496,6 +500,46 @@ async function baueSeite(zustand) {
             }
             check(bereiche.length >= 6,
                   `Bereichsseiten erkannt (${bereiche.length})`, bereiche.join(', '));
+
+            // ── EINE Reihenfolge fuer ALLE Seiten ──────────────────────────
+            // Es gab zwei: /chat, /sap, /support, /userchat hatten
+            // "Thema -> Home", /claude, /email, /excel, /tracks umgekehrt. Wer
+            // zwischen den Bereichen wechselt, greift dann jedes zweite Mal
+            // daneben. Mehrfach gemeldet.
+            const ROLLE = [
+                [/lang-toggle/, 'Sprache'],
+                [/id="btn-theme-toggle"|id="btn-theme"|theme-icon-|data-i18n-title="chat\.theme"/, 'Thema'],
+                [/data-i18n-title="nav\.home"|title="Zum Portal"|href="\/portal"/, 'Home'],
+                [/data-i18n-title="sup\.issues"|title="Issues \/ Feedback"/, 'Issues'],
+                [/data-i18n-title="nav\.settings"/, 'Zahnrad'],
+                [/data-i18n-title="chat\.logout"|title="Abmelden"/, 'Abmelden'],
+            ];
+            const SOLL = ROLLE.map(r => r[1]);          // die kanonische Folge
+            const folgen = {};
+            for (const f of seiten) {
+                const q = fs.readFileSync(path.join(ROOT, 'frontend', f), 'utf8');
+                let m = q.match(/<div class="topbar-right">([\s\S]*?)<\/header>/);
+                if (!m) m = q.match(/<(?:header|div)[^>]*class="[^"]*topbar[^"]*"[^>]*>([\s\S]*?)<\/(?:header|div)>/);
+                if (!m) continue;
+                const tr = [];
+                for (const el of m[1].matchAll(/<(?:button|a|div)\b[^>]*>/g)) {
+                    for (const [re_, name] of ROLLE) {
+                        if (re_.test(el[0])) { if (!tr.includes(name)) tr.push(name); break; }
+                    }
+                }
+                if (tr.length < 3) continue;
+                folgen[f] = tr;
+                // Jede VORHANDENE Rolle muss in der kanonischen Reihenfolge
+                // stehen – fehlende Symbole sind erlaubt, Vertauschen nicht.
+                const erwartet = SOLL.filter(r => tr.includes(r));
+                check(tr.join(' → ') === erwartet.join(' → '),
+                      `${f}: Symbole in der kanonischen Reihenfolge`,
+                      `${tr.join(' → ')}  statt  ${erwartet.join(' → ')}`);
+            }
+            const eindeutig = new Set(Object.values(folgen).map(v => v.join('|')));
+            check(eindeutig.size === 1,
+                  `Alle ${Object.keys(folgen).length} Seiten haben DIESELBE Reihenfolge`,
+                  [...eindeutig].join('   ///   '));
         }
 
         for (const [name, quelle, pfx, ret] of [

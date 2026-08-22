@@ -9379,6 +9379,37 @@ async def claudesub_page():
                         headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 
+@app.get("/claude/skill.md")
+async def claudesub_skill_md():
+    """Liefert die fertige SKILL.md zum Herunterladen.
+
+    KEIN Verweis auf eine Datei im Repo: `.claude/` ist gitignored, die Datei
+    existiert auf einer Installation also gar nicht – und "leg sie selbst an"
+    ist keine Anleitung. Der Benutzer laedt sie hier fertig herunter.
+
+    Die Marken-Platzhalter werden dabei eingesetzt, damit die Datei die
+    Kennungen DIESER Installation nennt (Name des Assistenten aus dem
+    Branding). Ohne Anmeldung – wie das Add-in-Manifest: die Datei enthaelt
+    keine Geheimnisse, nur die Anleitung fuer das Werkzeug.
+    """
+    from backend import claude_subagent as _cs
+    # FRONTEND_DIR ist die einzige Pfadkonstante in diesem Modul –
+    # PROJECT_ROOT gibt es hier NICHT (ein NameError beim ersten Abruf).
+    quelle = FRONTEND_DIR.parent / "deploy" / "claude_subagent" / "SKILL.md"
+    if not quelle.is_file():
+        return Response("SKILL.md nicht gefunden", status_code=404,
+                        media_type="text/plain; charset=utf-8")
+    marke = _cs.marken_slug()                      # z.B. NEXI
+    text = (quelle.read_text(encoding="utf-8")
+            .replace("{MARKE}", marke)
+            .replace("{marke_slug}", marke.lower())
+            .replace("{marke}", _cs.marken_anzeige()))
+    return Response(
+        content=text, media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="SKILL.md"',
+                 "Cache-Control": "no-store"})
+
+
 @app.get("/api/claude/status")
 async def claudesub_status(user: str = Depends(require_claudesub_access)):
     """Zustand des Bereichs: Schluessel-Info (NIE das Geheimnis) und Grenzen."""

@@ -1529,6 +1529,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 <button class="settings-tab-btn" data-settings-tab="telegram" id="settings-tab-btn-telegram" style="display:none;" data-i18n="settings.tab.telegram">Telegram</button>
                 <button class="settings-tab-btn" data-settings-tab="browser_control" id="settings-tab-btn-browser" style="display:none;" data-i18n="settings.tab.browser">Browser</button>
                 <button class="settings-tab-btn" data-settings-tab="claude_bridge" id="settings-tab-btn-claude-bridge" style="display:none;" data-i18n="settings.tab.claude_bridge">Claude-Bridge</button>
+                <button class="settings-tab-btn" data-settings-tab="claude_subagent" id="settings-tab-btn-claudesub" style="display:none;" data-i18n="settings.tab.claude_subagent">Claude Subagent</button>
                 <button class="settings-tab-btn" data-settings-tab="agent_orchestrator" id="settings-tab-btn-orchestrator" style="display:none;" data-i18n="settings.tab.orchestrator">Orchestrator</button>
                 <button class="settings-tab-btn" data-settings-tab="agent_autonomy_kit" id="settings-tab-btn-autonomy" style="display:none;" data-i18n="settings.tab.autonomy">Autonomie</button>
                 <button class="settings-tab-btn" data-settings-tab="avatar" id="settings-tab-btn-avatar" style="display:none;" data-i18n="settings.tab.avatar">Avatar</button>
@@ -3433,6 +3434,17 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                     </div>
                 </div>
 
+                <!-- ═══ Tab: Claude Subagent ═══
+                     Manifest-generiertes Formular (skillcfg.js), kein
+                     handgebautes Panel: die drei Werte sind reine Zahlen. -->
+                <div id="settings-tab-claude_subagent" class="settings-tab-content" style="display:none;">
+                    <div class="kb-container">
+                        <p class="kb-hint">Claude Code gibt eng umrissene Codeaufgaben an Jarvis ab; Jarvis arbeitet in einem Wegwerf-Klon unter <code>/tmp</code> und liefert einen <b>maschinell geprüften</b> Patch zurück. Wer den Bereich betreten darf, steht unter <b>Sicherheit → Berechtigungen → Claude-Subagent-Zugriff</b> (leer = niemand). Die Anleitung für die Benutzer samt Token-Rechnung steht im Bereich <code>/claude</code>.</p>
+                        <p class="kb-hint"><b>Zu den Werten:</b> Jeder Auftrag rechnet auf demselben Sprachmodell wie der Chat – eine hohe Zahl gleichzeitiger Läufe geht unmittelbar zu Lasten der Antwortzeiten aller anderen.</p>
+                        <div id="skcfg-claude_subagent"></div>
+                    </div>
+                </div>
+
                 <!-- ═══ Tab: Agent Orchestrator ═══ -->
                 <div id="settings-tab-agent_orchestrator" class="settings-tab-content" style="display:none;">
                     <div class="kb-container">
@@ -4623,15 +4635,15 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
     <script src="/static/js/icons.js?v=1"></script>
-    <script src="/static/js/i18n.js?v=163"></script>
+    <script src="/static/js/i18n.js?v=164"></script>
 <script src="/static/js/tabfill.js?v=1"></script>
     <script src="/static/js/cron.js?v=20"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
     <script src="/static/js/audit.js?v=4"></script>
     <script src="/static/js/kbgroups.js?v=4"></script>
-    <script src="/static/js/skills.js?v=42"></script>
+    <script src="/static/js/skills.js?v=43"></script>
     <script src="/static/js/chatlib.js?v=4"></script>
-    <script src="/static/js/skillcfg.js?v=5"></script>
+    <script src="/static/js/skillcfg.js?v=6"></script>
     <script src="/static/js/google.js?v=12"></script>
     <script src="/static/js/whatsapp.js?v=16"></script>
     <script src="/static/js/knowledge.js?v=94"></script>
@@ -4657,7 +4669,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/sessions.js?v=4"></script>
     <script src="/static/js/agent_roles.js?v=2"></script>
     <script src="/static/js/model_caps.js?v=6"></script>
-    <script src="/static/js/app.js?v=194"></script>
+    <script src="/static/js/app.js?v=195"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

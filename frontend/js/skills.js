@@ -92,6 +92,7 @@
         telegram:           'telegram',
         browser_control:    'browser_control',
         claude_bridge:      'claude_bridge',
+        claude_subagent:    'claude_subagent',
         agent_orchestrator: 'agent_orchestrator',
         agent_autonomy_kit: 'agent_autonomy_kit',
         avatar:             'avatar',

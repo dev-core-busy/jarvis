@@ -217,6 +217,95 @@ async function baueSeite(zustand) {
         dom.window.close();
     }
 
+    // ══════════════════════════════════════════════════════════════════════
+    section('6. Der Einstellungs-Reiter ist VOLLSTAENDIG verdrahtet');
+    // Ein Reiter braucht FUENF Eintraege an vier Stellen. Fehlt einer, gibt es
+    // ihn stillschweigend nicht – genau das ist hier passiert, obwohl Manifest
+    // und Berechtigungs-Hinweis ihn ausdruecklich nennen ("im Reiter Claude
+    // Subagent einstellen"). Wieder die Fehlerklasse "eine Zusage, die der Code
+    // nicht haelt".
+    {
+        const settings = fs.readFileSync(path.join(ROOT, 'frontend/settings.html'), 'utf8');
+        const skillcfg = fs.readFileSync(path.join(ROOT, 'frontend/js/skillcfg.js'), 'utf8');
+        const skillsjs = fs.readFileSync(path.join(ROOT, 'frontend/js/skills.js'), 'utf8');
+        const appjs    = fs.readFileSync(path.join(ROOT, 'frontend/js/app.js'), 'utf8');
+
+        check(/claude_subagent:\s*\{\s*container:\s*'skcfg-claude_subagent'/.test(skillcfg),
+              'skillcfg.js TARGETS kennt den Container');
+        check(/claude_subagent:\s*'settings-tab-btn-claudesub'/.test(skillcfg),
+              'skillcfg.js TAB_BUTTONS kennt den Knopf');
+        check(/claude_subagent:\s*'claude_subagent'/.test(skillsjs),
+              'skills.js SKILL_TABS kennt den Reiter (Zahnrad springt dorthin)');
+        check(/SKILLCFG_TABS[\s\S]{0,240}'claude_subagent'/.test(appjs),
+              'app.js SKILLCFG_TABS kennt den Reiter');
+        check(settings.indexOf('id="settings-tab-btn-claudesub"') >= 0,
+              'settings.html hat den Reiter-Knopf');
+        check(settings.indexOf('id="settings-tab-claude_subagent"') >= 0,
+              'settings.html hat das Reiter-Panel');
+        check(settings.indexOf('id="skcfg-claude_subagent"') >= 0,
+              'settings.html hat den Formular-Container');
+
+        // GENERISCH, damit der naechste Skill nicht denselben Weg geht: jede
+        // Knopf-ID aus TAB_BUTTONS und jeder Container aus TARGETS muss es im
+        // Markup wirklich geben. Eine ID, die nur in einer der beiden Dateien
+        // steht, faellt sonst niemandem auf.
+        const knopfIds = [...skillcfg.matchAll(/'(settings-tab-btn-[a-z0-9-]+)'/g)].map(m => m[1]);
+        const fehlendeKnoepfe = knopfIds.filter(id => settings.indexOf('id="' + id + '"') < 0);
+        check(fehlendeKnoepfe.length === 0,
+              `Alle ${knopfIds.length} TAB_BUTTONS-Knoepfe existieren im Markup`,
+              fehlendeKnoepfe.join(', '));
+
+        const container = [...skillcfg.matchAll(/container:\s*'(skcfg-[a-z0-9_-]+)'/g)].map(m => m[1]);
+        const fehlendeCont = container.filter(id => settings.indexOf('id="' + id + '"') < 0);
+        check(fehlendeCont.length === 0,
+              `Alle ${container.length} TARGETS-Container existieren im Markup`,
+              fehlendeCont.join(', '));
+
+        // ── UND ER MUSS AUCH WIRKLICH ERSCHEINEN ──────────────────────────
+        // Markup allein beweist nichts: der Knopf steht auf display:none und
+        // wird erst von SkillCfg.updateTabs() eingeblendet. Genau diese
+        // Pruefung fehlte, als der Reiter gemeldet wurde.
+        {
+            const dom2 = new JSDOM(settings, { url: 'https://jarvis.test/settings',
+                                               runScripts: 'outside-only' });
+            const w2 = dom2.window;
+            w2.localStorage.setItem('jarvis_token', 't');
+            w2.fetch = (u) => {
+                u = String(u).split('?')[0];
+                if (u === '/api/skills') return Promise.resolve({ ok: true, status: 200,
+                    json: () => Promise.resolve({ skills: [{
+                        dir_name: 'claude_subagent', name: 'Claude Subagent',
+                        enabled: true, installed: true,
+                        config_schema: { gleichzeitig: { type: 'number', default: 2 } } }] }) });
+                return Promise.resolve({ ok: true, status: 200,
+                    json: () => Promise.resolve({ config: {} }) });
+            };
+            w2.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8'));
+            w2.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/skillcfg.js'), 'utf8'));
+            const knopf = w2.document.getElementById('settings-tab-btn-claudesub');
+            check(knopf && knopf.style.display === 'none',
+                  'Reiter-Knopf startet verborgen');
+            if (w2.SkillCfg && w2.SkillCfg.updateTabs) await w2.SkillCfg.updateTabs();
+            await schlaf(120);
+            check(!!knopf && knopf.style.display !== 'none',
+                  'updateTabs() blendet ihn bei AKTIVEM Skill ein',
+                  knopf ? knopf.style.display : 'Knopf weg');
+            dom2.window.close();
+        }
+
+        // Die Beschriftung darf nicht als roher Text festhaengen.
+        const i18n = fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8');
+        check((i18n.match(/'settings\.tab\.claude_subagent'/g) || []).length === 2,
+              'Reiter-Beschriftung in DE und EN');
+
+        // Und die Zusage im Manifest muss zum Reiter passen.
+        const manifest = JSON.parse(fs.readFileSync(
+            path.join(ROOT, 'skills/claude_subagent/skill.json'), 'utf8'));
+        const nenntReiter = JSON.stringify(manifest).indexOf('Reiter') >= 0;
+        check(!nenntReiter || settings.indexOf('id="settings-tab-claude_subagent"') >= 0,
+              'Wenn das Manifest einen Reiter nennt, gibt es ihn auch');
+    }
+
     console.log('\n' + '='.repeat(62));
     console.log(`  ${ok} OK, ${fail} FAIL`);
     console.log('='.repeat(62));

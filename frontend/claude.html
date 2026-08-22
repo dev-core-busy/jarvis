@@ -113,6 +113,24 @@
         .cs-help b, .cs-help strong { color: var(--text-secondary); }
         .cs-help code { font-family: var(--font-mono, monospace); font-size: .95em;
             background: rgba(var(--fg-rgb), .1); padding: 1px 4px; border-radius: 4px; }
+        /* Code-Bloecke der Anleitung: eigener Grund, damit sie sich vom
+           Fliesstext abheben, und waagerecht scrollbar statt umbrechend –
+           ein umgebrochener Befehl laesst sich nicht kopieren. */
+        .cs-help pre { margin: 6px 0 10px; padding: 9px 11px; border-radius: 7px;
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            font-family: var(--font-mono, monospace); font-size: .78rem;
+            line-height: 1.5; overflow-x: auto; white-space: pre; }
+        .cs-help pre code { background: none; padding: 0; }
+        .cs-help h4 { font-size: .85rem; font-weight: 600; color: var(--text-primary);
+            margin: 14px 0 5px; }
+        .cs-help h4:first-child { margin-top: 0; }
+        .cs-help table { border-collapse: collapse; width: 100%; margin: 6px 0 10px;
+            font-size: .78rem; }
+        .cs-help th, .cs-help td { text-align: left; padding: 5px 8px;
+            border-bottom: 1px solid var(--border); vertical-align: top; }
+        .cs-help th { color: var(--text-primary); font-weight: 600; }
+        .cs-help .cs-num { font-family: var(--font-mono, monospace);
+            white-space: nowrap; }
 
         /* ── Auftragsliste ── */
         .cs-job { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
@@ -215,6 +233,75 @@
                         <li>Claude bekommt die Änderung als Patch zurück, prüft sie und übernimmt sie bei dir lokal.</li>
                     </ul>
                     <b>Was bewusst nicht delegiert wird:</b> alles, wofür man die Projektregeln kennen muss, alles Sicherheitsrelevante – und Aufgaben, die mehrere Zustände durchlaufen („ändere, miss, mach rückgängig"). Dafür ist ein Auftrag der falsche Zuschnitt.
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ Anleitung ═══
+             Startet ZUGEKLAPPT: Nachschlagewerk, kein Erstkontakt. Wer die
+             Seite zum ersten Mal oeffnet, braucht den Schluessel und die kurze
+             Ablauf-Erklaerung darueber – nicht die Referenz. -->
+        <div class="cs-card" data-klapp="anleitung" data-zu="1">
+            <div class="cs-card-head" role="button" tabindex="0" aria-expanded="false">
+                <h2 data-i18n="csub.guide_head">Anleitung: Einrichtung und Nutzung in Claude Code</h2>
+                <span class="cs-caret" aria-hidden="true">&#9662;</span>
+            </div>
+            <div class="cs-card-body">
+                <div class="cs-help is-open" data-i18n-html="csub.guide_body">
+                    <h4>1. Schlüssel erzeugen</h4>
+                    <p>Oben in der Karte <b>Mein Delegations-Schlüssel</b> auf <b>Schlüssel erzeugen</b> klicken und den angezeigten Wert sofort kopieren. Er wird nur dieses eine Mal angezeigt.</p>
+
+                    <h4>2. Zugang auf deinem Rechner hinterlegen</h4>
+                    <p>Zwei Angaben, beide <b>außerhalb</b> des Projektordners – ein Schlüssel gehört nie ins Repo:</p>
+                    <pre><code>printf '%s' 'JARVIS-CSA-1.…dein Schlüssel…' &gt; ~/.jarvis-csa-key
+printf '%s' 'https://dein-jarvis.firma.de'   &gt; ~/.jarvis-csa-url
+chmod 600 ~/.jarvis-csa-key</code></pre>
+                    <p>Alternativ als Umgebungsvariablen <code>JARVIS_CSA_KEY</code> und <code>JARVIS_CSA_URL</code>. Eine feste Vorgabe für die Adresse gibt es bewusst nicht: derselbe Client arbeitet gegen jede Jarvis-Installation, und eine falsche Adresse sähe wie ein Schlüsselproblem aus.</p>
+
+                    <h4>3. Skill in Claude Code ablegen</h4>
+                    <p>Die Datei <code>.claude/skills/jarvis-delegate/SKILL.md</code> im Projekt anlegen (Vorlage im Repo unter <code>deploy/claude_subagent/</code>). Claude findet den Skill dann selbst, sobald eine Aufgabe dazu passt. Der Client <code>deploy/claude_subagent/delegiere.py</code> ist versioniert und muss nicht kopiert werden.</p>
+
+                    <h4>4. Eine Aufgabe abgeben</h4>
+                    <pre><code>S=deploy/claude_subagent/delegiere.py
+
+ID=$(python3 $S senden --spec-datei /tmp/auftrag.txt \
+        --dateien frontend/css/chat.css \
+        --riegel tests/test_branding_aliase.py)
+
+python3 $S warten "$ID" &gt; /tmp/patch.diff</code></pre>
+                    <p><code>--dateien</code> nennt, was geändert werden darf. <code>--riegel</code> nennt die Testdatei, die das Ergebnis beweist. Beides ist Pflicht – ohne Riegel wird nicht delegiert.</p>
+
+                    <h4>5. Ergebnis übernehmen</h4>
+                    <p>Kommt ein Patch, prüft Claude ihn und wendet ihn mit <code>git apply</code> an. Kommt keiner, nennt die Meldung den Grund (leerer Patch, fremde Datei angefasst, Riegel rot) – dann macht Claude die Aufgabe selbst, statt nachzubessern.</p>
+
+                    <h4>Was das an Tokens spart</h4>
+                    <p>Gemessen an einer echten Kleinänderung (eine CSS-Variable, die an zwei Stellen zusammenpassen muss):</p>
+                    <table>
+                        <tr><th>Weg</th><th>Aufwand bei Claude</th></tr>
+                        <tr><td>Claude macht es selbst</td><td class="cs-num">≈ 4.000–6.000 Token</td></tr>
+                        <tr><td>Delegiert an Jarvis</td><td class="cs-num">≈ 800 Token</td></tr>
+                    </table>
+                    <p>Also grob <b>Faktor 5 bis 7</b>. Der Aufwand bei Claude besteht dann nur noch aus der Aufgabenbeschreibung, dem kurzen Bericht und dem Lesen des Patches. Was wegfällt, ist das <b>Suchen und Lesen der Dateien</b> – und genau daraus entsteht die Ersparnis.</p>
+                    <p><b>Daraus folgt die wichtigste Regel:</b> Muss Claude den Code erst lesen, um die Aufgabe überhaupt beschreiben zu können, ist die Ersparnis schon ausgegeben. Dann lohnt sich die Delegation nicht.</p>
+                    <p>Je Auftrag laufen auf dem Server rund 30 bis 60 Sekunden. Die Jarvis-Tokens sind kostenlos, die Rechenzeit nicht: jeder Auftrag belegt dasselbe Sprachmodell wie der Chat.</p>
+
+                    <h4>Wofür es sich lohnt</h4>
+                    <ul>
+                        <li>Dieselbe mechanische Änderung über viele Dateien ziehen.</li>
+                        <li>Eine kleine Änderung, für die es schon einen Test gibt.</li>
+                        <li>Zwei Stellen, die zusammenpassen müssen.</li>
+                    </ul>
+
+                    <h4>Wofür nicht</h4>
+                    <ul>
+                        <li><b>Alles, wofür man die Projektregeln kennen muss.</b> Die stehen in einem Dokument, das für das Modell zu umfangreich ist, um es zuverlässig anzuwenden.</li>
+                        <li><b>Alles Sicherheitsrelevante</b> – Berechtigungen, Zugriffsschranken, Anmeldung.</li>
+                        <li><b>Aufgaben mit mehreren Zuständen</b> („ändere, miss, mach rückgängig"). Eine Delegation ist genau ein Zielzustand.</li>
+                        <li><b>Alles ohne Test</b>, der das Ergebnis beweist.</li>
+                    </ul>
+
+                    <h4>Worauf du dich nicht verlassen darfst</h4>
+                    <p>Zahlen, die der Agent in seinem Bericht nennt („13 Dateien gefunden"), sind unzuverlässig – in der Erprobung war die selbst hergeleitete Zahl mehrfach falsch, obwohl die zugrunde liegenden Daten stimmten. Verlässlich sind nur Patch und Testergebnis, und die rechnet der Server selbst aus.</p>
                 </div>
             </div>
         </div>

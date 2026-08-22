@@ -357,6 +357,62 @@ check("Basis stimmt nicht" in QUELLE,
       "Abweichende Basis wird gemeldet, nicht stillschweigend uebergangen")
 
 
+# ══════════════════════════════════════════════════════════════════════════
+section("8. Laeuft gegen JEDE Installation – und sagt, wie")
+
+_CLIENT = (ROOT / "deploy" / "claude_subagent" / "delegiere.py").read_text(encoding="utf-8")
+_SKILLMD_P = ROOT / ".claude" / "skills" / "jarvis-delegate" / "SKILL.md"
+_SKILLMD = _SKILLMD_P.read_text(encoding="utf-8") if _SKILLMD_P.is_file() else ""
+_MANIFEST = json.loads((ROOT / "skills" / "claude_subagent" / "skill.json")
+                       .read_text(encoding="utf-8"))
+_I18N = (ROOT / "frontend" / "js" / "i18n.js").read_text(encoding="utf-8")
+_SEITE = (ROOT / "frontend" / "claude.html").read_text(encoding="utf-8")
+
+# KEIN fest verdrahteter Host. Eine Vorgabe waere die Adresse genau einer
+# Installation – bei der naechsten falsch, und der Fehler saehe wie ein
+# Schluesselproblem aus (fremder Server -> 401).
+check(re.search(r"\d{1,3}(\.\d{1,3}){3}", nur_code(_CLIENT)) is None,
+      "Client enthaelt keine hart verdrahtete IP")
+check("VORGABE_URL" not in _CLIENT, "Keine Vorgabe-URL mehr im Client")
+check("JARVIS_CSA_URL" in _CLIENT and ".jarvis-csa-url" in _CLIENT,
+      "Adresse kommt aus Umgebung ODER Datei")
+check("JARVIS_CSA_KEY" in _CLIENT and ".jarvis-csa-key" in _CLIENT,
+      "Schluessel kommt aus Umgebung ODER Datei")
+
+# Die frueher behauptete DEV-Beschraenkung war FALSCH: der Arbeitsbereich wird
+# frisch von origin/master geklont, ein sparse-checkout des Servers wirkt nur
+# auf DESSEN Arbeitskopie. Sie darf nicht zurueckkommen.
+for _name, _text in (("Client", _CLIENT), ("SKILL.md", _SKILLMD),
+                     ("Manifest", json.dumps(_MANIFEST, ensure_ascii=False)),
+                     ("Seite", _SEITE)):
+    _t = _text.lower()
+    check(not ("nur auf dev" in _t or "nur fuer dev" in _t or "nur für dev" in _t),
+          f"{_name} behauptet keine DEV-Beschraenkung")
+
+# Anleitung und Token-Rechnung muessen VORHANDEN und ZWEISPRACHIG sein.
+for _k in ("csub.guide_head", "csub.guide_body"):
+    check(_I18N.count("'" + _k + "':") == 2, f"{_k} in DE und EN vorhanden",
+          f"{_I18N.count(chr(39) + _k + chr(39) + ':')}x")
+check('data-i18n-html="csub.guide_body"' in _SEITE,
+      "Anleitung haengt an data-i18n-html (nicht data-i18n)")
+check('data-i18n="csub.guide_body"' not in _SEITE,
+      "... denn data-i18n wuerde die Auszeichnung beim Sprachwechsel loeschen")
+
+# Die Token-Aussage ist der Grund, warum es das Feature gibt – sie muss an
+# BEIDEN Stellen stehen, an denen jemand nachsieht.
+check("token_ersparnis" in _MANIFEST.get("help", {}),
+      "Manifest nennt die Token-Ersparnis")
+_te = _MANIFEST.get("help", {}).get("token_ersparnis", "")
+check("800" in _te and ("4000" in _te or "4.000" in _te),
+      "... mit den gemessenen Zahlen", _te[:60])
+check("lohnt nicht" in _te or "lohnt sich" in _te,
+      "... und mit der Einsatzregel (wann es sich NICHT lohnt)")
+_gb = _I18N[_I18N.find("'csub.guide_body'"):]
+_gb = _gb[:_gb.find("\n        'csub.jobs_head'")]
+check("800" in _gb and "Faktor" in _gb, "Anleitung nennt Ersparnis und Faktor")
+check("jarvis-csa-url" in _gb and "jarvis-csa-key" in _gb,
+      "Anleitung nennt beide Zugangsangaben")
+
 print("\n" + "=" * 62)
 print(f"  {_ok} OK, {_fail} FAIL")
 print("=" * 62)

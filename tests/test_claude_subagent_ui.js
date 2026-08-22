@@ -1,0 +1,224 @@
+/* UI-Test fuer den Bereich "Claude Subagent" (/claude)
+ * ───────────────────────────────────────────────────────────────────────────
+ * jsdom gegen die ECHTEN Dateien (claude.html, claude_portal.js, i18n.js).
+ *
+ * WAS DIESER TEST FESTHAELT, in der Reihenfolge der Wichtigkeit:
+ *
+ * 1. DIE ANLEITUNG UEBERLEBT DEN SPRACHWECHSEL. Sie enthaelt <h4>, <pre> und
+ *    eine <table>; haenge sie an `data-i18n` statt `data-i18n-html`, setzt
+ *    applyLang() den textContent und die komplette Auszeichnung ist beim ersten
+ *    Sprachwechsel weg. Genau dieser Fehler ist im E-Mail-Reiter am 2026-08-13
+ *    passiert – ein reiner Schluessel-Abgleich sieht ihn NICHT.
+ * 2. Der Schluessel wird genau einmal gezeigt, mit Warnung, und das Panel
+ *    erscheint erst nach dem Erzeugen.
+ * 3. Fremdinhalt (Auftragstexte) wird maskiert.
+ * 4. `applyLang()` loest KEINE Endlosschleife aus (Vorfall 2026-08-18 im
+ *    Short-Tracks-Reiter: ueber 40 Abrufe in 250 ms).
+ *
+ * WICHTIG (Fallstrick 2026-07-30): am Ende window.close() + process.exit(),
+ * sonst halten Timer den Node-Prozess fuer immer offen.
+ *
+ * Lauf:  timeout 90 node tests/test_claude_subagent_ui.js
+ */
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+
+let JSDOM;
+try { JSDOM = require(process.env.JSDOM_PATH || '/tmp/node_modules/jsdom').JSDOM; }
+catch (e) {
+    console.error('ABBRUCH: jsdom nicht gefunden (JSDOM_PATH setzen).');
+    process.exit(2);
+}
+
+const ROOT = path.resolve(__dirname, '..');
+let ok = 0, fail = 0;
+
+function check(cond, label, detail) {
+    if (cond) { ok++; console.log('  OK   ' + label); }
+    else { fail++; console.log('  FAIL ' + label + (detail ? ' – ' + detail : '')); }
+}
+function section(t) { console.log('\n' + t); }
+const schlaf = (ms) => new Promise(r => setTimeout(r, ms));
+
+// ── Attrappe: die Antwortform stammt aus dem Endpunkt-Quelltext, nicht aus
+//    dem Gedaechtnis. Ein Mock mit falscher Form prueft nichts (Lehre 2026-08-12).
+function baueFetch(zustand) {
+    const rufe = [];
+    return {
+        rufe,
+        fn: function (url, opt) {
+            const pfad = String(url).split('?')[0];
+            rufe.push({ url: String(url), pfad, methode: (opt && opt.method) || 'GET' });
+            if (pfad === '/api/claude/status') {
+                if (zustand.status403) {
+                    return Promise.resolve({ status: 403, ok: false,
+                        json: () => Promise.resolve({ detail: 'kein Zugriff' }) });
+                }
+                return Promise.resolve({
+                    status: 200, ok: true, json: () => Promise.resolve({
+                        ok: true, skill_aktiv: true,
+                        schluessel: zustand.schluessel,
+                        jobs: zustand.jobs || [],
+                        grenzen: { gleichzeitig: 2, laufzeit_s: 600, max_dateien: 40,
+                                   spec_max: 12000, diff_max: 200000 },
+                        werkzeuge: ['filesystem', 'shell_execute'],
+                    })
+                });
+            }
+            if (pfad === '/api/claude/key') {
+                if ((opt && opt.method) === 'DELETE') {
+                    zustand.schluessel = null;
+                    return Promise.resolve({ status: 200, ok: true,
+                        json: () => Promise.resolve({ ok: true }) });
+                }
+                zustand.schluessel = { kennung: 'abc123', letzte4: 'WXYZ',
+                                       erstellt: 1787000000, zuletzt: 0 };
+                return Promise.resolve({
+                    status: 200, ok: true, json: () => Promise.resolve({
+                        ok: true, schluessel: 'JARVIS-CSA-1.abc123.GEHEIMNISWXYZ',
+                        kennung: 'abc123', letzte4: 'WXYZ' })
+                });
+            }
+            return Promise.resolve({ status: 200, ok: true,
+                json: () => Promise.resolve({ ok: true }) });
+        }
+    };
+}
+
+async function baueSeite(zustand) {
+    const html = fs.readFileSync(path.join(ROOT, 'frontend/claude.html'), 'utf8');
+    const dom = new JSDOM(html, { url: 'https://jarvis.test/claude',
+                                  runScripts: 'outside-only' });
+    const w = dom.window;
+    w.localStorage.setItem('jarvis_token', 'test-token');
+    const f = baueFetch(zustand);
+    w.fetch = f.fn;
+    w.confirm = () => true;
+    w.navigator.clipboard = { writeText: () => Promise.resolve() };
+    // i18n zuerst – claude_portal.js benutzt window.t
+    w.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8'));
+    w.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/claude_portal.js'), 'utf8'));
+    w.document.dispatchEvent(new w.Event('DOMContentLoaded'));
+    await schlaf(40);
+    return { dom, w, d: w.document, fetchInfo: f };
+}
+
+(async () => {
+
+    // ══════════════════════════════════════════════════════════════════════
+    section('1. Die Anleitung ueberlebt den Sprachwechsel');
+    {
+        const { dom, w, d } = await baueSeite({ schluessel: null, jobs: [] });
+        const kasten = d.querySelector('[data-i18n-html="csub.guide_body"]');
+        check(!!kasten, 'Anleitungs-Kasten vorhanden');
+        check(!d.querySelector('[data-i18n="csub.guide_body"]'),
+              'Sie haengt NICHT an data-i18n (das wuerde die Auszeichnung loeschen)');
+
+        for (const lang of ['de', 'en', 'de']) {
+            if (w.setLang) w.setLang(lang);
+            else if (w.applyLang) w.applyLang();
+            await schlaf(15);
+            const k = d.querySelector('[data-i18n-html="csub.guide_body"]');
+            check(!!k && k.querySelectorAll('h4').length >= 5,
+                  `[${lang}] Ueberschriften erhalten`,
+                  k ? String(k.querySelectorAll('h4').length) : 'Kasten weg');
+            check(!!k && k.querySelectorAll('pre').length >= 2,
+                  `[${lang}] Code-Bloecke erhalten`,
+                  k ? String(k.querySelectorAll('pre').length) : '-');
+            check(!!k && k.querySelectorAll('table').length === 1,
+                  `[${lang}] Token-Tabelle erhalten`);
+            check(!!k && /800/.test(k.textContent),
+                  `[${lang}] Token-Zahl steht drin`);
+        }
+        // Die Anleitung startet ZUGEKLAPPT – sie ist Nachschlagewerk.
+        const karte = d.querySelector('.cs-card[data-klapp="anleitung"]');
+        check(!!karte && karte.getAttribute('data-zu') === '1',
+              'Anleitung startet zugeklappt');
+        dom.window.close();
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    section('2. Schluessel: einmalige Anzeige');
+    {
+        const { dom, w, d, fetchInfo } = await baueSeite({ schluessel: null, jobs: [] });
+        const box = d.getElementById('cs-key-box');
+        check(box && box.hidden, 'Schluessel-Kasten ist anfangs verborgen');
+        check(/keinen Schl/i.test(d.getElementById('cs-key-meta').textContent),
+              'Meldung "noch keinen Schluessel"');
+        check(/kein Schl/i.test(d.getElementById('cs-key-pill').textContent),
+              'Pille sagt "kein Schluessel"');
+        check(d.getElementById('cs-key-del').hidden, 'Loeschen-Knopf verborgen');
+
+        d.getElementById('cs-key-new').click();
+        await schlaf(60);
+        check(!d.getElementById('cs-key-box').hidden, 'Kasten erscheint nach dem Erzeugen');
+        check(d.getElementById('cs-key-value').textContent === 'JARVIS-CSA-1.abc123.GEHEIMNISWXYZ',
+              'Der Schluessel steht im Klartext da');
+        const posts = fetchInfo.rufe.filter(r => r.pfad === '/api/claude/key' && r.methode === 'POST');
+        check(posts.length === 1, 'Genau EIN POST auf /api/claude/key', String(posts.length));
+        check(!d.getElementById('cs-key-del').hidden, 'Loeschen-Knopf jetzt sichtbar');
+        check(/nie wieder/i.test(d.querySelector('.cs-key-warn').textContent),
+              'Warnung "wird nie wieder angezeigt"');
+        check(/…WXYZ|WXYZ/.test(d.getElementById('cs-key-meta').textContent),
+              'Meta nennt nur die letzten 4 Zeichen');
+        dom.window.close();
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    section('3. Auftragsliste: Fremdinhalt wird maskiert');
+    {
+        const boese = '<img src=x onerror=alert(1)>';
+        const { dom, d } = await baueSeite({
+            schluessel: { kennung: 'k', letzte4: 'WXYZ', erstellt: 1787000000, zuletzt: 0 },
+            jobs: [
+                { id: 'j1', status: 'fertig', spec: boese, riegel: 'tests/t.py',
+                  dateien: ['a.py'], erstellt: 1787000000 },
+                { id: 'j2', status: 'fehler', spec: 'zweiter', riegel: 'tests/t.js',
+                  dateien: [], erstellt: 1787000000, fehler: 'kaputt' },
+            ]
+        });
+        const liste = d.getElementById('cs-jobs-list');
+        check(liste.querySelectorAll('.cs-job').length === 2, 'Beide Auftraege gerendert');
+        check(liste.querySelectorAll('img').length === 0,
+              'Kein <img> aus dem Auftragstext (maskiert)');
+        check(liste.textContent.indexOf('onerror') >= 0,
+              'Der Text erscheint als Text');
+        check(/\(2\)/.test(d.getElementById('cs-jobs-count').textContent),
+              'Zaehler zeigt die Anzahl');
+        check(/kaputt/.test(liste.textContent), 'Fehlergrund wird angezeigt');
+        dom.window.close();
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    section('4. Kein Endlos-Neuladen bei applyLang');
+    {
+        const { dom, w, fetchInfo } = await baueSeite({ schluessel: null, jobs: [] });
+        const vorher = fetchInfo.rufe.filter(r => r.pfad === '/api/claude/status').length;
+        for (let i = 0; i < 5; i++) { if (w.applyLang) w.applyLang(); }
+        await schlaf(150);
+        const nachher = fetchInfo.rufe.filter(r => r.pfad === '/api/claude/status').length;
+        check(nachher === vorher,
+              'applyLang() loest keinen erneuten Statusabruf aus',
+              `${vorher} -> ${nachher}`);
+        check(vorher === 1, 'Beim Aufbau genau EIN Statusabruf', String(vorher));
+        dom.window.close();
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    section('5. Ohne Freigabe: Klartext statt leerer Seite');
+    {
+        const { dom, d } = await baueSeite({ status403: true });
+        check(/Kein Zugriff/i.test(d.body.textContent),
+              'Meldung nennt die fehlende Freigabe');
+        check(/Berechtigungen/i.test(d.body.textContent),
+              '... und den Weg dorthin');
+        dom.window.close();
+    }
+
+    console.log('\n' + '='.repeat(62));
+    console.log(`  ${ok} OK, ${fail} FAIL`);
+    console.log('='.repeat(62));
+    process.exit(fail ? 1 : 0);
+})();

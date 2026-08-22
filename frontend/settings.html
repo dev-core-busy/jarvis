@@ -3925,6 +3925,34 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 </div>
                                     </div>
                                 </details>
+                                <!-- ── Unter-Container: Claude Subagent ──
+                                     Startet VERSTECKT und wird von app.js am Zustand des Skills
+                                     "claude_subagent" eingeblendet – gleiches Muster wie
+                                     sec-sub-email/-tracks/-excel. -->
+                                <details class="sec-sub" data-sub="claudesub" id="sec-sub-claudesub" style="display:none;">
+                                    <summary><span>Claude-Subagent-Zugriff</span><span class="sec-sub-hint">– Wer darf Codeaufgaben an Jarvis abgeben?</span></summary>
+                                    <div class="sec-sub-body">
+                                <p class="kb-hint" style="margin-bottom:10px;">Steuert den Zugriff auf den Bereich <b>Claude Subagent</b> (Kachel im Portal): dort erzeugt ein Benutzer den persönlichen Schlüssel, mit dem sein Claude-Code-Werkzeug Codeaufgaben an Jarvis abgeben darf. Wie bei E-Mail, SAP und Short Tracks ausdrücklich freizuschalten: leer = <b>niemand</b> – ausdrücklich <b>auch keine lokalen Administratoren</b>. <b>Was ein Auftrag darf:</b> Jarvis klont das Projekt frisch nach <code>/tmp</code> und arbeitet nur dort; der Lauf ist immer <b>unprivilegiert</b>, hat kein Internet und nur <code>filesystem</code> + <code>shell_execute</code>. An die laufende Installation, an <code>settings.json</code> oder <code>.env</code> kommt er nicht heran. Das Ergebnis wird <b>maschinell</b> geprüft (Patch + benannte Testdatei), nicht vom Sprachmodell behauptet. <b>Was es kostet:</b> jeder Auftrag rechnet auf demselben LLM wie der Chat – die Zahl gleichzeitiger Läufe stellen Sie im Reiter <b>Claude Subagent</b> ein.</p>
+
+                                <div class="form-group" style="margin-bottom:8px;">
+                                    <label>
+                                        <span>Erlaubte Benutzer</span>
+                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– Benutzernamen kommagetrennt, z.B. <code>mueller,schmidt</code></span>
+                                    </label>
+                                    <input type="text" id="claudesub-allowed-users" placeholder="Leer = niemand (auch keine lokalen Admins)" style="width:60%;box-sizing:border-box;">
+                                </div>
+                                <div class="form-group" style="margin-bottom:8px;">
+                                    <label>
+                                        <span>Claude-Subagent-Gruppe (AD-Gruppe)</span>
+                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;" data-i18n="security.ad_group_hint">– zusätzlich zur Benutzerliste (ODER: Liste oder Gruppe genügt)</span>
+                                    </label>
+                                    <textarea id="claudesub-allowed-group" rows="1" placeholder="z.B. CN=Entwicklung,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;"></textarea>
+                                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
+                                        <span data-i18n="security.ad_group_cache_hint">⚠ Gruppen-Mitgliedschaft wird beim Login ermittelt. Mit Service-Konto (Verzeichnis-Suche) wird sie automatisch nachgeprüft (Standard: alle 10 Min.) – Änderungen wirken dann ohne Neuanmeldung.</span>
+                                    </div>
+                                </div>
+                                    </div>
+                                </details>
                                 <!-- ── Unter-Container: Excel-Add-in ──
                                      Startet VERSTECKT und wird von app.js am Zustand des Skills
                                      "excel-addin" eingeblendet – gleiches Muster wie
@@ -4101,8 +4129,10 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             var _trG = document.getElementById('tracks-allowed-group'); if (_trG) _trG.value = d.tracks_group || '';
                                             var _xlU = document.getElementById('excel-allowed-users'); if (_xlU) _xlU.value = d.excel_users || '';
                                             var _xlG = document.getElementById('excel-allowed-group'); if (_xlG) _xlG.value = d.excel_group || '';
+                                            var _csU = document.getElementById('claudesub-allowed-users'); if (_csU) _csU.value = d.claudesub_users || '';
+                                            var _csG = document.getElementById('claudesub-allowed-group'); if (_csG) _csG.value = d.claudesub_group || '';
                                             // Token-Listen (Chips) aller AD-Felder neu aufbauen (nach dem Setzen aller Werte)
-                                            ['ad-allowed-users','ad-allowed-group','ad-knowledge-editors','ad-knowledge-editors-group','ad-internet-users','ad-internet-group','ad-admins','ad-admins-group','sap-allowed-users','sap-allowed-group','email-allowed-users','email-allowed-group','tracks-allowed-users','tracks-allowed-group','excel-allowed-users','excel-allowed-group'].forEach(function(_id){ var _e=document.getElementById(_id); if(_e) _e.dispatchEvent(new Event('change')); });
+                                            ['ad-allowed-users','ad-allowed-group','ad-knowledge-editors','ad-knowledge-editors-group','ad-internet-users','ad-internet-group','ad-admins','ad-admins-group','sap-allowed-users','sap-allowed-group','email-allowed-users','email-allowed-group','tracks-allowed-users','tracks-allowed-group','excel-allowed-users','excel-allowed-group','claudesub-allowed-users','claudesub-allowed-group'].forEach(function(_id){ var _e=document.getElementById(_id); if(_e) _e.dispatchEvent(new Event('change')); });
                                             _adUpdateStatus(d);
                                         } catch(e) {}
                                     }
@@ -4287,6 +4317,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                                     tracks_allowed_group:      (document.getElementById('tracks-allowed-group')||{}).value ? document.getElementById('tracks-allowed-group').value.trim() : '',
                                                     excel_allowed_users:       (document.getElementById('excel-allowed-users')||{}).value ? document.getElementById('excel-allowed-users').value.trim() : '',
                                                     excel_allowed_group:       (document.getElementById('excel-allowed-group')||{}).value ? document.getElementById('excel-allowed-group').value.trim() : '',
+                                                    claudesub_allowed_users:   (document.getElementById('claudesub-allowed-users')||{}).value ? document.getElementById('claudesub-allowed-users').value.trim() : '',
+                                                    claudesub_allowed_group:   (document.getElementById('claudesub-allowed-group')||{}).value ? document.getElementById('claudesub-allowed-group').value.trim() : '',
                                                 })
                                             });
                                             if (!r.ok) throw new Error('HTTP ' + r.status);

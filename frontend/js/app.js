@@ -997,6 +997,23 @@
             }
         };
 
+        // ── Claude Subagent: Berechtigungsblock nur bei aktivem Skill ──
+        // Gleiche Begruendung wie bei sec-sub-email/-sap/-tracks: ohne aktiven
+        // Skill waere die Freigabe eine Freigabe fuer nichts.
+        window.updateClaudesubSecVisibility = async function updateClaudesubSecVisibility() {
+            const box = document.getElementById('sec-sub-claudesub');
+            if (!box) return;
+            try {
+                const skills = await _skillsOnce();
+                const sp = Array.isArray(skills)
+                    ? skills.find(s => s.dir_name === 'claude_subagent')
+                    : null;
+                box.style.display = (sp && sp.enabled) ? '' : 'none';
+            } catch (e) {
+                // Fehler ignorieren – der Block bleibt versteckt
+            }
+        };
+
         // ── Excel-Assistent: Berechtigungsblock nur bei aktivem Skill ──
         // Der REITER wird von skillcfg.js::updateTabs() geschaltet (er steht dort
         // in TAB_BUTTONS). Hier geht es nur um den Block in Sicherheit →
@@ -1197,6 +1214,7 @@
             await updateSapTabVisibility();
             await updateEmailTabVisibility();
             await updateTracksSecVisibility();
+            await updateClaudesubSecVisibility();
             await updateExcelSecVisibility();
             await updateKundenverwaltungTabVisibility();
             await updateSupportTabVisibility();

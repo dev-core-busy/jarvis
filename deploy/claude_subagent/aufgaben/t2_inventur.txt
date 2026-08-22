@@ -1,0 +1,18 @@
+Du bist ein Coding-Agent. Dein Arbeitsbereich ist der Ordner /tmp/csprobe/work
+(ein vollstaendiger Klon des Jarvis-Repos). Arbeite AUSSCHLIESSLICH dort.
+
+DIES IST EINE REINE LESE-AUFGABE. Aendere KEINE Datei.
+
+AUFGABE
+Finde jedes Vorkommen von  window.confirm(  in diesen beiden Ordnern:
+    /tmp/csprobe/work/frontend/js/
+    /tmp/csprobe/work/frontend/addin/
+
+MELDE ZUM SCHLUSS GENAU DIES:
+1. Eine Liste, eine Zeile je Fundstelle, im Format
+       <dateiname>:<zeilennummer>
+   Nur der Dateiname, nicht der ganze Pfad. Sortiert nach Dateiname.
+2. Die Gesamtzahl der Fundstellen.
+3. Die Anzahl der verschiedenen Dateien, in denen es vorkommt.
+
+Arbeite vollstaendig autonom, ohne Rueckfragen.

@@ -23,6 +23,8 @@
     var TOKEN_KEYS = ['jarvis_token', 'jarvis_chat_token', 'jarvis_uc_token'];
     // Zuletzt gezeichnete Sprache – siehe Begruendung an `binde()`.
     var _lang = '';
+    // Hinterlegter Katalog-Pfad ('' = keiner, dann gilt der Download).
+    var _pfad = '';
 
     function $(id) { return document.getElementById(id); }
     function T(key, fallback) {
@@ -82,6 +84,65 @@
                     e.textContent = T('xp.version', 'Fassung') + ' ' + d.version;
                 }
             }).catch(function () { });
+    }
+
+    /* Hat die Administration einen Katalog-Pfad hinterlegt, ist der Download
+       der FALSCHE Weg: der Benutzer holte sich eine zweite Kopie, die niemand
+       aktualisiert, und traegt hinterher einen anderen Ordner ein als alle
+       anderen. Deshalb wird der Knopf nicht nur ergaenzt, sondern ERSETZT.
+
+       Der Pfad kommt aus `/api/excel/katalog` (hinter der Excel-Freigabe, nicht
+       am unangemeldeten Versions-Endpunkt – ein UNC-Pfad nennt Servernamen und
+       Freigabe des Hauses). */
+    function ladeKatalog() {
+        return fetch('/api/excel/katalog', {
+            headers: { 'Authorization': 'Bearer ' + token() }, cache: 'no-store'
+        })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                var pfad = (d && d.pfad) || '';
+                if (!pfad) return false;        // kein Pfad -> Download bleibt
+                var kasten = $('xp-pfad');
+                // textContent, nicht innerHTML: der Pfad ist Freitext aus dem
+                // Reiter und landet ungeprueft in der Seite.
+                if (kasten) kasten.textContent = pfad;
+                var dl = $('xp-dl-block'); if (dl) dl.hidden = true;
+                var pb = $('xp-pfad-block'); if (pb) pb.hidden = false;
+                // Schritt 1 der Anleitung ("Datei in einen Ordner legen") waere
+                // jetzt das Gegenteil der Aussage darueber.
+                var s1 = $('xp-steps-dl'); if (s1) s1.hidden = true;
+                var s2 = $('xp-steps-pfad'); if (s2) s2.hidden = false;
+                var h = $('xp-get-head');
+                if (h) h.textContent = T('xp.get_head_pfad', '1. Add-in-Ordner eintragen');
+                _pfad = pfad;
+                bindeKopieren();
+                return true;
+            }).catch(function () { return false; });
+    }
+
+    function bindeKopieren() {
+        var b = $('xp-pfad-copy');
+        if (!b || b.dataset.gebunden) return;
+        b.dataset.gebunden = '1';
+        b.addEventListener('click', function () {
+            var melde = function (txt) {
+                var s = $('xp-pfad-status');
+                if (s) { s.textContent = txt; setTimeout(function () { s.textContent = ''; }, 3000); }
+            };
+            // Ohne Rueckmeldung sieht man nicht, ob es geklappt hat – in der
+            // Zwischenablage ist nichts sichtbar. Und `navigator.clipboard`
+            // fehlt in unsicherem Kontext; dann bleibt der Kasten markierbar
+            // (`user-select: all`), darauf verweist die Fehlermeldung.
+            var fertig = function () { melde(T('xp.pfad_copied', 'Kopiert.')); };
+            var schief = function () {
+                melde(T('xp.pfad_copyfail', 'Kopieren nicht möglich – Pfad markieren und mit Strg+C kopieren.'));
+            };
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(_pfad).then(fertig, schief);
+                } else { schief(); }
+            } catch (e) { schief(); }
+        });
     }
 
     /* Der Server lehnt ein Manifest ab, das ueber einen nur lokal gueltigen
@@ -161,8 +222,18 @@
                 if (w) w.classList.add('hidden');
                 var c = $('xp-dl-card');
                 if (c) c.classList.remove('hidden');
-                ladeVersion();
-                pruefeAdresse();
+                // REIHENFOLGE IST WICHTIG. `pruefeAdresse()` blendet bei
+                // einer untauglichen Adresse die GANZE Karte aus – mit
+                // hinterlegtem Pfad wuerde es damit auch den Pfad verbergen,
+                // obwohl der Benutzer gar nichts herunterlaedt und die vom
+                // Administrator abgelegte Datei in Ordnung ist. Und die
+                // Fassungsnummer dieses Servers sagt nichts ueber die Datei
+                // in der Freigabe – sie zu zeigen waere eine Behauptung.
+                ladeKatalog().then(function (hatPfad) {
+                    if (hatPfad) return;
+                    ladeVersion();
+                    pruefeAdresse();
+                });
             }).catch(function (e) {
                 if (String(e && e.message) !== '401') sperren('');
             });

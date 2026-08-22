@@ -86,7 +86,38 @@
                 var c = (d && d.config) || {};
                 var r1 = $('xa-l-runden'); if (r1) r1.value = c.max_runden || 3;
                 var r2 = $('xa-l-aenderungen'); if (r2) r2.value = c.max_aenderungen || 200;
+                var k = $('xa-katalog');
+                // `|| ''` waere hier richtig, `|| vorgabe` nicht: ein leerer
+                // Pfad ist die AUSSAGE "wir verteilen nicht zentral".
+                if (k) k.value = c.katalog_pfad || '';
             }).catch(function () { });
+    }
+
+    /* Eigener Knopf, eigene Teilmenge. `update_skill_config` merged – ein Knopf,
+       der den ganzen Formularstand schickt, ueberschriebe den jeweils anderen
+       Teil (Lehre von den SAP-Sichtbarkeiten und den beiden E-Mail-Knoepfen). */
+    function speichereKatalog() {
+        if (_laeuft) return;
+        _laeuft = true;
+        var feld = $('xa-katalog');
+        var pfad = (feld ? feld.value : '').trim();
+        melde('xa-katalog-status', 'Speichert …');
+        fetch('/api/skills/' + SKILL + '/config', {
+            method: 'POST',
+            headers: kopf({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ katalog_pfad: pfad })
+        }).then(function (r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            // Die Folge benennen, nicht nur "gespeichert": der Knopf schaltet
+            // die Benutzerseite zwischen Download und Pfad um, und das sieht
+            // man von hier aus nicht.
+            melde('xa-katalog-status', pfad
+                ? 'Gespeichert – /excel zeigt jetzt diesen Pfad statt des Downloads.'
+                : 'Gespeichert – /excel bietet wieder den Download an.', 'ok');
+            setTimeout(function () { melde('xa-katalog-status', ''); }, 5000);
+        }).catch(function (e) {
+            melde('xa-katalog-status', 'Fehler: ' + (e && e.message || e), 'fehler');
+        }).then(function () { _laeuft = false; });
     }
 
     function speichere() {
@@ -122,6 +153,8 @@
         if (window.initExcelCollapse) window.initExcelCollapse();
         var b = $('xa-save');
         if (b) b.addEventListener('click', speichere);
+        var kb = $('xa-katalog-save');
+        if (kb) kb.addEventListener('click', speichereKatalog);
         var g = $('xa-guide-btn');
         if (g) {
             g.addEventListener('click', function () {

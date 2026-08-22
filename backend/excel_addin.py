@@ -120,6 +120,49 @@ def addin_id(basis: str) -> str:
     return str(uuid.uuid5(_NS, (basis or "jarvis").lower() + "/excel-addin"))
 
 
+# ─── Katalog-Pfad ────────────────────────────────────────────────────────────
+# Der uebliche Weg in einem Haus ist NICHT, dass jeder Benutzer das Manifest
+# herunterlaedt: der Administrator legt es EINMAL in eine Netzfreigabe, und die
+# Arbeitsplaetze tragen genau diesen Ordner als vertrauenswuerdigen Katalog ein.
+# Dann braucht der Benutzer keinen Download, sondern den PFAD – und den kennt
+# nur die Administration. Steht er hier, zeigt die Benutzerseite ihn anstelle
+# des Download-Knopfes.
+
+KATALOG_PFAD_MAX = 260   # Windows MAX_PATH; laenger ist ohnehin nicht eintragbar
+
+
+def _skill_config() -> dict:
+    """Konfiguration des Excel-Skills. Lazy und fehlertolerant."""
+    try:
+        from backend.config import config  # noqa: PLC0415
+        st = config.get_skill_states().get("excel-addin", {}) or {}
+        return st.get("config", {}) or {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def katalog_pfad() -> str:
+    """Netzwerkpfad des Add-in-Katalogs – "" wenn keiner hinterlegt ist.
+
+    Bewusst eine FUNKTION und keine Modulkonstante: der Wert ist im Reiter
+    aenderbar und muss ohne Dienstneustart greifen (Muster
+    ``documents.retention_days()``).
+
+    Der Wert ist FREITEXT und wird nicht auf eine Form geprueft – zulaessig sind
+    UNC (``\\\\server\\freigabe\\addins``), ein verbundenes Laufwerk (``X:\\...``)
+    und eine SharePoint-Adresse. Eine Formpruefung waere hier keine Sicherheit,
+    sondern eine Fehlerquelle: sie wuerde gueltige Schreibweisen abweisen, die
+    in irgendeinem Haus die richtige ist.
+
+    Entfernt werden nur Steuerzeichen: der Pfad geht in eine Weboberflaeche und
+    in einen Kopiervorgang, ein eingeschmuggelter Zeilenumbruch haette dort
+    nichts zu suchen. Maskiert wird zusaetzlich beim Anzeigen.
+    """
+    roh = str(_skill_config().get("katalog_pfad") or "")
+    sauber = "".join(c for c in roh if c.isprintable())
+    return sauber.strip()[:KATALOG_PFAD_MAX]
+
+
 def dateiname() -> str:
     """Dateiname des Manifests fuer den Download – folgt dem Branding.
 

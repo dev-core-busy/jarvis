@@ -382,6 +382,16 @@ async function baueSeite(zustand) {
             const b3 = w3.document.querySelector('button');
             check(b3.getAttribute('title').indexOf(fall.erwartet) >= 0,
                   `[${fall.label}] auch im title-Attribut`, b3.getAttribute('title'));
+            // {adresse} muss die ECHTE Adresse zeigen, nicht "file://" oder
+            // "null" – ein Beispiel waere Arbeit fuer den Benutzer.
+            const pa = w3.document.createElement('p');
+            pa.textContent = 'url {adresse} ende';
+            w3.document.body.appendChild(pa);
+            if (w3.applyLang) { /* nur der Vollstaendigkeit halber */ }
+            w3.dispatchEvent(new w3.Event('jarvis-lang-changed'));
+            await schlaf(40);
+            check(/https:\/\/jarvis\.test/.test(pa.textContent),
+                  `[${fall.label}] {adresse} wird zur echten Adresse`, pa.textContent);
             check(typeof w3.jarvisMarke === 'function' && w3.jarvisMarke() === fall.erwartet,
                   `[${fall.label}] window.jarvisMarke() liefert den Namen`,
                   typeof w3.jarvisMarke === 'function' ? w3.jarvisMarke() : 'fehlt');

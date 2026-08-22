@@ -506,10 +506,27 @@
         var name = markeName();
         // Drei Platzhalter: {marke} = Anzeigename, {marke_slug} = klein und
         // dateinamentauglich, {MARKE} = gross (Umgebungsvariablen).
+        // {adresse} = die ECHTE Adresse DIESER Installation. Gehoert streng
+        // genommen nicht zum Branding, aber in denselben Durchlauf: es ist
+        // dieselbe Klasse "installationsabhaengiger Text", und ein zweiter
+        // TreeWalker mit eigenem Rohtext-Gedaechtnis waere Doppelarbeit.
+        // Ein Beispiel wie "https://dein-server.firma.de" waere Arbeit, die der
+        // Benutzer heraussuchen muss – der Browser kennt die Adresse laengst.
+        // location.origin ist im Normalfall "https://host" – aber NICHT immer:
+        // bei einer lokalen Datei steht dort "file://", in einem abgeschotteten
+        // iframe "null". Beides als Adresse hinzuschreiben waere Unsinn.
+        function eigeneAdresse() {
+            var o = (location.origin || '');
+            if (/^https?:\/\/.+/.test(o)) return o;
+            if (location.hostname) return 'https://' + location.hostname;
+            return '<Adresse dieser Installation>';
+        }
+
         function fuellen(s) {
             return s.split('{marke_slug}').join(markeSlug(false))
                     .split('{MARKE}').join(markeSlug(true))
-                    .split('{marke}').join(name);
+                    .split('{marke}').join(name)
+                    .split('{adresse}').join(eigeneAdresse());
         }
         // 1. Bekannte Fundstellen neu setzen (korrigiert einen zu fruehen Lauf).
         _markeText = _markeText.filter(function (e) {
@@ -530,7 +547,7 @@
         var neu = [];
         var k;
         while ((k = lauf.nextNode())) {
-            if (k.nodeValue && /\{marke(_slug)?\}|\{MARKE\}/.test(k.nodeValue)) neu.push(k);
+            if (k.nodeValue && /\{marke(_slug)?\}|\{MARKE\}|\{adresse\}/.test(k.nodeValue)) neu.push(k);
         }
         neu.forEach(function (k) {
             _markeText.push({ k: k, roh: k.nodeValue });

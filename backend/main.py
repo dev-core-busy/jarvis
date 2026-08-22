@@ -9380,7 +9380,7 @@ async def claudesub_page():
 
 
 @app.get("/claude/skill.md")
-async def claudesub_skill_md():
+async def claudesub_skill_md(request: Request):
     """Liefert die fertige SKILL.md zum Herunterladen.
 
     KEIN Verweis auf eine Datei im Repo: `.claude/` ist gitignored, die Datei
@@ -9400,10 +9400,20 @@ async def claudesub_skill_md():
         return Response("SKILL.md nicht gefunden", status_code=404,
                         media_type="text/plain; charset=utf-8")
     marke = _cs.marken_slug()                      # z.B. NEXI
+    # Die ECHTE Adresse dieser Installation einsetzen, kein Beispiel: der
+    # Server kennt sie, der Benutzer soll sie nicht heraussuchen muessen.
+    # Wiederverwendet die vorhandene Ableitung des Add-ins (Host-Kopf bzw.
+    # JARVIS_ADDIN_BASE hinter einem Rueckwaertsproxy).
+    try:
+        from backend import addin as _addin
+        adresse = _addin.basis_url(request)
+    except Exception:  # noqa: BLE001
+        adresse = str(request.base_url).rstrip("/")
     text = (quelle.read_text(encoding="utf-8")
             .replace("{MARKE}", marke)
             .replace("{marke_slug}", marke.lower())
-            .replace("{marke}", _cs.marken_anzeige()))
+            .replace("{marke}", _cs.marken_anzeige())
+            .replace("{adresse}", adresse))
     return Response(
         content=text, media_type="text/markdown; charset=utf-8",
         headers={"Content-Disposition": 'attachment; filename="SKILL.md"',

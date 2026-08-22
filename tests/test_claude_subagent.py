@@ -503,6 +503,201 @@ check("Vorlage im Repo unter" not in _I18N,
       "Anleitung fordert NICHT mehr zum Selbstanlegen auf")
 
 
+# ════════════════════════════════════════════════════════════════════════════
+section("Einstellbare Werte – Profil, Denktiefe, Grenzen")
+# ════════════════════════════════════════════════════════════════════════════
+# VORBEFUND, der diesen Abschnitt ausgeloest hat: das Manifest versprach drei
+# Schalter (gleichzeitig / laufzeit_s / arbeit_ttl_min), der Reiter zeigte sie,
+# gespeichert wurden sie – und GELESEN hat sie niemand. Die Werte standen als
+# Modulkonstanten im Code. Dieselbe Fehlerklasse wie `prompt_tool_calling`.
+# Deshalb prueft dieser Abschnitt die WIRKUNG, nicht die Anwesenheit der Felder.
+
+_CS_SRC = nur_code((ROOT / "backend" / "claude_subagent.py").read_text(encoding="utf-8"))
+
+# Die Konstanten duerfen NICHT zurueckkommen – sonst waere die Einstellung
+# wieder wirkungslos, ohne dass irgendetwas rot wird.
+for _tot in ("MAX_GLEICHZEITIG", "MAX_LAUFZEIT_S", "ARBEIT_TTL_MIN "):
+    check(_tot not in _CS_SRC,
+          f"Keine Modulkonstante {_tot.strip()} mehr (waere wieder unlesbar)")
+for _fn in ("gleichzeitig", "laufzeit_s", "arbeit_ttl_min", "profil_id",
+            "reasoning_effort", "wirksames_profil", "temperatur_hinweis"):
+    check(callable(getattr(cs, _fn, None)), f"cs.{_fn}() existiert")
+
+# Manifest und Code muessen dieselben Felder kennen. Ein Feld im Formular, das
+# der Code nicht liest, ist genau der Vorbefund von oben.
+_MAN = json.loads((ROOT / "skills" / "claude_subagent" / "skill.json")
+                  .read_text(encoding="utf-8"))
+_SCHEMA = _MAN.get("config_schema", {})
+for _feld in ("gleichzeitig", "laufzeit_s", "arbeit_ttl_min", "profile_id",
+              "reasoning_effort"):
+    check(_feld in _SCHEMA, f"Manifest kennt '{_feld}'")
+    check(f'"{_feld}"' in _CS_SRC, f"... und der Code LIEST '{_feld}'")
+_EFF = _SCHEMA.get("reasoning_effort", {})
+check(isinstance(_EFF.get("enum"), list),
+      "Denktiefe-Feld nutzt 'enum' (skillcfg.js liest NICHT 'options')")
+check("options" not in _EFF, "... und kein totes 'options' daneben")
+check(set(_EFF.get("enum") or []) == set(cs.EFFORT_STUFEN),
+      "Manifest-Stufen und cs.EFFORT_STUFEN sind dieselben")
+_SKC = (ROOT / "frontend" / "js" / "skillcfg.js").read_text(encoding="utf-8")
+check("f.enum" in _SKC and "f.options" not in _SKC,
+      "Gegenprobe am Renderer: er liest wirklich 'enum'")
+
+# Wirkung: Config setzen -> Funktion liefert den Wert, ausserhalb der Grenzen
+# wird gekappt, Muell faellt auf die Vorgabe zurueck.
+_echte_cfg = cs.skill_config
+def _cfg(d):
+    cs.skill_config = lambda: d
+try:
+    _cfg({})
+    check(cs.gleichzeitig() == 2 and cs.laufzeit_s() == 600
+          and cs.arbeit_ttl_min() == 60, "Leere Config -> Vorgaben")
+    _cfg({"gleichzeitig": 4, "laufzeit_s": 120, "arbeit_ttl_min": 15})
+    check(cs.gleichzeitig() == 4 and cs.laufzeit_s() == 120
+          and cs.arbeit_ttl_min() == 15, "Gesetzte Werte wirken WIRKLICH")
+    _cfg({"gleichzeitig": 500, "laufzeit_s": 99999, "arbeit_ttl_min": 0})
+    check(cs.gleichzeitig() == 4, "gleichzeitig wird nach oben gekappt (500 -> 4)")
+    check(cs.laufzeit_s() == 1800, "laufzeit_s wird gekappt")
+    check(cs.arbeit_ttl_min() == 5, "arbeit_ttl_min wird nach unten gekappt")
+    _cfg({"gleichzeitig": "zwei"})
+    check(cs.gleichzeitig() == 2, "Muell -> Vorgabe statt Absturz")
+
+    # Denktiefe: nur die fuenf Stufen, alles andere ist "keine Vorgabe".
+    _cfg({"reasoning_effort": "low"})
+    check(cs.reasoning_effort() == "low", "Gueltige Denktiefe wird uebernommen")
+    _cfg({"reasoning_effort": "  HIGH "})
+    check(cs.reasoning_effort() == "high", "... normalisiert (Rand, Grossschreibung)")
+    _cfg({"reasoning_effort": "sehr_viel"})
+    check(cs.reasoning_effort() == "",
+          "Unbekannte Stufe -> leer (kein Provider-400 aus einem Tippfehler)")
+    _cfg({"profile_id": "  abc-123  "})
+    check(cs.profil_id() == "abc-123", "Profil-Kennung wird getrimmt")
+    _cfg({"profile_id": "x" * 500})
+    check(len(cs.profil_id()) == 64, "Profil-Kennung ist gedeckelt")
+finally:
+    cs.skill_config = _echte_cfg
+
+# Verdrahtung im Lauf: dieselben Attribute wie bei den Rollen-Agenten.
+_lauf = _CS_SRC[_CS_SRC.find("async def job_ausfuehren"):]
+check("_role_profile_id = profil_id_aufgeloest()" in _lauf,
+      "Der Lauf setzt _role_profile_id auf die AUFGELOESTE Kennung "
+      "(ein Name liefe dort ins Leere)")
+check("reasoning_effort=" in _lauf,
+      "Der Lauf reicht die Denktiefe an run_task_headless durch")
+check("reasoning_effort() or None" in _lauf,
+      "Leere Denktiefe wird zu None (= keine Vorgabe), nicht zu ''")
+check("timeout=grenze_s" in _lauf,
+      "Das Zeitlimit kommt aus der Config, nicht aus einer Konstante")
+
+# ── Der Hinweis zur temperature ────────────────────────────────────────────
+# GEMESSEN am 2026-08-22 auf DEV gegen das aktive Profil (Qwen3.6-35B auf
+# vLLM 0.27.1, je 12 Laeufe): ohne das Feld 12 verschiedene Antworten, mit 0.2
+# nur 2 – die wirksame Vorgabe des Servers ist also hoch. Die WERKZEUG-Aufrufe
+# waren in BEIDEN Faellen 12/12 exakt richtig. Der Hinweis darf deshalb kein
+# Versagen behaupten, das nicht gemessen wurde.
+class _FakeCfg:
+    def __init__(self, profile, aktiv):
+        self.profiles = profile
+        self._aktiv = aktiv
+    @property
+    def active_profile(self):
+        return self._aktiv
+
+import types  # noqa: E402
+def _mit_profilen(profile, aktiv):
+    """Schiebt ein Attrappen-config-Modul unter backend.config."""
+    m = types.ModuleType("backend.config")
+    m.config = _FakeCfg(profile, aktiv)
+    sys.modules["backend.config"] = m
+
+_echt_cfgmod = sys.modules.get("backend.config")
+try:
+    _p_auto = {"id": "p1", "name": "Qwen lokal", "temperature": "auto"}
+    _p_fest = {"id": "p2", "name": "Qwen fest", "temperature": "0.2"}
+
+    cs.skill_config = lambda: {}
+    _mit_profilen([_p_auto, _p_fest], _p_auto)
+    _w = cs.wirksames_profil()
+    # DIESE Pruefung ist der Grund fuer den ganzen Block: wirksames_profil()
+    # hat ein breites except. Ein Tippfehler an den config-Zugriffen (etwa
+    # get_profiles() statt .profiles, oder active_profile als Methode) wuerde
+    # verschluckt – der Hinweis erschiene dann einfach NIE.
+    check(_w["gefunden"] and _w["name"] == "Qwen lokal",
+          "wirksames_profil() findet das global aktive Profil WIRKLICH")
+    check(not _w["gewaehlt"], "... und meldet es als nicht festgelegt")
+    check("auto" in cs.temperatur_hinweis(),
+          "Hinweis erscheint, wenn das wirksame Profil auf auto steht")
+    check("0.2" in cs.temperatur_hinweis(),
+          "... und nennt den konkreten Ausweg")
+    _h = cs.temperatur_hinweis().lower()
+    check("werkzeug" not in _h and "tool" not in _h,
+          "Der Hinweis behauptet KEIN Werkzeug-Versagen (nicht gemessen)")
+
+    _mit_profilen([_p_auto, _p_fest], _p_fest)
+    check(cs.temperatur_hinweis() == "",
+          "Feste Zahl im Profil -> kein Hinweis")
+
+    cs.skill_config = lambda: {"profile_id": "p2"}
+    _mit_profilen([_p_auto, _p_fest], _p_auto)
+    _w = cs.wirksames_profil()
+    check(_w["name"] == "Qwen fest" and _w["gewaehlt"],
+          "Das Feld im Reiter schlaegt das global aktive Profil")
+
+    check(cs.profil_id_aufgeloest() == "p2",
+          "profil_id_aufgeloest() liefert die KENNUNG (nicht den Rohwert)")
+
+    # NAME statt Kennung: der Reiter rendert hier ein Textfeld, und eine UUID
+    # abzutippen ist eine Zumutung.
+    cs.skill_config = lambda: {"profile_id": "Qwen fest"}
+    check(cs.wirksames_profil()["id"] == "p2",
+          "Profil laesst sich ueber den NAMEN waehlen")
+    check(cs.profil_id_aufgeloest() == "p2",
+          "... und daraus wird die Kennung fuer _role_profile_id")
+
+    cs.skill_config = lambda: {"profile_id": "gibtsnicht"}
+    check("gibt es nicht mehr" in cs.temperatur_hinweis(),
+          "Verwaistes Profil wird gemeldet (Lauf laeuft sonst still anders)")
+    check(cs.profil_id_aufgeloest() == "",
+          "Verwaistes Profil -> leer (Lauf faellt aufs aktive zurueck)")
+
+    cs.skill_config = lambda: {}
+    check(cs.profil_id_aufgeloest() == "",
+          "Ohne Wahl wird KEIN Profil gepinnt")
+
+    cs.skill_config = lambda: {}
+    _mit_profilen([], None)
+    check(cs.temperatur_hinweis() == "",
+          "Ohne Profil wird nichts behauptet")
+finally:
+    cs.skill_config = _echte_cfg
+    if _echt_cfgmod is not None:
+        sys.modules["backend.config"] = _echt_cfgmod
+    else:
+        sys.modules.pop("backend.config", None)
+
+# Endpunkt und Oberflaeche
+_ep = _MAIN[_MAIN.find('@app.get("/api/claude/status")'):]
+_ep = _ep[:_ep.find("@app.post")]
+for _f in ("wirksames_profil", "temperatur_hinweis", "reasoning_effort"):
+    check(_f in _ep, f"/api/claude/status liefert {_f}")
+check("_cs.gleichzeitig()" in _ep and "_cs.laufzeit_s()" in _ep,
+      "... und meldet die WIRKSAMEN Grenzen, nicht die Vorgaben")
+
+_PORTAL = (ROOT / "frontend" / "js" / "claude_portal.js").read_text(encoding="utf-8")
+check("zeichneModell" in _PORTAL, "Oberflaeche zeichnet den Modell-Kasten")
+check(_PORTAL.count("zeichneModell();") == 1,
+      "... und ruft ihn genau einmal auf")
+check("modell_hinweis" in _PORTAL, "... inklusive Hinweis")
+check("if (!m || !m.name) { box.hidden = true; return; }" in _PORTAL,
+      "Ohne Datenstand wird nichts behauptet")
+_HTML = (ROOT / "frontend" / "claude.html").read_text(encoding="utf-8")
+check('id="cs-modell"' in _HTML, "Markup fuer den Modell-Kasten vorhanden")
+check(".cs-modell {" in _HTML and "var(--bg-primary)" in _HTML,
+      "Kasten hat eine DECKENDE Flaeche")
+for _k in ("csub.model_line", "csub.model_fixed", "csub.model_global",
+           "csub.model_effort"):
+    check(_I18N.count(f"'{_k}'") == 2, f"{_k} in DE und EN")
+
+
 print("\n" + "=" * 62)
 print(f"  {_ok} OK, {_fail} FAIL")
 print("=" * 62)

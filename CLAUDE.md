@@ -755,9 +755,37 @@ Modell setzt ENTERPRISE voraus; das Formular sagt es, statt in einen 403 zu lauf
   faengt das erst der 400-Fallback ab, also nach einem verschwendeten Aufruf. **Nebenwirkung, die
   man kennen muss:** ohne Feld gilt der Anbieter-Default, und der liegt bei vielen
   OpenAI-kompatiblen Servern und bei Gemini deutlich ueber den frueher fest verdrahteten 0.2.
-  Fuer werkzeuglastige Profile kann das die Zuverlaessigkeit von Tool-Aufrufen senken – dort
-  gehoert eine feste Zahl ins Profil (0.2 stellt das Verhalten vor Juli 2026 wieder her).
-  `llm.LEGACY_TEMPERATURE = 0.2` dokumentiert diesen Altwert als benannte Konstante.
+  Eine feste Zahl gehoert ins Profil, wenn man Reproduzierbarkeit braucht (0.2 stellt das
+  Verhalten vor Juli 2026 wieder her). `llm.LEGACY_TEMPERATURE = 0.2` dokumentiert diesen
+  Altwert als benannte Konstante.
+- **⚠ HIER STAND EINE UNGEMESSENE BEHAUPTUNG (korrigiert 2026-08-22):** „Fuer werkzeuglastige
+  Profile kann das die Zuverlaessigkeit von Tool-Aufrufen senken." Am 2026-08-22 auf DEV gegen
+  das aktive Profil nachgemessen (Qwen3.6-35B auf **vLLM 0.27.1**, Denken aus, je 12 Laeufe):
+  | | verschiedene Antworten | Werkzeug-Aufruf exakt richtig |
+  |---|---|---|
+  | ohne das Feld (`auto`) | **12 von 12** | **12/12** |
+  | `temperature: 0.2` | 2 von 12 | **12/12** |
+  Die Streuung ist also real und gross – **die Werkzeug-Aufrufe hat sie nicht gekostet**, in
+  keinem der 24 Laeufe. Der Grund ist bekannt: vLLM erzwingt bei `tools` die JSON-Struktur
+  ueber gefuehrte Dekodierung, die Form kann gar nicht brechen. Ende-zu-Ende gegengeprueft
+  ueber den Claude-Subagent (dieselbe Aufgabe je 5x, Riegel `test_branding_aliase.py`):
+  **5/5 angenommen mit `auto`, 5/5 mit `0.2`** – die Patchgroessen streuten dabei 710–1107 B
+  gegen 710–816 B. Die Aussage lautet damit: **`auto` kostet keine Zuverlaessigkeit, sondern
+  Reproduzierbarkeit.**
+- **Der Anbieter-Default ist nicht bekannt und auch nicht stabil.** In vLLM ist er
+  versionsabhaengig verschieden (`SamplingParams` 1.0 gegen `ChatCompletionRequest` 0.7 –
+  ein eigener Bugreport dazu, vllm#10930). Wer eine Zahl braucht, muss sie eintragen; sie aus
+  dem Weglassen zu erschliessen geht nicht.
+- **Fuer aktuelle Claude-Modelle ist eine niedrige Temperature nicht nur unnoetig, sondern
+  unmoeglich** (an der Quelle geprueft, nicht aus dem Gedaechtnis): auf Opus 4.7 und spaeter
+  sind `temperature`, `top_p` und `top_k` **entfernt** und ergeben HTTP 400; der Python-SDK ab
+  1.0 kennt sie gar nicht mehr und wirft `TypeError`. Anthropic verweist stattdessen auf
+  Prompting. Genau dafuer gibt es `"auto"` – es ist bei Claude der EINZIGE gueltige Zustand.
+- **Bei Qwen waere eine niedrige Temperature sogar gegen die Empfehlung des Herstellers:**
+  das Modellkarten-Kapitel „Best Practices" nennt 0.7/TopP 0.8 (ohne Denken) bzw. 0.6/0.95
+  (mit Denken) und warnt ausdruecklich „DO NOT use greedy decoding, as it can lead to
+  performance degradation and endless repetitions". `temperature: 0` ist dort also ein Fehler,
+  kein sicherer Wert.
 - **Migration bestehender Profile** (`_load_v2`): Profile ohne `temperature`-Key oder mit leerem
   Wert werden beim Laden auf `"auto"` gesetzt und **einmalig** zurueckgeschrieben – nur wenn
   wirklich etwas geaendert wurde, sonst schriebe jeder Start die settings.json neu. Ein bereits

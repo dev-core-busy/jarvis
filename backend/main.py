@@ -9434,12 +9434,18 @@ async def claudesub_status(user: str = Depends(require_claudesub_access)):
         "schluessel": _cs.schluessel_info(user),
         "jobs": _cs.jobs_liste(user, limit=20),
         "grenzen": {
-            "gleichzeitig": _cs.MAX_GLEICHZEITIG,
-            "laufzeit_s": _cs.MAX_LAUFZEIT_S,
+            "gleichzeitig": _cs.gleichzeitig(),
+            "laufzeit_s": _cs.laufzeit_s(),
             "max_dateien": _cs.MAX_DATEIEN,
             "spec_max": _cs.MAX_SPEC_ZEICHEN,
             "diff_max": _cs.MAX_DIFF_BYTES,
         },
+        # Womit die Laeufe wirklich rechnen. Ohne diese Angabe muesste man zwei
+        # Einstellungen im Kopf zusammenrechnen (Feld im Skill-Reiter, sonst das
+        # global aktive Profil) – die Auskunft waere im Zweifel geraten.
+        "modell": _cs.wirksames_profil(),
+        "modell_hinweis": _cs.temperatur_hinweis(),
+        "effort": _cs.reasoning_effort(),
         "werkzeuge": sorted(_cs.WERKZEUGE),
     })
 
@@ -9494,7 +9500,7 @@ async def claudesub_job_create(request: Request, user: str = Depends(require_cla
 
     if _cs.freie_plaetze() <= 0:
         return JSONResponse(
-            {"ok": False, "error": f"Alle {_cs.MAX_GLEICHZEITIG} Plaetze belegt – "
+            {"ok": False, "error": f"Alle {_cs.gleichzeitig()} Plaetze belegt – "
                                    f"spaeter erneut versuchen."}, status_code=429)
 
     job = _cs.job_anlegen(user, geprueft)

@@ -183,6 +183,33 @@
         }).join('');
     }
 
+    // Womit die Laeufe rechnen. Beantwortet eine Frage, die man sonst aus zwei
+    // Einstellungen zusammenrechnen muesste (Feld im Skill-Reiter, sonst das
+    // global aktive Profil) – der Server hat sie schon aufgeloest.
+    function zeichneModell() {
+        var box = $('cs-modell');
+        if (!box) return;
+        var m = _status && _status.modell;
+        // Kein Datenstand -> nichts behaupten (gleiche Regel wie beim Trenner
+        // "Neue Sitzung" und beim Audit-Filter).
+        if (!m || !m.name) { box.hidden = true; return; }
+        var warn = (_status && _status.modell_hinweis) || '';
+        var zeilen = T('csub.model_line', 'Die Aufträge rechnen auf <b>{p}</b>{q}.')
+            .replace('{p}', esc(m.name))
+            .replace('{q}', m.gewaehlt
+                ? ' ' + esc(T('csub.model_fixed', '(im Reiter festgelegt)'))
+                : ' ' + esc(T('csub.model_global', '(das global aktive Profil)')));
+        var eff = (_status && _status.effort) || '';
+        if (eff) {
+            zeilen += ' ' + esc(T('csub.model_effort', 'Denktiefe: {e}.')
+                .replace('{e}', eff));
+        }
+        box.innerHTML = zeilen
+            + (warn ? '<div class="cs-modell-warn">' + esc(warn) + '</div>' : '');
+        box.className = 'cs-modell' + (warn ? ' is-warn' : '');
+        box.hidden = false;
+    }
+
     // Zahnrad nur fuer Administratoren – dort werden Skill und Freigabe
     // gepflegt. Der Rueckweg wird gemerkt, damit /settings zurueckfindet
     // (gleiches Muster wie /sap, /support, /wissen).
@@ -201,6 +228,7 @@
     function zeichne() {
         zeichneAdminKnopf();
         zeichneSchluessel();
+        zeichneModell();
         zeichneJobs();
         // KEIN applyLang() hier – siehe Kopfkommentar (Endlosschleife).
     }

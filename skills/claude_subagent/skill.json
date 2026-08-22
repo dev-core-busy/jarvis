@@ -1,0 +1,51 @@
+{
+    "name": "Claude Subagent",
+    "description": "Claude Code gibt eng umrissene Codeaufgaben an Jarvis ab (Bereich /claude). Jarvis arbeitet in einem Wegwerf-Klon unter /tmp und liefert einen PATCH zurueck, dessen Ergebnis maschinell geprueft ist – nicht vom Sprachmodell behauptet. Spart Anthropic-Tokens bei mechanischer Breitenarbeit.",
+    "version": "1.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": [],
+    "category": "entwicklung",
+    "icon": "code",
+    "system": false,
+    "enabled": false,
+    "dependencies": [],
+    "system_packages": [],
+    "data_dirs": ["data/claude_subagent.json"],
+    "config_schema": {
+        "gleichzeitig": {
+            "type": "number",
+            "label": "Gleichzeitige Laeufe",
+            "description": "Wie viele Delegations-Auftraege parallel laufen duerfen. Jeder Lauf belegt einen Klon im tmpfs und rechnet auf demselben LLM wie der Chat – hohe Werte gehen unmittelbar zu Lasten der Antwortzeiten aller anderen. Erlaubt 1 bis 4 (Vorgabe 2).",
+            "default": 2,
+            "required": false
+        },
+        "laufzeit_s": {
+            "type": "number",
+            "label": "Zeitlimit je Auftrag (Sekunden)",
+            "description": "Danach wird der Lauf abgebrochen und der Auftrag als gescheitert vermerkt. Erlaubt 60 bis 1800 (Vorgabe 600). Die Schrittgrenze des Agenten wirkt zusaetzlich.",
+            "default": 600,
+            "required": false
+        },
+        "arbeit_ttl_min": {
+            "type": "number",
+            "label": "Vorhaltezeit der Arbeitsbereiche (Minuten)",
+            "description": "Wie lange der Wegwerf-Klon unter /tmp nach dem Lauf stehen bleibt, damit ein Ergebnis nachvollziehbar ist. Danach wird er entfernt. Erlaubt 5 bis 1440 (Vorgabe 60).",
+            "default": 60,
+            "required": false
+        }
+    },
+    "knowledge_docs": [],
+    "permissions": [],
+    "help": {
+        "details": "Schaltet den Bereich /claude frei. Dort erzeugt jeder freigegebene Benutzer EINEN persoenlichen Delegations-Schluessel und traegt ihn in seinem Claude-Code-Skill ein. Claude Code schickt danach eine eng umrissene Aufgabe (welche Dateien geaendert werden duerfen, welche Testdatei das Ergebnis beweist); Jarvis klont das Projekt frisch von origin/master nach /tmp, arbeitet dort und gibt einen Patch zurueck.\n\nDAS ERGEBNIS WIRD MASCHINELL GEPRUEFT, nicht vom Modell behauptet: das Backend rechnet den Patch selbst (git diff), fuehrt die benannte Testdatei aus und lehnt alles-oder-nichts ab, wenn der Patch leer ist, eine nicht freigegebene Datei angefasst wurde, der Test rot ist oder der Patch gekuerzt werden musste. Grund dafuer ist eine Messung, keine Vorsicht: in der Machbarkeitsprobe war die vom Modell abgeleitete Zahl in drei von drei Laeufen falsch, waehrend die zugrunde liegenden Daten jedes Mal stimmten.\n\nDer Lauf ist IMMER unprivilegiert und arbeitet ausschliesslich im Klon unter /tmp – an /opt/jarvis, an settings.json und an .env kommt er nicht heran. Sein Werkzeugkasten ist auf filesystem und shell_execute beschraenkt, Internet hat er nicht.\n\nWer den Bereich betreten darf, steht unter Einstellungen -> Sicherheit -> Berechtigungen -> Claude-Subagent-Zugriff. Ohne Eintrag darf NIEMAND, ausdruecklich auch keine lokalen Administratoren.",
+        "tools": [],
+        "use_cases": [
+            "Dieselbe mechanische Aenderung ueber viele Dateien ziehen (z.B. ein Attribut an alle Filterfelder)",
+            "Eine kleine Aenderung machen, bei der ein vorhandener Test beweist, dass sie stimmt",
+            "Einen Wert oder eine Deklaration ergaenzen, die an zwei Stellen zusammenpassen muss"
+        ],
+        "setup": "Skill aktivieren, dann unter Einstellungen -> Sicherheit -> Berechtigungen -> Claude-Subagent-Zugriff die Benutzer oder eine AD-Gruppe eintragen (leer = niemand). Jeder Benutzer erzeugt danach unter /claude seinen eigenen Schluessel und traegt ihn im Claude-Code-Skill ein.",
+        "notes": "NICHT delegieren lassen sollte man: alles Konventionslastige (die Projektregeln in CLAUDE.md sind zu umfangreich, als dass ein 35B-Modell sie zuverlaessig anwendet), alles Sicherheitsrelevante, und Auftraege mit Zustandswechsel ('aendere X, miss, mache rueckgaengig') – letztere sind in der Machbarkeitsprobe reproduzierbar gescheitert. Eine Delegation = ein Zielzustand. Der Skill stellt keine Agent-Werkzeuge bereit; ein Modell kann ihn nicht von sich aus benutzen."
+    }
+}

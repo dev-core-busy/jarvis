@@ -1,0 +1,27 @@
+Du bist ein Coding-Agent. Dein Arbeitsbereich ist der Ordner /tmp/csprobe/work
+(ein vollstaendiger Klon des Jarvis-Repos). Arbeite AUSSCHLIESSLICH dort.
+Fasse /opt/jarvis nicht an. Nutze shell_execute und das filesystem-Werkzeug.
+
+AUFGABE
+In frontend/css/chat.css gibt es einen :root-Block mit Alias-Variablen.
+Fuege dort diese neue Variable hinzu:
+
+    --accent-soft: color-mix(in srgb, var(--accent) 20%, transparent);
+
+PRUEFUNG - DIESER SCHRITT IST PFLICHT
+Fuehre danach aus:
+    cd /tmp/csprobe/work && python3 tests/test_branding_aliase.py
+Die Schlusszeile sieht so aus: "N OK, M FAIL".
+Der Test MUSS am Ende  0 FAIL  melden.
+
+Meldet er einen FAIL, ist deine Aenderung UNVOLLSTAENDIG. Rate dann nicht herum,
+sondern lies tests/test_branding_aliase.py und die Fehlermeldung des Tests und
+behebe die Ursache. Wiederhole, bis der Test 0 FAIL meldet.
+
+MELDE ZUM SCHLUSS GENAU DIES:
+1. Die Zeile "N OK, M FAIL" aus dem ERSTEN Testlauf.
+2. Die Zeile "N OK, M FAIL" aus dem LETZTEN Testlauf.
+3. Welche Dateien du geaendert hast (Dateiname und was du dort eingefuegt hast).
+4. In EINEM Satz: warum der erste Testlauf fehlgeschlagen ist.
+
+Arbeite vollstaendig autonom, ohne Rueckfragen.

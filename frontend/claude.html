@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claude Subagent</title>
+    <link rel="stylesheet" href="/static/css/theme.css?v=12">
+    <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
+    <style>
+        /* ═══════════════════════════════════════════════════════════════
+           Bereich Claude Subagent (/claude)
+           ───────────────────────────────────────────────────────────────
+           Titelleiste bewusst identisch zu /email, /sap und /tracks – wer
+           zwischen den Bereichen wechselt, findet die Knoepfe am selben Platz.
+
+           Praefix `cs-` fuer alles hier.
+
+           Farben ausschliesslich ueber Theme-Variablen – kein hartes Violett
+           oder Weiss, sonst bricht das Branding und der Hell-Modus.
+           ═══════════════════════════════════════════════════════════════ */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: var(--font-body); background: var(--bg-primary);
+               color: var(--text-primary); min-height: 100vh; }
+        .hidden { display: none !important; }
+
+        /* ── Titelleiste ── */
+        .topbar { display: flex; align-items: center; justify-content: space-between;
+            padding: 10px 16px; border-bottom: 1px solid var(--border);
+            background: var(--bg-glass); backdrop-filter: blur(8px);
+            position: sticky; top: 0; z-index: 30; }
+        .topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+        .topbar-right { display: flex; align-items: center; gap: 4px; }
+        .topbar-avatar { width: 32px; height: 32px; border-radius: 50%;
+            background: var(--gradient); display: flex; align-items: center;
+            justify-content: center; font-size: 14px; font-weight: 700; color: #fff;
+            flex-shrink: 0; overflow: hidden; }
+        .topbar-title { font-size: 19px; font-weight: 600; white-space: nowrap; }
+
+        /* Zustands-Pille. `align-self: flex-start` ist Pflicht – im senkrechten
+           Flex-Container wuerde sie sonst auf die ganze Breite gezogen und
+           saehe wie ein Eingabefeld aus (Fehler vom 2026-08-11). */
+        .cs-pill { display: inline-flex; align-items: center; gap: 6px;
+            align-self: flex-start;
+            padding: 3px 10px; border-radius: 12px; font-size: .74rem; font-weight: 600;
+            background: rgba(var(--fg-rgb), .06); border: 1px solid var(--border);
+            color: var(--text-secondary); white-space: nowrap; }
+        .cs-pill.is-ok { color: var(--success);
+            border-color: color-mix(in srgb, var(--success) 45%, transparent);
+            background: color-mix(in srgb, var(--success) 12%, transparent); }
+        .cs-pill.is-off { color: var(--danger);
+            border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+            background: color-mix(in srgb, var(--danger) 12%, transparent); }
+
+        /* ── Karten ── */
+        .cs-wrap { max-width: 900px; margin: 0 auto; padding: 18px 16px 60px;
+            display: flex; flex-direction: column; gap: 14px; }
+        .cs-card { border: 1px solid var(--border); border-radius: 12px;
+            background: var(--bg-secondary); overflow: hidden; }
+        .cs-card-head { display: flex; align-items: center; justify-content: space-between;
+            gap: 10px; padding: 12px 14px; cursor: pointer; user-select: none; }
+        .cs-card-head h2 { font-size: 1rem; font-weight: 600; }
+        .cs-caret { color: var(--text-muted); font-size: .8rem; transition: transform .15s; }
+        .cs-card[data-zu="1"] .cs-caret { transform: rotate(-90deg); }
+        .cs-card[data-zu="1"] .cs-card-body { display: none; }
+        .cs-card-body { padding: 0 14px 14px; }
+        .cs-hint { font-size: .84rem; line-height: 1.55; color: var(--text-secondary); }
+        .cs-sep { height: 1px; background: var(--border); margin: 12px 0; }
+
+        /* ── Felder und Knoepfe ── */
+        .cs-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        /* `display:flex` ueberstimmt das hidden-Attribut – ohne diese Regel
+           steht ein verborgener Block trotzdem da (Fehler vom 2026-08-17 bei
+           .sp-row). Gleiche Klassen-Falle wie .input-group und .role-grid. */
+        .cs-row[hidden] { display: none; }
+        .cs-btn { background: none; border: 1px solid var(--border); color: var(--text-secondary);
+            height: 32px; padding: 0 12px; border-radius: 8px; cursor: pointer;
+            font-size: .85rem; display: inline-flex; align-items: center; gap: 6px;
+            font-family: var(--font-body); white-space: nowrap; text-decoration: none;
+            flex: 0 0 auto; }
+        .cs-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+        .cs-btn.is-primary { border-color: var(--accent); color: var(--text-primary);
+            background: color-mix(in srgb, var(--accent) 14%, transparent); }
+        .cs-btn.is-danger { border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+            color: var(--danger); }
+        .cs-btn[disabled] { opacity: .5; cursor: default; }
+
+        /* Der Schluessel selbst: einmalige Anzeige, Monospace, umbrechend.
+           Deckende Flaeche, weil er ueber Karteninhalt liegt. */
+        .cs-key { margin-top: 10px; padding: 10px 12px; border-radius: 8px;
+            background: var(--bg-primary); border: 1px solid var(--accent);
+            font-family: var(--font-mono, monospace); font-size: .8rem;
+            word-break: break-all; line-height: 1.5; color: var(--text-primary); }
+        .cs-key-warn { margin-top: 8px; font-size: .8rem; color: var(--warning, var(--accent));
+            font-weight: 600; }
+        .cs-meta { font-size: .8rem; color: var(--text-muted); margin-top: 6px; }
+
+        /* ── ⓘ: aufklappender Text, kein schwebendes Popup ──
+           Ein positioniertes Popup wuerde auf schmalen Fenstern abgeschnitten
+           oder verdeckte das Feld. Ein `title`-Attribut scheidet aus – auf
+           Touch unerreichbar. Monochromes Textzeichen statt Emoji. */
+        .cs-info { background: none; border: none; cursor: pointer; padding: 0 0 0 5px;
+            color: var(--text-muted); font-size: .9rem; line-height: 1;
+            font-family: var(--font-body); vertical-align: baseline; }
+        .cs-info:hover, .cs-info[aria-expanded="true"] { color: var(--accent); }
+        .cs-help { display: none; margin-top: 6px; padding: 8px 10px;
+            border-radius: 8px; font-size: .8rem; line-height: 1.5;
+            color: var(--text-secondary); background: var(--bg-primary);
+            border: 1px solid var(--border); border-left: 3px solid var(--accent); }
+        .cs-help.is-open { display: block; }
+        /* Eigener Einzug: sonst stehen die Punkte links AUSSERHALB des Kastens. */
+        .cs-help ul { margin: 6px 0 2px; padding-left: 1.15rem; }
+        .cs-help li { margin-bottom: 4px; }
+        .cs-help b, .cs-help strong { color: var(--text-secondary); }
+        .cs-help code { font-family: var(--font-mono, monospace); font-size: .95em;
+            background: rgba(var(--fg-rgb), .1); padding: 1px 4px; border-radius: 4px; }
+
+        /* ── Auftragsliste ── */
+        .cs-job { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+            margin-bottom: 8px; background: var(--bg-primary); }
+        .cs-job-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .cs-job-spec { font-size: .85rem; color: var(--text-primary); flex: 1 1 auto;
+            min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .cs-job-meta { font-size: .76rem; color: var(--text-muted); margin-top: 4px; }
+        .cs-leer { font-size: .84rem; color: var(--text-muted); padding: 6px 0; }
+
+        .cs-toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+            padding: 10px 16px; border-radius: 10px; background: var(--bg-secondary);
+            border: 1px solid var(--border); color: var(--text-primary);
+            font-size: .85rem; z-index: 60; pointer-events: none; }
+    </style>
+</head>
+<body>
+<script>try{if(localStorage.getItem('jarvis_theme')==='light')document.body.classList.add('light');}catch(e){}</script>
+
+<div id="cs-app" class="hidden">
+    <header class="topbar">
+        <div class="topbar-left">
+            <div class="topbar-avatar">J</div>
+            <span class="topbar-title"><span class="brand-app-name">Jarvis</span>
+                <span data-i18n="csub.portal_title">Claude Subagent</span></span>
+            <span class="cs-pill" id="cs-key-pill"></span>
+        </div>
+        <div class="topbar-right">
+            <div class="lang-toggle" id="cs-lang-toggle">
+                <button class="lang-toggle-btn" data-lang="de" onclick="window.setLang && window.setLang('de')" title="Deutsch">DE</button>
+                <button class="lang-toggle-btn" data-lang="en" onclick="window.setLang && window.setLang('en')" title="English">EN</button>
+            </div>
+            <button class="btn-theme" id="cs-portal-btn" title="Zum Portal" data-i18n-title="nav.home">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            </button>
+            <button class="btn-theme" id="btn-theme-toggle" title="Hell/Dunkel umschalten" data-i18n-title="chat.theme">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            </button>
+            <button class="btn-theme" id="cs-logout-btn" title="Abmelden" data-i18n-title="chat.logout">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            </button>
+        </div>
+    </header>
+
+    <div class="cs-wrap">
+
+        <!-- ═══ Mein Delegations-Schluessel ═══ -->
+        <div class="cs-card" data-klapp="key">
+            <div class="cs-card-head" role="button" tabindex="0" aria-expanded="true">
+                <h2 data-i18n="csub.key_head">Mein Delegations-Schlüssel</h2>
+                <span class="cs-caret" aria-hidden="true">&#9662;</span>
+            </div>
+            <div class="cs-card-body">
+                <p class="cs-hint">
+                    <span data-i18n="csub.key_hint">Mit diesem Schlüssel darf dein Claude-Code-Werkzeug Codeaufgaben an Jarvis abgeben. Die Aufträge laufen unter deiner Kennung.</span>
+                    <button type="button" class="cs-info" data-help="cs-help-key" aria-expanded="false"
+                            data-i18n-title="csub.info_title" title="Erklärung anzeigen">&#9432;</button>
+                </p>
+                <div class="cs-help" id="cs-help-key" data-i18n-html="csub.help_key">
+                    <b>Der Schlüssel wird genau einmal angezeigt.</b>
+                    <ul>
+                        <li>Jarvis speichert ihn nur als Prüfsumme – niemand kann ihn später wieder auslesen, auch kein Administrator.</li>
+                        <li>Kopiere ihn deshalb sofort und trage ihn in deinem Claude-Code-Werkzeug ein.</li>
+                        <li>Verloren? Dann erzeuge einfach einen neuen. Der alte wird dabei sofort ungültig – das ist zugleich der Weg, einen versehentlich weitergegebenen Schlüssel zurückzuziehen.</li>
+                        <li>Du hast immer höchstens <b>einen</b> gültigen Schlüssel.</li>
+                        <li>Behandle ihn wie ein Kennwort: wer ihn hat, kann in deinem Namen Aufträge starten.</li>
+                    </ul>
+                </div>
+
+                <div class="cs-sep"></div>
+                <div class="cs-meta" id="cs-key-meta"></div>
+                <div class="cs-row" style="margin-top:10px;">
+                    <button class="cs-btn is-primary" id="cs-key-new" data-i18n="csub.key_new">Schlüssel erzeugen</button>
+                    <button class="cs-btn is-danger" id="cs-key-del" data-i18n="csub.key_del" hidden>Schlüssel löschen</button>
+                </div>
+
+                <div class="cs-row" id="cs-key-box" hidden style="display:block;">
+                    <div class="cs-key" id="cs-key-value"></div>
+                    <div class="cs-key-warn" data-i18n="csub.key_once">Jetzt kopieren – dieser Schlüssel wird nie wieder angezeigt.</div>
+                    <div class="cs-row" style="margin-top:8px;">
+                        <button class="cs-btn" id="cs-key-copy" data-i18n="csub.key_copy">Kopieren</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ Wie es funktioniert ═══ -->
+        <div class="cs-card" data-klapp="info">
+            <div class="cs-card-head" role="button" tabindex="0" aria-expanded="true">
+                <h2 data-i18n="csub.how_head">Wie die Delegation abläuft</h2>
+                <span class="cs-caret" aria-hidden="true">&#9662;</span>
+            </div>
+            <div class="cs-card-body">
+                <div class="cs-help is-open" data-i18n-html="csub.how_body">
+                    <ul>
+                        <li>Claude beschreibt eine <b>eng umrissene</b> Aufgabe und nennt dabei, welche Dateien geändert werden dürfen und welche Testdatei das Ergebnis beweist.</li>
+                        <li>Jarvis holt sich eine <b>frische Kopie</b> des Projekts in ein Wegwerf-Verzeichnis und arbeitet nur dort. An die laufende Installation kommt er dabei nicht heran.</li>
+                        <li>Danach rechnet <b>Jarvis selbst</b> nach, was sich geändert hat, und führt den genannten Test aus.</li>
+                        <li>Nur wenn alles zusammenpasst, gilt der Auftrag als angenommen: es wurde wirklich etwas geändert, es wurde <i>nur</i> an den freigegebenen Dateien gearbeitet, und der Test ist grün.</li>
+                        <li>Claude bekommt die Änderung als Patch zurück, prüft sie und übernimmt sie bei dir lokal.</li>
+                    </ul>
+                    <b>Was bewusst nicht delegiert wird:</b> alles, wofür man die Projektregeln kennen muss, alles Sicherheitsrelevante – und Aufgaben, die mehrere Zustände durchlaufen („ändere, miss, mach rückgängig"). Dafür ist ein Auftrag der falsche Zuschnitt.
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ Letzte Auftraege ═══ -->
+        <div class="cs-card" data-klapp="jobs">
+            <div class="cs-card-head" role="button" tabindex="0" aria-expanded="true">
+                <h2><span data-i18n="csub.jobs_head">Letzte Aufträge</span> <span id="cs-jobs-count" class="cs-meta"></span></h2>
+                <span class="cs-caret" aria-hidden="true">&#9662;</span>
+            </div>
+            <div class="cs-card-body">
+                <div id="cs-jobs-list"><div class="cs-leer" data-i18n="csub.loading">Lädt…</div></div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<script src="/static/js/icons.js?v=1"></script>
+<script src="/static/js/i18n.js?v=53"></script>
+<script src="/static/js/theme.js?v=2"></script>
+<script src="/static/js/branding.js?v=23"></script>
+<script src="/static/js/sessions.js?v=6"></script>
+<script src="/static/js/claude_portal.js?v=1"></script>
+<script src="/static/js/activity.js?v=1"></script>
+</body>
+</html>

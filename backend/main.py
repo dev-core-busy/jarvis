@@ -1321,6 +1321,85 @@ async def require_tracks_access(request: Request, user: str = Depends(require_au
                "Short-Tracks-Zugriff; ggf. neu einloggen für Gruppen-Aktualisierung)")
 
 
+def _user_may_use_claudesub(user: str) -> bool:
+    """Prädikat: Darf der Benutzer Codearbeiten an Jarvis delegieren?
+
+    Zuschnitt 1:1 wie ``_user_may_use_email``/``_user_may_use_sap``/
+    ``_user_may_use_tracks``: Benutzerliste ODER Gruppe, **leer = niemand**
+    (ausdrücklich auch keine lokalen Administratoren), **kein Admin-Bypass**.
+
+    WARUM ES DIE FREIGABE BRAUCHT: wer hier einen Schlüssel hat, lässt auf dem
+    Server Agentenläufe starten, die Dateien schreiben und Tests ausführen –
+    unprivilegiert und in einem Wegwerf-Klon unter /tmp, aber sie kosten
+    Rechenzeit und laufen ohne anwesenden Menschen. Das ist dieselbe Klasse von
+    Fähigkeit wie ein gespeicherter Short-Tracks-Prompt.
+
+    Geprüft wird an ZWEI Stellen: beim Erzeugen des Schlüssels UND bei jeder
+    Benutzung (``_claudesub_user_aus_key``). Die Liste kann sich nachträglich
+    ändern – ein einmal ausgegebener Schlüssel darf eine entzogene Freigabe
+    nicht überleben.
+    """
+    u = (user or "").strip()
+    if not u:
+        return False
+    users_raw = config.get_setting("claudesub_allowed_users", "").strip()
+    grp = config.get_setting("claudesub_allowed_group", "").strip()
+    if not users_raw and not grp:
+        return False
+    plain = _norm_login(u)
+    if users_raw and plain in {_norm_login(x) for x in users_raw.split(",") if x.strip()}:
+        return True
+    if grp and _member_of_any_group(_user_group_dns_cache.get(plain, []), grp):
+        return True
+    return False
+
+
+async def require_claudesub_access(request: Request, user: str = Depends(require_auth)) -> str:
+    """FastAPI Dependency: Prüft die Claude-Subagent-Berechtigung (→ /api/claude/*)."""
+    if _user_may_use_claudesub(user):
+        return user
+    raise HTTPException(status_code=403,
+        detail="Kein Zugriff auf den Bereich Claude Subagent – nicht in der "
+               "Benutzerliste/-Gruppe freigeschaltet (Einstellungen → Sicherheit → "
+               "Berechtigungen → Claude-Subagent-Zugriff; ggf. neu einloggen für "
+               "Gruppen-Aktualisierung)")
+
+
+def _claudesub_user_aus_key(request: Request) -> str | None:
+    """Delegations-Schlüssel → Benutzer, ODER ``None``.
+
+    Zwei Tore, beide nötig: der Schlüssel muss gültig sein UND sein Besitzer
+    muss (noch) freigeschaltet sein. Ohne die zweite Prüfung überlebte ein
+    ausgegebener Schlüssel den Entzug der Freigabe – dieselbe Lehre wie bei
+    ``_login_still_allowed`` (2026-07-29).
+    """
+    from backend import claude_subagent as _cs
+    tok = request.headers.get("X-Jarvis-Key", "").strip()
+    if not tok:
+        tok = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    if not tok:
+        return None
+    user = _cs.benutzer_zu_schluessel(tok)
+    if not user or not _user_may_use_claudesub(user):
+        return None
+    return user
+
+
+async def require_claudesub_key(request: Request) -> str:
+    """FastAPI Dependency für die Delegations-Endpunkte (Claude Code ruft sie auf).
+
+    Bewusst KEINE Sitzung: der Aufrufer ist ein Werkzeug auf dem Rechner des
+    Benutzers, kein Browser. Der Schlüssel bindet den Lauf an einen Benutzer –
+    das Postfach-Muster des E-Mail-Skills, nur für Codeaufträge.
+    """
+    user = _claudesub_user_aus_key(request)
+    if not user:
+        raise HTTPException(status_code=401,
+            detail="Ungültiger oder fehlender Delegations-Schlüssel. Neu erzeugen "
+                   "unter /claude → Mein Delegations-Schlüssel.")
+    return user
+
+
 def _user_may_use_excel(user: str) -> bool:
     """Prädikat: Darf der Benutzer das Excel-Add-in nutzen (→ /api/excel/*)?
 
@@ -4335,6 +4414,9 @@ async def get_me(user: str = Depends(require_auth)):
             # der Einstellungs-Reiter unabhaengig vom Skill-Zustand bedienbar
             # bleibt.
             "tracks": _user_may_use_tracks(user) and _skill_active("short-tracks"),
+            # Gleiche Logik wie sap/email/tracks: Freigabe UND aktiver Skill.
+            "claudesub": (_user_may_use_claudesub(user)
+                          and _skill_active("claude_subagent")),
             # Benutzer-Chat: haengt NUR am Skill-Zustand – eine eigene Freigabe
             # gibt es bewusst nicht (Begruendung in require_userchat_access).
             # Das Portal blendet Kachel UND Ungelesen-Badge daran ein; ohne das
@@ -5222,6 +5304,10 @@ async def save_settings(request: Request, user: str = Depends(require_local_auth
         config.save_setting("excel_allowed_users", body["excel_allowed_users"])
     if "excel_allowed_group" in body:
         config.save_setting("excel_allowed_group", body["excel_allowed_group"])
+    if "claudesub_allowed_users" in body:
+        config.save_setting("claudesub_allowed_users", body["claudesub_allowed_users"])
+    if "claudesub_allowed_group" in body:
+        config.save_setting("claudesub_allowed_group", body["claudesub_allowed_group"])
     if "ad_bind_user" in body:
         _bu = (body["ad_bind_user"] or "").strip()
         config.save_setting("ad_bind_user", _bu)
@@ -5375,6 +5461,8 @@ async def get_ad_status(user: str = Depends(require_local_auth)):
         "tracks_group": config.get_setting("tracks_allowed_group", ""),
         "excel_users": config.get_setting("excel_allowed_users", ""),
         "excel_group": config.get_setting("excel_allowed_group", ""),
+        "claudesub_users": config.get_setting("claudesub_allowed_users", ""),
+        "claudesub_group": config.get_setting("claudesub_allowed_group", ""),
         # Beide Felder sind ODER-verknuepft (jeder Weg genuegt allein), deshalb
         # gibt es den Modus `users_group` – ein Modus, der einen der beiden Werte
         # verschweigt, ist genau die Anzeige, die den Login-Fehler vom
@@ -9261,6 +9349,128 @@ async def tracks_page():
         return HTMLResponse("<h1>404 – Seite nicht gefunden</h1>", status_code=404)
     return HTMLResponse(content=f.read_text(encoding="utf-8"),
                         headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Claude Subagent – Codearbeiten, die Claude Code an Jarvis abgibt
+#
+# ZWEI AUTH-WEGE, und die Trennung ist Absicht:
+#   * ``require_claudesub_access`` – der BENUTZER im Browser (/claude): eigenen
+#     Schluessel erzeugen, eigene Auftraege ansehen. Sitzungs-Token.
+#   * ``require_claudesub_key``    – das WERKZEUG auf dem Rechner des Benutzers
+#     (Claude Code): Auftrag anlegen, Ergebnis abholen. Delegations-Schluessel.
+# Beide binden an DENSELBEN Benutzer und pruefen beide die Freigabe.
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.get("/claude", response_class=HTMLResponse)
+async def claudesub_page():
+    """Bereich Claude Subagent ausliefern – nur wenn der Skill aktiv ist.
+
+    Die Berechtigung wird hier NICHT geprueft (leere Huelle, gleiche Begruendung
+    wie bei /tracks und /email): eine normale Navigation traegt keinen
+    Authorization-Header. Jeder Datenabruf haengt an require_claudesub_access.
+    """
+    if not _skill_active("claude_subagent"):
+        return HTMLResponse("<h1>404 – Claude Subagent ist nicht aktiv</h1>", status_code=404)
+    f = FRONTEND_DIR / "claude.html"
+    if not f.exists():
+        return HTMLResponse("<h1>404 – Seite nicht gefunden</h1>", status_code=404)
+    return HTMLResponse(content=f.read_text(encoding="utf-8"),
+                        headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+
+
+@app.get("/api/claude/status")
+async def claudesub_status(user: str = Depends(require_claudesub_access)):
+    """Zustand des Bereichs: Schluessel-Info (NIE das Geheimnis) und Grenzen."""
+    from backend import claude_subagent as _cs
+    return JSONResponse({
+        "ok": True,
+        "skill_aktiv": _skill_active("claude_subagent"),
+        "schluessel": _cs.schluessel_info(user),
+        "jobs": _cs.jobs_liste(user, limit=20),
+        "grenzen": {
+            "gleichzeitig": _cs.MAX_GLEICHZEITIG,
+            "laufzeit_s": _cs.MAX_LAUFZEIT_S,
+            "max_dateien": _cs.MAX_DATEIEN,
+            "spec_max": _cs.MAX_SPEC_ZEICHEN,
+            "diff_max": _cs.MAX_DIFF_BYTES,
+        },
+        "werkzeuge": sorted(_cs.WERKZEUGE),
+    })
+
+
+@app.post("/api/claude/key")
+async def claudesub_key_create(user: str = Depends(require_claudesub_access)):
+    """Erzeugt einen neuen Delegations-Schluessel.
+
+    Der Klartext steht GENAU HIER und nirgends sonst – gespeichert wird nur der
+    Hash. Ein zweiter Aufruf entwertet den alten Schluessel; das ist zugleich
+    der Widerrufsweg.
+    """
+    from backend import claude_subagent as _cs
+    try:
+        neu = _cs.schluessel_erzeugen(user)
+    except ValueError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    print(f"[CLAUDE-SUB] Neuer Delegations-Schluessel fuer '{user}'", flush=True)
+    return JSONResponse({"ok": True, **neu})
+
+
+@app.delete("/api/claude/key")
+async def claudesub_key_delete(user: str = Depends(require_claudesub_access)):
+    """Loescht den eigenen Schluessel."""
+    from backend import claude_subagent as _cs
+    return JSONResponse({"ok": _cs.schluessel_loeschen(user)})
+
+
+@app.post("/api/claude/jobs")
+async def claudesub_job_create(request: Request, user: str = Depends(require_claudesub_key)):
+    """Nimmt einen Delegations-Auftrag an (Aufrufer: Claude Code).
+
+    Antwortet SOFORT mit der Auftragskennung; der Lauf laeuft im Hintergrund.
+    Bewusst kein blockierendes HTTP: eine Codeaufgabe dauert Minuten, und eine
+    so lange gehaltene Verbindung ist genau das Muster, das Short Tracks mit
+    einer Warteschlange geloest hat.
+    """
+    from backend import claude_subagent as _cs
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungueltiger JSON-Body"}, status_code=400)
+
+    try:
+        geprueft = _cs.auftrag_pruefen(
+            spec=body.get("spec", ""), basis=body.get("basis", ""),
+            dateien=body.get("dateien", []), riegel=body.get("riegel", ""))
+    except _cs.AuftragsFehler as e:
+        # Klartext mit Grund, nicht nur 400: die Meldung geht an ein Werkzeug,
+        # das daraus die Korrektur ableiten soll.
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+    if _cs.freie_plaetze() <= 0:
+        return JSONResponse(
+            {"ok": False, "error": f"Alle {_cs.MAX_GLEICHZEITIG} Plaetze belegt – "
+                                   f"spaeter erneut versuchen."}, status_code=429)
+
+    job = _cs.job_anlegen(user, geprueft)
+    asyncio.create_task(_cs.job_ausfuehren(job["id"]))
+    print(f"[CLAUDE-SUB] Auftrag {job['id']} von '{user}' angenommen "
+          f"({len(geprueft['dateien'])} Datei(en), Riegel {geprueft['riegel']})", flush=True)
+    return JSONResponse({"ok": True, "id": job["id"], "status": job["status"]})
+
+
+@app.get("/api/claude/jobs/{job_id}")
+async def claudesub_job_get(job_id: str, user: str = Depends(require_claudesub_key)):
+    """Zustand und – wenn fertig – Ergebnis eines Auftrags.
+
+    Fremde Auftraege antworten 404, nicht 403: ob ein Auftrag existiert, ist
+    selbst eine Information (Muster wie bei Cron und den E-Mail-Regeln).
+    """
+    from backend import claude_subagent as _cs
+    job = _cs.job_holen(job_id, user)
+    if not job:
+        return JSONResponse({"ok": False, "error": "Auftrag nicht gefunden"}, status_code=404)
+    return JSONResponse({"ok": True, "job": job})
 
 
 @app.get("/api/tracks/status")

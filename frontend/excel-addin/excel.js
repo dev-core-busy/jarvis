@@ -49,7 +49,12 @@
        sich zweimal anmeldet, obwohl es derselbe Server ist. */
     var TOKEN_KEYS = ['jarvis_token', 'jarvis_chat_token', 'jarvis_uc_token'];
     var OFFICE_WARTE_MS = 4000;   // danach gilt: kein Excel-Kontext
-    var MAX_RUNDEN = 3;           // muss zu excel_ask.MAX_RUNDEN passen
+    /* Nachforderungs-Deckel. MASSGEBLICH IST DER SERVER: er liefert ihn mit
+       jeder Antwort als `max_runden` (aus der Skill-Konfiguration, im
+       Admin-Reiter einstellbar). Die Zahl hier ist nur der Rueckfall fuer eine
+       Antwort ohne das Feld – eine zweite, fest verdrahtete Quelle fuer
+       denselben Deckel war die Drift, die dieser Umbau beseitigt hat. */
+    var MAX_RUNDEN_VORGABE = 3;   // = excel_ask.MAX_RUNDEN_VORGABE
 
     var _office = false;      // Excel-Kontext vorhanden
     var _officeGrund = '';
@@ -581,10 +586,13 @@
             });
         }).then(function (d) {
             // Nachforderung: das Modell braucht einen Bereich, den es nicht
-            // gesehen hat. Wir lesen ihn und fragen erneut – hoechstens
-            // MAX_RUNDEN mal, sonst kann ein Modell in einer Schleife immer
-            // weitere Bereiche verlangen.
-            if (d.brauche && d.brauche.length && runde < MAX_RUNDEN) {
+            // gesehen hat. Wir lesen ihn und fragen erneut – hoechstens so oft,
+            // wie der Server erlaubt, sonst kann ein Modell in einer Schleife
+            // immer weitere Bereiche verlangen. Der Deckel kommt MIT der
+            // Antwort; fehlt er (aelterer Server), gilt die Vorgabe.
+            var maxRunden = parseInt(d.max_runden, 10);
+            if (!(maxRunden >= 1)) maxRunden = MAX_RUNDEN_VORGABE;
+            if (d.brauche && d.brauche.length && runde < maxRunden) {
                 var letzte = _verlauf[_verlauf.length - 1];
                 if (letzte && letzte.rolle === 'wait') {
                     letzte.text = T('xl.loading_range', 'Lade Bereich:') + ' ' +

@@ -132,11 +132,18 @@ KATALOG_PFAD_MAX = 260   # Windows MAX_PATH; laenger ist ohnehin nicht eintragba
 
 
 def _skill_config() -> dict:
-    """Konfiguration des Excel-Skills. Lazy und fehlertolerant."""
+    """Konfiguration des Excel-Skills. Lazy und fehlertolerant.
+
+    Reicht bewusst an ``excel_ask.skill_config()`` durch, statt dieselben zwoelf
+    Zeilen ein zweites Mal zu halten: beide lesen denselben Skill-Zustand, und
+    zwei Fassungen laufen beim naechsten Feld auseinander. Der Import steht
+    lokal – ``excel_ask`` zieht das Sprachmodell nach und wird beim Erzeugen
+    eines Manifests nicht gebraucht; einen Zyklus gibt es nicht (``excel_ask``
+    kennt dieses Modul nicht).
+    """
     try:
-        from backend.config import config  # noqa: PLC0415
-        st = config.get_skill_states().get("excel-addin", {}) or {}
-        return st.get("config", {}) or {}
+        from backend.excel_ask import skill_config  # noqa: PLC0415
+        return skill_config()
     except Exception:  # noqa: BLE001
         return {}
 

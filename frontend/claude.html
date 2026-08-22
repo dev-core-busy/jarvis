@@ -185,14 +185,14 @@
             </div>
             <div class="cs-card-body">
                 <p class="cs-hint">
-                    <span data-i18n="csub.key_hint">Mit diesem Schlüssel darf dein Claude-Code-Werkzeug Codeaufgaben an Jarvis abgeben. Die Aufträge laufen unter deiner Kennung.</span>
+                    <span data-i18n="csub.key_hint">Mit diesem Schlüssel darf dein Claude-Code-Werkzeug Codeaufgaben an {marke} abgeben. Die Aufträge laufen unter deiner Kennung.</span>
                     <button type="button" class="cs-info" data-help="cs-help-key" aria-expanded="false"
                             data-i18n-title="csub.info_title" title="Erklärung anzeigen">&#9432;</button>
                 </p>
                 <div class="cs-help" id="cs-help-key" data-i18n-html="csub.help_key">
                     <b>Der Schlüssel wird genau einmal angezeigt.</b>
                     <ul>
-                        <li>Jarvis speichert ihn nur als Prüfsumme – niemand kann ihn später wieder auslesen, auch kein Administrator.</li>
+                        <li>{marke} speichert ihn nur als Prüfsumme – niemand kann ihn später wieder auslesen, auch kein Administrator.</li>
                         <li>Kopiere ihn deshalb sofort und trage ihn in deinem Claude-Code-Werkzeug ein.</li>
                         <li>Verloren? Dann erzeuge einfach einen neuen. Der alte wird dabei sofort ungültig – das ist zugleich der Weg, einen versehentlich weitergegebenen Schlüssel zurückzuziehen.</li>
                         <li>Du hast immer höchstens <b>einen</b> gültigen Schlüssel.</li>
@@ -227,8 +227,8 @@
                 <div class="cs-help is-open" data-i18n-html="csub.how_body">
                     <ul>
                         <li>Claude beschreibt eine <b>eng umrissene</b> Aufgabe und nennt dabei, welche Dateien geändert werden dürfen und welche Testdatei das Ergebnis beweist.</li>
-                        <li>Jarvis holt sich eine <b>frische Kopie</b> des Projekts in ein Wegwerf-Verzeichnis und arbeitet nur dort. An die laufende Installation kommt er dabei nicht heran.</li>
-                        <li>Danach rechnet <b>Jarvis selbst</b> nach, was sich geändert hat, und führt den genannten Test aus.</li>
+                        <li>{marke} holt sich eine <b>frische Kopie</b> des Projekts in ein Wegwerf-Verzeichnis und arbeitet nur dort. An die laufende Installation kommt er dabei nicht heran.</li>
+                        <li>Danach rechnet <b>{marke} selbst</b> nach, was sich geändert hat, und führt den genannten Test aus.</li>
                         <li>Nur wenn alles zusammenpasst, gilt der Auftrag als angenommen: es wurde wirklich etwas geändert, es wurde <i>nur</i> an den freigegebenen Dateien gearbeitet, und der Test ist grün.</li>
                         <li>Claude bekommt die Änderung als Patch zurück, prüft sie und übernimmt sie bei dir lokal.</li>
                     </ul>
@@ -256,7 +256,7 @@
                     <pre><code>printf '%s' 'JARVIS-CSA-1.…dein Schlüssel…' &gt; ~/.jarvis-csa-key
 printf '%s' 'https://dein-jarvis.firma.de'   &gt; ~/.jarvis-csa-url
 chmod 600 ~/.jarvis-csa-key</code></pre>
-                    <p>Alternativ als Umgebungsvariablen <code>JARVIS_CSA_KEY</code> und <code>JARVIS_CSA_URL</code>. Eine feste Vorgabe für die Adresse gibt es bewusst nicht: derselbe Client arbeitet gegen jede Jarvis-Installation, und eine falsche Adresse sähe wie ein Schlüsselproblem aus.</p>
+                    <p>Alternativ als Umgebungsvariablen <code>JARVIS_CSA_KEY</code> und <code>JARVIS_CSA_URL</code>. Eine feste Vorgabe für die Adresse gibt es bewusst nicht: derselbe Client arbeitet gegen jede {marke}-Installation, und eine falsche Adresse sähe wie ein Schlüsselproblem aus.</p>
 
                     <h4>3. Skill in Claude Code ablegen</h4>
                     <p>Die Datei <code>.claude/skills/jarvis-delegate/SKILL.md</code> im Projekt anlegen (Vorlage im Repo unter <code>deploy/claude_subagent/</code>). Claude findet den Skill dann selbst, sobald eine Aufgabe dazu passt. Der Client <code>deploy/claude_subagent/delegiere.py</code> ist versioniert und muss nicht kopiert werden.</p>
@@ -279,11 +279,11 @@ python3 $S warten "$ID" &gt; /tmp/patch.diff</code></pre>
                     <table>
                         <tr><th>Weg</th><th>Aufwand bei Claude</th></tr>
                         <tr><td>Claude macht es selbst</td><td class="cs-num">≈ 4.000–6.000 Token</td></tr>
-                        <tr><td>Delegiert an Jarvis</td><td class="cs-num">≈ 800 Token</td></tr>
+                        <tr><td>Delegiert an {marke}</td><td class="cs-num">≈ 800 Token</td></tr>
                     </table>
                     <p>Also grob <b>Faktor 5 bis 7</b>. Der Aufwand bei Claude besteht dann nur noch aus der Aufgabenbeschreibung, dem kurzen Bericht und dem Lesen des Patches. Was wegfällt, ist das <b>Suchen und Lesen der Dateien</b> – und genau daraus entsteht die Ersparnis.</p>
                     <p><b>Daraus folgt die wichtigste Regel:</b> Muss Claude den Code erst lesen, um die Aufgabe überhaupt beschreiben zu können, ist die Ersparnis schon ausgegeben. Dann lohnt sich die Delegation nicht.</p>
-                    <p>Je Auftrag laufen auf dem Server rund 30 bis 60 Sekunden. Die Jarvis-Tokens sind kostenlos, die Rechenzeit nicht: jeder Auftrag belegt dasselbe Sprachmodell wie der Chat.</p>
+                    <p>Je Auftrag laufen auf dem Server rund 30 bis 60 Sekunden. Die {marke}-Tokens sind kostenlos, die Rechenzeit nicht: jeder Auftrag belegt dasselbe Sprachmodell wie der Chat.</p>
 
                     <h4>Wofür es sich lohnt</h4>
                     <ul>
@@ -323,7 +323,7 @@ python3 $S warten "$ID" &gt; /tmp/patch.diff</code></pre>
 <script src="/static/js/icons.js?v=1"></script>
 <script src="/static/js/i18n.js?v=54"></script>
 <script src="/static/js/theme.js?v=2"></script>
-<script src="/static/js/branding.js?v=23"></script>
+<script src="/static/js/branding.js?v=24"></script>
 <script src="/static/js/sessions.js?v=6"></script>
 <script src="/static/js/claude_portal.js?v=2"></script>
 <script src="/static/js/activity.js?v=1"></script>

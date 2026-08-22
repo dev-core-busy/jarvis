@@ -5,9 +5,14 @@ Gibt eine eng umrissene Codeaufgabe an Jarvis ab und holt das Ergebnis als
 PATCH zurueck. Der Patch wird NICHT automatisch angewandt – das entscheidet
 Claude nach dem Lesen.
 
-ZUGANG
-    Schluessel aus  $JARVIS_CSA_KEY  oder  ~/.jarvis-csa-key
-    Adresse   aus  $JARVIS_CSA_URL   (Vorgabe: https://191.100.144.1)
+ZUGANG – je Jarvis-Installation zu setzen, es gibt KEINE Vorgabe
+    Schluessel  $JARVIS_CSA_KEY  oder  ~/.jarvis-csa-key
+    Adresse     $JARVIS_CSA_URL  oder  ~/.jarvis-csa-url
+
+    Bewusst KEIN voreingestellter Host: derselbe Client laeuft gegen jede
+    Jarvis-Installation. Eine Vorgabe waere die Adresse genau einer davon – bei
+    der naechsten falsch, und der Fehler saehe wie ein Schluesselproblem aus
+    (ein fremder Server kennt den Schluessel nicht und antwortet 401).
 
     Der Schluessel gehoert NICHT ins Repo. ~/.jarvis-csa-key liegt ausserhalb,
     die Umgebungsvariable erst recht.
@@ -35,9 +40,6 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VORGABE_URL = "https://191.100.144.1"
-
-
 def fehler(text: str, code: int = 1):
     print(f"FEHLER: {text}", file=sys.stderr)
     sys.exit(code)
@@ -55,7 +57,19 @@ def schluessel() -> str:
 
 
 def basis_url() -> str:
-    return os.environ.get("JARVIS_CSA_URL", VORGABE_URL).rstrip("/")
+    u = os.environ.get("JARVIS_CSA_URL", "").strip()
+    if not u:
+        p = Path.home() / ".jarvis-csa-url"
+        if p.is_file():
+            u = p.read_text(encoding="utf-8").strip()
+    if not u:
+        fehler("Keine Jarvis-Adresse. Setze $JARVIS_CSA_URL oder lege "
+               "~/.jarvis-csa-url an (z.B. https://jarvis.firma.de). Es gibt "
+               "bewusst keine Vorgabe – der Client laeuft gegen jede "
+               "Installation.", 2)
+    if not u.startswith(("http://", "https://")):
+        u = "https://" + u
+    return u.rstrip("/")
 
 
 def _ctx() -> ssl.SSLContext:

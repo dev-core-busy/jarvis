@@ -9386,6 +9386,10 @@ async def claudesub_status(user: str = Depends(require_claudesub_access)):
     return JSONResponse({
         "ok": True,
         "skill_aktiv": _skill_active("claude_subagent"),
+        # Fuer das Zahnrad in der Titelleiste – kein zweiter Roundtrip auf
+        # /api/me nur wegen eines Knopfes (gleiche Ueberlegung wie beim
+        # permissions-Unterobjekt, das /settings einmal neun Sekunden kostete).
+        "ist_admin": _is_admin_user(user),
         "schluessel": _cs.schluessel_info(user),
         "jobs": _cs.jobs_liste(user, limit=20),
         "grenzen": {

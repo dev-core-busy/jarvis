@@ -262,6 +262,21 @@
     }
 
     /* ── Status laden ──────────────────────────────────────────────────── */
+    // Zahnrad nur fuer Administratoren – dort werden Skill, Freigabe und die
+    // Werkzeug-Bereiche gepflegt. Der Rueckweg wird gemerkt, damit /settings
+    // zurueckfindet (gleiches Muster wie /sap, /support, /wissen).
+    function zeichneAdminKnopf() {
+        var b = document.getElementById('st-settings-btn');
+        if (!b || !_istAdmin) return;
+        b.style.display = '';
+        if (b.dataset.gebunden) return;
+        b.dataset.gebunden = '1';
+        b.addEventListener('click', function () {
+            try { sessionStorage.setItem('jarvis_settings_return', '/tracks'); } catch (e) { /* egal */ }
+            location.href = '/settings';
+        });
+    }
+
     function ladeStatus() {
         return hole('/api/tracks/status?lang=' + sprache()).then(function (d) {
             _status = d;
@@ -270,6 +285,7 @@
             _bereicheLang = sprache();
             _grenzen = d.grenzen || {};
             _istAdmin = !!d.ist_admin;
+            zeichneAdminKnopf();
             zeichneBrett();
         }).catch(function (e) {
             melde('st-board-status', e.message, 'fehler');

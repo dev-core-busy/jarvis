@@ -77,7 +77,7 @@ function baueFetch(zustand) {
                                        erstellt: 1787000000, zuletzt: 0 };
                 return Promise.resolve({
                     status: 200, ok: true, json: () => Promise.resolve({
-                        ok: true, schluessel: 'JARVIS-CSA-1.abc123.GEHEIMNISWXYZ',
+                        ok: true, schluessel: 'CSA-1.abc123.GEHEIMNISWXYZ',
                         kennung: 'abc123', letzte4: 'WXYZ' })
                 });
             }
@@ -154,7 +154,7 @@ async function baueSeite(zustand) {
         d.getElementById('cs-key-new').click();
         await schlaf(60);
         check(!d.getElementById('cs-key-box').hidden, 'Kasten erscheint nach dem Erzeugen');
-        check(d.getElementById('cs-key-value').textContent === 'JARVIS-CSA-1.abc123.GEHEIMNISWXYZ',
+        check(d.getElementById('cs-key-value').textContent === 'CSA-1.abc123.GEHEIMNISWXYZ',
               'Der Schluessel steht im Klartext da');
         const posts = fetchInfo.rufe.filter(r => r.pfad === '/api/claude/key' && r.methode === 'POST');
         check(posts.length === 1, 'Genau EIN POST auf /api/claude/key', String(posts.length));
@@ -331,8 +331,24 @@ async function baueSeite(zustand) {
 
         // Die technischen Kennungen duerfen NICHT gebrandet werden – sie sind
         // Teil des Protokolls bzw. Dateinamen auf dem Rechner des Benutzers.
-        check(i18n.indexOf('JARVIS_CSA_KEY') >= 0 && i18n.indexOf('jarvis-csa-url') >= 0,
-              'Technische Kennungen sind unangetastet geblieben');
+        // ── UND AUCH DIE KENNUNGEN SIND PRODUKTNEUTRAL ────────────────────
+        // Erst als "technisch, bleibt" eingestuft – falsch: der Benutzer LIEST
+        // sie in der Anleitung, und der Schluessel selbst begann mit
+        // "JARVIS-CSA-1.". In einem White-Label-System verraet das den
+        // Produktnamen unabhaengig vom Branding. Vom Nutzer gemeldet.
+        check(i18n.indexOf('SUBAGENT_KEY') >= 0 && i18n.indexOf('.subagent-url') >= 0,
+              'Anleitung nennt die neutralen Kennungen');
+        const kennungen = ['JARVIS_CSA', 'JARVIS-CSA', 'jarvis-csa', 'jarvis-delegate'];
+        const alt = kennungen.filter(k => i18n.indexOf(k) >= 0 || seite.indexOf(k) >= 0);
+        check(alt.length === 0, 'Keine alten Jarvis-Kennungen mehr', alt.join(', '));
+
+        // Die harte Zusage: im sichtbaren Text steht der Produktname NIRGENDS –
+        // weder gross noch klein, weder in Prosa noch in einem Beispiel.
+        const sichtbar = eigene.map(m => m[2]).join(' ');
+        const treffer = sichtbar.match(/.{0,25}[Jj]arvis.{0,25}/g) || [];
+        check(treffer.length === 0,
+              'Kein "jarvis" in irgendeinem Bereichs-Text (auch klein geschrieben)',
+              treffer.slice(0, 2).join(' | '));
 
         // ── VERHALTEN, nicht Schreibweise: loest branding.js den Platzhalter? ──
         for (const fall of [
@@ -382,6 +398,124 @@ async function baueSeite(zustand) {
                   'Nach einem Sprachwechsel wird erneut eingesetzt',
                   w4.document.getElementById('z').textContent);
             dom4.window.close();
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    section('8. Titelleiste ist IDENTISCH zu den uebrigen Bereichsseiten');
+    // WARUM DAS EIN EIGENER WAECHTER IST: die Regeln fuer .topbar, .btn-theme
+    // und .lang-toggle stehen in JEDER Bereichsseite lokal im <style>-Block –
+    // es gibt sie nicht in theme.css. Wer eine neue Seite anlegt und nur das
+    // MARKUP kopiert, bekommt unformatierte Knoepfe: ein <svg> ohne
+    // `.btn-theme svg { width:20px }` hat keine Groesse. Genau so ist
+    // /claude entstanden, und es ist im Projekt nicht das erste Mal.
+    // Referenz ist tracks.html (die juengste Bereichsseite; email.html traegt
+    // beim Knopf noch ein hartes #888899 statt --text-muted).
+    {
+        const refQ = fs.readFileSync(path.join(ROOT, 'frontend/tracks.html'), 'utf8');
+        const ownQ = fs.readFileSync(path.join(ROOT, 'frontend/claude.html'), 'utf8');
+
+        // Deklarationen eines Selektors einsammeln (Reihenfolge egal,
+        // Leerraum normalisiert).
+        function regeln(quelle, selektor) {
+            const re = new RegExp('(?:^|\\})\\s*' +
+                selektor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') +
+                '\\s*\\{([^}]*)\\}', 'm');
+            const m = quelle.match(re);
+            if (!m) return null;
+            return m[1].split(';').map(s => s.replace(/\s+/g, ' ').trim())
+                       .filter(Boolean).sort().join('; ');
+        }
+
+        const pruefen = ['.topbar', '.topbar-left', '.topbar-right', '.topbar-avatar',
+                         '.topbar-title', '.btn-theme', '.btn-theme svg',
+                         '.lang-toggle', '.lang-toggle-btn'];
+        for (const sel of pruefen) {
+            const a = regeln(refQ, sel);
+            const b = regeln(ownQ, sel);
+            check(a !== null, `Referenz tracks.html definiert ${sel}`);
+            check(b !== null, `claude.html definiert ${sel}`);
+            if (a && b) {
+                check(a === b, `${sel} stimmt mit der Referenz ueberein`,
+                      b.length > 90 ? b.slice(0, 90) + '…' : b);
+            }
+        }
+
+        // Die Knopf-Reihenfolge in der Leiste ist Teil der Wiedererkennung:
+        // Sprache, Portal, Thema, Abmelden – wer zwischen den Bereichen
+        // wechselt, findet sie am selben Platz.
+        function leiste(quelle) {
+            const m = quelle.match(/<div class="topbar-right">([\s\S]*?)<\/header>/);
+            if (!m) return [];
+            return [...m[1].matchAll(/(lang-toggle|btn-theme)"[^>]*id="([a-z-]+)"/g)]
+                   .map(x => x[2].replace(/^(st|cs|em)-/, ''));
+        }
+        const lRef = leiste(refQ), lOwn = leiste(ownQ);
+        check(lRef.length >= 3 && lOwn.join(',') === lRef.join(','),
+              'Gleiche Knoepfe in gleicher Reihenfolge',
+              `${lOwn.join(',')} vs ${lRef.join(',')}`);
+
+        // ── DAS ZAHNRAD, AUF JEDER BEREICHSSEITE ───────────────────────────
+        // Fehlte auf /claude, /tracks, /email und /excel, waehrend /chat,
+        // /portal, /sap, /support, /userchat und /wissen es hatten. Wer aus
+        // einem Bereich in die Einstellungen will, musste dort ueber das
+        // Portal – auf jeder zweiten Seite anders. Zweimal vom Nutzer gemeldet.
+        //
+        // GENERISCH statt Aufzaehlung: JEDE Seite mit Titelleiste UND
+        // Abmelden-Knopf ist eine Bereichsseite und braucht das Zahnrad. Damit
+        // faellt auch eine KUENFTIGE Seite auf, ohne dass jemand diese Liste
+        // pflegt (Doku-Seiten wie api.html haben keine Titelleiste und fallen
+        // von selbst heraus).
+        {
+            const seiten = fs.readdirSync(path.join(ROOT, 'frontend'))
+                .filter(f => f.endsWith('.html') && f !== 'settings.html');
+            const bereiche = [];
+            for (const f of seiten) {
+                const q = fs.readFileSync(path.join(ROOT, 'frontend', f), 'utf8');
+                const lo = q.match(/id="([a-z-]*logout[a-z-]*)"/);
+                if (!/topbar-right/.test(q) || !lo) continue;
+                bereiche.push(f);
+                check(/id="[a-z-]*settings[a-z-]*"[^>]*data-i18n-title="nav\.settings"/.test(q)
+                      || /data-i18n-title="nav\.settings"/.test(q),
+                      `${f}: hat ein Zahnrad in der Titelleiste`);
+            }
+            check(bereiche.length >= 6,
+                  `Bereichsseiten erkannt (${bereiche.length})`, bereiche.join(', '));
+        }
+
+        for (const [name, quelle, pfx, ret] of [
+            ['claude.html', ownQ, 'cs', '/claude'],
+            ['tracks.html', refQ, 'st', '/tracks'],
+        ]) {
+            check(quelle.indexOf(`id="${pfx}-settings-btn"`) >= 0,
+                  `${name}: Zahnrad-Knopf vorhanden`);
+            // Es MUSS verborgen starten – sichtbar waere es fuer jeden
+            // Nicht-Admin ein Knopf, der in einen 403 laeuft.
+            const bl = quelle.match(
+                new RegExp(`<button[^>]*id="${pfx}-settings-btn"[^>]*>`));
+            check(!!bl && /display:\s*none/.test(bl[0]),
+                  `${name}: startet verborgen (nur Admins)`);
+            check(!!bl && /data-i18n-title="nav\.settings"/.test(bl[0]),
+                  `${name}: Beschriftung ueber den vorhandenen i18n-Key`);
+            // ... und es muss VOR dem Abmelden stehen, wie auf allen anderen.
+            check(quelle.indexOf(`id="${pfx}-settings-btn"`)
+                  < quelle.indexOf(`id="${pfx}-logout-btn"`),
+                  `${name}: steht vor dem Abmelden-Knopf`);
+        }
+        // Verdrahtung: eingeblendet nur bei is_admin, Rueckweg gemerkt.
+        for (const [js, ret] of [['frontend/js/claude_portal.js', '/claude'],
+                                 ['frontend/js/tracks.js', '/tracks'],
+                                 ['frontend/js/email_portal.js', '/email'],
+                                 ['frontend/js/excel_portal.js', '/excel']]) {
+            const q = fs.readFileSync(path.join(ROOT, js), 'utf8');
+            check(/settings-btn/.test(q), `${path.basename(js)}: verdrahtet das Zahnrad`);
+            check(q.indexOf(`'jarvis_settings_return', '${ret}'`) >= 0,
+                  `${path.basename(js)}: merkt den Rueckweg ${ret}`);
+            // Zwei Schreibweisen sind richtig: `ist_admin` kommt aus den
+            // Bereichs-Endpunkten (/api/claude|tracks/status), `is_admin` aus
+            // /api/me. Beides gattert denselben Knopf.
+            check(/\bist?_admin\b|_istAdmin\b/.test(q),
+                  `${path.basename(js)}: blendet es nur fuer Administratoren ein`);
         }
     }
 

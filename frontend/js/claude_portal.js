@@ -183,7 +183,23 @@
         }).join('');
     }
 
+    // Zahnrad nur fuer Administratoren – dort werden Skill und Freigabe
+    // gepflegt. Der Rueckweg wird gemerkt, damit /settings zurueckfindet
+    // (gleiches Muster wie /sap, /support, /wissen).
+    function zeichneAdminKnopf() {
+        var b = $('cs-settings-btn');
+        if (!b || !(_status && _status.ist_admin)) return;
+        b.style.display = '';
+        if (b.dataset.gebunden) return;
+        b.dataset.gebunden = '1';
+        b.addEventListener('click', function () {
+            try { sessionStorage.setItem('jarvis_settings_return', '/claude'); } catch (e) { /* egal */ }
+            location.href = '/settings';
+        });
+    }
+
     function zeichne() {
+        zeichneAdminKnopf();
         zeichneSchluessel();
         zeichneJobs();
         // KEIN applyLang() hier – siehe Kopfkommentar (Endlosschleife).

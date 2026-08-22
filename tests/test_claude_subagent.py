@@ -361,7 +361,7 @@ check("Basis stimmt nicht" in QUELLE,
 section("8. Laeuft gegen JEDE Installation – und sagt, wie")
 
 _CLIENT = (ROOT / "deploy" / "claude_subagent" / "delegiere.py").read_text(encoding="utf-8")
-_SKILLMD_P = ROOT / ".claude" / "skills" / "jarvis-delegate" / "SKILL.md"
+_SKILLMD_P = ROOT / ".claude" / "skills" / "code-delegate" / "SKILL.md"
 _SKILLMD = _SKILLMD_P.read_text(encoding="utf-8") if _SKILLMD_P.is_file() else ""
 _MANIFEST = json.loads((ROOT / "skills" / "claude_subagent" / "skill.json")
                        .read_text(encoding="utf-8"))
@@ -374,9 +374,9 @@ _SEITE = (ROOT / "frontend" / "claude.html").read_text(encoding="utf-8")
 check(re.search(r"\d{1,3}(\.\d{1,3}){3}", nur_code(_CLIENT)) is None,
       "Client enthaelt keine hart verdrahtete IP")
 check("VORGABE_URL" not in _CLIENT, "Keine Vorgabe-URL mehr im Client")
-check("JARVIS_CSA_URL" in _CLIENT and ".jarvis-csa-url" in _CLIENT,
+check("SUBAGENT_URL" in _CLIENT and ".subagent-url" in _CLIENT,
       "Adresse kommt aus Umgebung ODER Datei")
-check("JARVIS_CSA_KEY" in _CLIENT and ".jarvis-csa-key" in _CLIENT,
+check("SUBAGENT_KEY" in _CLIENT and ".subagent-key" in _CLIENT,
       "Schluessel kommt aus Umgebung ODER Datei")
 
 # Die frueher behauptete DEV-Beschraenkung war FALSCH: der Arbeitsbereich wird
@@ -410,7 +410,7 @@ check("lohnt nicht" in _te or "lohnt sich" in _te,
 _gb = _I18N[_I18N.find("'csub.guide_body'"):]
 _gb = _gb[:_gb.find("\n        'csub.jobs_head'")]
 check("800" in _gb and "Faktor" in _gb, "Anleitung nennt Ersparnis und Faktor")
-check("jarvis-csa-url" in _gb and "jarvis-csa-key" in _gb,
+check(".subagent-url" in _gb and ".subagent-key" in _gb,
       "Anleitung nennt beide Zugangsangaben")
 
 print("\n" + "=" * 62)

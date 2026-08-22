@@ -33,6 +33,21 @@
             "description": "Wie lange der Wegwerf-Klon unter /tmp nach dem Lauf stehen bleibt, damit ein Ergebnis nachvollziehbar ist. Danach wird er entfernt. Erlaubt 5 bis 1440 (Vorgabe 60).",
             "default": 60,
             "required": false
+        },
+        "profile_id": {
+            "type": "string",
+            "label": "LLM-Profil fuer Delegations-Laeufe",
+            "description": "NAME oder Kennung eines Profils aus 'KI & System -> LLM-Profile' - der Name genuegt, damit hier keine UUID abgetippt werden muss. Leer = das global aktive Profil, also dasselbe Modell wie der Chat. Ein eigenes Profil lohnt, weil eine Delegation kein Chat ist: sie laeuft minutenlang, ruft Werkzeuge auf und wird am Ende maschinell geprueft - dafuer kann ein anderes Modell richtig sein. Zeigt der Eintrag ins Leere, laufen die Auftraege mit dem global aktiven Profil weiter und der Bereich /claude sagt es.",
+            "default": "",
+            "required": false
+        },
+        "reasoning_effort": {
+            "type": "enum",
+            "label": "Denktiefe der Delegations-Laeufe",
+            "enum": ["", "off", "low", "medium", "high", "max"],
+            "description": "Leer = keine Vorgabe, dann gilt das Profil bzw. die globale Einstellung. Hoehere Stufen denken laenger und verbrauchen mehr von der Antwortlaenge, niedrigere sind schneller. Eine Delegation ist eine eng umrissene Aufgabe - endet ein Lauf regelmaessig ohne Ergebnis, ist 'low' der erste Versuch (dasselbe Mittel greift bei den E-Mail-Regeln).",
+            "default": "",
+            "required": false
         }
     },
     "knowledge_docs": [],

@@ -114,6 +114,15 @@
             font-weight: 600; }
         .cs-meta { font-size: .8rem; color: var(--text-muted); margin-top: 6px; }
 
+        /* Womit die Laeufe rechnen. Deckende Flaeche, weil der Kasten ueber
+           Karteninhalt liegt (gleiche Lehre wie bei .em-paused und den Panels). */
+        .cs-modell { margin-top: 12px; padding: 10px 12px; border-radius: 8px;
+            background: var(--bg-primary); border: 1px solid var(--border);
+            font-size: .84rem; line-height: 1.55; color: var(--text-secondary); }
+        .cs-modell b { color: var(--text-primary); }
+        .cs-modell.is-warn { border-color: color-mix(in srgb, var(--warning, var(--accent)) 55%, transparent); }
+        .cs-modell-warn { margin-top: 6px; color: var(--warning, var(--accent)); }
+
         /* ── ⓘ: aufklappender Text, kein schwebendes Popup ──
            Ein positioniertes Popup wuerde auf schmalen Fenstern abgeschnitten
            oder verdeckte das Feld. Ein `title`-Attribut scheidet aus – auf
@@ -262,6 +271,11 @@
                     </ul>
                     <b>Was bewusst nicht delegiert wird:</b> alles, wofür man die Projektregeln kennen muss, alles Sicherheitsrelevante – und Aufgaben, die mehrere Zustände durchlaufen („ändere, miss, mach rückgängig"). Dafür ist ein Auftrag der falsche Zuschnitt.
                 </div>
+                <!-- Womit die Laeufe rechnen. Wird von claude_portal.js gefuellt;
+                     bleibt leer, solange der Status nicht geladen ist – eine
+                     Behauptung ueber das Modell ohne Datenstand waere schlechter
+                     als keine. -->
+                <div class="cs-modell" id="cs-modell" hidden></div>
             </div>
         </div>
 
@@ -339,11 +353,11 @@ chmod 600 ~/.{marke_slug}-csa-key</code></pre>
 </div>
 
 <script src="/static/js/icons.js?v=1"></script>
-<script src="/static/js/i18n.js?v=54"></script>
+<script src="/static/js/i18n.js?v=55"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=24"></script>
 <script src="/static/js/sessions.js?v=6"></script>
-<script src="/static/js/claude_portal.js?v=2"></script>
+<script src="/static/js/claude_portal.js?v=3"></script>
 <script src="/static/js/activity.js?v=1"></script>
 <script src="/static/js/issues.js?v=7"></script>
 </body>

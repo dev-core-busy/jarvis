@@ -113,17 +113,194 @@ def marken_anzeige() -> str:
 def schluessel_prefix() -> str:
     return marken_slug() + "-" + SCHLUESSEL_KERN
 
+
+# ─── Einstellbares ───────────────────────────────────────────────────────────
+# Bis 2026-08-22 standen hier Modulkonstanten, waehrend das Manifest drei
+# Schalter versprach: der Reiter zeigte sie, gespeichert wurden sie auch, und
+# gelesen hat sie NIEMAND. Dieselbe Fehlerklasse wie ``prompt_tool_calling``
+# (jahrelang wirkungslos, weil es in der Whitelist fehlte) – eine Zusage, die
+# der Code nicht haelt.
+
+SKILL_NAME = "claude_subagent"
+
+
+def skill_config() -> dict:
+    """Konfiguration des Skills (Administrator-Teil).
+
+    Lazy und fehlertolerant: der Skill kann fehlen oder aus sein – dann gibt es
+    ein leeres dict und es gelten die Vorgaben dieses Moduls.
+    """
+    try:
+        from backend.config import config  # noqa: PLC0415
+        st = config.get_skill_states().get(SKILL_NAME, {}) or {}
+        return st.get("config", {}) or {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _cfg_int(schluessel: str, vorgabe: int, unten: int, oben: int) -> int:
+    """Zahl aus der Skill-Config, hart begrenzt.
+
+    Die Begrenzung ist kein Zierrat: die Werte kommen aus einem Formular und
+    koennen auch von Hand in die settings.json geschrieben werden.
+    """
+    try:
+        n = int(str(skill_config().get(schluessel, "")).strip() or vorgabe)
+    except Exception:  # noqa: BLE001
+        return vorgabe
+    return max(unten, min(n, oben))
+
+
+def gleichzeitig() -> int:
+    """Parallele Laeufe (Vorgabe 2).
+
+    Bewusst eine FUNKTION und keine Modulkonstante – der Wert ist im
+    Admin-Reiter aenderbar und muss ohne Dienstneustart greifen (gleiche
+    Begruendung wie ``documents.retention_days()``).
+    """
+    return _cfg_int("gleichzeitig", GLEICHZEITIG_VORGABE, 1, 4)
+
+
+def laufzeit_s() -> int:
+    return _cfg_int("laufzeit_s", LAUFZEIT_S_VORGABE, 60, 1800)
+
+
+def arbeit_ttl_min() -> int:
+    return _cfg_int("arbeit_ttl_min", ARBEIT_TTL_MIN_VORGABE, 5, 1440)
+
+
+def profil_id() -> str:
+    """LLM-Profil fuer Delegations-Laeufe – leer = das global aktive.
+
+    Warum das ueberhaupt waehlbar ist: ein Delegations-Lauf ist kein Chat. Er
+    laeuft minutenlang, ruft Werkzeuge auf und wird am Ende MASCHINELL geprueft.
+    Dafuer kann ein anderes Modell richtig sein als fuer die Unterhaltung – und
+    ohne dieses Feld erbt der Lauf zwangslaeufig das Chat-Profil.
+    """
+    return str(skill_config().get("profile_id") or "").strip()[:64]
+
+
+def reasoning_effort() -> str:
+    """Denktiefe der Delegations-Laeufe – leer = Profil bzw. globale Vorgabe.
+
+    Ungueltige Werte werden zu "" (= keine Vorgabe) und NICHT durchgereicht: ein
+    Tippfehler in der settings.json darf nicht jede Anfrage mit einem
+    Provider-400 toeten (dieselbe Regel wie ``llm.normalize_effort``).
+    """
+    s = str(skill_config().get("reasoning_effort") or "").strip().lower()
+    return s if s in EFFORT_STUFEN else ""
+
+
+def profil_id_aufgeloest() -> str:
+    """Die KENNUNG des gewaehlten Profils – "" wenn keines gewaehlt/gefunden.
+
+    Noetig, weil ``profil_id()`` auch einen NAMEN liefern darf: an
+    ``agent._role_profile_id`` gehoert die Kennung, ein Name liefe dort ins
+    Leere. Nichts gewaehlt oder Eintrag verwaist -> "" (= Profil des Aufrufers),
+    genau das Verhalten, das der Rollen-Weg fuer verwaiste Profile vorsieht.
+    """
+    if not profil_id():
+        return ""
+    return wirksames_profil().get("id", "")
+
+
+def wirksames_profil() -> dict:
+    """Welches LLM-Profil ein Delegations-Lauf WIRKLICH benutzt – zur Anzeige.
+
+    Beantwortet die Frage, die man sonst nur durch Nachdenken ueber zwei
+    Einstellungen beantworten kann: das Feld hier, sonst das global aktive.
+    Zurueck kommt zusaetzlich die aufgeloeste ``temperature`` – siehe
+    ``temperatur_hinweis``.
+    """
+    ergebnis = {"id": "", "name": "", "temperature": "", "gewaehlt": False,
+                "gefunden": False}
+    gewuenscht = profil_id()
+    try:
+        from backend.config import config  # noqa: PLC0415
+        # ``profiles`` ist eine Liste, ``active_profile`` eine PROPERTY (kein
+        # Aufruf). Ein Tippfehler waere hier besonders teuer: das breite
+        # ``except`` unten wuerde ihn verschlucken und der Hinweis erschiene
+        # einfach nie – ein Test prueft deshalb den Erfolgsfall.
+        ziel = None
+        if gewuenscht:
+            ergebnis["gewaehlt"] = True
+            # ID ODER NAME. Der Reiter rendert hier ein Textfeld (generisches
+            # Skill-Formular), und eine UUID abzutippen ist eine Zumutung – der
+            # Profilname steht in derselben Oberflaeche direkt daneben.
+            # Kennung zuerst: sie ist unveraenderlich, der Name nicht.
+            for p in (config.profiles or []):
+                if str(p.get("id")) == gewuenscht:
+                    ziel = p
+                    break
+            if ziel is None:
+                for p in (config.profiles or []):
+                    if str(p.get("name") or "").strip() == gewuenscht:
+                        ziel = p
+                        break
+        else:
+            ziel = config.active_profile
+        if ziel:
+            ergebnis.update({
+                "id": str(ziel.get("id") or ""),
+                "name": str(ziel.get("name") or ""),
+                "temperature": str(ziel.get("temperature", "")),
+                "gefunden": True,
+            })
+    except Exception:  # noqa: BLE001
+        pass
+    return ergebnis
+
+
+def temperatur_hinweis() -> str:
+    """Klartext, wenn das wirksame Profil auf "auto" steht – sonst "".
+
+    WAS HIER BEWUSST NICHT BEHAUPTET WIRD: dass "auto" die Delegation kaputt
+    macht. Am 2026-08-22 auf DEV gegen das aktive Profil gemessen (Qwen3.6-35B
+    auf vLLM 0.27.1, je 12 Laeufe): ohne das Feld kamen 12 verschiedene
+    Antworten, mit ``0.2`` nur 2 – die wirksame Vorgabe des Servers ist also
+    hoch. Die WERKZEUG-Aufrufe waren in BEIDEN Faellen 12/12 exakt richtig.
+    Der Hinweis nennt deshalb die Folge (nicht reproduzierbar), nicht ein
+    Versagen, das nicht gemessen wurde.
+
+    Ein geloeschtes Profil meldet sich ebenfalls – sonst liefe die Delegation
+    still mit einem anderen Modell als im Reiter eingetragen.
+    """
+    p = wirksames_profil()
+    if p["gewaehlt"] and not p["gefunden"]:
+        return ("Das eingetragene LLM-Profil gibt es nicht mehr. Die Laeufe "
+                "benutzen das global aktive Profil – bitte im Reiter "
+                "'Claude Subagent' neu waehlen.")
+    if not p["gefunden"]:
+        return ""
+    if (p["temperature"] or "").strip().lower() not in ("", "auto"):
+        return ""
+    return (f"Profil '{p['name']}' steht auf temperature 'auto'. Damit wird "
+            f"das Feld nicht gesendet und es gilt die Vorgabe des Anbieters – "
+            f"die ist von hier aus nicht bekannt und je nach Server "
+            f"unterschiedlich. Folge: zwei gleiche Auftraege koennen "
+            f"unterschiedlich ausgehen. Fuer die Delegation ist das vertretbar, "
+            f"weil das Ergebnis ohnehin maschinell geprueft wird; scheitert ein "
+            f"Auftrag aber sprunghaft, ist eine feste Zahl im Profil (z.B. 0.2) "
+            f"das Erste, was man versucht.")
+
 # ─── Grenzen ─────────────────────────────────────────────────────────────────
 # Notbremsen, KEINE Aufbewahrungs-Schranken (siehe die Lehre zu Stueckzahlen im
 # Projekt). Wird gekuerzt, steht die Zahl im Ergebnis – ein stiller Schnitt
 # liesse Claude den Patch fuer vollstaendig halten.
-MAX_GLEICHZEITIG = 2                  # parallele Laeufe
-MAX_LAUFZEIT_S = 600                  # Wanduhr je Auftrag
 MAX_DIFF_BYTES = 200_000              # Patch-Groesse
 MAX_SPEC_ZEICHEN = 12_000             # Auftragstext
 MAX_DATEIEN = 40                      # erlaubte Zieldateien je Auftrag
 MAX_JOBS = 200                        # Ringpuffer der Auftragsliste
-ARBEIT_TTL_MIN = 60                   # Arbeitsbereiche danach abraeumen
+
+# Vorgaben der einstellbaren Werte. Gelesen wird ueber die FUNKTIONEN unten,
+# nicht ueber diese Namen – siehe die Begruendung an ``_cfg_int``.
+GLEICHZEITIG_VORGABE = 2              # parallele Laeufe
+LAUFZEIT_S_VORGABE = 600              # Wanduhr je Auftrag
+ARBEIT_TTL_MIN_VORGABE = 60           # Arbeitsbereiche danach abraeumen
+
+# Dieselben fuenf Stufen wie ``llm.REASONING_LEVELS``, plus "" = keine Vorgabe
+# (dann gilt Profil bzw. globale Einstellung).
+EFFORT_STUFEN = ("", "off", "low", "medium", "high", "max")
 
 # Werkzeug-Zuschnitt des Laufs. HARTE Schranke: sie sitzt in
 # ``agent.py::_execute_tool`` VOR der Ausfuehrung, nicht nur in der Werkzeugliste,
@@ -574,7 +751,7 @@ def alte_arbeitsbereiche_abraeumen() -> int:
     ein gerade fertiger Auftrag soll noch abrufbar sein."""
     if not ARBEIT_ROOT.is_dir():
         return 0
-    grenze = time.time() - ARBEIT_TTL_MIN * 60
+    grenze = time.time() - arbeit_ttl_min() * 60
     weg = 0
     for p in ARBEIT_ROOT.iterdir():
         try:
@@ -641,7 +818,7 @@ def _job_setzen(job_id: str, **felder) -> None:
 
 def freie_plaetze() -> int:
     with _jobs_lock:
-        return max(0, MAX_GLEICHZEITIG - len(_laufend))
+        return max(0, gleichzeitig() - len(_laufend))
 
 
 # ─── Der Lauf ────────────────────────────────────────────────────────────────
@@ -705,23 +882,33 @@ async def job_ausfuehren(job_id: str) -> None:
         agent = JarvisAgent()
         # HARTE Schranke: sitzt in _execute_tool vor der Ausfuehrung.
         agent._role_tools = set(WERKZEUGE)
+        # Profil und Denktiefe ueber DIESELBEN Attribute wie die Rollen-Agenten
+        # (agent_roles) und Short Tracks. Eigene waeren eine zweite Mechanik
+        # fuer dieselbe Frage, und der Rollen-Weg behandelt ein geloeschtes
+        # Profil bereits richtig (Lauf laeuft mit dem Profil des Aufrufers
+        # weiter, Journal-Zeile statt Abbruch).
+        agent._role_profile_id = profil_id_aufgeloest()
         auftrag = auftragstext(work, job)
+        grenze_s = laufzeit_s()
 
         antwort = ""
         try:
             antwort = await asyncio.wait_for(
                 agent.run_task_headless(
                     auftrag,
+                    # "" heisst hier NICHT "aus", sondern "keine Vorgabe" – dann
+                    # gilt Profil bzw. globale Einstellung. Deshalb None.
+                    reasoning_effort=reasoning_effort() or None,
                     # privileged ist HART False und kein Feld des Auftrags.
                     # internet aus: die Aufgabe braucht kein Netz, und ein
                     # unprivilegierter Lauf mit Fremdtext soll keines haben.
                     actor={"user": job["user"], "privileged": False,
                            "internet": False, "sap": False},
                 ),
-                timeout=MAX_LAUFZEIT_S,
+                timeout=grenze_s,
             )
         except asyncio.TimeoutError:
-            antwort = f"(Zeitlimit von {MAX_LAUFZEIT_S}s ueberschritten)"
+            antwort = f"(Zeitlimit von {grenze_s}s ueberschritten)"
         except Exception as e:  # noqa: BLE001
             antwort = f"(Ausnahme im Lauf) {type(e).__name__}: {e}"
 

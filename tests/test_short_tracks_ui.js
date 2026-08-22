@@ -1049,7 +1049,11 @@ abschnitt('8. Verdrahtung, Portal, i18n, CSS');
         'app.js blendet den Block am Skill-Zustand ein');
     // Der Block muss in DERSELBEN Liste stehen wie die uebrigen Picker-Felder –
     // sonst zeigt er nach dem Laden keine Marken (Lehre vom AD-Picker).
-    pruefe(/'tracks-allowed-users','tracks-allowed-group'\]/.test(SET_HTML),
+    // MITGLIEDSCHAFT pruefen, nicht die Position: die alte Fassung verlangte
+    // ein `]` direkt hinter den Tracks-Feldern, war also nur richtig, solange
+    // Tracks der LETZTE Eintrag der Liste blieb. Jedes spaeter ergaenzte Feld
+    // (excel, claudesub) liess sie fehlschlagen, ohne dass etwas kaputt war.
+    pruefe(/'tracks-allowed-users','tracks-allowed-group'/.test(SET_HTML),
         'die Felder stehen in der Picker-Auffrisch-Liste');
 
     // Reiter
@@ -1088,8 +1092,17 @@ abschnitt('8. Verdrahtung, Portal, i18n, CSS');
 
     // Seite
     pruefe(/tracks\.js\?v=\d+/.test(TR_HTML), 'tracks.js hat einen Cache-Buster');
-    pruefe(TR_HTML.indexOf('i18n.js') < TR_HTML.indexOf('tracks.js'),
-        'i18n.js wird VOR tracks.js geladen');
+    // Auf das <script src=…>-TAG pruefen, nicht auf den blossen Dateinamen:
+    // "tracks.js" steht auch in Kommentaren ("wird von tracks.js eingeblendet")
+    // und damit frueher im Dokument als das Skript – die alte Fassung schlug
+    // dann grundlos fehl. Dieselbe Falle steht in CLAUDE.md fuer
+    // knowledge_sync.js.
+    {
+        const skriptPos = (name) =>
+            TR_HTML.search(new RegExp('<script[^>]+src="[^"]*' + name + '\\?'));
+        const pI = skriptPos('i18n\\.js'), pT = skriptPos('tracks\\.js');
+        pruefe(pI >= 0 && pT >= 0 && pI < pT, 'i18n.js wird VOR tracks.js geladen');
+    }
     pruefe(/id="btn-theme-toggle"/.test(TR_HTML),
         'der Theme-Knopf traegt die Id, die avatar.js erwartet');
     pruefe(/activity\.js/.test(TR_HTML),

@@ -6,15 +6,15 @@ PATCH zurueck. Der Patch wird NICHT automatisch angewandt – das entscheidet
 Claude nach dem Lesen.
 
 ZUGANG – je Jarvis-Installation zu setzen, es gibt KEINE Vorgabe
-    Schluessel  $JARVIS_CSA_KEY  oder  ~/.jarvis-csa-key
-    Adresse     $JARVIS_CSA_URL  oder  ~/.jarvis-csa-url
+    Schluessel  $SUBAGENT_KEY  oder  ~/.subagent-key
+    Adresse     $SUBAGENT_URL  oder  ~/.subagent-url
 
     Bewusst KEIN voreingestellter Host: derselbe Client laeuft gegen jede
     Jarvis-Installation. Eine Vorgabe waere die Adresse genau einer davon – bei
     der naechsten falsch, und der Fehler saehe wie ein Schluesselproblem aus
     (ein fremder Server kennt den Schluessel nicht und antwortet 401).
 
-    Der Schluessel gehoert NICHT ins Repo. ~/.jarvis-csa-key liegt ausserhalb,
+    Der Schluessel gehoert NICHT ins Repo. ~/.subagent-key liegt ausserhalb,
     die Umgebungsvariable erst recht.
 
 AUFRUF
@@ -46,25 +46,25 @@ def fehler(text: str, code: int = 1):
 
 
 def schluessel() -> str:
-    k = os.environ.get("JARVIS_CSA_KEY", "").strip()
+    k = os.environ.get("SUBAGENT_KEY", "").strip()
     if k:
         return k
-    p = Path.home() / ".jarvis-csa-key"
+    p = Path.home() / ".subagent-key"
     if p.is_file():
         return p.read_text(encoding="utf-8").strip()
-    fehler("Kein Delegations-Schluessel. Setze $JARVIS_CSA_KEY oder lege "
-           "~/.jarvis-csa-key an (erzeugt wird er in Jarvis unter /claude).", 2)
+    fehler("Kein Delegations-Schluessel. Setze $SUBAGENT_KEY oder lege "
+           "~/.subagent-key an (erzeugt wird er in Jarvis unter /claude).", 2)
 
 
 def basis_url() -> str:
-    u = os.environ.get("JARVIS_CSA_URL", "").strip()
+    u = os.environ.get("SUBAGENT_URL", "").strip()
     if not u:
-        p = Path.home() / ".jarvis-csa-url"
+        p = Path.home() / ".subagent-url"
         if p.is_file():
             u = p.read_text(encoding="utf-8").strip()
     if not u:
-        fehler("Keine Jarvis-Adresse. Setze $JARVIS_CSA_URL oder lege "
-               "~/.jarvis-csa-url an (z.B. https://jarvis.firma.de). Es gibt "
+        fehler("Keine Jarvis-Adresse. Setze $SUBAGENT_URL oder lege "
+               "~/.subagent-url an (z.B. https://jarvis.firma.de). Es gibt "
                "bewusst keine Vorgabe – der Client laeuft gegen jede "
                "Installation.", 2)
     if not u.startswith(("http://", "https://")):

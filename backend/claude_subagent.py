@@ -70,7 +70,7 @@ STATE_PATH = PROJECT_ROOT / "data" / "claude_subagent.json"
 # fuer unprivilegierte Laeufe. Genau deshalb kann der Lauf unprivilegiert sein.
 ARBEIT_ROOT = Path("/tmp/claude_subagent")
 
-SCHLUESSEL_PREFIX = "JARVIS-CSA-1."
+SCHLUESSEL_PREFIX = "CSA-1."
 
 # ─── Grenzen ─────────────────────────────────────────────────────────────────
 # Notbremsen, KEINE Aufbewahrungs-Schranken (siehe die Lehre zu Stueckzahlen im

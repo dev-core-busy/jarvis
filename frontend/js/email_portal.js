@@ -105,9 +105,25 @@
                 // freigegeben" – lieber zurueck aufs Portal als eine Seite, auf
                 // der jeder Knopf 403 liefert.
                 if (!(me.permissions && me.permissions.email)) { toPortal(); return; }
+                zahnrad(me.is_admin);
                 zeigeApp();
             })
             .catch(function () { toPortal(); });
+    }
+
+    // Zahnrad nur fuer Administratoren – dort werden Serverdaten und Freigabe
+    // gepflegt. Der Rueckweg wird gemerkt, damit /settings zurueckfindet
+    // (gleiches Muster wie /sap, /support, /wissen, /tracks, /claude).
+    function zahnrad(istAdmin) {
+        var b = $('em-settings-btn');
+        if (!b || !istAdmin) return;
+        b.style.display = '';
+        if (b.dataset.gebunden) return;
+        b.dataset.gebunden = '1';
+        b.addEventListener('click', function () {
+            try { sessionStorage.setItem('jarvis_settings_return', '/email'); } catch (e) { /* egal */ }
+            window.location.href = '/settings';
+        });
     }
 
     function zeigeApp() {

@@ -31,11 +31,27 @@ _cfg = types.ModuleType("backend.config")
 
 
 class _C:
+    def __init__(self):
+        # Skill-Zustaende wie in der echten settings.json: {name: {config: {…}}}.
+        # Ueber ``_skill_cfg()`` gesetzt, damit die einstellbaren Deckel
+        # (max_runden/max_aenderungen) mit ECHTER Wirkung geprueft werden
+        # koennen und nicht nur als Quelltext-Fund.
+        self.skill_states = {}
+
     def get_setting(self, k, d=None):
         return d
 
+    def get_skill_states(self):
+        return self.skill_states
+
 
 _cfg.config = _C()
+
+
+def _skill_cfg(**felder):
+    """Skill-Konfiguration setzen – ``_skill_cfg()`` raeumt sie wieder ab."""
+    _cfg.config.skill_states = ({"excel-addin": {"config": dict(felder)}}
+                                if felder else {})
 sys.modules["backend.config"] = _cfg
 
 _ma = types.ModuleType("backend.mail_accounts")
@@ -245,7 +261,7 @@ pruefe(len(g3) == 1 and g3[0]["formel"].startswith("="),
 
 viele = [{"adresse": "A%d" % i, "wert": i} for i in range(1, 400)]
 g4, a4 = excel_ask.aenderungen_pruefen(viele)
-pruefe(len(g4) <= excel_ask.MAX_AENDERUNGEN, "Anzahl ist gedeckelt", len(g4))
+pruefe(len(g4) <= excel_ask.max_aenderungen(), "Anzahl ist gedeckelt", len(g4))
 pruefe(any("höchstens" in (a.get("grund") or "") for a in a4),
        "der Deckel wird ausgewiesen, nicht stillschweigend angewandt")
 
@@ -510,12 +526,30 @@ pruefe(MAIN.count("def _addin_icon_response") == 1
        and MAIN.count("_addin_icon_response(groesse,") == 2,
        "Icon-Logik wird von beiden Add-ins gemeinsam benutzt")
 
-# Der Deckel des Fensters muss zum Deckel des Servers passen.
+# Der Deckel des Fensters muss zum Deckel des Servers passen. Bis 2026-08-22
+# stand er auf BEIDEN Seiten als feste Zahl und wurde hier auf Gleichheit
+# geprueft – damit war er nicht einstellbar. Jetzt liefert der Server ihn mit
+# jeder Antwort mit; geprueft wird deshalb die MECHANIK, nicht die Gleichheit
+# zweier Literale.
 XLJS = (ROOT / "frontend" / "excel-addin" / "excel.js").read_text(encoding="utf-8")
-m = re.search(r"MAX_RUNDEN\s*=\s*(\d+)", XLJS)
-pruefe(m and int(m.group(1)) == excel_ask.MAX_RUNDEN,
-       "MAX_RUNDEN stimmt zwischen Fenster und Server ueberein",
-       (m.group(1) if m else "?", excel_ask.MAX_RUNDEN))
+pruefe("d.max_runden" in XLJS,
+       "das Fenster nimmt den Deckel aus der Antwort des Servers")
+# Auf die VARIABLE pruefen, nicht nur auf die Abwesenheit des alten Namens:
+# `runde < MAX_RUNDEN_VORGABE` waere sonst durchgerutscht (\b greift zwischen
+# N und _ nicht) – und genau das ist der Rueckfall-Name, der hier steht.
+pruefe(re.search(r"runde\s*<\s*maxRunden\b", XLJS)
+       and not re.search(r"runde\s*<\s*MAX_RUNDEN", XLJS),
+       "verglichen wird gegen den Wert des Servers, nicht gegen eine fest "
+       "verdrahtete Zahl")
+m = re.search(r"MAX_RUNDEN_VORGABE\s*=\s*(\d+)", XLJS)
+pruefe(m and int(m.group(1)) == excel_ask.MAX_RUNDEN_VORGABE,
+       "der Rueckfall des Fensters entspricht der Vorgabe des Servers",
+       (m.group(1) if m else "?", excel_ask.MAX_RUNDEN_VORGABE))
+pruefe('"max_runden": grenze_runden' in MAIN,
+       "der Endpunkt liefert den geltenden Deckel mit der Antwort aus")
+pruefe("excel_ask.max_runden()" in MAIN
+       and not re.search(r"excel_ask\.MAX_RUNDEN\b", MAIN),
+       "der Endpunkt liest den Deckel ueber die Funktion, nicht als Konstante")
 
 # Dateien vorhanden?
 for datei in ("frontend/excel-addin/taskpane.html", "frontend/excel-addin/excel.js",
@@ -888,28 +922,30 @@ abschnitt("14. Katalog-Pfad statt Download")
 from backend import excel_addin as _xa   # noqa: E402
 
 _echte_cfg = excel_addin._skill_config
-def _cfg(d):
+def _kat_cfg(d):
+    # NICHT `_cfg` nennen: so heisst weiter oben das Attrappen-Modul
+    # backend.config, das Abschnitt 15 braucht.
     excel_addin._skill_config = lambda: d
 try:
-    _cfg({})
+    _kat_cfg({})
     pruefe(_xa.katalog_pfad() == "", "Ohne Eintrag ist der Pfad leer (= Download)")
-    _cfg({"katalog_pfad": "  \\\\srv\\freigabe\\addins  "})
+    _kat_cfg({"katalog_pfad": "  \\\\srv\\freigabe\\addins  "})
     pruefe(_xa.katalog_pfad() == "\\\\srv\\freigabe\\addins",
            "Pfad wird getrimmt", _xa.katalog_pfad())
     # Steuerzeichen raus: der Wert geht in eine Weboberflaeche und in einen
     # Kopiervorgang. Ein Zeilenumbruch haette dort nichts zu suchen.
-    _cfg({"katalog_pfad": "X:\\a\r\nY:\\b"})
+    _kat_cfg({"katalog_pfad": "X:\\a\r\nY:\\b"})
     pruefe("\n" not in _xa.katalog_pfad() and "\r" not in _xa.katalog_pfad(),
            "Steuerzeichen werden entfernt", repr(_xa.katalog_pfad()))
     # Aber KEINE Formpruefung: UNC, Laufwerk und SharePoint sind alle gueltig.
     for _form in ("\\\\srv\\f", "X:\\addins",
                   "https://firma.sharepoint.com/sites/it/addins"):
-        _cfg({"katalog_pfad": _form})
+        _kat_cfg({"katalog_pfad": _form})
         pruefe(_xa.katalog_pfad() == _form, "Form bleibt unangetastet: " + _form)
-    _cfg({"katalog_pfad": "z" * 400})
+    _kat_cfg({"katalog_pfad": "z" * 400})
     pruefe(len(_xa.katalog_pfad()) == _xa.KATALOG_PFAD_MAX,
            "Pfad ist gedeckelt", len(_xa.katalog_pfad()))
-    _cfg({"katalog_pfad": None})
+    _kat_cfg({"katalog_pfad": None})
     pruefe(_xa.katalog_pfad() == "", "None -> leer (kein Absturz)")
 finally:
     excel_addin._skill_config = _echte_cfg
@@ -1008,6 +1044,123 @@ _b = len(_re.findall(r"<li>", [z for z in I18N.splitlines()
 pruefe(_a == _b + 1,
        "Die Pfad-Liste hat genau einen Schritt weniger (das Herunterladen)",
        (_a, _b))
+# ══════════════════════════════════════════════════════════════════════
+abschnitt("15. Die einstellbaren Deckel WIRKEN")
+# GEFUNDEN 2026-08-22: `max_runden` und `max_aenderungen` standen im Manifest,
+# der Admin-Reiter zeigte und speicherte sie – GELESEN hat sie keine Zeile
+# Code. Massgeblich waren die Modulkonstanten. Dieselbe Fehlerklasse wie
+# `prompt_tool_calling` und die drei Schalter des Skills `claude_subagent`:
+# eine Zusage, die der Code nicht haelt.
+#
+# Geprueft wird deshalb die WIRKUNG (Wert setzen -> Verhalten aendert sich),
+# nicht die Anwesenheit einer Funktion: ein Quelltext-Fund haette den alten
+# Zustand nicht von diesem unterschieden.
+
+# Vorgaben: Manifest und Modul duerfen NICHT auseinanderlaufen – sonst zeigt
+# das Formular eine andere Zahl an, als ohne Eintrag wirklich gilt.
+import json as _json  # noqa: E402
+
+_MANI = _json.loads((ROOT / "skills" / "excel-addin" / "skill.json")
+                    .read_text(encoding="utf-8"))
+_SCHEMA = _MANI.get("config_schema", {})
+pruefe(_SCHEMA.get("max_runden", {}).get("default") == excel_ask.MAX_RUNDEN_VORGABE,
+       "Manifest-Vorgabe max_runden = Modul-Vorgabe",
+       (_SCHEMA.get("max_runden", {}).get("default"), excel_ask.MAX_RUNDEN_VORGABE))
+pruefe(_SCHEMA.get("max_aenderungen", {}).get("default")
+       == excel_ask.MAX_AENDERUNGEN_VORGABE,
+       "Manifest-Vorgabe max_aenderungen = Modul-Vorgabe",
+       (_SCHEMA.get("max_aenderungen", {}).get("default"),
+        excel_ask.MAX_AENDERUNGEN_VORGABE))
+
+# Ohne Eintrag gilt die Vorgabe.
+_skill_cfg()
+pruefe(excel_ask.max_runden() == 3, "ohne Config: max_runden = 3",
+       excel_ask.max_runden())
+pruefe(excel_ask.max_aenderungen() == 200, "ohne Config: max_aenderungen = 200",
+       excel_ask.max_aenderungen())
+pruefe(excel_ask.skill_config() == {}, "ohne Eintrag ist die Config leer")
+
+# Gesetzte Werte gelten – OHNE Dienstneustart, deshalb sind es Funktionen.
+_skill_cfg(max_runden=5, max_aenderungen=50)
+pruefe(excel_ask.max_runden() == 5, "gesetzt: max_runden = 5",
+       excel_ask.max_runden())
+pruefe(excel_ask.max_aenderungen() == 50, "gesetzt: max_aenderungen = 50",
+       excel_ask.max_aenderungen())
+
+# Text statt Zahl (so kommt es aus einem Formular) wird angenommen.
+_skill_cfg(max_runden=" 2 ", max_aenderungen="120")
+pruefe(excel_ask.max_runden() == 2, "Zahl als Text wird gelesen",
+       excel_ask.max_runden())
+pruefe(excel_ask.max_aenderungen() == 120, "Zahl als Text wird gelesen (2)",
+       excel_ask.max_aenderungen())
+
+# Ausserhalb der Grenzen wird HART gekappt – die Werte koennen auch von Hand
+# in die settings.json geschrieben werden.
+_skill_cfg(max_runden=99, max_aenderungen=99999)
+pruefe(excel_ask.max_runden() == 5, "max_runden wird oben gekappt (5)",
+       excel_ask.max_runden())
+pruefe(excel_ask.max_aenderungen() == 500, "max_aenderungen wird oben gekappt (500)",
+       excel_ask.max_aenderungen())
+_skill_cfg(max_runden=0, max_aenderungen=1)
+pruefe(excel_ask.max_runden() == 1, "max_runden wird unten gekappt (1)",
+       excel_ask.max_runden())
+pruefe(excel_ask.max_aenderungen() == 10, "max_aenderungen wird unten gekappt (10)",
+       excel_ask.max_aenderungen())
+_skill_cfg(max_runden=-7, max_aenderungen=-1)
+pruefe(excel_ask.max_runden() == 1 and excel_ask.max_aenderungen() == 10,
+       "auch negative Werte landen an der Untergrenze")
+
+# Muell und Leeres fallen auf die Vorgabe zurueck – ein Tippfehler darf den
+# Assistenten nicht lahmlegen.
+for _muell in ("abc", "", "   ", None, [], {"a": 1}, 3.7):
+    _skill_cfg(max_runden=_muell, max_aenderungen=_muell)
+    pruefe(excel_ask.max_runden() == 3 and excel_ask.max_aenderungen() == 200,
+           "Muell faellt auf die Vorgabe zurueck: %r" % (_muell,),
+           (excel_ask.max_runden(), excel_ask.max_aenderungen()))
+
+# ── WIRKUNG 1: max_aenderungen deckelt die Vorschlagsliste wirklich ──
+_skill_cfg(max_aenderungen=12)
+_viele = [{"adresse": "A%d" % i, "wert": i} for i in range(1, 60)]
+_g, _a = excel_ask.aenderungen_pruefen(_viele)
+pruefe(len(_g) == 12, "max_aenderungen=12 laesst genau 12 Eintraege durch", len(_g))
+pruefe(any("höchstens 12" in (x.get("grund") or "") for x in _a),
+       "der eingestellte Deckel steht in der Begruendung, nicht die Vorgabe",
+       [x.get("grund") for x in _a][-1:])
+# Gegenprobe: ein groesserer Deckel laesst mehr durch – sonst koennte der Test
+# auch bei einer fest verdrahteten 12 gruen sein.
+_skill_cfg(max_aenderungen=40)
+_g2, _ = excel_ask.aenderungen_pruefen(_viele)
+pruefe(len(_g2) == 40, "max_aenderungen=40 laesst genau 40 Eintraege durch", len(_g2))
+
+# ── WIRKUNG 2: max_runden begrenzt die nachgeladenen Bereiche im Auftrag ──
+_nach = [{"bereich": "Tab1!A%d:B%d" % (i, i), "text": "Zeile %d" % i}
+         for i in range(1, 8)]
+_ub = {"blaetter": [{"name": "Tab1", "benutzt": "A1:B9"}]}
+_skill_cfg(max_runden=1)
+_t1, _ = excel_ask.auftrag("Frage", _ub, nachgeladen=_nach)
+pruefe(_t1.count("NACHGELADENER BEREICH") == 1,
+       "max_runden=1: genau ein nachgeladener Bereich im Auftrag",
+       _t1.count("NACHGELADENER BEREICH"))
+_skill_cfg(max_runden=4)
+_t2, _ = excel_ask.auftrag("Frage", _ub, nachgeladen=_nach)
+pruefe(_t2.count("NACHGELADENER BEREICH") == 4,
+       "max_runden=4: genau vier nachgeladene Bereiche im Auftrag",
+       _t2.count("NACHGELADENER BEREICH"))
+
+# ── Fehlertoleranz: ein kaputter config-Zugriff darf nichts umwerfen ──
+_alt = _cfg.config.get_skill_states
+
+
+def _kaputt():
+    raise RuntimeError("settings.json unlesbar")
+
+
+_cfg.config.get_skill_states = _kaputt
+pruefe(excel_ask.skill_config() == {} and excel_ask.max_runden() == 3
+       and excel_ask.max_aenderungen() == 200,
+       "faellt der Config-Zugriff aus, gelten die Vorgaben")
+_cfg.config.get_skill_states = _alt
+_skill_cfg()
 
 print("\n" + "=" * 52)
 print("Bestanden: %d / Fehlgeschlagen: %d" % (_ok, _fail))

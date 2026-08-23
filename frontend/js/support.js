@@ -22,27 +22,8 @@
     }
     // Übersetzung mit Fallback (deutscher Text), falls i18n nicht geladen
     function T(key, def) { return (window.t && window.t(key)) || def; }
-    // CPU-Auslastung: /api/cpu pollen und Topbar-Bar aktualisieren
-    var _cpuTimer = null;
-    function _updateCpu(pct) {
-        var fill = $('cpu-bar-fill'), label = $('cpu-bar-label');
-        if (!fill || !label) return;
-        var p = Math.max(0, Math.min(100, Number(pct) || 0));
-        fill.style.width = p + '%';
-        fill.style.backgroundPosition = p + '% 0';
-        label.textContent = 'CPU: ' + Math.round(p) + '%';
-    }
-    function _pollCpu() {
-        fetch('/api/cpu', { headers: authHeaders() })
-            .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (d) { if (d) _updateCpu(d.cpu); })
-            .catch(function () {});
-    }
-    function _startCpu() {
-        if (_cpuTimer) return;
-        _pollCpu();
-        _cpuTimer = setInterval(_pollCpu, 3000);
-    }
+    // CPU-Auslastung: liegt seit 2026-08-22 in frontend/js/cpubar.js – die
+    // eigene Fassung hier war eine von vier gleichlautenden Kopien.
     // Karten bei mehr als 6 Zeilen einklappen + 'mehr'/'weniger'-Umschalter –
     // gilt für KI-Zusammenfassungen (Gesamt + je Ticket) und Ergebnis-Karten
     var _CLAMP_LINES = 6;
@@ -335,8 +316,7 @@
                     }
                 }
             }).catch(function () {});
-        // CPU-Auslastung (fuer alle): /api/cpu pollen und Bar aktualisieren
-        _startCpu();
+        // CPU-Auslastung: cpubar.js laeuft von selbst, sobald ein Token vorliegt
         // Sprachwechsel: statische Labels via applyLang (i18n.js), dynamische Treffer neu rendern
         if (window.setLang && !window._supLangWrapped) {
             window._supLangWrapped = true;

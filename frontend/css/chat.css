@@ -466,37 +466,9 @@ body {
 }
 .security-badge:hover { transform: scale(1.1); filter: brightness(1.2); }
 
-/* ─── CPU-Auslastung (Admin, Topbar) ─────────────────────────── */
-.cpu-bar.chat-cpu-bar {
-    width: 130px;
-    height: 18px;
-    margin-left: 8px;
-    background: rgba(148, 163, 184, .14);
-    border-radius: 999px;
-    position: relative;
-    overflow: hidden;
-    border: 1px solid rgba(148, 163, 184, .55);
-    flex-shrink: 0;
-}
-.cpu-bar.chat-cpu-bar .cpu-bar-fill {
-    height: 100%;
-    border-radius: 999px;
-    background: linear-gradient(90deg, #10b981, #22c55e, #84cc16, #eab308, #f97316, #ef4444);
-    background-size: 300% 100%;
-    transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.cpu-bar.chat-cpu-bar .cpu-bar-label {
-    position: absolute;
-    left: 50%; top: 50%;
-    transform: translate(-50%, -50%);
-    font-size: 0.62rem;
-    font-weight: 600;
-    font-family: var(--font-mono, monospace);
-    color: var(--text-primary);
-    text-shadow: 0 1px 3px rgba(var(--shadow-rgb, 0,0,0), 0.8);
-    z-index: 1;
-    white-space: nowrap;
-}
+/* CPU-Auslastung: die Regeln stehen seit 2026-08-22 als `.jv-cpu-bar`
+   in theme.css – sie erscheint auf JEDER Seite, chat.css laedt aber nur
+   /chat und /userchat. Hier lag eine von drei gleichlautenden Kopien. */
 
 /* ─── Messages Container ─────────────────────────────────────── */
 .messages {

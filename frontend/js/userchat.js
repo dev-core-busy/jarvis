@@ -172,7 +172,7 @@
 
     // ─── Login (Auto-Login bei vorhandenem Token) ────────────────
     // WICHTIG: erst NACHDEM das gesamte Modul initialisiert ist ausführen.
-    // showChat() ruft _startLlmStatus()/_startCpu()/initUserSearch(), die auf
+    // showChat() ruft _startLlmStatus()/initUserSearch(), die auf
     // weiter unten per `let` deklarierte Timer-Variablen zugreifen – ein direkter
     // Aufruf hier würde in die Temporal Dead Zone laufen (ReferenceError, bricht
     // die komplette Initialisierung ab). Daher deferred bis zum Ende des Ticks.
@@ -247,30 +247,14 @@
         if (_ucLogout && myUser) _ucLogout.title = window.t('userchat.logout_title').replace('{user}', myUser);
         _requestNotifyPermission();
         _startLlmStatus();
-        _startCpu();
         initUserSearch();
         connectWS();
         // Online-Status (aktive Portal-Sessions) regelmaessig auffrischen
         if (!_presenceTimer) _presenceTimer = setInterval(loadKnownUsers, 30000);
     }
 
-    // ── CPU-Auslastung (fuer alle): /api/cpu pollen ──
-    let _cpuTimer = null;
-    function _updateCpu(pct) {
-        const fill = $('cpu-bar-fill'), label = $('cpu-bar-label');
-        if (!fill || !label) return;
-        const p = Math.max(0, Math.min(100, Number(pct) || 0));
-        fill.style.width = p + '%';
-        fill.style.backgroundPosition = p + '% 0';
-        label.textContent = 'CPU: ' + Math.round(p) + '%';
-    }
-    function _startCpu() {
-        if (_cpuTimer) return;
-        const poll = () => fetch('/api/cpu', { headers: { 'Authorization': 'Bearer ' + token } })
-            .then(r => r.ok ? r.json() : null).then(d => { if (d) _updateCpu(d.cpu); }).catch(() => {});
-        poll();
-        _cpuTimer = setInterval(poll, 3000);
-    }
+    // CPU-Auslastung: liegt seit 2026-08-22 in frontend/js/cpubar.js
+    // (hier stand eine von vier gleichlautenden Kopien).
 
     // ── LLM-Status-Pill (analog /chat): erreichbar -> gruen, sonst rot ──
     let _llmStatusTimer = null;

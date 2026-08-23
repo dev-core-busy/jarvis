@@ -252,3 +252,48 @@ select option:hover {
 /* Der Muelleimer ist filigraner als das Kreuz und wirkt bei gleicher Groesse
    kleiner – minimal aufziehen, damit beide optisch gleich schwer sind. */
 .jv-ico-trash { width: 1.05em; height: 1.05em; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   CPU-Auslastung in der Titelleiste (frontend/js/cpubar.js)
+
+   Steht in theme.css und NICHT in style.css: die Anzeige erscheint auf
+   JEDER angemeldeten Seite, style.css laedt aber nur /settings und /wissen
+   (gleiche Begruendung wie bei `select option`, 2026-07-29).
+
+   Bis 2026-08-22 lag dieselbe Regel DREIMAL nebeneinander (chat.css,
+   support.html inline, wissen.html inline) – jede mit eigenen Zahlen.
+   `.jv-cpu-bar` ist die eine Fassung; die Farbreihe ist bewusst fest und
+   nicht themenabhaengig: sie bedeutet gruen=frei bis rot=ausgelastet.
+   ═══════════════════════════════════════════════════════════════════════ */
+.jv-cpu-bar {
+    width: 130px;
+    height: 18px;
+    /* KEIN eigener Rand: alle fuenf Wirt-Container arbeiten mit `gap`, ein
+       zusaetzliches `margin-left` addiert sich darauf. Auf /portal waren das
+       10 + 8 = 18 px, waehrend daneben 10 px stehen – ein gemeinsamer
+       Baustein darf seinen Abstand nicht selbst mitbringen. */
+    border-radius: 999px;
+    background: rgba(148, 163, 184, .14);
+    border: 1px solid rgba(148, 163, 184, .55);
+    position: relative;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+.jv-cpu-bar .cpu-bar-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #10b981, #22c55e, #84cc16, #eab308, #f97316, #ef4444);
+    background-size: 300% 100%;
+    transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.jv-cpu-bar .cpu-bar-label {
+    position: absolute;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 0.62rem;
+    font-weight: 600;
+    font-family: var(--font-mono, monospace);
+    color: var(--text-primary);
+    white-space: nowrap;
+    z-index: 1;
+}

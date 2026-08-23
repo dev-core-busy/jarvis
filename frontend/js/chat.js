@@ -336,9 +336,8 @@
             if (window.JarvisUpdateWidget) window.JarvisUpdateWidget.init();
         }
         // Desktop/VNC-Button: nach /portal verschoben (dort fuer alle Admins)
-        // CPU-Auslastung fuer alle (Werte kommen via WS-Event 'cpu')
-        const _cpuBar = $('cpu-bar');
-        if (_cpuBar) _cpuBar.style.display = '';
+        // CPU-Auslastung: cpubar.js blendet sie selbst ein, sobald ein Token
+        // vorliegt – die Werte kommen zusaetzlich ueber das WS-Ereignis 'cpu'.
         _setupDebugToggle();
         connectWS();
         _startLlmStatusIndicator();
@@ -838,15 +837,11 @@
         }
     }
 
-    // CPU-Bar (Admin) aus WS-Event aktualisieren
+    // CPU-Bar aus dem WS-Ereignis aktualisieren. Gezeichnet wird ueber die
+    // gemeinsame Fassung (frontend/js/cpubar.js); der WebSocket ist hier nur
+    // die schnellere Quelle – die Anzeige selbst gehoert nicht /chat allein.
     function updateCPU(percent) {
-        const fill = $('cpu-bar-fill');
-        const label = $('cpu-bar-label');
-        if (!fill || !label) return;
-        const pct = Math.max(0, Math.min(100, Number(percent) || 0));
-        fill.style.width = pct + '%';
-        fill.style.backgroundPosition = pct + '% 0';
-        label.textContent = 'CPU: ' + Math.round(pct) + '%';
+        if (window.JarvisCpuBar) window.JarvisCpuBar.setzeWert(percent);
     }
 
     function handleStatus(msg) {

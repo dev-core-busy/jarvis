@@ -50,7 +50,6 @@
         }
         mountProfile();
         startLlmStatus();
-        startCpu();
     }
 
     // KI-Profil-Pulldown neben "Fragen & Antworten generieren"
@@ -67,8 +66,9 @@
         });
     }
 
-    // ── LLM-Status-Punkt + CPU-Auslastung (wie /chat und /support) ─────
-    var _llmStatusTimer = null, _cpuTimer = null;
+    // ── LLM-Status-Punkt (die CPU-Auslastung liegt seit 2026-08-22 in
+    //    frontend/js/cpubar.js – hier stand eine von vier Kopien) ────────
+    var _llmStatusTimer = null;
     function checkLlmStatus() {
         var dot = $('wi-status-dot');
         if (!dot) return;
@@ -94,26 +94,6 @@
         checkLlmStatus();
         if (!_llmStatusTimer) _llmStatusTimer = setInterval(checkLlmStatus, 30000);
     }
-    function startCpu() {
-        function poll() {
-            fetch('/api/cpu', { headers: authH() })
-                .then(function (r) { return r.ok ? r.json() : null; })
-                .then(function (d) {
-                    if (!d) return;
-                    var fill = $('cpu-bar-fill'), label = $('cpu-bar-label');
-                    if (!fill || !label) return;
-                    var p = Math.max(0, Math.min(100, Number(d.cpu) || 0));
-                    fill.style.width = p + '%';
-                    fill.style.backgroundPosition = p + '% 0';
-                    label.textContent = 'CPU: ' + Math.round(p) + '%';
-                })
-                .catch(function () {});
-        }
-        if (_cpuTimer) return;
-        poll();
-        _cpuTimer = setInterval(poll, 3000);
-    }
-
     // ── Login ───────────────────────────────────────────────────────────
     function doLogin() {
         var btn = $('wi-login-btn'), err = $('wi-login-err');

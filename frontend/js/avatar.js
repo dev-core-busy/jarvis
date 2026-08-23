@@ -182,17 +182,26 @@
     var SVG_AUS = SVG_AN.replace('</svg>', '<line x1="3" y1="21" x2="21" y2="3"/></svg>');
 
     // Der Knopf wird zur Laufzeit eingehaengt und uebernimmt die Klassen des
-    // Theme-Knopfes – so passt er ohne Extrawurst zum Stil JEDER Seite und
-    // sitzt ueberall an derselben Stelle (direkt links davon).
+    // Ankers – so passt er ohne Extrawurst zum Stil JEDER Seite.
+    //
+    // Anker ist seit 2026-08-22 der ISSUES-Knopf (`.jv-issues-btn`), nicht
+    // mehr der Theme-Knopf: die Reihenfolge der Titelsymbole lautet von
+    // rechts nach links Abmelden, Einstellungen, Startseite, Hell/Dunkel,
+    // Issues, Avatar, Sprachausgabe. Der Avatar steht also LINKS von Issues.
+    // Der Theme-Knopf bleibt als Rueckfall fuer Seiten ohne Issues-Knopf.
     function injectToggle() {
         if (toggleBtn) return;
-        var anker = document.getElementById('btn-theme-toggle')
+        var anker = document.querySelector('.jv-issues-btn')
+                 || document.getElementById('btn-theme-toggle')
                  || document.getElementById('btn-theme');   // /chat; NICHT btn-theme-login
         toggleBtn = document.createElement('button');
         toggleBtn.type = 'button';
         toggleBtn.id = 'jav-toggle';
         if (anker && anker.parentNode) {
             toggleBtn.className = anker.className;
+            // Die Anker-Klasse selbst darf NICHT mitkommen: sonst waere der
+            // Avatar-Knopf beim naechsten Einhaengen sein eigener Anker.
+            toggleBtn.classList.remove('jv-issues-btn');
             anker.parentNode.insertBefore(toggleBtn, anker);
         } else {
             // Seiten ohne Symbolleiste (z.B. /settings): frei schwebend oben rechts

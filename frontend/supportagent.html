@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Jarvis – Support-Agent (Windows)</title>
-    <link rel="stylesheet" href="/static/css/theme.css?v=12">
+    <link rel="stylesheet" href="/static/css/theme.css?v=14">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=8">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
@@ -18,7 +18,8 @@
         .sa-title { font-size: 1.15rem; font-weight: 600; }
         .sa-spacer { flex: 1; }
         /* Symbol-Buttons rechts: Gruppe mit 8px Abstand wie auf den anderen Seiten */
-        .sa-top-icons { display: flex; align-items: center; gap: 8px; }
+        /* 4px wie .topbar-right/.wi-top-icons – 8px waren hier der Ausreisser. */
+        .sa-top-icons { display: flex; align-items: center; gap: 4px; }
         .sa-theme-btn, .sa-icon-btn { background: none; border: 1px solid var(--border); color: var(--text-secondary);
             width: 36px; height: 34px; border-radius: 8px; cursor: pointer; text-decoration: none;
             display: inline-flex; align-items: center; justify-content: center; }
@@ -146,13 +147,14 @@
     </div>
 
     <script src="/static/js/icons.js?v=1"></script>
+    <script src="/static/js/cpubar.js?v=1"></script>
     <script src="/static/js/theme.js?v=2"></script>
     <script src="/static/js/branding.js?v=24"></script>
     <script>if (window.refreshBranding) { try { window.refreshBranding(); } catch (e) {} }</script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>
-<script src="/static/js/avatar.js?v=13"></script>
+<script src="/static/js/avatar.js?v=14"></script>
 <script src="/static/js/activity.js?v=1"></script>
 </body>
 </html>

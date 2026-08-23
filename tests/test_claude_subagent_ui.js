@@ -502,11 +502,23 @@ async function baueSeite(zustand) {
                       `${f}: hat den Issues-Knopf`);
                 check(/js\/issues\.js/.test(q),
                       `${f}: bindet issues.js ein (sonst tut der Knopf nichts)`);
-                // Gleiche Reihenfolge wie ueberall: Thema -> Issues -> Zahnrad.
+                // Gleiche Reihenfolge wie ueberall: Issues -> Thema -> Home
+                // -> Zahnrad -> Abmelden (Vorgabe des Nutzers 2026-08-22).
                 const pIss = q.search(/data-i18n-title="sup\.issues"/);
                 const pSet = q.search(/data-i18n-title="nav\.settings"/);
                 check(pIss >= 0 && pSet >= 0 && pIss < pSet,
                       `${f}: Issues steht vor den Einstellungen`);
+                // Der Avatar-Schalter haengt sich zur Laufzeit VOR den
+                // Issues-Knopf (avatar.js). Ohne diese Klasse landet er am
+                // Theme-Knopf und damit an der falschen Stelle – oder, auf
+                // einer Seite ohne beides, frei schwebend ueber dem Inhalt.
+                check(/class="[^"]*jv-issues-btn/.test(q),
+                      `${f}: Issues-Knopf traegt .jv-issues-btn (Anker fuer den Avatar)`);
+                // Die CPU-Anzeige gehoert auf JEDE Bereichsseite. Sie fehlte
+                // auf der Haelfte davon (gemeldet 2026-08-22); cpubar.js baut
+                // sie selbst auf, muss dafuer aber geladen werden.
+                check(/js\/cpubar\.js/.test(q),
+                      `${f}: bindet cpubar.js ein (CPU-Anzeige)`);
             }
             check(bereiche.length >= 6,
                   `Bereichsseiten erkannt (${bereiche.length})`, bereiche.join(', '));
@@ -516,11 +528,20 @@ async function baueSeite(zustand) {
             // "Thema -> Home", /claude, /email, /excel, /tracks umgekehrt. Wer
             // zwischen den Bereichen wechselt, greift dann jedes zweite Mal
             // daneben. Mehrfach gemeldet.
+            //
+            // Die Folge steht seit 2026-08-22 fest (Vorgabe des Nutzers), von
+            // RECHTS nach links gelesen: Abmelden, Einstellungen, Startseite,
+            // Hell/Dunkel, Issues, Avatar, Sprachausgabe, Dokumente. Hier steht
+            // sie von links nach rechts, also genau andersherum.
+            //
+            // Der Avatar-Schalter fehlt in dieser Liste mit Absicht: er
+            // entsteht erst zur Laufzeit (avatar.js) und haengt sich vor
+            // `.jv-issues-btn` – geprueft wird dafuer die Klasse am Anker.
             const ROLLE = [
                 [/lang-toggle/, 'Sprache'],
+                [/data-i18n-title="sup\.issues"|title="Issues \/ Feedback"/, 'Issues'],
                 [/id="btn-theme-toggle"|id="btn-theme"|theme-icon-|data-i18n-title="chat\.theme"/, 'Thema'],
                 [/data-i18n-title="nav\.home"|title="Zum Portal"|href="\/portal"/, 'Home'],
-                [/data-i18n-title="sup\.issues"|title="Issues \/ Feedback"/, 'Issues'],
                 [/data-i18n-title="nav\.settings"/, 'Zahnrad'],
                 [/data-i18n-title="chat\.logout"|title="Abmelden"/, 'Abmelden'],
             ];
@@ -529,6 +550,13 @@ async function baueSeite(zustand) {
             for (const f of seiten) {
                 const q = fs.readFileSync(path.join(ROOT, 'frontend', f), 'utf8');
                 let m = q.match(/<div class="topbar-right">([\s\S]*?)<\/header>/);
+                // /portal und /wissen bauen ihre Leiste flach (kein
+                // `topbar-right`): dort ist der Abstandhalter der Anfang der
+                // Symbolgruppe und der Abmelden-Knopf ihr Ende. Ohne diesen
+                // Zweig fielen ausgerechnet die zwei Seiten heraus, die eine
+                // eigene Bauform haben – also die, bei denen ein Umbau am
+                // ehesten danebengeht.
+                if (!m) m = q.match(/<div class="(?:pt-spacer|wi-spacer)"><\/div>([\s\S]*?id="(?:pt-logout|wi-logout)"[\s\S]*?<\/button>)/);
                 if (!m) m = q.match(/<(?:header|div)[^>]*class="[^"]*topbar[^"]*"[^>]*>([\s\S]*?)<\/(?:header|div)>/);
                 if (!m) continue;
                 const tr = [];
@@ -546,10 +574,50 @@ async function baueSeite(zustand) {
                       `${f}: Symbole in der kanonischen Reihenfolge`,
                       `${tr.join(' → ')}  statt  ${erwartet.join(' → ')}`);
             }
-            const eindeutig = new Set(Object.values(folgen).map(v => v.join('|')));
+            // Die Gleichheitspruefung gilt nur fuer UNTERSEITEN – erkennbar am
+            // Haus-Symbol. /portal ist die Startseite und hat es folgerichtig
+            // nicht; es mitzuzaehlen wuerde eine Abweichung melden, die keine
+            // ist. Die Reihenfolge selbst wurde oben trotzdem geprueft.
+            const unter = Object.fromEntries(
+                Object.entries(folgen).filter(([, v]) => v.includes('Home')));
+            const eindeutig = new Set(Object.values(unter).map(v => v.join('|')));
             check(eindeutig.size === 1,
-                  `Alle ${Object.keys(folgen).length} Seiten haben DIESELBE Reihenfolge`,
+                  `Alle ${Object.keys(unter).length} Unterseiten haben DIESELBE Reihenfolge`,
                   [...eindeutig].join('   ///   '));
+            check(Object.keys(folgen).includes('portal.html')
+                  && Object.keys(folgen).includes('wissen.html'),
+                  'auch /portal und /wissen wurden geprueft (flache Leiste)',
+                  Object.keys(folgen).join(', '));
+
+            // ── Das SSL-Zertifikat gibt es NUR auf der Startseite ──────────
+            // Auf jeder Unterseite war es reine Wiederholung und stand an dem
+            // Platz, an dem dort das Haus-Symbol steht (Vorgabe 2026-08-22).
+            // Der Dialog #cert-modal in chat.html bleibt: ihn oeffnet das
+            // Sicherheits-Banner bei unverschluesselter Verbindung.
+            //
+            // Geprueft wird die GANZE Datei, nicht ein herausgeschnittener
+            // Leisten-Ausschnitt: ein Schnitt, der ins Leere greift, macht die
+            // Pruefung trivial gruen (dieselbe Falle wie beim Waechter am
+            // 2026-08-18). Der Schluessel steht projektweit nur am Symbol.
+            const mitZert = [];
+            for (const f of seiten) {
+                const q = fs.readFileSync(path.join(ROOT, 'frontend', f), 'utf8');
+                if (/data-i18n-title="chat\.ssl_cert"/.test(q)) mitZert.push(f);
+            }
+            check(mitZert.join(',') === 'portal.html',
+                  'Zertifikat-Symbol nur auf der Startseite',
+                  `gefunden auf: ${mitZert.join(', ') || '(nirgends)'}`);
+
+            // ── Die zwei Symbole, die es nur auf EINER Seite gibt ──────────
+            // Sie stehen links von Issues und damit vom Avatar-Schalter.
+            const chatQ = fs.readFileSync(path.join(ROOT, 'frontend', 'chat.html'), 'utf8');
+            check(chatQ.indexOf('id="btn-tts-chat"') >= 0
+                  && chatQ.indexOf('id="btn-tts-chat"') < chatQ.indexOf('id="btn-chat-issues"'),
+                  'chat.html: Sprachausgabe steht links von Issues');
+            const ptQ = fs.readFileSync(path.join(ROOT, 'frontend', 'portal.html'), 'utf8');
+            check(ptQ.indexOf('id="pt-info-btn"') >= 0
+                  && ptQ.indexOf('id="pt-info-btn"') < ptQ.indexOf('id="pt-issues-btn"'),
+                  'portal.html: Dokumente steht links von Issues');
         }
 
         for (const [name, quelle, pfx, ret] of [

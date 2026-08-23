@@ -59,16 +59,53 @@ def _stream_shell(command: str, cwd: str | None, timeout: int, stream) -> dict:
         proc = subprocess.Popen(
             command, shell=True, cwd=cwd or None, env=env,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            # EIGENE Prozessgruppe, damit ein Timeout den GANZEN Baum trifft.
+            # `proc.kill()` beendet nur die aeussere Shell; die Kette
+            # runuser -> setpriv -> bwrap -> bash -> python lief danach weiter
+            # (Waise, die weiter Rechenzeit und Speicher verbraucht und in ein
+            # gerade abgeraeumtes Lauf-Verzeichnis schreibt). Mit der Isolation
+            # faellt das mehr auf, der Fehler ist aber aelter.
+            start_new_session=True,
         )
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "rc": -1, "stdout": "", "stderr": str(e)}
 
+    def _abwuergen():
+        """Ganze Prozessgruppe beenden – erst freundlich, dann hart."""
+        import signal as _sig
+        for signum in (_sig.SIGTERM, _sig.SIGKILL):
+            try:
+                _os.killpg(_os.getpgid(proc.pid), signum)
+            except (ProcessLookupError, PermissionError):
+                break
+            try:
+                proc.wait(timeout=3)
+                return
+            except subprocess.TimeoutExpired:
+                continue
+        try:
+            proc.kill()
+        except Exception:  # noqa: BLE001
+            pass
+
     lines = []
-    deadline = time.monotonic() + max(5, timeout)
+    grenze = max(5, timeout)
+    deadline = time.monotonic() + grenze
+    # WACHHUND, und er ist noetig: die Deadline unten wird nur geprueft, wenn eine
+    # ZEILE ankommt. `for line in proc.stdout` blockiert bei einem stillen Befehl
+    # (`sleep 300`) unbegrenzt – gemessen am 23.08.2026: der Op-Timeout von 3 s lief
+    # ins Leere, erst der Client brach nach 33 s ab, und der Prozessbaum lebte
+    # danach WEITER (Waise, die Rechenzeit verbraucht und in ein bereits
+    # abgeraeumtes Lauf-Verzeichnis schreibt). Der Fehler ist aelter als die
+    # Isolation; mit ihr faellt er auf.
+    import threading as _th
+    _wachhund = _th.Timer(grenze + 1, _abwuergen)
+    _wachhund.daemon = True
+    _wachhund.start()
     try:
         for line in proc.stdout:
             if time.monotonic() > deadline:
-                proc.kill()
+                _abwuergen()
                 return {"ok": False, "rc": -1, "stdout": "\n".join(lines),
                         "stderr": f"Timeout nach {timeout}s. Befehl abgebrochen."}
             line = line.rstrip("\n")
@@ -81,7 +118,14 @@ def _stream_shell(command: str, cwd: str | None, timeout: int, stream) -> dict:
         proc.wait(timeout=10)
         stderr = (proc.stderr.read() or "") if proc.stderr else ""
     except subprocess.TimeoutExpired:
-        proc.kill()
+        _abwuergen()
+        return {"ok": False, "rc": -1, "stdout": "\n".join(lines),
+                "stderr": f"Timeout nach {timeout}s. Befehl abgebrochen."}
+    finally:
+        _wachhund.cancel()
+    if proc.returncode is not None and proc.returncode < 0:
+        # Vom Wachhund beendet: als Timeout melden, nicht als "Signal -9". Der
+        # Agent soll wissen, dass er zu lange gebraucht hat.
         return {"ok": False, "rc": -1, "stdout": "\n".join(lines),
                 "stderr": f"Timeout nach {timeout}s. Befehl abgebrochen."}
     return {"ok": proc.returncode == 0, "rc": proc.returncode,
@@ -173,7 +217,20 @@ def _op_chpasswd(args, stream):
 
 def _op_sandbox_exec(args, stream):
     """Shell-Befehl als unprivilegierter Sandbox-User ausfuehren (runuser).
-    Harte Grenze: nur User mit Prefix 'jarvis_sandbox' und uid != 0."""
+    Harte Grenze: nur User mit Prefix 'jarvis_sandbox' und uid != 0.
+
+    PRIVATES /tmp (seit 2026-08-23): Uebergibt der Aufrufer eine Benutzer-
+    Kennung, wird der Befehl zusaetzlich in einen Mount-Namespace gesetzt, in dem
+    ``/tmp`` NUR das Arbeitsverzeichnis dieses Benutzers ist. Das Verzeichnis wird
+    HIER angelegt und dem Sandbox-Benutzer uebertragen – das ist der Grund, warum
+    es ueberhaupt ueber den Broker laeuft: chown braucht root, und beide Seiten
+    brauchen Schreibrecht (der Lauf schreibt Ergebnisse, das Backend liefert sie
+    aus).
+
+    Das Argument ``arbeit`` ist ABSICHTLICH eine Kennung und kein Pfad (8 Hex);
+    die Bindungen werden validiert. Der Broker ist die Sicherheitsgrenze – er
+    darf einen Pfad aus dem Backend nicht ungeprueft in einen Mount verwandeln.
+    """
     import pwd
     user = str(args.get("user", "")).strip()
     command = str(args.get("command", ""))
@@ -185,8 +242,29 @@ def _op_sandbox_exec(args, stream):
             return {"ok": False, "rc": -1, "stdout": "", "stderr": "Sandbox-User darf nicht uid 0 haben"}
     except KeyError:
         return {"ok": False, "rc": -1, "stdout": "", "stderr": f"OS-Benutzer fehlt: {user}"}
-    wrapped = "runuser -u %s -- /bin/bash -c %s" % (shlex.quote(user), shlex.quote(command))
-    return _stream_shell(wrapped, "/tmp", timeout, stream)
+    lauf_dir = None
+    binds = []
+    rw = []
+    try:
+        from backend import lauf_tmp as _lt
+        lauf_dir = _lt.arbeit_bereitstellen(str(args.get("arbeit") or ""), user)
+        if lauf_dir:
+            binds = _lt.binds_pruefen(args.get("ro_binds"))
+            rw = _lt.rw_binds_pruefen(args.get("rw_binds"))
+            # Einhaengepunkte VORHER anlegen (root). Ueberlaesst man das bwrap,
+            # gehoeren sie dem Sandbox-Benutzer samt eigener Gruppe und das
+            # Backend kann darin nichts mehr aufraeumen.
+            _lt.einhaengepunkte(lauf_dir, list(binds) + list(rw), user)
+        wrapped = _lt.sandbox_befehl(user, command, lauf_dir, binds,
+                                     rw_binds=rw)
+    except Exception as e:  # noqa: BLE001
+        # Fail-OPEN und laut: eine kaputte Isolation darf nicht jeden
+        # Shell-Befehl jedes Netzwerk-Benutzers abschalten.
+        print(f"[Broker] Lauf-Isolation nicht anwendbar ({e}) – gemeinsames /tmp",
+              flush=True)
+        lauf_dir = None
+        wrapped = "runuser -u %s -- /bin/bash -c %s" % (shlex.quote(user), shlex.quote(command))
+    return _stream_shell(wrapped, str(lauf_dir) if lauf_dir else "/tmp", timeout, stream)
 
 
 def _op_shell_root(args, stream):
@@ -198,6 +276,25 @@ def _op_shell_root(args, stream):
     if not command.strip():
         return {"ok": False, "rc": -1, "stdout": "", "stderr": "Kein Befehl angegeben"}
     return _stream_shell(command, cwd, timeout, stream)
+
+
+def _op_lauf_aufraeumen(args, stream):
+    """Arbeitsverzeichnis eines Benutzers entfernen (oder alle abgelaufenen).
+
+    Braucht root, weil der Agent darin eigene Unterverzeichnisse anlegt
+    (``mkdir /tmp/zwischen``, matplotlib-Cache); die gehoeren dem
+    Sandbox-Benutzer mit dessen eigener Gruppe, und das unprivilegierte Backend
+    darf darin nichts loeschen. Ohne diesen Weg sammelten sich die Verzeichnisse
+    still in /tmp – genau der Zustand, den die Isolation beseitigen soll.
+
+    Die Kennung wird in ``lauf_tmp`` hart geprueft (8 Hex) und ausschliesslich
+    unter ARBEIT_ROOT aufgeloest: ein Pfad aus einem Argument kann hier keine
+    Loeschung an anderer Stelle ausloesen.
+    """
+    from backend import lauf_tmp as _lt
+    weg = _lt.aufraeumen_root(str(args.get("arbeit") or ""),
+                              int(args.get("alter_min") or 0))
+    return {"ok": True, "rc": 0, "result": {"entfernt": weg}, "stdout": "", "stderr": ""}
 
 
 def _op_sandbox_setup(args, stream):
@@ -503,6 +600,12 @@ _REGISTRY = {
         _op_sandbox_exec,
         lambda a: f"sandbox_exec:{a.get('user')}",
         lambda a: f"Shell-Befehl als unprivilegierter Sandbox-User '{a.get('user')}' ausfuehren",
+        True, (),
+    ),
+    "lauf_aufraeumen": (
+        _op_lauf_aufraeumen,
+        lambda a: "lauf_aufraeumen",
+        lambda a: "Arbeitsverzeichnis eines Benutzers entfernen (privates /tmp)",
         True, (),
     ),
     "sandbox_setup": (

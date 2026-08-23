@@ -275,6 +275,31 @@ if [ "${JARVIS_SANDBOX_PY_AUTO:-1}" != "0" ] && [ -f "$SANDBOX_PY" ]; then
     ) &
 fi
 
+# 6d. bubblewrap sicherstellen (privates /tmp pro Agent-Lauf)
+#
+# WARUM HIER: Die Isolation der Laeufe (backend/lauf_tmp.py) haengt an `bwrap`.
+# Fehlt das Paket, laeuft alles weiter – aber OHNE Trennung, und dann kann jeder
+# Domain-Benutzer die Arbeitskopien aller anderen lesen. Genau dieser Zustand
+# soll nicht durch eine vergessene Handinstallation entstehen; dieselbe
+# Begruendung wie bei 6c (bei mehreren Servern skaliert nur eine Automatik).
+#
+# Fail-OPEN mit Meldung: ein Schutz, der still ausfaellt, ist kein Schutz –
+# aber die Anwendung fuer eine Verbesserung abzuschalten waere schlimmer.
+# Abschaltbar mit JARVIS_BWRAP_AUTO=0.
+if [ "${JARVIS_BWRAP_AUTO:-1}" != "0" ] && [ ! -x /usr/bin/bwrap ]; then
+    (
+        echo "[Lauf-Isolation] bubblewrap fehlt – installiere nach (bis dahin teilen Laeufe /tmp)..."
+        AUSGABE="$(DEBIAN_FRONTEND=noninteractive apt-get install -y bubblewrap 2>&1)"
+        RC=$?
+        if [ "$RC" -eq 0 ] && [ -x /usr/bin/bwrap ]; then
+            echo "[Lauf-Isolation] bubblewrap installiert – privates /tmp pro Lauf ist aktiv."
+        else
+            printf '%s\n' "$AUSGABE" | tail -3 | sed 's/^/[Lauf-Isolation] /' >&2
+            echo "[Lauf-Isolation] WARNUNG: bubblewrap nicht installierbar (rc=$RC; kein Netzzugang?). Die Laeufe teilen weiter /tmp – 'apt-get install -y bubblewrap' von Hand nachziehen." >&2
+        fi
+    ) &
+fi
+
 # 7. Root-Broker starten (Vordergrund-Prozess dieses Dienstes)
 echo "Starte Root-Broker..."
 export JARVIS_BROKER_GROUP="${JARVIS_BROKER_GROUP:-jarvis}"

@@ -11,13 +11,12 @@ Domain-Benutzer. Auf DEV nachgestellt (2026-08-05): `runuser -u jarvis_sandbox -
 /tmp/anhang_…` liefert den Inhalt, `ls /tmp` listet alles. Dateirechte koennen das
 nicht loesen – 0600 wuerde auch den eigenen Lauf aussperren.
 
-**Was dieses Modul kann und was nicht:** Es begrenzt die LEBENSDAUER, nicht die
-Sichtbarkeit. Das Fenster schrumpft von "bis zum Reboot" (auf DEV lagen Dateien von
-mehreren Tagen in /tmp) auf `ttl_minutes`. Die eigentliche Trennung braucht ein
-privates /tmp pro Lauf (Mount-Namespace, `systemd-run -p PrivateTmp=yes` oder
-`bwrap --tmpfs /tmp`) – das ist ein eigener Umbau, weil Anhang-Uebergabe und
-Ergebnis-Abholung (`agent.py::_deliver_docs` liest aus /tmp) dann ueber ein
-pro-Lauf-Verzeichnis laufen muessen.
+**Seit 2026-08-23 loest das der Mount-Namespace** (`backend/lauf_tmp.py`): Anhaenge
+liegen in einem Verzeichnis JE BENUTZER und werden nur in dessen eigene Laeufe
+eingehaengt; im Lauf ist `/tmp` ausschliesslich das Arbeitsverzeichnis dieses
+Benutzers, fremde Arbeitskopien sind dort nicht vorhanden. **Die Frist bleibt trotzdem** – sie ist jetzt
+Datenminimierung statt Notbehelf, und sie ist die einzige Schranke, solange auf einem
+Server `bwrap` fehlt (dann liegen die Kopien wie bisher direkt in /tmp).
 
 **Warum eine FRIST und nicht "loeschen nach dem Lauf":** der Hinweistext mit dem
 /tmp-Pfad steht im Chat-Verlauf und geht in den Kontext der Folgeanfragen ein. Wer die
@@ -39,6 +38,13 @@ WORK_DIR = Path("/tmp")
 _NAME_RE = re.compile(r'^anhang_[0-9a-f]{12}_')
 
 DEFAULT_TTL_MIN = 30
+# Mit Lauf-Isolation ist die Frist kein Sicherheitsmittel mehr, sondern nur noch
+# Datenminimierung – fremde Laeufe sehen die Kopie ohnehin nicht. Die 30 Minuten
+# waren die Abwaegung "so kurz wie moeglich, so lang wie noetig fuer eine
+# Folgefrage"; sie hat aber ihren Preis: wer nach der Mittagspause "und jetzt
+# Spalte C" fragt, bekam `No such file or directory`. Mit Isolation kostet ein
+# groesseres Fenster keine Trennung mehr, deshalb vier Stunden.
+DEFAULT_TTL_MIN_ISOLIERT = 240
 
 
 def ttl_minutes() -> int:
@@ -48,14 +54,95 @@ def ttl_minutes() -> int:
     naechsten Dienststart eingefroren (gleiche Begruendung wie
     ``documents.retention_days()``). Deckel 10080 Minuten (7 Tage) – eine laengere
     Frist waere praktisch "bis zum Reboot" und damit der Zustand, der behoben wird.
+
+    OHNE ausdrueckliche Vorgabe haengt die Vorgabe daran, ob die Laeufe isoliert
+    sind: ohne Isolation bleibt es bei 30 Minuten, denn dann ist die Frist die
+    EINZIGE Schranke gegen das Mitlesen fremder Arbeitskopien.
     """
+    vorgabe = DEFAULT_TTL_MIN
     try:
-        v = int(os.environ.get("JARVIS_ATTACH_TTL_MIN", DEFAULT_TTL_MIN))
+        from backend import lauf_tmp as _lt
+        if _lt.isolation_gewuenscht() and os.path.exists(_lt.BWRAP):
+            vorgabe = DEFAULT_TTL_MIN_ISOLIERT
     except Exception:  # noqa: BLE001
-        return DEFAULT_TTL_MIN
+        pass
+    try:
+        v = int(os.environ.get("JARVIS_ATTACH_TTL_MIN", vorgabe))
+    except Exception:  # noqa: BLE001
+        return vorgabe
     if v <= 0:
         return 0
     return max(1, min(v, 10080))
+
+
+def _arbeitswurzeln() -> list:
+    """Wo Arbeitskopien liegen koennen: /tmp und die Verzeichnisse je Benutzer.
+
+    Beide Orte, weil beide Betriebsarten vorkommen (mit und ohne Isolation) und
+    weil nach einem Umschalten noch Kopien am alten Ort liegen. Die Kennungs-
+    Verzeichnisse werden EINE Ebene tief durchsucht, nicht rekursiv – dieselbe
+    Zurueckhaltung wie bei "nur direkte Kinder von /tmp".
+    """
+    wurzeln = [WORK_DIR]
+    try:
+        from backend.lauf_tmp import ANH_ROOT
+        if ANH_ROOT.is_dir():
+            wurzeln += [d for d in ANH_ROOT.iterdir() if d.is_dir()]
+    except Exception:  # noqa: BLE001
+        pass
+    return wurzeln
+
+
+def cleanup_arbeit(ttl_min: int | None = None, now: float | None = None) -> list[str]:
+    """Entfernt ABGELAUFENE Arbeitsverzeichnisse (privates /tmp je Benutzer).
+
+    Anders als die Arbeitskopien haengt hier ALLES an der Frist: das Verzeichnis
+    gehoert dem Benutzer und ueberlebt seine Laeufe bewusst, damit eine
+    Folgefrage das Zwischenprodukt noch findet. Es gibt also keinen Zeitpunkt,
+    an dem "der Auftrag ist fertig" auch "weg damit" heisst.
+
+    Die Frist ist ABSICHTLICH grosszuegiger (mindestens 4 h): sie ist die einzige
+    Schranke gegen ein Verzeichnis, in dem gerade gearbeitet wird. Ein aktiver
+    Lauf haelt die mtime frisch, ein 4 h stiller Benutzer arbeitet nicht mehr.
+
+    **Das eigentliche Aufraeumen kann nur root** (Unterverzeichnisse des
+    Sandbox-Benutzers) – siehe ``lauf_tmp.aufraeumen_root`` und die Broker-Op.
+    Diese Fassung ist der Weg fuer den Alt-Betrieb (Backend als root) und raeumt
+    sonst nur, was ihr gehoert.
+    """
+    ttl = (ttl_minutes() if ttl_min is None else int(ttl_min))
+    if ttl <= 0:
+        return []
+    ttl = max(ttl, 240)
+    grenze = (time.time() if now is None else now) - ttl * 60
+    weg: list[str] = []
+    try:
+        from backend.lauf_tmp import ARBEIT_ROOT as _WURZEL
+        if not _WURZEL.is_dir():
+            return []
+        import shutil as _shutil
+        for d in _WURZEL.iterdir():
+            try:
+                st = d.lstat()
+                import stat as _stat
+                if not _stat.S_ISDIR(st.st_mode):
+                    continue
+                if st.st_mtime >= grenze:
+                    continue
+                _shutil.rmtree(d, ignore_errors=True)
+                if not d.exists():
+                    weg.append(d.name)
+            except FileNotFoundError:
+                continue
+            except Exception as e:  # noqa: BLE001
+                print(f"[Anhang] Arbeitsverzeichnis {d.name} nicht entfernbar: {e}",
+                      flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"[Anhang] Arbeitsverzeichnisse nicht pruefbar: {e}", flush=True)
+    if weg:
+        print(f"[Anhang] {len(weg)} abgelaufene(s) Arbeitsverzeichnis(se) entfernt",
+              flush=True)
+    return weg
 
 
 def cleanup(ttl_min: int | None = None, now: float | None = None) -> list[str]:
@@ -76,11 +163,12 @@ def cleanup(ttl_min: int | None = None, now: float | None = None) -> list[str]:
     grenze = (time.time() if now is None else now) - ttl * 60
     uid = os.getuid()
     weg: list[str] = []
-    try:
-        eintraege = list(WORK_DIR.iterdir())
-    except Exception as e:  # noqa: BLE001
-        print(f"[Anhang] /tmp nicht lesbar: {e}", flush=True)
-        return []
+    eintraege = []
+    for wurzel in _arbeitswurzeln():
+        try:
+            eintraege += list(wurzel.iterdir())
+        except Exception as e:  # noqa: BLE001
+            print(f"[Anhang] {wurzel} nicht lesbar: {e}", flush=True)
     for p in eintraege:
         if not _NAME_RE.match(p.name):
             continue

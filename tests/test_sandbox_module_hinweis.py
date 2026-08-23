@@ -226,9 +226,16 @@ pruef("verbietet das Weitersuchen nach Modulen",
       "suche NICHT nach weiteren Modulen" in PUNKT16)
 pruef("verlangt, dem Benutzer das fehlende Modul zu nennen",
       "welches Modul fehlt" in PUNKT16)
-pruef("Excel geht ueber office_create_excel, nicht per openpyxl-Eigenbau",
-      "openpyxl/pandas selbst zusammenbauen" in PUNKT16
-      and "office_create_excel da" in PUNKT16)
+# Die Pruefung war seit dem 2026-08-19 ROT, und zwar zu Recht am Wortlaut: der
+# Prompt wurde beim Excel-Umbau umformuliert ("LIEGT DIE TABELLE SCHON VOR …
+# ist office_create_excel der FALSCHE Weg" + xlsx_*-Werkzeuge), der Waechter
+# suchte weiter den alten Satz "openpyxl/pandas selbst zusammenbauen".
+# Geprueft wird jetzt die AUSSAGE, nicht die Formulierung – sonst faellt der
+# Test bei jeder Textpflege aus und wird irgendwann abgeschaltet.
+pruef("Excel geht ueber die Werkzeuge, nicht per Eigenbau",
+      "office_create_excel da" in PUNKT16
+      and ("openpyxl/pandas selbst zusammenbauen" in PUNKT16
+           or "office_create_excel der FALSCHE Weg" in PUNKT16))
 # Genau die Notloesung, die auf ECHT herauskam.
 pruef("CSV als Ersatz fuer eine gewuenschte Excel-Datei ist untersagt",
       "ersatzweise als CSV" in PUNKT16)

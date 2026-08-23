@@ -175,7 +175,7 @@ class ShellTool(BaseTool):
         }
 
     @staticmethod
-    def _code_to_command(code: str) -> str:
+    def _code_to_command(code: str, tempdateien: list = None) -> str:
         """Wandelt Code in einen ausfuehrbaren Shell-Befehl um.
         Schreibt Python-Code in eine Temp-Datei um Quoting-Probleme zu vermeiden."""
         import tempfile, os
@@ -199,12 +199,32 @@ class ShellTool(BaseTool):
         if any(code.startswith(s) for s in shell_indicators):
             return code
 
-        # Python-Code in Temp-Datei schreiben (vermeidet ALLE Quoting-Probleme)
+        # Python-Code in Temp-Datei schreiben (vermeidet ALLE Quoting-Probleme).
+        #
+        # Die Datei entsteht DIREKT im Lauf-Verzeichnis (ohne Isolation: im
+        # echten /tmp). Der Lauf sieht sie dort als `/tmp/<name>` – es braucht
+        # also keine eigene Bindung, und im Befehl steht der Modell-Pfad.
+        #
+        # ALTFEHLER, hier mitbehoben: `NamedTemporaryFile` legt mit 0600 an. Der
+        # Befehl eines Domain-Benutzers laeuft aber als `jarvis_sandbox` –
+        # `python3 /tmp/jarvis_x.py` scheiterte damit seit immer mit `Errno 13`,
+        # der Parameter `code` war fuer Netzwerk-Benutzer also unbenutzbar.
+        # Aufgeraeumt wird vom Aufrufer und NICHT per `rm -f` im Befehl: als
+        # Sandbox-Benutzer scheiterte dieses rm ohnehin still (fremder
+        # Eigentuemer im sticky /tmp).
+        from backend import lauf_tmp as _lt
+        _verz = _lt.temp_verzeichnis()
         tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.py', prefix='jarvis_',
-                                           dir='/tmp', delete=False)
+                                           dir=str(_verz), delete=False)
         tmp.write(stripped)
         tmp.close()
-        return f"python3 {tmp.name} ; rm -f {tmp.name}"
+        _lt.temp_datei_freigeben(tmp.name)
+        if tempdateien is not None:
+            tempdateien.append(tmp.name)
+        # Im Lauf heisst dieselbe Datei /tmp/<name> – der Befehl muss den
+        # MODELL-Pfad nennen, nicht den Host-Pfad.
+        _im_lauf = "/tmp/" + os.path.basename(tmp.name)
+        return f"python3 {_im_lauf}"
 
     async def execute(
         self,
@@ -216,15 +236,18 @@ class ShellTool(BaseTool):
         **kwargs,
     ) -> str:
         """Fuehrt Shell-Befehl aus. Bei _status_callback wird stdout live gestreamt."""
+        # Temp-Skripte dieses Aufrufs: werden am Ende geloescht und bei aktiver
+        # Lauf-Isolation in den Namespace gebunden.
+        _tempdateien: list = []
         # Fallback: LLM schickt manchmal "cmd" oder "code" statt "command"
         if not command and kwargs.get("cmd"):
             command = kwargs["cmd"]
         if not command and code:
-            command = self._code_to_command(code.strip())
+            command = self._code_to_command(code.strip(), _tempdateien)
         elif command and code:
             if command.strip().endswith("-c"):
                 # command="python3 -c" + code separat -> Temp-Datei
-                command = self._code_to_command(code.strip())
+                command = self._code_to_command(code.strip(), _tempdateien)
             # Sonst: command hat Vorrang, code ignorieren
 
         if not command:
@@ -236,12 +259,22 @@ class ShellTool(BaseTool):
         # Root-Bedarf VOR dem Env-Prefix erkennen (Original-Befehl des Agenten)
         _wants_root = _needs_root(command)
 
+        # Privates /tmp (backend/lauf_tmp.py). Im Lauf IST /tmp das
+        # Arbeitsverzeichnis DIESES BENUTZERS – der Modell-Pfad
+        # /tmp/ergebnis.xlsx bleibt damit gueltig, die Datei liegt auf dem Host
+        # darin und ist fuer die Auslieferung erreichbar.
+        from backend import lauf_tmp as _lauf_tmp
+        _lauf = _lauf_tmp.aktueller_lauf()
+
         # Grafik-Umgebung fuer matplotlib/seaborn: headless (Agg, kein DISPLAY) +
-        # schreibbarer Cache PRO OS-User unter /tmp. Der Sandbox-User hat kein
-        # schreibbares HOME; der $(id -u)-Suffix vermeidet Rechte-Kollisionen
-        # zwischen privilegierten Usern und dem Sandbox-User. Als Prefix im
+        # schreibbarer Cache unter /tmp. Der Sandbox-User hat kein schreibbares
+        # HOME. Ohne Isolation trennt der $(id -u)-Suffix privilegierte User vom
+        # Sandbox-User; MIT Isolation liegt der Cache IM Arbeitsverzeichnis, das
+        # je Benutzer existiert und den Lauf ueberlebt – der Schriftarten-Index
+        # wird also einmal gebaut und nicht bei jedem Shell-Befehl. Als Prefix im
         # Kommando (nicht via Parent-Env), weil runuser die Env nicht durchreicht.
-        command = "export MPLBACKEND=Agg MPLCONFIGDIR=/tmp/.mpl-$(id -u); " + command
+        _mplcfg = _lauf_tmp.MPL_ZIEL if _lauf else "/tmp/.mpl-$(id -u)"
+        command = ("export MPLBACKEND=Agg TMPDIR=/tmp MPLCONFIGDIR=%s; " % _mplcfg) + command
 
         _broker_user = (kwargs.get("_broker_user") or "").strip()
         # Rein informativer Ausloeser-Kontext (Agent-Task-Auszug) fuers Audit-Log.
@@ -251,27 +284,58 @@ class ShellTool(BaseTool):
         # Wird vom Agent-Dispatch nur fuer nicht-privilegierte Benutzer gesetzt.
         _sandbox_user = (kwargs.get("_sandbox_user") or "").strip()
         if _sandbox_user:
+            # Was in den Lauf hineingebunden werden muss: das Anhang-Verzeichnis
+            # dieses Benutzers. Es liegt bewusst NICHT im Lauf-Verzeichnis – eine
+            # Arbeitskopie ueberlebt den Lauf, weil die Folgefrage ("und jetzt
+            # Spalte C") sie noch braucht. Die Temp-Skripte brauchen keine
+            # Bindung: sie werden direkt im Lauf-Verzeichnis angelegt.
+            _ro_binds = []
+            _rw_binds = []
+            if _lauf:
+                _ro_binds += _lauf_tmp.anhang_binds(_lauf.benutzer)
+                # Vom AUFRUFER angemeldete Arbeitsverzeichnisse (z.B. der
+                # Wegwerf-Klon des Claude-Subagenten). Sie ueberleben den Lauf
+                # und koennen deshalb nicht im Lauf-Verzeichnis liegen.
+                _rw_binds += list(_lauf_tmp.zusatz_binds())
             if os.geteuid() == 0:
                 # Alt-Betrieb (Backend als root): runuser direkt
                 from backend import sandbox as _sbx
-                command = _sbx.wrap_sandboxed(command, _sandbox_user)
-                cwd = "/tmp"   # Arbeitsverzeichnis auf den Sandbox-Bereich zwingen
+                _ldir = (_lauf_tmp.arbeit_bereitstellen(_lauf.kennung, _sandbox_user)
+                         if _lauf else None)
+                command = _sbx.wrap_sandboxed(
+                    command, _sandbox_user, _ldir,
+                    _lauf_tmp.binds_pruefen(_ro_binds),
+                    rw_binds=_lauf_tmp.rw_binds_pruefen(_rw_binds))
+                # Arbeitsverzeichnis auf den Sandbox-Bereich zwingen. Bei aktiver
+                # Isolation setzt bwrap zusaetzlich --chdir /tmp; der Host-cwd
+                # muss trotzdem existieren, sonst startet die Shell nicht.
+                cwd = str(_ldir) if _ldir else "/tmp"
             else:
-                # Getrennter Betrieb: runuser braucht root → Root-Broker
-                return await self._exec_via_broker(
-                    "sandbox_exec",
-                    {"user": _sandbox_user, "command": command, "timeout": timeout,
-                     "_context": _broker_context},
-                    _broker_user, timeout, _status_callback)
+                # Getrennter Betrieb: runuser braucht root → Root-Broker. Der legt
+                # das Arbeitsverzeichnis an und uebertraegt es dem Sandbox-Benutzer
+                # (chown braucht root) – deshalb geht nur die KENNUNG hinueber.
+                try:
+                    return await self._exec_via_broker(
+                        "sandbox_exec",
+                        {"user": _sandbox_user, "command": command, "timeout": timeout,
+                         "arbeit": _lauf.kennung if _lauf else "",
+                         "ro_binds": _ro_binds, "rw_binds": _rw_binds,
+                         "_context": _broker_context},
+                        _broker_user, timeout, _status_callback)
+                finally:
+                    self._temp_weg(_tempdateien)
 
         # Root-Befehle privilegierter Benutzer: ueber den Root-Broker (shell_root).
         # Unbekannte Befehle erzeugen dort einen Pending-Eintrag fuer den Admin.
         elif _wants_root and os.geteuid() != 0 and kwargs.get("_root_broker"):
-            return await self._exec_via_broker(
-                "shell_root",
-                {"command": command, "cwd": cwd, "timeout": timeout,
-                 "_context": _broker_context},
-                _broker_user, timeout, _status_callback)
+            try:
+                return await self._exec_via_broker(
+                    "shell_root",
+                    {"command": command, "cwd": cwd, "timeout": timeout,
+                     "_context": _broker_context},
+                    _broker_user, timeout, _status_callback)
+            finally:
+                self._temp_weg(_tempdateien)
 
         # Python-Buffering deaktivieren fuer Live-Streaming
         env = os.environ.copy()
@@ -284,6 +348,12 @@ class ShellTool(BaseTool):
                 env=env,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=cwd,
+                # EIGENE Prozessgruppe: ein Timeout muss den ganzen Baum treffen.
+                # `proc.kill()` beendet nur die aeussere Shell – bei
+                # `runuser -> setpriv -> bwrap -> bash -> python` lief der Rest
+                # als Waise weiter (aelter als die Isolation, faellt damit aber
+                # mehr auf: die Waise schreibt in ein abgeraeumtes Verzeichnis).
+                start_new_session=True,
             )
 
             # Live-Streaming: stdout zeilenweise lesen und senden
@@ -306,7 +376,7 @@ class ShellTool(BaseTool):
                                 proc.stdout.readline(), timeout=timeout
                             )
                         except asyncio.TimeoutError:
-                            proc.kill()
+                            self._gruppe_beenden(proc)
                             return f"⏰ Timeout nach {timeout}s. Befehl abgebrochen."
 
                         if not line:
@@ -324,7 +394,7 @@ class ShellTool(BaseTool):
                     await stderr_task
 
                 except asyncio.TimeoutError:
-                    proc.kill()
+                    self._gruppe_beenden(proc)
                     return f"⏰ Timeout nach {timeout}s. Befehl abgebrochen."
 
                 result = ""
@@ -344,7 +414,7 @@ class ShellTool(BaseTool):
                         proc.communicate(), timeout=timeout
                     )
                 except asyncio.TimeoutError:
-                    proc.kill()
+                    self._gruppe_beenden(proc)
                     return f"⏰ Timeout nach {timeout}s. Befehl abgebrochen."
 
                 result = ""
@@ -359,6 +429,40 @@ class ShellTool(BaseTool):
 
         except Exception as e:
             return f"Fehler: {str(e)}"
+        finally:
+            self._temp_weg(_tempdateien)
+
+    @staticmethod
+    def _gruppe_beenden(proc) -> None:
+        """Prozessgruppe des Befehls beenden (Timeout).
+
+        Mit ``start_new_session=True`` ist die pid des Kindes die Gruppen-Id;
+        ``killpg`` erwischt damit auch runuser/bwrap/python darunter. Rueckfall
+        auf ``proc.kill()``, falls die Gruppe schon weg ist.
+        """
+        import signal
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            try:
+                proc.kill()
+            except Exception:  # noqa: BLE001
+                pass
+
+    @staticmethod
+    def _temp_weg(pfade) -> None:
+        """Temp-Skripte dieses Aufrufs entfernen.
+
+        Sie gehoeren dem Dienstbenutzer, das Loeschen klappt also auch dann, wenn
+        der Befehl selbst als Sandbox-Benutzer lief – genau das konnte das
+        frueher im Befehl mitgeschickte `rm -f` NICHT (fremder Eigentuemer im
+        sticky /tmp), weshalb diese Dateien bis zum Reboot liegen blieben.
+        """
+        for pf in (pfade or []):
+            try:
+                os.unlink(pf)
+            except OSError:
+                pass
 
     async def _exec_via_broker(self, op: str, args: dict, username: str,
                                timeout: int, _status_callback) -> str:

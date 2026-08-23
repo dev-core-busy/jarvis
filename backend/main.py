@@ -575,13 +575,16 @@ def _anhang_ablegen(rohdaten: bytes, dateiname: str, benutzer: str):
     * ``data/documents`` – dauerhaft, MIT Eigentuemer-Vermerk. Ohne den waere der
       eigene Anhang fuer den Hochladenden selbst nicht mehr auffindbar (die
       Eigentuemer-Schranke in ``sandbox.py`` ist fail-closed).
-    * ``/tmp/anhang_<12 Hex>_<name>`` – Arbeitskopie fuer die Shell.
+    * ``anhang_<12 Hex>_<name>`` – Arbeitskopie fuer die Shell.
       ``data/documents`` ist 0750 und fuer den Sandbox-Benutzer gesperrt; ohne
       diese Kopie waere "analysiere die angehaengte Tabelle" mit pandas/openpyxl
-      fuer Netzwerk-Benutzer tot. Zufaelliges Praefix, weil /tmp von allen
-      Sandbox-Laeufen geteilt wird – der Name ist damit nicht erratbar. Die
-      Kopie verfaellt nach ``JARVIS_ATTACH_TTL_MIN`` (Vorgabe 30 min,
-      ``backend/attachments.py``).
+      fuer Netzwerk-Benutzer tot. Den ORT bestimmt ``lauf_tmp.anhang_ziel()``:
+      bei aktiver Lauf-Isolation ein Verzeichnis JE BENUTZER, das nur in dessen
+      eigene Laeufe eingehaengt wird; ohne Isolation wie bisher direkt in
+      ``/tmp``. Der Modell-Pfad ist in beiden Faellen der Host-Pfad – nur so
+      finden auch die Backend-Werkzeuge (``xlsx_inspect``, ``office_read``) die
+      Datei unter dem Namen, den das Modell nennt. Die Kopie verfaellt nach
+      ``JARVIS_ATTACH_TTL_MIN`` (Vorgabe 30 min, ``backend/attachments.py``).
 
     Scheitert die dauerhafte Ablage, wird ``(None, None)`` gemeldet – der
     Aufrufer laesst den Pfad-Hinweis dann weg, statt auf eine Datei zu zeigen,
@@ -608,7 +611,8 @@ def _anhang_ablegen(rohdaten: bytes, dateiname: str, benutzer: str):
 
     arbeit = None
     try:
-        arbeit = Path("/tmp") / f"anhang_{_uuidatt.uuid4().hex[:12]}_{sicher}"
+        from backend import lauf_tmp as _lauf_tmp
+        arbeit = _lauf_tmp.anhang_ziel(benutzer, sicher)
         arbeit.write_bytes(rohdaten)
         # 0644 – ausdruecklich OHNE Ausfuehrungsrecht.
         os.chmod(arbeit, 0o644)
@@ -3696,6 +3700,37 @@ async def startup_sandbox_python():
 
 
 @app.on_event("startup")
+async def startup_lauf_isolation():
+    """Privates /tmp pro Agent-Lauf pruefen – und den Ausfall SAGEN.
+
+    Die Isolation (``backend/lauf_tmp.py``) ist fail-open: ohne ``bwrap`` teilen
+    die Laeufe ``/tmp`` wie vor dem Umbau. Das ist die richtige Wahl – die
+    Alternative waere, auf einem Server ohne ``bubblewrap`` jeden Shell-Befehl
+    jedes Netzwerk-Benutzers abzuschalten. Aber ein Schutz, der still ausfaellt,
+    ist kein Schutz: deshalb steht der Zustand im Journal, wenn er NICHT gilt.
+
+    Die Pruefung startet ausserdem den echten bwrap-Probelauf, damit sein
+    Ergebnis gecacht ist, bevor der erste Auftrag kommt (er kostet einen
+    Unterprozess und liefe sonst im ersten Lauf mitten im Event-Loop).
+    """
+    try:
+        from backend import lauf_tmp as _lt
+        stand = _lt.bericht()
+        if not stand["gewuenscht"]:
+            print("[Lauf-Isolation] Abgeschaltet (JARVIS_LAUF_ISOLATION=0) – "
+                  "alle Agent-Laeufe teilen /tmp.", flush=True)
+            return
+        ok = await asyncio.to_thread(_lt.bwrap_verfuegbar)
+        if not ok:
+            print("[Lauf-Isolation] NICHT AKTIV – die Laeufe teilen /tmp, jeder "
+                  "Netzwerk-Benutzer kann die Arbeitskopien der anderen lesen. "
+                  "Abhilfe: apt-get install -y bubblewrap (der Broker-Start "
+                  "versucht das selbst).", flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"[Lauf-Isolation] Pruefung uebersprungen: {e}", flush=True)
+
+
+@app.on_event("startup")
 async def startup_info_files_dir():
     """Ablage-Ordner fuer die Portal-Info-Dokumente bereitstellen.
 
@@ -3769,13 +3804,12 @@ async def startup_documents_retention():
 async def startup_attachment_cleanup():
     """Anhang-Arbeitskopien in /tmp altern lassen (Vorgabe 30 min).
 
-    Die Kopie muss fuer `jarvis_sandbox` lesbar sein, und weil ALLE Domain-Benutzer
-    als dieser eine OS-Benutzer laufen, kann jeder die Anhaenge aller anderen lesen
-    (auf DEV nachgestellt 2026-08-05: `cat` und `ls /tmp` gelingen). Dateirechte
-    koennen das nicht loesen – 0600 sperrte den eigenen Lauf aus. Bis eine echte
-    Trennung existiert (privates /tmp pro Lauf via Mount-Namespace), begrenzt dieser
-    Hook wenigstens die LEBENSDAUER: auf DEV lagen Arbeitsdateien von mehreren Tagen
-    in /tmp.
+    Die SICHTBARKEIT regelt seit 2026-08-23 der Mount-Namespace je Lauf
+    (`backend/lauf_tmp.py`); dieser Hook begrenzt die LEBENSDAUER – Datenminimierung,
+    und die einzige Schranke auf einem Server ohne `bwrap`. Ausserdem raeumt er
+    ABGELAUFENE Arbeitsverzeichnisse ab: die gehoeren dem Benutzer und ueberleben
+    seine Laeufe bewusst (eine Folgefrage braucht das Zwischenprodukt), es gibt
+    also nur die Frist.
 
     **Frist statt "loeschen nach dem Lauf":** der /tmp-Pfad steht im Chat-Verlauf und
     damit im Kontext der Folgeanfragen – ein sofortiges Loeschen laesst "und jetzt
@@ -3788,6 +3822,20 @@ async def startup_attachment_cleanup():
         while True:
             try:
                 await asyncio.to_thread(_attachments.cleanup)
+                # Abgelaufene Arbeitsverzeichnisse (privates /tmp je Benutzer):
+                # im getrennten Betrieb ueber den Broker, weil darin
+                # Unterverzeichnisse des Sandbox-Benutzers liegen, die das
+                # unprivilegierte Backend nicht loeschen darf (dann scheitert
+                # rmtree STILL).
+                if os.geteuid() == 0:
+                    await asyncio.to_thread(_attachments.cleanup_arbeit)
+                else:
+                    try:
+                        from backend import broker_client as _bc
+                        await _bc.call("lauf_aufraeumen", {"alter_min": 240},
+                                       user="system", timeout=60)
+                    except Exception as e:  # noqa: BLE001
+                        print(f"[Anhang] Lauf-Verzeichnisse: {e}", flush=True)
             except Exception as e:
                 print(f"[Anhang] Aufraeumen fehlgeschlagen: {e}", flush=True)
             await asyncio.sleep(300)

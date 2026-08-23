@@ -937,20 +937,27 @@ async def job_ausfuehren(job_id: str) -> None:
 
         antwort = ""
         try:
-            antwort = await asyncio.wait_for(
-                agent.run_task_headless(
-                    auftrag,
-                    # "" heisst hier NICHT "aus", sondern "keine Vorgabe" – dann
-                    # gilt Profil bzw. globale Einstellung. Deshalb None.
-                    reasoning_effort=reasoning_effort() or None,
-                    # privileged ist HART False und kein Feld des Auftrags.
-                    # internet aus: die Aufgabe braucht kein Netz, und ein
-                    # unprivilegierter Lauf mit Fremdtext soll keines haben.
-                    actor={"user": job["user"], "privileged": False,
-                           "internet": False, "sap": False},
-                ),
-                timeout=grenze_s,
-            )
+            # Der Wegwerf-Klon liegt in /tmp/claude_subagent/<job> und muss im
+            # Lauf SICHTBAR und BESCHREIBBAR sein. Seit dem privaten /tmp pro
+            # Lauf (backend/lauf_tmp.py) ist /tmp im Lauf ausschliesslich das
+            # Lauf-Verzeichnis – ohne diese Anmeldung existierte der Pfad dort
+            # nicht und der Skill waere still kaputt.
+            from backend import lauf_tmp as _lauf_tmp
+            with _lauf_tmp.zusatz_bind(str(work.parent)):
+                antwort = await asyncio.wait_for(
+                    agent.run_task_headless(
+                        auftrag,
+                        # "" heisst hier NICHT "aus", sondern "keine Vorgabe" –
+                        # dann gilt Profil bzw. globale Einstellung. Deshalb None.
+                        reasoning_effort=reasoning_effort() or None,
+                        # privileged ist HART False und kein Feld des Auftrags.
+                        # internet aus: die Aufgabe braucht kein Netz, und ein
+                        # unprivilegierter Lauf mit Fremdtext soll keines haben.
+                        actor={"user": job["user"], "privileged": False,
+                               "internet": False, "sap": False},
+                    ),
+                    timeout=grenze_s,
+                )
         except asyncio.TimeoutError:
             antwort = f"(Zeitlimit von {grenze_s}s ueberschritten)"
         except Exception as e:  # noqa: BLE001

@@ -59,7 +59,6 @@ from backend import short_tracks as st
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DOCS_DIR = PROJECT_ROOT / "data" / "documents"
-TMP_DIR = Path("/tmp")
 
 # Wie viel Fremdtext an das Modell geht. Ein 200-seitiges PDF sprengt sonst den
 # Kontext, und der entscheidende Teil (Anfang) fliegt bei der Kompression zuerst
@@ -165,8 +164,8 @@ def datei_ablegen(rohdaten: bytes, dateiname: str, benutzer: str) -> Path | None
     return ziel
 
 
-def _arbeitskopie(quelle: Path) -> Path | None:
-    """Arbeitskopie in /tmp fuer die Shell – erst unmittelbar vor dem Lauf.
+def _arbeitskopie(quelle: Path, besitzer: str = "") -> Path | None:
+    """Arbeitskopie fuer die Shell – erst unmittelbar vor dem Lauf.
 
     ``data/documents`` ist 0750 und fuer den Sandbox-Benutzer gesperrt; ohne
     diese Kopie waere eine Auswertung mit pandas/openpyxl fuer Netzwerk-Benutzer
@@ -174,9 +173,15 @@ def _arbeitskopie(quelle: Path) -> Path | None:
     ``backend/attachments.py`` sie nach der Frist mit abraeumt – ein eigenes
     Praefix wuerde dort nicht getroffen und die Kopien blieben bis zum Reboot
     liegen.
+
+    Den ORT bestimmt ``lauf_tmp.anhang_ziel()``: bei aktiver Lauf-Isolation ein
+    Verzeichnis je Benutzer, das nur in dessen eigene Laeufe eingehaengt wird.
+    OHNE ``besitzer`` landet die Kopie im gemeinsamen ``/tmp`` – deshalb wird er
+    hier durchgereicht und nicht bequem weggelassen.
     """
     try:
-        ziel = TMP_DIR / ("anhang_%s_%s" % (uuid.uuid4().hex[:12], _sicherer_name(quelle.name)))
+        from backend import lauf_tmp as _lauf_tmp
+        ziel = _lauf_tmp.anhang_ziel(besitzer, _sicherer_name(quelle.name))
         ziel.write_bytes(quelle.read_bytes())
         os.chmod(ziel, 0o644)      # ausdruecklich OHNE Ausfuehrungsrecht
         return ziel
@@ -947,7 +952,9 @@ async def _fuehre_aus(job_id: str) -> None:
         # lange wartenden Auftrags abraeumen).
         for t in j["_teile"]:
             if t.get("pfad") and not t.get("tmp"):
-                kopie = await asyncio.to_thread(_arbeitskopie, Path(t["pfad"]))
+                kopie = await asyncio.to_thread(
+                    _arbeitskopie, Path(t["pfad"]),
+                    j.get("owner_roh") or j.get("owner") or "")
                 if kopie is not None:
                     t["tmp"] = kopie.as_posix()
         await _injektion_pruefen(j, j["_teile"])

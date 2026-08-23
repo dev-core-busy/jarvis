@@ -347,6 +347,24 @@ def authorize_fs(action: str, path: str) -> tuple[bool, str]:
     # Inhalt wird in filesystem.py gefiltert), einzelne fremde Dateien nicht.
     if rp != DOCS_ROOT and _under(rp, [DOCS_ROOT]) and not may_see_document(rp.name):
         return False, "diese Datei gehört einem anderen Benutzer"
+    # Dieselbe Schranke fuer die Arbeitskopien der Anhaenge. Sie liegen seit
+    # 2026-08-23 je Benutzer unter /tmp/jarvis-anhaenge/<kennung>/ – vorher
+    # direkt in /tmp, und damit konnte ein Domain-Benutzer den Anhang eines
+    # anderen ueber JEDES Backend-Werkzeug oeffnen (office_read,
+    # xlsx_read_range, create_chart), sobald er den Namen kannte. Den Namen
+    # nannte ihm `filesystem list /tmp`.
+    try:
+        from backend import lauf_tmp as _lt
+        if _lt.gehoert_anhang(rp, tool_user()) is False:
+            return False, "dieser Anhang gehört einem anderen Benutzer"
+        # Dasselbe fuer die Arbeitsverzeichnisse. Der Namespace verbirgt sie nur
+        # vor der SHELL; ein Werkzeug im Dienstprozess (filesystem, office_read,
+        # xlsx_read_range) koennte die Ergebnisdatei eines FREMDEN Benutzers
+        # sonst einfach oeffnen – und ein Verzeichnis-Listing nennt die Namen.
+        if _lt.gehoert_arbeitsbereich(rp, tool_user()) is False:
+            return False, "diese Datei gehört einem anderen Benutzer"
+    except Exception:  # noqa: BLE001
+        pass
     return True, ""
 
 
@@ -453,8 +471,17 @@ def authorize_shell(cmd: str) -> tuple[bool, str]:
     return True, ""
 
 
-def wrap_sandboxed(command: str, sandbox_user: str) -> str:
+def wrap_sandboxed(command: str, sandbox_user: str, lauf_dir=None,
+                   ro_binds=(), rw_binds=()) -> str:
     """Verpackt einen Befehl so, dass er als unprivilegierter OS-User laeuft
-    (harte Grenze via OS-Rechte, unabhaengig von Base64/Python/etc.)."""
-    return "runuser -u %s -- /bin/bash -c %s" % (
-        shlex.quote(sandbox_user), shlex.quote(command))
+    (harte Grenze via OS-Rechte, unabhaengig von Base64/Python/etc.).
+
+    Mit ``lauf_dir`` kommt die Mount-Namespace-Isolation dazu: ``/tmp`` ist im
+    Lauf dann NUR dieses Verzeichnis (siehe ``backend/lauf_tmp.py``). Der Aufbau
+    des Aufrufs liegt bewusst dort und nicht hier – der Broker braucht ihn
+    genauso, und zwei Fassungen desselben bwrap-Aufrufs waeren in drei Wochen
+    auseinandergelaufen.
+    """
+    from backend import lauf_tmp as _lt
+    return _lt.sandbox_befehl(sandbox_user, command, lauf_dir, ro_binds,
+                              rw_binds=rw_binds)

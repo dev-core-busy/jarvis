@@ -144,6 +144,7 @@ from backend.skills.manager import SkillManager
 from backend.tools.memory import load_memory_context, load_selective_memory
 import backend.conv_log as conv_log
 import backend.documents as _documents
+import backend.lauf_tmp as _lauf_tmp
 
 # ── Sicherheit: LDAP-Benutzer duerfen diese Tools NICHT verwenden ─────────
 _LOCAL_PRIVILEGED_USERS = {"jarvis", "root", ""}
@@ -1443,6 +1444,49 @@ KRITISCH – Autonomie-Regeln:
                     except AttributeError:
                         pass
 
+    @staticmethod
+    def _lauf_pfade_umleiten(name: str, tool, exec_args: dict) -> None:
+        """Uebersetzt Modell-Pfade fuer Werkzeuge, die IM DIENSTPROZESS laufen.
+
+        Bei aktiver Lauf-Isolation ist ``/tmp`` INNERHALB des Laufs das
+        Lauf-Verzeichnis (``backend/lauf_tmp.py``). Werkzeuge wie ``filesystem``,
+        ``create_chart(source.file)``, ``xlsx_*`` oder ``pdf_formular_extrakt``
+        laufen aber nicht dort, sondern im Backend – sie wuerden ``/tmp/x.xlsx``
+        im ECHTEN /tmp suchen und nichts finden, obwohl die Shell die Datei
+        gerade geschrieben hat. Genau dieser Widerspruch ist die Sorte Fehler,
+        die niemand erklaeren kann.
+
+        Umgelenkt wird nur, was das Werkzeug selbst als Pfadfeld ausweist –
+        dieselbe Quelle, aus der auch die Freigabe (``pfad_parameter``) kommt.
+        Anhaenge bleiben unberuehrt: dort ist der Host-Pfad absichtlich gleich
+        dem Modell-Pfad, damit beide Welten dieselbe Datei sehen.
+        """
+        try:
+            from backend import lauf_tmp as _lt
+            if not _lt.aktueller_lauf():
+                return
+            if name == "filesystem":
+                if exec_args.get("path"):
+                    exec_args["path"] = _lt.aufloesen(str(exec_args["path"]))
+                return
+            if name == "create_chart":
+                quelle = exec_args.get("source")
+                if isinstance(quelle, dict):
+                    # Flache Kopie: exec_args ist eine Kopie von args, das
+                    # verschachtelte dict aber NICHT – ohne diese Zeile wuerde
+                    # der Aufruf im Verlauf mitgeaendert.
+                    quelle = dict(quelle)
+                    for feld in ("file", "path"):
+                        if quelle.get(feld):
+                            quelle[feld] = _lt.aufloesen(str(quelle[feld]))
+                    exec_args["source"] = quelle
+                return
+            for feld in (getattr(tool, "pfad_parameter", None) or ()):
+                if exec_args.get(feld):
+                    exec_args[feld] = _lt.aufloesen(str(exec_args[feld]))
+        except Exception as e:  # noqa: BLE001
+            _log(f"Pfad-Umleitung fuer {name} nicht moeglich: {e}")
+
     def _attach_extra_tools(self) -> None:
         """Haengt die NICHT aus Skills stammenden Werkzeuge an.
 
@@ -1638,12 +1682,18 @@ KRITISCH – Autonomie-Regeln:
         # Hauptagenten sich vermischen. Eine geerbte Bindung (Sub-Agent eines
         # unprivilegierten Laufs) hat Vorrang vor der Namens-Heuristik.
         _inherited = getattr(self, "_current_actor_privileged", None)
-        _actor_token = _actor_cv.set((
-            self._current_username,
-            bool(_inherited) if _inherited is not None
-            else ((not self._current_username)
-                  or self._current_username in _LOCAL_PRIVILEGED_USERS),
-        ))
+        _lauf_privilegiert = (bool(_inherited) if _inherited is not None
+                              else ((not self._current_username)
+                                    or self._current_username in _LOCAL_PRIVILEGED_USERS))
+        _actor_token = _actor_cv.set((self._current_username, _lauf_privilegiert))
+        # Privates /tmp dieses Laufs (backend/lauf_tmp.py): unprivilegierte
+        # Laeufe bekommen ein eigenes Verzeichnis, das im Namespace auf /tmp
+        # gemountet wird – fremde Arbeitskopien sind darin nicht vorhanden.
+        # Ein Sub-Agent ERBT das Verzeichnis (die Klammer ist verschachtelbar),
+        # sonst saehe er die Dateien seines Eltern-Laufs nicht.
+        _lauf_stack = contextlib.ExitStack()
+        _lauf_stack.enter_context(_lauf_tmp.lauf_scope(
+            self._current_username, _lauf_privilegiert))
         self._tool_cache.clear()  # Cache für diesen Task-Run leeren
         # Delegations-Deckel gilt PRO AUFTRAG. Ohne diesen Reset waere der
         # geteilte Hauptagent nach acht Delegationen dauerhaft gesperrt.
@@ -2548,6 +2598,12 @@ KRITISCH – Autonomie-Regeln:
                 _actor_cv.reset(_actor_token)
             except Exception:
                 pass
+            # Lauf-Verzeichnis abraeumen (nur der aeussere Lauf raeumt wirklich).
+            # NACH _deliver_docs: die Auslieferung liest daraus.
+            try:
+                _lauf_stack.close()
+            except Exception as e:  # noqa: BLE001
+                _log(f"Lauf-Verzeichnis nicht abgeraeumt: {e}")
         # Benutzer-Stop hat immer Vorrang: nach einem manuellen Abbruch NIE
         # automatisch neu versuchen (auch wenn zwischendrin ein Fehler auftrat).
         if stop_scope.stopped:
@@ -2589,6 +2645,12 @@ KRITISCH – Autonomie-Regeln:
 
     async def _run_headless(self, task_text: str, reasoning_effort=None) -> str:
         self._current_reasoning_effort = reasoning_effort
+        # Privates /tmp – auch hier, denn ueber diesen Weg laufen E-Mail-Regeln,
+        # Short Tracks, Cron und die Rollen-Agenten: sie sind IMMER
+        # unprivilegiert und teilten sich bis 2026-08-23 /tmp mit allen anderen.
+        _lauf_stack = contextlib.ExitStack()
+        _lauf_stack.enter_context(_lauf_tmp.lauf_scope(
+            self.actor_name(), self._actor_is_privileged()))
         # Delegations-Deckel pro Auftrag (siehe run_task)
         self._delegations_used = 0
         self._fallback_used = set()
@@ -2883,6 +2945,10 @@ KRITISCH – Autonomie-Regeln:
                 current_task_images.reset(_img_token)
             except Exception:
                 pass
+            try:
+                _lauf_stack.close()
+            except Exception as e:  # noqa: BLE001
+                _log(f"Lauf-Verzeichnis nicht abgeraeumt: {e}")
 
         _out = "\n".join(collected_texts) if collected_texts else "Aufgabe ausgefuehrt (keine Textausgabe)."
         # Kanaele ohne Web-Oberflaeche (WhatsApp/Telegram/Cron/Notify): den
@@ -2960,6 +3026,9 @@ KRITISCH – Autonomie-Regeln:
             # Streaming-Callback fuer Tools die es unterstuetzen (z.B. shell_execute)
             # Kopie anlegen um den Original-Dict nicht zu mutieren (json.dumps wuerde sonst scheitern)
             exec_args = dict(args)
+            # Privates /tmp dieses Laufs: Modell-Pfade auf das Lauf-Verzeichnis
+            # umlenken, BEVOR das Werkzeug sie oeffnet.
+            self._lauf_pfade_umleiten(name, tool, exec_args)
             if ws and getattr(tool, 'supports_streaming', False):
                 exec_args['_status_callback'] = lambda msg: self._send_status(ws, msg)
             # Benutzer-spezifischer Memory-Namespace
@@ -3963,6 +4032,14 @@ KRITISCH – Autonomie-Regeln:
             Absichtlich fail-OPEN bei nicht lesbarer mtime: ein Statfehler darf
             eine echte Ergebnisdatei nicht verschlucken – der umgekehrte Fehler
             (Chip fehlt) ist der schlimmere, weil der Nutzer dann gar nichts hat.
+
+            **Das private /tmp ersetzt diese Pruefung NICHT.** Eine Zwischenfassung
+            hat das versucht (Verzeichnis je LAUF -> "was drin liegt, ist aus
+            diesem Lauf"); seit das Arbeitsverzeichnis dem BENUTZER gehoert und
+            seine Laeufe ueberlebt, ist die Annahme falsch – dort liegen auch die
+            Zwischenprodukte von vorhin. Genau die duerfen nicht als Ergebnis
+            dieses Laufs herausgehen (die Fehlerklasse "b45.xlsx aus einem Chat
+            vom Juni", nur eine Ebene naeher).
             """
             if not since:
                 return True
@@ -4023,6 +4100,27 @@ KRITISCH – Autonomie-Regeln:
         import tempfile as _tempfile
         _tmp_root = _Path(_tempfile.gettempdir()).resolve()
         _docs_root = docs_dir.resolve()
+        # Privates /tmp (backend/lauf_tmp.py): der Lauf schreibt seine Ergebnisse
+        # nach /tmp, auf dem Host liegen sie im Lauf-Verzeichnis. Beide Wurzeln
+        # gelten – das echte /tmp, weil derselbe Code auf Servern ohne bwrap und
+        # fuer privilegierte Laeufe unveraendert arbeitet.
+        _arb_roots = []
+        for _r in list(_lauf_tmp.such_wurzeln()) + [_tmp_root]:
+            try:
+                _rr = _r.resolve()
+                if _rr not in _arb_roots:
+                    _arb_roots.append(_rr)
+            except Exception:  # noqa: BLE001
+                continue
+
+        def _unter_arbeit(rp) -> bool:
+            """Liegt der Pfad in einem agent-schreibbaren Arbeitsbereich?"""
+            return any(rp == r or r in rp.parents for r in _arb_roots)
+
+        def _hostpfad(raw: str):
+            """Modell-Pfad in den Host-Pfad DIESES Laufs uebersetzen."""
+            return (_Path(_lauf_tmp.aufloesen(raw)) if raw.startswith("/")
+                    else (proj / raw))
 
         # (m) EXPLIZITE Liefer-Marker [[JARVIS_DELIVER:/pfad]] – liefert JEDEN Dateityp,
         # den der Agent bewusst zur Auslieferung markiert. Sicherheit: nur aus
@@ -4031,7 +4129,7 @@ KRITISCH – Autonomie-Regeln:
         for mk in re.finditer(r"\[\[JARVIS_DELIVER:\s*([^\]|]+?)\s*(?:\|\s*([^\]]+?)\s*)?\]\]", text):
             raw = mk.group(1).strip()
             disp_name = (mk.group(2) or "").strip()
-            p = _Path(raw) if raw.startswith("/") else (proj / raw)
+            p = _hostpfad(raw)
             try:
                 if not p.is_file():
                     continue
@@ -4040,8 +4138,7 @@ KRITISCH – Autonomie-Regeln:
             except Exception:
                 continue
             # Nur agent-schreibbare Orte – NICHT Projekt-Root/cwd (dort liegt z.B. .env)
-            if not (rp == _docs_root or _docs_root in rp.parents
-                    or rp == _tmp_root or _tmp_root in rp.parents):
+            if not (rp == _docs_root or _docs_root in rp.parents or _unter_arbeit(rp)):
                 _log(f"Liefer-Marker abgelehnt (Ort): {raw}")
                 continue
             ext = rp.suffix.lower().lstrip(".")
@@ -4070,7 +4167,7 @@ KRITISCH – Autonomie-Regeln:
         # (b) Lokale Dateipfade zu AGENT-ERZEUGTEN Dokumenten -> nach data/documents/ ziehen
         for m in re.finditer(r"(?:/[\w.\-]+)+\.(?:" + _EXT_RE + r")|data/documents/[\w.\-]+\.(?:" + _EXT_RE + ")", text):
             raw = m.group(0)
-            p = _Path(raw) if raw.startswith("/") else (proj / raw)
+            p = _hostpfad(raw)
             try:
                 if not p.is_file():
                     continue
@@ -4078,11 +4175,11 @@ KRITISCH – Autonomie-Regeln:
                 key = str(rp)
             except Exception:
                 continue
-            # NUR erzeugte Dateien ausliefern: unter /tmp oder data/documents.
-            # NIEMALS Eingabe-/Quelldateien anfassen (z.B. read-only Wissens-Shares
-            # wie /mnt/...). Sonst wuerde shutil.move die Quelle zerstoeren/fehlschlagen.
-            if not (rp == _docs_root or _docs_root in rp.parents
-                    or rp == _tmp_root or _tmp_root in rp.parents):
+            # NUR erzeugte Dateien ausliefern: unter /tmp bzw. im Lauf-Verzeichnis
+            # oder data/documents. NIEMALS Eingabe-/Quelldateien anfassen (z.B.
+            # read-only Wissens-Shares wie /mnt/...) – sonst wuerde der Ingest die
+            # Quelle zerstoeren oder fehlschlagen.
+            if not (rp == _docs_root or _docs_root in rp.parents or _unter_arbeit(rp)):
                 continue
             if _ist_geheim(rp):
                 _log(f"Pfad-Treffer abgelehnt (Secret): {rp.name}")
@@ -4125,7 +4222,7 @@ KRITISCH – Autonomie-Regeln:
         # genannte Projektdatei (settings.json, *.md, *.txt) ein Liefer-Kandidat.
         # Ergebnisse entstehen ohnehin nur in /tmp (shell.py setzt cwd=/tmp) oder
         # in data/documents (Office-Werkzeuge).
-        _search_dirs = [docs_dir, _tmp_root]
+        _search_dirs = [docs_dir] + _arb_roots
         for m in re.finditer(r"(?<![\w./\\-])([\w.\-]+\.(?:" + _EXT_RE + r"))\b", text):
             raw = m.group(1)
             if "/" in raw or "\\" in raw:
@@ -4147,7 +4244,7 @@ KRITISCH – Autonomie-Regeln:
             # Nur agent-schreibbare Orte (kein read-only Quell-Share, NICHT das
             # Projektverzeichnis – dort liegen die Zustandsdateien).
             if not (found == _docs_root or _docs_root in found.parents
-                    or found == _tmp_root or _tmp_root in found.parents):
+                    or _unter_arbeit(found)):
                 continue
             if _ist_geheim(found):
                 _log(f"Namens-Treffer abgelehnt (Secret): {found.name}")

@@ -399,10 +399,23 @@ class ConfluenceDownloadAttachmentTool(_Base):
             if not names:
                 return "Keine Anhaenge an Seite %s." % page_id
 
+        # Zielverzeichnis des LAUFS. Der Download passiert im Backend, gelesen
+        # wird der Anhang aber meist per Shell IM Lauf – und dort ist /tmp
+        # ausschliesslich das Lauf-Verzeichnis (backend/lauf_tmp.py). Ohne diese
+        # Zeile laege die Datei im echten /tmp und waere im Lauf nicht vorhanden.
+        # Gemeldet wird deshalb der Pfad, den der Lauf SIEHT.
+        import os as _os
+        try:
+            from backend import lauf_tmp as _lt
+            ziel_verz = str(_lt.temp_verzeichnis())
+        except Exception:  # noqa: BLE001
+            ziel_verz = "/tmp"
+
         ok, failed = [], []
         for nm in names:
             try:
-                path, size = await _to_thread(c.download_attachment, page_id, nm, "/tmp")
+                path, size = await _to_thread(c.download_attachment, page_id, nm, ziel_verz)
+                path = "/tmp/" + _os.path.basename(path)
                 ok.append((nm, path, size))
             except ConfluenceError as e:
                 failed.append((nm, _fmt_err(e)))

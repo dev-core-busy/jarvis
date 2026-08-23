@@ -417,7 +417,17 @@ class ConfluenceClient:
         # Dateiname aus dem Titel bilden, NICHT aus der URL: der Download-Pfad traegt
         # Query-Parameter (version/modificationDate), die sonst im Namen landen.
         safe = _re.sub(r'[^A-Za-z0-9._-]', "_", os.path.basename(want)).lstrip(".") or "anhang"
-        dest_dir = dest_dir or "/tmp"
+        # Zielverzeichnis: bei aktiver Lauf-Isolation das Verzeichnis DIESES
+        # Laufs. Der Anhang wird hier vom BACKEND geschrieben, gelesen aber oft
+        # per Shell im Lauf – landete er im echten /tmp, waere er dort nicht
+        # vorhanden (im Lauf ist /tmp das Lauf-Verzeichnis). Gemeldet wird
+        # weiterhin der Modell-Pfad /tmp/<name>, der in beiden Welten stimmt.
+        if not dest_dir:
+            try:
+                from backend import lauf_tmp as _lt
+                dest_dir = str(_lt.temp_verzeichnis())
+            except Exception:  # noqa: BLE001
+                dest_dir = "/tmp"
         os.makedirs(dest_dir, exist_ok=True)
         target = os.path.join(dest_dir, safe)
         with open(target, "wb") as fh:

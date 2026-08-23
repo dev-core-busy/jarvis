@@ -99,6 +99,17 @@ def _resolve_existing(path: str) -> Path | None:
     cand = DOCS_DIR / path
     if cand.exists():
         return _sichtbar(cand)
+    # Privates /tmp pro Agent-Lauf: was die Shell als /tmp/ergebnis.docx
+    # geschrieben hat, liegt auf dem Host im Lauf-Verzeichnis. Ohne diese
+    # Uebersetzung meldet office_read/office_to_pdf "Datei nicht gefunden" fuer
+    # eine Datei, die der Agent gerade selbst erzeugt hat – und der Widerspruch
+    # ist von aussen nicht erklaerbar. Nicht-/tmp-Pfade und blosse Namen bleiben
+    # unberuehrt (siehe backend/lauf_tmp.aufloesen).
+    try:
+        from backend import lauf_tmp as _lt
+        path = _lt.aufloesen(path)
+    except Exception:  # noqa: BLE001
+        pass
     p = Path(path)
     if p.exists():
         return _sichtbar(p)

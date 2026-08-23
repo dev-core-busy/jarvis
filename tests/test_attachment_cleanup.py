@@ -92,14 +92,32 @@ check(at.cleanup() == [], "bei 0 wird nichts entfernt")
 _uralt = mk("anhang_0123456789af_uralt.xlsx", time.time() - 999999)
 check(at.cleanup() == [], "auch eine uralte Datei bleibt bei 0")
 _uralt.unlink()          # nicht als Rueckstand in Abschnitt 5 mitschleppen
+# Die VORGABE haengt seit 2026-08-23 daran, ob die Laeufe isoliert sind: ohne
+# Isolation ist die Frist die EINZIGE Schranke gegen das Mitlesen fremder
+# Arbeitskopien und bleibt kurz (30 min); mit privatem /tmp pro Lauf ist sie nur
+# noch Datenminimierung und darf laenger sein (240 min), damit eine Folgefrage
+# nach einer Pause nicht in "No such file or directory" laeuft.
+def _erwartet():
+    try:
+        from backend import lauf_tmp as _lt
+        import os.path as _op
+        if _lt.isolation_gewuenscht() and _op.exists(_lt.BWRAP):
+            return at.DEFAULT_TTL_MIN_ISOLIERT
+    except Exception:  # noqa: BLE001
+        pass
+    return at.DEFAULT_TTL_MIN
+
 os.environ["JARVIS_ATTACH_TTL_MIN"] = "unsinn"
-check(at.ttl_minutes() == at.DEFAULT_TTL_MIN, "Tippfehler -> Standard")
+check(at.ttl_minutes() == _erwartet(), "Tippfehler -> Standard")
 os.environ["JARVIS_ATTACH_TTL_MIN"] = "999999"
 check(at.ttl_minutes() == 10080, "Deckel 7 Tage")
 os.environ["JARVIS_ATTACH_TTL_MIN"] = "45"
 check(at.ttl_minutes() == 45, "gueltiger Wert wird uebernommen")
 del os.environ["JARVIS_ATTACH_TTL_MIN"]
-check(at.ttl_minutes() == 30, "Vorgabe 30 Minuten")
+check(at.ttl_minutes() == _erwartet(),
+      "Vorgabe %d Minuten (Isolation: %s)" % (_erwartet(), _erwartet() != at.DEFAULT_TTL_MIN))
+check(at.DEFAULT_TTL_MIN == 30 and at.DEFAULT_TTL_MIN_ISOLIERT == 240,
+      "beide Vorgaben stehen fest (30 ohne, 240 mit Isolation)")
 check(callable(at.ttl_minutes), "ttl_minutes ist eine Funktion (nicht beim Import eingefroren)")
 
 print("\n5. Robustheit")

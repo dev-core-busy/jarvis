@@ -4357,6 +4357,88 @@ def _is_admin_user(username: str) -> bool:
     return (username in ALLOWED_USERS) or _user_is_admin(username)
 
 
+# ── Zahnrad-Badge fuer Administratoren: offene Root-Freigaben + Sperren ──
+# WARUM AN /api/me UND NICHT AN EINEM EIGENEN ENDPUNKT: dieselbe Begruendung
+# wie bei ``license_banner`` – jede der elf Bereichsseiten ruft /api/me ohnehin
+# ab (settings_btn.js braucht daraus den Administrator-Status, um das Zahnrad
+# ueberhaupt einzublenden). Ein zweiter Endpunkt waere ein zusaetzlicher
+# Roundtrip auf jeder Seite, nur um eine Zahl zu zeigen.
+#
+# WARUM GEMERKT UND GEDECKELT: die Zahl der offenen Root-Freigaben kommt vom
+# Root-Broker, also ueber einen Unix-Socket aus einem FREMDEN Prozess. /api/me
+# liegt auf dem heissen Pfad jeder Seite – ein haengender Broker wuerde sonst
+# jeden Seitenaufbau eines Administrators bremsen (der 20-Sekunden-Freeze vom
+# 2026-08-11 entstand genau so). Deshalb 20 s gemerkt und der Abruf hart
+# gedeckelt: Daemon-Thread mit ``join(timeout)``, denn
+# ``asyncio.wait_for(asyncio.to_thread(...))`` kehrt bei einem haengenden
+# Executor-Auftrag NICHT zurueck (live nachgemessen, siehe CLAUDE.md).
+# Schlaegt die Messung fehl, gilt die laengere Frist – sonst spawnt ein toter
+# Broker alle 20 s einen weiteren Thread, der 63 s lang haengt.
+_ADMIN_BADGE_TTL = 20.0          # Sekunden, normaler Fall
+_ADMIN_BADGE_TTL_FEHLER = 120.0  # Sekunden, nach Zeitueberschreitung
+_ADMIN_BADGE_TIMEOUT = 3.0       # harter Deckel je Messung
+_ADMIN_BADGE_LEER = {"root_pending": 0, "gesperrt": 0, "gesamt": 0}
+_admin_badge_stand: dict = {"ts": 0.0, "ttl": 0.0, "wert": dict(_ADMIN_BADGE_LEER)}
+
+
+def _admin_badge_messen(user: str) -> dict:
+    """Zaehlt, was einen Administrator zum Handeln auffordert (blockierend).
+
+    Jede Quelle einzeln abgesichert: faellt eine aus, fehlt ihre Zahl – die
+    Badge zeigt dann zu wenig statt gar nichts. Eine Badge, die wegen eines
+    unerreichbaren Brokers auch die gesperrten Konten verschweigt, waere der
+    schlechtere Ausgang."""
+    pending = 0
+    try:
+        from backend import broker_client
+        if broker_client.mode() != "none":
+            res = broker_client.call_sync("broker.policy_list", {}, user=user,
+                                          timeout=int(_ADMIN_BADGE_TIMEOUT))
+            if res.get("ok"):
+                pending = sum(1 for e in (res.get("ops") or [])
+                              if e.get("decision") == "pending")
+    except Exception:  # noqa: BLE001
+        pending = 0
+    gesperrt = 0
+    try:
+        gesperrt = len(security_guard.list_blocked())
+    except Exception:  # noqa: BLE001
+        gesperrt = 0
+    return {"root_pending": pending, "gesperrt": gesperrt,
+            "gesamt": pending + gesperrt}
+
+
+def _admin_badge(user: str) -> dict:
+    """Gemerkter Stand fuer die Zahnrad-Badge. NUR aus einem Thread aufrufen."""
+    import threading
+    jetzt = time.time()
+    if jetzt - _admin_badge_stand["ts"] < _admin_badge_stand["ttl"]:
+        return dict(_admin_badge_stand["wert"])
+
+    box = {"wert": None}
+
+    def _run():
+        try:
+            box["wert"] = _admin_badge_messen(user)
+        except Exception:  # noqa: BLE001
+            box["wert"] = None
+
+    th = threading.Thread(target=_run, daemon=True)
+    th.start()
+    th.join(_ADMIN_BADGE_TIMEOUT)
+    if box["wert"] is None:
+        # Zeitueberschreitung: den ZULETZT bekannten Stand behalten (nicht auf 0
+        # setzen – "keine offene Freigabe" waere eine Behauptung, die wir nicht
+        # belegen koennen) und laenger nicht erneut fragen.
+        _admin_badge_stand["ts"] = jetzt
+        _admin_badge_stand["ttl"] = _ADMIN_BADGE_TTL_FEHLER
+        return dict(_admin_badge_stand["wert"])
+    _admin_badge_stand["wert"] = box["wert"]
+    _admin_badge_stand["ts"] = jetzt
+    _admin_badge_stand["ttl"] = _ADMIN_BADGE_TTL
+    return dict(box["wert"])
+
+
 @app.get("/api/me")
 async def get_me(user: str = Depends(require_auth)):
     """Gibt den aktuell angemeldeten Benutzer samt seiner Bereichs-Freigaben
@@ -4381,10 +4463,18 @@ async def get_me(user: str = Depends(require_auth)):
     Endpunkt, weil das Portal ``/api/me`` ohnehin abruft – ein zusaetzlicher
     Roundtrip auf jeder Seite waere der teuerste Weg, eine Warnung zu zeigen.
     Ein normaler Benutzer bekommt das Feld nie: er kann daran nichts aendern,
-    und die Meldung nennt Vertragsdaten."""
+    und die Meldung nennt Vertragsdaten.
+
+    ``admin_badge`` traegt aus demselben Grund hier: die Zahl der offenen
+    Root-Freigaben und der gesperrten Konten fuer die Badge am Zahnrad
+    (settings_btn.js). Ebenfalls **nur fuer Administratoren** – ein normaler
+    Benutzer sieht das Zahnrad gar nicht, und die Zahlen sind eine Aussage
+    ueber die Rechteverwaltung."""
     ist_admin = _is_admin_user(user)
     banner = ""
+    badge = dict(_ADMIN_BADGE_LEER)
     if ist_admin:
+        badge = await asyncio.to_thread(_admin_badge, user)
         try:
             from backend import license as _lic
             z = _lic.zustand()
@@ -4431,6 +4521,7 @@ async def get_me(user: str = Depends(require_auth)):
             "internet": _user_has_internet_access(user),
         },
         "license_banner": banner,
+        "admin_badge": badge,
     })
 
 

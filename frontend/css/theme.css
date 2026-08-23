@@ -51,6 +51,11 @@
     --warning-rgb: 245, 158, 11;
     --danger-rgb: 239, 68, 68;
     --info-rgb: 59, 130, 246;
+    /* Schrift AUF einer Signalflaeche (Warn-/Gefahr-Badge). Bewusst in BEIDEN
+       Themes derselbe Wert und im Light-Theme NICHT ueberschrieben: die Flaeche
+       darunter (--warning/--danger) wechselt ja auch nicht. Ein helles Pendant
+       waere auf Amber unlesbar (gemessen 2,1:1 gegen 9,6:1). */
+    --on-signal: #101828;
 
     --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
@@ -391,3 +396,39 @@ body.light .sapcert-state.is-err { color: color-mix(in srgb, var(--danger) 78%, 
     color: var(--text-secondary);
 }
 .sapcert-icon:hover { color: var(--danger); }
+
+/* ── Badge am Einstellungs-Zahnrad (settings_btn.js) ────────────────────────
+ * Offene Root-Freigaben und gesperrte Konten. Steht HIER und nicht in
+ * style.css: das Zahnrad sitzt auf elf Seiten, style.css laden aber nur
+ * /settings und /wissen (gleiche Lehre wie bei `select option`, 2026-07-29).
+ *
+ * Die Hoehe wird NICHT am Knopf verankert – vier verschiedene Knopf-Klassen
+ * tragen ihn (.btn-theme, .pt-btn, .wi-icon-btn, .ad-btn). Das JS setzt
+ * stattdessen `.jv-gear-host`, damit `position: absolute` einen Bezug hat,
+ * ohne dass eine dieser vier Klassen angefasst werden muss. */
+.jv-gear-host { position: relative; }
+.jv-gear-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    box-sizing: border-box;
+    border-radius: 8px;
+    background: var(--warning);
+    color: var(--on-signal);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 16px;
+    text-align: center;
+    /* Ring in der Seitenfarbe, damit die Badge auch auf dem Zahnrad-Symbol
+     * ablesbar bleibt. */
+    box-shadow: 0 0 0 2px var(--bg-primary);
+    /* Absicht: NICHT `none`. Nur mit Zeigerereignissen erscheint der Tooltip,
+     * und der Klick blubbert weiterhin an den Knopf (= /settings). */
+    pointer-events: auto;
+    cursor: pointer;
+}
+/* Eine Sperre ist dringlicher als eine offene Freigabe. */
+.jv-gear-badge.is-danger { background: var(--danger); }

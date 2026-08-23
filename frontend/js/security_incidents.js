@@ -295,8 +295,14 @@
                     badge.style.display = 'none';
                 }
             }
-            // Zahnrad-Badge (Header) synchron mitziehen
-            if (window._setBrokerBadge) window._setBrokerBadge(d.pending || 0);
+            // KEIN Aufruf einer Zahnrad-Badge von hier: die sitzt seit 2026-08-23
+            // in settings_btn.js und damit auf den BEREICHSSEITEN – /settings
+            // selbst hat kein Zahnrad (man ist ja drin). Bis dahin stand hier
+            // `window._setBrokerBadge(...)`, dessen Gegenstueck seit 2026-07-15
+            // (bc41701) nicht mehr existierte: ein toter Haken, den das
+            // vorgeschaltete `if` stillschweigend verschluckt hat. Nach dem
+            // Entscheiden einer Freigabe ist die Badge beim naechsten Aufbau der
+            // Bereichsseite aktuell, spaetestens nach ihrem 60-Sekunden-Takt.
             // Umschalt-Buttons je Betriebsart: im getrennten Betrieb nur den
             // Rueckweg anbieten, sonst die Aktivierung/Reparatur.
             var isSep = (d.mode === 'broker' && d.separated);

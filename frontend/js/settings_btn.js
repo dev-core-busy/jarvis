@@ -25,11 +25,36 @@
  * bei `icons.js`: eine Regel erwischt neue Faelle von selbst, eine Liste nie).
  * Der Attributwert ist der Rueckweg fuer /settings; ohne Wert gilt der aktuelle
  * Pfad.
+ *
+ * BADGE (offene Root-Freigaben + gesperrte Konten): die Zahlen kommen aus
+ * DERSELBEN /api/me-Antwort (`admin_badge`), die den Knopf ohnehin einblendet –
+ * kein zusaetzlicher Roundtrip. Es gab sie schon einmal im alten
+ * Einzelseiten-Hauptfenster (`gear-broker-badge` in app.js); sie fiel am
+ * 2026-07-15 mit `bc41701` als toter Code, weil das Zahnrad in die
+ * Bereichsseiten gewandert war und das Element nicht mitgenommen wurde. Sie
+ * gehoert deshalb HIERHIN und nicht in eine Seite: sonst haette sie elf
+ * Fassungen, und die zwoelfte Seite vergisst sie wieder.
+ *
+ * Ein Klick auf die Badge fuehrt in den Sicherheits-Reiter (sessionStorage
+ * `jarvis_settings_tab`, ausgewertet in app.js) – eine Warnung ohne Weg zur
+ * Abhilfe ist nur Laerm (dieselbe Regel wie beim Lizenz-Banner im Portal).
  */
 (function () {
     'use strict';
 
     var TOKEN_KEYS = ['jarvis_token', 'jarvis_chat_token', 'jarvis_uc_token'];
+
+    // Letzter Stand aus /api/me: {root_pending, gesperrt, gesamt}. null = noch
+    // nichts gemessen (dann wird auch nichts behauptet, also keine Badge).
+    var _badge = null;
+    var _admin = false;      // belegter Administrator-Status
+    var _pollTimer = null;
+    var POLL_MS = 60000;   // wie die alte Fassung in app.js
+
+    function T(key, fallback) {
+        try { if (window.t) return window.t(key) || fallback; } catch (e) {}
+        return fallback;
+    }
 
     function token() {
         for (var i = 0; i < TOKEN_KEYS.length; i++) {
@@ -44,6 +69,61 @@
     function knoepfe() {
         return Array.prototype.slice.call(
             document.querySelectorAll('[data-jarvis-settings]'));
+    }
+
+    /* Malt die Badge in JEDEN Zahnrad-Knopf (bzw. entfernt sie wieder).
+     *
+     * Wird aus `zeige()` gerufen, damit ein NACHTRAEGLICH erzeugter Knopf sie
+     * ebenfalls bekommt (claude_portal.js baut bei 403 eine Absage-Seite samt
+     * Knopf) – und aus dem Sprachwechsel, weil der Titel uebersetzt ist.
+     *
+     * Das `title` gehoert an die Badge, NICHT an den Knopf: der traegt
+     * `data-i18n-title="nav.settings"`, ein dort gesetzter Text waere beim
+     * naechsten `applyLang()` weg. `pointer-events: auto` (und nicht `none` wie
+     * bei der alten `.issues-badge`) ist Absicht – nur so erscheint der
+     * Tooltip; der Klick blubbert trotzdem an den Knopf. */
+    function badgeMalen() {
+        // Tiefenverteidigung: ohne belegten Administrator-Status wird nichts
+        // gemalt. Das Backend fuellt `admin_badge` ohnehin nur fuer Admins –
+        // aber eine Badge in einen ausgeblendeten Knopf zu malen, weil ein
+        // (aelteres oder manipuliertes) Antwort-Objekt das Feld mitbringt,
+        // waere eine Aussage ueber die Rechteverwaltung an den Falschen.
+        var n = (_admin && _badge && _badge.gesamt) || 0;
+        knoepfe().forEach(function (btn) {
+            var el = btn.querySelector('.jv-gear-badge');
+            if (!n) {
+                if (el) el.parentNode.removeChild(el);
+                btn.classList.remove('jv-gear-host');
+                return;
+            }
+            if (!el) {
+                el = document.createElement('span');
+                el.className = 'jv-gear-badge';
+                // Der Klick auf die Badge soll IN den Sicherheits-Reiter fuehren.
+                // Eigener Handler statt Ausnutzen des Knopf-Handlers, weil nur
+                // hier bekannt ist, dass die Badge gemeint war.
+                el.addEventListener('click', function () {
+                    try { sessionStorage.setItem('jarvis_settings_tab', 'security'); }
+                    catch (e) { /* egal - dann oeffnet der Vorgabe-Reiter */ }
+                });
+                btn.appendChild(el);
+            }
+            btn.classList.add('jv-gear-host');
+            el.textContent = n > 99 ? '99+' : String(n);
+            // Eine Sperre ist dringlicher als eine offene Freigabe: ein Konto
+            // kommt nicht mehr herein, bis jemand handelt.
+            el.classList.toggle('is-danger', !!(_badge && _badge.gesperrt));
+            var teile = [];
+            if (_badge && _badge.root_pending) {
+                teile.push(T('security.gear_badge_title', 'Offene Root-Freigaben')
+                    + ': ' + _badge.root_pending);
+            }
+            if (_badge && _badge.gesperrt) {
+                teile.push(T('security.gear_badge_blocked', 'Gesperrte Konten')
+                    + ': ' + _badge.gesperrt);
+            }
+            el.title = teile.join(' \u00b7 ');
+        });
     }
 
     /* Einblenden + binden. Idempotent: mehrfaches Aufrufen (Sprachwechsel,
@@ -69,6 +149,7 @@
                 location.href = '/settings';
             });
         });
+        badgeMalen();
     }
 
     var _lauf = null;
@@ -90,7 +171,10 @@
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
                 var an = !!(d && d.is_admin);
+                _admin = an;
+                _badge = (d && d.admin_badge) || null;
                 zeige(an);
+                if (an) starteTakt();
                 return an;
             })
             .catch(function () {
@@ -103,11 +187,48 @@
         return _lauf;
     }
 
+    /* Haelt die Badge aktuell, solange die Seite offen ist.
+     *
+     * NUR fuer Administratoren und erst NACH dem belegten Admin-Status – ein
+     * Takt, der bei jedem Benutzer laeuft, waere Last ohne Aussage. Der Server
+     * merkt sich die Zahlen 20 s, der Takt kostet also hoechstens eine
+     * Datei- und eine Socket-Abfrage je Minute.
+     *
+     * WARUM UEBERHAUPT EIN TAKT: eine offene Freigabe entsteht, WAEHREND der
+     * Administrator auf der Seite steht (er drueckt ⤓ an einem Skill, der
+     * apt braucht). Ein Stand vom Seitenaufbau zeigte sie nie – genau deshalb
+     * hatte die alte Fassung in app.js denselben 60-Sekunden-Takt. */
+    function aktualisiere() {
+        var t = token();
+        if (!t) return Promise.resolve(null);
+        return fetch('/api/me', { headers: { 'Authorization': 'Bearer ' + t } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                // 401/403/Netzfehler: den alten Stand BEHALTEN. "Keine offene
+                // Freigabe" waere eine Behauptung, die der Abruf nicht deckt.
+                if (!d) return null;
+                _badge = d.admin_badge || null;
+                badgeMalen();
+                return _badge;
+            })
+            .catch(function () { return null; });
+    }
+
+    function starteTakt() {
+        if (_pollTimer) return;
+        _pollTimer = setInterval(aktualisiere, POLL_MS);
+    }
+
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', pruefe);
     } else {
         pruefe();
     }
 
-    window.JarvisSettingsBtn = { pruefe: pruefe, zeige: zeige };
+    // Der Badge-Tooltip ist uebersetzt, steht aber nicht im Markup –
+    // `applyLang()` erreicht ihn nicht. Neu malen, NICHT neu abrufen.
+    window.addEventListener('jarvis-lang-changed', badgeMalen);
+
+    window.JarvisSettingsBtn = { pruefe: pruefe, zeige: zeige,
+                                 aktualisiere: aktualisiere };
 })();

@@ -36,7 +36,33 @@
         if (loginScreen) loginScreen.classList.remove('active');
         setTimeout(function () {
             // Modal direkt oeffnen (ohne den entfernten Header-Zahnrad-Button)
-            if (window._openSettingsModal) window._openSettingsModal();
+            const _auf = window._openSettingsModal ? window._openSettingsModal() : null;
+            // Direkt in einen bestimmten Reiter springen, wenn die aufrufende
+            // Seite einen gesetzt hat (settings_btn.js tut das beim Klick auf die
+            // Zahnrad-Badge: dort ist die Sicherheit gemeint, nicht der
+            // Vorgabe-Reiter).
+            //
+            // ERST NACH openModal(): die Funktion ist async und aktiviert an
+            // ihrem ENDE den ersten Reiter. Ein Klick davor wird dadurch
+            // ueberschrieben – gemessen: das Sicherheits-Panel war sichtbar,
+            // waehrend "KI & System" als ausgewaehlt aussah UND dessen Panel
+            // ebenfalls stehen blieb (der Reset raeumt die Panels nicht ab).
+            //
+            // EINMALIG: der Wert wird verbraucht, sonst landete jeder spaetere
+            // Aufruf der Einstellungen wieder dort, ohne dass jemand danach
+            // gefragt hat.
+            Promise.resolve(_auf).then(function () {
+                try {
+                    const _tab = sessionStorage.getItem('jarvis_settings_tab') || '';
+                    sessionStorage.removeItem('jarvis_settings_tab');
+                    if (!_tab) return;
+                    const _tb = document.querySelector(
+                        '.settings-tab-btn[data-settings-tab="' + _tab + '"]');
+                    // Kein Klick auf einen ausgeblendeten Reiter (Skill aus) –
+                    // das Panel waere leer und der Vorgabe-Reiter zugleich weg.
+                    if (_tb && _tb.style.display !== 'none') _tb.click();
+                } catch (e) { /* Speicher gesperrt: Vorgabe-Reiter, kein Fehler */ }
+            });
             const c = document.getElementById('btn-close-settings');
             if (c) c.addEventListener('click', function () { window.location.replace(_settingsReturn()); }, { once: true });
             if (window.applyLang) window.applyLang();

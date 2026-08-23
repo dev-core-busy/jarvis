@@ -80,7 +80,13 @@ skills_from_openclaw/
 data/downloads/
 
 # ─── Claude Code interne Dateien ─────────────────────────────────────────────
-.claude/
+# AUSNAHME .claude/skills/: Skills sind Arbeitsanweisungen und gehoeren ins Repo
+# (jeder Klon soll sie haben). Deshalb `.claude/*` und NICHT `.claude/` – bei
+# einem ignorierten VERZEICHNIS steigt git nicht hinein und jede Negation
+# darunter bleibt wirkungslos. Alles andere bleibt draussen: settings.local.json
+# ist maschinenspezifisch (Berechtigungen, Hooks), worktrees/ und *.lock ohnehin.
+.claude/*
+!.claude/skills/
 
 # ─── Temp & Entwicklungsdateien ─────────────────────────────────────────────
 patch_main.py

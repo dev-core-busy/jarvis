@@ -23,7 +23,7 @@
     <link rel="stylesheet" href="/static/css/theme.css?v=16">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=8">
-    <link rel="stylesheet" href="/static/css/style.css?v=158">
+    <link rel="stylesheet" href="/static/css/style.css?v=159">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=6">
 </head>
 
@@ -3203,12 +3203,6 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                      beschreibt die Aufgabe falsch. -->
                                 <div class="xa-row">
                                     <a class="btn-primary xa-dl" id="xa-download" href="/excel-addin/manifest.xml">Manifest herunterladen</a>
-                                    <!-- Ordner EINMAL waehlen: danach schreibt "Manifest
-                                         hochladen" ohne Dialog dorthin (Handle in
-                                         IndexedDB). Nur sichtbar, wenn ein Katalogpfad
-                                         gepflegt ist und der Browser es kann. -->
-                                    <button type="button" class="btn-secondary" id="xa-ordner-btn" style="display:none;">Ordner einmal auswählen</button>
-                                    <button type="button" class="btn-secondary" id="xa-pfad-copy" style="display:none;">Pfad kopieren</button>
                                     <!-- Die Fassung steht VOR dem Status: sie ist
                                          dauerhaft da und gehoert an die Knoepfe. Der
                                          Status ist laenger und bricht in die naechste
@@ -3234,6 +3228,24 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <div class="xa-row">
                                     <button class="btn-primary" id="xa-katalog-save">Pfad speichern</button>
                                     <span class="kb-hint" id="xa-katalog-status"></span>
+                                </div>
+
+                                <!-- DER WEG, DER DEN EINGETRAGENEN PFAD WIRKLICH BENUTZT.
+                                     Ein Browser kann in keinen als TEXT angegebenen Pfad
+                                     schreiben - die File System Access API nimmt dafuer
+                                     ausdruecklich keine Zeichenkette an (Sicherheitsgrenze
+                                     jedes Browsers, keine Entscheidung dieses Projekts).
+                                     Eine Befehlszeile kann es. Sie wird aus dem Feld
+                                     darueber gebildet und aktualisiert sich beim Tippen. -->
+                                <div id="xa-cmd-box" style="display:none;margin-top:12px;">
+                                    <!-- Bewusst KEIN <label> in einer .form-group: dort
+                                         setzt style.css Grossschreibung, und der Satz saehe
+                                         wie eine Feldbeschriftung aus. Es ist eine Einleitung
+                                         zum Block darunter - und ein NEBENweg, der nicht
+                                         lauter sein darf als der Knopf oben. -->
+                                    <p class="kb-hint" style="margin-bottom:5px;"><b>Oder</b> in einer Eingabeaufforderung auf Ihrem Arbeitsplatz – schreibt direkt in den Pfad oben, ohne Dialog und ohne Chrome:</p>
+                                    <pre id="xa-cmd" class="xa-cmd"></pre>
+                                    <span class="kb-hint" id="xa-cmd-hint"></span>
                                 </div>
 
                                 <div style="margin-top:12px;">
@@ -4717,7 +4729,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/theme.js?v=2"></script>
     <script src="/static/js/security_incidents.js?v=30"></script>
     <script src="/static/js/ldap_picker.js?v=10"></script>
-    <script src="/static/js/excel_admin.js?v=5"></script>
+    <script src="/static/js/excel_admin.js?v=6"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
     <script src="/static/js/sessions.js?v=4"></script>
     <script src="/static/js/agent_roles.js?v=2"></script>

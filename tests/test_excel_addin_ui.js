@@ -706,8 +706,8 @@ function warte(ms) { return new Promise(r => setTimeout(r, ms)); }
         const dl = w.document.getElementById('xa-download');
         pruefe(dl.textContent === 'Manifest herunterladen',
                'ohne Pfad heisst der Knopf "Manifest herunterladen"', dl.textContent);
-        pruefe(w.document.getElementById('xa-pfad-copy').style.display === 'none',
-               'ohne Pfad ist "Pfad kopieren" verborgen');
+        pruefe(w.document.getElementById('xa-cmd-box').style.display === 'none',
+               'ohne Pfad steht keine Befehlszeile da');
         pruefe(w.document.getElementById('xa-dl-hint').style.display === 'none',
                'ohne Pfad steht kein Zusatzhinweis da');
         const ev = new w.MouseEvent('click', { bubbles: true, cancelable: true });
@@ -730,11 +730,17 @@ function warte(ms) { return new Promise(r => setTimeout(r, ms)); }
         const dl = w.document.getElementById('xa-download');
         pruefe(dl.textContent === 'Manifest hochladen',
                'mit Pfad heisst der Knopf "Manifest hochladen"', dl.textContent);
-        pruefe(w.document.getElementById('xa-pfad-copy').style.display !== 'none',
-               'mit Pfad erscheint "Pfad kopieren"');
         const hint = w.document.getElementById('xa-dl-hint');
-        pruefe(hint.style.display !== 'none' && /nicht\s+vorbelegen/.test(hint.textContent),
-               'der Hinweis sagt, dass der Zielordner nicht vorbelegbar ist');
+        pruefe(hint.style.display !== 'none' && /Sicherheitsgrenze/.test(hint.textContent),
+               'der Hinweis begruendet, warum der Pfad nicht direkt benutzbar ist',
+               hint.textContent.slice(0, 80));
+        const cmd = w.document.getElementById('xa-cmd');
+        pruefe(w.document.getElementById('xa-cmd-box').style.display !== 'none',
+               'mit Pfad steht die fertige Befehlszeile da');
+        pruefe(cmd.textContent.indexOf('\\\\srv\\freigabe\\addins') >= 0,
+               'sie enthaelt GENAU den eingetragenen Pfad', cmd.textContent);
+        pruefe(cmd.textContent.indexOf('nexus-dp-excel-addin.xml') > 0,
+               'und den Dateinamen aus dem Antwortkopf (Branding)', cmd.textContent);
 
         const ev = new w.MouseEvent('click', { bubbles: true, cancelable: true });
         dl.dispatchEvent(ev);
@@ -867,8 +873,15 @@ function warte(ms) { return new Promise(r => setTimeout(r, ms)); }
     // Der Reiter ist durchgehend deutsch (wie der Jira-Reiter) – ein einzelner
     // i18n-Schluessel hier waere eine halbe Uebersetzung.
     const XPANEL = SETH.slice(ia, ja);
-    pruefe(XPANEL.indexOf('id="xa-pfad-copy"') > 0 && XPANEL.indexOf('id="xa-dl-hint"') > 0,
-           'Kopier-Knopf und Hinweisfeld stehen im echten Markup');
+    pruefe(XPANEL.indexOf('id="xa-cmd"') > 0 && XPANEL.indexOf('id="xa-dl-hint"') > 0,
+           'Befehlszeile und Hinweisfeld stehen im echten Markup');
+    // GEMELDET 2026-08-23: "was soll dieser Bullshit mit 'Ordner einmal
+    // auswaehlen' und 'Pfad kopieren'". Beide Knoepfe sind weg und duerfen nicht
+    // zurueckkommen – der Hochlade-Knopf erledigt beides selbst.
+    pruefe(XPANEL.indexOf('xa-ordner-btn') < 0 && XPANEL.indexOf('xa-pfad-copy') < 0,
+           'die beiden Vorstufen-Knoepfe sind aus dem Markup entfernt');
+    pruefe(ADMIN_CODE.indexOf('xa-ordner-btn') < 0 && ADMIN_CODE.indexOf('xa-pfad-copy') < 0,
+           '... und es gibt keinen toten Code mehr dazu');
     pruefe(!/JarvisIcons\.trash/.test(ADMIN_CODE),
            'kein Muelleimer im Verteil-Bereich (es wird nichts geloescht)');
 
@@ -880,7 +893,7 @@ function warte(ms) { return new Promise(r => setTimeout(r, ms)); }
        Handle, und Handles sind in IndexedDB persistierbar. */
     const PFAD = '\\\\srv\\freigabe\\addins';
 
-    // ── i) Ordner waehlen und merken ───────────────────────────────────
+    // ── i) EIN Klick: fragt einmal nach dem Ordner und schreibt hinein ─
     {
         const laden = {};
         /* Der Ordner-Stub schreibt in SEINE eigene Spur, nicht in die des
@@ -891,22 +904,30 @@ function warte(ms) { return new Promise(r => setTimeout(r, ms)); }
         const { w, spur } = adminFenster(PFAD, pickerOk, true, h, laden);
         w.ExcelAdmin.onShow();
         await warte(40);
-        const ow = w.document.getElementById('xa-ordner-btn');
-        pruefe(!!ow, 'Ordner-Knopf steht im echten Markup');
-        pruefe(ow.style.display !== 'none',
-               'mit Pfad und File-System-API ist der Ordner-Knopf sichtbar');
-        pruefe(ow.textContent.indexOf('einmal') >= 0,
-               'ohne gemerkten Ordner lautet er "Ordner einmal auswaehlen"', ow.textContent);
-        ow.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
-        await warte(60);
-        pruefe(spur.dirPicker === 1, 'der Ordner-Dialog wird genau einmal geoeffnet',
-               'aufrufe=' + spur.dirPicker);
+        // Kein Vorstufen-Knopf mehr – das war die Meldung.
+        pruefe(w.document.getElementById('xa-ordner-btn') === null,
+               'es gibt keinen Knopf "Ordner einmal auswaehlen" mehr');
+        const dl = w.document.getElementById('xa-download');
+        pruefe(dl.textContent === 'Manifest hochladen',
+               'der Knopf heisst "Manifest hochladen"', dl.textContent);
+
+        dl.dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true }));
+        await warte(80);
+        pruefe(spur.dirPicker === 1,
+               'derselbe Klick fragt EINMAL nach dem Ordner', 'aufrufe=' + spur.dirPicker);
+        pruefe(spur.picker === 0,
+               'und oeffnet KEINEN Speichern-Dialog daneben', 'dialoge=' + spur.picker);
+        pruefe(hSpur.geschrieben.length === 1 && hSpur.geschlossen === 1,
+               'die Datei landet im gewaehlten Ordner',
+               'schreibvorgaenge=' + hSpur.geschrieben.length);
+        pruefe(hSpur.dateiName === 'nexus-dp-excel-addin.xml',
+               'Dateiname aus dem Antwortkopf (folgt dem Branding)', hSpur.dateiName);
+        pruefe(hSpur.create === true,
+               'die Datei wird angelegt, wenn sie noch nicht existiert');
         pruefe(!!laden['excel-katalog'], 'das Handle wird in IndexedDB gemerkt');
-        pruefe(ow.textContent.indexOf('office-addins') >= 0,
-               'der Knopf nennt danach den Ordner', ow.textContent);
         w.close();
 
-        // ── j) NEUES Fenster: der Ordner ist noch gemerkt ──────────────
+        // ── j) NEUES Fenster: kein zweiter Ordner-Dialog ───────────────
         const zwei = adminFenster(PFAD, pickerOk, true, h, laden);
         zwei.w.ExcelAdmin.onShow();
         await warte(60);
@@ -914,27 +935,56 @@ function warte(ms) { return new Promise(r => setTimeout(r, ms)); }
         pruefe(hint.innerHTML.indexOf('office-addins') >= 0,
                'nach dem Neuladen ist der Ordner noch gemerkt (Persistenz)',
                hint.textContent.slice(0, 70));
-        pruefe(/ohne\s*<b>Dialog<\/b>|ohne <b>Dialog<\/b>/.test(hint.innerHTML)
-               || hint.innerHTML.indexOf('ohne') >= 0,
-               'der Hinweis sagt, dass kein Dialog mehr kommt');
-
-        // DER KERN DER MELDUNG: der Klick schreibt DIREKT, ohne Dialog.
-        const dl = zwei.w.document.getElementById('xa-download');
-        pruefe(dl.textContent === 'Manifest hochladen',
-               'der Knopf heisst "Manifest hochladen"', dl.textContent);
-        dl.dispatchEvent(new zwei.w.MouseEvent('click', { bubbles: true, cancelable: true }));
+        zwei.w.document.getElementById('xa-download')
+            .dispatchEvent(new zwei.w.MouseEvent('click', { bubbles: true, cancelable: true }));
         await warte(60);
-        pruefe(zwei.spur.picker === 0,
-               'KEIN Speichern-Dialog mehr – das war die Meldung',
-               'dialoge=' + zwei.spur.picker);
-        pruefe(hSpur.geschrieben.length === 1 && hSpur.geschlossen === 1,
-               'die Datei wird in den gemerkten Ordner geschrieben und geschlossen',
+        pruefe(zwei.spur.dirPicker === 0,
+               'beim zweiten Mal wird NICHT mehr nach dem Ordner gefragt',
+               'aufrufe=' + zwei.spur.dirPicker);
+        pruefe(zwei.spur.picker === 0, 'und weiterhin kein Speichern-Dialog');
+        pruefe(hSpur.geschrieben.length === 2, 'geschrieben wurde trotzdem',
                'schreibvorgaenge=' + hSpur.geschrieben.length);
-        pruefe(hSpur.dateiName === 'nexus-dp-excel-addin.xml',
-               'Dateiname aus dem Antwortkopf (folgt dem Branding)', hSpur.dateiName);
-        pruefe(hSpur.create === true,
-               'die Datei wird angelegt, wenn sie noch nicht existiert');
         zwei.w.close();
+    }
+
+    // ── i2) DER GEMELDETE FEHLER: getippter, NICHT gespeicherter Pfad ──
+    /* "ich habe den pfad bereits im 'Netzwerk Pfad' Feld eingetragen" – der
+       Knopf hing am GESPEICHERTEN Wert und bot deshalb weiter einen Download
+       an. Jetzt entscheidet der Feldinhalt, und der Klick speichert ihn mit. */
+    {
+        const laden = {};
+        const hSpur = { geschrieben: [], geschlossen: 0, gefragt: 0 };
+        const h = ordnerStub('office-addins', 'granted', 'granted', hSpur);
+        const { w, spur } = adminFenster('', pickerOk, true, h, laden);
+        w.ExcelAdmin.onShow();
+        await warte(40);
+        const dl = w.document.getElementById('xa-download');
+        pruefe(dl.textContent === 'Manifest herunterladen',
+               'ohne Pfad zunaechst "Manifest herunterladen"', dl.textContent);
+
+        const feld = w.document.getElementById('xa-katalog');
+        feld.value = '\\\\srv\\freigabe\\neu';
+        feld.dispatchEvent(new w.Event('input', { bubbles: true }));
+        await warte(20);
+        pruefe(dl.textContent === 'Manifest hochladen',
+               'beim Tippen schaltet der Knopf sofort um', dl.textContent);
+        pruefe(w.document.getElementById('xa-cmd').textContent.indexOf('freigabe\\neu') > 0,
+               'und die Befehlszeile wandert mit');
+
+        const vorher = spur.koerper.length;
+        dl.dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true }));
+        await warte(80);
+        pruefe(hSpur.geschrieben.length === 1,
+               'der Klick laedt hoch, ohne dass vorher gespeichert wurde');
+        const gesendet = spur.koerper.slice(vorher)
+                             .filter(function (b) { return 'katalog_pfad' in b; });
+        pruefe(gesendet.length === 1 && gesendet[0].katalog_pfad === '\\\\srv\\freigabe\\neu',
+               'und speichert den eingetragenen Pfad gleich mit',
+               JSON.stringify(gesendet));
+        // Nur die eigene Teilmenge – sonst ueberschriebe der Knopf die Grenzen.
+        pruefe(gesendet.length === 1 && !('max_runden' in gesendet[0]),
+               'dabei werden die Grenzwerte NICHT mitgeschickt');
+        w.close();
     }
 
     // ── k) Berechtigung auf "prompt": einmal fragen, dann schreiben ────
@@ -984,14 +1034,22 @@ function warte(ms) { return new Promise(r => setTimeout(r, ms)); }
         w.close();
     }
 
-    // ── m) Kein Ordner-Picker im Browser: Knopf bleibt verborgen ───────
+    // ── m) Kein Ordner-Picker im Browser: Rueckfall auf den Dialog ─────
     {
-        const { w } = adminFenster(PFAD, pickerOk, true, null, {});
+        const { w, spur } = adminFenster(PFAD, pickerOk, true, null, {});
         w.ExcelAdmin.onShow();
         await warte(60);
-        pruefe(w.document.getElementById('xa-ordner-btn').style.display === 'none',
-               'ohne showDirectoryPicker bleibt der Ordner-Knopf verborgen '
-               + '(ein Knopf ohne Wirkung ist schlimmer als keiner)');
+        w.document.getElementById('xa-download')
+         .dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true }));
+        await warte(60);
+        // FAIL-SAFE IN DIE RICHTIGE RICHTUNG: fehlt die Ordner-API, endet es
+        // nicht in "geht nicht", sondern im Weg, der vorher schon ging.
+        pruefe(spur.picker === 1, 'ohne showDirectoryPicker oeffnet der Speichern-Dialog',
+               'dialoge=' + spur.picker);
+        pruefe(spur.geschrieben.length === 1, 'und geschrieben wird trotzdem');
+        // Und die Befehlszeile steht daneben – sie braucht gar keine API.
+        pruefe(w.document.getElementById('xa-cmd').textContent.indexOf('curl.exe') === 0,
+               'die Befehlszeile ist der API-freie Weg');
         w.close();
     }
 

@@ -983,12 +983,20 @@ pruefe("xa-katalog-save" in XA and "speichereKatalog" in XA,
        "excel_admin.js bindet ihn")
 # Eigene Teilmenge senden: `update_skill_config` merged, ein Knopf mit dem
 # ganzen Formularstand ueberschriebe den jeweils anderen Teil.
-_sk = XA[XA.find("function speichereKatalog"):]
+# Seit 2026-08-23 sendet nicht mehr `speichereKatalog` selbst, sondern der
+# gemeinsame Kern `speicherePfad` – ihn benutzt auch der Hochlade-Knopf, der den
+# eingetragenen Pfad mitspeichert. Geprueft wird deshalb DIESE Funktion; ein
+# Ausschnitt der Huelle waere trivial wahr.
+_sk = XA[XA.find("function speicherePfad"):]
 _sk = _sk[:_sk.find("function ", 10)]
-pruefe(len(_sk) > 100 and "speichereKatalog" in _sk,
-       "Wächter schneidet wirklich speichereKatalog aus", len(_sk))
+pruefe(len(_sk) > 100 and "katalog_pfad" in _sk,
+       "Wächter schneidet wirklich speicherePfad aus", len(_sk))
 pruefe("katalog_pfad: pfad" in _sk and "max_runden" not in _sk,
-       "Der Pfad-Knopf sendet NUR den Pfad")
+       "Der Pfad-Weg sendet NUR den Pfad")
+pruefe("speicherePfad(pfad, true)" in XA,
+       "Der Hochlade-Knopf speichert den eingetragenen Pfad mit (still)")
+pruefe("function feldPfad" in XA and "feldPfad() && kannSpeichern()" in XA,
+       "Massgeblich ist der FELDINHALT, nicht der gespeicherte Pfad")
 _sg = XA[XA.find("function speichere()"):]
 _sg = _sg[:_sg.find("function ", 10)]
 pruefe("katalog_pfad" not in _sg, "... und der Grenzen-Knopf NICHT den Pfad")

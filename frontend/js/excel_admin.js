@@ -27,29 +27,36 @@
    schreibt. Massgeblich ist der GESPEICHERTE Pfad, nicht der Feldinhalt: der
    Knopf soll den Zustand zeigen, den auch `/excel` den Benutzern zeigt.
 
-   DER ORDNER WIRD EINMAL GEWAEHLT UND DANN GEMERKT (seit 2026-08-23, gemeldet:
-   "nutzt nicht den gespeicherten Pfad"). Ein PFAD als Text laesst sich im
-   Speichern-Dialog wirklich nicht vorbelegen – `startIn` nimmt keine
-   Zeichenkette, `suggestedName` keine Pfadtrenner. Der VORGANG geht aber:
-   `showDirectoryPicker()` liefert ein `FileSystemDirectoryHandle`, und Handles
-   sind ueber IndexedDB persistierbar. Ist eines gemerkt, schreibt der Knopf
-   OHNE Dialog direkt in die Freigabe; der Text-Pfad bleibt daneben stehen, weil
-   `/excel` ihn den Benutzern nennt (der Browser gibt einen Pfad nicht heraus,
-   nur `handle.name`).
+   EIN KNOPF, KEINE VORSTUFEN (Umbau 2026-08-23, gemeldet: "was soll dieser
+   Bullshit mit 'Ordner einmal auswaehlen' und 'Pfad kopieren'"). Beide Knoepfe
+   sind weg. Der Hochlade-Knopf erledigt alles selbst: ist noch kein Ordner
+   gemerkt, fragt er EINMAL danach und merkt ihn sich; ab dann schreibt er ohne
+   Dialog. Und er speichert den eingetragenen Pfad gleich mit – ein zweiter
+   Klick auf "Pfad speichern" ist nicht mehr noetig.
 
-   DREI STUFEN, absteigend:
-     1. Gemerktes Handle + Berechtigung erteilt -> direkt schreiben, kein Dialog.
-     2. Gemerktes Handle, Berechtigung auf "prompt" (nach Browser-Neustart
-        normal) -> EIN Klick zum Bestaetigen, dann schreiben.
-     3. Kein Handle / Firefox / Safari -> Speichern-unter-Fenster wie bisher,
-        mit `id` (Chrome merkt sich das Verzeichnis pro id) und `startIn` auf das
-        Handle, falls eines da ist. Dazu "Pfad kopieren": im Windows-Dialog
-        fuehrt der eingefuegte Pfad im Feld "Dateiname" per Enter in den Ordner.
+   ⚠ WARUM DER EINGETRAGENE PFAD DEN BROWSER NICHT ERREICHT – das ist keine
+   Bequemlichkeit dieses Moduls, sondern eine Grenze JEDES Browsers: die File
+   System Access API nimmt fuer `startIn` **nur** ein Handle oder einen der
+   festen Namen (documents/downloads/…), niemals eine Zeichenkette, und
+   `suggestedName` darf keine Pfadtrenner enthalten. Eine Seite, die in
+   `\\server\freigabe\…` schreiben duerfte, weil dort jemand den Pfad
+   hingetippt hat, waere die Luecke, die es zu verhindern gilt. Deshalb
+   EINMAL der Ordner-Dialog – danach nie wieder.
+
+   WAS DEN PFAD WIRKLICH BENUTZT, steht deshalb daneben: eine fertige
+   `curl.exe`-Zeile, die aus dem Feld gebildet wird und direkt dorthin
+   schreibt. Sie ist der Weg fuer Firefox/Safari, fuer Automatisierung – und
+   fuer jeden, der den Ordner-Dialog nicht will.
+
+   MASSGEBLICH IST DER FELDINHALT, nicht der gespeicherte Wert (das war der
+   eigentliche Fehler): wer den Pfad eintippt und sofort auf den Knopf drueckt,
+   bekam bis dahin einen Download, weil der Knopf am GESPEICHERTEN Pfad haengt.
+   Jetzt entscheidet, was im Feld steht.
 
    DAS HANDLE HAENGT AM BROWSERPROFIL, nicht am Server: es gilt pro
-   Administrator-Arbeitsplatz und muss dort einmal gesetzt werden. Eine Zusage
-   "landet automatisch dort" waere ohne diesen Schritt unhaltbar – der Server
-   erreicht die Freigabe nicht, nur der Arbeitsplatz tut das.
+   Administrator-Arbeitsplatz. Eine Zusage "landet automatisch dort" waere ohne
+   diesen Schritt unhaltbar – der Server erreicht die Freigabe nicht, nur der
+   Arbeitsplatz tut das.
    ═══════════════════════════════════════════════════════════════════════ */
 (function () {
     'use strict';
@@ -64,6 +71,11 @@
     // Hochlade-Weg nichts tun: er wuerde eine Datei in die Freigabe legen, die
     // auf jedem Arbeitsplatz ins Leere zeigt.
     var _adresseKaputt = false;
+    // Der Dateiname aus dem Antwortkopf (folgt dem Branding). Wird beim
+    // Adress-Test mitgelesen – er kostet dort nichts und macht die Befehlszeile
+    // vollstaendig. Ohne ihn muesste sie den Namen nachbauen und liefe dem
+    // Branding hinterher (genau der Fehler, den `dateinameAus` vermeidet).
+    var _dateiname = '';
     var _DL_TEXT = 'Manifest herunterladen';
     var _UP_TEXT = 'Manifest hochladen';
 
@@ -113,7 +125,13 @@
         if (!warn) return;
         fetch('/excel-addin/manifest.xml', { method: 'GET', cache: 'no-store' })
             .then(function (r) {
-                if (r.ok) { _adresseKaputt = false; warn.style.display = 'none'; return; }
+                if (r.ok) {
+                    _adresseKaputt = false;
+                    warn.style.display = 'none';
+                    _dateiname = dateinameAus(r);
+                    knopfAktualisieren();     // Befehlszeile mit echtem Namen
+                    return;
+                }
                 return r.json().catch(function () { return {}; }).then(function (d) {
                     _adresseKaputt = true;
                     warn.textContent = '⚠ ' + (d.error ||
@@ -182,33 +200,28 @@
         }).catch(function () { return false; });
     }
 
-    /* Ordner EINMAL waehlen. Danach ist der Hochlade-Knopf dialogfrei. */
-    function ordnerWaehlen() {
-        if (typeof window.showDirectoryPicker !== 'function') {
-            melde('xa-dl-status', 'Dieser Browser kann keinen Ordner merken – das können ' +
-                  'nur Chrome und Edge.', 'fehler');
-            return;
-        }
-        window.showDirectoryPicker({ id: 'jarvis-excel-katalog', mode: 'readwrite',
-                                     startIn: _ordner || 'documents' })
+    /* Den Zielordner besorgen – gemerkter zuerst, sonst EINMAL fragen.
+       MUSS synchron in der Klick-Geste aufgerufen werden: `showDirectoryPicker`
+       verlangt eine frische Benutzergeste, und die laeuft in Chrome nach
+       wenigen Sekunden ab. Deshalb steht dieser Aufruf VOR dem Netz-Abruf des
+       Manifests – anders als beim Speichern-Dialog droht hier keine 0-Byte-
+       Datei, weil das Auswaehlen eines VERZEICHNISSES nichts anlegt. */
+    function ordnerBesorgen() {
+        if (_ordner) return Promise.resolve(_ordner);
+        if (typeof window.showDirectoryPicker !== 'function') return Promise.resolve(null);
+        return window.showDirectoryPicker({ id: 'jarvis-excel-katalog', mode: 'readwrite',
+                                            startIn: 'documents' })
             .then(function (h) {
                 return darfSchreiben(h, true).then(function (ok) {
                     if (!ok) throw new Error('Schreibrecht für den Ordner wurde nicht erteilt.');
                     _ordner = h;
-                    return handleSchreiben(h);
+                    // Das Merken darf den Vorgang nicht aufhalten und auch nicht
+                    // kippen: schlaegt IndexedDB fehl (privates Fenster), wird
+                    // beim naechsten Mal eben noch einmal gefragt.
+                    handleSchreiben(h).catch(function () { });
+                    knopfAktualisieren();
+                    return h;
                 });
-            })
-            .then(function () {
-                knopfAktualisieren();
-                melde('xa-dl-status', '✓ Ordner „' + (_ordner.name || '?') + '“ gemerkt – ' +
-                      '„Manifest hochladen“ schreibt jetzt ohne Dialog dorthin.', 'ok');
-                setTimeout(function () { melde('xa-dl-status', ''); }, 10000);
-            })
-            .catch(function (e) {
-                if (e && (e.name === 'AbortError' || e.code === 20)) {
-                    melde('xa-dl-status', ''); return;   // Abbrechen ist keine Stoerung
-                }
-                melde('xa-dl-status', 'Fehler: ' + ((e && e.message) || e), 'fehler');
             });
     }
 
@@ -221,52 +234,79 @@
         return typeof window.showSaveFilePicker === 'function';
     }
 
-    /* Beschriftung, Zusatzknopf und Hinweis an den gespeicherten Pfad
-       anpassen. MUSS nach JEDEM Speichern des Pfades laufen – sonst bewirbt der
-       Knopf weiter einen Download, waehrend `/excel` den Benutzern bereits die
-       Freigabe nennt. */
+    /* Der Pfad, der GERADE gilt: was im Feld steht, sonst der gespeicherte.
+       Der Feldinhalt hat Vorrang – wer den Pfad eintippt und sofort auf den
+       Knopf drueckt, meint diesen Pfad. Dass der Knopf frueher am GESPEICHERTEN
+       Wert hing, war der gemeldete Fehler. */
+    function feldPfad() {
+        var f = $('xa-katalog');
+        var v = (f ? f.value : '').trim();
+        return v || _katalog;
+    }
+
+    /* Beschriftung, Hinweis und Befehlszeile an den aktuellen Pfad anpassen.
+       Laeuft beim Laden, nach dem Speichern UND bei jedem Tastendruck im Feld. */
     function knopfAktualisieren() {
         var dl = $('xa-download');
-        var copy = $('xa-pfad-copy');
         var hint = $('xa-dl-hint');
-        var ow = $('xa-ordner-btn');
-        var hoch = !!_katalog && kannSpeichern();
+        var pfad = feldPfad();
+        var hoch = !!pfad && kannSpeichern();
         if (dl) dl.textContent = hoch ? _UP_TEXT : _DL_TEXT;
-        if (copy) copy.style.display = _katalog ? '' : 'none';
-        // Ordner merken lohnt nur, wenn ueberhaupt ein Katalogpfad gepflegt ist
-        // UND der Browser es kann – sonst waere es ein Knopf ohne Wirkung.
-        if (ow) {
-            ow.style.display = (hoch && typeof window.showDirectoryPicker === 'function')
-                               ? '' : 'none';
-            ow.textContent = _ordner ? 'Ordner ändern (' + (_ordner.name || '?') + ')'
-                                     : 'Ordner einmal auswählen';
-        }
+        befehlAktualisieren(pfad);
         if (!hint) return;
         if (hoch && _ordner) {
             hint.innerHTML = 'Der Ordner <b>' + esc(_ordner.name || '?') + '</b> ist gemerkt – ' +
-                'der Knopf schreibt das Manifest <b>ohne Dialog</b> hinein. Nach einem ' +
-                'Browser-Neustart fragt Chrome einmal nach der Erlaubnis; das ist normal. ' +
-                'Der gemerkte Ordner gilt für <b>diesen Arbeitsplatz</b>, nicht serverweit.';
+                'der Knopf schreibt das Manifest <b>ohne Dialog</b> hinein und speichert ' +
+                'den Pfad oben gleich mit. Nach einem Browser-Neustart fragt Chrome einmal ' +
+                'nach der Erlaubnis; das ist normal.';
             hint.style.color = '';
             hint.style.display = '';
         } else if (hoch) {
-            hint.innerHTML = 'Drücken Sie einmal <b>Ordner einmal auswählen</b> und wählen ' +
-                'Sie die Freigabe – danach schreibt <b>Manifest hochladen</b> ohne Dialog ' +
-                'dorthin. Ohne das öffnet sich ein <b>Speichern unter</b>-Fenster; ein ' +
-                'Pfad als Text lässt sich darin nicht vorbelegen, deshalb legt ' +
-                '<b>Pfad kopieren</b> ihn in die Zwischenablage (im Feld <b>Dateiname</b> ' +
-                'einfügen, Enter).';
+            hint.innerHTML = 'Der Knopf fragt <b>einmal</b> nach dem Zielordner und merkt ' +
+                'ihn sich – ab dann schreibt er ohne Dialog dorthin und speichert den Pfad ' +
+                'gleich mit. <b>Warum nicht gleich der Pfad von oben?</b> Kein Browser darf ' +
+                'in einen Ordner schreiben, der ihm nur als Text genannt wurde – das ist ' +
+                'eine Sicherheitsgrenze des Browsers. Wer den Dialog nicht will, nimmt die ' +
+                'Befehlszeile unter dem Feld: die benutzt den Pfad direkt.';
             hint.style.color = '';
             hint.style.display = '';
-        } else if (_katalog) {
+        } else if (pfad) {
             hint.innerHTML = 'Ihr Browser kann nicht direkt in einen Ordner schreiben – das ' +
-                'können nur <b>Chrome und Edge</b>. Laden Sie das Manifest herunter und ' +
-                'legen Sie es von Hand in den Katalog-Ordner.';
+                'können nur <b>Chrome und Edge</b>. Nehmen Sie die Befehlszeile unter dem ' +
+                'Feld, oder laden Sie das Manifest herunter und legen es von Hand hinein.';
             hint.style.color = '';
             hint.style.display = '';
         } else {
             hint.style.display = 'none';
         }
+    }
+
+    /* Die fertige Befehlszeile – DER Weg, der den eingetragenen Pfad wirklich
+       benutzt. `curl.exe` liegt auf jedem Windows 10/11 bei und laeuft in
+       Eingabeaufforderung wie PowerShell; `Invoke-WebRequest` scheidet aus, weil
+       die mitgelieferte PowerShell 5.1 kein `-SkipCertificateCheck` kennt und an
+       einem selbst ausgestellten Zertifikat scheitert – mit einer Meldung, die
+       niemand mit dem Zertifikat in Verbindung bringt.
+       `-k` steht deshalb drin und wird im Hinweis auch begruendet. */
+    function befehlAktualisieren(pfad) {
+        var box = $('xa-cmd-box');
+        var pre = $('xa-cmd');
+        var hint = $('xa-cmd-hint');
+        if (!box || !pre) return;
+        if (!pfad) { box.style.display = 'none'; return; }
+        // Kein Escaping in eine Zeichenkette hinein, sondern textContent: der
+        // Pfad ist Fremdeingabe und stuende sonst als Markup in einer
+        // Administratoren-Oberflaeche.
+        var ziel = pfad.replace(/[\\/]+$/, '') + '\\' + (_dateiname || 'excel-addin.xml');
+        pre.textContent = 'curl.exe -k -o "' + ziel + '" ' +
+                          location.origin + '/excel-addin/manifest.xml';
+        if (hint) {
+            hint.textContent = '-k überspringt die Zertifikatsprüfung – nötig, solange dieser '
+                + 'Server ein selbst ausgestelltes Zertifikat verwendet. Die Zeile schreibt '
+                + 'in genau den Pfad oben; sie läuft auf Ihrem Arbeitsplatz, nicht auf dem '
+                + 'Server.';
+        }
+        box.style.display = '';
     }
 
     /* Dateiname aus dem Antwortkopf statt nachgebaut – so folgt er dem Branding
@@ -291,9 +331,21 @@
        ausdruecklich, dass ein erneuter Klick genuegt. */
     function hochladen() {
         if (_adresseKaputt) return;
+
+        // 1. Den eingetragenen Pfad MITSPEICHERN – ohne zweiten Knopf.
+        //    Bewusst OHNE `await`: der naechste Schritt braucht die frische
+        //    Benutzergeste, und ein Netz-Roundtrip davor kann sie aufbrauchen.
+        var pfad = feldPfad();
+        if (pfad && pfad !== _katalog) speicherePfad(pfad, true);
+
+        // 2. Zielordner besorgen – SYNCHRON in der Geste (siehe ordnerBesorgen).
+        var ordnerP = ordnerBesorgen();
+
         melde('xa-dl-status', 'Manifest wird geholt …');
         var name = 'jarvis-excel-addin.xml';
-        fetch('/excel-addin/manifest.xml', { cache: 'no-store' })
+        ordnerP.then(function () {
+            return fetch('/excel-addin/manifest.xml', { cache: 'no-store' });
+        })
             .then(function (r) {
                 if (!r.ok) {
                     return r.json().catch(function () { return {}; }).then(function (d) {
@@ -365,26 +417,6 @@
         });
     }
 
-    /* Der Pfad in die Zwischenablage – ohne ihn ist der Dialog eine Sucherei.
-       Gleiche Rueckmeldung wie auf der Benutzerseite (`xp-pfad-copy`): in der
-       Zwischenablage ist nichts sichtbar, ein stiller Klick sieht wie ein
-       wirkungsloser aus. `navigator.clipboard` fehlt in unsicherem Kontext. */
-    function pfadKopieren() {
-        var schief = function () {
-            melde('xa-dl-status', 'Kopieren nicht möglich – Pfad im Feld markieren ' +
-                  'und mit Strg+C kopieren.', 'fehler');
-        };
-        var fertig = function () {
-            melde('xa-dl-status', 'Pfad kopiert.', 'ok');
-            setTimeout(function () { melde('xa-dl-status', ''); }, 4000);
-        };
-        try {
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(_katalog).then(fertig, schief);
-            } else { schief(); }
-        } catch (e) { schief(); }
-    }
-
     function ladeGrenzen() {
         return fetch('/api/skills/' + SKILL + '/config', { headers: kopf() })
             .then(function (r) { return r.json(); })
@@ -409,11 +441,19 @@
        der den ganzen Formularstand schickt, ueberschriebe den jeweils anderen
        Teil (Lehre von den SAP-Sichtbarkeiten und den beiden E-Mail-Knoepfen). */
     function speichereKatalog() {
+        var feld = $('xa-katalog');
+        speicherePfad((feld ? feld.value : '').trim(), false);
+    }
+
+    /* `still = true`: aufgerufen aus dem Hochlade-Knopf, der den Pfad nebenbei
+       mitspeichert. Dann KEINE eigene Statusmeldung – der Knopf meldet ohnehin,
+       und zwei Meldungen nebeneinander widersprechen sich beim Timing. Ein
+       Fehlschlag wird trotzdem gezeigt: ein still verlorener Pfad waere genau
+       die Art Fehler, die man erst Wochen spaeter bemerkt. */
+    function speicherePfad(pfad, still) {
         if (_laeuft) return;
         _laeuft = true;
-        var feld = $('xa-katalog');
-        var pfad = (feld ? feld.value : '').trim();
-        melde('xa-katalog-status', 'Speichert …');
+        if (!still) melde('xa-katalog-status', 'Speichert …');
         fetch('/api/skills/' + SKILL + '/config', {
             method: 'POST',
             headers: kopf({ 'Content-Type': 'application/json' }),
@@ -428,10 +468,12 @@
             // Die Folge benennen, nicht nur "gespeichert": der Knopf schaltet
             // die Benutzerseite zwischen Download und Pfad um, und das sieht
             // man von hier aus nicht.
-            melde('xa-katalog-status', pfad
-                ? 'Gespeichert – /excel zeigt jetzt diesen Pfad statt des Downloads.'
-                : 'Gespeichert – /excel bietet wieder den Download an.', 'ok');
-            setTimeout(function () { melde('xa-katalog-status', ''); }, 5000);
+            if (!still) {
+                melde('xa-katalog-status', pfad
+                    ? 'Gespeichert – /excel zeigt jetzt diesen Pfad statt des Downloads.'
+                    : 'Gespeichert – /excel bietet wieder den Download an.', 'ok');
+                setTimeout(function () { melde('xa-katalog-status', ''); }, 5000);
+            }
         }).catch(function (e) {
             melde('xa-katalog-status', 'Fehler: ' + (e && e.message || e), 'fehler');
         }).then(function () { _laeuft = false; });
@@ -477,14 +519,17 @@
         // irgendwann zwei gebunden sind und der Klick doppelt feuert.
         var dl = $('xa-download');
         if (dl) dl.addEventListener('click', function (ev) {
-            if (!(_katalog && kannSpeichern())) return;   // normaler Download
+            // Massgeblich ist der FELDINHALT, nicht der gespeicherte Pfad:
+            // wer eintippt und sofort drueckt, bekam sonst einen Download.
+            if (!(feldPfad() && kannSpeichern())) return;   // normaler Download
             ev.preventDefault();
             hochladen();
         });
-        var pc = $('xa-pfad-copy');
-        if (pc) pc.addEventListener('click', pfadKopieren);
-        var ow = $('xa-ordner-btn');
-        if (ow) ow.addEventListener('click', ordnerWaehlen);
+        // Der Knopf schaltet beim Tippen um, und die Befehlszeile darunter
+        // wandert mit. Ohne das muesste man erst speichern, um zu sehen, was
+        // der Knopf dann tut – genau die Ueberraschung, die gemeldet wurde.
+        var kf = $('xa-katalog');
+        if (kf) kf.addEventListener('input', knopfAktualisieren);
         var g = $('xa-guide-btn');
         if (g) {
             g.addEventListener('click', function () {
@@ -506,11 +551,11 @@
         onShow: function () {
             binde();
             ladeVersion();
-            // Das gemerkte Handle VOR knopfAktualisieren laden, sonst zeigt der
-            // Reiter beim Oeffnen "Ordner einmal auswaehlen", obwohl schon einer
-            // gemerkt ist. ladeGrenzen() ruft knopfAktualisieren am Ende – hier
-            // wird es nach dem Laden noch einmal angestossen, weil beide Abrufe
-            // nebenlaeufig sind und die Reihenfolge nicht feststeht.
+            // Das gemerkte Handle VOR knopfAktualisieren laden, sonst behauptet
+            // der Hinweis, es werde noch nach dem Ordner gefragt, obwohl schon
+            // einer gemerkt ist. ladeGrenzen() ruft knopfAktualisieren am Ende –
+            // hier wird es nach dem Laden noch einmal angestossen, weil beide
+            // Abrufe nebenlaeufig sind und die Reihenfolge nicht feststeht.
             handleLesen().then(function (h) {
                 _ordner = h || null;
                 knopfAktualisieren();

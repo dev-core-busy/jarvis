@@ -8048,6 +8048,16 @@ body.light .kb-mirror-mark { color: color-mix(in srgb, var(--info) 72%, #000); }
  * braucht kein JS. Ein <a> mit Knopf-Klasse ist ohne diese Zeile
  * unterstrichen (Lehre von .em-btn und .ad-upd a). */
 .xa-dl { text-decoration: none; display: inline-block; }
+/* Die fertige Befehlszeile. Waagerecht scrollbar statt umbrechend: ein
+ * umgebrochener Befehl laesst sich nicht sauber markieren und kopieren
+ * (gleiche Begruendung wie bei .cs-help pre im Claude-Bereich). Deckende
+ * Flaeche, damit sie sich vom Fliesstext abhebt; `user-select: all` macht
+ * aus dem Markieren einen Klick. */
+.xa-cmd { margin: 0 0 4px; padding: 9px 11px; border-radius: 7px;
+    background: var(--bg-secondary); border: 1px solid var(--border);
+    font-family: var(--font-mono, monospace); font-size: 0.78rem;
+    line-height: 1.5; overflow-x: auto; white-space: pre;
+    color: var(--text-primary); user-select: all; }
 .xa-steps { margin: 6px 0 0 0; padding-left: 1.3rem; line-height: 1.7;
     font-size: 0.82rem; color: var(--text-secondary); }
 .xa-steps li { margin-bottom: 6px; }

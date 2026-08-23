@@ -102,7 +102,9 @@ chmod 600 ~/.{marke_slug}-csa-key
 ```
 
 - **Schluessel** in `{MARKE}_CSA_KEY` oder `~/.{marke_slug}-csa-key` – in {marke}
-  unter `{adresse}/claude` erzeugen. **Nie ins Repo.**
+  unter `{adresse}/claude` erzeugen. Dort stehen dieselben drei Zeilen samt
+  eingesetztem Schluessel zum Kopieren, und der Schluessel bleibt dauerhaft
+  sichtbar. **Nie ins Repo.**
 - **Adresse** ist oben schon eingesetzt: `{adresse}`. (Ueber `{MARKE}_CSA_URL`
   bzw. die Datei laesst sich der Client auch gegen eine andere Installation
   richten – eine feste Vorgabe im Code gibt es bewusst nicht.)

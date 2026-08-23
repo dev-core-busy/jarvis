@@ -9698,7 +9698,15 @@ async def claudesub_diaet_md(request: Request):
 
 @app.get("/api/claude/status")
 async def claudesub_status(user: str = Depends(require_claudesub_access)):
-    """Zustand des Bereichs: Schluessel-Info (NIE das Geheimnis) und Grenzen."""
+    """Zustand des Bereichs: Schluessel des EIGENEN Benutzers und Grenzen.
+
+    Seit 2026-08-23 enthaelt ``schluessel.schluessel`` den Klartext – aber nur
+    den des abfragenden Benutzers: ``require_claudesub_access`` liefert den
+    angemeldeten Namen, und ``schluessel_info`` sucht ausschliesslich dessen
+    Eintrag. Es gibt keinen Endpunkt, der einen fremden Schluessel herausgibt,
+    auch nicht fuer einen Administrator. Bei Altbestand aus der Hash-Zeit steht
+    dort ``None`` + ``alt: true`` (siehe Modulkopf von ``claude_subagent``).
+    """
     from backend import claude_subagent as _cs
     return JSONResponse({
         "ok": True,
@@ -9730,9 +9738,10 @@ async def claudesub_status(user: str = Depends(require_claudesub_access)):
 async def claudesub_key_create(user: str = Depends(require_claudesub_access)):
     """Erzeugt einen neuen Delegations-Schluessel.
 
-    Der Klartext steht GENAU HIER und nirgends sonst – gespeichert wird nur der
-    Hash. Ein zweiter Aufruf entwertet den alten Schluessel; das ist zugleich
-    der Widerrufsweg.
+    Ein zweiter Aufruf entwertet den alten Schluessel; das ist zugleich der
+    Widerrufsweg. Der Klartext wird gespeichert und ist danach ueber
+    ``/api/claude/status`` wieder abrufbar – fuer den Eigentuemer und nur fuer
+    ihn (Begruendung im Modulkopf von ``claude_subagent``).
     """
     from backend import claude_subagent as _cs
     try:

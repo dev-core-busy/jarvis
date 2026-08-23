@@ -121,12 +121,23 @@
     }
 
     // ── Zeichnen ───────────────────────────────────────────────────────────
+    // Der Schluessel wird DAUERHAFT gezeigt (Vorgabe 2026-08-23). Drei
+    // Zustaende, und alle drei muessen unterscheidbar bleiben:
+    //   * kein Schluessel        -> Kasten weg, Meldung "noch keinen erzeugt"
+    //   * Schluessel im Klartext -> Kasten mit Wert und Kopieren-Knopf
+    //   * Altbestand (Hash-Zeit) -> Kasten weg, aber AUSDRUECKLICHER Hinweis,
+    //     dass er weiter gilt und sich nur nicht anzeigen laesst. Ein leeres
+    //     Feld waere hier eine Behauptung ("kein Schluessel"), die nicht stimmt.
     function zeichneSchluessel() {
         var pille = $('cs-key-pill');
         var meta = $('cs-key-meta');
         var neu = $('cs-key-new');
         var del = $('cs-key-del');
+        var box = $('cs-key-box');
+        var wert = $('cs-key-value');
+        var altHinweis = $('cs-key-alt');
         var k = _status && _status.schluessel;
+        var klar = (k && k.schluessel) || '';
         if (pille) {
             pille.textContent = k ? T('csub.pill_ok', 'Schlüssel hinterlegt')
                                   : T('csub.pill_off', 'kein Schlüssel');
@@ -140,11 +151,32 @@
                     .replace('{l}', k.zuletzt ? zeitText(k.zuletzt) : T('csub.never', 'nie'))
                 : T('csub.key_none', 'Du hast noch keinen Schlüssel erzeugt.');
         }
+        // textContent, nicht innerHTML: der Wert kommt zwar vom eigenen Server,
+        // aber ein Schluessel ist Fremdinhalt in einer Seite, die ein Token im
+        // localStorage haelt.
+        if (wert) wert.textContent = klar;
+        if (box) box.hidden = !klar;
+        if (altHinweis) altHinweis.hidden = !(k && !klar);
         if (neu) {
             neu.textContent = k ? T('csub.key_regen', 'Neuen Schlüssel erzeugen')
                                 : T('csub.key_new', 'Schlüssel erzeugen');
         }
         if (del) del.hidden = !k;
+    }
+
+    // Der Schluessel in der Anleitung (Schritt "Zugang hinterlegen"). Ziel: die
+    // drei Zeilen dort sind fertig – kopieren, ausfuehren, fertig. Die Adresse
+    // setzt branding.js ueber {adresse} ein, den Schluessel diese Funktion.
+    //
+    // ⚠ Der Platzhalter im i18n-Text enthaelt ABSICHTLICH keine geschweiften
+    // Klammern: branding.js merkt sich jeden Textknoten mit {…} samt Rohtext
+    // und setzt ihn bei JEDEM Durchlauf neu – es wuerde unseren Schluessel
+    // sonst wieder durch den Platzhalter ersetzen.
+    function zeichneAnleitungsSchluessel() {
+        var ziel = $('cs-guide-key');
+        if (!ziel) return;
+        var k = _status && _status.schluessel;
+        if (k && k.schluessel) ziel.textContent = k.schluessel;
     }
 
     function zeichneJobs() {
@@ -218,6 +250,7 @@
 
     function zeichne() {
         zeichneSchluessel();
+        zeichneAnleitungsSchluessel();
         zeichneModell();
         zeichneJobs();
         // KEIN applyLang() hier – siehe Kopfkommentar (Endlosschleife).
@@ -278,11 +311,16 @@
                 melde(T('csub.err_generic', 'Das hat nicht geklappt.') + ' ' + ((d && d.error) || ''));
                 return;
             }
-            var box = $('cs-key-box');
-            var wert = $('cs-key-value');
-            if (wert) wert.textContent = d.schluessel;
-            if (box) box.hidden = false;
-            melde(T('csub.key_done', 'Schlüssel erzeugt – jetzt kopieren.'));
+            // Sofort anzeigen, ohne auf den Statusabruf zu warten: der Wert
+            // ist da, und ein Kasten, der erst nach dem Roundtrip erscheint,
+            // sieht wie ein haengender Knopf aus. laden() zieht danach die
+            // Metadaten (erzeugt/zuletzt) nach.
+            if (!_status) _status = {};
+            _status.schluessel = { schluessel: d.schluessel, kennung: d.kennung,
+                                   letzte4: d.letzte4, erstellt: 0, zuletzt: 0 };
+            zeichneSchluessel();
+            zeichneAnleitungsSchluessel();
+            melde(T('csub.key_done', 'Schlüssel erzeugt.'));
             laden();
         }).catch(function () {
             melde(T('csub.err_generic', 'Das hat nicht geklappt.'));
@@ -292,26 +330,58 @@
     function schluesselLoeschen() {
         if (!window.confirm(T('csub.del_ask', 'Schlüssel wirklich löschen? Dein Claude-Code-Werkzeug kann danach nichts mehr abgeben.'))) return;
         hole('/api/claude/key', { method: 'DELETE' }).then(function () {
-            var box = $('cs-key-box');
-            if (box) box.hidden = true;
+            if (_status) _status.schluessel = null;
+            zeichneSchluessel();
             melde(T('csub.del_done', 'Schlüssel gelöscht.'));
+            // Der Platzhalter in der Anleitung kommt erst beim naechsten
+            // applyLang() zurueck – bis dahin stuende dort der geloeschte
+            // Schluessel. Deshalb hier ausdruecklich zuruecksetzen.
+            var ziel = $('cs-guide-key');
+            if (ziel) ziel.textContent = T('csub.guide_key_ph', 'DEIN-SCHLUESSEL-SIEHE-OBEN');
             laden();
         }).catch(function () {
             melde(T('csub.err_generic', 'Das hat nicht geklappt.'));
         });
     }
 
+    // EIN Kopier-Weg fuer beide Knoepfe (Schluessel und die drei Zeilen der
+    // Anleitung). Zwei Fassungen waeren in drei Wochen auseinandergelaufen.
+    function kopiere(text) {
+        if (!text) return;
+        var fehler = function () {
+            melde(T('csub.copy_err', 'Kopieren nicht möglich – bitte von Hand markieren.'));
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(function () {
+                melde(T('csub.copied', 'In die Zwischenablage kopiert.'));
+            }, fehler);
+        } else {
+            fehler();
+        }
+    }
+
     function schluesselKopieren() {
         var wert = $('cs-key-value');
-        if (!wert || !wert.textContent) return;
-        var fertig = function () { melde(T('csub.copied', 'In die Zwischenablage kopiert.')); };
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(wert.textContent).then(fertig, function () {
-                melde(T('csub.copy_err', 'Kopieren nicht möglich – bitte von Hand markieren.'));
-            });
-        } else {
-            melde(T('csub.copy_err', 'Kopieren nicht möglich – bitte von Hand markieren.'));
-        }
+        kopiere(wert && wert.textContent);
+    }
+
+    // Die drei Zeilen aus der Anleitung – GERENDERT, also samt echtem
+    // Schluessel und echter Adresse. Der Knopf steckt im i18n-Block und wird
+    // bei jedem Sprachlauf neu erzeugt; deshalb ein DELEGIERTER Listener am
+    // Dokument statt einer Bindung, die den naechsten Neuaufbau nicht ueberlebt.
+    function anleitungKopieren() {
+        var pre = $('cs-guide-cmds');
+        kopiere(pre && pre.textContent);
+    }
+
+    // Die Regel fuer die CLAUDE.md des Benutzers. Sie ist der Unterschied
+    // zwischen "Claude KANN delegieren" und "Claude MUSS delegieren": der Skill
+    // wird von selbst gefunden, ob er genommen wird, entscheidet das Modell
+    // aber jedes Mal neu. Gleicher delegierter Weg wie oben – der Knopf steckt
+    // im i18n-Block und wird bei jedem Sprachlauf neu erzeugt.
+    function regelKopieren() {
+        var pre = $('cs-guide-rule');
+        kopiere(pre && pre.textContent);
     }
 
     // ── Bindung ────────────────────────────────────────────────────────────
@@ -329,6 +399,17 @@
         var kopie = $('cs-key-copy');
         if (kopie) kopie.addEventListener('click', schluesselKopieren);
 
+        document.addEventListener('click', function (ev) {
+            if (!ev.target || !ev.target.closest) return;
+            if (ev.target.closest('#cs-guide-copy')) {
+                ev.preventDefault();
+                anleitungKopieren();
+            } else if (ev.target.closest('#cs-guide-rule-copy')) {
+                ev.preventDefault();
+                regelKopieren();
+            }
+        });
+
         var portal = $('cs-portal-btn');
         if (portal) portal.addEventListener('click', function () { location.href = '/portal'; });
 
@@ -344,6 +425,13 @@
         // Sprachwechsel: nur neu zeichnen, wenn sich die Sprache WIRKLICH
         // geaendert hat – applyLang() feuert dieses Ereignis bei jedem Aufruf.
         window.addEventListener('jarvis-lang-changed', function () {
+            // Der Schluessel in der Anleitung MUSS bei JEDEM Lauf neu gesetzt
+            // werden, nicht nur bei einem echten Wechsel: applyLang() ersetzt
+            // das innerHTML des Anleitungs-Kastens und bringt damit den
+            // Platzhalter zurueck. Der Aufruf ist billig und ruft selbst kein
+            // applyLang() – die Endlosschleife von 2026-08-18 entsteht dadurch
+            // nicht.
+            zeichneAnleitungsSchluessel();
             var jetzt = sprache();
             if (jetzt === _lang) return;
             _lang = jetzt;

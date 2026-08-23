@@ -74,7 +74,9 @@ function baueFetch(zustand) {
                         json: () => Promise.resolve({ ok: true }) });
                 }
                 zustand.schluessel = { kennung: 'abc123', letzte4: 'WXYZ',
-                                       erstellt: 1787000000, zuletzt: 0 };
+                                       erstellt: 1787000000, zuletzt: 0,
+                                       schluessel: 'CSA-1.abc123.GEHEIMNISWXYZ',
+                                       alt: false };
                 return Promise.resolve({
                     status: 200, ok: true, json: () => Promise.resolve({
                         ok: true, schluessel: 'CSA-1.abc123.GEHEIMNISWXYZ',
@@ -144,16 +146,22 @@ async function baueSeite(zustand) {
     }
 
     // ══════════════════════════════════════════════════════════════════════
-    section('2. Schluessel: einmalige Anzeige');
+    section('2. Schluessel: dauerhafte Anzeige');
     {
         const { dom, w, d, fetchInfo } = await baueSeite({ schluessel: null, jobs: [] });
         const box = d.getElementById('cs-key-box');
-        check(box && box.hidden, 'Schluessel-Kasten ist anfangs verborgen');
+        check(box && box.hidden, 'Schluessel-Kasten ist ohne Schluessel verborgen');
+        // Der Kasten darf KEIN Inline-`display` tragen: ein Inline-Style
+        // schlaegt jede Klassenregel, das hidden-Attribut waere dann wirkungslos
+        // und der Warnsatz stuende auch ohne Schluessel da (Klassen-Falle wie
+        // bei .sp-row/.input-group).
+        check(!!box && !box.getAttribute('style'), 'Kasten traegt keinen Inline-Style');
         check(/keinen Schl/i.test(d.getElementById('cs-key-meta').textContent),
               'Meldung "noch keinen Schluessel"');
         check(/kein Schl/i.test(d.getElementById('cs-key-pill').textContent),
               'Pille sagt "kein Schluessel"');
         check(d.getElementById('cs-key-del').hidden, 'Loeschen-Knopf verborgen');
+        check(d.getElementById('cs-key-alt').hidden, 'Altbestand-Hinweis verborgen');
 
         d.getElementById('cs-key-new').click();
         await schlaf(60);
@@ -163,10 +171,191 @@ async function baueSeite(zustand) {
         const posts = fetchInfo.rufe.filter(r => r.pfad === '/api/claude/key' && r.methode === 'POST');
         check(posts.length === 1, 'Genau EIN POST auf /api/claude/key', String(posts.length));
         check(!d.getElementById('cs-key-del').hidden, 'Loeschen-Knopf jetzt sichtbar');
-        check(/nie wieder/i.test(d.querySelector('.cs-key-warn').textContent),
-              'Warnung "wird nie wieder angezeigt"');
+        check(!/nie wieder/i.test(d.querySelector('.cs-key-warn').textContent),
+              'KEINE Warnung mehr "wird nie wieder angezeigt"');
+        check(/Kennwort/i.test(d.querySelector('.cs-key-warn').textContent),
+              'Stattdessen der Kennwort-Hinweis');
         check(/…WXYZ|WXYZ/.test(d.getElementById('cs-key-meta').textContent),
-              'Meta nennt nur die letzten 4 Zeichen');
+              'Meta nennt weiterhin die letzten 4 Zeichen');
+        dom.window.close();
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    section('2b. Der Schluessel ist beim NAECHSTEN Aufruf wieder da');
+    {
+        // Genau das war der Anlass: bisher musste man einen neuen erzeugen
+        // (und damit den eingerichteten entwerten), nur um nachzusehen.
+        const { dom, d } = await baueSeite({
+            schluessel: { kennung: 'abc123', letzte4: 'WXYZ', erstellt: 1787000000,
+                          zuletzt: 1787001000, schluessel: 'CSA-1.abc123.GEHEIMNISWXYZ',
+                          alt: false },
+            jobs: []
+        });
+        check(!d.getElementById('cs-key-box').hidden,
+              'Kasten ist ohne Klick auf "erzeugen" sichtbar');
+        const wv = d.getElementById('cs-key-value');
+        check(!!wv && wv.textContent === 'CSA-1.abc123.GEHEIMNISWXYZ',
+              'Der gespeicherte Schluessel steht da');
+        check(/Neuen Schl/i.test(d.getElementById('cs-key-new').textContent),
+              'Der Knopf heisst jetzt "Neuen Schluessel erzeugen"');
+        dom.window.close();
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    section('2c. Altbestand: gilt weiter, laesst sich nicht anzeigen');
+    {
+        const { dom, d } = await baueSeite({
+            schluessel: { kennung: 'alt1', letzte4: 'OLDX', erstellt: 1780000000,
+                          zuletzt: 0, schluessel: null, alt: true },
+            jobs: []
+        });
+        // Ein leeres Feld waere hier die Behauptung "kein Schluessel" – und die
+        // stimmt nicht (gleiche Regel wie beim Trenner "Neue Sitzung").
+        check(d.getElementById('cs-key-box').hidden, 'Kein leerer Schluessel-Kasten');
+        check(!d.getElementById('cs-key-alt').hidden, 'Stattdessen der Altbestand-Hinweis');
+        check(/hinterlegt/i.test(d.getElementById('cs-key-pill').textContent),
+              'Die Pille sagt weiterhin "Schluessel hinterlegt"');
+        check(!d.getElementById('cs-key-del').hidden, 'Loeschen bleibt moeglich');
+        dom.window.close();
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    section('2d. Anleitung: die drei Zeilen sind fertig zum Ausfuehren');
+    {
+        const { dom, w, d } = await baueSeite({
+            schluessel: { kennung: 'abc123', letzte4: 'WXYZ', erstellt: 1787000000,
+                          zuletzt: 0, schluessel: 'CSA-1.abc123.GEHEIMNISWXYZ',
+                          alt: false },
+            jobs: []
+        });
+        const pre = d.getElementById('cs-guide-cmds');
+        check(!!pre, 'Der Befehlsblock hat eine Kennung');
+        const kz = d.getElementById('cs-guide-key');
+        check(!!kz && kz.textContent === 'CSA-1.abc123.GEHEIMNISWXYZ',
+              'Der echte Schluessel steht in der Befehlszeile');
+        const zeilen = (pre ? pre.textContent : '').trim().split('\n');
+        check(zeilen.length === 3, 'Es sind genau drei Zeilen', String(zeilen.length));
+        check(zeilen[0].indexOf('CSA-1.abc123.GEHEIMNISWXYZ') > 0,
+              'Zeile 1 traegt den Schluessel');
+        check(!!pre && !/dein Schl|DEIN-SCHLUESSEL|your key|YOUR-KEY/i.test(pre.textContent),
+              'Kein Platzhalter mehr im Block');
+
+        // Der Platzhalter darf KEINE geschweiften Klammern haben: branding.js
+        // merkt sich jeden Textknoten mit {…} samt Rohtext und wuerde den
+        // Schluessel bei seinem naechsten Durchlauf wieder ueberschreiben.
+        const roh = fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8');
+        const treffer = roh.match(/id="cs-guide-key">([^<]*)</g) || [];
+        check(treffer.length === 2, 'Platzhalter in DE und EN vorhanden',
+              String(treffer.length));
+        check(treffer.every(t => t.indexOf('{') < 0),
+              'Platzhalter enthaelt keine Branding-Klammern');
+
+        // Kopieren: der Knopf steckt IM i18n-Block und wird bei jedem
+        // Sprachlauf neu erzeugt – deshalb ein delegierter Listener.
+        let kopiert = '';
+        w.navigator.clipboard = { writeText: (t) => { kopiert = t; return Promise.resolve(); } };
+        const kk = d.getElementById('cs-guide-copy');
+        check(!!kk, 'Kopier-Knopf vorhanden');
+        if (kk) kk.click();
+        await schlaf(20);
+        check(kopiert.split('\n').length === 3, 'Kopiert werden drei Zeilen');
+        check(kopiert.indexOf('CSA-1.abc123.GEHEIMNISWXYZ') > 0,
+              'Der echte Schluessel ist mitkopiert');
+
+        // Sprachwechsel: applyLang() ersetzt das innerHTML des Kastens und
+        // bringt den Platzhalter zurueck – der Schluessel muss danach wieder
+        // drinstehen, sonst kopiert der Benutzer einen Platzhalter.
+        if (w.setLang) w.setLang('en');
+        await schlaf(30);
+        const kzEn = d.getElementById('cs-guide-key');
+        check(!!kzEn && kzEn.textContent === 'CSA-1.abc123.GEHEIMNISWXYZ',
+              '[en] Schluessel ueberlebt den Sprachwechsel');
+        const kkEn = d.getElementById('cs-guide-copy');
+        if (kkEn) kkEn.click();
+        await schlaf(20);
+        check(kopiert.indexOf('CSA-1.abc123.GEHEIMNISWXYZ') > 0,
+              '[en] Kopieren funktioniert weiterhin');
+        if (w.setLang) w.setLang('de');
+        await schlaf(30);
+        const kzDe = d.getElementById('cs-guide-key');
+        check(!!kzDe && kzDe.textContent === 'CSA-1.abc123.GEHEIMNISWXYZ',
+              '[de] ... und zurueck');
+
+        // Und der Fall, den ein reiner Sprachwechsel-Test NICHT abdeckt:
+        // applyLang() mit DERSELBEN Sprache. Es feuert `jarvis-lang-changed`
+        // bei JEDEM Aufruf und baut den Kasten neu auf – der Sprachvergleich
+        // laesst zeichne() dann aber aus. Ohne den zusaetzlichen Aufruf im
+        // Listener stuende hier wieder der Platzhalter.
+        if (w.applyLang) w.applyLang();
+        await schlaf(30);
+        const kzNach = d.getElementById('cs-guide-key');
+        check(!!kzNach && kzNach.textContent === 'CSA-1.abc123.GEHEIMNISWXYZ',
+              'applyLang() ohne Sprachwechsel laesst den Schluessel stehen');
+        dom.window.close();
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    section('2e. Die Regel fuer die CLAUDE.md des Benutzers');
+    {
+        const { dom, w, d } = await baueSeite({
+            schluessel: { kennung: 'abc123', letzte4: 'WXYZ', erstellt: 1787000000,
+                          zuletzt: 0, schluessel: 'CSA-1.abc123.GEHEIMNISWXYZ',
+                          alt: false },
+            jobs: []
+        });
+        const regel = d.getElementById('cs-guide-rule');
+        check(!!regel, 'Die Regel steht als eigener Block in der Anleitung');
+        const txt = regel ? regel.textContent : '';
+        // Beide Haelften sind noetig: die erste macht die Delegation
+        // verbindlich, die zweite verhindert Nachbesserungsschleifen – ohne sie
+        // ist die Token-Ersparnis wieder ausgegeben.
+        check(/MUSST/.test(txt), 'Sie ist verbindlich formuliert ("MUSST")', txt.slice(0, 60));
+        check(/code-delegate/.test(txt), 'Sie nennt den Skill beim Namen');
+        check(/Nachbesserung/i.test(txt), 'Sie verbietet Nachbesserungsversuche');
+        check(/Test/.test(txt), 'Sie nennt den vorhandenen Test als Bedingung');
+
+        // DRIFT-SCHRANKE: der Skill-Name in der Regel muss zu dem Ordner passen,
+        // in den die Anleitung die SKILL.md legen laesst. Laufen die beiden
+        // auseinander, findet Claude den Skill unter einem anderen Namen und die
+        // Regel zeigt ins Leere.
+        const kasten = d.querySelector('[data-i18n-html="csub.guide_body"]');
+        const ganz = kasten ? kasten.textContent : '';
+        const m = /\.claude\/skills\/([a-z0-9-]+)\//.exec(ganz);
+        check(!!m && txt.indexOf(m[1]) >= 0,
+              'Skill-Name in der Regel == Ordnername in Schritt 3',
+              m ? m[1] : 'Ordner nicht gefunden');
+
+        // Nummerierung: keine doppelte Zahl, luekenlos ab 1.
+        const nummern = Array.prototype.map.call(
+            kasten ? kasten.querySelectorAll('h4') : [], h => h.textContent)
+            .map(t => (/^(\d+)\./.exec(t) || [])[1]).filter(Boolean).map(Number);
+        check(nummern.length >= 6 && nummern.join(',') === nummern.map((_, i) => i + 1).join(','),
+              'Die Schritte sind fortlaufend nummeriert', nummern.join(','));
+
+        // Kopieren: delegierter Listener, muss den Sprachwechsel ueberleben.
+        let kopiert = '';
+        w.navigator.clipboard = { writeText: (t) => { kopiert = t; return Promise.resolve(); } };
+        const kb = d.getElementById('cs-guide-rule-copy');
+        check(!!kb, 'Kopier-Knopf fuer die Regel vorhanden');
+        if (kb) kb.click();
+        await schlaf(20);
+        check(/code-delegate/.test(kopiert), 'Der Klick kopiert die Regel', kopiert.slice(0, 40));
+        check(kopiert.indexOf('Regel kopieren') < 0,
+              '... und NICHT die Beschriftung des Knopfes mit');
+
+        if (w.setLang) w.setLang('en');
+        await schlaf(30);
+        const en = d.getElementById('cs-guide-rule');
+        check(!!en && /MUST/.test(en.textContent) && /code-delegate/.test(en.textContent),
+              '[en] Die Regel gibt es auch auf Englisch',
+              en ? en.textContent.slice(0, 60) : '-');
+        const kbEn = d.getElementById('cs-guide-rule-copy');
+        kopiert = '';
+        if (kbEn) kbEn.click();
+        await schlaf(20);
+        check(/code-delegate/.test(kopiert), '[en] Kopieren funktioniert weiterhin');
+        if (w.setLang) w.setLang('de');
+        await schlaf(30);
         dom.window.close();
     }
 

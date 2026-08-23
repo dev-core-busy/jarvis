@@ -15,8 +15,10 @@ WAS DIESER TEST FESTHAELT, in der Reihenfolge der Wichtigkeit:
    vermutet: in der Machbarkeitsprobe vom 2026-08-21 war die vom Modell
    ABGELEITETE Zahl in drei von drei Laeufen falsch, waehrend die zugrunde
    liegenden Daten jedes Mal stimmten.
-4. **Der Schluessel liegt nur als Hash auf Platte** und wird genau einmal
-   ausgegeben. Ein zweiter ``schluessel_erzeugen`` entwertet den alten – das ist
+4. **Der Schluessel liegt im KLARTEXT auf Platte** (seit 2026-08-23, Vorgabe des
+   Nutzers: er wird dauerhaft angezeigt) und ist ueber ``schluessel_info``
+   wieder abrufbar – aber NUR fuer den Eigentuemer, und die Datei ist deshalb
+   0600. Ein zweiter ``schluessel_erzeugen`` entwertet den alten – das ist
    der Widerrufsweg.
 5. **Die Zustandsdatei ist gegen die Sandbox gesperrt** (``_APP_DENY_REL``,
    ``PRIVATE_FILES``, ``SHELL_SECRET_PATHS``): wer sie beschreiben kann, laesst
@@ -108,15 +110,45 @@ check(cs.schluessel_info("ANDREAS.BENDER@nexus.int") is not None,
 check(cs.schluessel_info("nexus\\Andreas.Bender") is not None,
       "Normierung: Domaenen-Praefix findet denselben Eintrag")
 
-# Das Geheimnis darf NICHT auf Platte liegen
+# Der Schluessel liegt im Klartext und ist wieder abrufbar (Vorgabe 2026-08-23)
 _roh = cs.STATE_PATH.read_text(encoding="utf-8")
 _geheimnis = _schluessel.split(".", 2)[-1]
-check(_geheimnis not in _roh, "Geheimnis steht NICHT im Klartext auf Platte")
-check('"hash"' in _roh, "Stattdessen liegt ein Hash in der Datei")
+check(_geheimnis in _roh, "Geheimnis steht im Klartext auf Platte (dauerhafte Anzeige)")
+check('"hash"' in _roh, "Der Hash bleibt daneben stehen (Vergleichsweg)")
+check(cs.schluessel_info("andreas.bender").get("schluessel") == _schluessel,
+      "schluessel_info gibt genau den ausgegebenen Text zurueck")
+check(cs.schluessel_info("andreas.bender").get("alt") is False,
+      "Neue Eintraege sind nicht 'alt'")
 check(cs.schluessel_info("andreas.bender").get("letzte4") == _geheimnis[-4:],
-      "Nur die letzten 4 Zeichen sind wieder abrufbar")
-check("schluessel" not in json.dumps(cs.schluessel_info("andreas.bender")),
-      "schluessel_info gibt das Geheimnis nicht heraus")
+      "Die letzten 4 Zeichen stehen weiterhin bereit")
+# DIE Gegenprobe zur Klartext-Speicherung: 0600, nicht 0640. Ohne sie waere
+# der Schluessel fuer jeden Prozess in der Gruppe `jarvis` lesbar.
+_modus = cs.STATE_PATH.stat().st_mode & 0o777
+check(_modus == 0o600, "Zustandsdatei ist 0600", oct(_modus))
+import backend.sandbox as _sb  # noqa: E402
+check("data/claude_subagent.json" in _sb.PRIVATE_FILES_STRENG,
+      "... und steht in PRIVATE_FILES_STRENG (0600 beim Start)")
+check("data/claude_subagent.json" not in _sb.PRIVATE_FILES,
+      "... und NICHT mehr in der 0640-Liste (zwei Meinungen waeren ein Bug)")
+check("data/claude_subagent.json" in _sb._APP_DENY_REL,
+      "... bleibt fuer Werkzeuge gesperrt")
+
+# ALTBESTAND aus der Hash-Zeit: gilt weiter, laesst sich aber nicht anzeigen.
+# Geraten wird nichts – `alt: True` ist ausdruecklich etwas anderes als
+# "kein Schluessel".
+_alt_geheim = "AltbestandGeheimnis123"
+with cs._lock:
+    cs._laden()["schluessel"].append({
+        "kennung": "altbestand01", "user": "alt.bestand",
+        "hash": cs._hash(_alt_geheim), "algo": "sha256",
+        "letzte4": _alt_geheim[-4:], "erstellt": 1, "zuletzt": 0})
+    cs._speichern()
+check(cs.benutzer_zu_schluessel(cs.schluessel_prefix() + "altbestand01." + _alt_geheim)
+      == "alt.bestand", "Altbestand ohne Klartext gilt weiter")
+_ai = cs.schluessel_info("alt.bestand")
+check(_ai.get("schluessel") is None, "Altbestand liefert keinen Klartext")
+check(_ai.get("alt") is True, "... und ist als 'alt' gekennzeichnet")
+check(cs.schluessel_loeschen("alt.bestand") is True, "Altbestand ist loeschbar")
 
 # Falsche/kaputte Schluessel
 check(cs.benutzer_zu_schluessel(cs.schluessel_prefix() + "abc.falsch") is None,
@@ -315,8 +347,9 @@ check(all("ergebnis" not in x for x in _liste),
 section("6. Zustandsdatei und Sandbox-Sperren")
 
 import os  # noqa: E402
-check(oct(os.stat(cs.STATE_PATH).st_mode)[-3:] == "640",
-      "Zustandsdatei ist 0640", oct(os.stat(cs.STATE_PATH).st_mode)[-3:])
+check(oct(os.stat(cs.STATE_PATH).st_mode)[-3:] == "600",
+      "Zustandsdatei ist 0600 (Klartext-Schluessel)",
+      oct(os.stat(cs.STATE_PATH).st_mode)[-3:])
 
 # NEUE Datei als root: sie muss dem Eigentuemer des data-Verzeichnisses
 # gehoeren, nicht root. Sonst kann der unprivilegierte Dienst sie nicht LESEN,
@@ -330,14 +363,16 @@ check(_sp_block.count("os.chown") == 2,
       "Beide Faelle (vorhanden / neu) werden bedient",
       f"{_sp_block.count('os.chown')}x chown")
 
-_sbx = (ROOT / "backend" / "sandbox.py").read_text(encoding="utf-8")
-check("data/claude_subagent.json" in _sbx, "Datei steht in sandbox.py")
-_deny = _sbx[_sbx.find("_APP_DENY_REL"):_sbx.find("PRIVATE_FILES")]
-check("data/claude_subagent.json" in _deny, "... in _APP_DENY_REL")
-_priv = _sbx[_sbx.find("PRIVATE_FILES = ("):_sbx.find("PRIVATE_FILE_MODE")]
-check("data/claude_subagent.json" in _priv, "... in PRIVATE_FILES")
-_shell = _sbx[_sbx.find("SHELL_SECRET_PATHS"):]
-check("claude_subagent" in _shell[:2000], "... in SHELL_SECRET_PATHS")
+# Geprueft werden die LISTEN des Moduls, nicht Textausschnitte der Datei: die
+# erste Fassung schnitt "_APP_DENY_REL bis zum Wort PRIVATE_FILES" – und schlug
+# fehl, sobald ein KOMMENTAR in diesem Block das Wort nennt. Ein Waechter, der
+# seine eigene Begruendung liest, prueft nichts (im Projekt der zehnte Fall).
+check("data/claude_subagent.json" in _sb._APP_DENY_REL, "... in _APP_DENY_REL")
+check("data/claude_subagent.json" in _sb.PRIVATE_FILES_STRENG,
+      "... in PRIVATE_FILES_STRENG (0600)")
+check(_sb.PRIVATE_FILE_MODE_STRENG == 0o600, "... und die Stufe ist wirklich 0600")
+check(bool(_sb.SHELL_SECRET_PATHS.search("cat data/claude_subagent.json")),
+      "... in SHELL_SECRET_PATHS")
 
 # Beschaedigte Datei darf den Dienst nicht kippen
 cs.STATE_PATH.write_text("{kaputt", encoding="utf-8")

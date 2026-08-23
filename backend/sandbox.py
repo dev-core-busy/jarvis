@@ -186,11 +186,11 @@ _APP_DENY_REL = (
     # Dateinamen und Ergebnistexte fremder Laeufe.
     "data/short_tracks.json", "data/short_tracks_log.jsonl",
     # Claude Subagent (backend/claude_subagent.py): bildet Delegations-Schluessel
-    # auf BENUTZER ab. Lesen verraet, wer delegieren darf; SCHREIBEN ist die
-    # direktere Gefahr – ein eigener Eintrag laesst kuenftige Laeufe unter einer
-    # fremden Kennung starten. Gespeichert ist zwar nur der Hash des Geheimnisses
-    # (das Geheimnis selbst existiert nur einmal, bei der Ausgabe), aber der
-    # Hash reicht zum EINTRAGEN eines selbst gewaehlten Schluessels.
+    # auf BENUTZER ab. Seit 2026-08-23 steht der Schluessel dort im KLARTEXT
+    # (er wird dauerhaft angezeigt) – Lesen ist damit gleichbedeutend mit
+    # "fremde Vollmacht in der Hand". Schreiben bleibt die zweite Gefahr: ein
+    # eigener Eintrag laesst kuenftige Laeufe unter fremder Kennung starten.
+    # Deshalb steht die Datei zusaetzlich in PRIVATE_FILES_STRENG (0600).
     "data/claude_subagent.json",
 )
 
@@ -227,15 +227,18 @@ PRIVATE_FILES = ("data/scheduled_jobs.json", "data/file_watchers.json",
                  "data/email_accounts.json", "data/email_rules.json",
                  "data/email_state.json", "data/email_log.jsonl",
                  "data/addin_links.json", "data/sap_accounts.json",
-                 "data/short_tracks.json", "data/short_tracks_log.jsonl",
-                 "data/claude_subagent.json")
+                 "data/short_tracks.json", "data/short_tracks_log.jsonl")
 PRIVATE_FILE_MODE = 0o640
 
 # Die Schluesseldateien der E-Mail-/SAP-Zugangsdaten sind strenger als 0640: sie
 # entschluesseln die Kennwoerter. 0600 heisst, dass nicht einmal die Gruppe
 # `jarvis` sie lesen kann – ein zusaetzlicher Riegel, falls jemand einen weiteren
 # Dienst in diese Gruppe aufnimmt.
-PRIVATE_FILES_STRENG = ("data/.mailkey", "data/.sapkey")
+# `claude_subagent.json` gehoert seit 2026-08-23 in dieselbe Stufe: der
+# Delegations-Schluessel wird dauerhaft angezeigt und liegt deshalb im Klartext
+# darin – wer ihn liest, kann Codeauftraege unter fremder Kennung starten.
+PRIVATE_FILES_STRENG = ("data/.mailkey", "data/.sapkey",
+                        "data/claude_subagent.json")
 PRIVATE_FILE_MODE_STRENG = 0o600
 
 

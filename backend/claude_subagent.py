@@ -43,10 +43,29 @@ Endpunkte in ``main.py`` (``_user_may_use_claudesub``) – bewusst dort und nich
 hier: Gruppen-Mitgliedschaften sind Sache der Anmeldeschicht. Dieses Modul
 beantwortet nur "zu welchem Benutzer gehoert dieser Schluessel".
 
-DER SCHLUESSEL WIRD NUR EINMAL ANGEZEIGT und danach als SHA-256 gespeichert.
-Abweichung vom Standort-Sync (der sein Token dauerhaft zeigt), bewusst: hier
-laege sonst eine Klartext-Vollmacht auf Platte, und wiederholtes Anzeigen bringt
-nichts, was "neu erzeugen" nicht auch loest. Naeher an ``.mailkey``/``.sapkey``.
+DER SCHLUESSEL WIRD DAUERHAFT GEZEIGT und deshalb im KLARTEXT gespeichert
+(Vorgabe des Nutzers 2026-08-23). Bis dahin lag nur ein SHA-256 auf Platte und
+der Klartext existierte genau einmal – bei der Ausgabe. Das war strenger, aber
+in der Bedienung falsch: die Anleitung braucht den Schluessel in einer
+Befehlszeile, die man kopiert und ausfuehrt, und wer die Seite spaeter wieder
+oeffnet, musste den Schluessel neu erzeugen (und damit den auf seinem Rechner
+hinterlegten entwerten), nur um ihn nachzusehen. Dieselbe Abwaegung wie beim
+Standort-Sync, der sein Token seit jeher dauerhaft zeigt.
+
+WAS DIESE ENTSCHEIDUNG KOSTET – und was sie deshalb VERLANGT:
+  * ``data/claude_subagent.json`` ist ab jetzt eine Datei mit einer nutzbaren
+    Vollmacht im Klartext. Sie steht deshalb in ``PRIVATE_FILES_STRENG``
+    (**0600**, wie ``.mailkey``/``.sapkey``) statt in ``PRIVATE_FILES`` (0640):
+    nicht einmal die Gruppe ``jarvis`` soll sie lesen. Zusaetzlich unveraendert
+    in ``_APP_DENY_REL`` und ``SHELL_SECRET_PATHS``.
+  * Herausgegeben wird der Klartext NUR an den EIGENTUEMER
+    (``/api/claude/status`` hinter ``require_claudesub_access``) – es gibt
+    keinen Weg, den Schluessel eines anderen Benutzers zu sehen, auch nicht fuer
+    einen Administrator.
+  * ALTBESTAND bleibt gueltig, aber unsichtbar: Eintraege aus der Hash-Zeit
+    haben keinen Klartext, und geraten wird nichts. Die Oberflaeche sagt das
+    ausdruecklich ("vor der Umstellung erzeugt") statt ein leeres Feld zu
+    zeigen. Wer ihn sehen will, erzeugt einen neuen.
 """
 
 import asyncio
@@ -339,7 +358,12 @@ def _laden() -> dict:
 
 
 def _speichern() -> None:
-    """Atomar schreiben, Eigentuemer und 0640 erhalten.
+    """Atomar schreiben, Eigentuemer erhalten, Modus 0600 setzen.
+
+    0600 und nicht 0640 (Vorgabe 2026-08-23): seit der Schluessel dauerhaft
+    gezeigt wird, liegt er im Klartext in dieser Datei – nicht einmal die Gruppe
+    ``jarvis`` soll ihn lesen. Dieselbe Stufe wie ``.mailkey``/``.sapkey``;
+    ``sandbox.PRIVATE_FILES_STRENG`` setzt denselben Wert beim Start.
 
     Eigentuemer: der Root-Broker kann diese Datei anfassen – gehoerte sie danach
     root, koennte das unprivilegierte Backend seine eigenen Schluessel nicht mehr
@@ -358,7 +382,7 @@ def _speichern() -> None:
         tmp.write_text(json.dumps(daten, indent=2, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, STATE_PATH)
         try:
-            os.chmod(STATE_PATH, 0o640)
+            os.chmod(STATE_PATH, 0o600)
         except Exception:  # noqa: BLE001
             pass
         try:
@@ -414,8 +438,10 @@ def schluessel_erzeugen(user: str) -> dict:
     alten (und macht ihn damit sofort unbrauchbar). Das ist der Widerrufsweg:
     wer sein Geheimnis verloren oder verstreut hat, drueckt "neu erzeugen".
 
-    Rueckgabe enthaelt ``schluessel`` im KLARTEXT – das ist die EINZIGE Stelle,
-    an der er existiert. Gespeichert wird nur der Hash.
+    Der Klartext wird gespeichert (siehe Modulkopf) und ist ueber
+    ``schluessel_info`` jederzeit wieder abrufbar – aber nur fuer den
+    Eigentuemer. Der Hash bleibt zusaetzlich stehen: er ist der Vergleichsweg
+    fuer Altbestand, und ein zweiter, unabhaengiger Weg kostet nichts.
     """
     u = _norm_user(user)
     if not u:
@@ -430,6 +456,12 @@ def schluessel_erzeugen(user: str) -> dict:
         daten["schluessel"].append({
             "kennung": kennung,
             "user": u,
+            # Der VOLLE Text, so wie er ausgegeben wurde – nicht nur das
+            # Geheimnis. Der Praefix traegt den Assistenten-Namen aus dem
+            # Branding; wuerde man ihn beim Anzeigen neu bilden, saehe der
+            # Benutzer nach einer Umbenennung einen anderen Text als den, der
+            # auf seinem Rechner liegt. Geprueft wird ohnehin nur der Kern.
+            "schluessel": voll,
             "hash": _hash(geheimnis),
             "algo": "sha256",
             "letzte4": geheimnis[-4:],
@@ -441,13 +473,21 @@ def schluessel_erzeugen(user: str) -> dict:
 
 
 def schluessel_info(user: str) -> dict | None:
-    """Was die Oberflaeche zeigen darf – NIE das Geheimnis."""
+    """Was die Oberflaeche zeigen darf – fuer den EIGENTUEMER auch den Klartext.
+
+    ``schluessel`` ist ``None``, wenn der Eintrag noch aus der Hash-Zeit stammt
+    (``alt: True``). Das ist ausdruecklich etwas anderes als "kein Schluessel":
+    er gilt weiter, er laesst sich nur nicht mehr anzeigen. Wer hier raet oder
+    ein leeres Feld zeigt, behauptet einen Zustand, den er nicht kennt.
+    """
     u = _norm_user(user)
     with _lock:
         for k in _laden()["schluessel"]:
             if _norm_user(k.get("user", "")) == u:
+                klar = str(k.get("schluessel") or "") or None
                 return {"kennung": k.get("kennung"), "letzte4": k.get("letzte4"),
-                        "erstellt": k.get("erstellt"), "zuletzt": k.get("zuletzt")}
+                        "erstellt": k.get("erstellt"), "zuletzt": k.get("zuletzt"),
+                        "schluessel": klar, "alt": klar is None}
     return None
 
 
@@ -471,6 +511,10 @@ def benutzer_zu_schluessel(token: str) -> str | None:
     werden kann – sie ist kein Geheimnis, das Geheimnis ist der dritte Teil.
     Verglichen wird ueber ``hmac.compare_digest``: ein zeichenweiser Vergleich
     verraet ueber die Laufzeit, wie viele Zeichen stimmen.
+
+    Verglichen wird weiterhin der HASH, auch wenn der Klartext daneben liegt –
+    so gilt derselbe Pfad fuer neue und fuer Altbestand-Eintraege, und es gibt
+    nur EINE Stelle, an der ueber Gueltigkeit entschieden wird.
     """
     tok = (token or "").strip()
     # NICHT auf den AKTUELLEN Praefix pruefen: er traegt den Assistenten-Namen,

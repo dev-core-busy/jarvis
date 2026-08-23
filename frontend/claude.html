@@ -106,7 +106,7 @@
             color: var(--danger); }
         .cs-btn[disabled] { opacity: .5; cursor: default; }
 
-        /* Der Schluessel selbst: einmalige Anzeige, Monospace, umbrechend.
+        /* Der Schluessel selbst: dauerhaft sichtbar, Monospace, umbrechend.
            Deckende Flaeche, weil er ueber Karteninhalt liegt. */
         .cs-key { margin-top: 10px; padding: 10px 12px; border-radius: 8px;
             background: var(--bg-primary); border: 1px solid var(--accent);
@@ -229,29 +229,38 @@
                             data-i18n-title="csub.info_title" title="Erklärung anzeigen">&#9432;</button>
                 </p>
                 <div class="cs-help" id="cs-help-key" data-i18n-html="csub.help_key">
-                    <b>Der Schlüssel wird genau einmal angezeigt.</b>
+                    <b>Der Schlüssel bleibt hier sichtbar.</b>
                     <ul>
-                        <li>{marke} speichert ihn nur als Prüfsumme – niemand kann ihn später wieder auslesen, auch kein Administrator.</li>
-                        <li>Kopiere ihn deshalb sofort und trage ihn in deinem Claude-Code-Werkzeug ein.</li>
-                        <li>Verloren? Dann erzeuge einfach einen neuen. Der alte wird dabei sofort ungültig – das ist zugleich der Weg, einen versehentlich weitergegebenen Schlüssel zurückzuziehen.</li>
+                        <li>Du kannst ihn jederzeit wieder nachsehen und kopieren – auch morgen noch. Ein Nachschlagen kostet dich also nicht den Schlüssel, den du schon eingerichtet hast.</li>
+                        <li>Sichtbar ist er <b>nur für dich</b>: {marke} gibt ihn an niemanden sonst heraus, auch nicht an einen Administrator.</li>
+                        <li>Behandle ihn wie ein Kennwort: wer ihn hat, kann in deinem Namen Aufträge starten. Er gehört nie ins Repo.</li>
+                        <li>Weitergegeben oder verloren? <b>Neuen Schlüssel erzeugen</b> – der alte wird dabei sofort ungültig. Das ist der Widerrufsweg.</li>
                         <li>Du hast immer höchstens <b>einen</b> gültigen Schlüssel.</li>
-                        <li>Behandle ihn wie ein Kennwort: wer ihn hat, kann in deinem Namen Aufträge starten.</li>
                     </ul>
                 </div>
 
                 <div class="cs-sep"></div>
                 <div class="cs-meta" id="cs-key-meta"></div>
-                <div class="cs-row" style="margin-top:10px;">
-                    <button class="cs-btn is-primary" id="cs-key-new" data-i18n="csub.key_new">Schlüssel erzeugen</button>
-                    <button class="cs-btn is-danger" id="cs-key-del" data-i18n="csub.key_del" hidden>Schlüssel löschen</button>
-                </div>
 
-                <div class="cs-row" id="cs-key-box" hidden style="display:block;">
+                <!-- Dauerhafte Anzeige. KEIN Inline-`display` hier: das
+                     hidden-Attribut wirkt nur, solange keine Regel und kein
+                     Inline-Style es ueberstimmt (Klassen-Falle wie bei
+                     .sp-row/.input-group – der Kasten stand sonst leer da). -->
+                <div id="cs-key-box" hidden>
                     <div class="cs-key" id="cs-key-value"></div>
-                    <div class="cs-key-warn" data-i18n="csub.key_once">Jetzt kopieren – dieser Schlüssel wird nie wieder angezeigt.</div>
+                    <div class="cs-key-warn" data-i18n="csub.key_secret">Wie ein Kennwort behandeln: wer ihn hat, kann in deinem Namen Aufträge starten.</div>
                     <div class="cs-row" style="margin-top:8px;">
                         <button class="cs-btn" id="cs-key-copy" data-i18n="csub.key_copy">Kopieren</button>
                     </div>
+                </div>
+                <!-- Altbestand aus der Hash-Zeit: gilt weiter, laesst sich aber
+                     nicht anzeigen. Das steht hier ausdruecklich, statt ein
+                     leeres Feld zu zeigen. -->
+                <div class="cs-meta" id="cs-key-alt" hidden data-i18n="csub.key_alt">Dieser Schlüssel wurde vor der Umstellung erzeugt und lässt sich nicht mehr anzeigen. Er gilt weiter – zum Nachsehen bitte einen neuen erzeugen.</div>
+
+                <div class="cs-row" style="margin-top:10px;">
+                    <button class="cs-btn is-primary" id="cs-key-new" data-i18n="csub.key_new">Schlüssel erzeugen</button>
+                    <button class="cs-btn is-danger" id="cs-key-del" data-i18n="csub.key_del" hidden>Schlüssel löschen</button>
                 </div>
             </div>
         </div>
@@ -293,19 +302,29 @@
             <div class="cs-card-body">
                 <div class="cs-help is-open" data-i18n-html="csub.guide_body">
                     <h4>1. Schlüssel erzeugen</h4>
-                    <p>Oben in der Karte <b>Mein Delegations-Schlüssel</b> auf <b>Schlüssel erzeugen</b> klicken und den angezeigten Wert sofort kopieren. Er wird nur dieses eine Mal angezeigt.</p>
+                    <p>Oben in der Karte <b>Mein Delegations-Schlüssel</b> auf <b>Schlüssel erzeugen</b> klicken. Er bleibt dort sichtbar – du kannst ihn jederzeit wieder nachsehen.</p>
 
                     <h4>2. Zugang auf deinem Rechner hinterlegen</h4>
-                    <p>Zwei Angaben, beide <b>außerhalb</b> des Projektordners – ein Schlüssel gehört nie ins Repo:</p>
-                    <pre><code>printf '%s' '{MARKE}-CSA-1.…dein Schlüssel…' &gt; ~/.{marke_slug}-csa-key
-printf '%s' '{adresse}'   &gt; ~/.{marke_slug}-csa-url
+                    <p>Die drei Zeilen enthalten deinen echten Schlüssel und die Adresse dieser Installation – einfach kopieren und ausführen. Beide Dateien liegen <b>außerhalb</b> des Projektordners: ein Schlüssel gehört nie ins Repo.</p>
+                    <pre id="cs-guide-cmds"><code>printf '%s' '<span id="cs-guide-key">DEIN-SCHLUESSEL-SIEHE-OBEN</span>' &gt; ~/.{marke_slug}-csa-key
+printf '%s' '{adresse}' &gt; ~/.{marke_slug}-csa-url
 chmod 600 ~/.{marke_slug}-csa-key</code></pre>
+                    <p><button type="button" class="cs-btn" id="cs-guide-copy" data-i18n="csub.guide_copy">Die drei Zeilen kopieren</button></p>
                     <p>Alternativ als Umgebungsvariablen <code>{MARKE}_CSA_KEY</code> und <code>{MARKE}_CSA_URL</code>. Eine feste Vorgabe für die Adresse gibt es bewusst nicht: derselbe Client arbeitet gegen jede {marke}-Installation, und eine falsche Adresse sähe wie ein Schlüsselproblem aus.</p>
 
                     <h4>3. Skill in Claude Code ablegen</h4>
                     <p><a class="cs-btn is-primary" href="/claude/skill.md" download="SKILL.md">SKILL.md herunterladen</a></p><p>Die Datei in deinem Projekt unter <code>.claude/skills/code-delegate/SKILL.md</code> ablegen – fertig. Sie ist bereits auf diese Installation ausgestellt. Claude findet den Skill dann selbst, sobald eine Aufgabe dazu passt; der Client <code>deploy/claude_subagent/delegiere.py</code> liegt versioniert im Projekt und muss nicht kopiert werden.</p>
 
-                    <h4>4. Loslegen – du sagst es Claude einfach</h4><p>Ab jetzt musst du nichts weiter tun. Bitte Claude ganz normal um eine Änderung; passt sie zum Zuschnitt, gibt Claude sie <b>von sich aus</b> ab und arbeitet mit dem geprüften Ergebnis weiter. Du siehst den Auftrag hier unter <b>Letzte Aufträge</b> auftauchen.</p><p>Willst du es ausdrücklich, genügt ein Satz wie: <i>„Gib das an {marke} ab."</i> Willst du es <i>nicht</i>, sag: <i>„Mach das selbst."</i></p><h4>5. Ergebnis übernehmen</h4>
+                    <h4>4. Regel in deine <code>CLAUDE.md</code> schreiben (empfohlen)</h4>
+                    <p>Claude findet den Skill zwar von selbst – <b>ob</b> es ihn nimmt, entscheidet es aber jedes Mal neu. Eine Regel in der <code>CLAUDE.md</code> deines Projekts macht daraus eine verbindliche Vorgabe. Zwei Sätze genügen:</p>
+                    <pre id="cs-guide-rule"><code>## Delegation an {marke}
+Fuer mechanische Breitenarbeiten (viele Dateien, einfache Aenderung,
+vorhandener Test) MUSST du den Skill `code-delegate` verwenden.
+Bei Fehlschlag sofort selbst machen - keine Nachbesserungsversuche.</code></pre>
+                    <p><button type="button" class="cs-btn" id="cs-guide-rule-copy" data-i18n="csub.guide_rule_copy">Regel kopieren</button></p>
+                    <p><b>Warum der zweite Satz genauso wichtig ist wie der erste:</b> ein Auftrag ist genau <i>ein</i> Zielzustand. Nachbessern kostet mehr Token, als die Aufgabe selbst zu machen – die Ersparnis wäre damit aufgebraucht. Und ein Fehlschlag hat meist einen Grund, den ein zweiter Versuch nicht behebt (fremde Datei angefasst, Riegel rot, Aufgabe zu groß geschnitten).</p>
+
+                    <h4>5. Loslegen – du sagst es Claude einfach</h4><p>Ab jetzt musst du nichts weiter tun. Bitte Claude ganz normal um eine Änderung; passt sie zum Zuschnitt, gibt Claude sie <b>von sich aus</b> ab und arbeitet mit dem geprüften Ergebnis weiter. Du siehst den Auftrag hier unter <b>Letzte Aufträge</b> auftauchen.</p><p>Willst du es ausdrücklich, genügt ein Satz wie: <i>„Gib das an {marke} ab."</i> Willst du es <i>nicht</i>, sag: <i>„Mach das selbst."</i></p><h4>6. Ergebnis übernehmen</h4>
                     <p>Kommt ein Patch, prüft Claude ihn und wendet ihn mit <code>git apply</code> an. Kommt keiner, nennt die Meldung den Grund (leerer Patch, fremde Datei angefasst, Riegel rot) – dann macht Claude die Aufgabe selbst, statt nachzubessern.</p>
 
                     <h4>Was das an Tokens spart</h4>
@@ -356,11 +375,11 @@ chmod 600 ~/.{marke_slug}-csa-key</code></pre>
 
 <script src="/static/js/icons.js?v=1"></script>
 <script src="/static/js/cpubar.js?v=1"></script>
-<script src="/static/js/i18n.js?v=58"></script>
+<script src="/static/js/i18n.js?v=170"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=24"></script>
 <script src="/static/js/sessions.js?v=6"></script>
-<script src="/static/js/claude_portal.js?v=4"></script>
+<script src="/static/js/claude_portal.js?v=6"></script>
 <script src="/static/js/settings_btn.js?v=3"></script>
 <script src="/static/js/activity.js?v=1"></script>
 <script src="/static/js/issues.js?v=7"></script>

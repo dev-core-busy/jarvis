@@ -29,10 +29,17 @@
                      display: flex; align-items: center; justify-content: center; font-size: 14px;
                      font-weight: 700; color: #fff; flex-shrink: 0; overflow: hidden; }
         .ad-avatar img { width: 100%; height: 100%; object-fit: contain; }
-        .ad-btn { background: var(--bg-glass, rgba(255,255,255,.05)); border: 1px solid var(--border, rgba(255,255,255,.12));
-                  color: var(--text-primary); border-radius: 10px; width: 38px; height: 38px; cursor: pointer;
-                  display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
-        .ad-btn:hover { border-color: rgba(var(--accent-rgb), .5); }
+        /* Wie `.btn-theme` auf den uebrigen Bereichsseiten (chat.css) – diese
+           Seite laedt chat.css nicht, deshalb dieselben Werte hier. Vorher war
+           `.ad-btn` ein gerahmtes 38x38-Kaestchen mit Glas-Hintergrund, waehrend
+           alle anderen Seiten rahmenlose Symbole zeigen; das war der gemeldete
+           Bruch im Gesamtbild. Wer chat.css hier ergaenzt, kann diesen Block
+           gegen `.btn-theme` tauschen. */
+        .ad-btn { background: none; border: none; color: var(--muted);
+                  font-size: 18px; cursor: pointer; padding: 4px 8px; border-radius: 8px;
+                  transition: color .2s, background .2s; text-decoration: none;
+                  display: inline-flex; align-items: center; justify-content: center; }
+        .ad-btn:hover { background: rgba(var(--accent-rgb), .12); color: var(--purple); }
         .ad-btn svg { width: 20px; height: 20px; }
 
         /* Controls */
@@ -136,6 +143,10 @@
                 <button class="lang-toggle-btn" data-lang="de" title="Deutsch">DE</button>
                 <button class="lang-toggle-btn" data-lang="en" title="English">EN</button>
             </div>
+            <button class="ad-btn jv-issues-btn" id="ad-issues-btn" data-i18n-title="sup.issues" title="Issues / Feedback"
+                    onclick="window.JarvisIssues && window.JarvisIssues.open()">
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            </button>
             <button class="ad-btn" id="btn-theme-toggle" title="Hell/Dunkel umschalten" data-i18n-title="chat.theme">
                 <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
                 <svg class="theme-icon-sun" style="display:none;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
@@ -143,6 +154,15 @@
             <a class="ad-btn" href="/portal" title="Startseite" aria-label="Startseite" data-i18n-title="nav.home" data-i18n-aria="nav.home">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
             </a>
+            <!-- Einstellungen: eingeblendet von js/settings_btn.js aus /api/me.
+                 Diese Seite ist ohnehin Admin-only (Gate weiter unten), der Knopf
+                 startet aber wie ueberall verborgen. -->
+            <button class="ad-btn" id="ad-settings-btn" data-jarvis-settings="/api" data-i18n-title="nav.settings" title="Einstellungen" style="display:none;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </button>
+            <button class="ad-btn" id="ad-logout-btn" title="Abmelden" data-i18n-title="chat.logout">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            </button>
         </div>
     </div>
 
@@ -160,9 +180,15 @@
 
     <script src="/static/js/icons.js?v=1"></script>
     <script src="/static/js/cpubar.js?v=1"></script>
-    <script src="/static/js/i18n.js?v=102"></script>
+    <script src="/static/js/i18n.js?v=103"></script>
     <script src="/static/js/theme.js?v=2"></script>
     <script src="/static/js/branding.js?v=24"></script>
+    <!-- sessions.js liefert JarvisSession.logout (Abmeldung MUSS am Server
+         ankommen, bevor der Token verworfen wird); settings_btn.js blendet das
+         Zahnrad ein; issues.js verdrahtet den Issues-Knopf. -->
+    <script src="/static/js/sessions.js?v=8"></script>
+    <script src="/static/js/settings_btn.js?v=2"></script>
+    <script src="/static/js/issues.js?v=7"></script>
     <script>
     (function () {
         'use strict';
@@ -567,6 +593,20 @@
                 box.appendChild(b);
             });
         }
+
+        // Abmelden – gleiche Reihenfolge wie auf den uebrigen Seiten: das
+        // Signal MUSS raus, BEVOR der Token verworfen wird (danach ist die
+        // Abmeldung nicht mehr authentifizierbar), und die Seite navigiert
+        // unmittelbar weg (keepalive steckt in JarvisSession.logout).
+        var _lo = document.getElementById('ad-logout-btn');
+        if (_lo) _lo.addEventListener('click', function () {
+            var p = (window.JarvisSession ? window.JarvisSession.logout()
+                                          : Promise.resolve());
+            var keys = (window.JarvisSession && window.JarvisSession.tokenKeys)
+                       || ['jarvis_token', 'jarvis_chat_token', 'jarvis_uc_token'];
+            keys.forEach(function (k) { try { localStorage.removeItem(k); } catch (e) {} });
+            p.catch(function () {}).then(function () { window.location.replace('/'); });
+        });
 
         // ── Start: Admin-Gate + Schema laden ──
         fetch('/api/me', { headers: H }).then(function (r) { return r.ok ? r.json() : null; }).then(function (me) {

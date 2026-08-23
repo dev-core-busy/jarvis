@@ -21,6 +21,8 @@ const _I18N = {
         // ── Portal (/portal) ───────────────────────────────────
         'portal.welcome':            'Willkommen',
         'portal.info_files':       'Dokumente',
+        'portal.tiles_small':      'Kacheln verkleinern',
+        'portal.tiles_large':      'Kacheln vergr\u00f6\u00dfern',
         'portal.info_files_count': 'Dateien',
         'portal.info_files_empty': 'Keine Dokumente vorhanden.',
         'portal.choose':             'Wähle einen Bereich:',
@@ -2754,6 +2756,8 @@ const _I18N = {
         // ── Portal (/portal) ───────────────────────────────────
         'portal.welcome':            'Welcome',
         'portal.info_files':       'Documents',
+        'portal.tiles_small':      'Shrink tiles',
+        'portal.tiles_large':      'Enlarge tiles',
         'portal.info_files_count': 'files',
         'portal.info_files_empty': 'No documents available.',
         'portal.choose':             'Choose an area:',

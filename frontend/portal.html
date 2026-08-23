@@ -74,6 +74,34 @@
         .pt-card-icon svg { width: 24px; height: 24px; }
         .pt-card-title { font-size: 1.1rem; font-weight: 600; color: var(--text-primary); }
         .pt-card-desc { font-size: 0.86rem; color: var(--text-secondary); line-height: 1.45; }
+        /* ── Kompakte Kacheln (Umschalter in der Titelleiste) ───────────────
+           Bei vielen freigeschalteten Bereichen passt die Kachelwand nicht mehr
+           auf einen Bildschirm. "klein" zeigt Symbol + Kurzbeschreibung (den
+           Titel); der laengere Beschreibungstext wandert in den Tooltip, damit
+           die Aussage nicht verloren geht, sondern nur ihren Platz wechselt.
+
+           Die Klasse haengt an `body`, nicht am Raster: so greifen auch Regeln
+           fuer Elemente ausserhalb von `.pt-cards`, und der Zustand ist mit
+           einem Klassenwechsel gesetzt (kein Umbauen von Inline-Styles, das nach
+           dem Zurueckschalten Reste hinterlaesst). */
+        body.pt-kompakt .pt-cards { grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 10px; }
+        body.pt-kompakt .pt-card { padding: 12px 10px; gap: 6px; align-items: center; text-align: center; }
+        body.pt-kompakt .pt-card-icon { width: 34px; height: 34px; border-radius: 9px; }
+        body.pt-kompakt .pt-card-icon svg { width: 19px; height: 19px; }
+        body.pt-kompakt .pt-card-title { font-size: 0.82rem; font-weight: 600; line-height: 1.25; }
+        /* Der lange Text wird NICHT geloescht, nur verborgen – er steckt zugleich
+           im title-Attribut, das `portalKacheln()` daraus setzt. */
+        body.pt-kompakt .pt-card-desc { display: none; }
+        /* Das Abzeichen (ungelesene Nachrichten) muss in der kleineren Kachel
+           mitwandern, sonst haengt es ausserhalb. */
+        body.pt-kompakt .pt-card-badge { top: 6px; right: 6px; }
+        /* DAS VIDEO WIRD NIE VERKLEINERT (Vorgabe): im engeren Raster belegt die
+           Karte zwei Spalten und behaelt damit ihre Breite, waehrend alle
+           uebrigen Kacheln schrumpfen. `min-width` faengt den Fall ab, dass nur
+           eine Spalte da ist (schmales Fenster). */
+        body.pt-kompakt .pt-card-video { grid-column: span 2; min-width: 220px;
+                                         padding: 12px; text-align: initial; }
+
         /* Dezente Info-/Kontaktzeile unterhalb der Karten (Branding-Skill befuellbar) */
         .pt-contact { margin-top: 26px; display: flex; justify-content: center; align-items: center;
             gap: 8px; flex-wrap: wrap; font-size: 0.8rem; color: var(--text-secondary); opacity: .75; }
@@ -346,6 +374,18 @@
         <button class="pt-btn jv-issues-btn" id="pt-issues-btn" title="Issues / Feedback" data-i18n-title="sup.issues" onclick="window.JarvisIssues && window.JarvisIssues.open()" style="position:relative;">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
         </button>
+        <!-- Kachelgroesse umschalten. Steht VOR Hell/Dunkel, weil beides
+             Ansichts-Schalter sind und der haeufiger benutzte (Theme) am Rand
+             der Gruppe bleibt. Beschriftung und Symbol folgen dem Zustand – ein
+             Umschalter mit unveraenderlichem Text sieht beim Zurueckschalten wie
+             ein wirkungsloser Klick aus (Lehre vom Broker-Audit-Knopf). -->
+        <button class="pt-btn" id="pt-size-btn" title="Kacheln verkleinern" data-i18n-title="portal.tiles_small">
+            <!-- 3x3 = "kleiner, mehr davon"; 2x2 = "groesser". Zwei fast gleiche
+                 Symbole waeren nicht unterscheidbar - der Unterschied muss die
+                 AUSSAGE tragen, nicht nur den Zustand anzeigen. -->
+            <svg id="pt-size-ico-small" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="5" height="5"/><rect x="10" y="3" width="5" height="5"/><rect x="17" y="3" width="4" height="5"/><rect x="3" y="10" width="5" height="5"/><rect x="10" y="10" width="5" height="5"/><rect x="17" y="10" width="4" height="5"/><rect x="3" y="17" width="5" height="4"/><rect x="10" y="17" width="5" height="4"/><rect x="17" y="17" width="4" height="4"/></svg>
+            <svg id="pt-size-ico-large" style="display:none;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8"/><rect x="13" y="3" width="8" height="8"/><rect x="3" y="13" width="8" height="8"/><rect x="13" y="13" width="8" height="8"/></svg>
+        </button>
         <button class="pt-btn" id="btn-theme-toggle" title="Hell/Dunkel umschalten" data-i18n-title="chat.theme">
             <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
             <svg class="theme-icon-sun" style="display:none;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
@@ -585,7 +625,7 @@ sudo update-ca-certificates</code></pre>
 
 <script src="/static/js/icons.js?v=1"></script>
 <script src="/static/js/cpubar.js?v=1"></script>
-<script src="/static/js/i18n.js?v=107"></script>
+<script src="/static/js/i18n.js?v=108"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=24"></script>
 <script src="/static/js/security_incidents.js?v=13"></script>
@@ -594,7 +634,8 @@ sudo update-ca-certificates</code></pre>
 <script src="/static/js/info_files.js?v=3"></script>
 <script src="/static/js/sessions.js?v=8"></script>
 <script src="/static/js/vnc.js?v=18"></script>
-<script src="/static/js/settings_btn.js?v=1"></script>
+<script src="/static/js/settings_btn.js?v=2"></script>
+<script src="/static/js/portal_tiles.js?v=1"></script>
 <script>
 (function () {
     var KEYS = ['jarvis_token', 'jarvis_chat_token', 'jarvis_uc_token'];

@@ -148,5 +148,48 @@ for (const datei of SEITEN) {
     pruefe(`${datei}: Rueckweg ${m[1]}`, m[1] === erwartet, 'erwartet ' + erwartet);
 }
 
+// ── 5. /api: Knopfleiste wie die uebrigen Seiten ───────────────────────────
+abschnitt('5. /api – Knoepfe optisch und inhaltlich wie die Nachbarseiten');
+{
+    /* GEMELDET: "Symbole auf /api anpassen an die restlichen Seiten." Der Bruch
+     * war doppelt: `.ad-btn` war ein gerahmtes 38x38-Kaestchen mit
+     * Glas-Hintergrund (alle anderen Seiten: rahmenloses Symbol), und es fehlten
+     * Issues, Einstellungen und Abmelden. api.html laedt chat.css NICHT, wo
+     * `.btn-theme` steht – die Werte muessen dort also gepflegt werden, und
+     * genau deshalb driftet es ohne Test wieder auseinander. */
+    const api = lies(path.join(FE, 'api.html'));
+    const regel = (api.match(/\.ad-btn\s*\{[^}]*\}/) || [''])[0];
+    pruefe('/api: .ad-btn ohne Rahmen', /border:\s*none/.test(regel), regel.slice(0, 90));
+    pruefe('/api: .ad-btn ohne eigene Flaeche', /background:\s*none/.test(regel));
+    pruefe('/api: gleiches Innenmass wie .btn-theme (4px 8px)',
+           /padding:\s*4px\s+8px/.test(regel));
+    pruefe('/api: keine feste 38px-Kachel mehr',
+           !/width:\s*38px/.test(regel) && !/height:\s*38px/.test(regel));
+    pruefe('/api: SVG 20px wie ueberall', /\.ad-btn svg\s*\{[^}]*width:\s*20px/.test(api));
+
+    // Vollstaendigkeit + Reihenfolge (wie auf den Nachbarseiten:
+    // Sprache -> Issues -> Hell/Dunkel -> Startseite -> Einstellungen -> Abmelden)
+    const stellen = {
+        issues:   api.indexOf('jv-issues-btn'),
+        theme:    api.indexOf('id="btn-theme-toggle"'),
+        home:     api.indexOf('data-i18n-title="nav.home"'),
+        settings: api.indexOf('data-jarvis-settings'),
+        logout:   api.indexOf('id="ad-logout-btn"'),
+    };
+    for (const [name, pos] of Object.entries(stellen))
+        pruefe(`/api: Knopf ${name} vorhanden`, pos >= 0);
+    pruefe('/api: Reihenfolge Issues < Theme < Home < Einstellungen < Abmelden',
+           stellen.issues < stellen.theme && stellen.theme < stellen.home
+           && stellen.home < stellen.settings && stellen.settings < stellen.logout,
+           JSON.stringify(stellen));
+    // Abmelden braucht sessions.js – ohne es wird die Abmeldung nie gemeldet
+    // und die Sitzung gilt noch zwei Minuten als online.
+    pruefe('/api: bindet sessions.js ein (JarvisSession.logout)',
+           /<script[^>]+js\/sessions\.js/.test(api));
+    pruefe('/api: Abmelden meldet VOR dem Verwerfen des Tokens',
+           api.indexOf('JarvisSession.logout()') < api.indexOf('removeItem'),
+           'Reihenfolge im Abmelde-Handler');
+}
+
 console.log(`\n\x1b[1m${ok} bestanden, ${fail} fehlgeschlagen\x1b[0m`);
 process.exit(fail ? 1 : 0);

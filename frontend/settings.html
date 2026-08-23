@@ -3203,6 +3203,11 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                      beschreibt die Aufgabe falsch. -->
                                 <div class="xa-row">
                                     <a class="btn-primary xa-dl" id="xa-download" href="/excel-addin/manifest.xml">Manifest herunterladen</a>
+                                    <!-- Ordner EINMAL waehlen: danach schreibt "Manifest
+                                         hochladen" ohne Dialog dorthin (Handle in
+                                         IndexedDB). Nur sichtbar, wenn ein Katalogpfad
+                                         gepflegt ist und der Browser es kann. -->
+                                    <button type="button" class="btn-secondary" id="xa-ordner-btn" style="display:none;">Ordner einmal auswählen</button>
                                     <button type="button" class="btn-secondary" id="xa-pfad-copy" style="display:none;">Pfad kopieren</button>
                                     <!-- Die Fassung steht VOR dem Status: sie ist
                                          dauerhaft da und gehoert an die Knoepfe. Der
@@ -4681,7 +4686,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
     <script src="/static/js/icons.js?v=1"></script>
-    <script src="/static/js/i18n.js?v=165"></script>
+    <script src="/static/js/i18n.js?v=166"></script>
 <script src="/static/js/tabfill.js?v=1"></script>
     <script src="/static/js/cron.js?v=20"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -4712,7 +4717,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/theme.js?v=2"></script>
     <script src="/static/js/security_incidents.js?v=29"></script>
     <script src="/static/js/ldap_picker.js?v=10"></script>
-    <script src="/static/js/excel_admin.js?v=3"></script>
+    <script src="/static/js/excel_admin.js?v=5"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
     <script src="/static/js/sessions.js?v=4"></script>
     <script src="/static/js/agent_roles.js?v=2"></script>

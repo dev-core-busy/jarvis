@@ -536,9 +536,11 @@ function warte(ms) { return new Promise(r => setTimeout(r, ms)); }
        Dialog), 'nur_erster' die fortwirkende Absage (`_adresseKaputt`). Mit
        `false` allein bleiben beide Gegenproben gruen, obwohl die jeweilige
        Schranke ausgebaut ist – nachgemessen 2026-08-23. */
-    function adminFenster(pfad, picker, manifestOk) {
+    function adminFenster(pfad, picker, manifestOk, ordner, speicher) {
         const spur = { urls: [], koerper: [], geschrieben: [], geschlossen: 0,
-                       picker: 0, pickerArg: null, navigation: 0, manifestAbrufe: 0 };
+                       picker: 0, pickerArg: null, navigation: 0, manifestAbrufe: 0,
+                       dirPicker: 0, dirArg: null, gefragt: 0,
+                       dateiName: null, create: false };
         /* Ein NICHT verhinderter Klick auf den <a> laesst jsdom "Not
            implemented: navigation" melden. Das ist hier kein Rauschen, sondern
            der BELEG, dass der Link ein Link geblieben ist – jsdom gibt das Ziel
@@ -599,8 +601,86 @@ function warte(ms) { return new Promise(r => setTimeout(r, ms)); }
         } else {
             try { delete w.showSaveFilePicker; } catch (e) { }
         }
+        /* jsdom hat KEIN indexedDB – ohne Attrappe laeuft der Code in seinen
+           catch-Zweig und das Merken des Ordners waere nicht pruefbar (der Test
+           waere gruen, ohne etwas zu pruefen). `speicher` wird von aussen
+           uebergeben, damit ein zweites Fenster den Stand des ersten sieht: nur
+           so ist "der Ordner ist nach dem Neuladen noch gemerkt" belegbar. */
+        w.indexedDB = ndbStub(speicher || {});
+        if (ordner) {
+            w.showDirectoryPicker = function (opt) {
+                spur.dirPicker++; spur.dirArg = opt;
+                return Promise.resolve(ordner);
+            };
+        } else {
+            try { delete w.showDirectoryPicker; } catch (e) { }
+        }
         w.eval(ADMIN_CODE);
         return { w, spur, dom };
+    }
+
+    /* Minimales indexedDB: open/get/put, alles im uebergebenen Objekt. Die
+       Rueckrufe muessen ASYNCHRON feuern – synchron waeren sie gesetzt, bevor
+       der Aufrufer `onsuccess` zuweisen kann, und nichts liefe. */
+    function ndbStub(daten) {
+        return {
+            open: function () {
+                const a = { result: null, error: null };
+                setTimeout(function () {
+                    a.result = {
+                        objectStoreNames: { contains: () => true },
+                        createObjectStore: () => ({}),
+                        transaction: function () {
+                            const t = {};
+                            t.objectStore = function () {
+                                return {
+                                    get: function (k) {
+                                        const r = {};
+                                        setTimeout(function () {
+                                            r.result = daten[k];
+                                            if (r.onsuccess) r.onsuccess();
+                                        }, 0);
+                                        return r;
+                                    },
+                                    put: function (v, k) {
+                                        daten[k] = v;
+                                        setTimeout(function () { if (t.oncomplete) t.oncomplete(); }, 0);
+                                        return {};
+                                    }
+                                };
+                            };
+                            return t;
+                        }
+                    };
+                    if (a.onsuccess) a.onsuccess();
+                }, 0);
+                return a;
+            }
+        };
+    }
+
+    /* Ein Verzeichnis-Handle. `recht` = was queryPermission meldet
+       ('granted' | 'prompt' | 'denied'), `gibt` = was requestPermission danach
+       liefert. */
+    function ordnerStub(name, recht, gibt, spur) {
+        return {
+            name: name,
+            queryPermission: function () { return Promise.resolve(recht); },
+            requestPermission: function () {
+                if (spur) spur.gefragt++;
+                return Promise.resolve(gibt || recht);
+            },
+            getFileHandle: function (n, o) {
+                if (spur) { spur.dateiName = n; spur.create = !!(o && o.create); }
+                return Promise.resolve({
+                    name: n,
+                    createWritable: () => Promise.resolve({
+                        write: (b) => { if (spur) spur.geschrieben.push(b); return Promise.resolve(); },
+                        close: () => { if (spur) spur.geschlossen++; return Promise.resolve(); }
+                    })
+                });
+            }
+        };
     }
 
     function pickerOk(w, spur) {
@@ -791,6 +871,145 @@ function warte(ms) { return new Promise(r => setTimeout(r, ms)); }
            'Kopier-Knopf und Hinweisfeld stehen im echten Markup');
     pruefe(!/JarvisIcons\.trash/.test(ADMIN_CODE),
            'kein Muelleimer im Verteil-Bereich (es wird nichts geloescht)');
+
+    // ══ 8. Der gemerkte Katalog-Ordner ════════════════════════════════════
+    abschnitt('8. "Manifest hochladen" schreibt in den gemerkten Ordner');
+    /* GEMELDET: "'Manifest hochladen' nutzt nicht den gespeicherten Pfad zum
+       hochladen." Ein PFAD als Text laesst sich im Speichern-Dialog nicht
+       vorbelegen – der VORGANG geht aber: showDirectoryPicker liefert ein
+       Handle, und Handles sind in IndexedDB persistierbar. */
+    const PFAD = '\\\\srv\\freigabe\\addins';
+
+    // ── i) Ordner waehlen und merken ───────────────────────────────────
+    {
+        const laden = {};
+        /* Der Ordner-Stub schreibt in SEINE eigene Spur, nicht in die des
+           Fensters – ohne diese Verknuepfung prueft man die falsche Variable und
+           bekommt "schreibvorgaenge=0", obwohl der Code richtig arbeitet. */
+        const hSpur = { geschrieben: [], geschlossen: 0, gefragt: 0 };
+        const h = ordnerStub('office-addins', 'granted', 'granted', hSpur);
+        const { w, spur } = adminFenster(PFAD, pickerOk, true, h, laden);
+        w.ExcelAdmin.onShow();
+        await warte(40);
+        const ow = w.document.getElementById('xa-ordner-btn');
+        pruefe(!!ow, 'Ordner-Knopf steht im echten Markup');
+        pruefe(ow.style.display !== 'none',
+               'mit Pfad und File-System-API ist der Ordner-Knopf sichtbar');
+        pruefe(ow.textContent.indexOf('einmal') >= 0,
+               'ohne gemerkten Ordner lautet er "Ordner einmal auswaehlen"', ow.textContent);
+        ow.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+        await warte(60);
+        pruefe(spur.dirPicker === 1, 'der Ordner-Dialog wird genau einmal geoeffnet',
+               'aufrufe=' + spur.dirPicker);
+        pruefe(!!laden['excel-katalog'], 'das Handle wird in IndexedDB gemerkt');
+        pruefe(ow.textContent.indexOf('office-addins') >= 0,
+               'der Knopf nennt danach den Ordner', ow.textContent);
+        w.close();
+
+        // ── j) NEUES Fenster: der Ordner ist noch gemerkt ──────────────
+        const zwei = adminFenster(PFAD, pickerOk, true, h, laden);
+        zwei.w.ExcelAdmin.onShow();
+        await warte(60);
+        const hint = zwei.w.document.getElementById('xa-dl-hint');
+        pruefe(hint.innerHTML.indexOf('office-addins') >= 0,
+               'nach dem Neuladen ist der Ordner noch gemerkt (Persistenz)',
+               hint.textContent.slice(0, 70));
+        pruefe(/ohne\s*<b>Dialog<\/b>|ohne <b>Dialog<\/b>/.test(hint.innerHTML)
+               || hint.innerHTML.indexOf('ohne') >= 0,
+               'der Hinweis sagt, dass kein Dialog mehr kommt');
+
+        // DER KERN DER MELDUNG: der Klick schreibt DIREKT, ohne Dialog.
+        const dl = zwei.w.document.getElementById('xa-download');
+        pruefe(dl.textContent === 'Manifest hochladen',
+               'der Knopf heisst "Manifest hochladen"', dl.textContent);
+        dl.dispatchEvent(new zwei.w.MouseEvent('click', { bubbles: true, cancelable: true }));
+        await warte(60);
+        pruefe(zwei.spur.picker === 0,
+               'KEIN Speichern-Dialog mehr – das war die Meldung',
+               'dialoge=' + zwei.spur.picker);
+        pruefe(hSpur.geschrieben.length === 1 && hSpur.geschlossen === 1,
+               'die Datei wird in den gemerkten Ordner geschrieben und geschlossen',
+               'schreibvorgaenge=' + hSpur.geschrieben.length);
+        pruefe(hSpur.dateiName === 'nexus-dp-excel-addin.xml',
+               'Dateiname aus dem Antwortkopf (folgt dem Branding)', hSpur.dateiName);
+        pruefe(hSpur.create === true,
+               'die Datei wird angelegt, wenn sie noch nicht existiert');
+        zwei.w.close();
+    }
+
+    // ── k) Berechtigung auf "prompt": einmal fragen, dann schreiben ────
+    {
+        const laden = {};
+        const spurRef = { geschrieben: [], geschlossen: 0, gefragt: 0 };
+        const h = ordnerStub('office-addins', 'prompt', 'granted', spurRef);
+        laden['excel-katalog'] = h;
+        const { w, spur } = adminFenster(PFAD, pickerOk, true, h, laden);
+        w.ExcelAdmin.onShow();
+        await warte(60);
+        w.document.getElementById('xa-download')
+         .dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true }));
+        await warte(60);
+        // Nach einem Browser-Neustart ist "prompt" der NORMALFALL und kein
+        // Fehler – es darf genau einmal gefragt und dann geschrieben werden.
+        pruefe(spurRef.gefragt === 1, 'bei "prompt" wird genau einmal nachgefragt',
+               'fragen=' + spurRef.gefragt);
+        pruefe(spurRef.geschrieben.length === 1,
+               'nach erteilter Erlaubnis wird geschrieben');
+        pruefe(spur.picker === 0, 'und weiterhin ohne Speichern-Dialog');
+        w.close();
+    }
+
+    // ── l) Berechtigung verweigert: Rueckfall auf den Dialog ───────────
+    {
+        const laden = {};
+        const spurRef = { geschrieben: [], geschlossen: 0, gefragt: 0 };
+        const h = ordnerStub('office-addins', 'prompt', 'denied', spurRef);
+        laden['excel-katalog'] = h;
+        const { w, spur } = adminFenster(PFAD, pickerOk, true, h, laden);
+        w.ExcelAdmin.onShow();
+        await warte(60);
+        w.document.getElementById('xa-download')
+         .dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true }));
+        await warte(60);
+        // FAIL-SAFE IN DIE RICHTIGE RICHTUNG: verweigerte Erlaubnis darf nicht
+        // in "geht nicht" enden, sondern in den Weg, der vorher schon ging.
+        pruefe(spurRef.geschrieben.length === 0,
+               'ohne Erlaubnis wird NICHT in den Ordner geschrieben');
+        pruefe(spur.picker === 1, 'stattdessen oeffnet der Speichern-Dialog (Rueckfall)',
+               'dialoge=' + spur.picker);
+        pruefe(spur.pickerArg && spur.pickerArg.id === 'jarvis-excel-katalog',
+               'der Dialog traegt eine id – Chrome merkt sich das Verzeichnis');
+        pruefe(spur.pickerArg && spur.pickerArg.startIn === h,
+               'und startet im gemerkten Ordner');
+        w.close();
+    }
+
+    // ── m) Kein Ordner-Picker im Browser: Knopf bleibt verborgen ───────
+    {
+        const { w } = adminFenster(PFAD, pickerOk, true, null, {});
+        w.ExcelAdmin.onShow();
+        await warte(60);
+        pruefe(w.document.getElementById('xa-ordner-btn').style.display === 'none',
+               'ohne showDirectoryPicker bleibt der Ordner-Knopf verborgen '
+               + '(ein Knopf ohne Wirkung ist schlimmer als keiner)');
+        w.close();
+    }
+
+    // ── n) Ordnername ist Fremdeingabe des Dateisystems ────────────────
+    {
+        const laden = {};
+        const h = ordnerStub('a<img src=x onerror=alert(1)>', 'granted', 'granted', null);
+        laden['excel-katalog'] = h;
+        const { w } = adminFenster(PFAD, pickerOk, true, h, laden);
+        w.ExcelAdmin.onShow();
+        await warte(60);
+        const hint = w.document.getElementById('xa-dl-hint');
+        pruefe(hint.querySelector('img') === null,
+               'ein Ordnername mit Markup wird entschaerft (er geht per innerHTML hinein)');
+        pruefe(hint.textContent.indexOf('<img') >= 0,
+               'und erscheint als Text');
+        w.close();
+    }
 
     console.log('\n' + '='.repeat(50));
     console.log('Bestanden: ' + ok + ' / Fehlgeschlagen: ' + fail);

@@ -27,13 +27,29 @@
    schreibt. Massgeblich ist der GESPEICHERTE Pfad, nicht der Feldinhalt: der
    Knopf soll den Zustand zeigen, den auch `/excel` den Benutzern zeigt.
 
-   WAS DIESER WEG NICHT KANN, und warum der Hinweistext es ausspricht: der
-   Zielordner laesst sich im Dialog **nicht vorbelegen**. `startIn` nimmt nur
-   Standardordner ("desktop", "documents", …), `suggestedName` keine
-   Pfadtrenner. Deshalb daneben ein "Pfad kopieren"-Knopf – im Windows-Dialog
-   fuehrt der eingefuegte Pfad im Feld "Dateiname" per Enter in den Ordner.
-   Eine Zusage "landet automatisch dort" waere unhaltbar; der Server erreicht
-   die Freigabe nicht, nur der Arbeitsplatz tut das.
+   DER ORDNER WIRD EINMAL GEWAEHLT UND DANN GEMERKT (seit 2026-08-23, gemeldet:
+   "nutzt nicht den gespeicherten Pfad"). Ein PFAD als Text laesst sich im
+   Speichern-Dialog wirklich nicht vorbelegen – `startIn` nimmt keine
+   Zeichenkette, `suggestedName` keine Pfadtrenner. Der VORGANG geht aber:
+   `showDirectoryPicker()` liefert ein `FileSystemDirectoryHandle`, und Handles
+   sind ueber IndexedDB persistierbar. Ist eines gemerkt, schreibt der Knopf
+   OHNE Dialog direkt in die Freigabe; der Text-Pfad bleibt daneben stehen, weil
+   `/excel` ihn den Benutzern nennt (der Browser gibt einen Pfad nicht heraus,
+   nur `handle.name`).
+
+   DREI STUFEN, absteigend:
+     1. Gemerktes Handle + Berechtigung erteilt -> direkt schreiben, kein Dialog.
+     2. Gemerktes Handle, Berechtigung auf "prompt" (nach Browser-Neustart
+        normal) -> EIN Klick zum Bestaetigen, dann schreiben.
+     3. Kein Handle / Firefox / Safari -> Speichern-unter-Fenster wie bisher,
+        mit `id` (Chrome merkt sich das Verzeichnis pro id) und `startIn` auf das
+        Handle, falls eines da ist. Dazu "Pfad kopieren": im Windows-Dialog
+        fuehrt der eingefuegte Pfad im Feld "Dateiname" per Enter in den Ordner.
+
+   DAS HANDLE HAENGT AM BROWSERPROFIL, nicht am Server: es gilt pro
+   Administrator-Arbeitsplatz und muss dort einmal gesetzt werden. Eine Zusage
+   "landet automatisch dort" waere ohne diesen Schritt unhaltbar – der Server
+   erreicht die Freigabe nicht, nur der Arbeitsplatz tut das.
    ═══════════════════════════════════════════════════════════════════════ */
 (function () {
     'use strict';
@@ -52,6 +68,13 @@
     var _UP_TEXT = 'Manifest hochladen';
 
     function $(id) { return document.getElementById(id); }
+    /* Der Ordnername kommt aus dem Dateisystem und geht per innerHTML in den
+       Hinweis – ein Ordner "a<img src=x onerror=…>" ist anlegbar. */
+    function esc(t) {
+        return String(t == null ? '' : t).replace(/[&<>"]/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+        });
+    }
     function token() {
         try { return localStorage.getItem('jarvis_token') || ''; } catch (e) { return ''; }
     }
@@ -102,6 +125,93 @@
             }).catch(function () { });
     }
 
+    /* ── Der gemerkte Katalog-Ordner ────────────────────────────────────────
+       Ein FileSystemDirectoryHandle ist strukturiert klonbar und laesst sich
+       deshalb in IndexedDB ablegen – localStorage kann es NICHT (dort landet nur
+       "[object FileSystemDirectoryHandle]"). Genau diese Persistenz ist der
+       Unterschied zwischen "jedes Mal den Ordner suchen" und "einmal waehlen".
+       Ein eigener kleiner Store, damit nichts mit anderen Modulen kollidiert. */
+    var _DB = 'jarvis-fs', _STORE = 'handles', _KEY = 'excel-katalog';
+    var _ordner = null;          // FileSystemDirectoryHandle oder null
+
+    function db() {
+        return new Promise(function (res, rej) {
+            if (!window.indexedDB) { rej(new Error('IndexedDB fehlt')); return; }
+            var a = indexedDB.open(_DB, 1);
+            a.onupgradeneeded = function () {
+                if (!a.result.objectStoreNames.contains(_STORE)) a.result.createObjectStore(_STORE);
+            };
+            a.onsuccess = function () { res(a.result); };
+            a.onerror = function () { rej(a.error || new Error('IndexedDB')); };
+        });
+    }
+
+    function handleLesen() {
+        return db().then(function (d) {
+            return new Promise(function (res) {
+                var r = d.transaction(_STORE, 'readonly').objectStore(_STORE).get(_KEY);
+                r.onsuccess = function () { res(r.result || null); };
+                r.onerror = function () { res(null); };
+            });
+        }).catch(function () { return null; });
+    }
+
+    function handleSchreiben(h) {
+        return db().then(function (d) {
+            return new Promise(function (res, rej) {
+                var t = d.transaction(_STORE, 'readwrite');
+                t.objectStore(_STORE).put(h, _KEY);
+                t.oncomplete = function () { res(true); };
+                t.onerror = function () { rej(t.error); };
+            });
+        });
+    }
+
+    /* Berechtigung fuer das gemerkte Handle. Sie faellt nach einem
+       Browser-Neustart regelmaessig auf "prompt" zurueck – das ist KEIN Fehler
+       und darf nicht als solcher gemeldet werden. `fragen=false` prueft nur
+       (fuer die Anzeige), `true` fragt nach (braucht eine Nutzergeste, liegt
+       beim Klick vor). */
+    function darfSchreiben(h, fragen) {
+        if (!h || !h.queryPermission) return Promise.resolve(false);
+        return h.queryPermission({ mode: 'readwrite' }).then(function (z) {
+            if (z === 'granted') return true;
+            if (!fragen || !h.requestPermission) return false;
+            return h.requestPermission({ mode: 'readwrite' })
+                    .then(function (z2) { return z2 === 'granted'; });
+        }).catch(function () { return false; });
+    }
+
+    /* Ordner EINMAL waehlen. Danach ist der Hochlade-Knopf dialogfrei. */
+    function ordnerWaehlen() {
+        if (typeof window.showDirectoryPicker !== 'function') {
+            melde('xa-dl-status', 'Dieser Browser kann keinen Ordner merken – das können ' +
+                  'nur Chrome und Edge.', 'fehler');
+            return;
+        }
+        window.showDirectoryPicker({ id: 'jarvis-excel-katalog', mode: 'readwrite',
+                                     startIn: _ordner || 'documents' })
+            .then(function (h) {
+                return darfSchreiben(h, true).then(function (ok) {
+                    if (!ok) throw new Error('Schreibrecht für den Ordner wurde nicht erteilt.');
+                    _ordner = h;
+                    return handleSchreiben(h);
+                });
+            })
+            .then(function () {
+                knopfAktualisieren();
+                melde('xa-dl-status', '✓ Ordner „' + (_ordner.name || '?') + '“ gemerkt – ' +
+                      '„Manifest hochladen“ schreibt jetzt ohne Dialog dorthin.', 'ok');
+                setTimeout(function () { melde('xa-dl-status', ''); }, 10000);
+            })
+            .catch(function (e) {
+                if (e && (e.name === 'AbortError' || e.code === 20)) {
+                    melde('xa-dl-status', ''); return;   // Abbrechen ist keine Stoerung
+                }
+                melde('xa-dl-status', 'Fehler: ' + ((e && e.message) || e), 'fehler');
+            });
+    }
+
     /* Kann dieser Browser in einen frei gewaehlten Ordner schreiben?
        Die File System Access API gibt es in Chrome und Edge, NICHT in Firefox
        und Safari – und nur im sicheren Kontext. Ohne sie bleibt es beim
@@ -119,16 +229,33 @@
         var dl = $('xa-download');
         var copy = $('xa-pfad-copy');
         var hint = $('xa-dl-hint');
+        var ow = $('xa-ordner-btn');
         var hoch = !!_katalog && kannSpeichern();
         if (dl) dl.textContent = hoch ? _UP_TEXT : _DL_TEXT;
         if (copy) copy.style.display = _katalog ? '' : 'none';
+        // Ordner merken lohnt nur, wenn ueberhaupt ein Katalogpfad gepflegt ist
+        // UND der Browser es kann – sonst waere es ein Knopf ohne Wirkung.
+        if (ow) {
+            ow.style.display = (hoch && typeof window.showDirectoryPicker === 'function')
+                               ? '' : 'none';
+            ow.textContent = _ordner ? 'Ordner ändern (' + (_ordner.name || '?') + ')'
+                                     : 'Ordner einmal auswählen';
+        }
         if (!hint) return;
-        if (hoch) {
-            hint.innerHTML = 'Der Knopf öffnet ein <b>Speichern unter</b>-Fenster mit dem ' +
-                'fertigen Manifest. <b>Der Zielordner lässt sich technisch nicht ' +
-                'vorbelegen</b> – fügen Sie den Pfad im Dialog in das Feld ' +
-                '<b>Dateiname</b> ein und drücken Sie Enter, dann sind Sie im Ordner. ' +
-                'Der Knopf <b>Pfad kopieren</b> legt ihn dafür in die Zwischenablage.';
+        if (hoch && _ordner) {
+            hint.innerHTML = 'Der Ordner <b>' + esc(_ordner.name || '?') + '</b> ist gemerkt – ' +
+                'der Knopf schreibt das Manifest <b>ohne Dialog</b> hinein. Nach einem ' +
+                'Browser-Neustart fragt Chrome einmal nach der Erlaubnis; das ist normal. ' +
+                'Der gemerkte Ordner gilt für <b>diesen Arbeitsplatz</b>, nicht serverweit.';
+            hint.style.color = '';
+            hint.style.display = '';
+        } else if (hoch) {
+            hint.innerHTML = 'Drücken Sie einmal <b>Ordner einmal auswählen</b> und wählen ' +
+                'Sie die Freigabe – danach schreibt <b>Manifest hochladen</b> ohne Dialog ' +
+                'dorthin. Ohne das öffnet sich ein <b>Speichern unter</b>-Fenster; ein ' +
+                'Pfad als Text lässt sich darin nicht vorbelegen, deshalb legt ' +
+                '<b>Pfad kopieren</b> ihn in die Zwischenablage (im Feld <b>Dateiname</b> ' +
+                'einfügen, Enter).';
             hint.style.color = '';
             hint.style.display = '';
         } else if (_katalog) {
@@ -178,17 +305,22 @@
             })
             .then(function (blob) {
                 melde('xa-dl-status', '');
-                return window.showSaveFilePicker({
-                    suggestedName: name,
-                    types: [{
-                        description: 'Office-Add-in-Manifest',
-                        accept: { 'application/xml': ['.xml'] }
-                    }]
-                }).then(function (handle) {
-                    return handle.createWritable().then(function (w) {
-                        return w.write(blob).then(function () { return w.close(); });
-                    }).then(function () { return handle.name || name; });
-                });
+                // STUFE 1+2: gemerkter Ordner. `fragen=true` ist wichtig – nach
+                // einem Browser-Neustart steht die Berechtigung auf "prompt",
+                // und das ist der Normalfall, kein Fehler.
+                if (_ordner) {
+                    return darfSchreiben(_ordner, true).then(function (ok) {
+                        if (!ok) return schreibDialog(blob, name);
+                        return _ordner.getFileHandle(name, { create: true })
+                            .then(function (fh) {
+                                return fh.createWritable().then(function (w) {
+                                    return w.write(blob).then(function () { return w.close(); });
+                                });
+                            })
+                            .then(function () { return (_ordner.name || '?') + '/' + name; });
+                    });
+                }
+                return schreibDialog(blob, name);
             })
             .then(function (geschrieben) {
                 // Die FOLGE benennen, nicht nur "gespeichert": ob die Datei im
@@ -212,6 +344,25 @@
                 }
                 melde('xa-dl-status', 'Fehler: ' + txt, 'fehler');
             });
+    }
+
+    /* STUFE 3: Speichern-unter-Fenster. `id` laesst Chrome sich das Verzeichnis
+       ueber Sitzungen hinweg merken, `startIn` setzt es auf das gemerkte Handle,
+       falls eines da ist (aber die Berechtigung fehlt). Beides kostet nichts und
+       erspart im Wiederholungsfall die Sucherei. */
+    function schreibDialog(blob, name) {
+        var opt = {
+            id: 'jarvis-excel-katalog',
+            suggestedName: name,
+            types: [{ description: 'Office-Add-in-Manifest',
+                      accept: { 'application/xml': ['.xml'] } }]
+        };
+        if (_ordner) opt.startIn = _ordner;
+        return window.showSaveFilePicker(opt).then(function (handle) {
+            return handle.createWritable().then(function (w) {
+                return w.write(blob).then(function () { return w.close(); });
+            }).then(function () { return handle.name || name; });
+        });
     }
 
     /* Der Pfad in die Zwischenablage – ohne ihn ist der Dialog eine Sucherei.
@@ -332,6 +483,8 @@
         });
         var pc = $('xa-pfad-copy');
         if (pc) pc.addEventListener('click', pfadKopieren);
+        var ow = $('xa-ordner-btn');
+        if (ow) ow.addEventListener('click', ordnerWaehlen);
         var g = $('xa-guide-btn');
         if (g) {
             g.addEventListener('click', function () {
@@ -353,6 +506,15 @@
         onShow: function () {
             binde();
             ladeVersion();
+            // Das gemerkte Handle VOR knopfAktualisieren laden, sonst zeigt der
+            // Reiter beim Oeffnen "Ordner einmal auswaehlen", obwohl schon einer
+            // gemerkt ist. ladeGrenzen() ruft knopfAktualisieren am Ende – hier
+            // wird es nach dem Laden noch einmal angestossen, weil beide Abrufe
+            // nebenlaeufig sind und die Reihenfolge nicht feststeht.
+            handleLesen().then(function (h) {
+                _ordner = h || null;
+                knopfAktualisieren();
+            });
             ladeGrenzen();
             pruefeAdresse();
         }

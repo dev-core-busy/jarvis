@@ -471,6 +471,44 @@ def _valid_bereiche(v: Any, frei: list[str]) -> list[str]:
     return [b for b in BEREICHE if b in gewaehlt]
 
 
+# Wendungen, mit denen ein Prompt MEHRERE Dateien verlangt.
+#
+# DIE ZAHL MUSS DAS DATEI-WORT DIREKT BESTIMMEN. Eine erste Fassung suchte
+# Zahlwort UND Datei-Wort irgendwo im selben Prompt – der eigene Test hat damit
+# sofort zwei Fehlalarme gefunden: "Fasse das Dokument in drei Saetzen zusammen"
+# und "Erzeuge zwei Diagramme aus der Tabelle". Beide sind voellig normale
+# Aufgaben fuer EINE Datei. Ein Fehlalarm ist hier teuer, weil die Meldung das
+# SPEICHERN blockiert – und eine Schranke, die man gewohnheitsmaessig umgeht,
+# schuetzt nichts mehr (Lehre vom 2026-08-05, als `2>/dev/null` vier Konten
+# sperrte). Deshalb hoechstens zwei Woerter zwischen Zahl und Datei-Wort
+# ("zwei Excel Dateien" trifft, "zwei Diagramme aus der Tabelle" nicht).
+_DATEI_WORT = (r"(?:datei|dateien|tabelle|tabellen|dokument|dokumente|mappe|mappen|"
+               r"arbeitsblatt|arbeitsblaetter|file|files|sheet|sheets)")
+_MEHRERE_MUSTER = re.compile(
+    # "zwei Excel Dateien", "beide Tabellen", "mehrere Dokumente", "2 Mappen"
+    r"\b(?:zwei|drei|vier|beide|mehrere|2|3|4)\b(?:\s+\S+){0,2}\s+" + _DATEI_WORT
+    # Rollenpaar ohne Zahlwort: "eine Master- und eine Slave-Tabelle"
+    + r"|\bmaster\b.{0,40}\bslave\b|\bslave\b.{0,40}\bmaster\b",
+    re.I)
+
+
+def prompt_verlangt_mehrere(prompt: str) -> bool:
+    """True, wenn der Prompt erkennbar MEHR als eine Datei braucht.
+
+    WARUM (Vorfall ECHT 2026-08-19/20): die Ablage "Tabellen zusammenfuehren"
+    stand auf ``mehrfach="einzeln"`` – jeder Lauf bekommt genau eine Datei –,
+    ihr Prompt begann aber mit "Du benoetigst zwei Excel Dateien. Eine ist
+    Master und eine ist Slave." Der Auftrag war damit prinzipiell unerfuellbar;
+    das Modell hat die zweite Datei in ``data/documents`` gesucht, Namen
+    erfunden und den Fehlschlag als fehlendes Zugriffsrecht ausgegeben.
+
+    Erkannt wird nur der eindeutige Fall (Anzahl/Rollen UND Datei-Wort im selben
+    Prompt). Ein Fehlalarm hier ist teuer: er erscheint beim Speichern und wuerde
+    sonst zur Gewohnheit, weggeklickt zu werden.
+    """
+    return bool(_MEHRERE_MUSTER.search(prompt or ""))
+
+
 def _pruefe(felder: dict, bestehend: dict | None = None) -> dict:
     """Baut den kanonischen Datensatz und wirft ``DumpFehler`` mit Klartext.
 
@@ -511,6 +549,19 @@ def _pruefe(felder: dict, bestehend: dict | None = None) -> dict:
     mehrfach = _text(q.get("mehrfach"), 12).lower()
     if mehrfach not in MEHRFACH_WERTE:
         mehrfach = "einzeln"
+
+    # Widerspruch Prompt <-> Verarbeitungsart. Das ist eine ABLEHNUNG, nicht nur
+    # ein Hinweis: mit "einzeln" ist so eine Aufgabe nicht erfuellbar, und der
+    # Lauf endet in einer erfundenen Begruendung statt in einem Ergebnis (Vorfall
+    # 2026-08-19/20). Der Text nennt BEIDE Wege heraus, damit die Meldung
+    # handlungsfaehig macht statt nur zu blockieren.
+    if mehrfach == "einzeln" and prompt_verlangt_mehrere(prompt):
+        raise DumpFehler(
+            "Die Aufgabe verlangt mehrere Dateien (z. B. „zwei Tabellen\u201c oder "
+            "„Master und Slave\u201c), die Ablage verarbeitet aber jede Datei EINZELN – "
+            "jeder Lauf bekaeme nur eine, und die zweite fehlt. Entweder auf "
+            "„alle gemeinsam\u201c umstellen (dann liegen alle abgelegten Dateien in "
+            "EINEM Auftrag vor) oder die Aufgabe auf eine Datei umformulieren.")
 
     return {
         "id": _text(q.get("id"), 12),

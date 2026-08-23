@@ -24,10 +24,21 @@ Bewusste Entscheidungen:
     Eintrag NICHT. Sonst koennte ein Nutzer eine fremde Capability-URL in seine
     Antwort schreiben (oder ein Prompt-Injection-Text das tun) und die Datei so
     auf sich umschreiben.
-  * **Nur Capability-Dateien** werden abgeraeumt. Roh-Dateien im selben Ordner
-    (Skill-Exporte, hochgeladene Anhaenge) sind ueber den Endpunkt gar nicht
-    erreichbar und werden von Tools ueber ihren Namen weiterbenutzt – ein
-    Loeschen wuerde laufende Arbeitsabläufe brechen.
+  * **Abgeraeumt werden Capability-Dateien UND registrierte Uploads**
+    (``kind == "upload"``: Chat-Anhaenge, auf eine Short-Tracks-Ablage gelegte
+    Dateien, vom Agenten per ``filesystem write`` erzeugte). Bis 2026-08-23 galt
+    das nur fuer Capability-Dateien, mit der Begruendung, Roh-Dateien wuerden
+    "von Tools ueber ihren Namen weiterbenutzt". Auf ECHT gemessen war die Folge:
+    76 Capability-Dateien (13,6 MB) unterlagen der Frist, **61 Roh-Dateien
+    (95,4 MB) lagen dauerhaft** – die Vorhaltezeit erfasste also 12 % der Daten,
+    waehrend die Oberflaeche eine Frist fuer den Ordner zusagt. Darunter fuenf
+    Kopien derselben 763-KB-Tabelle aus fuenf Ablage-Versuchen.
+    Der alte Grund traegt nicht mehr: der Short-Tracks-Auftrag nennt seit
+    2026-08-23 den /tmp-Pfad und den Ablagenamen nur noch im Rueckfall, und
+    Chat-Anhaenge werden ohnehin ueber ihre /tmp-Arbeitskopie verarbeitet.
+    Unangetastet bleiben Dateien OHNE Registry-Eintrag (Altbestand, Skill-Exporte
+    ohne Vermerk): bei ihnen ist nicht belegt, wer sie wozu braucht – und Raten
+    ist beim Loeschen die schlechteste Wahl.
 """
 
 from __future__ import annotations
@@ -177,9 +188,22 @@ def may_access(fname: str, username: str, is_admin: bool = False) -> bool:
     return owner == _norm(username)
 
 
-def cleanup_old(days: int | None = None) -> tuple[int, int]:
-    """Loescht Capability-Dateien, die aelter als die Aufbewahrungsfrist sind.
+def _unterliegt_frist(name: str, eintrag) -> bool:
+    """Faellt diese Datei unter die Vorhaltezeit?
 
+    Ja fuer Capability-Dateien (der Name IST die Zugriffsberechtigung) und fuer
+    Dateien, die als Upload vermerkt sind – siehe Modul-Docstring. Nein fuer
+    alles ohne Eintrag: dort ist unbekannt, wer sie wozu braucht.
+    """
+    if is_capability(name):
+        return True
+    return isinstance(eintrag, dict) and eintrag.get("kind") == "upload"
+
+
+def cleanup_old(days: int | None = None) -> tuple[int, int]:
+    """Loescht Dateien, die aelter als die Aufbewahrungsfrist sind.
+
+    Erfasst Capability-Dateien UND registrierte Uploads (``_unterliegt_frist``).
     Gibt ``(Anzahl, Bytes)`` zurueck. Raeumt zugleich Registry-Eintraege ohne
     Datei ab, damit die Registry nicht unbegrenzt waechst.
     """
@@ -193,7 +217,9 @@ def cleanup_old(days: int | None = None) -> tuple[int, int]:
         changed = False
         for p in list(DOCS_DIR.iterdir()):
             try:
-                if not p.is_file() or not is_capability(p.name):
+                if not p.is_file() or p.name.startswith("."):
+                    continue
+                if not _unterliegt_frist(p.name, data.get(p.name)):
                     continue
                 if cutoff is None or p.stat().st_mtime >= cutoff:
                     continue

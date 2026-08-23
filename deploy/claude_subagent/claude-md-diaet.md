@@ -1,7 +1,7 @@
 # CLAUDE.md auf Token-Diaet
 
 Beiblatt zum Delegations-Skill, **aber eigenstaendig**: dieser Auftrag braucht
-weder Jarvis noch eine Delegation. Er laeuft in einer normalen
+weder {marke} noch eine Delegation. Er laeuft in einer normalen
 Claude-Code-Sitzung in deinem Projekt.
 
 **Warum es sich lohnt:** CLAUDE.md geht in **jede** Anfrage **jeder** Sitzung.

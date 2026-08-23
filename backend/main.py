@@ -9633,25 +9633,27 @@ async def claudesub_page():
                         headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 
-@app.get("/claude/skill.md")
-async def claudesub_skill_md(request: Request):
-    """Liefert die fertige SKILL.md zum Herunterladen.
+def _claudesub_beiblatt(request: Request, name: str) -> Response:
+    """Liefert eine Datei aus `deploy/claude_subagent/` mit gesetzten
+    Marken-Platzhaltern zum Herunterladen.
+
+    EINE Stelle fuer beide Downloads (SKILL.md + das CLAUDE.md-Beiblatt): die
+    Ersetzung zweimal zu schreiben waere genau der Drift, den dieses Projekt
+    mehrfach bezahlt hat.
 
     KEIN Verweis auf eine Datei im Repo: `.claude/` ist gitignored, die Datei
     existiert auf einer Installation also gar nicht – und "leg sie selbst an"
     ist keine Anleitung. Der Benutzer laedt sie hier fertig herunter.
 
-    Die Marken-Platzhalter werden dabei eingesetzt, damit die Datei die
-    Kennungen DIESER Installation nennt (Name des Assistenten aus dem
-    Branding). Ohne Anmeldung – wie das Add-in-Manifest: die Datei enthaelt
-    keine Geheimnisse, nur die Anleitung fuer das Werkzeug.
+    Ohne Anmeldung – wie das Add-in-Manifest: die Dateien enthalten keine
+    Geheimnisse, nur die Anleitung fuer das Werkzeug.
     """
     from backend import claude_subagent as _cs
     # FRONTEND_DIR ist die einzige Pfadkonstante in diesem Modul –
     # PROJECT_ROOT gibt es hier NICHT (ein NameError beim ersten Abruf).
-    quelle = FRONTEND_DIR.parent / "deploy" / "claude_subagent" / "SKILL.md"
+    quelle = FRONTEND_DIR.parent / "deploy" / "claude_subagent" / name
     if not quelle.is_file():
-        return Response("SKILL.md nicht gefunden", status_code=404,
+        return Response(f"{name} nicht gefunden", status_code=404,
                         media_type="text/plain; charset=utf-8")
     marke = _cs.marken_slug()                      # z.B. NEXI
     # Die ECHTE Adresse dieser Installation einsetzen, kein Beispiel: der
@@ -9670,8 +9672,28 @@ async def claudesub_skill_md(request: Request):
             .replace("{adresse}", adresse))
     return Response(
         content=text, media_type="text/markdown; charset=utf-8",
-        headers={"Content-Disposition": 'attachment; filename="SKILL.md"',
+        headers={"Content-Disposition": f'attachment; filename="{name}"',
                  "Cache-Control": "no-store"})
+
+
+@app.get("/claude/skill.md")
+async def claudesub_skill_md(request: Request):
+    """Die fertige SKILL.md zum Herunterladen (Ablage:
+    `.claude/skills/code-delegate/SKILL.md`)."""
+    return _claudesub_beiblatt(request, "SKILL.md")
+
+
+@app.get("/claude/claude-md-diaet.md")
+async def claudesub_diaet_md(request: Request):
+    """Beiblatt: Auftrag, um die eigene CLAUDE.md zu verschlanken.
+
+    EIGENE Datei und NICHT im Rumpf der SKILL.md: die Skill-Datei entscheidet,
+    wann eine Aufgabe an den Agenten abgegeben wird – ein zweites Thema darin
+    verwaessert genau diesen Zuschnitt. Inhaltlich ist das Beiblatt
+    eigenstaendig: es braucht weder diese Installation noch eine Delegation
+    (und darf ausdruecklich NICHT delegiert werden – CLAUDE.md ist die
+    Konvention selbst)."""
+    return _claudesub_beiblatt(request, "claude-md-diaet.md")
 
 
 @app.get("/api/claude/status")

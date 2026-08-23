@@ -24,6 +24,22 @@
     }
 
     var widget, dropdown, badge, verEl, body;
+
+    /* Fusszeile des Popups – wird bei Bedarf selbst erzeugt.
+       BEWUSST nicht im Markup: dann wirkt der Fix auch auf einer Installation,
+       deren portal.html noch nicht neu ausgerollt ist (die Pill ist eine
+       Admin-Anzeige, ein halb aktualisierter Stand darf sie nicht brechen). */
+    function foot() {
+        if (!dropdown) return null;
+        var f = document.getElementById('upd-foot');
+        if (!f) {
+            f = document.createElement('div');
+            f.id = 'upd-foot';
+            f.className = 'update-dropdown-foot';
+            dropdown.appendChild(f);
+        }
+        return f;
+    }
     var _open = false, _timer = null, _inited = false;
 
     function init() {
@@ -99,13 +115,19 @@
             ? '<button id="upd-apply-btn" class="kb-btn-action">' + T('update.apply_btn') + '</button>'
             : '<button id="upd-check-btn" class="kb-btn-secondary" style="font-size:.78rem;">' + T('update.check_btn') + '</button>';
 
+        // NUR Zustand und Commit-Liste scrollen mit ...
         body.innerHTML =
             '<div class="upd-status-row"><span class="upd-dot ' + statusDot + '"></span>'
             + '<span style="font-size:.82rem;color:var(--text-primary);">' + esc(statusText) + '</span></div>'
             + '<div style="display:flex;justify-content:space-between;font-size:.75rem;color:var(--text-secondary);">'
             + '<span>' + T('update.current') + ' <code style="color:var(--accent);">' + esc(d.current_hash || '?') + '</code></span>'
             + '<span>' + T('update.branch') + ' <code style="color:var(--text-secondary);">' + esc(d.branch || 'master') + '</code></span></div>'
-            + commitsHtml + btnHtml
+            + commitsHtml;
+
+        // ... Aktion und Einstellung stehen FEST unten. Eine Liste kann beliebig
+        // lang werden; der Knopf darf davon nicht weggeschoben werden.
+        var f = foot();
+        if (f) f.innerHTML = btnHtml
             + '<div class="upd-auto-row"><span class="upd-auto-label">' + T('update.auto_label') + '</span>'
             + '<select id="upd-schedule" class="upd-schedule-select">'
             + '<option value="never"' + (schedule === 'never' ? ' selected' : '') + '>' + T('update.sched_never') + '</option>'
@@ -136,6 +158,10 @@
             .then(function (d) {
                 if (d.ok) {
                     if (body) body.innerHTML = '<p style="color:var(--success);font-size:.85rem;">' + T('update.success') + '</p>';
+                    // Fusszeile leeren: ein Knopf "Update anwenden" unter der
+                    // Erfolgsmeldung waere eine Aufforderung ins Leere.
+                    var _f = document.getElementById('upd-foot');
+                    if (_f) _f.innerHTML = '';
                     setTimeout(function () { window.location.reload(); }, 5000);
                 } else {
                     if (body) {

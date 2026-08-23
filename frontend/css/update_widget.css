@@ -25,15 +25,32 @@
 @keyframes upd-pulse { 0%,100%{opacity:1;} 50%{opacity:0.35;} }
 
 /* ── Dropdown ─────────────────────────────────────────────────────── */
+/* Der Aufbau ist Flex-SPALTE mit fester Kopf- und Fusszeile: nur die Mitte
+   (Commit-Liste) scrollt. Vorher lagen Knopf und Auto-Update-Zeile HINTER der
+   Liste im selben Scrollbereich – bei mehreren Commits war der Knopf
+   ausserhalb des Sichtfensters, also unerreichbar, ohne dass etwas darauf
+   hinwies (gemeldet 2026-08-23, "der Button im Popup wieder abgeschnitten").
+   Die Hoehe haengt am SICHTFENSTER, nicht an einer festen Zahl: 440 px passten
+   auf einem kleinen Fenster ebenfalls nicht. */
 .update-dropdown { position:absolute;top:calc(100% + 10px);left:0;right:auto;width:360px;max-width:90vw;
     background:var(--bg-secondary,#111827);border:1px solid var(--border,rgba(255,255,255,.12));border-radius:var(--radius,12px);
-    box-shadow:0 8px 32px rgba(0,0,0,0.6);z-index:9999;overflow:hidden; }
+    box-shadow:0 8px 32px rgba(0,0,0,0.6);z-index:9999;overflow:hidden;
+    display:flex;flex-direction:column;max-height:calc(100vh - 84px); }
 .update-dropdown.hidden { display:none; }
 .update-dropdown-header { display:flex;align-items:center;justify-content:space-between;padding:10px 14px;
     border-bottom:1px solid var(--border,rgba(255,255,255,.12));font-size:0.85rem;font-weight:600;color:var(--text-primary,#f8fafc); }
 .update-close-btn { background:none;border:none;color:var(--text-secondary,#94a3b8);cursor:pointer;font-size:0.85rem;padding:2px 5px;border-radius:4px;transition:background .15s; }
 .update-close-btn:hover { background:rgba(127,127,127,0.15); }
-.update-dropdown-body { padding:12px 14px;display:flex;flex-direction:column;gap:10px;max-height:440px;overflow-y:auto; }
+/* `min-height:0` ist Pflicht: ein Flex-Kind schrumpft sonst nicht unter seine
+   Inhaltshoehe, `overflow-y` bleibt wirkungslos und die Fusszeile wird aus dem
+   Popup gedrueckt. */
+.update-dropdown-body { padding:12px 14px;display:flex;flex-direction:column;gap:10px;
+    flex:1 1 auto;min-height:0;overflow-y:auto; }
+/* Fusszeile: Aktion und Einstellung, immer sichtbar. */
+.update-dropdown-foot { flex:0 0 auto;padding:10px 14px;display:flex;flex-direction:column;gap:8px;
+    border-top:1px solid var(--border,rgba(255,255,255,.12));background:var(--bg-secondary,#111827); }
+.update-dropdown-foot:empty { display:none; }
+.update-dropdown-foot .upd-auto-row { border-top:none;padding:0; }
 
 .upd-status-row { display:flex;align-items:center;gap:8px;font-size:0.82rem; }
 .upd-dot { width:8px;height:8px;border-radius:50%;flex-shrink:0; }

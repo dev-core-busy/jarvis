@@ -114,3 +114,12 @@ Laeuft gegen **jede** {marke}-Installation, auch produktive. Der Riegel ist dort
 verfuegbar, weil der Arbeitsbereich frisch von `origin/master` geklont wird –
 ein `sparse-checkout` auf dem Server (der `tests/` in `/opt/jarvis` ausblendet)
 wirkt nur auf dessen eigene Arbeitskopie, nicht auf einen neuen Klon.
+
+## Beiblatt: CLAUDE.md schlank halten
+
+Die Ausschlussregel „nichts Konventionslastiges" oben haengt an der Groesse von
+CLAUDE.md – je dicker die Datei, desto weniger laesst sich abgeben. Ein
+paste-fertiger Auftrag zum Verschlanken steht in **`claude-md-diaet.md`**
+(Download im Bereich `{adresse}/claude`, Abschnitt „Anleitung"). Er ist
+eigenstaendig – kein {marke}, keine Delegation – und wird ausdruecklich **nicht**
+delegiert: CLAUDE.md ist die Konvention selbst.

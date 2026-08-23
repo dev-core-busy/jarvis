@@ -92,10 +92,20 @@ rechnet der Server selbst.
 
 ## Voraussetzungen
 
-- **Schluessel** in `$SUBAGENT_KEY` oder `~/.subagent-key` – in Jarvis unter
-  `/claude` erzeugen. **Nie ins Repo.**
-- **Adresse** in `$SUBAGENT_URL` oder `~/.subagent-url`. Es gibt bewusst
-  keine Vorgabe: derselbe Client laeuft gegen jede Jarvis-Installation.
+Diese Datei ist bereits auf DIESE Installation ausgestellt – die beiden Befehle
+unten sind vollstaendig, es fehlt nur der Schluessel:
+
+```bash
+printf '%s' 'HIER-DEINEN-SCHLUESSEL-EINSETZEN' > ~/.jarvis-csa-key
+printf '%s' 'https://191.100.144.1' > ~/.jarvis-csa-url
+chmod 600 ~/.jarvis-csa-key
+```
+
+- **Schluessel** in `JARVIS_CSA_KEY` oder `~/.jarvis-csa-key` – in Jarvis
+  unter `https://191.100.144.1/claude` erzeugen. **Nie ins Repo.**
+- **Adresse** ist oben schon eingesetzt: `https://191.100.144.1`. (Ueber `JARVIS_CSA_URL`
+  bzw. die Datei laesst sich der Client auch gegen eine andere Installation
+  richten – eine feste Vorgabe im Code gibt es bewusst nicht.)
 - Der lokale Stand muss auf `origin/master` liegen und die Zieldateien duerfen
   keine ungespeicherten Aenderungen haben – der Client prueft beides und bricht
   sonst ab.
@@ -105,10 +115,11 @@ verfuegbar, weil der Arbeitsbereich frisch von `origin/master` geklont wird –
 ein `sparse-checkout` auf dem Server (der `tests/` in `/opt/jarvis` ausblendet)
 wirkt nur auf dessen eigene Arbeitskopie, nicht auf einen neuen Klon.
 
-## Tipp am Rande: CLAUDE.md schlank halten
+## Beiblatt: CLAUDE.md schlank halten
 
 Die Ausschlussregel „nichts Konventionslastiges" oben haengt an der Groesse von
 CLAUDE.md – je dicker die Datei, desto weniger laesst sich abgeben. Ein
-paste-fertiger Auftrag zum Verschlanken steht in **`claude-md-diaet.md`** neben
-dieser Datei. Er ist eigenstaendig (kein Jarvis, keine Delegation) und wird
-ausdruecklich **nicht** delegiert: CLAUDE.md ist die Konvention selbst.
+paste-fertiger Auftrag zum Verschlanken steht in **`claude-md-diaet.md`**
+(Download im Bereich `https://191.100.144.1/claude`, Abschnitt „Anleitung"). Er ist
+eigenstaendig – kein Jarvis, keine Delegation – und wird ausdruecklich **nicht**
+delegiert: CLAUDE.md ist die Konvention selbst.

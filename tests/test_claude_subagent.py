@@ -433,8 +433,17 @@ check("code-delegate" in _tpl, "Vorlage nennt den Skill-Ordner")
 
 _MAIN = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
 check('"/claude/skill.md"' in _MAIN, "Endpunkt /claude/skill.md vorhanden")
+# Die AUSLIEFERUNG steckt seit 2026-08-23 in `_claudesub_beiblatt` (zwei
+# Downloads, eine Ersetzung). Geprueft wird deshalb die Kette Endpunkt →
+# Helfer, nicht der Rumpf des Endpunkts: sonst schlaegt der Test bei jedem
+# Herausziehen einer Funktion an, ohne dass etwas kaputt ist.
 _ep = _MAIN[_MAIN.find('@app.get("/claude/skill.md")'):]
-_ep = _ep[:_ep.find("@app.get(\"/api/claude/status\")")]
+_ep = _ep[:_ep.find("@app.get(\"/claude/claude-md-diaet.md\")")]
+_helper = _MAIN[_MAIN.find("def _claudesub_beiblatt("):]
+_helper = _helper[:_helper.find('@app.get("/claude/skill.md")')]
+check("_claudesub_beiblatt(request" in _ep,
+      "... liefert ueber den gemeinsamen Helfer aus")
+_ep = _ep + _helper          # ab hier gilt: Endpunkt PLUS sein Helfer
 check("attachment" in _ep and "SKILL.md" in _ep,
       "... liefert als Download (Content-Disposition attachment)")
 check("marken_slug" in _ep and "marken_anzeige" in _ep,
@@ -484,10 +493,9 @@ check("dein-server" not in _tpl and "your-server" not in _tpl
 check("csa-url" in _tpl and "printf" in _tpl,
       "Vorlage enthaelt den fertigen Befehl zum Ablegen")
 
-_ep_adr = _MAIN[_MAIN.find('@app.get("/claude/skill.md")'):]
-_ep_adr = _ep_adr[:_ep_adr.find('@app.get("/api/claude/status")')]
-check("basis_url" in _ep_adr, "Endpunkt leitet die Adresse aus der Anfrage ab")
-check("request" in _ep_adr.split("\n")[1], "... und nimmt dafuer das Request-Objekt")
+check("basis_url" in _helper, "Auslieferung leitet die Adresse aus der Anfrage ab")
+check("request: Request" in _helper.split("\n")[0],
+      "... und nimmt dafuer das Request-Objekt")
 
 # Anleitung im Bereich: derselbe Platzhalter, gefuellt von branding.js.
 _BR = (ROOT / "frontend" / "js" / "branding.js").read_text(encoding="utf-8")
@@ -696,6 +704,59 @@ check(".cs-modell {" in _HTML and "var(--bg-primary)" in _HTML,
 for _k in ("csub.model_line", "csub.model_fixed", "csub.model_global",
            "csub.model_effort"):
     check(_I18N.count(f"'{_k}'") == 2, f"{_k} in DE und EN")
+
+
+section("Beiblatt: CLAUDE.md-Diaet erreicht den Anwender")
+
+# WARUM EINE EIGENE DATEI: die SKILL.md entscheidet, WANN eine Aufgabe abgegeben
+# wird. Ein zweites Thema in ihrem Rumpf verwaessert genau diesen Zuschnitt (auf
+# Anweisung des Nutzers am 2026-08-23 so gebaut, nachdem der Abschnitt zuerst
+# mitten in der Skill-Datei stand).
+_DIAET = ROOT / "deploy" / "claude_subagent" / "claude-md-diaet.md"
+check(_DIAET.is_file(), "Beiblatt liegt versioniert im Repo")
+_diaet = _DIAET.read_text(encoding="utf-8") if _DIAET.is_file() else ""
+
+# ... und der Rumpf der SKILL.md bleibt frei davon: nur ein Zeiger.
+check(_tpl.count("claude-md-diaet") == 1,
+      "SKILL.md verweist auf das Beiblatt - genau einmal",
+      f"gefunden: {_tpl.count('claude-md-diaet')}")
+check("Phase 0" not in _tpl and "Behalte-Test" not in _tpl,
+      "... und traegt den Auftrag NICHT selbst")
+
+# Der Anwender bekommt nur, was ein Endpunkt ausliefert.
+check('"/claude/claude-md-diaet.md"' in _MAIN, "Endpunkt vorhanden")
+_epd = _MAIN[_MAIN.find('@app.get("/claude/claude-md-diaet.md")'):]
+_epd = _epd[:_epd.find('@app.get("/api/claude/status")')]
+check("_claudesub_beiblatt(request" in _epd,
+      "... nutzt denselben Helfer wie /claude/skill.md (keine zweite Ersetzung)")
+_hlp = _MAIN[_MAIN.find("def _claudesub_beiblatt("):]
+_hlp = _hlp[:_hlp.find('@app.get("/claude/skill.md")')]
+check("attachment" in _hlp and "marken_slug" in _hlp and "marken_anzeige" in _hlp,
+      "... Helfer liefert als Download und setzt beide Marken-Formen")
+check("{name}" in _hlp or 'filename="{name}"' in _hlp,
+      "... Dateiname kommt aus dem Parameter, nicht fest verdrahtet")
+
+# Ohne Link in der Anleitung findet den Download niemand.
+check(_I18N.count("/claude/claude-md-diaet.md") == 2,
+      "Anleitung verlinkt das Beiblatt in DE UND EN",
+      f"gefunden: {_I18N.count('/claude/claude-md-diaet.md')}")
+
+# Inhaltliche Zusagen des Beiblatts.
+check("{marke}" in _diaet, "Beiblatt ist markenneutral (Platzhalter statt Name)")
+check("NICHT delegieren" in _diaet,
+      "... sagt ausdruecklich, dass es NICHT delegiert wird")
+check("Phase 0" in _diaet and "Phase 1" in _diaet and "Phase 2" in _diaet,
+      "... arbeitet in drei Phasen (kein Ein-Schuss-Umschreiben)")
+check("<BUDGET>" in _diaet and "<X>" in _diaet,
+      "... nennt die anzupassenden Platzhalter")
+check("settings*.json" in _diaet and "nicht** im Modellkontext" in _diaet,
+      "... berichtigt den Scope (settings.json kostet keine Token)")
+for _wort in ("Niemals streichen", "Behalte-Test", "git diff"):
+    check(_wort in _diaet, f"... enthaelt '{_wort}'")
+# Keine Zahlen aus UNSEREM Repo in einer Datei, die an fremde Projekte geht -
+# sie waeren dort schlicht falsch.
+check("605." not in _diaet and "65.986" not in _diaet,
+      "... nennt keine Messwerte dieses Repos als die des Anwenders")
 
 
 print("\n" + "=" * 62)

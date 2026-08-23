@@ -3178,11 +3178,36 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <span class="sk-openclaw-toggle" id="xa-sect-install-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="xa-sect-install-body">
-                                <p class="kb-hint" style="margin-bottom:10px;">Das Manifest wird bei jedem Abruf <b>für diesen Server</b> erzeugt – die enthaltenen Adressen zeigen auf ihn. Laden Sie es herunter und legen Sie es in einen freigegebenen Ordner im Netz; die Arbeitsplätze tragen diesen Ordner einmalig in den Excel-Optionen als vertrauenswürdigen Katalog ein (per Gruppenrichtlinie ausrollbar).</p>
+                                <p class="kb-hint" style="margin-bottom:10px;">Das Manifest wird bei jedem Abruf <b>für diesen Server</b> erzeugt – die enthaltenen Adressen zeigen auf ihn. Es muss in einen freigegebenen Ordner im Netz; die Arbeitsplätze tragen diesen Ordner einmalig in den Excel-Optionen als vertrauenswürdigen Katalog ein (per Gruppenrichtlinie ausrollbar).</p>
+                                <!-- Der Einleitungstext darueber sagt bewusst NICHT
+                                     "laden Sie es herunter": der Knopf laedt je nach
+                                     hinterlegtem Katalogpfad herunter ODER hoch, und
+                                     ein fester Text, der einen der beiden Wege
+                                     behauptet, widerspricht der Beschriftung direkt
+                                     daneben. Was zu tun ist, sagt #xa-dl-hint - der
+                                     folgt dem Zustand.
+
+                                     Der Knopf hat ZWEI Zustaende, gesteuert vom
+                                     gespeicherten Katalogpfad weiter unten:
+                                     ohne Pfad "herunterladen" (der <a> laedt die
+                                     Datei mit dem Namen aus dem Branding), mit
+                                     Pfad "hochladen" (Speichern-unter-Fenster,
+                                     das direkt in die Freigabe schreibt).
+                                     Ein Knopf, der zum Herunterladen einlaedt,
+                                     waehrend der Weg in eine Freigabe fuehrt,
+                                     beschreibt die Aufgabe falsch. -->
                                 <div class="xa-row">
                                     <a class="btn-primary xa-dl" id="xa-download" href="/excel-addin/manifest.xml">Manifest herunterladen</a>
+                                    <button type="button" class="btn-secondary" id="xa-pfad-copy" style="display:none;">Pfad kopieren</button>
+                                    <!-- Die Fassung steht VOR dem Status: sie ist
+                                         dauerhaft da und gehoert an die Knoepfe. Der
+                                         Status ist laenger und bricht in die naechste
+                                         Zeile um - stuende er davor, risse er die
+                                         Fassung von den Knoepfen weg. -->
                                     <span class="kb-hint" id="xa-version"></span>
+                                    <span class="kb-hint" id="xa-dl-status"></span>
                                 </div>
+                                <p class="kb-hint" id="xa-dl-hint" style="display:none;margin-top:8px;"></p>
                                 <p class="kb-hint" id="xa-warn" style="display:none;margin-top:8px;"></p>
 
                                 <!-- Der uebliche Weg im Haus ist NICHT, dass jeder
@@ -4680,7 +4705,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/theme.js?v=2"></script>
     <script src="/static/js/security_incidents.js?v=29"></script>
     <script src="/static/js/ldap_picker.js?v=10"></script>
-    <script src="/static/js/excel_admin.js?v=2"></script>
+    <script src="/static/js/excel_admin.js?v=3"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
     <script src="/static/js/sessions.js?v=4"></script>
     <script src="/static/js/agent_roles.js?v=2"></script>

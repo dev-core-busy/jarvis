@@ -27,8 +27,11 @@ const pruefe = (b, t, d) => {
 const abschnitt = (t) => console.log('\n=== ' + t + ' ===');
 
 const ROOT = path.resolve(__dirname, '..');
-let JSDOM;
-try { JSDOM = require(process.env.JSDOM_PATH || '/tmp/node_modules/jsdom').JSDOM; }
+let JSDOM, VirtualConsole;
+try {
+    const _j = require(process.env.JSDOM_PATH || '/tmp/node_modules/jsdom');
+    JSDOM = _j.JSDOM; VirtualConsole = _j.VirtualConsole;
+}
 catch (e) { console.log('ABBRUCH: jsdom nicht installiert'); process.exit(2); }
 
 const HTML = fs.readFileSync(path.join(ROOT, 'frontend/excel-addin/taskpane.html'), 'utf8');
@@ -507,6 +510,287 @@ function warte(ms) { return new Promise(r => setTimeout(r, ms)); }
         });
     }
     winK.close();
+
+    /* ══════════════════════════════════════════════════════════════════
+       7. Der Verteil-Knopf: Download ODER Hochladen
+       ══════════════════════════════════════════════════════════════════
+       GEMELDET 2026-08-23: "Manifest herunterladen" ist die falsche Ansage,
+       sobald ein Katalogpfad hinterlegt ist – die Datei soll dann in genau
+       diese Freigabe, nicht in den Download-Ordner.
+
+       Getrieben wird der ECHTE excel_admin.js gegen das ECHTE Markup aus
+       settings.html. Ein Test, der beides nachbaut, bestaetigt nur seine
+       eigene Annahme. */
+    abschnitt('7. Verteil-Knopf: Download oder Hochladen');
+    const ADMINJS = fs.readFileSync(path.join(ROOT, 'frontend/js/excel_admin.js'), 'utf8');
+    const ADMIN_CODE = nurCode(ADMINJS);
+
+    /* Ein frischer Reiter je Fall. `pfad` = was der Server als gespeicherten
+       Katalogpfad meldet, `picker` = die Attrappe der File System Access API
+       (null bedeutet: dieser Browser hat sie nicht – Firefox/Safari).
+       `manifestOk`: true = immer, false = nie (localhost-Absage des Servers),
+       'spaeter' = der Pruefabruf beim Oeffnen gelingt, der beim KLICK nicht,
+       'nur_erster' = umgekehrt.
+       DIE BEIDEN LETZTEN TRENNEN ZWEI SCHRANKEN, die bei `false` beide
+       gleichzeitig greifen: 'spaeter' prueft die Reihenfolge (erst holen, dann
+       Dialog), 'nur_erster' die fortwirkende Absage (`_adresseKaputt`). Mit
+       `false` allein bleiben beide Gegenproben gruen, obwohl die jeweilige
+       Schranke ausgebaut ist – nachgemessen 2026-08-23. */
+    function adminFenster(pfad, picker, manifestOk) {
+        const spur = { urls: [], koerper: [], geschrieben: [], geschlossen: 0,
+                       picker: 0, pickerArg: null, navigation: 0, manifestAbrufe: 0 };
+        /* Ein NICHT verhinderter Klick auf den <a> laesst jsdom "Not
+           implemented: navigation" melden. Das ist hier kein Rauschen, sondern
+           der BELEG, dass der Link ein Link geblieben ist – jsdom gibt das Ziel
+           nicht heraus, aber den Versuch. Ohne eigene VirtualConsole landet die
+           Meldung als Fehlertext in der Testausgabe und sieht wie ein Defekt aus. */
+        const vc = new VirtualConsole();
+        vc.on('jsdomError', (e) => {
+            if (/navigation/i.test(String(e && e.message))) spur.navigation++;
+            else console.error(e);
+        });
+        const dom = new JSDOM('<body>' + SETH.slice(ia, ja) + '</body>',
+            { url: 'https://jarvis.test/settings', runScripts: 'outside-only',
+              virtualConsole: vc });
+        const w = dom.window;
+        const XML = '<?xml version="1.0"?><OfficeApp/>';
+        w.fetch = function (url, opt) {
+            spur.urls.push(url);
+            if (opt && opt.body) spur.koerper.push(JSON.parse(opt.body));
+            if (String(url).indexOf('/api/excel-addin/version') === 0) {
+                return Promise.resolve({ ok: true, status: 200,
+                    json: () => Promise.resolve({ ok: true, version: '1.0.0.0' }) });
+            }
+            if (String(url).indexOf('/api/skills/') === 0) {
+                return Promise.resolve({ ok: true, status: 200,
+                    json: () => Promise.resolve({ ok: true, config: {
+                        max_runden: 3, max_aenderungen: 200, katalog_pfad: pfad } }) });
+            }
+            if (String(url).indexOf('/excel-addin/manifest.xml') === 0) {
+                spur.manifestAbrufe++;
+                const scheitert = (manifestOk === false) ||
+                                  (manifestOk === 'spaeter' && spur.manifestAbrufe > 1) ||
+                                  (manifestOk === 'nur_erster' && spur.manifestAbrufe === 1);
+                if (scheitert) {
+                    // `blob()` MUSS auch hier funktionieren – eine 400-Antwort hat
+                    // einen Rumpf. Ohne das waere die Gegenprobe "Pruefung
+                    // ausgebaut" gruen, weil sie an einem TypeError scheitert
+                    // statt an der fehlenden Pruefung (nachgemessen 2026-08-23).
+                    return Promise.resolve({ ok: false, status: 400,
+                        headers: { get: () => null },
+                        blob: () => Promise.resolve(new w.Blob(['{"error":"nein"}'])),
+                        json: () => Promise.resolve({ error: 'localhost taugt nicht' }) });
+                }
+                return Promise.resolve({ ok: true, status: 200,
+                    // Der Dateiname MUSS aus diesem Kopf kommen und nicht
+                    // nachgebaut werden, sonst laeuft er dem Branding hinterher.
+                    headers: { get: (k) => (String(k).toLowerCase() === 'content-disposition'
+                        ? 'attachment; filename="nexus-dp-excel-addin.xml"' : null) },
+                    blob: () => Promise.resolve(new w.Blob([XML], { type: 'application/xml' })),
+                    json: () => Promise.resolve({}) });
+            }
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
+        };
+        if (picker !== null) {
+            w.showSaveFilePicker = function (opt) {
+                spur.picker++; spur.pickerArg = opt;
+                return picker(w, spur);
+            };
+        } else {
+            try { delete w.showSaveFilePicker; } catch (e) { }
+        }
+        w.eval(ADMIN_CODE);
+        return { w, spur, dom };
+    }
+
+    function pickerOk(w, spur) {
+        return Promise.resolve({
+            name: 'nexus-dp-excel-addin.xml',
+            createWritable: () => Promise.resolve({
+                write: (b) => { spur.geschrieben.push(b); return Promise.resolve(); },
+                close: () => { spur.geschlossen++; return Promise.resolve(); }
+            })
+        });
+    }
+    function pickerAbbruch() {
+        const e = new Error('The user aborted a request.');
+        e.name = 'AbortError';
+        return Promise.reject(e);
+    }
+
+    // ── a) Kein Pfad hinterlegt: alles wie bisher ──────────────────────
+    {
+        const { w, spur } = adminFenster('', pickerOk, true);
+        w.ExcelAdmin.onShow();
+        await warte(20);
+        const dl = w.document.getElementById('xa-download');
+        pruefe(dl.textContent === 'Manifest herunterladen',
+               'ohne Pfad heisst der Knopf "Manifest herunterladen"', dl.textContent);
+        pruefe(w.document.getElementById('xa-pfad-copy').style.display === 'none',
+               'ohne Pfad ist "Pfad kopieren" verborgen');
+        pruefe(w.document.getElementById('xa-dl-hint').style.display === 'none',
+               'ohne Pfad steht kein Zusatzhinweis da');
+        const ev = new w.MouseEvent('click', { bubbles: true, cancelable: true });
+        dl.dispatchEvent(ev);
+        await warte(20);
+        pruefe(ev.defaultPrevented === false,
+               'ohne Pfad bleibt es beim normalen Link-Download');
+        pruefe(spur.navigation === 1,
+               'der Browser folgt dem Link wirklich (jsdom meldet den Navigationsversuch)',
+               'navigationen=' + spur.navigation);
+        pruefe(spur.picker === 0, 'ohne Pfad wird kein Speichern-Dialog geoeffnet');
+        w.close();
+    }
+
+    // ── b) Pfad hinterlegt, Browser kann speichern ─────────────────────
+    {
+        const { w, spur } = adminFenster('\\\\srv\\freigabe\\addins', pickerOk, true);
+        w.ExcelAdmin.onShow();
+        await warte(20);
+        const dl = w.document.getElementById('xa-download');
+        pruefe(dl.textContent === 'Manifest hochladen',
+               'mit Pfad heisst der Knopf "Manifest hochladen"', dl.textContent);
+        pruefe(w.document.getElementById('xa-pfad-copy').style.display !== 'none',
+               'mit Pfad erscheint "Pfad kopieren"');
+        const hint = w.document.getElementById('xa-dl-hint');
+        pruefe(hint.style.display !== 'none' && /nicht\s+vorbelegen/.test(hint.textContent),
+               'der Hinweis sagt, dass der Zielordner nicht vorbelegbar ist');
+
+        const ev = new w.MouseEvent('click', { bubbles: true, cancelable: true });
+        dl.dispatchEvent(ev);
+        await warte(40);
+        pruefe(ev.defaultPrevented === true && spur.navigation === 0,
+               'der Klick loest KEINEN Download aus, sondern den Dialog');
+        pruefe(spur.picker === 1, 'genau ein Speichern-Dialog', 'picker=' + spur.picker);
+        pruefe(spur.pickerArg && spur.pickerArg.suggestedName === 'nexus-dp-excel-addin.xml',
+               'der Dateiname kommt aus dem Content-Disposition-Kopf (Branding)',
+               spur.pickerArg && spur.pickerArg.suggestedName);
+        pruefe(spur.geschrieben.length === 1 && spur.geschlossen === 1,
+               'genau einmal geschrieben und der Datenstrom geschlossen');
+        const st = w.document.getElementById('xa-dl-status');
+        pruefe(/geschrieben/.test(st.textContent) && !/Fehler/.test(st.textContent),
+               'Erfolg wird gemeldet', st.textContent);
+        w.close();
+    }
+
+    // ── c) Pfad hinterlegt, Browser kann es nicht (Firefox/Safari) ─────
+    {
+        const { w, spur } = adminFenster('\\\\srv\\freigabe\\addins', null, true);
+        w.ExcelAdmin.onShow();
+        await warte(20);
+        const dl = w.document.getElementById('xa-download');
+        pruefe(dl.textContent === 'Manifest herunterladen',
+               'ohne File-System-API bleibt es beim Download – kein leeres Versprechen',
+               dl.textContent);
+        const hint = w.document.getElementById('xa-dl-hint');
+        pruefe(hint.style.display !== 'none' && /Chrome/.test(hint.textContent),
+               'der Hinweis nennt den Grund und die Browser, die es koennen');
+        const ev = new w.MouseEvent('click', { bubbles: true, cancelable: true });
+        dl.dispatchEvent(ev);
+        await warte(20);
+        pruefe(ev.defaultPrevented === false, 'der Link bleibt ein Link');
+        w.close();
+    }
+
+    // ── d) Abbrechen im Dialog ist kein Fehler ─────────────────────────
+    {
+        const { w, spur } = adminFenster('\\\\srv\\freigabe', pickerAbbruch, true);
+        w.ExcelAdmin.onShow();
+        await warte(20);
+        w.document.getElementById('xa-download')
+            .dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true }));
+        await warte(40);
+        const st = w.document.getElementById('xa-dl-status');
+        pruefe(st.textContent === '',
+               'Abbrechen im Dialog erzeugt KEINE Fehlermeldung', st.textContent);
+        w.close();
+    }
+
+    // ── e) Server lehnt die Adresse ab (localhost): nichts geht raus ───
+    {
+        const { w, spur } = adminFenster('\\\\srv\\freigabe', pickerOk, false);
+        w.ExcelAdmin.onShow();
+        await warte(20);
+        w.document.getElementById('xa-download')
+            .dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true }));
+        await warte(40);
+        pruefe(spur.picker === 0,
+               'bei abgelehnter Basis-Adresse wird kein Dialog geoeffnet – sonst laege ' +
+               'ein Manifest im Katalog, das auf jedem Arbeitsplatz ins Leere zeigt',
+               'picker=' + spur.picker);
+        w.close();
+    }
+
+    // ── e1) Die Absage beim Oeffnen wirkt fort ─────────────────────────
+    //  Auch wenn ein spaeterer Abruf gelaenge: der Server hat diese Basis
+    //  einmal abgelehnt, das Manifest waere auf den Arbeitsplaetzen wertlos.
+    {
+        const { w, spur } = adminFenster('\\\\srv\\freigabe', pickerOk, 'nur_erster');
+        w.ExcelAdmin.onShow();
+        await warte(20);
+        w.document.getElementById('xa-download')
+            .dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true }));
+        await warte(40);
+        pruefe(spur.picker === 0,
+               'die Absage beim Oeffnen sperrt den Knopf dauerhaft, nicht nur den ' +
+               'einen Abruf', 'picker=' + spur.picker);
+        w.close();
+    }
+
+    // ── e2) Erst holen, DANN den Dialog – nie eine 0-Byte-Datei ────────
+    //  Beim Oeffnen des Reiters war die Adresse in Ordnung, der Abruf beim
+    //  Klick scheitert (Deploy dazwischen, Netzstoerung). `_adresseKaputt`
+    //  greift hier NICHT – geprueft wird allein die Reihenfolge.
+    {
+        const { w, spur } = adminFenster('\\\\srv\\freigabe', pickerOk, 'spaeter');
+        w.ExcelAdmin.onShow();
+        await warte(20);
+        w.document.getElementById('xa-download')
+            .dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true }));
+        await warte(40);
+        pruefe(spur.manifestAbrufe > 1, 'Vorbedingung: der Klick hat wirklich abgerufen',
+               'abrufe=' + spur.manifestAbrufe);
+        pruefe(spur.picker === 0,
+               'scheitert der Abruf, wird gar kein Dialog geoeffnet (der Picker legt die ' +
+               'Zieldatei schon beim Auswaehlen an – es laege eine 0-Byte-Datei im Katalog)',
+               'picker=' + spur.picker);
+        pruefe(/Fehler/.test(w.document.getElementById('xa-dl-status').textContent),
+               'und der Grund steht im Klartext da');
+        w.close();
+    }
+
+    // ── f) Speichern des Pfades schaltet den Knopf sofort um ───────────
+    {
+        const { w, spur } = adminFenster('', pickerOk, true);
+        w.ExcelAdmin.onShow();
+        await warte(20);
+        const dl = w.document.getElementById('xa-download');
+        pruefe(dl.textContent === 'Manifest herunterladen', 'Ausgangszustand: Download');
+        w.document.getElementById('xa-katalog').value = '\\\\srv\\neu';
+        w.document.getElementById('xa-katalog-save').click();
+        await warte(40);
+        pruefe(dl.textContent === 'Manifest hochladen',
+               'nach dem Speichern des Pfades heisst der Knopf sofort "hochladen" ' +
+               '(ohne Neuladen des Reiters)', dl.textContent);
+        // Der Knopf sendet nur SEINE Teilmenge – `update_skill_config` merged,
+        // ein voller Formularstand ueberschriebe die Grenzwerte.
+        const letzte = spur.koerper[spur.koerper.length - 1];
+        pruefe(letzte && Object.keys(letzte).length === 1 && 'katalog_pfad' in letzte,
+               'gesendet wird ausschliesslich katalog_pfad', JSON.stringify(letzte));
+        w.close();
+    }
+
+    // ── g) Waechter im Quelltext ───────────────────────────────────────
+    pruefe(/showSaveFilePicker/.test(ADMIN_CODE) &&
+           ADMIN_CODE.indexOf('typeof window.showSaveFilePicker') > 0,
+           'die API wird geprueft, nicht vorausgesetzt');
+    // Der Reiter ist durchgehend deutsch (wie der Jira-Reiter) – ein einzelner
+    // i18n-Schluessel hier waere eine halbe Uebersetzung.
+    const XPANEL = SETH.slice(ia, ja);
+    pruefe(XPANEL.indexOf('id="xa-pfad-copy"') > 0 && XPANEL.indexOf('id="xa-dl-hint"') > 0,
+           'Kopier-Knopf und Hinweisfeld stehen im echten Markup');
+    pruefe(!/JarvisIcons\.trash/.test(ADMIN_CODE),
+           'kein Muelleimer im Verteil-Bereich (es wird nichts geloescht)');
 
     console.log('\n' + '='.repeat(50));
     console.log('Bestanden: ' + ok + ' / Fehlgeschlagen: ' + fail);

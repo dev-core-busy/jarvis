@@ -131,12 +131,51 @@
                     if ($('sap-rfc-lang')) $('sap-rfc-lang').value = c.rfc_lang || 'EN';
                     // Freigegebene Server fuer persoenliche Zugaenge (leer = niemand)
                     if ($('sap-allowed-hosts')) $('sap-allowed-hosts').value = c.allowed_hosts || '';
+                    self._cfg = c;
+                    self._mountCert();
                     self._applyType(c.connection_type || 'odata');
                 })
                 .catch(function () {});
         },
 
+        // ── Serverzertifikat pruefen/verankern ──────────────────────────
+        // Der Baustein liegt in js/sapcert.js und wird von BEIDEN Oberflaechen
+        // benutzt (hier und in /sap). `_mountCert` ist idempotent – onShow()
+        // laeuft bei jedem Oeffnen des Reiters.
+        _cfg: {},
+        _cert: {},
+
+        _mountCert: function () {
+            var self = this;
+            if (!window.SapCert) return;
+            [['odata', 'sapcert-odata'], ['hana', 'sapcert-hana']].forEach(function (p) {
+                var kanal = p[0], box = $(p[1]);
+                if (!box) return;
+                if (!self._cert[kanal]) {
+                    self._cert[kanal] = window.SapCert.mount(box, {
+                        basis: '/api/sap/admin/cert',
+                        kanal: kanal,
+                        ziel: function () {
+                            return kanal === 'hana'
+                                ? { host: val('sap-hana-host'), port: val('sap-hana-port') || 443 }
+                                : { url: val('sap-odata-url') };
+                        },
+                        gebunden: function () { return self._cfg['cert_' + kanal] || {}; },
+                        nachAenderung: function () { self.loadConfig(); }
+                    });
+                } else {
+                    // Nach dem Neuladen der Konfiguration muss die Zustandszeile
+                    // folgen – sonst stuende dort noch der alte Anker.
+                    self._cert[kanal].refresh();
+                }
+            });
+        },
+
         _collect: function () {
+            // ACHTUNG: hier stehen bewusst KEINE `cert_*`-Felder. Der Server
+            // merged (`update_skill_config`), ein Speichern der Verbindung darf
+            // den Anker also nicht mitschreiben – sonst loescht der eine Knopf,
+            // was der andere gesetzt hat (Muster „zwei Knoepfe, zwei Teilmengen").
             return {
                 connection_type: val('sap-conn-type') || 'odata',
                 sap_product: val('sap-product'),

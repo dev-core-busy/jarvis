@@ -410,10 +410,25 @@ section("8. Quelltext: Sandbox-Listen, Endpunkte, ContextVar, Skill")
 sbx = (ROOT / "backend" / "sandbox.py").read_text(encoding="utf-8")
 for muster, label in (
         ('"data/sap_accounts.json", "data/.sapkey"', "beide Dateien in _APP_DENY_REL"),
-        ('"data/sap_accounts.json")', "sap_accounts.json in PRIVATE_FILES"),
         ('"data/.mailkey", "data/.sapkey"', ".sapkey in PRIVATE_FILES_STRENG (0600)"),
         (r"sap_accounts\.json\b|\.sapkey\b", "beide in SHELL_SECRET_PATHS")):
     check(muster in sbx, label)
+
+
+def _liste(name: str) -> str:
+    """Rumpf einer Tupel-Konstante aus sandbox.py.
+
+    Frueher stand hier `'"data/sap_accounts.json")' in sbx` – das prueft die
+    POSITION (letzter Eintrag vor der Klammer), nicht die Mitgliedschaft. Als
+    die Liste um short_tracks/claude_subagent wuchs, meldete der Test einen
+    Fehler, den es nicht gab. Eine Positionsangabe in einer Pruefung ist eine
+    Zeitbombe (gleiche Lehre wie bei der Einrueckungs-Pruefung im Mail-Test)."""
+    start = sbx.index(name + " = (")
+    return sbx[start:sbx.index(")", start)]
+
+
+check('"data/sap_accounts.json"' in _liste("PRIVATE_FILES"),
+      "sap_accounts.json in PRIVATE_FILES")
 
 mainpy = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
 check('def _sap_client(user: str = "")' in mainpy, "_sap_client nimmt den Benutzer")

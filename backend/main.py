@@ -7864,6 +7864,139 @@ async def sap_account_del(user: str = Depends(require_sap_access)):
                          "account": sap_accounts.zugang_info(user)})
 
 
+# ── SAP-Serverzertifikat pruefen und verankern ──────────────────────────────
+#
+# Sechs Endpunkte, zwei Wege mit UNTERSCHIEDLICHER Schranke:
+#   /api/sap/admin/cert/*  – `require_local_auth`, betrifft den Sammelzugang
+#   /api/sap/cert/*        – `require_sap_access`, betrifft den eigenen Zugang
+#
+# Host und Port kommen aus dem RUMPF, nicht aus der gespeicherten Konfiguration:
+# nur so laesst sich ein Zertifikat pruefen, BEVOR die Verbindung gespeichert
+# wird. Das ist eine SSRF-Flaeche – im Admin-Zweig hingenommen (dieselbe
+# Einstufung wie `/api/profiles/test`), im Benutzer-Zweig durch die
+# Host-Freigabeliste begrenzt (`sap_accounts.host_pruefen`).
+#
+# Das PEM wird NIE entgegengenommen. "Vertrauen" sendet nur den Fingerabdruck,
+# den der Mensch gesehen hat; der Server holt das Zertifikat selbst und
+# vergleicht (`sap_cert.bestaetigen`).
+
+async def _sap_cert_ziel(request: Request) -> tuple[str, str, int, dict]:
+    """``(kanal, host, port, rumpf)`` aus dem Request – wirft ``ZertFehler``."""
+    from backend import sap_cert
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    if not isinstance(body, dict):
+        raise sap_cert.ZertFehler("Ungueltiger Rumpf.")
+    kanal = str(body.get("kanal") or body.get("channel") or "odata").strip().lower()
+    host, port = sap_cert.ziel_bestimmen(kanal, body)
+    return kanal, host, port, body
+
+
+def _sap_cert_admin_setzen(kanal: str, eintrag: dict | None) -> None:
+    """Anker in der SAP-Skill-Config ablegen bzw. entfernen.
+
+    Bewusst ueber `update_skill_config` (merged): der Verbindungs-Knopf im
+    Reiter sendet die `cert_*`-Felder NICHT mit und kann sie deshalb nicht
+    ueberschreiben – dasselbe Muster wie bei `hidden_analyses`."""
+    sm = _get_skill_manager()
+    sm.update_skill_config("sap", {("cert_" + kanal): (eintrag or "")})
+
+
+@app.post("/api/sap/admin/cert/probe")
+async def sap_cert_admin_probe(request: Request, user: str = Depends(require_local_auth)):
+    """Zertifikat des SAP-Servers holen und beurteilen (Sammelzugang)."""
+    from backend import sap_cert
+    try:
+        kanal, host, port = (await _sap_cert_ziel(request))[:3]
+        erg = sap_cert.pruefen(host, port, kanal)
+    except sap_cert.ZertFehler as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    erg.pop("pem", None)      # das Zertifikat selbst braucht die Anzeige nicht
+    from backend import sap_accounts
+    return JSONResponse({"ok": True, "zert": erg,
+                         "gebunden": sap_cert.info(
+                             sap_accounts.skill_config().get("cert_" + kanal))})
+
+
+@app.post("/api/sap/admin/cert/trust")
+async def sap_cert_admin_trust(request: Request, user: str = Depends(require_local_auth)):
+    """Gezeigtes Zertifikat als Vertrauensanker des Sammelzugangs verankern."""
+    from backend import sap_cert
+    try:
+        kanal, host, port, body = await _sap_cert_ziel(request)
+        eintrag = sap_cert.bestaetigen(host, port,
+                                      str(body.get("fingerprint") or ""), kanal)
+    except sap_cert.ZertFehler as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    _sap_cert_admin_setzen(kanal, eintrag)
+    return JSONResponse({"ok": True, "kanal": kanal, "gebunden": sap_cert.info(eintrag)})
+
+
+@app.delete("/api/sap/admin/cert")
+async def sap_cert_admin_del(kanal: str = "odata", user: str = Depends(require_local_auth)):
+    """Anker des Sammelzugangs loesen – danach gilt wieder die normale Pruefung."""
+    from backend import sap_cert
+    kanal = (kanal or "").strip().lower()
+    if kanal not in sap_cert.KANAELE:
+        return JSONResponse({"ok": False, "error": "Unbekannter Kanal."}, status_code=400)
+    try:
+        _sap_cert_admin_setzen(kanal, None)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "kanal": kanal, "gebunden": {}})
+
+
+@app.post("/api/sap/cert/probe")
+async def sap_cert_probe(request: Request, user: str = Depends(require_sap_access)):
+    """Zertifikat fuer den EIGENEN Zugang pruefen (nur freigegebene Server)."""
+    from backend import sap_accounts, sap_cert
+    try:
+        kanal, host, port = (await _sap_cert_ziel(request))[:3]
+        sap_accounts.host_pruefen(host)
+        erg = sap_cert.pruefen(host, port, kanal)
+    except (sap_cert.ZertFehler, sap_accounts.SapKontoFehler) as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    erg.pop("pem", None)
+    return JSONResponse({"ok": True, "zert": erg,
+                         "account": sap_accounts.zugang_info(user)})
+
+
+@app.post("/api/sap/cert/trust")
+async def sap_cert_trust(request: Request, user: str = Depends(require_sap_access)):
+    """Zertifikat im eigenen Zugang verankern."""
+    from backend import sap_accounts, sap_cert
+    try:
+        kanal, host, port, body = await _sap_cert_ziel(request)
+        info = sap_accounts.zertifikat_binden(
+            user, kanal, host, port, str(body.get("fingerprint") or ""))
+    except (sap_cert.ZertFehler, sap_accounts.SapKontoFehler) as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "kanal": kanal, "account": info})
+
+
+@app.delete("/api/sap/cert")
+async def sap_cert_del(kanal: str = "odata", user: str = Depends(require_sap_access)):
+    """Eigenen Anker loesen."""
+    from backend import sap_accounts
+    try:
+        info = sap_accounts.zertifikat_loesen(user, (kanal or "").strip().lower())
+    except sap_accounts.SapKontoFehler as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "kanal": kanal, "account": info})
+
+
 def _sap_hidden_analyses() -> list:
     """Vom Administrator ausgeblendete Analysen (*Einstellungen → SAP*).
 

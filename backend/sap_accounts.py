@@ -23,10 +23,17 @@ Deshalb gibt es die **Host-Freigabeliste** des Administrators
 **leer = niemand**, der bereits konfigurierte Server des Administrators gilt
 **implizit** als erlaubt.
 
-**Was der Benutzer NICHT setzen darf:** die Zertifikatspruefung
+**Was der Benutzer NICHT setzen darf:** das ABSCHALTEN der Zertifikatspruefung
 (``verify_ssl``/``hana_ssl_validate``) und ``read_only``. Ein freier Host PLUS
 abgeschaltete Zertifikatspruefung waere eine Einladung zum
-Man-in-the-Middle; die TLS-Vorgabe bleibt Sache des Administrators. Read-only
+Man-in-the-Middle; die TLS-Vorgabe bleibt Sache des Administrators.
+
+**Ein Serverzertifikat VERANKERN darf er dagegen sehr wohl** (seit 2026-08-23,
+``zertifikat_binden`` / ``backend/sap_cert.py``): dabei wird die Pruefung nicht
+abgeschaltet, sondern auf genau ein Zertifikat festgelegt – strenger als der
+System-Vertrauensspeicher. Ohne diesen Weg haette ein Benutzer mit eigenem
+Server und selbst ausgestelltem Zertifikat gar keine Loesung ausser der Bitte an
+den Administrator, die Pruefung fuer ALLE abzuschalten. Read-only
 ist ohnehin hart im ``sap_client`` erzwungen (OData nur GET, SQL nur
 SELECT/WITH, RFC nur Whitelist-Bausteine) – unabhaengig davon, woher die
 Zugangsdaten kommen.
@@ -416,6 +423,90 @@ def _hosts_im_zugang(k: dict) -> list[str]:
     return [h] if h else []
 
 
+# ── Verankerte Serverzertifikate ────────────────────────────────────────────
+#
+# Verankern ist ausdruecklich KEINE Aufweichung: die Pruefung bleibt an, es gilt
+# genau ein Zertifikat. Deshalb darf der Benutzer es selbst tun, waehrend
+# `verify_ssl` (= Pruefung ABschalten) weiterhin nur der Administrator setzt.
+#
+# **Das PEM kommt nie aus dem Request** – `sap_cert.bestaetigen` holt das
+# Zertifikat selbst und vergleicht den Fingerabdruck, den der Mensch gesehen
+# hat. Genau deshalb stehen `cert_odata`/`cert_hana` NICHT in `AENDERBAR`: ueber
+# `speichern()` liesse sich sonst ein beliebiger Vertrauensanker einschleusen.
+
+def _cert_ansicht(k: dict) -> dict:
+    """Was die Oberflaeche ueber die Anker erfaehrt (eigener + Administrator)."""
+    from backend import sap_cert
+    c = skill_config()
+    out = {}
+    for kanal in sap_cert.KANAELE:
+        feld = "cert_" + kanal
+        out[kanal] = {"eigen": sap_cert.info(k.get(feld)),
+                      "admin": sap_cert.info(c.get(feld))}
+    return out
+
+
+def _konto_fuer_schreiben(user: str) -> tuple[str, dict, dict]:
+    un = norm_user(user)
+    if not un:
+        raise SapKontoFehler("Kein Benutzer – Zugang kann nicht zugeordnet werden.")
+    if ":" in un:
+        raise SapKontoFehler("Fuer diese Kennung kann kein SAP-Zugang hinterlegt werden.")
+    alle = _laden()
+    return un, alle, (alle.get(un) or _leer(un))
+
+
+def host_pruefen(host: str) -> None:
+    """Dieselbe Schranke wie beim Speichern eines Zugangs (SSRF-Flaeche).
+
+    Ohne sie waere die Zertifikatspruefung ein Portscanner fuer jeden
+    SAP-freigegebenen Benutzer – man bekaeme fuer jede Adresse eine Aussage
+    darueber, ob dort TLS lauscht."""
+    erlaubt = hosts_erlaubt()
+    if host_ok(host, erlaubt):
+        return
+    raise SapKontoFehler(
+        "Der Server '%s' ist nicht freigegeben. %s" % (
+            host,
+            ("Freigegeben sind: " + ", ".join(erlaubt)) if erlaubt else
+            "Es ist bisher KEIN Server freigegeben – ein Administrator muss die "
+            "Freigabeliste unter Einstellungen → SAP fuellen (leer = niemand)."))
+
+
+def zertifikat_binden(user: str, kanal: str, host: str, port: int,
+                      fingerprint: str) -> dict:
+    """Zertifikat des Servers als Anker im EIGENEN Zugang hinterlegen."""
+    from backend import sap_cert
+    if kanal not in sap_cert.KANAELE:
+        raise SapKontoFehler("Unbekannter Kanal '%s'." % kanal)
+    host_pruefen(host)
+    un, alle, k = _konto_fuer_schreiben(user)
+    try:
+        eintrag = sap_cert.bestaetigen(host, int(port), fingerprint, kanal)
+    except sap_cert.ZertFehler as e:
+        raise SapKontoFehler(str(e)) from None
+    k["benutzer_norm"] = un
+    k["cert_" + kanal] = eintrag
+    k["geaendert"] = int(time.time())
+    alle[un] = k
+    _speichern(alle)
+    return zugang_info(user)
+
+
+def zertifikat_loesen(user: str, kanal: str) -> dict:
+    """Eigenen Anker entfernen – danach gilt wieder die normale Pruefung
+    (bzw. der Anker des Administrators, falls er auf denselben Server zeigt)."""
+    from backend import sap_cert
+    if kanal not in sap_cert.KANAELE:
+        raise SapKontoFehler("Unbekannter Kanal '%s'." % kanal)
+    un, alle, k = _konto_fuer_schreiben(user)
+    if k.pop("cert_" + kanal, None) is not None:
+        k["geaendert"] = int(time.time())
+        alle[un] = k
+        _speichern(alle)
+    return zugang_info(user)
+
+
 # ── Lesen fuer die Oberflaeche ──────────────────────────────────────────────
 
 def zugang_info(user: str) -> dict:
@@ -448,6 +539,11 @@ def zugang_info(user: str) -> dict:
         # darf, statt den Benutzer in ein 400 laufen zu lassen.
         "erlaubte_hosts": erlaubt,
         "host_ok": (not hosts) or all(host_ok(h, erlaubt) for h in hosts),
+        # Verankerte Serverzertifikate – OHNE PEM (`sap_cert.info`). Getrennt
+        # nach eigenem Anker und dem des Administrators: die Oberflaeche muss
+        # sagen koennen, WESSEN Anker gerade gilt, sonst sucht der Benutzer den
+        # Loesen-Knopf fuer etwas, das ihm gar nicht gehoert.
+        "cert": _cert_ansicht(k),
     }
     for f in TEXTFELDER:
         info[f] = k.get(f, "")
@@ -484,9 +580,11 @@ def speichern(user: str, felder: dict) -> dict:
     unbekannt = [f for f in (felder or {}) if f not in AENDERBAR]
     if unbekannt:
         raise SapKontoFehler(
-            "Unbekannte oder nicht selbst setzbare Felder: %s. Serverseitige "
-            "Vorgaben (Zertifikatspruefung, Nur-Lesen) und die Freigabeliste "
-            "pflegt der Administrator." % ", ".join(sorted(unbekannt)))
+            "Unbekannte oder nicht selbst setzbare Felder: %s. Das ABSCHALTEN "
+            "der Zertifikatspruefung, Nur-Lesen und die Freigabeliste pflegt der "
+            "Administrator; ein Serverzertifikat verankerst du ueber den Knopf "
+            "„Zertifikat pruefen\" (das ist strenger, nicht schwaecher)."
+            % ", ".join(sorted(unbekannt)))
 
     if "connection_type" in felder:
         ct = str(felder.get("connection_type") or "").strip().lower()
@@ -649,6 +747,13 @@ def _cfg_aus_zugang(k: dict) -> dict:
         "verify_ssl": c.get("verify_ssl", True),
         "hana_encrypt": c.get("hana_encrypt", True),
         "hana_ssl_validate": c.get("hana_ssl_validate", True),
+        # Verankertes Serverzertifikat: EIGENER Anker vor dem des Administrators.
+        # Der Rueckfall auf dessen Anker ist Absicht – wer denselben Server
+        # benutzt, soll ihn nicht ein zweites Mal bestaetigen muessen. Ob ein
+        # Anker ueberhaupt gilt, entscheidet der Ziel-Vergleich im sap_client
+        # (Host/Port), nicht diese Zuweisung.
+        "cert_odata": k.get("cert_odata") or c.get("cert_odata"),
+        "cert_hana": k.get("cert_hana") or c.get("cert_hana"),
     }
     for f in TEXTFELDER:
         if f == "sap_product":

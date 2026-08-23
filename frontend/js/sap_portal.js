@@ -631,6 +631,46 @@
         el.textContent = T('sap.acc_hosts', 'Freigegebene Server:') + ' ' + hosts.join(', ');
     }
 
+    // ── Serverzertifikat pruefen/verankern ──────────────────────────────
+    // Derselbe Baustein wie im Einstellungs-Reiter (js/sapcert.js), nur gegen
+    // die Benutzer-Endpunkte. Warum der Benutzer das darf, obwohl er die
+    // Pruefung nicht ABschalten darf: Verankern ist strenger, nicht schwaecher –
+    // und ohne diesen Weg haette ein eigener Server mit selbst ausgestelltem
+    // Zertifikat ueberhaupt keine Loesung.
+    var _certBoxen = {};
+
+    function accMountCert() {
+        if (!window.SapCert) return;
+        [['odata', 'sp-cert-odata'], ['hana', 'sp-cert-hana']].forEach(function (p) {
+            var kanal = p[0], box = $(p[1]);
+            if (!box) return;
+            if (!_certBoxen[kanal]) {
+                _certBoxen[kanal] = window.SapCert.mount(box, {
+                    basis: '/api/sap/cert',
+                    kanal: kanal,
+                    ziel: function () {
+                        var v = function (id) { var e = $(id); return e ? e.value.trim() : ''; };
+                        return kanal === 'hana'
+                            ? { host: v('sp-acc-hana-host'), port: v('sp-acc-hana-port') || 443 }
+                            : { url: v('sp-acc-od-url') };
+                    },
+                    gebunden: function () {
+                        return ((_account && _account.cert && _account.cert[kanal]) || {}).eigen || {};
+                    },
+                    fremd: function () {
+                        return ((_account && _account.cert && _account.cert[kanal]) || {}).admin || {};
+                    },
+                    nachAenderung: function (d) {
+                        if (d && d.account) _account = d.account;
+                        loadStatus();   // die Pille folgt der geaenderten Lage
+                    }
+                });
+            } else {
+                _certBoxen[kanal].refresh();
+            }
+        });
+    }
+
     function loadAccount() {
         fetch('/api/sap/account', { headers: authHeaders() })
             .then(function (r) { return r.ok ? r.json() : null; })
@@ -661,6 +701,7 @@
                 accApplyType(a.connection_type || '');
                 accRenderHosts();
                 accRenderState();
+                accMountCert();
                 if (a.ausgesetzt) {
                     accNote(T('sap.acc_suspended', 'Ausgesetzt nach fehlgeschlagenen Anmeldungen – '
                         + 'Kennwort prüfen und „Verbindung testen" drücken.'), 'error');

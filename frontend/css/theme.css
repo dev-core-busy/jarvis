@@ -297,3 +297,97 @@ select option:hover {
     white-space: nowrap;
     z-index: 1;
 }
+
+/* ── SAP-Serverzertifikat pruefen/verankern (frontend/js/sapcert.js) ──────────
+   Steht in theme.css und NICHT in style.css: der Baustein erscheint auf
+   /settings UND auf /sap – style.css laedt aber nur /settings und /wissen
+   (gleiche Lehre wie bei `select option`, 2026-07-29). */
+.sapcert { margin-top: 8px; }
+.sapcert-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sapcert-btn {
+    flex: 0 0 auto;                 /* .btn-primary/.btn-secondary setzen width:100% */
+    padding: 5px 12px;
+    font-size: .82rem;
+    border-radius: 7px;
+    cursor: pointer;
+    background: rgba(var(--fg-rgb), .06);
+    border: 1px solid rgba(var(--fg-rgb), .18);
+    color: var(--text-primary);
+}
+.sapcert-btn:hover:not(:disabled) { background: rgba(var(--fg-rgb), .12); }
+.sapcert-btn:disabled { opacity: .55; cursor: default; }
+.sapcert-btn.is-primary {
+    margin-top: 10px;
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+.sapcert-state { font-size: .8rem; color: var(--text-secondary); }
+.sapcert-state.is-ok { color: var(--success); }
+.sapcert-state.is-err { color: var(--danger); }
+
+/* Deckende Flaeche: der Kasten liegt ueber Formularinhalt, halbtransparent
+   scheint der Text darunter durch (Lehre von den Panels). */
+.sapcert-box {
+    margin-top: 10px;
+    padding: 10px 12px;
+    border: 1px solid rgba(var(--fg-rgb), .16);
+    border-radius: 8px;
+    background: var(--bg-secondary);
+}
+.sapcert-grid {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 4px 12px;
+    font-size: .82rem;
+}
+.sapcert-k { color: var(--text-secondary); }
+.sapcert-v { color: var(--text-primary); word-break: break-word; min-width: 0; }
+.sapcert-fp {
+    font-family: var(--font-mono, monospace);
+    font-size: .76rem;
+    word-break: break-all;          /* 71 Zeichen muessen umbrechen duerfen */
+}
+.sapcert-verdict { margin: 10px 0 0; font-size: .82rem; line-height: 1.45; }
+.sapcert-verdict.is-ok { color: var(--success); }
+.sapcert-verdict.is-warn { color: var(--warning); }
+.sapcert-verdict.is-err { color: var(--danger); }
+/* Im Hell-Modus sind die Signalfarben auf Weiss zu schwach – gemessen 2,2:1
+   (Warnung), 2,6:1 (Erfolg), 3,8:1 (Fehler). Dieser eine Satz entscheidet, ob
+   jemand ein Zertifikat verankert; er muss lesbar sein. Nur hier abgedunkelt,
+   nicht projektweit: die Signalfarben werden an vielen Stellen als Text
+   benutzt, das waere eine eigene Aufraeumaktion. */
+body.light .sapcert-verdict.is-ok { color: color-mix(in srgb, var(--success) 72%, #000); }
+body.light .sapcert-verdict.is-warn { color: color-mix(in srgb, var(--warning) 62%, #000); }
+body.light .sapcert-verdict.is-err { color: color-mix(in srgb, var(--danger) 78%, #000); }
+body.light .sapcert-state.is-ok { color: color-mix(in srgb, var(--success) 72%, #000); }
+body.light .sapcert-state.is-err { color: color-mix(in srgb, var(--danger) 78%, #000); }
+.sapcert-hint {
+    margin: 8px 0 0;
+    font-size: .76rem;
+    color: var(--text-muted, var(--text-secondary));
+    line-height: 1.4;
+}
+.sapcert-pinned {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    padding: 5px 10px;
+    border-radius: 7px;
+    border: 1px solid rgba(var(--success-rgb), .35);
+    background: rgba(var(--success-rgb), .10);
+    font-size: .78rem;
+}
+.sapcert-pinned-txt { flex: 1 1 auto; min-width: 0; word-break: break-word; }
+.sapcert-icon {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    background: none;
+    border: none;
+    padding: 2px;
+    cursor: pointer;
+    color: var(--text-secondary);
+}
+.sapcert-icon:hover { color: var(--danger); }

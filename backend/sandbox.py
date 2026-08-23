@@ -134,6 +134,11 @@ _APP_DENY_REL = (
     # data/instructions. Ein beschreibbarer Eintrag waere ein dauerhafter Kanal
     # in den System-Prompt eines Rollen-Agenten.
     "data/agent_roles.json",
+    # Verankerte SAP-Serverzertifikate (backend/sap_cert.py). Der INHALT ist
+    # oeffentlich – die SCHREIBBARKEIT ist das Problem: wer hier eine eigene CA
+    # ablegt, laesst eine SAP-Verbindung gegen einen fremden Server laufen, ohne
+    # dass die Zertifikatspruefung anschlaegt.
+    "data/sap_certs",
     # Login-Caches (main.py::_load_ad_caches): Gruppen-DNs und die Rechte-Flags
     # kb_editor/internet/**admin** aller kuerzlich angemeldeten Benutzer. Lesen
     # verraet die AD-Struktur; SCHREIBEN waere mit `{"admin": true}` der

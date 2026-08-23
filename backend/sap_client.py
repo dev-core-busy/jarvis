@@ -123,6 +123,29 @@ def assert_read_only_sql(sql: str) -> str:
     return core
 
 
+# ── Verankertes Serverzertifikat ─────────────────────────────────────
+#
+# Der Anker kommt aus derselben Konfiguration wie alles andere: `cert_odata`
+# bzw. `cert_hana` (Admin-Anker aus der Skill-Config, persoenlicher Anker legt
+# `sap_accounts._cfg_aus_zugang` darueber). Fehlt das Modul oder passt der Anker
+# nicht zum Ziel, bleibt es exakt beim bisherigen Verhalten.
+
+def _verify_odata(cfg: dict, basis: str):
+    """``verify``-Wert fuer ``requests``: Pfad zum Anker-Buendel, sonst bool."""
+    if not cfg.get("cert_odata"):
+        return bool(cfg.get("verify_ssl", True))
+    try:
+        from backend import sap_cert
+        host, port = sap_cert.ziel_bestimmen("odata", {"url": basis})
+        return sap_cert.verify_fuer(cfg, "cert_odata", host, port)
+    except Exception:  # noqa: BLE001
+        # Laesst sich das Ziel gar nicht bestimmen (kaputte URL), ist auch nicht
+        # entscheidbar, ob der Anker gilt -> es bleibt beim eingestellten Wert.
+        # Ein unbrauchbarer Anker AM ZIEL wird dagegen in `verify_fuer`
+        # abgefangen und dort auf die volle Pruefung gehoben, nie auf "keine".
+        return bool(cfg.get("verify_ssl", True))
+
+
 # ── OData (V2/V4) ────────────────────────────────────────────────────
 class _ODataClient:
     """Lesender OData-Zugriff (nur GET) fuer S/4HANA, Gateway, BW/4HANA."""
@@ -134,7 +157,12 @@ class _ODataClient:
         self.user = (cfg.get("username") or "").strip()
         self.password = cfg.get("password") or ""
         self.bearer = (cfg.get("bearer_token") or "").strip()
-        self.verify = bool(cfg.get("verify_ssl", True))
+        # Verankertes Serverzertifikat (backend/sap_cert.py) hat Vorrang: dann ist
+        # `verify` der Pfad zu einem Buendel mit GENAU diesem Zertifikat. Die
+        # Ziel-Pruefung (Host/Port) sitzt bewusst HIER und nicht beim Aufrufer –
+        # so kann kein Aufrufer sie umgehen, und Sammelzugang wie persoenlicher
+        # Zugang teilen sich dieselbe Entscheidung.
+        self.verify = _verify_odata(cfg, self.base)
         self.sap_client = (cfg.get("sap_client") or "").strip()  # Mandant (sap-client)
 
     @property
@@ -291,6 +319,30 @@ class _HanaClient:
         # HANA-Systeme mit selbstsigniertem Zertifikat bewusst abschaltbar.
         self.validate_cert = bool(cfg.get("hana_ssl_validate", True))
         self.schema = (cfg.get("hana_schema") or "").strip()
+        # Verankertes Zertifikat (siehe backend/sap_cert.py). Ein passender Anker
+        # SCHALTET DIE PRUEFUNG EIN, auch wenn `hana_ssl_validate` aus steht –
+        # verankern ist strenger, nicht schwaecher.
+        self.trust_pem = ""        # -> sslTrustStore
+        self.name_im_zert = ""     # -> sslHostNameInCertificate
+        anker = cfg.get("cert_hana")
+        if anker:
+            try:
+                from backend import sap_cert
+                if sap_cert.passt(anker, self.host, self.port):
+                    self.trust_pem = anker.get("pem") or ""
+                    self.validate_cert = True
+                    # Nur HANA kann einen abweichenden Namen ueberbruecken; bei
+                    # OData gibt es dafuer keinen Schalter (dort sagt die
+                    # Pruefung dem Administrator, dass er die Adresse anpassen
+                    # muss). Ohne dieses Feld scheiterte ein Zertifikat, das auf
+                    # den FQDN lautet, waehrend im Formular eine IP steht.
+                    if anker.get("name_abweichung"):
+                        self.name_im_zert = (anker.get("inhaber") or "").strip()
+            except Exception as e:  # noqa: BLE001
+                print(f"[SAP] HANA-Anker unbrauchbar ({e}) – normale Pruefung",
+                      flush=True)
+                self.trust_pem = ""
+                self.validate_cert = True
 
     @property
     def configured(self) -> bool:
@@ -302,6 +354,16 @@ class _HanaClient:
         except ImportError:
             raise SapError(0, "hdbcli ist nicht installiert. Bitte den SAP-Skill "
                               "(neu) aktivieren, damit die Abhaengigkeit installiert wird.")
+        # `sslTrustStore` nimmt das Zertifikat als PEM entgegen (OpenSSL-Provider,
+        # Standard unter Linux). Nur mitgeben, wenn wirklich ein Anker gilt –
+        # ein leerer Wert wuerde die Vorgabe des Treibers ueberschreiben.
+        # ⚠ NICHT end-to-end geprueft: auf DEV gibt es kein HANA. Belegt ist,
+        # dass genau diese Parameter zusammengebaut und uebergeben werden.
+        extra = {}
+        if self.trust_pem:
+            extra["sslTrustStore"] = self.trust_pem
+            if self.name_im_zert:
+                extra["sslHostNameInCertificate"] = self.name_im_zert
         try:
             conn = dbapi.connect(
                 address=self.host, port=self.port,
@@ -309,6 +371,7 @@ class _HanaClient:
                 encrypt=self.encrypt,
                 sslValidateCertificate=self.validate_cert,
                 autocommit=False,  # nichts wird jemals committed
+                **extra,
             )
         except Exception as e:  # dbapi.Error u.a.
             raise SapError(0, "HANA-Verbindung fehlgeschlagen: %s" % e)

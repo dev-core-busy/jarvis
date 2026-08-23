@@ -20,7 +20,7 @@
          Wer Inter zwingend will, muss die Dateien selbst ausliefern
          (WOFF2 unter /static/fonts + @font-face) – NICHT wieder extern. -->
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
-    <link rel="stylesheet" href="/static/css/theme.css?v=14">
+    <link rel="stylesheet" href="/static/css/theme.css?v=15">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=8">
     <link rel="stylesheet" href="/static/css/style.css?v=158">
@@ -2772,6 +2772,10 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                             <div class="form-group">
                                 <label class="checkbox-group"><input type="checkbox" id="sap-verify-ssl" checked><span>SSL-Zertifikat prüfen</span></label>
+                                <!-- Der Baustein rendert sich selbst (js/sapcert.js) – hier steht
+                                     bewusst nur der Anker, damit beide Oberflaechen dieselbe
+                                     Fassung benutzen. -->
+                                <div class="sapcert" id="sapcert-odata"></div>
                             </div>
                         </div>
 
@@ -2807,6 +2811,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <div class="form-group">
                                 <label class="checkbox-group"><input type="checkbox" id="sap-hana-encrypt" checked><span>Verbindung verschlüsseln (TLS)</span></label>
                                 <label class="checkbox-group"><input type="checkbox" id="sap-hana-validate" checked><span>Serverzertifikat prüfen</span></label>
+                                <div class="sapcert" id="sapcert-hana"></div>
                             </div>
                         </div>
 
@@ -4695,7 +4700,9 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/vision.js?v=31"></script>
     <script src="/static/js/confluence.js?v=7"></script>
     <script src="/static/js/jira.js?v=7"></script>
-    <script src="/static/js/sap.js?v=3"></script>
+    <!-- sapcert.js VOR sap.js: der Reiter haengt den Baustein beim Laden ein. -->
+    <script src="/static/js/sapcert.js?v=1"></script>
+    <script src="/static/js/sap.js?v=4"></script>
     <script src="/static/js/email.js?v=4"></script>
     <script src="/static/js/short_tracks_admin.js?v=2"></script>
     <script src="/static/js/kundenverwaltung.js?v=6"></script>

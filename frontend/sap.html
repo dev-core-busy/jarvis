@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SAP-Analysen</title>
-    <link rel="stylesheet" href="/static/css/theme.css?v=14">
+    <link rel="stylesheet" href="/static/css/theme.css?v=15">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=8">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
@@ -484,6 +484,11 @@
                                    data-i18n-placeholder="sap.acc_pass_ph" placeholder="leer = unverändert">
                         </div>
                     </div>
+                    <!-- Zertifikat pruefen/verankern – derselbe Baustein wie im
+                         Einstellungs-Reiter (js/sapcert.js). KEIN `.sp-row`: die
+                         Klasse setzt display:flex und wuerde `hidden` an den
+                         Kindern ueberstimmen. -->
+                    <div class="sapcert" id="sp-cert-odata"></div>
                 </div>
 
                 <!-- HANA -->
@@ -514,6 +519,7 @@
                                    data-i18n-placeholder="sap.acc_pass_ph" placeholder="leer = unverändert">
                         </div>
                     </div>
+                    <div class="sapcert" id="sp-cert-hana"></div>
                 </div>
 
                 <!-- RFC -->
@@ -632,7 +638,10 @@
 <script src="/static/js/vendor/chartjs-plugin-annotation.min.js?v=1"></script>
 <script src="/static/js/charts.js?v=4"></script>
 <script src="/static/js/mermaid_blocks.js?v=1"></script>
-<script src="/static/js/sap_portal.js?v=4"></script>
+<!-- sapcert.js VOR sap_portal.js: die Benutzerkachel haengt den Baustein
+     beim Laden des Zugangs ein. -->
+<script src="/static/js/sapcert.js?v=1"></script>
+<script src="/static/js/sap_portal.js?v=5"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist).
      Der Ein/Aus-Schalter baut sich selbst und haengt sich VOR
      #btn-theme-toggle – deshalb muss der Theme-Knopf diese Id tragen. -->

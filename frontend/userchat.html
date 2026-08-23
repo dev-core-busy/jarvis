@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Jarvis – Benutzer-Chat</title>
-    <link rel="stylesheet" href="/static/css/theme.css?v=14">
+    <link rel="stylesheet" href="/static/css/theme.css?v=15">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=8">
     <link rel="stylesheet" href="/static/css/chat.css?v=45">
@@ -773,7 +773,7 @@
                 </svg>
             </a>
             <!-- Setup/Einstellungen: nur fuer Admins, direkt vor Logout -->
-            <button class="btn-theme" id="btn-uc-settings" data-i18n-title="nav.settings" title="Einstellungen" style="display:none;">
+            <button class="btn-theme" id="btn-uc-settings" data-jarvis-settings="/userchat" data-i18n-title="nav.settings" title="Einstellungen" style="display:none;">
                 <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
             </button>
             <button id="btn-uc-logout" class="btn-logout" title="Abmelden">
@@ -920,7 +920,8 @@
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/security_incidents.js?v=13"></script>
 <script src="/static/js/sessions.js?v=4"></script>
-<script src="/static/js/userchat.js?v=43"></script>
+<script src="/static/js/userchat.js?v=44"></script>
+<script src="/static/js/settings_btn.js?v=1"></script>
 <!-- Nur Mermaid, KEIN Chart.js: /userchat ist Mensch-zu-Mensch, hier
      entstehen keine LLM-Antworten mit Datenreihen. Der Renderer (chatlib.js)
      erzeugt aber auch hier einen Platzhalter, wenn jemand einen

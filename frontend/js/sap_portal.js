@@ -73,16 +73,6 @@
                 // auf der jeder Knopf 403 liefert.
                 var may = !!(me.permissions && me.permissions.sap);
                 if (!may) { toPortal(); return; }
-                if (me.is_admin) {
-                    var sb = $('sp-settings-btn');
-                    if (sb) {
-                        sb.style.display = '';
-                        sb.addEventListener('click', function () {
-                            try { sessionStorage.setItem('jarvis_settings_return', '/sap'); } catch (e) {}
-                            window.location.href = '/settings';
-                        });
-                    }
-                }
                 showApp();
             })
             .catch(function () { toPortal(); });

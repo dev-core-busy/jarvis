@@ -334,7 +334,7 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
             </a>
             <!-- Einstellungen: nur fuer Admins (dort werden die Zugangsdaten gepflegt) -->
-            <button class="btn-theme" id="sp-settings-btn" data-i18n-title="nav.settings" title="Einstellungen" style="display:none;">
+            <button class="btn-theme" id="sp-settings-btn" data-jarvis-settings="/sap" data-i18n-title="nav.settings" title="Einstellungen" style="display:none;">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
             </button>
             <button class="btn-theme" id="sp-logout-btn" data-i18n-title="chat.logout" title="Abmelden">
@@ -641,7 +641,8 @@
 <!-- sapcert.js VOR sap_portal.js: die Benutzerkachel haengt den Baustein
      beim Laden des Zugangs ein. -->
 <script src="/static/js/sapcert.js?v=1"></script>
-<script src="/static/js/sap_portal.js?v=5"></script>
+<script src="/static/js/sap_portal.js?v=6"></script>
+<script src="/static/js/settings_btn.js?v=1"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist).
      Der Ein/Aus-Schalter baut sich selbst und haengt sich VOR
      #btn-theme-toggle – deshalb muss der Theme-Knopf diese Id tragen. -->

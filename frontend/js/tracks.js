@@ -262,20 +262,12 @@
     }
 
     /* ── Status laden ──────────────────────────────────────────────────── */
-    // Zahnrad nur fuer Administratoren – dort werden Skill, Freigabe und die
-    // Werkzeug-Bereiche gepflegt. Der Rueckweg wird gemerkt, damit /settings
-    // zurueckfindet (gleiches Muster wie /sap, /support, /wissen).
-    function zeichneAdminKnopf() {
-        var b = document.getElementById('st-settings-btn');
-        if (!b || !_istAdmin) return;
-        b.style.display = '';
-        if (b.dataset.gebunden) return;
-        b.dataset.gebunden = '1';
-        b.addEventListener('click', function () {
-            try { sessionStorage.setItem('jarvis_settings_return', '/tracks'); } catch (e) { /* egal */ }
-            location.href = '/settings';
-        });
-    }
+    // Das Einstellungs-Zahnrad wird NICHT hier eingeblendet, sondern zentral von
+    // `settings_btn.js` aus `/api/me`. Grund: es hing an `ist_admin` aus
+    // `/api/tracks/status`, und dieser Abruf antwortet fuer einen Administrator
+    // OHNE Bereichs-Freigabe mit 403 – der Knopf fehlte damit genau dann, wenn
+    // er gebraucht wird, denn die Freigabe wird in den Einstellungen gepflegt.
+    // `_istAdmin` bleibt: es steuert, wer GLOBALE Ablagen aendern darf.
 
     function ladeStatus() {
         return hole('/api/tracks/status?lang=' + sprache()).then(function (d) {
@@ -285,7 +277,6 @@
             _bereicheLang = sprache();
             _grenzen = d.grenzen || {};
             _istAdmin = !!d.ist_admin;
-            zeichneAdminKnopf();
             zeichneBrett();
         }).catch(function (e) {
             melde('st-board-status', e.message, 'fehler');

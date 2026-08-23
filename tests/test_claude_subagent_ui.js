@@ -639,20 +639,26 @@ async function baueSeite(zustand) {
                   < quelle.indexOf(`id="${pfx}-logout-btn"`),
                   `${name}: steht vor dem Abmelden-Knopf`);
         }
-        // Verdrahtung: eingeblendet nur bei is_admin, Rueckweg gemerkt.
-        for (const [js, ret] of [['frontend/js/claude_portal.js', '/claude'],
-                                 ['frontend/js/tracks.js', '/tracks'],
-                                 ['frontend/js/email_portal.js', '/email'],
-                                 ['frontend/js/excel_portal.js', '/excel']]) {
-            const q = fs.readFileSync(path.join(ROOT, js), 'utf8');
-            check(/settings-btn/.test(q), `${path.basename(js)}: verdrahtet das Zahnrad`);
-            check(q.indexOf(`'jarvis_settings_return', '${ret}'`) >= 0,
-                  `${path.basename(js)}: merkt den Rueckweg ${ret}`);
-            // Zwei Schreibweisen sind richtig: `ist_admin` kommt aus den
-            // Bereichs-Endpunkten (/api/claude|tracks/status), `is_admin` aus
-            // /api/me. Beides gattert denselben Knopf.
-            check(/\bist?_admin\b|_istAdmin\b/.test(q),
-                  `${path.basename(js)}: blendet es nur fuer Administratoren ein`);
+        /* VERDRAHTUNG LIEGT SEIT 2026-08-23 ZENTRAL in js/settings_btn.js.
+         *
+         * Dieser Abschnitt verlangte vorher das GEGENTEIL: jedes Seiten-Skript
+         * musste den Knopf selbst verdrahten, und der Kommentar erklaerte
+         * `ist_admin` aus den Bereichs-Endpunkten ausdruecklich als richtig.
+         * Genau das war der Fehler – scheitert dieser Abruf (403 ohne
+         * Bereichs-Freigabe, Zeitlimit), lief die Einblendung nie, und der
+         * Administrator hatte keinen Weg in die Einstellungen, wo die Freigabe
+         * gesetzt wird. Ein Test, der ein ueberholtes Verhalten festschreibt,
+         * meldet spaeter einen Fehler, den es nicht gibt.
+         *
+         * Die Regel selbst prueft `tests/test_settings_btn.js` (Konvention
+         * `data-jarvis-settings` + /api/me + keine Doppelverdrahtung); hier
+         * bleibt nur die Zusicherung, dass diese beiden Seiten mitziehen. */
+        for (const [name, quelle, ret] of [['claude.html', ownQ, '/claude'],
+                                           ['tracks.html', refQ, '/tracks']]) {
+            check(quelle.indexOf(`data-jarvis-settings="${ret}"`) >= 0,
+                  `${name}: deklariert den Rueckweg ${ret} am Knopf`);
+            check(/<script[^>]+js\/settings_btn\.js/.test(quelle),
+                  `${name}: bindet die zentrale Verdrahtung ein`);
         }
     }
 

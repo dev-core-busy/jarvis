@@ -60,20 +60,8 @@
         if (c) c.classList.add('hidden');
     }
 
-    // Zahnrad nur fuer Administratoren – dort werden Freigabe und Skill
-    // gepflegt. Der Rueckweg wird gemerkt, damit /settings zurueckfindet
-    // (gleiches Muster wie /sap, /support, /wissen, /tracks, /claude, /email).
-    function zahnrad(istAdmin) {
-        var b = $('xp-settings-btn');
-        if (!b || !istAdmin) return;
-        b.style.display = '';
-        if (b.dataset.gebunden) return;
-        b.dataset.gebunden = '1';
-        b.addEventListener('click', function () {
-            try { sessionStorage.setItem('jarvis_settings_return', '/excel'); } catch (e) { /* egal */ }
-            window.location.href = '/settings';
-        });
-    }
+    // Das Einstellungs-Zahnrad blendet `settings_btn.js` zentral aus
+    // `/api/me` ein (EINE Stelle fuer alle Bereichsseiten).
 
     function ladeVersion() {
         fetch('/api/excel-addin/version', { cache: 'no-store' })
@@ -217,7 +205,6 @@
                 // FAIL-CLOSED: fehlt `permissions` ganz (aelteres Backend),
                 // gilt "nicht freigegeben".
                 if (!(d && d.permissions && d.permissions.excel)) { sperren(''); return; }
-                zahnrad(d.is_admin);
                 var w = $('xp-noaccess');
                 if (w) w.classList.add('hidden');
                 var c = $('xp-dl-card');

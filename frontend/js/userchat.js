@@ -277,13 +277,6 @@
             fetch('/api/me', { headers: { 'Authorization': 'Bearer ' + token } })
                 .then(function (r) { return r.ok ? r.json() : null; })
                 .then(function (d) {
-                    if (d && d.is_admin) {
-                        var sb = $('btn-uc-settings');
-                        if (sb) {
-                            sb.style.display = '';
-                            sb.addEventListener('click', function () { try{sessionStorage.setItem('jarvis_settings_return','/userchat');}catch(e){} window.location.href = '/settings'; });
-                        }
-                    }
                 }).catch(function () {});
         }
     }

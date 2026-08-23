@@ -305,16 +305,6 @@
                 // Angemeldeten Benutzer als Tooltip am Logout-Button ('<user> abmelden')
                 var lo = $('sup-logout-btn');
                 if (lo && d.username) lo.title = d.username + ' abmelden';
-                if (d.is_admin) {
-                    // Profilwechsel laeuft ueber das Status-Pill-Menue (ProfileSwitcher);
-                    // die fruehere Pill-Navigation zu /settings wurde entfernt.
-                    // Setup-Button (direkt vor Logout) fuer Admins einblenden
-                    var sb = $('sup-settings-btn');
-                    if (sb) {
-                        sb.style.display = '';
-                        sb.addEventListener('click', function () { try{sessionStorage.setItem('jarvis_settings_return','/support');}catch(e){} window.location.href = '/settings'; });
-                    }
-                }
             }).catch(function () {});
         // CPU-Auslastung: cpubar.js laeuft von selbst, sobald ein Token vorliegt
         // Sprachwechsel: statische Labels via applyLang (i18n.js), dynamische Treffer neu rendern

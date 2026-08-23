@@ -320,15 +320,8 @@
         // Angemeldeter Benutzer: als Tooltip am Logout-Button ('<user> abmelden')
         const _logoutBtn = $('btn-logout');
         if (_logoutBtn && _currentUser) _logoutBtn.title = window.t('chat.logout_user').replace('{u}', _currentUser);
-        // Setup/Einstellungen-Button nur fuer Admins (direkt vor Logout)
-        const _setupBtn = $('btn-settings');
-        if (_setupBtn) {
-            _setupBtn.style.display = _isAdmin ? '' : 'none';
-            if (_isAdmin && !_setupBtn._wired) {
-                _setupBtn._wired = true;
-                _setupBtn.addEventListener('click', () => { try{sessionStorage.setItem('jarvis_settings_return','/chat');}catch(e){} window.location.href = '/settings'; });
-            }
-        }
+        // Das Einstellungs-Zahnrad blendet `settings_btn.js` zentral aus
+        // `/api/me` ein (EINE Stelle fuer alle Bereichsseiten).
         // Update-Pill nur fuer Admins (jarvis/lokaler Admin) einblenden + starten
         const _updWrap = $('chat-update-wrap');
         if (_isAdmin && _updWrap) {

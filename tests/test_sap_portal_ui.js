@@ -190,6 +190,10 @@ function loadScript(dom, rel) {
     loadScript(dom, 'js/i18n.js');
     loadScript(dom, 'js/chatlib.js');
     loadScript(dom, 'js/sap_portal.js');
+    // Das Zahnrad wird seit 2026-08-23 zentral aus /api/me eingeblendet
+    // (js/settings_btn.js). Ohne dieses Skript im Aufbau prueft der Test eine
+    // Kette, die die echte Seite nicht mehr hat.
+    loadScript(dom, 'js/settings_btn.js');
     await sleep(120);
     const doc = dom.window.document;
     const $ = (id) => doc.getElementById(id);

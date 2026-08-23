@@ -36,18 +36,11 @@
         $('wi-logout').classList.remove('hidden');
         var d = $('wi-status-dot'); if (d) d.classList.remove('hidden');
         var c = $('cpu-bar'); if (c) c.classList.remove('hidden');
-        // Einstellungen-Zahnrad nur fuer Admins (zweites von rechts, vor Logout)
-        var setBtn = $('wi-settings');
-        if (setBtn) {
-            setBtn.classList.toggle('hidden', !SCOPE.is_admin);
-            if (SCOPE.is_admin && !setBtn._wired) {
-                setBtn._wired = true;
-                setBtn.addEventListener('click', function () {
-                    try { sessionStorage.setItem('jarvis_settings_return', '/wissen'); } catch (e) {}
-                    window.location.href = '/settings';
-                });
-            }
-        }
+        // Das Einstellungs-Zahnrad blendet `settings_btn.js` zentral aus
+        // `/api/me` ein – nicht hier. Es hing an `is_admin` aus
+        // `/api/wissen/scope`; scheitert dieser Abruf (403, Zeitlimit), lief die
+        // Einblendung nie, und der Administrator hatte keinen Weg in die
+        // Einstellungen.
         mountProfile();
         startLlmStatus();
     }

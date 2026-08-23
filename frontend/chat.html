@@ -7,7 +7,7 @@
          bleibt dadurch immer sichtbar. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
     <title>Jarvis Chat</title>
-    <link rel="stylesheet" href="/static/css/theme.css?v=14">
+    <link rel="stylesheet" href="/static/css/theme.css?v=15">
     <link rel="stylesheet" href="/static/css/chat.css?v=45">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=6">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
@@ -142,7 +142,7 @@
                  Der Dialog #cert-modal bleibt: er wird vom Sicherheits-Banner
                  und vom Schild-Symbol geoeffnet, wenn die Verbindung unsicher ist. -->
             <!-- Setup/Einstellungen: nur fuer Admins, direkt vor Logout -->
-            <button class="btn-theme" id="btn-settings" data-i18n-title="nav.settings" title="Einstellungen" style="display:none;">
+            <button class="btn-theme" id="btn-settings" data-jarvis-settings="/chat" data-i18n-title="nav.settings" title="Einstellungen" style="display:none;">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
             </button>
             <button class="btn-logout" id="btn-logout" title="Abmelden">
@@ -346,7 +346,7 @@ sudo update-ca-certificates</code></pre>
 <script src="/static/js/kbgroupfilter.js?v=7"></script>
 <script src="/static/js/profile_switcher.js?v=5"></script>
 <script src="/static/js/sessions.js?v=4"></script>
-<script src="/static/js/chat.js?v=99"></script>
+<script src="/static/js/chat.js?v=100"></script>
 <!-- Interaktive Charts (```chartjs) – Chart.js lokal gevendort (CSP: kein CDN) -->
 <script src="/static/js/vendor/chart.umd.min.js?v=1"></script>
 <!-- Chart.js-Plugins (MIT). MUESSEN nach chart.umd.min.js kommen – ihre
@@ -356,6 +356,7 @@ sudo update-ca-certificates</code></pre>
 <script src="/static/js/vendor/chartjs-plugin-annotation.min.js?v=1"></script>
 <script src="/static/js/charts.js?v=4"></script>
 <script src="/static/js/mermaid_blocks.js?v=1"></script>
+<script src="/static/js/settings_btn.js?v=1"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

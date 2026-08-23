@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Jarvis – Start</title>
-    <link rel="stylesheet" href="/static/css/theme.css?v=14">
+    <link rel="stylesheet" href="/static/css/theme.css?v=15">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=8">
     <link rel="stylesheet" href="/static/css/update_widget.css?v=3">
@@ -356,7 +356,7 @@
         <a class="pt-btn" href="/api/cert" download data-i18n-title="chat.ssl_cert" title="SSL-Zertifikat" style="text-decoration:none;">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
         </a>
-        <button class="pt-btn" id="pt-settings" title="Einstellungen" data-i18n-title="nav.settings" style="display:none;">
+        <button class="pt-btn" id="pt-settings" data-jarvis-settings="/portal" title="Einstellungen" data-i18n-title="nav.settings" style="display:none;">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </button>
         <button class="pt-btn" id="pt-logout" title="Abmelden" data-i18n-title="chat.logout">
@@ -594,6 +594,7 @@ sudo update-ca-certificates</code></pre>
 <script src="/static/js/info_files.js?v=3"></script>
 <script src="/static/js/sessions.js?v=8"></script>
 <script src="/static/js/vnc.js?v=18"></script>
+<script src="/static/js/settings_btn.js?v=1"></script>
 <script>
 (function () {
     var KEYS = ['jarvis_token', 'jarvis_chat_token', 'jarvis_uc_token'];
@@ -680,8 +681,7 @@ sudo update-ca-certificates</code></pre>
             }
         }
         if (d.is_admin) {
-            var s = document.getElementById('pt-settings');
-            if (s) { s.style.display = ''; s.addEventListener('click', function(){ try{sessionStorage.setItem('jarvis_settings_return','/portal');}catch(e){} window.location.href = '/settings'; }); }
+            // Das Zahnrad blendet `settings_btn.js` zentral aus /api/me ein.
             // Versions-/Update-Pill (Admin) – verschoben von /chat
             var uw = document.getElementById('chat-update-wrap');
             if (uw) { uw.style.display = ''; if (window.JarvisUpdateWidget) window.JarvisUpdateWidget.init(); }

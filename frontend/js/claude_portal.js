@@ -210,23 +210,13 @@
         box.hidden = false;
     }
 
-    // Zahnrad nur fuer Administratoren – dort werden Skill und Freigabe
-    // gepflegt. Der Rueckweg wird gemerkt, damit /settings zurueckfindet
-    // (gleiches Muster wie /sap, /support, /wissen).
-    function zeichneAdminKnopf() {
-        var b = $('cs-settings-btn');
-        if (!b || !(_status && _status.ist_admin)) return;
-        b.style.display = '';
-        if (b.dataset.gebunden) return;
-        b.dataset.gebunden = '1';
-        b.addEventListener('click', function () {
-            try { sessionStorage.setItem('jarvis_settings_return', '/claude'); } catch (e) { /* egal */ }
-            location.href = '/settings';
-        });
-    }
+    // Das Einstellungs-Zahnrad wird zentral von `settings_btn.js` aus `/api/me`
+    // eingeblendet – NICHT hier. Es hing an `ist_admin` aus
+    // `/api/claude/status`; dieser Abruf antwortet fuer einen Administrator ohne
+    // Bereichs-Freigabe mit 403, und damit fehlte der Knopf ausgerechnet auf dem
+    // Weg zu der Einstellung, die die Freigabe setzt.
 
     function zeichne() {
-        zeichneAdminKnopf();
         zeichneSchluessel();
         zeichneModell();
         zeichneJobs();
@@ -245,10 +235,22 @@
         return hole('/api/claude/status').then(function (r) {
             if (r.status === 401) { location.href = '/'; return null; }
             if (r.status === 403) {
+                // Die Absage ersetzt die Seite – dabei geht der Zahnrad-Knopf
+                // mit. Fuer einen Administrator ist das aber genau der Moment,
+                // in dem er in die Einstellungen will: DORT wird die Freigabe
+                // gesetzt. Eine Absage ohne Weg zur Abhilfe ist nur Laerm
+                // (dieselbe Regel wie beim Lizenz-Banner im Portal). Deshalb
+                // traegt die Seite einen Knopf mit `data-jarvis-settings`, den
+                // `settings_btn.js` fuer Administratoren einblendet.
                 document.body.innerHTML = '<div style="padding:40px;text-align:center;'
                     + 'font-family:var(--font-body);color:var(--text-primary)">'
                     + esc(T('csub.no_access', 'Kein Zugriff auf diesen Bereich. Ein Administrator kann dich unter Einstellungen → Sicherheit → Berechtigungen freischalten.'))
+                    + '<div style="margin-top:20px"><button class="btn-theme" '
+                    + 'data-jarvis-settings="/claude" data-i18n-title="nav.settings" '
+                    + 'title="Einstellungen" style="display:none;width:auto;padding:8px 16px">'
+                    + esc(T('nav.settings', 'Einstellungen')) + '</button></div>'
                     + '</div>';
+                if (window.JarvisSettingsBtn) window.JarvisSettingsBtn.pruefe();
                 return null;
             }
             return r.json();

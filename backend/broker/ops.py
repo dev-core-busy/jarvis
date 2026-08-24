@@ -264,7 +264,20 @@ def _op_sandbox_exec(args, stream):
               flush=True)
         lauf_dir = None
         wrapped = "runuser -u %s -- /bin/bash -c %s" % (shlex.quote(user), shlex.quote(command))
-    return _stream_shell(wrapped, str(lauf_dir) if lauf_dir else "/tmp", timeout, stream)
+    res = _stream_shell(wrapped, str(lauf_dir) if lauf_dir else "/tmp", timeout, stream)
+    # DIE ANTWORT SAGT, OB ISOLIERT WURDE – und das ist keine Statistik, sondern
+    # eine Zusage, auf die das Backend seine Pfad-Uebersetzung stuetzt.
+    # Der Broker ist ein EIGENER Prozess mit eigener Kopie dieses Moduls; laeuft
+    # er noch mit einer Fassung von vor dem /tmp-Umbau, nimmt er `arbeit` klaglos
+    # an und ignoriert es. Dann FEHLT dieses Feld – und genau das Fehlen ist die
+    # Aussage "nein" (siehe lauf_tmp.melde_ausfuehrung). Vorfall 2026-08-24:
+    # ohne diese Rueckmeldung suchte die Auslieferung Ergebnisdateien im
+    # Lauf-Verzeichnis, waehrend die Shell ins gemeinsame /tmp schrieb.
+    try:
+        res["isolation"] = bool(lauf_dir)
+    except Exception:  # noqa: BLE001
+        pass
+    return res
 
 
 def _op_shell_root(args, stream):

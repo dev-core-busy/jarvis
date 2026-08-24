@@ -2135,7 +2135,8 @@ KRITISCH – Autonomie-Regeln:
                                      "Nachschlag wird geholt.")
                         _conv_messages.append({"role": "assistant", "content": text.strip()})
                         # In der Antwort genannte Dokumente (auch /tmp-Pfade) als Chip ausliefern
-                        await self._deliver_docs(ws, text, _delivered_docs, username, since=_task_start_time)
+                        await self._deliver_docs(ws, text, _delivered_docs, username,
+                                                 since=_task_start_time, melden=True)
 
                 # Wenn keine Function Calls → fertig; User+Antwort in History eintragen
                 if not function_calls:
@@ -3998,7 +3999,7 @@ KRITISCH – Autonomie-Regeln:
                 "fehlenden Teil, statt den Rest zu erraten.]" % (grenze, len(text)))
 
     async def _deliver_docs(self, ws, text, delivered, username: str = "",
-                            since: float = 0.0):
+                            since: float = 0.0, melden: bool = False):
         """Liefert erzeugte Office-Dokumente als Download-Chip ans Frontend –
         UNABHAENGIG davon, ob sie via office_*-Tool oder per Shell-Skript (z.B.
         python-pptx fuer Diagramme) erzeugt wurden.
@@ -4009,6 +4010,12 @@ KRITISCH – Autonomie-Regeln:
               nach data/documents/ mit Capability-Namen kopiert.
         Sendet je Fund EINEN Markdown-Download-Link (highlight) -> Frontend-Chip.
         Verlaesst sich NICHT auf woertliche URL-Wiedergabe durch das LLM.
+
+        ``melden=True`` sagt dem Aufrufer-Kontext "das hier ist der letzte Text
+        dieses Laufs": nur dann wird ein VERFEHLTER Liefer-Marker dem Benutzer
+        gemeldet. Bei einem Werkzeug-Ergebnis waere die Meldung verfrueht – die
+        Datei kann einen Schritt spaeter noch entstehen, und dann stuenden
+        Warnung und Chip gleichzeitig im Chat.
 
         ``since`` = Startzeit des Laufs (``time.time()``). Fuer die BEIDEN
         namensratenden Pfade (b) und (c) gilt: nur ausliefern, was in diesem Lauf
@@ -4151,24 +4158,50 @@ KRITISCH – Autonomie-Regeln:
         # den der Agent bewusst zur Auslieferung markiert. Sicherheit: nur aus
         # agent-schreibbaren Verzeichnissen (/tmp, data/documents) und niemals
         # offensichtliche Secrets (schuetzt vor Prompt-Injection-Exfiltration).
+        # VERFEHLTE Marker werden gesammelt und dem Benutzer gemeldet. Bis
+        # 2026-08-24 brach dieser Zweig bei einer fehlenden Datei mit einem
+        # nackten `continue` ab – ohne Journal-Zeile und ohne jede Spur im Chat.
+        # Weil `_clean_doc_refs` den Marker aus dem Anzeigetext entfernt, blieb
+        # genau der Satz stehen, der auf ihn verwies: "nutze diesen Link:" und
+        # dahinter nichts. Der Chip IST der einzige Weg zur Datei; faellt er aus,
+        # muss der Benutzer das ERFAHREN – eine Antwort, die auf einen
+        # unsichtbaren Link zeigt, ist schlimmer als eine Fehlermeldung.
+        _verfehlt = []
+
+        def _verfehlt_merken(rohpfad: str, anzeige: str, grund: str) -> None:
+            # Journal IMMER – der Grund ist die Diagnose, und sie fehlte bisher
+            # vollstaendig. Das Dedup-Set nur beim meldenden Aufruf: ein frueher
+            # gesetzter Merker wuerde sonst die Meldung am Ende unterdruecken.
+            _log(f"Liefer-Marker OHNE Auslieferung ({grund}): roh={rohpfad!r} "
+                 f"host={_hostpfad(rohpfad)!r}")
+            if not melden:
+                return
+            schluessel = "miss:" + rohpfad
+            if schluessel in delivered:
+                return
+            delivered.add(schluessel)
+            _verfehlt.append(_os.path.basename(anzeige or rohpfad) or rohpfad)
+
         for mk in re.finditer(r"\[\[JARVIS_DELIVER:\s*([^\]|]+?)\s*(?:\|\s*([^\]]+?)\s*)?\]\]", text):
             raw = mk.group(1).strip()
             disp_name = (mk.group(2) or "").strip()
             p = _hostpfad(raw)
             try:
                 if not p.is_file():
+                    _verfehlt_merken(raw, disp_name, "Datei nicht vorhanden")
                     continue
                 rp = p.resolve()
                 key = str(rp)
-            except Exception:
+            except Exception as e:
+                _verfehlt_merken(raw, disp_name, f"Pfad nicht aufloesbar: {e}")
                 continue
             # Nur agent-schreibbare Orte – NICHT Projekt-Root/cwd (dort liegt z.B. .env)
             if not (rp == _docs_root or _docs_root in rp.parents or _unter_arbeit(rp)):
-                _log(f"Liefer-Marker abgelehnt (Ort): {raw}")
+                _verfehlt_merken(raw, disp_name, "Ort nicht erlaubt")
                 continue
             ext = rp.suffix.lower().lstrip(".")
             if _ist_geheim(rp):
-                _log(f"Liefer-Marker abgelehnt (Secret): {rp.name}")
+                _verfehlt_merken(raw, disp_name, "Secret")
                 continue
             if key in delivered:
                 continue
@@ -4185,9 +4218,22 @@ KRITISCH – Autonomie-Regeln:
                 docs_dir.mkdir(parents=True, exist_ok=True)
                 _ingest(p, docs_dir / fname)
             except Exception as e:
-                _log(f"Liefer-Marker Ingest fehlgeschlagen fuer {raw}: {e}")
+                _verfehlt_merken(raw, disp_name, f"Ingest fehlgeschlagen: {e}")
                 continue
             await _emit(f"{base}.{safe_ext}", f"/api/documents/{fname}")
+
+        if _verfehlt:
+            # Sichtbar wie ein Chip (highlight), damit der Hinweis dort steht, wo
+            # der Benutzer den Download erwartet. Ohne Pfad im Text: er waere
+            # fuer ihn nicht erreichbar und wuerde nur zum naechsten Fehlversuch
+            # einladen.
+            _liste = ", ".join(dict.fromkeys(_verfehlt))
+            await self._send_status(
+                ws,
+                f"⚠️ Konnte nicht zum Download bereitgestellt werden: {_liste}. "
+                "Ein im Text genannter Link führt ins Leere – bitte die Datei "
+                "erneut erzeugen lassen.",
+                highlight=True)
 
         # (b) Lokale Dateipfade zu AGENT-ERZEUGTEN Dokumenten -> nach data/documents/ ziehen
         for m in re.finditer(r"(?:/[\w.\-]+)+\.(?:" + _EXT_RE + r")|data/documents/[\w.\-]+\.(?:" + _EXT_RE + ")", text):

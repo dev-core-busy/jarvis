@@ -110,12 +110,36 @@ class AgentStub:
         self.gesendet.append(msg)
 
 
-def baue(tmpdir: Path, dok: DokStub):
+class LaufTmpStub:
+    """Ersatz fuer backend.lauf_tmp – die Uebersetzung ist HIER umschaltbar.
+
+    Ohne sie war dieser Test seit dem /tmp-Umbau (2026-08-23) rot: `_hostpfad`
+    ruft `_lauf_tmp.aufloesen`, und in der Attrappen-Umgebung gab es das Modul
+    nicht (NameError mitten im Lauf). Mit `arbeit` laesst sich der Vorfall vom
+    2026-08-24 nachstellen – Backend uebersetzt, die Datei liegt aber im echten
+    /tmp.
+    """
+
+    def __init__(self, arbeit=None):
+        self.arbeit = Path(arbeit) if arbeit else None
+
+    def such_wurzeln(self):
+        return [self.arbeit] if self.arbeit else []
+
+    def aufloesen(self, pfad):
+        s = str(pfad)
+        if self.arbeit and s.startswith("/tmp/"):
+            return str(self.arbeit / s[len("/tmp/"):])
+        return pfad
+
+
+def baue(tmpdir: Path, dok: DokStub, lauf=None):
     """Liefert (deliver, clean) – beide gegen ein gefaelschtes Projektverzeichnis."""
     umg = {
         "re": re, "os": os, "time": time, "uuid": uuid, "asyncio": asyncio,
         "_documents": dok,
         "_log": lambda *a, **k: None,
+        "_lauf_tmp": lauf or LaufTmpStub(),
         "__file__": str(tmpdir / "backend" / "agent.py"),
     }
     exec(hole("_deliver_docs"), umg)
@@ -155,8 +179,17 @@ def main() -> int:
 
     # Secret-Sperre muss in ALLEN Zweigen greifen, nicht nur beim Marker.
     pruefe("Secret-Sperre wird mehrfach angewandt", QUELLE.count("_ist_geheim(") >= 4)
+    # Geprueft wird die EIGENSCHAFT, nicht der Wortlaut: die Suchorte fuer blosse
+    # Dateinamen sind data/documents und die Arbeitswurzeln – niemals `proj`
+    # (dort liegen .env und settings.json). Die frueher hier fest verdrahtete
+    # Zeile "[docs_dir, _tmp_root]" hiess nach dem /tmp-Umbau
+    # "[docs_dir] + _arb_roots" und liess den Test rot stehen, obwohl die Zusage
+    # unveraendert gilt – eine Zeichenkette als Testkriterium ist eine
+    # Zeitbombe.
+    _sd = re.search(r"_search_dirs\s*=\s*(.+)", QUELLE)
     pruefe("Projektverzeichnis ist kein Suchort mehr fuer blosse Dateinamen",
-           "_search_dirs = [docs_dir, _tmp_root]" in QUELLE)
+           bool(_sd) and "docs_dir" in _sd.group(1) and "proj" not in _sd.group(1),
+           _sd.group(1) if _sd else "_search_dirs fehlt")
 
     dok = DokStub()
     # Das gefaelschte Projektverzeichnis MUSS ausserhalb von /tmp liegen:
@@ -269,6 +302,48 @@ def main() -> int:
         asyncio.run(deliver(s7, None, t, gemeldet, "u", jetzt))
         pruefe("derselbe Pfad ergibt genau EINEN Chip",
                len([m for m in s7.gesendet if "/api/documents/" in m]) == 1, str(s7.gesendet))
+
+        abschnitt("7) Verfehlter Liefer-Marker wird GEMELDET (Vorfall 2026-08-24)")
+        # Nachbau: die Shell schreibt ins gemeinsame /tmp (alter Broker), das
+        # Backend haelt die Isolation fuer aktiv und uebersetzt -> die Datei ist
+        # unter dem uebersetzten Pfad NICHT vorhanden. Vorher: stilles
+        # `continue`, kein Log, kein Chip – und im Chat blieb der Satz stehen,
+        # der auf den Link verwies.
+        echte = Path("/tmp") / f"ergebnis_{uuid.uuid4().hex[:6]}.xlsx"
+        echte.write_bytes(b"PK\x03\x04egal")
+        aufraeumen.append(echte)
+        arbeit = tmpdir / "jarvis-arbeit" / "abcdef01"
+        arbeit.mkdir(parents=True, exist_ok=True)
+        deliver_iso, clean_iso = baue(tmpdir, dok, LaufTmpStub(arbeit))
+
+        s9 = AgentStub(EXT)
+        marker = ("Die Liste liegt bereit. Falls kein Chip erscheint, nutze diesen Link:\n\n"
+                  f"[[JARVIS_DELIVER:{echte.as_posix()}]]")
+        asyncio.run(deliver_iso(s9, None, marker, set(), "u", jetzt, True))
+        pruefe("kein Chip, wenn der uebersetzte Pfad ins Leere zeigt",
+               not [m for m in s9.gesendet if "/api/documents/" in m], str(s9.gesendet))
+        pruefe("der Benutzer wird darauf HINGEWIESEN",
+               any("⚠️" in m and echte.name in m for m in s9.gesendet),
+               "sonst steht 'nutze diesen Link:' im Chat und dahinter nichts – "
+               f"gesendet: {s9.gesendet}")
+        pruefe("und der Anzeigetext nennt den Marker nicht mehr",
+               "JARVIS_DELIVER" not in clean_iso(s9, marker))
+
+        # Gegenprobe 1: derselbe Text OHNE Meldeauftrag (Werkzeug-Ergebnis, die
+        # Datei kann einen Schritt spaeter noch entstehen) -> keine Warnung.
+        s10 = AgentStub(EXT)
+        asyncio.run(deliver_iso(s10, None, marker, set(), "u", jetzt))
+        pruefe("ein Werkzeug-Ergebnis warnt NICHT verfrueht",
+               not any("⚠️" in m for m in s10.gesendet), str(s10.gesendet))
+
+        # Gegenprobe 2: ohne Uebersetzung (Isolation aus bzw. gemeldet
+        # unwirksam) findet derselbe Marker die Datei und liefert den Chip.
+        s11 = AgentStub(EXT)
+        asyncio.run(deliver(s11, None, marker, set(), "u", jetzt, True))
+        pruefe("ohne Uebersetzung entsteht der Chip",
+               len([m for m in s11.gesendet if "/api/documents/" in m]) == 1, str(s11.gesendet))
+        pruefe("dann auch KEINE Warnung",
+               not any("⚠️" in m for m in s11.gesendet), str(s11.gesendet))
 
         for f in aufraeumen:
             try:

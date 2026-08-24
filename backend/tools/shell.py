@@ -482,6 +482,19 @@ class ShellTool(BaseTool):
         res = await broker_client.call(op, args, user=username or "system",
                                        timeout=timeout + 30, stream_cb=_cb)
 
+        # Hat die ausfuehrende Seite den Lauf wirklich isoliert? Nur auswerten,
+        # wenn wir eine Isolation ANGEFORDERT haben und der Befehl tatsaechlich
+        # gelaufen ist ("rc" vorhanden) – pending/denied/unreachable sagen
+        # darueber nichts. Ein FEHLENDES Feld gilt als "nein": genau so
+        # verhaelt sich ein Broker-Prozess, der noch mit einer Fassung von vor
+        # dem /tmp-Umbau laeuft (Vorfall 2026-08-24, Details in lauf_tmp.py).
+        if op == "sandbox_exec" and args.get("arbeit") and "rc" in res:
+            try:
+                from backend import lauf_tmp as _lt2
+                _lt2.melde_ausfuehrung(bool(res.get("isolation")))
+            except Exception as _e:  # noqa: BLE001
+                print(f"[SHELL] Isolations-Rueckmeldung fehlgeschlagen: {_e}", flush=True)
+
         decision = res.get("decision", "")
         if decision == "pending":
             shown = args.get("command", "")

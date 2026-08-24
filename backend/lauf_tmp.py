@@ -296,6 +296,64 @@ def bwrap_verfuegbar(als_benutzer: str = "") -> bool:
     return ok
 
 
+# ── Wirkt die Isolation auch auf der AUSFUEHRENDEN Seite? ────────────────────
+# ``bwrap_verfuegbar()`` misst den EIGENEN Prozess. Im getrennten Betrieb fuehrt
+# die Shell-Befehle aber der Root-Broker aus – ein EIGENER Prozess mit einer
+# EIGENEN Kopie von ``backend/broker/*``, der nur beim Dienst-Neustart neu
+# geladen wird. Laeuft er noch mit einer Fassung von VOR diesem Umbau, nimmt er
+# die Argumente ``arbeit``/``ro_binds`` klaglos an, ignoriert sie und schreibt
+# ins gemeinsame ``/tmp`` – waehrend das Backend weiter uebersetzt und die
+# Ergebnisdatei im Lauf-Verzeichnis sucht, wo nie etwas angekommen ist.
+#
+# VORFALL 2026-08-24 auf ECHT: der Broker lief seit sechs Tagen, das Backend
+# hatte den Umbau in der Nacht bekommen. Ein Shell-Skript schrieb
+# ``/tmp/kontrakte_….xlsx`` (echtes /tmp), der Liefer-Marker zeigte auf
+# ``/tmp/jarvis-arbeit/<kennung>/kontrakte_….xlsx`` – nicht vorhanden, also kein
+# Download-Chip. Die Antwort im Chat lautete trotzdem „nutze diesen Link:" und
+# endete im Nichts. Vier Laeufe, zwei fertige Auswertungen unerreichbar.
+#
+# **Die Lehre ist die Asymmetrie, nicht der alte Prozess:** wer eine Isolation
+# fail-OPEN baut, muss den Rueckfall auf BEIDEN Seiten gleich beantworten. Fiel
+# nur eine Haelfte zurueck, war die Isolation halb aktiv – und das ist schlimmer
+# als gar keine, weil die Pfade beider Welten auseinanderlaufen.
+_ausf_isoliert = None          # None = noch nichts gemessen
+
+
+def melde_ausfuehrung(isoliert: bool) -> None:
+    """Die ausfuehrende Seite hat gemeldet, ob sie den Lauf isoliert hat.
+
+    Aufgerufen aus ``tools/shell.py`` mit dem Feld ``isolation`` der
+    Broker-Antwort. **Ein FEHLENDES Feld ist die Aussage "nein"** – genau so
+    verhaelt sich eine Fassung, die den Umbau nicht kennt; auf ein neues Feld zu
+    warten waere die Pruefung, die den Vorfall nicht gefunden haette.
+    """
+    global _ausf_isoliert
+    vorher = _ausf_isoliert
+    _ausf_isoliert = bool(isoliert)
+    if vorher is not _ausf_isoliert:
+        if _ausf_isoliert:
+            _log("Lauf-Isolation wirkt auch beim Ausfuehrenden (Broker) – "
+                 "private /tmp-Verzeichnisse aktiv")
+        else:
+            _log("Lauf-Isolation wirkt beim Ausfuehrenden NICHT – Laeufe teilen "
+                 "/tmp wie vor dem Umbau. Pfad-Uebersetzung deshalb AUS "
+                 "(sonst suchen Auslieferung und Werkzeuge an einer Stelle, an "
+                 "der nichts liegt). Abhilfe: jarvis-broker.service neu starten, "
+                 "damit er die aktuelle Fassung von backend/broker/ laedt.")
+
+
+def ausfuehrung_unwirksam() -> bool:
+    """True, wenn GEMESSEN wurde, dass die Ausfuehrung nicht isoliert.
+
+    ``None`` (nichts gemessen) ist bewusst NICHT unwirksam: der erste Befehl
+    eines Laufs muss die Klammer bekommen, sonst waere die Isolation nach jedem
+    Dienststart einmal aus. Der Preis ist genau EIN Befehl, dessen Ergebnis im
+    gemeinsamen /tmp landet – und weil die Meldung vor der Auslieferung
+    eintrifft, findet der Chip die Datei trotzdem.
+    """
+    return _ausf_isoliert is False
+
+
 def bericht() -> dict:
     """Zustand fuer Journal und Statusanzeige – der Ausfall soll sichtbar sein."""
     gewuenscht = isolation_gewuenscht()
@@ -305,6 +363,7 @@ def bericht() -> dict:
         "aktiv": gewuenscht and os.path.exists(BWRAP),
         "arbeit_root": str(ARBEIT_ROOT),
         "anhang_root": str(ANH_ROOT),
+        "ausfuehrung_isoliert": _ausf_isoliert,
     }
 
 
@@ -409,7 +468,13 @@ def lauf_scope(benutzer: str, privilegiert: bool):
         yield lauf
         return
     kennung = benutzer_kennung(benutzer)
-    if privilegiert or not kennung or not bwrap_verfuegbar():
+    # ``ausfuehrung_unwirksam()`` steht NEBEN ``bwrap_verfuegbar()``, weil beide
+    # dieselbe Frage aus verschiedenen Prozessen beantworten: kann der, der den
+    # Befehl WIRKLICH startet, ihn isolieren? Fehlt die zweite Haelfte, ist die
+    # Isolation halb aktiv (Backend uebersetzt, Ausfuehrung nicht) – und das
+    # kostet Ergebnisdateien.
+    if (privilegiert or not kennung or ausfuehrung_unwirksam()
+            or not bwrap_verfuegbar()):
         yield None
         return
     neu = Lauf(ARBEIT_ROOT / kennung, benutzer, kennung)
@@ -605,6 +670,11 @@ def aufloesen(pfad: str) -> str:
     """
     lauf = _lauf_cv.get()
     if not lauf or not pfad:
+        return pfad
+    # Gemessen, dass die ausfuehrende Seite NICHT isoliert (alter Broker,
+    # fail-open im Broker)? Dann liegt die Datei im echten /tmp, und eine
+    # Uebersetzung wuerde ins Leere zeigen – der Vorfall vom 2026-08-24.
+    if ausfuehrung_unwirksam():
         return pfad
     s = str(pfad)
     if not s.startswith("/tmp"):

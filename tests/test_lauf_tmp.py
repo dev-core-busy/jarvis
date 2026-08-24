@@ -559,6 +559,66 @@ boot = quelle("start_jarvis_root.sh")
 pruef("Bootstrap installiert bubblewrap nach", "bubblewrap" in boot)
 
 # ═══════════════════════════════════════════════════════════════════════════
+abschnitt("10. Isoliert die AUSFUEHRENDE Seite auch? (Vorfall 2026-08-24)")
+# Der Broker ist ein EIGENER Prozess mit eigener Kopie von backend/broker/*.
+# Lief er noch mit einer Fassung von vor diesem Umbau, nahm er `arbeit` klaglos
+# an und ignorierte es: die Shell schrieb ins gemeinsame /tmp, waehrend das
+# Backend weiter uebersetzte und die Ergebnisdatei im Lauf-Verzeichnis suchte.
+# Auf ECHT vier Laeufe, zwei fertige Auswertungen unerreichbar – ohne eine
+# einzige Zeile im Journal.
+pruef("der Broker MELDET, ob er isoliert hat", '"isolation"] = bool(lauf_dir)' in ops,
+      "ohne Rueckmeldung kann das Backend die halb aktive Isolation nicht erkennen")
+pruef("shell.py wertet die Meldung aus", "melde_ausfuehrung(bool(res.get(\"isolation\")))" in sh)
+pruef("nur bei angeforderter Isolation und wirklich gelaufenem Befehl",
+      'op == "sandbox_exec" and args.get("arbeit") and "rc" in res' in sh,
+      "pending/denied/unreachable sagen nichts ueber die Isolation")
+
+_alt_zustand = lt._ausf_isoliert
+try:
+    isolation_erzwingen(True)
+    lt.melde_ausfuehrung(False)
+    pruef("gemeldetes 'nicht isoliert' schaltet die Uebersetzung ab",
+          lt.ausfuehrung_unwirksam() is True)
+    with lt.lauf_scope("alice", False) as lauf:
+        pruef("und es entsteht gar kein Lauf mehr", lauf is None,
+              "sonst uebersetzen Auslieferung und Werkzeuge weiter ins Leere")
+
+    # Der Kern: MIT Lauf-Kontext, aber gemeldet unwirksam -> Pfad bleibt.
+    _kn = lt.benutzer_kennung("alice")
+    _tok = lt._lauf_cv.set(lt.Lauf(lt.ARBEIT_ROOT / _kn, "alice", _kn))
+    try:
+        modell = str(lt.TMP_ECHT / "ergebnis.xlsx")
+        pruef("aufloesen() laesst den Pfad unangetastet",
+              lt.aufloesen(modell) == modell,
+              f"uebersetzt zu {lt.aufloesen(modell)}")
+        lt.melde_ausfuehrung(True)
+        pruef("Gegenprobe: nach 'isoliert' wird wieder uebersetzt",
+              lt.aufloesen(modell) != modell)
+    finally:
+        lt._lauf_cv.reset(_tok)
+
+    lt._ausf_isoliert = None
+    pruef("ungemessen (None) gilt NICHT als unwirksam",
+          lt.ausfuehrung_unwirksam() is False,
+          "sonst waere die Isolation nach jedem Dienststart einmal aus")
+    with lt.lauf_scope("alice", False) as lauf:
+        pruef("und der erste Lauf bekommt seine Klammer", lauf is not None)
+    pruef("bericht() weist den Zustand aus", "ausfuehrung_isoliert" in lt.bericht())
+finally:
+    lt._ausf_isoliert = _alt_zustand
+
+ag = quelle("backend/agent.py")
+pruef("ein verfehlter Liefer-Marker wird protokolliert",
+      "Liefer-Marker OHNE Auslieferung" in ag,
+      "vorher brach der Zweig mit einem nackten `continue` ab – ohne jede Spur")
+pruef("und dem Benutzer gemeldet",
+      "Konnte nicht zum Download bereitgestellt werden" in ag,
+      "der Chip ist der EINZIGE Weg zur Datei; faellt er aus, muss es sichtbar sein")
+pruef("gemeldet wird nur beim letzten Text des Laufs",
+      "since=_task_start_time, melden=True" in ag,
+      "ein Werkzeug-Ergebnis warnt sonst, bevor die Datei entstanden ist")
+
+# ═══════════════════════════════════════════════════════════════════════════
 shutil.rmtree(SANDKASTEN, ignore_errors=True)
 print(f"\n{'='*66}\nErgebnis: {ok} ok, {fail} FAIL")
 sys.exit(1 if fail else 0)

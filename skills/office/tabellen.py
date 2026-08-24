@@ -549,6 +549,38 @@ def _verlust_hinweis(verluste: list[str]) -> str:
               "Zellen und Zahlenformate bleiben erhalten.")
 
 
+def _patch_quelle(path: str) -> tuple:
+    """``(Pfad, [Blattnamen])`` fuer den Patch-Weg – OHNE die Mappe zu laden.
+
+    Der Patch-Weg braucht nur den Pfad und die Blattliste; ``load_workbook``
+    dafuer aufzurufen wuerde die Datei ein zweites Mal vollstaendig parsen (bei
+    einer 100-MB-Mappe der teuerste Teil der ganzen Operation).
+
+    Wirft ``TabellenFehler`` mit denselben Texten wie ``_oeffnen`` – eine CSV ist
+    hier wie dort keine bearbeitbare Quelle.
+    """
+    from skills.office.main import _resolve_existing  # noqa: PLC0415
+    from skills.office import xlsx_patch as _xp        # noqa: PLC0415
+
+    p = _resolve_existing(path)
+    if not p:
+        raise TabellenFehler(f"Datei nicht gefunden: {path!r}")
+    if p.suffix.lower() in _CSV_ENDUNGEN:
+        raise TabellenFehler(
+            f"'{p.name}' ist eine CSV – sie kann als QUELLE dienen "
+            f"(xlsx_inspect, xlsx_read_range, xlsx_merge als 'slave'), aber "
+            f"nicht bearbeitet werden: eine CSV hat kein Layout und keine "
+            f"Formeln. Die zu befuellende Tabelle (master/path) muss eine "
+            f".xlsx sein.")
+    try:
+        namen = list(_xp.blaetter_von(p))
+    except Exception as e:  # noqa: BLE001
+        raise TabellenFehler("Aufbau der Mappe nicht lesbar: %s" % e) from e
+    if not namen:
+        raise TabellenFehler(f"'{p.name}' enthaelt kein Arbeitsblatt.")
+    return p, namen
+
+
 def _weiterarbeiten_hinweis(fname: str) -> str:
     """Sagt, wie der NAECHSTE Schritt auf diesem Stand aufsetzt.
 
@@ -1216,6 +1248,83 @@ class EditTool(BaseTool):
             return ("Fehler: 'aenderungen' ist Pflicht und muss eine nicht-leere "
                     "Liste sein, z.B. [{\"zelle\": \"B5\", \"wert\": 42}].")
 
+        # ── ZELLEN EINSAMMELN UND PRUEFEN (unabhaengig vom Schreibweg) ──
+        werte: dict = {}
+        fehler: list[str] = []
+        for nr, a in enumerate(aenderungen, start=1):
+            if not isinstance(a, dict):
+                fehler.append(f"#{nr}: kein Objekt ({type(a).__name__})")
+                continue
+            zelle = str(a.get("zelle") or "").strip().upper()
+            if not _ZELLE_RE.match(zelle):
+                fehler.append(f"#{nr}: 'zelle' war {zelle!r} – erwartet wird "
+                              f"z.B. 'B5'")
+                continue
+            werte[zelle] = a.get("wert")
+        if not werte:
+            return ("Fehler: keine einzige gueltige Zelle angegeben, es wurde "
+                    "KEINE Datei erzeugt.\n" + "\n".join(fehler[:20]))
+
+        # ── REGELWEG: im ZIP patchen ──────────────────────────────────────
+        # Warum das der Regelweg ist: openpyxl kann nicht in-place schreiben, es
+        # baut die Mappe beim Speichern neu und verliert dabei alles, was es
+        # nicht versteht. An der echten Produktionsdatei gemessen (2026-08-24):
+        # 6 von 16 ZIP-Teilen weg, `xl/workbook.xml` 2277 -> 833 Byte. Der
+        # Patch-Weg uebernimmt jeden Teil byte-gleich und fasst nur die
+        # betroffene Blatt-XML an. Details in skills/office/xlsx_patch.py.
+        from skills.office.main import _new_path, _ok  # noqa: PLC0415
+        from skills.office import xlsx_patch as _xp    # noqa: PLC0415
+
+        rueckfall = ""
+        try:
+            quelle, namen = _patch_quelle(path)
+            name = str(blatt or "").strip() or namen[0]
+            if name not in namen:
+                return ("Fehler: Blatt %r gibt es nicht. Vorhanden: %s"
+                        % (name, ", ".join(namen)))
+            disk, fname, dl = _new_path(ziel, "xlsx")
+            b = _xp.patch_datei(quelle, disk, {name: werte})
+            for adr in b["abgelehnt"]:
+                fehler.append(
+                    "%s: definiert die Formel einer ganzen Zellgruppe (shared "
+                    "formula) – wird nicht ueberschrieben, weil sonst alle "
+                    "Folgezellen ihre Formel verlieren" % adr)
+            if not b["geschrieben"]:
+                disk.unlink(missing_ok=True)
+                return ("Fehler: keine einzige Zelle konnte geschrieben werden, "
+                        "es wurde KEINE Datei erzeugt.\n" + "\n".join(fehler[:20]))
+            extra = ("%d Zelle(n) in Blatt '%s' geschrieben. Layout, Formeln, "
+                     "Diagramme und Druckeinstellungen der Originaldatei bleiben "
+                     "unveraendert; Excel berechnet die Mappe beim Oeffnen neu."
+                     % (len(b["geschrieben"]), name))
+            if b.get("weit_draussen"):
+                # Jedes dreibuchstabige Wort ist eine gueltige Spalte ("Ort" =
+                # Spalte 10.628). Ein Vertipper landet damit klaglos ausserhalb
+                # der Tabelle – benannt statt verschwiegen.
+                extra += ("\n⚠ Weit ausserhalb des bisherigen Bereichs "
+                          "geschrieben: %s. Falls das ein Vertipper in der "
+                          "Spaltenangabe war, die Zelle erneut korrekt setzen."
+                          % ", ".join(b["weit_draussen"][:10]))
+            if b["neue_zeilen"].get(name):
+                extra += (" Neu angelegte Zeile(n): %s."
+                          % ", ".join(str(z) for z in b["neue_zeilen"][name]))
+            if fehler:
+                extra += (f"\n⚠ {len(fehler)} Aenderung(en) wurden NICHT "
+                          f"ausgefuehrt:\n" + "\n".join(fehler[:20]))
+            return _ok(dl, fname, disk,
+                       extra=extra + _weiterarbeiten_hinweis(fname))
+        except TabellenFehler as e:
+            return f"Fehler: {e}"
+        except _xp.PatchFehler as e:
+            # FAIL-OPEN auf den alten Weg, aber NICHT STILL: der Patch kann an
+            # einer Struktur scheitern, die openpyxl noch versteht. Ein
+            # Fehlschlag ohne Ergebnis waere der schlechtere Ausgang – der
+            # Verlusthinweis unten sagt dann, was dabei auf dem Spiel steht.
+            rueckfall = str(e)
+            print("[xlsx_edit] Patch-Weg nicht moeglich (%s) – openpyxl-Rueckfall"
+                  % rueckfall, flush=True)
+
+        # ── RUECKFALL: openpyxl (baut die Mappe neu) ──────────────────────
         try:
             wb, _p = _oeffnen(path, schreibend=True)
             ws = _blatt(wb, blatt)
@@ -1223,27 +1332,18 @@ class EditTool(BaseTool):
             return f"Fehler: {e}"
 
         geschrieben = 0
-        fehler: list[str] = []
-        for nr, a in enumerate(aenderungen, start=1):
-            if not isinstance(a, dict):
-                fehler.append(f"#{nr}: kein Objekt ({type(a).__name__})")
-                continue
-            zelle = str(a.get("zelle") or "").strip()
+        for zelle, wert in werte.items():
             m = _ZELLE_RE.match(zelle)
-            if not m:
-                fehler.append(f"#{nr}: 'zelle' war {zelle!r} – erwartet wird "
-                              f"z.B. 'B5'")
-                continue
-            spalte = _buchstabe_zu_index(m.group(1))
-            zeile = int(m.group(2))
+            spalte = _buchstabe_zu_index(m.group(1)) if m else 0
+            zeile = int(m.group(2)) if m else 0
             if not spalte or zeile < 1:
-                fehler.append(f"#{nr}: {zelle!r} ist keine gueltige Zelle")
+                fehler.append(f"{zelle!r} ist keine gueltige Zelle")
                 continue
             try:
-                ws.cell(row=zeile, column=spalte).value = a.get("wert")
+                ws.cell(row=zeile, column=spalte).value = wert
                 geschrieben += 1
             except Exception as e:  # noqa: BLE001
-                fehler.append(f"#{nr}: {zelle} nicht beschreibbar ({e})")
+                fehler.append(f"{zelle} nicht beschreibbar ({e})")
 
         # LAUT scheitern, wenn nichts geschrieben wurde – kein leeres Ergebnis.
         if not geschrieben:
@@ -1252,7 +1352,6 @@ class EditTool(BaseTool):
                     "wurde KEINE Datei erzeugt.\n" + "\n".join(fehler[:20]))
 
         verluste = _verluste(wb)
-        from skills.office.main import _new_path, _ok  # noqa: PLC0415
         disk, fname, dl = _new_path(ziel, "xlsx")
         try:
             wb.save(str(disk))
@@ -1261,7 +1360,11 @@ class EditTool(BaseTool):
             return f"Fehler beim Speichern: {e}"
         wb.close()
 
-        extra = f"{geschrieben} Zelle(n) in Blatt '{ws.title}' geschrieben."
+        extra = (f"{geschrieben} Zelle(n) in Blatt '{ws.title}' geschrieben.")
+        if rueckfall:
+            extra += ("\n⚠ HINWEIS_AN_NUTZER: Die Datei musste neu aufgebaut "
+                      "werden (%s). Diagramme, Bilder und Druckeinstellungen der "
+                      "Originaldatei koennen dabei verloren gehen." % rueckfall)
         if fehler:
             # Teilerfolg wird BENANNT. Ein "erstellt" ueber einer halb
             # ausgefuehrten Aenderungsliste ist dieselbe stille Luege wie eine

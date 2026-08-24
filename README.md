@@ -35,6 +35,9 @@
 - [Multi-User Chat](#multi-user-chat)
 - [Multi-Agent System](#multi-agent-system)
 - [Skill System](#skill-system)
+- [Email Automation & Outlook Add-in](#email-automation--outlook-add-in)
+- [SAP Analysis Area](#sap-analysis-area)
+- [Short Tracks](#short-tracks)
 - [WhatsApp Integration](#whatsapp-integration)
 - [Knowledge Base](#knowledge-base)
 - [Vision & Face Recognition](#vision--face-recognition)
@@ -52,7 +55,7 @@
 
 ## Overview
 
-Jarvis is a **self-hosted, autonomous AI agent** that runs on a Linux server. Give it a goal in plain language — through the web chat, the built-in **Support portal**, or even **WhatsApp** — and it plans and executes: browsing the web, reading and writing files, running code, generating Office documents & diagrams, sending emails, managing your calendar. Whenever you want, you can watch it work live on the desktop via an **optional VNC view**.
+Jarvis is a **self-hosted, autonomous AI agent** that runs on a Linux server. Give it a goal in plain language — through the web chat, the built-in **Support portal**, a **task pane inside Outlook or Excel**, or even **WhatsApp** — and it plans and executes: browsing the web, reading and writing files, running code, editing existing spreadsheets, generating Office documents & diagrams, answering email by rule, evaluating SAP data read-only, managing your calendar. Whenever you want, you can watch it work live on the desktop via an **optional VNC view**.
 
 ```
 "Find all emails from last week about Project Alpha, summarize them,
@@ -94,8 +97,10 @@ Switch between AI providers without restarting anything:
 
 Both native tool/function calling **and** prompt-based tool calling are supported — so even models without native tool support can use all of Jarvis's capabilities.
 
-### 🤖 Multi-Agent System
+### 🤖 Multi-Agent System & Role Delegation
 The **main agent can spawn autonomous sub-agents** for parallel or background tasks. Each sub-agent runs independently, reports back in real-time, and appears in the sidebar. Complex multi-step workflows run in parallel without blocking the main conversation.
+
+On top of that, an admin can define **named role agents** — each with its own system prompt, tool subset, LLM profile, reasoning depth and step limit. The main agent gets a single `delegate(role, task)` tool, hands off a sub-task, **waits**, and continues with the result. A role can only ever *narrow* the caller's permissions, never widen them.
 
 ### 💬 Multi-User Chat
 A built-in **user-to-user chat** (`/userchat`) lets all logged-in users communicate in real-time — with image galleries, audio/video players, file attachments, lightbox preview, and a forward/save context menu.
@@ -110,8 +115,8 @@ Send **images, audio, video, and PDFs** directly in the Jarvis chat:
 ### 📱 WhatsApp Agent
 Send Jarvis a voice note or text message on WhatsApp, get a response back. Voice messages are transcribed via faster-whisper (runs locally, no cloud). Perfect for mobile task delegation.
 
-### 📚 Knowledge Base
-Drop PDFs, DOCX files, or plain text into watched folders. Jarvis indexes them with both **TF-IDF and ChromaDB vector search** (multilingual embeddings). Multi-folder support, automatic re-indexing on file changes.
+### 📚 Knowledge Base (hybrid RAG)
+Drop PDFs, DOCX files, or plain text into watched folders. Jarvis indexes them into a **FAISS** index (`multilingual-e5-small`, 384-dim, cosine) and answers with a **hybrid search**: two semantic channels plus a lexical **BM25** channel, fused by Reciprocal Rank Fusion. Pure embeddings are structurally weak on exact identifiers such as error codes or `@STR_UCASE`; BM25 covers exactly that. Multi-folder support, incremental re-indexing on file changes, crash-safe resume, and a TF-IDF fallback when no vector stack is available.
 
 ### 🧩 Modular Skill System
 Skills are self-contained Python packages that extend Jarvis with new capabilities. Install, enable, disable, and configure them through the UI without touching config files. Compatible with [OpenClaw](https://github.com/steipete/gogcli) skills.
@@ -124,7 +129,9 @@ Built to be opened to a whole team — every restriction is **enforced in code**
 - **Sandboxed execution** for network/domain users — shell commands run as an unprivileged OS user; file access is confined (no system/root/secret paths, symlink-escape safe)
 - **Prompt-injection, jailbreak & Base64-obfuscation detection** across chat, support & WhatsApp (heuristics + LLM classifier)
 - **Automatic account lockout** on repeated attack attempts, with a full, itemized violation log
+- **A private `/tmp` per user** — all network users share one OS account, so file permissions cannot separate them (0600 would lock out their own run). A bubblewrap mount namespace binds a per-user directory onto `/tmp` instead: another user's files are not unreadable, they are **not present**. `--unshare-pid` hides foreign processes too (measured: 5 visible instead of 288). The model-facing path stays `/tmp/result.xlsx`, so no prompt had to change.
 - **Role-based rights** (local admins vs. network users) + sub-agents inherit the caller's confinement — no privilege escalation
+- **Time-delayed runs are bound to their owner** — a scheduled job carries the identity of whoever created it, not of whoever chatted last. Channels without an account (WhatsApp, Telegram, the notify API) are *always* unprivileged, and creating scheduled triggers is admin-only
 
 ### 🔐 Authentication & Access
 - **Active Directory / LDAP** authentication (no domain join required)
@@ -156,6 +163,32 @@ Organize documents into logical groups (multi-membership), scope searches to a g
 
 ### 🔌 Interactive API Console
 An admin-only, auto-generated **API explorer** at `/api`: every REST endpoint listed, explained, with examples and a **live test caller**. The OpenAPI schema and Swagger/ReDoc are gated behind admin auth.
+
+### 📧 Exchange Email Automation & Outlook Add-in
+Connect your in-house **Exchange** (EWS, with IMAP/SMTP as a fallback). Every user stores **their own mailbox** — no service account with impersonation — and writes **their own rules** in plain language. When a new message arrives, the rule's prompt runs and the model picks the action: reply, draft, move, forward, send, delete. Named **reply styles** (tone + signature) can be selected per rule, per preview, or chosen automatically.
+
+An **Outlook web add-in** brings the same area into a task pane in classic Outlook and Outlook on the web: process the selected message with a rule, preview a reply before it goes out, and sign in **without a password** via the Exchange identity token. → [details](#email-automation--outlook-add-in)
+
+### 📊 SAP Analysis Area
+A dedicated `/sap` area for management: pick an analysis template, the agent evaluates **read-only** (OData GET, SQL SELECT/WITH, RFC whitelist) and answers with figures and sources. Ships with 24 templates across 6 categories, including segment reporting (IFRS 8), expected credit losses (IFRS 9), consolidation, internal controls, VAT/Intrastat and ESG/CSRD. Each user can store a **personal SAP account**; the admin's account becomes the read-only fallback. Server certificates can be **pinned** instead of switching validation off. → [details](#sap-analysis-area)
+
+### 🎯 Short Tracks
+Named **drop zones** with a stored prompt. Drag a file or a URL onto one and it runs — result on the card, generated files as download chips. Admins create global zones, every user creates their own; runs are always unprivileged and limited to an admin-approved set of tool areas. → [details](#short-tracks)
+
+### 📈 Charts & Diagrams
+A validated `create_chart` tool builds bar/line/pie/scatter charts **server-side from your data** — it reads CSV/TSV/XLSX itself, aggregates, sorts, and validates before rendering, so the model never has to retype numbers. A theme layer keeps every chart on brand in light and dark mode. **Mermaid** diagrams render inline in chat, loaded on demand.
+
+### 📗 Spreadsheet & Form Intelligence
+Existing workbooks are **edited, not rebuilt**: `xlsx_inspect` returns the structure of even a 360,000-cell workbook in a few kilobytes, `xlsx_read_range`, `xlsx_merge` and `xlsx_edit` then transform the real file — formulas, column widths and merged ranges survive. The data never passes through the language model; the model describes the transformation, the backend performs it. `pdf_formular_extrakt` does the same for stacks of filled-in **form PDFs**, mapping values to labels by **geometry** rather than by reading order, with a learned template and OCR when the text layer is damaged.
+
+### 🔄 Knowledge Sync Between Sites
+Run several Jarvis instances in one network: an admin shares a knowledge folder at site A, site B **pulls** it (one-way read-sync) and gets it as a local mirror *and* as RAG entries. Incremental via manifest + SHA-256, certificate-pinned TLS, mirror folders are write-protected and marked in the UI.
+
+### 🧠 Reasoning Control
+One provider-independent scale — `off | low | medium | high | max` — translated per provider (Gemini thinking budget, OpenAI `reasoning_effort`, OpenRouter `reasoning`, Anthropic `thinking` + `output_config`). Set it globally, per LLM profile, or per single request. If a model rejects the parameter, the request is retried once without it, so the user gets an answer instead of an error.
+
+### 👥 Presence & Audit
+An admin-only **"logged-in users"** panel shows who is online, idle, or offline — derived from real human activity (page load, click, keypress), not from background polling. Alongside it: a tool audit log, an itemized access-violation list, per-area telemetry, and full LLM conversation logs with **uncut prompts**, all self-pruning by age.
 
 ### 📱 Desktop & Mobile Clients
 Use Jarvis anywhere: a **native Windows app** (Go — tray, on-device speech-to-text, animated avatar, auto-update), a **native Android app** (Kotlin/Jetpack Compose — streaming chat, voice, attachments, push), and **iOS** via an installable PWA (native app on the roadmap). All share one login, chat history, and attachments. → [details](#client-apps)
@@ -230,9 +263,15 @@ flowchart LR
 | uvicorn | latest | ASGI server |
 | ldap3 | latest | Active Directory / LDAP authentication |
 | faster-whisper | latest | Voice transcription (CPU, int8) |
-| pypdf | latest | PDF text extraction |
-| ChromaDB | latest | Vector database for semantic search |
-| sentence-transformers | latest | Multilingual embeddings (MiniLM-L12-v2) |
+| pdfplumber / pypdf | latest | PDF text extraction |
+| pytesseract + pdf2image | latest | OCR for scanned or damaged PDFs |
+| faiss-cpu | ≥1.7.4 | Vector index (`IndexFlatIP`, cosine) |
+| sentence-transformers | <4.0 | Multilingual embeddings (`intfloat/multilingual-e5-small`, 384-dim) |
+| python-docx / openpyxl / python-pptx | latest | Office document generation and editing |
+| exchangelib | latest | Exchange EWS (email skill; IMAP/SMTP fallback via stdlib) |
+| cryptography | latest | Ed25519 license verification, credential encryption (Fernet) |
+| mcp | ≥1.5 | Model Context Protocol client (stdio + streamable HTTP) |
+| APScheduler | <4.0 | Scheduled jobs |
 | face_recognition | latest | Face detection + recognition (dlib) |
 
 ### Frontend
@@ -242,6 +281,9 @@ flowchart LR
 | CSS Custom Properties | Dark Glassmorphism theme |
 | WebSocket API | Real-time agent communication |
 | noVNC | In-browser VNC client |
+| Chart.js (+ datalabels, annotation) | Interactive charts, themed light/dark |
+| Mermaid | Flow and sequence diagrams, loaded on demand |
+| Office.js | Outlook and Excel task-pane add-ins |
 | Service Worker | PWA offline support |
 
 ### Desktop / System
@@ -252,6 +294,8 @@ flowchart LR
 | x11vnc | VNC server for X11 session |
 | websockify | WebSocket-to-TCP proxy (noVNC bridge) |
 | xdotool | X11 automation (keyboard, mouse, window management) |
+| bubblewrap | Per-user mount/PID namespace for agent shell runs |
+| LibreOffice | Headless conversion of Office documents to PDF |
 
 ### WhatsApp
 | Technology | Purpose |
@@ -334,9 +378,11 @@ sudo journalctl -u jarvis.service -f
 |------|---------|--------|
 | 443 | FastAPI (HTTPS) | External |
 | 80 | HTTP → HTTPS Redirect | External |
-| 6080 | noVNC (WSS) | External |
-| 5900 | x11vnc | Local only |
+| 6080 | websockify (noVNC bridge) | **Local only** |
+| 5900 | x11vnc | **Local only** |
 | 3001 | WhatsApp Bridge | Local only |
+
+The desktop is reached **only** through `/novnc` on port 443, with a session token. Ports 5900 and 6080 bind to loopback: `x11vnc` runs with `-nopw`, and websockify used to serve noVNC without any authentication — anyone who could reach the host had mouse and keyboard, bypassing the portal login. `deploy/security/harden_vnc.sh` adds `-localhost` to every x11vnc start site (including the ones in Python — a `grep` over `*.sh` alone misses them), and `deploy/security/firewall.sh` installs a default-DROP packet filter for IPv4 *and* IPv6.
 
 ---
 
@@ -409,6 +455,26 @@ Jarvis can spawn **autonomous sub-agents** that work in parallel with the main a
 
 This enables patterns like: *"Simultaneously research topic A and B, then merge the results."*
 
+### Role Agents & `delegate()`
+
+`spawn_agent` is fire-and-forget with the full toolbox. **Role delegation is the opposite:** an admin defines named roles under *Settings → Orchestrator* — each with its own system prompt, tool whitelist, optional LLM profile, reasoning depth and step limit. The main agent then gets one tool:
+
+```
+delegate(role="image_builder", task="Render a 16:9 title image for the quarterly report")
+```
+
+It hands off, **awaits** the result, and keeps working with it.
+
+The security rule is a single formula:
+
+```
+effective tools = role whitelist ∩ (caller's tools − blocklist) − delegate
+```
+
+**A role can only take away.** Reversing that direction would make "role X may use tool Y" the most convenient way around the network-user blocklist — a permanent privilege escalation for anyone allowed to delegate. The caller's identity, privilege level, internet and SAP flags are passed through unchanged, and every gate runs as usual. Role agents cannot delegate further (recursion guard), and there is a hard cap of 8 delegations per task.
+
+Getting a model to actually delegate is not automatic. Measured with a 35B local model and 70 tools, the tool description alone was **not** enough — it answered "image generation is unavailable" while both the tool and the role existed. Three levers, in this order, fixed it: the role list in the tool description, the same list repeated in the system prompt, and a deterministic fallback that hands over when a tool fails *and* an active role carries exactly that tool with its own profile.
+
 ---
 
 ## Skill System
@@ -462,17 +528,57 @@ def get_tools(config: dict) -> list:
 
 ### Built-in Skills
 
+**Core** (on by default — the agent's basic hands and eyes)
+
 | Skill | Description |
 |-------|-------------|
+| `shell` | Run bash commands (sandboxed for network users) |
+| `filesystem` | Read, write and manage files (path-confined) |
+| `knowledge` | Hybrid RAG over local documents (FAISS + BM25) |
+| `memory` | Persistent store for facts and preferences |
+| `screenshot` | Capture the desktop (feeds back into the LLM context) |
+| `desktop` | Mouse, keyboard and window control (X11) |
+| `cron` | Create, list and delete scheduled jobs (admin only) |
+| `office` | Create and edit Word, Excel, PowerPoint, PDF — incl. the `xlsx_*` and form-PDF tools |
+
+**Integrations**
+
+| Skill | Description |
+|-------|-------------|
+| `email` | Exchange (EWS + IMAP/SMTP fallback), per-user mailboxes and rules |
+| `excel-addin` | Chat task pane against the currently open workbook |
+| `jira` / `confluence` | Atlassian Server/Data-Center — search, read, work on issues and pages |
+| `sap` | Read-only access to S/4HANA, ECC, BW/4HANA, HANA Cloud, Datasphere |
+| `kundenverwaltung` | IBS customer-management API (ticket search by keyword) |
+| `google` | Gmail, Drive and Calendar via OAuth2 |
+| `whatsapp` | Send/receive WhatsApp messages (incl. voice notes) |
+| `telegram` | Telegram bot — receives messages, sends replies |
 | `browser_control` | CDP + xdotool browser automation |
-| `whatsapp` | Send/receive WhatsApp messages |
-| `telegram` | Telegram bot integration (receive messages, send replies) |
-| `google` | Google Calendar, Drive and Gmail integration |
 | `vision` | Real-time face recognition (USB/IP camera) |
-| `cron` | Schedule recurring/timed tasks (cron jobs) |
+
+**Areas and agents**
+
+| Skill | Description |
+|-------|-------------|
+| `short-tracks` | Drop zones with a stored prompt (`/tracks`) |
+| `support_assistant` | Support UI (`/support`) with RAG and Jira ticket search |
+| `userchat` | User-to-user direct messages (`/userchat`) |
+| `agent_orchestrator` | Named role agents + `delegate(role, task)` |
+| `agent_autonomy_kit` | Proactive task management via `QUEUE.md` |
 | `cognitive_evolution` | Self-improving agent (analyze → propose → validate → apply) |
+| `coding_agent` | Autonomous coding agents (staff-engineer workflow) |
+| `claude_subagent` | Claude Code hands scoped coding tasks to Jarvis (`/claude`) |
 | `claude_bridge` | Delegate tasks to the Claude desktop app (xdotool) |
+
+**Appearance**
+
+| Skill | Description |
+|-------|-------------|
+| `branding` | Replace name, colors and logo with your own (white-label) |
+| `avatar` | Talking assistant figure in the chat |
 | `example_skill` | Template for new skill development |
+
+Skills declare their own pip and apt dependencies in `skill.json`; enabling one installs them in the background, and **Purge** removes them again — with a shared-use check so it never uninstalls a package another skill still needs.
 
 Beyond skills, the backend also exposes an **MCP client** (`backend/mcp_client.py`) so Jarvis can connect to external Model Context Protocol servers.
 
@@ -508,6 +614,77 @@ cp -r my_openclaw_skill/ skills/
 
 ---
 
+## Email Automation & Outlook Add-in
+
+> Skill `email` — **off by default**. Enabling it installs `exchangelib`.
+
+Connect the in-house **Exchange**: EWS first, IMAP/SMTP as a fallback. Server settings belong to the admin, the mailbox belongs to the user — deliberately, because a user-editable "IMAP server" field would be the way to send company credentials to a foreign host.
+
+### Rules
+
+Every user writes their own rules in plain language. When a new message arrives, the rule's prompt runs and **the model chooses the action**: reply, draft, move, forward, send, delete.
+
+That combination — a stored prompt that later starts an agent run with nobody present, plus foreign text in the same prompt — is the most dangerous persistence substrate in the project. Three barriers, none of which is sufficient alone:
+
+1. **Actor binding** — the run carries the rule owner's identity and is *always* unprivileged. `privileged` is hard-coded `False` and is not a field of the rule. There is no path to system rights here, not even for an admin. A rule without an owner never runs.
+2. **Tool whitelist** — the same hard barrier used for role agents, checked *before* execution, not merely in the tool list the model sees. The business-systems area contains **read-only** tools only: an incoming email must not be able to create a ticket.
+3. **Trigger conditions live in fields, not in the prompt** — sender and subject filters are evaluated by the runner *before* a model ever sees the message. Wildcards are supported. Saving a rule whose prompt tries to express a sender condition is **rejected**.
+
+The mailbox is never a tool parameter: it comes from a context variable set per call, so a model cannot choose whose mailbox it works in, and an injected sentence has no field to reach for.
+
+### Does the injection protection work? Measured, not claimed
+
+Test setup: a rule that may only act on a sender that never occurs — so **any** tool call is itself the proof that the message steered the agent. Plus a positive control, because "held" proves nothing if the rule could not have acted at all.
+
+**Before: 3 of 4 held.** What got through was a message that *rebuilt the prompt's own section markers* and appended a forged rule section. Structural, not bad luck — the markers were fixed, guessable text.
+
+Three countermeasures, then **6 of 6**:
+
+- an **authenticity token** generated per run, embedded in every genuine marker
+- **defanging**: marker-like lines in foreign text get a `| ` prefix — still readable (an invoice has separator lines) but no longer shaped like a marker
+- **visibility without lockout**: foreign text is classified but never blocks, because the text comes from a stranger — a lockout would be a way to lock any user out by email
+
+The remaining risk is named openly: the prompt layer is probabilistic, not certain. The hard boundary is the tool cut — and within it, sending to arbitrary addresses is possible. Anyone who wants that excluded gives the rule mail tools without send tools.
+
+### Outlook Add-in
+
+An Office **web add-in** (XML manifest, `Mailbox 1.3`) brings the area into a task pane:
+
+- process the **selected message** with a rule, right from Outlook
+- generate a **reply preview**, edit it, send on a button press — the suggestion run has **no tools at all**, so an injection can trigger nothing here, and no language model runs on send
+- sign in **without a password** via the Exchange identity token — verified against the configured EWS address as the trust anchor, so nobody can present a validly signed token from *some other* Exchange
+
+> Microsoft's **new** Outlook for Windows does not support on-premises Exchange accounts at all — independently of add-ins. Supported: classic Outlook (M365 / Office 2021+) and Outlook on the web. Full guide: [`docs/outlook-addin.md`](docs/outlook-addin.md).
+
+---
+
+## SAP Analysis Area
+
+> Skill `sap` — read-only by construction.
+
+A dedicated `/sap` area for management, reachable only for users on the SAP allow-list. Pick an analysis template, add a free-text question if you like, and the agent evaluates and answers with figures and sources.
+
+**24 templates in 6 categories**, cut for a stock corporation: operational analysis, segment reporting (IFRS 8), expected credit losses (IFRS 9), group consolidation, internal controls and separation of duties, VAT/Intrastat, ESG/CSRD, and forecast deviation as an early warning — the last one states in its own task text that it does **not** replace the legal assessment.
+
+- **Read-only is the area's promise**, held twice: hard in the SAP client (OData `GET` only, SQL `SELECT`/`WITH` only, RFC whitelist) *and* in the catalog — a test rejects any template text containing a writing keyword, because otherwise the run ends in an error message instead of an analysis.
+- **Personal SAP accounts**: each user stores their own credentials; the admin's account becomes the shared read-only fallback. Before this, everyone with access inherited the permissions of one server account.
+- **Certificate pinning** instead of switching validation off: exactly one certificate becomes the trust anchor, validation stays on, a change aborts and has to be accepted deliberately. Whether pinning would actually work is **measured** with a third handshake, not inferred.
+- The **history stores the question, never the result** — business figures have no business in browser storage.
+
+---
+
+## Short Tracks
+
+> Skill `short-tracks` — off by default.
+
+A board of named **drop zones**, each with a stored prompt. Drag a file or a URL onto one and it runs: result on the card, generated files as download chips. Admins create global zones, every user creates their own. Queue with an adjustable concurrency limit; per zone you choose "each file separately" or "all together".
+
+Why a normal user may store prompts here, when that is otherwise an admin matter: the run only starts because a human dropped something on it, it carries that person's identity, it is **always unprivileged**, and its toolset is a whitelist drawn from admin-approved areas (read + document generation is the default; knowledge, read-only business systems and shell must be switched on).
+
+Injection probes here went **1 of 6 → 6 of 6**. Defanging marker lines was not enough on its own — the line loses its *shape*, not its *meaning*. What worked: repeating the actual task **verbatim at the very end** of the prompt (the forged marker had simply been closer to the answer), breaking structure words inside foreign text so they cannot be rebuilt, and a per-run authenticity token.
+
+---
+
 ## WhatsApp Integration
 
 Jarvis uses [Baileys v7](https://github.com/WhiskeySockets/Baileys) to connect to WhatsApp Web — **no official API or business account required**.
@@ -539,18 +716,32 @@ Only numbers listed in `WA_ALLOWED_NUMBERS` can send tasks to Jarvis. Self-chat 
 Drop documents into watched folders and Jarvis can search them during tasks.
 
 ### Supported Formats
-- PDF (`.pdf`) — full text extraction
-- Word Documents (`.docx`)
-- Plain Text (`.txt`, `.md`)
-- Any text format
+- PDF (`.pdf`) — full text extraction, OCR for scanned pages
+- Word, Excel, PowerPoint (`.docx`, `.xlsx`, `.pptx`)
+- Images (`.png`, `.jpg`) — OCR via tesseract
+- Plain text (`.txt`, `.md`) and any text format
 
-### Search Modes
+When the text layer of a PDF turns out to be **damaged** — a broken font cmap turns `01.07.2026` into `OL.O7.2026` while the character count looks perfectly healthy — Jarvis measures both readings on a two-page sample and only re-reads the document with OCR if OCR actually wins.
 
-| Mode | Description |
-|------|-------------|
-| **Auto** | Tries vector search first, falls back to TF-IDF |
-| **TF-IDF** | Fast keyword-based search, works offline |
-| **Vector** | Semantic search via ChromaDB + multilingual embeddings |
+### How Search Works
+
+Every query runs through three channels, fused by Reciprocal Rank Fusion:
+
+| Channel | Purpose |
+|---------|---------|
+| **Semantic (full query)** | Meaning of the question as asked |
+| **Semantic (content words)** | Same, with question filler removed — filler measurably drags the query vector away |
+| **Lexical (BM25)** | Exact identifiers, error codes, product names — where embeddings are structurally weak |
+
+Chunking is 200 words with 40 words overlap (kept under the 512-token limit of the embedding model, or the tail would be silently truncated and unfindable). Results are filtered by an absolute *and* a relative score cut; self-written learning notes are down-weighted so they cannot become the top hit for the very question they were named after.
+
+A **TF-IDF index** remains as a fallback when the vector stack is unavailable.
+
+### Knowledge Groups
+
+Documents can belong to several logical groups; a search can be scoped to one. The group filter is applied **inside** the search — not afterwards — because post-filtering silently loses hits: the relative score cut would otherwise measure against a top hit from a different group.
+
+> Knowledge groups organize and scope. They are **not** a read barrier — every authenticated user can reach every group's content through chat.
 
 ### Configuration
 
@@ -559,6 +750,17 @@ KNOWLEDGE_DIRS=/home/jarvis/docs,/opt/company-wiki
 ```
 
 Or configure via the Settings UI. Files are indexed automatically on change.
+
+### Sync Between Sites
+
+Several Jarvis instances in one network can share knowledge one-way. An admin at site A shares a folder (🔗 on the folder row) and gets one token; site B adds the site and **pulls** it. The result is a local mirror *and* RAG entries.
+
+- **Incremental** via manifest + SHA-256; the receiver compares against the stored manifest **and** the disk, so a file deleted by hand comes back
+- **TLS pinned in the transport layer**, not checked afterwards — the confirmed certificate is the only trust anchor, so the token never travels to an unverified peer
+- The **mirror is write-protected** (HTTP 409, not 403 — no permission is missing, the folder is externally owned) and an existing knowledge folder can never be chosen as a target, because the first sync would delete whatever else is in it
+- Revocation and outage **leave the copy in place** and report the reason in plain language
+
+> Mirrored knowledge is readable by **all** users at the receiving site. Knowledge groups organize, they do not restrict reading. What you do not want everyone to see, you do not mirror.
 
 ### Knowledge Editor Permissions
 
@@ -755,6 +957,17 @@ A native, **signed** Android app under `android/`:
 - **Active Directory / LDAP** domain login
 
 Build: open `android/` in Android Studio and run (release builds are signed via a `.jks` keystore).
+
+### 🧩 Office Add-ins
+
+Two Office web add-ins put Jarvis where the work already happens — both served by this server, both signing in without a password where the platform allows it:
+
+| Add-in | What it does |
+|---|---|
+| **Outlook** | `/email` in a task pane: process the selected message with a rule, preview and edit a reply before sending. Classic Outlook and Outlook on the web. |
+| **Excel** | A chat window against the **currently open workbook** — ask about the sheet in front of you, let changes be applied. |
+
+The Outlook manifest is **generated per server**, never kept as a file: every URL inside it has to point at *this* installation, and a repo copy would have to be edited per server. The task pane also tells you when the installed manifest is out of date — Microsoft only auto-updates add-ins from the store, so for an in-house Exchange it stays `Remove-App` + `New-App`.
 
 ### 🍎 iOS
 

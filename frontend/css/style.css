@@ -1640,12 +1640,6 @@ body.light .model-discover-item:hover { background-color: #eef0f4 !important; }
     white-space: pre-wrap;
     word-break: break-word;
 }
-.conv-log-empty {
-    text-align: center;
-    color: var(--text-muted);
-    padding: 24px;
-    font-size: 0.85rem;
-}
 
 /* Debug-Button */
 /* Exakt wie .header-status Badge */

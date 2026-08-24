@@ -43,10 +43,10 @@
    hingetippt hat, waere die Luecke, die es zu verhindern gilt. Deshalb
    EINMAL der Ordner-Dialog – danach nie wieder.
 
-   WAS DEN PFAD WIRKLICH BENUTZT, steht deshalb daneben: eine fertige
-   `curl.exe`-Zeile, die aus dem Feld gebildet wird und direkt dorthin
-   schreibt. Sie ist der Weg fuer Firefox/Safari, fuer Automatisierung – und
-   fuer jeden, der den Ordner-Dialog nicht will.
+   Die frueher daneben angebotene `curl.exe`-Zeile ist auf Vorgabe des Nutzers
+   entfallen (2026-08-24). Wer den Dialog nicht will oder einen anderen Browser
+   benutzt, laedt das Manifest herunter und legt es von Hand in den Ordner –
+   der Hinweis am Knopf sagt das.
 
    MASSGEBLICH IST DER FELDINHALT, nicht der gespeicherte Wert (das war der
    eigentliche Fehler): wer den Pfad eintippt und sofort auf den Knopf drueckt,
@@ -252,7 +252,6 @@
         var pfad = feldPfad();
         var hoch = !!pfad && kannSpeichern();
         if (dl) dl.textContent = hoch ? _UP_TEXT : _DL_TEXT;
-        befehlAktualisieren(pfad);
         if (!hint) return;
         if (hoch && _ordner) {
             hint.innerHTML = 'Der Ordner <b>' + esc(_ordner.name || '?') + '</b> ist gemerkt – ' +
@@ -262,51 +261,23 @@
             hint.style.color = '';
             hint.style.display = '';
         } else if (hoch) {
-            hint.innerHTML = 'Der Knopf fragt <b>einmal</b> nach dem Zielordner und merkt ' +
-                'ihn sich – ab dann schreibt er ohne Dialog dorthin und speichert den Pfad ' +
-                'gleich mit. <b>Warum nicht gleich der Pfad von oben?</b> Kein Browser darf ' +
-                'in einen Ordner schreiben, der ihm nur als Text genannt wurde – das ist ' +
-                'eine Sicherheitsgrenze des Browsers. Wer den Dialog nicht will, nimmt die ' +
-                'Befehlszeile unter dem Feld: die benutzt den Pfad direkt.';
-            hint.style.color = '';
-            hint.style.display = '';
+            // Pfad da, Ordner noch nicht gemerkt: der Erklaertext zum
+            // Ordner-Dialog ist auf Vorgabe des Nutzers entfallen. Der Zweig
+            // MUSS bleiben – ohne ihn faellt dieser Zustand in den Zweig
+            // darunter und behauptet, der Browser koenne nicht schreiben.
+            hint.style.display = 'none';
         } else if (pfad) {
+            // Die Befehlszeile als Ausweg ist entfallen – der Hinweis darf sie
+            // nicht mehr nennen, sonst schickt er den Admin an eine Stelle,
+            // die es nicht gibt.
             hint.innerHTML = 'Ihr Browser kann nicht direkt in einen Ordner schreiben – das ' +
-                'können nur <b>Chrome und Edge</b>. Nehmen Sie die Befehlszeile unter dem ' +
-                'Feld, oder laden Sie das Manifest herunter und legen es von Hand hinein.';
+                'können nur <b>Chrome und Edge</b>. Laden Sie das Manifest herunter und ' +
+                'legen es von Hand in den Ordner.';
             hint.style.color = '';
             hint.style.display = '';
         } else {
             hint.style.display = 'none';
         }
-    }
-
-    /* Die fertige Befehlszeile – DER Weg, der den eingetragenen Pfad wirklich
-       benutzt. `curl.exe` liegt auf jedem Windows 10/11 bei und laeuft in
-       Eingabeaufforderung wie PowerShell; `Invoke-WebRequest` scheidet aus, weil
-       die mitgelieferte PowerShell 5.1 kein `-SkipCertificateCheck` kennt und an
-       einem selbst ausgestellten Zertifikat scheitert – mit einer Meldung, die
-       niemand mit dem Zertifikat in Verbindung bringt.
-       `-k` steht deshalb drin und wird im Hinweis auch begruendet. */
-    function befehlAktualisieren(pfad) {
-        var box = $('xa-cmd-box');
-        var pre = $('xa-cmd');
-        var hint = $('xa-cmd-hint');
-        if (!box || !pre) return;
-        if (!pfad) { box.style.display = 'none'; return; }
-        // Kein Escaping in eine Zeichenkette hinein, sondern textContent: der
-        // Pfad ist Fremdeingabe und stuende sonst als Markup in einer
-        // Administratoren-Oberflaeche.
-        var ziel = pfad.replace(/[\\/]+$/, '') + '\\' + (_dateiname || 'excel-addin.xml');
-        pre.textContent = 'curl.exe -k -o "' + ziel + '" ' +
-                          location.origin + '/excel-addin/manifest.xml';
-        if (hint) {
-            hint.textContent = '-k überspringt die Zertifikatsprüfung – nötig, solange dieser '
-                + 'Server ein selbst ausgestelltes Zertifikat verwendet. Die Zeile schreibt '
-                + 'in genau den Pfad oben; sie läuft auf Ihrem Arbeitsplatz, nicht auf dem '
-                + 'Server.';
-        }
-        box.style.display = '';
     }
 
     /* Dateiname aus dem Antwortkopf statt nachgebaut – so folgt er dem Branding

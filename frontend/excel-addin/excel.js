@@ -62,7 +62,10 @@
     var _laeuft = false;
     var _verlauf = [];        // [{rolle:'user'|'bot', text}]
     var _vorschlag = null;    // {aenderungen, abgelehnt, zusammenfassung}
-    var _rueckgaengig = null; // [{blatt, adresse, formeln}] fuer eigenes Undo
+    // Der bereits GESCHRIEBENE Vorschlag bleibt sichtbar stehen. Bei
+    // automatischer Uebernahme sieht der Benutzer den Diff sonst NIE – die
+    // Zellen aendern sich, und was geaendert wurde, steht nirgends.
+    var _erledigt = null;
     var _updServer = '';
     var _ctxKurz = '';        // letzte gelesene Bezugszeile
 
@@ -85,6 +88,26 @@
        Endlosschleife mit RICHTIGEM Kennwort und ohne Fehlermeldung. */
     var _tokenRam = '';
     var _speicherGeht = true;
+
+    /* Automatische Uebernahme. VORGABE AN (Vorgabe des Nutzers). Der
+       Rueckfall im Arbeitsspeicher ist derselbe Grund wie beim Token: im
+       iframe von Excel im Web kann `localStorage` gesperrt sein.
+       Gepruefft wird auf die Zeichenkette '0' – ein FEHLENDER Wert heisst
+       "noch nie entschieden" und damit AN, nicht AUS. */
+    var AUTO_KEY = 'jarvis_xl_autoapply';
+    var _autoRam = null;      // null = nichts entschieden
+    function autoAn() {
+        try {
+            var v = localStorage.getItem(AUTO_KEY);
+            if (v !== null) return v !== '0';
+        } catch (e) { _speicherGeht = false; }
+        return _autoRam === null ? true : _autoRam;
+    }
+    function autoSetzen(an) {
+        _autoRam = !!an;
+        try { localStorage.setItem(AUTO_KEY, an ? '1' : '0'); }
+        catch (e) { _speicherGeht = false; }
+    }
 
     function token() {
         for (var i = 0; i < TOKEN_KEYS.length; i++) {
@@ -481,6 +504,8 @@
             return '<div class="xl-msg xl-msg-bot' + (m.fehler ? ' xl-msg-err' : '') +
                 '">' + esc(m.text) + '</div>';
         }).join('');
+        // Erst der erledigte, dann der offene Vorschlag – zeitliche Folge.
+        if (_erledigt) html += diffHtml(_erledigt, true);
         if (_vorschlag) html += diffHtml(_vorschlag);
         box.innerHTML = html;
         if (_vorschlag) diffBinden();
@@ -492,7 +517,7 @@
         return a.wert === null || a.wert === undefined ? '' : String(a.wert);
     }
 
-    function diffHtml(v) {
+    function diffHtml(v, erledigt) {
         var n = (v.aenderungen || []).length;
         var h = '<div class="xl-diff"><div class="xl-diff-head">' +
             esc(T('xl.diff_head', 'Vorgeschlagene Änderungen') + ' (' + n + ')') +
@@ -524,6 +549,14 @@
                 h += esc(ort + (a.grund || '')) + '<br>';
             });
             h += '</div>';
+        }
+        if (erledigt) {
+            // KEINE Knoepfe: es ist schon geschrieben. Ein zweites
+            // "Uebernehmen" darunter wuerde behaupten, es waere noch offen.
+            h += '<div class="xl-diff-done">' + esc(v.auto
+                ? T('xl.applied_auto', 'Automatisch übernommen.')
+                : T('xl.applied_note', 'Übernommen.')) + '</div></div>';
+            return h;
         }
         h += '<div class="xl-row">' +
             '<button class="xl-btn xl-btn-primary" id="xl-apply">' +
@@ -557,6 +590,7 @@
         }
         feld.value = '';
         _vorschlag = null;
+        _erledigt = null;
         _verlauf.push({ rolle: 'user', text: text });
         _verlauf.push({ rolle: 'wait', text: T('xl.reading', 'Lese die Tabelle …') });
         zeichneVerlauf();
@@ -634,7 +668,18 @@
             };
             // Alten Inhalt der betroffenen Zellen holen, damit der Diff beide
             // Seiten zeigt. Ein Diff mit nur einer Seite ist kein Diff.
-            alteWerteLesen(_vorschlag.aenderungen).then(zeichneVerlauf);
+            //
+            // DIE AUTO-UEBERNAHME HAENGT AN DIESEM `then`, nicht am
+            // Antworteingang: `uebernehmenJetzt()` verwirft `_vorschlag`, und
+            // `alteWerteLesen` schreibt seine Ergebnisse IN dessen Eintraege.
+            // Umgekehrte Reihenfolge = ein erledigter Diff ohne die linke
+            // Seite, also wieder kein Diff.
+            alteWerteLesen(_vorschlag.aenderungen).then(function () {
+                zeichneVerlauf();
+                if (autoAn() && _vorschlag && _vorschlag.aenderungen.length) {
+                    uebernehmenJetzt(true);
+                }
+            });
         }
         if (!d.text && !(d.aenderungen || []).length) {
             _verlauf.push({
@@ -705,13 +750,14 @@
             });
     }
 
-    function uebernehmenJetzt() {
-        var aenderungen = _vorschlag.aenderungen.slice();
+    function uebernehmenJetzt(auto) {
+        var vorschlag = _vorschlag;
+        var aenderungen = vorschlag.aenderungen.slice();
         melde('xl-status', T('xl.writing', 'Schreibe …'));
+        _laeuft = true;
         setzeLaeuft(true);
 
         Excel.run(function (ctx) {
-            var schnappschuss = [];
             var ziele = [];
             aenderungen.forEach(function (a) {
                 var s = a.blatt ? ctx.workbook.worksheets.getItem(a.blatt)
@@ -721,17 +767,6 @@
                 ziele.push({ a: a, r: r, s: s });
             });
             return ctx.sync().then(function () {
-                // SNAPSHOT VOR DEM SCHREIBEN. Office.js-Schreibvorgaenge landen
-                // nicht im Undo-Stack von Excel – Strg+Z holt sie nicht zurueck.
-                // Ohne diesen Schnappschuss gaebe es keinen Rueckweg.
-                ziele.forEach(function (z) {
-                    schnappschuss.push({
-                        blatt: z.a.blatt || '',
-                        adresse: z.a.adresse,
-                        formeln: JSON.parse(JSON.stringify(z.r.formulas || []))
-                    });
-                });
-
                 ziele.forEach(function (z) {
                     var zeilen = z.r.rowCount || 1;
                     var spalten = z.r.columnCount || 1;
@@ -794,13 +829,15 @@
                             });
                         });
                     });
-                    return { schnappschuss: schnappschuss, kaputt: kaputt };
+                    return { kaputt: kaputt };
                 });
             });
         }).then(function (erg) {
-            _rueckgaengig = erg.schnappschuss;
-            var u = $('xl-undo');
-            if (u) u.style.display = '';
+            // Der geschriebene Vorschlag bleibt SICHTBAR (ohne Knoepfe) – bei
+            // automatischer Uebernahme ist das die einzige Stelle, an der
+            // steht, was gerade in die Mappe gelaufen ist.
+            vorschlag.auto = !!auto;
+            _erledigt = vorschlag;
             _vorschlag = null;
             if (erg.kaputt.length) {
                 // Nicht stillschweigend stehen lassen: der Benutzer soll
@@ -809,7 +846,7 @@
                     rolle: 'bot', fehler: true,
                     text: T('xl.err_cells', 'Achtung – diese Zellen zeigen einen Fehlerwert:') +
                         '\n' + erg.kaputt.slice(0, 10).join('\n') + '\n\n' +
-                        T('xl.err_hint', 'Du kannst die Änderung mit „Letzte Änderung zurücknehmen" rückgängig machen.')
+                        T('xl.err_hint', 'Du kannst die Änderung in Excel mit Strg+Z rückgängig machen.')
                 });
                 melde('xl-status', T('xl.written_err', 'Geschrieben – mit Fehlerwerten.'), 'fehler');
             } else {
@@ -820,42 +857,16 @@
             melde('xl-status', T('xl.write_failed', 'Schreiben fehlgeschlagen:') + ' ' +
                 String(e && e.message || e), 'fehler');
         }).then(function () {
+            _laeuft = false;
             setzeLaeuft(false);
         });
-    }
-
-    function rueckgaengig() {
-        if (!_rueckgaengig || !_rueckgaengig.length) return;
-        frage(T('xl.undo_ask', 'Die zuletzt geschriebenen Zellen auf ihren vorherigen Inhalt zurücksetzen?'),
-            T('xl.undo_yes', 'Zurücknehmen'), true).then(function (ja) {
-                if (!ja) return;
-                setzeLaeuft(true);
-                Excel.run(function (ctx) {
-                    _rueckgaengig.forEach(function (s) {
-                        var sh = s.blatt ? ctx.workbook.worksheets.getItem(s.blatt)
-                            : ctx.workbook.worksheets.getActiveWorksheet();
-                        // `formulas` stellt BEIDES wieder her: eine Zelle mit
-                        // festem Wert traegt dort schlicht diesen Wert.
-                        sh.getRange(s.adresse).formulas = s.formeln;
-                    });
-                    return ctx.sync();
-                }).then(function () {
-                    _rueckgaengig = null;
-                    var u = $('xl-undo');
-                    if (u) u.style.display = 'none';
-                    melde('xl-status', T('xl.undone', 'Änderung zurückgenommen.'), 'ok');
-                }).catch(function (e) {
-                    melde('xl-status', T('xl.undo_failed', 'Zurücknehmen fehlgeschlagen:') +
-                        ' ' + String(e && e.message || e), 'fehler');
-                }).then(function () { setzeLaeuft(false); });
-            });
     }
 
     function setzeLaeuft(an) {
         var s = $('xl-send');
         if (s) {
             s.disabled = !!an;
-            s.textContent = an ? T('xl.working', 'Arbeitet …') : T('xl.send', 'Fragen');
+            s.textContent = an ? T('xl.working', 'Arbeitet …') : T('xl.send', 'Senden');
         }
     }
 
@@ -1066,18 +1077,40 @@
             if (ev.key === 'Enter') anmelden();
         });
         if ((e = $('xl-send'))) e.addEventListener('click', fragen);
-        if ((e = $('xl-undo'))) e.addEventListener('click', rueckgaengig);
+        if ((e = $('xl-auto'))) {
+            // Zustand ZUERST setzen: das Markup traegt `checked`, aber wer
+            // einmal abgewaehlt hat, darf nach dem Neuladen nicht wieder
+            // eine automatische Uebernahme bekommen.
+            e.checked = autoAn();
+            e.addEventListener('change', function () { autoSetzen(e.checked); });
+        }
         if ((e = $('xl-logout'))) e.addEventListener('click', abmelden);
         if ((e = $('xl-frage'))) e.addEventListener('keydown', function (ev) {
-            // Strg+Enter sendet; Enter allein macht einen Zeilenumbruch – eine
-            // Frage an eine Tabelle ist oft mehrzeilig.
-            if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) {
-                ev.preventDefault();
-                fragen();
-            }
+            if (ev.key !== 'Enter') return;
+            // ENTER sendet (Vorgabe des Nutzers). Fuer den mehrzeiligen Fall
+            // bleibt Umschalt+Enter – ein Feld, aus dem es GAR KEINEN Weg zum
+            // Zeilenumbruch gibt, waere ein Rueckschritt: eine Frage an eine
+            // Tabelle ist oft mehrzeilig, und `rows="3"` verspricht das auch.
+            if (ev.shiftKey) return;
+            // Strg+Enter sendet weiter mit – es war bis hierher der einzige
+            // Sendeweg, und wer ihn gewohnt ist, soll nicht ins Leere greifen.
+            ev.preventDefault();
+            fragen();
         });
         if ((e = $('xl-theme'))) e.addEventListener('click', function () {
-            if (window.toggleTheme) window.toggleTheme();
+            // `theme.js` exportiert `applyTheme`, NICHT `toggleTheme` – die
+            // frueher geprueefte Funktion gab es nie, also tat der Knopf
+            // NICHTS (kein Fehler, keine Reaktion). Gleicher Fehler wie im
+            // Outlook-Add-in, dort schon behoben.
+            var hell = !document.body.classList.contains('light');
+            // Der Rueckfall schaltet zwar die Klasse, feuert aber KEIN
+            // `jarvis:themechange` – branding.js zieht die Hell-Farben der
+            // Marke dann nicht nach. Deshalb bevorzugt `applyTheme`.
+            if (window.applyTheme) window.applyTheme(hell);
+            else document.body.classList.toggle('light', hell);
+            try {
+                localStorage.setItem('jarvis_theme', hell ? 'light' : 'dark');
+            } catch (e2) { }
         });
         if ((e = $('xl-lang'))) e.addEventListener('click', function () {
             var neu = (window._lang === 'en') ? 'de' : 'en';

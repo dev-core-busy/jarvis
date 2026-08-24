@@ -52,7 +52,7 @@ const JS_CODE = nurCode(JS);
    ══════════════════════════════════════════════════════════════════════ */
 abschnitt('0. Formelbezuege verschieben');
 
-function fensterMitStub(officeDa) {
+function fensterMitStub(officeDa, vorher) {
     const dom = new JSDOM(HTML, { url: 'https://jarvis.test/excel-addin/taskpane.html?mv=1.0.0.0',
                                   runScripts: 'outside-only' });
     const win = dom.window;
@@ -68,6 +68,10 @@ function fensterMitStub(officeDa) {
             context: { requirements: { isSetSupported: () => false } }
         };
     }
+    // Optional ein Skript VOR excel.js (theme.js) – die Reihenfolge ist die
+    // des Fensters: theme.js bindet zuerst, excel.js haengt seinen eigenen
+    // Handler daneben.
+    if (vorher) win.eval(vorher);
     win.eval(JS);
     return { dom, win };
 }
@@ -159,7 +163,18 @@ pruefe(!!doc0.getElementById('xl-app'), 'Anwendungsbereich vorhanden');
 pruefe(!!doc0.getElementById('xl-chat'), 'Verlauf vorhanden');
 pruefe(!!doc0.getElementById('xl-frage'), 'Eingabefeld vorhanden');
 pruefe(!!doc0.getElementById('xl-ctx'), 'Bezugszeile vorhanden');
-pruefe(!!doc0.getElementById('xl-undo'), 'Rueckgaengig-Knopf vorhanden');
+// Der Rueckgaengig-Knopf ist auf Vorgabe des Nutzers entfallen (2026-08-24):
+// Strg+Z in Excel holt die Aenderung zurueck. Er darf nicht zurueckkommen –
+// zwei Rueckwege nebeneinander waeren zwei Wahrheiten.
+pruefe(!doc0.getElementById('xl-undo'), 'kein eigener Rueckgaengig-Knopf mehr');
+pruefe(HTML.indexOf('xl-undo') < 0 && JS_CODE.indexOf('xl-undo') < 0,
+       '... und kein toter Code dazu');
+pruefe(JS_CODE.indexOf('schnappschuss') < 0,
+       'auch der Schnappschuss vor dem Schreiben ist weg (Strg+Z ist der Rueckweg)');
+// Automatische Uebernahme: Vorgabe AN. Das `checked` steht im Markup.
+const autoBox = doc0.getElementById('xl-auto');
+pruefe(!!autoBox, 'Kontrollkaestchen "automatisch uebernehmen" vorhanden');
+pruefe(!!autoBox && autoBox.checked === true, 'und es ist per Vorgabe angekreuzt');
 
 // Der Bestaetigungsdialog ist Pflicht: window.confirm ist in Office-
 // Aufgabenfenstern je nach Host unterdrueckt und liefert dann keinen Wert.
@@ -221,13 +236,6 @@ pruefe(/getRangeByIndexes/.test(JS_CODE),
 // Fehlerwerte nach dem Schreiben pruefen statt einen Formelparser zu bauen.
 pruefe(/NAME\\\?/.test(JS_CODE) && /load\('values'\)/.test(JS_CODE),
        'prueft nach dem Schreiben auf Fehlerwerte');
-
-// Snapshot VOR dem Schreiben – Office.js-Schreibvorgaenge sind nicht im
-// Undo-Stack von Excel.
-const posSnap = JS_CODE.indexOf('schnappschuss.push');
-const posWrite = JS_CODE.indexOf('z.r.formulas = m');
-pruefe(posSnap > 0 && posWrite > 0 && posSnap < posWrite,
-       'Schnappschuss wird VOR dem Schreiben genommen');
 
 // copyFrom nur, wenn ExcelApi 1.9 wirklich da ist.
 pruefe(/isSetSupported\('ExcelApi', '1\.9'\)/.test(JS_CODE),
@@ -309,7 +317,12 @@ function excelStub(zustand) {
 
 function warte(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-(async function ablauf() {
+/* Angemeldetes Fenster mit Excel-Attrappe. EIN Aufbau fuer Abschnitt 3
+   (Handbetrieb) und den Auto-Abschnitt – zwei Fassungen desselben Stubs waeren
+   beim naechsten Feld auseinandergelaufen. `opt.auto` legt den gespeicherten
+   Zustand der Automatik VOR dem Laden fest. */
+function angemeldetesFenster(opt) {
+    opt = opt || {};
     const zustand = { geschrieben: [], copyFrom: false, gesendet: [] };
     const dom = new JSDOM(HTML, { url: 'https://jarvis.test/excel-addin/taskpane.html?mv=1.0.0.0',
                                   runScripts: 'outside-only' });
@@ -321,10 +334,13 @@ function warte(ms) { return new Promise(r => setTimeout(r, ms)); }
     };
     win.Excel = excelStub(zustand);
     win.localStorage.setItem('jarvis_token', 'T');
+    if (opt.auto !== undefined) {
+        win.localStorage.setItem('jarvis_xl_autoapply', opt.auto);
+    }
 
-    win.fetch = (url, opt) => {
+    win.fetch = (url, opt2) => {
         const pfad = String(url).split('?')[0];
-        zustand.gesendet.push({ pfad, opt });
+        zustand.gesendet.push({ pfad, opt: opt2 });
         const j = (d) => Promise.resolve({ status: 200, ok: true, json: () => Promise.resolve(d) });
         if (pfad === '/api/excel-addin/version') return j({ ok: true, version: '1.0.0.0' });
         if (pfad === '/api/me') return j({ username: 'u', permissions: { excel: true } });
@@ -340,9 +356,19 @@ function warte(ms) { return new Promise(r => setTimeout(r, ms)); }
         return j({ ok: true });
     };
     win.eval(JS);
+    return { win, dom, zustand };
+}
+
+(async function ablauf() {
+    const { win, zustand } = angemeldetesFenster();
     await warte(60);
 
     const d = win.document;
+    // DIESER ABSCHNITT PRUEFT DEN HANDBETRIEB. Die automatische Uebernahme ist
+    // per Vorgabe AN – dann gibt es gar keinen "Uebernehmen"-Knopf mehr. Also
+    // ausdruecklich abwaehlen; der Auto-Fall hat seinen eigenen Abschnitt.
+    d.getElementById('xl-auto').checked = false;
+    d.getElementById('xl-auto').dispatchEvent(new win.Event('change', { bubbles: true }));
     pruefe(!d.getElementById('xl-app').classList.contains('hidden'),
            'nach gueltigem Token wird die Anwendung gezeigt');
     pruefe(zustand.gesendet.some(g => g.pfad === '/api/me'),
@@ -387,6 +413,27 @@ function warte(ms) { return new Promise(r => setTimeout(r, ms)); }
     pruefe(zustand.geschrieben.length === 0, 'Verwerfen schreibt nichts in die Mappe');
     pruefe(!d.querySelector('.xl-diff'), 'nach dem Verwerfen ist der Diff weg');
 
+    // ENTER muss WIRKLICH senden, nicht nur `preventDefault` rufen. Der
+    // Abschnitt "Enter sendet" weiter unten kann das nicht belegen (dort ist
+    // niemand angemeldet) – hier laeuft der echte Weg bis zum Endpunkt.
+    {
+        const vorher = zustand.gesendet.filter(g => g.pfad === '/api/excel/ask').length;
+        d.getElementById('xl-frage').value = 'per Enter';
+        d.getElementById('xl-frage').dispatchEvent(new win.KeyboardEvent('keydown',
+            { key: 'Enter', bubbles: true, cancelable: true }));
+        await warte(80);
+        const alle = zustand.gesendet.filter(g => g.pfad === '/api/excel/ask');
+        pruefe(alle.length === vorher + 1, 'Enter loest die Anfrage wirklich aus');
+        pruefe(alle.length > vorher &&
+               JSON.parse(alle[alle.length - 1].opt.body).frage === 'per Enter',
+               'und schickt den getippten Text mit');
+        // Kein nacktes `.click()`: gibt es keinen Diff (Gegenprobe!), ist der
+        // Knopf null und der WURF beendet den Testlauf – dann sieht ein
+        // beissender Waechter wie ein bestandener Lauf aus (Register).
+        const verw = d.getElementById('xl-discard');
+        if (verw) { verw.click(); await warte(20); }
+    }
+
     // Erneut fragen und diesmal uebernehmen.
     d.getElementById('xl-frage').value = 'nochmal';
     d.getElementById('xl-send').click();
@@ -415,8 +462,13 @@ function warte(ms) { return new Promise(r => setTimeout(r, ms)); }
     pruefe(!!g.v && g.v[0] && g.v[0][0] === '=E2*F2',
            'die vorgeschlagene Formel landet in der Zelle',
            JSON.stringify(g.v));
-    pruefe(d.getElementById('xl-undo').style.display !== 'none',
-           'Rueckgaengig-Knopf erscheint nach dem Schreiben');
+    // Der geschriebene Vorschlag bleibt SICHTBAR – ohne Knoepfe. Bei
+    // automatischer Uebernahme ist das die einzige Stelle, an der steht, was
+    // in die Mappe gelaufen ist.
+    pruefe(!!d.querySelector('.xl-diff-done'),
+           'der uebernommene Diff bleibt mit Vermerk stehen');
+    pruefe(!d.getElementById('xl-apply') && !d.getElementById('xl-discard'),
+           'und traegt keine Knoepfe mehr');
 
     win.close();
 
@@ -706,8 +758,6 @@ function warte(ms) { return new Promise(r => setTimeout(r, ms)); }
         const dl = w.document.getElementById('xa-download');
         pruefe(dl.textContent === 'Manifest herunterladen',
                'ohne Pfad heisst der Knopf "Manifest herunterladen"', dl.textContent);
-        pruefe(w.document.getElementById('xa-cmd-box').style.display === 'none',
-               'ohne Pfad steht keine Befehlszeile da');
         pruefe(w.document.getElementById('xa-dl-hint').style.display === 'none',
                'ohne Pfad steht kein Zusatzhinweis da');
         const ev = new w.MouseEvent('click', { bubbles: true, cancelable: true });
@@ -730,17 +780,12 @@ function warte(ms) { return new Promise(r => setTimeout(r, ms)); }
         const dl = w.document.getElementById('xa-download');
         pruefe(dl.textContent === 'Manifest hochladen',
                'mit Pfad heisst der Knopf "Manifest hochladen"', dl.textContent);
+        // Der Erklaertext zum Ordner-Dialog ist auf Vorgabe des Nutzers
+        // entfallen (2026-08-24) – ohne gemerkten Ordner steht hier NICHTS.
         const hint = w.document.getElementById('xa-dl-hint');
-        pruefe(hint.style.display !== 'none' && /Sicherheitsgrenze/.test(hint.textContent),
-               'der Hinweis begruendet, warum der Pfad nicht direkt benutzbar ist',
-               hint.textContent.slice(0, 80));
-        const cmd = w.document.getElementById('xa-cmd');
-        pruefe(w.document.getElementById('xa-cmd-box').style.display !== 'none',
-               'mit Pfad steht die fertige Befehlszeile da');
-        pruefe(cmd.textContent.indexOf('\\\\srv\\freigabe\\addins') >= 0,
-               'sie enthaelt GENAU den eingetragenen Pfad', cmd.textContent);
-        pruefe(cmd.textContent.indexOf('nexus-dp-excel-addin.xml') > 0,
-               'und den Dateinamen aus dem Antwortkopf (Branding)', cmd.textContent);
+        pruefe(hint.style.display === 'none',
+               'mit Pfad, aber ohne gemerkten Ordner steht kein Erklaertext da',
+               hint.textContent.slice(0, 60));
 
         const ev = new w.MouseEvent('click', { bubbles: true, cancelable: true });
         dl.dispatchEvent(ev);
@@ -873,8 +918,36 @@ function warte(ms) { return new Promise(r => setTimeout(r, ms)); }
     // Der Reiter ist durchgehend deutsch (wie der Jira-Reiter) – ein einzelner
     // i18n-Schluessel hier waere eine halbe Uebersetzung.
     const XPANEL = SETH.slice(ia, ja);
-    pruefe(XPANEL.indexOf('id="xa-cmd"') > 0 && XPANEL.indexOf('id="xa-dl-hint"') > 0,
-           'Befehlszeile und Hinweisfeld stehen im echten Markup');
+    pruefe(XPANEL.indexOf('id="xa-dl-hint"') > 0,
+           'das Hinweisfeld steht im echten Markup');
+    // Auf Vorgabe des Nutzers entfallen (2026-08-24): die curl-Zeile samt
+    // Erklaerung. Beides darf nicht zurueckkommen – weder im Markup noch als
+    // toter Code, der die Zeile weiter baut.
+    pruefe(XPANEL.indexOf('xa-cmd') < 0 && XPANEL.indexOf('Eingabeaufforderung') < 0,
+           'die Befehlszeile ist aus dem Markup entfernt');
+    pruefe(ADMIN_CODE.indexOf('xa-cmd') < 0 && ADMIN_CODE.indexOf('curl.exe') < 0,
+           '... und es gibt keinen toten Code mehr dazu');
+    pruefe(!/Sicherheitsgrenze des Browsers/.test(ADMIN_CODE),
+           'der Erklaertext zum Ordner-Dialog ist entfernt');
+
+    /* Die Liste "Was der Assistent darf" ist eine ZUSAGE an den Administrator.
+       Zwei ihrer Zeilen waren nach dem Umbau vom 2026-08-24 unwahr - genau die
+       Fehlerklasse, die in diesem Projekt dreimal teuer war (WA_TASK_PROMPT
+       versprach cron_create, der EWS-Hinweis das Gegenteil der Weiche). */
+    pruefe(XPANEL.indexOf('nie ohne Bestätigung') < 0,
+           'die Liste behauptet nicht mehr "nie ohne Bestätigung" (Automatik ist Vorgabe)');
+    pruefe(XPANEL.indexOf('Änderungen automatisch übernehmen') > 0,
+           '... sondern nennt das Kaestchen beim Namen');
+    pruefe(XPANEL.indexOf('Strg+Z holt die Änderung nicht zurück') < 0,
+           'die Liste behauptet nicht mehr, Strg+Z wirke nicht');
+    pruefe(XPANEL.indexOf('eigenen Rückweg') < 0,
+           '... und verspricht keinen eigenen Rueckweg mehr (den Knopf gibt es nicht)');
+    pruefe(/Strg\+Z/.test(XPANEL) && /Excel im Web/.test(XPANEL),
+           'sie nennt Strg+Z als Rueckweg UND die Einschraenkung fuer Excel im Web');
+    // Die Beschriftung im Fenster und der Text hier muessen dasselbe Kaestchen
+    // benennen - sonst sucht der Benutzer eine Einstellung, die anders heisst.
+    pruefe(HTML.indexOf('Änderungen automatisch übernehmen') > 0,
+           'und trifft die Beschriftung im Aufgabenfenster woertlich');
     // GEMELDET 2026-08-23: "was soll dieser Bullshit mit 'Ordner einmal
     // auswaehlen' und 'Pfad kopieren'". Beide Knoepfe sind weg und duerfen nicht
     // zurueckkommen – der Hochlade-Knopf erledigt beides selbst.
@@ -968,8 +1041,6 @@ function warte(ms) { return new Promise(r => setTimeout(r, ms)); }
         await warte(20);
         pruefe(dl.textContent === 'Manifest hochladen',
                'beim Tippen schaltet der Knopf sofort um', dl.textContent);
-        pruefe(w.document.getElementById('xa-cmd').textContent.indexOf('freigabe\\neu') > 0,
-               'und die Befehlszeile wandert mit');
 
         const vorher = spur.koerper.length;
         dl.dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true }));
@@ -1047,9 +1118,6 @@ function warte(ms) { return new Promise(r => setTimeout(r, ms)); }
         pruefe(spur.picker === 1, 'ohne showDirectoryPicker oeffnet der Speichern-Dialog',
                'dialoge=' + spur.picker);
         pruefe(spur.geschrieben.length === 1, 'und geschrieben wird trotzdem');
-        // Und die Befehlszeile steht daneben – sie braucht gar keine API.
-        pruefe(w.document.getElementById('xa-cmd').textContent.indexOf('curl.exe') === 0,
-               'die Befehlszeile ist der API-freie Weg');
         w.close();
     }
 
@@ -1067,6 +1135,200 @@ function warte(ms) { return new Promise(r => setTimeout(r, ms)); }
         pruefe(hint.textContent.indexOf('<img') >= 0,
                'und erscheint als Text');
         w.close();
+    }
+
+    /* ══════════════════════════════════════════════════════════════════
+       Automatische Uebernahme (Vorgabe AN)
+       ──────────────────────────────────────────────────────────────────
+       Der Handbetrieb steht in Abschnitt 3. Hier der Auto-Fall: nach der
+       Antwort wird OHNE Rueckfrage geschrieben – und der Diff bleibt
+       sichtbar stehen, sonst aendern sich Zellen und niemand sieht, welche.
+       ══════════════════════════════════════════════════════════════════ */
+    abschnitt('Automatische Uebernahme');
+    {
+        const { win, zustand } = angemeldetesFenster();
+        await warte(60);
+        const d = win.document;
+        pruefe(d.getElementById('xl-auto').checked === true,
+               'ohne gespeicherte Wahl ist die Automatik AN');
+
+        d.getElementById('xl-frage').value = 'Berechne die Marge';
+        d.getElementById('xl-send').click();
+        await warte(160);
+
+        pruefe(zustand.geschrieben.length > 0,
+               'geschrieben wird ohne jede Rueckfrage');
+        const dlg = d.getElementById('xl-ask');
+        pruefe(!dlg || dlg.classList.contains('hidden'),
+               'der Bestaetigungsdialog bleibt zu');
+        pruefe(!d.getElementById('xl-apply'),
+               'und es steht kein Uebernehmen-Knopf mehr da');
+
+        // Der Diff MUSS bleiben – er ist die einzige Stelle, an der steht,
+        // was gerade in die Mappe gelaufen ist.
+        const fertig = d.querySelector('.xl-diff-done');
+        pruefe(!!fertig, 'der uebernommene Diff bleibt sichtbar');
+        pruefe(!!fertig && /[Aa]utomatisch/.test(fertig.textContent),
+               'und ist als automatisch uebernommen gekennzeichnet',
+               fertig && fertig.textContent);
+        const diff = d.querySelector('.xl-diff');
+        pruefe(!!diff && /G2/.test(diff.textContent),
+               'mit Zelladresse');
+        pruefe(!!diff && /=E2\*F2/.test(diff.textContent),
+               'und der geschriebenen Formel');
+
+        // Die naechste Frage raeumt ihn ab – sonst stuende ein alter Diff
+        // UNTER der neuen Frage und saehe wie deren Ergebnis aus.
+        d.getElementById('xl-frage').value = 'noch etwas';
+        d.getElementById('xl-send').click();
+        // OHNE Wartezeit geprueft: `fragen()` raeumt auf und zeichnet noch
+        // synchron. Wer hier wartet, sieht schon den Diff der NEUEN Antwort
+        // (die Automatik ist schnell) und misst damit das Falsche.
+        pruefe(!d.querySelector('.xl-diff-done'),
+               'eine neue Frage raeumt den erledigten Diff sofort ab');
+        // Den angestossenen Lauf AUSLAUFEN lassen, bevor das Fenster zugeht:
+        // `close()` nimmt das `document` weg, und der noch laufende Lauf
+        // zeichnet danach in ein Nichts (Absturz des Testlaufs, nicht ein
+        // Fehlschlag – also nicht als Fehler erkennbar).
+        await warte(200);
+        win.close();
+    }
+    {
+        // Abwaehlen wird gemerkt: ein '0' im Speicher heisst AUS, ein
+        // FEHLENDER Wert heisst AN (nicht entschieden).
+        const { win, zustand } = angemeldetesFenster();
+        await warte(60);
+        const d = win.document;
+        const box = d.getElementById('xl-auto');
+        box.checked = false;
+        box.dispatchEvent(new win.Event('change', { bubbles: true }));
+        pruefe(win.localStorage.getItem('jarvis_xl_autoapply') === '0',
+               'das Abwaehlen wird gespeichert');
+
+        d.getElementById('xl-frage').value = 'Berechne die Marge';
+        d.getElementById('xl-send').click();
+        await warte(160);
+        pruefe(zustand.geschrieben.length === 0,
+               'abgewaehlt wird NICHTS ohne Zutun geschrieben');
+        pruefe(!!d.getElementById('xl-apply'),
+               'stattdessen steht der Uebernehmen-Knopf da');
+        win.close();
+    }
+    {
+        // Ein gespeichertes AUS muss das `checked` im Markup ueberstimmen –
+        // sonst bekaeme der Benutzer nach dem Neuladen wieder die Automatik.
+        const { win } = angemeldetesFenster({ auto: '0' });
+        await warte(60);
+        pruefe(win.document.getElementById('xl-auto').checked === false,
+               'ein gespeichertes AUS ueberstimmt das checked im Markup');
+        win.close();
+    }
+
+    /* ══════════════════════════════════════════════════════════════════
+       Tastatur im Eingabefeld
+       ──────────────────────────────────────────────────────────────────
+       ENTER sendet (Vorgabe des Nutzers, vorher nur Strg+Enter).
+       Umschalt+Enter muss den Zeilenumbruch BEHALTEN – sonst gibt es aus
+       einem dreizeiligen Feld keinen Weg zu einer mehrzeiligen Frage.
+       Geprueft wird ueber die ECHTE Bindung: `preventDefault` ist das
+       einzige beobachtbare Zeichen dafuer, dass gesendet statt umgebrochen
+       wird (jsdom fuehrt die Vorgabeaktion eines Textfelds nicht aus). */
+    abschnitt('Enter sendet');
+    {
+        const { win } = fensterMitStub(true);
+        await warte(60);
+        const doc = win.document;
+        const feld = doc.getElementById('xl-frage');
+
+        function taste(opt) {
+            const ev = new win.KeyboardEvent('keydown',
+                Object.assign({ key: 'Enter', bubbles: true, cancelable: true }, opt));
+            feld.dispatchEvent(ev);
+            return ev.defaultPrevented;
+        }
+
+        pruefe(taste({}) === true,
+               'Enter sendet (Vorgabeaktion unterbunden)');
+        pruefe(taste({ shiftKey: true }) === false,
+               'Umschalt+Enter macht weiter einen Zeilenumbruch');
+        pruefe(taste({ ctrlKey: true }) === true,
+               'Strg+Enter sendet weiter mit (der bisherige Weg)');
+        pruefe(taste({ metaKey: true }) === true,
+               'Cmd+Enter ebenso');
+
+        const ev = new win.KeyboardEvent('keydown',
+            { key: 'a', bubbles: true, cancelable: true });
+        feld.dispatchEvent(ev);
+        pruefe(ev.defaultPrevented === false,
+               'eine gewoehnliche Taste wird nicht abgefangen');
+
+        // Die Beschriftung heisst "Senden", nicht "Fragen" – der Knopf sendet
+        // auch Arbeitsauftraege ("trage in G2:G40 die Marge ein"), nicht nur
+        // Fragen. Geprueft in BEIDEN Sprachen, weil der Text aus i18n kommt.
+        pruefe(doc.getElementById('xl-send').getAttribute('data-i18n') === 'xl.send',
+               'der Sende-Knopf haengt an xl.send');
+        win.close();
+    }
+    {
+        const T = fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8');
+        pruefe(/'xl\.send':\s*'Senden'/.test(T), 'DE: Senden');
+        pruefe(/'xl\.send':\s*'Send'/.test(T), 'EN: Send');
+        pruefe(!/'xl\.send':\s*'(Fragen|Ask)'/.test(T),
+               'die alte Beschriftung kommt nicht zurueck');
+    }
+
+    /* ══════════════════════════════════════════════════════════════════
+       Hell/Dunkel-Umschalter
+       ──────────────────────────────────────────────────────────────────
+       Der Knopf rief `window.toggleTheme()` – eine Funktion, die es NIE
+       gab (`theme.js` exportiert `applyTheme`). Der Klick tat damit
+       nichts: keine Reaktion, kein Fehler. Derselbe Fehler war im
+       Outlook-Add-in schon behoben, hier nicht.
+
+       Geprueft wird der ECHTE Klick mit dem ECHTEN theme.js – eine
+       Quelltextpruefung auf "applyTheme" waere gruen, sobald das Wort
+       irgendwo steht. */
+    abschnitt('Hell/Dunkel');
+    {
+        const THEME = fs.readFileSync(path.join(ROOT, 'frontend/js/theme.js'), 'utf8');
+
+        pruefe(nurCode(THEME).indexOf('window.toggleTheme') < 0,
+               'theme.js exportiert KEIN toggleTheme (deshalb darf niemand darauf pruefen)');
+        pruefe(JS_CODE.indexOf('toggleTheme') < 0,
+               'excel.js ruft toggleTheme nicht mehr auf');
+
+        const { dom, win } = fensterMitStub(true, THEME);
+        // `start()` laeuft ueber `officeErmitteln().then(...)`, die Bindung
+        // steht also erst nach einem Durchlauf der Ereigniswarteschlange –
+        // ein Klick direkt nach `eval` trifft ins Leere.
+        await warte(60);
+        const doc = win.document;
+        const knopf = doc.getElementById('xl-theme');
+        pruefe(!!knopf, 'der Umschalter ist vorhanden');
+
+        // Start ist Dunkel (kein gespeicherter Wert).
+        pruefe(!doc.body.classList.contains('light'), 'Start: Dunkel');
+
+        knopf.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+        pruefe(doc.body.classList.contains('light'),
+               'ein Klick schaltet auf Hell');
+        pruefe(win.localStorage.getItem('jarvis_theme') === 'light',
+               'und merkt sich das (jarvis_theme)');
+
+        knopf.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+        pruefe(!doc.body.classList.contains('light'),
+               'ein zweiter Klick schaltet zurueck auf Dunkel');
+        pruefe(win.localStorage.getItem('jarvis_theme') === 'dark',
+               'und merkt sich auch das');
+
+        // branding.js zieht die Hell-Farben der Marke ueber dieses Ereignis
+        // nach – ohne `applyTheme` (nur Klasse umschalten) feuert es nicht.
+        var gesehen = 0;
+        doc.addEventListener('jarvis:themechange', function () { gesehen++; });
+        knopf.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+        pruefe(gesehen === 1, 'der Wechsel feuert jarvis:themechange (fuer branding.js)');
+
+        win.close();
     }
 
     console.log('\n' + '='.repeat(50));

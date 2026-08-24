@@ -8043,7 +8043,15 @@ body.light .kb-mirror-mark { color: color-mix(in srgb, var(--info) 72%, #000); }
 /* `.btn-primary` traegt im Projekt `width:100%` – in einer Flex-Zeile fuellt
  * das die ganze Breite und schiebt den Versionshinweis in die naechste Zeile
  * (dieselbe Falle wie beim Entfernen-Knopf der PPTX-Vorlage). */
-.xa-row .btn-primary, .xa-row .btn-secondary { flex: 0 0 auto; width: auto; }
+/* Schrift AUSDRUECKLICH setzen. Ein <button> erbt sie nicht – der Browser
+ * gibt ihm seine eigene (in Chrome 13.3px Arial); ein <a class="btn-primary">
+ * erbt dagegen `--font-body` mit 16px. Nebeneinander in derselben Zeile sah
+ * "Manifest hochladen" (Link) deshalb groesser und in anderer Schrift aus als
+ * "Pfad speichern" (Knopf). Hier gesetzt statt an `.btn-primary`: die Klasse
+ * traegt das ganze Projekt, und der Unterschied faellt nur auf, wo Link und
+ * Knopf NEBENEINANDER stehen. */
+.xa-row .btn-primary, .xa-row .btn-secondary { flex: 0 0 auto; width: auto;
+    font-family: var(--font-body); font-size: 0.82rem; line-height: 1.4; }
 /* Der Download ist ein LINK: der Endpunkt liefert Content-Disposition, es
  * braucht kein JS. Ein <a> mit Knopf-Klasse ist ohne diese Zeile
  * unterstrichen (Lehre von .em-btn und .ad-upd a). */

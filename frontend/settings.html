@@ -23,7 +23,7 @@
     <link rel="stylesheet" href="/static/css/theme.css?v=16">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=8">
-    <link rel="stylesheet" href="/static/css/style.css?v=159">
+    <link rel="stylesheet" href="/static/css/style.css?v=160">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=6">
 </head>
 
@@ -3183,7 +3183,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <span class="sk-openclaw-toggle" id="xa-sect-install-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="xa-sect-install-body">
-                                <p class="kb-hint" style="margin-bottom:10px;">Das Manifest wird bei jedem Abruf <b>für diesen Server</b> erzeugt – die enthaltenen Adressen zeigen auf ihn. Es muss in einen freigegebenen Ordner im Netz; die Arbeitsplätze tragen diesen Ordner einmalig in den Excel-Optionen als vertrauenswürdigen Katalog ein (per Gruppenrichtlinie ausrollbar).</p>
+                                <p class="kb-hint" style="margin-bottom:10px;">Das Manifest wird bei jedem Abruf <b>für diesen Server</b> erzeugt – die enthaltenen Adressen zeigen auf ihn. Es muss in einem Ordner liegen, den der Arbeitsplatz lesen kann, und dieser Ordner wird einmalig in den Excel-Optionen als vertrauenswürdiger Katalog eingetragen (per Gruppenrichtlinie ausrollbar). Üblich ist <b>eine Freigabe im Netz</b> für alle – tragen Sie deren Pfad unten ein, dann sieht jeder Benutzer auf <code>/excel</code> nur noch diesen Pfad. Bleibt das Feld leer, holt sich jeder das Manifest selbst und legt es in einen eigenen Ordner.</p>
                                 <!-- Der Einleitungstext darueber sagt bewusst NICHT
                                      "laden Sie es herunter": der Knopf laedt je nach
                                      hinterlegtem Katalogpfad herunter ODER hoch, und
@@ -3228,24 +3228,6 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <div class="xa-row">
                                     <button class="btn-primary" id="xa-katalog-save">Pfad speichern</button>
                                     <span class="kb-hint" id="xa-katalog-status"></span>
-                                </div>
-
-                                <!-- DER WEG, DER DEN EINGETRAGENEN PFAD WIRKLICH BENUTZT.
-                                     Ein Browser kann in keinen als TEXT angegebenen Pfad
-                                     schreiben - die File System Access API nimmt dafuer
-                                     ausdruecklich keine Zeichenkette an (Sicherheitsgrenze
-                                     jedes Browsers, keine Entscheidung dieses Projekts).
-                                     Eine Befehlszeile kann es. Sie wird aus dem Feld
-                                     darueber gebildet und aktualisiert sich beim Tippen. -->
-                                <div id="xa-cmd-box" style="display:none;margin-top:12px;">
-                                    <!-- Bewusst KEIN <label> in einer .form-group: dort
-                                         setzt style.css Grossschreibung, und der Satz saehe
-                                         wie eine Feldbeschriftung aus. Es ist eine Einleitung
-                                         zum Block darunter - und ein NEBENweg, der nicht
-                                         lauter sein darf als der Knopf oben. -->
-                                    <p class="kb-hint" style="margin-bottom:5px;"><b>Oder</b> in einer Eingabeaufforderung auf Ihrem Arbeitsplatz – schreibt direkt in den Pfad oben, ohne Dialog und ohne Chrome:</p>
-                                    <pre id="xa-cmd" class="xa-cmd"></pre>
-                                    <span class="kb-hint" id="xa-cmd-hint"></span>
                                 </div>
 
                                 <div style="margin-top:12px;">
@@ -3295,12 +3277,12 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                             <div class="kb-collapse-body" id="xa-sect-info-body" style="display:none;">
                                 <ul class="xa-facts">
-                                    <li><b>Geschrieben wird nie ohne Bestätigung.</b> Der Server schlägt vor; das Fenster zeigt jede Zelle mit altem und neuem Inhalt, der Benutzer entscheidet.</li>
+                                    <li><b>Geschrieben wird nur, was das Fenster vorher zeigt.</b> Der Server schlägt vor, das Fenster listet jede betroffene Zelle mit altem und neuem Inhalt. Per Vorgabe übernimmt es den Vorschlag sofort und lässt die Liste danach stehen; wer das Kästchen <i>„Änderungen automatisch übernehmen"</i> abwählt, entscheidet je Vorschlag selbst. Die Wahl trifft jeder Benutzer für sich.</li>
                                     <li><b>Der Lauf ist immer unprivilegiert</b> und hat als einziges Werkzeug <code>excel_vorschlag</code> – er kann weder ins Dateisystem noch ins Netz greifen.</li>
                                     <li><b>Formeln, die aus der Mappe herausgreifen, werden abgewiesen</b> (WEBSERVICE/WEBDIENST, RTD, CALL, REGISTER, DDE), bevor der Vorschlag im Fenster ankommt. Ein WEBSERVICE-Aufruf könnte Zellinhalte an eine fremde Adresse schicken, sobald die Mappe neu berechnet.</li>
                                     <li><b>Es geht nie ein ganzes Blatt an den Server</b>, sondern der Aufbau: Blattnamen, Spaltenüberschriften, Datentypen, wenige Beispielzeilen und die markierte Auswahl.</li>
                                     <li><b>Zellinhalte gelten als Fremdtext</b> – eine zugesandte Tabelle kann versuchen, den Assistenten zu steuern. Der Auftrag trägt eine Echtheitskennung, nachgebaute Abschnittsmarken werden entschärft.</li>
-                                    <li><b>Strg+Z holt die Änderung nicht zurück:</b> Schreibvorgänge eines Add-ins landen nicht im Undo-Stack von Excel. Das Fenster bietet dafür einen eigenen Rückweg an.</li>
+                                    <li><b>Zurückgenommen wird mit Strg+Z in Excel.</b> Im Excel am Arbeitsplatz holt das die geschriebenen Zellen zurück – auch mehrere Schritte weit. Einen eigenen Rückgängig-Knopf hat das Fenster deshalb nicht mehr. <b>Für <i>Excel im Web</i> ist das nicht zugesichert</b>: dort nimmt Excel Schreibvorgänge eines Add-ins nicht zwingend in seinen Verlauf auf. Wer dort arbeitet, wählt die automatische Übernahme besser ab und prüft jeden Vorschlag vorher.</li>
                                     <li><b>Jeder Benutzer meldet sich im Fenster an.</b> Anders als das Outlook-Add-in kann sich der Assistent nicht selbst anmelden – das dafür nötige Token gibt es nur für Postfächer. In Excel am Arbeitsplatz läuft das Fenster in einem <b>eigenen Browser-Kontext</b> (WebView2 bzw. WKWebView auf dem Mac); eine Anmeldung in Chrome oder Edge gilt dort <b>nicht</b>. Die Anmeldung ist einmalig und bleibt bestehen, bis der Office-Cache geleert oder das Add-in entfernt wird. Nur in <i>Excel im Web</i> läuft das Fenster im echten Browser und übernimmt eine dort bestehende Jarvis-Anmeldung.</li>
                                 </ul>
                             </div>
@@ -4698,7 +4680,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
     <script src="/static/js/icons.js?v=1"></script>
-    <script src="/static/js/i18n.js?v=168"></script>
+    <script src="/static/js/i18n.js?v=169"></script>
 <script src="/static/js/tabfill.js?v=1"></script>
     <script src="/static/js/cron.js?v=20"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -4729,7 +4711,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/theme.js?v=2"></script>
     <script src="/static/js/security_incidents.js?v=30"></script>
     <script src="/static/js/ldap_picker.js?v=10"></script>
-    <script src="/static/js/excel_admin.js?v=6"></script>
+    <script src="/static/js/excel_admin.js?v=7"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
     <script src="/static/js/sessions.js?v=4"></script>
     <script src="/static/js/agent_roles.js?v=2"></script>

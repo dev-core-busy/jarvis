@@ -8353,6 +8353,38 @@ def _email_skill_hinweis() -> dict | None:
                      "aktiviert ihn unter Einstellungen → Skills."}
 
 
+def _addin_zert_warnung(basis: str, was: str) -> str:
+    """Warntext, wenn das Serverzertifikat die Manifest-Adresse nicht deckt.
+
+    GEMELDET AUS DEM ECHTEN BETRIEB (2026-08-24): "Office 365 vertraut dem
+    Add-in nicht". Ursache war NICHT die Selbstsignierung – auf dem Server lag
+    ein Zertifikat der internen Firmen-CA fuer einen DNS-Namen, das Manifest
+    zeigte aber auf die IP-Adresse. Damit ist es eine NAMENSABWEICHUNG: Office
+    bricht das Laden ab, obwohl Zertifikat und Vertrauen in Ordnung sind. Von
+    aussen ist das nicht zu deuten, denn die Installation gelingt klaglos.
+
+    KEINE Sperre, sondern ein Hinweis: bei TLS-Terminierung im Rueckwaertsproxy
+    ist das lokale Zertifikat nicht massgeblich, und ein 400 wuerde dort eine
+    funktionierende Einrichtung abwuergen. Leerer Rueckgabewert = kein Anlass.
+    """
+    try:
+        from backend import addin as _ad
+        gedeckt, host, namen = _ad.zert_deckt_basis(basis)
+        if gedeckt is not False:
+            return ""
+        text = ("Das Serverzertifikat gilt nicht fuer '%s' (abgedeckt: %s). "
+                "Office laedt das %s dann nicht - es meldet, dass es dem Add-in "
+                "nicht vertraut. Abhilfe: das Manifest ueber den Namen abrufen, "
+                "auf den das Zertifikat lautet (bzw. 'addin_base_url' darauf "
+                "setzen) ODER ein Zertifikat hinterlegen, das diese Adresse "
+                "abdeckt." % (host, ", ".join(namen[:6]) or "keine Namen lesbar", was))
+        print("[Add-in] %s" % text, flush=True)
+        return text
+    except Exception as e:  # noqa: BLE001
+        print(f"[Add-in] Zertifikatspruefung nicht moeglich: {e}", flush=True)
+        return ""
+
+
 @app.get("/addin/manifest.xml")
 async def addin_manifest(request: Request):
     """XML-Manifest des Outlook-Add-ins, passend zu DIESEM Server erzeugt.
@@ -8386,17 +8418,21 @@ async def addin_manifest(request: Request):
                       "setze JARVIS_ADDIN_BASE (bzw. die Einstellung "
                       "'addin_base_url') auf diese Adresse." % basis},
             status_code=400)
-    return Response(
-        content=addin.manifest(basis),
-        media_type="application/xml",
-        headers={
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            # Damit der Browser des Administrators die Datei ablegt, statt sie
-            # anzuzeigen – hochgeladen wird sie als Datei. Der Stamm folgt dem
-            # Branding (``addin.dateiname()`` entschaerft ihn auf ASCII, es kann
-            # also nichts in den Kopf eingeschleust werden).
-            "Content-Disposition": 'attachment; filename="%s"' % addin.dateiname(),
-        })
+    _kopf = {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        # Damit der Browser des Administrators die Datei ablegt, statt sie
+        # anzuzeigen – hochgeladen wird sie als Datei. Der Stamm folgt dem
+        # Branding (``addin.dateiname()`` entschaerft ihn auf ASCII, es kann
+        # also nichts in den Kopf eingeschleust werden).
+        "Content-Disposition": 'attachment; filename="%s"' % addin.dateiname(),
+    }
+    # Deckt das Serverzertifikat diese Adresse? Sonst meldet Outlook spaeter
+    # nur, dass es dem Add-in nicht vertraut (Details in _addin_zert_warnung).
+    _warn = _addin_zert_warnung(basis, "Aufgabenfenster")
+    if _warn:
+        _kopf["X-Jarvis-Cert-Warn"] = _warn.encode("ascii", "replace").decode()
+    return Response(content=addin.manifest(basis),
+                    media_type="application/xml", headers=_kopf)
 
 
 @app.get("/api/addin/version")
@@ -8692,14 +8728,20 @@ async def excel_addin_manifest(request: Request):
                       "setze JARVIS_ADDIN_BASE (bzw. die Einstellung "
                       "'addin_base_url') auf diese Adresse." % basis},
             status_code=400)
-    return Response(
-        content=excel_addin.manifest(basis),
-        media_type="application/xml",
-        headers={
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Content-Disposition": 'attachment; filename="%s"'
-                                   % excel_addin.dateiname(),
-        })
+    _kopf = {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Content-Disposition": 'attachment; filename="%s"'
+                               % excel_addin.dateiname(),
+    }
+    # Der Hinweis reist im ANTWORTKOPF mit, nicht im XML: die Datei muss ein
+    # gueltiges Manifest bleiben. Der Admin-Reiter liest ihn beim Adress-Test
+    # und zeigt ihn an – sonst faellt die Namensabweichung erst am Arbeitsplatz
+    # auf, und dort als "Office vertraut dem Add-in nicht".
+    _warn = _addin_zert_warnung(basis, "Aufgabenfenster")
+    if _warn:
+        _kopf["X-Jarvis-Cert-Warn"] = _warn.encode("ascii", "replace").decode()
+    return Response(content=excel_addin.manifest(basis),
+                    media_type="application/xml", headers=_kopf)
 
 
 @app.get("/api/excel-addin/version")

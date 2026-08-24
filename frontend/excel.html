@@ -130,6 +130,11 @@
            der naechste Block bekommt sonst denselben Fehler. */
         .xp-row[hidden], .xp-steps[hidden] { display: none; }
 
+        /* Zwischenueberschrift der zwei Einbau-Wege. Eigene Klasse und nicht
+           `h3` global: die Karte hat schon `h2`, und ein globaler h3-Stil
+           wuerde auf allen Seiten mitgezogen. */
+        .xp-sub { font-size: .88rem; font-weight: 600; margin: 16px 0 0;
+                  color: var(--text-primary); }
         .xp-steps { margin: 10px 0 0 0; padding-left: 1.35rem; line-height: 1.75;
             font-size: .86rem; color: var(--text-secondary); }
         .xp-steps li { margin-bottom: 8px; }
@@ -234,6 +239,28 @@
 
     <div class="xp-card">
         <h2 data-i18n="xp.steps_head">2. In Excel einbinden</h2>
+        <!-- GEMELDET AUS DEM ECHTEN BETRIEB (2026-08-24, Office 365): "es wird
+             kein Netzlaufwerk angeboten, nur der Store". Zutreffend – der neue
+             Knopf "Add-Ins" im Menueband oeffnet zuerst den Store; der Reiter
+             FREIGEGEBENER ORDNER steckt dahinter unter "Erweitert" (Excel als
+             Programm) bzw. "Weitere Einstellungen" (Excel im Browser). Genau
+             dieser Zwischenschritt fehlte hier, und zwei weitere Punkte auch:
+             der Knopf "Katalog hinzufuegen" im Trust Center und dass es ein
+             NETZWERKPFAD sein muss – ein lokaler Ordner erscheint nie.
+             Quelle: Microsoft Learn, "Sideload Office Add-ins on Windows from a
+             network share" und "… to Office on the web". -->
+        <p class="xp-hint" data-i18n-html="xp.steps_intro"><b>Der Knopf „Add-Ins“ zeigt zuerst nur den Store.</b> Das ist normal – der Weg zum eigenen Add-in liegt eine Ebene tiefer. Am schnellsten geht es im Browser.</p>
+
+        <h3 class="xp-sub" data-i18n="xp.web_head">Weg 1: Excel im Browser (ohne Administration)</h3>
+        <ol class="xp-steps" data-i18n-html="xp.steps_web">
+            <li>Die Tabelle in <b>Excel im Browser</b> öffnen (office.com oder das Firmenportal).</li>
+            <li><b>Start → Add-Ins → Weitere Einstellungen</b>.</li>
+            <li>Im Fenster „Office-Add-Ins“ auf <b>Mein Add-In hochladen</b>, die Manifest-Datei wählen und <b>Hochladen</b>.</li>
+            <li>Der Knopf steht danach im Menüband unter <b>Start</b>. Beim ersten Öffnen meldest du dich mit deinen gewohnten Zugangsdaten an.</li>
+        </ol>
+        <p class="xp-hint" data-i18n-html="xp.web_note">Das gilt pro Browser: die Datei liegt im Speicher des Browsers. Nach „Browserdaten löschen“ oder in einem anderen Browser lädst du sie erneut hoch.</p>
+
+        <h3 class="xp-sub" data-i18n="xp.desk_head">Weg 2: Excel als Programm (Windows)</h3>
         <!-- Erster Schritt hat zwei Fassungen: mit hinterlegtem Katalog-Pfad
              waere "Datei in einen Ordner legen" das Gegenteil dessen, was oben
              steht ("du musst nichts herunterladen"). Zwei getrennte Listen und
@@ -241,18 +268,20 @@
              `data-i18n-html` bei jedem Sprachwechsel neu und wuerde die
              Aenderung wortlos zurueckdrehen. -->
         <ol class="xp-steps" id="xp-steps-dl" data-i18n-html="xp.steps">
-            <li>Datei in einen Ordner legen, auf den du zugreifen kannst (bei einer Freigabe im Netz: den Pfad von der Administration erfragen).</li>
+            <li>Die Datei in einen <b>freigegebenen Ordner im Netz</b> legen und dessen Netzwerkpfad notieren (<code>\\Server\Ordner</code>). <b>Ein Ordner auf dem eigenen Rechner funktioniert nicht</b> – frag im Zweifel die Administration nach einer Freigabe.</li>
             <li>In Excel: <b>Datei → Optionen → Trust Center → Einstellungen für das Trust Center → Kataloge vertrauenswürdiger Add-Ins</b>.</li>
-            <li>Den Ordnerpfad eintragen, <b>Katalog anzeigen</b> ankreuzen, mit <b>OK</b> bestätigen und Excel neu starten.</li>
-            <li>In Excel: <b>Start → Add-Ins → Weitere Add-Ins → FREIGEGEBENER ORDNER</b>, den Assistenten auswählen und hinzufügen.</li>
+            <li>Den Netzwerkpfad eintragen, auf <b>Katalog hinzufügen</b> klicken, beim neuen Eintrag <b>Im Menü anzeigen</b> ankreuzen, mit <b>OK</b> bestätigen – und Excel <b>schließen und neu öffnen</b>.</li>
+            <li>In Excel: <b>Start → Add-Ins → Erweitert</b> – oben im Fenster den Reiter <b>FREIGEGEBENER ORDNER</b> wählen, den Assistenten auswählen und hinzufügen.</li>
             <li>Der Knopf steht danach im Menüband unter <b>Start</b>. Beim ersten Öffnen meldest du dich mit deinen gewohnten Zugangsdaten an.</li>
         </ol>
         <ol class="xp-steps" id="xp-steps-pfad" data-i18n-html="xp.steps_pfad" hidden>
             <li>In Excel: <b>Datei → Optionen → Trust Center → Einstellungen für das Trust Center → Kataloge vertrauenswürdiger Add-Ins</b>.</li>
-            <li>Den Pfad von oben eintragen, <b>Katalog anzeigen</b> ankreuzen, mit <b>OK</b> bestätigen und Excel neu starten.</li>
-            <li>In Excel: <b>Start → Add-Ins → Weitere Add-Ins → FREIGEGEBENER ORDNER</b>, den Assistenten auswählen und hinzufügen.</li>
+            <li>Den Pfad von oben eintragen, auf <b>Katalog hinzufügen</b> klicken, beim neuen Eintrag <b>Im Menü anzeigen</b> ankreuzen, mit <b>OK</b> bestätigen – und Excel <b>schließen und neu öffnen</b>.</li>
+            <li>In Excel: <b>Start → Add-Ins → Erweitert</b> – oben im Fenster den Reiter <b>FREIGEGEBENER ORDNER</b> wählen, den Assistenten auswählen und hinzufügen.</li>
             <li>Der Knopf steht danach im Menüband unter <b>Start</b>. Beim ersten Öffnen meldest du dich mit deinen gewohnten Zugangsdaten an.</li>
         </ol>
+        <p class="xp-hint" data-i18n-html="xp.desk_note">Fehlt der Reiter <b>FREIGEGEBENER ORDNER</b> weiterhin, ist der Katalog nicht angekommen: Pfad ohne <b>Katalog hinzufügen</b> eingetragen, <b>Im Menü anzeigen</b> nicht angekreuzt, Excel nicht neu gestartet – oder es war kein Netzwerkpfad.</p>
+        <p class="xp-hint" style="margin-top:10px;" data-i18n-html="xp.trust_note"><b>Meldet Office, es könne dem Add-in nicht vertrauen?</b> Dann passt die Adresse im Manifest nicht zum Sicherheitszertifikat des Servers – das kannst du nicht selbst beheben. Wende dich an die Administration; sie muss das Manifest über den richtigen Servernamen erzeugen oder das Zertifikat nachziehen.</p>
         <p class="xp-hint" style="margin-top:10px;" data-i18n-html="xp.steps_note"><b>Zur Anmeldung:</b> Das Fenster in Excel hat einen eigenen Speicher – eine Anmeldung im Browser gilt dort nicht. Du meldest dich einmal im Fenster an, danach bleibt es angemeldet.</p>
     </div>
 
@@ -275,7 +304,7 @@
      bliebe leer (so geschehen in tracks.js). -->
 <script src="/static/js/icons.js?v=1"></script>
 <script src="/static/js/cpubar.js?v=1"></script>
-<script src="/static/js/i18n.js?v=171"></script>
+<script src="/static/js/i18n.js?v=172"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=24"></script>
 <!-- sessions.js liefert `JarvisSession.logout()`: das Abmelde-Signal MUSS

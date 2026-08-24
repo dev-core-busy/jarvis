@@ -50,6 +50,7 @@ nicht miteinander.
 from __future__ import annotations
 
 import os
+import re
 import uuid
 from xml.sax.saxutils import escape as _escape
 
@@ -151,6 +152,79 @@ def ist_lokale_basis(basis: str) -> bool:
     else:
         host = host.split(":")[0]
     return host in _LOKALE_NAMEN
+
+
+# ── Passt das Serverzertifikat zur Adresse im Manifest? ─────────────────────
+# GEMELDET AUS DEM ECHTEN BETRIEB (2026-08-24): "Office 365 vertraut dem Add-in
+# nicht". Ursache war NICHT die Selbstsignierung – auf dem Server lag ein
+# Zertifikat der internen Firmen-CA fuer `dp.<firma>.<tld>` (die Domaenen-
+# Rechner vertrauen dieser CA per AD). Das Manifest zeigte aber auf die
+# IP-ADRESSE des Servers, und die stand nicht im Zertifikat. Damit ist es eine
+# NAMENSABWEICHUNG: Office bricht das Laden ab, obwohl Zertifikat UND Vertrauen
+# in Ordnung sind.
+#
+# Der Fehler ist von aussen nicht zu deuten – das Add-in installiert sich
+# klaglos. Deshalb wird hier GEMESSEN statt geraten: welche Namen deckt das
+# ausgelieferte Zertifikat wirklich ab (dieselbe Haltung wie bei der
+# SAP-Zertifikatsbindung).
+def zert_namen() -> list:
+    """Namen und IPs, die das eigene Serverzertifikat abdeckt.
+
+    Leere Liste heisst "nicht ermittelbar" – das ist NICHT dasselbe wie "deckt
+    nichts ab". Bei einer TLS-Terminierung im Rueckwaertsproxy ist die lokale
+    Datei ohnehin nicht massgeblich; deshalb ist alles hier ein HINWEIS und
+    niemals eine Sperre.
+    """
+    try:
+        from backend.security import CERT_FILE  # noqa: PLC0415
+        import subprocess as _sp  # noqa: PLC0415
+        if not CERT_FILE.exists():
+            return []
+        res = _sp.run(["openssl", "x509", "-in", str(CERT_FILE), "-noout",
+                       "-subject", "-ext", "subjectAltName"],
+                      capture_output=True, text=True, timeout=10)
+        roh = (res.stdout or "") + (res.stderr or "")
+    except Exception:  # noqa: BLE001
+        return []
+    namen = []
+    for treffer in re.findall(r"CN\s*=\s*([^,/\n]+)", roh):
+        namen.append(treffer.strip().lower())
+    for treffer in re.findall(r"(?:DNS|IP Address):\s*([^,\s]+)", roh):
+        namen.append(treffer.strip().lower())
+    return [n for n in dict.fromkeys(namen) if n]
+
+
+def _host_aus(basis: str) -> str:
+    wert = (basis or "").strip().lower()
+    for schema in ("https://", "http://"):
+        if wert.startswith(schema):
+            wert = wert[len(schema):]
+            break
+    host = wert.split("/")[0].split("?")[0]
+    if host.startswith("["):
+        return host.split("]")[0] + "]"
+    return host.split(":")[0]
+
+
+def zert_deckt_basis(basis: str) -> tuple:
+    """``(gedeckt, host, namen)`` – deckt das Serverzertifikat diese Adresse?
+
+    ``gedeckt`` ist ``None``, wenn es sich nicht feststellen laesst (kein
+    Zertifikat lesbar, kein Host in der Basis). Wildcards werden beruecksichtigt:
+    ``*.firma.de`` deckt ``dp.firma.de``, aber NICHT ``a.b.firma.de`` – genau so
+    prueft es auch der Client.
+    """
+    host = _host_aus(basis)
+    namen = zert_namen()
+    if not host or not namen:
+        return None, host, namen
+    for n in namen:
+        if n == host:
+            return True, host, namen
+        if n.startswith("*.") and host.endswith(n[1:]) \
+                and host.count(".") == n.count("."):
+            return True, host, namen
+    return False, host, namen
 
 
 def addin_id(basis: str) -> str:

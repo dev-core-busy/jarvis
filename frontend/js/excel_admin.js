@@ -118,9 +118,24 @@
             .then(function (r) {
                 if (r.ok) {
                     _adresseKaputt = false;
-                    warn.style.display = 'none';
                     _dateiname = dateinameAus(r);
                     knopfAktualisieren();     // Hinweis mit echtem Dateinamen
+                    // ZERTIFIKAT: das Manifest ist gueltig, aber die Adresse
+                    // darin passt vielleicht nicht zum Serverzertifikat. Dann
+                    // meldet Office nur "vertraut dem Add-in nicht" – ein
+                    // Fehler, der erst am Arbeitsplatz auffaellt. Der Server
+                    // legt den Grund in den Antwortkopf; hier wird er als
+                    // WARNUNG gezeigt, nicht als Sperre: bei TLS-Terminierung
+                    // im Rueckwaertsproxy ist das lokale Zertifikat nicht
+                    // massgeblich, und ein gesperrter Download waere dort falsch.
+                    var zw = r.headers.get('X-Jarvis-Cert-Warn');
+                    if (zw) {
+                        warn.textContent = '⚠ ' + zw;
+                        warn.style.color = 'var(--warning, #d98a00)';
+                        warn.style.display = '';
+                    } else {
+                        warn.style.display = 'none';
+                    }
                     return;
                 }
                 return r.json().catch(function () { return {}; }).then(function (d) {
@@ -237,6 +252,22 @@
         return v || _katalog;
     }
 
+    /* Der Ordner-Weg als ZWEITER Knopf – er erscheint nur, wo er wirklich geht
+       (Chrome/Edge) UND nur mit eingetragenem Pfad. Ein Knopf, der in Firefox
+       nichts tut, ist schlimmer als keiner; und einer, der ohne Zielpfad
+       dasteht, hat kein Ziel. */
+    function ordnerKnopf(pfad) {
+        var ub = $('xa-upload');
+        if (!ub) return;
+        var geht = !!pfad && kannSpeichern();
+        ub.style.display = geht ? '' : 'none';
+        if (geht) {
+            ub.textContent = _ordner
+                ? 'In Ordner „' + (_ordner.name || '?') + '" schreiben'
+                : 'Ordner wählen und hineinschreiben';
+        }
+    }
+
     /* Der Hinweis unter dem Knopf. Der Knopf selbst hat nur EINEN Zustand:
        er laedt herunter. Er kann NICHT in den eingetragenen Netzwerkpfad
        schreiben – kein Browser darf in einen Ordner schreiben, der ihm als
@@ -247,6 +278,11 @@
         var hint = $('xa-dl-hint');
         if (!hint) return;
         var pfad = feldPfad();
+        // Der Ordner-Knopf wird VOR dem fruehen Ausstieg gesetzt. Stand er
+        // dahinter, blieb er beim LEEREN des Feldes sichtbar – der Zweig war
+        // dann unerreichbar, und der Kommentar unten versprach das Gegenteil
+        // ("nur mit eingetragenem Pfad"). Ein Test hat genau das gemeldet.
+        ordnerKnopf(pfad);
         if (!pfad) { hint.style.display = 'none'; return; }
         // Der Pfad wird ANGEZEIGT, damit man ihn beim Verschieben vor Augen
         // hat – er ist Fremdeingabe, also per textContent in ein eigenes
@@ -264,19 +300,6 @@
         // durch, wird er NICHT geraten – dann steht dort die neutrale Endung.
         if (f) f.textContent = _dateiname || 'manifest.xml';
 
-        // Der Ordner-Weg als ZWEITER Knopf – er erscheint nur, wo er wirklich
-        // geht (Chrome/Edge) und nur mit eingetragenem Pfad. Ein Knopf, der in
-        // Firefox nichts tut, ist schlimmer als keiner.
-        var ub = $('xa-upload');
-        if (ub) {
-            var geht = kannSpeichern();
-            ub.style.display = geht ? '' : 'none';
-            if (geht) {
-                ub.textContent = _ordner
-                    ? 'In Ordner „' + (_ordner.name || '?') + '" schreiben'
-                    : 'Ordner wählen und hineinschreiben';
-            }
-        }
         hint.style.color = '';
         hint.style.display = '';
     }

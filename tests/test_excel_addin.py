@@ -995,8 +995,25 @@ pruefe("katalog_pfad: pfad" in _sk and "max_runden" not in _sk,
        "Der Pfad-Weg sendet NUR den Pfad")
 pruefe("speicherePfad(pfad, true)" in XA,
        "Der Hochlade-Knopf speichert den eingetragenen Pfad mit (still)")
-pruefe("function feldPfad" in XA and "feldPfad() && kannSpeichern()" in XA,
-       "Massgeblich ist der FELDINHALT, nicht der gespeicherte Pfad")
+# Geprueft wird die EIGENSCHAFT, nicht der Wortlaut: der Ordner-Knopf haengt am
+# FELDINHALT (via `feldPfad()`), und die Sichtbarkeit wird gesetzt, BEVOR die
+# Hinweis-Funktion bei leerem Pfad aussteigt – sonst blieb der Knopf beim Leeren
+# des Feldes stehen. Die frueher hier fest verdrahtete Zeichenkette
+# "feldPfad() && kannSpeichern()" hat den Test rot stehen lassen, obwohl die
+# Zusage gilt: eine Zeichenkette als Testkriterium ist eine Zeitbombe. Den
+# funktionalen Nachweis fuehrt tests/test_excel_addin_ui.js (mit und ohne Pfad,
+# und nach dem LEEREN des Feldes).
+_ka = XA[XA.find("function knopfAktualisieren"):]
+_ka = _ka[:_ka.find("\n    function ", 10)]
+pruefe("function feldPfad" in XA and "function ordnerKnopf" in XA,
+       "Feldinhalt und Ordner-Knopf sind eigene Funktionen")
+pruefe(len(_ka) > 100 and _ka.find("ordnerKnopf(") < _ka.find("if (!pfad)"),
+       "Massgeblich ist der FELDINHALT, nicht der gespeicherte Pfad",
+       "ordnerKnopf() muss VOR dem fruehen Ausstieg stehen")
+_ok_fn = XA[XA.find("function ordnerKnopf"):]
+_ok_fn = _ok_fn[:_ok_fn.find("\n    }") + 6]
+pruefe("pfad" in _ok_fn and "kannSpeichern()" in _ok_fn,
+       "und der Knopf verlangt BEIDES: einen Pfad und einen Browser, der es kann")
 _sg = XA[XA.find("function speichere()"):]
 _sg = _sg[:_sg.find("function ", 10)]
 pruefe("katalog_pfad" not in _sg, "... und der Grenzen-Knopf NICHT den Pfad")
@@ -1052,6 +1069,97 @@ _b = len(_re.findall(r"<li>", [z for z in I18N.splitlines()
 pruefe(_a == _b + 1,
        "Die Pfad-Liste hat genau einen Schritt weniger (das Herunterladen)",
        (_a, _b))
+
+# ── Die Anleitung muss zum HEUTIGEN Office passen ────────────────────────
+# GEMELDET AUS DEM ECHTEN BETRIEB (2026-08-24, Office 365): "es wird kein
+# Netzlaufwerk angeboten, nur der Store". Zutreffend – der Knopf "Add-Ins" im
+# Menueband oeffnet den Store; der Reiter FREIGEGEBENER ORDNER liegt dahinter
+# unter "Erweitert" (Programm) bzw. "Weitere Einstellungen" (Browser). Die
+# Anleitung nannte "Weitere Add-Ins", verschwieg den Knopf "Katalog
+# hinzufuegen" und liess einen LOKALEN Ordner als Ziel zu (der erscheint nie).
+# Quelle: Microsoft Learn, "Sideload Office Add-ins on Windows from a network
+# share" und "… to Office on the web".
+for _k in ("xp.steps_intro", "xp.web_head", "xp.steps_web", "xp.web_note",
+           "xp.desk_head", "xp.desk_note"):
+    pruefe(I18N.count("'%s'" % _k) == 2, "%s in DE und EN" % _k)
+
+_dl_de = [z for z in I18N.splitlines() if "'xp.steps':" in z][0]
+_pf_de = [z for z in I18N.splitlines() if "'xp.steps_pfad':" in z][0]
+for _name, _z in (("xp.steps", _dl_de), ("xp.steps_pfad", _pf_de)):
+    pruefe("Erweitert" in _z, "%s nennt den Zwischenschritt 'Erweitert'" % _name)
+    pruefe("Weitere Add-Ins" not in _z,
+           "%s nennt NICHT mehr 'Weitere Add-Ins' (gibt es so nicht)" % _name)
+    pruefe("Katalog hinzuf" in _z,
+           "%s nennt den Knopf 'Katalog hinzufuegen'" % _name,
+           "ohne ihn wird die URL nicht uebernommen – dann nur Store")
+    pruefe("Im Men" in _z, "%s nennt 'Im Menue anzeigen'" % _name)
+pruefe("Netzwerkpfad" in _dl_de and "eigenen Rechner funktioniert nicht" in _dl_de,
+       "die Download-Liste verlangt einen NETZWERKPFAD und sagt, dass ein "
+       "lokaler Ordner nicht geht")
+_web = [z for z in I18N.splitlines() if "'xp.steps_web':" in z][0]
+pruefe("Weitere Einstellungen" in _web and "hochladen" in _web.lower(),
+       "der Browser-Weg nennt 'Weitere Einstellungen' und das Hochladen")
+# Und der Admin-Reiter darf nicht auseinanderlaufen.
+pruefe("Erweitert" in SET and "Weitere Add-Ins" not in SET.split("xa-guide")[1][:2500],
+       "die Admin-Anleitung nennt ebenfalls 'Erweitert'")
+pruefe("Katalog hinzuf" in SET, "und den Knopf 'Katalog hinzufuegen'")
+pruefe("Exchange Online" in SET,
+       "sie sagt, dass die zentrale Bereitstellung hier KEIN Weg ist",
+       "sie setzt Exchange Online voraus und schliesst Postfaecher im Haus aus")
+
+# ── "Office vertraut dem Add-in nicht" – die ADRESSE, nicht das Zertifikat ──
+# GEMELDET (2026-08-24): auf ECHT lag ein Zertifikat der internen Firmen-CA fuer
+# einen DNS-Namen, das Manifest zeigte aber auf die IP-Adresse des Servers. Das
+# ist eine NAMENSABWEICHUNG – Office bricht das Laden ab, obwohl Zertifikat und
+# Vertrauensstellung in Ordnung sind, und die Installation gelingt vorher
+# klaglos. Deshalb wird es GEMESSEN und angezeigt, nicht erklaert und gehofft.
+import backend.addin as _AD_MOD  # noqa: E402
+pruefe(hasattr(_AD_MOD, "zert_deckt_basis") and hasattr(_AD_MOD, "zert_namen"),
+       "addin.py kann die Zertifikats-Deckung messen")
+_alt_namen = _AD_MOD.zert_namen
+try:
+    _AD_MOD.zert_namen = lambda: ["dp.firma.de"]
+    pruefe(_AD_MOD.zert_deckt_basis("https://dp.firma.de")[0] is True,
+           "der passende DNS-Name gilt als gedeckt")
+    pruefe(_AD_MOD.zert_deckt_basis("https://DP.Firma.DE:443")[0] is True,
+           "Gross-/Kleinschreibung und Port stoeren nicht")
+    pruefe(_AD_MOD.zert_deckt_basis("https://10.1.2.3")[0] is False,
+           "eine IP-Adresse, die nicht im Zertifikat steht, ist NICHT gedeckt",
+           "genau der gemeldete Fall")
+    _AD_MOD.zert_namen = lambda: ["*.firma.de"]
+    pruefe(_AD_MOD.zert_deckt_basis("https://dp.firma.de")[0] is True,
+           "Wildcard deckt eine Ebene")
+    pruefe(_AD_MOD.zert_deckt_basis("https://a.b.firma.de")[0] is False,
+           "aber NICHT zwei – so prueft es der Client auch")
+    _AD_MOD.zert_namen = lambda: []
+    pruefe(_AD_MOD.zert_deckt_basis("https://x.de")[0] is None,
+           "kein lesbares Zertifikat heisst UNBEKANNT, nicht 'nicht gedeckt'",
+           "bei TLS-Terminierung im Proxy ist die lokale Datei nicht massgeblich")
+finally:
+    _AD_MOD.zert_namen = _alt_namen
+
+pruefe("X-Jarvis-Cert-Warn" in MAIN and MAIN.count("_addin_zert_warnung(") >= 3,
+       "beide Manifest-Endpunkte warnen ueber den Antwortkopf",
+       "im XML waere die Warnung ein kaputtes Manifest")
+# Der Text landet in einem HTTP-KOPF und wird auf ASCII entschaerft. Steht dort
+# ein Gedankenstrich, liest der Administrator ein '?' mitten im Satz – live so
+# gesehen. Also von vornherein ASCII schreiben.
+# Geprueft wird der TEXT-Ausdruck, nicht die ganze Funktion: Docstring und
+# Kommentare duerfen (und muessen) deutsch bleiben. Ein Waechter, der seine
+# eigene Begruendung mitliest, meldet Unsinn – die Falle steht im Register.
+_wf = MAIN[MAIN.index("def _addin_zert_warnung"):]
+_wf = _wf[:_wf.index("\n\n\n")]
+_txt = _wf[_wf.index("text = ("):]
+_txt = _txt[:_txt.index("\n        print(")]
+pruefe(all(ord(c) < 128 for c in _txt),
+       "der Warntext ist reines ASCII (er reist in einem HTTP-Kopf)",
+       [c for c in _txt if ord(c) >= 128][:5])
+pruefe("X-Jarvis-Cert-Warn" in XA and "warning" in XA,
+       "der Admin-Reiter zeigt sie als WARNUNG (nicht als Sperre)")
+pruefe("xp.trust_note" in XP and I18N.count("'xp.trust_note'") == 2,
+       "die Benutzerseite sagt, was zu tun ist (und in beiden Sprachen)")
+pruefe("addin_base_url" in SET and "Stammzertifizierungsstellen" in SET,
+       "die Admin-Anleitung nennt beide Abhilfen: Adresse und Zertifikat")
 # ══════════════════════════════════════════════════════════════════════
 abschnitt("15. Die einstellbaren Deckel WIRKEN")
 # GEFUNDEN 2026-08-22: `max_runden` und `max_aenderungen` standen im Manifest,

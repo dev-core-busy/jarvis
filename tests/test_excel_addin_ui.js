@@ -776,6 +776,26 @@ function angemeldetesFenster(opt) {
                'der Browser folgt dem Link wirklich (jsdom meldet den Navigationsversuch)',
                'navigationen=' + spur.navigation);
         pruefe(spur.picker === 0, 'und es oeffnet sich kein Dialog');
+
+        // GEMELDETE LUECKE (2026-08-24): der Uebergang. Pfad EINTIPPEN laesst
+        // den Ordner-Knopf erscheinen, LEEREN muss ihn wieder wegnehmen – ohne
+        // Ziel hat er keine Bedeutung. Vorher sass seine Sichtbarkeit HINTER
+        // dem fruehen Ausstieg fuer "kein Pfad": der Zweig war unerreichbar,
+        // der Knopf blieb nach dem Leeren stehen. Geprueft wird hier, weil in
+        // diesem Fenster KEIN Katalog gespeichert ist – sonst faellt
+        // `feldPfad()` mit Recht auf den gespeicherten Wert zurueck.
+        const feld = w.document.getElementById('xa-katalog');
+        feld.value = '\\\\srv\\tipp';
+        feld.dispatchEvent(new w.Event('input', { bubbles: true }));
+        await warte(20);
+        pruefe(w.document.getElementById('xa-upload').style.display !== 'none',
+               'ein eingetippter Pfad laesst den Ordner-Knopf erscheinen');
+        feld.value = '';
+        feld.dispatchEvent(new w.Event('input', { bubbles: true }));
+        await warte(20);
+        pruefe(w.document.getElementById('xa-upload').style.display === 'none',
+               'nach dem LEEREN des Feldes ist der Ordner-Knopf wieder weg',
+               w.document.getElementById('xa-upload').style.display);
         w.close();
     }
 

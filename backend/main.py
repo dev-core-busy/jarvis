@@ -10187,6 +10187,58 @@ async def tracks_job_delete(job_id: str, user: str = Depends(require_tracks_acce
     return JSONResponse({"ok": True})
 
 
+@app.post("/api/prompt/pruefen")
+async def prompt_pruefen(request: Request, user: str = Depends(require_auth)):
+    """Sagt vorher, wie ein gespeicherter Prompt spaeter verstanden wird.
+
+    Body: ``{"prompt": "…", "kontext": "tracks", "lang": "de"}``.
+    Antwort: ``{ok, interpretation, annahmen[], risiken[], beispiel, modell}``.
+
+    **Es laeuft KEIN Agent** – ein einzelner LLM-Aufruf ohne Werkzeuge (Details
+    im Docstring von ``backend/prompt_check.py``). Der Endpunkt fuehrt den
+    uebergebenen Text also nicht aus; er laesst ihn beschreiben.
+
+    **Die Rechte sind die des Bereichs**: pruefen darf, wer in Short Tracks auch
+    eine Ablage anlegen duerfte (``_user_may_use_tracks``). Die Pruefung sitzt im
+    Rumpf und nicht in einer Dependency, weil der Bereich im Body steht – und
+    sie ist fail-closed: jeder andere Wert wird abgewiesen, nicht
+    durchgelassen.
+    """
+    from backend import prompt_check as _pc
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    kontext = str(body.get("kontext") or "").strip().lower()
+    prompt = str(body.get("prompt") or "")
+    lang = str(body.get("lang") or "de")
+
+    # NUR Short Tracks (ausdrueckliche Vorgabe des Nutzers). Der Endpunkt kennt
+    # bewusst keinen weiteren Bereich: ein Kontext ohne Oberflaeche waere toter
+    # Code, der bei der naechsten Rechtefrage mitgeprueft werden muesste.
+    if kontext == "tracks":
+        erlaubt = _user_may_use_tracks(user)
+    else:
+        return JSONResponse({"ok": False, "error": "Unbekannter Bereich."},
+                            status_code=400)
+    if not erlaubt:
+        return JSONResponse(
+            {"ok": False, "error": "Für diesen Bereich nicht freigegeben."},
+            status_code=403)
+
+    try:
+        return JSONResponse(await _pc.pruefen(prompt, kontext, user, lang))
+    except _pc.PruefFehler as e:
+        # 400 mit Klartext, nicht 200 mit ok:false – sonst sieht ein Fehlschlag
+        # im Netzwerk-Reiter wie ein Erfolg aus (dieselbe Regel wie bei
+        # /api/license).
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        print("[PromptCheck] unerwartet: %s" % e, flush=True)
+        return JSONResponse({"ok": False, "error": "Prüfung fehlgeschlagen."},
+                            status_code=500)
+
+
 @app.post("/api/tracks/dumps/{dump_id}/reset")
 async def tracks_dump_reset(dump_id: str, user: str = Depends(require_tracks_access)):
     """Alle eigenen Auftraege EINER Ablage verwerfen – zurueck auf Anfang.

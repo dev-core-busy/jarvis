@@ -779,6 +779,15 @@
                 : '') +
             '<div class="st-row">' +
               '<button class="st-btn st-btn-primary" id="st-f-save" data-i18n="tracks.save">Speichern</button>' +
+              // ZWISCHEN Speichern und Abbrechen (Vorgabe des Nutzers). Der
+              // Knopf uebernimmt `st-btn`, damit er sich in die Zeile einreiht
+              // statt aufzufallen; die Wirkung steckt im delegierten Listener
+              // von prompt_check.js - das Formular wird bei jedem Oeffnen neu
+              // aus diesem String gebaut, ein direkt gebundener Handler waere
+              // danach weg.
+              (window.JarvisPromptCheck
+                  ? window.JarvisPromptCheck.knopfHtml('st-f-prompt', 'tracks', 'st-btn')
+                  : '') +
               '<button class="st-btn" id="st-f-cancel" data-i18n="tracks.cancel">Abbrechen</button>' +
               '<span class="st-status" id="st-f-status"></span>' +
             '</div>';

@@ -21,6 +21,11 @@
     --bg-secondary: #111827;
     --bg-glass: rgba(15, 23, 42, 0.75);
     --bg-glass-heavy: rgba(15, 23, 42, 0.9);
+    /* Eingabefelder und Bedienflaechen INNERHALB einer Karte (Toenung statt
+       fester Farbe, damit sie dem Theme folgt).
+       ACHTUNG: Der Eintrag in body.light ist PFLICHT und keine Dopplung –
+       siehe die Begruendung dort. */
+    --bg-input: rgba(var(--fg-rgb), 0.06);
 
     --border: rgba(var(--fg-rgb), 0.08);
     --border-hover: rgba(var(--fg-rgb), 0.15);
@@ -109,9 +114,21 @@ body.light {
     --bg-secondary: #ffffff;
     --bg-glass: rgba(255, 255, 255, 0.78);
     --bg-glass-heavy: rgba(255, 255, 255, 0.92);
+    --bg-input: rgba(var(--fg-rgb), 0.06);
 
     --border: rgba(var(--fg-rgb), 0.12);
     --border-hover: rgba(var(--fg-rgb), 0.22);
+
+    /* MUESSEN hier wiederholt werden, obwohl die Formel identisch ist: eine
+       Custom Property wird auf dem Element BERECHNET, auf dem sie deklariert
+       ist. Die :root-Fassung friert also auf dem DUNKEL-Wert von --shadow-rgb
+       (0,0,0) ein, und das --shadow-rgb: 15,23,42 zwei Zeilen weiter oben
+       waere wirkungslos. Gemessen am 2026-08-20: ohne diese drei Zeilen kommt
+       im Hell-Theme reines Schwarz heraus statt des Schiefertons.
+       Gleiche Falle wie --gradient (2026-08-17) und --bg-input darueber. */
+    --shadow-sm: 0 2px 8px rgba(var(--shadow-rgb), 0.3);
+    --shadow-md: 0 4px 16px rgba(var(--shadow-rgb), 0.4);
+    --shadow-lg: 0 8px 32px rgba(var(--shadow-rgb), 0.5);
 
     --text-primary: #1a2233;
     --text-secondary: #4a5568;

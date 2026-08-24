@@ -549,6 +549,26 @@ def _verlust_hinweis(verluste: list[str]) -> str:
               "Zellen und Zahlenformate bleiben erhalten.")
 
 
+def _weiterarbeiten_hinweis(fname: str) -> str:
+    """Sagt, wie der NAECHSTE Schritt auf diesem Stand aufsetzt.
+
+    GEMELDET VON ECHT (2026-08-24): ein Lauf schrieb die Juli-Werte in fuenf
+    Batches und rief `xlsx_edit` fuenfmal auf – jedes Mal mit ``path`` auf der
+    ORIGINAL-Quelle. Jeder Aufruf legt aber ueber ``_new_path()`` eine eigene
+    Ergebnisdatei an. Ergebnis: fuenf Dateien mit gleichem Namen, jede mit nur
+    46-53 der 194 Werte, keine davon brauchbar; die Reihe baute nicht
+    aufeinander auf.
+
+    Der Hinweis ist deshalb keine Kosmetik, sondern die Bedingung dafuer, dass
+    mehrschrittiges Bearbeiten ueberhaupt ein vollstaendiges Ergebnis liefert.
+    Er nennt die ``/api/documents/``-URL, weil ``path`` genau die annimmt.
+    """
+    return ("\n\nWEITER AN DIESEM STAND: fuer zusaetzliche Aenderungen 'path' auf "
+            "/api/documents/%s setzen. Wer erneut die Ausgangsdatei bearbeitet, "
+            "verliert die eben geschriebenen Aenderungen und erzeugt einen "
+            "zweiten Teilstand." % fname)
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # xlsx_inspect – STRUKTUR statt Inhalt
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1139,7 +1159,9 @@ class MergeTool(BaseTool):
                 f"und wurden NICHT uebernommen (modus='aktualisieren'). Mit "
                 f"modus='beides' werden sie als neue Zeilen angefuegt.")
 
-        return _ok(dl, fname, disk, extra="\n".join(bericht) + _verlust_hinweis(verluste))
+        return _ok(dl, fname, disk,
+                   extra="\n".join(bericht) + _verlust_hinweis(verluste)
+                   + _weiterarbeiten_hinweis(fname))
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1246,7 +1268,9 @@ class EditTool(BaseTool):
             # leere Datei mit Erfolgsmeldung.
             extra += (f"\n⚠ {len(fehler)} Aenderung(en) wurden NICHT ausgefuehrt:\n"
                       + "\n".join(fehler[:20]))
-        return _ok(dl, fname, disk, extra=extra + _verlust_hinweis(verluste))
+        return _ok(dl, fname, disk,
+                   extra=extra + _verlust_hinweis(verluste)
+                   + _weiterarbeiten_hinweis(fname))
 
 
 def get_tabellen_tools():

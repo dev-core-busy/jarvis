@@ -1327,6 +1327,87 @@ check(0 <= _i_clean < _i_warn,
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# 14) Namensgleiche Fassungen: nur die JUENGSTE ist das Ergebnis
+#     Gemeldet von ECHT 2026-08-24: sechs Chips, alle
+#     "IBSv3_Monatsstatistik_aktualisiert.xlsx" – fuenf davon Teilstaende mit
+#     46-53 von 194 Werten. `_endergebnis_filtern` kann sie nicht trennen, weil
+#     derselbe Name auf alle zutrifft.
+print("\n── 14) Gleichnamige Fassungen verdichten ──")
+
+import os                                                 # noqa: E402
+import time                                               # noqa: E402
+# `_docs.DOCS_DIR` zeigt bereits in den Sandkasten (s. o.) – `_dateizeit` liest
+# von dort, es braucht hier also keine zweite Umbiegung.
+
+def _chip(cap: str, name: str, alter_s: float) -> dict:
+    """Legt eine echte Datei mit gesetzter mtime an und gibt den Chip zurueck."""
+    f = run.DOCS_DIR / ("%s__%s" % (cap, name))
+    f.write_bytes(b"x" * 10)
+    t = time.time() - alter_s
+    os.utime(f, (t, t))
+    return {"name": name, "url": "/api/documents/%s__%s" % (cap, name)}
+
+_a = _chip("a" * 32, "Bericht.xlsx", 300)     # aeltester Teilstand
+_b = _chip("b" * 32, "Bericht.xlsx", 200)
+_c = _chip("c" * 32, "Bericht.xlsx", 10)      # juengster = vollstaendig
+_d = _chip("d" * 32, "Anhang.xlsx", 50)       # anderer Name, bleibt
+
+_bleibt, _alt = run._gleichnamige_verdichten([_a, _b, _c, _d])
+check([x["url"] for x in _bleibt] == [_c["url"], _d["url"]],
+      "von drei gleichnamigen bleibt nur die juengste, fremder Name bleibt")
+check([x["url"] for x in _alt] == [_a["url"], _b["url"]],
+      "die beiden frueheren Fassungen werden ausgewiesen, nicht verschwiegen")
+
+# Reihenfolge in der Eingabe darf nichts aendern: entscheidend ist die ZEIT.
+_bleibt2, _ = run._gleichnamige_verdichten([_c, _b, _a])
+check([x["url"] for x in _bleibt2] == [_c["url"]],
+      "auch wenn die juengste zuerst gelistet ist, gewinnt sie")
+
+# Verschiedene Namen: nichts wird angefasst.
+_bleibt3, _alt3 = run._gleichnamige_verdichten([_d, _c])
+check(len(_bleibt3) == 2 and _alt3 == [],
+      "verschiedene Namen werden NICHT verdichtet")
+
+# Ein einzelner Chip bleibt unberuehrt (kein Sonderfall-Absturz).
+check(run._gleichnamige_verdichten([_d]) == ([_d], []),
+      "ein einzelner Chip bleibt unveraendert")
+check(run._gleichnamige_verdichten([]) == ([], []),
+      "leere Liste ist unkritisch")
+
+# FAIL-SAFE: ohne lesbare Datei entscheidet die Fundreihenfolge – der letzte
+# Schreibvorgang ist der letzte Chip. Nie darf alles wegfallen.
+_x1 = {"name": "Weg.xlsx", "url": "/api/documents/" + "1" * 32 + "__Weg.xlsx"}
+_x2 = {"name": "Weg.xlsx", "url": "/api/documents/" + "2" * 32 + "__Weg.xlsx"}
+_bleibt4, _alt4 = run._gleichnamige_verdichten([_x1, _x2])
+check([x["url"] for x in _bleibt4] == [_x2["url"]] and _alt4 == [_x1],
+      "ohne lesbare Datei gewinnt die spaetere Fundstelle")
+check(run._dateizeit("/api/documents/gibtsnicht.xlsx") == 0.0,
+      "_dateizeit meldet 0.0 statt zu werfen")
+
+# Der gemeldete Fall woertlich: sechs gleichnamige -> EIN Chip.
+_sechs = [_chip("%032d" % i, "IBSv3_Monatsstatistik_aktualisiert.xlsx", 60 - i * 5)
+          for i in range(6)]
+_b6, _a6 = run._gleichnamige_verdichten(_sechs)
+check(len(_b6) == 1 and len(_a6) == 5,
+      "der gemeldete Fall: aus sechs Chips wird einer (fuenf ausgewiesen)")
+check(_b6[0]["url"] == _sechs[-1]["url"],
+      "und zwar der zuletzt geschriebene, vollstaendige Stand")
+
+# Verdichtung muss VOR dem Antwort-Filter laufen – sonst gelten alle sechs als
+# genannt (gleicher Name) und der Filter behaelt sie.
+_lauf_v = abschnitt(CODE_RUN, "async def _lauf(", "def stop_alle")
+_i_verd = _lauf_v.find("_gleichnamige_verdichten(")
+_i_filt = _lauf_v.find("_endergebnis_filtern(")
+check(0 <= _i_verd < _i_filt,
+      "der Lauf verdichtet VOR _endergebnis_filtern")
+check("aeltere" in _lauf_v and "frühere Fassung" in QUELLE_RUN,
+      "die frueheren Fassungen werden im Antworttext benannt")
+# Und der Hinweis nennt den Namen nur EINMAL, nicht fuenfmal denselben.
+check("dict.fromkeys(a[\"name\"] for a in aeltere)" in QUELLE_RUN,
+      "gleichnamige Fassungen werden im Hinweis dedupliziert")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 print(f"\n{'=' * 62}")
 print(f"  {_ok} OK, {_fail} FAIL  (Sandkasten: {TMP})")
 print(f"{'=' * 62}")

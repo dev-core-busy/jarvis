@@ -843,6 +843,69 @@ def _warnungen_lesen(md: list[str]) -> list[str]:
     return raus
 
 
+def _dateizeit(url: str) -> float:
+    """mtime der Datei hinter einer ``/api/documents/``-URL, ``0.0`` = unbekannt.
+
+    Bewusst tolerant: die Zeit ist hier ein Sortierkriterium, keine Zusage. Ist
+    sie nicht lesbar, entscheidet die Fundreihenfolge (s. unten).
+    """
+    try:
+        from backend import documents  # noqa: PLC0415
+        name = (url or "").rsplit("/", 1)[-1].split("?")[0].strip()
+        if not name:
+            return 0.0
+        pfad = documents.DOCS_DIR / name
+        return pfad.stat().st_mtime if pfad.is_file() else 0.0
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
+def _gleichnamige_verdichten(chips: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Mehrere Fassungen DERSELBEN Datei -> nur die juengste ist das Ergebnis.
+
+    GEMELDET VON ECHT (2026-08-24): eine Ablage bot SECHS Downloads an, alle mit
+    demselben Anzeigenamen ``IBSv3_Monatsstatistik_aktualisiert.xlsx``. Ursache
+    ist kein Fehler der Auslieferung, sondern die Arbeitsweise der Werkzeuge:
+    ``xlsx_edit``/``xlsx_merge`` verlangen ``ziel`` und legen bei JEDEM Aufruf
+    ueber ``_new_path()`` eine eigene Datei mit eigenem Capability-Namen ab. Fuenf
+    Bearbeitungsschritte sind damit fuenf vollwertige Ergebnisdateien.
+
+    WARUM ``_endergebnis_filtern`` DAS NICHT FAENGT: der prueft, ob die
+    Abschluss-Antwort den Namen nennt – bei namensgleichen Fassungen trifft
+    derselbe Name auf ALLE zu, also gilt jede als Endergebnis. Der Name ist dort
+    kein Unterscheidungsmerkmal, deshalb braucht es diese Stufe DAVOR.
+
+    Und es ist kein Schoenheitsfehler: an der gemeldeten Datei nachgemessen
+    trugen die fuenf frueheren Fassungen 46 bis 53 der 194 zu uebertragenden
+    Werte, nur die letzte alle 194. Die ``xlsx_edit``-Aufrufe gingen jeweils von
+    der ORIGINAL-Quelle aus, bauen also nicht aufeinander auf – wer einen der
+    ersten Chips oeffnete, hatte stillschweigend ein Viertel der Daten.
+
+    Die verdraengten Fassungen werden dem Benutzer im Text GENANNT und bleiben
+    auf Platte abrufbar; sie sind nur kein Chip. Dieselbe Schranke wie bei
+    ``_endergebnis_filtern``: die Verdichtung darf nichts verschweigen.
+    """
+    if len(chips) < 2:
+        return list(chips), []
+    gruppen: dict[str, list[int]] = {}
+    for i, c in enumerate(chips):
+        gruppen.setdefault((c.get("name") or "").strip().lower(), []).append(i)
+    weg: set[int] = set()
+    for schluessel, idx in gruppen.items():
+        if not schluessel or len(idx) < 2:
+            continue
+        # Juengste per mtime; bei unlesbarer Zeit gewinnt die SPAETERE
+        # Fundstelle. Die Chips entstehen in der Reihenfolge der
+        # Werkzeug-Ergebnisse, der letzte Schreibvorgang ist also der letzte
+        # Eintrag – die Regel bleibt damit auch ohne Dateizugriff dieselbe.
+        best = max(idx, key=lambda i: (_dateizeit(chips[i].get("url") or ""), i))
+        weg.update(set(idx) - {best})
+    if not weg:
+        return list(chips), []
+    return ([c for i, c in enumerate(chips) if i not in weg],
+            [c for i, c in enumerate(chips) if i in weg])
+
+
 def _chips_lesen(md: list[str]) -> list[dict]:
     """Aus den Markdown-Zeilen des Sammlers die Ergebnisdateien lesen."""
     raus: list[dict] = []
@@ -1166,7 +1229,12 @@ async def _lauf(job: dict, dump: dict, auftrag: str,
                 # Ein fehlender Chip ist aergerlich, ein verlorener Ergebnistext
                 # waere schlimmer – deshalb nur protokollieren.
                 print("[Tracks] Ergebnisdateien nicht ermittelbar: %s" % e, flush=True)
-    chips, zwischen = _endergebnis_filtern(_chips_lesen(sammler.md), antwort)
+    # ZUERST namensgleiche Fassungen verdichten, DANN nach der Antwort filtern:
+    # der Namensvergleich in `_endergebnis_filtern` kann zwei Fassungen derselben
+    # Datei nicht trennen (gleicher Name trifft auf beide), er wuerde also alle
+    # sechs behalten. Die Verdichtung ist von der Antwort unabhaengig.
+    chips, aeltere = _gleichnamige_verdichten(_chips_lesen(sammler.md))
+    chips, zwischen = _endergebnis_filtern(chips, antwort)
 
     # Die Pfade aus dem Anzeigetext entfernen: der Chip ist der EINZIGE Weg zur
     # Datei (gleiche Regel wie im Chat), und ein Pfad im Text verleitet den
@@ -1189,6 +1257,17 @@ async def _lauf(job: dict, dump: dict, auftrag: str,
     # Warnung ist danach der EINZIGE Hinweis, dass etwas fehlt).
     for _w in _warnungen_lesen(sammler.md):
         antwort = (antwort or "").rstrip() + "\n\n" + _w
+
+    if aeltere:
+        # EIGENER Satz, nicht in den Zwischenprodukt-Hinweis gemischt: dort
+        # stehen die NAMEN, und bei gleichnamigen Fassungen waere das fuenfmal
+        # dasselbe Wort – eine Aufzaehlung, die nichts unterscheidet. Hier
+        # traegt die ANZAHL die Aussage.
+        _namen = ", ".join(dict.fromkeys(a["name"] for a in aeltere))
+        antwort = (antwort or "").rstrip() + (
+            "\n\n_(Von %s sind beim Bearbeiten %d frühere Fassung(en) entstanden; "
+            "angeboten wird nur der letzte, vollständige Stand.)_"
+            % (_namen, len(aeltere)))
 
     if zwischen:
         antwort = (antwort or "").rstrip() + (

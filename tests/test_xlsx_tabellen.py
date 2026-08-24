@@ -762,6 +762,54 @@ pruefe(r.startswith("Fehler:") and "CSV" in r,
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+print("8c) Weiterarbeiten am ERGEBNIS, nicht an der Quelle (Vorfall 2026-08-24)")
+# ═══════════════════════════════════════════════════════════════════════════
+# Auf ECHT rief ein Lauf `xlsx_edit` fuenfmal mit `path` auf der ORIGINAL-Quelle
+# auf. Jeder Aufruf legt eine eigene Ergebnisdatei an – die Reihe baute also
+# nicht aufeinander auf, jede Datei trug nur ihren eigenen Batch.
+q1 = TMP / "wt_quelle.xlsx"
+wb = Workbook(); ws = wb.active; ws.title = "D"
+ws["A1"] = "Jahr"; ws["B1"] = "Wert"; ws["A2"] = 2026; ws["B2"] = 1
+wb.save(q1); wb.close()
+
+r1 = lauf(edit.execute(path=str(q1), ziel="WT_Stand1",
+                       aenderungen=[{"zelle": "B2", "wert": 10}]))
+pruefe("WEITER AN DIESEM STAND" in r1,
+       "xlsx_edit sagt, wie der naechste Schritt aufsetzt")
+# NIE `.split(...)[1]` in einer Pruefung: fehlt die Marke, WIRFT das, und die
+# Gegenprobe bricht ab statt fehlzuschlagen (genau so beim ersten Lauf dieses
+# Abschnitts passiert – der Fallstrick steht im Register).
+_i_hin = r1.find("WEITER AN DIESEM STAND")
+_hinweis = r1[_i_hin:] if _i_hin >= 0 else ""
+pruefe("/api/documents/" in _hinweis,
+       "und nennt dazu die /api/documents/-URL des ERGEBNISSES")
+# Die genannte URL muss auch wirklich als `path` benutzbar sein - ein Hinweis,
+# den das Werkzeug selbst nicht einloest, waere die bekannte Prompt-Falle.
+_url = ""
+for _t in r1.split():
+    if _t.startswith("/api/documents/"):
+        _url = _t.rstrip(").,")
+        break
+pruefe(bool(_url), "die URL ist aus dem Ergebnistext lesbar")
+r2 = lauf(edit.execute(path=_url, ziel="WT_Stand2",
+                       aenderungen=[{"zelle": "A2", "wert": 2027}]))
+pruefe(not r2.startswith("Fehler:"),
+       "die genannte URL ist als 'path' wirklich benutzbar")
+# Und der zweite Stand traegt BEIDE Aenderungen - das ist der ganze Punkt.
+_zweit = sorted(office_main.DOCS_DIR.glob("*__WT_Stand2.xlsx"))
+pruefe(len(_zweit) == 1, "der zweite Stand liegt in der Ablage")
+if _zweit:
+    _wb = load_workbook(_zweit[0]); _ws = _wb["D"]
+    pruefe(_ws["B2"].value == 10 and _ws["A2"].value == 2027,
+           "er enthaelt die Aenderung des ersten UND des zweiten Aufrufs")
+    _wb.close()
+# xlsx_merge traegt denselben Hinweis (mehrere Slaves nacheinander).
+r3 = lauf(merge.execute(master=str(q1), slave=str(q1), ziel="WT_Merge",
+                        schluessel=["Jahr"]))
+pruefe("WEITER AN DIESEM STAND" in r3, "xlsx_merge sagt es ebenfalls")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 print("9) Nichts wurde in die echte Ablage geschrieben")
 # ═══════════════════════════════════════════════════════════════════════════
 pruefe(office_main.DOCS_DIR.resolve() != _ECHT_DOCS.resolve(),

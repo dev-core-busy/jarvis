@@ -3981,6 +3981,12 @@ KRITISCH – Autonomie-Regeln:
             "", text)
         # Aufraeumen: leere Klammern, haengende 'unter/in/:' vor Satzende, doppelte Spaces
         text = re.sub(r"\(\s*\)", "", text)
+        # LEERE Inline-Code-Klammern: der entfernte Pfad stand meist in
+        # Backticks ("wurde als `/tmp/x.xlsx` gespeichert"), zurueck blieb
+        # "wurde als `` gespeichert" - der gemeldete Anblick vom 2026-08-24.
+        # Das Lookaround SCHUETZT CODEFENCES: ohne es matcht "``" in "```python"
+        # und macht daraus "`python", also einen kaputten Codeblock.
+        text = re.sub(r"(?<!`)`[ \t]*`(?!`)", "", text)
         text = re.sub(r"\s+([.,;:])", r"\1", text)
         text = re.sub(r"\b(unter|in|nach|als|hier|datei)\s*([.,;:])", r"\2", text, flags=re.IGNORECASE)
         text = re.sub(r"[ \t]{2,}", " ", text)
@@ -4211,6 +4217,29 @@ KRITISCH – Autonomie-Regeln:
             return (_Path(_lauf_tmp.aufloesen(raw)) if raw.startswith("/")
                     else (proj / raw))
 
+        def _ergebnisort(raw: str) -> bool:
+            """Ist der ROHE (Modell-)Pfad ein Ort, an dem Ergebnisse entstehen?
+
+            Gemessen am rohen Pfad, nicht am aufgeloesten: Sinn der Frage ist,
+            ob das Modell ein ERGEBNIS gemeint hat. ``/tmp/x.xlsx`` ist der
+            Modell-Pfad des Lauf-Verzeichnisses, ``data/documents`` der Ort der
+            Office-Werkzeuge. Alles andere ist eine Quelle.
+            """
+            r = str(raw or "")
+            return r.startswith("/tmp/") or r.startswith("data/documents/")
+
+        def _schon(pfad) -> bool:
+            """Wurde dieser Pfad in diesem Lauf bereits ausgeliefert?
+
+            ``resolve()`` ist hier bewusst nicht-strikt (die Datei ist ja weg) –
+            gebraucht wird nur derselbe Schluessel, unter dem der liefernde
+            Zweig sie in ``delivered`` vermerkt hat.
+            """
+            try:
+                return str(pfad.resolve()) in delivered
+            except Exception:  # noqa: BLE001
+                return False
+
         # (m) EXPLIZITE Liefer-Marker [[JARVIS_DELIVER:/pfad]] – liefert JEDEN Dateityp,
         # den der Agent bewusst zur Auslieferung markiert. Sicherheit: nur aus
         # agent-schreibbaren Verzeichnissen (/tmp, data/documents) und niemals
@@ -4279,25 +4308,39 @@ KRITISCH – Autonomie-Regeln:
                 continue
             await _emit(f"{base}.{safe_ext}", f"/api/documents/{fname}")
 
-        if _verfehlt:
-            # Sichtbar wie ein Chip (highlight), damit der Hinweis dort steht, wo
-            # der Benutzer den Download erwartet. Ohne Pfad im Text: er waere
-            # fuer ihn nicht erreichbar und wuerde nur zum naechsten Fehlversuch
-            # einladen.
-            _liste = ", ".join(dict.fromkeys(_verfehlt))
-            await self._send_status(
-                ws,
-                f"⚠️ Konnte nicht zum Download bereitgestellt werden: {_liste}. "
-                "Ein im Text genannter Link führt ins Leere – bitte die Datei "
-                "erneut erzeugen lassen.",
-                highlight=True)
-
         # (b) Lokale Dateipfade zu AGENT-ERZEUGTEN Dokumenten -> nach data/documents/ ziehen
         for m in re.finditer(r"(?:/[\w.\-]+)+\.(?:" + _EXT_RE + r")|data/documents/[\w.\-]+\.(?:" + _EXT_RE + ")", text):
             raw = m.group(0)
             p = _hostpfad(raw)
             try:
                 if not p.is_file():
+                    # NICHT still weiter (Vorfall 2026-08-24, ECHT): der Pfad wird
+                    # von `_clean_doc_refs` aus dem Anzeigetext ENTFERNT. Bleibt der
+                    # Chip aus, liest der Benutzer "wurde als `` gespeichert" und hat
+                    # weder Datei noch Fehlermeldung - genau der Zustand, der beim
+                    # Liefer-Marker schon behoben wurde. Dieselbe Lehre, anderer Zweig.
+                    #
+                    # ENG gehalten: nur Pfade an einem ERGEBNISORT (/tmp bzw.
+                    # data/documents). Ein genannter Quellpfad (/mnt/share/..., eine
+                    # Projektdatei) wird weiter stillschweigend uebergangen - dort ist
+                    # "nicht vorhanden" keine Aussage ueber ein fehlendes Ergebnis.
+                    #
+                    # Nur beim LETZTEN Text des Laufs (``melden``) - anders als
+                    # beim Marker, der auch im Journal immer erscheint. Ein
+                    # Werkzeug-Ergebnis darf hier nichts behaupten: die Datei
+                    # kann einen Schritt spaeter entstehen, und eine Zeile, die
+                    # im Normalbetrieb kommt, entwertet das Journal.
+                    #
+                    # SCHON GELIEFERT ist keine verfehlte Lieferung. `_ingest`
+                    # VERSCHIEBT die Quelle nach data/documents – danach ist der
+                    # Pfad zwangsweise weg. Zwei Normalfaelle liefen sonst in
+                    # eine Falschmeldung NEBEN dem fertigen Chip: derselbe Pfad
+                    # steht im Liefer-Marker UND als nackter Pfad im selben Text,
+                    # oder ein Werkzeug-Ergebnis hat ihn geliefert und die
+                    # Endantwort nennt ihn noch einmal. (Der Bestandstest
+                    # `test_doc_delivery` hat genau das gefangen.)
+                    if melden and _ergebnisort(raw) and not _schon(p):
+                        _verfehlt_merken(raw, "", "Datei nicht vorhanden")
                     continue
                 rp = p.resolve()
                 key = str(rp)
@@ -4400,6 +4443,24 @@ KRITISCH – Autonomie-Regeln:
                 _log(f"Doc-Ingest (bare) fehlgeschlagen fuer {raw}: {e}")
                 continue
             await _emit(f"{base}.{ext}", f"/api/documents/{fname}")
+
+        # ERST JETZT melden, was verfehlt wurde - NACH (m), (b) und (c).
+        # Bis 2026-08-24 stand diese Sendung zwischen (m) und (b); ein in (b)
+        # vermerkter Fehlschlag wurde damit nie ausgegeben (die Schleife war
+        # bereits gelaufen). Eine Meldung, die von ihrer Position abhaengt, ist
+        # dieselbe Falle wie ein Hinweis hinter dem Kuerzungsschnitt.
+        if _verfehlt:
+            # Sichtbar wie ein Chip (highlight), damit der Hinweis dort steht, wo
+            # der Benutzer den Download erwartet. Ohne Pfad im Text: er waere
+            # fuer ihn nicht erreichbar und wuerde nur zum naechsten Fehlversuch
+            # einladen.
+            _liste = ", ".join(dict.fromkeys(_verfehlt))
+            await self._send_status(
+                ws,
+                f"⚠️ Konnte nicht zum Download bereitgestellt werden: {_liste}. "
+                "Ein im Text genannter Link führt ins Leere – bitte die Datei "
+                "erneut erzeugen lassen.",
+                highlight=True)
 
     async def _send_llm_stats(self, ws, duration_ms: int, input_tokens: int, output_tokens: int, steps: int):
         """Sendet LLM-Statistiken (Dauer + Token-Verbrauch) an alle Clients."""

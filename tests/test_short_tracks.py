@@ -1295,6 +1295,38 @@ check("logonly" not in _cnt or not _cnt,
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+section("Verfehlte Auslieferung erreicht die Karte (Vorfall 2026-08-24)")
+# Der Sammler nimmt ALLES auf, was `_deliver_docs` als Status sendet: den Chip
+# UND die Warnung. `_chips_lesen` laesst die Warnung fallen (kein Chip-Regex) –
+# ohne einen zweiten Leser waere die Meldung ausgerechnet in dem Kanal
+# verpufft, in dem der stille Ausfall gemeldet wurde.
+_chip = ("[📥 Ergebnis.xlsx herunterladen]"
+         "(/api/documents/" + "a" * 32 + "__Ergebnis.xlsx)")
+_warn = ("⚠️ Konnte nicht zum Download bereitgestellt werden: Master.xlsx. "
+         "Ein im Text genannter Link führt ins Leere – bitte die Datei erneut "
+         "erzeugen lassen.")
+_md = [_chip, _warn]
+check(len(run._chips_lesen(_md)) == 1,
+      "der Chip wird weiterhin als Chip gelesen")
+_w = run._warnungen_lesen(_md)
+check(_w == [_warn],
+      "und die Warnung getrennt herausgelesen (nicht als Chip, nicht verworfen)")
+check(run._warnungen_lesen([_chip]) == [],
+      "ein reiner Chip erzeugt KEINE Warnung")
+check(run._warnungen_lesen([_warn, _warn]) == [_warn],
+      "dieselbe Warnung erscheint nur einmal")
+# Und sie muss auch wirklich an die Antwort gehaengt werden.
+_lauf_q = abschnitt(CODE_RUN, "async def _lauf(", "def stop_alle")
+check("_warnungen_lesen(sammler.md)" in _lauf_q,
+      "der Lauf haengt die Warnungen an den Antworttext")
+_i_clean = _lauf_q.find("_clean_doc_refs")
+_i_warn = _lauf_q.find("_warnungen_lesen(sammler.md)")
+check(0 <= _i_clean < _i_warn,
+      "NACH _clean_doc_refs – davor wuerde die Bereinigung den Dateinamen "
+      "aus der Warnung wieder herausschneiden")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 print(f"\n{'=' * 62}")
 print(f"  {_ok} OK, {_fail} FAIL  (Sandkasten: {TMP})")
 print(f"{'=' * 62}")

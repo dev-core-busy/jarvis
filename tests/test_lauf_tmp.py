@@ -618,6 +618,90 @@ pruef("gemeldet wird nur beim letzten Text des Laufs",
       "since=_task_start_time, melden=True" in ag,
       "ein Werkzeug-Ergebnis warnt sonst, bevor die Datei entstanden ist")
 
+abschnitt("11. Auslieferung AUSSERHALB des Lauf-Scopes ist blind "
+          "(Vorfall 2026-08-24, ECHT)")
+
+# WARUM DIESER ABSCHNITT: gemeldet wurde "kein Dateiname und keine Excel-Tabelle
+# im Ergebnis". Die Datei war fertig – sie lag mit 37 KB in
+# /tmp/jarvis-arbeit/<kennung>/, zwei Sekunden vor Laufende. Der Short-Tracks-
+# Runner lieferte aber NACH ``run_task_headless`` aus, also nach dem Schliessen
+# der Klammer. Ohne ContextVar sind BEIDE Wege blind, und der Test prueft
+# genau diese zwei Eigenschaften – nicht eine Zeichenkette im Quelltext.
+_arb = SANDKASTEN / "arbeit-scope"
+_lauf_dir = _arb / lt.benutzer_kennung("bender")
+_lauf_dir.mkdir(parents=True, exist_ok=True)
+(_lauf_dir / "IBSv3_Monatsstatistik.xlsx").write_bytes(b"PK\x03\x04egal")
+
+_alt_root, _alt_iso = lt.ARBEIT_ROOT, lt._ausf_isoliert
+try:
+    lt.ARBEIT_ROOT = _arb
+    lt._ausf_isoliert = True          # Isolation wirkt (Broker hat es bestaetigt)
+    # Der MODELL-Pfad muss relativ zu ``lt.TMP_ECHT`` gebildet werden – der Test
+    # biegt es oben in den Sandkasten um. Ein hart getipptes "/tmp/..." laeuft in
+    # `relative_to` auf einen ValueError, `aufloesen` gibt den Pfad dann
+    # unveraendert zurueck und der Test scheitert an seiner eigenen Annahme.
+    _modell = str(lt.TMP_ECHT / "IBSv3_Monatsstatistik.xlsx")
+
+    # (a) IM Scope: Uebersetzung greift, das Lauf-Verzeichnis ist Suchwurzel.
+    with lt.lauf_scope("bender", False) as _l:
+        pruef("im Scope wird der Modell-Pfad uebersetzt",
+              _l is not None and Path(lt.aufloesen(_modell)).is_file(),
+              f"aufgeloest: {lt.aufloesen(_modell)}")
+        pruef("und das Lauf-Verzeichnis ist eine Suchwurzel",
+              _lauf_dir.resolve() in [w.resolve() for w in lt.such_wurzeln()],
+              "sonst findet auch der Namens-Zweig (c) die Datei nicht")
+
+    # (b) AUSSERHALB – der gemeldete Zustand. Beide Wege fallen aus, und genau
+    #     deshalb muss die Auslieferung in die Klammer.
+    pruef("ausserhalb bleibt der Pfad unuebersetzt (der Vorfall)",
+          lt.aufloesen(_modell) == _modell and not Path(_modell).is_file(),
+          "hier entstand 'wurde als `` gespeichert' ohne Datei und ohne Warnung")
+    pruef("und das Lauf-Verzeichnis fehlt in den Suchwurzeln",
+          _lauf_dir.resolve() not in [w.resolve() for w in lt.such_wurzeln()])
+finally:
+    lt.ARBEIT_ROOT, lt._ausf_isoliert = _alt_root, _alt_iso
+
+# Und die STRUKTUR beim Aufrufer: der Runner MUSS im Scope ausliefern. Geprueft
+# wird die Eigenschaft ueber den Syntaxbaum – ein `with`-Block um den Aufruf –,
+# nicht das Vorkommen einer Zeichenkette. Ein spaeterer Umbau, der die Klammer
+# verliert, faellt damit auf.
+import ast as _ast
+
+_rq = _ast.parse(quelle("backend/short_tracks_runner.py"))
+
+
+def _im_scope(baum) -> bool:
+    for knoten in _ast.walk(baum):
+        if not isinstance(knoten, (_ast.With, _ast.AsyncWith)):
+            continue
+        if "lauf_scope" not in _ast.dump(_ast.Module(body=list(knoten.items and []) or [],
+                                                    type_ignores=[])) \
+                and "lauf_scope" not in _ast.unparse(_ast.Tuple(
+                    elts=[i.context_expr for i in knoten.items], ctx=_ast.Load())):
+            continue
+        for kind in _ast.walk(knoten):
+            if isinstance(kind, _ast.Attribute) and kind.attr == "_deliver_docs":
+                return True
+    return False
+
+
+pruef("der Short-Tracks-Runner liefert INNERHALB von lauf_scope aus",
+      _im_scope(_rq),
+      "ohne die Klammer ist die Auslieferung blind – der gemeldete Vorfall")
+
+_ag2 = quelle("backend/agent.py")
+pruef("ein verfehlter ERGEBNISPFAD wird ebenfalls gemeldet",
+      "_ergebnisort(raw)" in _ag2,
+      "Zweig (b) brach still ab; der Pfad verschwindet aber aus dem Anzeigetext")
+pruef("eine schon ausgelieferte Datei loest KEINE Warnung aus",
+      "_schon(p)" in _ag2,
+      "_ingest verschiebt die Quelle – sonst warnt es neben dem fertigen Chip")
+pruef("die Meldung steht NACH allen drei Zweigen",
+      _ag2.index("Konnte nicht zum Download bereitgestellt werden")
+      > _ag2.index("# (c) BLOSSE Dateinamen ohne Pfad"),
+      "zwischen (m) und (b) platziert wird ein Treffer aus (b)/(c) nie ausgegeben")
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 shutil.rmtree(SANDKASTEN, ignore_errors=True)
 print(f"\n{'='*66}\nErgebnis: {ok} ok, {fail} FAIL")

@@ -820,6 +820,29 @@ class _Sammler:
 _CHIP_RE = re.compile(r"!?\[(?:📥 )?([^\]]+?)(?: herunterladen)?\]\((/api/documents/[^)]+)\)")
 
 
+def _warnungen_lesen(md: list[str]) -> list[str]:
+    """Statusmeldungen des Auslieferungs-Codes, die KEIN Chip sind.
+
+    ``_deliver_docs`` sendet zwei Sorten Status: den Download-Chip und – seit
+    2026-08-24 – die Warnung "Konnte nicht zum Download bereitgestellt werden".
+    Im Chat landet beides sichtbar im Fenster; der Sammler hat sie bis dahin
+    beide in dieselbe Liste gelegt, und ``_chips_lesen`` liess die Warnung
+    fallen, weil sie den Chip-Regex nicht trifft.
+
+    DAMIT WAERE DIE MELDUNG IM RUNNER VERPUFFT – also genau in dem Kanal, in dem
+    der stille Ausfall gemeldet wurde. Eine Warnung, die nur der Chat-Weg
+    ausgibt, ist fuer /tracks keine.
+    """
+    raus: list[str] = []
+    for z in md:
+        t = (z or "").strip()
+        if not t or _CHIP_RE.search(t):
+            continue
+        if t not in raus:
+            raus.append(t)
+    return raus
+
+
 def _chips_lesen(md: list[str]) -> list[dict]:
     """Aus den Markdown-Zeilen des Sammlers die Ergebnisdateien lesen."""
     raus: list[dict] = []
@@ -1110,17 +1133,39 @@ async def _lauf(job: dict, dump: dict, auftrag: str,
     # (dort stehen die Klarnamen). Dasselbe `schon`-Set ueber alle Aufrufe –
     # so entsteht je Datei genau EIN Chip, egal ueber welchen Weg sie gefunden
     # wurde.
-    for _text in ergebnisse + [antwort]:
-        if not _text:
-            continue
-        try:
-            await agent._deliver_docs(sammler, _text, schon,
-                                      job.get("owner_roh") or job.get("owner") or "",
-                                      since=job.get("gestartet") or 0.0)
-        except Exception as e:  # noqa: BLE001
-            # Ein fehlender Chip ist aergerlich, ein verlorener Ergebnistext
-            # waere schlimmer – deshalb nur protokollieren.
-            print("[Tracks] Ergebnisdateien nicht ermittelbar: %s" % e, flush=True)
+    # DIE AUSLIEFERUNG MUSS IM LAUF-SCOPE STEHEN (Vorfall 2026-08-24, ECHT).
+    #
+    # ``run_task_headless`` oeffnet das private /tmp selbst und SCHLIESST es beim
+    # Verlassen. Wer danach ausliefert, steht ausserhalb – und ist dann doppelt
+    # blind: ``lauf_tmp.aufloesen()`` uebersetzt den Modell-Pfad nicht mehr
+    # (ohne ContextVar gibt es ihn unveraendert zurueck), UND ``such_wurzeln()``
+    # liefert das Lauf-Verzeichnis nicht mit. Damit findet _deliver_docs weder
+    # ueber Pfad (b) noch ueber Namen (c) etwas.
+    #
+    # Gemessen: das Modell schrieb korrekt nach ``/tmp/IBSv3_Monatsstatistik.xlsx``,
+    # die Datei lag mit 37 KB in ``/tmp/jarvis-arbeit/9e78f36a/`` – zwei Sekunden
+    # vor Laufende. ``dateien`` im Protokoll war LEER, und weil
+    # ``_clean_doc_refs`` den Pfad aus dem Anzeigetext entfernt, blieb genau der
+    # Satz stehen, der auf ihn verwies: "wurde als `` gespeichert".
+    #
+    # Die Klammer ist gefahrlos wiederholbar: das Verzeichnis haengt am BENUTZER,
+    # nicht am Auftrag (``benutzer_kennung`` ist deterministisch), und beim
+    # Verlassen wird nichts geloescht. Es ist also dasselbe Verzeichnis, in dem
+    # der Lauf gerade gearbeitet hat.
+    from backend import lauf_tmp as _lauf_tmp  # noqa: PLC0415
+    with _lauf_tmp.lauf_scope(actor.get("user") or "", bool(actor.get("privileged"))):
+        for _text in ergebnisse + [antwort]:
+            if not _text:
+                continue
+            try:
+                await agent._deliver_docs(sammler, _text, schon,
+                                          job.get("owner_roh") or job.get("owner") or "",
+                                          since=job.get("gestartet") or 0.0,
+                                          melden=(_text is antwort))
+            except Exception as e:  # noqa: BLE001
+                # Ein fehlender Chip ist aergerlich, ein verlorener Ergebnistext
+                # waere schlimmer – deshalb nur protokollieren.
+                print("[Tracks] Ergebnisdateien nicht ermittelbar: %s" % e, flush=True)
     chips, zwischen = _endergebnis_filtern(_chips_lesen(sammler.md), antwort)
 
     # Die Pfade aus dem Anzeigetext entfernen: der Chip ist der EINZIGE Weg zur
@@ -1139,6 +1184,12 @@ async def _lauf(job: dict, dump: dict, auftrag: str,
     # Zwischenprodukte werden BENANNT, nicht verschwiegen: ohne diesen Satz
     # sieht der Benutzer nicht, dass der Lauf noch etwas erzeugt hat – und ohne
     # die Namen kann er nicht danach fragen.
+    # Verfehlte Auslieferungen: NACH `_clean_doc_refs` anhaengen (der Pfad, auf
+    # den sich die Warnung bezieht, ist aus dem Text dann bereits entfernt – die
+    # Warnung ist danach der EINZIGE Hinweis, dass etwas fehlt).
+    for _w in _warnungen_lesen(sammler.md):
+        antwort = (antwort or "").rstrip() + "\n\n" + _w
+
     if zwischen:
         antwort = (antwort or "").rstrip() + (
             "\n\n_(Beim Bearbeiten sind %d Zwischendatei(en) entstanden, die nicht "

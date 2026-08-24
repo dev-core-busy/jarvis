@@ -325,9 +325,25 @@ def _under(rp: Path, roots) -> bool:
     return False
 
 
-def authorize_fs(action: str, path: str) -> tuple[bool, str]:
+def authorize_fs(action: str, path: str, username: str | None = None) -> tuple[bool, str]:
     """Zugriffsentscheidung fuers filesystem-Tool (nur Domain-Nutzer).
+
+    ``username`` GEHOERT UEBERGEBEN, wenn der Aufrufer den Akteur kennt. Der
+    Rueckfall auf ``tool_user()`` gilt nur fuer Aufrufe aus einem Werkzeug
+    heraus, wo der ContextVar nachweislich gesetzt ist.
+
+    WARUM DAS EIN PARAMETER IST UND KEIN UMGEBUNGSZUSTAND (Vorfall 2026-08-24):
+    die drei Pfad-Freigaben im Dispatch laufen VOR ``set_tool_user`` – dort war
+    ``tool_user()`` also der Vorgabewert ``""``. Folge in BEIDE Richtungen:
+    ``gehoert_anhang`` verglich gegen eine leere Kennung und wies damit JEDEN
+    Benutzer von seiner EIGENEN Arbeitskopie ab, waehrend ``may_see_document``
+    ein leeres ``user`` als "keine Einschraenkung" liest und die
+    Eigentuemer-Schranke in ``data/documents`` an dieser Stelle gar nicht
+    durchsetzte. Eine harte Schranke darf nicht davon abhaengen, wann sie
+    aufgerufen wird.
+
     Rueckgabe (erlaubt, begruendung)."""
+    benutzer = tool_user() if username is None else username
     rp = _resolve(path)
     action = (action or "").lower()
     if action in ("write", "append", "mkdir"):
@@ -345,7 +361,7 @@ def authorize_fs(action: str, path: str) -> tuple[bool, str]:
     # Eigentuemer-Schranke in data/documents: dort liegen die Ergebnis- und
     # Anhangsdateien ALLER Benutzer. Das VERZEICHNIS bleibt auflistbar (der
     # Inhalt wird in filesystem.py gefiltert), einzelne fremde Dateien nicht.
-    if rp != DOCS_ROOT and _under(rp, [DOCS_ROOT]) and not may_see_document(rp.name):
+    if rp != DOCS_ROOT and _under(rp, [DOCS_ROOT]) and not may_see_document(rp.name, benutzer):
         return False, "diese Datei gehört einem anderen Benutzer"
     # Dieselbe Schranke fuer die Arbeitskopien der Anhaenge. Sie liegen seit
     # 2026-08-23 je Benutzer unter /tmp/jarvis-anhaenge/<kennung>/ – vorher
@@ -355,13 +371,13 @@ def authorize_fs(action: str, path: str) -> tuple[bool, str]:
     # nannte ihm `filesystem list /tmp`.
     try:
         from backend import lauf_tmp as _lt
-        if _lt.gehoert_anhang(rp, tool_user()) is False:
+        if _lt.gehoert_anhang(rp, benutzer) is False:
             return False, "dieser Anhang gehört einem anderen Benutzer"
         # Dasselbe fuer die Arbeitsverzeichnisse. Der Namespace verbirgt sie nur
         # vor der SHELL; ein Werkzeug im Dienstprozess (filesystem, office_read,
         # xlsx_read_range) koennte die Ergebnisdatei eines FREMDEN Benutzers
         # sonst einfach oeffnen – und ein Verzeichnis-Listing nennt die Namen.
-        if _lt.gehoert_arbeitsbereich(rp, tool_user()) is False:
+        if _lt.gehoert_arbeitsbereich(rp, benutzer) is False:
             return False, "diese Datei gehört einem anderen Benutzer"
     except Exception:  # noqa: BLE001
         pass

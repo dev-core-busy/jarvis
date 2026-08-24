@@ -3067,6 +3067,14 @@ KRITISCH – Autonomie-Regeln:
             _viol_soft = False
             if not _privileged:
                 from backend import sandbox as _sbx
+                # Der Akteur fuer die Pfad-Freigaben. AUSDRUECKLICH hier und
+                # nicht ueber sandbox.tool_user(): der ContextVar wird erst
+                # weiter unten gesetzt (kurz vor der Ausfuehrung), die drei
+                # Freigaben darunter laufen also davor. Bis 2026-08-24 lasen sie
+                # deshalb den Vorgabewert "" – siehe authorize_fs().
+                # Gleiche Ableitung wie bei set_tool_user: ein unprivilegierter
+                # Lauf OHNE Namen bekommt den Platzhalter, nie den leeren String.
+                _fs_akteur = _uname or _ANON_ACTOR
                 if name in _BLOCKED_TOOLS_FOR_LDAP and not _reminder_exempt(name, _uname):
                     print(f"[AGENT] BLOCKED Tool '{name}' fuer Domain-User '{_uname}'", flush=True)
                     result = f"Zugriff verweigert: Das Tool '{name}' steht Netzwerk-Benutzern nicht zur Verfuegung."
@@ -3100,7 +3108,9 @@ KRITISCH – Autonomie-Regeln:
                 elif name == "filesystem":
                     # Pfad-Confinement: Schreiben nur /tmp+data/documents, Lesen nur
                     # in Wissens-/Arbeitsverzeichnissen; Secrets/System/Root gesperrt.
-                    _ok, _why = _sbx.authorize_fs(str(args.get("action", "")), str(args.get("path", "")))
+                    _ok, _why = _sbx.authorize_fs(str(args.get("action", "")),
+                                                  str(args.get("path", "")),
+                                                  username=_fs_akteur)
                     if not _ok:
                         print(f"[AGENT] BLOCKED filesystem action={args.get('action')!r} path={args.get('path')!r} fuer '{_uname}': {_why}", flush=True)
                         result = f"Zugriff verweigert: {_why}."
@@ -3121,7 +3131,7 @@ KRITISCH – Autonomie-Regeln:
                     _src = args.get("source") if isinstance(args.get("source"), dict) else None
                     _spath = str((_src or {}).get("file") or (_src or {}).get("path") or "")
                     if _spath:
-                        _ok, _why = _sbx.authorize_fs("read", _spath)
+                        _ok, _why = _sbx.authorize_fs("read", _spath, username=_fs_akteur)
                         if not _ok:
                             print(f"[AGENT] BLOCKED create_chart source={_spath!r} fuer '{_uname}': {_why}", flush=True)
                             result = f"Zugriff verweigert: {_why}."
@@ -3148,7 +3158,22 @@ KRITISCH – Autonomie-Regeln:
                         _pv = str(args.get(_pf) or "")
                         if not _pv:
                             continue
-                        _ok, _why = _sbx.authorize_fs("read", _pv)
+                        if "/" not in _pv and "\\" not in _pv:
+                            # BLOSSER DATEINAME. Den loest das Werkzeug selbst auf
+                            # (`skills/office/main._resolve_existing`: erst
+                            # data/documents, dann der Anzeigename hinter dem
+                            # Capability-Praefix) – hier ist noch gar nicht
+                            # bekannt, welche Datei gemeint ist. Ein Vergleich
+                            # gegen den ROHEN Namen loest gegen das
+                            # Arbeitsverzeichnis des Dienstes auf und wies
+                            # deshalb am 24.08.2026 auf ECHT ein
+                            # `xlsx_edit path='Monatsumsaetze_2026.xlsx'` mit
+                            # "Lesen ist nur in den Wissens-/Arbeitsverzeichnissen
+                            # erlaubt" ab – fuer den Benutzer nicht deutbar.
+                            # Die Freigabe holt `_sichtbar()` auf dem
+                            # AUFGELOESTEN Pfad nach, also dort, wo er feststeht.
+                            continue
+                        _ok, _why = _sbx.authorize_fs("read", _pv, username=_fs_akteur)
                         if not _ok:
                             print(f"[AGENT] BLOCKED {name} {_pf}={_pv!r} fuer '{_uname}': {_why}", flush=True)
                             result = f"Zugriff verweigert: {_why}."

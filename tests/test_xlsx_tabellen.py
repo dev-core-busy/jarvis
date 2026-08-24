@@ -646,8 +646,11 @@ pruefe(set(merge.pfad_parameter) == {"master", "slave"},
 agent_src = (ROOT / "backend" / "agent.py").read_text(encoding="utf-8")
 pruefe('getattr(self.tools_map.get(name), "pfad_parameter", None)' in agent_src,
        "im Dispatch fehlt der generische Pfad-Freigabe-Zweig")
-pruefe('authorize_fs("read", _pv)' in agent_src,
-       "der Zweig muss authorize_fs aufrufen")
+pruefe('authorize_fs("read", _pv, username=_fs_akteur)' in agent_src,
+       "der Zweig muss authorize_fs MIT dem Akteur aufrufen – ohne den Parameter "
+       "las die Freigabe den leeren Vorgabewert des ContextVars und wies jeden "
+       "Benutzer von seinem EIGENEN Anhang ab (Vorfall 2026-08-24, siehe "
+       "tests/test_fs_gate_akteur.py)")
 
 st_src = (ROOT / "backend" / "short_tracks.py").read_text(encoding="utf-8")
 for n in ("xlsx_inspect", "xlsx_read_range", "xlsx_merge", "xlsx_edit"):

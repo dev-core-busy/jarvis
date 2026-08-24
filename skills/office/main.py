@@ -78,6 +78,27 @@ def _sichtbar(p: Path | None) -> Path | None:
         rp = p.resolve()
         if rp.parent == _sbx.DOCS_ROOT and not _sbx.may_see_document(rp.name):
             return None
+        # VOLLE Freigabe auf den AUFGELOESTEN Pfad (2026-08-24). Die Zeile
+        # darueber deckt nur data/documents ab – `office_read`/`office_to_pdf`
+        # deklarieren aber KEIN `pfad_parameter` und laufen deshalb an der
+        # generischen Pfad-Freigabe im Dispatch vorbei. Damit konnte ein
+        # Netzwerk-Benutzer die Arbeitskopie oder Ergebnisdatei eines ANDEREN
+        # oeffnen (`/tmp/jarvis-anhaenge/<fremd>/…`), sobald er den Namen
+        # kannte – genau die Grenze, die der /tmp-Umbau ziehen sollte und die
+        # dessen Doku fuer `office_read` ausdruecklich behauptet.
+        #
+        # Geprueft wird HIER, weil der Pfad erst hier feststeht: das Modell darf
+        # einen blossen Dateinamen nennen, und der wird oben aufgeloest.
+        #
+        # LEER = keine Einschraenkung – dieselbe Regel wie in
+        # `may_see_document`/`may_list_entry`: der ContextVar ist fuer
+        # privilegierte Laeufe absichtlich leer, und deren Anhaenge liegen
+        # ebenfalls unter ANH_ROOT.
+        benutzer = _sbx.tool_user()
+        if benutzer:
+            erlaubt, _grund = _sbx.authorize_fs("read", str(rp), username=benutzer)
+            if not erlaubt:
+                return None
     except Exception:
         pass
     return p

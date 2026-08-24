@@ -8056,6 +8056,13 @@ body.light .kb-mirror-mark { color: color-mix(in srgb, var(--info) 72%, #000); }
  * braucht kein JS. Ein <a> mit Knopf-Klasse ist ohne diese Zeile
  * unterstrichen (Lehre von .em-btn und .ad-upd a). */
 .xa-dl { text-decoration: none; display: inline-block; }
+/* Der eingetragene Pfad und der Dateiname im Hinweis unter den Knoepfen. Sie
+ * sind Fremdeingabe bzw. kommen aus einem Antwortkopf und stehen deshalb per
+ * textContent in eigenen Elementen. Umbruchfaehig, weil ein UNC-Pfad lang
+ * werden kann und den Kasten sonst waagerecht aufreisst. */
+.xa-pfad, .xa-datei { font-family: var(--font-mono, monospace);
+    font-size: 0.78rem; background: rgba(var(--fg-rgb), .07);
+    border-radius: 4px; padding: 1px 5px; word-break: break-all; }
 /* Die fertige Befehlszeile. Waagerecht scrollbar statt umbrechend: ein
  * umgebrochener Befehl laesst sich nicht sauber markieren und kopieren
  * (gleiche Begruendung wie bei .cs-help pre im Claude-Bereich). Deckende

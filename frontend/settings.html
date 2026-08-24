@@ -23,7 +23,7 @@
     <link rel="stylesheet" href="/static/css/theme.css?v=16">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=8">
-    <link rel="stylesheet" href="/static/css/style.css?v=160">
+    <link rel="stylesheet" href="/static/css/style.css?v=161">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=6">
 </head>
 
@@ -3184,25 +3184,29 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                             <div class="kb-collapse-body" id="xa-sect-install-body">
                                 <p class="kb-hint" style="margin-bottom:10px;">Das Manifest wird bei jedem Abruf <b>für diesen Server</b> erzeugt – die enthaltenen Adressen zeigen auf ihn. Es muss in einem Ordner liegen, den der Arbeitsplatz lesen kann, und dieser Ordner wird einmalig in den Excel-Optionen als vertrauenswürdiger Katalog eingetragen (per Gruppenrichtlinie ausrollbar). Üblich ist <b>eine Freigabe im Netz</b> für alle – tragen Sie deren Pfad unten ein, dann sieht jeder Benutzer auf <code>/excel</code> nur noch diesen Pfad. Bleibt das Feld leer, holt sich jeder das Manifest selbst und legt es in einen eigenen Ordner.</p>
-                                <!-- Der Einleitungstext darueber sagt bewusst NICHT
-                                     "laden Sie es herunter": der Knopf laedt je nach
-                                     hinterlegtem Katalogpfad herunter ODER hoch, und
-                                     ein fester Text, der einen der beiden Wege
-                                     behauptet, widerspricht der Beschriftung direkt
-                                     daneben. Was zu tun ist, sagt #xa-dl-hint - der
-                                     folgt dem Zustand.
+                                <p class="kb-hint" style="margin-bottom:10px;"><b>Der Download landet nicht in der Freigabe – das müssen Sie selbst tun.</b> „Manifest downloaden" gibt die Datei an Ihren Browser; wohin sie geht, entscheidet dessen Einstellung (Download-Ordner, „Speichern unter", Desktop). <b>Verschieben Sie sie anschließend von Hand</b> in den Katalog-Ordner. Eine Webseite darf nicht in einen Ordner schreiben, der ihr nur als <i>Text</i> genannt wurde – der eingetragene Netzwerkpfad ist deshalb eine Angabe für Menschen, kein Ziel für den Browser. Wer die Datei ohne Umweg über den Download-Ordner ablegen will, nimmt in <b>Chrome oder Edge</b> den zweiten Knopf: dort wählen Sie den Zielordner <i>einmal</i> im Dialog aus, er wird gemerkt, und danach schreibt der Knopf direkt hinein.</p>
+                                <!-- ZWEI KNOEPFE, ZWEI AUFGABEN (Umbau 2026-08-24).
+                                     Vorher war es EIN Knopf, der je nach
+                                     Katalogpfad herunterlud ODER in einen
+                                     Ordner schrieb - was er gerade tut, hing an
+                                     einem Feld weiter unten und war ihm nicht
+                                     anzusehen.
 
-                                     Der Knopf hat ZWEI Zustaende, gesteuert vom
-                                     gespeicherten Katalogpfad weiter unten:
-                                     ohne Pfad "herunterladen" (der <a> laedt die
-                                     Datei mit dem Namen aus dem Branding), mit
-                                     Pfad "hochladen" (Speichern-unter-Fenster,
-                                     das direkt in die Freigabe schreibt).
-                                     Ein Knopf, der zum Herunterladen einlaedt,
-                                     waehrend der Weg in eine Freigabe fuehrt,
-                                     beschreibt die Aufgabe falsch. -->
+                                     #xa-download ist ein reines <a href> und
+                                     wird NICHT abgefangen: so entscheidet der
+                                     Browser ueber das Ziel, die Datei darf also
+                                     auch auf den Desktop.
+
+                                     #xa-upload ist der Ordner-Weg (File System
+                                     Access API). Er erscheint nur in Chrome und
+                                     Edge - excel_admin.js blendet ihn sonst aus,
+                                     ein Knopf, der in Firefox nichts tut, ist
+                                     schlimmer als keiner. In den EINGETRAGENEN
+                                     Pfad kann auch er nicht schreiben; der
+                                     Ordner wird einmal ausgewaehlt und gemerkt. -->
                                 <div class="xa-row">
-                                    <a class="btn-primary xa-dl" id="xa-download" href="/excel-addin/manifest.xml">Manifest herunterladen</a>
+                                    <a class="btn-primary xa-dl" id="xa-download" href="/excel-addin/manifest.xml">Manifest downloaden</a>
+                                    <button class="btn-secondary" id="xa-upload" style="display:none;">Ordner wählen und hineinschreiben</button>
                                     <!-- Die Fassung steht VOR dem Status: sie ist
                                          dauerhaft da und gehoert an die Knoepfe. Der
                                          Status ist laenger und bricht in die naechste
@@ -3223,7 +3227,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     <input type="text" id="xa-katalog" maxlength="260"
                                            placeholder="z. B. \\server\freigabe\office-addins"
                                            style="width:100%;box-sizing:border-box;font-family:var(--font-mono,monospace);">
-                                    <span class="kb-hint">Der Ordner, in den <b>Sie</b> das Manifest gelegt haben. Ist hier etwas eingetragen, sieht der Benutzer auf <code>/excel</code> <b>diesen Pfad statt des Download-Knopfes</b> – er lädt dann nichts herunter, sondern trägt den Pfad nur noch in seine Excel-Optionen ein. Leer lassen, wenn sich jeder das Manifest selbst holen soll. <b>Das Feld verteilt nichts</b> – es sagt den Benutzern nur, wohin Sie die Datei gelegt haben.</span>
+                                    <span class="kb-hint">Der Ordner, in den <b>Sie</b> das Manifest legen. Ist hier etwas eingetragen, sieht der Benutzer auf <code>/excel</code> <b>diesen Pfad statt des Download-Knopfes</b> – er lädt dann nichts herunter, sondern trägt den Pfad nur noch in seine Excel-Optionen ein. Leer lassen, wenn sich jeder das Manifest selbst holen soll. <b>Das Feld verteilt nichts</b> – es sagt den Benutzern nur, wohin Sie die Datei gelegt haben.</span>
                                 </div>
                                 <div class="xa-row">
                                     <button class="btn-primary" id="xa-katalog-save">Pfad speichern</button>
@@ -4711,7 +4715,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/theme.js?v=2"></script>
     <script src="/static/js/security_incidents.js?v=30"></script>
     <script src="/static/js/ldap_picker.js?v=10"></script>
-    <script src="/static/js/excel_admin.js?v=7"></script>
+    <script src="/static/js/excel_admin.js?v=8"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
     <script src="/static/js/sessions.js?v=4"></script>
     <script src="/static/js/agent_roles.js?v=2"></script>

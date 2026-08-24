@@ -756,19 +756,26 @@ function angemeldetesFenster(opt) {
         w.ExcelAdmin.onShow();
         await warte(20);
         const dl = w.document.getElementById('xa-download');
-        pruefe(dl.textContent === 'Manifest herunterladen',
-               'ohne Pfad heisst der Knopf "Manifest herunterladen"', dl.textContent);
+        // DER DOWNLOAD-KNOPF HAT NUR EINEN ZUSTAND (Umbau 2026-08-24). Vorher
+        // wechselte er die Beschriftung je nach Katalogpfad – was er gerade tut,
+        // war ihm nicht anzusehen.
+        pruefe(dl.textContent === 'Manifest downloaden',
+               'der Knopf heisst immer "Manifest downloaden"', dl.textContent);
         pruefe(w.document.getElementById('xa-dl-hint').style.display === 'none',
                'ohne Pfad steht kein Zusatzhinweis da');
+        pruefe(w.document.getElementById('xa-upload').style.display === 'none',
+               'ohne Pfad ist der Ordner-Knopf unsichtbar');
         const ev = new w.MouseEvent('click', { bubbles: true, cancelable: true });
         dl.dispatchEvent(ev);
         await warte(20);
+        // DAS IST DIE ZUSAGE "der Download darf auch auf den Desktop": der Klick
+        // wird NICHT abgefangen, also entscheidet der Browser ueber das Ziel.
         pruefe(ev.defaultPrevented === false,
-               'ohne Pfad bleibt es beim normalen Link-Download');
+               'der Klick wird nicht abgefangen – das Ziel bestimmt der Browser');
         pruefe(spur.navigation === 1,
                'der Browser folgt dem Link wirklich (jsdom meldet den Navigationsversuch)',
                'navigationen=' + spur.navigation);
-        pruefe(spur.picker === 0, 'ohne Pfad wird kein Speichern-Dialog geoeffnet');
+        pruefe(spur.picker === 0, 'und es oeffnet sich kein Dialog');
         w.close();
     }
 
@@ -777,21 +784,29 @@ function angemeldetesFenster(opt) {
         const { w, spur } = adminFenster('\\\\srv\\freigabe\\addins', pickerOk, true);
         w.ExcelAdmin.onShow();
         await warte(20);
-        const dl = w.document.getElementById('xa-download');
-        pruefe(dl.textContent === 'Manifest hochladen',
-               'mit Pfad heisst der Knopf "Manifest hochladen"', dl.textContent);
-        // Der Erklaertext zum Ordner-Dialog ist auf Vorgabe des Nutzers
-        // entfallen (2026-08-24) – ohne gemerkten Ordner steht hier NICHTS.
+        pruefe(w.document.getElementById('xa-download').textContent === 'Manifest downloaden',
+               'auch mit Pfad heisst der Download-Knopf unveraendert so');
+        const dl = w.document.getElementById('xa-upload');
+        pruefe(dl.style.display !== 'none' && /Ordner/.test(dl.textContent),
+               'mit Pfad erscheint der Ordner-Knopf', dl.textContent);
+        // Der Hinweis MUSS den Weg nennen: herunterladen, dann selbst
+        // verschieben. Ohne diesen Satz haelt der Administrator den
+        // eingetragenen Pfad fuer ein Ziel des Browsers – das war die Meldung.
         const hint = w.document.getElementById('xa-dl-hint');
-        pruefe(hint.style.display === 'none',
-               'mit Pfad, aber ohne gemerkten Ordner steht kein Erklaertext da',
-               hint.textContent.slice(0, 60));
+        pruefe(hint.style.display !== 'none' && /verschieben/i.test(hint.textContent),
+               'der Hinweis sagt, dass die Datei selbst verschoben werden muss',
+               hint.textContent.slice(0, 90));
+        pruefe(hint.textContent.indexOf('\\\\srv\\freigabe\\addins') >= 0,
+               'und nennt den eingetragenen Pfad woertlich', hint.textContent);
+        pruefe(!!hint.querySelector('.xa-pfad') &&
+               hint.querySelector('.xa-pfad').textContent === '\\\\srv\\freigabe\\addins',
+               'der Pfad steht per textContent in einem eigenen Element (Fremdeingabe)');
 
         const ev = new w.MouseEvent('click', { bubbles: true, cancelable: true });
         dl.dispatchEvent(ev);
         await warte(40);
-        pruefe(ev.defaultPrevented === true && spur.navigation === 0,
-               'der Klick loest KEINEN Download aus, sondern den Dialog');
+        pruefe(spur.navigation === 0,
+               'der Ordner-Knopf loest KEINEN Download aus, sondern den Dialog');
         pruefe(spur.picker === 1, 'genau ein Speichern-Dialog', 'picker=' + spur.picker);
         pruefe(spur.pickerArg && spur.pickerArg.suggestedName === 'nexus-dp-excel-addin.xml',
                'der Dateiname kommt aus dem Content-Disposition-Kopf (Branding)',
@@ -809,13 +824,12 @@ function angemeldetesFenster(opt) {
         const { w, spur } = adminFenster('\\\\srv\\freigabe\\addins', null, true);
         w.ExcelAdmin.onShow();
         await warte(20);
+        // Ein Knopf, der in Firefox nichts tun kann, wird nicht angeboten.
+        pruefe(w.document.getElementById('xa-upload').style.display === 'none',
+               'ohne File-System-API gibt es den Ordner-Knopf nicht');
         const dl = w.document.getElementById('xa-download');
-        pruefe(dl.textContent === 'Manifest herunterladen',
-               'ohne File-System-API bleibt es beim Download – kein leeres Versprechen',
-               dl.textContent);
-        const hint = w.document.getElementById('xa-dl-hint');
-        pruefe(hint.style.display !== 'none' && /Chrome/.test(hint.textContent),
-               'der Hinweis nennt den Grund und die Browser, die es koennen');
+        pruefe(dl.textContent === 'Manifest downloaden',
+               'der Download-Knopf ist unveraendert da', dl.textContent);
         const ev = new w.MouseEvent('click', { bubbles: true, cancelable: true });
         dl.dispatchEvent(ev);
         await warte(20);
@@ -828,7 +842,7 @@ function angemeldetesFenster(opt) {
         const { w, spur } = adminFenster('\\\\srv\\freigabe', pickerAbbruch, true);
         w.ExcelAdmin.onShow();
         await warte(20);
-        w.document.getElementById('xa-download')
+        w.document.getElementById('xa-upload')
             .dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true }));
         await warte(40);
         const st = w.document.getElementById('xa-dl-status');
@@ -842,7 +856,7 @@ function angemeldetesFenster(opt) {
         const { w, spur } = adminFenster('\\\\srv\\freigabe', pickerOk, false);
         w.ExcelAdmin.onShow();
         await warte(20);
-        w.document.getElementById('xa-download')
+        w.document.getElementById('xa-upload')
             .dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true }));
         await warte(40);
         pruefe(spur.picker === 0,
@@ -859,7 +873,7 @@ function angemeldetesFenster(opt) {
         const { w, spur } = adminFenster('\\\\srv\\freigabe', pickerOk, 'nur_erster');
         w.ExcelAdmin.onShow();
         await warte(20);
-        w.document.getElementById('xa-download')
+        w.document.getElementById('xa-upload')
             .dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true }));
         await warte(40);
         pruefe(spur.picker === 0,
@@ -876,7 +890,7 @@ function angemeldetesFenster(opt) {
         const { w, spur } = adminFenster('\\\\srv\\freigabe', pickerOk, 'spaeter');
         w.ExcelAdmin.onShow();
         await warte(20);
-        w.document.getElementById('xa-download')
+        w.document.getElementById('xa-upload')
             .dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true }));
         await warte(40);
         pruefe(spur.manifestAbrufe > 1, 'Vorbedingung: der Klick hat wirklich abgerufen',
@@ -895,14 +909,18 @@ function angemeldetesFenster(opt) {
         const { w, spur } = adminFenster('', pickerOk, true);
         w.ExcelAdmin.onShow();
         await warte(20);
-        const dl = w.document.getElementById('xa-download');
-        pruefe(dl.textContent === 'Manifest herunterladen', 'Ausgangszustand: Download');
+        const dl = w.document.getElementById('xa-upload');
+        pruefe(dl.style.display === 'none', 'Ausgangszustand: kein Ordner-Knopf');
+        pruefe(w.document.getElementById('xa-dl-hint').style.display === 'none',
+               'und kein Hinweis');
         w.document.getElementById('xa-katalog').value = '\\\\srv\\neu';
         w.document.getElementById('xa-katalog-save').click();
         await warte(40);
-        pruefe(dl.textContent === 'Manifest hochladen',
-               'nach dem Speichern des Pfades heisst der Knopf sofort "hochladen" ' +
-               '(ohne Neuladen des Reiters)', dl.textContent);
+        pruefe(dl.style.display !== 'none',
+               'nach dem Speichern des Pfades erscheint der Ordner-Knopf sofort ' +
+               '(ohne Neuladen des Reiters)');
+        pruefe(w.document.getElementById('xa-dl-hint').textContent.indexOf('srv\\neu') > 0,
+               'und der Hinweis nennt den neuen Pfad');
         // Der Knopf sendet nur SEINE Teilmenge – `update_skill_config` merged,
         // ein voller Formularstand ueberschriebe die Grenzwerte.
         const letzte = spur.koerper[spur.koerper.length - 1];
@@ -929,6 +947,27 @@ function angemeldetesFenster(opt) {
            '... und es gibt keinen toten Code mehr dazu');
     pruefe(!/Sicherheitsgrenze des Browsers/.test(ADMIN_CODE),
            'der Erklaertext zum Ordner-Dialog ist entfernt');
+
+    /* ZWEI KNOEPFE, ZWEI AUFGABEN (Umbau 2026-08-24, mehrfach gemeldet).
+       #xa-download ist ein reines <a href> – wird es abgefangen, bestimmt die
+       Seite das Ziel und die Datei kann NICHT mehr auf den Desktop. Genau das
+       war die Meldung. */
+    pruefe(XPANEL.indexOf('id="xa-upload"') > 0,
+           'der Ordner-Weg hat einen EIGENEN Knopf');
+    pruefe(XPANEL.indexOf('>Manifest downloaden<') > 0,
+           'der Download-Knopf heisst "Manifest downloaden"');
+    pruefe(!/xa-download[^>]*>\s*Manifest (herunterladen|hochladen)/.test(XPANEL),
+           '... und traegt keine der alten Beschriftungen mehr');
+    // Die Beschriftung darf nicht mehr umgeschaltet werden - ein Knopf, dessen
+    // Aufgabe an einem Feld weiter unten haengt, ist ihm nicht anzusehen.
+    pruefe(ADMIN_CODE.indexOf("$('xa-download').textContent") < 0 &&
+           !/dl\.textContent\s*=/.test(ADMIN_CODE),
+           'die Beschriftung des Download-Knopfes wird nirgends umgeschrieben');
+    pruefe(!/\$\('xa-download'\)[\s\S]{0,120}addEventListener/.test(ADMIN_CODE),
+           'am Download-Knopf haengt KEIN Klick-Handler (das Ziel bestimmt der Browser)');
+    // Der Hinweis muss den manuellen Schritt benennen.
+    pruefe(/verschieben/i.test(ADMIN_CODE) && /nicht.{0,40}selbst.{0,40}Netzwerkfreigabe|Netzwerkfreigabe/i.test(ADMIN_CODE),
+           'der Hinweis nennt das Verschieben von Hand');
 
     /* Die Liste "Was der Assistent darf" ist eine ZUSAGE an den Administrator.
        Zwei ihrer Zeilen waren nach dem Umbau vom 2026-08-24 unwahr - genau die
@@ -980,9 +1019,11 @@ function angemeldetesFenster(opt) {
         // Kein Vorstufen-Knopf mehr – das war die Meldung.
         pruefe(w.document.getElementById('xa-ordner-btn') === null,
                'es gibt keinen Knopf "Ordner einmal auswaehlen" mehr');
-        const dl = w.document.getElementById('xa-download');
-        pruefe(dl.textContent === 'Manifest hochladen',
-               'der Knopf heisst "Manifest hochladen"', dl.textContent);
+        const dl = w.document.getElementById('xa-upload');
+        // Noch KEIN Ordner gemerkt (das Handle kommt erst aus dem Dialog) –
+        // der Knopf laedt also zum Waehlen ein.
+        pruefe(dl.style.display !== 'none' && /wählen/.test(dl.textContent),
+               'ohne gemerkten Ordner laedt der Knopf zum Waehlen ein', dl.textContent);
 
         dl.dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true }));
         await warte(80);
@@ -1004,11 +1045,11 @@ function angemeldetesFenster(opt) {
         const zwei = adminFenster(PFAD, pickerOk, true, h, laden);
         zwei.w.ExcelAdmin.onShow();
         await warte(60);
-        const hint = zwei.w.document.getElementById('xa-dl-hint');
-        pruefe(hint.innerHTML.indexOf('office-addins') >= 0,
-               'nach dem Neuladen ist der Ordner noch gemerkt (Persistenz)',
-               hint.textContent.slice(0, 70));
-        zwei.w.document.getElementById('xa-download')
+        const knopf2 = zwei.w.document.getElementById('xa-upload');
+        pruefe(knopf2.textContent.indexOf('office-addins') >= 0,
+               'nach dem Neuladen nennt der Knopf den gemerkten Ordner (Persistenz)',
+               knopf2.textContent);
+        zwei.w.document.getElementById('xa-upload')
             .dispatchEvent(new zwei.w.MouseEvent('click', { bubbles: true, cancelable: true }));
         await warte(60);
         pruefe(zwei.spur.dirPicker === 0,
@@ -1031,16 +1072,19 @@ function angemeldetesFenster(opt) {
         const { w, spur } = adminFenster('', pickerOk, true, h, laden);
         w.ExcelAdmin.onShow();
         await warte(40);
-        const dl = w.document.getElementById('xa-download');
-        pruefe(dl.textContent === 'Manifest herunterladen',
-               'ohne Pfad zunaechst "Manifest herunterladen"', dl.textContent);
+        const dl = w.document.getElementById('xa-upload');
+        pruefe(dl.style.display === 'none', 'ohne Pfad kein Ordner-Knopf');
 
         const feld = w.document.getElementById('xa-katalog');
         feld.value = '\\\\srv\\freigabe\\neu';
         feld.dispatchEvent(new w.Event('input', { bubbles: true }));
         await warte(20);
-        pruefe(dl.textContent === 'Manifest hochladen',
-               'beim Tippen schaltet der Knopf sofort um', dl.textContent);
+        // MASSGEBLICH IST DER FELDINHALT, nicht der gespeicherte Wert: wer
+        // eintippt, sieht sofort, wohin die Datei gehoert.
+        pruefe(dl.style.display !== 'none',
+               'beim Tippen erscheint der Ordner-Knopf sofort');
+        pruefe(w.document.getElementById('xa-dl-hint').textContent.indexOf('freigabe\\neu') > 0,
+               'und der Hinweis wandert mit');
 
         const vorher = spur.koerper.length;
         dl.dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true }));
@@ -1067,7 +1111,7 @@ function angemeldetesFenster(opt) {
         const { w, spur } = adminFenster(PFAD, pickerOk, true, h, laden);
         w.ExcelAdmin.onShow();
         await warte(60);
-        w.document.getElementById('xa-download')
+        w.document.getElementById('xa-upload')
          .dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true }));
         await warte(60);
         // Nach einem Browser-Neustart ist "prompt" der NORMALFALL und kein
@@ -1089,7 +1133,7 @@ function angemeldetesFenster(opt) {
         const { w, spur } = adminFenster(PFAD, pickerOk, true, h, laden);
         w.ExcelAdmin.onShow();
         await warte(60);
-        w.document.getElementById('xa-download')
+        w.document.getElementById('xa-upload')
          .dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true }));
         await warte(60);
         // FAIL-SAFE IN DIE RICHTIGE RICHTUNG: verweigerte Erlaubnis darf nicht
@@ -1110,7 +1154,7 @@ function angemeldetesFenster(opt) {
         const { w, spur } = adminFenster(PFAD, pickerOk, true, null, {});
         w.ExcelAdmin.onShow();
         await warte(60);
-        w.document.getElementById('xa-download')
+        w.document.getElementById('xa-upload')
          .dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true }));
         await warte(60);
         // FAIL-SAFE IN DIE RICHTIGE RICHTUNG: fehlt die Ordner-API, endet es
@@ -1129,11 +1173,19 @@ function angemeldetesFenster(opt) {
         const { w } = adminFenster(PFAD, pickerOk, true, h, laden);
         w.ExcelAdmin.onShow();
         await warte(60);
+        // Der Ordnername steht seit dem Umbau in der KNOPF-Beschriftung, nicht
+        // mehr im Hinweis – dort wird er per textContent gesetzt, kann also
+        // gar kein Markup werden. Beides wird geprueft: kein Element UND der
+        // Name als Text sichtbar.
+        const knopf = w.document.getElementById('xa-upload');
+        pruefe(knopf.querySelector('img') === null,
+               'ein Ordnername mit Markup wird nicht zu Markup');
+        pruefe(knopf.textContent.indexOf('<img') >= 0,
+               'und erscheint als Text', knopf.textContent);
+        // Und der eingetragene Pfad im Hinweis ebenso – er ist Fremdeingabe.
         const hint = w.document.getElementById('xa-dl-hint');
         pruefe(hint.querySelector('img') === null,
-               'ein Ordnername mit Markup wird entschaerft (er geht per innerHTML hinein)');
-        pruefe(hint.textContent.indexOf('<img') >= 0,
-               'und erscheint als Text');
+               'auch der Hinweis traegt kein Markup aus Fremdeingabe');
         w.close();
     }
 

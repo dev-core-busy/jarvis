@@ -19,44 +19,36 @@
    Branding hinterher. Im Hochlade-Modus (unten) wird deshalb der Dateiname AUS
    DEM ANTWORTKOPF gelesen, nicht nachgebaut.
 
-   DER KNOPF HAT ZWEI ZUSTAENDE (seit 2026-08-23, gemeldet):
-   Ist ein Katalogpfad gespeichert, ist "herunterladen" die falsche Ansage – die
-   Datei soll ja nicht in den Download-Ordner, sondern in genau diese Freigabe.
-   Dann heisst der Knopf "Manifest hochladen" und oeffnet ein
-   Speichern-unter-Fenster (File System Access API), das direkt dorthin
-   schreibt. Massgeblich ist der GESPEICHERTE Pfad, nicht der Feldinhalt: der
-   Knopf soll den Zustand zeigen, den auch `/excel` den Benutzern zeigt.
+   DER KNOPF LAEDT HERUNTER – EINEN ZWEITEN ZUSTAND GIBT ES NICHT
+   (Umbau 2026-08-24, nach mehreren Meldungen). Er ist ein <a href> und wird
+   NICHT abgefangen: so entscheidet der Browser ueber das Ziel, und der
+   Administrator kann die Datei auch auf den Desktop legen. Jeder abgefangene
+   Klick nahm ihm diese Wahl.
 
-   EIN KNOPF, KEINE VORSTUFEN (Umbau 2026-08-23, gemeldet: "was soll dieser
-   Bullshit mit 'Ordner einmal auswaehlen' und 'Pfad kopieren'"). Beide Knoepfe
-   sind weg. Der Hochlade-Knopf erledigt alles selbst: ist noch kein Ordner
-   gemerkt, fragt er EINMAL danach und merkt ihn sich; ab dann schreibt er ohne
-   Dialog. Und er speichert den eingetragenen Pfad gleich mit – ein zweiter
-   Klick auf "Pfad speichern" ist nicht mehr noetig.
+   ⚠ WARUM DER EINGETRAGENE PFAD NICHT BENUTZT WERDEN KANN. Das ist keine
+   Bequemlichkeit dieses Moduls, sondern eine Grenze JEDES Browsers: es gibt
+   keine API, die in einen als TEXT genannten Ordner schreibt.
+   `showDirectoryPicker`/`showSaveFilePicker` liefern ein Handle aus einem
+   Dialog, `startIn` nimmt nur ein Handle oder einen festen Namen
+   (documents/downloads/…), `suggestedName` keine Pfadtrenner. Eine Seite, die
+   in `\\server\freigabe\…` schreiben duerfte, weil dort jemand den Pfad
+   hingetippt hat, waere genau die Luecke, die diese Grenze verhindert.
 
-   ⚠ WARUM DER EINGETRAGENE PFAD DEN BROWSER NICHT ERREICHT – das ist keine
-   Bequemlichkeit dieses Moduls, sondern eine Grenze JEDES Browsers: die File
-   System Access API nimmt fuer `startIn` **nur** ein Handle oder einen der
-   festen Namen (documents/downloads/…), niemals eine Zeichenkette, und
-   `suggestedName` darf keine Pfadtrenner enthalten. Eine Seite, die in
-   `\\server\freigabe\…` schreiben duerfte, weil dort jemand den Pfad
-   hingetippt hat, waere die Luecke, die es zu verhindern gilt. Deshalb
-   EINMAL der Ordner-Dialog – danach nie wieder.
+   FRUEHERE ANLAEUFE, damit sie niemand wieder einbaut:
+   * Zwei-Zustands-Knopf ("Manifest hochladen") mit Ordner-Dialog und
+     gemerktem Handle in IndexedDB. Der Dialog kam nach jedem Browser-Neustart
+     wieder (Chrome setzt das Schreibrecht auf "fragen" zurueck) – und er hat
+     den eingetragenen Pfad nie benutzt, sondern nur den gewaehlten Ordner.
+   * Eine fertige `curl.exe`-Zeile daneben. Sie hat den Pfad woertlich
+     benutzt, war aber ausdruecklich nicht gewuenscht.
+   Beides ist entfernt. Der eingetragene Pfad ist eine ANGABE fuer Menschen:
+   der Hinweis unter dem Knopf nennt ihn, damit man weiss, wohin die
+   heruntergeladene Datei gehoert, und `/excel` zeigt ihn den Benutzern
+   anstelle des Download-Knopfes.
 
-   Die frueher daneben angebotene `curl.exe`-Zeile ist auf Vorgabe des Nutzers
-   entfallen (2026-08-24). Wer den Dialog nicht will oder einen anderen Browser
-   benutzt, laedt das Manifest herunter und legt es von Hand in den Ordner –
-   der Hinweis am Knopf sagt das.
+   MASSGEBLICH IST DER FELDINHALT, nicht der gespeicherte Wert: wer den Pfad
+   eintippt, sieht ihn sofort im Hinweis – ohne erst speichern zu muessen.
 
-   MASSGEBLICH IST DER FELDINHALT, nicht der gespeicherte Wert (das war der
-   eigentliche Fehler): wer den Pfad eintippt und sofort auf den Knopf drueckt,
-   bekam bis dahin einen Download, weil der Knopf am GESPEICHERTEN Pfad haengt.
-   Jetzt entscheidet, was im Feld steht.
-
-   DAS HANDLE HAENGT AM BROWSERPROFIL, nicht am Server: es gilt pro
-   Administrator-Arbeitsplatz. Eine Zusage "landet automatisch dort" waere ohne
-   diesen Schritt unhaltbar – der Server erreicht die Freigabe nicht, nur der
-   Arbeitsplatz tut das.
    ═══════════════════════════════════════════════════════════════════════ */
 (function () {
     'use strict';
@@ -68,16 +60,15 @@
     // die Betriebsart des Knopfes.
     var _katalog = '';
     // Der Server hat den Abruf abgelehnt (localhost-Basis). Dann darf auch der
-    // Hochlade-Weg nichts tun: er wuerde eine Datei in die Freigabe legen, die
-    // auf jedem Arbeitsplatz ins Leere zeigt.
+    // Ordner-Weg nichts tun: er legte eine Datei in die Freigabe, die auf jedem
+    // Arbeitsplatz ins Leere zeigt.
     var _adresseKaputt = false;
     // Der Dateiname aus dem Antwortkopf (folgt dem Branding). Wird beim
-    // Adress-Test mitgelesen – er kostet dort nichts und macht die Befehlszeile
-    // vollstaendig. Ohne ihn muesste sie den Namen nachbauen und liefe dem
-    // Branding hinterher (genau der Fehler, den `dateinameAus` vermeidet).
+    // Adress-Test mitgelesen – er kostet dort nichts. Er steht im Hinweis,
+    // damit der Administrator die Datei im Download-Ordner wiederfindet;
+    // nachgebaut liefe er dem Branding hinterher (genau der Fehler, den
+    // `dateinameAus` vermeidet).
     var _dateiname = '';
-    var _DL_TEXT = 'Manifest herunterladen';
-    var _UP_TEXT = 'Manifest hochladen';
 
     function $(id) { return document.getElementById(id); }
     /* Der Ordnername kommt aus dem Dateisystem und geht per innerHTML in den
@@ -129,7 +120,7 @@
                     _adresseKaputt = false;
                     warn.style.display = 'none';
                     _dateiname = dateinameAus(r);
-                    knopfAktualisieren();     // Befehlszeile mit echtem Namen
+                    knopfAktualisieren();     // Hinweis mit echtem Dateinamen
                     return;
                 }
                 return r.json().catch(function () { return {}; }).then(function (d) {
@@ -139,6 +130,8 @@
                     warn.style.color = 'var(--danger)';
                     warn.style.display = '';
                     if (dl) { dl.style.opacity = '.5'; dl.style.pointerEvents = 'none'; }
+                    var ub = $('xa-upload');
+                    if (ub) ub.disabled = true;
                 });
             }).catch(function () { });
     }
@@ -244,40 +237,48 @@
         return v || _katalog;
     }
 
-    /* Beschriftung, Hinweis und Befehlszeile an den aktuellen Pfad anpassen.
-       Laeuft beim Laden, nach dem Speichern UND bei jedem Tastendruck im Feld. */
+    /* Der Hinweis unter dem Knopf. Der Knopf selbst hat nur EINEN Zustand:
+       er laedt herunter. Er kann NICHT in den eingetragenen Netzwerkpfad
+       schreiben – kein Browser darf in einen Ordner schreiben, der ihm als
+       Text genannt wurde, und die einzige API dafuer nimmt ausschliesslich ein
+       Handle aus einem Ordner-Dialog. Deshalb steht hier der Weg im Klartext:
+       herunterladen, dann von Hand in die Freigabe legen. */
     function knopfAktualisieren() {
-        var dl = $('xa-download');
         var hint = $('xa-dl-hint');
-        var pfad = feldPfad();
-        var hoch = !!pfad && kannSpeichern();
-        if (dl) dl.textContent = hoch ? _UP_TEXT : _DL_TEXT;
         if (!hint) return;
-        if (hoch && _ordner) {
-            hint.innerHTML = 'Der Ordner <b>' + esc(_ordner.name || '?') + '</b> ist gemerkt – ' +
-                'der Knopf schreibt das Manifest <b>ohne Dialog</b> hinein und speichert ' +
-                'den Pfad oben gleich mit. Nach einem Browser-Neustart fragt Chrome einmal ' +
-                'nach der Erlaubnis; das ist normal.';
-            hint.style.color = '';
-            hint.style.display = '';
-        } else if (hoch) {
-            // Pfad da, Ordner noch nicht gemerkt: der Erklaertext zum
-            // Ordner-Dialog ist auf Vorgabe des Nutzers entfallen. Der Zweig
-            // MUSS bleiben – ohne ihn faellt dieser Zustand in den Zweig
-            // darunter und behauptet, der Browser koenne nicht schreiben.
-            hint.style.display = 'none';
-        } else if (pfad) {
-            // Die Befehlszeile als Ausweg ist entfallen – der Hinweis darf sie
-            // nicht mehr nennen, sonst schickt er den Admin an eine Stelle,
-            // die es nicht gibt.
-            hint.innerHTML = 'Ihr Browser kann nicht direkt in einen Ordner schreiben – das ' +
-                'können nur <b>Chrome und Edge</b>. Laden Sie das Manifest herunter und ' +
-                'legen es von Hand in den Ordner.';
-            hint.style.color = '';
-            hint.style.display = '';
-        } else {
-            hint.style.display = 'none';
+        var pfad = feldPfad();
+        if (!pfad) { hint.style.display = 'none'; return; }
+        // Der Pfad wird ANGEZEIGT, damit man ihn beim Verschieben vor Augen
+        // hat – er ist Fremdeingabe, also per textContent in ein eigenes
+        // Element und nicht in die Zeichenkette hinein.
+        hint.innerHTML = 'Der Browser darf das Manifest <b>nicht</b> selbst in die ' +
+            'Netzwerkfreigabe schreiben – in einen Ordner, der ihm nur als Text genannt ' +
+            'wurde, darf keine Webseite schreiben. Laden Sie die Datei also herunter ' +
+            '(wohin, entscheidet Ihr Browser – Download-Ordner, Desktop, „Speichern ' +
+            'unter") und <b>verschieben Sie sie anschließend selbst</b> nach ' +
+            '<code class="xa-pfad"></code>. Sie heißt <code class="xa-datei"></code>.';
+        var c = hint.querySelector('.xa-pfad');
+        if (c) c.textContent = pfad;
+        var f = hint.querySelector('.xa-datei');
+        // Der Name kommt aus dem Antwortkopf. Ist der Adress-Test noch nicht
+        // durch, wird er NICHT geraten – dann steht dort die neutrale Endung.
+        if (f) f.textContent = _dateiname || 'manifest.xml';
+
+        // Der Ordner-Weg als ZWEITER Knopf – er erscheint nur, wo er wirklich
+        // geht (Chrome/Edge) und nur mit eingetragenem Pfad. Ein Knopf, der in
+        // Firefox nichts tut, ist schlimmer als keiner.
+        var ub = $('xa-upload');
+        if (ub) {
+            var geht = kannSpeichern();
+            ub.style.display = geht ? '' : 'none';
+            if (geht) {
+                ub.textContent = _ordner
+                    ? 'In Ordner „' + (_ordner.name || '?') + '" schreiben'
+                    : 'Ordner wählen und hineinschreiben';
+            }
         }
+        hint.style.color = '';
+        hint.style.display = '';
     }
 
     /* Dateiname aus dem Antwortkopf statt nachgebaut – so folgt er dem Branding
@@ -485,20 +486,20 @@
         if (b) b.addEventListener('click', speichere);
         var kb = $('xa-katalog-save');
         if (kb) kb.addEventListener('click', speichereKatalog);
-        // EIN Handler fuer beide Betriebsarten, der den Modus selbst prueft.
-        // Listener je nach Zustand an- und abzuhaengen ist die Variante, bei der
-        // irgendwann zwei gebunden sind und der Klick doppelt feuert.
-        var dl = $('xa-download');
-        if (dl) dl.addEventListener('click', function (ev) {
-            // Massgeblich ist der FELDINHALT, nicht der gespeicherte Pfad:
-            // wer eintippt und sofort drueckt, bekam sonst einen Download.
-            if (!(feldPfad() && kannSpeichern())) return;   // normaler Download
-            ev.preventDefault();
-            hochladen();
-        });
-        // Der Knopf schaltet beim Tippen um, und die Befehlszeile darunter
-        // wandert mit. Ohne das muesste man erst speichern, um zu sehen, was
-        // der Knopf dann tut – genau die Ueberraschung, die gemeldet wurde.
+        // KEIN Handler am Download-Knopf. Er ist ein <a href> und bleibt es:
+        // so entscheidet der BROWSER ueber das Ziel (Downloads-Ordner oder
+        // "Speichern unter", je nach dessen Einstellung) – der Administrator
+        // kann die Datei also auch auf den Desktop legen. Der frueher hier
+        // haengende Handler hat ihm genau diese Wahl genommen.
+        //
+        // Der Ordner-Weg hat seinen EIGENEN Knopf. Zwei Aufgaben an einem Knopf
+        // waren der Fehler: welche davon er gerade erfuellt, hing an einem Feld
+        // weiter unten, und niemand konnte es dem Knopf ansehen.
+        var ub = $('xa-upload');
+        if (ub) ub.addEventListener('click', hochladen);
+        // Der Hinweis unter dem Knopf nennt den eingetragenen Pfad und wandert
+        // beim Tippen mit – ohne das muesste man erst speichern, um zu sehen,
+        // wohin die Datei gehoert.
         var kf = $('xa-katalog');
         if (kf) kf.addEventListener('input', knopfAktualisieren);
         var g = $('xa-guide-btn');
@@ -527,6 +528,11 @@
             // einer gemerkt ist. ladeGrenzen() ruft knopfAktualisieren am Ende –
             // hier wird es nach dem Laden noch einmal angestossen, weil beide
             // Abrufe nebenlaeufig sind und die Reihenfolge nicht feststeht.
+            // Das gemerkte Handle VOR knopfAktualisieren laden, sonst
+            // beschriftet sich der Ordner-Knopf mit "Ordner waehlen", obwohl
+            // schon einer gemerkt ist. ladeGrenzen() ruft es am Ende noch
+            // einmal – beide Abrufe sind nebenlaeufig.
+            knopfAktualisieren();
             handleLesen().then(function (h) {
                 _ordner = h || null;
                 knopfAktualisieren();

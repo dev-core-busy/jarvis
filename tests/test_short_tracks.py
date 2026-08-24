@@ -301,17 +301,32 @@ section("4. Werkzeug-Bereiche")
 
 bereiche_frei("basis")
 check(st.freigegebene_bereiche() == ["basis"], "ohne Freigabe nur basis")
-bereiche_frei("wissen", "shell")
+bereiche_frei("fach", "wissen")
 check(st.freigegebene_bereiche()[0] == "basis", "basis ist immer dabei")
-check(st.freigegebene_bereiche() == ["basis", "wissen", "shell"],
+check(st.freigegebene_bereiche() == ["basis", "wissen", "fach"],
       "Reihenfolge folgt BEREICHE, nicht der Eingabe")
 
 w = st.werkzeuge_fuer(["basis"])
 check(isinstance(w, set) and w, "werkzeuge_fuer liefert eine nicht-leere Menge")
 check(st.werkzeuge_fuer([]) == set(st.BASIS_WERKZEUGE),
       "leere Auswahl → Basis-Werkzeuge (nie 'keine Beschraenkung')")
-check(st.werkzeuge_fuer(["shell"]) == set(st.BASIS_WERKZEUGE) | {"shell_execute"},
-      "shell ergaenzt shell_execute")
+check(st.werkzeuge_fuer(["wissen"]) == set(st.BASIS_WERKZEUGE) | {"knowledge_search"},
+      "ein Bereich ergaenzt seine Werkzeuge")
+# Eigene Rechenschritte gehoeren zur Grundausstattung (Vorgabe 2026-08-24). Die
+# Ablage schnitt sonst einen Benutzer zu, der im Chat MEHR darf – kein
+# Sicherheitsgewinn, aber ein gemessener Ausfall: "Tabellen zusammenfuehren"
+# scheiterte auf ECHT viermal, weil das Modell die 254 Spalten einer Tabelle
+# ohne Shell in Haeppchen lesen musste und nach 534 s nichts lieferte.
+check("shell_execute" in st.BASIS_WERKZEUGE,
+      "shell_execute ist Teil der Basis-Werkzeuge")
+check("shell_execute" in st.werkzeuge_fuer([]),
+      "auch ohne jeden gewaehlten Bereich")
+check("shell" not in st.BEREICHE,
+      "und es gibt keinen abwaehlbaren Bereich 'shell' mehr",
+      "ein Haken, der nichts bewirkt, behauptet einen Zustand, den er nicht herstellt")
+check(st.werkzeuge_fuer(["basis", "shell"]) == st.werkzeuge_fuer(["basis"]),
+      "Altbestand mit bereiche=['basis','shell'] laeuft unveraendert")
+check("shell" in st.ALTE_BEREICHE, "'shell' steht als abgelegter Name drin")
 check("None" not in re.findall(r"return\s+(\w+)", nur_code(
           abschnitt(QUELLE_ST, "def werkzeuge_fuer", "def bereiche_katalog"))),
       "werkzeuge_fuer gibt nie None zurueck")
@@ -323,18 +338,29 @@ check(not schreib, "Bereich 'fach' enthaelt nur lesende Werkzeuge", str(schreib)
 # Ein nicht freigegebener Bereich wird BENANNT, nicht still entfernt
 bereiche_frei("basis")
 try:
-    st.anlegen(U, {"name": "Mit Shell", "prompt": "x", "bereiche": ["basis", "shell"]})
+    st.anlegen(U, {"name": "Mit Fach", "prompt": "x", "bereiche": ["basis", "fach"]})
     check(False, "gesperrter Bereich wird abgewiesen")
 except st.DumpFehler as e:
-    check("shell" in str(e) and "freigeschaltet" in str(e),
+    check("fach" in str(e) and "freigeschaltet" in str(e),
           "gesperrter Bereich wird benannt (Klartext)")
 try:
     st.anlegen(U, {"name": "Quatsch", "prompt": "x", "bereiche": ["gibtsnicht"]})
     check(False, "unbekannter Bereich wird abgewiesen")
 except st.DumpFehler as e:
     check("Unbekannt" in str(e), "unbekannter Bereich wird benannt")
+# ABGELEGTER Name: still uebergehen, NICHT abweisen. Sonst laesst sich eine
+# bestehende Ablage mit bereiche=['basis','shell'] nicht mehr speichern – fuer
+# eine Faehigkeit, die sie ohnehin hat.
+try:
+    _alt = st.anlegen(U, {"name": "Altbestand", "prompt": "x",
+                          "bereiche": ["basis", "shell"]})
+    check(_alt["bereiche"] == ["basis"],
+          "abgelegter Bereich 'shell' wird beim Speichern still entfernt",
+          str(_alt["bereiche"]))
+except st.DumpFehler as e:
+    check(False, "abgelegter Bereich darf das Speichern nicht verhindern", str(e))
 
-bereiche_frei("basis", "wissen", "fach", "shell")
+bereiche_frei("basis", "wissen", "fach")
 dw = st.anlegen(U, {"name": "Mit Wissen", "prompt": "x",
                     "bereiche": ["wissen"]})
 check(dw["bereiche"] == ["basis", "wissen"], "basis wird ergaenzt")
@@ -583,6 +609,15 @@ check(run._kein_ergebnis("HINWEIS_AN_NUTZER: geht nicht") is True,
       "HINWEIS_AN_NUTZER = kein Ergebnis")
 check(run._kein_ergebnis("Die Rechnung ist geprueft.") is False,
       "echte Antwort zaehlt")
+# Gemessen auf ECHT (2026-08-24, 12:28): die Endantwort brach mitten im Satz ab
+# und der Lauf wurde als ok=True mit dateien=[] verbucht – ein gruen gemeldeter
+# Fehlschlag ist die schlimmste Variante.
+check(run._kein_ergebnis("… hole ich die restlichen Spalten in Batches.\nFehler:") is True,
+      "abgebrochene Antwort ('… Fehler:') = kein Ergebnis")
+check(run._kein_ergebnis("Fehler: die Datei hat keine Kopfzeile.") is False,
+      "eine Antwort, die einen Fehler ERKLAERT, bleibt ein Ergebnis")
+check(run._kein_ergebnis("Die Datei liegt bereit:") is False,
+      "ein Doppelpunkt am Ende allein ist kein Abbruch (danach kommt der Chip)")
 check("HINWEIS_UNVOLLSTAENDIG" in CODE_RUN,
       "die Konstante aus llm.py wird benutzt, nicht nachgetippte Prosa")
 

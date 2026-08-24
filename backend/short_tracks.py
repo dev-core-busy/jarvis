@@ -119,6 +119,28 @@ BASIS_WERKZEUGE = (
     # data/documents schreiben. Die Pfad-Freigabe prueft der Dispatch ueber
     # das Attribut `pfad_parameter`.
     "xlsx_inspect", "xlsx_read_range", "xlsx_merge", "xlsx_edit",
+    # EIGENE RECHENSCHRITTE GEHOEREN ZUR GRUNDAUSSTATTUNG (Vorgabe des Nutzers,
+    # 2026-08-24, nach einem gemessenen Ausfall auf ECHT). `shell_execute` war
+    # bis dahin ein eigener, per Vorgabe ABGESCHALTETER Bereich – und damit
+    # scheiterte die Ablage "Tabellen zusammenfuehren" reproduzierbar: das
+    # Modell schrieb selbst "Da shell_execute nicht verfuegbar ist, hole ich die
+    # restlichen Spalten in Batches", brauchte 24 Leseaufrufe fuer eine Tabelle
+    # mit 254 Spalten und lieferte nach 534 s gar nichts. Vier Laeufe an einem
+    # Vormittag, kein einziges brauchbares Ergebnis.
+    #
+    # **Die Beschraenkung war KEIN Sicherheitsgewinn.** Der Lauf traegt die
+    # Kennung des Menschen, der die Datei abgelegt hat, ist IMMER unprivilegiert
+    # und laeuft im privaten `/tmp` als `jarvis_sandbox*` – genau wie ein
+    # Shell-Befehl desselben Benutzers im Chat, wo er `shell_execute` ohnehin
+    # hat. Die Ablage schnitt also einen Benutzer zu, der einen Klick weiter
+    # mehr darf. Was bleibt, ist die harte Grenze: OS-Benutzer, Namespace,
+    # Pfad-Confinement, Deny-Muster – und die gilt hier wie dort.
+    #
+    # Was der Werkzeug-Zuschnitt WEITER leistet: `wissen` und `fach` bleiben
+    # eigene Bereiche. Dort geht es nicht um Rechenleistung, sondern um
+    # ZUGANG zu fremden Datenquellen – das ist die Grenze, die ein Administrator
+    # ziehen soll.
+    "shell_execute",
 )
 
 BEREICHE: dict[str, dict] = {
@@ -134,12 +156,19 @@ BEREICHE: dict[str, dict] = {
                       "Enthält auch die Tabellen-Werkzeuge: eine vorhandene "
                       "Excel-Datei ansehen, zwei Tabellen über gemeinsame Spalten "
                       "zusammenführen und einzelne Zellen ändern – dabei bleiben "
-                      "Formeln, Spaltenbreiten und Formatierung erhalten.",
+                      "Formeln, Spaltenbreiten und Formatierung erhalten. "
+                      "Enthält außerdem eigene Rechenschritte: der Assistent darf "
+                      "sich ein kleines Programm schreiben und ausführen, um die "
+                      "Daten durchzurechnen – nötig für alles, was über Lesen, "
+                      "Zusammenführen und Ändern hinausgeht.",
         "hinweis_en": "Read the dropped file (PDF, Office, CSV) and produce Word, "
                       "Excel, PowerPoint, PDF or a chart as the result. Also "
                       "includes the table tools: inspect an existing Excel file, "
                       "merge two tables via shared columns and change individual "
-                      "cells – formulas, column widths and formatting are kept.",
+                      "cells – formulas, column widths and formatting are kept. "
+                      "Also includes custom computations: the assistant may write "
+                      "and run a small program to process the data – needed for "
+                      "anything beyond reading, merging and editing.",
     },
     "wissen": {
         "de": "Wissensdatenbank (lesend)", "en": "Knowledge base (read)",
@@ -167,37 +196,12 @@ BEREICHE: dict[str, dict] = {
         "hinweis_en": "Tickets, Confluence, customer records and SAP READ-ONLY – "
                       "and only as far as the triggering user is authorised.",
     },
-    # DIESER TEXT WIRD VON NICHT-TECHNISCHEN BENUTZERN GELESEN. Er stand bis
-    # 2026-08-19 als "Auswertung mit pandas/openpyxl in der Sandbox" da – zwei
-    # Bibliotheksnamen, aus denen niemand ableiten kann, was der Haken bewirkt
-    # oder wann man ihn braucht. Wer eine Sicherheitsentscheidung treffen soll,
-    # muss die FOLGE verstehen, nicht die verwendete Technik.
-    "shell": {
-        "de": "Eigene Rechenschritte (Programm ausführen)",
-        "en": "Custom computations (run a program)",
-        "tools": ["shell_execute"],
-        "hinweis_de": "Der Assistent darf sich für diese Ablage ein kleines "
-                      "Programm schreiben und ausführen, um die Daten selbst "
-                      "durchzurechnen. Nötig nur für Auswertungen, die über "
-                      "Lesen, Zusammenführen und Ändern hinausgehen – zum "
-                      "Beispiel Statistik über viele Dateien hinweg oder eine "
-                      "ungewöhnliche Umformung. Für den Normalfall reicht der "
-                      "Bereich „Lesen, Tabellen bearbeiten“. "
-                      "ACHTUNG: das ist der weiteste Werkzeugkasten. Eine "
-                      "präparierte Datei kann hier am meisten anrichten, und "
-                      "alle Netzwerk-Benutzer teilen sich denselben "
-                      "Arbeitsbereich auf dem Server. Im Zweifel ausgeschaltet "
-                      "lassen.",
-        "hinweis_en": "The assistant may write and run a small program for this "
-                      "drop in order to process the data itself. Only needed for "
-                      "analyses beyond reading, merging and editing – for example "
-                      "statistics across many files or an unusual transformation. "
-                      "For the normal case the area „Read, edit tables“ is "
-                      "sufficient. "
-                      "CAUTION: this is the widest toolset. A crafted file can do "
-                      "the most damage here, and all network users share the same "
-                      "working area on the server. When in doubt, leave it off.",
-    },
+    # DER BEREICH "shell" IST WEG (2026-08-24): `shell_execute` gehoert jetzt zu
+    # `BASIS_WERKZEUGE` (Begruendung dort). Ihn als abwaehlbaren Haken stehen zu
+    # lassen waere die schlimmere Variante – ein Schalter, der nichts mehr
+    # bewirkt, behauptet einen Zustand, den er nicht herstellt. Ein Altbestand
+    # `bereiche: ["basis","shell"]` ist unschaedlich: `werkzeuge_fuer()` und
+    # `freigegebene_bereiche()` verwerfen unbekannte Namen, statt sie zu raten.
 }
 
 # Ohne Freigabe durch den Administrator gilt: nur der Basis-Bereich. Bewusst
@@ -205,6 +209,15 @@ BEREICHE: dict[str, dict] = {
 # 2026-07-29): eine Vorgabe, die im Zweifel mehr erlaubt, ist die falsche.
 VORGABE_BEREICHE = ("basis",)
 PFLICHT_BEREICH = "basis"
+
+# ABGELEGTE Bereichsnamen, die es einmal gab. Sie werden beim Speichern STILL
+# uebergangen statt abgewiesen – die einzige Stelle in diesem Modul, an der ein
+# unbekannter Wert nicht benannt wird, und das ist Absicht: `shell` ist in
+# `basis` aufgegangen, der Benutzer verliert also NICHTS. Ohne diese Liste waere
+# jede bestehende Ablage mit `bereiche: ["basis","shell"]` nicht mehr
+# speicherbar ("Unbekannte Werkzeug-Bereiche: shell") – ein Fehler, den niemand
+# deuten kann, fuer eine Faehigkeit, die er ohnehin hat.
+ALTE_BEREICHE = ("shell",)
 
 
 # ── Skill-Konfiguration (lazy) ──────────────────────────────────────────────
@@ -541,7 +554,8 @@ def _pruefe(felder: dict, bestehend: dict | None = None) -> dict:
                 "Diese Werkzeug-Bereiche sind nicht freigeschaltet: %s. Ein "
                 "Administrator gibt sie unter Einstellungen → Short Tracks frei."
                 % ", ".join(sorted(set(gesperrt))))
-        unbekannt = [b for b in roh if b and b not in BEREICHE]
+        unbekannt = [b for b in roh
+                     if b and b not in BEREICHE and b not in ALTE_BEREICHE]
         if unbekannt:
             raise DumpFehler("Unbekannte Werkzeug-Bereiche: %s"
                              % ", ".join(sorted(set(unbekannt))))

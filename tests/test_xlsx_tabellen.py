@@ -188,15 +188,40 @@ pruefe("office_create_excel" in r and "NICHT" in r,
        "inspect muss vom Neuaufbau abraten")
 pruefe(len(r) < tab.AUSGABE_MAX, "Ausgabe muss begrenzt sein")
 
-# Viele Spalten: Kopf wird gekappt, und das wird GESAGT
+# BREITE TABELLE: die SPALTENNAMEN sind Struktur und muessen VOLLSTAENDIG
+# kommen. Vorfall 2026-08-24 (ECHT): ein Blatt mit 254 Laborcode-Spalten wurde
+# bei 60 gekappt ("+182 weitere benannte Spalten") – die 182 Namen bekam man
+# nirgends her, waehrend der Hinweis "Mit 'spalten' gezielt auswaehlen" genau
+# sie verlangte. Das Modell probierte 24 Leseaufrufe durch und lieferte nichts.
 breit = TMP / "Breit.xlsx"
 wb = Workbook(); ws = wb.active
 ws.append([f"Sp{i}" for i in range(1, 200)])
 ws.append(list(range(1, 200)))
 wb.save(str(breit)); wb.close()
 r = lauf(inspect.execute(path=str(breit)))
-pruefe("weitere benannte Spalten" in r,
-       "bei 199 Spalten muss die Kuerzung beziffert werden")
+pruefe("Sp199" in r and "Sp1" in r,
+       "bei 199 kurzen Spaltennamen muessen ALLE benannt werden")
+pruefe("weitere benannte Spalten" not in r,
+       "und dann gibt es auch nichts zu beziffern")
+pruefe(len(r) < tab.AUSGABE_MAX, "trotzdem unter dem Gesamtdeckel")
+
+# Gegenprobe: reisst die Namensliste den ZEICHEN-Deckel, wird beziffert – eine
+# unvollstaendige Liste, die sich fuer vollstaendig ausgibt, waere schlimmer
+# als eine kurze.
+lang = TMP / "LangeNamen.xlsx"
+wb = Workbook(); ws = wb.active
+ws.append([("Spaltenueberschrift_Nummer_%03d_mit_viel_Text" % i) for i in range(1, 200)])
+ws.append(list(range(1, 200)))
+wb.save(str(lang)); wb.close()
+r2 = lauf(inspect.execute(path=str(lang)))
+pruefe("weitere benannte Spalten" in r2,
+       "bei sehr langen Namen muss die Kuerzung beziffert werden")
+pruefe(len(r2) < tab.AUSGABE_MAX, "und der Gesamtdeckel haelt")
+
+# xlsx_read_range darf die Kopfzeile NICHT enger kappen als inspect – sonst
+# verlangt sein eigener Hinweis Namen, die es gerade verschwiegen hat.
+r3 = lauf(readrange.execute(path=str(breit), zeilen=1))
+pruefe("Sp199" in r3, "read_range nennt die Spaltennamen vollstaendig")
 pruefe("199" in r, "die Gesamtzahl der Spalten muss vorkommen")
 
 r = lauf(inspect.execute(path="/gibt/es/nicht.xlsx"))

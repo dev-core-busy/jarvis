@@ -63,6 +63,16 @@ from backend.tools.base import BaseTool
 # sie greifen. Eine Grenze, die man nur im Quelltext sieht, ist fuer den
 # Aufrufer eine unsichtbare Luege.
 SPALTEN_IM_KOPF = 60        # so viele Kopf-Spalten je Blatt werden benannt
+# ZEICHEN-Deckel fuer die Spaltennamen. Die Namen sind STRUKTUR, nicht Daten –
+# und Struktur ist genau das, was diese Werkzeuge liefern sollen. Gemessen an
+# einer echten Datei (2026-08-24, ECHT): ein Blatt mit 254 Laborcode-Spalten
+# ergab bei der alten festen Grenze "+182 weitere benannte Spalten" – die 182
+# Namen bekam man NIRGENDS her, waehrend der Hinweis "Mit 'spalten' gezielt
+# auswaehlen" genau sie verlangte. Ein Zirkelschluss, aus dem das Modell nur
+# durch Durchprobieren herauskam: 24 Leseaufrufe, 534 s, kein Ergebnis. Der
+# ganze inspect-Text war dabei 2.630 von 14.000 erlaubten Zeichen lang – es war
+# reichlich Platz, die Kappung kam allein von der festen Zahl.
+KOPF_TEXT_MAX = 4000
 BEISPIEL_ZEILEN = 3         # Beispielzeilen je Blatt in `xlsx_inspect`
 BEISPIEL_SPALTEN = 25       # Spalten je Beispielzeile
 LESE_ZEILEN_VORGABE = 30    # `xlsx_read_range` ohne Angabe
@@ -108,6 +118,26 @@ def _buchstabe_zu_index(s: str) -> int | None:
     for z in s:
         n = n * 26 + (ord(z) - 64)
     return n if 1 <= n <= _MAX_SPALTE else None
+
+
+def _kopf_text(paare) -> tuple[str, int]:
+    """Spaltennamen als 'A=Name | B=Name | …' – bis KOPF_TEXT_MAX Zeichen.
+
+    Liefert ``(text, nicht_gezeigt)``. Gedeckelt wird nach ZEICHEN und nicht
+    nach Anzahl: eine Tabelle mit 254 kurzen Kuerzeln passt vollstaendig hinein
+    (rund 2,3 KB), eine mit 1.000 langen Ueberschriften wird ehrlich gekuerzt.
+    Der Aufrufer MUSS die Restzahl ausgeben – eine unvollstaendige Spaltenliste,
+    die sich fuer vollstaendig ausgibt, ist schlimmer als eine kurze.
+    """
+    teile: list[str] = []
+    laenge = 0
+    for nr, (i, k) in enumerate(paare):
+        t = f"{_spaltenbuchstabe(i)}={_kurz(k, 40)}"
+        if teile and laenge + len(t) + 3 > KOPF_TEXT_MAX:
+            return " | ".join(teile), len(paare) - nr
+        teile.append(t)
+        laenge += len(t) + 3
+    return " | ".join(teile), 0
 
 
 def _deckeln(text: str) -> str:
@@ -500,10 +530,7 @@ class InspectTool(BaseTool):
             kopf = _kopfzeile(ws, kz)
             benannt = [(i, k) for i, k in enumerate(kopf, start=1) if k]
             if benannt:
-                gezeigt = benannt[:SPALTEN_IM_KOPF]
-                txt = " | ".join(f"{_spaltenbuchstabe(i)}={_kurz(k, 40)}"
-                                 for i, k in gezeigt)
-                rest = len(benannt) - len(gezeigt)
+                txt, rest = _kopf_text(benannt)
                 zeilen.append(f"  Kopfzeile {_kz_text(kz, auto, ab)}: {txt}"
                               + (f"  … (+{rest} weitere benannte Spalten, "
                                  f"{len(benannt)} von {n_s} insgesamt)" if rest else ""))
@@ -683,9 +710,18 @@ class ReadRangeTool(BaseTool):
                 wb.close()
                 return "Fehler: " + _spalten_bericht(kopf, fehlend)
 
-        kopf_txt = ("Spalten (Kopfzeile " + _kz_text(kz, kz_auto, _ab) + "): " + " | ".join(
-            f"{_spaltenbuchstabe(i)}={_kurz(kopf[i - 1] if i <= len(kopf) else '', 40)}"
-            for i in (auswahl or range(1, min(gesamt_s, BEISPIEL_SPALTEN) + 1))))
+        # Die SPALTENNAMEN vollstaendig (bis KOPF_TEXT_MAX) – nicht auf
+        # BEISPIEL_SPALTEN gekappt. Sonst verlangt der Hinweis unten ("Mit
+        # 'spalten' gezielt auswaehlen") Namen, die dieselbe Ausgabe gerade
+        # verschwiegen hat. Die DATENZEILEN bleiben gekappt: dort ist die
+        # Begrenzung richtig, denn Werte gehoeren nicht durch das Modell.
+        _kopf_paare = [(i, (kopf[i - 1] if i <= len(kopf) else "") or "")
+                       for i in (auswahl or range(1, gesamt_s + 1))]
+        _kopf_str, _kopf_rest = _kopf_text(_kopf_paare)
+        kopf_txt = ("Spalten (Kopfzeile " + _kz_text(kz, kz_auto, _ab) + "): "
+                    + _kopf_str
+                    + (f"  … (+{_kopf_rest} weitere Spalten nicht benannt)"
+                       if _kopf_rest else ""))
 
         aus = [f"Blatt '{ws.title}' – {gesamt_z} Zeilen x {gesamt_s} Spalten insgesamt.",
                kopf_txt, ""]

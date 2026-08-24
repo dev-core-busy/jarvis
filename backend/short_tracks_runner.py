@@ -905,6 +905,15 @@ def _kein_ergebnis(antwort: str) -> bool:
             return True
     except Exception:  # noqa: BLE001
         pass
+    # ABGEBROCHEN MITTEN IM SATZ. Gemessen auf ECHT (2026-08-24, 12:28): die
+    # Endantwort lautete "… hole ich die restlichen Spalten in Batches.\nFehler:"
+    # – und der Lauf wurde als ok=True mit dateien=[] verbucht. Fuer den
+    # Benutzer ist das ein gruen gemeldeter Fehlschlag, also die schlimmste
+    # Variante. Bewusst ENG geprueft (Ende auf "Fehler:"/"Error:") und nicht
+    # allgemein auf einen Doppelpunkt am Ende: eine legitime Antwort darf
+    # "Die Datei liegt bereit:" heissen, wenn danach ein Download-Chip kommt.
+    if t.endswith(("Fehler:", "fehler:", "Error:", "error:")):
+        return True
     return "HINWEIS_AN_NUTZER" in t
 
 

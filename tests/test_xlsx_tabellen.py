@@ -705,6 +705,63 @@ pruefe(any("TIPPE TABELLENDATEN NIEMALS AB" in z for z in agent_src.splitlines()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+print("8b) CSV ist eine erlaubte QUELLE (Vorgabe 2026-08-24)")
+# ═══════════════════════════════════════════════════════════════════════════
+# Der Anlass: die Ablage "Tabellen zusammenfuehren" erlaubt `csv`, aber
+# xlsx_merge wies die Slave-CSV mit "ist keine Excel-Datei" ab. Das Modell zog
+# daraus die Folgerung "der Slave-Juli ist LEER" und setzte 27 Spalten auf 0 –
+# eine abgelehnte Datei ist gefaehrlicher als eine fehlende Funktion, weil das
+# Ergebnis plausibel aussieht.
+csvq = TMP / "slave.csv"
+csvq.write_text("Jahr;Monat;Umsatz;Kundennr\n2004;Jul;1.234,50;00083\n"
+                "2004;Aug;2.000;00084\n", encoding="utf-8")
+
+r = lauf(inspect.execute(path=str(csvq)))
+pruefe("Umsatz" in r and "Kundennr" in r, "xlsx_inspect liest eine CSV")
+pruefe("Fehler" not in r[:40], "und meldet keinen Fehler mehr")
+
+r = lauf(readrange.execute(path=str(csvq), zeilen=5))
+pruefe("1234.5" in r or "1234,5" in r,
+       "deutsches Dezimalkomma wird zur ZAHL (nicht Text)")
+pruefe("00083" in r,
+       "fuehrende Null bleibt TEXT – sonst ist die Kundennummer zerstoert")
+
+# Master (xlsx) + Slave (csv) zusammenfuehren
+mcsv = TMP / "MasterFuerCsv.xlsx"
+wb = Workbook(); ws = wb.active; ws.title = "Daten"
+ws.append(["Jahr", "Monat", "Umsatz", "Kundennr"])
+ws.append([2004, "Jul", None, None])
+ws.append([2004, "Aug", None, None])
+wb.save(str(mcsv)); wb.close()
+r = lauf(merge.execute(master=str(mcsv), slave=str(csvq), ziel="AusCsv",
+                       schluessel=["Jahr", "Monat"]))
+pruefe("/api/documents/" in r, "xlsx_merge nimmt eine CSV als slave")
+_z = datei_aus(r)
+if _z is not None and _z.exists():
+    wb = load_workbook(str(_z)); ws = wb.active
+    werte = {ws.cell(row=z, column=2).value: (ws.cell(row=z, column=3).value,
+                                              ws.cell(row=z, column=4).value)
+             for z in (2, 3)}
+    wb.close()
+    pruefe(werte.get("Jul", (None,))[0] == 1234.5,
+           "der Wert kommt als Zahl in die Master-Zelle")
+    pruefe(werte.get("Jul", (None, None))[1] == "00083",
+           "die fuehrende Null ueberlebt den Merge")
+
+# SCHREIBEND auf eine CSV muss abgelehnt werden – mit Klartext, nicht generisch
+r = lauf(edit.execute(path=str(csvq), ziel="Nope",
+                      aenderungen=[{"zelle": "A1", "wert": 1}]))
+pruefe(r.startswith("Fehler:") and "CSV" in r,
+       "xlsx_edit auf eine CSV wird abgelehnt")
+pruefe("master" in r.lower() or ".xlsx" in r,
+       "und die Meldung nennt den Weg")
+r = lauf(merge.execute(master=str(csvq), slave=str(csvq), ziel="Nope2",
+                       schluessel=["Jahr"]))
+pruefe(r.startswith("Fehler:") and "CSV" in r,
+       "eine CSV als MASTER wird abgelehnt (kein Layout, keine Formeln)")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 print("9) Nichts wurde in die echte Ablage geschrieben")
 # ═══════════════════════════════════════════════════════════════════════════
 pruefe(office_main.DOCS_DIR.resolve() != _ECHT_DOCS.resolve(),

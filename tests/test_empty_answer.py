@@ -194,6 +194,24 @@ if HABEN_FASTAPI:
                 parts = [teil("Standardantwort")]
             return LLMResponse(parts=parts, raw=None, usage={})
 
+    # ── SANDKASTEN FUER DEN LLM-VERLAUF ──────────────────────────────────
+    # `run_task` UND (seit 2026-08-24) `_run_headless` schreiben nach
+    # data/logs/conv. Ohne Umbiegen verschmutzt dieser Test den echten Verlauf
+    # des laufenden Servers – er tat es bis heute unbemerkt. Wie bei den
+    # Tabellen-Tests: umbiegen UND nachweisen, sonst Exit 2 ("konnte nicht
+    # laufen" muss von "durchgefallen" unterscheidbar bleiben).
+    import tempfile as _tf, shutil as _sh
+    from backend import conv_log as _CL
+    _SAND = Path(_tf.mkdtemp(prefix="empty_answer_conv_"))
+    _ECHT_CONV = _CL._CONV_DIR
+    _CL._CONV_DIR = _SAND / "conv"
+    _CL._INDEX = _CL._CONV_DIR / "index.jsonl"
+    _CL._OLD_FILE = _SAND / "conv_log.json"
+    if _CL._CONV_DIR.resolve() == _ECHT_CONV.resolve() or \
+            _SAND not in _CL._CONV_DIR.resolve().parents:
+        print("ABBRUCH: conv_log zeigt nicht in das Wegwerf-Verzeichnis.")
+        sys.exit(2)
+
     # EINEN echten Agenten bauen (kein __new__-Nachbau: run_task braucht ein
     # vollstaendig eingerichtetes Objekt – Stop-Scopes, Telemetrie, Verlaufs-
     # Buchhaltung).
@@ -298,6 +316,76 @@ if HABEN_FASTAPI:
                and stub.aufrufe[-1]["tools"] is False,
                "Werkzeug-Lauf: der Nachschlag ist der einzige Aufruf OHNE Werkzeuge")
         _agent.tools_map.pop("echo", None)
+
+# ═════════════════════════════════════════════════════════════════════════════
+if HABEN_FASTAPI and machbar:
+    print("\n=== 4. Headless-Laeufe stehen im LLM-Verlauf ===")
+    # Gemeldet am 2026-08-24: ein fehlgeschlagener Short-Tracks-Lauf hinterliess
+    # KEINE Spur im LLM-Verlauf. Das Skill-Protokoll sagte "Das Modell hat keine
+    # Antwort formuliert", und im Verlauf stand zu diesem Zeitpunkt nur ein
+    # fremder Chat-Lauf: keine Werkzeugkette, keine Token-Zahl, kein
+    # Abbruchgrund. Nur `run_task` protokollierte, `_run_headless` nicht – also
+    # ausgerechnet die Kanaele, die ohne Zuschauer laufen (E-Mail-Regeln, Short
+    # Tracks, Cron, Rollen-Agenten).
+
+    class ToolStub:
+        name = "echo"
+        supports_streaming = False
+
+        async def execute(self, **kw):
+            return "Werkzeug-Ergebnis-headless"
+
+    def hl_lauf(folge, rolle=""):
+        stub = Stub(folge)
+        _stub_halter["s"] = stub
+        _agent.provider = stub
+        _agent._role_id = rolle
+        _agent.tools_map["echo"] = ToolStub()
+        try:
+            return asyncio.run(_agent.run_task_headless("Headless-Testfrage")), stub
+        finally:
+            _agent.tools_map.pop("echo", None)
+            _agent._role_id = ""
+
+    def letzter_eintrag():
+        eintraege = _CL.get_conversations(limit=1)
+        return eintraege[0] if eintraege else None
+
+    vorher = len(_CL.get_conversations(limit=500))
+    fc = types.Part.from_function_call(name="echo", args={})
+    antwort, stub = hl_lauf([[teil("Ich sehe nach …"), fc],
+                            [teil("Fertig: das Ergebnis lautet 42.")]],
+                            rolle="dump:abc123")
+    nachher = _CL.get_conversations(limit=500)
+    pruefe(len(nachher) == vorher + 1,
+           "ein headless-Lauf erzeugt GENAU EINEN Verlaufs-Eintrag",
+           f"{vorher} -> {len(nachher)}")
+    e = letzter_eintrag()
+    pruefe(bool(e) and e.get("steps") == 1,
+           "die Schrittzahl steht drin", str(e and e.get("steps")))
+    pruefe(bool(e) and str(e.get("client_type", "")).startswith("headless"),
+           "der Kanal ist als headless erkennbar", str(e and e.get("client_type")))
+    pruefe(bool(e) and "dump:abc123" in str(e.get("client_type", "")),
+           "und nennt die Rolle/Ablage – sonst weiss niemand, WELCHER Lauf es war",
+           str(e and e.get("client_type")))
+    body = _CL.get_body(e["id"]) if e else {}
+    rollen = [m.get("role") for m in (body.get("messages") or [])]
+    pruefe("tool" in rollen and "assistant" in rollen,
+           "Werkzeugkette UND Antworttexte sind im Rumpf", str(rollen))
+    pruefe(any("Werkzeug-Ergebnis-headless" in str(m.get("content", ""))
+               for m in (body.get("messages") or [])),
+           "das Werkzeug-ERGEBNIS steht drin (ohne es ist die Diagnose blind)")
+    pruefe(len(body.get("system_prompt") or "") > 100,
+           "der System-Prompt ist dabei (vollstaendig, wie im Chat-Weg)")
+
+    # DER wichtige Fall: ein Lauf OHNE Ergebnis muss ebenfalls im Verlauf stehen
+    vorher = len(_CL.get_conversations(limit=500))
+    antwort, stub = hl_lauf([[teil("   ")]])
+    pruefe(len(_CL.get_conversations(limit=500)) == vorher + 1,
+           "auch ein Lauf ohne Antwort wird protokolliert – genau der ist der "
+           "interessante")
+
+    _sh.rmtree(_SAND, ignore_errors=True)
 
 print(f"\n{'=' * 62}\nErgebnis: {_ok}/{_ok + _fail} Pruefungen bestanden")
 if _fail:

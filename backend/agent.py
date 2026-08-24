@@ -2696,6 +2696,26 @@ KRITISCH – Autonomie-Regeln:
             system_prompt += f"\n\n{memory_context}"
 
         collected_texts = []
+        # LLM-VERLAUF AUCH HEADLESS. Bis 2026-08-24 protokollierte nur `run_task`
+        # (der Chat-Weg) – und damit war ausgerechnet das unsichtbar, was ohne
+        # Zuschauer laeuft: E-Mail-Regeln, Short Tracks, Cron, Rollen-Agenten.
+        # Gemeldet am Fall "Tabellen zusammenfuehren": das Protokoll sagte "Das
+        # Modell hat keine Antwort formuliert", und im LLM-Verlauf stand zu
+        # diesem Zeitpunkt nur ein fremder Chat-Lauf. Keine Werkzeugkette, keine
+        # Token-Zahl, kein Abbruchgrund – die Ursache musste ueber Journal und
+        # Skill-Protokoll rekonstruiert werden.
+        #
+        # Kosten vorher GEMESSEN, nicht geschaetzt (ECHT, 2026-08-24): der
+        # conv-Ordner haelt 507 Laeufe in 21 MB (~42 KB je Lauf, fast alles
+        # System-Prompt); headless kaeme mit 195 Mail- und 28 Tracks-Laeufen
+        # ueber Wochen dazu, also rund +9 MB. Eine Dedup-Infrastruktur fuer den
+        # Prompt braucht das nicht – wer sie ohne Messung baut, loest ein
+        # Problem, das es nicht gibt.
+        _conv_messages: list = []
+        _hl_start = time.time()
+        # VOR dem try: der Protokoll-Eintrag im finally liest den Wert, und eine
+        # Ausnahme kann vor der Zuweisung in der Schleife auftreten.
+        steps = 0
 
         try:
             chat_history = []
@@ -2741,6 +2761,8 @@ KRITISCH – Autonomie-Regeln:
                 for text in text_parts:
                     if text.strip():
                         collected_texts.append(text.strip())
+                        _conv_messages.append({"role": "assistant",
+                                               "content": text.strip()})
 
                 if not function_calls:
                     break
@@ -2776,6 +2798,12 @@ KRITISCH – Autonomie-Regeln:
                             _ehook(tool_name, result_str)
                         except Exception as _he:  # noqa: BLE001
                             print(f"[Agent] Ergebnis-Hook: {_he}", flush=True)
+
+                    # Fuer den LLM-Verlauf: dasselbe Format wie im Chat-Weg
+                    # (Rolle 'tool' + Werkzeugname), damit die Oberflaeche beide
+                    # Kanaele gleich darstellt.
+                    _conv_messages.append({"role": "tool", "tool": tool_name,
+                                           "content": result_str})
 
                     # Screenshot-Bild erkennen (IMAGE_BASE64:pfad|base64data)
                     image_part = None
@@ -2894,6 +2922,8 @@ KRITISCH – Autonomie-Regeln:
 
                 if _final_h_text:
                     collected_texts.append(_final_h_text)
+                    _conv_messages.append({"role": "assistant",
+                                           "content": _final_h_text})
 
             # Auto-Learning (gleiche Logik wie in run_task, inkl. der Bedingung
             # auf 'memory_manage' – ohne das Werkzeug ist der Zweig ein Leerlauf.
@@ -2934,6 +2964,33 @@ KRITISCH – Autonomie-Regeln:
             collected_texts.append(f"Fehler: {str(e)}")
         finally:
             self.state = AgentState.IDLE
+            # IM FINALLY, damit auch ein abgebrochener oder gescheiterter Lauf
+            # im Verlauf steht – genau der ist der interessante. Der Eintrag
+            # entsteht fuer JEDEN headless-Lauf, auch fuer Rollen- und
+            # Dump-Agenten (`is_sub_agent=True`): im Chat-Weg sind sie
+            # ausgenommen, weil dort der Eltern-Lauf mitschreibt; hier waere
+            # genau der Rollen-Lauf sonst unsichtbar, und das war der gemeldete
+            # Fall. Doppelte Eintraege entstehen nicht – der aeussere Lauf
+            # protokolliert nur sein Delegations-ERGEBNIS.
+            try:
+                _kanal = "headless"
+                _rolle = str(getattr(self, "_role_id", "") or "")
+                if _rolle:
+                    _kanal += ":" + _rolle[:40]
+                conv_log.log_conversation(
+                    task=task_text,
+                    model=self.current_model,
+                    client_ip="",            # kein Request – conv_log setzt 'unknown'
+                    client_type=_kanal,
+                    system_prompt=system_prompt,
+                    messages=_conv_messages,
+                    steps=steps,
+                    duration_ms=int((time.time() - _hl_start) * 1000),
+                    error=_hl_error,
+                    username=self.actor_name(),
+                )
+            except Exception as _cl:  # noqa: BLE001
+                _log(f"conv_log (headless) fehlgeschlagen: {_cl}")
             try:
                 if _hl_error:
                     tracer.end_span(agent_span, status="error", error=_hl_error)

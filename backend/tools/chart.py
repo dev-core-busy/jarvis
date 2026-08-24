@@ -174,6 +174,44 @@ def parse_number(raw):
     return -v if neg else v
 
 
+def csv_zeilen(path: Path, max_zeilen: int = MAX_TABLE_ROWS) -> list:
+    """Rohe Zeilen einer CSV/TSV – EINE Stelle fuer Kodierung und Trennzeichen.
+
+    Gibt Listen von Zeichenketten zurueck, ungefiltert und unkonvertiert. Wird
+    von ``_read_table`` (Diagramme) UND von ``skills/office/tabellen.py``
+    benutzt: seit 2026-08-24 nehmen die xlsx-Werkzeuge eine CSV als Quelle an,
+    und zwei getrennte Erkennungen waeren beim naechsten Export-Format
+    auseinandergelaufen (auf ECHT kommen deutsche Exporte mit ';' und cp1252).
+
+    Wirft ``RuntimeError`` mit Klartext – die Aufrufer geben ihn weiter.
+    """
+    raw = path.read_bytes()
+    for enc in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+        try:
+            text = raw.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        raise RuntimeError("Textkodierung nicht erkannt.")
+    probe = "\n".join(text.splitlines()[:20])
+    delim = "\t" if path.suffix.lower() == ".tsv" else ";"
+    if path.suffix.lower() != ".tsv":
+        try:
+            delim = csv.Sniffer().sniff(probe, delimiters=";,\t|").delimiter
+        except Exception:  # noqa: BLE001
+            # Der Sniffer scheitert bei einer einspaltigen Datei. Dann
+            # entscheidet die Haeufigkeit – ';' zuerst, weil deutsche Exporte
+            # die Regel sind.
+            delim = ";" if probe.count(";") >= probe.count(",") else ","
+    zeilen = []
+    for i, row in enumerate(csv.reader(io.StringIO(text), delimiter=delim), start=1):
+        if i > max_zeilen:
+            break
+        zeilen.append(row)
+    return zeilen
+
+
 def _read_table(path: Path, sheet=None, header_row: int = 1):
     """Liest CSV/TSV/XLSX und gibt (spaltennamen, zeilen) zurueck.
     Zeilen sind Listen in Spaltenreihenfolge."""
@@ -205,28 +243,7 @@ def _read_table(path: Path, sheet=None, header_row: int = 1):
         finally:
             wb.close()
     else:
-        # Trennzeichen erkennen (Semikolon ist in deutschen Exporten die Regel)
-        raw = path.read_bytes()
-        for enc in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
-            try:
-                text = raw.decode(enc)
-                break
-            except UnicodeDecodeError:
-                continue
-        else:
-            raise RuntimeError("Textkodierung nicht erkannt.")
-        probe = "\n".join(text.splitlines()[:20])
-        delim = "\t" if suffix == ".tsv" else ";"
-        if suffix != ".tsv":
-            try:
-                delim = csv.Sniffer().sniff(probe, delimiters=";,\t|").delimiter
-            except Exception:  # noqa: BLE001
-                delim = ";" if probe.count(";") >= probe.count(",") else ","
-        rows = []
-        for i, row in enumerate(csv.reader(io.StringIO(text), delimiter=delim), start=1):
-            if i > MAX_TABLE_ROWS:
-                break
-            rows.append(row)
+        rows = csv_zeilen(path)
 
     rows = [r for r in rows if r and any(c is not None and str(c).strip() != "" for c in r)]
     if not rows:

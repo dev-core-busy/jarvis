@@ -157,6 +157,81 @@ def _deckeln(text: str) -> str:
 
 # ── Datei oeffnen ───────────────────────────────────────────────────────────
 
+# Endungen, die als TABELLE gelesen werden, obwohl sie keine Mappe sind.
+# Vorgabe des Nutzers 2026-08-24: "CSV muss natuerlich auch erlaubt werden."
+# Der Anlass steht in CLAUDE.md – die Ablage "Tabellen zusammenfuehren" erlaubt
+# `csv`, und `xlsx_merge` wies die Slave-CSV mit "ist keine Excel-Datei" ab.
+# Das Modell zog daraus die Folgerung "der Slave-Juli ist LEER" und setzte 27
+# Spalten auf 0: eine Fehlermeldung, die nicht gelesen wurde, ist schlimmer als
+# eine fehlende Funktion.
+_CSV_ENDUNGEN = (".csv", ".tsv", ".txt")
+
+
+def _csv_wert(roh):
+    """Textzelle in eine Zahl wandeln – aber nur, wenn nichts verloren geht.
+
+    Eine CSV kennt keine Typen; ohne Umwandlung landet "3282" als TEXT in der
+    Master-Zelle, Excel richtet es links aus und jede Summenformel darueber
+    rechnet es als 0. Umgekehrt darf die Umwandlung keine Bedeutung loeschen:
+
+    * **Fuehrende Null ist Inhalt, nicht Formatierung** – PLZ ``02625``,
+      Kundennummer ``00083``, Artikelnummer. Als Zahl waeren sie zerstoert.
+    * Sehr lange Ziffernfolgen (IBAN, Belegnummer) verlieren als float ihre
+      letzten Stellen – sie bleiben Text.
+    * Deutsche Schreibweise laeuft ueber ``chart.parse_number``: ``float("1.234")``
+      ergaebe 1.234 statt 1234 und verfaelschte jede Tabelle um Faktor 1000.
+    """
+    if roh is None:
+        return None
+    s = str(roh).strip()
+    if not s:
+        return None
+    if len(s) > 1 and s[0] == "0" and s[1] not in ",.":
+        return roh
+    if len(re.sub(r"\D", "", s)) > 15:
+        return roh
+    try:
+        from backend.tools.chart import parse_number  # noqa: PLC0415
+    except Exception:  # noqa: BLE001
+        return roh
+    v = parse_number(s)
+    if v is None:
+        return roh
+    try:
+        return int(v) if float(v).is_integer() and abs(v) < 2 ** 53 else v
+    except Exception:  # noqa: BLE001
+        return roh
+
+
+def _csv_mappe(p):
+    """Baut aus einer CSV/TSV eine Mappe IM SPEICHER.
+
+    Damit arbeiten `_kz`, `_kopfzeile`, `iter_rows` und alle Werkzeuge
+    unveraendert weiter – die Alternative waere ein zweiter Codepfad je
+    Werkzeug gewesen, und der laeuft erfahrungsgemaess auseinander.
+
+    Das Blatt heisst wie die Datei (ohne Endung), damit `blatt=`-Angaben und
+    Fehlermeldungen etwas Sinnvolles nennen.
+    """
+    try:
+        from openpyxl import Workbook  # noqa: PLC0415
+        from backend.tools.chart import csv_zeilen  # noqa: PLC0415
+    except Exception as e:  # noqa: BLE001
+        raise TabellenFehler(f"CSV-Unterstuetzung nicht verfuegbar ({e}).") from e
+    try:
+        zeilen = csv_zeilen(p)
+    except Exception as e:  # noqa: BLE001
+        raise TabellenFehler(f"CSV nicht lesbar: {e}") from e
+    if not zeilen:
+        raise TabellenFehler(f"'{p.name}' enthaelt keine Zeilen.")
+    wb = Workbook()
+    ws = wb.active
+    ws.title = (p.stem or "CSV")[:31]
+    for row in zeilen:
+        ws.append([_csv_wert(c) for c in row])
+    return wb
+
+
 def _oeffnen(path: str, schreibend: bool = False):
     """Loest den Pfad auf und oeffnet die Mappe. Gibt (workbook, Path) zurueck.
 
@@ -174,11 +249,25 @@ def _oeffnen(path: str, schreibend: bool = False):
     p = _resolve_existing(path)
     if not p:
         raise TabellenFehler(f"Datei nicht gefunden: {path!r}")
+    if p.suffix.lower() in _CSV_ENDUNGEN:
+        # SCHREIBEND geht nicht: eine CSV hat kein Layout, keine Formeln und
+        # keine Blaetter – "bearbeiten und Formeln behalten" ist dort keine
+        # Zusage, die man halten kann. Die Meldung nennt den Weg, statt nur
+        # abzulehnen.
+        if schreibend:
+            raise TabellenFehler(
+                f"'{p.name}' ist eine CSV – sie kann als QUELLE dienen "
+                f"(xlsx_inspect, xlsx_read_range, xlsx_merge als 'slave'), aber "
+                f"nicht bearbeitet werden: eine CSV hat kein Layout und keine "
+                f"Formeln. Die zu befuellende Tabelle (master/path) muss eine "
+                f".xlsx sein."
+            )
+        return _csv_mappe(p), p
     if p.suffix.lower() not in (".xlsx", ".xlsm"):
         raise TabellenFehler(
-            f"'{p.name}' ist keine Excel-Datei (.xlsx/.xlsm), sondern "
-            f"'{p.suffix or 'ohne Endung'}'. Fuer .csv nimm filesystem oder "
-            f"create_chart, fuer .xls muss die Datei erst konvertiert werden."
+            f"'{p.name}' ist weder eine Excel-Datei (.xlsx/.xlsm) noch eine "
+            f"Texttabelle (.csv/.tsv), sondern '{p.suffix or 'ohne Endung'}'. "
+            f"Fuer .xls muss die Datei erst konvertiert werden."
         )
     try:
         from openpyxl import load_workbook  # noqa: PLC0415
@@ -480,8 +569,9 @@ class InspectTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "ERSTER SCHRITT bei jeder Excel-Aufgabe: zeigt den AUFBAU einer "
-            "vorhandenen .xlsx – Blaetter, Zeilen- und Spaltenzahl, Kopfzeile, "
+            "ERSTER SCHRITT bei jeder Tabellen-Aufgabe: zeigt den AUFBAU einer "
+            "vorhandenen .xlsx ODER .csv/.tsv – Blaetter, Zeilen- und "
+            "Spaltenzahl, Kopfzeile, "
             "Datentyp je Spalte und einige Beispielzeilen. Die Ausgabe ist "
             "klein und unabhaengig von der Dateigroesse. Benutze das statt "
             "office_read, sobald es um Tabellendaten geht: office_read macht "
@@ -492,7 +582,7 @@ class InspectTool(BaseTool):
         return {
             "type": "OBJECT",
             "properties": {
-                "path": {"type": "STRING", "description": "Dateiname, /api/documents/-URL oder Pfad der .xlsx."},
+                "path": {"type": "STRING", "description": "Dateiname, /api/documents/-URL oder Pfad. .xlsx/.xlsm oder .csv/.tsv (Texttabelle, nur lesend)."},
                 "kopfzeile": {"type": "INTEGER", "description": "Zeilennummer der Kopfzeile. Weglassen = je Blatt automatisch erkennen (empfohlen)."},
             },
             "required": ["path"],
@@ -645,7 +735,8 @@ class ReadRangeTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "Liest einen BEGRENZTEN Ausschnitt einer .xlsx (Blatt, Zeilen-, "
+            "Liest einen BEGRENZTEN Ausschnitt einer .xlsx oder .csv/.tsv "
+            "(Blatt, Zeilen-, "
             "Spaltenbereich) als Text. Sagt immer dazu, wie viele Zeilen und "
             "Spalten es insgesamt gibt und wie viele gezeigt werden. Fuer den "
             "Ueberblick zuerst xlsx_inspect benutzen."
@@ -655,7 +746,7 @@ class ReadRangeTool(BaseTool):
         return {
             "type": "OBJECT",
             "properties": {
-                "path": {"type": "STRING", "description": "Dateiname, /api/documents/-URL oder Pfad der .xlsx."},
+                "path": {"type": "STRING", "description": "Dateiname, /api/documents/-URL oder Pfad. .xlsx/.xlsm oder .csv/.tsv (Texttabelle, nur lesend)."},
                 "blatt": {"type": "STRING", "description": "Blattname (Standard: erstes Blatt)."},
                 "ab_zeile": {"type": "INTEGER", "description": "Erste zu lesende Zeile (1-basiert, Standard 1)."},
                 "zeilen": {"type": "INTEGER", "description": f"Anzahl Zeilen (Standard {LESE_ZEILEN_VORGABE}, hoechstens {LESE_ZEILEN_MAX})."},
@@ -773,8 +864,9 @@ class MergeTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "Traegt Daten aus einer zweiten Tabelle (slave) in eine bestehende "
-            "Tabelle (master) ein und liefert das Ergebnis als neue .xlsx. Der "
+            "Traegt Daten aus einer zweiten Tabelle (slave, .xlsx ODER .csv) in "
+            "eine bestehende .xlsx (master) ein und liefert das Ergebnis als "
+            "neue Datei. Der "
             "Master wird GEOEFFNET und beschrieben – Formeln, Spaltenbreiten, "
             "verbundene Zellen und Formate bleiben erhalten. Zugeordnet wird "
             "ueber 'schluessel' (gemeinsame Spalten). Die Daten laufen nicht "
@@ -785,8 +877,8 @@ class MergeTool(BaseTool):
         return {
             "type": "OBJECT",
             "properties": {
-                "master": {"type": "STRING", "description": "Master-Tabelle (gibt Layout und Zielspalten vor)."},
-                "slave": {"type": "STRING", "description": "Tabelle mit den einzutragenden Daten."},
+                "master": {"type": "STRING", "description": "Master-Tabelle, muss .xlsx sein (sie wird beschrieben und gibt Layout und Zielspalten vor)."},
+                "slave": {"type": "STRING", "description": "Tabelle mit den einzutragenden Daten – .xlsx ODER .csv/.tsv."},
                 "ziel": {"type": "STRING", "description": "Dateiname des Ergebnisses (ohne Pfad), z.B. 'Master_erweitert'."},
                 "master_blatt": {"type": "STRING", "description": "Blatt im Master (Standard: erstes)."},
                 "slave_blatt": {"type": "STRING", "description": "Blatt im Slave (Standard: erstes)."},
@@ -1079,7 +1171,7 @@ class EditTool(BaseTool):
         return {
             "type": "OBJECT",
             "properties": {
-                "path": {"type": "STRING", "description": "Zu bearbeitende .xlsx."},
+                "path": {"type": "STRING", "description": "Zu bearbeitende .xlsx (eine CSV kann nicht bearbeitet werden – sie hat kein Layout)."},
                 "ziel": {"type": "STRING", "description": "Dateiname des Ergebnisses (ohne Pfad)."},
                 "blatt": {"type": "STRING", "description": "Blattname (Standard: erstes Blatt)."},
                 "aenderungen": {

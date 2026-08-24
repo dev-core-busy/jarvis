@@ -602,7 +602,14 @@
             z.innerHTML =
                 '<div class="st-job-head">' +
                   '<span class="st-job-name">' + esc(j.titel) + '</span>' +
-                  '<span class="st-job-state">' + esc(jobZustand(j)) + '</span>' +
+                  '<span class="st-job-state">' +
+                    // Der drehende Kreis nur, solange wirklich gearbeitet wird –
+                    // ein wartender Auftrag arbeitet nicht.
+                    (j.status === 'laeuft'
+                        ? '<span class="st-spin" aria-hidden="true" style="animation-delay:-'
+                          + (Date.now() % 800) + 'ms"></span>'
+                        : '') +
+                    esc(jobZustand(j)) + '</span>' +
                   (j.status === 'fertig' || j.status === 'fehler'
                       ? '<button class="st-icon-btn" data-jobdel="' + esc(j.id) +
                         '" title="' + esc(T('tracks.job_hide', 'Aus der Liste nehmen')) +

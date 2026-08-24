@@ -478,11 +478,45 @@ abschnitt('3. Auftraege: Zustaende, Warteposition, Chips, Zaehler');
     const fehler = w.document.querySelector('[data-jobs="bbbbbbbbbbbb"] .st-job');
     pruefe(fehler.classList.contains('is-bad'), 'ein Fehlschlag ist abgesetzt');
     pruefe(fehler.textContent.indexOf('keine Antwort') > -1, 'und nennt den Grund');
+    /* Drehender Kreis als "ich arbeite noch"-Anzeige */
+    const laufZeile = [...box.querySelectorAll('.st-job')]
+        .find(z => z.classList.contains('is-run'));
+    pruefe(laufZeile && laufZeile.querySelector('.st-spin') !== null,
+        'der laufende Auftrag traegt den drehenden Kreis');
+    const wartetZeile = [...box.querySelectorAll('.st-job')]
+        .find(z => /wartet/.test(z.textContent));
+    pruefe(wartetZeile && wartetZeile.querySelector('.st-spin') === null,
+        'ein WARTENDER Auftrag traegt ihn nicht – er arbeitet nicht');
+    pruefe(box.querySelectorAll('.st-job:not(.is-run) .st-spin').length === 0,
+        'fertige und fehlgeschlagene Auftraege ebenfalls nicht');
+    // NULL-SICHER: fehlt der Kreis, muss die Pruefung FEHLSCHLAGEN, nicht
+    // werfen – sonst bricht die Gegenprobe ab und sieht wie ein bestandener
+    // Lauf aus (Register; beim ersten Lauf dieses Abschnitts genau so passiert).
+    const spin = laufZeile ? laufZeile.querySelector('.st-spin') : null;
+    pruefe(spin && spin.getAttribute('aria-hidden') === 'true',
+        'er ist fuer Screenreader unsichtbar – die Aussage traegt der Text');
+    pruefe(laufZeile && /l(ä|ae)uft/.test(laufZeile.textContent),
+        'und der Text "laeuft" steht weiterhin da (Bewegung allein ist keine Information)');
+    // Die Liste wird alle 2 s NEU gebaut (TAKT_AKTIV). Ohne negativen
+    // animation-delay begaenne die Drehung dabei jedes Mal von vorn – ein
+    // sichtbares Zurueckspringen im Sekundentakt.
+    pruefe(/animation-delay:\s*-\d+ms/.test((spin && spin.getAttribute('style')) || ''),
+        'die Drehphase haengt an der Uhrzeit, nicht am Neuaufbau der Liste');
+
     const pille = w.document.getElementById('st-queue-pill');
     pruefe(pille.classList.contains('is-run') && /2/.test(pille.textContent),
         'die Pille oben zeigt die laufenden/wartenden Auftraege');
     pruefe(rufe.some(r => r.url === '/api/tracks/jobs/seen'),
         'fertige Auftraege werden als gesehen gemeldet (Kachel-Zaehler)');
+    // jsdom rechnet kein Layout – geprueft wird die REGEL selbst.
+    pruefe(/@keyframes\s+st-spin/.test(TR_HTML), 'die Drehung ist definiert');
+    pruefe(/prefers-reduced-motion/.test(TR_HTML.split('.st-spin')[1] || ''),
+        'und respektiert "weniger Bewegung"');
+    pruefe(!/\.st-spin\s*\{[^}]*animation:\s*none/.test(TR_HTML),
+        'dort wird sie verlangsamt, NICHT abgeschaltet – ein stehender Ring '
+        + 'waere kein Vorgang mehr');
+    pruefe(/var\(--accent/.test(TR_HTML.split('.st-spin')[1].slice(0, 400)),
+        'die Farbe kommt aus der Theme-Variablen, nicht hart');
     // Abgeschlossene lassen sich aus der Liste nehmen, laufende nicht
     pruefe(w.document.querySelector('[data-jobdel="j3"]') !== null,
         'fertiger Auftrag hat einen Entfernen-Knopf');

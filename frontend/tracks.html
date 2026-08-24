@@ -247,6 +247,22 @@
         .st-job-state { flex: 0 0 auto; font-size: .74rem; color: var(--text-muted);
             white-space: nowrap; }
         .st-job.is-run .st-job-state { color: var(--accent); }
+        /* Drehender Kreis als "ich arbeite noch"-Anzeige. Er steht NEBEN dem
+           Text, nicht an seiner Stelle: eine Bewegung allein ist keine
+           Information (Register) – "läuft …" bleibt die Aussage, der Kreis
+           macht sie auf einen Blick sichtbar. */
+        .st-spin { display: inline-block; width: 10px; height: 10px;
+            margin-right: 5px; vertical-align: -1px; border-radius: 50%;
+            border: 2px solid rgba(var(--accent-rgb), .28);
+            border-top-color: var(--accent);
+            animation: st-spin .8s linear infinite; }
+        @keyframes st-spin { to { transform: rotate(360deg); } }
+        /* NICHT abschalten, sondern verlangsamen: ein stehender Ring sieht aus
+           wie ein Zeichen, nicht wie ein Vorgang – die Anzeige verlöre genau
+           das, wofür sie da ist. */
+        @media (prefers-reduced-motion: reduce) {
+            .st-spin { animation-duration: 2.4s; }
+        }
         .st-job.is-bad .st-job-state { color: var(--danger); }
         .st-job-step { font-size: .74rem; color: var(--text-muted); margin-top: 2px; }
         .st-job-res { color: var(--text-secondary); margin-top: 3px; line-height: 1.5;
@@ -443,7 +459,7 @@
 <script src="/static/js/branding.js?v=25"></script>
 <script src="/static/js/sessions.js?v=6"></script>
 <script src="/static/js/prompt_check.js?v=1"></script>
-<script src="/static/js/tracks.js?v=7"></script>
+<script src="/static/js/tracks.js?v=8"></script>
 <script src="/static/js/settings_btn.js?v=3"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist).
      Der Ein/Aus-Schalter haengt sich VOR #btn-theme-toggle – deshalb muss der

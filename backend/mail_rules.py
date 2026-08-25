@@ -350,7 +350,7 @@ def _pruefe(felder: dict, bestehend: dict | None = None,
                 if bekannt and sid not in bekannt:
                     raise RegelFehler(
                         "Diesen Antwort-Stil gibt es nicht (mehr). Waehle einen "
-                        "vorhandenen Stil oder lege ihn unter „Postfach\" an.")
+                        "vorhandenen Stil oder lege ihn unter „Stile\" an.")
             except RegelFehler:
                 raise
             except Exception:  # noqa: BLE001

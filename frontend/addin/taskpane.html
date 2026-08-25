@@ -84,6 +84,13 @@
             border-bottom: 2px solid transparent; white-space: nowrap; }
         .ad-tab:hover { color: var(--text-primary); }
         .ad-tab.is-active { color: var(--accent); border-bottom-color: var(--accent); }
+        /* Seit dem fuenften Reiter (Stile, 2026-08-25) wird die Leiste in
+           schmalen Aufgabenfenstern eng. `white-space: nowrap` laesst den Text
+           sonst UEBER den Knopf hinauslaufen, statt ihn umzubrechen – bei
+           320 px und 286 px gemessen passt es, darunter nicht mehr. */
+        @media (max-width: 300px) {
+            .ad-tab { font-size: 10.5px; padding: 8px 1px; letter-spacing: -0.2px; }
+        }
 
         .ad-body { padding: 12px 10px 40px; }
         .ad-sec { margin-bottom: 14px; }
@@ -259,7 +266,7 @@
 </style>
 </head>
 <body>
-<script>try{if(localStorage.getItem('jarvis_theme')==='light')document.body.classList.add('light');}catch(e){}</script>
+<script>try{if(localStorage.getItem('jarvis_theme')!=='dark')document.body.classList.add('light');}catch(e){}</script>
 
 <!-- ═══ Band: veraltetes Manifest ═══
      Faengt den EINEN Teil, der sich nicht von selbst aktualisiert. Das
@@ -339,6 +346,7 @@
     <div class="ad-tabs">
         <button class="ad-tab is-active" data-tab="mail" data-i18n="addin.tab_mail">Nachricht</button>
         <button class="ad-tab" data-tab="rules" data-i18n="addin.tab_rules">Regeln</button>
+        <button class="ad-tab" data-tab="stile" data-i18n="addin.tab_stile">Stile</button>
         <button class="ad-tab" data-tab="acct" data-i18n="addin.tab_acct">Postfach</button>
         <button class="ad-tab" data-tab="log" data-i18n="addin.tab_log">Protokoll</button>
     </div>
@@ -366,6 +374,25 @@
         </div>
 
         <!-- ── Reiter: Postfach ── -->
+        <!-- ── Reiter: Stile ──
+             Bis 2026-08-25 ein Abschnitt UNTEN im Postfach-Reiter. Dort
+             stand er hinter Serveradresse, Kennwort und vier Ordnerfeldern
+             und war nur nach Scrollen erreichbar - obwohl er im taeglichen
+             Gebrauch haeufiger gebraucht wird als die Zugangsdaten, die man
+             einmal eintraegt. -->
+        <div class="ad-pane hidden" data-pane="stile">
+            <div class="ad-h"><span data-i18n="mail.styles_head">Stile für Antworten</span>
+                <button type="button" class="ad-info" data-help="ad-help-styles" aria-expanded="false"
+                    data-i18n-title="mail.help" title="Erklärung anzeigen">&#9432;</button></div>
+            <p class="ad-hint" data-i18n="mail.styles_hint_short">Mehrere Schreibweisen – beim Antworten wählst du oben im Reiter „Nachricht“ aus, welche gilt, oder lässt die KI selbst wählen.</p>
+            <div class="ad-help" id="ad-help-styles" data-i18n="mail.help_styles">Der Standard-Stil (●) gilt überall dort, wo nichts anderes gewählt ist. Du kannst einen Stil auch im Text einer Regel beim Namen nennen; ist im Regel-Formular einer ausgewählt, gewinnt diese Auswahl. In jedem Stil-Pulldown gibt es zusätzlich „automatisch Stil wählen“: dann sucht das Sprachmodell selbst den passenden aus und nennt ihn über dem Vorschlag.</div>
+            <div id="ad-stile" style="margin-top:8px;"></div>
+            <div id="ad-stil-edit" class="hidden"></div>
+            <button class="ad-btn ad-btn-block" id="ad-stil-neu" style="margin-top:8px;"
+                    data-i18n="mail.style_new">Neuer Stil</button>
+            <p class="ad-status" id="ad-stil-status" style="margin-top:6px;"></p>
+        </div>
+
         <div class="ad-pane hidden" data-pane="acct">
             <p class="ad-hint" data-i18n="mail.acct_hint">Hier hinterlegst du dein eigenes Exchange-Postfach. Das Kennwort wird verschlüsselt gespeichert und von keiner Schnittstelle wieder herausgegeben – auch nicht an Administratoren. Lass das Feld leer, um es unverändert zu lassen.</p>
             <div class="ad-sep"></div>
@@ -421,17 +448,6 @@
             </div>
             <p class="ad-status" id="ad-acct-status" style="margin-top:8px;"></p>
 
-            <div class="ad-sep"></div>
-            <div class="ad-h"><span data-i18n="mail.styles_head">Stile für Antworten</span>
-                <button type="button" class="ad-info" data-help="ad-help-styles" aria-expanded="false"
-                    data-i18n-title="mail.help" title="Erklärung anzeigen">&#9432;</button></div>
-            <p class="ad-hint" data-i18n="mail.styles_hint_short">Mehrere Schreibweisen – beim Antworten wählst du oben im Reiter „Nachricht“ aus, welche gilt, oder lässt die KI selbst wählen.</p>
-            <div class="ad-help" id="ad-help-styles" data-i18n="mail.help_styles">Der Standard-Stil (●) gilt überall dort, wo nichts anderes gewählt ist. Du kannst einen Stil auch im Text einer Regel beim Namen nennen; ist im Regel-Formular einer ausgewählt, gewinnt diese Auswahl. In jedem Stil-Pulldown gibt es zusätzlich „automatisch Stil wählen“: dann sucht das Sprachmodell selbst den passenden aus und nennt ihn über dem Vorschlag.</div>
-            <div id="ad-stile" style="margin-top:8px;"></div>
-            <div id="ad-stil-edit" class="hidden"></div>
-            <button class="ad-btn ad-btn-block" id="ad-stil-neu" style="margin-top:8px;"
-                    data-i18n="mail.style_new">Neuer Stil</button>
-            <p class="ad-status" id="ad-stil-status" style="margin-top:6px;"></p>
         </div>
 
         <!-- ── Reiter: Protokoll ── -->
@@ -461,14 +477,14 @@
 -->
 <script async src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
 <script src="/static/js/icons.js?v=1"></script>
-<script src="/static/js/i18n.js?v=171"></script>
+<script src="/static/js/i18n.js?v=173"></script>
 <script src="/static/js/tabfill.js?v=1"></script>
-<script src="/static/js/theme.js?v=2"></script>
+<script src="/static/js/theme.js?v=3"></script>
 <!-- Branding: setzt Markenfarben, Marken-Namen (.brand-app-name) und das
      Firmenlogo (.topbar-avatar) – dieselbe Einbindung wie auf allen uebrigen
      Seiten. `/api/branding` haengt an KEINER Anmeldung, die Marke steht also
      schon auf dem Anmeldebildschirm richtig da. -->
 <script src="/static/js/branding.js?v=24"></script>
-<script src="/static/addin/addin.js?v=10"></script>
+<script src="/static/addin/addin.js?v=11"></script>
 </body>
 </html>

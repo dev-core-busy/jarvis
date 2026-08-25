@@ -550,6 +550,47 @@ pruefe("window.toggleTheme" not in THEMEJS, "theme.js hat KEIN toggleTheme")
 pruefe("window.applyTheme" in ADDINJS and "window.toggleTheme" not in ADDINJS,
        "der Umschalter im Fenster ruft applyTheme (feuert jarvis:themechange)")
 
+# ── Reiterleiste: jeder Knopf braucht sein Pane ──
+# Seit 2026-08-25 sind es FUENF (Stile wurde aus dem Postfach-Reiter
+# herausgeloest). Geprueft wird die Paarung, nicht eine gepflegte Liste: ein
+# Reiter ohne Pane ist ein Knopf, der nichts tut, und ein Pane ohne Reiter ist
+# unerreichbarer Inhalt - beides faellt sonst erst im echten Outlook auf.
+abschnitt("Reiterleiste")
+_tabs = re.findall(r'class="ad-tab[^"]*"\s+data-tab="([a-z_]+)"', TASKPANE)
+_panes = re.findall(r'class="ad-pane[^"]*"\s+data-pane="([a-z_]+)"', TASKPANE)
+pruefe(_tabs == ["mail", "rules", "stile", "acct", "log"],
+       "Reihenfolge ist Nachricht, Regeln, Stile, Postfach, Protokoll (%r)" % _tabs)
+pruefe(sorted(_tabs) == sorted(_panes),
+       "zu jedem Reiter gibt es genau ein Pane (%r vs %r)" % (sorted(_tabs), sorted(_panes)))
+pruefe(len(_tabs) == len(set(_tabs)), "keine doppelte Reiter-Kennung")
+
+# Die Stile muessen im EIGENEN Pane liegen - lagen sie noch im Postfach-Pane,
+# waere der neue Reiter leer und der alte unveraendert lang.
+_i_stile = TASKPANE.find('data-pane="stile"')
+_i_acct = TASKPANE.find('data-pane="acct"')
+_i_liste = TASKPANE.find('id="ad-stile"')
+pruefe(_i_stile != -1 and _i_acct != -1 and _i_liste != -1,
+       "Stile-Pane, Postfach-Pane und die Stilliste sind vorhanden")
+pruefe(_i_stile < _i_liste < _i_acct,
+       "die Stilliste liegt IM Stile-Pane, nicht mehr im Postfach-Pane")
+for _id in ("ad-stil-edit", "ad-stil-neu", "ad-stil-status", "ad-help-styles"):
+    _i = TASKPANE.find('id="%s"' % _id)
+    pruefe(_i_stile < _i < _i_acct, "%s ist mitgewandert" % _id)
+
+# Die Weiche im Skript muss den neuen Namen kennen, sonst zeigt der Reiter
+# eine Liste, die seit dem letzten Statuslauf veraltet ist.
+ADDINJS = (ROOT / "frontend" / "addin" / "addin.js").read_text(encoding="utf-8")
+pruefe("if (name === 'stile')" in _ohne_kommentare(ADDINJS),
+       "reiter() behandelt 'stile' (auf den Aufruf geprueft, nicht auf das Wort)")
+
+# Beschriftung in BEIDEN Sprachen - ein Reiter ohne Key zeigt nach dem ersten
+# Sprachwechsel einen leeren Knopf.
+I18N = (ROOT / "frontend" / "js" / "i18n.js").read_text(encoding="utf-8")
+pruefe(I18N.count("'addin.tab_stile'") == 2,
+       "addin.tab_stile ist in DE und EN belegt (%d Treffer)" % I18N.count("'addin.tab_stile'"))
+pruefe('data-i18n="addin.tab_stile"' in TASKPANE,
+       "der Knopf traegt den i18n-Haken")
+
 # ── Dateiname des Downloads ──
 _stub.config.marke = "Nexerius"
 pruefe(addin.dateiname() == "nexerius-outlook-addin.xml",

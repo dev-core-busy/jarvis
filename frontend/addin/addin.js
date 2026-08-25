@@ -653,6 +653,20 @@
         });
         if (name === 'log') ladeLog();
         if (name === 'acct') fuelleKonto();
+        // Stile sind seit 2026-08-25 ein eigener Reiter. Neu zeichnen beim
+        // Oeffnen, damit die Liste stimmt, wenn zwischenzeitlich ein
+        // Statuslauf neue Stile geholt hat. _stile selbst wird weiterhin in
+        // fuelleKonto() belegt, das aus ladeStatus() heraus IMMER laeuft -
+        // der Nachricht-Reiter baut sein Stil-Pulldown daraus, das darf
+        // nicht davon abhaengen, ob jemand diesen Reiter geoeffnet hat.
+        if (name === 'stile') zeichneStile();
+        // Stile sind seit 2026-08-25 ein eigener Reiter. Neu zeichnen beim
+        // Oeffnen, damit die Liste stimmt, wenn zwischenzeitlich ein
+        // Statuslauf neue Stile geholt hat. _stile selbst wird weiterhin in
+        // fuelleKonto() belegt, das aus ladeStatus() heraus IMMER laeuft –
+        // der Nachricht-Reiter baut sein Stil-Pulldown daraus, das darf
+        // nicht davon abhaengen, ob jemand diesen Reiter geoeffnet hat.
+
         window.scrollTo(0, 0);
     }
 

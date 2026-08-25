@@ -38,6 +38,19 @@ hast du die Ersparnis schon ausgegeben. Dann mach es selbst.
 - **Alles ohne mechanischen Riegel.** Kein Test, der es beweist → nicht
   delegieren. Die Modellantwort allein ist kein Nachweis.
 
+## Vorbedingung – kostet sonst einen ganzen Lauf
+
+**Der Riegel muss in `origin/master` liegen.** Der Server klont von dort; ein
+frisch geschriebener, noch nicht gepushter Waechter existiert im Arbeitsbereich
+gar nicht. Der Lauf startet trotzdem, der Agent arbeitet, und erst die Bewertung
+meldet „Riegel existiert im Arbeitsbereich nicht" – kein Patch, und nach der
+Abbruchregel machst du die Aufgabe danach selbst. Genauso: ein committeter, aber
+lokal **geaenderter** Riegel – geprueft wuerde die alte Fassung, ein gruener
+Riegel bewiese dann etwas anderes als das, was du geschrieben hast.
+
+`senden` faengt beides seit 2026-08-25 **vor** dem Lauf ab. Reihenfolge also:
+**Waechter schreiben -> committen und pushen -> delegieren.**
+
 ## Ablauf
 
 ```bash
@@ -77,6 +90,27 @@ git apply --check /tmp/patch.diff && git apply /tmp/patch.diff
 Ein gruener Riegel beweist, dass die Aenderung *funktioniert* – nicht, dass sie
 zu den Projektkonventionen passt (Einrueckung, Spaltenausrichtung, Kommentare).
 Das ist deine Aufgabe und der Grund, warum der Patch klein sein muss.
+
+## Was es gebracht hat
+
+```bash
+python3 $S bericht
+```
+
+Zeigt je Auftrag die GEMESSENEN Zeichen (Auftragstext, Quelldateien,
+Patch) und die Bilanz. Die Rechnung:
+
+    ohne Delegation ~ Quelldateien lesen + Patch schreiben
+    mit  Delegation ~ Auftrag schreiben  + Patch lesen
+    Ersparnis       ~ Quelle - Auftrag
+
+Der Patch faellt heraus – er geht in beiden Faellen durch Claude. Ein
+**abgelehnter** Auftrag zaehlt mit negativem Beitrag: die Spezifikation wurde
+geschrieben und die Aufgabe danach trotzdem selbst gemacht.
+
+**Der Vorbehalt steht im Bericht und ist der Kern der Entscheidungsregel:** die
+Ersparnis gilt nur, soweit die Dateien vorher NICHT gelesen wurden. Wer erst
+lesen muss, um den Auftrag zu schreiben, hat sie schon ausgegeben.
 
 ## Was der Auftragstext enthalten muss
 

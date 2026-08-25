@@ -9912,6 +9912,24 @@ async def claudesub_job_create(request: Request, user: str = Depends(require_cla
     return JSONResponse({"ok": True, "id": job["id"], "status": job["status"]})
 
 
+@app.get("/api/claude/jobs")
+async def claudesub_jobs_list(user: str = Depends(require_claudesub_key)):
+    """Eigene Auftraege samt Messwerten – Grundlage fuer `delegiere.py bericht`.
+
+    Haengt bewusst am DELEGATIONS-SCHLUESSEL und nicht an der Sitzung: der
+    Bericht wird vom Client aus der Kommandozeile geholt, dort gibt es kein
+    Sitzungstoken. `jobs_liste` filtert auf den Eigentuemer – ein fremder
+    Auftrag ist auch hier nicht sichtbar.
+
+    MUSS VOR `/api/claude/jobs/{job_id}` stehen: FastAPI prueft innerhalb
+    derselben Methode in Registrierungsreihenfolge, sonst finge die
+    Sammelroute den Pfad ab (gleiche Falle wie bei /api/conv_log/ips).
+    """
+    from backend import claude_subagent as _cs
+    return JSONResponse({"ok": True, "jobs": _cs.jobs_liste(user, limit=200),
+                         "zeichen_je_token": _cs.ZEICHEN_JE_TOKEN})
+
+
 @app.get("/api/claude/jobs/{job_id}")
 async def claudesub_job_get(job_id: str, user: str = Depends(require_claudesub_key)):
     """Zustand und – wenn fertig – Ergebnis eines Auftrags.

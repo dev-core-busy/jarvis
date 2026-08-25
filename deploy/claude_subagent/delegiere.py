@@ -124,6 +124,40 @@ def git(*args) -> str:
     return (p.stdout or "").strip()
 
 
+def git_ok(*args) -> bool:
+    """Nur der Exitcode zaehlt (fuer Existenzfragen wie `cat-file -e`)."""
+    return subprocess.run(["git", *args], capture_output=True,
+                          text=True).returncode == 0
+
+
+def pruefe_riegel(riegel: str) -> None:
+    """Der Riegel muss im GEPUSHTEN Stand liegen, nicht nur im Arbeitsbaum.
+
+    DAS HAT EINEN LAUF GEKOSTET (2026-08-25): ein frisch geschriebener, noch
+    nicht committeter Waechter existiert im Klon des Servers nicht. Der Lauf
+    laeuft trotzdem an, der Agent arbeitet, und erst die Bewertung meldet
+    "Riegel existiert im Arbeitsbereich nicht" – Ergebnis: kein Patch, und nach
+    der Abbruchregel macht man die Aufgabe danach selbst. Die Vorbedingung
+    gehoert VOR den Lauf.
+
+    Zweiter Fall, subtiler: der Riegel ist committet, aber lokal GEAENDERT. Dann
+    prueft der Server die alte Fassung – und ein gruener Riegel beweist etwas
+    anderes als das, was man gerade geschrieben hat.
+    """
+    if not riegel:
+        return
+    if not git_ok("cat-file", "-e", f"origin/master:{riegel}"):
+        fehler(f"Der Riegel '{riegel}' liegt nicht in origin/master. Der Server "
+               f"klont von dort und findet ihn nicht – der Lauf wuerde ohne "
+               f"Patch enden. Committe und pushe ihn zuerst.")
+    stand = git("status", "--porcelain", "--", riegel).strip()
+    if stand:
+        fehler(f"Der Riegel '{riegel}' ist lokal geaendert, aber nicht gepusht. "
+               f"Geprueft wuerde die Fassung aus origin/master – ein gruener "
+               f"Riegel bewiese dann etwas anderes als das, was du geschrieben "
+               f"hast. Pushe die Aenderung zuerst.")
+
+
 def pruefe_arbeitsbaum(dateien: list) -> str:
     """Basis-Commit ermitteln und sicherstellen, dass der Patch spaeter passt."""
     kopf = git("rev-parse", "HEAD")
@@ -149,6 +183,7 @@ def cmd_senden(a) -> None:
     dateien = [x.strip() for x in a.dateien.split(",") if x.strip()]
     if not dateien:
         fehler("--dateien fehlt: nenne die Dateien, die geaendert werden duerfen.")
+    pruefe_riegel(a.riegel)
     basis = a.basis or pruefe_arbeitsbaum(dateien)
 
     antwort = ruf("/api/claude/jobs", "POST", {
@@ -206,6 +241,67 @@ def cmd_warten(a) -> None:
     fehler(f"Auftrag {a.id} ist nach {a.timeout}s noch nicht fertig.")
 
 
+def cmd_bericht(a) -> None:
+    """Was die Delegation gekostet und gespart hat – aus GEMESSENEN Zeichen.
+
+    Die Rechnung steht im Kopf von ``backend/claude_subagent.py``:
+        ohne Delegation ~ Quelldateien lesen + Patch schreiben
+        mit  Delegation ~ Auftrag schreiben  + Patch lesen
+        Ersparnis       ~ Quelle - Auftrag
+    Der Patch faellt heraus, er geht in beiden Faellen durch Claude.
+
+    Ein ABGELEHNTER Auftrag ist ein Kostenpunkt, kein Nullwert: die
+    Spezifikation wurde geschrieben und die Aufgabe danach selbst gemacht. Er
+    zaehlt deshalb mit NEGATIVEM Beitrag.
+    """
+    antwort = ruf("/api/claude/jobs")
+    jobs = antwort.get("jobs") or []
+    zjt = float(antwort.get("zeichen_je_token") or 3.6)
+    if not jobs:
+        print("Noch kein Auftrag abgegeben – es gibt nichts zu berichten.")
+        return
+
+    print(f"{'Zeit':<12} {'Kennung':<13} {'St':<3} {'Dat':>4} "
+          f"{'Auftrag':>9} {'Quelle':>9} {'Patch':>8} {'Bilanz':>9}  Riegel")
+    print("-" * 100)
+    sp = qu = pa = 0
+    ang = abg = 0
+    for j in jobs[::-1]:
+        m = j.get("messwerte") or {}
+        if not m:
+            continue                      # Altbestand vor der Buchhaltung
+        ok = bool(m.get("angenommen"))
+        # Bei Ablehnung ist die Quelle NICHT gespart – die Arbeit fiel trotzdem an.
+        bilanz = (m.get("quelle_zeichen", 0) if ok else 0) - m.get("spec_zeichen", 0)
+        sp += m.get("spec_zeichen", 0)
+        qu += m.get("quelle_zeichen", 0) if ok else 0
+        pa += m.get("patch_zeichen", 0)
+        ang += 1 if ok else 0
+        abg += 0 if ok else 1
+        zeit = time.strftime("%d.%m %H:%M", time.localtime(j.get("erstellt", 0)))
+        riegel = j.get("riegel")
+        riegel = riegel if isinstance(riegel, str) else ",".join(riegel or [])
+        print(f"{zeit:<12} {j.get('id',''):<13} {'OK ' if ok else 'ABL':<3} "
+              f"{m.get('dateien_anzahl',0):>4} "
+              f"{m.get('spec_zeichen',0):>9,} {m.get('quelle_zeichen',0):>9,} "
+              f"{m.get('patch_zeichen',0):>8,} {bilanz:>+9,}  {riegel.split('/')[-1]}")
+
+    bilanz = qu - sp
+    print("-" * 100)
+    print(f"{ang + abg} Auftraege: {ang} angenommen, {abg} abgelehnt")
+    print(f"Auftragstexte (gezahlt):        {sp:>12,} Zeichen  ~{sp/zjt:>10,.0f} Token")
+    print(f"Quelldateien (nicht gelesen):   {qu:>12,} Zeichen  ~{qu/zjt:>10,.0f} Token")
+    print(f"Patches (in beiden Faellen):    {pa:>12,} Zeichen  ~{pa/zjt:>10,.0f} Token")
+    print(f"BILANZ:                         {bilanz:>+12,} Zeichen  ~{bilanz/zjt:>+10,.0f} Token")
+    print()
+    print("Gemessen sind die ZEICHEN; die Token sind daraus geschaetzt "
+          f"({zjt} Zeichen/Token).")
+    print("VORBEHALT: die Ersparnis gilt nur, soweit die Dateien vorher NICHT "
+          "gelesen wurden.")
+    print("Wer erst lesen muss, um den Auftrag zu schreiben, hat sie schon "
+          "ausgegeben.")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="Codeaufgabe an Jarvis abgeben")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -229,6 +325,9 @@ def main() -> None:
     w.add_argument("--timeout", type=int, default=900)
     w.add_argument("--takt", type=int, default=10)
     w.set_defaults(fn=cmd_warten)
+
+    b = sub.add_parser("bericht", help="Kosten und Ersparnis aller Auftraege")
+    b.set_defaults(fn=cmd_bericht)
 
     a = p.parse_args()
     a.fn(a)

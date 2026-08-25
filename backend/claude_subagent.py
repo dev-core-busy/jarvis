@@ -807,6 +807,54 @@ def alte_arbeitsbereiche_abraeumen() -> int:
     return weg
 
 
+# ─── Messwerte: was die Delegation gekostet und gespart hat ──────────────────
+# Ohne diese Zahlen ist jede Ersparnis-Aussage geraten. Gemessen werden ZEICHEN
+# – das ist die harte Groesse; Token sind daraus abgeleitet und als Schaetzung
+# ausgewiesen (Anthropic gibt keinen Zaehler heraus, den dieser Server abfragen
+# koennte).
+#
+# Die Rechnung, die der Bericht daraus zieht:
+#   ohne Delegation ~ quelle_zeichen (Dateien lesen) + patch_zeichen (Aenderung schreiben)
+#   mit  Delegation ~ spec_zeichen   (Auftrag)       + patch_zeichen (Patch lesen)
+#   Ersparnis       ~ quelle_zeichen - spec_zeichen
+# Der Patch faellt heraus, weil er in BEIDEN Faellen durch Claude geht.
+#
+# ⚠ DIE RECHNUNG GILT NUR, WENN DIE DATEIEN VORHER NICHT GELESEN WURDEN. Wer den
+# Code erst lesen muss, um die Spezifikation zu schreiben, hat die Ersparnis
+# schon ausgegeben – genau das sagt die Entscheidungsregel des Skills. Der
+# Server kann das nicht wissen, deshalb weist der Bericht es als Vorbehalt aus.
+ZEICHEN_JE_TOKEN = 3.6   # Faustwert fuer Code mit deutschen Kommentaren
+
+
+def _zeichen(pfad: Path) -> int:
+    """Groesse einer Datei in Zeichen – 0, wenn sie nicht lesbar ist.
+
+    Bewusst Zeichen und nicht Bytes: die Abrechnung eines Sprachmodells haengt
+    am Text, und in diesem Projekt stehen Umlaute in jedem Oberflaechentext.
+    """
+    try:
+        return len(pfad.read_text(encoding="utf-8", errors="replace"))
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def messwerte_erheben(work: Path, job: dict) -> dict:
+    """Umfang der QUELLDATEIEN, gemessen VOR dem Lauf.
+
+    Danach hat der Agent sie veraendert – die Zahl waere dann die des Ergebnisses
+    und nicht mehr die, die Claude haette lesen muessen.
+    """
+    quelle = sum(_zeichen(work / d) for d in job.get("dateien", []))
+    riegel = sum(_zeichen(work / r) for r in ([job["riegel"]] if isinstance(job.get("riegel"), str)
+                                              else (job.get("riegel") or [])))
+    return {
+        "spec_zeichen": len(job.get("spec", "")),
+        "quelle_zeichen": quelle,
+        "riegel_zeichen": riegel,
+        "dateien_anzahl": len(job.get("dateien", [])),
+    }
+
+
 # ─── Auftragsverwaltung ──────────────────────────────────────────────────────
 
 def job_anlegen(user: str, geprueft: dict) -> dict:
@@ -934,6 +982,8 @@ async def job_ausfuehren(job_id: str) -> None:
         agent._role_profile_id = profil_id_aufgeloest()
         auftrag = auftragstext(work, job)
         grenze_s = laufzeit_s()
+        # VOR dem Lauf messen: danach sind die Dateien veraendert.
+        messwerte = messwerte_erheben(work, job)
 
         antwort = ""
         try:
@@ -975,10 +1025,18 @@ async def job_ausfuehren(job_id: str) -> None:
             if hinweis:
                 gruende.append(hinweis)
 
+        jetzt = int(time.time())
+        messwerte.update({
+            "patch_zeichen": len(diff or ""),
+            "angenommen": angenommen,
+            "dauer_s": max(0, jetzt - int(job.get("gestartet") or jetzt)),
+        })
+
         _job_setzen(
             job_id,
             status="fertig",
-            fertig=int(time.time()),
+            fertig=jetzt,
+            messwerte=messwerte,
             ergebnis={
                 "angenommen": angenommen,
                 "gruende": gruende,
@@ -992,8 +1050,15 @@ async def job_ausfuehren(job_id: str) -> None:
             },
         )
     except Exception as e:  # noqa: BLE001
+        # Auch hier Messwerte festhalten: ein gescheiterter Auftrag ist ein
+        # Kostenpunkt (die Spezifikation wurde geschrieben) und darf im Bericht
+        # nicht als Nullzeile erscheinen.
         _job_setzen(job_id, status="fehler", fehler=f"{type(e).__name__}: {e}",
-                    fertig=int(time.time()))
+                    fertig=int(time.time()),
+                    messwerte={"spec_zeichen": len((job or {}).get("spec", "")),
+                               "quelle_zeichen": 0, "riegel_zeichen": 0,
+                               "patch_zeichen": 0, "angenommen": False,
+                               "dateien_anzahl": len((job or {}).get("dateien", []))})
     finally:
         with _jobs_lock:
             _laufend.discard(job_id)

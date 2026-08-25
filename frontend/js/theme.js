@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════════
    Dark/Light-Theme – eigenstaendiger Umschalter
    ───────────────────────────────────────────────────────────────────
-   Schaltet zwischen Dunkel (Default) und Hell um, indem die Klasse
+   Schaltet zwischen Hell (Default seit 2026-08-25) und Dunkel um, indem die Klasse
    `light` auf <body> gesetzt wird. Die CSS-Dateien definieren das helle
    Farbschema unter `body.light`. Persistenz im localStorage-Schluessel
    `jarvis_theme` (seitenuebergreifend).
@@ -34,7 +34,11 @@
     }
 
     var saved = localStorage.getItem(KEY);
-    var light = saved ? (saved === 'light') : false; // Default: Dunkel
+    // Vorgabe HELL (2026-08-25): wer noch nie umgeschaltet hat, bekommt das
+    // helle Thema. Geprueft wird auf 'dark', NICHT auf 'light' – sonst waere
+    // die Vorgabe nur fuer den ersten Aufruf hell und ein gespeichertes
+    // 'light' unterschiede sich nicht mehr von 'nichts gespeichert'.
+    var light = (saved !== 'dark'); // Default: Hell
 
     function init() {
         apply(light);

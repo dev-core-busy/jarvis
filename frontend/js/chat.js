@@ -2280,9 +2280,14 @@
         try { document.dispatchEvent(new CustomEvent('jarvis:themechange', { detail: { light: light } })); } catch (e) {}
     }
 
-    // Gespeicherte Präferenz laden (seitenuebergreifender Schluessel)
+    // Gespeicherte Präferenz laden (seitenuebergreifender Schluessel).
+    // Vorgabe HELL (2026-08-25): nur ein ausdrueckliches 'dark' schaltet um.
+    // applyTheme wird IMMER gerufen, auch fuer Dunkel – es setzt neben der
+    // Klasse auch die Sonne/Mond-Symbole; wuerde es im Dunkel-Fall
+    // uebersprungen, zeigten die Symbole den Stand des HTML-Markups statt
+    // den tatsaechlichen.
     const savedTheme = localStorage.getItem('jarvis_theme');
-    if (savedTheme === 'light') applyTheme(true);
+    applyTheme(savedTheme !== 'dark');
 
     // Beide Theme-Buttons registrieren
     ['btn-theme', 'btn-theme-login'].forEach(id => {

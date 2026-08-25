@@ -56,7 +56,7 @@
     </style>
 </head>
 <body>
-<script>try{if(localStorage.getItem('jarvis_theme')==='light')document.body.classList.add('light');}catch(e){}</script>
+<script>try{if(localStorage.getItem('jarvis_theme')!=='dark')document.body.classList.add('light');}catch(e){}</script>
     <div class="sa-topbar">
         <div class="sa-logo">J</div>
         <div class="sa-title"><span class="brand-app-name">Jarvis</span> · Support-Agent</div>
@@ -148,7 +148,7 @@
 
     <script src="/static/js/icons.js?v=1"></script>
     <script src="/static/js/cpubar.js?v=1"></script>
-    <script src="/static/js/theme.js?v=2"></script>
+    <script src="/static/js/theme.js?v=3"></script>
     <script src="/static/js/branding.js?v=24"></script>
     <script>if (window.refreshBranding) { try { window.refreshBranding(); } catch (e) {} }</script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->

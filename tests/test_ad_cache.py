@@ -72,10 +72,10 @@ _baum = ast.parse(MAIN_SRC)
 _holen = {}
 for n in _baum.body:
     if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in (
-            "_load_ad_caches", "_save_ad_caches", "_norm_login"):
+            "_load_ad_caches", "_save_ad_caches", "_norm_login", "_touch_ad_caches"):
         _holen[n.name] = "".join(MAIN_LINES[n.lineno - 1:n.end_lineno])
 
-for _p in ("_load_ad_caches", "_save_ad_caches", "_norm_login"):
+for _p in ("_load_ad_caches", "_save_ad_caches", "_norm_login", "_touch_ad_caches"):
     if _p not in _holen:
         print(f"ABBRUCH: {_p} nicht in main.py gefunden")
         sys.exit(2)
@@ -87,6 +87,8 @@ _ns = {
     "_AD_CACHE_TTL": 86400.0,
     "_AD_CACHE_MIN_INTERVAL": 5.0,
     "_ad_cache_last_write": 0.0,
+    "_AD_CACHE_TOUCH_INTERVAL": 300.0,
+    "_ad_cache_last_touch": 0.0,
     "_user_group_dns_cache": {}, "_knowledge_editor_cache": {},
     "_internet_access_cache": {}, "_admin_access_cache": {},
     "_ad_seen_users": {},
@@ -109,6 +111,7 @@ def leeren():
               "_internet_access_cache", "_admin_access_cache", "_ad_seen_users"):
         _ns[k].clear()
     _ns["_ad_cache_last_write"] = 0.0
+    _ns["_ad_cache_last_touch"] = 0.0
 
 
 DN = "CN=DP-AI,OU=Gruppen,DC=nexus,DC=int"
@@ -303,6 +306,85 @@ pruefe("profile.pulldown_locked" in PS, "eigener Tooltip fuer den gesperrten Fal
 I18N = (ROOT / "frontend" / "js" / "i18n.js").read_text(encoding="utf-8")
 pruefe(I18N.count("'profile.pulldown_locked'") == 2,
        "i18n-Schluessel in DE und EN vorhanden")
+
+# ═════════════════════════════════════════════════════════════════════════════
+abschnitt("7. Der Zeitstempel altert nicht mehr im laufenden Betrieb (2026-08-25)")
+
+# GEMELDET: "die Kachel Wissen wird oft nicht angezeigt, dann hilft nur logout
+# und wieder login". Ursache dahinter: `_save_ad_caches` wurde AUSSCHLIESSLICH
+# beim Login und bei der Revalidierung gerufen. Ein Benutzer bleibt aber bis zu
+# 30 Tage angemeldet (Token-Lebensdauer) – `_ad_seen_users` wird pro Request im
+# RAM aufgefrischt, die DATEI nie. Ihr Eintrag altert, `_load_ad_caches`
+# verwirft ihn nach 24 h, und weil nur der Login die Caches fuellt, ist er der
+# einzige Ausweg.
+touch = _ns["_touch_ad_caches"]
+
+
+def datei_ts():
+    """Zeitstempel des Eintrags, wie er auf Platte steht (nicht die mtime:
+    zwei Schreibvorgaenge im selben Millisekunden-Tick sind daran nicht zu
+    unterscheiden – Lehre aus tests/test_user_sessions.py)."""
+    roh = json.loads(_ns["_AD_CACHE_FILE"].read_text(encoding="utf-8"))
+    return roh["users"]["andreas.bender"]["ts"]
+
+
+# ── Der gemeldete Fall, Ende zu Ende ─────────────────────────────────────────
+# OHNE Auffrischung: Login vor 25 h, seitdem durchgehend gearbeitet, kein
+# Neu-Login. Die Datei traegt den alten Zeitstempel.
+leeren()
+_alt = time.time() - 25 * 3600
+_ns["_AD_CACHE_FILE"].write_text(json.dumps({"users": {"andreas.bender": {
+    "ts": _alt, "group_dns": [DN], "kb_editor": True,
+    "internet": True, "admin": False}}}), encoding="utf-8")
+laden()   # = Dienst-Neustart
+pruefe(_ns["_knowledge_editor_cache"] == {},
+       "ALT: nach 25 h ohne Neu-Login ist das Wissens-Recht beim Neustart weg "
+       "(genau das gemeldete Bild)")
+
+# MIT Auffrischung: derselbe Verlauf, aber ein Request unterwegs hat den
+# Zeitstempel durchgereicht.
+leeren()
+befuellen(ts=_alt)                       # Rechte stammen vom Login vor 25 h
+_ns["_ad_seen_users"]["andreas.bender"] = time.time()   # ... aber er arbeitet JETZT
+touch("andreas.bender")
+pruefe(_ns["_AD_CACHE_FILE"].exists() and (time.time() - datei_ts()) < 5,
+       "NEU: ein Request unterwegs frischt den Zeitstempel auf")
+leeren()
+laden()   # = Dienst-Neustart
+pruefe(_ns["_knowledge_editor_cache"].get("andreas.bender") is True,
+       "NEU: dieselbe Sitzung ueberlebt den Neustart – kein Logout/Login noetig")
+pruefe(_ns["_user_group_dns_cache"].get("andreas.bender") == [DN],
+       "NEU: auch die Gruppen-DNs (gruppenspezifische Wissens-Editoren) sind da")
+
+# ── Drosselung: der Aufruf liegt auf dem heissen Pfad ────────────────────────
+leeren()
+befuellen()
+touch("andreas.bender")
+_erster = datei_ts()
+_ns["_ad_seen_users"]["andreas.bender"] = time.time() + 999   # naechster Request
+touch("andreas.bender")
+pruefe(datei_ts() == _erster,
+       "innerhalb der Frist wird NICHT erneut geschrieben (jeder Request wuerde sonst schreiben)")
+_ns["_ad_cache_last_touch"] = time.time() - 301               # Frist abgelaufen
+touch("andreas.bender")
+pruefe(datei_ts() != _erster, "nach Ablauf der Frist wird wieder geschrieben")
+
+# ── Wer in keinem Cache steht, loest keinen Schreibvorgang aus ───────────────
+leeren()
+_ns["_AD_CACHE_FILE"].unlink(missing_ok=True)
+touch("fremder.benutzer")
+pruefe(not _ns["_AD_CACHE_FILE"].exists(),
+       "ein Benutzer ohne Cache-Eintrag schreibt nichts (es gaebe nichts zu sichern)")
+touch("")
+pruefe(not _ns["_AD_CACHE_FILE"].exists(), "leerer Name schreibt nichts")
+
+# ── Verdrahtung: ohne Aufruf im Request-Pfad ist die Funktion toter Code ─────
+_lsa = _holen_quelle = None
+for n in ast.parse(MAIN_SRC).body:
+    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == "_login_still_allowed":
+        _lsa = "".join(MAIN_LINES[n.lineno - 1:n.end_lineno])
+pruefe(_lsa is not None and "_touch_ad_caches(" in _lsa,
+       "_login_still_allowed ruft _touch_ad_caches – die Funktion haengt am Request-Pfad")
 
 # ═════════════════════════════════════════════════════════════════════════════
 try:

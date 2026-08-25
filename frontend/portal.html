@@ -412,6 +412,11 @@
          (Text kommt fertig aus /api/me). Deckende Fläche, weil sie über den
          Karten liegt – halbtransparent würde der Kartentext durchscheinen. -->
     <div id="pt-lic-banner" style="display:none;cursor:pointer;margin:0 0 16px;padding:10px 14px;border-radius:10px;border:1px solid var(--danger);background:var(--bg-secondary);color:var(--danger);font-size:0.88rem;"></div>
+    <!-- Konnte ein Bereich nicht geprüft werden (Neustart, Netzhänger, Serverfehler),
+         fehlt seine Kachel – und das sieht exakt aus wie eine fehlende Berechtigung.
+         Dieser Streifen sagt, dass der Zustand UNBEKANNT ist, und führt zurück.
+         Deckende Fläche wie beim Lizenz-Banner: er liegt über den Karten. -->
+    <div id="pt-load-banner" style="display:none;cursor:pointer;margin:0 0 16px;padding:10px 14px;border-radius:10px;border:1px solid var(--warning);background:var(--bg-secondary);color:var(--warning);font-size:0.88rem;"></div>
     <div class="pt-cards">
         <a class="pt-card" href="/chat">
             <div class="pt-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
@@ -625,7 +630,7 @@ sudo update-ca-certificates</code></pre>
 
 <script src="/static/js/icons.js?v=1"></script>
 <script src="/static/js/cpubar.js?v=1"></script>
-<script src="/static/js/i18n.js?v=175"></script>
+<script src="/static/js/i18n.js?v=176"></script>
 <script src="/static/js/theme.js?v=3"></script>
 <script src="/static/js/branding.js?v=25"></script>
 <script src="/static/js/security_incidents.js?v=30"></script>
@@ -648,22 +653,74 @@ sudo update-ca-certificates</code></pre>
     // Reihenfolge nicht von der Hebung einer spaeteren var abhaengt.
     var _ucAn = false;
 
-    fetch('/api/me', { headers: H }).then(function(r){
-        // Sicherheitsschicht: gesperrtes Konto -> Sperr-Bildschirm statt Portal.
-        // Entzogene Anmeldeberechtigung (NOT_AUTHORIZED) -> abmelden + zur Loginseite.
-        if (r.status === 403) {
-            return r.json().catch(function(){ return {}; }).then(function(e){
-                if (e && e.detail === 'ACCOUNT_BLOCKED') {
-                    if (window.SecurityIncidents) window.SecurityIncidents.fetchAndShowBlocked();
-                } else {
-                    KEYS.forEach(function(k){ localStorage.removeItem(k); });
-                    window.location.replace('/');
-                }
-                return null;
-            });
-        }
-        return r.ok ? r.json() : null;
-    }).then(function(d){
+    /* ── Sitzung beenden (eine Stelle fuer alle Aufrufer) ──────────────────
+       Tokens sind zustandslos und 30 Tage gueltig. Faellt die Berechtigung
+       serverseitig weg (401 / 403 NOT_AUTHORIZED), merkt der offene Tab davon
+       von sich aus NICHTS – er zeigt einfach ein halb leeres Portal. Deshalb
+       wird die Sitzung hier aktiv beendet, statt den Fehler zu verschlucken. */
+    var _raus = false;
+    function sitzungBeenden() {
+        if (_raus) return;            // mehrere Aufrufe laufen parallel
+        _raus = true;
+        KEYS.forEach(function(k){ try { localStorage.removeItem(k); } catch (e) {} });
+        window.location.replace('/');
+    }
+
+    /* ── Hinweis, wenn ein Bereich NICHT geprueft werden konnte ────────────
+       Eine Kachel, die wegen eines Netzfehlers oder eines Neustarts fehlt,
+       sieht exakt aus wie eine fehlende Berechtigung. Der Unterschied ist fuer
+       den Benutzer nicht erkennbar – und genau daran ist die Wissen-Kachel
+       "oft nicht da" aufgefallen. Wir behaupten deshalb nicht "kein Zugriff",
+       sondern sagen, dass wir es nicht wissen, und bieten den Weg zurueck. */
+    function ladefehlerZeigen() {
+        var b = document.getElementById('pt-load-banner');
+        if (!b || b.style.display === '') return;   // schon sichtbar
+        b.textContent = '\u26A0 ' + (window.t ? window.t('portal.load_failed')
+            : 'Einige Bereiche konnten nicht geprüft werden – hier klicken, um es erneut zu versuchen.');
+        b.style.display = '';
+        b.addEventListener('click', function(){ window.location.reload(); });
+    }
+
+    /* ── Ein Abruf, der seinen Fehlschlag NICHT verschluckt ────────────────
+       * 401 / 403 NOT_AUTHORIZED -> Sitzung beenden (wie /api/me),
+       * 403 ACCOUNT_BLOCKED      -> Sperr-Bildschirm,
+       * 5xx oder Netzfehler      -> EINMAL nachfassen (ein Deploy dauert
+         Sekunden; auf ECHT wurde in einer Woche 101x neu gestartet), danach
+         den Hinweis zeigen.
+       Rueckgabe: Promise auf die Daten oder null. `null` heisst ausdruecklich
+       "unbekannt", nicht "nicht berechtigt". */
+    function holeGeschuetzt(url, _zweiter) {
+        return fetch(url, { headers: H }).then(function(r){
+            if (r.status === 401) { sitzungBeenden(); return null; }
+            if (r.status === 403) {
+                return r.json().catch(function(){ return {}; }).then(function(e){
+                    if (e && e.detail === 'ACCOUNT_BLOCKED') {
+                        if (window.SecurityIncidents) window.SecurityIncidents.fetchAndShowBlocked();
+                    } else {
+                        sitzungBeenden();
+                    }
+                    return null;
+                });
+            }
+            if (r.ok) return r.json().catch(function(){ return null; });
+            // 5xx & Co: der Server lebt, konnte aber nicht antworten.
+            if (_zweiter) { ladefehlerZeigen(); return null; }
+            return new Promise(function(ok){ setTimeout(ok, 1500); })
+                .then(function(){ return holeGeschuetzt(url, true); });
+        }).catch(function(){
+            // Netzfehler (Dienst startet gerade neu, Verbindung weg).
+            if (_zweiter) { ladefehlerZeigen(); return null; }
+            return new Promise(function(ok){ setTimeout(ok, 1500); })
+                .then(function(){ return holeGeschuetzt(url, true); });
+        });
+    }
+
+    // Sicherheitsschicht (in holeGeschuetzt): gesperrtes Konto -> Sperr-Bildschirm,
+    // entzogene Anmeldeberechtigung (401 / 403 NOT_AUTHORIZED) -> abmelden + zur
+    // Loginseite. Der 401-Fall fehlte hier bisher und endete in `null`: der
+    // Benutzer sah ein halb leeres Portal, ohne zu erfahren, dass seine Sitzung
+    // nicht mehr gilt.
+    holeGeschuetzt('/api/me').then(function(d){
         if (!d) return;
         if (d.username) {
             var n = document.getElementById('pt-name'); if (n) n.textContent = ', ' + d.username;
@@ -735,16 +792,21 @@ sudo update-ca-certificates</code></pre>
             var apiCard = document.getElementById('pt-card-api');
             if (apiCard) apiCard.classList.remove('hidden');
         }
-    }).catch(function(){});
+    });
 
-    fetch('/api/support/status', { headers: H }).then(function(r){ return r.ok ? r.json() : null; }).then(function(d){
+    holeGeschuetzt('/api/support/status').then(function(d){
         if (d && d.active) { var c = document.getElementById('pt-card-support'); if (c) c.classList.remove('hidden'); }
-    }).catch(function(){});
+    });
 
     // Wissen-Kachel nur, wenn dem Nutzer ein Wissensbereich (Editor-Gruppe) zugewiesen ist.
-    fetch('/api/wissen/scope', { headers: H }).then(function(r){ return r.ok ? r.json() : null; }).then(function(d){
+    // GEMELDET (2026-08-25): "die Kachel Wissen wird oft nicht angezeigt, dann hilft
+    // nur logout + login". Der Abruf verschluckte JEDEN Fehlschlag – ein Neustart
+    // (101 in einer Woche auf ECHT), ein Netzhaenger oder ein entzogenes Recht sahen
+    // alle gleich aus: Kachel weg, keine Meldung. holeGeschuetzt() unterscheidet die
+    // Faelle und fasst bei einem technischen Fehler einmal nach.
+    holeGeschuetzt('/api/wissen/scope').then(function(d){
         if (d && d.ok && d.groups && d.groups.length) { var c = document.getElementById('pt-card-wissen'); if (c) c.classList.remove('hidden'); }
-    }).catch(function(){});
+    });
 
     // Ungelesen-Badge auf der Benutzerchat-Karte. Laeuft nur, wenn der Skill
     // aktiv ist (`_ucAn`, gesetzt aus permissions.userchat) – der erste Aufruf

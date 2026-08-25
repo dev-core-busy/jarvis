@@ -844,6 +844,11 @@ def _login_still_allowed(username: str) -> bool:
     # AD-Benutzer als 'aktiv' vormerken – Grundlage fuer die periodische
     # Gruppen-Revalidierung (_ad_revalidation_loop prueft nur aktive Benutzer).
     _ad_seen_users[_norm_login(username)] = time.time()
+    # Denselben Zeitstempel gedrosselt auf Platte durchreichen, damit der
+    # Datei-Eintrag nicht altert, waehrend der Benutzer durchgehend arbeitet
+    # (siehe _touch_ad_caches – ohne das faellt er nach 24 h aus dem Cache und
+    # verliert beim naechsten Neustart seine gruppenbasierten Rechte).
+    _touch_ad_caches(_norm_login(username))
     ad_srv = config.get_setting("ad_server", "")
     ad_dom = config.get_setting("ad_domain", "")
     if not (ad_srv and ad_dom):
@@ -1788,6 +1793,11 @@ _AD_CACHE_FILE = Path(__file__).parent.parent / "data" / "ad_cache.json"
 _AD_CACHE_TTL = 86400.0        # 24 h – gleiches Fenster wie `_ad_seen_users`
 _AD_CACHE_MIN_INTERVAL = 5.0   # Schreib-Drosselung (Login-Bursts)
 _ad_cache_last_write = 0.0
+# Auffrischung im LAUFENDEN Betrieb (siehe _touch_ad_caches). Bewusst gross:
+# es geht nicht um Aktualitaet der Rechte (die kommen aus Login/Revalidierung),
+# sondern nur darum, dass der Zeitstempel in der Datei nicht altert.
+_AD_CACHE_TOUCH_INTERVAL = 300.0
+_ad_cache_last_touch = 0.0
 
 
 def _load_ad_caches() -> None:
@@ -1871,6 +1881,44 @@ def _save_ad_caches(force: bool = False) -> None:
         os.replace(tmp, _AD_CACHE_FILE)   # atomar: kein halber Stand bei Absturz
     except Exception as e:  # noqa: BLE001
         print(f"[AUTH] Login-Caches nicht schreibbar: {e}", flush=True)
+
+
+def _touch_ad_caches(plain: str) -> None:
+    """Zeitstempel der Login-Caches im LAUFENDEN Betrieb auffrischen.
+
+    WARUM (gefunden 2026-08-25, gemeldet als "die Wissen-Kachel ist oft weg,
+    dann hilft nur logout + login"): `_save_ad_caches` wurde ausschliesslich
+    beim LOGIN und bei der Revalidierung gerufen. Ein Benutzer kann aber
+    30 Tage lang angemeldet bleiben (Token-Lebensdauer) und dabei durchgehend
+    arbeiten – `_ad_seen_users` wird pro Request im RAM aufgefrischt, die DATEI
+    dagegen nie. Ihr Eintrag altert also zwangslaeufig, und `_load_ad_caches`
+    verwirft beim naechsten Neustart alles, was aelter als `_AD_CACHE_TTL`
+    (24 h) ist. Danach fehlen die gruppenbasierten Rechte, und weil nur der
+    Login sie neu setzt, ist er der einzige Ausweg – genau das gemeldete Bild.
+
+    Bisher haing das allein an der Revalidierung, und die braucht ein
+    Service-Konto (`ad_bind_user`). Ohne eines – oder wenn dessen Kennwort
+    faellt, auf ECHT ist es ein PERSOENLICHES Konto – altert die Datei
+    unbemerkt weiter. Diese Funktion macht die Persistenz davon unabhaengig.
+
+    Geschrieben wird hoechstens alle `_AD_CACHE_TOUCH_INTERVAL` Sekunden und
+    NUR fuer Benutzer, die ueberhaupt in einem der Caches stehen: fuer alle
+    anderen gaebe es nichts zu sichern, und ein Schreibvorgang je Request waere
+    auf dem heissen Pfad (`_login_still_allowed` laeuft bei JEDER Anfrage).
+    """
+    global _ad_cache_last_touch
+    if not plain:
+        return
+    if not (plain in _user_group_dns_cache or plain in _knowledge_editor_cache
+            or plain in _internet_access_cache or plain in _admin_access_cache):
+        return
+    now = time.time()
+    if (now - _ad_cache_last_touch) < _AD_CACHE_TOUCH_INTERVAL:
+        return
+    _ad_cache_last_touch = now
+    # force=True: die 5-s-Drosselung von _save_ad_caches gilt den Login-Bursts,
+    # hier hat die eigene, viel groessere Frist bereits entschieden.
+    _save_ad_caches(force=True)
 
 
 def _check_internet_access_with_conn(username: str, conn, base_dn: str) -> bool:

@@ -265,22 +265,63 @@ _AUTH_MUSTER = re.compile(
     r"authentication failed|invalid username or password|"
     r"name or password is incorrect|password logon no longer possible|"
     r"user is locked|account is locked|rfc_logon_failure|logon failed|"
-    r"invalid credentials|not authorized", re.I)
+    r"invalid credentials", re.I)
+
+# ⚠ BERECHTIGUNG IST NICHT ANMELDUNG (Vorfall 2026-08-25, ECHT).
+#
+# Gemeldet: die SAP-Analyse eines Benutzers endete immer wieder mit "Ausgesetzt
+# nach fehlgeschlagenen Anmeldungen", waehrend auf dem SAP-System KEIN Fehler
+# feststellbar war und "Verbindung testen" anschliessend klaglos durchlief.
+#
+# Ursache: als Anmeldefehler galt (a) jedes HTTP 403 und (b) der Text
+# "not authorized". Beides sind AUTORISIERUNGS-Fehler: der Benutzer war
+# angemeldet, ihm fehlte nur die Berechtigung fuer diesen Service, diese Tabelle
+# oder dieses Schema. HANA meldet das als Fehler 258 "insufficient privilege:
+# Not authorized", SAP Gateway als 403 – in beiden Faellen steht auf der
+# SAP-Seite kein einziger fehlgeschlagener Logon, deshalb war die Meldung von
+# aussen nicht erklaerbar. Ein Analyselauf probiert mehrere Services/Tabellen
+# durch; drei Fehlgriffe reichen fuer den Aussetzer. Der Verbindungstest prueft
+# dagegen nur $metadata bzw. einen Trivial-SELECT – der laeuft, hebt den
+# Aussetzer auf, und der naechste Lauf setzt ihn erneut. Genau der Kreislauf.
+#
+# WARUM DAS OHNE RISIKO IST: der Aussetzer existiert allein, damit
+# ``login/fails_to_user_lock`` den SAP-Benutzer nicht sperrt. Dieser Zaehler
+# steigt nur bei einem ABGELEHNTEN LOGON (HTTP 401 / "authentication failed").
+# Ein 403 ist ein angenommener Logon – es zaehlt auf der SAP-Seite nichts hoch,
+# also darf es hier auch nichts hochzaehlen. Wir verlieren keinen Schutz, wir
+# hoeren nur auf, den falschen Fall zu zaehlen.
+#
+# Die Ausschlussliste GEWINNT gegen ``_AUTH_MUSTER`` (fail-safe in Richtung
+# "nicht zaehlen"), aber NICHT gegen HTTP 401 – das ist unzweideutig die
+# Anmeldung, egal was im Rumpf steht.
+_AUTHZ_MUSTER = re.compile(
+    r"insufficient privilege|not authorized|no authorization|"
+    r"missing authorization|authorization (check )?fail|"
+    r"keine berechtigung|nicht berechtigt|no rfc authorization", re.I)
+
+# Nur diese Status zaehlen. 403 steht bewusst NICHT hier (siehe oben).
+_AUTH_STATUS = (401,)
 
 
 def ist_anmeldefehler(fehler: Exception) -> bool:
-    """Ist das ein Anmeldefehler (zaehlt gegen den Aussetzer)?
+    """Ist das ein ANMELDE-Fehler (zaehlt gegen den Aussetzer)?
 
-    OData liefert 401/403. HANA und RFC melden ueber ``SapError(0, text)`` –
-    dort entscheidet der Text (hdbcli: "authentication failed",
-    pyrfc: "Name or password is incorrect")."""
+    Abgegrenzt gegen den BERECHTIGUNGS-Fehler, der wie einer aussieht, aber
+    keiner ist – siehe die Begruendung bei ``_AUTHZ_MUSTER``.
+
+    OData liefert 401 (HANA/RFC melden ueber ``SapError(0, text)``, dort
+    entscheidet der Text: hdbcli "authentication failed", pyrfc "Name or
+    password is incorrect")."""
+    text = str(fehler or "")
     try:
-        status = getattr(fehler, "status", 0) or 0
-        if int(status) in (401, 403):
-            return True
+        status = int(getattr(fehler, "status", 0) or 0)
     except Exception:  # noqa: BLE001
-        pass
-    return bool(_AUTH_MUSTER.search(str(fehler or "")))
+        status = 0
+    if status in _AUTH_STATUS:
+        return True
+    if _AUTHZ_MUSTER.search(text):
+        return False
+    return bool(_AUTH_MUSTER.search(text))
 
 
 def _leer(un: str) -> dict:

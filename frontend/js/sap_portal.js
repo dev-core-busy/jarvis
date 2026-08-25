@@ -693,8 +693,16 @@
                 accRenderState();
                 accMountCert();
                 if (a.ausgesetzt) {
+                    // Der GRUND gehoert dazu (Vorfall 2026-08-25): ohne ihn stand
+                    // hier nur "Kennwort pruefen", waehrend der Zugang in Wahrheit
+                    // an einer fehlenden BERECHTIGUNG gescheitert war – der Satz
+                    // schickte den Benutzer an die falsche Stelle, und den
+                    // tatsaechlichen Fehler bekam er nirgends zu sehen.
+                    var grund = a.ausgesetzt_grund || a.letzter_fehler || '';
                     accNote(T('sap.acc_suspended', 'Ausgesetzt nach fehlgeschlagenen Anmeldungen – '
-                        + 'Kennwort prüfen und „Verbindung testen" drücken.'), 'error');
+                        + 'Kennwort prüfen und „Verbindung testen" drücken.')
+                        + (grund ? ' ' + T('sap.acc_last_error', 'Letzter Fehler:') + ' ' + grund : ''),
+                        'error');
                 } else if (a.letzter_fehler) {
                     accNote(a.letzter_fehler, 'error');
                 }

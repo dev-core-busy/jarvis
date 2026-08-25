@@ -317,7 +317,6 @@ section("6. Aussetzer nach Anmeldefehlern (Schutz des SAP-Benutzers)")
 # ═══════════════════════════════════════════════════════════════════════════
 
 check(sa.ist_anmeldefehler(SapError(401, "Unauthorized")), "HTTP 401 ist ein Anmeldefehler")
-check(sa.ist_anmeldefehler(SapError(403, "Forbidden")), "HTTP 403 ist ein Anmeldefehler")
 check(sa.ist_anmeldefehler(SapError(0, "HANA-Verbindung fehlgeschlagen: authentication failed")),
       "hdbcli 'authentication failed' ist ein Anmeldefehler")
 check(sa.ist_anmeldefehler(SapError(0, "RFC_LOGON_FAILURE: Name or password is incorrect")),
@@ -328,6 +327,41 @@ check(not sa.ist_anmeldefehler(SapError(500, "Internal Server Error")),
       "HTTP 500 ist KEIN Anmeldefehler")
 check(not sa.ist_anmeldefehler(SapError(0, "certificate verify failed")),
       "Zertifikatsfehler ist KEIN Anmeldefehler")
+
+# ── Berechtigung ist NICHT Anmeldung (Vorfall 2026-08-25, ECHT) ────────────
+# Der gemeldete Kreislauf: Analyse -> "Ausgesetzt nach fehlgeschlagenen
+# Anmeldungen", auf dem SAP-System KEIN fehlgeschlagener Logon, Verbindungstest
+# laeuft. Ursache waren genau diese Faelle. Jeder einzelne darf NICHT zaehlen.
+check(not sa.ist_anmeldefehler(SapError(403, "Forbidden")),
+      "HTTP 403 ist KEIN Anmeldefehler (Logon lief durch, Berechtigung fehlt)")
+check(not sa.ist_anmeldefehler(
+          SapError(0, "(258, 'insufficient privilege: Not authorized\\n')")),
+      "HANA 258 'insufficient privilege: Not authorized' ist KEIN Anmeldefehler")
+check(not sa.ist_anmeldefehler(
+          SapError(403, "No authorization to access Service '/IWFND/SUCHE'")),
+      "Gateway 'No authorization to access Service' ist KEIN Anmeldefehler")
+check(not sa.ist_anmeldefehler(
+          SapError(0, "RFC-Aufruf RFC_READ_TABLE fehlgeschlagen: "
+                      "You are not authorized to use transaction")),
+      "RFC 'not authorized' ist KEIN Anmeldefehler")
+check(not sa.ist_anmeldefehler(SapError(0, "Keine Berechtigung fuer Tabelle BKPF")),
+      "deutsche Berechtigungsmeldung ist KEIN Anmeldefehler")
+# ...aber HTTP 401 bleibt unzweideutig die Anmeldung, egal was im Rumpf steht:
+# nur dieser Fall laesst SAPs `login/fails_to_user_lock` hochzaehlen, und genau
+# dagegen gibt es den Aussetzer.
+check(sa.ist_anmeldefehler(SapError(401, "Not authorized")),
+      "HTTP 401 zaehlt auch mit 'not authorized' im Rumpf")
+
+# Ein ganzer Analyselauf voller Berechtigungsfehler darf NICHTS aussetzen –
+# das ist der gemeldete Fall in seiner vollen Laenge.
+for _ in range(8):
+    sa.melde_fehler("carol", SapError(403, "No authorization to access Service"))
+    sa.melde_fehler("carol", SapError(0, "insufficient privilege: Not authorized"))
+_i = sa.zugang_info("carol")
+check(_i["anmeldefehler"] == 0 and not _i["ausgesetzt"],
+      "16 Berechtigungsfehler setzen den Zugang NICHT aus", _i["anmeldefehler"])
+check((_i["letzter_fehler"] or "") != "",
+      "der Fehler wird trotzdem vermerkt (sonst sieht ihn niemand)")
 
 # Netzfehler zaehlen nicht
 for _ in range(5):

@@ -54,9 +54,19 @@ def _fmt_err(e: SapError) -> str:
             _sa.merke_ergebnis(akt.get("benutzer") or "", False, str(e))
     except Exception:  # noqa: BLE001
         pass
-    if e.status in (401, 403):
-        return ("❌ Authentifizierung fehlgeschlagen (HTTP %s). Benutzer/Passwort/Token "
-                "pruefen.%s" % (e.status, zusatz))
+    if e.status == 401:
+        return ("❌ Authentifizierung fehlgeschlagen (HTTP 401). Benutzer/Passwort/Token "
+                "pruefen.%s" % zusatz)
+    if e.status == 403:
+        # 403 ist KEINE Anmeldefrage (Vorfall 2026-08-25): der Logon lief durch,
+        # es fehlt die Berechtigung. Wer hier "Passwort pruefen" schreibt,
+        # schickt Modell UND Benutzer in die falsche Richtung – auf dem
+        # SAP-System ist zu diesem Fehler kein Anmeldeversuch zu finden.
+        return ("❌ Keine Berechtigung fuer diesen Zugriff (HTTP 403). Die Anmeldung "
+                "war erfolgreich – dem SAP-Benutzer fehlt die Berechtigung fuer "
+                "diesen Service/dieses EntitySet. Nimm eine andere Quelle oder "
+                "lass die Berechtigung im SAP-System vergeben. Details: %s%s"
+                % (e, zusatz))
     if e.status == 404:
         return "❌ Nicht gefunden (HTTP 404). URL/Service/EntitySet pruefen."
     if e.status:

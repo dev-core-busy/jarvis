@@ -43,7 +43,28 @@ import time
 VORGABE_SERVER = "root@191.100.144.1"   # DEV, steht so auch in CLAUDE.md
 VORGABE_ZIEL = "/opt/jarvis"
 AGENT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "abgleich_agent.py")
-ABLAGE = "/root/.jarvis-abgleich"       # 0700, nicht /tmp (dort 1777)
+# Ablage der Helferdateien auf dem Server: im HOME des ANMELDENDEN Benutzers,
+# 0700 – bewusst nicht /tmp (dort 1777, jeder koennte mitlesen oder unterschieben).
+# ⚠ NICHT "/root" fest verdrahten (Stand bis 2026-08-25): auf ECHT meldet man
+# sich als `nxadmin` an, dort scheiterte JEDER Lauf mit "mkdir: cannot create
+# directory '/root'". Ausgerechnet der Server, auf dem Drift am teuersten ist,
+# war damit nicht pruefbar. Das HOME wird jetzt am Anfang EINMAL erfragt.
+ABLAGE_NAME = ".jarvis-abgleich"
+
+
+def ablage_pfad(server, key):
+    """Absoluter Ablagepfad im HOME des Anmeldenden.
+
+    Fail-closed: laesst sich das HOME nicht ermitteln, wird abgebrochen statt
+    auf einen geratenen Pfad auszuweichen – ein Schreibversuch in ein fremdes
+    Verzeichnis ist der schlechtere Ausgang.
+    """
+    heim = _lauf(ssh_basis(server, key) + ['printf %s "$HOME"']) \
+        .stdout.decode("utf-8", "replace").strip()
+    if not heim.startswith("/"):
+        raise SystemExit("ABBRUCH: HOME auf dem Server nicht ermittelbar "
+                         f"(Antwort: {heim!r}).")
+    return heim.rstrip("/") + "/" + ABLAGE_NAME
 
 # Dateien, die auf dem Server absichtlich anders sind. Sie hier NICHT
 # aufzufuehren waere kein Sicherheitsgewinn, sondern Rauschen, in dem der
@@ -175,17 +196,18 @@ def scp_basis(key):
 def server_lesen(server, key, ziel, dateien, praefix_liste):
     """Agent + Dateiliste hochladen, beide Auftraege ausfuehren, aufraeumen."""
     ssh = ssh_basis(server, key)
-    _lauf(ssh + ["mkdir -p %s && chmod 700 %s" % (shlex.quote(ABLAGE), shlex.quote(ABLAGE))])
+    ablage = ablage_pfad(server, key)
+    _lauf(ssh + ["mkdir -p %s && chmod 700 %s" % (shlex.quote(ablage), shlex.quote(ablage))])
     with tempfile.NamedTemporaryFile(delete=False) as tmp:
         tmp.write(b"\0".join(d.encode("utf-8", "surrogateescape") for d in dateien))
         listendatei = tmp.name
     try:
-        _lauf(scp_basis(key) + [AGENT, "%s:%s/abgleich_agent.py" % (server, ABLAGE)])
-        _lauf(scp_basis(key) + [listendatei, "%s:%s/liste.bin" % (server, ABLAGE)])
+        _lauf(scp_basis(key) + [AGENT, "%s:%s/abgleich_agent.py" % (server, ablage)])
+        _lauf(scp_basis(key) + [listendatei, "%s:%s/liste.bin" % (server, ablage)])
 
         def agent(auftrag, extra=()):
-            teile = ["python3", ABLAGE + "/abgleich_agent.py", auftrag, ziel,
-                     ABLAGE + "/liste.bin"] + list(extra)
+            teile = ["python3", ablage + "/abgleich_agent.py", auftrag, ziel,
+                     ablage + "/liste.bin"] + list(extra)
             return _lauf(ssh + [" ".join(shlex.quote(t) for t in teile)]) \
                 .stdout.decode("utf-8", "surrogateescape")
 
@@ -197,7 +219,7 @@ def server_lesen(server, key, ziel, dateien, praefix_liste):
                        pruefen=False).stdout.decode("utf-8", "replace")
     finally:
         os.unlink(listendatei)
-        _lauf(ssh + ["rm -rf %s" % shlex.quote(ABLAGE)], pruefen=False)
+        _lauf(ssh + ["rm -rf %s" % shlex.quote(ablage)], pruefen=False)
 
     hashes, kaputt = {}, []
     for zeile in roh_h.splitlines():
@@ -243,8 +265,12 @@ def nachziehen(server, key, ziel, wurzel, pfade):
     """
     ssh = ssh_basis(server, key)
     marke = time.strftime("%Y%m%d-%H%M%S")
-    sicher = "/root/abgleich-sicherung-%s" % marke
-    stapel = ABLAGE + "-neu"
+    # Auch hier das HOME des Anmeldenden statt eines festen "/root": sonst
+    # scheitert das Nachziehen bei nicht-root-Anmeldung an der Sicherung – und
+    # zwar NACHDEM der Lauf schon Drift gemeldet hat.
+    heim = ablage_pfad(server, key).rsplit("/", 1)[0]
+    sicher = "%s/abgleich-sicherung-%s" % (heim, marke)
+    stapel = "%s/%s-neu" % (heim, ABLAGE_NAME)
     _lauf(ssh + ["mkdir -p %s %s" % (shlex.quote(sicher), shlex.quote(stapel))])
     gesichert = 0
     try:

@@ -162,8 +162,21 @@ with tempfile.TemporaryDirectory() as tmp:
 # ── 7 · das Werkzeug aendert von sich aus nichts ───────────────────────────
 print("\n7 · ohne --nachziehen wird nichts geschrieben (funktional, nicht per Quelltext)")
 
-pruefe(abgleich.ABLAGE.startswith("/root/"),
-       "die Server-Ablage liegt unter /root (0700), nicht in /tmp (1777): %s" % abgleich.ABLAGE)
+# Die Ablage liegt im HOME des ANMELDENDEN Benutzers, nicht in /tmp (1777) –
+# und NICHT fest unter /root: bis 2026-08-25 stand dort "/root/.jarvis-abgleich",
+# und auf ECHT (Anmeldung als `nxadmin`) scheiterte damit JEDER Lauf mit
+# "mkdir: cannot create directory '/root'". Ausgerechnet der Server, auf dem
+# Drift am teuersten ist, war nicht pruefbar.
+pruefe(not abgleich.ABLAGE_NAME.startswith("/"),
+       "der Ablagename ist RELATIV, das HOME kommt vom Server: %s" % abgleich.ABLAGE_NAME)
+pruefe("/tmp" not in abgleich.ABLAGE_NAME,
+       "die Ablage liegt nicht in /tmp (dort 1777, jeder koennte unterschieben)")
+_quelle_ab = open(os.path.join(WURZEL, "deploy", "abgleich.py"), encoding="utf-8").read()
+_code_ab = "\n".join(z for z in _quelle_ab.splitlines() if not z.lstrip().startswith("#"))
+pruefe('"/root' not in _code_ab,
+       "kein fest verdrahtetes /root mehr im Code (bricht bei nicht-root-Anmeldung)")
+pruefe('"$HOME"' in _code_ab,
+       "das HOME wird auf dem Server erfragt statt geraten")
 
 # Der Server wird durch eine Attrappe ersetzt, die absichtlich Drift meldet.
 # So laeuft main() wirklich durch – ein Quelltext-Grep haette hier nur die

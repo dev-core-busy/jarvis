@@ -1065,6 +1065,12 @@ async def require_auth(request: Request) -> str:
     # Anmeldeberechtigung laufend pruefen: Entzug greift sofort, nicht erst beim Login.
     if not _login_still_allowed(username):
         raise HTTPException(status_code=403, detail="NOT_AUTHORIZED")
+    # Fehlen die gruppenbasierten Rollen (frischer Prozess, Benutzer war nicht
+    # im gespeicherten Cache), sie JETZT nachholen statt bis zur naechsten
+    # Revalidierung zu warten – siehe _ad_cache_nachladen_falls_noetig. Kostet
+    # im Normalfall zwei dict-Abfragen; der LDAP-Bind laeuft im Thread und
+    # haelt nur DIESE Anfrage auf, nicht den Event-Loop.
+    await _ad_cache_nachladen_falls_noetig(username)
     # Anwesenheit bzw. Handlung festhalten (siehe _note_activity).
     _note_activity(username, request)
     return username
@@ -2073,6 +2079,147 @@ def _save_revocations():
 _load_revocations()
 
 
+def _ldap_escape(wert: str) -> str:
+    """Sonderzeichen fuer einen LDAP-Suchfilter entschaerfen (RFC 4515)."""
+    return (wert.replace("\\", "\\5c").replace("*", "\\2a")
+                .replace("(", "\\28").replace(")", "\\29").replace("\x00", "\\00"))
+
+
+def _ad_rollen_aktualisieren(conn, base_dn: str, plain: str) -> tuple:
+    """memberOf lesen und die VIER Rollen-Caches dieses Benutzers setzen.
+
+    Rueckgabe ``(status, member_of)`` mit status aus:
+      ``"ok"``            – gefunden, Caches gesetzt, ``member_of`` gefuellt
+      ``"nicht_gefunden"`` – der Benutzer existiert im Verzeichnis nicht
+      ``"fehler"``        – die Suche selbst schlug fehl (Netz, Bind, Timeout)
+
+    **Die letzten beiden duerfen NICHT zusammenfallen**, auch wenn beide "keine
+    Daten" bedeuten: aus "nicht gefunden" darf der Aufrufer eine Sitzung
+    widerrufen, aus "fehler" NIE – sonst wirft ein einzelner Netzhaenger
+    Benutzer aus dem System, deren Konto voellig in Ordnung ist.
+
+    In beiden Fehlfaellen bleiben die Caches UNANGETASTET. Auf False zu setzen
+    waere der teure Fehler: das wuerde einem Benutzer sein Recht wegschreiben,
+    und weil sonst nur der Login es wieder setzt, haette er es bis zur
+    naechsten Anmeldung verloren.
+
+    EINE Stelle fuer beide Aufrufer (periodische Revalidierung UND das
+    Nachladen beim ersten Request) – zwei Fassungen liefen beim naechsten
+    Rollen-Feld auseinander, und dann hinge das Recht davon ab, welcher Weg
+    zufaellig zuerst lief.
+
+    ⚠ REIHENFOLGE IST PFLICHT: ``memberOf`` wird VOR den drei
+    ``_check_*_with_conn``-Aufrufen gelesen. Jeder von ihnen setzt mit seiner
+    eigenen ``conn.search()`` das Feld ``conn.entries`` neu – wer danach noch
+    daraus liest, bekommt das Ergebnis einer fremden Suche.
+    """
+    try:
+        conn.search(search_base=base_dn,
+                    search_filter=f"(sAMAccountName={_ldap_escape(plain)})",
+                    attributes=["memberOf"])
+    except Exception as e:  # noqa: BLE001
+        print(f"[AUTH] Rollen-Abgleich: Suche fuer '{plain}' fehlgeschlagen: {e}", flush=True)
+        return ("fehler", [])
+    if not conn.entries:
+        return ("nicht_gefunden", [])
+    member_of = list(conn.entries[0]["memberOf"].values
+                     if "memberOf" in conn.entries[0] else [])
+    _user_group_dns_cache[plain] = member_of
+    _knowledge_editor_cache[plain] = _check_knowledge_edit_permission_with_conn(
+        plain, conn, base_dn)
+    _internet_access_cache[plain] = _check_internet_access_with_conn(plain, conn, base_dn)
+    _admin_access_cache[plain] = _check_admin_with_conn(plain, conn, base_dn)
+    return ("ok", member_of)
+
+
+# ─── Rechte beim ERSTEN Request nachladen ────────────────────────────────────
+# WARUM (gemessen 2026-08-25): nach einem Neustart hat ein Benutzer seine
+# gruppenbasierten Rechte erst, wenn ihn die periodische Revalidierung erfasst –
+# und die laeuft erstmals 45 s nach dem Start, danach alle 10 Minuten, und NUR
+# fuer Benutzer, die der frische Prozess ueberhaupt kennt. Gemessen auf einem
+# Produktivsystem: nach drei von achtzehn Neustarts wurde der betroffene
+# Benutzer bis zum naechsten Neustart GAR NICHT erfasst, einmal dauerte es
+# 1194 s. In dieser Zeit fehlte ihm die Wissen-Kachel, und weil sonst nur der
+# Login die Caches fuellt, blieb ihm allein das Ab- und Anmelden.
+#
+# Statt den Benutzer hinauszuwerfen wird nachgeladen: steht er in KEINEM der
+# vier Caches, holt der erste Request seine Rollen selbst. Das Fenster geht
+# damit von "bis zu 10 Minuten oder nie" auf "einen Request".
+_AD_NACHLADE_SPERRE = 60.0        # Sekunden zwischen zwei Versuchen je Benutzer
+_ad_nachlade_versuch: dict[str, float] = {}
+
+
+def _ad_cache_fehlt(plain: str) -> bool:
+    """True, wenn dieser Benutzer in KEINEM der vier Rollen-Caches steht."""
+    return not (plain in _user_group_dns_cache or plain in _knowledge_editor_cache
+                or plain in _internet_access_cache or plain in _admin_access_cache)
+
+
+def _ad_cache_nachladen(plain: str) -> bool:
+    """Rollen EINES Benutzers per Service-Konto nachladen (blocking).
+
+    Nur ueber ``asyncio.to_thread`` aufrufen: der LDAP-Bind geht ueber das Netz
+    und haette im Event-Loop alle anderen Anfragen mit angehalten.
+    """
+    from backend import ldap_directory
+    try:
+        conn, base_dn = ldap_directory._bind()
+    except Exception as e:  # noqa: BLE001
+        print(f"[AUTH] Rechte-Nachladen fuer '{plain}': Service-Bind fehlgeschlagen: {e}",
+              flush=True)
+        return False
+    try:
+        status, dns = _ad_rollen_aktualisieren(conn, base_dn, plain)
+    finally:
+        try:
+            conn.unbind()
+        except Exception:  # noqa: BLE001
+            pass
+    if status != "ok":
+        # Nicht gefunden oder Suche gescheitert -> NICHTS gesetzt (siehe
+        # _ad_rollen_aktualisieren). Die Sperre verhindert, dass jeder weitere
+        # Request denselben erfolglosen Bind wiederholt. Widerrufen wird hier
+        # ausdruecklich NICHT: das ist Sache der Revalidierung, die dafuer die
+        # Login-Freigabe kennt.
+        return False
+    _ad_seen_users.setdefault(plain, time.time())
+    _save_ad_caches(force=True)
+    print(f"[AUTH] Rechte fuer '{plain}' nachgeladen ({len(dns)} Gruppen) – "
+          f"kein Neu-Anmelden noetig", flush=True)
+    return True
+
+
+async def _ad_cache_nachladen_falls_noetig(username: str) -> None:
+    """Fehlen die Rollen dieses Benutzers, sie EINMAL nachholen.
+
+    Fail-safe in jeder Richtung: ohne Verzeichnis-Konfiguration, ohne
+    Service-Konto (ohne das ist eine Gruppen-Pruefung ohne Benutzerkennwort
+    gar nicht moeglich) oder bei einem Fehler bleibt es beim bisherigen
+    Verhalten – der Benutzer hat dann so lange keine gruppenbasierten Rechte
+    wie vorher auch, es geht nichts kaputt.
+    """
+    plain = _norm_login(username)
+    if not plain or username in ALLOWED_USERS or plain in ("jarvis", "root"):
+        return                                   # lokale Konten kennen kein AD
+    if not _ad_cache_fehlt(plain):
+        return                                   # der Normalfall, kostet nichts
+    now = time.time()
+    if (now - _ad_nachlade_versuch.get(plain, 0.0)) < _AD_NACHLADE_SPERRE:
+        return
+    if not (config.get_setting("ad_server", "") and config.get_setting("ad_domain", "")):
+        return
+    if not (config.get_setting("ad_bind_user", "") or "").strip():
+        return
+    # Die Sperre wird VOR dem Versuch gesetzt: laufen zwei Anfragen desselben
+    # Benutzers gleichzeitig an (der Portal-Aufbau macht genau das), soll nur
+    # EINE davon einen LDAP-Bind ausloesen.
+    _ad_nachlade_versuch[plain] = now
+    try:
+        await asyncio.to_thread(_ad_cache_nachladen, plain)
+    except Exception as e:  # noqa: BLE001
+        print(f"[AUTH] Rechte-Nachladen fuer '{plain}' fehlgeschlagen: {e}", flush=True)
+
+
 def _revalidate_ad_groups_once() -> dict:
     """Ein Revalidierungs-Durchlauf (blocking – via asyncio.to_thread aufrufen).
 
@@ -2106,26 +2253,15 @@ def _revalidate_ad_groups_once() -> dict:
     allowed_set = {_norm_login(u) for u in allowed_users_raw.split(",") if u.strip()}
     try:
         for plain in users:
-            safe = plain.replace("\\", "\\5c").replace("*", "\\2a").replace(
-                "(", "\\28").replace(")", "\\29").replace("\x00", "\\00")
-            try:
-                conn.search(search_base=base_dn,
-                            search_filter=f"(sAMAccountName={safe})",
-                            attributes=["memberOf"])
-            except Exception as e:  # noqa: BLE001
-                print(f"[AUTH] Revalidierung: Suche fuer '{plain}' fehlgeschlagen: {e}", flush=True)
-                continue  # fail-open pro Benutzer
+            # Rollen-Caches auffrischen (Gruppen-Aenderungen ohne Neuanmeldung).
+            # Dieselbe Funktion wie beim Nachladen eines einzelnen Benutzers –
+            # zwei Fassungen wuerden beim naechsten Rollen-Feld auseinanderlaufen.
+            status, member_of = _ad_rollen_aktualisieren(conn, base_dn, plain)
+            if status == "fehler":
+                continue        # fail-open pro Benutzer: ein Netzhaenger ist
+                                # kein Grund, jemandem die Sitzung zu entziehen
+            found = status == "ok"
             res["checked"] += 1
-            found = bool(conn.entries)
-            member_of = []
-            if found:
-                member_of = list(conn.entries[0]["memberOf"].values
-                                 if "memberOf" in conn.entries[0] else [])
-                # Rollen-Caches auffrischen (Gruppen-Aenderungen ohne Neuanmeldung)
-                _user_group_dns_cache[plain] = member_of
-                _knowledge_editor_cache[plain] = _check_knowledge_edit_permission_with_conn(plain, conn, base_dn)
-                _internet_access_cache[plain] = _check_internet_access_with_conn(plain, conn, base_dn)
-                _admin_access_cache[plain] = _check_admin_with_conn(plain, conn, base_dn)
             if (enforce_login and plain not in allowed_set
                     and (not found or not _member_of_any_group(member_of, allowed_group))):
                 _revoked_logins[plain] = int(now)

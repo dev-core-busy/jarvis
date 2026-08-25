@@ -5298,6 +5298,33 @@ async def chat_sessions_list(user: str = Depends(require_auth)):
     return JSONResponse({"ok": True, "sessions": cs.list_sessions(user)})
 
 
+@app.post("/api/chat/welcome/restore")
+async def chat_welcome_restore(user: str = Depends(require_auth)):
+    """Willkommens-Chat "Beispiel Prompts" des ANGEMELDETEN Benutzers wiederherstellen.
+
+    Der Chat wird pro Benutzer nur einmal angelegt und traegt danach einen
+    Marker, damit er nach dem Loeschen nicht von selbst wiederkommt. Genau
+    deshalb braucht es einen ausdruecklichen Weg zurueck – vorher war das
+    Loeschen endgueltig und nur ein Administrator konnte es auf dem Server
+    rueckgaengig machen.
+
+    Der Benutzer kommt AUSSCHLIESSLICH aus der Anmeldung, nie aus dem Rumpf:
+    sonst waere der Endpunkt ein Weg, in fremde Chatordner zu schreiben.
+    `restored=false` heisst "war noch da" – dann ist `session` der vorhandene
+    Chat und der Aufrufer springt nur hinein.
+    """
+    from backend import chat_sessions as cs
+    try:
+        sess, neu_angelegt = cs.restore_welcome_session(user)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    if not sess:
+        return JSONResponse(
+            {"ok": False, "error": "Beispiel-Prompts konnten nicht angelegt werden."},
+            status_code=500)
+    return JSONResponse({"ok": True, "session": sess, "restored": neu_angelegt})
+
+
 @app.post("/api/chat/sessions")
 async def chat_sessions_create(request: Request, user: str = Depends(require_auth)):
     """Neue Chat-Sitzung anlegen (optional Titel)."""

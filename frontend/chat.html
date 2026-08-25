@@ -8,7 +8,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
     <title>Jarvis Chat</title>
     <link rel="stylesheet" href="/static/css/theme.css?v=18">
-    <link rel="stylesheet" href="/static/css/chat.css?v=46">
+    <link rel="stylesheet" href="/static/css/chat.css?v=49">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=6">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=8">
@@ -81,6 +81,16 @@
             <button id="cs-collapse" class="cs-collapse" type="button" data-i18n-title="chat.collapse_history" title="Verlauf einklappen" aria-label="Verlauf einklappen">«</button>
         </div>
         <div id="cs-list" class="cs-list"></div>
+        <!-- Fuss der Verlaufsleiste: Weg zurueck zum Willkommens-Chat. Der wird pro
+             Benutzer nur EINMAL angelegt und kam nach dem Loeschen nie wieder –
+             ohne diesen Knopf konnte ihn nur ein Administrator auf dem Server
+             wiederherstellen. -->
+        <div class="cs-foot">
+            <button id="cs-welcome" class="cs-welcome" type="button"
+                    data-i18n="chat.welcome_restore"
+                    data-i18n-title="chat.welcome_restore_title"
+                    title="Willkommens-Chat mit Beispiel-Prompts wieder anzeigen">Beispiel-Prompts</button>
+        </div>
     </aside>
     <div id="chat-main" class="chat-main">
     <!-- Top Bar -->
@@ -334,7 +344,7 @@ sudo update-ca-certificates</code></pre>
 
 <script src="/static/js/icons.js?v=1"></script>
 <script src="/static/js/cpubar.js?v=1"></script>
-<script src="/static/js/i18n.js?v=173"></script>
+<script src="/static/js/i18n.js?v=174"></script>
 <script src="/static/js/tabfill.js?v=1"></script>
 <!-- Gemeinsame Chat-Helfer (escapeHtml, renderMarkdown, History, Edit-Workflow) -->
 <script src="/static/js/chatlib.js?v=16"></script>
@@ -346,7 +356,7 @@ sudo update-ca-certificates</code></pre>
 <script src="/static/js/kbgroupfilter.js?v=7"></script>
 <script src="/static/js/profile_switcher.js?v=5"></script>
 <script src="/static/js/sessions.js?v=4"></script>
-<script src="/static/js/chat.js?v=101"></script>
+<script src="/static/js/chat.js?v=102"></script>
 <!-- Interaktive Charts (```chartjs) – Chart.js lokal gevendort (CSP: kein CDN) -->
 <script src="/static/js/vendor/chart.umd.min.js?v=1"></script>
 <!-- Chart.js-Plugins (MIT). MUESSEN nach chart.umd.min.js kommen – ihre

@@ -337,6 +337,8 @@
         _initSessions();
         const _csNewBtn = $('cs-new');
         if (_csNewBtn && !_csNewBtn._wired) { _csNewBtn._wired = true; _csNewBtn.addEventListener('click', _newSession); }
+        const _csWelBtn = $('cs-welcome');
+        if (_csWelBtn && !_csWelBtn._wired) { _csWelBtn._wired = true; _csWelBtn.addEventListener('click', _restoreWelcome); }
         const _csPreBtn = $('cs-preprompt');
         if (_csPreBtn && !_csPreBtn._wired) { _csPreBtn._wired = true; _csPreBtn.addEventListener('click', _openPreprompt); }
         const _ppSave = $('btn-preprompt-save');
@@ -2060,6 +2062,37 @@
         _renderSidebar();
         await _restoreHistory();        _updateContextIndicator();
         if (typeof msgInput !== 'undefined' && msgInput) msgInput.focus();
+    }
+
+    // ── Willkommens-Chat "Beispiel Prompts" zurueckholen ─────────────────────
+    // Das Backend legt ihn pro Benutzer nur EINMAL an und merkt sich das per
+    // Marker – nach dem Loeschen kam er nie wieder. Dieser Knopf ist der
+    // ausdrueckliche Weg zurueck; ist der Chat noch da, springt er nur hinein
+    // (der Endpunkt legt dann bewusst KEINEN zweiten gleichen Namens an).
+    async function _restoreWelcome() {
+        const btn = $('cs-welcome');
+        if (btn) btn.disabled = true;
+        try {
+            const r = await fetch('/api/chat/welcome/restore', { method: 'POST', headers: _csHeaders() });
+            const d = await r.json();
+            if (!d || !d.ok || !d.session) { showToast(window.t('chat.welcome_restore_failed')); return; }
+            _persistSession();
+            // Liste frisch holen statt den einen Eintrag einzuschieben: sonst
+            // stuende die neue Sitzung an falscher Stelle (sortiert nach updated).
+            const list = await _csList();
+            if (list && list.length) _sessions = list;
+            if (!_sessions.some(x => x.id === d.session.id)) _sessions.unshift(d.session);
+            _activeSid = d.session.id;
+            try { localStorage.setItem(_sidKey(), _activeSid); } catch (e) {}
+            _renderSidebar();
+            await _restoreHistory();
+            _updateContextIndicator();
+            showToast(window.t(d.restored ? 'chat.welcome_restored' : 'chat.welcome_present'));
+        } catch (e) {
+            showToast(window.t('chat.welcome_restore_failed'));
+        } finally {
+            if (btn) btn.disabled = false;
+        }
     }
 
     // ── Persönlicher Preprompt (Zahnrad neben "+ Neuer Chat") ────────────────

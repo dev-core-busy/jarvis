@@ -161,6 +161,13 @@ def ensure_welcome_session(user: str) -> dict | None:
         if mark.exists():
             return None
         sess = create_session(user, WELCOME_TITLE)
+        # Kennzeichnung im meta.json: so findet _ist_welcome() den Chat wieder,
+        # ohne jedes Transkript lesen zu muessen (Altbestand traegt sie nicht –
+        # dafuer gibt es dort den Rueckfall ueber Titel + Transkript).
+        sd = _sess_dir(user, sess["id"])
+        m = _read_meta(sd) or {}
+        m["kind"] = "welcome"
+        _write_meta(sd, m)
         now = time.localtime()
         save_transcript(user, sess["id"], [{
             "role": "bot",
@@ -178,6 +185,72 @@ def ensure_welcome_session(user: str) -> dict | None:
             # das ist unschoen, aber kein Grund, den /chat-Aufruf scheitern zu lassen.
             pass
         return sess
+
+
+def _ist_welcome(user: str, sid: str, meta: dict | None) -> bool:
+    """True, wenn diese Sitzung der Willkommens-Chat ist.
+
+    Zwei Wege, weil der Altbestand die Kennzeichnung im meta.json noch nicht hat:
+    (1) `kind == "welcome"` im meta – seit 2026-08-25 beim Anlegen gesetzt;
+    (2) Rueckfall Titel + erster Transkript-Eintrag. Der Titel ALLEIN genuegt
+    NICHT – ein Benutzer darf einen echten Chat so nennen, und der wuerde sonst
+    als Willkommens-Chat gelten (und die Wiederherstellung stillschweigend
+    verweigern).
+    """
+    m = meta or {}
+    if m.get("kind") == "welcome":
+        return True
+    if m.get("title") != WELCOME_TITLE:
+        return False
+    tr = load_transcript(user, sid)
+    return bool(tr) and isinstance(tr[0], dict) and tr[0].get("kind") == "welcome"
+
+
+def find_welcome_session(user: str) -> dict | None:
+    """Die vorhandene Willkommens-Sitzung des Benutzers, sonst None."""
+    with _LOCK:
+        ud = _user_dir(user)
+        if not ud.is_dir():
+            return None
+        for sd in ud.iterdir():
+            if not sd.is_dir():
+                continue
+            m = _read_meta(sd)
+            sid = (m or {}).get("id")
+            if not sid or not _ist_welcome(user, sid, m):
+                continue
+            return {"id": sid, "title": m.get("title", WELCOME_TITLE),
+                    "created": m.get("created", 0), "updated": m.get("updated", 0)}
+    return None
+
+
+def restore_welcome_session(user: str) -> tuple[dict | None, bool]:
+    """Stellt den Willkommens-Chat "Beispiel Prompts" wieder her.
+
+    Rueckgabe: `(Sitzung, neu_angelegt)`. Ist er noch vorhanden, wird er
+    UNVERAENDERT zurueckgegeben – ein zweiter Eintrag gleichen Namens waere
+    Verwirrung, kein Dienst; der Aufrufer springt dann einfach hinein.
+
+    Der Marker wird nur entfernt, wenn wirklich keiner mehr da ist: er ist die
+    einzige Stelle, die "schon gehabt" festhaelt, und `ensure_welcome_session()`
+    legt ohne ihn an. Der BENUTZER kommt vom Aufrufer aus der Anmeldung, nie aus
+    einem Request-Feld – sonst waere das ein Weg, in fremde Chatordner zu
+    schreiben.
+    """
+    with _LOCK:
+        vorhanden = find_welcome_session(user)
+        if vorhanden:
+            return vorhanden, False
+        mark = _user_dir(user) / _WELCOME_MARK
+        try:
+            if mark.exists():
+                mark.unlink()
+        except Exception:  # noqa: BLE001
+            # Ohne entfernten Marker legt ensure_welcome_session() nichts an;
+            # der Aufrufer meldet das als Fehlschlag (kein stiller Erfolg).
+            pass
+        sess = ensure_welcome_session(user)
+        return sess, bool(sess)
 
 
 def rename_session(user: str, sid: str, title: str) -> dict | None:

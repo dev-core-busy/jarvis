@@ -263,6 +263,50 @@ body {
 .cs-item .cs-act.cs-del:hover { color: var(--danger); }
 .cs-empty { color: var(--text-muted); font-size: 0.82rem; padding: 8px 4px; }
 
+/* Fuss der Verlaufsleiste ("Beispiel-Prompts"). Er bleibt beim Scrollen stehen –
+   mit vielen Chats waere er sonst unerreichbar weit unten. Weil er dabei UEBER
+   den Eintraegen liegt, braucht er eine DECKENDE Flaeche: die Sidebar selbst
+   traegt --bg-glass (halbtransparent), der Text darunter schiene durch.
+   `bottom: -12px` + eigenes padding-bottom deckt das 12px-Polster der Sidebar mit
+   ab, sonst blitzt dort beim Scrollen ein Streifen der Liste hervor. Die
+   negativen Seitenraender ziehen den Fuss auf die volle Breite der Leiste.
+
+   ⚠ RAENDER HIER NICHT UEBER rgba(var(--fg-rgb), …) BAUEN. Im echten Chrome
+   gemessen: chat.css setzt in `body.light` bewusst `--fg-rgb: 255,255,255`
+   ("helle Overlays/Raender") – auf /chat ist --fg-rgb also in BEIDEN Themes
+   weiss, und damit sind --border/--border-hover aus theme.css auf der weissen
+   Flaeche des Fusses unsichtbar. Der erste Anlauf las sich im Screenshot
+   deshalb als blosse Beschriftung statt als Knopf. Richtig ist das
+   theme-bewusste --outline aus chat.css (dunkel #333355 / hell #D0D0DD). */
+.cs-foot {
+    position: sticky;
+    bottom: -12px;
+    margin-top: auto;           /* bei kurzer Liste unten stehen bleiben */
+    flex-shrink: 0;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--outline);
+    margin-left: -10px; margin-right: -10px;
+    padding: 8px 10px 12px;
+}
+.cs-welcome {
+    display: block; width: 100%;
+    padding: 7px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--outline);
+    background: rgba(var(--accent-rgb), 0.06);
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    font-family: inherit;
+    cursor: pointer;
+    transition: color .12s, border-color .12s, background .12s, opacity .12s;
+}
+.cs-welcome:hover {
+    color: var(--text-primary);
+    border-color: var(--accent);
+    background: rgba(var(--accent-rgb), 0.14);
+}
+.cs-welcome:disabled { opacity: .55; cursor: default; }
+
 /* Einklappen der Verlaufs-Sidebar (nach links) */
 .chat-sidebar { transition: flex-basis .18s ease, width .18s ease, padding .18s ease, opacity .15s ease; }
 .cs-head { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }

@@ -87,6 +87,8 @@ data/downloads/
 # ist maschinenspezifisch (Berechtigungen, Hooks), worktrees/ und *.lock ohnehin.
 .claude/*
 !.claude/skills/
+!.claude/rules/
+!.claude/hooks/
 
 # ─── Temp & Entwicklungsdateien ─────────────────────────────────────────────
 patch_main.py

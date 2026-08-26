@@ -327,6 +327,13 @@ def teil3():
         def _ohne_tool_markup(self, t):
             aufrufe.append("markup"); return t
 
+        # Seit 2026-08-26 (zweiter Teil): base64-Bilddaten im ANTWORTTEXT
+        # werden ausgelagert. Muss VOR _clean_doc_refs laufen, sonst greift die
+        # Bereinigung in den Blob. Gemeldet von ECHT als "das Bild wird nur als
+        # Zeichen angezeigt".
+        def _bilddaten_bergen(self, tool_name, t, fuer_anzeige=False):
+            aufrufe.append("bergen"); return t
+
         def _clean_doc_refs(self, t):
             aufrufe.append("clean"); return t
 
@@ -342,8 +349,8 @@ def teil3():
     s = Stub()
 
     aus = s._anzeigetext("Fertig.")
-    check(aufrufe == ["markup", "clean", "charts", "bilder"],
-          "alle vier Schritte laufen, in dieser Reihenfolge", str(aufrufe))
+    check(aufrufe == ["markup", "bergen", "clean", "charts", "bilder"],
+          "alle fuenf Schritte laufen, in dieser Reihenfolge", str(aufrufe))
     check("/api/generated/x.png" in aus, "das Bild wird nachgetragen")
 
     aufrufe.clear()

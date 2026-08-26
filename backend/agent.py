@@ -4,6 +4,7 @@ import asyncio
 import base64
 import contextlib
 import contextvars
+import hashlib
 import json
 import re
 import time
@@ -2114,8 +2115,8 @@ KRITISCH – Autonomie-Regeln:
                             _ensure_user_msg()
                             chat_history.append(types.Content(
                                 role="model",
-                                parts=[types.Part.from_text(text=retry_text)]))
-                            _conv_messages.append({"role": "assistant", "content": retry_text})
+                                parts=[types.Part.from_text(text=self._verlauf_text(retry_text))]))
+                            _conv_messages.append({"role": "assistant", "content": self._verlauf_text(retry_text)})
                             break
                     except Exception as _re:
                         _log(f"Retry fehlgeschlagen: {_re}")
@@ -2172,7 +2173,7 @@ KRITISCH – Autonomie-Regeln:
                             elif _nur_absicht:
                                 _log("Antwort war nur eine Absichtserklaerung – "
                                      "Nachschlag wird geholt.")
-                        _conv_messages.append({"role": "assistant", "content": text.strip()})
+                        _conv_messages.append({"role": "assistant", "content": self._verlauf_text(text.strip())})
                         # In der Antwort genannte Dokumente (auch /tmp-Pfade) als Chip ausliefern
                         await self._deliver_docs(ws, text, _delivered_docs, username,
                                                  since=_task_start_time, melden=True)
@@ -2204,11 +2205,11 @@ KRITISCH – Autonomie-Regeln:
                         _empty_finish = True
                         break
                     if self.LLM_PROVIDER == "google" and hasattr(response, 'raw') and response.raw and response.raw.candidates:
-                        chat_history.append(response.raw.candidates[0].content)
+                        chat_history.append(self._verlauf_content(response.raw.candidates[0].content))
                     else:
                         _resp_parts = []
                         for p in response.parts:
-                            if p.text: _resp_parts.append(types.Part.from_text(text=p.text))
+                            if p.text: _resp_parts.append(types.Part.from_text(text=self._verlauf_text(p.text)))
                         if _resp_parts:
                             chat_history.append(types.Content(role="model", parts=_resp_parts))
                     await self._send_status(ws, "✅ Aufgabe abgeschlossen")
@@ -2331,11 +2332,11 @@ KRITISCH – Autonomie-Regeln:
                 # Beim ersten Tool-Step: User-Nachricht als Anker in History einbauen
                 _ensure_user_msg()
                 if self.LLM_PROVIDER == "google":
-                    chat_history.append(response.raw.candidates[0].content)
+                    chat_history.append(self._verlauf_content(response.raw.candidates[0].content))
                 else:
                     parts = []
                     for p in response.parts:
-                        if p.text: parts.append(types.Part.from_text(text=p.text))
+                        if p.text: parts.append(types.Part.from_text(text=self._verlauf_text(p.text)))
                         if p.function_call:
                              parts.append(types.Part(function_call=types.FunctionCall(name=p.function_call.name, args=p.function_call.args)))
                     chat_history.append(types.Content(role="model", parts=parts))
@@ -2461,9 +2462,9 @@ KRITISCH – Autonomie-Regeln:
                     _ensure_user_msg()
                     chat_history.append(types.Content(
                         role="model",
-                        parts=[types.Part.from_text(text=_final_text)]
+                        parts=[types.Part.from_text(text=self._verlauf_text(_final_text))]
                     ))
-                    _conv_messages.append({"role": "assistant", "content": _final_text})
+                    _conv_messages.append({"role": "assistant", "content": self._verlauf_text(_final_text)})
                 else:
                     run_outcome = "empty"
                     if is_final_attempt:
@@ -2808,7 +2809,7 @@ KRITISCH – Autonomie-Regeln:
                     if text.strip():
                         collected_texts.append(text.strip())
                         _conv_messages.append({"role": "assistant",
-                                               "content": text.strip()})
+                                               "content": self._verlauf_text(text.strip())})
 
                 if not function_calls:
                     break
@@ -2881,12 +2882,12 @@ KRITISCH – Autonomie-Regeln:
                         function_response_parts.append(image_part)
 
                 if self.LLM_PROVIDER == "google":
-                    chat_history.append(response.raw.candidates[0].content)
+                    chat_history.append(self._verlauf_content(response.raw.candidates[0].content))
                 else:
                     parts = []
                     for p in response.parts:
                         if p.text:
-                            parts.append(types.Part.from_text(text=p.text))
+                            parts.append(types.Part.from_text(text=self._verlauf_text(p.text)))
                         if p.function_call:
                             parts.append(types.Part(function_call=types.FunctionCall(
                                 name=p.function_call.name, args=p.function_call.args)))
@@ -2969,7 +2970,7 @@ KRITISCH – Autonomie-Regeln:
                 if _final_h_text:
                     collected_texts.append(_final_h_text)
                     _conv_messages.append({"role": "assistant",
-                                           "content": _final_h_text})
+                                           "content": self._verlauf_text(_final_h_text)})
 
             # Auto-Learning (gleiche Logik wie in run_task, inkl. der Bedingung
             # auf 'memory_manage' – ohne das Werkzeug ist der Zweig ein Leerlauf.
@@ -3972,6 +3973,55 @@ KRITISCH – Autonomie-Regeln:
             print(f"[AGENT {self.agent_id}] Bild-Nachtrag fehlgeschlagen: {e}", flush=True)
             return text
 
+    def _verlauf_text(self, t: str) -> str:
+        """Modelltext fuer den LLM-VERLAUF – Bilddaten ausgelagert.
+
+        Der Anzeigepfad allein genuegt nicht: was in `chat_history` landet,
+        geht in `context.json` und damit in JEDE Folgeanfrage der Sitzung.
+        Auf ECHT gemessen (2026-08-26): ein Antworttext mit einer
+        `data:image/png;base64,`-Referenz legte **43.483 Zeichen** in den
+        Kontext – rund 12.000 Token, die von da an bei jeder weiteren Frage
+        mitgeschickt werden, ohne dass das Modell etwas damit anfangen kann.
+
+        Idempotent gegenueber dem Anzeigepfad: `_bilddaten_bergen` benennt die
+        Datei nach dem sha256 ihres Inhalts, derselbe Blob ergibt also dieselbe
+        URL und keine zweite Datei."""
+        if not t:
+            return t
+        return self._bilddaten_bergen("(verlauf)", t, fuer_anzeige=True)
+
+    def _verlauf_content(self, content):
+        """Dasselbe fuer den Google-Rohpfad, der das Antwort-Objekt des
+        Providers unveraendert in den Verlauf legt.
+
+        Gibt das Objekt **unveraendert** zurueck, wenn nichts zu bergen war –
+        so bleibt das Verhalten dort exakt wie bisher (Funktionsaufrufe und
+        alle uebrigen Part-Typen inbegriffen) und der Eingriff beschraenkt sich
+        auf den einen Fall, um den es geht. Fail-safe: bei jedem Fehler das
+        Original."""
+        try:
+            teile = list(getattr(content, "parts", None) or [])
+            if not teile:
+                return content
+            neu = []
+            geaendert = False
+            for p in teile:
+                t = getattr(p, "text", None)
+                if t:
+                    b = self._verlauf_text(t)
+                    if b != t:
+                        neu.append(types.Part.from_text(text=b))
+                        geaendert = True
+                        continue
+                neu.append(p)
+            if not geaendert:
+                return content
+            return types.Content(role=getattr(content, "role", "model") or "model",
+                                 parts=neu)
+        except Exception as e:  # noqa: BLE001
+            print(f"[AGENT {self.agent_id}] Verlaufs-Bergung uebersprungen: {e}", flush=True)
+            return content
+
     def _anzeigetext(self, text: str, mit_bildern: bool = True) -> str:
         """Die VOLLSTAENDIGE Aufbereitung eines Textes, der dem Benutzer als
         Antwort gezeigt wird – an EINER Stelle.
@@ -4001,6 +4051,14 @@ KRITISCH – Autonomie-Regeln:
         t = self._ohne_tool_markup(text or "")
         if not t.strip():
             return ""
+        # Bilddaten IM ANTWORTTEXT bergen – VOR jeder Bereinigung.
+        # Die Bergung an `_ergebnis_kappen` deckt nur den Weg ueber ein
+        # Werkzeug-ERGEBNIS ab. Gibt das Modell die Daten in seiner ANTWORT aus
+        # (weil es sie gesehen hat oder selbst zusammensetzt), lief bis
+        # 2026-08-26 nichts durch die Bergung: der rohe base64-String blieb
+        # stehen und der Benutzer sah eine Zeichenwueste statt eines Bildes –
+        # gemeldet von ECHT als "das Bild wird nur als Zeichen angezeigt".
+        t = self._bilddaten_bergen("(antworttext)", t, fuer_anzeige=True)
         t = self._clean_doc_refs(t.strip()).strip()
         t = self._expand_charts(t)
         if mit_bildern:
@@ -4229,7 +4287,8 @@ KRITISCH – Autonomie-Regeln:
         treffer.sort(key=lambda t: t[0])
         return treffer
 
-    def _bilddaten_bergen(self, tool_name: str, text: str) -> str:
+    def _bilddaten_bergen(self, tool_name: str, text: str,
+                          fuer_anzeige: bool = False) -> str:
         """Base64-Bilddaten aus einem Werkzeug-Ergebnis in eine Datei auslagern
         und durch die kurze `/api/generated/…`-URL ersetzen.
 
@@ -4285,14 +4344,32 @@ KRITISCH – Autonomie-Regeln:
                     continue          # kein Bild -> unangetastet lassen (wird gekappt wie bisher)
 
                 _IMG_DIR.mkdir(parents=True, exist_ok=True)
-                fname = f"{uuid.uuid4().hex}.{endung}"
-                (_IMG_DIR / fname).write_bytes(daten)
+                # INHALTSADRESSIERT (sha256), NICHT uuid4 – damit ist die
+                # Bergung idempotent: derselbe Blob ergibt dieselbe Datei und
+                # dieselbe URL. Das ist Pflicht, weil derselbe Antworttext
+                # ZWEIMAL durch die Bergung laeuft – einmal fuer die Anzeige,
+                # einmal fuer den LLM-Verlauf. Mit uuid4 entstuenden zwei
+                # Dateien und zwei URLs fuer ein Bild.
+                # Abwaegung zur Capability-URL: sie ist damit aus dem
+                # Bildinhalt berechenbar. Wer das Bild bereits hat, gewinnt
+                # dadurch nichts; wer es nicht hat, muesste es byte-genau
+                # raten. Nebeneffekt: dasselbe Bild wird nicht doppelt abgelegt.
+                fname = f"{hashlib.sha256(daten).hexdigest()[:32]}.{endung}"
+                ziel = _IMG_DIR / fname
+                if not ziel.exists():
+                    ziel.write_bytes(daten)
                 url = f"/api/generated/{fname}"
-                record_task_image(_IMG_DIR / fname, url)
+                record_task_image(ziel, url)
                 gebaut += 1
 
                 teile.append(text[letzte:start])
+                # ZWEI Ersatztexte, und die Unterscheidung ist nicht Kosmetik:
+                # der Text fuer das MODELL ist eine Anweisung ("gib diese Zeile
+                # aus"). Landet die im ANZEIGETEXT, liest der Benutzer eine
+                # Aufforderung an das Modell mitten in seiner Antwort. Fuer die
+                # Anzeige bleibt nur die Bildreferenz.
                 teile.append(
+                    f"![Bild]({url})" if fuer_anzeige else
                     f"[BILDDATEN AUSGELAGERT: {endung.upper()}, {len(daten) // 1024} KB. "
                     f"Base64 gehoert NICHT in deine Antwort – sie wird nicht angezeigt und "
                     f"fuellt den Kontext. Gib stattdessen GENAU diese Zeile unveraendert aus, "

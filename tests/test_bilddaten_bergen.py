@@ -102,7 +102,9 @@ AGENT_KLS = _klasse("JarvisAgent")
 if AGENT_KLS is None:
     abbruch("Klasse JarvisAgent nicht gefunden")
 
-for _m in ("_b64_endung", "_b64_bloecke", "_bilddaten_bergen", "_ergebnis_kappen"):
+_METHODEN = ("_b64_endung", "_b64_bloecke", "_bilddaten_bergen",
+             "_verlauf_text", "_verlauf_content", "_ergebnis_kappen")
+for _m in _METHODEN:
     if _methode(AGENT_KLS, _m) is None:
         abbruch(f"Methode {_m} fehlt in JarvisAgent – Fix nicht vorhanden?")
 
@@ -146,7 +148,45 @@ for _name, _obj in (("backend", _BackendStub), ("backend.tools", _ToolsPkgStub),
             setattr(_mod, _a, getattr(_obj, _a))
     sys.modules[_name] = _mod
 
-_ns = {"base64": base64, "re": re, "uuid": uuid, "print": lambda *a, **k: None}
+# Standardmodule NICHT einzeln aufzaehlen, sondern die Top-Level-Importe von
+# agent.py nachziehen. Ein fehlendes Modul (hier: hashlib) laesst die Bergung
+# still in ihr `except` laufen – der Test meldet dann "Blob steht noch im Text"
+# und man sucht den Fehler im Code statt in der Attrappe.
+_ns = {"print": lambda *a, **k: None}
+for _n in BAUM.body:
+    if isinstance(_n, ast.Import):
+        for _a in _n.names:
+            if "." in _a.name or _a.name.startswith("backend"):
+                continue
+            try:
+                _ns[_a.asname or _a.name] = __import__(_a.name)
+            except ImportError:
+                pass
+for _pflicht in ("base64", "re", "uuid", "hashlib"):
+    if _pflicht not in _ns:
+        abbruch(f"{_pflicht} wird von agent.py nicht importiert – Fix unvollstaendig?")
+
+
+class _PartStub:
+    def __init__(self, text=None):
+        self.text = text
+
+    @staticmethod
+    def from_text(text=None):
+        return _PartStub(text)
+
+
+class _ContentStub:
+    def __init__(self, role="model", parts=None):
+        self.role, self.parts = role, list(parts or [])
+
+
+class _TypesStub:
+    Part = _PartStub
+    Content = _ContentStub
+
+
+_ns["types"] = _TypesStub
 
 # Konstanten NICHT aus einer gepflegten Liste holen, sondern alle `_B64_*` aus
 # agent.py einsammeln: eine handgepflegte Liste laeuft beim naechsten neuen
@@ -165,8 +205,7 @@ for _k in _konst_namen:
     exec(_konstante(_k), _ns)
 
 _körper = "\n\n".join(
-    textwrap.indent(_segment(_methode(AGENT_KLS, m)), "    ")
-    for m in ("_b64_endung", "_b64_bloecke", "_bilddaten_bergen", "_ergebnis_kappen")
+    textwrap.indent(_segment(_methode(AGENT_KLS, m)), "    ") for m in _METHODEN
 )
 exec("class Attrappe:\n    agent_id = 'test'\n    tools_map = {}\n\n" + _körper, _ns)
 A = _ns["Attrappe"]()
@@ -451,6 +490,124 @@ for _name, _text in {
     frisch()
     _r = A._ergebnis_kappen("shell_execute", _text)
     pruef(URL_RE.search(_r) is None, f"Fehlalarm: {_name} wurde als Bild ausgelagert")
+
+# ═══════════════════════════════════════════════════════════════════════════
+print("\n14. Bilddaten im ANTWORTTEXT des Modells (gemeldet: 'nur Zeichen')")
+# Die Bergung an `_ergebnis_kappen` deckt nur den Weg ueber ein Werkzeug-
+# ERGEBNIS ab. Gibt das Modell die Daten in seiner ANTWORT aus, blieb der
+# Blob stehen – der Benutzer sah eine Zeichenwueste statt eines Bildes.
+frisch()
+antwort = f"Hier ist das Diagramm:\n\ndata:image/png;base64,{PNG_B64}\n\nViel Erfolg."
+raus = A._bilddaten_bergen("(antworttext)", antwort, fuer_anzeige=True)
+m = URL_RE.search(raus)
+pruef(m is not None, "Bilddaten im Antworttext werden nicht geborgen")
+pruef(PNG_B64[:200] not in raus, "roher base64-Blob steht noch im Anzeigetext")
+pruef(m is not None and f"![Bild](/api/generated/{m.group(1)})" in raus,
+      "keine benutzbare Markdown-Bildreferenz im Anzeigetext")
+# Der Ersatztext fuers MODELL ist eine ANWEISUNG – die darf ein Benutzer nie lesen.
+pruef("AUSGELAGERT" not in raus and "deine Antwort" not in raus,
+      "die Modell-Anweisung steht im Anzeigetext, den der Benutzer liest")
+pruef("Viel Erfolg." in raus and raus.startswith("Hier ist das Diagramm:"),
+      "umgebender Text ging verloren")
+# Gegenrichtung: im WERKZEUG-Ergebnis muss die Anweisung sehr wohl stehen
+frisch()
+fuers_modell = A._bilddaten_bergen("shell_execute", antwort)
+pruef("AUSGELAGERT" in fuers_modell,
+      "dem Modell fehlt der Hinweis, was mit den Daten passiert ist")
+
+print("\n14b. …und der Anzeigepfad ruft sie wirklich")
+_anz = _methode(AGENT_KLS, "_anzeigetext")
+if _anz is None:
+    abbruch("_anzeigetext nicht gefunden")
+_rufe = [(k.func.attr, k.lineno) for k in ast.walk(_anz)
+         if isinstance(k, ast.Call) and isinstance(k.func, ast.Attribute)]
+pruef(any(a == "_bilddaten_bergen" for a, _ in _rufe),
+      "_anzeigetext ruft die Bergung nicht – Modelltext bleibt ungeborgen")
+_b = [l for a, l in _rufe if a == "_bilddaten_bergen"]
+_c = [l for a, l in _rufe if a == "_clean_doc_refs"]
+pruef(bool(_b) and bool(_c) and min(_b) < min(_c),
+      "die Bergung steht NACH _clean_doc_refs – die Bereinigung greift dann in den Blob")
+# Und sie muss dort mit fuer_anzeige=True gerufen werden.
+_mit_flag = any(
+    k.func.attr == "_bilddaten_bergen"
+    and any(kw.arg == "fuer_anzeige" and getattr(kw.value, "value", None) is True
+            for kw in k.keywords)
+    for k in ast.walk(_anz)
+    if isinstance(k, ast.Call) and isinstance(k.func, ast.Attribute))
+pruef(_mit_flag, "_anzeigetext ruft ohne fuer_anzeige=True – die Modell-Anweisung "
+                 "landet dann im Text des Benutzers")
+
+# ═══════════════════════════════════════════════════════════════════════════
+print("\n15. Der LLM-VERLAUF bekommt ebenfalls keine Bilddaten")
+# Auf ECHT gemessen: der Blob stand nicht nur im Anzeigetext, sondern auch in
+# context.json – 43.483 Zeichen, die von da an bei JEDER Folgeanfrage der
+# Sitzung mitgeschickt werden. Der Anzeigepfad allein reicht nicht.
+frisch()
+_roh = f"Hier ist das Bild:\n\n![Drache](data:image/png;base64,{PNG_B64})"
+_verl = A._verlauf_text(_roh)
+pruef(PNG_B64[:200] not in _verl, "der Blob steht weiterhin im LLM-Verlauf")
+pruef(URL_RE.search(_verl) is not None, "im Verlauf fehlt die Bild-URL")
+pruef(len(_verl) < 500, f"Verlaufstext immer noch gross ({len(_verl)} Zeichen)")
+
+print("\n15b. Idempotent: Anzeige + Verlauf ergeben EINE Datei")
+frisch()
+_a = A._bilddaten_bergen("(antworttext)", _roh, fuer_anzeige=True)
+_b = A._verlauf_text(_roh)
+_dateien = sorted(p.name for p in IMG_DIR.iterdir()) if IMG_DIR.exists() else []
+pruef(len(_dateien) == 1,
+      f"derselbe Blob erzeugte {len(_dateien)} Dateien – mit uuid4 statt Inhalts-Hash")
+pruef(URL_RE.search(_a).group(1) == URL_RE.search(_b).group(1),
+      "Anzeige und Verlauf zeigen auf verschiedene URLs desselben Bildes")
+pruef(_dateien and len(_dateien[0].split(".")[0]) == 32,
+      "Dateiname ist kein 32-stelliger Hex – /api/generated wiese ihn mit 400 ab")
+
+print("\n15c. REGEL: kein Modelltext geht ungeborgen in den Verlauf")
+# Die Herkunft der parts-Variablen wird mitverfolgt – eine Pruefung auf die
+# Schreibweise haette die drei Stellen falsch gemeldet, an denen die Liste
+# einige Zeilen weiter oben befuellt wird.
+def _gespeiste_listen(fn):
+    raus = set()
+    for k in ast.walk(fn):
+        if isinstance(k, ast.Call) and isinstance(k.func, ast.Attribute) \
+                and k.func.attr == "append":
+            ziel = getattr(k.func.value, "id", None)
+            if ziel and any(isinstance(x, ast.Call) and isinstance(x.func, ast.Attribute)
+                            and x.func.attr in ("_verlauf_text", "_verlauf_content")
+                            for x in ast.walk(k)):
+                raus.add(ziel)
+    return raus
+
+_offen = []
+for _fn in ast.walk(BAUM):
+    if not isinstance(_fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        continue
+    _gespeist = _gespeiste_listen(_fn)
+    for _k in ast.walk(_fn):
+        if not (isinstance(_k, ast.Call) and isinstance(_k.func, ast.Attribute)
+                and _k.func.attr == "append"
+                and getattr(_k.func.value, "id", "") == "chat_history"):
+            continue
+        _d = ast.dump(_k)
+        if "model" not in _d and "candidates" not in _d:
+            continue                      # Benutzer-/Werkzeug-Turns
+        if any(isinstance(x, ast.Call) and isinstance(x.func, ast.Attribute)
+               and x.func.attr in ("_verlauf_text", "_verlauf_content")
+               for x in ast.walk(_k)):
+            continue
+        if {getattr(a, "id", None) for a in ast.walk(_k)
+                if isinstance(a, ast.Name)} & _gespeist:
+            continue
+        _offen.append(f"{_fn.name}:{_k.lineno}")
+pruef(not _offen, f"ungeborgener Modelltext geht in den Verlauf: {_offen}")
+
+# Und der Google-Rohpfad muss das Objekt unveraendert lassen, wenn nichts anliegt
+class _P:
+    def __init__(self, t=None): self.text = t
+class _C:
+    def __init__(self, parts): self.parts = parts; self.role = "model"
+_orig = _C([_P("nur Text, keine Bilddaten")])
+pruef(A._verlauf_content(_orig) is _orig,
+      "der Google-Rohpfad baut das Objekt um, obwohl nichts zu bergen war")
 
 # ═══════════════════════════════════════════════════════════════════════════
 shutil.rmtree(SANDKASTEN, ignore_errors=True)

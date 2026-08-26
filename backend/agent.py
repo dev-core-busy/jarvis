@@ -587,6 +587,13 @@ _BARE_EXTERNAL_HOST = re.compile(
     r'(?:^|\s)(?![-/.~]|' + _LOOPBACK + r'\b)'
     r'(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}\b', re.IGNORECASE)
 
+# URL eines vom Agenten erzeugten/gefundenen BILDES (generate_image, search_image).
+# Sie sieht wie ein lokaler Pfad aus, ist aber der einzige Weg, auf dem ein Bild
+# im Chat erscheint – es gibt dafuer KEINEN Download-Chip. Deshalb nimmt
+# `_clean_doc_refs` sie ausdruecklich von der Pfad-Bereinigung aus.
+_GENERATED_URL_RE = re.compile(
+    r"/api/generated/[\w.\-]+\.(?:png|jpe?g|gif|webp|bmp|svg)", re.IGNORECASE)
+
 
 def _shell_hits_internet(cmd: str) -> bool:
     """Heuristik: Greift dieser Shell-Befehl (vermutlich) ins Internet?
@@ -2055,7 +2062,11 @@ KRITISCH – Autonomie-Regeln:
                         )
                         retry_text = " ".join(p.text for p in (retry_resp.parts or []) if p.text).strip()
                         if retry_text:
-                            await self._send_status(ws, retry_text, highlight=True)
+                            # Auch dieser Notpfad braucht die volle Aufbereitung:
+                            # der Kurz-Prompt kennt weder Werkzeug-Ergebnisse noch
+                            # erzeugte Bilder (Vorfall 2026-08-26).
+                            await self._send_status(ws, self._anzeigetext(retry_text),
+                                                    highlight=True)
                             _answer_sent = True
                             # Die gelieferte Antwort MUSS in den Verlauf – vorher endete
                             # dieser Zweig mit einem nackten break: der Nutzer sah eine
@@ -2089,34 +2100,23 @@ KRITISCH – Autonomie-Regeln:
                 is_intermediate = bool(function_calls)
                 for text in text_parts:
                     if text.strip():
-                        # Reste von Tool-Syntax NIEMALS anzeigen. Der Provider
-                        # bereinigt bereits (llm.berge_tool_syntax); das hier ist
-                        # die zweite Schicht fuer Provider ohne diese Behandlung
-                        # und fuer Text, der aus einem Werkzeug-Ergebnis stammt.
-                        # Vorfall 2026-08-12: der Benutzer bekam
-                        # "</parameter></function></tool_call>" als Antwort.
+                        # Reste von Tool-Syntax NIEMALS anzeigen (Vorfall
+                        # 2026-08-12: der Benutzer bekam
+                        # "</parameter></function></tool_call>" als Antwort).
+                        # Bleibt HIER stehen, weil `text` unten auch ins
+                        # Konversationslog und in die Chip-Auslieferung geht.
                         text = self._ohne_tool_markup(text)
                         if not text.strip():
                             continue
-                        # Dokument-Links/-Pfade aus dem Anzeigetext entfernen – der Download
-                        # kommt ausschliesslich als verifizierter Chip via _deliver_docs.
-                        _display = self._clean_doc_refs(text.strip()).strip()
-                        # Diagramm-Marker erst HIER zur Chart-Spezifikation
-                        # aufloesen: der Anzeigetext (und damit der gespeicherte
-                        # Verlauf) bekommt den Block, der LLM-Kontext behaelt den
-                        # kurzen Marker. So stehen die Zahlen nie im Kontext.
-                        _display = self._expand_charts(_display)
-                        # Erzeugte Bilder deterministisch anhaengen. Ein Bild
-                        # erscheint im Chat NUR ueber die Markdown-Referenz
-                        # ![..](/api/generated/..) im Anzeigetext. Bisher hing das
-                        # daran, dass das Modell die Referenz aus dem
-                        # Werkzeug-Ergebnis WOERTLICH uebernimmt – bei einer
-                        # Delegation an eine Rolle sah der Orchestrator sie nur als
-                        # Zitat und formulierte neu ("hier ist das Bild" – ohne
-                        # Bild). Gleiche Ueberlegung wie bei _deliver_docs: der
-                        # Seitenkanal darf nicht vom Wohlwollen des Modells haengen.
-                        if not is_intermediate:
-                            _display = self._mit_bildern(_display)
+                        # Die vollstaendige Aufbereitung liegt in _anzeigetext
+                        # (Dokumentpfade weg, Diagramm-Marker aufgeloest,
+                        # erzeugte Bilder nachgetragen). EINE Quelle fuer alle
+                        # vier Ausgabestellen – bis 2026-08-26 stand die Kette
+                        # nur hier, und die Notpfade sendeten roh.
+                        #
+                        # Bilder nur am Endergebnis: ein Bild, das an einem
+                        # Zwischentext haengt, erschiene im Chat doppelt.
+                        _display = self._anzeigetext(text, mit_bildern=not is_intermediate)
                         if _display:
                             # Ein reines Selbstgespraech ("Ich werde jetzt …") ist
                             # keine Antwort. Es wird zwar angezeigt (der Benutzer
@@ -2407,7 +2407,14 @@ KRITISCH – Autonomie-Regeln:
                     )
 
                 if _final_text:
-                    await self._send_status(ws, self._expand_charts(_final_text), highlight=True)
+                    # VOLLE Aufbereitung, nicht nur die Diagramm-Marker: dieser
+                    # Pfad liefert die Endantwort nach MAX_STEPS / Endlosschleife
+                    # / "Abschluss ohne Antwort". Der Reset-Versuch sieht die
+                    # Werkzeug-Ergebnisse gar nicht mehr und kann die erzeugte
+                    # Datei bzw. das erzeugte Bild deshalb nicht nennen –
+                    # `_mit_bildern` traegt es nach (Vorfall 2026-08-26).
+                    await self._send_status(ws, self._anzeigetext(_final_text),
+                                            highlight=True)
                     _answer_sent = True
                     # _user_msg nur anhaengen, wenn es noch nicht in der History steht
                     # (kann durch Z. 668 beim ersten Tool-Call bereits drin sein) –
@@ -3926,6 +3933,41 @@ KRITISCH – Autonomie-Regeln:
             print(f"[AGENT {self.agent_id}] Bild-Nachtrag fehlgeschlagen: {e}", flush=True)
             return text
 
+    def _anzeigetext(self, text: str, mit_bildern: bool = True) -> str:
+        """Die VOLLSTAENDIGE Aufbereitung eines Textes, der dem Benutzer als
+        Antwort gezeigt wird – an EINER Stelle.
+
+        Reihenfolge ist Semantik: Tool-Syntax weg → Dokumentpfade weg (der
+        Download kommt als Chip) → Diagramm-Marker aufloesen → erzeugte Bilder
+        nachtragen. Der Bild-Nachtrag MUSS zuletzt kommen, sonst wuerde
+        `_clean_doc_refs` die gerade angehaengte Referenz gleich wieder
+        bearbeiten.
+
+        WARUM ES DIESE FUNKTION GIBT: die Schritte standen nur im Regelweg. Die
+        drei NOTPFADE (Kurz-Prompt-Neuversuch bei leerer Antwort, und die beiden
+        `_try_final`-Versuche nach MAX_STEPS / Endlosschleife / "Abschluss ohne
+        Antwort") sendeten den Modelltext ROH. Genau dort ist der Schaden am
+        groessten: der Reset-Versuch bekommt die Werkzeug-Ergebnisse gar nicht
+        mehr zu sehen, weiss also nichts von der erzeugten Datei oder dem
+        erzeugten Bild – und formuliert dann frei. Gemeldet 2026-08-26 von ECHT
+        (Orchestrierung mit Bildgenerierung): das Bild war fertig, die Antwort
+        lautete "Die Base64-codierte Bilddaten-URL war vermutlich zu lang fuer
+        die Anzeige. Hier ist das Bild als Download:" – und dahinter stand
+        nichts. `_mit_bildern` haette es angehaengt, lief auf diesem Pfad aber
+        nie.
+
+        `mit_bildern=False` fuer Zwischentexte: ein Bild, das an einem
+        Zwischenstand haengt, erschiene doppelt.
+        """
+        t = self._ohne_tool_markup(text or "")
+        if not t.strip():
+            return ""
+        t = self._clean_doc_refs(t.strip()).strip()
+        t = self._expand_charts(t)
+        if mit_bildern:
+            t = self._mit_bildern(t)
+        return t
+
     def _ohne_tool_markup(self, text: str) -> str:
         """Entfernt Reste von Tool-Aufruf-Syntax aus einem Anzeigetext.
 
@@ -3948,9 +3990,28 @@ KRITISCH – Autonomie-Regeln:
         kaputten LLM-Links (z.B. /tmp/x.pptx oder gekuerzte /api/documents-URLs).
         Markdown-Links auf Dokumente werden auf ihr Label reduziert, nackte
         Dokumentpfade entfernt.
+
+        AUSGENOMMEN sind `/api/generated/…` – die URLs von generate_image und
+        search_image. Sie sehen wie ein lokaler Bildpfad aus, sind aber das
+        GEGENTEIL: fuer sie entsteht KEIN Chip (`_deliver_docs` kennt nur
+        `/api/documents/`), die Markdown-Referenz im Anzeigetext ist der einzige
+        Weg zum Bild. Ohne die Ausnahme machte die Dokument-Link-Regel aus
+        "![Ein Hund](/api/generated/<hex>.png)" den Textrest "!Ein Hund" – das
+        Bild war weg und an seiner Stelle stand Muell (gemeldet 2026-08-26 von
+        ECHT, Orchestrierung mit Bildgenerierung).
         """
         if not text:
             return text
+        # Die generierten Bild-URLs vor JEDER Regel unten in Sicherheit bringen
+        # (Maskierung statt Ausnahme-Regeln: der Platzhalter traegt weder Slash
+        # noch Endung, damit greift auch eine kuenftig ergaenzte Regel nicht).
+        _bild_urls: list[str] = []
+
+        def _maskieren(m):
+            _bild_urls.append(m.group(0))
+            return f"\x00JVGEN{len(_bild_urls) - 1}\x00"
+
+        text = _GENERATED_URL_RE.sub(_maskieren, text)
         # Explizite Liefer-Marker komplett aus der Anzeige entfernen (die Datei
         # wird separat als Chat-Anhang ausgeliefert).
         text = re.sub(r"\[\[JARVIS_DELIVER:[^\]]*\]\]", "", text)
@@ -3990,6 +4051,11 @@ KRITISCH – Autonomie-Regeln:
         text = re.sub(r"\s+([.,;:])", r"\1", text)
         text = re.sub(r"\b(unter|in|nach|als|hier|datei)\s*([.,;:])", r"\2", text, flags=re.IGNORECASE)
         text = re.sub(r"[ \t]{2,}", " ", text)
+        # Bild-URLs zurueckholen. Nach dem Aufraeumen, damit keine der Regeln
+        # oben sie noch zu fassen bekommt.
+        if _bild_urls:
+            text = re.sub(r"\x00JVGEN(\d+)\x00",
+                          lambda m: _bild_urls[int(m.group(1))], text)
         return text
 
     # ── Ergebnisdateien: EINE Liste fuer Auslieferung UND Textbereinigung ──

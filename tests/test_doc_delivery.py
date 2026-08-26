@@ -84,6 +84,22 @@ def hole_liefer_ext() -> tuple:
     return u["_LIEFER_EXT"]
 
 
+def hole_konstante(name: str):
+    """Eine modulweite Konstante aus agent.py – ECHT, nicht abgetippt.
+
+    `_clean_doc_refs` benutzt `_GENERATED_URL_RE`. Wer die Regex hier nachbaut,
+    prueft beim naechsten Feinschliff eine andere als die laufende.
+    """
+    m = re.search(r"^%s = re\.compile\(" % re.escape(name), QUELLE, re.M)
+    if not m:
+        raise AssertionError(f"Konstante {name} nicht in agent.py gefunden")
+    i = m.start()
+    j = QUELLE.index("\n", QUELLE.index(")\n", i))
+    u = {"re": re}
+    exec(QUELLE[i:j], u)
+    return u[name]
+
+
 class DokStub:
     """Ersatz fuer backend.documents – merkt sich die Eigentuemer-Eintraege."""
 
@@ -140,6 +156,7 @@ def baue(tmpdir: Path, dok: DokStub, lauf=None):
         "_documents": dok,
         "_log": lambda *a, **k: None,
         "_lauf_tmp": lauf or LaufTmpStub(),
+        "_GENERATED_URL_RE": hole_konstante("_GENERATED_URL_RE"),
         "__file__": str(tmpdir / "backend" / "agent.py"),
     }
     exec(hole("_deliver_docs"), umg)

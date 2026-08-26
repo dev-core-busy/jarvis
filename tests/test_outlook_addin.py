@@ -452,18 +452,23 @@ pruefe(bool(m_js) and int(m_js.group(1)) >= 4,
 # ═══ 10. /email: einklappbare Karten ════════════════════════════════════════
 abschnitt("10. Einklappbare Karten in /email")
 karten = re.findall(r'<div class="em-card" data-klapp="([a-z]+)">', EMAILHTML)
-pruefe(sorted(karten) == ["acct", "addin", "log", "rules"],
-       "alle vier Karten sind klappbar: %s" % karten)
-pruefe(EMAILHTML.count('class="em-card-head"') == 4
-       and EMAILHTML.count('class="em-card-body"') == 4,
-       "jede Karte hat Kopfzeile und Koerper")
+# PFLICHT-Karten namentlich, die Zahl daraus ABGELEITET. Eine feste 4 hat beim
+# Umzug der Stile in eine eigene Karte (2026-08-26) angeschlagen, ohne dass
+# etwas kaputt war – geprueft werden soll die Eigenschaft "jede Karte ist
+# vollstaendig ausgezeichnet", nicht wie viele es gerade gibt.
+for _pflicht in ("acct", "styles", "sigs", "rules", "log", "addin"):
+    pruefe(_pflicht in karten, "Karte '%s' vorhanden" % _pflicht)
+pruefe(len(set(karten)) == len(karten), "keine Karte doppelt: %s" % karten)
+pruefe(EMAILHTML.count('class="em-card-head"') == len(karten)
+       and EMAILHTML.count('class="em-card-body"') == len(karten),
+       "jede der %d Karten hat Kopfzeile und Koerper" % len(karten))
 # Im MARKUP zaehlen, nicht im <style>-Block: seit den Feld-Erklaerungen gibt es
 # die CSS-Regel `.em-info[aria-expanded="true"]`, und die zaehlte mit.
 _markup = re.sub(r"<style>.*?</style>", "", EMAILHTML, flags=re.S)
-pruefe(_markup.count('aria-expanded="true"') == 4 and 'role="button"' in _markup
+pruefe(_markup.count('aria-expanded="true"') == len(karten) and 'role="button"' in _markup
        and 'tabindex="0"' in _markup,
-       "die Kopfzeile ist als Schalter ausgezeichnet und fokussierbar (%d)"
-       % _markup.count('aria-expanded="true"'))
+       "die Kopfzeile ist als Schalter ausgezeichnet und fokussierbar (%d von %d)"
+       % (_markup.count('aria-expanded="true"'), len(karten)))
 
 # REIHENFOLGE: Titel zuerst, Pfeil als zweites Kind. Bei `space-between` schoebe
 # die umgekehrte Reihenfolge den Titel an den rechten Rand – genau der Fehler,

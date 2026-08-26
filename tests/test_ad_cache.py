@@ -637,6 +637,121 @@ pruefe("_knowledge_editor_cache[plain] =" not in _rev,
        "... die Revalidierung setzt die Caches nicht mehr selbst")
 
 # ═════════════════════════════════════════════════════════════════════════════
+abschnitt("9. Rechte-Aenderung nimmt die Wissen-Kachel nicht mehr weg (2026-08-26)")
+# GEMELDET: "bei einer Aenderung der Rechte auf ECHT ist im Anschluss die Kachel
+# 'Wissen' bei andreas.bender wieder weg und ein logout/login ist noetig ... alle
+# anderen Kacheln sind davon nicht betroffen."
+#
+# URSACHE: `POST /api/settings` leert bei jeder Rechte-Aenderung
+# `_knowledge_editor_cache` (und `_internet_access_cache`/`_admin_access_cache`),
+# gefuellt wird der Wahrheitswert aber nur von Login und Revalidierung. Genau
+# drei Rechte haingen ALLEIN daran; alle anderen Kacheln pruefen die
+# konfigurierte Gruppe gegen `_user_group_dns_cache` und bleiben deshalb heil.
+# Auch das Nachladen half nicht: `_ad_cache_fehlt` verlangt, dass der Benutzer in
+# KEINEM der vier Caches steht – in den anderen drei stand er noch.
+
+_baum9 = ast.parse(MAIN_SRC)
+_h9 = {}
+for n in _baum9.body:
+    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in (
+            "_gruppe_trifft", "_may_edit_knowledge", "_user_has_internet_access",
+            "_user_is_admin"):
+        _h9[n.name] = "".join(MAIN_LINES[n.lineno - 1:n.end_lineno])
+for _p in ("_gruppe_trifft", "_may_edit_knowledge", "_user_has_internet_access",
+           "_user_is_admin"):
+    if _p not in _h9:
+        print(f"ABBRUCH: {_p} nicht in main.py gefunden")
+        sys.exit(2)
+
+_EINST = {}
+
+
+class _CfgStub:
+    def get_setting(self, k, d=""):
+        return _EINST.get(k, d)
+
+
+_ns9 = {
+    "config": _CfgStub(),
+    "ALLOWED_USERS": {"jarvis"},
+    "_norm_login": _ns["_norm_login"],
+    "_member_of_any_group": _ns["_member_of_any_group"],
+    "_group_cn_prefix": _ns["_group_cn_prefix"],
+    "_user_group_dns_cache": {}, "_knowledge_editor_cache": {},
+    "_internet_access_cache": {}, "_admin_access_cache": {},
+}
+exec(compile("".join(_h9.values()), "<main-teile-9>", "exec"), _ns9)  # noqa: S102
+
+darf_wissen = _ns9["_may_edit_knowledge"]
+darf_internet = _ns9["_user_has_internet_access"]
+ist_admin = _ns9["_user_is_admin"]
+
+
+def _lage9(mit_dns=True, mit_bool=True):
+    """Der Zustand auf ECHT: Freigabe ausschliesslich ueber die Gruppe."""
+    _EINST.clear()
+    _EINST.update({"ad_knowledge_editors": "", "ad_knowledge_editors_group": DN,
+                   "ad_internet_users": "", "ad_internet_group": DN,
+                   "ad_admins": "", "ad_admins_group": DN})
+    for k in ("_user_group_dns_cache", "_knowledge_editor_cache",
+              "_internet_access_cache", "_admin_access_cache"):
+        _ns9[k].clear()
+    if mit_dns:
+        _ns9["_user_group_dns_cache"]["andreas.bender"] = [DN]
+    if mit_bool:
+        _ns9["_knowledge_editor_cache"]["andreas.bender"] = True
+        _ns9["_internet_access_cache"]["andreas.bender"] = True
+        _ns9["_admin_access_cache"]["andreas.bender"] = True
+
+
+# Normalfall: alles gefuellt
+_lage9()
+pruefe(darf_wissen("nexus\\andreas.bender"), "Normalfall: darf Wissen bearbeiten")
+
+# DER GEMELDETE FALL: der Wahrheitswert ist geleert, die DNs stehen noch
+_lage9(mit_dns=True, mit_bool=False)
+pruefe(darf_wissen("nexus\\andreas.bender"),
+       "nach der Rechte-Aenderung (Wahrheitswert geleert) bleibt die Kachel – der gemeldete Fall")
+pruefe(darf_internet("nexus\\andreas.bender"),
+       "... dasselbe fuer die Internet-Freigabe (`_internet_access_cache.clear()`)")
+pruefe(ist_admin("nexus\\andreas.bender"),
+       "... und fuer den Administrator-Status (sonst wirft sich ein AD-Admin aus /settings)")
+
+# Rueckfall: keine DNs, aber ein vorberechneter Wahrheitswert
+_lage9(mit_dns=False, mit_bool=True)
+pruefe(darf_wissen("nexus\\andreas.bender"),
+       "ohne DNs traegt weiter der vorberechnete Wahrheitswert (Rueckfall bleibt)")
+
+# Beides leer -> kein Recht (fail-closed)
+_lage9(mit_dns=False, mit_bool=False)
+pruefe(not darf_wissen("nexus\\andreas.bender"),
+       "ohne beides KEIN Recht (fail-closed)")
+
+# Ein Entzug wirkt SOFORT: die Gruppenangabe wird bei jeder Anfrage neu gelesen
+_lage9(mit_dns=True, mit_bool=False)
+_EINST["ad_knowledge_editors_group"] = "CN=Andere,DC=nexus,DC=int"
+pruefe(not darf_wissen("nexus\\andreas.bender"),
+       "eine geaenderte Gruppenangabe wirkt sofort auch in die ANDERE Richtung")
+
+# Ohne jede Konfiguration ist niemand globaler Editor – auch kein Gruppenmitglied
+_lage9(mit_dns=True, mit_bool=True)
+_EINST["ad_knowledge_editors_group"] = ""
+pruefe(not darf_wissen("nexus\\andreas.bender"),
+       "leer = niemand bleibt leer = niemand")
+
+# Die Benutzerliste bleibt der zweite, unabhaengige Weg (ODER-Verknuepfung)
+_lage9(mit_dns=False, mit_bool=False)
+_EINST["ad_knowledge_editors"] = "nexus\\andreas.bender"
+pruefe(darf_wissen("nexus\\andreas.bender"), "die Benutzerliste allein genuegt weiterhin")
+
+# EINE Fassung fuer alle drei – sonst laeuft der naechste Rechte-Typ auseinander
+for _name in ("_may_edit_knowledge", "_user_has_internet_access", "_user_is_admin"):
+    pruefe("_gruppe_trifft(" in _h9[_name],
+           f"{_name} nutzt die gemeinsame Fassung `_gruppe_trifft`")
+pruefe("_user_group_dns_cache" in _h9["_gruppe_trifft"],
+       "`_gruppe_trifft` fragt wirklich die memberOf-DNs (nicht nur den Wahrheitswert)")
+
+# ═════════════════════════════════════════════════════════════════════════════
 try:
     for f in _TMP.iterdir():
         f.unlink()

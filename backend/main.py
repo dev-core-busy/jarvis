@@ -813,6 +813,40 @@ def _member_of_any_group(member_of, groups_raw: str) -> bool:
     return False
 
 
+def _gruppe_trifft(plain: str, gruppen_raw: str, boolean_cache: dict) -> bool:
+    """Ist dieser Benutzer Mitglied einer der konfigurierten AD-Gruppen?
+
+    Gefragt werden ZWEI Quellen, und die Reihenfolge ist der Sinn der Funktion:
+
+    1. die gecachten ``memberOf``-DNs (``_user_group_dns_cache``) gegen die
+       AKTUELL konfigurierten Gruppen – genau so, wie es die LLM-Profile, SAP,
+       E-Mail, Short Tracks und die gruppenspezifischen Wissens-Editoren schon
+       immer tun;
+    2. erst danach der vorberechnete Wahrheitswert (``_knowledge_editor_cache``
+       & Co.) als Rueckfall fuer Eintraege, zu denen keine DNs vorliegen.
+
+    WARUM (gemeldet 2026-08-26): drei Rechte – Wissens-Editor, Internet und
+    Administrator – haingen ALLEIN an so einem Wahrheitswert, und
+    ``POST /api/settings`` leert ihn bei jeder Rechte-Aenderung
+    (``_knowledge_editor_cache.clear()`` & Co.). Gefuellt wird er aber nur von
+    Login und Revalidierung. Ergebnis auf ECHT: nach einer Rechte-Aenderung war
+    die Wissen-Kachel weg, bis der Benutzer sich ab- und wieder anmeldete –
+    waehrend alle anderen Kacheln unberuehrt blieben, weil sie ueber die DNs
+    gehen. Auch das Nachladen (``_ad_cache_fehlt``) griff nicht: es verlangt,
+    dass der Benutzer in KEINEM der vier Caches steht, und in den anderen drei
+    stand er noch.
+
+    Ein geleerter Wahrheitswert kostet damit kein Recht mehr, und eine geaenderte
+    Gruppenangabe wirkt SOFORT in beide Richtungen: der Vergleich liest die
+    Einstellung bei jeder Anfrage neu.
+    """
+    if not plain or not gruppen_raw:
+        return False
+    if _member_of_any_group(_user_group_dns_cache.get(plain, []), gruppen_raw):
+        return True
+    return bool(boolean_cache.get(plain, False))
+
+
 def _norm_login(name: str) -> str:
     """Normalisiert einen Login ODER Listen-Eintrag auf den blossen sAMAccountName:
     entfernt Domain-Praefix (DOMAIN\\user), UPN-Suffix (user@domain) und Whitespace,
@@ -1151,7 +1185,7 @@ def _may_edit_knowledge(user: str) -> bool:
         allowed_list = {_norm_login(u) for u in editors_raw.split(",") if u.strip()}
         if plain in allowed_list:
             return True
-    if editors_group and _knowledge_editor_cache.get(plain, False):
+    if editors_group and _gruppe_trifft(plain, editors_group, _knowledge_editor_cache):
         return True
     return False
 
@@ -1996,7 +2030,7 @@ def _user_has_internet_access(user: str) -> bool:
             return True
         if not grp:
             return False
-    return _internet_access_cache.get(plain, False)
+    return _gruppe_trifft(plain, grp, _internet_access_cache)
 
 
 def _check_admin_with_conn(username: str, conn, base_dn: str) -> bool:
@@ -2357,7 +2391,7 @@ def _user_is_admin(user: str) -> bool:
             return True
         if not grp:
             return False
-    return _admin_access_cache.get(plain, False)
+    return _gruppe_trifft(plain, grp, _admin_access_cache)
 
 
 def authenticate_linux_user(username: str, password: str, details: dict | None = None) -> bool:

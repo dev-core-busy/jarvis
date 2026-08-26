@@ -183,7 +183,7 @@ const _I18N = {
         'settings.tab.excel':        'Excel',
         // ── Excel-Assistent: Portal-Kachel und Benutzerseite (/excel) ──
         'portal.card_excel':         'Excel-Assistent',
-        'portal.card_excel_desc':    'Jarvis als Aufgabenfenster in Excel: Fragen zur geöffneten Tabelle stellen und Änderungen vorschlagen lassen.',
+        'portal.card_excel_desc':    '{marke} als Aufgabenfenster in Excel: Fragen zur geöffneten Tabelle stellen und Änderungen vorschlagen lassen.',
         'xp.title':                  'Excel-Assistent',
         'xp.lead':                   'Der Assistent arbeitet <b>in Excel</b>: du öffnest ein Fenster neben deiner Tabelle, stellst dort deine Frage und bekommst eine Antwort – oder einen Änderungsvorschlag, den du vor dem Schreiben Zelle für Zelle siehst. Damit das geht, muss das Add-in einmalig in dein Excel eingebunden werden.',
         'xp.get_head':               '1. Add-in holen',
@@ -2951,7 +2951,7 @@ const _I18N = {
         'settings.tab.excel':        'Excel',
         // ── Excel assistant: portal card and user page (/excel) ──
         'portal.card_excel':         'Excel Assistant',
-        'portal.card_excel_desc':    'Jarvis as a task pane in Excel: ask about the open spreadsheet and have changes proposed.',
+        'portal.card_excel_desc':    '{marke} as a task pane in Excel: ask about the open spreadsheet and have changes proposed.',
         'xp.title':                  'Excel Assistant',
         'xp.lead':                   'The assistant works <b>inside Excel</b>: you open a pane next to your spreadsheet, ask your question there and get an answer – or a proposed change that you see cell by cell before anything is written. For that, the add-in has to be installed in your Excel once.',
         'xp.get_head':               '1. Get the add-in',

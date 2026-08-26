@@ -278,8 +278,28 @@ class EmailAntwortenTool(_Base):
             return "❌ Es fehlt der Antworttext."
         allen, entwurf = bool(kwargs.get("allen")), bool(kwargs.get("entwurf"))
 
+        # Format und Signatur kommen aus dem LAUF, nie aus den Argumenten
+        # (Schema oben: es gibt kein solches Feld, und ein Test haelt das fest).
+        # Waere es eines, koennte das Modell - und damit ein eingeschmuggelter
+        # Satz im Fremdtext - die Anschrift der Firma abwaehlen oder eine andere
+        # anhaengen. Angehaengt wird DETERMINISTISCH, das Modell sieht die
+        # Signatur nicht.
+        from backend import mail_accounts, mail_body
+        benutzer = _wer()
+        fmt = mail_accounts.format_fuer(
+            benutzer, mail_accounts.current_antwort_format.get() or "")
+        sig = mail_accounts.signatur_fuer(
+            benutzer, mail_accounts.current_antwort_signatur.get() or "")
+        rumpf_text, rumpf_html = mail_body.signatur_anhaengen(text, sig, fmt)
+        vermerk = ""
+        if sig.get("name"):
+            vermerk = " (Signatur '%s')" % sig["name"]
+        if sig.get("hinweis"):
+            vermerk += " " + sig["hinweis"]
+
         def _tun(c: MailClient):
-            return "✅ " + c.antworten(mid, text, allen=allen, entwurf=entwurf)
+            return "✅ " + c.antworten(mid, rumpf_text, allen=allen, entwurf=entwurf,
+                                       html=rumpf_html) + vermerk
         return await self._mit_client(_tun)
 
 

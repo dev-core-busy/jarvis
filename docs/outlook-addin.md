@@ -245,6 +245,94 @@ Beim Senden läuft **kein Sprachmodell mehr**: der Text geht so hinaus, wie er i
 Feld steht. Der Empfänger ergibt sich aus der beantworteten Nachricht und kann
 nicht überschrieben werden. Jeder Versand steht im **Protokoll**.
 
+### Format: HTML oder Text – und warum es kein Rich-Text gibt
+
+Bis zum 26.08.2026 ging jede Antwort als **reiner Text** hinaus. Das war kein
+Schalter, der falsch stand, sondern es gab keinen. Jetzt steht in der Vorschau
+neben den Knöpfen ein Pulldown **Format**:
+
+| Eintrag | Wirkung |
+|---|---|
+| **Vorgabe (…)** | das im Reiter *Postfach* eingestellte Format – die Beschriftung nennt es |
+| **HTML** | die Antwort wird als HTML-Mail gesendet; Absätze bleiben, die HTML-Signatur wirkt |
+| **Nur Text** | reiner Text wie bisher |
+| ~~Rich-Text~~ | steht sichtbar da, ist aber **abgeschaltet** |
+
+> **Rich-Text lässt sich nicht erzeugen, und das liegt nicht an Jarvis.**
+> Exchange kennt über EWS genau zwei Rumpf-Typen: `HTML` und `Text` (`BodyType`
+> kennt daneben nur `Best`, und das ist rein lesend). Was Outlook „Rich-Text"
+> nennt, ist außerdem gar kein RTF-Rumpf, sondern **TNEF** – der berüchtigte
+> Anhang `winmail.dat`, ein eigenes Containerformat. Der Eintrag bleibt trotzdem
+> im Pulldown stehen und nennt beim Zeigen den Grund: sonst bleibt die Frage
+> „warum fehlt Rich-Text?" unbeantwortet. Ihn wählbar zu machen und still HTML
+> daraus zu erzeugen, wäre die schlechtere Lösung – die Anzeige würde etwas
+> behaupten, das nicht passiert.
+
+Die **Vorgabe des Postfachs** steht im Reiter *Postfach* unter **Format neuer
+Antworten** (ebenso in `/email`) und gilt überall, wo nichts anderes gewählt ist –
+auch für die Antworten, die eine **Regel** automatisch schreibt. Vorgabe ist
+**Nur Text**: das ist das Verhalten von vorher, und ein Postfach, das ohne Zutun
+plötzlich HTML verschickt, wäre eine Überraschung.
+
+Aus dem Textfeld wird beim HTML-Versand nur das übersetzt, was in reinem Text
+keine Bedeutung hat: Leerzeilen werden Absätze, einfache Umbrüche werden
+Zeilenumbrüche. **Markdown wird bewusst nicht ausgewertet** – aus `**wichtig**`
+wird kein Fettdruck. Der Text ist von einem Menschen freigegeben worden; ihn
+nachträglich umzuformatieren wäre eine Änderung an etwas Freigegebenem.
+
+### Signaturen
+
+Eine Signatur ist **kein Stil**. Der Unterschied ist nicht Ordnung, sondern
+Wirkung:
+
+* Ein **Stil** ist eine Anweisung an das Sprachmodell – er geht in den Auftrag,
+  und das Modell schreibt danach.
+* Eine **Signatur** ist ein fester Text – sie wird **hinter** die fertige Antwort
+  gesetzt und läuft **nie** durch ein Sprachmodell.
+
+Das ist der ganze Grund für die Trennung: eine Signatur trägt Pflichtangaben –
+Rechtsform, Registergericht, Geschäftsführung, Umsatzsteuer-Id. Ein Modell, das
+sie „mitschreibt", formuliert sie um, und bei einer Regel liest niemand gegen.
+
+Gepflegt werden Signaturen im Reiter **Antworten** (ebenso in `/email` unter
+*Mein Postfach*), so viele wie gebraucht – etwa „Standard", „Kurz", „Englisch".
+Eine davon ist der **Standard** (Marke ●) und gilt überall, wo nichts anderes
+gewählt ist. Je Signatur gibt es zwei Felder:
+
+* **Signatur (Text)** – wird wörtlich angehängt, mit dem üblichen Trenner `-- `
+  davor.
+* **HTML-Fassung (optional)** – wirkt nur bei HTML-Antworten und erlaubt Logo,
+  Links und Farben. Fehlt sie, wird bei einer HTML-Antwort die Textfassung
+  umgesetzt; fehlt umgekehrt die Textfassung, wird für eine Text-Antwort aus dem
+  HTML eine Textfassung abgeleitet. **Eine Signatur verschwindet nie, nur weil
+  das Format nicht passt.**
+
+> **Aus der HTML-Fassung wird alles entfernt, was ausführbar wäre** – Skripte,
+> `on…`-Attribute, `javascript:`-Ziele, eingebettete Rahmen, SVG. Erlaubt bleibt,
+> was eine Signatur braucht: Text, Auszeichnung, Links, Bilder (auch als
+> eingebettetes `data:`-Bild) und einfache Tabellen. Geprüft wird beim **Senden**,
+> nicht beim Speichern – so geht auch eine vor dieser Änderung gespeicherte
+> Signatur nicht ungeprüft hinaus.
+
+Gewählt wird eine Signatur auf zwei Wegen:
+
+| Weg | Wo | Gilt für |
+|---|---|---|
+| **Pulldown** | Vorschau, neben „Senden" | genau diese Antwort |
+| **Feld an der Regel** | „Signatur" im Regel-Formular | jeden Lauf dieser Regel |
+
+Anders als beim Stil gibt es **keine Erkennung aus dem Regel-Prompt** und **kein
+„automatisch wählen"**. Beides mit Absicht: typische Signaturnamen sind
+„Standard", „Kurz", „Englisch" – Wörter, die in jedem zweiten Regeltext
+vorkommen, und ein zufälliger Treffer würde eine falsche Anschrift an eine echte
+Mail hängen. Und was fest angehängt wird, soll kein Modell aussuchen.
+
+> **Die Signatur steht nicht im Textfeld der Vorschau.** Was dort steht, kann
+> geändert werden – eine Pflichtangabe darf das nicht. Stattdessen sagt eine
+> Zeile unter den Pulldowns, welche Signatur angehängt wird („Angehängt wird die
+> Signatur ‚Standard'."), und im Protokoll steht bei jedem Versand Format und
+> Signatur.
+
 ### Was das Add-in **nicht** kann
 
 * **Postfächer über IMAP**: die Kennung, die Outlook liefert, ist eine

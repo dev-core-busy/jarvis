@@ -29,6 +29,10 @@
     var TOKEN_KEYS = ['jarvis_token', 'jarvis_chat_token', 'jarvis_uc_token'];
 
     var _status = null;      // /api/email/status
+    // Letzter Kontostand. Gebraucht wird davon nur `antwort_format` fuer die
+    // Beschriftung "Vorgabe (Nur Text)" im Format-Pulldown; `zeigeKonto` fuellt
+    // sonst nur Felder und behielt bisher nichts.
+    var _konto = null;
     var _regeln = [];
     var _bereiche = [];
     var _bereicheLang = '';  // in welcher Sprache der Katalog geholt wurde
@@ -37,6 +41,8 @@
     var _editHeim = null;    // Heimatplatz des wandernden Formulars
     var _stile = [];         // benannte Antwort-Stile des Postfachs
     var _stilEdit = null;    // welcher Stil ist offen ('neu' = neuer Stil)
+    var _signaturen = [];    // benannte Signaturen des Postfachs
+    var _sigEdit = null;     // welche Signatur ist offen ('neu' = neue)
 
     function $(id) { return document.getElementById(id); }
     function T(key, fallback) {
@@ -147,8 +153,16 @@
         setz('em-ord-gesendet', k.ordner_gesendet);
         // Das frueher hier stehende Einzelfeld ist seit 2026-08-18 eine
         // LISTE benannter Stile mit eigenen Endpunkten (siehe zeichneStile).
+        _konto = k || {};
         _stile = k.stile || [];
         zeichneStile();
+        _signaturen = k.signaturen || [];
+        zeichneSignaturen();
+        var fmt = $('em-format');
+        // Leer in der Datei heisst "keine Vorgabe" = Text. Das Pulldown kennt
+        // keinen leeren Eintrag: hier wird eine Vorgabe GESETZT, nicht von
+        // einer geerbt.
+        if (fmt) fmt.value = (k.antwort_format === 'html') ? 'html' : 'text';
         var akt = $('em-aktiv');
         // NICHT auf Falsyness pruefen: ein gespeichertes `false` muss als false
         // erscheinen, ein FEHLENDES Feld dagegen als Vorgabe true.
@@ -231,7 +245,11 @@
             aktiv: !!(($('em-aktiv') || {}).checked),
             ordner_eingang: (($('em-ord-eingang') || {}).value || '').trim(),
             ordner_entwuerfe: (($('em-ord-entwuerfe') || {}).value || '').trim(),
-            ordner_gesendet: (($('em-ord-gesendet') || {}).value || '').trim()
+            ordner_gesendet: (($('em-ord-gesendet') || {}).value || '').trim(),
+            // `antwort_format` ist ein EINZELNER Wert und darf mit - anders als
+            // die Listen `stile`/`signaturen`, die ein Formular als Ganzes
+            // senden wuerde.
+            antwort_format: ((($('em-format') || {}).value === 'html') ? 'html' : 'text')
             // KEIN `antwort_vorgabe` mehr: die Stile haengen an eigenen
             // Endpunkten. Wuerde dieses Formular das Feld mitsenden, schriebe
             // ein Klick auf "Speichern" den Text des Standardstils mit dem
@@ -473,6 +491,218 @@
             .catch(function (e2) { melde('em-stil-status', e2.message, 'fehler'); });
     }
 
+    /* ── Signaturen ───────────────────────────────────────────────────── */
+    /* Eigene Endpunkte (/api/email/signatures), gespiegelt an den Stilen.
+       Der Unterschied liegt in der WIRKUNG, nicht in der Bedienung: ein Stil
+       geht als Anweisung in den Auftrag, eine Signatur wird nach dem Lauf
+       woertlich angehaengt. Deshalb hat sie zwei Felder (Text und optional
+       HTML) und KEIN "automatisch waehlen" - was fest angehaengt wird, soll
+       kein Modell aussuchen. */
+    function zeichneSignaturen() {
+        var box = $('em-sigs-list');
+        if (!box) return;
+        sigFormularHeim();
+        if (!_signaturen.length) {
+            box.innerHTML = '<div class="em-empty">' + esc(T('mail.sigs_none',
+                'Noch keine Signatur angelegt. Antworten gehen dann ohne Signatur hinaus.')) +
+                '</div>';
+            return;
+        }
+        box.innerHTML = _signaturen.map(function (e) {
+            var vorschau = (e.text || '').replace(/\s+/g, ' ').slice(0, 110);
+            if (!vorschau && e.html) vorschau = T('mail.sig_html_only', '(nur HTML-Fassung)');
+            return '<div class="em-stil-card' + (e.standard ? ' is-std' : '') +
+                '" data-sig="' + esc(e.id) + '">' +
+                '<div class="em-stil-row"><div class="em-stil-main">' +
+                '<div class="em-stil-name">' + esc(e.name) +
+                (e.standard ? '<span class="em-stil-badge">\u25CF ' +
+                    esc(T('mail.style_default', 'Standard')) + '</span>' : '') +
+                (e.html ? '<span class="em-stil-badge">HTML</span>' : '') + '</div>' +
+                '<div class="em-stil-meta">' + (vorschau ? esc(vorschau) :
+                    esc(T('mail.sig_empty', '(kein Text hinterlegt)'))) + '</div>' +
+                '</div><div class="em-stil-acts">' +
+                (e.standard ? '' : '<button class="em-icon-btn" data-act="std" title="' +
+                    esc(T('mail.sig_make_default', 'Als Standard setzen')) + '">\u25CB</button>') +
+                '<button class="em-icon-btn" data-act="edit" title="' +
+                esc(T('common.edit', 'Bearbeiten')) + '">\u270E</button>' +
+                '<button class="em-icon-btn is-danger" data-act="del" title="' +
+                esc(T('common.delete', 'Löschen')) + '">\u2715</button>' +
+                '</div></div></div>';
+        }).join('');
+        box.querySelectorAll('.em-icon-btn').forEach(function (b) {
+            b.addEventListener('click', function () {
+                var karte = b.closest('.em-stil-card');
+                if (!karte) return;
+                var id = karte.getAttribute('data-sig');
+                var act = b.getAttribute('data-act');
+                if (act === 'edit') oeffneSigFormular(id, karte);
+                else if (act === 'del') loescheSig(id);
+                else if (act === 'std') setzeSigStandard(id);
+            });
+        });
+        if (_sigEdit && _sigEdit !== 'neu') {
+            var k = box.querySelector('.em-stil-card[data-sig="' + _sigEdit + '"]');
+            if (k) k.appendChild($('em-sig-edit'));
+        }
+    }
+
+    var _sigHeim = null;
+    function sigFormularHeim() {
+        var f = $('em-sig-edit');
+        if (!f) return;
+        if (!_sigHeim) _sigHeim = f.parentNode;
+        if (f.parentNode !== _sigHeim) _sigHeim.appendChild(f);
+    }
+
+    function schliesseSigFormular() {
+        _sigEdit = null;
+        var f = $('em-sig-edit');
+        if (!f) return;
+        sigFormularHeim();
+        f.innerHTML = '';
+        f.className = 'hidden';
+    }
+
+    function oeffneSigFormular(id, karte) {
+        var f = $('em-sig-edit');
+        if (!f) return;
+        if (_sigEdit === (id || 'neu')) { schliesseSigFormular(); return; }
+        if (!_sigHeim) _sigHeim = f.parentNode;
+        _sigEdit = id || 'neu';
+        var e = id ? (_signaturen.filter(function (x) { return x.id === id; })[0] || {}) : {};
+        var g = (_status && _status.grenzen) || {};
+        var tmax = g.sig_text_max || 4000;
+        var hmax = g.sig_html_max || 60000;
+        f.className = id ? 'em-stil-edit' : '';
+        f.innerHTML =
+            '<div class="em-field" style="margin-top:12px;"><label>'
+            + T('mail.sig_name', 'Name der Signatur') + '</label>'
+            + '<input type="text" id="em-g-name" maxlength="' + (g.sig_name_max || 60)
+            + '" placeholder="' + esc(T('mail.sig_name_ph', 'z. B. Standard, Kurz, Englisch'))
+            + '"></div>'
+            + '<div class="em-field" style="margin-top:10px;"><label>'
+            + T('mail.sig_text', 'Signatur (Text)') + '</label>'
+            + '<textarea id="em-g-text" rows="7" maxlength="' + tmax + '"></textarea>'
+            + '<span class="em-hint">' + T('mail.sig_text_hint',
+                'Wird wörtlich angehängt – die KI ändert daran nichts.')
+            + ' <span id="em-g-count"></span></span></div>'
+            + '<div class="em-field" style="margin-top:10px;"><label>'
+            + T('mail.sig_html', 'HTML-Fassung (optional)') + '</label>'
+            + '<textarea id="em-g-html" rows="6" maxlength="' + hmax + '"></textarea>'
+            + '<span class="em-hint">' + T('mail.sig_html_hint',
+                'Wirkt nur bei HTML-Antworten. Skripte werden entfernt.')
+            + ' <span id="em-g-hcount"></span></span></div>'
+            + '<div class="em-field" style="margin-top:10px;"><label>'
+            + '<input type="checkbox" id="em-g-std" style="width:auto;margin-right:8px;">'
+            + T('mail.sig_is_default', 'Als Standard verwenden, wenn nichts gewählt ist')
+            + '</label></div>'
+            + '<div class="em-row"><button class="em-btn em-btn-primary" id="em-g-save">'
+            + (id ? T('common.save', 'Speichern') : T('mail.sig_create', 'Signatur anlegen'))
+            + '</button><button class="em-btn" id="em-g-cancel">'
+            + T('common.cancel', 'Abbrechen') + '</button>'
+            + '<span class="em-status" id="em-g-status"></span></div>';
+        // Werte per `.value` setzen, NICHT in den HTML-String: ein `</textarea>`
+        // im gespeicherten HTML wuerde den Block sonst vorzeitig schliessen -
+        // und genau dieses Feld enthaelt bestimmungsgemaess Markup.
+        $('em-g-name').value = e.name || '';
+        $('em-g-text').value = e.text || '';
+        $('em-g-html').value = e.html || '';
+        $('em-g-std').checked = !!e.standard || (!id && !_signaturen.length);
+        zaehlerBinden($('em-g-text'), $('em-g-count'), tmax);
+        zaehlerBinden($('em-g-html'), $('em-g-hcount'), hmax);
+        $('em-g-save').addEventListener('click', function () { speichereSig(id); });
+        $('em-g-cancel').addEventListener('click', schliesseSigFormular);
+        if (karte) karte.appendChild(f); else sigFormularHeim();
+        $('em-g-name').focus();
+    }
+
+    function speichereSig(id) {
+        var daten = {
+            name: (($('em-g-name') || {}).value || '').trim(),
+            text: (($('em-g-text') || {}).value || ''),
+            html: (($('em-g-html') || {}).value || ''),
+            standard: !!(($('em-g-std') || {}).checked)
+        };
+        melde('em-g-status', T('common.saving', 'Speichere…'));
+        var p = id ? sende('/api/email/signatures/' + encodeURIComponent(id), 'PUT', daten)
+            : sende('/api/email/signatures', 'POST', daten);
+        return p.then(function (d) {
+            _signaturen = d.signaturen || [];
+            schliesseSigFormular();
+            zeichneSignaturen();
+            melde('em-sig-status', T('mail.sig_saved', '✓ Signatur gespeichert.'), 'ok');
+            fuelleSigWahl();
+        }).catch(function (e) { melde('em-g-status', e.message, 'fehler'); });
+    }
+
+    function setzeSigStandard(id) {
+        return sende('/api/email/signatures/' + encodeURIComponent(id), 'PUT',
+                     { standard: true })
+            .then(function (d) {
+                _signaturen = d.signaturen || [];
+                zeichneSignaturen();
+                fuelleSigWahl();
+            })
+            .catch(function (e) { melde('em-sig-status', e.message, 'fehler'); });
+    }
+
+    function loescheSig(id) {
+        var e = _signaturen.filter(function (x) { return x.id === id; })[0] || {};
+        if (!window.confirm(T('mail.sig_del_confirm',
+            'Diese Signatur wirklich löschen? Antworten ohne eigene Auswahl nehmen danach die Standard-Signatur.')
+            + '\n\n' + (e.name || ''))) return Promise.resolve();
+        return sende('/api/email/signatures/' + encodeURIComponent(id), 'DELETE')
+            .then(function (d) {
+                _signaturen = d.signaturen || [];
+                if (_sigEdit === id) schliesseSigFormular();
+                zeichneSignaturen();
+                fuelleSigWahl();
+                melde('em-sig-status', T('mail.sig_deleted', 'Signatur entfernt.'), 'ok');
+            })
+            .catch(function (e2) { melde('em-sig-status', e2.message, 'fehler'); });
+    }
+
+    /* Auswahlfeld im Regel-Formular neu befuellen (falls es offen steht). */
+    function fuelleSigWahl() {
+        var sel = $('em-f-sig');
+        if (!sel) return;
+        var alt = sel.value;
+        sel.innerHTML = sigOptionen(alt);
+    }
+
+    function sigOptionen(gewaehlt) {
+        var std = _signaturen.filter(function (e) { return e.standard; })[0];
+        var h = '<option value=""' + (gewaehlt ? '' : ' selected') + '>' + (std
+            ? esc(std.name) + ' *'
+            : esc(T('mail.sig_opt_none', 'keine Signatur'))) + '</option>';
+        h += _signaturen.filter(function (e) { return !e.standard; }).map(function (e) {
+            return '<option value="' + esc(e.id) + '"' +
+                (gewaehlt === e.id ? ' selected' : '') + '>' + esc(e.name) + '</option>';
+        }).join('');
+        if (!_signaturen.length) return h;
+        return h + '<option value="-"' + (gewaehlt === '-' ? ' selected' : '') + '>' +
+            esc(T('mail.sig_opt_off', '– ohne Signatur –')) + '</option>';
+    }
+
+    /* Format-Pulldown. Rich-Text steht drin und ist ABGESCHALTET: Exchange kann
+       ueber EWS nur HTML oder Text als BodyType setzen, und was Outlook
+       "Rich-Text" nennt, ist TNEF (winmail.dat). Weglassen liesse die Frage
+       "warum fehlt das?" unbeantwortet; waehlbar machen und HTML daraus machen
+       waere eine Behauptung. */
+    function formatOptionen(gewaehlt) {
+        var vorgabe = ((_konto || {}).antwort_format === 'html') ? 'HTML'
+            : T('mail.fmt_text', 'Nur Text');
+        return '<option value=""' + (gewaehlt ? '' : ' selected') + '>' +
+            esc(T('mail.fmt_default', 'Vorgabe') + ' (' + vorgabe + ')') + '</option>' +
+            '<option value="html"' + (gewaehlt === 'html' ? ' selected' : '') + '>HTML</option>' +
+            '<option value="text"' + (gewaehlt === 'text' ? ' selected' : '') + '>' +
+            esc(T('mail.fmt_text', 'Nur Text')) + '</option>' +
+            '<option value="richtext" disabled title="' +
+            esc(T('mail.fmt_rtf_why',
+                  'Exchange kann über EWS nur HTML oder Text setzen – Rich-Text (winmail.dat) ist nicht möglich.')) +
+            '">' + esc(T('mail.fmt_rtf', 'Rich-Text (nicht möglich)')) + '</option>';
+    }
+
     /* Auswahlfeld im Regel-Formular neu befuellen (falls es offen steht). */
     function fuelleStilWahl() {
         var sel = $('em-f-stil');
@@ -698,6 +928,19 @@
                 'Bestimmt nur den Ton. Ohne Auswahl gilt der Standard-Stil – oder der Stil, '
                 + 'den du im Prompt beim Namen nennst („Antworte im Stil ‚Förmlich‘“). '
                 + 'Eine Auswahl hier gewinnt gegen die Nennung im Prompt.') + '</span></div>'
+            // Format und Signatur DIESER Regel. Sie wirken auf jede Antwort,
+            // die die Regel automatisch schreibt - also dort, wo niemand
+            // gegenliest. Deshalb Felder und keine Prompt-Formulierung: das
+            // Modell sieht keins von beiden und kann sie nicht umstellen.
+            + '<div class="em-field" style="margin-top:12px;">'
+            + '<label>' + T('mail.fmt_pick', 'Format') + '</label>'
+            + '<select id="em-f-fmt">' + formatOptionen(r.format || '') + '</select></div>'
+            + '<div class="em-field" style="margin-top:10px;">'
+            + '<label>' + T('mail.sig_pick', 'Signatur') + '</label>'
+            + '<select id="em-f-sig">' + sigOptionen(r.signatur || '') + '</select>'
+            + '<span class="em-hint">' + T('mail.sig_rule_hint',
+                'Wird wörtlich an jede Antwort dieser Regel gehängt. Ohne Auswahl gilt die '
+                + 'Standard-Signatur.') + '</span></div>'
             + '<div class="em-field" style="margin-top:12px;">'
             + '<label>' + T('mail.f_areas', 'Werkzeuge, die diese Regel benutzen darf') + '</label>'
             + '<div class="em-tools" id="em-f-areas"></div></div>'
@@ -745,6 +988,8 @@
         $('em-f-von').value = r.von_filter || '';
         $('em-f-betreff').value = r.betreff_filter || '';
         if ($('em-f-stil')) $('em-f-stil').value = r.stil || '';
+        if ($('em-f-fmt')) $('em-f-fmt').value = r.format || '';
+        if ($('em-f-sig')) $('em-f-sig').value = r.signatur || '';
         $('em-f-unread').checked = (r.nur_ungelesen === undefined ? true : !!r.nur_ungelesen);
         $('em-f-read').checked = !!r.markiere_gelesen;
         zeichneBereichsWahl(r.bereiche || ['mail']);
@@ -821,6 +1066,8 @@
             von_filter: (($('em-f-von') || {}).value || '').trim(),
             betreff_filter: (($('em-f-betreff') || {}).value || '').trim(),
             stil: (($('em-f-stil') || {}).value || ''),
+            format: (($('em-f-fmt') || {}).value || ''),
+            signatur: (($('em-f-sig') || {}).value || ''),
             nur_ungelesen: !!(($('em-f-unread') || {}).checked),
             markiere_gelesen: !!(($('em-f-read') || {}).checked)
         };
@@ -846,7 +1093,8 @@
     // beim Oeffnen aus T()). Ohne diese beiden Helfer waere ein Klick auf DE/EN
     // mitten im Tippen Datenverlust – deshalb Stand sichern und zuruecklegen.
     var FORM_FELDER = ['em-f-name', 'em-f-ordner', 'em-f-prompt', 'em-f-intervall',
-                       'em-f-max', 'em-f-von', 'em-f-betreff', 'em-f-stil'];
+                       'em-f-max', 'em-f-von', 'em-f-betreff', 'em-f-stil',
+                       'em-f-fmt', 'em-f-sig'];
     function formularStand() {
         if (!_editId || !$('em-f-name')) return null;
         var s = { id: _editId, werte: {}, haken: {}, bereiche: [] };
@@ -1018,6 +1266,12 @@
         var stilNeu = $('em-stil-neu');
         if (stilNeu) stilNeu.addEventListener('click', function () {
             oeffneStilFormular(null, null);
+        });
+        // Eigene Variable, nicht `stilNeu` weiterverwenden: eine geteilte `var`
+        // sieht beim Klick den zuletzt zugewiesenen Wert (Register).
+        var sigNeu = $('em-sig-neu');
+        if (sigNeu) sigNeu.addEventListener('click', function () {
+            oeffneSigFormular(null, null);
         });
         if ((b = $('em-new-rule'))) b.addEventListener('click', function () {
             if (_editId === 'neu') { schliesseFormular(); return; }

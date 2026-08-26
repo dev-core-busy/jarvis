@@ -36,7 +36,7 @@ import re
 import secrets
 import time
 
-from backend import mail_accounts, mail_rules
+from backend import mail_accounts, mail_body, mail_rules
 from backend.mail_client import MailClient, MailFehler, klartext
 
 # Ein eigener Agent mit eigener Sperre – wie beim SAP-Bereich und beim Avatar.
@@ -769,6 +769,15 @@ async def _lauf_fuer_nachricht(regel: dict, n, konto, werkzeuge, actor: dict) ->
         # steht er fuer den Fall, dass ein Werkzeug ausserhalb des Dispatchs
         # laeuft (zwei Tore, beide fail-closed – wie bei der Erinnerungs-Ausnahme).
         marke = mail_accounts.current_mail_user.set(actor.get("user") or "")
+        # Format und Signatur DIESER Regel fuer die Dauer des Laufs. Das
+        # email_antworten-Werkzeug liest sie von dort und haengt die Signatur
+        # selbst an – sie ist damit auch bei einer automatischen Antwort dabei,
+        # ohne dass sie je in einen Auftrag geraet. Leer heisst "Vorgabe des
+        # Postfachs", nicht "keine".
+        marke_f = mail_accounts.current_antwort_format.set(
+            str(regel.get("format") or ""))
+        marke_s = mail_accounts.current_antwort_signatur.set(
+            str(regel.get("signatur") or ""))
         try:
             antwort = await _agent.run_task_headless(auftrag, actor=actor)
             if _kein_ergebnis(antwort):
@@ -788,10 +797,13 @@ async def _lauf_fuer_nachricht(regel: dict, n, konto, werkzeuge, actor: dict) ->
                 return (zweite or antwort)
             return antwort
         finally:
-            try:
-                mail_accounts.current_mail_user.reset(marke)
-            except Exception:  # noqa: BLE001
-                pass
+            for cv, mk in ((mail_accounts.current_mail_user, marke),
+                           (mail_accounts.current_antwort_format, marke_f),
+                           (mail_accounts.current_antwort_signatur, marke_s)):
+                try:
+                    cv.reset(mk)
+                except Exception:  # noqa: BLE001
+                    pass
             _agent._role_tools = None
 
 
@@ -1172,7 +1184,8 @@ async def antwort_vorschlag(user: str, msg_id: str, ordner: str = "",
 
 
 async def antwort_senden(user: str, msg_id: str, text: str, ordner: str = "",
-                         allen: bool = False, entwurf: bool = False) -> dict:
+                         allen: bool = False, entwurf: bool = False,
+                         fmt: str = "", signatur_id: str = "") -> dict:
     """Sendet den vom Benutzer freigegebenen Antworttext.
 
     **HIER LAEUFT KEIN SPRACHMODELL.** Der Text kommt aus dem Fenster, der
@@ -1184,11 +1197,25 @@ async def antwort_senden(user: str, msg_id: str, text: str, ordner: str = "",
     **Der Empfaenger ergibt sich aus der NACHRICHT** (``antworten()`` benutzt
     den Gespraechsfaden), nicht aus einem Feld des Aufrufs – sonst waere dieser
     Endpunkt ein Versandweg an beliebige Adressen.
+
+    ``fmt`` ist ``"html"`` oder ``"text"``; leer = Vorgabe des Postfachs
+    (``mail_accounts.format_fuer``). ``signatur_id`` waehlt eine benannte
+    Signatur, ``mail_accounts.SIG_KEINER`` heisst ausdruecklich keine, leer
+    = Standardsignatur.
+
+    ⚠ **DIE SIGNATUR WIRD HIER ANGEHAENGT, ALSO NACH dem Modell und NACH der
+    Freigabe.** Sie steht bewusst NICHT im Textfeld der Vorschau: was dort
+    steht, ist bearbeitbar, und eine Signatur traegt Pflichtangaben. Aus
+    demselben Grund geht sie nie in einen Auftrag – ein Modell, das sie
+    "mitschreibt", formuliert sie um.
     """
     inhalt = (text or "").strip()
     if not inhalt:
         raise MailFehler("Es wurde kein Text uebergeben.", "eingabe")
     inhalt = inhalt[:VORSCHLAG_MAX]
+    format_ = mail_accounts.format_fuer(user, fmt)
+    sig = mail_accounts.signatur_fuer(user, signatur_id)
+    rumpf_text, rumpf_html = mail_body.signatur_anhaengen(inhalt, sig, format_)
     konto = mail_accounts.konto_fuer(user, trotz_aussetzer=True)
     with MailClient(konto) as c:
         n = None
@@ -1197,16 +1224,26 @@ async def antwort_senden(user: str, msg_id: str, text: str, ordner: str = "",
         except MailFehler:
             pass        # nur fuer das Protokoll – das Senden haengt nicht daran
         ergebnis = await asyncio.to_thread(
-            functools.partial(c.antworten, msg_id, inhalt,
-                              allen=bool(allen), entwurf=bool(entwurf)))
+            functools.partial(c.antworten, msg_id, rumpf_text,
+                              allen=bool(allen), entwurf=bool(entwurf),
+                              html=rumpf_html))
+    # Format und Signatur gehoeren INS PROTOKOLL. Wer eine hinausgegangene
+    # Antwort nachvollzieht, muss sehen koennen, welche Anschrift daran hing –
+    # ohne das ist "wieso stand da die alte Adresse?" nicht beantwortbar.
+    vermerk = "%s, %s" % ("HTML" if format_ == mail_body.FORMAT_HTML else "Text",
+                          ("Signatur '%s'" % sig["name"]) if sig.get("name")
+                          else "ohne Signatur")
     mail_rules.protokoll_schreiben({
         "owner": mail_rules.norm_user(user), "regel_id": "", "regel": "Antwort aus Outlook",
         "mail_von": getattr(n, "von", ""), "mail_betreff": getattr(n, "betreff", ""),
         "mail_datum": getattr(n, "datum", ""),
-        "ergebnis": "%s (vom Benutzer freigegeben, %d Zeichen)" % (ergebnis, len(inhalt)),
+        "ergebnis": "%s (vom Benutzer freigegeben, %d Zeichen, %s)"
+                    % (ergebnis, len(inhalt), vermerk),
         "ok": True, "testlauf": False, "dauer_s": 0,
     })
-    return {"ergebnis": ergebnis, "an": getattr(n, "von", "")}
+    return {"ergebnis": ergebnis, "an": getattr(n, "von", ""),
+            "format": format_, "signatur": sig.get("name") or "",
+            "signatur_hinweis": sig.get("hinweis") or ""}
 
 
 # ── Takt ────────────────────────────────────────────────────────────────────

@@ -397,10 +397,16 @@ for m, pfad in (("get", "/api/email/styles"), ("post", "/api/email/styles"),
                 ("put", "/api/email/styles/{stil_id}"),
                 ("delete", "/api/email/styles/{stil_id}")):
     check('@app.%s("%s")' % (m, pfad) in MAIN, "Route %s %s" % (m.upper(), pfad))
-_styles = MAIN.split('@app.get("/api/email/styles")', 1)[1].split(
-    '@app.post("/api/email/test")', 1)[0]
+# Der Schnitt endet an der NAECHSTEN Route, nicht am weit entfernten
+# /api/email/test: dazwischen kamen am 2026-08-26 die vier Signatur-Routen dazu,
+# und der Zaehler stand dann bei 8. Ein Waechter, der zu weit schneidet, misst
+# fremden Code (Register). Die Signatur-Routen prueft test_mail_signaturen.py.
+_ende = '@app.get("/api/email/signatures")'
+if _ende not in MAIN:
+    _ende = '@app.post("/api/email/test")'
+_styles = MAIN.split('@app.get("/api/email/styles")', 1)[1].split(_ende, 1)[0]
 check(_styles.count("Depends(require_email_access)") == 4,
-      "alle vier Endpunkte haengen an require_email_access")
+      "alle vier Stil-Endpunkte haengen an require_email_access")
 check("user: str = Depends" in _styles and '"user"' not in _styles,
       "der Benutzer kommt aus der Anmeldung, nie aus dem Rumpf")
 check('erlaubt = {k: v for k, v in (body or {}).items() if k in ("name", "text", "standard")}'

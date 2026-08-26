@@ -319,6 +319,19 @@
                     </div>
                 </div>
                 <div class="em-help" id="em-help-folders" data-i18n="mail.help_folders">Nur ausfüllen, wenn deine Ordner anders heißen als üblich. Bleibt ein Feld leer, benutzt Jarvis den Standardordner deines Postfachs.</div>
+                <!-- Vorgabe-Format. Sie gilt ueberall, wo beim Antworten nichts
+                     ausdruecklich gewaehlt ist - in der Vorschau des
+                     Outlook-Add-ins und in jeder Regel. Vorgabe "Nur Text" =
+                     Verhalten von vor dem 2026-08-26. -->
+                <div class="em-field" style="margin-top:12px;">
+                    <label data-i18n="mail.fmt_acct">Format neuer Antworten</label>
+                    <select id="em-format">
+                        <option value="text" data-i18n="mail.fmt_text">Nur Text</option>
+                        <option value="html">HTML</option>
+                        <option value="richtext" disabled data-i18n="mail.fmt_rtf">Rich-Text (nicht möglich)</option>
+                    </select>
+                    <span class="em-hint" data-i18n="mail.fmt_acct_hint">Gilt, solange beim Antworten nichts anderes gewählt ist. Rich-Text kann Exchange über EWS nicht setzen.</span>
+                </div>
                 <div class="em-field" style="margin-top:12px;">
                     <label><input type="checkbox" id="em-aktiv" style="width:auto;margin-right:8px;">
                         <span data-i18n="mail.acct_active">Postfach aktiv (Regeln dürfen darauf arbeiten)</span> <button type="button" class="em-info" data-help="em-help-active" aria-expanded="false"
@@ -345,6 +358,23 @@
                     <span class="em-status" id="em-stil-status"></span>
                 </div>
                 <div id="em-stil-edit" class="hidden"></div>
+
+                <!-- Signaturen (2026-08-26). Getrennt von den Stilen, weil die
+                     WIRKUNG verschieden ist: ein Stil geht als Anweisung in den
+                     Auftrag, eine Signatur wird nach dem Lauf woertlich
+                     angehaengt und laeuft NIE durch ein Modell. -->
+                <div class="em-sep"></div>
+                <h3 class="em-sub-head"><span data-i18n="mail.sigs_head">Signaturen</span>
+                    <button type="button" class="em-info" data-help="em-help-sigs" aria-expanded="false"
+                        data-i18n-title="mail.help" title="Erklärung anzeigen">&#9432;</button></h3>
+                <p class="em-hint" data-i18n="mail.sigs_hint">Eine Signatur wird wörtlich an deine Antwort gehängt. Sie läuft nie durch das Sprachmodell – Pflichtangaben wie Rechtsform oder Registergericht können dadurch nicht umformuliert werden. Die Standard-Signatur (●) gilt überall, wo nichts anderes gewählt ist.</p>
+                <div class="em-help" id="em-help-sigs" data-i18n-html="mail.help_sigs">Eine Signatur wird <b>wörtlich</b> angehängt: sie geht nie durch das Sprachmodell und kann deshalb nicht umformuliert werden.</div>
+                <div id="em-sigs-list" style="margin-top:10px;"></div>
+                <div class="em-row">
+                    <button class="em-btn" id="em-sig-neu" data-i18n="mail.sig_new">Neue Signatur</button>
+                    <span class="em-status" id="em-sig-status"></span>
+                </div>
+                <div id="em-sig-edit" class="hidden"></div>
             </div>
         </div>
 
@@ -427,12 +457,12 @@
 
 <script src="/static/js/icons.js?v=1"></script>
 <script src="/static/js/cpubar.js?v=1"></script>
-<script src="/static/js/i18n.js?v=177"></script>
+<script src="/static/js/i18n.js?v=178"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
 <script src="/static/js/theme.js?v=3"></script>
 <script src="/static/js/branding.js?v=25"></script>
 <script src="/static/js/sessions.js?v=8"></script>
-<script src="/static/js/email_portal.js?v=11"></script>
+<script src="/static/js/email_portal.js?v=12"></script>
 <script src="/static/js/settings_btn.js?v=3"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist).
      Der Ein/Aus-Schalter haengt sich VOR #btn-theme-toggle – deshalb muss der

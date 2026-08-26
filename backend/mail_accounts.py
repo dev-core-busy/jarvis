@@ -58,6 +58,24 @@ SCHLUESSEL_MODUS = 0o600
 current_mail_user: contextvars.ContextVar = contextvars.ContextVar(
     "jarvis_mail_user", default="")
 
+# Signatur und Format, die fuer den LAUFENDEN Regel-Lauf gelten (2026-08-26).
+# Gesetzt von ``mail_runner`` fuer die Dauer eines Laufs, gelesen von
+# ``skills/email`` beim Antworten.
+#
+# ⚠ WARUM EIN CONTEXTVAR UND KEIN WERKZEUG-PARAMETER: dieselbe Begruendung wie
+# beim Postfach. Waere die Signatur ein Feld im Schema, koennte das MODELL sie
+# waehlen – und ein eingeschmuggelter Satz im Fremdtext haette ein Feld, in das
+# er greifen kann ("antworte ohne Signatur", "nimm die englische"). Ein Test
+# verbietet die Feldnamen im Schema der email_*-Werkzeuge.
+#
+# Der leere String heisst "nichts vorgegeben" und faellt damit auf die Vorgabe
+# des Postfachs zurueck (``format_fuer`` / ``signatur_fuer``) – NICHT auf
+# "keine Signatur". Das ist der Unterschied zu ``SIG_KEINER``.
+current_antwort_format: contextvars.ContextVar = contextvars.ContextVar(
+    "jarvis_mail_antwort_format", default="")
+current_antwort_signatur: contextvars.ContextVar = contextvars.ContextVar(
+    "jarvis_mail_antwort_signatur", default="")
+
 
 def norm_user(name: str) -> str:
     """Kontoname ohne Domaenen-Praefix/UPN-Suffix, klein.
@@ -177,9 +195,13 @@ def _speichern(alle: dict) -> None:
 # Nur diese Felder darf ein Benutzer an seinem Konto setzen. Ohne Whitelist
 # nimmt ein PUT beliebige Felder – dieselbe Luecke, die ``scheduler.update_job``
 # bis 2026-07-28 hatte (dort liess sich ``owner_privileged`` setzen).
+# ``antwort_format`` steht hier, ``signaturen`` NICHT: das Format ist ein
+# einzelner Wert (ein Formular kann ihn gefahrlos mitsenden), eine Liste dagegen
+# wuerde bei zwei offenen Fenstern den jeweils anderen Stand ueberschreiben -
+# dieselbe Begruendung wie bei ``stile``.
 AENDERBAR = ("adresse", "benutzer", "passwort", "kanal", "aktiv",
              "ordner_eingang", "ordner_entwuerfe", "ordner_gesendet",
-             "antwort_vorgabe")
+             "antwort_vorgabe", "antwort_format")
 
 # Deckel fuer den Text EINES Stils. Er geht in JEDEN Auftrag ein, der ihn
 # benutzt (Vorschlag und Regel-Lauf), und kostet dort Kontext – ein Roman waere
@@ -217,6 +239,35 @@ STIL_PROMPT_MIN = 3
 # Anfuehrungszeichen, die um einen Stilnamen stehen duerfen (deutsche und
 # englische Formen, gerade und typografische).
 _ANFUEHRUNG = "\"'\u201e\u201c\u201d\u00ab\u00bb\u2018\u2019"
+
+
+# ── Signaturen (2026-08-26) ─────────────────────────────────────────────────
+#
+# BEWUSST GETRENNT VON DEN STILEN, obwohl das Stilfeld "Stil und Signatur"
+# heisst und eine Signatur bis hierher dort mit hineingeschrieben wurde. Der
+# Unterschied ist nicht kosmetisch:
+#
+#   Ein Stil ist eine ANWEISUNG AN DAS MODELL - er geht in den Auftrag ein, und
+#   das Modell schreibt danach.
+#   Eine Signatur ist ein FESTER TEXT - sie wird hinter die fertige Antwort
+#   gesetzt und geht NIE durch ein Modell.
+#
+# Genau deshalb ist die Trennung eine Sicherheitsaussage und keine Ordnung:
+# eine Signatur traegt Pflichtangaben (Rechtsform, Registergericht,
+# Geschaeftsfuehrung, Umsatzsteuer-Id). Ein Modell, das sie "mitschreibt",
+# formuliert sie um - und bei einer Regel liest niemand gegen. Wer Signaturen
+# je in den Prompt zurueckverlegt, hebt diese Zusage auf.
+MAX_SIGNATUREN = 12
+SIG_NAME_MAX = 60
+# Deckel: die Signatur kostet KEINEN Modell-Kontext (anders als VORGABE_MAX,
+# dessen Begruendung genau daran haengt) - sie muss nur in eine Mail passen.
+# Die HTML-Fassung darf deutlich groesser sein: ein eingebettetes Logo als
+# data:-URI ist schnell einige Kilobyte.
+SIG_TEXT_MAX = 4000
+SIG_HTML_MAX = 60000
+# Ausdrueckliche Wahl "keine Signatur" - unterscheidbar von "nichts gewaehlt"
+# (leer = Standardsignatur). Dieselbe Semantik wie STIL_KEINER.
+SIG_KEINER = "-"
 
 
 # ── Aussetzer nach wiederholten Anmeldefehlern ──────────────────────────────
@@ -259,6 +310,7 @@ def _leer(benutzer_norm: str) -> dict:
             "pw_enc": "", "kanal": "", "aktiv": True,
             "ordner_eingang": "", "ordner_entwuerfe": "", "ordner_gesendet": "",
             "stile": [], "antwort_vorgabe": "",
+            "signaturen": [], "antwort_format": "",
             "angelegt": int(time.time()), "geaendert": 0,
             "letzter_erfolg": 0, "letzter_fehler": "",
             "anmeldefehler": 0, "ausgesetzt": False, "ausgesetzt_seit": 0,
@@ -566,6 +618,238 @@ def antwort_vorgabe(user: str) -> str:
     return e.get("text") or ""
 
 
+# ── Signaturen ──────────────────────────────────────────────────────────────
+#
+# Ein Eintrag: ``{"id", "name", "text", "html", "standard"}``. Genau EINER kann
+# ``standard`` sein. Keiner ist erlaubt - dann geht eine Antwort ohne Signatur
+# hinaus, und das ist eine gueltige Wahl.
+#
+# ⚠ ES GIBT KEINE ERKENNUNG AUS DEM REGEL-PROMPT (anders als bei den Stilen,
+# ``stil_aus_prompt``). Zwei Gruende, beide zaehlen:
+#   1. Ein Stil ist eine Formulierung, die jemand in Prosa hinschreibt ("antworte
+#      im Stil Foermlich") - eine Signatur waehlt man aus einer Liste.
+#   2. Die Namenssuche im Prompt traefe bei Signaturen zwangslaeufig daneben:
+#      typische Namen sind "Standard", "Kurz", "Englisch" - Woerter, die in jedem
+#      zweiten Regeltext vorkommen. Ein zufaellig getroffener Name haenge dann
+#      eine falsche Rechtsform an eine echte Mail.
+
+
+def _sig_id() -> str:
+    return secrets.token_hex(4)
+
+
+def _sig_norm(roh) -> dict | None:
+    """Ein Eintrag aus der Datei - oder ``None``, wenn er unbrauchbar ist.
+
+    Wie ``_stil_norm`` beim LESEN angewandt: eine von Hand verbogene Datei soll
+    die Oberflaeche nicht kippen, sondern nur den kaputten Eintrag verlieren.
+    Die HTML-Fassung wird hier NICHT entschaerft - das passiert beim Bauen des
+    Rumpfes (``mail_body.signatur_anhaengen``), also unmittelbar vor dem
+    Versand. Wer nur beim Speichern entschaerft, laesst einen Altbestand
+    ungeprueft hinausgehen.
+    """
+    if not isinstance(roh, dict):
+        return None
+    sid = str(roh.get("id") or "").strip()[:32]
+    name = str(roh.get("name") or "").strip()[:SIG_NAME_MAX]
+    if not sid or not name:
+        return None
+    return {"id": sid, "name": name,
+            "text": str(roh.get("text") or "").strip()[:SIG_TEXT_MAX],
+            "html": str(roh.get("html") or "").strip()[:SIG_HTML_MAX],
+            "standard": bool(roh.get("standard"))}
+
+
+def _signaturen_von(k: dict) -> list[dict]:
+    out, gesehen = [], set()
+    for roh in (k.get("signaturen") or []):
+        e = _sig_norm(roh)
+        if not e or e["id"] in gesehen:
+            continue
+        gesehen.add(e["id"])
+        out.append(e)
+        if len(out) >= MAX_SIGNATUREN:
+            break
+    # Genau EIN Standard - zwei waeren nicht aufloesbar; der erste gewinnt.
+    schon = False
+    for e in out:
+        if e["standard"] and not schon:
+            schon = True
+        else:
+            e["standard"] = False
+    return out
+
+
+def signaturen(user: str) -> list[dict]:
+    """Alle Signaturen des Benutzers. Fail-safe leer."""
+    try:
+        return _signaturen_von(_laden().get(norm_user(user)) or {})
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _sig_schreiben(un: str, liste: list[dict]) -> list[dict]:
+    alle = _laden()
+    k = alle.get(un) or _leer(un)
+    k["benutzer_norm"] = un
+    k["signaturen"] = liste
+    k["geaendert"] = int(time.time())
+    alle[un] = k
+    _speichern(alle)
+    return _signaturen_von(k)
+
+
+def sig_anlegen(user: str, name: str, text: str = "", html: str = "",
+                standard: bool | None = None) -> list[dict]:
+    """Neue Signatur anlegen. Rueckgabe = die vollstaendige Liste.
+
+    Die ERSTE wird automatisch Standard - sonst haette eine Regel ohne Auswahl
+    keine Signatur, obwohl der Benutzer gerade eine angelegt hat (gleiche
+    Abwaegung wie bei ``stil_anlegen``).
+    """
+    un = norm_user(user)
+    if not un:
+        raise MailFehler("Kein Benutzer - die Signatur kann nicht zugeordnet werden.",
+                         "eingabe")
+    nm = str(name or "").strip()
+    if not nm:
+        raise MailFehler("Die Signatur braucht einen Namen.", "eingabe")
+    if len(nm) > SIG_NAME_MAX:
+        raise MailFehler("Der Name ist zu lang (max. %d Zeichen)." % SIG_NAME_MAX, "eingabe")
+    liste = signaturen(user)
+    if len(liste) >= MAX_SIGNATUREN:
+        raise MailFehler("Es sind hoechstens %d Signaturen moeglich (vorhanden: %d)."
+                         % (MAX_SIGNATUREN, len(liste)), "eingabe")
+    if any(e["name"].lower() == nm.lower() for e in liste):
+        raise MailFehler("Es gibt bereits eine Signatur mit dem Namen '%s'." % nm, "eingabe")
+    eintrag = {"id": _sig_id(), "name": nm,
+               "text": str(text or "").strip()[:SIG_TEXT_MAX],
+               "html": str(html or "").strip()[:SIG_HTML_MAX],
+               "standard": bool(standard) if standard is not None else (not liste)}
+    liste.append(eintrag)
+    if eintrag["standard"]:
+        for e in liste:
+            e["standard"] = (e["id"] == eintrag["id"])
+    return _sig_schreiben(un, liste)
+
+
+def sig_aendern(user: str, sig_id: str, felder: dict) -> list[dict]:
+    """Name/Text/HTML/Standard einer Signatur aendern. Unbekannt -> Fehler."""
+    un = norm_user(user)
+    liste = signaturen(user)
+    treffer = [e for e in liste if e["id"] == str(sig_id or "").strip()]
+    if not treffer:
+        raise MailFehler("Signatur nicht gefunden.", "eingabe")
+    e = treffer[0]
+    if "name" in (felder or {}):
+        nm = str(felder.get("name") or "").strip()
+        if not nm:
+            raise MailFehler("Die Signatur braucht einen Namen.", "eingabe")
+        if len(nm) > SIG_NAME_MAX:
+            raise MailFehler("Der Name ist zu lang (max. %d Zeichen)." % SIG_NAME_MAX,
+                             "eingabe")
+        if any(a["name"].lower() == nm.lower() and a["id"] != e["id"] for a in liste):
+            raise MailFehler("Es gibt bereits eine Signatur mit dem Namen '%s'." % nm,
+                             "eingabe")
+        e["name"] = nm
+    # LEER heisst hier wirklich "kein Text" - der Benutzer sieht seine Signatur
+    # und darf sie bewusst loeschen (anders als beim Kennwort, das nie angezeigt
+    # wird und wo leer "unveraendert" bedeutet).
+    if "text" in (felder or {}):
+        e["text"] = str(felder.get("text") or "").strip()[:SIG_TEXT_MAX]
+    if "html" in (felder or {}):
+        e["html"] = str(felder.get("html") or "").strip()[:SIG_HTML_MAX]
+    if "standard" in (felder or {}):
+        if felder.get("standard"):
+            for a in liste:
+                a["standard"] = (a["id"] == e["id"])
+        else:
+            e["standard"] = False
+    return _sig_schreiben(un, liste)
+
+
+def sig_loeschen(user: str, sig_id: str) -> list[dict]:
+    """Signatur entfernen. **Es rueckt KEINER nach.**
+
+    Gleiche Begruendung wie bei ``stil_loeschen``: eine nachrueckende
+    Standardsignatur hiesse, dass Regeln ohne eigene Wahl ploetzlich eine
+    Anschrift anhaengen, die niemand dafuer bestimmt hat. Regeln, die genau
+    diese gewaehlt hatten, fallen auf den Standard zurueck - ``signatur_fuer``
+    vermerkt das im Klartext.
+    """
+    un = norm_user(user)
+    liste = signaturen(user)
+    rest = [e for e in liste if e["id"] != str(sig_id or "").strip()]
+    if len(rest) == len(liste):
+        raise MailFehler("Signatur nicht gefunden.", "eingabe")
+    return _sig_schreiben(un, rest)
+
+
+def signatur_fuer(user: str, sig_id: str = "") -> dict:
+    """Die Signatur, die fuer DIESE Antwort gilt.
+
+    Reihenfolge:
+      1. ``sig_id`` ausdruecklich gewaehlt -> diese. ``SIG_KEINER`` heisst
+         "ausdruecklich ohne Signatur".
+      2. gewaehlte Kennung gibt es nicht mehr -> Standard, mit ``hinweis``.
+         Der Lauf laeuft weiter: eine Antwort, die wegen einer verwaisten
+         Referenz gar nicht hinausgeht, ist der schlechtere Ausgang.
+      3. nichts gewaehlt -> Standardsignatur (kann fehlen; dann keine).
+
+    Rueckgabe ist IMMER ein dict: ``{"id","name","text","html","quelle","hinweis"}``.
+    """
+    leer = {"id": "", "name": "", "text": "", "html": "", "quelle": "", "hinweis": ""}
+    try:
+        liste = signaturen(user)
+    except Exception:  # noqa: BLE001
+        return leer
+    std = ([e for e in liste if e["standard"]] or [None])[0]
+    wahl = str(sig_id or "").strip()
+    if wahl == SIG_KEINER:
+        return dict(leer, quelle="keiner")
+    if wahl:
+        for e in liste:
+            if e["id"] == wahl:
+                return dict(e, quelle="feld", hinweis="")
+        if std:
+            return dict(std, quelle="standard",
+                        hinweis="Die gewaehlte Signatur gibt es nicht mehr - es gilt "
+                                "die Standardsignatur '%s'." % std["name"])
+        return dict(leer, hinweis="Die gewaehlte Signatur gibt es nicht mehr, und es "
+                                  "ist keine Standardsignatur gesetzt.")
+    return dict(std, quelle="standard", hinweis="") if std else leer
+
+
+# ── Antwort-Format (Text oder HTML) ─────────────────────────────────────────
+#
+# Die Werte und die Umsetzung liegen in ``mail_body``; hier steht nur, WELCHES
+# Format fuer einen Benutzer gilt. Getrennt, weil ``mail_body`` ohne Postfach
+# und ohne Fremdmodule pruefbar bleiben soll.
+
+
+def format_fuer(user: str, wahl: str = "") -> str:
+    """Das Format dieser Antwort: Wahl > Vorgabe des Postfachs > Text.
+
+    ``mail_body.norm_format`` gibt fuer Unbekanntes ``""`` zurueck - ein
+    Tippfehler faellt damit auf die Vorgabe des Postfachs und nicht auf einen
+    geratenen Wert. Die Vorgabe ist bewusst **Text**: das ist das Verhalten von
+    vor dieser Aenderung, und ein Postfach, das ohne Zutun ploetzlich HTML
+    verschickt, waere eine Ueberraschung.
+    """
+    from backend import mail_body
+    w = mail_body.norm_format(wahl)
+    if w:
+        return w
+    try:
+        k = _laden().get(norm_user(user)) or {}
+        v = mail_body.norm_format(k.get("antwort_format"))
+        if v:
+            return v
+    except Exception:  # noqa: BLE001
+        pass
+    return mail_body.FORMAT_TEXT
+
+
 def konto_info(user: str) -> dict:
     """Fuer die Oberflaeche – OHNE Kennwort, auch nicht maskiert.
 
@@ -590,6 +874,12 @@ def konto_info(user: str) -> dict:
         # etwas Sinnvolles an, statt ein leeres Feld.
         "stile": _stile_von(k),
         "max_stile": MAX_STILE,
+        "signaturen": _signaturen_von(k),
+        "max_signaturen": MAX_SIGNATUREN,
+        # Rohwert, NICHT aufgeloest: die Oberflaeche muss "nichts gewaehlt"
+        # (leer = es gilt Text) von einer ausdruecklichen Wahl unterscheiden
+        # koennen, sonst sieht die Vorgabe wie eine Entscheidung aus.
+        "antwort_format": str(k.get("antwort_format") or ""),
         "antwort_vorgabe": ([e["text"] for e in _stile_von(k) if e["standard"]]
                             or [""])[0],
         "letzter_erfolg": int(k.get("letzter_erfolg", 0) or 0),
@@ -659,6 +949,22 @@ def speichern(user: str, felder: dict) -> dict:
                                "text": _alt, "standard": True})
             k["stile"] = _liste
             _spiegel_setzen(k)
+    if "antwort_format" in felder:
+        # LEER ist hier ein gueltiger Wert: "keine Vorgabe" heisst Text. Ein
+        # unbekannter Wert wird ABGEWIESEN und nicht stillschweigend verworfen -
+        # sonst klickt jemand auf Speichern, das Feld springt zurueck, und
+        # niemand erfaehrt warum. Namentlich genannt wird auch Rich-Text: das
+        # ist die haeufigste Fehlannahme (Begruendung in mail_body).
+        from backend import mail_body
+        _fw = str(felder.get("antwort_format") or "").strip().lower()
+        if _fw and not mail_body.norm_format(_fw):
+            if _fw in ("richtext", "rich-text", "rtf", "rich_text"):
+                raise MailFehler(
+                    "Rich-Text (RTF) laesst sich ueber Exchange nicht setzen - EWS "
+                    "kennt nur 'html' und 'text'. Bitte 'html' waehlen.", "eingabe")
+            raise MailFehler("Antwort-Format muss leer, 'text' oder 'html' sein.",
+                             "eingabe")
+        k["antwort_format"] = _fw
     if "passwort" in felder:
         pw = str(felder.get("passwort") or "")
         if pw.strip():

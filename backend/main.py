@@ -9256,6 +9256,10 @@ async def email_status(lang: str = "de", user: str = Depends(require_email_acces
             "max_stile": mail_accounts.MAX_STILE,
             "stil_name_max": mail_accounts.STIL_NAME_MAX,
             "stil_text_max": mail_accounts.VORGABE_MAX,
+            "max_signaturen": mail_accounts.MAX_SIGNATUREN,
+            "sig_name_max": mail_accounts.SIG_NAME_MAX,
+            "sig_text_max": mail_accounts.SIG_TEXT_MAX,
+            "sig_html_max": mail_accounts.SIG_HTML_MAX,
         },
     })
 
@@ -9389,6 +9393,99 @@ async def email_styles_del(stil_id: str, user: str = Depends(require_email_acces
     except MailFehler as f:
         return JSONResponse({"ok": False, "error": str(f)}, status_code=404)
     return JSONResponse({"ok": True, "stile": liste})
+
+
+@app.get("/api/email/signatures")
+async def email_signatures_get(user: str = Depends(require_email_access)):
+    """Eigene Signaturen (Name + Text + HTML + Standard-Markierung).
+
+    Eigene Endpunkte statt eines Feldes am Postfach-Formular – gleiche
+    Begruendung wie bei den Stilen: ein Formular, das die Liste als Ganzes
+    sendet, wuerde bei zwei offenen Fenstern den jeweils anderen Stand
+    ueberschreiben. Deshalb steht ``signaturen`` NICHT in
+    ``mail_accounts.AENDERBAR`` (``antwort_format`` schon – das ist ein
+    einzelner Wert).
+
+    ``formate`` nennt die WIRKLICH moeglichen Formate. Rich-Text ist keines:
+    EWS kennt in ``BodyType`` nur ``HTML`` und ``Text`` (an exchangelib 5.6.0
+    gemessen), und was Outlook "Rich-Text" nennt, ist TNEF. Die Oberflaeche
+    zeigt den Eintrag abgeschaltet und nennt den Grund – deshalb geht er hier
+    als ``formate_aus`` mit heraus, statt in der Oberflaeche erfunden zu werden.
+    """
+    from backend import mail_accounts, mail_body
+    return JSONResponse({"ok": True,
+                         "signaturen": mail_accounts.signaturen(user),
+                         "max_signaturen": mail_accounts.MAX_SIGNATUREN,
+                         "name_max": mail_accounts.SIG_NAME_MAX,
+                         "text_max": mail_accounts.SIG_TEXT_MAX,
+                         "html_max": mail_accounts.SIG_HTML_MAX,
+                         "formate": list(mail_body.FORMATE),
+                         "formate_aus": ["richtext"],
+                         "format_vorgabe": mail_accounts.format_fuer(user)})
+
+
+@app.post("/api/email/signatures")
+async def email_signatures_add(request: Request,
+                               user: str = Depends(require_email_access)):
+    """Neue Signatur anlegen. Die erste wird automatisch der Standard."""
+    from backend import mail_accounts
+    from backend.mail_client import MailFehler
+    hinweis = _email_skill_hinweis()
+    if hinweis:
+        return JSONResponse(hinweis, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
+    try:
+        liste = await asyncio.to_thread(
+            mail_accounts.sig_anlegen, user,
+            str((body or {}).get("name") or ""), str((body or {}).get("text") or ""),
+            str((body or {}).get("html") or ""),
+            bool((body or {}).get("standard")) if "standard" in (body or {}) else None)
+    except MailFehler as f:
+        return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
+    return JSONResponse({"ok": True, "signaturen": liste})
+
+
+@app.put("/api/email/signatures/{sig_id}")
+async def email_signatures_set(sig_id: str, request: Request,
+                               user: str = Depends(require_email_access)):
+    """Signatur aendern. Nur die eigenen – die Kennung wird gegen das eigene
+    Postfach aufgeloest, eine fremde ist damit gar nicht erreichbar."""
+    from backend import mail_accounts
+    from backend.mail_client import MailFehler
+    hinweis = _email_skill_hinweis()
+    if hinweis:
+        return JSONResponse(hinweis, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
+    erlaubt = {k: v for k, v in (body or {}).items()
+               if k in ("name", "text", "html", "standard")}
+    if not erlaubt:
+        return JSONResponse({"ok": False, "error": "Es wurde nichts zum Aendern "
+                                                   "uebergeben."}, status_code=400)
+    try:
+        liste = await asyncio.to_thread(mail_accounts.sig_aendern, user, sig_id, erlaubt)
+    except MailFehler as f:
+        code = 404 if "nicht gefunden" in str(f).lower() else 400
+        return JSONResponse({"ok": False, "error": str(f)}, status_code=code)
+    return JSONResponse({"ok": True, "signaturen": liste})
+
+
+@app.delete("/api/email/signatures/{sig_id}")
+async def email_signatures_del(sig_id: str, user: str = Depends(require_email_access)):
+    """Signatur entfernen. Regeln und Antworten ohne eigene Wahl fallen auf die
+    Standardsignatur zurueck (mit Vermerk) – es rueckt keine nach."""
+    from backend import mail_accounts
+    from backend.mail_client import MailFehler
+    try:
+        liste = await asyncio.to_thread(mail_accounts.sig_loeschen, user, sig_id)
+    except MailFehler as f:
+        return JSONResponse({"ok": False, "error": str(f)}, status_code=404)
+    return JSONResponse({"ok": True, "signaturen": liste})
 
 
 @app.post("/api/email/test")
@@ -9688,6 +9785,16 @@ async def email_reply_send(request: Request,
 
     ``entwurf: true`` speichert statt zu senden – der zurueckhaltende Weg, wenn
     jemand die Antwort lieber noch in Outlook selbst ansehen moechte.
+
+    ``format`` ist ``"html"`` oder ``"text"`` (leer = Vorgabe des Postfachs),
+    ``signatur`` die Kennung einer hinterlegten Signatur (leer = Standard,
+    ``"-"`` = ausdruecklich keine). **Rich-Text gibt es nicht** – EWS kann
+    keinen RTF-Rumpf setzen, Begruendung in ``backend/mail_body.py``.
+
+    Die Signatur wird SERVERSEITIG hinter den freigegebenen Text gesetzt und
+    nicht aus dem Rumpf uebernommen: der Aufrufer waehlt sie aus, er liefert
+    sie nicht. Sonst waere dieses Feld ein Weg, beliebigen Text in eine Mail zu
+    setzen, den niemand gesehen hat.
     """
     from backend import mail_client, mail_runner
     hinweis = _email_skill_hinweis()
@@ -9707,7 +9814,9 @@ async def email_reply_send(request: Request,
             user, msg_id, text,
             ordner=str((body or {}).get("ordner") or "").strip(),
             allen=bool((body or {}).get("allen")),
-            entwurf=bool((body or {}).get("entwurf")))
+            entwurf=bool((body or {}).get("entwurf")),
+            fmt=str((body or {}).get("format") or "").strip()[:16],
+            signatur_id=str((body or {}).get("signatur") or "").strip()[:32])
     except mail_client.MailFehler as f:
         return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
     except Exception as e:  # noqa: BLE001

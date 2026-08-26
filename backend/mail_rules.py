@@ -49,8 +49,8 @@ import secrets
 import time
 from pathlib import Path
 
-from backend.mail_accounts import (STIL_AUTO as _STIL_AUTO, STIL_KEINER,
-                                   norm_user, skill_config)
+from backend.mail_accounts import (SIG_KEINER, STIL_AUTO as _STIL_AUTO,
+                                   STIL_KEINER, norm_user, skill_config)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
@@ -243,7 +243,7 @@ def _alle_speichern(regeln: list[dict]) -> None:
 # fehlte ``scheduler.update_job`` bis 2026-07-28.
 AENDERBAR = ("name", "enabled", "ordner", "prompt", "bereiche", "intervall_min",
              "nur_ungelesen", "von_filter", "betreff_filter", "max_je_lauf",
-             "markiere_gelesen", "stil")
+             "markiere_gelesen", "stil", "signatur", "format")
 
 
 def _neue_id() -> str:
@@ -356,6 +356,46 @@ def _pruefe(felder: dict, bestehend: dict | None = None,
             except Exception:  # noqa: BLE001
                 pass
         r["stil"] = sid
+
+    # ── Signatur und Format dieser Regel (2026-08-26) ──────────────────────
+    # Beide wirken NICHT ueber den Prompt: die Signatur haengt das Werkzeug
+    # deterministisch an (``skills/email``), das Format entscheidet nur den
+    # BodyType. Das Modell sieht keins von beiden – deshalb kann auch ein
+    # eingeschmuggelter Satz sie nicht umstellen.
+    #
+    # Es gibt hier bewusst KEINE Erkennung aus dem Prompt (anders als beim
+    # Stil): Signaturnamen wie "Standard" oder "Kurz" treffen in jedem zweiten
+    # Regeltext, und ein zufaelliger Treffer haenge eine falsche Anschrift an
+    # eine echte Mail. Begruendung ausfuehrlich in ``mail_accounts``.
+    if "signatur" in felder or not bestehend:
+        sg = str(felder.get("signatur") or "").strip()[:32]
+        if sg and sg != SIG_KEINER and not re.fullmatch(r"[A-Za-z0-9_-]+", sg):
+            raise RegelFehler("Ungueltige Signatur-Kennung.")
+        if sg and sg != SIG_KEINER and (owner or r.get("owner")):
+            # Existenz gegen die Signaturen des BESITZERS pruefen. Fail-open bei
+            # Lesefehlern – eine unlesbare Kontendatei darf das Speichern einer
+            # Regel nicht blockieren.
+            try:
+                from backend import mail_accounts as _ma
+                bekannt = [e["id"] for e in _ma.signaturen(owner or r.get("owner"))]
+                if bekannt and sg not in bekannt:
+                    raise RegelFehler(
+                        "Diese Signatur gibt es nicht (mehr). Waehle eine "
+                        "vorhandene oder lege sie unter „Signaturen\" an.")
+            except RegelFehler:
+                raise
+            except Exception:  # noqa: BLE001
+                pass
+        r["signatur"] = sg
+    if "format" in felder or not bestehend:
+        fw = str(felder.get("format") or "").strip().lower()[:16]
+        if fw and fw not in ("text", "html"):
+            if fw in ("richtext", "rich-text", "rtf", "rich_text"):
+                raise RegelFehler(
+                    "Rich-Text (RTF) laesst sich ueber Exchange nicht setzen – EWS "
+                    "kennt nur „HTML\" und „Text\". Bitte HTML waehlen.")
+            raise RegelFehler("Antwort-Format muss leer, „text\" oder „html\" sein.")
+        r["format"] = fw
 
     # ── Bedingung im Prompt, aber kein Filterfeld? Dann ablehnen. ──────────
     # VORFALL 2026-08-17: Eine Regel lautete "wenn eine Nachricht von

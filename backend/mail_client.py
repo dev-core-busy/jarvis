@@ -667,25 +667,53 @@ class _Ews:
         except Exception as e:  # noqa: BLE001
             raise _einordnen(e, "ews") from e
 
+    def _rumpf(self, text: str, html: str):
+        """Rumpf fuer EWS: ``HTMLBody`` bei HTML, sonst reiner Text.
+
+        DAS IST DER GANZE UNTERSCHIED zwischen einem Text- und einem
+        HTML-Entwurf: exchangelib entscheidet den ``BodyType`` an der KLASSE des
+        Wertes. Ein ``str`` wird zu ``BodyType=Text`` - genau daher kam der
+        gemeldete Zustand "Entwuerfe werden im Text Format erstellt", ohne dass
+        irgendwo ein Format gesetzt war.
+
+        Einen RTF-Rumpf gibt es hier nicht und kann es nicht geben: EWS kennt in
+        ``BodyType`` nur ``Best`` (lesend), ``HTML`` und ``Text``. Siehe
+        ``backend/mail_body.py``.
+        """
+        if not (html or "").strip():
+            return text or ""
+        xl = self._lib()
+        try:
+            return xl.HTMLBody(html)
+        except Exception as e:  # noqa: BLE001
+            # Aeltere exchangelib-Fassung ohne HTMLBody: dann geht der Text
+            # hinaus. Ein Abbruch waere der schlechtere Ausgang - die Antwort
+            # ist wichtiger als ihr Format -, aber es muss im Journal stehen,
+            # sonst sucht jemand den Fehler in der Oberflaeche.
+            print("[Mail] HTMLBody nicht verfuegbar (%s) - Antwort geht als Text "
+                  "hinaus." % e, flush=True)
+            return text or ""
+
     def antworten(self, msg_id: str, text: str, allen: bool = False,
-                  entwurf: bool = False) -> str:
+                  entwurf: bool = False, html: str = "") -> str:
         m = self._suche_item(msg_id)
         acc = self._konto()
         try:
             betreff = m.subject or ""
             if not betreff.lower().startswith("re:"):
                 betreff = "Re: " + betreff
+            rumpf = self._rumpf(text, html)
             if entwurf:
                 # create_reply(...).save(ordner) ist der dokumentierte Weg zum
                 # Entwurf – der Entwurf behaelt dabei den Gesprächsfaden.
-                erz = m.create_reply_all(betreff, text or "") if allen \
-                    else m.create_reply(betreff, text or "")
+                erz = m.create_reply_all(betreff, rumpf) if allen \
+                    else m.create_reply(betreff, rumpf)
                 erz.save(acc.drafts)
                 return "Antwort als Entwurf gespeichert."
             if allen:
-                m.reply_all(subject=betreff, body=text or "")
+                m.reply_all(subject=betreff, body=rumpf)
             else:
-                m.reply(subject=betreff, body=text or "")
+                m.reply(subject=betreff, body=rumpf)
             return "Antwort gesendet."
         except Exception as e:  # noqa: BLE001
             raise _einordnen(e, "ews") from e
@@ -1046,7 +1074,7 @@ class _Imap:
             raise _einordnen(e, "smtp") from e
 
     def _bauen(self, an: list[str], betreff: str, text: str, cc: list[str],
-               bezug: str = "") -> EmailMessage:
+               bezug: str = "", html: str = "") -> EmailMessage:
         m = EmailMessage()
         m["From"] = self.konto.adresse
         m["To"] = ", ".join(an)
@@ -1059,6 +1087,12 @@ class _Imap:
             m["In-Reply-To"] = bezug
             m["References"] = bezug
         m.set_content(text or "")
+        if (html or "").strip():
+            # multipart/alternative: der TEXTTEIL BLEIBT. Ein Programm ohne
+            # HTML-Anzeige (und jeder Textfilter im Weg) bekommt sonst eine
+            # leere Mail - deshalb `add_alternative` und nicht `set_content`
+            # mit subtype html.
+            m.add_alternative(html, subtype="html")
         return m
 
     def senden(self, an, betreff: str, text: str, cc=None, entwurf: bool = False) -> str:
@@ -1110,7 +1144,7 @@ class _Imap:
             print("[Mail] Kopie im Ordner '%s' nicht abgelegt: %s" % (ordner, e), flush=True)
 
     def antworten(self, msg_id: str, text: str, allen: bool = False,
-                  entwurf: bool = False) -> str:
+                  entwurf: bool = False, html: str = "") -> str:
         alt = self.lesen(msg_id)
         an = [alt.von] if alt.von else []
         cc = []
@@ -1122,7 +1156,16 @@ class _Imap:
             betreff = "Re: " + betreff
         zitat = "\n\n----- Urspruengliche Nachricht -----\nVon: %s\nDatum: %s\nBetreff: %s\n\n%s" % (
             alt.von, alt.datum, alt.betreff, (alt.text or "")[:5000])
-        m = self._bauen(an, betreff, (text or "") + zitat, cc, bezug=alt.schluessel)
+        rumpf_html = ""
+        if (html or "").strip():
+            # Das ZITAT muss mit ins HTML, sonst faellt der Verlauf in der
+            # HTML-Fassung weg und der Empfaenger sieht nur die Antwort -
+            # waehrend die Textfassung ihn hat. Zwei Alternativteile mit
+            # verschiedenem INHALT waeren ein Fehler, nicht nur haesslich.
+            from backend import mail_body
+            rumpf_html = html + mail_body.text_zu_html(zitat)
+        m = self._bauen(an, betreff, (text or "") + zitat, cc,
+                        bezug=alt.schluessel, html=rumpf_html)
         if entwurf:
             return self._entwurf_ablegen(m)
         _pruefe_empfaenger(an)
@@ -1346,8 +1389,9 @@ class MailClient:
         return self._ruf("senden", an, betreff, text, cc=cc, entwurf=entwurf)
 
     def antworten(self, msg_id: str, text: str, allen: bool = False,
-                  entwurf: bool = False) -> str:
-        return self._ruf("antworten", msg_id, text, allen=allen, entwurf=entwurf)
+                  entwurf: bool = False, html: str = "") -> str:
+        return self._ruf("antworten", msg_id, text, allen=allen, entwurf=entwurf,
+                         html=html)
 
     def weiterleiten(self, msg_id: str, an, text: str = "", entwurf: bool = False) -> str:
         return self._ruf("weiterleiten", msg_id, an, text=text, entwurf=entwurf)

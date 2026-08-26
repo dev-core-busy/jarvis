@@ -8,7 +8,11 @@ paths:
   - "tests/test_outlook_addin.py"
   - "tests/test_addin_sso.py"
   - "tests/test_addin_update_ui.js"
+  - "backend/mail_body.py"
   - "tests/test_mail_styles.py"
+  - "tests/test_mail_body.py"
+  - "tests/test_mail_signaturen.py"
+  - "tests/test_mail_sig_ui.js"
   - "tests/test_tabfill_ui.js"
 ---
 
@@ -231,6 +235,97 @@ meldet die Wahl in einer Kopfzeile `[<Kennung>] STIL: <Name>`.
   was der geforderten Kopfzeile widerspricht.
 - Live (Qwen3.6-35B): foermliche Reklamation → „Foermlich", lockere Kollegenmail → „Locker", je
   **ein** Aufruf, Kopfzeile sauber entfernt.
+
+### Antwort-Format und Signaturen (2026-08-26)
+**Gemeldet:** "in dem Outlook-Add-In werden aktuell Entwuerfe im Text Format erstellt. 'HTML',
+'Text' und 'Rich-Text' sollten waehlbar sein. Ausserdem soll auswaehlbar eine Signatur sein."
+Code `backend/mail_body.py` (neu), `mail_accounts.signaturen/format_fuer`, vier Endpunkte
+`/api/email/signatures`, Felder `format`/`signatur` an Regel und Postfach, Reiter **Antworten**
+(hiess bis dahin *Stile* – er haelt jetzt beides).
+
+- **RICH-TEXT GIBT ES NICHT, UND ZWAR NACHGEMESSEN.** exchangelib 5.6.0 auf DEV:
+  `BodyField.from_xml` kennt genau `{Body: "Text", HTMLBody: "HTML"}`; EWS' `BodyType` hat daneben
+  nur `Best` (rein lesend). Was Outlook "Rich-Text" nennt, ist ausserdem **TNEF**
+  (`winmail.dat`) – ein Containerformat, das man selbst erzeugen muesste. Der Eintrag steht
+  **sichtbar und abgeschaltet** im Pulldown und nennt beim Zeigen den Grund: weglassen liesse die
+  Frage "warum fehlt das?" unbeantwortet, waehlbar machen und HTML daraus erzeugen waere eine
+  Behauptung. `norm_format("richtext")` gibt `""` zurueck – **nicht** `"html"`; ein Test haelt das
+  fest.
+- **Der BodyType haengt an der KLASSE des Wertes, nicht an einem Parameter.** `_Ews._rumpf` gibt
+  `HTMLBody(html)` oder den `str` zurueck; ein `str` wird zu `BodyType=Text` – genau daher kam der
+  gemeldete Zustand, ohne dass irgendwo ein Format falsch stand. Faellt `HTMLBody` aus (alte
+  Bibliothek), geht der TEXT hinaus **mit Journal-Zeile**: die Antwort ist wichtiger als ihr
+  Format, aber ein stiller Rueckfall waere nicht diagnostizierbar.
+- **IMAP: `add_alternative`, nicht `set_content(subtype="html")`** – der Textteil MUSS bleiben,
+  sonst bekommt jedes Programm ohne HTML-Anzeige eine leere Mail. Und **das Zitat muss in BEIDE
+  Teile**: zwei Alternativteile mit verschiedenem Inhalt sind ein Fehler, nicht nur haesslich.
+- **EINE SIGNATUR IST KEIN STIL – der Unterschied ist die Sicherheitsaussage:** ein Stil ist eine
+  **Anweisung an das Modell** (er geht in den Auftrag), eine Signatur ein **fester Text** (sie
+  wird hinter die fertige Antwort gesetzt und laeuft NIE durch ein Modell). Eine Signatur traegt
+  Pflichtangaben – Rechtsform, Registergericht, Geschaeftsfuehrung. Ein Modell, das sie
+  "mitschreibt", formuliert sie um, und **bei einer Regel liest niemand gegen.** Wer Signaturen je
+  in den Prompt zurueckverlegt, hebt diese Zusage auf.
+- **Deshalb: KEINE Erkennung aus dem Regel-Prompt und KEIN "automatisch waehlen".** Typische
+  Signaturnamen sind "Standard", "Kurz", "Englisch" – Woerter, die in jedem zweiten Regeltext
+  vorkommen; ein Zufallstreffer haenge eine falsche Anschrift an eine echte Mail. (Beim Stil ist
+  die Prompt-Erkennung richtig: einen Ton formuliert man in Prosa.)
+- **Die Signatur steht NICHT im Textfeld der Vorschau.** Was dort steht, ist bearbeitbar – eine
+  Pflichtangabe darf das nicht sein; ausserdem passt eine HTML-Signatur nicht in eine Textarea.
+  Angehaengt wird serverseitig in `antwort_senden`. **Genau deshalb ist der Hinweis Pflicht**
+  („Angehaengt wird die Signatur ‚Standard'."), sonst ist sie bis zum Blick ins Postfach
+  unsichtbar. Format und Signatur stehen auch im **Protokoll** – wer eine hinausgegangene Antwort
+  nachvollzieht, muss sehen, welche Anschrift daran hing.
+- **Format und Signatur der REGEL laufen ueber ContextVars** (`current_antwort_format`,
+  `current_antwort_signatur`), gesetzt von `_lauf_fuer_nachricht`, gelesen im Werkzeug. **Kein
+  Werkzeug-Parameter** – dieselbe Begruendung wie beim Postfach: waere es ein Feld im Schema,
+  koennte das MODELL (und damit ein eingeschmuggelter Satz) die Anschrift abwaehlen. Ein Test
+  lehnt die Feldnamen im Schema ab. Leer heisst "Vorgabe des Postfachs", **nicht** "keine" – das
+  ist der Unterschied zu `SIG_KEINER`.
+- **Die HTML-Entschaerfung ist eine ERLAUBNISLISTE mit `html.parser`, kein Regex.** Ein
+  `re.sub("<script.*?>")` uebersieht `<img onerror>`, `<svg><script>`, `javascript:`-Ziele und ein
+  nicht geschlossenes `<script`. Das Fragment wird zerlegt und aus einer Erlaubnisliste neu
+  aufgebaut; ein Test prueft die REGEL („nach der Entschaerfung nur erlaubte Tags"), nicht eine
+  Liste bekannter Boesewichte. **Geprueft wird beim BAUEN des Rumpfes, nicht beim Speichern** –
+  sonst geht ein Altbestand ungeprueft hinaus.
+- **⚠ DER FEHLER, DEN DER TEST GEFUNDEN HAT: void-Elemente in der Toetungsliste.** `<meta>`,
+  `<input>`, `<link>`, `<embed>` bekommen NIE ein Ende-Tag. Standen sie bei "mit Inhalt
+  verwerfen", kehrte der Tiefenzaehler nie auf 0 zurueck und **alles dahinter verschwand** – und
+  ein aus Outlook kopiertes Signatur-HTML beginnt typischerweise mit `<meta>`: die Anschrift waere
+  restlos weg gewesen, ohne jede Meldung. Jetzt drei Klassen (`_TOETEN` / `_LEER_WEG` / Rest:
+  Tag weg, **Inhalt bleibt**).
+- **Kein Markdown beim Umsetzen nach HTML.** Der Text ist von einem Menschen freigegeben; aus
+  `**wichtig**` Fettdruck zu machen aendert einen freigegebenen Text nachtraeglich, und `3*4`
+  waere Auszeichnung. Uebersetzt wird nur, was in reinem Text keine Bedeutung hat: Absaetze und
+  Umbrueche.
+- **Vorgabe ist TEXT** (`format_fuer` faellt darauf zurueck) – das Verhalten von vorher; ein
+  Postfach, das ohne Zutun HTML verschickt, waere eine Ueberraschung. Ein UNGUELTIGER Wert faellt
+  auf die Vorgabe des Postfachs, nicht auf einen geratenen; beim SPEICHERN wird er dagegen
+  **abgewiesen** (sonst springt das Feld zurueck und niemand erfaehrt warum), und Rich-Text wird
+  namentlich genannt.
+- **`antwort_format` steht in `AENDERBAR`, `signaturen` NICHT** – ein Skalar darf ein Formular
+  mitsenden, eine Liste wuerde bei zwei offenen Fenstern den jeweils anderen Stand ueberschreiben
+  (dieselbe Begruendung wie bei `stile`). Ein UI-Test prueft, dass der Speichern-Knopf des
+  Postfachs die Liste nicht mitschickt.
+- **Beim Loeschen rueckt KEINE nach**, verwaiste Kennung → Standard **mit Hinweis** (eine Antwort,
+  die wegen einer verwaisten Referenz nicht hinausgeht, ist der schlechtere Ausgang). `SIG_KEINER
+  = "-"` ist die ausdrueckliche Wahl "ohne" und muss von leer unterscheidbar bleiben.
+- **Deckel:** `SIG_TEXT_MAX = 4000`, `SIG_HTML_MAX = 60000`. Der HTML-Deckel ist bewusst viel
+  groesser: ein eingebettetes Logo als `data:`-URI ist Kilobyte. Anders als `VORGABE_MAX` haengt
+  hier **kein Modell-Kontext** dran – die Begruendung des Stil-Deckels gilt nicht.
+- **Der Reiter heisst jetzt „Antworten"** (`addin.tab_stile`, Schluessel unveraendert – nur der
+  WERT): er haelt Stile UND Signaturen. Bei 320 px Fensterbreite und fuenf Reitern ist "Stile &
+  Signaturen" nicht unterzubringen, und wer Signaturen sucht, findet sie unter "Stile" nicht.
+- `.ad-grid2` fuer die zwei Pulldowns nebeneinander: `min-width: 0` ist Pflicht, sonst schrumpft
+  ein Grid-Kind nicht unter seine Inhaltsbreite und schiebt das zweite Feld aus dem Fenster.
+- **Verifiziert:** `tests/test_mail_body.py` (74, ohne Fremdmodule) ·
+  `tests/test_mail_signaturen.py` (98) · `tests/test_mail_sig_ui.js` (89, jsdom gegen die echten
+  Dateien; die Antwort-Vorschau wird ENDE ZU ENDE geklickt). Gegenproben beissen einzeln:
+  `richtext` durchgelassen 3 FAIL, void-Elemente zurueck in `_TOETEN` 4, Signatur nicht angehaengt
+  1, `signatur` im Werkzeug-Schema 1, Rich-Text waehlbar 3.
+  **FALLSTRICKE im eigenen Test:** ohne Office-Attrappe wartet das Fenster 4 s und zeigt WEDER
+  Anmeldung NOCH Anwendung; und `POST /api/email/account` musste im Mock dasselbe Konto-Objekt
+  antworten wie `/status` – mit `{ok:true}` wurde `_konto` null und der Nachricht-Reiter zeigte
+  "hinterlege zuerst dein Postfach".
 
 #### Bedienhilfen
 - **Tab-Uebernahme** (`frontend/js/tabfill.js`): TAB uebernimmt in einem **leeren** Feld den

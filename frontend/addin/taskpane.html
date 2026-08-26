@@ -151,6 +151,16 @@
             background: color-mix(in srgb, var(--danger) 10%, transparent); }
         .ad-btn-block { display: block; width: 100%; text-align: center; }
         .ad-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+        /* Zwei Pulldowns nebeneinander (Format + Signatur). Das Fenster ist 320 px
+           schmal - unter 260 px wird daraus eine Spalte, sonst stehen zwei
+           abgeschnittene Beschriftungen neben einander. `min-width: 0` ist
+           Pflicht: ein Grid-Kind schrumpft sonst nicht unter seine Inhaltsbreite
+           und schiebt das zweite Feld aus dem Fenster (derselbe Fallstrick wie
+           bei Flex-Kindern mit overflow). */
+        .ad-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+        .ad-grid2 > * { min-width: 0; }
+        .ad-grid2 .ad-field { margin-top: 0; }
+        @media (max-width: 260px) { .ad-grid2 { grid-template-columns: 1fr; } }
         .ad-status { font-size: 11.5px; color: var(--text-muted); line-height: 1.45;
             word-break: break-word; }
 
@@ -346,7 +356,7 @@
     <div class="ad-tabs">
         <button class="ad-tab is-active" data-tab="mail" data-i18n="addin.tab_mail">Nachricht</button>
         <button class="ad-tab" data-tab="rules" data-i18n="addin.tab_rules">Regeln</button>
-        <button class="ad-tab" data-tab="stile" data-i18n="addin.tab_stile">Stile</button>
+        <button class="ad-tab" data-tab="stile" data-i18n="addin.tab_stile">Antworten</button>
         <button class="ad-tab" data-tab="acct" data-i18n="addin.tab_acct">Postfach</button>
         <button class="ad-tab" data-tab="log" data-i18n="addin.tab_log">Protokoll</button>
     </div>
@@ -391,6 +401,24 @@
             <button class="ad-btn ad-btn-block" id="ad-stil-neu" style="margin-top:8px;"
                     data-i18n="mail.style_new">Neuer Stil</button>
             <p class="ad-status" id="ad-stil-status" style="margin-top:6px;"></p>
+
+            <!-- Signaturen (2026-08-26). Sie stehen NEBEN den Stilen und nicht
+                 in ihnen: ein Stil ist eine Anweisung an das Modell, eine
+                 Signatur ein fester Text, der hinter die fertige Antwort
+                 gesetzt wird und NIE durch ein Modell laeuft. Deshalb heisst
+                 der Reiter seit dieser Aenderung "Antworten" und nicht mehr
+                 "Stile" - er haelt jetzt beides. -->
+            <div class="ad-sep"></div>
+            <div class="ad-h"><span data-i18n="mail.sigs_head">Signaturen</span>
+                <button type="button" class="ad-info" data-help="ad-help-sigs" aria-expanded="false"
+                    data-i18n-title="mail.help" title="Erklärung anzeigen">&#9432;</button></div>
+            <p class="ad-hint" data-i18n="mail.sigs_hint_short">Wird beim Senden hinter deinen Text gesetzt – unverändert, ohne KI.</p>
+            <div class="ad-help" id="ad-help-sigs" data-i18n-html="mail.help_sigs">Eine Signatur wird <b>wörtlich</b> angehängt: sie geht nie durch das Sprachmodell und kann deshalb nicht umformuliert werden. Genau darum steht sie nicht im Textfeld der Vorschau – was dort steht, ist bearbeitbar. Die Standard-Signatur (●) gilt überall, wo nichts anderes gewählt ist. Die <b>HTML-Fassung</b> ist optional; sie wirkt nur, wenn die Antwort als HTML gesendet wird, und erlaubt Logo, Links und Farben. Ohne HTML-Fassung wird die Textfassung umgesetzt.</div>
+            <div id="ad-sigs" style="margin-top:8px;"></div>
+            <div id="ad-sig-edit" class="hidden"></div>
+            <button class="ad-btn ad-btn-block" id="ad-sig-neu" style="margin-top:8px;"
+                    data-i18n="mail.sig_new">Neue Signatur</button>
+            <p class="ad-status" id="ad-sig-status" style="margin-top:6px;"></p>
         </div>
 
         <div class="ad-pane hidden" data-pane="acct">
@@ -437,6 +465,20 @@
                 <input type="text" id="ad-ord-gesendet" data-i18n-placeholder="mail.default_ph" placeholder="Standardordner">
                 <div class="ad-help" id="ad-help-folders" data-i18n="mail.help_folders">Nur ausfüllen, wenn deine Ordner anders heißen als üblich. Bleibt ein Feld leer, benutzt Jarvis den Standardordner deines Postfachs.</div>
             </div>
+            <!-- Vorgabe-Format des Postfachs. Sie gilt ueberall, wo nichts
+                 ausdruecklich gewaehlt ist - in der Antwort-Vorschau und in
+                 jeder Regel. Vorgabe ist bewusst "Nur Text": das ist das
+                 Verhalten von vor dem 2026-08-26, und ein Postfach, das ohne
+                 Zutun ploetzlich HTML verschickt, waere eine Ueberraschung. -->
+            <div class="ad-field">
+                <label data-i18n="mail.fmt_acct">Format neuer Antworten</label>
+                <select id="ad-format">
+                    <option value="text" data-i18n="mail.fmt_text">Nur Text</option>
+                    <option value="html">HTML</option>
+                    <option value="richtext" disabled data-i18n="mail.fmt_rtf">Rich-Text (nicht möglich)</option>
+                </select>
+                <span class="ad-hint" data-i18n="mail.fmt_acct_hint">Gilt, solange beim Antworten nichts anderes gewählt ist. Rich-Text kann Exchange über EWS nicht setzen.</span>
+            </div>
             <label class="ad-check"><input type="checkbox" id="ad-aktiv">
                 <span data-i18n="mail.acct_active">Postfach aktiv (Regeln dürfen darauf arbeiten)</span></label>
             <div class="ad-row">
@@ -477,7 +519,7 @@
 -->
 <script async src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
 <script src="/static/js/icons.js?v=1"></script>
-<script src="/static/js/i18n.js?v=177"></script>
+<script src="/static/js/i18n.js?v=178"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
 <script src="/static/js/theme.js?v=3"></script>
 <!-- Branding: setzt Markenfarben, Marken-Namen (.brand-app-name) und das
@@ -485,6 +527,6 @@
      Seiten. `/api/branding` haengt an KEINER Anmeldung, die Marke steht also
      schon auf dem Anmeldebildschirm richtig da. -->
 <script src="/static/js/branding.js?v=25"></script>
-<script src="/static/addin/addin.js?v=11"></script>
+<script src="/static/addin/addin.js?v=12"></script>
 </body>
 </html>

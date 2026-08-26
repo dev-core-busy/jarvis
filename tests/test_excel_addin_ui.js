@@ -1378,19 +1378,25 @@ function angemeldetesFenster(opt) {
         const knopf = doc.getElementById('xl-theme');
         pruefe(!!knopf, 'der Umschalter ist vorhanden');
 
-        // Start ist Dunkel (kein gespeicherter Wert).
-        pruefe(!doc.body.classList.contains('light'), 'Start: Dunkel');
-
-        knopf.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
-        pruefe(doc.body.classList.contains('light'),
-               'ein Klick schaltet auf Hell');
-        pruefe(win.localStorage.getItem('jarvis_theme') === 'light',
-               'und merkt sich das (jarvis_theme)');
+        // Start ist HELL (kein gespeicherter Wert) – Vorgabe seit 2026-08-25.
+        // ⚠ Diese fuenf Pruefungen standen bis 2026-08-25 auf der ALTEN Vorgabe
+        // (Start dunkel) und schlugen seit der Umstellung fehl. Aufgefallen ist
+        // es erst, als jsdom lokal verfuegbar war – die ganze Suite liess sich
+        // vorher nicht ausfuehren. Das Add-in selbst war korrekt umgestellt
+        // (Anti-Flacker-Skript in taskpane.html + theme.js), nur der Waechter
+        // nicht. Ein Test, der nicht laufen KANN, meldet keinen Fehler.
+        pruefe(doc.body.classList.contains('light'), 'Start: Hell (Vorgabe)');
 
         knopf.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
         pruefe(!doc.body.classList.contains('light'),
-               'ein zweiter Klick schaltet zurueck auf Dunkel');
+               'ein Klick schaltet auf Dunkel');
         pruefe(win.localStorage.getItem('jarvis_theme') === 'dark',
+               'und merkt sich das (jarvis_theme)');
+
+        knopf.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+        pruefe(doc.body.classList.contains('light'),
+               'ein zweiter Klick schaltet zurueck auf Hell');
+        pruefe(win.localStorage.getItem('jarvis_theme') === 'light',
                'und merkt sich auch das');
 
         // branding.js zieht die Hell-Farben der Marke ueber dieses Ereignis

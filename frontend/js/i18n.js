@@ -486,7 +486,7 @@ const _I18N = {
         // oben – hier stehen nur Texte, die es im Bereich /email nicht gibt.
         'addin.tab_mail':               'Nachricht',
         'addin.tab_rules':              'Regeln',
-        'addin.tab_stile':              'Antworten',
+        'addin.tab_stile':              'Stile',
         'addin.tab_acct':               'Postfach',
         'addin.tab_log':                'Protokoll',
         'addin.rules_hint':             'Jede Regel beobachtet einen Ordner. Trifft eine neue Nachricht ein, entscheidet das Sprachmodell anhand deines Prompts, was zu tun ist.',
@@ -3296,7 +3296,7 @@ const _I18N = {
         // ── Outlook add-in (frontend/addin/) ──────────────────────────────
         'addin.tab_mail':               'Message',
         'addin.tab_rules':              'Rules',
-        'addin.tab_stile':              'Replies',
+        'addin.tab_stile':              'Styles',
         'addin.tab_acct':               'Mailbox',
         'addin.tab_log':                'Log',
         'addin.rules_hint':             'Each rule watches one folder. When a new message arrives, the language model decides what to do based on your prompt.',

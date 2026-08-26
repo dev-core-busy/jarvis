@@ -325,9 +325,13 @@ Code `backend/mail_body.py` (neu), `mail_accounts.signaturen/format_fuer`, vier 
 - **Deckel:** `SIG_TEXT_MAX = 4000`, `SIG_HTML_MAX = 60000`. Der HTML-Deckel ist bewusst viel
   groesser: ein eingebettetes Logo als `data:`-URI ist Kilobyte. Anders als `VORGABE_MAX` haengt
   hier **kein Modell-Kontext** dran – die Begruendung des Stil-Deckels gilt nicht.
-- **Der Reiter heisst jetzt „Antworten"** (`addin.tab_stile`, Schluessel unveraendert – nur der
-  WERT): er haelt Stile UND Signaturen. Bei 320 px Fensterbreite und fuenf Reitern ist "Stile &
-  Signaturen" nicht unterzubringen, und wer Signaturen sucht, findet sie unter "Stile" nicht.
+- **Der Reiter heisst „Stile"** (`addin.tab_stile` – der Schluessel hat den Wert schon immer
+  getragen, nur der WERT wanderte). Er hielt seit den Signaturen kurzzeitig „Antworten", weil er
+  Stile UND Signaturen fuehrt und "Stile & Signaturen" bei 320 px Fensterbreite und fuenf Reitern
+  nicht unterzubringen ist; **auf Vorgabe des Nutzers (2026-08-26) heisst er wieder „Stile"** /
+  „Styles". Die Signaturen bleiben in diesem Reiter. **Wer den Namen erneut aendert, aendert DREI
+  Stellen** – i18n DE, i18n EN und den Rueckfalltext im `taskpane.html` (der steht dort, weil das
+  Fenster vor dem ersten `applyLang()` schon sichtbar ist).
 - `.ad-grid2` fuer die zwei Pulldowns nebeneinander: `min-width: 0` ist Pflicht, sonst schrumpft
   ein Grid-Kind nicht unter seine Inhaltsbreite und schiebt das zweite Feld aus dem Fenster.
 - **Verifiziert:** `tests/test_mail_body.py` (74, ohne Fremdmodule) ·

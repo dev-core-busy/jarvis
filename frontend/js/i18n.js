@@ -807,6 +807,7 @@ const _I18N = {
         'agent.idle':            'Bereit',
         'agent.stopped':         'Gestoppt',
         'agent.remove':          'Entfernen',
+        'agent.main':            'Hauptagent',
         'context.label':         'Kontext Speicher: {n} Einträge · {pct} %',
 
         // ── Desktop Panel ─────────────────────────────────────
@@ -3606,6 +3607,7 @@ const _I18N = {
         'agent.idle':            'Ready',
         'agent.stopped':         'Stopped',
         'agent.remove':          'Remove',
+        'agent.main':            'Main agent',
         'context.label':         'Context Memory: {n} entries · {pct} %',
 
         // ── Desktop Panel ─────────────────────────────────────

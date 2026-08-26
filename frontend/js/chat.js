@@ -930,7 +930,10 @@
             Object.keys(_agentInfos).forEach(k => delete _agentInfos[k]);
             Object.keys(_subBubbles).forEach(k => delete _subBubbles[k]);
             _activeAgentId = '_main';
-            if (agent.agent_id) _agentInfos[agent.agent_id] = { label: agent.label || 'Jarvis', state: 'running', is_sub_agent: false };
+            // Beschriftung IMMER selbst bestimmen, nicht `agent.label` vom
+            // Server: der liefert das technische "Hauptagent" ohne Marke, und
+            // der fruehere Rueckfall war ein hart verdrahtetes 'Jarvis'.
+            if (agent.agent_id) _agentInfos[agent.agent_id] = { label: _mainAgentLabel(), state: 'running', is_sub_agent: false };
         } else if (ev === 'finished' && !isSub) {
             agentRunning = false;
             _stopRunWatchdog();
@@ -965,8 +968,15 @@
         }
         if (ev === 'paused' && isSub && _agentInfos[agent.agent_id]) _agentInfos[agent.agent_id].state = 'paused';
 
-        // Gesamtliste aus dem Event uebernehmen (falls mitgeliefert)
-        (msg.agents || []).forEach(a => { _agentInfos[a.agent_id] = { label: a.label, state: a.state, is_sub_agent: a.is_sub_agent }; });
+        // Gesamtliste aus dem Event uebernehmen (falls mitgeliefert). Fuer den
+        // HAUPTagenten gilt auch hier die eigene Beschriftung – sonst
+        // ueberschriebe die Serverliste sie eine Zeile spaeter wieder mit
+        // "Hauptagent" ohne Marke.
+        (msg.agents || []).forEach(a => {
+            _agentInfos[a.agent_id] = {
+                label: a.is_sub_agent ? a.label : _mainAgentLabel(),
+                state: a.state, is_sub_agent: a.is_sub_agent };
+        });
         // …UND Karten entfernen, die es im Backend nicht mehr gibt. Das forEach
         // oben schreibt nur, es raeumt nicht ab: ein Sub-Agent, der beim Senden
         // des Ereignisses schon aus dem AgentManager entfernt war, blieb dadurch
@@ -1005,6 +1015,18 @@
         scrollToBottom();
     }
 
+    // Beschriftung der Hauptagent-Karte: Markenname aus dem Branding, dahinter
+    // die Rolle. Hier stand fest "Jarvis" – auf einem White-Label-System nannte
+    // die Agentenliste damit das Produkt dahinter, waehrend jede andere Stelle
+    // den Assistenten-Namen zeigt. jarvisMarke() faellt ohne Branding selbst auf
+    // "Jarvis" zurueck, das Verhalten einer ungebrandeten Installation aendert
+    // sich also nicht.
+    function _mainAgentLabel() {
+        const marke = (window.jarvisMarke ? window.jarvisMarke() : '') || 'Jarvis';
+        const rolle = window.t ? window.t('agent.main') : 'Hauptagent';
+        return marke + ' · ' + rolle;
+    }
+
     // Rendert das Multi-Agent-Panel (nur Admin, nur wenn Sub-Agenten existieren)
     function _renderAgentPanel() {
         const panel = $('agent-panel'), list = $('agent-panel-list');
@@ -1016,19 +1038,31 @@
         const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
         list.innerHTML = ids.map(id => {
             const info = id === '_main'
-                ? { label: 'Jarvis', state: agentRunning ? 'running' : 'idle', is_sub_agent: false }
+                ? { label: _mainAgentLabel(), state: agentRunning ? 'running' : 'idle', is_sub_agent: false }
                 : _agentInfos[id];
             if (!info) return '';
             const dot = info.state === 'running' ? 'var(--warning)' : info.state === 'paused' ? 'var(--accent)' : 'var(--success)';
             const act = id === _activeAgentId;
+            const txt = info.label || id;
+            // title, weil die Karte nur 220 px breit ist und laengere Namen mit
+            // Ellipse abgeschnitten werden – ein abgeschnittener Markenname
+            // waere sonst nicht lesbar.
             return '<div class="agent-card" data-agent-id="' + esc(id) + '" style="display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;cursor:pointer;margin-bottom:4px;'
                 + (act ? 'background:rgba(var(--accent-rgb,99,102,241),0.18);' : '') + '">'
                 + '<span style="width:8px;height:8px;border-radius:50%;background:' + dot + ';flex-shrink:0;"></span>'
-                + '<span style="font-size:0.82rem;color:var(--text-primary,#f8fafc);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(info.label || id) + (info.is_sub_agent ? '' : '') + '</span>'
+                + '<span title="' + esc(txt) + '" style="font-size:0.82rem;color:var(--text-primary,#f8fafc);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(txt) + '</span>'
                 + '</div>';
         }).join('');
         list.querySelectorAll('.agent-card').forEach(c => c.addEventListener('click', () => _switchToAgent(c.dataset.agentId)));
     }
+
+    // Die Karten werden aus einem String gebaut, applyLang() erreicht sie nicht –
+    // ohne diesen Zuhoerer bliebe "Hauptagent" nach einem Sprachwechsel stehen,
+    // bis das naechste Agent-Ereignis eintrifft. Ohne sichtbares Panel kostet
+    // der Aufruf nichts (fruehes return).
+    window.addEventListener('jarvis-lang-changed', function () {
+        try { _renderAgentPanel(); } catch (e) { /* egal */ }
+    });
 
     // ═════════════════════════════════════════════════════════════
     //  BUBBLES RENDERN

@@ -11,6 +11,7 @@
  *   4. Verlauf: Eintrag nach dem Lauf, Klick UEBERNIMMT nur (startet nicht)
  *   5. Escape schliesst zuerst den Anweisungs-Dialog, dann das Verlaufsfeld
  *   6. Portal: Kachel nur bei permissions.sap
+ *   7. "Mein SAP-Zugang": die Aussetzer-Meldung nennt den GRUND
  *
  * WICHTIG (Fallstrick vom 2026-07-30): am Ende window.close() + process.exit(),
  * sonst haelt der 30-Sekunden-Timer der LLM-Anzeige den Prozess fuer immer offen.
@@ -129,6 +130,10 @@ function build(htmlFile, me, opts) {
                 if (u.startsWith('/api/sap/ask')) {
                     askCalls++;
                     return json({ ok: true, answer: '## Ergebnis\n\n| A | B |\n|---|---|\n| 1 | 2 |' });
+                }
+                if (u.startsWith('/api/sap/account')) {
+                    return opts.account ? json({ ok: true, account: opts.account })
+                                        : json({ ok: true });
                 }
                 if (u.startsWith('/api/sap/stop')) return json({ ok: true });
                 if (u.startsWith('/api/llm/active-status')) return json({ status: 'ok', profile_name: 'Test' });
@@ -577,6 +582,74 @@ function loadScript(dom, rel) {
                   missing.join(', '));
         }
         s.window.close();
+    }
+
+    // ══ 7. "Mein SAP-Zugang": der Aussetzer muss seinen GRUND nennen ══
+    //
+    // Vorfall 2026-08-25 (ECHT): der Zugang wurde wiederholt ausgesetzt, weil
+    // BERECHTIGUNGS-Fehler als Anmeldefehler gezaehlt wurden. Die Oberflaeche
+    // blendete im ausgesetzten Zustand `letzter_fehler` aus und sagte nur
+    // "Kennwort pruefen" – der tatsaechliche Fehler war NIRGENDS zu sehen, und
+    // der Satz schickte den Benutzer an die falsche Stelle. Deshalb ist der
+    // Grund Teil der Meldung. Geprueft wird der gerenderte TEXT, nicht der
+    // Quelltext: am Quelltext liesse sich nicht ablesen, ob er ankommt.
+    section('7. Mein SAP-Zugang: Aussetzer nennt den Grund');
+    {
+        const GRUND = 'insufficient privilege: Not authorized';
+        const d7 = build('sap.html', { username: 'anna', is_admin: true,
+                                       permissions: { sap: true } },
+                         { account: { vorhanden: true, connection_type: 'hana',
+                                      aktiv: true, hana_port: 30015,
+                                      anmeldefehler: 3, ausgesetzt: true,
+                                      ausgesetzt_grund: GRUND,
+                                      letzter_fehler: GRUND,
+                                      erlaubte_hosts: [], host_ok: true, cert: {} } });
+        loadScript(d7, 'js/i18n.js');
+        loadScript(d7, 'js/chatlib.js');
+        loadScript(d7, 'js/sap_portal.js');
+        await sleep(140);
+        const st = d7.window.document.getElementById('sp-acc-status');
+        const txt = (st && st.textContent) || '';
+        check('Aussetzer-Meldung erscheint', /[Aa]usgesetzt/.test(txt), txt);
+        check('...und nennt den tatsaechlichen Grund', txt.indexOf(GRUND) >= 0, txt);
+        check('...als Fehler markiert', !!st && /is-error/.test(st.className), st && st.className);
+        d7.window.close();
+    }
+    {
+        // Gegenrichtung: ohne Aussetzer wird der Grund NICHT drangehaengt –
+        // sonst stuende an einem gesunden Zugang ein alter Fehlertext.
+        const d7b = build('sap.html', { username: 'anna', is_admin: true,
+                                        permissions: { sap: true } },
+                          { account: { vorhanden: true, connection_type: 'odata',
+                                       aktiv: true, hana_port: 443,
+                                       anmeldefehler: 0, ausgesetzt: false,
+                                       ausgesetzt_grund: 'alter Text von frueher',
+                                       letzter_fehler: '',
+                                       erlaubte_hosts: [], host_ok: true, cert: {} } });
+        loadScript(d7b, 'js/i18n.js');
+        loadScript(d7b, 'js/chatlib.js');
+        loadScript(d7b, 'js/sap_portal.js');
+        await sleep(140);
+        const st = d7b.window.document.getElementById('sp-acc-status');
+        const txt = (st && st.textContent) || '';
+        check('ohne Aussetzer keine Aussetzer-Meldung', !/[Aa]usgesetzt nach/.test(txt), txt);
+        check('...und kein alter Grund im Text', txt.indexOf('alter Text von frueher') < 0, txt);
+        d7b.window.close();
+    }
+    {
+        // Der neue Schluessel muss in BEIDEN Sprachen existieren, sonst steht
+        // im englischen Portal der Schluesselname im Fehlertext.
+        const d7c = build('sap.html', { username: 'anna', is_admin: true,
+                                        permissions: { sap: true } });
+        loadScript(d7c, 'js/i18n.js');
+        await sleep(40);
+        const fehlt = [];
+        ['de', 'en'].forEach((lg) => {
+            d7c.window._lang = lg;
+            if (d7c.window.t('sap.acc_last_error') === 'sap.acc_last_error') fehlt.push(lg);
+        });
+        check('sap.acc_last_error in beiden Sprachen', fehlt.length === 0, fehlt.join(', '));
+        d7c.window.close();
     }
 
     // ── Ergebnis ────────────────────────────────────────────────────

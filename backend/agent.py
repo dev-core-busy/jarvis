@@ -183,6 +183,45 @@ _EXTERNAL_WRITE_TOOLS = {
 # den vollstaendigen Kommentarverlauf).
 _TOOL_ERGEBNIS_MAX = 5000
 
+# ── Base64-Bilddaten im Werkzeug-Ergebnis: auslagern statt abschneiden ────────
+# Ein Bild als base64 ist fuer das Modell WERTLOS und fuer den Kontext toedlich:
+# ein 150-dpi-PNG sind rund 200.000 Zeichen, der Deckel oben zeigt davon 2,5 %.
+# Bis 2026-08-26 wurde genau das gemacht – mitten im Blob abgeschnitten. Das
+# Modell sah einen Datenklumpen mit Kuerzungshinweis, konnte daraus nichts
+# machen und erfand eine Begruendung ("die Base64-Daten waren zu gross fuer den
+# Chat") samt Ersatzweg. Gemeldet von ECHT: ein ausdruecklich VERLANGTES
+# generiertes Bild wurde daraufhin durch einen matplotlib-Plot ersetzt.
+# Jetzt gilt: Bilddaten gehen NIE durch das Sprachmodell. Sie werden zur Datei,
+# das Modell bekommt die kurze URL – dasselbe Muster wie bei `generate_image`,
+# `[[JARVIS_CHART:…]]` und `[[JARVIS_DELIVER:…]]`.
+_B64_MIN_ZEICHEN = 512                    # darunter ist es kein Bild, das jemand sehen will
+_B64_MAX_ZEICHEN = 48 * 1024 * 1024       # Notbremse gegen einen Riesenblob
+_B64_MAX_BILDER = 4                       # ein Skript, das 100 PNGs ausgibt, flutet den Chat nicht
+# Magische Bytes -> Endung. NUR was `/api/generated/{name}` auch ausliefert
+# (main.py::get_generated_image) – eine .bmp waere eine URL, die 400 antwortet.
+_B64_MAGIC = (
+    (b"\x89PNG\r\n\x1a\n", "png"),
+    (b"\xff\xd8\xff", "jpg"),
+    (b"GIF87a", "gif"),
+    (b"GIF89a", "gif"),
+)
+_B64_ALPHABET = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=")
+# Data-URL: die Nutzlast steht auf DERSELBEN Zeile – genau das ist eine Data-URL.
+# Bewusst kein `\s` in der Zeichenklasse: Fliesstext besteht ebenfalls aus
+# Buchstaben und Leerzeichen, die Klasse frisst sonst den halben Folgeabsatz.
+_B64_DATA_URL_RE = re.compile(
+    r"data:image/[a-z0-9.+-]{1,12};base64,([A-Za-z0-9+/]{%d,}={0,2})" % _B64_MIN_ZEICHEN,
+    re.IGNORECASE)
+# EINGEBETTETER Lauf – die haeufigste Form ueberhaupt: ein Werkzeug (MCP-Server,
+# API-Wrapper, Skill) liefert JSON mit einem base64-Feld, also
+# {"image": "iVBORw0KGgo…"}. Eine zeilenweise Erkennung findet das NIE, weil die
+# Zeile Klammern und Anfuehrungszeichen enthaelt.
+# Warum das gefahrlos ist: das Leerzeichen gehoert NICHT zum Alphabet – ein
+# zusammenhaengender Lauf von 512 Zeichen ohne jedes Leerzeichen ist kein
+# Fliesstext. Und was kein Bild ist, faellt an den magischen Bytes durch und
+# bleibt unangetastet.
+_B64_LAUF_RE = re.compile(r"[A-Za-z0-9+/]{%d,}={0,2}" % _B64_MIN_ZEICHEN)
+
 _BLOCKED_TOOLS_FOR_LDAP = {
     "spawn_agent",         # Keine Sub-Agents (koennten Shell/FS ungefiltert nutzen)
     "write_clipboard",     # Kein Clipboard-Schreibzugriff
@@ -4098,6 +4137,179 @@ KRITISCH – Autonomie-Regeln:
     # Nutzer unmittelbar vor dem Absenden hochlaedt.
     _DELIVER_TOLERANCE_SEC = 120
 
+    @staticmethod
+    def _b64_endung(daten: bytes) -> str:
+        """Endung aus den magischen Bytes – "" wenn es kein ausliefer-
+        barer Bildtyp ist. Die Typ-Angabe einer Data-URL wird bewusst NICHT
+        geglaubt: sie ist Text aus einem Werkzeug-Ergebnis, die Bytes sind der
+        Beweis. Ein `data:image/png;base64,` vor einem ZIP darf keine .png-URL
+        erzeugen, die der Browser dann nicht anzeigen kann."""
+        for magie, endung in _B64_MAGIC:
+            if daten.startswith(magie):
+                return endung
+        # WEBP: RIFF....WEBP – die vier Laengenbytes dazwischen sind beliebig.
+        if len(daten) >= 12 and daten[:4] == b"RIFF" and daten[8:12] == b"WEBP":
+            return "webp"
+        return ""
+
+    @classmethod
+    def _b64_bloecke(cls, text: str):
+        """Findet base64-Bilddaten im Text: (start, ende, nutzlast).
+
+        DREI Formen, weil ein Werkzeug base64 auf drei Arten zurueckgibt:
+          1. **Data-URL** – Nutzlast auf derselben Zeile hinter dem Praefix.
+          2. **Nackter Blob ueber mehrere Zeilen** – was `base64 datei.png`
+             bzw. `b64encode(...)` auf stdout erzeugt.
+          3. **EINGEBETTET** – `{"image": "iVBORw0KGgo…"}`. Das ist die
+             HAEUFIGSTE Form (MCP-Server, API-Wrapper, Skills mit JSON-Antwort)
+             und faellt durch jede zeilenweise Erkennung, weil die Zeile
+             Klammern und Anfuehrungszeichen enthaelt. Die erste Fassung dieses
+             Fixes hat genau sie uebersehen.
+
+        Die Reihenfolge ist wichtig: erst die Formen mit Struktur (1, 2), dann
+        die allgemeine (3) NUR in den noch freien Bereichen. Umgekehrt zerlegte
+        Form 3 einen mehrzeiligen Blob in seine Einzelzeilen.
+
+        Warum Form 3 gefahrlos ist: das LEERZEICHEN gehoert nicht zum Alphabet.
+        Ein zusammenhaengender Lauf von `_B64_MIN_ZEICHEN` Zeichen ohne jedes
+        Leerzeichen ist kein Fliesstext – und was trotzdem keines ist, faellt an
+        den magischen Bytes durch und bleibt unangetastet."""
+        treffer: list[tuple[int, int, str]] = []
+        belegt: list[tuple[int, int]] = []
+
+        def _frei(a: int, b: int) -> bool:
+            return all(b <= x or a >= y for x, y in belegt)
+
+        def _nimm(a: int, b: int, nutz: str) -> None:
+            if len(nutz) >= _B64_MIN_ZEICHEN and _frei(a, b):
+                treffer.append((a, b, nutz))
+                belegt.append((a, b))
+
+        # Form 1: Data-URL
+        for m in _B64_DATA_URL_RE.finditer(text):
+            _nimm(m.start(), m.end(), m.group(1))
+
+        # Form 2: nackte Bloecke ueber Zeilenlaeufe
+        pos = 0
+        lauf: list[tuple[int, int, str]] = []   # (start, ende, inhalt)
+        for zeile in text.splitlines(keepends=True):
+            start = pos
+            pos += len(zeile)
+            roh = zeile.strip()
+            ist_b64 = (len(roh) >= 60 and _B64_ALPHABET.issuperset(roh)
+                       and "=" not in roh[:-2])
+            if ist_b64:
+                lauf.append((start + zeile.index(roh), start + zeile.index(roh) + len(roh), roh))
+                continue
+            # Kurze Restzeile schliesst einen laufenden Block ab – aber NUR,
+            # wenn sie sein Rest ueberhaupt SEIN KANN. Ein Wort wie "fertig"
+            # besteht ausschliesslich aus base64-Zeichen; naiv angehaengt
+            # verschwindet es aus dem Ergebnis UND beschaedigt das Bild am Ende
+            # (die magischen Bytes stehen vorn, der Schaden faellt dort nicht
+            # auf). Genau das hat der Test beim ersten Lauf gefunden.
+            #   (1) Ein Block MIT Polster ist abgeschlossen – was folgt, ist Text.
+            #   (2) Sonst muss die Gesamtlaenge ein Vielfaches von 4 ergeben.
+            if lauf and roh and len(roh) < 60 and _B64_ALPHABET.issuperset(roh):
+                bisher = sum(len(t[2]) for t in lauf)
+                passt = (not lauf[-1][2].endswith("=")) and (bisher + len(roh)) % 4 == 0
+                if passt:
+                    lauf.append((start + zeile.index(roh),
+                                 start + zeile.index(roh) + len(roh), roh))
+            if lauf:
+                _nimm(lauf[0][0], lauf[-1][1], "".join(t[2] for t in lauf))
+                lauf = []
+        if lauf:
+            _nimm(lauf[0][0], lauf[-1][1], "".join(t[2] for t in lauf))
+
+        # Form 3: eingebettete Laeufe (JSON-Feld, Anfuehrungszeichen, key=wert)
+        # – zuletzt und nur dort, wo noch nichts liegt.
+        for m in _B64_LAUF_RE.finditer(text):
+            _nimm(m.start(), m.end(), m.group(0))
+
+        treffer.sort(key=lambda t: t[0])
+        return treffer
+
+    def _bilddaten_bergen(self, tool_name: str, text: str) -> str:
+        """Base64-Bilddaten aus einem Werkzeug-Ergebnis in eine Datei auslagern
+        und durch die kurze `/api/generated/…`-URL ersetzen.
+
+        WARUM DAS DIE RICHTIGE STELLE IST: `_ergebnis_kappen` ist der EINE
+        Engpass, durch den beide Wege laufen (Chat und `_run_headless`). Eine
+        Auslagerung nur im Chat-Weg waere die halbe Reparatur – Short Tracks,
+        E-Mail-Regeln und Cron saehen weiter den abgeschnittenen Blob.
+
+        Die Reihenfolge ist Semantik: erst bergen, DANN kappen. Umgekehrt waere
+        der Blob schon zerschnitten und die magischen Bytes am Ende fehlten.
+
+        `record_task_image` ist die zweite Haelfte und nicht optional: nennt das
+        Modell die URL in seiner Antwort nicht, traegt `_mit_bildern` sie nach.
+        Ohne das haette der Benutzer wieder eine Antwort ohne Bild – der Fehler,
+        der hier behoben wird.
+
+        Fail-safe: jeder Fehler laesst den Text unveraendert. Ein nicht
+        ausgelagerter Blob wird gekappt wie bisher; ein verlorenes
+        Werkzeug-Ergebnis waere der schlimmere Ausgang.
+        """
+        try:
+            if not text or "base64" not in text.lower() and len(text) < _B64_MIN_ZEICHEN:
+                return text
+            # Screenshots gehen ihren eigenen Weg: der Aufrufer liest das ROHE
+            # Ergebnis (`IMAGE_BASE64:`) und haengt das Bild als Inline-Part an
+            # das Modell. Hier zusaetzlich auszulagern erzeugte eine zweite
+            # Kopie und eine URL, die niemand angefordert hat.
+            from backend.tools.screenshot import IMAGE_PREFIX
+            if text.startswith(IMAGE_PREFIX):
+                return text
+        except Exception:  # noqa: BLE001
+            pass
+
+        try:
+            bloecke = self._b64_bloecke(text)
+            if not bloecke:
+                return text
+
+            from backend.tools.image_gen import _IMG_DIR, record_task_image
+
+            teile: list[str] = []
+            letzte = 0
+            gebaut = 0
+            for start, ende, nutz in bloecke:
+                if gebaut >= _B64_MAX_BILDER or len(nutz) > _B64_MAX_ZEICHEN:
+                    continue
+                try:
+                    daten = base64.b64decode(nutz + "=" * (-len(nutz) % 4), validate=False)
+                except Exception:  # noqa: BLE001
+                    continue
+                endung = self._b64_endung(daten)
+                if not endung:
+                    continue          # kein Bild -> unangetastet lassen (wird gekappt wie bisher)
+
+                _IMG_DIR.mkdir(parents=True, exist_ok=True)
+                fname = f"{uuid.uuid4().hex}.{endung}"
+                (_IMG_DIR / fname).write_bytes(daten)
+                url = f"/api/generated/{fname}"
+                record_task_image(_IMG_DIR / fname, url)
+                gebaut += 1
+
+                teile.append(text[letzte:start])
+                teile.append(
+                    f"[BILDDATEN AUSGELAGERT: {endung.upper()}, {len(daten) // 1024} KB. "
+                    f"Base64 gehoert NICHT in deine Antwort – sie wird nicht angezeigt und "
+                    f"fuellt den Kontext. Gib stattdessen GENAU diese Zeile unveraendert aus, "
+                    f"damit das Bild erscheint:]\n![Bild]({url})"
+                )
+                letzte = ende
+                print(f"[AGENT {self.agent_id}] Bilddaten aus '{tool_name}' ausgelagert: "
+                      f"{len(nutz)} base64-Zeichen -> {url} ({len(daten) // 1024} KB)", flush=True)
+
+            if not gebaut:
+                return text
+            teile.append(text[letzte:])
+            return "".join(teile)
+        except Exception as e:  # noqa: BLE001
+            print(f"[AGENT {self.agent_id}] Bilddaten-Bergung fehlgeschlagen: {e}", flush=True)
+            return text
+
     def _ergebnis_kappen(self, tool_name: str, result) -> str:
         """Werkzeug-Ergebnis auf die Kontextgrenze kuerzen – MIT Ausweis.
 
@@ -4114,6 +4326,10 @@ KRITISCH – Autonomie-Regeln:
           antwortete auf einem Ausschnitt, ohne es sagen zu koennen.
         """
         text = str(result)
+        # ZUERST bergen, DANN kappen. Umgekehrt waere der Blob schon
+        # zerschnitten – die magischen Bytes stehen am Anfang, das Bild aber
+        # waere unvollstaendig und die Datei unbrauchbar.
+        text = self._bilddaten_bergen(tool_name, text)
         grenze = _TOOL_ERGEBNIS_MAX
         try:
             eigen = int(getattr(self.tools_map.get(tool_name), "ergebnis_max", 0) or 0)

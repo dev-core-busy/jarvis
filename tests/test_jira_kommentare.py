@@ -82,6 +82,14 @@ class _Agent:
 
     _TOOL_ERGEBNIS_MAX = 5000
 
+    # Seit 2026-08-26 lagert `_ergebnis_kappen` ZUERST base64-Bilddaten aus
+    # (`_bilddaten_bergen`). Hier wird nur das KAPPEN geprueft, deshalb eine
+    # Durchreiche – ohne sie bricht dieser Test mit AttributeError ab und misst
+    # gar nichts mehr. Die Bergung hat ihren eigenen Waechter:
+    # tests/test_bilddaten_bergen.py.
+    def _bilddaten_bergen(self, tool_name, text):
+        return text
+
 
 # Die echte Methode aus agent.py in die Attrappe holen.
 _src = _kap.replace("_TOOL_ERGEBNIS_MAX", "self._TOOL_ERGEBNIS_MAX")

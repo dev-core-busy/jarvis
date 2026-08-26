@@ -287,6 +287,33 @@ select option:hover {
    `.jv-cpu-bar` ist die eine Fassung; die Farbreihe ist bewusst fest und
    nicht themenabhaengig: sie bedeutet gruen=frei bis rot=ausgelastet.
    ═══════════════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════════════
+   Marken-Logo als Weg zum Portal (Vorgabe des Nutzers, 2026-08-26)
+
+   Nur das Aussehen. WELCHE Logos das bekommen, entscheidet
+   `frontend/js/logo_home.js` – naemlich die, deren Seite ueberhaupt einen Weg
+   zum Portal hat. Die Klasse wird von dort gesetzt, damit ein Logo ohne
+   Funktion nicht wie ein Knopf aussieht.
+
+   Steht in theme.css und NICHT in style.css/chat.css: das Logo steht auf jeder
+   Bereichsseite, jene beiden laden nur /settings + /wissen bzw. /chat +
+   /userchat (Register).
+   ═══════════════════════════════════════════════════════════════════════ */
+.jv-logo-home {
+    cursor: pointer;
+    /* Nur eine Andeutung: das Logo ist eine Marke, kein Bedienelement, und
+       soll beim Zeigen nicht wie ein Knopf aufblitzen. */
+    transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.jv-logo-home:hover { opacity: 0.85; }
+.jv-logo-home:active { transform: scale(0.96); }
+/* Sichtbarer Fokus NUR fuer die Tastatur: `:focus` allein setzte nach jedem
+   Mausklick einen Rahmen ums Logo, der bis zum naechsten Klick stehenbleibt. */
+.jv-logo-home:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
 .jv-cpu-bar {
     width: 130px;
     height: 18px;

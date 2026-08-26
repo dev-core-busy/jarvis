@@ -9448,6 +9448,77 @@ async def email_signatures_add(request: Request,
     return JSONResponse({"ok": True, "signaturen": liste})
 
 
+@app.post("/api/email/signatures/import")
+async def email_signatures_import(request: Request,
+                                  user: str = Depends(require_email_access)):
+    """Die im POSTFACH hinterlegte Signatur uebernehmen (Exchange/OWA).
+
+    Der Weg dahin ist ``UserConfiguration`` ``OWA.UserOptions`` – dasselbe
+    Objekt, das ``Get-MailboxMessageConfiguration`` liest. **Nicht** die
+    Signatur aus Outlook auf dem Arbeitsplatz: die liegt lokal auf dem Rechner
+    und ist von hier grundsaetzlich unerreichbar. Auf den meisten
+    Arbeitsplaetzen ist beides derselbe Text.
+
+    **Nur auf Knopfdruck, nie automatisch.** Eine Signatur traegt
+    Pflichtangaben; sie beim ersten Anmelden still anzulegen hiesse, dass sie
+    unter Antworten steht, fuer die niemand sie bestimmt hat.
+
+    Es entsteht eine **Kopie**. Wird die Signatur spaeter in Outlook geaendert,
+    aendert sich diese hier nicht mit – deshalb sagt die Antwort ausdruecklich,
+    dass ein erneutes Uebernehmen noetig ist.
+
+    ``ersetzen: true`` frischt eine schon uebernommene Signatur auf. Ohne das
+    antwortet der Endpunkt **409** statt zu ueberschreiben: der Eintrag kann von
+    Hand nachbearbeitet worden sein.
+
+    Der Benutzer kommt aus der Anmeldung, NIE aus dem Rumpf – sonst waere das
+    hier ein Weg, in ein fremdes Postfach zu sehen.
+    """
+    from backend import mail_accounts
+    from backend.mail_client import MailClient, MailFehler
+    hinweis = _email_skill_hinweis()
+    if hinweis:
+        return JSONResponse(hinweis, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    ersetzen = bool((body or {}).get("ersetzen"))
+
+    def _lesen() -> dict:
+        konto = mail_accounts.konto_fuer(user, trotz_aussetzer=True)
+        with MailClient(konto) as c:
+            return c.signatur_lesen()
+
+    try:
+        gefunden = await asyncio.to_thread(_lesen)
+    except MailFehler as f:
+        return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Signatur konnte nicht gelesen "
+                                                   "werden: %s" % e}, status_code=500)
+    try:
+        liste, sig_id, art = await asyncio.to_thread(
+            mail_accounts.sig_uebernehmen, user,
+            gefunden.get("text") or "", gefunden.get("html") or "", ersetzen)
+    except MailFehler as f:
+        return JSONResponse({"ok": False, "error": str(f),
+                             "vorhanden": f.kategorie == "vorhanden"},
+                            status_code=409 if f.kategorie == "vorhanden" else 400)
+    # Was beim Entschaerfen herausfaellt, wird BEZIFFERT. In Outlook gebaute
+    # Signaturen verweisen ihr Logo auf einen lokalen Pfad des Absenders
+    # (file:///C:/Users/…) – das kann ein serverseitiger Versand nicht
+    # aufloesen. Ohne diese Zahl fehlt hinterher das Logo und nichts sagt warum.
+    from backend import mail_body
+    _sicher, bericht = mail_body.html_entschaerfen_mit_bericht(
+        gefunden.get("html") or "")
+    return JSONResponse({"ok": True, "signaturen": liste, "id": sig_id, "art": art,
+                         "name": mail_accounts.SIG_IMPORT_NAME,
+                         "text_zeichen": len(gefunden.get("text") or ""),
+                         "html_zeichen": len(gefunden.get("html") or ""),
+                         "bilder_weg": int(bericht.get("bilder_weg") or 0)})
+
+
 @app.put("/api/email/signatures/{sig_id}")
 async def email_signatures_set(sig_id: str, request: Request,
                                user: str = Depends(require_email_access)):

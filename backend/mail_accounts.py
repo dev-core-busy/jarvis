@@ -768,6 +768,61 @@ def sig_aendern(user: str, sig_id: str, felder: dict) -> list[dict]:
     return _sig_schreiben(un, liste)
 
 
+# Name der aus dem Postfach uebernommenen Signatur. FEST und nicht waehlbar:
+# nur so ist eine zweite Uebernahme als Auffrischung derselben Kopie erkennbar
+# statt als weiterer Eintrag - sonst haette man nach dreimaligem Druecken drei
+# fast gleiche Signaturen und wuesste bei keiner, welche aktuell ist.
+SIG_IMPORT_NAME = "Aus dem Postfach"
+
+
+def sig_uebernehmen(user: str, text: str, html: str,
+                    ersetzen: bool = False) -> tuple[list[dict], str, str]:
+    """Signatur aus dem Postfach in die eigene Liste uebernehmen.
+
+    Rueckgabe ``(liste, sig_id, "neu"|"aktualisiert")``.
+
+    **Es ist eine KOPIE, keine Verknuepfung.** Wer die Signatur spaeter in
+    Outlook aendert, aendert diese hier nicht mit – die Oberflaeche muss das
+    sagen, sonst behauptet der Knopf einen Abgleich, den es nicht gibt, und
+    eine geaenderte Anschrift ginge unbemerkt falsch hinaus.
+
+    **Zu lang wird ABGELEHNT, nicht gekuerzt.** ``sig_anlegen`` schneidet still
+    auf die Grenze - bei HTML faellt der Schnitt mitten in ein Tag, und was
+    danach fehlt, sieht niemand. Eine Anschrift, die zur Haelfte hinausgeht,
+    ist schlimmer als eine Absage mit Zahlen.
+    """
+    un = norm_user(user)
+    if not un:
+        raise MailFehler("Kein Benutzer - die Signatur kann nicht zugeordnet werden.",
+                         "eingabe")
+    t, h = str(text or "").strip(), str(html or "").strip()
+    if not t and not h:
+        raise MailFehler("Im Postfach ist keine Signatur hinterlegt. Lege sie in "
+                         "Outlook bzw. Outlook im Web an - oder hier von Hand.",
+                         "eingabe")
+    if len(t) > SIG_TEXT_MAX:
+        raise MailFehler("Die Signatur aus dem Postfach ist zu lang (%d Zeichen, "
+                         "erlaubt sind %d)." % (len(t), SIG_TEXT_MAX), "eingabe")
+    if len(h) > SIG_HTML_MAX:
+        raise MailFehler("Die HTML-Fassung aus dem Postfach ist zu gross (%d Zeichen, "
+                         "erlaubt sind %d)." % (len(h), SIG_HTML_MAX), "eingabe")
+
+    vorhanden = [e for e in signaturen(user)
+                 if e["name"].lower() == SIG_IMPORT_NAME.lower()]
+    if vorhanden:
+        # Auffrischen statt danebenlegen - aber NUR auf ausdrueckliche Ansage.
+        # Der Eintrag kann von Hand nachbearbeitet worden sein; ihn im
+        # Vorbeigehen zu ueberschreiben waere ein Datenverlust ohne Rueckfrage.
+        if not ersetzen:
+            raise MailFehler("Es gibt bereits eine Signatur '%s'." % SIG_IMPORT_NAME,
+                             "vorhanden")
+        sid = vorhanden[0]["id"]
+        return (sig_aendern(user, sid, {"text": t, "html": h}), sid, "aktualisiert")
+    liste = sig_anlegen(user, SIG_IMPORT_NAME, t, h)
+    neu = [e for e in liste if e["name"].lower() == SIG_IMPORT_NAME.lower()]
+    return (liste, neu[0]["id"] if neu else "", "neu")
+
+
 def sig_loeschen(user: str, sig_id: str) -> list[dict]:
     """Signatur entfernen. **Es rueckt KEINER nach.**
 
@@ -828,13 +883,19 @@ def signatur_fuer(user: str, sig_id: str = "") -> dict:
 
 
 def format_fuer(user: str, wahl: str = "") -> str:
-    """Das Format dieser Antwort: Wahl > Vorgabe des Postfachs > Text.
+    """Das Format dieser Antwort: Wahl > Vorgabe des Postfachs > HTML.
 
     ``mail_body.norm_format`` gibt fuer Unbekanntes ``""`` zurueck - ein
     Tippfehler faellt damit auf die Vorgabe des Postfachs und nicht auf einen
-    geratenen Wert. Die Vorgabe ist bewusst **Text**: das ist das Verhalten von
-    vor dieser Aenderung, und ein Postfach, das ohne Zutun ploetzlich HTML
-    verschickt, waere eine Ueberraschung.
+    geratenen Wert.
+
+    **Die Vorgabe ist seit 2026-08-26 HTML** (Entscheidung des Nutzers). Bis
+    dahin stand hier Text mit der Begruendung, ein Postfach duerfe nicht ohne
+    Zutun ploetzlich HTML verschicken. In der Praxis war die Ueberraschung die
+    andere: eine Signatur mit Logo, Links und Farben wird im Textformat
+    plattgeklopft, und niemand rechnet damit, dass die Antwort reiner Text ist.
+    **Text bleibt waehlbar** - pro Antwort im Pulldown oder dauerhaft am
+    Postfach; ein gespeichertes ``"text"`` gewinnt hier weiterhin.
     """
     from backend import mail_body
     w = mail_body.norm_format(wahl)
@@ -847,7 +908,7 @@ def format_fuer(user: str, wahl: str = "") -> str:
             return v
     except Exception:  # noqa: BLE001
         pass
-    return mail_body.FORMAT_TEXT
+    return mail_body.FORMAT_HTML
 
 
 def konto_info(user: str) -> dict:

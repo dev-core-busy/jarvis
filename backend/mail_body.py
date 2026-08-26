@@ -168,6 +168,12 @@ class _Entschaerfer(HTMLParser):
         self.aus: list[str] = []
         self.stapel: list[str] = []
         self.tot = 0            # Verschachtelungstiefe innerhalb eines _TOETEN
+        # Zaehler fuer den Bericht: Bilder, deren Quelle unbrauchbar ist. Das
+        # ist KEIN Nebenschauplatz - eine aus Outlook uebernommene Signatur
+        # verweist ihre Logos typischerweise auf `file:///C:/Users/...`, also
+        # auf die Platte des Absenders. Diese Bilder fallen heraus, und ohne
+        # eine Zahl dazu sieht der Benutzer nur, dass sein Logo fehlt.
+        self.bilder_weg = 0
 
     # -- Attribute ------------------------------------------------------
     def _attrs(self, tag: str, attrs) -> str | None:
@@ -200,6 +206,7 @@ class _Entschaerfer(HTMLParser):
                 and not any(t.startswith(' rel=') for t in teile):
             teile.append(' rel="noopener noreferrer"')
         if tag == "img" and not hat_src:
+            self.bilder_weg += 1
             return None
         return "".join(teile)
 
@@ -274,6 +281,30 @@ class _Entschaerfer(HTMLParser):
         return "".join(self.aus)
 
 
+def html_entschaerfen_mit_bericht(fragment: str) -> tuple[str, dict]:
+    """Wie ``html_entschaerfen``, gibt zusaetzlich Kennzahlen zurueck.
+
+    Der Bericht (``{"bilder_weg": n}``) existiert fuer die Uebernahme aus dem
+    Postfach: **eine in Outlook gebaute Signatur verweist ihr Logo fast immer
+    auf einen lokalen Pfad** (``file:///C:/Users/…/clip_image002.png``). Outlook
+    loest den beim Verfassen auf und haengt das Bild an; ein serverseitiger
+    Versand kann das nicht – die Quelle ist die Platte eines fremden Rechners.
+    Solche Bilder fallen heraus, und **das gehoert beziffert**: sonst uebernimmt
+    jemand seine Signatur, das Logo fehlt, und nichts erklaert warum.
+    """
+    if not (fragment or "").strip():
+        return "", {"bilder_weg": 0}
+    try:
+        p = _Entschaerfer()
+        p.feed(str(fragment))
+        p.close()
+        return p.ergebnis().strip(), {"bilder_weg": p.bilder_weg}
+    except Exception as e:  # noqa: BLE001
+        print("[Mail] HTML-Entschaerfung fehlgeschlagen, Fragment verworfen: %s" % e,
+              flush=True)
+        return "", {"bilder_weg": 0}
+
+
 def html_entschaerfen(fragment: str) -> str:
     """HTML aus einem Freitextfeld auf eine Erlaubnisliste zurechtschneiden.
 
@@ -281,17 +312,7 @@ def html_entschaerfen(fragment: str) -> str:
     den Rumpf einer Mail gesetzt. FAIL-CLOSED – kippt der Parser, kommt
     nichts durch. Ein halb entschaerftes Fragment waere schlimmer als keines.
     """
-    if not (fragment or "").strip():
-        return ""
-    try:
-        p = _Entschaerfer()
-        p.feed(str(fragment))
-        p.close()
-        return p.ergebnis().strip()
-    except Exception as e:  # noqa: BLE001
-        print("[Mail] HTML-Entschaerfung fehlgeschlagen, Fragment verworfen: %s" % e,
-              flush=True)
-        return ""
+    return html_entschaerfen_mit_bericht(fragment)[0]
 
 
 # ── Signatur anhaengen ───────────────────────────────────────────────────────

@@ -48,7 +48,13 @@ from email.message import EmailMessage
 # "grenze"    – der Kanal kann das nicht (z.B. IMAP kann keine echte Weiterleitung).
 # "eingabe"   – Aufruf war falsch (fehlender Empfaenger o.ae.).
 # "fehler"    – alles andere.
-KATEGORIEN = ("auth", "kanal", "netz", "nicht_da", "grenze", "eingabe", "fehler")
+# "vorhanden" (2026-08-26) heisst: der Vorgang wuerde etwas Bestehendes
+# ueberschreiben und braucht dafuer eine ausdrueckliche Ansage. Eine EIGENE
+# Kategorie, weil der Aufrufer daran die Rueckfrage aufhaengt (HTTP 409) - ueber
+# "eingabe" waere sie nur am Text der Meldung erkennbar, und ein Waechter, der
+# Meldungstexte vergleicht, bricht beim ersten Umformulieren.
+KATEGORIEN = ("auth", "kanal", "netz", "nicht_da", "grenze", "eingabe", "vorhanden",
+              "fehler")
 
 # Kanaele, bei denen ein Rueckfall auf IMAP/SMTP sinnvoll ist.
 _RUECKFALL_KATEGORIEN = {"kanal"}
@@ -778,6 +784,60 @@ class _Ews:
         except Exception as e:  # noqa: BLE001
             raise _einordnen(e, "ews") from e
 
+    # Name des UserConfiguration-Objekts, in dem Exchange die Signatur des
+    # POSTFACHS haelt (das, was OWA unter "E-Mail-Signatur" zeigt und was
+    # `Get-MailboxMessageConfiguration` liest). Am echten Exchange 2019
+    # gemessen: es liegt im ROOT; ein Zugriff ueber `msg_folder_root` scheitert
+    # mit ErrorItemNotFound.
+    _OWA_KONFIG = "OWA.UserOptions"
+
+    def signatur_lesen(self) -> dict:
+        """Die im Postfach hinterlegte Signatur lesen (rein lesend).
+
+        **Das ist NICHT die Signatur aus Outlook auf dem Arbeitsplatz.** Die
+        liegt lokal in ``%APPDATA%\\Microsoft\\Signatures`` und ist von hier aus
+        prinzipiell unerreichbar; ausserdem baut Jarvis die Antwort
+        serverseitig, sie durchlaeuft Outlooks Verfassen-Weg also nie. Was hier
+        gelesen wird, ist die im POSTFACH gespeicherte Fassung – dieselbe, die
+        OWA benutzt und die auf den meisten Arbeitsplaetzen inhaltlich mit der
+        lokalen uebereinstimmt.
+
+        Rueckgabe ist IMMER ein dict; **"es gibt keine" ist kein Fehler**,
+        sondern eine Auskunft (``leer``). Ein Fehler waere hier die schlechtere
+        Antwort: die Oberflaeche kann "im Postfach ist nichts hinterlegt" klar
+        sagen, aus "Vorgang fehlgeschlagen" kann sie das nicht ableiten.
+        """
+        acc = self._konto()
+        try:
+            konfig = acc.root.get_user_configuration(self._OWA_KONFIG)
+        except Exception as e:  # noqa: BLE001
+            # Klassen-NAME statt Import – dieselbe Begruendung wie in
+            # `_einordnen`: exchangelib hat seine Fehlerklassen zwischen
+            # Versionen verschoben.
+            if type(e).__name__ == "ErrorItemNotFound":
+                return {"text": "", "html": "", "auto_anhaengen": False,
+                        "quelle": self._OWA_KONFIG, "leer": True}
+            raise _einordnen(e, "ews") from e
+        try:
+            roh = dict(getattr(konfig, "dictionary", None) or {})
+        except Exception as e:  # noqa: BLE001
+            raise _einordnen(e, "ews") from e
+        # Die Schluessel kommen kleingeschrieben herein ("signaturetext"), aber
+        # das ist eine Beobachtung an EINEM Server und keine Zusage von
+        # Microsoft – deshalb wird ohne Ruecksicht auf Gross/Klein gesucht.
+        werte = {str(k).strip().lower(): v for k, v in roh.items()}
+
+        def _txt(schluessel: str) -> str:
+            wert = werte.get(schluessel)
+            return "" if wert is None else str(wert).strip()
+
+        # `autoaddsignature` kommt als ZEICHENKETTE "True"/"False" herein, nicht
+        # als bool – ein `bool(wert)` waere fuer "False" wahr.
+        return {"text": _txt("signaturetext"), "html": _txt("signaturehtml"),
+                "auto_anhaengen": _txt("autoaddsignature").lower() in ("true", "1"),
+                "quelle": self._OWA_KONFIG,
+                "leer": not (_txt("signaturetext") or _txt("signaturehtml"))}
+
     def test(self) -> dict:
         acc = self._konto()
         try:
@@ -1269,6 +1329,20 @@ class _Imap:
         except Exception as e:  # noqa: BLE001
             raise _einordnen(e, "imap") from e
 
+    def signatur_lesen(self) -> dict:
+        """IMAP kennt keine Postfach-Signatur – und sagt das im Klartext.
+
+        Die Signatur liegt in einem Exchange-eigenen Konfigurationsobjekt
+        (``OWA.UserOptions``); IMAP transportiert Nachrichten und sonst nichts.
+        Hier ``{"leer": True}`` zurueckzugeben waere die schlechtere Antwort:
+        das hiesse "im Postfach ist nichts hinterlegt", und das weiss dieser
+        Kanal gar nicht.
+        """
+        raise MailFehler(
+            "Ueber IMAP laesst sich keine Signatur aus dem Postfach lesen – das ist "
+            "eine Eigenschaft von Exchange (OWA/Outlook im Web). Lege die Signatur "
+            "unter 'Neue Signatur' von Hand an.", "kanal", "imap")
+
     def test(self) -> dict:
         c, name = self._waehlen(self.konto.ordner_eingang, schreibbar=False)
         try:
@@ -1288,7 +1362,8 @@ class _Imap:
 # ═══════════════════════════════════════════════════════════════════════════
 
 _OPERATIONEN = ("test", "ordner_liste", "liste", "lesen", "senden", "antworten",
-                "weiterleiten", "verschieben", "loeschen", "kategorie", "gelesen")
+                "weiterleiten", "verschieben", "loeschen", "kategorie", "gelesen",
+                "signatur_lesen")
 
 
 class MailClient:
@@ -1395,6 +1470,10 @@ class MailClient:
 
     def weiterleiten(self, msg_id: str, an, text: str = "", entwurf: bool = False) -> str:
         return self._ruf("weiterleiten", msg_id, an, text=text, entwurf=entwurf)
+
+    def signatur_lesen(self) -> dict:
+        """Im Postfach hinterlegte Signatur lesen (nur EWS, siehe ``_Ews``)."""
+        return self._ruf("signatur_lesen")
 
     def verschieben(self, msg_id: str, ziel: str) -> str:
         return self._ruf("verschieben", msg_id, ziel)

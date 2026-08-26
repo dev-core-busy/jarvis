@@ -83,7 +83,12 @@
                 return r.json().catch(function () { return {}; })
                     .then(function (d) {
                         if (!r.ok || d.ok === false) {
-                            throw new Error(d.error || ('HTTP ' + r.status));
+                            var f = new Error(d.error || ('HTTP ' + r.status));
+                            // Status mitgeben: wer auf eine Rueckfrage umschalten
+                            // will (409 = wuerde etwas ueberschreiben), duerfte
+                            // das sonst nur am Meldungstext erkennen.
+                            f.status = r.status;
+                            throw f;
                         }
                         return d;
                     });
@@ -159,10 +164,12 @@
         _signaturen = k.signaturen || [];
         zeichneSignaturen();
         var fmt = $('em-format');
-        // Leer in der Datei heisst "keine Vorgabe" = Text. Das Pulldown kennt
-        // keinen leeren Eintrag: hier wird eine Vorgabe GESETZT, nicht von
-        // einer geerbt.
-        if (fmt) fmt.value = (k.antwort_format === 'html') ? 'html' : 'text';
+        // Leer in der Datei heisst "keine Vorgabe" - und die ist seit
+        // 2026-08-26 HTML. Das Pulldown kennt keinen leeren Eintrag: hier wird
+        // eine Vorgabe GESETZT, nicht von einer geerbt. Geprueft wird auf
+        // 'text', sonst zeigte ein unberuehrtes Postfach "Nur Text" an,
+        // waehrend der Server HTML sendet.
+        if (fmt) fmt.value = (k.antwort_format === 'text') ? 'text' : 'html';
         var akt = $('em-aktiv');
         // NICHT auf Falsyness pruefen: ein gespeichertes `false` muss als false
         // erscheinen, ein FEHLENDES Feld dagegen als Vorgabe true.
@@ -635,6 +642,55 @@
         }).catch(function (e) { melde('em-g-status', e.message, 'fehler'); });
     }
 
+    /* Signatur aus dem Postfach uebernehmen (Exchange/OWA).
+
+       Bei 409 ("gibt es schon") wird gefragt statt ueberschrieben - der
+       vorhandene Eintrag kann von Hand nachbearbeitet worden sein. Hier ist
+       `confirm` in Ordnung: das ist eine normale Seite, kein Aufgabenfenster. */
+    function uebernehmeSig(ersetzen) {
+        var knopf = $('em-sig-import');
+        if (knopf) knopf.disabled = true;
+        melde('em-sig-status', T('mail.sig_import_run', 'Lese Signatur aus dem Postfach…'));
+        return sende('/api/email/signatures/import', 'POST', { ersetzen: !!ersetzen })
+            .then(function (d) {
+                _signaturen = d.signaturen || [];
+                zeichneSignaturen();
+                fuelleSigWahl();
+                // Verlorene Bilder werden GENANNT: eine in Outlook gebaute
+                // Signatur verweist ihr Logo auf einen Pfad des eigenen
+                // Rechners (file:///C:/Users/...), den der Server nicht
+                // aufloesen kann. Ohne den Satz fehlt das Logo unerklaert.
+                var txt = d.art === 'aktualisiert'
+                    ? T('mail.sig_import_upd', '✓ Signatur aus dem Postfach aufgefrischt.')
+                    : T('mail.sig_import_new', '✓ Signatur aus dem Postfach übernommen.');
+                if (d.bilder_weg > 0) {
+                    txt += ' ' + T('mail.sig_import_imgs',
+                        'Bilder wurden nicht übernommen (%n) – sie liegen in Outlook '
+                        + 'auf deinem Rechner und sind vom Server aus nicht erreichbar.')
+                        .replace('%n', d.bilder_weg);
+                }
+                melde('em-sig-status', txt, 'ok');
+            })
+            .catch(function (e) {
+                if (e.status === 409 && !ersetzen) {
+                    melde('em-sig-status', '');
+                    if (window.confirm(T('mail.sig_import_ask',
+                        'Es gibt bereits eine übernommene Signatur. Soll sie durch den '
+                        + 'aktuellen Stand aus dem Postfach ersetzt werden? Eigene '
+                        + 'Änderungen daran gehen dabei verloren.'))) {
+                        return uebernehmeSig(true);
+                    }
+                    return null;
+                }
+                melde('em-sig-status', e.message, 'fehler');
+                return null;
+            })
+            .then(function (x) {
+                if (knopf) knopf.disabled = false;
+                return x;
+            });
+    }
+
     function setzeSigStandard(id) {
         return sende('/api/email/signatures/' + encodeURIComponent(id), 'PUT',
                      { standard: true })
@@ -690,8 +746,11 @@
        "warum fehlt das?" unbeantwortet; waehlbar machen und HTML daraus machen
        waere eine Behauptung. */
     function formatOptionen(gewaehlt) {
-        var vorgabe = ((_konto || {}).antwort_format === 'html') ? 'HTML'
-            : T('mail.fmt_text', 'Nur Text');
+        // Auf 'text' pruefen, nicht auf 'html': LEER heisst "keine Vorgabe" und
+        // ist seit 2026-08-26 HTML. Andersherum stuende an einem unberuehrten
+        // Postfach "Nur Text", waehrend der Server HTML sendet.
+        var vorgabe = ((_konto || {}).antwort_format === 'text')
+            ? T('mail.fmt_text', 'Nur Text') : 'HTML';
         return '<option value=""' + (gewaehlt ? '' : ' selected') + '>' +
             esc(T('mail.fmt_default', 'Vorgabe') + ' (' + vorgabe + ')') + '</option>' +
             '<option value="html"' + (gewaehlt === 'html' ? ' selected' : '') + '>HTML</option>' +
@@ -1272,6 +1331,10 @@
         var sigNeu = $('em-sig-neu');
         if (sigNeu) sigNeu.addEventListener('click', function () {
             oeffneSigFormular(null, null);
+        });
+        var sigImp = $('em-sig-import');
+        if (sigImp) sigImp.addEventListener('click', function () {
+            uebernehmeSig(false);
         });
         if ((b = $('em-new-rule'))) b.addEventListener('click', function () {
             if (_editId === 'neu') { schliesseFormular(); return; }

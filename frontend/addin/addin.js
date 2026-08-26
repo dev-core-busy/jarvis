@@ -171,7 +171,13 @@
                 return r.json().catch(function () { return {}; })
                     .then(function (d) {
                         if (!r.ok || d.ok === false) {
-                            throw new Error(d.error || d.detail || ('HTTP ' + r.status));
+                            var f = new Error(d.error || d.detail || ('HTTP ' + r.status));
+                            // Der Status muss mit: ein Aufrufer, der auf eine
+                            // Rueckfrage umschalten will (409 = wuerde etwas
+                            // ueberschreiben), koennte das sonst nur am
+                            // Meldungstext erkennen - und der darf sich aendern.
+                            f.status = r.status;
+                            throw f;
                         }
                         return d;
                     });
@@ -650,6 +656,10 @@
         var sigNeu = $('ad-sig-neu');
         if (sigNeu) sigNeu.addEventListener('click', function () {
             oeffneSigFormular(null, null);
+        });
+        var sigImp = $('ad-sig-import');
+        if (sigImp) sigImp.addEventListener('click', function () {
+            uebernehmeSig(false);
         });
         $('ad-lang').textContent = sprache().toUpperCase();
     }
@@ -1730,6 +1740,60 @@
         });
     }
 
+    /* Meldung nach der Uebernahme. Verlorene Bilder werden GENANNT, nicht
+       verschwiegen: eine in Outlook gebaute Signatur verweist ihr Logo auf
+       einen Pfad auf dem eigenen Rechner (file:///C:/Users/...), und den kann
+       der Server nicht aufloesen. Ohne diesen Satz fehlt hinterher das Logo
+       und nichts erklaert warum. */
+    function importMeldung(a) {
+        var txt = (a.art === 'aktualisiert'
+            ? T('mail.sig_import_upd', 'Signatur aus dem Postfach aufgefrischt.')
+            : T('mail.sig_import_new', 'Signatur aus dem Postfach übernommen.'));
+        if (a.bilder_weg > 0) {
+            txt += ' ' + T('mail.sig_import_imgs',
+                'Bilder wurden nicht übernommen (%n) – sie liegen in Outlook auf '
+                + 'deinem Rechner und sind vom Server aus nicht erreichbar.')
+                .replace('%n', a.bilder_weg);
+        }
+        return txt;
+    }
+
+    /* Signatur aus dem Postfach uebernehmen.
+
+       Bei 409 ("gibt es schon") wird NICHT stillschweigend ueberschrieben,
+       sondern gefragt - der Eintrag kann von Hand nachbearbeitet worden sein.
+       `frage()` statt `confirm()`: im Aufgabenfenster (WebView2) ist confirm
+       unterdrueckt und der Knopf braeche wortlos ab. */
+    function uebernehmeSig(ersetzen) {
+        var knopf = $('ad-sig-import');
+        if (knopf) knopf.disabled = true;
+        melde('ad-sig-status', T('mail.sig_import_run', 'Lese Signatur aus dem Postfach…'));
+        sende('/api/email/signatures/import', 'POST', { ersetzen: !!ersetzen })
+            .then(function (a) {
+                _signaturen = a.signaturen || [];
+                zeichneSignaturen();
+                zeichneNachricht();   // das Signatur-Pulldown dort haengt daran
+                melde('ad-sig-status', importMeldung(a), 'ok');
+            })
+            .catch(function (e) {
+                if (String(e.message) === '401') return;
+                if (e.status === 409 && !ersetzen) {
+                    melde('ad-sig-status', '');
+                    frage(T('mail.sig_import_ask',
+                        'Es gibt bereits eine übernommene Signatur. Soll sie durch den '
+                        + 'aktuellen Stand aus dem Postfach ersetzt werden? Eigene '
+                        + 'Änderungen daran gehen dabei verloren.'),
+                        T('mail.sig_import_yes', 'Ersetzen'), true)
+                        .then(function (ja) { if (ja) uebernehmeSig(true); });
+                    return;
+                }
+                melde('ad-sig-status', e.message, 'fehler');
+            })
+            .then(function () {
+                if (knopf) knopf.disabled = false;
+            });
+    }
+
     function setzeSigStandard(id) {
         sende('/api/email/signatures/' + encodeURIComponent(id), 'PUT', { standard: true })
             .then(function (a) {
@@ -1789,8 +1853,13 @@
        Frage "warum fehlt Rich-Text?" nirgends; wer ihn waehlbar macht und HTML
        daraus macht, behauptet etwas, das nicht passiert. */
     function formatOptionen(gewaehlt) {
-        var vorgabe = ((_konto || {}).antwort_format || '') === 'html' ? 'HTML'
-            : T('mail.fmt_text', 'Nur Text');
+        // LEER heisst "keine Vorgabe gesetzt", und das ist seit 2026-08-26
+        // HTML. Deshalb wird auf 'text' geprueft und nicht auf 'html' - eine
+        // Pruefung auf 'html' zeigte fuer ein unberuehrtes Postfach "Nur Text"
+        // an, waehrend der Server HTML sendet: eine Anzeige, die einen Zustand
+        // behauptet, den sie nicht kennt.
+        var vorgabe = ((_konto || {}).antwort_format || '') === 'text'
+            ? T('mail.fmt_text', 'Nur Text') : 'HTML';
         var h = '<option value=""' + (gewaehlt ? '' : ' selected') + '>' +
             esc(T('mail.fmt_default', 'Vorgabe') + ' (' + vorgabe + ')') + '</option>' +
             '<option value="html"' + (gewaehlt === 'html' ? ' selected' : '') + '>HTML</option>' +
@@ -1879,10 +1948,13 @@
         $('ad-ord-eingang').value = k.ordner_eingang || '';
         $('ad-ord-entwuerfe').value = k.ordner_entwuerfe || '';
         $('ad-ord-gesendet').value = k.ordner_gesendet || '';
-        // Leer in der Datei heisst "keine Vorgabe" = Text. Das Pulldown kennt
-        // keinen leeren Eintrag: hier wird eine Vorgabe GESETZT, nicht von
-        // einer geerbt - ein drittes "unbestimmt" waere in diesem Feld sinnlos.
-        if ($('ad-format')) $('ad-format').value = (k.antwort_format === 'html') ? 'html' : 'text';
+        // Leer in der Datei heisst "keine Vorgabe" - und die ist seit
+        // 2026-08-26 HTML. Das Pulldown kennt keinen leeren Eintrag: hier wird
+        // eine Vorgabe GESETZT, nicht von einer geerbt - ein drittes
+        // "unbestimmt" waere in diesem Feld sinnlos. Geprueft wird auf 'text',
+        // sonst zeigte ein unberuehrtes Postfach "Nur Text" an, waehrend der
+        // Server HTML sendet.
+        if ($('ad-format')) $('ad-format').value = (k.antwort_format === 'text') ? 'text' : 'html';
         $('ad-aktiv').checked = k.aktiv !== false;
         $('ad-pw-hint').textContent = k.passwort_gesetzt
             ? T('mail.pw_set', 'Ein Kennwort ist hinterlegt.')

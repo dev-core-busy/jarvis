@@ -418,6 +418,15 @@
             <div id="ad-sig-edit" class="hidden"></div>
             <button class="ad-btn ad-btn-block" id="ad-sig-neu" style="margin-top:8px;"
                     data-i18n="mail.sig_new">Neue Signatur</button>
+            <!-- Uebernahme aus dem Postfach. Steht UNTER "Neue Signatur" und
+                 nicht darueber: der Regelweg bleibt das Anlegen, die Uebernahme
+                 ist die Abkuerzung fuer Exchange-Postfaecher. Der Hinweis
+                 darunter ist Pflicht - es entsteht eine KOPIE, und ein Knopf,
+                 der einen Abgleich suggeriert, laesst eine spaeter geaenderte
+                 Anschrift unbemerkt falsch hinausgehen. -->
+            <button class="ad-btn ad-btn-block" id="ad-sig-import" style="margin-top:6px;"
+                    data-i18n="mail.sig_import">Aus dem Postfach übernehmen</button>
+            <p class="ad-hint" data-i18n="mail.sig_import_hint">Holt die Signatur, die in deinem Exchange-Postfach hinterlegt ist (dieselbe, die Outlook im Web benutzt). Es entsteht eine Kopie – änderst du sie später in Outlook, musst du sie hier erneut übernehmen.</p>
             <p class="ad-status" id="ad-sig-status" style="margin-top:6px;"></p>
         </div>
 
@@ -467,14 +476,16 @@
             </div>
             <!-- Vorgabe-Format des Postfachs. Sie gilt ueberall, wo nichts
                  ausdruecklich gewaehlt ist - in der Antwort-Vorschau und in
-                 jeder Regel. Vorgabe ist bewusst "Nur Text": das ist das
-                 Verhalten von vor dem 2026-08-26, und ein Postfach, das ohne
-                 Zutun ploetzlich HTML verschickt, waere eine Ueberraschung. -->
+                 jeder Regel. Vorgabe ist seit 2026-08-26 HTML (Entscheidung des
+                 Nutzers): eine Signatur mit Logo, Links und Farben wird im
+                 Textformat plattgeklopft. "Nur Text" bleibt waehlbar.
+                 HTML steht deshalb ZUERST - die erste Option ist das, was ein
+                 unberuehrtes Postfach tatsaechlich tut. -->
             <div class="ad-field">
                 <label data-i18n="mail.fmt_acct">Format neuer Antworten</label>
                 <select id="ad-format">
-                    <option value="text" data-i18n="mail.fmt_text">Nur Text</option>
                     <option value="html">HTML</option>
+                    <option value="text" data-i18n="mail.fmt_text">Nur Text</option>
                     <option value="richtext" disabled data-i18n="mail.fmt_rtf">Rich-Text (nicht möglich)</option>
                 </select>
                 <span class="ad-hint" data-i18n="mail.fmt_acct_hint">Gilt, solange beim Antworten nichts anderes gewählt ist. Rich-Text kann Exchange über EWS nicht setzen.</span>
@@ -519,7 +530,7 @@
 -->
 <script async src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
 <script src="/static/js/icons.js?v=1"></script>
-<script src="/static/js/i18n.js?v=178"></script>
+<script src="/static/js/i18n.js?v=179"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
 <script src="/static/js/theme.js?v=3"></script>
 <!-- Branding: setzt Markenfarben, Marken-Namen (.brand-app-name) und das
@@ -527,6 +538,6 @@
      Seiten. `/api/branding` haengt an KEINER Anmeldung, die Marke steht also
      schon auf dem Anmeldebildschirm richtig da. -->
 <script src="/static/js/branding.js?v=25"></script>
-<script src="/static/addin/addin.js?v=12"></script>
+<script src="/static/addin/addin.js?v=14"></script>
 </body>
 </html>

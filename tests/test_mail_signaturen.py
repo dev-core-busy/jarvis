@@ -233,11 +233,12 @@ check("prompt" not in _sfk.lower(),
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-section("3. Antwort-Format: Wahl > Postfach > Text")
+section("3. Antwort-Format: Wahl > Postfach > HTML")
 # ═══════════════════════════════════════════════════════════════════════════
 W = "fmtuser"
-check(ma.format_fuer(W) == "text",
-      "ohne alles gilt TEXT (= Verhalten vor dieser Aenderung)")
+# Vorgabe ist seit 2026-08-26 HTML (Entscheidung des Nutzers, vorher Text): eine
+# Signatur mit Logo, Links und Farben wird im Textformat plattgeklopft.
+check(ma.format_fuer(W) == "html", "ohne alles gilt HTML")
 check(ma.format_fuer(W, "html") == "html", "die Wahl gewinnt")
 ma.speichern(W, {"antwort_format": "html"})
 check(ma.format_fuer(W) == "html", "Vorgabe des Postfachs wirkt")
@@ -256,7 +257,32 @@ try:
 except MailFehler:
     check(True, "unbekanntes Format wird abgelehnt (nicht still verworfen)")
 ma.speichern(W, {"antwort_format": ""})
-check(ma.format_fuer(W) == "text", "leer ist gueltig und heisst Text")
+check(ma.format_fuer(W) == "html", "leer ist gueltig und heisst 'keine Vorgabe' = HTML")
+# Text muss AUSDRUECKLICH waehlbar bleiben - sonst waere die Umstellung eine
+# Abschaffung. Ein gespeichertes "text" gewinnt gegen die neue Vorgabe.
+ma.speichern(W, {"antwort_format": "text"})
+check(ma.format_fuer(W) == "text", "ein gespeichertes 'text' gewinnt gegen die Vorgabe")
+check(ma.format_fuer(W, "html") == "html", "... und die Wahl pro Antwort dagegen")
+ma.speichern(W, {"antwort_format": ""})
+# Die Oberflaeche darf die Vorgabe nicht anders benennen als der Server sie
+# rechnet: LEER heisst HTML, also muss auf 'text' geprueft werden. Eine Pruefung
+# auf 'html' zeigte an einem unberuehrten Postfach "Nur Text", waehrend HTML
+# hinausgeht - eine Anzeige, die einen Zustand behauptet, den sie nicht kennt.
+for name, _pfad in (("addin.js", ROOT / "frontend" / "addin" / "addin.js"),
+                    ("email_portal.js", ROOT / "frontend" / "js" / "email_portal.js")):
+    _js = _pfad.read_text(encoding="utf-8")
+    # Auf das FELD pruefen, nicht auf "=== 'html'" irgendwo: in derselben
+    # Funktion steht `gewaehlt === 'html'` fuer die vorausgewaehlte Option -
+    # ein grobes Muster meldet die als Verstoss (beim ersten Lauf genau so
+    # passiert). Kommentare raus, sonst liest der Waechter die Begruendung mit.
+    _fo = _ohne_kommentare(
+        _js.split("function formatOptionen", 1)[1].split("\n    }", 1)[0])
+    check("antwort_format === 'text'" in _fo or "antwort_format || '') === 'text'" in _fo,
+          "%s: das Vorgabe-Etikett prueft auf 'text'" % name)
+    check("antwort_format === 'html'" not in _js
+          and "antwort_format || '') === 'html'" not in _js,
+          "%s: keine Stelle vergleicht antwort_format mit 'html' "
+          "(leer waere dort sonst 'Nur Text')" % name)
 check("antwort_format" in ma.AENDERBAR and "signaturen" not in ma.AENDERBAR,
       "das Format darf ans Formular, die LISTE nicht")
 check("signaturen" in ma.konto_info(V) and "antwort_format" in ma.konto_info(V),
@@ -352,13 +378,24 @@ check(".reset(" in _lauf.split("finally", 1)[-1],
 section("6. Endpunkte")
 # ═══════════════════════════════════════════════════════════════════════════
 for m, pfad in (("get", "/api/email/signatures"), ("post", "/api/email/signatures"),
+                ("post", "/api/email/signatures/import"),
                 ("put", "/api/email/signatures/{sig_id}"),
                 ("delete", "/api/email/signatures/{sig_id}")):
     check('@app.%s("%s")' % (m, pfad) in MAIN, "Route %s %s" % (m.upper(), pfad))
-_sig = MAIN.split('@app.get("/api/email/signatures")', 1)[1].split(
-    '@app.post("/api/email/test")', 1)[0]
-check(_sig.count("Depends(require_email_access)") == 4,
-      "alle vier Signatur-Endpunkte haengen an require_email_access")
+# Ausschnitt EINSCHLIESSLICH des ersten Dekorators. Ein `split()` haette ihn
+# verschluckt - die Route waere dann nicht zaehlbar, ihr `Depends` aber schon,
+# und der Zaehlvergleich unten haette eine unerklaerliche Differenz von 1.
+_von = MAIN.index('@app.get("/api/email/signatures")')
+_sig = MAIN[_von:MAIN.index('@app.post("/api/email/test")', _von)]
+# ZAEHLEN statt einer festen Zahl: eine "== 4" bricht bei jedem neuen Endpunkt
+# in diesem Block und verleitet dann dazu, die Zahl hochzusetzen, statt die
+# Dependency zu pruefen. Geprueft wird die REGEL - jede Route hier haengt an
+# require_email_access -, damit faellt auch eine kuenftige auf.
+_sig_routen = len(re.findall(r"@app\.(?:get|post|put|delete)\(", _sig))
+check(_sig_routen >= 5, "der Signatur-Block enthaelt alle Routen (%d)" % _sig_routen)
+check(_sig.count("Depends(require_email_access)") == _sig_routen,
+      "JEDE Route im Signatur-Block haengt an require_email_access "
+      "(%d Routen)" % _sig_routen)
 check('"name", "text", "html", "standard"' in _sig,
       "PUT hat eine Feld-Whitelist (kein beliebiges Feld)")
 # reply/send nimmt Format und Signatur - aber NICHT den Signaturtext.
@@ -424,6 +461,138 @@ for k in ("mail.sigs_head", "mail.sig_new", "mail.sig_text", "mail.sig_html",
 # erste Sprachwechsel die Auszeichnung (Register).
 check('data-i18n-html="mail.help_sigs"' in ADDHTML,
       "die Signatur-Erklaerung nutzt data-i18n-html (sie enthaelt <b>)")
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+section("9. Signatur aus dem Postfach uebernehmen (2026-08-26)")
+# ═══════════════════════════════════════════════════════════════════════════
+# Der Auslöser: das Postfach HAT eine Signatur (Exchange haelt sie in der
+# UserConfiguration "OWA.UserOptions"), Jarvis hat sie nur nie abgeholt - und im
+# Pulldown stand deshalb ausschliesslich "keine Signatur".
+
+# --- der Lesezugriff ---
+_ews = CLIENT.split("class _Ews", 1)[1].split("\nclass ", 1)[0]
+_sigl = _ews.split("def signatur_lesen", 1)[1].split("\n    def ", 1)[0]
+check("OWA.UserOptions" in _ews, "der EWS-Kanal kennt das Konfigurationsobjekt")
+check("acc.root." in _ohne_kommentare(_sigl),
+      "gelesen wird aus dem ROOT (msg_folder_root liefert ErrorItemNotFound)")
+check("ErrorItemNotFound" in _sigl,
+      "'es gibt keine' wird als AUSKUNFT behandelt, nicht als Fehler")
+# Die Kategorie muss stimmen, sonst kann der Endpunkt nicht unterscheiden.
+_sigl_c = _ohne_kommentare(_sigl)
+check("lower()" in _sigl_c and "signaturetext" in _sigl_c,
+      "die Schluessel werden ohne Ruecksicht auf Gross/Klein gesucht")
+# `autoaddsignature` kommt als Zeichenkette "False" herein - bool("False") ist True.
+check('("true", "1")' in _sigl_c,
+      "autoaddsignature wird als TEXT ausgewertet, nicht per bool()")
+_imap = CLIENT.split("class _Imap", 1)[1].split("\n_OPERATIONEN", 1)[0]
+check("def signatur_lesen" in _imap, "der IMAP-Kanal hat den Vorgang ebenfalls")
+_isig = _ohne_kommentare(_imap.split("def signatur_lesen", 1)[1].split("\n    def ", 1)[0])
+check("raise MailFehler" in _isig and '"leer"' not in _isig,
+      "IMAP sagt es im Klartext, statt 'leer' zu behaupten (das weiss es nicht)")
+check('"signatur_lesen"' in CLIENT.split("_OPERATIONEN", 1)[1][:400],
+      "der Vorgang steht in _OPERATIONEN (sonst weist die Fassade ihn ab)")
+
+# --- die Uebernahme ---
+ACC2 = (ROOT / "backend" / "mail_accounts.py").read_text(encoding="utf-8")
+_ueb = ACC2.split("def sig_uebernehmen", 1)[1].split("\ndef ", 1)[0]
+_uebc = _ohne_kommentare(_ueb)
+check("SIG_IMPORT_NAME" in ACC2, "der Name der uebernommenen Signatur ist FEST")
+# Zu lang muss ABGELEHNT werden. sig_anlegen schneidet still auf die Grenze -
+# bei HTML faellt der Schnitt mitten in ein Tag und niemand sieht es.
+check("SIG_TEXT_MAX" in _uebc and "SIG_HTML_MAX" in _uebc and "raise" in _uebc,
+      "zu grosse Signaturen werden abgelehnt, nicht gekuerzt")
+
+konto_probe = "uebernahme.test"
+ma.speichern(konto_probe, {"adresse": "u@example.org", "passwort": "geheim"})
+liste, sid, art = ma.sig_uebernehmen(konto_probe, "Gruss\nA. B.", "<p>Gruss</p>")
+check(art == "neu" and len(liste) == 1, "erste Uebernahme legt an", art)
+check(liste[0]["name"] == ma.SIG_IMPORT_NAME, "... unter dem festen Namen")
+check(liste[0]["standard"] is True,
+      "... und wird Standard, weil es die einzige ist (sonst waere sie wirkungslos)")
+try:
+    ma.sig_uebernehmen(konto_probe, "Neu", "")
+    check(False, "zweite Uebernahme ohne 'ersetzen' wird abgelehnt")
+except MailFehler as f:
+    check(f.kategorie == "vorhanden",
+          "zweite Uebernahme ohne 'ersetzen' wird abgelehnt (Kategorie 'vorhanden')",
+          f.kategorie)
+liste2, sid2, art2 = ma.sig_uebernehmen(konto_probe, "Neu\nA. B.", "<p>Neu</p>", True)
+check(art2 == "aktualisiert" and len(liste2) == 1,
+      "mit 'ersetzen' wird aufgefrischt statt danebengelegt", art2)
+check(sid2 == sid, "... unter DERSELBEN Kennung (Regeln zeigen weiter darauf)")
+check(liste2[0]["text"] == "Neu\nA. B.", "... und der Text ist der neue")
+try:
+    ma.sig_uebernehmen(konto_probe, "x" * (ma.SIG_TEXT_MAX + 1), "", True)
+    check(False, "zu langer Text wird abgelehnt")
+except MailFehler as f:
+    check(str(ma.SIG_TEXT_MAX) in str(f),
+          "zu langer Text wird abgelehnt UND nennt die Grenze", str(f)[:60])
+try:
+    ma.sig_uebernehmen("leer.test", "", "")
+    check(False, "leere Signatur wird abgelehnt")
+except MailFehler:
+    check(True, "ein leeres Postfach-Feld wird abgelehnt (kein leerer Eintrag)")
+
+# --- der Endpunkt ---
+check('@app.post("/api/email/signatures/import")' in MAIN, "Route POST …/import")
+_imp = MAIN.split('@app.post("/api/email/signatures/import")', 1)[1].split(
+    "\n@app.", 1)[0]
+_impc = _ohne_kommentare(_imp)
+check("Depends(require_email_access)" in _imp, "… haengt an require_email_access")
+check("409" in _impc, "… antwortet 409, wenn es etwas ueberschreiben wuerde")
+# Der Benutzer kommt aus der Anmeldung, NIE aus dem Rumpf - sonst waere der
+# Endpunkt ein Weg, in ein fremdes Postfach zu sehen.
+for feld in ('"user"', '"benutzer"', '"adresse"', '"postfach"'):
+    check("get(%s)" % feld not in _impc,
+          "… nimmt %s NICHT aus dem Rumpf" % feld)
+check("asyncio.to_thread" in _impc,
+      "… laeuft im Thread (EWS blockiert, sonst friert der Event-Loop ein)")
+
+# --- Oberflaeche: beide Wege, und der Kopie-Hinweis ist Pflicht ---
+for name, js, html, praefix in (("addin", ADDJS, ADDHTML, "ad"),
+                                ("portal", EMJS, EMHTML, "em")):
+    check('id="%s-sig-import"' % praefix in html, "%s: Knopf vorhanden" % name)
+    check("/api/email/signatures/import" in js, "%s: Knopf ruft den Endpunkt" % name)
+    check('data-i18n="mail.sig_import_hint"' in html,
+          "%s: der Kopie-Hinweis steht dabei (kein Abgleich wird versprochen)" % name)
+    # 409 muss ueber den STATUS erkannt werden, nicht am Meldungstext.
+    check("status === 409" in js or "status == 409" in js,
+          "%s: die Rueckfrage haengt am Status, nicht am Text" % name)
+    check("f.status = r.status" in js,
+          "%s: der Fetch-Helfer reicht den Status durch" % name)
+# Im Aufgabenfenster ist `confirm` unterdrueckt - dort MUSS `frage()` benutzt
+# werden, sonst bricht der Knopf wortlos ab (Register).
+_uebjs = ADDJS.split("function uebernehmeSig", 1)[1].split("\n    function ", 1)[0]
+check("frage(" in _uebjs and "confirm(" not in _uebjs,
+      "addin: Rueckfrage ueber frage(), nicht ueber confirm()")
+check("zeichneNachricht()" in _uebjs,
+      "addin: das Signatur-Pulldown im Reiter 'Nachricht' wird nachgezogen")
+# Verlorene Bilder werden BEZIFFERT. Eine in Outlook gebaute Signatur verweist
+# ihr Logo auf einen lokalen Pfad des Absenders (an der echten Signatur
+# gemessen: file:///C:/Users/…/clip_image002.png) - der Server kann den nicht
+# aufloesen. Ohne die Zahl fehlt hinterher das Logo und nichts erklaert warum.
+_roh_img = ('<p>Gru&szlig;</p><img src="file:///C:/Users/x/clip_image002.png" '
+            'width="30"><img src="https://example.org/logo.png">')
+_sicher, _ber = mb.html_entschaerfen_mit_bericht(_roh_img)
+check(_ber["bilder_weg"] == 1,
+      "der Bericht zaehlt genau das Bild mit unbrauchbarer Quelle",
+      str(_ber))
+check("example.org/logo.png" in _sicher and "file:///" not in _sicher,
+      "... das https-Bild bleibt, das file:-Bild faellt heraus")
+check(mb.html_entschaerfen(_roh_img) == _sicher,
+      "html_entschaerfen liefert unveraendert dasselbe (keine zweite Fassung)")
+check('"bilder_weg"' in _impc, "der Endpunkt gibt die Zahl heraus")
+for name, js in (("addin", ADDJS), ("portal", EMJS)):
+    check("bilder_weg" in js and "mail.sig_import_imgs" in js,
+          "%s: die Meldung nennt die nicht uebernommenen Bilder" % name)
+
+for k in ("mail.sig_import", "mail.sig_import_hint", "mail.sig_import_run",
+          "mail.sig_import_new", "mail.sig_import_upd", "mail.sig_import_ask",
+          "mail.sig_import_yes", "mail.sig_import_imgs"):
+    check(I18N.count("'%s'" % k) == 2, "i18n %s in DE UND EN" % k,
+          str(I18N.count("'%s'" % k)))
 
 
 print(f"\n{'='*62}\n  {_ok} OK, {_fail} FAIL  (Sandkasten: {TMP})\n{'='*62}")

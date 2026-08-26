@@ -297,11 +297,24 @@ Code `backend/mail_body.py` (neu), `mail_accounts.signaturen/format_fuer`, vier 
   `**wichtig**` Fettdruck zu machen aendert einen freigegebenen Text nachtraeglich, und `3*4`
   waere Auszeichnung. Uebersetzt wird nur, was in reinem Text keine Bedeutung hat: Absaetze und
   Umbrueche.
-- **Vorgabe ist TEXT** (`format_fuer` faellt darauf zurueck) – das Verhalten von vorher; ein
-  Postfach, das ohne Zutun HTML verschickt, waere eine Ueberraschung. Ein UNGUELTIGER Wert faellt
-  auf die Vorgabe des Postfachs, nicht auf einen geratenen; beim SPEICHERN wird er dagegen
-  **abgewiesen** (sonst springt das Feld zurueck und niemand erfaehrt warum), und Rich-Text wird
-  namentlich genannt.
+- **Vorgabe ist HTML** (`format_fuer` faellt darauf zurueck) – **umgestellt am 2026-08-26 auf
+  Vorgabe des Nutzers**, bis dahin Text mit der Begruendung „ein Postfach, das ohne Zutun HTML
+  verschickt, waere eine Ueberraschung". In der Praxis war die Ueberraschung die andere: eine
+  Signatur mit Logo, Links und Farben wird im Textformat plattgeklopft, und niemand rechnet damit,
+  dass eine Antwort aus einem Web-Formular reiner Text ist. **Text bleibt waehlbar** – pro Antwort
+  im Pulldown oder dauerhaft am Postfach; ein gespeichertes `"text"` gewinnt gegen die Vorgabe.
+  - **⚠ LEER heisst jetzt HTML, und das betrifft DREI Anzeigestellen.** `formatOptionen()` und die
+    Feldbelegung in `fuelleKonto`/`zeigeKonto` pruefen deshalb auf **`=== 'text'`**, nicht auf
+    `=== 'html'`: andersherum stuende an einem unberuehrten Postfach „Vorgabe (Nur Text)", waehrend
+    der Server HTML sendet – eine Anzeige, die einen Zustand behauptet, den sie nicht kennt. Im
+    Pulldown steht **HTML zuerst**: die erste Option soll das sein, was ohne Zutun passiert.
+  - Der Waechter prueft das FELD (`antwort_format === 'html'` darf nirgends mehr vorkommen), nicht
+    das Muster `=== 'html'` – in derselben Funktion steht `gewaehlt === 'html'` fuer die
+    vorausgewaehlte Option, und ein grobes Muster meldet die als Verstoss (beim ersten Lauf genau
+    so passiert).
+- Ein UNGUELTIGER Wert faellt auf die Vorgabe des Postfachs, nicht auf einen geratenen; beim
+  SPEICHERN wird er dagegen **abgewiesen** (sonst springt das Feld zurueck und niemand erfaehrt
+  warum), und Rich-Text wird namentlich genannt.
 - **`antwort_format` steht in `AENDERBAR`, `signaturen` NICHT** – ein Skalar darf ein Formular
   mitsenden, eine Liste wuerde bei zwei offenen Fenstern den jeweils anderen Stand ueberschreiben
   (dieselbe Begruendung wie bei `stile`). Ein UI-Test prueft, dass der Speichern-Knopf des
@@ -326,6 +339,66 @@ Code `backend/mail_body.py` (neu), `mail_accounts.signaturen/format_fuer`, vier 
   Anmeldung NOCH Anwendung; und `POST /api/email/account` musste im Mock dasselbe Konto-Objekt
   antworten wie `/status` – mit `{ok:true}` wurde `_konto` null und der Nachricht-Reiter zeigte
   "hinterlege zuerst dein Postfach".
+
+#### „Aus dem Postfach übernehmen" (2026-08-26)
+**Gemeldet:** „im Outlook-Add-In ist bei ‚Signatur' nur ‚keine Signatur' auswaehlbar." Zutreffend
+– und meine erste Antwort war methodisch wertlos: **ich habe auf DEV gemessen, das Add-in laeuft
+gegen ECHT.** Der Befund stimmte danach trotzdem (auf ECHT `signaturen: []`), aber die Frage war
+eine andere: **das Postfach HAT eine Signatur**, Jarvis hat sie nur nie abgeholt.
+- **Was gelesen wird, ist die Signatur des POSTFACHS**, nicht die aus Outlook auf dem Arbeitsplatz.
+  Letztere liegt in `%APPDATA%\Microsoft\Signatures` und ist von hier prinzipiell unerreichbar;
+  ausserdem baut Jarvis die Antwort **serverseitig**, sie durchlaeuft Outlooks Verfassen-Weg also
+  nie. Erreichbar ist die UserConfiguration **`OWA.UserOptions`** (`signaturetext`,
+  `signaturehtml`, `autoaddsignature`) – dasselbe Objekt, das
+  `Get-MailboxMessageConfiguration` liest. Am echten Exchange 2019 gemessen: sie liegt im
+  **`root`**, ueber `msg_folder_root` kommt `ErrorItemNotFound`.
+- **Office.js scheidet aus:** es gibt in KEINEM Requirement Set ein `getSignature…`; ab 1.10 nur
+  `setSignatureAsync` (schreiben), und das Manifest ist auf **Mailbox 1.3** festgenagelt, weil ein
+  hoeherer Satz auf Exchange 2019 im Haus nicht installierbar ist.
+- **`autoaddsignature` kommt als ZEICHENKETTE** `"True"`/`"False"` herein – `bool(wert)` waere fuer
+  `"False"` wahr. Die Schluessel werden ohne Ruecksicht auf Gross/Klein gesucht: die
+  Kleinschreibung ist eine Beobachtung an EINEM Server, keine Zusage von Microsoft.
+- **„Es gibt keine" ist eine AUSKUNFT, kein Fehler** (`leer: True`) – aus „Vorgang fehlgeschlagen"
+  kann die Oberflaeche nicht ableiten, dass im Postfach schlicht nichts hinterlegt ist.
+  **IMAP gibt aber NICHT `leer` zurueck**, sondern lehnt im Klartext ab: dieser Kanal weiss es
+  nicht, und „nichts hinterlegt" waere eine Behauptung ueber etwas Ungeprueftes.
+- **Fester Name `SIG_IMPORT_NAME`,** nicht waehlbar: nur so ist eine zweite Uebernahme als
+  Auffrischung derselben Kopie erkennbar. Ohne das haette man nach dreimaligem Druecken drei fast
+  gleiche Signaturen und wuesste bei keiner, welche aktuell ist. **Aufgefrischt wird unter
+  DERSELBEN Kennung** – Regeln zeigen weiter darauf.
+- **409 statt stillem Ueberschreiben.** Der vorhandene Eintrag kann von Hand nachbearbeitet worden
+  sein. Eigene Fehlerkategorie **`vorhanden`**, damit der Aufrufer die Rueckfrage am STATUS
+  aufhaengt und nicht am Meldungstext (ein Waechter, der Texte vergleicht, bricht beim ersten
+  Umformulieren). Im Aufgabenfenster **`frage()`, nie `confirm()`** – WebView2 unterdrueckt es.
+- **Zu gross wird ABGELEHNT, nicht gekuerzt.** `sig_anlegen` schneidet still auf `SIG_TEXT_MAX`/
+  `SIG_HTML_MAX`; bei HTML faellt der Schnitt mitten in ein Tag, und was danach fehlt, sieht
+  niemand. Die Meldung nennt beide Zahlen.
+- **⚠ DER BEFUND, DEN ERST DIE ECHTE SIGNATUR ZEIGTE: die Logos gehen NICHT mit.** Eine in Outlook
+  gebaute Signatur verweist ihre Bilder auf
+  `file:///C:/Users/<name>/AppData/Local/.../clip_image002.png` – die Platte des Absenders. Outlook
+  loest das beim Verfassen auf und haengt sie als `cid:` an; ein serverseitiger Versand kann das
+  nicht, und `_SRC_OK` laesst `file:` zu Recht nicht durch (das waere ein lokaler Dateizugriff).
+  Deshalb **zaehlt** `html_entschaerfen_mit_bericht()` sie und die Meldung nennt die Zahl: sonst
+  uebernimmt jemand seine Signatur, das Logo fehlt, und **nichts erklaert warum.** An der echten
+  Signatur gemessen: 7378 → 5462 Zeichen, **4 Bilder weg**, Text/Anschrift/Mailadresse/Links
+  vollstaendig erhalten.
+- **Es ist eine KOPIE, keine Verknuepfung** – der Hinweis unter dem Knopf sagt das ausdruecklich.
+  Ein Knopf, der einen Abgleich suggeriert, laesst eine spaeter in Outlook geaenderte Anschrift
+  unbemerkt falsch hinausgehen.
+- **Verifiziert:** `tests/test_mail_signaturen.py` (153). Gegenproben beissen einzeln:
+  Groessenpruefung raus 3 FAIL, `autoaddsignature` per `bool()` 1, Status nicht durchgereicht 1,
+  Benutzer aus dem Rumpf 1, Bilder-Zaehler raus 1. **Live auf DEV gegen das echte Exchange** ueber
+  den HTTP-Weg: `200` (`art: neu`, 1158/7378 Zeichen, `bilder_weg: 4`) · `409` beim zweiten Lauf ·
+  `200` (`art: aktualisiert`, gleiche Kennung) mit `ersetzen: true`.
+- **FALLSTRICK, ZWEIMAL AM SELBEN TAG bezahlt:** die Probe lief als **root** und schrieb dabei
+  `data/email_accounts.json` neu – Eigentuemer danach `root:root` bei 0640, der Dienst als `jarvis`
+  bekam `Permission denied` und meldete fuer JEDEN Benutzer „kein Postfach hinterlegt". **Die API
+  antwortete dabei freundlich mit einem leeren Konto**; der einzige Hinweis stand im Journal
+  (`[Mail] Kontendatei nicht lesbar`). Beim zweiten Mal habe ich den Fehler in der frisch gebauten
+  Uebernahme gesucht, obwohl er in meinem eigenen Aufruf lag.
+  **Rezept, das beide Male gereicht haette:** Probe-Skript nach `/tmp` (nicht `/root` – dort kommt
+  `jarvis` nicht heran) und mit `runuser -u jarvis -- venv/bin/python` starten. Wer in einer Probe
+  eine Datendatei SCHREIBT, tut das als Dienstbenutzer; wer nur liest, darf root bleiben.
 
 #### Bedienhilfen
 - **Tab-Uebernahme** (`frontend/js/tabfill.js`): TAB uebernimmt in einem **leeren** Feld den
@@ -378,3 +451,14 @@ vom fremden Exchange 401 mit Nennung der hinterlegten Adresse, `runuser -u jarvi
 data/addin_links.json` verweigert. **Im echten Outlook belegt** (Sideload, Menueband, Lauf ueber
 „Jetzt verarbeiten", kennwortlose Anmeldung).
 
+
+#### FALLSTRICK: gleich lange Konstanten + gleiche Sekunde = veraltete `.pyc`
+Beim Umstellen der Vorgabe meldeten die Tests nach dem Zurueckdrehen einer Gegenprobe weiter den
+alten Wert – die Quelldatei sagte `return mail_body.FORMAT_HTML`, `inspect.getsource` bestaetigte
+es, und der **Bytecode enthielt `FORMAT_TEXT`** (`f.__code__.co_names`). Ursache: Python haelt eine
+`.pyc` fuer gueltig, wenn **Groesse und mtime in ganzen Sekunden** zur aufgezeichneten Quelle
+passen. `FORMAT_TEXT` und `FORMAT_HTML` sind **gleich lang**, und `sed` + `cp` liefen in derselben
+Sekunde – beide Merkmale stimmten also, obwohl der Inhalt ein anderer war.
+**Zwei verlorene Gegenproben, bis es auffiel.** Merkregel: bei Gegenproben, die eine Konstante
+gegen eine gleich lange tauschen, `PYTHONDONTWRITEBYTECODE=1` setzen (oder `__pycache__` leeren) –
+und wenn eine Pruefung dem Quelltext widerspricht, **`co_names` ansehen statt der Datei**.

@@ -98,6 +98,25 @@
         avatar:             'avatar',
     };
 
+    // Alphabetisch nach dem ANGEZEIGTEN Namen sortieren (2026-08-27).
+    // Vorher kam die Reihenfolge roh vom Endpunkt – also aus der Reihenfolge
+    // des Verzeichnis-Durchlaufs. Bei ueber zwanzig Eintraegen sucht man einen
+    // bestimmten Skill damit Zeile fuer Zeile ab.
+    //
+    // localeCompare statt `<`: ein reiner Codepoint-Vergleich sortiert
+    // Grossbuchstaben vor Kleinbuchstaben und stellt Umlaute hinter das
+    // gesamte Alphabet ("Übersetzer" nach "Zeitplan"). `numeric` sorgt dafuer,
+    // dass "Skill 2" vor "Skill 10" steht.
+    //
+    // Die Liste wird VORHER kopiert: sortiert wird nur die Anzeige, nie
+    // this.skills – dort haengen Filter und Neuzeichnen dran.
+    function sortiereNachName(liste) {
+        const spr = (window._lang === 'en') ? 'en' : 'de';
+        return liste.slice().sort((a, b) => String(a && a.name || '')
+            .localeCompare(String(b && b.name || ''), spr,
+                           { sensitivity: 'base', numeric: true }));
+    }
+
     // Liefert den Reiter-Knopf eines Skills – nur wenn er existiert UND sichtbar
     // ist (ausgeschaltete Skills blenden ihren Reiter aus).
     function tabButtonFor(dirName) {
@@ -207,7 +226,7 @@
                 return;
             }
             el.innerHTML = '';
-            installed.forEach(s => el.appendChild(this._mkInstalledItem(s)));
+            sortiereNachName(installed).forEach(s => el.appendChild(this._mkInstalledItem(s)));
         }
 
         _mkInstalledItem(skill) {
@@ -367,7 +386,7 @@
                 return;
             }
             el.innerHTML = '';
-            filtered.forEach(s => el.appendChild(this._mkAvailableItem(s)));
+            sortiereNachName(filtered).forEach(s => el.appendChild(this._mkAvailableItem(s)));
         }
 
         _mkAvailableItem(skill) {

@@ -247,7 +247,7 @@
                 <label>${window.t('issues.f_status')}
                     <select id="jv-iss-flt-status">
                         <option value="">${window.t('issues.f_all')}</option>
-                        <option value="open">${window.t('issues.status_open')}</option>
+                        <option value="open" selected>${window.t('issues.status_open')}</option>
                         <option value="in_progress">${window.t('issues.status_in_progress')}</option>
                         <option value="closed">${window.t('issues.status_closed')}</option>
                     </select>
@@ -262,7 +262,7 @@
                 </label>
                 <label><input type="checkbox" id="jv-iss-flt-mine"> ${window.t('issues.f_mine')}</label>
                 <span style="flex:1"></span>
-                <span style="font-size:11px;color:var(--text-muted);">${issues.length} ${window.t('issues.count_label')}</span>
+                <span id="jv-iss-count" style="font-size:11px;color:var(--text-muted);"></span>
             </div>
             <div class="jv-iss-list" id="jv-iss-list"></div>
         `;
@@ -276,12 +276,25 @@
             if (ft) filtered = filtered.filter(i => i.type === ft);
             if (fm) filtered = filtered.filter(i =>
                 (i.author || '').toLowerCase() === _currentUser.toLowerCase());
+            // Der Zaehler nennt die ANGEZEIGTEN Eintraege, bei gesetztem Filter
+            // zusaetzlich den Gesamtbestand. Vorher stand dort immer die
+            // Gesamtzahl - mit dem Vorgabe-Filter "offen" waere das eine Zahl
+            // ueber eine Liste, die so gar nicht dasteht.
+            const cnt = document.getElementById('jv-iss-count');
+            if (cnt) {
+                cnt.textContent = filtered.length < issues.length
+                    ? `${filtered.length} / ${issues.length} ${window.t('issues.count_label')}`
+                    : `${issues.length} ${window.t('issues.count_label')}`;
+            }
             _renderItems(filtered);
         }
         document.getElementById('jv-iss-flt-status').onchange = _apply;
         document.getElementById('jv-iss-flt-type').onchange = _apply;
         document.getElementById('jv-iss-flt-mine').onchange = _apply;
-        _renderItems(issues);
+        // Vorgabe ist "offen": beim Oeffnen interessiert, was noch aussteht -
+        // geschlossene Eintraege sind Archiv und waren bisher die Mehrheit der
+        // Liste. Ueber das Pulldown bleibt "alle" einen Klick entfernt.
+        _apply();
     }
 
     function _renderItems(items) {

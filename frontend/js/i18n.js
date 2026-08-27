@@ -151,8 +151,10 @@ const _I18N = {
         'jaddon.tr3_a':          'In Jira zuerst das Kommentarfeld öffnen, dann erneut einfügen. Hilft das nicht, <b>Kopieren</b> benutzen und den Text von Hand einsetzen.',
         'jaddon.tr4_q':          '„Kein Jira-Ticket in diesem Tab“',
         'jaddon.tr4_a':          'Die Ticketnummer wird aus der Adresszeile gelesen. In der Board-Ansicht das Ticket zuerst öffnen, sodass <code>…/browse/ABC-1234</code> in der Adresszeile steht.',
+        // ── Jira-Reiter: Klapp-Container (Einstellungen → Jira) ──
+        'jira.sect_conn':        'Verbindung',
         // ── Vorlagen des Jira-Assistenten (Einstellungen → Jira) ──
-        'jvorl.h':               'Vorlagen für die Zusammenfassung',
+        'jvorl.h':               'Browser Plugin Vorlagen',
         'jvorl.intro':           'Benannte Vorlagen bestimmen, <b>worauf</b> eine Zusammenfassung hinausläuft – „kurz für die Leitung“, „technisch mit Verlauf“. Sie erscheinen im Pulldown der Browser-Erweiterung. <b>Gemeinsame</b> Vorlagen gelten für alle Benutzer und werden hier gepflegt; eigene darf jeder zusätzlich im Fenster der Erweiterung anlegen.',
         'jvorl.loading':         'Lade Vorlagen …',
         'jvorl.empty':           'Noch keine Vorlagen.',
@@ -3046,8 +3048,10 @@ const _I18N = {
         'jaddon.tr3_a':          'Open the comment field in Jira first, then insert again. If that does not help, use <b>Copy</b> and paste the text by hand.',
         'jaddon.tr4_q':          '“No Jira ticket in this tab”',
         'jaddon.tr4_a':          'The ticket number is read from the address bar. In the board view, open the ticket first so that <code>…/browse/ABC-1234</code> appears in the address bar.',
+        // ── Jira tab: collapsible containers (Settings → Jira) ──
+        'jira.sect_conn':        'Connection',
         // ── Jira assistant templates (Settings → Jira) ──
-        'jvorl.h':               'Templates for the summary',
+        'jvorl.h':               'Browser plug-in templates',
         'jvorl.intro':           'Named templates decide <b>what</b> a summary aims at – "short for management", "technical with history". They appear in the drop-down of the browser extension. <b>Shared</b> templates apply to every user and are maintained here; in addition, anyone may create their own in the extension window.',
         'jvorl.loading':         'Loading templates …',
         'jvorl.empty':           'No templates yet.',

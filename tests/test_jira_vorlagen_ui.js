@@ -269,8 +269,14 @@ function text(d, id) { const e = d.getElementById(id); return e ? e.textContent 
     // ══════════════════════════════════════════════════════════════════════
     {
         const I18N = read('frontend/js/i18n.js');
-        const reiter = HTML.slice(HTML.indexOf('<div id="settings-tab-jira"'));
-        const abschnitt = reiter.slice(0, reiter.indexOf('Tickets suchen'));
+        // Geschnitten wird am CONTAINER, nicht an einem Ueberschriftstext:
+        // seit dem Umbau auf zwei Klapp-Container (2026-08-27) steht
+        // "Tickets suchen" VOR den Vorlagen – der alte Textanker schnitt den
+        // Abschnitt damit komplett weg und der Test meldete 3 statt 8
+        // Schluesseln. Eine Id ist die stabilere Grenze.
+        const iStart = HTML.indexOf('id="ji-sect-vorl"');
+        const abschnitt = iStart < 0 ? ''
+            : HTML.slice(iStart, HTML.indexOf('</div>', HTML.indexOf('jvorl-status', iStart)));
         const keys = Array.from(new Set(
             (abschnitt.match(/data-i18n(?:-html|-placeholder)?="([^"]+)"/g) || [])
                 .map((m) => m.replace(/.*="([^"]+)"/, '$1'))));

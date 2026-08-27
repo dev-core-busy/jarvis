@@ -655,6 +655,17 @@
         }
         window.initExcelCollapse = _initExcelCollapse;
 
+        // ── Jira-Tab Collapse ──────────────────────────────────────────────
+        // Gleiche Begruendung wie bei Excel: das Markup traegt zwar die Klassen
+        // kb-collapse-header/-body, gebunden wird aber ausschliesslich hier.
+        // Ohne diesen Eintrag liessen sich die beiden Container nicht klappen.
+        function _initJiraCollapse() {
+            _collapseInit([
+                { hdr: 'ji-sect-conn-hdr', body: 'ji-sect-conn-body', tog: 'ji-sect-conn-tog' },
+                { hdr: 'ji-sect-vorl-hdr', body: 'ji-sect-vorl-body', tog: 'ji-sect-vorl-tog' },
+            ]);
+        }
+
         // ── Vision-Tab Collapse ────────────────────────────────────────────
         function _initVisionCollapse() {
             _collapseInit([
@@ -776,6 +787,7 @@
                 } else if (target === 'jira' && tabJira) {
                     tabJira.style.display = '';
                     tabJira.classList.add('active');
+                    _initJiraCollapse();
                     if (window.JiraManager) window.JiraManager.onShow();
                 } else if (target === 'sap' && tabSap) {
                     tabSap.style.display = '';

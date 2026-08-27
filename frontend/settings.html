@@ -3990,6 +3990,34 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 </div>
                                     </div>
                                 </details>
+                                <!-- ── Unter-Container: Jira-Assistent (Browser-Erweiterung) ──
+                                     Startet VERSTECKT und wird von app.js am Zustand des Skills
+                                     "jira" eingeblendet – gleiches Muster wie
+                                     sec-sub-email/-tracks/-excel. -->
+                                <details class="sec-sub" data-sub="jiraassist" id="sec-sub-jiraassist" style="display:none;">
+                                    <summary><span>Jira-Assistent</span><span class="sec-sub-hint">– Wer darf Tickets über die Browser-Erweiterung auswerten?</span></summary>
+                                    <div class="sec-sub-body">
+                                <p class="kb-hint" style="margin-bottom:10px;">Steuert die <b>Browser-Erweiterung „Jarvis für Jira"</b>: Zusammenfassung eines Tickets und Antwortvorschlag an den Melder. Leer = <b>niemand</b> – ausdrücklich <b>auch keine lokalen Administratoren</b>. <b>Warum das hier eine eigene Freigabe braucht:</b> das Ticket wird mit dem <b>Server-Token</b> aus dem Jira-Reiter geholt, nicht mit den Rechten des Benutzers in Jira. Wer eine Ticketnummer errät, die er dort selbst nicht sehen dürfte, bekäme den Inhalt über diesen Weg trotzdem. Tragen Sie deshalb nur ein, wer die betreffenden Tickets ohnehin einsehen darf. <b>Es läuft kein Agent</b> – der Vorschlag entsteht in einem einzelnen Modellaufruf ohne Werkzeuge und wird von Hand in Jira eingefügt und abgeschickt.</p>
+
+                                <div class="form-group" style="margin-bottom:8px;">
+                                    <label>
+                                        <span>Erlaubte Benutzer</span>
+                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– Benutzernamen kommagetrennt, z.B. <code>mueller,schmidt</code></span>
+                                    </label>
+                                    <input type="text" id="jiraassist-allowed-users" placeholder="Leer = niemand (auch keine lokalen Admins)" style="width:60%;box-sizing:border-box;">
+                                </div>
+                                <div class="form-group" style="margin-bottom:8px;">
+                                    <label>
+                                        <span>Jira-Assistent-Gruppe (AD-Gruppe)</span>
+                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;" data-i18n="security.ad_group_hint">– zusätzlich zur Benutzerliste (ODER: Liste oder Gruppe genügt)</span>
+                                    </label>
+                                    <textarea id="jiraassist-allowed-group" rows="1" placeholder="z.B. CN=Jira-Assistent,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;"></textarea>
+                                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
+                                        <span data-i18n="security.ad_group_cache_hint">⚠ Gruppen-Mitgliedschaft wird beim Login ermittelt. Mit Service-Konto (Verzeichnis-Suche) wird sie automatisch nachgeprüft (Standard: alle 10 Min.) – Änderungen wirken dann ohne Neuanmeldung.</span>
+                                    </div>
+                                </div>
+                                    </div>
+                                </details>
                                 <!-- ── Unter-Container: Claude Subagent ──
                                      Startet VERSTECKT und wird von app.js am Zustand des Skills
                                      "claude_subagent" eingeblendet – gleiches Muster wie
@@ -4192,12 +4220,14 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             var _mailG = document.getElementById('email-allowed-group'); if (_mailG) _mailG.value = d.email_group || '';
                                             var _trU = document.getElementById('tracks-allowed-users'); if (_trU) _trU.value = d.tracks_users || '';
                                             var _trG = document.getElementById('tracks-allowed-group'); if (_trG) _trG.value = d.tracks_group || '';
+                                            var _jaU = document.getElementById('jiraassist-allowed-users'); if (_jaU) _jaU.value = d.jira_assist_users || '';
+                                            var _jaG = document.getElementById('jiraassist-allowed-group'); if (_jaG) _jaG.value = d.jira_assist_group || '';
                                             var _xlU = document.getElementById('excel-allowed-users'); if (_xlU) _xlU.value = d.excel_users || '';
                                             var _xlG = document.getElementById('excel-allowed-group'); if (_xlG) _xlG.value = d.excel_group || '';
                                             var _csU = document.getElementById('claudesub-allowed-users'); if (_csU) _csU.value = d.claudesub_users || '';
                                             var _csG = document.getElementById('claudesub-allowed-group'); if (_csG) _csG.value = d.claudesub_group || '';
                                             // Token-Listen (Chips) aller AD-Felder neu aufbauen (nach dem Setzen aller Werte)
-                                            ['ad-allowed-users','ad-allowed-group','ad-knowledge-editors','ad-knowledge-editors-group','ad-internet-users','ad-internet-group','ad-admins','ad-admins-group','sap-allowed-users','sap-allowed-group','email-allowed-users','email-allowed-group','tracks-allowed-users','tracks-allowed-group','excel-allowed-users','excel-allowed-group','claudesub-allowed-users','claudesub-allowed-group'].forEach(function(_id){ var _e=document.getElementById(_id); if(_e) _e.dispatchEvent(new Event('change')); });
+                                            ['ad-allowed-users','ad-allowed-group','ad-knowledge-editors','ad-knowledge-editors-group','ad-internet-users','ad-internet-group','ad-admins','ad-admins-group','sap-allowed-users','sap-allowed-group','email-allowed-users','email-allowed-group','tracks-allowed-users','tracks-allowed-group','jiraassist-allowed-users','jiraassist-allowed-group','excel-allowed-users','excel-allowed-group','claudesub-allowed-users','claudesub-allowed-group'].forEach(function(_id){ var _e=document.getElementById(_id); if(_e) _e.dispatchEvent(new Event('change')); });
                                             _adUpdateStatus(d);
                                         } catch(e) {}
                                     }
@@ -4380,6 +4410,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                                     email_allowed_group:       (document.getElementById('email-allowed-group')||{}).value ? document.getElementById('email-allowed-group').value.trim() : '',
                                                     tracks_allowed_users:      (document.getElementById('tracks-allowed-users')||{}).value ? document.getElementById('tracks-allowed-users').value.trim() : '',
                                                     tracks_allowed_group:      (document.getElementById('tracks-allowed-group')||{}).value ? document.getElementById('tracks-allowed-group').value.trim() : '',
+                                                    jira_assist_allowed_users: (document.getElementById('jiraassist-allowed-users')||{}).value ? document.getElementById('jiraassist-allowed-users').value.trim() : '',
+                                                    jira_assist_allowed_group: (document.getElementById('jiraassist-allowed-group')||{}).value ? document.getElementById('jiraassist-allowed-group').value.trim() : '',
                                                     excel_allowed_users:       (document.getElementById('excel-allowed-users')||{}).value ? document.getElementById('excel-allowed-users').value.trim() : '',
                                                     excel_allowed_group:       (document.getElementById('excel-allowed-group')||{}).value ? document.getElementById('excel-allowed-group').value.trim() : '',
                                                     claudesub_allowed_users:   (document.getElementById('claudesub-allowed-users')||{}).value ? document.getElementById('claudesub-allowed-users').value.trim() : '',
@@ -4688,7 +4720,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
     <script src="/static/js/icons.js?v=1"></script>
-    <script src="/static/js/i18n.js?v=181"></script>
+    <script src="/static/js/i18n.js?v=182"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=21"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -4718,13 +4750,13 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/branding.js?v=25"></script>
     <script src="/static/js/theme.js?v=3"></script>
     <script src="/static/js/security_incidents.js?v=30"></script>
-    <script src="/static/js/ldap_picker.js?v=10"></script>
+    <script src="/static/js/ldap_picker.js?v=11"></script>
     <script src="/static/js/excel_admin.js?v=8"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
     <script src="/static/js/sessions.js?v=8"></script>
     <script src="/static/js/agent_roles.js?v=2"></script>
     <script src="/static/js/model_caps.js?v=6"></script>
-    <script src="/static/js/app.js?v=196"></script>
+    <script src="/static/js/app.js?v=197"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

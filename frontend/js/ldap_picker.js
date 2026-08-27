@@ -26,6 +26,8 @@
         'email-allowed-group':        { kind: 'groups', multi: true, sep: '\n', list: true },
         'tracks-allowed-users':       { kind: 'users',  multi: true, sep: ',',  list: true },
         'tracks-allowed-group':       { kind: 'groups', multi: true, sep: '\n', list: true },
+        'jiraassist-allowed-users':   { kind: 'users',  multi: true, sep: ',',  list: true },
+        'jiraassist-allowed-group':   { kind: 'groups', multi: true, sep: '\n', list: true },
         'excel-allowed-users':        { kind: 'users',  multi: true, sep: ',',  list: true },
         'excel-allowed-group':        { kind: 'groups', multi: true, sep: '\n', list: true },
         'claudesub-allowed-users':    { kind: 'users',  multi: true, sep: ',',  list: true },

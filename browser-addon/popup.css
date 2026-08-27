@@ -1,0 +1,102 @@
+/* Eigenstaendige Oberflaeche: die Erweiterung laeuft ausserhalb von Jarvis und
+ * kann theme.css nicht laden. Farben folgen deshalb dem Systemthema statt einer
+ * festen Palette – ein Popup, das im dunklen Chrome hell aufblitzt, ist eine
+ * Zumutung, und die Projektkonvention "keine hardcoded Farben" zielt genau auf
+ * dieses Problem. `color-scheme` ueberlaesst dem Browser Scrollbalken und
+ * Formularfelder.
+ */
+:root {
+  color-scheme: light dark;
+  --grund: Canvas;
+  --schrift: CanvasText;
+  --rand: color-mix(in srgb, CanvasText 22%, transparent);
+  --gedaempft: color-mix(in srgb, CanvasText 62%, transparent);
+  --akzent: #b80f2e;
+  --akzent-schrift: #fff;
+  --warn: color-mix(in srgb, #b80f2e 12%, Canvas);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  width: 380px;
+  margin: 0;
+  padding: 12px;
+  background: var(--grund);
+  color: var(--schrift);
+  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.kopf {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--rand);
+}
+.marke { font-weight: 600; }
+.ticket {
+  margin-left: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--gedaempft);
+}
+.kopf .leise { margin-left: 0; }
+
+.feld { display: block; margin-bottom: 8px; }
+.feld > span { display: block; margin-bottom: 3px; font-size: 12px; color: var(--gedaempft); }
+.feld em { font-style: normal; opacity: .75; }
+
+input, textarea {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--rand);
+  border-radius: 5px;
+  background: var(--grund);
+  color: var(--schrift);
+  font: inherit;
+}
+textarea { resize: vertical; min-height: 120px; font-size: 12.5px; }
+input:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--akzent);
+  outline-offset: 1px;
+}
+
+button {
+  padding: 6px 10px;
+  border: 1px solid var(--rand);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--schrift);
+  font: inherit;
+  cursor: pointer;
+}
+button:hover:not(:disabled) { border-color: var(--akzent); }
+button:disabled { opacity: .5; cursor: default; }
+button.haupt { background: var(--akzent); border-color: var(--akzent); color: var(--akzent-schrift); }
+button.leise { color: var(--gedaempft); }
+
+.knopfreihe { display: flex; gap: 6px; margin: 8px 0; }
+/* Ohne das fressen die Knoepfe in einer Flex-Zeile die ganze Breite bzw.
+ * schrumpfen ungleich – dieselbe Falle wie bei .btn-primary im Hauptprojekt. */
+.knopfreihe > button { flex: 1 1 auto; }
+.knopfreihe > button.leise { flex: 0 0 auto; }
+
+.hinweis, .fussnote {
+  margin: -2px 0 8px;
+  font-size: 11.5px;
+  color: var(--gedaempft);
+}
+.fussnote { margin: 4px 0 0; }
+
+/* Meldungen tragen ihre Aussage doppelt – Farbe UND Text. Eine reine
+ * Farbcodierung ist keine Information (Projektregel). */
+.meldung {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--rand);
+  border-radius: 5px;
+  background: var(--warn);
+  white-space: pre-wrap;
+}
+.meldung.arbeitet { background: transparent; color: var(--gedaempft); }

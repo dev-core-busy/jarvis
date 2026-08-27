@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>Jarvis für Jira</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="kopf">
+    <span class="marke" id="marke">Jarvis</span>
+    <span class="ticket" id="ticket-anzeige"></span>
+    <button type="button" id="btn-abmelden" class="leise" hidden>Abmelden</button>
+  </header>
+
+  <!-- Einrichtung / Anmeldung -->
+  <section id="bereich-login">
+    <label class="feld">
+      <span>Jarvis-Adresse</span>
+      <input type="url" id="f-basis" placeholder="https://dp.firma.de" autocomplete="off">
+    </label>
+    <p class="hinweis">
+      Genau der Name, auf den das Serverzertifikat lautet – nicht die IP-Adresse.
+    </p>
+    <label class="feld">
+      <span>Benutzer</span>
+      <input type="text" id="f-benutzer" autocomplete="username">
+    </label>
+    <label class="feld">
+      <span>Kennwort</span>
+      <input type="password" id="f-kennwort" autocomplete="current-password">
+    </label>
+    <label class="feld">
+      <span>Code der Zwei-Faktor-App <em>(nur falls eingerichtet)</em></span>
+      <input type="text" id="f-totp" inputmode="numeric" autocomplete="one-time-code">
+    </label>
+    <button type="button" id="btn-anmelden" class="haupt">Anmelden</button>
+  </section>
+
+  <!-- Arbeitsbereich -->
+  <section id="bereich-arbeit" hidden>
+    <div class="knopfreihe">
+      <button type="button" id="btn-zusammenfassung" class="haupt">Zusammenfassen</button>
+      <button type="button" id="btn-antwort" class="haupt">Antwort vorschlagen</button>
+    </div>
+    <label class="feld">
+      <span>Zusatzwunsch <em>(optional)</em></span>
+      <input type="text" id="f-hinweis" placeholder="z. B. kurz halten, auf Englisch">
+    </label>
+
+    <div id="ergebnis" hidden>
+      <textarea id="f-ergebnis" rows="12" spellcheck="true"></textarea>
+      <div class="knopfreihe">
+        <button type="button" id="btn-einfuegen">Ins Kommentarfeld einfügen</button>
+        <button type="button" id="btn-kopieren" class="leise">Kopieren</button>
+      </div>
+      <p class="fussnote" id="ergebnis-fuss"></p>
+    </div>
+  </section>
+
+  <p id="meldung" class="meldung" hidden></p>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

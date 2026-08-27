@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Jarvis für Jira",
+  "version": "0.1.0",
+  "description": "Fasst das offene Jira-Ticket zusammen und schlägt eine Antwort an den Kunden vor.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "jarvis-jira@nexus-ag.de",
+      "strict_min_version": "115.0"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "Jarvis für Jira",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
+  ]
+}

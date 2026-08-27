@@ -1370,6 +1370,50 @@ async def require_tracks_access(request: Request, user: str = Depends(require_au
                "Short-Tracks-Zugriff; ggf. neu einloggen für Gruppen-Aktualisierung)")
 
 
+def _user_may_use_jira_assist(user: str) -> bool:
+    """Prädikat: Darf der Benutzer den Jira-Assistenten der Browser-Erweiterung nutzen?
+
+    Zuschnitt 1:1 wie ``_user_may_use_email``/``_user_may_use_sap``/
+    ``_user_may_use_tracks``: Benutzerliste ODER Gruppe, **leer = niemand**
+    (ausdrücklich auch keine lokalen Administratoren), **kein Admin-Bypass**.
+
+    WARUM ES DIE FREIGABE BRAUCHT – und warum sie hier schwerer wiegt als bei
+    den Nachbarn: das Ticket wird mit dem **Server-PAT** aus der
+    Skill-Konfiguration geholt, nicht mit den Rechten des Benutzers in Jira. Wer
+    eine Ticketnummer errät, die er dort selbst nicht sehen dürfte, bekäme den
+    Inhalt über den Umweg trotzdem. Das ist das Muster "fremde Zugangsdaten als
+    Vollmacht" aus der Endpunkt-Durchsicht vom 2026-08-04 – hier bewusst in Kauf
+    genommen und durch eine ausdrückliche Freigabe eingegrenzt, statt es zu
+    verschweigen. Die vollständige Antwort wäre ein persönlicher PAT je Benutzer
+    (Muster ``sap_accounts``); wer den Bereich breit öffnet, sollte ihn vorher
+    nachrüsten.
+    """
+    u = (user or "").strip()
+    if not u:
+        return False
+    users_raw = config.get_setting("jira_assist_allowed_users", "").strip()
+    grp = config.get_setting("jira_assist_allowed_group", "").strip()
+    if not users_raw and not grp:
+        return False
+    plain = _norm_login(u)
+    if users_raw and plain in {_norm_login(x) for x in users_raw.split(",") if x.strip()}:
+        return True
+    if grp and _member_of_any_group(_user_group_dns_cache.get(plain, []), grp):
+        return True
+    return False
+
+
+async def require_jira_assist_access(request: Request,
+                                     user: str = Depends(require_auth)) -> str:
+    """FastAPI Dependency: Prüft die Freigabe für /api/jira/assist*."""
+    if _user_may_use_jira_assist(user):
+        return user
+    raise HTTPException(status_code=403,
+        detail="Kein Zugriff auf den Jira-Assistenten – nicht in der Benutzerliste/-Gruppe "
+               "freigeschaltet (Einstellungen → Sicherheit → Berechtigungen → "
+               "Jira-Assistent; ggf. neu einloggen für Gruppen-Aktualisierung)")
+
+
 def _user_may_use_claudesub(user: str) -> bool:
     """Prädikat: Darf der Benutzer Codearbeiten an Jarvis delegieren?
 
@@ -4770,6 +4814,12 @@ async def get_me(user: str = Depends(require_auth)):
             # der Einstellungs-Reiter unabhaengig vom Skill-Zustand bedienbar
             # bleibt.
             "tracks": _user_may_use_tracks(user) and _skill_active("short-tracks"),
+            # Jira-Assistent der Browser-Erweiterung: Freigabe UND aktiver Skill.
+            # Die Erweiterung fragt das beim Anmelden ab und blendet ihr Panel
+            # sonst gar nicht erst ein – ein Knopf, der zuverlaessig 403 liefert,
+            # ist schlimmer als kein Knopf.
+            "jira_assist": (_user_may_use_jira_assist(user)
+                            and _skill_active("jira")),
             # Gleiche Logik wie sap/email/tracks: Freigabe UND aktiver Skill.
             "claudesub": (_user_may_use_claudesub(user)
                           and _skill_active("claude_subagent")),
@@ -5684,6 +5734,10 @@ async def save_settings(request: Request, user: str = Depends(require_local_auth
         config.save_setting("tracks_allowed_users", body["tracks_allowed_users"])
     if "tracks_allowed_group" in body:
         config.save_setting("tracks_allowed_group", body["tracks_allowed_group"])
+    if "jira_assist_allowed_users" in body:
+        config.save_setting("jira_assist_allowed_users", body["jira_assist_allowed_users"])
+    if "jira_assist_allowed_group" in body:
+        config.save_setting("jira_assist_allowed_group", body["jira_assist_allowed_group"])
     if "excel_allowed_users" in body:
         config.save_setting("excel_allowed_users", body["excel_allowed_users"])
     if "excel_allowed_group" in body:
@@ -5841,6 +5895,8 @@ async def get_ad_status(user: str = Depends(require_local_auth)):
         ),
         "email_users": config.get_setting("email_allowed_users", ""),
         "email_group": config.get_setting("email_allowed_group", ""),
+        "jira_assist_users": config.get_setting("jira_assist_allowed_users", ""),
+        "jira_assist_group": config.get_setting("jira_assist_allowed_group", ""),
         "tracks_users": config.get_setting("tracks_allowed_users", ""),
         "tracks_group": config.get_setting("tracks_allowed_group", ""),
         "excel_users": config.get_setting("excel_allowed_users", ""),
@@ -11150,6 +11206,124 @@ def _support_jira_jql(query: str, open_only: bool = True) -> str:
         clauses.append("resolution = Unresolved")
     jql = " AND ".join(clauses)
     return (jql + " ORDER BY updated DESC") if jql else "ORDER BY updated DESC"
+
+
+# ─── Jira-Assistent fuer die Browser-Erweiterung ─────────────────────
+# Die Erweiterung (browser-addon/) schickt NUR die Ticketnummer; Beschreibung
+# und Verlauf holt der Server. Dahinter laeuft KEIN Agent, sondern ein einzelner
+# LLM-Aufruf mit tools=[] – Begruendung im Modul-Docstring von jira_assist.
+@app.get("/api/jira/assist/health")
+async def jira_assist_health(request: Request,
+                             user: str = Depends(require_jira_assist_access)):
+    """Ist der Assistent einsatzbereit – und passt das Zertifikat zur Adresse?
+
+    Die Erweiterung ruft das einmal beim Einrichten. Der Zertifikatsteil ist
+    KEIN Beiwerk: ruft sie den Server unter einem Namen auf, den das
+    Serverzertifikat nicht abdeckt, bricht der Hintergrund-Aufruf mit einem
+    TLS-Fehler ab – und anders als in einem Tab gibt es dort **kein
+    "trotzdem fortfahren"**. Genau dieser Fehler hat beim Outlook-Add-in Tage
+    gekostet ("Office 365 vertraut dem Add-in nicht"), weil das Manifest auf die
+    IP zeigte und das Zertifikat auf den FQDN lautete.
+    """
+    from backend import addin, jira_assist  # noqa: PLC0415
+    try:
+        from backend.jira_client import JiraClient  # noqa: PLC0415
+        konfiguriert = bool(JiraClient().configured)
+    except Exception:  # noqa: BLE001
+        konfiguriert = False
+    # DER REQUEST MUSS MIT. Ohne ihn faellt basis_url auf die Einstellung
+    # zurueck und ist auf einem Server ohne `addin_base_url` LEER – die
+    # Zertifikatsfrage waere dann immer "nicht feststellbar", also genau bei
+    # der Adresse blind, unter der die Erweiterung gerade zugreift. Beim
+    # ersten Live-Lauf auf DEV genau so gemessen.
+    basis = addin.basis_url(request) or ""
+    gedeckt, host, namen = addin.zert_deckt_basis(basis) if basis else (None, "", [])
+    return JSONResponse({
+        "ok": True,
+        "jira_konfiguriert": konfiguriert,
+        "modi": list(jira_assist.MODI),
+        # None = nicht feststellbar. Das ist NICHT dasselbe wie "deckt nicht ab"
+        # (TLS-Terminierung im Rueckwaertsproxy) – die Oberflaeche darf daraus
+        # keine Warnung machen.
+        "zert_deckt_adresse": gedeckt,
+        "zert_host": host,
+        "zert_namen": namen,
+    })
+
+
+@app.post("/api/jira/assist")
+async def jira_assist_run(request: Request,
+                          user: str = Depends(require_jira_assist_access)):
+    """Zusammenfassung oder Antwortvorschlag zu EINEM Ticket.
+
+    Rumpf: ``{key, modus: "zusammenfassung"|"antwort", lang?, hinweis?, stil?}``.
+    Fehlschlag = **400 mit Klartext**, nicht 200 mit ``ok:false`` – gleiche Regel
+    wie bei ``/api/license`` und ``/api/prompt/pruefen``: sonst sieht der
+    Aufrufer den Fehler nicht.
+    """
+    from backend import jira_assist  # noqa: PLC0415
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."},
+                            status_code=400)
+    b = body or {}
+    try:
+        daten = await jira_assist.auswerten(
+            key=str(b.get("key") or ""),
+            modus=str(b.get("modus") or "zusammenfassung"),
+            user=user,
+            lang=str(b.get("lang") or "de"),
+            hinweis=str(b.get("hinweis") or ""),
+            stil=str(b.get("stil") or ""),
+        )
+    except jira_assist.AssistFehler as f:
+        return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        from backend.llm import scrub_secrets  # noqa: PLC0415
+        return JSONResponse({"ok": False,
+                             "error": "Auswertung fehlgeschlagen: %s"
+                                      % scrub_secrets(str(e))}, status_code=500)
+    return JSONResponse(daten)
+
+
+@app.get("/api/jira/assist/paket")
+async def jira_assist_paket(variante: str = "chrome",
+                            user: str = Depends(require_jira_assist_access)):
+    """Die Browser-Erweiterung als ZIP – bei jedem Abruf frisch erzeugt.
+
+    Bewusst KEIN `?token=`-Weg (anders als bei /api/documents): das Paket wird
+    per fetch geholt und als Blob gespeichert, der Bearer-Header genuegt. Ein
+    Query-Token landet im Verlauf und in Proxy-Logs; hier gibt es keinen Grund
+    dafuer, weil kein <a href> und kein <img src> im Spiel ist.
+    """
+    from backend import jira_assist  # noqa: PLC0415
+    try:
+        name, rohdaten = jira_assist.paket_bauen(variante)
+    except jira_assist.AssistFehler as f:
+        return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
+    return Response(
+        content=rohdaten,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": 'attachment; filename="%s"' % name,
+            # Das Paket wird aus dem Arbeitsverzeichnis erzeugt: nach einem
+            # Deploy soll der naechste Abruf den neuen Stand liefern, nicht den
+            # aus dem Cache.
+            "Cache-Control": "no-store",
+        })
+
+
+@app.get("/jira-addon")
+async def jira_addon_seite():
+    """Anleitungs- und Downloadseite fuer die Browser-Erweiterung.
+
+    Leere Huelle wie /sap und /tracks: eine Navigation traegt keinen
+    Authorization-Header, die Berechtigung kann hier also nicht geprueft werden.
+    Die Seite holt `/api/me` und leitet Unberechtigte aufs Portal; die DATEN
+    liegen ausschliesslich hinter `require_jira_assist_access`.
+    """
+    return FileResponse(FRONTEND_DIR / "jira_addon.html")
 
 
 # ─── Kundenverwaltung (IBS-API) ──────────────────────────────────────

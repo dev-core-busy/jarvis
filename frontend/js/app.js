@@ -1024,6 +1024,24 @@
             }
         };
 
+        // ── Jira-Assistent: Berechtigungsblock nur bei aktivem Skill ──
+        // Gleiche Begruendung wie bei sec-sub-email/-sap/-tracks: ohne aktiven
+        // Jira-Skill gibt es weder Adresse noch Token, die Freigabe waere eine
+        // Freigabe fuer nichts.
+        window.updateJiraAssistSecVisibility = async function updateJiraAssistSecVisibility() {
+            const box = document.getElementById('sec-sub-jiraassist');
+            if (!box) return;
+            try {
+                const skills = await _skillsOnce();
+                const sp = Array.isArray(skills)
+                    ? skills.find(s => s.dir_name === 'jira')
+                    : null;
+                box.style.display = (sp && sp.enabled) ? '' : 'none';
+            } catch (e) {
+                // Fehler ignorieren – der Block bleibt versteckt
+            }
+        };
+
         // ── Claude Subagent: Berechtigungsblock nur bei aktivem Skill ──
         // Gleiche Begruendung wie bei sec-sub-email/-sap/-tracks: ohne aktiven
         // Skill waere die Freigabe eine Freigabe fuer nichts.
@@ -1241,6 +1259,7 @@
             await updateSapTabVisibility();
             await updateEmailTabVisibility();
             await updateTracksSecVisibility();
+            await updateJiraAssistSecVisibility();
             await updateClaudesubSecVisibility();
             await updateExcelSecVisibility();
             await updateKundenverwaltungTabVisibility();

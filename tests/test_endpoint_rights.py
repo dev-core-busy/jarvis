@@ -220,6 +220,19 @@ EXEMPT = {
     # Externe Automatisierung: Token ODER Agent-API-Key (require_auth_or_agent).
     ("get", "/api/jira/phonenumber"), ("get", "/api/jira/crm-number"),
     ("get", "/api/jira/passende-tickets"),
+    # Jira-Assistent der Browser-Erweiterung: bewusst UNTERHALB von Admin, aber
+    # mit eigener Freigabeliste (`require_jira_assist_access` – Benutzerliste
+    # ODER Gruppe, leer = niemand, KEIN Admin-Bypass). Damit auf derselben Ebene
+    # wie require_sap_access/require_email_access/require_tracks_access, die
+    # ebenfalls auf Fachsysteme mit Server-Zugangsdaten zugreifen.
+    # EINZELN eingetragen und nicht als Dependency freigegeben: eine dritte
+    # Route unter /api/jira/ mit dieser Schranke soll hier wieder auffallen.
+    ("get", "/api/jira/assist/health"), ("post", "/api/jira/assist"),
+    # Auslieferung der Browser-Erweiterung als ZIP. Dieselbe Freigabe wie oben.
+    # Der Inhalt ist NICHT vertraulich (er liegt als Quelltext im Repo) – die
+    # Schranke haengt daran, dass niemand ein Werkzeug angeboten bekommt, das
+    # er anschliessend nicht benutzen darf.
+    ("get", "/api/jira/assist/paket"),
 }
 # Vision-Medien (Kamerabild, Gesichts-Ausschnitte, Trainings-Vorschau,
 # Begruessungs-Audio) brauchen ``?token=``, weil <img>/<audio> keine Header
@@ -245,6 +258,7 @@ section("Regel: Lesen darf nicht freier sein als Schreiben")
 RANK = {"require_local_auth": 3, "require_admin_or_knowledge_editor": 2,
         "require_knowledge_editor": 2, "require_sap_access": 2,
         "require_email_access": 2, "require_tracks_access": 2,
+        "require_jira_assist_access": 2,
         # Bereichs-Schranke ohne eigene Freigabeliste: prueft NUR, ob der Skill
         # "userchat" an ist. Damit auf der Ebene von require_auth, nicht darueber.
         "require_userchat_access": 1,

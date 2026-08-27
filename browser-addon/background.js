@@ -1,0 +1,184 @@
+/* Hintergrund: HIER laufen ALLE Netzaufrufe – und das ist keine Stilfrage.
+ *
+ * Unter Manifest V3 unterliegen Content-Scripts derselben CORS-Regel wie die
+ * Seite, in der sie laufen; host_permissions wirken dort NICHT (MDN: "Only
+ * backend scripts have elevated cross-domain privileges"). Der Jarvis-Server
+ * traegt eine enge CORS-Liste – live gemessen antwortet er einem Preflight von
+ * `chrome-extension://…` mit **400 Disallowed CORS origin**. Aus dem
+ * Hintergrund entsteht dieser Preflight gar nicht erst.
+ *
+ * Wer einen dieser fetch-Aufrufe ins Content-Script oder in das Popup
+ * verschiebt, bricht die Erweiterung also – und zwar mit einer Meldung, die
+ * nach einem Serverfehler aussieht.
+ *
+ * Das Popup waere als Extension-Page zwar ebenfalls privilegiert, ist aber der
+ * falsche Ort: es schliesst sich, sobald der Benutzer daneben klickt, und
+ * nimmt einen laufenden Aufruf mit. Eine Auswertung dauert rund 13 Sekunden.
+ */
+
+const api = (typeof browser !== "undefined") ? browser : chrome;
+
+// Serveradresse steht NICHT im Manifest, sondern in den Einstellungen.
+// Grund: eine Firefox-Erweiterung muss von Mozilla signiert sein, auch die
+// selbst verteilte ("All add-ons must be submitted for signing, even if you
+// distribute them outside AMO"). Eine signierte Datei laesst sich nicht pro
+// Server umschreiben, ohne die Signatur zu brechen. Damit scheidet der Weg des
+// Outlook-Add-ins aus, wo das Manifest je Server erzeugt wird – und die
+// Drift-Falle "eine Kopie je Installation" gleich mit.
+const EINST = "einstellungen";   // storage.local: { basis }
+const SITZUNG = "sitzung";       // storage.session: { token, benutzer }
+
+async function basisLesen() {
+  const d = await api.storage.local.get(EINST);
+  return ((d[EINST] || {}).basis || "").replace(/\/+$/, "");
+}
+
+// Das Token liegt in storage.SESSION, nicht in local: es soll den Browser nicht
+// ueberleben. Preis ist eine Anmeldung je Browserstart – bewusst, denn hier
+// gibt es kein SSO wie im Outlook-Add-in (das haengt am Exchange-Token, das ein
+// Browser nicht hat).
+async function tokenLesen() {
+  const d = await api.storage.session.get(SITZUNG);
+  return (d[SITZUNG] || {}).token || "";
+}
+
+async function sitzungSchreiben(wert) {
+  await api.storage.session.set({ [SITZUNG]: wert || {} });
+}
+
+/** Ein Aufruf an Jarvis. Wirft mit KLARTEXT – der Text geht 1:1 ins Popup. */
+async function ruf(pfad, { methode = "GET", rumpf = null, mitToken = true } = {}) {
+  const basis = await basisLesen();
+  if (!basis) throw new Error("Es ist keine Jarvis-Adresse hinterlegt.");
+
+  const kopf = { "Content-Type": "application/json" };
+  if (mitToken) {
+    const t = await tokenLesen();
+    if (!t) throw new Error("Nicht angemeldet.");
+    kopf["Authorization"] = "Bearer " + t;
+  }
+
+  let antwort;
+  try {
+    antwort = await fetch(basis + pfad, {
+      method: methode,
+      headers: kopf,
+      body: rumpf ? JSON.stringify(rumpf) : undefined,
+      // KEINE Cookies. Jarvis authentifiziert ueber den Bearer-Header; ein
+      // "include" wuerde nur die CORS-Regeln verschaerfen, ohne etwas zu
+      // gewinnen.
+      credentials: "omit",
+    });
+  } catch (e) {
+    // Der haeufigste Fall dahinter ist KEIN Netzausfall, sondern ein
+    // Zertifikat, das nicht zur aufgerufenen Adresse passt. Im Hintergrund gibt
+    // es dafuer kein "trotzdem fortfahren" – der Aufruf bricht wortlos ab.
+    // Genau dieser Fehler hat beim Outlook-Add-in Tage gekostet.
+    throw new Error(
+      "Der Server ist nicht erreichbar (" + (e && e.message ? e.message : "?") + ").\n" +
+      "Häufigste Ursache: die Adresse passt nicht zum Serverzertifikat. Rufe " +
+      "Jarvis unter genau dem Namen auf, auf den das Zertifikat lautet – nicht " +
+      "über die IP-Adresse.");
+  }
+
+  if (antwort.status === 401) {
+    await sitzungSchreiben({});
+    throw new Error("Die Anmeldung ist abgelaufen. Bitte neu anmelden.");
+  }
+
+  let daten = null;
+  try { daten = await antwort.json(); } catch (e) { daten = null; }
+
+  if (!antwort.ok) {
+    // Jarvis antwortet bei fachlichem Fehlschlag mit 400 und Klartext in
+    // `error` bzw. `detail` (403 der Freigabe). Ein "HTTP 400" allein waere
+    // fuer den Benutzer wertlos.
+    const txt = (daten && (daten.error || daten.detail))
+      || ("Der Server meldet HTTP " + antwort.status + ".");
+    throw new Error(String(txt));
+  }
+  return daten || {};
+}
+
+async function anmelden({ basis, benutzer, kennwort, totp }) {
+  await api.storage.local.set({ [EINST]: { basis: (basis || "").replace(/\/+$/, "") } });
+  const d = await ruf("/api/login", {
+    methode: "POST", mitToken: false,
+    rumpf: {
+      username: benutzer,
+      password: kennwort,
+      // ⚠ DAS FELD HEISST `totp_code`. Im Outlook-Add-in stand hier einmal
+      // `totp`, und das Ergebnis war eine Anmeldeschleife OHNE Fehlermeldung –
+      // der Server sah schlicht keinen Code. Ein Test vergleicht den Namen
+      // gegen app.js.
+      totp_code: totp || "",
+    },
+  });
+  if (!d || d.success === false || !d.token) {
+    throw new Error((d && d.error) || "Anmeldung fehlgeschlagen.");
+  }
+  await sitzungSchreiben({ token: d.token, benutzer: benutzer });
+
+  // Darf dieser Benutzer den Assistenten ueberhaupt? Wird sofort geklaert, statt
+  // den Knopf anzubieten und beim Druecken 403 zu liefern.
+  let erlaubt = false, hinweis = "";
+  try {
+    const me = await ruf("/api/me");
+    erlaubt = !!(me && me.permissions && me.permissions.jira_assist);
+    if (!erlaubt) {
+      hinweis = "Dein Konto ist für den Jira-Assistenten nicht freigeschaltet " +
+                "(Einstellungen → Sicherheit → Berechtigungen → Jira-Assistent).";
+    }
+  } catch (e) {
+    hinweis = e.message;
+  }
+  return { ok: true, benutzer, erlaubt, hinweis };
+}
+
+// ── Nachrichten aus dem Popup ───────────────────────────────────────────────
+api.runtime.onMessage.addListener((nachricht, _absender, antworten) => {
+  (async () => {
+    try {
+      switch (nachricht && nachricht.art) {
+        case "zustand": {
+          const basis = await basisLesen();
+          const d = await api.storage.session.get(SITZUNG);
+          const s = d[SITZUNG] || {};
+          antworten({ ok: true, basis, angemeldet: !!s.token, benutzer: s.benutzer || "" });
+          break;
+        }
+        case "anmelden":
+          antworten(await anmelden(nachricht));
+          break;
+        case "abmelden":
+          await sitzungSchreiben({});
+          antworten({ ok: true });
+          break;
+        case "health":
+          antworten({ ok: true, daten: await ruf("/api/jira/assist/health") });
+          break;
+        case "auswerten":
+          antworten({
+            ok: true,
+            daten: await ruf("/api/jira/assist", {
+              methode: "POST",
+              rumpf: {
+                key: nachricht.key,
+                modus: nachricht.modus,
+                lang: nachricht.lang || "de",
+                hinweis: nachricht.hinweis || "",
+              },
+            }),
+          });
+          break;
+        default:
+          antworten({ ok: false, fehler: "Unbekannte Anfrage." });
+      }
+    } catch (e) {
+      antworten({ ok: false, fehler: (e && e.message) || String(e) });
+    }
+  })();
+  // true = die Antwort kommt asynchron. Ohne das bekommt das Popup `undefined`
+  // und zeigt "Unbekannter Fehler", waehrend der Aufruf in Wahrheit laeuft.
+  return true;
+});

@@ -432,6 +432,55 @@ def addon_verzeichnis():
     return p if (p / "manifest.json").exists() else None
 
 
+def markenname() -> str:
+    """Der Name, unter dem die Erweiterung im Browser erscheint.
+
+    Gleiche Quelle und gleiche Begruendung wie ``addin.anzeigename()``: der Name
+    steht in der Symbolleiste jedes Arbeitsplatzes und in der
+    Erweiterungsverwaltung. Ein White-Label-System darf dort nicht "Jarvis"
+    schreiben. ``kategorie_name()`` loest Assistenten-Name → Firmenname →
+    "Jarvis" auf; eine eigene Aufloesung waere die dritte Fassung derselben
+    Frage.
+    """
+    try:
+        from backend.mail_accounts import kategorie_name  # noqa: PLC0415
+        name = (kategorie_name() or "").strip()
+    except Exception:  # noqa: BLE001
+        name = ""
+    # Chrome begrenzt `name` auf 75 Zeichen; hier bleibt Platz fuer den Zusatz.
+    return (name or "Jarvis")[:40]
+
+
+def _manifest_gebrandet(roh: str) -> str:
+    """Setzt Marke und Beschreibung im Manifest – JSON-sicher.
+
+    Der Name kommt aus dem Branding-Formular und ist damit Fremdeingabe: er
+    wird ueber ``json.dumps`` eingesetzt, nie per Zeichenkettenersatz. Ein
+    Anfuehrungszeichen im Firmennamen haette das Manifest sonst zerlegt, und
+    der Browser meldet dazu nur "Manifest ist ungueltig" (dieselbe Falle wie
+    beim XML-Manifest des Outlook-Add-ins, dort mit ``x()`` geloest).
+
+    ⚠ FOLGE FUER DIE FIREFOX-SIGNIERUNG: das Paket ist damit pro Installation
+    verschieden. Fuer eine dauerhafte Firefox-Installation muss GENAU DIESES
+    Paket signiert werden – ein zentral signiertes "fuer alle" gibt es dann
+    nicht mehr. Fuer ein White-Label-Produkt ist das richtig herum: jedes Haus
+    verteilt sein eigenes Paket unter seinem eigenen Namen.
+    """
+    import json  # noqa: PLC0415
+
+    marke = markenname()
+    try:
+        m = json.loads(roh)
+    except Exception:  # noqa: BLE001
+        # Fail-safe: lieber das unveraenderte Manifest ausliefern als gar
+        # keines – ohne Branding heisst die Erweiterung eben wie im Repo.
+        return roh
+    m["name"] = "%s für Jira" % marke
+    m["description"] = ("Fasst das offene Jira-Ticket zusammen und schlägt "
+                        "eine Antwort an den Kunden vor.")
+    return json.dumps(m, ensure_ascii=False, indent=2)
+
+
 def paket_bauen(variante: str) -> tuple:
     """``(dateiname, bytes)`` – die Erweiterung als ZIP.
 
@@ -460,8 +509,9 @@ def paket_bauen(variante: str) -> tuple:
     puffer = io.BytesIO()
     with zipfile.ZipFile(puffer, "w", zipfile.ZIP_DEFLATED) as z:
         # Das Manifest heisst im Paket IMMER manifest.json – der Browser kennt
-        # keinen anderen Namen.
-        z.writestr("manifest.json", (wurzel / manifest).read_bytes())
+        # keinen anderen Namen. Marke und Beschreibung kommen aus dem Branding.
+        z.writestr("manifest.json", _manifest_gebrandet(
+            (wurzel / manifest).read_text(encoding="utf-8")))
         for d in PAKET_DATEIEN:
             z.writestr(d, (wurzel / d).read_bytes())
         for s in symbole:

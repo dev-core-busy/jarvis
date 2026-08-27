@@ -253,6 +253,149 @@ mitDom('<iframe id="x_ifr"></iframe>', (w, f) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+section("6b) Branding: keine Marke und keine Farbe fest verdrahtet");
+// ═══════════════════════════════════════════════════════════════════════════
+/* Dies ist ein White-Label-Produkt. Ein Fenster, das im Browser jedes
+ * Sachbearbeiters "Jarvis" schreibt, verraet das Produkt hinter der Hausmarke –
+ * dieselbe Begruendung, aus der die Mail-Kategorie und der Name des
+ * Outlook-Add-ins dem Branding folgen. */
+const POPUP_CSS = lies("popup.css");
+const cssOhne = ohneKommentare(POPUP_CSS);
+
+// Die Kundenfarbe stand hier hart verdrahtet (#b80f2e) – sie gehoert zum
+// Server, nicht ins ausgelieferte Paket.
+const festeFarben = (cssOhne.match(/#[0-9a-fA-F]{3,8}\b/g) || [])
+    .filter(f => !['#fff', '#ffffff'].includes(f.toLowerCase()));
+check(!festeFarben.includes('#b80f2e'),
+      'keine Kundenfarbe im Paket', festeFarben.join(', '));
+check(/--akzent:\s*#9b59b6/.test(cssOhne),
+      'der Rueckfall ist der neutrale Jarvis-Ton');
+check(/setProperty\("--akzent"/.test(POPUP_JS),
+      'popup.js setzt die Akzentfarbe aus dem Branding');
+// Die Farben stehen in `colors`, nicht flach in der Antwort. Ein Zugriff auf
+// b.accent liefert undefined – und zwar STILL (das Fenster behaelt den
+// Standardton). Live gegen ein eingeschaltetes Branding gemessen.
+check(/b\.colors/.test(POPUP_JS),
+      'die Farben werden aus b.colors gelesen');
+check(!/\bb\.accent\b/.test(ohneKommentare(POPUP_JS)),
+      'NICHT flach aus b.accent (dort steht nichts)');
+// Gegenprobe an der Wahrheit: der Endpunkt liefert genau dieses Feld.
+const MAIN_SRC = fs.readFileSync(path.join(WURZEL, 'backend', 'main.py'), 'utf8');
+check(/"colors":\s*cfg\.get\("colors"/.test(MAIN_SRC),
+      '/api/branding liefert colors – die Namen passen zusammen');
+
+// ── Der Platzhalter {marke} wird WIRKLICH ersetzt ─────────────────────────
+// Kein Quelltext-Test: ein roher "{marke}"-Text im Fenster waere schlimmer als
+// der falsche Markenname. Geprueft wird in BEIDEN Faellen – ohne Branding
+// (Rueckfall) und mit.
+{
+  // markeAnwenden + setzeBranding aus popup.js schneiden und ausfuehren.
+  const teile = ['const _originale = new Map();'];
+  for (const name of ['markeAnwenden', 'setzeBranding']) {
+    const m = POPUP_JS.match(new RegExp('function ' + name + '\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}'));
+    if (m) teile.push(m[0]);
+  }
+
+  /* JE FALL EIN FRISCHES DOM. Der erste Lauf ersetzt die Platzhalter durch den
+   * Rueckfall; ein zweiter Lauf auf demselben DOM faende keine mehr und waere
+   * gruen aus dem falschen Grund – genau so ist dieser Test beim ersten Mal
+   * fehlgeschlagen und hat einen Fehler im PRODUKTIONSCODE behauptet, den es
+   * nicht gab. (Register: ein neuer Testblock braucht ein frisches DOM.) */
+  const lauf = (branding) => {
+    const dom = new JSDOM(POPUP_HTML, { url: 'https://x.test/', runScripts: 'outside-only' });
+    const w = dom.window;
+    try {
+      const f = new w.Function('marke', 'branding', `
+          let _marke = marke;
+          const $ = (id) => document.getElementById(id);
+          const el = { basis: { value: '' } };
+          ${teile.join('\n')}
+          markeAnwenden();
+          if (branding) setzeBranding(branding);
+          return JSON.stringify({
+            text: document.body.textContent,
+            titel: document.title,
+            marke: document.getElementById('marke').textContent
+          });`);
+      return JSON.parse(f('Jarvis', branding));
+    } finally {
+      w.close();
+    }
+  };
+
+  const ohne = lauf(null);
+  check(!ohne.text.includes('{marke}'),
+        'ohne Branding: kein roher Platzhalter im Fenster');
+  check(ohne.text.includes('Jarvis-Adresse'),
+        'ohne Branding: Rueckfall auf Jarvis');
+  check(!ohne.titel.includes('{marke}'), 'ohne Branding: auch der Titel');
+
+  const mit = lauf({ assistant_name: 'Nexerius', colors: { accent: '#b80f2e' } });
+
+  /* Der Test oben ruft markeAnwenden() SELBST auf – er belegt damit die
+   * Funktion, nicht ihren Aufruf. Eine Gegenprobe, die den Aufruf aus start()
+   * entfernte, blieb deshalb gruen. Also zusaetzlich: wird er ueberhaupt
+   * gerufen, und zwar VOR dem ersten await? Danach blitzt der rohe Platzhalter
+   * sichtbar auf, weil das Fenster schon gerendert ist. */
+  const startFn = (POPUP_JS.match(/async function start\(\)\s*\{[\s\S]*?\n\}/) || [''])[0];
+  check(/markeAnwenden\(\)/.test(startFn), 'start() ruft markeAnwenden()');
+  const vorAwait = startFn.slice(0, startFn.search(/\bawait\b/));
+  check(/markeAnwenden\(\)/.test(vorAwait),
+        'und zwar VOR dem ersten await (sonst blitzt {marke} auf)');
+  check(!mit.text.includes('{marke}'), 'mit Branding: kein roher Platzhalter');
+  check(mit.text.includes('Nexerius-Adresse'),
+        'mit Branding: der Platzhalter traegt die Marke');
+  check(!mit.text.includes('Jarvis-Adresse'),
+        'mit Branding: kein "Jarvis" mehr im Text');
+  check(mit.marke === 'Nexerius', 'die Kopfzeile traegt die Marke');
+  check(mit.titel === 'Nexerius für Jira', 'der Fenstertitel ebenfalls');
+}
+
+// Kein sichtbarer Text im Paket darf "Jarvis" fest verdrahtet haben – der
+// Rueckfall gehoert in EINE Variable, nicht in zwanzig Zeichenketten.
+for (const [datei, inhalt] of [['popup.html', POPUP_HTML],
+                               ['background.js', BG],
+                               ['popup.js', POPUP_JS]]) {
+  const sichtbar = ohneKommentare(inhalt)
+      // Der Rueckfall selbst und der Elementinhalt der Kopfzeile sind erlaubt.
+      .replace(/let _marke = "Jarvis";/, '')
+      .replace(/<span class="marke" id="marke">Jarvis<\/span>/, '')
+      .replace(/JarvisIcons|JarvisIssues/g, '');
+  check(!/Jarvis/.test(sichtbar),
+        datei + ': kein fest verdrahtetes "Jarvis" im Anzeigetext',
+        (sichtbar.match(/.{0,40}Jarvis.{0,40}/) || [''])[0].trim());
+}
+
+// Der Markenname wird gesetzt – und zwar per textContent (er kommt aus einem
+// Formular, also Fremdeingabe).
+check(/getElementById\("marke"\)|\$\("marke"\)/.test(POPUP_JS),
+      'popup.js setzt den Markennamen');
+check(!/marke[^\n]*innerHTML/.test(POPUP_JS),
+      'der Markenname geht NICHT durch innerHTML');
+check(/textContent = name/.test(POPUP_JS),
+      'sondern durch textContent');
+
+// /api/branding haengt an KEINER Anmeldung – deshalb kann die Marke schon vor
+// dem ersten Login stehen. Wuerde hier ein Token verlangt, saehe der Benutzer
+// beim allerersten Oeffnen die fremde Marke.
+check(/mitToken:\s*false/.test(bgOhne.slice(bgOhne.indexOf('/api/branding') - 200,
+                                            bgOhne.indexOf('/api/branding') + 200)),
+      '/api/branding wird OHNE Token geholt');
+
+// Serverseitig: das Manifest im ZIP traegt den Markennamen.
+const MAIN_PY = fs.readFileSync(path.join(WURZEL, 'backend', 'jira_assist.py'), 'utf8');
+const pyOhne = MAIN_PY.replace(/"""[\s\S]*?"""/g, '')
+                      .split('\n').map(z => z.split('#')[0]).join('\n');
+check(/def markenname/.test(pyOhne), 'der Server kennt einen Markennamen');
+check(/kategorie_name/.test(pyOhne),
+      'er kommt aus kategorie_name() – keine dritte Fassung derselben Frage');
+check(/json\.dumps/.test(pyOhne),
+      'das Manifest wird JSON-sicher gebaut (der Name ist Fremdeingabe)');
+check(!/\.replace\([^)]*"name"/.test(pyOhne),
+      'kein Zeichenketten-Ersatz am Manifest');
+
+
+// ═══════════════════════════════════════════════════════════════════════════
 section("7) Oberflaeche");
 // ═══════════════════════════════════════════════════════════════════════════
 check(/type="module"/.test(POPUP_HTML),

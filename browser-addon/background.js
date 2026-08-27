@@ -49,7 +49,7 @@ async function sitzungSchreiben(wert) {
 /** Ein Aufruf an Jarvis. Wirft mit KLARTEXT – der Text geht 1:1 ins Popup. */
 async function ruf(pfad, { methode = "GET", rumpf = null, mitToken = true } = {}) {
   const basis = await basisLesen();
-  if (!basis) throw new Error("Es ist keine Jarvis-Adresse hinterlegt.");
+  if (!basis) throw new Error("Es ist keine {marke}-Adresse hinterlegt.");
 
   const kopf = { "Content-Type": "application/json" };
   if (mitToken) {
@@ -77,7 +77,7 @@ async function ruf(pfad, { methode = "GET", rumpf = null, mitToken = true } = {}
     throw new Error(
       "Der Server ist nicht erreichbar (" + (e && e.message ? e.message : "?") + ").\n" +
       "Häufigste Ursache: die Adresse passt nicht zum Serverzertifikat. Rufe " +
-      "Jarvis unter genau dem Namen auf, auf den das Zertifikat lautet – nicht " +
+      "{marke} unter genau dem Namen auf, auf den das Zertifikat lautet – nicht " +
       "über die IP-Adresse.");
   }
 
@@ -98,6 +98,24 @@ async function ruf(pfad, { methode = "GET", rumpf = null, mitToken = true } = {}
     throw new Error(String(txt));
   }
   return daten || {};
+}
+
+/** Marke, Farbe und Logo des Servers – OHNE Anmeldung abrufbar.
+ *
+ * `/api/branding` haengt bewusst an keiner Anmeldung (es wird schon auf der
+ * Loginseite gebraucht). Deshalb kann das Fenster sein Aussehen setzen, sobald
+ * eine Adresse eingetragen ist – also VOR dem ersten Anmelden, genau dann,
+ * wenn jemand zum ersten Mal hinsieht.
+ *
+ * Fehlschlag ist KEIN Fehler: ohne Branding bleibt das eingebaute Aussehen.
+ */
+async function branding() {
+    try {
+        const b = await ruf("/api/branding", { mitToken: false });
+        return (b && b.active) ? b : null;
+    } catch (e) {
+        return null;
+    }
 }
 
 async function anmelden({ basis, benutzer, kennwort, totp }) {
@@ -154,6 +172,17 @@ api.runtime.onMessage.addListener((nachricht, _absender, antworten) => {
           await sitzungSchreiben({});
           antworten({ ok: true });
           break;
+        case "branding": {
+          // Die Adresse kann aus dem Formular kommen (noch nicht gespeichert),
+          // damit das Fenster schon beim Eintippen die Marke zeigen kann.
+          if (nachricht.basis) {
+            await api.storage.local.set({
+              [EINST]: { basis: String(nachricht.basis).replace(/\/+$/, "") }
+            });
+          }
+          antworten({ ok: true, daten: await branding() });
+          break;
+        }
         case "health":
           antworten({ ok: true, daten: await ruf("/api/jira/assist/health") });
           break;

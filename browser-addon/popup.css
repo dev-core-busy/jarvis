@@ -11,9 +11,15 @@
   --schrift: CanvasText;
   --rand: color-mix(in srgb, CanvasText 22%, transparent);
   --gedaempft: color-mix(in srgb, CanvasText 62%, transparent);
-  --akzent: #b80f2e;
+  /* Jarvis-Standard. Ist am Server ein Branding hinterlegt, ueberschreibt
+   * popup.js::setzeBranding() diese Variable mit der Hausfarbe.
+   * ⚠ HIER STAND EINE KUNDENFARBE HART VERDRAHTET (#b80f2e). In einem
+   * White-Label-Produkt ist das falsch herum: die Farbe gehoert zum Server,
+   * nicht ins ausgelieferte Paket. */
+  --akzent: #9b59b6;
+  --akzent-hover: #8e44ad;
   --akzent-schrift: #fff;
-  --warn: color-mix(in srgb, #b80f2e 12%, Canvas);
+  --warn: color-mix(in srgb, var(--akzent) 12%, Canvas);
 }
 
 * { box-sizing: border-box; }
@@ -36,6 +42,15 @@ body {
   border-bottom: 1px solid var(--rand);
 }
 .marke { font-weight: 600; }
+/* Das Logo kommt vom Server und hat unbekannte Masse – die Hoehe begrenzt,
+ * das Seitenverhaeltnis bleibt. Ohne max-width sprengt ein breites
+ * Wort-Bild-Logo die 380 px des Fensters. */
+.marke-logo {
+  height: 20px;
+  max-width: 120px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
 .ticket {
   margin-left: auto;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -74,6 +89,10 @@ button {
 button:hover:not(:disabled) { border-color: var(--akzent); }
 button:disabled { opacity: .5; cursor: default; }
 button.haupt { background: var(--akzent); border-color: var(--akzent); color: var(--akzent-schrift); }
+button.haupt:hover:not(:disabled) {
+  background: var(--akzent-hover);
+  border-color: var(--akzent-hover);
+}
 button.leise { color: var(--gedaempft); }
 
 .knopfreihe { display: flex; gap: 6px; margin: 8px 0; }

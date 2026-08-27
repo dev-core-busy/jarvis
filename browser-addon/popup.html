@@ -2,11 +2,15 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8">
-  <title>Jarvis für Jira</title>
+  <title>{marke} für Jira</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
   <header class="kopf">
+    <!-- Marke und Logo folgen dem Branding des Servers (popup.js::setzeBranding).
+         Der Rückfalltext steht hier, weil das Fenster vor dem ersten Abruf
+         schon sichtbar ist. -->
+    <img class="marke-logo" id="marke-logo" alt="" hidden>
     <span class="marke" id="marke">Jarvis</span>
     <span class="ticket" id="ticket-anzeige"></span>
     <button type="button" id="btn-abmelden" class="leise" hidden>Abmelden</button>
@@ -15,7 +19,7 @@
   <!-- Einrichtung / Anmeldung -->
   <section id="bereich-login">
     <label class="feld">
-      <span>Jarvis-Adresse</span>
+      <span>{marke}-Adresse</span>
       <input type="url" id="f-basis" placeholder="https://dp.firma.de" autocomplete="off">
     </label>
     <p class="hinweis">

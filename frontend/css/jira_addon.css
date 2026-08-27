@@ -51,6 +51,38 @@ body {
 }
 .topbar-title { font-size: 19px; font-weight: 600; white-space: nowrap; }
 
+/* Die Symbole SELBST brauchen ihre Regeln ebenfalls – derselbe Fallstrick wie
+ * bei .topbar, nur eine Ebene tiefer: `.lang-toggle` steht in theme.css gar
+ * nicht, `.btn-theme` nur unvollstaendig. Ohne das rendern die Knoepfe als
+ * nackte Browser-Buttons mit Rahmen und in falscher Groesse, waehrend die
+ * Struktur (Reihenfolge, Abstaende) voellig richtig ist – deshalb faellt es
+ * in jsdom nicht auf, nur im Bild.
+ * Woertlich aus tracks.html uebernommen, damit die Bereiche gleich aussehen. */
+.btn-theme {
+    background: none; border: none; color: var(--text-muted);
+    padding: 4px 8px; border-radius: 8px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: color .2s, background .2s;
+}
+.btn-theme:hover { background: rgba(var(--accent-rgb), .12); color: var(--accent); }
+.btn-theme svg { width: 20px; height: 20px; }
+
+.lang-toggle {
+    display: flex; gap: 2px;
+    background: rgba(var(--fg-rgb, 148,163,184), .05);
+    border: 1px solid rgba(var(--fg-rgb, 148,163,184), .1);
+    border-radius: 8px; padding: 2px;
+}
+.lang-toggle-btn {
+    background: transparent; border: none; color: var(--text-secondary);
+    font-size: .72rem; font-weight: 700; letter-spacing: .04em;
+    padding: 3px 10px; border-radius: 6px; cursor: pointer;
+    font-family: var(--font-body);
+    transition: background .15s, color .15s;
+}
+.lang-toggle-btn:hover { color: var(--text-primary); }
+.lang-toggle-btn.active { background: rgba(var(--accent-rgb), .35); color: var(--text-primary); }
+
 .ja-main {
     max-width: 820px;          /* laengere Zeilen liest niemand mehr gern */
     margin: 0 auto;

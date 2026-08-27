@@ -134,6 +134,11 @@ _APP_DENY_REL = (
     # data/instructions. Ein beschreibbarer Eintrag waere ein dauerhafter Kanal
     # in den System-Prompt eines Rollen-Agenten.
     "data/agent_roles.json",
+    # Prompt-Vorlagen des Jira-Assistenten (backend/jira_vorlagen.py). Gleiche
+    # Begruendung wie eine Zeile darueber: der Text geht in den System-Prompt
+    # JEDER Zusammenfassung, und die globalen Vorlagen gelten fuer alle
+    # Benutzer. Der Inhalt ist harmlos, die Schreibbarkeit nicht.
+    "data/jira_vorlagen.json",
     # Verankerte SAP-Serverzertifikate (backend/sap_cert.py). Der INHALT ist
     # oeffentlich – die SCHREIBBARKEIT ist das Problem: wer hier eine eigene CA
     # ablegt, laesst eine SAP-Verbindung gegen einen fremden Server laufen, ohne
@@ -223,7 +228,7 @@ PRIVATE_MODE = 0o750
 PRIVATE_FILES = ("data/scheduled_jobs.json", "data/file_watchers.json",
                  "data/security_state.json", "data/license.json",
                  "data/agent_roles.json", "data/ad_cache.json",
-                 "data/knowledge_sync.json",
+                 "data/knowledge_sync.json", "data/jira_vorlagen.json",
                  "data/email_accounts.json", "data/email_rules.json",
                  "data/email_state.json", "data/email_log.jsonl",
                  "data/addin_links.json", "data/sap_accounts.json",
@@ -449,6 +454,10 @@ SHELL_SECRET_PATHS = re.compile(
     r'scheduled_jobs\.json\b|file_watchers\.json\b|security_state\.json\b|'
     r'license\.json\b|license_root\.pub\b|agent_roles\.json\b|ad_cache\.json\b|'
     r'knowledge_sync\.json\b|'
+    # Prompt-Vorlagen des Jira-Assistenten: beschreibbar waere das ein
+    # dauerhafter Abschnitt im System-Prompt JEDER Zusammenfassung, fuer alle
+    # Benutzer (siehe _APP_DENY_REL).
+    r'jira_vorlagen\.json\b|'
     # E-Mail-Skill: Postfach-Kennwoerter (email_accounts.json + .mailkey ergeben
     # zusammen den Klartext), fremde Regel-Prompts, fremde Absender/Betreffe.
     r'email_accounts\.json\b|\.mailkey\b|email_rules\.json\b|'

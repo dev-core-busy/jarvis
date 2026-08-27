@@ -123,14 +123,29 @@ check(/["']totp_code["']/.test(MAIN),
       "backend/main.py liest 'totp_code' – die Namen passen zusammen");
 
 // ═══════════════════════════════════════════════════════════════════════════
-section("4) Das Token ueberlebt den Browser nicht");
+section("4) Anmeldung und Ergebnis ueberleben den Neustart");
 // ═══════════════════════════════════════════════════════════════════════════
-check(/storage\.session/.test(bgOhne),
-      "der Token liegt in storage.session");
-check(!/storage\.local\.set\([^)]*token/i.test(bgOhne),
-      "der Token wird NICHT in storage.local geschrieben");
-check(/storage\.local/.test(bgOhne),
-      "die Serveradresse dagegen schon (sie ist kein Geheimnis)");
+/* GEAENDERT auf Meldung aus dem Betrieb ("Anmeldung verschwindet generell bei
+ * Chrome Neustart"). Vorher lag das Token in `storage.session` – eine
+ * Strenge ohne Gegenwert: das Portal legt sein Token seit jeher in den
+ * localStorage, gleicher Rechner, gleiche Person. Die Erweiterung war also
+ * strenger als die Anwendung, fuer die sie arbeitet. */
+check(/storage\.local/.test(bgOhne), "Token und Adresse liegen in storage.local");
+check(!/storage\.session/.test(bgOhne),
+      "storage.session wird nicht mehr benutzt (ueberlebt den Neustart nicht)");
+
+// Was die Grenze weiterhin haelt – und das ist der Punkt, an dem die
+// Lockerung vertretbar wird:
+check(/status === 401/.test(bgOhne) && /sitzungSchreiben\(\{\}\)/.test(bgOhne),
+      "ein abgelaufenes Token (401) wird sofort verworfen");
+check(/case "abmelden"[\s\S]{0,220}sitzungSchreiben\(\{\}\)/.test(bgOhne),
+      "Abmelden loescht es");
+
+// Das Ergebnis ueberlebt das Schliessen des Fensters – ein Popup schliesst
+// beim Wechsel in den Jira-Tab, und eine Auswertung dauert ~13 Sekunden.
+check(/ergebnisSchreiben/.test(bgOhne), "das Ergebnis wird gemerkt");
+check(/case "abmelden"[\s\S]{0,320}ergebnisSchreiben\(null\)/.test(bgOhne),
+      "beim Abmelden geht es mit (es enthaelt Ticketinhalte)");
 
 // ═══════════════════════════════════════════════════════════════════════════
 section("5) Die injizierte Funktion ist SELBSTSTAENDIG");
@@ -151,7 +166,10 @@ section("6) Einfuegen gegen ein nachgebautes Jira – WIRKLICH ausgefuehrt");
 /* Die Funktion wird so geladen, wie der Browser sie sieht: als Quelltext, neu
  * ausgewertet. Damit wird zugleich belegt, dass die Serialisierung traegt. */
 function ladeEinfuegen(fenster) {
-  const quelle = EINFUEGEN.replace("export function", "function");
+  // /g – die Datei exportiert seit dem Editor-API-Weg ZWEI Funktionen. Ohne
+  // das globale Flag bleibt das zweite `export` stehen und der ganze Abschnitt
+  // stirbt mit "Unexpected token 'export'".
+  const quelle = EINFUEGEN.replace(/export function/g, "function");
   const f = new fenster.Function(
     quelle + "\nreturn einfuegenInJira;")();
   return f;
@@ -234,8 +252,12 @@ mitDom('<div contenteditable="true"></div>', (w, f) => {
   w.document.execCommand = () => false;   // jsdom kennt execCommand nicht
   const r = f(TEXT);
   check(r.ok === true, "contenteditable wird als letzter Weg genommen");
-  check(w.document.querySelector("[contenteditable]").textContent === TEXT,
-        "auch dort steht der Text");
+  // Geprueft wird der INHALT, nicht die Zeichenkette: der Text wird bewusst in
+  // ABSAETZE zerlegt (ein HTML-Editor macht aus \n sonst nichts). Ein Vergleich
+  // auf Gleichheit haette hier eine Verbesserung als Fehler gemeldet.
+  const drin = w.document.querySelector("[contenteditable]").textContent;
+  check(TEXT.split(/\s+/).every((wort) => drin.includes(wort)),
+        "auch dort steht der Text", drin);
 });
 
 // g) Der Vorschlagstext ist MODELLTEXT und darf kein Markup einschleusen.
@@ -396,7 +418,115 @@ check(!/\.replace\([^)]*"name"/.test(pyOhne),
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-section("7) Oberflaeche");
+section("6c) Einfuegen: fokussiertes Feld, Editor-API, Diagnose");
+// ═══════════════════════════════════════════════════════════════════════════
+/* GEMELDET: "'in Kommentarfeld uebernehmen' fuegt NICHT in das Feld ein" –
+ * bei einem Jira mit WYSIWYG-Editor. */
+{
+  const TXT = "Guten Tag,\n\nerledigt.";
+
+  // a) Das ZULETZT FOKUSSIERTE Feld schlaegt jede Selektorliste. Wer einfuegen
+  //    will, hat vorher hineingeklickt – das funktioniert auch in einem Editor,
+  //    den niemand vorhergesehen hat.
+  mitDom('<div id="fremd" contenteditable="true"></div>'
+         + '<textarea id="comment"></textarea>', (w, f) => {
+    const ziel = w.document.getElementById("fremd");
+    // activeElement ist in jsdom nur ueber focus() setzbar.
+    ziel.focus();
+    Object.defineProperty(w.document, "activeElement", { value: ziel, configurable: true });
+    w.document.execCommand = () => false;
+    const r = f(TXT);
+    check(r.ok === true && /fokussiert/.test(r.weg || ""),
+          "das fokussierte Feld wird bevorzugt", JSON.stringify(r));
+    check(ziel.textContent.includes("erledigt"),
+          "und der Text landet dort – nicht in der textarea");
+    check(w.document.getElementById("comment").value === "",
+          "die textarea bleibt unberuehrt");
+  });
+
+  // b) WYSIWYG ohne Fokus: der contenteditable-Weg vor der versteckten textarea.
+  //    Genau das war der gemeldete Fall – `#comment` existiert, ist aber
+  //    unsichtbar und traegt beim Absenden nicht den sichtbaren Inhalt.
+  mitDom('<textarea id="comment" data-unsichtbar></textarea>'
+         + '<div id="comment-wiki-edit"><div contenteditable="true"></div></div>',
+         (w, f) => {
+    w.document.execCommand = () => false;
+    const r = f(TXT);
+    check(r.ok === true, "WYSIWYG wird gefunden, obwohl #comment existiert",
+          JSON.stringify(r));
+    check(w.document.querySelector("#comment-wiki-edit [contenteditable]")
+            .textContent.includes("erledigt"),
+          "der Text steht im sichtbaren Editor");
+    check(w.document.getElementById("comment").value === "",
+          "die unsichtbare textarea bleibt leer");
+  });
+
+  // c) Ein Fehlschlag muss sagen, WAS er gesehen hat – sonst ist der naechste
+  //    Anlauf wieder Raten.
+  mitDom('<textarea id="comment" data-unsichtbar></textarea>', (w, f) => {
+    const r = f(TXT);
+    check(r.ok === false, "unsichtbares Feld allein: kein falscher Erfolg");
+    check(Array.isArray(r.gesehen) && r.gesehen.length > 0,
+          "die Diagnose nennt die gefundenen Kandidaten", JSON.stringify(r.gesehen));
+    check(/unsichtbar/.test((r.gesehen || []).join(" ")),
+          "und sagt dazu, dass sie unsichtbar waren");
+    check(/Klicke zuerst/.test(r.fehler || ""),
+          "die Meldung nennt den Ausweg (erst hineinklicken)");
+  });
+
+  // d) Der zweite Weg laeuft in der SEITENWELT – von der isolierten Welt aus
+  //    ist `window.tinymce` unsichtbar, das ist keine Einstellung.
+  const zweitQuelle = EINFUEGEN.slice(EINFUEGEN.indexOf("export function einfuegenUeberEditorApi"));
+  check(!/document\.querySelectorAll\(/.test(zweitQuelle) || /tinymce/.test(zweitQuelle),
+        "die zweite Funktion benutzt die Editor-API");
+  check(/world:\s*["']MAIN["']/.test(POPUP_JS),
+        'popup.js ruft sie mit world: "MAIN"');
+  check(/tinymce_moeglich/.test(POPUP_JS) && /tinymce_moeglich/.test(EINFUEGEN),
+        "und nur, wenn der erste Weg das nahelegt");
+  // Die Diagnose muss beim Benutzer ankommen, nicht nur im Rueckgabewert.
+  check(/r\.gesehen/.test(POPUP_JS), "die Diagnose wird angezeigt");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("6d) Vorlagen und Ticketbezug");
+// ═══════════════════════════════════════════════════════════════════════════
+// Ein gemerkter Text zu Ticket A darf nicht unbemerkt in Ticket B landen –
+// er geht am Ende an einen Kunden.
+check(/_fremdesErgebnis/.test(POPUP_JS), "ein fremder Ticketbezug wird erkannt");
+check(/_fremdesErgebnis && !\(await frageJaNein\(\)\)/.test(POPUP_JS),
+      "und beim Einfuegen zurueckgefragt");
+check(!/\b(confirm|alert|prompt)\s*\(/.test(ohneKommentare(POPUP_JS)),
+      "die Rueckfrage ist ein eigener Dialog, kein confirm");
+check(/jn-nein"\)\.focus\(\)/.test(POPUP_JS),
+      "der Fokus liegt auf Abbrechen (die gefaehrlichere Wahl loest kein Tastendruck aus)");
+
+// Die Vorlage gilt nur fuer die Zusammenfassung – bei einem Antwortvorschlag
+// waere sie eine zweite, widersprechende Aufgabe.
+check(/modus === "zusammenfassung"\) \? \(\$\("f-vorlage"\)/.test(POPUP_JS),
+      "die Vorlage geht nur bei der Zusammenfassung mit");
+// Namen sind Freitext aus einem Formular.
+check(!/innerHTML\s*=\s*[^;]*\bv\.name\b/.test(POPUP_JS),
+      "Vorlagennamen gehen nicht durch innerHTML");
+check(/o\.textContent = v\.name/.test(POPUP_JS), "sondern durch textContent");
+
+/* Drei Layout-Regeln, die NUR der Screenshot gezeigt hat. jsdom rechnet kein
+ * Layout – geprüft wird deshalb die Regel, nicht das Ergebnis. Alle drei
+ * ließen im 380 px breiten Fenster etwas herausragen, während die erste
+ * Messung „kein Überlauf“ meldete: sie verglich Kinder mit ihren Eltern statt
+ * das Dokument mit dem Viewport. */
+const cssRegel = (sel) => {
+  const m = new RegExp('(?:^|\\})\\s*' + sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                       + '\\s*\\{([^}]*)\\}', 'm').exec(cssOhne);
+  return m ? m[1] : '';
+};
+check(/width:\s*auto/.test(cssRegel('input[type="checkbox"], input[type="radio"]')),
+      'Kontrollkästchen sind nicht 100 % breit (sonst rutscht die Beschriftung um)');
+check(/flex-wrap:\s*wrap/.test(cssRegel('.knopfreihe')),
+      'Knopfreihen brechen um (zwei lange Beschriftungen passen nicht nebeneinander)');
+check(/min-width:\s*0/.test(cssRegel('.marke')),
+      'die Marke darf schrumpfen');
+check(/flex:\s*0 0 auto/.test(cssRegel('.kopf > button')),
+      'der Abmelden-Knopf nicht (sonst schiebt ihn eine lange Ticketnummer hinaus)');
 // ═══════════════════════════════════════════════════════════════════════════
 check(/type="module"/.test(POPUP_HTML),
       "popup.js wird als Modul geladen (der Import von einfuegen.js braucht das)");

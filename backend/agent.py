@@ -4529,7 +4529,8 @@ KRITISCH – Autonomie-Regeln:
         _DENY_NAME = ("id_rsa", "id_ed25519", "id_dsa", ".env", "settings.json",
                       "credentials", "ad_cache.json", "license.json",
                       "knowledge_sync.json", "agent_roles.json", "security_state.json",
-                      "scheduled_jobs.json", "file_watchers.json", ".owners.json")
+                      "scheduled_jobs.json", "file_watchers.json", ".owners.json",
+                      "jira_vorlagen.json")
 
         def _ist_geheim(pfad) -> bool:
             low = pfad.name.lower()

@@ -233,6 +233,11 @@ EXEMPT = {
     # Schranke haengt daran, dass niemand ein Werkzeug angeboten bekommt, das
     # er anschliessend nicht benutzen darf.
     ("get", "/api/jira/assist/paket"),
+    # Prompt-Vorlagen. Dieselbe Freigabe; die zusaetzliche Schranke "gemeinsame
+    # Vorlagen nur fuer Admins" sitzt im MODUL (jira_vorlagen.speichern), damit
+    # sie nicht am Endpunkt vergessen werden kann.
+    ("get", "/api/jira/assist/vorlagen"), ("post", "/api/jira/assist/vorlagen"),
+    ("delete", "/api/jira/assist/vorlagen/{vid}"),
 }
 # Vision-Medien (Kamerabild, Gesichts-Ausschnitte, Trainings-Vorschau,
 # Begruessungs-Audio) brauchen ``?token=``, weil <img>/<audio> keine Header

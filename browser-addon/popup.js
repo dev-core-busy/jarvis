@@ -5,7 +5,7 @@
  * Benutzer daneben klickt; ein Aufruf von hier waere damit mitten in einer
  * 13-Sekunden-Auswertung weg.
  */
-import { einfuegenInJira } from "./einfuegen.js";
+import { einfuegenInJira, einfuegenUeberEditorApi } from "./einfuegen.js";
 
 const api = (typeof browser !== "undefined") ? browser : chrome;
 
@@ -21,6 +21,10 @@ const el = {
 
 let _key = "";        // Ticketnummer des offenen Tabs
 let _tabId = null;
+// Gehört der angezeigte Text zu einem ANDEREN Ticket als dem offenen?
+let _fremdesErgebnis = false;
+// Das zuletzt angezeigte Ergebnis (für das Mitmerken bearbeiteter Texte).
+let _letztes = null;
 
 // ── Meldungen ───────────────────────────────────────────────────────────────
 function melde(text, arbeitet = false) {
@@ -34,6 +38,37 @@ function melde(text, arbeitet = false) {
 
 function sperre(an) {
   for (const b of document.querySelectorAll("button")) b.disabled = an;
+}
+
+/** Rückfrage – EIGENER Dialog, nie `confirm`.
+ *
+ * `window.confirm` blockiert in einem Extension-Popup den Renderer und sieht
+ * aus wie ein Dialog der Seite; im Projekt ist es aus demselben Grund auch im
+ * Outlook-Aufgabenfenster verboten. Fehlt das Markup, wird mit `true`
+ * aufgelöst (fail-open) – der Benutzer hat den Knopf schon gedrückt.
+ */
+function frageJaNein(text) {
+  const box = $("ja-nein");
+  if (!box) return Promise.resolve(true);
+  if (text) $("jn-text").textContent = text;
+  else $("jn-text").innerHTML =
+    'Der Text gehört zu einem <b>anderen Ticket</b>. Trotzdem einfügen?';
+  box.hidden = false;
+  return new Promise((fertig) => {
+    const schluss = (wert) => {
+      box.hidden = true;
+      $("jn-ja").removeEventListener("click", ja);
+      $("jn-nein").removeEventListener("click", nein);
+      fertig(wert);
+    };
+    const ja = () => schluss(true);
+    const nein = () => schluss(false);
+    $("jn-ja").addEventListener("click", ja);
+    $("jn-nein").addEventListener("click", nein);
+    // Der Fokus liegt auf ABBRECHEN – die gefährlichere Wahl darf nicht die
+    // sein, die ein Tastendruck auslöst.
+    $("jn-nein").focus();
+  });
 }
 
 /** Eine Anfrage an den Hintergrund – Fehler kommen als Text zurueck, nie als
@@ -195,11 +230,47 @@ async function start() {
   zeige(z.angemeldet);
   if (z.angemeldet) {
     el.abmelden.hidden = false;
+    // Das Pulldown gleich füllen – nicht erst beim Öffnen des Zahnrads:
+    // sonst steht dort „Standard“, obwohl Vorlagen hinterlegt sind.
+    vorlagenLaden();
+    if (z.ergebnis) zeigeGemerktes(z.ergebnis);
     if (!_key) {
       // Kein Fehler, sondern eine Auskunft: die Erweiterung ist bereit, dieser
       // Tab ist nur kein Ticket.
       melde("Kein Jira-Ticket in diesem Tab. Öffne ein Ticket (…/browse/ABC-123).");
     }
+  }
+}
+
+/* Ein gemerktes Ergebnis wieder anzeigen.
+ *
+ * ⚠ DER TICKETBEZUG IST HIER EINE SICHERHEITSFRAGE, KEINE BEQUEMLICHKEIT.
+ * Das Fenster schliesst beim Wechsel in den Jira-Tab; beim naechsten Oeffnen
+ * kann laengst ein ANDERES Ticket offen sein. Ein wiederhergestellter Text
+ * ohne sichtbaren Bezug waere die Einladung, die Antwort auf Vorgang A in
+ * Vorgang B einzufuegen – und der geht danach an einen echten Kunden.
+ * Deshalb: bei Abweichung eine deutliche Warnung, und der Einfuegen-Knopf
+ * traegt sie mit.
+ */
+function zeigeGemerktes(g) {
+  if (!g || !g.text) return;
+  _letztes = g;
+  el.ergebnisFeld.value = g.text;
+  el.ergebnis.hidden = false;
+  const alter = Math.round((Date.now() - (g.zeit || 0)) / 60000);
+  el.ergebnisFuss.textContent =
+    g.key + " · " + (g.kommentare || 0) + " Kommentar(e) · "
+    + (alter < 1 ? "gerade eben" : "vor " + alter + " Min.")
+    + (g.modell ? " · " + g.modell : "");
+
+  if (_key && g.key && _key !== g.key) {
+    _fremdesErgebnis = true;
+    melde("⚠ Dieser Text gehört zu " + g.key + ", offen ist aber " + _key
+          + ". Nicht einfügen, ohne ihn zu prüfen.");
+  } else {
+    melde(g.modus === "antwort"
+      ? "Gemerkter Vorschlag – bitte vor dem Absenden lesen."
+      : "Gemerkte Zusammenfassung.");
   }
 }
 
@@ -285,8 +356,15 @@ async function auswerten(modus) {
       art: "auswerten", key: _key, modus,
       lang: (navigator.language || "de").toLowerCase().startsWith("de") ? "de" : "en",
       hinweis: (el.hinweis.value || "").trim(),
+      // Die Vorlage gilt nur für die Zusammenfassung – ein Antwortvorschlag
+      // hat seine eigene Aufgabe, dort wäre sie eine zweite Anweisung.
+      vorlage: (modus === "zusammenfassung") ? ($("f-vorlage").value || "") : "",
     });
     const d = a.daten || {};
+    _letztes = { key: d.key, modus: d.modus, text: d.text || "",
+                 titel: d.titel || "", kommentare: d.kommentare || 0,
+                 modell: d.modell || "", zeit: Date.now() };
+    _fremdesErgebnis = false;      // frisch geholt = passt zum offenen Ticket
     el.ergebnisFeld.value = d.text || "";
     el.ergebnis.hidden = false;
     // Was das Ergebnis TRÄGT, gehört sichtbar dazu: aus wie vielen Kommentaren
@@ -307,10 +385,174 @@ async function auswerten(modus) {
 $("btn-zusammenfassung").addEventListener("click", () => auswerten("zusammenfassung"));
 $("btn-antwort").addEventListener("click", () => auswerten("antwort"));
 
+/* Der BEARBEITETE Text wird mitgemerkt – gedrosselt.
+ *
+ * Wer einen Vorschlag umschreibt und dann in den Jira-Tab wechselt, um das
+ * Kommentarfeld zu öffnen, hätte sonst seine Änderungen verloren: das Popup
+ * schließt dabei. Bei jedem Tastendruck zu speichern wäre unnötig – eine
+ * halbe Sekunde Ruhe genügt.
+ */
+let _merkTimer = null;
+el.ergebnisFeld.addEventListener("input", () => {
+  clearTimeout(_merkTimer);
+  _merkTimer = setTimeout(async () => {
+    if (!_letztes) return;
+    _letztes.text = el.ergebnisFeld.value || "";
+    try { await frage({ art: "ergebnis_merken", wert: _letztes }); } catch (e) {}
+  }, 500);
+});
+
+// ── Vorlagen ────────────────────────────────────────────────────────────────
+/* Benannte Vorlagen bestimmen, WORAUF eine Zusammenfassung hinausläuft.
+ *
+ * Gemeinsame Vorlagen pflegt ein Administrator, eigene darf jeder anlegen –
+ * die Trennung ist am Server durchgesetzt (jira_vorlagen.speichern), hier wird
+ * sie nur ANGEZEIGT. Eine Oberfläche, die das Häkchen versteckt, ist keine
+ * Schranke; wer es sich zurückholt, bekommt trotzdem einen Fehler.
+ */
+let _vorlagen = { global: [], eigene: [], darf_global: false };
+let _vorlBearbeitet = "";      // Kennung der gerade bearbeiteten Vorlage
+
+function vorlagenZeichnen() {
+  const sel = $("f-vorlage");
+  const gewaehlt = sel.value;
+  sel.innerHTML = "";
+  const standard = document.createElement("option");
+  standard.value = "";
+  standard.textContent = "Standard";
+  sel.appendChild(standard);
+
+  const gruppe = (titel, liste) => {
+    if (!liste.length) return;
+    const g = document.createElement("optgroup");
+    g.label = titel;
+    for (const v of liste) {
+      const o = document.createElement("option");
+      o.value = v.id;
+      // textContent: die Namen sind Freitext aus einem Formular.
+      o.textContent = v.name;
+      g.appendChild(o);
+    }
+    sel.appendChild(g);
+  };
+  gruppe("Gemeinsam", _vorlagen.global);
+  gruppe("Meine", _vorlagen.eigene);
+  sel.value = gewaehlt;                       // Auswahl überlebt das Neuzeichnen
+  if (sel.value !== gewaehlt) sel.value = "";  // ...außer sie wurde gelöscht
+
+  const liste = $("vorl-liste");
+  liste.innerHTML = "";
+  for (const [art, vs] of [["global", _vorlagen.global], ["eigen", _vorlagen.eigene]]) {
+    for (const v of vs) {
+      // Änderbar ist nur, was einem gehört – oder alles, wenn man Admin ist.
+      const darf = (art === "eigen") || _vorlagen.darf_global;
+      const li = document.createElement("li");
+      const name = document.createElement("span");
+      name.textContent = v.name + (art === "global" ? " (gemeinsam)" : "");
+      li.appendChild(name);
+      if (darf) {
+        const bearb = document.createElement("button");
+        bearb.type = "button";
+        bearb.className = "leise ico";
+        bearb.title = "Bearbeiten";
+        bearb.textContent = "✎";
+        bearb.addEventListener("click", () => vorlageInsFormular(v, art === "global"));
+        li.appendChild(bearb);
+
+        const weg = document.createElement("button");
+        weg.type = "button";
+        weg.className = "leise ico";
+        weg.title = "Löschen";
+        // Mülleimer = löschen (Projektregel). Als Inline-SVG, nicht als Emoji:
+        // ein Emoji-Mülleimer wird je System anders gerendert.
+        weg.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none"'
+          + ' stroke="currentColor" stroke-width="2" stroke-linecap="round"'
+          + ' stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/>'
+          + '<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>'
+          + '<line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>';
+        weg.addEventListener("click", () => vorlageLoeschen(v));
+        li.appendChild(weg);
+      }
+      liste.appendChild(li);
+    }
+  }
+  $("vorl-global-zeile").hidden = !_vorlagen.darf_global;
+}
+
+function vorlageInsFormular(v, global_) {
+  _vorlBearbeitet = v ? v.id : "";
+  $("f-vorl-name").value = v ? v.name : "";
+  $("f-vorl-text").value = v ? v.text : "";
+  $("f-vorl-global").checked = !!global_;
+  $("vorl-hinweis").textContent = v ? "Ändert „" + v.name + "“." : "";
+}
+
+async function vorlagenLaden() {
+  try {
+    const a = await frage({ art: "vorlagen" });
+    _vorlagen = {
+      global: (a.daten && a.daten.global) || [],
+      eigene: (a.daten && a.daten.eigene) || [],
+      darf_global: !!(a.daten && a.daten.darf_global),
+    };
+    vorlagenZeichnen();
+  } catch (e) {
+    // Ohne Vorlagen bleibt „Standard“ – das ist kein Grund, den Rest zu sperren.
+    $("vorl-hinweis").textContent = e.message;
+  }
+}
+
+async function vorlageLoeschen(v) {
+  if (!(await frageJaNein("Vorlage „" + v.name + "“ löschen?"))) return;
+  try {
+    await frage({ art: "vorlage_loeschen", id: v.id });
+    if (_vorlBearbeitet === v.id) vorlageInsFormular(null, false);
+    await vorlagenLaden();
+    $("vorl-hinweis").textContent = "Gelöscht.";
+  } catch (e) {
+    $("vorl-hinweis").textContent = e.message;
+  }
+}
+
+$("btn-vorlagen").addEventListener("click", () => {
+  const box = $("vorlagen-box");
+  box.hidden = !box.hidden;
+  if (!box.hidden) vorlagenLaden();
+});
+$("btn-vorlagen-zu").addEventListener("click", () => { $("vorlagen-box").hidden = true; });
+$("btn-vorl-neu").addEventListener("click", () => vorlageInsFormular(null, false));
+
+$("btn-vorl-speichern").addEventListener("click", async () => {
+  const name = ($("f-vorl-name").value || "").trim();
+  const text = ($("f-vorl-text").value || "").trim();
+  if (!name || !text) {
+    $("vorl-hinweis").textContent = "Name und Anweisung sind nötig.";
+    return;
+  }
+  try {
+    const a = await frage({
+      art: "vorlage_speichern",
+      wert: { id: _vorlBearbeitet, name, text, global: $("f-vorl-global").checked },
+    });
+    await vorlagenLaden();
+    // Die frisch gespeicherte Vorlage gleich auswählen – sonst muss der
+    // Benutzer sie im Pulldown suchen, das er gerade gefüllt hat.
+    const neu = a.daten && a.daten.vorlage;
+    if (neu && neu.id) $("f-vorlage").value = neu.id;
+    vorlageInsFormular(null, false);
+    $("vorl-hinweis").textContent = "Gespeichert.";
+  } catch (e) {
+    $("vorl-hinweis").textContent = e.message;
+  }
+});
+
 // ── Einfügen und Kopieren ───────────────────────────────────────────────────
 $("btn-einfuegen").addEventListener("click", async () => {
   const text = el.ergebnisFeld.value || "";
   if (!text.trim() || _tabId === null) return;
+  // Ein Text zu einem anderen Vorgang wird nicht ohne Rückfrage eingefügt –
+  // das Ergebnis geht am Ende an einen Kunden.
+  if (_fremdesErgebnis && !(await frageJaNein())) return;
   sperre(true);
   try {
     const treffer = await api.scripting.executeScript({
@@ -318,11 +560,41 @@ $("btn-einfuegen").addEventListener("click", async () => {
       func: einfuegenInJira,
       args: [text],
     });
-    const r = (treffer && treffer[0] && treffer[0].result) || {};
+    let r = (treffer && treffer[0] && treffer[0].result) || {};
+
+    /* ZWEITER VERSUCH ÜBER DIE EDITOR-API DER SEITE.
+     * Der erste Lauf sieht `window.tinymce` nicht – Content-Scripts leben in
+     * einer isolierten Welt. Bei einem WYSIWYG-Editor ist die API aber oft der
+     * einzige Weg, der wirklich ankommt (der sichtbare Inhalt hängt dann nicht
+     * am DOM-Knoten, den wir beschreiben würden).
+     * Nur wenn der erste Weg scheitert: Code im Seitenkontext teilt sich deren
+     * globalen Namensraum, das ist kein Standardweg. */
+    if (!r.ok && r.tinymce_moeglich) {
+      try {
+        const zweit = await api.scripting.executeScript({
+          target: { tabId: _tabId },
+          world: "MAIN",
+          func: einfuegenUeberEditorApi,
+          args: [text],
+        });
+        const r2 = (zweit && zweit[0] && zweit[0].result) || {};
+        if (r2.ok) r = r2;
+      } catch (e) {
+        // `world: "MAIN"` gibt es in Firefox erst ab 128 – dort bleibt es beim
+        // Ergebnis des ersten Versuchs. Kein eigener Fehler für den Benutzer:
+        // die Meldung unten ist die aussagekräftigere.
+      }
+    }
+
     if (r.ok) {
       melde("Eingefügt. Bitte in Jira prüfen und selbst abschicken.");
     } else {
-      melde(r.fehler || "Einfügen fehlgeschlagen.");
+      // DIE DIAGNOSE GEHÖRT IN DIE MELDUNG. Ohne sie ist der nächste Anlauf
+      // wieder Raten – und zwar für den Benutzer wie für die Fehlersuche.
+      const gesehen = (r.gesehen && r.gesehen.length)
+        ? "\nGefunden: " + r.gesehen.join(", ")
+        : "";
+      melde((r.fehler || "Einfügen fehlgeschlagen.") + gesehen);
     }
   } catch (e) {
     // Häufigster Fall: die Seite verbietet die Injektion (z. B. eine

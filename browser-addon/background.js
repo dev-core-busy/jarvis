@@ -26,24 +26,57 @@ const api = (typeof browser !== "undefined") ? browser : chrome;
 // Outlook-Add-ins aus, wo das Manifest je Server erzeugt wird – und die
 // Drift-Falle "eine Kopie je Installation" gleich mit.
 const EINST = "einstellungen";   // storage.local: { basis }
-const SITZUNG = "sitzung";       // storage.session: { token, benutzer }
+const SITZUNG = "sitzung";       // storage.local: { token, benutzer }
+const ERGEBNIS = "ergebnis";     // storage.local: letzter Lauf (siehe unten)
 
 async function basisLesen() {
   const d = await api.storage.local.get(EINST);
   return ((d[EINST] || {}).basis || "").replace(/\/+$/, "");
 }
 
-// Das Token liegt in storage.SESSION, nicht in local: es soll den Browser nicht
-// ueberleben. Preis ist eine Anmeldung je Browserstart – bewusst, denn hier
-// gibt es kein SSO wie im Outlook-Add-in (das haengt am Exchange-Token, das ein
-// Browser nicht hat).
+/* DAS TOKEN LIEGT IN storage.LOCAL – geaendert auf Meldung aus dem Betrieb
+ * ("Anmeldung verschwindet generell bei Chrome Neustart").
+ *
+ * Vorher stand es in `storage.session` mit der Begruendung, es solle den
+ * Browser nicht ueberleben. Das war eine Sicherheitsentscheidung ohne
+ * Gegenwert: das Portal legt sein Token seit jeher in den `localStorage`,
+ * derselbe Rechner, dieselbe Person, dasselbe Token. Wer die Platte lesen kann,
+ * findet es dort ohnehin – die Erweiterung war also strenger als die Anwendung,
+ * fuer die sie arbeitet, und der Preis war eine Anmeldung bei jedem
+ * Browserstart.
+ *
+ * Was die Grenze weiterhin haelt: das Token laeuft serverseitig ab, `401`
+ * verwirft es hier sofort (siehe `ruf`), und Abmelden loescht es.
+ */
 async function tokenLesen() {
-  const d = await api.storage.session.get(SITZUNG);
+  const d = await api.storage.local.get(SITZUNG);
   return (d[SITZUNG] || {}).token || "";
 }
 
 async function sitzungSchreiben(wert) {
-  await api.storage.session.set({ [SITZUNG]: wert || {} });
+  await api.storage.local.set({ [SITZUNG]: wert || {} });
+}
+
+/* Das letzte Ergebnis ueberlebt das Schliessen des Fensters.
+ *
+ * Ein Browser-Popup schliesst, sobald der Benutzer daneben klickt – auch beim
+ * Wechsel in den Jira-Tab, um das Kommentarfeld zu oeffnen. Ohne Gedaechtnis
+ * ist eine 13 Sekunden lange Auswertung dann weg, und der einzige Weg zurueck
+ * ist, sie erneut zu bezahlen.
+ *
+ * Gespeichert wird der BEARBEITETE Text: der Benutzer soll seine Aenderungen
+ * nicht verlieren. Dazu die Ticketnummer – ohne sie waere beim naechsten
+ * Oeffnen nicht erkennbar, zu welchem Vorgang der Text gehoert, und das ist
+ * gefaehrlicher als kein Text.
+ */
+async function ergebnisLesen() {
+  const d = await api.storage.local.get(ERGEBNIS);
+  return d[ERGEBNIS] || null;
+}
+
+async function ergebnisSchreiben(wert) {
+  if (wert) await api.storage.local.set({ [ERGEBNIS]: wert });
+  else await api.storage.local.remove(ERGEBNIS);
 }
 
 /** Ein Aufruf an Jarvis. Wirft mit KLARTEXT – der Text geht 1:1 ins Popup. */
@@ -160,9 +193,11 @@ api.runtime.onMessage.addListener((nachricht, _absender, antworten) => {
       switch (nachricht && nachricht.art) {
         case "zustand": {
           const basis = await basisLesen();
-          const d = await api.storage.session.get(SITZUNG);
+          const d = await api.storage.local.get(SITZUNG);
           const s = d[SITZUNG] || {};
-          antworten({ ok: true, basis, angemeldet: !!s.token, benutzer: s.benutzer || "" });
+          antworten({ ok: true, basis, angemeldet: !!s.token,
+                      benutzer: s.benutzer || "",
+                      ergebnis: await ergebnisLesen() });
           break;
         }
         case "anmelden":
@@ -170,6 +205,13 @@ api.runtime.onMessage.addListener((nachricht, _absender, antworten) => {
           break;
         case "abmelden":
           await sitzungSchreiben({});
+          // Beim Abmelden geht auch das Ergebnis – es enthaelt Ticketinhalte,
+          // und der naechste Benutzer an diesem Rechner hat damit nichts zu tun.
+          await ergebnisSchreiben(null);
+          antworten({ ok: true });
+          break;
+        case "ergebnis_merken":
+          await ergebnisSchreiben(nachricht.wert || null);
           antworten({ ok: true });
           break;
         case "branding": {
@@ -186,20 +228,39 @@ api.runtime.onMessage.addListener((nachricht, _absender, antworten) => {
         case "health":
           antworten({ ok: true, daten: await ruf("/api/jira/assist/health") });
           break;
-        case "auswerten":
-          antworten({
-            ok: true,
-            daten: await ruf("/api/jira/assist", {
-              methode: "POST",
-              rumpf: {
-                key: nachricht.key,
-                modus: nachricht.modus,
-                lang: nachricht.lang || "de",
-                hinweis: nachricht.hinweis || "",
-              },
-            }),
-          });
+        case "vorlagen":
+          antworten({ ok: true, daten: await ruf("/api/jira/assist/vorlagen") });
           break;
+        case "vorlage_speichern":
+          antworten({ ok: true, daten: await ruf("/api/jira/assist/vorlagen", {
+            methode: "POST", rumpf: nachricht.wert || {} }) });
+          break;
+        case "vorlage_loeschen":
+          antworten({ ok: true, daten: await ruf(
+            "/api/jira/assist/vorlagen/" + encodeURIComponent(nachricht.id || ""),
+            { methode: "DELETE" }) });
+          break;
+        case "auswerten": {
+          const d = await ruf("/api/jira/assist", {
+            methode: "POST",
+            rumpf: {
+              key: nachricht.key,
+              modus: nachricht.modus,
+              lang: nachricht.lang || "de",
+              hinweis: nachricht.hinweis || "",
+              vorlage: nachricht.vorlage || "",
+            },
+          });
+          // Sofort merken – der Benutzer wechselt als Naechstes typischerweise
+          // in den Jira-Tab, und damit ist das Fenster zu.
+          await ergebnisSchreiben({
+            key: d.key, modus: d.modus, text: d.text || "",
+            titel: d.titel || "", kommentare: d.kommentare || 0,
+            modell: d.modell || "", zeit: Date.now(),
+          });
+          antworten({ ok: true, daten: d });
+          break;
+        }
         default:
           antworten({ ok: false, fehler: "Unbekannte Anfrage." });
       }

@@ -41,7 +41,18 @@ body {
   padding-bottom: 8px;
   border-bottom: 1px solid var(--rand);
 }
-.marke { font-weight: 600; }
+/* Die Marke darf schrumpfen, der Abmelden-Knopf nicht: sonst schiebt eine
+ * lange Ticketnummer den Knopf aus dem 380 px breiten Fenster (gemessen mit
+ * NXKS-17559 – er war abgeschnitten und das Fenster horizontal scrollbar). */
+.marke {
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kopf > button { flex: 0 0 auto; }
+.ticket { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; }
 /* Das Logo kommt vom Server und hat unbekannte Masse – die Hoehe begrenzt,
  * das Seitenverhaeltnis bleibt. Ohne max-width sprengt ein breites
  * Wort-Bild-Logo die 380 px des Fensters. */
@@ -71,6 +82,16 @@ input, textarea {
   color: var(--schrift);
   font: inherit;
 }
+
+/* ⚠ `width: 100%` trifft sonst auch das Kästchen. Ein 100 % breites
+ * Kontrollkästchen schiebt seine Beschriftung in die nächste Zeile und sieht
+ * aus wie ein Eingabefeld – im Screenshot sofort zu sehen, in der Messung
+ * nicht. Dieselbe Falle wie `.input-group` im Hauptprojekt (Register). */
+input[type="checkbox"], input[type="radio"] {
+  width: auto;
+  margin-right: 6px;
+  vertical-align: middle;
+}
 textarea { resize: vertical; min-height: 120px; font-size: 12.5px; }
 input:focus-visible, textarea:focus-visible {
   outline: 2px solid var(--akzent);
@@ -95,7 +116,9 @@ button.haupt:hover:not(:disabled) {
 }
 button.leise { color: var(--gedaempft); }
 
-.knopfreihe { display: flex; gap: 6px; margin: 8px 0; }
+/* `wrap`: „Ins Kommentarfeld einfügen“ neben „Kopieren“ passt bei 380 px
+ * nicht in eine Zeile – ohne Umbruch ragt der zweite Knopf hinaus. */
+.knopfreihe { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 /* Ohne das fressen die Knoepfe in einer Flex-Zeile die ganze Breite bzw.
  * schrumpfen ungleich – dieselbe Falle wie bei .btn-primary im Hauptprojekt. */
 .knopfreihe > button { flex: 1 1 auto; }
@@ -119,3 +142,61 @@ button.leise { color: var(--gedaempft); }
   white-space: pre-wrap;
 }
 .meldung.arbeitet { background: transparent; color: var(--gedaempft); }
+
+/* Rückfrage-Kasten. Deckende Fläche und Akzentkante: er trägt eine Warnung,
+ * die nicht wie Fließtext aussehen darf. */
+.ja-nein {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--akzent);
+  border-radius: 6px;
+  background: var(--warn);
+}
+.ja-nein p { margin: 0 0 8px; }
+.ja-nein .knopfreihe { margin: 0; }
+
+/* ── Vorlagen ─────────────────────────────────────────────────────────── */
+/* Feld plus Symbolknopf in einer Zeile. `min-width: 0` ist Pflicht: ein
+ * Flex-Kind schrumpft sonst nicht unter seine Inhaltsbreite und schiebt das
+ * Zahnrad aus dem 380 px breiten Fenster. */
+.feld-zeile { display: flex; align-items: center; gap: 6px; }
+.feld-zeile select { flex: 1 1 auto; min-width: 0; }
+
+select {
+  padding: 6px 8px;
+  border: 1px solid var(--rand);
+  border-radius: 5px;
+  background: var(--grund);
+  color: var(--schrift);
+  font: inherit;
+}
+
+button.ico {
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  line-height: 1;
+}
+
+#vorlagen-box {
+  margin: 10px 0 0;
+  padding: 10px;
+  border: 1px solid var(--rand);
+  border-radius: 6px;
+}
+.vorl-kopf {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.vorl-liste { list-style: none; margin: 0 0 10px; padding: 0; }
+.vorl-liste li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--rand);
+}
+.vorl-liste li:last-child { border-bottom: 0; }
+/* Der Name nimmt den Platz, die Knöpfe bleiben rechts. */
+.vorl-liste li > span { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }

@@ -765,5 +765,119 @@ _farben = [f for f in re.findall(r"#[0-9a-fA-F]{3,8}\b", CSS)
 check(not _farben, "keine hartcodierten Farben", ", ".join(_farben[:5]))
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+section("12) Prompt-Vorlagen")
+# ═══════════════════════════════════════════════════════════════════════════
+import tempfile  # noqa: E402
+
+from backend import jira_vorlagen as jv                      # noqa: E402
+
+# SANDKASTEN. Ein Test, der in die echte data/ schreibt, verändert den Betrieb –
+# im Projekt mehrfach bezahlt (zuletzt eine Probe, die als root die
+# Kontendatei neu schrieb). Exit 2, wenn er verfehlt wird: "konnte nicht
+# laufen" muss von "bestanden" unterscheidbar sein.
+jv._DATEI = Path(tempfile.mkdtemp()) / "jira_vorlagen.json"
+if not str(jv._DATEI).startswith(tempfile.gettempdir()):
+    print("ABBRUCH: Sandkasten verfehlt – der Test würde die echte data/ ändern")
+    sys.exit(2)
+
+jv.saeen()
+d = jv.liste("nexus\\Max.Muster")
+check(len(d["global"]) == len(jv.VORSCHLAEGE),
+      "die Vorschläge werden mitgeliefert (%d)" % len(jv.VORSCHLAEGE))
+check(d["eigene"] == [], "eigene sind zunächst leer")
+check(d["darf_global"] is False, "ohne Admin: gemeinsame nicht änderbar")
+
+# Nur beim ERSTEN Mal säen – eine bewusst gelöschte Vorgabe darf nicht
+# zurückkommen (gleiche Regel wie bei den Rollen-Agenten).
+jv.loeschen("x", d["global"][0]["id"], ist_admin=True)
+jv.saeen()
+check(len(jv.liste("x")["global"]) == len(jv.VORSCHLAEGE) - 1,
+      "eine gelöschte Vorgabe kommt NICHT zurück")
+
+# Der Benutzerschlüssel ist normalisiert – sonst hätte dieselbe Person je
+# Anmeldeform verschiedene Vorlagen (Register).
+v = jv.speichern("nexus\\Max.Muster", "Meine Sicht", "Nur die offenen Punkte.")
+check(len(jv.liste("MAX.MUSTER@firma.de")["eigene"]) == 1,
+      "derselbe Benutzer in anderer Schreibweise sieht seine Vorlage")
+
+# Rechte: gemeinsame Vorlagen nur für Admins – geprüft im MODUL, nicht am
+# Endpunkt: sonst fehlt die Schranke, sobald jemand einen zweiten Aufrufer baut.
+try:
+    jv.speichern("max.muster", "Global", "x", global_=True, ist_admin=False)
+    check(False, "gemeinsame Vorlage ohne Admin wird abgewiesen")
+except jv.VorlagenFehler:
+    check(True, "gemeinsame Vorlage ohne Admin wird abgewiesen")
+g = jv.speichern("chef", "Global", "x", global_=True, ist_admin=True)
+check(g["id"], "als Admin geht es")
+
+check(jv.loeschen("wer.anders", v["id"]) is False,
+      "eine fremde Vorlage lässt sich nicht löschen")
+check(jv.loeschen("wer.anders", g["id"], ist_admin=False) is False,
+      "eine gemeinsame auch nicht ohne Admin")
+check(jv.loeschen("chef", g["id"], ist_admin=True) is True, "als Admin schon")
+
+# Zu lang wird ABGELEHNT, nicht gekürzt: ein stiller Schnitt mitten im Satz
+# ändert die Anweisung, und niemand sieht es.
+try:
+    jv.speichern("x", "Lang", "y" * (jv.TEXT_MAX + 1))
+    check(False, "zu langer Text wird abgewiesen")
+except jv.VorlagenFehler as e:
+    check("zu lang" in str(e), "zu langer Text wird abgewiesen (nicht gekürzt)")
+for leer in ("", "   "):
+    try:
+        jv.speichern("x", leer, "text")
+        check(False, "leerer Name wird abgewiesen")
+    except jv.VorlagenFehler:
+        check(True, "leerer Name wird abgewiesen")
+
+# text_fuer sucht NUR in dem, was der Benutzer benutzen darf.
+v2 = jv.speichern("alice", "Alice-Vorlage", "Alices Text.")
+check(jv.text_fuer("alice", v2["id"]) == "Alices Text.", "eigene Vorlage auflösbar")
+check(jv.text_fuer("bob", v2["id"]) == "", "fremde NICHT auflösbar")
+check(jv.text_fuer("alice", "gibtsnicht") == "", "unbekannte Kennung → leer")
+
+# ── Die Vorlage bestimmt die FORM, nicht die BEFUGNIS ─────────────────────
+# Lehre aus dem Vorfall 2026-08-17 (eine Stilvorgabe hob eine Bedingung auf).
+sysp = ja._system_prompt("zusammenfassung", "de",
+                         vorlage="Nur drei Stichpunkte, sonst nichts.")
+check("Nur drei Stichpunkte" in sysp, "die Vorlage steht im Auftrag")
+check("KEINE Werkzeuge" in sysp,
+      "die Grundregeln stehen weiter drin (Werkzeuglosigkeit)")
+check("erfindest du nicht" in sysp or "erfinde" in sysp.lower(),
+      "und die Regel, nichts zu erfinden")
+i_grund = sysp.find("KEINE Werkzeuge")
+i_vorl = sysp.find("Nur drei Stichpunkte")
+check(0 <= i_grund < i_vorl, "die Vorlage steht HINTER den Grundregeln")
+
+# Die Kennung wird aufgelöst – der TEXT kommt nie aus dem Request. Sonst wäre
+# das Feld ein Weg, den System-Prompt frei zu setzen.
+_qa = ohne_kommentare(funktion(QUELLE_JA, "auswerten"))
+check("jira_vorlagen.text_fuer" in _qa, "die Vorlage wird über ihre Kennung aufgelöst")
+check("vorlage=vorlage" not in _qa.replace(" ", ""),
+      "der Vorlagen-TEXT kommt nicht aus dem Request")
+
+# ── Endpunkte ────────────────────────────────────────────────────────────
+for name in ("jira_assist_vorlagen", "jira_assist_vorlage_speichern",
+             "jira_assist_vorlage_loeschen"):
+    q = funktion(QUELLE_MAIN, name)
+    check(bool(q), "%s existiert" % name)
+    check("require_jira_assist_access" in q,
+          "%s hängt an der Freigabe" % name)
+_del = funktion(QUELLE_MAIN, "jira_assist_vorlage_loeschen")
+check("status_code=404" in _del,
+      "unbekannt/fremd → 404 (ob eine fremde Vorlage existiert, ist Information)")
+
+# Die Datei ist Persistenz-Substrat: wer sie beschreibt, legt allen Benutzern
+# einen Prompt-Abschnitt in jeden Auftrag.
+SANDBOX = (ROOT / "backend" / "sandbox.py").read_text(encoding="utf-8")
+AGENT = (ROOT / "backend" / "agent.py").read_text(encoding="utf-8")
+for liste_ in ("_APP_DENY_REL", "PRIVATE_FILES", "SHELL_SECRET_PATHS"):
+    i = SANDBOX.find(liste_)
+    check(i > 0 and "jira_vorlagen" in SANDBOX[i:i + 2600],
+          "data/jira_vorlagen.json steht in %s" % liste_)
+check("jira_vorlagen.json" in AGENT, "und in der Deny-Liste des Agenten")
+
+
 print("\n%d OK, %d FAIL" % (_ok, _fail))
 sys.exit(1 if _fail else 0)

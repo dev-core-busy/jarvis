@@ -11276,6 +11276,8 @@ async def jira_assist_run(request: Request,
             lang=str(b.get("lang") or "de"),
             hinweis=str(b.get("hinweis") or ""),
             stil=str(b.get("stil") or ""),
+            vorlage=str(b.get("vorlage") or ""),
+            ist_admin=_is_admin_user(user),
         )
     except jira_assist.AssistFehler as f:
         return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
@@ -11285,6 +11287,62 @@ async def jira_assist_run(request: Request,
                              "error": "Auswertung fehlgeschlagen: %s"
                                       % scrub_secrets(str(e))}, status_code=500)
     return JSONResponse(daten)
+
+
+@app.get("/api/jira/assist/vorlagen")
+async def jira_assist_vorlagen(user: str = Depends(require_jira_assist_access)):
+    """Die Vorlagen, die dieser Benutzer benutzen darf."""
+    from backend import jira_vorlagen  # noqa: PLC0415
+    try:
+        return JSONResponse({"ok": True,
+                             **jira_vorlagen.liste(user, _is_admin_user(user))})
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Vorlagen nicht lesbar: %s" % e},
+                            status_code=500)
+
+
+@app.post("/api/jira/assist/vorlagen")
+async def jira_assist_vorlage_speichern(
+        request: Request, user: str = Depends(require_jira_assist_access)):
+    """Eine eigene Vorlage anlegen oder aendern.
+
+    ``global: true`` verlangt Administratorrechte – die Pruefung sitzt in
+    ``jira_vorlagen.speichern``, damit sie nicht am Endpunkt vergessen werden
+    kann, wenn jemand einen zweiten Aufrufer ergaenzt.
+    """
+    from backend import jira_vorlagen  # noqa: PLC0415
+    try:
+        b = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."},
+                            status_code=400)
+    try:
+        v = jira_vorlagen.speichern(
+            user=user,
+            name=str((b or {}).get("name") or ""),
+            text=str((b or {}).get("text") or ""),
+            vid=str((b or {}).get("id") or ""),
+            global_=bool((b or {}).get("global")),
+            ist_admin=_is_admin_user(user),
+        )
+    except jira_vorlagen.VorlagenFehler as f:
+        return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
+    return JSONResponse({"ok": True, "vorlage": v})
+
+
+@app.delete("/api/jira/assist/vorlagen/{vid}")
+async def jira_assist_vorlage_loeschen(
+        vid: str, user: str = Depends(require_jira_assist_access)):
+    """Eine eigene Vorlage loeschen (Admins auch gemeinsame).
+
+    Unbekannt oder fremd → **404**, nicht 403: ob eine fremde Vorlage
+    existiert, ist selbst eine Information.
+    """
+    from backend import jira_vorlagen  # noqa: PLC0415
+    if jira_vorlagen.loeschen(user, vid, _is_admin_user(user)):
+        return JSONResponse({"ok": True})
+    return JSONResponse({"ok": False, "error": "Vorlage nicht gefunden."},
+                        status_code=404)
 
 
 @app.get("/api/jira/assist/paket")

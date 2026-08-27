@@ -46,10 +46,52 @@
       <button type="button" id="btn-zusammenfassung" class="haupt">Zusammenfassen</button>
       <button type="button" id="btn-antwort" class="haupt">Antwort vorschlagen</button>
     </div>
+
+    <!-- Vorlage für die Zusammenfassung. Das Zahnrad öffnet die Verwaltung –
+         eigene Vorlagen darf jeder anlegen, gemeinsame nur ein Administrator. -->
+    <label class="feld">
+      <span>Vorlage für die Zusammenfassung</span>
+      <div class="feld-zeile">
+        <select id="f-vorlage">
+          <option value="">Standard</option>
+        </select>
+        <button type="button" id="btn-vorlagen" class="leise ico"
+                title="Vorlagen verwalten" aria-label="Vorlagen verwalten">⚙</button>
+      </div>
+    </label>
+
     <label class="feld">
       <span>Zusatzwunsch <em>(optional)</em></span>
       <input type="text" id="f-hinweis" placeholder="z. B. kurz halten, auf Englisch">
     </label>
+
+    <!-- Vorlagen-Verwaltung: bleibt im selben Fenster, damit die Auswahl
+         daneben sichtbar bleibt. -->
+    <div id="vorlagen-box" hidden>
+      <div class="vorl-kopf">
+        <b>Vorlagen</b>
+        <button type="button" id="btn-vorlagen-zu" class="leise" title="Schließen"
+                aria-label="Schließen">&times;</button>
+      </div>
+      <ul class="vorl-liste" id="vorl-liste"></ul>
+      <label class="feld">
+        <span>Name</span>
+        <input type="text" id="f-vorl-name" maxlength="60" placeholder="z. B. Kurz für die Leitung">
+      </label>
+      <label class="feld">
+        <span>Anweisung</span>
+        <textarea id="f-vorl-text" rows="4"
+                  placeholder="Worauf soll die Zusammenfassung hinauslaufen?"></textarea>
+      </label>
+      <label class="feld" id="vorl-global-zeile" hidden>
+        <span><input type="checkbox" id="f-vorl-global"> Für alle Benutzer (Administrator)</span>
+      </label>
+      <div class="knopfreihe">
+        <button type="button" id="btn-vorl-speichern" class="haupt">Speichern</button>
+        <button type="button" id="btn-vorl-neu" class="leise">Neu</button>
+      </div>
+      <p class="hinweis" id="vorl-hinweis"></p>
+    </div>
 
     <div id="ergebnis" hidden>
       <textarea id="f-ergebnis" rows="12" spellcheck="true"></textarea>
@@ -58,6 +100,16 @@
         <button type="button" id="btn-kopieren" class="leise">Kopieren</button>
       </div>
       <p class="fussnote" id="ergebnis-fuss"></p>
+    </div>
+
+    <!-- Rückfrage, wenn der gemerkte Text zu einem anderen Ticket gehört.
+         Eigener Dialog statt confirm() – siehe popup.js::frageJaNein. -->
+    <div class="ja-nein" id="ja-nein" hidden>
+      <p id="jn-text">Der Text gehört zu einem <b>anderen Ticket</b>. Trotzdem einfügen?</p>
+      <div class="knopfreihe">
+        <button type="button" id="jn-nein" class="leise">Abbrechen</button>
+        <button type="button" id="jn-ja">Trotzdem einfügen</button>
+      </div>
     </div>
   </section>
 

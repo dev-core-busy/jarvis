@@ -41,6 +41,8 @@ import re
 import secrets
 from contextvars import ContextVar
 
+from backend import fremdtext
+
 # ── Deckel ────────────────────────────────────────────────────────────────
 # Alle begrenzen, was EIN Vorschlag anrichten kann. Sie sind keine Schikane:
 # ohne sie kann eine einzelne Antwort die halbe Mappe ueberschreiben, und die
@@ -464,33 +466,38 @@ def ueberblick_text(daten: dict) -> str:
 
 
 # ── Fremdtext entschaerfen ────────────────────────────────────────────────
-# Gleiche Mechanik wie ``short_tracks_runner.fremdtext_entschaerfen`` – die
-# WORTLISTE muss eigen sein, weil sie die Strukturwoerter DIESES Auftrags
-# beschreibt. Ein Angriff muss genau diese nachbauen, um zu wirken.
-_MARKENZEILE = re.compile(r"^\s*(={3,}|-{5,}|#{3,}|\[{2,})", re.MULTILINE)
-_STRUKTURWORT = re.compile(
-    r"(ÜBERBLICK ÜBER DIE MAPPE|UEBERBLICK UEBER DIE MAPPE|FRAGE DES BENUTZERS"
-    r"|ECHTHEITSKENNUNG|ENDE DES ÜBERBLICKS|ENDE DES UEBERBLICKS"
-    r"|ZUSATZAUFGABE|NEUE ANWEISUNG"
-    r"|IGNORIERE ALLE (?:VORHERIGEN |VORIGEN )?ANWEISUNGEN)",
-    re.IGNORECASE)
+# Der Koerper liegt in ``backend/fremdtext.py`` – die WORTLISTE muss eigen sein,
+# weil sie die Strukturwoerter DIESES Auftrags beschreibt. Ein Angriff muss
+# genau diese nachbauen, um zu wirken; eine mit ``/tracks`` gemeinsame Liste
+# braeche hier Woerter, die in einer Mappe gar keine Marke sind.
+#
+# Beide Schreibweisen (``ÜBERBLICK``/``UEBERBLICK``) stehen ausdruecklich da:
+# der Vorspann benutzt die Umlautfassung, ein Nachbau kann die
+# Ersatzschreibweise waehlen. Die generischen Angriffsformeln
+# (ECHTHEITSKENNUNG, ZUSATZAUFGABE, "IGNORIERE ALLE …") kommen aus
+# ``fremdtext.BASIS_WOERTER`` und stehen deshalb hier NICHT mehr einzeln.
+_STRUKTURWORT = fremdtext.strukturwort_re(
+    "ÜBERBLICK ÜBER DIE MAPPE",
+    "UEBERBLICK UEBER DIE MAPPE",
+    "FRAGE DES BENUTZERS",
+    "ENDE DES ÜBERBLICKS",
+    "ENDE DES UEBERBLICKS",
+    "NEUE ANWEISUNG",
+)
 
 
 def fremdtext_entschaerfen(text: str) -> str:
     """Macht nachgebaute Abschnittsmarken im Mappeninhalt unwirksam.
+
+    Duenne Huelle um ``fremdtext.entschaerfen`` mit der Wortliste DIESES
+    Auftrags.
 
     Beide Schritte erhalten den Inhalt LESBAR – gekuerzt oder geloescht wird
     nichts. Eine Zelle darf eine Trennlinie enthalten (das ist in Tabellen
     ueblich), sie soll nur nicht mehr wie eine Abschnittsmarke DIESES Auftrags
     aussehen.
     """
-    if not text:
-        return ""
-    entschaerft = _MARKENZEILE.sub(lambda m: "| " + m.group(1), text)
-    # Ein Mittelpunkt im Wort: fuer einen Leser unveraendert, als Nachbau der
-    # Marke unbrauchbar.
-    return _STRUKTURWORT.sub(
-        lambda m: m.group(1)[0] + "·" + m.group(1)[1:], entschaerft)
+    return fremdtext.entschaerfen(text, _STRUKTURWORT)
 
 
 # ── Auftrag ───────────────────────────────────────────────────────────────

@@ -3,15 +3,26 @@
 <head>
   <meta charset="UTF-8">
   <title>{marke} für Jira</title>
+  <!-- DIE MARKE STEHT ALS VORGABE IM PAKET – und das ist der Kern des Fixes:
+       beim allerersten Öffnen ist noch keine Serveradresse hinterlegt, das
+       Fenster kann `/api/branding` also gar nicht fragen. Genau dann sieht
+       jemand die ANMELDEMASKE zum ersten Mal, und dort stand deshalb der
+       eingebaute Rückfall.
+       Gefüllt wird das Feld beim Bauen des ZIP (jira_assist._popup_gebrandet);
+       im Repo bleibt es LEER, damit hier keine zweite Wahrheit neben dem
+       Branding entsteht. Ohne Eintrag gilt unverändert der Rückfall aus
+       popup.js. -->
+  <meta name="marke" content="">
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
   <header class="kopf">
     <!-- Marke und Logo folgen dem Branding des Servers (popup.js::setzeBranding).
-         Der Rückfalltext steht hier, weil das Fenster vor dem ersten Abruf
-         schon sichtbar ist. -->
+         Bis dahin trägt der Platzhalter die Vorgabe aus dem Paket (siehe
+         <meta name="marke">) und erst danach den eingebauten Rückfall – das
+         Fenster ist sichtbar, bevor irgendein Abruf zurück ist. -->
     <img class="marke-logo" id="marke-logo" alt="" hidden>
-    <span class="marke" id="marke">Jarvis</span>
+    <span class="marke" id="marke">{marke}</span>
     <span class="ticket" id="ticket-anzeige"></span>
     <button type="button" id="btn-abmelden" class="leise" hidden>Abmelden</button>
   </header>

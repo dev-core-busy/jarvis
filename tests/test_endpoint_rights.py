@@ -233,9 +233,15 @@ EXEMPT = {
     # Schranke haengt daran, dass niemand ein Werkzeug angeboten bekommt, das
     # er anschliessend nicht benutzen darf.
     ("get", "/api/jira/assist/paket"),
-    # Prompt-Vorlagen. Dieselbe Freigabe; die zusaetzliche Schranke "gemeinsame
-    # Vorlagen nur fuer Admins" sitzt im MODUL (jira_vorlagen.speichern), damit
-    # sie nicht am Endpunkt vergessen werden kann.
+    # Prompt-Vorlagen: `require_jira_vorlagen_access` = dieselbe Freigabe ODER
+    # Administrator. Der Admin-Zweig ist noetig, weil die GEMEINSAMEN Vorlagen
+    # im Einstellungs-Reiter gepflegt werden und `_user_may_use_jira_assist`
+    # bewusst keinen Admin-Bypass kennt – ohne ihn saehe ein Administrator ohne
+    # eigene Jira-Freigabe seinen eigenen Reiter leer (gleiche Stelle und
+    # gleiche Begruendung wie GET /api/sap/analyses/catalog).
+    # Die zusaetzliche Schranke "gemeinsame Vorlagen nur fuer Admins" sitzt im
+    # MODUL (jira_vorlagen.speichern), damit sie nicht am Endpunkt vergessen
+    # werden kann.
     ("get", "/api/jira/assist/vorlagen"), ("post", "/api/jira/assist/vorlagen"),
     ("delete", "/api/jira/assist/vorlagen/{vid}"),
 }
@@ -264,6 +270,8 @@ RANK = {"require_local_auth": 3, "require_admin_or_knowledge_editor": 2,
         "require_knowledge_editor": 2, "require_sap_access": 2,
         "require_email_access": 2, "require_tracks_access": 2,
         "require_jira_assist_access": 2,
+        # Freigabe ODER Admin – also mindestens so eng wie die Freigabe selbst.
+        "require_jira_vorlagen_access": 2,
         # Bereichs-Schranke ohne eigene Freigabeliste: prueft NUR, ob der Skill
         # "userchat" an ist. Damit auf der Ebene von require_auth, nicht darueber.
         "require_userchat_access": 1,

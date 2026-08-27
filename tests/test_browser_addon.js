@@ -373,15 +373,57 @@ check(/"colors":\s*cfg\.get\("colors"/.test(MAIN_SRC),
   check(mit.titel === 'Nexerius für Jira', 'der Fenstertitel ebenfalls');
 }
 
+/* ── DER GEMELDETE FALL: die ANMELDEMASKE ─────────────────────────────────
+ * "das Branding beim Login ist noch falsch". Zu Recht: die Marke kam
+ * ausschliesslich aus /api/branding, und der Abruf braucht eine Adresse. Beim
+ * allerersten Oeffnen ist keine hinterlegt – ausgerechnet auf der Maske, die
+ * jemand als Erstes sieht, stand deshalb der eingebaute Name.
+ * Der Server traegt die Marke jetzt beim Bauen des ZIP ein. Hier wird das
+ * OHNE jeden Abruf gemessen: ein gebrandetes Paket, kein Branding-Objekt. */
+{
+  const vorgabe  = POPUP_JS.match(/function _vorgabeMarke\(\)\s*\{[\s\S]*?\n\}/);
+  const anwenden = POPUP_JS.match(/function markeAnwenden\(\)\s*\{[\s\S]*?\n\}/);
+  check(!!vorgabe, 'popup.js liest eine Marken-Vorgabe aus dem Paket');
+  check(/<meta name="marke" content="">/.test(POPUP_HTML),
+        'im Repo ist das Feld LEER (keine zweite Wahrheit neben dem Branding)');
+  check(/_vorgabeMarke\(\)\s*\|\|\s*"Jarvis"/.test(POPUP_JS),
+        'ohne Vorgabe gilt weiterhin der eingebaute Rueckfall');
+
+  const html = POPUP_HTML.replace('<meta name="marke" content="">',
+                                  '<meta name="marke" content="Nexerius">');
+  const dom = new JSDOM(html, { url: 'https://x.test/', runScripts: 'outside-only' });
+  const w = dom.window;
+  try {
+    const f = new w.Function(`
+        const _originale = new Map();
+        ${vorgabe ? vorgabe[0] : ''}
+        ${anwenden ? anwenden[0] : ''}
+        let _marke = _vorgabeMarke() || "Jarvis";
+        markeAnwenden();
+        return JSON.stringify({ text: document.body.textContent,
+                                titel: document.title });`);
+    const r = JSON.parse(f());
+    check(r.text.includes('Nexerius-Adresse'),
+          'die Anmeldemaske traegt die Marke OHNE jeden Serverabruf');
+    check(!/Jarvis/.test(r.text),
+          'und nirgends mehr den eingebauten Namen', r.text.slice(0, 80));
+    check(r.titel === 'Nexerius für Jira', 'der Fenstertitel ebenfalls');
+  } finally { w.close(); }
+
+  // Farbe und Logo kennt nur der Server – die sollen stehen, sobald eine
+  // Adresse eingetippt IST, nicht erst nach dem Anmelden.
+  check(/el\.basis\.addEventListener\("change"/.test(POPUP_JS),
+        'die eingetippte Adresse loest den Branding-Abruf schon vor dem Login aus');
+}
+
 // Kein sichtbarer Text im Paket darf "Jarvis" fest verdrahtet haben – der
 // Rueckfall gehoert in EINE Variable, nicht in zwanzig Zeichenketten.
 for (const [datei, inhalt] of [['popup.html', POPUP_HTML],
                                ['background.js', BG],
                                ['popup.js', POPUP_JS]]) {
   const sichtbar = ohneKommentare(inhalt)
-      // Der Rueckfall selbst und der Elementinhalt der Kopfzeile sind erlaubt.
-      .replace(/let _marke = "Jarvis";/, '')
-      .replace(/<span class="marke" id="marke">Jarvis<\/span>/, '')
+      // Der Rueckfall selbst ist erlaubt – aber nur EINMAL und nur hier.
+      .replace(/_vorgabeMarke\(\) \|\| "Jarvis";/, '')
       .replace(/JarvisIcons|JarvisIssues/g, '');
   check(!/Jarvis/.test(sichtbar),
         datei + ': kein fest verdrahtetes "Jarvis" im Anzeigetext',

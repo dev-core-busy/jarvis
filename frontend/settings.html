@@ -2967,6 +2967,33 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <span id="jira-status" style="font-size:0.9em;"></span>
                         </div>
 
+                        <!-- ═══ Vorlagen des Jira-Assistenten ═══
+                             Sie liessen sich bisher NUR im Fenster der
+                             Browser-Erweiterung pflegen – also ausgerechnet die
+                             GEMEINSAMEN, die einem Administrator gehoeren, in
+                             einem 360 Pixel breiten Popup und nur mit
+                             installierter Erweiterung. Endpunkte:
+                             /api/jira/assist/vorlagen (GET/POST/DELETE). -->
+                        <h4 style="margin:22px 0 8px;" data-i18n="jvorl.h">Vorlagen für die Zusammenfassung</h4>
+                        <p class="kb-hint" data-i18n-html="jvorl.intro">Benannte Vorlagen bestimmen, <b>worauf</b> eine Zusammenfassung hinausläuft – „kurz für die Leitung“, „technisch mit Verlauf“. Sie erscheinen im Pulldown der Browser-Erweiterung. <b>Gemeinsame</b> Vorlagen gelten für alle Benutzer und werden hier gepflegt; eigene darf jeder zusätzlich im Fenster der Erweiterung anlegen.</p>
+                        <div id="jvorl-liste" style="display:flex;flex-direction:column;gap:6px;margin:10px 0;"></div>
+                        <div class="form-group">
+                            <label data-i18n="jvorl.name">Name</label>
+                            <input type="text" id="jvorl-name" class="config-input" maxlength="60" placeholder="z. B. Kurz für die Leitung" data-i18n-placeholder="jvorl.ph_name" style="width:100%;box-sizing:border-box;">
+                        </div>
+                        <div class="form-group">
+                            <label data-i18n="jvorl.text">Anweisung</label>
+                            <textarea id="jvorl-text" class="config-input" rows="4" placeholder="Worauf soll die Zusammenfassung hinauslaufen?" data-i18n-placeholder="jvorl.ph_text" style="width:100%;box-sizing:border-box;resize:vertical;"></textarea>
+                        </div>
+                        <div class="form-group" id="jvorl-global-zeile">
+                            <label class="checkbox-group"><input type="checkbox" id="jvorl-global"><span data-i18n="jvorl.global">Für alle Benutzer (gemeinsame Vorlage)</span></label>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                            <button class="btn-primary" id="jvorl-save" type="button" data-i18n="common.save" style="flex:0 0 auto;">Speichern</button>
+                            <button class="btn-secondary" id="jvorl-new" type="button" data-i18n="jvorl.new" style="flex:0 0 auto;">Neu</button>
+                            <span id="jvorl-status" style="font-size:0.9em;"></span>
+                        </div>
+
                         <h4 style="margin:22px 0 8px;">Tickets suchen</h4>
                         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
                             <input type="text" id="jira-search-q" class="config-input" placeholder="Suchbegriff (Volltext)…" style="flex:1;min-width:180px;">
@@ -4720,7 +4747,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
     <script src="/static/js/icons.js?v=1"></script>
-    <script src="/static/js/i18n.js?v=182"></script>
+    <script src="/static/js/i18n.js?v=183"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=21"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -4738,7 +4765,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/mcp.js?v=5"></script>
     <script src="/static/js/vision.js?v=31"></script>
     <script src="/static/js/confluence.js?v=7"></script>
-    <script src="/static/js/jira.js?v=7"></script>
+    <script src="/static/js/jira.js?v=8"></script>
     <!-- sapcert.js VOR sap.js: der Reiter haengt den Baustein beim Laden ein. -->
     <script src="/static/js/sapcert.js?v=1"></script>
     <script src="/static/js/sap.js?v=4"></script>

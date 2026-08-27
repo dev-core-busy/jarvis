@@ -687,6 +687,43 @@ try:
 except ja.AssistFehler:
     check(True, "unbekannte Variante wird abgewiesen")
 
+# ── Die Marke steht schon auf der ANMELDEMASKE ────────────────────────────
+# Gemeldet: "das Branding beim Login ist noch falsch". Ursache: das Fenster
+# holte die Marke ausschliesslich ueber /api/branding – und dafuer braucht es
+# eine Adresse. Beim allerersten Oeffnen ist keine hinterlegt, also stand dort
+# der eingebaute Rueckfall. Das Paket ist ohnehin pro Installation verschieden;
+# der Name gehoert hinein. GEMESSEN am gebauten ZIP, nicht im Quelltext gelesen.
+_echte_marke = ja.markenname
+try:
+    ja.markenname = lambda: 'Ne"xerius & Co'      # Fremdeingabe aus dem Formular
+    _, _daten = ja.paket_bauen("chrome")
+    _popup = zipfile.ZipFile(io.BytesIO(_daten)).read("popup.html").decode("utf-8")
+    m_meta = re.search(r'<meta name="marke" content="([^"]*)"', _popup)
+    check(m_meta is not None, "das gebaute popup.html hat das Feld <meta name=marke>")
+    if m_meta:
+        check(m_meta.group(1) == "Ne&quot;xerius &amp; Co",
+              "die Marke steht darin – HTML-attributsicher maskiert",
+              m_meta.group(1))
+        # Die Gegenprobe zur Maskierung: ein Anfuehrungszeichen darf das
+        # Attribut nicht schliessen. Sonst haenge hier Markup aus einem
+        # Formularfeld im Fenster jedes Sachbearbeiters.
+        check('content="Ne"' not in _popup,
+              "das Anfuehrungszeichen schliesst das Attribut NICHT")
+finally:
+    ja.markenname = _echte_marke
+
+# Im Repo bleibt das Feld LEER – sonst waere es eine zweite Wahrheit neben dem
+# Branding und wuerde beim naechsten Firmennamen still falsch.
+_popup_repo = (ROOT / "browser-addon" / "popup.html").read_text(encoding="utf-8")
+check('<meta name="marke" content="">' in _popup_repo,
+      "im Repo ist das Feld leer (der Rueckfall steht in popup.js)")
+_pj = (ROOT / "browser-addon" / "popup.js").read_text(encoding="utf-8")
+check('meta[name="marke"]' in _pj, "popup.js liest die Vorgabe aus dem Paket")
+check('_vorgabeMarke() || "Jarvis"' in _pj,
+      "und faellt ohne sie auf den eingebauten Namen zurueck")
+_pb = ohne_kommentare(funktion(QUELLE_JA, "paket_bauen"))
+check("_popup_gebrandet" in _pb, "paket_bauen brandet popup.html wirklich")
+
 # ── DRIFT-SCHRANKE: bauen.sh und der Server packen dasselbe ───────────────
 # Die Dateiliste steht an zwei Orten. Laufen sie auseinander, laedt sich ein
 # Benutzer ueber die Kachel ein anderes Paket herunter als ein Administrator
@@ -858,12 +895,35 @@ check("vorlage=vorlage" not in _qa.replace(" ", ""),
       "der Vorlagen-TEXT kommt nicht aus dem Request")
 
 # ── Endpunkte ────────────────────────────────────────────────────────────
+# Die Vorlagen haengen an `require_jira_vorlagen_access` – Freigabe ODER
+# Administrator. Der Admin-Zweig ist noetig, weil die GEMEINSAMEN Vorlagen im
+# Einstellungs-Reiter gepflegt werden und `_user_may_use_jira_assist` bewusst
+# keinen Admin-Bypass kennt (sonst saehe ein Administrator ohne eigene
+# Jira-Freigabe seinen eigenen Reiter leer). Alles UEBRIGE unter /assist bleibt
+# bei der engen Freigabe: dort kommen Ticketinhalte mit dem Server-PAT.
 for name in ("jira_assist_vorlagen", "jira_assist_vorlage_speichern",
              "jira_assist_vorlage_loeschen"):
     q = funktion(QUELLE_MAIN, name)
     check(bool(q), "%s existiert" % name)
-    check("require_jira_assist_access" in q,
-          "%s hängt an der Freigabe" % name)
+    check("require_jira_vorlagen_access" in q,
+          "%s hängt an der Vorlagen-Schranke" % name)
+    check("require_auth)" not in q and "require_auth," not in q,
+          "%s haengt nicht an der blossen Anmeldung" % name)
+
+_dep = ohne_kommentare(funktion(QUELLE_MAIN, "require_jira_vorlagen_access"))
+check(bool(_dep), "require_jira_vorlagen_access existiert")
+check("_user_may_use_jira_assist" in _dep and "_is_admin_user" in _dep,
+      "sie laesst Freigegebene UND Administratoren durch")
+check("403" in _dep or "HTTPException" in _dep,
+      "fail-closed: alle anderen bekommen 403")
+# Die Ticket-Endpunkte duerfen den Admin-Zweig NICHT erben – ein Administrator
+# ohne Jira-Freigabe soll keine Ticketinhalte ueber den Server-PAT bekommen.
+for name in ("jira_assist_run", "jira_assist_health", "jira_assist_paket"):
+    q = funktion(QUELLE_MAIN, name)
+    check(bool(q), "%s existiert (sonst prueft die Zeile darunter nichts)" % name)
+    check("require_jira_assist_access" in q
+          and "require_jira_vorlagen_access" not in q,
+          "%s bleibt bei der engen Freigabe" % name)
 _del = funktion(QUELLE_MAIN, "jira_assist_vorlage_loeschen")
 check("status_code=404" in _del,
       "unbekannt/fremd → 404 (ob eine fremde Vorlage existiert, ist Information)")

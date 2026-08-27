@@ -1414,6 +1414,29 @@ async def require_jira_assist_access(request: Request,
                "Jira-Assistent; ggf. neu einloggen für Gruppen-Aktualisierung)")
 
 
+async def require_jira_vorlagen_access(request: Request,
+                                       user: str = Depends(require_auth)) -> str:
+    """FastAPI Dependency: Vorlagen pflegen – Freigabe **oder** Administrator.
+
+    WARUM HIER EIN ADMIN-ZWEIG STEHT und bei den übrigen ``/assist``-Routen
+    nicht: ``_user_may_use_jira_assist`` kennt bewusst keinen Admin-Bypass.
+    Gemeinsame Vorlagen sind aber Administratorenarbeit – ohne diesen Zweig
+    könnte ein Administrator ohne eigene Jira-Freigabe sie weder sehen noch
+    anlegen, obwohl der Reiter dafür ihm gehört. Genau dieselbe Stelle und
+    dieselbe Begründung wie bei ``GET /api/sap/analyses/catalog``.
+
+    Es ist KEINE Erweiterung der Ticket-Rechte: die Vorlagen enthalten
+    Prompt-Text, kein Ticketinhalt, und die Schranke „gemeinsame Vorlagen nur
+    für Admins" sitzt weiterhin im Modul (``jira_vorlagen.speichern``).
+    """
+    if _user_may_use_jira_assist(user) or _is_admin_user(user):
+        return user
+    raise HTTPException(status_code=403,
+        detail="Kein Zugriff auf die Vorlagen des Jira-Assistenten – weder freigeschaltet "
+               "(Einstellungen → Sicherheit → Berechtigungen → Jira-Assistent) noch "
+               "Administrator")
+
+
 def _user_may_use_claudesub(user: str) -> bool:
     """Prädikat: Darf der Benutzer Codearbeiten an Jarvis delegieren?
 
@@ -11290,7 +11313,7 @@ async def jira_assist_run(request: Request,
 
 
 @app.get("/api/jira/assist/vorlagen")
-async def jira_assist_vorlagen(user: str = Depends(require_jira_assist_access)):
+async def jira_assist_vorlagen(user: str = Depends(require_jira_vorlagen_access)):
     """Die Vorlagen, die dieser Benutzer benutzen darf."""
     from backend import jira_vorlagen  # noqa: PLC0415
     try:
@@ -11303,7 +11326,7 @@ async def jira_assist_vorlagen(user: str = Depends(require_jira_assist_access)):
 
 @app.post("/api/jira/assist/vorlagen")
 async def jira_assist_vorlage_speichern(
-        request: Request, user: str = Depends(require_jira_assist_access)):
+        request: Request, user: str = Depends(require_jira_vorlagen_access)):
     """Eine eigene Vorlage anlegen oder aendern.
 
     ``global: true`` verlangt Administratorrechte – die Pruefung sitzt in
@@ -11332,7 +11355,7 @@ async def jira_assist_vorlage_speichern(
 
 @app.delete("/api/jira/assist/vorlagen/{vid}")
 async def jira_assist_vorlage_loeschen(
-        vid: str, user: str = Depends(require_jira_assist_access)):
+        vid: str, user: str = Depends(require_jira_vorlagen_access)):
     """Eine eigene Vorlage loeschen (Admins auch gemeinsame).
 
     Unbekannt oder fremd → **404**, nicht 403: ob eine fremde Vorlage

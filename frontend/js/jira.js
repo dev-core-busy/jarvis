@@ -30,10 +30,22 @@
             + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
     }
     function status(msg, kind) {
-        var el = $('jira-status'); if (!el) return;
+        setStatus('jira-status', msg, kind);
+    }
+    function setStatus(id, msg, kind) {
+        var el = $(id); if (!el) return;
         el.textContent = msg || '';
         el.style.color = kind === 'error' ? 'var(--danger)'
             : kind === 'ok' ? 'var(--success)' : 'var(--text-secondary)';
+    }
+    // Uebersetzung mit Rueckfall: der Reiter wird auch gerendert, wenn i18n.js
+    // (noch) nicht da ist – dann steht der deutsche Text statt eines leeren
+    // Feldes. Platzhalter werden hier ersetzt, window.t kennt keine.
+    function t(key, fallback, werte) {
+        var s = (window.t && window.t(key)) || '';
+        if (!s || s === key) s = fallback;
+        for (var k in (werte || {})) s = s.split('{' + k + '}').join(werte[k]);
+        return s;
     }
 
     var SVG_EYE_OPEN = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
@@ -45,6 +57,7 @@
         onShow: function () {
             this._bind();
             this.loadConfig();
+            this.loadVorlagen();
         },
 
         _bind: function () {
@@ -57,6 +70,9 @@
                 var el = $(id);
                 if (el) el.addEventListener('keydown', function (e) { if (e.key === 'Enter') Manager.search(); });
             });
+            var vs = $('jvorl-save'); if (vs) vs.addEventListener('click', this.saveVorlage.bind(this));
+            var vn = $('jvorl-new');
+            if (vn) vn.addEventListener('click', function () { Manager.editVorlage(null, false); });
             // Auge: PAT anzeigen/verbergen (analog Confluence-Reiter)
             var tt = $('jira-token-toggle');
             if (tt) tt.addEventListener('click', function () {
@@ -114,6 +130,144 @@
                     }
                 })
                 .catch(function () { status('❌ Verbindungstest fehlgeschlagen', 'error'); });
+        },
+
+        /* ── Vorlagen des Jira-Assistenten ──────────────────────────────────
+           Dieselben Endpunkte wie im Fenster der Erweiterung; die Schranke
+           „gemeinsame Vorlagen nur fuer Admins" sitzt im Backend
+           (jira_vorlagen.speichern). Hier wird sie nur ANGEZEIGT – eine
+           Oberflaeche, die das Haekchen versteckt, ist keine Schranke. */
+        _vorlagen: { global: [], eigene: [], darf_global: false },
+        _vorlBearbeitet: '',
+
+        loadVorlagen: function () {
+            var box = $('jvorl-liste'); if (!box) return;
+            box.innerHTML = '<span class="kb-hint">' + esc(t('jvorl.loading', 'Lade Vorlagen …')) + '</span>';
+            fetch('/api/jira/assist/vorlagen', { headers: authHeaders() })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    if (!d || d.ok === false) throw new Error((d && d.error) || 'Fehler');
+                    Manager._vorlagen = {
+                        global: d.global || [], eigene: d.eigene || [],
+                        darf_global: !!d.darf_global
+                    };
+                    Manager.renderVorlagen();
+                })
+                .catch(function (e) {
+                    box.innerHTML = '<span class="kb-hint" style="color:var(--danger);">'
+                        + esc(e.message || 'Vorlagen konnten nicht geladen werden.') + '</span>';
+                });
+        },
+
+        renderVorlagen: function () {
+            var box = $('jvorl-liste'); if (!box) return;
+            var v = this._vorlagen;
+            var zeile = $('jvorl-global-zeile');
+            // Wer keine gemeinsamen Vorlagen anlegen darf, sieht das Haekchen
+            // gar nicht erst – der Server wuerde ihn ohnehin abweisen.
+            if (zeile) zeile.style.display = v.darf_global ? '' : 'none';
+            box.innerHTML = '';
+            var alle = v.global.map(function (x) { return { v: x, global: true }; })
+                .concat(v.eigene.map(function (x) { return { v: x, global: false }; }));
+            if (!alle.length) {
+                box.innerHTML = '<span class="kb-hint">' + esc(t('jvorl.empty', 'Noch keine Vorlagen.')) + '</span>';
+                return;
+            }
+            alle.forEach(function (e) {
+                // Aendern darf man Eigenes immer, Gemeinsames nur als Admin.
+                var darf = !e.global || v.darf_global;
+                var row = document.createElement('div');
+                row.style.cssText = 'display:flex;justify-content:space-between;align-items:flex-start;'
+                    + 'gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;'
+                    + 'background:var(--bg-glass);';
+                var links = document.createElement('span');
+                links.style.cssText = 'min-width:0;';
+                // textContent: Name und Text sind Freitext aus einem Formular.
+                var titel = document.createElement('span');
+                titel.style.fontWeight = '600';
+                titel.textContent = e.v.name || '';
+                var art = document.createElement('span');
+                art.className = 'kb-hint';
+                art.style.marginLeft = '8px';
+                art.textContent = e.global ? t('jvorl.shared', 'Gemeinsam') : t('jvorl.mine', 'Nur für mich');
+                var text = document.createElement('div');
+                text.className = 'kb-hint';
+                text.style.cssText = 'white-space:pre-wrap;word-break:break-word;';
+                text.textContent = e.v.text || '';
+                links.appendChild(titel); links.appendChild(art); links.appendChild(text);
+                row.appendChild(links);
+
+                if (darf) {
+                    var knoepfe = document.createElement('span');
+                    knoepfe.style.cssText = 'display:flex;gap:4px;flex:0 0 auto;';
+                    var b = document.createElement('button');
+                    b.type = 'button';
+                    b.className = 'kb-hdr-btn';
+                    b.title = t('jvorl.edit', 'Bearbeiten');
+                    b.textContent = '✎';
+                    b.addEventListener('click', function () { Manager.editVorlage(e.v, e.global); });
+                    knoepfe.appendChild(b);
+                    var w = document.createElement('button');
+                    w.type = 'button';
+                    w.className = 'kb-hdr-btn';
+                    w.title = t('jvorl.del', 'Löschen');
+                    // Muelleimer = loeschen (Projektregel), als Inline-SVG aus
+                    // icons.js – nie ein Emoji, nie ein ×.
+                    w.innerHTML = (window.JarvisIcons && window.JarvisIcons.trash()) || '';
+                    w.addEventListener('click', function () { Manager.deleteVorlage(e.v); });
+                    knoepfe.appendChild(w);
+                    row.appendChild(knoepfe);
+                }
+                box.appendChild(row);
+            });
+        },
+
+        editVorlage: function (v, global_) {
+            this._vorlBearbeitet = v ? (v.id || '') : '';
+            if ($('jvorl-name')) $('jvorl-name').value = v ? (v.name || '') : '';
+            if ($('jvorl-text')) $('jvorl-text').value = v ? (v.text || '') : '';
+            if ($('jvorl-global')) $('jvorl-global').checked = !!global_;
+            setStatus('jvorl-status',
+                v ? t('jvorl.editing', 'Ändert „{name}“.', { name: v.name || '' }) : '');
+        },
+
+        saveVorlage: function () {
+            var name = ($('jvorl-name') ? $('jvorl-name').value : '').trim();
+            var text = ($('jvorl-text') ? $('jvorl-text').value : '').trim();
+            if (!name || !text) {
+                setStatus('jvorl-status', t('jvorl.need', 'Name und Anweisung sind nötig.'), 'error');
+                return;
+            }
+            fetch('/api/jira/assist/vorlagen', {
+                method: 'POST',
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({
+                    id: this._vorlBearbeitet, name: name, text: text,
+                    global: !!($('jvorl-global') && $('jvorl-global').checked)
+                })
+            }).then(function (r) { return r.json(); })
+              .then(function (d) {
+                    if (!d || d.ok === false) throw new Error((d && (d.error || d.detail)) || 'Fehler');
+                    Manager.editVorlage(null, false);
+                    Manager.loadVorlagen();
+                    setStatus('jvorl-status', t('jvorl.saved', '✓ Gespeichert'), 'ok');
+              })
+              .catch(function (e) { setStatus('jvorl-status', e.message, 'error'); });
+        },
+
+        deleteVorlage: function (v) {
+            if (!confirm(t('jvorl.del_ask', 'Vorlage „{name}“ wirklich löschen?',
+                           { name: v.name || '' }))) return;
+            fetch('/api/jira/assist/vorlagen/' + encodeURIComponent(v.id || ''), {
+                method: 'DELETE', headers: authHeaders()
+            }).then(function (r) { return r.json(); })
+              .then(function (d) {
+                    if (!d || d.ok === false) throw new Error((d && (d.error || d.detail)) || 'Fehler');
+                    if (Manager._vorlBearbeitet === v.id) Manager.editVorlage(null, false);
+                    Manager.loadVorlagen();
+                    setStatus('jvorl-status', t('jvorl.deleted', '✓ Gelöscht'), 'ok');
+              })
+              .catch(function (e) { setStatus('jvorl-status', e.message, 'error'); });
         },
 
         search: function () {

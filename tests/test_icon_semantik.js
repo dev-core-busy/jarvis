@@ -113,17 +113,30 @@ pruefe('mindestens 15 Module benutzen das zentrale Modul', NUTZER.length >= 15, 
 
 abschnitt('3 – DIE REGEL: Loesch-Beschriftung ⇒ Muelleimer, nie ×');
 
+// Reine Kommentarzeile – JS (`//`, `/*`, Fortsetzung `*`) und HTML (`<!--`).
+// Bewusst NUR der Zeilenanfang: was danach kommt, kann Code sein.
+const NUR_KOMMENTAR = /^\s*(\/\/|\/\*|\*(?!\/)|\*\/|<!--)/;
+
 const verstoesse = [];
 for (const p of UI) {
     if (p.endsWith('icons.js') || rel(p).startsWith('tests')) continue;
     const zeilen = fs.readFileSync(p, 'utf8').split('\n');
     zeilen.forEach((z, i) => {
         if (!KREUZE.test(z)) return;
+        // Eine reine KOMMENTARZEILE ist kein Bedienelement. Ohne diese Zeile
+        // meldet der Waechter ausgerechnet die Begruendung als Verstoss, die
+        // NEBEN einem korrekten Muelleimer erklaert, warum dort kein × steht –
+        // derselbe Fall wie oben, nur in der Gegenrichtung: falscher Alarm
+        // statt blinder Fleck.
+        if (NUR_KOMMENTAR.test(z)) return;
         // FENSTER statt Einzelzeile: ein Knopf wird regelmaessig ueber mehrere
         // Zeilen zusammengesetzt ('<button …' + title + '">×</button>'). Die
         // zeilenweise Pruefung sah weder das `<button` noch die Beschriftung
         // und liess `tracks.js` durch (gemeldet 2026-08-19).
-        const fenster = zeilen.slice(Math.max(0, i - 3), i + 2).join('\n');
+        // Kommentarzeilen im Fenster werden geleert – weder das Symbol noch das
+        // Loeschwort darf aus einer Erklaerung stammen.
+        const fenster = zeilen.slice(Math.max(0, i - 3), i + 2)
+            .map((f) => (NUR_KOMMENTAR.test(f) ? '' : f)).join('\n');
         if (AUSNAHMEN.some((a) => a.test(fenster))) return;
         if (!/<button|textContent|innerHTML|icon:\s*['"]/.test(fenster)) return;
         if (!LOESCHWORT.test(fenster)) return;

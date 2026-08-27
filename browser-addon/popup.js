@@ -91,8 +91,23 @@ async function frage(nachricht) {
  *
  * Ohne Branding bleibt alles wie eingebaut; ein Fehlschlag aendert nichts.
  */
+/* DIE VORGABE AUS DEM PAKET ist der erste Anlauf, der Rueckfall der zweite.
+ *
+ * Gemeldet: "das Branding beim Login ist noch falsch". Zu Recht – die Marke kam
+ * bis dahin AUSSCHLIESSLICH aus `/api/branding`, und der Abruf braucht eine
+ * Adresse. Beim allerersten Oeffnen ist keine hinterlegt: die Anmeldemaske, das
+ * erste, was jemand sieht, zeigte den eingebauten Namen.
+ * Der Server traegt die Marke deshalb beim Bauen des ZIP ins Fenster ein
+ * (jira_assist._popup_gebrandet). Ist das Feld leer – Paket aus bauen.sh, oder
+ * gar kein Branding eingerichtet –, bleibt alles wie vorher.
+ */
+function _vorgabeMarke() {
+    const m = document.querySelector('meta[name="marke"]');
+    return ((m && m.content) || "").trim();
+}
+
 // Der Rueckfall, solange keine Marke bekannt ist.
-let _marke = "Jarvis";
+let _marke = _vorgabeMarke() || "Jarvis";
 
 /** Ersetzt {marke} ueberall im Fenster – und MUSS auch ohne Branding laufen.
  *
@@ -178,6 +193,18 @@ async function brandingHolen(basis) {
         setzeBranding(a.daten);
     } catch (e) { /* ohne Branding bleibt das eingebaute Aussehen */ }
 }
+
+/* Farbe und Logo kennt nur der Server – die stehen also erst, wenn eine Adresse
+ * da ist. Sobald sie eingetippt IST, gibt es keinen Grund, damit bis nach dem
+ * Anmelden zu warten: `/api/branding` haengt an keiner Anmeldung.
+ * Bewusst am `change` (also nach dem Verlassen des Feldes) und nur bei einer
+ * plausiblen https-Adresse – jeder Tastendruck waere ein Netzaufruf, und ein
+ * halb getippter Name wuerde als Adresse gespeichert.
+ */
+el.basis.addEventListener("change", () => {
+    const b = (el.basis.value || "").trim();
+    if (/^https:\/\/[^\s/]+\.[^\s/]+/i.test(b)) brandingHolen(b);
+});
 
 // ── Ticketnummer aus dem offenen Tab ────────────────────────────────────────
 /** Liest die Ticketnummer aus der URL – NICHT aus dem Seiteninhalt.

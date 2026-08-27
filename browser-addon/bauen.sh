@@ -9,6 +9,12 @@
 # Gepackt wird mit Python statt `zip`: das Werkzeug fehlt auf schlanken
 # Installationen (hier beim ersten Lauf genau so passiert), python3 ist wegen
 # des Backends ohnehin Voraussetzung.
+#
+# ⚠ DIESER WEG BRANDET NICHT. Marke im Manifest und im Fenster setzt der SERVER
+# beim Abruf ueber /api/jira/assist/paket (jira_assist.paket_bauen) – hier gibt
+# es keine Konfiguration, aus der er sie nehmen koennte. Das Paket von hier
+# heisst deshalb wie im Repo; zum Verteilen ist das ueber die Kachel geholte das
+# richtige.
 set -euo pipefail
 
 HIER="$(cd "$(dirname "$0")" && pwd)"

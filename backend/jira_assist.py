@@ -506,6 +506,36 @@ def _manifest_gebrandet(roh: str) -> str:
     return json.dumps(m, ensure_ascii=False, indent=2)
 
 
+def _popup_gebrandet(roh: str) -> str:
+    """Traegt die Marke als VORGABE in das Fenster der Erweiterung ein.
+
+    WARUM DAS NOETIG IST (gemeldet 2026-08-27: "das Branding beim Login ist noch
+    falsch"): das Fenster holt seine Marke aus ``/api/branding`` – und dafuer
+    braucht es eine Serveradresse. Beim allerersten Oeffnen ist keine
+    hinterlegt, das Fenster kann also gar nicht fragen und zeigt auf der
+    ANMELDEMASKE den eingebauten Rueckfall. Das ist genau der Moment, in dem
+    jemand zum ersten Mal hinsieht. Das Paket ist ohnehin pro Installation
+    verschieden (siehe ``_manifest_gebrandet``) – dann darf auch die Marke darin
+    stehen.
+
+    Der Name ist Fremdeingabe aus dem Branding-Formular und wird deshalb
+    HTML-attributsicher eingesetzt: ein Anfuehrungszeichen im Firmennamen wuerde
+    das Attribut sonst schliessen und Markup einschleusen. Gleiche Haltung wie
+    beim Manifest (dort ``json.dumps``), nur fuer HTML.
+
+    Fail-safe: fehlt das Feld, bleibt die Datei unveraendert – die Marke kommt
+    dann wie bisher beim ersten Serverabruf.
+    """
+    import html  # noqa: PLC0415
+
+    def ersetzen(m):
+        return "%s%s%s" % (m.group(1), html.escape(markenname(), quote=True),
+                           m.group(3))
+
+    return re.sub(r'(<meta\s+name="marke"\s+content=")([^"]*)(")', ersetzen,
+                  roh, count=1)
+
+
 def paket_bauen(variante: str) -> tuple:
     """``(dateiname, bytes)`` – die Erweiterung als ZIP.
 
@@ -538,6 +568,12 @@ def paket_bauen(variante: str) -> tuple:
         z.writestr("manifest.json", _manifest_gebrandet(
             (wurzel / manifest).read_text(encoding="utf-8")))
         for d in PAKET_DATEIEN:
+            if d == "popup.html":
+                # Die Marke gehoert schon VOR den ersten Serverabruf ins
+                # Fenster – sonst steht sie auf der Anmeldemaske nicht.
+                z.writestr(d, _popup_gebrandet(
+                    (wurzel / d).read_text(encoding="utf-8")))
+                continue
             z.writestr(d, (wurzel / d).read_bytes())
         for s in symbole:
             z.writestr("icons/" + s.name, s.read_bytes())

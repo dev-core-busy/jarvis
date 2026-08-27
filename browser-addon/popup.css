@@ -4,6 +4,12 @@
  * Zumutung, und die Projektkonvention "keine hardcoded Farben" zielt genau auf
  * dieses Problem. `color-scheme` ueberlaesst dem Browser Scrollbalken und
  * Formularfelder.
+ *
+ * ⚠ DIESE DATEI GESTALTET NUR NOCH DIE ANMELDUNG. Die Arbeitsflaeche sitzt seit
+ * dem Panel-Umbau in der Jira-Seite und bringt ihre Gestaltung selbst mit
+ * (`panel.js`, Zeichenkette `STIL`) – sie muss in einen Shadow DOM, und dorthin
+ * reicht keine Stildatei. Die gemeinsamen Werte (Akzent-Rueckfall, Systemthema)
+ * stehen deshalb an beiden Orten; ein Test vergleicht sie.
  */
 :root {
   color-scheme: light dark;
@@ -24,6 +30,14 @@
 
 * { box-sizing: border-box; }
 
+/* ⚠ EINE AUTOREN-REGEL SCHLAEGT DAS `hidden`-ATTRIBUT. `.feld { display: block }`
+ * ueberstimmt das `display: none` des Browsers – gemessen im echten Chrome: die
+ * Zeile "Fuer alle Benutzer (Administrator)" stand trotz `hidden` da, obwohl
+ * der Benutzer kein Administrator ist. Dieselbe Falle wie `.sp-row[hidden]` im
+ * Hauptprojekt (Register). Die Regel gilt fuer ALLES, nicht nur fuer den einen
+ * Fall, damit der naechste versteckte Kasten nicht wieder auffaellt. */
+[hidden] { display: none !important; }
+
 body {
   width: 380px;
   margin: 0;
@@ -41,9 +55,8 @@ body {
   padding-bottom: 8px;
   border-bottom: 1px solid var(--rand);
 }
-/* Die Marke darf schrumpfen, der Abmelden-Knopf nicht: sonst schiebt eine
- * lange Ticketnummer den Knopf aus dem 380 px breiten Fenster (gemessen mit
- * NXKS-17559 – er war abgeschnitten und das Fenster horizontal scrollbar). */
+/* Die Marke darf schrumpfen, der Abmelden-Knopf nicht: sonst schiebt ein
+ * langer Markenname den Knopf aus dem 380 px breiten Fenster. */
 .marke {
   font-weight: 600;
   min-width: 0;
@@ -51,8 +64,7 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.kopf > button { flex: 0 0 auto; }
-.ticket { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; }
+.kopf > button { flex: 0 0 auto; margin-left: auto; }
 /* Das Logo kommt vom Server und hat unbekannte Masse – die Hoehe begrenzt,
  * das Seitenverhaeltnis bleibt. Ohne max-width sprengt ein breites
  * Wort-Bild-Logo die 380 px des Fensters. */
@@ -62,18 +74,12 @@ body {
   object-fit: contain;
   flex-shrink: 0;
 }
-.ticket {
-  margin-left: auto;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--gedaempft);
-}
-.kopf .leise { margin-left: 0; }
 
 .feld { display: block; margin-bottom: 8px; }
 .feld > span { display: block; margin-bottom: 3px; font-size: 12px; color: var(--gedaempft); }
 .feld em { font-style: normal; opacity: .75; }
 
-input, textarea {
+input {
   width: 100%;
   padding: 6px 8px;
   border: 1px solid var(--rand);
@@ -82,21 +88,7 @@ input, textarea {
   color: var(--schrift);
   font: inherit;
 }
-
-/* ⚠ `width: 100%` trifft sonst auch das Kästchen. Ein 100 % breites
- * Kontrollkästchen schiebt seine Beschriftung in die nächste Zeile und sieht
- * aus wie ein Eingabefeld – im Screenshot sofort zu sehen, in der Messung
- * nicht. Dieselbe Falle wie `.input-group` im Hauptprojekt (Register). */
-input[type="checkbox"], input[type="radio"] {
-  width: auto;
-  margin-right: 6px;
-  vertical-align: middle;
-}
-textarea { resize: vertical; min-height: 120px; font-size: 12.5px; }
-input:focus-visible, textarea:focus-visible {
-  outline: 2px solid var(--akzent);
-  outline-offset: 1px;
-}
+input:focus-visible { outline: 2px solid var(--akzent); outline-offset: 1px; }
 
 button {
   padding: 6px 10px;
@@ -109,27 +101,27 @@ button {
 }
 button:hover:not(:disabled) { border-color: var(--akzent); }
 button:disabled { opacity: .5; cursor: default; }
-button.haupt { background: var(--akzent); border-color: var(--akzent); color: var(--akzent-schrift); }
+button.haupt {
+  width: 100%;
+  background: var(--akzent);
+  border-color: var(--akzent);
+  color: var(--akzent-schrift);
+}
 button.haupt:hover:not(:disabled) {
   background: var(--akzent-hover);
   border-color: var(--akzent-hover);
 }
 button.leise { color: var(--gedaempft); }
 
-/* `wrap`: „Ins Kommentarfeld einfügen“ neben „Kopieren“ passt bei 380 px
- * nicht in eine Zeile – ohne Umbruch ragt der zweite Knopf hinaus. */
-.knopfreihe { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
-/* Ohne das fressen die Knoepfe in einer Flex-Zeile die ganze Breite bzw.
- * schrumpfen ungleich – dieselbe Falle wie bei .btn-primary im Hauptprojekt. */
-.knopfreihe > button { flex: 1 1 auto; }
-.knopfreihe > button.leise { flex: 0 0 auto; }
-
-.hinweis, .fussnote {
+.hinweis {
   margin: -2px 0 8px;
   font-size: 11.5px;
   color: var(--gedaempft);
 }
-.fussnote { margin: 4px 0 0; }
+
+/* Der Zustand steht als TEXT da, nicht nur als Farbe – eine reine
+ * Farbcodierung ist keine Information (Projektregel). */
+.bereit { margin: 0 0 6px; font-weight: 600; }
 
 /* Meldungen tragen ihre Aussage doppelt – Farbe UND Text. Eine reine
  * Farbcodierung ist keine Information (Projektregel). */
@@ -142,61 +134,3 @@ button.leise { color: var(--gedaempft); }
   white-space: pre-wrap;
 }
 .meldung.arbeitet { background: transparent; color: var(--gedaempft); }
-
-/* Rückfrage-Kasten. Deckende Fläche und Akzentkante: er trägt eine Warnung,
- * die nicht wie Fließtext aussehen darf. */
-.ja-nein {
-  margin-top: 10px;
-  padding: 10px;
-  border: 1px solid var(--akzent);
-  border-radius: 6px;
-  background: var(--warn);
-}
-.ja-nein p { margin: 0 0 8px; }
-.ja-nein .knopfreihe { margin: 0; }
-
-/* ── Vorlagen ─────────────────────────────────────────────────────────── */
-/* Feld plus Symbolknopf in einer Zeile. `min-width: 0` ist Pflicht: ein
- * Flex-Kind schrumpft sonst nicht unter seine Inhaltsbreite und schiebt das
- * Zahnrad aus dem 380 px breiten Fenster. */
-.feld-zeile { display: flex; align-items: center; gap: 6px; }
-.feld-zeile select { flex: 1 1 auto; min-width: 0; }
-
-select {
-  padding: 6px 8px;
-  border: 1px solid var(--rand);
-  border-radius: 5px;
-  background: var(--grund);
-  color: var(--schrift);
-  font: inherit;
-}
-
-button.ico {
-  flex: 0 0 auto;
-  padding: 4px 7px;
-  line-height: 1;
-}
-
-#vorlagen-box {
-  margin: 10px 0 0;
-  padding: 10px;
-  border: 1px solid var(--rand);
-  border-radius: 6px;
-}
-.vorl-kopf {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-}
-.vorl-liste { list-style: none; margin: 0 0 10px; padding: 0; }
-.vorl-liste li {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 0;
-  border-bottom: 1px solid var(--rand);
-}
-.vorl-liste li:last-child { border-bottom: 0; }
-/* Der Name nimmt den Platz, die Knöpfe bleiben rechts. */
-.vorl-liste li > span { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }

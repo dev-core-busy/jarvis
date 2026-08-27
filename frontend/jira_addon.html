@@ -58,7 +58,7 @@
 
     <section class="ja-card">
         <h2 data-i18n="jaddon.what_h">Was die Erweiterung tut</h2>
-        <p data-i18n="jaddon.what_p">Wer ein Jira-Ticket im Browser offen hat, bekommt über ein Symbol in der Symbolleiste eine Zusammenfassung des Vorgangs und auf Wunsch einen Vorschlag für die Antwort an den Melder. Der Vorschlag lässt sich mit einem Klick ins Kommentarfeld einfügen.</p>
+        <p data-i18n="jaddon.what_p">Wer ein Jira-Ticket im Browser offen hat, bekommt über ein Symbol in der Symbolleiste eine Zusammenfassung des Vorgangs und auf Wunsch einen Vorschlag für die Antwort an den Melder. Der Vorschlag lässt sich mit einem Klick ins Kommentarfeld einfügen. Der Assistent öffnet sich als Fenster rechts in der Jira-Seite und bleibt dort stehen, während du weiterarbeitest.</p>
         <p class="ja-merk" data-i18n="jaddon.what_note">Abgeschickt wird in Jira, von Hand. {marke} schreibt nichts in ein Ticket.</p>
     </section>
 
@@ -106,20 +106,22 @@
             <li data-i18n-html="jaddon.setup_3">Mit den eigenen {marke}-Zugangsdaten anmelden. Wer eine Zwei-Faktor-App eingerichtet hat, trägt zusätzlich den Code ein.</li>
             <li data-i18n-html="jaddon.setup_4">Der Browser fragt einmalig nach der Erlaubnis, auf diese Adresse zuzugreifen. Ohne diese Erlaubnis erreicht die Erweiterung den Server nicht.</li>
         </ol>
-        <p class="ja-hint" data-i18n="jaddon.setup_note">Die Anmeldung gilt bis zum Schließen des Browsers. Das ist Absicht: das Zugangstoken wird bewusst nicht dauerhaft gespeichert.</p>
+        <p class="ja-hint" data-i18n="jaddon.setup_note">Die Anmeldung bleibt bestehen, bis du dich abmeldest oder sie am Server abläuft – ein Neustart des Browsers beendet sie nicht. Danach zeigt derselbe Knopf wieder die Anmeldemaske.</p>
     </section>
 
     <section class="ja-card">
         <h2 data-i18n="jaddon.use_h">4. Benutzen</h2>
         <ol class="ja-steps">
             <li data-i18n-html="jaddon.use_1">Ein Jira-Ticket öffnen, sodass die Ticketnummer in der Adresszeile steht (<code>…/browse/ABC-1234</code>).</li>
-            <li data-i18n-html="jaddon.use_2">Auf das Symbol klicken. Oben rechts im Fenster steht die erkannte Ticketnummer – steht dort nichts, ist der Tab kein Ticket.</li>
+            <li data-i18n-html="jaddon.use_2">Auf das Symbol klicken. Der Assistent erscheint <b>rechts in der Jira-Seite</b> und bleibt dort stehen. In seiner Kopfzeile steht die erkannte Ticketnummer – steht dort nichts, ist der Tab kein Ticket.</li>
             <li data-i18n-html="jaddon.use_3"><b>Zusammenfassen</b> gibt einen Überblick: worum es geht, was bisher passiert ist, woran es hängt und was offen bleibt.</li>
             <li data-i18n-html="jaddon.use_4"><b>Antwort vorschlagen</b> formuliert einen Entwurf an den Melder. Im Feld <b>Zusatzwunsch</b> lassen sich Vorgaben ergänzen, etwa „kurz halten“ oder „auf Englisch“.</li>
-            <li data-i18n-html="jaddon.use_5">Der Text im Fenster ist <b>bearbeitbar</b>. Erst danach <b>Ins Kommentarfeld einfügen</b> – oder <b>Kopieren</b>, wenn das Kommentarfeld nicht gefunden wird.</li>
+            <li data-i18n-html="jaddon.use_5">Der Text im Fenster ist <b>bearbeitbar</b>. Erst danach <b>Ins Kommentarfeld einfügen</b> – oder <b>Kopieren</b>, wenn das Kommentarfeld nicht gefunden wird. Tipp: einmal ins Jira-Kommentarfeld klicken, bevor du einfügst – dann landet der Text genau dort.</li>
             <li data-i18n-html="jaddon.use_6">Abgeschickt wird in Jira, von Hand.</li>
+            <li data-i18n-html="jaddon.use_7">Das Fenster schließt du über das <b>×</b> in seiner Kopfzeile oder durch einen erneuten Klick auf das Symbol.</li>
         </ol>
-        <p class="ja-hint" data-i18n="jaddon.use_note">Eine Auswertung dauert je nach Länge des Tickets einige Sekunden. Solange muss das Fenster offen bleiben – ein Klick daneben schließt es und bricht die Auswertung ab.</p>
+        <p class="ja-hint" data-i18n="jaddon.use_note">Eine Auswertung dauert je nach Länge des Tickets einige Sekunden. Das Fenster bleibt dabei stehen – du kannst danebenklicken, den Tab wechseln oder in Jira weiterarbeiten. Nur ein Neuladen der Seite blendet es aus; das Ergebnis ist nach einem Klick auf das Symbol wieder da.</p>
+        <p class="ja-warn" data-i18n-html="jaddon.use_warn"><b>Wechselst du bei geöffnetem Fenster das Ticket</b>, erscheint eine Warnung mit beiden Nummern: der angezeigte Text gehört dann noch zum vorherigen Vorgang. Vor dem Einfügen wird ausdrücklich zurückgefragt – der Text geht am Ende an einen Kunden.</p>
     </section>
 
     <section class="ja-card">
@@ -141,6 +143,8 @@
             <dd data-i18n-html="jaddon.tr2_a">Der Zugriff ist eine eigene Freigabe. Die Administration trägt das Konto unter <i>Einstellungen → Sicherheit → Berechtigungen → Jira-Assistent</i> ein.</dd>
             <dt data-i18n="jaddon.tr3_q">„Kein Kommentarfeld gefunden“</dt>
             <dd data-i18n-html="jaddon.tr3_a">In Jira zuerst das Kommentarfeld öffnen, dann erneut einfügen. Hilft das nicht, <b>Kopieren</b> benutzen und den Text von Hand einsetzen.</dd>
+            <dt data-i18n="jaddon.tr5_q">Das Fenster ist plötzlich verschwunden</dt>
+            <dd data-i18n-html="jaddon.tr5_a">Das Fenster gehört zur geöffneten Seite. Wird die Seite neu geladen – in Jira Server passiert das beim Wechsel auf ein anderes Ticket oft –, ist es weg. Ein Klick auf das Symbol holt es zurück, <b>samt dem letzten Ergebnis</b>.</dd>
             <dt data-i18n="jaddon.tr4_q">„Kein Jira-Ticket in diesem Tab“</dt>
             <dd data-i18n-html="jaddon.tr4_a">Die Ticketnummer wird aus der Adresszeile gelesen. In der Board-Ansicht das Ticket zuerst öffnen, sodass <code>…/browse/ABC-1234</code> in der Adresszeile steht.</dd>
         </dl>
@@ -151,13 +155,13 @@
 <script src="/static/js/icons.js?v=1"></script>
 <script src="/static/js/cpubar.js?v=1"></script>
 <script src="/static/js/theme.js?v=3"></script>
-<script src="/static/js/i18n.js?v=182"></script>
+<script src="/static/js/i18n.js?v=183"></script>
 <script src="/static/js/branding.js?v=25"></script>
 <script src="/static/js/sessions.js?v=8"></script>
 <script src="/static/js/logo_home.js?v=1"></script>
 <script src="/static/js/settings_btn.js?v=3"></script>
 <script src="/static/js/activity.js?v=2"></script>
 <script src="/static/js/issues.js?v=7"></script>
-<script src="/static/js/jira_addon.js?v=1"></script>
+<script src="/static/js/jira_addon.js?v=2"></script>
 </body>
 </html>

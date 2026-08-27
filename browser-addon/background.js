@@ -14,9 +14,23 @@
  * Das Popup waere als Extension-Page zwar ebenfalls privilegiert, ist aber der
  * falsche Ort: es schliesst sich, sobald der Benutzer daneben klickt, und
  * nimmt einen laufenden Aufruf mit. Eine Auswertung dauert rund 13 Sekunden.
+ * Aus demselben Grund sitzt die Arbeitsoberflaeche seit dem Panel-Umbau IN der
+ * Jira-Seite (`panel.js`) und nicht mehr im Popup.
  */
 
 const api = (typeof browser !== "undefined") ? browser : chrome;
+
+/* `einfuegen.js` wird hier gebraucht, um `einfuegenUeberEditorApi` per
+ * `executeScript({func})` in die SEITENWELT nachzuschieben.
+ *
+ * ⚠ ZWEI HINTERGRUENDE, ZWEI LADEWEGE: Chrome laeuft als Service Worker und
+ * kennt `importScripts`; Firefox laeuft als Event Page (ein Fenster-Kontext,
+ * KEIN Worker) und hat es nicht – dort steht die Datei als erster Eintrag in
+ * `background.scripts` und ist beim Auswerten dieser Zeile schon geladen. Ein
+ * bedingungsloses `importScripts` waere in Firefox ein ReferenceError beim
+ * Start, und der Hintergrund liefe gar nicht an.
+ */
+if (typeof importScripts === "function") importScripts("einfuegen.js");
 
 // Serveradresse steht NICHT im Manifest, sondern in den Einstellungen.
 // Grund: eine Firefox-Erweiterung muss von Mozilla signiert sein, auch die
@@ -55,7 +69,76 @@ async function tokenLesen() {
 
 async function sitzungSchreiben(wert) {
   await api.storage.local.set({ [SITZUNG]: wert || {} });
+  await popupNachziehen();
 }
+
+/* ── Was ein Klick auf das Symbol tut, haengt an der Anmeldung ──────────────
+ *
+ * ANGEMELDET: kein Popup (`setPopup("")`) – dann feuert `action.onClicked`, und
+ * der Klick injiziert das Panel in die Jira-Seite. Genau das ist der Umbau: das
+ * Fenster ueberlebt den Tabwechsel, weil es zur Seite gehoert.
+ *
+ * NICHT ANGEMELDET: `popup.html` – Anmeldung und Einrichtung bleiben eine
+ * Extension-Seite. Ein Anmeldeformular IN einer fremden Seite waere die
+ * schlechtere Wahl: dort tippt der Benutzer sein Kennwort in ein Formular, das
+ * optisch im Jira steht.
+ *
+ * ⚠ Das ist zugleich der EINZIGE Weg zurueck zum Anmeldefenster. Wer abmeldet
+ * oder dessen Token mit 401 verfaellt, muss beim naechsten Klick wieder die
+ * Maske sehen – deshalb haengt der Aufruf in `sitzungSchreiben()` und damit an
+ * JEDER Aenderung der Sitzung, statt an den einzelnen Stellen.
+ *
+ * Der Aufruf steht ausserdem im Modulrumpf: ein Service Worker wird beendet und
+ * neu gestartet, und nach einem Browser-Neustart gilt wieder der Wert aus dem
+ * Manifest (`popup.html`). Ohne das Nachziehen bei jedem Start saehe ein
+ * laengst angemeldeter Benutzer wieder die Anmeldemaske.
+ */
+async function popupNachziehen() {
+  try {
+    const t = await tokenLesen();
+    await api.action.setPopup({ popup: t ? "" : "popup.html" });
+  } catch (e) {
+    // Kann eine alte Browserfassung nicht umschalten, bleibt es beim Popup –
+    // das ist der funktionierende Zustand von vorher, nicht ein kaputter.
+  }
+}
+popupNachziehen();
+
+/* Der Klick auf das Symbol – nur erreichbar, wenn kein Popup gesetzt ist.
+ *
+ * `activeTab` gibt genau hier das Zugriffsrecht auf den offenen Tab, und nur
+ * fuer diesen. Deshalb gibt es KEIN dauerhaftes Content-Script: das verlangte
+ * bei der Installation "Alle deine Daten auf allen Websites lesen und aendern".
+ *
+ * `einfuegen.js` MUSS mitinjiziert werden – das Panel ruft `einfuegenInJira`
+ * direkt auf, statt es aus der Ferne zu serialisieren.
+ */
+api.action.onClicked.addListener(async (tab) => {
+  if (!tab || tab.id === undefined || tab.id === null) return;
+  try {
+    await api.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ["einfuegen.js", "panel.js"],
+    });
+    await api.action.setBadgeText({ tabId: tab.id, text: "" });
+    await api.action.setTitle({ tabId: tab.id, title: "" });   // zurueck zur Vorgabe
+  } catch (e) {
+    /* Haeufigster Fall: eine Seite, in die der Browser nicht injizieren laesst
+     * (Browser-interne Seiten, PDF-Ansicht, der Web Store). Es gibt von hier
+     * aus keinen Weg, dem Benutzer ein Fenster zu zeigen – ein Klick, der
+     * WORTLOS nichts tut, waere aber das Schlimmste. Also Abzeichen plus
+     * Beschriftung, die den Grund nennt. */
+    const grund = (e && e.message) || String(e);
+    try {
+      await api.action.setBadgeText({ tabId: tab.id, text: "!" });
+      await api.action.setTitle({
+        tabId: tab.id,
+        title: "Auf dieser Seite kann der Assistent nicht geöffnet werden "
+             + "(" + grund + "). Öffne ein Jira-Ticket.",
+      });
+    } catch (e2) { /* dann bleibt es beim stillen Fehlschlag */ }
+  }
+});
 
 /* Das letzte Ergebnis ueberlebt das Schliessen des Fensters.
  *
@@ -186,8 +269,34 @@ async function anmelden({ basis, benutzer, kennwort, totp }) {
   return { ok: true, benutzer, erlaubt, hinweis };
 }
 
-// ── Nachrichten aus dem Popup ───────────────────────────────────────────────
-api.runtime.onMessage.addListener((nachricht, _absender, antworten) => {
+/** Zweiter Einfuege-Versuch – IM SEITENKONTEXT (`world: "MAIN"`).
+ *
+ * Das Panel kann das nicht selbst: es laeuft in der isolierten Welt und sieht
+ * `window.tinymce` der Seite nicht. Nur der Hintergrund darf `executeScript`
+ * rufen, also faehrt der Weg hier durch.
+ *
+ * ⚠ DIE TAB-KENNUNG KOMMT AUS DEM ABSENDER, NIE AUS DER NACHRICHT. Sonst waere
+ * die Nachricht ein Weg, in einen BELIEBIGEN offenen Tab zu schreiben – und
+ * eine Nachricht kann aus jeder Seite kommen, in der das Panel steckt.
+ */
+async function editorApi(nachricht, absender) {
+  const tabId = absender && absender.tab && absender.tab.id;
+  if (tabId === undefined || tabId === null) {
+    throw new Error("Kein Tab zur Anfrage bekannt.");
+  }
+  const fn = (globalThis.__jvEinfuegen || {}).einfuegenUeberEditorApi;
+  if (!fn) throw new Error("Das Einfüge-Modul wurde nicht geladen.");
+  const treffer = await api.scripting.executeScript({
+    target: { tabId },
+    world: "MAIN",
+    func: fn,
+    args: [String(nachricht.text || "")],
+  });
+  return (treffer && treffer[0] && treffer[0].result) || { ok: false };
+}
+
+// ── Nachrichten aus dem Popup und aus dem Panel ─────────────────────────────
+api.runtime.onMessage.addListener((nachricht, absender, antworten) => {
   (async () => {
     try {
       switch (nachricht && nachricht.art) {
@@ -213,6 +322,9 @@ api.runtime.onMessage.addListener((nachricht, _absender, antworten) => {
         case "ergebnis_merken":
           await ergebnisSchreiben(nachricht.wert || null);
           antworten({ ok: true });
+          break;
+        case "editor_api":
+          antworten({ ok: true, daten: await editorApi(nachricht, absender) });
           break;
         case "branding": {
           // Die Adresse kann aus dem Formular kommen (noch nicht gespeichert),

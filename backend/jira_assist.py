@@ -435,7 +435,7 @@ async def auswerten(key: str, modus: str, user: str, lang: str = "de",
 # `bauen.sh` erzeugt dasselbe Paket fuer die Kommandozeile; ein Test vergleicht
 # beide Dateilisten.
 PAKET_DATEIEN = ("background.js", "popup.html", "popup.js", "popup.css",
-                 "einfuegen.js")
+                 "einfuegen.js", "panel.js")
 PAKET_VARIANTEN = {
     # Firefox kennt `background.service_worker` nicht und verlangt eine
     # Add-on-Kennung – deshalb zwei Manifeste, aber nur EIN Codestand.

@@ -26,7 +26,8 @@ hier = pathlib.Path(sys.argv[1])
 ziel = hier / "dist"
 ziel.mkdir(exist_ok=True)
 
-DATEIEN = ["background.js", "popup.html", "popup.js", "popup.css", "einfuegen.js"]
+DATEIEN = ["background.js", "popup.html", "popup.js", "popup.css", "einfuegen.js",
+           "panel.js"]
 ICONS = sorted((hier / "icons").glob("*.png"))
 
 fehlt = [d for d in DATEIEN if not (hier / d).exists()]

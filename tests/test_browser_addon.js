@@ -4,7 +4,8 @@
  * Zwei Teile:
  *  1. Struktur und Regeln – Manifeste, Rechte-Zuschnitt, Feldnamen, und die
  *     Frage, wo gefetcht werden darf (das ist unter MV3 keine Stilfrage).
- *  2. Das Einfuegen wird gegen ein nachgebautes Jira-DOM WIRKLICH AUSGEFUEHRT.
+ *  2. Das PANEL und das Einfuegen werden gegen ein nachgebautes Jira-DOM
+ *     WIRKLICH AUSGEFUEHRT.
  *     Ein Quelltext-Test wuerde hier nichts belegen: die Funktion wird von
  *     scripting.executeScript serialisiert und in fremdem Kontext neu
  *     ausgewertet – ob sie das ueberlebt, sieht man nur, wenn man es tut.
@@ -17,7 +18,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const { JSDOM } = require("jsdom");
+const { JSDOM, VirtualConsole } = require("jsdom");
 
 const WURZEL = path.resolve(__dirname, "..");
 const ADDON = path.join(WURZEL, "browser-addon");
@@ -44,6 +45,8 @@ const BG = lies("background.js");
 const POPUP_JS = lies("popup.js");
 const POPUP_HTML = lies("popup.html");
 const EINFUEGEN = lies("einfuegen.js");
+const PANEL = lies("panel.js");
+const BAUEN = lies("bauen.sh");
 
 // ═══════════════════════════════════════════════════════════════════════════
 section("1) Manifeste: eine Erweiterung, zwei Bauformen");
@@ -104,6 +107,12 @@ check(!/\bfetch\s*\(/.test(ohneKommentare(POPUP_JS)),
       "popup.js fetcht NICHT (sonst schliesst das Popup den Aufruf mit sich)");
 check(!/\bfetch\s*\(/.test(ohneKommentare(EINFUEGEN)),
       "das injizierte Skript fetcht NICHT (dort gilt CORS der Jira-Seite)");
+// Das Panel sitzt IN der Jira-Seite – fuer es gilt dieselbe CORS-Regel. Und es
+// darf sich seine Gestaltung auch nicht per fetch(runtime.getURL(...)) holen.
+check(!/\bfetch\s*\(/.test(ohneKommentare(PANEL)),
+      "panel.js fetcht NICHT (es laeuft im Ursprung der Jira-Seite)");
+check(/runtime\.sendMessage/.test(ohneKommentare(PANEL)),
+      "panel.js spricht ueber runtime.sendMessage mit dem Hintergrund");
 check(/credentials:\s*["']omit["']/.test(BG),
       "keine Cookies – Jarvis authentifiziert per Bearer-Header");
 
@@ -148,16 +157,39 @@ check(/case "abmelden"[\s\S]{0,320}ergebnisSchreiben\(null\)/.test(bgOhne),
       "beim Abmelden geht es mit (es enthaelt Ticketinhalte)");
 
 // ═══════════════════════════════════════════════════════════════════════════
-section("5) Die injizierte Funktion ist SELBSTSTAENDIG");
+section("5) einfuegen.js: klassisches Skript, selbststaendige Funktionen");
 // ═══════════════════════════════════════════════════════════════════════════
-// scripting.executeScript serialisiert sie per toString und wertet sie in der
-// Seite neu aus. Jede Referenz nach draussen wird dort zu einem ReferenceError,
-// der im Popup als "Einfuegen fehlgeschlagen" ankommt.
-const koerper = EINFUEGEN.slice(EINFUEGEN.indexOf("export function einfuegenInJira"));
-check(!/\bimport\b/.test(koerper), "kein import in der Funktion");
-for (const fremd of ["api.", "chrome.", "browser.", "$(", "frage(", "melde("]) {
-  check(!koerper.includes(fremd),
-        "keine Referenz auf '" + fremd + "' (Modul-Scope)");
+/* Die Datei wird an ZWEI Orten geladen, und keiner davon kann ES-Module:
+ * per `executeScript({files})` in die Jira-Seite (injizierte Dateien sind immer
+ * klassische Skripte) und im Hintergrund (Chrome `importScripts`, Firefox als
+ * Eintrag in `background.scripts`). Ein `export` stirbt dort mit
+ * "Unexpected token 'export'" – und zwar BEVOR das Panel entsteht. */
+const einfOhne = ohneKommentare(EINFUEGEN);
+check(!/\bexport\s/.test(einfOhne),
+      "kein export (injizierte Dateien sind klassische Skripte)");
+check(!/\bimport\b/.test(einfOhne), "kein import");
+check(/globalThis\.__jvEinfuegen/.test(einfOhne),
+      "registriert sich in globalThis.__jvEinfuegen");
+
+/* `einfuegenUeberEditorApi` wird weiterhin per toString serialisiert und in der
+ * SEITENWELT neu ausgewertet. Jede Referenz nach draussen – auch auf den eigenen
+ * Namensraum – wird dort zu einem ReferenceError. */
+const zweitKoerper = einfOhne.slice(einfOhne.indexOf("function einfuegenUeberEditorApi"),
+                                    einfOhne.indexOf("raum.einfuegenInJira"));
+check(zweitKoerper.length > 200, "die serialisierte Funktion wurde gefunden",
+      "Laenge " + zweitKoerper.length);
+for (const fremd of ["api.", "chrome.", "browser.", "__jvEinfuegen", "raum.", "$("]) {
+  check(!zweitKoerper.includes(fremd),
+        "einfuegenUeberEditorApi ohne Referenz auf '" + fremd + "'");
+}
+
+/* Und die DOM-Suche darf keine Erweiterungs-API benutzen: sie laeuft in der
+ * Jira-Seite, dort gibt es weder Netzrecht noch Speicher der Erweiterung. */
+const ersterKoerper = einfOhne.slice(einfOhne.indexOf("function einfuegenInJira"),
+                                     einfOhne.indexOf("function einfuegenUeberEditorApi"));
+for (const fremd of ["api.", "chrome.", "browser.", "sendMessage"]) {
+  check(!ersterKoerper.includes(fremd),
+        "einfuegenInJira ohne Referenz auf '" + fremd + "'");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -166,13 +198,11 @@ section("6) Einfuegen gegen ein nachgebautes Jira – WIRKLICH ausgefuehrt");
 /* Die Funktion wird so geladen, wie der Browser sie sieht: als Quelltext, neu
  * ausgewertet. Damit wird zugleich belegt, dass die Serialisierung traegt. */
 function ladeEinfuegen(fenster) {
-  // /g – die Datei exportiert seit dem Editor-API-Weg ZWEI Funktionen. Ohne
-  // das globale Flag bleibt das zweite `export` stehen und der ganze Abschnitt
-  // stirbt mit "Unexpected token 'export'".
-  const quelle = EINFUEGEN.replace(/export function/g, "function");
-  const f = new fenster.Function(
-    quelle + "\nreturn einfuegenInJira;")();
-  return f;
+  // Genau wie der Browser sie laedt: als klassisches Skript, das sich selbst in
+  // `globalThis` registriert. Ein Nachbau der Funktion (Quelltext ausschneiden)
+  // wuerde beweisen, dass der AUSSCHNITT laeuft – nicht die Datei.
+  new fenster.Function(EINFUEGEN)();
+  return fenster.__jvEinfuegen.einfuegenInJira;
 }
 
 function mitDom(html, arbeit) {
@@ -377,7 +407,8 @@ check(/"colors":\s*cfg\.get\("colors"/.test(MAIN_SRC),
 // Rueckfall gehoert in EINE Variable, nicht in zwanzig Zeichenketten.
 for (const [datei, inhalt] of [['popup.html', POPUP_HTML],
                                ['background.js', BG],
-                               ['popup.js', POPUP_JS]]) {
+                               ['popup.js', POPUP_JS],
+                               ['panel.js', PANEL]]) {
   const sichtbar = ohneKommentare(inhalt)
       // Der Rueckfall selbst und der Elementinhalt der Kopfzeile sind erlaubt.
       .replace(/let _marke = "Jarvis";/, '')
@@ -479,57 +510,141 @@ section("6c) Einfuegen: fokussiertes Feld, Editor-API, Diagnose");
   const zweitQuelle = EINFUEGEN.slice(EINFUEGEN.indexOf("export function einfuegenUeberEditorApi"));
   check(!/document\.querySelectorAll\(/.test(zweitQuelle) || /tinymce/.test(zweitQuelle),
         "die zweite Funktion benutzt die Editor-API");
-  check(/world:\s*["']MAIN["']/.test(POPUP_JS),
-        'popup.js ruft sie mit world: "MAIN"');
-  check(/tinymce_moeglich/.test(POPUP_JS) && /tinymce_moeglich/.test(EINFUEGEN),
+  /* Rufen kann `executeScript` nur der Hintergrund – das Panel sitzt in der
+   * isolierten Welt und laesst den Weg deshalb dort nachschieben. */
+  check(/world:\s*["']MAIN["']/.test(BG),
+        'background.js schiebt sie mit world: "MAIN" nach');
+  check(/tinymce_moeglich/.test(PANEL) && /tinymce_moeglich/.test(EINFUEGEN),
         "und nur, wenn der erste Weg das nahelegt");
   // Die Diagnose muss beim Benutzer ankommen, nicht nur im Rueckgabewert.
-  check(/r\.gesehen/.test(POPUP_JS), "die Diagnose wird angezeigt");
+  check(/r\.gesehen/.test(PANEL), "die Diagnose wird angezeigt");
+
+  /* ⚠ DIE TAB-KENNUNG KOMMT AUS DEM ABSENDER, NIE AUS DER NACHRICHT. Eine
+   * Nachricht kann aus jeder Seite kommen, in der das Panel steckt – stuende
+   * die Kennung im Rumpf, waere sie ein Weg, in einen BELIEBIGEN offenen Tab zu
+   * schreiben. */
+  const editorFn = (bgOhne.match(/async function editorApi[\s\S]*?\n\}/) || [''])[0];
+  check(/absender[\s\S]{0,40}\.tab[\s\S]{0,20}\.id/.test(editorFn),
+        "die Tab-Kennung kommt aus dem Absender");
+  check(!/nachricht\.tab/.test(editorFn) && !/nachricht\.tabId/.test(editorFn),
+        "und NICHT aus der Nachricht");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-section("6d) Vorlagen und Ticketbezug");
+section("6d) Vorlagen und Ticketbezug (jetzt im Panel)");
 // ═══════════════════════════════════════════════════════════════════════════
 // Ein gemerkter Text zu Ticket A darf nicht unbemerkt in Ticket B landen –
 // er geht am Ende an einen Kunden.
-check(/_fremdesErgebnis/.test(POPUP_JS), "ein fremder Ticketbezug wird erkannt");
-check(/_fremdesErgebnis && !\(await frageJaNein\(\)\)/.test(POPUP_JS),
+const panelOhne = ohneKommentare(PANEL);
+check(/_fremdesErgebnis/.test(PANEL), "ein fremder Ticketbezug wird erkannt");
+check(/if \(_fremdesErgebnis\)[\s\S]{0,240}await frageJaNein/.test(PANEL),
       "und beim Einfuegen zurueckgefragt");
-check(!/\b(confirm|alert|prompt)\s*\(/.test(ohneKommentare(POPUP_JS)),
+check(!/\b(confirm|alert|prompt)\s*\(/.test(panelOhne),
       "die Rueckfrage ist ein eigener Dialog, kein confirm");
-check(/jn-nein"\)\.focus\(\)/.test(POPUP_JS),
+check(/jn-nein"\)\.focus\(\)/.test(PANEL),
       "der Fokus liegt auf Abbrechen (die gefaehrlichere Wahl loest kein Tastendruck aus)");
+
+/* NEU MIT DEM PANEL: es ueberlebt einen Wechsel innerhalb der Anwendung. Der
+ * Benutzer kann laengst bei Ticket B stehen, waehrend der Text zu A gehoert –
+ * deshalb wird die Adresse ueberwacht, und die Warnung ist eine STEHENDE Zeile
+ * und keine Meldung, die die naechste Aktion ueberschreibt. */
+check(/setInterval/.test(panelOhne), "die Adresse wird ueberwacht");
+check(/bezug-warnung/.test(PANEL) && /class="warnung"/.test(PANEL),
+      "die Bezugswarnung ist ein eigenes, stehendes Element");
+// `popstate` allein GENUEGT NICHT: eine Einzelseiten-Anwendung wechselt das
+// Ticket per pushState, und das feuert kein Ereignis.
+check(!/addEventListener\("popstate"/.test(panelOhne)
+      || /setInterval/.test(panelOhne),
+      "und nicht nur ueber popstate (pushState feuert keines)");
 
 // Die Vorlage gilt nur fuer die Zusammenfassung – bei einem Antwortvorschlag
 // waere sie eine zweite, widersprechende Aufgabe.
-check(/modus === "zusammenfassung"\) \? \(\$\("f-vorlage"\)/.test(POPUP_JS),
+check(/modus === "zusammenfassung"\) \? \(\$\("f-vorlage"\)/.test(PANEL),
       "die Vorlage geht nur bei der Zusammenfassung mit");
 // Namen sind Freitext aus einem Formular.
-check(!/innerHTML\s*=\s*[^;]*\bv\.name\b/.test(POPUP_JS),
+check(!/innerHTML\s*=\s*[^;]*\bv\.name\b/.test(PANEL),
       "Vorlagennamen gehen nicht durch innerHTML");
-check(/o\.textContent = v\.name/.test(POPUP_JS), "sondern durch textContent");
+check(/o\.textContent = v\.name/.test(PANEL), "sondern durch textContent");
 
 /* Drei Layout-Regeln, die NUR der Screenshot gezeigt hat. jsdom rechnet kein
  * Layout – geprüft wird deshalb die Regel, nicht das Ergebnis. Alle drei
  * ließen im 380 px breiten Fenster etwas herausragen, während die erste
  * Messung „kein Überlauf“ meldete: sie verglich Kinder mit ihren Eltern statt
  * das Dokument mit dem Viewport. */
-const cssRegel = (sel) => {
+const cssRegel = (quelle, sel) => {
   const m = new RegExp('(?:^|\\})\\s*' + sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-                       + '\\s*\\{([^}]*)\\}', 'm').exec(cssOhne);
+                       + '\\s*\\{([^}]*)\\}', 'm').exec(quelle);
   return m ? m[1] : '';
 };
-check(/width:\s*auto/.test(cssRegel('input[type="checkbox"], input[type="radio"]')),
+/* Die Arbeitsflaeche ist umgezogen, die Fallen sind mitgezogen: das Panel ist
+ * ebenfalls 380 px breit und traegt jetzt die Knopfreihen und das
+ * Kontrollkaestchen. Geprueft wird deshalb DORT, wo die Regel heute gilt. */
+const panelCss = ohneKommentare((PANEL.match(/const STIL = `([\s\S]*?)`;/) || ['', ''])[1]);
+check(panelCss.length > 500, 'die Gestaltung des Panels wurde gefunden',
+      'Laenge ' + panelCss.length);
+/* ⚠ ZWEIMAL PASSIERT: ein Rueckwaerts-Hochkomma in einem CSS-Kommentar beendet
+ * das Template-Literal, und die Datei stirbt beim Laden mit einem
+ * SyntaxError – also BEVOR das Panel entsteht. Der Waechter prueft das an der
+ * geladenen Datei, nicht am Ausschnitt: `new Function` faellt darauf herein
+ * wie der Browser. */
+try {
+  new Function(PANEL);
+  check(true, 'panel.js ist syntaktisch gueltig (Template-Literale unversehrt)');
+} catch (e) {
+  check(false, 'panel.js ist syntaktisch gueltig (Template-Literale unversehrt)',
+        String(e && e.message));
+}
+check(/width:\s*auto/.test(cssRegel(panelCss, 'input[type="checkbox"], input[type="radio"]')),
       'Kontrollkästchen sind nicht 100 % breit (sonst rutscht die Beschriftung um)');
-check(/flex-wrap:\s*wrap/.test(cssRegel('.knopfreihe')),
+check(/flex-wrap:\s*wrap/.test(cssRegel(panelCss, '.knopfreihe')),
       'Knopfreihen brechen um (zwei lange Beschriftungen passen nicht nebeneinander)');
-check(/min-width:\s*0/.test(cssRegel('.marke')),
-      'die Marke darf schrumpfen');
-check(/flex:\s*0 0 auto/.test(cssRegel('.kopf > button')),
-      'der Abmelden-Knopf nicht (sonst schiebt ihn eine lange Ticketnummer hinaus)');
+check(/min-width:\s*0/.test(cssRegel(panelCss, '.marke')),
+      'die Marke darf schrumpfen (Panel)');
+check(/flex:\s*0 0 auto/.test(cssRegel(panelCss, '.kopf > button')),
+      'der Schliessen-Knopf nicht (sonst schiebt ihn eine lange Ticketnummer hinaus)');
+/* ⚠ `min-height: 0` ist Pflicht, nicht Kosmetik: ohne das schrumpft ein
+ * Flex-Kind nicht unter seine Inhaltshoehe, `overflow-y` bleibt wirkungslos und
+ * der Fuss wird aus dem Panel gedrueckt (Register). */
+check(/min-height:\s*0/.test(cssRegel(panelCss, '.koerper'))
+      && /overflow-y:\s*auto/.test(cssRegel(panelCss, '.koerper')),
+      'der scrollende Bereich darf schrumpfen (min-height: 0)');
+/* Was ueber Inhalt liegt, braucht eine DECKENDE Flaeche – darunter liegt die
+ * Jira-Seite mit Text. */
+check(/background:\s*var\(--grund\)/.test(cssRegel(panelCss, '.rahmen')),
+      'das Panel ist deckend');
+/* ⚠ EINE AUTOREN-REGEL SCHLAEGT DAS `hidden`-ATTRIBUT – im echten Chrome
+ * gemessen: `.feld { display: block }` liess die Zeile "Fuer alle Benutzer
+ * (Administrator)" trotz `hidden` stehen, obwohl der Benutzer kein Admin ist.
+ * Dieselbe Falle wie `.sp-row[hidden]` im Hauptprojekt. jsdom rechnet kein
+ * Layout und haette das NIE gemeldet – geprueft wird deshalb die Regel. */
+for (const [wo, quelle] of [['Panel', panelCss], ['Popup', cssOhne]]) {
+  check(/display:\s*none\s*!important/.test(cssRegel(quelle, '[hidden]')),
+        wo + ': [hidden] wird gegen eigene display-Regeln durchgesetzt');
+}
+// Im Popup ist von den Layout-Fallen nur die Kopfzeile geblieben.
+check(/min-width:\s*0/.test(cssRegel(cssOhne, '.marke')),
+      'die Marke darf schrumpfen (Popup)');
+check(/flex:\s*0 0 auto/.test(cssRegel(cssOhne, '.kopf > button')),
+      'der Abmelden-Knopf nicht');
 // ═══════════════════════════════════════════════════════════════════════════
-check(/type="module"/.test(POPUP_HTML),
-      "popup.js wird als Modul geladen (der Import von einfuegen.js braucht das)");
+/* Das Popup ist NUR noch Anmeldung und Einrichtung – die Arbeitsflaeche sitzt
+ * im Panel. Zwei Fassungen derselben Oberflaeche waeren die Drift-Falle des
+ * Projekts; ein Waechter haelt deshalb fest, dass die Arbeit dort NICHT mehr
+ * steht. */
+check(!/einfuegen\.js/.test(POPUP_HTML) && !/\bimport\b/.test(ohneKommentare(POPUP_JS)),
+      "popup.js bindet einfuegen.js nicht mehr ein");
+for (const [was, muster] of [["Auswerten", /art: "auswerten"/],
+                             ["Einfuegen", /einfuegenInJira/],
+                             ["Vorlagen", /art: "vorlagen"/]]) {
+  check(!muster.test(POPUP_JS), "das Popup macht kein " + was + " mehr");
+  check(muster.test(PANEL), "das Panel macht " + was);
+}
+// Aber der WEG dorthin muss im Popup stehen: nach dem Anmelden bietet es nichts
+// mehr an, und niemand kaeme von selbst darauf, dass derselbe Knopf beim
+// naechsten Klick etwas anderes tut.
+check(/bereich-bereit/.test(POPUP_HTML) && /Symbol/.test(POPUP_HTML),
+      "das Popup sagt nach der Anmeldung, wo gearbeitet wird");
+
 // window.confirm/alert sind in Aufgabenfenstern unterdrueckt; in einem
 // Extension-Popup funktionieren sie zwar, sehen aber wie ein Browserdialog der
 // Seite aus. Eigene Meldungen statt Systemdialoge – wie im Rest des Projekts.
@@ -538,23 +653,105 @@ check(!/\b(confirm|alert|prompt)\s*\(/.test(ohneKommentare(POPUP_JS)),
 check(/https:\\?\/\\?\//.test(POPUP_JS) && /muss mit https/.test(POPUP_JS),
       "http wird abgelehnt – der Token darf nicht im Klartext reisen");
 // Rueckmeldung ist Pflicht: in der Zwischenablage sieht man nichts.
-check(/Kopieren fehlgeschlagen/.test(POPUP_JS),
+check(/Kopieren fehlgeschlagen/.test(PANEL),
       "ein fehlgeschlagenes Kopieren wird gemeldet");
-check(/Zwischenablage kopiert/.test(POPUP_JS),
+check(/Zwischenablage kopiert/.test(PANEL),
       "ein erfolgreiches Kopieren ebenfalls");
 
 // Die Ticketnummer kommt aus der URL, nicht aus dem DOM (stabil ueber
 // Jira-Versionen hinweg – und den Inhalt holt ohnehin der Server).
-check(/\/browse\//.test(POPUP_JS), "die Ticketnummer wird aus /browse/ gelesen");
-check(!/document\.querySelector[^\n]*issue/i.test(POPUP_JS),
+check(/\/browse\//.test(PANEL), "die Ticketnummer wird aus /browse/ gelesen");
+check(!/document\.querySelector[^\n]*issue/i.test(PANEL),
       "die Ticketnummer wird NICHT aus dem Seiten-DOM geraten");
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("7) Der Klick: Panel statt Popup – und der Weg zurueck");
+// ═══════════════════════════════════════════════════════════════════════════
+/* Ein Klick auf das Symbol soll das Panel in die Jira-Seite setzen. `onClicked`
+ * feuert aber NUR, wenn kein Popup gesetzt ist – deshalb schaltet der
+ * Hintergrund um. */
+check(/action\.onClicked\.addListener/.test(bgOhne),
+      "der Hintergrund reagiert auf den Klick");
+check(/executeScript\(\{[\s\S]{0,200}files:/.test(bgOhne),
+      "und injiziert Dateien in den Tab");
+check(/setPopup\(\{\s*popup:[^}]*popup\.html/.test(bgOhne),
+      "nicht angemeldet: das Anmeldefenster");
+
+/* ⚠ DER AUFRUF MUSS IM MODULRUMPF STEHEN. Ein Service Worker wird beendet und
+ * neu gestartet, und nach einem Browser-Neustart gilt wieder der Wert aus dem
+ * Manifest. Haenge das Umschalten nur an einem Ereignis, saehe ein laengst
+ * angemeldeter Benutzer irgendwann wieder die Anmeldemaske. */
+check(/^popupNachziehen\(\);\s*$/m.test(bgOhne),
+      "das Fenster wird bei JEDEM Start des Hintergrunds nachgezogen");
+
+/* Und es muss an JEDER Aenderung der Sitzung haengen, nicht an den einzelnen
+ * Stellen: sonst bleibt nach einem 401 das Panel eingestellt, und der Benutzer
+ * hat keinen Weg zurueck zur Anmeldung. */
+const sitzFn = (bgOhne.match(/async function sitzungSchreiben[\s\S]*?\n\}/) || [''])[0];
+check(/popupNachziehen\(\)/.test(sitzFn),
+      "jede Aenderung der Sitzung zieht das Fenster nach (auch der 401-Fall)");
+
+// Fail-safe: eine frische Installation zeigt die Anmeldung, nicht ins Leere.
+for (const [name, m] of [["Chrome", M_CHROME], ["Firefox", M_FF]]) {
+  check((m.action || {}).default_popup === "popup.html",
+        name + ": die Vorgabe im Manifest ist das Anmeldefenster");
+}
+
+/* Ein Klick, der WORTLOS nichts tut, ist das Schlimmste. Auf einer Seite ohne
+ * Injektionsrecht (Browser-interne Seiten, PDF-Ansicht) gibt es von hier aus
+ * kein Fenster – also Abzeichen und Beschriftung mit dem Grund. */
+check(/setBadgeText/.test(bgOhne) && /setTitle/.test(bgOhne),
+      "eine gescheiterte Injektion wird sichtbar gemeldet");
+
+// ── Das Panel lebt in der Seite, nicht als dauerhaftes Content-Script ──────
+check(/attachShadow\(\{\s*mode:\s*["']open["']\s*\}\)/.test(panelOhne),
+      "das Markup liegt im Shadow DOM (kein Eingriff in Jiras Stilraum)");
+// Genau EIN Element in der fremden Seite – der Rest haengt darunter.
+const anhaenge = (panelOhne.match(/document\.body\.appendChild/g) || []).length;
+check(anhaenge === 1, "genau ein Element wird an die Seite gehaengt",
+      "gefunden: " + anhaenge);
+
+/* ⚠ DRIFT-SCHRANKE. Die Dateiliste des Pakets steht an ZWEI Orten (bauen.sh
+ * fuer die Kommandozeile, jira_assist.py fuer den Download aus der Oberflaeche).
+ * Fehlt eine injizierte Datei im Paket, installiert sich die Erweiterung
+ * klaglos und der Klick scheitert erst beim Benutzen – mit einer Meldung, die
+ * niemand deutet. Geprueft wird die REGEL: was `executeScript` injiziert, MUSS
+ * in beiden Listen stehen. */
+const strings = (s) => (s.match(/"[^"]+\.(?:js|html|css)"/g) || [])
+    .map((x) => x.slice(1, -1));
+const injiziert = strings((bgOhne.match(/files:\s*\[[^\]]*\]/) || [''])[0]);
+check(injiziert.length >= 2, "die injizierten Dateien wurden gefunden",
+      injiziert.join(", "));
+const listeBauen = strings((BAUEN.match(/DATEIEN = \[[^\]]*\]/) || [''])[0]);
+const JIRA_PY = fs.readFileSync(path.join(WURZEL, "backend", "jira_assist.py"), "utf8");
+const listeServer = strings((JIRA_PY.match(/PAKET_DATEIEN = \([^)]*\)/) || [''])[0]);
+check(listeBauen.length > 0 && listeServer.length > 0, "beide Paketlisten gefunden");
+check(JSON.stringify(listeBauen.slice().sort()) === JSON.stringify(listeServer.slice().sort()),
+      "bauen.sh und jira_assist.py packen dieselben Dateien",
+      listeBauen.join(",") + "  ≠  " + listeServer.join(","));
+for (const d of injiziert) {
+  check(listeBauen.includes(d), "injizierte Datei '" + d + "' liegt im Paket");
+  check(fs.existsSync(path.join(ADDON, d)), "und existiert auf der Platte");
+}
+
+/* Der Hintergrund braucht `einfuegen.js` selbst – fuer den MAIN-Welt-Weg.
+ * Chrome laeuft als Service Worker (`importScripts`), Firefox als Event Page
+ * (KEIN Worker, dort steht die Datei im Manifest). Ein bedingungsloses
+ * `importScripts` waere in Firefox ein ReferenceError beim Start. */
+check(/typeof importScripts === "function"/.test(bgOhne),
+      "importScripts wird nur benutzt, wo es das gibt (Chrome)");
+check((M_FF.background.scripts || []).includes("einfuegen.js"),
+      "Firefox laedt einfuegen.js ueber background.scripts");
+check(M_FF.background.scripts.indexOf("einfuegen.js")
+      < M_FF.background.scripts.indexOf("background.js"),
+      "und zwar VOR background.js (sonst ist der Namensraum beim Start leer)");
 
 // ═══════════════════════════════════════════════════════════════════════════
 section("8) Die Ticketnummer-Erkennung – ausgefuehrt");
 // ═══════════════════════════════════════════════════════════════════════════
 {
   // keyAusUrl ist modulintern; sie wird wie im Browser neu ausgewertet.
-  const m = POPUP_JS.match(/function keyAusUrl\(url\)\s*\{[\s\S]*?\n\}/);
+  const m = PANEL.match(/function keyAusUrl\(url\)\s*\{[\s\S]*?\n  \}/);
   check(!!m, "keyAusUrl gefunden");
   if (m) {
     const dom = new JSDOM("", { url: "https://jira.test/" });
@@ -579,5 +776,332 @@ section("8) Die Ticketnummer-Erkennung – ausgefuehrt");
   }
 }
 
-console.log("\n" + ok + " OK, " + fail + " FAIL");
-process.exit(fail ? 1 : 0);
+// ═══════════════════════════════════════════════════════════════════════════
+section("8b) Die Anleitung beschreibt das PANEL, nicht mehr das Popup");
+// ═══════════════════════════════════════════════════════════════════════════
+/* Eine Anleitung, die das alte Verhalten verspricht, ist schlimmer als keine:
+ * der Benutzer sucht dann einen Fehler, den es nicht gibt. Geprueft werden
+ * deshalb die INHALTE – dieselbe Lehre wie bei der Excel-Add-in-Anleitung. */
+const ANLEITUNG = fs.readFileSync(path.join(WURZEL, "frontend", "jira_addon.html"), "utf8");
+const I18N = fs.readFileSync(path.join(WURZEL, "frontend", "js", "i18n.js"), "utf8");
+const DOKU = ANLEITUNG + I18N + fs.readFileSync(path.join(ADDON, "README.md"), "utf8");
+
+/* Die vier Zusagen, die der Umbau UMGEDREHT hat. Jede stand woertlich in der
+ * Anleitung und ist heute falsch. */
+for (const [was, muster] of [
+  ["ein Klick daneben beende die Auswertung", /Klick daneben schließt es/],
+  ["das Fenster muesse offen bleiben", /Solange muss das Fenster offen bleiben/],
+  ["clicking elsewhere aborts", /clicking elsewhere closes it/],
+  ["the window has to stay open", /The window has to stay open/],
+]) {
+  check(!muster.test(DOKU), "die Anleitung behauptet nicht mehr, " + was);
+}
+
+/* Und die Anmeldung ueberlebt den Browser seit dem Wechsel auf storage.local –
+ * die Anleitung behauptete jahrelang das Gegenteil. Der Test bindet beides
+ * aneinander: solange der Hintergrund storage.local benutzt, darf dort nicht
+ * "bis zum Schliessen des Browsers" stehen. */
+if (/storage\.local/.test(bgOhne)) {
+  check(!/gilt bis zum Schließen des Browsers/.test(DOKU)
+        && !/lasts until you close the browser/.test(DOKU),
+        "die Anleitung behauptet keine Anmeldung, die mit dem Browser endet");
+}
+
+// Umgekehrt MUSS der neue Weg beschrieben sein – in beiden Sprachen.
+for (const [was, muster] of [
+  ["dass der Assistent in der Jira-Seite erscheint", /rechts in der Jira-Seite/],
+  ["dasselbe auf Englisch", /right-hand side of the Jira page/],
+  ["was beim Ticketwechsel passiert", /jaddon\.use_warn/],
+  ["dass ein Neuladen das Fenster abraeumt", /jaddon\.tr5_q/],
+]) {
+  check(muster.test(DOKU), "die Anleitung sagt, " + was);
+}
+check(/panel\.js/.test(fs.readFileSync(path.join(ADDON, "README.md"), "utf8")),
+      "die Entwickler-Anleitung fuehrt panel.js im Aufbau");
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 9) DAS PANEL GEGEN EIN NACHGEBAUTES JIRA – WIRKLICH AUSGEFUEHRT
+// ═══════════════════════════════════════════════════════════════════════════
+/* Ein Quelltext-Test belegt hier nichts. Das Panel baut sich in einer FREMDEN
+ * Seite auf, redet ueber `runtime.sendMessage` mit dem Hintergrund und schreibt
+ * am Ende in ein Feld, das jemand anderes gerendert hat – ob das traegt, sieht
+ * man nur, wenn man es tut.
+ *
+ * Die Erweiterungs-API wird gestellt, alles andere ist der echte Code. */
+
+// CSS-Meldungen von jsdom sind Rauschen (es kennt `color-mix` nicht) – echte
+// Skriptfehler sollen aber sichtbar bleiben.
+const vc = new VirtualConsole();
+vc.on("jsdomError", (e) => {
+  const m = String((e && e.message) || e);
+  if (!/Could not parse CSS|Error: Not implemented/i.test(m)) console.log("  [jsdom] " + m);
+});
+
+const warte = (ms) => new Promise((r) => setTimeout(r, ms));
+const ERG_TEXT = "Guten Tag,\n\ndas Problem ist behoben.\n\nViele Grüße";
+
+function panelBau(seite, opts) {
+  const o = opts || {};
+  const dom = new JSDOM("<!DOCTYPE html><html><head></head><body>" + seite + "</body></html>", {
+    url: o.url || "https://jira.test/browse/ABC-1",
+    runScripts: "outside-only",
+    virtualConsole: vc,
+  });
+  const w = dom.window;
+  // jsdom rechnet kein Layout – ohne das haelt die Suche JEDES Feld fuer
+  // unsichtbar. Gemessen wird die echte Logik, nur die Geometrie wird gestellt.
+  w.Element.prototype.getBoundingClientRect = function () {
+    return this.hasAttribute("data-unsichtbar")
+      ? { width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0 }
+      : { width: 300, height: 80, top: 0, left: 0, right: 300, bottom: 80 };
+  };
+  w.Element.prototype.scrollIntoView = function () {};
+  w.document.execCommand = () => false;
+
+  const gesendet = [];
+  const antw = Object.assign({
+    zustand: { ok: true, basis: "https://dp.test", angemeldet: true, ergebnis: null },
+    branding: { ok: true, daten: null },
+    vorlagen: { ok: true, daten: { global: [], eigene: [], darf_global: false } },
+    auswerten: (m) => ({ ok: true, daten: { key: m.key, modus: m.modus,
+                                            text: ERG_TEXT, kommentare: 7,
+                                            modell: "qwen3.6-35b" } }),
+  }, o.antworten || {});
+  w.chrome = {
+    runtime: {
+      sendMessage: (m) => {
+        gesendet.push(m);
+        const f = antw[m && m.art];
+        const a = (typeof f === "function") ? f(m) : f;
+        return Promise.resolve(a === undefined ? { ok: true } : a);
+      },
+    },
+  };
+
+  // Ein vergessener Taktgeber laeuft im Jira-Tab des Benutzers weiter – das
+  // wird gezaehlt, nicht geglaubt.
+  const takt = { auf: 0, zu: 0 };
+  const si = w.setInterval.bind(w), ci = w.clearInterval.bind(w);
+  w.setInterval = function (fn, ms) { takt.auf++; return si(fn, ms); };
+  w.clearInterval = function (id) { takt.zu++; return ci(id); };
+
+  const laden = () => new w.Function(EINFUEGEN + "\n;\n" + PANEL)();
+  const wirt = () => w.document.getElementById("jv-assist-panel");
+  const s = (id) => { const h = wirt(); return h && h.shadowRoot.getElementById(id); };
+  return { dom, w, gesendet, takt, laden, wirt, s };
+}
+
+/** Ein Lauf – ein Wurf darf ihn nicht ABBRECHEN, sonst sieht ein Fehler aus wie
+ * "nicht gelaufen" und eine Gegenprobe waere gruen aus dem falschen Grund. */
+async function mitPanel(titel, seite, opts, arbeit) {
+  const u = panelBau(seite, opts);
+  try {
+    u.laden();
+    await warte(5);
+    await arbeit(u);
+  } catch (e) {
+    check(false, titel, String((e && e.stack) || e));
+  } finally {
+    u.w.close();
+  }
+}
+
+(async () => {
+  section("9) Das Panel gegen ein nachgebautes Jira – ausgefuehrt");
+
+  // a) Es haengt GENAU EIN Element in die fremde Seite, alles andere darunter.
+  await mitPanel("Aufbau", '<div id="jira"><textarea id="comment"></textarea></div>',
+                 null, async (u) => {
+    const koerper = u.w.document.body;
+    check(koerper.children.length === 2,
+          "genau ein Element kommt zur Seite hinzu", "Kinder: " + koerper.children.length);
+    check(!!u.wirt() && !!u.wirt().shadowRoot, "und es traegt einen Shadow DOM");
+    check(u.w.document.head.querySelectorAll("style, link").length === 0,
+          "die Gestaltung landet NICHT im Kopf der Jira-Seite");
+    check(u.w.document.getElementById("comment").value === "",
+          "die Seite selbst bleibt unberuehrt");
+    // Der Ticketbezug steht sichtbar in der Kopfzeile.
+    check(u.s("ticket").textContent === "ABC-1",
+          "die Ticketnummer aus der Adresse steht im Kopf", u.s("ticket").textContent);
+  });
+
+  // b) Auswerten fragt den HINTERGRUND – mit der Nummer aus der Adresse.
+  await mitPanel("Auswerten", '<textarea id="comment"></textarea>', null, async (u) => {
+    u.s("btn-zus").click();
+    await warte(5);
+    const auf = u.gesendet.filter((m) => m.art === "auswerten");
+    check(auf.length === 1 && auf[0].key === "ABC-1"
+          && auf[0].modus === "zusammenfassung",
+          "der Auftrag geht mit der richtigen Ticketnummer an den Hintergrund",
+          JSON.stringify(auf));
+    check(u.s("f-ergebnis").value === ERG_TEXT, "das Ergebnis steht im Feld");
+    check(!u.s("ergebnis").hidden, "und der Bereich ist sichtbar");
+    // Was das Ergebnis TRAEGT, gehoert sichtbar dazu.
+    const fuss = u.s("ergebnis-fuss").textContent;
+    check(/ABC-1/.test(fuss) && /7 Kommentar/.test(fuss) && /qwen/.test(fuss),
+          "die Fussnote nennt Ticket, Kommentarzahl und Modell", fuss);
+  });
+
+  // c) ENDE ZU ENDE: der Text landet im Kommentarfeld DERSELBEN Seite.
+  await mitPanel("Einfuegen", '<form><textarea id="comment"></textarea></form>',
+                 null, async (u) => {
+    u.s("btn-zus").click();
+    await warte(5);
+    u.s("btn-einfuegen").click();
+    await warte(5);
+    check(u.w.document.getElementById("comment").value === ERG_TEXT,
+          "der Vorschlag steht im Kommentarfeld der Jira-Seite");
+    check(/Eingefügt/.test(u.s("meldung").textContent),
+          "und der Erfolg wird gemeldet", u.s("meldung").textContent);
+  });
+
+  /* d) DER EIGENTLICHE GEWINN DES UMBAUS – und die Falle, die er mitbringt.
+   *
+   * Das zuletzt fokussierte Feld schlaegt jede Selektorliste. Sobald der
+   * Benutzer aber im Panel klickt, ist `document.activeElement` der Panel-Wirt.
+   * Ohne das gemerkte Feld faellt die Suche auf die Selektorliste zurueck und
+   * schreibt in den ERSTBESTEN Editor – hier also in den WYSIWYG-Kasten statt
+   * in das Feld, in dem der Benutzer wirklich stand. */
+  await mitPanel("Gemerktes Feld",
+                 '<div class="jira-editor-container">'
+                 + '<div contenteditable="true" id="wysiwyg"></div></div>'
+                 + '<textarea id="notiz"></textarea>', null, async (u) => {
+    const notiz = u.w.document.getElementById("notiz");
+    notiz.dispatchEvent(new u.w.FocusEvent("focusin", { bubbles: true }));
+    // Klick ins Panel: der Fokus liegt danach auf dem Wirt.
+    Object.defineProperty(u.w.document, "activeElement",
+                          { value: u.wirt(), configurable: true });
+    u.s("btn-zus").click();
+    await warte(5);
+    u.s("btn-einfuegen").click();
+    await warte(5);
+    check(notiz.value === ERG_TEXT,
+          "der Text landet in dem Feld, in dem der Benutzer zuletzt war");
+    check(u.w.document.getElementById("wysiwyg").textContent === "",
+          "und NICHT im erstbesten Editor der Selektorliste");
+  });
+
+  /* e) Ein Klick auf die Formatierleiste darf das gemerkte Feld nicht
+   *    verdraengen – sonst waere die Regel nach dem ersten Fettdruck tot. */
+  await mitPanel("Fremder Fokus",
+                 '<textarea id="comment"></textarea><button id="fett">B</button>',
+                 null, async (u) => {
+    const feld = u.w.document.getElementById("comment");
+    feld.dispatchEvent(new u.w.FocusEvent("focusin", { bubbles: true }));
+    u.w.document.getElementById("fett")
+      .dispatchEvent(new u.w.FocusEvent("focusin", { bubbles: true }));
+    Object.defineProperty(u.w.document, "activeElement",
+                          { value: u.wirt(), configurable: true });
+    u.s("btn-zus").click();
+    await warte(5);
+    u.s("btn-einfuegen").click();
+    await warte(5);
+    check(feld.value === ERG_TEXT,
+          "ein Knopf der Seite verdraengt das gemerkte Kommentarfeld nicht");
+  });
+
+  /* f) DER TICKETBEZUG BEIM WECHSEL – das ist neu, weil das Panel stehen
+   *    bleibt. `popstate` feuert bei pushState NICHT; die Adresse wird deshalb
+   *    ueberwacht. Der Test wartet die echte Taktzeit ab, statt einen Aufruf
+   *    nachzubauen. */
+  await mitPanel("Adresswechsel", '<textarea id="comment"></textarea>', null, async (u) => {
+    u.s("btn-zus").click();
+    await warte(5);
+    check(u.s("bezug-warnung").hidden, "beim eigenen Ticket steht keine Warnung");
+
+    u.w.history.pushState({}, "", "/browse/DEF-2");
+    await warte(1300);
+    check(u.s("ticket").textContent === "DEF-2",
+          "nach dem Wechsel steht die neue Nummer im Kopf", u.s("ticket").textContent);
+    const w = u.s("bezug-warnung");
+    check(!w.hidden && /ABC-1/.test(w.textContent) && /DEF-2/.test(w.textContent),
+          "und eine stehende Warnung nennt BEIDE Nummern", w.textContent);
+
+    // Einfuegen fragt jetzt zurueck – und ABBRECHEN fuegt nichts ein.
+    u.s("btn-einfuegen").click();
+    await warte(5);
+    check(!u.s("ja-nein").hidden, "Einfuegen fragt zurueck");
+    check(u.w.document.getElementById("comment").value === "",
+          "und hat bis dahin nichts geschrieben");
+    u.s("jn-nein").click();
+    await warte(5);
+    check(u.w.document.getElementById("comment").value === "",
+          "nach Abbrechen bleibt das Kommentarfeld leer");
+
+    u.s("btn-einfuegen").click();
+    await warte(5);
+    u.s("jn-ja").click();
+    await warte(5);
+    check(u.w.document.getElementById("comment").value === ERG_TEXT,
+          "erst die ausdrueckliche Bestaetigung fuegt ein");
+  });
+
+  // g) Ein GEMERKTES Ergebnis zu einem anderen Ticket warnt schon beim Oeffnen.
+  await mitPanel("Gemerktes fremdes Ergebnis", '<textarea id="comment"></textarea>',
+                 { antworten: { zustand: { ok: true, basis: "https://dp.test",
+                     angemeldet: true,
+                     ergebnis: { key: "DEF-2", modus: "antwort", text: ERG_TEXT,
+                                 kommentare: 3, zeit: Date.now() } } } },
+                 async (u) => {
+    check(u.s("f-ergebnis").value === ERG_TEXT, "das gemerkte Ergebnis ist wieder da");
+    const w = u.s("bezug-warnung");
+    check(!w.hidden && /DEF-2/.test(w.textContent) && /ABC-1/.test(w.textContent),
+          "und der fremde Bezug steht sofort sichtbar da", w.textContent);
+  });
+
+  // h) Kein Ticket im Tab: Auskunft statt Fehlversuch.
+  await mitPanel("Kein Ticket", '<div>Dashboard</div>',
+                 { url: "https://jira.test/secure/Dashboard.jspa" }, async (u) => {
+    check(/Kein Jira-Ticket/.test(u.s("meldung").textContent),
+          "das Panel sagt, dass dieser Tab kein Ticket ist");
+    u.s("btn-zus").click();
+    await warte(5);
+    check(u.gesendet.filter((m) => m.art === "auswerten").length === 0,
+          "und schickt keinen Auftrag ohne Ticketnummer los");
+  });
+
+  // i) Nicht angemeldet: keine Arbeitsknoepfe, aber ein Weg hinaus.
+  await mitPanel("Nicht angemeldet", '<textarea id="comment"></textarea>',
+                 { antworten: { zustand: { ok: true, basis: "", angemeldet: false,
+                                           ergebnis: null } } }, async (u) => {
+    check(/Nicht angemeldet/.test(u.s("meldung").textContent),
+          "das Panel sagt, dass keine Anmeldung vorliegt");
+    check(u.s("btn-zus").disabled && u.s("btn-einfuegen").disabled,
+          "die Arbeitsknoepfe sind gesperrt");
+    check(!u.s("btn-zu").disabled, "der Schliessen-Knopf bleibt bedienbar");
+  });
+
+  // j) Vorlagennamen sind Freitext aus einem Formular – kein Markup.
+  await mitPanel("Vorlagennamen", '<textarea id="comment"></textarea>',
+                 { antworten: { vorlagen: { ok: true, daten: {
+                     global: [], darf_global: false,
+                     eigene: [{ id: "1", name: '<img src=x onerror=alert(1)>Kurz',
+                                text: "kurz" }] } } } }, async (u) => {
+    u.s("btn-vorlagen").click();
+    await warte(5);
+    /* Gezaehlt wird IN DER LISTE, nicht im ganzen Panel: der Kopf traegt ein
+     * eigenes <img> fuer das Logo – eine Zaehlung ueber alles haette hier einen
+     * Fehler gemeldet, den es nicht gibt. */
+    check(u.s("vorl-liste").querySelectorAll("img, script").length === 0
+          && u.s("f-vorlage").querySelectorAll("img, script").length === 0,
+          "eingeschleustes Markup wird NICHT als HTML uebernommen");
+    check(/onerror/.test(u.s("vorl-liste").textContent),
+          "der Name steht als Text da", u.s("vorl-liste").textContent);
+  });
+
+  // k) Der zweite Klick schliesst – und laesst nichts zurueck.
+  await mitPanel("Schliessen", '<textarea id="comment"></textarea>', null, async (u) => {
+    check(u.takt.auf === 1, "das Panel setzt genau einen Taktgeber",
+          "auf: " + u.takt.auf);
+    u.laden();                       // zweiter Klick auf das Symbol
+    await warte(5);
+    check(u.wirt() === null, "der zweite Klick blendet das Panel wieder aus");
+    check(u.w.document.body.children.length === 1,
+          "und laesst die Seite so zurueck, wie sie war");
+    check(u.takt.zu === 1, "der Taktgeber wird abgeraeumt (kein Nachlauf im Tab)",
+          "zu: " + u.takt.zu);
+  });
+
+  console.log("\n" + ok + " OK, " + fail + " FAIL");
+  process.exit(fail ? 1 : 0);
+})();

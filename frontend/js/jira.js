@@ -29,6 +29,17 @@
         return p(d.getDate()) + '.' + p(d.getMonth() + 1) + '.' + d.getFullYear()
             + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
     }
+    /* Dateiname aus `Content-Disposition`. Der Name wird SERVERSEITIG aus der
+     * Marke gebildet (jira_assist.paket_dateiname) – hier wird er nur gelesen,
+     * damit es nicht zwei Fassungen derselben Namensregel gibt.
+     * Zugelassen ist nur [A-Za-z0-9._-]: der Kopf kommt zwar vom eigenen
+     * Server, aber der Markenname darin ist Fremdeingabe, und ein
+     * Schraegstrich waere im Download-Ordner ein Pfadanteil. */
+    function nameAusKopf(kopf) {
+        var m = /filename="?([^";]+)"?/i.exec(kopf || '');
+        var n = m ? m[1].trim() : '';
+        return /^[A-Za-z0-9._-]+$/.test(n) ? n : '';
+    }
     function status(msg, kind) {
         setStatus('jira-status', msg, kind);
     }
@@ -172,10 +183,20 @@
             knopf.disabled = true;
             knopf.textContent = 'wird erstellt…';
             setz('');
+            // ⚠ BEI EINEM BLOB-DOWNLOAD ENTSCHEIDET `a.download`, NICHT der
+            // Kopf des Servers. Hier stand der Name deshalb hart als
+            // "jarvis-jira-…" – und blieb es auch, nachdem das Paket laengst
+            // gebrandet war (gemeldet 2026-08-28). Der Name kommt jetzt aus
+            // `Content-Disposition`, also aus derselben Quelle wie der Eintrag
+            // im Manifest.
+            var dateiname = '';
             fetch('/api/jira/assist/paket?variante=' + encodeURIComponent(variante),
                   { headers: authHeaders() })
                 .then(function (r) {
-                    if (r.ok) return r.blob();
+                    if (r.ok) {
+                        dateiname = nameAusKopf(r.headers.get('Content-Disposition'));
+                        return r.blob();
+                    }
                     // Der Server antwortet bei fachlichem Fehlschlag mit 400 und
                     // Klartext – "HTTP 400" allein waere wertlos.
                     return r.json().then(function (d) {
@@ -186,7 +207,10 @@
                     var url = URL.createObjectURL(blob);
                     var a = document.createElement('a');
                     a.href = url;
-                    a.download = 'jarvis-jira-' + variante + '.zip';
+                    // Rueckfall markenNEUTRAL: faellt der Kopf aus, ist ein
+                    // sachlicher Name richtig – "jarvis" waere auf einem
+                    // gebrandeten System wieder genau der gemeldete Fehler.
+                    a.download = dateiname || ('jira-erweiterung-' + variante + '.zip');
                     document.body.appendChild(a);
                     a.click();
                     a.remove();

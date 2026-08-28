@@ -1,5 +1,11 @@
 <!DOCTYPE html>
-<html lang="de">
+<!-- `neutral` ist der AUSGANGSZUSTAND, nicht die Ausnahme: solange keine
+     Hausfarbe bekannt ist, trägt der Hauptknopf einen schlichten Umriss statt
+     einer Produktfarbe. popup.js NIMMT die Klasse weg, sobald eine Farbe da
+     ist – die Richtung ist Absicht: fällt das Skript aus oder ist gar kein
+     Branding eingerichtet, bleibt es neutral. Umgekehrt (Klasse per JS setzen)
+     würde bei jedem Öffnen kurz die falsche Farbe aufblitzen. -->
+<html lang="de" class="neutral">
 <head>
   <meta charset="UTF-8">
   <title>{marke} für Jira</title>
@@ -13,6 +19,14 @@
        Branding entsteht. Ohne Eintrag gilt unverändert der Rückfall aus
        popup.js. -->
   <meta name="marke" content="">
+  <!-- DIE HAUSFARBE AUS DEMSELBEN GRUND. Gemeldet 2026-08-28: "der Anmelden-
+       Knopf ist weiterhin nicht in der Branding-Farbe". Zu Recht – die Farbe
+       kam bis dahin AUSSCHLIESSLICH aus `/api/branding`, und der Abruf startet
+       erst, wenn eine Adresse im Feld steht. Auf der Anmeldemaske gibt es die
+       noch nicht: genau dort war der Knopf also nie gebrandet.
+       Erlaubt ist nur `#rgb`/`#rrggbb` – der Wert wird als CSS gesetzt, ein
+       freier Text darin wäre eine Einschleusung. Leer = neutraler Knopf. -->
+  <meta name="akzent" content="">
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>

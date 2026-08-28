@@ -20,6 +20,17 @@
         return rueckfall;
     }
 
+    /* Dateiname aus `Content-Disposition`. Gebildet wird er SERVERSEITIG aus
+     * der Marke (jira_assist.paket_dateiname) – hier wird nur gelesen, sonst
+     * gaebe es zwei Fassungen derselben Namensregel. Zugelassen ist nur
+     * [A-Za-z0-9._-]: der Markenname im Kopf ist Fremdeingabe, und ein
+     * Schraegstrich waere im Download-Ordner ein Pfadanteil. */
+    function nameAusKopf(kopf) {
+        var m = /filename="?([^";]+)"?/i.exec(kopf || '');
+        var n = m ? m[1].trim() : '';
+        return /^[A-Za-z0-9._-]+$/.test(n) ? n : '';
+    }
+
     function esc(s) {
         return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
             return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
@@ -199,11 +210,17 @@
                 try { d = await r.json(); } catch (e) {}
                 throw new Error((d && d.error) || ('HTTP ' + r.status));
             }
+            // ⚠ BEI EINEM BLOB-DOWNLOAD ENTSCHEIDET `a.download`, NICHT der Kopf
+            // des Servers. Hier stand der Name hart als "jarvis-jira-…" und
+            // blieb es auch, nachdem das Paket laengst gebrandet war.
+            var dateiname = nameAusKopf(r.headers.get('Content-Disposition'));
             var blob = await r.blob();
             var url = URL.createObjectURL(blob);
             var a = document.createElement('a');
             a.href = url;
-            a.download = 'jarvis-jira-' + variante + '.zip';
+            // Rueckfall markenNEUTRAL – "jarvis" waere auf einem gebrandeten
+            // System wieder genau der gemeldete Fehler.
+            a.download = dateiname || ('jira-erweiterung-' + variante + '.zip');
             document.body.appendChild(a);
             a.click();
             a.remove();

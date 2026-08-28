@@ -34,6 +34,23 @@ function melde(text, arbeitet = false) {
   // Meldungen tragen {marke} – auch die aus dem Hintergrund (der kennt das
   // DOM nicht und kann selbst nicht ersetzen).
   el.meldung.textContent = String(text).split("{marke}").join(_marke);
+  /* WARTEMELDUNGEN BEKOMMEN EINEN DREHENDEN KREIS. "Formuliere einen
+   * Antwortvorschlag … (dauert einige Sekunden)" steht sonst reglos da, und
+   * ein stehender Satz ist von einem haengenden Fenster nicht zu
+   * unterscheiden – erst recht nicht in einem Popup, das keine Titelleiste und
+   * keinen Ladebalken hat.
+   *
+   * Der Kreis wird VORANGESTELLT statt in den Text geschrieben: der Text kommt
+   * teils aus dem Hintergrund und ginge sonst durch innerHTML. `insertBefore`
+   * laesst `textContent` oben die einzige Stelle, die Fremdtext setzt. */
+  if (arbeitet) {
+    const kreis = document.createElement("span");
+    kreis.className = "dreher";
+    // Vorlesesoftware soll den Kreis nicht als Inhalt ansagen - die Meldung
+    // daneben sagt bereits, was laeuft.
+    kreis.setAttribute("aria-hidden", "true");
+    el.meldung.insertBefore(kreis, el.meldung.firstChild);
+  }
   el.meldung.classList.toggle("arbeitet", !!arbeitet);
   el.meldung.hidden = false;
 }
@@ -111,6 +128,46 @@ function _vorgabeMarke() {
 // Der Rueckfall, solange keine Marke bekannt ist.
 let _marke = _vorgabeMarke() || "Jarvis";
 
+/* ── Hausfarbe ──────────────────────────────────────────────────────────────
+ * DIESELBE LUECKE WIE BEI DER MARKE, gemeldet 2026-08-28: der Anmelden-Knopf
+ * war nie gebrandet. Die Farbe kam ausschliesslich aus `/api/branding`, und
+ * der Abruf haengt am `change` des Adressfeldes - auf der Anmeldemaske steht
+ * dort noch nichts. Genau dort sieht jemand das Fenster zum ersten Mal.
+ *
+ * ⚠ DIE FARBE WIRD ALS CSS GESETZT und kommt aus dem Branding-Formular, ist
+ * also Fremdeingabe. Zugelassen ist deshalb NUR eine Hex-Notation: ein Wert
+ * wie `red;background:url(...)` waere sonst eine Einschleusung in die
+ * Formatvorlage. Alles andere wird verworfen, nicht repariert - dann bleibt
+ * der neutrale Knopf, und das ist der richtige Ausgang.
+ */
+function _istHexFarbe(wert) {
+    return /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(wert || "").trim());
+}
+
+/** Setzt die Hausfarbe und beendet damit den Neutralzustand.
+ *
+ * EINE Stelle fuer beide Wege (Vorgabe aus dem Paket und Antwort des Servers):
+ * zwei Fassungen wuerden beim naechsten Farbfeld auseinanderlaufen, und der
+ * Unterschied faellt nur auf, wenn jemand die Anmeldemaske ansieht.
+ */
+function akzentSetzen(akzent, hover) {
+    if (!_istHexFarbe(akzent)) return false;
+    const s = document.documentElement.style;
+    s.setProperty("--akzent", akzent.trim());
+    // Ohne eigenen Hover-Ton einen aus der Hausfarbe ableiten - sonst bliebe
+    // der Knopf beim Ueberfahren auf dem neutralen Wert stehen und saehe wie
+    // ein Fehler aus.
+    s.setProperty("--akzent-hover", _istHexFarbe(hover) ? hover.trim()
+        : "color-mix(in srgb, " + akzent.trim() + " 82%, #000)");
+    document.documentElement.classList.remove("neutral");
+    return true;
+}
+
+/* Die Vorgabe aus dem Paket gilt SOFORT - vor jedem Netzaufruf. Ist das Feld
+ * leer (Paket aus bauen.sh oder kein Branding eingerichtet), bleibt der
+ * Knopf neutral. */
+akzentSetzen((document.querySelector('meta[name="akzent"]') || {}).content);
+
 /** Ersetzt {marke} ueberall im Fenster – und MUSS auch ohne Branding laufen.
  *
  * Sonst steht der rohe Platzhalter im Text ("Bitte die {marke}-Adresse
@@ -170,12 +227,9 @@ function setzeBranding(b) {
      * Der Akzent gilt markenweit aus `colors` (nicht `colors_light`) – so
      * macht es branding.js::effectiveColors() auch. */
     const farben = b.colors || {};
-    if (farben.accent) {
-        document.documentElement.style.setProperty("--akzent", farben.accent);
-    }
-    if (farben.accent_hover) {
-        document.documentElement.style.setProperty("--akzent-hover", farben.accent_hover);
-    }
+    // Ueber dieselbe Funktion wie die Vorgabe aus dem Paket - sie prueft die
+    // Farbe und beendet den Neutralzustand.
+    akzentSetzen(farben.accent, farben.accent_hover);
     const logo = b.logo_url_light || b.logo_url;
     if (logo) {
         const bild = $("marke-logo");

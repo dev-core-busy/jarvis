@@ -655,6 +655,60 @@ def markenname() -> str:
     return (name or "Jarvis")[:40]
 
 
+# Umlaute werden UMGESCHRIEBEN, nicht verworfen: ein blosses Filtern auf
+# [a-z0-9] macht aus "Pruefung" zwar nichts, aus "Prüfung" aber "prfung" -
+# ein Dateiname, den niemand als seine Marke wiedererkennt.
+_UMSCHRIFT = {
+    "ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss",
+    "à": "a", "á": "a", "â": "a", "å": "a", "æ": "ae",
+    "è": "e", "é": "e", "ê": "e", "ë": "e",
+    "ì": "i", "í": "i", "î": "i", "ï": "i",
+    "ò": "o", "ó": "o", "ô": "o", "ø": "o",
+    "ù": "u", "ú": "u", "û": "u", "ç": "c", "ñ": "n",
+}
+
+
+def _dateiname_teil(text: str) -> str:
+    """Markenname → ein Namensteil aus ``[a-z0-9-]``, sonst nichts.
+
+    ⚠ DAS IST NICHT NUR KOSMETIK. Der Name reist im Kopf
+    ``Content-Disposition`` – Fremdeingabe aus dem Branding-Formular. Ein
+    Anfuehrungszeichen wuerde den Header-Wert schliessen, ein Zeilenumbruch
+    einen weiteren Kopf einschleusen (dieselbe Klasse wie bei
+    ``llm.clean_api_key``: trimmen allein genuegt dort nicht, es wird auf ein
+    sicheres Alphabet REDUZIERT). Ein Schraegstrich im Firmennamen waere
+    ausserdem ein Pfadanteil im Download-Ordner.
+
+    Ergebnis ist bewusst ASCII: die Header-Syntax kennt nur das, und
+    ``filename*=`` waere fuer einen selbst gewaehlten Paketnamen ein Aufwand
+    ohne Gewinn.
+    """
+    roh = (text or "").strip().lower()
+    umgeschrieben = "".join(_UMSCHRIFT.get(z, z) for z in roh)
+    slug = re.sub(r"[^a-z0-9]+", "-", umgeschrieben).strip("-")
+    slug = re.sub(r"-{2,}", "-", slug)[:40].strip("-")
+    # Leer heisst: die Marke besteht nur aus Zeichen, die hier nicht zulaessig
+    # sind. Dann ist "jarvis" richtig - ein Dateiname MUSS entstehen.
+    return slug or "jarvis"
+
+
+def paket_dateiname(variante: str) -> str:
+    """``<marke>-jira-<variante>.zip`` – der Name, den der Benutzer sieht.
+
+    Gemeldet 2026-08-28: das Paket hiess trotz Branding weiter ``jarvis-*``.
+    Der Name steht im Download-Ordner und auf der Netzfreigabe, aus der die
+    ganze Belegschaft installiert - er gehoert zur Marke wie der Eintrag in der
+    Erweiterungsverwaltung (``_manifest_gebrandet``) und das Symbol in der
+    Symbolleiste (``symbole_bauen``).
+
+    OHNE Branding kommt ``jarvis-jira-chrome.zip`` heraus, also genau der
+    bisherige Name - die Aenderung ist fuer ungebrandete Installationen
+    wirkungslos.
+    """
+    return "%s-jira-%s.zip" % (_dateiname_teil(markenname()),
+                               _dateiname_teil(variante))
+
+
 def _manifest_gebrandet(roh: str) -> str:
     """Setzt Marke und Beschreibung im Manifest – JSON-sicher.
 
@@ -685,8 +739,11 @@ def _manifest_gebrandet(roh: str) -> str:
     return json.dumps(m, ensure_ascii=False, indent=2)
 
 
+_HEXFARBE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+
+
 def _popup_gebrandet(roh: str) -> str:
-    """Traegt die Marke als VORGABE in das Fenster der Erweiterung ein.
+    """Traegt Marke UND Hausfarbe als VORGABE in das Fenster der Erweiterung ein.
 
     WARUM DAS NOETIG IST (gemeldet 2026-08-27: "das Branding beim Login ist noch
     falsch"): das Fenster holt seine Marke aus ``/api/branding`` – und dafuer
@@ -702,17 +759,44 @@ def _popup_gebrandet(roh: str) -> str:
     das Attribut sonst schliessen und Markup einschleusen. Gleiche Haltung wie
     beim Manifest (dort ``json.dumps``), nur fuer HTML.
 
-    Fail-safe: fehlt das Feld, bleibt die Datei unveraendert – die Marke kommt
-    dann wie bisher beim ersten Serverabruf.
+    DASSELBE GILT FUER DIE FARBE (gemeldet 2026-08-28: "der Anmelden-Knopf ist
+    weiterhin nicht in der Branding-Farbe"). Sie kam bis dahin ausschliesslich
+    aus ``/api/branding``, und das Fenster fragt erst, wenn eine Adresse im Feld
+    steht – auf der Anmeldemaske also nie. Steht keine Farbe zur Verfuegung,
+    bleibt das Feld leer und der Knopf NEUTRAL (Umriss statt Flaeche): eine
+    Produktfarbe im ausgelieferten Paket waere eine Aussage, die niemand
+    getroffen hat.
+
+    Der Name ist Fremdeingabe aus dem Branding-Formular und wird deshalb
+    HTML-attributsicher eingesetzt: ein Anfuehrungszeichen im Firmennamen wuerde
+    das Attribut sonst schliessen und Markup einschleusen. Gleiche Haltung wie
+    beim Manifest (dort ``json.dumps``), nur fuer HTML. **Die Farbe wird nicht
+    entschaerft, sondern GEPRUEFT** – sie landet im Fenster in einer
+    CSS-Eigenschaft, wo Maskierung nichts nuetzt; alles ausser ``#rgb``/
+    ``#rrggbb`` wird verworfen. Dieselbe Pruefung noch einmal in ``popup.js``:
+    die Datei kann auch aus ``bauen.sh`` stammen oder von Hand bearbeitet sein.
+
+    Fail-safe: fehlt das Feld, bleibt die Datei unveraendert – Marke und Farbe
+    kommen dann wie bisher beim ersten Serverabruf.
     """
     import html  # noqa: PLC0415
 
-    def ersetzen(m):
+    def marke_ersetzen(m):
         return "%s%s%s" % (m.group(1), html.escape(markenname(), quote=True),
                            m.group(3))
 
-    return re.sub(r'(<meta\s+name="marke"\s+content=")([^"]*)(")', ersetzen,
-                  roh, count=1)
+    text = re.sub(r'(<meta\s+name="marke"\s+content=")([^"]*)(")',
+                  marke_ersetzen, roh, count=1)
+
+    akzent = (_branding_fuer_symbol()[0] or "").strip()
+    if not _HEXFARBE.match(akzent):
+        return text
+
+    def farbe_ersetzen(m):
+        return "%s%s%s" % (m.group(1), akzent, m.group(3))
+
+    return re.sub(r'(<meta\s+name="akzent"\s+content=")([^"]*)(")',
+                  farbe_ersetzen, text, count=1)
 
 
 def _branding_fuer_symbol() -> tuple:
@@ -820,7 +904,7 @@ def paket_bauen(variante: str) -> tuple:
         for s in symbole:
             name = "icons/" + s.name
             z.writestr(name, gebrandet.get(name) or s.read_bytes())
-    return ("jarvis-jira-%s.zip" % variante.lower(), puffer.getvalue())
+    return (paket_dateiname(variante), puffer.getvalue())
 
 
 def _vorschlag_saeubern(text: str) -> str:

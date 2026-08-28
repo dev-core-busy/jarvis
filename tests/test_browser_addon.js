@@ -290,8 +290,25 @@ const festeFarben = (cssOhne.match(/#[0-9a-fA-F]{3,8}\b/g) || [])
     .filter(f => !['#fff', '#ffffff'].includes(f.toLowerCase()));
 check(!festeFarben.includes('#b80f2e'),
       'keine Kundenfarbe im Paket', festeFarben.join(', '));
-check(/--akzent:\s*#9b59b6/.test(cssOhne),
-      'der Rueckfall ist der neutrale Jarvis-Ton');
+// OHNE BRANDING GIBT ES GAR KEINE PRODUKTFARBE MEHR (Vorgabe 2026-08-28).
+// Erst stand hier eine Kundenfarbe, dann das Jarvis-Violett - beides ist in
+// einem ausgelieferten White-Label-Paket eine Aussage ueber das Produkt.
+check(!/--akzent:\s*#9b59b6/.test(cssOhne),
+      'der Jarvis-Ton ist als Rueckfall raus');
+check(/--akzent:\s*CanvasText/.test(cssOhne),
+      'der Rueckfall folgt dem Systemthema (hell = schwarz auf weiss)');
+check(/html\.neutral\s+button\.haupt\s*\{/.test(cssOhne),
+      'es gibt einen neutralen Knopf-Zustand');
+{
+  // Der Nutzer hat den Neutralknopf woertlich beschrieben: schwarze Schrift,
+  // schwarzer Rand, weisser Hintergrund. Geprueft wird die REGEL, nicht die
+  // Existenz der Klasse.
+  const m = cssOhne.match(/html\.neutral\s+button\.haupt\s*\{([^}]*)\}/);
+  const r = m ? m[1] : '';
+  check(/background:\s*Canvas\b/.test(r), 'neutral: heller Hintergrund', r);
+  check(/color:\s*CanvasText\b/.test(r), 'neutral: dunkle Schrift', r);
+  check(/border-color:\s*CanvasText\b/.test(r), 'neutral: dunkler Rand', r);
+}
 check(/setProperty\("--akzent"/.test(POPUP_JS),
       'popup.js setzt die Akzentfarbe aus dem Branding');
 // Die Farben stehen in `colors`, nicht flach in der Antwort. Ein Zugriff auf
@@ -313,7 +330,7 @@ check(/"colors":\s*cfg\.get\("colors"/.test(MAIN_SRC),
 {
   // markeAnwenden + setzeBranding aus popup.js schneiden und ausfuehren.
   const teile = ['const _originale = new Map();'];
-  for (const name of ['markeAnwenden', 'setzeBranding']) {
+  for (const name of ['_istHexFarbe', 'akzentSetzen', 'markeAnwenden', 'setzeBranding']) {
     const m = POPUP_JS.match(new RegExp('function ' + name + '\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}'));
     if (m) teile.push(m[0]);
   }
@@ -414,6 +431,175 @@ check(/"colors":\s*cfg\.get\("colors"/.test(MAIN_SRC),
   // Adresse eingetippt IST, nicht erst nach dem Anmelden.
   check(/el\.basis\.addEventListener\("change"/.test(POPUP_JS),
         'die eingetippte Adresse loest den Branding-Abruf schon vor dem Login aus');
+}
+
+/* ── DIE HAUSFARBE AUF DER ANMELDEMASKE ───────────────────────────────────
+ * Gemeldet 2026-08-28: "der Anmelden-Knopf ist weiterhin NICHT in der
+ * Branding-Farbe". Dieselbe Luecke wie bei der Marke, eine Ebene tiefer: die
+ * Farbe kam nur aus /api/branding, und der Abruf haengt am `change` des
+ * Adressfeldes – auf der Anmeldemaske steht dort noch nichts.
+ * GEMESSEN, nicht gelesen: die Funktionen werden wirklich ausgefuehrt. */
+{
+  const teile = [];
+  for (const name of ['_istHexFarbe', 'akzentSetzen']) {
+    const m = POPUP_JS.match(new RegExp('function ' + name + '\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}'));
+    check(!!m, 'popup.js hat ' + name + '()');
+    if (m) teile.push(m[0]);
+  }
+  check(/<meta name="akzent" content="">/.test(POPUP_HTML),
+        'im Repo ist das Farbfeld LEER (keine Produktfarbe im Paket)');
+  check(/class="neutral"/.test(POPUP_HTML),
+        'das Fenster startet im Neutralzustand');
+  // Die Richtung ist der Kern: die Klasse wird ENTFERNT, nie gesetzt. Sonst
+  // blitzt bei jedem Oeffnen kurz die falsche Farbe auf, und ohne JS waere der
+  // Knopf gefaerbt, obwohl niemand eine Farbe kennt.
+  check(/classList\.remove\("neutral"\)/.test(POPUP_JS),
+        'und verlaesst ihn nur, wenn eine Farbe da ist');
+  check(!/classList\.add\("neutral"\)/.test(POPUP_JS),
+        'die Klasse wird nie per JS gesetzt (fail-safe Richtung)');
+  /* ⚠ DER TEST UNTEN RUFT akzentSetzen() SELBST – er belegt damit die Funktion,
+   * nicht ihren AUFRUF. Eine Gegenprobe, die den Aufruf aus popup.js entfernte,
+   * blieb deshalb gruen (dieselbe Falle wie bei markeAnwenden weiter oben).
+   * Also zusaetzlich: steht er auf MODULEBENE, also vor jedem Rendern und vor
+   * jedem Netzaufruf? Ein Aufruf in einer Funktion waere zu spaet - dann
+   * blitzt der neutrale Knopf auf und faerbt sich nachtraeglich. */
+  check(/^akzentSetzen\(/m.test(ohneKommentare(POPUP_JS)),
+        'popup.js wendet die Vorgabe beim Laden an, nicht erst spaeter');
+  check(/^akzentSetzen\([^\n]*meta\[name="akzent"\]/m.test(ohneKommentare(POPUP_JS)),
+        'und zwar die Vorgabe aus dem Paket');
+
+  const lauf = (farbe) => {
+    const html = POPUP_HTML.replace('<meta name="akzent" content="">',
+                                    '<meta name="akzent" content="' + farbe + '">');
+    const dom = new JSDOM(html, { url: 'https://x.test/', runScripts: 'outside-only' });
+    const w = dom.window;
+    try {
+      const f = new w.Function(`
+          ${teile.join('\n')}
+          akzentSetzen((document.querySelector('meta[name="akzent"]') || {}).content);
+          return JSON.stringify({
+            neutral: document.documentElement.classList.contains('neutral'),
+            akzent: document.documentElement.style.getPropertyValue('--akzent'),
+            hover: document.documentElement.style.getPropertyValue('--akzent-hover')
+          });`);
+      return JSON.parse(f());
+    } finally { w.close(); }
+  };
+
+  const mit = lauf('#b80f2e');
+  check(mit.akzent === '#b80f2e',
+        'die Hausfarbe steht OHNE jeden Serverabruf im Fenster', mit.akzent);
+  check(mit.neutral === false, 'und der Neutralzustand ist beendet');
+  check(mit.hover.includes('#b80f2e'),
+        'ein Hover-Ton wird abgeleitet (sonst springt der Knopf zurueck)',
+        mit.hover);
+
+  const ohne = lauf('');
+  check(ohne.neutral === true && !ohne.akzent,
+        'ohne Vorgabe bleibt es neutral – keine Produktfarbe');
+
+  /* ⚠ DIE FARBE LANDET IN EINER CSS-EIGENSCHAFT. Maskieren nuetzt dort nichts,
+   * deshalb wird GEPRUEFT statt entschaerft: alles ausser #rgb/#rrggbb wird
+   * verworfen, und dann bleibt der neutrale Knopf. */
+  for (const boese of ['red;background:url(http://x/a.png)', 'url(javascript:1)',
+                       'expression(alert(1))', 'var(--x)', '#12', 'rot']) {
+    const r = lauf(boese);
+    check(r.neutral === true && !r.akzent,
+          'unbrauchbare/gefaehrliche Farbe wird verworfen: ' + boese,
+          r.akzent);
+  }
+
+  // Und der Server fuellt das Feld auch wirklich – sonst ist alles obige tot.
+  const JA_SRC = fs.readFileSync(path.join(WURZEL, 'backend', 'jira_assist.py'), 'utf8');
+  const fn = (JA_SRC.match(/def _popup_gebrandet\([\s\S]*?\n\n\n/) || [''])[0];
+  check(/name="akzent"/.test(fn),
+        'jira_assist._popup_gebrandet traegt die Farbe ins Paket ein');
+  check(/_HEXFARBE/.test(fn),
+        'und prueft sie serverseitig ebenfalls');
+}
+
+/* ── DREHENDER KREIS BEI WARTEMELDUNGEN ───────────────────────────────────
+ * Vorgabe des Nutzers 2026-08-28: "Formuliere einen Antwortvorschlag …
+ * (dauert einige Sekunden)" stand reglos da. Ein stehender Satz ist von einem
+ * haengenden Fenster nicht zu unterscheiden – das Popup hat weder Titelleiste
+ * noch Ladebalken.
+ * GEMESSEN am echten DOM: melde() wird wirklich ausgefuehrt. */
+{
+  const m = POPUP_JS.match(/function melde\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  check(!!m, 'melde() ist schneidbar');
+
+  const lauf = (rufe) => {
+    const dom = new JSDOM(POPUP_HTML, { url: 'https://x.test/', runScripts: 'outside-only' });
+    const w = dom.window;
+    try {
+      const f = new w.Function('rufe', `
+          const _marke = "Marke";
+          const el = { meldung: document.getElementById("meldung") };
+          ${m ? m[0] : ''}
+          for (const r of rufe) melde(r[0], r[1]);
+          return JSON.stringify({
+            kreise: el.meldung.querySelectorAll(".dreher").length,
+            text: el.meldung.textContent,
+            arbeitet: el.meldung.classList.contains("arbeitet"),
+            ariaVersteckt: (el.meldung.querySelector(".dreher") || {})
+                .getAttribute ? el.meldung.querySelector(".dreher").getAttribute("aria-hidden") : null,
+            erstesKind: el.meldung.firstChild && el.meldung.firstChild.className || ''
+          });`);
+      return JSON.parse(f(rufe));
+    } finally { w.close(); }
+  };
+
+  const wartet = lauf([['Formuliere einen Antwortvorschlag … (dauert einige Sekunden)', true]]);
+  check(wartet.kreise === 1, 'Wartemeldung: genau ein drehender Kreis', wartet.kreise);
+  check(wartet.erstesKind === 'dreher',
+        'und er steht VOR dem Text', wartet.erstesKind);
+  check(wartet.text.includes('Antwortvorschlag'),
+        'der Text bleibt vollstaendig erhalten', wartet.text);
+  check(wartet.arbeitet === true, 'die Meldung ist als arbeitend markiert');
+  check(wartet.ariaVersteckt === 'true',
+        'der Kreis wird Vorlesesoftware nicht als Inhalt angesagt');
+
+  const fertig = lauf([['Fertig.', false]]);
+  check(fertig.kreise === 0, 'normale Meldung: kein Kreis', fertig.kreise);
+
+  /* Der Wechsel ist der interessante Fall: bleibt ein Kreis stehen, dreht sich
+   * das Fenster nach dem Ergebnis weiter und behauptet Arbeit, die laengst
+   * fertig ist. */
+  const danach = lauf([['Lade …', true], ['Vorschlag – bitte lesen.', false]]);
+  check(danach.kreise === 0,
+        'nach dem Ergebnis ist der Kreis weg', danach.kreise);
+  check(danach.arbeitet === false, 'und die Markierung ebenfalls');
+  const zweimal = lauf([['Lade …', true], ['Lese …', true]]);
+  check(zweimal.kreise === 1,
+        'zwei Wartemeldungen hintereinander haeufen keine Kreise an', zweimal.kreise);
+
+  /* Der Text kommt teils aus dem Hintergrund - er darf nicht durch innerHTML.
+   * ⚠ OHNE ohneKommentare() liest der Waechter die eigene Begruendung im Code
+   * mit ("ginge sonst durch innerHTML") und meldet einen Fehler, den es nicht
+   * gibt - genau so ist diese Pruefung beim ersten Lauf fehlgeschlagen. */
+  check(!/innerHTML/.test(ohneKommentare(m ? m[0] : 'innerHTML')),
+        'melde() setzt den Text nie per innerHTML');
+
+  // Und die Wartetexte melden sich auch wirklich als solche an.
+  for (const stelle of [/melde\(ARBEITSTEXT\[modus\][^)]*,\s*true\)/,
+                        /melde\("Melde an …",\s*true\)/,
+                        /melde\("Lese das Kommentarfeld …",\s*true\)/]) {
+    check(stelle.test(POPUP_JS),
+          'Wartetext ' + stelle.source.slice(0, 32) + '… ist als arbeitend gemeldet');
+  }
+
+  // CSS: Bauform wie .chat-activity-spinner im Hauptprojekt.
+  const dreher = (cssOhne.match(/\.dreher\s*\{([^}]*)\}/) || ['', ''])[1];
+  check(/animation:\s*[\w-]+\s/.test(dreher), 'der Kreis dreht sich wirklich', dreher);
+  check(/border-radius:\s*50%/.test(dreher), 'und ist rund', dreher);
+  check(/border-top-color:\s*var\(--akzent\)/.test(dreher),
+        'die drehende Kante folgt der Hausfarbe', dreher);
+  check(/@keyframes\s+dreher-drehen/.test(cssOhne), 'die Animation ist definiert');
+  check(/prefers-reduced-motion[\s\S]{0,120}\.dreher\s*\{\s*animation:\s*none/
+        .test(cssOhne),
+        'wer Bewegung abgestellt hat, bekommt keine');
+  check(/\.meldung\.arbeitet\s*\{[^}]*display:\s*flex/.test(cssOhne),
+        'Kreis und Text stehen nebeneinander, nicht uebereinander');
 }
 
 // Kein sichtbarer Text im Paket darf "Jarvis" fest verdrahtet haben – der

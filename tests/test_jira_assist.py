@@ -655,6 +655,8 @@ for variante, erwartetes_bg in (("chrome", "service_worker"),
     except ja.AssistFehler as e:
         check(False, "%s: Paket gebaut" % variante, str(e))
         continue
+    # Ohne Branding bleibt es beim bisherigen Namen - die Markenlogik darf fuer
+    # eine ungebrandete Installation wirkungslos sein.
     check(name == "jarvis-jira-%s.zip" % variante, "%s: Dateiname" % variante)
     z = zipfile.ZipFile(io.BytesIO(daten))
     check(z.testzip() is None, "%s: das ZIP ist unbeschaedigt" % variante)
@@ -1395,6 +1397,89 @@ check("BRANDET NICHT" in BAUEN_SH, "bauen.sh sagt selbst, dass es nicht brandet"
 # im Projekt mehrfach Stunden gekostet).
 check("bauen.sh</code> auf dem Server – es trägt die eingestellte Marke" not in I18N,
       "kein Text behauptet, bauen.sh brande das Paket")
+
+
+# ══ Der DATEINAME traegt die Marke ════════════════════════════════════════
+# Gemeldet 2026-08-28: "die Dateien heissen trotz Branding immer noch
+# jarvis*". Der Name steht im Download-Ordner und auf der Netzfreigabe, aus
+# der die ganze Belegschaft installiert - er gehoert zur Marke wie der Eintrag
+# in der Erweiterungsverwaltung und das Symbol in der Symbolleiste.
+print("\n═══ Dateiname des Pakets folgt der Marke")
+_echte_marke = ja.markenname
+try:
+    ja.markenname = lambda: "Nexus DP"
+    check(ja.paket_dateiname("chrome") == "nexus-dp-jira-chrome.zip",
+          "die Marke steht im Dateinamen",
+          ja.paket_dateiname("chrome"))
+    # GEMESSEN am wirklich gebauten Paket, nicht an der Namensfunktion allein:
+    # `paket_bauen` koennte den Namen weiterhin selbst zusammensetzen.
+    check(ja.paket_bauen("firefox")[0] == "nexus-dp-jira-firefox.zip",
+          "und paket_bauen benutzt sie auch",
+          ja.paket_bauen("firefox")[0])
+
+    # Umlaute werden UMGESCHRIEBEN, nicht verworfen - "prfung" erkennt niemand
+    # als seine Marke wieder.
+    ja.markenname = lambda: "Prüfstelle Süd"
+    check(ja.paket_dateiname("chrome") == "pruefstelle-sued-jira-chrome.zip",
+          "Umlaute werden umgeschrieben", ja.paket_dateiname("chrome"))
+
+    # ⚠ DER NAME REIST IM KOPF Content-Disposition und ist Fremdeingabe aus dem
+    # Branding-Formular: ein Anfuehrungszeichen schliesst den Wert, ein
+    # Zeilenumbruch schleust einen weiteren Kopf ein, ein Schraegstrich waere
+    # ein Pfadanteil im Download-Ordner.
+    for boese in ('Ne"xerius', "A\r\nX-Boese: 1", "../../etc", "Fir/ma",
+                  "Fir\\ma", "a\tb"):
+        ja.markenname = lambda b=boese: b
+        n = ja.paket_dateiname("chrome")
+        check(re.fullmatch(r"[a-z0-9._-]+", n) is not None,
+              "gefaehrlicher Markenname wird entschaerft: %r" % boese, n)
+
+    # Eine Marke ganz ohne verwertbare Zeichen darf keinen leeren Namen ergeben
+    # - eine Datei MUSS einen Namen haben.
+    ja.markenname = lambda: "★☆"
+    check(ja.paket_dateiname("chrome") == "jarvis-jira-chrome.zip",
+          "unbrauchbare Marke faellt auf den Standardnamen zurueck",
+          ja.paket_dateiname("chrome"))
+finally:
+    ja.markenname = _echte_marke
+
+# Die Variante kommt aus der Query und ist damit ebenfalls Fremdeingabe.
+# `paket_bauen` weist Unbekanntes zwar ab - aber `paket_dateiname` ist eine
+# oeffentliche Funktion und darf sich darauf nicht verlassen.
+check(re.fullmatch(r"[a-z0-9._-]+", ja.paket_dateiname('x"/..')) is not None,
+      "auch die Variante wird entschaerft", ja.paket_dateiname('x"/..'))
+
+# ⚠ BEI EINEM BLOB-DOWNLOAD ENTSCHEIDET `a.download`, NICHT der Kopf des
+# Servers. Genau deshalb blieb der Name "jarvis-*", obwohl das Paket laengst
+# gebrandet war: der serverseitige Fix allein waere unsichtbar geblieben.
+JS_ADDON = (ROOT / "frontend" / "js" / "jira_addon.js").read_text(encoding="utf-8")
+for bez, quelle in (("Jira-Reiter", JS_JIRA), ("Anleitungsseite", JS_ADDON)):
+    check("'jarvis-jira-'" not in quelle and '"jarvis-jira-"' not in quelle,
+          "%s: kein hart verdrahteter jarvis-Name mehr" % bez)
+    check("Content-Disposition" in quelle,
+          "%s: der Name kommt aus dem Kopf des Servers" % bez)
+    check("nameAusKopf(" in quelle,
+          "%s: und wird vor der Benutzung geprueft" % bez)
+    # Der Rueckfall darf die Marke nicht wieder ueberschreiben.
+    # ⚠ Geprueft wird die ZUWEISUNG, nicht die Umgebung des Wortes: ein
+    # `split("a.download")` trifft zuerst die Erwaehnung im Kommentar darueber -
+    # der Waechter laese dann seine eigene Begruendung (Register).
+    _zuw = re.search(r"a\.download\s*=\s*([^;]+);", quelle)
+    check(_zuw is not None, "%s: a.download wird gesetzt" % bez)
+    _aus = (_zuw.group(1) if _zuw else "").lower()
+    check("jarvis" not in _aus and "dateiname" in _aus,
+          "%s: der Rueckfall ist markenneutral" % bez, _aus)
+
+# Der Endpunkt muss den Namen ueberhaupt mitschicken - ohne den Kopf liest das
+# Fenster nichts und faellt dauerhaft auf den neutralen Namen zurueck.
+_ep = funktion(QUELLE_MAIN, "jira_assist_paket") if "QUELLE_MAIN" in dir() else ""
+if not _ep:
+    QUELLE_MAIN = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
+    _ep = funktion(QUELLE_MAIN, "jira_assist_paket")
+check("Content-Disposition" in _ep and "filename=" in _ep,
+      "der Endpunkt schickt den Dateinamen mit")
+check("paket_bauen" in _ep,
+      "und nimmt ihn aus paket_bauen, statt ihn selbst zu bilden")
 
 
 print("\n%d OK, %d FAIL" % (_ok, _fail))

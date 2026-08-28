@@ -18182,8 +18182,10 @@ async def watcher_delete(watcher_id: str, user: str = Depends(require_auth)):
 
 # ═══ Issue-Tracker ════════════════════════════════════════════════════
 # Berechtigung: alle authentifizierten User sehen alles; Autor editiert
-# seine Issues solange status != "closed"; jarvis hat Vollzugriff inkl.
-# Status-Wechsel/Comment/Delete. Implementierung in backend/issues.py.
+# seine Issues solange status != "closed"; ADMINISTRATOREN und `jarvis` haben
+# Vollzugriff auf ALLE Felder inkl. Status/Kommentar/Anhaenge/Loeschen.
+# Implementierung in backend/issues.py – dieser Abschnitt steuert nur
+# `is_admin` bei, das Modul kennt die Rechtelage nicht selbst.
 from backend import issues as _issues_mod
 
 
@@ -18238,17 +18240,22 @@ async def api_issues_get(issue_id: str, user: str = Depends(require_auth_or_agen
     issue = _issues_mod.get_issue(issue_id)
     if not issue:
         raise HTTPException(404, "Issue nicht gefunden")
+    ist_admin = _is_admin_user(user)
     return JSONResponse({
         "ok": True,
         "issue": issue,
         "current_user": user,
         # 'bearbeiten' (Loesungsbereich) steht ALLEN Administratoren zu, nicht nur jarvis
-        "is_admin": _is_admin_user(user),
-        "can_edit": _issues_mod.can_edit(issue, user),
+        "is_admin": ist_admin,
+        # 'editieren' (Titel/Text/Typ/Prioritaet/Anhaenge) ebenfalls – die
+        # Oberflaeche zeichnet Knopf UND Anhang-Bereich allein an diesem Feld.
+        # Ohne `is_admin` blieben beide unsichtbar, obwohl der Endpunkt die
+        # Aenderung ausfuehren wuerde.
+        "can_edit": _issues_mod.can_edit(issue, user, ist_admin),
         # Loeschen duerfen Administratoren – die Oberflaeche zeigt den Knopf
         # allein anhand dieses Feldes. Ohne `is_admin` bliebe er unsichtbar,
         # obwohl der Endpunkt die Loeschung ausfuehren wuerde.
-        "can_delete": _issues_mod.can_delete(issue, user, _is_admin_user(user)),
+        "can_delete": _issues_mod.can_delete(issue, user, ist_admin),
     })
 
 
@@ -18312,7 +18319,8 @@ async def api_issues_attach(issue_id: str, file: UploadFile = File(...),
                             user: str = Depends(require_auth_or_agent)):
     """Lädt einen Datei-Anhang zu einem Issue hoch."""
     content = await file.read()
-    saved, err = _issues_mod.add_attachment(user, issue_id, file.filename or "file", content)
+    saved, err = _issues_mod.add_attachment(user, issue_id, file.filename or "file", content,
+                                            is_admin=_is_admin_user(user))
     if not saved:
         if "Berechtigung" in err:
             raise HTTPException(403, err)
@@ -18337,7 +18345,8 @@ async def api_issues_get_attachment(issue_id: str, filename: str,
 async def api_issues_del_attachment(issue_id: str, filename: str,
                                     user: str = Depends(require_auth_or_agent)):
     """Löscht einen Datei-Anhang eines Issues."""
-    ok, err = _issues_mod.delete_attachment(user, issue_id, filename)
+    ok, err = _issues_mod.delete_attachment(user, issue_id, filename,
+                                            is_admin=_is_admin_user(user))
     if not ok:
         if "Berechtigung" in err:
             raise HTTPException(403, err)

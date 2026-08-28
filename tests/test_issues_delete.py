@@ -135,22 +135,109 @@ check(iss.get_issue(b["id"]) is not None, "nur die gewaehlte Meldung faellt weg"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-section("3) 'editieren' bleibt eng – Loeschen ist nicht Umschreiben")
+section("3) Ein Administrator bearbeitet ALLE Felder")
 # ═══════════════════════════════════════════════════════════════════════════
-# Ein Administrator darf aufraeumen und den Loesungsbereich pflegen. Den TEXT
-# einer fremden Meldung umschreiben darf er NICHT: "editieren" und "bearbeiten"
-# sind in dieser Oberflaeche zwei verschiedene Dinge.
+# ⚠ HIER STAND BIS 2026-08-28 DAS GEGENTEIL ("can_edit wurde NICHT mit
+# erweitert"). Die Trennung "editieren = nur der Ersteller" gegen "bearbeiten =
+# Loesungsbereich" ist auf Vorgabe des Nutzers aufgehoben: sie bleibt als
+# Aufteilung in zwei FORMULARE bestehen, nicht als Rechteschranke.
 fremd = _neu("alice", "Alices Meldung")
-check(iss.can_edit(fremd, "nexus\\chefin") is False,
-      "can_edit wurde NICHT mit erweitert")
+check(iss.can_edit(fremd, "nexus\\chefin", is_admin=True) is True,
+      "ein Administrator darf den Inhalt einer FREMDEN Meldung aendern")
 check(iss.can_edit(fremd, "alice") is True, "die Autorin darf ihren Text ändern")
 check(iss.can_edit(fremd, "jarvis") is True, "und 'jarvis' weiterhin alles")
+check(iss.can_edit(fremd, "wer.anders") is False,
+      "ein Fremder OHNE Adminrecht weiterhin nicht")
+
+# Fail-closed wie bei can_delete: das Argument ist optional, die Vorgabe ist
+# die enge Antwort. Ein Aufrufer, der es vergisst, erweitert keine Rechte.
+check(iss.can_edit(fremd, "nexus\\chefin") is False,
+      "ohne is_admin gilt weiter das enge Verhalten (fail-closed)")
+check(iss.can_edit(fremd, "wer.anders", is_admin="") is False,
+      "ein leerer Wert ist kein Ja")
+
+# Der GESCHLOSSENE Zustand trennt Autor und Administrator: die Autorin kommt
+# nicht mehr an ihren Text (die Antwort haengt daran), der Administrator schon.
+zu = _neu("alice", "Erledigte Meldung")
+iss.update_issue("jarvis", zu["id"], {"status": "closed"})
+zu = iss.get_issue(zu["id"])
+check(iss.can_edit(zu, "alice") is False,
+      "die Autorin darf eine GESCHLOSSENE Meldung nicht mehr umschreiben")
+check(iss.can_edit(zu, "nexus\\chefin", is_admin=True) is True,
+      "der Administrator schon – er verantwortet den Vorgang")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+section("3b) …und das wirkt WIRKLICH – gegen echte Dateien")
+# ═══════════════════════════════════════════════════════════════════════════
+# Eine Rechte-Matrix, die nur `can_edit` prueft, beweist nichts: `update_issue`
+# hat eine ZWEITE Schranke je Feld ("Inhalt darf nur der Ersteller editieren").
+# Genau die war der eigentliche Riegel.
+ziel = _neu("alice", "Falscher Titel")
+alle = {"title": "Berichtigter Titel", "body": "Neuer Text",
+        "type": "feature", "priority": "high",
+        "status": "in_progress", "jarvis_comment": "Wir kuemmern uns."}
+
+nach, err = iss.update_issue("wer.anders", ziel["id"], dict(alle), is_admin=False)
+check(nach is None and "Berechtigung" in err,
+      "ein Fremder ohne Adminrecht wird abgewiesen", err)
+check((iss.get_issue(ziel["id"]) or {}).get("title") == "Falscher Titel",
+      "und nichts davon ist durchgesickert (die Absage war keine Fassade)")
+
+nach, err = iss.update_issue("nexus\\chefin", ziel["id"], dict(alle), is_admin=True)
+check(nach is not None, "als Administrator geht es", err)
+for feld, wert in alle.items():
+    check((nach or {}).get(feld) == wert, "Feld '%s' wurde uebernommen" % feld,
+          (nach or {}).get(feld))
+
+# Auch an einer GESCHLOSSENEN Meldung – sonst waere der letzte Statuswechsel
+# eine Einbahnstrasse und ein Tippfehler im Titel dauerhaft.
+iss.update_issue("nexus\\chefin", ziel["id"], {"status": "closed"}, is_admin=True)
+nach, err = iss.update_issue("nexus\\chefin", ziel["id"],
+                             {"title": "Auch danach noch"}, is_admin=True)
+check((nach or {}).get("title") == "Auch danach noch",
+      "eine geschlossene Meldung bleibt fuer den Administrator bearbeitbar", err)
+
+# Die Absage an die Autorin nennt den Weg – "nur Jarvis darf bearbeiten" waere
+# jetzt falsch und liesse sie beim Administrator gar nicht erst nachfragen.
+nach, err = iss.update_issue("alice", ziel["id"], {"title": "Doch nicht"})
+check(nach is None and "Administrator" in err,
+      "die Absage verweist auf den Administrator, nicht mehr auf 'Jarvis'", err)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+section("3c) Anhaenge sind ein Feld – nicht die Ausnahme")
+# ═══════════════════════════════════════════════════════════════════════════
+# Waere `is_admin` hier nicht durchgereicht, duerfte ein Administrator jedes
+# Feld aendern AUSSER diesem – ein Unterschied, den keine Oberflaeche erklaeren
+# kann, und der erst beim Klick auffaellt.
+mit_att = _neu("alice", "Meldung mit Anhang")
+gespeichert, err = iss.add_attachment("nexus\\chefin", mit_att["id"], "notiz.txt",
+                                      b"inhalt", is_admin=True)
+check(bool(gespeichert), "ein Administrator darf einen Anhang hinzufuegen", err)
+
+abgewiesen, err = iss.add_attachment("wer.anders", mit_att["id"], "fremd.txt",
+                                     b"x", is_admin=False)
+check(abgewiesen is None and "Berechtigung" in err,
+      "ein Fremder ohne Adminrecht nicht", err)
+
+ok, err = iss.delete_attachment("nexus\\chefin", mit_att["id"], gespeichert,
+                                is_admin=True)
+check(ok is True, "und er darf ihn auch wieder entfernen", err)
+check(gespeichert not in (iss.get_issue(mit_att["id"]) or {}).get("attachments", []),
+      "der Anhang ist wirklich weg")
+
+ok, err = iss.delete_attachment("wer.anders", mit_att["id"], "notiz.txt")
+check(ok is False and "Berechtigung" in err,
+      "ohne Adminrecht bleibt das Entfernen gesperrt (fail-closed)", err)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 section("4) Verdrahtung: main.py steuert is_admin bei")
 # ═══════════════════════════════════════════════════════════════════════════
 MAIN = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
+JS = (ROOT / "frontend" / "js" / "issues.js").read_text(encoding="utf-8")
+QUELLE = (ROOT / "backend" / "issues.py").read_text(encoding="utf-8")
 
 
 def funktion(quelle: str, name: str) -> str:
@@ -167,6 +254,16 @@ def funktion(quelle: str, name: str) -> str:
     return rest[:ende.start()] if ende else rest
 
 
+def modulfunktion(name: str) -> str:
+    """Der Rumpf EINER Modulfunktion aus issues.py.
+
+    ⚠ Gibt "" zurueck statt zu werfen – ein `.group(0)` in einer Pruefung
+    WIRFT, und die Gegenprobe braeche dann ab, statt zu zaehlen (Register).
+    """
+    m = re.search(r"\ndef %s\([\s\S]*?\n\n\n" % re.escape(name), QUELLE)
+    return m.group(0) if m else ""
+
+
 _del = funktion(MAIN, "api_issues_delete")
 check(bool(_del), "der Loesch-Endpunkt existiert (sonst prueft nichts darunter)")
 check("_is_admin_user(user)" in _del,
@@ -176,13 +273,49 @@ check('"Berechtigung" in err' in _del,
       "die Absage wird zu 403 – nicht zu 404")
 
 _get = funktion(MAIN, "api_issues_get")
-check("can_delete(issue, user, _is_admin_user(user))" in _get,
-      "auch die Einzelabfrage meldet das Recht mit is_admin")
+check("_is_admin_user(user)" in _get and "can_delete(issue, user, ist_admin)" in _get,
+      "auch die Einzelabfrage meldet das Loeschrecht mit is_admin")
+# ⚠ DIE OBERFLAECHE ZEICHNET DEN 'editieren'-KNOPF UND DEN ANHANG-BEREICH
+# ALLEIN AN can_edit. Ohne is_admin hier bliebe beides unsichtbar, obwohl der
+# PATCH-Endpunkt die Aenderung ausfuehren wuerde – der Fix waere unbemerkt
+# wirkungslos (genau der Fall, den can_delete schon einmal hatte).
+check("can_edit(issue, user, ist_admin)" in _get,
+      "und das Bearbeitungsrecht ebenso")
+
+# Der PATCH-Endpunkt reicht is_admin an das Modul weiter – dort sitzt die
+# Schranke je Feld, nicht hier.
+_patch = funktion(MAIN, "api_issues_update")
+check("is_admin=_is_admin_user(user)" in _patch,
+      "der PATCH-Endpunkt steuert den Administrator-Status bei")
+
+# Anhaenge: beide Wege, sonst ist genau ein Feld ausgenommen.
+for _rt, _name in (("api_issues_attach", "Hochladen"),
+                   ("api_issues_del_attachment", "Entfernen")):
+    _r = funktion(MAIN, _rt)
+    check(bool(_r), "der Endpunkt zum %s von Anhaengen existiert" % _name)
+    check("is_admin=_is_admin_user(user)" in _r,
+          "%s reicht is_admin weiter" % _name)
+
+# Die Rechtefrage darf nicht doppelt beantwortet werden: die Schranke sitzt in
+# can_edit, damit ein zweiter Aufrufer sie nicht umgehen kann.
+for _fn in ("add_attachment", "delete_attachment", "update_issue"):
+    _blk = modulfunktion(_fn)
+    check(bool(_blk), "%s ist im Modul auffindbar" % _fn)
+    check("can_edit(" in _blk, "%s fragt can_edit" % _fn)
+    check(re.search(r"can_edit\([^)]*is_admin", _blk) is not None,
+          "%s reicht is_admin an can_edit weiter" % _fn,
+          "sonst prueft es die enge Vorgabe und der Administrator faellt durch")
+
+check("data.can_edit" in JS,
+      "das Fenster liest can_edit vom Server")
+check(re.search(r"if \(canEdit\)[\s\S]{0,300}jv-iss-edit-btn", JS) is not None,
+      "und zeichnet den 'editieren'-Knopf danach")
+check("_showJarvisForm(issue)" in JS,
+      "der Loesungsbereich bleibt ein eigenes Formular (Aufteilung der Oberflaeche)")
 
 # ⚠ DIE OBERFLAECHE ZEIGT DEN KNOPF ALLEIN AN can_delete. Meldet die
 # Einzelabfrage das Recht nicht, bleibt der Knopf unsichtbar – und der Fix
 # waere unbemerkt wirkungslos, obwohl der Endpunkt loeschen wuerde.
-JS = (ROOT / "frontend" / "js" / "issues.js").read_text(encoding="utf-8")
 check("data.can_delete" in JS, "das Fenster liest can_delete vom Server")
 check(re.search(r"if \(canDelete\)[\s\S]{0,200}jv-iss-del-btn", JS) is not None,
       "und zeichnet den Loeschknopf danach")
@@ -190,19 +323,31 @@ check("method: 'DELETE'" in JS, "der Knopf ruft wirklich DELETE")
 
 # Das Modul darf die Rechtefrage nicht doppelt beantworten: die Schranke sitzt
 # in can_delete, damit sie ein zweiter Aufrufer nicht umgehen kann.
-QUELLE = (ROOT / "backend" / "issues.py").read_text(encoding="utf-8")
-_dq = re.search(r"def delete_issue\([\s\S]*?\n\n\n", QUELLE).group(0)
+_dq = modulfunktion("delete_issue")
 check("can_delete(" in _dq, "delete_issue fragt can_delete")
 check("is_jarvis(" not in _dq,
       "und beantwortet die Rechtefrage NICHT selbst noch einmal")
 
 # Der Modul-Docstring darf nicht das Gegenteil des Codes behaupten – diese
-# Fehlerklasse hat im Projekt mehrfach Stunden gekostet.
-kopf = QUELLE[:QUELLE.index('"""', 3) + 3]
+# Fehlerklasse hat im Projekt mehrfach Stunden gekostet. Hier besonders: der
+# Kopf FUEHRTE die alte Trennung woertlich und wurde beim Umbau fast vergessen.
+_kopfende = QUELLE.find('"""', 3)
+check(_kopfende > 0, "der Modul-Docstring ist auffindbar")
+kopf = QUELLE[:_kopfende + 3] if _kopfende > 0 else ""
 check("Loeschen: alle Administratoren" in kopf,
-      "der Docstring nennt die neue Regel")
+      "der Docstring nennt die Loesch-Regel")
 check("editieren/loeschen: nur Benutzer" not in kopf,
       "und behauptet nicht mehr die alte")
+check("ALLE Felder" in kopf,
+      "er nennt auch die neue Regel (Administrator bearbeitet alle Felder)")
+check("weiterhin NUR \"jarvis\"" not in kopf,
+      "und nicht mehr, der fremde Text sei jarvis vorbehalten")
+
+# Dieselbe Falle eine Ebene hoeher: der Abschnittskommentar ueber den Routen.
+_kap = MAIN[MAIN.find("# ═══ Issue-Tracker"):]
+_kap = _kap[:_kap.find("@app.get")] if "@app.get" in _kap else _kap
+check("jarvis hat Vollzugriff" not in _kap,
+      "auch der Kommentar in main.py behauptet die alte Sonderrolle nicht mehr")
 
 
 section("5) Muelleimer an der Listenzeile")

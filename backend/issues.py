@@ -3,13 +3,19 @@
 Berechtigungsmodell:
 - Sehen: jeder authentifizierte Benutzer (alle Issues)
 - Erstellen: jeder authentifizierte Benutzer
-- Eigene Issues editieren ('editieren'): nur der Ersteller, solange status != "closed"
+- Eigene Issues editieren ('editieren'): der Ersteller, solange status != "closed"
 - Loesungsbereich ('bearbeiten', status + jarvis_comment): alle Administratoren
   (is_admin wird vom Aufrufer in main.py via _is_admin_user bestimmt) sowie "jarvis"
+- ALLE Felder einer FREMDEN Meldung (Titel, Text, Typ, Prioritaet, Anhaenge):
+  alle Administratoren sowie "jarvis" (``can_edit``) – auch bei status "closed"
 - Loeschen: alle Administratoren sowie "jarvis" (``can_delete``)
-- Fremden Meldungstext editieren: weiterhin NUR "jarvis" – „editieren" aendert
-  den Text eines anderen, „bearbeiten" pflegt nur den Loesungsbereich; das ist
-  bewusst zweierlei
+
+⚠ VORGABE 2026-08-28: Ein Administrator muss bei einer Meldung ALLE Felder
+bearbeiten koennen. Bis dahin trennte dieses Modul „editieren" (Meldungstext,
+nur der Ersteller) von „bearbeiten" (Loesungsbereich, Administratoren) und liess
+den fremden Text ausdruecklich nur ``jarvis`` aendern. Diese Trennung ist
+aufgehoben; sie bleibt nur noch als Aufteilung der OBERFLAECHE in zwei
+Formulare bestehen, nicht als Rechteschranke.
 
 Speicherung:
 - data/issues.json (Atomic-Write via .tmp + replace)
@@ -105,13 +111,29 @@ def is_jarvis(user: str) -> bool:
     return (user or "").strip().lower() == JARVIS_USER
 
 
-def can_edit(issue: dict, user: str) -> bool:
-    """Darf der Benutzer das Issue bearbeiten?
+def can_edit(issue: dict, user: str, is_admin: bool = False) -> bool:
+    """Darf der Benutzer die INHALTSFELDER des Issues aendern?
 
-    - jarvis: immer
+    - ``jarvis``: immer
+    - Administratoren: immer, auch bei fremden und geschlossenen Meldungen
+      (Vorgabe 2026-08-28: ein Administrator muss ALLE Felder bearbeiten
+      koennen – Titel, Text, Typ, Prioritaet und Anhaenge, nicht nur den
+      Loesungsbereich)
     - Autor: nur solange status != 'closed'
+
+    ⚠ ``is_admin`` MUSS uebergeben werden; die Vorgabe ``False`` ist
+    fail-closed. Das Modul kennt die Rechtelage nicht selbst: wer Administrator
+    ist, entscheidet ``main.py::_is_admin_user`` (Benutzerliste ODER
+    AD-Gruppe) – dieselbe Aufteilung wie bei ``can_delete``, ``update_issue``
+    und ``unseen_count``. Ein Aufrufer, der das Argument vergisst, bekommt das
+    alte, engere Verhalten und keine stille Rechteerweiterung.
+
+    Der Autor bleibt an ``status != 'closed'`` gebunden: eine abgeschlossene
+    Meldung ist die Grundlage der Antwort, die er bekommen hat – wer sie
+    nachtraeglich umschreibt, entwertet den Vorgang. Ein Administrator darf
+    genau das, weil er den Vorgang verantwortet.
     """
-    if is_jarvis(user):
+    if is_jarvis(user) or bool(is_admin):
         return True
     if issue.get("author", "").strip().lower() != (user or "").strip().lower():
         return False
@@ -132,10 +154,9 @@ def can_delete(issue: dict, user: str, is_admin: bool = False) -> bool:
     die AD-Freigaben leer oder falsch gesetzt sind (gleiche Begruendung wie bei
     „leer = niemand" in der Anmeldung).
 
-    Bewusst NICHT erweitert wird ``can_edit``: „editieren" ist das Aendern des
-    fremden Meldungstextes, „bearbeiten" der Loesungsbereich des Administrators.
-    Beides ueber einen Kamm zu scheren, hiesse einem Admin den Text eines
-    anderen umschreiben zu lassen – das ist etwas anderes als aufraeumen.
+    ``can_edit`` traegt seit dem 2026-08-28 dieselbe Regel (Vorgabe des
+    Nutzers) – vorher war das Loeschen ausdruecklich weiter gefasst als das
+    Bearbeiten.
     """
     return is_jarvis(user) or bool(is_admin)
 
@@ -241,10 +262,13 @@ def update_issue(user: str, issue_id: str, patch: dict,
                  *, is_admin: bool = False) -> tuple[dict | None, str]:
     """Issue bearbeiten. Gibt (issue, "") oder (None, err).
 
-    - Inhaltsfelder (title/body/type/priority): nur der Ersteller ('editieren'),
-      solange status != closed; jarvis immer.
+    - Inhaltsfelder (title/body/type/priority): der Ersteller ('editieren',
+      solange status != closed) sowie Administratoren und jarvis – IMMER.
     - Loesungsbereich (status/jarvis_comment): Administratoren ('bearbeiten',
       is_admin=True vom Aufrufer bestimmt) sowie jarvis.
+
+    Beide Bereiche stehen einem Administrator damit vollstaendig offen; die
+    Aufteilung in zwei Formulare ist nur noch eine Frage der Oberflaeche.
     """
     allowed_admin = is_admin or is_jarvis(user)
     with _lock:
@@ -258,17 +282,19 @@ def update_issue(user: str, issue_id: str, patch: dict,
             return None, "Issue nicht gefunden."
 
         current = issues[idx]
-        allowed_content = can_edit(current, user)
+        allowed_content = can_edit(current, user, is_admin)
         if not (allowed_content or allowed_admin):
-            if current.get("status") == "closed" and not is_jarvis(user):
-                return None, "Issue ist geschlossen – nur Jarvis darf bearbeiten."
+            if current.get("status") == "closed":
+                return None, ("Issue ist geschlossen – nur ein Administrator "
+                              "darf es noch bearbeiten.")
             return None, "Keine Berechtigung."
 
-        # Inhaltsfelder: nur Ersteller (bzw. jarvis) – Admins editieren fremde Inhalte NICHT
+        # Inhaltsfelder: Ersteller, Administratoren und jarvis
         for fld in ("title", "body", "type", "priority"):
             if fld in patch:
                 if not allowed_content:
-                    return None, "Keine Berechtigung – Inhalt darf nur der Ersteller editieren."
+                    return None, ("Keine Berechtigung – den Inhalt duerfen nur "
+                                  "der Ersteller und Administratoren aendern.")
                 val = (patch[fld] or "").strip() if isinstance(patch[fld], str) else patch[fld]
                 if fld == "title":
                     if not val:
@@ -431,8 +457,14 @@ def _attach_dir(issue_id: str) -> Path:
 
 
 def add_attachment(user: str, issue_id: str, filename: str,
-                   content: bytes) -> tuple[str | None, str]:
-    """Anhang zu Issue speichern. Gibt (saved_filename, "") oder (None, err)."""
+                   content: bytes, *, is_admin: bool = False) -> tuple[str | None, str]:
+    """Anhang zu Issue speichern. Gibt (saved_filename, "") oder (None, err).
+
+    Berechtigung wie ``can_edit`` – ein Anhang IST ein Feld der Meldung. Waere
+    ``is_admin`` hier nicht durchgereicht, duerfte ein Administrator jedes Feld
+    aendern ausser diesem, ohne dass die Oberflaeche den Unterschied erklaeren
+    koennte.
+    """
     if len(content) > MAX_ATTACHMENT_SIZE:
         return None, f"Datei zu gross (max {MAX_ATTACHMENT_SIZE // (1024*1024)} MiB)."
 
@@ -446,7 +478,7 @@ def add_attachment(user: str, issue_id: str, filename: str,
         if idx is None:
             return None, "Issue nicht gefunden."
         current = issues[idx]
-        if not can_edit(current, user):
+        if not can_edit(current, user, is_admin):
             return None, "Keine Berechtigung."
         if len(current.get("attachments", [])) >= MAX_ATTACHMENTS_PER_ISSUE:
             return None, f"Maximal {MAX_ATTACHMENTS_PER_ISSUE} Anhaenge pro Issue."
@@ -502,8 +534,9 @@ def get_attachment_path(issue_id: str, filename: str) -> Path | None:
         return None
 
 
-def delete_attachment(user: str, issue_id: str, filename: str) -> tuple[bool, str]:
-    """Anhang entfernen. Berechtigung wie update_issue."""
+def delete_attachment(user: str, issue_id: str, filename: str,
+                      *, is_admin: bool = False) -> tuple[bool, str]:
+    """Anhang entfernen. Berechtigung wie ``can_edit`` (siehe add_attachment)."""
     safe = _safe_filename(filename)
     with _lock:
         issues = _load_all()
@@ -515,7 +548,7 @@ def delete_attachment(user: str, issue_id: str, filename: str) -> tuple[bool, st
         if idx is None:
             return False, "Issue nicht gefunden."
         current = issues[idx]
-        if not can_edit(current, user):
+        if not can_edit(current, user, is_admin):
             return False, "Keine Berechtigung."
 
         att_dir = _attach_dir(issue_id)

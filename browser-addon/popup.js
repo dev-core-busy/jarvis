@@ -316,13 +316,60 @@ async function start() {
     // Das Pulldown gleich füllen – nicht erst beim Öffnen des Zahnrads:
     // sonst steht dort „Standard“, obwohl Vorlagen hinterlegt sind.
     vorlagenLaden();
-    if (z.ergebnis) zeigeGemerktes(z.ergebnis);
-    if (!_key) {
+    /* GEMERKTES GILT NUR FÜR DAS TICKET, ZU DEM ES GEHÖRT.
+     *
+     * Vorgabe des Nutzers 2026-08-28: passt der gemerkte Text nicht zum
+     * offenen Tab, werden die Felder GELEERT. Vorher stand er weiter da – mit
+     * Warnung, aber eben sichtbar und einfügbar. Ein Text im Feld ist eine
+     * Einladung, ihn zu benutzen; die stärkere Antwort ist, ihn wegzuräumen.
+     * Der Ticketbezug ist hier keine Bequemlichkeit, sondern eine
+     * Sicherheitsfrage: das Ergebnis geht am Ende an einen echten Kunden. */
+    const gemerkt = z.ergebnis;
+    const passt = gemerkt && gemerkt.key && _key && gemerkt.key === _key;
+    if (passt) {
+      zeigeGemerktes(gemerkt);
+    } else if (gemerkt && gemerkt.text) {
+      await felderLeeren(_key
+        ? "Der gemerkte Text gehörte zu " + gemerkt.key + ", offen ist "
+          + _key + " – die Felder wurden geleert."
+        : "Kein Jira-Ticket in diesem Tab. Der gemerkte Text zu "
+          + gemerkt.key + " wurde entfernt. Öffne ein Ticket "
+          + "(…/browse/ABC-123).");
+    } else if (!_key) {
       // Kein Fehler, sondern eine Auskunft: die Erweiterung ist bereit, dieser
       // Tab ist nur kein Ticket.
       melde("Kein Jira-Ticket in diesem Tab. Öffne ein Ticket (…/browse/ABC-123).");
     }
   }
+}
+
+/** Alles wegräumen, was zu einem Ticket gehört – Anzeige UND Gedächtnis.
+ *
+ * ⚠ DAS GEDÄCHTNIS MUSS MIT. Der gemerkte Text liegt im Speicher der
+ * Erweiterung (background.js::ergebnisSchreiben); nur das Feld zu leeren,
+ * hätte ihn beim nächsten Öffnen zurückgebracht – das Leeren sähe dann aus wie
+ * ein Fehler, und der fremde Text stünde wieder da.
+ *
+ * ⚠ UND DER LAUFENDE MERK-TIMER MUSS GESTOPPT WERDEN. Wer den Vorschlag
+ * bearbeitet hat, hat einen Timer offen, der `_letztes` eine halbe Sekunde
+ * später zurückschreibt. Ohne `clearTimeout` löscht man das Gedächtnis und der
+ * Timer legt es unmittelbar danach wieder an.
+ *
+ * Die VORLAGE bleibt bewusst stehen: sie ist eine Voreinstellung für den
+ * nächsten Lauf, kein Inhalt dieses Tickets.
+ */
+async function felderLeeren(meldungstext) {
+  clearTimeout(_merkTimer);
+  _letztes = null;
+  _fremdesErgebnis = false;
+  el.ergebnisFeld.value = "";
+  el.ergebnis.hidden = true;
+  el.ergebnisFuss.textContent = "";
+  el.hinweis.value = "";
+  // Fehlschlag ist hier nicht schlimm: die Anzeige ist bereits leer, und beim
+  // nächsten Öffnen greift dieselbe Prüfung erneut.
+  try { await frage({ art: "ergebnis_merken", wert: null }); } catch (e) {}
+  melde(meldungstext || "");
 }
 
 /* Ein gemerktes Ergebnis wieder anzeigen.
@@ -332,8 +379,9 @@ async function start() {
  * kann laengst ein ANDERES Ticket offen sein. Ein wiederhergestellter Text
  * ohne sichtbaren Bezug waere die Einladung, die Antwort auf Vorgang A in
  * Vorgang B einzufuegen – und der geht danach an einen echten Kunden.
- * Deshalb: bei Abweichung eine deutliche Warnung, und der Einfuegen-Knopf
- * traegt sie mit.
+ * Seit 2026-08-28 wird bei Abweichung GELEERT (siehe start()); die Warnung
+ * hier bleibt als zweite Schranke für den Fall, dass diese Funktion künftig
+ * von anderer Stelle gerufen wird.
  */
 function zeigeGemerktes(g) {
   if (!g || !g.text) return;
@@ -782,6 +830,17 @@ $("btn-kopieren").addEventListener("click", async () => {
     // stiller Fehlschlag wäre unsichtbar.
     melde("Kopieren fehlgeschlagen. Markiere den Text und kopiere ihn von Hand.");
   }
+});
+
+/* Von Hand leeren – bewusst OHNE Rückfrage.
+ *
+ * `window.confirm` ist in einem Extension-Popup ohnehin keine Option (siehe
+ * frageJaNein), und ein eigener Dialog wäre hier zu viel: der Text lässt sich
+ * mit einem Klick neu erzeugen, verloren geht höchstens eine Bearbeitung. Der
+ * Knopf ist als `leise` gezeichnet und steht hinter dem Kopieren.
+ */
+$("btn-leeren").addEventListener("click", async () => {
+  await felderLeeren("Geleert.");
 });
 
 start();

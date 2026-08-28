@@ -31,60 +31,83 @@
         return /^[A-Za-z0-9._-]+$/.test(n) ? n : '';
     }
 
-    function esc(s) {
-        return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
-            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
-        });
+    /* {marke} in einem Text, den JS selbst zusammenbaut.
+     *
+     * WARUM NICHT branding.js ueberlassen: dessen Durchlauf sammelt die
+     * Fundstellen beim Laden und nach einem Sprachwechsel ein. Was DANACH ins
+     * DOM kommt - und diese Zeile entsteht erst nach der Antwort von
+     * /api/jira/assist/health - waere nicht dabei; im Fenster stuende dann roh
+     * "{marke}-Adresse". `window.jarvisMarke` ist genau fuer diesen Fall da.
+     * Ohne Branding liefert es "Jarvis", also den richtigen Rueckfall. */
+    function mitMarke(text) {
+        var name = 'Jarvis';
+        try { if (window.jarvisMarke) name = window.jarvisMarke() || name; }
+        catch (e) { /* Rueckfall bleibt */ }
+        return String(text || '').split('{marke}').join(name);
     }
 
-    // ── Zustand: gemessen, nicht behauptet ──────────────────────────────────
-    /* Drei Zeilen mit je eigener Aussage. WICHTIG ist die dritte: passt die
-     * Adresse nicht zum Serverzertifikat, bricht der Hintergrund-Aufruf der
-     * Erweiterung wortlos ab – dort gibt es kein "trotzdem fortfahren" wie in
-     * einem Tab. Genau dieser Fehler hat beim Outlook-Add-in Tage gekostet,
-     * deshalb steht er hier VOR der Anleitung. */
-    function zeile(art, text) {
-        return '<li class="ja-st ja-st-' + art + '">' + esc(text) + '</li>';
+    // ── Die Serveradresse, die in die Erweiterung gehoert ───────────────────
+    /* Sie stand bis 2026-08-28 in einer eigenen Karte „Einsatzbereit?" ganz
+     * oben, zusammen mit zwei Zeilen, die nur bestaetigten, dass alles in
+     * Ordnung ist. Auf Vorgabe des Nutzers steht sie jetzt an der Stelle, an
+     * der sie gebraucht wird: Schritt 3, Punkt 2 – direkt neben dem Satz
+     * „diese Adresse eintragen".
+     *
+     * DIE ZERTIFIKATSPRUEFUNG IST MITGEWANDERT UND DARF NICHT ENTFALLEN:
+     * passt die Adresse nicht zum Serverzertifikat, bricht der
+     * Hintergrund-Aufruf der Erweiterung WORTLOS ab – dort gibt es kein
+     * „trotzdem fortfahren" wie in einem Tab. Genau dieser Fehler hat beim
+     * Outlook-Add-in Tage gekostet. */
+    /* `location.origin` ist NICHT immer eine brauchbare Adresse: bei einer
+     * lokalen Datei steht dort "file://", in einem abgeschotteten iframe
+     * "null". Beides in ein Feld zu schreiben, das der Benutzer KOPIERT und in
+     * die Erweiterung eintraegt, waere Unsinn - er bekaeme eine Adresse, unter
+     * der nie ein Server geantwortet hat. Dieselbe Absicherung wie in
+     * branding.js::eigeneAdresse; hier ohne Platzhaltertext, weil das Feld zum
+     * Kopieren da ist: laesst sich nichts ermitteln, steht lieber nichts. */
+    function eigeneAdresse() {
+        var o = window.location.origin || '';
+        if (/^https?:\/\/.+/.test(o)) return o;
+        if (window.location.hostname) return 'https://' + window.location.hostname;
+        return '';
     }
 
-    function zeigeStatus(d) {
-        var box = $('ja-status');
+    function zeigeAdresse(d) {
+        var box = $('ja-adresse');
         if (!box) return;
-        var out = [];
+        box.innerHTML = '';
 
-        out.push(zeile('ok', T('jaddon.st_free',
-            'Dein Konto ist für den Jira-Assistenten freigeschaltet.')));
+        var adresse = eigeneAdresse();
+        var nichtGedeckt = !!(d && d.zert_deckt_adresse === false);
+        // Deckt das Zertifikat die aufgerufene Adresse nicht, ist die Adresse
+        // im Zertifikat die richtige - nicht die, unter der man gerade steht.
+        var namen = (d && d.zert_namen) || [];
+        var eintragen = (nichtGedeckt && namen.length)
+            ? 'https://' + String(namen[0]).replace(/^\*\./, '')
+            : adresse;
 
-        if (d && d.jira_konfiguriert) {
-            out.push(zeile('ok', T('jaddon.st_jira_ok',
-                'Die Jira-Anbindung ist eingerichtet.')));
-        } else {
-            out.push(zeile('warn', T('jaddon.st_jira_no',
-                'Die Jira-Anbindung ist nicht eingerichtet – ohne sie kann kein '
-                + 'Ticket gelesen werden. Bitte die Administration ansprechen.')));
+        // Ein Kopierfeld ohne brauchbaren Inhalt waere eine Falle - lieber
+        // nichts anbieten als eine Adresse, unter der nie ein Server stand.
+        if (!eintragen) return;
+        box.appendChild(pfadZeile(mitMarke(T('jaddon.adr_lab', '{marke}-Adresse')),
+                                  eintragen,
+                                  T('jaddon.adr_copy', 'Adresse kopieren')));
+
+        if (nichtGedeckt) {
+            var warn = document.createElement('p');
+            warn.className = 'ja-warn';
+            // textContent: die Namen stammen aus dem Serverzertifikat.
+            warn.textContent = T('jaddon.adr_cert_bad',
+                'Wichtig: die Adresse, unter der du gerade hier bist (')
+                + adresse + T('jaddon.adr_cert_bad2',
+                '), steht nicht im Serverzertifikat – über sie erreicht die '
+                + 'Erweiterung den Server nicht. Trage genau den Namen oben ein.')
+                + (namen.length > 1
+                    ? ' ' + T('jaddon.adr_cert_more', 'Ebenfalls möglich: ')
+                      + namen.slice(1).join(', ')
+                    : '');
+            box.appendChild(warn);
         }
-
-        // Die Adresse, die der Benutzer in die Erweiterung eintragen soll.
-        var adresse = window.location.origin;
-        if (d && d.zert_deckt_adresse === false) {
-            // Nicht gedeckt: das ist die haeufigste unerklaerliche Fehlerursache.
-            out.push(zeile('warn', T('jaddon.st_cert_bad',
-                'Achtung: diese Adresse (' + adresse + ') steht nicht im '
-                + 'Serverzertifikat. Die Erweiterung wird den Server darüber '
-                + 'nicht erreichen. Benutze stattdessen: '
-                + ((d.zert_namen || []).join(', ') || '–'))));
-        } else if (d && d.zert_deckt_adresse === true) {
-            out.push(zeile('ok', T('jaddon.st_cert_ok',
-                'Trage in der Erweiterung diese Adresse ein: ') + adresse));
-        } else {
-            // null = nicht feststellbar. Das ist NICHT dasselbe wie "passt nicht"
-            // (z.B. TLS-Terminierung in einem Rueckwaertsproxy) – hier wird
-            // deshalb nichts behauptet.
-            out.push(zeile('info', T('jaddon.st_cert_unknown',
-                'Trage in der Erweiterung die Adresse ein, unter der du Jarvis '
-                + 'aufrufst (aktuell: ') + adresse + ').'));
-        }
-        box.innerHTML = out.join('');
     }
 
     // ── Herunterladen ───────────────────────────────────────────────────────
@@ -132,7 +155,9 @@
         }
     }
 
-    function pfadZeile(titel, pfad) {
+    /* `knopfText` ist optional: derselbe Baustein traegt einen Netzwerkpfad UND
+     * die Serveradresse - "Pfad kopieren" waere an der Adresse falsch. */
+    function pfadZeile(titel, pfad, knopfText) {
         var zeileEl = document.createElement('div');
         zeileEl.className = 'ja-pfad';
 
@@ -147,7 +172,7 @@
         var knopf = document.createElement('button');
         knopf.type = 'button';
         knopf.className = 'ja-btn';
-        knopf.textContent = T('jaddon.copy', 'Pfad kopieren');
+        knopf.textContent = knopfText || T('jaddon.copy', 'Pfad kopieren');
         knopf.addEventListener('click', function () { kopieren(pfad, knopf); });
 
         zeileEl.appendChild(lab);
@@ -262,10 +287,10 @@
             var h = await fetch('/api/jira/assist/health',
                                 { headers: { 'Authorization': 'Bearer ' + token() } });
             var hd = h.ok ? await h.json() : null;
-            zeigeStatus(hd);
+            zeigeAdresse(hd);
             paketBlock(hd);
         } catch (e) {
-            zeigeStatus(null);
+            zeigeAdresse(null);
             // Ohne Auskunft bleibt der Download – der funktioniert immer.
             paketBlock(null);
         }
@@ -294,7 +319,7 @@
             fetch('/api/jira/assist/health',
                   { headers: { 'Authorization': 'Bearer ' + token() } })
                 .then(function (r) { return r.ok ? r.json() : null; })
-                .then(function (d) { zeigeStatus(d); paketBlock(d); })
+                .then(function (d) { zeigeAdresse(d); paketBlock(d); })
                 .catch(function () {});
         });
     }

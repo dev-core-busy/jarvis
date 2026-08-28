@@ -135,26 +135,14 @@ body {
     line-height: 1.5;
 }
 
-/* ── Zustandsliste ─────────────────────────────────────────────────────── */
-.ja-status { list-style: none; margin: 0; padding: 0; }
-.ja-status li {
-    padding: 7px 0 7px 26px;
-    position: relative;
-    line-height: 1.5;
-    color: var(--text-primary);
-    border-bottom: 1px solid var(--border);
-}
-.ja-status li:last-child { border-bottom: 0; }
-/* Das Zeichen steht VOR dem Text, nicht als Farbe dahinter: ein Haken bzw. ein
- * Ausrufezeichen ist auch ohne Farbwahrnehmung eindeutig. */
-.ja-st::before {
-    position: absolute;
-    left: 2px;
-    font-weight: 700;
-}
-.ja-st-ok::before   { content: "✓"; color: var(--accent); }
-.ja-st-warn::before { content: "!"; color: var(--accent); }
-.ja-st-info::before { content: "i"; color: var(--text-muted); }
+/* ── Die Serveradresse in Schritt 3 ────────────────────────────────────────
+ * Die frueheren Regeln der Karte „Einsatzbereit?" (.ja-status/.ja-st*) sind
+ * mit ihr entfallen - toter Stil ist beim naechsten Feinschliff eine Falle,
+ * weil er wie eine benutzte Regel aussieht.
+ * Der Kasten sitzt IN einem Listenpunkt: eigener Abstand nach oben, damit die
+ * Adresse nicht am Satz darueber klebt. */
+.ja-adr { margin: 6px 0 2px; }
+.ja-adr .ja-pfad { margin: 0; }
 
 /* ── Schritte ──────────────────────────────────────────────────────────── */
 .ja-steps { margin: 6px 0 10px; padding-left: 22px; }

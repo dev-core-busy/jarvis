@@ -760,8 +760,18 @@ check("jarvis-lang-changed" in SEITE_JS,
 
 # "nicht feststellbar" ist NICHT dasselbe wie "passt nicht" – die Seite darf
 # daraus keine Warnung machen (Rueckwaertsproxy).
-check("=== false" in SEITE_JS and "=== true" in SEITE_JS,
-      "die Zertifikatsanzeige unterscheidet drei Zustaende")
+# ⚠ GEPRUEFT WIRD DIE EIGENSCHAFT, NICHT DIE SCHREIBWEISE. Die frühere Fassung
+# verlangte "=== true" UND "=== false", weil sie drei Zweige hatte. Seit die
+# Anzeige in Schritt 3 sitzt, gibt es nur noch ZWEI Ausgaenge (Warnung bzw.
+# keine) - "gedeckt" und "nicht feststellbar" sehen gleich aus, und das ist
+# richtig so: in beiden Faellen wird nichts behauptet. Entscheidend bleibt,
+# dass allein `=== false` warnt. Der Beweis am DOM steht in
+# tests/test_jira_addon_ui.js (alle drei Lagen).
+check("zert_deckt_adresse === false" in SEITE_JS,
+      "gewarnt wird NUR bei einer nachgewiesenen Abweichung")
+check("zert_deckt_adresse !==" not in SEITE_JS
+      and "!d.zert_deckt_adresse" not in SEITE_JS,
+      "ein fehlender Messwert loest KEINE Warnung aus (Rueckwaertsproxy)")
 
 # ── Drei CSS-Regeln, die NUR der Screenshot gefunden hat ──────────────────
 # jsdom rechnet kein Layout, hier wird deshalb die REGEL geprueft, nicht das
@@ -1482,5 +1492,65 @@ check("paket_bauen" in _ep,
       "und nimmt ihn aus paket_bauen, statt ihn selbst zu bilden")
 
 
+# ══ Die Serveradresse steht in Schritt 3, nicht in einer eigenen Karte ═════
+# Vorgabe 2026-08-28: die Karte „Einsatzbereit?" komplett raus, die Adresse
+# stattdessen dort, wo sie eingetragen wird.
+print("\n═══ Anleitungsseite: Adresse in Schritt 3, Punkt 2")
+_js_a = ohne_js_kommentare(SEITE_JS)
+for rest in ('ja-status', 'ja-st-', 'jaddon.status_h', 'jaddon.checking',
+             'jaddon.st_free', 'jaddon.st_jira_ok', 'jaddon.st_jira_no',
+             'jaddon.st_cert_ok', 'jaddon.st_cert_bad', 'jaddon.st_cert_unknown'):
+    check(rest not in SEITE and rest not in _js_a,
+          "Rest der Karte 'Einsatzbereit?' ist weg: %s" % rest)
+# Auch der Stil - toter Stil sieht beim naechsten Feinschliff wie eine
+# benutzte Regel aus.
+CSS_A = ohne_js_kommentare(
+    (ROOT / "frontend" / "css" / "jira_addon.css").read_text(encoding="utf-8"))
+check(".ja-status" not in CSS_A and ".ja-st-ok" not in CSS_A,
+      "und die zugehoerigen CSS-Regeln ebenfalls")
+# Die i18n-Schluessel duerfen nicht als Waisen liegenbleiben.
+for tot in ("'jaddon.status_h'", "'jaddon.checking'", "'jaddon.st_cert_ok'"):
+    check(tot not in I18N, "toter i18n-Schluessel entfernt: %s" % tot)
+
+# Der Platz ist Schritt 3, Punkt 2 - nicht irgendwo auf der Seite.
+_i_setup = SEITE.find('data-i18n="jaddon.setup_h"')
+_i_adr = SEITE.find('id="ja-adresse"')
+_i_use = SEITE.find('data-i18n="jaddon.use_h"')
+check(_i_setup >= 0 and _i_adr >= 0 and _i_use >= 0,
+      "Schritt 3, Adress-Kasten und Schritt 4 sind alle da")
+check(_i_setup < _i_adr < _i_use,
+      "der Adress-Kasten steht IN Schritt 3, nicht davor oder danach")
+check(SEITE.find('data-i18n-html="jaddon.setup_2"') < _i_adr,
+      "und direkt hinter dem Satz 'diese Adresse eintragen'")
+check("Einsatzbereit" not in I18N.split("'jaddon.setup_2'")[1][:400],
+      "der Satz verweist nicht mehr auf die entfernte Karte")
+
+# GEMESSEN: die Zeile wird wirklich gebaut, und die Zertifikatspruefung ist
+# MITGEWANDERT - ohne sie scheitert die Erweiterung wortlos.
+check("function zeigeAdresse(" in SEITE_JS, "zeigeAdresse() ersetzt zeigeStatus()")
+_za = ohne_js_kommentare(
+    (re.search(r"function zeigeAdresse\([\s\S]*?\n    \}", SEITE_JS) or [""])[0]
+    if re.search(r"function zeigeAdresse\([\s\S]*?\n    \}", SEITE_JS) else "")
+check("zert_deckt_adresse" in _za,
+      "die Zertifikatsmessung ist mitgewandert, nicht entfallen")
+check("zert_namen" in _za,
+      "und nennt bei einer Abweichung die Namen aus dem Zertifikat")
+check("pfadZeile(" in _za,
+      "die Adresse nutzt denselben Kopier-Baustein wie der Netzwerkpfad")
+check("innerHTML = ''" in _za or 'innerHTML = ""' in _za,
+      "der Kasten wird vor dem Fuellen geleert (kein Anhaeufen bei zwei Laeufen)")
+# {marke} wird SELBST aufgeloest: branding.js sammelt seine Fundstellen beim
+# Laden ein, diese Zeile entsteht erst nach der Antwort von /health.
+check("mitMarke(" in _za, "der Markenname wird im gebauten Text aufgeloest")
+check("window.jarvisMarke" in _js_a,
+      "und zwar ueber die dafuer vorgesehene Funktion aus branding.js")
+check("'{marke}'" in _js_a or '"{marke}"' in _js_a,
+      "der Platzhalter wird wirklich ersetzt, nicht nur gelesen")
+# Der Knopf darf an einer Adresse nicht "Pfad kopieren" heissen.
+check("jaddon.adr_copy" in _js_a and "'jaddon.adr_copy'" in I18N,
+      "der Kopier-Knopf traegt einen eigenen Text")
+for k in ("'jaddon.adr_lab'", "'jaddon.adr_copy'", "'jaddon.adr_cert_bad'"):
+    check(I18N.count(k) == 2, "%s ist in DE und EN hinterlegt" % k)
+
+
 print("\n%d OK, %d FAIL" % (_ok, _fail))
-sys.exit(1 if _fail else 0)

@@ -973,5 +973,140 @@ section("8) Die Ticketnummer-Erkennung – ausgefuehrt");
   }
 }
 
+(async () => {
+
+/* ── FELDER LEEREN, WENN DER TEXT NICHT ZUM TAB GEHÖRT ────────────────────
+ * Vorgabe des Nutzers 2026-08-28. Vorher blieb ein gemerkter Text stehen -
+ * mit Warnung, aber sichtbar und einfügbar. Ein Text im Feld ist eine
+ * Einladung, ihn zu benutzen; er geht am Ende an einen echten Kunden.
+ * GEMESSEN: start() wird mit echtem DOM ausgefuehrt. */
+{
+  const teile = [];
+  for (const name of ['melde', 'felderLeeren', 'zeigeGemerktes', 'mitAbgleich',
+                      'zeige', 'start', 'markeAnwenden']) {
+    const m = POPUP_JS.match(new RegExp('(?:async )?function ' + name
+                                        + '\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}'));
+    check(!!m, 'popup.js hat ' + name + '()');
+    if (m) teile.push(m[0]);
+  }
+
+  /* Der Lauf gibt zurueck, was NACH start() im Fenster steht - und was an den
+   * Hintergrund gemeldet wurde. Letzteres ist der eigentliche Punkt: nur das
+   * Feld zu leeren wuerde den Text beim naechsten Oeffnen zurueckbringen. */
+  // Die Attrappe muss `zustand` beantworten - sonst laeuft start() ins Leere.
+  const laufMit = async (tabKey, gemerkt, klickLeeren) => {
+    const dom = new JSDOM(POPUP_HTML, { url: 'https://x.test/',
+                                        runScripts: 'outside-only' });
+    const w = dom.window;
+    try {
+      const f = new w.Function('tabKey', 'gemerkt', 'klickLeeren', `
+          const gesendet = [];
+          const $ = (id) => document.getElementById(id);
+          const el = {
+            login: $("bereich-login"), arbeit: $("bereich-arbeit"),
+            basis: $("f-basis"), hinweis: $("f-hinweis"),
+            ergebnisFeld: $("f-ergebnis"), ergebnis: $("ergebnis"),
+            ergebnisFuss: $("ergebnis-fuss"), meldung: $("meldung"),
+            ticket: $("ticket-anzeige"), abmelden: $("btn-abmelden"),
+          };
+          let _marke = "Marke", _key = tabKey, _tabId = 1;
+          let _letztes = null, _fremdesErgebnis = false, _merkTimer = null;
+          const _originale = new Map();
+          async function frage(n) {
+            gesendet.push(n);
+            if (n && n.art === "zustand") {
+              return { ok: true, basis: "https://s.test", angemeldet: true,
+                       ergebnis: gemerkt };
+            }
+            return { ok: true };
+          }
+          async function tabErmitteln() { el.ticket.textContent = _key || ""; }
+          function vorlagenLaden() {}
+          function brandingHolen() {}
+          ${teile.join('\n')}
+          return (async () => {
+            el.hinweis.value = "bitte kurz halten";
+            await start();
+            if (klickLeeren) await felderLeeren("Geleert.");
+            return JSON.stringify({
+              text: el.ergebnisFeld.value,
+              sichtbar: !el.ergebnis.hidden,
+              fuss: el.ergebnisFuss.textContent,
+              hinweis: el.hinweis.value,
+              meldung: el.meldung.hidden ? "" : el.meldung.textContent,
+              geloescht: gesendet.some(n => n && n.art === "ergebnis_merken"
+                                            && n.wert === null),
+            });
+          })();`);
+      return JSON.parse(await f(tabKey, gemerkt, klickLeeren));
+    } finally { w.close(); }
+  };
+
+  const GEMERKT = { key: 'ABC-1', text: 'Sehr geehrte Damen und Herren …',
+                    modus: 'antwort', zeit: Date.now(), kommentare: 3 };
+
+  // 1) Passt zusammen -> der Text bleibt stehen (sonst waere das Gedaechtnis
+  //    wertlos: genau dafuer gibt es es).
+  {
+    const r = await laufMit('ABC-1', GEMERKT, false);
+    check(r.text === GEMERKT.text, 'gleiches Ticket: der Text bleibt', r.text);
+    check(r.sichtbar === true, 'und das Feld ist sichtbar');
+    check(r.geloescht === false, 'das Gedaechtnis wird NICHT geloescht');
+  }
+
+  // 2) ANDERES Ticket -> leeren.
+  {
+    const r = await laufMit('XYZ-9', GEMERKT, false);
+    check(r.text === '', 'anderes Ticket: der Text ist weg', r.text);
+    check(r.sichtbar === false, 'das Feld ist ausgeblendet');
+    check(r.fuss === '', 'die Fusszeile ebenfalls', r.fuss);
+    check(r.hinweis === '', 'auch der Zusatzwunsch', r.hinweis);
+    check(r.geloescht === true,
+          'und das GEDAECHTNIS ist geloescht (sonst kommt der Text zurueck)');
+    check(/ABC-1/.test(r.meldung) && /XYZ-9/.test(r.meldung),
+          'die Meldung nennt beide Ticketnummern', r.meldung);
+  }
+
+  // 3) KEIN Ticket im Tab -> ebenfalls leeren.
+  {
+    const r = await laufMit('', GEMERKT, false);
+    check(r.text === '', 'kein Ticket: der Text ist weg', r.text);
+    check(r.geloescht === true, 'und das Gedaechtnis ebenfalls');
+    check(/browse/.test(r.meldung),
+          'die Meldung sagt weiterhin, was zu tun ist', r.meldung);
+  }
+
+  // 4) Kein Ticket UND nichts gemerkt -> nur die Auskunft, kein Loeschbefehl
+  //    (ein Loeschen ohne Anlass waere ein Aufruf ins Leere).
+  {
+    const r = await laufMit('', null, false);
+    check(r.geloescht === false, 'ohne gemerkten Text wird nichts geloescht');
+    check(/browse/.test(r.meldung), 'die Auskunft steht trotzdem da', r.meldung);
+  }
+
+  // 5) Der Knopf leert von Hand - auch wenn alles zusammenpasst.
+  {
+    const r = await laufMit('ABC-1', GEMERKT, true);
+    check(r.text === '' && r.sichtbar === false,
+          'der Leeren-Knopf raeumt das Feld');
+    check(r.hinweis === '', 'und den Zusatzwunsch');
+    check(r.geloescht === true, 'und das Gedaechtnis');
+    check(r.meldung === 'Geleert.', 'mit Rueckmeldung', r.meldung);
+  }
+
+  check(/id="btn-leeren"/.test(POPUP_HTML), 'der Knopf steht im Fenster');
+  check(/btn-leeren[\s\S]{0,200}addEventListener/.test(POPUP_JS),
+        'und ist verdrahtet');
+  /* ⚠ DER LAUFENDE MERK-TIMER MUSS GESTOPPT WERDEN: wer den Vorschlag
+   * bearbeitet hat, hat einen Timer offen, der `_letztes` eine halbe Sekunde
+   * spaeter zurueckschreibt - das Gedaechtnis waere sofort wieder da. */
+  const fl = (POPUP_JS.match(/async function felderLeeren\([\s\S]*?\n\}/) || [''])[0];
+  check(/clearTimeout\(_merkTimer\)/.test(fl),
+        'felderLeeren stoppt den laufenden Merk-Timer');
+  check(/wert:\s*null/.test(fl), 'und loescht das Gedaechtnis wirklich');
+  check(/_letztes = null/.test(fl), 'der lokale Merker faellt mit');
+}
+
 console.log("\n" + ok + " OK, " + fail + " FAIL");
 process.exit(fail ? 1 : 0);
+})();

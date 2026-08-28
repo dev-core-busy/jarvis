@@ -3036,7 +3036,23 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     <button class="btn-primary" id="jshare-save" type="button" data-i18n="common.save" style="flex:0 0 auto;">Speichern</button>
                                     <span id="jshare-status" style="font-size:0.9em;"></span>
                                 </div>
-                                <p class="kb-hint" style="margin:10px 0 0;" data-i18n-html="jshare.note">Das Paket für die Freigabe holst du dir <b>in der Anleitung selbst</b>: Portal → Jira-Assistent, dort erscheinen für Administratoren die Download-Knöpfe. Nur dieser Weg trägt Marke und Symbol dieses Servers – <code>bauen.sh</code> erzeugt bewusst ein neutrales Paket. Nach einer Aktualisierung von {marke} gehört es <b>neu</b> auf die Freigabe, sonst installieren die Benutzer weiter den alten Stand.</p>
+
+                                <!-- ═══ Die Pakete für die Freigabe ═══
+                                     HIER, nicht in der Anleitung: der Administrator
+                                     pflegt den Pfad an dieser Stelle und braucht die
+                                     Datei genau hier. In der Anleitung hing der Knopf
+                                     hinter zwei Bedingungen (Pfad gesetzt UND Admin)
+                                     und war damit faktisch nicht vorhanden. Diese
+                                     Knöpfe sind IMMER da – unabhängig davon, ob oben
+                                     ein Pfad steht. -->
+                                <h4 style="margin:22px 0 6px;" data-i18n="jshare.dl_h">Pakete für die Freigabe herunterladen</h4>
+                                <p class="kb-hint" style="margin:0 0 8px;" data-i18n-html="jshare.dl_p">Diese beiden Dateien gehören auf die Freigabe. Nur dieser Weg trägt <b>Marke und Symbol</b> dieses Servers – <code>bauen.sh</code> erzeugt bewusst ein neutrales Paket. Für Chrome/Edge wird der Inhalt des ZIP <b>entpackt</b> in den oben eingetragenen Ordner gelegt (der Browser lädt eine Erweiterung nie aus einem ZIP), für Firefox die ZIP-Datei selbst.</p>
+                                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                                    <button class="btn-secondary" id="jshare-dl-chrome" type="button" data-i18n="jshare.dl_chrome" style="flex:0 0 auto;">Chrome / Edge (ZIP)</button>
+                                    <button class="btn-secondary" id="jshare-dl-firefox" type="button" data-i18n="jshare.dl_firefox" style="flex:0 0 auto;">Firefox (ZIP)</button>
+                                    <span id="jshare-dl-status" style="font-size:0.9em;"></span>
+                                </div>
+                                <p class="kb-hint" style="margin:10px 0 0;" data-i18n-html="jshare.note">Nach einer Aktualisierung von {marke} gehört das Paket <b>neu</b> auf die Freigabe – sonst installieren die Benutzer weiter den alten Stand, und niemand sieht warum.</p>
                             </div>
                         </div>
 
@@ -4807,7 +4823,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
     <script src="/static/js/icons.js?v=1"></script>
-    <script src="/static/js/i18n.js?v=186"></script>
+    <script src="/static/js/i18n.js?v=188"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=21"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -4825,7 +4841,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/mcp.js?v=5"></script>
     <script src="/static/js/vision.js?v=31"></script>
     <script src="/static/js/confluence.js?v=7"></script>
-    <script src="/static/js/jira.js?v=9"></script>
+    <script src="/static/js/jira.js?v=10"></script>
     <!-- sapcert.js VOR sap.js: der Reiter haengt den Baustein beim Laden ein. -->
     <script src="/static/js/sapcert.js?v=1"></script>
     <script src="/static/js/sap.js?v=4"></script>

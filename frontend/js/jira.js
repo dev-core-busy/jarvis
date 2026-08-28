@@ -71,6 +71,10 @@
                 if (el) el.addEventListener('keydown', function (e) { if (e.key === 'Enter') Manager.search(); });
             });
             var sh = $('jshare-save'); if (sh) sh.addEventListener('click', this.saveShare.bind(this));
+            ['chrome', 'firefox'].forEach(function (v) {
+                var b = $('jshare-dl-' + v);
+                if (b) b.addEventListener('click', function () { Manager.ladePaket(v, b); });
+            });
             var vs = $('jvorl-save'); if (vs) vs.addEventListener('click', this.saveVorlage.bind(this));
             var vn = $('jvorl-new');
             if (vn) vn.addEventListener('click', function () { Manager.editVorlage(null, false); });
@@ -147,6 +151,51 @@
             }).then(function (r) { return r.json(); })
               .then(function () { setz('✓ Gespeichert', 'ok'); })
               .catch(function () { setz('✗ Fehler beim Speichern', 'error'); });
+        },
+
+        /* Das fertige Paket herunterladen – der Weg an die Datei, die auf die
+         * Freigabe gehoert.
+         *
+         * Bewusst per fetch + Blob statt <a href="…?token=">: ein Query-Token
+         * landet im Browser-Verlauf und in Proxy-Logs. Der Klick kann den
+         * Authorization-Header setzen, hier gibt es also keinen Grund dafuer.
+         */
+        ladePaket: function (variante, knopf) {
+            var s = $('jshare-dl-status');
+            var setz = function (t, art) {
+                if (!s) return;
+                s.textContent = t || '';
+                s.style.color = art === 'ok' ? 'var(--success, #2ecc71)'
+                              : art === 'error' ? 'var(--danger, #e74c3c)' : '';
+            };
+            var alt = knopf.textContent;
+            knopf.disabled = true;
+            knopf.textContent = 'wird erstellt…';
+            setz('');
+            fetch('/api/jira/assist/paket?variante=' + encodeURIComponent(variante),
+                  { headers: authHeaders() })
+                .then(function (r) {
+                    if (r.ok) return r.blob();
+                    // Der Server antwortet bei fachlichem Fehlschlag mit 400 und
+                    // Klartext – "HTTP 400" allein waere wertlos.
+                    return r.json().then(function (d) {
+                        throw new Error((d && d.error) || ('HTTP ' + r.status));
+                    }, function () { throw new Error('HTTP ' + r.status); });
+                })
+                .then(function (blob) {
+                    var url = URL.createObjectURL(blob);
+                    var a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'jarvis-jira-' + variante + '.zip';
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    // Erst nach dem Klick freigeben, sonst ist der Blob schon weg.
+                    setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+                    setz('✓ Heruntergeladen', 'ok');
+                })
+                .catch(function (e) { setz('✗ ' + (e.message || e), 'error'); })
+                .then(function () { knopf.disabled = false; knopf.textContent = alt; });
         },
 
         test: function () {

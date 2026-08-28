@@ -82,10 +82,10 @@
         <details class="ja-det" open>
             <summary data-i18n="jaddon.inst_chrome_h">Chrome oder Edge</summary>
             <ol class="ja-steps">
-                <li data-i18n-html="jaddon.inst_chrome_1">Das Paket in einen <b>lokalen Ordner</b> legen, der liegen bleiben darf (z.&nbsp;B. <code>C:\Tools\jarvis-jira</code>): den Ordner von der Netzfreigabe aus Schritt&nbsp;1 dorthin <b>kopieren</b> – oder, wenn dort ein Download-Knopf stand, das ZIP <b>entpacken</b>. <b>Der Ordner darf danach nicht gelöscht oder verschoben werden</b>, der Browser lädt die Erweiterung bei jedem Start von dort. Deshalb lokal und nicht direkt von der Freigabe: ohne Netz startet die Erweiterung sonst nicht.</li>
+                <li data-i18n-html="jaddon.inst_chrome_1">Steht oben ein <b>Netzwerkpfad</b>, ist nichts vorzubereiten – der Ordner liegt schon fertig da. Nur falls dort ein Download-Knopf stand: das ZIP in einen Ordner <b>entpacken</b>, der liegen bleiben darf.</li>
                 <li data-i18n-html="jaddon.inst_chrome_2">In der Adresszeile <code>chrome://extensions</code> öffnen (in Edge: <code>edge://extensions</code>).</li>
                 <li data-i18n-html="jaddon.inst_chrome_3">Oben rechts <b>Entwicklermodus</b> einschalten.</li>
-                <li data-i18n-html="jaddon.inst_chrome_4">Auf <b>Entpackt laden</b> klicken und den entpackten Ordner auswählen – den Ordner selbst, nicht das ZIP und keine einzelne Datei.</li>
+                <li data-i18n-html="jaddon.inst_chrome_4">Auf <b>Entpackt laden</b> klicken und den <b>Ordner aus Schritt&nbsp;1</b> auswählen: den Pfad oben kopieren und in der Ordnerauswahl oben in die Adresszeile einfügen. Den Ordner selbst wählen – nicht das ZIP und keine einzelne Datei. <b>Der Ordner muss erreichbar bleiben</b>, der Browser lädt die Erweiterung bei jedem Start von dort.</li>
                 <li data-i18n-html="jaddon.inst_chrome_5">Die Erweiterung erscheint in der Liste. Über das Puzzle-Symbol rechts oben lässt sie sich an die Symbolleiste <b>anheften</b>.</li>
             </ol>
             <p class="ja-hint" data-i18n="jaddon.inst_chrome_note">Chrome erinnert bei jedem Start daran, dass Erweiterungen im Entwicklermodus laufen. Das ist normal und verschwindet erst, wenn die Erweiterung zentral über eine Gruppenrichtlinie verteilt wird.</p>
@@ -96,7 +96,7 @@
             <ol class="ja-steps">
                 <li data-i18n-html="jaddon.inst_ff_1">In der Adresszeile <code>about:debugging</code> öffnen.</li>
                 <li data-i18n-html="jaddon.inst_ff_2">Links <b>Dieses Firefox</b> anklicken.</li>
-                <li data-i18n-html="jaddon.inst_ff_3">Auf <b>Temporäres Add-on laden</b> klicken und die ZIP-Datei aus Schritt&nbsp;1 auswählen – von der Netzfreigabe oder aus dem Download-Ordner. <b>Nicht entpacken.</b></li>
+                <li data-i18n-html="jaddon.inst_ff_3">Auf <b>Temporäres Add-on laden</b> klicken und die <b>ZIP-Datei aus Schritt&nbsp;1</b> auswählen: den Pfad oben kopieren und in der Dateiauswahl einfügen. <b>Nicht entpacken.</b></li>
             </ol>
             <p class="ja-warn" data-i18n-html="jaddon.inst_ff_note"><b>In Firefox ist das nur vorübergehend:</b> beim Beenden des Browsers ist die Erweiterung wieder weg. Dauerhaft geht es dort nur mit einer Signatur von Mozilla – das gilt auch für Erweiterungen, die nicht über deren Verzeichnis verteilt werden. Wer Firefox dauerhaft nutzen möchte, wendet sich an die Administration.</p>
         </details>
@@ -156,13 +156,13 @@
 <script src="/static/js/icons.js?v=1"></script>
 <script src="/static/js/cpubar.js?v=1"></script>
 <script src="/static/js/theme.js?v=3"></script>
-<script src="/static/js/i18n.js?v=186"></script>
+<script src="/static/js/i18n.js?v=188"></script>
 <script src="/static/js/branding.js?v=25"></script>
 <script src="/static/js/sessions.js?v=8"></script>
 <script src="/static/js/logo_home.js?v=1"></script>
 <script src="/static/js/settings_btn.js?v=3"></script>
 <script src="/static/js/activity.js?v=2"></script>
-<script src="/static/js/issues.js?v=8"></script>
-<script src="/static/js/jira_addon.js?v=3"></script>
+<script src="/static/js/issues.js?v=9"></script>
+<script src="/static/js/jira_addon.js?v=4"></script>
 </body>
 </html>

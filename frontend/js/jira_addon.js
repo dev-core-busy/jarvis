@@ -12,10 +12,6 @@
 
     function token() { return localStorage.getItem('jarvis_token') || ''; }
 
-    /* Gemerkt, weil der Paket-Block bei jedem Sprachwechsel neu gebaut wird –
-     * ein zweites /api/me dafuer waere ein Aufruf fuer eine Zahl, die feststeht. */
-    var _istAdmin = false;
-
     function T(key, rueckfall) {
         // i18n.js ist eingebunden; faellt es aus, steht der deutsche Text da.
         try {
@@ -159,33 +155,6 @@
         return b;
     }
 
-    /* Wer das Paket auf die Freigabe legt, braucht es GEBRANDET – und das gibt
-     * es nur hier: `bauen.sh` erzeugt ausdrücklich ein neutrales Paket, Marke
-     * und Symbol setzt der Server beim Abruf. Ohne diesen Zweig hätte ein
-     * Administrator nach dem Eintragen des Pfades keinen Weg mehr an die
-     * Datei – der Download-Knopf ist dann ja ersetzt. */
-    function adminBlock() {
-        var kasten = document.createElement('div');
-        kasten.className = 'ja-adminbau';
-
-        var text = document.createElement('p');
-        text.className = 'ja-hint';
-        text.textContent = T('jaddon.admin_build',
-            'Nur für Administratoren: Hier liegt das Paket, das auf die '
-            + 'Freigabe gehört – es trägt Marke und Symbol dieses Servers. Nach '
-            + 'einer Aktualisierung gehört es neu dorthin.');
-        kasten.appendChild(text);
-
-        var reihe = document.createElement('div');
-        reihe.className = 'ja-dl';
-        [['chrome', T('jaddon.dl_chrome', 'Für Chrome / Edge')],
-         ['firefox', T('jaddon.dl_firefox', 'Für Firefox')]].forEach(function (v) {
-            reihe.appendChild(dlKnopf(v[0], v[1]));
-        });
-        kasten.appendChild(reihe);
-        return kasten;
-    }
-
     function paketBlock(d) {
         var box = $('ja-paket');
         if (!box) return;
@@ -213,7 +182,6 @@
                 + 'einfügen. Kommst du nicht an die Freigabe, wende dich an die '
                 + 'Administration.');
             box.appendChild(hinweis);
-            if (_istAdmin) box.appendChild(adminBlock());
         }
     }
 
@@ -268,8 +236,7 @@
         if (app) app.classList.remove('hidden');
 
         // Das Zahnrad nur fuer Administratoren – wie auf den anderen Bereichsseiten.
-        _istAdmin = !!(me && me.is_admin);
-        if (_istAdmin) {
+        if (me && me.is_admin) {
             var s = $('ja-settings-btn');
             if (s) s.style.display = '';
         }

@@ -1211,8 +1211,15 @@ for k in ("jshare.h", "jshare.intro", "jshare.chrome", "jshare.firefox",
 # Chrome-Schritt muss den Weg ueber die Freigabe nennen.
 check("Netzfreigabe" in SEITE or "Freigabe" in SEITE,
       "die Anleitung kennt den Weg ueber die Freigabe")
-check("lokalen Ordner" in I18N,
-      "und sagt, dass lokal kopiert wird (ohne Netz startet sie sonst nicht)")
+# Der Benutzer laedt NICHTS herunter und kopiert NICHTS: die Anleitung verweist
+# auf den Ordner, den der Administrator eingetragen hat.
+_ch1 = re.search(r"'jaddon\.inst_chrome_1':\s*'([^']*)'", I18N)
+check(_ch1 is not None and "nichts vorzubereiten" in _ch1.group(1),
+      "Schritt 1 verlangt kein Kopieren mehr",
+      _ch1.group(1)[:60] if _ch1 else "")
+_ch4 = re.search(r"'jaddon\.inst_chrome_4':\s*'([^']*)'", I18N)
+check(_ch4 is not None and "Schritt&nbsp;1" in _ch4.group(1),
+      "sondern verweist auf den konfigurierten Ordner")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1370,12 +1377,18 @@ if _pil:
 # Mit gesetztem Pfad ist der Download-Knopf ersetzt – und `bauen.sh` brandet
 # ausdruecklich NICHT. Ohne diesen Zweig haette der Administrator keinen Weg
 # mehr an die Datei, die auf die Freigabe gehoert.
-check("adminBlock" in _sj, "die Anleitung bietet Administratoren den Bau an")
-_pblock = re.search(r"function paketBlock\([\s\S]*?\n    \}", _sj)
-check(_pblock is not None, "paketBlock gefunden (sonst prueft die Zeile darunter nichts)")
-_mit = re.search(r"if \(mitPfad\) \{([\s\S]*?)\n        \}", _pblock.group(0) if _pblock else "")
-check(_mit is not None and "_istAdmin" in _mit.group(1) and "adminBlock" in _mit.group(1),
-      "der Admin-Kasten haengt IM mitPfad-Zweig und hinter _istAdmin")
+# ⚠ ER SITZT IM REITER, NICHT IN DER ANLEITUNG. Erste Fassung versteckte ihn
+# dort hinter ZWEI Bedingungen (Pfad gesetzt UND Administrator) – aus dem
+# Betrieb gemeldet als "es existiert keine Moeglichkeit, die ZIPs
+# herunterzuladen". Jetzt steht er dort, wo der Administrator die Freigabe
+# pflegt, und haengt an keiner Bedingung.
+check("adminBlock" not in _sj,
+      "der versteckte Kasten in der Anleitung ist weg")
+check('id="jshare-dl-chrome"' in SETTINGS_HTML
+      and 'id="jshare-dl-firefox"' in SETTINGS_HTML,
+      "beide Knoepfe stehen im Jira-Reiter")
+check("ladePaket" in JS_JIRA and "/api/jira/assist/paket" in JS_JIRA,
+      "und holen wirklich das Paket")
 BAUEN_SH = (ROOT / "browser-addon" / "bauen.sh").read_text(encoding="utf-8")
 check("BRANDET NICHT" in BAUEN_SH, "bauen.sh sagt selbst, dass es nicht brandet")
 # Und die Texte duerfen nicht das Gegenteil behaupten (diese Fehlerklasse hat

@@ -18218,12 +18218,31 @@ async def api_issues_list(request: Request, user: str = Depends(require_auth_or_
     })
 
 
+# Wie viele Eintraege die Badge-Liste HOECHSTENS ueber die Leitung schickt.
+# ⚠ Das ist ein TRANSPORT-Deckel, keine zweite Zaehlung: `count` bleibt die
+# volle Zahl aus `unseen_details`. Die Oberflaeche vergleicht beides und
+# schreibt „… und N weitere" – ein stiller Schnitt liesse den Benutzer die
+# gekuerzte Liste fuer vollstaendig halten (Register).
+_ISSUE_NOTIF_ITEMS_MAX = 12
+
+
 @app.get("/api/issues/notifications")
 async def api_issues_notifications(user: str = Depends(require_auth_or_agent)):
-    """Badge-Anzahl: eigene Issues mit ungesehener Status-Aenderung PLUS – fuer
-    Admins – neue Issues anderer seit dem letzten 'gesehen'."""
-    return JSONResponse({"ok": True,
-                         "count": _issues_mod.unseen_count(user, is_admin=_is_admin_user(user))})
+    """Badge-Anzahl UND die Eintraege dahinter: eigene Issues mit ungesehener
+    Status-Aenderung PLUS – fuer Admins – neue Issues anderer seit dem letzten
+    'gesehen'.
+
+    Die Eintraege speisen den Mouseover am Badge. Sie enthalten nichts, was
+    `GET /api/issues` nicht ohnehin jedem angemeldeten Benutzer zeigt – der
+    Melder-Name laeuft wie ueberall durch `_mit_anzeigenamen` (Domaenen-
+    Praefix), damit dort nicht dieselbe Person in zwei Schreibweisen steht.
+    """
+    posten = _issues_mod.unseen_details(user, is_admin=_is_admin_user(user))
+    return JSONResponse({
+        "ok": True,
+        "count": len(posten),
+        "items": _mit_anzeigenamen(posten[:_ISSUE_NOTIF_ITEMS_MAX]),
+    })
 
 
 @app.post("/api/issues/notifications/seen")

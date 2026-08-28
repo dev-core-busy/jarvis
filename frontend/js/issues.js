@@ -123,9 +123,50 @@
 .jv-iss-item-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
 .jv-iss-item-title{font-weight:600;color:var(--text-primary);font-size:14px;flex:1;min-width:0;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+/* pointer-events:auto (frueher none) – der Badge MUSS den Zeiger annehmen,
+   sonst gibt es kein Mouseover. Ein Klick darauf geht durch Bubbling weiter an
+   den Knopf, der ihn ohnehin schon oeffnet. */
 .jv-iss-notif{position:absolute;top:-4px;right:-4px;min-width:16px;height:16px;border-radius:8px;
   background:var(--danger);color:#fff;font-size:10px;font-weight:700;line-height:16px;text-align:center;
-  padding:0 4px;pointer-events:none;box-shadow:0 0 0 2px var(--bg-primary,#0a0e17);}
+  padding:0 4px;pointer-events:auto;cursor:pointer;box-shadow:0 0 0 2px var(--bg-primary,#0a0e17);}
+/* ── Mouseover am Badge: was hinter der Zahl steckt ──────────────────
+   DECKENDE Flaeche (Register): das Panel liegt ueber der Seite. Es haengt an
+   body und ist fixed positioniert – in der Titelleiste eingehaengt wuerde es
+   an deren overflow/Stapelkontext haengenbleiben und auf schmalen Fenstern
+   abgeschnitten. z-index UNTER dem Modal (99999): oeffnet sich der Dialog,
+   gehoert er nach vorn.
+   ACHTUNG: dieser Block steht IN einem Template-Literal – keine Backticks. */
+.jv-iss-tip{position:fixed;z-index:99990;display:none;width:min(360px,calc(100vw - 16px));
+  max-height:min(60vh,420px);overflow-y:auto;background:var(--bg-secondary);
+  color:var(--text-primary);border:1px solid rgba(var(--accent-rgb),.35);border-radius:10px;
+  box-shadow:0 12px 32px rgba(var(--shadow-rgb),.5);
+  font-family:system-ui,-apple-system,sans-serif;font-size:12px;padding:8px;}
+.jv-iss-tip-h{font-size:11px;font-weight:700;color:var(--text-secondary);
+  text-transform:uppercase;letter-spacing:.04em;padding:2px 4px 6px;}
+.jv-iss-tip-row{display:block;width:100%;text-align:left;background:none;border:none;
+  border-radius:7px;padding:7px 8px;cursor:pointer;color:inherit;font:inherit;}
+.jv-iss-tip-row:hover,.jv-iss-tip-row:focus-visible{background:rgba(var(--accent-rgb),.10);outline:none;}
+.jv-iss-tip-top{display:flex;align-items:center;gap:6px;}
+.jv-iss-tip-t{font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;color:var(--text-primary);}
+/* KONTRAST GEMESSEN, nicht geschaetzt (Chrome, Hell-Modus). Die naheliegenden
+   Signalfarben sind bei 9 px unlesbar: weiss auf var(--warning) = 2,15:1 und
+   weiss auf #3b82f6 = 3,68:1. Abgedunkelt auf 5,05:1 bzw. 5,12:1 - dieselbe
+   Korrektur wie beim SAP-Zertifikatsfeld. Die Pille bringt ihre eigene Flaeche
+   mit, der Wert gilt deshalb in BEIDEN Themes. */
+.jv-iss-tip-k{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;
+  padding:1px 6px;border-radius:9px;color:#fff;background:#4b5563;flex:0 0 auto;}
+.jv-iss-tip-k.edited{background:#b45309;}
+.jv-iss-tip-k.new{background:#2563eb;}
+.jv-iss-tip-sub{color:var(--text-secondary);font-size:11px;margin-top:2px;}
+.jv-iss-tip-c{color:var(--text-secondary);font-size:11px;margin-top:3px;font-style:italic;
+  overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;
+  -webkit-box-orient:vertical;}
+/* --text-muted waere hier 3,72:1 bei 10 px - fuer eine Zeile, die eine
+   Kuerzung erklaert, zu wenig. --text-secondary misst 7,53:1. */
+.jv-iss-tip-more{color:var(--text-secondary);font-size:11px;padding:6px 8px 2px;
+  border-top:1px solid rgba(var(--fg-rgb),.08);margin-top:4px;}
+.jv-iss-tip-hint{color:var(--text-secondary);font-size:10px;padding:4px 8px 0;}
 .jv-iss-badge{font-size:10px;padding:2px 7px;border-radius:10px;font-weight:600;
   text-transform:uppercase;letter-spacing:.04em;color:#fff;background:#6b7280;}
 .jv-iss-badge.bug{background:var(--danger);}
@@ -220,6 +261,11 @@
         // Mit dem Oeffnen gelten Status-/Kommentar-Aenderungen als gesehen
         fetch('/api/issues/notifications/seen', { method: 'POST', headers: _headers() }).catch(() => {});
         document.querySelectorAll('.jv-iss-notif').forEach(b => { b.style.display = 'none'; });
+        // Der gemerkte Stand gehoert mit weg – sonst zeigt ein Hover nach dem
+        // Schliessen eine Liste, die soeben als gesehen gemeldet wurde.
+        _notifCount = 0;
+        _notifItems = [];
+        _tipAus();
         if (initialView === 'create') {
             _showForm(null);
         } else {
@@ -705,6 +751,14 @@
                 b = document.createElement('span');
                 b.className = 'jv-iss-notif';
                 b.style.display = 'none';
+                // ⚠ LEERER title IST ABSICHT und keine Vergesslichkeit: der
+                // Knopf darunter traegt title="Issues / Feedback". Ohne das
+                // leere Attribut sucht der Browser beim Hovern des Badges beim
+                // Vorfahren weiter und zeigt SEINEN nativen Tooltip ZUSAETZLICH
+                // zu unserem Panel – zwei Kaesten uebereinander.
+                b.setAttribute('title', '');
+                b.addEventListener('mouseenter', () => _tipAn(b));
+                b.addEventListener('mouseleave', _tipAusGleich);
                 btn.appendChild(b);
             }
             els.push(b);
@@ -720,11 +774,134 @@
             if (!r.ok) return;
             const d = await r.json();
             const n = d.count || 0;
+            _notifCount = n;
+            _notifItems = Array.isArray(d.items) ? d.items : [];
             els.forEach(b => {
                 if (n > 0) { b.textContent = n > 99 ? '99+' : String(n); b.style.display = ''; }
                 else { b.style.display = 'none'; }
             });
+            // Steht das Panel gerade offen, muss es dem neuen Stand folgen –
+            // sonst zeigt es nach dem 60-s-Takt eine Liste, die es nicht mehr
+            // gibt (Register: eine Anzeige darf keinen Zustand behaupten, den
+            // sie nicht kennt). Bei 0 verschwindet es mitsamt dem Badge.
+            if (_tip && _tip.style.display !== 'none') {
+                if (n > 0) _tipZeichnen(); else _tipAus();
+            }
         } catch (e) { /* offline */ }
+    }
+
+    // ─── Mouseover am Badge: die Liste hinter der Zahl ────────────────
+    // WARUM UEBERHAUPT: der Badge sagt "3" und sonst nichts. Wer wissen will,
+    // WAS passiert ist, musste den Dialog oeffnen – und damit gilt alles als
+    // gesehen, der Badge ist weg, und die Frage "was war das nochmal?" ist
+    // nicht mehr beantwortbar. Das Panel zeigt es, OHNE etwas als gesehen zu
+    // markieren.
+    let _tip = null;
+    let _tipTimer = null;
+    let _notifItems = [];
+    let _notifCount = 0;
+
+    function _tipEl() {
+        if (_tip) return _tip;
+        _tip = document.createElement('div');
+        _tip.className = 'jv-iss-tip';
+        _tip.setAttribute('role', 'group');
+        // Der Zeiger muss vom Badge INS Panel wandern koennen (die Zeilen sind
+        // anklickbar). Deshalb haelt das Panel sich selbst offen.
+        _tip.addEventListener('mouseenter', () => clearTimeout(_tipTimer));
+        _tip.addEventListener('mouseleave', _tipAusGleich);
+        document.body.appendChild(_tip);
+        return _tip;
+    }
+
+    function _tipZeichnen() {
+        const el = _tipEl();
+        el.setAttribute('aria-label', window.t('issues.notif_title'));
+        const zeilen = _notifItems.map(it => {
+            const art = it.kind === 'new' ? 'new' : 'edited';
+            const marke = window.t(art === 'new' ? 'issues.notif_new' : 'issues.notif_edited');
+            // Fremdtext: Titel, Melder und Kommentar kommen aus einer fremden
+            // Meldung und werden ausnahmslos maskiert.
+            const sub = art === 'new'
+                ? window.t('issues.notif_from') + ' ' + _escape(it.author || '–')
+                : _statusLabel(it.status);
+            const komm = it.comment
+                ? `<div class="jv-iss-tip-c">${_escape(it.comment)}</div>` : '';
+            return `<button type="button" class="jv-iss-tip-row" data-id="${_escape(it.id)}">
+                <div class="jv-iss-tip-top">
+                    <span class="jv-iss-tip-k ${art}">${_escape(marke)}</span>
+                    <span class="jv-iss-tip-t">${_escape(it.title) || '–'}</span>
+                </div>
+                <div class="jv-iss-tip-sub">${sub} · ${_escape(_fmtDate(it.ts))}</div>
+                ${komm}
+            </button>`;
+        }).join('');
+        // ⚠ Die Restzahl MUSS dastehen: der Server deckelt die Uebertragung bei
+        // 12. Ohne diese Zeile haelt der Benutzer die gekuerzte Liste fuer
+        // vollstaendig, waehrend der Badge eine groessere Zahl zeigt.
+        const rest = _notifCount - _notifItems.length;
+        const mehr = rest > 0
+            ? `<div class="jv-iss-tip-more">${_escape(window.t('issues.notif_more').replace('{n}', String(rest)))}</div>`
+            : '';
+        el.innerHTML = `<div class="jv-iss-tip-h">${_escape(window.t('issues.notif_title'))} (${_notifCount})</div>`
+            + (zeilen || `<div class="jv-iss-tip-hint">${_escape(window.t('issues.none_found'))}</div>`)
+            + mehr
+            + `<div class="jv-iss-tip-hint">${_escape(window.t('issues.notif_hint'))}</div>`;
+        el.querySelectorAll('.jv-iss-tip-row').forEach(b => {
+            b.addEventListener('click', () => {
+                _tipAus();
+                openIssue(b.getAttribute('data-id'));
+            });
+        });
+    }
+
+    function _tipAn(anker) {
+        clearTimeout(_tipTimer);
+        if (!_notifCount) return;
+        const el = _tipEl();
+        _tipZeichnen();
+        el.style.display = 'block';
+        // Erst nach dem Einblenden messen – ein verstecktes Element hat die
+        // Breite 0, die Klammerung liefe ins Leere (Register).
+        const a = anker.getBoundingClientRect();
+        const b = el.getBoundingClientRect();
+        const rand = 8;
+        let links = a.right - b.width;               // rechtsbuendig zum Badge
+        links = Math.max(rand, Math.min(links, window.innerWidth - b.width - rand));
+        let oben = a.bottom + 8;
+        // Kein Platz nach unten? Dann darueber – sonst haengt das Panel im
+        // Nichts und ist unlesbar.
+        if (oben + b.height > window.innerHeight - rand) {
+            oben = Math.max(rand, a.top - b.height - 8);
+        }
+        el.style.left = links + 'px';
+        el.style.top = oben + 'px';
+    }
+
+    function _tipAus() {
+        clearTimeout(_tipTimer);
+        if (_tip) _tip.style.display = 'none';
+    }
+
+    // Verzoegert schliessen: der Weg vom Badge ins Panel fuehrt ueber ein paar
+    // Pixel Zwischenraum. Ohne die Frist waere keine Zeile je anklickbar.
+    function _tipAusGleich() {
+        clearTimeout(_tipTimer);
+        _tipTimer = setTimeout(_tipAus, 220);
+    }
+
+    /** Modal oeffnen und direkt eine bestimmte Meldung zeigen. */
+    function openIssue(id) {
+        if (!id) return open('list');
+        _ensureModal();
+        _modal.style.display = 'flex';
+        // Wie in open(): mit dem Oeffnen gilt alles als gesehen.
+        fetch('/api/issues/notifications/seen', { method: 'POST', headers: _headers() })
+            .catch(() => {});
+        document.querySelectorAll('.jv-iss-notif').forEach(b => { b.style.display = 'none'; });
+        _notifCount = 0;
+        _notifItems = [];
+        _showDetail(id);
     }
 
     function _startBadge() {
@@ -742,6 +919,7 @@
     window.JarvisIssues = {
         open: () => open('list'),
         create: () => open('create'),
+        openIssue: openIssue,
         close: close,
         refreshBadge: refreshBadge,
     };

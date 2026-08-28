@@ -343,24 +343,64 @@ def update_issue(user: str, issue_id: str, patch: dict,
         return current, ""
 
 
-def unseen_count(user: str, is_admin: bool = False) -> int:
-    """Anzahl der Badge-Benachrichtigungen fuer diesen Benutzer:
-    - EIGENE Issues mit ungesehener Bearbeitung (Statuswechsel/Admin-Kommentar).
-    - Fuer ADMINS zusaetzlich: NEUE Issues ANDERER seit dem letzten "gesehen".
+# Auszug des Admin-Kommentars in der Badge-Liste. Er beantwortet die einzige
+# Frage, die ein Melder beim Hovern hat („was ist daraus geworden?"), darf die
+# Liste aber nicht sprengen.
+NOTIF_COMMENT_LEN = 140
+
+
+def unseen_details(user: str, is_admin: bool = False) -> list[dict]:
+    """Die Badge-Benachrichtigungen dieses Benutzers – EINZELN aufgefuehrt.
+
+    - EIGENE Issues mit ungesehener Bearbeitung (Statuswechsel/Admin-Kommentar)
+      → ``kind="edited"``
+    - Fuer ADMINS zusaetzlich: NEUE Issues ANDERER seit dem letzten "gesehen"
+      → ``kind="new"``
 
     So erhalten alle Admins eine Badge, sobald ein neues Issue erzeugt wird.
+
+    ⚠ DIES IST DIE EINZIGE STELLE, DIE DIE REGEL KENNT. ``unseen_count`` zaehlt
+    nur noch, was hier herauskommt – eine zweite, „schnellere" Zaehlschleife
+    daneben waere eine zweite Fassung derselben Regel und liefe beim naechsten
+    Feld auseinander: der Badge stuende dann auf 3 und die Liste zeigte 2, ohne
+    dass jemand sagen koennte, welche der beiden Zahlen stimmt.
+
+    Neueste zuerst. Der Rueckgabewert ist frei von Geheimnissen: er enthaelt
+    nur, was ``list_issues`` ohnehin jedem angemeldeten Benutzer zeigt.
     """
     u = (user or "").strip().lower()
     if not u:
-        return 0
+        return []
     with _lock:
         issues = _load_all()
-    n = 0
+
+    treffer: list[dict] = []
+
+    def _eintrag(i: dict, kind: str, ts: str) -> dict:
+        e = {
+            "id": i.get("id", ""),
+            "title": i.get("title", ""),
+            "kind": kind,
+            "status": i.get("status", ""),
+            "type": i.get("type", ""),
+            "ts": ts,
+        }
+        if kind == "new":
+            e["author"] = i.get("author", "")
+        else:
+            # Der Kommentar IST die Nachricht an den Melder – ohne ihn sagt die
+            # Zeile nur, DASS etwas passiert ist.
+            k = (i.get("jarvis_comment") or "").strip()
+            if k:
+                e["comment"] = (k[:NOTIF_COMMENT_LEN] + "…"
+                                if len(k) > NOTIF_COMMENT_LEN else k)
+        return e
+
     for i in issues:
         if i.get("author", "").strip().lower() != u:
             continue
         if i.get("admin_change_pending"):
-            n += 1
+            treffer.append(_eintrag(i, "edited", i.get("updated", "")))
             continue
         seen = i.get("status_seen")
         # Alt-Issues ohne status_seen (vor dem Feature angelegt) NICHT als
@@ -368,7 +408,8 @@ def unseen_count(user: str, is_admin: bool = False) -> int:
         if not seen:
             continue
         if i.get("status") != seen:
-            n += 1
+            treffer.append(_eintrag(i, "edited", i.get("updated", "")))
+
     if is_admin:
         with _lock:
             seen_map = _load_admin_seen()
@@ -379,10 +420,25 @@ def unseen_count(user: str, is_admin: bool = False) -> int:
                 seen_map[u] = latest
                 _save_admin_seen(seen_map)
             else:
-                n += sum(1 for i in issues
-                         if i.get("author", "").strip().lower() != u
-                         and i.get("created", "") > marker)
-    return n
+                for i in issues:
+                    if (i.get("author", "").strip().lower() != u
+                            and i.get("created", "") > marker):
+                        treffer.append(_eintrag(i, "new", i.get("created", "")))
+
+    # Neueste zuerst. Ein fehlender Zeitstempel sortiert nach hinten statt zu
+    # werfen – ein Altbestand-Eintrag darf die Liste nicht unbrauchbar machen.
+    treffer.sort(key=lambda e: e.get("ts") or "", reverse=True)
+    return treffer
+
+
+def unseen_count(user: str, is_admin: bool = False) -> int:
+    """Anzahl der Badge-Benachrichtigungen – siehe ``unseen_details``.
+
+    Bewusst nur ein ``len()``: Zaehler und Liste koennen so nicht auseinander
+    laufen. Die Nebenwirkung von ``unseen_details`` (Lazy-Init des
+    Admin-Markers) bleibt damit unveraendert erhalten.
+    """
+    return len(unseen_details(user, is_admin))
 
 
 def mark_seen(user: str, is_admin: bool = False) -> int:

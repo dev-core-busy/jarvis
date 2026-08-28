@@ -15,6 +15,18 @@ localStorage eines Rechners sichtbar.
 Vorlagen gehoeren dem Benutzer und sind fuer niemanden sonst sichtbar; die des
 Administrators kann er sehen und benutzen, aber nicht aendern.
 
+DER STANDARD IST PERSOENLICH (2026-08-28)
+-----------------------------------------
+Jeder markiert genau EINE Vorlage als seinen Standard – eigene oder gemeinsame;
+sie ist danach im Pulldown vorausgewaehlt. Gespeichert unter ``standard`` als
+Zuordnung Benutzer → Kennung, NICHT als Feld an der Vorlage: eine gemeinsame
+Vorlage gehoert dem Administrator, ihr Standard-Merkmal aber jedem Benutzer
+einzeln. Stuende es an der Vorlage, waere die Wahl des Ersten die Wahl aller.
+
+Der Anlass: das Fenster wird bei jedem Klick neu aufgebaut, die Auswahl stand
+also bei JEDEM Oeffnen wieder auf "ohne Vorlage". Wer immer dieselbe Form
+braucht, musste sie jedes Mal neu heraussuchen.
+
 DIE VORLAGE BESTIMMT DIE FORM, NICHT DIE BEFUGNIS
 -------------------------------------------------
 Sie geht als zusaetzlicher Abschnitt in den System-Prompt, HINTER die
@@ -88,20 +100,27 @@ class VorlagenFehler(Exception):
     """Fachlicher Fehlschlag mit Text fuer die Oberflaeche."""
 
 
+def _leer() -> dict:
+    return {"global": [], "benutzer": {}, "standard": {}}
+
+
 def _laden() -> dict:
     if not _DATEI.exists():
-        return {"global": [], "benutzer": {}}
+        return _leer()
     try:
         d = json.loads(_DATEI.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         # Eine beschaedigte Datei darf den Bereich nicht sperren – dann gibt es
         # eben keine Vorlagen. Ueberschrieben wird sie erst beim naechsten
         # Speichern, der Administrator kann sie vorher ansehen.
-        return {"global": [], "benutzer": {}}
+        return _leer()
     if not isinstance(d, dict):
-        return {"global": [], "benutzer": {}}
+        return _leer()
     d.setdefault("global", [])
     d.setdefault("benutzer", {})
+    # Altbestand kennt das Feld nicht – dann hat eben niemand einen Standard.
+    if not isinstance(d.get("standard"), dict):
+        d["standard"] = {}
     return d
 
 
@@ -122,7 +141,7 @@ def saeen() -> None:
     """Legt die Vorschlaege an – NUR, wenn die Datei noch gar nicht existiert."""
     if _DATEI.exists():
         return
-    d = {"global": [], "benutzer": {}}
+    d = _leer()
     for v in VORSCHLAEGE:
         d["global"].append({
             "id": uuid.uuid4().hex[:12],
@@ -154,14 +173,67 @@ def liste(user: str, ist_admin: bool = False) -> dict:
     ``global`` sind die des Administrators (nur lesbar, ausser fuer Admins),
     ``eigene`` gehoeren dem Benutzer. Getrennt, weil die Oberflaeche den
     Unterschied zeigen muss: was man aendern kann und was nicht.
+
+    ``standard`` ist die Kennung der persoenlichen Standard-Vorlage – schon
+    GEPRUEFT (siehe ``_standard_aus``): zeigt der gespeicherte Wert ins Leere,
+    kommt ``""`` heraus. Die Oberflaeche waehlt danach vor und setzt den Stern.
     """
     saeen()
     d = _laden()
+    global_ = list(d.get("global") or [])
+    eigene = list((d.get("benutzer") or {}).get(_key(user)) or [])
     return {
-        "global": list(d.get("global") or []),
-        "eigene": list((d.get("benutzer") or {}).get(_key(user)) or []),
+        "global": global_,
+        "eigene": eigene,
         "darf_global": bool(ist_admin),
+        "standard": _standard_aus(d, user, eigene + global_),
     }
+
+
+def _standard_aus(d: dict, user: str, sichtbar: list) -> str:
+    """Die geprueffte Standard-Kennung dieses Benutzers – oder ``""``.
+
+    ⚠ GEPRUEFT WIRD BEIM LESEN, GESCHRIEBEN WIRD DABEI NICHTS. Der Standard
+    kann ins Leere zeigen, ohne dass jemand etwas falsch gemacht hat: ein
+    Administrator loescht eine GEMEINSAME Vorlage, und sie war fuer zwanzig
+    Leute der Standard. Ihre Eintraege einzeln aufzuraeumen hiesse, beim
+    Loeschen durch alle Benutzer zu laufen; die Datei bei jedem Lesen
+    zurueckzuschreiben waere ein Schreibzugriff auf dem heissen Pfad. Ein
+    verwaister Eintrag ist harmlos, solange er nach aussen ``""`` ist – und
+    er verschwindet beim naechsten Setzen von selbst.
+    """
+    vid = str((d.get("standard") or {}).get(_key(user)) or "")
+    if not vid:
+        return ""
+    return vid if any(v.get("id") == vid for v in sichtbar) else ""
+
+
+def standard_setzen(user: str, vid: str, ist_admin: bool = False) -> str:
+    """Markiert eine Vorlage als persoenlichen Standard. ``""`` hebt ihn auf.
+
+    **Der Standard ist immer persoenlich** – auch dann, wenn er auf eine
+    gemeinsame Vorlage zeigt. Ein Administrator, der hier seine Wahl trifft,
+    setzt sie fuer sich, nicht fuer das Haus; wer eine Haus-Vorgabe will,
+    braucht ein eigenes Feld an der Vorlage und keine Umdeutung dieses hier.
+
+    Eine unbekannte Kennung wird ABGEWIESEN, nicht gespeichert: sonst waere
+    die Anzeige beim naechsten Oeffnen wieder auf "ohne Vorlage" und niemand
+    wuesste warum. Gesucht wird nur in dem, was dieser Benutzer benutzen darf –
+    damit ist die Kennung im Request kein Weg an eine fremde Vorlage.
+    """
+    ziel = str(vid or "").strip()
+    schluessel = _key(user)
+    d = _laden()
+    if ziel:
+        sichtbar = (list((d.get("benutzer") or {}).get(schluessel) or [])
+                    + list(d.get("global") or []))
+        if not any(v.get("id") == ziel for v in sichtbar):
+            raise VorlagenFehler("Die Vorlage wurde nicht gefunden.")
+        d.setdefault("standard", {})[schluessel] = ziel
+    else:
+        d.setdefault("standard", {}).pop(schluessel, None)
+    _speichern(d)
+    return ziel
 
 
 def _key(user: str) -> str:
@@ -222,6 +294,7 @@ def loeschen(user: str, vid: str, ist_admin: bool = False) -> bool:
     for i, v in enumerate(eigene):
         if v.get("id") == vid:
             eigene.pop(i)
+            _standard_vergessen(d, user, vid)
             _speichern(d)
             return True
     if ist_admin:
@@ -229,11 +302,22 @@ def loeschen(user: str, vid: str, ist_admin: bool = False) -> bool:
         for i, v in enumerate(g):
             if v.get("id") == vid:
                 g.pop(i)
+                # Nur der EIGENE Eintrag wird geraeumt. Die anderen Benutzer
+                # laufen ueber `_standard_aus` ins Leere und bekommen "ohne
+                # Vorlage" – siehe die Begruendung dort.
+                _standard_vergessen(d, user, vid)
                 _speichern(d)
                 return True
     # Fremd oder unbekannt – in beiden Faellen dieselbe Antwort. Ob eine
     # fremde Vorlage existiert, ist selbst eine Information.
     return False
+
+
+def _standard_vergessen(d: dict, user: str, vid: str) -> None:
+    """Raeumt den Standard-Eintrag EINES Benutzers, wenn er auf ``vid`` zeigt."""
+    st = d.setdefault("standard", {})
+    if st.get(_key(user)) == vid:
+        st.pop(_key(user), None)
 
 
 def text_fuer(user: str, vid: str, ist_admin: bool = False) -> str:

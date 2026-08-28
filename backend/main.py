@@ -11363,6 +11363,32 @@ async def jira_assist_vorlage_speichern(
     return JSONResponse({"ok": True, "vorlage": v})
 
 
+@app.post("/api/jira/assist/vorlagen/standard")
+async def jira_assist_vorlage_standard(
+        request: Request, user: str = Depends(require_jira_vorlagen_access)):
+    """Die persoenliche Standard-Vorlage setzen – ``{"id": ""}`` hebt sie auf.
+
+    Der Benutzer kommt AUSSCHLIESSLICH aus der Anmeldung, nie aus dem Rumpf:
+    sonst waere der Endpunkt ein Weg, fremden Leuten eine Vorlage vorzugeben.
+    Eigener Pfad statt eines Feldes am Speichern-Endpunkt, damit ein
+    Formular, das die ganze Vorlage sendet, den Standard nicht nebenbei
+    verstellt (gleiche Trennung wie bei den Antwort-Stilen).
+    """
+    from backend import jira_vorlagen  # noqa: PLC0415
+    try:
+        b = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."},
+                            status_code=400)
+    try:
+        vid = jira_vorlagen.standard_setzen(
+            user=user, vid=str((b or {}).get("id") or ""),
+            ist_admin=_is_admin_user(user))
+    except jira_vorlagen.VorlagenFehler as f:
+        return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
+    return JSONResponse({"ok": True, "standard": vid})
+
+
 @app.delete("/api/jira/assist/vorlagen/{vid}")
 async def jira_assist_vorlage_loeschen(
         vid: str, user: str = Depends(require_jira_vorlagen_access)):
@@ -11379,7 +11405,7 @@ async def jira_assist_vorlage_loeschen(
 
 
 @app.get("/api/jira/assist/paket")
-async def jira_assist_paket(variante: str = "chrome",
+async def jira_assist_paket(request: Request, variante: str = "chrome",
                             user: str = Depends(require_jira_assist_access)):
     """Die Browser-Erweiterung als ZIP – bei jedem Abruf frisch erzeugt.
 
@@ -11387,10 +11413,20 @@ async def jira_assist_paket(variante: str = "chrome",
     per fetch geholt und als Blob gespeichert, der Bearer-Header genuegt. Ein
     Query-Token landet im Verlauf und in Proxy-Logs; hier gibt es keinen Grund
     dafuer, weil kein <a href> und kein <img src> im Spiel ist.
+
+    DER REQUEST MUSS MIT – aus ihm kommt die Adresse, unter der die
+    Arbeitsplaetze diesen Server erreichen. Sie geht als Host-Berechtigung ins
+    Manifest, und genau das erspart der Erweiterung die Berechtigungs-Nachfrage,
+    an der bisher die erste Anmeldung scheiterte (jira_assist.paket_bauen).
+    `addin.basis_url` bevorzugt die ausdrueckliche Einstellung
+    `addin_base_url`/`JARVIS_ADDIN_BASE` und faellt sonst auf den Host-Kopf
+    dieses Abrufs zurueck – also auf die Adresse, die der Administrator gerade
+    selbst benutzt hat.
     """
-    from backend import jira_assist  # noqa: PLC0415
+    from backend import addin, jira_assist  # noqa: PLC0415
     try:
-        name, rohdaten = jira_assist.paket_bauen(variante)
+        name, rohdaten = jira_assist.paket_bauen(variante,
+                                                 addin.basis_url(request))
     except jira_assist.AssistFehler as f:
         return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
     return Response(

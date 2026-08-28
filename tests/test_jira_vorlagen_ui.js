@@ -57,7 +57,14 @@ function mkFetch(state) {
             if (method === 'GET') {
                 if (state.listFail) return j({ ok: false, error: 'Vorlagen nicht lesbar' }, false, 500);
                 return j({ ok: true, global: state.global, eigene: state.eigene,
-                           darf_global: state.darfGlobal });
+                           darf_global: state.darfGlobal,
+                           standard: state.standard || '' });
+            }
+            // Die Standard-Route steht VOR der allgemeinen POST-Behandlung –
+            // sonst legte sie eine Vorlage namens "undefined" an.
+            if (method === 'POST' && u.endsWith('/vorlagen/standard')) {
+                state.standard = (body && body.id) || '';
+                return j({ ok: true, standard: state.standard });
             }
             if (method === 'POST') {
                 // Der Server entscheidet, WOHIN gespeichert wird – hier nur
@@ -109,6 +116,36 @@ function klick(w, d, sel, idx, was) {
     el.dispatchEvent(new w.Event('click', { bubbles: true }));
     return true;
 }
+/* Einen Knopf IN EINER ZEILE ueber seine Aufgabe finden – nie ueber die
+ * Position.
+ *
+ * ⚠ HIER STAND EINMAL `'#jvorl-liste button'[0]`. Als der Stern der
+ * Standard-Vorlage dazukam, zeigten alle Indizes auf den falschen Knopf und
+ * ZEHN Pruefungen schlugen fehl, obwohl an der geprueften Sache nichts kaputt
+ * war. Ein Test, der die Reihenfolge von Bedienelementen festschreibt, prueft
+ * das Layout und behauptet, die Funktion zu pruefen.
+ *
+ * `art`: 'stern' | 'edit' | 'trash'.
+ */
+function zeilenKnopf(d, zeile, art) {
+    const box = d.getElementById('jvorl-liste');
+    const row = box && box.children[zeile];
+    if (!row) return null;
+    for (const b of row.querySelectorAll('button')) {
+        if (art === 'trash' && b.querySelector('.jv-ico-trash')) return b;
+        if (art === 'edit' && b.textContent.trim() === '✎') return b;
+        if (art === 'stern' && /^[★☆]$/u.test(b.textContent.trim())) return b;
+    }
+    return null;
+}
+
+function klickKnopf(w, d, zeile, art, was) {
+    const el = zeilenKnopf(d, zeile, art);
+    if (!el) { check('Bedienelement vorhanden: ' + was, false, art + ' in Zeile ' + zeile); return false; }
+    el.dispatchEvent(new w.Event('click', { bubbles: true }));
+    return true;
+}
+
 function wert(d, id) { const e = d.getElementById(id); return e ? e.value : null; }
 function text(d, id) { const e = d.getElementById(id); return e ? e.textContent : ''; }
 
@@ -168,7 +205,7 @@ function text(d, id) { const e = d.getElementById(id); return e ? e.textContent 
     // ══════════════════════════════════════════════════════════════════════
     section('3) Bearbeiten füllt das Formular, Speichern schickt die Kennung mit');
     // ══════════════════════════════════════════════════════════════════════
-    klick(w, d, '#jvorl-liste button', 0, 'Bearbeiten der ersten Zeile');   // ✎
+    klickKnopf(w, d, 0, 'edit', 'Bearbeiten der ersten Zeile');
     check('der Name steht im Formular', wert(d, 'jvorl-name') === 'Kurz für die Leitung',
           String(wert(d, 'jvorl-name')));
     check('der Text ebenfalls', wert(d, 'jvorl-text') === 'Höchstens fünf Sätze.');
@@ -212,13 +249,13 @@ function text(d, id) { const e = d.getElementById(id); return e ? e.textContent 
     state.calls.length = 0;
     state.confirmAntwort = false;
     w.confirm = () => false;
-    klick(w, d, '#jvorl-liste button', 1, 'Mülleimer der ersten Zeile');
+    klickKnopf(w, d, 0, 'trash', 'Mülleimer der ersten Zeile');
     await sleep(20);
     check('"Abbrechen" löscht NICHTS', state.calls.length === 0,
           JSON.stringify(state.calls));
 
     w.confirm = () => true;
-    klick(w, d, '#jvorl-liste button', 3, 'Mülleimer der zweiten Zeile');
+    klickKnopf(w, d, 1, 'trash', 'Mülleimer der zweiten Zeile');
     await sleep(30);
     const del = state.calls.find((c) => c.method === 'DELETE');
     check('bestätigtes Löschen schickt ein DELETE', !!del);
@@ -227,6 +264,63 @@ function text(d, id) { const e = d.getElementById(id); return e ? e.textContent 
     await sleep(20);
     check('danach steht nur noch eine Zeile da', zeilenTexte(d).length === 1,
           JSON.stringify(zeilenTexte(d)));
+
+    // ══════════════════════════════════════════════════════════════════════
+    section('4b) Der Stern setzt und löst die persönliche Standard-Vorlage');
+    // ══════════════════════════════════════════════════════════════════════
+    /* GEMELDET 2026-08-28: "der user muss die Möglichkeit haben eine Vorlage
+     * als seine 'Standard' Vorlage zu markieren". Geprüft wird der ganze Weg –
+     * Klick, abgeschickter Rumpf, und dass die Liste den Stern danach WIRKLICH
+     * anders zeichnet. Ein Test, der nur den Aufruf einfängt, ließe einen
+     * Stern durchgehen, der sich nie füllt. */
+    {
+        const st3 = { calls: [], global: JSON.parse(JSON.stringify(START.global)),
+                      eigene: JSON.parse(JSON.stringify(START.eigene)),
+                      darfGlobal: true, standard: '' };
+        const dom3 = makeDom(st3);
+        const w3 = dom3.window, d3 = w3.document;
+        w3.JiraManager.onShow();
+        await sleep(30);
+
+        const vorher = zeilenKnopf(d3, 0, 'stern');
+        check('unmarkiert steht ein hohler Stern', !!vorher && vorher.textContent === '☆',
+              vorher && vorher.textContent);
+        check('und er sagt, was ein Klick tut', !!vorher && /markieren|mark/i.test(vorher.title),
+              vorher && vorher.title);
+
+        st3.calls.length = 0;
+        klickKnopf(w3, d3, 0, 'stern', 'Stern der ersten Zeile');
+        await sleep(40);
+        const setz = st3.calls.find((c) => c.method === 'POST');
+        check('der Klick schickt einen POST', !!setz);
+        check('auf die Standard-Route', !!setz && /\/vorlagen\/standard$/.test(setz.url),
+              setz && setz.url);
+        check('mit der Kennung der angeklickten Vorlage',
+              !!setz && setz.body && setz.body.id === 'g1',
+              setz && JSON.stringify(setz.body));
+        check('danach wird die Liste neu geholt (der Server ist die Wahrheit)',
+              st3.calls.some((c) => c.method === 'GET'));
+
+        const nachher = zeilenKnopf(d3, 0, 'stern');
+        check('der Stern ist danach gefüllt', !!nachher && nachher.textContent === '★',
+              nachher && nachher.textContent);
+        check('und bietet jetzt das Aufheben an',
+              !!nachher && /aufheben|remove/i.test(nachher.title), nachher && nachher.title);
+        check('die andere Zeile bleibt hohl',
+              !!zeilenKnopf(d3, 1, 'stern') && zeilenKnopf(d3, 1, 'stern').textContent === '☆');
+
+        // Ein zweiter Klick hebt auf – sonst ließe sich eine einmal gesetzte
+        // Vorauswahl nie wieder loswerden.
+        st3.calls.length = 0;
+        klickKnopf(w3, d3, 0, 'stern', 'Stern erneut');
+        await sleep(40);
+        const loes = st3.calls.find((c) => c.method === 'POST');
+        check('der zweite Klick hebt auf', !!loes && loes.body && loes.body.id === '',
+              loes && JSON.stringify(loes.body));
+        check('und der Stern ist wieder hohl',
+              !!zeilenKnopf(d3, 0, 'stern') && zeilenKnopf(d3, 0, 'stern').textContent === '☆');
+        w3.close();
+    }
 
     // ══════════════════════════════════════════════════════════════════════
     section('5) Ein Ladefehler bleibt sichtbar – keine leere Liste ohne Grund');
@@ -256,9 +350,15 @@ function text(d, id) { const e = d.getElementById(id); return e ? e.textContent 
         check('die Zeile mit dem Häkchen ist ausgeblendet',
               !!zeile2 && zeile2.style.display === 'none',
               zeile2 ? zeile2.style.display || '(leer)' : 'Zeile fehlt');
-        const btns = d2.querySelectorAll('#jvorl-liste button');
-        check('eine fremde (gemeinsame) Vorlage hat weder ✎ noch Mülleimer',
-              btns.length === 0, String(btns.length));
+        check('eine fremde (gemeinsame) Vorlage hat kein ✎',
+              !zeilenKnopf(d2, 0, 'edit'));
+        check('und keinen Mülleimer', !zeilenKnopf(d2, 0, 'trash'));
+        /* DEN STERN HAT SIE SEHR WOHL. Markiert wird die EIGENE Wahl, nicht
+           die Vorlage: wer eine gemeinsame Vorlage nicht ändern darf, darf sie
+           trotzdem zu seinem Standard machen. Hinge der Stern an `darf`,
+           könnte ein Nicht-Admin ausgerechnet die vorgegebenen Vorlagen nicht
+           vorauswählen – also genau die, die er am häufigsten benutzt. */
+        check('den Stern trägt sie trotzdem', !!zeilenKnopf(d2, 0, 'stern'));
         check('sie ist trotzdem sichtbar – man soll wissen, was gilt',
               /Kurz für die Leitung/.test(text(d2, 'jvorl-liste')));
         w2.close();

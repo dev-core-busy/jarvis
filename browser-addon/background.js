@@ -29,9 +29,36 @@ const EINST = "einstellungen";   // storage.local: { basis }
 const SITZUNG = "sitzung";       // storage.local: { token, benutzer }
 const ERGEBNIS = "ergebnis";     // storage.local: letzter Lauf (siehe unten)
 
-async function basisLesen() {
+async function einstLesen() {
   const d = await api.storage.local.get(EINST);
-  return ((d[EINST] || {}).basis || "").replace(/\/+$/, "");
+  return d[EINST] || {};
+}
+
+async function basisLesen() {
+  return ((await einstLesen()).basis || "").replace(/\/+$/, "");
+}
+
+/* Adresse und Benutzername ueberleben das Schliessen des Fensters – und das
+ * ist keine Bequemlichkeit, sondern die zweite Haelfte des Fixes zur Meldung
+ * "man muss sich 2x anmelden".
+ *
+ * Fehlt das Host-Zugriffsrecht, muss das Fenster es erfragen, und **Chrome
+ * schliesst dabei das Popup**. Ohne Gedaechtnis stuende danach eine leere
+ * Maske da: der Benutzer haette getippt, nichts waere passiert, und er
+ * muesste alles noch einmal eingeben. Gemerkt wird VOR der Nachfrage.
+ *
+ * ⚠ DAS KENNWORT WIRD NIE GEMERKT. Der Benutzername ist eine Bequemlichkeit,
+ * das Kennwort waere eine gespeicherte Zugangsberechtigung ohne Ablauf – und
+ * es wird ohnehin nur einmal gebraucht, danach traegt das Token.
+ */
+async function einstSchreiben(teil) {
+  const alt = await einstLesen();
+  const neu = Object.assign({}, alt);
+  if (teil.basis !== undefined) neu.basis = String(teil.basis).replace(/\/+$/, "");
+  if (teil.benutzer !== undefined) neu.benutzer = String(teil.benutzer);
+  if (teil.zugriff_erfragt !== undefined) neu.zugriff_erfragt = !!teil.zugriff_erfragt;
+  await api.storage.local.set({ [EINST]: neu });
+  return neu;
 }
 
 /* DAS TOKEN LIEGT IN storage.LOCAL – geaendert auf Meldung aus dem Betrieb
@@ -152,7 +179,9 @@ async function branding() {
 }
 
 async function anmelden({ basis, benutzer, kennwort, totp }) {
-  await api.storage.local.set({ [EINST]: { basis: (basis || "").replace(/\/+$/, "") } });
+  // Der Merker der Berechtigungsabfrage faellt hier weg: sie ist erledigt,
+  // sonst waeren wir nicht bis zur Anmeldung gekommen.
+  await einstSchreiben({ basis, benutzer, zugriff_erfragt: false });
   const d = await ruf("/api/login", {
     methode: "POST", mitToken: false,
     rumpf: {
@@ -192,14 +221,26 @@ api.runtime.onMessage.addListener((nachricht, _absender, antworten) => {
     try {
       switch (nachricht && nachricht.art) {
         case "zustand": {
-          const basis = await basisLesen();
+          const e = await einstLesen();
           const d = await api.storage.local.get(SITZUNG);
           const s = d[SITZUNG] || {};
-          antworten({ ok: true, basis, angemeldet: !!s.token,
+          antworten({ ok: true,
+                      basis: (e.basis || "").replace(/\/+$/, ""),
+                      angemeldet: !!s.token,
                       benutzer: s.benutzer || "",
+                      // Fuer die Anmeldemaske nach einem Fensterabbruch: der
+                      // zuletzt eingetippte Name und der Merker, dass die
+                      // Berechtigungsabfrage lief.
+                      benutzer_vorschlag: e.benutzer || "",
+                      zugriff_erfragt: !!e.zugriff_erfragt,
                       ergebnis: await ergebnisLesen() });
           break;
         }
+        case "merken":
+          // Wird VOR der Berechtigungsabfrage gerufen – danach kann das
+          // Fenster weg sein.
+          antworten({ ok: true, daten: await einstSchreiben(nachricht) });
+          break;
         case "anmelden":
           antworten(await anmelden(nachricht));
           break;
@@ -217,11 +258,10 @@ api.runtime.onMessage.addListener((nachricht, _absender, antworten) => {
         case "branding": {
           // Die Adresse kann aus dem Formular kommen (noch nicht gespeichert),
           // damit das Fenster schon beim Eintippen die Marke zeigen kann.
-          if (nachricht.basis) {
-            await api.storage.local.set({
-              [EINST]: { basis: String(nachricht.basis).replace(/\/+$/, "") }
-            });
-          }
+          // MERGE, kein Ersatz: ein `set` mit nur `basis` haette den gemerkten
+          // Benutzernamen mitgeloescht – und der ist genau das, was nach einer
+          // Berechtigungsabfrage noch da sein soll.
+          if (nachricht.basis) await einstSchreiben({ basis: nachricht.basis });
           antworten({ ok: true, daten: await branding() });
           break;
         }
@@ -234,6 +274,11 @@ api.runtime.onMessage.addListener((nachricht, _absender, antworten) => {
         case "vorlage_speichern":
           antworten({ ok: true, daten: await ruf("/api/jira/assist/vorlagen", {
             methode: "POST", rumpf: nachricht.wert || {} }) });
+          break;
+        case "vorlage_standard":
+          antworten({ ok: true, daten: await ruf(
+            "/api/jira/assist/vorlagen/standard",
+            { methode: "POST", rumpf: { id: nachricht.id || "" } }) });
           break;
         case "vorlage_loeschen":
           antworten({ ok: true, daten: await ruf(

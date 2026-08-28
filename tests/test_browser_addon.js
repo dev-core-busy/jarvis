@@ -72,24 +72,36 @@ check(!!(M_FF.browser_specific_settings
 for (const [name, m] of [["Chrome", M_CHROME], ["Firefox", M_FF]]) {
   check(!m.content_scripts,
         name + ": kein dauerhaftes Content-Script (activeTab statt Vollzugriff)");
+  // IM REPO keine festen host_permissions – die traegt erst der Server beim
+  // Bauen ein, und zwar SEINE Adresse (jira_assist._manifest_gebrandet).
+  // Stuende hier eine, waere sie auf jedem anderen Server falsch.
   check(!m.host_permissions,
-        name + ": keine festen host_permissions");
+        name + ": im Repo keine festen host_permissions");
   check(Array.isArray(m.optional_host_permissions)
         && m.optional_host_permissions.length > 0,
-        name + ": Host-Rechte werden ERST zur Laufzeit erfragt");
+        name + ": Host-Rechte sind sonst zur Laufzeit erfragbar");
   check((m.permissions || []).includes("activeTab"),
         name + ": activeTab");
   check(!(m.permissions || []).includes("tabs"),
         name + ": KEINE weitreichende tabs-Berechtigung");
 }
 
-// DIE SERVERADRESSE DARF NICHT INS MANIFEST. Eine Firefox-Erweiterung muss von
-// Mozilla signiert sein, auch die selbst verteilte – eine signierte Datei laesst
-// sich nicht pro Server umschreiben, ohne die Signatur zu brechen. Stuende die
-// Adresse hier, braeuchte jeder Kunde ein eigenes Paket (Drift-Muster).
+/* KEINE SERVERADRESSE IM REPO-MANIFEST – aber sehr wohl im gebauten Paket.
+ *
+ * ⚠ HIER STAND EINE BEGRUENDUNG, DIE NICHT MEHR STIMMTE: "eine signierte Datei
+ * laesst sich nicht pro Server umschreiben". Das Paket ist laengst pro
+ * Installation verschieden – `_manifest_gebrandet` schreibt seit Langem den
+ * Markennamen hinein. Die Adresse herauszuhalten war damit eine Regel ohne
+ * Grund, und sie hat Geld gekostet: ohne Host-Recht musste das Fenster beim
+ * ersten Anmelden nachfragen, Chrome schloss dabei das Popup, und **die
+ * Anmeldung ging beim ersten Mal verloren** ("man muss sich 2x anmelden").
+ *
+ * Was bleibt und hier geprueft wird: im REPO steht keine Adresse. Sie entsteht
+ * beim Bauen aus `addin.basis_url(request)` – die Drift-Falle "eine Kopie je
+ * Installation im Repo" ist damit weiterhin zu. */
 const beideManifeste = JSON.stringify(M_CHROME) + JSON.stringify(M_FF);
 check(!/https:\/\/(?!\*)[a-z0-9.-]+\.[a-z]{2,}/i.test(beideManifeste),
-      "keine feste Serveradresse im Manifest");
+      "keine feste Serveradresse im Repo-Manifest");
 
 // ═══════════════════════════════════════════════════════════════════════════
 section("2) Netzaufrufe NUR im Hintergrund");
@@ -509,13 +521,22 @@ check(/"colors":\s*cfg\.get\("colors"/.test(MAIN_SRC),
           r.akzent);
   }
 
-  // Und der Server fuellt das Feld auch wirklich – sonst ist alles obige tot.
+  /* Und der Server fuellt die Felder auch wirklich – sonst ist alles obige tot.
+   *
+   * Geprueft wird, dass der NAME des Feldes belegt wird, nicht die Schreibweise
+   * des Regex: seit alle drei Felder ueber denselben Helfer laufen
+   * (`feld_setzen`), steht `name="akzent"` nirgends mehr woertlich da. Ein
+   * Waechter, der auf die Schreibweise zielt, meldet dann einen Fehler, den es
+   * nicht gibt – genau das ist hier beim Umbau passiert. Das VERHALTEN prueft
+   * `tests/test_jira_assist.py`, indem es das Paket wirklich baut. */
   const JA_SRC = fs.readFileSync(path.join(WURZEL, 'backend', 'jira_assist.py'), 'utf8');
   const fn = (JA_SRC.match(/def _popup_gebrandet\([\s\S]*?\n\n\n/) || [''])[0];
-  check(/name="akzent"/.test(fn),
-        'jira_assist._popup_gebrandet traegt die Farbe ins Paket ein');
+  for (const feld of ['marke', 'akzent', 'basis']) {
+    check(new RegExp('"' + feld + '"').test(fn),
+          'jira_assist._popup_gebrandet belegt das Feld ' + feld);
+  }
   check(/_HEXFARBE/.test(fn),
-        'und prueft sie serverseitig ebenfalls');
+        'und prueft die Farbe serverseitig ebenfalls');
 }
 
 /* ── DREHENDER KREIS BEI WARTEMELDUNGEN ───────────────────────────────────
@@ -903,6 +924,83 @@ check(!/innerHTML\s*=\s*[^;]*\bv\.name\b/.test(POPUP_JS),
       "Vorlagennamen gehen nicht durch innerHTML");
 check(/o\.textContent = v\.name/.test(POPUP_JS), "sondern durch textContent");
 
+/* ── DIE PERSOENLICHE STANDARD-VORLAGE (gemeldet 2026-08-28) ──────────────
+ * "der user muss die Moeglichkeit haben eine Vorlage als seine 'Standard'
+ * Vorlage zu markieren". Das Fenster wird bei jedem Klick neu aufgebaut, die
+ * Auswahl stand also bei JEDEM Oeffnen wieder auf "ohne Vorlage".
+ *
+ * AUSGEFUEHRT, nicht gelesen: die haeufigste Ursache fuer eine wirkungslose
+ * Vorauswahl ist, dass sie beim naechsten Neuzeichnen wieder ueberschrieben
+ * wird – im Quelltext sieht man das nicht. */
+{
+  const zeichnen = (POPUP_JS.match(
+    /function vorlagenZeichnen\([\s\S]*?\n\}/) || [''])[0];
+  check(!!zeichnen, 'popup.js hat vorlagenZeichnen()');
+
+  const lauf = (standard, eigeneWahl) => {
+    const dom = new JSDOM(POPUP_HTML, { url: 'https://x.test/',
+                                        runScripts: 'outside-only' });
+    const w = dom.window;
+    try {
+      const f = new w.Function('standard', 'eigeneWahl', `
+        const $ = (id) => document.getElementById(id);
+        let _vorlBeruehrt = false;
+        let _vorlagen = {
+          global: [{ id: "g1", name: "Kurz" }, { id: "g2", name: "Technisch" }],
+          eigene: [{ id: "e1", name: "Meine" }],
+          darf_global: true, standard,
+        };
+        function standardSetzen() {}
+        function vorlageInsFormular() {}
+        function vorlageLoeschen() {}
+        function frageJaNein() { return Promise.resolve(true); }
+        ${zeichnen}
+        vorlagenZeichnen();
+        if (eigeneWahl) {
+          $("f-vorlage").value = eigeneWahl;
+          _vorlBeruehrt = true;
+          vorlagenZeichnen();            // z. B. nach dem Speichern
+        }
+        const sterne = Array.from(
+          document.querySelectorAll("#vorl-liste button"))
+          .filter((b) => /^[★☆]$/u.test(b.textContent))
+          .map((b) => b.textContent);
+        return JSON.stringify({
+          gewaehlt: $("f-vorlage").value,
+          erste: $("f-vorlage").options[0].textContent,
+          sterne,
+        });`);
+      return JSON.parse(f(standard, eigeneWahl));
+    } finally { w.close(); }
+  };
+
+  const ohne = lauf('', '');
+  check(ohne.gewaehlt === '',
+        'ohne Standard bleibt "ohne Vorlage" vorausgewaehlt', ohne.gewaehlt);
+  /* "Standard" hiesse jetzt zweierlei: der eingebaute Ablauf UND die Vorlage
+   * mit dem Stern. Deshalb wurde die erste Option umbenannt. */
+  check(!/^Standard$/.test(ohne.erste),
+        'die leere Option heisst nicht mehr "Standard"', ohne.erste);
+  check(ohne.sterne.length === 3 && ohne.sterne.every((s) => s === '☆'),
+        'jede Zeile traegt einen Stern, keiner ist gefuellt',
+        JSON.stringify(ohne.sterne));
+
+  const mit = lauf('g2', '');
+  check(mit.gewaehlt === 'g2',
+        'mit Standard ist er vorausgewaehlt – DAS ist der Sinn', mit.gewaehlt);
+  check(mit.sterne.join('') === '☆★☆',
+        'und genau seine Zeile traegt den gefuellten Stern',
+        JSON.stringify(mit.sterne));
+
+  /* ⚠ EINE EIGENE WAHL MUSS DEN STANDARD SCHLAGEN. Ohne den Merker holte
+   * jedes Neuzeichnen (Speichern, Loeschen, Stern) den Standard zurueck und
+   * verstellte die gerade getroffene Auswahl – ein Pulldown, das sich selbst
+   * zuruecksetzt, sieht wie ein Fehler aus. */
+  const gewaehlt = lauf('g2', 'e1');
+  check(gewaehlt.gewaehlt === 'e1',
+        'eine eigene Wahl ueberlebt das Neuzeichnen', gewaehlt.gewaehlt);
+}
+
 /* Drei Layout-Regeln, die NUR der Screenshot gezeigt hat. jsdom rechnet kein
  * Layout – geprüft wird deshalb die Regel, nicht das Ergebnis. Alle drei
  * ließen im 380 px breiten Fenster etwas herausragen, während die erste
@@ -1105,6 +1203,187 @@ section("8) Die Ticketnummer-Erkennung – ausgefuehrt");
         'felderLeeren stoppt den laufenden Merk-Timer');
   check(/wert:\s*null/.test(fl), 'und loescht das Gedaechtnis wirklich');
   check(/_letztes = null/.test(fl), 'der lokale Merker faellt mit');
+}
+
+/* ── 9) ZUGRIFFSRECHT VOR ANMELDUNG – der Fix zu "man muss sich 2x anmelden"
+ *
+ * GEMELDET 2026-08-28. Die Ursache lag nicht in der Anmeldung: fehlte das
+ * Host-Recht, erfragte das Fenster es MITTEN im Anmelde-Ablauf – und Chrome
+ * schliesst dabei das Popup. Der Klick auf "Anmelden" endete im Nichts, die
+ * Zugangsdaten wurden nie abgeschickt. Beim zweiten Anlauf war das Recht da.
+ *
+ * GEMESSEN WIRD DIE REIHENFOLGE, nicht der Quelltext: erst merken, dann
+ * fragen, dann anmelden. Ein Test, der nur nach `permissions.request` sucht,
+ * bliebe gruen, wenn der Aufruf wieder hinter die Anmeldung rutscht – also
+ * genau bei dem Fehler, um den es hier geht. */
+section("9) Zugriffsrecht: erst merken, dann fragen, dann anmelden");
+{
+  /* Der Klick-Handler haengt an `addEventListener` auf Modulebene und laesst
+   * sich nicht als Funktion herausschneiden. Deshalb wird sein RUMPF
+   * geschnitten und als eigene Funktion ausgefuehrt – zusammen mit den
+   * Helfern, die er benutzt. */
+  const handler = (POPUP_JS.match(
+    /\$\("btn-anmelden"\)\.addEventListener\("click", async \(\) => \{([\s\S]*?)\n\}\);/) || [])[1];
+  check(!!handler, 'der Anmelden-Handler laesst sich schneiden');
+
+  const teile = [];
+  for (const name of ['melde', 'sperre', 'zeige', 'hostMuster', 'hatZugriff',
+                      'zugriffAnzeigen', 'zugriffSichern']) {
+    const m = POPUP_JS.match(new RegExp('(?:async )?function ' + name
+                                        + '\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}'));
+    check(!!m, 'popup.js hat ' + name + '()');
+    if (m) teile.push(m[0]);
+  }
+
+  /** Ein Anmelde-Klick mit gestellter Berechtigungslage.
+   *  `hat`: liegt das Recht schon vor? `erteilt`: sagt der Benutzer im
+   *  Browser-Dialog ja? */
+  const anmeldeKlick = async (hat, erteilt) => {
+    const dom = new JSDOM(POPUP_HTML, { url: 'https://x.test/',
+                                        runScripts: 'outside-only' });
+    const w = dom.window;
+    try {
+      const f = new w.Function('hat', 'erteilt', `
+        const spur = [];            // die REIHENFOLGE aller Ereignisse
+        let erlaubt = hat;
+        const api = { permissions: {
+          async contains() { return erlaubt; },
+          async request() {
+            spur.push("request");
+            if (erteilt) erlaubt = true;
+            return erteilt;
+          },
+        } };
+        const $ = (id) => document.getElementById(id);
+        const el = {
+          login: $("bereich-login"), arbeit: $("bereich-arbeit"),
+          basis: $("f-basis"), benutzer: $("f-benutzer"),
+          kennwort: $("f-kennwort"), totp: $("f-totp"),
+          meldung: $("meldung"), abmelden: $("btn-abmelden"),
+        };
+        let _marke = "Marke", _key = "ABC-1";
+        async function frage(n) {
+          spur.push(n.art);
+          if (n.art === "merken") return { ok: true };
+          if (n.art === "anmelden") return { ok: true, erlaubt: true, hinweis: "" };
+          return { ok: true };
+        }
+        function brandingHolen() {}
+        ${teile.join('\n')}
+        return (async () => {
+          el.basis.value = "https://s.test";
+          el.benutzer.value = "alice";
+          el.kennwort.value = "geheim";
+          await (async () => {${handler}})();
+          return JSON.stringify({
+            spur,
+            meldung: el.meldung.hidden ? "" : el.meldung.textContent,
+            kennwortFeld: el.kennwort.value,
+            angemeldet: !el.arbeit.hidden,
+          });
+        })();`);
+      return JSON.parse(await f(hat, erteilt));
+    } finally { w.close(); }
+  };
+
+  // a) Recht liegt vor (der Normalfall mit gebrandetem Paket): gar keine
+  //    Nachfrage, EINE Anmeldung.
+  {
+    const r = await anmeldeKlick(true, false);
+    check(!r.spur.includes('request'),
+          'mit vorhandenem Recht wird NICHT nachgefragt', JSON.stringify(r.spur));
+    check(r.spur.includes('anmelden'), 'und die Anmeldung laeuft durch');
+    check(r.angemeldet === true, 'der Arbeitsbereich ist danach offen');
+    check(r.kennwortFeld === '', 'das Kennwort verlaesst das Feld');
+  }
+
+  // b) Recht fehlt und wird erteilt: merken → fragen → anmelden, in DIESER
+  //    Reihenfolge. Das Merken MUSS vor der Nachfrage stehen – danach kann
+  //    das Fenster weg sein.
+  {
+    const r = await anmeldeKlick(false, true);
+    const iM = r.spur.indexOf('merken');
+    const iR = r.spur.indexOf('request');
+    const iA = r.spur.indexOf('anmelden');
+    check(iM >= 0, 'Adresse und Benutzer werden gemerkt', JSON.stringify(r.spur));
+    check(iM < iR, 'und zwar VOR der Berechtigungsabfrage', JSON.stringify(r.spur));
+    check(iR >= 0 && iR < iA,
+          'die Abfrage steht VOR der Anmeldung – nicht mittendrin',
+          JSON.stringify(r.spur));
+    check(iA >= 0, 'nach dem Erteilen wird angemeldet – ohne zweiten Klick');
+  }
+
+  // c) Recht fehlt und wird VERWEIGERT: es darf keine Anmeldung geben, und
+  //    der Grund muss dastehen. Ein stiller Abbruch ist genau das gemeldete
+  //    Symptom.
+  {
+    const r = await anmeldeKlick(false, false);
+    check(!r.spur.includes('anmelden'),
+          'ohne Recht wird gar nicht erst angemeldet', JSON.stringify(r.spur));
+    check(/Zugriffsrecht/.test(r.meldung),
+          'und der Grund steht im Fenster', r.meldung);
+    check(/Anmelden/.test(r.meldung),
+          'samt dem Weg zurueck (erneut druecken)', r.meldung);
+  }
+
+  /* Der Hinweis ueber dem Knopf: er muss VOR dem Klick dastehen, sonst liest
+   * ihn niemand rechtzeitig. */
+  check(/id="zugriff-hinweis"/.test(POPUP_HTML),
+        'das Fenster hat einen Platz fuer die Erklaerung');
+
+  /* WANN der Hinweis erscheint, wird AUSGEFUEHRT statt im Quelltext gelesen.
+   * Die erste Fassung dieses Waechters suchte nach "=== false" und meldete
+   * einen Fehler, obwohl dort "!== false" stand – dieselbe Aussage, andere
+   * Schreibweise. Ein Waechter, der die Schreibweise prueft, prueft nicht die
+   * Eigenschaft. */
+  const hinweisBei = async (lage) => {
+    const dom = new JSDOM(POPUP_HTML, { url: 'https://x.test/',
+                                        runScripts: 'outside-only' });
+    const w = dom.window;
+    try {
+      const f = new w.Function('lage', `
+        const api = { permissions: { async contains() {
+          if (lage === 'kaputt') throw new Error('geht nicht');
+          return lage === 'da';
+        } } };
+        const $ = (id) => document.getElementById(id);
+        const el = { basis: $("f-basis") };
+        ${teile.join('\n')}
+        return (async () => {
+          el.basis.value = "https://s.test";
+          await zugriffAnzeigen();
+          const p = $("zugriff-hinweis");
+          return JSON.stringify({ sichtbar: !p.hidden, text: p.textContent });
+        })();`);
+      return JSON.parse(await f(lage));
+    } finally { w.close(); }
+  };
+  check((await hinweisBei('fehlt')).sichtbar === true,
+        'fehlt das Recht, steht die Erklaerung ueber dem Knopf');
+  check(/schließt/.test((await hinweisBei('fehlt')).text),
+        'und sie kuendigt an, dass das Fenster dabei zugehen kann');
+  check((await hinweisBei('da')).sichtbar === false,
+        'mit vorhandenem Recht steht dort nichts');
+  /* "Nicht feststellbar" ist NICHT "fehlt" – eine Warnung auf Verdacht
+   * verunsichert bei einer funktionierenden Einrichtung. Meldet sich der
+   * Aufruf spaeter doch, steht der Grund im Meldungsfeld. */
+  check((await hinweisBei('kaputt')).sichtbar === false,
+        '"nicht feststellbar" erzeugt KEINE Warnung');
+
+  /* Die Adresse aus dem Paket – ohne sie tippt jemand eine abweichende
+   * Schreibweise ein, fuer die das vorbelegte Recht nicht gilt. */
+  check(/meta\[name="basis"\]/.test(POPUP_JS),
+        'popup.js liest die Adress-Vorgabe aus dem Paket');
+  const vb = (POPUP_JS.match(/function _vorgabeBasis\([\s\S]*?\n\}/) || [''])[0];
+  check(/https/.test(vb), 'und nimmt nur https-Adressen an');
+  check(/z\.basis \|\| _vorgabeBasis\(\)/.test(POPUP_JS),
+        'eine hinterlegte Adresse schlaegt die Vorgabe aus dem Paket');
+
+  /* Das Kennwort darf NIE gemerkt werden – der Benutzername schon. */
+  const BG_OHNE = ohneKommentare(BG);
+  check(/benutzer/.test(BG_OHNE) && !/kennwort:/.test(
+          (BG_OHNE.match(/async function einstSchreiben\([\s\S]*?\n\}/) || [''])[0]),
+        'der Hintergrund merkt den Benutzernamen, nie das Kennwort');
 }
 
 console.log("\n" + ok + " OK, " + fail + " FAIL");

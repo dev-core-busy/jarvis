@@ -128,6 +128,23 @@ function _vorgabeMarke() {
 // Der Rueckfall, solange keine Marke bekannt ist.
 let _marke = _vorgabeMarke() || "Jarvis";
 
+/* DIE SERVERADRESSE AUS DEM PAKET – dieselbe Bauart wie Marke und Farbe, und
+ * derselbe Zweck: etwas, das beim ALLERERSTEN Oeffnen schon dastehen muss.
+ *
+ * Sie gehoert zum Fix "man muss sich 2x anmelden": das Manifest traegt genau
+ * diese Adresse als Host-Recht, also muss auch das Feld sie tragen. Tippt
+ * jemand eine abweichende Schreibweise (IP statt Name, Port dazu), gilt das
+ * vorbelegte Recht nicht und die Nachfrage waere wieder da.
+ *
+ * Nur https wird uebernommen - ein anderer Wert im Paket waere ein Feld, das
+ * der Anmelden-Knopf gleich darauf ablehnt.
+ */
+function _vorgabeBasis() {
+    const m = document.querySelector('meta[name="basis"]');
+    const wert = ((m && m.content) || "").trim().replace(/\/+$/, "");
+    return /^https:\/\/[^\s"']+$/i.test(wert) ? wert : "";
+}
+
 /* ── Hausfarbe ──────────────────────────────────────────────────────────────
  * DIESELBE LUECKE WIE BEI DER MARKE, gemeldet 2026-08-28: der Anmelden-Knopf
  * war nie gebrandet. Die Farbe kam ausschliesslich aus `/api/branding`, und
@@ -260,6 +277,10 @@ async function brandingHolen(basis) {
 el.basis.addEventListener("change", () => {
     const b = (el.basis.value || "").trim();
     if (/^https:\/\/[^\s/]+\.[^\s/]+/i.test(b)) brandingHolen(b);
+    // Das Zugriffsrecht gilt je Adresse: wer eine andere eintraegt, braucht
+    // moeglicherweise eine neue Nachfrage – und soll das VORHER lesen, nicht
+    // erst, wenn sein Klick auf "Anmelden" im Nichts endet.
+    zugriffAnzeigen();
 });
 
 // ── Ticketnummer aus dem offenen Tab ────────────────────────────────────────
@@ -306,11 +327,31 @@ async function start() {
     melde(e.message);
     return;
   }
-  el.basis.value = z.basis || "";
+  /* DIE ADRESSE: gemerkt schlägt Paket-Vorgabe. Wer seinen Server umgestellt
+   * hat, soll seine Eingabe behalten – die Vorgabe aus dem ZIP ist nur die
+   * Starthilfe für das allererste Öffnen (siehe <meta name="basis">). */
+  el.basis.value = z.basis || _vorgabeBasis();
+  // Der zuletzt eingetippte Benutzername steht wieder da, wenn die
+  // Berechtigungsabfrage das Fenster geschlossen hat. Das Kennwort nie.
+  if (!z.angemeldet && z.benutzer_vorschlag && !el.benutzer.value) {
+    el.benutzer.value = z.benutzer_vorschlag;
+  }
   // Marke setzen, sobald eine Adresse bekannt ist – das geht ohne Anmeldung
   // und damit schon beim allerersten Öffnen nach dem Einrichten.
-  if (z.basis) brandingHolen(z.basis);
+  if (el.basis.value) brandingHolen(el.basis.value);
   zeige(z.angemeldet);
+  if (!z.angemeldet) {
+    await zugriffAnzeigen();
+    /* Nach dem Wiederöffnen SAGEN, was passiert ist. Ohne diesen Satz sieht
+     * die Maske aus wie beim ersten Mal, und der Benutzer weiß nicht, ob die
+     * Erlaubnis angekommen ist – genau das war die Verwirrung hinter „man muss
+     * sich 2x anmelden". Der Merker gilt einmalig und wird sofort verworfen. */
+    if (z.zugriff_erfragt && (await hatZugriff(el.basis.value)) === true) {
+      try { await frage({ art: "merken", zugriff_erfragt: false }); } catch (e) {}
+      melde("Zugriff erteilt. Bitte jetzt anmelden.");
+      el.kennwort.focus();
+    }
+  }
   if (z.angemeldet) {
     el.abmelden.hidden = false;
     // Das Pulldown gleich füllen – nicht erst beim Öffnen des Zahnrads:
@@ -425,6 +466,86 @@ function zeige(angemeldet) {
   el.abmelden.hidden = !angemeldet;
 }
 
+// ── Zugriffsrecht auf den Server ────────────────────────────────────────────
+/* ⚠ HIER LAG DIE MELDUNG „man muss sich 2x anmelden".
+ *
+ * Fehlt das Host-Recht, muss es erfragt werden – und **Chrome schließt dabei
+ * das Popup**. Bis 2026-08-28 stand die Abfrage MITTEN im Anmelde-Ablauf:
+ * Klick auf „Anmelden" → Abfrage → Fenster weg → die Zugangsdaten wurden nie
+ * abgeschickt. Beim zweiten Anlauf war das Recht da und es ging. Nach außen
+ * eine Anmeldung, die beim ersten Mal nicht zählt.
+ *
+ * Drei Dinge zusammen lösen das:
+ *  1. Der Server schreibt seine Adresse als Host-Recht ins Paket – in Chrome
+ *     kommt die Abfrage dann gar nicht mehr (jira_assist._manifest_gebrandet).
+ *  2. Bleibt sie doch nötig (Firefox, abweichende Adresse, Altpaket), wird
+ *     sie ZUERST erledigt und ANGEKÜNDIGT, nicht mitten im Anmelden.
+ *  3. Adresse und Benutzername werden vorher gemerkt – schließt das Fenster,
+ *     steht beim nächsten Öffnen alles außer dem Kennwort wieder da.
+ */
+function hostMuster(basis) {
+  try { return new URL(basis).origin + "/*"; }
+  catch (e) { return ""; }
+}
+
+/** Ist das Zugriffsrecht für diese Adresse da? `null` = nicht feststellbar. */
+async function hatZugriff(basis) {
+  const muster = hostMuster(basis);
+  if (!muster) return null;
+  try { return await api.permissions.contains({ origins: [muster] }); }
+  catch (e) { return null; }
+}
+
+/** Blendet die Erklärung über dem Anmelden-Knopf ein – oder aus.
+ *
+ * „Nicht feststellbar" wird wie „vorhanden" behandelt: eine Warnung, die auf
+ * einer Vermutung beruht, verunsichert bei einer funktionierenden Einrichtung.
+ * Fehlt das Recht wirklich, meldet sich der Aufruf ohnehin.
+ */
+async function zugriffAnzeigen() {
+  const p = $("zugriff-hinweis");
+  if (!p) return;
+  const basis = (el.basis.value || "").trim();
+  if (!basis || (await hatZugriff(basis)) !== false) { p.hidden = true; return; }
+  p.textContent =
+    "Beim ersten Anmelden fragt der Browser nach dem Zugriffsrecht für "
+    + basis + ". Bestätige die Nachfrage – dieses Fenster schließt dabei "
+    + "möglicherweise. Öffne es danach einfach erneut, Adresse und Benutzer "
+    + "stehen dann noch da.";
+  p.hidden = false;
+}
+
+/** Beschafft das Zugriffsrecht. `true` = vorhanden (ggf. gerade erteilt).
+ *
+ * ⚠ NACH DEM `request` KANN DAS FENSTER WEG SEIN – der Rückgabewert kommt
+ * dann nie an, und das ist kein Fehler, sondern der Normalfall in Chrome.
+ * Deshalb steht vorher alles im Speicher, was der nächste Anlauf braucht.
+ */
+async function zugriffSichern(basis) {
+  const muster = hostMuster(basis);
+  if (!muster) throw new Error("Die Adresse ist keine gültige URL.");
+  if ((await hatZugriff(basis)) === true) return true;
+  await frage({ art: "merken", basis,
+                benutzer: (el.benutzer.value || "").trim(),
+                zugriff_erfragt: true });
+  let ok = false;
+  try {
+    ok = await api.permissions.request({ origins: [muster] });
+  } catch (e) {
+    // Chrome verlangt für `request` eine Benutzeraktion. Geht sie verloren,
+    // ist die Meldung („must be called during a user gesture") für niemanden
+    // deutbar – der Weg zurück ist ein erneuter Klick.
+    throw new Error("Die Berechtigungsabfrage ließ sich nicht öffnen. Bitte "
+                    + "drücke „Anmelden“ noch einmal.");
+  }
+  if (!ok) {
+    throw new Error("Ohne Zugriffsrecht auf " + muster + " kann die "
+                    + "Erweiterung den Server nicht erreichen. Drücke "
+                    + "„Anmelden“ erneut und bestätige die Nachfrage.");
+  }
+  return true;
+}
+
 // ── Anmelden ────────────────────────────────────────────────────────────────
 $("btn-anmelden").addEventListener("click", async () => {
   const basis = (el.basis.value || "").trim();
@@ -435,27 +556,14 @@ $("btn-anmelden").addEventListener("click", async () => {
     return;
   }
 
-  // Die Host-Berechtigung wird ERST HIER erfragt, für genau diesen Server.
-  // Deshalb steht die Adresse nicht im Manifest: eine bei der Installation
-  // erzwungene Berechtigung für „alle Websites“ wäre für einen einzigen Server
-  // unverhältnismäßig – und in Firefox ließe sich die Adresse ohnehin nicht ins
-  // signierte Manifest schreiben.
-  let muster;
-  try { muster = new URL(basis).origin + "/*"; }
-  catch (e) { melde("Die Adresse ist keine gültige URL."); return; }
-
   sperre(true);
-  melde("Melde an …", true);
   try {
-    const hat = await api.permissions.contains({ origins: [muster] });
-    if (!hat) {
-      const ok = await api.permissions.request({ origins: [muster] });
-      if (!ok) {
-        melde("Ohne Zugriffsrecht auf " + muster + " kann die Erweiterung den " +
-              "Server nicht erreichen.");
-        return;
-      }
-    }
+    // ZUERST das Zugriffsrecht, DANN die Anmeldung – nie umgekehrt und nie
+    // vermischt (Begründung im Block darüber).
+    melde("Prüfe das Zugriffsrecht …", true);
+    await zugriffSichern(basis);
+
+    melde("Melde an …", true);
     const a = await frage({
       art: "anmelden", basis,
       benutzer: (el.benutzer.value || "").trim(),
@@ -473,6 +581,9 @@ $("btn-anmelden").addEventListener("click", async () => {
     }
   } catch (e) {
     melde(e.message);
+    // Der Hinweis über dem Knopf wird nachgezogen: scheiterte es am
+    // Zugriffsrecht, muss dort jetzt stehen, was zu tun ist.
+    zugriffAnzeigen();
   } finally {
     sperre(false);
   }
@@ -625,17 +736,24 @@ el.ergebnisFeld.addEventListener("input", () => {
  * sie nur ANGEZEIGT. Eine Oberfläche, die das Häkchen versteckt, ist keine
  * Schranke; wer es sich zurückholt, bekommt trotzdem einen Fehler.
  */
-let _vorlagen = { global: [], eigene: [], darf_global: false };
+let _vorlagen = { global: [], eigene: [], darf_global: false, standard: "" };
 let _vorlBearbeitet = "";      // Kennung der gerade bearbeiteten Vorlage
+// Hat der Benutzer in DIESEM Fenster schon selbst gewählt? Dann gewinnt seine
+// Wahl gegen den Standard – sonst überschriebe ein Neuzeichnen (nach dem
+// Speichern einer Vorlage) die gerade getroffene Auswahl.
+let _vorlBeruehrt = false;
 
 function vorlagenZeichnen() {
   const sel = $("f-vorlage");
   const gewaehlt = sel.value;
   sel.innerHTML = "";
-  const standard = document.createElement("option");
-  standard.value = "";
-  standard.textContent = "Standard";
-  sel.appendChild(standard);
+  const ohne = document.createElement("option");
+  ohne.value = "";
+  // NICHT „Standard“: seit es eine markierbare Standard-Vorlage gibt, hieße
+  // dasselbe Wort zwei verschiedene Dinge – der eingebaute Ablauf und die
+  // Vorlage mit dem Stern.
+  ohne.textContent = "Ohne Vorlage";
+  sel.appendChild(ohne);
 
   const gruppe = (titel, liste) => {
     if (!liste.length) return;
@@ -652,8 +770,13 @@ function vorlagenZeichnen() {
   };
   gruppe("Gemeinsam", _vorlagen.global);
   gruppe("Meine", _vorlagen.eigene);
-  sel.value = gewaehlt;                       // Auswahl überlebt das Neuzeichnen
-  if (sel.value !== gewaehlt) sel.value = "";  // ...außer sie wurde gelöscht
+  // Die Auswahl überlebt das Neuzeichnen; wurde sie gelöscht, bleibt „ohne“.
+  // Hat der Benutzer noch gar nichts angefasst, gilt SEIN Standard – genau
+  // dafür gibt es ihn. Der Server liefert nur eine Kennung, die es wirklich
+  // gibt (jira_vorlagen._standard_aus), ein Fehlgriff ist hier also keiner.
+  const wunsch = _vorlBeruehrt ? gewaehlt : (_vorlagen.standard || gewaehlt);
+  sel.value = wunsch;
+  if (sel.value !== wunsch) sel.value = "";
 
   const liste = $("vorl-liste");
   liste.innerHTML = "";
@@ -665,6 +788,24 @@ function vorlagenZeichnen() {
       const name = document.createElement("span");
       name.textContent = v.name + (art === "global" ? " (gemeinsam)" : "");
       li.appendChild(name);
+
+      /* DER STERN STEHT AN JEDER ZEILE, auch an fremden (gemeinsamen)
+       * Vorlagen: markiert wird nicht die Vorlage, sondern die eigene Wahl.
+       * Deshalb hängt er NICHT an `darf` – wer eine gemeinsame Vorlage nicht
+       * ändern darf, darf sie sehr wohl zu seinem Standard machen. */
+      const istStd = _vorlagen.standard === v.id;
+      const stern = document.createElement("button");
+      stern.type = "button";
+      stern.className = "leise ico stern" + (istStd ? " an" : "");
+      // Der Knopf sagt, was ein Klick TUT – nicht, was gerade gilt. Bei einem
+      // gesetzten Standard ist das Aufheben die Wirkung.
+      stern.title = istStd ? "Standard aufheben" : "Als Standard markieren";
+      stern.setAttribute("aria-label", stern.title);
+      stern.setAttribute("aria-pressed", istStd ? "true" : "false");
+      stern.textContent = istStd ? "★" : "☆";
+      stern.addEventListener("click", () => standardSetzen(istStd ? "" : v.id));
+      li.appendChild(stern);
+
       if (darf) {
         const bearb = document.createElement("button");
         bearb.type = "button";
@@ -709,10 +850,33 @@ async function vorlagenLaden() {
       global: (a.daten && a.daten.global) || [],
       eigene: (a.daten && a.daten.eigene) || [],
       darf_global: !!(a.daten && a.daten.darf_global),
+      standard: (a.daten && a.daten.standard) || "",
     };
     vorlagenZeichnen();
   } catch (e) {
-    // Ohne Vorlagen bleibt „Standard“ – das ist kein Grund, den Rest zu sperren.
+    // Ohne Vorlagen bleibt „Ohne Vorlage“ – kein Grund, den Rest zu sperren.
+    $("vorl-hinweis").textContent = e.message;
+  }
+}
+
+/** Standard setzen oder aufheben. `""` hebt auf.
+ *
+ * Die Liste wird danach NEU GELADEN statt nur der Stern umgemalt: der Server
+ * ist die Wahrheit, und er weist eine Kennung ab, die er nicht kennt. Ein
+ * lokal umgemalter Stern hätte sonst einen Standard behauptet, den es nicht
+ * gibt – und beim nächsten Öffnen stünde wieder „Ohne Vorlage“ da.
+ */
+async function standardSetzen(vid) {
+  try {
+    await frage({ art: "vorlage_standard", id: vid });
+    // Ein frisch gesetzter Standard soll SOFORT im Pulldown stehen – sonst
+    // markiert jemand seine Vorlage und muss sie trotzdem noch auswählen.
+    _vorlBeruehrt = false;
+    await vorlagenLaden();
+    $("vorl-hinweis").textContent = vid
+      ? "Als Standard markiert."
+      : "Standard aufgehoben.";
+  } catch (e) {
     $("vorl-hinweis").textContent = e.message;
   }
 }
@@ -728,6 +892,11 @@ async function vorlageLoeschen(v) {
     $("vorl-hinweis").textContent = e.message;
   }
 }
+
+// Eine eigene Wahl gewinnt gegen den Standard, bis das Fenster wieder zugeht.
+// Ohne diesen Merker holte jedes Neuzeichnen (Speichern, Löschen, Stern) den
+// Standard zurück und verstellte die gerade getroffene Auswahl.
+$("f-vorlage").addEventListener("change", () => { _vorlBeruehrt = true; });
 
 $("btn-vorlagen").addEventListener("click", () => {
   const box = $("vorlagen-box");
@@ -753,7 +922,9 @@ $("btn-vorl-speichern").addEventListener("click", async () => {
     // Die frisch gespeicherte Vorlage gleich auswählen – sonst muss der
     // Benutzer sie im Pulldown suchen, das er gerade gefüllt hat.
     const neu = a.daten && a.daten.vorlage;
-    if (neu && neu.id) $("f-vorlage").value = neu.id;
+    // Gilt als eigene Wahl – sonst zöge das nächste Neuzeichnen den Standard
+    // vor und die gerade gespeicherte Vorlage wäre wieder abgewählt.
+    if (neu && neu.id) { $("f-vorlage").value = neu.id; _vorlBeruehrt = true; }
     vorlageInsFormular(null, false);
     $("vorl-hinweis").textContent = "Gespeichert.";
   } catch (e) {

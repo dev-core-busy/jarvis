@@ -243,7 +243,7 @@
            „gemeinsame Vorlagen nur fuer Admins" sitzt im Backend
            (jira_vorlagen.speichern). Hier wird sie nur ANGEZEIGT – eine
            Oberflaeche, die das Haekchen versteckt, ist keine Schranke. */
-        _vorlagen: { global: [], eigene: [], darf_global: false },
+        _vorlagen: { global: [], eigene: [], darf_global: false, standard: '' },
         _vorlBearbeitet: '',
 
         loadVorlagen: function () {
@@ -255,7 +255,8 @@
                     if (!d || d.ok === false) throw new Error((d && d.error) || 'Fehler');
                     Manager._vorlagen = {
                         global: d.global || [], eigene: d.eigene || [],
-                        darf_global: !!d.darf_global
+                        darf_global: !!d.darf_global,
+                        standard: d.standard || ''
                     };
                     Manager.renderVorlagen();
                 })
@@ -303,9 +304,32 @@
                 links.appendChild(titel); links.appendChild(art); links.appendChild(text);
                 row.appendChild(links);
 
+                var knoepfe = document.createElement('span');
+                knoepfe.style.cssText = 'display:flex;gap:4px;flex:0 0 auto;';
+
+                /* DER STERN HAENGT NICHT AN `darf`. Markiert wird die EIGENE
+                   Wahl, nicht die Vorlage: wer eine gemeinsame Vorlage nicht
+                   aendern darf, darf sie sehr wohl zu seinem Standard machen.
+                   Der Standard ist immer persoenlich (jira_vorlagen.
+                   standard_setzen) - auch der eines Administrators. */
+                var ist = Manager._vorlagen.standard === e.v.id;
+                var s = document.createElement('button');
+                s.type = 'button';
+                s.className = 'kb-hdr-btn';
+                // Der Titel sagt, was der Klick TUT, nicht was gerade gilt.
+                s.title = ist ? t('jvorl.unstar', 'Standard aufheben')
+                              : t('jvorl.star', 'Als Standard markieren');
+                s.setAttribute('aria-pressed', ist ? 'true' : 'false');
+                // Aussage doppelt: Form UND Farbe - ein Farbwechsel allein
+                // waere an einem Zeichen dieser Groesse zu wenig.
+                s.textContent = ist ? '★' : '☆';
+                if (ist) s.style.color = 'var(--accent)';
+                s.addEventListener('click', function () {
+                    Manager.setStandard(ist ? '' : e.v.id);
+                });
+                knoepfe.appendChild(s);
+
                 if (darf) {
-                    var knoepfe = document.createElement('span');
-                    knoepfe.style.cssText = 'display:flex;gap:4px;flex:0 0 auto;';
                     var b = document.createElement('button');
                     b.type = 'button';
                     b.className = 'kb-hdr-btn';
@@ -322,10 +346,32 @@
                     w.innerHTML = (window.JarvisIcons && window.JarvisIcons.trash()) || '';
                     w.addEventListener('click', function () { Manager.deleteVorlage(e.v); });
                     knoepfe.appendChild(w);
-                    row.appendChild(knoepfe);
                 }
+                // AUSSERHALB von `darf`: der Stern steht an jeder Zeile, also
+                // muss auch die Knopfleiste immer in die Zeile.
+                row.appendChild(knoepfe);
                 box.appendChild(row);
             });
+        },
+
+        /* Persoenliche Standard-Vorlage setzen ('' hebt sie auf).
+           Danach wird NEU GELADEN statt der Stern umgemalt: der Server ist die
+           Wahrheit und weist eine Kennung ab, die er nicht kennt. Ein lokal
+           umgemalter Stern haette einen Standard behauptet, den es nicht gibt. */
+        setStandard: function (vid) {
+            fetch('/api/jira/assist/vorlagen/standard', {
+                method: 'POST',
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ id: vid || '' })
+            }).then(function (r) { return r.json(); })
+              .then(function (d) {
+                    if (!d || d.ok === false) throw new Error((d && (d.error || d.detail)) || 'Fehler');
+                    Manager.loadVorlagen();
+                    setStatus('jvorl-status', vid
+                        ? t('jvorl.starred', '✓ Als Standard markiert')
+                        : t('jvorl.unstarred', '✓ Standard aufgehoben'), 'ok');
+              })
+              .catch(function (e) { setStatus('jvorl-status', e.message, 'error'); });
         },
 
         editVorlage: function (v, global_) {

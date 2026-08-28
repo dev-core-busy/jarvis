@@ -27,6 +27,14 @@
        Erlaubt ist nur `#rgb`/`#rrggbb` – der Wert wird als CSS gesetzt, ein
        freier Text darin wäre eine Einschleusung. Leer = neutraler Knopf. -->
   <meta name="akzent" content="">
+  <!-- DIE SERVERADRESSE, aus demselben Grund und für denselben Fix wie das
+       Host-Recht im Manifest (jira_assist._manifest_gebrandet): steht sie
+       schon im Feld, tippt niemand eine abweichende Schreibweise ein, für die
+       das vorbelegte Zugriffsrecht nicht gilt – und die Berechtigungsabfrage,
+       an der die erste Anmeldung scheiterte, bleibt aus.
+       Gefüllt beim Bauen des ZIP; im Repo LEER. Eine bereits hinterlegte
+       Adresse wird davon NICHT überschrieben (popup.js::start). -->
+  <meta name="basis" content="">
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
@@ -63,6 +71,12 @@
       <input type="text" id="f-totp" inputmode="numeric" autocomplete="one-time-code">
     </label>
     <button type="button" id="btn-anmelden" class="haupt">Anmelden</button>
+    <!-- Fehlt das Zugriffsrecht auf den Server, steht die Erklärung HIER –
+         über dem Knopf, der die Abfrage auslöst, und nicht erst als Meldung
+         hinterher. Der Browser kann das Fenster dabei schließen; wer das
+         vorher gelesen hat, hält es nicht für einen Absturz.
+         popup.js blendet den Absatz ein (siehe zugriffAnzeigen). -->
+    <p class="hinweis" id="zugriff-hinweis" hidden></p>
   </section>
 
   <!-- Arbeitsbereich -->
@@ -86,8 +100,11 @@
     <label class="feld">
       <span>Vorlage für die Zusammenfassung</span>
       <div class="feld-zeile">
+        <!-- „Ohne Vorlage“, NICHT „Standard“: seit eine Vorlage als Standard
+             markierbar ist, hieße dasselbe Wort zwei verschiedene Dinge.
+             popup.js baut die Liste neu auf und setzt denselben Text. -->
         <select id="f-vorlage">
-          <option value="">Standard</option>
+          <option value="">Ohne Vorlage</option>
         </select>
         <button type="button" id="btn-vorlagen" class="leise ico"
                 title="Vorlagen verwalten" aria-label="Vorlagen verwalten">⚙</button>

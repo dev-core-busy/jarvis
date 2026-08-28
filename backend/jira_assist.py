@@ -709,7 +709,35 @@ def paket_dateiname(variante: str) -> str:
                                _dateiname_teil(variante))
 
 
-def _manifest_gebrandet(roh: str) -> str:
+def host_muster(basis: str) -> str:
+    """``https://host[:port]/*`` aus einer Basis-URL – oder ``""``.
+
+    Das Muster ist der Wert, den eine Host-Berechtigung im Manifest braucht.
+    Leer kommt heraus, wenn die Adresse fehlt, unbrauchbar ist oder **nur auf
+    dem Server selbst gilt** (``localhost``): eine Berechtigung fuer
+    ``https://localhost/*`` ist auf jedem Arbeitsplatz wertlos und verdeckt
+    obendrein, dass die Adresse falsch hinterlegt ist.
+    """
+    from urllib.parse import urlsplit  # noqa: PLC0415
+
+    from backend import addin  # noqa: PLC0415
+
+    wert = (basis or "").strip().rstrip("/")
+    if not wert or addin.ist_lokale_basis(wert):
+        return ""
+    try:
+        teile = urlsplit(wert)
+    except Exception:  # noqa: BLE001
+        return ""
+    # NUR https. Das Token ginge ueber http im Klartext, und das Fenster laesst
+    # eine http-Adresse ohnehin nicht zu (popup.js) - eine Berechtigung dafuer
+    # waere eine Zusage, die nirgends eingeloest wird.
+    if teile.scheme != "https" or not teile.netloc:
+        return ""
+    return "https://%s/*" % teile.netloc
+
+
+def _manifest_gebrandet(roh: str, basis: str = "") -> str:
     """Setzt Marke und Beschreibung im Manifest – JSON-sicher.
 
     Der Name kommt aus dem Branding-Formular und ist damit Fremdeingabe: er
@@ -723,6 +751,30 @@ def _manifest_gebrandet(roh: str) -> str:
     Paket signiert werden – ein zentral signiertes "fuer alle" gibt es dann
     nicht mehr. Fuer ein White-Label-Produkt ist das richtig herum: jedes Haus
     verteilt sein eigenes Paket unter seinem eigenen Namen.
+
+    DIE SERVERADRESSE STEHT SEIT 2026-08-28 ALS HOST-BERECHTIGUNG DARIN
+    --------------------------------------------------------------------
+    **Gemeldet: "man muss sich 2x anmelden".** Zutreffend, und die Ursache lag
+    nicht in der Anmeldung. Das Manifest trug die Adresse nur als
+    ``optional_host_permissions``; das Fenster musste sie also beim ersten
+    Anmelden per ``permissions.request()`` erfragen – und **Chrome schliesst
+    das Popup, sobald sein Berechtigungsdialog aufgeht**. Der Klick auf
+    "Anmelden" endete damit im Nichts: die Zugangsdaten wurden nie
+    abgeschickt. Beim zweiten Anlauf war die Berechtigung da und es
+    funktionierte. Nach aussen sieht das aus wie eine Anmeldung, die beim
+    ersten Mal nicht zaehlt.
+
+    Die frueher hier notierte Begruendung ("die Adresse darf nicht ins
+    Manifest, eine signierte Datei laesst sich nicht pro Server umschreiben")
+    war zu diesem Zeitpunkt schon ueberholt – **dieselbe Funktion schreibt seit
+    Langem den Markennamen hinein**, das Paket ist also ohnehin pro
+    Installation verschieden. Was bleibt: **im REPO steht keine Adresse**
+    (Waechter in ``tests/test_browser_addon.js``), sie entsteht erst beim
+    Bauen aus ``addin.basis_url(request)``.
+
+    **Fuer Chrome ist die Nachfrage damit weg.** Firefox behandelt in MV3 auch
+    deklarierte Host-Rechte als zustimmungspflichtig – dort bleibt der Weg
+    ueber den zweistufigen Ablauf im Fenster (``popup.js::zugriffSichern``).
     """
     import json  # noqa: PLC0415
 
@@ -736,14 +788,24 @@ def _manifest_gebrandet(roh: str) -> str:
     m["name"] = "%s für Jira" % marke
     m["description"] = ("Fasst das offene Jira-Ticket zusammen und schlägt "
                         "eine Antwort an den Kunden vor.")
+
+    # DIE EIGENE ADRESSE ALS HOST-BERECHTIGUNG - das ist der Fix zur Meldung
+    # "man muss sich 2x anmelden" (siehe Docstring). Nur wenn sie bekannt und
+    # brauchbar ist; sonst bleibt es beim Erfragen zur Laufzeit.
+    # `optional_host_permissions` BLEIBT daneben stehen: wer eine andere
+    # Adresse eintraegt (zweite Instanz, Adresswechsel), kommt weiterhin ueber
+    # die Nachfrage zum Ziel.
+    muster = host_muster(basis)
+    if muster:
+        m["host_permissions"] = [muster]
     return json.dumps(m, ensure_ascii=False, indent=2)
 
 
 _HEXFARBE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 
 
-def _popup_gebrandet(roh: str) -> str:
-    """Traegt Marke UND Hausfarbe als VORGABE in das Fenster der Erweiterung ein.
+def _popup_gebrandet(roh: str, basis: str = "") -> str:
+    """Traegt Marke, Hausfarbe UND Serveradresse ins Fenster der Erweiterung ein.
 
     WARUM DAS NOETIG IST (gemeldet 2026-08-27: "das Branding beim Login ist noch
     falsch"): das Fenster holt seine Marke aus ``/api/branding`` – und dafuer
@@ -776,27 +838,44 @@ def _popup_gebrandet(roh: str) -> str:
     ``#rrggbb`` wird verworfen. Dieselbe Pruefung noch einmal in ``popup.js``:
     die Datei kann auch aus ``bauen.sh`` stammen oder von Hand bearbeitet sein.
 
-    Fail-safe: fehlt das Feld, bleibt die Datei unveraendert – Marke und Farbe
-    kommen dann wie bisher beim ersten Serverabruf.
+    DIE ADRESSE AUS DEMSELBEN GRUND (2026-08-28): sie steht als Host-Recht im
+    Manifest (``_manifest_gebrandet``), also muss das Fenster sie auch als
+    VORGABE im Feld anbieten – sonst tippt jemand eine abweichende Schreibweise
+    ein, das vorbelegte Recht passt nicht dazu, und die Nachfrage ist wieder da.
+    Sie ueberschreibt eine bereits hinterlegte Adresse NICHT (popup.js): wer
+    seinen Server umgestellt hat, soll seine Eingabe behalten.
+
+    Fail-safe: fehlt ein Feld, bleibt es unveraendert – Marke, Farbe und Adresse
+    kommen dann wie bisher beim ersten Serverabruf bzw. per Eingabe.
     """
     import html  # noqa: PLC0415
 
-    def marke_ersetzen(m):
-        return "%s%s%s" % (m.group(1), html.escape(markenname(), quote=True),
-                           m.group(3))
+    def feld_setzen(text, name, wert):
+        """Belegt ``<meta name="…" content="">`` – oder laesst den Text stehen."""
+        if not wert:
+            return text
+        return re.sub(r'(<meta\s+name="%s"\s+content=")([^"]*)(")' % name,
+                      lambda m: "%s%s%s" % (m.group(1), wert, m.group(3)),
+                      text, count=1)
 
-    text = re.sub(r'(<meta\s+name="marke"\s+content=")([^"]*)(")',
-                  marke_ersetzen, roh, count=1)
+    # Fremdeingabe aus dem Branding-Formular → attributsicher.
+    text = feld_setzen(roh, "marke",
+                       html.escape(markenname(), quote=True))
 
+    # ⚠ DIE ADRESSE STEHT VOR DER FARBPRUEFUNG. Frueher endete diese Funktion
+    # bei fehlender Hausfarbe mit einem `return`; ein Feld hinter diesem
+    # Ausstieg waere auf jedem Server OHNE Branding still leer geblieben - und
+    # das sind genau die Server, auf denen niemand nach einem Branding-Fehler
+    # sucht. Dieselbe Falle wie beim Ordner-Knopf im Excel-Reiter.
+    text = feld_setzen(text, "basis",
+                       html.escape((basis or "").strip().rstrip("/"),
+                                   quote=True))
+
+    # Die Farbe wird nicht entschaerft, sondern GEPRUEFT – sie landet in einer
+    # CSS-Eigenschaft, wo Maskierung nichts nuetzt.
     akzent = (_branding_fuer_symbol()[0] or "").strip()
-    if not _HEXFARBE.match(akzent):
-        return text
-
-    def farbe_ersetzen(m):
-        return "%s%s%s" % (m.group(1), akzent, m.group(3))
-
-    return re.sub(r'(<meta\s+name="akzent"\s+content=")([^"]*)(")',
-                  farbe_ersetzen, text, count=1)
+    return feld_setzen(text, "akzent",
+                       akzent if _HEXFARBE.match(akzent) else "")
 
 
 def _branding_fuer_symbol() -> tuple:
@@ -857,8 +936,15 @@ def symbole_bauen() -> dict:
     return {"icons/icon-%d.png" % g: b for g, b in gebaut.items()}
 
 
-def paket_bauen(variante: str) -> tuple:
+def paket_bauen(variante: str, basis: str = "") -> tuple:
     """``(dateiname, bytes)`` – die Erweiterung als ZIP.
+
+    ``basis`` ist die Adresse, unter der die Arbeitsplaetze diesen Server
+    erreichen (``addin.basis_url(request)``). Sie wird als Host-Berechtigung
+    ins Manifest und als Vorgabe ins Fenster eingetragen – **damit entfaellt
+    die Berechtigungs-Nachfrage, an der die erste Anmeldung scheiterte**
+    (Begruendung in ``_manifest_gebrandet``). Fehlt sie, entsteht genau das
+    bisherige Paket: die Erweiterung fragt dann wie gehabt zur Laufzeit.
 
     Wirft ``AssistFehler``, wenn eine Datei fehlt: ein Paket mit einer fehlenden
     Datei installiert sich klaglos und bricht erst beim Benutzen, mit einer
@@ -887,13 +973,14 @@ def paket_bauen(variante: str) -> tuple:
         # Das Manifest heisst im Paket IMMER manifest.json – der Browser kennt
         # keinen anderen Namen. Marke und Beschreibung kommen aus dem Branding.
         z.writestr("manifest.json", _manifest_gebrandet(
-            (wurzel / manifest).read_text(encoding="utf-8")))
+            (wurzel / manifest).read_text(encoding="utf-8"), basis))
         for d in PAKET_DATEIEN:
             if d == "popup.html":
-                # Die Marke gehoert schon VOR den ersten Serverabruf ins
-                # Fenster – sonst steht sie auf der Anmeldemaske nicht.
+                # Marke, Farbe und Adresse gehoeren schon VOR den ersten
+                # Serverabruf ins Fenster – sonst stehen sie auf der
+                # Anmeldemaske nicht.
                 z.writestr(d, _popup_gebrandet(
-                    (wurzel / d).read_text(encoding="utf-8")))
+                    (wurzel / d).read_text(encoding="utf-8"), basis))
                 continue
             z.writestr(d, (wurzel / d).read_bytes())
         # DAS SYMBOL STEHT IN DER SYMBOLLEISTE JEDES ARBEITSPLATZES und wird

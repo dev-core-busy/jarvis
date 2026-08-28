@@ -243,3 +243,13 @@ button.ico {
 .vorl-liste li:last-child { border-bottom: 0; }
 /* Der Name nimmt den Platz, die Knöpfe bleiben rechts. */
 .vorl-liste li > span { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+
+/* Der Stern der Standard-Vorlage.
+ *
+ * Er trägt die Aussage DOPPELT: gefüllt/leer UND Farbe. Nur die Farbe zu
+ * wechseln wäre für ein 13-Pixel-Zeichen zu wenig, und Farbe allein ist im
+ * Projekt ohnehin keine Information. Er steht VOR den Bearbeiten-Knöpfen und
+ * an jeder Zeile – auch an gemeinsamen Vorlagen, die man nicht ändern darf:
+ * markiert wird die eigene Wahl, nicht die Vorlage. */
+.vorl-liste .stern { font-size: 13px; }
+.vorl-liste .stern.an { color: var(--akzent); }

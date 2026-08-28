@@ -5,7 +5,9 @@
  * Benutzer daneben klickt; ein Aufruf von hier waere damit mitten in einer
  * 13-Sekunden-Auswertung weg.
  */
-import { einfuegenInJira, einfuegenUeberEditorApi } from "./einfuegen.js";
+import {
+  einfuegenInJira, einfuegenUeberEditorApi, leseAusJira, lesenUeberEditorApi,
+} from "./einfuegen.js";
 
 const api = (typeof browser !== "undefined") ? browser : chrome;
 
@@ -294,11 +296,25 @@ function zeigeGemerktes(g) {
     _fremdesErgebnis = true;
     melde("⚠ Dieser Text gehört zu " + g.key + ", offen ist aber " + _key
           + ". Nicht einfügen, ohne ihn zu prüfen.");
+  } else if (g.modus === "ueberarbeiten") {
+    melde(mitAbgleich("Gemerkte Überarbeitung – bitte vor dem Absenden lesen.",
+                      g.hinweis));
   } else {
     melde(g.modus === "antwort"
       ? "Gemerkter Vorschlag – bitte vor dem Absenden lesen."
       : "Gemerkte Zusammenfassung.");
   }
+}
+
+/** Haengt den Abgleich-Hinweis an eine Meldung – oder eben nicht.
+ *
+ * Der Hinweis kommt vom Server bereits ABGETRENNT (jira_assist._abgleich_teilen)
+ * und darf hier nicht in das bearbeitbare Feld geraten: er ist eine Anmerkung
+ * FUER den Mitarbeiter, kein Teil der Antwort an den Kunden.
+ */
+function mitAbgleich(text, hinweis) {
+  const h = (hinweis || "").trim();
+  return h ? (text + "\n\n⚠ Abgleich mit dem Ticket:\n" + h) : text;
 }
 
 function zeige(angemeldet) {
@@ -368,16 +384,27 @@ el.abmelden.addEventListener("click", async () => {
 });
 
 // ── Auswerten ───────────────────────────────────────────────────────────────
-async function auswerten(modus) {
+const ARBEITSTEXT = {
+  zusammenfassung: "Fasse das Ticket zusammen … (dauert einige Sekunden)",
+  antwort: "Formuliere einen Antwortvorschlag … (dauert einige Sekunden)",
+  ueberarbeiten: "Gleiche deinen Entwurf mit dem Ticket ab … "
+                 + "(dauert einige Sekunden)",
+};
+const FERTIGTEXT = {
+  zusammenfassung: "",
+  antwort: "Vorschlag – bitte vor dem Absenden lesen und anpassen.",
+  ueberarbeiten: "Überarbeitete Fassung deines Entwurfs – bitte vor dem "
+                 + "Absenden lesen.",
+};
+
+async function auswerten(modus, entwurf) {
   if (!_key) {
     melde("Kein Jira-Ticket in diesem Tab. Öffne ein Ticket (…/browse/ABC-123).");
     return;
   }
   sperre(true);
   el.ergebnis.hidden = true;
-  melde(modus === "antwort"
-    ? "Formuliere einen Antwortvorschlag … (dauert einige Sekunden)"
-    : "Fasse das Ticket zusammen … (dauert einige Sekunden)", true);
+  melde(ARBEITSTEXT[modus] || ARBEITSTEXT.zusammenfassung, true);
   try {
     const a = await frage({
       art: "auswerten", key: _key, modus,
@@ -386,10 +413,12 @@ async function auswerten(modus) {
       // Die Vorlage gilt nur für die Zusammenfassung – ein Antwortvorschlag
       // hat seine eigene Aufgabe, dort wäre sie eine zweite Anweisung.
       vorlage: (modus === "zusammenfassung") ? ($("f-vorlage").value || "") : "",
+      entwurf: entwurf || "",
     });
     const d = a.daten || {};
     _letztes = { key: d.key, modus: d.modus, text: d.text || "",
                  titel: d.titel || "", kommentare: d.kommentare || 0,
+                 hinweis: d.hinweis || "",
                  modell: d.modell || "", zeit: Date.now() };
     _fremdesErgebnis = false;      // frisch geholt = passt zum offenen Ticket
     el.ergebnisFeld.value = d.text || "";
@@ -399,9 +428,7 @@ async function auswerten(modus) {
     // von einem dünnen Ticket zu unterscheiden.
     el.ergebnisFuss.textContent =
       d.key + " · " + (d.kommentare || 0) + " Kommentar(e) ausgewertet · " + (d.modell || "");
-    melde(modus === "antwort"
-      ? "Vorschlag – bitte vor dem Absenden lesen und anpassen."
-      : "");
+    melde(mitAbgleich(FERTIGTEXT[modus] || "", d.hinweis));
   } catch (e) {
     melde(e.message);
   } finally {
@@ -411,6 +438,65 @@ async function auswerten(modus) {
 
 $("btn-zusammenfassung").addEventListener("click", () => auswerten("zusammenfassung"));
 $("btn-antwort").addEventListener("click", () => auswerten("antwort"));
+
+/* ── Überarbeiten: erst das Kommentarfeld LESEN, dann auswerten ────────────
+ *
+ * Der Entwurf wird hier geholt und mitgeschickt; der Server liest die Seite
+ * nicht (er kennt nur die Ticketnummer). Das ist dieselbe Trennung wie beim
+ * Einfügen, nur in die andere Richtung – und derselbe zweistufige Weg: die
+ * isolierte Welt zuerst, die Editor-API der Seite nur, wenn das nicht reicht.
+ */
+async function entwurfHolen() {
+  const treffer = await api.scripting.executeScript({
+    target: { tabId: _tabId }, func: leseAusJira,
+  });
+  let r = (treffer && treffer[0] && treffer[0].result) || {};
+  // Auch bei „leer“ nachfassen: genau dann trägt oft der TinyMCE-Editor den
+  // Text, während die sichtbare textarea daneben leer ist.
+  if (!r.ok && r.tinymce_moeglich) {
+    try {
+      const zweit = await api.scripting.executeScript({
+        target: { tabId: _tabId }, world: "MAIN", func: lesenUeberEditorApi,
+      });
+      const r2 = (zweit && zweit[0] && zweit[0].result) || {};
+      // Nur ein ERFOLG zählt: die Meldung des ersten Laufs ist die
+      // aussagekräftigere („leer“ statt „kein Editor erreichbar“).
+      if (r2.ok) r = r2;
+    } catch (e) {
+      // `world: "MAIN"` gibt es in Firefox erst ab 128.
+    }
+  }
+  return r;
+}
+
+$("btn-ueberarbeiten").addEventListener("click", async () => {
+  if (!_key) {
+    melde("Kein Jira-Ticket in diesem Tab. Öffne ein Ticket (…/browse/ABC-123).");
+    return;
+  }
+  if (_tabId === null) return;
+  sperre(true);
+  melde("Lese das Kommentarfeld …", true);
+  let r;
+  try {
+    r = await entwurfHolen();
+  } catch (e) {
+    melde("Das Kommentarfeld ist nicht lesbar: " + ((e && e.message) || e)
+          + "\nKopiere deinen Entwurf notfalls von Hand in das Textfeld unten.");
+    return;
+  } finally {
+    sperre(false);
+  }
+  if (!r || !r.ok) {
+    // DIE DIAGNOSE GEHÖRT IN DIE MELDUNG – ohne sie ist der nächste Anlauf
+    // wieder Raten (gleiche Lehre wie beim Einfügen).
+    const gesehen = (r && r.gesehen && r.gesehen.length)
+      ? "\nGefunden: " + r.gesehen.join(", ") : "";
+    melde(((r && r.fehler) || "Kein Text im Kommentarfeld gefunden.") + gesehen);
+    return;
+  }
+  await auswerten("ueberarbeiten", r.text);
+});
 
 /* Der BEARBEITETE Text wird mitgemerkt – gedrosselt.
  *

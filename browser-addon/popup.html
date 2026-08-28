@@ -56,7 +56,16 @@
     <div class="knopfreihe">
       <button type="button" id="btn-zusammenfassung" class="haupt">Zusammenfassen</button>
       <button type="button" id="btn-antwort" class="haupt">Antwort vorschlagen</button>
+      <button type="button" id="btn-ueberarbeiten" class="haupt">Überarbeiten</button>
     </div>
+    <!-- Die Voraussetzung ist unsichtbar und muss deshalb dastehen: das Feld
+         wird über den zuletzt gesetzten Cursor gefunden. Ohne diesen Satz
+         drückt jemand den Knopf und bekommt „kein Text gefunden“, ohne zu
+         wissen, was er anders machen soll. -->
+    <p class="hinweis" id="ueberarb-hinweis">
+      <b>Überarbeiten</b> liest den Entwurf aus dem Kommentarfeld, in dem zuletzt
+      der Cursor stand, und gleicht ihn mit dem Ticketverlauf ab.
+    </p>
 
     <!-- Vorlage für die Zusammenfassung. Das Zahnrad öffnet die Verwaltung –
          eigene Vorlagen darf jeder anlegen, gemeinsame nur ein Administrator. -->

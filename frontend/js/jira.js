@@ -70,6 +70,7 @@
                 var el = $(id);
                 if (el) el.addEventListener('keydown', function (e) { if (e.key === 'Enter') Manager.search(); });
             });
+            var sh = $('jshare-save'); if (sh) sh.addEventListener('click', this.saveShare.bind(this));
             var vs = $('jvorl-save'); if (vs) vs.addEventListener('click', this.saveVorlage.bind(this));
             var vn = $('jvorl-new');
             if (vn) vn.addEventListener('click', function () { Manager.editVorlage(null, false); });
@@ -91,6 +92,8 @@
                     if ($('jira-url')) $('jira-url').value = c.base_url || '';
                     if ($('jira-token')) $('jira-token').value = c.api_token || '';
                     if ($('jira-max-results')) $('jira-max-results').value = c.max_results || 50;
+                    if ($('jshare-chrome')) $('jshare-chrome').value = c.addon_pfad_chrome || '';
+                    if ($('jshare-firefox')) $('jshare-firefox').value = c.addon_pfad_firefox || '';
                 })
                 .catch(function () {});
         },
@@ -114,6 +117,36 @@
             }).then(function (r) { return r.json(); })
               .then(function () { status('✓ Gespeichert', 'ok'); })
               .catch(function () { status('✗ Fehler beim Speichern', 'error'); });
+        },
+
+        /* Eigener Knopf, eigene TEILMENGE.
+         *
+         * `POST /api/skills/jira/config` merged serverseitig – ein Knopf darf
+         * deshalb nur seine eigenen Felder senden. Schickte er den ganzen
+         * Formularstand mit, ueberschriebe er den Stand des anderen Knopfes
+         * (im Projekt bezahlt, siehe Register „Zwei Knoepfe im selben Reiter"):
+         * ein leeres Token-Feld waere dann ein geloeschter Zugang.
+         */
+        saveShare: function () {
+            var s = $('jshare-status');
+            var setz = function (t, art) {
+                if (!s) return;
+                s.textContent = t || '';
+                s.style.color = art === 'ok' ? 'var(--success, #2ecc71)'
+                              : art === 'error' ? 'var(--danger, #e74c3c)' : '';
+            };
+            var body = {
+                addon_pfad_chrome: ($('jshare-chrome') ? $('jshare-chrome').value : '').trim(),
+                addon_pfad_firefox: ($('jshare-firefox') ? $('jshare-firefox').value : '').trim()
+            };
+            setz('Speichere…');
+            fetch('/api/skills/jira/config', {
+                method: 'POST',
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify(body)
+            }).then(function (r) { return r.json(); })
+              .then(function () { setz('✓ Gespeichert', 'ok'); })
+              .catch(function () { setz('✗ Fehler beim Speichern', 'error'); });
         },
 
         test: function () {

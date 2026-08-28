@@ -58,6 +58,31 @@ Jarvis-Adresse. Ohne dieses Recht kann die Erweiterung den Server nicht erreiche
 > Zu bedenken: **der Code geht dabei an Mozilla.** Die Serveradresse steht deshalb nicht im
 > Manifest, sondern wird beim ersten Anmelden eingetragen – im Paket steht kein interner Name.
 
+## Verteilen über eine Netzfreigabe (der Weg, der heute benutzt wird)
+
+Statt jeden Benutzer das Paket herunterladen zu lassen, kann es auf einer Netzfreigabe
+liegen. Die Anleitungsseite `/jira-addon` zeigt dann **den Pfad zum Kopieren statt des
+Download-Knopfes** – eingetragen wird er unter *Einstellungen → Jira → Browser Plugin
+Bereitstellung* (Felder `addon_pfad_chrome`, `addon_pfad_firefox` der Skill-Config).
+
+* **Chrome/Edge** braucht den **entpackten Ordner** – der Browser lädt eine Erweiterung
+  nie aus einem ZIP. Auf der Freigabe liegt also der Ordnerinhalt.
+* **Firefox** braucht die **ZIP-Datei** selbst.
+
+⚠ **Das gebrandete Paket kommt vom SERVER, nicht aus `bauen.sh`.** Marke, Beschreibung und
+**Symbol** setzt erst `jira_assist.paket_bauen` beim Abruf zusammen; `bauen.sh` erzeugt
+bewusst ein neutrales Paket für die Entwicklung. Wer die Datei für die Freigabe braucht,
+holt sie in der Anleitung: *Portal → Jira-Assistent* zeigt Administratoren die
+Download-Knöpfe auch dann noch, wenn dort für alle anderen längst der Netzwerkpfad steht.
+
+⚠ **Die Kopie auf der Freigabe driftet.** Sie trägt den Stand des Kopiermoments. Nach einer
+Aktualisierung gehört sie **neu** dorthin, sonst installieren die Benutzer weiter den alten
+Stand, und niemand sieht warum.
+
+Die Felder leer zu lassen ist ein gültiger Zustand: dann bleibt es beim Download-Knopf.
+Der Pfad steht bewusst **nicht im Quelltext** – er ist hausintern, dieses Repo ist
+öffentlich, und auf einem anderen Server gibt es die Freigabe nicht.
+
 ## Verteilen (Phase 2, noch nicht gebaut)
 
 * **Chrome/Edge:** `ExtensionInstallForcelist` per Gruppenrichtlinie, dazu eine selbst

@@ -11271,15 +11271,24 @@ async def jira_assist_health(request: Request,
         "zert_deckt_adresse": gedeckt,
         "zert_host": host,
         "zert_namen": namen,
+        # Wo das fertige Paket im Netz liegt (Einstellungen → Jira). Leer =
+        # nicht hinterlegt; die Anleitung zeigt dann wie bisher den
+        # Download-Knopf. Der Weg ueber diesen Endpunkt ist noetig, weil
+        # /api/skills/{name}/config Administratoren vorbehalten ist – die
+        # Anleitung lesen aber die BENUTZER.
+        "paket_pfade": jira_assist.paket_pfade(),
     })
 
 
 @app.post("/api/jira/assist")
 async def jira_assist_run(request: Request,
                           user: str = Depends(require_jira_assist_access)):
-    """Zusammenfassung oder Antwortvorschlag zu EINEM Ticket.
+    """Zusammenfassung, Antwortvorschlag oder Ueberarbeitung zu EINEM Ticket.
 
-    Rumpf: ``{key, modus: "zusammenfassung"|"antwort", lang?, hinweis?, stil?}``.
+    Rumpf: ``{key, modus: "zusammenfassung"|"antwort"|"ueberarbeiten", lang?,
+    hinweis?, stil?, entwurf?}``. ``entwurf`` ist der bereits getippte Text aus
+    dem Jira-Kommentarfeld und nur im Modus ``ueberarbeiten`` von Belang – dort
+    ist er Pflicht (die Pruefung sitzt im Modul, nicht hier).
     Fehlschlag = **400 mit Klartext**, nicht 200 mit ``ok:false`` – gleiche Regel
     wie bei ``/api/license`` und ``/api/prompt/pruefen``: sonst sieht der
     Aufrufer den Fehler nicht.
@@ -11300,6 +11309,7 @@ async def jira_assist_run(request: Request,
             hinweis=str(b.get("hinweis") or ""),
             stil=str(b.get("stil") or ""),
             vorlage=str(b.get("vorlage") or ""),
+            entwurf=str(b.get("entwurf") or ""),
             ist_admin=_is_admin_user(user),
         )
     except jira_assist.AssistFehler as f:
@@ -18221,7 +18231,10 @@ async def api_issues_get(issue_id: str, user: str = Depends(require_auth_or_agen
         # 'bearbeiten' (Loesungsbereich) steht ALLEN Administratoren zu, nicht nur jarvis
         "is_admin": _is_admin_user(user),
         "can_edit": _issues_mod.can_edit(issue, user),
-        "can_delete": _issues_mod.can_delete(issue, user),
+        # Loeschen duerfen Administratoren – die Oberflaeche zeigt den Knopf
+        # allein anhand dieses Feldes. Ohne `is_admin` bliebe er unsichtbar,
+        # obwohl der Endpunkt die Loeschung ausfuehren wuerde.
+        "can_delete": _issues_mod.can_delete(issue, user, _is_admin_user(user)),
     })
 
 
@@ -18265,10 +18278,16 @@ async def api_issues_update(issue_id: str, request: Request,
 
 @app.delete("/api/issues/{issue_id}")
 async def api_issues_delete(issue_id: str, user: str = Depends(require_auth_or_agent)):
-    """Löscht ein Issue (nur mit entsprechender Berechtigung)."""
-    ok, err = _issues_mod.delete_issue(user, issue_id)
+    """Löscht ein Issue – Administratoren (und der lokale Benutzer `jarvis`).
+
+    Die Rechtefrage beantwortet das MODUL (`issues.can_delete`), nicht dieser
+    Endpunkt: sonst fehlt die Schranke, sobald jemand einen zweiten Aufrufer
+    baut. Hier wird nur `is_admin` beigesteuert – das weiß das Modul nicht.
+    """
+    ok, err = _issues_mod.delete_issue(user, issue_id,
+                                       is_admin=_is_admin_user(user))
     if not ok:
-        if "Jarvis" in err or "Berechtigung" in err:
+        if "Berechtigung" in err:
             raise HTTPException(403, err)
         raise HTTPException(404, err)
     return JSONResponse({"ok": True})

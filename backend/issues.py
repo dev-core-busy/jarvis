@@ -6,7 +6,10 @@ Berechtigungsmodell:
 - Eigene Issues editieren ('editieren'): nur der Ersteller, solange status != "closed"
 - Loesungsbereich ('bearbeiten', status + jarvis_comment): alle Administratoren
   (is_admin wird vom Aufrufer in main.py via _is_admin_user bestimmt) sowie "jarvis"
-- Alle Issues editieren/loeschen: nur Benutzer "jarvis"
+- Loeschen: alle Administratoren sowie "jarvis" (``can_delete``)
+- Fremden Meldungstext editieren: weiterhin NUR "jarvis" – „editieren" aendert
+  den Text eines anderen, „bearbeiten" pflegt nur den Loesungsbereich; das ist
+  bewusst zweierlei
 
 Speicherung:
 - data/issues.json (Atomic-Write via .tmp + replace)
@@ -115,9 +118,26 @@ def can_edit(issue: dict, user: str) -> bool:
     return issue.get("status") != "closed"
 
 
-def can_delete(issue: dict, user: str) -> bool:
-    """Nur jarvis darf loeschen."""
-    return is_jarvis(user)
+def can_delete(issue: dict, user: str, is_admin: bool = False) -> bool:
+    """Loeschen duerfen Administratoren – und der lokale Benutzer ``jarvis``.
+
+    ⚠ ``is_admin`` MUSS uebergeben werden; die Vorgabe ``False`` ist
+    fail-closed. Das Modul kennt die Rechtelage nicht selbst: wer Administrator
+    ist, entscheidet ``main.py::_is_admin_user`` (Benutzerliste ODER
+    AD-Gruppe) – dieselbe Aufteilung wie bei ``update_issue`` und
+    ``unseen_count``. Ein Aufrufer, der das Argument vergisst, bekommt das alte,
+    engere Verhalten und keine stille Rechteerweiterung.
+
+    Der lokale ``jarvis`` bleibt ausdruecklich drin: er ist der Rueckweg, wenn
+    die AD-Freigaben leer oder falsch gesetzt sind (gleiche Begruendung wie bei
+    „leer = niemand" in der Anmeldung).
+
+    Bewusst NICHT erweitert wird ``can_edit``: „editieren" ist das Aendern des
+    fremden Meldungstextes, „bearbeiten" der Loesungsbereich des Administrators.
+    Beides ueber einen Kamm zu scheren, hiesse einem Admin den Text eines
+    anderen umschreiben zu lassen – das ist etwas anderes als aufraeumen.
+    """
+    return is_jarvis(user) or bool(is_admin)
 
 
 # ═══ Validation ═════════════════════════════════════════════════════════
@@ -373,8 +393,8 @@ def mark_seen(user: str, is_admin: bool = False) -> int:
     return changed
 
 
-def delete_issue(user: str, issue_id: str) -> tuple[bool, str]:
-    """Issue loeschen (nur jarvis). Loescht auch Attachment-Ordner."""
+def delete_issue(user: str, issue_id: str, is_admin: bool = False) -> tuple[bool, str]:
+    """Issue loeschen (Administratoren). Loescht auch den Attachment-Ordner."""
     with _lock:
         issues = _load_all()
         target = None
@@ -384,8 +404,10 @@ def delete_issue(user: str, issue_id: str) -> tuple[bool, str]:
                 break
         if not target:
             return False, "Issue nicht gefunden."
-        if not can_delete(target, user):
-            return False, "Nur Jarvis darf Issues loeschen."
+        if not can_delete(target, user, is_admin):
+            # Das Wort "Berechtigung" traegt die Antwort: der Endpunkt macht
+            # daraus 403, alles andere waere ein 404 ("nicht gefunden").
+            return False, "Keine Berechtigung – Meldungen darf nur ein Administrator loeschen."
 
         issues = [i for i in issues if i.get("id") != issue_id]
         _save_all(issues)

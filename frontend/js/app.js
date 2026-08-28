@@ -662,6 +662,7 @@
         function _initJiraCollapse() {
             _collapseInit([
                 { hdr: 'ji-sect-conn-hdr', body: 'ji-sect-conn-body', tog: 'ji-sect-conn-tog' },
+                { hdr: 'ji-sect-share-hdr', body: 'ji-sect-share-body', tog: 'ji-sect-share-tog' },
                 { hdr: 'ji-sect-vorl-hdr', body: 'ji-sect-vorl-body', tog: 'ji-sect-vorl-tog' },
             ]);
         }

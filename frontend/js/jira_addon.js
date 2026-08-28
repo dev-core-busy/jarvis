@@ -12,6 +12,10 @@
 
     function token() { return localStorage.getItem('jarvis_token') || ''; }
 
+    /* Gemerkt, weil der Paket-Block bei jedem Sprachwechsel neu gebaut wird –
+     * ein zweites /api/me dafuer waere ein Aufruf fuer eine Zahl, die feststeht. */
+    var _istAdmin = false;
+
     function T(key, rueckfall) {
         // i18n.js ist eingebunden; faellt es aus, steht der deutsche Text da.
         try {
@@ -88,6 +92,131 @@
         m.classList.toggle('ja-warn', !!warn);
     }
 
+    /* ── Woher das Paket kommt: Netzfreigabe ODER Download ────────────────
+     *
+     * Ist unter *Einstellungen → Jira* ein Netzwerkpfad hinterlegt, steht hier
+     * dieser Pfad zum Kopieren – sonst wie bisher der Download-Knopf. Die
+     * Entscheidung faellt JE VARIANTE: ein Haus kann das Chrome-Paket auf die
+     * Freigabe legen und Firefox weiter herunterladen lassen.
+     *
+     * Der Pfad ist Fremdeingabe aus einem Formular und wird ausschliesslich per
+     * textContent gesetzt.
+     */
+    function kopieren(pfad, knopf) {
+        var alt = knopf.textContent;
+        var fertig = function (text) {
+            knopf.textContent = text;
+            setTimeout(function () { knopf.textContent = alt; }, 2000);
+        };
+        try {
+            navigator.clipboard.writeText(pfad).then(function () {
+                // Rueckmeldung ist Pflicht: in der Zwischenablage sieht man
+                // nichts, ein stiller Fehlschlag waere unsichtbar.
+                fertig(T('jaddon.copy_ok', 'kopiert ✓'));
+            }, function () {
+                meldung(T('jaddon.copy_err',
+                    'Kopieren nicht möglich – markiere den Pfad und kopiere ihn '
+                    + 'von Hand.'), true);
+            });
+        } catch (e) {
+            meldung(T('jaddon.copy_err',
+                'Kopieren nicht möglich – markiere den Pfad und kopiere ihn '
+                + 'von Hand.'), true);
+        }
+    }
+
+    function pfadZeile(titel, pfad) {
+        var zeileEl = document.createElement('div');
+        zeileEl.className = 'ja-pfad';
+
+        var lab = document.createElement('div');
+        lab.className = 'ja-pfad-lab';
+        lab.textContent = titel;
+
+        var wert = document.createElement('code');
+        wert.className = 'ja-pfad-wert';
+        wert.textContent = pfad;          // NIE innerHTML – Fremdeingabe
+
+        var knopf = document.createElement('button');
+        knopf.type = 'button';
+        knopf.className = 'ja-btn';
+        knopf.textContent = T('jaddon.copy', 'Pfad kopieren');
+        knopf.addEventListener('click', function () { kopieren(pfad, knopf); });
+
+        zeileEl.appendChild(lab);
+        zeileEl.appendChild(wert);
+        zeileEl.appendChild(knopf);
+        return zeileEl;
+    }
+
+    function dlKnopf(variante, titel) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.id = 'ja-dl-' + variante;
+        b.className = 'ja-btn' + (variante === 'chrome' ? ' ja-btn-haupt' : '');
+        b.textContent = titel;
+        b.addEventListener('click', function () { laden(variante, b); });
+        return b;
+    }
+
+    /* Wer das Paket auf die Freigabe legt, braucht es GEBRANDET – und das gibt
+     * es nur hier: `bauen.sh` erzeugt ausdrücklich ein neutrales Paket, Marke
+     * und Symbol setzt der Server beim Abruf. Ohne diesen Zweig hätte ein
+     * Administrator nach dem Eintragen des Pfades keinen Weg mehr an die
+     * Datei – der Download-Knopf ist dann ja ersetzt. */
+    function adminBlock() {
+        var kasten = document.createElement('div');
+        kasten.className = 'ja-adminbau';
+
+        var text = document.createElement('p');
+        text.className = 'ja-hint';
+        text.textContent = T('jaddon.admin_build',
+            'Nur für Administratoren: Hier liegt das Paket, das auf die '
+            + 'Freigabe gehört – es trägt Marke und Symbol dieses Servers. Nach '
+            + 'einer Aktualisierung gehört es neu dorthin.');
+        kasten.appendChild(text);
+
+        var reihe = document.createElement('div');
+        reihe.className = 'ja-dl';
+        [['chrome', T('jaddon.dl_chrome', 'Für Chrome / Edge')],
+         ['firefox', T('jaddon.dl_firefox', 'Für Firefox')]].forEach(function (v) {
+            reihe.appendChild(dlKnopf(v[0], v[1]));
+        });
+        kasten.appendChild(reihe);
+        return kasten;
+    }
+
+    function paketBlock(d) {
+        var box = $('ja-paket');
+        if (!box) return;
+        var pfade = (d && d.paket_pfade) || {};
+        var varianten = [
+            ['chrome', T('jaddon.dl_chrome', 'Für Chrome / Edge')],
+            ['firefox', T('jaddon.dl_firefox', 'Für Firefox')]
+        ];
+        var mitPfad = varianten.some(function (v) {
+            return !!(pfade[v[0]] || '').trim();
+        });
+        box.innerHTML = '';
+        // Nebeneinander nur, solange es zwei Knoepfe sind – ein Pfad braucht
+        // die ganze Breite, sonst bricht er mitten im Servernamen um.
+        box.className = 'ja-dl' + (mitPfad ? ' ja-dl-spalte' : '');
+        varianten.forEach(function (v) {
+            var pfad = (pfade[v[0]] || '').trim();
+            box.appendChild(pfad ? pfadZeile(v[1], pfad) : dlKnopf(v[0], v[1]));
+        });
+        if (mitPfad) {
+            var hinweis = document.createElement('p');
+            hinweis.className = 'ja-hint';
+            hinweis.textContent = T('jaddon.share_hint',
+                'Pfad kopieren und im Windows-Explorer in die Adresszeile '
+                + 'einfügen. Kommst du nicht an die Freigabe, wende dich an die '
+                + 'Administration.');
+            box.appendChild(hinweis);
+            if (_istAdmin) box.appendChild(adminBlock());
+        }
+    }
+
     async function laden(variante, knopf) {
         var alt = knopf.textContent;
         knopf.disabled = true;
@@ -139,7 +268,8 @@
         if (app) app.classList.remove('hidden');
 
         // Das Zahnrad nur fuer Administratoren – wie auf den anderen Bereichsseiten.
-        if (me && me.is_admin) {
+        _istAdmin = !!(me && me.is_admin);
+        if (_istAdmin) {
             var s = $('ja-settings-btn');
             if (s) s.style.display = '';
         }
@@ -147,14 +277,14 @@
         try {
             var h = await fetch('/api/jira/assist/health',
                                 { headers: { 'Authorization': 'Bearer ' + token() } });
-            zeigeStatus(h.ok ? await h.json() : null);
+            var hd = h.ok ? await h.json() : null;
+            zeigeStatus(hd);
+            paketBlock(hd);
         } catch (e) {
             zeigeStatus(null);
+            // Ohne Auskunft bleibt der Download – der funktioniert immer.
+            paketBlock(null);
         }
-
-        var c = $('ja-dl-chrome'), f = $('ja-dl-firefox');
-        if (c) c.addEventListener('click', function () { laden('chrome', c); });
-        if (f) f.addEventListener('click', function () { laden('firefox', f); });
 
         var p = $('ja-portal-btn');
         if (p) p.addEventListener('click', function () { window.location.href = '/portal'; });
@@ -173,13 +303,14 @@
             window.location.href = '/';
         });
 
-        // Der Zustandsblock ist gerendert, nicht uebersetzt – nach einem
-        // Sprachwechsel muss er neu gebaut werden, sonst bleibt er deutsch.
+        // Zustandsblock UND Paket-Block sind gerendert, nicht uebersetzt – nach
+        // einem Sprachwechsel muessen sie neu gebaut werden, sonst bleiben sie
+        // deutsch (der Paket-Block traegt die Knopf- und Kopiertexte).
         window.addEventListener('jarvis-lang-changed', function () {
             fetch('/api/jira/assist/health',
                   { headers: { 'Authorization': 'Bearer ' + token() } })
                 .then(function (r) { return r.ok ? r.json() : null; })
-                .then(zeigeStatus)
+                .then(function (d) { zeigeStatus(d); paketBlock(d); })
                 .catch(function () {});
         });
     }

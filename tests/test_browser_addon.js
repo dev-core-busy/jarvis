@@ -165,17 +165,17 @@ section("6) Einfuegen gegen ein nachgebautes Jira – WIRKLICH ausgefuehrt");
 // ═══════════════════════════════════════════════════════════════════════════
 /* Die Funktion wird so geladen, wie der Browser sie sieht: als Quelltext, neu
  * ausgewertet. Damit wird zugleich belegt, dass die Serialisierung traegt. */
-function ladeEinfuegen(fenster) {
-  // /g – die Datei exportiert seit dem Editor-API-Weg ZWEI Funktionen. Ohne
+function ladeEinfuegen(fenster, name) {
+  // /g – die Datei exportiert seit dem Editor-API-Weg MEHRERE Funktionen. Ohne
   // das globale Flag bleibt das zweite `export` stehen und der ganze Abschnitt
   // stirbt mit "Unexpected token 'export'".
   const quelle = EINFUEGEN.replace(/export function/g, "function");
   const f = new fenster.Function(
-    quelle + "\nreturn einfuegenInJira;")();
+    quelle + "\nreturn " + (name || "einfuegenInJira") + ";")();
   return f;
 }
 
-function mitDom(html, arbeit) {
+function mitDom(html, arbeit, name) {
   // runScripts ist Pflicht, nicht Beiwerk: ohne das liefert `window.Function`
   // eine Funktion, deren globaler Scope NICHT das jsdom-Fenster ist – sie sieht
   // dann kein `document` und stirbt mit ReferenceError. "outside-only" genuegt
@@ -196,7 +196,7 @@ function mitDom(html, arbeit) {
   // "nicht gelaufen" und eine Gegenprobe waere gruen aus dem falschen Grund
   // (Register: eine Pruefung darf nicht werfen).
   try {
-    return arbeit(w, ladeEinfuegen(w));
+    return arbeit(w, ladeEinfuegen(w, name));
   } catch (e) {
     check(false, "Lauf gegen das nachgebaute DOM", String(e && e.message || e));
     return null;
@@ -528,6 +528,172 @@ section("6c) Einfuegen: fokussiertes Feld, Editor-API, Diagnose");
   // Die Diagnose muss beim Benutzer ankommen, nicht nur im Rueckgabewert.
   check(/r\.gesehen/.test(POPUP_JS), "die Diagnose wird angezeigt");
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("6e) Ueberarbeiten: das Kommentarfeld LESEN – ausgefuehrt");
+// ═══════════════════════════════════════════════════════════════════════════
+/* Der dritte Knopf holt den bereits getippten Entwurf aus dem Kommentarfeld.
+ * Gleiche Kaskade wie beim Einfuegen, ein Unterschied: es gewinnt das erste
+ * Feld MIT TEXT. */
+{
+  const lies = (html, arbeit) => mitDom(html, arbeit, "leseAusJira");
+
+  // a) Der einfache Fall – und die Absaetze muessen erhalten bleiben.
+  lies('<textarea id="comment">Hallo Herr Meier,\n\nerledigt.</textarea>',
+       (w, f) => {
+    const r = f();
+    check(r.ok === true, "textarea wird gelesen", JSON.stringify(r));
+    check(r.text === "Hallo Herr Meier,\n\nerledigt.",
+          "der Text kommt unveraendert – mit Absatz", JSON.stringify(r.text));
+  });
+
+  // b) Das FOKUSSIERTE Feld schlaegt die Selektorliste – wie beim Einfuegen.
+  lies('<div id="fremd" contenteditable="true"><p>Mein Entwurf.</p></div>'
+       + '<textarea id="comment">Etwas ganz anderes.</textarea>', (w, f) => {
+    const ziel = w.document.getElementById("fremd");
+    Object.defineProperty(w.document, "activeElement",
+                          { value: ziel, configurable: true });
+    const r = f();
+    check(r.ok === true && r.text === "Mein Entwurf.",
+          "der Text kommt aus dem fokussierten Feld", JSON.stringify(r));
+  });
+
+  /* c) ⚠ DER FALL, DER DIE REGEL BEGRUENDET: manche Jira-Editoren halten den
+   *    Fokus auf einer versteckten Spiegel-textarea, waehrend der sichtbare
+   *    Editor den Inhalt traegt. Wuerde das fokussierte, LEERE Feld sofort
+   *    gewinnen, meldete die Erweiterung "leer" – waehrend der Text sichtbar
+   *    auf dem Schirm steht. */
+  /*    ⚠ DAS FELD MUSS HIER SICHTBAR SEIN. Ein unsichtbares wird schon von der
+   *    Sichtbarkeitspruefung uebergangen – der Test liefe dann durch einen
+   *    ANDEREN Zweig und waere auch mit der naiven Fassung gruen (genau so beim
+   *    ersten Anlauf passiert: die Gegenprobe biss nicht). */
+  lies('<textarea id="comment"></textarea>'
+       + '<div id="comment-wiki-edit"><div contenteditable="true">'
+       + '<p>Der sichtbare Entwurf.</p></div></div>', (w, f) => {
+    const leer = w.document.getElementById("comment");
+    Object.defineProperty(w.document, "activeElement",
+                          { value: leer, configurable: true });
+    const r = f();
+    check(r.ok === true && r.text === "Der sichtbare Entwurf.",
+          "ein leeres fokussiertes Feld laesst die Suche WEITERLAUFEN",
+          JSON.stringify(r));
+    check((r.gesehen || []).length === 0 || r.ok === true,
+          "und der leere Fund fuehrt zu keiner Absage");
+  });
+
+  // d) Absaetze aus einem Editor: <p> und <br> sind Umbrueche, kein Leerzeichen.
+  //    textContent allein klebte "Guten Tag" und "erledigt" aneinander.
+  lies('<div contenteditable="true"><p>Guten Tag,</p><p>erledigt.<br>MfG</p></div>',
+       (w, f) => {
+    const r = f();
+    check(r.ok === true, "contenteditable wird gelesen", JSON.stringify(r));
+    check(/Guten Tag,\n+erledigt\.\nMfG/.test(r.text || ""),
+          "Absaetze und <br> werden zu Zeilenumbruechen",
+          JSON.stringify(r.text));
+  });
+
+  // e) `innerText` ist der bevorzugte Weg – jsdom kennt ihn nicht, deshalb
+  //    wird er gestellt. Ohne diese Pruefung waere im Browser ein anderer
+  //    Zweig aktiv als im Test.
+  lies('<div contenteditable="true"><p>x</p></div>', (w, f) => {
+    const el = w.document.querySelector("[contenteditable]");
+    Object.defineProperty(el, "innerText",
+                          { value: "Zeile 1\nZeile 2", configurable: true });
+    const r = f();
+    check(r.text === "Zeile 1\nZeile 2", "innerText wird bevorzugt",
+          JSON.stringify(r.text));
+  });
+
+  // f) LEER ist ein eigener Zustand – nicht "nicht gefunden". Die beiden
+  //    brauchen verschiedene Antworten: ein Bedienfehler mit klarem Weg gegen
+  //    einen Fund fuer die Fehlersuche.
+  lies('<textarea id="comment"></textarea>', (w, f) => {
+    const r = f();
+    check(r.ok === false && r.leer === true, "ein leeres Feld meldet 'leer'",
+          JSON.stringify(r));
+    check(/leer/i.test(r.fehler || "") && /Entwurf/.test(r.fehler || ""),
+          "und sagt, was zu tun ist");
+  });
+  lies("<p>Kein Formular hier.</p>", (w, f) => {
+    const r = f();
+    check(r.ok === false && !r.leer, "ohne Feld: NICHT 'leer', sondern nicht gefunden");
+    check(/Kommentarfeld/.test(r.fehler || ""), "die Meldung nennt das Feld");
+  });
+
+  // g) Unsichtbare Felder werden uebergangen – in Jira liegt oft ein
+  //    verstecktes Formular im DOM.
+  lies('<textarea id="comment" data-unsichtbar>Alter Entwurf</textarea>',
+       (w, f) => {
+    const r = f();
+    check(r.ok === false, "ein unsichtbares Feld wird NICHT gelesen",
+          JSON.stringify(r));
+  });
+
+  // h) Es wird TEXT gelesen, kein Markup: was der Server bekommt, soll der
+  //    getippte Entwurf sein und nicht der HTML-Rumpf des Editors.
+  lies('<div contenteditable="true"><p>Hallo <b>Welt</b></p>'
+       + '<script>var x = 1;<\/script></div>', (w, f) => {
+    const r = f();
+    check(!/[<>]/.test(r.text || ""), "kein Markup im Ergebnis",
+          JSON.stringify(r.text));
+    check(/Hallo Welt/.test(r.text || ""), "der sichtbare Text bleibt");
+  });
+
+  // i) Gelesen wird NUR das Kommentarfeld. Die Funktion laeuft in der Seite –
+  //    sie darf dort nichts anderes einsammeln und nichts nach draussen geben.
+  const leseQuelle = EINFUEGEN.slice(EINFUEGEN.indexOf("export function leseAusJira"),
+                                     EINFUEGEN.indexOf("export function lesenUeberEditorApi"));
+  for (const verboten of ["fetch(", "XMLHttpRequest", "localStorage", "cookie",
+                          "sendMessage", "document.forms"]) {
+    check(!leseQuelle.includes(verboten),
+          "die Lesefunktion benutzt kein '" + verboten + "'");
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("6f) Ueberarbeiten: Verdrahtung Knopf → Server");
+// ═══════════════════════════════════════════════════════════════════════════
+const popupOhne = ohneKommentare(POPUP_JS);
+check(/id="btn-ueberarbeiten"/.test(POPUP_HTML), "der Knopf steht im Fenster");
+check(/\$\("btn-ueberarbeiten"\)\.addEventListener/.test(popupOhne),
+      "und ist verdrahtet");
+// Die Voraussetzung (Cursor im Feld) ist unsichtbar – ohne den Hinweis drueckt
+// jemand den Knopf und weiss nach der Absage nicht, was er anders machen soll.
+check(/Cursor/.test(POPUP_HTML) && /Kommentarfeld/.test(POPUP_HTML),
+      "das Fenster nennt die Voraussetzung");
+check(/leseAusJira/.test(popupOhne) && /lesenUeberEditorApi/.test(popupOhne),
+      "beide Lesewege werden eingebunden");
+check(/world:\s*["']MAIN["'][\s\S]{0,120}lesenUeberEditorApi/.test(popupOhne),
+      "der Editor-API-Weg laeuft im Seitenkontext");
+check(/entwurf:\s*entwurf/.test(popupOhne), "der Entwurf geht an den Hintergrund");
+check(/entwurf:\s*nachricht\.entwurf/.test(bgOhne),
+      "und von dort an den Server");
+// DRIFT-SCHRANKE: der Modusname steht in zwei Welten. Passt er nicht, antwortet
+// der Server "Unbekannter Modus" – und die Ursache steht in einer anderen Datei.
+check(/MODI = \([^)]*"ueberarbeiten"/.test(MAIN_PY),
+      "der Server kennt genau diesen Modusnamen");
+check(/auswerten\("ueberarbeiten"/.test(popupOhne),
+      "das Fenster schickt ihn");
+
+/* DER ABGLEICH-HINWEIS DARF NICHT INS KOMMENTARFELD.
+ * Er ist eine Anmerkung an den Mitarbeiter ("das steht so nicht im Ticket").
+ * Landete er im bearbeitbaren Feld, ginge er mit dem naechsten Klick auf
+ * "Einfuegen" an einen Kunden. Getrennt wird am Server; hier wird geprueft,
+ * dass die Oberflaeche ihn NUR als Meldung anfasst. */
+check(/mitAbgleich/.test(popupOhne), "der Hinweis wird eigens behandelt");
+check(!/ergebnisFeld\.value\s*=[^;]*hinweis/.test(popupOhne),
+      "er wird NICHT in das bearbeitbare Feld geschrieben");
+check(/melde\(mitAbgleich/.test(popupOhne), "sondern als Meldung angezeigt");
+check(/hinweis:\s*d\.hinweis/.test(bgOhne),
+      "und mitgemerkt (sonst fehlt er beim naechsten Oeffnen)");
+
+// Ein Fehlschlag beim Lesen muss sagen, WAS er gesehen hat – gleiche Lehre wie
+// beim Einfuegen.
+check(/r\.gesehen/.test(popupOhne), "die Diagnose des Lesens wird angezeigt");
+// Und er darf keinen Modellaufruf ausloesen: ohne Entwurf gibt es nichts zu
+// ueberarbeiten, ein Lauf waere bezahlte Zeit fuer eine erfundene Antwort.
+check(/if \(!r \|\| !r\.ok\)[\s\S]{0,300}return;/.test(popupOhne),
+      "ohne Entwurf wird gar nicht erst ausgewertet");
 
 // ═══════════════════════════════════════════════════════════════════════════
 section("6d) Vorlagen und Ticketbezug");

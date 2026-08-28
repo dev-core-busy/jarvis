@@ -211,6 +211,45 @@ body {
 }
 .ja-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
+/* ── Netzwerkpfad statt Download ───────────────────────────────────────────
+ * Sobald ein Pfad angezeigt wird, wechselt der Block auf eine SPALTE: ein
+ * UNC-Pfad ist laenger als das Fenster breit ist und braucht die volle Zeile,
+ * sonst bricht er mitten im Servernamen um. */
+.ja-dl-spalte { flex-direction: column; align-items: stretch; }
+.ja-pfad {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: var(--bg-secondary);
+}
+/* Der Admin-Kasten setzt sich ab: er richtet sich an eine ANDERE Zielgruppe als
+ * alles darueber. Ohne die Trennlinie liest ihn jeder Sachbearbeiter als
+ * weiteren Schritt seiner Anleitung. */
+.ja-adminbau {
+    margin-top: 6px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--border);
+}
+.ja-adminbau .ja-dl { margin-bottom: 0; }
+.ja-pfad-lab { font-weight: 600; flex: 0 0 auto; }
+.ja-pfad-wert {
+    /* `all`: ein Klick markiert den GANZEN Pfad – wer die Zwischenablage nicht
+     * benutzen darf, kommt so trotzdem in einem Zug an ihn heran. */
+    user-select: all;
+    flex: 1 1 260px;
+    min-width: 0;
+    /* break-all statt break-word: ein Pfad hat keine Wortgrenzen, an denen ein
+     * Umbruch lesbar waere – ohne das ragt er aus der Karte heraus. */
+    word-break: break-all;
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: .82rem;
+    color: var(--text-primary);
+}
+
 /* ── Fragen und Antworten ──────────────────────────────────────────────── */
 .ja-faq { margin: 0; }
 .ja-faq dt {

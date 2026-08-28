@@ -204,6 +204,168 @@ export function einfuegenInJira(text) {
 }
 
 
+/* LESEN statt schreiben – fuer "Überarbeiten".
+ *
+ * Der Benutzer hat seine Antwort schon getippt; hier wird sie geholt, damit der
+ * Server sie gegen den Ticketverlauf abgleichen kann. Dieselbe Kaskade und
+ * dieselben drei Lehren wie beim Einfuegen – vor allem die erste: DAS ZULETZT
+ * FOKUSSIERTE FELD SCHLAEGT JEDE SELEKTORLISTE. Wer ueberarbeiten laesst, hat
+ * gerade in das Feld getippt; `document.activeElement` ueberlebt das Oeffnen des
+ * Popups.
+ *
+ * ⚠ DER UNTERSCHIED ZUM EINFUEGEN: hier gewinnt das erste Feld MIT TEXT, nicht
+ * das erste ueberhaupt. Grund ist ein Jira-Detail – manche Editoren halten den
+ * Fokus auf einer versteckten Spiegel-`textarea`, waehrend der sichtbare Editor
+ * den Inhalt traegt. Wuerde das fokussierte, leere Feld sofort gewinnen, meldete
+ * die Erweiterung "leer", obwohl der Text sichtbar auf dem Schirm steht. Ein
+ * leerer Fund wird deshalb nur GEMERKT und die Suche laeuft weiter; die
+ * Reihenfolge bleibt dieselbe.
+ *
+ * Was NICHT passiert: es wird nichts anderes von der Seite gelesen. Nur der
+ * Inhalt des Kommentarfeldes verlaesst den Tab.
+ */
+export function leseAusJira() {
+  "use strict";
+
+  function sichtbar(el) {
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  }
+
+  function istTextfeld(el) {
+    return !!el && (el.tagName === "TEXTAREA"
+      || (el.tagName === "INPUT" && /^(text|search)$/i.test(el.type || "")));
+  }
+
+  function istEditierbar(el) {
+    if (!el) return false;
+    return el.isContentEditable === true
+      || (el.getAttribute && el.getAttribute("contenteditable") === "true");
+  }
+
+  /** Zeilenumbrueche erhalten, Leerlauf entfernen.
+   *
+   * Ein Absatzwechsel ist im Ergebnis eine Information: der Server bekommt den
+   * Entwurf als Text, und "Guten TagIhr Anliegen" waere eine andere Vorlage als
+   * die getippte.
+   */
+  function aufraeumen(t) {
+    return String(t || "")
+      .replace(/\r/g, "")
+      .replace(/ /g, " ")          // geschuetzte Leerzeichen der Editoren
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
+  /** Text aus einem Editor – mit Absaetzen, nicht als eine Zeile.
+   *
+   * `innerText` ist der richtige Weg (er liefert den SICHTBAREN Text samt
+   * Umbruechen), existiert aber nicht ueberall. `textContent` allein waere
+   * falsch: es klebt alle Absaetze aneinander. Deshalb der Rueckfall, der die
+   * Blockgrenzen selbst setzt.
+   */
+  function textAus(el) {
+    const roh = el.innerText;
+    if (typeof roh === "string" && roh.trim()) return roh;
+    const BLOCK = /^(P|DIV|LI|UL|OL|H[1-6]|BLOCKQUOTE|PRE|TR|SECTION|ARTICLE)$/;
+    const teile = [];
+    (function lauf(k) {
+      for (let n = k.firstChild; n; n = n.nextSibling) {
+        if (n.nodeType === 3) { teile.push(n.nodeValue || ""); continue; }
+        if (n.nodeType !== 1) continue;
+        if (n.tagName === "BR") { teile.push("\n"); continue; }
+        const block = BLOCK.test(n.tagName);
+        if (block) teile.push("\n");
+        lauf(n);
+        if (block) teile.push("\n");
+      }
+    })(el);
+    return teile.join("");
+  }
+
+  const diagnose = [];
+  let leerGesehen = false;
+
+  /** Liefert den Text – oder merkt sich, dass das Feld leer war. */
+  function hole(el, weg) {
+    const t = aufraeumen(istTextfeld(el) ? (el.value || "") : textAus(el));
+    if (!t) { leerGesehen = true; diagnose.push(weg + " (leer)"); return null; }
+    return { ok: true, weg: weg, text: t };
+  }
+
+  // ── 1. Das zuletzt fokussierte Feld ───────────────────────────────────────
+  let ziel = document.activeElement;
+  if (ziel && ziel.tagName === "IFRAME") {
+    try { ziel = ziel.contentDocument.activeElement; } catch (e) { ziel = null; }
+  }
+  if (istTextfeld(ziel) && sichtbar(ziel)) {
+    const r = hole(ziel, "fokussiertes Textfeld");
+    if (r) return r;
+  } else if (istEditierbar(ziel)) {
+    const r = hole(ziel, "fokussierter Editor");
+    if (r) return r;
+  }
+
+  // ── 2. Bekannte Kommentarfelder – gleiche Reihenfolge wie beim Einfuegen ──
+  const editorSelektoren = [
+    "#comment-wiki-edit [contenteditable='true']",
+    ".jira-editor-container [contenteditable='true']",
+    ".ak-editor-content-area [contenteditable='true']",   // Jira Cloud
+    "[data-testid='comment'] [contenteditable='true']",
+    "form [contenteditable='true']",
+    "[contenteditable='true']",
+  ];
+  for (const sel of editorSelektoren) {
+    for (const el of document.querySelectorAll(sel)) {
+      if (!sichtbar(el)) { diagnose.push(sel + " (unsichtbar)"); continue; }
+      const r = hole(el, sel);
+      if (r) return r;
+    }
+  }
+
+  for (const rahmen of document.querySelectorAll("iframe")) {
+    let koerper = null;
+    try { koerper = rahmen.contentDocument && rahmen.contentDocument.body; }
+    catch (e) { continue; }                      // fremde Herkunft
+    if (!koerper) continue;
+    const editierbar = koerper.isContentEditable
+      || koerper.getAttribute("contenteditable") === "true"
+      || (rahmen.contentDocument.designMode || "").toLowerCase() === "on";
+    if (!editierbar || !sichtbar(rahmen)) continue;
+    const r = hole(koerper, "iframe#" + (rahmen.id || "?"));
+    if (r) return r;
+  }
+
+  for (const sel of ["#comment", "textarea[name='comment']",
+                     "#jira-issue-comment textarea", ".issue-comment textarea",
+                     "textarea.wiki-editor", "form textarea"]) {
+    for (const el of document.querySelectorAll(sel)) {
+      if (!sichtbar(el)) { diagnose.push(sel + " (unsichtbar)"); continue; }
+      const r = hole(el, "textarea " + sel);
+      if (r) return r;
+    }
+  }
+
+  // ── 3. Nichts gefunden: sagen, WAS der Fall war ───────────────────────────
+  // Die beiden Faelle brauchen verschiedene Antworten: "leer" ist ein
+  // Bedienfehler mit klarem Weg, "nicht gefunden" ein Fund fuer die Fehlersuche.
+  return {
+    ok: false,
+    leer: leerGesehen,
+    tinymce_moeglich: document.querySelectorAll("iframe").length > 0
+      || !!document.querySelector(".wiki-edit, .jira-editor-container, #comment"),
+    gesehen: diagnose.slice(0, 8),
+    fehler: leerGesehen
+      ? "Das Kommentarfeld ist leer. Schreibe deinen Entwurf hinein und "
+        + "versuche es erneut."
+      : "Auf dieser Seite wurde kein Kommentarfeld gefunden. Klicke IN das "
+        + "Kommentarfeld in Jira und versuche es erneut.",
+  };
+}
+
+
 /* Zweiter Versuch – laeuft mit `world: "MAIN"` IM SEITENKONTEXT.
  *
  * Nur so ist die Editor-API der Seite erreichbar (`window.tinymce`, das Jira
@@ -233,6 +395,35 @@ export function einfuegenUeberEditorApi(text) {
     if (tm && tm.editors && tm.editors.length) {
       tm.editors[0].setContent(text.replace(/\n/g, "<br>"));
       return { ok: true, weg: "tinymce.editors[0]" };
+    }
+  } catch (e) {
+    return { ok: false, fehler: "Editor-API meldet: " + (e && e.message || e) };
+  }
+  return { ok: false, fehler: "Die Seite hat keinen erreichbaren Editor." };
+}
+
+
+/* Der Lese-Weg ueber die Editor-API – ebenfalls `world: "MAIN"`.
+ *
+ * Gleiche Begruendung wie beim Schreiben: bei einem TinyMCE-Editor haengt der
+ * Inhalt nicht am DOM-Knoten, den die isolierte Welt sieht. `format: "text"`
+ * liefert den Text mit Absaetzen statt HTML – der Server soll den Entwurf
+ * ueberarbeiten, nicht Markup.
+ */
+export function lesenUeberEditorApi() {
+  "use strict";
+  try {
+    const tm = window.tinymce || (window.tinyMCE);
+    const ed = tm && (tm.activeEditor || (tm.editors && tm.editors[0]));
+    if (ed) {
+      const t = String(ed.getContent({ format: "text" }) || "")
+        .replace(/\r/g, "").replace(/\n{3,}/g, "\n\n").trim();
+      if (!t) {
+        return { ok: false, leer: true,
+                 fehler: "Das Kommentarfeld ist leer. Schreibe deinen Entwurf "
+                       + "hinein und versuche es erneut." };
+      }
+      return { ok: true, weg: "tinymce.getContent", text: t };
     }
   } catch (e) {
     return { ok: false, fehler: "Editor-API meldet: " + (e && e.message || e) };

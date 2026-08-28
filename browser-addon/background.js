@@ -249,6 +249,9 @@ api.runtime.onMessage.addListener((nachricht, _absender, antworten) => {
               lang: nachricht.lang || "de",
               hinweis: nachricht.hinweis || "",
               vorlage: nachricht.vorlage || "",
+              // Nur im Modus "ueberarbeiten" gefuellt: der bereits getippte
+              // Text aus dem Jira-Kommentarfeld. Der Server prueft ihn.
+              entwurf: nachricht.entwurf || "",
             },
           });
           // Sofort merken – der Benutzer wechselt als Naechstes typischerweise
@@ -256,6 +259,10 @@ api.runtime.onMessage.addListener((nachricht, _absender, antworten) => {
           await ergebnisSchreiben({
             key: d.key, modus: d.modus, text: d.text || "",
             titel: d.titel || "", kommentare: d.kommentare || 0,
+            // Der Abgleich-Hinweis gehoert zum Text: ohne ihn stuende beim
+            // naechsten Oeffnen eine ueberarbeitete Fassung da, deren
+            // ausgewiesener Widerspruch verschwunden ist.
+            hinweis: d.hinweis || "",
             modell: d.modell || "", zeit: Date.now(),
           });
           antworten({ ok: true, daten: d });

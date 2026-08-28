@@ -205,5 +205,51 @@ check("editieren/loeschen: nur Benutzer" not in kopf,
       "und behauptet nicht mehr die alte")
 
 
+section("5) Muelleimer an der Listenzeile")
+# Der Loeschknopf sass nur in der Detailansicht: wer aufraeumen wollte, musste
+# jede Meldung erst oeffnen. Der Muelleimer an der Zeile ist der kurze Weg –
+# und er darf das Recht NICHT selbst herleiten.
+_list = funktion(MAIN, "api_issues_list")
+check("can_delete(i, user, ist_admin)" in _list,
+      "die Liste laesst das MODUL entscheiden, je Eintrag")
+# ⚠ KEIN .index() in einer Pruefung – das WIRFT statt fehlzuschlagen, und die
+# Gegenprobe braeche dann ab, statt zu zaehlen (Register).
+_pos_r = _list.find("rechte = [")
+_pos_m = _list.find("_mit_anzeigenamen(issues)")
+check(_pos_r >= 0 and _pos_m >= 0 and _pos_r < _pos_m,
+      "gerechnet wird auf den Originalen, nicht auf den Anzeige-Kopien",
+      "sonst geht eine kuenftige Autor-Regel am Domaenen-Praefix fehl")
+check("_is_admin_user" in _list, "und der Administrator-Status kommt aus main.py")
+
+check("i.can_delete" in JS, "die Zeile zeichnet den Muelleimer nur bei can_delete")
+check("JarvisIcons.trash()" in JS, "und zwar als Muelleimer, nicht als ×")
+
+# Der Knopf liegt IN der klickbaren Zeile. Ohne stopPropagation oeffnet
+# derselbe Klick zusaetzlich das Detail (Register: Klick-Ausnahme).
+_delbtn = JS[JS.index(".jv-iss-item-del').forEach"):] if ".jv-iss-item-del').forEach" in JS else ""
+check(bool(_delbtn), "der Handler fuer den Zeilen-Muelleimer existiert")
+check("stopPropagation()" in _delbtn[:900],
+      "er stoppt den Klick, sonst oeffnet sich zugleich die Detailansicht")
+check("method: 'DELETE'" in _delbtn[:900], "und ruft wirklich DELETE")
+
+# Nach dem Loeschen darf der Filter NICHT auf die Vorgabe 'offen'
+# zurueckspringen – beim Aufraeumen steht er auf 'geschlossen'.
+check("_listIssues = _listIssues.filter" in _delbtn[:1200],
+      "der Eintrag wird aus dem Bestand genommen")
+check("_applyFilter()" in _delbtn[:1200] and "_showList()" not in _delbtn[:1200],
+      "und nur neu gefiltert – die gewaehlte Ansicht bleibt stehen")
+check("let filtered = _listIssues;" in JS,
+      "der Filter liest den Bestand, sonst zeichnet er den Eintrag wieder mit")
+
+# Fremdtext in der Zeile bleibt maskiert (der Titel kommt von einem Melder).
+check('data-del="${_escape(i.id)}"' in JS, "die Id im Knopf ist maskiert")
+
+# i18n: kein hart verdrahteter Text mehr an einem Loeschweg.
+I18N = (ROOT / "frontend" / "js" / "i18n.js").read_text(encoding="utf-8")
+for key in ("issues.delete", "issues.delete_confirm", "issues.delete_error"):
+    check(I18N.count("'%s'" % key) == 2, "%s ist in DE und EN hinterlegt" % key)
+check("Issue wirklich loeschen?" not in JS,
+      "die Rueckfrage haengt nicht mehr als deutscher Klartext im Code")
+
 print("\n%d OK, %d FAIL" % (_ok, _fail))
 sys.exit(1 if _fail else 0)

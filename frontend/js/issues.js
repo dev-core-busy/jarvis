@@ -72,6 +72,14 @@
     let _currentUser = '';
     let _isAdmin = false;
     let _detailIssueId = null;
+    // Bestand der zuletzt geladenen Liste + der Filter, der sie zeichnet.
+    // WARUM MODULWEIT: der Muelleimer an einer Zeile muss den Eintrag aus dem
+    // Bestand nehmen und NUR neu filtern koennen. Ein `_showList()` nach dem
+    // Loeschen wuerde den Filter auf die Vorgabe "offen" zuruecksetzen - genau
+    // beim Aufraeumen steht er aber auf "geschlossen", und jeder geloeschte
+    // Eintrag risse einen aus seiner Ansicht.
+    let _listIssues = [];
+    let _applyFilter = null;
 
     // ─── CSS einfuegen ────────────────────────────────────────────────
     function _injectCss() {
@@ -126,6 +134,13 @@
 .jv-iss-badge.prio-low{background:#6b7280;}
 .jv-iss-badge.prio-medium{background:var(--warning);}
 .jv-iss-badge.prio-high{background:var(--danger);}
+/* Muelleimer an der Listenzeile: nur fuer Berechtigte, und er darf die Zeile
+   NICHT oeffnen (der Klick wird im Handler gestoppt). Ruhend gedaempft, damit
+   eine Liste voller Loeschknoepfe nicht wie eine Warnung aussieht. */
+.jv-iss-item-del{background:none;border:none;color:var(--text-muted);cursor:pointer;
+  padding:0 2px;line-height:1;display:inline-flex;align-items:center;opacity:.6;
+  transition:color .15s,opacity .15s;}
+.jv-iss-item-del:hover{color:var(--danger);opacity:1;}
 .jv-iss-item-meta{font-size:11px;color:var(--text-muted);margin-top:3px;display:flex;
   gap:10px;flex-wrap:wrap;}
 .jv-iss-item-author{color:var(--text-secondary);}
@@ -267,11 +282,16 @@
             <div class="jv-iss-list" id="jv-iss-list"></div>
         `;
 
+        _listIssues = issues;
+
         function _apply() {
             const fs = document.getElementById('jv-iss-flt-status').value;
             const ft = document.getElementById('jv-iss-flt-type').value;
             const fm = document.getElementById('jv-iss-flt-mine').checked;
-            let filtered = issues;
+            // Gefiltert wird ueber den BESTAND, nicht ueber das Argument von
+            // `_renderList`: sonst brächte der Muelleimer den Eintrag zwar aus
+            // `_listIssues`, die Liste zeichnete ihn aber wieder mit.
+            let filtered = _listIssues;
             if (fs) filtered = filtered.filter(i => i.status === fs);
             if (ft) filtered = filtered.filter(i => i.type === ft);
             if (fm) filtered = filtered.filter(i =>
@@ -282,12 +302,13 @@
             // ueber eine Liste, die so gar nicht dasteht.
             const cnt = document.getElementById('jv-iss-count');
             if (cnt) {
-                cnt.textContent = filtered.length < issues.length
-                    ? `${filtered.length} / ${issues.length} ${window.t('issues.count_label')}`
-                    : `${issues.length} ${window.t('issues.count_label')}`;
+                cnt.textContent = filtered.length < _listIssues.length
+                    ? `${filtered.length} / ${_listIssues.length} ${window.t('issues.count_label')}`
+                    : `${_listIssues.length} ${window.t('issues.count_label')}`;
             }
             _renderItems(filtered);
         }
+        _applyFilter = _apply;
         document.getElementById('jv-iss-flt-status').onchange = _apply;
         document.getElementById('jv-iss-flt-type').onchange = _apply;
         document.getElementById('jv-iss-flt-mine').onchange = _apply;
@@ -310,6 +331,7 @@
                     <span class="jv-iss-badge prio-${_escape(i.priority)}">${_prioLabel(i.priority)}</span>
                     <span class="jv-iss-item-title">${_escape(i.title)}</span>
                     <span class="jv-iss-badge" style="background:${_statusColor(i.status)}">${_statusLabel(i.status)}</span>
+                    ${i.can_delete ? `<button class="jv-iss-item-del" data-del="${_escape(i.id)}" title="${window.t('issues.delete')}" aria-label="${window.t('issues.delete')}">${JarvisIcons.trash()}</button>` : ''}
                 </div>
                 <div class="jv-iss-item-meta">
                     <span class="jv-iss-item-author" title="${window.t('issues.reporter_title')}">👤 ${_escape(i.author || '—')}</span>
@@ -320,6 +342,31 @@
         `).join('');
         list.querySelectorAll('.jv-iss-item').forEach(el => {
             el.onclick = () => _showDetail(el.getAttribute('data-id'));
+        });
+        // Der Muelleimer liegt IN der klickbaren Zeile - ohne stopPropagation
+        // oeffnet derselbe Klick zusaetzlich die Detailansicht, und der Benutzer
+        // beantwortet die Rueckfrage vor einem Fenster, das schon gewechselt hat.
+        list.querySelectorAll('.jv-iss-item-del').forEach(btn => {
+            btn.onclick = async (ev) => {
+                ev.stopPropagation();
+                ev.preventDefault();
+                const id = btn.getAttribute('data-del');
+                if (!confirm(window.t('issues.delete_confirm'))) return;
+                btn.disabled = true;
+                try {
+                    const r = await fetch('/api/issues/' + encodeURIComponent(id),
+                        { method: 'DELETE', headers: _headers() });
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    // Nur den Bestand kuerzen und neu filtern: die Ansicht des
+                    // Aufraeumenden bleibt so stehen, wie er sie gewaehlt hat.
+                    _listIssues = _listIssues.filter(x => x.id !== id);
+                    if (_applyFilter) _applyFilter();
+                    refreshBadge();
+                } catch (e) {
+                    btn.disabled = false;
+                    alert(window.t('issues.delete_error') + ': ' + e.message);
+                }
+            };
         });
     }
 
@@ -464,7 +511,7 @@
         // pflegt den Loesungsbereich (Status + oeffentlicher Kommentar)
         if (canEdit) buttons.push(`<button class="jv-iss-btn primary" id="jv-iss-edit-btn">editieren</button>`);
         if (_isAdmin) buttons.push(`<button class="jv-iss-btn primary" id="jv-iss-jarvis-btn">bearbeiten</button>`);
-        if (canDelete) buttons.push(`<button class="jv-iss-btn danger" id="jv-iss-del-btn">Loeschen</button>`);
+        if (canDelete) buttons.push(`<button class="jv-iss-btn danger" id="jv-iss-del-btn">${window.t('issues.delete')}</button>`);
         footer.innerHTML = buttons.join('');
 
         document.getElementById('jv-iss-back-btn').onclick = () => _showList();
@@ -476,14 +523,15 @@
         }
         if (canDelete) {
             document.getElementById('jv-iss-del-btn').onclick = async () => {
-                if (!confirm('Issue wirklich loeschen? Anhaenge werden mit entfernt.')) return;
+                if (!confirm(window.t('issues.delete_confirm'))) return;
                 try {
                     const r = await fetch('/api/issues/' + encodeURIComponent(issue.id),
                         { method: 'DELETE', headers: _headers() });
                     if (!r.ok) throw new Error('HTTP ' + r.status);
                     _showList();
+                    refreshBadge();
                 } catch (e) {
-                    alert('Fehler: ' + e.message);
+                    alert(window.t('issues.delete_error') + ': ' + e.message);
                 }
             };
         }

@@ -18194,11 +18194,25 @@ async def api_issues_list(request: Request, user: str = Depends(require_auth_or_
     status = request.query_params.get("status") or None
     type_ = request.query_params.get("type") or None
     issues = _issues_mod.list_issues(user, mine_only=mine, status=status, type_=type_)
+    ist_admin = _is_admin_user(user)
+    # Das Loeschrecht beantwortet das MODUL, je Eintrag - nicht die Oberflaeche.
+    # Ein im Frontend nachgebautes "Administrator darf" waere eine zweite
+    # Fassung derselben Regel und liefe beim naechsten Mal auseinander, sobald
+    # `can_delete` das Issue selbst auswertet.
+    #
+    # GERECHNET WIRD AUF DEN ORIGINALEN, angehaengt an die Anzeige-Kopien:
+    # `_mit_anzeigenamen` setzt den Domaenen-Praefix an `author` - eine
+    # kuenftige Regel "der Autor darf sein eigenes loeschen" wuerde auf dem
+    # aufbereiteten Namen fehlgehen.
+    rechte = [_issues_mod.can_delete(i, user, ist_admin) for i in issues]
+    liste = _mit_anzeigenamen(issues)
+    for eintrag, darf in zip(liste, rechte):
+        eintrag["can_delete"] = darf
     return JSONResponse({
         "ok": True,
-        "issues": _mit_anzeigenamen(issues),
+        "issues": liste,
         "current_user": user,
-        "is_admin": _is_admin_user(user),
+        "is_admin": ist_admin,
     })
 
 

@@ -10915,16 +10915,33 @@ async def tracks_admin_stop(user: str = Depends(require_local_auth)):
 
 # ─── Jira (Reiter: Ticketsuche) ──────────────────────────────────────
 
-def _jira_client():
+def _jira_client(user: str = ""):
+    """Jira-Client fuer DIESEN Benutzer – eigener Token vor Sammelzugang.
+
+    Seit 2026-08-28 ist der in der Skill-Config hinterlegte Token nur noch der
+    Rueckfall (``backend/jira_accounts.py``). Wer einen eigenen hinterlegt hat,
+    sieht genau die Vorgaenge, fuer die er in Jira berechtigt ist – beim
+    Sammelzugang saehe jeder Freigegebene alles, was dem Servertoken offensteht,
+    und in Ticketverlaeufen stehen Kundendaten.
+
+    ``user=""`` (Vorgabe) nimmt den ContextVar des laufenden Auftrags und faellt
+    ausserhalb eines Laufs auf den Sammelzugang zurueck. **Wer einen Benutzer
+    kennt, gibt ihn mit** – sonst ist die Bindung an dieser Stelle still
+    wirkungslos.
+    """
     from backend.jira_client import JiraClient
-    return JiraClient()
+    try:
+        from backend import jira_accounts
+        return jira_accounts.client_fuer_lauf(user or None)
+    except Exception:
+        return JiraClient()
 
 
 @app.get("/api/jira/test")
 async def jira_test(user: str = Depends(require_local_auth)):
     """Prueft die gespeicherte Jira-Verbindung (fuer den Reiter)."""
     from backend.jira_client import JiraError
-    c = _jira_client()
+    c = _jira_client(user)
     if not c.configured:
         return JSONResponse({"ok": False, "configured": False,
                              "error": "Nicht konfiguriert (URL/Token fehlen)."})
@@ -10944,7 +10961,7 @@ async def jira_search_api(q: str = "", project: str = "", status: str = "",
                           limit: int = 25, user: str = Depends(require_local_auth)):
     """Ticketsuche fuer den Reiter – liefert Treffer mit Link."""
     from backend.jira_client import JiraError, issue_brief
-    c = _jira_client()
+    c = _jira_client(user)
     if not c.configured:
         return JSONResponse({"ok": False, "error": "Nicht konfiguriert."}, status_code=400)
     try:
@@ -10967,7 +10984,7 @@ async def jira_search_api(q: str = "", project: str = "", status: str = "",
 async def jira_issue_api(key: str = "", user: str = Depends(require_local_auth)):
     """Ticketdetails fuer den Reiter (Beschreibung als Text + Kommentare)."""
     from backend.jira_client import JiraError, html_to_text, issue_brief
-    c = _jira_client()
+    c = _jira_client(user)
     if not c.configured:
         return JSONResponse({"ok": False, "error": "Nicht konfiguriert."}, status_code=400)
     if not key.strip():
@@ -10995,7 +11012,7 @@ async def jira_phonenumber_api(phone: str = "", phonenumber: str = "", number: s
     Telefon-Attributen der CRM-Objekte. Parameter ``phone`` (Aliase ``phonenumber``/
     ``number``). Auth: Benutzer-Token ODER externer API-Key."""
     from backend.jira_client import JiraError
-    c = _jira_client()
+    c = _jira_client(user)
     if not c.configured:
         return JSONResponse({"ok": False, "error": "Nicht konfiguriert."}, status_code=400)
     ph = (phone or phonenumber or number or "").strip()
@@ -11023,7 +11040,7 @@ async def jira_crm_number_api(crm: str = "", crm_number: str = "", number: str =
     Kunden – nicht nur Volltext-Treffer). Parameter ``crm`` (Aliase ``crm_number``/
     ``number``), z.B. ``CRM-10550``. Auth: Benutzer-Token ODER externer API-Key."""
     from backend.jira_client import JiraError, crm_org_clause, issue_brief
-    c = _jira_client()
+    c = _jira_client(user)
     if not c.configured:
         return JSONResponse({"ok": False, "error": "Nicht konfiguriert."}, status_code=400)
     raw = (crm or crm_number or number or "").strip()
@@ -11068,7 +11085,7 @@ async def jira_matching_tickets_api(crm: str = "", crm_number: str = "", number:
     Zaehler ``open``/``closed`` bezogen auf die zurueckgelieferte Seite.
     Auth: Benutzer-Token ODER externer API-Key."""
     from backend.jira_client import JiraError, crm_keyword_jql, normalize_keywords, issue_brief
-    c = _jira_client()
+    c = _jira_client(user)
     if not c.configured:
         return JSONResponse({"ok": False, "error": "Nicht konfiguriert."}, status_code=400)
     raw = (crm or crm_number or number or kunde or "").strip()
@@ -11250,8 +11267,14 @@ async def jira_assist_health(request: Request,
     """
     from backend import addin, jira_assist  # noqa: PLC0415
     try:
-        from backend.jira_client import JiraClient  # noqa: PLC0415
-        konfiguriert = bool(JiraClient().configured)
+        # DIE FRAGE IST "kommt DIESER Benutzer an Jira", nicht "gibt es einen
+        # Sammelzugang". Seit dem persoenlichen Zugang (2026-08-28) faellt
+        # beides auseinander: wer einen eigenen Token hinterlegt hat, arbeitet
+        # auch dann, wenn der Administrator gar keinen hinterlegt hat – die
+        # Anleitung duerfte ihm dann nicht "Jira ist nicht konfiguriert"
+        # melden.
+        from backend import jira_accounts  # noqa: PLC0415
+        konfiguriert = bool(jira_accounts.aufloesen(user)["client"].configured)
     except Exception:  # noqa: BLE001
         konfiguriert = False
     # DER REQUEST MUSS MIT. Ohne ihn faellt basis_url auf die Einstellung
@@ -11361,6 +11384,114 @@ async def jira_assist_vorlage_speichern(
     except jira_vorlagen.VorlagenFehler as f:
         return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
     return JSONResponse({"ok": True, "vorlage": v})
+
+
+# ── Mein Jira-Zugang (persoenlicher Token; Sammelzugang = Rueckfall) ────────
+#
+# Die Schranke ist `require_jira_assist_access`, also die Freigabe des Bereichs:
+# wer /jira-addon betreten darf, darf dort auch seinen eigenen Token hinterlegen.
+# Eine ZUSAETZLICHE Freigabe waere eine Schranke vor einer offenen Tuer – der
+# Token erweitert keine Rechte, er ERSETZT die des Sammelzugangs durch die
+# eigenen (in aller Regel engeren).
+
+@app.get("/api/jira/account")
+async def jira_account_get(user: str = Depends(require_jira_assist_access)):
+    """Eigener Jira-Zugang – OHNE Token (nur ``token_gesetzt``)."""
+    from backend import jira_accounts  # noqa: PLC0415
+    try:
+        return JSONResponse({"ok": True, "account": jira_accounts.zugang_info(user)})
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/jira/account")
+async def jira_account_set(request: Request,
+                           user: str = Depends(require_jira_assist_access)):
+    """Eigenen Jira-Token anlegen/aendern.
+
+    Der Rumpf geht UNVERAENDERT an ``jira_accounts.speichern`` – die
+    Feld-Whitelist dort ist die einzige Instanz. Wuerde der Endpunkt vorfiltern,
+    verschwaende ein unbekanntes Feld stillschweigend und die Antwort meldete
+    trotzdem Erfolg (derselbe Fehler, der am 2026-08-12 beim Postfach behoben
+    wurde).
+    """
+    from backend import jira_accounts  # noqa: PLC0415
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    if not isinstance(body, dict):
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
+    try:
+        info = jira_accounts.speichern(user, body)
+    except jira_accounts.JiraKontoFehler as e:
+        code = 400 if getattr(e, "kategorie", "eingabe") == "eingabe" else 500
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=code)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "account": info})
+
+
+@app.delete("/api/jira/account")
+async def jira_account_del(user: str = Depends(require_jira_assist_access)):
+    """Eigenen Jira-Token entfernen – danach gilt wieder der Sammelzugang."""
+    from backend import jira_accounts  # noqa: PLC0415
+    try:
+        weg = jira_accounts.loeschen(user)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "removed": bool(weg),
+                         "account": jira_accounts.zugang_info(user)})
+
+
+@app.post("/api/jira/account/test")
+async def jira_account_test(user: str = Depends(require_jira_assist_access)):
+    """Verbindungstest MIT dem eigenen Token (``/rest/api/2/myself``).
+
+    Er prueft ausdruecklich den PERSOENLICHEN Zugang, nicht den, der gerade
+    gelten wuerde – sonst meldete der Knopf bei einem kaputten eigenen Token
+    "ok", weil der Sammelzugang antwortet, und der Benutzer haette keinen Weg,
+    seinen Fehler zu finden. Dieselbe Falle wie beim SAP-Verbindungstest.
+
+    Der Aufruf laeuft im Thread: ``JiraClient`` ist synchron (requests), im
+    Event-Loop wuerde er alle uebrigen Benutzer blockieren.
+    """
+    from backend import jira_accounts  # noqa: PLC0415
+    try:
+        d = await asyncio.to_thread(jira_accounts.testen, user)
+    except jira_accounts.JiraKontoFehler as e:
+        code = 400 if getattr(e, "kategorie", "eingabe") == "eingabe" else 500
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=code)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, **d})
+
+
+@app.get("/api/jira/admin/accounts")
+async def jira_admin_accounts(user: str = Depends(require_local_auth)):
+    """Wer hat einen eigenen Jira-Token hinterlegt? (*Einstellungen → Jira*)
+
+    Fuer den Administrator die Antwort auf "warum sieht dieser Benutzer andere
+    Tickets als ich". **Ohne Token** – wer welchen Jira-Benutzer verwendet, ist
+    dessen Sache; sichtbar ist nur, DASS es einen eigenen Zugang gibt und ob er
+    zuletzt funktioniert hat.
+    """
+    from backend import jira_accounts  # noqa: PLC0415
+    out = []
+    try:
+        for un in jira_accounts.alle_benutzer():
+            i = jira_accounts.zugang_info(un)
+            out.append({
+                "user": _display_name(un),
+                "aktiv": bool(i.get("aktiv")),
+                "vorhanden": bool(i.get("vorhanden")),
+                "anzeigename": i.get("anzeigename") or "",
+                "letzter_erfolg": int(i.get("letzter_erfolg") or 0),
+                "letzter_fehler": i.get("letzter_fehler") or "",
+            })
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "accounts": out})
 
 
 @app.post("/api/jira/assist/vorlagen/standard")

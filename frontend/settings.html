@@ -3063,6 +3063,24 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                              einem 360 Pixel breiten Popup und nur mit
                              installierter Erweiterung. Endpunkte:
                              /api/jira/assist/vorlagen (GET/POST/DELETE). -->
+                        <!-- Wer hat einen EIGENEN Jira-Token hinterlegt?
+                             (2026-08-28) Fuer den Administrator die Antwort auf
+                             "warum sieht dieser Benutzer andere Tickets als
+                             ich": seit dem persoenlichen Zugang ist der Token
+                             oben nur noch der Rueckfall. OHNE Token und ohne
+                             Adressen - wer welchen Jira-Benutzer verwendet, ist
+                             dessen Sache. Endpunkt: /api/jira/admin/accounts. -->
+                        <div class="kb-section" id="ji-sect-acc">
+                            <div class="kb-section-header kb-collapse-header" id="ji-sect-acc-hdr">
+                                <h3 data-i18n="jacc.h">Persönliche Jira-Zugänge</h3>
+                                <span class="sk-openclaw-toggle" id="ji-sect-acc-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="ji-sect-acc-body">
+                                <p class="kb-hint" data-i18n-html="jacc.intro">Der oben hinterlegte Token ist der <b>gemeinsame Zugang</b> und nur noch der Rückfall. Wer unter <b>Jira → Mein Jira-Zugang</b> einen eigenen Token hinterlegt, arbeitet damit – im Chat, in der Ticketsuche und in der Browser-Erweiterung, und sieht genau die Vorgänge, für die er in Jira berechtigt ist.</p>
+                                <div id="jacc-liste" style="display:flex;flex-direction:column;gap:6px;margin:10px 0;"></div>
+                            </div>
+                        </div>
+
                         <div class="kb-section" id="ji-sect-vorl">
                             <div class="kb-section-header kb-collapse-header" id="ji-sect-vorl-hdr">
                                 <h3 data-i18n="jvorl.h">Browser Plugin Vorlagen</h3>
@@ -4825,7 +4843,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
     <script src="/static/js/icons.js?v=1"></script>
-    <script src="/static/js/i18n.js?v=192"></script>
+    <script src="/static/js/i18n.js?v=194"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=21"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -4843,7 +4861,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/mcp.js?v=5"></script>
     <script src="/static/js/vision.js?v=31"></script>
     <script src="/static/js/confluence.js?v=7"></script>
-    <script src="/static/js/jira.js?v=12"></script>
+    <script src="/static/js/jira.js?v=13"></script>
     <!-- sapcert.js VOR sap.js: der Reiter haengt den Baustein beim Laden ein. -->
     <script src="/static/js/sapcert.js?v=1"></script>
     <script src="/static/js/sap.js?v=4"></script>
@@ -4861,7 +4879,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/sessions.js?v=8"></script>
     <script src="/static/js/agent_roles.js?v=2"></script>
     <script src="/static/js/model_caps.js?v=6"></script>
-    <script src="/static/js/app.js?v=199"></script>
+    <script src="/static/js/app.js?v=200"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

@@ -3450,6 +3450,19 @@ KRITISCH – Autonomie-Regeln:
                     _s_token = _scv.set(_uname or "")
                 except Exception:  # noqa: BLE001
                     _scv = None
+                # Persoenlicher Jira-Zugang fuer die jira_*-Werkzeuge (seit
+                # 2026-08-28). Gleiche Begruendung wie bei Postfach und SAP: es
+                # ist eine Personen-, keine Rechtefrage, und der Benutzer darf
+                # NIEMALS als Werkzeug-Argument kommen – sonst koennte das
+                # Modell waehlen, mit wessen Jira-Token es arbeitet. Ohne
+                # hinterlegten Token faellt die Aufloesung auf den Sammelzugang
+                # zurueck.
+                _j_token = _jcv = None
+                try:
+                    from backend.jira_accounts import current_jira_user as _jcv
+                    _j_token = _jcv.set(_uname or "")
+                except Exception:  # noqa: BLE001
+                    _jcv = None
                 try:
                     result = await tool.execute(**exec_args)
                 finally:
@@ -3467,6 +3480,11 @@ KRITISCH – Autonomie-Regeln:
                     if _s_token is not None and _scv is not None:
                         try:
                             _scv.reset(_s_token)
+                        except Exception:  # noqa: BLE001
+                            pass
+                    if _j_token is not None and _jcv is not None:
+                        try:
+                            _jcv.reset(_j_token)
                         except Exception:  # noqa: BLE001
                             pass
             _dur_ms = int((_time.monotonic() - _t0) * 1000)

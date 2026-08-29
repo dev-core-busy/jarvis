@@ -69,6 +69,7 @@
             this._bind();
             this.loadConfig();
             this.loadVorlagen();
+            this.loadZugaenge();
         },
 
         _bind: function () {
@@ -245,6 +246,79 @@
            Oberflaeche, die das Haekchen versteckt, ist keine Schranke. */
         _vorlagen: { global: [], eigene: [], darf_global: false, standard: '' },
         _vorlBearbeitet: '',
+
+        /* ── Wer hat einen eigenen Jira-Token? (2026-08-28) ─────────────────
+           Seit der persoenliche Zugang existiert, ist der oben hinterlegte
+           Token nur noch der Rueckfall – und damit kann derselbe Vorgang zwei
+           Benutzern Verschiedenes zeigen. Diese Liste ist die Antwort auf
+           "warum sieht der andere etwas, das ich nicht sehe".
+           OHNE Token und ohne Adressen (der Endpunkt gibt sie gar nicht
+           heraus): wer welchen Jira-Benutzer verwendet, ist dessen Sache. */
+        loadZugaenge: function () {
+            var box = $('jacc-liste'); if (!box) return;
+            box.innerHTML = '<span class="kb-hint">' + esc(t('jacc.loading', 'Lade …')) + '</span>';
+            fetch('/api/jira/admin/accounts', { headers: authHeaders() })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    if (!d || d.ok === false) throw new Error((d && d.error) || 'Fehler');
+                    box.innerHTML = '';
+                    var alle = d.accounts || [];
+                    if (!alle.length) {
+                        box.innerHTML = '<span class="kb-hint">'
+                            + esc(t('jacc.empty', 'Niemand hat bisher einen eigenen Token hinterlegt – es gilt für alle der gemeinsame Zugang.'))
+                            + '</span>';
+                        return;
+                    }
+                    alle.forEach(function (a) {
+                        var row = document.createElement('div');
+                        row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;'
+                            + 'gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;'
+                            + 'background:var(--bg-glass);';
+                        var links = document.createElement('span');
+                        links.style.cssText = 'min-width:0;';
+                        var n = document.createElement('span');
+                        n.style.fontWeight = '600';
+                        // textContent: Benutzer- und Jira-Anzeigename sind Fremdtext.
+                        n.textContent = a.user || '';
+                        links.appendChild(n);
+                        if (a.anzeigename) {
+                            var j = document.createElement('span');
+                            j.className = 'kb-hint';
+                            j.style.marginLeft = '8px';
+                            j.textContent = '→ ' + a.anzeigename;
+                            links.appendChild(j);
+                        }
+                        if (a.letzter_fehler) {
+                            var f = document.createElement('div');
+                            f.className = 'kb-hint';
+                            f.style.cssText = 'color:var(--danger);word-break:break-word;';
+                            f.textContent = a.letzter_fehler;
+                            links.appendChild(f);
+                        }
+                        row.appendChild(links);
+                        // Aussage doppelt (Text UND Farbe) – Farbe allein ist
+                        // im Projekt keine Information.
+                        var pill = document.createElement('span');
+                        pill.className = 'kb-hint';
+                        pill.style.cssText = 'flex:0 0 auto;font-weight:600;';
+                        if (!a.aktiv) {
+                            pill.textContent = t('jacc.off', 'inaktiv');
+                        } else if (a.letzter_fehler) {
+                            pill.textContent = t('jacc.err', 'Token abgelehnt');
+                            pill.style.color = 'var(--danger)';
+                        } else {
+                            pill.textContent = t('jacc.on', 'eigener Zugang');
+                            pill.style.color = 'var(--success)';
+                        }
+                        row.appendChild(pill);
+                        box.appendChild(row);
+                    });
+                })
+                .catch(function (e) {
+                    box.innerHTML = '<span class="kb-hint" style="color:var(--danger);">'
+                        + esc(e.message || 'Zugänge konnten nicht geladen werden.') + '</span>';
+                });
+        },
 
         loadVorlagen: function () {
             var box = $('jvorl-liste'); if (!box) return;

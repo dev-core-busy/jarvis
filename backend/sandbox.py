@@ -176,6 +176,12 @@ _APP_DENY_REL = (
     # fremden Benutzer einen Zugang auf einen fremden Server unterzuschieben
     # (die Host-Freigabeliste prueft nur der Endpunkt, nicht das Dateisystem).
     "data/sap_accounts.json", "data/.sapkey",
+    # Persoenliche Jira-Zugaenge (backend/jira_accounts.py): dieselbe Bauart und
+    # dieselbe Begruendung wie bei SAP – `jira_accounts.json` + `.jirakey` sind
+    # zusammen der KLARTEXT-Token jedes hinterlegten Jira-Benutzers. Ein
+    # Jira-PAT traegt die vollen Rechte seines Besitzers; SCHREIBEN waere der
+    # Weg, einem fremden Benutzer einen untergeschobenen Token zuzuordnen.
+    "data/jira_accounts.json", "data/.jirakey",
     # Outlook-Add-in (backend/addin_sso.py): ordnet Exchange-Postfaecher den
     # Jarvis-Konten zu und ist damit die Grundlage der kennwortlosen Anmeldung.
     # SCHREIBEN heisst hier: das eigene Postfach auf einen fremden – gern einen
@@ -232,6 +238,7 @@ PRIVATE_FILES = ("data/scheduled_jobs.json", "data/file_watchers.json",
                  "data/email_accounts.json", "data/email_rules.json",
                  "data/email_state.json", "data/email_log.jsonl",
                  "data/addin_links.json", "data/sap_accounts.json",
+                 "data/jira_accounts.json",
                  "data/short_tracks.json", "data/short_tracks_log.jsonl")
 PRIVATE_FILE_MODE = 0o640
 
@@ -242,7 +249,7 @@ PRIVATE_FILE_MODE = 0o640
 # `claude_subagent.json` gehoert seit 2026-08-23 in dieselbe Stufe: der
 # Delegations-Schluessel wird dauerhaft angezeigt und liegt deshalb im Klartext
 # darin – wer ihn liest, kann Codeauftraege unter fremder Kennung starten.
-PRIVATE_FILES_STRENG = ("data/.mailkey", "data/.sapkey",
+PRIVATE_FILES_STRENG = ("data/.mailkey", "data/.sapkey", "data/.jirakey",
                         "data/claude_subagent.json")
 PRIVATE_FILE_MODE_STRENG = 0o600
 
@@ -466,8 +473,11 @@ SHELL_SECRET_PATHS = re.compile(
     # kuerzeste Rechteerhoehung im Verzeichnis (siehe _APP_DENY_REL).
     r'addin_links\.json\b|'
     # Persoenliche SAP-Zugaenge: sap_accounts.json + .sapkey ergeben zusammen die
-    # Klartext-Kennwoerter der SAP-Benutzer.
+    # Klartext-Kennwoerter der SAP-Benutzer. Dasselbe fuer Jira: jira_accounts
+    # .json + .jirakey ergeben die Klartext-Token, und ein PAT traegt die vollen
+    # Rechte seines Besitzers.
     r'sap_accounts\.json\b|\.sapkey\b|'
+    r'jira_accounts\.json\b|\.jirakey\b|'
     # Short Tracks: fremde Dump-Prompts samt Werkzeug-Zuschnitt (beschreibbar
     # waere das ein Dump mit `shell` unter fremder Kennung) und die
     # Ergebnistexte fremder Laeufe.

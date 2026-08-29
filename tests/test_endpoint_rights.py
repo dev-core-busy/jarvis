@@ -244,6 +244,24 @@ EXEMPT = {
     # werden kann.
     ("get", "/api/jira/assist/vorlagen"), ("post", "/api/jira/assist/vorlagen"),
     ("delete", "/api/jira/assist/vorlagen/{vid}"),
+    # Die persoenliche Standard-Vorlage (2026-08-28): dieselbe Dependency und
+    # dieselbe Begruendung wie die drei Routen darueber. Gespeichert wird eine
+    # Zuordnung Benutzer → Vorlagen-Kennung, sonst nichts.
+    ("post", "/api/jira/assist/vorlagen/standard"),
+    # ── Mein Jira-Zugang (2026-08-28) ──
+    # `require_jira_assist_access`, also die Freigabe des Bereichs: wer
+    # /jira-addon betreten darf, darf dort seinen EIGENEN Token hinterlegen.
+    #
+    # WARUM DAS HIER RICHTIG IST, obwohl es nach "Zugangsdaten" klingt: der
+    # Token ERWEITERT keine Rechte, er ERSETZT die des Sammelzugangs durch die
+    # eigenen – in aller Regel engeren. Diese Routen sind der Weg, das Muster
+    # "fremde Zugangsdaten als Vollmacht" (Endpunkt-Durchsicht 2026-08-04)
+    # loszuwerden, nicht ein neuer Fall davon. Herausgegeben wird NIE ein
+    # Token, auch nicht maskiert (`jira_accounts.zugang_info`).
+    # Gleiche Einstufung wie /api/sap/account – dort ebenfalls die
+    # Bereichs-Freigabe und nicht Admin.
+    ("get", "/api/jira/account"), ("post", "/api/jira/account"),
+    ("delete", "/api/jira/account"), ("post", "/api/jira/account/test"),
 }
 # Vision-Medien (Kamerabild, Gesichts-Ausschnitte, Trainings-Vorschau,
 # Begruessungs-Audio) brauchen ``?token=``, weil <img>/<audio> keine Header

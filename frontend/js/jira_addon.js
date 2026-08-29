@@ -260,6 +260,176 @@
         }
     }
 
+    /* ══ Mein Jira-Zugang ═══════════════════════════════════════════════════
+     *
+     * Seit 2026-08-28 ist der in der Skill-Config hinterlegte Token nur noch
+     * der RUECKFALL: wer hier einen eigenen hinterlegt, arbeitet damit – im
+     * Chat, in der Ticketsuche und in der Erweiterung. Beim Sammelzugang sieht
+     * jeder Freigegebene alles, was dem Servertoken offensteht, und in
+     * Ticketverlaeufen stehen Kundendaten.
+     *
+     * DER TOKEN VERLAESST DEN SERVER NIE. Gelesen wird nur `token_gesetzt`
+     * (ja/nein) – eine maskierte Form ("****") verriete die Laenge, und ein
+     * leeres Feld heisst hier "unveraendert".
+     */
+    var _acc = null;          // zuletzt gelesener Zustand
+
+    function accMeld(text, art) {
+        var p = $('ja-acc-msg');
+        if (!p) return;
+        if (!text) { p.hidden = true; p.textContent = ''; return; }
+        // textContent: die Texte kommen teils vom Server (Fehlermeldungen).
+        p.textContent = text;
+        p.style.color = (art === 'error') ? 'var(--danger)'
+            : (art === 'ok' ? 'var(--success)' : '');
+        p.hidden = false;
+    }
+
+    /** Zeichnet Pille, Hinweiskasten und Felder aus `_acc`. */
+    function accZeichnen() {
+        var a = _acc || {};
+        var pill = $('ja-acc-pill');
+        var note = $('ja-acc-note');
+        var srv = $('ja-acc-server');
+        var akt = $('ja-acc-aktiv');
+
+        if (srv) {
+            srv.value = a.basis_url || '';
+            srv.placeholder = a.server_konfiguriert ? ''
+                : T('jaddon.acc_no_server', '— keine Adresse hinterlegt —');
+        }
+        if (akt) akt.checked = (a.aktiv !== false);
+
+        /* DIE PILLE SAGT, WELCHER ZUGANG GERADE GILT – und das ist keine
+         * Kosmetik: ein stiller Rueckfall auf den Sammelzugang liesse den
+         * Benutzer Tickets sehen, die mit FREMDEN Rechten geholt wurden, ohne
+         * dass er es merkt. Aussage doppelt (Text UND Farbe). */
+        if (pill) {
+            pill.className = 'ja-acc-pill';
+            if (!a.vorhanden) {
+                pill.textContent = T('jaddon.acc_pill_none', 'gemeinsamer Zugang');
+            } else if (a.aktiv === false) {
+                pill.textContent = T('jaddon.acc_pill_off', 'inaktiv');
+                pill.classList.add('is-warn');
+            } else if (a.letzter_fehler) {
+                pill.textContent = T('jaddon.acc_pill_err', 'Token abgelehnt');
+                pill.classList.add('is-warn');
+            } else {
+                pill.textContent = T('jaddon.acc_pill_own', 'eigener Zugang');
+                pill.classList.add('is-own');
+            }
+        }
+
+        if (note) {
+            var zeilen = [];
+            if (a.vorhanden && a.anzeigename) {
+                zeilen.push(T('jaddon.acc_as', 'Angemeldet in Jira als:') + ' '
+                            + a.anzeigename + (a.konto ? ' (' + a.konto + ')' : ''));
+            }
+            if (a.vorhanden && a.letzter_fehler) {
+                zeilen.push(T('jaddon.acc_lasterr', 'Letzter Fehler:') + ' ' + a.letzter_fehler);
+            }
+            // Ohne Sammelzugang ist ein eigener Token der EINZIGE Weg – dann
+            // darf die Oberflaeche ihn nicht als "optional" darstellen.
+            if (!a.vorhanden && a.sammel_vorhanden === false) {
+                zeilen.push(T('jaddon.acc_none_at_all',
+                    'Es ist weder ein gemeinsamer noch ein eigener Zugang hinterlegt – '
+                    + 'ohne Token kann kein Ticket geladen werden.'));
+            }
+            note.textContent = '';
+            zeilen.forEach(function (z) {
+                var d = document.createElement('div');
+                d.textContent = z;      // Fremdtext (Jira-Name, Fehlermeldung)
+                note.appendChild(d);
+            });
+            note.classList.toggle('is-on', zeilen.length > 0);
+        }
+    }
+
+    async function accLaden() {
+        try {
+            var r = await fetch('/api/jira/account',
+                                { headers: { 'Authorization': 'Bearer ' + token() } });
+            var d = r.ok ? await r.json() : null;
+            _acc = (d && d.account) || null;
+        } catch (e) { _acc = null; }
+        accZeichnen();
+    }
+
+    /** Ein Schreibzugriff auf den eigenen Zugang – EINE Stelle fuer alle drei
+     *  Knoepfe, damit Fehlerbehandlung und Neuzeichnen nicht dreimal
+     *  auseinanderlaufen. */
+    async function accRuf(pfad, methode, rumpf, erfolgstext) {
+        var knoepfe = ['ja-acc-save', 'ja-acc-test', 'ja-acc-del'];
+        knoepfe.forEach(function (i) { if ($(i)) $(i).disabled = true; });
+        accMeld(T('jaddon.acc_working', 'Einen Moment …'));
+        try {
+            var opt = { method: methode,
+                        headers: { 'Authorization': 'Bearer ' + token() } };
+            if (rumpf) {
+                opt.headers['Content-Type'] = 'application/json';
+                opt.body = JSON.stringify(rumpf);
+            }
+            var r = await fetch(pfad, opt);
+            var d = null;
+            try { d = await r.json(); } catch (e) { d = null; }
+            if (!r.ok || !d || d.ok === false) {
+                throw new Error((d && (d.error || d.detail))
+                                || T('jaddon.acc_fail', 'Vorgang fehlgeschlagen.'));
+            }
+            if (d.account) { _acc = d.account; accZeichnen(); }
+            else if (d.info) { _acc = d.info; accZeichnen(); }
+            else { await accLaden(); }
+            // Das Token-Feld wird nach JEDEM Schreibzugriff geleert: es stuende
+            // sonst im Klartext im Formular, und ein leeres Feld heisst beim
+            // naechsten Speichern korrekt "unveraendert".
+            if ($('ja-acc-token')) $('ja-acc-token').value = '';
+            accMeld(typeof erfolgstext === 'function' ? erfolgstext(d) : erfolgstext, 'ok');
+        } catch (e) {
+            accMeld(e.message, 'error');
+        } finally {
+            knoepfe.forEach(function (i) { if ($(i)) $(i).disabled = false; });
+        }
+    }
+
+    function accVerdrahten() {
+        var sp = $('ja-acc-save');
+        if (sp) sp.addEventListener('click', function () {
+            var tok = ($('ja-acc-token') ? $('ja-acc-token').value : '').trim();
+            var aktiv = !!($('ja-acc-aktiv') && $('ja-acc-aktiv').checked);
+            if (!tok && !(_acc && _acc.vorhanden)) {
+                accMeld(T('jaddon.acc_need_token',
+                          'Bitte zuerst einen Token eintragen.'), 'error');
+                return;
+            }
+            // Ein LEERES Feld wird gar nicht erst gesendet – "leer heisst
+            // unveraendert" bleibt so eine Regel des Servers und nicht zwei.
+            var rumpf = { aktiv: aktiv };
+            if (tok) rumpf.api_token = tok;
+            accRuf('/api/jira/account', 'POST', rumpf,
+                   T('jaddon.acc_saved', '✓ Gespeichert.'));
+        });
+
+        var te = $('ja-acc-test');
+        if (te) te.addEventListener('click', function () {
+            accRuf('/api/jira/account/test', 'POST', null, function (d) {
+                return T('jaddon.acc_test_ok', '✓ Verbindung steht – angemeldet als')
+                       + ' ' + (d.anzeigename || d.konto || '?');
+            });
+        });
+
+        var de = $('ja-acc-del');
+        if (de) de.addEventListener('click', function () {
+            // Eigener Dialog waere hier Aufwand ohne Gewinn: die Seite ist kein
+            // Aufgabenfenster (dort ist `confirm` unterdrueckt), und es geht
+            // kein Inhalt verloren – nur eine Einstellung, die man neu setzt.
+            if (!window.confirm(T('jaddon.acc_del_ask',
+                'Eigenen Jira-Token entfernen? Danach gilt wieder der gemeinsame Zugang.'))) return;
+            accRuf('/api/jira/account', 'DELETE', null,
+                   T('jaddon.acc_deleted', '✓ Entfernt – es gilt wieder der gemeinsame Zugang.'));
+        });
+    }
+
     // ── Start ───────────────────────────────────────────────────────────────
     async function start() {
         if (!token()) { window.location.replace('/'); return; }
@@ -295,6 +465,12 @@
             paketBlock(null);
         }
 
+        // Der eigene Zugang wird IMMER geladen, auch wenn der Container zu
+        // ist: die Pille am Titel ist der einzige Hinweis darauf, welcher
+        // Zugang gerade gilt – und sie muss dastehen, BEVOR jemand aufklappt.
+        accVerdrahten();
+        accLaden();
+
         var p = $('ja-portal-btn');
         if (p) p.addEventListener('click', function () { window.location.href = '/portal'; });
 
@@ -321,6 +497,11 @@
                 .then(function (r) { return r.ok ? r.json() : null; })
                 .then(function (d) { zeigeAdresse(d); paketBlock(d); })
                 .catch(function () {});
+            // Pille und Hinweiskasten des Zugangs werden ebenfalls GERENDERT,
+            // nicht per data-i18n uebersetzt – ohne diese Zeile blieben sie
+            // nach einem Sprachwechsel deutsch. KEIN Neuladen noetig, der
+            // Zustand liegt schon vor.
+            accZeichnen();
         });
     }
 

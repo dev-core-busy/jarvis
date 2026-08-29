@@ -20,7 +20,24 @@ from backend.jira_client import (
 
 
 def _client() -> JiraClient:
-    return JiraClient()
+    """Der Jira-Client FUER DEN LAUFENDEN BENUTZER.
+
+    Seit 2026-08-28 gilt der in der Skill-Config hinterlegte Token nur noch als
+    Rueckfall: wer unter *Mein Jira-Zugang* einen eigenen hinterlegt hat,
+    arbeitet damit und sieht genau die Vorgaenge, fuer die er in Jira
+    berechtigt ist. Der Benutzer kommt aus dem ContextVar, den
+    ``agent.py::_execute_tool`` je Aufruf setzt – **nie** aus einem
+    Werkzeug-Parameter (sonst koennte das Modell, und damit eine
+    Prompt-Injektion, waehlen, mit wessen Token es arbeitet).
+
+    Faellt das Modul aus, bleibt es beim bisherigen Verhalten: der
+    Sammelzugang ist besser als ein 500er mitten im Werkzeug-Aufruf.
+    """
+    try:
+        from backend import jira_accounts  # noqa: PLC0415
+        return jira_accounts.client_fuer_lauf()
+    except Exception:  # noqa: BLE001
+        return JiraClient()
 
 
 async def _to_thread(fn, *a, **kw):

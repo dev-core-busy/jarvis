@@ -113,6 +113,126 @@ body {
 .ja-card p { margin: 0 0 10px; color: var(--text-primary); line-height: 1.55; }
 .ja-card p:last-child { margin-bottom: 0; }
 
+/* ── Container „Mein Jira-Zugang" / „Browser-Plugin" (2026-08-28) ───────
+ * Zwei Klappabschnitte statt einer langen Kartenreihe. Bauform wie die
+ * `.sp-sect` in /sap – dieselbe Aufgabe, dieselbe Optik: Bereiche, die man
+ * einmal einrichtet und danach selten wieder anfasst. */
+.ja-sect {
+    background: var(--bg-secondary);
+    /* Wie bei .ja-card: `body` traegt in BEIDEN Themes rgb(255,255,255), ohne
+     * diese Zeile stuende im hellen Thema weisser Text auf weisser Flaeche. */
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 16px;
+}
+.ja-sect > summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 20px;
+    font-size: 1.05rem;
+    font-weight: 600;
+    cursor: pointer;
+    /* `list-style: none` allein genuegt WebKit nicht – ohne das Pseudoelement
+     * bleibt dort das Standard-Dreieck neben unserem eigenen stehen. */
+    list-style: none;
+}
+.ja-sect > summary::-webkit-details-marker { display: none; }
+/* Eigenes Dreieck: es dreht sich mit dem Zustand, damit der Abschnitt als
+ * klappbar erkennbar ist – ein Titel ohne Zeichen sieht wie eine Ueberschrift
+ * aus, die man nicht anklickt. */
+.ja-sect > summary::before {
+    content: "▸";
+    flex: 0 0 auto;
+    color: var(--text-muted);
+    transition: transform .15s ease;
+}
+.ja-sect[open] > summary::before { transform: rotate(90deg); }
+.ja-sect > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ja-sect-body { padding: 0 20px 18px; }
+/* Die Karten IM Plugin-Container brauchen keinen zweiten Rahmen – sie liegen
+ * schon in einem. Ohne das entsteht der Kasten-im-Kasten-Eindruck. */
+.ja-sect-body .ja-card {
+    background: transparent;
+    border: 0;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+    padding: 14px 0 0;
+    margin-bottom: 14px;
+}
+.ja-sect-body .ja-card:first-child { border-top: 0; padding-top: 0; }
+.ja-sect-body .ja-card:last-child { margin-bottom: 0; }
+
+/* Zustands-Pille am Titel: sagt auf einen Blick, welcher Zugang gerade gilt.
+ * `margin-left: auto` schiebt sie nach rechts, `flex: 0 0 auto` verhindert,
+ * dass sie im Flex-Container auf volle Breite gezogen wird (derselbe Fehler
+ * wie bei der Zustands-Pille in knowledge_sync). */
+.ja-acc-pill {
+    flex: 0 0 auto;
+    margin-left: auto;
+    font-size: .74rem;
+    font-weight: 600;
+    padding: 2px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+}
+/* Ein leeres Element stuende sonst als nackter Rahmen da, solange der Zustand
+ * noch nicht geladen ist. */
+.ja-acc-pill:empty { display: none; }
+.ja-acc-pill.is-own { color: var(--success); border-color: var(--success); }
+.ja-acc-pill.is-warn { color: var(--danger); border-color: var(--danger); }
+
+.ja-acc-note {
+    display: none;
+    background: var(--bg-glass);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 9px 12px;
+    margin: 10px 0;
+    font-size: .88rem;
+    line-height: 1.5;
+}
+.ja-acc-note.is-on { display: block; }
+
+.ja-acc-row { display: flex; gap: 14px; flex-wrap: wrap; margin: 12px 0 10px; }
+/* `min-width: 0` ist Pflicht: ohne das schrumpft ein Flex-Kind nicht unter
+ * seine Inhaltsbreite und schiebt das zweite Feld aus dem Container. */
+.ja-acc-field { flex: 1 1 260px; min-width: 0; display: block; }
+.ja-acc-lab {
+    display: block;
+    font-size: .82rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+}
+.ja-acc-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-glass);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: .92rem;
+}
+.ja-acc-input:focus { outline: none; border-color: var(--accent); }
+/* Das Serverfeld ist Anzeige, kein Eingabefeld – es muss auch so aussehen,
+ * sonst tippt jemand hinein und wundert sich, dass nichts passiert. */
+.ja-acc-input[readonly] { color: var(--text-muted); cursor: default; }
+.ja-acc-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 4px 0 12px;
+    font-size: .9rem;
+}
+/* Ohne `width: auto` zoege eine Feldregel das Kaestchen auf volle Breite und
+ * die Beschriftung rutschte darunter (Register: erst die Klasse ansehen). */
+.ja-acc-check input { flex: 0 0 auto; width: auto; }
+
 /* Der Merksatz der Seite: er traegt die wichtigste Zusage und darf nicht wie
  * Fliesstext aussehen. Akzentkante statt Farbflaeche – die waere in Hell und
  * Dunkel nie gleichzeitig richtig. */

@@ -152,26 +152,42 @@ def _drosseln(user: str) -> None:
     _letzte[k] = jetzt
 
 
-def _client():
-    """Der geteilte Jira-Client – oder ``AssistFehler`` mit dem Weg zur Abhilfe.
+def _client(user: str = ""):
+    """Der Jira-Client DIESES Benutzers – oder ``AssistFehler`` mit Abhilfe.
 
     Bewusst ``backend.jira_client`` und **nicht** der Skill: der Skill kann
     abgeschaltet sein, und dann waere der Import ein 500er statt einer Auskunft.
+
+    Seit 2026-08-28 gilt der Token aus der Skill-Config nur noch als Rueckfall
+    (``jira_accounts``): wer einen eigenen hinterlegt hat, holt das Ticket mit
+    seinen eigenen Jira-Rechten. **Das ist hier keine Bequemlichkeit** – im
+    Verlauf eines Tickets stehen Kundendaten, und mit dem Sammelzugang saehe
+    jeder Freigegebene jedes Ticket, das dem Servertoken offensteht.
     """
     try:
         from backend.jira_client import JiraClient  # noqa: PLC0415
     except Exception as e:  # noqa: BLE001
         raise AssistFehler("Die Jira-Anbindung ist auf diesem Server nicht "
                            "verfügbar.") from e
-    c = JiraClient()
+    try:
+        from backend import jira_accounts  # noqa: PLC0415
+        c = jira_accounts.aufloesen(user)["client"]
+    except Exception:  # noqa: BLE001
+        c = JiraClient()
     if not c.configured:
         raise AssistFehler("Jira ist nicht konfiguriert – Adresse und Token "
-                           "fehlen (Einstellungen → Jira).")
+                           "fehlen (Einstellungen → Jira). Alternativ einen "
+                           "eigenen Token unter „Mein Jira-Zugang\" hinterlegen.")
     return c
 
 
-async def ticket_laden(key: str) -> dict:
+async def ticket_laden(key: str, user: str = "") -> dict:
     """Ticket als STRUKTUR, nicht als Fliesstext.
+
+    ``user`` entscheidet, mit WESSEN Jira-Rechten geladen wird (eigener Token
+    vor Sammelzugang, siehe ``_client``). Vorgabe ist leer = Sammelzugang –
+    fail-safe in Richtung des bisherigen Verhaltens, aber jeder Aufrufer, dem
+    ein Benutzer bekannt ist, MUSS ihn mitgeben.
 
     Der Skill (``jira_get_issue``) baut aus denselben Daten einen Text fuer das
     Modell. Hier wird die Struktur gebraucht, weil die Oberflaeche Betreff,
@@ -188,7 +204,7 @@ async def ticket_laden(key: str) -> dict:
         JiraError, fmt_err, html_to_text, issue_brief,
     )
 
-    c = _client()
+    c = _client(user)
     try:
         it = await asyncio.to_thread(c.get_issue, key)
     except JiraError as e:
@@ -501,7 +517,9 @@ async def auswerten(key: str, modus: str, user: str, lang: str = "de",
         except Exception:  # noqa: BLE001
             vorlagentext = ""
 
-    ticket = await ticket_laden(key)
+    # MIT dem Benutzer: das Ticket wird mit SEINEN Jira-Rechten geholt, nicht
+    # mit denen des Servertokens (jira_accounts, seit 2026-08-28).
+    ticket = await ticket_laden(key, user)
     kennung = secrets.token_hex(4)
     sysp = _system_prompt(modus, lang, stil, vorlagentext)
     text = _ticket_text(ticket, kennung)

@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Jira-Assistent</title>
+    <title>Jira</title>
     <link rel="icon" href="/static/favicon.ico">
     <link rel="stylesheet" href="/static/css/theme.css?v=19">
-    <link rel="stylesheet" href="/static/css/jira_addon.css?v=4">
+    <link rel="stylesheet" href="/static/css/jira_addon.css?v=5">
 </head>
 <body>
 <script>try{if(localStorage.getItem('jarvis_theme')!=='dark')document.body.classList.add('light');}catch(e){}</script>
@@ -16,7 +16,7 @@
         <div class="topbar-left">
             <div class="topbar-avatar">J</div>
             <span class="topbar-title"><span class="brand-app-name">Jarvis</span>
-                <span data-i18n="jaddon.title">Jira-Assistent</span></span>
+                <span data-i18n="jaddon.title">Jira</span></span>
         </div>
         <!-- Symbolgruppe: eigener Container mit gap 4px. Ein flaches Anhaengen an
              .topbar erbt deren gap 10px, das ist der Abstand fuer den Titelbereich –
@@ -46,6 +46,79 @@
     </header>
 
 <main class="ja-main">
+
+    <!-- ══ Mein Jira-Zugang ══════════════════════════════════════════════
+         STEHT BEWUSST GANZ OBEN (Vorgabe 2026-08-28), nicht hinter der
+         Anleitung: der eigene Token wirkt im GANZEN System – Chat, Ticketsuche
+         und Erweiterung –, waehrend darunter nur eine Browser-Erweiterung
+         eingerichtet wird. Wer die Seite zum ersten Mal oeffnet, soll ihn
+         hier finden.
+
+         Wer /jira-addon betreten darf, darf ihn pflegen: die Berechtigungsfrage
+         ist dieselbe wie fuer den ganzen Bereich. Eine zusaetzliche Freigabe
+         waere eine Schranke vor einer offenen Tuer – der Token erweitert keine
+         Rechte, er ERSETZT die des Sammelzugangs durch die eigenen. -->
+    <details class="ja-sect" id="ja-sect-account" open>
+        <summary>
+            <span data-i18n="jaddon.acc_h">Mein Jira-Zugang</span>
+            <span class="ja-acc-pill" id="ja-acc-pill"></span>
+        </summary>
+        <div class="ja-sect-body">
+            <p class="ja-hint" data-i18n="jaddon.acc_hint">Hinterlege hier deinen eigenen Jira-Token. Dann laufen Ticket-Zusammenfassungen, Chat-Abfragen und die Ticketsuche mit <b>deinen</b> Jira-Berechtigungen – du siehst genau die Vorgänge, für die du in Jira freigegeben bist. Ohne eigenen Token gilt der gemeinsame Zugang, den ein Administrator hinterlegt hat.</p>
+
+            <!-- Zustand des eigenen Zugangs: WER der Token in Jira ist und
+                 wann er zuletzt funktioniert hat. Ohne diese Zeile ist ein
+                 Token eine Zeichenkette ohne Aussage, und ein abgelaufener
+                 faellt erst auf, wenn eine Auswertung nichts findet. -->
+            <div class="ja-acc-note" id="ja-acc-note"></div>
+
+            <div class="ja-acc-row">
+                <label class="ja-acc-field">
+                    <span class="ja-acc-lab" data-i18n="jaddon.acc_server">Jira-Server</span>
+                    <!-- NUR ANZEIGE: die Adresse gehört dem Administrator. Ein
+                         freies Adressfeld wäre eine SSRF-Fläche ohne Gegenwert –
+                         es gibt genau ein Haus-Jira (jira_accounts, Docstring). -->
+                    <input class="ja-acc-input" id="ja-acc-server" type="text" readonly disabled>
+                </label>
+                <label class="ja-acc-field">
+                    <span class="ja-acc-lab" data-i18n="jaddon.acc_token">Persönlicher Token (PAT)</span>
+                    <input class="ja-acc-input" id="ja-acc-token" type="password" autocomplete="off"
+                           data-i18n-placeholder="jaddon.acc_token_ph" placeholder="leer lassen = unverändert">
+                </label>
+            </div>
+
+            <label class="ja-acc-check"><input type="checkbox" id="ja-acc-aktiv" checked>
+                <span data-i18n="jaddon.acc_active">Eigenen Zugang verwenden</span></label>
+
+            <div class="ja-dl">
+                <button type="button" class="ja-btn ja-btn-haupt" id="ja-acc-save" data-i18n="jaddon.acc_save">Speichern</button>
+                <button type="button" class="ja-btn" id="ja-acc-test" data-i18n="jaddon.acc_test">Verbindung testen</button>
+                <button type="button" class="ja-btn" id="ja-acc-del" data-i18n="jaddon.acc_del">Zugang entfernen</button>
+            </div>
+            <p class="ja-hint" id="ja-acc-msg" hidden></p>
+
+            <details class="ja-det">
+                <summary data-i18n="jaddon.acc_how_h">Wo finde ich meinen Token?</summary>
+                <ol class="ja-steps">
+                    <li data-i18n-html="jaddon.acc_how_1">In Jira oben rechts auf das <b>eigene Profilbild</b> klicken und <b>Profil</b> öffnen.</li>
+                    <li data-i18n-html="jaddon.acc_how_2">Links <b>Persönliche Zugriffstoken</b> (Personal Access Tokens) wählen.</li>
+                    <li data-i18n-html="jaddon.acc_how_3"><b>Token erstellen</b>, einen Namen vergeben (z. B. „{marke}“) und eine Laufzeit setzen.</li>
+                    <li data-i18n-html="jaddon.acc_how_4">Den angezeigten Token <b>sofort kopieren</b> – Jira zeigt ihn nur ein einziges Mal – und hier einfügen.</li>
+                </ol>
+                <p class="ja-hint" data-i18n="jaddon.acc_how_note">Der Token wird verschlüsselt gespeichert und nie wieder angezeigt – auch nicht dir. Läuft er ab, trägst du hier einfach einen neuen ein.</p>
+            </details>
+        </div>
+    </details>
+
+    <!-- ══ Browser-Plugin ════════════════════════════════════════════════
+         Alles, was die Seite vorher AUSMACHTE, liegt jetzt in diesem
+         Container. Er ist EINGEKLAPPT: die Anleitung ist eine Einmal-Sache
+         (installieren, einrichten, fertig), waehrend der Zugang darueber
+         dauerhaft gepflegt wird. Wer sie braucht, klappt sie auf; wer sie
+         hinter sich hat, sieht sie nicht mehr bei jedem Besuch. -->
+    <details class="ja-sect" id="ja-sect-plugin">
+        <summary><span data-i18n="jaddon.plugin_h">Browser-Plugin</span></summary>
+        <div class="ja-sect-body">
 
     <!-- Die Karte „Einsatzbereit?" ist entfallen (Vorgabe 2026-08-28): zwei
          ihrer drei Zeilen sagten nur, dass alles in Ordnung ist, und standen
@@ -159,19 +232,22 @@
             <dd data-i18n-html="jaddon.tr4_a">Die Ticketnummer wird aus der Adresszeile gelesen. In der Board-Ansicht das Ticket zuerst öffnen, sodass <code>…/browse/ABC-1234</code> in der Adresszeile steht.</dd>
         </dl>
     </section>
+
+        </div>
+    </details>
 </main>
 </div>
 
 <script src="/static/js/icons.js?v=1"></script>
 <script src="/static/js/cpubar.js?v=1"></script>
 <script src="/static/js/theme.js?v=3"></script>
-<script src="/static/js/i18n.js?v=192"></script>
+<script src="/static/js/i18n.js?v=194"></script>
 <script src="/static/js/branding.js?v=25"></script>
 <script src="/static/js/sessions.js?v=8"></script>
 <script src="/static/js/logo_home.js?v=1"></script>
 <script src="/static/js/settings_btn.js?v=3"></script>
 <script src="/static/js/activity.js?v=2"></script>
 <script src="/static/js/issues.js?v=10"></script>
-<script src="/static/js/jira_addon.js?v=7"></script>
+<script src="/static/js/jira_addon.js?v=8"></script>
 </body>
 </html>

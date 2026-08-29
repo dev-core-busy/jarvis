@@ -196,6 +196,13 @@ _TOOL_ERGEBNIS_MAX = 5000
 # das Modell bekommt die kurze URL – dasselbe Muster wie bei `generate_image`,
 # `[[JARVIS_CHART:…]]` und `[[JARVIS_DELIVER:…]]`.
 _B64_MIN_ZEICHEN = 512                    # darunter ist es kein Bild, das jemand sehen will
+# …fuer eine DATA-URL gilt das aber NICHT. Die 512 sind eine Heuristik gegen
+# Fliesstext: ein Lauf ohne Leerzeichen von dieser Laenge ist keine Prosa. Eine
+# Data-URL sagt mit ihrem Praefix selbst, dass sie Daten ist – dort braucht es
+# die Heuristik nicht. Auf ECHT gemessen (28.08., Lauf 17879222818650010): das
+# Modell kopierte 263 Zeichen eines Blobs in seine Antwort, die Bergung sah gar
+# nicht hin, und der Benutzer las eine Zeichenwueste. Das ist der gemeldete Fall.
+_B64_DATA_URL_MIN = 16
 _B64_MAX_ZEICHEN = 48 * 1024 * 1024       # Notbremse gegen einen Riesenblob
 _B64_MAX_BILDER = 4                       # ein Skript, das 100 PNGs ausgibt, flutet den Chat nicht
 # Magische Bytes -> Endung. NUR was `/api/generated/{name}` auch ausliefert
@@ -207,12 +214,26 @@ _B64_MAGIC = (
     (b"GIF89a", "gif"),
 )
 _B64_ALPHABET = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=")
-# Data-URL: die Nutzlast steht auf DERSELBEN Zeile – genau das ist eine Data-URL.
-# Bewusst kein `\s` in der Zeichenklasse: Fliesstext besteht ebenfalls aus
-# Buchstaben und Leerzeichen, die Klasse frisst sonst den halben Folgeabsatz.
-_B64_DATA_URL_RE = re.compile(
-    r"data:image/[a-z0-9.+-]{1,12};base64,([A-Za-z0-9+/]{%d,}={0,2})" % _B64_MIN_ZEICHEN,
-    re.IGNORECASE)
+# So lang ist eine UMGEBROCHENE base64-Zeile mindestens. Das ist die Schranke
+# gegen Fliesstext: ein Wort mit 60 Zeichen ohne Leerzeichen gibt es nicht.
+# EINE Quelle – dieselbe Zahl gilt fuer Form 1 und Form 2 unten.
+_B64_ZEILE_MIN = 60
+# Data-URL – nur das PRAEFIX als Muster. Die Nutzlast wird danach in Code
+# eingesammelt (`_data_url_nutzlast`), weil sie UMGEBROCHEN sein darf.
+#
+# Bis 2026-08-29 stand hier ein einziger Regex, der die Nutzlast auf DERSELBEN
+# Zeile verlangte. Genau daran ist der gemeldete Fall vorbeigelaufen: gibt das
+# Modell die Data-URL ueber mehrere Zeilen aus, trifft Form 1 nicht, Form 2
+# ueberspringt die erste Zeile (sie traegt das Praefix und ist damit kein
+# reines base64) – und die Bytes der uebrigen Zeilen beginnen dann nicht mit
+# den magischen Bytes. Ergebnis: nichts wird geborgen, der rohe Blob steht in
+# der Antwort. Ein `\s` in der Zeichenklasse ist NICHT die Loesung: Fliesstext
+# besteht ebenfalls aus Buchstaben und Leerzeichen, die Klasse frisst sonst den
+# halben Folgeabsatz.
+_B64_DATA_URL_RE = re.compile(r"data:image/[a-z0-9.+-]{1,12};base64,", re.IGNORECASE)
+# Ein zusammenhaengendes Stueck Nutzlast bzw. der Zeilentrenner dazwischen.
+_B64_STUECK_RE = re.compile(r"[A-Za-z0-9+/]+={0,2}")
+_B64_TRENNER_RE = re.compile(r"[ \t]*\r?\n[ \t]*")
 # EINGEBETTETER Lauf – die haeufigste Form ueberhaupt: ein Werkzeug (MCP-Server,
 # API-Wrapper, Skill) liefert JSON mit einem base64-Feld, also
 # {"image": "iVBORw0KGgo…"}. Eine zeilenweise Erkennung findet das NIE, weil die
@@ -879,6 +900,7 @@ Regeln:
     - GENERIEREN ("generiere/erstelle/erzeuge/male/zeichne ein Bild von ...") -> IMMER generate_image. NIEMALS stattdessen search_image aufrufen. Kann das aktive Profil nicht generieren: gibt es eine ROLLE fuer Bilder (Abschnitt SPEZIALISIERTE ROLLEN), delegiere dorthin – sonst gib die Meldung des Tools UNVERAENDERT aus. KEINE Web-Suche als Ersatz, kein eigenmaechtiger Profilwechsel.
     - SUCHEN/ZEIGEN eines vorhandenen Bildes ("bitte ein Bild von ...", "such/finde ein Bild von ...", "zeig mir ein Bild von ...") -> IMMER search_image.
     OEFFNE NIEMALS einen Browser auf dem Desktop, um ein Bild zu zeigen (kein browser_control, kein desktop_*). Gib die vom Tool zurueckgegebene Markdown-Bildreferenz ![..](url) UNVERAENDERT in deiner Antwort aus.
+    - SCHREIBE NIEMALS BILDDATEN IN DEINE ANTWORT: keine base64-Zeichenketten, keine "data:image/...;base64,..."-Adresse – weder ganz noch auszugsweise, auch nicht aus einem Werkzeug-Ergebnis oder aus dem bisherigen Gespraech kopiert. Ein Bild entsteht AUSSCHLIESSLICH ueber generate_image bzw. search_image; deren `/api/generated/...`-Referenz ist der einzige Weg, auf dem ein Bild beim Benutzer ankommt. Du kannst Bilddaten NICHT selbst zusammensetzen – der Versuch erzeugt eine Zeichenwueste oder ein kaputtes Bild. Kannst du kein Bild liefern, SAGE DAS.
 
 16. OFFICE-DOKUMENTE (Word/Excel/PowerPoint/PDF):
     - Fuer EINFACHE Dokumente (Text, Tabellen, Bullet-Folien) die office_*-Tools nutzen: office_create_word / office_create_excel / office_create_powerpoint, PDF-Export via office_to_pdf. Diese Werkzeuge laufen IM BACKEND und sind damit unabhaengig von Python-Modulen in der Shell – sie sind der verlaessliche Weg. Eine NEU anzulegende EXCEL-Tabelle also mit office_create_excel erzeugen.
@@ -3684,6 +3706,17 @@ KRITISCH – Autonomie-Regeln:
             print(f"[AGENT {self.agent_id}] Bilder der Rolle nicht uebernommen: {e}", flush=True)
 
         ergebnis = (ergebnis or "").strip() or "(Die Rolle hat kein Ergebnis geliefert.)"
+        # ERST BERGEN, DANN KAPPEN – dieselbe Reihenfolge wie in
+        # `_ergebnis_kappen`, hier bis 2026-08-29 NICHT angewandt.
+        # AUF ECHT GEMESSEN (Lauf 17879222818650010, 28.08.): die Rolle
+        # 'image_builder' lieferte das fertige Bild als Data-URL zurueck –
+        # 2.481.887 Zeichen. Der Deckel schnitt sie auf 12.000 herunter, die
+        # Nutzlast war damit mitten im Strom abgeschnitten und nicht mehr
+        # dekodierbar. Ergebnis: das Bild war ERZEUGT und kam trotzdem nie an,
+        # und der Rest des Blobs wanderte als Zeichenwueste in die Antwort.
+        # Die Bergung davor macht daraus eine kurze /api/generated-URL, die
+        # unter jedem Deckel bleibt.
+        ergebnis = self._bilddaten_bergen(f"delegate:{rolle['id']}", ergebnis)
         if len(ergebnis) > self._DELEGATE_RESULT_MAX:
             voll = len(ergebnis)
             ergebnis = (ergebnis[:self._DELEGATE_RESULT_MAX]
@@ -4080,8 +4113,57 @@ KRITISCH – Autonomie-Regeln:
         t = self._clean_doc_refs(t.strip()).strip()
         t = self._expand_charts(t)
         if mit_bildern:
+            t = self._ohne_tote_bildrefs(t)
             t = self._mit_bildern(t)
         return t
+
+    # Bildreferenz auf ein erzeugtes Bild – die Adresse in Gruppe 1.
+    _GEN_REF_RE = re.compile(r"!\[[^\]]*\]\(\s*(/api/generated/[^)\s]+)\s*\)")
+
+    def _ohne_tote_bildrefs(self, text: str) -> str:
+        """Entfernt Bildreferenzen auf `/api/generated/…`, die es nicht gibt.
+
+        DAS MODELL SCHREIBT DIE ADRESSE AB, und bei 32 Hexziffern verzaehlt es
+        sich. Live auf DEV gemessen (2026-08-29): aus
+        `d185d07097e0b6efc03181dad100fa4c` wurde `d185d070b6efc03181dad100fa4c`
+        – vier Zeichen fehlten. Der Endpunkt antwortet darauf mit 400, der
+        Benutzer sieht ein kaputtes Bildsymbol neben einem Satz, der ein Bild
+        ankuendigt.
+
+        Muss VOR `_mit_bildern` laufen: das traegt die richtige Adresse nach,
+        sobald sie im Text fehlt – zusammen wird aus der verstuemmelten
+        Referenz wieder die richtige. Umgekehrt haelt `_mit_bildern` die
+        kaputte fuer vorhanden und ergaenzt nichts.
+
+        Fail-safe: im Zweifel bleibt die Referenz stehen. Eine faelschlich
+        entfernte waere der schlimmere Ausgang – `_mit_bildern` kann nur
+        nachtragen, was in DIESEM Lauf entstanden ist.
+        """
+        try:
+            from backend.tools.image_gen import _IMG_DIR
+
+            def _pruefe(m):
+                name = m.group(1).rsplit("/", 1)[-1]
+                stamm, _, ext = name.rpartition(".")
+                # Gleiche Regel wie der Endpunkt (main.py::get_generated_image):
+                # was er mit 400 abweist, ist als Referenz wertlos. Die Pruefung
+                # haelt zugleich jeden Pfadanteil aus dem Dateizugriff heraus.
+                if len(stamm) == 32 and all(c in "0123456789abcdef" for c in stamm) \
+                        and ext.lower() in ("png", "jpg", "jpeg", "gif", "webp"):
+                    try:
+                        if (_IMG_DIR / name).is_file():
+                            return m.group(0)
+                    except Exception:  # noqa: BLE001
+                        return m.group(0)
+                print(f"[AGENT {self.agent_id}] Bildreferenz zeigt ins Leere und wurde "
+                      f"entfernt: {m.group(1)}", flush=True)
+                return ""
+
+            return self._GEN_REF_RE.sub(_pruefe, text)
+        except Exception as e:  # noqa: BLE001
+            print(f"[AGENT {self.agent_id}] Pruefung der Bildreferenzen uebersprungen: {e}",
+                  flush=True)
+            return text
 
     def _ohne_tool_markup(self, text: str) -> str:
         """Entfernt Reste von Tool-Aufruf-Syntax aus einem Anzeigetext.
@@ -4228,12 +4310,102 @@ KRITISCH – Autonomie-Regeln:
             return "webp"
         return ""
 
+    @staticmethod
+    def _b64_vollstaendig(daten: bytes, endung: str) -> bool:
+        """Ist das ein VOLLSTAENDIGES Bild – oder nur ein Anfang?
+
+        Die magischen Bytes stehen VORN. Sie beweisen den Typ, nicht die
+        Vollstaendigkeit; genau das ist der Unterschied zwischen einem Bild und
+        einem Torso, der im Browser als kaputtes Symbol erscheint.
+
+        WARUM ES DAS BRAUCHT (auf ECHT gemessen, 2026-08-29): Sprachmodelle
+        kennen den PNG-Kopf einer 1024x1024-Grafik auswendig
+        (`iVBORw0KGgoAAAANSUhEUgAABAAAAAQACAIAAAD…` – IHDR mit KORREKTER
+        Pruefsumme) und setzen danach frei erfundenes base64 fort. In
+        `data/generated_images` lagen drei so entstandene Dateien: alle
+        1024x1024 laut IHDR, alle mit einem IDAT-Block, der 65536 Byte
+        ankuendigt und nach 1 bis 32 KB endet, keine einzige oeffenbar. Die
+        Bergung hat sie klaglos geschrieben und als `![Bild](…)` ausgeliefert.
+
+        Geprueft wird die ENDMARKE des Formats – dependency-frei und
+        deterministisch. Ein unvollstaendiges Bild faellt damit auf, ein
+        gueltiges nie.
+        """
+        if not daten:
+            return False
+        if endung == "png":
+            # Fenster statt `endswith`: manche Encoder haengen Fuellbytes hinter
+            # den IEND-Block. Ein ABGESCHNITTENER Strom hat den Block gar nicht,
+            # das Fenster macht die Aussage also nicht schwaecher.
+            return b"IEND\xaeB`\x82" in daten[-64:]
+        if endung == "jpg":
+            # Hier bewusst ein KLEINES Fenster: ein EXIF-Vorschaubild ist selbst
+            # ein JPEG und bringt sein eigenes FFD9 mit – ein weites Fenster
+            # wuerde eine Datei, die kurz hinter der Vorschau abbricht, fuer
+            # vollstaendig halten.
+            return b"\xff\xd9" in daten[-16:]
+        if endung == "gif":
+            return daten.rstrip(b"\x00").endswith(b"\x3b")
+        if endung == "webp":
+            try:
+                laenge = int.from_bytes(daten[4:8], "little")
+            except Exception:  # noqa: BLE001
+                return False
+            # RIFF-Groesse zaehlt ab Byte 8. Ein abgeschnittener Strom ist
+            # kuerzer als angekuendigt; ein paar Fuellbytes mehr sind erlaubt.
+            return len(daten) >= laenge + 8
+        return False
+
+    @staticmethod
+    def _data_url_nutzlast(text: str, ab: int):
+        """Nutzlast einer Data-URL ab Position ``ab`` – ueber Zeilenumbrueche
+        hinweg. Liefert ``(ende, nutzlast_ohne_leerraum)``.
+
+        WARUM ES DAS BRAUCHT (gemeldet 2026-08-29 von ECHT): Modelle brechen
+        lange Zeilen um. Steht die Nutzlast dann auf mehreren Zeilen, findet ein
+        einzeiliger Regex sie nicht, und die zeilenweise Erkennung (Form 2)
+        ueberspringt die ERSTE Zeile, weil dort das Praefix klebt – die
+        magischen Bytes fehlen und nichts wird geborgen.
+
+        Getrennt wird ausschliesslich durch einen ZEILENUMBRUCH, und jedes
+        Folgestueck muss ``_B64_ZEILE_MIN`` Zeichen lang sein. Beides zusammen
+        ist die Schranke gegen Fliesstext: ein Absatz hinter der Data-URL
+        beginnt mit kurzen Woertern, die durch Leerzeichen getrennt sind.
+
+        Ein KURZES Schlussstueck (der Rest der letzten Zeile) wird nur
+        uebernommen, wenn es der Rest ueberhaupt SEIN KANN – dieselbe Pruefung
+        wie in Form 2: ein Stueck mit Polster (`=`) schliesst ab, sonst muss die
+        Gesamtlaenge ein Vielfaches von 4 ergeben. Ohne diese Regel wanderte
+        ein Wort wie "fertig" in die Nutzlast und beschaedigte das Bild am Ende.
+        """
+        teile: list[str] = []
+        ende = ab
+        i = ab
+        while i < len(text):
+            if teile:
+                tr = _B64_TRENNER_RE.match(text, i)
+                if not tr:
+                    break
+                i = tr.end()
+            m = _B64_STUECK_RE.match(text, i)
+            if not m:
+                break
+            stueck = m.group(0)
+            if teile and len(stueck) < _B64_ZEILE_MIN:
+                bisher = sum(len(t) for t in teile)
+                if teile[-1].endswith("=") or (bisher + len(stueck)) % 4 != 0:
+                    break
+            teile.append(stueck)
+            i = ende = m.end()
+        return ende, "".join(teile)
+
     @classmethod
     def _b64_bloecke(cls, text: str):
         """Findet base64-Bilddaten im Text: (start, ende, nutzlast).
 
         DREI Formen, weil ein Werkzeug base64 auf drei Arten zurueckgibt:
-          1. **Data-URL** – Nutzlast auf derselben Zeile hinter dem Praefix.
+          1. **Data-URL** – Nutzlast hinter dem Praefix, ein- ODER mehrzeilig
+             (`_data_url_nutzlast`).
           2. **Nackter Blob ueber mehrere Zeilen** – was `base64 datei.png`
              bzw. `b64encode(...)` auf stdout erzeugt.
           3. **EINGEBETTET** – `{"image": "iVBORw0KGgo…"}`. Das ist die
@@ -4256,14 +4428,16 @@ KRITISCH – Autonomie-Regeln:
         def _frei(a: int, b: int) -> bool:
             return all(b <= x or a >= y for x, y in belegt)
 
-        def _nimm(a: int, b: int, nutz: str) -> None:
-            if len(nutz) >= _B64_MIN_ZEICHEN and _frei(a, b):
+        def _nimm(a: int, b: int, nutz: str, mindest: int = _B64_MIN_ZEICHEN) -> None:
+            if len(nutz) >= mindest and _frei(a, b):
                 treffer.append((a, b, nutz))
                 belegt.append((a, b))
 
-        # Form 1: Data-URL
+        # Form 1: Data-URL – Nutzlast darf UMGEBROCHEN sein, und die
+        # Laengen-Heuristik entfaellt hier (siehe _B64_DATA_URL_MIN).
         for m in _B64_DATA_URL_RE.finditer(text):
-            _nimm(m.start(), m.end(), m.group(1))
+            ende, nutz = cls._data_url_nutzlast(text, m.end())
+            _nimm(m.start(), ende, nutz, _B64_DATA_URL_MIN)
 
         # Form 2: nackte Bloecke ueber Zeilenlaeufe
         pos = 0
@@ -4272,7 +4446,7 @@ KRITISCH – Autonomie-Regeln:
             start = pos
             pos += len(zeile)
             roh = zeile.strip()
-            ist_b64 = (len(roh) >= 60 and _B64_ALPHABET.issuperset(roh)
+            ist_b64 = (len(roh) >= _B64_ZEILE_MIN and _B64_ALPHABET.issuperset(roh)
                        and "=" not in roh[:-2])
             if ist_b64:
                 lauf.append((start + zeile.index(roh), start + zeile.index(roh) + len(roh), roh))
@@ -4285,7 +4459,7 @@ KRITISCH – Autonomie-Regeln:
             # auf). Genau das hat der Test beim ersten Lauf gefunden.
             #   (1) Ein Block MIT Polster ist abgeschlossen – was folgt, ist Text.
             #   (2) Sonst muss die Gesamtlaenge ein Vielfaches von 4 ergeben.
-            if lauf and roh and len(roh) < 60 and _B64_ALPHABET.issuperset(roh):
+            if lauf and roh and len(roh) < _B64_ZEILE_MIN and _B64_ALPHABET.issuperset(roh):
                 bisher = sum(len(t[2]) for t in lauf)
                 passt = (not lauf[-1][2].endswith("=")) and (bisher + len(roh)) % 4 == 0
                 if passt:
@@ -4349,7 +4523,8 @@ KRITISCH – Autonomie-Regeln:
 
             teile: list[str] = []
             letzte = 0
-            gebaut = 0
+            gebaut = 0      # daraus wurde ein Bild – zaehlt gegen _B64_MAX_BILDER
+            ersetzt = 0     # ueberhaupt aus dem Text entfernt (Bild ODER Torso)
             for start, ende, nutz in bloecke:
                 if gebaut >= _B64_MAX_BILDER or len(nutz) > _B64_MAX_ZEICHEN:
                     continue
@@ -4360,6 +4535,33 @@ KRITISCH – Autonomie-Regeln:
                 endung = self._b64_endung(daten)
                 if not endung:
                     continue          # kein Bild -> unangetastet lassen (wird gekappt wie bisher)
+
+                if not self._b64_vollstaendig(daten, endung):
+                    # TORSO. Meist erfindet das Modell den Rest hinter einem
+                    # auswendig gelernten Kopf (siehe `_b64_vollstaendig`).
+                    # Daraus eine Datei zu machen war doppelt falsch: der
+                    # Benutzer bekam ein kaputtes Bildsymbol, und der Ordner
+                    # fuellte sich mit unbrauchbaren Dateien.
+                    if not fuer_anzeige:
+                        # Werkzeug-Ergebnis: unangetastet lassen wie bisher.
+                        # Ein Ergebnis zu veraendern, das nur ZUFAELLIG wie ein
+                        # Bildanfang aussieht, waere der schlechtere Ausgang –
+                        # es wird gekappt, mehr nicht.
+                        continue
+                    # Antwort/Verlauf: der Blob MUSS raus. Ihn stehen zu lassen
+                    # ist genau der gemeldete Fehler (Zeichenwueste im Chat),
+                    # und im Kontext kostet er Token fuer nichts.
+                    teile.append(text[letzte:start])
+                    teile.append(
+                        f"[Unbrauchbare Bilddaten entfernt: {endung.upper()}-Strom, "
+                        f"{len(daten) // 1024} KB, unvollstaendig. Ein Bild entsteht "
+                        f"ausschliesslich ueber generate_image bzw. search_image.]")
+                    letzte = ende
+                    ersetzt += 1
+                    print(f"[AGENT {self.agent_id}] Unvollstaendige Bilddaten aus "
+                          f"'{tool_name}' verworfen: {len(nutz)} base64-Zeichen, "
+                          f"{len(daten)} Byte {endung.upper()}", flush=True)
+                    continue
 
                 _IMG_DIR.mkdir(parents=True, exist_ok=True)
                 # INHALTSADRESSIERT (sha256), NICHT uuid4 – damit ist die
@@ -4379,6 +4581,7 @@ KRITISCH – Autonomie-Regeln:
                 url = f"/api/generated/{fname}"
                 record_task_image(ziel, url)
                 gebaut += 1
+                ersetzt += 1
 
                 teile.append(text[letzte:start])
                 # ZWEI Ersatztexte, und die Unterscheidung ist nicht Kosmetik:
@@ -4397,7 +4600,7 @@ KRITISCH – Autonomie-Regeln:
                 print(f"[AGENT {self.agent_id}] Bilddaten aus '{tool_name}' ausgelagert: "
                       f"{len(nutz)} base64-Zeichen -> {url} ({len(daten) // 1024} KB)", flush=True)
 
-            if not gebaut:
+            if not ersetzt:
                 return text
             teile.append(text[letzte:])
             return "".join(teile)

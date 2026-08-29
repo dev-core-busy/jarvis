@@ -95,6 +95,45 @@ def _wert_deuten(rohtext: str):
     return rohtext
 
 
+def inhalt_als_text(inhalt) -> str:
+    """``message["content"]`` als TEXT – auch wenn der Server Bloecke schickt.
+
+    Die OpenAI-Schnittstelle erlaubt fuer ``content`` eine Liste von Bloecken
+    (``{"type": "text"|"image_url", …}``). Bis 2026-08-29 stand hier ein nacktes
+    ``str(...)`` – aus einer solchen Liste wurde damit die PYTHON-DARSTELLUNG,
+    also woertlich ``[{'type': 'image_url', 'image_url': {'url': 'data:…'}}]``.
+
+    AUF ECHT GEMESSEN (28.08.): genau so kam das Ergebnis der Rolle
+    ``image_builder`` zurueck – **2.481.887 Zeichen** Python-Repr statt einer
+    Antwort. Was der Benutzer davon sah, war der Anfang der Zeichenkette.
+
+    Bilder werden als **saubere Data-URL** durchgereicht, nicht weggeworfen:
+    die Auslagerung in eine Datei passiert eine Ebene hoeher
+    (``agent._bilddaten_bergen``), und die erkennt eine Data-URL – eine
+    Python-Darstellung erkennt sie nur zufaellig mit.
+    """
+    if isinstance(inhalt, str):
+        return inhalt
+    if not isinstance(inhalt, list):
+        return str(inhalt) if inhalt is not None else ""
+    stuecke = []
+    for block in inhalt:
+        if isinstance(block, str):
+            stuecke.append(block)
+            continue
+        if not isinstance(block, dict):
+            stuecke.append(str(block))
+            continue
+        if block.get("text"):
+            stuecke.append(str(block["text"]))
+            continue
+        bild = block.get("image_url")
+        url = bild.get("url") if isinstance(bild, dict) else bild
+        if url:
+            stuecke.append(str(url))
+    return "\n".join(s for s in stuecke if s)
+
+
 def berge_tool_syntax(text: str):
     """``(text_ohne_marken, [MockFC, …])``.
 
@@ -1032,7 +1071,7 @@ class OpenAICompatibleProvider(LLMProvider):
             # Aufruf wird unten wie ein nativer behandelt.
             _geborgen = []
             if message.get("content"):
-                _rein, _geborgen = berge_tool_syntax(str(message["content"]))
+                _rein, _geborgen = berge_tool_syntax(inhalt_als_text(message["content"]))
                 if _rein:
                     parts.append(LLMPart(text=_rein))
                 elif not message.get("tool_calls") and not _geborgen:

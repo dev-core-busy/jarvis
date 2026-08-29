@@ -102,7 +102,13 @@ AGENT_KLS = _klasse("JarvisAgent")
 if AGENT_KLS is None:
     abbruch("Klasse JarvisAgent nicht gefunden")
 
-_METHODEN = ("_b64_endung", "_b64_bloecke", "_bilddaten_bergen",
+# ACHTUNG: wer eine Methode in diese Kette einhaengt, MUSS sie hier eintragen.
+# Sonst fehlt sie in der Attrappe, der AttributeError landet im breiten `except`
+# von `_bilddaten_bergen` – und der Test meldet "Blob steht noch im Text", also
+# einen Codefehler, den es nicht gibt. Beim Bau von Abschnitt 17 genau so
+# passiert (18 FAIL aus einer fehlenden Zeile).
+_METHODEN = ("_b64_endung", "_b64_vollstaendig", "_data_url_nutzlast",
+             "_b64_bloecke", "_bilddaten_bergen", "_ohne_tote_bildrefs",
              "_verlauf_text", "_verlauf_content", "_ergebnis_kappen")
 for _m in _METHODEN:
     if _methode(AGENT_KLS, _m) is None:
@@ -207,7 +213,13 @@ for _k in _konst_namen:
 _körper = "\n\n".join(
     textwrap.indent(_segment(_methode(AGENT_KLS, m)), "    ") for m in _METHODEN
 )
-exec("class Attrappe:\n    agent_id = 'test'\n    tools_map = {}\n\n" + _körper, _ns)
+_attrib = [_segment(n) for n in AGENT_KLS.body
+           if isinstance(n, ast.Assign)
+           and any(isinstance(z, ast.Name) and z.id == "_GEN_REF_RE" for z in n.targets)]
+if not _attrib:
+    abbruch("Klassen-Attribut _GEN_REF_RE fehlt – Fix nicht vorhanden?")
+exec("class Attrappe:\n    agent_id = 'test'\n    tools_map = {}\n\n"
+     + textwrap.indent("\n".join(_attrib), "    ") + "\n\n" + _körper, _ns)
 A = _ns["Attrappe"]()
 
 # SANDKASTEN-WAECHTER: schreibt die Bergung wirklich ins Wegwerf-Verzeichnis?
@@ -608,6 +620,224 @@ class _C:
 _orig = _C([_P("nur Text, keine Bilddaten")])
 pruef(A._verlauf_content(_orig) is _orig,
       "der Google-Rohpfad baut das Objekt um, obwohl nichts zu bergen war")
+
+print("\n16. Data-URL mit UMGEBROCHENER Nutzlast")
+# NICHT der gemeldete Fall (der steht in 17b), sondern eine Luecke, die bei
+# dessen Untersuchung auffiel: gibt das Modell die Data-URL ueber mehrere
+# Zeilen aus, griff bis zum Fix gar nichts.
+# Form 1 traf nicht (sie verlangte eine Zeile), Form 2 uebersprang
+# die erste Zeile (Praefix = kein reines base64) – die Bytes der uebrigen Zeilen
+# begannen damit NICHT mit den magischen Bytes, nichts wurde geborgen und der
+# rohe Blob stand in der Antwort.
+for _breite in (60, 76, 80, 200, 600):
+    frisch()
+    _umbrochen = "\n".join(textwrap.wrap(PNG_B64, _breite))
+    _t = f"Hier ist die Kuh:\n\n![Kuh im Anzug]\n(data:image/png;base64,{_umbrochen})\n\nViel Spass."
+    _r = A._bilddaten_bergen("(antworttext)", _t, fuer_anzeige=True)
+    pruef(PNG_B64[:200] not in _r, f"Umbruch {_breite}: base64 steht noch in der Antwort")
+    pruef("data:image/" not in _r, f"Umbruch {_breite}: Data-URL-Praefix blieb stehen")
+    _m = URL_RE.search(_r)
+    pruef(_m is not None, f"Umbruch {_breite}: keine /api/generated-URL erzeugt")
+    if _m:
+        pruef((IMG_DIR / _m.group(1)).read_bytes() == PNG,
+              f"Umbruch {_breite}: geborgene Bytes weichen vom Original ab")
+    pruef("Viel Spass." in _r, f"Umbruch {_breite}: Text NACH dem Blob ging verloren")
+    pruef(_r.startswith("Hier ist die Kuh:"), f"Umbruch {_breite}: Text davor ging verloren")
+
+print("   Fliesstext hinter der Data-URL bleibt unangetastet")
+frisch()
+_prosa = ("Analyse fertig. Das Ergebnis siehst du unten.\n"
+          "Die Zahlen stammen aus der Quartalsauswertung und sind gerundet.\n")
+_t = ("![X](data:image/png;base64,\n" + "\n".join(textwrap.wrap(PNG_B64, 76)) + ")\n" + _prosa)
+_r = A._bilddaten_bergen("(antworttext)", _t, fuer_anzeige=True)
+pruef(_prosa.strip() in _r, "Fliesstext hinter der Data-URL wurde mitgefressen")
+pruef(PNG_B64[:200] not in _r, "base64 blieb stehen (Nutzlast begann auf der Folgezeile)")
+
+print("\n17. Ein TORSO wird nicht zum Bild – er wird benannt")
+# AUF ECHT GEMESSEN (2026-08-29): drei Dateien in data/generated_images,
+# alle mit gueltigem IHDR (1024x1024, korrekte Pruefsumme) und einem IDAT, das
+# 65536 Byte ankuendigt und nach 1-32 KB endet. Keine einzige oeffenbar.
+# Sprachmodelle kennen diesen Kopf auswendig und erfinden den Rest.
+_HALLUZINIERT = PNG[:len(PNG) // 2]          # gueltiger Kopf, abgeschnitten
+pruef(A._b64_endung(_HALLUZINIERT) == "png",
+      "Testmaterial taugt nicht: der Torso wird nicht als PNG erkannt")
+pruef(not A._b64_vollstaendig(_HALLUZINIERT, "png"),
+      "abgeschnittenes PNG gilt als vollstaendig – IEND wird nicht geprueft")
+pruef(A._b64_vollstaendig(PNG, "png"), "vollstaendiges PNG wird abgelehnt (Positivkontrolle)")
+pruef(A._b64_vollstaendig(JPEG, "jpg"), "vollstaendiges JPEG wird abgelehnt")
+pruef(not A._b64_vollstaendig(JPEG[:-2], "jpg"), "abgeschnittenes JPEG gilt als vollstaendig")
+pruef(A._b64_vollstaendig(PNG + b"\x00" * 8, "png"),
+      "PNG mit ein paar Fuellbytes hinter IEND gilt als Torso")
+pruef(not A._b64_vollstaendig(PNG[:-12] + b"\x00" * 200, "png"),
+      "abgeschnittenes PNG mit Fuellbytes gilt als vollstaendig")
+pruef(not A._b64_vollstaendig(b"", "png"), "leere Daten gelten als vollstaendiges Bild")
+
+_TORSO_B64 = base64.b64encode(_HALLUZINIERT).decode()
+if len(_TORSO_B64) < 512:
+    abbruch("Torso zu kurz – die Bergung wuerde ihn ohnehin nicht ansehen")
+
+frisch()
+_t = f"Hier ist die Kuh:\n![Kuh](data:image/png;base64,{_TORSO_B64})\nFertig."
+_r = A._bilddaten_bergen("(antworttext)", _t, fuer_anzeige=True)
+pruef(_TORSO_B64[:200] not in _r, "der Torso-Blob steht weiter in der Antwort")
+pruef("data:image/" not in _r, "Data-URL-Praefix des Torsos blieb stehen")
+pruef(URL_RE.search(_r) is None, "aus dem Torso wurde eine Bild-URL – der Benutzer sieht ein kaputtes Bild")
+pruef(not (IMG_DIR.exists() and list(IMG_DIR.iterdir())),
+      "aus dem Torso wurde eine Datei geschrieben")
+pruef(len(_gemerkt) == 0, "record_task_image wurde fuer den Torso gerufen – _mit_bildern haengt ihn an")
+pruef("Unbrauchbare Bilddaten" in _r, "der Benutzer erfaehrt nicht, was mit den Daten war")
+pruef("Fertig." in _r and _r.startswith("Hier ist die Kuh:"), "Text um den Torso ging verloren")
+
+print("   Werkzeug-Ergebnis bleibt beim Torso unangetastet (fail-safe)")
+frisch()
+_r = A._bilddaten_bergen("shell_execute", _t, fuer_anzeige=False)
+pruef(_r == _t, "ein Werkzeug-Ergebnis wurde wegen eines Torsos veraendert")
+pruef(not (IMG_DIR.exists() and list(IMG_DIR.iterdir())), "Torso-Datei aus dem Werkzeug-Weg")
+
+print("   Ein vollstaendiges Bild geht weiter durch (Positivkontrolle)")
+frisch()
+_r = A._bilddaten_bergen("(antworttext)",
+                         f"![X](data:image/png;base64,{PNG_B64})", fuer_anzeige=True)
+pruef(URL_RE.search(_r) is not None, "vollstaendiges Bild wird nicht mehr geborgen")
+pruef(len(_gemerkt) == 1, "record_task_image fehlt beim vollstaendigen Bild")
+
+print("\n17b. DER GEMELDETE FALL (ECHT, Lauf 17879222818650010 vom 28.08.)")
+# Gemessene Kette, Schritt fuer Schritt nachgestellt:
+#   [0] Werkzeug-Ergebnis der Rolle 'image_builder': 2.481.887 Zeichen, das
+#       fertige Bild als Data-URL – vom Delegations-Deckel auf 12.000 gekappt,
+#       Nutzlast 11.933 Zeichen und damit mitten im Strom abgeschnitten.
+#   [1] Die Antwort des Modells: "Hier ist die KüH im identischen Look:" plus
+#       263 kopierte Zeichen des Blobs – UNTER der 512er-Schranke, also von der
+#       Bergung nie angesehen. Das ist, was der Benutzer im Screenshot sah.
+frisch()
+_kurz = PNG_B64[:263]
+pruef(len(_kurz) < 512, "Testfall taugt nicht – 263 Zeichen muessen unter der Schranke liegen")
+_t = f"Hier ist die KüH im identischen Look:\n\n![Kuh im Anzug mit Raketenjetpack](data:image/png;base64,{_kurz}\n*)"
+_r = A._bilddaten_bergen("(antworttext)", _t, fuer_anzeige=True)
+pruef(_kurz[:120] not in _r, "der 263-Zeichen-Blob steht weiter in der Antwort (gemeldeter Fall)")
+pruef("data:image/" not in _r, "Data-URL-Praefix blieb stehen")
+pruef("Hier ist die KüH" in _r, "der Satz des Modells ging verloren")
+pruef(URL_RE.search(_r) is None, "aus 263 Zeichen wurde ein Bild – das kann keines sein")
+
+print("   …und ein VOLLSTAENDIGES kleines Bild wird trotzdem geliefert")
+frisch()
+_winzig = echtes_png(2, 2)
+_wb64 = base64.b64encode(_winzig).decode()
+pruef(len(_wb64) < 512, f"Miniatur zu gross ({len(_wb64)} Zeichen) – der Fall waere nicht der gemeinte")
+_r = A._bilddaten_bergen("(antworttext)",
+                         f"Bitte sehr: ![P](data:image/png;base64,{_wb64})", fuer_anzeige=True)
+_m = URL_RE.search(_r)
+pruef(_m is not None, "ein vollstaendiges kleines Bild wird nicht mehr ausgeliefert")
+if _m:
+    pruef((IMG_DIR / _m.group(1)).read_bytes() == _winzig, "Miniatur weicht vom Original ab")
+
+print("   Lange NICHT-Data-URL-Laeufe behalten ihre 512er-Schranke")
+frisch()
+_kurzlauf = base64.b64encode(echtes_png(2, 2)).decode()
+_t = "{\"image\": \"" + _kurzlauf + "\"}"
+pruef(A._bilddaten_bergen("shell_execute", _t) == _t,
+      "ein kurzer eingebetteter Lauf wird jetzt geborgen – die Heuristik gilt dort weiter")
+
+print("\n17c. Rollen-Ergebnis: BERGEN vor dem Delegations-Deckel")
+# Ohne diese Reihenfolge ist die Bergung wirkungslos: der Deckel zerschneidet
+# den Blob vorher, danach ist er nicht mehr dekodierbar.
+_dele = _methode(AGENT_KLS, "_delegate_to_role")
+pruef(_dele is not None, "_delegate_to_role nicht gefunden")
+if _dele is not None:
+    _zeilen_d = _segment(_dele).splitlines()
+    _i_berg = next((i for i, z in enumerate(_zeilen_d)
+                    if "_bilddaten_bergen" in z and not z.strip().startswith("#")), None)
+    _i_kapp = next((i for i, z in enumerate(_zeilen_d)
+                    if "_DELEGATE_RESULT_MAX" in z and "if len(" in z), None)
+    pruef(_i_berg is not None, "_delegate_to_role bergt keine Bilddaten")
+    pruef(_i_kapp is not None, "Deckel _DELEGATE_RESULT_MAX nicht gefunden")
+    pruef(_i_berg is not None and _i_kapp is not None and _i_berg < _i_kapp,
+          "der Deckel greift VOR der Bergung – dann ist der Blob schon zerschnitten")
+
+print("\n17d. message['content'] als Bloeckliste wird zu TEXT, nicht zu Python-Repr")
+LLM_PY = WURZEL / "backend" / "llm.py"
+if not LLM_PY.exists():
+    abbruch("backend/llm.py fehlt")
+_llm_baum = ast.parse(LLM_PY.read_text(encoding="utf-8"))
+_fn = next((n for n in _llm_baum.body
+            if isinstance(n, ast.FunctionDef) and n.name == "inhalt_als_text"), None)
+pruef(_fn is not None, "llm.inhalt_als_text fehlt")
+if _fn is not None:
+    _lns = {"json": json} if False else {}
+    exec(compile(ast.Module([_fn], []), "llm", "exec"), _lns)
+    _iat = _lns["inhalt_als_text"]
+    pruef(_iat("schlicht") == "schlicht", "einfacher Text wird veraendert")
+    _bloecke = [{"type": "text", "text": "Hier ist das Bild:"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64," + PNG_B64}}]
+    _raus = _iat(_bloecke)
+    pruef("'type':" not in _raus and "{" not in _raus,
+          "die Python-Darstellung der Liste steht noch im Text")
+    pruef(_raus.startswith("Hier ist das Bild:"), "der Textblock ging verloren")
+    pruef("data:image/png;base64," + PNG_B64[:80] in _raus,
+          "die Data-URL ueberlebt die Umwandlung nicht – die Bergung findet sie dann nicht")
+    pruef(_iat(None) == "" and _iat(123) == "123", "Sonderfaelle nicht abgefangen")
+    # Und die Kette danach muss greifen
+    frisch()
+    _r = A._bilddaten_bergen("delegate:image_builder", _raus)
+    pruef(URL_RE.search(_r) is not None,
+          "aus dem umgewandelten Rollen-Ergebnis entsteht kein Bild")
+
+# Und die Aufrufstelle darf nicht wieder auf str() zurueckfallen
+_quelle_llm = LLM_PY.read_text(encoding="utf-8")
+pruef('berge_tool_syntax(str(message["content"]))' not in _quelle_llm,
+      "die Aufrufstelle nutzt wieder str() statt inhalt_als_text()")
+pruef('inhalt_als_text(message["content"])' in _quelle_llm,
+      "inhalt_als_text wird an der Antwortstelle gar nicht benutzt")
+
+print("\n17e. Verstuemmelte Bildreferenz wird entfernt, nicht angezeigt")
+# LIVE AUF DEV GEMESSEN (2026-08-29): das Modell schrieb die 32-stellige
+# Adresse falsch ab (4 Zeichen fehlten). Der Endpunkt antwortet darauf mit 400 –
+# der Benutzer saehe ein kaputtes Bildsymbol.
+frisch()
+IMG_DIR.mkdir(parents=True, exist_ok=True)
+_echt = "d185d07097e0b6efc03181dad100fa4c.png"
+(IMG_DIR / _echt).write_bytes(PNG)
+_faelle = {
+    f"![K](/api/generated/{_echt})": True,                       # existiert -> bleibt
+    "![K](/api/generated/d185d070b6efc03181dad100fa4c.png)": False,   # 28 statt 32 -> weg
+    "![K](/api/generated/" + "a" * 32 + ".png)": False,          # 32 Hex, aber keine Datei
+    "![K](/api/generated/" + "z" * 32 + ".png)": False,          # kein Hex
+    "![K](https://example.org/bild.png)": True,                  # fremde URL -> unangetastet
+    "Text ohne Bild": True,
+}
+for _q, _bleibt in _faelle.items():
+    _r = A._ohne_tote_bildrefs(_q)
+    pruef((_r == _q) == _bleibt,
+          f"falsch behandelt ({'sollte bleiben' if _bleibt else 'sollte weg'}): {_q[:60]}")
+pruef(A._ohne_tote_bildrefs("![K](/api/generated/../../etc/passwd)") == "",
+      "eine Referenz mit Pfadanteil wird nicht entfernt")
+
+# …und der Anzeigepfad muss sie VOR _mit_bildern rufen: nur zusammen wird aus
+# der verstuemmelten Referenz wieder die richtige.
+_az = _methode(AGENT_KLS, "_anzeigetext")
+_zeilen_a = [z for z in _segment(_az).splitlines() if not z.strip().startswith("#")]
+_i_tot = next((i for i, z in enumerate(_zeilen_a) if "_ohne_tote_bildrefs" in z), None)
+_i_mit = next((i for i, z in enumerate(_zeilen_a) if "_mit_bildern(" in z), None)
+pruef(_i_tot is not None, "_anzeigetext prueft die Bildreferenzen nicht")
+pruef(_i_mit is not None, "_anzeigetext traegt keine Bilder nach")
+pruef(_i_tot is not None and _i_mit is not None and _i_tot < _i_mit,
+      "die Pruefung laeuft NACH dem Nachtragen – dann bleibt die kaputte Referenz stehen")
+
+print("\n18. Der System-Prompt verbietet base64 in der Antwort")
+# Register: ein Prompt ist Code. Die Bergung ist die Notbremse – dass das Modell
+# es gar nicht erst versucht, ist die billigere Haelfte. CLAUDE.md fuehrte genau
+# diese Regel als offenen Punkt.
+_sp = None
+for _n in ast.walk(AGENT_KLS):
+    if isinstance(_n, ast.Assign) and any(
+            isinstance(z, ast.Name) and z.id == "SYSTEM_PROMPT" for z in _n.targets):
+        _sp = _n.value.value if isinstance(_n.value, ast.Constant) else None
+pruef(isinstance(_sp, str), "SYSTEM_PROMPT nicht als Literal gefunden")
+if isinstance(_sp, str):
+    _l = _sp.lower()
+    pruef("base64" in _l and "data:image" in _l,
+          "der Prompt sagt nirgends, dass base64 nicht in die Antwort gehoert")
+    pruef("generate_image" in _sp, "der Prompt nennt den erlaubten Weg nicht")
 
 # ═══════════════════════════════════════════════════════════════════════════
 shutil.rmtree(SANDKASTEN, ignore_errors=True)

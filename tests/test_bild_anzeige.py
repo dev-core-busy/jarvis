@@ -309,10 +309,11 @@ def teil3():
     # eigene Begruendung statt des Codes (Register).
     rumpf = _ohne_docstring(methode("_anzeigetext"))
     pos = {n: rumpf.index(n) for n in ("_ohne_tool_markup", "_clean_doc_refs",
-                                       "_expand_charts", "_mit_bildern")}
+                                       "_expand_charts", "_ohne_tote_bildrefs",
+                                       "_mit_bildern")}
     check(pos["_ohne_tool_markup"] < pos["_clean_doc_refs"] < pos["_expand_charts"]
-          < pos["_mit_bildern"],
-          "Tool-Syntax → Dokumentpfade → Diagramme → BILDER ZULETZT")
+          < pos["_ohne_tote_bildrefs"] < pos["_mit_bildern"],
+          "Tool-Syntax → Dokumentpfade → Diagramme → tote Referenzen → BILDER ZULETZT")
 
     # Der Bild-Nachtrag muss abschaltbar sein (Zwischentexte), sonst erschiene
     # ein Bild, das an einem Zwischenstand haengt, doppelt.
@@ -340,6 +341,12 @@ def teil3():
         def _expand_charts(self, t):
             aufrufe.append("charts"); return t
 
+        # Seit 2026-08-29: eine vom Modell verstuemmelt abgeschriebene Adresse
+        # fliegt raus, BEVOR _mit_bildern die richtige nachtraegt – sonst haelt
+        # der Nachtrag die kaputte fuer vorhanden und ergaenzt nichts.
+        def _ohne_tote_bildrefs(self, t):
+            aufrufe.append("tote"); return t
+
         def _mit_bildern(self, t):
             aufrufe.append("bilder"); return t + "\n\n![Bild](/api/generated/x.png)"
 
@@ -349,13 +356,15 @@ def teil3():
     s = Stub()
 
     aus = s._anzeigetext("Fertig.")
-    check(aufrufe == ["markup", "bergen", "clean", "charts", "bilder"],
-          "alle fuenf Schritte laufen, in dieser Reihenfolge", str(aufrufe))
+    check(aufrufe == ["markup", "bergen", "clean", "charts", "tote", "bilder"],
+          "alle sechs Schritte laufen, in dieser Reihenfolge", str(aufrufe))
     check("/api/generated/x.png" in aus, "das Bild wird nachgetragen")
 
     aufrufe.clear()
     s._anzeigetext("Ich schaue kurz nach…", mit_bildern=False)
     check("bilder" not in aufrufe, "bei einem Zwischentext KEIN Bild-Nachtrag")
+    check("tote" not in aufrufe,
+          "bei einem Zwischentext auch keine Referenz-Pruefung – es wird nichts nachgetragen")
 
     aufrufe.clear()
     check(s._anzeigetext("   ") == "", "leerer Text ergibt leeren Text")

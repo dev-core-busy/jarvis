@@ -111,6 +111,19 @@ Die Prüfung `if (!_key)` **im Handler** bleibt daneben bestehen. Ein gesperrter
 Oberfläche, keine Garantie: `_key` kann sich in der Seitenleiste zwischen Zeichnen und
 Klick ändern, und `disabled` lässt sich aus den Entwicklerwerkzeugen entfernen.
 
+## Nach jeder Aktualisierung: Neu laden (⟳)
+
+Chrome liest die **Popup-Seite** bei jedem Öffnen frisch von der Platte, behält den
+**Service-Worker** aber im Speicher. Wer die Dateien austauscht, ohne in
+`chrome://extensions` auf **Neu laden** zu drücken, bekommt ein neues Fenster und einen
+alten Hintergrund — und dann sieht jedes Symptom nach einem Programmierfehler aus.
+
+Dagegen steht `STAND`: eine Zahl, die in `background.js` **und** `popup.js` identisch
+gepflegt wird und mit dem Zustand mitgeht. Weicht sie ab, sagt das Fenster im Klartext, dass
+neu zu laden ist. **Bei jeder Änderung an den Nachrichtenfällen hochzählen** — ein Test
+vergleicht beide Zahlen. Eine Versionsnummer taugt dafür nicht: beide Seiten lesen dasselbe
+Manifest von der Platte und melden dieselbe Version, auch wenn der Worker-Code alt ist.
+
 ## Voraussetzungen
 
 1. Der **Jira-Skill** ist in Jarvis aktiv und konfiguriert (Adresse + Token).

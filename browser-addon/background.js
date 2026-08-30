@@ -25,6 +25,19 @@ const api = (typeof browser !== "undefined") ? browser : chrome;
 // Server umschreiben, ohne die Signatur zu brechen. Damit scheidet der Weg des
 // Outlook-Add-ins aus, wo das Manifest je Server erzeugt wird – und die
 // Drift-Falle "eine Kopie je Installation" gleich mit.
+/* STAND DES HINTERGRUND-CODES – muss mit `STAND` in popup.js uebereinstimmen.
+ *
+ * ⚠ WOFUER DAS DA IST: Chrome liest die Popup-SEITE bei jedem Oeffnen frisch
+ * von der Platte, behaelt den **Service-Worker** aber im Speicher. Wer die
+ * Erweiterung aktualisiert, ohne sie in `chrome://extensions` neu zu laden,
+ * bekommt damit ein NEUES Fenster und einen ALTEN Hintergrund. Gemeldet
+ * 2026-08-30: Klick auf den Ansichts-Schalter antwortete „Unbekannte
+ * Anfrage." – das ist der `default`-Zweig unten, und er sagte nicht, was zu
+ * tun ist.
+ * Bei jeder Aenderung an den Nachrichtenfaellen HOCHZAEHLEN. Ein Test
+ * vergleicht beide Zahlen. */
+const STAND = 4;
+
 const EINST = "einstellungen";   // storage.local: { basis }
 const SITZUNG = "sitzung";       // storage.local: { token, benutzer }
 const ERGEBNIS = "ergebnis";     // storage.local: letzter Lauf (siehe unten)
@@ -419,6 +432,9 @@ api.runtime.onMessage.addListener((nachricht, absender, antworten) => {
                       // ist schlimmer als kein Schalter.
                       ansicht: (e.ansicht === "leiste") ? "leiste" : "popup",
                       leiste_moeglich: leisteMoeglich(),
+                      // Damit das Fenster merkt, wenn hier noch eine aeltere
+                      // Fassung antwortet (siehe STAND).
+                      stand: STAND,
                       // "SIDE_PANEL" | "POPUP" | "" (nicht feststellbar).
                       // Das Fenster entscheidet danach, ob es Tab-Wechsel
                       // beobachten muss - siehe kontextArt().
@@ -514,7 +530,16 @@ api.runtime.onMessage.addListener((nachricht, absender, antworten) => {
           break;
         }
         default:
-          antworten({ ok: false, fehler: "Unbekannte Anfrage." });
+          /* ⚠ DIE MELDUNG MUSS DEN WEG NENNEN. „Unbekannte Anfrage." war
+           * richtig und trotzdem wertlos: der haeufigste Grund ist nicht ein
+           * Programmierfehler, sondern ein Hintergrund, der aelter ist als das
+           * Fenster (siehe STAND). */
+          antworten({ ok: false, fehler:
+            "Diese Anfrage kennt der Hintergrund nicht (\"" +
+            String((nachricht && nachricht.art) || "?") + "\"). " +
+            "Vermutlich laeuft noch eine aeltere Fassung der Erweiterung: " +
+            "oeffne chrome://extensions und druecke bei dieser Erweiterung " +
+            "auf Neu laden (\u27F3)." });
       }
     } catch (e) {
       antworten({ ok: false, fehler: (e && e.message) || String(e) });

@@ -45,6 +45,11 @@ const POPUP_JS = lies("popup.js");
 const POPUP_HTML = lies("popup.html");
 const EINFUEGEN = lies("einfuegen.js");
 
+/* Modul-Konstanten, die die geschnittenen Funktionen brauchen. Sie stehen
+ * nicht in einem Funktionsrumpf und fallen deshalb aus jedem Schnitt heraus –
+ * fehlen sie, WIRFT der Lauf statt fehlzuschlagen (siehe LEISTE_PFAD). */
+const STAND_ZEILE = (POPUP_JS.match(/const STAND = \d+;/) || [""])[0];
+
 /* ── Schnitt-Helfer fuer die funktionalen Laeufe ──────────────────────────
  *
  * Schneidet eine Funktion aus popup.js und zieht TRANSITIV alles mit, was sie
@@ -1206,7 +1211,7 @@ section("8) Die Ticketnummer-Erkennung – ausgefuehrt");
    * Hintergrund gemeldet wurde. Letzteres ist der eigentliche Punkt: nur das
    * Feld zu leeren wuerde den Text beim naechsten Oeffnen zurueckbringen. */
   // Die Attrappe muss `zustand` beantworten - sonst laeuft start() ins Leere.
-  const laufMit = async (tabKey, gemerkt, klickLeeren) => {
+  const laufMit = async (tabKey, gemerkt, klickLeeren, bgStand) => {
     const dom = new JSDOM(POPUP_HTML, { url: 'https://x.test/',
                                         runScripts: 'outside-only' });
     const w = dom.window;
@@ -1221,7 +1226,7 @@ section("8) Die Ticketnummer-Erkennung – ausgefuehrt");
        * Bedeutung (\\d wird zu d). Der Waechter pruefte dann eine Funktion,
        * die es so im Code gar nicht gibt.
        * Zusammengehaengt kommt der Code Zeichen fuer Zeichen an. */
-      const f = new w.Function('tabKey', 'gemerkt', 'klickLeeren', `
+      const f = new w.Function('tabKey', 'gemerkt', 'klickLeeren', 'bgStand', `
           const gesendet = [];
           const $ = (id) => document.getElementById(id);
           const el = {
@@ -1234,7 +1239,8 @@ section("8) Die Ticketnummer-Erkennung – ausgefuehrt");
           let _marke = "Marke", _key = tabKey, _tabId = 1;
           let _letztes = null, _fremdesErgebnis = false, _merkTimer = null;
           const _originale = new Map();
-          let _jiraBasis = "";
+          let _jiraBasis = "", _standAlt = false, _standGesehen;
+` + STAND_ZEILE + `
           /* Die Leisten-Umgebung. Hier gilt der Popup-Fall (_leiste = false);
            * den Leisten-Fall prueft Abschnitt 10.
            * KEINE Backticks in diesem Vorspann - er steht selbst in einem
@@ -1250,6 +1256,7 @@ section("8) Die Ticketnummer-Erkennung – ausgefuehrt");
             gesendet.push(n);
             if (n && n.art === "zustand") {
               return { ok: true, basis: "https://s.test", angemeldet: true,
+                       stand: (bgStand === undefined) ? STAND : bgStand,
                        ergebnis: gemerkt };
             }
             return { ok: true };
@@ -1272,9 +1279,44 @@ section("8) Die Ticketnummer-Erkennung – ausgefuehrt");
                                             && n.wert === null),
             });
           })();`);
-      return JSON.parse(await f(tabKey, gemerkt, klickLeeren));
+      return JSON.parse(await f(tabKey, gemerkt, klickLeeren, bgStand));
     } finally { w.close(); }
   };
+
+  /* ── HALB AKTUALISIERT: neues Fenster, alter Hintergrund ────────────────
+   * Gemeldet 2026-08-30 („Unbekannte Anfrage" beim Ansichts-Schalter). Chrome
+   * liest die Popup-SEITE bei jedem Oeffnen frisch, behaelt den
+   * Service-Worker aber im Speicher - wer aktualisiert, ohne in
+   * chrome://extensions neu zu laden, hat genau diesen Zustand. */
+  {
+    // AUSGEFUEHRT: passender Stand -> keine Warnung, abweichender -> Warnung.
+    const G = { key: "ABC-1", text: "Text", modus: "antwort",
+                zeit: Date.now(), kommentare: 1 };
+    {
+      const r = await laufMit("ABC-1", G, false);        // Stand passt
+      check(!/halb aktualisiert/.test(r.meldung),
+            "passender Stand: keine Warnung", r.meldung);
+    }
+    {
+      const r = await laufMit("ABC-1", G, false, 1);     // Hintergrund aelter
+      check(/halb aktualisiert/.test(r.meldung),
+            "alter Hintergrund: die Warnung steht da", r.meldung);
+      check(/chrome:\/\/extensions/.test(r.meldung),
+            "und nennt den Weg");
+      /* ⚠ SIE MUSS GEWINNEN. Die Warnung wird ganz am Ende von start()
+       * gesetzt - sonst ueberschreibt sie die naechste Routine-Meldung, und
+       * die wichtigste Auskunft des Fensters waere die einzige, die niemand
+       * sieht. Hier steht sonst „Gemerkter Vorschlag …". */
+      check(!/Gemerkter Vorschlag/.test(r.meldung),
+            "und ueberschreibt die Routine-Meldung, nicht umgekehrt", r.meldung);
+    }
+    {
+      // Eine Fassung OHNE das Feld ist per Definition aelter.
+      const r = await laufMit("ABC-1", G, false, null);
+      check(/halb aktualisiert/.test(r.meldung),
+            "fehlt das Feld ganz, gilt der Hintergrund als aelter", r.meldung);
+    }
+  }
 
   const GEMERKT = { key: 'ABC-1', text: 'Sehr geehrte Damen und Herren …',
                     modus: 'antwort', zeit: Date.now(), kommentare: 3 };
@@ -2319,6 +2361,34 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
     const o = ohneKommentare(quelle);
     check(!/api\.sidePanel/.test(o) && !/api\.sidebarAction/.test(o),
           name + " greift nirgends ueber `api` auf sidePanel/sidebarAction zu");
+  }
+
+  /* ── l) HALB AKTUALISIERT: neues Fenster, alter Hintergrund ────────────
+   *
+   * Gemeldet 2026-08-30: Klick auf den Ansichts-Schalter antwortete
+   * „Unbekannte Anfrage." – der `default`-Zweig des Hintergrunds. Der Code war
+   * in Ordnung; es antwortete eine AELTERE Fassung.
+   * URSACHE (Chrome-Bauart, nicht Fehler): die Popup-SEITE liest Chrome bei
+   * jedem Oeffnen frisch von der Platte, den **Service-Worker** behaelt es im
+   * Speicher. Wer aktualisiert, ohne in chrome://extensions neu zu laden, hat
+   * genau diesen Zustand – und alle Symptome sehen aus wie Programmierfehler.
+   * Der Abgleich macht daraus eine Anweisung. */
+  {
+    const inPopup = (POPUP_JS.match(/const STAND = (\d+);/) || [])[1];
+    const inBg = (BG.match(/const STAND = (\d+);/) || [])[1];
+    check(!!inPopup && !!inBg, "beide Dateien tragen einen STAND",
+          inPopup + " / " + inBg);
+    check(inPopup === inBg, "und er ist derselbe - sonst warnt es dauernd",
+          inPopup + " / " + inBg);
+    check(/stand: STAND/.test(BG), "der Hintergrund schickt ihn im Zustand mit");
+
+    /* Der `default`-Zweig muss den WEG nennen. „Unbekannte Anfrage." war
+     * richtig und trotzdem wertlos. */
+    const dflt = (BG.match(/default:[\s\S]*?\}\);/) || [""])[0];
+    check(/chrome:\/\/extensions/.test(dflt) && /aeltere Fassung/.test(dflt),
+          "und der default-Zweig nennt den Weg statt nur 'unbekannt'",
+          dflt.slice(0, 60));
+
   }
 
   // ── h) CSS ──────────────────────────────────────────────────────────────

@@ -46,6 +46,12 @@ function zweig(name, methode) {
   return null;
 }
 
+/* STAND DES FENSTER-CODES – muss mit `STAND` in background.js uebereinstimmen.
+ * Begruendung dort; kurz: Chrome laedt diese Seite bei jedem Oeffnen frisch,
+ * behaelt den Service-Worker aber im Speicher. Ohne diesen Abgleich sieht ein
+ * halb aktualisierter Zustand wie ein Programmierfehler aus. */
+const STAND = 4;
+
 const $ = (id) => document.getElementById(id);
 const el = {
   login: $("bereich-login"), arbeit: $("bereich-arbeit"),
@@ -85,6 +91,9 @@ let _laeuft = false;
  * gleich darauf vom Hintergrund (`kontextArt` ueber runtime.getContexts) und
  * wird hier nachgetragen. */
 let _leiste = document.documentElement.classList.contains("leiste");
+// Antwortet im Hintergrund eine aeltere Fassung? (siehe STAND)
+let _standAlt = false;
+let _standGesehen;       // was der Hintergrund gemeldet hat (fuer die Meldung)
 let _windowId = null;
 let _tabUrl = "";
 // Adresse des Jira-Servers, einmal vom Server geholt (siehe zugriffZeile).
@@ -474,6 +483,15 @@ async function start() {
   // Marke setzen, sobald eine Adresse bekannt ist – das geht ohne Anmeldung
   // und damit schon beim allerersten Öffnen nach dem Einrichten.
   if (el.basis.value) brandingHolen(el.basis.value);
+  /* ⚠ LAEUFT IM HINTERGRUND NOCH EINE AELTERE FASSUNG? Dann stimmt hier gar
+   * nichts mehr zusammen, und die Symptome sehen aus wie Programmierfehler:
+   * der Ansichts-Schalter antwortet „Unbekannte Anfrage", Felder im Zustand
+   * fehlen. Der Abgleich sagt es SOFORT und nennt den Weg - statt dass jemand
+   * (auch ich) tagelang an der falschen Stelle sucht.
+   * `undefined` zaehlt als Abweichung: eine Fassung ohne das Feld ist per
+   * Definition aelter als die, die es eingefuehrt hat. */
+  _standGesehen = z.stand;
+  if (z.stand !== STAND) _standAlt = true;
   // ZUERST klaeren, WAS dieses Fenster ist - davon haengen Breite, Beschriftung
   // des Umschalters und die Tab-Beobachtung ab.
   leisteFeststellen(z.kontext);
@@ -508,6 +526,17 @@ async function start() {
      * Sicherheitsfrage: das Ergebnis geht am Ende an einen echten Kunden. */
     await ticketLageAnwenden(z.ergebnis);
     leisteBeobachten();
+  }
+
+  /* ⚠ ZULETZT, damit sie GEWINNT. Ein halb aktualisierter Zustand macht alles
+   * andere unerklaerlich; diese Auskunft darf nicht von einer Routine-Meldung
+   * ueberschrieben werden, die kurz danach gesetzt wird. */
+  if (_standAlt) {
+    melde("Die Erweiterung ist nur halb aktualisiert: dieses Fenster ist neuer "
+          + "als ihr Hintergrund. Öffne chrome://extensions und drücke bei "
+          + "dieser Erweiterung auf Neu laden (⟳) – danach funktioniert wieder "
+          + "alles. (Fenster " + STAND + ", Hintergrund "
+          + (_standGesehen === undefined ? "älter" : _standGesehen) + ".)");
   }
 }
 
@@ -1450,7 +1479,14 @@ $("f-ansicht").addEventListener("change", async (ereignis) => {
     // Zuruecksetzen, sonst behauptet das Haekchen einen Zustand, den es nicht
     // gibt.
     ereignis.target.checked = (wert !== "leiste");
-    melde(e.message);
+    // Kennt der Hintergrund die Anfrage nicht, ist er aelter als dieses
+    // Fenster - dann ist die Fehlermeldung des Hintergrunds zwar richtig, der
+    // Weg steht aber hier (siehe STAND).
+    melde(_standAlt
+      ? "Der Hintergrund der Erweiterung ist älter als dieses Fenster. Öffne "
+        + "chrome://extensions und drücke bei dieser Erweiterung auf Neu "
+        + "laden (⟳)."
+      : e.message);
     return;
   }
   ansichtZeigen(a.wert, a.leiste_moeglich);

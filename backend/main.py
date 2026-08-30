@@ -4559,7 +4559,14 @@ async def api_context_clear(request: Request, user: str = Depends(require_auth))
 # konsistent bleiben:
 #
 #   1. Index ermitteln: position der editierten Nachricht innerhalb der
-#      User-Rollen (0-basiert, nur Rolle=="user" zaehlen).
+#      SICHTBAREN Benutzer-Sprechblasen (0-basiert).
+#      ⚠ "Sichtbar" ist hier entscheidend und war bis 2026-08-30 die Fehlstelle:
+#      der Server zaehlte `role == "user"` – und diese Rolle tragen im
+#      LLM-Verlauf AUCH die Werkzeug-Ergebnisse (`function_response`), der
+#      Auto-Learning-Hinweis, der Zusammenfassungs-Eintrag der Komprimierung und
+#      die Anhang-Notiz. Client und Server meinten dieselbe Zahl und meinten
+#      Verschiedenes; der Schnitt landete mitten in einem Werkzeug-Turn.
+#      Server-seitig entscheidet jetzt `_ist_benutzerfrage()`.
 #   2. UI: alle Nachrichten NACH der editierten Bubble entfernen.
 #   3. Lokale History: auf die ersten (userIndex+1) User-Eintraege kuerzen
 #      und Text der editierten Nachricht ersetzen.
@@ -4579,11 +4586,126 @@ async def api_context_clear(request: Request, user: str = Depends(require_auth))
 #   - android/.../ChatRepository.kt :: editUserMessage
 #   - android/.../JarvisWebSocket.kt :: sendTaskWithTruncate
 # ════════════════════════════════════════════════════════════════════════════
+def _ist_benutzerfrage(entry) -> bool:
+    """Ist dieser Verlaufs-Eintrag eine SICHTBARE Benutzerfrage?
+
+    Die Entscheidung liegt in `agent.py` – dort entsteht das Format, und dort
+    werden die internen `role="user"`-Eintraege geschrieben. Eine zweite
+    Fassung hier waere genau das Drift-Muster, das diesen Fehler erzeugt hat.
+    Fail-closed: ist die Auskunft nicht zu bekommen, gilt der Eintrag NICHT als
+    Frage – dann schneidet der Aufruf lieber zu spaet als mitten in einen Turn.
+    """
+    try:
+        from backend.agent import ist_benutzerfrage as _ibf
+        return _ibf(entry)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _entferne_offene_toolaufrufe(history: list) -> int:
+    """Entfernt am ENDE des Verlaufs einen `function_call` ohne Antwort.
+
+    Ein Schnitt landet praktisch immer auf einer Werkzeug-Grenze, und was dann
+    stehen bleibt, ist ein Modell-Eintrag, der ein Werkzeug aufruft, dessen
+    Ergebnis geloescht wurde. Diesen Zustand beschreibt der Abschnitt
+    "Verlaufs-Buchhaltung im Agent-Loop" als den eigentlichen Fehler: das Modell
+    beantwortet die offene Frage beim NAECHSTEN Lauf mit – daher die gemeldeten
+    doppelten Ergebnisse.
+
+    Rueckgabe: Anzahl der entfernten Eintraege.
+    """
+    weg = 0
+    while history:
+        letzter = history[-1]
+        teile = getattr(letzter, "parts", None) or []
+        hat_aufruf = any(getattr(p, "function_call", None) is not None for p in teile)
+        if getattr(letzter, "role", None) == "model" and hat_aufruf:
+            history.pop()
+            weg += 1
+            continue
+        break
+    return weg
+
+
+_FORGET_MIN_LEN = 12
+
+
+def _eintrag_text(entry) -> str:
+    """Zusammengesetzter Text eines Verlaufs-Eintrags, Leerraum normiert."""
+    teile = getattr(entry, "parts", None) or []
+    return " ".join("".join((getattr(p, "text", None) or "") for p in teile).split())
+
+
+def _texte_passen(a: str, b: str) -> bool:
+    """Meinen diese beiden Texte dieselbe Frage?
+
+    Kein exakter Vergleich, und das hat Gruende: die Sprechblase im Transkript
+    traegt Zusaetze, die der Kontext nicht kennt (Anhang-Marke), und umgekehrt
+    stellt der Server dem Auftragstext Transkripte und PDF-Text VORAN
+    (`_text_prepend`). Beides sind Anhaengsel an denselben Kern.
+
+    Die Unschaerfe ist gedeckelt: sie gilt erst ab `_FORGET_MIN_LEN` Zeichen –
+    sonst traefe ein "ja" jede Frage, die mit "ja" beginnt.
+    """
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    if min(len(a), len(b)) < _FORGET_MIN_LEN:
+        return False
+    return (a.startswith(b) or b.startswith(a)
+            or a.endswith(b) or b.endswith(a))
+
+
+def _kontext_zuege(history: list) -> list:
+    """Die ZUEGE des Verlaufs: ``[(start, ende_exklusiv, fragetext), …]``.
+
+    Ein Zug beginnt bei einer Benutzerfrage und reicht bis zur naechsten – er
+    umfasst also die Werkzeugschritte und die Antwort. Was VOR der ersten Frage
+    steht (Zusammenfassungs-Eintrag, Anhang-Notiz), gehoert zu keinem Zug und
+    bleibt bei jeder Entfernung stehen.
+    """
+    starts = [i for i, e in enumerate(history) if _ist_benutzerfrage(e)]
+    zuege = []
+    for n, s in enumerate(starts):
+        ende = starts[n + 1] if n + 1 < len(starts) else len(history)
+        zuege.append((s, ende, _eintrag_text(history[s])))
+    return zuege
+
+
+def _kontext_zuege_entfernen(history: list, fragetexte: list) -> int:
+    """Entfernt die ZUEGE zu den genannten Fragen aus dem Verlauf.
+
+    Gedacht fuer "Nachricht geloescht": bis 2026-08-30 schrieb das Loeschen im
+    Chat ausschliesslich das TRANSKRIPT (`PUT …/transcript`) – der LLM-Kontext
+    blieb unangetastet. Auf ECHT gemessen (Sitzung dbcbe98a0f9d): eine vom
+    Benutzer geloeschte Frage stand danach nur noch im Kontext und wirkte dort
+    weiter.
+
+    Entfernt wird immer der GANZE Zug, auch wenn nur die Antwort geloescht
+    wurde. Eine Frage ohne Antwort stehen zu lassen waere genau der Zustand, den
+    `_verlauf_reparieren` beseitigt: das Modell beantwortet sie beim naechsten
+    Lauf mit.
+
+    Rueckgabe: Anzahl der entfernten Eintraege.
+    """
+    gesucht = [" ".join(str(t).split()) for t in (fragetexte or []) if str(t).strip()]
+    if not gesucht or not history:
+        return 0
+    treffer = [(s, e) for s, e, frage in _kontext_zuege(history)
+               if any(_texte_passen(frage, g) for g in gesucht)]
+    weg = 0
+    for s, e in sorted(treffer, reverse=True):      # von hinten: Indizes bleiben gueltig
+        del history[s:e]
+        weg += e - s
+    return weg
+
+
 def _truncate_history_to_user_index(history: list, keep_user_count: int) -> int:
     """
     Trimmt die Chat-History des Backends so, dass die ersten `keep_user_count`
-    User-Nachrichten (inkl. ihrer Antworten) erhalten bleiben und alles danach
-    entfernt wird.
+    BENUTZERFRAGEN (inkl. ihrer Werkzeugschritte und Antworten) erhalten bleiben
+    und alles danach entfernt wird.
 
     Beispiel:
         history = [user0, model0, user1, model1, user2, model2]
@@ -4591,22 +4713,32 @@ def _truncate_history_to_user_index(history: list, keep_user_count: int) -> int:
         keep_user_count = 2 → [user0, model0, user1, model1]
         keep_user_count = 0 → []  (alles löschen)
 
+    ⚠ GEZAEHLT WIRD ueber `_ist_benutzerfrage`, NICHT ueber `role == "user"`.
+    Bis 2026-08-30 stand hier der rohe Rollenvergleich – und weil ein
+    Werkzeug-Ergebnis ebenfalls `role="user"` traegt, war die Zahl des Clients
+    eine andere als die des Servers. Gemessen an einem Verlauf mit EINEM
+    Werkzeugschritt: `keep_user_count=1` liess `[Frage, function_call]` stehen –
+    die Antwort des Werkzeugs und die des Modells waren weg, der Aufruf blieb
+    offen. Genau diese Form lag am 2026-08-29 im Kontext einer echten Sitzung
+    auf ECHT (Meldung: "Context-Inhalte vermischt, doppelte Ergebnisse").
+
     Rückgabe: Anzahl der entfernten Einträge.
     """
     if not history or keep_user_count < 0:
         return 0
-    user_seen = 0
+    gesehen = 0
     cut_at = len(history)
     for idx, entry in enumerate(history):
-        role = getattr(entry, "role", None)
-        if role == "user":
-            if user_seen == keep_user_count:
+        if _ist_benutzerfrage(entry):
+            if gesehen == keep_user_count:
                 cut_at = idx
                 break
-            user_seen += 1
+            gesehen += 1
     removed = len(history) - cut_at
     if removed > 0:
         del history[cut_at:]
+    # Und was der Schnitt am Ende offen laesst, kommt mit weg.
+    removed += _entferne_offene_toolaufrufe(history)
     return removed
 
 
@@ -5670,16 +5802,70 @@ async def chat_sessions_rename(sid: str, request: Request, user: str = Depends(r
     return JSONResponse({"ok": True, "session": res})
 
 
+@app.post("/api/chat/sessions/{sid}/context/forget")
+async def chat_sessions_context_forget(sid: str, request: Request,
+                                       user: str = Depends(require_auth)):
+    """Geloeschte Nachrichten auch aus dem LLM-KONTEXT nehmen.
+
+    Body: ``{"questions": ["<Fragetext des Zugs>", …]}`` – zu jeder geloeschten
+    Sprechblase der Text IHRER Frage (bei einer Antwort also der der davor
+    stehenden Frage). Entfernt wird der ganze Zug, siehe
+    `_kontext_zuege_entfernen`.
+
+    WARUM ES DEN ENDPUNKT GIBT: `PUT …/transcript` schreibt nur das, was der
+    Mensch sieht. Der Kontext liegt in einer zweiten Datei und blieb beim
+    Loeschen unangetastet – gemeldet am 2026-08-29 als "Context-Inhalte
+    vermischt". Der Benutzer kommt ueber sein Token nur an die EIGENEN
+    Sitzungen; die Fragetexte sind seine eigenen.
+    """
+    from backend import chat_sessions as cs
+    from backend.agent import _hist_key as _hk, deserialize_history as _deser, \
+        serialize_history as _ser
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    fragen = body.get("questions") if isinstance(body, dict) else None
+    if not isinstance(fragen, list) or not fragen:
+        return JSONResponse({"ok": True, "removed": 0})
+
+    schluessel = _hk(user, sid)
+    agent = agent_manager.main_agent
+    hist = agent._user_histories.get(schluessel) if agent else None
+    aus_ram = hist is not None
+    if hist is None:
+        hist = _deser(cs.load_context(user, sid))
+    weg = _kontext_zuege_entfernen(hist, fragen)
+    if weg:
+        # In den Speicher zurueckschreiben (falls dort gehalten) UND auf Platte –
+        # ohne das Zweite waere die Entfernung nach dem naechsten Neustart weg,
+        # ohne das Erste erst nach ihm wirksam.
+        if agent is not None and not aus_ram:
+            agent._user_histories[schluessel] = hist
+        try:
+            cs.save_context(user, sid, _ser(hist))
+        except Exception as e:  # noqa: BLE001
+            print(f"[chat] Kontext nach Loeschen nicht gespeichert: {e}", flush=True)
+        print(f"[chat] {weg} Kontext-Eintraege zu {len(fragen)} geloeschten "
+              f"Nachricht(en) entfernt (Sitzung {sid})", flush=True)
+    return JSONResponse({"ok": True, "removed": weg})
+
+
 @app.delete("/api/chat/sessions/{sid}")
 async def chat_sessions_delete(sid: str, user: str = Depends(require_auth)):
     """Sitzung löschen (Ordner + Transkript + Kontext) und RAM-Kontext verwerfen."""
     from backend import chat_sessions as cs
     from backend.agent import _hist_key as _hk
     ok = cs.delete_session(user, sid)
-    # RAM-Kontext dieser Sitzung verwerfen (falls geladen)
+    # RAM-Kontext dieser Sitzung verwerfen (falls geladen).
+    # ⚠ Der HAUPTAGENT haelt die Chat-Verlaeufe, nicht `agent_instance` – das ist
+    # ein eigener Agent fuer die Skill-Verwaltung. Bis 2026-08-30 stand hier
+    # `agent_instance`, der Eintrag blieb also im Speicher stehen, waehrend die
+    # Datei geloescht wurde. (Dieselbe Verwechslung wie beim Skill-Toggle, siehe
+    # `_reload_agent_tools`.)
     try:
-        if agent_instance is not None:
-            agent_instance._user_histories.pop(_hk(user, sid), None)
+        if agent_manager.main_agent is not None:
+            agent_manager.main_agent._user_histories.pop(_hk(user, sid), None)
     except Exception:  # noqa: BLE001
         pass
     return JSONResponse({"ok": ok})

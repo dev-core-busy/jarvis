@@ -244,6 +244,46 @@ _B64_TRENNER_RE = re.compile(r"[ \t]*\r?\n[ \t]*")
 # bleibt unangetastet.
 _B64_LAUF_RE = re.compile(r"[A-Za-z0-9+/]{%d,}={0,2}" % _B64_MIN_ZEICHEN)
 
+# ── Was im Verlauf `role="user"` traegt, aber KEINE Benutzerfrage ist ────────
+# Diese Texte entstehen ALLE in dieser Datei; deshalb steht die Liste hier und
+# nicht bei den Aufrufern. `main.py::_ist_benutzerfrage` holt sie sich von hier.
+INTERNE_VERLAUFS_MARKEN = (
+    "[Zusammenfassung",                  # _compress_history
+    "[ANHAENGE NICHT MEHR IM KONTEXT",   # _verworfene_anhaenge
+    "WICHTIG – AUTO-LEARNING",           # Lern-Hinweis nach einem Lauf
+    "WICHTIG - AUTO-LEARNING",
+)
+
+
+def ist_benutzerfrage(entry) -> bool:
+    """Ist dieser Verlaufs-Eintrag eine SICHTBARE Benutzerfrage?
+
+    Das ist NICHT dasselbe wie `role == "user"` – und diese Verwechslung ist der
+    Fehler, den die Meldung vom 2026-08-29 ("Context-Inhalte vermischt, doppelte
+    Ergebnisse") sichtbar gemacht hat. Als `user` liegen im Verlauf:
+
+      * die echten Fragen,
+      * **jedes Werkzeug-Ergebnis** (`function_response` – so verlangt es das
+        Format der Gemini-API, das hier durchgereicht wird),
+      * der Auto-Learning-Hinweis nach einem Lauf,
+      * der Zusammenfassungs-Eintrag der Kontext-Komprimierung,
+      * die Notiz ueber verworfene Anhaenge.
+
+    Ein Client zaehlt dagegen nur seine sichtbaren Sprechblasen. Wer beides
+    gleichsetzt, schneidet mitten in einen Werkzeug-Turn.
+    """
+    if getattr(entry, "role", None) != "user":
+        return False
+    teile = getattr(entry, "parts", None) or []
+    if any(getattr(p, "function_response", None) is not None for p in teile):
+        return False
+    text = "".join((getattr(p, "text", None) or "") for p in teile).lstrip()
+    if text.startswith(INTERNE_VERLAUFS_MARKEN):
+        return False
+    # Eine Frage ohne Text gibt es (reiner Bild-Anhang) – die zaehlt.
+    return bool(text) or any(getattr(p, "inline_data", None) is not None for p in teile)
+
+
 _BLOCKED_TOOLS_FOR_LDAP = {
     "spawn_agent",         # Keine Sub-Agents (koennten Shell/FS ungefiltert nutzen)
     "write_clipboard",     # Kein Clipboard-Schreibzugriff
@@ -1981,6 +2021,12 @@ KRITISCH – Autonomie-Regeln:
                         try:
                             from backend import chat_sessions as _cs
                             chat_history = deserialize_history(_cs.load_context(username, session_id))
+                            # Einen bereits BESCHAEDIGTEN Kontext heilen, bevor er
+                            # den naechsten Lauf vergiftet (siehe _verlauf_reparieren).
+                            _rep = self._verlauf_reparieren(chat_history)
+                            if _rep:
+                                _log(f"Sitzungs-Kontext repariert: {_rep} unvollstaendige "
+                                     f"Eintraege entfernt")
                         except Exception:  # noqa: BLE001
                             chat_history = []
                     self._user_histories[_history_key] = chat_history
@@ -2012,6 +2058,13 @@ KRITISCH – Autonomie-Regeln:
                     _name = _att.get("name", "Datei")
                     # LLM-native Formate (Bild/PDF/Audio/Video) direkt inline anhaengen.
                     if _mime.startswith(("image/", "audio/", "video/")) or _mime == "application/pdf":
+                        # Der NAME steht in keinem inline-Part – `from_bytes` kennt
+                        # nur Bytes und MIME-Typ. Ohne diese Zeile weiss das Modell
+                        # nicht, wie die Datei heisst, die es gerade ansieht, und
+                        # `_compress_history` kann den Anhang spaeter nicht beim
+                        # Namen nennen, wenn er aus dem Kontext faellt.
+                        _user_parts.append(types.Part.from_text(
+                            text=f"[Anhang: {_name} ({_mime})]"))
                         _user_parts.append(types.Part.from_bytes(data=_att_bytes, mime_type=_mime))
                         _log(f"Anhang inline: {_name} ({_mime})")
                     else:
@@ -3830,6 +3883,177 @@ KRITISCH – Autonomie-Regeln:
         return (f"(Das Werkzeug '{tool_name}' ist mit dem aktiven Modell nicht moeglich; "
                 f"die Aufgabe wurde an die Rolle '{rolle['id']}' uebergeben.)\n{ergebnis}")
 
+    # Anhangs-Marke, die `run_task` neben den inline-Part legt (dort steht die
+    # Begruendung). EINE Quelle fuer beide Stellen.
+    _ANHANG_MARKE_RE = re.compile(r"^\[Anhang:\s*(.+?)\s*\((.+?)\)\]$")
+    # Kopf der Verlust-Notiz. Sie muss WIEDERERKENNBAR sein: eine Sitzung wird
+    # mehrfach komprimiert, und die Notiz ist selbst nur Text – beim naechsten
+    # Durchgang landet sie im `dialog_text` und wird vom Modell mitzusammen-
+    # gefasst. Live gemessen (2026-08-29): der Dateiname ueberlebte, die Aussage
+    # "nicht mehr im Kontext" NICHT. Deshalb liest `_verworfene_anhaenge` eine
+    # fruehere Notiz wieder ein und gibt sie weiter – die Notiz traegt sich
+    # dadurch selbst durch die Sitzung.
+    _NOTIZ_KOPF = "[ANHAENGE NICHT MEHR IM KONTEXT: "
+    _NOTIZ_TRENNER = " · "   # bewusst NICHT ", " – ein Eintrag kann selbst ein Komma tragen
+
+    @classmethod
+    def _verworfene_anhaenge(cls, eintraege: list) -> str:
+        """Beschreibt die Anhaenge, die beim Zusammenfassen VERLOREN gehen.
+
+        WARUM ES DAS BRAUCHT (live auf DEV gemessen, 2026-08-29): ein
+        hochgeladenes Bild liegt als `inline_data`-Part im Verlauf. Die
+        Zusammenfassung wird aber nur aus `text`, `function_call` und
+        `function_response` gebaut – ein inline-Part traegt NICHTS bei und wird
+        mit dem Rest des Abschnitts ersetzt. Danach steht im gespeicherten
+        Kontext **kein einziger inline-Part** mehr, und in der Zusammenfassung
+        kommt der Anhang mit keinem Wort vor.
+
+        Was der Benutzer dann sieht, ist nicht etwa eine erfundene Antwort,
+        sondern die gemessene: „Mir liegt aktuell kein Bild vor." Seine eigene
+        Sprechblase zeigt den Anhang aber weiter – aus dieser Sicht behauptet
+        der Agent, er habe nie eines bekommen. Genau das ist der Unterschied,
+        den diese Notiz herstellt: der Verlust wird BENANNT, statt bestritten.
+
+        Gibt "" zurueck, wenn nichts verloren geht.
+        """
+        gefunden: list[str] = []
+        for eintrag in eintraege or []:
+            try:
+                namen: list[str] = []
+                inline: list[tuple[str, int]] = []
+                for p in (getattr(eintrag, "parts", None) or []):
+                    t = getattr(p, "text", None)
+                    if t:
+                        t = t.strip()
+                        # Eine FRUEHERE Notiz: ihre Eintraege uebernehmen, damit
+                        # der Verlust die naechste Komprimierung ueberlebt.
+                        if t.startswith(cls._NOTIZ_KOPF):
+                            liste = t[len(cls._NOTIZ_KOPF):].split(". Sie wurden", 1)[0]
+                            for alt in liste.split(cls._NOTIZ_TRENNER):
+                                alt = alt.strip()
+                                # "und N weitere" ist der Deckel-Rest, kein Anhang.
+                                if alt and not alt.startswith("und "):
+                                    gefunden.append(alt)
+                            continue
+                        m = cls._ANHANG_MARKE_RE.match(t)
+                        if m:
+                            namen.append(f"{m.group(1)} ({m.group(2)})")
+                        continue
+                    blob = getattr(p, "inline_data", None)
+                    if blob is not None:
+                        daten = getattr(blob, "data", b"") or b""
+                        inline.append((getattr(blob, "mime_type", "") or "unbekannt",
+                                       len(daten)))
+                # Marke und Datenteil stehen im SELBEN Eintrag und in derselben
+                # Reihenfolge – ein Anhang ohne Marke (Altbestand) wird ueber
+                # MIME-Typ und Groesse beschrieben, statt zu verschwinden.
+                for i, (mime, groesse) in enumerate(inline):
+                    if i < len(namen):
+                        gefunden.append(namen[i])
+                    else:
+                        gefunden.append(f"{mime}, {max(1, groesse // 1024)} KB")
+            except Exception:  # noqa: BLE001
+                continue
+        # Doppelte zusammenfassen, Reihenfolge behalten: dieselbe Datei darf nach
+        # mehreren Komprimierungen nicht mehrfach in der Notiz stehen. Die ANZAHL
+        # bleibt aber sichtbar – sieben namenlose Anhaenge desselben Typs sind
+        # etwas anderes als einer, und "(7×)" ist kuerzer als sieben Eintraege.
+        eindeutig = []
+        for name in dict.fromkeys(gefunden):
+            n = gefunden.count(name)
+            eindeutig.append(f"{name} ({n}×)" if n > 1 else name)
+        if not eindeutig:
+            return ""
+        # Deckel: eine Sitzung mit dreissig Bildern erzeugt sonst eine Notiz, die
+        # laenger ist als die Zusammenfassung, die sie begleitet.
+        if len(eindeutig) > 8:
+            eindeutig = eindeutig[:8] + [f"und {len(eindeutig) - 8} weitere"]
+        return (cls._NOTIZ_KOPF + cls._NOTIZ_TRENNER.join(eindeutig) + ". "
+                "Sie wurden beim Zusammenfassen des aelteren Gespraechsteils entfernt "
+                "und stehen dir NICHT mehr zur Ansicht zur Verfuegung. Wird danach "
+                "gefragt: sage das offen und bitte darum, den Anhang erneut zu senden. "
+                "Suche NICHT im Dateisystem danach – ein Bild kannst du nur ansehen, "
+                "wenn es als Anhang mitgeschickt wird. Erfinde KEINEN Inhalt – und "
+                "behaupte NICHT, es sei nie einer geschickt worden.]")
+
+    @staticmethod
+    def _verlauf_reparieren(history: list) -> int:
+        """Entfernt unvollstaendige Turns aus einem GELADENEN Kontext.
+
+        Die Regel steht seit dem 2026-07-28 fest: ein Lauf hinterlaesst den
+        Kontext ENTWEDER vollstaendig ODER unveraendert. Ein Zwischenzustand
+        laesst das Modell die offene Frage beim naechsten Lauf mitbeantworten –
+        das sind die gemeldeten "doppelten Ergebnisse".
+
+        Erzwungen wurde die Regel bisher nur INNERHALB eines Laufs
+        (`_rollback_history`). Ein Kontext, der schon beschaedigt AUF PLATTE
+        liegt, blieb es. Am 2026-08-29 auf ECHT gemessen: in einer Sitzung stand
+        seit drei Tagen eine Frage ohne Antwort, gefolgt von einem
+        `function_call` ohne `function_response` – Rueckstand eines falsch
+        berechneten Schnitts (siehe `_truncate_history_to_user_index`). Jede
+        weitere Frage in dieser Sitzung lief gegen diesen Rest an.
+
+        Entfernt werden drei Formen:
+          1. `function_call` ohne die zugehoerige `function_response`,
+          2. `function_response` ohne vorangehenden `function_call`,
+          3. eine Benutzerfrage, auf die bis zur naechsten Frage keine Antwort
+             des Modells folgt.
+
+        NUR BEIM LADEN aufrufen, nie waehrend eines Laufs: der Hauptagent ist
+        geteilt, zwei Laeufe koennen gleichzeitig in derselben Liste stehen –
+        ein offener `function_call` ist dann der NORMALZUSTAND des anderen
+        Laufs, und die Reparatur wuerde ihn wegwerfen. Frisch deserialisiert
+        kann dagegen kein Lauf darauf arbeiten.
+
+        Fail-safe: bei jedem Fehler bleibt der Verlauf unveraendert.
+        Rueckgabe: Anzahl der entfernten Eintraege.
+        """
+        try:
+            def _hat(eintrag, feld) -> bool:
+                return any(getattr(p, feld, None) is not None
+                           for p in (getattr(eintrag, "parts", None) or []))
+
+            # DIESELBE Entscheidung wie beim Schnitt – der Zusammenfassungs-
+            # Eintrag und der Lern-Hinweis tragen `role="user"`, sind aber keine
+            # Fragen. Eine eigene Fassung hier hat im ersten Anlauf genau das
+            # uebersehen und den Zusammenfassungs-Eintrag geloescht.
+            _ist_frage = ist_benutzerfrage
+
+            def _ist_antwort(eintrag) -> bool:
+                return (getattr(eintrag, "role", None) == "model"
+                        and any((getattr(p, "text", None) or "").strip()
+                                for p in (getattr(eintrag, "parts", None) or [])))
+
+            weg = set()
+            for i, e in enumerate(history):
+                if _hat(e, "function_call"):
+                    naechster = history[i + 1] if i + 1 < len(history) else None
+                    if naechster is None or not _hat(naechster, "function_response"):
+                        weg.add(i)
+                elif _hat(e, "function_response"):
+                    vorher = history[i - 1] if i else None
+                    if vorher is None or not _hat(vorher, "function_call"):
+                        weg.add(i)
+
+            # Unbeantwortete Fragen: bis zur naechsten Frage muss eine Antwort
+            # des Modells kommen. Eintraege, die oben schon fallen, zaehlen nicht
+            # mehr mit – ein Werkzeugschritt ohne Ergebnis ist keine Antwort.
+            fragen = [i for i, e in enumerate(history) if _ist_frage(e)]
+            for nr, start in enumerate(fragen):
+                ende = fragen[nr + 1] if nr + 1 < len(fragen) else len(history)
+                if not any(_ist_antwort(history[j]) and j not in weg
+                           for j in range(start + 1, ende)):
+                    weg.update(range(start, ende))
+
+            if not weg:
+                return 0
+            behalten = [e for i, e in enumerate(history) if i not in weg]
+            history[:] = behalten
+            return len(weg)
+        except Exception as e:  # noqa: BLE001
+            print(f"[AGENT] Verlaufs-Reparatur uebersprungen: {e}", flush=True)
+            return 0
+
     async def _compress_history(self, chat_history: list, system_prompt: str) -> list:
         """Komprimiert lange Chat-Historien: Zusammenfassung der älteren Nachrichten."""
         # Nur komprimieren wenn über dem Schwellwert
@@ -3839,6 +4063,40 @@ KRITISCH – Autonomie-Regeln:
         # Letzte 4 Nachrichten behalten
         keep = chat_history[-4:]
         to_summarize = chat_history[:-4]
+
+        # Was hier verloren geht, muss BENANNT werden – die Notiz haengt an ALLEN
+        # Ausgaengen dieser Funktion, auch an den Rueckfaellen. Ein Abschnitt, der
+        # NUR aus einem Bild besteht, erzeugt gar keinen `dialog_text` und lief
+        # bis 2026-08-29 in `return keep` – der Anhang verschwand dort besonders
+        # lautlos.
+        #
+        # AUSDRUECKLICH NICHT gebaut: das juengste Bild wie die letzten vier
+        # Eintraege mitzuschleppen. Ein Foto-Anhang sind 1–10 MB, als Data-URL
+        # das 1,3-fache – und zwar in JEDER weiteren Anfrage dieser Sitzung.
+        # Genau dagegen gibt es die Komprimierung; ein Kontextfenster laesst
+        # sich damit sprengen. Ein KUERZLICH geschicktes Bild liegt ohnehin in
+        # den letzten vier Eintraegen und ueberlebt. Was aelter ist, wird
+        # benannt statt behalten.
+        _anh = self._verworfene_anhaenge(to_summarize)
+
+        def _mit_notiz(liste: list, in_ersten: bool = False) -> list:
+            """`in_ersten=True` haengt die Notiz als zweiten Teil an den GERADE
+            gebauten Zusammenfassungs-Eintrag, statt einen eigenen davorzusetzen.
+
+            Grund: ein zusaetzlicher `user`-Eintrag direkt vor der (ebenfalls
+            als `user` gefuehrten) Zusammenfassung ergibt zwei gleichrollige
+            Nachrichten hintereinander. Die OpenAI-Schiene nimmt das klaglos,
+            aber es ist eine Form, die kein anderer Zweig dieses Codes erzeugt –
+            und sie kostet nichts, wenn man sie vermeidet."""
+            if not _anh:
+                return liste
+            print(f"[AGENT {self.agent_id}] Anhaenge fallen aus dem Kontext: {_anh[:120]}",
+                  flush=True)
+            if in_ersten and liste:
+                liste[0].parts.append(types.Part.from_text(text=_anh))
+                return liste
+            return [types.Content(role="user",
+                                  parts=[types.Part.from_text(text=_anh)])] + liste
 
         # Bisherigen Dialog für die Zusammenfassung als Text extrahieren.
         # WICHTIG: Tool-Aufrufe und Tool-Ergebnisse MUESSEN mit aufgenommen werden,
@@ -3872,7 +4130,7 @@ KRITISCH – Autonomie-Regeln:
                 pass
 
         if not dialog_text:
-            return keep  # Nichts zu komprimieren
+            return _mit_notiz(keep)  # Nichts zu komprimieren
 
         summary_prompt = (
             "Fasse den folgenden Gesprächsabschnitt in maximal 300 Wörtern zusammen. "
@@ -3905,12 +4163,12 @@ KRITISCH – Autonomie-Regeln:
                     )],
                 )
                 print(f"[AGENT {self.agent_id}] History komprimiert: {len(chat_history)} → {len(keep)+1} Einträge", flush=True)
-                return [summary_entry] + keep
+                return _mit_notiz([summary_entry] + keep, in_ersten=True)
         except Exception as e:
             print(f"[AGENT {self.agent_id}] History-Kompression fehlgeschlagen: {e}", flush=True)
 
         # Fallback: nur letzte Einträge behalten
-        return keep
+        return _mit_notiz(keep)
 
     async def _await_or_stop(self, coro):
         """Wartet auf ``coro``, bricht die Wartung aber SOFORT ab, sobald stop()

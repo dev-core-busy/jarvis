@@ -1233,6 +1233,39 @@
     // sonst loescht ein Klick auf die erste Bot-Antwort den falschen Eintrag.
     function _isRowEntry(e) { return !!e && e.kind !== 'welcome'; }
 
+    // Zu einer Sprechblase den Text IHRER Frage finden: bei einer Antwort also
+    // den der davorstehenden Benutzer-Sprechblase. Der Server entfernt darueber
+    // den ganzen Zug aus dem LLM-Kontext (siehe _forgetInContext).
+    function _fragetextVon(row) {
+        let r = row;
+        while (r) {
+            if (r.classList && r.classList.contains('msg-row') && r.classList.contains('user')) {
+                // Derselbe Zugriff wie im Edit-Modus: der ROHE Text haengt an der
+                // ZEILE (`dataset.rawText`), nicht an der Sprechblase – deren
+                // textContent traegt den gerenderten Stand.
+                const b = r.querySelector('.msg-bubble');
+                return ((r.dataset && r.dataset.rawText) || (b ? b.textContent : '') || '').trim();
+            }
+            r = r.previousElementSibling;
+        }
+        return '';
+    }
+
+    // Geloeschte Nachrichten auch aus dem LLM-Kontext nehmen.
+    // OHNE DAS IST LOESCHEN NUR KOSMETIK: `_persistSession` schreibt das
+    // Transkript, der Kontext liegt in einer zweiten Datei und blieb bis
+    // 2026-08-30 unangetastet – das Modell kannte die geloeschte Nachricht
+    // weiter (auf ECHT gemessen). Best effort: schlaegt der Aufruf fehl, ist der
+    // sichtbare Verlauf trotzdem schon aufgeraeumt.
+    function _forgetInContext(fragen) {
+        const liste = (fragen || []).filter(t => t && t.trim());
+        if (!liste.length || !_activeSid || !token) return;
+        fetch('/api/chat/sessions/' + encodeURIComponent(_activeSid) + '/context/forget', {
+            method: 'POST', headers: _csHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ questions: liste })
+        }).catch(() => {});
+    }
+
     function _deleteBubble(row, role) {
         if (!row || !row.parentNode) return;
         if (_editingRow && _editingRow !== row) {
@@ -1256,6 +1289,9 @@
         }
         if (_editingRow === row) _editingRow = null;
 
+        // VOR dem Entfernen lesen – danach hat die Zeile keine Nachbarn mehr.
+        const _frage = _fragetextVon(row);
+
         row.parentNode.removeChild(row);
 
         if (Array.isArray(_chatHistory) && roleIndex >= 0) {
@@ -1271,6 +1307,7 @@
             _saveHistory();
             _syncReplace();
         }
+        _forgetInContext([_frage]);
     }
 
     // ─── Mehrfachauswahl: Nachrichten per Checkbox loeschen ──────
@@ -1289,6 +1326,8 @@
             if (_editingRow) { try { _restoreBubble(_editingRow.querySelector('.msg-bubble'), _editingRow); } catch(_) {} }
         },
         onDelete: (checked) => {
+            // Solange die Zeilen noch im DOM haengen: Fragetexte einsammeln.
+            const _fragen = checked.map(_fragetextVon);
             const userRows = Array.from(messagesEl.querySelectorAll('.msg-row.user'));
             const botRows  = Array.from(messagesEl.querySelectorAll('.msg-row.bot'));
             const delUser = new Set();
@@ -1331,6 +1370,8 @@
                 }
                 if (!n) sep.remove();
             });
+
+            _forgetInContext(_fragen);
         },
     });
 

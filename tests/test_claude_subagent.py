@@ -33,7 +33,9 @@ Exit 2 = konnte nicht laufen, 1 = Pruefung fehlgeschlagen, 0 = bestanden.
 
     python3 tests/test_claude_subagent.py
 """
+import importlib.util
 import json
+import os
 import re
 import sys
 import tempfile
@@ -419,6 +421,86 @@ check("_aus_umgebung_oder_datei" in _CLIENT
       "Schluessel UND Adresse gehen ueber denselben Weg")
 check("SUBAGENT_KEY" not in _CLIENT and ".subagent-key" not in _CLIENT,
       "Keine neutralisierten Kennungen mehr im Client")
+
+# ── Mehrere Zugaenge sind ein FEHLER, keine Auswahl (2026-08-30) ───────────
+# GEMESSEN, nicht vermutet: bis dahin gewann der alphabetisch erste nicht leere
+# Treffer. Wer neben `.jarvis-csa-key` einen `.nexerius-csa-key` hinterlegte,
+# arbeitete weiter gegen die ALTE Installation – der neue Schluessel lag daneben
+# und tat NICHTS, ohne eine einzige Meldung. Und weil Schluessel und Adresse
+# getrennt ermittelt werden, waere auch die halbe Wahl moeglich (Schluessel des
+# einen Servers an den anderen -> 401, sieht wie ein kaputter Schluessel aus).
+#
+# Geprueft wird die WIRKUNG: das Modul wird mit einem Wegwerf-HOME wirklich
+# ausgefuehrt. Eine Quelltext-Suche nach "len(treffer) > 1" bliebe gruen, wenn
+# jemand den Zweig spaeter ueberspringt.
+_spec = importlib.util.spec_from_file_location(
+    "_delegiere_probe", ROOT / "deploy" / "claude_subagent" / "delegiere.py")
+_dlg = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_dlg)
+
+
+def _mit_home(dateien: dict, umgebung: dict | None = None):
+    """(schluessel, url, fehlercode) fuer ein Wegwerf-HOME. `fehler()` beendet
+    den Prozess – deshalb SystemExit fangen, sonst braeche der ganze Testlauf
+    ab und saehe wie ein bestandener aus (Register)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, inhalt in dateien.items():
+            (Path(tmp) / name).write_text(inhalt, encoding="utf-8")
+        alt_home = os.environ.get("HOME")
+        alt_env = {k: v for k, v in os.environ.items() if "_CSA_" in k.upper()}
+        for k in alt_env:
+            del os.environ[k]
+        os.environ["HOME"] = tmp
+        os.environ.update(umgebung or {})
+        try:
+            return _dlg.schluessel(), _dlg.basis_url(), 0
+        except SystemExit as e:
+            return None, None, e.code
+        finally:
+            for k in list(os.environ):
+                if "_CSA_" in k.upper():
+                    del os.environ[k]
+            os.environ.update(alt_env)
+            if alt_home is not None:
+                os.environ["HOME"] = alt_home
+
+
+_EIN = {".alpha-csa-key": "ALPHA-CSA-1.aaa.geheim",
+        ".alpha-csa-url": "https://alpha.example"}
+_ZWEI = dict(_EIN, **{".beta-csa-key": "BETA-CSA-1.bbb.geheim",
+                      ".beta-csa-url": "https://beta.example"})
+
+_k, _u, _rc = _mit_home(_EIN)
+check(_k == "ALPHA-CSA-1.aaa.geheim" and _u == "https://alpha.example",
+      "EIN hinterlegter Zugang wird gefunden (Gegenprobe)", f"{_k} / {_u}")
+
+_k, _u, _rc = _mit_home(_ZWEI)
+check(_rc == 2 and _k is None,
+      "ZWEI hinterlegte Zugaenge brechen ab, statt still einen zu waehlen",
+      f"rc={_rc}, gewaehlt={_k}")
+
+_k, _u, _rc = _mit_home(_ZWEI, {"BETA_CSA_KEY": "BETA-CSA-1.bbb.geheim",
+                                "BETA_CSA_URL": "https://beta.example"})
+check(_rc == 0 and _u == "https://beta.example",
+      "die Umgebungsvariable loest die Zwickmuehle auf", f"rc={_rc}, {_u}")
+
+_k, _u, _rc = _mit_home(_EIN, {"X_CSA_KEY": "a", "Y_CSA_KEY": "b"})
+check(_rc == 2, "auch zwei Umgebungsvariablen brechen ab", f"rc={_rc}")
+
+# Ein Name, der nicht auf `-csa-<endung>` endet, wird nicht mehr gefunden - das
+# ist der in der Meldung genannte Rueckweg, und er muss auch stimmen.
+_k, _u, _rc = _mit_home({".alpha-csa-key": "ALPHA-CSA-1.aaa.geheim",
+                         ".alpha-csa-url": "https://alpha.example",
+                         ".beta-csa-key.inaktiv": "BETA-CSA-1.bbb.geheim",
+                         ".beta-csa-url.inaktiv": "https://beta.example"})
+check(_rc == 0 and _u == "https://alpha.example",
+      "ein umbenannter Zugang stoert nicht mehr (der genannte Rueckweg wirkt)",
+      f"rc={_rc}, {_u}")
+
+# Die Meldung muss BEIDE Wege nennen - eine Absage ohne Ausweg ist nur Laerm.
+_fn = nur_code(_CLIENT)
+check("Mehrere Zugaenge" in _fn and "_CSA_" in _fn and "Benenne die nicht" in _fn,
+      "die Absage nennt Umbenennen UND Umgebungsvariable als Ausweg")
 
 # Die frueher behauptete DEV-Beschraenkung war FALSCH: der Arbeitsbereich wird
 # frisch von origin/master geklont, ein sparse-checkout des Servers wirkt nur

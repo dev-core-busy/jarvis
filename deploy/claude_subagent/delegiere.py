@@ -53,17 +53,37 @@ def _aus_umgebung_oder_datei(endung: str, was: str) -> str:
     des Assistenten und nicht "Jarvis". Der Client kann die Marke aber nicht
     kennen (sie liegt auf dem Server), deshalb wird nach dem MUSTER gesucht
     statt nach einem festen Namen.
+
+    ⚠ MEHRERE TREFFER SIND EIN FEHLER, KEINE AUSWAHL (gemessen 2026-08-30).
+    Wer neben einem bestehenden Zugang einen zweiten hinterlegt, bekam bis dahin
+    weiter den ALTEN: die Liste war alphabetisch sortiert und der erste nicht
+    leere Treffer gewann – `.jarvis-csa-key` steht vor `.nexerius-csa-key`. Der
+    neue Schluessel lag daneben und tat NICHTS, ohne eine einzige Meldung.
+    Schlimmer ist die halbe Wahl: Schluessel und Adresse werden getrennt
+    ermittelt, ein Zugang koennte also den Schluessel des einen Servers an den
+    anderen schicken – der antwortet 401, und das sieht wie ein kaputter
+    Schluessel aus statt wie eine falsche Adresse. Deshalb fail-closed mit
+    Klartext, der beide Wege aus der Zwickmuehle nennt.
     """
     end = endung.upper()
-    for name, wert in os.environ.items():
-        if name.upper().endswith("_CSA_" + end) and wert.strip():
-            return wert.strip()
-    treffer = sorted(Path.home().glob(".*-csa-" + endung.lower()))
-    for p in treffer:
-        inhalt = p.read_text(encoding="utf-8").strip()
-        if inhalt:
-            return inhalt
-    return ""
+    aus_env = sorted(n for n, w in os.environ.items()
+                     if n.upper().endswith("_CSA_" + end) and w.strip())
+    if len(aus_env) > 1:
+        fehler(f"Mehrere Umgebungsvariablen fuer {was}: {', '.join(aus_env)}. "
+               f"Es ist nicht erkennbar, welche Installation gemeint ist – "
+               f"setze genau eine.", 2)
+    if aus_env:
+        return os.environ[aus_env[0]].strip()
+    treffer = [p for p in sorted(Path.home().glob(".*-csa-" + endung.lower()))
+               if p.read_text(encoding="utf-8").strip()]
+    if len(treffer) > 1:
+        namen = ", ".join("~/" + p.name for p in treffer)
+        fehler(f"Mehrere Zugaenge fuer {was} hinterlegt: {namen}. Es ist nicht "
+               f"erkennbar, welche Installation gemeint ist. Benenne die nicht "
+               f"gewuenschte um (ein Name, der nicht auf '-csa-{endung.lower()}' "
+               f"endet, wird nicht mehr gefunden) oder waehle die gewuenschte "
+               f"per Umgebungsvariable <MARKE>_CSA_{end}.", 2)
+    return treffer[0].read_text(encoding="utf-8").strip() if treffer else ""
 
 
 def schluessel() -> str:

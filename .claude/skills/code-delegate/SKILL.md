@@ -130,16 +130,27 @@ Beide Werte gehoeren zur jeweiligen Installation und stehen bewusst NICHT hier �
 dieses Repo ist oeffentlich, und eine Serveradresse in einer Anleitung ist eine
 Einladung, die niemand ausgesprochen hat:
 
+`<marke>` ist der **Name des Assistenten aus dem Branding**, kleingeschrieben –
+er steckt auch im Schluessel selbst (`NEXI-CSA-1.…` → `~/.nexi-csa-key`):
+
 ```bash
-printf '%s' 'HIER-DEINEN-SCHLUESSEL-EINSETZEN' > ~/.jarvis-csa-key
-printf '%s' 'https://DEINE-JARVIS-ADRESSE'     > ~/.jarvis-csa-url
-chmod 600 ~/.jarvis-csa-key
+printf '%s' 'HIER-DEINEN-SCHLUESSEL-EINSETZEN' > ~/.<marke>-csa-key
+printf '%s' 'https://DEINE-JARVIS-ADRESSE'     > ~/.<marke>-csa-url
+chmod 600 ~/.<marke>-csa-key ~/.<marke>-csa-url
 ```
 
-- **Schluessel** in `JARVIS_CSA_KEY` oder `~/.jarvis-csa-key` – in Jarvis unter
+- **Schluessel** in `<MARKE>_CSA_KEY` oder `~/.<marke>-csa-key` – in Jarvis unter
   `/claude` erzeugen. **Nie ins Repo.**
-- **Adresse** in `JARVIS_CSA_URL` oder `~/.jarvis-csa-url`. Eine feste Vorgabe im
-  Code gibt es bewusst nicht; der Client laeuft so gegen jede Installation.
+- **Adresse** in `<MARKE>_CSA_URL` oder `~/.<marke>-csa-url`. Eine feste Vorgabe
+  im Code gibt es bewusst nicht; der Client laeuft so gegen jede Installation.
+- **⚠ GENAU EIN Zugang, sonst bricht der Client ab.** Wer einen zweiten
+  hinterlegt (weil er zwei Installationen hat), bekam bis 2026-08-30
+  stillschweigend weiter den **alphabetisch ersten** – `.jarvis-csa-key` gewinnt
+  gegen `.nexerius-csa-key`, der neue Schluessel lag daneben und tat NICHTS.
+  Zwei Wege aus der Zwickmuehle, beide nennt die Fehlermeldung: die nicht
+  gewuenschte Datei **umbenennen** (ein Name, der nicht auf `-csa-key` endet,
+  wird nicht gefunden – z.B. `~/.jarvis-csa-key.inaktiv`) oder die gewuenschte
+  per Umgebungsvariable waehlen; die sticht die Dateien.
 - Der lokale Stand muss auf `origin/master` liegen und die Zieldateien duerfen
   keine ungespeicherten Aenderungen haben – der Client prueft beides und bricht
   sonst ab.

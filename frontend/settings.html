@@ -3006,6 +3006,24 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                         </div>
 
+                        <!-- Wer hat einen EIGENEN Jira-Token hinterlegt?
+                             (2026-08-28) Fuer den Administrator die Antwort auf
+                             "warum sieht dieser Benutzer andere Tickets als
+                             ich": seit dem persoenlichen Zugang ist der Token
+                             oben nur noch der Rueckfall. OHNE Token und ohne
+                             Adressen - wer welchen Jira-Benutzer verwendet, ist
+                             dessen Sache. Endpunkt: /api/jira/admin/accounts. -->
+                        <div class="kb-section" id="ji-sect-acc">
+                            <div class="kb-section-header kb-collapse-header" id="ji-sect-acc-hdr">
+                                <h3 data-i18n="jacc.h">Persönliche Jira-Zugänge</h3>
+                                <span class="sk-openclaw-toggle" id="ji-sect-acc-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="ji-sect-acc-body">
+                                <p class="kb-hint" data-i18n-html="jacc.intro">Der oben hinterlegte Token ist der <b>gemeinsame Zugang</b> und nur noch der Rückfall. Wer unter <b>Jira → Mein Jira-Zugang</b> einen eigenen Token hinterlegt, arbeitet damit – im Chat, in der Ticketsuche und in der Browser-Erweiterung, und sieht genau die Vorgänge, für die er in Jira berechtigt ist.</p>
+                                <div id="jacc-liste" style="display:flex;flex-direction:column;gap:6px;margin:10px 0;"></div>
+                            </div>
+                        </div>
+
                         <!-- ═══ Bereitstellung der Browser-Erweiterung ═══
                              Der Pfad ist HAUSINTERN und steht deshalb in der
                              Einstellung, nicht im Quelltext: das Repo ist
@@ -3063,24 +3081,6 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                              einem 360 Pixel breiten Popup und nur mit
                              installierter Erweiterung. Endpunkte:
                              /api/jira/assist/vorlagen (GET/POST/DELETE). -->
-                        <!-- Wer hat einen EIGENEN Jira-Token hinterlegt?
-                             (2026-08-28) Fuer den Administrator die Antwort auf
-                             "warum sieht dieser Benutzer andere Tickets als
-                             ich": seit dem persoenlichen Zugang ist der Token
-                             oben nur noch der Rueckfall. OHNE Token und ohne
-                             Adressen - wer welchen Jira-Benutzer verwendet, ist
-                             dessen Sache. Endpunkt: /api/jira/admin/accounts. -->
-                        <div class="kb-section" id="ji-sect-acc">
-                            <div class="kb-section-header kb-collapse-header" id="ji-sect-acc-hdr">
-                                <h3 data-i18n="jacc.h">Persönliche Jira-Zugänge</h3>
-                                <span class="sk-openclaw-toggle" id="ji-sect-acc-tog">▼</span>
-                            </div>
-                            <div class="kb-collapse-body" id="ji-sect-acc-body">
-                                <p class="kb-hint" data-i18n-html="jacc.intro">Der oben hinterlegte Token ist der <b>gemeinsame Zugang</b> und nur noch der Rückfall. Wer unter <b>Jira → Mein Jira-Zugang</b> einen eigenen Token hinterlegt, arbeitet damit – im Chat, in der Ticketsuche und in der Browser-Erweiterung, und sieht genau die Vorgänge, für die er in Jira berechtigt ist.</p>
-                                <div id="jacc-liste" style="display:flex;flex-direction:column;gap:6px;margin:10px 0;"></div>
-                            </div>
-                        </div>
-
                         <div class="kb-section" id="ji-sect-vorl">
                             <div class="kb-section-header kb-collapse-header" id="ji-sect-vorl-hdr">
                                 <h3 data-i18n="jvorl.h">Browser Plugin Vorlagen</h3>

@@ -103,6 +103,12 @@
                     ? rollen.length + ' / ' + (d.max_roles || '?')
                     : '';
             }
+            // Einen offenen Prompt-Tooltip ZUERST abraeumen: er haengt an
+            // `body`, nicht an der Liste – ein Neuaufbau wuerde ihn sonst als
+            // Kasten ohne Bezug stehen lassen (dieselbe Falle wie bei der
+            // Vorschau in /wissen, die beim Neuzeichnen mitgeloescht werden
+            // musste).
+            this._tipWeg();
             // Rollen sind ohne den Skill pflegbar, aber wirkungslos – das muss
             // dastehen, sonst sucht der Administrator den Fehler bei den Rollen.
             var warn = $('roles-skill-warn');
@@ -159,6 +165,17 @@
                 desc.className = 'role-row-desc';
                 desc.textContent = r.description || '';
                 links.appendChild(desc);
+
+                // Der SYSTEM-PROMPT bei Mouseover. Er IST die Definition einer
+                // Rolle – ohne ihn sagt die Liste nur, wie sie heisst. Ihn zum
+                // Nachlesen erst aufklappen zu muessen, macht den Vergleich
+                // zweier Rollen zur Klickstrecke.
+                // BEWUSST KEIN `title`-Attribut: der native Tooltip kommt mit
+                // rund einer Sekunde Verzoegerung, laesst sich nicht scrollen
+                // und wird je nach Browser unterschiedlich hart abgeschnitten –
+                // bei einem langen Prompt sieht man den Anfang und merkt nicht,
+                // dass etwas fehlt.
+                this._promptTip(links, r.prompt || '');
 
                 var meta = document.createElement('div');
                 meta.className = 'role-row-meta';
@@ -233,6 +250,79 @@
             // Verwaistes Profil sichtbar machen: zur Laufzeit faellt die Rolle auf
             // das Profil des Aufrufers zurueck – das soll man hier schon sehen.
             return p ? p.name : T('roles.profile_gone', '⚠ gelöschtes Profil');
+        },
+
+        // Wie viel Prompt der Tooltip zeigt. Darueber wird gekuerzt UND es
+        // steht dabei – ein stiller Schnitt liesse den Leser glauben, die Rolle
+        // sei kuerzer definiert, als sie ist.
+        PROMPT_TIP_MAX: 1500,
+
+        _promptTip: function (wirt, prompt) {
+            var self = this;
+            var text = String(prompt || '').trim();
+            if (!text) return;              // kein Prompt -> kein leerer Kasten
+            wirt.classList.add('role-has-tip');
+
+            function zeigen(ev) {
+                self._tipWeg();
+                var box = document.createElement('div');
+                box.className = 'role-prompt-tip';
+                var kopf = document.createElement('div');
+                kopf.className = 'role-prompt-tip-head';
+                kopf.textContent = T('roles.prompt_label', 'System-Prompt');
+                box.appendChild(kopf);
+                var body = document.createElement('div');
+                body.className = 'role-prompt-tip-body';
+                // textContent, NICHT innerHTML: der Prompt ist Freitext des
+                // Administrators und darf kein Markup in die Seite bringen.
+                var gekuerzt = text.length > self.PROMPT_TIP_MAX;
+                body.textContent = gekuerzt
+                    ? text.slice(0, self.PROMPT_TIP_MAX) + '…' : text;
+                box.appendChild(body);
+                if (gekuerzt) {
+                    var fuss = document.createElement('div');
+                    fuss.className = 'role-prompt-tip-foot';
+                    fuss.textContent = T('roles.prompt_cut', 'gekürzt – vollständig unter „Bearbeiten"')
+                        + ' (' + text.length + ' ' + T('roles.chars', 'Zeichen') + ')';
+                    box.appendChild(fuss);
+                }
+                // DIREKTES KIND VON BODY: in der Liste haengt der Tooltip sonst
+                // im Stapelkontext der Karte und wird von der naechsten Zeile
+                // ueberdeckt (Register: was ueber Inhalt liegt, braucht eine
+                // deckende Flaeche UND einen eigenen Stapelkontext).
+                document.body.appendChild(box);
+                self._tip = box;
+                self._tipStellen(ev);
+            }
+
+            wirt.addEventListener('mouseenter', zeigen);
+            wirt.addEventListener('mousemove', function (ev) { self._tipStellen(ev); });
+            wirt.addEventListener('mouseleave', function () { self._tipWeg(); });
+            // Tastatur: die Zeile ist kein Bedienelement, aber wer mit Tab
+            // hindurchgeht, soll den Prompt ebenfalls sehen koennen.
+            wirt.tabIndex = 0;
+            wirt.addEventListener('focus', zeigen);
+            wirt.addEventListener('blur', function () { self._tipWeg(); });
+        },
+
+        _tipStellen: function (ev) {
+            var box = this._tip;
+            if (!box) return;
+            var rand = 12;
+            var b = box.getBoundingClientRect();
+            var x = (ev.clientX || 0) + 16;
+            var y = (ev.clientY || 0) + 16;
+            // Am Fensterrand umklappen, sonst steht der Kasten halb draussen
+            // und der Anfang des Prompts ist nicht lesbar.
+            if (x + b.width + rand > window.innerWidth) x = (ev.clientX || 0) - b.width - 16;
+            if (y + b.height + rand > window.innerHeight) y = (ev.clientY || 0) - b.height - 16;
+            box.style.left = Math.max(rand, x) + 'px';
+            box.style.top = Math.max(rand, y) + 'px';
+        },
+
+        _tipWeg: function () {
+            if (this._tip && this._tip.parentNode) this._tip.parentNode.removeChild(this._tip);
+            this._tip = null;
         },
 
         // ── Formular ────────────────────────────────────────────────────

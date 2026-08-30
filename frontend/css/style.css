@@ -7602,6 +7602,53 @@ select.input-field {
 .role-row-meta { font-size: .72rem; opacity: .7; margin-top: 3px; }
 .role-row-btns { display: flex; gap: 4px; flex: 0 0 auto; }
 
+/* Prompt-Tooltip an der Rollenzeile ------------------------------------- */
+/* Der Kasten ist DIREKTES KIND VON BODY und deshalb `fixed` – die Position
+   kommt aus den Mauskoordinaten. Innerhalb der Karte laege er im Stapelkontext
+   der Liste und wuerde von der naechsten Zeile ueberdeckt. */
+.role-has-tip { cursor: help; }
+.role-has-tip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.role-prompt-tip {
+    position: fixed;
+    z-index: 9999;
+    max-width: min(560px, 88vw);
+    /* DECKENDE Flaeche (Register): darunter liegen Listeneintraege mit Text. */
+    background: var(--bg-secondary);
+    border: 1px solid var(--outline, var(--border));
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .35);
+    padding: 8px 10px;
+    /* OHNE das flackert der Tooltip: der Kasten liegt unter dem Zeiger, loest
+       `mouseleave` am Wirt aus, verschwindet, der Wirt bekommt wieder
+       `mouseenter` – eine Endlosschleife aus Auf und Zu. */
+    pointer-events: none;
+}
+.role-prompt-tip-head {
+    font-size: .68rem;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+}
+.role-prompt-tip-body {
+    font-size: .78rem;
+    line-height: 1.45;
+    color: var(--text-primary);
+    /* Ein Prompt hat Absaetze und Einrueckungen – ohne pre-wrap wird er zu
+       einem Textklumpen und ist als Prompt nicht mehr lesbar. */
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 46vh;
+    overflow: hidden;
+}
+.role-prompt-tip-foot {
+    margin-top: 6px;
+    padding-top: 5px;
+    border-top: 1px solid var(--outline, var(--border));
+    font-size: .7rem;
+    color: var(--text-secondary);
+}
+
 /* Das Formular. Am Heimatplatz (unter der Liste) eine eigene Box; INNERHALB
    einer Karte verliert es Rahmen und Rand und wird durch eine Trennlinie
    abgesetzt – gesteuert ueber den Elternkontext, damit das JS keine Klassen

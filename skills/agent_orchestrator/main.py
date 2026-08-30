@@ -131,7 +131,15 @@ class DelegateTool(BaseTool):
                     "description": (
                         "Die vollstaendige Teilaufgabe fuer die Rolle. Muss ohne "
                         "Gespraechskontext verstaendlich sein (Dateipfade, Zahlen, "
-                        "Rahmenbedingungen mitgeben)."
+                        "Rahmenbedingungen mitgeben). "
+                        "AENDERUNGSWUNSCH ZU EINEM FRUEHEREN ERGEBNIS: beschreibe "
+                        "das ERGEBNIS VOLLSTAENDIG NEU – die alte Beschreibung PLUS "
+                        "die Aenderung. Die Rolle sieht das Gespraech NICHT und kennt "
+                        "das vorherige Ergebnis nicht; sie beginnt bei null. Aus "
+                        "'setz der Kuh einen Helm auf' wird also "
+                        "'gruene Kuh mit roten Hoernern UND einem silbernen Helm, "
+                        "fotorealistisch' – NIEMALS nur die alte Beschreibung ohne "
+                        "die Aenderung und niemals nur die Aenderung allein."
                     ),
                 },
             },

@@ -126,20 +126,20 @@ rechnet der Server selbst.
 
 ## Voraussetzungen
 
-Diese Datei ist bereits auf DIESE Installation ausgestellt – die beiden Befehle
-unten sind vollstaendig, es fehlt nur der Schluessel:
+Beide Werte gehoeren zur jeweiligen Installation und stehen bewusst NICHT hier –
+dieses Repo ist oeffentlich, und eine Serveradresse in einer Anleitung ist eine
+Einladung, die niemand ausgesprochen hat:
 
 ```bash
 printf '%s' 'HIER-DEINEN-SCHLUESSEL-EINSETZEN' > ~/.jarvis-csa-key
-printf '%s' 'https://191.100.144.1' > ~/.jarvis-csa-url
+printf '%s' 'https://DEINE-JARVIS-ADRESSE'     > ~/.jarvis-csa-url
 chmod 600 ~/.jarvis-csa-key
 ```
 
-- **Schluessel** in `JARVIS_CSA_KEY` oder `~/.jarvis-csa-key` – in Jarvis
-  unter `https://191.100.144.1/claude` erzeugen. **Nie ins Repo.**
-- **Adresse** ist oben schon eingesetzt: `https://191.100.144.1`. (Ueber `JARVIS_CSA_URL`
-  bzw. die Datei laesst sich der Client auch gegen eine andere Installation
-  richten – eine feste Vorgabe im Code gibt es bewusst nicht.)
+- **Schluessel** in `JARVIS_CSA_KEY` oder `~/.jarvis-csa-key` – in Jarvis unter
+  `/claude` erzeugen. **Nie ins Repo.**
+- **Adresse** in `JARVIS_CSA_URL` oder `~/.jarvis-csa-url`. Eine feste Vorgabe im
+  Code gibt es bewusst nicht; der Client laeuft so gegen jede Installation.
 - Der lokale Stand muss auf `origin/master` liegen und die Zieldateien duerfen
   keine ungespeicherten Aenderungen haben – der Client prueft beides und bricht
   sonst ab.
@@ -154,6 +154,6 @@ wirkt nur auf dessen eigene Arbeitskopie, nicht auf einen neuen Klon.
 Die Ausschlussregel „nichts Konventionslastiges" oben haengt an der Groesse von
 CLAUDE.md – je dicker die Datei, desto weniger laesst sich abgeben. Ein
 paste-fertiger Auftrag zum Verschlanken steht in **`claude-md-diaet.md`**
-(Download im Bereich `https://191.100.144.1/claude`, Abschnitt „Anleitung"). Er ist
+(Download im Bereich `/claude` der eigenen Installation, Abschnitt „Anleitung"). Er ist
 eigenstaendig – kein Jarvis, keine Delegation – und wird ausdruecklich **nicht**
 delegiert: CLAUDE.md ist die Konvention selbst.

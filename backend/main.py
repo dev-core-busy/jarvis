@@ -12006,6 +12006,25 @@ def _support_jira_jql(query: str, open_only: bool = True) -> str:
 # Die Erweiterung (browser-addon/) schickt NUR die Ticketnummer; Beschreibung
 # und Verlauf holt der Server. Dahinter laeuft KEIN Agent, sondern ein einzelner
 # LLM-Aufruf mit tools=[] – Begruendung im Modul-Docstring von jira_assist.
+def _jira_basis_url(user: str) -> str:
+    """Die Adresse des Jira-Servers, wie sie fuer DIESEN Benutzer gilt.
+
+    Fail-safe: laesst sie sich nicht ermitteln, kommt der leere String zurueck –
+    die Erweiterung zeigt dann ihren allgemeinen Hinweis statt einer geratenen
+    Adresse. Eine falsche Adresse waere hier schlimmer als keine: der Benutzer
+    bekaeme eine Berechtigungsabfrage fuer einen fremden Host.
+    """
+    try:
+        from backend import jira_accounts  # noqa: PLC0415
+        roh = (jira_accounts.aufloesen(user)["client"].base_url or "").strip()
+    except Exception:  # noqa: BLE001
+        return ""
+    if not roh.lower().startswith("https://"):
+        # http scheidet aus - `optional_host_permissions` deckt nur https ab.
+        return ""
+    return roh.rstrip("/")
+
+
 @app.get("/api/jira/assist/health")
 async def jira_assist_health(request: Request,
                              user: str = Depends(require_jira_assist_access)):
@@ -12054,6 +12073,18 @@ async def jira_assist_health(request: Request,
         # /api/skills/{name}/config Administratoren vorbehalten ist – die
         # Anleitung lesen aber die BENUTZER.
         "paket_pfade": jira_assist.paket_pfade(),
+        # DIE ADRESSE DES JIRA-SERVERS – fuer die Seitenleiste der Erweiterung.
+        #
+        # Sie braucht ein dauerhaftes Zugriffsrecht auf den Jira-Server, sonst
+        # liefert `tabs.query` beim Tab-Wechsel gar keine Adresse mehr
+        # (`activeTab` gilt nur fuer den Tab, aus dem sie geoeffnet wurde) –
+        # und ohne Adresse erkennt sie kein Ticket. Die Abfrage muss aber
+        # einen ORT nennen koennen, und den kennt die Erweiterung von sich aus
+        # nicht: ohne diese Angabe waere die Zugriffszeile ausgerechnet dann
+        # unerreichbar, wenn man sie braucht.
+        # Keine neue Preisgabe: derselbe Endpunkt gibt seit jeher den
+        # Netzfreigabe-Pfad heraus, und er haengt an `require_jira_assist_access`.
+        "jira_basis": _jira_basis_url(user),
     })
 
 

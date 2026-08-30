@@ -1234,6 +1234,7 @@ section("8) Die Ticketnummer-Erkennung – ausgefuehrt");
           let _marke = "Marke", _key = tabKey, _tabId = 1;
           let _letztes = null, _fremdesErgebnis = false, _merkTimer = null;
           const _originale = new Map();
+          let _jiraBasis = "";
           /* Die Leisten-Umgebung. Hier gilt der Popup-Fall (_leiste = false);
            * den Leisten-Fall prueft Abschnitt 10.
            * KEINE Backticks in diesem Vorspann - er steht selbst in einem
@@ -1739,9 +1740,35 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
   }
 
   // ── e) popup.js: Beobachtung, Ableitung, Reihenfolge ────────────────────
-  check(/const _leiste = document\.documentElement\.classList\.contains\("leiste"\)/
+  /* ⚠ DIE KLASSE IST NUR DER ANFANGSWERT, NICHT DIE ANTWORT.
+   *
+   * Hier stand bis zur Meldung vom 2026-08-30 `const _leiste = …classList…`.
+   * Der Abfrageteil `?ansicht=leiste` kommt aber NUR mit, wenn die Leiste ueber
+   * unseren Weg aufgeht - ueber Chromes eigene Seitenleisten-Auswahl laedt sie
+   * `side_panel.default_path`, also popup.html ohne Abfrageteil. Das Fenster
+   * hielt sich dann fuer ein Popup und registrierte keinen Tab-Zuhoerer.
+   * Verbindlich antwortet jetzt der Hintergrund ueber runtime.getContexts. */
+  check(/let _leiste = document\.documentElement\.classList\.contains\("leiste"\)/
         .test(POPUP_JS),
-        "popup.js liest die Ansicht aus der Klasse - keine zweite Wahrheit");
+        "die Klasse ist der Anfangswert der Ansicht");
+  const lf = schneidePopup("leisteFeststellen");
+  check(!!lf, "popup.js hat leisteFeststellen()");
+  check(!!lf && /SIDE_PANEL/.test(lf) && /_leiste = true/.test(lf),
+        "und macht aus der Kontextauskunft des Hintergrunds die Leiste");
+  /* NUR EINSCHALTEN, nie ausschalten: sagt der Hintergrund nichts (aeltere
+   * Browser, Firefox ohne getContexts), bleibt der Abfrageteil die einzige
+   * Auskunft, die es gibt. */
+  check(!!lf && !/_leiste = false/.test(lf),
+        "sie schaltet die Leiste nie AB - sonst faellt der Rueckfall aus");
+  check(/leisteFeststellen\(z\.kontext\)/.test(POPUP_JS),
+        "start() traegt die Auskunft nach");
+  {
+    const bg = ohneKommentare(BG);
+    check(/getContexts/.test(bg) && /contextType/.test(bg),
+          "der Hintergrund ermittelt die Kontextart ueber runtime.getContexts");
+    check(/kontext: await kontextArt\(absender\)/.test(bg),
+          "und schickt sie mit dem Zustand mit");
+  }
 
   {
     const lb = schneidePopup("leisteBeobachten");
@@ -1754,12 +1781,19 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
           "und haengt sich an Tab-Wechsel UND Adressaenderung");
     /* Jira wechselt das Ticket ohne Neuladen - das meldet sich als info.url.
      * Ein Filter auf `status: complete` verpasst genau diesen Fall. */
-    /* ⚠ OHNE KOMMENTARE PRUEFEN. Die Begruendung im Code nennt `status:
-     * complete` woertlich - der Waechter fand seinen eigenen Text und meldete
-     * einen Fehler, den es nicht gab (neunter belegter Fall im Projekt). */
+    /* ⚠ OHNE KOMMENTARE PRUEFEN. Die Begruendungen im Code nennen die
+     * gesuchten Bezeichner woertlich - der Waechter fand seinen eigenen Text
+     * und meldete einen Fehler, den es nicht gab (belegter Fall im Projekt). */
     const lbO = ohneKommentare(lb || "");
-    check(/info\.url/.test(lbO) && !/status/.test(lbO),
-          "der Filter ist info.url, nicht der Ladezustand");
+    /* ⚠ HIER STAND EIN FILTER AUF `info.url` - UND DAS WAR DER FEHLER.
+     * `changeInfo.url` liefert der Browser nur mit der `tabs`-Berechtigung
+     * oder einem Host-Recht fuer genau diese Seite; die Erweiterung hat beides
+     * von Haus aus nicht. Der Zuhoerer war damit so gut wie tot (gemeldet
+     * 2026-08-30). Entschieden wird jetzt ueber den VERGLEICH in tabWechsel. */
+    check(!/info\.url/.test(lbO) && !/status/.test(lbO),
+          "der Zuhoerer filtert NICHT auf info.url - das braeuchte ein Host-Recht");
+    check(/tab\.active/.test(lbO),
+          "er beschraenkt sich aber auf den sichtbaren Tab");
   }
 
   /* ⚠ DER TAB-WECHSEL IST EINE SICHERHEITSFRAGE. Gemessen, nicht gelesen:
@@ -1788,6 +1822,7 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
             };
             let _key = vonKey, _letztes = gemerkt, _fremdesErgebnis = false;
             let _merkTimer = null, _laeuft = laeuft, _marke = "Marke";
+            let _jiraBasis = "", _leiste_unbenutzt = 0;
             const _leiste = true;
             let _tabUrl = "https://jira.test/browse/" + (nachKey || "X-1");
             let _windowId = 7, _tabId = 1;
@@ -1857,9 +1892,14 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
    * ueberlebt den Tab-Wechsel; fuer den naechsten Tab gilt `activeTab` nicht
    * mehr. */
   {
-    const th = schneidePopup("tabHerkunft");
-    check(!!th, "popup.js hat tabHerkunft()");
-    const herkunft = (url) => new Function("_tabUrl", th + "; return tabHerkunft();")(url);
+    // Transitiv: `tabHerkunft` reicht seit 2026-08-30 an `herkunftAus` weiter,
+    // damit auch die Jira-Adresse aus dem Server durch dieselbe Pruefung geht.
+    const { teile: t5, drin: d5 } = popupTeile(["tabHerkunft"], []);
+    check(d5.has("tabHerkunft"), "popup.js hat tabHerkunft()");
+    check(d5.has("herkunftAus"),
+          "und die Herkunftspruefung liegt in EINER Funktion", [...d5].join(","));
+    const herkunft = (url) =>
+      new Function("_tabUrl", t5.join("\n") + "; return tabHerkunft();")(url);
     check(herkunft("https://jira.test/browse/A-1") === "https://jira.test",
           "https liefert die Herkunft");
     check(herkunft("http://jira.test/browse/A-1") === "",
@@ -1877,6 +1917,111 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
     check(!!zz && /da !== false/.test(zz),
           '"nicht feststellbar" erzeugt keine Aufforderung');
   }
+  /* ⚠ DIE ZEILE LIEF IM KREIS - gemeldet am 2026-08-30 als "Tab-Wechsel wird
+   * nicht erkannt". Ohne Host-Recht liefert `tabs.query` fuer einen fremden
+   * Tab GAR KEINE Adresse; damit gibt es keine Ticketnummer, und die Zeile
+   * haing an einer Ticketnummer: sie war ausgerechnet dann verborgen, wenn sie
+   * gebraucht wurde. AUSGEFUEHRT geprueft, nicht gelesen. */
+  {
+    const { teile: t6 } = popupTeile(
+      ["zugriffZeileAktualisieren"], ["frage"]);
+    const zeigeBei = async (leiste, tabUrl, key, hatRecht, basis) => {
+      const dom = new JSDOM(POPUP_HTML, { url: "https://x.test/",
+                                          runScripts: "outside-only" });
+      const w = dom.window;
+      try {
+        const f = new w.Function("leiste", "tabUrl", "key", "hatRecht", "basis", `
+          const $ = (id) => document.getElementById(id);
+          const gefragt = [];
+          let _leiste = leiste, _tabUrl = tabUrl, _key = key, _jiraBasis = "";
+          const api = { permissions: {
+            async contains(o) { gefragt.push(o.origins[0]); return hatRecht; },
+          } };
+          async function frage(n) {
+            if (n.art === "health") return { ok: true, daten: { jira_basis: basis } };
+            return { ok: true };
+          }
+` + t6.join("\n") + `
+          return (async () => {
+            await zugriffZeileAktualisieren();
+            const p = $("leiste-zugriff");
+            return JSON.stringify({
+              sichtbar: !p.hidden,
+              text: $("leiste-zugriff-text").textContent,
+              gefragt,
+            });
+          })();`);
+        return JSON.parse(await f(leiste, tabUrl, key, hatRecht, basis));
+      } finally { w.close(); }
+    };
+
+    const JIRA = "https://jira.test";
+    // 1) DER GEMELDETE FALL: Leiste offen, Tab-Adresse NICHT lesbar.
+    {
+      const r = await zeigeBei(true, "", "", false, JIRA);
+      check(r.sichtbar === true,
+            "ohne lesbare Tab-Adresse ist die Zugriffszeile SICHTBAR");
+      check(r.gefragt[0] === JIRA + "/*",
+            "und fragt nach dem Jira-Server, nicht nach irgendetwas",
+            r.gefragt.join(","));
+      check(/nicht lesen/.test(r.text) && /kein Ticket/.test(r.text),
+            "der Text sagt, dass deshalb kein Ticket erkannt wird", r.text);
+    }
+    // 2) Recht schon da -> keine Aufforderung.
+    {
+      const r = await zeigeBei(true, "", "", true, JIRA);
+      check(r.sichtbar === false, "mit vorhandenem Recht bleibt sie aus");
+    }
+    // 3) Ticket erkannt -> die Herkunft des TABS, nicht die aus health.
+    {
+      const r = await zeigeBei(true, "https://jira-echt.test/browse/A-1", "A-1",
+                               false, JIRA);
+      check(r.gefragt[0] === "https://jira-echt.test/*",
+            "bei erkanntem Ticket gilt die Herkunft des Tabs", r.gefragt.join(","));
+    }
+    /* 4) KEIN erkanntes Ticket, aber eine lesbare fremde Adresse: es wird
+     *    NICHT nach dem fremden Host gefragt. Sonst bekaeme jemand, der die
+     *    Leiste im Intranet oeffnet, eine Abfrage fuer das Intranet - die ihm
+     *    nichts nuetzt und die er zu Recht ablehnt. */
+    {
+      const r = await zeigeBei(true, "https://intranet.test/start", "", false, JIRA);
+      check(r.gefragt[0] === JIRA + "/*",
+            "auf einem fremden Tab wird trotzdem nach Jira gefragt",
+            r.gefragt.join(","));
+    }
+    // 5) Im Popup ist die Zeile immer aus - dort traegt `activeTab`.
+    {
+      const r = await zeigeBei(false, "", "", false, JIRA);
+      check(r.sichtbar === false, "im Popup bleibt sie aus");
+      check(r.gefragt.length === 0, "und es wird gar nicht erst gefragt");
+    }
+    // 6) Ohne Auskunft vom Server wird NICHTS geraten.
+    {
+      const r = await zeigeBei(true, "", "", false, "");
+      check(r.sichtbar === false,
+            "ohne bekannte Jira-Adresse bleibt sie aus statt zu raten");
+    }
+  }
+
+  /* Nach dem Erteilen muss die Lage NEU ERMITTELT werden - der Tab ist jetzt
+   * lesbar und traegt womoeglich zum ersten Mal eine Ticketnummer. */
+  {
+    const h = (POPUP_JS.match(
+      /\$\("btn-leiste-zugriff"\)\.addEventListener\([\s\S]*?\n\}\);/) || [""])[0];
+    check(/tabErmitteln\(\)/.test(h) && /ticketLageAnwenden/.test(h),
+          "nach dem Erteilen wird der Tab neu ermittelt, nicht nur neu gezeichnet");
+  }
+
+  // Der Server muss die Jira-Adresse ueberhaupt herausgeben.
+  {
+    const m = MAIN.match(/def _jira_basis_url[\s\S]*?\n\n\n/);
+    check(!!m, "main.py hat _jira_basis_url()");
+    check(!!m && /https:\/\//.test(m[0]) && /return ""/.test(m[0]),
+          "sie nimmt nur https und gibt sonst nichts heraus");
+    check(/"jira_basis": _jira_basis_url\(user\)/.test(MAIN),
+          "und health liefert sie mit");
+  }
+
   check(/id="btn-leiste-zugriff"/.test(POPUP_HTML),
         "es gibt einen eigenen Knopf fuer die Abfrage");
   {
@@ -1920,14 +2065,35 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
       const oeffnen = h.indexOf("leisteOeffnen()");
       check(senden > -1 && oeffnen > -1 && senden < oeffnen,
             "erst absenden, dann oeffnen", senden + " / " + oeffnen);
-      check(!/await frage\(\{ art: "ansicht"/.test(h),
-            "und OHNE await - sonst ist die Benutzergeste verbraucht");
+      /* ⚠ UND ZWAR ABGEWARTET. Hier stand die Gegenregel ("OHNE await, sonst
+       * ist die Benutzergeste verbraucht") - sie war die Ursache der Meldung
+       * "ich kann die Seitenleiste nur ueber die plugin Steuerung oeffnen":
+       * Chrome zerstoert das Popup, sobald die Leiste aufgeht, die Nachricht
+       * war da noch unterwegs und die Einstellung wurde nie gespeichert. Der
+       * naechste Klick auf das Symbol oeffnete wieder das Popup.
+       * Eine nicht gespeicherte Einstellung macht den Schalter kaputt, eine
+       * verlorene Benutzergeste kostet einen Klick - und die Meldung sagt
+       * dann, welchen. */
+      check(/await frage\(\{ art: "ansicht"/.test(h),
+            "die Einstellung wird ABGEWARTET, bevor die Leiste aufgeht");
+      check(/Symbol/.test(h),
+            "und misslingt das Oeffnen, nennt die Meldung den Weg");
     }
     const lo = schneidePopup("leisteOeffnen");
-    check(!!lo && !/await/.test(lo),
-          "leisteOeffnen() wartet auf nichts");
-    check(!!lo && /sidebarAction[\s\S]*sidePanel/.test(lo),
-          "und bedient beide Welten");
+    /* ⚠ JEDER Zweig muss warten, nicht irgendeiner. Die erste Fassung dieser
+     * Pruefung suchte `await api.(sidePanel|sidebarAction)` - mit zwei Zweigen
+     * blieb sie gruen, obwohl in einem das `await` fehlte, und die Gegenprobe
+     * biss nicht. Geprueft wird jetzt die Eigenschaft: KEIN `open(` ohne
+     * unmittelbar davorstehendes `await`. */
+    const offeneAufrufe = (lo || "").match(/(\w+\s+)?api\.\w+\.open\(/g) || [];
+    check(offeneAufrufe.length >= 2,
+          "leisteOeffnen() bedient beide Welten", String(offeneAufrufe.length));
+    check(offeneAufrufe.every((a) => /^await\s/.test(a)),
+          "und wartet in JEDEM Zweig das Ergebnis ab - sonst waere die Meldung geraten",
+          offeneAufrufe.join(" | "));
+    check(!!lo && /return false;/.test(lo),
+          "und meldet einen Fehlschlag zurueck, statt ihn zu verschlucken");
+
   }
 
   // ── h) CSS ──────────────────────────────────────────────────────────────

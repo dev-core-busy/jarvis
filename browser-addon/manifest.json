@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Jarvis für Jira",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Fasst das offene Jira-Ticket zusammen und schlägt eine Antwort an den Kunden vor.",
   "icons": {
     "16": "icons/icon-16.png",

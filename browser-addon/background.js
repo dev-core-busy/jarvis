@@ -117,7 +117,14 @@ async function ansichtAnwenden(modus) {
      * Abfrageteil: schmal, aber benutzbar. */
     try {
       await api.sidePanel.setOptions({ path: LEISTE_PFAD, enabled: true });
-    } catch (e) {}
+    } catch (e) {
+      /* Nimmt dieser Chrome keinen Abfrageteil im Pfad, wenigstens den nackten
+       * Pfad setzen - sonst bliebe die Leiste ganz abgeschaltet. Die Erkennung
+       * haengt ohnehin nicht mehr daran (kontextArt). */
+      try {
+        await api.sidePanel.setOptions({ path: "popup.html", enabled: true });
+      } catch (e2) {}
+    }
     try {
       await api.sidePanel.setPanelBehavior({ openPanelOnActionClick: leiste });
     } catch (e) {}
@@ -126,6 +133,31 @@ async function ansichtAnwenden(modus) {
     try {
       await api.sidebarAction.setPanel({ panel: api.runtime.getURL(LEISTE_PFAD) });
     } catch (e) {}
+  }
+}
+
+/** Was ist der Absender dieser Nachricht – Popup oder Seitenleiste?
+ *
+ * ⚠ DAS IST DIE EIGENTLICHE ERKENNUNG. Bis hierher haing sie am Abfrageteil
+ * `?ansicht=leiste`, den `setOptions`/`setPanel` in den Pfad schreiben. Der
+ * kommt aber NUR mit, wenn die Leiste ueber unseren Weg geoeffnet wird –
+ * oeffnet der Benutzer sie ueber **Chromes eigene Seitenleisten-Auswahl**,
+ * laedt Chrome `side_panel.default_path`, also `popup.html` ohne Abfrageteil.
+ * Das Fenster hielt sich dann fuer ein Popup: keine Tab-Zuhoerer, feste
+ * Breite. Genau so gemeldet (2026-08-30, Chrome 152).
+ *
+ * `runtime.getContexts` beantwortet die Frage am Absender selbst und ist von
+ * jedem Oeffnungsweg unabhaengig. Faellt es aus (aeltere Browser, Firefox),
+ * bleibt der Abfrageteil als Rueckfall – deshalb wird er weiterhin gesetzt.
+ */
+async function kontextArt(absender) {
+  try {
+    if (!api.runtime.getContexts || !absender || !absender.documentId) return "";
+    const k = await api.runtime.getContexts(
+      { documentIds: [absender.documentId] });
+    return (k && k[0] && k[0].contextType) || "";
+  } catch (e) {
+    return "";
   }
 }
 
@@ -324,7 +356,7 @@ async function anmelden({ basis, benutzer, kennwort, totp }) {
 }
 
 // ── Nachrichten aus dem Popup ───────────────────────────────────────────────
-api.runtime.onMessage.addListener((nachricht, _absender, antworten) => {
+api.runtime.onMessage.addListener((nachricht, absender, antworten) => {
   (async () => {
     try {
       switch (nachricht && nachricht.art) {
@@ -346,6 +378,10 @@ api.runtime.onMessage.addListener((nachricht, _absender, antworten) => {
                       // ist schlimmer als kein Schalter.
                       ansicht: (e.ansicht === "leiste") ? "leiste" : "popup",
                       leiste_moeglich: leisteMoeglich(),
+                      // "SIDE_PANEL" | "POPUP" | "" (nicht feststellbar).
+                      // Das Fenster entscheidet danach, ob es Tab-Wechsel
+                      // beobachten muss - siehe kontextArt().
+                      kontext: await kontextArt(absender),
                       ergebnis: await ergebnisLesen() });
           break;
         }

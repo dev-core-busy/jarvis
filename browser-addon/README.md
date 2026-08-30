@@ -56,6 +56,22 @@ Antwortentwurf zu Ticket A neben dem geöffneten Ticket B. Und `activeTab` gilt 
 den Tab, aus dem die Leiste geöffnet wurde; für „Überarbeiten" und „Einfügen" in weiteren
 Tabs erfragt sie einmalig ein dauerhaftes Zugriffsrecht auf den Jira-Server.
 
+Drei Fallen, die das im ersten Anlauf halb tot gemacht haben (gemeldet, Chrome 152):
+
+* **Die Erkennung darf nicht am Abfrageteil hängen.** `?ansicht=leiste` kommt nur mit,
+  wenn die Leiste über unseren Weg aufgeht – über **Chromes eigene Seitenleisten-Auswahl**
+  lädt sie `side_panel.default_path`, also `popup.html` ohne Abfrageteil, und das Fenster
+  hielt sich für ein Popup: kein Tab-Zuhörer, feste Breite. Verbindlich antwortet der
+  Hintergrund über `runtime.getContexts` (`kontextArt`); die Klasse aus `ansicht.js` ist
+  nur noch der Anfangswert für die Breite.
+* **`tabs.onUpdated` darf nicht auf `changeInfo.url` filtern.** Das liefert der Browser nur
+  mit der `tabs`-Berechtigung oder einem Host-Recht für genau diese Seite – die Erweiterung
+  hat beides von Haus aus nicht. Entschieden wird über den Vergleich in `tabWechsel`.
+* **Die Zugriffszeile darf nicht an einer Ticketnummer hängen.** Ohne Host-Recht gibt es
+  gar keine Tab-Adresse und damit keine Ticketnummer – die Zeile wäre genau dann verborgen,
+  wenn man sie braucht. Den Ort für die Abfrage liefert `GET /api/jira/assist/health` als
+  `jira_basis`.
+
 **`ansicht.js` gehört in DREI Listen:** die Einbindung in `popup.html`, `DATEIEN` in
 `bauen.sh` und `PAKET_DATEIEN` in `backend/jira_assist.py`. Laufen sie auseinander,
 installiert sich das Paket klaglos und die Leiste ist still 380 px schmal.

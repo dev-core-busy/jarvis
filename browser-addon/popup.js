@@ -37,13 +37,33 @@ let _laeuft = false;
 
 /* SEITENLEISTE ODER POPUP.
  *
- * Die Klasse steht bereits am <html> (ansicht.js, noch vor dem ersten
- * Zeichnen); hier wird sie nur GELESEN. Ein zweites Mal auf den Abfrageteil zu
- * schauen waere eine zweite Wahrheit – und die beiden liefen beim naechsten
- * Feinschliff auseinander. */
-const _leiste = document.documentElement.classList.contains("leiste");
+ * ⚠ DER ABFRAGETEIL ALLEIN GENUEGT NICHT – gemeldet 2026-08-30 (Chrome 152):
+ * „ich kann die Seitenleiste nur ueber die plugin Steuerung oeffnen. Dann wird
+ * aber ein TAB Wechsel nicht erkannt." Zutreffend. `?ansicht=leiste` kommt nur
+ * mit, wenn die Leiste ueber UNSEREN Weg aufgeht; oeffnet der Benutzer sie
+ * ueber **Chromes eigene Seitenleisten-Auswahl**, laedt Chrome
+ * `side_panel.default_path`, also `popup.html` ohne Abfrageteil. Das Fenster
+ * hielt sich dann fuer ein Popup und registrierte KEINEN einzigen Tab-Zuhoerer.
+ *
+ * Der Anfangswert bleibt die Klasse (ansicht.js setzt sie vor dem ersten
+ * Zeichnen, das ist fuer die Breite noetig); die verbindliche Antwort kommt
+ * gleich darauf vom Hintergrund (`kontextArt` ueber runtime.getContexts) und
+ * wird hier nachgetragen. */
+let _leiste = document.documentElement.classList.contains("leiste");
 let _windowId = null;
 let _tabUrl = "";
+// Adresse des Jira-Servers, einmal vom Server geholt (siehe zugriffZeile).
+let _jiraBasis = "";
+
+/** Traegt die verbindliche Antwort des Hintergrunds nach. */
+function leisteFeststellen(kontext) {
+  // Nur EINSCHALTEN, nie ausschalten: sagt der Hintergrund nichts (aeltere
+  // Browser, Firefox ohne getContexts), bleibt es beim Abfrageteil - der ist
+  // dann die einzige Auskunft, die es gibt.
+  if (kontext !== "SIDE_PANEL" && kontext !== "SIDEBAR") return;
+  _leiste = true;
+  document.documentElement.classList.add("leiste");
+}
 
 // ── Meldungen ───────────────────────────────────────────────────────────────
 function melde(text, arbeitet = false) {
@@ -406,6 +426,9 @@ async function start() {
   // Marke setzen, sobald eine Adresse bekannt ist – das geht ohne Anmeldung
   // und damit schon beim allerersten Öffnen nach dem Einrichten.
   if (el.basis.value) brandingHolen(el.basis.value);
+  // ZUERST klaeren, WAS dieses Fenster ist - davon haengen Breite, Beschriftung
+  // des Umschalters und die Tab-Beobachtung ab.
+  leisteFeststellen(z.kontext);
   // Der Umschalter gilt unabhaengig von der Anmeldung – wer in der Leiste
   // steht und zurueck will, muss das auch ohne Konto koennen.
   ansichtZeigen(z.ansicht, z.leiste_moeglich);
@@ -485,11 +508,18 @@ function leisteBeobachten() {
   try {
     api.tabs.onActivated.addListener(() => { tabWechsel(); });
     api.tabs.onUpdated.addListener((tabId, info, tab) => {
-      // Nur der SICHTBARE Tab, und nur wenn sich die Adresse geaendert hat.
-      // Jira wechselt das Ticket ohne Neuladen (Einzelseiten-Anwendung), das
-      // meldet sich hier als `info.url` – ein Filter auf `status: complete`
-      // wuerde genau diesen Fall verpassen.
-      if (info && info.url && tab && tab.active) tabWechsel();
+      /* ⚠ HIER DARF NICHT AUF `info.url` GEFILTERT WERDEN.
+       *
+       * Das war die zweite Haelfte des gemeldeten Fehlers: `changeInfo.url`
+       * liefert der Browser NUR mit der `tabs`-Berechtigung oder mit einem
+       * Host-Recht fuer genau diese Seite. Die Erweiterung hat beides von Haus
+       * aus nicht (`activeTab` ist etwas anderes) – der Filter traf also nie
+       * zu, und der Zuhoerer war so gut wie tot.
+       * Jetzt entscheidet der VERGLEICH in `tabWechsel`: der ist ohnehin
+       * noetig, kostet nur eine Abfrage und ist gegen jede Zustandsaenderung
+       * unempfindlich (er kehrt sofort um, wenn sich die Ticketnummer nicht
+       * geaendert hat). */
+      if (tab && tab.active) tabWechsel();
     });
   } catch (e) {
     // Ohne Zuhoerer verhaelt sich die Leiste wie das Popup von frueher: der
@@ -1186,20 +1216,53 @@ $("btn-leeren").addEventListener("click", async () => {
  * fehlgeschlagenen `executeScript` wuerde mit "must be called during a user
  * gesture" abgelehnt, also wortlos nichts tun.
  */
-function tabHerkunft() {
+function herkunftAus(adresse) {
   try {
-    const u = new URL(_tabUrl);
+    const u = new URL(adresse);
     // Nur https: `optional_host_permissions` deckt nur das ab, und ueber http
     // wuerde das Sitzungstoken der Seite ohnehin nichts gewinnen.
     return (u.protocol === "https:") ? u.origin : "";
   } catch (e) { return ""; }
 }
 
+function tabHerkunft() { return herkunftAus(_tabUrl); }
+
+/** Die Adresse des Jira-Servers – einmal beim Server erfragt, dann gemerkt.
+ *
+ * ⚠ OHNE SIE WAERE DIE ZUGRIFFSZEILE UNERREICHBAR, GENAU WENN MAN SIE BRAUCHT.
+ * Fehlt das Host-Recht, liefert `tabs.query` fuer einen fremden Tab GAR KEINE
+ * Adresse – dann gibt es keine Ticketnummer, und die Zeile haette sich an
+ * einer Ticketnummer festgemacht: ein Kreis, aus dem der Benutzer nicht
+ * herauskommt. Die Berechtigungsabfrage muss aber einen Ort nennen koennen,
+ * und den kennt die Erweiterung von sich aus nicht.
+ * Fehlschlag ist kein Fehler: dann bleibt es beim Weg ueber die Tab-Adresse.
+ */
+async function jiraBasisHolen() {
+  if (_jiraBasis) return _jiraBasis;
+  try {
+    const a = await frage({ art: "health" });
+    _jiraBasis = ((a.daten || {}).jira_basis || "").replace(/\/+$/, "");
+  } catch (e) {
+    _jiraBasis = "";
+  }
+  return _jiraBasis;
+}
+
 async function zugriffZeileAktualisieren() {
   const p = $("leiste-zugriff");
   if (!p) return;
-  const herkunft = tabHerkunft();
-  if (!_leiste || !_key || !herkunft) { p.hidden = true; return; }
+  // Das Popup kommt mit `activeTab` aus - dort ist die Zeile immer aus.
+  if (!_leiste) { p.hidden = true; return; }
+
+  /* WELCHE HERKUNFT WIRD ERFRAGT? Steht in diesem Tab ein erkanntes Ticket,
+   * ist seine Herkunft der richtige und sicherste Ort. Sonst die Adresse des
+   * Jira-Servers laut Jarvis – NIE die eines beliebigen fremden Tabs: sonst
+   * bekaeme jemand, der die Leiste im Intranet oeffnet, eine
+   * Berechtigungsabfrage fuer das Intranet, die ihm gar nichts nuetzt. */
+  const blind = !_tabUrl;
+  const herkunft = (_key && tabHerkunft()) || herkunftAus(await jiraBasisHolen());
+  if (!herkunft) { p.hidden = true; return; }
+
   let da = null;
   try { da = await api.permissions.contains({ origins: [herkunft + "/*"] }); }
   catch (e) { da = null; }
@@ -1207,10 +1270,18 @@ async function zugriffZeileAktualisieren() {
    * in `zugriffAnzeigen`: eine Aufforderung, die auf einer Vermutung beruht,
    * verunsichert bei einer funktionierenden Einrichtung. */
   if (da !== false) { p.hidden = true; return; }
-  $("leiste-zugriff-text").textContent =
-    "In der Seitenleiste brauchen „Überarbeiten“ und „Einfügen“ ein dauerhaftes "
-    + "Zugriffsrecht auf " + herkunft + " – beim Tab-Wechsel verfällt das "
-    + "kurzfristige Recht aus dem Klick auf das Symbol. ";
+
+  /* OHNE LESBARE TAB-ADRESSE IST DAS KEINE EMPFEHLUNG MEHR, SONDERN DIE
+   * VORAUSSETZUNG - dann erkennt die Leiste ueberhaupt kein Ticket. Der Text
+   * muss das unterscheiden, sonst sucht der Benutzer den Fehler bei sich. */
+  $("leiste-zugriff-text").textContent = blind
+    ? "Die Seitenleiste kann die Adresse des offenen Tabs nicht lesen und "
+      + "erkennt deshalb kein Ticket. Erlaube ihr dauerhaften Zugriff auf "
+      + herkunft + " – das kurzfristige Recht aus dem Klick auf das Symbol "
+      + "gilt nur für den Tab, aus dem sie geöffnet wurde. "
+    : "Damit die Seitenleiste beim Tab-Wechsel mitkommt und „Überarbeiten“ "
+      + "und „Einfügen“ weiter funktionieren, braucht sie dauerhaften Zugriff "
+      + "auf " + herkunft + ". ";
   p.hidden = false;
 }
 
@@ -1227,7 +1298,12 @@ $("btn-leiste-zugriff").addEventListener("click", async () => {
     melde("Die Berechtigungsabfrage ließ sich nicht öffnen: "
           + ((e && e.message) || e));
   }
-  await zugriffZeileAktualisieren();
+  /* Neu ERMITTELN, nicht nur neu zeichnen: mit dem Recht ist die Adresse des
+   * offenen Tabs jetzt lesbar - und damit womoeglich zum ersten Mal eine
+   * Ticketnummer. Ohne das stuende weiter "Kein Ticket gefunden" da, obwohl
+   * gerade alles dafuer erledigt wurde. */
+  await tabErmitteln();
+  await ticketLageAnwenden(_letztes);
 });
 
 /* ── Umschalter Popup ↔ Seitenleiste ───────────────────────────────────────
@@ -1252,60 +1328,70 @@ function ansichtZeigen(wert, moeglich) {
   h.hidden = false;
 }
 
-/** Oeffnet die Leiste sofort. Gibt zurueck, ob ein Versuch startete.
+/** Oeffnet die Leiste. Gibt zurueck, ob sie WIRKLICH aufgegangen ist.
  *
- * ⚠ MUSS OHNE VORHERIGES `await` GERUFEN WERDEN. Beide APIs verlangen eine
- * Benutzergeste; nach dem ersten `await` ist sie weg und der Aufruf wird
- * abgelehnt – sichtbar wird davon nichts, es passiert einfach nichts.
+ * Beide APIs verlangen eine Benutzergeste. Schlaegt der Aufruf deshalb fehl,
+ * ist das kein Fehler: die Einstellung ist zu diesem Zeitpunkt bereits
+ * gespeichert, der naechste Klick auf das Symbol oeffnet die Leiste. Genau das
+ * sagt die Meldung dann auch – ein stiller Fehlschlag waere die schlechtere
+ * Auskunft.
  */
-function leisteOeffnen() {
+async function leisteOeffnen() {
   try {
     if (api.sidebarAction && api.sidebarAction.open) {
-      api.sidebarAction.open();
+      await api.sidebarAction.open();
       return true;
     }
     if (api.sidePanel && api.sidePanel.open && _windowId !== null) {
-      api.sidePanel.open({ windowId: _windowId });
+      await api.sidePanel.open({ windowId: _windowId });
       return true;
     }
-  } catch (e) { /* Fehlschlag ist kein Fehler – der naechste Klick tut es. */ }
+  } catch (e) { /* Fehlschlag ist kein Fehler – siehe oben. */ }
   return false;
 }
 
-$("f-ansicht").addEventListener("change", (ereignis) => {
+$("f-ansicht").addEventListener("change", async (ereignis) => {
   const wert = ereignis.target.checked ? "leiste" : "popup";
 
-  /* REIHENFOLGE IST HIER DIE GANZE MECHANIK:
-   *  1. Absenden ANSTOSSEN, ohne zu warten. Die Nachricht ist damit unterwegs
-   *     und der Hintergrund arbeitet sie ab, auch wenn dieses Fenster gleich
-   *     verschwindet – nur die Antwort geht dann verloren.
-   *  2. Leiste oeffnen, noch in derselben Aufgabe. Chrome schliesst dabei das
-   *     Popup; das ist gewollt, die Leiste tritt an seine Stelle.
-   * Umgekehrt waere beides kaputt: nach einem `await` fehlt die Benutzergeste,
-   * und ein Oeffnen vor dem Absenden koennte das Fenster toeten, bevor die
-   * Einstellung ueberhaupt abgeschickt wurde. */
-  const unterwegs = frage({ art: "ansicht", wert });
-  const geoeffnet = (wert === "leiste" && !_leiste) ? leisteOeffnen() : false;
-
-  unterwegs.then((a) => {
-    ansichtZeigen(a.wert, a.leiste_moeglich);
-    if (wert === "leiste") {
-      melde(geoeffnet
-        ? ""
-        : "Die Seitenleiste öffnet sich beim nächsten Klick auf das Symbol.");
-    } else {
-      melde(_leiste
-        ? "Umgestellt. Das Symbol öffnet ab jetzt wieder das kleine Fenster – "
-          + "diese Leiste kannst du schließen."
-        : "Umgestellt.");
-    }
-  }).catch((e) => {
+  /* ⚠ ERST SPEICHERN – UND ZWAR ABGEWARTET –, DANN OEFFNEN.
+   *
+   * Die erste Fassung machte es umgekehrt: absenden ohne zu warten, sofort
+   * oeffnen, damit die Benutzergeste fuer `sidePanel.open` erhalten bleibt.
+   * Das war die Ursache der Meldung „ich kann die Seitenleiste nur ueber die
+   * plugin Steuerung oeffnen" (2026-08-30): **Chrome zerstoert das Popup, wenn
+   * die Leiste aufgeht** – die Nachricht war da noch unterwegs, die Einstellung
+   * wurde nie gespeichert, und der naechste Klick auf das Symbol oeffnete
+   * wieder das Popup. Der Umschalter war damit faktisch wirkungslos.
+   *
+   * Die Abwaegung ist eindeutig: eine nicht gespeicherte Einstellung macht den
+   * Schalter kaputt, eine verlorene Benutzergeste kostet einen Klick – und die
+   * Meldung sagt dann, welchen. */
+  let a;
+  try {
+    a = await frage({ art: "ansicht", wert });
+  } catch (e) {
     // Zuruecksetzen, sonst behauptet das Haekchen einen Zustand, den es nicht
-    // gibt. Bricht die Verbindung beim Oeffnen der Leiste ab, ist das kein
-    // Fehler – dann ist dieses Fenster ohnehin schon weg.
+    // gibt.
     ereignis.target.checked = (wert !== "leiste");
     melde(e.message);
-  });
+    return;
+  }
+  ansichtZeigen(a.wert, a.leiste_moeglich);
+
+  if (wert !== "leiste") {
+    melde(_leiste
+      ? "Umgestellt. Das Symbol öffnet ab jetzt wieder das kleine Fenster – "
+        + "diese Leiste kannst du schließen."
+      : "Umgestellt.");
+    return;
+  }
+  // Gelingt das Oeffnen, ist dieses Fenster gleich weg und die Meldung wird
+  // ohnehin niemand lesen. Gelingt es nicht, ist sie der Weg zum Ziel.
+  const geoeffnet = _leiste ? true : await leisteOeffnen();
+  if (!geoeffnet) {
+    melde("Gespeichert. Die Seitenleiste öffnet sich beim nächsten Klick auf "
+          + "das Symbol in der Symbolleiste.");
+  }
 });
 
 start();

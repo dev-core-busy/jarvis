@@ -883,8 +883,8 @@ in der Spalte „Rolle":
 Die Abschnitte 9–11 sind **erzeugt**, nicht gepflegt:
 
 ```bash
-python3 tests/tools/lizenzen_erheben.py            # DEV ist die Vorgabe
-python3 tests/tools/lizenzen_erheben.py --host root@ENTFERNT-PRODUKTIONSADRESSE   # gegen ECHT
+python3 tests/tools/lizenzen_erheben.py                       # DEV ist die Vorgabe
+python3 tests/tools/lizenzen_erheben.py --host <benutzer@server>   # gegen eine andere Instanz
 ```
 
 Das Skript schreibt die drei Abschnitte nach `/tmp/tabellen.md`; von dort ersetzen sie

@@ -158,10 +158,18 @@ const badge = (d) => d.querySelector('[data-jarvis-settings] .jv-gear-badge');
         const b = badge(d);
         pruefe(!!b, 'Badge vorhanden');
         pruefe(b && b.textContent === '2', 'zeigt die Anzahl', b && b.textContent);
-        pruefe(b && /Offene Root-Freigaben: 2/.test(b.title),
-               'Tooltip nennt die offenen Freigaben', b && b.title);
-        pruefe(b && !/Gesperrte/.test(b.title),
-               'Tooltip nennt NICHT, was es nicht gibt', b && b.title);
+        const bl = b && b.getAttribute('aria-label');
+        pruefe(/Offene Root-Freigaben: 2/.test(bl || ''),
+               'die Beschriftung nennt die offenen Freigaben', bl);
+        pruefe(!/Gesperrte/.test(bl || ''),
+               'sie nennt NICHT, was es nicht gibt', bl);
+        // ⚠ LEERER title ist Absicht: der Knopf darunter traegt einen (aus
+        // data-i18n-title). Ohne das leere Attribut sucht der Browser beim
+        // Hovern der Badge beim Vorfahren weiter und zeigt SEINEN nativen
+        // Tooltip ZUSAETZLICH zum Panel - zwei Kaesten uebereinander.
+        pruefe(b && b.getAttribute('title') === '',
+               'die Badge traegt einen LEEREN title (kein Doppel-Tooltip)',
+               b && JSON.stringify(b.getAttribute('title')));
         pruefe(b && !b.classList.contains('is-danger'),
                'ohne Sperre bleibt es die Warnfarbe');
         pruefe(b && b.parentNode.classList.contains('jv-gear-host'),
@@ -178,9 +186,9 @@ const badge = (d) => d.querySelector('[data-jarvis-settings] .jv-gear-badge');
                b && b.textContent);
         pruefe(b && b.classList.contains('is-danger'),
                'eine Sperre setzt die Gefahrenfarbe');
-        pruefe(b && /Offene Root-Freigaben: 1/.test(b.title) &&
-                    /Gesperrte Konten: 2/.test(b.title),
-               'Tooltip nennt beide Quellen', b && b.title);
+        const bl = (b && b.getAttribute('aria-label')) || '';
+        pruefe(/Offene Root-Freigaben: 1/.test(bl) && /Gesperrte Konten: 2/.test(bl),
+               'die Beschriftung nennt beide Quellen', bl);
     }
     {   // nichts zu tun = keine Badge
         const { d } = starte('portal.html',
@@ -275,6 +283,200 @@ const badge = (d) => d.querySelector('[data-jarvis-settings] .jv-gear-badge');
     }
 
     /* ================================================================= */
+    abschnitt('2b. Mouseover am Badge: die Liste hinter der Zahl');
+    // WARUM: die Zahl sagt "3" und sonst nichts. Wer wissen wollte, WAS zu tun
+    // ist, musste erst /settings oeffnen und zwei getrennte Abschnitte
+    // durchsehen. Gebaut nach dem Vorbild des Issues-Badges (2026-08-25).
+    const POSTEN = {
+        is_admin: true,
+        admin_badge: {
+            root_pending: 1, gesperrt: 1, gesamt: 2,
+            items: [
+                { art: 'blocked', titel: 'nexus\\rene.pfeiffer',
+                  sub: 'policy:shell-write', ts: 1756000000 },
+                { art: 'root', titel: 'apt-get install libreoffice',
+                  sub: 'nexus\\anna.klein', ts: 1756000100 },
+            ],
+        },
+    };
+    const tip = (d) => d.querySelector('.jv-gear-tip');
+    const hover = (w, d) => {
+        const b = badge(d);
+        b.dispatchEvent(new w.MouseEvent('mouseenter', { bubbles: false }));
+        return tip(d);
+    };
+    {
+        const { w, d } = starte('portal.html', POSTEN);
+        await gleich(); await gleich();
+        pruefe(!tip(d), 'ohne Hover gibt es kein Panel');
+        const el = hover(w, d);
+        pruefe(!!el, 'Hover ueber der Badge oeffnet das Panel');
+        // Es haengt an body und ist fixed - in der Titelleiste eingehaengt
+        // bliebe es an deren overflow/Stapelkontext haengen (Register).
+        pruefe(el && el.parentNode === d.body,
+               'das Panel ist direktes Kind von body');
+        pruefe(el && el.style.display === 'block', 'und ist sichtbar');
+        const zeilen = el ? el.querySelectorAll('.jv-gear-tip-row') : [];
+        pruefe(zeilen.length === 2, 'eine Zeile je Eintrag', String(zeilen.length));
+        pruefe(el && /nexus\\rene\.pfeiffer/.test(el.textContent) &&
+                     /apt-get install libreoffice/.test(el.textContent),
+               'die Zeilen nennen Konto bzw. Befehl');
+        pruefe(el && /policy:shell-write/.test(el.textContent),
+               'die Sperre nennt ihren Grund');
+        pruefe(el && /nexus\\anna\.klein/.test(el.textContent),
+               'die Freigabe nennt den Anforderer');
+        // Die Zuordnung Zeile -> Abschnitt ist der Gewinn gegenueber dem alten
+        // `title`: eine Warnung ohne Weg zur Abhilfe ist nur Laerm.
+        const fokus = Array.prototype.map.call(zeilen,
+            (b) => b.getAttribute('data-fokus'));
+        pruefe(JSON.stringify(fokus) === '["incidents","broker"]',
+               'jede Zeile kennt den Abschnitt, der sie erledigt',
+               JSON.stringify(fokus));
+        pruefe(el && !/und \d+ weitere/.test(el.textContent),
+               'ohne Kuerzung steht keine Restzahl da');
+        w.close();
+    }
+    {   // Klick auf eine Zeile: Reiter UND Abschnitt UND Rueckweg
+        const { w, d } = starte('portal.html', POSTEN);
+        await gleich(); await gleich();
+        const el = hover(w, d);
+        el.querySelectorAll('.jv-gear-tip-row')[1]
+            .dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+        pruefe(w.sessionStorage.getItem('jarvis_settings_tab') === 'security',
+               'die Zeile fuehrt in den Sicherheits-Reiter');
+        pruefe(w.sessionStorage.getItem('jarvis_settings_focus') === 'broker',
+               'und in GENAU den Abschnitt der Zeile',
+               w.sessionStorage.getItem('jarvis_settings_focus'));
+        // Die Zeilen haengen an body und koennen den Klick nicht an den Knopf
+        // weiterreichen - der Rueckweg muss deshalb selbst gesetzt werden.
+        pruefe(w.sessionStorage.getItem('jarvis_settings_return') === '/portal',
+               'der Rueckweg wird trotzdem gesetzt',
+               w.sessionStorage.getItem('jarvis_settings_return'));
+        w.close();
+    }
+    {   // Klick auf die Badge selbst setzt KEINEN Abschnitt (nur den Reiter)
+        const { w, d } = starte('portal.html', POSTEN);
+        await gleich(); await gleich();
+        badge(d).dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+        pruefe(!w.sessionStorage.getItem('jarvis_settings_focus'),
+               'ein Klick auf die Zahl selbst springt in keinen Abschnitt');
+        w.close();
+    }
+    {   // Fremdtext wird maskiert: Befehl und Sperrgrund stammen aus fremden
+        // Quellen und landen in einer ADMINISTRATOREN-Oberflaeche, in der das
+        // Sitzungstoken im localStorage liegt (Lehre aus mcp.js, 2026-08-14).
+        const { w, d } = starte('portal.html', { is_admin: true, admin_badge: {
+            root_pending: 1, gesperrt: 0, gesamt: 1,
+            items: [{ art: 'root', titel: '<img src=x onerror=alert(1)>',
+                      sub: '<b>chef</b>', ts: 0 }] } });
+        await gleich(); await gleich();
+        const el = hover(w, d);
+        pruefe(el && !el.querySelector('img') && !el.querySelector('b'),
+               'kein Markup aus Fremdtext im DOM');
+        pruefe(el && /<img src=x onerror=alert\(1\)>/.test(el.textContent),
+               'der Text steht trotzdem lesbar da');
+        w.close();
+    }
+    {   // Deckel: `gesamt` ist groesser als die uebertragene Liste.
+        const items = [];
+        for (let i = 0; i < 12; i++) {
+            items.push({ art: 'root', titel: 'op ' + i, sub: '', ts: 0 });
+        }
+        const { w, d } = starte('portal.html', { is_admin: true, admin_badge: {
+            root_pending: 30, gesperrt: 0, gesamt: 30, items: items } });
+        await gleich(); await gleich();
+        const el = hover(w, d);
+        pruefe(el && /und 18 weitere/.test(el.textContent),
+               'die Restzahl steht da (sonst gilt die Liste als vollstaendig)',
+               el && el.textContent.slice(-120));
+        w.close();
+    }
+    {   // Aelteres Backend ohne `items`: KEINE leere Flaeche - eine leere Liste
+        // waere die Behauptung, es gaebe nichts (Register).
+        const { w, d } = starte('portal.html', { is_admin: true,
+            admin_badge: { root_pending: 2, gesperrt: 1, gesamt: 3 } });
+        await gleich(); await gleich();
+        const el = hover(w, d);
+        pruefe(el && /Offene Root-Freigaben: 2/.test(el.textContent) &&
+                     /Gesperrte Konten: 1/.test(el.textContent),
+               'ohne items faellt das Panel auf die Quellen zurueck',
+               el && el.textContent);
+        w.close();
+    }
+    {   // Der Zeiger muss vom Badge INS Panel wandern koennen: sonst waere
+        // keine Zeile je anklickbar. Deshalb schliesst es verzoegert, und ein
+        // mouseenter AM PANEL haelt es offen.
+        const { w, d } = starte('portal.html', POSTEN);
+        await gleich(); await gleich();
+        const el = hover(w, d);
+        badge(d).dispatchEvent(new w.MouseEvent('mouseleave', { bubbles: false }));
+        pruefe(el.style.display === 'block',
+               'ein mouseleave schliesst nicht sofort');
+        el.dispatchEvent(new w.MouseEvent('mouseenter', { bubbles: false }));
+        await new Promise((r) => setTimeout(r, 320));
+        pruefe(el.style.display === 'block',
+               'der Zeiger im Panel haelt es offen');
+        el.dispatchEvent(new w.MouseEvent('mouseleave', { bubbles: false }));
+        await new Promise((r) => setTimeout(r, 320));
+        pruefe(el.style.display === 'none', 'danach schliesst es');
+        w.close();
+    }
+    {   // Takt: wird die letzte Freigabe entschieden, verschwindet mit der
+        // Badge auch das offene Panel - sonst zeigt es eine Liste, die es nicht
+        // mehr gibt.
+        const dom = new JSDOM(lies('frontend/portal.html'),
+                              { url: 'https://x/', runScripts: 'outside-only',
+                                virtualConsole: stilleKonsole() });
+        const w = dom.window;
+        w.localStorage.setItem('jarvis_token', 'tok-1');
+        let stand = POSTEN;
+        w.fetch = () => Promise.resolve({ ok: true, status: 200,
+                                          json: () => Promise.resolve(stand) });
+        w.t = () => '';
+        w.eval(SBTN);
+        await gleich(); await gleich();
+        const el = hover(w, w.document);
+        pruefe(el && el.style.display === 'block',
+               'Ausgangslage: Panel offen (Gegenprobe)');
+        stand = { is_admin: true,
+                  admin_badge: { root_pending: 0, gesperrt: 0, gesamt: 0, items: [] } };
+        await w.JarvisSettingsBtn.aktualisiere();
+        await gleich();
+        pruefe(el.style.display === 'none',
+               'nach dem Entscheiden schliesst das Panel mit');
+        w.close();
+    }
+    {   // CSS am richtigen Ort - dieselbe Begruendung wie bei der Badge:
+        // theme.css liegt auf allen Seiten mit Zahnrad, style.css nur auf zwei.
+        pruefe(/^\.jv-gear-tip \{/m.test(THEMECSS),
+               '.jv-gear-tip steht in theme.css');
+        pruefe(!/jv-gear-tip/.test(STYLECSS),
+               '.jv-gear-tip steht NICHT in style.css');
+        // Ein Flex-Kind schrumpft von sich aus nicht unter seine Inhaltsbreite:
+        // ohne `min-width: 0` schiebt ein langer Root-Befehl die Pille aus dem
+        // Panel, statt dass die Ellipse greift (Register, 2026-08-30).
+        const t = (THEMECSS.match(/\.jv-gear-tip-t \{[^}]*\}/) || [''])[0];
+        pruefe(/min-width:\s*0/.test(t), '.jv-gear-tip-t traegt min-width: 0', t);
+        pruefe(/text-overflow:\s*ellipsis/.test(t),
+               'und kuerzt mit Ellipse statt zu ueberlaufen');
+        // Das Issues-Panel liegt bei 99990; das Zahnrad-Panel darf nicht
+        // darueber und unter kein Modal.
+        const box = (THEMECSS.match(/\.jv-gear-tip \{[^}]*\}/) || [''])[0];
+        const z = (box.match(/z-index:\s*(\d+)/) || [])[1];
+        pruefe(z && Number(z) < 99990, 'z-index unter dem Issues-Panel', z);
+        pruefe(/background:\s*var\(--bg-secondary\)/.test(box),
+               'DECKENDE Flaeche (darunter liegt Seiteninhalt)');
+    }
+    {   // i18n in BEIDEN Sprachen - der Panel-Text steht nicht im Markup.
+        for (const k of ['security.gear_tip_title', 'security.gear_tip_root',
+                         'security.gear_tip_blocked', 'security.gear_tip_by',
+                         'security.gear_tip_more', 'security.gear_tip_hint']) {
+            const n = (I18N.match(new RegExp("'" + k.replace(/\./g, '\\.') + "'", 'g')) || []).length;
+            pruefe(n === 2, k + ' steht in DE und EN', 'gefunden: ' + n);
+        }
+    }
+
+    /* ================================================================= */
     abschnitt('3. Die Rueckstaende von 2026-07-15 sind weg');
     {
         pruefe(!/_setBrokerBadge/.test(SECINC_CODE),
@@ -329,6 +531,72 @@ const badge = (d) => d.querySelector('[data-jarvis-settings] .jv-gear-badge');
                'und GENAU sein Panel steht offen', JSON.stringify(panel));
         pruefe(w.sessionStorage.getItem('jarvis_settings_tab') === null,
                'der Wert ist verbraucht');
+        w.close();
+    }
+
+    /* ================================================================= */
+    abschnitt('5. Der Abschnitts-Sprung (jarvis_settings_focus)');
+    // Auch das laesst sich nicht per Quelltext pruefen: der Abschnitt haengt am
+    // Klapp-Handler, den `_initSecCollapse()` erst beim Aktivieren des Reiters
+    // bindet - und "Sicherheitsvorfaelle" startet ZU, "Root-Freigaben" AUF.
+    // Ein blindes click() wuerde den offenen zuklappen.
+    async function settingsMit(fokus) {
+        const dom = new JSDOM(lies('frontend/settings.html'),
+            { url: 'https://x/settings', runScripts: 'outside-only',
+              virtualConsole: stilleKonsole() });
+        const w = dom.window;
+        w.localStorage.setItem('jarvis_token', 't:1:x');
+        // Der gemerkte Klapp-Zustand darf das Ergebnis nicht faelschen.
+        w.localStorage.removeItem('jarvis_sect_collapse_sec-sect-incidents-hdr');
+        w.localStorage.removeItem('jarvis_sect_collapse_sec-sect-broker-hdr');
+        w.sessionStorage.setItem('jarvis_settings_tab', 'security');
+        if (fokus !== null) w.sessionStorage.setItem('jarvis_settings_focus', fokus);
+        w.fetch = () => Promise.resolve({ ok: true, status: 200,
+            json: () => Promise.resolve({ valid: true, success: true,
+                username: 'jarvis', is_admin: true, permissions: {},
+                license_banner: '',
+                admin_badge: { root_pending: 1, gesperrt: 1, gesamt: 2 } }) });
+        w.matchMedia = w.matchMedia || (() => ({ matches: false, addListener() {},
+            removeListener() {}, addEventListener() {}, removeEventListener() {} }));
+        w.requestAnimationFrame = (cb) => setTimeout(cb, 0);
+        w.WebSocket = function () { this.close = () => {}; this.send = () => {}; };
+        w.eval(lies('frontend/js/i18n.js'));
+        w.eval(lies('frontend/js/app.js'));
+        await new Promise((r) => setTimeout(r, 900));
+        const sicht = (id) => {
+            const el = w.document.getElementById(id);
+            return el ? el.style.display !== 'none' : null;
+        };
+        return { w, sicht };
+    }
+    {   // Der zugeklappte Abschnitt geht auf.
+        const { w, sicht } = await settingsMit('incidents');
+        pruefe(sicht('sec-sect-incidents-body') === true,
+               '"incidents" klappt den zugeklappten Abschnitt auf');
+        pruefe(w.sessionStorage.getItem('jarvis_settings_focus') === null,
+               'und der Wert ist verbraucht (kein Dauer-Sprung)');
+        w.close();
+    }
+    {   // Der offene Abschnitt bleibt offen - ein blindes click() haette ihn
+        // ZUgeklappt, also genau das Gegenteil bewirkt.
+        const { sicht, w } = await settingsMit('broker');
+        pruefe(sicht('sec-sect-broker-body') === true,
+               '"broker" laesst den bereits offenen Abschnitt offen');
+        pruefe(sicht('sec-sect-incidents-body') === false,
+               'und fasst den fremden Abschnitt nicht an');
+        w.close();
+    }
+    {   // Ohne Fokus bleibt alles, wie es war (Gegenprobe zu beiden oben).
+        const { sicht, w } = await settingsMit(null);
+        pruefe(sicht('sec-sect-incidents-body') === false,
+               'ohne Fokus bleibt der Abschnitt zu');
+        w.close();
+    }
+    {   // Ein unbekannter Wert wird VERWORFEN, nicht geraten.
+        const { sicht, w } = await settingsMit('gibtsnicht');
+        pruefe(sicht('sec-sect-incidents-body') === false &&
+               sicht('sec-sect-broker-body') === true,
+               'ein unbekannter Fokus aendert gar nichts');
         w.close();
     }
 

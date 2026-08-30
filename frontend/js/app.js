@@ -28,6 +28,37 @@
         try { r = sessionStorage.getItem('jarvis_settings_return') || ''; } catch (e) {}
         return allowed.indexOf(r) !== -1 ? r : '/portal';
     }
+    // Abschnitte des Sicherheits-Reiters, in die eine Zeile des Zahnrad-Panels
+    // fuehren kann. Der Name kommt aus `jarvis_settings_focus` (settings_btn.js);
+    // ein unbekannter Wert wird VERWORFEN, nicht geraten – sonst klappt ein
+    // Tippfehler irgendeinen Abschnitt auf.
+    const _SETTINGS_SECTIONS = {
+        broker:    { hdr: 'sec-sect-broker-hdr',    body: 'sec-sect-broker-body' },
+        incidents: { hdr: 'sec-sect-incidents-hdr', body: 'sec-sect-incidents-body' },
+    };
+    function _oeffneAbschnitt(name) {
+        const s = _SETTINGS_SECTIONS[name];
+        if (!s) return;
+        const hdr = document.getElementById(s.hdr);
+        const body = document.getElementById(s.body);
+        if (!hdr) return;
+        // Aufklappen NUR, wenn er wirklich zu ist: ein blindes click() wuerde
+        // einen offenen Abschnitt ZUklappen – und die beiden Ziele starten
+        // verschieden ("Root-Freigaben" offen, "Sicherheitsvorfaelle" zu, dazu
+        // ein gemerkter Zustand je Container). Geklickt wird der vorhandene
+        // Kopfzeilen-Handler, damit die Merkung mitgeschrieben wird.
+        if (body && body.style.display === 'none') hdr.click();
+        // Erst im naechsten Frame springen: das Aufklappen aendert die Hoehen
+        // ueber dem Abschnitt, eine Messung davor zeigt auf die alte Position.
+        const spaeter = window.requestAnimationFrame
+            || function (cb) { return setTimeout(cb, 0); };
+        spaeter(function () {
+            try {
+                if (hdr.scrollIntoView) hdr.scrollIntoView({ block: 'start', behavior: 'smooth' });
+            } catch (e) { /* kein Sprung – der Reiter steht trotzdem richtig */ }
+        });
+    }
+
     // Oeffnet NUR das Einstellungen-Modal (nicht den toten Haupt-Chat/-Desktop).
     // Stufe 1 der Altlast-Bereinigung: der chat-/desktopspezifische Init-Chain aus
     // showMainScreen() (WebSocket, VNC, Verlauf, Kontext-/LLM-Status, Header-TTS)
@@ -54,13 +85,18 @@
             Promise.resolve(_auf).then(function () {
                 try {
                     const _tab = sessionStorage.getItem('jarvis_settings_tab') || '';
+                    // Der ABSCHNITT innerhalb des Reiters (Mouseover-Panel am
+                    // Zahnrad-Badge: eine Zeile weiss, WAS sie erledigt).
+                    const _fokus = sessionStorage.getItem('jarvis_settings_focus') || '';
                     sessionStorage.removeItem('jarvis_settings_tab');
+                    sessionStorage.removeItem('jarvis_settings_focus');
                     if (!_tab) return;
                     const _tb = document.querySelector(
                         '.settings-tab-btn[data-settings-tab="' + _tab + '"]');
                     // Kein Klick auf einen ausgeblendeten Reiter (Skill aus) –
                     // das Panel waere leer und der Vorgabe-Reiter zugleich weg.
                     if (_tb && _tb.style.display !== 'none') _tb.click();
+                    if (_fokus) _oeffneAbschnitt(_fokus);
                 } catch (e) { /* Speicher gesperrt: Vorgabe-Reiter, kein Fehler */ }
             });
             const c = document.getElementById('btn-close-settings');

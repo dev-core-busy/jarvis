@@ -69,9 +69,15 @@ _me = schnitt("get_me")
 check(bool(_messen), "_admin_badge_messen gefunden")
 check(bool(_badge), "_admin_badge gefunden")
 check(bool(_me) and "admin_badge" in _me, "get_me liefert admin_badge")
-check(len(_messen.splitlines()) < 40 and len(_badge.splitlines()) < 45,
-      "beide Funktionen sind kurz (Gegenprobe zum Schnitt)",
-      f"{len(_messen.splitlines())}/{len(_badge.splitlines())}")
+# GEGENPROBE ZUM SCHNITT – als EIGENSCHAFT, nicht als Zeilenzahl. Ein
+# `len(...) < 40` meldet beim naechsten Feld einen Fehler, den es nicht gibt
+# (Register: eine feste Zahl in einem Test ist eine Zeitbombe). Die Aussage,
+# auf die es ankommt: jeder Schnitt enthaelt GENAU seine Funktion und keine
+# fremde – ein zu weiter Schnitt misst fremden Code (Lehre 2026-08-18).
+for _name, _txt in (("_admin_badge_messen", _messen), ("_admin_badge", _badge)):
+    _defs = re.findall(r"^def (\w+)", _txt, re.M)
+    check(_defs == [_name], f"{_name}: der Schnitt enthaelt genau diese Funktion",
+          str(_defs))
 
 # ═══════════════════════════════════════════════════════════════════════════
 abschnitt("2. Rechte und Kosten an /api/me")
@@ -142,10 +148,12 @@ class FakeGuard:
 
     def list_blocked(self):
         self.aufrufe += 1
-        return [{"user": f"u{i}"} for i in range(self.n)]
+        return [{"user": f"u{i}", "reason": f"grund-{i}", "at": 1000 + i}
+                for i in range(self.n)]
 
 
-def baue(pending=0, gesperrt=0, mode="broker", broker_ok=True, haenge=False):
+def baue(pending=0, gesperrt=0, mode="broker", broker_ok=True, haenge=False,
+         display=None):
     """Fuehrt den Block mit Attrappen aus und liefert (namespace, guard)."""
     import time as _time
     guard = FakeGuard(gesperrt)
@@ -160,7 +168,9 @@ def baue(pending=0, gesperrt=0, mode="broker", broker_ok=True, haenge=False):
         if not broker_ok:
             return {"ok": False, "error": "Broker nicht erreichbar"}
         return {"ok": True, "ops": (
-            [{"decision": "pending"}] * pending
+            [{"decision": "pending", "key": f"shell_root:cmd{i}",
+              "description": f"befehl {i}", "requested_by": f"anna{i}",
+              "first_seen": 2000 + i} for i in range(pending)]
             + [{"decision": "allow"}, {"decision": "deny"}])}
 
     bc.mode = _mode
@@ -169,15 +179,23 @@ def baue(pending=0, gesperrt=0, mode="broker", broker_ok=True, haenge=False):
     paket.broker_client = bc
     sys.modules["backend"] = paket
     sys.modules["backend.broker_client"] = bc
-    ns = {"security_guard": guard, "time": _time}
+    ns = {"security_guard": guard, "time": _time,
+          "_display_name": display or (lambda u: f"nexus\\{u}" if u else "")}
     exec(compile(BLOCK, "<badge>", "exec"), ns)
     return ns, guard
+
+
+def zahlen(w: dict) -> dict:
+    """Nur die ZAEHLUNG – ohne `items`. Ein Vergleich gegen das ganze Objekt
+    haette bei jeder kuenftigen Ergaenzung einen Fehler gemeldet, den es nicht
+    gibt (Register: die Eigenschaft pruefen, nicht die Schreibweise)."""
+    return {k: w.get(k) for k in ("root_pending", "gesperrt", "gesamt")}
 
 
 # — Zaehlen —
 ns, guard = baue(pending=3, gesperrt=2)
 w = ns["_admin_badge_messen"]("jarvis")
-check(w == {"root_pending": 3, "gesperrt": 2, "gesamt": 5},
+check(zahlen(w) == {"root_pending": 3, "gesperrt": 2, "gesamt": 5},
       "zaehlt pending-Freigaben und Sperren zusammen", str(w))
 check(guard.aufrufe == 1, "security_guard genau einmal gefragt")
 
@@ -193,7 +211,7 @@ check(ns["_admin_badge_messen"]("x")["root_pending"] == 1,
 # — Broker weg: die Sperren muessen trotzdem gezaehlt werden —
 ns, _ = baue(pending=5, gesperrt=4, mode="none")
 w = ns["_admin_badge_messen"]("x")
-check(w == {"root_pending": 0, "gesperrt": 4, "gesamt": 4},
+check(zahlen(w) == {"root_pending": 0, "gesperrt": 4, "gesamt": 4},
       "ohne Broker fehlt nur SEINE Zahl, nicht die ganze Badge", str(w))
 ns, _ = baue(pending=5, gesperrt=4, broker_ok=False)
 check(ns["_admin_badge_messen"]("x")["gesperrt"] == 4,
@@ -242,7 +260,84 @@ except Exception as e:  # noqa: BLE001
     check(False, "eine Ausnahme in der Messung wird geschluckt", repr(e))
 
 # ═══════════════════════════════════════════════════════════════════════════
-abschnitt("4. Kein zweiter Endpunkt, keine zweite Fassung")
+abschnitt("4. `items` – was hinter der Zahl steckt (Mouseover am Zahnrad)")
+# ═══════════════════════════════════════════════════════════════════════════
+def messe(ns, user="x") -> dict:
+    """Ruft die Messung so, dass eine Ausnahme FEHLSCHLAEGT statt den Lauf
+    abzubrechen. Ohne das sah die Gegenprobe "Formatierer ungeschuetzt" wie ein
+    nicht gelaufener Test aus – dieselbe Falle wie ``.index()`` in einer
+    Pruefung (Register)."""
+    try:
+        w = ns["_admin_badge_messen"](user)
+        return w if isinstance(w, dict) else {"__fehler__": repr(w)}
+    except Exception as e:  # noqa: BLE001
+        return {"__fehler__": repr(e)}
+
+
+def posten(w: dict, i: int) -> dict:
+    """Eintrag i – NIE ``it[i]``: ein leeres `items` wuerde werfen und die
+    Gegenprobe "items leer" damit abbrechen lassen."""
+    lst = w.get("items") or []
+    return lst[i] if 0 <= i < len(lst) else {}
+
+
+ns, _ = baue(pending=2, gesperrt=1)
+w = messe(ns)
+it = w.get("items") or []
+check(len(it) == 3, "je ein Eintrag fuer Sperre und offene Freigabe", str(w))
+# Sperren zuerst: dieselbe Rangfolge, die die Badge in der Farbe ausdrueckt.
+check(posten(w, 0).get("art") == "blocked",
+      "die Sperre steht oben (dringlicher)", str(posten(w, 0)))
+check([e.get("art") for e in it] == ["blocked", "root", "root"],
+      "danach die offenen Freigaben", str([e.get("art") for e in it]))
+check(posten(w, 0).get("titel") == "nexus\\u0"
+      and posten(w, 0).get("sub") == "grund-0"
+      and posten(w, 0).get("ts") == 1000,
+      "die Sperre traegt Benutzer (mit Praefix), Grund und Zeitpunkt",
+      str(posten(w, 0)))
+check(posten(w, 1).get("titel") == "befehl 0"
+      and posten(w, 1).get("sub") == "nexus\\anna0"
+      and posten(w, 1).get("ts") == 2000,
+      "die Freigabe traegt Beschreibung, Anforderer und Zeitpunkt",
+      str(posten(w, 1)))
+
+# Ohne `description` muss der Key einspringen – sonst stuende dort eine leere
+# Zeile, und der Administrator wuesste nicht, was er freigeben soll.
+ns, _ = baue()
+sys.modules["backend.broker_client"].call_sync = (
+    lambda op, args, user="", timeout=0: {
+        "ok": True, "ops": [{"decision": "pending", "key": "shell_root:apt-get"}]})
+w = messe(ns)
+check(posten(w, 0).get("titel") == "shell_root:apt-get",
+      "ohne Beschreibung steht der Key da, nie eine leere Zeile", str(w))
+
+# TRANSPORT-Deckel: `gesamt` bleibt die volle Zahl, damit die Oberflaeche
+# "… und N weitere" schreiben kann.
+ns, _ = baue(pending=30, gesperrt=0)
+w = messe(ns)
+check(len(w.get("items") or []) == ns["_ADMIN_BADGE_ITEMS_MAX"],
+      "die Liste ist gedeckelt", str(len(w.get("items") or [])))
+check(w.get("gesamt") == 30,
+      "aber `gesamt` bleibt die VOLLE Zahl (sonst waere der Rest unsichtbar)",
+      str(w.get("gesamt")))
+
+# ⚠ Der eigentliche Punkt der Trennung: die ZAHL ist die Aussage, die Liste nur
+# ihre Erklaerung. Beim Bau dieses Moduls hat ein NameError im Listenaufbau den
+# Zaehler still auf 0 fallen lassen – vom breiten `except` verschluckt.
+def _kaputt(_u):
+    raise RuntimeError("Formatierer kaputt")
+
+
+ns, _ = baue(pending=3, gesperrt=2, display=_kaputt)
+w = messe(ns)
+check(zahlen(w) == {"root_pending": 3, "gesperrt": 2, "gesamt": 5},
+      "ein Fehler beim Formatieren laesst die ZAHL stehen", str(w))
+check(w.get("items") == [],
+      "und liefert nur eine leere Liste (das Panel faellt auf die Quellen zurueck)",
+      str(w.get("items")))
+
+# ═══════════════════════════════════════════════════════════════════════════
+abschnitt("5. Kein zweiter Endpunkt, keine zweite Fassung")
 # ═══════════════════════════════════════════════════════════════════════════
 SBTN = (ROOT / "frontend" / "js" / "settings_btn.js").read_text(encoding="utf-8")
 check("/api/broker/status" not in SBTN,

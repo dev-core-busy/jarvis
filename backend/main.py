@@ -4892,7 +4892,14 @@ def _is_admin_user(username: str) -> bool:
 _ADMIN_BADGE_TTL = 20.0          # Sekunden, normaler Fall
 _ADMIN_BADGE_TTL_FEHLER = 120.0  # Sekunden, nach Zeitueberschreitung
 _ADMIN_BADGE_TIMEOUT = 3.0       # harter Deckel je Messung
-_ADMIN_BADGE_LEER = {"root_pending": 0, "gesperrt": 0, "gesamt": 0}
+# Wie viele Eintraege die Badge-Liste HOECHSTENS ueber die Leitung schickt.
+# ⚠ TRANSPORT-Deckel, keine zweite Zaehlung – genau wie bei den Issue-
+# Benachrichtigungen (`_ISSUE_NOTIF_ITEMS_MAX`): `gesamt` bleibt die volle Zahl,
+# die Oberflaeche vergleicht beides und schreibt „… und N weitere". Ein stiller
+# Schnitt liesse den Administrator die gekuerzte Liste fuer vollstaendig halten,
+# waehrend die Badge daneben eine groessere Zahl zeigt (Register).
+_ADMIN_BADGE_ITEMS_MAX = 12
+_ADMIN_BADGE_LEER = {"root_pending": 0, "gesperrt": 0, "gesamt": 0, "items": []}
 _admin_badge_stand: dict = {"ts": 0.0, "ttl": 0.0, "wert": dict(_ADMIN_BADGE_LEER)}
 
 
@@ -4902,25 +4909,68 @@ def _admin_badge_messen(user: str) -> dict:
     Jede Quelle einzeln abgesichert: faellt eine aus, fehlt ihre Zahl – die
     Badge zeigt dann zu wenig statt gar nichts. Eine Badge, die wegen eines
     unerreichbaren Brokers auch die gesperrten Konten verschweigt, waere der
-    schlechtere Ausgang."""
+    schlechtere Ausgang.
+
+    ``items`` traegt, WAS hinter der Zahl steckt (Mouseover am Zahnrad). Es
+    enthaelt nichts, was `/api/broker/ops` und `/api/security/incidents` einem
+    Administrator nicht ohnehin zeigen – beide Endpunkte sind ebenfalls
+    Admin-only, und die Badge erscheint nur fuer Administratoren. Benutzernamen
+    laufen wie ueberall durch ``_display_name`` (Domaenen-Praefix), damit
+    dieselbe Person nicht in zwei Schreibweisen dasteht.
+
+    ⚠ DIE AUFBEREITUNG DER EINTRAEGE STEHT IN EIGENEN ``try``-BLOECKEN, GETRENNT
+    VON DER ZAEHLUNG. Die Zahl ist die Aussage, die Liste nur ihre Erklaerung:
+    ein Fehler beim Formatieren (unerwartetes Feld, fehlender Helfer) darf die
+    Badge nicht verschwinden lassen. Zusammengelegt wuerde ein NameError im
+    Listenaufbau vom breiten ``except`` verschluckt und der Zaehler faele
+    stillschweigend auf 0 – beim Bau dieses Moduls genau so passiert.
+    """
+    posten: list[dict] = []
     pending = 0
+    offen: list[dict] = []
     try:
         from backend import broker_client
         if broker_client.mode() != "none":
             res = broker_client.call_sync("broker.policy_list", {}, user=user,
                                           timeout=int(_ADMIN_BADGE_TIMEOUT))
             if res.get("ok"):
-                pending = sum(1 for e in (res.get("ops") or [])
-                              if e.get("decision") == "pending")
+                offen = [e for e in (res.get("ops") or [])
+                         if e.get("decision") == "pending"]
+                pending = len(offen)
     except Exception:  # noqa: BLE001
         pending = 0
+        offen = []
     gesperrt = 0
+    eintraege: list[dict] = []
     try:
-        gesperrt = len(security_guard.list_blocked())
+        eintraege = security_guard.list_blocked()
+        gesperrt = len(eintraege)
     except Exception:  # noqa: BLE001
         gesperrt = 0
+        eintraege = []
+    try:
+        # Sperren zuerst: ein Konto kommt nicht mehr herein, bis jemand handelt –
+        # dieselbe Rangfolge, die die Badge ueber `is-danger` schon in der Farbe
+        # ausdrueckt. Bei knappem Deckel steht dann das Dringlichere oben.
+        for e in eintraege:
+            posten.append({
+                "art": "blocked",
+                "titel": _display_name(str(e.get("user") or "")),
+                "sub": str(e.get("reason") or ""),
+                "ts": int(e.get("at") or 0),
+            })
+        for e in offen:
+            posten.append({
+                "art": "root",
+                "titel": str(e.get("description") or e.get("key") or ""),
+                "sub": _display_name(str(e.get("requested_by") or "")),
+                "ts": int(e.get("first_seen") or 0),
+            })
+    except Exception:  # noqa: BLE001
+        posten = []
     return {"root_pending": pending, "gesperrt": gesperrt,
-            "gesamt": pending + gesperrt}
+            "gesamt": pending + gesperrt,
+            "items": posten[:_ADMIN_BADGE_ITEMS_MAX]}
 
 
 def _admin_badge(user: str) -> dict:

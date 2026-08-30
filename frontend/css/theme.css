@@ -477,6 +477,96 @@ body.light .sapcert-state.is-err { color: color-mix(in srgb, var(--danger) 78%, 
 /* Eine Sperre ist dringlicher als eine offene Freigabe. */
 .jv-gear-badge.is-danger { background: var(--danger); }
 
+/* ── Mouseover am Zahnrad-Badge: was hinter der Zahl steckt ─────────────────
+ * Bauform des Issues-Badge-Panels (`.jv-iss-tip`), aber EIGENE Klassen und
+ * hier statt dort: jenes CSS spritzt issues.js zur Laufzeit ein, und das Modul
+ * liegt nicht auf allen Seiten mit Zahnrad. Eine geteilte Klasse waere eine
+ * Abhaengigkeit, die genau auf der Seite ausfaellt, die issues.js nicht laedt.
+ *
+ * DECKENDE Flaeche (Register): das Panel liegt ueber der Seite. Es haengt an
+ * `body` und ist `fixed` – in der Titelleiste eingehaengt bliebe es an deren
+ * overflow/Stapelkontext haengen und waere auf schmalen Fenstern abgeschnitten.
+ * z-index knapp unter dem Issues-Panel (99990) und unter jedem Modal. */
+.jv-gear-tip {
+    position: fixed;
+    z-index: 99988;
+    display: none;
+    width: min(360px, calc(100vw - 16px));
+    max-height: min(60vh, 420px);
+    overflow-y: auto;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 1px solid rgba(var(--accent-rgb), .35);
+    border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(var(--shadow-rgb), .5);
+    font-size: 12px;
+    padding: 8px;
+    text-align: left;
+}
+.jv-gear-tip-h {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    padding: 2px 4px 6px;
+}
+.jv-gear-tip-row {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    border-radius: 7px;
+    padding: 7px 8px;
+    cursor: pointer;
+    color: inherit;
+    font: inherit;
+}
+.jv-gear-tip-row:hover,
+.jv-gear-tip-row:focus-visible { background: rgba(var(--accent-rgb), .10); outline: none; }
+.jv-gear-tip-top { display: flex; align-items: center; gap: 6px; }
+/* `min-width: 0` ist Pflicht, nicht Kosmetik: ein Flex-Kind schrumpft von sich
+ * aus nicht unter seine Inhaltsbreite – ohne die Zeile schiebt ein langer
+ * Root-Befehl die Pille aus dem Panel, statt dass die Ellipse greift. */
+.jv-gear-tip-t {
+    font-weight: 600;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-primary);
+}
+/* Signalfarben sind bei 9 px auf Weiss unlesbar (var(--warning) misst 2,15:1).
+ * Abgedunkelt wie beim Issues-Panel; die Pille bringt ihre eigene Flaeche mit,
+ * der Wert gilt deshalb in BEIDEN Themes. */
+.jv-gear-tip-k {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    padding: 1px 6px;
+    border-radius: 9px;
+    color: #fff;
+    background: #4b5563;
+    flex: 0 0 auto;
+}
+.jv-gear-tip-k.root    { background: #b45309; }
+.jv-gear-tip-k.blocked { background: #b91c1c; }
+.jv-gear-tip-sub { color: var(--text-secondary); font-size: 11px; margin-top: 2px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* --text-muted waere hier 3,72:1 bei 10-11 px – fuer eine Zeile, die eine
+ * Kuerzung erklaert, zu wenig. --text-secondary misst 7,53:1. */
+.jv-gear-tip-more {
+    color: var(--text-secondary);
+    font-size: 11px;
+    padding: 6px 8px 2px;
+    border-top: 1px solid rgba(var(--fg-rgb), .08);
+    margin-top: 4px;
+}
+.jv-gear-tip-hint { color: var(--text-secondary); font-size: 10px; padding: 4px 8px 0; }
+
 /* ── Prompt-Pruefung (frontend/js/prompt_check.js) ──────────────────────────
    IN theme.css UND NICHT in style.css/chat.css: der Knopf sitzt in mehreren
    Bereichsseiten (/tracks, /email, Einstellungen), und die laden style.css

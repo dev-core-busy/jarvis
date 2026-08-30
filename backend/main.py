@@ -4494,12 +4494,19 @@ async def api_context_stats(session_id: str = "", user: str = Depends(require_au
                              "fills_pct": 0, "session_input_tokens": 0,
                              "session_output_tokens": 0, "session_total_tokens": 0,
                              "estimated_history_tokens": 0, "agent_state": "idle"})
-    from backend.agent import _hist_key as _hk, deserialize_history as _deser
+    from backend.agent import _hist_key as _hk, \
+        geheilter_sitzungskontext as _geheilt
     if session_id:
         hist = agent._user_histories.get(_hk(user, session_id))
         if hist is None:
-            from backend import chat_sessions as _cs
-            hist = _deser(_cs.load_context(user, session_id))
+            # Auch die reine ANZEIGE geht ueber die Heilung. Sonst nennt die
+            # Kontext-Pille eine Zahl, die den beschaedigten Stand zaehlt und
+            # nach dem naechsten Lauf anders ist – eine Anzeige, die einen
+            # Zustand behauptet, den sie nicht kennt (Register).
+            # Dass ein GET dabei die Heilung zurueckschreibt, ist bewusst: es
+            # ist keine fachliche Aenderung, sondern die Wiederherstellung
+            # einer Invariante, und sie passiert je Beschaedigung genau EINMAL.
+            hist = _geheilt(user, session_id)
     else:
         # Sitzungsloser Kontext GENAU DIESES Benutzers – derselbe Schluessel, den
         # /api/context/clear und /truncate verwenden (_hist_key ohne session_id).
@@ -5819,8 +5826,8 @@ async def chat_sessions_context_forget(sid: str, request: Request,
     Sitzungen; die Fragetexte sind seine eigenen.
     """
     from backend import chat_sessions as cs
-    from backend.agent import _hist_key as _hk, deserialize_history as _deser, \
-        serialize_history as _ser
+    from backend.agent import _hist_key as _hk, serialize_history as _ser, \
+        geheilter_sitzungskontext as _geheilt
     try:
         body = await request.json()
     except Exception:  # noqa: BLE001
@@ -5834,7 +5841,13 @@ async def chat_sessions_context_forget(sid: str, request: Request,
     hist = agent._user_histories.get(schluessel) if agent else None
     aus_ram = hist is not None
     if hist is None:
-        hist = _deser(cs.load_context(user, sid))
+        # ⚠ NICHT `deserialize_history(cs.load_context(...))` – das laedt
+        # UNGEHEILT, und der Rest landet danach in `_user_histories`, wo der
+        # Agent ihn FINDET und nie wieder von Platte liest. Genau dieser Pfad
+        # (Nachricht loeschen) hat am 2026-08-30 die Reparatur ausgehebelt:
+        # eine vier Tage alte offene Frage blieb stehen und wurde statt der
+        # neuen beantwortet. Siehe `geheilter_sitzungskontext`.
+        hist = _geheilt(user, sid)
     weg = _kontext_zuege_entfernen(hist, fragen)
     if weg:
         # In den Speicher zurueckschreiben (falls dort gehalten) UND auf Platte –
@@ -17969,13 +17982,16 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
             try:
                 _keep = int(_trunc)
                 _user_key = _get_ws_username(ws) or "anonymous"
-                from backend.agent import _hist_key as _hk, deserialize_history as _deser
+                from backend.agent import _hist_key as _hk, \
+                    geheilter_sitzungskontext as _geheilt
                 _skey = _hk(_user_key, chat_sid)
                 _hist = agent._user_histories.get(_skey)
                 if _hist is None and chat_sid:
-                    # Sitzungs-Kontext lazy laden, damit Edit-Modus auch nach Neustart greift
-                    from backend import chat_sessions as _cs
-                    _hist = _deser(_cs.load_context(_user_key, chat_sid))
+                    # Sitzungs-Kontext lazy laden, damit Edit-Modus auch nach
+                    # Neustart greift – ueber `geheilter_sitzungskontext`, NICHT
+                    # roh: ein hier ungeheilt eingehaengter Verlauf bleibt es
+                    # bis zum Prozessende (der Agent laedt ihn nicht neu).
+                    _hist = _geheilt(_user_key, chat_sid)
                     agent._user_histories[_skey] = _hist
                 if _hist is not None:
                     _removed = _truncate_history_to_user_index(_hist, _keep)

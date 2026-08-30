@@ -255,15 +255,33 @@ for _fn in ast.walk(_baum):
         if (isinstance(_k, ast.Call) and isinstance(_k.func, ast.Attribute)
                 and _k.func.attr == "_verlauf_reparieren"):
             _aufrufer.append(_fn.name)
-pruef(_aufrufer == ["run_task"],
-      f"_verlauf_reparieren wird an unerwarteter Stelle gerufen: {_aufrufer}")
+# ⚠ 2026-08-30 UMGESTELLT: geprueft wird die EIGENSCHAFT ("nur beim Laden"),
+# nicht mehr die STELLE ("in run_task"). Die Lade-und-Heil-Logik ist nach
+# `geheilter_sitzungskontext` gewandert, weil sie an DREI weiteren Ladestellen
+# fehlte – und genau daran ist der Schutz gescheitert (Maus statt Kuh, siehe
+# tests/test_kontext_laden.py). Ein Test, der die alte Stelle festschreibt,
+# meldet die Reparatur dieses Fehlers als Fehler. Register: die Eigenschaft
+# pruefen, nicht die Schreibweise.
+pruef(_aufrufer == ["geheilter_sitzungskontext"],
+      f"_verlauf_reparieren wird an unerwarteter Stelle gerufen: {_aufrufer} "
+      f"(erwartet: ausschliesslich die eine Ladefunktion)")
+_gh = next((n for n in ast.walk(_baum)
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and n.name == "geheilter_sitzungskontext"), None)
+pruef(_gh is not None, "geheilter_sitzungskontext fehlt")
+if _gh is not None:
+    _rumpf = "\n".join(_zeilen[_gh.lineno - 1:_gh.end_lineno])
+    _i_load = _rumpf.find("load_context(")
+    _i_rep = _rumpf.find("_verlauf_reparieren(")
+    pruef(_i_load != -1 and _i_rep != -1 and _i_load < _i_rep,
+          "die Reparatur laeuft nicht unmittelbar nach dem Laden des Kontexts")
+# Und der Lade-Zweig in run_task muss diese Funktion wirklich benutzen –
+# sonst waere die Auslagerung eine Verschiebung ins Leere.
 _rt = next(n for n in ast.walk(_baum)
            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == "run_task")
-_rumpf = "\n".join(_zeilen[_rt.lineno - 1:_rt.end_lineno])
-_i_load = _rumpf.find("deserialize_history(")
-_i_rep = _rumpf.find("_verlauf_reparieren(")
-pruef(_i_load != -1 and _i_rep != -1 and _i_load < _i_rep,
-      "die Reparatur laeuft nicht unmittelbar nach dem Laden des Kontexts")
+_rt_rumpf = "\n".join(_zeilen[_rt.lineno - 1:_rt.end_lineno])
+pruef("geheilter_sitzungskontext(" in _rt_rumpf,
+      "run_task laedt den Sitzungs-Kontext nicht ueber die Heilfunktion")
 
 print("\n6. Der Protokoll-Block sagt, worueber gezaehlt wird")
 # Alle Clients (Web, Android, Windows) setzen diesen Algorithmus um. Stand dort

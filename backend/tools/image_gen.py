@@ -31,10 +31,23 @@ def record_task_image(path, url: str) -> None:
     Werkzeug ``search_image`` liess sich nicht mehr laden ("SearchImageTool nicht
     geladen: cannot import name 'record_task_image'") und fehlte still im
     Werkzeugkasten. Aufgefallen nur, weil eine Zaehlung der Werkzeuge es zeigte.
+
+    DIESELBE URL WIRD NUR EINMAL GEMERKT. Die URL ist inhaltsadressiert
+    (sha256 des Bildinhalts), dieselbe URL ist also zwangslaeufig dasselbe
+    Bild – zweimal anzuzeigen ist nie gewollt. Doppelt registriert wird es bei
+    JEDER Delegation an eine Rolle: der Rollen-Agent birgt die Bilddaten aus
+    seiner Antwort ("(verlauf)"), der Hauptagent noch einmal aus dem
+    Werkzeug-Ergebnis ("delegate:image_builder"). Ohne diese Pruefung haengt
+    `_mit_bildern` beide Eintraege an.
+    GEMELDET VON ECHT 2026-08-30: eine Antwort endete mit zweimal derselben
+    Zeile `![Bild](/api/generated/cb20b70d….png)` – ein Bild, doppelt gezeigt.
     """
     lst = current_task_images.get()
-    if lst is not None:
-        lst.append({"path": str(path), "url": url})
+    if lst is None:
+        return
+    if any((e or {}).get("url") == url for e in lst):
+        return
+    lst.append({"path": str(path), "url": url})
 
 
 # Das LLM-Profil des LAUFENDEN Agenten liegt zentral in backend/llm.py (dort

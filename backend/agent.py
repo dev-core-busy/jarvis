@@ -904,6 +904,62 @@ def deserialize_history(dicts: list) -> list:
     return out
 
 
+def geheilter_sitzungskontext(username: str, session_id: str) -> list:
+    """Laedt `context.json` einer Sitzung, HEILT ihn und speichert die Heilung.
+
+    ⚠ DIE EINE STELLE, ueber die ein Kontext von Platte in den Speicher kommt.
+    Wer `chat_sessions.load_context()` direkt aufruft und das Ergebnis in
+    `_user_histories` haengt, umgeht die Reparatur – und weil der Agent den
+    Verlauf danach im Speicher FINDET, laedt er ihn nie wieder: die Heilung ist
+    ab diesem Moment tot, fuer die gesamte Lebensdauer des Prozesses.
+
+    GENAU SO IST ES PASSIERT (ECHT, 2026-08-30). `_verlauf_reparieren` gab es
+    seit dem Vortag und sie arbeitet korrekt – sie hing aber nur am Lade-Zweig
+    in `run_task`. Die beiden Pfade in `main.py` ("Nachricht loeschen" und
+    "Nachricht editieren") luden denselben Kontext UNGEHEILT in denselben
+    Speicher. Der Benutzer hatte eine Frage geloescht; damit war die Reparatur
+    umgangen, und eine vier Tage alte unbeantwortete Frage ("Comic-Bild einer
+    rennenden Maus") blieb im Kontext stehen. Auf die naechste Frage – ein Bild
+    einer gruenen Kuh – lieferte das Modell die MAUS: es sah zwei offene Fragen
+    und arbeitete die aeltere ab.
+
+    **Merkregel: eine Schutzmassnahme an EINEM von mehreren Zugaengen ist keine.**
+    Deshalb ist das hier eine Funktion und keine dritte Kopie des Dreizeilers;
+    `tests/test_kontext_laden.py` haelt fest, dass kein Aufrufer daran vorbei
+    geht.
+
+    Die Heilung wird ZURUECKGESCHRIEBEN, nicht nur im Speicher gehalten: sonst
+    liegt der beschaedigte Stand weiter auf Platte und der naechste Prozess
+    faengt von vorn an. Fehler dabei sind nicht toedlich – der Lauf arbeitet
+    mit dem geheilten Verlauf weiter.
+
+    Fail-safe: laesst sich nichts laden, kommt eine leere Liste zurueck. Ein
+    leerer Kontext kostet Gedaechtnis, ein beschaedigter kostet Richtigkeit.
+    """
+    try:
+        from backend import chat_sessions as _cs
+        verlauf = deserialize_history(_cs.load_context(username, session_id))
+    except Exception as e:  # noqa: BLE001
+        _log(f"Sitzungs-Kontext nicht ladbar ({session_id}): {e}")
+        return []
+
+    try:
+        weg = JarvisAgent._verlauf_reparieren(verlauf)
+    except Exception as e:  # noqa: BLE001
+        _log(f"Sitzungs-Kontext: Reparatur uebersprungen ({session_id}): {e}")
+        return verlauf
+
+    if weg:
+        _log(f"Sitzungs-Kontext {session_id} repariert: {weg} unvollstaendige "
+             f"Eintraege entfernt (unbeantwortete Frage oder offener Werkzeugaufruf)")
+        try:
+            from backend import chat_sessions as _cs2
+            _cs2.save_context(username, session_id, serialize_history(verlauf))
+        except Exception as e:  # noqa: BLE001
+            _log(f"Sitzungs-Kontext {session_id}: Heilung nicht gespeichert: {e}")
+    return verlauf
+
+
 class JarvisAgent:
     """Der Jarvis Agent – orchestriert LLM und Tools."""
 
@@ -2018,17 +2074,11 @@ KRITISCH – Autonomie-Regeln:
                     # Kontext fort, auch nach Neustart.
                     chat_history = []
                     if session_id:
-                        try:
-                            from backend import chat_sessions as _cs
-                            chat_history = deserialize_history(_cs.load_context(username, session_id))
-                            # Einen bereits BESCHAEDIGTEN Kontext heilen, bevor er
-                            # den naechsten Lauf vergiftet (siehe _verlauf_reparieren).
-                            _rep = self._verlauf_reparieren(chat_history)
-                            if _rep:
-                                _log(f"Sitzungs-Kontext repariert: {_rep} unvollstaendige "
-                                     f"Eintraege entfernt")
-                        except Exception:  # noqa: BLE001
-                            chat_history = []
+                        # Laden UND heilen in einem – siehe
+                        # `geheilter_sitzungskontext`. Nicht wieder aufdroeseln:
+                        # genau die Verdopplung dieses Dreizeilers an anderen
+                        # Stellen hat die Reparatur am 2026-08-30 ausgehebelt.
+                        chat_history = geheilter_sitzungskontext(username, session_id)
                     self._user_histories[_history_key] = chat_history
             self._current_chat_history  = chat_history  # Live-Referenz für Context-Stats-API
             # Schnappschuss des Verlaufs VOR diesem Lauf. Bricht der Lauf ohne
@@ -4271,7 +4321,21 @@ KRITISCH – Autonomie-Regeln:
             bilder = list(current_task_images.get() or [])
             if not bilder:
                 return text
-            fehlend = [b for b in bilder if b.get("url") and b["url"] not in (text or "")]
+            # ZWEI Bedingungen, und die zweite ist Tiefenverteidigung:
+            # (a) die URL steht noch nicht im Text,
+            # (b) sie wurde in diesem Nachtrag noch nicht verwendet.
+            # (b) faengt eine doppelte Registrierung ab. Die Quelle dafuer ist
+            # in `record_task_image` geschlossen – aber ein zweiter Weg in die
+            # Liste (neues Werkzeug, fremder Skill) wuerde hier sonst wieder
+            # zwei identische Zeilen erzeugen. Genau das wurde am 2026-08-30
+            # von ECHT gemeldet: dieselbe Bildzeile zweimal untereinander.
+            fehlend, gesehen = [], set()
+            for b in bilder:
+                url = b.get("url")
+                if not url or url in (text or "") or url in gesehen:
+                    continue
+                gesehen.add(url)
+                fehlend.append(b)
             if not fehlend:
                 return text
             zeilen = [f"![{(b.get('prompt') or 'Bild')[:80]}]({b['url']})" for b in fehlend]

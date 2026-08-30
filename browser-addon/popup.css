@@ -183,6 +183,19 @@ button.leise { color: var(--gedaempft); }
  * eine Kante in der Akzentfarbe. Die Erweiterung kann chat.css nicht laden,
  * die Regel steht deshalb hier – aber bewusst mit denselben Massen. */
 .meldung.arbeitet { display: flex; align-items: center; gap: 8px; }
+/* ⚠ UND DIESE ZEILE IST PFLICHT, NICHT KOSMETIK.
+ *
+ * `display: flex` ueberstimmt das `hidden`-ATTRIBUT. Ohne die Regel hier blieb
+ * eine einmal gezeigte Wartemeldung fuer immer stehen - mit drehendem Kreis -,
+ * obwohl `melde("")` sie laengst versteckt hatte. Gemeldet 2026-08-30
+ * („'Fasse das Ticket zusammen...' wird dauerhaft angezeigt") und im echten
+ * Chrome nachgemessen: `hidden=true`, `display=flex`, `offsetHeight>0`.
+ * Nebenwirkung war schlimmer als der Schoenheitsfehler: der Kasten machte das
+ * Fenster hoeher und schob den Ansichts-Umschalter aus dem 600 px hohen Popup
+ * heraus - „keine Moeglichkeit die Seitenleiste auszuwaehlen".
+ * Dieselbe Falle steht im Register (`.sp-row[hidden]`, `/sap`). Wer einer
+ * Klasse `display` gibt, muss `[hidden]` mitnehmen. */
+.meldung[hidden] { display: none; }
 .dreher {
   width: 13px;
   height: 13px;
@@ -315,6 +328,18 @@ html.leiste #f-ergebnis {
   margin-top: 12px;
   padding-top: 8px;
   border-top: 1px solid var(--rand);
+  /* ⚠ ER BLEIBT STEHEN, egal wie lang der Inhalt darueber wird.
+   *
+   * Ein Popup ist auf 600 px geklemmt; bei einem langen Ergebnis rutschte der
+   * Umschalter darunter (gemessen: Oberkante bei y=703). Er ist dann zwar da,
+   * aber niemand findet ihn - und genau so wurde es gemeldet.
+   * DECKENDE Flaeche ist Pflicht, sonst scheint der Text darunter durch;
+   * `bottom: -12px` deckt das Polster des Fensters mit ab, sonst blitzt dort
+   * ein Streifen hervor (Bauform wie der Fuss der Verlaufsleiste in /chat). */
+  position: sticky;
+  bottom: -12px;
+  padding-bottom: 12px;
+  background: var(--grund);
 }
 .ansicht-schalter {
   display: flex;
@@ -328,3 +353,7 @@ html.leiste #f-ergebnis {
  * Leiste das Kaestchen aus dem Bild (Register). */
 .ansicht-schalter > span { min-width: 0; }
 .ansicht-fuss .hinweis { margin: 4px 0 0; }
+/* Kann dieser Browser keine Leiste, bleibt die Zeile SICHTBAR und sagt warum -
+ * abgeschwaecht, damit sie nicht wie ein bedienbares Angebot aussieht. Die
+ * Aussage traegt der Hinweistext darunter, nicht die Deckkraft. */
+.ansicht-fuss.aus .ansicht-schalter { opacity: .55; cursor: default; }

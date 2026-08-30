@@ -67,7 +67,20 @@ function leisteFeststellen(kontext) {
 
 // ── Meldungen ───────────────────────────────────────────────────────────────
 function melde(text, arbeitet = false) {
-  if (!text) { el.meldung.hidden = true; return; }
+  if (!text) {
+    /* ⚠ AUCH INHALT UND KLASSE RAEUMEN, nicht nur verstecken.
+     *
+     * Bis 2026-08-30 stand hier nur `hidden = true`. Der alte Text blieb im
+     * DOM, der drehende Kreis blieb Kind, und die Klasse `arbeitet` blieb
+     * gesetzt - deren `display: flex` ueberstimmt das `hidden`-Attribut, also
+     * blieb die Wartemeldung sichtbar STEHEN. Die CSS-Regel `.meldung[hidden]`
+     * faengt das jetzt strukturell ab; hier wird zusaetzlich der Zustand
+     * beseitigt, damit gar nichts Altes mehr herumliegt. */
+    el.meldung.hidden = true;
+    el.meldung.textContent = "";
+    el.meldung.classList.remove("arbeitet");
+    return;
+  }
   // Meldungen tragen {marke} – auch die aus dem Hintergrund (der kennt das
   // DOM nicht und kann selbst nicht ersetzen).
   el.meldung.textContent = String(text).split("{marke}").join(_marke);
@@ -1314,17 +1327,31 @@ $("btn-leiste-zugriff").addEventListener("click", async () => {
  */
 function ansichtZeigen(wert, moeglich) {
   const zeile = $("ansicht-zeile");
-  if (!zeile) return;
-  // Ein Schalter fuer etwas, das dieser Browser nicht kann, ist schlimmer als
-  // kein Schalter: er verspricht eine Ansicht, die nie erscheint.
-  if (!moeglich) { zeile.hidden = true; return; }
-  zeile.hidden = false;
-  $("f-ansicht").checked = (wert === "leiste");
+  const kasten = $("f-ansicht");
   const h = $("ansicht-hinweis");
+  if (!zeile || !kasten) return;
+
+  /* ⚠ DIE ZEILE BLEIBT SICHTBAR, AUCH WENN DER BROWSER KEINE LEISTE KANN.
+   *
+   * Hier stand die Gegenregel („ein Schalter fuer etwas, das es nicht gibt,
+   * ist schlimmer als kein Schalter"). Die Meldung vom 2026-08-30 hat sie
+   * widerlegt: „keine Moeglichkeit die Seitenleiste auszuwaehlen" – und weder
+   * der Benutzer noch ich konnten von aussen unterscheiden, ob der Schalter
+   * FEHLT, ob er ausgeblendet WURDE oder ob er nur ausserhalb des
+   * Sichtfensters lag. Ein unsichtbares Bedienelement ist unerklaerbar.
+   * Ein gesperrtes MIT GRUND ist besser als beides: es sagt, dass es die
+   * Funktion gibt, und warum sie hier nicht geht. */
+  zeile.hidden = false;
+  kasten.checked = (wert === "leiste");
+  kasten.disabled = !moeglich;
+  zeile.classList.toggle("aus", !moeglich);
   if (!h) return;
-  h.textContent = _leiste
-    ? "Die Breite ziehst du an der Kante der Leiste."
-    : "Öffnet sich beim nächsten Klick auf das Symbol in der Symbolleiste.";
+  h.textContent = !moeglich
+    ? "Dieser Browser stellt keine Seitenleiste für Erweiterungen bereit "
+      + "(nötig: Chrome/Edge ab 114 oder Firefox ab 115)."
+    : (_leiste
+      ? "Die Breite ziehst du an der Kante der Leiste."
+      : "Öffnet sich beim nächsten Klick auf das Symbol in der Symbolleiste.");
   h.hidden = false;
 }
 

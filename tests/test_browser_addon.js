@@ -2048,9 +2048,18 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
   check(/ansichtZeigen\(z\.ansicht, z\.leiste_moeglich\)/.test(POPUP_JS),
         "start() belegt ihn aus dem Zustand des Hintergrunds");
   {
+    /* ⚠ UMGEDREHT AM 2026-08-30. Hier stand „kennt der Browser keine Leiste,
+     * bleibt der Schalter verborgen". Die Meldung „keine Moeglichkeit die
+     * Seitenleiste auszuwaehlen" liess sich damit von aussen nicht deuten:
+     * fehlt der Schalter, wurde er ausgeblendet, oder liegt er nur ausserhalb
+     * des Sichtfensters? Ein unsichtbares Bedienelement ist unerklaerbar. */
     const az = schneidePopup("ansichtZeigen");
-    check(!!az && /if \(!moeglich\)[\s\S]{0,80}hidden = true/.test(az),
-          "kennt der Browser keine Leiste, bleibt der Schalter verborgen");
+    check(!!az && /zeile\.hidden = false;/.test(az) && !/hidden = true/.test(az),
+          "die Ansichts-Zeile bleibt IMMER sichtbar");
+    check(!!az && /kasten\.disabled = !moeglich/.test(az),
+          "kann der Browser keine Leiste, ist sie gesperrt statt verborgen");
+    check(!!az && /Chrome\/Edge ab 114|ab 114/.test(az),
+          "und der Hinweis nennt den Grund");
   }
   /* ⚠ REIHENFOLGE: erst absenden, dann oeffnen. Nach einem `await` fehlt die
    * Benutzergeste fuer `sidePanel.open`; und ein Oeffnen VOR dem Absenden
@@ -2094,6 +2103,75 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
     check(!!lo && /return false;/.test(lo),
           "und meldet einen Fehlschlag zurueck, statt ihn zu verschlucken");
 
+  }
+
+  /* ── i) DIE WARTEMELDUNG MUSS WIEDER VERSCHWINDEN ──────────────────────
+   *
+   * Gemeldet 2026-08-30: „'Fasse das Ticket zusammen...' wird dauerhaft
+   * angezeigt". Ursache war NICHT ein haengender Lauf: `melde("")` setzte nur
+   * `hidden`, und `.meldung.arbeitet { display: flex }` UEBERSTIMMT das
+   * `hidden`-Attribut. Im echten Chrome gemessen: hidden=true, display=flex,
+   * offsetHeight>0, drehender Kreis noch da.
+   * Die Folge war schlimmer als der Schoenheitsfehler: der Kasten machte das
+   * Fenster hoeher und schob den Ansichts-Umschalter aus dem 600 px hohen
+   * Popup - „keine Moeglichkeit die Seitenleiste auszuwaehlen". */
+  {
+    const regel = /\.meldung\[hidden\]\s*\{([^}]*)\}/.exec(POPUP_CSS);
+    check(!!regel && /display:\s*none/.test(regel[1]),
+          "`.meldung[hidden]` setzt display:none - das Attribut muss gewinnen");
+    /* Die Regel muss NACH der Klasse stehen: gleiche Spezifitaet (0,2,0 gegen
+     * 0,2,0), da entscheidet die Reihenfolge. */
+    check(POPUP_CSS.indexOf(".meldung[hidden]")
+          > POPUP_CSS.lastIndexOf(".meldung.arbeitet"),
+          "und steht NACH .meldung.arbeitet - sonst verliert sie");
+
+    // Und der Zustand wird geraeumt, nicht nur versteckt.
+    const m = schneidePopup("melde");
+    check(!!m && /textContent = ""/.test(m) && /classList\.remove\("arbeitet"\)/.test(m),
+          "melde(\"\") raeumt Text und Klasse mit ab");
+
+    // AUSGEFUEHRT: erst eine Wartemeldung, dann leeren.
+    {
+      const dom = new JSDOM(POPUP_HTML, { url: "https://x.test/",
+                                          runScripts: "outside-only" });
+      const w = dom.window;
+      try {
+        const r = JSON.parse(new w.Function(`
+          const $ = (id) => document.getElementById(id);
+          const el = { meldung: $("meldung") };
+          let _marke = "Marke";
+` + m + `
+          melde("Fasse das Ticket zusammen …", true);
+          const waehrend = { sichtbar: !el.meldung.hidden,
+                             dreher: !!el.meldung.querySelector(".dreher") };
+          melde("");
+          return JSON.stringify({ waehrend, danach: {
+            hidden: el.meldung.hidden,
+            text: el.meldung.textContent,
+            arbeitet: el.meldung.classList.contains("arbeitet"),
+            dreher: !!el.meldung.querySelector(".dreher"),
+          }});`)());
+        check(r.waehrend.sichtbar && r.waehrend.dreher,
+              "waehrend des Laufs steht die Meldung mit drehendem Kreis da");
+        check(r.danach.hidden === true, "danach ist sie versteckt");
+        check(r.danach.text === "", "der Text ist weg", r.danach.text);
+        check(r.danach.arbeitet === false, "die Klasse `arbeitet` ist weg");
+        check(r.danach.dreher === false, "und der Kreis ist weg");
+      } finally { w.close(); }
+    }
+  }
+
+  /* ── j) DER UMSCHALTER DARF NICHT AUS DEM BILD WANDERN ─────────────────
+   * Ein Popup ist auf 600 px geklemmt; bei langem Ergebnis lag die Oberkante
+   * der Zeile gemessen bei y=703. Sie ist dann da und trotzdem unauffindbar. */
+  {
+    const r = /\.ansicht-fuss\s*\{([^}]*)\}/.exec(POPUP_CSS);
+    check(!!r && /position:\s*sticky/.test(r[1]),
+          "der Ansichts-Fuss klebt am unteren Rand", (r || ["", ""])[1].trim());
+    /* DECKENDE Flaeche ist Pflicht - halbtransparent schiene der Text
+     * darunter durch (Projektregel). */
+    check(!!r && /background:\s*var\(--grund\)/.test(r[1]),
+          "und traegt eine deckende Flaeche");
   }
 
   // ── h) CSS ──────────────────────────────────────────────────────────────

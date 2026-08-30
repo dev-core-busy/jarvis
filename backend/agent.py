@@ -997,6 +997,7 @@ Regeln:
     - SUCHEN/ZEIGEN eines vorhandenen Bildes ("bitte ein Bild von ...", "such/finde ein Bild von ...", "zeig mir ein Bild von ...") -> IMMER search_image.
     OEFFNE NIEMALS einen Browser auf dem Desktop, um ein Bild zu zeigen (kein browser_control, kein desktop_*). Gib die vom Tool zurueckgegebene Markdown-Bildreferenz ![..](url) UNVERAENDERT in deiner Antwort aus.
     - SCHREIBE NIEMALS BILDDATEN IN DEINE ANTWORT: keine base64-Zeichenketten, keine "data:image/...;base64,..."-Adresse – weder ganz noch auszugsweise, auch nicht aus einem Werkzeug-Ergebnis oder aus dem bisherigen Gespraech kopiert. Ein Bild entsteht AUSSCHLIESSLICH ueber generate_image bzw. search_image; deren `/api/generated/...`-Referenz ist der einzige Weg, auf dem ein Bild beim Benutzer ankommt. Du kannst Bilddaten NICHT selbst zusammensetzen – der Versuch erzeugt eine Zeichenwueste oder ein kaputtes Bild. Kannst du kein Bild liefern, SAGE DAS.
+    - EIN WERKZEUG-ERGEBNIS MIT EINER `/api/generated/...`-ADRESSE IST EIN ERFOLG. Melde dann NIEMALS einen Fehlschlag, und erfinde erst recht keine Fehlermeldung ("Failed to parse", "JSON-Fehler", "interner Fehler" o.ae.) – gab es einen Fehler, steht er im Ergebnis. Uebernimm die Zeile `![...](/api/generated/...)` unveraendert in deine Antwort. Das gilt auch, wenn das Ergebnis aus einer delegierten Rolle kommt und in eckigen Klammern eingeleitet wird: die Klammer ist ein Hinweis an dich, keine Stoerungsmeldung.
 
 16. OFFICE-DOKUMENTE (Word/Excel/PowerPoint/PDF):
     - Fuer EINFACHE Dokumente (Text, Tabellen, Bullet-Folien) die office_*-Tools nutzen: office_create_word / office_create_excel / office_create_powerpoint, PDF-Export via office_to_pdf. Diese Werkzeuge laufen IM BACKEND und sind damit unabhaengig von Python-Modulen in der Shell – sie sind der verlaessliche Weg. Eine NEU anzulegende EXCEL-Tabelle also mit office_create_excel erzeugen.
@@ -4956,10 +4957,11 @@ KRITISCH – Autonomie-Regeln:
                 # Anzeige bleibt nur die Bildreferenz.
                 teile.append(
                     f"![{bild_alt}]({url})" if fuer_anzeige else
-                    f"[BILDDATEN AUSGELAGERT: {endung.upper()}, {len(daten) // 1024} KB. "
-                    f"Base64 gehoert NICHT in deine Antwort – sie wird nicht angezeigt und "
-                    f"fuellt den Kontext. Gib stattdessen GENAU diese Zeile unveraendert aus, "
-                    f"damit das Bild erscheint:]\n![{bild_alt}]({url})"
+                    f"[BILD ERFOLGREICH ERZEUGT – KEIN FEHLER. "
+                    f"{endung.upper()}, {len(daten) // 1024} KB, fertig gespeichert. "
+                    f"Uebernimm die folgende Zeile unveraendert in deine Antwort, dann "
+                    f"sieht der Benutzer das Bild. Melde KEINEN Fehlschlag.]\n"
+                    f"![{bild_alt}]({url})"
                 )
                 letzte = ende
                 print(f"[AGENT {self.agent_id}] Bilddaten aus '{tool_name}' ausgelagert: "

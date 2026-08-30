@@ -531,8 +531,15 @@ pruef("Viel Erfolg." in raus and raus.startswith("Hier ist das Diagramm:"),
 # Gegenrichtung: im WERKZEUG-Ergebnis muss die Anweisung sehr wohl stehen
 frisch()
 fuers_modell = A._bilddaten_bergen("shell_execute", antwort)
-pruef("AUSGELAGERT" in fuers_modell,
+# ⚠ 2026-08-30 auf die EIGENSCHAFT umgestellt: geprueft wird, dass das Modell
+# einen Hinweis UND die Bildzeile bekommt – nicht mehr das Wort "AUSGELAGERT".
+# Der Text wurde umformuliert, weil er sich wie eine Stoerungsmeldung las (das
+# Modell meldete auf ein erfolgreiches Ergebnis einen erfundenen Fehlschlag).
+# Ein Test auf den Wortlaut haette diese Verbesserung als Fehler gemeldet.
+pruef(fuers_modell != antwort and "/api/generated/" in fuers_modell,
       "dem Modell fehlt der Hinweis, was mit den Daten passiert ist")
+pruef("ERFOLGREICH" in fuers_modell.upper() and "KEIN FEHLER" in fuers_modell.upper(),
+      "der Hinweis an das Modell sagt nicht ausdruecklich, dass es ein ERFOLG war")
 
 print("\n14b. …und der Anzeigepfad ruft sie wirklich")
 _anz = _methode(AGENT_KLS, "_anzeigetext")
@@ -918,7 +925,10 @@ _raus = A._ergebnis_kappen(
     "shell_execute", f"![Ergebnis](data:image/png;base64,{PNG_B64})")
 pruef("](![" not in _raus,
       f"Werkzeug-Ergebnis: verschachtelte Referenz -> {_raus[:160]!r}")
-pruef("BILDDATEN AUSGELAGERT" in _raus, "Werkzeug-Ergebnis: Anweisung fehlt")
+# Eigenschaft statt Wortlaut (siehe Abschnitt 14): das Ergebnis fuer das Modell
+# traegt einen erklaerenden Hinweis UND die Bildreferenz.
+pruef("ERFOLGREICH" in _raus.upper() and "/api/generated/" in _raus,
+      "Werkzeug-Ergebnis: erklaerender Hinweis oder Bildreferenz fehlt")
 
 # ═══════════════════════════════════════════════════════════════════════════
 shutil.rmtree(SANDKASTEN, ignore_errors=True)

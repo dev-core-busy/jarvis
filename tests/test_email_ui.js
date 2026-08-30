@@ -34,6 +34,22 @@ catch (e) { console.log('ABBRUCH: jsdom nicht installiert'); process.exit(2); }
 const MAIL_HTML = fs.readFileSync(path.join(ROOT, 'frontend/email.html'), 'utf8');
 const PORTAL_JS = fs.readFileSync(path.join(ROOT, 'frontend/js/email_portal.js'), 'utf8');
 const SET_HTML = fs.readFileSync(path.join(ROOT, 'frontend/settings.html'), 'utf8');
+
+/* Schneidet EIN Reiter-Panel aus settings.html.
+ *
+ * DIE GRENZE IST DAS NAECHSTE PANEL, nicht ein Kommentar weiter unten.
+ * GEMELDET 2026-08-30: der SAP-Schnitt endete an "Tab: E-Mail" – seit
+ * zwischendurch die Reiter *Vemas* und *Jira* eingezogen wurden, umfasste er
+ * DREI Panels (56.482 statt 22.269 Zeichen) und zaehlte sieben Kaestchen statt
+ * vier. Der Test meldete einen Fehler, den es nicht gab. Eine Textmarke in
+ * einem fremden Abschnitt ist keine Grenze. */
+function reiterPanel(id) {
+    const a = SET_HTML.indexOf('id="settings-tab-' + id + '"');
+    if (a < 0) return '';
+    const rest = SET_HTML.slice(a + 10);
+    const m = rest.match(/id="settings-tab-[a-z_]+" class="settings-tab-content"/);
+    return m ? SET_HTML.slice(a, a + 10 + m.index) : SET_HTML.slice(a);
+}
 const ADMIN_JS = fs.readFileSync(path.join(ROOT, 'frontend/js/email.js'), 'utf8');
 const I18N = fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8');
 const APP = fs.readFileSync(path.join(ROOT, 'frontend/js/app.js'), 'utf8');
@@ -663,8 +679,7 @@ function baueReiter(opt) {
     // Die Hinweistexte duerfen nicht das Gegenteil des Verhaltens versprechen
     // (dieselbe Fehlerklasse wie WA_TASK_PROMPT): eine eingetragene URL GEWINNT
     // jetzt gegen den Autodiscover-Haken.
-    const panel2 = SET_HTML.slice(SET_HTML.indexOf('id="settings-tab-email"'),
-                                  SET_HTML.indexOf('Tab: Kundenverwaltung'));
+    const panel2 = reiterPanel('email');
     pruefe(panel2.indexOf('den Haken entfernen und die URL eintragen') === -1,
         'der alte, falsche Hinweis ist weg');
     pruefe(panel2.indexOf('eingetragene Adresse wird immer benutzt') > -1,
@@ -794,8 +809,7 @@ function baueReiter(opt) {
         pruefe(SET_HTML.indexOf('id="em-sect-' + s + '-tog"') > -1,
             'Umschalter em-sect-' + s + '-tog existiert');
     });
-    const panel = SET_HTML.slice(SET_HTML.indexOf('id="settings-tab-email"'),
-                                 SET_HTML.indexOf('Tab: Kundenverwaltung'));
+    const panel = reiterPanel('email');
     pruefe((panel.match(/kb-collapse-header/g) || []).length === 4,
         'alle vier Container nutzen das Projekt-Muster kb-collapse-header');
     pruefe(panel.indexOf('data-em-sect') === -1,
@@ -830,12 +844,34 @@ function baueReiter(opt) {
         pruefe(regel.slice(0, 260).indexOf(teil) > -1, 'die Regel setzt ' + teil);
     });
     // Der SAP-Reiter war der Anlass fuer die Ausweitung: dort standen dieselben
-    // vier Kaestchen gross geschrieben und ohne Abstand.
-    const SAP_PANEL = SET_HTML.slice(SET_HTML.indexOf('id="settings-tab-sap"'),
-                                     SET_HTML.indexOf('Tab: E-Mail'));
-    pruefe((SAP_PANEL.match(/label class="checkbox-group"/g) || []).length === 4,
-        'im SAP-Reiter sind es genau die vier bekannten Kaestchen',
-        String((SAP_PANEL.match(/label class="checkbox-group"/g) || []).length));
+    // Kaestchen gross geschrieben und ohne Abstand.
+    //
+    // GEPRUEFT WIRD DIE EIGENSCHAFT, NICHT EINE ZAHL: "es sind genau vier"
+    // meldet beim fuenften Kaestchen einen Fehler, den es nicht gibt – eine
+    // feste Zahl in einem Test ist eine Zeitbombe (Register). Die Aussage, auf
+    // die es ankommt, lautet: JEDES Kaestchen des Reiters folgt dem Muster.
+    const SAP_PANEL = reiterPanel('sap');
+    // DER SCHNITT WIRD SELBST GEPRUEFT. Ohne das bliebe eine zu weite Grenze
+    // unbemerkt, solange die fremden Panels zufaellig demselben Muster folgen –
+    // genau so war der alte Schnitt zwei Reiter lang unauffaellig, bis der
+    // Kaestchen-Zaehler ploetzlich sieben meldete.
+    ['email', 'sap'].forEach(function (id) {
+        const teil = reiterPanel(id);
+        pruefe(teil.length > 0 && (teil.match(/class="settings-tab-content"/g) || []).length === 1,
+            'reiterPanel(' + id + ') schneidet GENAU EIN Panel',
+            String((teil.match(/class="settings-tab-content"/g) || []).length));
+    });
+    pruefe(SAP_PANEL.indexOf('sap-conn-type') > -1
+        && SAP_PANEL.indexOf('vemas-verify-ssl') === -1
+        && SAP_PANEL.indexOf('jvorl-global') === -1,
+        'der SAP-Schnitt enthaelt den SAP-Reiter und keinen fremden');
+    const sapAlle = (SAP_PANEL.match(/type="checkbox"/g) || []).length;
+    const sapMuster = (SAP_PANEL.match(
+        /<label class="checkbox-group"[^>]*>\s*<input[^>]*type="checkbox"/g) || []).length;
+    pruefe(sapAlle > 0, 'der SAP-Reiter hat ueberhaupt Kontrollkaestchen', String(sapAlle));
+    pruefe(sapAlle === sapMuster,
+        'im SAP-Reiter nutzt JEDES Kaestchen .checkbox-group',
+        sapMuster + ' von ' + sapAlle);
     // Inline gesetzte Werte muessen weiter gewinnen, sonst rutschen die
     // Branding-Radios untereinander bzw. verlieren die Profil-Kaestchen ihr flex:1.
     pruefe(SET_HTML.indexOf('style="display:inline-flex;gap:6px;margin-right:18px;"') > -1,

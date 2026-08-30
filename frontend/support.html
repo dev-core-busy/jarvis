@@ -77,7 +77,19 @@
         .sup-hist-clear { background: none; border: none; color: var(--text-muted); cursor: pointer;
             font-size: 0.78rem; }
         .sup-hist-clear:hover { color: var(--danger); }
-        .sup-hist-item { padding: 9px 14px; cursor: pointer; border-bottom: 1px solid rgba(var(--fg-rgb), .05); }
+        .sup-hist-item { padding: 9px 14px; cursor: pointer; border-bottom: 1px solid rgba(var(--fg-rgb), .05);
+            display: flex; align-items: center; gap: 8px; }
+        /* `min-width: 0` ist PFLICHT, nicht Kosmetik: ein Flex-Kind schrumpft
+           von sich aus nicht unter seine Inhaltsbreite – ohne diese Zeile
+           schiebt eine lange Anfrage den Muelleimer aus dem Panel, statt dass
+           das Ellipsis in .sup-hist-q greift. */
+        .sup-hist-text { flex: 1 1 auto; min-width: 0; }
+        /* Muelleimer am Eintrag: loescht GENAU DIESEN Verlaufseintrag. */
+        .sup-hist-del { flex: 0 0 auto; background: none; border: none; padding: 4px;
+            margin: -4px -4px -4px 0; color: var(--text-muted); cursor: pointer;
+            border-radius: 6px; display: flex; align-items: center; line-height: 1; }
+        .sup-hist-del:hover { color: var(--danger); background: rgba(var(--danger-rgb), .12); }
+        .sup-hist-del:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
         .sup-hist-item:hover { background: rgba(var(--accent-rgb), .08); }
         .sup-hist-q { font-size: 0.86rem; color: var(--text-primary);
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -573,7 +585,7 @@
 
 <script src="/static/js/icons.js?v=1"></script>
 <script src="/static/js/cpubar.js?v=1"></script>
-<script src="/static/js/i18n.js?v=197"></script>
+<script src="/static/js/i18n.js?v=198"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
 <script src="/static/js/theme.js?v=3"></script>
 <script src="/static/js/branding.js?v=25"></script>
@@ -585,7 +597,7 @@
 <script src="/static/js/profile_switcher.js?v=5"></script>
 <script src="/static/js/sessions.js?v=8"></script>
 <script src="/static/js/logo_home.js?v=1"></script>
-<script src="/static/js/support.js?v=58"></script>
+<script src="/static/js/support.js?v=59"></script>
 <!-- Diagramme: der Support-Assistent antwortet ueber denselben
      Markdown-Renderer (chatlib.js), erzeugte also bisher Platzhalter fuer
      ```chartjs-Bloecke, die niemand hydratisiert hat – ein leerer Kasten.

@@ -395,6 +395,18 @@
         catch (e) {}
         renderHistory();
     }
+    // Loescht GENAU EINEN Eintrag, gefunden ueber den Zeitstempel: ein zweiter
+    // Tab kann den Verlauf inzwischen verschoben haben, ein Listenindex traefe
+    // dann den falschen Eintrag.
+    function deleteHistory(ts) {
+        var list = readHistory();
+        var i = -1;
+        for (var k = 0; k < list.length; k++) { if (list[k].ts === ts) { i = k; break; } }
+        if (i < 0) { renderHistory(); return; }
+        list.splice(i, 1);
+        try { localStorage.setItem(HIST_KEY, JSON.stringify(list)); } catch (e) {}
+        renderHistory();
+    }
     function renderHistory() {
         var box = $('vm-hist-list'); if (!box) return;
         var list = readHistory();
@@ -416,7 +428,32 @@
             m.className = 'vm-hist-meta';
             m.textContent = new Date(h.ts || 0).toLocaleString()
                 + (h.q && h.title ? ' · ' + h.q : '');
-            d.appendChild(q); d.appendChild(m);
+            // Text in einem eigenen Kind (min-width:0), sonst greift das
+            // Ellipsis der langen Zeile im Flex-Container nicht mehr.
+            var txt = document.createElement('div');
+            txt.className = 'vm-hist-text';
+            txt.appendChild(q); txt.appendChild(m);
+            d.appendChild(txt);
+            // MUELLEIMER, kein x: der gespeicherte Eintrag wird dauerhaft
+            // entfernt (Symbol-Semantik 2026-08-19).
+            var del = document.createElement('button');
+            del.type = 'button';
+            del.className = 'vm-hist-del';
+            del.innerHTML = window.JarvisIcons.trash();
+            var lbl = T('sup.hist_del', 'Eintrag löschen');
+            del.title = lbl;
+            del.setAttribute('aria-label', lbl);
+            del.addEventListener('click', function (e) {
+                // stopPropagation ist hier PFLICHT, und zwar doppelt: ohne sie
+                // uebernaehme der Eintrag darunter die Auswertung ins Formular,
+                // UND der Dokument-Listener schloesse das Verlaufsfeld – die
+                // geloeschte Zeile haengt beim Weiterlaufen des Klicks nicht
+                // mehr im Panel, `panel.contains(target)` ist dann falsch.
+                e.stopPropagation();
+                e.preventDefault();
+                deleteHistory(h.ts);
+            });
+            d.appendChild(del);
             // Ein Klick UEBERNIMMT nur, er startet nicht: eine Auswertung
             // kostet Minuten und Last (gleiche Entscheidung wie in /sap).
             d.addEventListener('click', function () {

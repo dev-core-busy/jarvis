@@ -579,9 +579,16 @@
                 entries.forEach(function (e) {
                     var item = document.createElement('div');
                     item.className = 'sup-hist-item';
-                    item.innerHTML = '<div class="sup-hist-q">' + esc(e.query) + '</div>'
+                    // Text in einem eigenen Kind: der Muelleimer sitzt daneben,
+                    // und ohne den Wrapper (mit min-width:0) greift das Ellipsis
+                    // der langen Anfrage im Flex-Container nicht mehr.
+                    var txt = document.createElement('div');
+                    txt.className = 'sup-hist-text';
+                    txt.innerHTML = '<div class="sup-hist-q">' + esc(e.query) + '</div>'
                         + '<div class="sup-hist-meta">' + relTime(e.ts)
                         + (typeof e.total === 'number' ? ' · ' + e.total + ' ' + T('sup.hits', 'Treffer') : '') + '</div>';
+                    item.appendChild(txt);
+                    item.appendChild(histDelButton(e.query));
                     item.addEventListener('click', function () {
                         $('sup-hist-panel').classList.add('hidden');
                         $('sup-input').value = e.query;
@@ -591,6 +598,53 @@
                 });
             })
             .catch(function () { list.innerHTML = '<div class="sup-hist-empty">' + esc(T('sup.hist_err', 'Fehler beim Laden.')) + '</div>'; });
+    }
+
+    // MUELLEIMER, kein x: hier wird ein GESPEICHERTER Eintrag dauerhaft
+    // entfernt (Symbol-Semantik 2026-08-19). Die Bedeutung traegt der title,
+    // das Symbol selbst ist Dekoration.
+    function histDelButton(query) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'sup-hist-del';
+        b.innerHTML = window.JarvisIcons.trash();
+        var lbl = T('sup.hist_del', 'Eintrag löschen');
+        b.title = lbl;
+        b.setAttribute('aria-label', lbl);
+        b.addEventListener('click', function (ev) {
+            // PFLICHT, nicht Kosmetik: ohne stopPropagation liefe der Klick
+            // weiter an den Eintrag – der wuerde die Anfrage uebernehmen und
+            // eine neue Suche starten, waehrend der Eintrag geloescht wird.
+            ev.stopPropagation();
+            ev.preventDefault();
+            deleteHistoryEntry(query);
+        });
+        return b;
+    }
+
+    // Loescht GENAU EINEN Eintrag. Der Benutzer steckt in der Anmeldung, nicht
+    // im Rumpf – geschickt wird nur, WELCHE Anfrage gemeint ist.
+    function deleteHistoryEntry(query) {
+        fetch('/api/support/history/entry', {
+            method: 'DELETE',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ query: query })
+        })
+            .then(function (r) { if (r.status === 401) { logout(); return null; } return r.json(); })
+            .then(function (d) {
+                if (!d) return;
+                // Neu laden statt die Zeile nur auszublenden: der Server ist
+                // die Wahrheit, und ein Fehlschlag darf nicht wie ein Erfolg
+                // aussehen.
+                if (d.ok) loadHistory();
+                else showHistError();
+            })
+            .catch(showHistError);
+    }
+    function showHistError() {
+        var list = $('sup-hist-list');
+        if (list) list.innerHTML = '<div class="sup-hist-empty">'
+            + esc(T('sup.hist_del_err', 'Löschen fehlgeschlagen.')) + '</div>';
     }
 
     function clearHistory() {

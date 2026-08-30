@@ -402,6 +402,21 @@
         try { localStorage.setItem(HIST_KEY, JSON.stringify(list.slice(0, HIST_MAX))); } catch (e) {}
         renderHistory();
     }
+    // Loescht GENAU EINEN Eintrag. Der Index stammt aus dem GEZEICHNETEN Stand;
+    // ein zweiter Tab kann den Verlauf inzwischen verschoben haben, deshalb
+    // entscheidet der Zeitstempel und der Index ist nur der schnelle Weg.
+    // Ohne diese Pruefung loeschte ein Klick den falschen Eintrag.
+    function deleteHistory(i, ts) {
+        var list = readHistory();
+        if (!(list[i] && list[i].ts === ts)) {
+            i = -1;
+            for (var k = 0; k < list.length; k++) { if (list[k].ts === ts) { i = k; break; } }
+        }
+        if (i < 0) { renderHistory(); return; }
+        list.splice(i, 1);
+        try { localStorage.setItem(HIST_KEY, JSON.stringify(list)); } catch (e) {}
+        renderHistory();
+    }
     function renderHistory() {
         var box = $('sp-hist-list'); if (!box) return;
         var list = readHistory();
@@ -410,14 +425,35 @@
                 + esc(T('sap.hist_empty', 'Noch keine Analysen ausgeführt.')) + '</div>';
             return;
         }
+        var delLbl = esc(T('sup.hist_del', 'Eintrag löschen'));
         box.innerHTML = list.map(function (it, i) {
             var label = it.title || it.q || T('sap.free_question_short', 'Freie Frage');
             var when = new Date(it.ts).toLocaleString();
             var sub = (it.title && it.q) ? (it.q + ' · ' + when) : when;
+            // Text in einem eigenen Kind (min-width:0), sonst greift das
+            // Ellipsis der langen Zeile im Flex-Container nicht mehr.
+            // MUELLEIMER, kein x: der Eintrag wird dauerhaft entfernt.
             return '<div class="sp-hist-item" data-i="' + i + '">'
+                + '<div class="sp-hist-text">'
                 + '<div class="sp-hist-q">' + esc(label) + '</div>'
-                + '<div class="sp-hist-meta">' + esc(sub) + '</div></div>';
+                + '<div class="sp-hist-meta">' + esc(sub) + '</div></div>'
+                + '<button type="button" class="sp-hist-del" data-i="' + i + '"'
+                + ' data-ts="' + (it.ts || 0) + '" title="' + delLbl + '"'
+                + ' aria-label="' + delLbl + '">' + window.JarvisIcons.trash() + '</button>'
+                + '</div>';
         }).join('');
+        Array.prototype.forEach.call(box.querySelectorAll('.sp-hist-del'), function (b) {
+            b.addEventListener('click', function (e) {
+                // stopPropagation ist hier PFLICHT, und zwar doppelt: ohne sie
+                // uebernaehme der Eintrag darunter die Analyse ins Formular,
+                // UND der Dokument-Listener schloesse das Verlaufsfeld – die
+                // geloeschte Zeile haengt beim Weiterlaufen des Klicks nicht
+                // mehr im Panel, `panel.contains(target)` ist dann falsch.
+                e.stopPropagation();
+                e.preventDefault();
+                deleteHistory(parseInt(b.dataset.i, 10), parseInt(b.dataset.ts, 10));
+            });
+        });
         Array.prototype.forEach.call(box.querySelectorAll('.sp-hist-item'), function (el) {
             el.addEventListener('click', function () {
                 var it = readHistory()[parseInt(el.dataset.i, 10)];

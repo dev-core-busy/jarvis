@@ -13415,6 +13415,56 @@ async def support_history_clear(user: str = Depends(require_auth)):
     return JSONResponse({"ok": True})
 
 
+@app.delete("/api/support/history/entry")
+async def support_history_delete_entry(request: Request, user: str = Depends(require_auth)):
+    """Entfernt EINEN Eintrag aus dem Such-Verlauf des angemeldeten Benutzers.
+
+    DER BENUTZER KOMMT AUSSCHLIESSLICH AUS DER ANMELDUNG, nie aus dem Rumpf –
+    sonst waere der Endpunkt ein Weg in fremde Verlaeufe (gleiche Regel wie
+    beim Empfaenger einer Erinnerung).
+
+    Identifiziert wird ueber die ANFRAGE, nicht ueber einen Listenindex: der
+    Verlauf kann sich zwischen Anzeigen und Klicken verschoben haben (eine neue
+    Suche stellt sich vorn ein), ein Index traefe dann den falschen Eintrag.
+    `query` ist zugleich der Dedup-Schluessel von `_record_support_history` –
+    verglichen wird deshalb genauso (getrimmt, Gross/Klein egal), damit
+    "loeschen" genau das entfernt, was eine gleichlautende Suche ersetzen wuerde.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    query = ((body or {}).get("query") or "").strip()
+    if not query:
+        return JSONResponse({"ok": False, "error": "query fehlt"}, status_code=400)
+    ziel = query.lower()
+    with _get_hist_lock():
+        data = _load_support_history()
+        entries = data.get(user, [])
+        rest = [e for e in entries
+                if (e.get("query") or "").strip().lower() != ziel]
+        entfernt = len(entries) - len(rest)
+        if entfernt:
+            if rest:
+                data[user] = rest
+            else:
+                # Leere Liste nicht stehen lassen – sonst waechst die Datei mit
+                # Karteileichen von Benutzern, die ihren Verlauf geleert haben.
+                data.pop(user, None)
+            try:
+                _SUPPORT_HIST_FILE.parent.mkdir(parents=True, exist_ok=True)
+                _SUPPORT_HIST_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                                              encoding="utf-8")
+            except Exception as e:
+                # LAUT scheitern: ein "ok" ueber einem misslungenen Schreibvorgang
+                # laesst den Eintrag beim naechsten Oeffnen wieder auftauchen und
+                # sieht wie ein Fehler der Oberflaeche aus.
+                print("[Support] Verlaufseintrag loeschen fehlgeschlagen: %s" % e, flush=True)
+                return JSONResponse({"ok": False, "error": "Speichern fehlgeschlagen"},
+                                    status_code=500)
+    return JSONResponse({"ok": True, "removed": entfernt})
+
+
 # ─── Agent Task API (extern, z.B. für Vision-Aktionen) ───────────────
 
 def _is_valid_agent_key(presented: str) -> bool:

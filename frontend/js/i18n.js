@@ -900,6 +900,11 @@ const _I18N = {
         'sup.cancelled': 'Suche abgebrochen.',
         'sup.hist_empty': 'Noch keine Anfragen.',
         'sup.hist_err': 'Fehler beim Laden.',
+        // Beschriftung des Muelleimers an einem Verlaufseintrag. Bewusst in
+        // `sup.` und damit gemeinsam fuer /support, /sap und /vemas – die drei
+        // Verlaeufe sind dasselbe Bedienelement, zwei Texte liefen auseinander.
+        'sup.hist_del': 'Eintrag löschen',
+        'sup.hist_del_err': 'Löschen fehlgeschlagen.',
         'sup.enter_query': 'Bitte eine Anfrage eingeben.',
         'sup.min': 'Min', 'sup.hours': 'Std', 'sup.days': 'Tg', 'sup.now': 'gerade eben',
         // ── Formular-Validierung (Browser-Meldung) ─────────────
@@ -3961,6 +3966,8 @@ const _I18N = {
         'sup.cancelled': 'Search cancelled.',
         'sup.hist_empty': 'No requests yet.',
         'sup.hist_err': 'Failed to load.',
+        'sup.hist_del': 'Delete entry',
+        'sup.hist_del_err': 'Delete failed.',
         'sup.enter_query': 'Please enter a request.',
         'sup.min': 'min', 'sup.hours': 'h', 'sup.days': 'd', 'sup.now': 'just now',
         // ── Formular-Validierung (Browser-Meldung) ─────────────

@@ -160,6 +160,7 @@ function loadScript(dom, rel) {
     {
         const dom = build('sap.html', { username: 'bob', is_admin: false,
                                         permissions: { sap: false } });
+        loadScript(dom, 'js/icons.js');
         loadScript(dom, 'js/sap_portal.js');
         await sleep(60);
         check('ohne Freigabe: Weiterleitung ausgeloest', dom.__navs.length > 0);
@@ -171,6 +172,7 @@ function loadScript(dom, rel) {
         // Fail-closed: aelteres Backend ohne permissions-Feld darf NICHT
         // versehentlich als "erlaubt" gelten.
         const dom = build('sap.html', { username: 'bob', is_admin: true });
+        loadScript(dom, 'js/icons.js');
         loadScript(dom, 'js/sap_portal.js');
         await sleep(60);
         check('fehlendes permissions-Feld gilt als nicht freigegeben (fail-closed)',
@@ -192,6 +194,10 @@ function loadScript(dom, rel) {
     // ══ 2..5 mit Freigabe ════════════════════════════════════════════
     const dom = build('sap.html', { username: 'anna', is_admin: true,
                                     permissions: { sap: true } });
+    // icons.js steht auf der echten Seite als ERSTES Skript – der Verlauf
+    // zeichnet seinen Muelleimer daraus. Ohne diese Zeile prueft der Test
+    // eine Kette, die es so nicht gibt.
+    loadScript(dom, 'js/icons.js');
     loadScript(dom, 'js/i18n.js');
     loadScript(dom, 'js/chatlib.js');
     loadScript(dom, 'js/sap_portal.js');
@@ -428,6 +434,7 @@ function loadScript(dom, rel) {
                                         permissions: { sap: true } },
             { seedHistory: [{ id: 'weg_damit', title: 'Fruehere Analyse',
                               q: 'alte Frage', tool: 'powerbi', ts: Date.now() }] });
+        loadScript(d13, 'js/icons.js');
         loadScript(d13, 'js/i18n.js');
         loadScript(d13, 'js/chatlib.js');
         loadScript(d13, 'js/sap_portal.js');

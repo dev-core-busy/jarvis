@@ -2191,6 +2191,69 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
       check(/Symbol/.test(h),
             "und misslingt das Oeffnen, nennt die Meldung den Weg");
     }
+    /* ── DAS POPUP SCHLIESST SICH NICHT VON SELBST ────────────────────────
+     * Gemeldet 2026-08-30: „nach dem Aktivieren der Seitenleiste bleibt das
+     * popup noch sichtbar" - man sieht beide nebeneinander. Ich hatte bis
+     * dahin das GEGENTEIL angenommen und sogar die Reihenfolge des Speicherns
+     * damit begruendet. Gemessen im Betrieb: es bleibt stehen.
+     * AUSGEFUEHRT geprueft, mit `window` als Attrappe. */
+    {
+      const rumpf = (POPUP_JS.match(
+        /\$\("f-ansicht"\)\.addEventListener\("change", async \(ereignis\) => \{([\s\S]*?)\n\}\);/)
+        || [])[1];
+      check(!!rumpf, "der Umschalter-Rumpf laesst sich schneiden");
+      const lauf = async (imLeiste, gehtAuf, anhaken) => {
+        const spur = [];
+        const fn = new Function(
+          "ereignis", "window", "frage", "ansichtZeigen", "melde",
+          "leisteOeffnen", "_leiste", "_standAlt",
+          "return (async () => {" + rumpf + "\n})();");
+        await fn(
+          { target: { checked: anhaken } },
+          { close: () => spur.push("zu") },
+          async (n) => { spur.push("gespeichert:" + n.wert);
+                         return { ok: true, wert: n.wert, leiste_moeglich: true }; },
+          () => {},
+          (t) => { if (t) spur.push("meldung"); },
+          async () => { spur.push("geoeffnet"); return gehtAuf; },
+          imLeiste, false);
+        return spur;
+      };
+
+      // 1) Aus dem POPUP heraus einschalten: speichern, oeffnen, schliessen.
+      {
+        const r = await lauf(false, true, true);
+        check(r.join(",") === "gespeichert:leiste,geoeffnet,zu",
+              "aus dem Popup: erst speichern, dann oeffnen, dann schliessen",
+              r.join(","));
+      }
+      /* 2) ⚠ GEHT DIE LEISTE NICHT AUF, DARF DAS POPUP NICHT ZUGEHEN - sonst
+       *    verschwindet die Meldung, die gerade erklaert, was zu tun ist. */
+      {
+        const r = await lauf(false, false, true);
+        check(r.indexOf("zu") === -1,
+              "misslingt das Oeffnen, bleibt das Popup stehen", r.join(","));
+        check(r.indexOf("meldung") > -1, "und sagt, was zu tun ist");
+      }
+      /* 3) ⚠ IN DER LEISTE NIEMALS SCHLIESSEN - `window.close()` wuerde genau
+       *    die Leiste schliessen, die der Benutzer eingeschaltet hat. */
+      {
+        const r = await lauf(true, true, true);
+        check(r.indexOf("zu") === -1,
+              "in der Leiste wird NICHT geschlossen", r.join(","));
+      }
+      // 4) Zurueck auf Popup: nur speichern, nichts oeffnen, nichts schliessen.
+      {
+        const r = await lauf(true, true, false);
+        check(r.join(",") === "gespeichert:popup,meldung",
+              "Zurueckstellen speichert und meldet, mehr nicht", r.join(","));
+      }
+    }
+    /* Und `window.close()` steht sonst NIRGENDS - eine zweite Stelle koennte
+     * die Leiste treffen. Ohne Kommentare, sonst zaehlt die Begruendung mit. */
+    check((ohneKommentare(POPUP_JS).match(/window\.close\(\)/g) || []).length === 1,
+          "window.close() steht genau EINMAL in popup.js");
+
     const lo = ohneKommentare(schneidePopup("leisteOeffnen") || "");
     /* ⚠ JEDER Zweig muss warten, nicht irgendeiner. Die erste Fassung dieser
      * Pruefung suchte `await api.(sidePanel|sidebarAction)` - mit zwei Zweigen

@@ -1459,18 +1459,20 @@ async function leisteOeffnen() {
 $("f-ansicht").addEventListener("change", async (ereignis) => {
   const wert = ereignis.target.checked ? "leiste" : "popup";
 
-  /* ⚠ ERST SPEICHERN – UND ZWAR ABGEWARTET –, DANN OEFFNEN.
+  /* ⚠ ERST SPEICHERN – UND ZWAR ABGEWARTET –, DANN OEFFNEN, DANN SCHLIESSEN.
    *
-   * Die erste Fassung machte es umgekehrt: absenden ohne zu warten, sofort
-   * oeffnen, damit die Benutzergeste fuer `sidePanel.open` erhalten bleibt.
-   * Das war die Ursache der Meldung „ich kann die Seitenleiste nur ueber die
-   * plugin Steuerung oeffnen" (2026-08-30): **Chrome zerstoert das Popup, wenn
-   * die Leiste aufgeht** – die Nachricht war da noch unterwegs, die Einstellung
-   * wurde nie gespeichert, und der naechste Klick auf das Symbol oeffnete
-   * wieder das Popup. Der Umschalter war damit faktisch wirkungslos.
+   * ⚠ HIER STAND EINE FALSCHE BEGRUENDUNG, und sie bleibt als Warnung stehen:
+   * „Chrome zerstoert das Popup, wenn die Leiste aufgeht" – damit hatte ich
+   * die Meldung „ich kann die Seitenleiste nur ueber die plugin Steuerung
+   * oeffnen" erklaert. **Beides war falsch.** Die echte Ursache jener Meldung
+   * war `api.sidePanel` (= `browser.sidePanel`, das es in Chrome nicht gibt),
+   * und das Popup schliesst sich NICHT von selbst – im Betrieb gemessen:
+   * „nach dem Aktivieren der Seitenleiste bleibt das popup noch sichtbar".
    *
-   * Die Abwaegung ist eindeutig: eine nicht gespeicherte Einstellung macht den
-   * Schalter kaputt, eine verlorene Benutzergeste kostet einen Klick – und die
+   * Die Reihenfolge stimmt trotzdem, nur aus einem anderen Grund: dieses
+   * Fenster schliesst sich gleich SELBST, also muss die Einstellung vorher
+   * sicher gespeichert sein. Eine nicht gespeicherte Einstellung macht den
+   * Schalter kaputt; eine verlorene Benutzergeste kostet einen Klick, und die
    * Meldung sagt dann, welchen. */
   let a;
   try {
@@ -1498,13 +1500,27 @@ $("f-ansicht").addEventListener("change", async (ereignis) => {
       : "Umgestellt.");
     return;
   }
-  // Gelingt das Oeffnen, ist dieses Fenster gleich weg und die Meldung wird
-  // ohnehin niemand lesen. Gelingt es nicht, ist sie der Weg zum Ziel.
   const geoeffnet = _leiste ? true : await leisteOeffnen();
   if (!geoeffnet) {
     melde("Gespeichert. Die Seitenleiste öffnet sich beim nächsten Klick auf "
           + "das Symbol in der Symbolleiste.");
+    return;
   }
+
+  /* ⚠ DAS POPUP SCHLIESST SICH NICHT VON SELBST – gemeldet 2026-08-30:
+   * „nach dem Aktivieren der Seitenleiste bleibt das popup noch sichtbar".
+   * Ich hatte bis hierher das Gegenteil angenommen und sogar die Reihenfolge
+   * des Speicherns damit begruendet („Chrome zerstoert das Popup, sobald die
+   * Leiste aufgeht"). Gemessen im Betrieb: es bleibt stehen. Zwei Fenster mit
+   * derselben Oberflaeche nebeneinander sind schlimmer als eines – schon weil
+   * der gemerkte Text dann an zwei Stellen steht und nur eine davon dem Tab
+   * folgt.
+   *
+   * ⚠ NUR AUS DEM POPUP HERAUS. `window.close()` in der Leiste wuerde genau
+   * die Leiste schliessen, die der Benutzer gerade eingeschaltet hat. Deshalb
+   * die `_leiste`-Schranke – und `window.close()` steht sonst NIRGENDS in
+   * dieser Datei (ein Test haelt das fest). */
+  if (!_leiste) window.close();
 });
 
 start();

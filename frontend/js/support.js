@@ -229,6 +229,26 @@
                         ibsWrap.title = d.ibs_configured ? '' : T('sup.opt_ibs_hint', 'Erst URL und API-Key der Kundenverwaltung in den Einstellungen hinterlegen');
                     }
                 }
+                // Fachsysteme (SAP/VEMAS) – zwei getrennte Zustaende, und die
+                // Unterscheidung ist der Punkt: OHNE Freigabe gibt es das
+                // Kaestchen gar nicht (es geht den Benutzer nichts an), MIT
+                // Freigabe aber ohne hinterlegten Zugang steht es abgeblendet
+                // da und sagt im Titel, was fehlt. Verschwaende man beides zu
+                // 'weg', suchte ein Freigegebener den Fehler bei sich.
+                ['sap', 'vemas'].forEach(function (k) {
+                    var el = $('sup-opt-' + k), wrap = $('sup-opt-' + k + '-wrap');
+                    if (!el || !wrap) return;
+                    var erlaubt = !!d[k + '_allowed'], bereit = !!d[k + '_configured'];
+                    wrap.classList.toggle('hidden', !erlaubt);
+                    el.disabled = !bereit;
+                    // Default AUS: jede Auswertung ist ein Agentenlauf gegen ein
+                    // Fachsystem und dauert Sekunden bis Minuten – das darf nur
+                    // laufen, wenn es jemand ausdruecklich angehakt hat.
+                    el.checked = bereit && getPref(k, false);
+                    wrap.style.opacity = bereit ? '' : '0.45';
+                    wrap.title = bereit ? T('sup.opt_fach_hint', 'Wertet die Anfrage im Fachsystem aus (Agentenlauf, dauert länger als eine Suche)')
+                        : T('sup.opt_fach_unconf', 'Für dich ist kein Zugang zu diesem Fachsystem hinterlegt (Einstellungen bzw. eigener Zugang im Bereich)');
+                });
                 $('sup-opt-ai').checked = getPref('ai');
                 $('sup-opt-open').checked = getPref('open');
                 // Exklusiv: nie 'alle' UND 'offene' zugleich → Standard 'offene'
@@ -287,6 +307,10 @@
         $('sup-opt-conf').addEventListener('change', function () { setPref('conf', this.checked); });
         $('sup-opt-rag').addEventListener('change', function () { setPref('rag', this.checked); });
         if ($('sup-opt-ibs')) $('sup-opt-ibs').addEventListener('change', function () { setPref('ibs', this.checked); });
+        ['sap', 'vemas'].forEach(function (k) {
+            var el = $('sup-opt-' + k);
+            if (el) el.addEventListener('change', function () { setPref(k, this.checked); });
+        });
         $('sup-opt-ai').addEventListener('change', function () { setPref('ai', this.checked); });
         // Abmelden (global: alle Token-Keys) -> zurueck zum Portal
         var _lo = $('sup-logout-btn');
@@ -598,6 +622,14 @@
         var useConf = !confWrap.classList.contains('hidden') && $('sup-opt-conf').checked;
         var useRag = $('sup-opt-rag').checked;
         var useIbs = $('sup-opt-ibs') ? $('sup-opt-ibs').checked : false;
+        // Ein ausgeblendetes oder abgeblendetes Kaestchen darf nichts ausloesen –
+        // sonst startete ein Agentenlauf, den niemand angehakt hat. Die
+        // Berechtigung entscheidet ohnehin der Server.
+        function fachAn(k) {
+            var el = $('sup-opt-' + k), wrap = $('sup-opt-' + k + '-wrap');
+            return !!(el && wrap && !wrap.classList.contains('hidden') && !el.disabled && el.checked);
+        }
+        var useSap = fachAn('sap'), useVemas = fachAn('vemas');
         var useAi = $('sup-opt-ai').checked;
         // Wissensgruppen-Filter: null = alle (Feld weglassen), [] = keine, [ids] = nur diese
         var kbSel = _kbFilter ? _kbFilter.getSelection() : null;
@@ -616,7 +648,8 @@
             method: 'POST',
             headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify(Object.assign({ text: text, jira_all: allJira, jira_open: openJira,
-                                   confluence: useConf, rag: useRag, ibs: useIbs, ai: useAi,
+                                   confluence: useConf, rag: useRag, ibs: useIbs,
+                                   sap: useSap, vemas: useVemas, ai: useAi,
                                    lang: (localStorage.getItem('jarvis_lang') || 'de'),
                                    jira_limit: clampNum(getNumPref('tickets') === null ? _supDefault.tickets : getNumPref('tickets'), 1, _supMax.tickets),
                                    summary_lines: clampNum(getNumPref('sumlines') === null ? _supMax.sum : getNumPref('sumlines'), 2, _supMax.sum) },
@@ -676,6 +709,12 @@
     function scoreTitle(b) {
         if (b.source === 'JIRA') {
             return T('sup.score_info_jira', 'Relevanz: Jira sortiert die Treffer nach Relevanz – der beste Treffer startet bei 85 %, jeder weitere Rang -8. Enthält der Ticket-Titel viele der Suchwörter, hebt deren Anteil den Wert an (Bereich 20–96 %).');
+        }
+        if (b.source === 'SAP' || b.source === 'VEMAS') {
+            // Ein Fachsystem liefert eine AUSWERTUNG, keinen Rang in einer
+            // sortierten Trefferliste – hier waere jede Prozentzahl eine
+            // Behauptung. Der Tooltip sagt das, statt Genauigkeit vorzutaeuschen.
+            return T('sup.score_info_fach', 'Fester Anzeigewert – keine gemessene Relevanz: Dieser Block ist die Antwort einer Auswertung im Fachsystem, kein Treffer in einer nach Relevanz sortierten Liste.');
         }
         if (b.source === 'CONFLUENCE') {
             return T('sup.score_info_conf', 'Relevanz: Confluence sortiert die Treffer nach Relevanz – der beste Treffer startet bei 86 %, jeder weitere Rang -9. Enthalten Titel/Textauszug viele der Suchwörter, hebt deren Anteil den Wert an (Bereich 20–96 %).');

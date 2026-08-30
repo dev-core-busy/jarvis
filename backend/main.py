@@ -12367,6 +12367,101 @@ def _support_jira_limits(cfg):
     return jmax, min(_SUPPORT_JIRA_DEFAULT, jmax)
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+#  Fachsysteme als zusaetzliche Support-Quelle (SAP, VEMAS)
+# ═══════════════════════════════════════════════════════════════════════════
+# SAP und VEMAS sind unter /support strukturell DASSELBE: Freigabe pruefen,
+# Zugang aufloesen, einen unprivilegierten Agentenlauf mit dem passenden
+# Actor-Flag starten, die Antwort als EIN Block zurueckgeben. Deshalb eine
+# Tabelle und ein Codepfad – zwei Fassungen liefen beim naechsten Feinschliff
+# auseinander (dieselbe Lehre wie bei den vier _client()-Konstruktionsstellen
+# des Jira-Zugangs: waere nur eine umgestellt worden, lieferten zwei
+# Oberflaechen verschiedene Zahlen und niemand koennte erklaeren warum).
+#
+# Ein Fachsystem liefert KEINE Trefferliste, sondern eine Auswertung – deshalb
+# genau ein Block je System, nicht n Treffer.
+_SUPPORT_FACH = {
+    "sap": {
+        "quelle": "SAP",                 # Wert im Feld 'source' (Filter + Abzeichen)
+        "skill": "sap",                  # Skill, der die sap_*-Werkzeuge mitbringt
+        "titel": "SAP-Auswertung",
+        "bereich": "/sap",               # Link am Block – dort steht der volle Bereich
+        "modul": "backend.sap_analyses",  # liefert build_task()
+        "label": "SAP-Analyse",          # Agent-Label (identisch zu /api/sap/ask)
+        "nicht_konfiguriert": (
+            "SAP ist nicht konfiguriert. Entweder hinterlegt ein Administrator "
+            "einen gemeinsamen Lesezugang unter Einstellungen → SAP, oder du "
+            "trägst deinen eigenen Zugang unter „Mein SAP-Zugang“ ein."),
+    },
+    "vemas": {
+        "quelle": "VEMAS",
+        "skill": "vemas",
+        "titel": "VEMAS-Auswertung",
+        "bereich": "/vemas",
+        "modul": "backend.vemas_analyses",
+        "label": "VEMAS-Auswertung",
+        "nicht_konfiguriert": (
+            "VEMAS ist nicht konfiguriert. Ein Administrator hinterlegt "
+            "Serveradresse und Zugang unter Einstellungen → Vemas."),
+    },
+}
+
+# Deckel fuer EINEN Fachsystem-Lauf unter /support. Anders als in /sap und
+# /vemas laeuft der Agent hier NEBEN anderen Quellen: eine Auswertung, die nie
+# zurueckkommt, laesst die ganze Support-Suche haengen – dann lieber ein
+# benannter Abbruch als ein Ergebnis, das niemand bekommt. In den Bereichen
+# selbst bleibt es bewusst ohne Deckel (dort wartet der Benutzer auf genau
+# diese eine Auswertung und kann sie abbrechen).
+_SUPPORT_FACH_TIMEOUT = 240.0
+
+# Anzeigewert der Fachsystem-Bloecke. Das ist AUSDRUECKLICH KEINE gemessene
+# Relevanz – ein Agentenlauf liefert eine Antwort, keinen Rang in einer
+# sortierten Trefferliste. Der Wert liegt hoch genug, um die ueblichen
+# Relevanzfilter zu ueberstehen; der Tooltip am Abzeichen sagt selbst, dass er
+# nicht gemessen ist (eine Anzeige darf keinen Zustand behaupten, den sie nicht
+# kennt).
+_SUPPORT_FACH_SCORE = 92
+
+
+def _support_fach_erlaubt(system: str, user: str) -> bool:
+    """Darf dieser Benutzer das Fachsystem als Support-Quelle nutzen?
+
+    Freigabe UND aktiver Skill – dieselbe Regel wie bei den Portal-Kacheln
+    (``permissions.sap`` / ``permissions.vemas``). Ohne den Skill gibt es die
+    ``sap_*``/``vemas_*``-Werkzeuge gar nicht; ein Kaestchen, das zuverlaessig
+    ins Leere fuehrt, ist schlimmer als kein Kaestchen.
+
+    Fail-closed: alles Unbekannte ist ein Nein. Ein Benutzer ohne Freigabe
+    (dazu zaehlt der externe API-Schluessel-Benutzer ``api``) bekommt hier
+    False, egal was im Anfrage-Rumpf steht."""
+    try:
+        if system == "sap":
+            return _user_may_use_sap(user) and _skill_active("sap")
+        if system == "vemas":
+            return _user_may_use_vemas(user) and _skill_active("vemas")
+    except Exception as e:  # noqa: BLE001
+        print(f"[Support] Freigabe {system} nicht pruefbar: {e}", flush=True)
+    return False
+
+
+def _support_fach_zugang(system: str, user: str) -> dict:
+    """Aufgeloester Zugang des Benutzers (persoenlich vor Sammelzugang)."""
+    return _sap_zugang(user) if system == "sap" else _vemas_zugang(user)
+
+
+def _support_fach_konfiguriert(system: str, user: str) -> bool:
+    """Ist fuer DIESEN Benutzer ein brauchbarer Zugang hinterlegt?
+
+    Der Aufrufer prueft die Freigabe VORHER – ohne sie wird der Zugang gar
+    nicht erst aufgeloest (das kostet sonst jeden Statusabruf eine
+    Entschluesselung fuer eine Antwort, die ohnehin False ist)."""
+    try:
+        return bool(_support_fach_zugang(system, user)["client"].configured)
+    except Exception as e:  # noqa: BLE001
+        print(f"[Support] Zugang {system} nicht pruefbar: {e}", flush=True)
+        return False
+
+
 @app.get("/api/support/status")
 async def support_status(user: str = Depends(require_auth)):
     """Status fuer die Support-Oberflaeche (Checkbox-Sichtbarkeit)."""
@@ -12376,11 +12471,22 @@ async def support_status(user: str = Depends(require_auth)):
     _jira_cfg = config.get_skill_states().get("jira", {}).get("config", {}) or {}
     _ibs_ok = bool((_jira_cfg.get("ibs_api_url") or "").strip()) and \
               bool((_jira_cfg.get("ibs_api_key") or "").strip())
+    # Fachsysteme (SAP/VEMAS): das Kaestchen erscheint NUR fuer Benutzer, die den
+    # Bereich betreten duerfen und deren Skill laeuft; klickbar ist es erst mit
+    # hinterlegtem Zugang (gleiche Bauart wie die IBS-Zeile darueber). Die
+    # Sichtbarkeit ist reine Bequemlichkeit – die Berechtigung entscheidet
+    # ausschliesslich der Server in _support_fach_block().
+    _fach = {}
+    for _fs in _SUPPORT_FACH:
+        _erlaubt = _support_fach_erlaubt(_fs, user)
+        _fach[_fs + "_allowed"] = _erlaubt
+        _fach[_fs + "_configured"] = _erlaubt and _support_fach_konfiguriert(_fs, user)
     return JSONResponse({
         "active": _skill_active("support_assistant"),
         "jira_active": _skill_active("jira"),
         "confluence_active": _skill_active("confluence"),
         "ibs_configured": _ibs_ok,
+        **_fach,
         "has_prompt": bool((cfg.get("system_prompt") or "").strip()),
         "summary_lines_max": _support_cap(cfg.get("summary_lines"), 5),
         "ticket_count_max": _tmax,
@@ -12538,10 +12644,17 @@ async def _support_ai_summary(query: str, blocks: list, system_prompt: str, line
         sysp = ((system_prompt.strip() + "\n\n") if system_prompt.strip() else "") + base
         # Fuer die KI-Zusammenfassung wenn vorhanden den (gekappten) Volltext nutzen
         # – z.B. Confluence-Seiten liefern 'full_text' statt nur eines Snippets.
+        # 'no_summary' markiert Bloecke, die eine Absage tragen statt eines
+        # Treffers (z.B. „Fachsystem nicht konfiguriert“). Als Quelle gelesen
+        # macht das Modell daraus eine Aussage ueber den Sachverhalt – deshalb
+        # gehoeren sie hier heraus, obwohl sie in der Liste sichtbar bleiben.
+        _quellen = [b for b in blocks if not b.get("no_summary")]
+        if not _quellen:
+            return ""
         src = "\n".join("- [%s] %s — %s" % (b.get("source", ""), b.get("title", ""),
                                             (b.get("full_text") or b.get("summary") or ""))
-                        for b in blocks[:max(1, max_sources)])
-        user_text = "Anfrage: %s\n\nGefundene Treffer (%d):\n%s" % (query, len(blocks), src[:120000])
+                        for b in _quellen[:max(1, max_sources)])
+        user_text = "Anfrage: %s\n\nGefundene Treffer (%d):\n%s" % (query, len(_quellen), src[:120000])
         _p = prof or config.active_profile or {}
         provider = get_provider(
             _p.get("provider", "google"), _p.get("api_key", ""), _p.get("api_url", ""),
@@ -12743,6 +12856,13 @@ async def support_query(request: Request):
       Ticket-/Ereignissuche ueber die API-Funktion 'getMatchingEvents'
       (nur wirksam, wenn URL + API-Key der Kundenverwaltung hinterlegt sind).
 
+    - ``sap`` / ``vemas`` (bool, Default false): das jeweilige Fachsystem als
+      zusaetzliche Quelle auswerten. Die Anfrage laeuft dort als **unprivilegierter
+      Agentenlauf** (lesend) und liefert EINEN Block mit der Antwort – keine
+      Trefferliste. **Nur wirksam mit Freigabe UND aktivem Skill**; das prueft
+      der Server je Benutzer (``_support_fach_block``), nicht der Aufrufer. Der
+      externe API-Schluessel-Benutzer ``api`` hat diese Freigaben nicht.
+
     Jira-Quellen ueber eindeutige Keys steuern:
     - ``jira_all``  (bool): 'alle Jira Tickets' (offen + geschlossen)
     - ``jira_open`` (bool): 'nur offene Jira Tickets'
@@ -12775,6 +12895,134 @@ async def support_query(request: Request):
     return JSONResponse(res, status_code=res.pop("_status", 200))
 
 
+async def _support_fach_lauf(system: str, task: str, user: str) -> str:
+    """Fuehrt den Auftrag auf DEM Agenten des Fachbereichs aus – demselben, den
+    auch ``/api/sap/ask`` bzw. ``/api/vemas/ask`` benutzt.
+
+    Bewusst kein zweiter Agent je Bereich: die vorhandene Sperre serialisiert
+    damit auch Support-Laeufe gegen die Laeufe aus dem Bereich selbst, statt die
+    Last auf dem Fachsystem zu verdoppeln.
+
+    Der Lauf ist **unprivilegiert** und traegt genau ein Actor-Flag
+    (``sap``/``vemas``) – das schaltet die Fachwerkzeuge frei, ohne Systemrechte
+    zu geben. Schreibzugriffe sperren die Clients selbst (SAP hart, VEMAS ueber
+    ``read_only`` und die Regel „Schreiben nur mit persoenlichem Zugang“)."""
+    global _sap_agent, _vemas_agent
+    from backend.agent import JarvisAgent
+    sperre = _sap_agent_lock if system == "sap" else _vemas_agent_lock
+    async with sperre:
+        if system == "sap":
+            if _sap_agent is None:
+                _sap_agent = JarvisAgent(label=_SUPPORT_FACH["sap"]["label"])
+            ag = _sap_agent
+        else:
+            if _vemas_agent is None:
+                _vemas_agent = JarvisAgent(label=_SUPPORT_FACH["vemas"]["label"])
+            ag = _vemas_agent
+        ag._current_username = user
+        try:
+            return await asyncio.wait_for(
+                ag.run_task_headless(
+                    task,
+                    actor={"user": user, "privileged": False,
+                           "internet": _user_has_internet_access(user),
+                           system: True}),
+                timeout=_SUPPORT_FACH_TIMEOUT)
+        except asyncio.TimeoutError:
+            # wait_for bricht die Koroutine ab; stop() setzt zusaetzlich das
+            # Signal im Agenten, falls dort noch etwas laeuft. _run_headless
+            # setzt das Flag beim naechsten Lauf selbst zurueck.
+            try:
+                ag.stop()
+            except Exception:  # noqa: BLE001
+                pass
+            raise
+
+
+def _support_fach_hinweis_block(system: str, text: str) -> dict:
+    """Ein Block, der eine Absage traegt (keine Freigabe, nicht konfiguriert,
+    fehlgeschlagen).
+
+    ``no_summary`` haelt ihn aus der KI-Gesamtzusammenfassung heraus: eine
+    Stoerungsmeldung ist keine Quelle, und als solche gelesen erfindet das
+    Modell daraus Aussagen. Er traegt trotzdem den vollen Anzeigewert – wer die
+    Quelle angehakt hat, muss SEHEN, warum nichts kam; eine leise Absage sieht
+    aus wie „keine Treffer“."""
+    f = _SUPPORT_FACH[system]
+    return {"source": f["quelle"], "title": f["titel"], "summary": text,
+            "score": _SUPPORT_FACH_SCORE, "full_text": "", "link": "",
+            "source_label": f["titel"], "no_summary": True, "hinweis_block": True}
+
+
+async def _support_fach_block(system: str, query: str, user: str, lang: str) -> dict | None:
+    """Fragt EIN Fachsystem (SAP/VEMAS) als zusaetzliche Support-Quelle ab und
+    gibt genau EINEN Block zurueck (oder None, wenn nichts herauskam).
+
+    **Die Freigabe wird HIER geprueft, nicht im Frontend.** Das Kaestchen unter
+    /support ist Sichtbarkeit, keine Berechtigung – und /api/support/query nimmt
+    auch Aufrufe mit externem API-Schluessel entgegen (Benutzer ``api``), der
+    weder SAP- noch VEMAS-Freigabe hat. Fail-closed: alles Unklare ist ein Nein.
+
+    Der Auftrag entsteht ueber ``build_task()`` des Fachmoduls – also mit
+    demselben Vorspann wie im Bereich selbst (Read-Only, Vorgehen, „rate keine
+    Pfade“). Ein selbst formulierter Auftrag liefe beim naechsten Feinschliff
+    des Vorspanns auseinander."""
+    f = _SUPPORT_FACH[system]
+    if not _support_fach_erlaubt(system, user):
+        # Kein Geheimnis: require_sap_access/require_vemas_access antworten
+        # jedem angemeldeten Benutzer mit genau dieser Auskunft. Schweigen waere
+        # hier das Schlechtere – der Benutzer hat die Quelle ausdruecklich
+        # angehakt und bekaeme sonst kommentarlos nichts.
+        return _support_fach_hinweis_block(
+            system, "Kein %s-Zugriff – dieser Bereich ist für dich nicht "
+                    "freigegeben oder der Skill ist nicht aktiv "
+                    "(Einstellungen → Sicherheit → Berechtigungen)."
+                    % f["quelle"])
+
+    z = _support_fach_zugang(system, user)
+    if not z["client"].configured:
+        return _support_fach_hinweis_block(system, f["nicht_konfiguriert"])
+
+    import importlib
+    modul = importlib.import_module(f["modul"])
+    lade = _load_sap_instructions if system == "sap" else _load_vemas_instructions
+    task = modul.build_task(question=query, instructions=lade(user), lang=lang)
+    if not task:
+        return None
+
+    try:
+        antwort = (await _support_fach_lauf(system, task, user) or "").strip()
+    except asyncio.TimeoutError:
+        print(f"[Support] {f['quelle']}-Auswertung abgebrochen "
+              f"(> {int(_SUPPORT_FACH_TIMEOUT)} s)", flush=True)
+        return _support_fach_hinweis_block(
+            system, "Die %s-Auswertung hat länger als %d Sekunden gebraucht und "
+                    "wurde abgebrochen. Eine engere Frage hilft – oder stelle "
+                    "sie direkt im Bereich %s, dort läuft sie ohne Zeitdeckel."
+                    % (f["quelle"], int(_SUPPORT_FACH_TIMEOUT), f["bereich"]))
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:  # noqa: BLE001
+        print(f"[Support] {f['quelle']}-Auswertung fehlgeschlagen: {e}", flush=True)
+        return _support_fach_hinweis_block(
+            system, "Die %s-Auswertung ist fehlgeschlagen: %s" % (f["quelle"], e))
+
+    if not antwort:
+        return None
+
+    # Mit WELCHEM Zugang gelesen wurde, gehoert sichtbar an den Block – aber
+    # NICHT in 'full_text': der geht in die KI-Gesamtzusammenfassung und wird
+    # weitergegeben. Faellt der Lauf auf den Sammelzugang zurueck, sind die
+    # Zahlen mit fremden – in der Regel weiteren – Berechtigungen geholt; das
+    # darf nicht unbemerkt bleiben.
+    hinweis = (z.get("hinweis") or "").strip()
+    anzeige = (("> ⚠ " + hinweis + "\n\n") if hinweis else "") + antwort
+    return {"source": f["quelle"], "title": f["titel"],
+            "summary": _flatten(anzeige), "score": _SUPPORT_FACH_SCORE,
+            "full_text": antwort, "link": f["bereich"],
+            "source_label": f["titel"], "quelle_zugang": z.get("quelle") or "sammel"}
+
+
 async def _support_run_query(body: dict, user: str) -> dict:
     """Volle Support-Pipeline (RAG + Jira + Confluence + KI-Gesamtzusammenfassung).
     Gemeinsame Logik fuer /api/support/query UND /api/support/summarize (CRM-Anfragen).
@@ -12793,6 +13041,11 @@ async def _support_run_query(body: dict, user: str) -> dict:
     if isinstance(kb_groups, list) and len(kb_groups) == 0:
         use_rag = False  # keine Gruppe gewaehlt -> kein Wissen aus der KB
     use_conf = body.get("confluence", True)
+    # Fachsysteme: Vorgabe AUS. Jede Auswertung ist ein Agentenlauf gegen ein
+    # fremdes System – das darf nicht nebenbei passieren, weil ein Aufrufer das
+    # Feld nicht kennt. Ob der Schalter etwas bewirkt, entscheidet allein die
+    # Freigabepruefung in _support_fach_block().
+    use_fach = {k: bool(body.get(k)) for k in _SUPPORT_FACH}
     use_ai = body.get("ai", True)
     # Jira-Modi ueber EINDEUTIGE Keys: ``jira_all`` = 'alle Jira Tickets'
     # (offen + geschlossen), ``jira_open`` = 'nur offene Jira Tickets'. Sind beide
@@ -12962,6 +13215,31 @@ async def _support_run_query(body: dict, user: str) -> dict:
                 print("[Support] IBS-Suche fehlgeschlagen: %s" % res.get("error"), flush=True)
         except Exception as e:
             print("[Support] IBS-Suche Fehler: %s" % e, flush=True)
+
+    # ── Fachsysteme (SAP, VEMAS) ────────────────────────────────────
+    # Beide gleichzeitig, nicht nacheinander: es sind zwei Agentenlaeufe von je
+    # mehreren Sekunden, und sie haengen an verschiedenen Systemen. Nacheinander
+    # addierten sich die Wartezeiten, ohne dass irgendetwas davon abhinge.
+    _fach_aktiv = [k for k, an in use_fach.items() if an]
+    if _fach_aktiv:
+        _res = await asyncio.gather(
+            *[_support_fach_block(k, query, user, lang) for k in _fach_aktiv],
+            return_exceptions=True)
+        for _k, _b in zip(_fach_aktiv, _res):
+            if isinstance(_b, asyncio.CancelledError):
+                # Der Benutzer hat abgebrochen (Knopf 'Abbrechen' bzw. Tab zu).
+                # 'return_exceptions=True' wuerde das sonst zu einem Fehlerblock
+                # machen und die Suche zu Ende laufen lassen.
+                raise _b
+            if isinstance(_b, BaseException):
+                # gather faengt auch das, was _support_fach_block selbst nicht
+                # mehr fangen konnte. Ein Ausfall EINER Quelle darf die ganze
+                # Support-Suche nicht mitnehmen.
+                print("[Support] %s-Block Fehler: %s" % (_k, _b), flush=True)
+                blocks.append(_support_fach_hinweis_block(
+                    _k, "Die Auswertung ist fehlgeschlagen: %s" % _b))
+            elif _b:
+                blocks.append(_b)
 
     blocks.sort(key=lambda b: b["score"], reverse=True)
 

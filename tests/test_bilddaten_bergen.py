@@ -108,8 +108,9 @@ if AGENT_KLS is None:
 # einen Codefehler, den es nicht gibt. Beim Bau von Abschnitt 17 genau so
 # passiert (18 FAIL aus einer fehlenden Zeile).
 _METHODEN = ("_b64_endung", "_b64_vollstaendig", "_data_url_nutzlast",
-             "_b64_bloecke", "_bilddaten_bergen", "_ohne_tote_bildrefs",
-             "_verlauf_text", "_verlauf_content", "_ergebnis_kappen")
+             "_b64_bloecke", "_md_bildrahmen", "_bilddaten_bergen",
+             "_ohne_tote_bildrefs", "_verlauf_text", "_verlauf_content",
+             "_ergebnis_kappen")
 for _m in _METHODEN:
     if _methode(AGENT_KLS, _m) is None:
         abbruch(f"Methode {_m} fehlt in JarvisAgent – Fix nicht vorhanden?")
@@ -213,11 +214,17 @@ for _k in _konst_namen:
 _körper = "\n\n".join(
     textwrap.indent(_segment(_methode(AGENT_KLS, m)), "    ") for m in _METHODEN
 )
+# Klassen-Attribute NICHT namentlich aufzaehlen, sondern alle Regex-Attribute
+# einsammeln (Register: die REGEL pruefen, nicht eine Liste). Eine gepflegte
+# Liste laeuft beim naechsten Attribut auseinander – und der Fehler sieht dann
+# wie ein Codefehler aus: der AttributeError landet im breiten `except` von
+# `_bilddaten_bergen`, der Text kommt unveraendert zurueck und der Test meldet
+# "Blob steht noch im Text". Beim Bau von Abschnitt 18 genau so passiert.
 _attrib = [_segment(n) for n in AGENT_KLS.body
            if isinstance(n, ast.Assign)
-           and any(isinstance(z, ast.Name) and z.id == "_GEN_REF_RE" for z in n.targets)]
-if not _attrib:
-    abbruch("Klassen-Attribut _GEN_REF_RE fehlt – Fix nicht vorhanden?")
+           and any(isinstance(z, ast.Name) and z.id.endswith("_RE") for z in n.targets)]
+if len(_attrib) < 2:
+    abbruch(f"nur {len(_attrib)} Regex-Attribute in JarvisAgent – Fix nicht vorhanden?")
 exec("class Attrappe:\n    agent_id = 'test'\n    tools_map = {}\n\n"
      + textwrap.indent("\n".join(_attrib), "    ") + "\n\n" + _körper, _ns)
 A = _ns["Attrappe"]()
@@ -838,6 +845,80 @@ if isinstance(_sp, str):
     pruef("base64" in _l and "data:image" in _l,
           "der Prompt sagt nirgends, dass base64 nicht in die Antwort gehoert")
     pruef("generate_image" in _sp, "der Prompt nennt den erlaubten Weg nicht")
+
+print("\n19. Blob STEHT SCHON in einer Markdown-Bildreferenz (ECHT 2026-08-30)")
+# DER VORFALL: "generiere ein kleines, fotorealistisches Bild einer gruenen Kuh
+# mit roten Hoernern" -> "Hier ist das Bild der gruenen Kuh mit den roten
+# Hoernern:\n\n)". Das Bild lag fertig als 1,88-MB-PNG auf ECHT; sichtbar war
+# eine Klammer. Ursache: der Ersatz `![Bild](url)` wurde IN die vorhandene
+# Referenz des Modells gesetzt -> `![Kuh](![Bild](url))`.
+
+
+def rendern(md: str) -> str:
+    """Der Bildschritt aus `frontend/js/chatlib.js`, nachgebaut: Adresse ist
+    alles bis zur ERSTEN Klammer, danach eine Schema-Pruefung. Beides ist der
+    Grund, warum aus der Verschachtelung ein nacktes `)` wird."""
+    def _ersetze(m):
+        adr = m.group(2)
+        if not re.match(r"^https?://|^/|^data:image/", adr):
+            return ""                      # verworfen – wie im Browser
+        return "<IMG>"
+    return re.sub(r"!\[([^\]\n]*)\]\(([^)\n]+)\)", _ersetze, md)
+
+
+# Positivkontrolle: der Nachbau muss den ECHTEN Fehler auch zeigen koennen.
+pruef(rendern("Text:\n\n![Kuh](![Bild](/api/generated/a.png))").endswith(")"),
+      "Renderer-Nachbau bildet den gemeldeten Fehler nicht ab – Test bewiese nichts")
+pruef("<IMG>" in rendern("![Kuh](/api/generated/a.png)"),
+      "Renderer-Nachbau zeigt nicht einmal ein gesundes Bild an")
+
+for _lage, _md in (
+    ("Markdown-Bild mit Data-URL",
+     f"Hier ist das Bild der gruenen Kuh:\n\n![Gruene Kuh](data:image/png;base64,{PNG_B64})"),
+    ("Referenz mit Leerraum in der Klammer",
+     f"![Kuh]( data:image/png;base64,{PNG_B64} )"),
+    ("nackter Lauf in einer Referenz",
+     f"![Kuh]({PNG_B64})"),
+):
+    frisch()
+    _raus = A._bilddaten_bergen("(antworttext)", _md, fuer_anzeige=True)
+    _gerendert = rendern(_raus)
+    pruef(PNG_B64[:200] not in _raus, f"{_lage}: Nutzlast steht noch im Text")
+    pruef("](![" not in _raus and _raus.count("](") == 1,
+          f"{_lage}: verschachtelte Bildreferenz entstanden -> {_raus[:120]!r}")
+    pruef("<IMG>" in _gerendert,
+          f"{_lage}: der Renderer zeigt KEIN Bild -> {_gerendert[:120]!r}")
+    pruef(")" not in _gerendert,
+          f"{_lage}: verwaiste Klammer im Text -> {_gerendert[:120]!r}")
+    # Der Alt-Text des Modells beschreibt das Bild – er darf nicht verlorengehen.
+    pruef("Kuh" in _raus, f"{_lage}: Alt-Text des Modells verworfen")
+
+print("\n19b. Ohne Rahmen bleibt es beim generischen Alt-Text")
+frisch()
+_raus = A._bilddaten_bergen("(antworttext)", f"Bild:\n\ndata:image/png;base64,{PNG_B64}",
+                            fuer_anzeige=True)
+pruef("![Bild](/api/generated/" in _raus,
+      f"nackte Data-URL wird nicht mehr zur Bildreferenz -> {_raus[:120]!r}")
+pruef("<IMG>" in rendern(_raus), "nackte Data-URL rendert kein Bild")
+
+print("\n19c. Eine NICHT geschlossene Referenz wird nicht angefasst")
+# Fail-safe: ohne schliessende Klammer ist die Lage unklar – dann lieber den
+# Blob ersetzen als einen fremden Ausdruck umzuschreiben.
+frisch()
+_raus = A._bilddaten_bergen("(antworttext)", f"![Kuh](data:image/png;base64,{PNG_B64}",
+                            fuer_anzeige=True)
+pruef(PNG_B64[:200] not in _raus, "offene Referenz: Nutzlast steht noch im Text")
+pruef("![Kuh](" in _raus, "offene Referenz: fremder Ausdruck wurde umgeschrieben")
+
+print("\n19d. Auch das WERKZEUG-Ergebnis bleibt frei von Verschachtelung")
+# Dort ist der Ersatz eine Anweisung an das Modell. Steckt sie in einer
+# Referenz, liest das Modell einen kaputten Ausdruck und schreibt ihn ab.
+frisch()
+_raus = A._ergebnis_kappen(
+    "shell_execute", f"![Ergebnis](data:image/png;base64,{PNG_B64})")
+pruef("](![" not in _raus,
+      f"Werkzeug-Ergebnis: verschachtelte Referenz -> {_raus[:160]!r}")
+pruef("BILDDATEN AUSGELAGERT" in _raus, "Werkzeug-Ergebnis: Anweisung fehlt")
 
 # ═══════════════════════════════════════════════════════════════════════════
 shutil.rmtree(SANDKASTEN, ignore_errors=True)

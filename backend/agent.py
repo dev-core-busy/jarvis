@@ -4737,6 +4737,43 @@ KRITISCH – Autonomie-Regeln:
         treffer.sort(key=lambda t: t[0])
         return treffer
 
+    # Kopf einer Markdown-Bildreferenz, der unmittelbar VOR den Bilddaten endet.
+    _MD_BILD_KOPF_RE = re.compile(r"!\[([^\]\n]*)\]\(\s*$")
+
+    @classmethod
+    def _md_bildrahmen(cls, text: str, start: int, ende: int, ab: int = 0):
+        """Steht der Blob schon INNERHALB einer `![alt](…)`-Referenz? Dann den
+        GANZEN Ausdruck ersetzen und nicht nur die Daten darin.
+
+        WARUM: der Ersatz ist selbst eine Bildreferenz. Wird er in eine zweite
+        hineingesetzt, entsteht `![Kuh](![Bild](/api/generated/x.png))`. Der
+        Renderer in `chatlib.js` nimmt als Adresse alles bis zur ERSTEN Klammer
+        (`[^)\\n]+`), bekommt `![Bild](/api/generated/x.png`, verwirft das an
+        seiner Schema-Pruefung – und uebrig bleibt ein nacktes `)`.
+
+        GEMELDET 2026-08-30 VON ECHT: "generiere ein kleines, fotorealistisches
+        Bild einer gruenen Kuh mit roten Hoernern" → "Hier ist das Bild der
+        gruenen Kuh mit den roten Hoernern:\\n\\n)". Das Bild war fertig und lag
+        als 1,88-MB-PNG auf der Platte; sichtbar war eine Klammer. Der
+        Dateiname war der sha256 des Inhalts – also aus genau dieser Bergung,
+        nicht aus `generate_image` (das benennt mit uuid4).
+
+        Der Alt-Text des Modells wird dabei UEBERNOMMEN: er beschreibt das Bild
+        besser als das generische "Bild", und er stammt vom selben Lauf.
+
+        Rueckgabe `(start, ende, alt)` – bei fehlendem Rahmen unveraendert.
+        `ab` begrenzt die Suche nach hinten auf den bereits verarbeiteten Teil,
+        damit der Rahmen nie in einen vorherigen Block hineinreicht.
+        """
+        m = cls._MD_BILD_KOPF_RE.search(text, max(0, ab), start)
+        if not m or m.end() != start:
+            return start, ende, ""
+        rest = text[ende:]
+        luecke = len(rest) - len(rest.lstrip())
+        if rest[luecke:luecke + 1] != ")":
+            return start, ende, ""      # Referenz nicht geschlossen -> nichts anfassen
+        return m.start(), ende + luecke + 1, (m.group(1) or "").strip()
+
     def _bilddaten_bergen(self, tool_name: str, text: str,
                           fuer_anzeige: bool = False) -> str:
         """Base64-Bilddaten aus einem Werkzeug-Ergebnis in eine Datei auslagern
@@ -4794,6 +4831,12 @@ KRITISCH – Autonomie-Regeln:
                 if not endung:
                     continue          # kein Bild -> unangetastet lassen (wird gekappt wie bisher)
 
+                # Umschliesst den Blob bereits eine `![alt](…)`-Referenz, wird
+                # SIE ersetzt – sonst steckt der Ersatz in ihr und der Renderer
+                # laesst nur ein `)` uebrig (siehe `_md_bildrahmen`).
+                start, ende, alt = self._md_bildrahmen(text, start, ende, letzte)
+                bild_alt = alt or "Bild"
+
                 if not self._b64_vollstaendig(daten, endung):
                     # TORSO. Meist erfindet das Modell den Rest hinter einem
                     # auswendig gelernten Kopf (siehe `_b64_vollstaendig`).
@@ -4848,11 +4891,11 @@ KRITISCH – Autonomie-Regeln:
                 # Aufforderung an das Modell mitten in seiner Antwort. Fuer die
                 # Anzeige bleibt nur die Bildreferenz.
                 teile.append(
-                    f"![Bild]({url})" if fuer_anzeige else
+                    f"![{bild_alt}]({url})" if fuer_anzeige else
                     f"[BILDDATEN AUSGELAGERT: {endung.upper()}, {len(daten) // 1024} KB. "
                     f"Base64 gehoert NICHT in deine Antwort – sie wird nicht angezeigt und "
                     f"fuellt den Kontext. Gib stattdessen GENAU diese Zeile unveraendert aus, "
-                    f"damit das Bild erscheint:]\n![Bild]({url})"
+                    f"damit das Bild erscheint:]\n![{bild_alt}]({url})"
                 )
                 letzte = ende
                 print(f"[AGENT {self.agent_id}] Bilddaten aus '{tool_name}' ausgelagert: "

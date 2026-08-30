@@ -113,9 +113,14 @@ try:
         check("[%s] SAP steht im Quellen-Filter" % thema,
               js("!![].slice.call(document.getElementById('sup-f-source').options)"
                  ".filter(function(o){return o.value==='SAP';})[0]") is True)
-        check("[%s] es steht in DERSELBEN Zeile wie die anderen Quellen" % thema,
-              js("document.getElementById('sup-opt-sap-wrap').parentElement"
-                 ".className.indexOf('sup-opts') >= 0") is True)
+        # Es gehoert zu den QUELLEN, nicht zur Ausgabe-Gruppe daneben - die Zeile
+        # traegt seit 2026-08-30 zwei benannte Gruppen mit verschiedener Bedeutung.
+        check("[%s] es steht bei den Quellen, nicht bei der Ausgabe" % thema,
+              js("!!document.getElementById('sup-opt-sap-wrap')"
+                 ".closest('#sup-opts-src')") is True)
+        check("[%s] die Ausgabe-Option steht abgesetzt in eigener Gruppe" % thema,
+              js("!!document.getElementById('sup-opt-ai').closest('#sup-opts-out')") is True
+              and js("!document.getElementById('sup-opt-ai').closest('#sup-opts-src')") is True)
         check("[%s] die Beschriftung ist nicht abgeschnitten" % thema,
               js("(function(){var e=document.querySelector('#sup-opt-sap-wrap span');"
                  "return e.scrollWidth <= e.clientWidth + 1;})()") is True)

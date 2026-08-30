@@ -1,0 +1,13 @@
+# Code-Owner des Projekts.
+#
+# WOZU DIESE DATEI DA IST: Das Ruleset auf 'master' verlangt eine Freigabe
+# VOM CODE-OWNER, nicht irgendeine. Ohne diese Datei koennten zwei Mitarbeiter
+# sich gegenseitig freigeben und mergen - die Regel waere dann eine
+# Vier-Augen-Pflicht, aber keine Entscheidung des Betreibers.
+#
+# Der Stern deckt jede Datei ab. Wer eine Zeile darunter ergaenzt, ueberschreibt
+# den Stern fuer die genannten Pfade - die LETZTE passende Zeile gewinnt.
+# Eine Zeile ohne @dev-core-busy nimmt fuer diese Pfade also die Entscheidung
+# aus der Hand.
+
+*   @dev-core-busy

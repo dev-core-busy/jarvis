@@ -11,6 +11,41 @@ import {
 
 const api = (typeof browser !== "undefined") ? browser : chrome;
 
+/* ── Herstellereigene APIs: NICHT ueber `api` ansprechen ───────────────────
+ *
+ * ⚠ HIER LAG DER FEHLER, DER DREI RUNDEN GEKOSTET HAT (gemeldet 2026-08-30).
+ *
+ * `api` ist `browser ?? chrome`. Chrome (152) definiert inzwischen selbst ein
+ * `browser`-Objekt – aber `sidePanel` ist eine **Chrome-eigene** API und steht
+ * dort NICHT drin. `api.sidePanel` war damit `undefined`, obwohl
+ * `chrome.sidePanel` existiert und die Leiste nachweislich funktioniert.
+ * Folge: `setPanelBehavior` und `setOptions` liefen ins Leere (der Klick aufs
+ * Symbol oeffnete nie die Leiste), und die Faehigkeitspruefung meldete „dieser
+ * Browser stellt keine Seitenleiste bereit" – auf einem Browser, der sie
+ * bereitstellt.
+ *
+ * Merkregel: `browser ?? chrome` taugt nur fuer STANDARDISIERTE APIs. Was nur
+ * ein Hersteller kennt (`sidePanel` in Chrome, `sidebarAction` in Firefox),
+ * wird an BEIDEN Wurzeln gesucht.
+ */
+function _wurzeln() {
+  const w = [];
+  if (typeof chrome !== "undefined" && chrome) w.push(chrome);
+  if (typeof browser !== "undefined" && browser && w.indexOf(browser) === -1) {
+    w.push(browser);
+  }
+  return w;
+}
+
+/** Sucht einen API-Zweig an beiden Wurzeln. `null`, wenn es ihn nirgends gibt. */
+function zweig(name, methode) {
+  for (const w of _wurzeln()) {
+    const z = w[name];
+    if (z && (!methode || typeof z[methode] === "function")) return z;
+  }
+  return null;
+}
+
 const $ = (id) => document.getElementById(id);
 const el = {
   login: $("bereich-login"), arbeit: $("bereich-arbeit"),
@@ -1343,15 +1378,28 @@ function ansichtZeigen(wert, moeglich) {
    * Funktion gibt, und warum sie hier nicht geht. */
   zeile.hidden = false;
   kasten.checked = (wert === "leiste");
-  kasten.disabled = !moeglich;
-  zeile.classList.toggle("aus", !moeglich);
+
+  /* ⚠ DER SCHALTER WIRD NICHT MEHR GESPERRT – auch nicht bei `moeglich ===
+   * false`. Die Faehigkeitspruefung war eine VERMUTUNG, und sie lag falsch:
+   * sie fragte `api.sidePanel`, also `browser.sidePanel`, das es in Chrome
+   * nicht gibt – und meldete „dieser Browser stellt keine Seitenleiste bereit"
+   * auf einem Browser, der sie nachweislich bereitstellt. Damit blockierte sie
+   * eine funktionierende Funktion.
+   * Die Fehlerlagen sind nicht gleich schwer: ein faelschlich gesperrter
+   * Schalter macht das Feature unerreichbar, ein faelschlich freigegebener
+   * kostet einen Klick, der nichts tut – und der sagt es dann auch
+   * (`leisteOeffnen` meldet den Fehlschlag).
+   * `moeglich` bleibt als AUSKUNFT erhalten (Hinweistext), nicht als Schranke. */
+  kasten.disabled = false;
+  zeile.classList.remove("aus");
   if (!h) return;
-  h.textContent = !moeglich
-    ? "Dieser Browser stellt keine Seitenleiste für Erweiterungen bereit "
-      + "(nötig: Chrome/Edge ab 114 oder Firefox ab 115)."
-    : (_leiste
-      ? "Die Breite ziehst du an der Kante der Leiste."
-      : "Öffnet sich beim nächsten Klick auf das Symbol in der Symbolleiste.");
+  h.textContent = _leiste
+    ? "Die Breite ziehst du an der Kante der Leiste."
+    : (moeglich
+      ? "Öffnet sich beim nächsten Klick auf das Symbol in der Symbolleiste."
+      : "Öffnet sich beim nächsten Klick auf das Symbol. Sollte nichts "
+        + "passieren, kennt dieser Browser keine Seitenleiste für "
+        + "Erweiterungen (nötig: Chrome/Edge ab 114, Firefox ab 115).");
   h.hidden = false;
 }
 
@@ -1365,12 +1413,14 @@ function ansichtZeigen(wert, moeglich) {
  */
 async function leisteOeffnen() {
   try {
-    if (api.sidebarAction && api.sidebarAction.open) {
-      await api.sidebarAction.open();
+    const ff = zweig("sidebarAction", "open");
+    if (ff) {
+      await ff.open();
       return true;
     }
-    if (api.sidePanel && api.sidePanel.open && _windowId !== null) {
-      await api.sidePanel.open({ windowId: _windowId });
+    const cp = zweig("sidePanel", "open");
+    if (cp && _windowId !== null) {
+      await cp.open({ windowId: _windowId });
       return true;
     }
   } catch (e) { /* Fehlschlag ist kein Fehler – siehe oben. */ }

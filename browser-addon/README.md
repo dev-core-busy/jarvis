@@ -56,7 +56,15 @@ Antwortentwurf zu Ticket A neben dem geöffneten Ticket B. Und `activeTab` gilt 
 den Tab, aus dem die Leiste geöffnet wurde; für „Überarbeiten" und „Einfügen" in weiteren
 Tabs erfragt sie einmalig ein dauerhaftes Zugriffsrecht auf den Jira-Server.
 
-Drei Fallen, die das im ersten Anlauf halb tot gemacht haben (gemeldet, Chrome 152):
+**⚠ `sidePanel` und `sidebarAction` NIE über `api` ansprechen.** `api` ist
+`browser ?? chrome`, und Chrome definiert inzwischen selbst ein `browser`-Objekt — in dem
+`sidePanel` als Chrome-eigene API **nicht** vorkommt. `api.sidePanel` war damit `undefined`,
+obwohl `chrome.sidePanel` existiert: die gesamte Panel-Steuerung war ein stiller No-op, und
+die Fähigkeitsprüfung meldete „dieser Browser kann das nicht" auf einem Browser, der es kann.
+Herstellereigene APIs werden über `zweig(name, methode)` an **beiden** Wurzeln gesucht.
+`browser ?? chrome` taugt nur für standardisierte APIs.
+
+Drei weitere Fallen, die das im ersten Anlauf halb tot gemacht haben (gemeldet, Chrome 152):
 
 * **Die Erkennung darf nicht am Abfrageteil hängen.** `?ansicht=leiste` kommt nur mit,
   wenn die Leiste über unseren Weg aufgeht – über **Chromes eigene Seitenleisten-Auswahl**

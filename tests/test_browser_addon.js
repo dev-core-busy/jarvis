@@ -1641,9 +1641,31 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
    * feuert nicht. Erst ein LEERER Pfad gibt den Klick frei. */
   const bgTeil = (name) => (BG.match(new RegExp(
     "(?:async )?function " + name + "\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}")) || [null])[0];
-  const anwenden = bgTeil("ansichtAnwenden");
-  check(!!anwenden && !!bgTeil("aktion"),
+  /* Transitiv, wie in popup.js: `ansichtAnwenden` ruft seit 2026-08-30
+   * `zweig()`, und mit der frueheren festen Liste brach der Lauf mit einem
+   * nackten ReferenceError ab statt fehlzuschlagen. Fuenfter Harness in dieser
+   * Datei mit derselben Falle. */
+  const bgTeile = (start, gestellt) => {
+    const G = new Set(gestellt || []);
+    const teile = [], drin = new Set(), offen = start.slice();
+    while (offen.length) {
+      const n = offen.shift();
+      if (drin.has(n) || G.has(n)) continue;
+      const k = bgTeil(n);
+      if (!k) continue;
+      drin.add(n); teile.push(k);
+      for (const t of k.match(/\b[A-Za-z_$][\w$]*(?=\s*\()/g) || []) {
+        if (!drin.has(t) && !G.has(t) && bgTeil(t)) offen.push(t);
+      }
+    }
+    return { teile, drin };
+  };
+  const { teile: bgT, drin: bgD } = bgTeile(["ansichtAnwenden", "aktion"], []);
+  const anwenden = bgT.join("\n");
+  check(bgD.has("ansichtAnwenden") && bgD.has("aktion"),
         "background.js hat ansichtAnwenden() und aktion()");
+  check(bgD.has("zweig") && bgD.has("_wurzeln"),
+        "der Schnitt zieht die API-Wurzelsuche mit", [...bgD].join(","));
   /* Der Pfad ist eine Modul-Konstante und gehoert in den Schnitt. Fehlte er,
    * warf `ansichtAnwenden` - und weil dort JEDER Schritt einzeln abgesichert
    * ist, verschwand der Fehler im leeren catch: der Lauf meldete FAIL und es
@@ -1652,25 +1674,44 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
   check(/\?ansicht=leiste/.test(PFAD_ZEILE),
         "background.js kennt den Leisten-Pfad", PFAD_ZEILE);
 
+  /* ⚠ DIE WELTEN WERDEN ALS ECHTE GLOBALE `chrome`/`browser` GESTELLT.
+   *
+   * Vorher stellte der Lauf nur ein `api`-Objekt - damit war der gemeldete
+   * Fehler gar nicht nachstellbar: `api` ist `browser ?? chrome`, und genau
+   * DIESE Aufloesung war das Problem. Chrome 152 definiert selbst ein
+   * `browser`-Objekt, in dem `sidePanel` NICHT vorkommt (Chrome-eigene API) -
+   * `api.sidePanel` war undefined, obwohl `chrome.sidePanel` da ist. */
   const laufAnsicht = async (modus, welt) => {
     const spur = [];
-    const a = {
-      action: { setPopup: async (o) => { spur.push(["popup", o.popup]); } },
-    };
+    const panelStub = () => ({
+      setOptions: async (o) => { spur.push(["optionen", o.path, o.enabled]); },
+      setPanelBehavior: async (o) => {
+        spur.push(["verhalten", o.openPanelOnActionClick]); },
+    });
+    const aktionStub = () => ({
+      setPopup: async (o) => { spur.push(["popup", o.popup]); },
+    });
+    const runtimeStub = () => ({
+      getURL: (p) => "ext://x/" + p,
+      getManifest: () => ({ side_panel: { default_path: "popup.html" } }),
+    });
+    let C, B;
     if (welt === "chrome") {
-      a.sidePanel = {
-        setOptions: async (o) => { spur.push(["optionen", o.path, o.enabled]); },
-        setPanelBehavior: async (o) => {
-          spur.push(["verhalten", o.openPanelOnActionClick]); },
-      };
+      C = { action: aktionStub(), sidePanel: panelStub(), runtime: runtimeStub() };
+      B = undefined;
+    } else if (welt === "chrome152") {
+      // DER GEMELDETE FALL: `browser` ist da, kennt aber kein sidePanel.
+      C = { action: aktionStub(), sidePanel: panelStub(), runtime: runtimeStub() };
+      B = { action: aktionStub(), runtime: runtimeStub() };
     } else {
-      a.sidebarAction = {
-        setPanel: async (o) => { spur.push(["panel", o.panel]); },
-      };
-      a.runtime = { getURL: (p) => "moz-extension://x/" + p };
+      C = undefined;
+      B = { action: aktionStub(), runtime: runtimeStub(),
+            sidebarAction: { setPanel: async (o) => { spur.push(["panel", o.panel]); } } };
     }
-    await new Function("api", PFAD_ZEILE + "\n" + anwenden + "\n" + bgTeil("aktion")
-                       + "\nreturn ansichtAnwenden(" + JSON.stringify(modus) + ");")(a);
+    const a = B || C;
+    await new Function("api", "chrome", "browser",
+                       PFAD_ZEILE + "\n" + anwenden
+                       + "\nreturn ansichtAnwenden(" + JSON.stringify(modus) + ");")(a, C, B);
     return spur;
   };
 
@@ -1695,6 +1736,21 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
      * der Popup-Breite da. */
     check(s.some((z) => z[0] === "optionen" && /\?ansicht=leiste/.test(z[1])),
           "der Panel-Pfad wird AUCH im Popup-Modus gesetzt");
+  }
+  /* ⚠ DER GEMELDETE FALL (Chrome 152, 2026-08-30): `browser` ist definiert,
+   * kennt aber kein `sidePanel`. Ueber `api = browser ?? chrome` war die
+   * ganze Panel-Steuerung damit ein stiller No-op - der Klick aufs Symbol
+   * oeffnete nie die Leiste, und die Faehigkeitspruefung meldete "dieser
+   * Browser kann das nicht" auf einem Browser, der es kann. */
+  {
+    const s = await laufAnsicht("leiste", "chrome152");
+    check(s.some((z) => z[0] === "verhalten" && z[1] === true),
+          "browser OHNE sidePanel: die Panel-Steuerung wird trotzdem erreicht",
+          JSON.stringify(s));
+    check(s.some((z) => z[0] === "optionen" && /\?ansicht=leiste/.test(z[1])),
+          "und der Panel-Pfad wird gesetzt");
+    check(s.some((z) => z[0] === "popup" && z[1] === ""),
+          "der Popup-Pfad wird geleert");
   }
   {
     const s = await laufAnsicht("leiste", "firefox");
@@ -2056,10 +2112,15 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
     const az = schneidePopup("ansichtZeigen");
     check(!!az && /zeile\.hidden = false;/.test(az) && !/hidden = true/.test(az),
           "die Ansichts-Zeile bleibt IMMER sichtbar");
-    check(!!az && /kasten\.disabled = !moeglich/.test(az),
-          "kann der Browser keine Leiste, ist sie gesperrt statt verborgen");
-    check(!!az && /Chrome\/Edge ab 114|ab 114/.test(az),
-          "und der Hinweis nennt den Grund");
+    /* ⚠ UND SIE WIRD NICHT GESPERRT. Die Faehigkeitspruefung war eine
+     * Vermutung und lag falsch (sie fragte `api.sidePanel`, das es in Chrome
+     * nicht gibt) - sie hat eine funktionierende Funktion blockiert. Ein
+     * faelschlich gesperrter Schalter macht das Feature unerreichbar, ein
+     * faelschlich freigegebener kostet einen Klick, der nichts tut. */
+    check(!!az && /kasten\.disabled = false/.test(az),
+          "und wird NIE gesperrt - die Faehigkeitspruefung ist keine Schranke");
+    check(!!az && /ab 114/.test(az),
+          "der Hinweis nennt die Voraussetzung trotzdem");
   }
   /* ⚠ REIHENFOLGE: erst absenden, dann oeffnen. Nach einem `await` fehlt die
    * Benutzergeste fuer `sidePanel.open`; und ein Oeffnen VOR dem Absenden
@@ -2088,13 +2149,16 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
       check(/Symbol/.test(h),
             "und misslingt das Oeffnen, nennt die Meldung den Weg");
     }
-    const lo = schneidePopup("leisteOeffnen");
+    const lo = ohneKommentare(schneidePopup("leisteOeffnen") || "");
     /* ⚠ JEDER Zweig muss warten, nicht irgendeiner. Die erste Fassung dieser
      * Pruefung suchte `await api.(sidePanel|sidebarAction)` - mit zwei Zweigen
      * blieb sie gruen, obwohl in einem das `await` fehlte, und die Gegenprobe
      * biss nicht. Geprueft wird jetzt die Eigenschaft: KEIN `open(` ohne
-     * unmittelbar davorstehendes `await`. */
-    const offeneAufrufe = (lo || "").match(/(\w+\s+)?api\.\w+\.open\(/g) || [];
+     * unmittelbar davorstehendes `await`.
+     * Ohne Kommentare, sonst zaehlen die Begruendungen mit. */
+    check(/zweig\("sidebarAction"/.test(lo) && /zweig\("sidePanel"/.test(lo),
+          "leisteOeffnen sucht beide APIs an BEIDEN Wurzeln");
+    const offeneAufrufe = lo.match(/(\w+\s+)?\w+\.open\(/g) || [];
     check(offeneAufrufe.length >= 2,
           "leisteOeffnen() bedient beide Welten", String(offeneAufrufe.length));
     check(offeneAufrufe.every((a) => /^await\s/.test(a)),
@@ -2172,6 +2236,89 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
      * darunter durch (Projektregel). */
     check(!!r && /background:\s*var\(--grund\)/.test(r[1]),
           "und traegt eine deckende Flaeche");
+  }
+
+  /* ── k) HERSTELLEREIGENE APIs AN BEIDEN WURZELN ────────────────────────
+   *
+   * ⚠ DER FEHLER, DER DREI RUNDEN GEKOSTET HAT. `api` ist `browser ?? chrome`.
+   * Chrome 152 definiert selbst ein `browser`-Objekt - `sidePanel` steht dort
+   * NICHT drin, weil es eine Chrome-eigene API ist. `api.sidePanel` war damit
+   * undefined, obwohl `chrome.sidePanel` existiert: die ganze Panel-Steuerung
+   * war ein stiller No-op, und die Faehigkeitspruefung meldete "dieser Browser
+   * kann das nicht" auf einem Browser, der es kann.
+   * AUSGEFUEHRT geprueft - eine Quelltext-Pruefung haette denselben Denkfehler
+   * nur wiederholt. */
+  {
+    const schneideAus = (quelle, name) => (quelle.match(new RegExp(
+      "(?:async )?function " + name + "\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}")) || [null])[0];
+    /* ⚠ DER HELFER STEHT IN BEIDEN DATEIEN - und beide muessen geprueft
+     * werden. Eine Gegenprobe, die nur background.js verbog, blieb sonst
+     * gruen, weil der Lauf die Fassung aus popup.js ausfuehrte.
+     * Dazu eine DRIFT-SCHRANKE: zwei Fassungen derselben Funktion laufen
+     * auseinander (Register; im Projekt zuletzt bei `kanonisch()` der Lizenz).
+     * Geteilt werden kann der Code nicht: popup.js ist ein Modul, background.js
+     * laeuft in Firefox als klassisches Skript. */
+    const fassungen = [["popup.js", POPUP_JS], ["background.js", BG]];
+    const geschnitten = fassungen.map(([n, q]) =>
+      [n, schneideAus(q, "_wurzeln"), schneideAus(q, "zweig")]);
+    for (const [n, w_, z_] of geschnitten) {
+      check(!!w_ && !!z_, n + " hat zweig() und _wurzeln()");
+    }
+    check(geschnitten[0][1] === geschnitten[1][1]
+          && geschnitten[0][2] === geschnitten[1][2],
+          "beide Fassungen sind ZEICHENGLEICH - sonst laufen sie auseinander");
+
+    const sucheIn = (w, z) => (C, B, name, methode) => new Function(
+      "chrome", "browser", "name", "methode",
+      w + "\n" + z + "\nreturn zweig(name, methode) ? 'gefunden' : 'fehlt';"
+    )(C, B, name, methode);
+    // Gemessen wird gegen BEIDE Fassungen; `suche` prueft sie gemeinsam und
+    // meldet nur "gefunden", wenn beide es sagen.
+    const suche = (C, B, name, methode) => {
+      const e = geschnitten.map(([, w_, z_]) => sucheIn(w_, z_)(C, B, name, methode));
+      return (e[0] === e[1]) ? e[0] : ("uneinig: " + e.join("/"));
+    };
+
+    const MIT = { sidePanel: { setOptions() {}, open() {} } };
+    const OHNE = { runtime: {} };
+
+    check(suche(MIT, undefined, "sidePanel", "setOptions") === "gefunden",
+          "klassisches Chrome: sidePanel wird gefunden");
+    /* DER GEMELDETE FALL. */
+    check(suche(MIT, OHNE, "sidePanel", "setOptions") === "gefunden",
+          "Chrome 152 mit `browser` OHNE sidePanel: wird trotzdem gefunden");
+    check(suche(undefined, { sidebarAction: { setPanel() {} } },
+                "sidebarAction", "setPanel") === "gefunden",
+          "Firefox: sidebarAction wird gefunden");
+    check(suche(OHNE, OHNE, "sidePanel", "setOptions") === "fehlt",
+          "gibt es sie nirgends, wird nichts erfunden");
+    /* Ein Zweig OHNE die gesuchte Methode zaehlt nicht - sonst laeuft der
+     * Aufruf gleich darauf in einen TypeError. */
+    check(suche({ sidePanel: {} }, undefined, "sidePanel", "setOptions") === "fehlt",
+          "ein Zweig ohne die Methode zaehlt nicht");
+    check(suche(undefined, undefined, "sidePanel", "setOptions") === "fehlt",
+          "ganz ohne Wurzeln wirft es nicht");
+  }
+
+  /* Und die Faehigkeit wird aus dem MANIFEST gelesen, nicht nur aus der API -
+   * das ist die verlaesslichste Auskunft: hat der Browser die Erweiterung mit
+   * dem Leisten-Schluessel geladen, gibt es die Leiste. */
+  {
+    const lm = ohneKommentare((BG.match(
+      /function leisteMoeglich\(\)[\s\S]*?\n\}/) || [""])[0]);
+    check(/getManifest/.test(lm) && /side_panel/.test(lm),
+          "leisteMoeglich fragt zuerst das Manifest");
+    check(/zweig\(/.test(lm),
+          "und sucht die API an beiden Wurzeln");
+    check(!/api\.sidePanel/.test(lm),
+          "aber NICHT mehr ueber `api` - das ist browser ?? chrome");
+  }
+  /* Keine Stelle im Code darf noch ueber `api` an die herstellereigenen APIs
+   * gehen - GEPRUEFT ALS REGEL, damit auch eine kuenftige auffaellt. */
+  for (const [name, quelle] of [["background.js", BG], ["popup.js", POPUP_JS]]) {
+    const o = ohneKommentare(quelle);
+    check(!/api\.sidePanel/.test(o) && !/api\.sidebarAction/.test(o),
+          name + " greift nirgends ueber `api` auf sidePanel/sidebarAction zu");
   }
 
   // ── h) CSS ──────────────────────────────────────────────────────────────

@@ -82,6 +82,41 @@ async function einstSchreiben(teil) {
  * es – `openPanelOnActionClick` bleibt dann wirkungslos und `onClicked` feuert
  * nicht. Erst ein LEERER Popup-Pfad gibt den Klick frei.
  */
+/* ── Herstellereigene APIs: NICHT ueber `api` ansprechen ───────────────────
+ *
+ * ⚠ HIER LAG DER FEHLER, DER DREI RUNDEN GEKOSTET HAT (gemeldet 2026-08-30).
+ *
+ * `api` ist `browser ?? chrome`. Chrome (152) definiert inzwischen selbst ein
+ * `browser`-Objekt – aber `sidePanel` ist eine **Chrome-eigene** API und steht
+ * dort NICHT drin. `api.sidePanel` war damit `undefined`, obwohl
+ * `chrome.sidePanel` existiert und die Leiste nachweislich funktioniert.
+ * Folge: `setPanelBehavior` und `setOptions` liefen ins Leere (der Klick aufs
+ * Symbol oeffnete nie die Leiste), und die Faehigkeitspruefung meldete „dieser
+ * Browser stellt keine Seitenleiste bereit" – auf einem Browser, der sie
+ * bereitstellt.
+ *
+ * Merkregel: `browser ?? chrome` taugt nur fuer STANDARDISIERTE APIs. Was nur
+ * ein Hersteller kennt (`sidePanel` in Chrome, `sidebarAction` in Firefox),
+ * wird an BEIDEN Wurzeln gesucht.
+ */
+function _wurzeln() {
+  const w = [];
+  if (typeof chrome !== "undefined" && chrome) w.push(chrome);
+  if (typeof browser !== "undefined" && browser && w.indexOf(browser) === -1) {
+    w.push(browser);
+  }
+  return w;
+}
+
+/** Sucht einen API-Zweig an beiden Wurzeln. `null`, wenn es ihn nirgends gibt. */
+function zweig(name, methode) {
+  for (const w of _wurzeln()) {
+    const z = w[name];
+    if (z && (!methode || typeof z[methode] === "function")) return z;
+  }
+  return null;
+}
+
 const LEISTE_PFAD = "popup.html?ansicht=leiste";
 
 /** Das Bedienelement in der Symbolleiste – in MV3 `action`, sonst `browserAction`. */
@@ -91,8 +126,15 @@ function aktion() {
 
 /** Gibt es ueberhaupt eine Leiste? Firefox < 115 und aeltere Chrome kennen keine. */
 function leisteMoeglich() {
-  return !!((api.sidePanel && api.sidePanel.setOptions) ||
-            (api.sidebarAction && api.sidebarAction.setPanel));
+  /* DAS MANIFEST IST DIE VERLAESSLICHSTE AUSKUNFT: hat der Browser die
+   * Erweiterung MIT dem Leisten-Schluessel geladen, gibt es die Leiste – ganz
+   * unabhaengig davon, unter welchem Namen die API im JS erreichbar ist. Die
+   * API-Abfrage bleibt als zweiter Weg daneben stehen. */
+  try {
+    const m = api.runtime.getManifest() || {};
+    if (m.side_panel || m.sidebar_action) return true;
+  } catch (e) { /* dann entscheidet die API-Abfrage */ }
+  return !!(zweig("sidePanel", "setOptions") || zweig("sidebarAction", "setPanel"));
 }
 
 /** Stellt den gewuenschten Modus im Browser her.
@@ -109,29 +151,31 @@ async function ansichtAnwenden(modus) {
     // Leer = der Klick faellt an `onClicked` bzw. an das Panel-Verhalten.
     try { await a.setPopup({ popup: leiste ? "" : "popup.html" }); } catch (e) {}
   }
-  if (api.sidePanel) {
+  const panel = zweig("sidePanel", "setOptions");
+  const leisteFf = zweig("sidebarAction", "setPanel");
+  if (panel) {
     /* DER ABFRAGETEIL WIRD HIER GESETZT, NICHT IM MANIFEST. Fuer `setOptions`
      * ist ein Pfad mit `?…` belegt, fuer `side_panel.default_path` nicht – und
      * ein Manifest, das der Browser ablehnt, macht die ganze Erweiterung
      * uninstallierbar. Faellt der Aufruf aus, laedt die Leiste ohne
      * Abfrageteil: schmal, aber benutzbar. */
     try {
-      await api.sidePanel.setOptions({ path: LEISTE_PFAD, enabled: true });
+      await panel.setOptions({ path: LEISTE_PFAD, enabled: true });
     } catch (e) {
       /* Nimmt dieser Chrome keinen Abfrageteil im Pfad, wenigstens den nackten
        * Pfad setzen - sonst bliebe die Leiste ganz abgeschaltet. Die Erkennung
        * haengt ohnehin nicht mehr daran (kontextArt). */
       try {
-        await api.sidePanel.setOptions({ path: "popup.html", enabled: true });
+        await panel.setOptions({ path: "popup.html", enabled: true });
       } catch (e2) {}
     }
     try {
-      await api.sidePanel.setPanelBehavior({ openPanelOnActionClick: leiste });
+      await panel.setPanelBehavior({ openPanelOnActionClick: leiste });
     } catch (e) {}
-  } else if (api.sidebarAction && api.sidebarAction.setPanel) {
+  } else if (leisteFf) {
     // Firefox verlangt eine vollstaendige Adresse, keinen relativen Pfad.
     try {
-      await api.sidebarAction.setPanel({ panel: api.runtime.getURL(LEISTE_PFAD) });
+      await leisteFf.setPanel({ panel: api.runtime.getURL(LEISTE_PFAD) });
     } catch (e) {}
   }
 }
@@ -191,13 +235,10 @@ ansichtHerstellen();
 const _aktion = aktion();
 if (_aktion && _aktion.onClicked) {
   _aktion.onClicked.addListener((tab) => {
-    if (api.sidebarAction && api.sidebarAction.toggle) {
-      api.sidebarAction.toggle().catch(() => {});
-      return;
-    }
-    if (api.sidePanel && api.sidePanel.open && tab) {
-      api.sidePanel.open({ windowId: tab.windowId }).catch(() => {});
-    }
+    const ff = zweig("sidebarAction", "toggle");
+    if (ff) { ff.toggle().catch(() => {}); return; }
+    const cp = zweig("sidePanel", "open");
+    if (cp && tab) cp.open({ windowId: tab.windowId }).catch(() => {});
   });
 }
 

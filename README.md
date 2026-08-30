@@ -352,7 +352,8 @@ nano .env   # Add your API keys (see Configuration section)
 ./start_jarvis.sh
 ```
 
-Open your browser at `https://your-server-ip` and log in with `jarvis/jarvis`.
+Open your browser at `https://your-server-ip` and log in with the local `jarvis`
+account. Set a password for it before the host is reachable by anyone else.
 
 > **Self-signed certificate:** Your browser will warn about the certificate on first visit. This is expected — accept the exception or install the certificate from Settings → SSL.
 

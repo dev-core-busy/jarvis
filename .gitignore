@@ -85,9 +85,14 @@ data/downloads/
 # einem ignorierten VERZEICHNIS steigt git nicht hinein und jede Negation
 # darunter bleibt wirkungslos. Alles andere bleibt draussen: settings.local.json
 # ist maschinenspezifisch (Berechtigungen, Hooks), worktrees/ und *.lock ohnehin.
+#
+# .claude/rules/ ist seit 2026-08-30 AUSGENOMMEN und bleibt draussen: die vier
+# Dateien sind ausgelagerte Kapitel von CLAUDE.md (Bereichs-Landkarte), also
+# dasselbe Projektgedaechtnis - und das gehoert aus denselben Gruenden nicht in
+# ein oeffentliches Repo. Sie bleiben LOKAL vorhanden und werden von Claude Code
+# weiter ueber die `paths:`-Frontmatter geladen; ein frischer Klon hat sie nicht.
 .claude/*
 !.claude/skills/
-!.claude/rules/
 !.claude/hooks/
 
 # ─── Temp & Entwicklungsdateien ─────────────────────────────────────────────

@@ -96,9 +96,33 @@ todo.txt
 =0.39.0
 verhalte_dich_wie_claude.md
 implementation_plan.md
-CLAUDE.md
 test_agent.py
 *.tmp
+
+# ─── Projektgedaechtnis: CLAUDE.md UND JEDE KOPIE ───────────────────────────
+# Dieses Repo ist OEFFENTLICH. CLAUDE.md enthaelt Server-Rollen, interne
+# Adressen und die Chronik jedes Vorfalls samt der Zeitraeume, in denen eine
+# Luecke offen stand. Das gehoert nicht hierher.
+#
+# ⚠ VORFALL 2026-08-30: der Eintrag stand hier seit dem Initial Public Release
+# und war WIRKUNGSLOS - .gitignore greift nicht bei bereits VERFOLGTEN Dateien.
+# Die Datei lag dadurch 136 Commits lang oeffentlich; bereinigt per
+# git-filter-repo. Ein Eintrag hier ist KEIN Nachweis, dass eine Datei draussen
+# ist - `git ls-files <datei>` ist es.
+#
+# Die Muster decken auch Sicherungen und Editor-Reste ab: eine Kopie unter
+# anderem Namen (CLAUDE.md.bak, CLAUDE-alt.md) waere wieder verfolgbar.
+CLAUDE.md
+CLAUDE.md.*
+CLAUDE-*.md
+CLAUDE_*.md
+claude.md
+claude.md.*
+*_CLAUDE.md
+.CLAUDE.md.sw?
+# AUSDRUECKLICH NICHT erfasst und bewusst im Repo:
+#   .claude/rules/*.md              - ausgelagerte Bereichsregeln (geprueft sauber)
+#   deploy/.../claude-md-diaet.md   - eine ANLEITUNG, keine Kopie (0 Zitate)
 windows-app-go/Jarvis.exe
 windows-app-go/dist/
 windows-app/

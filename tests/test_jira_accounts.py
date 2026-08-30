@@ -314,9 +314,15 @@ check("der Zugang steht OBERHALB des Plugin-Containers",
 _a = HTML.index('id="ja-sect-plugin"')
 check("keine ja-card steht ausserhalb (vor) des Plugin-Containers",
       'class="ja-card"' not in HTML[:_a], HTML[:_a][-120:])
-check("und im Container liegen alle sieben",
-      HTML[_a:].count('class="ja-card"') == 7,
-      str(HTML[_a:].count('class="ja-card"')))
+# ⚠ GEPRUEFT WIRD DIE EIGENSCHAFT, NICHT DIE ANZAHL. Hier stand bis 2026-08-30
+# `== 7`. Beim Ergaenzen der Karte "Fenster oder Seitenleiste" meldete der
+# Waechter daraufhin einen Fehler, den es nicht gab – eine feste Zahl in einem
+# Test ist eine Zeitbombe (Register). Die Aussage, auf die es ankommt: JEDE
+# Karte liegt im Plugin-Container, und es sind ueberhaupt welche da.
+_karten = HTML[_a:].count('class="ja-card"')
+check("und im Container liegen ALLE Karten der Anleitung",
+      _karten == HTML.count('class="ja-card"') and _karten >= 7,
+      "%d im Container / %d gesamt" % (_karten, HTML.count('class="ja-card"')))
 
 # Geprueft wird der SICHTBARE Titel der Kachel, nicht das Vorkommen der
 # Zeichenkette im ganzen File: "Jira-Assistent" steht dort weiterhin in zwei

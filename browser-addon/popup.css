@@ -57,7 +57,20 @@ body {
   white-space: nowrap;
 }
 .kopf > button { flex: 0 0 auto; }
-.ticket { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; }
+.ticket { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* KEIN Ticket im Tab: das Feld sagt es im Klartext.
+ *
+ * ⚠ NICHT UEBER DIE FARBE. `.ticket` ist weiter unten ohnehin schon
+ * `--gedaempft` - eine Faerbung hier waere ein wirkungsloser No-op gewesen, und
+ * genau so stand es im ersten Anlauf da (nur der Screenshot hat es gezeigt, die
+ * Messung "Klasse ist gesetzt" war gruen).
+ * Unterschieden wird ueber die SCHRIFT: eine Ticketnummer ist eine Kennung und
+ * steht in Monospace, "Kein Ticket gefunden" ist ein Satz und gehoert in die
+ * Textschrift. Die Aussage traegt ohnehin der Text selbst.
+ * Zugleich sind dann alle Knoepfe gesperrt, die ein Ticket brauchen
+ * (popup.js::knoepfeAktualisieren) - Anzeige und Sperre haben dieselbe Ursache
+ * und werden in EINER Funktion gesetzt. */
+.ticket.leer { font-family: inherit; }
 /* Das Logo kommt vom Server und hat unbekannte Masse – die Hoehe begrenzt,
  * das Seitenverhaeltnis bleibt. Ohne max-width sprengt ein breites
  * Wort-Bild-Logo die 380 px des Fensters. */
@@ -253,3 +266,65 @@ button.ico {
  * markiert wird die eigene Wahl, nicht die Vorlage. */
 .vorl-liste .stern { font-size: 13px; }
 .vorl-liste .stern.an { color: var(--akzent); }
+
+/* ── Seitenleiste ───────────────────────────────────────────────────────────
+ *
+ * DIE BREITE BESTIMMT HIER DER BENUTZER, nicht das Stylesheet. Ein Popup hat
+ * kein Fenster, das sich bemessen liesse – der Browser zeichnet es um den
+ * gerenderten Inhalt und klemmt es auf 800 x 600; deshalb steht oben die feste
+ * Breite von 380 px. In der Leiste ist es genau andersherum: der Browser gibt
+ * die Breite vor (in Chrome ab etwa 360 px, per Ziehen an der Kante), und eine
+ * feste Angabe wuerde dort waagerecht ueberlaufen.
+ *
+ * Die Klasse setzt ansicht.js am <html>, noch vor dem ersten Zeichnen. */
+html.leiste body {
+  width: auto;
+  min-width: 0;
+}
+
+/* Die zusaetzliche HOEHE ist der eigentliche Gewinn der Leiste: das Popup ist
+ * bei 600 px zu Ende, die Leiste geht ueber die ganze Fensterhoehe. Ohne diese
+ * Zeile bliebe das Textfeld bei seinen zwoelf Zeilen und darunter staende
+ * leere Flaeche. */
+html.leiste #f-ergebnis {
+  min-height: 40vh;
+}
+
+/* ── Zugriffszeile (nur Leiste) ─────────────────────────────────────────────
+ * Text und Knopf gehoeren zusammen; der Knopf steht darunter, weil der Text
+ * mehrzeilig ist und ein Knopf am Zeilenende sonst irgendwo haengt. */
+.zugriff-zeile {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--rand);
+  border-radius: 6px;
+  background: var(--warn);
+}
+/* ⚠ DER TEXT MUSS EIN EIGENER BLOCK SEIN. Ein <p> ist ein Textfluss, und ein
+ * Knopf darin ist inline: im Screenshot stand er mitten im Satz („… aus dem
+ * Klick auf das Symbol. [Zugriff erlauben]"), nicht darunter. Die Messung
+ * „Zeile ist sichtbar" war dabei gruen – gesehen hat es erst das Bild. */
+.zugriff-zeile > span { display: block; }
+.zugriff-zeile > button { display: block; margin-top: 8px; }
+
+/* ── Umschalter Popup ↔ Seitenleiste ───────────────────────────────────────
+ * Steht am Fuss und ist bewusst leise gezeichnet: eine Einstellung, die man
+ * einmal trifft, darf nicht mit den Arbeitsknoepfen um Aufmerksamkeit ringen.
+ * Die Trennlinie sagt, dass sie nicht zum Arbeitsbereich darueber gehoert. */
+.ansicht-fuss {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--rand);
+}
+.ansicht-schalter {
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  color: var(--gedaempft);
+  cursor: pointer;
+}
+/* `min-width: 0` ist Pflicht: ohne das schrumpft ein Flex-Kind nicht unter
+ * seine Inhaltsbreite und eine lange Beschriftung schiebt in einer schmalen
+ * Leiste das Kaestchen aus dem Bild (Register). */
+.ansicht-schalter > span { min-width: 0; }
+.ansicht-fuss .hinweis { margin: 4px 0 0; }

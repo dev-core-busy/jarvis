@@ -57,8 +57,116 @@ async function einstSchreiben(teil) {
   if (teil.basis !== undefined) neu.basis = String(teil.basis).replace(/\/+$/, "");
   if (teil.benutzer !== undefined) neu.benutzer = String(teil.benutzer);
   if (teil.zugriff_erfragt !== undefined) neu.zugriff_erfragt = !!teil.zugriff_erfragt;
+  /* NUR ZWEI WERTE, und alles Unbekannte wird zu "popup".
+   * Der Wert steuert, ob der Klick auf das Symbol ein Popup oeffnet oder die
+   * Seitenleiste. Ein Tippfehler in der Ablage (oder ein aelterer Stand, der
+   * das Feld gar nicht kennt) darf nicht in einem dritten, undefinierten
+   * Zustand enden - dann oeffnet gar nichts mehr, und niemand sieht warum. */
+  if (teil.ansicht !== undefined) neu.ansicht = (teil.ansicht === "leiste") ? "leiste" : "popup";
   await api.storage.local.set({ [EINST]: neu });
   return neu;
+}
+
+/* ── Popup oder Seitenleiste ────────────────────────────────────────────────
+ *
+ * DIE LEISTE IST KEIN ZWEITES FENSTER, sondern dieselbe `popup.html` – nur mit
+ * `?ansicht=leiste` davor (ansicht.js macht daraus eine Klasse am <html>). Eine
+ * zweite Oberflaeche waere eine Kopie, und Kopien laufen auseinander.
+ *
+ * ZWEI APIS, EIN VERHALTEN: Chrome kennt `sidePanel` (ab 114), Firefox kennt
+ * `sidebarAction` – und keiner der beiden kennt den jeweils anderen. Deshalb
+ * wird hier auf VORHANDENSEIN geprueft, nicht auf den Browsernamen: eine
+ * Abfrage des User-Agent waere beim naechsten Fork falsch.
+ *
+ * DER UMSCHALTER IST `action.setPopup`. Solange ein Popup gesetzt ist, gewinnt
+ * es – `openPanelOnActionClick` bleibt dann wirkungslos und `onClicked` feuert
+ * nicht. Erst ein LEERER Popup-Pfad gibt den Klick frei.
+ */
+const LEISTE_PFAD = "popup.html?ansicht=leiste";
+
+/** Das Bedienelement in der Symbolleiste – in MV3 `action`, sonst `browserAction`. */
+function aktion() {
+  return api.action || api.browserAction || null;
+}
+
+/** Gibt es ueberhaupt eine Leiste? Firefox < 115 und aeltere Chrome kennen keine. */
+function leisteMoeglich() {
+  return !!((api.sidePanel && api.sidePanel.setOptions) ||
+            (api.sidebarAction && api.sidebarAction.setPanel));
+}
+
+/** Stellt den gewuenschten Modus im Browser her.
+ *
+ * JEDER Teilschritt ist einzeln abgesichert: schlaegt einer fehl, sollen die
+ * uebrigen trotzdem wirken. Ein `sidePanel`, das sich nicht konfigurieren
+ * laesst, darf nicht dazu fuehren, dass auch der Popup-Pfad ungesetzt bleibt –
+ * dann oeffnet der Klick GAR NICHTS, und das ist der schlechteste Ausgang.
+ */
+async function ansichtAnwenden(modus) {
+  const leiste = (modus === "leiste");
+  const a = aktion();
+  if (a && a.setPopup) {
+    // Leer = der Klick faellt an `onClicked` bzw. an das Panel-Verhalten.
+    try { await a.setPopup({ popup: leiste ? "" : "popup.html" }); } catch (e) {}
+  }
+  if (api.sidePanel) {
+    /* DER ABFRAGETEIL WIRD HIER GESETZT, NICHT IM MANIFEST. Fuer `setOptions`
+     * ist ein Pfad mit `?…` belegt, fuer `side_panel.default_path` nicht – und
+     * ein Manifest, das der Browser ablehnt, macht die ganze Erweiterung
+     * uninstallierbar. Faellt der Aufruf aus, laedt die Leiste ohne
+     * Abfrageteil: schmal, aber benutzbar. */
+    try {
+      await api.sidePanel.setOptions({ path: LEISTE_PFAD, enabled: true });
+    } catch (e) {}
+    try {
+      await api.sidePanel.setPanelBehavior({ openPanelOnActionClick: leiste });
+    } catch (e) {}
+  } else if (api.sidebarAction && api.sidebarAction.setPanel) {
+    // Firefox verlangt eine vollstaendige Adresse, keinen relativen Pfad.
+    try {
+      await api.sidebarAction.setPanel({ panel: api.runtime.getURL(LEISTE_PFAD) });
+    } catch (e) {}
+  }
+}
+
+async function ansichtLesen() {
+  return ((await einstLesen()).ansicht === "leiste") ? "leiste" : "popup";
+}
+
+/* WIRD BEI JEDEM START DES HINTERGRUNDS GERUFEN – und das ist noetig, nicht
+ * vorsichtshalber: unter MV3 wird der Service-Worker beendet, sobald er nichts
+ * zu tun hat. `setPopup` gilt nur fuer die laufende Browsersitzung; ohne
+ * Wiederherstellung stuende nach dem naechsten Browserstart wieder das Popup
+ * da, obwohl der Benutzer die Leiste gewaehlt hat. */
+async function ansichtHerstellen() {
+  try { await ansichtAnwenden(await ansichtLesen()); } catch (e) {}
+}
+
+api.runtime.onInstalled.addListener(() => { ansichtHerstellen(); });
+api.runtime.onStartup.addListener(() => { ansichtHerstellen(); });
+ansichtHerstellen();
+
+/* Der Klick auf das Symbol, wenn KEIN Popup gesetzt ist.
+ *
+ * ⚠ HIER DARF VOR DEM OEFFNEN KEIN `await` STEHEN. Sowohl `sidePanel.open()`
+ * als auch `sidebarAction.toggle()` verlangen eine Benutzergeste, und die ist
+ * nach dem ersten `await` verbraucht – der Aufruf scheitert dann mit "may only
+ * be called in response to a user gesture", also mit einer Meldung, die kein
+ * Benutzer je zu sehen bekommt, weil einfach nichts passiert.
+ * Den Modus nachzulesen ist auch unnoetig: steht ein Popup, feuert `onClicked`
+ * gar nicht erst.
+ */
+const _aktion = aktion();
+if (_aktion && _aktion.onClicked) {
+  _aktion.onClicked.addListener((tab) => {
+    if (api.sidebarAction && api.sidebarAction.toggle) {
+      api.sidebarAction.toggle().catch(() => {});
+      return;
+    }
+    if (api.sidePanel && api.sidePanel.open && tab) {
+      api.sidePanel.open({ windowId: tab.windowId }).catch(() => {});
+    }
+  });
 }
 
 /* DAS TOKEN LIEGT IN storage.LOCAL – geaendert auf Meldung aus dem Betrieb
@@ -233,6 +341,11 @@ api.runtime.onMessage.addListener((nachricht, _absender, antworten) => {
                       // Berechtigungsabfrage lief.
                       benutzer_vorschlag: e.benutzer || "",
                       zugriff_erfragt: !!e.zugriff_erfragt,
+                      // Welche Ansicht gilt, und kann dieser Browser ueberhaupt
+                      // eine Leiste? Ein Schalter fuer etwas, das es nicht gibt,
+                      // ist schlimmer als kein Schalter.
+                      ansicht: (e.ansicht === "leiste") ? "leiste" : "popup",
+                      leiste_moeglich: leisteMoeglich(),
                       ergebnis: await ergebnisLesen() });
           break;
         }
@@ -241,6 +354,16 @@ api.runtime.onMessage.addListener((nachricht, _absender, antworten) => {
           // Fenster weg sein.
           antworten({ ok: true, daten: await einstSchreiben(nachricht) });
           break;
+        case "ansicht": {
+          // Ohne `wert` ist es eine reine Abfrage.
+          if (nachricht.wert !== undefined) {
+            await einstSchreiben({ ansicht: nachricht.wert });
+            await ansichtAnwenden(nachricht.wert);
+          }
+          antworten({ ok: true, wert: await ansichtLesen(),
+                      leiste_moeglich: leisteMoeglich() });
+          break;
+        }
         case "anmelden":
           antworten(await anmelden(nachricht));
           break;

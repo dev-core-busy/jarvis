@@ -28,6 +28,23 @@ let _fremdesErgebnis = false;
 // Das zuletzt angezeigte Ergebnis (für das Mitmerken bearbeiteter Texte).
 let _letztes = null;
 
+/* LAEUFT GERADE EINE AUSWERTUNG? Gesetzt von `sperre`.
+ *
+ * Nur in der Seitenleiste von Belang: dort kann der Benutzer den Tab wechseln,
+ * WAEHREND eine Auswertung laeuft. Die Felder dann zu leeren wuerde das
+ * Ergebnis wegwerfen, fuer das er gerade wartet. */
+let _laeuft = false;
+
+/* SEITENLEISTE ODER POPUP.
+ *
+ * Die Klasse steht bereits am <html> (ansicht.js, noch vor dem ersten
+ * Zeichnen); hier wird sie nur GELESEN. Ein zweites Mal auf den Abfrageteil zu
+ * schauen waere eine zweite Wahrheit – und die beiden liefen beim naechsten
+ * Feinschliff auseinander. */
+const _leiste = document.documentElement.classList.contains("leiste");
+let _windowId = null;
+let _tabUrl = "";
+
 // ── Meldungen ───────────────────────────────────────────────────────────────
 function melde(text, arbeitet = false) {
   if (!text) { el.meldung.hidden = true; return; }
@@ -56,7 +73,54 @@ function melde(text, arbeitet = false) {
 }
 
 function sperre(an) {
-  for (const b of document.querySelectorAll("button")) b.disabled = an;
+  _laeuft = !!an;
+  if (an) {
+    for (const b of document.querySelectorAll("button")) b.disabled = true;
+    return;
+  }
+  /* ⚠ NICHT blind alles freigeben. Bis 2026-08-30 stand hier
+   * `b.disabled = an` fuer JEDEN Knopf – damit haette das Ende eines Laufs die
+   * Ticket-Sperre wieder aufgehoben, und zwar genau dann, wenn der Benutzer
+   * waehrenddessen auf einen fremden Tab gewechselt ist. */
+  knoepfeAktualisieren();
+}
+
+/** Sperrt alles, was ein Ticket braucht – und gibt es wieder frei.
+ *
+ * ⚠ DIE RICHTUNG IST FAIL-CLOSED, und das ist der ganze Entwurf: gesperrt wird
+ * pauschal JEDER Knopf, ausgenommen sind nur die wenigen mit
+ * `data-ohne-ticket` im Markup. Andersherum – eine Liste der zu sperrenden
+ * Knoepfe – waere ein kuenftig ergaenzter Knopf ohne Eintrag **bedienbar**,
+ * obwohl er ohne Ticket nichts tun kann; so ist er hoechstens einmal zu viel
+ * gesperrt. Das ist die harmlosere Halbfehlerstellung.
+ *
+ * Bedienbar bleiben: Anmelden (sonst kaeme man von einem fremden Tab aus nie
+ * hinein), Abmelden (sonst nie hinaus), die Schliessen-Knoepfe der beiden
+ * Dialoge (ein Dialog, den man nicht wegbekommt, ist eine Falle) und die
+ * Zugriffsabfrage der Seitenleiste.
+ */
+function knoepfeAktualisieren() {
+  // Waehrend eines Laufs entscheidet `sperre` allein – sonst gaebe ein
+  // Tab-Wechsel mitten in einer Auswertung die Knoepfe wieder frei.
+  if (_laeuft) return;
+  const aus = !_key;
+  for (const b of document.querySelectorAll("button")) {
+    b.disabled = aus && !b.hasAttribute("data-ohne-ticket");
+  }
+}
+
+/** Setzt die Ticketanzeige im Kopf – und zieht die Knopf-Sperre nach.
+ *
+ * Beides gehoert in EINE Funktion: die Anzeige ist die Begruendung fuer die
+ * Sperre. Stuenden sie getrennt, waere der naechste Zustand denkbar, in dem
+ * Knoepfe grau sind und im Kopf trotzdem eine Ticketnummer steht.
+ */
+function ticketAnzeigen() {
+  el.ticket.textContent = _key || "Kein Ticket gefunden";
+  // Die Aussage traegt der TEXT; die Faerbung sagt nur zusaetzlich, dass hier
+  // keine Ticketnummer steht (Farbe allein ist im Projekt keine Information).
+  el.ticket.classList.toggle("leer", !_key);
+  knoepfeAktualisieren();
 }
 
 /** Rückfrage – EIGENER Dialog, nie `confirm`.
@@ -310,8 +374,11 @@ async function tabErmitteln() {
   const tabs = await api.tabs.query({ active: true, currentWindow: true });
   const t = tabs && tabs[0];
   _tabId = t ? t.id : null;
+  // Das Fenster braucht `sidePanel.open`, die Adresse die Zugriffszeile.
+  _windowId = t && (t.windowId !== undefined) ? t.windowId : null;
+  _tabUrl = (t && t.url) || "";
   _key = keyAusUrl(t && t.url);
-  el.ticket.textContent = _key || "";
+  ticketAnzeigen();
 }
 
 // ── Start ───────────────────────────────────────────────────────────────────
@@ -339,6 +406,9 @@ async function start() {
   // Marke setzen, sobald eine Adresse bekannt ist – das geht ohne Anmeldung
   // und damit schon beim allerersten Öffnen nach dem Einrichten.
   if (el.basis.value) brandingHolen(el.basis.value);
+  // Der Umschalter gilt unabhaengig von der Anmeldung – wer in der Leiste
+  // steht und zurueck will, muss das auch ohne Konto koennen.
+  ansichtZeigen(z.ansicht, z.leiste_moeglich);
   zeige(z.angemeldet);
   if (!z.angemeldet) {
     await zugriffAnzeigen();
@@ -365,23 +435,86 @@ async function start() {
      * Einladung, ihn zu benutzen; die stärkere Antwort ist, ihn wegzuräumen.
      * Der Ticketbezug ist hier keine Bequemlichkeit, sondern eine
      * Sicherheitsfrage: das Ergebnis geht am Ende an einen echten Kunden. */
-    const gemerkt = z.ergebnis;
-    const passt = gemerkt && gemerkt.key && _key && gemerkt.key === _key;
-    if (passt) {
-      zeigeGemerktes(gemerkt);
-    } else if (gemerkt && gemerkt.text) {
-      await felderLeeren(_key
-        ? "Der gemerkte Text gehörte zu " + gemerkt.key + ", offen ist "
-          + _key + " – die Felder wurden geleert."
-        : "Kein Jira-Ticket in diesem Tab. Der gemerkte Text zu "
-          + gemerkt.key + " wurde entfernt. Öffne ein Ticket "
-          + "(…/browse/ABC-123).");
-    } else if (!_key) {
-      // Kein Fehler, sondern eine Auskunft: die Erweiterung ist bereit, dieser
-      // Tab ist nur kein Ticket.
-      melde("Kein Jira-Ticket in diesem Tab. Öffne ein Ticket (…/browse/ABC-123).");
-    }
+    await ticketLageAnwenden(z.ergebnis);
+    leisteBeobachten();
   }
+}
+
+/** Bringt Anzeige und Gedaechtnis mit dem offenen Tab in Einklang.
+ *
+ * Stand bis 2026-08-30 wortgleich in `start()`. Herausgezogen, weil die
+ * Seitenleiste dieselbe Pruefung BEI JEDEM TAB-WECHSEL braucht – im Popup lief
+ * sie genau einmal, weil das Fenster danach ohnehin zu war.
+ */
+async function ticketLageAnwenden(gemerkt) {
+  const passt = gemerkt && gemerkt.key && _key && gemerkt.key === _key;
+  if (passt) {
+    zeigeGemerktes(gemerkt);
+  } else if (gemerkt && gemerkt.text) {
+    await felderLeeren(_key
+      ? "Der gemerkte Text gehörte zu " + gemerkt.key + ", offen ist "
+        + _key + " – die Felder wurden geleert."
+      : "Kein Jira-Ticket in diesem Tab. Der gemerkte Text zu "
+        + gemerkt.key + " wurde entfernt. Öffne ein Ticket "
+        + "(…/browse/ABC-123).");
+  } else if (!_key) {
+    // Kein Fehler, sondern eine Auskunft: die Erweiterung ist bereit, dieser
+    // Tab ist nur kein Ticket.
+    melde("Kein Jira-Ticket in diesem Tab. Öffne ein Ticket (…/browse/ABC-123).");
+  } else {
+    melde("");
+  }
+  await zugriffZeileAktualisieren();
+}
+
+/* ── Der Tab-Wechsel ist der PREIS der Seitenleiste ─────────────────────────
+ *
+ * ⚠ UND ER IST EINE SICHERHEITSFRAGE, KEINE BEQUEMLICHKEIT. Das Popup schloss
+ * sich beim Wechsel in einen anderen Tab; `start()` lief danach neu und pruefte
+ * den Ticketbezug erneut. Die Leiste bleibt offen – ohne diese Beobachtung
+ * stuende ein fertiger Antwortentwurf zu TICKET-A neben dem geoeffneten
+ * TICKET-B, und der Text geht am Ende an einen echten Kunden. Genau dagegen ist
+ * `felderLeeren` gebaut (Vorgabe 2026-08-28: bei Abweichung wird GELEERT).
+ *
+ * Im Popup wird NICHT beobachtet: dort gibt es keinen Wechsel zu sehen, und ein
+ * Zuhoerer, der nie feuert, ist nur eine Fehlerquelle mehr.
+ */
+function leisteBeobachten() {
+  if (!_leiste || leisteBeobachten._an) return;
+  leisteBeobachten._an = true;   // idempotent: `start()` kann erneut laufen
+  try {
+    api.tabs.onActivated.addListener(() => { tabWechsel(); });
+    api.tabs.onUpdated.addListener((tabId, info, tab) => {
+      // Nur der SICHTBARE Tab, und nur wenn sich die Adresse geaendert hat.
+      // Jira wechselt das Ticket ohne Neuladen (Einzelseiten-Anwendung), das
+      // meldet sich hier als `info.url` – ein Filter auf `status: complete`
+      // wuerde genau diesen Fall verpassen.
+      if (info && info.url && tab && tab.active) tabWechsel();
+    });
+  } catch (e) {
+    // Ohne Zuhoerer verhaelt sich die Leiste wie das Popup von frueher: der
+    // Ticketbezug wird beim Oeffnen geprueft, danach nicht mehr. Die Warnung
+    // in `fremd()` traegt dann allein.
+  }
+}
+
+async function tabWechsel() {
+  const vorher = _key;
+  await tabErmitteln();
+  if (_key === vorher) { await zugriffZeileAktualisieren(); return; }
+
+  /* LAEUFT GERADE EINE AUSWERTUNG, WIRD NICHTS GELEERT. Der Benutzer wartet
+   * auf genau dieses Ergebnis; es wegzuwerfen, weil er nebenbei nachgesehen
+   * hat, waere die teuerste Reaktion. Gewarnt wird trotzdem – und die
+   * Einfuege-Schranke greift ohnehin, sie leitet den Fremdbezug aus dem
+   * Zustand ab (siehe `fremd()`). */
+  if (_laeuft) {
+    melde("⚠ Der Tab hat gewechselt, während eine Auswertung läuft. Das "
+          + "Ergebnis gehört zum vorher offenen Ticket.");
+    await zugriffZeileAktualisieren();
+    return;
+  }
+  await ticketLageAnwenden(_letztes);
 }
 
 /** Alles wegräumen, was zu einem Ticket gehört – Anzeige UND Gedächtnis.
@@ -458,6 +591,21 @@ function zeigeGemerktes(g) {
 function mitAbgleich(text, hinweis) {
   const h = (hinweis || "").trim();
   return h ? (text + "\n\n⚠ Abgleich mit dem Ticket:\n" + h) : text;
+}
+
+/** Gehoert der angezeigte Text zu einem ANDEREN Ticket als dem offenen Tab?
+ *
+ * ⚠ ABGELEITET, NICHT NUR GEMERKT. Bis 2026-08-30 entschied allein das Flag
+ * `_fremdesErgebnis`, und das wird nur an zwei Stellen gesetzt – beim
+ * Wiederherstellen eines gemerkten Textes und beim Auswerten. Im Popup genuegte
+ * das, weil sich der offene Tab waehrend seiner Lebensdauer nicht aendern
+ * konnte. In der Seitenleiste kann er das jederzeit; ein Flag, das dabei
+ * stehenbleibt, waere genau die Luecke, gegen die die Schranke gebaut ist.
+ * Der Vergleich hier fragt den ZUSTAND und kann nicht veralten.
+ */
+function fremd() {
+  if (_fremdesErgebnis) return true;
+  return !!(_letztes && _letztes.key && _key && _letztes.key !== _key);
 }
 
 function zeige(angemeldet) {
@@ -833,6 +981,12 @@ function vorlagenZeichnen() {
     }
   }
   $("vorl-global-zeile").hidden = !_vorlagen.darf_global;
+  /* ⚠ DIE ZEILEN-KNOEPFE ENTSTEHEN HIER ERST – Stern, Bearbeiten, Loeschen.
+   * Ein einmaliger Durchlauf ueber `button` beim Tab-Wechsel erwischt sie
+   * nicht: sie existieren zu dem Zeitpunkt noch gar nicht, und beim naechsten
+   * Neuzeichnen waeren sie wieder bedienbar. Deshalb wird die Sperre HIER
+   * nachgezogen. */
+  knoepfeAktualisieren();
 }
 
 function vorlageInsFormular(v, global_) {
@@ -938,7 +1092,7 @@ $("btn-einfuegen").addEventListener("click", async () => {
   if (!text.trim() || _tabId === null) return;
   // Ein Text zu einem anderen Vorgang wird nicht ohne Rückfrage eingefügt –
   // das Ergebnis geht am Ende an einen Kunden.
-  if (_fremdesErgebnis && !(await frageJaNein())) return;
+  if (fremd() && !(await frageJaNein())) return;
   sperre(true);
   try {
     const treffer = await api.scripting.executeScript({
@@ -1012,6 +1166,146 @@ $("btn-kopieren").addEventListener("click", async () => {
  */
 $("btn-leeren").addEventListener("click", async () => {
   await felderLeeren("Geleert.");
+});
+
+/* ── Dauerhaftes Zugriffsrecht auf die Jira-Seite (nur Seitenleiste) ───────
+ *
+ * DAS POPUP BRAUCHT DAS NICHT, und deshalb wird hier auch nichts erfragt,
+ * solange es eines ist: `activeTab` erteilt das Recht fuer genau den Tab, in
+ * dem der Benutzer die Erweiterung angeklickt hat – und das Popup lebt nicht
+ * laenger als dieser Klick.
+ *
+ * Die Leiste bleibt ueber den Tab-Wechsel hinaus offen. Fuer den NAECHSTEN Tab
+ * gilt `activeTab` nicht mehr; „Überarbeiten" und „Einfügen" liefen dort in
+ * genau die Meldung, die weiter unten schon steht („activeTab gilt nicht
+ * mehr") – eine Meldung, aus der niemand ableiten kann, was zu tun ist.
+ *
+ * ⚠ ERFRAGT WIRD UEBER EINEN EIGENEN KNOPF, nicht nebenbei aus dem
+ * Fehlerzweig. `permissions.request` verlangt eine Benutzergeste, und die ist
+ * nach dem ersten `await` verbraucht – ein Nachfragen nach einem
+ * fehlgeschlagenen `executeScript` wuerde mit "must be called during a user
+ * gesture" abgelehnt, also wortlos nichts tun.
+ */
+function tabHerkunft() {
+  try {
+    const u = new URL(_tabUrl);
+    // Nur https: `optional_host_permissions` deckt nur das ab, und ueber http
+    // wuerde das Sitzungstoken der Seite ohnehin nichts gewinnen.
+    return (u.protocol === "https:") ? u.origin : "";
+  } catch (e) { return ""; }
+}
+
+async function zugriffZeileAktualisieren() {
+  const p = $("leiste-zugriff");
+  if (!p) return;
+  const herkunft = tabHerkunft();
+  if (!_leiste || !_key || !herkunft) { p.hidden = true; return; }
+  let da = null;
+  try { da = await api.permissions.contains({ origins: [herkunft + "/*"] }); }
+  catch (e) { da = null; }
+  /* „Nicht feststellbar" wird wie „vorhanden" behandelt – dieselbe Regel wie
+   * in `zugriffAnzeigen`: eine Aufforderung, die auf einer Vermutung beruht,
+   * verunsichert bei einer funktionierenden Einrichtung. */
+  if (da !== false) { p.hidden = true; return; }
+  $("leiste-zugriff-text").textContent =
+    "In der Seitenleiste brauchen „Überarbeiten“ und „Einfügen“ ein dauerhaftes "
+    + "Zugriffsrecht auf " + herkunft + " – beim Tab-Wechsel verfällt das "
+    + "kurzfristige Recht aus dem Klick auf das Symbol. ";
+  p.hidden = false;
+}
+
+$("btn-leiste-zugriff").addEventListener("click", async () => {
+  const herkunft = tabHerkunft();
+  if (!herkunft) return;
+  try {
+    const ok = await api.permissions.request({ origins: [herkunft + "/*"] });
+    melde(ok
+      ? "Zugriff auf " + herkunft + " erteilt."
+      : "Ohne das Zugriffsrecht bleiben „Überarbeiten“ und „Einfügen“ auf den "
+        + "Tab beschränkt, aus dem die Leiste geöffnet wurde.");
+  } catch (e) {
+    melde("Die Berechtigungsabfrage ließ sich nicht öffnen: "
+          + ((e && e.message) || e));
+  }
+  await zugriffZeileAktualisieren();
+});
+
+/* ── Umschalter Popup ↔ Seitenleiste ───────────────────────────────────────
+ *
+ * Der Zustand liegt im Hintergrund (background.js::ansichtAnwenden), weil nur
+ * dort `action.setPopup` und die Panel-Einstellungen gesetzt werden koennen –
+ * und weil sie einen Browserstart ueberdauern muessen.
+ */
+function ansichtZeigen(wert, moeglich) {
+  const zeile = $("ansicht-zeile");
+  if (!zeile) return;
+  // Ein Schalter fuer etwas, das dieser Browser nicht kann, ist schlimmer als
+  // kein Schalter: er verspricht eine Ansicht, die nie erscheint.
+  if (!moeglich) { zeile.hidden = true; return; }
+  zeile.hidden = false;
+  $("f-ansicht").checked = (wert === "leiste");
+  const h = $("ansicht-hinweis");
+  if (!h) return;
+  h.textContent = _leiste
+    ? "Die Breite ziehst du an der Kante der Leiste."
+    : "Öffnet sich beim nächsten Klick auf das Symbol in der Symbolleiste.";
+  h.hidden = false;
+}
+
+/** Oeffnet die Leiste sofort. Gibt zurueck, ob ein Versuch startete.
+ *
+ * ⚠ MUSS OHNE VORHERIGES `await` GERUFEN WERDEN. Beide APIs verlangen eine
+ * Benutzergeste; nach dem ersten `await` ist sie weg und der Aufruf wird
+ * abgelehnt – sichtbar wird davon nichts, es passiert einfach nichts.
+ */
+function leisteOeffnen() {
+  try {
+    if (api.sidebarAction && api.sidebarAction.open) {
+      api.sidebarAction.open();
+      return true;
+    }
+    if (api.sidePanel && api.sidePanel.open && _windowId !== null) {
+      api.sidePanel.open({ windowId: _windowId });
+      return true;
+    }
+  } catch (e) { /* Fehlschlag ist kein Fehler – der naechste Klick tut es. */ }
+  return false;
+}
+
+$("f-ansicht").addEventListener("change", (ereignis) => {
+  const wert = ereignis.target.checked ? "leiste" : "popup";
+
+  /* REIHENFOLGE IST HIER DIE GANZE MECHANIK:
+   *  1. Absenden ANSTOSSEN, ohne zu warten. Die Nachricht ist damit unterwegs
+   *     und der Hintergrund arbeitet sie ab, auch wenn dieses Fenster gleich
+   *     verschwindet – nur die Antwort geht dann verloren.
+   *  2. Leiste oeffnen, noch in derselben Aufgabe. Chrome schliesst dabei das
+   *     Popup; das ist gewollt, die Leiste tritt an seine Stelle.
+   * Umgekehrt waere beides kaputt: nach einem `await` fehlt die Benutzergeste,
+   * und ein Oeffnen vor dem Absenden koennte das Fenster toeten, bevor die
+   * Einstellung ueberhaupt abgeschickt wurde. */
+  const unterwegs = frage({ art: "ansicht", wert });
+  const geoeffnet = (wert === "leiste" && !_leiste) ? leisteOeffnen() : false;
+
+  unterwegs.then((a) => {
+    ansichtZeigen(a.wert, a.leiste_moeglich);
+    if (wert === "leiste") {
+      melde(geoeffnet
+        ? ""
+        : "Die Seitenleiste öffnet sich beim nächsten Klick auf das Symbol.");
+    } else {
+      melde(_leiste
+        ? "Umgestellt. Das Symbol öffnet ab jetzt wieder das kleine Fenster – "
+          + "diese Leiste kannst du schließen."
+        : "Umgestellt.");
+    }
+  }).catch((e) => {
+    // Zuruecksetzen, sonst behauptet das Haekchen einen Zustand, den es nicht
+    // gibt. Bricht die Verbindung beim Oeffnen der Leiste ab, ist das kein
+    // Fehler – dann ist dieses Fenster ohnehin schon weg.
+    ereignis.target.checked = (wert !== "leiste");
+    melde(e.message);
+  });
 });
 
 start();

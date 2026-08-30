@@ -18,6 +18,75 @@ was gerade aufgeklappt ist.
 Dahinter läuft **kein Agent**, sondern ein einzelner Modellaufruf ohne Werkzeuge. Der Grund
 steht im Kopf von `backend/jira_assist.py`: in ein Ticket schreibt ein Kunde, was er will.
 
+## Popup oder Seitenleiste (seit 0.3.0)
+
+Der Klick auf das Symbol öffnet **voreingestellt ein Popup**. Ein Schalter am Fuß des
+Fensters stellt auf **Seitenleiste** um; sie bleibt beim Arbeiten im Ticket offen und
+lässt sich in der Breite ziehen. Ein Popup kann das nicht – der Browser zeichnet es um
+seinen Inhalt und klemmt es auf 800 × 600, eine API zum Bemessen gibt es nicht.
+
+**Es ist dieselbe `popup.html`.** Eine zweite Oberfläche wäre eine Kopie, und Kopien
+laufen auseinander – dieselbe Begründung, aus der es zwei Manifeste, aber nur eine
+Codebasis gibt. Unterschieden wird über den Abfrageteil `?ansicht=leiste`, aus dem
+`ansicht.js` eine Klasse am `<html>` macht.
+
+| | Chrome / Edge | Firefox |
+|---|---|---|
+| API | `sidePanel` (ab Chrome 114) | `sidebarAction` |
+| Manifest | `side_panel.default_path` + Permission `sidePanel` | `sidebar_action.default_panel` |
+| Breite gemerkt | **nein**, öffnet wieder mit der Standardbreite | ja |
+
+Drei Punkte, die man beim Anfassen kennen muss:
+
+* **`action.setPopup` ist der Umschalter.** Solange ein Popup gesetzt ist, gewinnt es:
+  `openPanelOnActionClick` bleibt wirkungslos und `onClicked` feuert nicht. Erst ein
+  **leerer** Popup-Pfad gibt den Klick frei (`background.js::ansichtAnwenden`).
+* **Der Abfrageteil steht NICHT im Manifest.** Für `setOptions`/`setPanel` ist ein Pfad
+  mit `?…` belegt, für die Manifest-Schlüssel nicht – und ein Manifest, das der Browser
+  ablehnt, macht die ganze Erweiterung uninstallierbar. Fällt der Aufruf aus, lädt die
+  Leiste ohne Abfrageteil: schmal, aber benutzbar.
+* **Vor dem Öffnen darf kein `await` stehen.** `sidePanel.open()` und
+  `sidebarAction.toggle()` verlangen eine Benutzergeste, und die ist nach dem ersten
+  `await` verbraucht – der Aufruf wird dann abgelehnt, und sichtbar passiert einfach
+  nichts.
+
+**Was die Leiste kostet:** sie überlebt den Tab-Wechsel, also muss der Ticketbezug bei
+jedem Wechsel neu geprüft werden (`popup.js::tabWechsel`) – sonst stünde ein fertiger
+Antwortentwurf zu Ticket A neben dem geöffneten Ticket B. Und `activeTab` gilt nur für
+den Tab, aus dem die Leiste geöffnet wurde; für „Überarbeiten" und „Einfügen" in weiteren
+Tabs erfragt sie einmalig ein dauerhaftes Zugriffsrecht auf den Jira-Server.
+
+**`ansicht.js` gehört in DREI Listen:** die Einbindung in `popup.html`, `DATEIEN` in
+`bauen.sh` und `PAKET_DATEIEN` in `backend/jira_assist.py`. Laufen sie auseinander,
+installiert sich das Paket klaglos und die Leiste ist still 380 px schmal.
+`tests/test_browser_addon.js` prüft das als Regel, nicht als Aufzählung.
+
+## Ohne erkanntes Ticket ist alles gesperrt
+
+Findet die Erweiterung im offenen Tab keine Ticketnummer, steht im Kopf **„Kein Ticket
+gefunden"** und **jeder** Knopf ist deaktiviert – ausgenommen sind nur die mit
+`data-ohne-ticket` im Markup: **Anmelden**, **Abmelden** und die **Schließen-Knöpfe** der
+Vorlagen-Box und der Einfüge-Rückfrage. Ohne diese vier entstünde ein
+Einbahnstraßen-Zustand: von einem fremden Tab aus käme man nie hinein, nie hinaus, und ein
+offener Dialog ließe sich nicht mehr wegräumen.
+
+**Die Richtung ist fail-closed.** Gesperrt wird pauschal, ausgenommen wird einzeln – ein
+künftig ergänzter Knopf ohne Attribut ist ohne Ticket höchstens einmal zu viel gesperrt.
+Andersherum wäre er bedienbar, obwohl er nichts tun kann.
+
+Drei Stellen, die zusammengehören (`popup.js`):
+
+* `knoepfeAktualisieren()` setzt die Sperre und **hält sich während eines Laufs heraus** –
+  sonst gäbe ein Tab-Wechsel mitten in der Auswertung die Knöpfe wieder frei.
+* `sperre(false)` gibt **nicht blind alles frei**, sondern ruft `knoepfeAktualisieren()`.
+  Sonst hätte das Ende eines Laufs die Ticket-Sperre aufgehoben.
+* `vorlagenZeichnen()` zieht sie am Ende nach: die Zeilen-Knöpfe der Vorlagenliste
+  entstehen erst dort und wären beim nächsten Neuzeichnen wieder bedienbar.
+
+Die Prüfung `if (!_key)` **im Handler** bleibt daneben bestehen. Ein gesperrter Knopf ist
+Oberfläche, keine Garantie: `_key` kann sich in der Seitenleiste zwischen Zeichnen und
+Klick ändern, und `disabled` lässt sich aus den Entwicklerwerkzeugen entfernen.
+
 ## Voraussetzungen
 
 1. Der **Jira-Skill** ist in Jarvis aktiv und konfiguriert (Adresse + Token).

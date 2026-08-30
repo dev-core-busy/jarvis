@@ -35,6 +35,12 @@
        Gefüllt beim Bauen des ZIP; im Repo LEER. Eine bereits hinterlegte
        Adresse wird davon NICHT überschrieben (popup.js::start). -->
   <meta name="basis" content="">
+  <!-- Setzt die Klasse `leiste` am <html>, BEVOR gezeichnet wird. Eigene Datei
+       statt Inline-Skript, weil die Content-Security-Policy von
+       Erweiterungsseiten (`script-src 'self'`) Skriptruempfe im HTML
+       verbietet – der sonst im Projekt uebliche Anti-Flacker-Weg scheidet hier
+       also aus. Begruendung im Kopf von ansicht.js. -->
+  <script src="ansicht.js"></script>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
@@ -46,7 +52,7 @@
     <img class="marke-logo" id="marke-logo" alt="" hidden>
     <span class="marke" id="marke">{marke}</span>
     <span class="ticket" id="ticket-anzeige"></span>
-    <button type="button" id="btn-abmelden" class="leise" hidden>Abmelden</button>
+    <button type="button" id="btn-abmelden" class="leise" data-ohne-ticket hidden>Abmelden</button>
   </header>
 
   <!-- Einrichtung / Anmeldung -->
@@ -70,7 +76,7 @@
       <span>Code der Zwei-Faktor-App <em>(nur falls eingerichtet)</em></span>
       <input type="text" id="f-totp" inputmode="numeric" autocomplete="one-time-code">
     </label>
-    <button type="button" id="btn-anmelden" class="haupt">Anmelden</button>
+    <button type="button" id="btn-anmelden" class="haupt" data-ohne-ticket>Anmelden</button>
     <!-- Fehlt das Zugriffsrecht auf den Server, steht die Erklärung HIER –
          über dem Knopf, der die Abfrage auslöst, und nicht erst als Meldung
          hinterher. Der Browser kann das Fenster dabei schließen; wer das
@@ -79,7 +85,16 @@
     <p class="hinweis" id="zugriff-hinweis" hidden></p>
   </section>
 
-  <!-- Arbeitsbereich -->
+  <!-- Arbeitsbereich
+       ⚠ OHNE ERKANNTES TICKET SIND HIER ALLE KNOEPFE GESPERRT (Vorgabe des
+       Nutzers 2026-08-30). Ausgenommen ist nur, was `data-ohne-ticket` traegt:
+       Anmelden, Abmelden, die Schliessen-Knoepfe der beiden Dialoge und die
+       Zugriffsabfrage der Seitenleiste. Ein Fenster, aus dem man sich auf einem
+       fremden Tab nicht mehr abmelden kann, waere eine Falle statt einer
+       Schranke - und ein gesperrter Schliessen-Knopf laesst einen offenen
+       Dialog stehen, den niemand mehr wegbekommt.
+       Die Richtung ist fail-closed: ein neuer Knopf OHNE das Attribut ist ohne
+       Ticket gesperrt (Begruendung in popup.js::knoepfeAktualisieren). -->
   <section id="bereich-arbeit" hidden>
     <div class="knopfreihe">
       <button type="button" id="btn-zusammenfassung" class="haupt">Zusammenfassen</button>
@@ -121,7 +136,7 @@
     <div id="vorlagen-box" hidden>
       <div class="vorl-kopf">
         <b>Vorlagen</b>
-        <button type="button" id="btn-vorlagen-zu" class="leise" title="Schließen"
+        <button type="button" id="btn-vorlagen-zu" class="leise" data-ohne-ticket title="Schließen"
                 aria-label="Schließen">&times;</button>
       </div>
       <ul class="vorl-liste" id="vorl-liste"></ul>
@@ -144,6 +159,20 @@
       <p class="hinweis" id="vorl-hinweis"></p>
     </div>
 
+    <!-- NUR IN DER SEITENLEISTE, und nur wenn das Recht wirklich fehlt.
+         Das Popup kommt mit `activeTab` aus: der Klick auf das Symbol erteilt
+         das Recht fuer genau den Tab, in dem gearbeitet wird. Die Leiste bleibt
+         dagegen ueber den Tab-Wechsel hinaus offen – fuer den NAECHSTEN Tab
+         gilt `activeTab` nicht mehr, und „Überarbeiten" wie „Einfügen" liefen
+         in einen Fehler, den niemand deuten kann.
+         Der Knopf ist Absicht: `permissions.request` verlangt eine
+         Benutzergeste, und die gibt es nur bei einem echten Klick. Aus einem
+         Fehlerzweig heraus (nach `await`) lehnt Chrome die Abfrage ab. -->
+    <p class="hinweis zugriff-zeile" id="leiste-zugriff" hidden>
+      <span id="leiste-zugriff-text"></span>
+      <button type="button" id="btn-leiste-zugriff" data-ohne-ticket>Zugriff erlauben</button>
+    </p>
+
     <div id="ergebnis" hidden>
       <textarea id="f-ergebnis" rows="12" spellcheck="true"></textarea>
       <div class="knopfreihe">
@@ -162,13 +191,26 @@
     <div class="ja-nein" id="ja-nein" hidden>
       <p id="jn-text">Der Text gehört zu einem <b>anderen Ticket</b>. Trotzdem einfügen?</p>
       <div class="knopfreihe">
-        <button type="button" id="jn-nein" class="leise">Abbrechen</button>
-        <button type="button" id="jn-ja">Trotzdem einfügen</button>
+        <button type="button" id="jn-nein" class="leise" data-ohne-ticket>Abbrechen</button>
+        <button type="button" id="jn-ja" data-ohne-ticket>Trotzdem einfügen</button>
       </div>
     </div>
   </section>
 
   <p id="meldung" class="meldung" hidden></p>
+
+  <!-- Popup oder Seitenleiste. Steht bewusst ausserhalb von Anmeldung und
+       Arbeitsbereich: die Ansicht ist eine Einstellung des Fensters, keine der
+       Aufgabe – und wer sie in der Leiste zurueckstellen will, muss das auch
+       koennen, ohne angemeldet zu sein.
+       Bleibt verborgen, wenn der Browser gar keine Leiste kennt (popup.js). -->
+  <footer class="ansicht-fuss" id="ansicht-zeile" hidden>
+    <label class="ansicht-schalter">
+      <input type="checkbox" id="f-ansicht">
+      <span>Als Seitenleiste öffnen</span>
+    </label>
+    <p class="hinweis" id="ansicht-hinweis" hidden></p>
+  </footer>
 
   <script type="module" src="popup.js"></script>
 </body>

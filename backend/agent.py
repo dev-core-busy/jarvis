@@ -1577,19 +1577,22 @@ KRITISCH – Autonomie-Regeln:
 
     @contextlib.contextmanager
     def actor_scope(self, username: str, privileged: bool = False,
-                    internet: bool = True, sap: bool = False, task: str = ""):
+                    internet: bool = True, sap: bool = False,
+                    vemas: bool = False, task: str = ""):
         """Bindet einen Lauf an einen Auftraggeber und stellt den Vorzustand danach
         wieder her. WICHTIG fuer den geteilten Hauptagenten: ein stehengebliebener
         Wert wuerde den naechsten Lauf mitregieren (genau der Fehler, den diese
         Klammer behebt)."""
         keys = ("_current_username", "_current_actor_privileged", "_current_user_internet",
-                "_current_user_sap", "_current_task", "_current_client_type")
+                "_current_user_sap", "_current_user_vemas", "_current_task",
+                "_current_client_type")
         before = {k: getattr(self, k, None) for k in keys}
         had = {k: hasattr(self, k) for k in keys}
         self._current_username = username or ""
         self._current_actor_privileged = bool(privileged)
         self._current_user_internet = bool(internet)
         self._current_user_sap = bool(sap)
+        self._current_user_vemas = bool(vemas)
         if task:
             self._current_task = task
         # Lauf-isolierte Bindung (maßgeblich fuer den Sicherheitsentscheid)
@@ -2797,7 +2800,8 @@ KRITISCH – Autonomie-Regeln:
         gesetzt hat.
 
         actor: Auftraggeber dieses Laufs als dict
-        ``{"user": str, "privileged": bool, "internet": bool, "sap": bool}``.
+        ``{"user": str, "privileged": bool, "internet": bool, "sap": bool,
+        "vemas": bool}``.
         NICHT uebergeben = fail-closed unprivilegiert – ein headless-Lauf hat
         keinen angemeldeten Benutzer, und "kein Benutzer" galt bis 2026-07-28 als
         privilegiert (siehe _actor_is_privileged). Wer bewusst mit Systemrechten
@@ -2811,6 +2815,7 @@ KRITISCH – Autonomie-Regeln:
                     privileged=bool(actor.get("privileged")),
                     internet=bool(actor.get("internet", True)),
                     sap=bool(actor.get("sap", False)),
+                    vemas=bool(actor.get("vemas", False)),
                     task=task_text):
                 return await self._run_headless(task_text, reasoning_effort)
         # actor=None: bestehenden Kontext des Agenten bewusst weiterverwenden
@@ -3500,6 +3505,15 @@ KRITISCH – Autonomie-Regeln:
                 result = "Zugriff verweigert: SAP-Zugriff ist fuer deinen Benutzer nicht freigeschaltet."
                 _ldap_blocked = True
 
+            # VEMAS-Zugriff: dieselbe Klasse Faehigkeit wie SAP (Fachsystem mit
+            # hinterlegten Zugangsdaten, Kunden- und Projektdaten), deshalb
+            # dieselbe Schranke. Default fuer Netzwerk-Nutzer = gesperrt.
+            if (not _ldap_blocked and name.startswith("vemas_")
+                    and not getattr(self, '_current_user_vemas', True)):
+                print(f"[AGENT] BLOCKED VEMAS-Tool '{name}' fuer User '{_uname}' (kein VEMAS-Zugriff)", flush=True)
+                result = "Zugriff verweigert: VEMAS-Zugriff ist fuer deinen Benutzer nicht freigeschaltet."
+                _ldap_blocked = True
+
             # OS-Sandbox: nicht-privilegierte Shell-Befehle als unprivilegierter
             # OS-Benutzer ausfuehren (harte Grenze via OS-Rechte – wirkt unabhaengig
             # von Base64/Python/etc.). Opt-in via Einstellung 'sandbox_shell_user'.
@@ -3589,6 +3603,18 @@ KRITISCH – Autonomie-Regeln:
                     _j_token = _jcv.set(_uname or "")
                 except Exception:  # noqa: BLE001
                     _jcv = None
+                # Persoenlicher VEMAS-Zugang fuer die vemas_*-Werkzeuge.
+                # Gleiche Begruendung wie bei Postfach, SAP und Jira: es ist
+                # eine Personen-, keine Rechtefrage, und der Benutzer darf
+                # NIEMALS als Werkzeug-Argument kommen – sonst koennte das
+                # Modell waehlen, mit wessen Zugangsdaten es liest und (bei
+                # freigeschaltetem Schreiben) in wessen Namen es bucht.
+                _v_token = _vcv = None
+                try:
+                    from backend.vemas_accounts import current_vemas_user as _vcv
+                    _v_token = _vcv.set(_uname or "")
+                except Exception:  # noqa: BLE001
+                    _vcv = None
                 try:
                     result = await tool.execute(**exec_args)
                 finally:
@@ -3611,6 +3637,11 @@ KRITISCH – Autonomie-Regeln:
                     if _j_token is not None and _jcv is not None:
                         try:
                             _jcv.reset(_j_token)
+                        except Exception:  # noqa: BLE001
+                            pass
+                    if _v_token is not None and _vcv is not None:
+                        try:
+                            _vcv.reset(_v_token)
                         except Exception:  # noqa: BLE001
                             pass
             _dur_ms = int((_time.monotonic() - _t0) * 1000)
@@ -3658,6 +3689,7 @@ KRITISCH – Autonomie-Regeln:
             sub._current_actor_privileged = self._actor_is_privileged()
             sub._current_user_internet = getattr(self, '_current_user_internet', True)
             sub._current_user_sap = getattr(self, '_current_user_sap', True)
+            sub._current_user_vemas = getattr(self, '_current_user_vemas', True)
             asyncio.create_task(agent_manager.run_sub_agent(sub, task, ws))
             return f"Sub-Agent '{label}' gestartet (ID: {sub.agent_id})"
         except Exception as e:
@@ -3766,6 +3798,7 @@ KRITISCH – Autonomie-Regeln:
                     "privileged": self._actor_is_privileged(),
                     "internet": bool(getattr(self, "_current_user_internet", True)),
                     "sap": bool(getattr(self, "_current_user_sap", False)),
+                    "vemas": bool(getattr(self, "_current_user_vemas", False)),
                 },
             )
         except Exception as e:  # noqa: BLE001
@@ -5544,6 +5577,7 @@ class AgentManager:
         if parent is not None:
             agent._current_user_internet = getattr(parent, '_current_user_internet', True)
             agent._current_user_sap = getattr(parent, '_current_user_sap', True)
+            agent._current_user_vemas = getattr(parent, '_current_user_vemas', True)
             agent._current_username = getattr(parent, '_current_username', '')
             # Privileg-Bindung mitvererben: ein Sub-Agent eines unprivilegierten
             # Laufs (z.B. Cron-Job eines Domain-Nutzers) darf nicht ueber die
@@ -5582,6 +5616,7 @@ class AgentManager:
             agent._current_actor_privileged = parent._actor_is_privileged()
             agent._current_user_internet = getattr(parent, "_current_user_internet", True)
             agent._current_user_sap = getattr(parent, "_current_user_sap", False)
+            agent._current_user_vemas = getattr(parent, "_current_user_vemas", False)
             agent._current_kb_groups = getattr(parent, "_current_kb_groups", None)
         self.agents[agent.agent_id] = agent
         return agent

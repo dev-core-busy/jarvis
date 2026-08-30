@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VEMAS</title>
+    <link rel="stylesheet" href="/static/css/theme.css?v=19">
+    <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
+    <link rel="stylesheet" href="/static/css/avatar.css?v=8">
+    <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
+    <style>
+
+        /* ═══════════════════════════════════════════════════════════════
+           VEMAS.NET-Bereich (/vemas)
+           ───────────────────────────────────────────────────────────────
+           Aufbau der Titelleiste bewusst identisch zu /sap und /support
+           (.topbar, .topbar-left/-right, .btn-theme, .lang-toggle) – wer
+           zwischen den Bereichen wechselt, soll die Knoepfe am selben Platz
+           finden. Die Reihenfolge der Symbole ist projektweit festgelegt
+           (von rechts: Abmelden, Einstellungen, Startseite, Hell/Dunkel,
+           Issues, Avatar, Sprache) und wird von
+           tests/test_claude_subagent_ui.js geprueft.
+
+           Praefix `vm-` fuer alles Neue: `vemas-` gehoert dem
+           Einstellungs-Reiter (frontend/js/vemas.js), eine Kollision waere
+           beim Debuggen kaum zu sehen – dieselbe Trennung wie `sp-`/`sap-`.
+
+           Farben ausschliesslich ueber Theme-Variablen – kein hartes Violett
+           oder Weiss, sonst bricht das Branding und der Hell-Modus.
+           ═══════════════════════════════════════════════════════════════ */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: var(--font-body); background: var(--bg-primary);
+               color: var(--text-primary); min-height: 100vh; }
+        .hidden { display: none !important; }
+
+        /* ── Titelleiste (Vorbild /support) ── */
+        .topbar { display: flex; align-items: center; justify-content: space-between;
+            padding: 10px 16px; border-bottom: 1px solid var(--border);
+            background: var(--bg-glass); backdrop-filter: blur(8px);
+            position: sticky; top: 0; z-index: 30; }
+        .topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+        .topbar-right { display: flex; align-items: center; gap: 4px; }
+        .topbar-avatar { width: 32px; height: 32px; border-radius: 50%;
+            background: var(--gradient); display: flex; align-items: center;
+            justify-content: center; font-size: 14px; font-weight: 700; color: #fff;
+            flex-shrink: 0; overflow: hidden; }
+        .topbar-title { font-size: 19px; font-weight: 600; white-space: nowrap; }
+        .vm-status-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+            background: var(--text-muted); transition: background .3s ease; }
+        .vm-status-dot.connected { background: var(--success); box-shadow: 0 0 6px var(--success); }
+        .vm-status-dot.disconnected { background: var(--danger); }
+        /* Verbindungs-Pille: sagt auf einen Blick, WELCHE SAP-Schnittstelle
+           aktiv ist. Ohne sie raet der Benutzer, warum eine Abfrage scheitert. */
+        .vm-conn { display: inline-flex; align-items: center; gap: 6px;
+            padding: 3px 10px; border-radius: 12px; font-size: .74rem; font-weight: 600;
+            background: rgba(var(--fg-rgb), .06); border: 1px solid var(--border);
+            color: var(--text-secondary); white-space: nowrap; }
+        .vm-conn.is-off { color: var(--danger);
+            border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+            background: color-mix(in srgb, var(--danger) 12%, transparent); }
+        .vm-conn:empty { display: none; }
+
+        .btn-theme { background: none; border: none; color: #888899;
+            padding: 4px 8px; border-radius: 8px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: color .2s, background .2s; }
+        .btn-theme:hover { background: rgba(var(--accent-rgb), .12); color: var(--accent); }
+        .btn-theme svg { width: 20px; height: 20px; }
+        body.light .btn-theme { color: #777788; }
+
+        .lang-toggle { display: flex; gap: 2px; background: rgba(var(--fg-rgb, 148,163,184), .05);
+            border: 1px solid rgba(var(--fg-rgb, 148,163,184), .1); border-radius: 8px; padding: 2px; }
+        .lang-toggle-btn { background: transparent; border: none; color: var(--text-secondary);
+            font-size: .72rem; font-weight: 700; letter-spacing: .04em; padding: 3px 10px;
+            border-radius: 6px; cursor: pointer; font-family: var(--font-body);
+            transition: background .15s, color .15s; }
+        .lang-toggle-btn:hover { color: var(--text-primary); }
+        .lang-toggle-btn.active { background: rgba(var(--accent-rgb), .35); color: var(--text-primary); }
+
+        /* ── Anweisungen / Verlauf (Knopfform wie /support) ── */
+        .vm-hist-btn { background: none; border: 1px solid var(--border); color: var(--text-secondary);
+            height: 32px; padding: 0 12px; border-radius: 8px; cursor: pointer;
+            font-size: .85rem; display: flex; align-items: center; gap: 6px;
+            font-family: var(--font-body); white-space: nowrap; }
+        .vm-hist-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+        .vm-hist-wrap { position: relative; }
+        .vm-hist-panel { position: absolute; right: 0; top: calc(100% + 6px);
+            width: 340px; max-width: 80vw;
+            /* DECKEND, nicht Glas: darunter liegen die Analysekarten mit Text,
+               der sonst durch die Verlaufseintraege scheint (gleiche
+               Begruendung wie beim Dokumente-Panel im Portal). */
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: var(--radius-md); box-shadow: var(--shadow-lg); z-index: 50;
+            max-height: 60vh; overflow-y: auto; }
+        .vm-hist-head { display: flex; align-items: center; justify-content: space-between;
+            padding: 10px 14px; border-bottom: 1px solid var(--border);
+            position: sticky; top: 0; background: var(--bg-secondary); }
+        .vm-hist-head strong { font-size: .85rem; }
+        .vm-hist-clear { background: none; border: none; color: var(--text-muted);
+            cursor: pointer; font-size: .78rem; font-family: var(--font-body); }
+        .vm-hist-clear:hover { color: var(--danger); }
+        .vm-hist-item { padding: 9px 14px; cursor: pointer;
+            border-bottom: 1px solid rgba(var(--fg-rgb), .05); }
+        .vm-hist-item:hover { background: rgba(var(--accent-rgb), .08); }
+        .vm-hist-q { font-size: .86rem; color: var(--text-primary);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .vm-hist-meta { font-size: .72rem; color: var(--text-muted); margin-top: 2px; }
+        .vm-hist-empty { padding: 22px 14px; text-align: center;
+            color: var(--text-muted); font-size: .84rem; }
+
+        .vm-instr-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 60;
+            display: flex; align-items: center; justify-content: center; padding: 16px; }
+        .vm-instr-overlay.hidden { display: none; }
+        .vm-instr-modal { background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: 12px; width: 640px; max-width: 100%; max-height: 85vh;
+            display: flex; flex-direction: column; padding: 18px;
+            box-shadow: 0 20px 60px rgba(var(--shadow-rgb), .5); }
+        .vm-instr-head { display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 8px; }
+        .vm-instr-hint { font-size: .82rem; color: var(--text-muted);
+            margin: 0 0 10px; line-height: 1.4; }
+        .vm-instr-text { width: 100%; min-height: 220px; resize: vertical;
+            background: var(--bg-primary); color: var(--text-primary);
+            border: 1px solid var(--border); border-radius: 8px; padding: 10px;
+            font-family: var(--font-body); font-size: .9rem; line-height: 1.5; }
+        .vm-instr-text:focus { border-color: var(--accent); outline: none; }
+        .vm-instr-foot { display: flex; align-items: center; justify-content: flex-end;
+            gap: 12px; margin-top: 12px; }
+        .vm-instr-status { font-size: .82rem; color: var(--text-muted); margin-right: auto; }
+
+        /* ── Inhalt ── */
+        .vm-wrap { max-width: 940px; margin: 0 auto; padding: 26px 20px 60px; }
+        .vm-card { background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: var(--radius-lg); padding: 18px; box-shadow: var(--shadow-md); }
+        .vm-card + .vm-card { margin-top: 16px; }
+        .vm-row { display: flex; gap: 14px; flex-wrap: wrap; }
+        .vm-field { flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+        .vm-label { font-size: .78rem; font-weight: 600; color: var(--text-secondary); }
+        .vm-select, .vm-input {
+            width: 100%; background: rgba(var(--fg-rgb), .05); border: 1px solid var(--border);
+            color: var(--text-primary); border-radius: var(--radius-md);
+            padding: 9px 11px; font-size: .9rem; font-family: var(--font-body); cursor: pointer; }
+        .vm-select:focus, .vm-input:focus { outline: none; border-color: var(--accent); }
+        /* Ein readonly-Feld MUSS auch danach aussehen. Die Serveradresse steht
+           hier nur zur Ansicht (sie gehoert dem Administrator) – sieht sie wie
+           ein Eingabefeld aus, tippt jemand hinein und wundert sich, dass
+           nichts gespeichert wird. Kein Rahmen-Akzent beim Fokus, gestrichelte
+           Kante und Zeiger "nicht erlaubt": drei Signale statt einem. */
+        .vm-input[readonly] {
+            background: rgba(var(--fg-rgb), .02); color: var(--text-secondary);
+            border-style: dashed; cursor: not-allowed; }
+        .vm-input[readonly]:focus { border-color: var(--border); }
+        /* Deckende Flaeche fuer die Auswahlliste: ein halbtransparenter
+           Feld-Hintergrund wird im Popup zu fast Weiss und die helle Schrift
+           verschwindet darin (theme.css setzt die Regel global – hier nur
+           erwaehnt, damit sie beim Aufraeumen nicht entfernt wird). */
+
+        .vm-desc { margin-top: 12px; padding: 12px 14px; border-radius: var(--radius-md);
+            background: rgba(var(--accent-rgb), .07);
+            border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+            font-size: .86rem; line-height: 1.5; color: var(--text-secondary); }
+        .vm-desc.hidden { display: none; }
+        .vm-desc-title { font-weight: 600; color: var(--text-primary); margin-bottom: 4px; }
+        .vm-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+        .vm-chip { font-size: .72rem; padding: 2px 8px; border-radius: 999px;
+            background: rgba(var(--fg-rgb), .08); border: 1px solid var(--border);
+            color: var(--text-secondary); }
+        .vm-src { margin-top: 8px; font-size: .74rem; color: var(--text-muted);
+            font-family: var(--font-mono, monospace); word-break: break-word; }
+
+        #vm-question { margin-top: 14px; width: 100%; resize: vertical;
+            min-height: 74px; max-height: 260px;
+            background: rgba(var(--fg-rgb), .05); border: 1px solid var(--border);
+            border-radius: var(--radius-md); color: var(--text-primary);
+            padding: 11px 13px; font-size: .93rem; font-family: var(--font-body); line-height: 1.45; }
+        #vm-question:focus { outline: none; border-color: var(--accent); }
+
+        .vm-actions { display: flex; align-items: center; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+        .vm-btn { background: var(--accent); color: #fff; border: none; cursor: pointer;
+            border-radius: var(--radius-md); padding: 10px 22px; font-size: .93rem;
+            font-weight: 600; font-family: var(--font-body); white-space: nowrap; }
+        .vm-btn:hover { background: var(--accent-hover); }
+        .vm-btn:disabled { opacity: .55; cursor: default; }
+        .vm-btn-cancel { background: var(--danger); color: #fff; border: none; cursor: pointer;
+            border-radius: var(--radius-md); padding: 8px 16px; font-size: .84rem;
+            font-weight: 600; font-family: var(--font-body); }
+        .vm-btn-cancel:hover { filter: brightness(1.1); }
+        .vm-note { font-size: .8rem; color: var(--text-muted); }
+        .vm-note.is-error { color: var(--danger); }
+        .vm-note.is-ok { color: var(--success); }
+
+        /* ── Ergebnis ── */
+        .vm-result { margin-top: 16px; }
+        .vm-result.hidden { display: none; }
+        .vm-result-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+        .vm-result-title { font-size: 1rem; font-weight: 600; }
+        .vm-result-body { font-size: .92rem; line-height: 1.6; overflow-wrap: anywhere; }
+        .vm-result-body table { border-collapse: collapse; width: 100%;
+            font-size: .84rem; margin: 10px 0; display: block; overflow-x: auto; }
+        .vm-result-body th, .vm-result-body td { border: 1px solid var(--border);
+            padding: 5px 9px; text-align: left; vertical-align: top; }
+        .vm-result-body th { background: rgba(var(--fg-rgb), .06); color: var(--text-secondary); }
+        .vm-result-body pre { background: var(--bg-primary); border: 1px solid var(--border);
+            border-radius: 8px; padding: 10px 12px; overflow-x: auto; font-size: .82rem; }
+        .vm-result-body code { font-family: var(--font-mono, monospace); font-size: .86em; }
+        .vm-result-body h1, .vm-result-body h2, .vm-result-body h3 {
+            font-size: 1rem; margin: 14px 0 6px; }
+        .vm-result-body ul, .vm-result-body ol { margin: 6px 0 6px 20px; }
+
+        /* Wartehinweis mit Laufzeit: eine Analyse kann Minuten dauern – ohne
+           mitlaufende Sekunden haelt der Benutzer die Seite fuer haengen. */
+        .vm-busy { display: flex; align-items: center; gap: 10px;
+            font-size: .86rem; color: var(--text-secondary); }
+        .vm-spin { width: 15px; height: 15px; border: 2px solid var(--border);
+            border-top-color: var(--accent); border-radius: 50%;
+            animation: spSpin .9s linear infinite; flex-shrink: 0; }
+        @keyframes spSpin { to { transform: rotate(360deg); } }
+
+        /* ── Klappabschnitte (Anbindung / Konsole) ── */
+        .vm-sect { margin-top: 16px; border: 1px solid var(--border);
+            border-radius: var(--radius-lg); background: var(--bg-secondary);
+            box-shadow: var(--shadow-md); overflow: hidden; }
+        .vm-sect > summary { list-style: none; cursor: pointer; padding: 14px 18px;
+            display: flex; align-items: center; gap: 9px; font-size: .95rem; font-weight: 600; }
+        .vm-sect > summary::-webkit-details-marker { display: none; }
+        .vm-sect > summary::before { content: '▸'; color: var(--text-muted);
+            transition: transform .15s ease; display: inline-block; }
+        .vm-sect[open] > summary::before { transform: rotate(90deg); }
+        .vm-sect > summary:hover { background: rgba(var(--accent-rgb), .07); }
+        .vm-sect-body { padding: 0 18px 18px; }
+        .vm-sect-hint { font-size: .82rem; color: var(--text-muted);
+            line-height: 1.5; margin-bottom: 12px; }
+
+        /* ── Mein SAP-Zugang ──
+           Die Pille traegt die Aussage DOPPELT (Farbe und Text) – Farbe allein
+           ist fuer Farbfehlsichtige keine Information (gleiche Regel wie bei der
+           Anwesenheitsliste). Sie sitzt im summary-Flex und darf nicht wachsen. */
+        .vm-acc-pill { flex: 0 0 auto; margin-left: auto; font-size: .74rem;
+            font-weight: 600; padding: 2px 9px; border-radius: 999px;
+            border: 1px solid var(--border); color: var(--text-secondary);
+            background: rgba(var(--fg-rgb), .05); }
+        .vm-acc-pill:empty { display: none; }
+        .vm-acc-pill.is-own { color: var(--success);
+            border-color: color-mix(in srgb, var(--success) 45%, transparent);
+            background: color-mix(in srgb, var(--success) 12%, transparent); }
+        .vm-acc-pill.is-warn { color: var(--danger);
+            border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+            background: color-mix(in srgb, var(--danger) 12%, transparent); }
+        /* DECKENDE Flaeche: der Kasten liegt ueber Karteninhalt, halbtransparent
+           schiene der Text darunter durch (Lehre von den Panels). */
+        .vm-acc-note { display: none; background: var(--bg-secondary);
+            border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border));
+            border-radius: var(--radius-md); padding: 10px 12px; margin-bottom: 12px;
+            font-size: .84rem; line-height: 1.5; color: var(--text-primary); }
+        .vm-acc-note.is-on { display: block; }
+        /* FALLSTRICK: `.vm-row` setzt `display: flex` und ueberstimmt damit das
+           UA-Stylesheet fuer [hidden] – ohne diese Regel bleibt eine per
+           `hidden` verborgene Zeile sichtbar (im Screenshot aufgefallen: das
+           Token-Feld stand neben Benutzer/Kennwort). Gleiche Klassen-Falle wie
+           bei `.input-group` und `.role-grid`. */
+        .vm-row[hidden] { display: none; }
+        .vm-acc-group { display: none; }
+        .vm-acc-group.is-on { display: block; }
+        .vm-acc-group .vm-row { margin-bottom: 12px; }
+        .vm-acc-aktiv { flex: 0 0 240px; }
+        /* Eigene Klasse statt einer Feldbeschriftung: ein Kontrollkaestchen ist
+           ein Satz, keine Beschriftung – und .vm-label ist gross/gesperrt. */
+        .vm-acc-check { display: flex; align-items: center; gap: 8px;
+            font-size: .86rem; color: var(--text-primary); padding-top: 7px; }
+        .vm-acc-check input { flex: 0 0 auto; }
+
+        .vm-ep { border: 1px solid var(--border); border-radius: var(--radius-md);
+            padding: 11px 13px; margin-bottom: 9px; background: rgba(var(--fg-rgb), .03); }
+        .vm-ep-name { font-weight: 600; font-size: .9rem; }
+        .vm-ep-url { font-size: .78rem; color: var(--text-muted);
+            font-family: var(--font-mono, monospace); word-break: break-all; margin: 3px 0 7px; }
+        .vm-ep-list { margin: 0; padding-left: 18px; font-size: .85rem; line-height: 1.55; }
+        .vm-ep.is-match { border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+            background: rgba(var(--accent-rgb), .08); }
+
+        .vm-console-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+        .vm-tab { background: none; border: 1px solid var(--border); color: var(--text-secondary);
+            padding: 6px 13px; border-radius: 8px; cursor: pointer;
+            font-size: .83rem; font-family: var(--font-body); }
+        .vm-tab.active { background: rgba(var(--accent-rgb), .15);
+            color: var(--accent-hover); border-color: var(--accent); }
+        .vm-console-pane.hidden { display: none; }
+        #vm-sql { width: 100%; min-height: 92px; resize: vertical;
+            background: var(--bg-primary); border: 1px solid var(--border);
+            border-radius: var(--radius-md); color: var(--text-primary); padding: 10px 12px;
+            font-family: var(--font-mono, monospace); font-size: .84rem; line-height: 1.5; }
+        #vm-sql:focus { outline: none; border-color: var(--accent); }
+        .vm-table-box { margin-top: 12px; overflow-x: auto; }
+        .vm-table-box table { border-collapse: collapse; width: 100%; font-size: .82rem; }
+        .vm-table-box th { text-align: left; padding: 5px 9px; white-space: nowrap;
+            border-bottom: 1px solid var(--border); color: var(--text-secondary); }
+        .vm-table-box td { padding: 5px 9px; vertical-align: top;
+            border-bottom: 1px solid rgba(var(--fg-rgb), .06); }
+
+        .vm-empty { padding: 26px 14px; text-align: center;
+            color: var(--text-muted); font-size: .88rem; line-height: 1.6; }
+        </style>
+</head>
+<body>
+<script>try{if(localStorage.getItem('jarvis_theme')!=='dark')document.body.classList.add('light');}catch(e){}</script>
+
+<div id="vm-app" class="hidden">
+    <header class="topbar">
+        <div class="topbar-left">
+            <div class="topbar-avatar">J</div>
+            <span class="topbar-title"><span class="brand-app-name">Jarvis</span>
+                <span data-i18n="vemas.portal_title">VEMAS</span></span>
+            <span class="vm-status-dot" id="vm-status-dot" title="LLM-Status"
+                  data-i18n-title="portal.llm_status"></span>
+            <span class="vm-conn" id="vm-conn"></span>
+        </div>
+        <div class="topbar-right">
+            <div class="lang-toggle" id="vm-lang-toggle">
+                <button class="lang-toggle-btn" data-lang="de" onclick="window.setLang && window.setLang('de')" title="Deutsch">DE</button>
+                <button class="lang-toggle-btn" data-lang="en" onclick="window.setLang && window.setLang('en')" title="English">EN</button>
+            </div>
+            <button class="vm-hist-btn" id="vm-instr-btn" data-i18n-title="vemas.instr_title"
+                    title="Eigene Anweisungen für die Auswertung">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                <span data-i18n="sup.instructions">Anweisungen</span>
+            </button>
+            <div class="vm-hist-wrap">
+                <button class="vm-hist-btn" id="vm-hist-btn" data-i18n-title="vemas.hist_title" title="Zuletzt ausgeführte Auswertungen">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>
+                    <span data-i18n="sup.history">Verlauf</span>
+                </button>
+                <div class="vm-hist-panel hidden" id="vm-hist-panel">
+                    <div class="vm-hist-head">
+                        <strong data-i18n="sup.history">Verlauf</strong>
+                        <button class="vm-hist-clear" id="vm-hist-clear" type="button" data-i18n="sup.clear">Leeren</button>
+                    </div>
+                    <div id="vm-hist-list"></div>
+                </div>
+            </div>
+            <button class="btn-theme jv-issues-btn" id="vm-issues-btn" data-i18n-title="sup.issues" title="Issues / Feedback"
+                    onclick="window.JarvisIssues && window.JarvisIssues.open()">
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            </button>
+            <button class="btn-theme" id="btn-theme-toggle" data-i18n-title="chat.theme" title="Hell/Dunkel umschalten">
+                <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                <svg class="theme-icon-sun" style="display:none;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            </button>
+            <a href="/portal" class="btn-theme" data-i18n-title="nav.home" title="Startseite"
+               style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            </a>
+            <!-- Einstellungen: nur fuer Admins (dort werden Server und Ressourcen gepflegt) -->
+            <button class="btn-theme" id="vm-settings-btn" data-jarvis-settings="/vemas" data-i18n-title="nav.settings" title="Einstellungen" style="display:none;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </button>
+            <button class="btn-theme" id="vm-logout-btn" data-i18n-title="chat.logout" title="Abmelden">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- Anweisungen (dauerhaft, je Benutzer) -->
+    <div id="vm-instr-overlay" class="vm-instr-overlay hidden">
+        <div class="vm-instr-modal">
+            <div class="vm-instr-head">
+                <strong data-i18n="vemas.instr_head">Eigene Anweisungen für Auswertungen</strong>
+                <button class="vm-hist-clear" id="vm-instr-close" type="button" data-i18n-title="common.close" title="Schließen">&#10005;</button>
+            </div>
+            <p class="vm-instr-hint" data-i18n="vemas.instr_hint">Diese Anweisungen gelten für jede Auswertung, die du hier startest – z. B. „Beträge immer in Euro mit Tausenderpunkt“ oder „nur Standort Krefeld“.</p>
+            <textarea id="vm-instr-text" class="vm-instr-text" data-tabfill
+                      data-i18n-placeholder="vemas.instr_ph"
+                      placeholder="z. B. Beträge in Euro, Zeitraum immer das laufende Geschäftsjahr, Kunden mit Kürzel nennen"></textarea>
+            <div class="vm-instr-foot">
+                <span id="vm-instr-status" class="vm-instr-status"></span>
+                <button class="vm-hist-btn" id="vm-instr-save" type="button" data-i18n="common.save">Speichern</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="vm-wrap">
+        <!-- ── Auswertung starten ── -->
+        <div class="vm-card">
+            <div class="vm-row">
+                <div class="vm-field">
+                    <label class="vm-label" for="vm-analysis" data-i18n="vemas.analysis">Abfrage</label>
+                    <select id="vm-analysis" class="vm-select"></select>
+                </div>
+                <div class="vm-field">
+                    <label class="vm-label" for="vm-tool" data-i18n="vemas.tool">Aufbereiten für</label>
+                    <select id="vm-tool" class="vm-select"></select>
+                </div>
+            </div>
+
+            <div id="vm-desc" class="vm-desc hidden">
+                <div class="vm-desc-title" id="vm-desc-title"></div>
+                <div id="vm-desc-text"></div>
+                <div class="vm-chips" id="vm-desc-kpis"></div>
+                <div class="vm-src" id="vm-desc-src"></div>
+            </div>
+
+            <textarea id="vm-question" data-i18n-placeholder="vemas.question_ph"
+                      data-i18n-tabfill="vemas.question_suggest"
+                      data-tabfill="Nur Projekte des Standorts Krefeld, letzte zwei Quartale."
+                      placeholder="Zusätzliche Frage oder Einschränkung (optional) – z. B. „nur Projekte von Kunde Müller, laufendes Quartal“"></textarea>
+
+            <div class="vm-actions">
+                <button class="vm-btn" id="vm-run" type="button" data-i18n="vemas.run">Auswertung starten</button>
+                <button class="vm-btn-cancel hidden" id="vm-cancel" type="button" data-i18n="common.cancel">Abbrechen</button>
+                <span class="vm-note" id="vm-note"></span>
+            </div>
+        </div>
+
+        <!-- ── Ergebnis ── -->
+        <div class="vm-card vm-result hidden" id="vm-result">
+            <div class="vm-result-head">
+                <span class="vm-result-title" id="vm-result-title" data-i18n="vemas.result">Ergebnis</span>
+                <span style="flex:1"></span>
+                <button class="vm-hist-btn" id="vm-copy" type="button" data-i18n="vemas.copy">Kopieren</button>
+            </div>
+            <div class="vm-result-body" id="vm-result-body"></div>
+        </div>
+
+        <!-- ── Mein VEMAS-Zugang (persoenliche Zugangsdaten) ──
+             Steht bewusst VOR den uebrigen Abschnitten: wer die Seite zum
+             ersten Mal oeffnet und noch keinen eigenen Zugang hat, soll ihn
+             hier finden. Wer /vemas betreten darf, darf ihn pflegen – die
+             Berechtigungsfrage ist damit dieselbe wie fuer den ganzen Bereich.
+
+             DIE SERVERADRESSE STEHT HIER NUR ZUR ANSICHT (readonly): sie ist
+             eine Eigenschaft des Systems, nicht der Person, und wird im
+             Einstellungs-Reiter gepflegt. Ein freies Adressfeld waere eine
+             SSRF-Flaeche ohne Gegenwert (anders als bei SAP, wo es je
+             Fachbereich verschiedene Systeme gibt). -->
+        <details class="vm-sect" id="vm-sect-account" open>
+            <summary>
+                <span data-i18n="vemas.acc_section">Mein VEMAS-Zugang</span>
+                <span class="vm-acc-pill" id="vm-acc-pill"></span>
+            </summary>
+            <div class="vm-sect-body">
+                <p class="vm-sect-hint" data-i18n="vemas.acc_hint">Hinterlege hier deine eigenen VEMAS-Zugangsdaten – dann laufen Auswertungen, Chat-Abfragen und die Abfrage-Konsole mit deinen VEMAS-Berechtigungen. Ohne eigenen Zugang gilt der gemeinsame Zugang, den ein Administrator hinterlegt hat.</p>
+
+                <div class="vm-acc-note" id="vm-acc-note"></div>
+
+                <div class="vm-row">
+                    <div class="vm-field">
+                        <label class="vm-label" for="vm-acc-server" data-i18n="vemas.acc_server">VEMAS-Server</label>
+                        <input class="vm-input" id="vm-acc-server" type="text" readonly
+                               data-i18n-placeholder="vemas.acc_server_none"
+                               placeholder="— vom Administrator noch nicht hinterlegt —">
+                    </div>
+                </div>
+
+                <div class="vm-row">
+                    <div class="vm-field">
+                        <label class="vm-label" for="vm-acc-auth" data-i18n="vemas.acc_authkind">Anmeldeart</label>
+                        <select id="vm-acc-auth" class="vm-select">
+                            <option value="" data-i18n="vemas.acc_auth_none">— kein eigener Zugang —</option>
+                            <option value="basic" data-i18n="vemas.acc_auth_basic">Benutzer und Kennwort</option>
+                            <option value="bearer" data-i18n="vemas.acc_auth_bearer">API-Token</option>
+                            <option value="login" data-i18n="vemas.acc_auth_login">Anmeldung über Login-Endpunkt</option>
+                        </select>
+                    </div>
+                    <div class="vm-field vm-acc-aktiv">
+                        <label class="vm-label" data-i18n="vemas.acc_active">Verwenden</label>
+                        <label class="vm-acc-check"><input type="checkbox" id="vm-acc-aktiv" checked>
+                            <span data-i18n="vemas.acc_active_lbl">Eigenen Zugang verwenden</span></label>
+                    </div>
+                </div>
+
+                <!-- Benutzer/Kennwort (Anmeldeart basic und login) -->
+                <div class="vm-acc-group" id="vm-acc-g-user" hidden>
+                    <div class="vm-row">
+                        <div class="vm-field">
+                            <label class="vm-label" for="vm-acc-user" data-i18n="vemas.acc_user">VEMAS-Benutzer</label>
+                            <input class="vm-input" id="vm-acc-user" type="text" autocomplete="off">
+                        </div>
+                        <div class="vm-field">
+                            <label class="vm-label" for="vm-acc-pass" data-i18n="vemas.acc_pass">Kennwort</label>
+                            <input class="vm-input" id="vm-acc-pass" type="password" autocomplete="new-password"
+                                   data-i18n-placeholder="vemas.acc_pass_ph" placeholder="leer = unverändert">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- API-Token (Anmeldeart bearer) -->
+                <div class="vm-acc-group" id="vm-acc-g-token" hidden>
+                    <div class="vm-row">
+                        <div class="vm-field">
+                            <label class="vm-label" for="vm-acc-token" data-i18n="vemas.acc_token">API-Token</label>
+                            <input class="vm-input" id="vm-acc-token" type="password" autocomplete="new-password"
+                                   data-i18n-placeholder="vemas.acc_pass_ph" placeholder="leer = unverändert">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="vm-actions">
+                    <button class="vm-btn" id="vm-acc-save" type="button" data-i18n="common.save">Speichern</button>
+                    <button class="vm-hist-btn" id="vm-acc-test" type="button" data-i18n="profile.test">Verbindung testen</button>
+                    <!-- Muelleimer, kein ×: hier wird etwas GESPEICHERTES dauerhaft
+                         entfernt (die hinterlegten Zugangsdaten). Das Symbol setzt
+                         vemas_portal.js aus icons.js in den leeren Slot – kein Emoji
+                         und kein data-i18n am Knopf selbst, sonst ueberschriebe der
+                         Sprachwechsel den textContent samt Symbol. -->
+                    <button class="vm-hist-btn" id="vm-acc-del" type="button"
+                            data-i18n-title="vemas.acc_remove" title="Eigenen Zugang entfernen">
+                        <span id="vm-acc-del-ico"></span><span data-i18n="vemas.acc_remove">Eigenen Zugang entfernen</span>
+                    </button>
+                    <span class="vm-note" id="vm-acc-status"></span>
+                </div>
+                <p class="vm-sect-hint" id="vm-acc-write"></p>
+            </div>
+        </details>
+
+        <!-- ── Abfrage-Konsole (ohne KI) ── -->
+        <details class="vm-sect" id="vm-sect-console">
+            <summary><span data-i18n="vemas.section_console">Abfrage-Konsole (nur lesend)</span></summary>
+            <div class="vm-sect-body">
+                <p class="vm-sect-hint" data-i18n="vemas.section_console_hint">Direkte Leseabfragen ohne KI. Es sind ausschließlich lesende Aufrufe möglich – schreibende Anweisungen sind serverseitig gesperrt.</p>
+                <div class="vm-row">
+                    <div class="vm-field">
+                        <label class="vm-label" for="vm-q-resource" data-i18n="vemas.resource">Ressource</label>
+                        <input class="vm-input" id="vm-q-resource" type="text" list="vm-res-list"
+                               data-i18n-placeholder="vemas.resource_ph" placeholder="z. B. Projekte">
+                        <datalist id="vm-res-list"></datalist>
+                    </div>
+                    <div class="vm-field">
+                        <label class="vm-label" for="vm-q-params" data-i18n="vemas.params">Filter (JSON, optional)</label>
+                        <input class="vm-input" id="vm-q-params" type="text" placeholder='{"jahr":2026}'>
+                    </div>
+                    <div class="vm-field" style="flex:0 0 120px;">
+                        <label class="vm-label" for="vm-q-top" data-i18n="vemas.rows">Zeilen</label>
+                        <input class="vm-input" id="vm-q-top" type="number" min="1" max="500" value="20">
+                    </div>
+                </div>
+                <div class="vm-actions">
+                    <button class="vm-btn" id="vm-q-run" type="button" data-i18n="vemas.query">Abfragen</button>
+                    <span class="vm-note" id="vm-q-note"></span>
+                </div>
+                <div class="vm-table-box" id="vm-console-out"></div>
+            </div>
+        </details>
+
+        <!-- ── Anbindung an eigene Auswertungswerkzeuge ── -->
+        <details class="vm-sect" id="vm-sect-bi">
+            <summary><span data-i18n="vemas.section_bi">Anbindung an Excel / BI</span></summary>
+            <div class="vm-sect-body">
+                <p class="vm-sect-hint" data-i18n="vemas.section_bi_hint">Die Angaben, mit denen sich dasselbe VEMAS-System direkt im gewählten Werkzeug anbinden lässt. Zugangsdaten werden hier nicht angezeigt – es gelten dieselben wie oben.</p>
+                <div id="vm-bi-list"></div>
+            </div>
+        </details>
+    </div>
+</div>
+
+<script src="/static/js/icons.js?v=1"></script>
+<script src="/static/js/cpubar.js?v=1"></script>
+<script src="/static/js/i18n.js?v=195"></script>
+<script src="/static/js/tabfill.js?v=2"></script>
+<script src="/static/js/theme.js?v=3"></script>
+<script src="/static/js/branding.js?v=25"></script>
+<script src="/static/js/issues.js?v=10"></script>
+<script src="/static/js/chatlib.js?v=16"></script>
+<script src="/static/js/sessions.js?v=8"></script>
+<script src="/static/js/logo_home.js?v=1"></script>
+<script src="/static/js/vendor/chart.umd.min.js?v=1"></script>
+<!-- Reihenfolge wie in chat.html: die Plugin-UMDs brauchen window.Chart. -->
+<script src="/static/js/vendor/chartjs-plugin-datalabels.min.js?v=1"></script>
+<script src="/static/js/vendor/chartjs-plugin-annotation.min.js?v=1"></script>
+<script src="/static/js/charts.js?v=4"></script>
+<script src="/static/js/mermaid_blocks.js?v=1"></script>
+<script src="/static/js/vemas_portal.js?v=1"></script>
+<script src="/static/js/settings_btn.js?v=3"></script>
+<!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist).
+     Der Ein/Aus-Schalter baut sich selbst und haengt sich VOR
+     #btn-theme-toggle – deshalb muss der Theme-Knopf diese Id tragen. -->
+<script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
+<script src="/static/vendor/clippy/clippy.min.js"></script>
+<script src="/static/js/avatar.js?v=14"></script>
+<script src="/static/js/activity.js?v=2"></script>
+</body>
+</html>

@@ -695,6 +695,7 @@
         const tabConfluence = document.getElementById('settings-tab-confluence');
         const tabJira    = document.getElementById('settings-tab-jira');
         const tabSap     = document.getElementById('settings-tab-sap');
+        const tabVemas   = document.getElementById('settings-tab-vemas');
         const tabKundenverwaltung = document.getElementById('settings-tab-kundenverwaltung');
         const tabSupport = document.getElementById('settings-tab-support');
         // Reiter, deren Inhalt generisch aus dem Skill-Manifest kommt (skillcfg.js)
@@ -705,7 +706,7 @@
         const tabEmail   = document.getElementById('settings-tab-email');
         const tabTracks  = document.getElementById('settings-tab-tracks');
         const tabExcel   = document.getElementById('settings-tab-excel');
-        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabBranding, tabConfluence, tabJira, tabSap, tabEmail, tabTracks, tabExcel, tabKundenverwaltung, tabSupport, tabMcp, tabTelemetry, tabSecurity, tabCron].concat(tabsSkillCfg);
+        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabBranding, tabConfluence, tabJira, tabSap, tabVemas, tabEmail, tabTracks, tabExcel, tabKundenverwaltung, tabSupport, tabMcp, tabTelemetry, tabSecurity, tabCron].concat(tabsSkillCfg);
 
         settingsTabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -795,6 +796,10 @@
                     tabSap.style.display = '';
                     tabSap.classList.add('active');
                     if (window.SapManager) window.SapManager.onShow();
+                } else if (target === 'vemas' && tabVemas) {
+                    tabVemas.style.display = '';
+                    tabVemas.classList.add('active');
+                    if (window.VemasManager) window.VemasManager.onShow();
                 } else if (target === 'email' && tabEmail) {
                     tabEmail.style.display = '';
                     tabEmail.classList.add('active');
@@ -1009,6 +1014,34 @@
                 const sapSecSub = document.getElementById('sec-sub-sap');
                 if (sapSecSub) sapSecSub.style.display = isEnabled ? '' : 'none';
                 if (!isEnabled && tabSap && tabSap.classList.contains('active')) {
+                    settingsTabs.forEach(t => t.classList.remove('active'));
+                    if (settingsTabs[0]) settingsTabs[0].classList.add('active');
+                    allSettingsTabs.forEach(t => { if (t) { t.style.display = 'none'; t.classList.remove('active'); } });
+                    if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
+                }
+            } catch (e) {
+                // Fehler ignorieren – Tab bleibt versteckt
+            }
+        }
+
+        // ── VEMAS-Tab: nur sichtbar wenn 'vemas'-Skill aktiviert ──
+        // Gleiche Bauart wie beim SAP-Reiter: der Reiter selbst UND der
+        // Berechtigungsblock in Sicherheit haengen am Skill-Zustand – eine
+        // Freigabe fuer einen abgeschalteten Bereich waere eine Freigabe fuer
+        // nichts (gleiche Begruendung wie bei sec-sub-email/-sap).
+        const vemasTabBtn = document.getElementById('settings-tab-btn-vemas');
+        window.updateVemasTabVisibility = async function updateVemasTabVisibility() {
+            if (!vemasTabBtn) return;
+            try {
+                const skills = await _skillsOnce();
+                const vm = Array.isArray(skills)
+                    ? skills.find(s => s.dir_name === 'vemas')
+                    : null;
+                const isEnabled = vm && vm.enabled;
+                vemasTabBtn.style.display = isEnabled ? '' : 'none';
+                const vemasSecSub = document.getElementById('sec-sub-vemas');
+                if (vemasSecSub) vemasSecSub.style.display = isEnabled ? '' : 'none';
+                if (!isEnabled && tabVemas && tabVemas.classList.contains('active')) {
                     settingsTabs.forEach(t => t.classList.remove('active'));
                     if (settingsTabs[0]) settingsTabs[0].classList.add('active');
                     allSettingsTabs.forEach(t => { if (t) { t.style.display = 'none'; t.classList.remove('active'); } });
@@ -1271,6 +1304,7 @@
             await updateConfluenceTabVisibility();
             await updateJiraTabVisibility();
             await updateSapTabVisibility();
+            await updateVemasTabVisibility();
             await updateEmailTabVisibility();
             await updateTracksSecVisibility();
             await updateJiraAssistSecVisibility();

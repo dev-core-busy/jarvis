@@ -22,6 +22,8 @@
         'ad-knowledge-editors-group': { kind: 'groups', multi: true, sep: '\n', list: true },
         'sap-allowed-users':          { kind: 'users',  multi: true, sep: ',',  list: true },
         'sap-allowed-group':          { kind: 'groups', multi: true, sep: '\n', list: true },
+        'vemas-allowed-users':        { kind: 'users',  multi: true, sep: ',',  list: true },
+        'vemas-allowed-group':        { kind: 'groups', multi: true, sep: '\n', list: true },
         'email-allowed-users':        { kind: 'users',  multi: true, sep: ',',  list: true },
         'email-allowed-group':        { kind: 'groups', multi: true, sep: '\n', list: true },
         'tracks-allowed-users':       { kind: 'users',  multi: true, sep: ',',  list: true },

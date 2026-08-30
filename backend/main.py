@@ -956,6 +956,7 @@ _ACTIVITY_PAGES = {
     "userchat": "Benutzer-Chat",
     "settings": "Einstellungen",
     "sap": "SAP",
+    "vemas": "VEMAS",
     "email": "E-Mail",
     "api": "API-Doku",
     "supportagent": "Support-Agent",
@@ -1283,6 +1284,48 @@ async def require_sap_access(request: Request, user: str = Depends(require_auth)
         detail="Kein SAP-Zugriff – nicht in der SAP-Benutzerliste/-Gruppe freigeschaltet "
                "(Einstellungen → Sicherheit → Berechtigungen → SAP-Zugriff; "
                "ggf. neu einloggen für Gruppen-Aktualisierung)")
+
+
+def _user_may_use_vemas(user: str) -> bool:
+    """Prädikat: Darf der Benutzer den VEMAS-Zugriff (Bereich + Tools) nutzen?
+
+    Zuschnitt bewusst 1:1 wie ``_user_may_use_sap`` – gleiche Klasse von
+    Fähigkeit (Fachsystem mit hinterlegten Zugangsdaten, Kunden- und
+    Projektdaten), gleiche Regeln:
+    - Erlaubt sind AUSSCHLIESSLICH Benutzer in ``vemas_allowed_users`` oder
+      Mitglieder von ``vemas_allowed_group`` (memberOf-DNs werden beim Login
+      gecacht). Beide Felder sind ODER-verknüpft, jeder Weg genügt allein.
+    - Ist WEDER Liste NOCH Gruppe gesetzt, darf NIEMAND – ausdrücklich AUCH
+      KEINE lokalen Administratoren. "Leer = niemand" ist seit 2026-07-29 die
+      Regel für alle Freigabefelder.
+    - KEIN Admin-Bypass: ein Administrator pflegt den gemeinsamen Zugang im
+      Reiter, arbeitet aber nur in VEMAS, wenn er sich selbst freigeschaltet
+      hat. Folge (wie bei SAP): ein Admin ohne Freigabe kann keinen eigenen
+      VEMAS-Zugang hinterlegen.
+    """
+    u = (user or "").strip()
+    if not u:
+        return False
+    users_raw = config.get_setting("vemas_allowed_users", "").strip()
+    grp = config.get_setting("vemas_allowed_group", "").strip()
+    if not users_raw and not grp:
+        return False  # niemand – auch keine lokalen Admins
+    plain = _norm_login(u)
+    if users_raw and plain in {_norm_login(x) for x in users_raw.split(",") if x.strip()}:
+        return True
+    if grp and _member_of_any_group(_user_group_dns_cache.get(plain, []), grp):
+        return True
+    return False
+
+
+async def require_vemas_access(request: Request, user: str = Depends(require_auth)) -> str:
+    """FastAPI Dependency: Prüft die VEMAS-Berechtigung (→ /api/vemas/*)."""
+    if _user_may_use_vemas(user):
+        return user
+    raise HTTPException(status_code=403,
+        detail="Kein VEMAS-Zugriff – nicht in der VEMAS-Benutzerliste/-Gruppe "
+               "freigeschaltet (Einstellungen → Sicherheit → Berechtigungen → "
+               "VEMAS-Zugriff; ggf. neu einloggen für Gruppen-Aktualisierung)")
 
 
 def _user_may_use_email(user: str) -> bool:
@@ -4966,6 +5009,12 @@ async def get_me(user: str = Depends(require_auth)):
         "permissions": {
             "sap": _user_may_use_sap(user) and _skill_active("sap"),
             # Gleiche Logik wie bei sap: Freigabe UND aktiver Skill – die Kachel
+            # darf nicht auf eine 404-Seite fuehren (/vemas antwortet bei
+            # ausgeschaltetem Skill mit 404). Die Datenendpunkte /api/vemas/*
+            # pruefen weiterhin nur die Freigabe (require_vemas_access), damit
+            # der Einstellungs-Reiter unabhaengig vom Skill bedienbar bleibt.
+            "vemas": _user_may_use_vemas(user) and _skill_active("vemas"),
+            # Gleiche Logik wie bei sap: Freigabe UND aktiver Skill – die Kachel
             # darf nicht auf eine 404-Seite fuehren. Die Datenendpunkte
             # /api/email/* pruefen weiterhin nur die Freigabe.
             "email": _user_may_use_email(user) and _skill_active("email"),
@@ -5948,6 +5997,10 @@ async def save_settings(request: Request, user: str = Depends(require_local_auth
         config.save_setting("sap_allowed_users", body["sap_allowed_users"])
     if "sap_allowed_group" in body:
         config.save_setting("sap_allowed_group", body["sap_allowed_group"])
+    if "vemas_allowed_users" in body:
+        config.save_setting("vemas_allowed_users", body["vemas_allowed_users"])
+    if "vemas_allowed_group" in body:
+        config.save_setting("vemas_allowed_group", body["vemas_allowed_group"])
     if "email_allowed_users" in body:
         config.save_setting("email_allowed_users", body["email_allowed_users"])
     if "email_allowed_group" in body:
@@ -6115,6 +6168,8 @@ async def get_ad_status(user: str = Depends(require_local_auth)):
             "users"     if config.get_setting("sap_allowed_users", "") else
             "none"      # nichts konfiguriert → nur lokale Admins
         ),
+        "vemas_users": config.get_setting("vemas_allowed_users", ""),
+        "vemas_group": config.get_setting("vemas_allowed_group", ""),
         "email_users": config.get_setting("email_allowed_users", ""),
         "email_group": config.get_setting("email_allowed_group", ""),
         "jira_assist_users": config.get_setting("jira_assist_allowed_users", ""),
@@ -7705,7 +7760,8 @@ async def avatar_ask(request: Request):
                 reasoning_effort=_norm_effort(body.get("reasoning_effort")),
                 actor={"user": username, "privileged": False,
                        "internet": _user_has_internet_access(user) if user else True,
-                       "sap": _user_may_use_sap(user) if user else False},
+                       "sap": _user_may_use_sap(user) if user else False,
+                       "vemas": _user_may_use_vemas(user) if user else False},
             )
             stopped = _cancelled() or bool(getattr(_avatar_agent, "_stop_flag", False))
         except Exception as e:
@@ -8847,6 +8903,455 @@ async def sap_stop(user: str = Depends(require_sap_access)):
         try:
             _sap_agent.stop()
         except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True})
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  VEMAS.NET-Bereich (/vemas) – Auswertungen aus dem CRM/ERP
+# ═══════════════════════════════════════════════════════════════════════════
+# Aufbau 1:1 wie der SAP-Bereich: eigene Oberflaeche fuer die Benutzer, getrennt
+# vom Admin-Reiter in den Einstellungen (dort werden Serveradresse und
+# Ressourcen gepflegt, hier wird ausgewertet). ALLE Endpunkte haengen an
+# ``require_vemas_access`` – dieselbe Schranke wie der Bereich. Die Seite prueft
+# zusaetzlich clientseitig, damit ein unberechtigter Benutzer nicht auf einer
+# Oberflaeche landet, die ihm nur Fehlermeldungen zeigt.
+#
+# ZWEI RECHTE-EBENEN, die man nicht verwechseln darf:
+#   * ``require_vemas_access``  – der BENUTZER-Bereich (/vemas + eigener Zugang)
+#   * ``require_local_auth``    – der ADMIN-Reiter (Sammelzugang, Ressourcen,
+#     Sichtbarkeit der Abfragen, Uebersicht der persoenlichen Zugaenge)
+
+def _vemas_zugang(user: str, trotz_aussetzer: bool = False) -> dict:
+    """Aufgeloester Zugang dieses Benutzers (persoenlich vor Sammelzugang).
+
+    Fail-safe: laesst sich das Modul nicht laden, gilt der Sammelzugang – der
+    ist nur lesend, ein Ausfall kann also nichts kaputt machen."""
+    try:
+        from backend import vemas_accounts
+        return vemas_accounts.aufloesen(user, trotz_aussetzer=trotz_aussetzer)
+    except Exception as e:  # noqa: BLE001
+        print(f"[vemas] Zugang nicht aufloesbar: {e}", flush=True)
+        from backend.vemas_client import VemasClient
+        return {"client": VemasClient({**(VemasClient().cfg or {}), "read_only": True}),
+                "quelle": "sammel", "hinweis": "", "benutzer": user,
+                "ausgesetzt": False}
+
+
+@app.get("/vemas", response_class=HTMLResponse)
+async def vemas_page():
+    """VEMAS-Bereich ausliefern – nur wenn der VEMAS-Skill aktiv ist.
+
+    Die Berechtigungspruefung passiert NICHT hier: eine normale Navigation
+    traegt keinen Authorization-Header, der Token liegt im localStorage. Die
+    Seite holt deshalb als Erstes ``/api/me`` und schickt Unberechtigte zurueck
+    aufs Portal. Sicherheitsrelevant ist das nicht – die Seite ist eine leere
+    Huelle, jeder Datenabruf haengt an ``require_vemas_access``."""
+    if not _skill_active("vemas"):
+        return HTMLResponse("<h1>404 – VEMAS-Bereich nicht aktiv</h1>", status_code=404)
+    f = FRONTEND_DIR / "vemas.html"
+    if not f.exists():
+        return HTMLResponse("<h1>404 – Seite nicht gefunden</h1>", status_code=404)
+    return HTMLResponse(content=f.read_text(encoding="utf-8"),
+                        headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+
+
+@app.get("/api/vemas/status")
+async def vemas_status(user: str = Depends(require_vemas_access)):
+    """Zustand fuer die VEMAS-Oberflaeche: was ist konfiguriert, was geht?
+
+    Bewusst OHNE Verbindungstest – der kostet je nach Netz Sekunden und die
+    Seite soll sofort stehen. Den Test loest der Benutzer per Knopf aus."""
+    z = _vemas_zugang(user)
+    c = z["client"]
+    sammel = False
+    try:
+        from backend import vemas_accounts
+        sammel = bool(vemas_accounts.sammel_client().configured)
+    except Exception:  # noqa: BLE001
+        pass
+    return JSONResponse({
+        "ok": True,
+        "configured": bool(c.configured),
+        "server": c.base,
+        "product": c.produkt,
+        "auth_kind": c.auth_kind,
+        # Nur-Lesen ist hier eine ANZEIGE, keine Behauptung ueber die Rechte des
+        # Benutzers: geschrieben wird ohnehin nur mit dem persoenlichen Zugang.
+        "read_only": bool(c.read_only),
+        "resources": len(c.ressourcen()),
+        "quelle": z.get("quelle") or "sammel",
+        "hinweis": z.get("hinweis") or "",
+        "sammel_vorhanden": sammel,
+        "is_admin": _is_admin_user(user),
+    })
+
+
+@app.get("/api/vemas/test")
+async def vemas_test(user: str = Depends(require_vemas_access)):
+    """Verbindungstest – prueft den Zugang, der fuer DIESEN Benutzer gilt.
+
+    ``trotz_aussetzer=True`` ist Absicht und der einzige Rueckweg aus einem
+    Aussetzer: ohne die Ausnahme pruefte der Knopf den Sammelzugang, meldete
+    "ok" und der Aussetzer loeste sich nie auf. Ein Klick ist EIN
+    Anmeldeversuch; gefaehrlich ist die Automatik, die es im Takt wiederholt."""
+    from backend import vemas_accounts
+    from backend.vemas_client import VemasError
+    z = _vemas_zugang(user, trotz_aussetzer=True)
+    c = z["client"]
+    if not c.configured:
+        return JSONResponse({"ok": False, "configured": False,
+                             "error": "VEMAS ist nicht konfiguriert."})
+    try:
+        res = await asyncio.to_thread(c.test)
+    except VemasError as e:
+        if z.get("quelle") == vemas_accounts.QUELLE_PERSOENLICH:
+            vemas_accounts.merke_ergebnis(
+                user, False, str(e),
+                anmeldefehler=vemas_accounts.ist_anmeldefehler(e))
+        return JSONResponse({"ok": False, "error": str(e),
+                             "status": getattr(e, "status", 0),
+                             "quelle": z.get("quelle")})
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    if z.get("quelle") == vemas_accounts.QUELLE_PERSOENLICH:
+        vemas_accounts.merke_ergebnis(user, True)
+    return JSONResponse({"ok": True, "detail": res.get("detail"),
+                         "quelle": z.get("quelle"), "hinweis": z.get("hinweis") or ""})
+
+
+@app.get("/api/vemas/resources")
+async def vemas_resources(user: str = Depends(require_vemas_access)):
+    """Die vom Administrator hinterlegte Zuordnung Name → Pfad.
+
+    Kein Geheimnis (es sind Pfade, keine Daten) und der Bereich braucht sie fuer
+    die Abfrage-Konsole."""
+    z = _vemas_zugang(user)
+    return JSONResponse({"ok": True, "resources": z["client"].ressourcen()})
+
+
+@app.get("/api/vemas/query")
+async def vemas_query(resource: str, params: str = "", top: int = 20,
+                      user: str = Depends(require_vemas_access)):
+    """Leseabfrage fuer die Abfrage-Konsole (ohne KI).
+
+    Nur GET – der ``vemas_client`` laesst hier gar nichts anderes zu. ``params``
+    ist ein JSON-Objekt als Text; ein Tippfehler wird ABGEWIESEN und nicht
+    stillschweigend als "keine Parameter" behandelt (sonst laeuft die Abfrage
+    ueber den ganzen Bestand und der Benutzer haelt das Ergebnis fuer gefiltert)."""
+    from backend.vemas_client import VemasError
+    z = _vemas_zugang(user)
+    c = z["client"]
+    if not c.configured:
+        return JSONResponse({"ok": False, "configured": False,
+                             "error": "VEMAS ist nicht konfiguriert."}, status_code=400)
+    p = {}
+    if (params or "").strip():
+        try:
+            p = json.loads(params)
+        except ValueError as e:
+            return JSONResponse({"ok": False, "error": f"Parameter sind kein gültiges JSON: {e}"},
+                                status_code=400)
+        if not isinstance(p, dict):
+            return JSONResponse({"ok": False, "error": "Parameter müssen ein JSON-Objekt sein."},
+                                status_code=400)
+    try:
+        zeilen = await asyncio.to_thread(c.abfragen, c.ressource_pfad(resource), p,
+                                         max(1, min(int(top or 20), 500)))
+    except VemasError as e:
+        from backend import vemas_accounts
+        if z.get("quelle") == vemas_accounts.QUELLE_PERSOENLICH:
+            vemas_accounts.melde_fehler(user, e)
+        return JSONResponse({"ok": False, "error": str(e),
+                             "status": getattr(e, "status", 0)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    # Spalten aus der VEREINIGUNG der Zeilen: JSON-APIs lassen leere Felder gern
+    # weg, und eine Spalte, die in Zeile 1 fehlt, waere sonst unsichtbar.
+    cols: list = []
+    for zl in zeilen[:50]:
+        if isinstance(zl, dict):
+            for k in zl:
+                if k not in cols:
+                    cols.append(k)
+    return JSONResponse({"ok": True, "columns": cols, "rows": zeilen,
+                         "quelle": z.get("quelle")})
+
+
+@app.get("/api/vemas/reporting-endpoints")
+async def vemas_reporting(user: str = Depends(require_vemas_access)):
+    """Anbindungsangaben fuer Excel/Power BI/Tableau/Qlik (ohne Zugangsdaten)."""
+    from backend.vemas_client import reporting_hinweis
+    z = _vemas_zugang(user)
+    return JSONResponse({"ok": True, "endpoints": reporting_hinweis(z["client"].base)})
+
+
+# ── Persoenlicher VEMAS-Zugang (Kachel "Mein VEMAS-Zugang" in /vemas) ────────
+# Alle Endpunkte haengen an ``require_vemas_access`` – dieselbe Schranke wie der
+# uebrige Bereich. Wer /vemas betreten darf, darf auch seinen eigenen Zugang
+# pflegen; ein Administrator OHNE VEMAS-Freigabe kann das nicht
+# (``_user_may_use_vemas`` kennt bewusst keinen Admin-Bypass) und pflegt
+# stattdessen den gemeinsamen Zugang unter Einstellungen → Vemas.
+
+@app.get("/api/vemas/account")
+async def vemas_account_get(user: str = Depends(require_vemas_access)):
+    """Eigener VEMAS-Zugang – OHNE Kennwoerter (nur ``*_gesetzt``-Flags)."""
+    from backend import vemas_accounts
+    try:
+        return JSONResponse({"ok": True, "account": vemas_accounts.zugang_info(user)})
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/vemas/account")
+async def vemas_account_set(request: Request, user: str = Depends(require_vemas_access)):
+    """Eigenen VEMAS-Zugang anlegen/aendern.
+
+    Der Rumpf geht UNVERAENDERT an ``vemas_accounts.speichern`` – die
+    Feld-Whitelist dort ist die einzige Instanz. Wuerde der Endpunkt vorfiltern,
+    verschwaende ein unbekanntes Feld stillschweigend und die Antwort meldete
+    trotzdem Erfolg (genau der Fehler, der am 2026-08-12 beim Postfach behoben
+    wurde)."""
+    from backend import vemas_accounts
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    if not isinstance(body, dict):
+        return JSONResponse({"ok": False, "error": "Ungültiger Rumpf."}, status_code=400)
+    try:
+        info = vemas_accounts.speichern(user, body)
+    except vemas_accounts.VemasKontoFehler as e:
+        code = 400 if getattr(e, "kategorie", "eingabe") == "eingabe" else 500
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=code)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "account": info})
+
+
+@app.delete("/api/vemas/account")
+async def vemas_account_del(user: str = Depends(require_vemas_access)):
+    """Eigenen VEMAS-Zugang entfernen – danach gilt wieder der Sammelzugang."""
+    from backend import vemas_accounts
+    try:
+        weg = vemas_accounts.loeschen(user)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "removed": bool(weg),
+                         "account": vemas_accounts.zugang_info(user)})
+
+
+@app.get("/api/vemas/admin/accounts")
+async def vemas_admin_accounts(user: str = Depends(require_local_auth)):
+    """Wer hat einen eigenen VEMAS-Zugang hinterlegt? (*Einstellungen → Vemas*)
+
+    Fuer den Administrator die Antwort auf "warum sieht dieser Benutzer andere
+    Daten als ich". **Ohne Zugangsdaten** – wer welchen VEMAS-Benutzer
+    verwendet, ist dessen Sache; sichtbar ist nur, DASS es einen eigenen Zugang
+    gibt, welche Anmeldeart und ob er gerade ausgesetzt ist."""
+    from backend import vemas_accounts
+    out = []
+    try:
+        for un in vemas_accounts.alle_benutzer():
+            i = vemas_accounts.zugang_info(un)
+            out.append({
+                "user": _display_name(un),
+                "auth_kind": i.get("auth_kind") or "",
+                "aktiv": bool(i.get("aktiv")),
+                "vorhanden": bool(i.get("vorhanden")),
+                "ausgesetzt": bool(i.get("ausgesetzt")),
+                "anmeldefehler": int(i.get("anmeldefehler") or 0),
+                "letzter_erfolg": int(i.get("letzter_erfolg") or 0),
+                "letzter_fehler": i.get("letzter_fehler") or "",
+            })
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "accounts": out})
+
+
+# ── Katalog der vorgefertigten Abfragen ─────────────────────────────────────
+
+def _vemas_hidden() -> list:
+    """Vom Administrator ausgeblendete Abfrage-Ids.
+
+    Liegt in der VEMAS-Skill-Config unter ``hidden_analyses``. Fail-open: laesst
+    sich der Wert nicht lesen, ist NICHTS ausgeblendet – ein kaputter Eintrag
+    darf den Bereich nicht leerraeumen."""
+    from backend import vemas_analyses
+    try:
+        cfg = config.get_skill_states().get("vemas", {}).get("config", {}) or {}
+        return vemas_analyses.normalize_hidden(cfg.get("hidden_analyses"))
+    except Exception as e:  # noqa: BLE001
+        print(f"[vemas] Sichtbarkeitsliste nicht lesbar: {e}", flush=True)
+        return []
+
+
+@app.get("/api/vemas/analyses")
+async def vemas_analyses_api(lang: str = "de", user: str = Depends(require_vemas_access)):
+    """Katalog der vorgefertigten Abfragen + Zielwerkzeuge in EINER Sprache.
+
+    Der Katalog liegt in ``backend/vemas_analyses.py`` und nicht in ``i18n.js``:
+    zu jedem Titel gehoert ein Arbeitsauftrag fuer den Agenten, und die beiden
+    duerfen nicht auseinanderlaufen."""
+    from backend import vemas_analyses
+    return JSONResponse(vemas_analyses.catalog(lang, hidden=_vemas_hidden()))
+
+
+@app.get("/api/vemas/analyses/catalog")
+async def vemas_analyses_catalog(lang: str = "de",
+                                 user: str = Depends(require_local_auth)):
+    """VOLLSTAENDIGER Katalog mit Sichtbarkeitsmerker – fuer *Einstellungen → Vemas*.
+
+    Haengt an ``require_local_auth`` und **nicht** an ``require_vemas_access``:
+    ``_user_may_use_vemas`` kennt bewusst keinen Admin-Bypass, ein Administrator
+    ohne VEMAS-Freigabe koennte die Sichtbarkeit sonst nicht pflegen. Der
+    Katalog ist ohnehin kein Geheimnis – er enthaelt keine Daten aus VEMAS.
+
+    Gespeichert wird ueber den vorhandenen ``POST /api/skills/vemas/config``
+    (Admin, serverseitiger Merge) mit dem Feld ``hidden_analyses``."""
+    from backend import vemas_analyses
+    return JSONResponse(vemas_analyses.admin_catalog(lang, hidden=_vemas_hidden()))
+
+
+def _vemas_instr_path(user: str) -> Path:
+    """Ablage der persoenlichen VEMAS-Anweisungen (je Benutzer eine Datei).
+
+    Gleiche Bauart wie ``_sap_instr_path``; der Dateiname wird auf unbedenkliche
+    Zeichen reduziert, damit ein Domaenenname mit Backslash keinen Pfadwechsel
+    ausloest."""
+    d = Path(__file__).parent.parent / "data" / "vemas_instructions"
+    d.mkdir(parents=True, exist_ok=True)
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", (user or "unbekannt").strip().lower())
+    return d / f"{safe or 'unbekannt'}.md"
+
+
+def _load_vemas_instructions(user: str) -> str:
+    try:
+        p = _vemas_instr_path(user)
+        return p.read_text(encoding="utf-8") if p.exists() else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+@app.get("/api/vemas/instructions")
+async def vemas_instructions_get(user: str = Depends(require_vemas_access)):
+    """Liest die persoenlichen Auswertungs-Anweisungen des Benutzers (Markdown)."""
+    return JSONResponse({"ok": True, "instructions": _load_vemas_instructions(user)})
+
+
+@app.post("/api/vemas/instructions")
+async def vemas_instructions_set(request: Request,
+                                 user: str = Depends(require_vemas_access)):
+    """Speichert die persoenlichen Anweisungen (dauerhaft, je Benutzer)."""
+    body = await request.json()
+    text = (body.get("instructions") or "")[:20000]
+    try:
+        _vemas_instr_path(user).write_text(text, encoding="utf-8")
+        return JSONResponse({"ok": True})
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+# Ein eigener Agent fuer den VEMAS-Bereich, mit eigener Sperre – genau wie beim
+# SAP-Bereich. Grund: eine Auswertung laeuft je nach Datenmenge Minuten; liefe
+# sie auf dem geteilten Hauptagenten, blockierte sie den Chat aller anderen.
+_vemas_agent = None
+_vemas_agent_lock = asyncio.Lock()
+
+
+@app.post("/api/vemas/ask")
+async def vemas_ask(request: Request, user: str = Depends(require_vemas_access)):
+    """Fuehrt eine vorgefertigte Abfrage als Agentenlauf aus.
+
+    Body: ``{analysis_id?, question?, tool?, lang?}``. Mindestens eines von
+    ``analysis_id`` und ``question`` muss gesetzt sein.
+
+    Der Lauf ist **unprivilegiert** (``privileged: False``) und traegt
+    ``vemas: True`` – das schaltet dem Agenten die VEMAS-Werkzeuge frei, ohne
+    ihm Systemrechte zu geben. Ob dabei geschrieben werden darf, entscheidet
+    ausschliesslich der ``vemas_client`` (Vorgabe: nur lesend) zusammen mit der
+    Regel "Schreiben nur mit persoenlichem Zugang"."""
+    from backend import vemas_analyses
+
+    body = await request.json()
+    analysis_id = (body.get("analysis_id") or "").strip()
+    question = (body.get("question") or "").strip()[:4000]
+    tool = (body.get("tool") or "").strip()
+    lang = (body.get("lang") or "de").strip()
+
+    if analysis_id and not vemas_analyses.find(analysis_id):
+        return JSONResponse({"ok": False, "error": "Unbekannte Abfrage."},
+                            status_code=400)
+    # Ausgeblendete Abfragen laufen auch dann nicht, wenn die Id noch von
+    # irgendwo kommt: der Verlauf liegt im localStorage des Browsers und
+    # ueberlebt das Ausblenden, ein offener Reiter ebenso. Ohne diese Pruefung
+    # waere "ausgeblendet" nur eine Empfehlung.
+    if analysis_id and vemas_analyses.is_hidden(analysis_id, _vemas_hidden()):
+        return JSONResponse({"ok": False, "hidden": True,
+                             "error": "Diese Abfrage wurde vom Administrator "
+                                      "ausgeblendet."}, status_code=400)
+    if not analysis_id and not question:
+        return JSONResponse({"ok": False, "error": "Bitte eine Abfrage wählen "
+                                                   "oder eine Frage eingeben."},
+                            status_code=400)
+
+    z = _vemas_zugang(user)
+    c = z["client"]
+    if not c.configured:
+        return JSONResponse({"ok": False, "configured": False,
+                             "error": "VEMAS ist nicht konfiguriert. Ein "
+                                      "Administrator hinterlegt Serveradresse "
+                                      "und Zugang unter Einstellungen → Vemas."},
+                            status_code=400)
+
+    # Sicherheitsschicht wie im Chat/Avatar: der Freitext geht in einen
+    # Agentenlauf, also gilt hier dieselbe Jailbreak-Pruefung.
+    if question and user and await _sec_inspect_user(question, user, "vemas"):
+        return JSONResponse({"detail": "security_blocked",
+                             "message": "Konto wegen eines Sicherheitsverstoßes gesperrt."},
+                            status_code=423)
+
+    task = vemas_analyses.build_task(
+        analysis_id=analysis_id, question=question, tool_id=tool,
+        instructions=_load_vemas_instructions(user), lang=lang)
+    if not task:
+        return JSONResponse({"ok": False, "error": "Leerer Auftrag."}, status_code=400)
+
+    global _vemas_agent
+    from backend.agent import JarvisAgent
+    async with _vemas_agent_lock:
+        if _vemas_agent is None:
+            _vemas_agent = JarvisAgent(label="VEMAS-Auswertung")
+        _vemas_agent._current_username = user
+        try:
+            answer = await _vemas_agent.run_task_headless(
+                task,
+                actor={"user": user, "privileged": False,
+                       "internet": _user_has_internet_access(user),
+                       "vemas": True},
+            )
+        except Exception as e:  # noqa: BLE001
+            print(f"[vemas] Auswertung fehlgeschlagen: {e}", flush=True)
+            return JSONResponse({"ok": False, "error": f"Auswertung fehlgeschlagen: {e}"},
+                                status_code=500)
+
+    # Mit WELCHEM Zugang gelesen wurde, gehoert in den Ergebniskopf – nicht in
+    # den Antworttext (der wird kopiert und weitergegeben). Faellt der Lauf auf
+    # den Sammelzugang zurueck, sind die Daten mit fremden – in der Regel
+    # weiteren – Berechtigungen geholt; das darf nicht unbemerkt bleiben.
+    return JSONResponse({"ok": True, "answer": answer or "",
+                         "analysis_id": analysis_id, "tool": tool,
+                         "quelle": z.get("quelle") or "sammel",
+                         "hinweis": z.get("hinweis") or ""})
+
+
+@app.post("/api/vemas/stop")
+async def vemas_stop(user: str = Depends(require_vemas_access)):
+    """Bricht die laufende VEMAS-Auswertung ab (der Bereich kennt einen Lauf)."""
+    if _vemas_agent is not None:
+        try:
+            _vemas_agent.stop()
+        except Exception as e:  # noqa: BLE001
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
     return JSONResponse({"ok": True})
 
@@ -17959,17 +18464,20 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         _ws_user = _get_ws_username(ws)
         _ws_internet = _user_has_internet_access(_ws_user)
         _ws_sap = _user_may_use_sap(_ws_user)
+        _ws_vemas = _user_may_use_vemas(_ws_user)
         if target_agent_id and agent_manager.get_agent(target_agent_id):
             target = agent_manager.get_agent(target_agent_id)
             if target.is_sub_agent:
                 target._current_user_internet = _ws_internet
                 target._current_user_sap = _ws_sap
+                target._current_user_vemas = _ws_vemas
                 asyncio.create_task(target.run_task(task_text, ws, client_type=client_type, client_ip=client_ip, username=_ws_user, lang=ui_lang, attachments=image_attachments, kb_groups=kb_groups, reasoning_effort=reasoning_effort))
                 return
 
         agent = agent_manager.get_or_create_main()
         agent._current_user_internet = _ws_internet
         agent._current_user_sap = _ws_sap
+        agent._current_user_vemas = _ws_vemas
         agent_instance = agent  # Kompatibilitaet
 
         # ── Edit-Modus: vor neuem Task History trimmen ─────────────────

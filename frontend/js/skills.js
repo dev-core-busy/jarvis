@@ -81,6 +81,7 @@
         confluence:        'confluence',
         jira:              'jira',
         sap:               'sap',
+        vemas:             'vemas',
         email:             'email',
         'short-tracks':    'tracks',
         'excel-addin':     'excel',
@@ -831,6 +832,7 @@
                 if (typeof window.updateConfluenceTabVisibility === 'function') window.updateConfluenceTabVisibility();
                 if (typeof window.updateJiraTabVisibility === 'function') window.updateJiraTabVisibility();
                 if (typeof window.updateSapTabVisibility === 'function') window.updateSapTabVisibility();
+                if (typeof window.updateVemasTabVisibility === 'function') window.updateVemasTabVisibility();
                 if (typeof window.updateEmailTabVisibility === 'function') window.updateEmailTabVisibility();
                 if (typeof window.updateTracksSecVisibility === 'function') window.updateTracksSecVisibility();
                 if (typeof window.updateKundenverwaltungTabVisibility === 'function') window.updateKundenverwaltungTabVisibility();
@@ -943,6 +945,7 @@
                 if (typeof window.updateConfluenceTabVisibility === 'function') window.updateConfluenceTabVisibility();
                 if (typeof window.updateJiraTabVisibility === 'function') window.updateJiraTabVisibility();
                 if (typeof window.updateSapTabVisibility === 'function') window.updateSapTabVisibility();
+                if (typeof window.updateVemasTabVisibility === 'function') window.updateVemasTabVisibility();
                 if (typeof window.updateEmailTabVisibility === 'function') window.updateEmailTabVisibility();
                 if (typeof window.updateTracksSecVisibility === 'function') window.updateTracksSecVisibility();
                 if (typeof window.updateKundenverwaltungTabVisibility === 'function') window.updateKundenverwaltungTabVisibility();
@@ -1057,6 +1060,7 @@
                 if (typeof window.updateConfluenceTabVisibility === 'function') window.updateConfluenceTabVisibility();
                 if (typeof window.updateJiraTabVisibility === 'function') window.updateJiraTabVisibility();
                 if (typeof window.updateSapTabVisibility === 'function') window.updateSapTabVisibility();
+                if (typeof window.updateVemasTabVisibility === 'function') window.updateVemasTabVisibility();
                 if (typeof window.updateEmailTabVisibility === 'function') window.updateEmailTabVisibility();
                 if (typeof window.updateTracksSecVisibility === 'function') window.updateTracksSecVisibility();
                 if (typeof window.updateKundenverwaltungTabVisibility === 'function') window.updateKundenverwaltungTabVisibility();

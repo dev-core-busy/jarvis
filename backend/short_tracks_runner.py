@@ -90,8 +90,8 @@ _lock = asyncio.Lock()
 
 # ── Rechte des Auslösenden ──────────────────────────────────────────────────
 
-def _rechte(user: str) -> tuple[bool, bool]:
-    """(internet, sap) des Benutzers – lazy aus main, fail-closed.
+def _rechte(user: str) -> tuple[bool, bool, bool]:
+    """(internet, sap, vemas) des Benutzers – lazy aus main, fail-closed.
 
     ``backend.main`` wird NICHT importiert (Zirkelimport, und im Testlauf ist
     fastapi ggf. nicht da), sondern nur benutzt, wenn es schon geladen ist –
@@ -100,8 +100,8 @@ def _rechte(user: str) -> tuple[bool, bool]:
     import sys
     m = sys.modules.get("backend.main")
     if m is None:
-        return False, False
-    internet, sap = False, False
+        return False, False, False
+    internet, sap, vemas = False, False, False
     try:
         internet = bool(m._user_has_internet_access(user))
     except Exception:  # noqa: BLE001
@@ -110,7 +110,11 @@ def _rechte(user: str) -> tuple[bool, bool]:
         sap = bool(m._user_may_use_sap(user))
     except Exception:  # noqa: BLE001
         sap = False
-    return internet, sap
+    try:
+        vemas = bool(m._user_may_use_vemas(user))
+    except Exception:  # noqa: BLE001
+        vemas = False
+    return internet, sap, vemas
 
 
 def _actor_fuer(user: str) -> dict:
@@ -118,12 +122,12 @@ def _actor_fuer(user: str) -> dict:
 
     ``privileged`` ist hart ``False``. Ein Dump-Lauf verarbeitet Fremdinhalt und
     darf deshalb NIE Systemrechte haben – auch dann nicht, wenn ein
-    Administrator die Datei abgelegt hat. Internet- und SAP-Freigabe kommen vom
+    Administrator die Datei abgelegt hat. Internet-, SAP- und VEMAS-Freigabe kommen vom
     Benutzer, weil die Werkzeug-Whitelist sie ohnehin einschraenkt.
     """
-    internet, sap = _rechte(user)
+    internet, sap, vemas = _rechte(user)
     return {"user": (user or "").strip(), "privileged": False,
-            "internet": internet, "sap": sap}
+            "internet": internet, "sap": sap, "vemas": vemas}
 
 
 # ── Dateien aufnehmen ───────────────────────────────────────────────────────

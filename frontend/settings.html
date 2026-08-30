@@ -1520,6 +1520,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 <button class="settings-tab-btn" data-settings-tab="confluence" id="settings-tab-btn-confluence" style="display:none;">Confluence</button>
                 <button class="settings-tab-btn" data-settings-tab="jira" id="settings-tab-btn-jira" style="display:none;">Jira</button>
                 <button class="settings-tab-btn" data-settings-tab="sap" id="settings-tab-btn-sap" style="display:none;">SAP</button>
+                <button class="settings-tab-btn" data-settings-tab="vemas" id="settings-tab-btn-vemas" style="display:none;">Vemas</button>
                 <button class="settings-tab-btn" data-settings-tab="email" id="settings-tab-btn-email" style="display:none;" data-i18n="settings.tab.email">E-Mail</button>
                 <button class="settings-tab-btn" data-settings-tab="tracks" id="settings-tab-btn-tracks" style="display:none;" data-i18n="settings.tab.tracks">Short Tracks</button>
                 <button class="settings-tab-btn" data-settings-tab="excel" id="settings-tab-btn-excel" style="display:none;" data-i18n="settings.tab.excel">Excel</button>
@@ -2937,6 +2938,185 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                     </div>
                 </div>
 
+
+                <!-- ═══ Tab: Vemas (VEMAS.NET – CRM/ERP) ═══ -->
+                <div id="settings-tab-vemas" class="settings-tab-content" style="display:none;">
+                    <div class="kb-container">
+                        <p class="kb-hint">Anbindung an <b>VEMAS.NET</b> (MS&nbsp;Consulting) über dessen REST-Webservice. Hier stehen <b>Serveradresse, Anmeldeart und die Ressourcen-Zuordnung</b> – die eigenen Zugangsdaten hinterlegen die Anwender im Bereich <b>VEMAS</b> unter „Mein VEMAS-Zugang". Der hier eingetragene Zugang ist danach nur noch der <b>gemeinsame Rückfall</b>.</p>
+                        <p class="kb-hint" style="margin-top:6px;">⚠ Die REST-Schnittstelle von VEMAS ist herstellerseitig <b>nicht öffentlich dokumentiert</b> und je Installation verschieden. Tragen Sie deshalb unbedingt die <b>Ressourcen-Zuordnung</b> unten ein – ohne sie muss der Agent Pfade raten, und Auswertungen bleiben leer.</p>
+
+                        <h4 style="margin:16px 0 8px;">Verbindung</h4>
+                        <div class="form-group">
+                            <label for="vemas-base-url">VEMAS Basis-URL</label>
+                            <input type="text" id="vemas-base-url" class="config-input" placeholder="https://vemas.firma.de/api" style="width:100%;box-sizing:border-box;">
+                            <span class="kb-hint">Basis der REST-Schnittstelle ohne Ressourcenpfad. Diese Adresse gilt für <b>alle</b> Benutzer – ein persönlicher Zugang liefert nur die Anmeldedaten, nie die Adresse.</span>
+                        </div>
+                        <div class="form-group">
+                            <label for="vemas-product">Version / Ausprägung <span class="kb-hint">(informativ)</span></label>
+                            <input type="text" id="vemas-product" class="config-input" list="vemas-product-list" placeholder="z.B. Vemas.NextGen" style="width:100%;box-sizing:border-box;">
+                            <datalist id="vemas-product-list">
+                                <option value="Vemas.NextGen"></option>
+                                <option value="VEMAS.NET"></option>
+                            </datalist>
+                        </div>
+                        <div class="form-group">
+                            <label for="vemas-auth-kind">Anmeldeart</label>
+                            <select id="vemas-auth-kind" class="config-input" style="width:100%;box-sizing:border-box;">
+                                <option value="basic">Basic – Benutzer und Kennwort im Header</option>
+                                <option value="bearer">Bearer – fester API-Token</option>
+                                <option value="login">Login-Endpunkt – Anmeldung liefert ein Token</option>
+                            </select>
+                        </div>
+
+                        <div class="vemas-auth-group" id="vemas-g-basic">
+                            <div class="form-group">
+                                <label for="vemas-username">Benutzer <span class="kb-hint">(gemeinsamer Zugang)</span></label>
+                                <input type="text" id="vemas-username" class="config-input" autocomplete="off" style="width:100%;box-sizing:border-box;">
+                            </div>
+                            <div class="form-group">
+                                <label for="vemas-password">Kennwort</label>
+                                <div style="display:flex;align-items:center;gap:4px;">
+                                    <input type="password" id="vemas-password" class="config-input" placeholder="••••••••" autocomplete="new-password" style="flex:1;min-width:0;box-sizing:border-box;">
+                                    <button type="button" class="vemas-eye" data-target="vemas-password" title="Anzeigen/Verbergen" data-i18n-title="profile.show_hide" style="background:none;border:none;cursor:pointer;padding:0 6px;color:var(--text-muted,#888);display:flex;align-items:center;flex-shrink:0;">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="vemas-auth-group" id="vemas-g-bearer" style="display:none;">
+                            <div class="form-group">
+                                <label for="vemas-token">API-Token</label>
+                                <div style="display:flex;align-items:center;gap:4px;">
+                                    <input type="password" id="vemas-token" class="config-input" placeholder="••••••••" autocomplete="new-password" style="flex:1;min-width:0;box-sizing:border-box;">
+                                    <button type="button" class="vemas-eye" data-target="vemas-token" title="Anzeigen/Verbergen" data-i18n-title="profile.show_hide" style="background:none;border:none;cursor:pointer;padding:0 6px;color:var(--text-muted,#888);display:flex;align-items:center;flex-shrink:0;">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Der Anmelde-Endpunkt ist eine Eigenschaft des SERVERS, nicht der
+                             Person – deshalb steht er hier und nicht in der Benutzerkachel.
+                             Ohne die vier Felder kann der Client das Token in der Antwort
+                             nicht finden; die Fehlermeldung nennt dann die tatsächlich
+                             vorhandenen Felder, damit man sie nicht raten muss. -->
+                        <div class="vemas-auth-group" id="vemas-g-login" style="display:none;">
+                            <div class="form-group">
+                                <label for="vemas-login-path">Anmelde-Pfad</label>
+                                <input type="text" id="vemas-login-path" class="config-input" placeholder="auth/login" style="width:100%;box-sizing:border-box;">
+                                <span class="kb-hint">Relativ zur Basis-URL.</span>
+                            </div>
+                            <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                                <div class="form-group" style="flex:1;min-width:180px;">
+                                    <label for="vemas-login-user-field">Feld „Benutzer" im Rumpf</label>
+                                    <input type="text" id="vemas-login-user-field" class="config-input" placeholder="username" style="width:100%;box-sizing:border-box;">
+                                </div>
+                                <div class="form-group" style="flex:1;min-width:180px;">
+                                    <label for="vemas-login-pass-field">Feld „Kennwort" im Rumpf</label>
+                                    <input type="text" id="vemas-login-pass-field" class="config-input" placeholder="password" style="width:100%;box-sizing:border-box;">
+                                </div>
+                            </div>
+                            <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                                <div class="form-group" style="flex:1;min-width:180px;">
+                                    <label for="vemas-token-json-path">Pfad zum Token in der Antwort</label>
+                                    <input type="text" id="vemas-token-json-path" class="config-input" placeholder="token oder data.accessToken" style="width:100%;box-sizing:border-box;">
+                                </div>
+                                <div class="form-group" style="flex:1;min-width:140px;">
+                                    <label for="vemas-token-header">Kopfzeile</label>
+                                    <input type="text" id="vemas-token-header" class="config-input" placeholder="Authorization" style="width:100%;box-sizing:border-box;">
+                                </div>
+                                <div class="form-group" style="flex:1;min-width:140px;">
+                                    <label for="vemas-token-prefix">Präfix</label>
+                                    <input type="text" id="vemas-token-prefix" class="config-input" placeholder="Bearer " style="width:100%;box-sizing:border-box;">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                            <div class="form-group" style="flex:1;min-width:180px;">
+                                <label for="vemas-mandant">Mandant <span class="kb-hint">(optional)</span></label>
+                                <input type="text" id="vemas-mandant" class="config-input" style="width:100%;box-sizing:border-box;">
+                            </div>
+                            <div class="form-group" style="flex:1;min-width:180px;">
+                                <label for="vemas-mandant-param">Name des Mandanten-Parameters</label>
+                                <input type="text" id="vemas-mandant-param" class="config-input" placeholder="mandant" style="width:100%;box-sizing:border-box;">
+                                <span class="kb-hint">Nur wirksam, wenn auch ein Mandant gesetzt ist.</span>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="checkbox-group"><input type="checkbox" id="vemas-verify-ssl" checked><span>SSL-Zertifikat prüfen</span></label>
+                            <span class="kb-hint">Nur hier abschaltbar. Benutzer können die Prüfung an ihrem eigenen Zugang <b>nicht</b> deaktivieren.</span>
+                        </div>
+
+                        <!-- DER SCHREIBSCHALTER. Vorgabe AUS, und der Hinweistext nennt
+                             die zweite Schranke: geschrieben wird ausschliesslich mit
+                             einem PERSÖNLICHEN Zugang. Ohne diesen Satz hielte ein
+                             Administrator den Haken für „der Agent darf jetzt buchen". -->
+                        <div class="form-group">
+                            <label class="checkbox-group"><input type="checkbox" id="vemas-read-only" checked><span>Nur lesend (empfohlen)</span></label>
+                            <span class="kb-hint">Abgewählt darf der Agent auch anlegen und ändern (POST/PUT/PATCH; <b>gelöscht wird nie</b>). <b>Zweite Schranke:</b> geschrieben wird ausschließlich mit dem <b>persönlichen</b> Zugang eines Benutzers – über den gemeinsamen Zugang bleibt es beim Lesen, damit jeder Vorgang in VEMAS zuzuordnen ist. Bedenken Sie, dass der Agent Fremdtext verarbeitet (E-Mails, Tickets); ein Schreibwerkzeug ist darüber erreichbar.</span>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="vemas-test-path">Pfad für den Verbindungstest <span class="kb-hint">(optional)</span></label>
+                            <input type="text" id="vemas-test-path" class="config-input" placeholder="z.B. projects" style="width:100%;box-sizing:border-box;">
+                            <span class="kb-hint">Leer = der Test probiert die erste hinterlegte Ressource und die Selbstauskunft des Servers.</span>
+                        </div>
+
+                        <!-- DIE WICHTIGSTE EINSTELLUNG DIESES REITERS. -->
+                        <div class="form-group" style="margin-top:18px;">
+                            <label for="vemas-resources">Ressourcen <span class="kb-hint">(Name = Pfad, eine je Zeile)</span></label>
+                            <textarea id="vemas-resources" class="config-input" rows="6"
+                                      placeholder="Projekte = projects&#10;Kunden = customers&#10;Zeiten = timeentries&#10;Tickets = tickets&#10;Rechnungen = invoices"
+                                      style="width:100%;box-sizing:border-box;font-family:var(--font-mono);font-size:0.84rem;"></textarea>
+                            <span class="kb-hint">Der Agent ruft diese Liste vor jeder Abfrage ab und benutzt die <b>Namen</b>. Ohne Zuordnung muss er Pfade raten – der häufigste Grund für leere Auswertungen. Der Knopf „Ressourcen erkunden" liest die Selbstauskunft des Servers, falls vorhanden.</span>
+                        </div>
+
+                        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px;">
+                            <button class="btn-primary" id="vemas-save" type="button" data-i18n="common.save">Speichern</button>
+                            <button class="btn-secondary" id="vemas-test" type="button" data-i18n="profile.test">Verbindung testen</button>
+                            <button class="btn-secondary" id="vemas-discover" type="button" data-i18n="vemas.discover">Ressourcen erkunden</button>
+                            <span id="vemas-status" style="font-size:0.9em;"></span>
+                        </div>
+                        <div id="vemas-discover-out" style="margin-top:10px;"></div>
+
+                        <!-- Wer hat einen eigenen Zugang hinterlegt? Für den Admin die
+                             Antwort auf „warum sieht dieser Benutzer andere Daten". -->
+                        <div class="form-group" style="margin-top:18px;">
+                            <label>Persönliche VEMAS-Zugänge</label>
+                            <div id="vemas-accounts-list" class="kb-hint">Lädt…</div>
+                        </div>
+
+                        <h4 style="margin:22px 0 8px;">Abfrage testen</h4>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                            <input type="text" id="vemas-q-resource" class="config-input" placeholder="Ressource, z.B. Projekte" style="flex:1;min-width:180px;">
+                            <input type="text" id="vemas-q-params" class="config-input" placeholder='Filter als JSON, z.B. {"jahr":2026}' style="flex:1;min-width:180px;">
+                            <input type="number" id="vemas-q-top" class="config-input" placeholder="Zeilen" value="20" style="width:90px;">
+                            <button class="btn-secondary" id="vemas-q-run" type="button" data-i18n="vemas.query">Abfragen</button>
+                        </div>
+                        <div id="vemas-results" style="margin-top:12px;overflow:auto;"></div>
+
+                        <!-- ══ Sichtbare Abfragen im Bereich /vemas ══════════════════
+                             Steuert das Pulldown unter /vemas. Gespeichert wird die
+                             Liste der AUSGEBLENDETEN Ids (`hidden_analyses` in der
+                             VEMAS-Skill-Config) – leer heisst also "alles sichtbar".
+                             Das ist Absicht: eine spaeter ergaenzte Abfrage soll
+                             erscheinen und nicht still fehlen. -->
+                        <h4 style="margin:22px 0 8px;" data-i18n="vemas.vis_head">Sichtbare Abfragen im Bereich /vemas</h4>
+                        <p class="kb-hint" data-i18n-html="vemas.vis_hint">Bestimmt, welche Vorlagen die Anwender im Bereich <strong>/vemas</strong> im Pulldown sehen. Abgewählte Vorlagen verschwinden dort und lassen sich auch nicht mehr über den Verlauf starten. Kategorien ohne sichtbare Vorlage werden ausgeblendet. Die freie Frage bleibt immer möglich.</p>
+                        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+                            <button class="btn-secondary" id="vemas-vis-all" type="button" data-i18n="sap.vis_all">Alle auswählen</button>
+                            <button class="btn-secondary" id="vemas-vis-none" type="button" data-i18n="sap.vis_none">Alle abwählen</button>
+                            <button class="btn-primary" id="vemas-vis-save" type="button" data-i18n="common.save">Speichern</button>
+                            <span id="vemas-vis-count" class="kb-hint"></span>
+                            <span id="vemas-vis-status" style="font-size:0.9em;"></span>
+                        </div>
+                        <div id="vemas-vis-list"></div>
+                    </div>
+                </div>
+
                 <!-- ═══ Tab: Jira (Ticketsuche) ═══ -->
                 <div id="settings-tab-jira" class="settings-tab-content" style="display:none;">
                     <div class="kb-container">
@@ -4061,6 +4241,32 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     </div>
                                 </details>
 
+                                <!-- ── Unter-Container: VEMAS-Zugriff (nur bei aktivem VEMAS-Skill sichtbar) ── -->
+                                <details class="sec-sub" data-sub="vemas" id="sec-sub-vemas" style="display:none;">
+                                    <summary><span>VEMAS-Zugriff</span><span class="sec-sub-hint">– Wer darf VEMAS.NET-Daten lesen (Bereich + Tools)?</span></summary>
+                                    <div class="sec-sub-body">
+                                <p class="kb-hint" style="margin-bottom:10px;">Steuert den Zugriff auf den <b>VEMAS-Bereich</b> (Kachel im Portal) und die <code>vemas_*</code>-Tools des Agenten. Wie bei SAP ausdrücklich freizuschalten: leer = <b>niemand</b> – ausdrücklich <b>auch keine lokalen Administratoren</b>. <b>Wichtig:</b> Freigegebene hinterlegen im Bereich VEMAS ihre <b>eigenen</b> Zugangsdaten und sehen dann genau die Daten, für die sie in VEMAS berechtigt sind; ohne eigenen Zugang gilt der gemeinsame Zugang aus dem Reiter <b>Vemas</b>. Ein Administrator <b>ohne</b> Eintrag hier kann keinen eigenen Zugang hinterlegen – er pflegt den gemeinsamen.</p>
+
+                                <div class="form-group" style="margin-bottom:8px;">
+                                    <label>
+                                        <span>Erlaubte Benutzer</span>
+                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– Benutzernamen kommagetrennt, z.B. <code>mueller,schmidt</code></span>
+                                    </label>
+                                    <input type="text" id="vemas-allowed-users" placeholder="Leer = niemand (auch keine lokalen Admins)" style="width:60%;box-sizing:border-box;">
+                                </div>
+                                <div class="form-group" style="margin-bottom:8px;">
+                                    <label>
+                                        <span>VEMAS-Gruppe (AD-Gruppe)</span>
+                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;" data-i18n="security.ad_group_hint">– zusätzlich zur Benutzerliste (ODER: Liste oder Gruppe genügt)</span>
+                                    </label>
+                                    <textarea id="vemas-allowed-group" rows="1" placeholder="z.B. CN=VEMAS-Users,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;"></textarea>
+                                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
+                                        <span data-i18n="security.ad_group_cache_hint">⚠ Gruppen-Mitgliedschaft wird beim Login ermittelt. Mit Service-Konto (Verzeichnis-Suche) wird sie automatisch nachgeprüft (Standard: alle 10 Min.) – Änderungen wirken dann ohne Neuanmeldung.</span>
+                                    </div>
+                                </div>
+                                    </div>
+                                </details>
+
                                 <!-- ── Unter-Container: E-Mail-Zugriff (nur bei aktivem E-Mail-Skill sichtbar) ── -->
                                 <details class="sec-sub" data-sub="email" id="sec-sub-email" style="display:none;">
                                     <summary><span>E-Mail-Zugriff</span><span class="sec-sub-hint">– Wer darf sein Postfach anbinden und Regeln anlegen?</span></summary>
@@ -4339,6 +4545,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             document.getElementById('ad-admins-group').value = d.admins_group || '';
                                             var _sapU = document.getElementById('sap-allowed-users'); if (_sapU) _sapU.value = d.sap_users || '';
                                             var _sapG = document.getElementById('sap-allowed-group'); if (_sapG) _sapG.value = d.sap_group || '';
+                                            var _vemU = document.getElementById('vemas-allowed-users'); if (_vemU) _vemU.value = d.vemas_users || '';
+                                            var _vemG = document.getElementById('vemas-allowed-group'); if (_vemG) _vemG.value = d.vemas_group || '';
                                             var _mailU = document.getElementById('email-allowed-users'); if (_mailU) _mailU.value = d.email_users || '';
                                             var _mailG = document.getElementById('email-allowed-group'); if (_mailG) _mailG.value = d.email_group || '';
                                             var _trU = document.getElementById('tracks-allowed-users'); if (_trU) _trU.value = d.tracks_users || '';
@@ -4350,7 +4558,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             var _csU = document.getElementById('claudesub-allowed-users'); if (_csU) _csU.value = d.claudesub_users || '';
                                             var _csG = document.getElementById('claudesub-allowed-group'); if (_csG) _csG.value = d.claudesub_group || '';
                                             // Token-Listen (Chips) aller AD-Felder neu aufbauen (nach dem Setzen aller Werte)
-                                            ['ad-allowed-users','ad-allowed-group','ad-knowledge-editors','ad-knowledge-editors-group','ad-internet-users','ad-internet-group','ad-admins','ad-admins-group','sap-allowed-users','sap-allowed-group','email-allowed-users','email-allowed-group','tracks-allowed-users','tracks-allowed-group','jiraassist-allowed-users','jiraassist-allowed-group','excel-allowed-users','excel-allowed-group','claudesub-allowed-users','claudesub-allowed-group'].forEach(function(_id){ var _e=document.getElementById(_id); if(_e) _e.dispatchEvent(new Event('change')); });
+                                            ['ad-allowed-users','ad-allowed-group','ad-knowledge-editors','ad-knowledge-editors-group','ad-internet-users','ad-internet-group','ad-admins','ad-admins-group','sap-allowed-users','sap-allowed-group','vemas-allowed-users','vemas-allowed-group','email-allowed-users','email-allowed-group','tracks-allowed-users','tracks-allowed-group','jiraassist-allowed-users','jiraassist-allowed-group','excel-allowed-users','excel-allowed-group','claudesub-allowed-users','claudesub-allowed-group'].forEach(function(_id){ var _e=document.getElementById(_id); if(_e) _e.dispatchEvent(new Event('change')); });
                                             _adUpdateStatus(d);
                                         } catch(e) {}
                                     }
@@ -4529,6 +4737,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                                     ad_admins_group:           document.getElementById('ad-admins-group').value.trim(),
                                                     sap_allowed_users:         (document.getElementById('sap-allowed-users')||{}).value ? document.getElementById('sap-allowed-users').value.trim() : '',
                                                     sap_allowed_group:         (document.getElementById('sap-allowed-group')||{}).value ? document.getElementById('sap-allowed-group').value.trim() : '',
+                                                    vemas_allowed_users:       (document.getElementById('vemas-allowed-users')||{}).value ? document.getElementById('vemas-allowed-users').value.trim() : '',
+                                                    vemas_allowed_group:       (document.getElementById('vemas-allowed-group')||{}).value ? document.getElementById('vemas-allowed-group').value.trim() : '',
                                                     email_allowed_users:       (document.getElementById('email-allowed-users')||{}).value ? document.getElementById('email-allowed-users').value.trim() : '',
                                                     email_allowed_group:       (document.getElementById('email-allowed-group')||{}).value ? document.getElementById('email-allowed-group').value.trim() : '',
                                                     tracks_allowed_users:      (document.getElementById('tracks-allowed-users')||{}).value ? document.getElementById('tracks-allowed-users').value.trim() : '',
@@ -4843,7 +5053,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
     <script src="/static/js/icons.js?v=1"></script>
-    <script src="/static/js/i18n.js?v=194"></script>
+    <script src="/static/js/i18n.js?v=195"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=21"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -4865,6 +5075,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <!-- sapcert.js VOR sap.js: der Reiter haengt den Baustein beim Laden ein. -->
     <script src="/static/js/sapcert.js?v=1"></script>
     <script src="/static/js/sap.js?v=4"></script>
+    <script src="/static/js/vemas.js?v=1"></script>
     <script src="/static/js/email.js?v=4"></script>
     <script src="/static/js/short_tracks_admin.js?v=2"></script>
     <script src="/static/js/kundenverwaltung.js?v=6"></script>

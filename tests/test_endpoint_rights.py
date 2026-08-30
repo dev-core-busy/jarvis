@@ -287,6 +287,10 @@ section("Regel: Lesen darf nicht freier sein als Schreiben")
 RANK = {"require_local_auth": 3, "require_admin_or_knowledge_editor": 2,
         "require_knowledge_editor": 2, "require_sap_access": 2,
         "require_email_access": 2, "require_tracks_access": 2,
+        # VEMAS: dieselbe Ebene wie SAP – Bereichs-Freigabe (Benutzerliste ODER
+        # Gruppe, leer = niemand, KEIN Admin-Bypass) auf ein Fachsystem mit
+        # hinterlegten Zugangsdaten.
+        "require_vemas_access": 2,
         "require_jira_assist_access": 2,
         # Freigabe ODER Admin – also mindestens so eng wie die Freigabe selbst.
         "require_jira_vorlagen_access": 2,

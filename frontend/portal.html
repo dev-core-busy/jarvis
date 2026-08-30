@@ -444,6 +444,14 @@
             <div class="pt-card-title" data-i18n="portal.card_sap">SAP-Analysen</div>
             <div class="pt-card-desc" data-i18n="portal.card_sap_desc">Auswertungen für die Geschäftsleitung aus SAP – lesend, mit Anbindung an das eigene BI-Werkzeug.</div>
         </a>
+        <!-- VEMAS: nur fuer freigegebene Benutzer UND nur bei aktivem VEMAS-Skill
+             (beides steckt in permissions.vemas). Freigabe unter Einstellungen →
+             Sicherheit → Berechtigungen → VEMAS-Zugriff. -->
+        <a class="pt-card hidden" id="pt-card-vemas" href="/vemas">
+            <div class="pt-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/></svg></div>
+            <div class="pt-card-title" data-i18n="portal.card_vemas">VEMAS</div>
+            <div class="pt-card-desc" data-i18n="portal.card_vemas_desc">Auswertungen aus VEMAS.NET – Projekte, Zeiten, Kunden und Service, mit eigenem Zugang.</div>
+        </a>
         <!-- E-Mail: nur fuer freigegebene Benutzer UND nur bei aktivem E-Mail-Skill
              (beides steckt in permissions.email – eine Kachel, die auf eine
              404-Seite fuehrt, ist schlimmer als keine Kachel). Freigabe unter
@@ -647,7 +655,7 @@ sudo update-ca-certificates</code></pre>
 
 <script src="/static/js/icons.js?v=1"></script>
 <script src="/static/js/cpubar.js?v=1"></script>
-<script src="/static/js/i18n.js?v=194"></script>
+<script src="/static/js/i18n.js?v=195"></script>
 <script src="/static/js/theme.js?v=3"></script>
 <script src="/static/js/branding.js?v=25"></script>
 <script src="/static/js/security_incidents.js?v=30"></script>
@@ -748,6 +756,11 @@ sudo update-ca-certificates</code></pre>
         if (d.permissions && d.permissions.sap) {
             var sapCard = document.getElementById('pt-card-sap');
             if (sapCard) sapCard.classList.remove('hidden');
+        }
+        // VEMAS-Bereich: dieselbe Logik (Freigabe UND aktiver Skill).
+        if (d.permissions && d.permissions.vemas) {
+            var vemasCard = document.getElementById('pt-card-vemas');
+            if (vemasCard) vemasCard.classList.remove('hidden');
         }
         // E-Mail-Bereich: dieselbe Logik (Freigabe UND aktiver Skill).
         if (d.permissions && d.permissions.email) {

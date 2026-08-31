@@ -1069,7 +1069,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
             </div>
             <div class="modal-body kbsync-doc" style="overflow-y:auto;">
 
-                <p class="kbsync-doc-lead">Mehrere Jarvis-Standorte in einem Netz teilen Wissen, ohne es zu verschmelzen:
+                <p class="kbsync-doc-lead">Mehrere {marke}-Standorte in einem Netz teilen Wissen, ohne es zu verschmelzen:
                     ein Administrator am <b>abgebenden Standort</b> gibt einen Wissensordner frei, ein Administrator am
                     <b>holenden Standort</b> spiegelt ihn. Die Verbindung ist eine <b>Einbahnstraße</b> – es wird nur
                     gelesen, und alle Verbindungen gehen <b>vom holenden Standort aus</b> (Pull). Nach dem Lauf liegt das
@@ -3805,7 +3805,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 <!-- ═══ Tab: Claude Bridge ═══ -->
                 <div id="settings-tab-claude_bridge" class="settings-tab-content" style="display:none;">
                     <div class="kb-container">
-                        <p class="kb-hint">Delegiert Aufgaben an die Claude-Desktop-App auf dem Jarvis-Desktop. Die Fokus-Verzögerung gibt der App Zeit, das Eingabefeld zu übernehmen, bevor der Text eingefügt wird.</p>
+                        <p class="kb-hint">Delegiert Aufgaben an die Claude-Desktop-App auf dem {marke}-Desktop. Die Fokus-Verzögerung gibt der App Zeit, das Eingabefeld zu übernehmen, bevor der Text eingefügt wird.</p>
                         <div id="skcfg-claude_bridge"></div>
                     </div>
                 </div>
@@ -4346,7 +4346,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <details class="sec-sub" data-sub="jiraassist" id="sec-sub-jiraassist" style="display:none;">
                                     <summary><span>Jira-Assistent</span><span class="sec-sub-hint">– Wer darf Tickets über die Browser-Erweiterung auswerten?</span></summary>
                                     <div class="sec-sub-body">
-                                <p class="kb-hint" style="margin-bottom:10px;">Steuert die <b>Browser-Erweiterung „Jarvis für Jira"</b>: Zusammenfassung eines Tickets und Antwortvorschlag an den Melder. Leer = <b>niemand</b> – ausdrücklich <b>auch keine lokalen Administratoren</b>. <b>Warum das hier eine eigene Freigabe braucht:</b> das Ticket wird mit dem <b>Server-Token</b> aus dem Jira-Reiter geholt, nicht mit den Rechten des Benutzers in Jira. Wer eine Ticketnummer errät, die er dort selbst nicht sehen dürfte, bekäme den Inhalt über diesen Weg trotzdem. Tragen Sie deshalb nur ein, wer die betreffenden Tickets ohnehin einsehen darf. <b>Es läuft kein Agent</b> – der Vorschlag entsteht in einem einzelnen Modellaufruf ohne Werkzeuge und wird von Hand in Jira eingefügt und abgeschickt.</p>
+                                <p class="kb-hint" style="margin-bottom:10px;">Steuert die <b>Browser-Erweiterung „{marke} für Jira"</b>: Zusammenfassung eines Tickets und Antwortvorschlag an den Melder. Leer = <b>niemand</b> – ausdrücklich <b>auch keine lokalen Administratoren</b>. <b>Warum das hier eine eigene Freigabe braucht:</b> das Ticket wird mit dem <b>Server-Token</b> aus dem Jira-Reiter geholt, nicht mit den Rechten des Benutzers in Jira. Wer eine Ticketnummer errät, die er dort selbst nicht sehen dürfte, bekäme den Inhalt über diesen Weg trotzdem. Tragen Sie deshalb nur ein, wer die betreffenden Tickets ohnehin einsehen darf. <b>Es läuft kein Agent</b> – der Vorschlag entsteht in einem einzelnen Modellaufruf ohne Werkzeuge und wird von Hand in Jira eingefügt und abgeschickt.</p>
 
                                 <div class="form-group" style="margin-bottom:8px;">
                                     <label>
@@ -4372,7 +4372,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                      "claude_subagent" eingeblendet – gleiches Muster wie
                                      sec-sub-email/-tracks/-excel. -->
                                 <details class="sec-sub" data-sub="claudesub" id="sec-sub-claudesub" style="display:none;">
-                                    <summary><span>Claude-Subagent-Zugriff</span><span class="sec-sub-hint">– Wer darf Codeaufgaben an Jarvis abgeben?</span></summary>
+                                    <summary><span>Claude-Subagent-Zugriff</span><span class="sec-sub-hint">– Wer darf Codeaufgaben an {marke} abgeben?</span></summary>
                                     <div class="sec-sub-body">
                                 <p class="kb-hint" style="margin-bottom:10px;">Steuert den Zugriff auf den Bereich <b>Claude Subagent</b> (Kachel im Portal): dort erzeugt ein Benutzer den persönlichen Schlüssel, mit dem sein Claude-Code-Werkzeug Codeaufgaben an Jarvis abgeben darf. Wie bei E-Mail, SAP und Short Tracks ausdrücklich freizuschalten: leer = <b>niemand</b> – ausdrücklich <b>auch keine lokalen Administratoren</b>. <b>Was ein Auftrag darf:</b> Jarvis klont das Projekt frisch nach <code>/tmp</code> und arbeitet nur dort; der Lauf ist immer <b>unprivilegiert</b>, hat kein Internet und nur <code>filesystem</code> + <code>shell_execute</code>. An die laufende Installation, an <code>settings.json</code> oder <code>.env</code> kommt er nicht heran. Das Ergebnis wird <b>maschinell</b> geprüft (Patch + benannte Testdatei), nicht vom Sprachmodell behauptet. <b>Was es kostet:</b> jeder Auftrag rechnet auf demselben LLM wie der Chat – die Zahl gleichzeitiger Läufe stellen Sie im Reiter <b>Claude Subagent</b> ein.</p>
 

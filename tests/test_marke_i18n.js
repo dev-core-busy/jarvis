@@ -232,6 +232,58 @@ pruefe(markenHaken.length >= 3,
        String(markenHaken.length));
 
 // ══════════════════════════════════════════════════════════════════════════
+abschnitt('8) Auch Text OHNE data-i18n nennt den Vorgabenamen nicht');
+// ══════════════════════════════════════════════════════════════════════════
+// Abschnitt 7 deckt nur Elemente MIT data-i18n ab. Am 2026-08-31 stand im
+// Sicherheits-Reiter woertlich "– Wer darf Codeaufgaben an Jarvis abgeben?" –
+// ein harter Name in einem Hinweis ohne Attribut, den die Regel davor nicht
+// sah. Gefunden hat es nicht dieser Waechter, sondern eine Pruefung des
+// SICHTBAREN Textes im Browser vor einem Handbuch-Screenshot.
+//
+// branding.js ersetzt {marke} mit einem TreeWalker ueber den Body – ein
+// Attribut braucht es dafuer nicht. Der Platzhalter gehoert also auch hierhin.
+const OHNE_I18N_AUSNAHMEN = [
+    // Branding-HAKEN: dort MUSS "Jarvis" stehen, branding.js ersetzt den Text
+    // (NAME_LABEL_SELECTOR: .login-title, .header-title, .brand-app-name).
+    'login-title',
+    // Diese zwei Texte BESCHREIBEN den Vorgabenamen – "Ersetzt {marke} nur in
+    // den Begruessungen" waere auf einer gebrandeten Installation sinnlos.
+    'Ersetzt „Jarvis"',
+    'Firmen-Branding',
+];
+function sichtbareTexte(html) {
+    let s = html.replace(/<!--[\s\S]*?-->/g, '');
+    s = s.replace(/<script\b[\s\S]*?<\/script>/gi, '<script></script>');
+    s = s.replace(/<style\b[\s\S]*?<\/style>/gi, '<style></style>');
+    const aus = [];
+    const re = /(<[a-zA-Z][^<>]*>)([^<>]*\bJarvis\b[^<>]*)(?=<)/g;
+    let m;
+    while ((m = re.exec(s))) {
+        const tag = m[1], txt = m[2].trim();
+        if (!txt) continue;
+        if (/brand-app-name|data-i18n/.test(tag)) continue;
+        if (/^<(title|script|style)\b/i.test(tag)) continue;
+        if (OHNE_I18N_AUSNAHMEN.some((a) => tag.includes(a) || txt.includes(a))) continue;
+        aus.push({ tag, txt });
+    }
+    return aus;
+}
+const offenOhne = [];
+for (const f of HTML_DATEIEN) {
+    for (const t of sichtbareTexte(lies(f))) {
+        offenOhne.push(f + ': ' + t.txt.slice(0, 55));
+    }
+}
+pruefe(offenOhne.length === 0,
+       'kein sichtbarer Text ohne data-i18n nennt "Jarvis"',
+       offenOhne.join(' | '));
+// Positivkontrolle: die Ausnahmen greifen wirklich, der Filter ist nicht
+// versehentlich blind (sonst waere die Null oben nichts wert).
+const hakenDa = HTML_DATEIEN.filter((f) => /class="login-title"[^>]*>\s*Jarvis/.test(lies(f)));
+pruefe(hakenDa.length >= 2, '.login-title behaelt "Jarvis" (Branding-Haken)',
+       String(hakenDa.length));
+
+// ══════════════════════════════════════════════════════════════════════════
 abschnitt('6) GEMESSEN: der Beobachter setzt spaeter eingefuegten Text nach');
 // ══════════════════════════════════════════════════════════════════════════
 // Teil 5 liest nur den Quelltext. Ob der Beobachter WIRKT - und ob er nach

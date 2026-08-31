@@ -140,6 +140,13 @@ windows-app-go/.ftps_credentials
 # Generierte Bilder (Bildgenerierung)
 data/generated_images/
 
+# jsdom fuer die UI-Riegel der Delegation (backend/jsdom_bereit.py).
+# Liegt NEBEN dem Repo, nicht darin: 58 Pakete / 13,2 MB / 1512 Dateien wuerden
+# bei jedem Auftrag mitgeklont (git clone --depth 1) – fuer einen Lauf von
+# 30-60 Sekunden der teuerste Teil.
+data/node_modules/
+data/.npm-cache/
+
 # Benutzerhandbuch: enthaelt Screenshots vom Echt-System mit potenziell privaten Daten – NIE committen (Repo ist public); Quelle der Wahrheit ist Confluence-Seite 315077818
 Benutzerhandbuch/
 

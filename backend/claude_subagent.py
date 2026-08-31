@@ -645,13 +645,17 @@ def _repo_url() -> str:
     return "https://github.com/dev-core-busy/jarvis.git"
 
 
-def _lauf(cmd: list, cwd: Path, timeout: int = 120) -> tuple[int, str]:
-    """Unterprozess mit Deckel; Rueckgabe (exitcode, stdout+stderr)."""
+def _lauf(cmd: list, cwd: Path, timeout: int = 120,
+          zusatz: dict | None = None) -> tuple[int, str]:
+    """Unterprozess mit Deckel; Rueckgabe (exitcode, stdout+stderr).
+
+    ``zusatz`` ergaenzt die Umgebung (z.B. JSDOM_PATH fuer einen UI-Riegel).
+    """
     try:
         p = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True,
                            timeout=timeout,
                            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1",
-                                "GIT_TERMINAL_PROMPT": "0"})
+                                "GIT_TERMINAL_PROMPT": "0", **(zusatz or {})})
         return p.returncode, ((p.stdout or "") + (p.stderr or ""))
     except subprocess.TimeoutExpired:
         return 124, f"Zeitlimit von {timeout}s ueberschritten: {' '.join(cmd[:3])}"
@@ -729,7 +733,24 @@ def riegel_laufen(work: Path, riegel: str) -> tuple[bool, str]:
     if not pfad.is_file():
         return False, f"Riegel {riegel} existiert im Arbeitsbereich nicht."
     cmd = ["python3", riegel] if riegel.endswith(".py") else ["node", riegel]
-    rc, aus = _lauf(cmd, cwd=work, timeout=300)
+    # ── JSDOM_PATH mitgeben ──────────────────────────────────────────────
+    # Der Riegel laeuft im WEGWERF-KLON, und `node_modules/` steht in
+    # .gitignore: ein `require('jsdom')` findet dort nichts. Alle UI-Tests
+    # fragen deshalb zuerst `process.env.JSDOM_PATH` – gesetzt wird er hier,
+    # aus derselben Funktion, die auch der Installationsort kennt
+    # (jsdom_bereit.pfad()). Ohne diese Zeile meldet jeder UI-Riegel "rot",
+    # obwohl an der Aenderung nichts falsch ist: so ist Auftrag be31e4825d52
+    # am 2026-08-31 abgelehnt worden (17 gruen, 1 rot – "jsdom vorhanden").
+    umgebung = {}
+    if not riegel.endswith(".py"):
+        try:
+            from backend import jsdom_bereit
+            jp = jsdom_bereit.pfad()
+            if jp:
+                umgebung["JSDOM_PATH"] = jp
+        except Exception:  # noqa: BLE001
+            pass          # fehlt es, faellt der Test auf seinen eigenen Weg zurueck
+    rc, aus = _lauf(cmd, cwd=work, timeout=300, zusatz=umgebung)
     return rc == 0, aus[-8000:]
 
 

@@ -4007,6 +4007,35 @@ async def startup_harden_data_dirs():
 
 
 @app.on_event("startup")
+async def startup_jsdom():
+    """jsdom fuer die UI-Riegel der Delegation sicherstellen.
+
+    ⚠ WARUM AUF JEDER INSTALLATION UND NICHT PER ANLEITUNG: es gibt Server, auf
+    die niemand von uns Zugriff hat. Ein Hinweis in einer Anleitung erreicht die
+    nie – dieselbe Begruendung wie bei den Python-Modulen der Agent-Shell
+    (``start_jarvis_root.sh`` Schritt 6c): bei mehreren Servern skaliert nur
+    eine Automatik.
+
+    Im HINTERGRUND und mit Verzoegerung: die Installation zieht 58 Pakete aus
+    dem Netz und darf den Start nicht aufhalten. Auf einem eingerichteten
+    Server ist die Pruefung ein Dateisystem-Zugriff und der Hook still.
+
+    Anders als Schritt 6c braucht das hier KEIN root: geschrieben wird nach
+    ``data/node_modules``, und das gehoert dem Dienstbenutzer.
+    """
+    async def _lauf():
+        await asyncio.sleep(30)      # erst die Oberflaeche, dann die Kuer
+        try:
+            from backend import jsdom_bereit
+            text = await asyncio.to_thread(jsdom_bereit.sicherstellen)
+            if text:
+                print(text, flush=True)
+        except Exception as e:  # noqa: BLE001
+            print(f"[jsdom] Bereitstellung uebersprungen: {e}", flush=True)
+    asyncio.create_task(_lauf())
+
+
+@app.on_event("startup")
 async def startup_sandbox_python():
     """Melden, wenn der Agent-Shell Python-Module fehlen.
 

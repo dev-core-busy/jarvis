@@ -636,6 +636,78 @@
     // ist idempotent und ohne Treffer praktisch kostenlos.)
     window.addEventListener('jarvis-lang-changed', markeStart);
 
+    // ── Und bei JEDER DOM-Aenderung (2026-08-31) ────────────────────────────
+    // WARUM DAS NOETIG IST: die beiden Ausloeser oben decken nur Text ab, der
+    // beim Laden oder bei einem Sprachlauf im DOM steht. Ein Hinweis, den ein
+    // Modul SPAETER rendert (Meldung, nachgeladene Karte, aufgeklappter
+    // Abschnitt), traegt den Platzhalter dann WOERTLICH – "{marke}" mitten im
+    // Text, und niemand sieht warum.
+    //
+    // Damit hing es an einer Frage, die man je Text einzeln nachsehen musste:
+    // "steht der im Markup oder rendert ihn JS?" Genau das ist der Grund, warum
+    // 30 i18n-Texte weiter hart "Jarvis" schrieben, statt den Platzhalter zu
+    // benutzen. Mit dem Beobachter ist die Frage weg: {marke} wirkt im DOM,
+    // unabhaengig davon, WANN der Text dort landet.
+    //
+    // Gedrosselt ueber requestAnimationFrame: markeEinsetzen() laeuft sonst je
+    // eingefuegtem Knoten, und das sind beim Zeichnen einer Liste hunderte.
+    // Der Durchlauf ist idempotent und ohne Treffer praktisch kostenlos (ein
+    // TreeWalker ueber den Body), aber nicht kostenlos genug fuer jeden Knoten.
+    (function markeBeobachten() {
+        if (typeof MutationObserver !== 'function') return;   // sehr alte Browser
+        var PLATZ = /\{marke(_slug)?\}|\{MARKE\}|\{adresse\}/;
+        var geplant = false;
+
+        // ⚠ OHNE DIESEN FILTER LAEUFT DAS ENDLOS. markeEinsetzen() SCHREIBT
+        // Textknoten (es setzt die bekannten Fundstellen bei jedem Durchlauf neu
+        // aus dem Rohtext) – jede dieser Zuweisungen ist selbst eine
+        // characterData-Aenderung und wuerde den naechsten Durchlauf ausloesen.
+        // Ein Zaehler oder ein „ich war das"-Flag hilft nicht: der Rueckruf
+        // kommt als Mikrotask, also NACH dem synchronen Lauf, das Flag steht
+        // dann wieder auf false.
+        //
+        // Der Filter loest das an der Sache: eigene Schreibvorgaenge ERSETZEN
+        // Platzhalter, sie erzeugen keine. Geplant wird nur, wenn in der
+        // Aenderung wirklich ein Platzhalter steckt.
+        function betrifftUns(saetze) {
+            for (var i = 0; i < saetze.length; i++) {
+                var r = saetze[i];
+                if (r.type === 'characterData') {
+                    if (r.target && PLATZ.test(r.target.nodeValue || '')) return true;
+                    continue;
+                }
+                for (var j = 0; j < r.addedNodes.length; j++) {
+                    var n = r.addedNodes[j];
+                    var t = (n.nodeType === 3 ? n.nodeValue : n.textContent) || '';
+                    if (PLATZ.test(t)) return true;
+                }
+            }
+            return false;
+        }
+
+        function spaeter(saetze) {
+            if (geplant || !betrifftUns(saetze)) return;
+            geplant = true;
+            var lauf = function () { geplant = false; markeStart(); };
+            if (typeof requestAnimationFrame === 'function') requestAnimationFrame(lauf);
+            else setTimeout(lauf, 16);
+        }
+        function start() {
+            if (!document.body) return;
+            // Nur Struktur und Textinhalte – Attribute lassen wir aus: der
+            // Durchlauf setzt selbst title/aria-label/placeholder und wuerde
+            // sich sonst beobachten.
+            new MutationObserver(spaeter).observe(document.body, {
+                childList: true, subtree: true, characterData: true
+            });
+        }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', start);
+        } else {
+            start();
+        }
+    })();
+
     window.refreshBranding = refreshBranding;
     // Marken-Name fuer Nicht-DOM-Texte (Meldungen, die JS selbst zusammenbaut).
     window.jarvisMarke = markeName;

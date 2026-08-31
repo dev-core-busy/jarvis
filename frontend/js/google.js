@@ -409,7 +409,11 @@ class JarvisGoogleManager {
     }
 
     async revokeJarvis() {
-        if (!confirm(window.t('google.confirm_disconnect_jarvis'))) return;
+        // Ein confirm()-Text landet nie im DOM: branding.js kann {marke}
+        // dort nicht ersetzen, das muss der Aufrufort tun.
+        const marke = (window.jarvisMarke && window.jarvisMarke()) || 'Jarvis';
+        if (!confirm(window.t('google.confirm_disconnect_jarvis')
+                .split('{marke}').join(marke))) return;
         await this._fetchJson('/api/google/revoke', { method: 'POST' });
         await this._renderAll();
     }

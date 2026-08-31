@@ -77,7 +77,14 @@
 
     function _updateTabTitle() {
         const total = Object.values(_unread).reduce((a, b) => a + b, 0);
-        document.title = total > 0 ? window.t('userchat.tab_title_unread').replace('{n}', total) : window.t('userchat.tab_title');
+        // `document.title` liegt NICHT im Body – der TreeWalker von
+        // branding.js erreicht ihn nicht, dort stuende sonst woertlich
+        // "{marke}" im Reiter. Deshalb hier selbst einsetzen.
+        const marke = (window.jarvisMarke && window.jarvisMarke()) || 'Jarvis';
+        const roh = total > 0
+            ? window.t('userchat.tab_title_unread').replace('{n}', total)
+            : window.t('userchat.tab_title');
+        document.title = roh.split('{marke}').join(marke);
     }
 
     // Tab erhält Fokus → aktiven Chat als gelesen markieren

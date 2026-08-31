@@ -695,9 +695,23 @@ ANALYSES: list[dict] = [
 # auf dem dasselbe System direkt angebunden wuerde – bei VEMAS ist das in allen
 # Faellen der REST-Webservice, deshalb steht dort einheitlich "REST/JSON" und
 # nicht ein erfundener Connector-Name.
+def _werkzeugname(b: dict, lg: str) -> str:
+    """Name eines Zielwerkzeugs in der aktiven Sprache.
+
+    Nur der Eintrag ``inline`` braucht das – alle anderen sind Eigennamen und
+    heissen in jeder Sprache gleich. Fehlt ``name_en``, gilt ``name``: ein
+    kuenftiger Eintrag ohne Uebersetzung faellt damit nicht aus, er erscheint
+    nur unuebersetzt.
+    """
+    if lg == "en":
+        return b.get("name_en") or b["name"]
+    return b["name"]
+
+
 TOOLS: list[dict] = [
     {
-        "id": "inline", "name": "Jarvis (direkt hier)", "iface": None,
+        "id": "inline", "name": "Direkt hier anzeigen",
+        "name_en": "Show here directly", "iface": None,
         "export": "Gib das Ergebnis als Markdown-Tabelle aus. Wenn sich eine "
                   "Zeitreihe oder ein Anteilsvergleich anbietet, ergaenze einen "
                   "```chartjs-Block mit einer gueltigen Chart.js-Konfiguration.",
@@ -801,7 +815,7 @@ def catalog(lang: str = "de", hidden=None) -> dict:
         })
     used = {i["cat"] for i in items}
     cats = [{"id": c["id"], "title": c[lg]} for c in CATEGORIES if c["id"] in used]
-    tools = [{"id": b["id"], "name": b["name"], "iface": b["iface"]}
+    tools = [{"id": b["id"], "name": _werkzeugname(b, lg), "iface": b["iface"]}
              for b in TOOLS]
     return {"lang": lg, "categories": cats, "analyses": items, "tools": tools}
 
@@ -887,7 +901,7 @@ def build_task(analysis_id: str = "", question: str = "", tool_id: str = "",
     if b:
         lbl = "Target tool" if lg == "en" else "Zielwerkzeug"
         exp = b.get("export_en" if lg == "en" else "export") or ""
-        parts.append("%s: %s\n%s" % (lbl, b["name"], exp))
+        parts.append("%s: %s\n%s" % (lbl, _werkzeugname(b, lg), exp))
 
     ins = (instructions or "").strip()
     if ins:

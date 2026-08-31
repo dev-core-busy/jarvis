@@ -195,5 +195,36 @@ check("is_hidden erkennt eine ausgeblendete Analyse",
 check("is_hidden ist False fuer sichtbare", not sa.is_hidden("hr_kpis", ["ar_aging"]))
 check("is_hidden ohne Liste ist immer False", not sa.is_hidden("ar_aging", None))
 
+
+# ══════════════════════════════════════════════════════════════════════════
+# Der VORGABE-Produktname darf nicht im Pulldown stehen (2026-08-31)
+# ══════════════════════════════════════════════════════════════════════════
+# Im Eintrag ``inline`` stand "Jarvis (direkt hier)" – auf einer weiss
+# gelabelten Installation also ein Name, den das Branding nicht erreicht.
+# Gemessen auf ECHT: der Assistent heisst dort `Nexerius`, im Pulldown stand
+# `Jarvis`. Geprueft wird die REGEL ueber ALLE Werkzeuge und beide Sprachen –
+# ein kuenftiger Eintrag mit Produktnamen faellt damit von selbst auf.
+print("\n── Kein Vorgabe-Produktname in den Zielwerkzeugen ──")
+for _lg in ("de", "en"):
+    _namen = [b["name"] for b in sa.catalog(_lg)["bi_tools"]]
+    check(f"catalog({_lg}) nennt nirgends den Vorgabenamen",
+          not any("jarvis" in n.lower() for n in _namen), str(_namen))
+    check(f"catalog({_lg}) liefert fuer jedes Werkzeug einen Namen",
+          all(n.strip() for n in _namen), str(_namen))
+check("und der Auftragstext ebenfalls nicht (de)",
+      "Jarvis" not in sa.build_task(analysis_id=None, question="x", tool_id="inline"))
+check("und der Auftragstext ebenfalls nicht (en)",
+      "Jarvis" not in sa.build_task(analysis_id=None, question="x", tool_id="inline",
+                                    lang="en"))
+# Positivkontrolle: die Namen unterscheiden sich je Sprache, der Helfer wirkt
+# also wirklich (sonst waere die Null oben aus dem falschen Grund gruen).
+check("der Name des Inline-Eintrags ist uebersetzt",
+      sa.catalog("de")["bi_tools"][0]["name"] != sa.catalog("en")["bi_tools"][0]["name"],
+      sa.catalog("en")["bi_tools"][0]["name"])
+# Eigennamen bleiben in beiden Sprachen gleich – sonst waere aus dem Helfer
+# eine Uebersetzungspflicht fuer Power BI und Excel geworden.
+check("Eigennamen bleiben unveraendert",
+      sa.catalog("de")["bi_tools"][1]["name"] == sa.catalog("en")["bi_tools"][1]["name"])
+
 print(f"\n{'═' * 46}\nErgebnis: {_ok}/{_ok + _fail} bestanden")
 sys.exit(0 if _fail == 0 else 1)

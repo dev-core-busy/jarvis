@@ -23,6 +23,23 @@ const WURZEL = path.resolve(__dirname, "..");
 const ADDON = path.join(WURZEL, "browser-addon");
 
 let ok = 0, fail = 0;
+
+/* ⚠ EINE UNBEHANDELTE ZURUECKWEISUNG IST EIN FEHLSCHLAG, KEIN ZUFALL.
+ *
+ * Gefunden 2026-08-31 bei den Gegenproben zur Ticket-Automatik: eine
+ * geschnittene Funktion, die NICHT abgewartet wird (`autoAktionPruefen`), warf
+ * in einem Harness einen ReferenceError. Der landete als unbehandelte
+ * Zurueckweisung – und ob der Lauf daran abbrach oder sie gar nicht meldete,
+ * haengte allein daran, ob `process.exit()` schneller war. Zwei Gegenproben
+ * brachen deshalb ab, statt fehlzuschlagen: kein FAIL, keine Zaehlzeile, der
+ * Waechter sah aus, als waere er nicht gelaufen (Register).
+ * Jetzt wird sie gezaehlt, und vor der Zusammenfassung wird der Mikrotask-
+ * Puffer geleert, damit sie sicher vorher ankommt. */
+const zurueckweisungen = [];
+process.on("unhandledRejection", (e) => {
+  zurueckweisungen.push((e && e.stack) || String(e));
+});
+
 function check(bed, text, extra) {
   if (bed) { ok++; console.log("  OK   " + text); }
   else { fail++; console.log("  FAIL " + text + (extra ? " – " + extra : "")); }
@@ -1238,6 +1255,8 @@ section("8) Die Ticketnummer-Erkennung – ausgefuehrt");
           };
           let _marke = "Marke", _key = tabKey, _tabId = 1;
           let _letztes = null, _fremdesErgebnis = false, _merkTimer = null;
+          // Siehe Abschnitt 10: ticketLageAnwenden stoesst die Automatik an.
+          let _autoModus = "";
           const _originale = new Map();
           let _jiraBasis = "", _standAlt = false, _standGesehen;
 ` + STAND_ZEILE + `
@@ -1920,6 +1939,14 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
             };
             let _key = vonKey, _letztes = gemerkt, _fremdesErgebnis = false;
             let _merkTimer = null, _laeuft = laeuft, _marke = "Marke";
+            /* ticketLageAnwenden stoesst die Automatik an; ohne diese Variable
+             * wirft die geschnittene Funktion einen ReferenceError - und weil
+             * sie NICHT abgewartet wird, kaeme der als unbehandelte
+             * Zurueckweisung zurueck, die je nach Zeitpunkt den Lauf abbricht
+             * oder gar nicht auffaellt. Hier bedeutet "" = Automatik aus, also
+             * genau das Verhalten, das dieser Abschnitt messen will.
+             * Abschnitt 14 prueft die Automatik selbst. */
+            let _autoModus = "";
             let _jiraBasis = "", _leiste_unbenutzt = 0;
             const _leiste = true;
             let _tabUrl = "https://jira.test/browse/" + (nachKey || "X-1");
@@ -2633,6 +2660,384 @@ section("11) Ohne Ticket ist alles gesperrt (Vorgabe 2026-08-30)");
   }
   check(/async function auswerten[\s\S]{0,200}if \(!_key\)/.test(POPUP_JS),
         "auswerten() bricht ohne Ticket ab - die Schranke hinter der Oberflaeche");
+}
+
+/* ── 14) AUTOMATIK BEI NEUEM TICKET ────────────────────────────────────────
+ *
+ * Vorgabe des Nutzers 2026-08-31: eine der beiden Auswertungen soll bei einem
+ * NEUEN Ticket von selbst starten koennen.
+ *
+ * DIE ZUSAGE, DIE HIER HAENGT, IST "HOECHSTENS EINMAL JE TICKET" – und sie ist
+ * keine Sparmassnahme, sondern zwei verschiedene Schaeden:
+ *   a) ein automatischer Lauf ueber ein bereits BEARBEITETES Ergebnis wirft die
+ *      Arbeit des Benutzers weg, ohne dass er etwas gedrueckt hat;
+ *   b) ohne Ringspeicher feuert jeder Tab-Wechsel zurueck auf ein schon
+ *      gesehenes Ticket einen weiteren Modellaufruf.
+ * Beide Schranken werden deshalb AUSGEFUEHRT geprueft, nicht am Quelltext
+ * abgelesen.
+ */
+section("14) Automatik bei neuem Ticket");
+
+/* Schnitt aus dem HINTERGRUND. Bis hierher gab es nur `schneidePopup`; die
+ * Entscheidung "darf dieses Ticket automatisch laufen" liegt aber bewusst
+ * dort, weil Pruefen und Vermerken EIN Schritt sein muessen. */
+function schneideBg(name) {
+  const m = BG.match(new RegExp('(?:async )?function ' + name
+                                + '\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}'));
+  return m ? m[0] : null;
+}
+
+// ── a) Die Umbenennung ───────────────────────────────────────────────────
+{
+  const knopf = (POPUP_HTML.match(
+    /<button[^>]*id="btn-ueberarbeiten"[^>]*>([^<]*)<\/button>/) || ["", ""])[1];
+  check(knopf.trim() === "Antwort überarbeiten",
+        'der Knopf heisst "Antwort überarbeiten"', knopf);
+  check(!/>\s*Überarbeiten\s*</.test(POPUP_HTML),
+        "der alte Name steht nirgends mehr im Fenster");
+  // Der Hinweis darunter erklaert GENAU diesen Knopf - laeuft er auf den alten
+  // Namen, sucht der Benutzer ein Bedienelement, das es nicht mehr gibt.
+  const hinweis = (POPUP_HTML.match(
+    /id="ueberarb-hinweis"[^>]*>([\s\S]*?)<\/p>/) || ["", ""])[1];
+  check(/<b>Antwort überarbeiten<\/b>/.test(hinweis),
+        "und der Hinweis darunter nennt ihn beim neuen Namen", hinweis.trim());
+}
+
+// ── b) Das Pulldown steht im Arbeitsbereich ──────────────────────────────
+{
+  const arbeit = (POPUP_HTML.match(
+    /<section id="bereich-arbeit"[\s\S]*?<\/section>/) || [""])[0];
+  check(/id="f-auto"/.test(arbeit),
+        "das Pulldown liegt im Arbeitsbereich (nur nach Anmeldung sichtbar)");
+
+  const sel = (arbeit.match(/<select id="f-auto"[\s\S]*?<\/select>/) || [""])[0];
+  const werte = [...sel.matchAll(/value="([^"]*)"/g)].map((m) => m[1]);
+  check(werte.length === 3, "es stehen genau drei Moeglichkeiten zur Wahl",
+        werte.join("|"));
+  check(werte[0] === "",
+        "die erste ist AUS - Vorgabe ist, dass nichts von selbst laeuft");
+
+  /* DRIFT-SCHRANKE ueber drei Dateien. Ein Wert im Markup, den der Hintergrund
+   * nicht kennt, wird dort still zu "aus" (autoModus ist fail-closed): der
+   * Benutzer stellt etwas ein, es wird gespeichert, und es passiert nie etwas -
+   * ohne jede Fehlermeldung. */
+  const AUTO_MODI = JSON.parse(
+    (BG.match(/const AUTO_MODI = (\[[^\]]*\]);/) || ["", "[]"])[1]
+      .replace(/'/g, '"'));
+  check(AUTO_MODI.length === 2, "der Hintergrund kennt zwei Modi",
+        AUTO_MODI.join("|"));
+  check(werte.filter((w) => w).every((w) => AUTO_MODI.indexOf(w) >= 0),
+        "jeder Wert im Markup ist einer, den der Hintergrund annimmt",
+        werte.join("|") + " gegen " + AUTO_MODI.join("|"));
+
+  /* "Antwort ueberarbeiten" darf NICHT zur Wahl stehen: es braucht einen
+   * Entwurf, den der Bearbeiter selbst ins Kommentarfeld geschrieben hat - bei
+   * einem gerade geoeffneten Ticket gibt es den per Definition nicht. Der Lauf
+   * endete zwangslaeufig mit "kein Text gefunden". */
+  check(werte.indexOf("ueberarbeiten") < 0 && AUTO_MODI.indexOf("ueberarbeiten") < 0,
+        "'ueberarbeiten' steht NICHT zur Wahl (es braucht einen eigenen Entwurf)");
+
+  /* Bewusst KEIN `data-ohne-ticket` noetig: die Ticket-Sperre greift nur auf
+   * <button>. Genau richtig - wer auf einem fremden Tab steht, muss die
+   * Automatik trotzdem AUSschalten koennen. Der Test haelt fest, dass es ein
+   * <select> bleibt und kein Knopf daraus wird. */
+  const ka = schneidePopup("knoepfeAktualisieren") || "";
+  check(/querySelectorAll\("button"\)/.test(ka),
+        "die Ticket-Sperre fasst nur Knoepfe an - das Pulldown bleibt bedienbar");
+}
+
+// ── c) Der Hintergrund entscheidet - AUSGEFUEHRT ─────────────────────────
+{
+  const teile = ["autoModus", "einstLesen", "einstSchreiben", "autoStart"]
+    .map(schneideBg);
+  for (let i = 0; i < teile.length; i++) {
+    check(!!teile[i],
+          "background.js hat " + ["autoModus", "einstLesen", "einstSchreiben",
+                                  "autoStart"][i] + "()");
+  }
+  // Modul-Konstanten: sie stehen in keinem Funktionsrumpf und fallen aus jedem
+  // Schnitt heraus - fehlen sie, WIRFT der Lauf statt fehlzuschlagen.
+  const konst = [
+    (BG.match(/const EINST = "[^"]*";/) || [""])[0],
+    (BG.match(/const AUTO_MODI = \[[^\]]*\];/) || [""])[0],
+    (BG.match(/const AUTO_MERK_MAX = \d+;/) || [""])[0],
+  ];
+  check(konst.every((k) => k), "und die drei Modul-Konstanten dazu",
+        konst.join(" / "));
+
+  const bgLauf = new Function("start", "rufe", ""
+    + konst.join("\n") + "\n"
+    + "const ablage = Object.assign({}, start);\n"
+    + "const api = { storage: { local: {\n"
+    + "  get: async (k) => (ablage[k] === undefined ? {} : { [k]: ablage[k] }),\n"
+    + "  set: async (o) => { Object.assign(ablage, o); },\n"
+    + "} } };\n"
+    + teile.join("\n") + "\n"
+    + "return (async () => {\n"
+    + "  const spur = [];\n"
+    + "  for (const k of rufe) spur.push(await autoStart(k));\n"
+    + "  return JSON.stringify({ spur, ablage });\n"
+    + "})();");
+
+  const einst = (o) => ({ einstellungen: o });
+
+  // 1) Automatik AUS -> es startet nichts, und es wird nichts vermerkt.
+  {
+    const r = JSON.parse(await bgLauf(einst({}), ["ABC-1", "ABC-2"]));
+    check(r.spur.every((s) => s.starten === false),
+          "Vorgabe (kein auto_modus): es startet nichts");
+    check(r.spur.every((s) => s.modus === ""), "und der Modus ist leer");
+    check(!r.ablage.einstellungen.auto_gelaufen,
+          "es wird auch nichts vermerkt - der Ring bleibt unangetastet",
+          JSON.stringify(r.ablage.einstellungen));
+  }
+
+  // 2) DER KERN: je Ticket genau einmal.
+  {
+    const r = JSON.parse(await bgLauf(
+      einst({ auto_modus: "zusammenfassung" }),
+      ["ABC-1", "ABC-1", "ABC-2", "ABC-1"]));
+    check(r.spur[0].starten === true, "erstes Ticket: es startet");
+    check(r.spur[0].modus === "zusammenfassung", "mit dem eingestellten Modus",
+          r.spur[0].modus);
+    check(r.spur[1].starten === false,
+          "DASSELBE Ticket ein zweites Mal: es startet NICHT mehr");
+    check(r.spur[2].starten === true, "ein anderes Ticket startet wieder");
+    check(r.spur[3].starten === false,
+          "und der Rueckwechsel auf das erste startet nicht erneut "
+          + "(genau das waere der Tab-Wechsel-Kreisel)");
+    check(r.spur[1].modus === "zusammenfassung",
+          "der Modus steht auch dann drin, wenn nicht gestartet wird - "
+          + "'aus' und 'schon gelaufen' sind zweierlei");
+    check(JSON.stringify(r.ablage.einstellungen.auto_gelaufen)
+            === JSON.stringify(["ABC-1", "ABC-2"]),
+          "im Ring stehen beide Ticketnummern, jede einmal",
+          JSON.stringify(r.ablage.einstellungen.auto_gelaufen));
+  }
+
+  // 3) Ohne Ticketnummer passiert nichts (und es landet kein Leerwert im Ring).
+  {
+    const r = JSON.parse(await bgLauf(einst({ auto_modus: "antwort" }), [""]));
+    check(r.spur[0].starten === false, "ohne Ticketnummer startet nichts");
+    check(!r.ablage.einstellungen.auto_gelaufen,
+          "und der Ring bekommt keinen Leerwert");
+  }
+
+  // 4) Ein unbekannter Modus ist AUS, nicht ein dritter Zustand.
+  {
+    const r = JSON.parse(await bgLauf(
+      einst({ auto_modus: "ueberarbeiten" }), ["ABC-1"]));
+    check(r.spur[0].modus === "" && r.spur[0].starten === false,
+          "ein unbekannter Modus gilt als AUS (fail-closed)",
+          JSON.stringify(r.spur[0]));
+  }
+
+  // 5) DER RING WAECHST NICHT UNBEGRENZT. Ohne Deckel steht die Ablage nach
+  //    einem Jahr voller Ticketnummern - und niemand sieht es.
+  {
+    const MAX = parseInt((BG.match(/const AUTO_MERK_MAX = (\d+);/) || [])[1], 10);
+    const viele = [];
+    for (let i = 0; i < MAX + 5; i++) viele.push("T-" + i);
+    const r = JSON.parse(await bgLauf(einst({ auto_modus: "antwort" }), viele));
+    /* Kein `ring.length` auf einem moeglicherweise fehlenden Wert: eine
+     * Pruefung, die WIRFT statt fehlzuschlagen, bricht die Gegenprobe ab und
+     * sieht aus wie ein nicht gelaufener Test (Register). */
+    const ring = r.ablage.einstellungen.auto_gelaufen || [];
+    check(ring.length === MAX, "der Ring ist bei " + MAX + " gedeckelt",
+          String(ring.length));
+    check(ring[ring.length - 1] === "T-" + (MAX + 4),
+          "und behaelt die JUENGSTEN Eintraege", String(ring[ring.length - 1]));
+    check(ring.length > 0 && ring.indexOf("T-0") < 0,
+          "der aelteste ist herausgefallen");
+  }
+}
+
+// ── d) Das Fenster: wann es NICHT startet - AUSGEFUEHRT ──────────────────
+{
+  const { teile, drin } = popupTeile(
+    ["autoAktionPruefen", "autoZeigen"],
+    ["frage", "auswerten", "melde"]);
+  check(drin.has("autoAktionPruefen") && drin.has("autoZeigen"),
+        "popup.js hat autoAktionPruefen() und autoZeigen()");
+
+  /* Der Lauf gibt zurueck, WAS an den Hintergrund ging und OB ausgewertet
+   * wurde. Beides ist noetig: bei ausgeschalteter Automatik darf nicht einmal
+   * gefragt werden (sonst kostet der Normalfall eine Nachricht je
+   * Tab-Wechsel). */
+  const lauf = async (o) => {
+    const dom = new JSDOM(POPUP_HTML, { url: "https://x.test/",
+                                        runScripts: "outside-only" });
+    const w = dom.window;
+    try {
+      const f = new w.Function("o", ""
+        + "const gesendet = [], gelaufen = [];\n"
+        + "const $ = (id) => document.getElementById(id);\n"
+        + "const el = { arbeit: $('bereich-arbeit'), meldung: $('meldung') };\n"
+        + "el.arbeit.hidden = !!o.abgemeldet;\n"
+        + "let _autoModus = '', _key = o.key, _laeuft = !!o.laeuft;\n"
+        + "function melde() {}\n"
+        + "async function frage(n) {\n"
+        + "  gesendet.push(n);\n"
+        + "  if (o.wechseltTab) _key = 'ANDERS-9';\n"
+        + "  if (o.hintergrundAlt) throw new Error('Diese Anfrage kennt der Hintergrund nicht');\n"
+        + "  return { ok: true, modus: o.modus || '', starten: !!o.starten };\n"
+        + "}\n"
+        + "async function auswerten(m) { gelaufen.push(m); }\n"
+        + teile.join("\n") + "\n"
+        + "return (async () => {\n"
+        + "  autoZeigen(o.modus);\n"
+        + "  await autoAktionPruefen(!!o.passt);\n"
+        + "  return JSON.stringify({\n"
+        + "    gefragt: gesendet.filter((n) => n && n.art === 'auto_start').length,\n"
+        + "    gelaufen, pulldown: $('f-auto').value,\n"
+        + "  });\n"
+        + "})();");
+      return JSON.parse(await f(o));
+    } finally { w.close(); }
+  };
+
+  // 1) Automatik aus -> es wird NICHT EINMAL GEFRAGT.
+  {
+    const r = await lauf({ key: "ABC-1", modus: "", starten: true });
+    check(r.gefragt === 0,
+          "Automatik aus: der Hintergrund wird gar nicht erst gefragt");
+    check(r.gelaufen.length === 0, "und es laeuft nichts");
+    check(r.pulldown === "", "das Pulldown steht auf AUS", r.pulldown);
+  }
+
+  // 2) Der Regelfall.
+  {
+    const r = await lauf({ key: "ABC-1", modus: "antwort", starten: true });
+    check(r.gefragt === 1, "neues Ticket: der Hintergrund wird gefragt");
+    check(JSON.stringify(r.gelaufen) === JSON.stringify(["antwort"]),
+          "und es laeuft GENAU die eingestellte Aktion",
+          JSON.stringify(r.gelaufen));
+    check(r.pulldown === "antwort", "das Pulldown zeigt sie an", r.pulldown);
+  }
+
+  /* 3) ⚠ DIE WICHTIGSTE SCHRANKE. Liegt fuer dieses Ticket schon ein Ergebnis
+   *    vor, kann es der Benutzer BEARBEITET haben (der Text wird gedrosselt
+   *    mitgemerkt). Ein automatischer Lauf wuerde es ueberschreiben - seine
+   *    Arbeit waere weg, ohne dass er etwas gedrueckt hat. */
+  {
+    const r = await lauf({ key: "ABC-1", modus: "antwort", starten: true,
+                           passt: true });
+    check(r.gefragt === 0 && r.gelaufen.length === 0,
+          "liegt schon ein Ergebnis zu diesem Ticket vor, laeuft NICHTS "
+          + "(der Text kann bearbeitet sein)");
+  }
+
+  // 4) Waehrend einer Auswertung wird nichts angestossen.
+  {
+    const r = await lauf({ key: "ABC-1", modus: "antwort", starten: true,
+                           laeuft: true });
+    check(r.gefragt === 0 && r.gelaufen.length === 0,
+          "waehrend eines laufenden Auftrags startet nichts zusaetzlich");
+  }
+
+  // 5) Kein Ticket im Tab.
+  {
+    const r = await lauf({ key: "", modus: "antwort", starten: true });
+    check(r.gefragt === 0 && r.gelaufen.length === 0,
+          "ohne erkanntes Ticket startet nichts");
+  }
+
+  /* 6) Abgemeldet. Kann in der Seitenleiste vorkommen: ihre Tab-Zuhoerer
+   *    ueberleben eine Abmeldung, der Arbeitsbereich ist dann verborgen. */
+  {
+    const r = await lauf({ key: "ABC-1", modus: "antwort", starten: true,
+                           abgemeldet: true });
+    check(r.gefragt === 0 && r.gelaufen.length === 0,
+          "abgemeldet startet nichts");
+  }
+
+  /* 7) DER TAB WECHSELT WAEHREND DER RUECKFRAGE. `auswerten` liest `_key`
+   *    selbst - ohne die zweite Pruefung wuerde fuer das NEUE Ticket
+   *    ausgewertet, waehrend im Ring das alte vermerkt ist. */
+  {
+    const r = await lauf({ key: "ABC-1", modus: "antwort", starten: true,
+                           wechseltTab: true });
+    check(r.gefragt === 1, "gefragt wurde");
+    check(r.gelaufen.length === 0,
+          "aber nach einem Tab-Wechsel waehrend der Rueckfrage laeuft nichts");
+  }
+
+  /* 8) Aelterer Hintergrund: die Anfrage kennt er nicht. Still bleiben - es
+   *    hat niemand etwas gedrueckt, und die Stand-Warnung sagt es ohnehin. */
+  {
+    const r = await lauf({ key: "ABC-1", modus: "antwort", starten: true,
+                           hintergrundAlt: true });
+    check(r.gelaufen.length === 0,
+          "ein aelterer Hintergrund laesst die Automatik still aus");
+  }
+}
+
+// ── e) Verdrahtung ───────────────────────────────────────────────────────
+{
+  const tla = schneidePopup("ticketLageAnwenden") || "";
+  check(/autoAktionPruefen\(/.test(tla),
+        "ticketLageAnwenden stoesst die Automatik an - die EINE Stelle, an der "
+        + "Anzeige und Ticketbezug zusammenlaufen (start() UND tabWechsel)");
+  /* ⚠ OHNE `await`: `start()` registriert unmittelbar danach die Tab-Zuhoerer
+   * der Leiste, und die sind eine Sicherheitsschranke. Ein abgewarteter Lauf
+   * liesse die Leiste zehn Sekunden ohne Beobachtung des Tab-Wechsels. */
+  check(!/await\s+autoAktionPruefen\(/.test(tla),
+        "und wartet NICHT darauf (sonst haengen die Tab-Zuhoerer hinterher)");
+  check(/autoAktionPruefen\([\s\S]*?_key !== key/.test(POPUP_JS),
+        "dafuer prueft autoAktionPruefen die Ticketnummer nach der Rueckfrage "
+        + "ein zweites Mal");
+
+  const st = schneidePopup("start") || "";
+  check(/autoZeigen\(z\.auto_modus\)/.test(st),
+        "start() belegt das Pulldown aus dem gespeicherten Zustand");
+  check(st.indexOf("autoZeigen(") < st.indexOf("ticketLageAnwenden("),
+        "und zwar BEVOR die Ticketlage angewandt wird - sonst liest die "
+        + "Automatik einen leeren Modus");
+
+  check(/case "auto_start":/.test(BG),
+        "der Hintergrund kennt den Nachrichtenfall");
+  check(/auto_modus: autoModus\(e\.auto_modus\)/.test(BG),
+        "und gibt den Modus im Zustand heraus (sonst stuende das Pulldown "
+        + "nach jedem Oeffnen wieder auf AUS)");
+
+  /* ⚠ ABMELDEN RAEUMT DEN RING. Es sind die Ticketnummern des vorigen
+   * Benutzers; der naechste am selben Rechner bekaeme fuer sie keine
+   * Automatik. Die EINSTELLUNG bleibt - die gehoert zum Browser. */
+  /* ⚠ OHNE KOMMENTARE. Der erste Anlauf schlug hier fehl, und der Code war in
+   * Ordnung: die Begruendung IM Quelltext nennt `auto_modus` woertlich ("der
+   * Einstellung passiert nichts"). Der Waechter las seine eigene Begruendung -
+   * die Falle steht im Register und ist hier trotzdem zugeschnappt. */
+  const ab = (ohneKommentare(BG).match(/case "abmelden":[\s\S]*?break;/) || [""])[0];
+  check(/auto_gelaufen: \[\]/.test(ab), "Abmelden leert den Ring", ab.trim());
+  check(!/auto_modus/.test(ab),
+        "laesst die Einstellung aber stehen (sie gehoert zum Browser, "
+        + "nicht zu einer Anmeldung)", ab.trim());
+
+  /* DRIFT-SCHRANKE, und zwar als REGEL: jedes Feld, das das Fenster per
+   * `merken` schickt, muss `einstSchreiben` auch kennen. Sonst wird es dort
+   * WORTLOS verworfen - der Benutzer stellt etwas ein, es steht beim naechsten
+   * Oeffnen wieder auf der Vorgabe, und es gibt keine Fehlermeldung. Genau
+   * dieser Fall ist der Grund fuer STAND. */
+  const felder = new Set();
+  for (const m of POPUP_JS.matchAll(/\{\s*art:\s*"merken",([\s\S]*?)\}\)/g)) {
+    for (const f of m[1].matchAll(/(\w+)\s*[:,]/g)) felder.add(f[1]);
+  }
+  const es = schneideBg("einstSchreiben") || "";
+  check(felder.size >= 3, "das Fenster schickt Felder per merken",
+        [...felder].join(", "));
+  for (const f of felder) {
+    check(new RegExp("teil\\." + f + " !== undefined").test(es),
+          "einstSchreiben kennt das Feld " + f
+          + " (sonst wird es wortlos verworfen)");
+  }
+  check(felder.has("auto_modus"), "darunter auto_modus");
+}
+
+/* Erst den Puffer leeren: eine Zurueckweisung aus einem nicht abgewarteten
+ * Aufruf wird sonst womoeglich erst nach der Zusammenfassung gemeldet. */
+await new Promise((r) => setTimeout(r, 20));
+for (const z of zurueckweisungen) {
+  check(false, "unbehandelte Zurueckweisung im Lauf", z.split("\n")[0]);
 }
 
 console.log("\n" + ok + " OK, " + fail + " FAIL");

@@ -36,11 +36,46 @@ const api = (typeof browser !== "undefined") ? browser : chrome;
  * tun ist.
  * Bei jeder Aenderung an den Nachrichtenfaellen HOCHZAEHLEN. Ein Test
  * vergleicht beide Zahlen. */
-const STAND = 4;
+const STAND = 5;
 
 const EINST = "einstellungen";   // storage.local: { basis }
 const SITZUNG = "sitzung";       // storage.local: { token, benutzer }
 const ERGEBNIS = "ergebnis";     // storage.local: letzter Lauf (siehe unten)
+
+/* ── AUTOMATIK BEI NEUEM TICKET ─────────────────────────────────────────────
+ *
+ * Zwei Werte in `einstellungen`:
+ *   auto_modus    "" | "zusammenfassung" | "antwort"  – Vorgabe LEER (aus).
+ *   auto_gelaufen [key, ...]                          – Ringspeicher, s.u.
+ *
+ * WARUM DER RING SEIN MUSS: ohne ihn feuert jeder Tab-Wechsel zurueck auf ein
+ * schon gesehenes Ticket einen weiteren LLM-Lauf. In der Seitenleiste wechselt
+ * man zwischen zwei Vorgaengen hin und her – das waeren dann zwei Laeufe je
+ * Runde, unbemerkt und auf Kosten des Servers. Der Ring macht die Zusage
+ * "hoechstens EIN automatischer Lauf je Ticket" haltbar.
+ *
+ * ⚠ ER LIEGT IN DER ABLAGE, NICHT IM SPEICHER. Im Popup wird das Fenster bei
+ * jedem Klick daneben zerstoert, und unter MV3 beendet der Browser auch den
+ * Service-Worker, sobald er nichts zu tun hat – ein Merker im Arbeitsspeicher
+ * waere in beiden Faellen sofort wieder weg und der Ring wirkungslos.
+ *
+ * DIE DRITTE ENTSCHEIDUNG: vermerkt wird VOR dem Lauf, nicht nach einem
+ * Erfolg. Ein Server, der gerade nicht antwortet, wuerde sonst bei jedem
+ * Tab-Wechsel erneut angefragt. Preis: schlaegt der eine automatische Lauf
+ * fehl, gibt es keinen zweiten von selbst – der Knopf daneben steht bereit.
+ */
+const AUTO_MODI = ["zusammenfassung", "antwort"];
+const AUTO_MERK_MAX = 20;
+
+/** Nimmt nur die zwei erlaubten Modi an – alles andere heisst "aus".
+ *
+ * Fail-closed wie bei `ansicht`: ein Tippfehler in der Ablage (oder ein Wert
+ * aus einer kuenftigen Fassung) darf nicht in einem dritten, undefinierten
+ * Zustand enden. "aus" ist die Lage, die niemanden ueberrascht.
+ */
+function autoModus(wert) {
+  return AUTO_MODI.indexOf(String(wert || "")) >= 0 ? String(wert) : "";
+}
 
 async function einstLesen() {
   const d = await api.storage.local.get(EINST);
@@ -76,6 +111,15 @@ async function einstSchreiben(teil) {
    * das Feld gar nicht kennt) darf nicht in einem dritten, undefinierten
    * Zustand enden - dann oeffnet gar nichts mehr, und niemand sieht warum. */
   if (teil.ansicht !== undefined) neu.ansicht = (teil.ansicht === "leiste") ? "leiste" : "popup";
+  // Siehe AUTO_MODI: unbekannt = aus.
+  if (teil.auto_modus !== undefined) neu.auto_modus = autoModus(teil.auto_modus);
+  /* Der Ring wird hier GEKAPPT, nicht beim Lesen: was einmal in der Ablage
+   * steht, waechst sonst mit jedem Ticket weiter – und niemand sieht es. */
+  if (teil.auto_gelaufen !== undefined) {
+    neu.auto_gelaufen = (Array.isArray(teil.auto_gelaufen) ? teil.auto_gelaufen : [])
+      .filter((k) => typeof k === "string" && k)
+      .slice(-AUTO_MERK_MAX);
+  }
   await api.storage.local.set({ [EINST]: neu });
   return neu;
 }
@@ -300,6 +344,30 @@ async function ergebnisSchreiben(wert) {
   else await api.storage.local.remove(ERGEBNIS);
 }
 
+/** Darf fuer dieses Ticket automatisch ausgewertet werden – und womit?
+ *
+ * DIE ENTSCHEIDUNG LIEGT HIER, NICHT IM FENSTER, und zwar aus einem Grund:
+ * Pruefen und Vermerken muessen EIN Schritt sein. Traege das Fenster den Ring
+ * selbst nach, laege zwischen "kenne ich noch nicht" und "ist jetzt vermerkt"
+ * eine Lese-Schreib-Runde – zwei schnelle Tab-Wechsel wuerden dieselbe
+ * Ticketnummer zweimal durchlassen, und die Zusage "hoechstens ein Lauf je
+ * Ticket" waere keine.
+ *
+ * Gibt `{ modus, starten }` zurueck. `modus` steht auch dann drin, wenn nicht
+ * gestartet wird – das Fenster kann so unterscheiden, ob die Automatik aus ist
+ * oder ob dieses Ticket bereits gelaufen war.
+ */
+async function autoStart(key) {
+  const e = await einstLesen();
+  const modus = autoModus(e.auto_modus);
+  if (!modus || !key) return { modus, starten: false };
+  const gelaufen = Array.isArray(e.auto_gelaufen) ? e.auto_gelaufen : [];
+  if (gelaufen.indexOf(key) >= 0) return { modus, starten: false };
+  // Vermerken VOR dem Lauf – siehe AUTO_MERK_MAX.
+  await einstSchreiben({ auto_gelaufen: gelaufen.concat([key]) });
+  return { modus, starten: true };
+}
+
 /** Ein Aufruf an Jarvis. Wirft mit KLARTEXT – der Text geht 1:1 ins Popup. */
 async function ruf(pfad, { methode = "GET", rumpf = null, mitToken = true } = {}) {
   const basis = await basisLesen();
@@ -432,6 +500,9 @@ api.runtime.onMessage.addListener((nachricht, absender, antworten) => {
                       // ist schlimmer als kein Schalter.
                       ansicht: (e.ansicht === "leiste") ? "leiste" : "popup",
                       leiste_moeglich: leisteMoeglich(),
+                      // Welche Aktion bei einem neuen Ticket von selbst
+                      // startet ("" = keine, das ist die Vorgabe).
+                      auto_modus: autoModus(e.auto_modus),
                       // Damit das Fenster merkt, wenn hier noch eine aeltere
                       // Fassung antwortet (siehe STAND).
                       stand: STAND,
@@ -465,7 +536,14 @@ api.runtime.onMessage.addListener((nachricht, absender, antworten) => {
           // Beim Abmelden geht auch das Ergebnis – es enthaelt Ticketinhalte,
           // und der naechste Benutzer an diesem Rechner hat damit nichts zu tun.
           await ergebnisSchreiben(null);
+          /* Aus demselben Grund faellt der Ring: es sind die Ticketnummern des
+           * vorigen Benutzers. Der EINSTELLUNG (auto_modus) passiert nichts –
+           * die gehoert zu diesem Browser, nicht zu einer Anmeldung. */
+          await einstSchreiben({ auto_gelaufen: [] });
           antworten({ ok: true });
+          break;
+        case "auto_start":
+          antworten(Object.assign({ ok: true }, await autoStart(nachricht.key || "")));
           break;
         case "ergebnis_merken":
           await ergebnisSchreiben(nachricht.wert || null);

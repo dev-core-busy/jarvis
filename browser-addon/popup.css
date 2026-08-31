@@ -231,6 +231,13 @@ button.leise { color: var(--gedaempft); }
 .feld-zeile { display: flex; align-items: center; gap: 6px; }
 .feld-zeile select { flex: 1 1 auto; min-width: 0; }
 
+/* Ein <select> hat KEINE eigene Breite (anders als input/textarea, die oben
+ * auf 100% stehen). In `.feld-zeile` erledigt das der Flex-Container; steht es
+ * allein in einem `.feld`, bleibt es sonst so schmal wie sein laengster
+ * Eintrag – neben den vollbreiten Feldern darueber und darunter sieht das aus
+ * wie ein Fehler. */
+select.voll { width: 100%; }
+
 select {
   padding: 6px 8px;
   border: 1px solid var(--rand);

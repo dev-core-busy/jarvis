@@ -53,7 +53,7 @@ Drei Punkte, die man beim Anfassen kennen muss:
 **Was die Leiste kostet:** sie überlebt den Tab-Wechsel, also muss der Ticketbezug bei
 jedem Wechsel neu geprüft werden (`popup.js::tabWechsel`) – sonst stünde ein fertiger
 Antwortentwurf zu Ticket A neben dem geöffneten Ticket B. Und `activeTab` gilt nur für
-den Tab, aus dem die Leiste geöffnet wurde; für „Überarbeiten" und „Einfügen" in weiteren
+den Tab, aus dem die Leiste geöffnet wurde; für „Antwort überarbeiten" und „Einfügen" in weiteren
 Tabs erfragt sie einmalig ein dauerhaftes Zugriffsrecht auf den Jira-Server.
 
 **⚠ `sidePanel` und `sidebarAction` NIE über `api` ansprechen.** `api` ist
@@ -84,6 +84,42 @@ Drei weitere Fallen, die das im ersten Anlauf halb tot gemacht haben (gemeldet, 
 `bauen.sh` und `PAKET_DATEIEN` in `backend/jira_assist.py`. Laufen sie auseinander,
 installiert sich das Paket klaglos und die Leiste ist still 380 px schmal.
 `tests/test_browser_addon.js` prüft das als Regel, nicht als Aufzählung.
+
+## Automatik bei neuem Ticket (seit 0.4.0)
+
+Im Pulldown **Bei neuem Ticket automatisch** lässt sich eine der beiden Auswertungen
+(*Zusammenfassen* oder *Antwort vorschlagen*) so einstellen, dass sie von selbst startet,
+sobald ein Ticket erkannt wird. **Vorgabe ist „Nichts"** – jeder Lauf kostet eine
+Auswertung auf dem Server, das darf nicht ungefragt passieren.
+
+*Antwort überarbeiten* steht bewusst nicht zur Wahl: sie braucht einen Entwurf, den der
+Bearbeiter selbst ins Kommentarfeld geschrieben hat – bei einem gerade geöffneten Ticket
+gibt es den per Definition nicht.
+
+**„Neu" heißt: höchstens ein automatischer Lauf je Ticket.** Zwei Schranken zusammen:
+
+* **Es läuft nichts, wenn schon ein Ergebnis zu diesem Ticket vorliegt**
+  (`popup.js::autoAktionPruefen`, Argument `passt`). Das ist keine Sparmaßnahme: der
+  gemerkte Text kann **bearbeitet** sein, und ein automatischer Lauf würde ihn
+  überschreiben, ohne dass jemand etwas gedrückt hat.
+* **Ein Ringspeicher der letzten 20 Ticketnummern** (`background.js::autoStart`). Ohne ihn
+  feuert jeder Tab-Wechsel zurück auf ein schon gesehenes Ticket einen weiteren Lauf – in
+  der Seitenleiste, in der man zwischen zwei Vorgängen hin- und herwechselt, wären das zwei
+  Läufe je Runde.
+
+Geprüft **und** vermerkt wird im Hintergrund, in einem Schritt: läge dazwischen eine
+Nachrichtenrunde, ließen zwei schnelle Tab-Wechsel dieselbe Nummer zweimal durch. Vermerkt
+wird **vor** dem Lauf – ein Server, der gerade nicht antwortet, würde sonst bei jedem
+Tab-Wechsel erneut angefragt. Preis: schlägt der eine automatische Lauf fehl, gibt es
+keinen zweiten von selbst; der Knopf daneben steht bereit.
+
+Der Ring liegt in `storage.local`, nicht im Arbeitsspeicher: das Popup wird bei jedem Klick
+daneben zerstört, und unter MV3 beendet der Browser auch den Service-Worker. Beim
+**Abmelden** wird er geleert (es sind die Ticketnummern des vorigen Benutzers); die
+Einstellung selbst bleibt – sie gehört zu diesem Browser, nicht zu einer Anmeldung.
+
+Ein Umschalten wirkt **ab dem nächsten Ticket**, nicht sofort – das sagt die Rückmeldung
+auch. Sofort zu starten hieße, ein bereits angezeigtes Ergebnis zu überschreiben.
 
 ## Ohne erkanntes Ticket ist alles gesperrt
 

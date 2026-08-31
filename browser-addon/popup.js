@@ -50,7 +50,7 @@ function zweig(name, methode) {
  * Begruendung dort; kurz: Chrome laedt diese Seite bei jedem Oeffnen frisch,
  * behaelt den Service-Worker aber im Speicher. Ohne diesen Abgleich sieht ein
  * halb aktualisierter Zustand wie ein Programmierfehler aus. */
-const STAND = 4;
+const STAND = 5;
 
 const $ = (id) => document.getElementById(id);
 const el = {
@@ -98,6 +98,11 @@ let _windowId = null;
 let _tabUrl = "";
 // Adresse des Jira-Servers, einmal vom Server geholt (siehe zugriffZeile).
 let _jiraBasis = "";
+/* Was bei einem NEUEN Ticket von selbst startet: "" | "zusammenfassung" |
+ * "antwort". Der massgebliche Wert liegt in der Ablage (background.js); dies
+ * hier ist die Kopie fuer dieses Fenster, damit `autoAktionPruefen` bei
+ * ausgeschalteter Automatik gar nicht erst den Hintergrund fragen muss. */
+let _autoModus = "";
 
 /** Traegt die verbindliche Antwort des Hintergrunds nach. */
 function leisteFeststellen(kontext) {
@@ -499,6 +504,11 @@ async function start() {
   // steht und zurueck will, muss das auch ohne Konto koennen.
   ansichtZeigen(z.ansicht, z.leiste_moeglich);
   zeige(z.angemeldet);
+  /* VOR `ticketLageAnwenden` – dort faellt die Entscheidung, ob die Automatik
+   * greift, und sie liest `_autoModus`. Ein aelterer Hintergrund schickt das
+   * Feld nicht mit; `autoZeigen` macht daraus "aus" (fail-closed: eine
+   * Automatik, die man nicht sieht, darf nicht laufen). */
+  autoZeigen(z.auto_modus);
   if (!z.angemeldet) {
     await zugriffAnzeigen();
     /* Nach dem Wiederöffnen SAGEN, was passiert ist. Ohne diesen Satz sieht
@@ -565,6 +575,64 @@ async function ticketLageAnwenden(gemerkt) {
     melde("");
   }
   await zugriffZeileAktualisieren();
+
+  /* ⚠ BEWUSST OHNE `await`. Die Automatik ist der letzte Schritt und darf den
+   * Aufrufer nicht aufhalten: `start()` registriert unmittelbar danach die
+   * Tab-Zuhoerer der Seitenleiste (`leisteBeobachten`), und die sind eine
+   * Sicherheitsschranke. Wuerde hier eine Auswertung abgewartet, liefe die
+   * Leiste zehn Sekunden lang OHNE Beobachtung des Tab-Wechsels – genau in der
+   * Zeit, in der jemand nebenbei ein anderes Ticket aufmacht.
+   * Der Preis ist eine kurze Lücke zwischen Entscheidung und Start; sie ist in
+   * `autoAktionPruefen` durch die zweite Prüfung von `_key` abgedeckt. */
+  autoAktionPruefen(passt);
+}
+
+/** Traegt den gespeicherten Modus ins Pulldown ein. */
+function autoZeigen(wert) {
+  _autoModus = (wert === "zusammenfassung" || wert === "antwort") ? wert : "";
+  const f = $("f-auto");
+  if (f) f.value = _autoModus;
+}
+
+/** Startet bei einem NEUEN Ticket die eingestellte Aktion von selbst.
+ *
+ * ⚠ `passt` IST DIE WICHTIGSTE SCHRANKE, und sie ist keine Sparmassnahme:
+ * liegt fuer dieses Ticket bereits ein Ergebnis vor, kann es der Benutzer
+ * BEARBEITET haben (der Text wird gedrosselt mitgemerkt). Ein automatischer
+ * Lauf wuerde das Feld ueberschreiben – also seine Arbeit wegwerfen, ohne dass
+ * er etwas gedrueckt hat. „Neu" heisst deshalb: kein Ticket im Tab gewechselt
+ * UND nichts Gemerktes dazu.
+ *
+ * Die zweite Haelfte der Entscheidung – „lief dieses Ticket schon einmal?" –
+ * faellt im Hintergrund, weil Pruefen und Vermerken dort EIN Schritt sind
+ * (background.js::autoStart).
+ *
+ * Fehler sind hier bewusst still: es hat niemand etwas gedrueckt, und eine
+ * Meldung ueber eine Automatik, die man nicht angestossen hat, waere Laerm.
+ * Der Knopf daneben tut es weiterhin und meldet dann im Klartext.
+ */
+async function autoAktionPruefen(passt) {
+  // Alles, was OHNE Rueckfrage entscheidbar ist, zuerst - so kostet der
+  // Normalfall (Automatik aus) keine einzige Nachricht an den Hintergrund.
+  if (!_autoModus || !_key || _laeuft || passt) return;
+  // Nicht angemeldet: der Arbeitsbereich ist verborgen. Kann in der Leiste
+  // vorkommen, deren Tab-Zuhoerer eine Abmeldung ueberleben.
+  if (el.arbeit && el.arbeit.hidden) return;
+
+  const key = _key;
+  let a;
+  try {
+    a = await frage({ art: "auto_start", key });
+  } catch (e) {
+    return;   // aelterer Hintergrund oder Ablagefehler - siehe Docstring
+  }
+  if (!a || !a.starten) return;
+  /* Nach der Runde noch einmal hinsehen: in der Leiste kann der Tab inzwischen
+   * gewechselt haben. `auswerten` liest `_key` selbst - ohne diese Pruefung
+   * wuerde fuer das NEUE Ticket ausgewertet, waehrend im Ring das alte
+   * vermerkt ist. Das neue Ticket loest ohnehin seine eigene Pruefung aus. */
+  if (_key !== key || _laeuft) return;
+  await auswerten(a.modus);
 }
 
 /* ── Der Tab-Wechsel ist der PREIS der Seitenleiste ─────────────────────────
@@ -964,6 +1032,34 @@ $("btn-ueberarbeiten").addEventListener("click", async () => {
     return;
   }
   await auswerten("ueberarbeiten", r.text);
+});
+
+/* ── Automatik bei neuem Ticket ────────────────────────────────────────────
+ *
+ * ⚠ SIE GILT AB DEM NAECHSTEN TICKET, NICHT SOFORT – und das muss dastehen.
+ * Wer sie einschaltet, waehrend ein Ticket offen ist, sieht sonst: nichts
+ * passiert. Ein sofortiger Lauf waere die andere Moeglichkeit, aber er wuerde
+ * ein bereits angezeigtes (womoeglich bearbeitetes) Ergebnis ueberschreiben –
+ * genau das, wogegen die `passt`-Schranke in `autoAktionPruefen` gebaut ist.
+ * Die ehrliche Ansage ist billiger als beides.
+ */
+$("f-auto").addEventListener("change", async (ereignis) => {
+  const wert = ereignis.target.value;
+  try {
+    await frage({ art: "merken", auto_modus: wert });
+  } catch (e) {
+    // Zurueckdrehen: ein Pulldown, das einen nicht gespeicherten Wert zeigt,
+    // ist schlimmer als eine Fehlermeldung.
+    autoZeigen(_autoModus);
+    melde(e.message);
+    return;
+  }
+  autoZeigen(wert);
+  melde(_autoModus
+    ? "Gespeichert. Beim nächsten Ticket startet „"
+      + (_autoModus === "antwort" ? "Antwort vorschlagen" : "Zusammenfassen")
+      + "“ von selbst – für das gerade offene nicht mehr."
+    : "Gespeichert. Es startet nichts mehr von selbst.");
 });
 
 /* Der BEARBEITETE Text wird mitgemerkt – gedrosselt.

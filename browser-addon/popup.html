@@ -88,13 +88,19 @@
   <!-- Arbeitsbereich
        ⚠ OHNE ERKANNTES TICKET SIND HIER ALLE KNOEPFE GESPERRT (Vorgabe des
        Nutzers 2026-08-30). Ausgenommen ist nur, was `data-ohne-ticket` traegt:
-       Anmelden, Abmelden, die Schliessen-Knoepfe der beiden Dialoge und die
-       Zugriffsabfrage der Seitenleiste. Ein Fenster, aus dem man sich auf einem
-       fremden Tab nicht mehr abmelden kann, waere eine Falle statt einer
-       Schranke - und ein gesperrter Schliessen-Knopf laesst einen offenen
-       Dialog stehen, den niemand mehr wegbekommt.
-       Die Richtung ist fail-closed: ein neuer Knopf OHNE das Attribut ist ohne
-       Ticket gesperrt (Begruendung in popup.js::knoepfeAktualisieren). -->
+       Anmelden, Abmelden, die Schliessen-Knoepfe der beiden Dialoge, die
+       Zugriffsabfrage der Seitenleiste und die GANZE Vorlagen-Verwaltung.
+       Ein Fenster, aus dem man sich auf einem fremden Tab nicht mehr abmelden
+       kann, waere eine Falle statt einer Schranke - und ein gesperrter
+       Schliessen-Knopf laesst einen offenen Dialog stehen, den niemand mehr
+       wegbekommt.
+       Das Attribut wirkt auch an einem CONTAINER und gilt dann fuer alles
+       darin (popup.js sucht per `closest`) - so sind auch die erst beim
+       Zeichnen entstehenden Zeilen-Knoepfe der Vorlagenliste erfasst, ohne
+       dass jemand eine zweite Liste im JS pflegen muss.
+       Die Richtung bleibt fail-closed: ein neuer Knopf ausserhalb eines
+       markierten Bereichs ist ohne Ticket gesperrt (Begruendung in
+       popup.js::knoepfeAktualisieren). -->
   <section id="bereich-arbeit" hidden>
     <div class="knopfreihe">
       <button type="button" id="btn-zusammenfassung" class="haupt">Zusammenfassen</button>
@@ -143,7 +149,12 @@
         <select id="f-vorlage">
           <option value="">Ohne Vorlage</option>
         </select>
-        <button type="button" id="btn-vorlagen" class="leise ico"
+        <!-- ⚠ `data-ohne-ticket`: Vorlagen pflegt man UNABHAENGIG von einem
+             Ticket (gemeldet 2026-08-31). Bis dahin fiel das Zahnrad unter die
+             Ticket-Sperre - wer auf einer beliebigen Seite eine Vorlage
+             anlegen oder aendern wollte, musste erst irgendein Ticket
+             oeffnen. Die Verwaltung liest kein Ticket und schreibt keines. -->
+        <button type="button" id="btn-vorlagen" class="leise ico" data-ohne-ticket
                 title="Vorlagen verwalten" aria-label="Vorlagen verwalten">⚙</button>
       </div>
     </label>
@@ -155,7 +166,12 @@
 
     <!-- Vorlagen-Verwaltung: bleibt im selben Fenster, damit die Auswahl
          daneben sichtbar bleibt. -->
-    <div id="vorlagen-box" hidden>
+    <!-- `data-ohne-ticket` steht am CONTAINER, nicht an jedem Knopf einzeln:
+         Speichern, Neu, Stern, Bearbeiten und Loeschen sind allesamt
+         Vorlagen-Pflege und brauchen kein Ticket - und Stern/Bearbeiten/
+         Loeschen entstehen ueberhaupt erst beim Zeichnen der Liste, koennten
+         das Attribut im Markup also gar nicht tragen. -->
+    <div id="vorlagen-box" data-ohne-ticket hidden>
       <div class="vorl-kopf">
         <b>Vorlagen</b>
         <button type="button" id="btn-vorlagen-zu" class="leise" data-ohne-ticket title="Schließen"

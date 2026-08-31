@@ -4866,6 +4866,49 @@ async def system_restart(user: str = Depends(require_local_auth)):
     return JSONResponse({"ok": True, "message": "Neustart eingeleitet"})
 
 
+@app.get("/api/system/packages")
+async def system_packages(request: Request, user: str = Depends(require_local_auth)):
+    """Installierte Debian-Pakete – bei JEDEM Abruf frisch erzeugt.
+
+    ADMIN-ONLY (`require_local_auth`), und das ist keine Formsache: die Liste
+    nennt jede installierte Software samt exakter Version. Das ist die
+    Einkaufsliste fuer jeden, der eine passende Luecke sucht – Angreifer
+    beginnen mit genau dieser Aufklaerung. Fuer den Betrieb (Inventur,
+    CVE-Abgleich, Vergleich DEV gegen ECHT) ist sie dagegen unverzichtbar.
+
+    ⚠ `asyncio.to_thread` ist PFLICHT, nicht Feinschliff: `dpkg-query` ist ein
+    Unterprozess und `os.stat` ueber 2800 Dateien blockierender Datei-I/O.
+    Direkt im Event-Loop stuende der Dienst fuer ALLE Benutzer, solange der
+    Bericht laeuft – dieselbe Klasse wie der 20-Sekunden-Freeze durch
+    `Path.is_mount()` auf einem toten CIFS-Ziel. Gemessen kostet der Bericht
+    0,1 s; bei gehaltener dpkg-Sperre kann es das Zeitlimit des Moduls werden.
+
+    `?download=1` setzt nur den Dateinamen-Kopf – der Inhalt ist identisch.
+    Gedacht fuer `curl -OJ`; die Oberflaeche baut ihre Datei aus der ohnehin
+    geladenen Antwort und braucht dafuer kein Token in einer URL.
+    """
+    from backend import system_packages as _pkg
+    try:
+        bericht = await asyncio.to_thread(_pkg.bericht)
+    except _pkg.PaketFehler as e:
+        # 503, nicht 500: der Dienst ist in Ordnung, die QUELLE antwortet nicht
+        # (fremdes System, gehaltene dpkg-Sperre). Und mit Klartext-Grund –
+        # "Interner Fehler" laesst den Administrator im Journal suchen.
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=503)
+    except Exception as e:
+        logger.error(f"[PAKETE] Bericht fehlgeschlagen: {e}")
+        return JSONResponse({"ok": False, "error": "Paketbericht fehlgeschlagen"},
+                            status_code=500)
+
+    kopf = {}
+    if (request.query_params.get("download") or "").strip() in ("1", "true", "yes"):
+        # ASCII-Dateiname: der Wert reist in einem HTTP-Kopf (dieselbe Lehre wie
+        # bei X-Jarvis-Cert-Warn). `dateiname()` erzeugt ohnehin nur [A-Za-z0-9_-].
+        name = _pkg.dateiname(bericht.get("host"))
+        kopf["Content-Disposition"] = f'attachment; filename="{name}"'
+    return JSONResponse(bericht, headers=kopf)
+
+
 def _check_vnc_available() -> bool:
     """Prüft ob x11vnc auf Port 5900 erreichbar ist (schneller TCP-Connect)."""
     import socket

@@ -678,3 +678,160 @@ body.light .sapcert-state.is-err { color: color-mix(in srgb, var(--danger) 78%, 
        darf nicht waagerecht scrollen. */
     overflow-x: auto;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Installierte Pakete (syspackages.js) – ⓘ rechts neben der CPU-Anzeige
+
+   Steht in theme.css und NICHT in style.css/chat.css: der Knopf sitzt auf
+   JEDER Seite mit Titelleiste, jene beiden laden nur /settings + /wissen bzw.
+   /chat + /userchat (Register).
+
+   Der Knopf bringt bewusst KEINEN eigenen Aussenabstand mit: alle fuenf
+   Wirt-Container arbeiten mit `gap`, ein `margin-left` addierte sich darauf
+   (auf /portal waren das seinerzeit 10 + 8 = 18 px). Den Abstand setzt der
+   Wirt – dieselbe Lehre wie bei `.jv-cpu-bar`.
+   ═══════════════════════════════════════════════════════════════════════ */
+.jv-pkg-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted, #888899);
+    padding: 3px 5px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    line-height: 0;
+    transition: color .15s ease, background .15s ease;
+}
+.jv-pkg-btn:hover { background: rgba(var(--accent-rgb), .12); color: var(--text-primary); }
+.jv-pkg-btn:focus-visible { outline: 2px solid rgba(var(--accent-rgb), .8); outline-offset: 2px; }
+
+/* Der Kasten liegt ueber der ganzen Seite: eine Paketliste braucht Platz, und
+   ein Aufklapp-Panel in der Titelleiste waere fuer 2800 Zeilen die falsche
+   Bauform. */
+.jv-pkg-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 99990;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 16px;
+    /* DECKENDE Abdunklung: darunter liegen Karten mit Text (Register). */
+    background: rgba(0, 0, 0, .55);
+}
+.jv-pkg-overlay.an { display: flex; }
+.jv-pkg-box {
+    display: flex;
+    flex-direction: column;
+    width: min(1100px, 100%);
+    max-height: 100%;
+    /* DECKEND, nicht `--bg-glass`: sonst scheint die Seite durch die Tabelle. */
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, .45);
+    padding: 14px 16px 12px;
+    /* ⚠ `min-height: 0` ist Pflicht, kein Feinschliff: ohne die Zeile schrumpft
+       der scrollende Koerper nicht unter seine Inhaltshoehe, `overflow-y`
+       bleibt wirkungslos und die Fusszeile wird aus dem Kasten gedrueckt
+       (dieselbe Stelle wie beim Update-Popup). */
+    min-height: 0;
+}
+.jv-pkg-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.jv-pkg-h { font-size: 1.02rem; font-weight: 700; }
+/* Schiebt Download und × nach rechts – und `margin-left: auto` am ersten
+   nachfolgenden Element statt eines Abstandhalter-Elements. */
+.jv-pkg-head .jv-pkg-dl { margin-left: auto; }
+.jv-pkg-dl {
+    background: rgba(var(--accent-rgb), .16);
+    border: 1px solid rgba(var(--accent-rgb), .45);
+    color: var(--text-primary);
+    border-radius: 8px;
+    padding: 5px 12px;
+    font: inherit;
+    font-size: .82rem;
+    cursor: pointer;
+}
+.jv-pkg-dl:hover { background: rgba(var(--accent-rgb), .28); }
+.jv-pkg-close {
+    margin-left: 4px;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 1.2rem;
+    line-height: 1;
+    padding: 2px 8px;
+    border-radius: 8px;
+    cursor: pointer;
+}
+.jv-pkg-close:hover { background: rgba(var(--accent-rgb), .12); color: var(--text-primary); }
+.jv-pkg-head .jv-pkg-close:only-of-type { margin-left: auto; }
+.jv-pkg-meta { font-size: .78rem; color: var(--text-secondary); margin-bottom: 8px; }
+.jv-pkg-suche {
+    width: 100%;
+    box-sizing: border-box;
+    margin-bottom: 8px;
+    padding: 7px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-primary, var(--bg-secondary));
+    color: var(--text-primary);
+    font: inherit;
+    font-size: .85rem;
+}
+.jv-pkg-scroll {
+    flex: 1 1 auto;
+    min-height: 0;             /* s.o. – sonst scrollt der Kasten statt der Tabelle */
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+.jv-pkg-tab { width: 100%; border-collapse: collapse; font-size: .8rem; }
+/* Der Kopf bleibt beim Scrollen stehen – sticky an den ZELLEN, nicht an der
+   Zeile, und mit DECKENDER Flaeche: bei `border-collapse: collapse` bleiben die
+   Zellen sonst nicht zuverlaessig beim Kopf, und halbtransparent scheint die
+   erste Datenzeile durch (Register: genau dieser Fall im Audit-Log). */
+.jv-pkg-tab thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background-color: var(--bg-secondary);
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-secondary);
+    padding: 7px 9px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    white-space: nowrap;
+    user-select: none;
+}
+.jv-pkg-tab thead th:hover { color: var(--text-primary); }
+.jv-pkg-tab td { padding: 5px 9px; border-bottom: 1px solid rgba(var(--fg-rgb, 148,163,184), .10); vertical-align: top; }
+.jv-pkg-tab tbody tr:hover td { background: rgba(var(--accent-rgb), .07); }
+.jv-pkg-n { font-family: var(--font-mono, monospace); white-space: nowrap; }
+.jv-pkg-v { font-family: var(--font-mono, monospace); font-size: .95em; color: var(--text-secondary); white-space: nowrap; }
+.jv-pkg-r { text-align: right; white-space: nowrap; }
+.jv-pkg-d { white-space: nowrap; color: var(--text-secondary); }
+.jv-pkg-s { color: var(--text-secondary); }
+.jv-pkg-hold {
+    font-size: .7rem;
+    padding: 0 5px;
+    border-radius: 6px;
+    background: rgba(245, 158, 11, .22);
+    border: 1px solid rgba(245, 158, 11, .5);
+    color: var(--text-primary);
+}
+.jv-pkg-fuss { font-size: .74rem; color: var(--text-secondary); padding-top: 8px; }
+.jv-pkg-lade, .jv-pkg-fehler { padding: 26px 4px; text-align: center; color: var(--text-secondary); }
+.jv-pkg-fehler { color: var(--danger, #ef4444); }
+
+@media (max-width: 720px) {
+    /* Auf schmalen Fenstern faellt die Beschreibung heraus – sie ist die
+       laengste Spalte und die am ehesten verzichtbare. Die Suche findet sie
+       weiterhin. */
+    .jv-pkg-tab .jv-pkg-s, .jv-pkg-tab th[data-sort="summary"] { display: none; }
+}

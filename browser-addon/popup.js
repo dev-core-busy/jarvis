@@ -170,16 +170,28 @@ function sperre(an) {
 /** Sperrt alles, was ein Ticket braucht – und gibt es wieder frei.
  *
  * ⚠ DIE RICHTUNG IST FAIL-CLOSED, und das ist der ganze Entwurf: gesperrt wird
- * pauschal JEDER Knopf, ausgenommen sind nur die wenigen mit
- * `data-ohne-ticket` im Markup. Andersherum – eine Liste der zu sperrenden
- * Knoepfe – waere ein kuenftig ergaenzter Knopf ohne Eintrag **bedienbar**,
- * obwohl er ohne Ticket nichts tun kann; so ist er hoechstens einmal zu viel
- * gesperrt. Das ist die harmlosere Halbfehlerstellung.
+ * pauschal JEDER Knopf, ausgenommen ist nur, was `data-ohne-ticket` traegt.
+ * Andersherum – eine Liste der zu sperrenden Knoepfe – waere ein kuenftig
+ * ergaenzter Knopf ohne Eintrag **bedienbar**, obwohl er ohne Ticket nichts tun
+ * kann; so ist er hoechstens einmal zu viel gesperrt. Das ist die harmlosere
+ * Halbfehlerstellung.
+ *
+ * ⚠ GESUCHT WIRD MIT `closest`, NICHT MIT `hasAttribute` (2026-08-31): das
+ * Attribut darf auch an einem CONTAINER stehen und gilt dann fuer alles darin.
+ * Zwei Gruende, jeder allein hinreichend:
+ *   - Die Zeilen-Knoepfe der Vorlagenliste (Stern, Bearbeiten, Loeschen)
+ *     entstehen erst beim Zeichnen und koennen im Markup gar kein Attribut
+ *     tragen. Sie im JS einzeln zu markieren waere genau die zweite Liste,
+ *     gegen die der ganze Entwurf gebaut ist.
+ *   - Ein zusammenhaengender Bereich hat EINE Begruendung. Sie einmal an den
+ *     Container zu schreiben ist ehrlicher als sie an fuenf Knoepfen zu
+ *     wiederholen – und ein sechster Knopf darin ist von selbst richtig.
  *
  * Bedienbar bleiben: Anmelden (sonst kaeme man von einem fremden Tab aus nie
  * hinein), Abmelden (sonst nie hinaus), die Schliessen-Knoepfe der beiden
- * Dialoge (ein Dialog, den man nicht wegbekommt, ist eine Falle) und die
- * Zugriffsabfrage der Seitenleiste.
+ * Dialoge (ein Dialog, den man nicht wegbekommt, ist eine Falle), die
+ * Zugriffsabfrage der Seitenleiste – und die Vorlagen-Verwaltung samt
+ * Zahnrad: sie liest kein Ticket und schreibt keines (gemeldet 2026-08-31).
  */
 function knoepfeAktualisieren() {
   // Waehrend eines Laufs entscheidet `sperre` allein – sonst gaebe ein
@@ -187,7 +199,7 @@ function knoepfeAktualisieren() {
   if (_laeuft) return;
   const aus = !_key;
   for (const b of document.querySelectorAll("button")) {
-    b.disabled = aus && !b.hasAttribute("data-ohne-ticket");
+    b.disabled = aus && !b.closest("[data-ohne-ticket]");
   }
 }
 
@@ -1446,7 +1458,10 @@ function vorlagenZeichnen() {
    * Ein einmaliger Durchlauf ueber `button` beim Tab-Wechsel erwischt sie
    * nicht: sie existieren zu dem Zeitpunkt noch gar nicht, und beim naechsten
    * Neuzeichnen waeren sie wieder bedienbar. Deshalb wird die Sperre HIER
-   * nachgezogen. */
+   * nachgezogen.
+   * Seit die Vorlagen-Box `data-ohne-ticket` traegt, laesst dieser Aufruf sie
+   * frei – der Aufruf bleibt trotzdem stehen: er ist die Stelle, die die
+   * Sperre wieder durchsetzt, falls die Box ihre Ausnahme je verliert. */
   knoepfeAktualisieren();
 }
 

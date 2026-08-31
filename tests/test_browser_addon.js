@@ -1117,8 +1117,18 @@ check(/o\.textContent = v\.name/.test(POPUP_JS), "sondern durch textContent");
     check(mit.zeilenAnzahl > 0, 'die Vorlagenliste hat Zeilen-Knoepfe',
           String(mit.zeilenAnzahl));
     check(mit.zeilenGesperrt === false, 'mit Ticket sind sie bedienbar');
-    check(ohneTicket.zeilenGesperrt === true,
-          'ohne Ticket sind auch die frisch gezeichneten Zeilen-Knoepfe gesperrt');
+    /* ⚠ SEIT 2026-08-31 UMGEKEHRT, auf Meldung: Vorlagen pflegt man
+     * unabhaengig von einem Ticket. Vorher waren Stern, Bearbeiten und
+     * Loeschen ohne Ticket gesperrt - zusammen mit dem Zahnrad, das die Box
+     * ueberhaupt erst oeffnet, war die Verwaltung damit unerreichbar.
+     * GEMESSEN am frisch gezeichneten DOM: die Knoepfe entstehen erst hier,
+     * die Ausnahme kommt vom Container - eine Quelltext-Pruefung saehe das
+     * nicht. */
+    check(ohneTicket.zeilenAnzahl === mit.zeilenAnzahl,
+          'ohne Ticket wird die Liste genauso gezeichnet',
+          String(ohneTicket.zeilenAnzahl));
+    check(ohneTicket.zeilenGesperrt === false,
+          'und die frisch gezeichneten Zeilen-Knoepfe sind bedienbar');
   }
 
   const ohne = lauf('', '');
@@ -2620,26 +2630,43 @@ section("11) Ohne Ticket ist alles gesperrt (Vorgabe 2026-08-30)");
   // ── b) Ohne Ticket ist JEDER Knopf gesperrt - bis auf die Ausnahmen ────
   /* Die Ausnahmen sind im Markup markiert (`data-ohne-ticket`), nicht hier
    * aufgezaehlt: eine zweite Liste im Test liefe beim naechsten Knopf
-   * auseinander. Geprueft wird die REGEL. */
-  const AUSNAHMEN = [...POPUP_HTML.matchAll(
-    /<button[^>]*\bid="([^"]+)"[^>]*data-ohne-ticket/g)].map((m) => m[1])
-    .concat([...POPUP_HTML.matchAll(
-      /<button[^>]*data-ohne-ticket[^>]*\bid="([^"]+)"/g)].map((m) => m[1]));
-  const ausnahme = new Set(AUSNAHMEN);
+   * auseinander. Geprueft wird die REGEL.
+   * ⚠ UEBER DEN DOM, NICHT PER REGEX (2026-08-31): das Attribut darf an einem
+   * CONTAINER stehen und gilt dann fuer alles darin. Eine Regex auf
+   * `<button ... data-ohne-ticket>` haette die Knoepfe der Vorlagen-Box
+   * uebersehen und faelschlich Alarm geschlagen. */
+  const ausnahme = (() => {
+    const dom = new JSDOM(POPUP_HTML, { url: "https://x.test/" });
+    try {
+      return new Set(Array.from(dom.window.document.querySelectorAll("button"))
+        .filter((b) => b.closest("[data-ohne-ticket]"))
+        .map((b) => b.id).filter(Boolean));
+    } finally { dom.window.close(); }
+  })();
   check(ausnahme.size >= 6,
         "im Markup sind die Ausnahmen gekennzeichnet", [...ausnahme].join(", "));
 
-  /* DIE VIER, DIE DRINSTEHEN MUESSEN - und jede aus einem eigenen Grund.
+  /* DIE SECHS, DIE DRINSTEHEN MUESSEN - und jede aus einem eigenen Grund.
    * Sie sind hier namentlich genannt, weil ihr Fehlen ein Einbahnstrassen-
-   * Zustand waere: nicht hineinkommen, nicht hinaus, Dialog nicht schliessbar. */
+   * Zustand waere: nicht hineinkommen, nicht hinaus, Dialog nicht schliessbar
+   * - oder eine Verwaltung, die ein Ticket verlangt, das sie nie benutzt. */
   for (const [id, grund] of [
     ["btn-anmelden", "sonst kaeme man von einem fremden Tab aus nie hinein"],
     ["btn-abmelden", "sonst nie hinaus"],
     ["btn-vorlagen-zu", "ein Dialog, den man nicht wegbekommt, ist eine Falle"],
     ["jn-nein", "dito fuer die Rueckfrage beim Einfuegen"],
+    ["btn-vorlagen", "Vorlagen verwalten braucht kein Ticket (gemeldet 2026-08-31)"],
+    ["btn-vorl-speichern", "sonst laesst sich die geoeffnete Box nicht benutzen"],
   ]) {
     check(ausnahme.has(id), id + " bleibt bedienbar - " + grund);
   }
+
+  /* Und die Ausnahme haengt am CONTAINER, nicht an jedem Knopf: nur so sind
+   * die erst beim Zeichnen entstehenden Zeilen-Knoepfe erfasst. */
+  check(/<div id="vorlagen-box" data-ohne-ticket/.test(POPUP_HTML),
+        "die Vorlagen-Box traegt die Ausnahme als ganzer Bereich");
+  check(/b\.closest\("\[data-ohne-ticket\]"\)/.test(ka || ""),
+        "und knoepfeAktualisieren sucht sie ueber die Vorfahren");
 
   {
     const r = lageBei("", false, false);
@@ -2648,8 +2675,15 @@ section("11) Ohne Ticket ist alles gesperrt (Vorgabe 2026-08-30)");
     check(offen.every((id) => ausnahme.has(id)),
           "ohne Ticket ist NUR noch offen, was ausdruecklich ausgenommen ist",
           offen.join(", "));
-    check(gesperrt.every((id) => !ausnahme.has(id)) && gesperrt.length >= 8,
+    /* ⚠ KEINE FESTE ZAHL mehr (kostete beim Ausnehmen der Vorlagen-Box einen
+     * Fehlalarm): geprueft wird die EIGENSCHAFT - jeder nicht ausgenommene
+     * Knopf ist gesperrt, und es ist ueberhaupt einer dabei. Eine Untergrenze
+     * meldet sonst einen Fehler, sobald eine Ausnahme dazukommt. */
+    check(gesperrt.every((id) => !ausnahme.has(id)) && gesperrt.length > 0,
           "alles uebrige ist gesperrt", gesperrt.length + ": " + gesperrt.join(", "));
+    check([...ausnahme].every((id) => r.zustand[id] !== true),
+          "und keine einzige Ausnahme ist gesperrt",
+          [...ausnahme].filter((id) => r.zustand[id] === true).join(", "));
     check(r.zustand["btn-zusammenfassung"] === true &&
           r.zustand["btn-antwort"] === true &&
           r.zustand["btn-ueberarbeiten"] === true,

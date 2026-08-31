@@ -210,6 +210,12 @@ GUARDED_PREFIXES = [
     "/api/instructions", "/api/whatsapp/", "/api/vision/", "/api/google/",
     "/api/confluence/", "/api/jira/", "/api/kundenverwaltung/", "/api/mcp/",
     "/api/openclaw/", "/api/broker/",
+    # /api/system/ (2026-08-31, mit dem Paketbericht): was dort haengt, sagt
+    # etwas ueber die MASCHINE aus oder greift in sie ein - Dienst-Neustart,
+    # Paketbestand samt exakter Versionen. Letzterer ist die Aufklaerungsliste
+    # fuer jeden, der eine passende Luecke sucht. Der Praefix steht hier, damit
+    # die naechste Route unter /api/system/ nicht mit require_auth durchrutscht.
+    "/api/system/",
 ]
 # Ausnahmen mit Begruendung – jede einzeln belegt, keine Sammelfreigabe.
 EXEMPT = {

@@ -47,6 +47,7 @@ const AUSNAHMEN = {
     'security.broker_mode_timeout':     'journalctl -u jarvis-broker-migrate',
     'security.pw_change_hint':          'das Linux-Konto heisst jarvis',
     'security.ad_warn_none':            'der lokale Rueckweg ist das Konto jarvis',
+    'security.ad_group_warning':        'nennt denselben lokalen Rueckweg: das Konto jarvis',
     'knowledge.index_failed_more':      'journalctl -u jarvis.service',
     'cert.download':                    'die Datei heisst jarvis.cer (Content-Disposition)',
     'security.ad_group_ph':             'Beispiel-DN im KUNDEN-AD, kein Produktname',
@@ -174,7 +175,76 @@ pruefe(/attributes/.test(BRANDING) === false
        || /attributes:\s*true/.test(BRANDING) === false,
        'Attribute werden NICHT beobachtet (der Durchlauf setzt sie selbst)');
 
+// ══════════════════════════════════════════════════════════════════════════
+abschnitt('6) GEMESSEN: der Beobachter setzt spaeter eingefuegten Text nach');
+// ══════════════════════════════════════════════════════════════════════════
+// Teil 5 liest nur den Quelltext. Ob der Beobachter WIRKT - und ob er nach
+// einer eigenen Schreiboperation zur Ruhe kommt - sagt nur ein Lauf.
+(async function () {
+    let JSDOM;
+    try { ({ JSDOM } = require('jsdom')); }
+    catch (e) {
+        try { ({ JSDOM } = require(process.env.JSDOM_PATH || '/tmp/node_modules/jsdom')); }
+        catch (e2) { pruefe(false, 'jsdom vorhanden (Abschnitt 6 uebersprungen)'); return abschluss(); }
+    }
+    const dom = new JSDOM('<!DOCTYPE html><body><p>Alt</p></body>',
+                          { url: 'https://dp.test/portal', runScripts: 'outside-only' });
+    const w = dom.window;
+    w.fetch = (u) => Promise.resolve({
+        ok: true, status: 200,
+        json: () => Promise.resolve(String(u).indexOf('/api/branding') >= 0
+            ? { active: true, assistant_name: 'Nexerius', company_name: 'Nexus DP',
+                colors: {}, colors_light: {}, logo_mode: 'letter', core_letter: 'nx' }
+            : {}),
+    });
+    w.localStorage.setItem('jarvis_theme', 'light');
+    // jsdom hat kein Canvas: letterFavicon() wirft sonst und bricht
+    // applyBranding ab, BEVOR markeEinsetzen() laeuft - der Beobachter waere
+    // nie eingerichtet und der Test gruen aus dem falschen Grund.
+    w.HTMLCanvasElement.prototype.getContext = () => null;
+    let rafs = 0;
+    w.requestAnimationFrame = (f) => { rafs++; return setTimeout(f, 0); };
+    w.eval(BRANDING);
+    const warte = (ms) => new Promise((r) => setTimeout(r, ms));
+    await warte(60);
+
+    pruefe(w.jarvisMarke && w.jarvisMarke() === 'Nexerius',
+           'der Markenname kommt an', w.jarvisMarke && w.jarvisMarke());
+
+    // Der eigentliche Fall: Text, der ERST JETZT im DOM landet.
+    const p1 = w.document.createElement('p');
+    p1.textContent = 'Aufgabe für {marke} eingeben...';
+    w.document.body.appendChild(p1);
+    const v1 = rafs;
+    await warte(80);
+    pruefe(p1.textContent === 'Aufgabe für Nexerius eingeben...',
+           'spaeter eingefuegter Text wird nachgesetzt', JSON.stringify(p1.textContent));
+    pruefe(rafs - v1 === 1, 'und zwar mit EINEM Durchlauf, nicht je Knoten',
+           String(rafs - v1));
+
+    // Text OHNE Platzhalter darf gar keinen Durchlauf ausloesen.
+    const p2 = w.document.createElement('p');
+    p2.textContent = 'Ganz normaler Text';
+    w.document.body.appendChild(p2);
+    const v2 = rafs;
+    await warte(80);
+    pruefe(rafs - v2 === 0, 'Text ohne Platzhalter loest keinen Durchlauf aus',
+           String(rafs - v2));
+
+    // ⚠ DIE WICHTIGSTE MESSUNG: kommt es zur Ruhe? markeEinsetzen() SCHREIBT
+    // Textknoten - ohne den Filter loest jeder eigene Schreibvorgang den
+    // naechsten Durchlauf aus, und das laeuft fuer immer.
+    const v3 = rafs;
+    await warte(400);
+    pruefe(rafs - v3 === 0, 'nach 400 ms Ruhe kein weiterer Durchlauf (keine Endlosschleife)',
+           String(rafs - v3));
+    w.close();
+    abschluss();
+})();
+
+function abschluss() {
 console.log('\n' + '='.repeat(58));
 console.log((fail ? '\x1b[31m' : '\x1b[32m') + ok + ' OK, ' + fail + ' FAIL\x1b[0m');
 console.log('='.repeat(58));
 process.exit(fail ? 1 : 0);
+}

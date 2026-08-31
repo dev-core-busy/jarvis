@@ -51,6 +51,10 @@ const AUSNAHMEN = {
     'cert.download':                    'die Datei heisst jarvis.cer (Content-Disposition)',
     'security.ad_group_ph':             'Beispiel-DN im KUNDEN-AD, kein Produktname',
     'chat.greeting':                    'wird von branding.js::applyAssistantName ueber einen eigenen Selektor gebrandet',
+    // Kein Anzeigename, sondern das DRAHTFORMAT: knowledge_sync.TOKEN_PREFIX
+    // ist fest "JARVIS-KBS-1." – der Platzhalter zeigt, wie ein echtes Token
+    // aussieht. Gebrandet waere der Hinweis schlicht falsch.
+    'kbsync.f_token_ph':                'Token-Praefix JARVIS-KBS-1. (knowledge_sync.TOKEN_PREFIX)',
 };
 
 /* Nicht-DOM-Senken: dort wirkt der TreeWalker von branding.js nicht. */

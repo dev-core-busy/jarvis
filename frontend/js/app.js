@@ -716,6 +716,13 @@
 
         // ── Settings Tabs ──
         const settingsTabs = document.querySelectorAll('.settings-tab-btn');
+        // ⚠ Der Knopf zu „KI & System" wird AUSDRUECKLICH gesucht, nicht als
+        // `settingsTabs[0]` angenommen. Seit die Reiter alphabetisch stehen
+        // (alpha_sort.js), ist der erste Knopf ein anderer – ein `[0]` wuerde
+        // den FALSCHEN Knopf hervorheben, waehrend darunter das Profil-Panel
+        // steht. Genau dieser Zustand (Knopf A markiert, Panel B offen) hat
+        // hier schon einmal Zeit gekostet.
+        const btnProfiles = document.querySelector('.settings-tab-btn[data-settings-tab="profiles"]');
         const tabProfiles = document.getElementById('settings-tab-profiles');
         const tabSkills = document.getElementById('settings-tab-skills');
         const tabWhatsApp = document.getElementById('settings-tab-whatsapp');
@@ -931,7 +938,7 @@
                 // Falls WhatsApp-Tab aktiv war und Skill deaktiviert → zu Profilen wechseln
                 if (!isEnabled && tabWhatsApp && tabWhatsApp.classList.contains('active')) {
                     settingsTabs.forEach(t => t.classList.remove('active'));
-                    if (settingsTabs[0]) settingsTabs[0].classList.add('active');
+                    if (btnProfiles) btnProfiles.classList.add('active');
                     allSettingsTabs.forEach(t => { if (t) { t.style.display = 'none'; t.classList.remove('active'); } });
                     if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
                 }
@@ -955,7 +962,7 @@
                 // Falls Vision-Tab aktiv war und Skill nun deaktiviert → zu Profilen wechseln
                 if (!isEnabled && tabVision && tabVision.classList.contains('active')) {
                     settingsTabs.forEach(t => t.classList.remove('active'));
-                    if (settingsTabs[0]) settingsTabs[0].classList.add('active');
+                    if (btnProfiles) btnProfiles.classList.add('active');
                     allSettingsTabs.forEach(t => { if (t) { t.style.display = 'none'; t.classList.remove('active'); } });
                     if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
                     if (window.visionManager) window.visionManager.stop();
@@ -980,7 +987,7 @@
                 // Falls Branding-Tab aktiv war und Skill nun deaktiviert → zu Profilen wechseln
                 if (!isEnabled && tabBranding && tabBranding.classList.contains('active')) {
                     settingsTabs.forEach(t => t.classList.remove('active'));
-                    if (settingsTabs[0]) settingsTabs[0].classList.add('active');
+                    if (btnProfiles) btnProfiles.classList.add('active');
                     allSettingsTabs.forEach(t => { if (t) { t.style.display = 'none'; t.classList.remove('active'); } });
                     if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
                 }
@@ -1005,7 +1012,7 @@
                 }
                 if (!isEnabled && tabConfluence && tabConfluence.classList.contains('active')) {
                     settingsTabs.forEach(t => t.classList.remove('active'));
-                    if (settingsTabs[0]) settingsTabs[0].classList.add('active');
+                    if (btnProfiles) btnProfiles.classList.add('active');
                     allSettingsTabs.forEach(t => { if (t) { t.style.display = 'none'; t.classList.remove('active'); } });
                     if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
                 }
@@ -1026,7 +1033,7 @@
                 jiraTabBtn.style.display = isEnabled ? '' : 'none';
                 if (!isEnabled && tabJira && tabJira.classList.contains('active')) {
                     settingsTabs.forEach(t => t.classList.remove('active'));
-                    if (settingsTabs[0]) settingsTabs[0].classList.add('active');
+                    if (btnProfiles) btnProfiles.classList.add('active');
                     allSettingsTabs.forEach(t => { if (t) { t.style.display = 'none'; t.classList.remove('active'); } });
                     if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
                 }
@@ -1051,7 +1058,7 @@
                 if (sapSecSub) sapSecSub.style.display = isEnabled ? '' : 'none';
                 if (!isEnabled && tabSap && tabSap.classList.contains('active')) {
                     settingsTabs.forEach(t => t.classList.remove('active'));
-                    if (settingsTabs[0]) settingsTabs[0].classList.add('active');
+                    if (btnProfiles) btnProfiles.classList.add('active');
                     allSettingsTabs.forEach(t => { if (t) { t.style.display = 'none'; t.classList.remove('active'); } });
                     if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
                 }
@@ -1079,7 +1086,7 @@
                 if (vemasSecSub) vemasSecSub.style.display = isEnabled ? '' : 'none';
                 if (!isEnabled && tabVemas && tabVemas.classList.contains('active')) {
                     settingsTabs.forEach(t => t.classList.remove('active'));
-                    if (settingsTabs[0]) settingsTabs[0].classList.add('active');
+                    if (btnProfiles) btnProfiles.classList.add('active');
                     allSettingsTabs.forEach(t => { if (t) { t.style.display = 'none'; t.classList.remove('active'); } });
                     if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
                 }
@@ -1180,7 +1187,7 @@
                 if (emailSecSub) emailSecSub.style.display = isEnabled ? '' : 'none';
                 if (!isEnabled && tabEmail && tabEmail.classList.contains('active')) {
                     settingsTabs.forEach(t => t.classList.remove('active'));
-                    if (settingsTabs[0]) settingsTabs[0].classList.add('active');
+                    if (btnProfiles) btnProfiles.classList.add('active');
                     allSettingsTabs.forEach(t => { if (t) { t.style.display = 'none'; t.classList.remove('active'); } });
                     if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
                 }
@@ -1238,7 +1245,7 @@
                 kvTabBtn.style.display = isEnabled ? '' : 'none';
                 if (!isEnabled && tabKundenverwaltung && tabKundenverwaltung.classList.contains('active')) {
                     settingsTabs.forEach(t => t.classList.remove('active'));
-                    if (settingsTabs[0]) settingsTabs[0].classList.add('active');
+                    if (btnProfiles) btnProfiles.classList.add('active');
                     allSettingsTabs.forEach(t => { if (t) { t.style.display = 'none'; t.classList.remove('active'); } });
                     if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
                 }
@@ -1259,7 +1266,7 @@
                 supportTabBtn.style.display = isEnabled ? '' : 'none';
                 if (!isEnabled && tabSupport && tabSupport.classList.contains('active')) {
                     settingsTabs.forEach(t => t.classList.remove('active'));
-                    if (settingsTabs[0]) settingsTabs[0].classList.add('active');
+                    if (btnProfiles) btnProfiles.classList.add('active');
                     allSettingsTabs.forEach(t => { if (t) { t.style.display = 'none'; t.classList.remove('active'); } });
                     if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
                 }
@@ -1353,7 +1360,7 @@
             showListView();
             // Ersten Tab aktivieren
             settingsTabs.forEach(t => t.classList.remove('active'));
-            if (settingsTabs[0]) settingsTabs[0].classList.add('active');
+            if (btnProfiles) btnProfiles.classList.add('active');
             if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
             _initProfilesCollapse();
             // WICHTIG: „KI & System" ist der VOREINGESTELLT aktive Reiter – hier wird

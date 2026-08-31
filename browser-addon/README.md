@@ -3,7 +3,9 @@
 Wer ein Jira-Ticket offen hat, bekommt über das Symbol in der Symbolleiste
 
 * eine **Zusammenfassung** des Vorgangs (worum es geht, was passiert ist, woran es hängt) und
-* einen **Antwortvorschlag** an den Melder, den ein Klick ins Jira-Kommentarfeld einfügt.
+* einen **Antwortvorschlag** an den Melder, den ein Klick als Kommentar übernimmt
+  (**Als Kommentar übernehmen** ersetzt den bisherigen Inhalt des Kommentarfeldes;
+  in Jira holt Strg+Z ihn zurück).
 
 **Abgeschickt wird in Jira, von Hand.** Jarvis schreibt nichts in ein Ticket.
 

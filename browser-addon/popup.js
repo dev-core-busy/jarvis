@@ -217,7 +217,7 @@ function frageJaNein(text) {
   if (!box) return Promise.resolve(true);
   if (text) $("jn-text").textContent = text;
   else $("jn-text").innerHTML =
-    'Der Text gehört zu einem <b>anderen Ticket</b>. Trotzdem einfügen?';
+    'Der Text gehört zu einem <b>anderen Ticket</b>. Trotzdem übernehmen?';
   box.hidden = false;
   return new Promise((fertig) => {
     const schluss = (wert) => {
@@ -1602,11 +1602,16 @@ $("btn-einfuegen").addEventListener("click", async () => {
        * vorhersagen, wohl aber BERICHTEN. Damit ist jede Rueckmeldung aus dem
        * Betrieb ein Beleg statt einer Vermutung. */
       const mitFett = /fett/i.test(String(r.weg || ""));
-      melde("Eingefügt"
+      /* „übernommen", nicht „eingefügt": der Knopf ERSETZT den bisherigen
+       * Inhalt des Kommentarfeldes (einfuegen.js, Dateikopf). Wer eben noch
+       * einen Entwurf dort hatte, muss das in der Rückmeldung lesen – sonst
+       * hält er die Ersetzung für einen Fehler. */
+      melde("Als Kommentar übernommen"
             + (hatFett(bloecke)
                ? (mitFett ? " – mit Fettschrift." : " – ohne Fettschrift (der "
                   + "Editor dieser Seite nimmt keine Formatierung an).")
                : ".")
+            + " Der bisherige Inhalt des Kommentarfeldes wurde ersetzt."
             + " Bitte in Jira prüfen und selbst abschicken.");
     } else {
       // DIE DIAGNOSE GEHÖRT IN DIE MELDUNG. Ohne sie ist der nächste Anlauf
@@ -1614,12 +1619,12 @@ $("btn-einfuegen").addEventListener("click", async () => {
       const gesehen = (r.gesehen && r.gesehen.length)
         ? "\nGefunden: " + r.gesehen.join(", ")
         : "";
-      melde((r.fehler || "Einfügen fehlgeschlagen.") + gesehen);
+      melde((r.fehler || "Übernehmen fehlgeschlagen.") + gesehen);
     }
   } catch (e) {
     // Häufigster Fall: die Seite verbietet die Injektion (z. B. eine
     // Browser-interne Seite) oder activeTab gilt nicht mehr.
-    melde("Einfügen nicht möglich: " + ((e && e.message) || e) +
+    melde("Übernehmen nicht möglich: " + ((e && e.message) || e) +
           "\nBenutze „Kopieren“ und füge den Text von Hand ein.");
   } finally {
     sperre(false);

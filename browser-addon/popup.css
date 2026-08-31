@@ -198,7 +198,7 @@ html.neutral button.haupt:hover:not(:disabled) {
 }
 button.leise { color: var(--gedaempft); }
 
-/* `wrap`: „Ins Kommentarfeld einfügen“ neben „Kopieren“ passt bei 380 px
+/* `wrap`: „Als Kommentar übernehmen“ neben „Kopieren“ passt bei 380 px
  * nicht in eine Zeile – ohne Umbruch ragt der zweite Knopf hinaus. */
 .knopfreihe { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 /* Ohne das fressen die Knoepfe in einer Flex-Zeile die ganze Breite bzw.

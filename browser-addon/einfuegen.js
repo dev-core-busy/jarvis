@@ -1,5 +1,13 @@
-/* Einfuegen in das Jira-Kommentarfeld – wird per scripting.executeScript in die
- * Seite injiziert, NUR auf Klick (activeTab).
+/* „Als Kommentar uebernehmen" – schreibt in das Jira-Kommentarfeld, per
+ * scripting.executeScript in die Seite injiziert, NUR auf Klick (activeTab).
+ *
+ * ⚠ ES WIRD UEBERSCHRIEBEN, NICHT ANGEHAENGT (Vorgabe 2026-08-31). Der Knopf
+ * hiess bis dahin „Ins Kommentarfeld einfuegen" und haengte an – aber nur bei
+ * den EDITOR-Wegen; die textarea-Wege ersetzten schon immer. Dieselbe
+ * Beschriftung hatte damit je Jira-Betriebsart eine andere Wirkung.
+ * Und der Regelablauf verlangt das Ersetzen: „Antwort ueberarbeiten" LIEST den
+ * Entwurf aus genau diesem Feld, der uebernommene Text ist dessen korrigierte
+ * Fassung – angehaengt stuende beides hintereinander im Kommentar beim Kunden.
  *
  * GEMELDET AUS DEM BETRIEB: "'in Kommentarfeld uebernehmen' fuegt NICHT in das
  * Feld ein" – bei einem Jira mit WYSIWYG-Editor (Formatierleiste). Die erste
@@ -117,6 +125,36 @@ export function einfuegenInJira(text, bloecke) {
       || (el.getAttribute && el.getAttribute("contenteditable") === "true");
   }
 
+  /* MARKIERT DEN GANZEN INHALT, damit `insertText`/`insertHTML` ihn ERSETZT.
+   *
+   * ⚠ HIER STAND DAS GEGENTEIL: der Cursor wurde ans ENDE gestellt, "damit ein
+   * bereits getippter Text nicht ersetzt wird". Seit der Knopf „Als Kommentar
+   * uebernehmen" heisst, ist das Ersetzen die Zusage – und sie ist auch die
+   * einzige, die zum Ablauf passt: der uebernommene Text IST in der Regel die
+   * ueberarbeitete Fassung genau des Entwurfs, der im Feld steht („Antwort
+   * ueberarbeiten" liest ihn von dort). Angehaengt stuende er zweimal im
+   * Kommentar beim Kunden.
+   *
+   * Ueber die AUSWAHL zu ersetzen und nicht per `innerHTML` ist Absicht: es
+   * geht durch die Ereignisbehandlung des Editors und bleibt ruecknehmbar
+   * (Strg+Z) – wer versehentlich uebernommen hat, kommt zurueck. */
+  function alleMarkieren(el) {
+    try {
+      const aus = el.ownerDocument || document;
+      const sel = (aus.defaultView || window).getSelection();
+      if (!sel) return false;
+      const r = aus.createRange();
+      r.selectNodeContents(el);
+      sel.removeAllRanges();
+      sel.addRange(r);
+      return true;
+    } catch (e) { return false; }
+  }
+
+  /* Inhalt restlos entfernen – fuer die Wege OHNE execCommand.
+   * Ueber Knoten, nicht `innerHTML = ""`: diese Datei fasst nie innerHTML an. */
+  function leeren(el) { while (el.firstChild) el.removeChild(el.firstChild); }
+
   /** Setzt einen Wert so, dass auch React/Angular ihn mitbekommen.
    *
    * Ein blosses `el.value = x` aktualisiert das DOM, aber nicht den Zustand
@@ -150,21 +188,17 @@ export function einfuegenInJira(text, bloecke) {
     if (hatFett()) return schreibeMitFett(el);
     try {
       const aus = el.ownerDocument || document;
-      // Ans Ende stellen, damit ein bereits getippter Text nicht ersetzt wird.
-      const sel = (aus.defaultView || window).getSelection();
-      if (sel && el.contains(sel.anchorNode) === false) {
-        const r = aus.createRange();
-        r.selectNodeContents(el);
-        r.collapse(false);
-        sel.removeAllRanges();
-        sel.addRange(r);
-      }
+      // Ganzen Inhalt markieren: `insertText` ERSETZT die Auswahl.
+      alleMarkieren(el);
       if (aus.execCommand && aus.execCommand("insertText", false, txt)) {
         return "insertText";
       }
     } catch (e) { /* weiter mit dem direkten Weg */ }
 
     const aus = el.ownerDocument || document;
+    // Ohne execCommand bleibt nur der harte Weg – dann aber ebenfalls
+    // ersetzend, sonst haette derselbe Knopf je Editor eine andere Wirkung.
+    leeren(el);
     for (const absatz of txt.split(/\n{2,}/)) {
       const p = aus.createElement("p");
       // textContent, nicht innerHTML – der Vorschlag ist Modelltext und darf
@@ -198,27 +232,44 @@ export function einfuegenInJira(text, bloecke) {
    */
   function schreibeMitFett(el) {
     const aus = el.ownerDocument || document;
-    const vorher = el.textContent || "";
+    const vorher = (el.textContent || "").replace(/\s+/g, " ").trim();
     const probe = klartext().replace(/\s+/g, " ").trim().slice(0, 24);
+    const alteProbe = vorher.slice(0, 24);
 
+    /* ⚠ DIE RUECKLESEPROBE MUSSTE MIT DEM UEBERSCHREIBEN UMGEBAUT WERDEN.
+     * Vorher hiess "angekommen" `jetzt.length > vorher.length` – das war fuer
+     * ANHAENGEN richtig und ist fuer ERSETZEN falsch: die ueberarbeitete
+     * Fassung darf kuerzer sein als der Entwurf, den sie ersetzt, und der Weg
+     * haette sich dann selbst fuer wirkungslos erklaert und waere auf den
+     * Rueckfall ohne Fett gefallen.
+     * Zwei Haelften, beide noetig:
+     *   – der NEUE Text ist da (Probetext gefunden),
+     *   – der ALTE ist weg. Ohne die zweite gilt ein wirkungsloses insertHTML
+     *     als Erfolg. Sie wird uebersprungen, wenn beide Texte gleich
+     *     ANFANGEN – das ist der haeufige Fall (die Korrektur beginnt wie der
+     *     Entwurf), und dort waere sie ein Fehlalarm. */
     function angekommen() {
       const jetzt = (el.textContent || "").replace(/\s+/g, " ");
-      return jetzt.length > vorher.length && (!probe || jetzt.indexOf(probe) >= 0);
+      if (probe && jetzt.indexOf(probe) < 0) return false;
+      if (alteProbe && alteProbe !== probe && jetzt.indexOf(alteProbe) >= 0) return false;
+      return jetzt.trim().length > 0;
     }
 
-    // 1) insertHTML
+    // 1) insertHTML – ersetzt die Auswahl, also den ganzen alten Inhalt.
     try {
       if (aus.execCommand) {
         const html = absaetze().map(function (laeufe) {
           return absatzKnoten(aus, laeufe).outerHTML;
         }).join("");
+        alleMarkieren(el);
         if (aus.execCommand("insertHTML", false, html) && angekommen()) {
           return "insertHTML+fett";
         }
       }
     } catch (e) { /* weiter mit Knoten */ }
 
-    // 2) Knoten anhaengen
+    // 2) Alten Inhalt entfernen und Knoten setzen
+    leeren(el);
     for (const laeufe of absaetze()) el.appendChild(absatzKnoten(aus, laeufe));
     el.dispatchEvent(new Event("input", { bubbles: true }));
     if (angekommen()) return "appendChild+fett";
@@ -226,6 +277,7 @@ export function einfuegenInJira(text, bloecke) {
     /* 3) Beides wirkungslos – der Editor fuehrt sein eigenes Modell. Jetzt
      * zaehlt nur noch, dass der TEXT ankommt. */
     try {
+      alleMarkieren(el);
       if (aus.execCommand && aus.execCommand("insertText", false, klartext())) {
         return "insertText ohne Fett";
       }
@@ -241,6 +293,9 @@ export function einfuegenInJira(text, bloecke) {
   }
   if (istTextfeld(ziel) && sichtbar(ziel)) {
     // Eine textarea kann kein Fett – dort geht der bereinigte Text hinein.
+    // `setzeWert` ERSETZT den Inhalt; dieser Weg hat also immer schon
+    // ueberschrieben, waehrend die Editor-Wege anhaengten. Genau diese
+    // Ungleichheit loest „Als Kommentar uebernehmen" auf.
     setzeWert(ziel, klartext());
     ziel.focus();
     return { ok: true, weg: "fokussiertes Textfeld" };
@@ -291,11 +346,13 @@ export function einfuegenInJira(text, bloecke) {
     koerper.focus();
     let weg = "innerHTML";
     if (hatFett()) {
+      leeren(koerper);                       // ersetzen, nicht anhaengen
       for (const laeufe of absaetze()) koerper.appendChild(absatzKnoten(aus, laeufe));
       koerper.dispatchEvent(new Event("input", { bubbles: true }));
       return { ok: true, weg: "iframe-Editor (appendChild+fett)" };
     }
     try {
+      alleMarkieren(koerper);                // insertText ersetzt die Auswahl
       if (aus.execCommand && aus.execCommand("insertText", false, text)) weg = "insertText";
       else throw new Error("kein insertText");
     } catch (e) {
@@ -520,14 +577,17 @@ export function einfuegenUeberEditorApi(text) {
   try {
     const tm = window.tinymce || (window.tinyMCE);
     if (tm && tm.activeEditor) {
-      // setContent ersetzt, insertContent haengt an der Cursorposition an.
+      /* `setContent` ERSETZT, `insertContent` haengt an der Cursorposition an.
+       * Genommen wird setContent: „Als Kommentar uebernehmen" ersetzt den
+       * vorhandenen Inhalt, und dieser Weg muss dasselbe tun wie die uebrigen –
+       * ein Knopf mit editorabhaengiger Wirkung ist nicht erklaerbar. */
       const html = text.split(/\n{2,}/).map(function (p) {
         const d = document.createElement("p");
         d.textContent = p.replace(/\n/g, " ");
         return d.outerHTML;
       }).join("");
-      tm.activeEditor.insertContent(html);
-      return { ok: true, weg: "tinymce.insertContent" };
+      tm.activeEditor.setContent(html);
+      return { ok: true, weg: "tinymce.setContent" };
     }
     if (tm && tm.editors && tm.editors.length) {
       tm.editors[0].setContent(text.replace(/\n/g, "<br>"));

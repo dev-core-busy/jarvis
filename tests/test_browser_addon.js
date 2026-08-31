@@ -3439,6 +3439,256 @@ function feldWelt() {
         "und es ist keine textarea mehr");
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+section('16) „Als Kommentar uebernehmen" ERSETZT, statt anzuhaengen');
+// ═══════════════════════════════════════════════════════════════════════════
+/* VORGABE 2026-08-31: der Knopf hiess „Ins Kommentarfeld einfuegen" und haengte
+ * an – aber nur bei den EDITOR-Wegen; die textarea-Wege ersetzten schon immer.
+ * Dieselbe Beschriftung hatte also je Jira-Betriebsart eine andere Wirkung.
+ *
+ * ⚠ DIE ATTRAPPE FUER `execCommand` MUSS DIE AUSWAHL BEACHTEN. Die Attrappe in
+ * Abschnitt 6f haengt bedingungslos an – gegen sie waere „ersetzt" gar nicht
+ * messbar, und der Waechter waere mit der ANHAENGENDEN Fassung gruen. Hier wird
+ * deshalb der Browser nachgebaut: `insertText`/`insertHTML` LOESCHEN zuerst die
+ * markierte Auswahl (jsdom kann `Range.deleteContents`). */
+{
+  const bloeckeAus = (text) => {
+    const { w, F } = feldWelt();
+    const b = F.zuBloecken(text);
+    w.close();
+    return JSON.parse(JSON.stringify(b));   // wie ueber executeScript: JSON
+  };
+
+  /** @param execAntwort true = Editor nimmt execCommand an, false = nicht,
+   *                     null = es gibt kein execCommand (reine textarea). */
+  function uebernahme(html, text, execAntwort) {
+    const dom = new JSDOM("<body>" + html + "</body>",
+      { url: "https://jira.test/browse/A-1", runScripts: "outside-only" });
+    const w = dom.window, doc = w.document;
+    w.Element.prototype.getBoundingClientRect = () => ({ width: 300, height: 80 });
+    w.Element.prototype.scrollIntoView = function () {};
+    const ruf = [];
+    if (execAntwort !== null) {
+      doc.execCommand = (befehl, u, wert) => {
+        ruf.push(befehl);
+        if (!execAntwort) return false;
+        const ziel = doc.querySelector("[contenteditable]") || doc.activeElement;
+        if (!ziel) return false;
+        // WIE DER BROWSER: erst die Auswahl weg, dann einsetzen.
+        const sel = w.getSelection();
+        if (sel && sel.rangeCount) { try { sel.getRangeAt(0).deleteContents(); } catch (e) {} }
+        if (befehl === "insertText") {
+          ziel.appendChild(doc.createTextNode(wert));
+        } else if (befehl === "insertHTML") {
+          const h = doc.createElement("div");
+          h.innerHTML = wert;
+          while (h.firstChild) ziel.appendChild(h.firstChild);
+        } else { return false; }
+        return true;
+      };
+    }
+    const r = ladeEinfuegen(w)(text, bloeckeAus(text));
+    const ziel = doc.querySelector("[contenteditable]") || doc.querySelector("textarea");
+    const erg = {
+      ok: r.ok, weg: String(r.weg || ""), ruf,
+      inhalt: ziel
+        ? (ziel.tagName === "TEXTAREA" ? ziel.value : ziel.textContent)
+        : "",
+      fett: (ziel && ziel.querySelectorAll) ? ziel.querySelectorAll("strong").length : 0,
+    };
+    w.close();
+    return erg;
+  }
+
+  const ALT  = "Guten Tag Herr Mueller, das schauen wir uns an. MfG";
+  const NEU  = "Sehr geehrter Herr Mueller,\n\ndas Problem ist behoben.";
+  const NEUF = "**Loesung:** Das Problem ist behoben.";
+
+  // 1) contenteditable mit Entwurf, ohne Fett – der Regelweg.
+  {
+    const r = uebernahme('<div contenteditable="true">' + ALT + '</div>', NEU, true);
+    check(r.inhalt.indexOf("behoben.") >= 0, "der neue Text kommt an", r.inhalt);
+    check(r.inhalt.indexOf("Guten Tag Herr Mueller") < 0,
+          "und der alte Entwurf ist WEG (ersetzt, nicht angehaengt)", r.inhalt);
+    check(r.ruf.indexOf("insertText") >= 0,
+          "ueber insertText – geht durch den Editor und bleibt ruecknehmbar",
+          r.ruf.join(","));
+  }
+
+  // 2) Derselbe Fall ohne execCommand: der harte Weg muss ebenso ersetzen,
+  //    sonst haette EIN Knopf je Editor zwei verschiedene Wirkungen.
+  {
+    const r = uebernahme('<div contenteditable="true">' + ALT + '</div>', NEU, false);
+    check(r.inhalt.indexOf("behoben.") >= 0, "Knotenweg: der neue Text kommt an", r.inhalt);
+    check(r.inhalt.indexOf("Guten Tag Herr Mueller") < 0,
+          "Knotenweg: der alte Entwurf ist ebenfalls weg", r.inhalt);
+  }
+
+  // 3) Mit Fett ueber insertHTML.
+  {
+    const r = uebernahme('<div contenteditable="true">' + ALT + '</div>', NEUF, true);
+    check(r.fett === 1, "mit Fett steht ein <strong> im Ziel", String(r.fett));
+    check(r.inhalt.indexOf("Guten Tag Herr Mueller") < 0,
+          "und der alte Entwurf ist weg", r.inhalt);
+    check(/insertHTML\+fett/.test(r.weg), "gemeldet wird der insertHTML-Weg", r.weg);
+  }
+
+  // 4) Mit Fett, aber der Editor nimmt execCommand nicht an.
+  {
+    const r = uebernahme('<div contenteditable="true">' + ALT + '</div>', NEUF, false);
+    check(r.fett === 1, "Knotenweg: Fett kommt an", String(r.fett));
+    check(r.inhalt.indexOf("Guten Tag Herr Mueller") < 0,
+          "Knotenweg: der alte Entwurf ist weg", r.inhalt);
+  }
+
+  /* 5) ⚠ DER FALL, DER DIE RUECKLESEPROBE UMBAUEN MUSSTE: die uebernommene
+   * Fassung ist KUERZER als der Entwurf, den sie ersetzt. Die alte Probe hiess
+   * `jetzt.length > vorher.length` – damit haette sich der insertHTML-Weg
+   * selbst fuer wirkungslos erklaert und waere auf `insertText` OHNE Fett
+   * gefallen: Fett verloren, ohne dass etwas kaputt war. */
+  {
+    const lang = "Sehr geehrter Herr Mueller, ".repeat(12);
+    const r = uebernahme('<div contenteditable="true">' + lang + '</div>', NEUF, true);
+    check(/insertHTML\+fett/.test(r.weg),
+          "eine KUERZERE Ersetzung gilt trotzdem als angekommen", r.weg);
+    check(!/ohne Fett/.test(r.weg),
+          "und NICHT als Rueckfall ohne Fett – das war der alte length-Fehler", r.weg);
+    check(r.fett === 1, "das Fett bleibt dabei erhalten", String(r.fett));
+    check(r.inhalt.length < lang.length, "und der lange Entwurf ist ersetzt",
+          String(r.inhalt.length) + " vs " + lang.length);
+  }
+
+  // 6) textarea: verhielt sich schon immer ersetzend – das bleibt so.
+  {
+    const r = uebernahme('<textarea id="comment">' + ALT + '</textarea>', NEUF, null);
+    check(r.inhalt.indexOf("Guten Tag") < 0, "textarea: alter Inhalt ersetzt", r.inhalt);
+    check(r.inhalt.indexOf("Loesung:") >= 0 && r.inhalt.indexOf("**") < 0,
+          "textarea: neuer Text ohne Sternchen", r.inhalt);
+  }
+
+  // 7) Gegenrichtung: ein LEERES Feld verhaelt sich unveraendert.
+  {
+    const r = uebernahme('<div contenteditable="true"></div>', NEU, true);
+    check(r.ok === true && r.inhalt.indexOf("behoben.") >= 0,
+          "in ein leeres Feld wird wie bisher geschrieben", r.inhalt);
+  }
+}
+
+// ── b) Der iframe-Editor (Jira Server mit Rich-Text) ersetzt ebenfalls ───
+{
+  const dom = new JSDOM('<body><iframe id="ed"></iframe></body>',
+    { url: "https://jira.test/browse/A-1", runScripts: "outside-only" });
+  const w = dom.window, doc = w.document;
+  w.Element.prototype.getBoundingClientRect = () => ({ width: 300, height: 80 });
+  w.Element.prototype.scrollIntoView = function () {};
+  const rahmen = doc.getElementById("ed");
+  const idoc = rahmen.contentDocument;
+  idoc.body.setAttribute("contenteditable", "true");
+  idoc.body.textContent = "alter Entwurf im Rahmen";
+  const ruf = [];
+  idoc.execCommand = (befehl, u, wert) => {
+    ruf.push(befehl);
+    const sel = idoc.defaultView.getSelection();
+    if (sel && sel.rangeCount) { try { sel.getRangeAt(0).deleteContents(); } catch (e) {} }
+    if (befehl !== "insertText") return false;
+    idoc.body.appendChild(idoc.createTextNode(wert));
+    return true;
+  };
+  const r = ladeEinfuegen(w)("Neuer Text.", null);
+  check(r.ok === true && /iframe/.test(String(r.weg)),
+        "der iframe-Editor wird gefunden", JSON.stringify(r));
+  check(idoc.body.textContent.indexOf("alter Entwurf") < 0,
+        "und sein Inhalt wird ERSETZT, nicht ergaenzt", idoc.body.textContent);
+  check(idoc.body.textContent.indexOf("Neuer Text.") >= 0,
+        "der neue Text steht darin", idoc.body.textContent);
+  w.close();
+}
+
+// ── c) Der Editor-API-Weg benutzt setContent, nicht insertContent ────────
+/* `insertContent` haengt an der Cursorposition an – dieser Weg haette dann als
+ * einziger noch angehaengt, und ein Knopf mit editorabhaengiger Wirkung ist
+ * nicht erklaerbar. */
+{
+  const { w } = mitDom("<body></body>", (w) => w, "einfuegenUeberEditorApi");
+  const dom = new JSDOM("<body></body>", { runScripts: "outside-only" });
+  const fw = dom.window;
+  const ruf = [];
+  fw.tinymce = {
+    activeEditor: {
+      setContent: (h) => ruf.push("setContent:" + h),
+      insertContent: (h) => ruf.push("insertContent:" + h),
+    },
+  };
+  const f = ladeEinfuegen(fw, "einfuegenUeberEditorApi");
+  const r = f("Neuer Text.");
+  check(r.ok === true, "der Editor-API-Weg meldet Erfolg", JSON.stringify(r));
+  check(ruf.some((x) => x.indexOf("setContent:") === 0),
+        "es wird setContent gerufen (ersetzt)", ruf.join(" | "));
+  check(!ruf.some((x) => x.indexOf("insertContent:") === 0),
+        "und NICHT insertContent (das wuerde anhaengen)", ruf.join(" | "));
+  check(/setContent/.test(String(r.weg)), "der gemeldete Weg nennt setContent", r.weg);
+  fw.close();
+  if (w && w.close) w.close();
+}
+
+// ── d) Beschriftung und Rueckmeldung sagen, was passiert ─────────────────
+{
+  check(/id="btn-einfuegen">Als Kommentar übernehmen</.test(POPUP_HTML),
+        'der Knopf heisst „Als Kommentar übernehmen"');
+  // Der alte Wortlaut darf nirgends stehenbleiben – sonst beschreibt die
+  // Anleitung einen Knopf, den es nicht mehr gibt.
+  for (const [name, inhalt] of [["popup.html", POPUP_HTML], ["popup.js", POPUP_JS],
+                                ["popup.css", POPUP_CSS], ["einfuegen.js", EINFUEGEN]]) {
+    check(!/Ins Kommentarfeld einfügen/.test(inhalt),
+          name + ": der alte Wortlaut kommt nicht mehr vor");
+  }
+  check(/id="uebernehmen-hinweis"/.test(POPUP_HTML),
+        "im Fenster steht, dass der bisherige Inhalt ersetzt wird");
+  check(/uebernehmen-hinweis[\s\S]{0,240}ersetzt/.test(POPUP_HTML),
+        'und zwar mit dem Wort „ersetzt“');
+  const pj = ohneKommentare(POPUP_JS);
+  check(/melde\("Als Kommentar übernommen"/.test(pj),
+        'die Erfolgsmeldung heisst „übernommen“, nicht „eingefügt“');
+  check(/wurde ersetzt/.test(pj),
+        "und sie nennt das Ersetzen – sonst haelt es der Benutzer fuer einen Fehler");
+}
+
+// ── e) Version hochgezaehlt (Verhaltensaenderung, nicht nur Beschriftung) ─
+{
+  const vC = JSON.parse(lies("manifest.json")).version;
+  const vF = JSON.parse(lies("manifest.firefox.json")).version;
+  check(vC === vF, "beide Manifeste tragen dieselbe Version", vC + " / " + vF);
+  const zahl = (v) => v.split(".").map(Number);
+  const [a, b] = zahl(vC);
+  check(a > 0 || b >= 6,
+        "die Version ist ueber 0.5.0 hinaus – das Verhalten hat sich geaendert", vC);
+}
+
+// ── f) Die Anleitung im Portal nennt denselben Knopf ─────────────────────
+/* Der Waechter greift ueber `browser-addon/` hinaus, weil die Anleitung im
+ * Portal liegt: ein Text, der ein Bedienelement bei einem Namen nennt, den es
+ * nicht mehr gibt, schickt den Benutzer suchen (Register). */
+{
+  const FE = path.join(WURZEL, "frontend");
+  const i18n = fs.readFileSync(path.join(FE, "js/i18n.js"), "utf8");
+  const seite = fs.readFileSync(path.join(FE, "jira_addon.html"), "utf8");
+  check(!/Ins Kommentarfeld einfügen/.test(i18n),
+        "i18n.js kennt den alten Wortlaut nicht mehr");
+  check(!/Ins Kommentarfeld einfügen/.test(seite),
+        "das Rueckfall-Markup ebenfalls nicht");
+  check(!/Insert into comment field/.test(i18n),
+        "auch nicht in Englisch");
+  // Beide Sprachen muessen das Ersetzen nennen – es ist die Aenderung, die
+  // jemanden ueberraschen kann.
+  const de = (i18n.match(/'jaddon\.use_5':\s*'([^']*)'/) || ["", ""])[1];
+  const alleUse5 = [...i18n.matchAll(/'jaddon\.use_5':\s*'([^']*)'/g)].map((m) => m[1]);
+  check(alleUse5.length === 2, "es gibt jaddon.use_5 in DE und EN", String(alleUse5.length));
+  check(alleUse5.every((t) => /ersetzt|replaces/.test(t)),
+        "beide Fassungen nennen das Ersetzen", alleUse5.join(" ||| ").slice(0, 200));
+  check(de && seite.indexOf("Als Kommentar übernehmen") >= 0,
+        "das Rueckfall-Markup nennt den neuen Namen");
+}
+
 /* Erst den Puffer leeren: eine Zurueckweisung aus einem nicht abgewarteten
  * Aufruf wird sonst womoeglich erst nach der Zusammenfassung gemeldet. */
 await new Promise((r) => setTimeout(r, 20));

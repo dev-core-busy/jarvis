@@ -208,20 +208,30 @@
            aria-multiline="true" spellcheck="true"
            data-platzhalter="Hier steht gleich der Vorschlag."></div>
       <div class="knopfreihe">
-        <button type="button" id="btn-einfuegen">Ins Kommentarfeld einfügen</button>
+        <button type="button" id="btn-einfuegen">Als Kommentar übernehmen</button>
         <button type="button" id="btn-kopieren" class="leise">Kopieren</button>
         <!-- Von Hand leeren. Steht hier, weil hier der Text steht, den man
              loswerden will – und er räumt auch das GEDÄCHTNIS ab, nicht nur
              die Anzeige (siehe popup.js::felderLeeren). -->
         <button type="button" id="btn-leeren" class="leise" title="Text und Zusatzwunsch verwerfen">Leeren</button>
       </div>
+      <!-- ÜBERSCHREIBEN GEHÖRT ANGESAGT (Vorgabe 2026-08-31). Der Knopf
+           ersetzt den Inhalt des Kommentarfeldes – das ist gewollt (der Text
+           hier IST in der Regel die überarbeitete Fassung genau dieses
+           Entwurfs), aber niemand darf davon überrascht werden. Rückgängig
+           machen geht in Jira mit Strg+Z, weil über die Auswahl ersetzt wird
+           und nicht am DOM vorbei. -->
+      <p class="hinweis" id="uebernehmen-hinweis">
+        <b>Als Kommentar übernehmen</b> <b>ersetzt</b> den bisherigen Inhalt des
+        Kommentarfeldes. In Jira holt Strg+Z ihn zurück.
+      </p>
       <p class="fussnote" id="ergebnis-fuss"></p>
     </div>
 
     <!-- Rückfrage, wenn der gemerkte Text zu einem anderen Ticket gehört.
          Eigener Dialog statt confirm() – siehe popup.js::frageJaNein. -->
     <div class="ja-nein" id="ja-nein" hidden>
-      <p id="jn-text">Der Text gehört zu einem <b>anderen Ticket</b>. Trotzdem einfügen?</p>
+      <p id="jn-text">Der Text gehört zu einem <b>anderen Ticket</b>. Trotzdem übernehmen?</p>
       <div class="knopfreihe">
         <button type="button" id="jn-nein" class="leise" data-ohne-ticket>Abbrechen</button>
         <button type="button" id="jn-ja" data-ohne-ticket>Trotzdem einfügen</button>

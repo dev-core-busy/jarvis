@@ -256,13 +256,18 @@ function sichtbareTexte(html) {
     s = s.replace(/<script\b[\s\S]*?<\/script>/gi, '<script></script>');
     s = s.replace(/<style\b[\s\S]*?<\/style>/gi, '<style></style>');
     const aus = [];
-    const re = /(<[a-zA-Z][^<>]*>)([^<>]*\bJarvis\b[^<>]*)(?=<)/g;
+    // ⚠ `</?` – auch nach einem SCHLIESSENDEN Tag steht Text. Das Muster
+    // verlangte ein oeffnendes und uebersah damit fuenf Stellen, darunter
+    // "Wissensgruppen sind in Jarvis keine Leseschranke" (settings.html).
+    // Aufgefallen ist das nicht beim Lesen, sondern weil ein
+    // Playwright-Klick auf genau diesen Text in den Timeout lief.
+    const re = /(<\/?[a-zA-Z][^<>]*>)([^<>]*\bJarvis\b[^<>]*)(?=<)/g;
     let m;
     while ((m = re.exec(s))) {
         const tag = m[1], txt = m[2].trim();
         if (!txt) continue;
-        if (/brand-app-name|data-i18n/.test(tag)) continue;
-        if (/^<(title|script|style)\b/i.test(tag)) continue;
+        if (/brand-app-name|data-i18n|login-title/.test(tag)) continue;
+        if (/^<\/?(title|script|style)\b/i.test(tag)) continue;
         if (OHNE_I18N_AUSNAHMEN.some((a) => tag.includes(a) || txt.includes(a))) continue;
         aus.push({ tag, txt });
     }

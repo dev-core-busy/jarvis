@@ -7663,6 +7663,32 @@ select.input-field {
     border-top: 1px solid var(--border);
 }
 
+/* ── Jira-Vorlagen (jira.js): dieselbe Struktur wie `.role-card` ────────────
+   Der Rahmen gehoert der KARTE, die Zeile macht nur Layout – nur so ist das
+   aufgeklappte Formular EINE Box mit dem Eintrag und nicht eine zweite
+   darunter. `min-width: 0` an der Textspalte ist Pflicht: ein Flex-Kind
+   schrumpft von sich aus nicht unter seine Inhaltsbreite, ein langer
+   Anweisungstext wuerde die Knopfleiste sonst aus der Karte druecken. */
+.jvorl-card {
+    border: 1px solid var(--border); border-radius: 8px;
+    background: var(--bg-glass); overflow: hidden;
+}
+.jvorl-card.is-editing { border-color: var(--accent); }
+.jvorl-row {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    gap: 10px; padding: 8px 10px;
+}
+.jvorl-row-main { flex: 1; min-width: 0; }
+.jvorl-edit-box {
+    margin-top: 14px; padding: 14px;
+    border: 1px solid var(--border); border-radius: var(--radius-md);
+    background: var(--bg-glass);
+}
+.jvorl-card > .jvorl-edit-box {
+    margin: 0; border: none; border-radius: 0; background: transparent;
+    border-top: 1px solid var(--border);
+}
+
 
 /* ── Modell-Fähigkeiten (model_caps.js) ──────────────────────────────────────
  * Der ⓘ-Knopf neben dem 🔍 im Profil-Formular und das Ergebnis-Panel darunter.

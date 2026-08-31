@@ -244,6 +244,129 @@ function text(d, id) { const e = d.getElementById(id); return e ? e.textContent 
           text(d, 'jvorl-status'));
 
     // ══════════════════════════════════════════════════════════════════════
+    section('3b) Das Formular steht DIREKT UNTER dem bearbeiteten Eintrag');
+    // ══════════════════════════════════════════════════════════════════════
+    /* GEMELDET 2026-08-31: "muss wie ansonsten auch ueberall im Projekt DIREKT
+     * UNTERHALB des zu bearbeitenden Eintrags erfolgen und nicht irgendwo am
+     * Ende der Seite". Zutreffend – das Formular lag statisch unter der Liste,
+     * "Bearbeiten" fuellte nur die Felder. Vier andere Module machen es richtig
+     * (agent_roles.js, wissen.js, tracks.js, email_portal.js).
+     *
+     * Gemessen wird die LAGE im DOM, nicht das Vorhandensein einer Funktion:
+     * ein Test, der nur `_platziereVorl` im Quelltext sucht, bleibt gruen,
+     * wenn der Aufruf fehlt. */
+    {
+        const st = { calls: [], global: JSON.parse(JSON.stringify(START.global)),
+                     eigene: JSON.parse(JSON.stringify(START.eigene)),
+                     darfGlobal: true, standard: '' };
+        const dm = makeDom(st);
+        const wv = dm.window, dv = wv.document;
+        wv.JiraManager.onShow();
+        await sleep(30);
+
+        const liste = dv.getElementById('jvorl-liste');
+        const form0 = dv.getElementById('jvorl-edit');
+        check('das Formular ist da und startet AUSSERHALB der Liste',
+              !!form0 && !!liste && !liste.contains(form0));
+        check('und es ist versteckt, solange nichts bearbeitet wird',
+              !!form0 && form0.style.display === 'none', form0 && form0.style.display);
+
+        // ── Bearbeiten: unter die angeklickte Zeile ──────────────────────
+        klickKnopf(wv, dv, 1, 'edit', 'Bearbeiten der ZWEITEN Zeile');
+        const f = dv.getElementById('jvorl-edit');
+        const karte1 = liste.children[1];
+        check('das Formular liegt IN der Karte des bearbeiteten Eintrags',
+              !!f && !!karte1 && karte1.contains(f),
+              f ? (f.parentNode && f.parentNode.className) : 'kein Formular');
+        check('und zwar direkt hinter dessen Zeile (nicht davor)',
+              !!karte1 && karte1.children.length === 2
+              && karte1.children[0].classList.contains('jvorl-row')
+              && karte1.children[1] === f,
+              karte1 ? Array.from(karte1.children).map((c) => c.className).join(' | ') : '');
+        check('es ist sichtbar', !!f && f.style.display !== 'none');
+        check('NICHT in der Karte des anderen Eintrags',
+              !liste.children[0].contains(f));
+        check('die bearbeitete Karte ist markiert',
+              !!karte1 && karte1.classList.contains('is-editing'));
+        check('der Titel im Formular nennt den Eintrag',
+              /Mein Blick/.test(text(dv, 'jvorl-edit-title')), text(dv, 'jvorl-edit-title'));
+
+        // ── Zweiter Eintrag: das Formular wandert MIT, es gibt nur eines ──
+        klickKnopf(wv, dv, 0, 'edit', 'Bearbeiten der ERSTEN Zeile');
+        check('es gibt immer nur EIN Formular',
+              dv.querySelectorAll('#jvorl-edit, .jvorl-edit-box').length === 1,
+              String(dv.querySelectorAll('.jvorl-edit-box').length));
+        check('es ist zur ersten Karte gewandert', liste.children[0].contains(f));
+        check('und die alte Markierung ist weg',
+              !liste.children[1].classList.contains('is-editing'));
+
+        // ── Abbrechen holt es heim ───────────────────────────────────────
+        klick(wv, dv, '#jvorl-cancel', 0, 'Abbrechen');
+        check('Abbrechen versteckt das Formular', f.style.display === 'none');
+        check('und holt es aus der Liste heraus', !liste.contains(f));
+        check('keine Karte bleibt markiert',
+              !liste.querySelector('.jvorl-card.is-editing'));
+        check('die Felder sind leer', wert(dv, 'jvorl-name') === ''
+              && wert(dv, 'jvorl-text') === '');
+
+        // ── "Neu" oeffnet am Heimatplatz, nicht mitten in der Liste ──────
+        klick(wv, dv, '#jvorl-new', 0, 'Neu');
+        check('"Neu" oeffnet das Formular', f.style.display !== 'none');
+        check('aber AUSSERHALB der Liste – es gehoert zu keinem Eintrag',
+              !liste.contains(f));
+
+        // ── DER Fallstrick: der Neuaufbau der Liste darf es nicht fressen ─
+        klickKnopf(wv, dv, 1, 'edit', 'Bearbeiten (fuer den Neuaufbau)');
+        check('Vorbedingung: Formular steckt in der Liste', liste.contains(f));
+        st.calls.length = 0;
+        dv.getElementById('jvorl-name').value = 'Neuer Name';
+        dv.getElementById('jvorl-text').value = 'Neuer Text';
+        klick(wv, dv, '#jvorl-save', 0, 'Speichern aus der Liste heraus');
+        await sleep(60);
+        check('das Formular existiert nach dem Neuaufbau noch',
+              !!dv.getElementById('jvorl-edit'));
+        check('es steht wieder am Heimatplatz',
+              !liste.contains(dv.getElementById('jvorl-edit')));
+        check('und der Erfolg steht in der Leiste (die nicht mitverschwindet)',
+              /Gespeichert|Saved/i.test(text(dv, 'jvorl-status')), text(dv, 'jvorl-status'));
+        check('der Status-Span liegt AUSSERHALB des Formulars',
+              !!dv.getElementById('jvorl-status')
+              && !dv.getElementById('jvorl-edit').contains(dv.getElementById('jvorl-status')));
+
+        /* ⚠ DIESE PRUEFUNG FEHLTE ZUERST – und die Gegenprobe hat es gezeigt:
+         * das Heimholen in loadVorlagen() liess sich entfernen, ohne dass ein
+         * Test anschlug. Grund: auf dem Speichern-Weg holt closeVorlage() das
+         * Formular schon heim, die zweite Schranke war also nie entscheidend.
+         *
+         * Entscheidend ist sie hier: ein Klick auf den STERN einer anderen
+         * Zeile laedt die Liste neu, WAEHREND das Formular in einer Karte
+         * steckt. Ohne Heimholen raeumt `innerHTML = ''` es mit ab – und
+         * `$('jvorl-edit')` ist danach fuer immer null, der Reiter also tot,
+         * bis die Seite neu geladen wird. */
+        klickKnopf(wv, dv, 0, 'edit', 'Bearbeiten (fuer den Stern-Klick)');
+        check('Vorbedingung: Formular steckt wieder in der Liste', liste.contains(f));
+        klickKnopf(wv, dv, 1, 'stern', 'Stern der ANDEREN Zeile');
+        await sleep(60);
+        check('ein Neuaufbau ohne Schliessen frisst das Formular nicht',
+              !!dv.getElementById('jvorl-edit'));
+        check('und es steht danach am Heimatplatz',
+              !!dv.getElementById('jvorl-edit')
+              && !liste.contains(dv.getElementById('jvorl-edit')));
+
+        // Die Karte traegt den Rahmen, die Zeile nur Layout – sonst waere das
+        // aufgeklappte Formular eine zweite Box unter der ersten.
+        const CSS = read('frontend/css/style.css');
+        check('.jvorl-card traegt den Rahmen', /\.jvorl-card\s*\{[^}]*border:\s*1px/.test(CSS));
+        check('.jvorl-row bringt keinen eigenen Rahmen mit',
+              !/\.jvorl-row\s*\{[^}]*border:\s*1px/.test(CSS));
+        check('das eingehaengte Formular verliert Rahmen und Radius',
+              /\.jvorl-card\s*>\s*\.jvorl-edit-box\s*\{[^}]*border:\s*none/.test(CSS));
+        check('die Textspalte darf schrumpfen (min-width: 0)',
+              /\.jvorl-row-main\s*\{[^}]*min-width:\s*0/.test(CSS));
+        dm.window.close();
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
     section('4) Löschen fragt nach und trifft die richtige Vorlage');
     // ══════════════════════════════════════════════════════════════════════
     state.calls.length = 0;
@@ -374,9 +497,30 @@ function text(d, id) { const e = d.getElementById(id); return e ? e.textContent 
         // "Tickets suchen" VOR den Vorlagen – der alte Textanker schnitt den
         // Abschnitt damit komplett weg und der Test meldete 3 statt 8
         // Schluesseln. Eine Id ist die stabilere Grenze.
+        /* ⚠ HIER STAND EINMAL `HTML.indexOf('</div>', …'jvorl-status'…)`.
+         * Der Status-Span wanderte beim Umbau des Formulars (2026-08-31) VOR
+         * die Liste – damit endete der Schnitt gleich hinter der Werkzeugleiste
+         * und der Test meldete 4 statt 8 Schluesseln, obwohl nichts kaputt war.
+         * Dieselbe Falle wie beim Reiter-Schnitt in test_email_ui.js: eine
+         * Grenze gehoert an die STRUKTUR, nicht an die Lage eines Elements. */
         const iStart = HTML.indexOf('id="ji-sect-vorl"');
-        const abschnitt = iStart < 0 ? ''
-            : HTML.slice(iStart, HTML.indexOf('</div>', HTML.indexOf('jvorl-status', iStart)));
+        const abschnitt = iStart < 0 ? '' : (function () {
+            // Vom oeffnenden <div> des Abschnitts bis zu seinem </div> zaehlen.
+            const von = HTML.lastIndexOf('<div', iStart);
+            let tiefe = 0, i = von;
+            const re = /<div\b|<\/div>/g;
+            re.lastIndex = von;
+            let m;
+            while ((m = re.exec(HTML))) {
+                tiefe += m[0] === '</div>' ? -1 : 1;
+                if (tiefe === 0) { i = m.index + m[0].length; break; }
+            }
+            return HTML.slice(von, i);
+        })();
+        check('die Schnittgrenze umfasst den ganzen Abschnitt',
+              abschnitt.includes('jvorl-liste') && abschnitt.includes('jvorl-save')
+              && abschnitt.includes('jvorl-cancel') && !abschnitt.includes('jira-search-q'),
+              String(abschnitt.length));
         const keys = Array.from(new Set(
             (abschnitt.match(/data-i18n(?:-html|-placeholder)?="([^"]+)"/g) || [])
                 .map((m) => m.replace(/.*="([^"]+)"/, '$1'))));

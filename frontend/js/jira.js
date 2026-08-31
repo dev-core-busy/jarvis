@@ -89,7 +89,9 @@
             });
             var vs = $('jvorl-save'); if (vs) vs.addEventListener('click', this.saveVorlage.bind(this));
             var vn = $('jvorl-new');
-            if (vn) vn.addEventListener('click', function () { Manager.editVorlage(null, false); });
+            if (vn) vn.addEventListener('click', function () { Manager.editVorlage(null, false, null); });
+            var vc = $('jvorl-cancel');
+            if (vc) vc.addEventListener('click', function () { Manager.closeVorlage(); });
             // Auge: PAT anzeigen/verbergen (analog Confluence-Reiter)
             var tt = $('jira-token-toggle');
             if (tt) tt.addEventListener('click', function () {
@@ -246,6 +248,43 @@
            Oberflaeche, die das Haekchen versteckt, ist keine Schranke. */
         _vorlagen: { global: [], eigene: [], darf_global: false, standard: '' },
         _vorlBearbeitet: '',
+        _vorlHeim: null,        // Heimatplatz des wandernden Formulars
+
+        /* ── Das Formular wandert, es gibt aber nur EINEN Container ──────────
+           Es wird beim Bearbeiten als KIND in die Karte des Eintrags gehaengt.
+           Bisher lag es statisch unter der Liste: "Bearbeiten" fuellte nur die
+           Felder, und man musste ans Ende des Abschnitts scrollen, um zu sehen,
+           was man gerade aendert. Muster und Fallstricke wie bei den
+           Rollen-Agenten (agent_roles.js), /wissen, /tracks und den
+           E-Mail-Regeln – hier war es die letzte Stelle ohne:
+
+             - Der Heimatplatz wird NUR beim ersten Verschieben gemerkt. Ein
+               spaeteres Auslesen wuerde die verschobene Position als "Heimat"
+               festschreiben, und das Formular blieb fuer immer in der Liste.
+             - Vor jedem Neuaufbau der Liste MUSS es heimgeholt werden, sonst
+               raeumt `innerHTML = ''` es mit ab und `$('jvorl-edit')` ist
+               danach null.
+             - KIND der Karte, nicht Geschwister: nur so ist es EINE Box. Als
+               Nachbar danebengesetzt bleibt eine sichtbare Fuge, und die
+               Zugehoerigkeit zum Eintrag ist geraten statt gezeigt. */
+        _platziereVorl: function (karte) {
+            var f = $('jvorl-edit');
+            if (!f) return;
+            if (!this._vorlHeim) {
+                this._vorlHeim = { parent: f.parentNode, next: f.nextSibling };
+            }
+            var box = $('jvorl-liste');
+            if (box) {
+                Array.prototype.forEach.call(box.querySelectorAll('.jvorl-card.is-editing'),
+                    function (k) { k.classList.remove('is-editing'); });
+            }
+            if (karte && karte.classList && karte.classList.contains('jvorl-card')) {
+                karte.appendChild(f);
+                karte.classList.add('is-editing');
+            } else if (this._vorlHeim.parent) {
+                this._vorlHeim.parent.insertBefore(f, this._vorlHeim.next);
+            }
+        },
 
         /* ── Wer hat einen eigenen Jira-Token? (2026-08-28) ─────────────────
            Seit der persoenliche Zugang existiert, ist der oben hinterlegte
@@ -322,6 +361,8 @@
 
         loadVorlagen: function () {
             var box = $('jvorl-liste'); if (!box) return;
+            // Formular heimholen, BEVOR die Liste ueberschrieben wird.
+            this._platziereVorl(null);
             box.innerHTML = '<span class="kb-hint">' + esc(t('jvorl.loading', 'Lade Vorlagen …')) + '</span>';
             fetch('/api/jira/assist/vorlagen', { headers: authHeaders() })
                 .then(function (r) { return r.json(); })
@@ -342,6 +383,9 @@
 
         renderVorlagen: function () {
             var box = $('jvorl-liste'); if (!box) return;
+            // Zweites Netz: wer renderVorlagen kuenftig direkt ruft, darf das
+            // Formular nicht mitloeschen. Idempotent.
+            this._platziereVorl(null);
             var v = this._vorlagen;
             var zeile = $('jvorl-global-zeile');
             // Wer keine gemeinsamen Vorlagen anlegen darf, sieht das Haekchen
@@ -357,12 +401,16 @@
             alle.forEach(function (e) {
                 // Aendern darf man Eigenes immer, Gemeinsames nur als Admin.
                 var darf = !e.global || v.darf_global;
+                /* Karte traegt den Rahmen, die Zeile nur das Layout. Das ist
+                   der Unterschied zwischen "eine Box" und "zwei Boxen
+                   uebereinander" – Radien und Kanten zu kaschieren hat im
+                   Projekt schon zweimal nicht gereicht (siehe .role-card). */
+                var karte = document.createElement('div');
+                karte.className = 'jvorl-card';
                 var row = document.createElement('div');
-                row.style.cssText = 'display:flex;justify-content:space-between;align-items:flex-start;'
-                    + 'gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;'
-                    + 'background:var(--bg-glass);';
+                row.className = 'jvorl-row';
                 var links = document.createElement('span');
-                links.style.cssText = 'min-width:0;';
+                links.className = 'jvorl-row-main';
                 // textContent: Name und Text sind Freitext aus einem Formular.
                 var titel = document.createElement('span');
                 titel.style.fontWeight = '600';
@@ -409,7 +457,7 @@
                     b.className = 'kb-hdr-btn';
                     b.title = t('jvorl.edit', 'Bearbeiten');
                     b.textContent = '✎';
-                    b.addEventListener('click', function () { Manager.editVorlage(e.v, e.global); });
+                    b.addEventListener('click', function () { Manager.editVorlage(e.v, e.global, karte); });
                     knoepfe.appendChild(b);
                     var w = document.createElement('button');
                     w.type = 'button';
@@ -424,7 +472,8 @@
                 // AUSSERHALB von `darf`: der Stern steht an jeder Zeile, also
                 // muss auch die Knopfleiste immer in die Zeile.
                 row.appendChild(knoepfe);
-                box.appendChild(row);
+                karte.appendChild(row);
+                box.appendChild(karte);
             });
         },
 
@@ -448,13 +497,40 @@
               .catch(function (e) { setStatus('jvorl-status', e.message, 'error'); });
         },
 
-        editVorlage: function (v, global_) {
+        /* `karte` ist die Karte des bearbeiteten Eintrags. Ohne sie (Knopf
+           "Neu") landet das Formular am Heimatplatz unter der Liste – dort
+           gibt es keinen Eintrag, zu dem es gehoeren koennte. */
+        editVorlage: function (v, global_, karte) {
             this._vorlBearbeitet = v ? (v.id || '') : '';
+            this._platziereVorl(karte || null);
             if ($('jvorl-name')) $('jvorl-name').value = v ? (v.name || '') : '';
             if ($('jvorl-text')) $('jvorl-text').value = v ? (v.text || '') : '';
             if ($('jvorl-global')) $('jvorl-global').checked = !!global_;
+            var tt = $('jvorl-edit-title');
+            if (tt) {
+                // Der Titel steht IM Formular, der Status oben in der Leiste:
+                // wenn das Formular tief in der Liste steckt, ist die Leiste
+                // womoeglich aus dem Bild gescrollt.
+                tt.textContent = v
+                    ? t('jvorl.edit', 'Bearbeiten') + ': ' + (v.name || '')
+                    : t('jvorl.new', 'Neu');
+            }
+            var f = $('jvorl-edit');
+            if (f) f.style.display = '';
             setStatus('jvorl-status',
                 v ? t('jvorl.editing', 'Ändert „{name}“.', { name: v.name || '' }) : '');
+        },
+
+        /* Schliessen heisst: Felder leeren, verstecken UND heimholen – sonst
+           taucht das Formular beim naechsten "Neu" mitten in der Liste auf. */
+        closeVorlage: function () {
+            this._vorlBearbeitet = '';
+            if ($('jvorl-name')) $('jvorl-name').value = '';
+            if ($('jvorl-text')) $('jvorl-text').value = '';
+            if ($('jvorl-global')) $('jvorl-global').checked = false;
+            var f = $('jvorl-edit');
+            if (f) f.style.display = 'none';
+            this._platziereVorl(null);
         },
 
         saveVorlage: function () {
@@ -474,7 +550,7 @@
             }).then(function (r) { return r.json(); })
               .then(function (d) {
                     if (!d || d.ok === false) throw new Error((d && (d.error || d.detail)) || 'Fehler');
-                    Manager.editVorlage(null, false);
+                    Manager.closeVorlage();
                     Manager.loadVorlagen();
                     setStatus('jvorl-status', t('jvorl.saved', '✓ Gespeichert'), 'ok');
               })
@@ -489,7 +565,7 @@
             }).then(function (r) { return r.json(); })
               .then(function (d) {
                     if (!d || d.ok === false) throw new Error((d && (d.error || d.detail)) || 'Fehler');
-                    if (Manager._vorlBearbeitet === v.id) Manager.editVorlage(null, false);
+                    if (Manager._vorlBearbeitet === v.id) Manager.closeVorlage();
                     Manager.loadVorlagen();
                     setStatus('jvorl-status', t('jvorl.deleted', '✓ Gelöscht'), 'ok');
               })

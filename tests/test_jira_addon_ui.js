@@ -293,6 +293,44 @@ for (const [name, zert, erwartet] of [
   w.close();
 }
 
+/* ── REGEL: `data-i18n` setzt den textContent ────────────────────────────
+ * Traegt der uebersetzte Text Markup (<b>, <code>, <ul> …), gehoert
+ * `data-i18n-html` an das Element. Sonst steht das Tag WOERTLICH auf der
+ * Seite – genau so stand am 2026-08-31 "<b>deinen</b>" im Kasten
+ * "Mein Jira-Zugang" auf dem Produktivsystem.
+ *
+ * ⚠ AUFGEFALLEN IST DAS NUR AM SCHREENSHOT. Im Quelltext sieht ein
+ * `data-i18n` genauso richtig aus wie ein `data-i18n-html`; der Fehler
+ * entsteht erst aus dem Zusammenspiel mit dem TEXT in i18n.js. Deshalb
+ * prueft dieser Waechter die REGEL ueber alle Schluessel der Seite und
+ * nicht eine gepflegte Liste – ein kuenftiger Text, dem jemand ein <b>
+ * hinzufuegt, faellt damit von selbst auf.
+ */
+{
+  const deVon = I18N.search(/^\s{0,4}de\s*:\s*\{/m);
+  const enVon = I18N.search(/^\s{0,4}en\s*:\s*\{/m);
+  const de = I18N.slice(deVon, enVon);
+  const wert = (k) => {
+    const m = de.match(new RegExp("'" + k.replace(".", "\\.") + "'\\s*:\\s*'((?:[^'\\\\]|\\\\.)*)'"));
+    return m ? m[1] : "";
+  };
+  const mitMarkup = /<(b|i|code|strong|em|ul|ol|li|br)\b/;
+  const schuldige = [];
+  for (const m of HTML.matchAll(/data-i18n="([a-z]+\.[a-z_0-9]+)"/g)) {
+    if (mitMarkup.test(wert(m[1]))) schuldige.push(m[1]);
+  }
+  check(schuldige.length === 0,
+        "kein data-i18n auf einem Text mit Markup (sonst steht das Tag da)",
+        schuldige.join(", "));
+  // Positivkontrolle: die Pruefung findet ueberhaupt Texte mit Markup –
+  // sonst waere die Null oben aus dem falschen Grund gruen.
+  const mitHtml = [...HTML.matchAll(/data-i18n-html="([a-z]+\.[a-z_0-9]+)"/g)]
+      .map((m) => m[1]).filter((k) => mitMarkup.test(wert(k)));
+  check(mitHtml.length >= 3,
+        "und die Regel greift wirklich (Texte mit Markup gefunden)",
+        String(mitHtml.length));
+}
+
 console.log("\n" + ok + " OK, " + fail + " FAIL");
 process.exit(fail ? 1 : 0);
 })();

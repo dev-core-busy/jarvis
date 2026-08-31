@@ -176,6 +176,62 @@ pruefe(/attributes/.test(BRANDING) === false
        'Attribute werden NICHT beobachtet (der Durchlauf setzt sie selbst)');
 
 // ══════════════════════════════════════════════════════════════════════════
+abschnitt('7) Der Rueckfalltext im Markup sagt dasselbe wie der i18n-Wert');
+// ══════════════════════════════════════════════════════════════════════════
+// Der Text zwischen den Tags ist der RUECKFALL: er steht da, bis applyLang()
+// den i18n-Wert setzt – und dauerhaft, wenn i18n.js nicht laedt. Traegt der
+// Wert {marke} und das Markup "Jarvis", zeigt die Seite fuer einen Moment
+// (im Fehlerfall fuer immer) den Vorgabenamen. Der Platzhalter funktioniert
+// dort genauso: branding.js geht mit einem TreeWalker ueber den Body und
+// kennt kein i18n.
+const HTML_DATEIEN = (function () {
+    const aus = [];
+    for (const d of ['frontend', 'frontend/addin', 'frontend/excel-addin']) {
+        const voll = path.join(ROOT, d);
+        if (!fs.existsSync(voll)) continue;
+        for (const f of fs.readdirSync(voll)) {
+            if (f.endsWith('.html')) aus.push(d + '/' + f);
+        }
+    }
+    return aus.sort();
+})();
+const markierteKeys = new Set(mitMarke);
+const rueckfaelle = [];
+for (const f of HTML_DATEIEN) {
+    const q = lies(f);
+    // Elementkoerper mit data-i18n / data-i18n-html
+    const re = /<([a-z]+)([^>]*\bdata-i18n(?:-html)?="([a-z_]+\.[a-z_0-9]+)"[^>]*)>([\s\S]*?)<\/\1>/g;
+    let m;
+    while ((m = re.exec(q))) {
+        if (markierteKeys.has(m[3]) && /Jarvis/.test(m[4])) {
+            rueckfaelle.push(f + ' → ' + m[3]);
+        }
+    }
+}
+pruefe(rueckfaelle.length === 0,
+       'kein Rueckfalltext nennt "Jarvis", wo der i18n-Wert {marke} sagt',
+       rueckfaelle.join(' | '));
+// Positivkontrolle: es gibt ueberhaupt Rueckfalltexte zu markierten
+// Schluesseln – sonst waere die Null oben aus dem falschen Grund gruen.
+let gefunden = 0;
+for (const f of HTML_DATEIEN) {
+    const q = lies(f);
+    const re = /data-i18n(?:-html)?="([a-z_]+\.[a-z_0-9]+)"/g;
+    let m;
+    while ((m = re.exec(q))) if (markierteKeys.has(m[1])) gefunden++;
+}
+pruefe(gefunden >= 10, 'markierte Schluessel kommen im Markup wirklich vor',
+       String(gefunden));
+// `.brand-app-name` ist der Gegenfall und MUSS "Jarvis" behalten: branding.js
+// ersetzt dort den Text. Wer das mit {marke} verwechselt, bekommt den Namen
+// doppelt gebrandet bzw. gar nicht.
+const markenHaken = HTML_DATEIEN
+    .filter((f) => /class="brand-app-name"[^>]*>Jarvis</.test(lies(f)));
+pruefe(markenHaken.length >= 3,
+       '.brand-app-name behaelt "Jarvis" (das ist der Branding-Haken)',
+       String(markenHaken.length));
+
+// ══════════════════════════════════════════════════════════════════════════
 abschnitt('6) GEMESSEN: der Beobachter setzt spaeter eingefuegten Text nach');
 // ══════════════════════════════════════════════════════════════════════════
 // Teil 5 liest nur den Quelltext. Ob der Beobachter WIRKT - und ob er nach

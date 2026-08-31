@@ -232,9 +232,35 @@ def _bericht(job: dict) -> int:
             print(f"#   - {g}", file=sys.stderr)
         aus = (erg.get("riegel_ausgabe") or "").strip()
         if aus:
-            print("# Riegel-Ausgabe (letzte Zeilen):", file=sys.stderr)
-            for z in aus.splitlines()[-15:]:
-                print(f"#   {z}", file=sys.stderr)
+            # ⚠ HIER STANDEN EINMAL NUR DIE LETZTEN 15 ZEILEN – und die
+            # fehlgeschlagenen Pruefungen stehen fast nie am Ende. Am 2026-08-31
+            # zeigte der Bericht ausschliesslich gruene Haken, waehrend unten
+            # "12 OK, 2 FAIL" stand: die zwei ✗-Zeilen lagen in Abschnitt 2 und
+            # waren abgeschnitten. Die Ursache war danach nur durch Nachstellen
+            # des Laufs zu finden – eine halbe Stunde fuer eine Auskunft, die
+            # der Bericht haette geben koennen.
+            #
+            # Deshalb ZUERST die Fehlzeilen, dann der Schluss. Erkannt an den
+            # ueblichen Markierungen der Waechter dieses Projekts (✗, FAIL,
+            # ✗ mit Farbcode davor) – reicht keine, bleibt es beim Ende.
+            zeilen = aus.splitlines()
+            schlecht = [z for z in zeilen
+                        if "✗" in z or "FAIL " in z or z.strip().startswith("FAIL")]
+            if schlecht:
+                print(f"# Riegel-Ausgabe – FEHLGESCHLAGENE Pruefungen "
+                      f"({len(schlecht)}):", file=sys.stderr)
+                for z in schlecht[:25]:
+                    print(f"#   {z}", file=sys.stderr)
+                if len(schlecht) > 25:
+                    print(f"#   … und {len(schlecht) - 25} weitere",
+                          file=sys.stderr)
+                print("# Riegel-Ausgabe (Schluss):", file=sys.stderr)
+                for z in zeilen[-5:]:
+                    print(f"#   {z}", file=sys.stderr)
+            else:
+                print("# Riegel-Ausgabe (letzte Zeilen):", file=sys.stderr)
+                for z in zeilen[-15:]:
+                    print(f"#   {z}", file=sys.stderr)
         return 1
     print("# ANGENOMMEN – Patch folgt auf stdout", file=sys.stderr)
     print(erg.get("diff") or "")

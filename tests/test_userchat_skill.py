@@ -223,8 +223,20 @@ check("Kachel wird aus permissions.userchat eingeblendet",
       "d.permissions.userchat" in PORTAL and
       "getElementById('pt-card-userchat')" in PORTAL)
 check("Ungelesen-Poll laeuft nur bei aktivem Skill", "!_ucAn" in PORTAL)
+# ⚠ DIESE PRUEFUNG WAR STILL ROT (gefunden 2026-08-31). Sie suchte woertlich
+# `fetch('/api/me'` – der Aufruf laeuft aber seit einem Umbau ueber den Wrapper
+# `holeGeschuetzt('/api/me')`. `find` gab -1, und `0 < a < -1` ist immer falsch:
+# der Waechter meldete einen Fehler, den es nicht gab, waehrend die EIGENSCHAFT
+# ("Deklaration vor dem Abruf") die ganze Zeit erfuellt war.
+# Jetzt wird die Aufrufstelle gesucht, ohne den Namen des Aufrufers zu kennen –
+# und ein FEHLENDER Aufruf bricht die Pruefung, statt sie stillschweigend
+# unentscheidbar zu machen. (Register: die Eigenschaft pruefen, nicht die
+# Schreibweise.)
+_ucm = re.search(r"[A-Za-z_$][\w$]*\(\s*['\"]/api/me['\"]", PORTAL)
+check("die /api/me-Aufrufstelle ist im Portal ueberhaupt zu finden", _ucm is not None)
 check("_ucAn wird vor dem /api/me-Abruf deklariert",
-      0 < PORTAL.find("var _ucAn = false;") < PORTAL.find("fetch('/api/me'"))
+      _ucm is not None
+      and 0 < PORTAL.find("var _ucAn = false;") < _ucm.start())
 # Vier Leerzeichen = Rumpf der IIFE, also ein Aufruf beim Seitenaufbau. Der
 # erlaubte Aufruf steht im permissions-Zweig und ist tiefer eingerueckt.
 check("kein unbedingter refreshUnread() beim Seitenaufbau",

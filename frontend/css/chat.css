@@ -675,7 +675,31 @@ body.light .welcome-card { background: rgba(var(--shadow-rgb), 0.03); }
 .msg-row.user .msg-bubble {
     background: var(--bubble-user);
     border-radius: 18px 4px 18px 18px;
+    /* ⚠ ZEILENUMBRUECHE DES BENUTZERS BLEIBEN STEHEN (gemeldet 2026-08-31).
+       Eigener Text wird mit `escapeHtml()` gerendert (chat.js) – richtig so,
+       das ist die Sicherheitsschranke –, und escapeHtml erzeugt KEIN <br>.
+       Ohne diese Zeile gilt `white-space: normal`, und HTML fasst jeden
+       Umbruch als Leerzeichen auf: ein eingefuegter Text mit drei Umbruechen
+       stand als EIN Absatz da (gemessen: 0 <br>, 3 statt 4 sichtbare Zeilen),
+       obwohl die \n im DOM und im gespeicherten Transkript vorhanden sind.
+       Bot-Blasen brauchen das nicht – `renderMarkdown` setzt dort <br>.
+
+       WARUM `pre-wrap` UND NICHT \n -> <br>: die Blase wird an drei Stellen
+       ueber `bubble.textContent` ZURUECKGELESEN (Bearbeiten, Wiederholen,
+       Kopieren) – und `textContent` liefert bei <br> keine Umbrueche. Der Text
+       waere beim Klick auf „Bearbeiten" wieder einzeilig, also derselbe Fehler
+       eine Ebene spaeter. Als Textknoten traegt er seine Umbrueche durch alle
+       drei Rueckleser, und Einrueckungen bleiben mit erhalten. */
+    white-space: pre-wrap;
 }
+
+/* `white-space` ERBT – und die Anhang-Chips und die Bildergalerie bringen ihr
+   Markup aus eingerueckten Template-Strings mit (chat.js::_renderFileChip).
+   Ohne diese Ruecknahme wuerde deren Einrueckung als Leerraum SICHTBAR.
+   Bewusst `> *` als REGEL statt einer Klassenliste: die Vorgabe gilt fuer den
+   TEXT der Nachricht, alles Element-Kind bringt seine eigene Formatierung mit –
+   damit ist auch ein kuenftiges Element in der Blase gedeckt. */
+.msg-row.user .msg-bubble > * { white-space: normal; }
 
 .msg-row.bot .msg-bubble {
     background: var(--bubble-bot);

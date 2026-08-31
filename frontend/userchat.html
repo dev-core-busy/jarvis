@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="/static/css/theme.css?v=20">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=8">
-    <link rel="stylesheet" href="/static/css/chat.css?v=49">
+    <link rel="stylesheet" href="/static/css/chat.css?v=50">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=6">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <link rel="manifest" href="/static/manifest.json">
@@ -220,7 +220,30 @@
             line-height: 1.45;
             overflow-wrap: break-word;
             word-break: normal;
+            /* ⚠ ZEILENUMBRUECHE BLEIBEN STEHEN (2026-08-31, nachgezogen aus
+               /chat). `linkify()` maskiert den Text und macht Adressen zu
+               <a> – ein <br> erzeugt es NICHT, und ohne diese Zeile gilt
+               `white-space: normal`: HTML fasst jeden Umbruch als Leerzeichen
+               auf, ein eingefuegter mehrzeiliger Text stand als EIN Absatz da.
+               Hier gilt es fuer BEIDE Seiten (.mine und .theirs) – es sind
+               Nachrichten zwischen Menschen, das Format ist deren Absicht.
+
+               `pre-wrap` und NICHT \n -> <br>: `chatlib.js::enterEditMode`
+               liest den Text notfalls ueber `bubble.textContent` zurueck
+               (Zeile 421), und das liefert bei <br> keine Umbrueche – der
+               Entwurf waere beim Bearbeiten wieder einzeilig. Als Textknoten
+               traegt er sie durch. Der Text ist getrimmt (`.trim()` an allen
+               drei Renderstellen), es entsteht also keine Leerzeile am Rand. */
+            white-space: pre-wrap;
         }
+
+        /* `white-space` ERBT – Bildergalerie und Datei-Chips liegen IN der
+           Blase und bringen ihr Markup aus eingerueckten Template-Strings mit
+           (userchat.js::_renderAttachments). Ohne diese Ruecknahme wuerde deren
+           Einrueckung als Leerraum SICHTBAR. Bewusst `> *` als REGEL statt
+           einer Klassenliste: die Vorgabe gilt dem TEXT der Nachricht, jedes
+           Element-Kind bringt seine eigene Formatierung mit. */
+        .uc-bubble > * { white-space: normal; }
         .uc-bubble.theirs {
             background: rgba(30,41,59,0.85);
             border-bottom-left-radius: 4px;

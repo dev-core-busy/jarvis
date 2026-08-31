@@ -707,11 +707,202 @@ async function tabWechsel() {
  * Die VORLAGE bleibt bewusst stehen: sie ist eine Voreinstellung für den
  * nächsten Lauf, kein Inhalt dieses Tickets.
  */
+/* ── DAS ERGEBNISFELD IST EIN RICH-TEXT-FELD ───────────────────────────────
+ *
+ * Es ist KEINE Anzeige, sondern die Bearbeitungsflaeche, deren Inhalt danach im
+ * Kommentar beim Kunden landet. Daraus folgt der ganze Entwurf:
+ *
+ * 1. KANONISCH BLEIBT DER TEXT mit `**…**`. Gespeichert (`ergebnis_merken`),
+ *    im Hintergrund abgelegt und vom Server geliefert wird unveraendert dieser
+ *    Text – das Speicherformat aendert sich durch den Umbau NICHT. Das Feld ist
+ *    nur eine zweite Darstellung davon, so wie der Jira-Kommentar die dritte.
+ *
+ * 2. GEBAUT WIRD MIT KNOTEN, NIE MIT `innerHTML`. Der Text stammt aus einem
+ *    Modell, das den Ticketinhalt verarbeitet hat – und in ein Ticket schreibt
+ *    ein Kunde, was er will. Mit `innerHTML` waere ein
+ *    `<img src=x onerror=…>` aus dem Ticket im Origin der Erweiterung
+ *    ausfuehrbar, und dort liegt das Sitzungstoken. Ueber `createElement` +
+ *    `createTextNode` kann Modelltext strukturell kein Element werden; gemessen
+ *    (Waechter Abschnitt 15b): aus `<script>` entsteht Text, kein Knoten.
+ *
+ * 3. EIN PARSER FUER BEIDES. `zuBloecken()` ist die einzige Stelle, die
+ *    `**…**` deutet; Anzeige UND Einfuegen bauen aus demselben Ergebnis. Zwei
+ *    Parser wuerden beim naechsten Feinschliff auseinanderlaufen, und dann
+ *    saehe der Mitarbeiter etwas anderes, als der Kunde bekommt.
+ */
+
+/* Die `\S`-Waechter sind der ganze Unterschied zwischen brauchbar und
+ * gefaehrlich: ohne sie wuerden `2 * 3 * 4`, `*.txt` und `** allein **` als
+ * Auszeichnung gelesen und der Text beim Kunden verstuemmelt. Nicht global –
+ * `exec` laeuft in einer Schleife ueber den Rest, ein `lastIndex` waere hier
+ * eine Fehlerquelle. */
+const _FETT_RE = /\*\*(?=\S)([^\n]+?)(?<=\S)\*\*/;
+
+/** Zerlegt Text in Zeilen aus Laeufen: `[[{t,fett}, …], …]`.
+ *
+ * Bewusst eine reine Funktion ohne DOM: so laesst sie sich messen, und dasselbe
+ * Ergebnis geht per `executeScript({args})` als JSON an die injizierte
+ * Einfuege-Funktion – die darf nichts aus ihrem Modul benutzen (sie wird per
+ * toString uebertragen) und braucht deshalb KEINEN eigenen Parser.
+ */
+function zuBloecken(text) {
+  const bloecke = [];
+  for (const zeile of String(text == null ? "" : text).split("\n")) {
+    const laeufe = [];
+    let rest = zeile, m;
+    while ((m = _FETT_RE.exec(rest))) {
+      if (m.index) laeufe.push({ t: rest.slice(0, m.index), fett: false });
+      laeufe.push({ t: m[1], fett: true });
+      rest = rest.slice(m.index + m[0].length);
+    }
+    if (rest) laeufe.push({ t: rest, fett: false });
+    bloecke.push(laeufe);
+  }
+  return bloecke;
+}
+
+/** Ist ueberhaupt etwas fett? Entscheidet beim Einfuegen ueber den Weg. */
+function hatFett(bloecke) {
+  return bloecke.some((laeufe) => laeufe.some((l) => l.fett));
+}
+
+/** Text ohne die Auszeichnung – fuer Ziele, die kein Fett koennen.
+ *
+ * Ein Kommentarfeld im Wiki-Quelltextmodus ist eine `textarea`; dort waere ein
+ * `**` genau das, was der Kunde am Ende sieht. Lieber ohne Fett als mit
+ * Sternchen.
+ */
+function ohneFett(text) {
+  return zuBloecken(text).map((laeufe) => laeufe.map((l) => l.t).join(""))
+    .join("\n");
+}
+
+/** Baut den Feldinhalt aus Knoten – ein `<div>` je Zeile, `<strong>` je Lauf. */
+function textZuFeld(el, text) {
+  el.textContent = "";
+  const t = String(text == null ? "" : text);
+  // WIRKLICH leer lassen: nur dann greift der `:empty`-Platzhalter. Ein
+  // `<div><br></div>` saehe leer aus, waere es aber nicht.
+  if (!t) return;
+  for (const laeufe of zuBloecken(t)) {
+    const z = document.createElement("div");
+    if (!laeufe.length) z.appendChild(document.createElement("br"));
+    for (const l of laeufe) {
+      if (l.fett) {
+        const stark = document.createElement("strong");
+        stark.appendChild(document.createTextNode(l.t));
+        z.appendChild(stark);
+      } else {
+        z.appendChild(document.createTextNode(l.t));
+      }
+    }
+    el.appendChild(z);
+  }
+}
+
+/* Blockelemente – sie beginnen eine neue Zeile. Dieselbe Liste wie in
+ * `einfuegen.js::textAus`, das dieselbe Aufgabe in der Gegenrichtung loest. */
+const _BLOCK_RE = /^(?:DIV|P|LI|UL|OL|H[1-6]|BLOCKQUOTE|PRE|SECTION|ARTICLE)$/;
+
+/** Ist dieser Knoten fett?
+ *
+ * ⚠ NICHT NUR `<strong>`. Strg+B im Feld erzeugt je nach Browser und Pfad
+ * `<b>` oder sogar `<span style="font-weight:700">`. Wer nur `<strong>` kennt,
+ * wirft vom Benutzer gesetztes Fett STILL weg: er sieht es auf dem Schirm, der
+ * Kunde bekommt es nicht, und nach dem naechsten Wiederherstellen ist es auch
+ * auf dem Schirm verschwunden.
+ */
+function istFett(n) {
+  if (n.nodeName === "STRONG" || n.nodeName === "B") return true;
+  const g = (n.style && n.style.fontWeight) || "";
+  return g === "bold" || g === "bolder" || parseInt(g, 10) >= 600;
+}
+
+/** Setzt die Sternchen – und zieht den Leerraum davor/dahinter heraus.
+ *
+ * ⚠ DAS IST DER HAEUFIGSTE BEARBEITUNGSFALL, nicht ein Randfall: wer hinter
+ * ein fettes Wort ein Leerzeichen tippt, bekommt `<strong>Loesung: </strong>`.
+ * Naiv emittiert waere das `**Loesung: **`, und das erfuellt die `\S`-Bedingung
+ * beim naechsten Aufbau NICHT – das Fett waere nach dem naechsten Speichern
+ * spurlos weg.
+ */
+function fettSetzen(t) {
+  const m = /^(\s*)([\s\S]*?)(\s*)$/.exec(t);
+  return m && m[2] ? m[1] + "**" + m[2] + "**" + m[3] : t;
+}
+
+/** Der Inhalt EINER Zeile als Text. */
+function zeileZuText(knoten) {
+  let s = "";
+  const kinder = knoten.childNodes;
+  for (let i = 0; i < kinder.length; i++) {
+    const n = kinder[i];
+    if (n.nodeType === 3) { s += n.data; continue; }
+    if (n.nodeName === "BR") {
+      /* Ein `<br>` als LETZTES Kind ist Fuellwerk: Chrome schliesst damit jeden
+       * leeren Block ab. Als Umbruch gezaehlt verdoppelte es jede Leerzeile. */
+      if (i === kinder.length - 1) continue;
+      s += "\n";
+      continue;
+    }
+    if (n.nodeType !== 1) continue;
+    s += istFett(n) ? fettSetzen(zeileZuText(n)) : zeileZuText(n);
+  }
+  return s;
+}
+
+/** Der Rueckweg: aus dem bearbeiteten Feld wieder die kanonische Textform.
+ *
+ * ⚠ WAS HIER STEHT, IST GEMESSEN – nicht angenommen. Und die beiden Browser
+ * bauen VERSCHIEDENE Baeume, das ist der Kern dieser Funktion:
+ *   Chrome  Enter -> ein weiteres `<div>` als Geschwister
+ *   Firefox Enter -> ein `<br>` auf OBERSTER Ebene, gar kein `<div>`
+ * Wer nur „div = Zeile" kennt, verliert in Firefox JEDEN vom Benutzer
+ * gesetzten Umbruch. Deshalb sammelt die Schleife inline-Inhalt in einem
+ * Puffer und schliesst eine Zeile ab, sobald ein `<br>` oder ein Block kommt.
+ * Weiter gemessen:
+ *   Shift+Enter    -> `<br>` INNERHALB der Zeile
+ *   Strg+B         -> `<b>` (siehe istFett)
+ *   alles loeschen -> ein nacktes `<br>` ohne jeden `<div>`
+ *   Einfuegen      -> `<i>`, `<span style>` und was sonst in der Ablage lag
+ * Alles Unbekannte wird FLACHGEKLOPFT (nur sein Text zaehlt). Ein Wurf ist
+ * hier ausgeschlossen – der Rueckgabewert geht direkt an einen Kunden.
+ */
+function feldZuText(el) {
+  const zeilen = [];
+  let puffer = "", offen = false;
+  const abschliessen = () => { zeilen.push(puffer); puffer = ""; offen = false; };
+  for (const kind of el.childNodes) {
+    if (kind.nodeType === 3) { puffer += kind.data; offen = true; continue; }
+    if (kind.nodeName === "BR") { abschliessen(); continue; }
+    if (kind.nodeType !== 1) continue;
+    if (_BLOCK_RE.test(kind.nodeName)) {
+      if (offen) abschliessen();
+      for (const z of zeileZuText(kind).split("\n")) zeilen.push(z);
+    } else {
+      puffer += istFett(kind) ? fettSetzen(zeileZuText(kind)) : zeileZuText(kind);
+      offen = true;
+    }
+  }
+  if (offen) abschliessen();
+  return zeilen.join("\n")
+    // Chrome setzt bei Doppel-Leerzeichen und am Zeilenende ein geschuetztes
+    // Leerzeichen. Unsichtbar im Feld, sichtbar beim Kunden.
+    .replace(/\u00a0/g, " ")
+    /* Zwei benachbarte Fettlaeufe (entstehen beim Loeschen an einer
+     * Fettgrenze) ergaeben `**A****B**` – im Feld unsichtbar, im Text an den
+     * Server und in der textarea aber sichtbarer Muell. */
+    .replace(/\*\*\*\*/g, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/^\n+/, "").replace(/\n+$/, "");
+}
+
 async function felderLeeren(meldungstext) {
   clearTimeout(_merkTimer);
   _letztes = null;
   _fremdesErgebnis = false;
-  el.ergebnisFeld.value = "";
+  textZuFeld(el.ergebnisFeld, "");
   el.ergebnis.hidden = true;
   el.ergebnisFuss.textContent = "";
   el.hinweis.value = "";
@@ -735,7 +926,7 @@ async function felderLeeren(meldungstext) {
 function zeigeGemerktes(g) {
   if (!g || !g.text) return;
   _letztes = g;
-  el.ergebnisFeld.value = g.text;
+  textZuFeld(el.ergebnisFeld, g.text);
   el.ergebnis.hidden = false;
   const alter = Math.round((Date.now() - (g.zeit || 0)) / 60000);
   el.ergebnisFuss.textContent =
@@ -957,7 +1148,7 @@ async function auswerten(modus, entwurf) {
                  hinweis: d.hinweis || "",
                  modell: d.modell || "", zeit: Date.now() };
     _fremdesErgebnis = false;      // frisch geholt = passt zum offenen Ticket
-    el.ergebnisFeld.value = d.text || "";
+    textZuFeld(el.ergebnisFeld, d.text || "");
     el.ergebnis.hidden = false;
     // Was das Ergebnis TRÄGT, gehört sichtbar dazu: aus wie vielen Kommentaren
     // es stammt und mit welchem Modell. Ohne das ist eine dünne Antwort nicht
@@ -1069,12 +1260,79 @@ $("f-auto").addEventListener("change", async (ereignis) => {
  * schließt dabei. Bei jedem Tastendruck zu speichern wäre unnötig – eine
  * halbe Sekunde Ruhe genügt.
  */
+/* ⚠ EINGEFUEGT WIRD NUR KLARTEXT.
+ *
+ * In echtem Chrome nachgemessen: ein Einfuegen aus der Zwischenablage traegt
+ * `<i>`, `<span style=…>` und beliebiges weiteres Markup in das Feld. Das ist
+ * doppelt schaedlich – es sammelt sich Formatierung an, die niemand gewollt
+ * hat, und der Rueckweg muesste sie flachklopfen, statt sie gar nicht erst
+ * hereinzulassen. Fremdes Markup gehoert hier nicht hin.
+ */
+/** Setzt Klartext an der Auswahl ein – der gemeinsame Weg von Einfuegen und
+ * Fallenlassen.
+ *
+ * `insertText` zuerst: nur so bleibt die Rueckgaengig-Kette des Browsers
+ * erhalten. Der Range-Weg darunter ist der Rueckfall (und das, was in jsdom
+ * gemessen werden kann – dort gibt es kein execCommand).
+ */
+function klartextEinsetzen(txt) {
+  try {
+    if (document.execCommand && document.execCommand("insertText", false, txt)) return;
+  } catch (e) { /* weiter mit dem Range-Weg */ }
+  const auswahl = window.getSelection();
+  if (!auswahl || !auswahl.rangeCount) return;
+  const bereich = auswahl.getRangeAt(0);
+  bereich.deleteContents();
+  const knoten = document.createTextNode(txt);
+  bereich.insertNode(knoten);
+  bereich.setStartAfter(knoten);
+  bereich.collapse(true);
+  auswahl.removeAllRanges();
+  auswahl.addRange(bereich);
+  /* Ohne dieses Ereignis laeuft die Merk-Drossel nicht an, und das Eingesetzte
+   * waere beim naechsten Oeffnen weg – genau das Szenario, fuer das der Timer
+   * ueberhaupt gebaut wurde. */
+  el.ergebnisFeld.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+/* ⚠ EINGEFUEGT WIRD NUR KLARTEXT.
+ *
+ * In echtem Chrome nachgemessen: ein Einfuegen aus der Zwischenablage traegt
+ * `<i>`, `<span style=…>` und beliebiges weiteres Markup in das Feld. Das ist
+ * doppelt schaedlich – es sammelt sich Formatierung an, die niemand gewollt
+ * hat, und der Rueckweg muesste sie flachklopfen, statt sie gar nicht erst
+ * hereinzulassen. Fremdes Markup gehoert hier nicht hin.
+ */
+el.ergebnisFeld.addEventListener("paste", (ereignis) => {
+  const ablage = ereignis.clipboardData;
+  if (!ablage) return;                       // ohne Zugriff lieber gar nichts
+  ereignis.preventDefault();
+  const txt = (ablage.getData("text/plain") || "").replace(/\r/g, "");
+  if (!txt) return;
+  klartextEinsetzen(txt);
+});
+
+/* Hineingezogener Text ist derselbe Fall wie das Einfuegen – und ohne
+ * `dragover`-Behandlung NAVIGIERT Chrome das Fenster zu einer fallengelassenen
+ * Adresse weg, samt allem, was im Feld stand. */
+el.ergebnisFeld.addEventListener("dragover", (ereignis) => {
+  ereignis.preventDefault();
+});
+el.ergebnisFeld.addEventListener("drop", (ereignis) => {
+  const d = ereignis.dataTransfer;
+  if (!d) return;
+  ereignis.preventDefault();
+  const txt = (d.getData("text/plain") || "").replace(/\r/g, "");
+  if (!txt) return;
+  klartextEinsetzen(txt);
+});
+
 let _merkTimer = null;
 el.ergebnisFeld.addEventListener("input", () => {
   clearTimeout(_merkTimer);
   _merkTimer = setTimeout(async () => {
     if (!_letztes) return;
-    _letztes.text = el.ergebnisFeld.value || "";
+    _letztes.text = feldZuText(el.ergebnisFeld);
     try { await frage({ art: "ergebnis_merken", wert: _letztes }); } catch (e) {}
   }, 500);
 });
@@ -1291,8 +1549,13 @@ $("btn-vorl-speichern").addEventListener("click", async () => {
 
 // ── Einfügen und Kopieren ───────────────────────────────────────────────────
 $("btn-einfuegen").addEventListener("click", async () => {
-  const text = el.ergebnisFeld.value || "";
+  const text = feldZuText(el.ergebnisFeld);
   if (!text.trim() || _tabId === null) return;
+  /* Die GEPARSTE Struktur geht mit – nicht, weil der Text nicht reichte,
+   * sondern weil die injizierte Funktion keinen eigenen Parser haben darf: sie
+   * wird per toString uebertragen und sieht ihr Modul nicht (einfuegen.js,
+   * Dateikopf). Zwei Parser waeren zwei Fassungen, die auseinanderlaufen. */
+  const bloecke = zuBloecken(text);
   // Ein Text zu einem anderen Vorgang wird nicht ohne Rückfrage eingefügt –
   // das Ergebnis geht am Ende an einen Kunden.
   if (fremd() && !(await frageJaNein())) return;
@@ -1301,7 +1564,7 @@ $("btn-einfuegen").addEventListener("click", async () => {
     const treffer = await api.scripting.executeScript({
       target: { tabId: _tabId },
       func: einfuegenInJira,
-      args: [text],
+      args: [text, bloecke],
     });
     let r = (treffer && treffer[0] && treffer[0].result) || {};
 
@@ -1318,7 +1581,10 @@ $("btn-einfuegen").addEventListener("click", async () => {
           target: { tabId: _tabId },
           world: "MAIN",
           func: einfuegenUeberEditorApi,
-          args: [text],
+          /* BEREINIGT: dieser Weg baut sein HTML aus reinem Text und kann
+           * kein Fett tragen. Mit `**` gingen die Sternchen woertlich in den
+           * Kommentar – genau das, was der Kunde am Ende liest. */
+          args: [ohneFett(text)],
         });
         const r2 = (zweit && zweit[0] && zweit[0].result) || {};
         if (r2.ok) r = r2;
@@ -1330,7 +1596,18 @@ $("btn-einfuegen").addEventListener("click", async () => {
     }
 
     if (r.ok) {
-      melde("Eingefügt. Bitte in Jira prüfen und selbst abschicken.");
+      /* ⚠ DER WEG GEHOERT IN DIE MELDUNG. Er wird in `einfuegen.js` muehsam
+       * aufgebaut und wurde im Erfolgsfall bisher weggeworfen. Ob beim Kunden
+       * Fett ankommt, haengt am Editor der Seite – das laesst sich hier nicht
+       * vorhersagen, wohl aber BERICHTEN. Damit ist jede Rueckmeldung aus dem
+       * Betrieb ein Beleg statt einer Vermutung. */
+      const mitFett = /fett/i.test(String(r.weg || ""));
+      melde("Eingefügt"
+            + (hatFett(bloecke)
+               ? (mitFett ? " – mit Fettschrift." : " – ohne Fettschrift (der "
+                  + "Editor dieser Seite nimmt keine Formatierung an).")
+               : ".")
+            + " Bitte in Jira prüfen und selbst abschicken.");
     } else {
       // DIE DIAGNOSE GEHÖRT IN DIE MELDUNG. Ohne sie ist der nächste Anlauf
       // wieder Raten – und zwar für den Benutzer wie für die Fehlersuche.
@@ -1351,7 +1628,10 @@ $("btn-einfuegen").addEventListener("click", async () => {
 
 $("btn-kopieren").addEventListener("click", async () => {
   try {
-    await navigator.clipboard.writeText(el.ergebnisFeld.value || "");
+    /* OHNE die Sternchen: der Knopf ist der Rueckfall fuer den Fall, dass das
+     * Kommentarfeld nicht gefunden wurde – von Hand eingefuegt wuerde ein `**`
+     * genau das, was der Kunde am Ende liest. */
+    await navigator.clipboard.writeText(ohneFett(feldZuText(el.ergebnisFeld)));
     melde("In die Zwischenablage kopiert.");
   } catch (e) {
     // Rückmeldung ist Pflicht: in der Zwischenablage sieht man nichts, ein

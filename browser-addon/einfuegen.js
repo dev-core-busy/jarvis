@@ -28,8 +28,73 @@
  * Importe, keine Konstanten von aussen. Alle Helfer stehen innen.
  */
 
-export function einfuegenInJira(text) {
+export function einfuegenInJira(text, bloecke) {
   "use strict";
+
+  /* `bloecke` ist der bereits geparste Text: `[[{t,fett}, …], …]`, eine Zeile
+   * je Eintrag. Er kommt als JSON ueber `executeScript({args})`, weil DIESE
+   * Funktion keinen eigenen Parser haben darf – sie wird per toString
+   * uebertragen und sieht ihr Modul nicht (siehe Dateikopf). Zwei Parser waeren
+   * zwei Fassungen: der Mitarbeiter saehe etwas anderes als der Kunde.
+   *
+   * FEHLT er (aelteres Fenster), verhaelt sich alles wie vor dem Umbau. */
+  const _bl = Array.isArray(bloecke) ? bloecke : null;
+
+  function hatFett() {
+    return !!_bl && _bl.some(function (laeufe) {
+      return laeufe.some(function (l) { return l && l.fett; });
+    });
+  }
+
+  /* Text OHNE die Sternchen – fuer alles, was kein Fett kann.
+   * Ein `**` in einer textarea ist genau das, was der Kunde am Ende liest;
+   * lieber ohne Fett als mit Sternchen. Ohne `bloecke` bleibt es beim
+   * Originaltext (fail-safe: nichts wegwerfen, was man nicht deuten kann). */
+  function klartext() {
+    if (!_bl) return text;
+    return _bl.map(function (laeufe) {
+      return laeufe.map(function (l) { return l.t; }).join("");
+    }).join("\n");
+  }
+
+  /* Absaetze wie bisher: leere Zeile trennt, einfacher Umbruch wird zum
+   * Leerzeichen. Genau das machte der bisherige Rueckfall mit
+   * `txt.split(/\n{2,}/)` und `replace(/\n/g, " ")` – nur eben auf Text
+   * statt auf Laeufen. */
+  function absaetze() {
+    const raus = [];
+    let aktuell = [];
+    for (const laeufe of (_bl || [])) {
+      const leer = !laeufe.length
+        || laeufe.every(function (l) { return !String(l.t).trim(); });
+      if (leer) {
+        if (aktuell.length) { raus.push(aktuell); aktuell = []; }
+        continue;
+      }
+      if (aktuell.length) aktuell.push({ t: " ", fett: false });
+      for (const l of laeufe) aktuell.push(l);
+    }
+    if (aktuell.length) raus.push(aktuell);
+    return raus;
+  }
+
+  /* Baut einen Absatz als KNOTEN – nie ueber innerHTML.
+   * Damit ist ausgeschlossen, dass Modelltext im Kommentarfeld zu Markup wird;
+   * die Fett-Auszeichnung entsteht aus der geparsten Struktur, nicht aus
+   * Zeichen im Text. */
+  function absatzKnoten(aus, laeufe) {
+    const p = aus.createElement("p");
+    for (const l of laeufe) {
+      if (l.fett) {
+        const stark = aus.createElement("strong");
+        stark.appendChild(aus.createTextNode(l.t));
+        p.appendChild(stark);
+      } else {
+        p.appendChild(aus.createTextNode(l.t));
+      }
+    }
+    return p;
+  }
 
   function sichtbar(el) {
     if (!el) return false;
@@ -74,6 +139,15 @@ export function einfuegenInJira(text) {
    */
   function schreibeEditierbar(el, txt) {
     el.focus();
+    /* ⚠ MIT FETT WIRD `insertText` UEBERSPRUNGEN – und das ist ein bewusster
+     * Tausch, kein Versehen. `insertText` traegt nur Klartext ein; die
+     * Auszeichnung ginge dabei verloren. Der Knotenweg darunter kann Fett,
+     * wird aber von manchen Editoren nicht bemerkt.
+     * OHNE Fett bleibt alles exakt wie vor dem Umbau – und das ist der
+     * Normalfall: in 14 gemessenen Laeufen lieferte das Modell kein einziges
+     * Mal Fett. Der riskantere Weg wird also nur beschritten, wenn es dafuer
+     * einen Grund gibt. */
+    if (hatFett()) return schreibeMitFett(el);
     try {
       const aus = el.ownerDocument || document;
       // Ans Ende stellen, damit ein bereits getippter Text nicht ersetzt wird.
@@ -102,6 +176,63 @@ export function einfuegenInJira(text) {
     return "appendChild";
   }
 
+  /** Fett einfuegen – in absteigender Verlaesslichkeit, MIT Rueckleseprobe.
+   *
+   * ⚠ DIE HALBFEHLERSTELLUNGEN SIND NICHT GLEICH SCHWER, und daraus folgt die
+   * Reihenfolge: „Text kommt an, Fett fehlt" ist harmlos – der Mitarbeiter
+   * sieht es und kann es von Hand setzen. „Text kommt gar nicht an, es meldet
+   * aber Erfolg" ist teuer: er wechselt in den Jira-Tab und findet ein leeres
+   * Kommentarfeld, oder schlimmer, er merkt es nicht.
+   *
+   * 1. `insertHTML` – geht durch die Ereignisbehandlung des Editors, bleibt
+   *    ruecknehmbar. Das HTML wird SELBST gebaut, jeder Text ueber
+   *    `textContent` (dieselbe Technik wie im TinyMCE-Weg unten): Modelltext
+   *    beruehrt nie einen HTML-Parser.
+   * 2. Knoten anhaengen – kann Fett, wird aber von Editoren mit eigenem
+   *    Dokumentmodell (ak-editor/ProseMirror in Jira Cloud) womoeglich
+   *    ignoriert.
+   * 3. RUECKLESEN. Steht der Text danach nicht im Feld, war Weg 1 und 2
+   *    wirkungslos: dann lieber `insertText` mit Klartext – Fett verloren,
+   *    Text da. Ohne diese Probe waere ein ignoriertes `appendChild` ein
+   *    STILLER Fehlschlag mit Erfolgsmeldung.
+   */
+  function schreibeMitFett(el) {
+    const aus = el.ownerDocument || document;
+    const vorher = el.textContent || "";
+    const probe = klartext().replace(/\s+/g, " ").trim().slice(0, 24);
+
+    function angekommen() {
+      const jetzt = (el.textContent || "").replace(/\s+/g, " ");
+      return jetzt.length > vorher.length && (!probe || jetzt.indexOf(probe) >= 0);
+    }
+
+    // 1) insertHTML
+    try {
+      if (aus.execCommand) {
+        const html = absaetze().map(function (laeufe) {
+          return absatzKnoten(aus, laeufe).outerHTML;
+        }).join("");
+        if (aus.execCommand("insertHTML", false, html) && angekommen()) {
+          return "insertHTML+fett";
+        }
+      }
+    } catch (e) { /* weiter mit Knoten */ }
+
+    // 2) Knoten anhaengen
+    for (const laeufe of absaetze()) el.appendChild(absatzKnoten(aus, laeufe));
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    if (angekommen()) return "appendChild+fett";
+
+    /* 3) Beides wirkungslos – der Editor fuehrt sein eigenes Modell. Jetzt
+     * zaehlt nur noch, dass der TEXT ankommt. */
+    try {
+      if (aus.execCommand && aus.execCommand("insertText", false, klartext())) {
+        return "insertText ohne Fett";
+      }
+    } catch (e) { /* nichts mehr uebrig */ }
+    return "appendChild+fett (ungeprueft)";
+  }
+
   // ── 1. Das zuletzt fokussierte Feld ───────────────────────────────────────
   // Auch in einem iframe: activeElement des Hauptdokuments ist dann der iframe.
   let ziel = document.activeElement;
@@ -109,7 +240,8 @@ export function einfuegenInJira(text) {
     try { ziel = ziel.contentDocument.activeElement; } catch (e) { ziel = null; }
   }
   if (istTextfeld(ziel) && sichtbar(ziel)) {
-    setzeWert(ziel, text);
+    // Eine textarea kann kein Fett – dort geht der bereinigte Text hinein.
+    setzeWert(ziel, klartext());
     ziel.focus();
     return { ok: true, weg: "fokussiertes Textfeld" };
   }
@@ -158,6 +290,11 @@ export function einfuegenInJira(text) {
     const aus = rahmen.contentDocument;
     koerper.focus();
     let weg = "innerHTML";
+    if (hatFett()) {
+      for (const laeufe of absaetze()) koerper.appendChild(absatzKnoten(aus, laeufe));
+      koerper.dispatchEvent(new Event("input", { bubbles: true }));
+      return { ok: true, weg: "iframe-Editor (appendChild+fett)" };
+    }
     try {
       if (aus.execCommand && aus.execCommand("insertText", false, text)) weg = "insertText";
       else throw new Error("kein insertText");
@@ -179,7 +316,7 @@ export function einfuegenInJira(text) {
     for (const el of document.querySelectorAll(sel)) {
       diagnose.push(sel + (sichtbar(el) ? " (sichtbar)" : " (unsichtbar)"));
       if (sichtbar(el)) {
-        setzeWert(el, text);
+        setzeWert(el, klartext());     // textarea kann kein Fett
         el.focus();
         try { el.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (e) {}
         return { ok: true, weg: "textarea " + sel };

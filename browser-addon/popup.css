@@ -111,6 +111,54 @@ input[type="checkbox"], input[type="radio"] {
   vertical-align: middle;
 }
 textarea { resize: vertical; min-height: 120px; font-size: 12.5px; }
+
+/* ── Das Ergebnisfeld ist ein <div>, kein <textarea> ───────────────────────
+ * Damit erbt es die Regeln oben NICHT mehr und braucht seine eigenen. Die
+ * Werte sind bewusst dieselben wie bei `textarea` – das Feld soll aussehen wie
+ * ein Eingabefeld, weil es eines ist.
+ *
+ * `white-space: pre-wrap` haelt Zeilenumbrueche und Einrueckungen des Modells;
+ * `overflow: auto` ist die Voraussetzung dafuer, dass `resize` ueberhaupt
+ * wirkt (in echtem Chrome nachgemessen). `overflow-wrap: anywhere` ist nach
+ * derselben Messung NICHT noetig – Chrome bricht auch ein unteilbares Wort aus
+ * 179 Zeichen von selbst; es steht hier, weil es nichts kostet und die
+ * Umbruch-Heuristik in Firefox abweichen kann. */
+#f-ergebnis {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--rand);
+  border-radius: 5px;
+  background: var(--grund);
+  color: var(--schrift);
+  font: inherit;
+  font-size: 12.5px;
+  min-height: 120px;
+  /* ⚠ DER DECKEL IST PFLICHT, KEINE KOSMETIK. Die abgeloeste `<textarea>` hatte
+   * `rows="12"`, also eine FESTE Hoehe, und scrollte intern. Ein <div> waechst
+   * unbegrenzt – bei einer langen Antwort schoebe es „Ins Kommentarfeld
+   * einfuegen" aus dem Fenster (das Popup ist bei 600 px zu Ende). Genau dieser
+   * Fehler ist hier schon einmal mit dem Ansichts-Umschalter passiert.
+   * 40vh entspricht bei 600 px etwa den zwoelf Zeilen von vorher. */
+  max-height: 40vh;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  resize: vertical;
+  overflow: auto;
+}
+
+#f-ergebnis:focus,
+#f-ergebnis:focus-visible {
+  outline: 2px solid var(--akzent);
+  outline-offset: 1px;
+}
+
+/* Ein contenteditable kennt kein `placeholder`. Greift nur, wenn das Feld
+ * WIRKLICH leer ist – deshalb legt `textZuFeld` bei leerem Text gar keinen
+ * Knoten an (ein <div><br></div> saehe leer aus, waere es aber nicht). */
+#f-ergebnis:empty::before {
+  content: attr(data-platzhalter);
+  color: var(--gedaempft);
+}
 input:focus-visible, textarea:focus-visible {
   outline: 2px solid var(--akzent);
   outline-offset: 1px;
@@ -308,6 +356,9 @@ html.leiste body {
  * leere Flaeche. */
 html.leiste #f-ergebnis {
   min-height: 40vh;
+  /* Auch in der Leiste gedeckelt, sonst wandert der Ansichts-Fuss nach unten
+   * weg – dort ist mehr Platz, also mehr Deckel. */
+  max-height: 60vh;
 }
 
 /* ── Zugriffszeile (nur Leiste) ─────────────────────────────────────────────

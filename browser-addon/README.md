@@ -121,6 +121,56 @@ Einstellung selbst bleibt – sie gehört zu diesem Browser, nicht zu einer Anme
 Ein Umschalten wirkt **ab dem nächsten Ticket**, nicht sofort – das sagt die Rückmeldung
 auch. Sofort zu starten hieße, ein bereits angezeigtes Ergebnis zu überschreiben.
 
+## Das Ergebnisfeld ist Rich-Text (seit 0.5.0)
+
+`#f-ergebnis` ist kein `<textarea>` mehr, sondern ein bearbeitbares
+`contenteditable`-`<div>`: `**Lösung:**` steht dort **fett** statt als Sternchen.
+
+**Kanonisch bleibt der Text mit `**…**`.** Gespeichert, im Hintergrund abgelegt und an den
+Server geschickt wird unverändert diese Form – das Speicherformat hat sich nicht geändert,
+`background.js` ist unberührt, `STAND` bleibt 5. Das Feld ist nur eine zweite Darstellung
+davon, der Jira-Kommentar die dritte.
+
+* **Aufgebaut wird mit Knoten, nie mit `innerHTML`** (`popup.js::textZuFeld`). Der Text
+  stammt aus einem Modell, das Kundentext verarbeitet hat; mit `innerHTML` wäre ein
+  `<img src=x onerror=…>` aus einem Ticket im Origin der Erweiterung ausführbar – und dort
+  liegt das Sitzungstoken.
+* **Ein Parser für alles** (`zuBloecken`). Anzeige und Einfügen bauen aus demselben
+  Ergebnis; zwei Parser würden auseinanderlaufen, und dann sähe der Mitarbeiter etwas
+  anderes, als der Kunde bekommt.
+* **Der Rückweg ist auf echte Browser gemessen**, nicht angenommen: Chrome macht beim Enter
+  ein weiteres `<div>`, **Firefox gar keines, sondern ein `<br>` auf oberster Ebene**;
+  Strg+B liefert `<b>` oder `<span style="font-weight:700">`; ein leerer Block endet auf
+  einem Füllwerk-`<br>`; Einfügen bringt `<i>` und `<span style>` mit. `feldZuText`
+  behandelt all das und klopft alles Unbekannte flach.
+* **Eingefügt und fallengelassen wird nur Klartext** (`paste`/`drop`), sonst sammelt sich
+  Fremdformatierung an.
+* **Nebengewinn:** Strg+B im Feld wird als `**…**` zurückgeschrieben – der Mitarbeiter kann
+  selbst fett auszeichnen.
+
+### Was beim Einfügen in Jira ankommt
+
+Die geparste Struktur geht als zweites Argument über `executeScript({args})` mit – die
+injizierte Funktion darf nichts aus ihrem Modul benutzen (sie wird per `toString`
+übertragen) und braucht so keinen eigenen Parser.
+
+* **Ohne Fettstellen ändert sich nichts** gegenüber vorher: `execCommand("insertText")`
+  zuerst, Knoten-Rückfall danach.
+* **Mit Fettstellen** eine Kaskade mit **Rückleseprobe**: `insertHTML` (selbst gebaut, Text
+  über `textContent` – Modelltext berührt nie einen HTML-Parser) → Knoten mit `<strong>` →
+  und wenn danach nichts im Feld steht, `insertText` mit bereinigtem Text. Denn die
+  Halbfehlerstellungen sind nicht gleich schwer: *Text da, Fett fehlt* ist harmlos,
+  *nichts da, meldet aber Erfolg* ist teuer.
+* **Textarea-Ziele** (Wiki-Quelltextmodus) können kein Fett und bekommen den **bereinigten**
+  Text – ein `**` dort wäre genau das, was der Kunde liest.
+* Die Erfolgsmeldung sagt, **ob mit Fettschrift eingefügt wurde**. Damit ist jede Rückmeldung
+  aus dem Betrieb ein Beleg statt einer Vermutung.
+
+**Was das Feld nicht kann:** Listen und Kursiv bleiben Text (bewusst – nur Fett).
+Ein `**` über einen Zeilenumbruch hinweg bleibt literal. Wer literal `**x**` tippt, sieht es
+nach dem nächsten Wiederherstellen fett. Und die native Rückgängig-Kette leidet, sobald ein
+Pfad den DOM von Hand anfasst – der Preis eines contenteditable ohne Editor-Bibliothek.
+
 ## Ohne erkanntes Ticket ist alles gesperrt
 
 Findet die Erweiterung im offenen Tab keine Ticketnummer, steht im Kopf **„Kein Ticket

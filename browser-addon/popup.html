@@ -196,7 +196,17 @@
     </p>
 
     <div id="ergebnis" hidden>
-      <textarea id="f-ergebnis" rows="12" spellcheck="true"></textarea>
+      <!-- RICH-TEXT, nicht Textarea: `**Lösung:**` soll fett DASTEHEN, nicht als
+           Sternchen. Das Feld bleibt bearbeitbar – es ist die Fläche, deren
+           Inhalt anschließend im Kommentar beim Kunden landet.
+           Aufgebaut wird ausschließlich über Knoten (popup.js::textZuFeld),
+           NIE über innerHTML: der Text stammt aus einem Modell, das
+           Kundentext verarbeitet hat.
+           `role`/`aria-multiline` sind Pflicht – ein <div> ist von sich aus
+           kein Eingabefeld und würde von Hilfsmitteln als Fließtext gelesen. -->
+      <div id="f-ergebnis" contenteditable="true" role="textbox"
+           aria-multiline="true" spellcheck="true"
+           data-platzhalter="Hier steht gleich der Vorschlag."></div>
       <div class="knopfreihe">
         <button type="button" id="btn-einfuegen">Ins Kommentarfeld einfügen</button>
         <button type="button" id="btn-kopieren" class="leise">Kopieren</button>

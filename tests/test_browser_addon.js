@@ -38,6 +38,14 @@ let ok = 0, fail = 0;
 const zurueckweisungen = [];
 process.on("unhandledRejection", (e) => {
   zurueckweisungen.push((e && e.stack) || String(e));
+  /* ⚠ EXIT-CODE SOFORT SETZEN. Ohne diese Zeile war der Wachhund schlimmer als
+   * gar keiner: die ganze Datei ist EINE async-IIFE – wirft etwas darin, wird
+   * alles bis zum Ende uebersprungen, auch die Zusammenfassung und
+   * `process.exit(fail ? 1 : 0)`. Der Zuhoerer verhinderte dann den Absturz,
+   * und der Lauf endete mit "0" und ohne jede Zaehlzeile: ein abgebrochener
+   * Test, der wie ein bestandener aussieht. Genau am 2026-08-31 passiert. */
+  process.exitCode = 1;
+  console.log("  FAIL Lauf abgebrochen: " + ((e && e.message) || e));
 });
 
 function check(bed, text, extra) {
@@ -66,6 +74,14 @@ const EINFUEGEN = lies("einfuegen.js");
  * nicht in einem Funktionsrumpf und fallen deshalb aus jedem Schnitt heraus –
  * fehlen sie, WIRFT der Lauf statt fehlzuschlagen (siehe LEISTE_PFAD). */
 const STAND_ZEILE = (POPUP_JS.match(/const STAND = \d+;/) || [""])[0];
+/* Dieselbe Falle, am 2026-08-31 erneut zugeschnappt: `_FETT_RE` und
+ * `_BLOCK_RE` stehen in keinem Funktionsrumpf. Ohne sie warf der Lauf mitten
+ * in `felderLeeren` – und weil die ganze Datei EINE async-IIFE ist, endete er
+ * ohne Zaehlzeile. */
+const FELD_KONST = [
+  (POPUP_JS.match(/const _FETT_RE = .*;/) || [""])[0],
+  (POPUP_JS.match(/const _BLOCK_RE = .*;/) || [""])[0],
+].join("\n");
 
 /* ── Schnitt-Helfer fuer die funktionalen Laeufe ──────────────────────────
  *
@@ -945,8 +961,18 @@ check(/auswerten\("ueberarbeiten"/.test(popupOhne),
  * "Einfuegen" an einen Kunden. Getrennt wird am Server; hier wird geprueft,
  * dass die Oberflaeche ihn NUR als Meldung anfasst. */
 check(/mitAbgleich/.test(popupOhne), "der Hinweis wird eigens behandelt");
-check(!/ergebnisFeld\.value\s*=[^;]*hinweis/.test(popupOhne),
-      "er wird NICHT in das bearbeitbare Feld geschrieben");
+/* ⚠ DIESE PRUEFUNG HING AN DER SCHREIBWEISE `ergebnisFeld.value = …` – und
+ * wurde mit dem Rich-Text-Umbau zur TAUTOLOGIE: den Ausdruck gibt es nirgends
+ * mehr, der Regex war fuer immer wahr und prueste nichts. Gemessen wird jetzt
+ * die EIGENSCHAFT (Abschnitt 15e fuehrt sie aus); hier bleibt nur die billige
+ * Struktur-Aussage, entkoppelt vom Zuweisungs-Operator. */
+check(!/ergebnisFeld[^;\n]*\bhinweis\b/.test(popupOhne),
+      "der Hinweis wird nirgends an das Ergebnisfeld gegeben");
+/* Und die Gegenrichtung, damit der Umbau nicht heimlich zurueckrutscht: ein
+ * <div> nimmt `.value` klaglos als eigene Eigenschaft an – ohne Wurf, ohne
+ * Warnung, ohne roten Test. */
+check(!/ergebnisFeld\s*\.\s*value/.test(popupOhne),
+      "und niemand fasst das Feld ueber .value an (am <div> ein stiller No-op)");
 check(/melde\(mitAbgleich/.test(popupOhne), "sondern als Meldung angezeigt");
 check(/hinweis:\s*d\.hinweis/.test(bgOhne),
       "und mitgemerkt (sonst fehlt er beim naechsten Oeffnen)");
@@ -1215,7 +1241,10 @@ section("8) Die Ticketnummer-Erkennung – ausgefuehrt");
    * stellt. */
   const { teile, drin } = popupTeile(
     ['melde', 'felderLeeren', 'zeigeGemerktes', 'mitAbgleich',
-     'zeige', 'start', 'markeAnwenden'],
+     'zeige', 'start', 'markeAnwenden',
+     // Die Attrappe LIEST damit den Feldinhalt; aus dem geschnittenen Code
+     // heraus wird es nicht gerufen und faellt sonst aus dem Schnitt.
+     'feldZuText'],
     ['frage', 'tabErmitteln', 'vorlagenLaden', 'brandingHolen']);
   for (const n of ['melde', 'felderLeeren', 'zeigeGemerktes', 'mitAbgleich',
                    'zeige', 'start', 'markeAnwenden']) {
@@ -1259,7 +1288,20 @@ section("8) Die Ticketnummer-Erkennung – ausgefuehrt");
           let _autoModus = "";
           const _originale = new Map();
           let _jiraBasis = "", _standAlt = false, _standGesehen;
+          /* ⚠ EIN value-ZUGRIFF AM <div> IST EIN STILLER ERFOLG: JS legt
+           * einfach eine Eigenschaft an, die mit dem Sichtbaren nichts zu tun
+           * hat. Eine zurueckgerutschte Zuweisung waere damit unsichtbar - und
+           * der schlimmste Ausgang ist der Antworttext zu Vorgang A im
+           * Kommentarfeld von Vorgang B, ohne Rueckfrage (die Fremd-Pruefung
+           * merkt nichts, weil das Gedaechtnis stimmt). Deshalb wirft es hier.
+           * KEINE BACKTICKS in diesem Vorspann - er steht selbst in einem
+           * Template-Literal und wuerde es beenden. */
+          Object.defineProperty(el.ergebnisFeld, "value", {
+            get() { throw new Error("value am Ergebnisfeld GELESEN"); },
+            set() { throw new Error("value am Ergebnisfeld GESETZT"); },
+          });
 ` + STAND_ZEILE + `
+` + FELD_KONST + `
           /* Die Leisten-Umgebung. Hier gilt der Popup-Fall (_leiste = false);
            * den Leisten-Fall prueft Abschnitt 10.
            * KEINE Backticks in diesem Vorspann - er steht selbst in einem
@@ -1289,7 +1331,7 @@ section("8) Die Ticketnummer-Erkennung – ausgefuehrt");
             await start();
             if (klickLeeren) await felderLeeren("Geleert.");
             return JSON.stringify({
-              text: el.ergebnisFeld.value,
+              text: feldZuText(el.ergebnisFeld),
               sichtbar: !el.ergebnis.hidden,
               fuss: el.ergebnisFuss.textContent,
               hinweis: el.hinweis.value,
@@ -1919,7 +1961,8 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
    * geoeffneten TICKET-B - und der Text geht an einen echten Kunden. */
   {
     const { teile: t2, drin: d2 } = popupTeile(
-      ["tabWechsel"], ["tabErmitteln", "frage"]);
+      // textZuFeld/feldZuText: die Attrappe baut und liest den Feldinhalt damit.
+      ["tabWechsel", "textZuFeld", "feldZuText"], ["tabErmitteln", "frage"]);
     check(d2.has("ticketLageAnwenden") && d2.has("felderLeeren"),
           "der Schnitt um tabWechsel zieht die Leer-Logik mit",
           [...d2].join(","));
@@ -1947,6 +1990,10 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
              * genau das Verhalten, das dieser Abschnitt messen will.
              * Abschnitt 14 prueft die Automatik selbst. */
             let _autoModus = "";
+            Object.defineProperty(el.ergebnisFeld, "value", {
+              get() { throw new Error("value am Ergebnisfeld GELESEN"); },
+              set() { throw new Error("value am Ergebnisfeld GESETZT"); },
+            });
             let _jiraBasis = "", _leiste_unbenutzt = 0;
             const _leiste = true;
             let _tabUrl = "https://jira.test/browse/" + (nachKey || "X-1");
@@ -1956,13 +2003,13 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
             async function tabErmitteln() {
               _key = nachKey; el.ticket.textContent = _key || "";
             }
-` + t2.join("\n") + `
+` + FELD_KONST + "\n" + t2.join("\n") + `
             return (async () => {
-              el.ergebnisFeld.value = (gemerkt && gemerkt.text) || "";
+              textZuFeld(el.ergebnisFeld, (gemerkt && gemerkt.text) || "");
               el.ergebnis.hidden = !(gemerkt && gemerkt.text);
               await tabWechsel();
               return JSON.stringify({
-                text: el.ergebnisFeld.value,
+                text: feldZuText(el.ergebnisFeld),
                 sichtbar: !el.ergebnis.hidden,
                 meldung: el.meldung.hidden ? "" : el.meldung.textContent,
                 geloescht: gesendet.some(n => n && n.art === "ergebnis_merken"
@@ -3031,6 +3078,365 @@ function schneideBg(name) {
           + " (sonst wird es wortlos verworfen)");
   }
   check(felder.has("auto_modus"), "darunter auto_modus");
+}
+
+/* ── 15) DAS ERGEBNISFELD IST RICH-TEXT ────────────────────────────────────
+ *
+ * Vorgabe des Nutzers 2026-08-31: `**Loesung:**` soll FETT dastehen, und beim
+ * Einfuegen sollen echte `<strong>`-Knoten in den Jira-Editor.
+ *
+ * DIE KETTE ENDET BEIM KUNDEN – deshalb wird hier nichts am Quelltext
+ * abgelesen, sondern ausgefuehrt. Zwei Dinge muessen zugleich halten:
+ * was der Mitarbeiter SIEHT und was der Kunde BEKOMMT.
+ */
+section("15) Ergebnisfeld als Rich-Text");
+
+/* Baut die Feld-Funktionen aus der echten popup.js in ein jsdom-Fenster. */
+function feldWelt() {
+  const { teile, drin } = popupTeile(
+    ["zuBloecken", "hatFett", "ohneFett", "textZuFeld", "feldZuText"], []);
+  const dom = new JSDOM("<div id=e></div>", { runScripts: "outside-only" });
+  const w = dom.window;
+  const F = new w.Function(FELD_KONST + "\n" + teile.join("\n")
+    + "\nreturn { zuBloecken, hatFett, ohneFett, textZuFeld, feldZuText };")();
+  return { w, F, el: w.document.getElementById("e"), drin };
+}
+
+// ── a) Der Rundlauf Text -> Feld -> Text ─────────────────────────────────
+{
+  const { w, F, el, drin } = feldWelt();
+  for (const n of ["zuBloecken", "textZuFeld", "feldZuText", "ohneFett"]) {
+    check(drin.has(n), "popup.js hat " + n + "()");
+  }
+  /* ⚠ EIN PARSER FUER BEIDES. Liefe die Anzeige nach anderen Regeln als das
+   * Einfuegen, saehe der Mitarbeiter etwas anderes, als der Kunde bekommt. */
+  check(/zuBloecken\(/.test(schneidePopup("textZuFeld") || ""),
+        "textZuFeld baut aus demselben Parser wie das Einfuegen");
+
+  const RUND = [
+    "**Lösung:** Der Dienst wurde neu gestartet.",
+    "1. Worum es geht\n2. Was passiert ist\n\n- Punkt A\n- Punkt B",
+    "Sehr geehrte Damen und Herren,\n\nwir haben geprüft.\n\nMit freundlichen Grüßen",
+    "**Lösung:**\nDetails darunter.",
+    // Die drei Fallen, an denen ein naives Muster den Kundentext verstuemmelt.
+    "Preis 2 * 3 * 4 und Datei *.txt bleiben unangetastet",
+    "Sternchen ** allein ** mit Leerzeichen",
+    "***fett und kursiv***",
+    "**A** und **B** in einer Zeile",
+    "Ein <script>alert(1)</script> aus dem Ticket",
+    "",
+  ];
+  for (const t of RUND) {
+    F.textZuFeld(el, t);
+    const zurueck = F.feldZuText(el);
+    check(zurueck === t, "verlustfrei: " + JSON.stringify(t.slice(0, 42)),
+          "zurueck " + JSON.stringify(zurueck.slice(0, 60)));
+  }
+  w.close();
+}
+
+// ── b) Was ECHTE Browser beim Bearbeiten bauen ───────────────────────────
+/* ⚠ DIESE TABELLE IST GEMESSEN, NICHT AUSGEDACHT. Die Chrome-Formen stammen
+ * aus einem Lauf in echtem Chrome (contenteditable, execCommand-Operationen,
+ * innerHTML abgegriffen). Sie hat einen Fehler im ersten Entwurf gefunden: der
+ * Rueckweg verwarf `<br>` und zog damit zwei Zeilen stillschweigend zusammen.
+ *
+ * Die Firefox-Formen sind der zweite Grund fuer diese Tabelle: Firefox erzeugt
+ * beim Enter GAR KEIN `<div>`, sondern ein `<br>` auf oberster Ebene. Wer nur
+ * "div = Zeile" kennt, verliert dort JEDEN vom Benutzer gesetzten Umbruch -
+ * und beide Browser werden ausgeliefert. */
+{
+  const { w, F, el } = feldWelt();
+  const FORMEN = [
+    ["Chrome: Enter am Zeilenende",
+     "<div><strong>L:</strong> eins</div><div>neu</div><div>zwei</div>",
+     "**L:** eins\nneu\nzwei"],
+    ["Chrome: Shift+Enter -> br IN der Zeile",
+     "<div><strong>L:</strong> eins<br>neu</div><div>zwei</div>",
+     "**L:** eins\nneu\nzwei"],
+    ["Chrome: alles markiert und geloescht", "<br>", ""],
+    ["Chrome: leere Zeile", "<div>a</div><div><br></div><div>b</div>", "a\n\nb"],
+    ["Chrome: Fuellwerk-br am Blockende", "<div>a<br></div><div>b</div>", "a\nb"],
+    ["Chrome: Strg+B erzeugt <b>",
+     "<div><strong>L:</strong> <b>Der</b> Dienst</div>", "**L:** **Der** Dienst"],
+    ["Strg+B als span font-weight",
+     '<div><span style="font-weight:700">Fett</span> normal</div>',
+     "**Fett** normal"],
+    ["Fremdformat eingefuegt wird flachgeklopft",
+     '<div>a<i>kursiv</i> und <span style="color:red">rot</span></div>',
+     "akursiv und rot"],
+    ["FIREFOX: Enter erzeugt br, keine div", "eins<br>zwei<br>drei",
+     "eins\nzwei\ndrei"],
+    ["FIREFOX: mit Fett", "<strong>L:</strong> eins<br>zwei", "**L:** eins\nzwei"],
+    ["FIREFOX: alles geloescht", "<br>", ""],
+    /* Der HAEUFIGSTE Bearbeitungsfall: ein Leerzeichen hinter das fette Wort
+     * getippt. Naiv emittiert waere das `**Loesung: **`, und das erfuellt die
+     * Bedingung beim naechsten Aufbau nicht - das Fett waere nach dem
+     * naechsten Wiederherstellen spurlos weg. */
+    ["Leerzeichen im Fettlauf", "<div><strong>Lösung: </strong>Text</div>",
+     "**Lösung:** Text"],
+    /* Beim Loeschen an einer Fettgrenze entstehen zwei benachbarte Laeufe.
+     * `**A****B**` ist im Feld unsichtbar, im Text an den Server und in der
+     * textarea aber sichtbarer Muell. */
+    ["zwei Fettlaeufe nebeneinander",
+     "<div><strong>A</strong><strong>B</strong> c</div>", "**AB** c"],
+    ["geschuetztes Leerzeichen wird normal", "<div>a  b</div>", "a  b"],
+  ];
+  for (const [name, html, erwartet] of FORMEN) {
+    el.innerHTML = html;          // NUR im Test: stellt das Browser-Ergebnis nach
+    const t = F.feldZuText(el);
+    check(t === erwartet, name, "bekommen " + JSON.stringify(t)
+          + " statt " + JSON.stringify(erwartet));
+  }
+  w.close();
+}
+
+// ── c) Modelltext kann kein Element werden ───────────────────────────────
+/* Der Text stammt aus einem Modell, das Kundentext verarbeitet hat. Mit
+ * `innerHTML` waere ein `<img src=x onerror=…>` aus einem Ticket im Origin der
+ * Erweiterung ausfuehrbar - und dort liegt das Sitzungstoken. */
+{
+  const { w, F, el } = feldWelt();
+  const boese = 'Ein <img src=x onerror=alert(1)> und <script>alert(2)</script>'
+    + ' und <b>fett</b> aus dem Ticket';
+  F.textZuFeld(el, boese);
+  const fremd = [...el.querySelectorAll("*")]
+    .map((n) => n.nodeName).filter((n) => n !== "DIV" && n !== "STRONG");
+  check(fremd.length === 0,
+        "aus Modelltext entsteht KEIN fremdes Element", fremd.join(","));
+  check(el.textContent === boese,
+        "und der Text bleibt woertlich erhalten", el.textContent.slice(0, 50));
+  check(!/innerHTML/.test(schneidePopup("textZuFeld") || ""),
+        "textZuFeld benutzt kein innerHTML");
+  w.close();
+}
+
+// ── d) Eingefuegt und fallengelassen wird nur Klartext ───────────────────
+/* In echtem Chrome gemessen: ein Einfuegen aus der Zwischenablage traegt
+ * `<i>`, `<span style>` und beliebiges weiteres Markup in das Feld. */
+{
+  const ohne = ohneKommentare(POPUP_JS);
+  const einsetzen = schneidePopup("klartextEinsetzen") || "";
+  check(!!einsetzen, "popup.js hat klartextEinsetzen()");
+  check(/addEventListener\("paste"/.test(ohne), "ein paste-Zuhoerer ist da");
+  check(/addEventListener\("drop"/.test(ohne),
+        "und ein drop-Zuhoerer - Hineinziehen ist derselbe Fall");
+  check(/addEventListener\("dragover"/.test(ohne),
+        "mit dragover, sonst navigiert Chrome das Fenster weg");
+
+  const pasteRumpf = (ohne.match(
+    /addEventListener\("paste"[\s\S]*?\n\}\);/) || [""])[0];
+  check(/preventDefault\(\)/.test(pasteRumpf), "paste wird abgefangen");
+  check(/getData\("text\/plain"\)/.test(pasteRumpf),
+        "und NUR text/plain gelesen - nie text/html");
+  check(!/text\/html/.test(pasteRumpf), "text/html wird nirgends angefasst");
+  /* Ohne das Ereignis laeuft die Merk-Drossel nicht an, und das Eingesetzte
+   * waere beim naechsten Oeffnen weg - genau das Szenario, fuer das der Timer
+   * gebaut wurde. */
+  check(/dispatchEvent\(new Event\("input"/.test(einsetzen),
+        "der Range-Rueckfall feuert selbst ein input-Ereignis");
+}
+
+// ── e) Der Abgleich-Hinweis gehoert NICHT in den Kundentext ──────────────
+/* ⚠ AUSGEFUEHRT, nicht gelesen. Die alte Pruefung hing an der Schreibweise
+ * `ergebnisFeld.value = …` und wurde durch den Umbau zur Tautologie. Der
+ * Hinweis ist eine Anmerkung FUER den Mitarbeiter; landete er im Feld, ginge
+ * er mit dem naechsten Klick auf "Einfuegen" an einen Kunden. */
+{
+  const { teile } = popupTeile(["auswerten", "mitAbgleich", "textZuFeld",
+                                "feldZuText", "melde"],
+                               ["frage", "sperre"]);
+  const dom = new JSDOM(POPUP_HTML, { url: "https://x.test/",
+                                      runScripts: "outside-only" });
+  const w = dom.window;
+  try {
+    const f = new w.Function(""
+      + "const $ = (id) => document.getElementById(id);\n"
+      + "const el = { ergebnisFeld: $('f-ergebnis'), ergebnis: $('ergebnis'),\n"
+      + "             ergebnisFuss: $('ergebnis-fuss'), meldung: $('meldung'),\n"
+      + "             hinweis: $('f-hinweis') };\n"
+      + "let _key = 'ABC-1', _letztes = null, _fremdesErgebnis = false;\n"
+      + "let _marke = 'Marke', _laeuft = false, _leiste = false;\n"
+      + "let _merkTimer = null, _autoModus = '';\n"
+      + "const _originale = new Map();\n"
+      + "function sperre() {}\n"
+      + "async function frage() {\n"
+      + "  return { ok: true, daten: { key: 'ABC-1', modus: 'ueberarbeiten',\n"
+      + "    text: 'ANTWORTTEXT', hinweis: 'GEHEIMER-ABGLEICH', kommentare: 3,\n"
+      + "    modell: 'M' } };\n"
+      + "}\n"
+      /* Auch ARBEITSTEXT/FERTIGTEXT stehen in keinem Funktionsrumpf und
+       * fallen aus dem Schnitt - dieselbe Falle wie bei _FETT_RE. */
+      + (POPUP_JS.match(/const ARBEITSTEXT = \{[\s\S]*?\n\};/) || [""])[0] + "\n"
+      + (POPUP_JS.match(/const FERTIGTEXT = \{[\s\S]*?\n\};/) || [""])[0] + "\n"
+      + FELD_KONST + "\n" + teile.join("\n") + "\n"
+      + "return (async () => {\n"
+      + "  await auswerten('ueberarbeiten', 'entwurf');\n"
+      + "  return JSON.stringify({\n"
+      + "    sichtbar: el.ergebnisFeld.textContent,\n"
+      + "    kanonisch: feldZuText(el.ergebnisFeld),\n"
+      + "    meldung: el.meldung.textContent,\n"
+      + "  });\n"
+      + "})();");
+    const r = JSON.parse(await f());
+    check(r.sichtbar.indexOf("GEHEIMER-ABGLEICH") < 0,
+          "der Abgleich-Hinweis steht NICHT sichtbar im Feld", r.sichtbar);
+    check(r.kanonisch.indexOf("GEHEIMER-ABGLEICH") < 0,
+          "und auch nicht in dem, was gespeichert und eingefuegt wird",
+          r.kanonisch);
+    check(r.sichtbar.indexOf("ANTWORTTEXT") >= 0,
+          "der Antworttext dagegen schon (sonst waere gar nichts gelaufen)");
+    check(r.meldung.indexOf("GEHEIMER-ABGLEICH") >= 0,
+          "der Hinweis erscheint als MELDUNG", r.meldung);
+  } finally { w.close(); }
+}
+
+// ── f) Einfuegen: mit Fett, ohne Fett, in eine textarea ──────────────────
+/* ⚠ execCommand wird als AUFZEICHNER gestellt, nicht als `() => false`. Nur so
+ * ist messbar, welcher Weg wirklich genommen wurde - ohne die Attrappe misst
+ * man immer nur den Rueckfall, und die Zusage "ohne Fett aendert sich nichts"
+ * waere unpruefbar. */
+{
+  const bloeckeAus = (text) => {
+    const { w, F } = feldWelt();
+    const b = F.zuBloecken(text);
+    w.close();
+    return JSON.parse(JSON.stringify(b));   // wie ueber executeScript: JSON
+  };
+
+  const einfuegeLauf = (html, text, mitBloecken, execAntwort) => {
+    const dom = new JSDOM("<body>" + html + "</body>",
+      { url: "https://jira.test/browse/A-1", runScripts: "outside-only" });
+    const w = dom.window, doc = w.document;
+    w.Element.prototype.getBoundingClientRect = function () {
+      return this.hasAttribute("data-unsichtbar")
+        ? { width: 0, height: 0 } : { width: 300, height: 80 };
+    };
+    w.Element.prototype.scrollIntoView = function () {};
+    const ruf = [];
+    if (execAntwort !== null) {
+      doc.execCommand = (befehl, u, wert) => {
+        ruf.push(befehl);
+        if (!execAntwort) return false;
+        // Wie der Browser: an der Auswahl einsetzen.
+        const ziel = doc.querySelector("[contenteditable]")
+          || doc.activeElement;
+        if (ziel && befehl === "insertText") {
+          ziel.appendChild(doc.createTextNode(wert));
+        } else if (ziel && befehl === "insertHTML") {
+          const h = doc.createElement("div");
+          h.innerHTML = wert;
+          while (h.firstChild) ziel.appendChild(h.firstChild);
+        }
+        return true;
+      };
+    }
+    const f = ladeEinfuegen(w);
+    const r = mitBloecken ? f(text, bloeckeAus(text)) : f(text);
+    const ziel = doc.querySelector("[contenteditable]")
+      || doc.querySelector("textarea");
+    const erg = {
+      ok: r.ok, weg: r.weg, ruf,
+      inhalt: ziel ? (ziel.value !== undefined && ziel.tagName === "TEXTAREA"
+        ? ziel.value : ziel.textContent) : "",
+      fett: ziel ? ziel.querySelectorAll
+        ? ziel.querySelectorAll("strong").length : 0 : 0,
+    };
+    w.close();
+    return erg;
+  };
+
+  const MIT = "**Lösung:** Der Dienst laeuft.";
+  const OHNE = "Guten Tag,\n\nerledigt.";
+
+  // 1) OHNE Fett bleibt der bevorzugte Weg unangetastet.
+  {
+    const r = einfuegeLauf('<div contenteditable="true"></div>', OHNE, true, true);
+    check(r.ruf.indexOf("insertText") >= 0,
+          "ohne Fett wird weiterhin insertText benutzt", r.ruf.join(","));
+    check(r.ruf.indexOf("insertHTML") < 0, "und NICHT insertHTML");
+    check(r.inhalt.indexOf("erledigt.") >= 0, "der Text kommt an", r.inhalt);
+  }
+
+  // 2) MIT Fett: echte <strong> im Ziel.
+  {
+    const r = einfuegeLauf('<div contenteditable="true"></div>', MIT, true, true);
+    check(r.fett === 1, "mit Fett steht ein <strong> im Ziel", String(r.fett));
+    check(r.inhalt.indexOf("Lösung:") >= 0, "mit dem richtigen Wort", r.inhalt);
+    check(r.inhalt.indexOf("**") < 0,
+          "und OHNE Sternchen - die liest sonst der Kunde", r.inhalt);
+    check(/fett/i.test(String(r.weg)), "der Weg wird als Fett-Weg gemeldet", r.weg);
+  }
+
+  // 3) MIT Fett, aber der Editor nimmt execCommand nicht an -> Knoten.
+  {
+    const r = einfuegeLauf('<div contenteditable="true"></div>', MIT, true, false);
+    check(r.fett === 1, "auch ueber den Knotenweg kommt Fett an", String(r.fett));
+    check(r.inhalt.indexOf("**") < 0, "weiterhin ohne Sternchen", r.inhalt);
+  }
+
+  /* 4) EINE TEXTAREA KANN KEIN FETT. Dort geht der bereinigte Text hinein -
+   * ein `**` waere genau das, was der Kunde am Ende liest. */
+  {
+    const r = einfuegeLauf('<textarea id="comment"></textarea>', MIT, true, null);
+    check(r.inhalt.indexOf("**") < 0,
+          "textarea bekommt den Text OHNE Sternchen", r.inhalt);
+    check(r.inhalt.indexOf("Lösung:") >= 0, "aber vollstaendig", r.inhalt);
+  }
+
+  /* 5) ALTES FENSTER, NEUE einfuegen.js: ohne zweites Argument muss sich alles
+   * verhalten wie vor dem Umbau - sonst braeche jeder Bestandstest. */
+  {
+    const r = einfuegeLauf('<textarea id="comment"></textarea>', MIT, false, null);
+    check(r.ok === true && r.inhalt === MIT,
+          "ohne bloecke bleibt der Originaltext unangetastet", r.inhalt);
+  }
+}
+
+// ── g) Kopieren legt bereinigten Text ab ─────────────────────────────────
+{
+  const ohne = ohneKommentare(POPUP_JS);
+  const kop = (ohne.match(/btn-kopieren"\)\.addEventListener\([\s\S]*?\n\}\);/) || [""])[0];
+  check(/ohneFett\(/.test(kop),
+        "Kopieren legt den Text OHNE Sternchen ab - er wird von Hand eingefuegt");
+  const zweit = (ohne.match(/func: einfuegenUeberEditorApi,[\s\S]{0,120}/) || [""])[0];
+  check(/ohneFett\(/.test(zweit),
+        "und der Editor-API-Weg ebenfalls (er kann kein Fett tragen)", zweit.trim());
+}
+
+// ── h) Das Feld sieht aus wie ein Eingabefeld und waechst nicht davon ────
+{
+  const regel = (POPUP_CSS.match(/#f-ergebnis \{([^}]*)\}/) || ["", ""])[1];
+  check(!!regel.trim(), "es gibt eine eigene #f-ergebnis-Regel");
+  for (const [eig, grund] of [
+    ["white-space: pre-wrap", "Umbrueche und Einrueckungen des Modells"],
+    ["min-height", "sonst ist das Feld beim ersten Zeichen huefthoch"],
+    ["overflow", "Voraussetzung dafuer, dass resize ueberhaupt wirkt"],
+  ]) {
+    check(regel.indexOf(eig) >= 0, "#f-ergebnis setzt " + eig + " - " + grund);
+  }
+  /* ⚠ DER DECKEL IST DER WICHTIGE TEIL. Die abgeloeste textarea hatte
+   * rows="12", also eine FESTE Hoehe. Ein <div> waechst unbegrenzt und schoebe
+   * bei einer langen Antwort den Einfuegen-Knopf aus dem 600-px-Fenster. */
+  check(/max-height/.test(regel),
+        "und einen max-height-Deckel (sonst waechst es aus dem Fenster)");
+  const leiste = (POPUP_CSS.match(/html\.leiste #f-ergebnis \{([^}]*)\}/) || ["", ""])[1];
+  check(/min-height:\s*40vh/.test(leiste),
+        "in der Leiste bleibt der Hoehengewinn erhalten", leiste.trim());
+  check(/max-height/.test(leiste), "auch dort gedeckelt");
+  check(/#f-ergebnis:empty::before/.test(POPUP_CSS),
+        "ein leeres Feld zeigt einen Platzhalter (ein div kennt kein placeholder)");
+  // Das Markup selbst.
+  check(/id="f-ergebnis"[^>]*contenteditable="true"/.test(POPUP_HTML),
+        "das Feld ist contenteditable");
+  check(/id="f-ergebnis"[^>]*role="textbox"/.test(POPUP_HTML),
+        'und traegt role="textbox" - ein div hat keine implizite Rolle');
+  check(/id="f-ergebnis"[^>]*aria-multiline="true"/.test(POPUP_HTML),
+        "sowie aria-multiline");
+  check(/id="f-ergebnis"[^>]*spellcheck="true"/.test(POPUP_HTML),
+        "die Rechtschreibpruefung bleibt erhalten");
+  check(!/<textarea id="f-ergebnis"/.test(POPUP_HTML),
+        "und es ist keine textarea mehr");
 }
 
 /* Erst den Puffer leeren: eine Zurueckweisung aus einem nicht abgewarteten

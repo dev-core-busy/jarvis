@@ -44,6 +44,34 @@
     // (Projektregel, dieselbe wie beim Badge-Panel und bei `cron_list`).
     var ZEILEN_MAX = 400;
 
+    /* DIE EINZEILER, mit denen ein Administrator die Liste selbst nachrechnen
+     * kann. Sie stehen hier als KONSTANTEN und nicht in i18n: ein Befehl ist
+     * kein Text, den man uebersetzt – und uebersetzt wuerde er frueher oder
+     * spaeter angefasst und damit falsch.
+     *
+     * ⚠ SIE MUESSEN ZUM BACKEND PASSEN. Das Abfrageformat ist woertlich
+     * `_FORMAT` aus `backend/system_packages.py`, der `awk`-Filter ist dessen
+     * Statuspruefung (`status[1] != 'i'` -> uebersprungen). Laufen die beiden
+     * auseinander, zeigt die Oberflaeche einen Befehl, der ETWAS ANDERES
+     * liefert als die Liste darueber – und der Anwender haelt genau diesen
+     * Unterschied fuer einen Fehler. `tests/test_system_packages.py` haelt sie
+     * deshalb als Drift-Schranke zusammen.
+     *
+     * Gemessen auf DEV: beide Wege liefern 2825 Pakete und 11036400 KiB; ohne
+     * den Filter waeren es 2844 – die 19 `rc`-Eintraege sind der Unterschied,
+     * den der Filter macht. */
+    var BEFEHLE = {
+        liste: "dpkg-query -W -f='${db:Status-Abbrev}|${Package}|${Version}"
+             + "|${Architecture}|${Installed-Size}|${binary:Summary}\\n'"
+             + " | awk -F'|' 'substr($1,2,1)==\"i\"'",
+        stand: "stat -c '%y  %n' /var/lib/dpkg/info/bash.list"
+    };
+
+    // Der Aufklapp-Zustand wird GEMERKT: `zeichnen()` baut den Kasten bei jedem
+    // Tastendruck in der Suche neu auf – ohne diesen Merker klappte die
+    // Erklaerung beim Tippen jedes Mal wieder zu.
+    var _wieOffen = false;
+
     var _admin = false;
     var _bericht = null;      // letzter geholter Stand (nur solange offen)
     var _kasten = null;
@@ -244,6 +272,68 @@
         return kopie;
     }
 
+    /** Eine Befehlszeile mit Kopier-Knopf.
+     *
+     * Der Befehl steht im Klartext DA und wird zusaetzlich zum Kopieren
+     * angeboten: wer einen `awk`-Ausdruck abtippen muss, vollzieht nichts nach.
+     * Der Knopf traegt nur den SCHLUESSEL, nie den Befehl selbst – so kann aus
+     * einem Attributwert nie ein anderer Befehl werden als der angezeigte. */
+    function cmdZeile(schluessel) {
+        return '<div class="jv-pkg-cmdrow">'
+            + '<code class="jv-pkg-cmd">' + esc(BEFEHLE[schluessel]) + '</code>'
+            + '<button type="button" class="jv-pkg-copy" data-cmd="' + esc(schluessel)
+            + '">' + esc(T('pkg.copy', 'Kopieren')) + '</button></div>';
+    }
+
+    /* Kopieren MIT Rueckmeldung. Ohne sie waere ein Fehlschlag unsichtbar – in
+     * der Zwischenablage sieht man nichts, und `navigator.clipboard` fehlt in
+     * unsicheren Kontexten ganz. Die Meldung nennt dann den Ausweg (markieren),
+     * statt den Benutzer glauben zu lassen, es haette geklappt. */
+    function kopiere(k, text) {
+        var fertig = function (gut) {
+            // Beim ERSTEN Klick den Ruhetext sichern - sonst wird beim zweiten
+            // Klick "Kopiert" als Ruhetext gemerkt und bleibt fuer immer stehen.
+            if (!k.getAttribute('data-ruhe')) k.setAttribute('data-ruhe', k.textContent);
+            k.textContent = gut ? T('pkg.copied', 'Kopiert')
+                                : T('pkg.copy_fail', 'Nicht möglich – bitte markieren');
+            if (gut) k.classList.remove('ist-fehler'); else k.classList.add('ist-fehler');
+            setTimeout(function () {
+                k.textContent = k.getAttribute('data-ruhe') || '';
+                k.classList.remove('ist-fehler');
+            }, gut ? 1600 : 3500);
+        };
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(function () { fertig(true); },
+                                                         function () { fertig(false); });
+                return;
+            }
+        } catch (e) { /* faellt unten durch */ }
+        fertig(false);
+    }
+
+    /** „Wie diese Liste entsteht" – zugeklappt per Vorgabe.
+     *
+     * Der Anlass ist eine Frage des Nutzers: eine Zahl ohne Herkunft ist eine
+     * Behauptung. Hier steht, WORAUS sie entsteht – und mit den Einzeilern kann
+     * ein Administrator sie auf dem Server selbst nachrechnen, statt sie mir zu
+     * glauben. Zugeklappt, weil die Tabelle der Zweck des Kastens ist; der
+     * Zustand ueberlebt das Neuzeichnen (`_wieOffen`).
+     */
+    function wieBlock() {
+        return '<details class="jv-pkg-wie"' + (_wieOffen ? ' open' : '') + '>'
+            + '<summary>' + esc(T('pkg.how_title', 'Wie diese Liste entsteht'))
+            + '</summary><div class="jv-pkg-wie-in">'
+            + '<p>' + esc(T('pkg.how_src', '')) + '</p>'
+            + '<p>' + esc(T('pkg.how_filter', '')) + '</p>'
+            + '<p>' + esc(T('pkg.how_fields', '')) + '</p>'
+            + '<p>' + esc(T('pkg.how_cmd1', '')) + '</p>'
+            + cmdZeile('liste')
+            + '<p>' + esc(T('pkg.how_cmd2', '')) + '</p>'
+            + cmdZeile('stand')
+            + '</div></details>';
+    }
+
     function zeichnen() {
         if (!_bericht) return;
         var suchfeld = document.getElementById('jv-pkg-suche');
@@ -309,6 +399,7 @@
             + ' · ' + esc(T('pkg.date_hint',
                 'Der Stand ist der Zeitpunkt, zu dem dpkg die Dateiliste zuletzt geschrieben '
                 + 'hat (Installation oder Aktualisierung) – dpkg führt kein Installationsdatum.'))
+            + wieBlock()
             + '</div>');
 
         var box = _kasten.querySelector('.jv-pkg-box');
@@ -334,6 +425,13 @@
             h.addEventListener('click', um);
             h.addEventListener('keydown', function (e) {
                 if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); um(); }
+            });
+        });
+        var wie = box.querySelector('.jv-pkg-wie');
+        if (wie) wie.addEventListener('toggle', function () { _wieOffen = wie.open; });
+        Array.prototype.forEach.call(box.querySelectorAll('.jv-pkg-copy'), function (k) {
+            k.addEventListener('click', function () {
+                kopiere(k, BEFEHLE[k.getAttribute('data-cmd')] || '');
             });
         });
         var dl = box.querySelector('.jv-pkg-dl');

@@ -88,6 +88,9 @@ from backend import system_packages as sp   # noqa: E402
 # der Lauf die echte Maschine – und ein spaeter ergaenzter Schreibvorgang
 # traefe sie.
 TMP = tempfile.mkdtemp(prefix="pkgtest_")
+# Den ECHTEN Wert vorher sichern: Abschnitt 9 vergleicht den in der Oberflaeche
+# angezeigten Einzeiler dagegen, und der nennt natuerlich den Produktionspfad.
+INFO_DIR_ECHT = sp._INFO_DIR
 sp._INFO_DIR = os.path.join(TMP, "info")
 os.makedirs(sp._INFO_DIR)
 if not sp._INFO_DIR.startswith(TMP):
@@ -523,6 +526,138 @@ check("und jeder im JS benutzte Schluessel existiert", benutzt <= de, sorted(ben
 # das behauptet, sagt etwas, das sie nicht weiss.
 check("die Oberflaeche sagt, was das Datum wirklich ist",
       "date_hint" in JS and "Installationsdatum" in I18N)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+abschnitt("9) Herkunft der Zahlen und die Einzeiler zum Nachrechnen")
+
+# Die Zusage: der Kasten sagt, WORAUS die Zahlen entstehen, und bietet einen
+# Einzeiler, mit dem ein Administrator sie auf dem Server nachrechnet. Eine Zahl
+# ohne Herkunft ist eine Behauptung.
+check("der Kasten erklaert die Herkunft in einem Aufklapp-Abschnitt",
+      "wieBlock" in JS and "jv-pkg-wie" in JS and "<details" in JS)
+# Der Abschnitt muss auch WIRKLICH gezeichnet werden - eine Funktion ohne
+# Aufrufer waere toter Code (im Projekt schon vorgekommen).
+fuss_idx = JS.find("jv-pkg-fuss")
+check("und er haengt in der Fusszeile, nicht nur im Quelltext",
+      fuss_idx > 0 and 0 < JS.find("wieBlock()", fuss_idx) < JS.find("</div>');", fuss_idx))
+# `zeichnen()` baut den Kasten bei JEDEM Tastendruck in der Suche neu auf.
+# Ohne gemerkten Zustand klappte die Erklaerung beim Tippen jedes Mal zu.
+check("der Aufklapp-Zustand ueberlebt das Neuzeichnen",
+      "_wieOffen" in JS and "wie.open" in JS and "_wieOffen ? ' open' : ''" in JS)
+# In der Zwischenablage sieht man nichts, und `navigator.clipboard` fehlt in
+# unsicheren Kontexten ganz - ein Fehlschlag waere sonst unsichtbar.
+check("Kopieren meldet Erfolg UND Fehlschlag zurueck",
+      "pkg.copied" in JS and "pkg.copy_fail" in JS and "ist-fehler" in JS)
+# Der Knopf traegt nur den Schluessel: so kann aus einem Attributwert nie ein
+# anderer Befehl werden als der angezeigte.
+check("der Kopier-Knopf traegt den Schluessel, nicht den Befehl",
+      "data-cmd=\"' + esc(schluessel)" in JS and "dpkg-query" not in JS[JS.find("function cmdZeile"):JS.find("function kopiere")])
+
+# ── Die Einzeiler aus dem JS holen (kein node noetig) ──────────────────────
+def js_befehl(name):
+    """Liest BEFEHLE.<name> aus syspackages.js und loest die JS-Escapes auf."""
+    blk = re.search(r"var BEFEHLE = \{(.*?)\n    \};", JS, re.S)
+    if not blk:
+        return ""
+    m = re.search(r"\n\s*%s:\s*(.*?)(?=\n\s*[a-z_]+:|\Z)" % name, blk.group(1), re.S)
+    if not m:
+        return ""
+    return "".join(json.loads(t) for t in re.findall(r'"(?:[^"\\]|\\.)*"', m.group(1)))
+
+CMD_LISTE = js_befehl("liste")
+CMD_STAND = js_befehl("stand")
+check("beide Einzeiler sind lesbar", CMD_LISTE and CMD_STAND, (CMD_LISTE, CMD_STAND))
+
+# ── DRIFT-SCHRANKE ────────────────────────────────────────────────────────
+# Der angezeigte Befehl und das Backend muessen DASSELBE tun. Laufen sie
+# auseinander, zeigt die Oberflaeche einen Befehl mit anderem Ergebnis als die
+# Liste darueber - und der Anwender haelt genau diesen Unterschied fuer einen
+# Fehler. Verglichen wird gegen die echten Konstanten des Moduls.
+check("der Einzeiler benutzt WOERTLICH das Abfrageformat des Backends",
+      sp._FORMAT.rstrip("\n") in CMD_LISTE,
+      sp._FORMAT.rstrip("\n"))
+check("und der zweite nennt das Verzeichnis, aus dem der Stand kommt",
+      INFO_DIR_ECHT in CMD_STAND, (INFO_DIR_ECHT, CMD_STAND))
+check("der Trenner des Befehls ist der des Backends",
+      ("-F'%s'" % sp._TRENNER) in CMD_LISTE, sp._TRENNER)
+
+# ⚠ ⚠ Der Befehl wird WIRKLICH AUSGEFUEHRT - gegen dieselbe Attrappen-Ausgabe,
+# aus der auch `sammle()` liest. Eine Textpruefung wuerde nur belegen, dass
+# jemand etwas hingeschrieben hat; hier wird die EIGENSCHAFT gemessen: waehlt
+# der angezeigte Befehl dieselben Pakete aus wie das Backend?
+import shutil
+if not shutil.which("awk"):
+    check("awk vorhanden (fuer die Ausfuehrungsprobe)", False, "awk fehlt")
+else:
+    hilfsdir = os.path.join(TMP, "bin")
+    os.makedirs(hilfsdir, exist_ok=True)
+    dq = os.path.join(hilfsdir, "dpkg-query")
+    # Die Attrappe ignoriert die Argumente und gibt die Testzeilen aus - genau
+    # das, was `stelle_dpkg` dem Modul liefert. Damit lesen beide Wege dasselbe.
+    with open(dq, "w", encoding="utf-8") as f:
+        f.write("#!/bin/sh\ncat <<'ZEILEN_ENDE'\n%s\nZEILEN_ENDE\n" % ZEILEN.rstrip("\n"))
+    os.chmod(dq, 0o755)
+    umg = dict(os.environ, PATH=hilfsdir + os.pathsep + os.environ.get("PATH", ""))
+    # ⚠ NICHT `subprocess.run` - `stelle_dpkg()` ersetzt das Attribut am MODUL,
+    # und dann liefe der Befehl durch die Attrappe zurueck, statt zu laufen.
+    # Genau so war die erste Fassung dieses Tests gruen, ohne etwas zu messen.
+    lauf, grund = sicher(lambda: _echt_run(
+        ["sh", "-c", CMD_LISTE], capture_output=True, text=True, timeout=20, env=umg))
+    if lauf is None:
+        check("der angezeigte Befehl laeuft", False, grund)
+    else:
+        durch = set()
+        for z in (lauf.stdout or "").splitlines():
+            t = z.split(sp._TRENNER)
+            if len(t) > 1 and t[1].strip():
+                durch.add(t[1].strip())
+        b = bericht_mit()
+        im_bericht = {x["package"] for x in b["pakete"]}
+        check("der angezeigte Befehl laeuft ueberhaupt", lauf.returncode == 0,
+              (lauf.returncode, lauf.stderr[:200]))
+        # DIE zentrale Zusage: was der Bericht zeigt, liefert der Befehl auch.
+        check("er liefert JEDES Paket, das der Bericht zeigt",
+              im_bericht and im_bericht <= durch, sorted(im_bericht - durch))
+        # Und die Gegenrichtung, die den Filter beweist: `rc` bleibt draussen.
+        check("und laesst den rc-Eintrag genauso draussen wie das Backend",
+              "altpaket" not in durch and "altpaket" not in im_bericht, sorted(durch))
+
+# ── CSS: drei Regeln, die keine Kosmetik sind ─────────────────────────────
+CSS = (ROOT / "frontend" / "css" / "theme.css").read_text(encoding="utf-8")
+
+
+def regel(name):
+    """Der Rumpf einer CSS-Regel – OHNE Kommentare.
+
+    ⚠ Die Kommentare MUESSEN raus: sie begruenden genau die Deklaration, die
+    hier geprueft wird ("`min-width: 0` ist Pflicht ..."). Ohne das Entfernen
+    liest der Waechter seine eigene Begruendung und bleibt gruen, auch wenn die
+    Deklaration geloescht wurde – im Projekt inzwischen der zwoelfte Fall
+    dieser Klasse, und dieser hier ist von einer Gegenprobe aufgefallen, die
+    NICHT gebissen hat.
+    """
+    m = re.search(r"\.%s\s*\{(.*?)\}" % re.escape(name), CSS, re.S)
+    if not m:
+        return None
+    return re.sub(r"/\*.*?\*/", "", m.group(1), flags=re.S)
+
+
+# Positivkontrolle fuer den Helfer: entfernt er wirklich NUR den Kommentar?
+_probe = regel("jv-pkg-cmd")
+check("die Kommentar-Entfernung im CSS-Helfer greift",
+      _probe is not None and "ist Pflicht" not in _probe and "font-family" in _probe,
+      _probe)
+
+r_cmd = regel("jv-pkg-cmd")
+check("der Befehlsblock schrumpft im Flex-Container (min-width: 0)",
+      r_cmd and "min-width: 0" in r_cmd, r_cmd)
+r_fuss = regel("jv-pkg-fuss")
+check("die Fusszeile wird nicht gestaucht (flex: 0 0 auto)",
+      r_fuss and "flex: 0 0 auto" in r_fuss, r_fuss)
+r_wie = regel("jv-pkg-wie-in")
+check("der aufgeklappte Bereich hat einen eigenen Deckel mit Scroll",
+      r_wie and "max-height" in r_wie and "overflow-y: auto" in r_wie, r_wie)
 
 print("\n\033[1m%d OK, %d FAIL\033[0m" % (ok, fail))
 sys.exit(1 if fail else 0)

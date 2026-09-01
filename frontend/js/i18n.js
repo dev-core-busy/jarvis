@@ -2017,6 +2017,18 @@ const _I18N = {
         // wird die Dateiliste des Pakets. Ein Datum als Installationsdatum
         // auszugeben, das keines ist, behauptet etwas, das die Anzeige nicht weiß.
         'pkg.date_hint':    'Der Stand ist der Zeitpunkt, zu dem dpkg die Dateiliste zuletzt geschrieben hat (Installation oder Aktualisierung) – dpkg führt kein Installationsdatum.',
+        // WIE die Liste entsteht - eine Zahl ohne Herkunft ist eine Behauptung.
+        // Die Einzeiler selbst stehen NICHT hier, sondern als Konstanten in
+        // syspackages.js: ein Befehl ist kein Text, den man uebersetzt.
+        'pkg.how_title':    'Wie diese Liste entsteht',
+        'pkg.how_src':      'Gelesen wird die Paketdatenbank des Systems (dpkg) – bei jedem Öffnen dieses Fensters neu. Es wird nichts zwischengespeichert und keine Datei angelegt: die Liste beschreibt den Server in genau diesem Moment.',
+        'pkg.how_filter':   'Aufgeführt ist nur, was wirklich installiert ist. dpkg führt je Paket ein zweistelliges Status-Kürzel; der zweite Buchstabe muss „i“ sein – „ii“ (installiert) und „hi“ (auf hold) zählen mit, „rc“ (entfernt, Konfiguration liegt noch) nicht.',
+        'pkg.how_fields':   'Größe und Beschreibung meldet dpkg selbst: die belegte Größe in KiB und die einzeilige Zusammenfassung des Pakets. Suchen und Sortieren laufen im Browser und fragen den Server nicht erneut.',
+        'pkg.how_cmd1':     'Zum Nachrechnen auf dem Server – diese Zeile liefert genau dieselbe Liste, mit „| wc -l“ am Ende die Anzahl von oben:',
+        'pkg.how_cmd2':     'Und der „Stand“ eines einzelnen Pakets (hier bash) – es ist der Zeitstempel seiner Dateiliste:',
+        'pkg.copy':         'Kopieren',
+        'pkg.copied':       'Kopiert',
+        'pkg.copy_fail':    'Nicht möglich – bitte markieren',
         'pkg.err':          'Der Paketbestand konnte nicht gelesen werden.',
         'pkg.err_admin':    'Nur für Administratoren.',
         'pkg.err_net':      'Der Server war nicht erreichbar.',
@@ -5249,6 +5261,15 @@ const _I18N = {
         'pkg.col_summary':  'Description',
         'pkg.hold':         'on hold – will not be upgraded',
         'pkg.date_hint':    'The date is when dpkg last wrote the package file list (install or upgrade) – dpkg keeps no installation date.',
+        'pkg.how_title':    'How this list is produced',
+        'pkg.how_src':      'The system package database (dpkg) is read afresh every time this window is opened. Nothing is cached and no file is written: the list describes the server at this very moment.',
+        'pkg.how_filter':   'Only what is really installed is listed. dpkg keeps a two-letter status code per package; the second letter must be “i” – “ii” (installed) and “hi” (on hold) count, “rc” (removed, configuration still present) does not.',
+        'pkg.how_fields':   'Size and description come from dpkg itself: the installed size in KiB and the package’s one-line summary. Search and sorting happen in the browser and do not query the server again.',
+        'pkg.how_cmd1':     'To verify on the server – this line returns exactly the same list, and with “| wc -l” appended the count shown above:',
+        'pkg.how_cmd2':     'And the “as of” date of a single package (bash here) – it is the timestamp of its file list:',
+        'pkg.copy':         'Copy',
+        'pkg.copied':       'Copied',
+        'pkg.copy_fail':    'Not possible – please select it',
         'pkg.err':          'The package list could not be read.',
         'pkg.err_admin':    'Administrators only.',
         'pkg.err_net':      'The server could not be reached.',

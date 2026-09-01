@@ -825,9 +825,89 @@ body.light .sapcert-state.is-err { color: color-mix(in srgb, var(--danger) 78%, 
     border: 1px solid rgba(245, 158, 11, .5);
     color: var(--text-primary);
 }
-.jv-pkg-fuss { font-size: .74rem; color: var(--text-secondary); padding-top: 8px; }
+/* ⚠ `flex: 0 0 auto`: die Fusszeile traegt jetzt den Aufklapp-Bereich und darf
+   NICHT gestaucht werden – ein Flex-Kind ist von sich aus `0 1 auto` und gibt
+   unter Druck als Erstes nach. Die Tabelle darueber hat `min-height: 0` und
+   schrumpft stattdessen, was hier richtig ist. */
+.jv-pkg-fuss { font-size: .74rem; color: var(--text-secondary); padding-top: 8px; flex: 0 0 auto; }
 .jv-pkg-lade, .jv-pkg-fehler { padding: 26px 4px; text-align: center; color: var(--text-secondary); }
 .jv-pkg-fehler { color: var(--danger, #ef4444); }
+
+/* ── „Wie diese Liste entsteht" ─────────────────────────────────────────────
+   Herkunft der Zahlen samt Einzeilern zum Nachrechnen. Zugeklappt kostet der
+   Abschnitt eine Zeile; aufgeklappt bekommt er einen EIGENEN Deckel mit eigenem
+   Scroll – ohne den koennte er auf einem niedrigen Fenster die Tabelle ganz
+   verdraengen, also genau das wegdruecken, worum es im Kasten geht. */
+.jv-pkg-wie { margin-top: 6px; }
+.jv-pkg-wie > summary {
+    cursor: pointer;
+    color: var(--text-secondary);
+    padding: 3px 0;
+    user-select: none;
+    border-radius: 6px;
+}
+.jv-pkg-wie > summary:hover { color: var(--text-primary); }
+.jv-pkg-wie > summary:focus-visible { outline: 2px solid rgba(var(--accent-rgb), .8); outline-offset: 2px; }
+.jv-pkg-wie-in {
+    max-height: 38vh;
+    overflow-y: auto;
+    margin-top: 4px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    /* DECKEND: der Bereich liegt im Kasten ueber nichts, aber er soll sich vom
+       Tabellenrahmen darueber absetzen (Register: nie halbtransparent). */
+    background: var(--bg-primary, var(--bg-secondary));
+}
+.jv-pkg-wie-in p { margin: 0 0 8px; line-height: 1.5; }
+.jv-pkg-wie-in p:last-child { margin-bottom: 0; }
+
+.jv-pkg-cmdrow {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 0 0 10px;
+}
+.jv-pkg-cmd {
+    /* ⚠ `min-width: 0` ist Pflicht: ein Flex-Kind schrumpft von sich aus nicht
+       unter seine Inhaltsbreite, und der Befehl ist eine lange Zeile – ohne die
+       Zeile schoebe er den Kopier-Knopf aus dem Kasten (Register). */
+    flex: 1 1 auto;
+    min-width: 0;
+    font-family: var(--font-mono, monospace);
+    font-size: .74rem;
+    line-height: 1.45;
+    /* Umbrechen statt waagerecht scrollen: der Befehl soll VOLLSTAENDIG lesbar
+       sein – er ist der Beleg. `anywhere`, weil das Formatargument ein einziger
+       langer Lauf ohne Leerzeichen ist und sonst ueber den Rand liefe. */
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+}
+.jv-pkg-copy {
+    flex: 0 0 auto;
+    background: rgba(var(--accent-rgb), .14);
+    border: 1px solid rgba(var(--accent-rgb), .40);
+    color: var(--text-primary);
+    border-radius: 6px;
+    padding: 5px 10px;
+    font: inherit;
+    font-size: .74rem;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.jv-pkg-copy:hover { background: rgba(var(--accent-rgb), .26); }
+.jv-pkg-copy:focus-visible { outline: 2px solid rgba(var(--accent-rgb), .8); outline-offset: 2px; }
+/* Der Fehlschlag traegt seine Aussage doppelt (Farbe UND Text) – Farbe allein
+   ist keine Information (Projektregel). */
+.jv-pkg-copy.ist-fehler {
+    background: rgba(239, 68, 68, .16);
+    border-color: rgba(239, 68, 68, .5);
+}
 
 @media (max-width: 720px) {
     /* Auf schmalen Fenstern faellt die Beschreibung heraus – sie ist die

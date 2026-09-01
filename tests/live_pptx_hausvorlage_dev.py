@@ -55,6 +55,36 @@ def hauptschrift(p: Path) -> str:
     return re.findall(r'typeface="([^"]+)"', f)[0]
 
 
+def _formen_zaehlen(p: Path):
+    """(Formen, davon mit Theme-Akzent). Eine Form mit festem RGB-Wert folgt
+    dem Branding NICHT – genau daran erkennt man ein handgebautes Schaubild."""
+    try:
+        from pptx import Presentation
+        from pptx.enum.dml import MSO_THEME_COLOR
+        from pptx.enum.shapes import MSO_SHAPE_TYPE
+    except Exception:  # noqa: BLE001
+        return 0, 0
+    ganz = akzent = 0
+    prs = Presentation(str(p))
+    for folie in prs.slides:
+        for sh in folie.shapes:
+            # AUF DEN SHAPE_TYPE FILTERN, nicht auf auto_shape_type: ein
+            # Picture (hier das Logo der Titelfolie) wirft dort NICHT und
+            # rutschte als achte "Form ohne Theme-Farbe" durch – ein Fehler
+            # der Messung, nicht des Decks.
+            if sh.shape_type != MSO_SHAPE_TYPE.AUTO_SHAPE:
+                continue
+            ganz += 1
+            try:
+                if sh.fill.fore_color.theme_color in (MSO_THEME_COLOR.ACCENT_1,
+                                                      MSO_THEME_COLOR.ACCENT_2,
+                                                      MSO_THEME_COLOR.ACCENT_5):
+                    akzent += 1
+            except Exception:  # noqa: BLE001
+                pass
+    return ganz, akzent
+
+
 async def main():
     from backend.agent import JarvisAgent
     from skills.office import vorlage as VO
@@ -83,10 +113,20 @@ async def main():
         a, s = accent1(p), hauptschrift(p)
         medien = len([n for n in zipfile.ZipFile(str(p)).namelist()
                       if n.startswith("ppt/media")])
-        print(f"  DATEI {p.name}: accent1={a}, Schrift={s}, Medien={medien}")
+        # WOHER kommt die Datei? Das Werkzeug legt sie mit Capability-Namen in
+        # data/documents, ein selbstgebautes Skript nach /tmp. Der Ort ist damit
+        # der Beleg fuer den GEWAEHLTEN WEG – und genau der war der Vorfall.
+        weg = "office_create_powerpoint" if p.parent.name == "documents" else "python-pptx (Shell)"
+        formen, akzent_formen = _formen_zaehlen(p)
+        print(f"  DATEI {p.name}: accent1={a}, Schrift={s}, Medien={medien}, "
+              f"Formen={formen} (davon Theme-Akzent {akzent_formen}), Weg={weg}")
         pruefe(a == soll, f"{p.name}: Theme traegt den Hausakzent {soll}", f"gemessen {a}")
         pruefe(a != "4F81BD", f"{p.name}: NICHT das python-pptx-Standardtheme")
         pruefe("Calibri" not in s, f"{p.name}: nicht Calibri", f"gemessen {s}")
+        if formen:
+            pruefe(akzent_formen == formen,
+                   f"{p.name}: alle {formen} Formen nehmen die Theme-Farbe",
+                   f"nur {akzent_formen}")
 
     print("\nAntwort-Auszug:", (antwort or "")[:400].replace("\n", " | "))
     print(f"\n{'=' * 62}\nErgebnis: {_ok}/{_ok + _fail} Pruefungen bestanden")

@@ -687,8 +687,18 @@ pruefe(roh and not unverboten,
 
 # (c) Der Formen-Absatz nennt den Weg zum Pfad – ohne ihn ist das Verbot
 #     eine Sackgasse (genau die Lage vom 01.09.).
+def _absatz_ab(text: str, pos: int) -> str:
+    """Vom Fund bis zum Ende SEINES Listenpunkts.
+
+    Register: eine feste Zeichenzahl ist eine Zeitbombe – der Absatz waechst,
+    und der Waechter meldet einen Fehler, den es nicht gibt (beim Ergaenzen des
+    'schaubild'-Hinweises genau so passiert)."""
+    ende = text.find("\n    - ", pos)
+    return text[pos:ende if ende > 0 else len(text)]
+
+
 _k = PROMPT.index("MUSST du python-pptx")
-formen = PROMPT[_k:_k + 1400]
+formen = _absatz_ab(PROMPT, _k)
 pruefe("office_template_info" in formen,
        "der Formen-Absatz sagt, WOHER der Vorlagenpfad kommt")
 pruefe("Presentation(" in formen and "hausvorlage" in formen.casefold(),
@@ -701,7 +711,7 @@ pruefe("ACCENT_1" in formen,
 # (d) Das pauschale Verbot ("NICHT von Hand") darf den Formen-Absatz nicht
 #     ueberdecken – sonst stehen zwei Saetze gegeneinander wie am 17.08.2026.
 _p = PROMPT.index("Baue eine Praesentation NICHT von Hand")
-verbot = PROMPT[_p:_p + 500]
+verbot = _absatz_ab(PROMPT, _p)
 pruefe("hausvorlage" in verbot.casefold(),
        "das pauschale Verbot benennt die Ausnahme (kein Widerspruch mehr)")
 
@@ -754,6 +764,193 @@ if HAT_PPTX:
         VO.VORLAGEN_DIR = _echt
         import shutil as _sh7
         _sh7.rmtree(tmp7, ignore_errors=True)
+
+# ═════════════════════════════════════════════════════════════════════════════
+print("\n=== 8. Schaubild: Ablaufkette im Werkzeug (Folge des 01.09.) ===")
+
+# Die Konsequenz aus Abschnitt 7: der python-pptx-Ausweichweg war noetig, WEIL
+# das Werkzeug keine Kaesten mit Pfeilen konnte. Jetzt kann es das – und der
+# Ausweichweg bleibt fuer das, was wirklich darueber hinausgeht.
+# Gemessen wird die ERZEUGTE DATEI (Formen, Positionen, Farbtyp), nicht der
+# Quelltext: ob eine Kette entsteht, sieht man nur an den Formen.
+
+pruefe("schaubild" in M, "das Werkzeug kennt das Feld 'schaubild'")
+pruefe("SCHAUBILD_MAX" in M and "SCHAUBILD_QUER_MAX" in M,
+       "Deckel und Umschaltpunkt sind benannte Konstanten")
+_beschr = M.split("class CreatePowerPointTool")[1].split("def parameters_schema")[0]
+pruefe("schaubild" in _beschr,
+       "die Werkzeug-Beschreibung nennt es (sonst findet das Modell es nie)")
+
+if HAT_PPTX:
+    import asyncio as _a8
+    from pptx.enum.dml import MSO_THEME_COLOR
+    from pptx.enum.shapes import MSO_SHAPE
+    from skills.office.main import CreatePowerPointTool, SCHAUBILD_MAX
+
+    def _alle(seq, bedingung) -> bool:
+        """all() ueber eine LEERE Menge ist True – und damit waere jede
+        Eigenschaftspruefung gruen, sobald gar nichts gezeichnet wurde. Genau
+        so blieb die Gegenprobe "Schaubild nicht gezeichnet" bei sieben
+        Pruefungen gruen (Register: eine Gegenprobe, die nicht beisst, ist ein
+        Testmangel)."""
+        seq = list(seq)
+        return bool(seq) and all(bedingung(x) for x in seq)
+
+    def _formen(pfad, folie=0, art=None):
+        prs = Presentation(str(pfad))
+        raus = []
+        for sh in prs.slides[folie].shapes:
+            try:
+                if sh.auto_shape_type is not None and (art is None or sh.auto_shape_type == art):
+                    raus.append(sh)
+            except Exception:  # noqa: BLE001
+                continue
+        return prs, raus
+
+    # Die Proben landen im ECHTEN data/documents (das Werkzeug kennt kein
+    # anderes Ziel). Sie werden gesammelt und am Ende IMMER entfernt – ein
+    # unlink() erst hinter den Pruefungen laesst bei jedem Fehlschlag eine
+    # Datei im Bestand zurueck (beim Fahren der Gegenproben genau so passiert).
+    _muell8 = []
+
+    def _erzeuge8(slides, name):
+        antwort = _a8.run(CreatePowerPointTool().execute(filename=name, slides=slides))
+        m = re.search(r"/api/documents/([0-9a-f]{32}__[^)\s]+)", antwort)
+        pfad = (ROOT / "data" / "documents" / m.group(1)) if m else None
+        if pfad:
+            _muell8.append(pfad)
+        return antwort, pfad
+
+    # ── a) Der gemeldete Fall: vier Schritte, quer ───────────────────────────
+    SCHRITTE = ["Auslöser", "Prüfung", "Verarbeitung", "Benachrichtigung"]
+    antw, pfad = _erzeuge8([{"title": "Ablauf",
+                             "schaubild": {"schritte": SCHRITTE}}], "probe_ablauf.pptx")
+    pruefe(pfad is not None and pfad.exists(), "Datei mit Schaubild entsteht", antw[:120])
+    if pfad and pfad.exists():
+        prs8, kaesten = _formen(pfad, 0, MSO_SHAPE.ROUNDED_RECTANGLE)
+        _, pfeile = _formen(pfad, 0, MSO_SHAPE.RIGHT_ARROW)
+        pruefe(len(kaesten) == 4, f"vier Kaesten gezeichnet ({len(kaesten)})")
+        pruefe(len(pfeile) == 3, f"drei Verbindungspfeile dazwischen ({len(pfeile)})")
+        texte = " | ".join(k.text_frame.text for k in kaesten)
+        pruefe(all(s in texte for s in SCHRITTE), "jeder Schritt steht in einem Kasten", texte)
+        # DIE KERNZUSAGE: Theme-Farbe, kein fester RGB-Wert. Genau daran ist der
+        # python-pptx-Weg vom 01.09. gescheitert.
+        pruefe(_alle(kaesten, lambda k: k.fill.fore_color.theme_color == MSO_THEME_COLOR.ACCENT_1),
+               "die Kaesten nehmen die THEME-Farbe ACCENT_1 (folgt dem Branding)")
+        pruefe(_alle(kaesten, lambda k: k.text_frame.paragraphs[0].runs[0].font.color.theme_color
+                     == MSO_THEME_COLOR.BACKGROUND_1),
+               "…und der Text die Gegenfarbe der Vorlage")
+        # Satzspiegel: nichts darf aus dem Inhaltsbereich laufen.
+        rand_r = prs8.slide_width - VO.RAND_LINKS
+        raus = [(s.left, s.top, s.width, s.height) for s in kaesten + pfeile
+                if s.left < VO.RAND_LINKS - 1 or s.left + s.width > rand_r + 1
+                or s.top < VO.INHALT_Y - 1
+                or s.top + s.height > VO.INHALT_Y + VO.INHALT_H + 1]
+        pruefe(bool(kaesten) and not raus, "alle Formen liegen im Satzspiegel", str(raus[:2]))
+        folge = sorted(kaesten, key=lambda s: s.left)
+        luecken = [(a.left + a.width, b.left) for a, b in zip(folge, folge[1:])
+                   if a.left + a.width > b.left + 1]
+        pruefe(bool(folge) and not luecken, "die Kaesten ueberlappen sich nicht", str(luecken))
+        pruefe(_alle(folge, lambda k: k.height == folge[0].height and k.width == folge[0].width),
+               "…und sind gleich gross")
+        # Kein Schlagschatten – und zwar an BEIDEN Stellen: das leere
+        # <a:effectLst/> allein liess LibreOffice den Schatten aus dem
+        # <p:style>-Verweis weiterzeichnen (am PDF gesehen).
+        xmls = [k._element.xml for k in kaesten + pfeile]
+        pruefe(_alle(xmls, lambda x: "<a:effectLst/>" in x),
+               "die Formen tragen einen leeren Effekt-Block")
+        pruefe(_alle(xmls, lambda x: 'effectRef idx="0"' in x),
+               "…UND der Style-Verweis zeigt auf 'kein Effekt' (sonst Schatten im PDF)")
+        # Die Datei traegt weiterhin die Hausvorlage.
+        x8 = zipfile.ZipFile(str(pfad)).read("ppt/theme/theme1.xml").decode("utf-8", "replace")
+        a8 = re.search(r'<a:accent1>.*?val="([0-9A-Fa-f]{6})"', x8, re.S).group(1).upper()
+        pruefe(a8 == VO.branding_farben()["akzent"],
+               f"das Deck steht weiterhin auf der Hausvorlage ({a8})")
+
+    # ── b) Ab sechs Schritten untereinander ──────────────────────────────────
+    antw, pfad = _erzeuge8([{"title": "Lang",
+                             "schaubild": {"schritte": [f"Schritt {i}" for i in range(1, 7)]}}],
+                           "probe_lang.pptx")
+    if pfad and pfad.exists():
+        _, kaesten = _formen(pfad, 0, MSO_SHAPE.ROUNDED_RECTANGLE)
+        _, runter = _formen(pfad, 0, MSO_SHAPE.DOWN_ARROW)
+        pruefe(len(kaesten) == 6 and len(runter) == 5,
+               f"sechs Kaesten, fuenf Pfeile ({len(kaesten)}/{len(runter)})")
+        pruefe(bool(kaesten) and len({k.left for k in kaesten}) == 1,
+               "sie stehen untereinander (gleiche linke Kante)")
+        oben = sorted(k.top for k in kaesten)
+        pruefe(len(oben) > 1 and all(b > a for a, b in zip(oben, oben[1:])),
+               "…und in aufsteigender Reihenfolge")
+        # Nicht flacher als 10:1 – sechs Kaesten ueber die volle Spaltenbreite
+        # ergaben im ersten Rendering Balken von 14:1.
+        # max() ueber eine leere Menge WIRFT – die Gegenprobe brach dadurch ab
+        # und sah aus wie ein nicht gelaufener Test (Register).
+        v = max((k.width / max(k.height, 1) for k in kaesten), default=0)
+        pruefe(bool(kaesten) and v <= 10,
+               f"die Kaesten bleiben kompakt (Verhaeltnis {v:.1f}:1)")
+
+    # ── c) Deckel und Fehlerfaelle: nie stillschweigend ──────────────────────
+    antw, pfad = _erzeuge8([{"title": "Zuviel",
+                             "schaubild": {"schritte": [f"S{i}" for i in range(12)]}}],
+                           "probe_deckel.pptx")
+    pruefe("Schritten" in antw and str(SCHAUBILD_MAX) in antw,
+           "zu viele Schritte werden gekappt UND das steht im Ergebnis", antw[-200:])
+    if pfad and pfad.exists():
+        _, kaesten = _formen(pfad, 0, MSO_SHAPE.ROUNDED_RECTANGLE)
+        pruefe(len(kaesten) == SCHAUBILD_MAX, f"gezeichnet werden {SCHAUBILD_MAX}")
+
+    antw, pfad = _erzeuge8([{"title": "Leer", "schaubild": {"schritte": []}}],
+                           "probe_leer.pptx")
+    pruefe("NICHT gezeichnet" in antw,
+           "ein Schaubild ohne Schritte sagt es – statt eine leere Folie zu liefern")
+    if pfad and pfad.exists():
+        _, kaesten = _formen(pfad, 0, MSO_SHAPE.ROUNDED_RECTANGLE)
+        pruefe(not kaesten, "…und zeichnet wirklich nichts")
+
+    # ── d) Toleranz: das Modell schickt Text statt eines Objekts ─────────────
+    antw, pfad = _erzeuge8([{"title": "AlsText",
+                             "schaubild": "{'schritte': ['Eins', 'Zwei', 'Drei']}"}],
+                           "probe_text.pptx")
+    if pfad and pfad.exists():
+        _, kaesten = _formen(pfad, 0, MSO_SHAPE.ROUNDED_RECTANGLE)
+        pruefe(len(kaesten) == 3, f"'schaubild' als Text wird gelesen ({len(kaesten)})")
+    antw, pfad = _erzeuge8([{"title": "Pfeiltext",
+                             "schaubild": {"schritte": "Eins → Zwei → Drei"}}],
+                           "probe_pfeil.pptx")
+    if pfad and pfad.exists():
+        _, kaesten = _formen(pfad, 0, MSO_SHAPE.ROUNDED_RECTANGLE)
+        pruefe(len(kaesten) == 3, f"auch 'A → B → C' als Kette ({len(kaesten)})")
+
+    # ── e) Zwei Grafiken auf einer Folie: Vorrang und Ansage ─────────────────
+    antw, pfad = _erzeuge8([{"title": "Beides",
+                             "chart": {"kategorien": ["A", "B"], "werte": [1, 2]},
+                             "schaubild": {"schritte": ["Eins", "Zwei"]}}],
+                           "probe_beides.pptx")
+    pruefe("chart" in antw and "schaubild" in antw,
+           "chart UND schaubild auf einer Folie wird ausdruecklich gemeldet", antw[-160:])
+    if pfad and pfad.exists():
+        _, kaesten = _formen(pfad, 0, MSO_SHAPE.ROUNDED_RECTANGLE)
+        pruefe(not kaesten, "…und es liegen nicht zwei Grafiken uebereinander")
+
+    # ── f) Neben Text: senkrecht in der rechten Spalte ───────────────────────
+    antw, pfad = _erzeuge8([{"title": "Mit Text", "bullets": ["Punkt 1", "Punkt 2"],
+                             "schaubild": {"schritte": ["Eins", "Zwei", "Drei"]}}],
+                           "probe_neben.pptx")
+    if pfad and pfad.exists():
+        prs8, kaesten = _formen(pfad, 0, MSO_SHAPE.ROUNDED_RECTANGLE)
+        mitte = VO.RAND_LINKS + VO.INHALT_B // 2
+        pruefe(len(kaesten) == 3 and _alle(kaesten, lambda k: k.left >= mitte - 1),
+               "neben einer Aufzaehlung steht die Kette in der rechten Spalte")
+        pruefe(bool(kaesten) and len({k.left for k in kaesten}) == 1,
+               "…und zwangslaeufig untereinander (quer waere sie 2 cm breit)")
+
+    for _p8 in _muell8:
+        try:
+            _p8.unlink()
+        except Exception:  # noqa: BLE001
+            pass
+    pruefe(not [q for q in _muell8 if q.exists()],
+           f"alle {len(_muell8)} Probedateien sind wieder abgeraeumt")
 
 print(f"\n{'=' * 62}\nErgebnis: {_ok}/{_ok + _fail} Pruefungen bestanden")
 if _fail:

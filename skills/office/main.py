@@ -741,6 +741,211 @@ def _diagramm_einfuegen(slide, prs, spec, neben_text: bool = False) -> bool:
     return True
 
 
+# Hoechstzahl der Kaesten in einem Ablauf-Schaubild. Darueber wird gekappt UND
+# das im Ergebnis gesagt – ein stiller Schnitt waere Datenverlust.
+SCHAUBILD_MAX = 8
+# Ab so vielen Schritten wird von selbst auf die senkrechte Anordnung
+# umgeschaltet: quer bleiben sonst rund 4 cm je Kasten, und ein Prozessschritt
+# heisst selten nur "Pruefung".
+SCHAUBILD_QUER_MAX = 5
+
+
+def _als_dict(spec):
+    """Nimmt ein dict – oder den Text, den ein Modell stattdessen schickt.
+
+    Dieselbe Lehre wie bei _slides_normalisieren (Vorfall 2026-08-10): ein
+    Argument, das als Zeichenkette ankommt, darf nicht stillschweigend als
+    "nichts" gelten. `ast.literal_eval` fuehrt keinen Code aus."""
+    import ast
+    import json
+    if isinstance(spec, dict):
+        return spec
+    if isinstance(spec, str) and spec.strip():
+        for parser in (json.loads, ast.literal_eval):
+            try:
+                wert = parser(spec.strip())
+            except Exception:  # noqa: BLE001
+                continue
+            if isinstance(wert, dict):
+                return wert
+    return None
+
+
+def _schritte_lesen(spec: dict):
+    """Bringt die Schritte auf [(Titel, Unterzeile), …].
+
+    Zwei Schreibweisen sind erlaubt, weil beide naheliegen: schlichte Texte
+    (["Ausloeser", "Pruefung"]) und Objekte mit Unterzeile
+    ([{"titel": "Pruefung", "text": "Regelwerk"}, …])."""
+    roh = (spec.get("schritte") or spec.get("steps") or spec.get("kaesten")
+           or spec.get("boxes") or spec.get("elemente"))
+    if isinstance(roh, str):
+        roh = _als_dict(roh) or [t.strip() for t in re.split(r"→|->|\n|;|\|", roh)]
+    if not isinstance(roh, (list, tuple)):
+        return []
+    schritte = []
+    for e in roh:
+        if isinstance(e, dict):
+            titel = e.get("titel") or e.get("title") or e.get("name") or e.get("text") or ""
+            unter = e.get("text") or e.get("beschreibung") or e.get("description") or ""
+            if unter == titel:
+                unter = ""
+        else:
+            titel, unter = str(e or ""), ""
+        titel = _text_bereinigen(str(titel)).strip()
+        unter = _text_bereinigen(str(unter)).strip()
+        if titel or unter:
+            schritte.append((titel or unter, unter if titel else ""))
+    return schritte
+
+
+def _kasten(slide, form, x, y, b, h, akzent=True, hell: float = 0.0):
+    """Eine Form im Hausdesign: Theme-Farbe, keine Kontur, kein Schatten.
+
+    THEME-FARBE UND KEIN FESTER RGB-WERT – das ist der Kern: eine feste Farbe
+    saehe auf einer anderen Vorlage (oder nach einem Branding-Wechsel) falsch
+    aus, waehrend `MSO_THEME_COLOR.ACCENT_1` dem Hausdesign folgt. Genau daran
+    war der python-pptx-Weg vom 2026-09-01 gescheitert."""
+    from pptx.enum.dml import MSO_THEME_COLOR
+    shape = slide.shapes.add_shape(form, int(x), int(y), int(b), int(h))
+    try:
+        shape.fill.solid()
+        shape.fill.fore_color.theme_color = (MSO_THEME_COLOR.ACCENT_1 if akzent
+                                             else MSO_THEME_COLOR.ACCENT_5)
+        if hell:
+            shape.fill.fore_color.brightness = hell
+        shape.line.fill.background()
+        # Formen erben den Schatten des Themes; auf einer Ablaufkette wirkt das
+        # unruhig und in einem PDF-Export oft schmutzig.
+        shape.shadow.inherit = False
+        # DAS LEERE <a:effectLst/> ALLEIN GENUEGT NICHT – gemessen am PDF:
+        # add_shape() legt zusaetzlich einen <p:style>-Block mit effectRef an,
+        # und LibreOffice zeichnet den Schatten daraus weiter. PowerPoint haelt
+        # sich an das effectLst, der Server-Export nicht – also muss auch der
+        # Verweis auf 0 (= kein Effekt).
+        for ref in shape._element.findall(
+                ".//{http://schemas.openxmlformats.org/presentationml/2006/main}style"
+                "/{http://schemas.openxmlformats.org/drawingml/2006/main}effectRef"):
+            ref.set("idx", "0")
+    except Exception:  # noqa: BLE001
+        pass
+    return shape
+
+
+def _kasten_text(shape, titel: str, unter: str, gross: int, klein: int) -> None:
+    from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
+    from pptx.enum.dml import MSO_THEME_COLOR
+    from pptx.util import Pt
+    tf = shape.text_frame
+    tf.word_wrap = True
+    tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+    tf.margin_left = tf.margin_right = 45720      # 0,05 Zoll – der Standard von
+    tf.margin_top = tf.margin_bottom = 27432      # 0,1 Zoll frisst schmale Kaesten
+    absaetze = [(titel, gross, True)] + ([(unter, klein, False)] if unter else [])
+    for i, (text, groesse, fett) in enumerate(absaetze):
+        p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+        p.alignment = PP_ALIGN.CENTER
+        lauf = p.add_run()
+        lauf.text = text
+        lauf.font.size = Pt(groesse)
+        lauf.font.bold = fett
+        # BACKGROUND_1 statt eines festen Weiss: auf dem Akzent ist das die
+        # Farbe, die die Vorlage selbst als Gegenfarbe fuehrt.
+        lauf.font.color.theme_color = MSO_THEME_COLOR.BACKGROUND_1
+
+
+def _schaubild_einfuegen(slide, prs, spec, neben_text: bool = False) -> str:
+    """Zeichnet eine Ablaufkette aus Kaesten und Verbindungspfeilen.
+
+    WARUM ES DAS GIBT (Vorfall 2026-09-01): fuer "ein Schaubild mit Kaesten und
+    Verbindungspfeilen" gab es im Werkzeug nichts – der Prompt schickte das
+    Modell deshalb zu python-pptx via shell_execute, und dort entstand ein Deck
+    im Standarddesign. Der Ausweichweg ist inzwischen auf die Hausvorlage
+    festgelegt; DIESE Funktion macht ihn fuer den haeufigsten Fall ueberfluessig:
+    die Kette laeuft im Backend, mit Theme-Farben und im Satzspiegel.
+
+    ``spec``: {'typ': 'ablauf', 'schritte': ['Ausloeser', 'Pruefung', …],
+    'richtung': 'quer'|'hoch'}. Fehlt etwas Wesentliches, passiert NICHTS –
+    eine halbe Grafik ist schlechter als keine (wie beim Diagramm).
+
+    Rueckgabe: ein Hinweis fuer den Aufrufer ("" = nichts zu melden)."""
+    try:
+        from pptx.enum.shapes import MSO_SHAPE
+        from skills.office import vorlage as _v
+    except Exception:  # noqa: BLE001
+        return ""
+
+    spec = _als_dict(spec)
+    if not spec:
+        return ""
+    schritte = _schritte_lesen(spec)
+    if not schritte:
+        return (" (Hinweis: Das Schaubild wurde NICHT gezeichnet – es enthielt keine "
+                "lesbaren Schritte. Erwartet wird {'schritte': ['Ausloeser', 'Pruefung', …]}.)")
+    hinweis = ""
+    if len(schritte) > SCHAUBILD_MAX:
+        hinweis = (f" (Hinweis: Das Schaubild zeigt nur die ersten {SCHAUBILD_MAX} von "
+                   f"{len(schritte)} Schritten – mehr wird auf einer Folie unlesbar. "
+                   f"Teile den Ablauf auf zwei Folien auf.)")
+        schritte = schritte[:SCHAUBILD_MAX]
+
+    n = len(schritte)
+    richtung = str(spec.get("richtung") or spec.get("direction") or "").strip().lower()
+    if richtung not in ("quer", "hoch", "horizontal", "vertikal"):
+        richtung = "quer" if n <= SCHAUBILD_QUER_MAX else "hoch"
+    quer = richtung in ("quer", "horizontal")
+    # Steht daneben Text, bleibt nur eine halbe Spalte – quer waere jeder
+    # Kasten dann rund zwei Zentimeter breit.
+    if neben_text:
+        quer = False
+
+    links, oben = _v.RAND_LINKS, _v.INHALT_Y
+    breite, hoehe = _v.INHALT_B, _v.INHALT_H
+    if neben_text:
+        spalte = (_v.INHALT_B - _v.SPALTEN_LUFT) // 2
+        links = _v.RAND_LINKS + spalte + _v.SPALTEN_LUFT
+        breite = spalte
+
+    formen = []
+    if quer:
+        luft = min(457200, int(breite * 0.06))
+        kasten_b = (breite - (n - 1) * luft) // n
+        kasten_h = min(hoehe, 1500000)
+        y = oben + (hoehe - kasten_h) // 2
+        gross = 16 if n <= 3 else (14 if n == 4 else 12)
+        for i, (titel, unter) in enumerate(schritte):
+            x = links + i * (kasten_b + luft)
+            k = _kasten(slide, MSO_SHAPE.ROUNDED_RECTANGLE, x, y, kasten_b, kasten_h)
+            _kasten_text(k, titel, unter, gross, max(9, gross - 4))
+            formen.append(k)
+            if i < n - 1:
+                dicke = min(int(kasten_h * 0.34), 400000)
+                _kasten(slide, MSO_SHAPE.RIGHT_ARROW, x + kasten_b,
+                        y + (kasten_h - dicke) // 2, luft, dicke, hell=0.45)
+    else:
+        luft = min(228600, int(hoehe * 0.06))
+        kasten_h = (hoehe - (n - 1) * luft) // n
+        # Die Breite folgt der Hoehe: sechs Kaesten ueber 60 % der Folienbreite
+        # ergeben Balken von 14:1 – am gerenderten PDF gesehen. Der Deckel ueber
+        # das Seitenverhaeltnis haelt sie kompakt, die Untergrenze verhindert
+        # umgekehrt schmale Saeulen bei vielen Schritten.
+        kasten_b = (breite if neben_text
+                    else min(int(breite * 0.6),
+                             max(int(kasten_h * 5), int(breite * 0.3))))
+        x = links + (breite - kasten_b) // 2
+        gross = 16 if n <= 4 else (14 if n <= 6 else 12)
+        for i, (titel, unter) in enumerate(schritte):
+            y = oben + i * (kasten_h + luft)
+            k = _kasten(slide, MSO_SHAPE.ROUNDED_RECTANGLE, x, y, kasten_b, kasten_h)
+            _kasten_text(k, titel, unter, gross, max(9, gross - 4))
+            formen.append(k)
+            if i < n - 1:
+                dicke = min(int(kasten_b * 0.12), 400000)
+                _kasten(slide, MSO_SHAPE.DOWN_ARROW, x + (kasten_b - dicke) // 2,
+                        y + kasten_h, dicke, luft, hell=0.45)
+    return hinweis
+
+
 def _logo_auf_titelfolie(slide, prs) -> None:
     """Setzt das Branding-Logo oben rechts auf die Titelfolie.
 
@@ -789,6 +994,12 @@ class CreatePowerPointTool(BaseTool):
             "'werte':[...]}, …]. Das Diagramm ist in PowerPoint bearbeitbar und nimmt "
             "seine Farben aus dem Hausdesign. Stehen daneben 'bullets', ruecken beide "
             "nebeneinander. "
+            "EIN ABLAUF GEHOERT IN EIN SCHAUBILD, nicht in eine Aufzaehlung und NICHT in ein "
+            "selbstgebautes python-pptx-Skript: je Folie { 'schaubild': { 'schritte': "
+            "['Ausloeser','Pruefung','Verarbeitung','Benachrichtigung'] } } zeichnet Kaesten "
+            "mit Verbindungspfeilen in den Hausfarben. Je Schritt auch "
+            "{'titel': …, 'text': 'Unterzeile'} moeglich; 'richtung': 'quer'|'hoch' ist "
+            "optional (ab 6 Schritten von selbst untereinander). Hoechstens acht Schritte. "
             "'slides' MUSS eine echte Liste sein – KEIN Text, der eine Liste enthaelt. "
             "KEINE Farb-, Schrift- oder Groessenangaben mitschicken – die kommen aus der "
             "Vorlage; eigene Werte brechen das Design beim Bearbeiten. "
@@ -805,7 +1016,9 @@ class CreatePowerPointTool(BaseTool):
                 "slides": {"type": "ARRAY", "items": {"type": "OBJECT"},
                            "description": "Liste der Inhaltsfolien als echtes Array von "
                                           "Objekten (siehe Beschreibung) – nicht als Text. "
-                                          "Je Folie optional 'chart' fuer ein Diagramm."},
+                                          "Je Folie optional 'chart' fuer ein Diagramm aus "
+                                          "Zahlen und 'schaubild' fuer eine Ablaufkette aus "
+                                          "Kaesten und Verbindungspfeilen."},
                 "template": {"type": "STRING", "description": "Optionaler Vorlagen-Dateiname (leer = Hausvorlage). Verfuegbare zeigt office_template_info."},
             },
             "required": ["filename", "slides"],
@@ -869,6 +1082,11 @@ class CreatePowerPointTool(BaseTool):
             # passiert).
             inhalt = sl.get("content") or sl.get("text") or sl.get("subtitle") or ""
             diagramm = sl.get("chart") or sl.get("diagramm")
+            # Mehrere Schreibweisen, weil das Modell sie raet – und ein nicht
+            # erkanntes Feld faellt hier wortlos weg (der teuerste Fehler:
+            # die Folie entsteht, das Schaubild fehlt).
+            schaubild = (sl.get("schaubild") or sl.get("shapes") or sl.get("ablauf")
+                         or sl.get("flow") or sl.get("prozess"))
             hat_text = bool(bullets) or bool(inhalt)
 
             if felder:
@@ -884,6 +1102,19 @@ class CreatePowerPointTool(BaseTool):
 
             if diagramm:
                 _diagramm_einfuegen(slide, prs, diagramm, neben_text=hat_text)
+
+            if schaubild:
+                if diagramm:
+                    # Beides auf einer Folie hiesse zwei Grafiken uebereinander.
+                    # Vorrang hat das Diagramm (Bestandsverhalten) – und der
+                    # Aufrufer erfaehrt, dass sein Schaubild NICHT gezeichnet
+                    # wurde, statt es auf der Folie zu suchen.
+                    vorlage_hinweis += (" (Hinweis: Eine Folie hatte 'chart' UND "
+                                        "'schaubild' – gezeichnet wurde das Diagramm. "
+                                        "Fuer beides zwei Folien nehmen.)")
+                else:
+                    vorlage_hinweis += _schaubild_einfuegen(
+                        slide, prs, schaubild, neben_text=hat_text)
 
             notizen = sl.get("notes") or sl.get("notizen")
             if notizen:

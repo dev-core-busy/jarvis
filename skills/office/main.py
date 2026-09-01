@@ -921,8 +921,10 @@ class TemplateInfoTool(BaseTool):
     def description(self) -> str:
         return (
             "Zeigt die verfuegbaren PowerPoint-Vorlagen und die Layouts der gewaehlten "
-            "Vorlage (Name, Platzhalter, Foliengroesse). Nuetzlich, wenn eine eigene "
-            "Firmenvorlage hinterlegt wurde und unklar ist, welche Layouts es gibt."
+            "Vorlage (Name, Platzhalter, Foliengroesse) UND ihren Dateipfad. Nuetzlich, "
+            "wenn eine eigene Firmenvorlage hinterlegt wurde und unklar ist, welche "
+            "Layouts es gibt – und PFLICHT, bevor du eine .pptx von Hand mit python-pptx "
+            "baust: von dort kommt der Pfad fuer Presentation(...)."
         )
 
     def parameters_schema(self) -> dict:
@@ -952,6 +954,15 @@ class TemplateInfoTool(BaseTool):
             "4:3" if abs(prs.slide_width / prs.slide_height - 4 / 3) < 0.02 else "andere")
         zeilen = [
             f"Vorlage: {pfad.name} ({breite_cm}×{hoehe_cm} cm, {seiten})",
+            # DER PFAD IST DER GRUND, WARUM ES DIESE ZEILE GIBT (Vorfall
+            # 2026-09-01): das Modell hatte fuer ein Schaubild mit Kaesten und
+            # Pfeilen zu python-pptx gegriffen – regelkonform, der Prompt
+            # verlangt das fuer Formen – und dabei `Presentation()` OHNE
+            # Argument geoeffnet. Ergebnis: Calibri und Office-Blau statt
+            # Hausdesign. Es hatte dieses Werkzeug vorher aufgerufen und
+            # WOLLTE branden; es bekam nur den Dateinamen, nie den Ort. Ein
+            # Werkzeug, das eine Vorlage nennt, muss auch sagen, wo sie liegt.
+            f"Pfad (fuer python-pptx): {pfad}",
             f"Vorhandene Vorlagen: {', '.join(_vorlage.verfuegbare()) or '(keine)'}",
             "",
             "Layouts (Name → befuellbare Platzhalter):",
@@ -968,6 +979,15 @@ class TemplateInfoTool(BaseTool):
             "",
             "Kurznamen fuer 'layout' in office_create_powerpoint: "
             + ", ".join(sorted(_LAYOUT_ALIAS.keys())),
+            "",
+            "BAUST DU PER python-pptx (Formen, Verbindungspfeile, eigenes "
+            f"Layout)? Dann STARTE mit dieser Vorlage: Presentation(\"{pfad}\") "
+            "– NIEMALS Presentation() ohne Argument, das ist das "
+            "python-pptx-Standarddesign (Calibri, Office-Blau) und liefert ein "
+            "Deck ohne Branding. Layout ueber prs.slide_layouts nach NAME "
+            "waehlen (Liste oben), Foliengroesse NICHT selbst setzen, keine "
+            "eigenen Farben/Schriften vergeben – fuer eigene Formen "
+            "MSO_THEME_COLOR.ACCENT_1..6 nehmen, dann folgen sie dem Branding.",
         ]
         return "\n".join(zeilen)
 

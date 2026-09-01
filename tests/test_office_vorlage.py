@@ -600,6 +600,161 @@ if HAT_PPTX:
     import shutil as _sh
     _sh.rmtree(tmp6, ignore_errors=True)
 
+# ═════════════════════════════════════════════════════════════════════════════
+print("\n=== 7. Vorfall 2026-09-01: python-pptx-Weg ohne Hausvorlage ===")
+
+# WAS PASSIERT IST (Lauf 17882583414110010 auf ECHT, 12:25): die Aufgabe
+# verlangte "ein echtes Schaubild mit Kaesten und Verbindungspfeilen". Das
+# Modell hat sich REGELKONFORM verhalten – Punkt 16 des System-Prompts sagt
+# fuer Formen/Connectors ausdruecklich "MUSST du python-pptx via
+# shell_execute verwenden" – und dabei `Presentation()` OHNE Argument
+# geoeffnet. Gemessen an der ausgelieferten Datei: accent1 4F81BD (statt
+# B80F2E), Calibri, 0 Medien, 11 englische Default-Layouts.
+#
+# Die Luecke war UNSERE, an zwei Stellen: der Prompt sagte kein Wort davon,
+# dass auch der python-pptx-Weg auf der Hausvorlage aufsetzt – und
+# office_template_info nannte den Dateinamen, aber NIE den Pfad. Das Modell
+# hatte es im Lauf aufgerufen und wollte branden; es konnte gar nicht wissen,
+# was es an Presentation(...) uebergeben soll.
+#
+# Der Waechter prueft die REGEL, nicht den Wortlaut: (a) wo der Prompt
+# python-pptx fuer Praesentationen erlaubt, muss die Hausvorlage stehen,
+# (b) `Presentation()` leer darf im Prompt nur als VERBOT vorkommen,
+# (c) office_template_info muss den Pfad ausgeben – und Teil B misst, dass
+# die Anleitung, die es gibt, wirklich zu einem gebrandeten Deck fuehrt.
+
+import io
+import tokenize
+
+
+def _ohne_kommentare(code: str) -> str:
+    """Python-Quelltext ohne Kommentare.
+
+    Register: ein Waechter, der die eigene Begruendung im Kommentar liest,
+    prueft nichts – im Projekt bereits ein Dutzend Mal bezahlt."""
+    try:
+        raus = [t for t in tokenize.generate_tokens(io.StringIO(code).readline)
+                if t.type != tokenize.COMMENT]
+        return tokenize.untokenize(raus)
+    except Exception:  # noqa: BLE001
+        return code
+
+
+M_OK = _ohne_kommentare(M)
+# Positivkontrolle: die Entfernung greift wirklich (sonst waere jede Pruefung
+# darunter moeglicherweise ein Treffer im Kommentar).
+pruefe("WOLLTE branden" in M and "WOLLTE branden" not in M_OK,
+       "Kommentare werden vor der Pruefung entfernt (Positivkontrolle)")
+pruefe("class TemplateInfoTool" in M_OK, "…und der Code bleibt dabei erhalten")
+
+TI = M_OK.split("class TemplateInfoTool")[1].split("\nclass ")[0]
+pruefe("Pfad (fuer python-pptx)" in TI,
+       "office_template_info gibt den PFAD der Vorlage aus")
+pruefe('Presentation(\\"{pfad}\\")' in TI or 'Presentation(\\"' in TI,
+       "…und die fertige Startzeile fuer python-pptx")
+pruefe("NIEMALS Presentation() ohne Argument" in TI,
+       "…und warnt vor Presentation() ohne Argument")
+
+# ── Der System-Prompt ────────────────────────────────────────────────────────
+AGENT = (ROOT / "backend" / "agent.py").read_text(encoding="utf-8")
+_i = AGENT.index("SYSTEM_PROMPT = ")
+_j = AGENT.index("SUB_AGENT_PROMPT = ")
+PROMPT = AGENT[_i:_j]
+pruefe(len(PROMPT) > 5000, f"System-Prompt geschnitten ({len(PROMPT)} Zeichen)")
+
+# (a) REGEL: jede Prompt-Zeile, die python-pptx fuer eine PRAESENTATION
+#     anleitet, muss die Hausvorlage nennen. Zeilen, die python-pptx nur
+#     erwaehnen (Paketliste, Abgrenzung zu matplotlib), sind ausgenommen –
+#     sie leiten nicht an.
+anleitend = [z for z in PROMPT.splitlines()
+             if "python-pptx" in z and (".pptx" in z or "Folien" in z
+                                        or "Praesentation" in z)
+             and ("MUSST du" in z or "verwenden" in z or "zusammen" in z)]
+pruefe(len(anleitend) >= 2, f"anleitende python-pptx-Zeilen gefunden ({len(anleitend)})")
+ohne_vorlage = [z[:90] for z in anleitend
+                if "hausvorlage" not in z.casefold()]
+pruefe(not ohne_vorlage,
+       "jede anleitende python-pptx-Zeile nennt die Hausvorlage", str(ohne_vorlage))
+
+# (b) `Presentation()` leer darf NUR als Verbot vorkommen.
+roh = [m.start() for m in re.finditer(r"Presentation\(\)", PROMPT)]
+unverboten = [PROMPT[max(0, p - 60):p + 20] for p in roh
+              if "NIEMALS" not in PROMPT[max(0, p - 60):p]
+              and "NICHT" not in PROMPT[max(0, p - 60):p]]
+pruefe(roh and not unverboten,
+       f"Presentation() ohne Argument kommt nur als Verbot vor ({len(roh)}x)",
+       str(unverboten))
+
+# (c) Der Formen-Absatz nennt den Weg zum Pfad – ohne ihn ist das Verbot
+#     eine Sackgasse (genau die Lage vom 01.09.).
+_k = PROMPT.index("MUSST du python-pptx")
+formen = PROMPT[_k:_k + 1400]
+pruefe("office_template_info" in formen,
+       "der Formen-Absatz sagt, WOHER der Vorlagenpfad kommt")
+pruefe("Presentation(" in formen and "hausvorlage" in formen.casefold(),
+       "…und nennt die Startzeile samt Hausvorlage")
+pruefe("slide_layouts" in formen and "NAME" in formen,
+       "…und dass Layouts der Vorlage ueber den Namen gewaehlt werden")
+pruefe("ACCENT_1" in formen,
+       "…und dass eigene Formen Theme-Farben nehmen (folgen dem Branding)")
+
+# (d) Das pauschale Verbot ("NICHT von Hand") darf den Formen-Absatz nicht
+#     ueberdecken – sonst stehen zwei Saetze gegeneinander wie am 17.08.2026.
+_p = PROMPT.index("Baue eine Praesentation NICHT von Hand")
+verbot = PROMPT[_p:_p + 500]
+pruefe("hausvorlage" in verbot.casefold(),
+       "das pauschale Verbot benennt die Ausnahme (kein Widerspruch mehr)")
+
+# ── Teil B: die Anleitung wirklich befolgen ─────────────────────────────────
+if HAT_PPTX:
+    import tempfile
+    import asyncio as _aio
+    tmp7 = Path(tempfile.mkdtemp(prefix="jvorl7_"))
+    _echt = VO.VORLAGEN_DIR
+    VO.VORLAGEN_DIR = tmp7
+    # SANDKASTEN-WAECHTER: ein Test, der die echte data/vorlagen anfasst,
+    # ueberschreibt eine womoeglich von Hand hinterlegte Firmenvorlage.
+    if not str(VO.VORLAGEN_DIR).startswith(str(tmp7)):
+        print("ABBRUCH: Vorlagenpfad zeigt nicht in den Sandkasten")
+        sys.exit(2)
+    try:
+        from skills.office.main import TemplateInfoTool
+        ausgabe = _aio.run(TemplateInfoTool().execute())
+        pruefe("Layouts (Name" in ausgabe, "das Werkzeug antwortet normal")
+        m_pfad = re.search(r"Pfad \(fuer python-pptx\): (\S+)", ausgabe)
+        pruefe(bool(m_pfad), "die Ausgabe nennt einen Pfad")
+        if m_pfad:
+            pfad = Path(m_pfad.group(1))
+            pruefe(pfad.is_absolute() and pfad.exists(),
+                   f"der genannte Pfad ist absolut und existiert ({pfad.name})")
+            pruefe(f'Presentation("{pfad}")' in ausgabe,
+                   "die Startzeile nennt GENAU diesen Pfad (kein zweiter Wert)")
+            # DIE EIGENTLICHE ZUSAGE: wer der Anleitung folgt, bekommt das
+            # Hausdesign. Gemessen am Theme, nicht am Wortlaut.
+            aus7 = tmp7 / "nachgebaut.pptx"
+            Presentation(str(pfad)).save(str(aus7))
+            def _accent1(p):
+                x = zipfile.ZipFile(str(p)).read("ppt/theme/theme1.xml").decode(
+                    "utf-8", "replace")
+                t = re.search(r"<a:accent1>.*?</a:accent1>", x, re.S).group(0)
+                return re.search(r'val="([0-9A-Fa-f]{6})"', t).group(1).upper()
+            soll = VO.branding_farben()["akzent"]
+            pruefe(_accent1(aus7) == soll,
+                   f"ein Skript auf dieser Vorlage traegt den Hausakzent ({soll})",
+                   f"gemessen {_accent1(aus7)}")
+            # Gegenprobe: der Weg, den der Lauf vom 01.09. genommen hat.
+            leer7 = tmp7 / "wie_am_0109.pptx"
+            Presentation().save(str(leer7))
+            pruefe(_accent1(leer7) == "4F81BD",
+                   "Gegenprobe: Presentation() leer liefert Office-Blau 4F81BD",
+                   f"gemessen {_accent1(leer7)}")
+            pruefe(_accent1(leer7) != _accent1(aus7),
+                   "…die Messung unterscheidet die beiden Wege ueberhaupt")
+    finally:
+        VO.VORLAGEN_DIR = _echt
+        import shutil as _sh7
+        _sh7.rmtree(tmp7, ignore_errors=True)
+
 print(f"\n{'=' * 62}\nErgebnis: {_ok}/{_ok + _fail} Pruefungen bestanden")
 if _fail:
     print(f"FEHLGESCHLAGEN: {_fail}")

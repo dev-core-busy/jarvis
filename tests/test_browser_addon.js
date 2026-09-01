@@ -3723,6 +3723,202 @@ section('16) „Als Kommentar uebernehmen" ERSETZT, statt anzuhaengen');
         "das Rueckfall-Markup nennt den neuen Namen");
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+section("17) Zeilenumbrueche ueberleben das Einfuegen");
+// ═══════════════════════════════════════════════════════════════════════════
+/* Gemeldet 2026-09-01 mit einem Screenshot: rechts im Fenster stand eine
+ * Timeline mit einem Eintrag je Zeile, links im Jira-Kommentarfeld war daraus
+ * EIN Fliesstextblock geworden.
+ *
+ * Ursache war `absaetze()`: ein einfacher Umbruch wurde zum Leerzeichen, nur
+ * eine LEERZEILE trennte. Das stammte aus der Zeit vor dem Rich-Text-Feld
+ * (`replace(/\n/g, " ")`) und widerspricht seither der Zusage des Umbaus – das
+ * Feld zeigt `white-space: pre-wrap`, also die Umbrueche.
+ *
+ * ⚠ GEMESSEN WIRD DIE EIGENSCHAFT, nicht das Markup: `gesehen()` rekonstruiert
+ * aus dem Ziel-DOM, was ein Mensch dort SIEHT. Ein Editor, der statt <br> ein
+ * <div> je Zeile baut, waere ebenso richtig – eine Suche nach "<br>" haette
+ * das faelschlich als Fehler gemeldet. */
+{
+  const bloeckeAus = (text) => {
+    const { w, F } = feldWelt();
+    const b = F.zuBloecken(text);
+    w.close();
+    return JSON.parse(JSON.stringify(b));   // wie ueber executeScript: JSON
+  };
+
+  function gesehen(el) {
+    if (!el) return "";
+    if (el.tagName === "TEXTAREA") return el.value;
+    let out = "";
+    (function lauf(k) {
+      for (const n of k.childNodes) {
+        if (n.nodeType === 3) { out += n.nodeValue; continue; }
+        if (n.nodeType !== 1) continue;
+        if (n.tagName === "BR") { out += "\n"; continue; }
+        const block = /^(P|DIV)$/.test(n.tagName);
+        if (block && out && !/\n\n$/.test(out)) out += "\n\n";
+        lauf(n);
+        if (block) out += "\n\n";
+      }
+    })(el);
+    return out.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  }
+
+  /* Wie in Abschnitt 16: die execCommand-Attrappe LOESCHT erst die Auswahl.
+   * Eine bedingungslos anhaengende Attrappe koennte "ersetzt" nicht messen. */
+  function einfuegen17(html, text, execAntwort) {
+    const dom = new JSDOM("<body>" + html + "</body>",
+      { url: "https://jira.test/browse/A-1", runScripts: "outside-only" });
+    const w = dom.window, doc = w.document;
+    w.Element.prototype.getBoundingClientRect = () => ({ width: 300, height: 80 });
+    w.Element.prototype.scrollIntoView = function () {};
+    if (execAntwort !== null) {
+      doc.execCommand = (befehl, u, wert) => {
+        if (!execAntwort) return false;
+        const ziel = doc.querySelector("[contenteditable]") || doc.activeElement;
+        if (!ziel) return false;
+        const sel = w.getSelection();
+        if (sel && sel.rangeCount) { try { sel.getRangeAt(0).deleteContents(); } catch (e) {} }
+        if (befehl === "insertText") {
+          ziel.appendChild(doc.createTextNode(wert));
+        } else if (befehl === "insertHTML") {
+          const h = doc.createElement("div");
+          h.innerHTML = wert;
+          while (h.firstChild) ziel.appendChild(h.firstChild);
+        } else { return false; }
+        return true;
+      };
+    }
+    const r = ladeEinfuegen(w)(text, bloeckeAus(text));
+    const ziel = doc.querySelector("[contenteditable]") || doc.querySelector("textarea");
+    const erg = { weg: String(r.weg || ""), text: gesehen(ziel),
+                  fett: (ziel && ziel.querySelectorAll) ? ziel.querySelectorAll("strong").length : 0 };
+    w.close();
+    return erg;
+  }
+
+  // Der gemeldete Fall: Fett UND ein Eintrag je Zeile.
+  const TIMELINE = "**Timeline**\n07.07. Weiterleitung an A. Liman\n"
+                 + "08.07. Koordinierung aller Beteiligten\n\n"
+                 + "**Bewertung**\nReaktive Kommunikation.";
+  const T_SOLL   = "Timeline\n07.07. Weiterleitung an A. Liman\n"
+                 + "08.07. Koordinierung aller Beteiligten\n\n"
+                 + "Bewertung\nReaktive Kommunikation.";
+  const OHNE     = "Zeile eins\nZeile zwei\n\nNeuer Absatz";
+
+  const EDIT = '<div contenteditable="true">Alter Entwurf</div>';
+
+  // a) Mit Fett ueber insertHTML – der Weg des gemeldeten Falls.
+  {
+    const r = einfuegen17(EDIT, TIMELINE, true);
+    check(r.text === T_SOLL,
+          "insertHTML+fett: jede Zeile bleibt eine Zeile", JSON.stringify(r.text));
+    const zeilen = r.text.split("\n").filter((z) => z.trim());
+    check(zeilen.length === 5,
+          "es sind wirklich 5 Zeilen, kein Fliesstextblock", String(zeilen.length));
+    check(r.fett === 2, "und die zwei Fettstellen sind erhalten", String(r.fett));
+    check(/insertHTML\+fett/.test(r.weg),
+          "der Umbruch kostet die Rueckleseprobe NICHT ihren Weg", r.weg);
+  }
+
+  // b) Derselbe Text, aber der Editor nimmt execCommand nicht an (Knotenweg).
+  {
+    const r = einfuegen17(EDIT, TIMELINE, false);
+    check(r.text === T_SOLL, "Knotenweg: dieselben Zeilen", JSON.stringify(r.text));
+    check(r.fett === 2, "Knotenweg: Fett erhalten", String(r.fett));
+  }
+
+  /* c) ⚠ DIE RUECKLESEPROBE WAR DER ZWEITE HALBE FEHLER. `<p>a<br>b</p>` gibt
+   * als textContent "ab", die Probe kommt aber aus `klartext()` ("a\nb").
+   * Mit der alten Normierung (\s+ -> " ") fand sie sich nie wieder: der Weg
+   * haette sich fuer wirkungslos erklaert und waere auf insertText OHNE Fett
+   * gefallen – Auszeichnung verloren, obwohl alles angekommen war. */
+  {
+    const r = einfuegen17(EDIT, TIMELINE, true);
+    check(!/ohne Fett/.test(r.weg),
+          "kein Rueckfall auf 'insertText ohne Fett' wegen der <br>", r.weg);
+  }
+
+  // d) Ohne Fett, ohne execCommand – der Klartext-Rueckfall.
+  {
+    const r = einfuegen17(EDIT, OHNE, false);
+    check(r.text === OHNE, "Klartext-Rueckfall: Umbrueche erhalten",
+          JSON.stringify(r.text));
+    check(r.fett === 0, "und kein Fett, wo keines war", String(r.fett));
+  }
+
+  // e) Gegenrichtung: die LEERZEILE trennt weiterhin Absaetze.
+  {
+    const r = einfuegen17(EDIT, OHNE, false);
+    check(/\n\n/.test(r.text), "die Leerzeile bleibt eine Absatzgrenze",
+          JSON.stringify(r.text));
+    check(r.text.indexOf("Zeile eins Zeile zwei") < 0,
+          "und nichts wird zu einem Leerzeichen zusammengezogen", r.text);
+  }
+
+  // f) textarea: schrieb schon immer `\n` – das darf sich nicht aendern.
+  {
+    const r = einfuegen17('<textarea id="comment">alt</textarea>', TIMELINE, null);
+    check(r.text === T_SOLL, "textarea: unveraendert mit Umbruechen",
+          JSON.stringify(r.text));
+  }
+
+  // g) Der iframe-Editor (Jira Server mit Rich-Text) – beide Zweige.
+  for (const mitFett of [true, false]) {
+    const quelle = mitFett ? TIMELINE : OHNE;
+    const soll   = mitFett ? T_SOLL   : OHNE;
+    const dom = new JSDOM('<body><iframe id="ed"></iframe></body>',
+      { url: "https://jira.test/browse/A-1", runScripts: "outside-only" });
+    const w = dom.window, doc = w.document;
+    w.Element.prototype.getBoundingClientRect = () => ({ width: 300, height: 80 });
+    w.Element.prototype.scrollIntoView = function () {};
+    const idoc = doc.getElementById("ed").contentDocument;
+    idoc.body.setAttribute("contenteditable", "true");
+    idoc.body.textContent = "alter Entwurf";
+    idoc.execCommand = () => false;          // erzwingt den Knoten-/Rueckfallweg
+    ladeEinfuegen(w)(quelle, bloeckeAus(quelle));
+    check(gesehen(idoc.body) === soll,
+          "iframe-Editor" + (mitFett ? " mit" : " ohne") + " Fett: Umbrueche erhalten",
+          JSON.stringify(gesehen(idoc.body)));
+    w.close();
+  }
+
+  /* h) Der Editor-API-Weg (world: "MAIN"). Seine beiden Zweige lagen
+   * auseinander: `tm.editors[0]` machte seit jeher `\n` -> <br>, der
+   * `activeEditor`-Zweig darueber machte ein Leerzeichen daraus. Derselbe
+   * Knopf hatte damit je Editor-Variante eine andere Wirkung. */
+  {
+    const dom = new JSDOM("<body></body>", { runScripts: "outside-only" });
+    const w = dom.window;
+    let gesetzt = "";
+    w.tinymce = { activeEditor: { setContent: (h) => { gesetzt = h; } } };
+    ladeEinfuegen(w, "einfuegenUeberEditorApi")(OHNE);
+    const box = w.document.createElement("div");
+    box.innerHTML = gesetzt;
+    check(gesehen(box) === OHNE, "tinymce.setContent: Umbrueche erhalten",
+          JSON.stringify(gesehen(box)));
+    check(gesetzt.indexOf("Zeile eins Zeile zwei") < 0,
+          "und kein Leerzeichen an der Umbruchstelle", gesetzt);
+    w.close();
+  }
+
+  /* i) DIE REGEL, nicht eine Liste von Stellen: nirgends in `einfuegen.js`
+   * darf ein einfacher Umbruch zu einem Leerzeichen werden. Kommentare werden
+   * vorher entfernt – sonst liest der Waechter seine eigene Begruendung
+   * (die erklaert genau dieses Muster) und meldet einen Fehler, den es nicht
+   * gibt. `\n` -> "<br>" bleibt ausdruecklich erlaubt. */
+  {
+    const nackt = ohneKommentare(EINFUEGEN);
+    const treffer = nackt.match(/replace\(\s*\/\\n\/g\s*,\s*" "\s*\)/g) || [];
+    check(treffer.length === 0,
+          "kein `replace(/\\n/g, \" \")` mehr in einfuegen.js",
+          treffer.join(" | "));
+    check(/replace\(\s*\/\\n\/g\s*,\s*"<br>"\s*\)/.test(nackt),
+          "der <br>-Weg von tm.editors[0] steht weiterhin da");
+  }
+}
+
 /* Erst den Puffer leeren: eine Zurueckweisung aus einem nicht abgewarteten
  * Aufruf wird sonst womoeglich erst nach der Zusammenfassung gemeldet. */
 await new Promise((r) => setTimeout(r, 20));

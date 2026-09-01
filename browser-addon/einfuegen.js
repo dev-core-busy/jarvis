@@ -65,10 +65,19 @@ export function einfuegenInJira(text, bloecke) {
     }).join("\n");
   }
 
-  /* Absaetze wie bisher: leere Zeile trennt, einfacher Umbruch wird zum
-   * Leerzeichen. Genau das machte der bisherige Rueckfall mit
-   * `txt.split(/\n{2,}/)` und `replace(/\n/g, " ")` – nur eben auf Text
-   * statt auf Laeufen. */
+  /* Leere Zeile trennt Absaetze, ein einfacher Umbruch bleibt ein UMBRUCH.
+   *
+   * ⚠ HIER STAND `{ t: " " }` – ein einfacher Umbruch wurde zum LEERZEICHEN.
+   * Das war das Verhalten von vor dem Rich-Text-Umbau (`replace(/\n/g, " ")`)
+   * und passt seither nicht mehr: das Ergebnisfeld im Fenster zeigt den Text
+   * mit `white-space: pre-wrap`, also MIT seinen Umbruechen. Eine Timeline mit
+   * einem Eintrag je Zeile floss im Kommentarfeld zu einem Block zusammen –
+   * der Mitarbeiter sah etwas anderes als der Kunde, also genau der Zustand,
+   * gegen den „ein Parser, ein Ergebnis" gebaut ist (gemeldet 2026-09-01).
+   *
+   * `{ br: true }` statt eines weiteren `<p>` je Zeile ist Absicht: ein Absatz
+   * traegt Abstand, ein Umbruch nicht – zehn Timeline-Zeilen als zehn Absaetze
+   * stuenden weit auseinander und waeren wieder nicht das, was im Feld steht. */
   function absaetze() {
     const raus = [];
     let aktuell = [];
@@ -79,7 +88,7 @@ export function einfuegenInJira(text, bloecke) {
         if (aktuell.length) { raus.push(aktuell); aktuell = []; }
         continue;
       }
-      if (aktuell.length) aktuell.push({ t: " ", fett: false });
+      if (aktuell.length) aktuell.push({ br: true });
       for (const l of laeufe) aktuell.push(l);
     }
     if (aktuell.length) raus.push(aktuell);
@@ -93,13 +102,32 @@ export function einfuegenInJira(text, bloecke) {
   function absatzKnoten(aus, laeufe) {
     const p = aus.createElement("p");
     for (const l of laeufe) {
-      if (l.fett) {
+      // Der Umbruch-Marker MUSS zuerst geprueft werden: er traegt kein `t`,
+      // und `createTextNode(undefined)` schriebe woertlich "undefined".
+      if (l.br) {
+        p.appendChild(aus.createElement("br"));
+      } else if (l.fett) {
         const stark = aus.createElement("strong");
         stark.appendChild(aus.createTextNode(l.t));
         p.appendChild(stark);
       } else {
         p.appendChild(aus.createTextNode(l.t));
       }
+    }
+    return p;
+  }
+
+  /* Absatz aus reinem Text – fuer die Wege OHNE Laeufe (kein Fett im Spiel).
+   * Einfache Umbrueche werden zu `<br>`, aus demselben Grund wie in
+   * `absaetze()`: was im Fenster steht, muss im Kommentar ankommen. */
+  function textAbsatz(aus, roh) {
+    const p = aus.createElement("p");
+    const zeilen = String(roh).split("\n");
+    for (let i = 0; i < zeilen.length; i++) {
+      // Knoten, nie innerHTML – der Vorschlag ist Modelltext und darf kein
+      // Markup einschleusen.
+      if (i) p.appendChild(aus.createElement("br"));
+      p.appendChild(aus.createTextNode(zeilen[i]));
     }
     return p;
   }
@@ -199,13 +227,7 @@ export function einfuegenInJira(text, bloecke) {
     // Ohne execCommand bleibt nur der harte Weg – dann aber ebenfalls
     // ersetzend, sonst haette derselbe Knopf je Editor eine andere Wirkung.
     leeren(el);
-    for (const absatz of txt.split(/\n{2,}/)) {
-      const p = aus.createElement("p");
-      // textContent, nicht innerHTML – der Vorschlag ist Modelltext und darf
-      // kein Markup einschleusen.
-      p.textContent = absatz.replace(/\n/g, " ");
-      el.appendChild(p);
-    }
+    for (const absatz of txt.split(/\n{2,}/)) el.appendChild(textAbsatz(aus, absatz));
     el.dispatchEvent(new Event("input", { bubbles: true }));
     return "appendChild";
   }
@@ -232,8 +254,15 @@ export function einfuegenInJira(text, bloecke) {
    */
   function schreibeMitFett(el) {
     const aus = el.ownerDocument || document;
-    const vorher = (el.textContent || "").replace(/\s+/g, " ").trim();
-    const probe = klartext().replace(/\s+/g, " ").trim().slice(0, 24);
+    /* ⚠ LEERRAUM WIRD GANZ ENTFERNT, nicht auf ein Leerzeichen normiert.
+     * `<p>a<br>b</p>` liefert als textContent "ab" – die Probe kommt aber aus
+     * `klartext()` und heisst dort "a\nb". Mit der alten Normierung ("a b")
+     * fand sich der neue Text nie wieder, `angekommen()` meldete false und der
+     * Weg fiel auf `insertText` OHNE Fett zurueck: Auszeichnung verloren,
+     * obwohl alles angekommen war. Wie der Editor Leerraum darstellt, ist fuer
+     * die Frage "ist es da?" ohnehin unerheblich. */
+    const vorher = (el.textContent || "").replace(/\s+/g, "").trim();
+    const probe = klartext().replace(/\s+/g, "").trim().slice(0, 24);
     const alteProbe = vorher.slice(0, 24);
 
     /* ⚠ DIE RUECKLESEPROBE MUSSTE MIT DEM UEBERSCHREIBEN UMGEBAUT WERDEN.
@@ -249,7 +278,7 @@ export function einfuegenInJira(text, bloecke) {
      *     ANFANGEN – das ist der haeufige Fall (die Korrektur beginnt wie der
      *     Entwurf), und dort waere sie ein Fehlalarm. */
     function angekommen() {
-      const jetzt = (el.textContent || "").replace(/\s+/g, " ");
+      const jetzt = (el.textContent || "").replace(/\s+/g, "");
       if (probe && jetzt.indexOf(probe) < 0) return false;
       if (alteProbe && alteProbe !== probe && jetzt.indexOf(alteProbe) >= 0) return false;
       return jetzt.trim().length > 0;
@@ -356,11 +385,10 @@ export function einfuegenInJira(text, bloecke) {
       if (aus.execCommand && aus.execCommand("insertText", false, text)) weg = "insertText";
       else throw new Error("kein insertText");
     } catch (e) {
-      koerper.innerHTML = text.split(/\n{2,}/).map(function (p) {
-        const d = aus.createElement("p");
-        d.textContent = p.replace(/\n/g, " ");
-        return d.outerHTML;
-      }).join("");
+      leeren(koerper);
+      for (const absatz of text.split(/\n{2,}/)) {
+        koerper.appendChild(textAbsatz(aus, absatz));
+      }
     }
     koerper.dispatchEvent(new Event("input", { bubbles: true }));
     return { ok: true, weg: "iframe-Editor (" + weg + ")" };
@@ -581,9 +609,18 @@ export function einfuegenUeberEditorApi(text) {
        * Genommen wird setContent: „Als Kommentar uebernehmen" ersetzt den
        * vorhandenen Inhalt, und dieser Weg muss dasselbe tun wie die uebrigen –
        * ein Knopf mit editorabhaengiger Wirkung ist nicht erklaerbar. */
-      const html = text.split(/\n{2,}/).map(function (p) {
+      /* Der Helfer steht INNEN: diese Funktion wird per toString uebertragen
+       * und sieht ihr Modul nicht (siehe Kopf von `einfuegenInJira`).
+       * Einfache Umbrueche bleiben `<br>` – der Zweig darunter
+       * (`tm.editors[0]`) macht das seit jeher, dieser tat es nicht: derselbe
+       * Knopf hatte je Editor-Variante eine andere Wirkung. */
+      const html = text.split(/\n{2,}/).map(function (roh) {
         const d = document.createElement("p");
-        d.textContent = p.replace(/\n/g, " ");
+        const zeilen = String(roh).split("\n");
+        for (let i = 0; i < zeilen.length; i++) {
+          if (i) d.appendChild(document.createElement("br"));
+          d.appendChild(document.createTextNode(zeilen[i]));
+        }
         return d.outerHTML;
       }).join("");
       tm.activeEditor.setContent(html);

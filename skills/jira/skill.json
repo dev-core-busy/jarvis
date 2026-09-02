@@ -38,6 +38,12 @@
             "type": "string",
             "label": "Browser-Erweiterung: ZIP-Datei fuer Firefox",
             "description": "Vollstaendiger Pfad zur ZIP-Datei auf der Netzfreigabe (z.B. \\\\server\\freigabe\\...\\jira-firefox.zip). Leer = die Anleitung bietet stattdessen den Download an."
+        },
+        "assist_bereiche": {
+            "type": "string",
+            "label": "Freigegebene Werkzeug-Bereiche fuer die Browser-Erweiterung",
+            "description": "Kommagetrennt: wissen, fach. LEER (Vorgabe) heisst: der Assistent hat keine Werkzeuge und wertet allein den Ticketinhalt aus. Der Benutzer kann je Vorlage NUR aus den hier freigegebenen Bereichen waehlen. Wird ueber die Kaestchen im Reiter gepflegt. Alle Bereiche sind nur LESEND; der Ticketinhalt ist Fremdtext, jeder freigeschaltete Bereich vergroessert die Angriffsflaeche einer praeparierten Kundenmail.",
+            "default": ""
         }
     },
     "knowledge_docs": [],

@@ -92,6 +92,19 @@
             if (vn) vn.addEventListener('click', function () { Manager.editVorlage(null, false, null); });
             var vc = $('jvorl-cancel');
             if (vc) vc.addEventListener('click', function () { Manager.closeVorlage(); });
+            var ts = $('jtool-save');
+            if (ts) ts.addEventListener('click', this.saveAreas.bind(this));
+            /* Der Katalog ist Servertext – ein Sprachwechsel muss ihn neu
+               holen. Neu GELADEN wird nur bei echtem Wechsel: zeichnen ruft
+               kein applyLang(), aber ein Abruf bei jedem Ereignis waere die
+               Sorte Schleife, die im Short-Tracks-Reiter 40 Abrufe in 250 ms
+               erzeugt hat. */
+            window.addEventListener('jarvis-lang-changed', function () {
+                var lg = (window._lang === 'en') ? 'en' : 'de';
+                if (Manager._bereicheLang && Manager._bereicheLang !== lg) {
+                    Manager.loadVorlagen();
+                }
+            });
             // Auge: PAT anzeigen/verbergen (analog Confluence-Reiter)
             var tt = $('jira-token-toggle');
             if (tt) tt.addEventListener('click', function () {
@@ -249,6 +262,13 @@
         _vorlagen: { global: [], eigene: [], darf_global: false, standard: '' },
         _vorlBearbeitet: '',
         _vorlHeim: null,        // Heimatplatz des wandernden Formulars
+        /* Werkzeug-Bereiche. Der Katalog kommt MIT den Vorlagen vom Server
+           (ein Roundtrip fuer beides) – Name und Hinweis stehen dort neben der
+           Werkzeugliste, damit Text und Wirkung nicht auseinanderlaufen.
+           Deshalb erreicht applyLang() sie nicht: bei einem Sprachwechsel wird
+           der Katalog neu geholt (_bereicheLang). */
+        _bereiche: [],
+        _bereicheLang: '',
 
         /* ── Das Formular wandert, es gibt aber nur EINEN Container ──────────
            Es wird beim Bearbeiten als KIND in die Karte des Eintrags gehaengt.
@@ -359,12 +379,100 @@
                 });
         },
 
+        /* ── Werkzeug-Bereiche ────────────────────────────────────────────
+           Zwei Ansichten auf denselben Katalog: die FREIGABE (was darf ein
+           Benutzer ueberhaupt waehlen – Admin-Sache) und die AUSWAHL je Vorlage.
+           Beide zeichnen aus `_bereiche`; getrennte Kataloge liefen beim
+           naechsten Bereich auseinander. */
+        renderAreas: function () {
+            var box = $('jtool-areas');
+            if (!box) return;
+            var bs = this._bereiche || [];
+            if (!bs.length) {
+                box.innerHTML = '<span class="kb-hint">'
+                    + esc(t('jtool.none', 'Keine Bereiche verfügbar.')) + '</span>';
+                return;
+            }
+            box.innerHTML = bs.map(function (b) {
+                return '<label class="checkbox-group" style="align-items:flex-start;">'
+                    + '<input type="checkbox" data-area="' + esc(b.id) + '"'
+                    + (b.freigegeben ? ' checked' : '') + '>'
+                    + '<span><b>' + esc(b.name) + '</b>'
+                    + '<span class="kb-hint" style="display:block;">' + esc(b.hinweis || '') + '</span>'
+                    + '<span class="kb-hint" style="display:block;opacity:.75;">'
+                    + esc((b.werkzeuge || []).join(', ')) + '</span>'
+                    + '</span></label>';
+            }).join('');
+        },
+
+        /* Eigener Knopf, eigene TEILMENGE – wie saveShare. Der Endpunkt sendet
+           nur das Freigabe-Feld; ein Knopf mit dem ganzen Formularstand
+           ueberschriebe den Jira-Zugang (Register). */
+        saveAreas: function () {
+            var gewaehlt = [];
+            document.querySelectorAll('#jtool-areas input[data-area]').forEach(function (c) {
+                if (c.checked) gewaehlt.push(c.getAttribute('data-area'));
+            });
+            setStatus('jtool-status', t('common.saving', 'Speichere…'));
+            fetch('/api/jira/admin/areas', {
+                method: 'POST',
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ bereiche: gewaehlt })
+            }).then(function (r) { return r.json(); })
+              .then(function (d) {
+                    if (!d || d.ok === false) throw new Error((d && (d.error || d.detail)) || 'Fehler');
+                    setStatus('jtool-status', t('jtool.saved', '✓ Freigegeben:') + ' '
+                        + ((d.bereiche || []).join(', ') || t('jtool.nothing', 'nichts')), 'ok');
+                    // Neu laden: die Kaestchen im Vorlagen-Formular haengen an
+                    // derselben Freigabe und muessen sofort stimmen.
+                    return Manager.loadVorlagen();
+              })
+              .catch(function (e) { setStatus('jtool-status', e.message, 'error'); });
+        },
+
+        /* Die Bereiche EINER Vorlage als Kaestchen. Gezeigt werden nur
+           FREIGESCHALTETE: ein Haken, den der Server abweist, ist eine Zusage,
+           die nicht gilt. Ist nichts freigeschaltet, verschwindet der ganze
+           Block – ein leeres Feld mit Erklaerung verlaengert nur das Formular.
+           Ein Bereich, der in der Vorlage STEHT, aber nicht mehr freigegeben
+           ist, wird ebenfalls nicht gezeigt: er wirkt nicht mehr
+           (jira_assist.wirksame_bereiche prueft zur Laufzeit). */
+        renderVorlBereiche: function (gewaehlt) {
+            var zeile = $('jvorl-ber-zeile');
+            var box = $('jvorl-bereiche');
+            var frei = (this._bereiche || []).filter(function (b) { return b.freigegeben; });
+            if (zeile) zeile.style.display = frei.length ? '' : 'none';
+            if (!box) return;
+            var an = {};
+            (gewaehlt || []).forEach(function (x) { an[x] = true; });
+            box.innerHTML = frei.map(function (b) {
+                return '<label class="checkbox-group" style="align-items:flex-start;">'
+                    + '<input type="checkbox" data-vber="' + esc(b.id) + '"'
+                    + (an[b.id] ? ' checked' : '') + '>'
+                    + '<span><b>' + esc(b.name) + '</b>'
+                    + '<span class="kb-hint" style="display:block;">' + esc(b.hinweis || '') + '</span>'
+                    + '</span></label>';
+            }).join('');
+        },
+
+        vorlBereicheGewaehlt: function () {
+            var raus = [];
+            document.querySelectorAll('#jvorl-bereiche input[data-vber]').forEach(function (c) {
+                if (c.checked) raus.push(c.getAttribute('data-vber'));
+            });
+            return raus;
+        },
+
         loadVorlagen: function () {
             var box = $('jvorl-liste'); if (!box) return;
             // Formular heimholen, BEVOR die Liste ueberschrieben wird.
             this._platziereVorl(null);
             box.innerHTML = '<span class="kb-hint">' + esc(t('jvorl.loading', 'Lade Vorlagen …')) + '</span>';
-            fetch('/api/jira/assist/vorlagen', { headers: authHeaders() })
+            // Sprache mitgeben: Name und Hinweis der Bereiche kommen uebersetzt
+            // vom Server – applyLang() erreicht sie nicht.
+            var lg = (window._lang === 'en') ? 'en' : 'de';
+            this._bereicheLang = lg;
+            return fetch('/api/jira/assist/vorlagen?lang=' + lg, { headers: authHeaders() })
                 .then(function (r) { return r.json(); })
                 .then(function (d) {
                     if (!d || d.ok === false) throw new Error((d && d.error) || 'Fehler');
@@ -373,6 +481,8 @@
                         darf_global: !!d.darf_global,
                         standard: d.standard || ''
                     };
+                    Manager._bereiche = d.bereiche || [];
+                    Manager.renderAreas();
                     Manager.renderVorlagen();
                 })
                 .catch(function (e) {
@@ -419,11 +529,37 @@
                 art.className = 'kb-hint';
                 art.style.marginLeft = '8px';
                 art.textContent = e.global ? t('jvorl.shared', 'Gemeinsam') : t('jvorl.mine', 'Nur für mich');
+                /* WAS DIE VORLAGE DARF, gehoert in die Zeile: eine Vorlage, die
+                   nachschlaegt, ist von einer, die nur das Ticket liest, sonst
+                   nicht zu unterscheiden – und der Unterschied ist genau der,
+                   den ein Administrator sehen will. Genannt werden nur WIRKSAME
+                   Bereiche (freigeschaltet): ein Rest aus einer
+                   zurueckgenommenen Freigabe wirkt nicht mehr und wuerde hier
+                   eine Faehigkeit behaupten, die es nicht gibt. */
+                var wirksam = (e.v.bereiche || []).filter(function (id) {
+                    return (Manager._bereiche || []).some(function (b) {
+                        return b.id === id && b.freigegeben;
+                    });
+                });
+                if (wirksam.length) {
+                    var nam = wirksam.map(function (id) {
+                        var f = (Manager._bereiche || []).filter(function (b) { return b.id === id; })[0];
+                        return (f && f.name) || id;
+                    });
+                    var bm = document.createElement('span');
+                    bm.className = 'kb-hint';
+                    bm.style.marginLeft = '8px';
+                    bm.style.color = 'var(--accent)';
+                    bm.textContent = t('jvorl.ber_mark', 'Nachschlagen:') + ' ' + nam.join(', ');
+                    links.appendChild(titel); links.appendChild(art); links.appendChild(bm);
+                } else {
+                    links.appendChild(titel); links.appendChild(art);
+                }
                 var text = document.createElement('div');
                 text.className = 'kb-hint';
                 text.style.cssText = 'white-space:pre-wrap;word-break:break-word;';
                 text.textContent = e.v.text || '';
-                links.appendChild(titel); links.appendChild(art); links.appendChild(text);
+                links.appendChild(text);
                 row.appendChild(links);
 
                 var knoepfe = document.createElement('span');
@@ -506,6 +642,7 @@
             if ($('jvorl-name')) $('jvorl-name').value = v ? (v.name || '') : '';
             if ($('jvorl-text')) $('jvorl-text').value = v ? (v.text || '') : '';
             if ($('jvorl-global')) $('jvorl-global').checked = !!global_;
+            this.renderVorlBereiche(v ? (v.bereiche || []) : []);
             var tt = $('jvorl-edit-title');
             if (tt) {
                 // Der Titel steht IM Formular, der Status oben in der Leiste:
@@ -528,6 +665,7 @@
             if ($('jvorl-name')) $('jvorl-name').value = '';
             if ($('jvorl-text')) $('jvorl-text').value = '';
             if ($('jvorl-global')) $('jvorl-global').checked = false;
+            this.renderVorlBereiche([]);
             var f = $('jvorl-edit');
             if (f) f.style.display = 'none';
             this._platziereVorl(null);
@@ -545,7 +683,11 @@
                 headers: authHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({
                     id: this._vorlBearbeitet, name: name, text: text,
-                    global: !!($('jvorl-global') && $('jvorl-global').checked)
+                    global: !!($('jvorl-global') && $('jvorl-global').checked),
+                    // IMMER mitsenden – auch die leere Liste. Sie heisst "keine
+                    // Bereiche"; ein fehlendes Feld heisst "unveraendert", und
+                    // dann liesse sich ein Haken nie wieder abwaehlen.
+                    bereiche: this.vorlBereicheGewaehlt()
                 })
             }).then(function (r) { return r.json(); })
               .then(function (d) {

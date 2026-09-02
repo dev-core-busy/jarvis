@@ -27,13 +27,30 @@ Der Anlass: das Fenster wird bei jedem Klick neu aufgebaut, die Auswahl stand
 also bei JEDEM Oeffnen wieder auf "ohne Vorlage". Wer immer dieselbe Form
 braucht, musste sie jedes Mal neu heraussuchen.
 
-DIE VORLAGE BESTIMMT DIE FORM, NICHT DIE BEFUGNIS
--------------------------------------------------
-Sie geht als zusaetzlicher Abschnitt in den System-Prompt, HINTER die
+DIE VORLAGE BESTIMMT DIE FORM – UND SEIT 2026-09-01 DEN WERKZEUG-ZUSCHNITT
+--------------------------------------------------------------------------
+Der TEXT geht als zusaetzlicher Abschnitt in den System-Prompt, HINTER die
 Grundaufgabe – dieselbe Reihenfolge und dieselbe Begruendung wie bei den
 Antwort-Stilen (Vorfall 2026-08-17: eine Stilvorgabe hob eine
-Absender-Bedingung auf). Sie kann nichts freischalten: der Lauf hat ohnehin
-keine Werkzeuge.
+Absender-Bedingung auf). Er kann nichts freischalten.
+
+Das Feld ``bereiche`` dagegen SCHALTET etwas frei: es nennt die lesenden
+Werkzeug-Bereiche (``jira_assist.BEREICHE``), mit denen der Lauf arbeiten darf.
+Deshalb ist es das einzige Feld dieses Moduls mit einer Rechtepruefung:
+
+* Gespeichert wird nur, was der Administrator freigeschaltet hat – ein
+  gesperrter Bereich wird **benannt und abgewiesen**, nicht stillschweigend
+  entfernt (``_pruefe_bereiche``). Ohne diese Pruefung waere die Freigabe eine
+  Empfehlung, die ein direkter POST umgeht.
+* Und weil eine Freigabe auch ZURUECKGENOMMEN wird, prueft
+  ``jira_assist.wirksame_bereiche`` beim Lauf ein zweites Mal. Beide Tore sind
+  noetig: das erste erklaert dem Benutzer den Fehler, das zweite haelt ihn.
+
+⚠ WORAUF DIE BEREICHE WIRKEN: auf ALLE drei Knoepfe der Erweiterung
+(Zusammenfassen, Antwort vorschlagen, Antwort ueberarbeiten) – der TEXT dagegen
+nur auf die Zusammenfassung, wie bisher. Die Oberflaeche sagt das; ohne diesen
+Satz waere nicht erklaerbar, warum eine Vorlage bei einem Antwortvorschlag
+"nichts tut" und trotzdem nachschlaegt.
 """
 
 from __future__ import annotations
@@ -167,6 +184,47 @@ def _pruefe(name: str, text: str) -> tuple:
     return n, t
 
 
+def _pruefe_bereiche(roh):
+    """Die Werkzeug-Bereiche einer Vorlage – nur bekannte UND freigeschaltete.
+
+    Rueckgabe ``None`` heisst **Feld nicht gesendet, also unveraendert lassen**;
+    eine leere Liste heisst ausdruecklich "keine Bereiche". Nie auf Falsyness
+    pruefen – sonst koennte ein Benutzer seine Bereiche nicht mehr abwaehlen
+    (dieselbe Falle wie bei ``temperature`` und ``retention_days``).
+
+    Ein abgewiesener Bereich wird BENANNT: sonst speichert jemand "mit
+    Wissensdatenbank" und wundert sich spaeter, warum der Lauf nichts
+    nachschlaegt (die Lehre aus dem Konto-Endpunkt des E-Mail-Skills, der
+    unbekannte Felder still verwarf).
+    """
+    if roh is None:
+        return None
+    if isinstance(roh, str):
+        gewaehlt = [t.strip() for t in roh.split(",") if t.strip()]
+    elif isinstance(roh, (list, tuple)):
+        gewaehlt = [str(t).strip() for t in roh if str(t).strip()]
+    else:
+        # Kein Raten: was nicht als Liste oder Liste-als-Text kommt, ist keine
+        # Auswahl.
+        raise VorlagenFehler("Die Werkzeug-Bereiche müssen eine Liste sein.")
+
+    from backend import jira_assist as ja  # noqa: PLC0415
+
+    unbekannt = [b for b in gewaehlt if b not in ja.BEREICHE]
+    if unbekannt:
+        raise VorlagenFehler("Unbekannte Werkzeug-Bereiche: %s"
+                             % ", ".join(sorted(set(unbekannt))))
+    frei = set(ja.freigegebene_bereiche())
+    gesperrt = [b for b in gewaehlt if b not in frei]
+    if gesperrt:
+        raise VorlagenFehler(
+            "Diese Werkzeug-Bereiche sind nicht freigeschaltet: %s. Ein "
+            "Administrator gibt sie unter Einstellungen → Jira frei."
+            % ", ".join(sorted(set(gesperrt))))
+    # Reihenfolge stabil nach BEREICHE, nicht nach Eingabereihenfolge.
+    return [b for b in ja.BEREICHE if b in gewaehlt]
+
+
 def liste(user: str, ist_admin: bool = False) -> dict:
     """Alle Vorlagen, die dieser Benutzer benutzen darf.
 
@@ -252,9 +310,23 @@ def _key(user: str) -> str:
 
 
 def speichern(user: str, name: str, text: str, vid: str = "",
-              global_: bool = False, ist_admin: bool = False) -> dict:
-    """Legt eine Vorlage an oder aendert sie."""
+              global_: bool = False, ist_admin: bool = False,
+              bereiche=None) -> dict:
+    """Legt eine Vorlage an oder aendert sie.
+
+    ``bereiche=None`` heisst "nicht gesendet" und laesst ein bestehendes Feld
+    unangetastet – ein Aufrufer, der die Bereiche nicht kennt (aeltere
+    Erweiterung), darf sie nicht loeschen.
+    """
+    # ⚠ SAEEN AUCH HIER, nicht nur in `liste()`. Ist die Datei noch nicht da und
+    # der ERSTE Zugriff ein Schreibvorgang, entsteht sie mit genau dieser einen
+    # Vorlage – und `saeen()` legt die mitgelieferten Vorschlaege danach NIE mehr
+    # an (es prueft nur, ob die Datei existiert). Auf DEV genau so passiert, mit
+    # einer Probe, die direkt `speichern` rief: fuenf Vorschlaege dauerhaft weg,
+    # ohne Fehlermeldung.
+    saeen()
     n, t = _pruefe(name, text)
+    ber = _pruefe_bereiche(bereiche)
     if global_ and not ist_admin:
         raise VorlagenFehler("Nur Administratoren dürfen gemeinsame Vorlagen "
                              "anlegen.")
@@ -268,6 +340,8 @@ def speichern(user: str, name: str, text: str, vid: str = "",
         for v in ziel:
             if v.get("id") == vid:
                 v["name"], v["text"] = n, t
+                if ber is not None:
+                    v["bereiche"] = ber
                 _speichern(d)
                 return v
         raise VorlagenFehler("Die Vorlage wurde nicht gefunden.")
@@ -276,6 +350,10 @@ def speichern(user: str, name: str, text: str, vid: str = "",
         raise VorlagenFehler("Mehr als %d Vorlagen sind nicht vorgesehen."
                              % MAX_JE_BENUTZER)
     neu = {"id": uuid.uuid4().hex[:12], "name": n, "text": t,
+           # Neu angelegt OHNE Angabe = keine Bereiche. Fail-closed, und
+           # zugleich der Zustand jeder Vorlage, die vor dem 2026-09-01
+           # entstanden ist.
+           "bereiche": ber or [],
            "erstellt": int(time.time())}
     ziel.append(neu)
     _speichern(d)
@@ -320,20 +398,29 @@ def _standard_vergessen(d: dict, user: str, vid: str) -> None:
         st.pop(_key(user), None)
 
 
-def text_fuer(user: str, vid: str, ist_admin: bool = False) -> str:
-    """Der Prompt-Text einer Vorlage – oder ``""``.
+def eintrag_fuer(user: str, vid: str, ist_admin: bool = False) -> dict:
+    """Die ganze Vorlage zu einer Kennung – oder ein leeres dict.
 
     Gesucht wird nur in dem, was dieser Benutzer benutzen DARF. Damit ist die
-    Kennung im Request kein Weg an fremde Vorlagen (sie enthalten zwar keine
-    Geheimnisse, aber die Regel kostet nichts).
+    Kennung im Request kein Weg an eine fremde Vorlage – und seit die Vorlage
+    ein Feld ``bereiche`` traegt, ist das keine Formsache mehr: sie bestimmt den
+    Werkzeug-Zuschnitt des Laufs.
+
+    EINE Nachschlage-Funktion fuer Text UND Bereiche. Zwei getrennte waeren zwei
+    Aufloesungen derselben Kennung, die beim naechsten Feld auseinanderlaufen.
     """
     if not vid:
-        return ""
+        return {}
     d = liste(user, ist_admin)
     for v in (d["eigene"] + d["global"]):
         if v.get("id") == vid:
-            return str(v.get("text") or "")[:TEXT_MAX]
-    return ""
+            return v
+    return {}
+
+
+def text_fuer(user: str, vid: str, ist_admin: bool = False) -> str:
+    """Der Prompt-Text einer Vorlage – oder ``""``."""
+    return str(eintrag_fuer(user, vid, ist_admin).get("text") or "")[:TEXT_MAX]
 
 
 def markensicher(name: str) -> str:

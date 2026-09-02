@@ -58,7 +58,11 @@ function mkFetch(state) {
                 if (state.listFail) return j({ ok: false, error: 'Vorlagen nicht lesbar' }, false, 500);
                 return j({ ok: true, global: state.global, eigene: state.eigene,
                            darf_global: state.darfGlobal,
-                           standard: state.standard || '' });
+                           standard: state.standard || '',
+                           // Fehlt das Feld, antwortet ein aelterer Server –
+                           // genau der Fall, den die uebrigen Abschnitte
+                           // messen (Block bleibt weg, keine Marke).
+                           bereiche: state.bereiche });
             }
             // Die Standard-Route steht VOR der allgemeinen POST-Behandlung –
             // sonst legte sie eine Vorlage namens "undefined" an.
@@ -71,8 +75,13 @@ function mkFetch(state) {
                 // nachgebildet, damit die Liste danach stimmt.
                 const ziel = body.global ? state.global : state.eigene;
                 const vorhanden = ziel.find((v) => v.id === body.id);
-                if (vorhanden) { vorhanden.name = body.name; vorhanden.text = body.text; }
-                else ziel.push({ id: 'neu1', name: body.name, text: body.text });
+                if (vorhanden) {
+                    vorhanden.name = body.name; vorhanden.text = body.text;
+                    if (body.bereiche !== undefined) vorhanden.bereiche = body.bereiche;
+                } else {
+                    ziel.push({ id: 'neu1', name: body.name, text: body.text,
+                                bereiche: body.bereiche || [] });
+                }
                 return j({ ok: true, vorlage: vorhanden || ziel[ziel.length - 1] });
             }
             if (method === 'DELETE') {
@@ -81,6 +90,13 @@ function mkFetch(state) {
                 state.eigene = state.eigene.filter((v) => v.id !== id);
                 return j({ ok: true });
             }
+        }
+        if (u.startsWith('/api/jira/admin/areas')) {
+            state.freigabe = (body && body.bereiche) || [];
+            (state.bereiche || []).forEach((b) => {
+                b.freigegeben = state.freigabe.indexOf(b.id) >= 0;
+            });
+            return j({ ok: true, bereiche: state.freigabe });
         }
         if (u.startsWith('/api/skills/jira/config')) return j({ config: { base_url: 'https://j.test' } });
         return j({ ok: true });
@@ -554,6 +570,113 @@ function text(d, id) { const e = d.getElementById(id); return e ? e.textContent 
         check('kein roher Schlüssel im Text', !/jvorl\./.test(txt), txt);
         check('sondern der deutsche Rückfall', /Noch keine Vorlagen/.test(txt), txt);
         w3.close();
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    section('9) Werkzeug-Bereiche: Freigabe (Admin) und Auswahl je Vorlage');
+    // ══════════════════════════════════════════════════════════════════════
+    /* Zwei Dinge, zwei Container: WAS ein Benutzer waehlen darf (Freigabe) und
+     * WAS eine Vorlage benutzt (Auswahl). Gemessen wird geklickt, nicht
+     * gelesen – der haeufigste Grund fuer einen toten Knopf ist, dass er nicht
+     * verdrahtet ist. */
+    {
+        const KAT = () => ([
+            { id: 'wissen', name: 'Wissensdatenbank (lesend)',
+              hinweis: 'Eigene Unterlagen.', freigegeben: true, werkzeuge: ['knowledge_search'] },
+            { id: 'fach', name: 'Interne Fachsysteme (lesend)',
+              hinweis: 'Nur lesend.', freigegeben: false, werkzeuge: ['jira_search'] },
+        ]);
+        const st = { calls: [], global: [], darfGlobal: true, bereiche: KAT(),
+                     eigene: [{ id: 'e9', name: 'Mit Wissen', text: 'x',
+                                bereiche: ['wissen'] }] };
+        const dom = makeDom(st);
+        const w = dom.window, d = w.document;
+        w.JiraManager.onShow();
+        await sleep(30);
+
+        // (a) Die Freigabe-Liste zeigt ALLE Bereiche, angehakt nur die freien.
+        const frei = Array.from(d.querySelectorAll('#jtool-areas input[data-area]'));
+        check('die Freigabe-Liste zeigt jeden Bereich', frei.length === 2,
+              String(frei.length));
+        check('angehakt ist genau der freigeschaltete',
+              frei.filter((c) => c.checked).map((c) => c.dataset.area).join(',') === 'wissen');
+        check('und der Hinweis des Servers steht dabei',
+              /Eigene Unterlagen/.test(text(d, 'jtool-areas')));
+
+        // (b) Die Marke in der Zeile – GEMESSEN, BEVOR das Formular in die
+        // Karte wandert: danach enthaelt der Zeilentext auch dessen Texte.
+        check('die Zeile nennt den wirksamen Bereich',
+              /Nachschlagen:\s*Wissensdatenbank/.test(zeilenTexte(d)[0] || ''),
+              zeilenTexte(d)[0]);
+
+        // (c) Die AUSWAHL je Vorlage zeigt nur FREIGESCHALTETES.
+        klickKnopf(w, d, 0, 'edit', 'Vorlage bearbeiten');
+        await sleep(10);
+        const vber = Array.from(d.querySelectorAll('#jvorl-bereiche input[data-vber]'));
+        check('im Formular erscheinen nur freigeschaltete Bereiche',
+              vber.map((c) => c.dataset.vber).join(',') === 'wissen',
+              vber.map((c) => c.dataset.vber).join(','));
+        check('und der Haken der Vorlage steht',
+              vber.length === 1 && vber[0].checked);
+        const zeile = d.getElementById('jvorl-ber-zeile');
+        check('der Block ist sichtbar, weil etwas freigeschaltet ist',
+              !!zeile && zeile.style.display !== 'none');
+
+        // (d) Speichern schickt die Bereiche mit – auch abgewaehlt.
+        vber[0].checked = false;
+        klick(w, d, '#jvorl-save', 0, 'Vorlage speichern');
+        await sleep(30);
+        const p = st.calls.filter((c) => c.method === 'POST'
+            && c.url.indexOf('/api/jira/assist/vorlagen') === 0
+            && c.url.indexOf('standard') < 0).pop();
+        check('das Speichern schickt bereiche mit', !!p && Array.isArray(p.body.bereiche),
+              JSON.stringify(p && p.body));
+        // Nie ungeprueft dereferenzieren: fehlt das Feld, WIRFT `.length` – und
+        // die Gegenprobe braeche ab statt fehlzuschlagen (Register).
+        check('und die LEERE Liste waehlt wirklich ab',
+              !!p && Array.isArray(p.body.bereiche) && p.body.bereiche.length === 0);
+
+        // (e) Die Freigabe speichert NUR ihre eigene Teilmenge.
+        st.calls.length = 0;
+        const kfach = Array.from(d.querySelectorAll('#jtool-areas input[data-area]'))
+            .find((c) => c.dataset.area === 'fach');
+        if (kfach) kfach.checked = true;
+        klick(w, d, '#jtool-save', 0, 'Freigabe speichern');
+        await sleep(40);
+        const a = st.calls.find((c) => c.url.indexOf('/api/jira/admin/areas') === 0);
+        check('der Knopf ruft /api/jira/admin/areas', !!a);
+        check('und schickt beide angehakten Bereiche',
+              !!a && (a.body.bereiche || []).slice().sort().join(',') === 'fach,wissen',
+              JSON.stringify(a && a.body));
+        /* DAS IST DER PUNKT: der Server merged die Skill-Config. Ginge hier der
+         * ganze Formularstand mit, waere ein leeres Token-Feld ein geloeschter
+         * Jira-Zugang (im Projekt bezahlt, siehe Register). */
+        check('und KEIN weiteres Feld', !!a && Object.keys(a.body).join(',') === 'bereiche',
+              JSON.stringify(a && a.body));
+        check('die Konfiguration wird dabei nicht angefasst',
+              !st.calls.some((c) => c.method === 'POST'
+                  && c.url.indexOf('/api/skills/jira/config') === 0));
+        w.close();
+    }
+
+    // Gegenprobe: ein aelterer Server ohne Katalog. Dann bleibt der Block weg –
+    // und die Vorlagen sind unveraendert benutzbar.
+    {
+        const st = { calls: [], global: [], eigene: [{ id: 'e1', name: 'A', text: 'b' }],
+                     darfGlobal: false };
+        const dom = makeDom(st);
+        const w = dom.window, d = w.document;
+        w.JiraManager.onShow();
+        await sleep(30);
+        // Zuerst die Zeile – das Formular wandert beim Bearbeiten hinein.
+        check('und in der Zeile steht keine Marke',
+              !/Nachschlagen:/.test(zeilenTexte(d)[0] || ''), zeilenTexte(d)[0]);
+        klickKnopf(w, d, 0, 'edit', 'Vorlage bearbeiten');
+        await sleep(10);
+        const zeile = d.getElementById('jvorl-ber-zeile');
+        check('ohne Katalog bleibt der Bereichs-Block versteckt',
+              !!zeile && zeile.style.display === 'none');
+        w.close();
     }
 
     const bad = results.filter((r) => !r.ok);

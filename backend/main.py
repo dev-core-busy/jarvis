@@ -12145,6 +12145,16 @@ async def jira_assist_health(request: Request,
         # /api/skills/{name}/config Administratoren vorbehalten ist – die
         # Anleitung lesen aber die BENUTZER.
         "paket_pfade": jira_assist.paket_pfade(),
+        # WELCHE WERKZEUG-BEREICHE FREIGESCHALTET SIND – fuer die Anleitung.
+        # Sie behauptete bis 2026-09-01 "sie kann nichts nachschlagen"; das ist
+        # falsch, sobald ein Administrator einen Bereich freigibt, und eine
+        # Anleitung, die einen Zustand behauptet, den sie nicht kennt, kostet in
+        # diesem Projekt regelmaessig Zeit (Register). Deshalb der WIRKLICHE
+        # Stand, nicht ein Satz darueber. Der Weg ueber diesen Endpunkt ist
+        # noetig, weil /api/skills/*/config Administratoren vorbehalten ist –
+        # die Anleitung lesen die BENUTZER.
+        "assist_bereiche": [b for b in jira_assist.bereiche_katalog(
+            str(request.query_params.get("lang") or "de")) if b.get("freigegeben")],
         # DIE ADRESSE DES JIRA-SERVERS – fuer die Seitenleiste der Erweiterung.
         #
         # Sie braucht ein dauerhaftes Zugriffsrecht auf den Jira-Server, sonst
@@ -12203,12 +12213,28 @@ async def jira_assist_run(request: Request,
 
 
 @app.get("/api/jira/assist/vorlagen")
-async def jira_assist_vorlagen(user: str = Depends(require_jira_vorlagen_access)):
-    """Die Vorlagen, die dieser Benutzer benutzen darf."""
-    from backend import jira_vorlagen  # noqa: PLC0415
+async def jira_assist_vorlagen(request: Request,
+                               user: str = Depends(require_jira_vorlagen_access)):
+    """Die Vorlagen, die dieser Benutzer benutzen darf – plus Bereichs-Katalog.
+
+    Der Katalog (``bereiche``) haengt an DIESER Antwort und hat keinen eigenen
+    Endpunkt: beide Oberflaechen brauchen ihn genau dort, wo sie die Vorlagen
+    zeichnen – die Browser-Erweiterung fuer die Kaestchen im Vorlagen-Formular,
+    der Jira-Reiter zusaetzlich fuer die Freigabe-Liste. Ein zweiter Endpunkt
+    waere ein zweiter Roundtrip fuer dieselbe Antwort (gleiche Ueberlegung wie
+    bei ``permissions`` in ``/api/me``).
+
+    ``lang`` steuert nur Name und Hinweis der Bereiche – sie kommen uebersetzt
+    vom Server, weil sie dort neben der Werkzeugliste stehen und nicht von ihr
+    auseinanderlaufen duerfen. Die Erweiterung ist einsprachig (deutsch) und
+    schickt nichts mit; Vorgabe ist deshalb ``de``.
+    """
+    from backend import jira_assist, jira_vorlagen  # noqa: PLC0415
+    lang = str(request.query_params.get("lang") or "de")
     try:
         return JSONResponse({"ok": True,
-                             **jira_vorlagen.liste(user, _is_admin_user(user))})
+                             **jira_vorlagen.liste(user, _is_admin_user(user)),
+                             "bereiche": jira_assist.bereiche_katalog(lang)})
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Vorlagen nicht lesbar: %s" % e},
                             status_code=500)
@@ -12237,6 +12263,11 @@ async def jira_assist_vorlage_speichern(
             vid=str((b or {}).get("id") or ""),
             global_=bool((b or {}).get("global")),
             ist_admin=_is_admin_user(user),
+            # OHNE Vorgabe: ein fehlendes Feld heisst "unveraendert" und darf
+            # die Bereiche einer bestehenden Vorlage nicht loeschen (eine
+            # aeltere Erweiterung kennt das Feld nicht). Geprueft wird im Modul,
+            # damit die Freigabe-Schranke nicht am Endpunkt haengt.
+            bereiche=(b or {}).get("bereiche"),
         )
     except jira_vorlagen.VorlagenFehler as f:
         return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
@@ -12349,6 +12380,42 @@ async def jira_admin_accounts(user: str = Depends(require_local_auth)):
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
     return JSONResponse({"ok": True, "accounts": out})
+
+
+@app.post("/api/jira/admin/areas")
+async def jira_admin_areas(request: Request, user: str = Depends(require_local_auth)):
+    """Freigegebene Werkzeug-Bereiche fuer den Jira-Assistenten setzen.
+
+    Sendet AUSSCHLIESSLICH das Freigabe-Feld an die Skill-Config: der Server
+    merged (``update_skill_config``), und ein Knopf, der den ganzen
+    Formularstand mitschickt, wuerde den Jira-Zugang des anderen Knopfes
+    ueberschreiben – ein leeres Token-Feld waere dann ein geloeschter Zugang
+    (im Projekt bezahlt, siehe Register). Gleiche Bauart wie
+    ``/api/email/admin/areas``.
+
+    Unbekannte Kennungen werden VERWORFEN, nicht geraten: sonst bliebe eine
+    entfernte Bereichs-Kennung dauerhaft in der Konfiguration stehen. **Eine
+    leere Liste ist gueltig** und heisst "nichts freigeschaltet" – das ist die
+    Vorgabe und muss erreichbar bleiben, sonst liesse sich eine Freigabe nie
+    zuruecknehmen.
+    """
+    from backend import jira_assist  # noqa: PLC0415
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."},
+                            status_code=400)
+    roh = (body or {}).get("bereiche")
+    if isinstance(roh, str):
+        roh = [t.strip() for t in roh.split(",")]
+    gewaehlt = {str(b).strip() for b in (roh or [])}
+    gewaehlt = [b for b in jira_assist.BEREICHE if b in gewaehlt]
+    try:
+        sm = _get_skill_manager()
+        sm.update_skill_config("jira", {jira_assist.FREIGABE_FELD: ",".join(gewaehlt)})
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "bereiche": gewaehlt})
 
 
 @app.post("/api/jira/assist/vorlagen/standard")

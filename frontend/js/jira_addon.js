@@ -221,6 +221,33 @@
         }
     }
 
+    /* Der WIRKLICHE Stand der Werkzeug-Bereiche.
+     *
+     * Ohne Auskunft (aelterer Server, health nicht erreichbar) bleibt die Zeile
+     * LEER statt eine Behauptung zu wagen: "nichts freigeschaltet" waere in dem
+     * Fall geraten, und der Punkt darueber sagt schon, dass es von einer
+     * Freigabe abhaengt.
+     */
+    function bereicheBlock(d) {
+        var box = $('ja-bereiche');
+        if (!box) return;
+        box.textContent = '';
+        if (!d || !Array.isArray(d.assist_bereiche)) return;
+        var namen = d.assist_bereiche.map(function (b) {
+            return (b && b.name) || (b && b.id) || '';
+        }).filter(Boolean);
+        if (!namen.length) {
+            box.textContent = T('jaddon.ber_off',
+                'Auf diesem Server ist kein Bereich freigeschaltet – die '
+                + 'Auswertung hat keinerlei Werkzeuge.');
+            return;
+        }
+        // textContent, kein innerHTML: die Namen kommen aus der Konfiguration.
+        box.textContent = T('jaddon.ber_on',
+            'Freigeschaltet auf diesem Server: {liste}.')
+            .replace('{liste}', namen.join(', '));
+    }
+
     async function laden(variante, knopf) {
         var alt = knopf.textContent;
         knopf.disabled = true;
@@ -459,10 +486,12 @@
             var hd = h.ok ? await h.json() : null;
             zeigeAdresse(hd);
             paketBlock(hd);
+            bereicheBlock(hd);
         } catch (e) {
             zeigeAdresse(null);
             // Ohne Auskunft bleibt der Download – der funktioniert immer.
             paketBlock(null);
+            bereicheBlock(null);
         }
 
         // Der eigene Zugang wird IMMER geladen, auch wenn der Container zu
@@ -495,7 +524,7 @@
             fetch('/api/jira/assist/health',
                   { headers: { 'Authorization': 'Bearer ' + token() } })
                 .then(function (r) { return r.ok ? r.json() : null; })
-                .then(function (d) { zeigeAdresse(d); paketBlock(d); })
+                .then(function (d) { zeigeAdresse(d); paketBlock(d); bereicheBlock(d); })
                 .catch(function () {});
             // Pille und Hinweiskasten des Zugangs werden ebenfalls GERENDERT,
             // nicht per data-i18n uebersetzt – ohne diese Zeile blieben sie

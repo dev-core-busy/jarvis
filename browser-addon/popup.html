@@ -138,10 +138,16 @@
       Auswertung. Ein zweiter Lauf ist ein Klick auf den Knopf.
     </p>
 
-    <!-- Vorlage für die Zusammenfassung. Das Zahnrad öffnet die Verwaltung –
-         eigene Vorlagen darf jeder anlegen, gemeinsame nur ein Administrator. -->
+    <!-- Vorlage. Das Zahnrad öffnet die Verwaltung – eigene Vorlagen darf jeder
+         anlegen, gemeinsame nur ein Administrator.
+         ⚠ SIE HIESS "Vorlage für die Zusammenfassung", und das ist seit
+         2026-09-01 nur noch halb wahr: der Anweisungstext wirkt weiter nur beim
+         Zusammenfassen, die freigeschalteten Nachschlage-Bereiche gelten für
+         alle drei Knöpfe. Eine Beschriftung, die einen Zustand behauptet, den
+         sie nicht kennt, kostet Zeit (Register) – der ganze Satz steht im
+         `title`, weil er in 380 Pixel Breite nicht als Fließtext danebenpasst. -->
     <label class="feld">
-      <span>Vorlage für die Zusammenfassung</span>
+      <span title="Der Anweisungstext einer Vorlage wirkt nur beim Zusammenfassen. Freigeschaltete Nachschlage-Bereiche gelten für alle drei Knöpfe.">Vorlage</span>
       <div class="feld-zeile">
         <!-- „Ohne Vorlage“, NICHT „Standard“: seit eine Vorlage als Standard
              markierbar ist, hieße dasselbe Wort zwei verschiedene Dinge.
@@ -187,6 +193,21 @@
         <textarea id="f-vorl-text" rows="4"
                   placeholder="Worauf soll die Zusammenfassung hinauslaufen?"></textarea>
       </label>
+      <!-- Werkzeug-Bereiche DIESER Vorlage. Der Block bleibt VERSTECKT, solange
+           der Administrator nichts freigeschaltet hat (Einstellungen → Jira →
+           Werkzeug-Bereiche freischalten) – dann gibt es nichts zu wählen, und
+           ein leerer Kasten mit Erklärung würde das 380 Pixel breite Fenster
+           nur verlängern. Die Kästchen baut popup.js aus dem Katalog des
+           Servers; Name und Hinweis kommen von dort, damit Text und Wirkung
+           nicht auseinanderlaufen. -->
+      <div class="feld" id="vorl-ber-zeile" hidden>
+        <span>Nachschlagen erlauben</span>
+        <p class="hinweis" id="vorl-ber-hinweis">Gilt für alle drei Knöpfe;
+           der Anweisungstext oben nur für die Zusammenfassung. Der Haken
+           <em>erlaubt</em> das Nachschlagen – verlangen muss es die
+           Anweisung.</p>
+        <div id="vorl-bereiche"></div>
+      </div>
       <label class="feld" id="vorl-global-zeile" hidden>
         <span><input type="checkbox" id="f-vorl-global"> Für alle Benutzer (Administrator)</span>
       </label>

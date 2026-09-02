@@ -1033,10 +1033,16 @@ check(!/\b(confirm|alert|prompt)\s*\(/.test(ohneKommentare(POPUP_JS)),
 check(/jn-nein"\)\.focus\(\)/.test(POPUP_JS),
       "der Fokus liegt auf Abbrechen (die gefaehrlichere Wahl loest kein Tastendruck aus)");
 
-// Die Vorlage gilt nur fuer die Zusammenfassung – bei einem Antwortvorschlag
-// waere sie eine zweite, widersprechende Aufgabe.
-check(/modus === "zusammenfassung"\) \? \(\$\("f-vorlage"\)/.test(POPUP_JS),
-      "die Vorlage geht nur bei der Zusammenfassung mit");
+/* ⚠ HIER STAND: "die Vorlage geht nur bei der Zusammenfassung mit".
+ * Das war bis 2026-09-01 richtig und ist seit den Werkzeug-Bereichen falsch:
+ * ihr TEXT wirkt weiter nur beim Zusammenfassen (durchgesetzt am SERVER in
+ * `_system_prompt`), ihre BEREICHE gelten fuer alle drei Knoepfe. Ginge die
+ * Kennung nur bei einem Modus mit, waere die Freigabe fuer zwei von drei
+ * Knoepfen wirkungslos – und niemand koennte erklaeren, warum. */
+check(/vorlage: \$\("f-vorlage"\)\.value \|\| ""/.test(POPUP_JS),
+      "die Vorlage geht bei JEDEM Modus mit (ihre Bereiche gelten fuer alle)");
+check(!/modus === "zusammenfassung"\) \? \(\$\("f-vorlage"\)/.test(POPUP_JS),
+      "und wird nicht mehr auf einen Modus eingeschraenkt");
 // Namen sind Freitext aus einem Formular.
 check(!/innerHTML\s*=\s*[^;]*\bv\.name\b/.test(POPUP_JS),
       "Vorlagennamen gehen nicht durch innerHTML");
@@ -1071,6 +1077,7 @@ check(/o\.textContent = v\.name/.test(POPUP_JS), "sondern durch textContent");
       const f = new w.Function('standard', 'eigeneWahl', 'key', `
         const $ = (id) => document.getElementById(id);
         let _vorlBeruehrt = false;
+        let _bereiche = [];   // Modul-Variable; faellt aus dem Schnitt heraus
         let _vorlagen = {
           global: [{ id: "g1", name: "Kurz" }, { id: "g2", name: "Technisch" }],
           eigene: [{ id: "e1", name: "Meine" }],
@@ -1333,6 +1340,7 @@ section("8) Die Ticketnummer-Erkennung – ausgefuehrt");
             return { ok: true };
           }
           async function tabErmitteln() { el.ticket.textContent = _key || ""; }
+          let _bereiche = [];
           function vorlagenLaden() {}
           function brandingHolen() {}
 ` + teile.join('\n') + `
@@ -3918,6 +3926,122 @@ section("17) Zeilenumbrueche ueberleben das Einfuegen");
           "der <br>-Weg von tm.editors[0] steht weiterhin da");
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("18) Werkzeug-Bereiche je Vorlage (2026-09-01)");
+// ═══════════════════════════════════════════════════════════════════════════
+/* Ein Administrator schaltet lesende Bereiche frei, der Benutzer hakt sie je
+ * VORLAGE an. Gemessen wird am echten DOM, nicht am Quelltext: gezeigt werden
+ * darf nur, was FREIGESCHALTET ist – ein Haken, den der Server abweist, ist
+ * eine Zusage, die nicht gilt. */
+{
+  const { teile, drin } = popupTeile(
+    ['bereicheZeichnen', 'bereicheGewaehlt', 'bereichsNamen',
+     'vorlageInsFormular'], []);
+  check(drin.has('bereicheZeichnen') && drin.has('bereicheGewaehlt'),
+        'popup.js hat bereicheZeichnen() und bereicheGewaehlt()');
+  const koerper = teile.join('\n');
+
+  const lauf = (katalog, vorlage) => {
+    const dom = new JSDOM(POPUP_HTML, { url: 'https://x.test/',
+                                        runScripts: 'outside-only' });
+    const w = dom.window;
+    try {
+      const f = new w.Function('katalog', 'vorlage', `
+        const $ = (id) => document.getElementById(id);
+        let _bereiche = katalog;
+        let _vorlBearbeitet = "";
+` + koerper + `
+        vorlageInsFormular(vorlage, false);
+        const kaesten = Array.from(
+          document.querySelectorAll("#vorl-bereiche input[data-ber]"));
+        return JSON.stringify({
+          versteckt: $("vorl-ber-zeile").hidden,
+          ids: kaesten.map((c) => c.dataset.ber),
+          an: kaesten.filter((c) => c.checked).map((c) => c.dataset.ber),
+          gewaehlt: bereicheGewaehlt(),
+          namen: bereichsNamen(vorlage ? vorlage.bereiche : []),
+          // Fremdtext darf nie als Markup ankommen.
+          fremd: document.querySelectorAll("#vorl-bereiche script, #vorl-bereiche img").length,
+          text: $("vorl-bereiche").textContent,
+        });`);
+      return JSON.parse(f(katalog, vorlage));
+    } finally { w.close(); }
+  };
+
+  const K = [
+    { id: 'wissen', name: 'Wissensdatenbank (lesend)', hinweis: 'Eigene Unterlagen.',
+      freigegeben: true },
+    { id: 'fach', name: 'Interne Fachsysteme (lesend)', hinweis: 'Nur lesend.',
+      freigegeben: false },
+  ];
+
+  // (a) Nichts freigeschaltet -> der Block bleibt weg.
+  let r = lauf([{ id: 'wissen', name: 'W', hinweis: '', freigegeben: false }], null);
+  check(r.versteckt === true,
+        'ohne Freigabe bleibt der ganze Block versteckt');
+  check(r.ids.length === 0, 'und es entsteht kein einziges Kaestchen');
+
+  // (b) Gar kein Katalog (aelterer Server) -> ebenfalls weg, kein Fehler.
+  r = lauf([], null);
+  check(r.versteckt === true && r.ids.length === 0,
+        'ein aelterer Server ohne Katalog aendert nichts');
+
+  // (c) Freigeschaltet -> nur das Freigegebene, ungehakt.
+  r = lauf(K, null);
+  check(r.versteckt === false, 'mit Freigabe erscheint der Block');
+  check(r.ids.join(',') === 'wissen',
+        'gezeigt wird NUR der freigeschaltete Bereich', r.ids.join(','));
+  check(r.an.length === 0, '"Neu" faengt ohne Haken an (fail-closed)');
+  check(r.text.indexOf('Eigene Unterlagen.') >= 0,
+        'Name und Hinweis kommen aus dem Katalog des Servers');
+
+  // (d) Bearbeiten -> die Haken der Vorlage stehen.
+  r = lauf(K, { id: 'v1', name: 'X', text: 'y', bereiche: ['wissen'] });
+  check(r.an.join(',') === 'wissen' && r.gewaehlt.join(',') === 'wissen',
+        'beim Bearbeiten sind die Bereiche der Vorlage angehakt');
+
+  // (e) EIN NICHT MEHR FREIGEGEBENER Bereich verschwindet – und wird auch
+  //     nicht als Marke behauptet. Er wirkt nicht mehr (der Server prueft zur
+  //     Laufzeit), eine Anzeige dafuer waere eine Faehigkeit, die es nicht gibt.
+  r = lauf(K, { id: 'v2', name: 'X', text: 'y', bereiche: ['wissen', 'fach'] });
+  check(r.ids.join(',') === 'wissen',
+        'ein zurueckgenommener Bereich taucht im Formular nicht auf');
+  check(r.namen === 'Wissensdatenbank (lesend)',
+        'und die Marke nennt nur die WIRKSAMEN Bereiche', r.namen);
+  r = lauf(K, { id: 'v3', name: 'X', text: 'y', bereiche: ['fach'] });
+  check(r.namen === '', 'ohne wirksamen Bereich gibt es keine Marke');
+
+  // (f) Einschleusen: der Katalog kommt vom Server, aber diese Datei fasst
+  //     keinen Fremdtext per innerHTML an.
+  r = lauf([{ id: 'wissen', name: '<img src=x onerror=1>', hinweis: '<script>x</script>',
+              freigegeben: true }], null);
+  check(r.fremd === 0, 'Katalogtexte erzeugen kein Markup (textContent)');
+}
+
+/* Das Speichern schickt die Bereiche IMMER mit – auch die leere Liste. Ein
+ * fehlendes Feld heisst am Server "unveraendert" (damit eine aeltere
+ * Erweiterung nichts loescht); waere es hier weggelassen, liesse sich ein Haken
+ * nie wieder abwaehlen. */
+check(/bereiche: bereicheGewaehlt\(\)/.test(POPUP_JS),
+      'das Speichern einer Vorlage schickt die Bereiche mit');
+/* Die Kaestchen sind <input>, keine <button> – die Ticket-Sperre fasst sie
+ * also nicht an, und das ist richtig: die Vorlagen-Pflege braucht kein Ticket
+ * (die Box traegt ohnehin `data-ohne-ticket`). */
+check(/data-ohne-ticket/.test(
+        POPUP_HTML.slice(POPUP_HTML.indexOf('id="vorlagen-box"') - 40,
+                         POPUP_HTML.indexOf('id="vorlagen-box"') + 40)),
+      'die Vorlagen-Box bleibt von der Ticket-Sperre ausgenommen');
+/* Der Klassenname der Kaestchen-Zeile darf nicht so heissen wie der Container:
+ * zwei Dinge mit demselben Namen sind beim Debuggen kaum zu unterscheiden. */
+check(/class="vorl-ber-opt"|"vorl-ber-opt"/.test(POPUP_JS)
+      && /\.vorl-ber-opt/.test(POPUP_CSS),
+      'die Kaestchen-Zeile hat eine eigene Klasse, und das CSS kennt sie');
+/* `.vorl-liste li > span` verteilt den Platz mit flex:1 1 auto – die Marke
+ * braucht ausdruecklich 0 0 auto, sonst halbiert sie den Namen. */
+check(/\.vorl-liste \.vorl-ber \{[^}]*flex: 0 0 auto/.test(POPUP_CSS),
+      'die Marke in der Zeile verdraengt den Namen nicht (flex: 0 0 auto)');
+
 
 /* Erst den Puffer leeren: eine Zurueckweisung aus einem nicht abgewarteten
  * Aufruf wird sonst womoeglich erst nach der Zusammenfassung gemeldet. */

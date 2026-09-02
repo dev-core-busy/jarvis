@@ -229,6 +229,14 @@
             <li data-i18n-html="jaddon.limit_3"><b>Sie liest die Seite nicht.</b> Übertragen wird die Ticketnummer aus der Adresszeile; Beschreibung und Verlauf holt der Server selbst über die Jira-Schnittstelle. Die einzige Ausnahme ist <b>Antwort überarbeiten</b>: dabei geht der Inhalt des Kommentarfeldes mit – also genau der Text, den du überarbeiten lässt, und sonst nichts von der Seite.</li>
             <li data-i18n-html="jaddon.limit_4"><b>Der Vorschlag ist ein Entwurf.</b> Er kann Aussagen enthalten, die fachlich nicht tragen. Vor dem Abschicken lesen – die Verantwortung für das, was an den Kunden geht, bleibt beim Absender.</li>
         </ul>
+        <!-- WAS AUF DIESEM SERVER GILT, nicht ein Satz darüber: der Punkt zum
+             Nachschlagen hängt an einer Freigabe, und eine Anleitung, die einen
+             Zustand behauptet, den sie nicht kennt, kostet Zeit (Register).
+             Gefüllt aus /api/jira/assist/health – ein eigener Endpunkt wäre ein
+             zweiter Roundtrip für dieselbe Antwort.
+             ⚠ AUSSERHALB der Liste: `data/i18n-html` ersetzt das innerHTML des
+             <li>, ein Kind darin wäre beim ersten Sprachwechsel weg. -->
+        <p class="ja-hint" id="ja-bereiche"></p>
     </section>
 
     <section class="ja-card">
@@ -254,13 +262,13 @@
 <script src="/static/js/cpubar.js?v=1"></script>
 <script src="/static/js/syspackages.js?v=2"></script>
 <script src="/static/js/theme.js?v=3"></script>
-<script src="/static/js/i18n.js?v=206"></script>
+<script src="/static/js/i18n.js?v=207"></script>
 <script src="/static/js/branding.js?v=26"></script>
 <script src="/static/js/sessions.js?v=8"></script>
 <script src="/static/js/logo_home.js?v=1"></script>
 <script src="/static/js/settings_btn.js?v=4"></script>
 <script src="/static/js/activity.js?v=2"></script>
 <script src="/static/js/issues.js?v=10"></script>
-<script src="/static/js/jira_addon.js?v=8"></script>
+<script src="/static/js/jira_addon.js?v=9"></script>
 </body>
 </html>

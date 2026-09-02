@@ -335,6 +335,44 @@ button.ico {
 .vorl-liste .stern { font-size: 13px; }
 .vorl-liste .stern.an { color: var(--akzent); }
 
+/* ── Werkzeug-Bereiche einer Vorlage ───────────────────────────────────────
+ *
+ * DIE MARKE IN DER ZEILE DARF DEN NAMEN NICHT VERDRÄNGEN: `.vorl-liste li >
+ * span` verteilt den Platz mit `flex: 1 1 auto`, und ein zweites Feld mit
+ * derselben Regel halbierte ihn (dieselbe Falle wie bei `.btn-primary` in einer
+ * Flex-Zeile im Hauptprojekt). Deshalb ausdrücklich `flex: 0 0 auto`, ein
+ * Deckel auf die Breite und Ellipsis statt Umbruch mitten im Bereichsnamen. */
+.vorl-liste .vorl-ber {
+  flex: 0 0 auto;
+  max-width: 45%;
+  font-size: 11px;
+  color: var(--akzent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Ein Kontrollkästchen ist ein SATZ, keine Feldbeschriftung – `.feld > span`
+ * (Block, gedämpft) würde den Text vom Kästchen lösen und grau färben. */
+.vorl-ber-opt {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--schrift);
+  cursor: pointer;
+}
+.vorl-ber-opt input { flex: 0 0 auto; margin-top: 2px; }
+.vorl-ber-opt > span { min-width: 0; overflow-wrap: anywhere; }
+.vorl-ber-opt b { display: block; font-weight: 600; }
+.vorl-ber-opt .hinweis { display: block; margin: 1px 0 0; }
+
+/* Der Kasten um die Kästchen. `.feld` ist ein <label> gewesen; hier ist es ein
+ * <div>, damit ein Klick auf die Überschrift nicht das erste Kästchen umschaltet. */
+#vorl-ber-zeile > span { display: block; margin-bottom: 3px; font-size: 12px; color: var(--gedaempft); }
+#vorl-ber-zeile #vorl-ber-hinweis { margin: -2px 0 6px; }
+
 /* ── Seitenleiste ───────────────────────────────────────────────────────────
  *
  * DIE BREITE BESTIMMT HIER DER BENUTZER, nicht das Stylesheet. Ein Popup hat

@@ -3254,6 +3254,31 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                         </div>
 
+                        <!-- ═══ Werkzeug-Bereiche freischalten ═══
+                             Bauart 1:1 wie bei Short Tracks und E-Mail: der
+                             Administrator schaltet Bereiche frei, der Benutzer
+                             waehlt je VORLAGE daraus. VORGABE IST LEER – wer
+                             hier nichts anhakt, hat exakt das Verhalten von
+                             vorher (ein Modellaufruf ohne Werkzeuge).
+                             Eigener Knopf, eigene Teilmenge: der Endpunkt
+                             /api/jira/admin/areas sendet NUR das Freigabe-Feld
+                             und laesst den Jira-Zugang oben unberuehrt. -->
+                        <div class="kb-section" id="ji-sect-tools">
+                            <div class="kb-section-header kb-collapse-header" id="ji-sect-tools-hdr">
+                                <h3 data-i18n="jtool.h">Werkzeug-Bereiche freischalten</h3>
+                                <span class="sk-openclaw-toggle" id="ji-sect-tools-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="ji-sect-tools-body">
+                                <p class="kb-hint" data-i18n-html="jtool.intro">Ohne Freigabe wertet der Assistent <b>allein den Ticketinhalt</b> aus – er kann nichts nachschlagen. Was hier freigeschaltet ist, kann ein Benutzer <b>je Vorlage</b> anhaken. Alle Bereiche sind <b>nur lesend</b> und arbeiten mit den Rechten des jeweiligen Benutzers (sein Jira-Token, sein SAP-Zugang).</p>
+                                <p class="kb-hint" data-i18n-html="jtool.warn">Der Ticketinhalt ist <b>Fremdtext</b>: was ein Kunde ins Ticket schreibt, sieht das Modell. Je weiter der Werkzeugkasten, desto größer die Angriffsfläche eines präparierten Tickets. Und bei <b>„Antwort vorschlagen"</b> geht das Ergebnis an einen Kunden – nachgeschlagene Inhalte aus fremden Vorgängen gehören dort nicht hinein. Der Vorschlag wird deshalb weiterhin von einem Menschen gelesen, bevor er abgeschickt wird.</p>
+                                <div id="jtool-areas"></div>
+                                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                                    <button class="btn-primary" id="jtool-save" type="button" data-i18n="jtool.save" style="flex:0 0 auto;">Freigabe speichern</button>
+                                    <span id="jtool-status" style="font-size:0.9em;"></span>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- ═══ Vorlagen des Jira-Assistenten ═══
                              Sie liessen sich bisher NUR im Fenster der
                              Browser-Erweiterung pflegen – also ausgerechnet die
@@ -3294,6 +3319,18 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     <div class="form-group">
                                         <label data-i18n="jvorl.text">Anweisung</label>
                                         <textarea id="jvorl-text" class="config-input" rows="4" placeholder="Worauf soll die Zusammenfassung hinauslaufen?" data-i18n-placeholder="jvorl.ph_text" style="width:100%;box-sizing:border-box;resize:vertical;"></textarea>
+                                    </div>
+                                    <!-- Werkzeug-Bereiche DIESER Vorlage. Der Block
+                                         erscheint nur, wenn der Administrator oben
+                                         etwas freigeschaltet hat – ein leeres Feld
+                                         mit einer Erklaerung, warum es leer ist,
+                                         wuerde das Formular nur verlaengern. Die
+                                         Kaestchen baut jira.js aus dem Katalog des
+                                         Servers (Name und Hinweis kommen von dort). -->
+                                    <div class="form-group" id="jvorl-ber-zeile" style="display:none;">
+                                        <label data-i18n="jvorl.ber">Nachschlagen erlauben (Werkzeug-Bereiche)</label>
+                                        <p class="kb-hint" style="margin:0 0 6px;" data-i18n-html="jvorl.ber_hint">Gilt für <b>alle drei Knöpfe</b> der Erweiterung; der Anweisungstext oben nur für die Zusammenfassung. Ohne Haken wertet der Lauf allein das Ticket aus. <b>Der Haken erlaubt das Nachschlagen, er erzwingt es nicht</b> – gemessen schlägt das Modell nur nach, wenn der Anweisungstext es verlangt („prüfe gegen unsere Dokumentation“).</p>
+                                        <div id="jvorl-bereiche"></div>
                                     </div>
                                     <div class="form-group" id="jvorl-global-zeile">
                                         <label class="checkbox-group"><input type="checkbox" id="jvorl-global"><span data-i18n="jvorl.global">Für alle Benutzer (gemeinsame Vorlage)</span></label>
@@ -5073,7 +5110,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
     <script src="/static/js/icons.js?v=1"></script>
-    <script src="/static/js/i18n.js?v=206"></script>
+    <script src="/static/js/i18n.js?v=207"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=21"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -5091,7 +5128,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/mcp.js?v=5"></script>
     <script src="/static/js/vision.js?v=31"></script>
     <script src="/static/js/confluence.js?v=7"></script>
-    <script src="/static/js/jira.js?v=14"></script>
+    <script src="/static/js/jira.js?v=15"></script>
     <!-- sapcert.js VOR sap.js: der Reiter haengt den Baustein beim Laden ein. -->
     <script src="/static/js/sapcert.js?v=1"></script>
     <script src="/static/js/sap.js?v=4"></script>
@@ -5111,7 +5148,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/agent_roles.js?v=3"></script>
     <script src="/static/js/model_caps.js?v=6"></script>
     <script src="/static/js/alpha_sort.js?v=1"></script>
-    <script src="/static/js/app.js?v=202"></script>
+    <script src="/static/js/app.js?v=203"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

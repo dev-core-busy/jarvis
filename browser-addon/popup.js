@@ -1149,9 +1149,19 @@ async function auswerten(modus, entwurf) {
       art: "auswerten", key: _key, modus,
       lang: (navigator.language || "de").toLowerCase().startsWith("de") ? "de" : "en",
       hinweis: (el.hinweis.value || "").trim(),
-      // Die Vorlage gilt nur für die Zusammenfassung – ein Antwortvorschlag
-      // hat seine eigene Aufgabe, dort wäre sie eine zweite Anweisung.
-      vorlage: (modus === "zusammenfassung") ? ($("f-vorlage").value || "") : "",
+      /* IMMER die gewählte Vorlage – auch bei „Antwort vorschlagen".
+       *
+       * Bis 2026-09-01 wurde sie nur beim Zusammenfassen mitgeschickt, weil ihr
+       * TEXT dort die Gliederung bestimmt und in einem Antwortvorschlag eine
+       * zweite Anweisung wäre. Das gilt weiter, und durchgesetzt wird es am
+       * SERVER: `_system_prompt` benutzt den Text ausschließlich im Modus
+       * „zusammenfassung".
+       *
+       * Ihre WERKZEUG-BEREICHE gelten dagegen für alle drei Knöpfe – und gerade
+       * bei einer Antwort ist das Nachschlagen in der Hausdokumentation der
+       * Punkt. Würde die Kennung hier weggelassen, wäre die Freigabe für zwei
+       * von drei Knöpfen wirkungslos, ohne dass es jemand erklären könnte. */
+      vorlage: $("f-vorlage").value || "",
       entwurf: entwurf || "",
     });
     const d = a.daten || {};
@@ -1358,6 +1368,12 @@ el.ergebnisFeld.addEventListener("input", () => {
  * Schranke; wer es sich zurückholt, bekommt trotzdem einen Fehler.
  */
 let _vorlagen = { global: [], eigene: [], darf_global: false, standard: "" };
+/* Der Katalog der WERKZEUG-BEREICHE, wie der Server ihn liefert:
+ * [{id, name, hinweis, freigegeben, werkzeuge}]. Er kommt mit derselben
+ * Antwort wie die Vorlagen – ein eigener Abruf waere ein zweiter Roundtrip fuer
+ * dieselbe Auskunft. Name und Hinweis stammen vom SERVER, damit Text und
+ * Wirkung nicht auseinanderlaufen (dort stehen sie neben der Werkzeugliste). */
+let _bereiche = [];
 let _vorlBearbeitet = "";      // Kennung der gerade bearbeiteten Vorlage
 // Hat der Benutzer in DIESEM Fenster schon selbst gewählt? Dann gewinnt seine
 // Wahl gegen den Standard – sonst überschriebe ein Neuzeichnen (nach dem
@@ -1409,6 +1425,19 @@ function vorlagenZeichnen() {
       const name = document.createElement("span");
       name.textContent = v.name + (art === "global" ? " (gemeinsam)" : "");
       li.appendChild(name);
+
+      /* WAS DIE VORLAGE DARF, gehoert in die Zeile: eine Vorlage, die
+       * nachschlaegt, ist von einer, die nur das Ticket liest, sonst nicht zu
+       * unterscheiden. Genannt werden nur WIRKSAME Bereiche – ein Rest aus
+       * einer zurueckgenommenen Freigabe wirkt nicht mehr, und eine Marke dafuer
+       * behauptete eine Faehigkeit, die es nicht gibt. */
+      const wirksam = bereichsNamen(v.bereiche);
+      if (wirksam) {
+        const bm = document.createElement("span");
+        bm.className = "vorl-ber";
+        bm.textContent = "🔎 " + wirksam;
+        li.appendChild(bm);
+      }
 
       /* DER STERN STEHT AN JEDER ZEILE, auch an fremden (gemeinsamen)
        * Vorlagen: markiert wird nicht die Vorlage, sondern die eigene Wahl.
@@ -1465,11 +1494,72 @@ function vorlagenZeichnen() {
   knoepfeAktualisieren();
 }
 
+/** Die Namen der WIRKSAMEN Bereiche einer Vorlage als Text – oder "".
+ *
+ * Wirksam heisst: in der Vorlage gewaehlt UND vom Administrator freigeschaltet.
+ * Denselben Schnitt macht der Server beim Lauf (`wirksame_bereiche`) – hier
+ * wird er nur ANGEZEIGT. Zwei verschiedene Antworten auf dieselbe Frage waeren
+ * schlimmer als keine Anzeige.
+ */
+function bereichsNamen(ids) {
+  const frei = new Map(_bereiche.filter((b) => b.freigegeben).map((b) => [b.id, b.name]));
+  return (ids || []).map((id) => frei.get(id)).filter(Boolean).join(", ");
+}
+
+/** Die Kaestchen fuer die Bereiche EINER Vorlage.
+ *
+ * Gezeigt werden nur FREIGESCHALTETE: ein Haken, den der Server abweist, ist
+ * eine Zusage, die nicht gilt. Ist nichts freigeschaltet, bleibt der ganze
+ * Block versteckt – im 380 Pixel breiten Fenster ist ein leerer Kasten mit
+ * Erklaerung nur Ballast, und der Benutzer kann daran ohnehin nichts aendern.
+ */
+function bereicheZeichnen(gewaehlt) {
+  const box = $("vorl-bereiche");
+  const zeile = $("vorl-ber-zeile");
+  if (!box || !zeile) return;
+  const frei = _bereiche.filter((b) => b.freigegeben);
+  zeile.hidden = frei.length === 0;
+  box.innerHTML = "";
+  const an = new Set(gewaehlt || []);
+  for (const b of frei) {
+    const lab = document.createElement("label");
+    // NICHT "vorl-ber-zeile": so heisst der CONTAINER im Markup. Zwei Dinge
+    // mit demselben Namen sind beim Debuggen kaum zu unterscheiden.
+    lab.className = "vorl-ber-opt";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.dataset.ber = b.id;
+    cb.checked = an.has(b.id);
+    lab.appendChild(cb);
+    const txt = document.createElement("span");
+    // textContent: der Hinweis kommt vom Server, aber er wird nie als Markup
+    // gebraucht – und diese Datei fasst kein innerHTML mit Fremdtext an.
+    const stark = document.createElement("b");
+    stark.textContent = b.name;
+    txt.appendChild(stark);
+    if (b.hinweis) {
+      const h = document.createElement("span");
+      h.className = "hinweis";
+      h.textContent = b.hinweis;
+      txt.appendChild(h);
+    }
+    lab.appendChild(txt);
+    box.appendChild(lab);
+  }
+}
+
+function bereicheGewaehlt() {
+  return Array.from(document.querySelectorAll("#vorl-bereiche input[data-ber]"))
+    .filter((c) => c.checked)
+    .map((c) => c.dataset.ber);
+}
+
 function vorlageInsFormular(v, global_) {
   _vorlBearbeitet = v ? v.id : "";
   $("f-vorl-name").value = v ? v.name : "";
   $("f-vorl-text").value = v ? v.text : "";
   $("f-vorl-global").checked = !!global_;
+  bereicheZeichnen(v ? v.bereiche : []);
   $("vorl-hinweis").textContent = v ? "Ändert „" + v.name + "“." : "";
 }
 
@@ -1482,7 +1572,17 @@ async function vorlagenLaden() {
       darf_global: !!(a.daten && a.daten.darf_global),
       standard: (a.daten && a.daten.standard) || "",
     };
+    // Fehlt das Feld, antwortet ein aelterer Server: dann gibt es keine
+    // Bereiche, der Block bleibt versteckt und alles laeuft wie vorher.
+    _bereiche = (a.daten && a.daten.bereiche) || [];
     vorlagenZeichnen();
+    // Der Block gehoert zum Formular und muss auch ohne Klick auf "Bearbeiten"
+    // stimmen – sonst stuenden beim ersten "Neu" die Kaestchen eines fremden
+    // Ladezustands da.
+    // Die schon gesetzten Haken bleiben stehen: ein Neuladen (etwa nach dem
+    // Stern) darf die gerade getroffene Auswahl nicht verstellen – gleiche
+    // Haltung wie bei `_vorlBeruehrt` fuer das Pulldown.
+    bereicheZeichnen(bereicheGewaehlt());
   } catch (e) {
     // Ohne Vorlagen bleibt „Ohne Vorlage“ – kein Grund, den Rest zu sperren.
     $("vorl-hinweis").textContent = e.message;
@@ -1546,7 +1646,12 @@ $("btn-vorl-speichern").addEventListener("click", async () => {
   try {
     const a = await frage({
       art: "vorlage_speichern",
-      wert: { id: _vorlBearbeitet, name, text, global: $("f-vorl-global").checked },
+      wert: { id: _vorlBearbeitet, name, text, global: $("f-vorl-global").checked,
+              /* IMMER mitsenden – auch die leere Liste. Sie heisst "keine
+               * Bereiche"; ein FEHLENDES Feld heisst "unveraendert" (damit eine
+               * aeltere Erweiterung nichts loescht), und dann liesse sich ein
+               * Haken nie wieder abwaehlen. */
+              bereiche: bereicheGewaehlt() },
     });
     await vorlagenLaden();
     // Die frisch gespeicherte Vorlage gleich auswählen – sonst muss der

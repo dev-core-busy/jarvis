@@ -38,9 +38,18 @@ abschnitt('1 · Struktur');
 pruefe(!!tab, 'Reiter settings-tab-jira vorhanden');
 
 const CONT = [
-    { id: 'ji-sect-conn', titel: 'Verbindung',              i18n: 'jira.sect_conn' },
-    { id: 'ji-sect-vorl', titel: 'Browser Plugin Vorlagen', i18n: 'jvorl.h' },
+    { id: 'ji-sect-conn',  titel: 'Verbindung',                    i18n: 'jira.sect_conn' },
+    { id: 'ji-sect-tools', titel: 'Werkzeug-Bereiche freischalten', i18n: 'jtool.h' },
+    { id: 'ji-sect-vorl',  titel: 'Browser Plugin Vorlagen',       i18n: 'jvorl.h' },
 ];
+
+/* ⚠ DIE LISTE OBEN IST NUR FUER TITEL UND UEBERSETZUNG. Ob ein Container
+ * gebunden ist, wird als REGEL geprueft: JEDE .kb-section im Reiter muss in
+ * _initJiraCollapse stehen. Eine gepflegte Liste laesst genau den Container
+ * fehlen, der neu dazukommt – und der sieht dann richtig aus und klappt nicht
+ * (die Fehlerklasse, die dieser Waechter abdeckt; siehe Kopf). */
+const ALLE_SECT = [...(tab ? tab.querySelectorAll('.kb-section') : [])]
+    .map((e) => e.id).filter(Boolean);
 for (const c of CONT) {
     const sect = doc.getElementById(c.id);
     const hdr  = doc.getElementById(c.id + '-hdr');
@@ -89,6 +98,39 @@ pruefe(fehltConn.length === 0, 'alle Verbindungs-/Such-Elemente im Container „
 pruefe(fehltVorl.length === 0, 'alle Vorlagen-Elemente im Container „Browser Plugin Vorlagen"'
     + (fehltVorl.length ? ' – fehlt: ' + fehltVorl.join(', ') : ''));
 
+// Werkzeug-Bereiche: Freigabe im eigenen Container, die Auswahl je Vorlage im
+// Vorlagen-Container. Zwei verschiedene Dinge, zwei Orte.
+const IN_TOOLS = ['jtool-areas', 'jtool-save', 'jtool-status'];
+const toolsBody = doc.getElementById('ji-sect-tools-body');
+const fehltTools = IN_TOOLS.filter((id) => {
+    const el = doc.getElementById(id);
+    return !el || !toolsBody || !toolsBody.contains(el);
+});
+pruefe(fehltTools.length === 0,
+    'alle Freigabe-Elemente im Container „Werkzeug-Bereiche freischalten"'
+    + (fehltTools.length ? ' – fehlt: ' + fehltTools.join(', ') : ''));
+const fehltVBer = ['jvorl-ber-zeile', 'jvorl-bereiche'].filter((id) => {
+    const el = doc.getElementById(id);
+    return !el || !vorlBody || !vorlBody.contains(el);
+});
+pruefe(fehltVBer.length === 0,
+    'die Kaestchen je Vorlage liegen im Vorlagen-Formular'
+    + (fehltVBer.length ? ' – fehlt: ' + fehltVBer.join(', ') : ''));
+// Vorgabe: der Block ist VERSTECKT. Sichtbar wird er erst, wenn der Server
+// einen freigeschalteten Bereich meldet – ein leerer Kasten mit Erklaerung
+// verlaengert nur das Formular.
+const berZeile = doc.getElementById('jvorl-ber-zeile');
+pruefe(!!berZeile && berZeile.style.display === 'none',
+    'und starten versteckt (ohne Freigabe gibt es nichts zu waehlen)');
+
+// DIE POSITION IST VORGEGEBEN: zwischen Bereitstellung und Vorlagen.
+const reihe = ALLE_SECT;
+pruefe(reihe.indexOf('ji-sect-share') >= 0
+    && reihe.indexOf('ji-sect-share') < reihe.indexOf('ji-sect-tools')
+    && reihe.indexOf('ji-sect-tools') < reihe.indexOf('ji-sect-vorl'),
+    'der Freigabe-Container steht zwischen „Bereitstellung" und „Vorlagen" – '
+    + reihe.join(' → '));
+
 // Die alte h4-Ueberschrift "Verbindung" darf nicht daneben stehenbleiben –
 // sonst stuende der Titel zweimal untereinander.
 const h4s = [...(tab ? tab.querySelectorAll('h4') : [])].map(h => h.textContent.trim());
@@ -105,10 +147,14 @@ pruefe(/function\s+_initJiraCollapse\s*\(/.test(appJs), '_initJiraCollapse ist d
 // faende der Test die Ids irgendwo anders und waere trivial wahr.
 const iFn = appJs.indexOf('function _initJiraCollapse');
 const rumpf = iFn >= 0 ? appJs.slice(iFn, appJs.indexOf('\n        }', iFn) + 10) : '';
-for (const c of CONT) {
-    pruefe(rumpf.includes(`'${c.id}-hdr'`) && rumpf.includes(`'${c.id}-body'`)
-        && rumpf.includes(`'${c.id}-tog'`), `${c.id}: alle drei Ids an _collapseInit uebergeben`);
-}
+pruefe(ALLE_SECT.length >= 5,
+    'der Reiter hat mehrere Klapp-Container – ' + ALLE_SECT.length);
+const ungebunden = ALLE_SECT.filter((id) =>
+    !(rumpf.includes(`'${id}-hdr'`) && rumpf.includes(`'${id}-body'`)
+      && rumpf.includes(`'${id}-tog'`)));
+pruefe(ungebunden.length === 0,
+    'JEDE .kb-section des Reiters ist in _initJiraCollapse gebunden'
+    + (ungebunden.length ? ' – fehlt: ' + ungebunden.join(', ') : ''));
 
 // Der Aufruf muss im Jira-Zweig der Reiter-Umschaltung stehen. Geprueft
 // wird der Zweig, nicht die Datei: ein Aufruf an anderer Stelle liefe
@@ -126,7 +172,8 @@ pruefe(iAufruf >= 0 && iNaechster >= 0 && iAufruf < iNaechster,
 
 // ── 4 · Beschriftungen in DE und EN ───────────────────────────────────
 abschnitt('4 · Uebersetzungen');
-for (const key of ['jira.sect_conn', 'jvorl.h']) {
+for (const key of ['jira.sect_conn', 'jvorl.h', 'jtool.h', 'jtool.intro',
+                  'jtool.warn', 'jtool.save', 'jvorl.ber', 'jvorl.ber_hint']) {
     const treffer = i18nJs.split('\n').filter(z => z.includes(`'${key}'`)).length;
     pruefe(treffer === 2, `${key}: in DE und EN je einmal belegt (gefunden: ${treffer})`);
 }

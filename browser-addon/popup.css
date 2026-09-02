@@ -526,6 +526,22 @@ html.leiste #f-ergebnis {
   padding-top: 10px;
   border-top: 1px solid var(--rand);
 }
+/* Ueberschrift eines Abschnitts. Bewusst NICHT `.feld > span` (das ist eine
+ * FELDbeschriftung und wuerde die Ueberschrift zu einem weiteren Label machen):
+ * gleiche Groesse und Daempfung, aber halbfett - so ordnet sie das Feld
+ * darunter ein, statt daneben zu stehen.
+ * `gap` statt Leerzeichen zwischen Zahnrad und Text: ein Leerzeichen bricht in
+ * 380 px Breite unter Umstaenden um und laesst das Symbol allein in einer
+ * Zeile stehen. */
+.abschnitt-titel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gedaempft);
+}
 
 /* ── Umschalter Popup ↔ Seitenleiste ───────────────────────────────────────
  * Steht am Fuss und ist bewusst leise gezeichnet: eine Einstellung, die man

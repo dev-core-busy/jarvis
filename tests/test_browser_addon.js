@@ -650,8 +650,16 @@ check(/"colors":\s*cfg\.get\("colors"/.test(MAIN_SRC),
  * noch Ladebalken.
  * GEMESSEN am echten DOM: melde() wird wirklich ausgefuehrt. */
 {
-  const m = POPUP_JS.match(/function melde\([^)]*\)\s*\{[\s\S]*?\n\}/);
-  check(!!m, 'melde() ist schneidbar');
+  /* ⚠ TRANSITIV SCHNEIDEN, nicht `melde` allein. Bis 2026-09-02 stand hier
+   * ein eigener Regex-Schnitt genau dieser einen Funktion - und als `melde()`
+   * um den Aufruf `meldungPlatzieren()` wuchs, brach der ganze Lauf mit einem
+   * nackten ReferenceError ab: keine Bilanzzeile, kein FAIL, der Waechter sah
+   * aus, als waere er nie gelaufen. Dieselbe Falle steht im Register und ist
+   * in dieser Datei zum vierten Mal zugeschnappt. */
+  const { teile, drin } = popupTeile(['melde'], []);
+  check(drin.has('melde'), 'melde() ist schneidbar');
+  check(drin.has('meldungPlatzieren'),
+        'und der Schnitt nimmt meldungPlatzieren() mit (transitiv)');
 
   const lauf = (rufe) => {
     const dom = new JSDOM(POPUP_HTML, { url: 'https://x.test/', runScripts: 'outside-only' });
@@ -660,7 +668,7 @@ check(/"colors":\s*cfg\.get\("colors"/.test(MAIN_SRC),
       const f = new w.Function('rufe', `
           const _marke = "Marke";
           const el = { meldung: document.getElementById("meldung") };
-          ${m ? m[0] : ''}
+` + teile.join('\n') + `
           for (const r of rufe) melde(r[0], r[1]);
           return JSON.stringify({
             kreise: el.meldung.querySelectorAll(".dreher").length,
@@ -702,7 +710,7 @@ check(/"colors":\s*cfg\.get\("colors"/.test(MAIN_SRC),
    * ⚠ OHNE ohneKommentare() liest der Waechter die eigene Begruendung im Code
    * mit ("ginge sonst durch innerHTML") und meldet einen Fehler, den es nicht
    * gibt - genau so ist diese Pruefung beim ersten Lauf fehlgeschlagen. */
-  check(!/innerHTML/.test(ohneKommentare(m ? m[0] : 'innerHTML')),
+  check(!/innerHTML/.test(ohneKommentare(schneidePopup('melde') || 'innerHTML')),
         'melde() setzt den Text nie per innerHTML');
 
   /* Und die Wartetexte melden sich auch wirklich als solche an.
@@ -2479,8 +2487,14 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
           "und steht NACH .meldung.arbeitet - sonst verliert sie");
 
     // Und der Zustand wird geraeumt, nicht nur versteckt.
-    const m = schneidePopup("melde");
-    check(!!m && /textContent = ""/.test(m) && /classList\.remove\("arbeitet"\)/.test(m),
+    /* ⚠ TRANSITIV, nicht `melde` allein: sie ruft `meldungPlatzieren()`, und
+     * ein Einzelschnitt liess den Lauf hier mit einem ReferenceError abbrechen
+     * (fuenfter Fall dieser Falle in dieser Datei, Register). */
+    const { teile: tMelde } = popupTeile(["melde"], []);
+    const m = tMelde.join("\n");
+    const mRein = schneidePopup("melde") || "";
+    check(!!mRein && /textContent = ""/.test(mRein)
+          && /classList\.remove\("arbeitet"\)/.test(mRein),
           "melde(\"\") raeumt Text und Klasse mit ab");
 
     // AUSGEFUEHRT: erst eine Wartemeldung, dann leeren.
@@ -5329,6 +5343,151 @@ section("23) Der Kommentarbereich wird AUFGEKLAPPT (2026-09-02)");
 await new Promise((r) => setTimeout(r, 20));
 for (const z of zurueckweisungen) {
   check(false, "unbehandelte Zurueckweisung im Lauf", z.split("\n")[0]);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("24) Einstellungen-Abschnitt und die wandernde Meldung");
+// ═══════════════════════════════════════════════════════════════════════════
+/* Zwei Vorgaben des Nutzers vom 2026-09-02:
+ *   a) "Trennlinie, dann Zahnrad-Symbol plus 'Einstellungen' vor 'Bei neuem
+ *      Ticket automatisch' einfuegen"
+ *   b) "das rote Feld 'Kein Jira-Ticket in diesem Tab. …' direkt vor das
+ *      Antwort Textfeld verschieben" */
+
+// ── a) Trennstrich, Zahnrad, Ueberschrift ───────────────────────────────
+{
+  const arbeit = arbeitsbereich();
+  const iUeberarb = arbeit.indexOf('id="btn-ueberarbeiten"');
+  const iTitel = arbeit.indexOf('class="abschnitt-titel"');
+  const iAuto = arbeit.indexOf('id="f-auto"');
+  check(iTitel > 0, "es gibt eine Abschnitts-Ueberschrift");
+  check(iTitel > iUeberarb && iTitel < iAuto,
+        "sie steht VOR 'Bei neuem Ticket automatisch' und hinter dem "
+        + "Ueberarbeiten-Knopf", [iUeberarb, iTitel, iAuto].join("<"));
+
+  /* DER TRENNSTRICH IST DIE KLASSE `.abschnitt` – gemessen wird, dass die
+   * Ueberschrift wirklich DARIN liegt, nicht bloss, dass beides vorkommt.
+   * Ohne den Container gaebe es keine Linie, und die Ueberschrift saehe wie
+   * eine weitere Feldbeschriftung aus. */
+  const dom0 = new JSDOM(POPUP_HTML, { url: "https://x.test/",
+                                       runScripts: "outside-only" });
+  const d0 = dom0.window.document;
+  const titel = d0.querySelector(".abschnitt-titel");
+  check(!!titel, "die Ueberschrift ist im DOM auffindbar");
+  const kasten = titel && titel.closest(".abschnitt");
+  check(!!kasten, "sie liegt in einem .abschnitt (das ist der Trennstrich)");
+  check(!!kasten && !!kasten.querySelector("#f-auto"),
+        "und das Automatik-Pulldown liegt im SELBEN Abschnitt");
+  check(/Einstellungen/.test(titel ? titel.textContent : ""),
+        "sie heisst 'Einstellungen'", titel && titel.textContent.trim());
+  /* Der Trennstrich selbst kommt aus dem CSS - eine Klasse ohne Regel waere
+   * eine Linie, die niemand sieht. */
+  check(/\.abschnitt\s*\{[^}]*border-top:/.test(ohneKommentare(POPUP_CSS)),
+        "CSS: .abschnitt zeichnet die Linie (border-top)");
+  check(/\.abschnitt-titel\s*\{/.test(ohneKommentare(POPUP_CSS)),
+        "CSS: .abschnitt-titel ist gestaltet");
+
+  /* ⚠ DASSELBE ZAHNRAD WIE AM VORLAGEN-KNOPF (Drift-Schranke): zwei Zahnraeder
+   * in verschiedener Darstellung - eines als Zeichen, eines als SVG - saehen
+   * nebeneinander nach einem Fehler aus. */
+  const zahnKnopf = (POPUP_HTML.match(/id="btn-vorlagen"[\s\S]*?>([^<]*)<\/button>/)
+                     || ["", ""])[1].trim();
+  const zahnTitel = titel ? (titel.querySelector("span[aria-hidden]") || {}).textContent : "";
+  check(!!zahnKnopf && zahnTitel === zahnKnopf,
+        "das Zahnrad der Ueberschrift ist zeichengleich mit dem am "
+        + "Vorlagen-Knopf", JSON.stringify([zahnTitel, zahnKnopf]));
+  /* Es traegt keine eigene Aussage - Hilfsmittel sollen "Einstellungen" lesen,
+   * nicht "Zahnrad Einstellungen". Gleiche Regel wie beim Start-Dreieck. */
+  check(!!titel && !!titel.querySelector('span[aria-hidden="true"]'),
+        "und ist fuer Hilfsmittel versteckt");
+  dom0.window.close();
+}
+
+// ── b) Die Meldung wandert – AUSGEFUEHRT ────────────────────────────────
+/* ⚠ DIE EIGENTLICHE ZUSAGE IST NICHT DER PLATZ, SONDERN DIE SICHTBARKEIT.
+ * Der verlangte Platz liegt IM Arbeitsbereich, und der ist bis zur Anmeldung
+ * `hidden`. Waere die Meldung starr dort, waere jede Auskunft des Anmeldewegs
+ * lautlos weg - der Knopf saehe tot aus. Gemessen wird deshalb in BEIDEN
+ * Lagen, und die harte Bedingung lautet: eine Meldung mit Text liegt NIEMALS
+ * in einem versteckten Abschnitt. */
+{
+  const { teile, drin } = popupTeile(["melde", "meldungPlatzieren", "zeige"], []);
+  check(drin.has("meldungPlatzieren"), "popup.js hat meldungPlatzieren()");
+  check(drin.has("melde") && drin.has("zeige"),
+        "und melde()/zeige() sind schneidbar");
+
+  const lauf = (angemeldet) => {
+    const dom = new JSDOM(POPUP_HTML, { url: "https://x.test/",
+                                        runScripts: "outside-only" });
+    const w = dom.window;
+    try {
+      const f = new w.Function("angemeldet", `
+        const $ = (id) => document.getElementById(id);
+        const _marke = "Marke";
+        const el = { meldung: $("meldung"), login: $("bereich-login"),
+                     arbeit: $("bereich-arbeit"), abmelden: $("btn-abmelden"),
+                     reset: $("btn-reset") };
+` + teile.join("\n") + `
+        zeige(angemeldet);
+        melde("Kein Jira-Ticket in diesem Tab. Öffne ein Ticket (…/browse/ABC-123).");
+        const m = $("meldung");
+        // Liegt sie in einem versteckten Vorfahren? DAS ist die Frage.
+        let p = m, versteckt = false, kette = [];
+        while (p && p !== document.documentElement) {
+          if (p.hidden) { versteckt = true; kette.push(p.id || p.tagName); }
+          p = p.parentElement;
+        }
+        return JSON.stringify({
+          text: m.textContent.slice(0, 30),
+          sichtbarLautAttribut: !m.hidden,
+          inVersteckt: versteckt, kette: kette.join(">"),
+          imArbeitsbereich: !!m.closest("#bereich-arbeit"),
+          direktVorErgebnis: m.nextElementSibling
+            && m.nextElementSibling.id === "ergebnis",
+          elternteil: m.parentElement.id || m.parentElement.tagName,
+        });`);
+      return JSON.parse(f(angemeldet));
+    } finally { w.close(); }
+  };
+
+  // Im Markup steht sie an ihrem verlangten Platz - das ist die Aussage, die
+  // ein Leser der Datei bekommt.
+  const arbeit = arbeitsbereich();
+  const iMeld = arbeit.indexOf('id="meldung"');
+  const iErgM = arbeit.indexOf('id="ergebnis"');
+  check(iMeld > 0, "im Markup liegt #meldung im Arbeitsbereich", iMeld);
+  /* ⚠ BEIDE INDIZES MUESSEN GEFUNDEN SEIN. `indexOf` gibt -1 zurueck, und
+   * `-1 < iErgebnis` ist IMMER wahr - die Pruefung waere dann gruen, gerade
+   * wenn das Element gar nicht mehr da ist. Register: eine Gegenprobe hat
+   * genau das aufgedeckt (sie biss nur mit einem statt zwei FAIL). */
+  check(iMeld > 0 && iErgM > 0 && iMeld < iErgM,
+        "und zwar VOR dem Antwort-Textfeld", [iMeld, iErgM].join("<"));
+
+  const an = lauf(true);
+  check(an.direktVorErgebnis,
+        "angemeldet: die Meldung steht DIREKT vor dem Antwort-Textfeld",
+        an.elternteil + " / next=" + JSON.stringify(an.direktVorErgebnis));
+  check(!an.inVersteckt,
+        "und in keinem versteckten Abschnitt", an.kette);
+  check(an.sichtbarLautAttribut, "sie ist nicht versteckt");
+
+  const aus = lauf(false);
+  check(!aus.inVersteckt,
+        "abgemeldet: die Meldung liegt NICHT in einem versteckten Abschnitt "
+        + "(sonst waere jeder Anmeldefehler unsichtbar)", aus.kette);
+  check(!aus.imArbeitsbereich,
+        "sie ist dafuer aus dem Arbeitsbereich heraus gewandert",
+        aus.elternteil);
+  check(/Kein Jira-Ticket/.test(aus.text) && /Kein Jira-Ticket/.test(an.text),
+        "und der Text kommt in beiden Lagen an");
+
+  /* Der Aufruf in `melde()` ist die fail-safe Haelfte: ohne ihn haengt die
+   * Sichtbarkeit daran, dass jeder kuenftige Umschalter `zeige()` benutzt. */
+  check(/meldungPlatzieren\(\)/.test(schneidePopup("melde") || ""),
+        "melde() platziert selbst (fail-safe, nicht nur zeige())");
+  check(/meldungPlatzieren\(\)/.test(schneidePopup("zeige") || ""),
+        "und zeige() ebenfalls - VOR der Meldung, die gleich darauf folgt");
 }
 
 console.log("\n" + ok + " OK, " + fail + " FAIL");

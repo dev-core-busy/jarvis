@@ -294,6 +294,22 @@
       <input type="text" id="f-hinweis" placeholder="z. B. kurz halten, auf Englisch">
     </label>
 
+    <!-- ⚠ MELDUNGEN STEHEN DIREKT VOR DEM ANTWORT-FELD (Vorgabe 2026-09-02).
+         Vorher hingen sie am FUSS des Fensters, hinter Überarbeiten-Knopf und
+         Automatik: „Kein Jira-Ticket in diesem Tab" stand damit vier Felder
+         unter dem Knopf, den man gerade gedrückt hatte – im 600 px hohen Popup
+         oft ausserhalb des Sichtfensters. Jetzt steht die Auskunft dort, wo man
+         nach dem Klick hinsieht, und das Ergebnis erscheint direkt darunter.
+
+         ⚠ ES IST EIN WANDERNDES ELEMENT, und das ist Pflicht, nicht Eleganz:
+         dieser Platz liegt IM Arbeitsbereich, und der ist bis zur Anmeldung
+         `hidden`. Jede Meldung des Anmeldewegs („Die Adresse muss mit https://
+         beginnen.", der ganze Fehlerzweig) wäre hier unsichtbar – der
+         Anmelde-Knopf sähe tot aus. `popup.js::meldungPlatzieren` hängt es
+         deshalb unter die Anmeldemaske, solange der Arbeitsbereich versteckt
+         ist. EIN Element, nicht zwei: zwei hiessen zwei Meldewege. -->
+    <p id="meldung" class="meldung" hidden></p>
+
     <!-- DAS ERGEBNIS STEHT OBEN – direkt hinter dem Start-Hinweis (Vorgabe
          2026-09-02). Vorher lag es hinter Zusatzwunsch, Überarbeiten-Knopf und
          Automatik: wer das Dreieck drückte, musste den erzeugten Text vier
@@ -378,6 +394,21 @@
 
     </div><!-- /abschnitt -->
 
+    <!-- ── EINSTELLUNGEN ────────────────────────────────────────────────
+         Trennstrich und Überschrift, weil darunter keine AKTION mehr steht,
+         sondern eine EINSTELLUNG dieses Browsers: sie wird einmal getroffen und
+         gilt über das Fenster hinaus. Ohne die Linie liest sich das Pulldown wie
+         ein weiteres Feld der Auswertung darüber.
+         Gleiche Bauform wie der Trennstrich über „Meinen Kommentar
+         überarbeiten" und wie der Fuss der Ansicht (.abschnitt).
+         Das Zahnrad ist DASSELBE Zeichen wie am Vorlagen-Knopf – zwei Zahnräder
+         in verschiedener Darstellung sähen nach einem Fehler aus. Es trägt
+         keine eigene Aussage und ist für Hilfsmittel deshalb versteckt. -->
+    <div class="abschnitt">
+      <h2 class="abschnitt-titel">
+        <span aria-hidden="true">⚙</span> Einstellungen
+      </h2>
+
     <!-- AUTOMATIK BEI NEUEM TICKET.
          Bewusst KEIN Knopf, sondern eine Einstellung: sie gilt über das
          Fenster hinaus. Und bewusst OHNE `data-ohne-ticket` – ein <select>
@@ -401,12 +432,11 @@
       Läuft höchstens <b>einmal je Ticket</b> und kostet jedes Mal eine
       Auswertung. Ein zweiter Lauf ist ein Klick auf den Knopf.
     </p>
+    </div><!-- /abschnitt Einstellungen -->
 
 
 
   </section>
-
-  <p id="meldung" class="meldung" hidden></p>
 
   <!-- Popup oder Seitenleiste. Steht bewusst ausserhalb von Anmeldung und
        Arbeitsbereich: die Ansicht ist eine Einstellung des Fensters, keine der

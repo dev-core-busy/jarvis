@@ -186,6 +186,38 @@ function leisteFeststellen(kontext) {
 }
 
 // ── Meldungen ───────────────────────────────────────────────────────────────
+/** Stellt `#meldung` dorthin, wo sie SICHTBAR ist.
+ *
+ * ⚠ EINE MELDUNG, DIE NIEMAND SEHEN KANN, IST SCHLIMMER ALS KEINE.
+ * Verlangt war „das rote Feld direkt vor das Antwort-Textfeld" (Vorgabe
+ * 2026-09-02), und genau dort steht es im Markup. Dieser Platz liegt aber IM
+ * Arbeitsbereich, und der ist bis zur Anmeldung `hidden`: „Die Adresse muss
+ * mit https:// beginnen.", „Prüfe das Zugriffsrecht …" und der ganze
+ * Fehlerzweig des Anmelde-Knopfes waeren damit unsichtbar – der Knopf saehe
+ * tot aus. Deshalb EIN Element, das wandert (Bauform des
+ * Vorlagen-Formulars): bei verstecktem Arbeitsbereich unter die Anmeldemaske,
+ * sonst vor das Ergebnis. Zwei Elemente hiessen zwei Meldewege.
+ *
+ * ⚠ UEBER `getElementById` STATT UEBER `el` – und mit Ausstieg bei jedem
+ * fehlenden Anker: die Funktion haengt an `melde()`, und die laeuft auch in
+ * Testaufbauten, die nur `#meldung` kennen. Ein fehlender Anker darf die
+ * Meldung nicht verschlucken; dann bleibt sie einfach, wo sie ist.
+ */
+function meldungPlatzieren() {
+  const m = document.getElementById("meldung");
+  if (!m) return;
+  const arbeit = document.getElementById("bereich-arbeit");
+  const erg = document.getElementById("ergebnis");
+  const fuss = document.getElementById("ansicht-zeile");
+  try {
+    if (arbeit && !arbeit.hidden && erg && erg.parentNode) {
+      if (m.nextElementSibling !== erg) erg.parentNode.insertBefore(m, erg);
+    } else if (fuss && fuss.parentNode) {
+      if (m.nextElementSibling !== fuss) fuss.parentNode.insertBefore(m, fuss);
+    }
+  } catch (e) { /* Der Platz ist nicht der Zweck – der Text ist es. */ }
+}
+
 function melde(text, arbeitet = false) {
   if (!text) {
     /* ⚠ AUCH INHALT UND KLASSE RAEUMEN, nicht nur verstecken.
@@ -201,6 +233,11 @@ function melde(text, arbeitet = false) {
     el.meldung.classList.remove("arbeitet");
     return;
   }
+  /* ⚠ ZUERST DEN PLATZ, DANN DER TEXT. Der Aufruf hier ist die fail-safe
+   * Haelfte: `zeige()` platziert schon beim Umschalten, aber wer kuenftig die
+   * Sichtbarkeit an einer anderen Stelle umschaltet, wuerde eine Meldung sonst
+   * in einen versteckten Abschnitt schreiben – und sie waere lautlos weg. */
+  meldungPlatzieren();
   // Meldungen tragen {marke} – auch die aus dem Hintergrund (der kennt das
   // DOM nicht und kann selbst nicht ersetzen).
   el.meldung.textContent = String(text).split("{marke}").join(_marke);
@@ -1270,6 +1307,11 @@ function zeige(angemeldet) {
   el.abmelden.hidden = !angemeldet;
   // Reset setzt die ARBEITSFLAECHE zurueck - ohne Anmeldung gibt es keine.
   if (el.reset) el.reset.hidden = !angemeldet;
+  /* Die Meldung wandert mit: ihr Platz haengt daran, WELCHER Abschnitt
+   * sichtbar ist (Begruendung in `meldungPlatzieren`). Hier, weil dies die
+   * eine Stelle ist, die den Wechsel kennt - und VOR jeder Meldung, die
+   * gleich darauf folgt (der Anmelde-Knopf meldet direkt nach `zeige(true)`). */
+  meldungPlatzieren();
 }
 
 // ── Zugriffsrecht auf den Server ────────────────────────────────────────────

@@ -6073,6 +6073,14 @@ async def get_settings(user: str = Depends(require_auth)):
         "llm_timeout": config.LLM_TIMEOUT,
         "llm_reasoning_effort": config.LLM_REASONING_EFFORT,
         "llm_max_tokens": config.LLM_MAX_TOKENS,
+        # Profil fuer die Bildgenerierung. WICHTIG: dieser Endpunkt baut seine
+        # Antwort SELBST zusammen und liest NICHT config.to_dict() – ein neues
+        # Feld muss hier ausdruecklich nachgetragen werden. Beim Einbau am
+        # 2026-09-02 genau das vergessen: die Einstellung wurde gespeichert, die
+        # Oberflaeche bekam sie aber nie zurueck und zeigte dauerhaft "wie das
+        # Chat-Profil". Aufgefallen NUR in der Live-Probe gegen den echten
+        # Endpunkt, nicht im Waechter (der prueste config.py).
+        "image_profile_id": config.IMAGE_PROFILE_ID,
         "docs_retention_days": config.DOCS_RETENTION_DAYS,
         # Kontext-Komprimierungs-Schwelle: nur zum ANZEIGEN im Feld unter
         # „System-Einstellungen" (seit 2026-08-05 steht es dort, vorher im

@@ -77,12 +77,24 @@ if not str(R.ROLES_FILE).startswith(str(_tmp)):
     sys.exit(2)
 pruefe(str(R.ROLES_FILE).startswith(str(_tmp)), "Sandkasten aktiv (echte Datei unberuehrt)")
 
+# ZWEITE Sandkasten-Schranke: seit 2026-09-02 traegt `saeen()` ein gefundenes
+# Bildprofil in die GLOBALE Einstellung ein – und das ginge ueber
+# `config._save_to_file()` in die ECHTE settings.json des laufenden Servers.
+# Hier wird stattdessen nur festgehalten, WAS eingetragen worden waere.
+_GLOBAL_GESETZT: list = []
+_GLOBAL_ECHT = R._bildprofil_global_setzen      # fuer die funktionale Pruefung unten
+R._bildprofil_global_setzen = lambda pid: _GLOBAL_GESETZT.append(pid)
+pruefe(R._bildprofil_global_setzen is not None,
+       "Sandkasten: das globale Eintragen ist abgefangen (keine Live-settings.json)")
+
 # ── Saeen ────────────────────────────────────────────────────────────────────
 n = R.saeen()
 pruefe(n == 3, f"Saeen legt die drei Vorgabe-Rollen an ({n})")
 pruefe(R.namen() == ["image_builder", "analyst", "writer"],
        "Kennungen wie vorgesehen", str(R.namen()))
 pruefe(R.saeen() == 0, "zweiter Lauf saet NICHT erneut (idempotent)")
+pruefe(len(_GLOBAL_GESETZT) == 1,
+       "das globale Eintragen laeuft NUR beim ersten Saeen", str(_GLOBAL_GESETZT))
 
 # Vorgabe-Rollen tragen KEINE Profil-UUID: eine fest verdrahtete zeigt auf einem
 # fremden System ins Nichts.
@@ -94,11 +106,98 @@ import re as _re
 _SRC_ROLES = (ROOT / "backend" / "agent_roles.py").read_text(encoding="utf-8")
 pruefe(not _re.search(r'"profile_id":\s*"[0-9a-f]{8}-', _SRC_ROLES),
        "keine Vorgabe-Rolle hat eine fest verdrahtete Profil-UUID im Quelltext")
-pruefe(all(r["profile_id"] == "" for r in R.alle() if r["id"] != "image_builder"),
-       "analyst/writer erben das Profil des Aufrufers")
-pruefe("def _bildprofil_finden" in _SRC_ROLES
-       and "image_builder" in _SRC_ROLES.split("def saeen")[1],
-       "image_builder bekommt beim Saeen ein bildfaehiges Profil, falls vorhanden")
+# GEAENDERT 2026-09-02: KEINE Vorgabe-Rolle bekommt beim Saeen ein Profil mehr.
+# Bis dahin erhielt `image_builder` das Bildmodell als eigenes GESPRAECHSmodell –
+# und war damit handlungsunfaehig: ein reines Bildmodell kann keine Werkzeuge
+# aufrufen (am Haus-Server gemessen: FLUX antwortet auf `tools` mit
+# `tool_calls: None` und einem Bild im `content`). Der Rollen-Agent rief
+# `generate_image` also nie auf, und jede Groessenangabe verpuffte. Das
+# gefundene Bildprofil gehoert seit `config.IMAGE_PROFILE_ID` in die GLOBALE
+# Einstellung; die Rolle braucht ein Modell, das WERKZEUGE kann.
+pruefe(all(r["profile_id"] == "" for r in R.alle()),
+       "KEINE Vorgabe-Rolle traegt ein Profil – alle erben das des Aufrufers",
+       str({r["id"]: r["profile_id"] for r in R.alle()}))
+pruefe("def _bildprofil_finden" in _SRC_ROLES,
+       "die Suche nach einem bildfaehigen Profil gibt es weiterhin")
+# Die EIGENSCHAFT, nicht das Vorkommen: `saeen` darf `profile_id` nicht mehr
+# setzen. Die alte Pruefung suchte "image_builder" im saeen-Block und war nach
+# dem Umbau TRIVIAL WAHR – sie fand das Wort im Kommentar (Register).
+_SAEEN = _SRC_ROLES.split("def saeen")[1].split("\n# ─── ")[0]
+_SAEEN_CODE = "\n".join(z for z in _SAEEN.splitlines() if not z.strip().startswith("#"))
+pruefe("image_builder" not in _SAEEN_CODE,
+       "saeen() behandelt image_builder nicht mehr besonders")
+pruefe('_bildprofil_global_setzen(' in _SAEEN_CODE,
+       "das gefundene Bildprofil geht in die GLOBALE Einstellung")
+# ...und zwar ueber den Top-Level-Weg. `config.save_setting` schreibt ins
+# Unterobjekt `extra`, wo `image_profile_id` niemand liest – ein stiller
+# Fehlschlag mit Erfolgsmeldung.
+# DOCSTRING MIT ABSCHNEIDEN, nicht nur #-Zeilen: der Docstring dieser Funktion
+# erklaert woertlich "NICHT ueber save_setting" – der Waechter las damit seine
+# eigene Begruendung und meldete einen Fehler, den es nicht gab (Register, und
+# zwar zum vierzehnten Mal in diesem Projekt).
+import ast as _ast
+_GLOB_CODE = ""
+for _n in _ast.walk(_ast.parse(_SRC_ROLES)):
+    if isinstance(_n, _ast.FunctionDef) and _n.name == "_bildprofil_global_setzen":
+        _rumpf = _n.body[1:] if (_n.body and isinstance(_n.body[0], _ast.Expr)
+                                 and isinstance(getattr(_n.body[0], "value", None), _ast.Constant)
+                                 and isinstance(_n.body[0].value.value, str)) else _n.body
+        _GLOB_CODE = "\n".join(_ast.unparse(x) for x in _rumpf)
+pruefe(bool(_GLOB_CODE) and "IMAGE_PROFILE_ID" in _GLOB_CODE,
+       "Positivkontrolle: der Rumpf von _bildprofil_global_setzen ist geschnitten")
+pruefe("save_setting" not in _GLOB_CODE and "_save_to_file()" in _GLOB_CODE,
+       "gespeichert wird ueber _save_to_file, nicht ueber save_setting/extra")
+# AUSGEFUEHRT statt gelesen: `ast.unparse` normalisiert Anfuehrungszeichen, eine
+# Suche nach der Schreibweise meldete deshalb einen Fehler, den es nicht gab.
+# Gemessen wird die Eigenschaft an einem gestubbten config – die echte
+# settings.json wird dabei nicht angefasst.
+class _CfgStub:
+    def __init__(self, datei, profile=None):
+        self.SETTINGS_FILE = datei
+        self.profiles = profile or []
+        self.IMAGE_PROFILE_ID = ""
+        self.geschrieben = 0
+
+    def _save_to_file(self):
+        self.geschrieben += 1
+        self.SETTINGS_FILE.write_text(json.dumps({"image_profile_id": self.IMAGE_PROFILE_ID}))
+
+
+def _glob_lauf(inhalt, pid="bild-x"):
+    """(IMAGE_PROFILE_ID, Anzahl Schreibvorgaenge) nach einem echten Aufruf."""
+    datei = _tmp / "settings_probe.json"
+    if inhalt is None:
+        datei.unlink(missing_ok=True)
+    else:
+        datei.write_text(json.dumps(inhalt))
+    cfg = _CfgStub(datei)
+    mod = types.ModuleType("backend.config")
+    mod.config = cfg
+    alt = sys.modules.get("backend.config")
+    sys.modules["backend.config"] = mod
+    try:
+        _GLOBAL_ECHT(pid)
+    finally:
+        if alt is not None:
+            sys.modules["backend.config"] = alt
+        else:
+            sys.modules.pop("backend.config", None)
+    return cfg.IMAGE_PROFILE_ID, cfg.geschrieben
+
+
+import types  # noqa: E402
+_w, _n = _glob_lauf(None)
+pruefe(_w == "bild-x" and _n == 1, "ohne settings.json wird das Bildprofil eingetragen",
+       f"{_w!r}/{_n}")
+_w, _n = _glob_lauf({"llm_timeout": 180})
+pruefe(_w == "bild-x" and _n == 1, "fehlt nur der Schluessel, wird er gefuellt", f"{_w!r}/{_n}")
+_w, _n = _glob_lauf({"image_profile_id": "schon-da"})
+pruefe(_w == "" and _n == 0, "ein gesetzter Wert wird NICHT ueberschrieben", f"{_w!r}/{_n}")
+_w, _n = _glob_lauf({"image_profile_id": ""})
+pruefe(_w == "" and _n == 0,
+       'auch das ausdrueckliche "" (= kein Bildprofil) bleibt stehen', f"{_w!r}/{_n}")
+_w, _n = _glob_lauf({"llm_timeout": 180}, pid="")
+pruefe(_w == "" and _n == 0, "ohne gefundenes Bildprofil passiert nichts", f"{_w!r}/{_n}")
 pruefe(all(r["description"] for r in R.alle()),
        "jede Vorgabe-Rolle hat eine Beschreibung (Grundlage der Modell-Auswahl)")
 pruefe(all(R.DELEGATE_TOOL not in r["tools"] for r in R.alle()),
@@ -480,8 +579,25 @@ IMG = (ROOT / "backend" / "tools" / "image_gen.py").read_text(encoding="utf-8")
 _LLMQ = (ROOT / "backend" / "llm.py").read_text(encoding="utf-8")
 pruefe("provider_fuer_lauf" in IMG and "current_agent_profile as current_llm_profile" in IMG,
        "image_gen nutzt den zentralen Helfer (alter Name bleibt als Alias)")
-pruefe("data = await provider.generate_image(modell, prompt)" in IMG,
-       "auch das MODELL kommt aus dem Profil des Agenten")
+# EIGENSCHAFT statt Schreibweise, und die Eigenschaft hat sich am 2026-09-02
+# BEWUSST geaendert: `generate_image` baut seinen Provider seither ueber
+# `llm.provider_fuer_bild()` – das eingestellte BILDPROFIL, sonst der Rueckfall
+# auf `provider_fuer_lauf`. Grund: ein Bildmodell als Gespraechsmodell kann
+# keine Werkzeuge aufrufen (am Haus-Server gemessen: FLUX liefert
+# `tool_calls: None`), ein Textmodell kann keine Bilder – aus beiden Richtungen
+# folgt die Trennung. Die urspruengliche Lehre von 2026-08-10 gilt unveraendert
+# weiter und ist genau das, was hier geprueft wird: Provider UND Modell kommen
+# aus EINEM zentralen Helfer, niemals aus `config.current_*`.
+_M_GI = re.search(r"provider,\s*modell\s*=\s*provider_fuer_(bild|lauf)\(", IMG)
+_A_GI = re.search(r"await\s+provider\.generate_image\(\s*modell\s*,\s*prompt", IMG)
+pruefe(bool(_M_GI) and bool(_A_GI) and _M_GI.start() < _A_GI.start(),
+       "auch das MODELL kommt aus dem zentralen Helfer (nie aus config.current_*)")
+pruefe("config.current_model" not in IMG and "config.LLM_PROVIDER" not in IMG,
+       "image_gen liest das globale Profil NICHT selbst")
+pruefe("provider_fuer_lauf(prompt_tool_calling=False)"
+       in (ROOT / "backend" / "llm.py").read_text(encoding="utf-8")
+       .split("def provider_fuer_bild")[1].split("def get_provider")[0],
+       "provider_fuer_bild faellt auf das Laufprofil zurueck (kein Verhaltensbruch)")
 pruefe("if not isinstance(p, dict) or not p:" in _LLMQ,
        "ohne gesetztes Profil gilt unveraendert das globale (kein Verhaltensbruch)")
 # Das Google-Bildmodell darf NICHT fest verdrahtet sein: imagen-3.0 war am

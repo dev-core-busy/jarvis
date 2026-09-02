@@ -102,7 +102,13 @@ VORGABE_ROLLEN: list[dict] = [
             "- Formuliere den Bild-Prompt selbst aus und mache ihn konkret "
             "(Motiv, Bildaufbau, Stil, Farbstimmung).\n"
             "- Frage NICHT nach – arbeite mit dem, was in der Aufgabe steht.\n"
-            "- Melde am Ende in einem Satz, was du erzeugt hast.\n"
+            "- Steht in der Aufgabe eine Aufloesung oder ein Seitenverhaeltnis "
+            "('1536x640', 'Breitbild', '16:9', 'quadratisch'), uebergib sie in "
+            "den Parametern 'size' bzw. 'aspect_ratio' – NICHT im Prompttext. "
+            "Dort gelesen wird sie zum Bildinhalt statt zur Bildgroesse.\n"
+            "- Melde am Ende in einem Satz, was du erzeugt hast, und nenne die "
+            "Bildgroesse, die das Werkzeug ZURUECKGEMELDET hat (nicht die "
+            "gewuenschte – manche Bildmodelle koennen die Groesse nicht erzwingen).\n"
             "HINWEIS FUER DEN ADMINISTRATOR: Diese Rolle braucht ein LLM-Profil "
             "mit einem Bildmodell. Ohne zugewiesenes Profil laeuft sie mit dem "
             "Profil des Aufrufers – bei einem Textmodell scheitert die "
@@ -413,6 +419,41 @@ def _bildprofil_finden() -> str:
     return ""
 
 
+def _bildprofil_global_setzen(pid: str) -> None:
+    """Traegt ``pid`` als globales Bildprofil ein – NUR wenn noch keines gesetzt ist.
+
+    Eine bewusste Wahl des Administrators (auch die bewusste Leere) wird nicht
+    ueberschrieben; deshalb wird nur ein noch NIE gesetzter Wert gefuellt. Der
+    Marker dafuer ist die Abwesenheit des Schluessels in der settings.json –
+    ``""`` heisst "ausdruecklich kein Bildprofil" und bleibt stehen.
+
+    ⚠ NICHT ueber ``config.get_setting``/``save_setting`` – die arbeiten auf dem
+    Unterobjekt ``extra``, waehrend ``image_profile_id`` im Top-Level liegt
+    (``_save_to_file``/``_load_v2``). Ueber jene Helfer geschrieben laege der
+    Wert an einer Stelle, die NIEMAND liest – ein stiller Fehlschlag mit
+    Erfolgsmeldung.
+
+    Faellt es aus, laeuft alles unveraendert weiter: ohne Bildprofil gilt das
+    Profil des Laufs, also das Verhalten von vor 2026-09-02.
+    """
+    if not pid:
+        return
+    try:
+        import json as _json
+
+        from backend.config import config
+        if config.SETTINGS_FILE.exists():
+            vorhanden = _json.loads(config.SETTINGS_FILE.read_text())
+            if "image_profile_id" in vorhanden:
+                return
+        config.IMAGE_PROFILE_ID = pid
+        config._save_to_file()
+        print(f"[Rollen] Bildprofil {pid} als globale Einstellung eingetragen "
+              f"(Einstellungen -> KI & System)", flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"[Rollen] Bildprofil nicht eintragbar: {e}", flush=True)
+
+
 def saeen() -> int:
     """Legt die Vorgabe-Rollen an – NUR wenn die Datei noch gar nicht existiert.
 
@@ -425,15 +466,23 @@ def saeen() -> int:
         if ROLES_FILE.exists():
             return 0
         d = _leer()
-        bild = _bildprofil_finden()
+        # ⚠ DAS GEFUNDENE BILDPROFIL GEHOERT SEIT 2026-09-02 IN DIE GLOBALE
+        # EINSTELLUNG, NICHT AN DIE ROLLE.
+        # Bis dahin bekam `image_builder` das Bildmodell als eigenes
+        # GESPRAECHSmodell – damals die einzige Moeglichkeit, denn
+        # `generate_image` benutzte das Profil des laufenden Agenten. Genau das
+        # macht die Rolle aber handlungsunfaehig: ein reines Bildmodell kann
+        # keine Werkzeuge aufrufen (am Haus-Server gemessen: FLUX bekommt
+        # `tools` uebergeben und antwortet mit `tool_calls: None` plus einem
+        # Bild im `content`). Der Rollen-Agent rief `generate_image` also nie
+        # auf, das Bild entstand aus seiner Antwort – und mit ihm verpuffte jede
+        # Groessenangabe (5 von 5 Laeufen 1024x1024, gleich was verlangt war).
+        # Seit es `config.IMAGE_PROFILE_ID` gibt, ist die Zuweisung an die Rolle
+        # nicht nur unnoetig, sondern der Fehler selbst: die Rolle braucht ein
+        # Modell, das WERKZEUGE kann, und das Bildprofil malt.
+        _bildprofil_global_setzen(_bildprofil_finden())
         for v in VORGABE_ROLLEN:
-            r = _normalisieren(v)
-            # image_builder bekommt gleich ein bildfaehiges Profil, sonst ist die
-            # Rolle beim ersten Bildauftrag wirkungslos.
-            if r["id"] == "image_builder" and not r["profile_id"] and bild:
-                r["profile_id"] = bild
-                print(f"[Rollen] image_builder: Bildprofil {bild} zugewiesen", flush=True)
-            d["roles"].append(r)
+            d["roles"].append(_normalisieren(v))
         _save(d)
         print(f"[Rollen] {len(d['roles'])} Vorgabe-Rollen angelegt ({ROLES_FILE})", flush=True)
         return len(d["roles"])

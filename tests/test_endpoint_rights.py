@@ -413,13 +413,32 @@ check("Saat nur bei KEINER vorhandenen .md",
       'if any(INSTRUCTIONS_DIR.glob("*.md")):' in _ag)
 
 section("Maskierung: /api/settings und /api/profiles geben keine Schluessel heraus")
-for fn in ("get_settings", "get_profiles"):
+
+
+def _rumpf(fn):
+    """Rumpf einer Endpunkt-Funktion – geschnitten an der STRUKTUR (bis zum
+    naechsten Dekorator), NICHT mit fester Zeichenzahl.
+
+    Vorher stand hier ``SRC[i:i + 1600]``. Am 2026-09-02 rutschte
+    ``agent_api_key`` aus diesem Fenster, weil ``get_settings`` um einen
+    Kommentar wuchs – der Waechter meldete eine Luecke, die es nicht gab
+    (Register: eine feste Zahl in einem Test ist eine Zeitbombe).
+    """
     i = SRC.index(f"async def {fn}(")
-    body = SRC[i:i + 1600]
+    rest = SRC[i:]
+    j = rest.find("\n@app.")
+    return rest if j < 0 else rest[:j]
+
+
+for fn in ("get_settings", "get_profiles"):
+    body = _rumpf(fn)
+    # Positivkontrolle: der Schnitt hat wirklich diese Funktion erfasst und
+    # endet vor der naechsten Route.
+    check(f"{fn}: Rumpf geschnitten", f"async def {fn}(" in body and body.count("@app.") == 0)
     check(f"{fn} maskiert api_key", '"api_key": _mask_key(' in body)
     check(f"{fn} maskiert session_key", '"session_key": _mask_key(' in body)
 check("get_settings maskiert den Agent-API-Key",
-      '"agent_api_key": _mask_key(' in SRC[SRC.index("async def get_settings("):][:1600])
+      '"agent_api_key": _mask_key(' in _rumpf("get_settings"))
 
 print(f"\n\033[1mErgebnis: {_ok}/{_ok + len(_fail)}\033[0m")
 if _fail:

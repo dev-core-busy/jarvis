@@ -1188,6 +1188,11 @@ const _I18N = {
         // ── Antwortlänge (global) + Temperature (pro Profil) ──
         'profile.section_maxtok':   'Maximale Antwortlänge',
         'profile.maxtok_label':     'Obergrenze der Antwort (Token)',
+        'profile.section_imgprof':  'Profil für die Bildgenerierung',
+        'profile.imgprof_label':    'Dieses Profil erzeugt Bilder',
+        'profile.imgprof_none':     '— wie das Chat-Profil (bisheriges Verhalten) —',
+        'profile.imgprof_gone':     'Das eingestellte Profil gibt es nicht mehr – es gilt wieder das Chat-Profil.',
+        'profile.imgprof_hint':     'Ein Bildmodell ist kein Gesprächsmodell – deshalb wird hier getrennt eingestellt, wer Bilder malt. Ohne diese Angabe versucht es das Modell, mit dem gerade gesprochen wird: ein Textmodell lehnt Bildaufträge ab, und ein reines Bildmodell kann umgekehrt keine Werkzeuge aufrufen, sodass Vorgaben wie die Auflösung wirkungslos bleiben. Mit einem eingetragenen Bildprofil funktioniert die Bildgenerierung in jedem Chat, unabhängig vom gewählten Modell, und Größenangaben kommen beim Bild an. Der Eintrag gilt global und hat für Bildaufträge Vorrang – auch vor dem Profil eines Rollen-Agenten.',
         'profile.section_docsret':  'Vorhaltezeit erzeugter Dokumente',
         'profile.docsret_label':    'Dateien aufbewahren (Tage)',
         'profile.docsret_forever':  'dauerhaft',
@@ -4314,6 +4319,11 @@ const _I18N = {
         // ── Response length (global) + temperature (per profile) ──
         'profile.section_maxtok':   'Maximum response length',
         'profile.maxtok_label':     'Response cap (tokens)',
+        'profile.section_imgprof':  'Profile for image generation',
+        'profile.imgprof_label':    'This profile generates images',
+        'profile.imgprof_none':     '— same as the chat profile (previous behaviour) —',
+        'profile.imgprof_gone':     'The configured profile no longer exists – the chat profile applies again.',
+        'profile.imgprof_hint':     'An image model is not a conversation model, so who paints the pictures is configured separately here. Without this setting the model you are currently talking to is asked: a text model turns image requests down, while a pure image model in turn cannot call any tools, which leaves instructions such as the resolution without effect. With an image profile set, image generation works in every chat regardless of the selected model, and size instructions reach the image. The setting applies globally and takes precedence for image requests – even over the profile of a role agent.',
         'profile.section_docsret':  'Retention of generated documents',
         'profile.docsret_label':    'Keep files for (days)',
         'profile.docsret_forever':  'keep forever',

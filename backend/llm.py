@@ -1,5 +1,6 @@
 """Jarvis LLM Provider Abstraktionsschicht."""
 
+import base64
 import asyncio
 import contextvars
 import json
@@ -208,6 +209,172 @@ def ist_nur_selbstgespraech(text: str) -> bool:
     return not hat_ergebnis
 
 
+# ═══════════════════════════════════════════════════════════════════
+#  Bildmasse: EINE Aufloesung fuer alle Provider
+# ═══════════════════════════════════════════════════════════════════
+# WARUM DAS ZENTRAL LIEGT (Befund 2026-09-02, gemeldet von ECHT)
+# ------------------------------------------------------------------
+# "Die Rolle 'Bild-Erzeuger' nimmt keine Anweisungen zur Aufloesung an" – und
+# zwar zu Recht: es gab im ganzen Bildpfad KEIN Aufloesungs-Konzept. Das
+# Werkzeug-Schema kannte nur `prompt`, die Provider-Signatur lautete
+# `generate_image(model, prompt)`, und die Imagen-Config reichte allein
+# `number_of_images=1` durch. Eine Groessenangabe landete damit hoechstens als
+# Wort IM Bildprompt und wurde dort als Bildinhalt gelesen.
+# GEMESSEN am echten FLUX-Server (vLLM, black-forest-labs/FLUX.2-klein-4B):
+#   Chat-Weg ohne Angabe            2 Laeufe -> 1024x1024
+#   Chat-Weg "Aufloesung 1536x640"  2 Laeufe -> 1024x1024  (Angabe wirkungslos)
+#   Chat-Weg englisch "1536x640 px" 1 Lauf   -> 1024x1024
+#   /v1/images/generations size=…   3 Laeufe -> 512x512, 1024x768, 1536x640
+# Der Server KANN es also punktgenau, Jarvis hat ihn nur nie danach gefragt.
+#
+# ZWEI PROVIDER, ZWEI SPRACHEN – DESHALB EINE UEBERSETZUNG
+# ------------------------------------------------------------------
+# OpenAI-kompatible Server nehmen PIXEL (`size: "1536x640"`), Google Imagen
+# nimmt ein VERHAELTNIS (`aspect_ratio: "16:9"`) plus eine Stufe
+# (`image_size: "1K"/"2K"`) und kennt gar keine freien Pixelmasse. Wer die
+# Umrechnung im Provider baut, hat sie zweimal – und beim naechsten Provider
+# ein drittes Mal. Hier steht sie einmal, und beide Richtungen kommen heraus.
+
+# Die einzigen Verhaeltnisse, die Google Imagen annimmt. Ein Wert daneben wird
+# NICHT geraten (siehe `bildmasse`), sondern auf den naechstliegenden abgebildet
+# und im Ergebnis benannt.
+BILD_VERHAELTNISSE = ("1:1", "3:4", "4:3", "9:16", "16:9")
+
+# Pixelmasse je Verhaeltnis, wenn der Nutzer NUR ein Verhaeltnis nennt.
+# Bewusst die ueblichen Diffusions-Buckets (alle durch 64 teilbar, Flaeche ~1 MP):
+# ein selbst gerechnetes 1365x768 ist bei FLUX/SDXL ein Kandidat fuer Artefakte,
+# und die 64er-Masse sind die, mit denen solche Modelle trainiert werden.
+BILD_BUCKETS = {
+    "1:1": (1024, 1024),
+    "4:3": (1152, 896),
+    "3:4": (896, 1152),
+    "16:9": (1344, 768),
+    "9:16": (768, 1344),
+}
+
+# Vielfaches, auf das Pixelmasse gerundet werden. Diffusionsmodelle arbeiten in
+# Latent-Bloecken; ein ungerades Mass wird serverseitig ohnehin gerundet oder
+# abgelehnt. 16 ist der kleinste Wert, den FLUX-/SD-Architekturen zuverlaessig
+# tragen (am echten Server gegengeprueft).
+BILD_RASTER = 16
+
+# Deckel je Kante – GEMESSEN, nicht geschaetzt (FLUX.2-klein-4B auf vLLM):
+#   1040x720   ->  9,6 s   (exakt geliefert; Raster 16 traegt, nicht erst 64)
+#   1024x1024  ->  8,8 s
+#   2048x2048  -> 78,2 s   (geht noch, ist aber die Schmerzgrenze)
+#   4096x4096  -> HTTP 000 nach 180 s: KEINE Antwort mehr
+# Der Deckel ist deshalb keine Bequemlichkeit: ein "4096x4096" aus einem
+# Modelltext belegt einen Slot des Bildservers minutenlang und liefert am Ende
+# nichts. Wird gekappt, steht es im Ergebnis (Projektregel: eine Kuerzung wird
+# ausgewiesen, nie stillschweigend).
+BILD_MAX_KANTE = 2048
+BILD_MIN_KANTE = 256
+
+_SIZE_RE = re.compile(r"^\s*(\d{2,5})\s*[x\u00d7*]\s*(\d{2,5})\s*(?:px|pixel)?\s*$", re.IGNORECASE)
+_RATIO_RE = re.compile(r"^\s*(\d{1,2})\s*[:/]\s*(\d{1,2})\s*$")
+
+
+class BildmassFehler(ValueError):
+    """Unbrauchbare Groessenangabe – wird ABGEWIESEN, nicht geraten.
+
+    Begruendung: ein stillschweigend verworfenes `size` erzeugt genau den
+    gemeldeten Fehler noch einmal, nur eine Ebene hoeher – der Nutzer nennt
+    eine Aufloesung, bekommt eine andere und kann es nicht erklaeren. Die
+    Meldung nennt stattdessen die erwartete Form, damit sich das Modell im
+    selben Schritt korrigieren kann (gleiches Muster wie der Repair-Loop von
+    `create_chart`).
+    """
+
+
+def _runde(n: int) -> int:
+    n = int(round(n / BILD_RASTER) * BILD_RASTER)
+    return max(BILD_MIN_KANTE, min(BILD_MAX_KANTE, n))
+
+
+def bildmasse(size=None, aspect_ratio=None) -> dict | None:
+    """Normalisiert eine Groessenangabe fuer JEDEN Bild-Provider.
+
+    Rueckgabe ``None``, wenn nichts angefordert wurde – dann sendet kein
+    Provider ein Groessenfeld und verhaelt sich exakt wie vorher. Das ist der
+    Grund, warum es fuer abgelehnte Groessen KEINEN stillen Rueckfall braucht:
+    ein Server ohne Groessen-Unterstuetzung sieht das Feld nie.
+
+    Sonst ein dict mit ``breite``, ``hoehe``, ``size`` ("BxH"), ``verhaeltnis``
+    ("16:9"), ``image_size`` ("1K"/"2K") und ``hinweis`` (Klartext, wenn
+    gerundet, gekappt oder ein Verhaeltnis ersetzt wurde – oder "").
+
+    ``size`` GEWINNT gegen ``aspect_ratio``: es ist die konkretere Angabe. Was
+    wirklich herauskam, steht im Ergebnis des Werkzeugs – niemand muss raten.
+    """
+    size = (str(size).strip() if size not in (None, "") else "")
+    aspect_ratio = (str(aspect_ratio).strip() if aspect_ratio not in (None, "") else "")
+    if not size and not aspect_ratio:
+        return None
+
+    hinweise: list[str] = []
+    breite = hoehe = 0
+
+    if size:
+        m = _SIZE_RE.match(size)
+        if not m:
+            # Ein Verhaeltnis im size-Feld ist ein haeufiger und harmloser
+            # Griff daneben – annehmen statt abweisen.
+            if _RATIO_RE.match(size):
+                aspect_ratio = aspect_ratio or size
+            else:
+                raise BildmassFehler(
+                    f"Groessenangabe '{size}' ist unbrauchbar. Erwartet wird "
+                    f"'BREITExHOEHE' in Pixeln (z.B. '1536x640') oder ein "
+                    f"Verhaeltnis in 'aspect_ratio' (z.B. '16:9')."
+                )
+        else:
+            breite, hoehe = int(m.group(1)), int(m.group(2))
+
+    if not breite and aspect_ratio:
+        m = _RATIO_RE.match(aspect_ratio)
+        if not m:
+            raise BildmassFehler(
+                f"Verhaeltnis '{aspect_ratio}' ist unbrauchbar. Erwartet wird "
+                f"'B:H' (z.B. '16:9'); moeglich sind {', '.join(BILD_VERHAELTNISSE)}."
+            )
+        a, b = int(m.group(1)), int(m.group(2))
+        if a <= 0 or b <= 0:
+            raise BildmassFehler(f"Verhaeltnis '{aspect_ratio}' ist unbrauchbar (0 ist keine Kante).")
+        gewuenscht = f"{a}:{b}"
+        nah = _naechstes_verhaeltnis(a / b)
+        if nah != gewuenscht:
+            hinweise.append(f"Verhaeltnis {gewuenscht} ist nicht verfuegbar, verwendet wurde {nah}")
+        breite, hoehe = BILD_BUCKETS[nah]
+
+    roh_b, roh_h = breite, hoehe
+    breite, hoehe = _runde(breite), _runde(hoehe)
+    if (roh_b, roh_h) != (breite, hoehe):
+        hinweise.append(f"{roh_b}x{roh_h} angepasst auf {breite}x{hoehe} "
+                        f"(Raster {BILD_RASTER} px, Grenzen {BILD_MIN_KANTE}-{BILD_MAX_KANTE} px)")
+
+    verh = _naechstes_verhaeltnis(breite / hoehe)
+    # Google kennt keine freien Pixelmasse: nur Verhaeltnis + Stufe. Die
+    # laengere Kante entscheidet ueber die Stufe.
+    image_size = "2K" if max(breite, hoehe) > 1536 else "1K"
+
+    return {
+        "breite": breite,
+        "hoehe": hoehe,
+        "size": f"{breite}x{hoehe}",
+        "verhaeltnis": verh,
+        "image_size": image_size,
+        "hinweis": "; ".join(hinweise),
+    }
+
+
+def _naechstes_verhaeltnis(quotient: float) -> str:
+    """Das naechstliegende von Google unterstuetzte Verhaeltnis."""
+    def _q(v: str) -> float:
+        a, b = v.split(":")
+        return int(a) / int(b)
+    return min(BILD_VERHAELTNISSE, key=lambda v: abs(_q(v) - quotient))
+
+
 class ImageGenNotSupported(Exception):
     """Wird geworfen, wenn das aktive Profil keine Bildgenerierung beherrscht."""
     def __init__(self, label: str = "Das aktive LLM-Profil"):
@@ -231,8 +398,15 @@ class LLMProvider(ABC):
         """
         pass
 
-    async def generate_image(self, model: str, prompt: str) -> bytes:
+    async def generate_image(self, model: str, prompt: str, masse: dict | None = None) -> bytes:
         """Generiert ein Bild (PNG-Bytes) aus einem Text-Prompt.
+
+        ``masse``: Ergebnis von :func:`bildmasse` oder ``None``. Bei ``None``
+        sendet kein Provider ein Groessenfeld – ein Server, der keines kennt,
+        verhaelt sich damit exakt wie vor 2026-09-02. Genau deshalb braucht es
+        fuer eine abgelehnte Groesse KEINEN stillen Rueckfall: ein Feld, das
+        niemand angefordert hat, wird nie gesendet, und eine angeforderte
+        Groesse darf nicht klammheimlich durch eine andere ersetzt werden.
 
         Default: NICHT unterstuetzt – der jeweilige Provider muss dies ueberschreiben,
         wenn er Bildgenerierung kann. Es wird NIEMALS auf ein anderes Profil gewechselt.
@@ -579,12 +753,22 @@ class GeminiProvider(LLMProvider):
     def __init__(self, api_key: str):
         self.client = genai.Client(api_key=api_key)
 
-    async def generate_image(self, model: str, prompt: str) -> bytes:
+    async def generate_image(self, model: str, prompt: str, masse: dict | None = None) -> bytes:
         """Bildgenerierung via Google Imagen – gleicher API-Key, KEIN Profilwechsel.
 
         Das aktive Text-Modell (z.B. gemini-2.5-flash) generiert selbst keine Bilder;
         der Google-Provider nutzt dafuer sein Bildmodell (Imagen). Schlaegt der Zugriff
         fehl (Key ohne Imagen-Freigabe), wird der Fehler nach oben gereicht.
+
+        GROESSE: Imagen kennt KEINE freien Pixelmasse, sondern nur ein
+        Verhaeltnis (`aspect_ratio`) und eine Stufe (`image_size`). Beides
+        rechnet :func:`bildmasse` aus – deshalb steht die Umrechnung dort und
+        nicht hier. Der Gemini-Weg (`generateContent`) kennt gar kein
+        Groessenfeld; dort geht die Angabe als Klartext-Zeile in den Prompt,
+        was das Modell BEACHTEN KANN, aber nicht muss. Ein Verhaeltnis so zu
+        transportieren ist die einzige Moeglichkeit, die die API laesst – und
+        weil das Ergebnis des Werkzeugs die WIRKLICHEN Masse des fertigen
+        Bildes nennt, entsteht daraus keine falsche Zusage.
         """
         # ── Kandidaten in dieser Reihenfolge ────────────────────────────────
         # 1. Das Modell des PROFILS, wenn es selbst ein Bildmodell ist. Das war
@@ -606,9 +790,23 @@ class GeminiProvider(LLMProvider):
         ist_bildmodell = any(t in prof_modell.lower() for t in ("imagen", "-image"))
 
         def _via_imagen(m):
+            cfg: dict = {"number_of_images": 1}
+            if masse:
+                cfg["aspect_ratio"] = masse["verhaeltnis"]
+                cfg["image_size"] = masse["image_size"]
+            try:
+                config_obj = types.GenerateImagesConfig(**cfg)
+            except Exception:  # noqa: BLE001
+                # BREITES except MIT ABSICHT: GenerateImagesConfig ist ein
+                # pydantic-Modell, und `image_size` gibt es erst ab Imagen 4 /
+                # neueren google-genai-Versionen – eine aeltere Fassung wirft
+                # dort einen ValidationError (kein TypeError; gleiche Falle wie
+                # bei ThinkingConfig, siehe _thinking_config). Lieber das Bild
+                # im richtigen VERHAELTNIS ohne Stufe, als gar keins.
+                cfg.pop("image_size", None)
+                config_obj = types.GenerateImagesConfig(**cfg)
             resp = self.client.models.generate_images(
-                model=m, prompt=prompt,
-                config=types.GenerateImagesConfig(number_of_images=1),
+                model=m, prompt=prompt, config=config_obj,
             )
             imgs = getattr(resp, "generated_images", None) or []
             if not imgs:
@@ -617,7 +815,16 @@ class GeminiProvider(LLMProvider):
 
         def _via_gemini(m):
             """Gemini-Bildmodelle liefern das Bild als inline_data in der Antwort."""
-            resp = self.client.models.generate_content(model=m, contents=prompt)
+            # Kein Groessenfeld in dieser API – die Angabe kann nur als Text
+            # mitgehen. Bewusst ans ENDE des Prompts und als eigene Zeile: mitten
+            # im Motivtext gelesen wuerde "1536x640" zum Bildinhalt (genau der
+            # gemeldete Fehler). Wirkt nicht garantiert; die echten Masse nennt
+            # das Werkzeug hinterher.
+            text = prompt
+            if masse:
+                text = (f"{prompt}\n\nBildformat: Seitenverhaeltnis "
+                        f"{masse['verhaeltnis']} ({masse['size']} Pixel).")
+            resp = self.client.models.generate_content(model=m, contents=text)
             for cand in (getattr(resp, "candidates", None) or []):
                 for part in (getattr(getattr(cand, "content", None), "parts", None) or []):
                     blob = getattr(part, "inline_data", None)
@@ -807,6 +1014,109 @@ class OpenAICompatibleProvider(LLMProvider):
         # Lokale Modelle brauchen mehr Zeit als Cloud-APIs – Timeout konfigurierbar
         # (Einstellungen -> LLM -> Timeout).
         return _llm_timeout()
+
+    def _bild_url(self) -> str:
+        """``/v1/images/generations`` aus derselben Basis wie der Chat-Endpunkt."""
+        return self.base_url.rsplit("/chat/completions", 1)[0] + "/images/generations"
+
+    def _bild_timeout(self) -> httpx.Timeout:
+        """Bilder brauchen laenger als Text – EIGENES Timeout, mind. 300 s.
+
+        Gemessen am echten FLUX-Server: 1024x1024 = 8,8 s, aber 2048x2048 =
+        78,2 s. Das LLM-Timeout ist auf Text zugeschnitten (Vorgabe 180 s, per
+        Einstellung auch weniger) – ein knapper Wert dort wuerde ein grosses
+        Bild abschneiden, das der Server bereits rechnet, und der Nutzer saehe
+        einen Verbindungsfehler statt eines Bildes. Der Wert wird nur
+        VERLAENGERT, nie verkuerzt: wer bewusst 600 s eingestellt hat, behaelt sie.
+        """
+        t = _llm_timeout()
+        total = max(300.0, float(getattr(t, "read", None) or 300.0))
+        return httpx.Timeout(total, connect=10.0, read=total, write=30.0)
+
+    async def generate_image(self, model: str, prompt: str, masse: dict | None = None) -> bytes:
+        """Bildgenerierung ueber ``POST /v1/images/generations``.
+
+        WARUM ES DAS BRAUCHT (gemeldet von ECHT 2026-09-02)
+        ---------------------------------------------------
+        Dieser Provider hatte gar kein ``generate_image``, also griff die
+        Vorgabe der Basisklasse: ``ImageGenNotSupported``. Im Produktiv-venv
+        gegen das echte Rollen-Profil gemessen:
+
+            Profil: FLUX.2-klein-4B | provider: openai_compatible
+            generate_image ueberschrieben: False
+            ERGEBNIS: ImageGenNotSupported
+
+        Das Werkzeug war in der Bild-Rolle also TOT. Bilder entstanden trotzdem
+        – aber als Nebenprodukt des gewoehnlichen Chat-Aufrufs: das Bildmodell
+        antwortet auf jede Nachricht mit base64-Daten, die
+        ``agent.py::_bilddaten_bergen`` einsammelt. Ein Chat-Aufruf hat kein
+        Groessenfeld, und deshalb war JEDE Aufloesungsangabe wirkungslos
+        (5 von 5 Laeufen 1024x1024, deutsch und englisch). Ueber diesen
+        Endpunkt trafen 3 von 3 angeforderten Massen punktgenau.
+
+        Das ersetzt einen Zufallsweg durch einen Aufruf, dessen Wirkung
+        nachweisbar ist.
+
+        404/405 = dieser Server hat keine Bild-API -> ``ImageGenNotSupported``,
+        nicht "fehlgeschlagen": fuer OpenRouter und reine Text-Server ist das
+        die richtige, unveraenderte Aussage (sie erben diese Methode).
+        """
+        payload: dict = {"model": model, "prompt": prompt, "n": 1}
+        if masse:
+            payload["size"] = masse["size"]
+        # `response_format` wird BEWUSST NICHT gesendet: vLLM kennt das Feld
+        # nicht zwingend und wuerde mit 400 antworten. Gelesen werden beide
+        # Formen (b64_json und url) – der gemessene Server liefert b64_json von
+        # selbst, OpenAI/DALL-E per Vorgabe eine URL.
+        # DERSELBE Client wie der Chat-Weg – insbesondere MIT Zertifikatspruefung.
+        # Ein eigener `httpx.AsyncClient(verify=False)` waere hier eine stille
+        # Abschwaechung an einer Stelle, an der niemand sie sucht.
+        client = await _get_shared_client()
+        try:
+            resp = await client.post(self._bild_url(), headers=self._build_headers(),
+                                     json=payload, timeout=self._bild_timeout())
+        except Exception as e:  # noqa: BLE001
+            raise RuntimeError(f"Bild-Endpunkt nicht erreichbar: "
+                               f"{scrub_secrets(e, self.api_key)}") from e
+
+        if resp.status_code in (404, 405):
+            raise ImageGenNotSupported(self.image_label)
+        if resp.status_code != 200:
+            detail = scrub_secrets((resp.text or "")[:300], self.api_key)
+            if masse and "size" in detail.lower():
+                # KEIN stiller Rueckfall ohne `size`: der Nutzer bekaeme eine
+                # andere Aufloesung als verlangt und koennte es nicht erklaeren
+                # – genau der gemeldete Fehler, eine Ebene hoeher.
+                raise RuntimeError(
+                    f"Der Bild-Server hat die Groesse {masse['size']} abgelehnt "
+                    f"(HTTP {resp.status_code}): {detail}. "
+                    f"Ohne Groessenangabe laeuft die Erzeugung unveraendert."
+                )
+            raise RuntimeError(f"HTTP {resp.status_code} von {self._bild_url()}: {detail}")
+
+        try:
+            daten = (resp.json().get("data") or [])
+        except Exception as e:  # noqa: BLE001
+            raise RuntimeError(f"Antwort des Bild-Servers ist kein JSON: {e}") from e
+        if not daten:
+            raise RuntimeError("Keine Bilddaten vom Bild-Server erhalten")
+
+        eintrag = daten[0] or {}
+        b64 = eintrag.get("b64_json")
+        if b64:
+            try:
+                return base64.b64decode(b64)
+            except Exception as e:  # noqa: BLE001
+                raise RuntimeError(f"Bilddaten nicht dekodierbar: {e}") from e
+
+        url = eintrag.get("url")
+        if url:
+            r2 = await client.get(url, timeout=self._bild_timeout())
+            if r2.status_code != 200 or not r2.content:
+                raise RuntimeError(f"Bild-URL nicht abrufbar (HTTP {r2.status_code})")
+            return r2.content
+
+        raise RuntimeError("Antwort enthaelt weder b64_json noch url")
 
     def _apply_reasoning(self, payload: dict, effort: str | None):
         """Setzt die Reasoning-Stufe im Payload (OpenAI-Konvention).
@@ -1769,6 +2079,55 @@ def provider_fuer_lauf(prompt_tool_calling: bool | None = None):
                          session_key=clean_api_key(p.get("session_key") or ""),
                          prompt_tool_calling=ptc),
             p.get("model") or config.current_model)
+
+
+def provider_fuer_bild():
+    """``(provider, model)`` fuer die BILDGENERIERUNG.
+
+    Reihenfolge: das global eingestellte Bildprofil (``IMAGE_PROFILE_ID``),
+    sonst unveraendert :func:`provider_fuer_lauf`.
+
+    WARUM ES DAS BRAUCHT (gemeldet von ECHT 2026-09-02)
+    ---------------------------------------------------
+    Ein Bildmodell ist kein Gespraechsmodell, und beide Richtungen gehen schief:
+
+    * Laeuft der Agent (bzw. eine Rolle) AUF dem Bildmodell, kann er keine
+      Werkzeuge aufrufen – am Haus-Server gemessen: FLUX bekommt ``tools``
+      uebergeben und antwortet mit ``tool_calls: None`` plus einem Bild im
+      ``content``. ``generate_image`` ist damit unerreichbar, das Bild entsteht
+      aus der Modellantwort, und jede Groessenangabe verpufft (5 von 5 Laeufen
+      1024x1024, gleich was verlangt war).
+    * Laeuft er auf einem Textmodell, sagt ``generate_image`` grundsaetzlich ab.
+
+    Deshalb gewinnt das ausdruecklich eingestellte Bildprofil. Das weicht
+    bewusst von der Regel "Rolle > Benutzerwahl > global" ab, die fuer das
+    GESPRAECHSmodell gilt: welches Modell ein Bild malt, ist keine Eigenschaft
+    des Gespraechs, sondern eine Faehigkeit.
+
+    FAIL-SAFE: zeigt die Kennung ins Leere oder faellt das Lesen der
+    Konfiguration aus, wird das Laufprofil benutzt – also das Verhalten von
+    vorher. Eine Bildgenerierung, die wegen einer verwaisten Einstellung gar
+    nicht erst laeuft, waere der schlechtere Ausgang.
+    """
+    from backend.config import config
+    pid = str(getattr(config, "IMAGE_PROFILE_ID", "") or "").strip()
+    if not pid:
+        return provider_fuer_lauf(prompt_tool_calling=False)
+    try:
+        prof = next((p for p in (config.profiles or []) if p.get("id") == pid), None)
+    except Exception:  # noqa: BLE001
+        prof = None
+    if not prof:
+        print(f"[LLM] Bildprofil {pid} nicht gefunden – es gilt das Profil des Laufs",
+              flush=True)
+        return provider_fuer_lauf(prompt_tool_calling=False)
+    return (get_provider(prof.get("provider") or config.LLM_PROVIDER,
+                         clean_api_key(prof.get("api_key") or ""),
+                         prof.get("api_url") or config.current_api_url,
+                         auth_method=prof.get("auth_method") or "api_key",
+                         session_key=clean_api_key(prof.get("session_key") or ""),
+                         prompt_tool_calling=False),
+            prof.get("model") or config.current_model)
 
 
 def get_provider(

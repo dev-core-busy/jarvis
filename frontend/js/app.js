@@ -1421,6 +1421,29 @@
                     }
                 });
             }
+            // Bildprofil speichern (einmalig verdrahten). Sendet NUR sein eigenes
+            // Feld – der Server merged, ein voller Formularstand ueberschriebe
+            // die Nachbarfelder (Register).
+            const _btnIp = document.getElementById('btn-save-image-profile');
+            if (_btnIp && !_btnIp._wired) {
+                _btnIp._wired = true;
+                _btnIp.addEventListener('click', async () => {
+                    const el = document.getElementById('setting-image-profile');
+                    const st = document.getElementById('image-profile-status');
+                    const v = (el && el.value) || '';
+                    try {
+                        const r = await fetch('/api/settings', {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ image_profile_id: v })
+                        });
+                        if (!r.ok) throw new Error('HTTP ' + r.status);
+                        if (st) { st.textContent = '✓ ' + (window.t ? window.t('profile.save_btn') : 'Gespeichert'); setTimeout(() => { st.textContent = ''; }, 2000); }
+                    } catch (e) {
+                        if (st) st.textContent = '✗';
+                    }
+                });
+            }
             // Kontext-Komprimierungs-Schwelle speichern (einmalig verdrahten).
             // Grenzen wie im Backend (main.py::api_context_threshold): 4..200.
             // ANDERER Endpunkt als die Nachbarfelder: /api/context/threshold setzt
@@ -1729,6 +1752,36 @@
                 // Maximale Antwortlaenge (global) ins Eingabefeld
                 const _mtEl = document.getElementById('setting-llm-max-tokens');
                 if (_mtEl) _mtEl.value = data.llm_max_tokens || 8192;
+                // Bildprofil: die Auswahlliste wird aus den GELADENEN Profilen
+                // gebaut. Eine getippte Kennung waere hier eine Fehlerquelle ohne
+                // Gegenwert, und eine zweite Profil-Abfrage ein Roundtrip zu viel.
+                const _ipEl = document.getElementById('setting-image-profile');
+                if (_ipEl) {
+                    const _leer = _ipEl.querySelector('option[value=""]');
+                    _ipEl.innerHTML = '';
+                    if (_leer) _ipEl.appendChild(_leer);
+                    (data.profiles || []).forEach(p => {
+                        const o = document.createElement('option');
+                        o.value = p.id || '';
+                        // textContent: der Profilname ist Freitext eines Admins
+                        o.textContent = (p.name || p.id || '') + (p.model ? ` · ${p.model}` : '');
+                        _ipEl.appendChild(o);
+                    });
+                    const _ipNeu = data.image_profile_id || '';
+                    // Zeigt die Einstellung ins Leere (Profil geloescht), faellt die
+                    // Auswahl sichtbar auf "wie das Chat-Profil" – und die Zeile
+                    // daneben SAGT es. Das entspricht dem Backend
+                    // (provider_fuer_bild ist fail-safe); eine Auswahl, die einen
+                    // Wert anzeigt, den es nicht mehr gibt, waere die schlechtere
+                    // Auskunft.
+                    const _ipDa = _ipNeu
+                        && Array.from(_ipEl.options).some(o => o.value === _ipNeu);
+                    _ipEl.value = _ipDa ? _ipNeu : '';
+                    if (_ipNeu && !_ipDa) {
+                        const st = document.getElementById('image-profile-status');
+                        if (st) st.textContent = window.t ? window.t('profile.imgprof_gone') : 'Profil nicht mehr vorhanden';
+                    }
+                }
                 // Kontext-Komprimierungs-Schwelle (global) ins Eingabefeld
                 const _ctEl = document.getElementById('setting-compress-threshold');
                 if (_ctEl) _ctEl.value = data.compress_threshold || 30;

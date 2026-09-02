@@ -214,6 +214,29 @@ class Config:
     # Feld NICHT – der getattr-Default 8192 galt immer, obwohl der Docstring
     # Konfigurierbarkeit versprach.
     LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "8192"))
+    # Kennung des LLM-Profils, das BILDER erzeugt. "" = wie bisher das Profil des
+    # laufenden Agenten.
+    #
+    # WARUM ES DAS BRAUCHT (gemeldet von ECHT 2026-09-02)
+    # ---------------------------------------------------
+    # Ein Bildmodell ist kein Gespraechsmodell. Am Haus-Server gemessen: FLUX
+    # bekommt `tools` uebergeben, antwortet aber mit `tool_calls: None` und
+    # einem Bild im `content` – es kann KEIN Tool-Calling. Haengt eine Rolle auf
+    # diesem Profil, ruft ihr Agent `generate_image` also NIE auf; das Bild
+    # entsteht am Werkzeug vorbei (aus der Modellantwort geborgen) und mit ihm
+    # jede Groessenangabe: 5 von 5 Laeufen 1024x1024, egal was verlangt war.
+    # Umgekehrt sagt `generate_image` mit einem Textprofil grundsaetzlich ab.
+    # Aus BEIDEN Richtungen folgt dasselbe: das Modell fuer Bilder muss vom
+    # Gespraechsmodell getrennt sein.
+    #
+    # VORRANG: dieses Profil gewinnt, wenn es gesetzt ist – sonst gilt
+    # unveraendert das Laufprofil. Das weicht bewusst von "Rolle > global" ab
+    # (so gilt es fuer das GESPRAECHSmodell): Bildgenerierung ist keine Frage
+    # des Gespraechs, sondern eine Faehigkeit, und das Laufprofil einer Rolle
+    # ist in der Praxis genau der Fall, der nicht funktioniert. Wer zwei
+    # Bildmodelle je Rolle braucht, braucht ein Rollen-Feld – das gibt es
+    # bewusst (noch) nicht.
+    IMAGE_PROFILE_ID: str = os.getenv("IMAGE_PROFILE_ID", "")
     # Vorhaltezeit erzeugter Dokumente in data/documents/ (Tage). 0 = dauerhaft
     # behalten, sonst 15..90. Wird von backend/documents.py::retention_days()
     # gelesen; das Loeschen der Datei IST der Widerruf der Capability-URL, denn
@@ -334,6 +357,10 @@ class Config:
             self.LLM_MAX_TOKENS = max(256, min(int(data.get("llm_max_tokens") or 8192), 131072))
         except (TypeError, ValueError):
             self.LLM_MAX_TOKENS = 8192
+        # Fehlt der Schluessel, bleibt der ENV-/Klassenwert stehen (gleiche
+        # Begruendung wie bei docs_retention_days).
+        if "image_profile_id" in data:
+            self.IMAGE_PROFILE_ID = str(data.get("image_profile_id") or "").strip()
         # Vorhaltezeit: fehlt der Schluessel, bleibt der ENV-/Klassenwert stehen –
         # NICHT auf 30 zurueckfallen, sonst ueberschreibt ein Laden ohne den
         # Schluessel eine bewusst per ENV gesetzte Vorgabe.
@@ -442,6 +469,7 @@ class Config:
             "llm_timeout": self.LLM_TIMEOUT,
             "llm_reasoning_effort": self.LLM_REASONING_EFFORT,
             "llm_max_tokens": self.LLM_MAX_TOKENS,
+            "image_profile_id": self.IMAGE_PROFILE_ID,
             "docs_retention_days": self.DOCS_RETENTION_DAYS,
             "agent_api_key": self.AGENT_API_KEY,
             "profiles": self.profiles,
@@ -472,6 +500,13 @@ class Config:
                 self.LLM_MAX_TOKENS = max(256, min(int(settings["llm_max_tokens"]), 131072))
             except (TypeError, ValueError):
                 pass
+        if "image_profile_id" in settings:
+            # Eine unbekannte Kennung wird ABGEWIESEN, nicht gespeichert: sonst
+            # zeigt die Einstellung ins Leere und die Bildgenerierung sagt ab,
+            # ohne dass jemand den Zusammenhang sieht. "" = abschalten.
+            _neu = str(settings["image_profile_id"] or "").strip()
+            if not _neu or any(p.get("id") == _neu for p in (self.profiles or [])):
+                self.IMAGE_PROFILE_ID = _neu
         if "docs_retention_days" in settings:
             # Bei Muell den ALTEN Wert behalten (Fallback = aktueller Stand), nicht
             # stillschweigend auf 30 zuruecksetzen.

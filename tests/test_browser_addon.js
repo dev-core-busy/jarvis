@@ -92,10 +92,34 @@ const FELD_KONST = [
  * ReferenceError ab: kein FAIL, keine Zaehlzeile, der Waechter sah aus, als
  * waere er gar nicht gelaufen (Register).
  */
+/** Schneidet EINE Funktion aus popup.js - mit Klammern-Zaehlung.
+ *
+ * ⚠ HIER STAND EIN REGEX AUF DAS ERSTE `\n}` - UND DER FRASS EINZEILER AUF.
+ * `function tabHerkunft() { return herkunftAus(_tabUrl); }` endet in DERSELBEN
+ * Zeile; das erste `\n}` steht erst am Ende der NAECHSTEN Funktion. Der
+ * Schnitt nahm sie also mit, samt deren Modul-Deklarationen - beim Messen
+ * schlug das als "Identifier already declared" zu, und in einem Waechter waere
+ * es schlimmer: er prueft dann fremden Code und ist trivial wahr (Register,
+ * dort schon mit 446 Zeilen bezahlt).
+ *
+ * Gezaehlt wird ab der oeffnenden Klammer; Zeichenketten und Kommentare
+ * bleiben unberuecksichtigt - fuer diesen Zweck genuegt das, und ein zu WEITER
+ * Schnitt faellt jetzt sofort auf (die Klammern gingen dann nicht auf).
+ */
 function schneidePopup(name) {
-  const m = POPUP_JS.match(new RegExp('(?:async )?function ' + name
-                                      + '\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}'));
-  return m ? m[0] : null;
+  const kopf = new RegExp('(?:async )?function ' + name + '\\([^)]*\\)\\s*\\{');
+  const m = kopf.exec(POPUP_JS);
+  if (!m) return null;
+  let tiefe = 0;
+  for (let i = m.index + m[0].length - 1; i < POPUP_JS.length; i++) {
+    const c = POPUP_JS[i];
+    if (c === '{') tiefe++;
+    else if (c === '}') {
+      tiefe--;
+      if (tiefe === 0) return POPUP_JS.slice(m.index, i + 1);
+    }
+  }
+  return null;
 }
 
 function popupTeile(start, gestellt) {
@@ -238,7 +262,9 @@ section("5) Die injizierte Funktion ist SELBSTSTAENDIG");
 // scripting.executeScript serialisiert sie per toString und wertet sie in der
 // Seite neu aus. Jede Referenz nach draussen wird dort zu einem ReferenceError,
 // der im Popup als "Einfuegen fehlgeschlagen" ankommt.
-const koerper = EINFUEGEN.slice(EINFUEGEN.indexOf("export function einfuegenInJira"));
+// Am NAMEN geschnitten, nicht an "export function": die Funktion ist seit
+// 2026-09-02 `async` (sie wartet auf den Kommentarbereich).
+const koerper = EINFUEGEN.slice(EINFUEGEN.search(/function einfuegenInJira/));
 check(!/\bimport\b/.test(koerper), "kein import in der Funktion");
 for (const fremd of ["api.", "chrome.", "browser.", "$(", "frage(", "melde("]) {
   check(!koerper.includes(fremd),
@@ -251,10 +277,15 @@ section("6) Einfuegen gegen ein nachgebautes Jira – WIRKLICH ausgefuehrt");
 /* Die Funktion wird so geladen, wie der Browser sie sieht: als Quelltext, neu
  * ausgewertet. Damit wird zugleich belegt, dass die Serialisierung traegt. */
 function ladeEinfuegen(fenster, name) {
-  // /g – die Datei exportiert seit dem Editor-API-Weg MEHRERE Funktionen. Ohne
-  // das globale Flag bleibt das zweite `export` stehen und der ganze Abschnitt
-  // stirbt mit "Unexpected token 'export'".
-  const quelle = EINFUEGEN.replace(/export function/g, "function");
+  /* /g – die Datei exportiert seit dem Editor-API-Weg MEHRERE Funktionen. Ohne
+   * das globale Flag bleibt das zweite `export` stehen und der ganze Abschnitt
+   * stirbt mit "Unexpected token 'export'".
+   * ⚠ UND NUR DAS SCHLUESSELWORT, nicht `export function`: seit
+   * `einfuegenInJira` auf den Kommentarbereich WARTET, heisst es dort `export
+   * async function` – die engere Ersetzung griff nicht mehr, und genau dieselbe
+   * Meldung kam zurueck. Das Muster darf nicht an einem zweiten Wort haengen,
+   * das sich aendern kann. */
+  const quelle = EINFUEGEN.replace(/\bexport\s+/g, "");
   const f = new fenster.Function(
     quelle + "\nreturn " + (name || "einfuegenInJira") + ";")();
   return f;
@@ -1332,7 +1363,14 @@ section("8) Die Ticketnummer-Erkennung – ausgefuehrt");
           let _marke = "Marke", _key = tabKey, _tabId = 1;
           let _letztes = null, _fremdesErgebnis = false, _merkTimer = null;
           // Siehe Abschnitt 10: ticketLageAnwenden stoesst die Automatik an.
-          let _autoModus = "";
+          let _autoVorlage = "";
+          /* Modul-Variablen, die start() ueber updateHinweis/healthHolen und
+           * ticketAnzeigen mitzieht. Ohne sie WIRFT der Lauf - kein FAIL,
+           * keine Bilanz (Register, in dieser Datei mehrfach bezahlt).
+           * KEINE BACKTICKS hier: dieser Vorspann steht in einem
+           * Template-Literal. */
+          let _health = null, _tabFehler = "";
+          let _zugriffHerkunft = "";
           const _originale = new Map();
           let _jiraBasis = "", _standAlt = false, _standGesehen;
           /* ⚠ EIN value-ZUGRIFF AM <div> IST EIN STILLER ERFOLG: JS legt
@@ -2050,6 +2088,10 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
               set() { throw new Error("value am Ergebnisfeld GESETZT"); },
             });
             let _jiraBasis = "", _leiste_unbenutzt = 0;
+            /* Modul-Variablen, die zugriffZeileAktualisieren ueber
+             * jiraBasisHolen/healthHolen mitzieht. Ohne sie WIRFT der Lauf.
+             * KEINE BACKTICKS hier (Template-Literal). */
+            let _health = null, _zugriffHerkunft = "";
             const _leiste = true;
             let _tabUrl = "https://jira.test/browse/" + (nachKey || "X-1");
             let _windowId = 7, _tabId = 1;
@@ -2161,6 +2203,9 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
           const $ = (id) => document.getElementById(id);
           const gefragt = [];
           let _leiste = leiste, _tabUrl = tabUrl, _key = key, _jiraBasis = "";
+          /* Modul-Variablen von healthHolen bzw. der Zugriffszeile. Ohne sie
+           * WIRFT der Lauf. KEINE BACKTICKS hier (Template-Literal). */
+          let _health = null, _zugriffHerkunft = "", _tabFehler = "";
           const api = { permissions: {
             async contains(o) { gefragt.push(o.origins[0]); return hatRecht; },
           } };
@@ -2647,6 +2692,7 @@ section("11) Ohne Ticket ist alles gesperrt (Vorgabe 2026-08-30)");
          * (Register). KEINE BACKTICKS HIER: dieser Prolog steht in einem
          * Template-Literal und wuerde es beenden - auch das schon dreimal. */
         let _tabFehler = "";
+        let _health = null;   // Modul-Variable von healthHolen
         function melde() {}
 ` + [schneidePopup("sperre"), ka, ta].join("\n") + `
         if (vorherSperren) sperre(true);
@@ -5109,6 +5155,124 @@ section("22) Abmelde-Symbol und Update-Hinweis (2026-09-02)");
         "und json ist dort erreichbar (sonst verschluckt das except den Fehler)");
   check(/manifest\.json/.test(q),
         "gelesen wird das Manifest des ausgelieferten Pakets");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("23) Der Kommentarbereich wird AUFGEKLAPPT (2026-09-02)");
+// ═══════════════════════════════════════════════════════════════════════════
+/* ⚠ GEMELDET: „traegt den Text in das Jira Feld ein, oeffnet es aber nicht.
+ * Dadurch wird auf einen Mausklick hin das Kommentarfeld geoeffnet, der Text
+ * aber wieder geloescht."
+ *
+ * In Jira Server ist der Bereich zugeklappt; das Feld EXISTIERT im DOM, ist
+ * aber unsichtbar. Der Text landete darin – und der Klick, mit dem der Benutzer
+ * den Bereich oeffnet, baute den Editor NEU auf. Die Arbeit einer Auswertung,
+ * weggeworfen von dem Klick, den er machen MUSS, um sie abzuschicken.
+ */
+{
+  const OEFF = (EINFUEGEN.match(
+    /export async function oeffneKommentarfeld\(\)[\s\S]*?\n\}/) || [""])[0]
+    .replace("export ", "");
+  check(!!OEFF, "einfuegen.js hat oeffneKommentarfeld()");
+  /* EIGENE FUNKTION, nicht Teil von `einfuegenInJira`: Warten heisst `async`,
+   * und an `einfuegenInJira` haengt die ganze Einfuege-Kaskade. Eine Funktion,
+   * eine Aufgabe. */
+  check(/^export function einfuegenInJira/m.test(EINFUEGEN),
+        "und einfuegenInJira bleibt SYNCHRON (dort haengt die Kaskade)");
+  check(!/\bimport\b/.test(OEFF) && !OEFF.includes("api.")
+        && !OEFF.includes("melde("),
+        "die injizierte Funktion ist selbststaendig (kein Modul-Scope)");
+
+  /* ⚠ OHNE SCHNITT KEIN LAUF. Fehlt die Funktion (etwa weil jemand sie
+   * entfernt hat - das WAERE der gemeldete Zustand), wirft `new Function` und
+   * der Waechter braeche ab: keine Bilanz, von "nicht gelaufen" nicht zu
+   * unterscheiden. Er hat die Sache oben ohnehin schon gemeldet. */
+  const lauf = async (markup) => {
+    if (!OEFF) return { r: { ok: false, grund: "FUNKTION FEHLT" },
+                        geklickt: false, feldSichtbar: false };
+    const dom = new JSDOM("<body>" + markup + "</body>",
+                          { runScripts: "outside-only" });
+    const w = dom.window;
+    let offen = false;
+    /* Der Kern der Nachstellung: ein Feld mit `data-zu` ist UNSICHTBAR, bis
+     * der Platzhalter geklickt wurde - genau wie in Jira. jsdom rechnet kein
+     * Layout, also wird die Geometrie gestellt. */
+    w.Element.prototype.getBoundingClientRect = function () {
+      const zu = this.dataset && this.dataset.zu === "1" && !offen;
+      return zu ? { width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0 }
+                : { width: 300, height: 60, top: 0, left: 0, right: 300, bottom: 60 };
+    };
+    const ph = w.document.getElementById("footer-comment-button");
+    if (ph) ph.addEventListener("click", () => { offen = true; });
+    try {
+      const f = new w.Function(OEFF + "\nreturn oeffneKommentarfeld();");
+      const r = await f();
+      const feld = w.document.querySelector("[contenteditable], textarea");
+      return { r, geklickt: offen,
+               feldSichtbar: !!feld && feld.getBoundingClientRect().height > 0 };
+    } finally { w.close(); }
+  };
+
+  // (a) DER GEMELDETE FALL.
+  let x = await lauf(`<div id="footer-comment-button">Klicken, um Kommentar
+    hinzuzufügen</div>
+    <div class="jira-editor-container"><div contenteditable="true" data-zu="1"></div></div>`);
+  check(x.geklickt && x.r.ok && x.r.geoeffnet === true,
+        "zugeklappt: der Bereich wird geoeffnet", JSON.stringify(x.r));
+  check(x.feldSichtbar,
+        "und danach ist das Kommentarfeld wirklich sichtbar");
+
+  // (b) War er schon offen, wird NICHT geklickt - sonst klappt er womoeglich zu.
+  x = await lauf(`<div id="footer-comment-button">x</div>
+    <div class="jira-editor-container"><div contenteditable="true"></div></div>`);
+  check(!x.geklickt && x.r.ok && x.r.geoeffnet === false,
+        "war er offen, bleibt der Oeffner unangetastet", JSON.stringify(x.r));
+
+  // (c) Auch der Wiki-Modus (textarea).
+  x = await lauf(`<div id="footer-comment-button">x</div>
+    <textarea id="comment" data-zu="1"></textarea>`);
+  check(x.geklickt && x.r.ok, "dasselbe fuer den Wiki-Modus (textarea)");
+
+  // (d) Kein Oeffner: ein GRUND, kein stilles false.
+  x = await lauf(`<div>nur Text</div>`);
+  check(x.r.ok === false && /öffnen/.test(x.r.grund || ""),
+        "ohne Oeffner kommt ein Grund im Klartext", x.r.grund);
+
+  /* (e) ⚠ GEWARTET WIRD AUF DAS FELD, NICHT AUF EINE FESTE ZEIT. Jira baut den
+   * Editor asynchron auf; eine Pause auf Verdacht ist entweder zu kurz (dann
+   * schreiben wir wieder ins Leere) oder verschenkt Zeit. */
+  check(/for \(let i = 0; i < \d+; i\+\+\)/.test(OEFF) && /setTimeout/.test(OEFF),
+        "gewartet wird in Schritten, bis das Feld da ist");
+  check(/return \{ ok: false, geoeffnet: true/.test(OEFF),
+        "und nach dem Deckel gibt es einen ehrlichen Fehlschlag");
+
+  // (f) Verdrahtung: VOR dem Einfuegen, und ein Fehlschlag bricht NICHT ab.
+  const h = (POPUP_JS.match(
+    /\$\("btn-einfuegen"\)\.addEventListener\([\s\S]*?\n\}\);/) || [""])[0];
+  const io_ = h.indexOf("oeffneKommentarfeld"), ie = h.indexOf("func: einfuegenInJira");
+  check(io_ > 0 && ie > 0 && io_ < ie,
+        "popup.js oeffnet ZUERST, dann wird eingefuegt", io_ + "<" + ie);
+  /* Ein Fehlschlag beim Oeffnen darf das Einfuegen nicht verhindern: war der
+   * Bereich schon offen oder gibt es keinen Oeffner, muss es trotzdem
+   * versuchen - die Rueckleseprobe merkt, wenn nichts ankam. */
+  const vor = h.slice(io_ - 200, ie);
+  check(/try \{/.test(vor) && /catch/.test(vor),
+        "und ein Fehlschlag beim Oeffnen bricht nicht ab");
+  check(/geoeffnet\.geoeffnet/.test(h),
+        "die Erfolgsmeldung sagt, wenn aufgeklappt wurde (der Benutzer soll "
+        + "nicht noch einmal klicken - genau das hat den Text geloescht)");
+  check(/Aufklappen: /.test(h),
+        "und im Fehlerfall steht der Oeffnungsversuch in der Diagnose");
+
+  /* DIESELBEN SELEKTOREN WIE BEIM SCHREIBEN. Wer hier andere nimmt, oeffnet
+   * womoeglich etwas, in das danach niemand schreibt - und der Text landet
+   * wieder im Nichts. */
+  for (const sel of ["#comment-wiki-edit [contenteditable='true']",
+                     ".jira-editor-container [contenteditable='true']",
+                     "#comment", "textarea[name='comment']"]) {
+    check(OEFF.indexOf(sel) >= 0 && EINFUEGEN.indexOf(sel) >= 0,
+          "der Oeffner kennt dasselbe Feld wie das Einfuegen: " + sel);
+  }
 }
 
 /* Erst den Puffer leeren: eine Zurueckweisung aus einem nicht abgewarteten

@@ -7,6 +7,7 @@
  */
 import {
   einfuegenInJira, einfuegenUeberEditorApi, leseAusJira, lesenUeberEditorApi,
+  oeffneKommentarfeld,
 } from "./einfuegen.js";
 
 /* ⚠ JE ZWEIG, NICHT JE WURZEL – und darin lag der gemeldete Fehler
@@ -154,6 +155,10 @@ let _jiraBasis = "";
  * einfach kein Ticket). Alles andere ist eine Stoerung, und die gehoert in die
  * Anzeige: sonst heisst "kein Ticket gefunden" zweierlei (gemeldet fuer Edge). */
 let _tabFehler = "";
+/* Die Herkunft, die die Zugriffszeile NENNT – und die ihr Knopf erfragen muss.
+ * Gesetzt von `zugriffZeileAktualisieren`; der Knopf liest sie SYNCHRON
+ * (Begruendung dort). */
+let _zugriffHerkunft = "";
 /* Was bei einem NEUEN Ticket von selbst startet: die KENNUNG einer Vorlage
  * oder "" (aus).
  *
@@ -2213,6 +2218,26 @@ $("btn-einfuegen").addEventListener("click", async () => {
   if (fremd() && !(await frageJaNein())) return;
   sperre(true);
   try {
+    /* ⚠ ZUERST DEN KOMMENTARBEREICH AUFKLAPPEN (gemeldet 2026-09-02).
+     *
+     * In Jira Server ist er zu; das Feld existiert im DOM, ist aber unsichtbar.
+     * Der Text landete darin, und der Klick, mit dem der Benutzer den Bereich
+     * oeffnet, baute den Editor NEU auf – die Auswertung war weg.
+     *
+     * Eigener Aufruf, weil Warten `async` heisst und `einfuegenInJira`
+     * synchron bleiben soll (dort haengt die ganze Kaskade). Ein Fehlschlag
+     * ist KEIN Abbruch: war der Bereich schon offen oder gibt es keinen
+     * Oeffner, versucht das Einfuegen es trotzdem – und seine Rueckleseprobe
+     * merkt, wenn nichts ankam. */
+    let geoeffnet = null;
+    try {
+      const auf = await api.scripting.executeScript({
+        target: { tabId: _tabId }, func: oeffneKommentarfeld,
+      });
+      geoeffnet = (auf && auf[0] && auf[0].result) || null;
+    } catch (e) {
+      // Kein Recht auf diesen Tab o. Ae. - der Aufruf unten meldet es sauber.
+    }
     const treffer = await api.scripting.executeScript({
       target: { tabId: _tabId },
       func: einfuegenInJira,
@@ -2263,6 +2288,13 @@ $("btn-einfuegen").addEventListener("click", async () => {
                ? (mitFett ? " – mit Fettschrift." : " – ohne Fettschrift (der "
                   + "Editor dieser Seite nimmt keine Formatierung an).")
                : ".")
+            /* WAR DER BEREICH ZU, GEHOERT DAS IN DIE MELDUNG: der Benutzer
+             * sieht dann einen Editor, den er nicht selbst geoeffnet hat – und
+             * er soll wissen, dass er ihn NICHT noch einmal anklicken muss
+             * (genau dieser Klick hat den Text vorher geloescht). */
+            + (geoeffnet && geoeffnet.geoeffnet
+               ? " Der Kommentarbereich wurde dafür aufgeklappt."
+               : "")
             + " Der bisherige Inhalt des Kommentarfeldes wurde ersetzt."
             + " Bitte in Jira prüfen und selbst abschicken.");
     } else {
@@ -2271,7 +2303,12 @@ $("btn-einfuegen").addEventListener("click", async () => {
       const gesehen = (r.gesehen && r.gesehen.length)
         ? "\nGefunden: " + r.gesehen.join(", ")
         : "";
-      melde((r.fehler || "Übernehmen fehlgeschlagen.") + gesehen);
+      /* Auch der Oeffnungsversuch gehoert in die Diagnose: „kein Kommentarfeld
+       * gefunden" und „der Bereich liess sich nicht aufklappen" fuehren zum
+       * selben Ergebnis, verlangen aber verschiedene Antworten. */
+      const auf = (geoeffnet && geoeffnet.grund)
+        ? "\nAufklappen: " + geoeffnet.grund : "";
+      melde((r.fehler || "Übernehmen fehlgeschlagen.") + gesehen + auf);
     }
   } catch (e) {
     // Häufigster Fall: die Seite verbietet die Injektion (z. B. eine
@@ -2400,6 +2437,14 @@ async function zugriffZeileAktualisieren() {
    * bekaeme jemand, der die Leiste im Intranet oeffnet, eine
    * Berechtigungsabfrage fuer das Intranet, die ihm gar nichts nuetzt. */
   const herkunft = (_key && tabHerkunft()) || herkunftAus(await jiraBasisHolen());
+  /* ⚠ GEMERKT FUER DEN KNOPF, und das ist keine Bequemlichkeit.
+   *
+   * `permissions.request` verlangt eine BENUTZERGESTE, und die ist nach dem
+   * ersten `await` verbraucht (im Projekt bei `sidePanel.open` schon einmal
+   * bezahlt). Der Knopf darf die Herkunft also nicht selbst asynchron holen –
+   * er muss sie synchron vorliegen haben. Hier ist der Ort, an dem sie ohnehin
+   * ermittelt wird. */
+  _zugriffHerkunft = herkunft;
   if (!herkunft) { p.hidden = true; return; }
 
   let da = null;
@@ -2432,25 +2477,63 @@ async function zugriffZeileAktualisieren() {
   p.hidden = false;
 }
 
-$("btn-leiste-zugriff").addEventListener("click", async () => {
-  const herkunft = tabHerkunft();
-  if (!herkunft) return;
+$("btn-leiste-zugriff").addEventListener("click", () => {
+  /* ⚠ HIER STAND `tabHerkunft()` – UND DAS WAR DER GEMELDETE FEHLER
+   * ("Klick auf 'Zugriff erlauben' ist ohne Funktion", 2026-09-02).
+   *
+   * `tabHerkunft()` liest `_tabUrl`. In genau der Lage, in der dieser Knopf
+   * ueberhaupt erscheint, ist die Tab-Adresse aber NICHT LESBAR – also leer.
+   * Damit lief die erste Zeile in `if (!herkunft) return;` und der Knopf tat
+   * buchstaeblich nichts: kein Dialog, keine Meldung. Die Zeile daneben nannte
+   * dabei `https://servicedesk.nexus-ag.de` – den Ort aus `jiraBasisHolen()`,
+   * den der Knopf gar nicht kannte. Die Sackgasse, eine Ebene weiter.
+   *
+   * Jetzt nimmt er GENAU DEN ORT, DEN DIE ZEILE NENNT (`_zugriffHerkunft`) –
+   * eine Quelle, keine zwei.
+   *
+   * ⚠ UND KEIN `await` VOR `permissions.request`: die Benutzergeste ist nach
+   * dem ersten `await` verbraucht, der Browser lehnt die Abfrage dann ab –
+   * wieder ein Knopf, der sichtbar nichts tut. Deshalb ist der Handler NICHT
+   * async und die Herkunft liegt schon vor. */
+  const herkunft = _zugriffHerkunft;
+  if (!herkunft) {
+    // Kein stilles Nichts: sagen, warum es nicht geht.
+    /* `{marke}` statt „Jarvis": im Fliesstext steht immer der Platzhalter,
+     * `melde()` setzt die Hausmarke ein (Projektregel - der Waechter hat den
+     * fest verdrahteten Namen hier sofort gemeldet). */
+    melde("Es ist keine Jira-Adresse bekannt, für die der Zugriff erfragt "
+          + "werden könnte. Trage sie in {marke} unter Einstellungen → Jira "
+          + "ein (als https-Adresse).");
+    return;
+  }
+  let p;
   try {
-    const ok = await api.permissions.request({ origins: [herkunft + "/*"] });
+    p = api.permissions.request({ origins: [herkunft + "/*"] });
+  } catch (e) {
+    melde("Die Berechtigungsabfrage ließ sich nicht öffnen: "
+          + ((e && e.message) || e)
+          + "\nÖffne die Erweiterung als Fenster (Schalter unten) und "
+          + "versuche es dort.");
+    return;
+  }
+  /* Erst NACH dem Aufruf ist `await` unschaedlich - die Geste hat gewirkt.
+   * Manche Umgebungen geben kein Promise, sondern erwarten einen Callback;
+   * dann wartet niemand, und das Ergebnis kommt ueber `tabErmitteln` unten
+   * ohnehin an. */
+  Promise.resolve(p).then(async (ok) => {
     melde(ok
       ? "Zugriff auf " + herkunft + " erteilt."
       : "Ohne das Zugriffsrecht bleiben „Überarbeiten“ und „Einfügen“ auf den "
         + "Tab beschränkt, aus dem die Leiste geöffnet wurde.");
-  } catch (e) {
-    melde("Die Berechtigungsabfrage ließ sich nicht öffnen: "
-          + ((e && e.message) || e));
-  }
-  /* Neu ERMITTELN, nicht nur neu zeichnen: mit dem Recht ist die Adresse des
-   * offenen Tabs jetzt lesbar - und damit womoeglich zum ersten Mal eine
-   * Ticketnummer. Ohne das stuende weiter "Kein Ticket gefunden" da, obwohl
-   * gerade alles dafuer erledigt wurde. */
-  await tabErmitteln();
-  await ticketLageAnwenden(_letztes);
+    /* Neu ERMITTELN, nicht nur neu zeichnen: mit dem Recht ist die Adresse des
+     * offenen Tabs jetzt lesbar - und damit womoeglich zum ersten Mal eine
+     * Ticketnummer. Ohne das stuende weiter "Kein Ticket gefunden" da, obwohl
+     * gerade alles dafuer erledigt wurde. */
+    await tabErmitteln();
+    await ticketLageAnwenden(_letztes);
+  }).catch((e) => {
+    melde("Die Berechtigungsabfrage schlug fehl: " + ((e && e.message) || e));
+  });
 });
 
 /* ── Umschalter Popup ↔ Seitenleiste ───────────────────────────────────────

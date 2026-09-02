@@ -36,6 +36,90 @@
  * Importe, keine Konstanten von aussen. Alle Helfer stehen innen.
  */
 
+/** Klappt den Kommentarbereich AUF und wartet auf den Editor.
+ *
+ * ⚠ GEMELDET 2026-09-02: „traegt den Text in das Jira Feld ein, oeffnet es aber
+ * nicht. Dadurch wird auf einen Mausklick hin das Kommentarfeld geoeffnet, der
+ * Text aber wieder geloescht."
+ *
+ * In Jira Server ist der Kommentarbereich zugeklappt – unten steht nur
+ * „Klicken, um Kommentar hinzuzufuegen". Das Feld dahinter EXISTIERT im DOM,
+ * und genau darin landete der Text. Beim Klick baut Jira den Editor neu auf und
+ * der Text ist weg: die Arbeit einer Auswertung, weggeworfen von dem Mausklick,
+ * den der Benutzer machen MUSS, um sie abzuschicken.
+ *
+ * ⚠ EIGENE FUNKTION, NICHT TEIL VON `einfuegenInJira`. Warten heisst `async`,
+ * und `einfuegenInJira` ist die Funktion, an der die ganze Einfuege-Kaskade
+ * haengt – sie synchron zu halten ist mehr wert als ein gesparter
+ * `executeScript`-Aufruf. Eine Funktion, eine Aufgabe: diese oeffnet, jene
+ * schreibt.
+ *
+ * Wird per `executeScript` in die Seite injiziert und darf deshalb NICHTS aus
+ * ihrem Modul benutzen (siehe Dateikopf).
+ */
+export async function oeffneKommentarfeld() {
+  "use strict";
+
+  function sichtbar(el) {
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  }
+
+  /* Dieselben Selektoren wie beim Schreiben und beim Lesen – wer hier andere
+   * nimmt, oeffnet womoeglich etwas, in das danach niemand schreibt. */
+  function feld() {
+    const sel = ["#comment-wiki-edit [contenteditable='true']",
+                 ".jira-editor-container [contenteditable='true']",
+                 ".ak-editor-content-area [contenteditable='true']",
+                 "[data-testid='comment'] [contenteditable='true']",
+                 "#comment", "textarea[name='comment']",
+                 "#jira-issue-comment textarea", ".issue-comment textarea"];
+    for (const s of sel) {
+      for (const el of document.querySelectorAll(s)) {
+        if (sichtbar(el)) return el;
+      }
+    }
+    return null;
+  }
+
+  if (feld()) return { ok: true, geoeffnet: false, grund: "war schon offen" };
+
+  const oeffner = [
+    "#footer-comment-button",          // Jira Server: der Platzhalter unten
+    "#comment-issue", "a#comment-issue", "#opsbar-comment-issue a",
+    "[data-testid='issue-activity-feed.ui.buttons.comment-button']",  // Cloud
+    ".issue-comment-placeholder", ".placeholder-comment",
+  ];
+  for (const sel of oeffner) {
+    const k = document.querySelector(sel);
+    if (!k || !sichtbar(k)) continue;
+    try { k.click(); } catch (e) { continue; }
+    /* GEWARTET WIRD AUF DAS FELD, NICHT AUF EINE FESTE ZEIT. Jira baut den
+     * Editor asynchron auf (teils mit Nachladen); eine Pause auf Verdacht ist
+     * entweder zu kurz – dann schreiben wir wieder ins Leere – oder verschenkt
+     * Zeit. Hoechstens 3 s; danach schreibt der Aufrufer ohnehin, und seine
+     * Rueckleseprobe merkt, wenn nichts ankam. */
+    for (let i = 0; i < 60; i++) {
+      const f = feld();
+      if (f) {
+        // Der Cursor koennte noch irgendwo stehen (Suchfeld, Beschreibung).
+        // Nach dem Oeffnen ist das neue Kommentarfeld gemeint - sonst greift
+        // die erste Stufe des Einfuegens das falsche Ziel.
+        try { f.focus(); } catch (e) { /* egal */ }
+        return { ok: true, geoeffnet: true, weg: sel };
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return { ok: false, geoeffnet: true, weg: sel,
+             grund: "Der Kommentarbereich wurde geöffnet, der Editor war aber "
+                    + "nach 3 Sekunden nicht da." };
+  }
+  return { ok: false, geoeffnet: false,
+           grund: "Kein Weg gefunden, den Kommentarbereich zu öffnen." };
+}
+
+
 export function einfuegenInJira(text, bloecke) {
   "use strict";
 

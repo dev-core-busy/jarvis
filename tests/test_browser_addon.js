@@ -2634,8 +2634,15 @@ section("11) Ohne Ticket ist alles gesperrt (Vorgabe 2026-08-30)");
     try {
       const f = new w.Function("key", "laeuft", "vorherSperren", `
         const $ = (id) => document.getElementById(id);
-        const el = { ticket: $("ticket-anzeige") };
+        const el = { ticket: $("ticket-anzeige"), meldung: $("meldung") };
         let _key = key, _laeuft = false;
+        /* Modul-Variablen von ticketAnzeigen. Ohne sie WIRFT der Lauf mit
+         * einem nackten ReferenceError - kein FAIL, keine Bilanz, von "nicht
+         * gelaufen" nicht zu unterscheiden. Zum dritten Mal in dieser Datei
+         * (Register). KEINE BACKTICKS HIER: dieser Prolog steht in einem
+         * Template-Literal und wuerde es beenden - auch das schon dreimal. */
+        let _tabFehler = "";
+        function melde() {}
 ` + [schneidePopup("sperre"), ka, ta].join("\n") + `
         if (vorherSperren) sperre(true);
         _laeuft = laeuft;
@@ -4714,6 +4721,194 @@ function arbeitsbereich() {
   check(iZug > iUeberarb && iZug < iAuto,
         "und die Zugriffszeile bei dem Knopf, den sie erklaert",
         [iUeberarb, iZug, iAuto].join("<"));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("21) 'In Edge wird kein Ticket erkannt' (2026-09-02)");
+// ═══════════════════════════════════════════════════════════════════════════
+/* ⚠ DRITTER FALL DERSELBEN KLASSE – und diesmal eine Ebene tiefer.
+ *
+ * `api` war `(typeof browser !== "undefined") ? browser : chrome`: das waehlt
+ * EINE WURZEL und benutzt sie fuer ALLES. Existiert `browser` nur als
+ * TEIL-Alias (ein Objekt mit `runtime`, ohne `tabs`), ist `api.tabs`
+ * undefined und `api.tabs.query` wirft. Gemessen: Anzeige LEER, kein Ticket,
+ * kein Hinweis – und weil `runtime` vorhanden war, funktionierten Anmeldung
+ * und Vorlagen weiter. Genau das gemeldete Bild.
+ *
+ * Vorher schon zweimal bezahlt: `api.sidePanel` (2026-08-30, drei Runden) und
+ * die Erkennung der Seitenleiste. Deshalb wird hier die REGEL geprueft, nicht
+ * ein Symptom.
+ */
+{
+  // Der Proxy steht in BEIDEN Dateien und muss zeichengleich sein - teilen
+  // geht nicht (popup.js ist ein Modul, background.js in Firefox ein
+  // klassisches Skript). Dieselbe Drift-Schranke wie bei `zweig`.
+  const holeProxy = (t) => (t.match(/const api = new Proxy\([\s\S]*?\n\}\);/) || [""])[0];
+  const pP = holeProxy(POPUP_JS), pB = holeProxy(BG);
+  check(!!pP && !!pB, "api wird in beiden Dateien je ZWEIG aufgeloest");
+  check(pP === pB, "und zwar zeichengleich (Drift-Schranke)");
+
+  /* ⚠ DIE REIHENFOLGE IST DIE EIGENTLICHE FALLE: `browser` ZUERST. In Firefox
+   * gibt es beide Wurzeln, aber nur `browser.*` liefert Promises - `chrome.*`
+   * ist dort die Callback-Variante. Wer `chrome` vorzieht, macht Firefox
+   * VOLLSTAENDIG kaputt, nicht nur an einer Stelle. */
+  check(pP.indexOf("browser[name]") < pP.indexOf("chrome[name]")
+        && pP.indexOf("browser[name]") > 0,
+        "browser wird ZUERST gefragt (sonst bricht Firefox)");
+  // Und das alte Muster ist weg - sonst lebt der Fehler an anderer Stelle weiter.
+  for (const [name, t] of [["popup.js", POPUP_JS], ["background.js", BG]]) {
+    check(!/\(typeof browser !== "undefined"\)\s*\?\s*browser\s*:\s*chrome/
+            .test(ohneKommentare(t)),
+          name + " hat kein `browser ?? chrome` mehr");
+  }
+
+  /* AUSGEFUEHRT gegen gestellte Wurzeln: findet der Proxy einen Zweig, den nur
+   * EINE Wurzel hat? Eine Quelltext-Pruefung saehe das nicht. */
+  /* ⚠ OHNE SCHNITT KEIN LAUF. Fehlt der Proxy (etwa weil jemand die alte
+   * Zeile zurueckgedreht hat), enthaelt der injizierte Code kein `api` und
+   * jeder Lauf wirft mit "api is not defined" - der Waechter braeche ab und
+   * lieferte KEINE Bilanz, obwohl er die Sache schon oben gemeldet hat
+   * (Register: eine Pruefung darf nicht werfen). */
+  const proxyLauf = (browserArg, chromeArg, frage, methode) => {
+    if (!pP) return "KEIN PROXY IM QUELLTEXT";
+    const f = new Function("browserArg", "chromeArg", "frage", "methode", `
+      const browser = browserArg, chrome = chromeArg;
+      ${pP}
+      const z = api[frage];
+      if (!z) return "ZWEIG FEHLT";
+      try { return String(z[methode]()); } catch (e) { return "WIRFT"; }
+    `);
+    try { return f(browserArg, chromeArg, frage, methode); }
+    catch (e) { return "WIRFT: " + ((e && e.message) || e); }
+  };
+  check(proxyLauf({ runtime: {} },
+                  { scripting: { executeScript: () => "da" } },
+                  "scripting", "executeScript") === "da",
+        "browser ohne den Zweig: er wird in chrome gefunden (der gemeldete Fall)");
+  check(proxyLauf({ tabs: { query: () => "browser" } },
+                  { tabs: { query: () => "chrome" } },
+                  "tabs", "query") === "browser",
+        "beide Wurzeln: browser gewinnt (Firefox bleibt heil)");
+  check(proxyLauf(undefined, { tabs: { query: () => "chrome" } },
+                  "tabs", "query") === "chrome",
+        "ohne browser: chrome wird genommen");
+  check(proxyLauf({ runtime: {} }, { runtime: {} }, "tabs", "query")
+        === "ZWEIG FEHLT",
+        "gibt es den Zweig nirgends, kommt undefined (kein stiller Ersatz)");
+
+  /* Und wenn ein Zweig wirklich fehlt, sagt es die Meldung im KLARTEXT und
+   * NENNT ihn - `Cannot read properties of undefined` ist fuer niemanden
+   * verwertbar. */
+  const br = schneidePopup("brauche") || "";
+  check(/throw new Error\(/.test(br) && /\+ name \+/.test(br),
+        "brauche() nennt den fehlenden Zweig beim Namen", br.slice(0, 80));
+}
+
+// ── Die Ticket-Erkennung in allen Lagen – AUSGEFUEHRT ───────────────────
+{
+  const { teile, drin } = popupTeile(
+    ["tabErmitteln", "brauche", "keyAusUrl", "ticketAnzeigen", "tabsAbfragen"],
+    ["knoepfeAktualisieren", "melde"]);
+  const bausteineDa = drin.has("tabsAbfragen") && drin.has("brauche");
+  check(bausteineDa, "popup.js hat tabsAbfragen() und brauche()",
+        [...drin].join(","));
+  const pP = (POPUP_JS.match(/const api = new Proxy\([\s\S]*?\n\}\);/) || [""])[0];
+  const WURZ = schneidePopup("_wurzeln") || "";
+  const ZW = schneidePopup("zweig") || "";
+
+  const TAB = { id: 7, windowId: 3, url: "https://jira.firma.de/browse/ABC-1234",
+                active: true };
+  const lauf = async (stellen) => {
+    const dom = new JSDOM(POPUP_HTML, { url: "https://x.test/",
+                                        runScripts: "outside-only" });
+    const w = dom.window;
+    try {
+      stellen(w);
+      const f = new w.Function(`
+        const $ = (id) => document.getElementById(id);
+        const el = { ticket: $("ticket-anzeige"), meldung: $("meldung") };
+        let _key = "", _tabId = null, _windowId = null, _tabUrl = "";
+        let _tabFehler = "", _laeuft = false;
+        const gemeldet = [];
+        function melde(t) { gemeldet.push(String(t || "")); }
+        function knoepfeAktualisieren() {}
+        ${pP}
+        ${WURZ}
+        ${ZW}
+` + teile.join("\n") + `
+        return (async () => {
+          let hart = "";
+          try { await tabErmitteln(); } catch (e) { hart = (e && e.message) || String(e); }
+          return JSON.stringify({ key: _key, tabId: _tabId, hart,
+                                  anzeige: el.ticket.textContent,
+                                  grund: _tabFehler, gemeldet: gemeldet.length });
+        })();`);
+      return JSON.parse(await f());
+    } finally { w.close(); }
+  };
+
+  /* Die vier Umgebungen, in denen die Nummer ERKANNT werden muss. Lage 2 ist
+   * der gemeldete Edge-Fall, Lage 3 eine reine Callback-API, Lage 4 Firefox. */
+  const lagen = bausteineDa ? [
+    ["chrome mit Promise-tabs (Chrome/Edge heute)",
+     (w) => { w.chrome = { tabs: { query: () => Promise.resolve([TAB]) } }; }],
+    ["browser OHNE tabs, chrome mit (der gemeldete Fall)",
+     (w) => { w.chrome = { tabs: { query: () => Promise.resolve([TAB]) } };
+              w.browser = { runtime: { sendMessage: () => Promise.resolve({}) } }; }],
+    ["tabs.query nur mit CALLBACK",
+     (w) => { w.chrome = { tabs: { query: (q, cb) => cb([TAB]) } }; }],
+    ["Firefox: beide Wurzeln, browser mit Promise",
+     (w) => { w.chrome = { tabs: { query: (q, cb) => cb([TAB]) } };
+              w.browser = { tabs: { query: () => Promise.resolve([TAB]) } }; }],
+  ] : [];
+  if (!bausteineDa) {
+    check(false, "die Umgebungs-Laeufe entfallen - popup.js hat die Bausteine "
+                 + "nicht (siehe oben)");
+  }
+  for (const [was, stellen] of lagen) {
+    const r = await lauf(stellen);
+    check(r.key === "ABC-1234" && r.anzeige === "ABC-1234",
+          "Ticket erkannt: " + was, JSON.stringify(r));
+    check(!r.grund && r.gemeldet === 0,
+          "und keine Stoerungsmeldung dabei: " + was, r.grund);
+  }
+
+  /* ⚠ UND DIE DREI ECHTEN FEHLERLAGEN NENNEN EINEN GRUND. Vorher hiess
+   * „kein Ticket gefunden" zweierlei: „diese Seite ist kein Ticket" UND „die
+   * Adresse war nicht lesbar" - aus dem Fenster war das nicht zu
+   * unterscheiden, und niemand konnte ableiten, was zu tun ist. */
+  for (const [was, stellen, wort] of (bausteineDa ? [
+    ["kein aktiver Tab in der Antwort",
+     (w) => { w.chrome = { tabs: { query: () => Promise.resolve([]) } }; },
+     /nicht ermittelbar/],
+    ["Tab ohne Adresse (activeTab fehlt)",
+     (w) => { w.chrome = { tabs: { query: () => Promise.resolve([{ id: 7 }]) } }; },
+     /nicht\s+lesbar/],
+    ["query wirft",
+     (w) => { w.chrome = { tabs: { query: () => { throw new Error("Cannot access contents"); } } }; },
+     /Cannot access contents/],
+  ] : [])) {
+    const r = await lauf(stellen);
+    check(r.key === "" && !r.hart,
+          "kein Ticket, aber auch kein Absturz: " + was, JSON.stringify(r));
+    check(wort.test(r.grund || "") && r.gemeldet === 1,
+          "und der GRUND wird gemeldet: " + was, r.grund);
+    check(r.anzeige === "Tab nicht lesbar",
+          "die Kopfzeile unterscheidet das von 'Kein Ticket gefunden': " + was,
+          r.anzeige);
+  }
+
+  /* Gegenrichtung: eine Seite, die WIRKLICH kein Ticket ist, meldet KEINE
+   * Stoerung - sonst waere jede Nicht-Jira-Seite eine Fehlermeldung. */
+  const r = !bausteineDa ? { key: "", grund: "", gemeldet: 0, anzeige: "-" }
+    : await lauf((w) => {
+    w.chrome = { tabs: { query: () => Promise.resolve(
+      [{ id: 7, windowId: 3, url: "https://www.google.de/" }]) } };
+  });
+  check(r.key === "" && !r.grund && r.gemeldet === 0
+        && r.anzeige === "Kein Ticket gefunden",
+        "eine gewoehnliche Seite bleibt 'Kein Ticket gefunden' - ohne Stoerung",
+        JSON.stringify(r));
 }
 
 /* Erst den Puffer leeren: eine Zurueckweisung aus einem nicht abgewarteten

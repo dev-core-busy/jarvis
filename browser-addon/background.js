@@ -16,7 +16,37 @@
  * nimmt einen laufenden Aufruf mit. Eine Auswertung dauert rund 13 Sekunden.
  */
 
-const api = (typeof browser !== "undefined") ? browser : chrome;
+/* ⚠ JE ZWEIG, NICHT JE WURZEL – und darin lag der gemeldete Fehler
+ * ("in edge wird kein Ticket erkannt", 2026-09-02).
+ *
+ * Hier stand `(typeof browser !== "undefined") ? browser : chrome`. Das waehlt
+ * EINE Wurzel und benutzt sie fuer ALLES. Existiert `browser` aber nur als
+ * TEIL-Alias (ein Objekt mit `runtime`, ohne `tabs`), dann ist `api.tabs`
+ * undefined – und `api.tabs.query` wirft "Cannot read properties of
+ * undefined". Gemessen an einer gestellten Umgebung: Anzeige LEER, kein
+ * Ticket, kein Hinweis. Dass Anmeldung und Vorlagen weiter gingen, passt genau
+ * dazu: `runtime` war ja da.
+ *
+ * Dieselbe Klasse wie `api.sidePanel` (2026-08-30, drei Runden gekostet), nur
+ * eine Ebene tiefer: dort fehlte ein Zweig in `browser`, hier auch – und das
+ * Muster `browser ?? chrome` kann darauf nicht reagieren.
+ *
+ * ⚠ DIE REIHENFOLGE IST PFLICHT: `browser` ZUERST. In Firefox gibt es BEIDE
+ * Wurzeln, aber nur `browser.*` liefert Promises; `chrome.*` ist dort die
+ * Callback-Variante. Wer hier `chrome` vorzieht, macht Firefox kaputt – und
+ * zwar vollstaendig, nicht nur an einer Stelle.
+ */
+const api = new Proxy({}, {
+  get(_ziel, name) {
+    if (typeof browser !== "undefined" && browser && browser[name]) {
+      return browser[name];
+    }
+    if (typeof chrome !== "undefined" && chrome && chrome[name]) {
+      return chrome[name];
+    }
+    return undefined;
+  },
+});
 
 // Serveradresse steht NICHT im Manifest, sondern in den Einstellungen.
 // Grund: eine Firefox-Erweiterung muss von Mozilla signiert sein, auch die

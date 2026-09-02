@@ -9,7 +9,37 @@ import {
   einfuegenInJira, einfuegenUeberEditorApi, leseAusJira, lesenUeberEditorApi,
 } from "./einfuegen.js";
 
-const api = (typeof browser !== "undefined") ? browser : chrome;
+/* ⚠ JE ZWEIG, NICHT JE WURZEL – und darin lag der gemeldete Fehler
+ * ("in edge wird kein Ticket erkannt", 2026-09-02).
+ *
+ * Hier stand `(typeof browser !== "undefined") ? browser : chrome`. Das waehlt
+ * EINE Wurzel und benutzt sie fuer ALLES. Existiert `browser` aber nur als
+ * TEIL-Alias (ein Objekt mit `runtime`, ohne `tabs`), dann ist `api.tabs`
+ * undefined – und `api.tabs.query` wirft "Cannot read properties of
+ * undefined". Gemessen an einer gestellten Umgebung: Anzeige LEER, kein
+ * Ticket, kein Hinweis. Dass Anmeldung und Vorlagen weiter gingen, passt genau
+ * dazu: `runtime` war ja da.
+ *
+ * Dieselbe Klasse wie `api.sidePanel` (2026-08-30, drei Runden gekostet), nur
+ * eine Ebene tiefer: dort fehlte ein Zweig in `browser`, hier auch – und das
+ * Muster `browser ?? chrome` kann darauf nicht reagieren.
+ *
+ * ⚠ DIE REIHENFOLGE IST PFLICHT: `browser` ZUERST. In Firefox gibt es BEIDE
+ * Wurzeln, aber nur `browser.*` liefert Promises; `chrome.*` ist dort die
+ * Callback-Variante. Wer hier `chrome` vorzieht, macht Firefox kaputt – und
+ * zwar vollstaendig, nicht nur an einer Stelle.
+ */
+const api = new Proxy({}, {
+  get(_ziel, name) {
+    if (typeof browser !== "undefined" && browser && browser[name]) {
+      return browser[name];
+    }
+    if (typeof chrome !== "undefined" && chrome && chrome[name]) {
+      return chrome[name];
+    }
+    return undefined;
+  },
+});
 
 /* ── Herstellereigene APIs: NICHT ueber `api` ansprechen ───────────────────
  *
@@ -44,6 +74,28 @@ function zweig(name, methode) {
     if (z && (!methode || typeof z[methode] === "function")) return z;
   }
   return null;
+}
+
+/** Wie `zweig`, wirft aber mit KLARTEXT, statt `null` zurueckzugeben.
+ *
+ * ⚠ GEMELDET 2026-09-02: "in edge wird kein Ticket erkannt". Gemessen an
+ * gestellten Umgebungen: existiert `browser` OHNE `tabs` (ein Alias-Objekt, das
+ * nur einen Teil der Zweige traegt), dann ist `api.tabs` undefined und
+ * `api.tabs.query` wirft "Cannot read properties of undefined". Die Anzeige
+ * blieb dabei LEER – nicht einmal "Kein Ticket gefunden" stand da, und aus dem
+ * Fenster war nicht zu erkennen, dass ueberhaupt etwas schiefging.
+ *
+ * Genau dieselbe Falle wie bei `sidePanel` (2026-08-30, drei Runden): `api` ist
+ * `browser ?? chrome`, und ein Alias-Objekt eines Herstellers muss nicht
+ * vollstaendig sein. Deshalb JEDER Zweig ueber beide Wurzeln – und wenn es ihn
+ * wirklich nirgends gibt, eine Meldung, die den Zweig NENNT.
+ */
+function brauche(name, methode) {
+  const z = zweig(name, methode);
+  if (z) return z;
+  throw new Error("Dieser Browser stellt " + name + "." + methode
+                  + " nicht bereit. Die Erweiterung braucht sie, um den "
+                  + "offenen Tab zu lesen.");
 }
 
 /* STAND DES FENSTER-CODES – muss mit `STAND` in background.js uebereinstimmen.
@@ -98,6 +150,10 @@ let _windowId = null;
 let _tabUrl = "";
 // Adresse des Jira-Servers, einmal vom Server geholt (siehe zugriffZeile).
 let _jiraBasis = "";
+/* WARUM die Ticketnummer fehlt - "" heisst: kein Grund bekannt (die Seite ist
+ * einfach kein Ticket). Alles andere ist eine Stoerung, und die gehoert in die
+ * Anzeige: sonst heisst "kein Ticket gefunden" zweierlei (gemeldet fuer Edge). */
+let _tabFehler = "";
 /* Was bei einem NEUEN Ticket von selbst startet: die KENNUNG einer Vorlage
  * oder "" (aus).
  *
@@ -220,7 +276,11 @@ function knoepfeAktualisieren() {
  * Knoepfe grau sind und im Kopf trotzdem eine Ticketnummer steht.
  */
 function ticketAnzeigen() {
-  el.ticket.textContent = _key || "Kein Ticket gefunden";
+  el.ticket.textContent = _key
+    || (_tabFehler ? "Tab nicht lesbar" : "Kein Ticket gefunden");
+  // Der GRUND steht in der Meldung - im 380 px breiten Kopf ist kein Platz
+  // dafuer, und er ist zu wichtig, um ihn abzuschneiden.
+  if (_tabFehler) melde(_tabFehler);
   // Die Aussage traegt der TEXT; die Faerbung sagt nur zusaetzlich, dass hier
   // keine Ticketnummer steht (Farbe allein ist im Projekt keine Information).
   el.ticket.classList.toggle("leer", !_key);
@@ -474,14 +534,65 @@ function keyAusUrl(url) {
   return "";
 }
 
+/** Fragt den aktiven Tab ab – in BEIDER Aufrufform.
+ *
+ * Chromium (MV3) und Firefox geben ein Promise zurueck. Ein Alias-Objekt
+ * koennte aber die aeltere CALLBACK-Form haben; dann ist der Rueckgabewert kein
+ * Promise, `await` liefert `undefined` und es gibt STILL kein Ticket.
+ *
+ * ⚠ DER ZWEITE AUFRUF IST HIER UNBEDENKLICH, WEIL DIE ABFRAGE NUR LIEST. Bei
+ * einem schreibenden Aufruf waere ein solcher Rueckfall ein Fehler – er wuerde
+ * die Wirkung verdoppeln. Deshalb steht er nur an dieser Stelle.
+ */
+async function tabsAbfragen() {
+  const z = brauche("tabs", "query");
+  const frage = { active: true, currentWindow: true };
+  /* ⚠ DER ERSTE AUFRUF MUSS IM try STEHEN: eine reine Callback-API wirft
+   * SOFORT ("cb is not a function"), wenn man sie ohne Callback ruft – der
+   * Rueckgabewert kommt dann gar nicht mehr zum Vergleich. Gemessen. */
+  try {
+    const r = z.query(frage);
+    if (r && typeof r.then === "function") return r;
+  } catch (e) { /* dann die Callback-Form, s.u. */ }
+  return new Promise((fertig, fehler) => {
+    try { z.query(frage, (tabs) => fertig(tabs)); }
+    catch (e) { fehler(e); }
+  });
+}
+
 async function tabErmitteln() {
-  const tabs = await api.tabs.query({ active: true, currentWindow: true });
+  let tabs = null;
+  _tabFehler = "";
+  try {
+    tabs = await tabsAbfragen();
+  } catch (e) {
+    /* ⚠ DER FEHLER WIRD BENANNT, NICHT VERSCHLUCKT. Vorher warf `tabErmitteln`
+     * durch und die Anzeige blieb leer: „kein Ticket erkannt" war von „die
+     * Adresse ist nicht lesbar" nicht zu unterscheiden, und niemand konnte
+     * ableiten, was zu tun ist (gemeldet fuer Edge). */
+    _tabFehler = (e && e.message) || String(e);
+  }
   const t = tabs && tabs[0];
   _tabId = t ? t.id : null;
   // Das Fenster braucht `sidePanel.open`, die Adresse die Zugriffszeile.
   _windowId = t && (t.windowId !== undefined) ? t.windowId : null;
   _tabUrl = (t && t.url) || "";
   _key = keyAusUrl(t && t.url);
+  /* KEIN Tab, KEINE Adresse und KEIN Fehler: dann fehlt das Zugriffsrecht auf
+   * diesen Tab. `tabs.query` liefert die Adresse nur mit `activeTab` (Klick auf
+   * das Symbol) oder einem Host-Recht – ohne beides kommt ein Tab OHNE `url`
+   * zurueck, und das sah wie "kein Jira-Ticket" aus. */
+  if (!_tabFehler && !t) {
+    // Kein aktiver Tab in der Antwort: auch das ist eine Stoerung, nicht
+    // "die Seite ist kein Ticket".
+    _tabFehler = "Der aktive Tab war nicht ermittelbar. Öffne das Ticket im "
+                 + "Vordergrund und klicke erneut auf das Symbol.";
+  }
+  if (!_tabFehler && t && !t.url) {
+    _tabFehler = "Die Adresse dieses Tabs ist für die Erweiterung nicht "
+                 + "lesbar. Klicke auf das Symbol in der Symbolleiste, "
+                 + "während das Ticket im Vordergrund ist.";
+  }
   ticketAnzeigen();
 }
 

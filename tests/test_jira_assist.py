@@ -779,6 +779,76 @@ try:
 finally:
     ja.markenname = _echte_marke
 
+# ── JEDER ANZEIGETEXT DES MANIFESTS folgt der Marke ──────────────────────
+# GEMELDET 2026-09-02: "in nexerius-jira-firefox.zip steht in der Titelleiste
+# noch 'jarvis'". Zutreffend – und die Stelle war NICHT `name`: Firefox
+# schreibt in die Titelleiste der SEITENLEISTE den
+# `sidebar_action.default_title`, Chrome und Firefox in den Tooltip am Symbol
+# den `action.default_title`. Das Branding kannte nur `name`, weil die
+# Seitenleiste erst am 2026-08-30 dazukam.
+#
+# GEPRUEFT WIRD DIE REGEL, nicht eine Liste von Pfaden: nach dem Branding darf
+# in KEINEM Wert des Manifests mehr die Vorgabemarke stehen – ein kuenftiger
+# `*_action`-Block faellt damit von selbst auf.
+_echte_marke = ja.markenname
+try:
+    ja.markenname = lambda: "Nexerius"
+    for _variante in ("chrome", "firefox"):
+        _, _d = ja.paket_bauen(_variante, basis="https://dp.example.invalid")
+        _mf = json.loads(zipfile.ZipFile(io.BytesIO(_d))
+                         .read("manifest.json").decode("utf-8"))
+        check(_mf.get("name") == "Nexerius für Jira",
+              "%s: der Name traegt die Marke" % _variante, str(_mf.get("name")))
+
+        def _werte(o, pfad=""):
+            """Alle Zeichenketten-Werte mit ihrem Pfad – rekursiv."""
+            if isinstance(o, dict):
+                for k, v in o.items():
+                    yield from _werte(v, pfad + "." + k)
+            elif isinstance(o, list):
+                for i, v in enumerate(o):
+                    yield from _werte(v, "%s[%d]" % (pfad, i))
+            elif isinstance(o, str):
+                yield pfad, o
+
+        # Die gecko-KENNUNG ist ausgenommen und das ist Absicht (siehe unten).
+        _rest = [(p, v) for p, v in _werte(_mf)
+                 if "jarvis" in v.lower() and p != ".browser_specific_settings.gecko.id"]
+        check(not _rest,
+              "%s: KEIN Anzeigetext im Manifest sagt noch 'Jarvis'" % _variante,
+              "; ".join("%s=%r" % t for t in _rest))
+
+        _titel = [(p, v) for p, v in _werte(_mf) if p.endswith(".default_title")]
+        check(bool(_titel), "%s: es gibt ueberhaupt default_title-Felder" % _variante)
+        check(all(v == _mf["name"] for _, v in _titel),
+              "%s: jedes default_title folgt dem Namen" % _variante, str(_titel))
+        if _variante == "firefox":
+            check(any(p.startswith(".sidebar_action") for p, _ in _titel),
+                  "firefox: die TITELLEISTE der Seitenleiste ist dabei",
+                  str([p for p, _ in _titel]))
+            # ⚠ DIE KENNUNG BLEIBT. Firefox unterscheidet Erweiterungen an der
+            # gecko-id: wer sie brandet, macht aus einem Update eine ZWEITE
+            # Erweiterung – die alte bleibt daneben stehen.
+            _id = (((_mf.get("browser_specific_settings") or {}).get("gecko")
+                    or {}).get("id"))
+            _roh = json.loads((ROOT / "browser-addon" / "manifest.firefox.json")
+                              .read_text(encoding="utf-8"))
+            check(_id == _roh["browser_specific_settings"]["gecko"]["id"],
+                  "firefox: die gecko-Kennung wird NICHT gebrandet", str(_id))
+finally:
+    ja.markenname = _echte_marke
+
+# Ohne Branding bleibt es beim eingebauten Namen – die Aenderung ist fuer eine
+# ungebrandete Installation wirkungslos.
+for _n in ("manifest.json", "manifest.firefox.json"):
+    _roh = json.loads((ROOT / "browser-addon" / _n).read_text(encoding="utf-8"))
+    check(_roh.get("name") == "Jarvis für Jira",
+          "%s traegt im Repo den eingebauten Namen" % _n)
+    check(all(b.get("default_title") == "Jarvis für Jira"
+              for b in _roh.values()
+              if isinstance(b, dict) and b.get("default_title")),
+          "%s: und dieselben default_title" % _n)
+
 # Im Repo bleibt das Feld LEER – sonst waere es eine zweite Wahrheit neben dem
 # Branding und wuerde beim naechsten Firmennamen still falsch.
 _popup_repo = (ROOT / "browser-addon" / "popup.html").read_text(encoding="utf-8")

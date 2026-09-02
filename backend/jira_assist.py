@@ -1225,6 +1225,27 @@ def _manifest_gebrandet(roh: str, basis: str = "") -> str:
     m["description"] = ("Fasst das offene Jira-Ticket zusammen und schlägt "
                         "eine Antwort an den Kunden vor.")
 
+    # ⚠ AUCH JEDES `default_title` – gemeldet 2026-09-02: "in
+    # nexerius-jira-firefox.zip steht in der Titelleiste noch 'jarvis'".
+    # Zutreffend, und die Stelle ist nicht `name`: Firefox schreibt in die
+    # TITELLEISTE DER SEITENLEISTE den `sidebar_action.default_title`, und der
+    # blieb bei "Jarvis für Jira" stehen. Dasselbe gilt fuer den Tooltip am
+    # Symbol (`action.default_title`) in beiden Browsern.
+    #
+    # ALS REGEL UEBER ALLE BLOECKE, nicht als zwei fest verdrahtete Pfade: es
+    # sind heute `action` und `sidebar_action`, morgen kommt ein weiterer
+    # `*_action`-Block dazu – und der faellt bei einer gepflegten Liste still
+    # heraus. Genau so ist dieser Fehler entstanden: die Seitenleiste kam am
+    # 2026-08-30 dazu, das Branding kannte nur `name`.
+    for block in m.values():
+        if isinstance(block, dict) and block.get("default_title"):
+            block["default_title"] = m["name"]
+
+    # NICHT ANGETASTET: `browser_specific_settings.gecko.id`. Das ist eine
+    # KENNUNG, kein Anzeigetext – Firefox unterscheidet Erweiterungen daran.
+    # Wer sie brandet, macht aus einem Update eine ZWEITE Erweiterung: die
+    # vorhandene bleibt daneben stehen, und niemand sieht warum.
+
     # DIE EIGENE ADRESSE ALS HOST-BERECHTIGUNG - das ist der Fix zur Meldung
     # "man muss sich 2x anmelden" (siehe Docstring). Nur wenn sie bekannt und
     # brauchbar ist; sonst bleibt es beim Erfragen zur Laufzeit.

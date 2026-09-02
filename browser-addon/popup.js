@@ -1814,7 +1814,7 @@ function startTitelSetzen() {
    * „Antwort" ist hier die Antwort DER ERWEITERUNG auf den Klick, nicht die
    * Kundenantwort: der Knopf tut immer dasselbe (die Vorlage ausfuehren), und
    * WAS herauskommt, sagt die Vorlage daneben – ihr Name steht im Titel. */
-  const t = !id ? "Antwort erstellen (ohne Vorlage: Zusammenfassung)"
+  const t = !id ? "Antwort erstellen – Zusammenfassung des Vorgangs"
     : "Antwort erstellen – Vorlage „" + vorlagenName(id) + "“"
       + (vorlagenArt(id) === "antwort" ? " (Antwort an den Melder)"
                                        : " (Zusammenfassung)");
@@ -1828,10 +1828,18 @@ function vorlagenZeichnen() {
   sel.innerHTML = "";
   const ohne = document.createElement("option");
   ohne.value = "";
-  // NICHT „Standard“: seit es eine markierbare Standard-Vorlage gibt, hieße
-  // dasselbe Wort zwei verschiedene Dinge – der eingebaute Ablauf und die
-  // Vorlage mit dem Stern.
-  ohne.textContent = "Ohne Vorlage";
+  /* ⚠ DER EINTRAG NENNT DIE AKTION (Vorgabe 2026-09-02): „Ohne Vorlage“ sagte,
+   * was NICHT gewaehlt ist, und brauchte darunter einen Satz, der das Ergebnis
+   * erklaert. „Zusammenfassen“ sagt es selbst – der Satz ist deshalb weg.
+   * Dahinter steckt weiter der eingebaute Prompt (Wert bleibt leer).
+   * NICHT „Standard“: seit es eine markierbare Standard-Vorlage gibt, hiesse
+   * dasselbe Wort zwei verschiedene Dinge – der eingebaute Ablauf und die
+   * Vorlage mit dem Stern.
+   * ⚠ DERSELBE TEXT STEHT IN popup.html – und DIESER hier gewinnt, weil die
+   * Liste beim Laden neu aufgebaut wird. Laufen sie auseinander, wechselt die
+   * Beschriftung nach dem ersten Laden vor den Augen des Benutzers; ein Test
+   * vergleicht beide. */
+  ohne.textContent = "Zusammenfassen";
   sel.appendChild(ohne);
 
   const gruppe = (titel, liste) => {
@@ -2103,7 +2111,7 @@ async function vorlagenLaden() {
     // Haltung wie bei `_vorlBeruehrt` fuer das Pulldown.
     bereicheZeichnen(bereicheGewaehlt());
   } catch (e) {
-    // Ohne Vorlagen bleibt „Ohne Vorlage“ – kein Grund, den Rest zu sperren.
+    // Ohne Vorlagen bleibt „Zusammenfassen“ – kein Grund, den Rest zu sperren.
     $("vorl-hinweis").textContent = e.message;
     /* ⚠ MIT `false`: bei einem LADEFEHLER darf die Automatik-Einstellung nicht
      * geraeumt werden. Die Liste ist dann leer, weil der Server nicht
@@ -2118,7 +2126,7 @@ async function vorlagenLaden() {
  * Die Liste wird danach NEU GELADEN statt nur der Stern umgemalt: der Server
  * ist die Wahrheit, und er weist eine Kennung ab, die er nicht kennt. Ein
  * lokal umgemalter Stern hätte sonst einen Standard behauptet, den es nicht
- * gibt – und beim nächsten Öffnen stünde wieder „Ohne Vorlage“ da.
+ * gibt – und beim nächsten Öffnen stünde wieder „Zusammenfassen“ da.
  */
 async function standardSetzen(vid) {
   try {

@@ -92,7 +92,9 @@ installiert sich das Paket klaglos und die Leiste ist still 380 px schmal.
 Es gibt **ein** Startsymbol – ein Dreieck links vom Pulldown **Vorlage** – und es führt die
 gewählte Vorlage aus. Was dabei herauskommt, sagt die **Art** der Vorlage
 (`jira_vorlagen.ARTEN`): *Zusammenfassung* für den Bearbeiter oder *Antwort an den Melder*
-für den Kunden. **Ohne Vorlage** entsteht eine Zusammenfassung.
+für den Kunden. Der erste Eintrag heißt **Zusammenfassen** und braucht keine Vorlage –
+dahinter steckt der eingebaute Zusammenfassungs-Prompt (seit 0.8.4; bis dahin hieß er
+*Ohne Vorlage* und ein Satz darunter erklärte, was dabei herauskommt).
 
 Bis 0.7.1 standen dort zwei Knöpfe, *Zusammenfassen* und *Antwort vorschlagen*. Beide sind
 jetzt Vorlagen; die mitgelieferte **Antwort an den Melder** ersetzt den zweiten Knopf und

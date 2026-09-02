@@ -4259,12 +4259,52 @@ section("19) Die Vorlage ist die Aktion (2026-09-02)");
   check(/button\.ico-start \{[^}]*flex: 0 0 auto/.test(POPUP_CSS),
         "CSS: er teilt sich den Platz NICHT mit dem Auswahlfeld");
 
-  // Der Hinweis darunter sagt, was ohne Vorlage passiert - sonst ist die
-  // Vorgabe "Ohne Vorlage" ein Knopf ins Unbekannte.
-  const hin = (POPUP_HTML.match(/id="start-hinweis"[^>]*>([\s\S]*?)<\/p>/)
-               || ["", ""])[1];
-  check(/Ohne Vorlage/.test(hin) && /Zusammenfassung/.test(hin),
-        "der Hinweis nennt das Ergebnis ohne Vorlage", hin.trim());
+  /* ── DER ERSTE EINTRAG NENNT DIE AKTION (Vorgabe 2026-09-02) ───────────
+   * Bis 0.8.3 hiess er "Ohne Vorlage" - eine Aussage darueber, was NICHT
+   * gewaehlt ist - und ein Satz darunter musste erklaeren, was dabei
+   * herauskommt. Beides ist ersetzt durch EIN Wort, das die Aktion nennt.
+   * Geprueft wird die EIGENSCHAFT, nicht der Wortlaut: der Wert bleibt leer
+   * (der eingebaute Prompt), die Beschriftung ist ein Verb, und der erklaerende
+   * Satz darf nicht zurueckkommen. */
+  const selBlock = (POPUP_HTML.match(/<select id="f-vorlage">[\s\S]*?<\/select>/)
+                    || [""])[0];
+  const leerHtml = (selBlock.match(/<option value="">([^<]*)<\/option>/)
+                    || ["", ""])[1].trim();
+  check(leerHtml === "Zusammenfassen",
+        "der erste Eintrag heisst 'Zusammenfassen' und nennt damit die Aktion",
+        leerHtml);
+  check(!/Ohne Vorlage|Standard/.test(leerHtml),
+        "und weder 'Ohne Vorlage' (sagt nur, was fehlt) noch 'Standard' "
+        + "(hiesse zweierlei, seit eine Vorlage als Standard markierbar ist)");
+  check(/<option value="">/.test(selBlock),
+        "der WERT bleibt leer - dahinter steckt weiter der eingebaute Prompt");
+
+  /* ⚠ DRIFT-SCHRANKE: derselbe Text steht in popup.js::vorlagenZeichnen, und
+   * DER gewinnt (die Liste wird beim Laden neu aufgebaut). Laufen sie
+   * auseinander, wechselt die Beschriftung nach dem ersten Laden vor den Augen
+   * des Benutzers - ein Fehler, den niemand einem Markup zuordnet. */
+  const leerJs = ((schneidePopup("vorlagenZeichnen") || "")
+                  .match(/ohne\.textContent\s*=\s*"([^"]*)"/) || ["", ""])[1];
+  check(leerJs === leerHtml,
+        "popup.js setzt denselben Text wie das Markup (Drift-Schranke)",
+        "html=" + leerHtml + " js=" + leerJs);
+
+  /* Der Satz "Das Dreieck fuehrt die gewaehlte Vorlage aus. Ohne Vorlage
+   * entsteht eine Zusammenfassung des Tickets." ist mit der Umbenennung
+   * obsolet und ausdruecklich ENTFERNT - ein Hinweis, der wiederholt, was der
+   * Eintrag daneben schon sagt, ist Rauschen. */
+  check(!/id="start-hinweis"/.test(POPUP_HTML),
+        "der erklaerende Satz darunter ist weg (obsolet)");
+  /* ⚠ OHNE KOMMENTARE GEMESSEN - der Waechter hat beim ersten Lauf seine
+   * EIGENE Begruendung gelesen: die Kommentare oben zitieren den alten Namen,
+   * um die Umbenennung zu erklaeren. Geprueft wird, was ein Benutzer SIEHT.
+   * (Diese Falle ist im Register vermerkt und trotzdem wieder zugeschnappt.) */
+  const htmlOhneKomm = POPUP_HTML.replace(/<!--[\s\S]*?-->/g, "");
+  check(htmlOhneKomm.length < POPUP_HTML.length - 500,
+        "Positivkontrolle: die Kommentare wurden wirklich entfernt",
+        (POPUP_HTML.length - htmlOhneKomm.length) + " Zeichen");
+  check(!/Ohne Vorlage/.test(htmlOhneKomm),
+        "und im sichtbaren Text kommt 'Ohne Vorlage' nicht mehr vor");
 }
 
 // ── b) Der Titel folgt der gewaehlten Vorlage – AUSGEFUEHRT ─────────────
@@ -4308,9 +4348,13 @@ section("19) Die Vorlage ist die Aktion (2026-09-02)");
   };
 
   let r = lauf("");
-  check(r.art === "zusammenfassung", "ohne Vorlage: Zusammenfassung");
-  check(/Zusammenfassung/.test(r.titel) && /ohne Vorlage/.test(r.titel),
-        "und der Titel sagt genau das", r.titel);
+  check(r.art === "zusammenfassung", "leere Auswahl: Zusammenfassung");
+  /* Der Titel nennt das ERGEBNIS, nicht das Fehlen einer Vorlage - seit der
+   * Eintrag "Zusammenfassen" heisst, waere "ohne Vorlage" im Titel ein
+   * Widerspruch zur Beschriftung daneben. */
+  check(/Zusammenfassung/.test(r.titel) && !/ohne Vorlage/.test(r.titel),
+        "und der Titel nennt das Ergebnis, nicht das Fehlen einer Vorlage",
+        r.titel);
   check(r.aria === r.titel, "aria-label und title sind identisch");
 
   /* ⚠ „ANTWORT ERSTELLEN" IN JEDEM FALL – Vorgabe des Nutzers 2026-09-02.
@@ -4775,12 +4819,17 @@ function arbeitsbereich() {
         "und popup.js setzt keinen 'Zusammenfassung erstellen'-Titel mehr");
 
   const arbeit = arbeitsbereich();
-  const iHinweis = arbeit.indexOf('id="start-hinweis"');
+  /* ⚠ ANKER IST DIE VORLAGEN-ZEILE, nicht mehr der Hinweissatz: der ist mit
+   * der Umbenennung des ersten Eintrags entfallen (Vorgabe 2026-09-02).
+   * Die Aussage bleibt dieselbe - das Ergebnis erscheint direkt hinter der
+   * Zeile, in der man die Auswertung startet. */
+  const iHinweis = arbeit.indexOf('id="f-vorlage"');
   const iErg = arbeit.indexOf('id="ergebnis"');
   const iWunsch = arbeit.indexOf('id="f-hinweis"');
   const iUeberarb = arbeit.indexOf('id="btn-ueberarbeiten"');
   const iAuto = arbeit.indexOf('id="f-auto"');
-  check(iErg > iHinweis, "das Ergebnis steht hinter dem Start-Hinweis");
+  check(iHinweis >= 0, "die Vorlagen-Zeile ist der Anker der Reihenfolge");
+  check(iErg > iHinweis, "das Ergebnis steht hinter der Vorlagen-Zeile");
   /* ⚠ UND VOR Ueberarbeiten und Automatik: „der generierte Text soll direkt
    * hinter 'das Dreieck fuehrt die gewuenschte …' erscheinen".
    * DER ZUSATZWUNSCH LIEGT DAZWISCHEN (Vorgabe 2026-09-02, zweite Runde): er
@@ -4788,7 +4837,7 @@ function arbeitsbereich() {
    * man ihn erst liest, wenn es zu spaet ist. Leserichtung: waehlen,
    * praezisieren, starten, Ergebnis. */
   check(iWunsch > iHinweis && iWunsch < iErg,
-        "der Zusatzwunsch steht zwischen Hinweis und Ergebnis",
+        "der Zusatzwunsch steht zwischen Vorlagen-Zeile und Ergebnis",
         [iHinweis, iWunsch, iErg].join("<"));
   check(iErg < iUeberarb && iErg < iAuto,
         "und das Ergebnis VOR Ueberarbeiten und Automatik",

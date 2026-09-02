@@ -168,11 +168,20 @@
                 title="Antwort erstellen" aria-label="Antwort erstellen"><svg
           viewBox="0 0 24 24" width="13" height="13" fill="currentColor"
           aria-hidden="true"><polygon points="6 4 20 12 6 20"/></svg></button>
-        <!-- „Ohne Vorlage“, NICHT „Standard“: seit eine Vorlage als Standard
+        <!-- ⚠ DER ERSTE EINTRAG NENNT DIE AKTION, NICHT DAS FEHLEN EINER
+             VORLAGE (Vorgabe 2026-09-02). „Ohne Vorlage“ beschrieb, was NICHT
+             gewählt ist – was dabei herauskommt, musste ein Satz darunter
+             erklären. „Zusammenfassen“ sagt es selbst, und der Satz ist damit
+             weg. Dahinter steckt weiter der eingebaute Zusammenfassungs-Prompt
+             (Wert bleibt leer, `jira_assist` kennt den Fall) – bearbeitbar
+             sind nur die Vorlagen darunter.
+             Und ausdrücklich NICHT „Standard“: seit eine Vorlage als Standard
              markierbar ist, hieße dasselbe Wort zwei verschiedene Dinge.
-             popup.js baut die Liste neu auf und setzt denselben Text. -->
+             ⚠ DERSELBE TEXT STEHT IN popup.js::vorlagenZeichnen – die Liste
+             wird beim Laden neu aufgebaut, und dann gewinnt der dortige. Ein
+             Test vergleicht beide (Drift-Schranke). -->
         <select id="f-vorlage">
-          <option value="">Ohne Vorlage</option>
+          <option value="">Zusammenfassen</option>
         </select>
         <!-- ⚠ `data-ohne-ticket`: Vorlagen pflegt man UNABHAENGIG von einem
              Ticket (gemeldet 2026-08-31). Bis dahin fiel das Zahnrad unter die
@@ -183,10 +192,6 @@
                 title="Vorlagen verwalten" aria-label="Vorlagen verwalten">⚙</button>
       </div>
     </label>
-    <p class="hinweis" id="start-hinweis">
-      Das Dreieck führt die gewählte Vorlage aus. <b>Ohne Vorlage</b> entsteht
-      eine Zusammenfassung des Tickets.
-    </p>
 
     <!-- Vorlagen-Verwaltung: bleibt im selben Fenster, damit die Auswahl
          daneben sichtbar bleibt. -->

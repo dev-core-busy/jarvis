@@ -331,6 +331,66 @@ for (const [name, zert, erwartet] of [
         String(mitHtml.length));
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+section("9) Die Anleitung nennt den ersten Pulldown-Eintrag richtig");
+// ═══════════════════════════════════════════════════════════════════════════
+/* Vorgabe 2026-09-02: der Eintrag heisst "Zusammenfassen" statt "Ohne
+ * Vorlage". Eine Anleitung, die ein Bedienelement bei einem Namen nennt, den
+ * es nicht mehr gibt, schickt den Benutzer suchen - diese Fehlerklasse hat das
+ * Projekt schon mehrfach bezahlt (jaddon.limit_3, use_5, view_3).
+ *
+ * ⚠ GEPRUEFT WIRD ALS REGEL UEBER ALLE `jaddon.*`-SCHLUESSEL, nicht nur ueber
+ * use_3: sonst faellt der naechste Text auf, der den alten Namen wieder
+ * einfuehrt - und genau so ist die Luecke jedes Mal entstanden. */
+{
+  const deVon = I18N.search(/^\s{0,4}de\s*:\s*\{/m);
+  const enVon = I18N.search(/^\s{0,4}en\s*:\s*\{/m);
+  check(deVon >= 0 && enVon > deVon, "beide Sprachbloecke gefunden");
+
+  const sammle = (block) =>
+    (block.match(/'jaddon\.[a-z0-9_]+':\s*'(?:[^'\\]|\\.)*'/g) || []).join("\n");
+  const jdDe = sammle(I18N.slice(deVon, enVon));
+  const jdEn = sammle(I18N.slice(enVon));
+  // Positivkontrolle: ohne sie waere jede Abwesenheits-Pruefung unten aus dem
+  // falschen Grund gruen (Register).
+  check(jdDe.length > 2000 && jdEn.length > 2000,
+        "die jaddon-Schluessel wurden in beiden Sprachen gefunden",
+        jdDe.length + " / " + jdEn.length);
+
+  for (const [name, block] of [["DE", jdDe], ["EN", jdEn]]) {
+    for (const wort of ["Ohne Vorlage", "ohne Vorlage",
+                        "Without a template", "without a template"]) {
+      check(block.indexOf(wort) < 0,
+            name + ": keine Anleitung sagt mehr '" + wort + "'");
+    }
+  }
+
+  const wert = (block, k) => {
+    const m = block.match(new RegExp("'" + k.replace(/\./g, "\\.")
+                                     + "':\\s*'((?:[^'\\\\]|\\\\.)*)'"));
+    return m ? m[1] : "";
+  };
+  const u3de = wert(jdDe, "jaddon.use_3");
+  const u3en = wert(jdEn, "jaddon.use_3");
+  check(/Zusammenfassen/.test(u3de),
+        "DE: use_3 nennt den Eintrag 'Zusammenfassen'", u3de.slice(0, 80));
+  /* ⚠ AUCH IM ENGLISCHEN STEHT DER DEUTSCHE NAME: das Fenster der Erweiterung
+   * ist einsprachig. Wer hier "Summarise" schreibt, laesst den Leser nach
+   * einem Eintrag suchen, den es nicht gibt - die Anleitung muss das
+   * Bedienelement bei SEINEM Namen nennen (Gloss in Klammern). */
+  check(/Zusammenfassen/.test(u3en),
+        "EN: use_3 nennt denselben deutschen Eintragstext",
+        u3en.slice(0, 80));
+
+  /* Das Rueckfall-Markup ist, was ein Leser SIEHT, bevor i18n laeuft. Weicht
+   * es ab, wechselt der Text vor seinen Augen. */
+  const fb = (HTML.match(/data-i18n-html="jaddon\.use_3">([\s\S]*?)<\/li>/)
+              || ["", ""])[1].trim();
+  check(fb === u3de.replace(/\\'/g, "'"),
+        "das Rueckfall-Markup in jira_addon.html ist deckungsgleich mit DE",
+        fb.slice(0, 80));
+}
+
 console.log("\n" + ok + " OK, " + fail + " FAIL");
 process.exit(fail ? 1 : 0);
 })();

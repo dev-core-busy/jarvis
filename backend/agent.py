@@ -1290,19 +1290,45 @@ KRITISCH – Autonomie-Regeln:
     def _llm_tools(self) -> list:
         """Die Werkzeuge, die an das Modell gehen.
 
-        Zwei Filter, beide nur fuer Sonderfaelle:
+        Drei Filter, alle nur fuer Sonderfaelle:
         1. Rollen-Whitelist (``_role_tools``) – der Zuschnitt der Rolle.
         2. ``delegate`` fliegt heraus, solange keine aktive Rolle existiert:
            ein Werkzeug ohne Ziel verleitet nur zu Fehlversuchen. Ob es
            ueberhaupt vorhanden ist, entscheidet der Skill "Agent Orchestrator".
+        3. ``_BLOCKED_TOOLS_FOR_LDAP`` fuer unprivilegierte Auftraggeber –
+           DIESELBE Begruendung wie unter (2), nur an anderer Stelle bezahlt.
 
-        Ohne Rolle und mit vorhandenen Rollen bleibt die Liste unveraendert –
-        der bestehende Betrieb aendert sich nicht.
+        WARUM (3) NOETIG WAR (gemessen 2026-09-02): der Dispatch weist diese
+        Werkzeuge hart ab, das MODELL bekam sie aber weiter angeboten. Folge in
+        jedem Lauf eines Netzwerk-Benutzers: das Modell greift danach, der
+        Aufruf wird verweigert, ein Schritt ist verbrannt – UND es entsteht ein
+        Eintrag in der Vorfallsliste, den der Benutzer weder angefordert hat
+        noch vermeiden kann. Genau deshalb ist ``blocked-tool`` seit dem
+        2026-08-05 als weich eingestuft: auf ECHT standen dort fuenf Eintraege
+        in fuenf Konten, alle ``spawn_agent``, keiner verlangt. Das war die
+        Behandlung des Symptoms; hier ist die Quelle.
+
+        **Der Dispatch bleibt die harte Schranke** – dieser Filter bestimmt nur,
+        was das Modell SIEHT. Modelle rufen auch nicht deklarierte Werkzeuge auf,
+        und ein Skill koennte ein Werkzeug am Dispatch vorbei benutzen.
+
+        Die Erinnerungs-Ausnahme gilt hier genauso wie dort: ein freigegebener
+        Messenger-Absender behaelt ``cron_create`` (siehe ``_reminder_exempt``) –
+        ohne das waere "Erinnere mich morgen um 6" tot, weil das Modell das
+        Werkzeug gar nicht mehr kennt.
+
+        Ohne Rolle, mit vorhandenen Rollen und fuer privilegierte Auftraggeber
+        bleibt die Liste unveraendert – der bestehende Betrieb aendert sich nicht.
         """
         tools = self._tool_instances
         allow = getattr(self, "_role_tools", None)
         if allow is not None:
             return [t for t in tools if t.name in allow]
+        if not self._actor_is_privileged():
+            _u = self.actor_name()
+            tools = [t for t in tools
+                     if t.name not in _BLOCKED_TOOLS_FOR_LDAP
+                     or _reminder_exempt(t.name, _u)]
         if any(t.name == "delegate" for t in tools):
             try:
                 from backend import agent_roles

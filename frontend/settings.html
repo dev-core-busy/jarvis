@@ -23,7 +23,7 @@
     <link rel="stylesheet" href="/static/css/theme.css?v=22">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=8">
-    <link rel="stylesheet" href="/static/css/style.css?v=165">
+    <link rel="stylesheet" href="/static/css/style.css?v=167">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=6">
 </head>
 
@@ -5028,7 +5028,16 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                         <span class="sec-sub-hint" id="sec-viol-count"></span>
                                     </summary>
                                     <div class="sec-sub-body">
-                                        <p class="kb-hint" data-i18n="security.violations_desc">Im Tool-Dispatch verweigerte Zugriffe (Secrets/Root/Base64) von Netzwerk-Benutzern. Nach mehreren Verstößen innerhalb kurzer Zeit wird der Account automatisch gesperrt (lokale Administratoren ausgenommen).</p>
+                                        <p class="kb-hint" data-i18n="security.violations_desc">Im Tool-Dispatch verweigerte Zugriffe von Netzwerk-Benutzern – zwei Sorten mit entgegengesetzter Bedeutung. VERSTOSS: Angriffsindiz (Secrets, Root, Base64); mehrere davon innerhalb kurzer Zeit sperren das Konto automatisch, lokale Administratoren ausgenommen. GRENZE: eine Sandbox-Schranke, die der Benutzer normal nicht kennen kann (geratener Pfad, Werkzeugwahl des Modells) – wird protokolliert, sperrt nichts und zählt auch später nicht mit.</p>
+                                        <!-- Filter: nur Angriffsindizien. Der Zaehler in der Kopfzeile
+                                             nennt weiter BEIDE Gesamtzahlen – gefiltert wird die Liste,
+                                             nicht die Aussage darueber, was passiert ist. -->
+                                        <label class="checkbox-group" id="sec-viol-onlyhard-box"
+                                               style="display:inline-flex;gap:6px;margin:0 0 10px;cursor:pointer;">
+                                            <input type="checkbox" id="sec-viol-onlyhard"
+                                                   style="width:16px;height:16px;accent-color:var(--accent);">
+                                            <span data-i18n="security.viol_only_hard">Nur Verstöße</span>
+                                        </label>
                                         <div id="sec-viol-list"></div>
                                     </div>
                                 </details>
@@ -5141,7 +5150,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
     <script src="/static/js/icons.js?v=1"></script>
-    <script src="/static/js/i18n.js?v=210"></script>
+    <script src="/static/js/i18n.js?v=212"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=21"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -5171,7 +5180,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/telemetry.js?v=9"></script>
     <script src="/static/js/branding.js?v=26"></script>
     <script src="/static/js/theme.js?v=3"></script>
-    <script src="/static/js/security_incidents.js?v=30"></script>
+    <script src="/static/js/security_incidents.js?v=32"></script>
     <script src="/static/js/ldap_picker.js?v=11"></script>
     <script src="/static/js/excel_admin.js?v=8"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>

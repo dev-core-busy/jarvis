@@ -4780,6 +4780,52 @@ select.input-field {
     border-bottom: 1px solid var(--border);
     overscroll-behavior: contain;
 }
+
+/* ── Zugriffs-Verstoesse: VERSTOSS gegen GRENZE ──────────────────────────────
+   Zwei Sorten Eintrag mit entgegengesetzter Bedeutung standen bis 2026-09-02 in
+   derselben flachen Liste: ein Angriffsindiz (zaehlt zur Auto-Sperre) und eine
+   Sandbox-Grenze (`soft`, zaehlt ausdruecklich NICHT). Das Backend stuft seit
+   dem 2026-08-05 ein, die Oberflaeche las das Feld nie – auf DEV waren allein
+   12 von 18 Eintraegen weich.
+   Die Aussage steht im WORT des Abzeichens; Farbe und Randstreifen sind nur
+   die zweite Ebene (Regel: Farbe allein ist keine Information). */
+.sec-viol-row {
+    padding: 6px 0 6px 10px;
+    border-bottom: 1px solid rgba(var(--fg-rgb), .08);
+    border-left: 3px solid transparent;
+}
+.sec-viol-row.is-hard { border-left-color: rgba(var(--danger-rgb), 0.65); }
+.sec-viol-row.is-soft { border-left-color: var(--border); }
+.sec-viol-meta { font-size: 0.78rem; color: var(--text-muted); }
+.sec-viol-detail { font-size: 0.82rem; color: var(--text-primary); }
+.sec-viol-task { font-size: 0.78rem; color: var(--text-secondary); }
+/* Die Begruendung, warum dieser Eintrag nichts sperrt. Ohne sie waere das
+   Abzeichen ein unerklaertes Zeichen. */
+.sec-viol-reason { font-size: 0.76rem; color: var(--text-muted); font-style: italic; }
+/* Sagt bei aktivem Filter, WIE VIEL nicht zu sehen ist. Ohne diese Zeile
+   haelt der Administrator die gefilterte Liste fuer den Gesamtbestand. */
+.sec-viol-hidden { margin: 0 0 6px; font-style: italic; }
+.sec-viol-badge {
+    display: inline-block;
+    margin-right: 8px;
+    padding: 0 7px;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    line-height: 1.5rem;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+.sec-viol-badge.is-hard {
+    background: rgba(var(--danger-rgb), 0.16);
+    border: 1px solid rgba(var(--danger-rgb), 0.5);
+    color: var(--text-primary);
+}
+.sec-viol-badge.is-soft {
+    background: rgba(var(--fg-rgb), 0.06);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+}
 .sec-btn.primary { background: var(--accent); border-color: transparent; color: #fff; }
 .sec-btn.primary:hover:not(:disabled) { opacity: 0.88; color: #fff; background: var(--accent); }
 .sec-btn.danger { border-color: rgba(var(--danger-rgb), 0.5); color: var(--danger); }

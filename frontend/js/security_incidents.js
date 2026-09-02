@@ -941,30 +941,133 @@
             }
         },
 
+        /* Warum ein Eintrag als GRENZE eingestuft ist – die Begruendung, die der
+         * Administrator braucht, um ihn zu uebergehen.
+         *
+         * Reihenfolge ist Absicht: zuerst der im Eintrag GESPEICHERTE Grund
+         * (Altbestand aus deploy/security/reclassify_violations.py und die
+         * nur protokollierten Fremdtext-Vorfaelle aus `logonly` tragen ihn),
+         * sonst aus dem Muster abgeleitet. Ein abgeleiteter Text ist
+         * uebersetzbar, ein gespeicherter nicht – deshalb wird der abgeleitete
+         * bevorzugt, wo es einen gibt, und der gespeicherte ist der Rueckfall
+         * fuer alles, was diese Zuordnung nicht kennt.
+         * Ohne Zuordnung UND ohne gespeicherten Grund bleibt eine allgemeine,
+         * aber wahre Aussage – nie eine leere Zeile: ein Abzeichen ohne
+         * Erklaerung ist eine Zumutung. */
+        SOFT_GRUENDE: {
+            'blocked-tool': ['security.soft_tool',
+                'Werkzeugwahl des Modells – vom Benutzer weder angefordert noch vermeidbar'],
+            'fs-deny': ['security.soft_fs',
+                'geratener Pfad außerhalb der Arbeitsbereiche – kein Secret-/System-Ziel'],
+            'shell-write': ['security.soft_write',
+                'Schreibziel außerhalb /tmp, aber kein System-/Secret-Bereich'],
+            'injektion-erkannt': ['security.soft_fremdtext',
+                'nur protokolliert – der Text stammt von einem Fremden, dieser Eintrag sperrt nichts']
+        },
+        softGrund: function (v) {
+            var m = Mgr.SOFT_GRUENDE[v.pattern] || Mgr.SOFT_GRUENDE[v.kind];
+            if (m) return T(m[0], m[1]);
+            if (v.soft_reason) return String(v.soft_reason);
+            return T('security.soft_generic', 'Sandbox-Grenze – zählt nicht zur Sperre');
+        },
+        /* '3 Verstöße · 41 Grenzen' statt einer Gesamtzahl. Eine Summe aus beidem
+         * sagt nichts: die eine Haelfte sperrt Konten, die andere ist per
+         * Definition harmlos. */
+        violCount: function (hart, weich) {
+            var teile = [];
+            function n(z, sg, pl, dsg, dpl) {
+                return z + ' ' + (z === 1 ? T(sg, dsg) : T(pl, dpl));
+            }
+            if (hart) teile.push(n(hart, 'security.viol_sg_hard', 'security.viol_pl_hard', 'Verstoß', 'Verstöße'));
+            if (weich) teile.push(n(weich, 'security.viol_sg_soft', 'security.viol_pl_soft', 'Grenze', 'Grenzen'));
+            return teile.length ? '(' + teile.join(' · ') + ')' : '';
+        },
+
+        /* Filter "nur Verstoesse". GEMERKT, nicht pro Aufruf neu: einen Filter,
+         * den man nach jedem Laden erneut setzen muss, benutzt niemand.
+         * Das ist nur vertretbar, WEIL der Zaehler in der Kopfzeile weiterhin
+         * beide Gesamtzahlen nennt und die Liste ausdruecklich sagt, wie viele
+         * Eintraege sie ausblendet – sonst haelt ein Administrator eine
+         * gefilterte Liste fuer den ganzen Bestand (dieselbe Regel wie bei
+         * cron_list, das die ANZAHL ausgeblendeter Auftraege nennt). */
+        VIOL_FILTER_KEY: 'jarvis_sec_viol_nur_hart',
+        _violAlle: null,
+        nurHart: function () {
+            try { return localStorage.getItem(Mgr.VIOL_FILTER_KEY) === '1'; }
+            catch (e) { return false; }
+        },
+        bindViolFilter: function () {
+            var cb = $('sec-viol-onlyhard');
+            if (!cb || cb._violBound) return;
+            cb._violBound = true;
+            cb.checked = Mgr.nurHart();
+            cb.addEventListener('change', function () {
+                try { localStorage.setItem(Mgr.VIOL_FILTER_KEY, cb.checked ? '1' : '0'); }
+                catch (e) { /* privater Modus: der Filter gilt dann nur fuer diese Sitzung */ }
+                // Neu zeichnen aus dem GEMERKTEN Vollbestand, nicht aus dem DOM:
+                // die gefilterte Liste kennt die ausgeblendeten Eintraege nicht mehr.
+                Mgr.renderViolations(Mgr._violAlle || []);
+            });
+        },
+
         renderViolations: function (list) {
             var box = $('sec-viol-list');
             if (!box) return;
+            Mgr._violAlle = list;
             Mgr.bindViolRemeasure();
+            Mgr.bindViolFilter();
             // Anzahl in die Kopfzeile des Unter-Containers: der startet zu, ohne die
-            // Zahl waere nicht erkennbar, ob sich das Aufklappen lohnt. Reine Ziffern,
-            // daher kein i18n-Schluessel noetig.
+            // Zahl waere nicht erkennbar, ob sich das Aufklappen lohnt.
+            var hart = 0, weich = 0;
+            list.forEach(function (v) { if (v.soft) weich++; else hart++; });
+            // Der Zaehler nennt IMMER den Gesamtbestand – auch bei aktivem Filter.
+            // Er ist die Aussage darueber, was passiert ist; der Filter bestimmt
+            // nur, was gerade auf dem Bildschirm steht.
             var cnt = $('sec-viol-count');
-            if (cnt) cnt.textContent = list.length ? '(' + list.length + ')' : '';
-            if (!list.length) {
+            if (cnt) cnt.textContent = list.length ? Mgr.violCount(hart, weich) : '';
+            var filter = Mgr.nurHart();
+            var box2 = $('sec-viol-onlyhard-box');
+            // Ein Filter ohne etwas zu filtern ist Rauschen – aber nur ausblenden,
+            // wenn die Liste leer ist: waere er bei "0 Grenzen" weg, verschwaende
+            // ein Bedienelement, dessen Zustand gemerkt ist (und der Benutzer
+            // wuesste nicht, warum spaeter wieder etwas fehlt).
+            if (box2) box2.hidden = !list.length;
+            var zeige = filter ? list.filter(function (v) { return !v.soft; }) : list;
+            if (!zeige.length) {
                 box.style.maxHeight = '';
                 box.classList.remove('sec-scrollbox');
-                box.innerHTML = '<p class="kb-hint">' + esc(T('security.no_violations', 'Keine Verstöße protokolliert.')) + '</p>';
+                // Die Leermeldung darf NICHT behaupten, es sei nichts passiert,
+                // wenn nur der Filter alles ausblendet.
+                var leer = (filter && weich)
+                    ? T('security.viol_only_soft', 'Keine Verstöße – {n} Grenzen sind ausgeblendet.')
+                        .replace('{n}', weich)
+                    : T('security.no_violations', 'Keine Verstöße protokolliert.');
+                box.innerHTML = '<p class="kb-hint">' + esc(leer) + '</p>';
                 return;
             }
-            box.innerHTML = list.map(function (v) {
+            var versteckt = list.length - zeige.length;
+            box.innerHTML = (versteckt
+                ? '<p class="kb-hint sec-viol-hidden">'
+                    + esc(T('security.viol_hidden', '{n} Grenzen ausgeblendet.').replace('{n}', versteckt))
+                    + '</p>'
+                : '') + zeige.map(function (v) {
+                // Das Abzeichen traegt die Aussage als WORT, nicht nur als Farbe
+                // (dieselbe Regel wie bei den Anwesenheits-Pillen): wer die Liste
+                // in Graustufen ausdruckt oder Farben nicht unterscheidet, muss
+                // 'Verstoß' und 'Grenze' trotzdem auseinanderhalten koennen.
+                var soft = !!v.soft;
+                var badge = '<span class="sec-viol-badge ' + (soft ? 'is-soft' : 'is-hard') + '">'
+                    + esc(soft ? T('security.viol_sg_soft', 'Grenze') : T('security.viol_sg_hard', 'Verstoß'))
+                    + '</span>';
                 var meta = esc(fmtTs(v.ts)) + ' · <strong style="color:var(--text-primary);">' + esc(v.user) + '</strong> · '
                     + esc(chanLabel(v.channel)) + ' · ' + esc(v.pattern || '');
                 if (v.tool) meta += ' · ' + esc(v.tool);
                 if (v.ip) meta += ' · IP ' + esc(v.ip);
-                var html = '<div class="sec-viol-row" style="padding:6px 0;border-bottom:1px solid rgba(var(--fg-rgb),.08);">'
-                    + '<div style="font-size:0.78rem;color:var(--text-muted);">' + meta + '</div>';
-                if (v.detail) html += '<div style="font-size:0.82rem;color:var(--text-primary);">' + esc(v.detail) + '</div>';
-                if (v.task) html += '<div style="font-size:0.78rem;color:var(--text-secondary);">'
+                var html = '<div class="sec-viol-row' + (soft ? ' is-soft' : ' is-hard') + '">'
+                    + '<div class="sec-viol-meta">' + badge + meta + '</div>';
+                if (v.detail) html += '<div class="sec-viol-detail">' + esc(v.detail) + '</div>';
+                if (soft) html += '<div class="sec-viol-reason">' + esc(Mgr.softGrund(v)) + '</div>';
+                if (v.task) html += '<div class="sec-viol-task">'
                     + esc(T('security.f_request', 'Anfrage')) + ': ' + esc(v.task) + '</div>';
                 return html + '</div>';
             }).join('');

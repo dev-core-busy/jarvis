@@ -504,5 +504,111 @@ check("eine beschaedigte Datei bleibt unveraendert",
 if _sicherung is not None:
     jv._DATEI.write_bytes(_sicherung)
 
+# ═════════════════════════════════════════════════════════════════════════════
+section("16) 'Fuer alle Benutzer' ist ein VERSCHIEBEN (Fix 2026-09-02)")
+# ═════════════════════════════════════════════════════════════════════════════
+# ⚠ GEMELDET: "wenn ich in der Vorlage 'Loesung suchen' versuche 'fuer alle
+# Benutzer' auszuwaehlen und zu speichern, kommt 'Die Vorlage wurde nicht
+# gefunden.'" Zutreffend, und in BEIDE Richtungen: gesucht wurde die Kennung
+# nur in der ZIELliste, und die ergibt sich aus `global_`. Eine eigene Vorlage
+# lag aber in `benutzer[...]` - die Suche fand nichts, und die Meldung
+# behauptete, es gaebe die Vorlage nicht.
+_v = jv.speichern("chef", "Lösung suchen", "Suche nach der Lösung.")
+check("angelegt als eigene Vorlage",
+      any(x["id"] == _v["id"] for x in jv.liste("chef")["eigene"]))
+
+# ⚠ IM try, UND ZWAR GERADE HIER: der gemeldete Fehler ist eine Ausnahme
+# ("Die Vorlage wurde nicht gefunden"). Ungefangen bricht der Lauf ab und
+# liefert KEINE Bilanz - der Waechter saehe aus, als waere er nicht gelaufen,
+# statt den Fehler zu melden. Register, und in dieser Sitzung mehrfach bezahlt.
+_r = {"id": ""}
+try:
+    _r = jv.speichern("chef", "Lösung suchen", "Suche nach der Lösung.",
+                      vid=_v["id"], global_=True, ist_admin=True)
+    _d = jv.liste("chef", ist_admin=True)
+    check("eigen -> gemeinsam: sie liegt jetzt in den gemeinsamen",
+          any(x["id"] == _v["id"] for x in _d["global"]))
+    check("und nicht mehr in den eigenen",
+          not any(x["id"] == _v["id"] for x in _d["eigene"]))
+except Exception as _e:  # noqa: BLE001
+    check("eigen -> gemeinsam: sie liegt jetzt in den gemeinsamen", False,
+          "es wirft: %s" % _e)
+    check("und nicht mehr in den eigenen", False, "s.o.")
+# ⚠ DIE KENNUNG BLEIBT. Persoenliche Standards (`standard`) und die Automatik
+# der Erweiterung (`auto_vorlage`) zeigen darauf - eine neue Kennung waere ein
+# stiller Verlust dieser Zuordnungen bei ALLEN Benutzern.
+check("die Kennung bleibt dieselbe", _r["id"] == _v["id"], _r["id"])
+
+# Und zurueck. ⚠ IM try: wechselt die Kennung beim Verschieben, findet die
+# zweite Stufe sie nicht mehr und WIRFT - der Lauf braeche ab und lieferte keine
+# Bilanz, also genau das, was von "nicht gelaufen" nicht zu unterscheiden ist.
+try:
+    jv.speichern("chef", "Lösung suchen", "x", vid=_v["id"], global_=False,
+                 ist_admin=True)
+    _d = jv.liste("chef", ist_admin=True)
+    check("gemeinsam -> eigen geht ebenfalls",
+          any(x["id"] == _v["id"] for x in _d["eigene"])
+          and not any(x["id"] == _v["id"] for x in _d["global"]))
+except Exception as _e:  # noqa: BLE001
+    check("gemeinsam -> eigen geht ebenfalls", False, "es wirft: %s" % _e)
+
+# Der persoenliche Standard ueberlebt das Verschieben - er haengt an der
+# Kennung, und die aendert sich nicht.
+# ⚠ IM try: wechselt die Kennung beim Verschieben (das waere der Fehler, den
+# diese Pruefung sucht), findet `standard_setzen` sie nicht mehr und WIRFT - der
+# Lauf braeche ab und lieferte keine Bilanz (Register).
+try:
+    jv.standard_setzen("chef", _v["id"], ist_admin=True)
+    jv.speichern("chef", "Lösung suchen", "x", vid=_v["id"], global_=True,
+                 ist_admin=True)
+    check("der persoenliche Standard ueberlebt das Verschieben",
+          jv.liste("chef", ist_admin=True)["standard"] == _v["id"])
+except Exception as _e:  # noqa: BLE001
+    check("der persoenliche Standard ueberlebt das Verschieben", False,
+          "es wirft: %s" % _e)
+
+# ── Rechte ─────────────────────────────────────────────────────────────────
+# Eine gemeinsame zu einer eigenen zu machen nimmt sie ALLEN anderen weg. Das
+# ist eine Entscheidung des Administrators, nicht die eines Benutzers.
+_g = jv.speichern("chef", "Gemeinsame", "x", global_=True, ist_admin=True)
+try:
+    jv.speichern("bob", "Gemeinsame", "x", vid=_g["id"], global_=False,
+                 ist_admin=False)
+    check("ein Nicht-Admin darf eine gemeinsame nicht 'privatisieren'", False)
+except jv.VorlagenFehler as f:
+    check("ein Nicht-Admin darf eine gemeinsame nicht 'privatisieren'",
+          "Administrator" in str(f), str(f))
+
+# Und der Weg nach oben bleibt Admins vorbehalten (Bestandsregel).
+_e = jv.speichern("bob", "Bobs eigene", "x")
+try:
+    jv.speichern("bob", "Bobs eigene", "x", vid=_e["id"], global_=True,
+                 ist_admin=False)
+    check("ein Nicht-Admin darf nichts gemeinsam machen", False)
+except jv.VorlagenFehler as f:
+    check("ein Nicht-Admin darf nichts gemeinsam machen",
+          "Administrator" in str(f), str(f))
+
+# ── Was NICHT verschoben werden darf ──────────────────────────────────────
+# Eine wirklich unbekannte Kennung bleibt ein Fehler - sonst wuerde ein
+# Tippfehler stillschweigend eine neue Vorlage anlegen.
+try:
+    jv.speichern("chef", "Neu?", "y", vid="gibtsnicht", ist_admin=True)
+    check("eine unbekannte Kennung bleibt ein Fehler", False)
+except jv.VorlagenFehler as f:
+    check("eine unbekannte Kennung bleibt ein Fehler",
+          "nicht gefunden" in str(f), str(f))
+
+# Eine FREMDE eigene Vorlage ist unerreichbar - auch fuer einen Admin, auch
+# ueber den Verschiebe-Weg: gesucht wird nur in der eigenen Liste.
+_bob = jv.speichern("bob", "Bobs zweite", "x")
+try:
+    jv.speichern("chef", "Bobs zweite", "x", vid=_bob["id"], global_=True,
+                 ist_admin=True)
+    check("eine FREMDE eigene Vorlage bleibt unerreichbar", False)
+except jv.VorlagenFehler as f:
+    check("eine FREMDE eigene Vorlage bleibt unerreichbar",
+          "nicht gefunden" in str(f), str(f))
+
 print("\n%d OK, %d FAIL" % (_ok, _fail))
 sys.exit(1 if _fail else 0)

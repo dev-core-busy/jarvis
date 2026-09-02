@@ -498,6 +498,35 @@ html.leiste #f-ergebnis {
 .zugriff-zeile > span { display: block; }
 .zugriff-zeile > button { display: block; margin-top: 8px; }
 
+/* ── „Neue Fassung verfuegbar" ─────────────────────────────────────────────
+ *
+ * Deutlich, aber keine Fehlermeldung: es ist kein Schaden, sondern eine
+ * Auskunft. Deshalb der Akzentrahmen und keine Signalfarbe – und DECKENDE
+ * Flaeche, weil der Kasten ueber dem Arbeitsbereich sitzt (Projektregel). */
+.update-hinweis {
+  margin: 0 0 10px;
+  padding: 7px 9px;
+  border: 1px solid var(--akzent);
+  border-radius: 5px;
+  background: var(--grund);
+  color: var(--schrift);
+}
+/* Register: wer einer Klasse Aussehen gibt, muss `[hidden]` mitnehmen. */
+.update-hinweis[hidden] { display: none !important; }
+
+/* ── Abschnittsgrenze im Arbeitsbereich ────────────────────────────────────
+ *
+ * Dieselbe Linie wie am Fuss der Ansicht, und aus demselben Grund: sie sagt,
+ * dass darunter eine ANDERE Aufgabe beginnt. Oben "Vorlage starten und
+ * übernehmen", darunter "meinen eigenen Entwurf überarbeiten lassen" – zwei
+ * Dinge, die ohne Trennung wie eine Reihe gleichartiger Knöpfe aussehen
+ * (Vorgabe 2026-09-02). */
+.abschnitt {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rand);
+}
+
 /* ── Umschalter Popup ↔ Seitenleiste ───────────────────────────────────────
  * Steht am Fuss und ist bewusst leise gezeichnet: eine Einstellung, die man
  * einmal trifft, darf nicht mit den Arbeitsknoepfen um Aufmerksamkeit ringen.

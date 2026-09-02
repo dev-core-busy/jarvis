@@ -12088,7 +12088,23 @@ def _jira_basis_url(user: str) -> str:
     """
     try:
         from backend import jira_accounts  # noqa: PLC0415
-        roh = (jira_accounts.aufloesen(user)["client"].base_url or "").strip()
+        c = jira_accounts.aufloesen(user)["client"]
+        # ⚠ DAS ATTRIBUT HEISST `base`, NICHT `base_url` – und hier stand
+        # `base_url`. `getattr` gibt dann None, daraus wird "" und die Funktion
+        # lieferte **immer** den leeren String: die Zugriffszeile der
+        # Seitenleiste konnte nie einen Ort nennen und blieb verborgen. Genau
+        # der Kreis, den sie aufloesen sollte (gemeldet fuer Edge 2026-09-02:
+        # "Ticket wird nicht erkannt", ohne jeden Weg heraus).
+        #
+        # Der Waechter hat das nicht gefangen, weil er nur die EXISTENZ der
+        # Funktion und das https-Filter geprueft hat – nicht, ob sie je eine
+        # Adresse herausgibt. Jetzt wird sie gegen den ECHTEN JiraClient
+        # gemessen (tests/test_jira_assist.py).
+        #
+        # `base_url` bleibt als Rueckfall stehen: falls das Attribut je so
+        # heisst, soll es weiter funktionieren.
+        roh = str(getattr(c, "base", None)
+                  or getattr(c, "base_url", None) or "").strip()
     except Exception:  # noqa: BLE001
         return ""
     if not roh.lower().startswith("https://"):
@@ -12167,6 +12183,12 @@ async def jira_assist_health(request: Request,
         # Keine neue Preisgabe: derselbe Endpunkt gibt seit jeher den
         # Netzfreigabe-Pfad heraus, und er haengt an `require_jira_assist_access`.
         "jira_basis": _jira_basis_url(user),
+        # WELCHE FASSUNG DIESER SERVER AUSLIEFERT. Die Erweiterung vergleicht
+        # sie mit ihrer eigenen und sagt es, wenn eine neuere bereitliegt – sie
+        # aktualisiert sich nicht von selbst (von Hand geladen, nicht aus einem
+        # Store). Leer = nicht ermittelbar; dann zeigt sie nichts an, statt eine
+        # Version zu behaupten.
+        "paket_version": jira_assist.paket_version(),
     })
 
 

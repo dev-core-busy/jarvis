@@ -467,6 +467,11 @@ def speichern(user: str, name: str, text: str, vid: str = "",
     ist also ein Fehler des Aufrufers – und eine Vorlage, die etwas anderes tut
     als bestellt, faellt niemandem auf. Beim LESEN ist die Abwaegung umgekehrt
     (``art_von``): dort ist der strengere Modus die richtige Antwort.
+
+    ``global_`` UMGESTELLT heisst VERSCHIEBEN – die Vorlage wandert zwischen
+    "meine" und "gemeinsam" und behaelt ihre Kennung (persoenliche Standards
+    und die Automatik der Erweiterung zeigen darauf). Vorher endete das mit
+    "Die Vorlage wurde nicht gefunden": gesucht wurde nur in der Zielliste.
     """
     # ⚠ SAEEN AUCH HIER, nicht nur in `liste()`. Ist die Datei noch nicht da und
     # der ERSTE Zugriff ein Schreibvorgang, entsteht sie mit genau dieser einen
@@ -502,6 +507,45 @@ def speichern(user: str, name: str, text: str, vid: str = "",
                     v["art"] = a
                 _speichern(d)
                 return _ansicht(v)
+
+        # ── DER HAKEN "FUER ALLE BENUTZER" IST EIN VERSCHIEBEN ─────────────
+        # ⚠ GEMELDET 2026-09-02: "wenn ich in der Vorlage 'Loesung suchen'
+        # versuche 'fuer alle Benutzer' auszuwaehlen und zu speichern, kommt
+        # 'Die Vorlage wurde nicht gefunden.'" Zutreffend, und in BEIDE
+        # Richtungen: gesucht wurde die Kennung nur in der ZIELliste, und die
+        # ergibt sich aus `global_`. Eine eigene Vorlage lag aber in
+        # `benutzer[...]` - also fand die Suche nichts und die Meldung
+        # behauptete, es gaebe die Vorlage nicht. Eine Umstellung eigen <->
+        # gemeinsam war damit unmoeglich.
+        #
+        # Die Kennung BLEIBT dabei dieselbe. Das ist der Punkt: persoenliche
+        # Standards (`standard`) und die Automatik-Einstellung der Erweiterung
+        # (`auto_vorlage`) zeigen darauf - eine neue Kennung waere ein stiller
+        # Verlust dieser Zuordnungen bei allen Benutzern.
+        quelle = ((d.get("benutzer") or {}).get(_key(user)) or []) if global_ \
+            else (d.get("global") or [])
+        for i, v in enumerate(quelle):
+            if v.get("id") != vid:
+                continue
+            # global -> eigen nimmt die Vorlage ALLEN anderen weg; das ist eine
+            # Entscheidung des Administrators, nicht die eines Benutzers.
+            if not global_ and not ist_admin:
+                raise VorlagenFehler("Nur Administratoren dürfen eine "
+                                     "gemeinsame Vorlage in eine eigene "
+                                     "umwandeln.")
+            if len(ziel) >= MAX_JE_BENUTZER:
+                raise VorlagenFehler("Mehr als %d Vorlagen sind nicht "
+                                     "vorgesehen." % MAX_JE_BENUTZER)
+            v["name"], v["text"] = n, t
+            if ber is not None:
+                v["bereiche"] = ber
+            if a is not None:
+                v["art"] = a
+            quelle.pop(i)
+            ziel.append(v)
+            _speichern(d)
+            return _ansicht(v)
+
         raise VorlagenFehler("Die Vorlage wurde nicht gefunden.")
 
     if len(ziel) >= MAX_JE_BENUTZER:

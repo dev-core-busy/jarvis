@@ -589,9 +589,20 @@ async function tabErmitteln() {
                  + "Vordergrund und klicke erneut auf das Symbol.";
   }
   if (!_tabFehler && t && !t.url) {
-    _tabFehler = "Die Adresse dieses Tabs ist für die Erweiterung nicht "
-                 + "lesbar. Klicke auf das Symbol in der Symbolleiste, "
-                 + "während das Ticket im Vordergrund ist.";
+    /* ⚠ ZWEI VERSCHIEDENE WEGE, und der falsche kostet Zeit. Im POPUP erteilt
+     * der Klick auf das Symbol `activeTab` – dort ist "klick auf das Symbol"
+     * die Loesung. In der LEISTE gilt `activeTab` nicht ueber den Tab hinaus,
+     * in dem sie geoeffnet wurde: dort hilft nur das dauerhafte Host-Recht,
+     * und dafuer gibt es den Knopf in der Zugriffszeile. Wer dort "klick auf
+     * das Symbol" liest, klappt die Leiste zu und wieder auf – und wundert
+     * sich. */
+    _tabFehler = _leiste
+      ? "Die Adresse dieses Tabs ist für die Seitenleiste nicht lesbar – "
+        + "deshalb erkennt sie kein Ticket. Erlaube ihr unten dauerhaften "
+        + "Zugriff auf den Jira-Server."
+      : "Die Adresse dieses Tabs ist für die Erweiterung nicht lesbar. Klicke "
+        + "auf das Symbol in der Symbolleiste, während das Ticket im "
+        + "Vordergrund ist.";
   }
   ticketAnzeigen();
 }
@@ -657,6 +668,18 @@ async function start() {
   if (z.angemeldet) {
     el.abmelden.hidden = false;
     if (el.reset) el.reset.hidden = false;
+    /* „[Benutzer] abmelden" – dasselbe Muster wie im Portal
+     * (portal.html::pt-logout). Der Knopf traegt nur ein Symbol; wer darauf
+     * zeigt, soll sehen, WESSEN Anmeldung er beendet. Ohne bekannten Namen
+     * bleibt es beim schlichten „Abmelden" – ein „undefined abmelden" waere
+     * schlimmer als kein Name. */
+    const titel = abmeldeTitel(z.benutzer);
+    el.abmelden.title = titel;
+    el.abmelden.setAttribute("aria-label", titel);
+    /* OHNE `await`: der Hinweis ist eine Auskunft, kein Arbeitsschritt – er
+     * darf `start()` nicht aufhalten (dort haengen gleich danach die
+     * Tab-Zuhoerer der Leiste, und die sind eine Sicherheitsschranke). */
+    updateHinweis();
     // Das Pulldown gleich füllen – nicht erst beim Öffnen des Zahnrads:
     // sonst steht dort „Standard“, obwohl Vorlagen hinterlegt sind.
     vorlagenLaden();
@@ -719,6 +742,70 @@ async function ticketLageAnwenden(gemerkt) {
    * Der Preis ist eine kurze Lücke zwischen Entscheidung und Start; sie ist in
    * `autoAktionPruefen` durch die zweite Prüfung von `_key` abgedeckt. */
   autoAktionPruefen(passt);
+}
+
+/** „[Benutzer] abmelden" – oder „Abmelden", wenn der Name unbekannt ist.
+ *
+ * Dasselbe Muster wie im Portal (portal.html::pt-logout). Der Knopf traegt nur
+ * ein Symbol; wer darauf zeigt, soll sehen, WESSEN Anmeldung er beendet.
+ *
+ * EIGENE FUNKTION, damit sie messbar ist: als Zeile in `start()` liess sich nur
+ * die Schreibweise pruefen – und ein Waechter, der auf `z.benutzer` sucht,
+ * trifft dort auch `z.benutzer_vorschlag` und bleibt gruen, obwohl der Name
+ * gar nicht mehr benutzt wird (genau so beim ersten Lauf passiert).
+ */
+function abmeldeTitel(wer) {
+  const n = String(wer || "").trim();
+  // Kein Name: das schlichte Wort. „undefined abmelden" waere schlimmer als
+  // kein Name - und ein leerer Vorsatz („ abmelden") sieht wie ein Fehler aus.
+  return n ? n + " abmelden" : "Abmelden";
+}
+
+/** Sagt es, wenn der Server eine NEUERE Fassung ausliefert.
+ *
+ * ⚠ DIE ERWEITERUNG AKTUALISIERT SICH NICHT VON SELBST. Sie ist von Hand
+ * geladen, nicht aus einem Store – bisher erfuhr niemand von einer neuen
+ * Fassung, und ein laengst behobener Fehler blieb wochenlang stehen. Die
+ * Stand-Warnung deckt das NICHT ab: sie greift nur bei einem HALB
+ * aktualisierten Paket (Fenster neu, Hintergrund alt).
+ *
+ * Verglichen werden die drei Zahlen der Version, nicht die Zeichenketten:
+ * "0.10.0" ist neuer als "0.9.0", als Text waere es kleiner. Fehlt eine
+ * Angabe oder ist sie unlesbar, wird NICHTS gezeigt – eine Warnung auf
+ * Verdacht verunsichert bei einer aktuellen Installation.
+ */
+async function updateHinweis() {
+  const p = $("update-hinweis");
+  if (!p) return;
+  const serverVersion = (await healthHolen()).paket_version || "";
+  /* ⚠ DER ZWEIG KANN FEHLEN – und genau darum ging es beim Edge-Fall: `api`
+   * liefert `undefined`, wenn keine Wurzel ihn hat. Wer hier ungeprueft
+   * dereferenziert, wirft ("Cannot read properties of undefined") und reisst
+   * `start()` mit – dann steht das ganze Fenster still, wegen einer blossen
+   * Auskunft. Ohne Manifest gibt es eben keinen Hinweis. */
+  const rt = api.runtime;
+  const eigene = (rt && rt.getManifest && rt.getManifest().version) || "";
+  const zahlen = (v) => String(v || "").trim().split(".").map((x) => parseInt(x, 10));
+  const a = zahlen(eigene), b = zahlen(serverVersion);
+  if (!a.length || !b.length || a.some(isNaN) || b.some(isNaN)) {
+    p.hidden = true;
+    return;
+  }
+  let neuer = false;
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i] || 0, y = b[i] || 0;
+    if (y > x) { neuer = true; break; }
+    if (y < x) break;
+  }
+  if (!neuer) { p.hidden = true; return; }
+  /* DER WEG GEHOERT IN DIE MELDUNG. „Es gibt eine neue Fassung" allein laesst
+   * den Benutzer suchen: das Paket kommt aus dem Portal, und danach muss die
+   * Erweiterung von Hand neu geladen werden – sonst antwortet der alte
+   * Service-Worker weiter (siehe STAND). */
+  p.textContent = "Neue Fassung " + serverVersion + " verfügbar (installiert: "
+    + eigene + "). Hol das Paket im Portal unter „Jira“ neu und lade die "
+    + "Erweiterung danach in der Erweiterungsverwaltung neu (⟳).";
+  p.hidden = false;
 }
 
 /** Traegt die gespeicherte Vorlagen-Kennung ins Pulldown ein.
@@ -2260,29 +2347,58 @@ function tabHerkunft() { return herkunftAus(_tabUrl); }
  * und den kennt die Erweiterung von sich aus nicht.
  * Fehlschlag ist kein Fehler: dann bleibt es beim Weg ueber die Tab-Adresse.
  */
-async function jiraBasisHolen() {
-  if (_jiraBasis) return _jiraBasis;
+/* Die Auskunft des Servers, EINMAL geholt.
+ *
+ * Zwei Dinge haengen daran: die Adresse des Jira-Servers (fuer die
+ * Berechtigungsabfrage der Leiste) und die Version des Pakets, das dieser
+ * Server ausliefert (fuer den Update-Hinweis). EIN Abruf fuer beides – zwei
+ * waeren zwei Roundtrips fuer dieselbe Antwort, und der Aufruf braucht ohnehin
+ * eine Anmeldung. Ein neuer Nachrichtenfall ist dafuer NICHT noetig, also
+ * bleibt `STAND` unberuehrt. */
+let _health = null;
+
+async function healthHolen() {
+  if (_health) return _health;
   try {
     const a = await frage({ art: "health" });
-    _jiraBasis = ((a.daten || {}).jira_basis || "").replace(/\/+$/, "");
+    _health = a.daten || {};
   } catch (e) {
-    _jiraBasis = "";
+    // Fehlschlag ist kein Fehler: dann gibt es keinen Update-Hinweis und die
+    // Zugriffszeile faellt auf den Weg ueber die Tab-Adresse zurueck.
+    _health = {};
   }
+  return _health;
+}
+
+async function jiraBasisHolen() {
+  if (_jiraBasis) return _jiraBasis;
+  _jiraBasis = String((await healthHolen()).jira_basis || "").replace(/\/+$/, "");
   return _jiraBasis;
 }
 
 async function zugriffZeileAktualisieren() {
   const p = $("leiste-zugriff");
   if (!p) return;
-  // Das Popup kommt mit `activeTab` aus - dort ist die Zeile immer aus.
-  if (!_leiste) { p.hidden = true; return; }
+  /* ⚠ SIE HING AN `_leiste` – UND DAS WAR IM EDGE-FALL EINE SACKGASSE.
+   *
+   * Die Begruendung war: "das Popup kommt mit `activeTab` aus, dort ist die
+   * Zeile immer aus". Richtig ist sie nur, SOLANGE `activeTab` wirkt. Ist die
+   * Tab-Adresse nicht lesbar (gemeldet fuer Edge 2026-09-02: "Tab nicht
+   * lesbar"), hilft ausschliesslich das dauerhafte Host-Recht – und dann muss
+   * der Weg dorthin sichtbar sein, ganz gleich ob Fenster oder Leiste. Wird
+   * die Leiste von einem Browser nicht als solche gemeldet, waere die Zeile
+   * sonst genau dort verborgen, wo sie gebraucht wird.
+   *
+   * Umgekehrt kostet das nichts: ist die Adresse lesbar (Normalfall im Popup),
+   * bleibt die Zeile weiter aus. */
+  const blind = !_tabUrl;
+  if (!_leiste && !blind) { p.hidden = true; return; }
 
   /* WELCHE HERKUNFT WIRD ERFRAGT? Steht in diesem Tab ein erkanntes Ticket,
    * ist seine Herkunft der richtige und sicherste Ort. Sonst die Adresse des
    * Jira-Servers laut Jarvis – NIE die eines beliebigen fremden Tabs: sonst
    * bekaeme jemand, der die Leiste im Intranet oeffnet, eine
    * Berechtigungsabfrage fuer das Intranet, die ihm gar nichts nuetzt. */
-  const blind = !_tabUrl;
   const herkunft = (_key && tabHerkunft()) || herkunftAus(await jiraBasisHolen());
   if (!herkunft) { p.hidden = true; return; }
 
@@ -2297,14 +2413,22 @@ async function zugriffZeileAktualisieren() {
   /* OHNE LESBARE TAB-ADRESSE IST DAS KEINE EMPFEHLUNG MEHR, SONDERN DIE
    * VORAUSSETZUNG - dann erkennt die Leiste ueberhaupt kein Ticket. Der Text
    * muss das unterscheiden, sonst sucht der Benutzer den Fehler bei sich. */
-  $("leiste-zugriff-text").textContent = blind
-    ? "Die Seitenleiste kann die Adresse des offenen Tabs nicht lesen und "
-      + "erkennt deshalb kein Ticket. Erlaube ihr dauerhaften Zugriff auf "
-      + herkunft + " – das kurzfristige Recht aus dem Klick auf das Symbol "
-      + "gilt nur für den Tab, aus dem sie geöffnet wurde. "
-    : "Damit die Seitenleiste beim Tab-Wechsel mitkommt und „Überarbeiten“ "
+  /* ⚠ DREI TEXTE, WEIL ES DREI LAGEN SIND – und der falsche Text schickt den
+   * Benutzer in die Irre. „Die Seitenleiste kann …" in einem POPUP zu lesen
+   * (Edge-Fall, in dem die Adresse auch dort nicht lesbar ist) laesst ihn nach
+   * einer Leiste suchen, die er nicht offen hat. */
+  $("leiste-zugriff-text").textContent = !blind
+    ? "Damit die Seitenleiste beim Tab-Wechsel mitkommt und „Überarbeiten“ "
       + "und „Einfügen“ weiter funktionieren, braucht sie dauerhaften Zugriff "
-      + "auf " + herkunft + ". ";
+      + "auf " + herkunft + ". "
+    : (_leiste
+        ? "Die Seitenleiste kann die Adresse des offenen Tabs nicht lesen und "
+          + "erkennt deshalb kein Ticket. Erlaube ihr dauerhaften Zugriff auf "
+          + herkunft + " – das kurzfristige Recht aus dem Klick auf das Symbol "
+          + "gilt nur für den Tab, aus dem sie geöffnet wurde. "
+        : "Die Erweiterung kann die Adresse des offenen Tabs nicht lesen und "
+          + "erkennt deshalb kein Ticket. Erlaube ihr dauerhaften Zugriff auf "
+          + herkunft + " – dann ist sie davon unabhängig. ");
   p.hidden = false;
 }
 

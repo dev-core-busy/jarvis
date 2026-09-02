@@ -2034,4 +2034,122 @@ check("ueberarbeiten" in _qa[i_art:i_art + 200],
       "und nimmt 'ueberarbeiten' ausdruecklich aus")
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+section("18) Die Jira-Adresse für die Berechtigungsabfrage (2026-09-02)")
+# ═══════════════════════════════════════════════════════════════════════════
+# ⚠ HIER LAG EIN FEHLER, DER EINE SACKGASSE ERZEUGT HAT.
+#
+# `_jira_basis_url` las `client.base_url` – das Attribut heisst aber `base`.
+# `getattr` gab None, daraus wurde "", und die Funktion lieferte **immer** den
+# leeren String. Folge: die Zugriffszeile der Seitenleiste konnte keinen Ort
+# nennen und blieb verborgen – genau der Kreis, den sie aufloesen sollte
+# (gemeldet fuer Edge: "Ticket wird nicht erkannt", ohne jeden Weg heraus).
+#
+# DER ALTE WAECHTER HAT DAS NICHT GEFANGEN, weil er nur die EXISTENZ der
+# Funktion und das https-Filter geprueft hat. Deshalb wird sie jetzt AUSGEFUEHRT
+# – und zwar gegen einen Client mit dem Attribut, das der ECHTE JiraClient hat.
+_qb = funktion(QUELLE_MAIN, "_jira_basis_url")
+check(bool(_qb), "main.py hat _jira_basis_url()")
+
+# ⚠ DAS ATTRIBUT WIRD IM QUELLTEXT NACHGESEHEN, NICHT IMPORTIERT: in dieser
+# Datei ist `backend.jira_client` durch eine Attrappe ersetzt (_stub_jira) –
+# ein Import wuerde die Attrappe gegen sich selbst pruefen und waere gruen,
+# egal wie das echte Attribut heisst. Genau diese Sorte Selbstbestaetigung hat
+# den Fehler ueberhaupt durchgelassen.
+_QC = (ROOT / "backend" / "jira_client.py").read_text(encoding="utf-8")
+check("self.base = " in _QC,
+      "der echte JiraClient setzt die Adresse in `self.base`")
+check("self.base_url = " not in _QC,
+      "und NICHT in `self.base_url` – dieser Name war der Fehler")
+
+# Ausgefuehrt: liefert die Funktion die Adresse eines Clients, wie es ihn
+# wirklich gibt? Das Modul wird dafuer per ast geschnitten und mit einer
+# Attrappe fuer `jira_accounts` gefahren.
+_ns = {}
+exec(compile(_qb, "<jira_basis>", "exec"), _ns)  # noqa: S102
+_jbu = _ns["_jira_basis_url"]
+
+
+class _KlientBase:
+    """Wie der ECHTE JiraClient: die Adresse steht in `base`."""
+
+    base = "https://servicedesk.example.invalid/"
+
+
+class _KlientAlt:
+    """Rueckfall - falls das Attribut je `base_url` heisst."""
+
+    base_url = "https://alt.example.invalid"
+
+
+class _KlientHttp:
+    base = "http://unverschluesselt.example.invalid"
+
+
+def _mit_klient(k):
+    """Fuehrt die echte Funktion mit einem gestellten Client aus.
+
+    ⚠ BEIDES SETZEN. `from backend import jira_accounts` schaut ZUERST auf das
+    Attribut des Pakets `backend` und erst dann in `sys.modules`. Wer nur
+    `sys.modules` stellt, bekommt das ECHTE Modul – der Test mass dann eine
+    fremde Konfiguration und meldete Fehler, die es nicht gab (genau so beim
+    ersten Lauf).
+    """
+    import backend as _bp  # noqa: PLC0415
+    m = types.ModuleType("backend.jira_accounts")
+    m.aufloesen = lambda user: {"client": k}
+    alt_mod = sys.modules.get("backend.jira_accounts")
+    alt_attr = getattr(_bp, "jira_accounts", None)
+    sys.modules["backend.jira_accounts"] = m
+    _bp.jira_accounts = m
+    try:
+        return _jbu("tester")
+    finally:
+        if alt_mod is None:
+            sys.modules.pop("backend.jira_accounts", None)
+        else:
+            sys.modules["backend.jira_accounts"] = alt_mod
+        if alt_attr is None:
+            if hasattr(_bp, "jira_accounts"):
+                delattr(_bp, "jira_accounts")
+        else:
+            _bp.jira_accounts = alt_attr
+
+
+check(_mit_klient(_KlientBase()) == "https://servicedesk.example.invalid",
+      "sie liefert die Adresse aus `base` – OHNE Schraegstrich am Ende",
+      _mit_klient(_KlientBase()))
+check(_mit_klient(_KlientAlt()) == "https://alt.example.invalid",
+      "und faellt auf `base_url` zurueck, falls es das je gibt")
+check(_mit_klient(_KlientHttp()) == "",
+      "http wird verworfen (optional_host_permissions deckt nur https)")
+
+
+class _Leer:
+    base = ""
+
+
+check(_mit_klient(_Leer()) == "", "ohne Adresse kommt der leere String")
+
+
+class _Kaputt:
+    @property
+    def base(self):
+        raise RuntimeError("kein Zugang")
+
+
+check(_mit_klient(_Kaputt()) == "",
+      "und ein Fehler beim Auflösen ist kein 500er, sondern ''")
+
+# Die Gegenprobe, die den gemeldeten Fehler beschreibt: ein Client OHNE das
+# Attribut darf nicht als "Adresse vorhanden" durchgehen - aber er darf auch
+# nicht werfen.
+check(_mit_klient(object()) == "",
+      "ein Client ohne jedes Adressfeld liefert '' (fail-safe)")
+
+check('"jira_basis": _jira_basis_url(user)' in QUELLE_MAIN,
+      "health gibt die Adresse heraus – ohne sie ist die Zugriffszeile der "
+      "Seitenleiste unerreichbar")
+
+
 print("\n%d OK, %d FAIL" % (_ok, _fail))

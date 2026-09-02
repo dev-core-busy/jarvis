@@ -2216,10 +2216,15 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
             "auf einem fremden Tab wird trotzdem nach Jira gefragt",
             r.gefragt.join(","));
     }
-    // 5) Im Popup ist die Zeile immer aus - dort traegt `activeTab`.
+    /* 5) Im Popup bleibt die Zeile aus, SOLANGE die Adresse lesbar ist - dort
+     *    traegt `activeTab`. Ist sie NICHT lesbar (gemeldet fuer Edge
+     *    2026-09-02), ist die Zeile der einzige Weg heraus und muss auch dort
+     *    erscheinen; das prueft Abschnitt 21. */
     {
-      const r = await zeigeBei(false, "", "", false, JIRA);
-      check(r.sichtbar === false, "im Popup bleibt sie aus");
+      const r = await zeigeBei(false, "https://jira.firma.de/browse/ABC-1",
+                               "ABC-1", false, JIRA);
+      check(r.sichtbar === false,
+            "im Popup bleibt sie aus, solange die Adresse lesbar ist");
       check(r.gefragt.length === 0, "und es wird gar nicht erst gefragt");
     }
     // 6) Ohne Auskunft vom Server wird NICHTS geraten.
@@ -4579,6 +4584,31 @@ function arbeitsbereich() {
 {
   const kopf = (POPUP_HTML.match(/<header class="kopf">[\s\S]*?<\/header>/) || [""])[0];
   check(/id="btn-reset"/.test(kopf), "der Reset-Knopf steht in der Kopfzeile");
+  /* SYMBOL STATT TEXT (Vorgabe 2026-09-02, zweite Runde) - und zwar das im
+   * Projekt etablierte "neu herstellen". Zwei Knoepfe mit Text passen neben
+   * Marke und Ticketnummer nicht in 380 px. */
+  {
+    const rk = (kopf.match(/<button[^>]*id="btn-reset"[\s\S]*?<\/button>/) || [""])[0];
+    check(/<svg/.test(rk), "und traegt ein Inline-SVG");
+    check(!/>\s*Reset\s*</.test(rk), "keinen Text mehr");
+    /* DASSELBE SYMBOL WIE IM HAUPTPROJEKT - sonst heisst dieselbe Handlung
+     * zweimal verschieden. Verglichen werden die Pfade. */
+    const set = fs.readFileSync(path.join(__dirname, "..", "frontend",
+                                          "settings.html"), "utf8");
+    const wa = (set.match(/id="btn-wa-reconnect"[\s\S]*?<\/svg>/) || [""])[0];
+    const pf = (t) => (t.match(/d="M[^"]+"/g) || []).join("|");
+    check(!!pf(wa) && pf(rk) === pf(wa),
+          "und zwar dasselbe wie btn-wa-reconnect im Hauptprojekt",
+          pf(rk) + "  gegen  " + pf(wa));
+    check(/aria-hidden="true"/.test(rk), "das SVG ist fuer Hilfsmittel unsichtbar");
+    /* ⚠ DER TITEL MUSS SAGEN, WAS BLEIBT. Ein Kreispfeil neben „Abmelden"
+     * sieht sonst wie „alles zuruecksetzen" aus - und wer seine Anmeldung
+     * verliert, weil er die Anzeige leeren wollte, drueckt ihn nie wieder. */
+    const t = (rk.match(/title="([^"]*)"/) || ["", ""])[1];
+    check(/Anmeldung bleibt/.test(t), "der Titel sagt, dass die Anmeldung bleibt", t);
+    check(/Text/.test(t) && /Vorlagen/.test(t),
+          "und was zurueckgesetzt wird", t);
+  }
   check(kopf.indexOf('id="btn-reset"') < kopf.indexOf('id="btn-abmelden"'),
         "links von Abmelden - die harmlosere Wahl steht vor der endgueltigen");
   check(/id="btn-reset"[^>]*hidden/.test(kopf) || /hidden/.test(
@@ -4705,16 +4735,40 @@ function arbeitsbereich() {
   const iUeberarb = arbeit.indexOf('id="btn-ueberarbeiten"');
   const iAuto = arbeit.indexOf('id="f-auto"');
   check(iErg > iHinweis, "das Ergebnis steht hinter dem Start-Hinweis");
-  /* ⚠ UND VOR Zusatzwunsch, Ueberarbeiten und Automatik: „der generierte Text
-   * soll direkt hinter 'das Dreieck fuehrt die gewuenschte …' erscheinen
-   * (aktuell erscheint er weiter unten)". */
-  check(iErg < iWunsch && iErg < iUeberarb && iErg < iAuto,
-        "und VOR Zusatzwunsch, Ueberarbeiten und Automatik",
-        [iHinweis, iErg, iWunsch, iUeberarb, iAuto].join("<"));
+  /* ⚠ UND VOR Ueberarbeiten und Automatik: „der generierte Text soll direkt
+   * hinter 'das Dreieck fuehrt die gewuenschte …' erscheinen".
+   * DER ZUSATZWUNSCH LIEGT DAZWISCHEN (Vorgabe 2026-09-02, zweite Runde): er
+   * wird VOR dem Klick gefuellt - hinter dem Ergebnisfeld stand er dort, wo
+   * man ihn erst liest, wenn es zu spaet ist. Leserichtung: waehlen,
+   * praezisieren, starten, Ergebnis. */
+  check(iWunsch > iHinweis && iWunsch < iErg,
+        "der Zusatzwunsch steht zwischen Hinweis und Ergebnis",
+        [iHinweis, iWunsch, iErg].join("<"));
+  check(iErg < iUeberarb && iErg < iAuto,
+        "und das Ergebnis VOR Ueberarbeiten und Automatik",
+        [iHinweis, iWunsch, iErg, iUeberarb, iAuto].join("<"));
   // Die Rueckfrage gehoert zum Einfuegen und wandert mit.
   check(arbeit.indexOf('id="ja-nein"') > iErg
-        && arbeit.indexOf('id="ja-nein"') < iWunsch,
+        && arbeit.indexOf('id="ja-nein"') < iUeberarb,
         "die Einfuege-Rueckfrage steht beim Ergebnis");
+
+  /* ── DER TRENNSTRICH (Vorgabe 2026-09-02) ────────────────────────────────
+   * Oben EINE Aufgabe (Vorlage starten, Ergebnis uebernehmen), darunter eine
+   * ANDERE (den eigenen Entwurf ueberarbeiten lassen) - mit eigener
+   * Voraussetzung. Ohne Linie liest sich beides als eine Reihe von Knoepfen,
+   * die dasselbe tun. */
+  const iAbschnitt = arbeit.indexOf('class="abschnitt"');
+  check(iAbschnitt > iErg && iAbschnitt < iUeberarb,
+        "vor dem Ueberarbeiten-Knopf beginnt ein eigener Abschnitt",
+        [iErg, iAbschnitt, iUeberarb].join("<"));
+  check(/\.abschnitt \{[^}]*border-top:\s*1px solid var\(--rand\)/.test(cssOhne),
+        "und der traegt dieselbe Trennlinie wie der Fuss der Ansicht");
+  // Der Hinweis und die Zugriffszeile erklaeren DIESEN Knopf - sie gehoeren
+  // mit in den Abschnitt, nicht hinter die Linie.
+  const iAbEnde = arbeit.indexOf("/abschnitt");
+  check(iAbEnde > arbeit.indexOf('id="ueberarb-hinweis"')
+        && iAbEnde > arbeit.indexOf('id="leiste-zugriff"'),
+        "Hinweis und Zugriffszeile liegen im selben Abschnitt");
   /* Die Zugriffszeile der Leiste erklaert die VORAUSSETZUNG des
    * Ueberarbeiten-Knopfes - sie muss bei ihm stehen, nicht am Fensterende. */
   const iZug = arbeit.indexOf('id="leiste-zugriff"');
@@ -4829,6 +4883,10 @@ section("21) 'In Edge wird kein Ticket erkannt' (2026-09-02)");
         const el = { ticket: $("ticket-anzeige"), meldung: $("meldung") };
         let _key = "", _tabId = null, _windowId = null, _tabUrl = "";
         let _tabFehler = "", _laeuft = false;
+        /* Modul-Variable: der Grundtext haengt daran (im Popup ist "klick auf
+         * das Symbol" der Weg, in der Leiste das Host-Recht). Ohne sie WIRFT
+         * der Lauf - Register, x-ter Fall. */
+        let _leiste = false;
         const gemeldet = [];
         function melde(t) { gemeldet.push(String(t || "")); }
         function knoepfeAktualisieren() {}
@@ -4909,6 +4967,148 @@ section("21) 'In Edge wird kein Ticket erkannt' (2026-09-02)");
         && r.anzeige === "Kein Ticket gefunden",
         "eine gewoehnliche Seite bleibt 'Kein Ticket gefunden' - ohne Stoerung",
         JSON.stringify(r));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("22) Abmelde-Symbol und Update-Hinweis (2026-09-02)");
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── a) Abmelden traegt das Portal-Symbol und nennt den Benutzer ─────────
+{
+  const kopf = (POPUP_HTML.match(/<header class="kopf">[\s\S]*?<\/header>/) || [""])[0];
+  const knopf = (kopf.match(/<button[^>]*id="btn-abmelden"[\s\S]*?<\/button>/) || [""])[0];
+  check(/<svg/.test(knopf) && /<polyline/.test(knopf),
+        "der Abmelde-Knopf traegt ein Inline-SVG");
+  check(!/>\s*Abmelden\s*</.test(knopf),
+        "und keinen Text mehr (im 380 px breiten Kopf ist kein Wort frei)");
+  /* DASSELBE SYMBOL WIE IM PORTAL - sonst ist derselbe Vorgang zweimal
+   * verschieden gezeichnet. Verglichen wird der Pfad, nicht das Markup. */
+  const portal = fs.readFileSync(path.join(__dirname, "..", "frontend",
+                                           "portal.html"), "utf8");
+  const ptKnopf = (portal.match(/<button[^>]*id="pt-logout"[\s\S]*?<\/button>/) || [""])[0];
+  const pfade = (t) => (t.match(/points="[^"]+"|d="M[^"]+"/g) || []).join("|");
+  check(!!pfade(ptKnopf) && pfade(knopf) === pfade(ptKnopf),
+        "und zwar dasselbe wie im Portal (pt-logout)",
+        pfade(knopf) + "  gegen  " + pfade(ptKnopf));
+  check(/aria-hidden="true"/.test(knopf),
+        "das SVG ist fuer Hilfsmittel unsichtbar - die Aussage steht im aria-label");
+  check(/aria-label="[^"]+"/.test(knopf) && /title="[^"]+"/.test(knopf),
+        "der Knopf traegt title UND aria-label (er hat keinen Text)");
+
+  /* „[Benutzer] abmelden" - dasselbe Muster wie im Portal. Ohne bekannten
+   * Namen bleibt es beim schlichten Wort: „undefined abmelden" waere
+   * schlimmer als kein Name. */
+  /* AUSGEFUEHRT, nicht gelesen: eine Suche nach `z.benutzer` in `start()`
+   * trifft dort auch `z.benutzer_vorschlag` und bleibt gruen, obwohl der Name
+   * gar nicht mehr benutzt wird - genau so blieb die Gegenprobe zu dieser
+   * Pruefung beim ersten Lauf stumm (Register: die Eigenschaft messen). */
+  const at = new Function("return " + (schneidePopup("abmeldeTitel") || "null")
+                          + "; ")();
+  check(typeof at === "function", "popup.js hat abmeldeTitel()");
+  if (typeof at === "function") {
+    check(at("nexus\\andreas.bender") === "nexus\\andreas.bender abmelden",
+          "der Titel lautet '[Benutzer] abmelden'", at("nexus\\andreas.bender"));
+    check(at("") === "Abmelden" && at(undefined) === "Abmelden"
+          && at(null) === "Abmelden",
+          "ohne Namen bleibt es 'Abmelden' (kein 'undefined abmelden')",
+          [at(""), at(undefined), at(null)].join("|"));
+    check(at("  bob  ") === "bob abmelden",
+          "Leerraum wird abgeschnitten (' abmelden' sieht wie ein Fehler aus)",
+          at("  bob  "));
+  }
+  const st = ohneKommentare(schneidePopup("start") || "");
+  check(/abmeldeTitel\(z\.benutzer\)/.test(st),
+        "und start() belegt ihn aus dem Benutzernamen des Zustands");
+  check(/benutzer: s\.benutzer \|\| ""/.test(BG),
+        "der Hintergrund gibt den Benutzernamen im Zustand heraus");
+}
+
+// ── b) Der Update-Hinweis – AUSGEFUEHRT ─────────────────────────────────
+/* ⚠ DIE ERWEITERUNG AKTUALISIERT SICH NICHT VON SELBST (von Hand geladen,
+ * nicht aus einem Store). Bisher erfuhr das niemand: ein laengst behobener
+ * Fehler blieb wochenlang stehen. Die Stand-Warnung deckt das NICHT ab - sie
+ * greift nur bei einem HALB aktualisierten Paket. */
+{
+  const uh = schneidePopup("updateHinweis") || "";
+  check(!!uh, "popup.js hat updateHinweis()");
+  check(/id="update-hinweis"/.test(POPUP_HTML), "und das Markup dazu");
+  check(/\.update-hinweis\[hidden\]\s*\{[^}]*display:\s*none/.test(cssOhne),
+        "CSS: [hidden] gewinnt (Register - wer Aussehen gibt, nimmt hidden mit)");
+  // Ein Server-Aufruf, zwei Verwendungen: kein zweiter Roundtrip, und KEIN
+  // neuer Nachrichtenfall - deshalb bleibt STAND unberuehrt.
+  check(/healthHolen\(\)/.test(uh)
+        && /healthHolen\(\)/.test(schneidePopup("jiraBasisHolen") || ""),
+        "Adresse und Version kommen aus EINEM health-Abruf");
+
+  const PROXY = (POPUP_JS.match(/const api = new Proxy\([\s\S]*?\n\}\);/) || [""])[0];
+  const lauf = async (eigene, server) => {
+    const dom = new JSDOM(POPUP_HTML, { url: "https://x.test/",
+                                        runScripts: "outside-only" });
+    const w = dom.window;
+    w.chrome = { runtime: { getManifest: () => ({ version: eigene }) } };
+    try {
+      const f = new w.Function("server", `
+        const $ = (id) => document.getElementById(id);
+        let _health = null;
+        ${PROXY}
+        async function frage() { return { ok: true, daten: { paket_version: server } }; }
+        ${schneidePopup("healthHolen")}
+        ${uh}
+        return (async () => {
+          await updateHinweis();
+          const p = $("update-hinweis");
+          return JSON.stringify({ sichtbar: !p.hidden, text: p.textContent });
+        })();`);
+      return JSON.parse(await f(server));
+    } finally { w.close(); }
+  };
+
+  for (const [was, eigene, server, soll] of [
+    ["gleiche Version", "0.8.2", "0.8.2", false],
+    ["Server neuer (Patch)", "0.8.2", "0.8.3", true],
+    ["Server neuer (Minor)", "0.8.2", "0.9.0", true],
+    /* ⚠ ZAHLEN, NICHT ZEICHENKETTEN: "0.10.0" ist neuer als "0.9.0", als Text
+     * waere es kleiner - und der Hinweis blieb aus, wenn er am dringendsten
+     * waere. */
+    ["zweistellige Minor-Version", "0.9.0", "0.10.0", true],
+    ["eigene neuer als Server", "0.9.0", "0.8.2", false],
+    ["Server meldet nichts", "0.8.2", "", false],
+    ["unlesbare Server-Version", "0.8.2", "kaputt", false],
+    ["eigene Version unbekannt", "", "0.9.0", false],
+  ]) {
+    const r = await lauf(eigene, server);
+    check(r.sichtbar === soll,
+          (soll ? "Hinweis: " : "still: ") + was,
+          "eigene=" + eigene + " server=" + server + " -> " + r.sichtbar);
+    if (soll) {
+      /* DER WEG GEHOERT IN DIE MELDUNG. "Es gibt eine neue Fassung" allein
+       * laesst den Benutzer suchen - und ohne das Neuladen antwortet der alte
+       * Service-Worker weiter (siehe STAND). */
+      check(r.text.indexOf(server) >= 0 && r.text.indexOf(eigene) >= 0,
+            "und nennt beide Versionen: " + was, r.text.slice(0, 60));
+      check(/neu/i.test(r.text) && /⟳|neu lade/i.test(r.text),
+            "und den Weg (Paket holen + Erweiterung neu laden): " + was);
+    }
+  }
+}
+
+// ── c) Der Server sagt, welche Fassung er ausliefert ────────────────────
+{
+  check(/"paket_version": jira_assist\.paket_version\(\)/.test(MAIN),
+        "health gibt die Paketversion heraus");
+  const q = (fs.readFileSync(path.join(__dirname, "..", "backend",
+                                       "jira_assist.py"), "utf8")
+    .match(/def paket_version\(\)[\s\S]*?\n\n\n/) || [""])[0];
+  check(!!q, "jira_assist.py hat paket_version()");
+  /* ⚠ `json` IST IN DIESEM MODUL NICHT GLOBAL IMPORTIERT - der NameError
+   * landete im breiten except und die Funktion gab IMMER "" zurueck (nur der
+   * Messwert hat es gezeigt, Register). */
+  check(/import json as/.test(q) || /^import json$/m.test(
+          fs.readFileSync(path.join(__dirname, "..", "backend",
+                                    "jira_assist.py"), "utf8")),
+        "und json ist dort erreichbar (sonst verschluckt das except den Fehler)");
+  check(/manifest\.json/.test(q),
+        "gelesen wird das Manifest des ausgelieferten Pakets");
 }
 
 /* Erst den Puffer leeren: eine Zurueckweisung aus einem nicht abgewarteten

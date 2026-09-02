@@ -1082,6 +1082,36 @@ PFAD_FELDER = {"chrome": "addon_pfad_chrome", "firefox": "addon_pfad_firefox"}
 MAX_PFAD = 300
 
 
+def paket_version() -> str:
+    """Die Version des Pakets, das dieser Server ausliefert – oder ``""``.
+
+    **Warum es das braucht:** die Erweiterung aktualisiert sich NICHT von
+    selbst; sie ist von Hand geladen, nicht aus einem Store. Bisher erfuhr
+    niemand von einer neuen Fassung – ein laengst behobener Fehler blieb
+    stehen, und die Stand-Warnung greift nur bei einem HALB aktualisierten
+    Paket (Fenster neu, Hintergrund alt), nicht bei einem durchgehend alten.
+
+    Gelesen wird das Manifest im Addon-Verzeichnis dieses Servers, also genau
+    die Datei, die im Paket landet. Fail-safe: bei jedem Problem der leere
+    String – die Erweiterung zeigt dann keinen Hinweis, statt eine Version zu
+    behaupten.
+    """
+    # ⚠ `json` IST IN DIESEM MODUL NICHT IMPORTIERT - der NameError landete im
+    # breiten `except` und die Funktion gab immer "" zurueck. Genau die Falle
+    # aus dem Register: ein weites except verschluckt einen Programmierfehler
+    # und macht ihn zu einem stillen Leerwert. Nur der Messwert hat es gezeigt.
+    import json as _json  # noqa: PLC0415
+
+    verz = addon_verzeichnis()
+    if not verz:
+        return ""
+    try:
+        roh = (verz / "manifest.json").read_text(encoding="utf-8")
+        return str(_json.loads(roh).get("version") or "").strip()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def paket_pfade() -> dict:
     """Wo liegt das fertige Paket im Netz? ``{"chrome": "…", "firefox": "…"}``.
 

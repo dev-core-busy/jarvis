@@ -59,7 +59,7 @@ const el = {
   totp: $("f-totp"), hinweis: $("f-hinweis"), ergebnisFeld: $("f-ergebnis"),
   ergebnis: $("ergebnis"), ergebnisFuss: $("ergebnis-fuss"),
   meldung: $("meldung"), ticket: $("ticket-anzeige"),
-  abmelden: $("btn-abmelden"),
+  abmelden: $("btn-abmelden"), reset: $("btn-reset"),
 };
 
 let _key = "";        // Ticketnummer des offenen Tabs
@@ -545,6 +545,7 @@ async function start() {
   }
   if (z.angemeldet) {
     el.abmelden.hidden = false;
+    if (el.reset) el.reset.hidden = false;
     // Das Pulldown gleich füllen – nicht erst beim Öffnen des Zahnrads:
     // sonst steht dort „Standard“, obwohl Vorlagen hinterlegt sind.
     vorlagenLaden();
@@ -1064,6 +1065,8 @@ function zeige(angemeldet) {
   el.login.hidden = !!angemeldet;
   el.arbeit.hidden = !angemeldet;
   el.abmelden.hidden = !angemeldet;
+  // Reset setzt die ARBEITSFLAECHE zurueck - ohne Anmeldung gibt es keine.
+  if (el.reset) el.reset.hidden = !angemeldet;
 }
 
 // ── Zugriffsrecht auf den Server ────────────────────────────────────────────
@@ -1187,6 +1190,41 @@ $("btn-anmelden").addEventListener("click", async () => {
   } finally {
     sperre(false);
   }
+});
+
+/* ── ZURUECKSETZEN ─────────────────────────────────────────────────────────
+ *
+ * Es gab „Leeren" schon – aber nur IM Ergebnisbereich, also genau dann nicht,
+ * wenn kein Ergebnis angezeigt wird. Wer eine haengengebliebene Anzeige oder
+ * einen alten Zusatzwunsch loswerden will, sucht den Knopf dort vergeblich.
+ *
+ * WAS ES ZURUECKSETZT: den angezeigten und den GEMERKTEN Text (`felderLeeren`
+ * raeumt beides ab, auch im Hintergrund), den Zusatzwunsch, die Vorlagenwahl
+ * (zurueck auf den persoenlichen Standard) und die geoeffnete Verwaltung.
+ * Dazu den Ring der Automatik: das ist der Sinn eines Reset – ein
+ * automatischer Lauf darf fuer dieses Ticket wieder moeglich sein.
+ *
+ * WAS ES NICHT ANFASST, und das ist Absicht: Anmeldung, Serveradresse,
+ * Ansicht (Popup/Leiste) und die Automatik-EINSTELLUNG. Fuer die Anmeldung
+ * gibt es den Knopf daneben; die uebrigen drei gehoeren zur Einrichtung
+ * dieses Browsers und nicht zur Arbeit an einem Ticket. Ein Reset, der
+ * ungefragt eine Einstellung verwirft, ist ein Datenverlust mit freundlichem
+ * Namen.
+ */
+$("btn-reset").addEventListener("click", async () => {
+  $("vorlagen-box").hidden = true;
+  vorlageFormularZu();
+  $("vorl-hinweis").textContent = "";
+  // Zurueck auf den persoenlichen Standard: `_vorlBeruehrt` ist der Merker,
+  // der die eigene Wahl gegen den Standard verteidigt - hier soll sie fallen.
+  _vorlBeruehrt = false;
+  vorlagenZeichnen();
+  /* Der Ring liegt im Hintergrund. Ein Fehlschlag ist hier nicht schlimm –
+   * die Anzeige ist trotzdem zurueckgesetzt, und die Meldung sagt es. */
+  try {
+    await frage({ art: "merken", auto_gelaufen: [] });
+  } catch (e) { /* aelterer Hintergrund: dann bleibt der Ring stehen */ }
+  await felderLeeren("Zurückgesetzt. Anmeldung, Adresse und Ansicht bleiben.");
 });
 
 el.abmelden.addEventListener("click", async () => {
@@ -1347,6 +1385,22 @@ $("btn-ueberarbeiten").addEventListener("click", async () => {
     const gesehen = (r && r.gesehen && r.gesehen.length)
       ? "\nGefunden: " + r.gesehen.join(", ") : "";
     melde(((r && r.fehler) || "Kein Text im Kommentarfeld gefunden.") + gesehen);
+    return;
+  }
+  /* ⚠ AUS EINEM NICHT ERKANNTEN FELD WIRD NUR NACH RUECKFRAGE ueberarbeitet.
+   *
+   * `unsicher` setzt `leseAusJira`, wenn der Text aus dem Auffangnetz stammt –
+   * also aus irgendeinem editierbaren Element, nicht aus einem als
+   * Kommentarfeld erkannten (unbekannte Jira-Variante). Gemessen 2026-09-02:
+   * bei Jira ist unter anderem die BESCHREIBUNG inline bearbeitbar, und deren
+   * Text sah wie ein Entwurf aus. Das Ergebnis geht am Ende an einen KUNDEN –
+   * dieselbe Schranke wie beim fremden Ticket. */
+  if (r.unsicher && !(await frageJaNein(
+        "Der gelesene Text stammt aus einem Feld, das nicht als Kommentarfeld "
+        + "erkannt wurde. Er beginnt mit: „"
+        + String(r.text || "").slice(0, 60).replace(/\s+/g, " ")
+        + "…“ Trotzdem überarbeiten?"))) {
+    melde("Abgebrochen. Klicke IN das Kommentarfeld und versuche es erneut.");
     return;
   }
   await auswerten("ueberarbeiten", r.text);
@@ -1553,10 +1607,14 @@ function startTitelSetzen() {
   const b = $("btn-start");
   if (!b) return;
   const id = $("f-vorlage").value || "";
-  const t = !id ? "Zusammenfassung erstellen (ohne Vorlage)"
-    : (vorlagenArt(id) === "antwort"
-        ? "Antwortentwurf erstellen – Vorlage „" + vorlagenName(id) + "“"
-        : "Zusammenfassung erstellen – Vorlage „" + vorlagenName(id) + "“");
+  /* ⚠ „ANTWORT ERSTELLEN" IN BEIDEN FAELLEN – Vorgabe des Nutzers 2026-09-02.
+   * „Antwort" ist hier die Antwort DER ERWEITERUNG auf den Klick, nicht die
+   * Kundenantwort: der Knopf tut immer dasselbe (die Vorlage ausfuehren), und
+   * WAS herauskommt, sagt die Vorlage daneben – ihr Name steht im Titel. */
+  const t = !id ? "Antwort erstellen (ohne Vorlage: Zusammenfassung)"
+    : "Antwort erstellen – Vorlage „" + vorlagenName(id) + "“"
+      + (vorlagenArt(id) === "antwort" ? " (Antwort an den Melder)"
+                                       : " (Zusammenfassung)");
   b.title = t;
   b.setAttribute("aria-label", t);
 }
@@ -1668,7 +1726,19 @@ function vorlagenZeichnen() {
         bearb.className = "leise ico";
         bearb.title = "Bearbeiten";
         bearb.textContent = "✎";
-        bearb.addEventListener("click", () => vorlageInsFormular(v, art === "global", li));
+        /* ⚠ UMSCHALTER (Vorgabe 2026-09-02): ein zweiter Klick auf DIESELBE
+         * Zeile schliesst das Formular wieder. Ohne das war der Knopf eine
+         * Einbahnstrasse – man konnte die Felder nur noch loswerden, indem man
+         * die ganze Verwaltung zuklappte. Dieselbe Bauart wie „Pruefen" in
+         * /wissen (Vergleich der Kennung + gefuellter Container). */
+        bearb.addEventListener("click", () => {
+          if (_vorlBearbeitet === v.id && !$("vorl-form").hidden) {
+            vorlageFormularZu();
+            $("vorl-hinweis").textContent = "";
+            return;
+          }
+          vorlageInsFormular(v, art === "global", li);
+        });
         zeile.appendChild(bearb);
 
         const weg = document.createElement("button");
@@ -1691,7 +1761,7 @@ function vorlagenZeichnen() {
   /* Die Bearbeitung ueberlebt den Neuaufbau: das `<li>` ist ein anderes
    * Element als vorher, deshalb wird es ueber die Kennung wiedergefunden.
    * Ist die Vorlage inzwischen weg, bleibt das Formular am Heimatplatz. */
-  if (_vorlBearbeitet) {
+  if (_vorlBearbeitet && !$("vorl-form").hidden) {
     const li = liste.querySelector('li[data-vid="' + _vorlBearbeitet + '"]');
     if (li) formPlatz(li);
   }
@@ -1778,8 +1848,26 @@ function bereicheGewaehlt() {
  * ``zeile`` ist das ``<li>``, unter dem es stehen soll; ohne Angabe (also bei
  * „Neu" und nach dem Speichern) geht es an seinen Heimatplatz hinter der Liste.
  */
+/** Schliesst das Bearbeiten-Formular: Felder leeren, heimholen, verstecken.
+ *
+ * ⚠ HEIMHOLEN GEHOERT DAZU. Bleibt es in einer Zeile haengen, loescht der
+ * naechste Neuaufbau der Liste es mit (`liste.innerHTML = ""`) – dann gibt es
+ * kein Namensfeld mehr und keinen Fehler, der das erklaert.
+ */
+function vorlageFormularZu() {
+  _vorlBearbeitet = "";
+  $("f-vorl-name").value = "";
+  $("f-vorl-text").value = "";
+  $("f-vorl-art").value = "zusammenfassung";
+  $("f-vorl-global").checked = false;
+  bereicheZeichnen([]);
+  formPlatz(null);
+  $("vorl-form").hidden = true;
+}
+
 function vorlageInsFormular(v, global_, zeile) {
   _vorlBearbeitet = v ? v.id : "";
+  $("vorl-form").hidden = false;
   $("f-vorl-name").value = (v && v.name) || "";
   $("f-vorl-text").value = (v && v.text) || "";
   // Ohne Angabe die Zusammenfassung – dieselbe Vorgabe wie am Server
@@ -1848,7 +1936,7 @@ async function vorlageLoeschen(v) {
   if (!(await frageJaNein("Vorlage „" + v.name + "“ löschen?"))) return;
   try {
     await frage({ art: "vorlage_loeschen", id: v.id });
-    if (_vorlBearbeitet === v.id) vorlageInsFormular(null, false);
+    if (_vorlBearbeitet === v.id) vorlageFormularZu();
     await vorlagenLaden();
     $("vorl-hinweis").textContent = "Gelöscht.";
   } catch (e) {
@@ -1870,7 +1958,12 @@ $("btn-vorlagen").addEventListener("click", () => {
   if (!box.hidden) vorlagenLaden();
 });
 $("btn-vorlagen-zu").addEventListener("click", () => { $("vorlagen-box").hidden = true; });
+// "Neu" oeffnet das Formular am Heimatplatz - es gehoert zu keiner Zeile.
 $("btn-vorl-neu").addEventListener("click", () => vorlageInsFormular(null, false));
+$("btn-vorl-abbrechen").addEventListener("click", () => {
+  vorlageFormularZu();
+  $("vorl-hinweis").textContent = "";
+});
 
 $("btn-vorl-speichern").addEventListener("click", async () => {
   const name = ($("f-vorl-name").value || "").trim();
@@ -1901,7 +1994,7 @@ $("btn-vorl-speichern").addEventListener("click", async () => {
     // Gilt als eigene Wahl – sonst zöge das nächste Neuzeichnen den Standard
     // vor und die gerade gespeicherte Vorlage wäre wieder abgewählt.
     if (neu && neu.id) { $("f-vorlage").value = neu.id; _vorlBeruehrt = true; }
-    vorlageInsFormular(null, false);
+    vorlageFormularZu();
     $("vorl-hinweis").textContent = "Gespeichert.";
   } catch (e) {
     $("vorl-hinweis").textContent = e.message;

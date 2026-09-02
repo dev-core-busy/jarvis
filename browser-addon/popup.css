@@ -363,6 +363,20 @@ button.ico-start {
 /* Der Name nimmt den Platz, die Knöpfe bleiben rechts. */
 .vorl-zeile > span { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 
+/* ⚠ `[hidden]` MUSS MITGENOMMEN WERDEN, sobald einer Regel `display` gegeben
+ * wird – im Projekt zweimal bezahlt (`.meldung.arbeitet` liess die
+ * Wartemeldung fuer immer stehen, `.sp-row` in /sap dasselbe). Die Regeln
+ * unten setzen heute kein `display`; die Zeile steht trotzdem hier, damit eine
+ * kuenftige das Verstecken nicht still aushebelt. */
+/* ⚠ ABSTAND NACH UNTEN, seit der Ergebnisblock nach OBEN gezogen wurde
+ * (Vorgabe 2026-09-02). Er hat jetzt einen Nachbarn unter sich – im Screenshot
+ * klebte die Fusszeile ("ABC-1234 · 7 Kommentare …") am Label des
+ * Zusatzwunsches und las sich wie ein Teil davon. Vorher stand darunter nichts
+ * mehr, deshalb fiel es nie auf. */
+#ergebnis { margin-bottom: 14px; }
+
+#vorl-form[hidden] { display: none !important; }
+
 /* Das Formular UNTER seiner Zeile: abgesetzt und eingerückt, damit die
  * Zugehörigkeit sichtbar ist. Am Heimatplatz (direkt hinter der Liste) trägt
  * es nichts davon – dort gehört es zu keiner Zeile. */

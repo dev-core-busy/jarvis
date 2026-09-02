@@ -530,22 +530,62 @@ export function leseAusJira() {
     if (r) return r;
   }
 
-  // ── 2. Bekannte Kommentarfelder – gleiche Reihenfolge wie beim Einfuegen ──
-  const editorSelektoren = [
+  /* ── 2. Bekannte Kommentarfelder ─────────────────────────────────────────
+   *
+   * ⚠ ZWEI STUFEN, UND DIE TRENNUNG IST DER GANZE PUNKT (gemessen 2026-09-02).
+   *
+   * `[contenteditable='true']` trifft JEDES editierbare Element der Seite – bei
+   * Jira ist unter anderem die BESCHREIBUNG des Tickets inline bearbeitbar.
+   * Solange dieser Auffang-Selektor in derselben Liste stand, passierte bei
+   * leerem Kommentarfeld Folgendes: die Suche lief weiter, fand die
+   * Beschreibung, und der Benutzer bekam eine "ueberarbeitete Antwort", die aus
+   * dem Tickettext gebaut war – statt der Meldung, dass sein Kommentarfeld leer
+   * ist. Nachgemessen mit einem DOM aus leerem Kommentarfeld plus fremdem
+   * Editor: `ok=true`, Text = die Beschreibung. Dieser Text haette am Ende als
+   * Kommentar beim KUNDEN landen koennen.
+   *
+   * Deshalb: war ein BEKANNTES Kommentarfeld sichtbar und leer, ist das die
+   * Antwort – es wird nicht weitergesucht. "Das Kommentarfeld ist leer" ist
+   * eine Aussage ueber das Kommentarfeld, nicht ueber die Seite. Das
+   * Auffangnetz greift nur, wenn es gar kein bekanntes Feld gibt (unbekannte
+   * Jira-Variante), und markiert seinen Fund als UNSICHER.
+   */
+  const bekannteEditoren = [
     "#comment-wiki-edit [contenteditable='true']",
     ".jira-editor-container [contenteditable='true']",
     ".ak-editor-content-area [contenteditable='true']",   // Jira Cloud
     "[data-testid='comment'] [contenteditable='true']",
-    "form [contenteditable='true']",
-    "[contenteditable='true']",
   ];
-  for (const sel of editorSelektoren) {
-    for (const el of document.querySelectorAll(sel)) {
-      if (!sichtbar(el)) { diagnose.push(sel + " (unsichtbar)"); continue; }
-      const r = hole(el, sel);
-      if (r) return r;
+  const bekannteTextfelder = [
+    "#comment", "textarea[name='comment']",
+    "#jira-issue-comment textarea", ".issue-comment textarea",
+    "textarea.wiki-editor",
+  ];
+  // Nur als Rueckfall, wenn KEIN bekanntes Feld existiert.
+  const auffang = ["form [contenteditable='true']", "[contenteditable='true']",
+                   "form textarea"];
+
+  /** Laeuft eine Selektorliste ab. Gibt den Treffer oder null.
+   *
+   * Setzt `bekanntGesehen`, sobald ein sichtbares Feld dabei war – auch ein
+   * leeres. Genau daran entscheidet sich, ob das Auffangnetz ueberhaupt
+   * gespannt wird.
+   */
+  let bekanntGesehen = false;
+  function ablaufen(liste, praefix, alsBekannt) {
+    for (const sel of liste) {
+      for (const el of document.querySelectorAll(sel)) {
+        if (!sichtbar(el)) { diagnose.push(sel + " (unsichtbar)"); continue; }
+        if (alsBekannt) bekanntGesehen = true;
+        const r = hole(el, (praefix || "") + sel);
+        if (r) return r;
+      }
     }
+    return null;
   }
+
+  let treffer = ablaufen(bekannteEditoren, "", true);
+  if (treffer) return treffer;
 
   for (const rahmen of document.querySelectorAll("iframe")) {
     let koerper = null;
@@ -556,18 +596,34 @@ export function leseAusJira() {
       || koerper.getAttribute("contenteditable") === "true"
       || (rahmen.contentDocument.designMode || "").toLowerCase() === "on";
     if (!editierbar || !sichtbar(rahmen)) continue;
+    bekanntGesehen = true;
     const r = hole(koerper, "iframe#" + (rahmen.id || "?"));
     if (r) return r;
   }
 
-  for (const sel of ["#comment", "textarea[name='comment']",
-                     "#jira-issue-comment textarea", ".issue-comment textarea",
-                     "textarea.wiki-editor", "form textarea"]) {
-    for (const el of document.querySelectorAll(sel)) {
-      if (!sichtbar(el)) { diagnose.push(sel + " (unsichtbar)"); continue; }
-      const r = hole(el, "textarea " + sel);
-      if (r) return r;
-    }
+  treffer = ablaufen(bekannteTextfelder, "textarea ", true);
+  if (treffer) return treffer;
+
+  /* ⚠ HIER WIRD ABGEBROCHEN, WENN EIN BEKANNTES FELD LEER WAR. Ohne diese
+   * Zeile faende das Auffangnetz gleich darunter irgendein anderes
+   * editierbares Element – und aus "dein Feld ist leer" wuerde die
+   * Ueberarbeitung eines fremden Textes. */
+  if (bekanntGesehen && leerGesehen) {
+    return {
+      ok: false, leer: true, tinymce_moeglich: false,
+      gesehen: diagnose.slice(0, 8),
+      fehler: "Das Kommentarfeld ist leer. Schreibe deinen Entwurf hinein und "
+              + "versuche es erneut.",
+    };
+  }
+
+  treffer = ablaufen(auffang, "", false);
+  if (treffer) {
+    /* UNSICHER: der Fund stammt aus einem beliebigen editierbaren Element,
+     * nicht aus einem als Kommentarfeld erkannten. Das Fenster sagt es –
+     * eine stille Uebernahme waere genau der Fehler oben, nur seltener. */
+    treffer.unsicher = true;
+    return treffer;
   }
 
   // ── 3. Nichts gefunden: sagen, WAS der Fall war ───────────────────────────

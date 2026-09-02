@@ -2038,6 +2038,13 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
              * genau das Verhalten, das dieser Abschnitt messen will.
              * Abschnitt 14 prueft die Automatik selbst. */
             let _autoVorlage = "";
+            /* ⚠ ERST PRUEFEN, DANN DEREFERENZIEREN. Fehlt das Feld (etwa
+             * weil eine Gegenprobe das Markup verstellt), wirft
+             * defineProperty mit "called on non-object" - der Lauf bricht ab,
+             * liefert KEINE Bilanz und ist von "nicht gelaufen" nicht zu
+             * unterscheiden. Genau so passiert am 2026-09-02. Register. */
+            if (!el.ergebnisFeld) throw new Error(
+              "TESTAUFBAU: #f-ergebnis fehlt im Markup");
             Object.defineProperty(el.ergebnisFeld, "value", {
               get() { throw new Error("value am Ergebnisfeld GELESEN"); },
               set() { throw new Error("value am Ergebnisfeld GESETZT"); },
@@ -2411,9 +2418,14 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
     check(!!regel && /display:\s*none/.test(regel[1]),
           "`.meldung[hidden]` setzt display:none - das Attribut muss gewinnen");
     /* Die Regel muss NACH der Klasse stehen: gleiche Spezifitaet (0,2,0 gegen
-     * 0,2,0), da entscheidet die Reihenfolge. */
-    check(POPUP_CSS.indexOf(".meldung[hidden]")
-          > POPUP_CSS.lastIndexOf(".meldung.arbeitet"),
+     * 0,2,0), da entscheidet die Reihenfolge.
+     * ⚠ AUF DER KOMMENTARFREIEN FASSUNG. Der erste Anlauf verglich Positionen
+     * im ROHEN CSS - und schlug fehl, sobald irgendein Kommentar weiter unten
+     * `.meldung.arbeitet` erwaehnte (genau so passiert, als eine neue Regel
+     * ihre Begruendung darauf stuetzte). Der Waechter las eine Erklaerung und
+     * meldete einen Fehler, den es nicht gab. Register, x-ter Fall. */
+    check(cssOhne.indexOf(".meldung[hidden]")
+          > cssOhne.lastIndexOf(".meldung.arbeitet"),
           "und steht NACH .meldung.arbeitet - sonst verliert sie");
 
     // Und der Zustand wird geraeumt, nicht nur versteckt.
@@ -4243,15 +4255,23 @@ section("19) Die Vorlage ist die Aktion (2026-09-02)");
         "und der Titel sagt genau das", r.titel);
   check(r.aria === r.titel, "aria-label und title sind identisch");
 
+  /* ⚠ „ANTWORT ERSTELLEN" IN JEDEM FALL – Vorgabe des Nutzers 2026-09-02.
+   * „Antwort" ist die Antwort DER ERWEITERUNG auf den Klick; was inhaltlich
+   * herauskommt, nennt der Titel dahinter (Vorlagenname + Art). Bis dahin hiess
+   * er „Zusammenfassung erstellen" bzw. „Antwortentwurf erstellen". */
+  check(/^Antwort erstellen/.test(r.titel),
+        "der Titel beginnt mit „Antwort erstellen“", r.titel);
+
   r = lauf("g1");
-  check(r.art === "zusammenfassung" && /Kurz/.test(r.titel),
+  check(/^Antwort erstellen/.test(r.titel) && /Kurz/.test(r.titel),
         "Zusammenfassungs-Vorlage: Titel nennt sie beim Namen", r.titel);
-  check(!/Antwort/.test(r.titel), "und behauptet keine Antwort", r.titel);
+  check(/\(Zusammenfassung\)/.test(r.titel),
+        "und sagt, dass eine Zusammenfassung entsteht", r.titel);
 
   r = lauf("g2");
-  check(r.art === "antwort" && /Antwortentwurf/.test(r.titel),
-        "Antwort-Vorlage: der Titel sagt, dass ein Entwurf fuer den Melder "
-        + "entsteht", r.titel);
+  check(r.art === "antwort" && /Antwort an den Melder/.test(r.titel),
+        "Antwort-Vorlage: der Titel sagt, dass sie an den Melder geht",
+        r.titel);
 
   /* ⚠ FAIL-SAFE IN DIE STRENGERE RICHTUNG. Eine Vorlage ohne Feld `art` (jede,
    * die vor dem 2026-09-02 entstand) und eine unbekannte Kennung gelten als
@@ -4407,6 +4427,293 @@ section("19) Die Vorlage ist die Aktion (2026-09-02)");
   check(!/if \([^)]*f-vorl-art/.test(sp),
         "und zwar bedingungslos - ein fehlendes Feld heisst am Server "
         + "'unveraendert'");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("20) Nachbesserungen am Fenster (2026-09-02, zweite Runde)");
+// ═══════════════════════════════════════════════════════════════════════════
+/* Sechs Vorgaben des Nutzers, gemeldet nach der ersten Runde:
+ *   a) ein zweiter Klick auf "Bearbeiten" schliesst die Felder wieder
+ *   b) die Vorlagen-Verwaltung oeffnet DIREKT unter ihrem Knopf
+ *   c) ein "Reset" neben "Abmelden"
+ *   d) leeres Kommentarfeld -> Meldung (statt eines fremden Textes!)
+ *   e) der Tooltip des Dreiecks heisst "Antwort erstellen …"
+ *   f) der erzeugte Text steht direkt hinter dem Start-Hinweis
+ */
+
+// ── a) Bearbeiten ist ein UMSCHALTER – AUSGEFUEHRT ──────────────────────
+{
+  const { teile, drin } = popupTeile(
+    ["vorlagenZeichnen", "vorlageInsFormular", "vorlageFormularZu"],
+    ["standardSetzen", "vorlageLoeschen", "frageJaNein",
+     "autoOptionenZeichnen", "startTitelSetzen", "bereicheZeichnen"]);
+  check(drin.has("vorlageFormularZu"),
+        "popup.js hat vorlageFormularZu() – EIN Weg zum Schliessen");
+
+  const lauf = (klicks) => {
+    const dom = new JSDOM(POPUP_HTML, { url: "https://x.test/",
+                                        runScripts: "outside-only" });
+    const w = dom.window;
+    try {
+      const f = new w.Function("klicks", `
+        const $ = (id) => document.getElementById(id);
+        let _vorlBeruehrt = false, _bereiche = [], _formHeimat = null;
+        let _vorlBearbeitet = "";
+        let _key = "ABC-1", _laeuft = false;
+        let _vorlagen = {
+          global: [{ id: "g1", name: "Eins", art: "zusammenfassung" },
+                   { id: "g2", name: "Zwei", art: "antwort" }],
+          eigene: [], darf_global: true, standard: "",
+        };
+        function standardSetzen() {}
+        function vorlageLoeschen() {}
+        function frageJaNein() { return Promise.resolve(true); }
+        function autoOptionenZeichnen() {}
+        function startTitelSetzen() {}
+        function bereicheZeichnen() {}
+        function knoepfeAktualisieren() {}
+` + teile.join("\n") + `
+        vorlagenZeichnen();
+        const bearb = (vid) => Array.from(document.querySelector(
+          '#vorl-liste li[data-vid="' + vid + '"]').querySelectorAll("button"))
+          .find((b) => b.title === "Bearbeiten");
+        const spur = [];
+        for (const k of klicks) {
+          if (k === "neu") vorlageInsFormular(null, false);
+          else if (k === "zeichnen") vorlagenZeichnen();
+          else bearb(k).click();
+          const form = $("vorl-form");
+          const li = form.closest("li");
+          spur.push((form.hidden ? "zu" : "offen")
+                    + ":" + (li ? li.dataset.vid : "heim"));
+        }
+        return JSON.stringify({ spur, name: $("f-vorl-name").value });`);
+      return JSON.parse(f(klicks));
+    } finally { w.close(); }
+  };
+
+  /* ⚠ DAS FORMULAR IST ZU, BIS JEMAND BEARBEITET. Vorher standen die Felder
+   * immer da: beim Oeffnen der Verwaltung sah man ein leeres Formular ohne
+   * Bezug, und der zweite Klick auf ✎ tat nichts Sichtbares. */
+  check(JSON.parse(JSON.stringify(POPUP_HTML.includes('id="vorl-form" hidden'))),
+        "das Formular startet ZU (hidden im Markup)");
+
+  let r = lauf(["g1"]);
+  check(r.spur[0] === "offen:g1", "ein Klick oeffnet es unter seiner Zeile",
+        r.spur.join(" -> "));
+
+  r = lauf(["g1", "g1"]);
+  check(r.spur[1] === "zu:heim",
+        "ein ZWEITER Klick auf dieselbe Zeile schliesst es wieder "
+        + "(und holt es heim - sonst loescht der naechste Neuaufbau es mit)",
+        r.spur.join(" -> "));
+  check(r.name === "", "und leert die Felder", r.name);
+
+  r = lauf(["g1", "g2"]);
+  check(r.spur[1] === "offen:g2",
+        "ein Klick auf eine ANDERE Zeile verschiebt es dorthin (schliesst nicht)",
+        r.spur.join(" -> "));
+
+  r = lauf(["g1", "g1", "g1"]);
+  check(r.spur[2] === "offen:g1", "und ein dritter oeffnet wieder",
+        r.spur.join(" -> "));
+
+  // Neu oeffnet am Heimatplatz; ein Neuaufbau danach laesst es dort und ZU.
+  r = lauf(["neu"]);
+  check(r.spur[0] === "offen:heim", "'Neu' oeffnet am Heimatplatz");
+  r = lauf(["g1", "g1", "zeichnen"]);
+  check(r.spur[2] === "zu:heim",
+        "nach dem Schliessen bleibt es auch beim Neuaufbau zu", r.spur.join(" -> "));
+
+  /* „Neu" MUSS ausserhalb des Formulars liegen: sonst ist der Knopf mit dem
+   * Formular versteckt und es gibt keinen Weg, eine Vorlage anzulegen. */
+  const form = (POPUP_HTML.match(/<div id="vorl-form" hidden>[\s\S]*?<\/div><!-- \/vorl-form -->/) || [""])[0];
+  check(!!form, "der Formular-Container ist im Markup abgegrenzt");
+  check(form.indexOf('id="btn-vorl-neu"') < 0,
+        "'Neu' liegt AUSSERHALB des Formulars (sonst waere es mit ihm versteckt)");
+  check(form.indexOf('id="btn-vorl-speichern"') > 0
+        && form.indexOf('id="btn-vorl-abbrechen"') > 0,
+        "Speichern und Abbrechen liegen darin");
+  check(POPUP_HTML.indexOf('id="btn-vorl-neu"') > 0,
+        "und 'Neu' gibt es weiterhin");
+  // Register: wer einer Klasse `display` gibt, muss `[hidden]` mitnehmen.
+  check(/#vorl-form\[hidden\]\s*\{[^}]*display:\s*none/.test(cssOhne),
+        "CSS haelt das Verstecken strukturell (Register: [hidden] mitnehmen)");
+}
+
+/** Der Arbeitsbereich als Text - mit Kontrolle, dass der Schnitt wirklich sass. */
+function arbeitsbereich() {
+  const t = (POPUP_HTML.match(/<section id="bereich-arbeit"[\s\S]*?<\/section>/) || [""])[0];
+  check(t.length > 2000 && t.indexOf('id="btn-start"') > 0,
+        "Positivkontrolle: der Arbeitsbereich ist geschnitten",
+        String(t.length));
+  return t;
+}
+
+// ── b) Die Verwaltung oeffnet direkt unter ihrem Knopf ──────────────────
+{
+  const arbeit = arbeitsbereich();
+  const iZahnrad = arbeit.indexOf('id="btn-vorlagen"');
+  const iBox = arbeit.indexOf('id="vorlagen-box"');
+  const iWunsch = arbeit.indexOf('id="f-hinweis"');
+  const iUeberarb = arbeit.indexOf('id="btn-ueberarbeiten"');
+  const iAuto = arbeit.indexOf('id="f-auto"');
+  check(iZahnrad > 0 && iBox > iZahnrad,
+        "die Box steht hinter ihrem Knopf");
+  /* ⚠ UND VOR ALLEM ANDEREN. Sie lag hinter Zusatzwunsch, Ueberarbeiten-Knopf
+   * und Automatik – „Klick auf Vorlagen verwalten zeigt die Felder 4 Felder
+   * weiter". Gemessen wird die REIHENFOLGE, nicht ein Pixelabstand. */
+  check(iBox < iWunsch && iBox < iUeberarb && iBox < iAuto,
+        "und VOR Zusatzwunsch, Ueberarbeiten und Automatik",
+        [iBox, iWunsch, iUeberarb, iAuto].join("<"));
+}
+
+// ── c) Reset neben Abmelden ─────────────────────────────────────────────
+{
+  const kopf = (POPUP_HTML.match(/<header class="kopf">[\s\S]*?<\/header>/) || [""])[0];
+  check(/id="btn-reset"/.test(kopf), "der Reset-Knopf steht in der Kopfzeile");
+  check(kopf.indexOf('id="btn-reset"') < kopf.indexOf('id="btn-abmelden"'),
+        "links von Abmelden - die harmlosere Wahl steht vor der endgueltigen");
+  check(/id="btn-reset"[^>]*hidden/.test(kopf) || /hidden/.test(
+        (kopf.match(/<button[^>]*id="btn-reset"[\s\S]*?>/) || [""])[0]),
+        "und ist ohne Anmeldung verborgen (es gibt dann keine Arbeitsflaeche)");
+  const z = schneidePopup("zeige") || "";
+  check(/reset/.test(z), "zeige() schaltet ihn mit der Anmeldung",
+        z.replace(/\s+/g, " ").slice(0, 120));
+
+  const h = (POPUP_JS.match(/\$\("btn-reset"\)\.addEventListener\([\s\S]*?\n\}\);/) || [""])[0];
+  check(!!h, "und er ist verdrahtet");
+  const ho = ohneKommentare(h);
+  /* WAS ES ZURUECKSETZT: Text und Gedaechtnis (felderLeeren raeumt beides ab),
+   * die Verwaltung, die Vorlagenwahl und den Ring der Automatik. */
+  for (const [muster, was] of [
+    [/felderLeeren\(/, "den angezeigten UND gemerkten Text"],
+    [/vorlageFormularZu\(/, "das Bearbeiten-Formular"],
+    [/vorlagen-box"\)\.hidden = true/, "die geoeffnete Verwaltung"],
+    [/_vorlBeruehrt = false/, "die Vorlagenwahl (zurueck auf den Standard)"],
+    [/auto_gelaufen: \[\]/, "den Ring der Automatik"],
+  ]) {
+    check(muster.test(ho), "Reset raeumt " + was + " ab");
+  }
+  /* ⚠ UND WAS ES NICHT ANFASST. Ein Reset, der ungefragt die Anmeldung, die
+   * Adresse, die Ansicht oder die Automatik-EINSTELLUNG verwirft, ist ein
+   * Datenverlust mit freundlichem Namen - fuer die Anmeldung gibt es den Knopf
+   * daneben. */
+  for (const [muster, was] of [
+    [/art: "abmelden"/, "die Anmeldung"],
+    [/basis:/, "die Serveradresse"],
+    [/ansicht/, "die Ansicht (Popup/Leiste)"],
+    [/auto_vorlage/, "die Automatik-Einstellung"],
+  ]) {
+    check(!muster.test(ho), "Reset fasst " + was + " NICHT an");
+  }
+}
+
+// ── d) LEERES Kommentarfeld: Meldung statt fremdem Text – AUSGEFUEHRT ───
+/* ⚠ DER SCHWERSTE DER SECHS PUNKTE, und er war mehr als eine fehlende
+ * Meldung. `[contenteditable='true']` als letzter Selektor trifft JEDES
+ * editierbare Element - bei Jira ist unter anderem die BESCHREIBUNG des
+ * Tickets inline bearbeitbar. Gemessen: leeres Kommentarfeld plus ein solches
+ * Element ergab `ok:true` mit dem TICKETTEXT als "Entwurf". Der Benutzer
+ * bekam eine "ueberarbeitete Antwort" aus der Beschreibung - und die haette er
+ * als Kommentar an den KUNDEN uebernehmen koennen.
+ */
+{
+  const src = fs.readFileSync(path.join(ADDON, "einfuegen.js"), "utf8");
+  const fn = (src.match(/export function leseAusJira\(\)[\s\S]*?\n\}/) || [""])[0]
+    .replace("export ", "");
+  check(!!fn, "einfuegen.js hat leseAusJira()");
+
+  const lese = (markup) => {
+    const dom = new JSDOM("<body>" + markup + "</body>",
+                          { runScripts: "outside-only" });
+    const w = dom.window;
+    try {
+      /* jsdom rechnet kein Layout: `getBoundingClientRect` liefert ueberall 0,
+       * und die Sichtbarkeitspruefung verwuerfe damit JEDES Feld - der Test
+       * liefe durch einen Zweig, den es im Browser nicht gibt. Deshalb
+       * gestellt. */
+      w.Element.prototype.getBoundingClientRect = function () {
+        return { width: 200, height: 40, top: 0, left: 0, right: 200, bottom: 40 };
+      };
+      return new w.Function("return (" + fn + ")();")();
+    } finally { w.close(); }
+  };
+
+  const KOMM = '<div class="jira-editor-container"><div contenteditable="true">';
+  let r = lese(KOMM + "</div></div>");
+  check(r.ok === false && r.leer === true,
+        "leeres Kommentarfeld: kein Text, sondern die Auskunft 'leer'");
+  check(/Kommentarfeld ist leer/.test(r.fehler || ""),
+        "und die Meldung sagt genau das", r.fehler);
+
+  // DER GEMELDETE FALL.
+  r = lese(KOMM + '</div></div>'
+           + '<div contenteditable="true">Beschreibung des Tickets</div>');
+  check(r.ok === false && r.leer === true,
+        "leeres Kommentarfeld NEBEN einem fremden Editor: weiterhin 'leer' - "
+        + "der fremde Text wird NICHT als Entwurf genommen",
+        JSON.stringify(r.text || r.fehler || "").slice(0, 60));
+
+  r = lese('<textarea id="comment"></textarea>'
+           + '<div contenteditable="true">Beschreibung</div>');
+  check(r.ok === false && r.leer === true,
+        "dasselbe fuer eine leere textarea");
+
+  // Gegenrichtung: das Kommentarfeld MIT Text wird weiterhin gelesen.
+  r = lese(KOMM + "mein Entwurf</div></div>");
+  check(r.ok === true && r.text === "mein Entwurf",
+        "ein gefuelltes Kommentarfeld wird unveraendert gelesen", r.text);
+  check(!r.unsicher, "und gilt als sicher");
+
+  /* Das Auffangnetz BLEIBT - fuer unbekannte Jira-Varianten. Es markiert
+   * seinen Fund aber als unsicher, und das Fenster fragt dann nach. */
+  r = lese('<div contenteditable="true">irgendein Text</div>');
+  check(r.ok === true && r.unsicher === true,
+        "ohne erkanntes Kommentarfeld greift das Auffangnetz - als UNSICHER",
+        JSON.stringify(r));
+
+  const h = (POPUP_JS.match(
+    /\$\("btn-ueberarbeiten"\)\.addEventListener\([\s\S]*?\n\}\);/) || [""])[0];
+  const ho = ohneKommentare(h);
+  check(/r\.unsicher/.test(ho) && /frageJaNein\(/.test(ho),
+        "und das Fenster fragt vor dem Lauf nach");
+  check(/melde\(/.test(ho) && /r\.fehler/.test(ho),
+        "im Fehlerfall wird gemeldet, was der Fall war");
+}
+
+// ── e/f) Tooltip und Platz des Ergebnisses ──────────────────────────────
+{
+  const knopf = (POPUP_HTML.match(/<button[^>]*id="btn-start"[\s\S]*?>/) || [""])[0];
+  check(/title="Antwort erstellen"/.test(knopf),
+        "die Vorgabe im Markup heisst 'Antwort erstellen'", knopf.slice(0, 90));
+  const st = schneidePopup("startTitelSetzen") || "";
+  check(/Antwort erstellen/.test(st) && !/"Zusammenfassung erstellen/.test(st),
+        "und popup.js setzt keinen 'Zusammenfassung erstellen'-Titel mehr");
+
+  const arbeit = arbeitsbereich();
+  const iHinweis = arbeit.indexOf('id="start-hinweis"');
+  const iErg = arbeit.indexOf('id="ergebnis"');
+  const iWunsch = arbeit.indexOf('id="f-hinweis"');
+  const iUeberarb = arbeit.indexOf('id="btn-ueberarbeiten"');
+  const iAuto = arbeit.indexOf('id="f-auto"');
+  check(iErg > iHinweis, "das Ergebnis steht hinter dem Start-Hinweis");
+  /* ⚠ UND VOR Zusatzwunsch, Ueberarbeiten und Automatik: „der generierte Text
+   * soll direkt hinter 'das Dreieck fuehrt die gewuenschte …' erscheinen
+   * (aktuell erscheint er weiter unten)". */
+  check(iErg < iWunsch && iErg < iUeberarb && iErg < iAuto,
+        "und VOR Zusatzwunsch, Ueberarbeiten und Automatik",
+        [iHinweis, iErg, iWunsch, iUeberarb, iAuto].join("<"));
+  // Die Rueckfrage gehoert zum Einfuegen und wandert mit.
+  check(arbeit.indexOf('id="ja-nein"') > iErg
+        && arbeit.indexOf('id="ja-nein"') < iWunsch,
+        "die Einfuege-Rueckfrage steht beim Ergebnis");
+  /* Die Zugriffszeile der Leiste erklaert die VORAUSSETZUNG des
+   * Ueberarbeiten-Knopfes - sie muss bei ihm stehen, nicht am Fensterende. */
+  const iZug = arbeit.indexOf('id="leiste-zugriff"');
+  check(iZug > iUeberarb && iZug < iAuto,
+        "und die Zugriffszeile bei dem Knopf, den sie erklaert",
+        [iUeberarb, iZug, iAuto].join("<"));
 }
 
 /* Erst den Puffer leeren: eine Zurueckweisung aus einem nicht abgewarteten

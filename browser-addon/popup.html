@@ -52,6 +52,15 @@
     <img class="marke-logo" id="marke-logo" alt="" hidden>
     <span class="marke" id="marke">{marke}</span>
     <span class="ticket" id="ticket-anzeige"></span>
+    <!-- ZURUECKSETZEN. Es gibt „Leeren" im Ergebnisbereich, aber der ist nur da,
+         WENN ein Ergebnis da ist – wer eine haengende Anzeige loswerden will,
+         findet ihn genau dann nicht. Dieser Knopf steht immer.
+         Er setzt die ARBEITSFLAECHE zurueck, nicht die Einrichtung: Anmeldung,
+         Adresse, Ansicht und die Automatik-EINSTELLUNG bleiben (fuer die
+         Anmeldung gibt es den Knopf daneben). -->
+    <button type="button" id="btn-reset" class="leise" data-ohne-ticket
+            title="Anzeige zurücksetzen: Text, Zusatzwunsch und Vorlagenwahl"
+            hidden>Reset</button>
     <button type="button" id="btn-abmelden" class="leise" data-ohne-ticket hidden>Abmelden</button>
   </header>
 
@@ -123,7 +132,7 @@
              `title`/`aria-label` setzt popup.js NACH der gewählten Art: ein
              Knopf, der zwei verschiedene Dinge tun kann, muss sagen welches. -->
         <button type="button" id="btn-start" class="haupt ico-start"
-                title="Vorlage ausführen" aria-label="Vorlage ausführen"><svg
+                title="Antwort erstellen" aria-label="Antwort erstellen"><svg
           viewBox="0 0 24 24" width="13" height="13" fill="currentColor"
           aria-hidden="true"><polygon points="6 4 20 12 6 20"/></svg></button>
         <!-- „Ohne Vorlage“, NICHT „Standard“: seit eine Vorlage als Standard
@@ -146,48 +155,6 @@
       eine Zusammenfassung des Tickets.
     </p>
 
-    <label class="feld">
-      <span>Zusatzwunsch <em>(optional)</em></span>
-      <input type="text" id="f-hinweis" placeholder="z. B. kurz halten, auf Englisch">
-    </label>
-
-    <div class="knopfreihe">
-      <button type="button" id="btn-ueberarbeiten" class="haupt">Meinen Kommentar überarbeiten</button>
-    </div>
-    <!-- Die Voraussetzung ist unsichtbar und muss deshalb dastehen: das Feld
-         wird über den zuletzt gesetzten Cursor gefunden. Ohne diesen Satz
-         drückt jemand den Knopf und bekommt „kein Text gefunden“, ohne zu
-         wissen, was er anders machen soll. -->
-    <p class="hinweis" id="ueberarb-hinweis">
-      <b>Meinen Kommentar überarbeiten</b> liest den Entwurf aus dem
-      Kommentarfeld, in dem zuletzt der Cursor stand, und gleicht ihn mit dem
-      Ticketverlauf ab.
-    </p>
-
-    <!-- AUTOMATIK BEI NEUEM TICKET.
-         Bewusst KEIN Knopf, sondern eine Einstellung: sie gilt über das
-         Fenster hinaus. Und bewusst OHNE `data-ohne-ticket` – ein <select>
-         wird von der Ticket-Sperre gar nicht erfasst (die greift nur auf
-         <button>), und das ist hier richtig: wer auf einem fremden Tab steht,
-         muss die Automatik trotzdem AUSschalten können.
-         „Meinen Kommentar überarbeiten" steht bewusst NICHT zur Wahl: es
-         braucht einen Entwurf, den man selbst ins Kommentarfeld geschrieben
-         hat – bei einem gerade erst geöffneten Ticket gibt es den per
-         Definition nicht.
-         ⚠ ZUR WAHL STEHEN VORLAGEN, nicht mehr zwei feste Aktionen: die Liste
-         füllt popup.js aus denselben Vorlagen wie das Pulldown darüber
-         (autoOptionenZeichnen). Gespeichert wird die KENNUNG der Vorlage. -->
-    <label class="feld">
-      <span>Bei neuem Ticket automatisch</span>
-      <select id="f-auto" class="voll">
-        <option value="">Nichts – nur auf Knopfdruck</option>
-      </select>
-    </label>
-    <p class="hinweis" id="auto-hinweis">
-      Läuft höchstens <b>einmal je Ticket</b> und kostet jedes Mal eine
-      Auswertung. Ein zweiter Lauf ist ein Klick auf den Knopf.
-    </p>
-
     <!-- Vorlagen-Verwaltung: bleibt im selben Fenster, damit die Auswahl
          daneben sichtbar bleibt. -->
     <!-- `data-ohne-ticket` steht am CONTAINER, nicht an jedem Knopf einzeln:
@@ -202,6 +169,13 @@
                 aria-label="Schließen">&times;</button>
       </div>
       <ul class="vorl-liste" id="vorl-liste"></ul>
+      <!-- „Neu" steht AUSSERHALB des Formulars, und das ist keine Kosmetik:
+           das Formular ist versteckt, solange niemand bearbeitet – ein „Neu"
+           darin wäre mit ihm verborgen, und es gäbe keinen Weg, eine Vorlage
+           anzulegen. Es ist ohnehin eine Aktion der LISTE. -->
+      <div class="knopfreihe">
+        <button type="button" id="btn-vorl-neu" class="leise" data-ohne-ticket>Neu</button>
+      </div>
       <!-- ⚠ DAS FORMULAR WANDERT (Vorgabe 2026-09-02).
            „Bearbeiten“ hängt es DIREKT UNTER die angeklickte Zeile, statt es am
            Ende der Liste stehen zu lassen – bei zwanzig Vorlagen war sonst
@@ -210,8 +184,14 @@
            nicht zwei Formulare: zwei wären zwei Wege zum Speichern, die
            auseinanderlaufen. Der Heimatplatz ist hier, direkt hinter der Liste;
            dorthin kehrt es für „Neu“ und vor jedem Neuaufbau der Liste zurück –
-           `liste.innerHTML = ""` würde es sonst MITLÖSCHEN. -->
-      <div id="vorl-form">
+           `liste.innerHTML = ""` würde es sonst MITLÖSCHEN.
+
+           ⚠ UND ES IST ZU, SOLANGE NIEMAND BEARBEITET (Vorgabe 2026-09-02:
+           „nochmaliger Klick auf Bearbeiten muss die Felder wieder schließen“).
+           Vorher standen die Felder immer da – beim Öffnen der Verwaltung sah
+           man ein leeres Formular ohne Bezug, und ein zweiter Klick auf ✎ tat
+           nichts Sichtbares. popup.js schaltet `hidden`. -->
+      <div id="vorl-form" hidden>
       <label class="feld">
         <span>Name</span>
         <input type="text" id="f-vorl-name" maxlength="60" placeholder="z. B. Kurz für die Leitung">
@@ -253,8 +233,11 @@
         <span><input type="checkbox" id="f-vorl-global"> Für alle Benutzer (Administrator)</span>
       </label>
       <div class="knopfreihe">
-        <button type="button" id="btn-vorl-speichern" class="haupt">Speichern</button>
-        <button type="button" id="btn-vorl-neu" class="leise">Neu</button>
+        <button type="button" id="btn-vorl-speichern" class="haupt" data-ohne-ticket>Speichern</button>
+        <!-- Schliesst das Formular, ohne zu speichern. Ein zweiter Klick auf ✎
+             derselben Zeile tut dasselbe – zwei Wege zum selben Ziel, weil man
+             den einen erwartet und den anderen sucht. -->
+        <button type="button" id="btn-vorl-abbrechen" class="leise" data-ohne-ticket>Abbrechen</button>
       </div>
       </div><!-- /vorl-form -->
       <!-- Die Rückmeldung bleibt BEWUSST ausserhalb des wandernden Formulars:
@@ -264,20 +247,10 @@
       <p class="hinweis" id="vorl-hinweis"></p>
     </div>
 
-    <!-- NUR IN DER SEITENLEISTE, und nur wenn das Recht wirklich fehlt.
-         Das Popup kommt mit `activeTab` aus: der Klick auf das Symbol erteilt
-         das Recht fuer genau den Tab, in dem gearbeitet wird. Die Leiste bleibt
-         dagegen ueber den Tab-Wechsel hinaus offen – fuer den NAECHSTEN Tab
-         gilt `activeTab` nicht mehr, und „Überarbeiten" wie „Einfügen" liefen
-         in einen Fehler, den niemand deuten kann.
-         Der Knopf ist Absicht: `permissions.request` verlangt eine
-         Benutzergeste, und die gibt es nur bei einem echten Klick. Aus einem
-         Fehlerzweig heraus (nach `await`) lehnt Chrome die Abfrage ab. -->
-    <p class="hinweis zugriff-zeile" id="leiste-zugriff" hidden>
-      <span id="leiste-zugriff-text"></span>
-      <button type="button" id="btn-leiste-zugriff" data-ohne-ticket>Zugriff erlauben</button>
-    </p>
-
+    <!-- DAS ERGEBNIS STEHT OBEN – direkt hinter dem Start-Hinweis (Vorgabe
+         2026-09-02). Vorher lag es hinter Zusatzwunsch, Überarbeiten-Knopf und
+         Automatik: wer das Dreieck drückte, musste den erzeugten Text vier
+         Felder weiter unten suchen. -->
     <div id="ergebnis" hidden>
       <!-- RICH-TEXT, nicht Textarea: `**Lösung:**` soll fett DASTEHEN, nicht als
            Sternchen. Das Feld bleibt bearbeitbar – es ist die Fläche, deren
@@ -320,6 +293,65 @@
         <button type="button" id="jn-ja" data-ohne-ticket>Trotzdem einfügen</button>
       </div>
     </div>
+
+    <label class="feld">
+      <span>Zusatzwunsch <em>(optional)</em></span>
+      <input type="text" id="f-hinweis" placeholder="z. B. kurz halten, auf Englisch">
+    </label>
+
+    <div class="knopfreihe">
+      <button type="button" id="btn-ueberarbeiten" class="haupt">Meinen Kommentar überarbeiten</button>
+    </div>
+    <!-- Die Voraussetzung ist unsichtbar und muss deshalb dastehen: das Feld
+         wird über den zuletzt gesetzten Cursor gefunden. Ohne diesen Satz
+         drückt jemand den Knopf und bekommt „kein Text gefunden“, ohne zu
+         wissen, was er anders machen soll. -->
+    <p class="hinweis" id="ueberarb-hinweis">
+      <b>Meinen Kommentar überarbeiten</b> liest den Entwurf aus dem
+      Kommentarfeld, in dem zuletzt der Cursor stand, und gleicht ihn mit dem
+      Ticketverlauf ab.
+    </p>
+
+    <!-- NUR IN DER SEITENLEISTE, und nur wenn das Recht wirklich fehlt.
+         Das Popup kommt mit `activeTab` aus: der Klick auf das Symbol erteilt
+         das Recht fuer genau den Tab, in dem gearbeitet wird. Die Leiste bleibt
+         dagegen ueber den Tab-Wechsel hinaus offen – fuer den NAECHSTEN Tab
+         gilt `activeTab` nicht mehr, und „Überarbeiten" wie „Einfügen" liefen
+         in einen Fehler, den niemand deuten kann.
+         Der Knopf ist Absicht: `permissions.request` verlangt eine
+         Benutzergeste, und die gibt es nur bei einem echten Klick. Aus einem
+         Fehlerzweig heraus (nach `await`) lehnt Chrome die Abfrage ab. -->
+    <p class="hinweis zugriff-zeile" id="leiste-zugriff" hidden>
+      <span id="leiste-zugriff-text"></span>
+      <button type="button" id="btn-leiste-zugriff" data-ohne-ticket>Zugriff erlauben</button>
+    </p>
+
+    <!-- AUTOMATIK BEI NEUEM TICKET.
+         Bewusst KEIN Knopf, sondern eine Einstellung: sie gilt über das
+         Fenster hinaus. Und bewusst OHNE `data-ohne-ticket` – ein <select>
+         wird von der Ticket-Sperre gar nicht erfasst (die greift nur auf
+         <button>), und das ist hier richtig: wer auf einem fremden Tab steht,
+         muss die Automatik trotzdem AUSschalten können.
+         „Meinen Kommentar überarbeiten" steht bewusst NICHT zur Wahl: es
+         braucht einen Entwurf, den man selbst ins Kommentarfeld geschrieben
+         hat – bei einem gerade erst geöffneten Ticket gibt es den per
+         Definition nicht.
+         ⚠ ZUR WAHL STEHEN VORLAGEN, nicht mehr zwei feste Aktionen: die Liste
+         füllt popup.js aus denselben Vorlagen wie das Pulldown darüber
+         (autoOptionenZeichnen). Gespeichert wird die KENNUNG der Vorlage. -->
+    <label class="feld">
+      <span>Bei neuem Ticket automatisch</span>
+      <select id="f-auto" class="voll">
+        <option value="">Nichts – nur auf Knopfdruck</option>
+      </select>
+    </label>
+    <p class="hinweis" id="auto-hinweis">
+      Läuft höchstens <b>einmal je Ticket</b> und kostet jedes Mal eine
+      Auswertung. Ein zweiter Lauf ist ein Klick auf den Knopf.
+    </p>
+
+
+
   </section>
 
   <p id="meldung" class="meldung" hidden></p>

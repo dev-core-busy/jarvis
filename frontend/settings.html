@@ -3292,7 +3292,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <span class="sk-openclaw-toggle" id="ji-sect-vorl-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="ji-sect-vorl-body">
-                                <p class="kb-hint" data-i18n-html="jvorl.intro">Benannte Vorlagen bestimmen, <b>worauf</b> eine Zusammenfassung hinausläuft – „kurz für die Leitung“, „technisch mit Verlauf“. Sie erscheinen im Pulldown der Browser-Erweiterung. <b>Gemeinsame</b> Vorlagen gelten für alle Benutzer und werden hier gepflegt; eigene darf jeder zusätzlich im Fenster der Erweiterung anlegen.</p>
+                                <p class="kb-hint" data-i18n-html="jvorl.intro">Benannte Vorlagen bestimmen, <b>was</b> die Erweiterung erzeugt: eine Zusammenfassung für den Bearbeiter („kurz für die Leitung“, „technisch mit Verlauf“) oder einen Antwortentwurf an den Melder. Das <b>Startsymbol</b> im Fenster führt die gewählte Vorlage aus. Sie erscheinen im Pulldown der Browser-Erweiterung. <b>Gemeinsame</b> Vorlagen gelten für alle Benutzer und werden hier gepflegt; eigene darf jeder zusätzlich im Fenster der Erweiterung anlegen.</p>
                                 <!-- data-i18n-html, nicht data-i18n: der Text trägt <b> und würde beim ersten Sprachwechsel sonst zu Klartext. -->
                                 <p class="kb-hint" data-i18n-html="jvorl.std_hint">Der Stern markiert deine <b>persönliche</b> Standard-Vorlage – sie ist im Fenster der Erweiterung vorausgewählt. Die Markierung gilt nur für dich, auch bei gemeinsamen Vorlagen.</p>
                                 <!-- Werkzeugleiste. "Neu" gehoert VOR die Liste und der Status
@@ -3316,9 +3316,26 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                         <label data-i18n="jvorl.name">Name</label>
                                         <input type="text" id="jvorl-name" class="config-input" maxlength="60" placeholder="z. B. Kurz für die Leitung" data-i18n-placeholder="jvorl.ph_name" style="width:100%;box-sizing:border-box;">
                                     </div>
+                                    <!-- WAS DIE VORLAGE TUT (seit 2026-09-02). Sie bestimmt den
+                                         Modus des Laufs: eine Zusammenfassung fuer den Bearbeiter
+                                         oder einen Antwortentwurf fuer den Melder – letzterer laeuft
+                                         unter eigenen Schutzregeln (nichts zusagen, keine Termine,
+                                         keine Platzhalter). Vorgabe ist die Zusammenfassung, dieselbe
+                                         fail-safe Richtung wie in jira_vorlagen.art_von.
+                                         Das Feld gehoert AUCH hierher, nicht nur ins Fenster der
+                                         Erweiterung: die GEMEINSAMEN Vorlagen werden hier gepflegt –
+                                         ohne es koennte ein Administrator keine Antwort-Vorlage fuer
+                                         alle anlegen. -->
+                                    <div class="form-group">
+                                        <label data-i18n="jvorl.art">Art</label>
+                                        <select id="jvorl-art" class="config-input" style="width:100%;box-sizing:border-box;">
+                                            <option value="zusammenfassung" data-i18n="jvorl.art_sum">Zusammenfassung (für den Bearbeiter)</option>
+                                            <option value="antwort" data-i18n="jvorl.art_reply">Antwort an den Melder</option>
+                                        </select>
+                                    </div>
                                     <div class="form-group">
                                         <label data-i18n="jvorl.text">Anweisung</label>
-                                        <textarea id="jvorl-text" class="config-input" rows="4" placeholder="Worauf soll die Zusammenfassung hinauslaufen?" data-i18n-placeholder="jvorl.ph_text" style="width:100%;box-sizing:border-box;resize:vertical;"></textarea>
+                                        <textarea id="jvorl-text" class="config-input" rows="4" placeholder="Worauf soll das Ergebnis hinauslaufen?" data-i18n-placeholder="jvorl.ph_text" style="width:100%;box-sizing:border-box;resize:vertical;"></textarea>
                                     </div>
                                     <!-- Werkzeug-Bereiche DIESER Vorlage. Der Block
                                          erscheint nur, wenn der Administrator oben
@@ -3329,7 +3346,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                          Servers (Name und Hinweis kommen von dort). -->
                                     <div class="form-group" id="jvorl-ber-zeile" style="display:none;">
                                         <label data-i18n="jvorl.ber">Nachschlagen erlauben (Werkzeug-Bereiche)</label>
-                                        <p class="kb-hint" style="margin:0 0 6px;" data-i18n-html="jvorl.ber_hint">Gilt für <b>alle drei Knöpfe</b> der Erweiterung; der Anweisungstext oben nur für die Zusammenfassung. Ohne Haken wertet der Lauf allein das Ticket aus. <b>Der Haken erlaubt das Nachschlagen, er erzwingt es nicht</b> – gemessen schlägt das Modell nur nach, wenn der Anweisungstext es verlangt („prüfe gegen unsere Dokumentation“).</p>
+                                        <p class="kb-hint" style="margin:0 0 6px;" data-i18n-html="jvorl.ber_hint">Gilt für <b>jede Auswertung</b> der Erweiterung, auch beim Überarbeiten eines Kommentars; der Anweisungstext oben dort nicht. Ohne Haken wertet der Lauf allein das Ticket aus. <b>Der Haken erlaubt das Nachschlagen, er erzwingt es nicht</b> – gemessen schlägt das Modell nur nach, wenn der Anweisungstext es verlangt („prüfe gegen unsere Dokumentation“).</p>
                                         <div id="jvorl-bereiche"></div>
                                     </div>
                                     <div class="form-group" id="jvorl-global-zeile">
@@ -5110,7 +5127,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
     <script src="/static/js/icons.js?v=1"></script>
-    <script src="/static/js/i18n.js?v=207"></script>
+    <script src="/static/js/i18n.js?v=208"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=21"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -5128,7 +5145,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/mcp.js?v=5"></script>
     <script src="/static/js/vision.js?v=31"></script>
     <script src="/static/js/confluence.js?v=7"></script>
-    <script src="/static/js/jira.js?v=15"></script>
+    <script src="/static/js/jira.js?v=16"></script>
     <!-- sapcert.js VOR sap.js: der Reiter haengt den Baustein beim Laden ein. -->
     <script src="/static/js/sapcert.js?v=1"></script>
     <script src="/static/js/sap.js?v=4"></script>

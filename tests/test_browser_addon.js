@@ -674,8 +674,12 @@ check(/"colors":\s*cfg\.get\("colors"/.test(MAIN_SRC),
   check(!/innerHTML/.test(ohneKommentare(m ? m[0] : 'innerHTML')),
         'melde() setzt den Text nie per innerHTML');
 
-  // Und die Wartetexte melden sich auch wirklich als solche an.
-  for (const stelle of [/melde\(ARBEITSTEXT\[modus\][^)]*,\s*true\)/,
+  /* Und die Wartetexte melden sich auch wirklich als solche an.
+   * Beim Auswerten steht der Text seit 0.8.0 in einem Ternaer (bei gewaehlter
+   * Vorlage entscheidet ihre ART den Modus, und die kennt erst die Antwort) -
+   * geprueft wird deshalb, dass ARBEITSTEXT ueberhaupt mit `true` gemeldet
+   * wird, nicht die Schreibweise des Ausdrucks. */
+  for (const stelle of [/melde\(\(?[\s\S]{0,200}?ARBEITSTEXT[\s\S]{0,200}?,\s*true\)/,
                         /melde\("Melde an …",\s*true\)/,
                         /melde\("Lese das Kommentarfeld …",\s*true\)/]) {
     check(stelle.test(POPUP_JS),
@@ -1039,10 +1043,20 @@ check(/jn-nein"\)\.focus\(\)/.test(POPUP_JS),
  * `_system_prompt`), ihre BEREICHE gelten fuer alle drei Knoepfe. Ginge die
  * Kennung nur bei einem Modus mit, waere die Freigabe fuer zwei von drei
  * Knoepfen wirkungslos – und niemand koennte erklaeren, warum. */
-check(/vorlage: \$\("f-vorlage"\)\.value \|\| ""/.test(POPUP_JS),
-      "die Vorlage geht bei JEDEM Modus mit (ihre Bereiche gelten fuer alle)");
-check(!/modus === "zusammenfassung"\) \? \(\$\("f-vorlage"\)/.test(POPUP_JS),
-      "und wird nicht mehr auf einen Modus eingeschraenkt");
+/* GEMESSEN AN DER EIGENSCHAFT, nicht an der Schreibweise: der Wert kommt seit
+ * 0.8.0 aus einem Ternaer, weil die Automatik eine ANDERE Vorlage fahren kann
+ * als die im Pulldown gewaehlte (`auswerten(..., vorlagenId)`). Entscheidend
+ * bleibt: die Kennung geht in JEDEM Modus mit, und ohne Uebergabe gilt das
+ * Feld. */
+{
+  const rumpf = schneidePopup('auswerten') || '';
+  const zeile = (rumpf.match(/vorlage:[\s\S]{0,180}?,\n/) || [''])[0];
+  check(/f-vorlage"\)\.value/.test(zeile) && /vorlagenId/.test(zeile),
+        "die Vorlage geht bei JEDEM Modus mit (ihre Bereiche gelten fuer alle)",
+        zeile.trim());
+  check(!/modus === "zusammenfassung"/.test(zeile),
+        "und wird nicht mehr auf einen Modus eingeschraenkt", zeile.trim());
+}
 // Namen sind Freitext aus einem Formular.
 check(!/innerHTML\s*=\s*[^;]*\bv\.name\b/.test(POPUP_JS),
       "Vorlagennamen gehen nicht durch innerHTML");
@@ -1063,7 +1077,10 @@ check(/o\.textContent = v\.name/.test(POPUP_JS), "sondern durch textContent");
    * nackten ReferenceError abgebrochen statt fehlzuschlagen. */
   const { teile: t3, drin: d3 } = popupTeile(
     ['vorlagenZeichnen'],
-    ['standardSetzen', 'vorlageInsFormular', 'vorlageLoeschen', 'frageJaNein']);
+    ['standardSetzen', 'vorlageLoeschen', 'frageJaNein',
+     // Das Automatik-Pulldown und der Knopf-Titel haengen an `melde`/`frage`
+     // und gehoeren in eigene Abschnitte – hier gestellt.
+     'autoOptionenZeichnen', 'startTitelSetzen']);
   const zeichnen = t3.join('\n');
   check(d3.has('vorlagenZeichnen'), 'popup.js hat vorlagenZeichnen()');
   check(d3.has('knoepfeAktualisieren'),
@@ -1078,13 +1095,22 @@ check(/o\.textContent = v\.name/.test(POPUP_JS), "sondern durch textContent");
         const $ = (id) => document.getElementById(id);
         let _vorlBeruehrt = false;
         let _bereiche = [];   // Modul-Variable; faellt aus dem Schnitt heraus
+        /* ACHTUNG EBENFALLS MODUL-VARIABLEN - und genau diese Falle hat beim
+         * Umbau auf das wandernde Formular zugeschnappt: _formHeimat fehlte,
+         * der Lauf brach mit einem nackten ReferenceError ab (kein FAIL, keine
+         * Zaehlzeile) und sah aus wie ein bestandener Test. Register.
+         * KEINE Backticks in diesem Prolog: er steht in einem
+         * Template-Literal und wuerde es beenden (Register, zweite Falle). */
+        let _formHeimat = null;
+        let _vorlBearbeitet = "";
+        function autoOptionenZeichnen() {}
+        function startTitelSetzen() {}
         let _vorlagen = {
           global: [{ id: "g1", name: "Kurz" }, { id: "g2", name: "Technisch" }],
           eigene: [{ id: "e1", name: "Meine" }],
           darf_global: true, standard,
         };
         function standardSetzen() {}
-        function vorlageInsFormular() {}
         function vorlageLoeschen() {}
         function frageJaNein() { return Promise.resolve(true); }
         let _key = (key === undefined) ? "ABC-1" : key, _laeuft = false;
@@ -1096,11 +1122,15 @@ check(/o\.textContent = v\.name/.test(POPUP_JS), "sondern durch textContent");
           vorlagenZeichnen();            // z. B. nach dem Speichern
         }
         const sterne = Array.from(
-          document.querySelectorAll("#vorl-liste button"))
+          document.querySelectorAll("#vorl-liste .vorl-zeile button"))
           .filter((b) => /^[★☆]$/u.test(b.textContent))
           .map((b) => b.textContent);
+        /* AUS DER ZEILE, nicht aus der ganzen Liste: seit das Bearbeiten-
+         * Formular UNTER seine Zeile wandert, liegen Speichern und Neu
+         * zeitweise ebenfalls in der Liste - "alle Zeilen-Knoepfe gesperrt"
+         * waere dann eine Aussage ueber fremde Knoepfe. */
         const zeilenKnoepfe = Array.from(
-          document.querySelectorAll("#vorl-liste button"));
+          document.querySelectorAll("#vorl-liste .vorl-zeile button"));
         return JSON.stringify({
           gewaehlt: $("f-vorlage").value,
           erste: $("f-vorlage").options[0].textContent,
@@ -2007,7 +2037,7 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
              * oder gar nicht auffaellt. Hier bedeutet "" = Automatik aus, also
              * genau das Verhalten, das dieser Abschnitt messen will.
              * Abschnitt 14 prueft die Automatik selbst. */
-            let _autoModus = "";
+            let _autoVorlage = "";
             Object.defineProperty(el.ergebnisFeld, "value", {
               get() { throw new Error("value am Ergebnisfeld GELESEN"); },
               set() { throw new Error("value am Ergebnisfeld GESETZT"); },
@@ -2692,10 +2722,12 @@ section("11) Ohne Ticket ist alles gesperrt (Vorgabe 2026-08-30)");
     check([...ausnahme].every((id) => r.zustand[id] !== true),
           "und keine einzige Ausnahme ist gesperrt",
           [...ausnahme].filter((id) => r.zustand[id] === true).join(", "));
-    check(r.zustand["btn-zusammenfassung"] === true &&
-          r.zustand["btn-antwort"] === true &&
+    /* Seit 0.8.0 sind es ZWEI Auswertungsknoepfe: das Startdreieck (es faehrt
+     * die gewaehlte Vorlage) und das Ueberarbeiten. `btn-zusammenfassung` und
+     * `btn-antwort` gibt es nicht mehr - beide sind Vorlagen. */
+    check(r.zustand["btn-start"] === true &&
           r.zustand["btn-ueberarbeiten"] === true,
-          "die drei Auswertungsknoepfe sind gesperrt");
+          "die Auswertungsknoepfe sind gesperrt");
     check(r.zustand["btn-einfuegen"] === true,
           "und Einfuegen ebenfalls - ohne Ticket gibt es kein Kommentarfeld");
     check(r.zustand["btn-anmelden"] === false,
@@ -2719,7 +2751,7 @@ section("11) Ohne Ticket ist alles gesperrt (Vorgabe 2026-08-30)");
    * waehrenddessen auf einen fremden Tab gewechselt ist. */
   {
     const r = lageBei("", false, true);   // sperre(true) ... sperre(false)
-    check(r.zustand["btn-zusammenfassung"] === true,
+    check(r.zustand["btn-start"] === true,
           "nach einem Lauf bleibt die Ticket-Sperre bestehen");
     check(r.zustand["btn-abmelden"] === false,
           "und die Ausnahme ist wieder frei");
@@ -2740,10 +2772,12 @@ section("11) Ohne Ticket ist alles gesperrt (Vorgabe 2026-08-30)");
    * zwischen Zeichnen und Klick aendern (Tab-Wechsel in der Leiste), und ein
    * `disabled` laesst sich aus den Entwicklerwerkzeugen entfernen. Die
    * Pruefung im Handler ist die eigentliche Schranke. */
-  for (const id of ["btn-zusammenfassung", "btn-antwort", "btn-ueberarbeiten"]) {
+  for (const id of ["btn-start", "btn-ueberarbeiten"]) {
     const h = (POPUP_JS.match(new RegExp(
       '\\$\\("' + id + '"\\)\\.addEventListener\\([\\s\\S]*?\\n\\}\\);')) || [""])[0];
-    const auswerten = /auswerten\("(zusammenfassung|antwort)"\)/.test(h);
+    // Entweder der Handler prueft selbst, oder er ruft `auswerten` - und das
+    // bricht ohne Ticket ab (Pruefung gleich darunter).
+    const auswerten = /auswerten\(/.test(h);
     check(auswerten || /if \(!_key\)/.test(h),
           id + " prueft weiterhin selbst auf ein Ticket");
   }
@@ -2780,15 +2814,25 @@ function schneideBg(name) {
 {
   const knopf = (POPUP_HTML.match(
     /<button[^>]*id="btn-ueberarbeiten"[^>]*>([^<]*)<\/button>/) || ["", ""])[1];
-  check(knopf.trim() === "Antwort überarbeiten",
-        'der Knopf heisst "Antwort überarbeiten"', knopf);
-  check(!/>\s*Überarbeiten\s*</.test(POPUP_HTML),
-        "der alte Name steht nirgends mehr im Fenster");
+  check(knopf.trim() === "Meinen Kommentar überarbeiten",
+        'der Knopf heisst "Meinen Kommentar überarbeiten"', knopf);
+  check(!/>\s*Überarbeiten\s*</.test(POPUP_HTML)
+        && !/>\s*Antwort überarbeiten\s*</.test(POPUP_HTML),
+        "kein alter Name steht mehr im Fenster");
+  /* ⚠ DIE ZWEI ALTEN KNOEPFE SIND WEG (Vorgabe 2026-09-02). Bleiben sie im
+   * Markup stehen, waehrend popup.js sie nicht mehr verdrahtet, hat der
+   * Benutzer zwei Knoepfe, die nichts tun - und niemand sieht warum. */
+  for (const id of ["btn-zusammenfassung", "btn-antwort"]) {
+    check(POPUP_HTML.indexOf('id="' + id + '"') < 0,
+          id + " gibt es nicht mehr (die Aktion ist eine Vorlage)");
+    check(POPUP_JS.indexOf('"' + id + '"') < 0,
+          "und popup.js verdrahtet ihn auch nicht mehr");
+  }
   // Der Hinweis darunter erklaert GENAU diesen Knopf - laeuft er auf den alten
   // Namen, sucht der Benutzer ein Bedienelement, das es nicht mehr gibt.
   const hinweis = (POPUP_HTML.match(
     /id="ueberarb-hinweis"[^>]*>([\s\S]*?)<\/p>/) || ["", ""])[1];
-  check(/<b>Antwort überarbeiten<\/b>/.test(hinweis),
+  check(/<b>Meinen Kommentar überarbeiten<\/b>/.test(hinweis),
         "und der Hinweis darunter nennt ihn beim neuen Namen", hinweis.trim());
 }
 
@@ -2801,30 +2845,47 @@ function schneideBg(name) {
 
   const sel = (arbeit.match(/<select id="f-auto"[\s\S]*?<\/select>/) || [""])[0];
   const werte = [...sel.matchAll(/value="([^"]*)"/g)].map((m) => m[1]);
-  check(werte.length === 3, "es stehen genau drei Moeglichkeiten zur Wahl",
+  /* ⚠ IM MARKUP STEHT NUR NOCH "AUS" (Vorgabe 2026-09-02). Zur Wahl stehen
+   * VORLAGEN, und die kennt nur der Server – gezeichnet wird sie aus derselben
+   * Liste wie das Startfeld (autoOptionenZeichnen). Eine zweite, fest
+   * verdrahtete Option im Markup waere ein Wert, den es als Vorlage nicht
+   * gibt: gespeichert wuerde er, laufen wuerde nichts. */
+  check(werte.length === 1 && werte[0] === "",
+        "im Markup steht nur AUS - die Vorlagen kommen aus der Liste",
         werte.join("|"));
-  check(werte[0] === "",
-        "die erste ist AUS - Vorgabe ist, dass nichts von selbst laeuft");
+  const aoz = schneidePopup("autoOptionenZeichnen") || "";
+  check(/_vorlagen\.global/.test(aoz) && /_vorlagen\.eigene/.test(aoz),
+        "und gefuellt wird aus denselben Vorlagen wie das Startfeld");
+  check(/o\.textContent = v\.name/.test(aoz),
+        "Vorlagennamen gehen durch textContent (Freitext aus einem Formular)");
+  check(/o\.value = v\.id/.test(aoz),
+        "gespeichert wird die KENNUNG der Vorlage");
 
-  /* DRIFT-SCHRANKE ueber drei Dateien. Ein Wert im Markup, den der Hintergrund
-   * nicht kennt, wird dort still zu "aus" (autoModus ist fail-closed): der
-   * Benutzer stellt etwas ein, es wird gespeichert, und es passiert nie etwas -
-   * ohne jede Fehlermeldung. */
-  const AUTO_MODI = JSON.parse(
-    (BG.match(/const AUTO_MODI = (\[[^\]]*\]);/) || ["", "[]"])[1]
-      .replace(/'/g, '"'));
-  check(AUTO_MODI.length === 2, "der Hintergrund kennt zwei Modi",
-        AUTO_MODI.join("|"));
-  check(werte.filter((w) => w).every((w) => AUTO_MODI.indexOf(w) >= 0),
-        "jeder Wert im Markup ist einer, den der Hintergrund annimmt",
-        werte.join("|") + " gegen " + AUTO_MODI.join("|"));
+  /* DRIFT-SCHRANKE ueber zwei Dateien, jetzt als FORM statt als Liste: der
+   * Hintergrund nimmt nur wohlgeformte Vorlagen-Kennungen an (fail-closed).
+   * Der ALTE Modus-Wert muss dabei herausfallen - sonst wuerde ein Bestand
+   * nach dem Update etwas anderes tun als bestellt. */
+  const idRe = (BG.match(/const AUTO_ID_RE = (\/[^\n;]*\/);/) || ["", ""])[1];
+  check(!!idRe, "der Hintergrund hat ein Muster fuer Vorlagen-Kennungen", idRe);
+  const pruef = new RegExp(idRe.slice(1, idRe.lastIndexOf("/")),
+                           idRe.slice(idRe.lastIndexOf("/") + 1));
+  check(pruef.test("a1b2c3d4e5f6"), "eine echte Kennung passt darauf");
+  check(!pruef.test("zusammenfassung") && !pruef.test("antwort"),
+        "der alte Modus-Wert NICHT - er gilt damit als AUS (fail-closed)");
+  check(!pruef.test("ueberarbeiten"),
+        "'ueberarbeiten' ebenso nicht: es braucht einen eigenen Entwurf, den es "
+        + "bei einem frisch geoeffneten Ticket per Definition nicht gibt");
 
-  /* "Antwort ueberarbeiten" darf NICHT zur Wahl stehen: es braucht einen
-   * Entwurf, den der Bearbeiter selbst ins Kommentarfeld geschrieben hat - bei
-   * einem gerade geoeffneten Ticket gibt es den per Definition nicht. Der Lauf
-   * endete zwangslaeufig mit "kein Text gefunden". */
-  check(werte.indexOf("ueberarbeiten") < 0 && AUTO_MODI.indexOf("ueberarbeiten") < 0,
-        "'ueberarbeiten' steht NICHT zur Wahl (es braucht einen eigenen Entwurf)");
+  /* Und es ist auch keine VORLAGEN-ART: waere es eine, liesse sich eine
+   * Vorlage anlegen, die als Automatik zwangslaeufig in "kein Text gefunden"
+   * laeuft. */
+  const artSel = (POPUP_HTML.match(/<select id="f-vorl-art"[\s\S]*?<\/select>/) || [""])[0];
+  const arten = [...artSel.matchAll(/value="([^"]*)"/g)].map((m) => m[1]);
+  check(JSON.stringify(arten) === JSON.stringify(["zusammenfassung", "antwort"]),
+        "eine Vorlage ist eine Zusammenfassung ODER eine Antwort", arten.join("|"));
+  check(arten[0] === "zusammenfassung",
+        "und die Zusammenfassung ist die Vorgabe (fail-safe: ein Antworttext "
+        + "geht an einen KUNDEN)");
 
   /* Bewusst KEIN `data-ohne-ticket` noetig: die Ticket-Sperre greift nur auf
    * <button>. Genau richtig - wer auf einem fremden Tab steht, muss die
@@ -2837,18 +2898,16 @@ function schneideBg(name) {
 
 // ── c) Der Hintergrund entscheidet - AUSGEFUEHRT ─────────────────────────
 {
-  const teile = ["autoModus", "einstLesen", "einstSchreiben", "autoStart"]
-    .map(schneideBg);
+  const namen = ["autoVorlage", "einstLesen", "einstSchreiben", "autoStart"];
+  const teile = namen.map(schneideBg);
   for (let i = 0; i < teile.length; i++) {
-    check(!!teile[i],
-          "background.js hat " + ["autoModus", "einstLesen", "einstSchreiben",
-                                  "autoStart"][i] + "()");
+    check(!!teile[i], "background.js hat " + namen[i] + "()");
   }
   // Modul-Konstanten: sie stehen in keinem Funktionsrumpf und fallen aus jedem
   // Schnitt heraus - fehlen sie, WIRFT der Lauf statt fehlzuschlagen.
   const konst = [
     (BG.match(/const EINST = "[^"]*";/) || [""])[0],
-    (BG.match(/const AUTO_MODI = \[[^\]]*\];/) || [""])[0],
+    (BG.match(/const AUTO_ID_RE = \/[^\n;]*\/;/) || [""])[0],
     (BG.match(/const AUTO_MERK_MAX = \d+;/) || [""])[0],
   ];
   check(konst.every((k) => k), "und die drei Modul-Konstanten dazu",
@@ -2874,8 +2933,8 @@ function schneideBg(name) {
   {
     const r = JSON.parse(await bgLauf(einst({}), ["ABC-1", "ABC-2"]));
     check(r.spur.every((s) => s.starten === false),
-          "Vorgabe (kein auto_modus): es startet nichts");
-    check(r.spur.every((s) => s.modus === ""), "und der Modus ist leer");
+          "Vorgabe (kein auto_vorlage): es startet nichts");
+    check(r.spur.every((s) => s.vorlage === ""), "und die Vorlage ist leer");
     check(!r.ablage.einstellungen.auto_gelaufen,
           "es wird auch nichts vermerkt - der Ring bleibt unangetastet",
           JSON.stringify(r.ablage.einstellungen));
@@ -2884,20 +2943,25 @@ function schneideBg(name) {
   // 2) DER KERN: je Ticket genau einmal.
   {
     const r = JSON.parse(await bgLauf(
-      einst({ auto_modus: "zusammenfassung" }),
+      einst({ auto_vorlage: "a1b2c3d4e5f6" }),
       ["ABC-1", "ABC-1", "ABC-2", "ABC-1"]));
     check(r.spur[0].starten === true, "erstes Ticket: es startet");
-    check(r.spur[0].modus === "zusammenfassung", "mit dem eingestellten Modus",
-          r.spur[0].modus);
+    check(r.spur[0].vorlage === "a1b2c3d4e5f6",
+          "mit der eingestellten Vorlage", r.spur[0].vorlage);
     check(r.spur[1].starten === false,
           "DASSELBE Ticket ein zweites Mal: es startet NICHT mehr");
     check(r.spur[2].starten === true, "ein anderes Ticket startet wieder");
     check(r.spur[3].starten === false,
           "und der Rueckwechsel auf das erste startet nicht erneut "
           + "(genau das waere der Tab-Wechsel-Kreisel)");
-    check(r.spur[1].modus === "zusammenfassung",
-          "der Modus steht auch dann drin, wenn nicht gestartet wird - "
+    check(r.spur[1].vorlage === "a1b2c3d4e5f6",
+          "die Vorlage steht auch dann drin, wenn nicht gestartet wird - "
           + "'aus' und 'schon gelaufen' sind zweierlei");
+  /* ⚠ WAS die Vorlage tut, sagt der Hintergrund NICHT - das entscheidet der
+   * Server aus ihrer Art. Eine zweite Stelle, die aus einer Kennung einen
+   * Modus macht, waere eine zweite Wahrheit. */
+    check(r.spur[0].modus === undefined,
+          "und KEIN Modus - den leitet allein der Server aus der Vorlage ab");
     check(JSON.stringify(r.ablage.einstellungen.auto_gelaufen)
             === JSON.stringify(["ABC-1", "ABC-2"]),
           "im Ring stehen beide Ticketnummern, jede einmal",
@@ -2906,18 +2970,21 @@ function schneideBg(name) {
 
   // 3) Ohne Ticketnummer passiert nichts (und es landet kein Leerwert im Ring).
   {
-    const r = JSON.parse(await bgLauf(einst({ auto_modus: "antwort" }), [""]));
+    const r = JSON.parse(await bgLauf(einst({ auto_vorlage: "abcdef" }), [""]));
     check(r.spur[0].starten === false, "ohne Ticketnummer startet nichts");
     check(!r.ablage.einstellungen.auto_gelaufen,
           "und der Ring bekommt keinen Leerwert");
   }
 
-  // 4) Ein unbekannter Modus ist AUS, nicht ein dritter Zustand.
-  {
+  /* 4) Eine unbrauchbare Kennung ist AUS, nicht ein dritter Zustand - und der
+   *    ALTE Modus-Wert gehoert ausdruecklich dazu: nach dem Update auf 0.8.0
+   *    steht er noch in der Ablage jedes Benutzers, der die Automatik genutzt
+   *    hat. Er darf nicht umgedeutet werden. */
+  for (const alt of ["ueberarbeiten", "zusammenfassung", "antwort", "NICHT-HEX"]) {
     const r = JSON.parse(await bgLauf(
-      einst({ auto_modus: "ueberarbeiten" }), ["ABC-1"]));
-    check(r.spur[0].modus === "" && r.spur[0].starten === false,
-          "ein unbekannter Modus gilt als AUS (fail-closed)",
+      einst({ auto_vorlage: alt }), ["ABC-1"]));
+    check(r.spur[0].vorlage === "" && r.spur[0].starten === false,
+          "'" + alt + "' gilt als AUS (fail-closed)",
           JSON.stringify(r.spur[0]));
   }
 
@@ -2927,7 +2994,7 @@ function schneideBg(name) {
     const MAX = parseInt((BG.match(/const AUTO_MERK_MAX = (\d+);/) || [])[1], 10);
     const viele = [];
     for (let i = 0; i < MAX + 5; i++) viele.push("T-" + i);
-    const r = JSON.parse(await bgLauf(einst({ auto_modus: "antwort" }), viele));
+    const r = JSON.parse(await bgLauf(einst({ auto_vorlage: "abcdef" }), viele));
     /* Kein `ring.length` auf einem moeglicherweise fehlenden Wert: eine
      * Pruefung, die WIRFT statt fehlzuschlagen, bricht die Gegenprobe ab und
      * sieht aus wie ein nicht gelaufener Test (Register). */
@@ -2948,6 +3015,8 @@ function schneideBg(name) {
     ["frage", "auswerten", "melde"]);
   check(drin.has("autoAktionPruefen") && drin.has("autoZeigen"),
         "popup.js hat autoAktionPruefen() und autoZeigen()");
+  // Kennung einer echten Vorlage - `autoZeigen` prueft die FORM.
+  const VID = "a1b2c3d4e5f6";
 
   /* Der Lauf gibt zurueck, WAS an den Hintergrund ging und OB ausgewertet
    * wurde. Beides ist noetig: bei ausgeschalteter Automatik darf nicht einmal
@@ -2963,18 +3032,27 @@ function schneideBg(name) {
         + "const $ = (id) => document.getElementById(id);\n"
         + "const el = { arbeit: $('bereich-arbeit'), meldung: $('meldung') };\n"
         + "el.arbeit.hidden = !!o.abgemeldet;\n"
-        + "let _autoModus = '', _key = o.key, _laeuft = !!o.laeuft;\n"
+        /* DIE OPTION MUSS DA SEIN, sonst kann das Pulldown die Kennung nicht
+         * anzeigen - in der Wirklichkeit zeichnet sie autoOptionenZeichnen aus
+         * der geladenen Vorlagenliste. Ohne diese Zeile prueft der Test eine
+         * Lage, die es nicht gibt. */
+        + "if (o.vorlage) { const x = document.createElement('option');\n"
+        + "  x.value = o.vorlage; x.textContent = 'V'; $('f-auto').appendChild(x); }\n"
+        + "let _autoVorlage = '', _key = o.key, _laeuft = !!o.laeuft;\n"
         + "function melde() {}\n"
         + "async function frage(n) {\n"
         + "  gesendet.push(n);\n"
         + "  if (o.wechseltTab) _key = 'ANDERS-9';\n"
         + "  if (o.hintergrundAlt) throw new Error('Diese Anfrage kennt der Hintergrund nicht');\n"
-        + "  return { ok: true, modus: o.modus || '', starten: !!o.starten };\n"
+        + "  return { ok: true, vorlage: o.vorlage || '', starten: !!o.starten };\n"
         + "}\n"
-        + "async function auswerten(m) { gelaufen.push(m); }\n"
+        /* Was gefahren wird, ist die VORLAGE - der Modus daran ist nur ein
+         * Wunsch (der Server entscheidet). Aufgezeichnet wird deshalb die
+         * Kennung, nicht der Modus. */
+        + "async function auswerten(m, e, vid) { gelaufen.push(vid); }\n"
         + teile.join("\n") + "\n"
         + "return (async () => {\n"
-        + "  autoZeigen(o.modus);\n"
+        + "  autoZeigen(o.vorlage);\n"
         + "  await autoAktionPruefen(!!o.passt);\n"
         + "  return JSON.stringify({\n"
         + "    gefragt: gesendet.filter((n) => n && n.art === 'auto_start').length,\n"
@@ -2987,7 +3065,7 @@ function schneideBg(name) {
 
   // 1) Automatik aus -> es wird NICHT EINMAL GEFRAGT.
   {
-    const r = await lauf({ key: "ABC-1", modus: "", starten: true });
+    const r = await lauf({ key: "ABC-1", vorlage: "", starten: true });
     check(r.gefragt === 0,
           "Automatik aus: der Hintergrund wird gar nicht erst gefragt");
     check(r.gelaufen.length === 0, "und es laeuft nichts");
@@ -2996,12 +3074,12 @@ function schneideBg(name) {
 
   // 2) Der Regelfall.
   {
-    const r = await lauf({ key: "ABC-1", modus: "antwort", starten: true });
+    const r = await lauf({ key: "ABC-1", vorlage: VID, starten: true });
     check(r.gefragt === 1, "neues Ticket: der Hintergrund wird gefragt");
-    check(JSON.stringify(r.gelaufen) === JSON.stringify(["antwort"]),
-          "und es laeuft GENAU die eingestellte Aktion",
-          JSON.stringify(r.gelaufen));
-    check(r.pulldown === "antwort", "das Pulldown zeigt sie an", r.pulldown);
+    check(JSON.stringify(r.gelaufen) === JSON.stringify([VID]),
+          "und es laeuft GENAU die eingestellte VORLAGE - nicht die im "
+          + "Pulldown gewaehlte", JSON.stringify(r.gelaufen));
+    check(r.pulldown === VID, "das Pulldown zeigt sie an", r.pulldown);
   }
 
   /* 3) ⚠ DIE WICHTIGSTE SCHRANKE. Liegt fuer dieses Ticket schon ein Ergebnis
@@ -3009,7 +3087,7 @@ function schneideBg(name) {
    *    mitgemerkt). Ein automatischer Lauf wuerde es ueberschreiben - seine
    *    Arbeit waere weg, ohne dass er etwas gedrueckt hat. */
   {
-    const r = await lauf({ key: "ABC-1", modus: "antwort", starten: true,
+    const r = await lauf({ key: "ABC-1", vorlage: VID, starten: true,
                            passt: true });
     check(r.gefragt === 0 && r.gelaufen.length === 0,
           "liegt schon ein Ergebnis zu diesem Ticket vor, laeuft NICHTS "
@@ -3018,7 +3096,7 @@ function schneideBg(name) {
 
   // 4) Waehrend einer Auswertung wird nichts angestossen.
   {
-    const r = await lauf({ key: "ABC-1", modus: "antwort", starten: true,
+    const r = await lauf({ key: "ABC-1", vorlage: VID, starten: true,
                            laeuft: true });
     check(r.gefragt === 0 && r.gelaufen.length === 0,
           "waehrend eines laufenden Auftrags startet nichts zusaetzlich");
@@ -3026,7 +3104,7 @@ function schneideBg(name) {
 
   // 5) Kein Ticket im Tab.
   {
-    const r = await lauf({ key: "", modus: "antwort", starten: true });
+    const r = await lauf({ key: "", vorlage: VID, starten: true });
     check(r.gefragt === 0 && r.gelaufen.length === 0,
           "ohne erkanntes Ticket startet nichts");
   }
@@ -3034,7 +3112,7 @@ function schneideBg(name) {
   /* 6) Abgemeldet. Kann in der Seitenleiste vorkommen: ihre Tab-Zuhoerer
    *    ueberleben eine Abmeldung, der Arbeitsbereich ist dann verborgen. */
   {
-    const r = await lauf({ key: "ABC-1", modus: "antwort", starten: true,
+    const r = await lauf({ key: "ABC-1", vorlage: VID, starten: true,
                            abgemeldet: true });
     check(r.gefragt === 0 && r.gelaufen.length === 0,
           "abgemeldet startet nichts");
@@ -3044,7 +3122,7 @@ function schneideBg(name) {
    *    selbst - ohne die zweite Pruefung wuerde fuer das NEUE Ticket
    *    ausgewertet, waehrend im Ring das alte vermerkt ist. */
   {
-    const r = await lauf({ key: "ABC-1", modus: "antwort", starten: true,
+    const r = await lauf({ key: "ABC-1", vorlage: VID, starten: true,
                            wechseltTab: true });
     check(r.gefragt === 1, "gefragt wurde");
     check(r.gelaufen.length === 0,
@@ -3054,7 +3132,7 @@ function schneideBg(name) {
   /* 8) Aelterer Hintergrund: die Anfrage kennt er nicht. Still bleiben - es
    *    hat niemand etwas gedrueckt, und die Stand-Warnung sagt es ohnehin. */
   {
-    const r = await lauf({ key: "ABC-1", modus: "antwort", starten: true,
+    const r = await lauf({ key: "ABC-1", vorlage: VID, starten: true,
                            hintergrundAlt: true });
     check(r.gelaufen.length === 0,
           "ein aelterer Hintergrund laesst die Automatik still aus");
@@ -3077,7 +3155,7 @@ function schneideBg(name) {
         + "ein zweites Mal");
 
   const st = schneidePopup("start") || "";
-  check(/autoZeigen\(z\.auto_modus\)/.test(st),
+  check(/autoZeigen\(z\.auto_vorlage\)/.test(st),
         "start() belegt das Pulldown aus dem gespeicherten Zustand");
   check(st.indexOf("autoZeigen(") < st.indexOf("ticketLageAnwenden("),
         "und zwar BEVOR die Ticketlage angewandt wird - sonst liest die "
@@ -3085,8 +3163,8 @@ function schneideBg(name) {
 
   check(/case "auto_start":/.test(BG),
         "der Hintergrund kennt den Nachrichtenfall");
-  check(/auto_modus: autoModus\(e\.auto_modus\)/.test(BG),
-        "und gibt den Modus im Zustand heraus (sonst stuende das Pulldown "
+  check(/auto_vorlage: autoVorlage\(e\.auto_vorlage\)/.test(BG),
+        "und gibt die Vorlage im Zustand heraus (sonst stuende das Pulldown "
         + "nach jedem Oeffnen wieder auf AUS)");
 
   /* ⚠ ABMELDEN RAEUMT DEN RING. Es sind die Ticketnummern des vorigen
@@ -3098,7 +3176,7 @@ function schneideBg(name) {
    * die Falle steht im Register und ist hier trotzdem zugeschnappt. */
   const ab = (ohneKommentare(BG).match(/case "abmelden":[\s\S]*?break;/) || [""])[0];
   check(/auto_gelaufen: \[\]/.test(ab), "Abmelden leert den Ring", ab.trim());
-  check(!/auto_modus/.test(ab),
+  check(!/auto_vorlage/.test(ab),
         "laesst die Einstellung aber stehen (sie gehoert zum Browser, "
         + "nicht zu einer Anmeldung)", ab.trim());
 
@@ -3119,7 +3197,12 @@ function schneideBg(name) {
           "einstSchreiben kennt das Feld " + f
           + " (sonst wird es wortlos verworfen)");
   }
-  check(felder.has("auto_modus"), "darunter auto_modus");
+  check(felder.has("auto_vorlage"), "darunter auto_vorlage");
+  /* ⚠ UND DER ALTE FELDNAME IST WEG. Bliebe er im Fenster stehen, schriebe es
+   * in ein Feld, das `einstSchreiben` nicht mehr kennt - wortlos verworfen,
+   * genau der Fall, fuer den es STAND gibt. */
+  check(!felder.has("auto_modus") && !/auto_modus/.test(ohneKommentare(POPUP_JS)),
+        "der alte Feldname auto_modus wird nirgends mehr geschickt");
 }
 
 /* ── 15) DAS ERGEBNISFELD IST RICH-TEXT ────────────────────────────────────
@@ -3951,6 +4034,9 @@ section("18) Werkzeug-Bereiche je Vorlage (2026-09-01)");
         const $ = (id) => document.getElementById(id);
         let _bereiche = katalog;
         let _vorlBearbeitet = "";
+        /* Modul-Variable des wandernden Formulars: vorlageInsFormular ruft
+         * formPlatz, und ohne sie WIRFT der Lauf statt fehlzuschlagen. */
+        let _formHeimat = null;
 ` + koerper + `
         vorlageInsFormular(vorlage, false);
         const kaesten = Array.from(
@@ -4037,11 +4123,291 @@ check(/data-ohne-ticket/.test(
 check(/class="vorl-ber-opt"|"vorl-ber-opt"/.test(POPUP_JS)
       && /\.vorl-ber-opt/.test(POPUP_CSS),
       'die Kaestchen-Zeile hat eine eigene Klasse, und das CSS kennt sie');
-/* `.vorl-liste li > span` verteilt den Platz mit flex:1 1 auto – die Marke
- * braucht ausdruecklich 0 0 auto, sonst halbiert sie den Namen. */
-check(/\.vorl-liste \.vorl-ber \{[^}]*flex: 0 0 auto/.test(POPUP_CSS),
-      'die Marke in der Zeile verdraengt den Namen nicht (flex: 0 0 auto)');
+/* `.vorl-zeile > span` verteilt den Platz mit flex:1 1 auto – jede Marke in
+ * der Zeile braucht ausdruecklich 0 0 auto, sonst halbiert sie den Namen.
+ * Geprueft als REGEL ueber alle Marken der Zeile: die Art-Marke kam 2026-09-02
+ * dazu, und eine Aufzaehlung haette genau sie fehlen lassen. */
+for (const kl of ['vorl-ber', 'vorl-art']) {
+  const re = new RegExp('\\.vorl-zeile \\.' + kl + ' \\{[^}]*flex: 0 0 auto');
+  check(re.test(POPUP_CSS),
+        'die Marke .' + kl + ' verdraengt den Namen nicht (flex: 0 0 auto)');
+}
+/* Und die Zeile selbst ist der Flex-Container, NICHT das <li>: nur so kann das
+ * Bearbeiten-Formular unter seiner Zeile stehen statt daneben. */
+check(/\.vorl-zeile \{[^}]*display: flex/.test(POPUP_CSS),
+      '.vorl-zeile ist der Flex-Container');
+check(!/\.vorl-liste li \{[^}]*display: flex/.test(POPUP_CSS),
+      'das <li> ist es ausdruecklich nicht (sonst landet das Formular daneben)');
 
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("19) Die Vorlage ist die Aktion (2026-09-02)");
+// ═══════════════════════════════════════════════════════════════════════════
+/* Vorgabe des Nutzers: "'Zusammenfassen' durch ein 'Starten' Dreieck ersetzen.
+ * Das neue Symbol liegt dann links vom pulldown 'Vorlage' und fuehrt die
+ * gewaehlte Vorlage aus" – und "die Aktion hinter 'Antwort vorschlagen'" wird
+ * ebenfalls eine Vorlage.
+ *
+ * WAS HIER HAENGT, IST MEHR ALS EIN KNOPF: aus zwei Aktionen mit je eigenem
+ * Prompt wird EINE, deren Wirkung an der ART der Vorlage haengt. Verwechselt
+ * sie sich, entsteht statt einer internen Zusammenfassung ein Text, der an
+ * einen KUNDEN geht (oder umgekehrt). Deshalb wird die Kette ausgefuehrt und
+ * nicht am Quelltext abgelesen.
+ */
+
+// ── a) Der Startknopf: EINER, links vom Pulldown, mit Symbol ─────────────
+{
+  const zeile = (POPUP_HTML.match(
+    /<div class="feld-zeile">[\s\S]*?<\/div>/) || [""])[0];
+  check(/id="btn-start"/.test(zeile) && /id="f-vorlage"/.test(zeile),
+        "Startknopf und Vorlagen-Pulldown stehen in EINER Zeile");
+  /* LINKS DAVON – Vorgabe des Nutzers, und im Markup ist die Reihenfolge die
+   * Leserichtung: erst starten, dann waehlen, dann verwalten. */
+  check(zeile.indexOf('id="btn-start"') < zeile.indexOf('id="f-vorlage"')
+        && zeile.indexOf('id="f-vorlage"') < zeile.indexOf('id="btn-vorlagen"'),
+        "der Startknopf links, dann die Auswahl, dann das Zahnrad");
+
+  const knopf = (POPUP_HTML.match(
+    /<button[^>]*id="btn-start"[\s\S]*?<\/button>/) || [""])[0];
+  /* INLINE-SVG, kein Zeichen: ▶ (U+25B6) wird je nach System als farbiges
+   * Emoji gerendert und folgt dann keinem Thema – dieselbe Begruendung wie
+   * beim Muelleimer, und Projektregel. */
+  check(/<svg/.test(knopf) && /<polygon/.test(knopf),
+        "das Dreieck ist ein Inline-SVG");
+  check(!/[▶►➤]/u.test(knopf), "und kein Emoji-Zeichen", knopf.slice(0, 80));
+  check(/fill="currentColor"/.test(knopf),
+        "es folgt der Schriftfarbe des Knopfes (Thema hell und dunkel)");
+  check(/aria-hidden="true"/.test(knopf),
+        "das SVG selbst ist fuer Hilfsmittel unsichtbar - die Aussage steht im "
+        + "aria-label des Knopfes");
+  /* Ein Knopf OHNE Text braucht eine Beschriftung, sonst ist er fuer
+   * Hilfsmittel ein leerer Knopf. */
+  check(/aria-label="[^"]+"/.test(knopf) && /title="[^"]+"/.test(knopf),
+        "er traegt title UND aria-label");
+  check(/class="[^"]*haupt/.test(knopf),
+        "und ist als Hauptaktion gestaltet (gefuellte Flaeche)");
+  check(/button\.ico-start \{[^}]*flex: 0 0 auto/.test(POPUP_CSS),
+        "CSS: er teilt sich den Platz NICHT mit dem Auswahlfeld");
+
+  // Der Hinweis darunter sagt, was ohne Vorlage passiert - sonst ist die
+  // Vorgabe "Ohne Vorlage" ein Knopf ins Unbekannte.
+  const hin = (POPUP_HTML.match(/id="start-hinweis"[^>]*>([\s\S]*?)<\/p>/)
+               || ["", ""])[1];
+  check(/Ohne Vorlage/.test(hin) && /Zusammenfassung/.test(hin),
+        "der Hinweis nennt das Ergebnis ohne Vorlage", hin.trim());
+}
+
+// ── b) Der Titel folgt der gewaehlten Vorlage – AUSGEFUEHRT ─────────────
+/* ⚠ EIN KNOPF, DER ZWEI VERSCHIEDENE DINGE TUN KANN, MUSS SAGEN WELCHES.
+ * Gemessen, nicht gelesen: die haeufigste Ursache fuer eine falsche Auskunft
+ * ist, dass der Titel beim Wechsel der Vorlage nicht nachgezogen wird. */
+{
+  const { teile, drin } = popupTeile(["startTitelSetzen", "vorlagenArt",
+                                      "vorlagenName"], []);
+  check(drin.has("startTitelSetzen") && drin.has("vorlagenArt"),
+        "popup.js hat startTitelSetzen() und vorlagenArt()");
+
+  const lauf = (wahl) => {
+    const dom = new JSDOM(POPUP_HTML, { url: "https://x.test/",
+                                        runScripts: "outside-only" });
+    const w = dom.window;
+    try {
+      const f = new w.Function("wahl", `
+        const $ = (id) => document.getElementById(id);
+        let _vorlagen = {
+          global: [{ id: "g1", name: "Kurz", art: "zusammenfassung" },
+                   { id: "g2", name: "Antwort an den Melder", art: "antwort" }],
+          eigene: [{ id: "e1", name: "Ohne Art" }],
+          darf_global: true, standard: "",
+        };
+` + teile.join("\n") + `
+        for (const v of _vorlagen.global.concat(_vorlagen.eigene)) {
+          const o = document.createElement("option");
+          o.value = v.id; o.textContent = v.name;
+          $("f-vorlage").appendChild(o);
+        }
+        $("f-vorlage").value = wahl;
+        startTitelSetzen();
+        return JSON.stringify({
+          titel: $("btn-start").title,
+          aria: $("btn-start").getAttribute("aria-label"),
+          art: vorlagenArt(wahl),
+        });`);
+      return JSON.parse(f(wahl));
+    } finally { w.close(); }
+  };
+
+  let r = lauf("");
+  check(r.art === "zusammenfassung", "ohne Vorlage: Zusammenfassung");
+  check(/Zusammenfassung/.test(r.titel) && /ohne Vorlage/.test(r.titel),
+        "und der Titel sagt genau das", r.titel);
+  check(r.aria === r.titel, "aria-label und title sind identisch");
+
+  r = lauf("g1");
+  check(r.art === "zusammenfassung" && /Kurz/.test(r.titel),
+        "Zusammenfassungs-Vorlage: Titel nennt sie beim Namen", r.titel);
+  check(!/Antwort/.test(r.titel), "und behauptet keine Antwort", r.titel);
+
+  r = lauf("g2");
+  check(r.art === "antwort" && /Antwortentwurf/.test(r.titel),
+        "Antwort-Vorlage: der Titel sagt, dass ein Entwurf fuer den Melder "
+        + "entsteht", r.titel);
+
+  /* ⚠ FAIL-SAFE IN DIE STRENGERE RICHTUNG. Eine Vorlage ohne Feld `art` (jede,
+   * die vor dem 2026-09-02 entstand) und eine unbekannte Kennung gelten als
+   * Zusammenfassung – NIE als Antwort. Eine Zusammenfassung liest ein
+   * Mitarbeiter, ein Antworttext geht an einen Kunden. */
+  check(lauf("e1").art === "zusammenfassung",
+        "eine Vorlage ohne Art gilt als Zusammenfassung (Altbestand)");
+  check(lauf("gibtsnicht").art === "zusammenfassung",
+        "eine unbekannte Kennung ebenfalls (fail-safe)");
+
+  // Der Handler faehrt genau diese Art.
+  const h = (POPUP_JS.match(
+    /\$\("btn-start"\)\.addEventListener\([\s\S]*?\);/) || [""])[0];
+  check(/auswerten\(vorlagenArt\(\$\("f-vorlage"\)\.value\)\)/.test(h),
+        "der Startknopf faehrt die Art der gewaehlten Vorlage", h.trim());
+  // Und ein Wechsel im Pulldown zieht den Titel nach.
+  const ch = (POPUP_JS.match(
+    /\$\("f-vorlage"\)\.addEventListener\("change",[\s\S]*?\}\);/) || [""])[0];
+  check(/startTitelSetzen\(\)/.test(ch),
+        "ein Wechsel der Vorlage zieht den Titel nach", ch.trim());
+}
+
+// ── c) Das Bearbeiten-Formular steht UNTER seiner Zeile – AUSGEFUEHRT ────
+/* Vorgabe: "Klick auf 'Bearbeiten' muss die Bearbeitung direkt unterhalb des
+ * gewaehlten Eintrags anzeigen, nicht am Ende der Liste."
+ *
+ * GEMESSEN WIRD DIE EIGENSCHAFT: ist `#vorl-form` ein Nachfahre GENAU des
+ * angeklickten `<li>`? Eine Suche nach `appendChild` im Quelltext bliebe wahr,
+ * wenn das Formular unter der falschen Zeile landet.
+ *
+ * ⚠ UND DIE EIGENTLICHE FALLE IST DER NEUAUFBAU: `liste.innerHTML = ""` wuerde
+ * ein eingehaengtes Formular MITLOESCHEN. Danach gaebe es kein Namensfeld,
+ * keinen Speichern-Knopf und keine Fehlermeldung, die das erklaert. */
+{
+  const { teile, drin } = popupTeile(
+    ["vorlagenZeichnen", "vorlageInsFormular"],
+    ["standardSetzen", "vorlageLoeschen", "frageJaNein",
+     "autoOptionenZeichnen", "startTitelSetzen", "bereicheZeichnen"]);
+  check(drin.has("formPlatz"),
+        "der Schnitt zieht formPlatz mit (das Formular wandert)",
+        [...drin].join(","));
+
+  const lauf = (tun) => {
+    const dom = new JSDOM(POPUP_HTML, { url: "https://x.test/",
+                                        runScripts: "outside-only" });
+    const w = dom.window;
+    try {
+      const f = new w.Function("tun", `
+        const $ = (id) => document.getElementById(id);
+        let _vorlBeruehrt = false, _bereiche = [], _formHeimat = null;
+        let _vorlBearbeitet = "";
+        let _key = "ABC-1", _laeuft = false;
+        let _vorlagen = {
+          global: [{ id: "g1", name: "Eins", art: "zusammenfassung" },
+                   { id: "g2", name: "Zwei", art: "antwort" }],
+          eigene: [{ id: "e1", name: "Drei", art: "zusammenfassung" }],
+          darf_global: true, standard: "",
+        };
+        function standardSetzen() {}
+        function vorlageLoeschen() {}
+        function frageJaNein() { return Promise.resolve(true); }
+        function autoOptionenZeichnen() {}
+        function startTitelSetzen() {}
+        function bereicheZeichnen() {}
+        function knoepfeAktualisieren() {}
+` + teile.join("\n") + `
+        vorlagenZeichnen();
+        const zeile = (vid) => document.querySelector(
+          '#vorl-liste li[data-vid="' + vid + '"]');
+        // Der Bearbeiten-Knopf DIESER Zeile - gesucht ueber seine Aufgabe,
+        // nicht ueber einen Index (Register).
+        const bearb = (vid) => Array.from(
+          zeile(vid).querySelectorAll("button"))
+          .find((b) => b.title === "Bearbeiten");
+        if (tun.klick) bearb(tun.klick).click();
+        if (tun.neu) vorlageInsFormular(null, false);
+        if (tun.nochmal) vorlagenZeichnen();
+        const form = $("vorl-form");
+        const liWo = form && form.closest("li");
+        return JSON.stringify({
+          formDa: !!form,
+          felderDa: !!($("f-vorl-name") && $("f-vorl-art")
+                       && $("btn-vorl-speichern")),
+          unter: liWo ? liWo.dataset.vid : "",
+          nachZeile: !!(liWo && liWo.querySelector(".vorl-zeile")
+                        && liWo.querySelector(".vorl-zeile").compareDocumentPosition(form)
+                           & 4),
+          name: $("f-vorl-name").value,
+          art: $("f-vorl-art").value,
+          zeilen: document.querySelectorAll("#vorl-liste li").length,
+        });`);
+      return JSON.parse(f(tun));
+    } finally { w.close(); }
+  };
+
+  let r = lauf({});
+  check(r.zeilen === 3, "die Liste hat drei Zeilen", String(r.zeilen));
+  check(r.formDa && r.felderDa,
+        "Positivkontrolle: Formular und Felder sind ueberhaupt auffindbar "
+        + "(sonst waere jede Aussage darueber trivial)");
+  check(r.unter === "", "ohne Bearbeiten steht das Formular NICHT in der Liste");
+
+  r = lauf({ klick: "g2" });
+  check(r.unter === "g2",
+        "nach dem Klick auf Bearbeiten steht es unter GENAU dieser Zeile",
+        r.unter);
+  check(r.nachZeile === true,
+        "und zwar UNTERHALB des Zeileninhalts, nicht davor");
+  check(r.name === "Zwei", "das Formular ist mit dieser Vorlage gefuellt",
+        r.name);
+  check(r.art === "antwort", "samt ihrer Art", r.art);
+
+  r = lauf({ klick: "e1" });
+  check(r.unter === "e1", "auch bei einer eigenen Vorlage", r.unter);
+
+  // Ein zweiter Klick verschiebt es weiter - es bleibt EIN Container.
+  r = lauf({ klick: "g1" });
+  check(r.unter === "g1" && r.formDa,
+        "es ist immer dasselbe Formular, es wandert nur", r.unter);
+
+  /* ⚠ DER NEUAUFBAU. Genau hier haette `innerHTML = ""` das Formular
+   * mitgeloescht - und der Fehler waere STILL: die Felder fehlen, niemand
+   * sieht warum. */
+  r = lauf({ klick: "g2", nochmal: true });
+  check(r.formDa && r.felderDa,
+        "ein Neuaufbau der Liste loescht das Formular NICHT");
+  check(r.unter === "g2",
+        "und stellt es wieder unter seine Zeile", r.unter);
+
+  // "Neu" holt es an seinen Heimatplatz.
+  r = lauf({ klick: "g2", neu: true });
+  check(r.unter === "" && r.formDa,
+        "'Neu' holt es zurueck an den Heimatplatz (es gehoert dann zu keiner "
+        + "Zeile)");
+  check(r.name === "", "und leert die Felder", r.name);
+  check(r.art === "zusammenfassung",
+        "die Art faellt dabei auf die Vorgabe zurueck", r.art);
+
+  // CSS: es muss als zugehoerig ERKENNBAR sein, nicht nur da stehen.
+  check(/\.vorl-liste #vorl-form \{[^}]*border-left/.test(POPUP_CSS),
+        "CSS: in der Liste ist es sichtbar seiner Zeile zugeordnet");
+}
+
+// ── d) Die Art geht beim Speichern mit ──────────────────────────────────
+{
+  const sp = (POPUP_JS.match(
+    /\$\("btn-vorl-speichern"\)\.addEventListener\([\s\S]*?\n\}\);/) || [""])[0];
+  check(/art: \$\("f-vorl-art"\)\.value/.test(sp),
+        "der Speichern-Knopf schickt die Art mit");
+  /* IMMER, nicht nur wenn gesetzt: ein FEHLENDES Feld heisst am Server
+   * "unveraendert" (damit eine aeltere Erweiterung nichts umstellt) - dann
+   * liesse sich eine Antwort-Vorlage nie wieder zur Zusammenfassung machen. */
+  check(!/if \([^)]*f-vorl-art/.test(sp),
+        "und zwar bedingungslos - ein fehlendes Feld heisst am Server "
+        + "'unveraendert'");
+}
 
 /* Erst den Puffer leeren: eine Zurueckweisung aus einem nicht abgewarteten
  * Aufruf wird sonst womoeglich erst nach der Zusammenfassung gemeldet. */

@@ -541,6 +541,19 @@
                         return b.id === id && b.freigegeben;
                     });
                 });
+                /* WAS DIE VORLAGE ERZEUGT, gehoert in die Zeile – aber nur der
+                   Fall, auf den es ankommt: bei einer Antwort-Vorlage geht der
+                   Text am Ende an einen KUNDEN. Die Zusammenfassung ist die
+                   Vorgabe; eine Marke an jeder Zeile waere Rauschen. */
+                var artm = null;
+                if (e.v.art === 'antwort') {
+                    artm = document.createElement('span');
+                    artm.className = 'kb-hint';
+                    artm.style.marginLeft = '8px';
+                    artm.textContent = t('jvorl.art_reply_mark', '· Antwort');
+                    artm.title = t('jvorl.art_reply_title',
+                                   'Erzeugt einen Antwortentwurf für den Melder');
+                }
                 if (wirksam.length) {
                     var nam = wirksam.map(function (id) {
                         var f = (Manager._bereiche || []).filter(function (b) { return b.id === id; })[0];
@@ -551,9 +564,12 @@
                     bm.style.marginLeft = '8px';
                     bm.style.color = 'var(--accent)';
                     bm.textContent = t('jvorl.ber_mark', 'Nachschlagen:') + ' ' + nam.join(', ');
-                    links.appendChild(titel); links.appendChild(art); links.appendChild(bm);
+                    links.appendChild(titel); links.appendChild(art);
+                    if (artm) links.appendChild(artm);
+                    links.appendChild(bm);
                 } else {
                     links.appendChild(titel); links.appendChild(art);
+                    if (artm) links.appendChild(artm);
                 }
                 var text = document.createElement('div');
                 text.className = 'kb-hint';
@@ -641,6 +657,13 @@
             this._platziereVorl(karte || null);
             if ($('jvorl-name')) $('jvorl-name').value = v ? (v.name || '') : '';
             if ($('jvorl-text')) $('jvorl-text').value = v ? (v.text || '') : '';
+            /* Ohne Angabe die Zusammenfassung – dieselbe Vorgabe wie am Server
+               (jira_vorlagen.art_von), damit ein Altbestand ohne das Feld nicht
+               ploetzlich als Antwort-Vorlage im Formular steht. */
+            if ($('jvorl-art')) {
+                $('jvorl-art').value = (v && v.art === 'antwort')
+                    ? 'antwort' : 'zusammenfassung';
+            }
             if ($('jvorl-global')) $('jvorl-global').checked = !!global_;
             this.renderVorlBereiche(v ? (v.bereiche || []) : []);
             var tt = $('jvorl-edit-title');
@@ -664,6 +687,7 @@
             this._vorlBearbeitet = '';
             if ($('jvorl-name')) $('jvorl-name').value = '';
             if ($('jvorl-text')) $('jvorl-text').value = '';
+            if ($('jvorl-art')) $('jvorl-art').value = 'zusammenfassung';
             if ($('jvorl-global')) $('jvorl-global').checked = false;
             this.renderVorlBereiche([]);
             var f = $('jvorl-edit');
@@ -687,7 +711,11 @@
                     // IMMER mitsenden – auch die leere Liste. Sie heisst "keine
                     // Bereiche"; ein fehlendes Feld heisst "unveraendert", und
                     // dann liesse sich ein Haken nie wieder abwaehlen.
-                    bereiche: this.vorlBereicheGewaehlt()
+                    bereiche: this.vorlBereicheGewaehlt(),
+                    // Aus demselben Grund immer: ein fehlendes Feld heisst am
+                    // Server "unveraendert", und dann liesse sich eine
+                    // Antwort-Vorlage nie wieder zur Zusammenfassung machen.
+                    art: ($('jvorl-art') ? $('jvorl-art').value : 'zusammenfassung')
                 })
             }).then(function (r) { return r.json(); })
               .then(function (d) {

@@ -679,6 +679,102 @@ function text(d, id) { const e = d.getElementById(id); return e ? e.textContent 
         w.close();
     }
 
+    // ══════════════════════════════════════════════════════════════════════
+    section('10) Die ART einer Vorlage (2026-09-02)');
+    // ══════════════════════════════════════════════════════════════════════
+    /* Seit die Erweiterung nur noch EIN Startsymbol hat, sagt die Vorlage, was
+     * sie tut. Das Feld gehoert AUCH hierher: die GEMEINSAMEN Vorlagen werden
+     * im Reiter gepflegt – ohne es koennte ein Administrator keine
+     * Antwort-Vorlage fuer alle anlegen, und das Feld waere nur im Fenster der
+     * Erweiterung erreichbar (genau die Kritik, die zu diesem Reiter gefuehrt
+     * hat). */
+    {
+        const dom = new JSDOM(HTML, { runScripts: 'outside-only' });
+        const d = dom.window.document;
+        const sel = d.getElementById('jvorl-art');
+        check('das Formular hat ein Feld fuer die Art', !!sel);
+        const werte = sel ? Array.from(sel.options).map((o) => o.value) : [];
+        check('mit genau den zwei Arten des Servers',
+              JSON.stringify(werte) === JSON.stringify(['zusammenfassung', 'antwort']),
+              werte.join('|'));
+        /* FAIL-SAFE: die Zusammenfassung steht vorn und ist damit die Vorgabe
+         * eines frischen Formulars. Ein Antworttext geht an einen KUNDEN. */
+        check('die Zusammenfassung ist die Vorgabe', werte[0] === 'zusammenfassung');
+        check('das Feld liegt IM Vorlagen-Formular, nicht irgendwo im Reiter',
+              !!(sel && sel.closest('#jvorl-edit')));
+        dom.window.close();
+    }
+
+    /* Und jetzt AUSGEFUEHRT: Bearbeiten fuellt das Feld, Speichern schickt es,
+     * "Neu" faellt auf die Vorgabe zurueck. Eine Quelltext-Pruefung saehe
+     * nicht, ob der Wert beim naechsten Zeichnen wieder verstellt wird. */
+    {
+        const st = { calls: [],
+                     global: [{ id: 'g1', name: 'Kundenmail', text: 'freundlich',
+                                art: 'antwort' },
+                               { id: 'g2', name: 'Kurz', text: 'knapp',
+                                 art: 'zusammenfassung' }],
+                     eigene: [{ id: 'e1', name: 'Ohne Feld', text: 'alt' }],
+                     darfGlobal: true };
+        const dom = makeDom(st);
+        const w = dom.window, d = w.document;
+        w.JiraManager.onShow();
+        await sleep(30);
+
+        /* Die Zeile nennt die Antwort-Vorlage – bei ihr geht der Text an einen
+         * Kunden. Die Zusammenfassung ist die Vorgabe und bleibt unbeschriftet:
+         * eine Marke an jeder Zeile waere Rauschen. */
+        const zt = zeilenTexte(d);
+        /* GEPRUEFT WIRD DIE MARKE, nicht das Wort: der Vorlagen-NAME darf nicht
+         * mitzaehlen - mit einem Datensatz namens "Antwortform" blieb diese
+         * Pruefung gruen, obwohl die Marke fehlte (Register). */
+        check('die Antwort-Vorlage ist in der Zeile erkennbar',
+              /· Antwort/.test(zt[0] || ''), zt[0]);
+        check('eine Zusammenfassungs-Vorlage traegt keine Marke',
+              !/· Antwort/.test(zt[1] || ''), zt[1]);
+
+        klickKnopf(w, d, 0, 'edit', 'Antwort-Vorlage bearbeiten');
+        await sleep(10);
+        check('Bearbeiten fuellt die Art', wert(d, 'jvorl-art') === 'antwort',
+              wert(d, 'jvorl-art'));
+
+        klickKnopf(w, d, 1, 'edit', 'Zusammenfassungs-Vorlage bearbeiten');
+        await sleep(10);
+        check('und stellt sie beim Wechsel um',
+              wert(d, 'jvorl-art') === 'zusammenfassung', wert(d, 'jvorl-art'));
+
+        /* ⚠ EINE VORLAGE OHNE DAS FELD (jede von vor dem 2026-09-02) darf im
+         * Formular NICHT als Antwort erscheinen – sonst macht ein Speichern
+         * ohne weiteres Zutun aus einer internen Zusammenfassung Kundentext. */
+        klickKnopf(w, d, 2, 'edit', 'Altbestand bearbeiten');
+        await sleep(10);
+        check('ein Altbestand ohne das Feld gilt als Zusammenfassung',
+              wert(d, 'jvorl-art') === 'zusammenfassung', wert(d, 'jvorl-art'));
+
+        // Speichern schickt die Art mit – IMMER, auch unveraendert.
+        const artFeld = d.getElementById('jvorl-art');
+        check('Positivkontrolle: das Feld ist ueberhaupt bedienbar', !!artFeld);
+        if (artFeld) artFeld.value = 'antwort';
+        d.getElementById('jvorl-save').dispatchEvent(new w.Event('click', { bubbles: true }));
+        await sleep(30);
+        const post = st.calls.filter((c) => c.url === '/api/jira/assist/vorlagen'
+                                            && c.method === 'POST').pop();
+        check('Speichern ruft den Endpunkt', !!post);
+        check('und schickt die Art mit - genau den Wert aus dem Feld',
+              !!post && post.body && post.body.art === 'antwort',
+              post && JSON.stringify(post.body));
+        check('das Feld fehlt also nicht im Rumpf',
+              !!post && post.body && 'art' in post.body,
+              post && Object.keys(post.body || {}).join(','));
+
+        // "Neu" faengt bei der Vorgabe an.
+        d.getElementById('jvorl-new').dispatchEvent(new w.Event('click', { bubbles: true }));
+        await sleep(10);
+        check('"Neu" faengt bei der Zusammenfassung an',
+              wert(d, 'jvorl-art') === 'zusammenfassung', wert(d, 'jvorl-art'));
+        w.close();
+    }
+
     const bad = results.filter((r) => !r.ok);
     console.log(`\n\x1b[1mErgebnis: ${results.length - bad.length}/${results.length}\x1b[0m`);
     if (bad.length) {

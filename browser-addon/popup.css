@@ -301,6 +301,36 @@ button.ico {
   line-height: 1;
 }
 
+/* ── STARTEN ────────────────────────────────────────────────────────────────
+ *
+ * Der Knopf traegt nur ein Dreieck und muss trotzdem als Hauptaktion lesbar
+ * sein – deshalb `.haupt` (gefuellte Flaeche) statt `.ico` (Umriss).
+ *
+ * `flex: 0 0 auto` ist PFLICHT und keine Kosmetik: in `.feld-zeile` steht
+ * daneben ein `<select>` mit `flex: 1 1 auto`. Ohne die Zeile teilte sich der
+ * Knopf den Platz mit dem Auswahlfeld und das Dreieck wanderte in die Mitte
+ * einer breiten Flaeche – dieselbe Falle wie bei `.btn-primary` in einer
+ * Flex-Zeile im Hauptprojekt.
+ *
+ * Quadratisch ueber `min-width` statt einer festen Breite: das SVG ist 13px,
+ * die Hoehe kommt aus dem Polster des Auswahlfeldes daneben. `display: flex`
+ * zentriert das Dreieck in beiden Achsen – ein Inline-SVG sitzt sonst auf der
+ * Grundlinie und damit sichtbar zu tief. */
+button.ico-start {
+  flex: 0 0 auto;
+  /* GEMESSEN, nicht geschaetzt: mit `align-items: center` aus `.feld-zeile`
+   * blieb der Knopf 27 px hoch neben einem 34 px hohen Auswahlfeld – in einer
+   * Zeile aus zwei Bedienelementen sieht das nach einem Fehler aus.
+   * `align-self: stretch` zieht ihn auf die Zeilenhoehe, ohne eine Zahl zu
+   * verdrahten, die beim naechsten Schriftwechsel falsch waere. */
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  padding: 6px 8px;
+}
+
 #vorlagen-box {
   margin: 10px 0 0;
   padding: 10px;
@@ -314,16 +344,33 @@ button.ico {
   margin-bottom: 8px;
 }
 .vorl-liste { list-style: none; margin: 0 0 10px; padding: 0; }
+/* ⚠ DAS <li> IST EIN BLOCK, NICHT DER FLEX-CONTAINER – und das ist die ganze
+ * Voraussetzung dafür, dass das Bearbeiten-Formular UNTER seiner Zeile stehen
+ * kann (Vorgabe 2026-09-02). Solange das `li` selbst `display: flex` trug,
+ * landete ein eingehängtes Formular NEBEN dem Namen statt darunter.
+ * Geflext wird jetzt eine Ebene tiefer, in `.vorl-zeile` – Aussehen der Zeile
+ * unverändert. */
 .vorl-liste li {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   padding: 4px 0;
   border-bottom: 1px solid var(--rand);
 }
 .vorl-liste li:last-child { border-bottom: 0; }
+.vorl-zeile {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 /* Der Name nimmt den Platz, die Knöpfe bleiben rechts. */
-.vorl-liste li > span { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.vorl-zeile > span { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+
+/* Das Formular UNTER seiner Zeile: abgesetzt und eingerückt, damit die
+ * Zugehörigkeit sichtbar ist. Am Heimatplatz (direkt hinter der Liste) trägt
+ * es nichts davon – dort gehört es zu keiner Zeile. */
+.vorl-liste #vorl-form {
+  margin: 6px 0 4px 10px;
+  padding: 8px 0 2px 10px;
+  border-left: 2px solid var(--akzent);
+}
 
 /* Der Stern der Standard-Vorlage.
  *
@@ -332,8 +379,8 @@ button.ico {
  * Projekt ohnehin keine Information. Er steht VOR den Bearbeiten-Knöpfen und
  * an jeder Zeile – auch an gemeinsamen Vorlagen, die man nicht ändern darf:
  * markiert wird die eigene Wahl, nicht die Vorlage. */
-.vorl-liste .stern { font-size: 13px; }
-.vorl-liste .stern.an { color: var(--akzent); }
+.vorl-zeile .stern { font-size: 13px; }
+.vorl-zeile .stern.an { color: var(--akzent); }
 
 /* ── Werkzeug-Bereiche einer Vorlage ───────────────────────────────────────
  *
@@ -342,7 +389,7 @@ button.ico {
  * derselben Regel halbierte ihn (dieselbe Falle wie bei `.btn-primary` in einer
  * Flex-Zeile im Hauptprojekt). Deshalb ausdrücklich `flex: 0 0 auto`, ein
  * Deckel auf die Breite und Ellipsis statt Umbruch mitten im Bereichsnamen. */
-.vorl-liste .vorl-ber {
+.vorl-zeile .vorl-ber {
   flex: 0 0 auto;
   max-width: 45%;
   font-size: 11px;
@@ -350,6 +397,27 @@ button.ico {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ── DIE ART EINER VORLAGE (seit 2026-09-02) ────────────────────────────────
+ *
+ * Sie steht nur an ANTWORT-Vorlagen: die Zusammenfassung ist die Vorgabe, und
+ * eine Marke an jeder Zeile wäre Rauschen. Gekennzeichnet wird also der Fall,
+ * bei dem der Text am Ende an einen KUNDEN geht – der Unterschied, auf den es
+ * ankommt.
+ *
+ * Bewusst KEINE Signalfarbe, sondern ein Rähmchen: es ist kein Warnzustand,
+ * sondern eine Eigenschaft. `flex: 0 0 auto` ist Pflicht – `.vorl-zeile > span`
+ * verteilt den Platz mit `flex: 1 1 auto`, und ein zweites Feld mit derselben
+ * Regel halbiert den Namen. */
+.vorl-zeile .vorl-art {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border: 1px solid var(--rand);
+  border-radius: 999px;
+  font-size: 10.5px;
+  color: var(--gedaempft);
+  white-space: nowrap;
 }
 
 /* Ein Kontrollkästchen ist ein SATZ, keine Feldbeschriftung – `.feld > span`

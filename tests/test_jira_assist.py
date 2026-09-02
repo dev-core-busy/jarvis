@@ -967,8 +967,14 @@ if not str(jv._DATEI).startswith(tempfile.gettempdir()):
 
 jv.saeen()
 d = jv.liste("nexus\\Max.Muster")
-check(len(d["global"]) == len(jv.VORSCHLAEGE),
-      "die Vorschläge werden mitgeliefert (%d)" % len(jv.VORSCHLAEGE))
+# GEGEN `jv.SAAT`, nicht gegen eine Zahl: seit 2026-09-02 gehoert die Vorlage
+# "Antwort an den Melder" dazu (sie ersetzt den frueheren Knopf). Eine
+# Aufzaehlung im Test waere beim naechsten Vorschlag wieder falsch.
+check(len(d["global"]) == len(jv.SAAT),
+      "die Vorschläge werden mitgeliefert (%d)" % len(jv.SAAT))
+check(any(v.get("art") == "antwort" for v in d["global"]),
+      "darunter eine Antwort-Vorlage - sie ersetzt den frueheren Knopf "
+      "'Antwort vorschlagen'")
 check(d["eigene"] == [], "eigene sind zunächst leer")
 check(d["darf_global"] is False, "ohne Admin: gemeinsame nicht änderbar")
 
@@ -976,7 +982,7 @@ check(d["darf_global"] is False, "ohne Admin: gemeinsame nicht änderbar")
 # zurückkommen (gleiche Regel wie bei den Rollen-Agenten).
 jv.loeschen("x", d["global"][0]["id"], ist_admin=True)
 jv.saeen()
-check(len(jv.liste("x")["global"]) == len(jv.VORSCHLAEGE) - 1,
+check(len(jv.liste("x")["global"]) == len(jv.SAAT) - 1,
       "eine gelöschte Vorgabe kommt NICHT zurück")
 
 # Der Benutzerschlüssel ist normalisiert – sonst hätte dieselbe Person je
@@ -1887,7 +1893,7 @@ _sandkasten = jv._DATEI.parent
 if jv._DATEI.exists():
     jv._DATEI.unlink()
 _neu = jv.speichern("uSeed", "Erste", "x")
-check(len(jv.liste("uSeed")["global"]) == len(jv.VORSCHLAEGE),
+check(len(jv.liste("uSeed")["global"]) == len(jv.SAAT),
       "ein erster SCHREIBVORGANG saet die Vorschlaege trotzdem",
       str(len(jv.liste("uSeed")["global"])))
 jv.loeschen("uSeed", _neu["id"], False)
@@ -1933,6 +1939,99 @@ _he = ohne_kommentare(funktion(QUELLE_MAIN, "jira_assist_health"))
 check('"assist_bereiche":' in _he,
       "health nennt die freigeschalteten Bereiche – die Anleitung darf nicht "
       "behaupten, es gaebe keine")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+section("17) Die ART der Vorlage bestimmt den Modus (2026-09-02)")
+# ═══════════════════════════════════════════════════════════════════════════
+# Seit die Erweiterung nur noch EIN Startsymbol hat, sagt die gewaehlte Vorlage,
+# was der Lauf tut. Entschieden wird HIER und nicht im Fenster: die Art steht in
+# der gespeicherten Vorlage, das Feld `modus` im Request ist der Wunsch eines
+# Clients. Eine Quelle, keine zwei.
+#
+# GEMESSEN, NICHT GELESEN: was am Ende zaehlt, ist der System-Prompt, mit dem
+# das Modell laeuft – und der Modus in der Antwort. Eine Quelltext-Pruefung
+# bliebe wahr, wenn die Ableitung an der falschen Stelle steht.
+_stub_jira({"key": "ABC-1234", "fields": {"summary": "Drucker klemmt",
+                                          "description": "Papierstau"}})
+_stub_llm(_Provider("Sehr geehrter Herr Meier, wir haben das geprüft."))
+
+_vz = jv.speichern("modususer", "Kurz fuer die Leitung", "Hoechstens fuenf Saetze.",
+                   art="zusammenfassung")
+_va = jv.speichern("modususer", "Antwort freundlich", "Freundlich und knapp.",
+                   art="antwort")
+
+# (a) Eine ANTWORT-Vorlage macht aus dem Wunsch "zusammenfassung" eine Antwort.
+_r = lauf(ja.auswerten("ABC-1234", "zusammenfassung", _frisch("modususer"), "de",
+                       vorlage=_va["id"]))
+check(_r["modus"] == "antwort",
+      "eine Antwort-Vorlage setzt den Modus – auch wenn der Client "
+      "'zusammenfassung' wuenscht", _r.get("modus"))
+check("ENTWURF einer Antwort" in _gefangen["sysp"],
+      "und es laeuft wirklich der Antwort-Prompt")
+check("Freundlich und knapp." in _gefangen["sysp"],
+      "der Vorlagentext wirkt dabei – vor 2026-09-02 wurde er hier verworfen "
+      "und eine Antwort-Vorlage war eine Vorlage ohne Wirkung")
+# Die Schutzregeln fuer Kundentext bleiben – sie sind der Grund, warum es
+# ueberhaupt zwei Modi gibt.
+for regel in ("Sage NICHTS zu", "Keine Platzhalter"):
+    check(regel in _gefangen["sysp"],
+          "die Schutzregel '%s' steht weiter drin" % regel)
+i_regel = _gefangen["sysp"].find("Keine Platzhalter")
+i_vorl = _gefangen["sysp"].find("Freundlich und knapp.")
+check(0 <= i_regel < i_vorl,
+      "und die Vorlage steht HINTER ihnen (sie hebt nichts auf)")
+
+# (b) Eine Zusammenfassungs-Vorlage bleibt eine Zusammenfassung – auch wenn der
+#     Client "antwort" wuenscht.
+_r = lauf(ja.auswerten("ABC-1234", "antwort", _frisch("modususer"), "de",
+                       vorlage=_vz["id"]))
+check(_r["modus"] == "zusammenfassung",
+      "eine Zusammenfassungs-Vorlage ebenso – in beide Richtungen",
+      _r.get("modus"))
+check("Hoechstens fuenf Saetze." in _gefangen["sysp"],
+      "mit ihrem Text als Gliederung")
+
+# (c) OHNE Vorlage gilt der Wunsch des Clients – sonst waere "Ohne Vorlage"
+#     nicht mehr bedienbar.
+_r = lauf(ja.auswerten("ABC-1234", "zusammenfassung", _frisch("modususer"), "de"))
+check(_r["modus"] == "zusammenfassung", "ohne Vorlage gilt der gesendete Modus")
+_r = lauf(ja.auswerten("ABC-1234", "antwort", _frisch("modususer"), "de"))
+check(_r["modus"] == "antwort", "auch fuer 'antwort'")
+
+# (d) Eine unbekannte Kennung bestimmt NICHTS. Sie kann von einer geloeschten
+#     Vorlage stammen (etwa aus der Automatik) – dann laeuft der gewuenschte
+#     Modus, nicht ein geratener.
+_r = lauf(ja.auswerten("ABC-1234", "antwort", _frisch("modususer"), "de",
+                       vorlage="gibtsnichtmehr"))
+check(_r["modus"] == "antwort",
+      "eine unbekannte Kennung laesst den Modus unangetastet", _r.get("modus"))
+
+# (e) ⚠ 'ueberarbeiten' WIRD NIE UMGEBOGEN. Es ist eine eigene Aufgabe mit einem
+#     Entwurf, den der Mitarbeiter selbst getippt hat. Wuerde eine
+#     Antwort-Vorlage den Modus hier umstellen, schriebe der Knopf "meinen
+#     Kommentar ueberarbeiten" eine voellig neue Antwort und warf den Entwurf
+#     weg – ohne dass es jemand erklaeren koennte.
+_stub_llm(_Provider("Sehr geehrter Herr Meier, wir haben das geprüft."))
+_r = lauf(ja.auswerten("ABC-1234", "ueberarbeiten", _frisch("modususer"), "de",
+                       vorlage=_va["id"], entwurf="hallo herr meier das gieng schief"))
+check(_r["modus"] == "ueberarbeiten",
+      "eine Antwort-Vorlage biegt 'ueberarbeiten' NICHT um", _r.get("modus"))
+check("VORFORMULIERT" in _gefangen["sysp"],
+      "es laeuft der Ueberarbeiten-Prompt")
+check("Freundlich und knapp." not in _gefangen["sysp"],
+      "und der Vorlagen-TEXT wirkt dort nicht – der Entwurf ist die Vorgabe")
+
+# (f) Die BEREICHE der Vorlage gelten dort trotzdem – das ist der Unterschied
+#     zwischen Text und Befugnis (Bestandsverhalten, hier nur festgehalten).
+_qa = ohne_kommentare(funktion(QUELLE_JA, "auswerten"))
+check("wirksame_bereiche(vorlagen_bereiche)" in _qa,
+      "die Bereiche werden unabhaengig vom Modus ausgewertet")
+i_art = _qa.find("vorlagen_art and modus")
+i_ber = _qa.find("wirksame_bereiche(")
+check(0 <= i_art, "die Modus-Ableitung steht im Rumpf von auswerten")
+check("ueberarbeiten" in _qa[i_art:i_art + 200],
+      "und nimmt 'ueberarbeiten' ausdruecklich aus")
 
 
 print("\n%d OK, %d FAIL" % (_ok, _fail))

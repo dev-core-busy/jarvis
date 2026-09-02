@@ -50,7 +50,7 @@ function zweig(name, methode) {
  * Begruendung dort; kurz: Chrome laedt diese Seite bei jedem Oeffnen frisch,
  * behaelt den Service-Worker aber im Speicher. Ohne diesen Abgleich sieht ein
  * halb aktualisierter Zustand wie ein Programmierfehler aus. */
-const STAND = 5;
+const STAND = 6;
 
 const $ = (id) => document.getElementById(id);
 const el = {
@@ -98,11 +98,21 @@ let _windowId = null;
 let _tabUrl = "";
 // Adresse des Jira-Servers, einmal vom Server geholt (siehe zugriffZeile).
 let _jiraBasis = "";
-/* Was bei einem NEUEN Ticket von selbst startet: "" | "zusammenfassung" |
- * "antwort". Der massgebliche Wert liegt in der Ablage (background.js); dies
- * hier ist die Kopie fuer dieses Fenster, damit `autoAktionPruefen` bei
- * ausgeschalteter Automatik gar nicht erst den Hintergrund fragen muss. */
-let _autoModus = "";
+/* Was bei einem NEUEN Ticket von selbst startet: die KENNUNG einer Vorlage
+ * oder "" (aus).
+ *
+ * ⚠ BIS 2026-09-02 STAND HIER EIN MODUS ("zusammenfassung"/"antwort"). Seit die
+ * Automatik Vorlagen anbietet, ist es eine Vorlagen-Kennung – deshalb ein
+ * anderer Feldname in der Ablage (`auto_vorlage`) und ein hoeherer `STAND`:
+ * ein alter Wert wird nicht umgedeutet, sondern ignoriert, die Automatik ist
+ * nach dem Update also AUS, bis jemand eine Vorlage waehlt. Fail-closed – eine
+ * Automatik, die nach einem Update etwas anderes tut als bestellt, waere
+ * schlimmer als eine, die einmal neu eingestellt werden muss.
+ *
+ * Der massgebliche Wert liegt in der Ablage (background.js); dies hier ist die
+ * Kopie fuer dieses Fenster, damit `autoAktionPruefen` bei ausgeschalteter
+ * Automatik gar nicht erst den Hintergrund fragen muss. */
+let _autoVorlage = "";
 
 /** Traegt die verbindliche Antwort des Hintergrunds nach. */
 function leisteFeststellen(kontext) {
@@ -517,10 +527,10 @@ async function start() {
   ansichtZeigen(z.ansicht, z.leiste_moeglich);
   zeige(z.angemeldet);
   /* VOR `ticketLageAnwenden` – dort faellt die Entscheidung, ob die Automatik
-   * greift, und sie liest `_autoModus`. Ein aelterer Hintergrund schickt das
+   * greift, und sie liest `_autoVorlage`. Ein aelterer Hintergrund schickt das
    * Feld nicht mit; `autoZeigen` macht daraus "aus" (fail-closed: eine
    * Automatik, die man nicht sieht, darf nicht laufen). */
-  autoZeigen(z.auto_modus);
+  autoZeigen(z.auto_vorlage);
   if (!z.angemeldet) {
     await zugriffAnzeigen();
     /* Nach dem Wiederöffnen SAGEN, was passiert ist. Ohne diesen Satz sieht
@@ -599,11 +609,67 @@ async function ticketLageAnwenden(gemerkt) {
   autoAktionPruefen(passt);
 }
 
-/** Traegt den gespeicherten Modus ins Pulldown ein. */
+/** Traegt die gespeicherte Vorlagen-Kennung ins Pulldown ein.
+ *
+ * Geprueft wird nur die FORM (Hexziffern, so entstehen die Kennungen in
+ * `jira_vorlagen.speichern`) – ob es die Vorlage noch gibt, weiss erst
+ * `autoOptionenZeichnen`, wenn die Liste geladen ist. Ein Wert aus einer
+ * aelteren Fassung ("zusammenfassung", "antwort") faellt hier heraus und die
+ * Automatik ist damit aus; das ist gewollt (siehe `_autoVorlage`).
+ *
+ * Steht die Kennung noch nicht im Pulldown (die Liste kommt erst), traegt
+ * dieser Aufruf sie trotzdem in `_autoVorlage` ein – `autoAktionPruefen` muss
+ * ohne die Liste entscheiden koennen.
+ */
 function autoZeigen(wert) {
-  _autoModus = (wert === "zusammenfassung" || wert === "antwort") ? wert : "";
+  _autoVorlage = /^[0-9a-f]{1,32}$/.test(String(wert || "")) ? String(wert) : "";
   const f = $("f-auto");
-  if (f) f.value = _autoModus;
+  if (!f) return;
+  f.value = _autoVorlage;
+  // Die Kennung ist (noch) keine Option: dann zeigt das Pulldown "Nichts",
+  // ohne dass die Einstellung geloescht wird.
+  if (f.value !== _autoVorlage) f.value = "";
+}
+
+/** Fuellt das Automatik-Pulldown aus DENSELBEN Vorlagen wie das Startfeld.
+ *
+ * ⚠ EINE VERSCHWUNDENE VORLAGE RAEUMT DIE EINSTELLUNG AUF. Zeigt die
+ * gespeicherte Kennung ins Leere (gelöscht, oder eine gemeinsame Vorlage, die
+ * der Administrator zurueckgezogen hat), wird die Automatik ABGESCHALTET und
+ * das gesagt – nicht stillschweigend auf etwas anderes umgebogen. Eine
+ * Einstellung, die auf nichts zeigt, wuerde sonst beim naechsten Ticket eine
+ * Aktion ausloesen, die niemand bestellt hat.
+ *
+ * Nur bei ERFOLGREICH geladener Liste (`geladen`): ein Netzfehler darf die
+ * Einstellung nicht loeschen.
+ */
+function autoOptionenZeichnen(geladen) {
+  const f = $("f-auto");
+  if (!f) return;
+  const alle = (_vorlagen.global || []).concat(_vorlagen.eigene || []);
+  f.innerHTML = "";
+  const nichts = document.createElement("option");
+  nichts.value = "";
+  nichts.textContent = "Nichts – nur auf Knopfdruck";
+  f.appendChild(nichts);
+  for (const v of alle) {
+    const o = document.createElement("option");
+    o.value = v.id;
+    // textContent: Vorlagennamen sind Freitext aus einem Formular.
+    o.textContent = v.name + (v.art === "antwort" ? " (Antwort)" : "");
+    f.appendChild(o);
+  }
+  if (_autoVorlage && !alle.some((v) => v.id === _autoVorlage)) {
+    if (!geladen) { f.value = ""; return; }   // Ladefehler: nichts anfassen
+    _autoVorlage = "";
+    f.value = "";
+    frage({ art: "merken", auto_vorlage: "" }).catch(() => {});
+    melde("Die Vorlage für die Automatik gibt es nicht mehr – es startet "
+          + "nichts mehr von selbst.");
+    return;
+  }
+  f.value = _autoVorlage;
+  if (f.value !== _autoVorlage) f.value = "";
 }
 
 /** Startet bei einem NEUEN Ticket die eingestellte Aktion von selbst.
@@ -626,7 +692,7 @@ function autoZeigen(wert) {
 async function autoAktionPruefen(passt) {
   // Alles, was OHNE Rueckfrage entscheidbar ist, zuerst - so kostet der
   // Normalfall (Automatik aus) keine einzige Nachricht an den Hintergrund.
-  if (!_autoModus || !_key || _laeuft || passt) return;
+  if (!_autoVorlage || !_key || _laeuft || passt) return;
   // Nicht angemeldet: der Arbeitsbereich ist verborgen. Kann in der Leiste
   // vorkommen, deren Tab-Zuhoerer eine Abmeldung ueberleben.
   if (el.arbeit && el.arbeit.hidden) return;
@@ -644,7 +710,15 @@ async function autoAktionPruefen(passt) {
    * wuerde fuer das NEUE Ticket ausgewertet, waehrend im Ring das alte
    * vermerkt ist. Das neue Ticket loest ohnehin seine eigene Pruefung aus. */
   if (_key !== key || _laeuft) return;
-  await auswerten(a.modus);
+  /* MIT DER VORLAGE DER AUTOMATIK, nicht mit der im Pulldown gewaehlten – und
+   * das Pulldown wird dabei NICHT verstellt: es zeigt die Wahl des Benutzers,
+   * und die gehoert ihm.
+   *
+   * Welcher Modus daraus wird, entscheidet der SERVER aus der Art der Vorlage
+   * (`jira_assist.auswerten`). Deshalb muss dieses Fenster die Vorlagenliste
+   * hier nicht kennen – sie wird in `start()` ohne `await` geladen und ist
+   * womoeglich noch nicht da. */
+  await auswerten("zusammenfassung", undefined, a.vorlage);
 }
 
 /* ── Der Tab-Wechsel ist der PREIS der Seitenleiste ─────────────────────────
@@ -1124,6 +1198,8 @@ el.abmelden.addEventListener("click", async () => {
 
 // ── Auswerten ───────────────────────────────────────────────────────────────
 const ARBEITSTEXT = {
+  vorlage: "Werte das Ticket nach der gewählten Vorlage aus … "
+           + "(dauert einige Sekunden)",
   zusammenfassung: "Fasse das Ticket zusammen … (dauert einige Sekunden)",
   antwort: "Formuliere einen Antwortvorschlag … (dauert einige Sekunden)",
   ueberarbeiten: "Gleiche deinen Entwurf mit dem Ticket ab … "
@@ -1136,14 +1212,32 @@ const FERTIGTEXT = {
                  + "Absenden lesen.",
 };
 
-async function auswerten(modus, entwurf) {
+/** Ein Lauf.
+ *
+ * ``modus`` ist nur der WUNSCH: traegt die uebergebene Vorlage eine Art, gilt
+ * sie – entschieden wird am Server, damit es nur eine Quelle gibt
+ * (`jira_assist.auswerten`). Angezeigt wird deshalb der Modus, den die ANTWORT
+ * nennt, nicht der gesendete.
+ *
+ * ``vorlagenId`` ist der einzige Weg, eine ANDERE als die im Pulldown gewaehlte
+ * Vorlage zu fahren – die Automatik braucht das. Ohne Angabe gilt das Feld.
+ */
+async function auswerten(modus, entwurf, vorlagenId) {
   if (!_key) {
     melde("Kein Jira-Ticket in diesem Tab. Öffne ein Ticket (…/browse/ABC-123).");
     return;
   }
   sperre(true);
   el.ergebnis.hidden = true;
-  melde(ARBEITSTEXT[modus] || ARBEITSTEXT.zusammenfassung, true);
+  /* Bei einer gewaehlten Vorlage steht der Modus erst nach der Antwort fest
+   * (die Art der Vorlage entscheidet). Eine Wartemeldung, die "Fasse das
+   * Ticket zusammen" behauptet, waehrend ein Antwortentwurf entsteht, ist eine
+   * falsche Auskunft – dann lieber die neutrale. */
+  const wartet = (vorlagenId === undefined ? ($("f-vorlage").value || "")
+                                           : (vorlagenId || ""));
+  melde((wartet && modus !== "ueberarbeiten")
+        ? ARBEITSTEXT.vorlage
+        : (ARBEITSTEXT[modus] || ARBEITSTEXT.zusammenfassung), true);
   try {
     const a = await frage({
       art: "auswerten", key: _key, modus,
@@ -1161,7 +1255,8 @@ async function auswerten(modus, entwurf) {
        * bei einer Antwort ist das Nachschlagen in der Hausdokumentation der
        * Punkt. Würde die Kennung hier weggelassen, wäre die Freigabe für zwei
        * von drei Knöpfen wirkungslos, ohne dass es jemand erklären könnte. */
-      vorlage: $("f-vorlage").value || "",
+      vorlage: (vorlagenId === undefined ? ($("f-vorlage").value || "")
+                                        : (vorlagenId || "")),
       entwurf: entwurf || "",
     });
     const d = a.daten || {};
@@ -1177,7 +1272,11 @@ async function auswerten(modus, entwurf) {
     // von einem dünnen Ticket zu unterscheiden.
     el.ergebnisFuss.textContent =
       d.key + " · " + (d.kommentare || 0) + " Kommentar(e) ausgewertet · " + (d.modell || "");
-    melde(mitAbgleich(FERTIGTEXT[modus] || "", d.hinweis));
+    /* NACH DEM MODUS DER ANTWORT, nicht nach dem gesendeten: die Art der
+     * Vorlage kann ihn am Server umgebogen haben (Antwort-Vorlage). Sonst
+     * stuende unter einem Antwortentwurf kein Wort davon, dass er vor dem
+     * Absenden gelesen werden muss. */
+    melde(mitAbgleich(FERTIGTEXT[d.modus] || "", d.hinweis));
   } catch (e) {
     melde(e.message);
   } finally {
@@ -1185,8 +1284,14 @@ async function auswerten(modus, entwurf) {
   }
 }
 
-$("btn-zusammenfassung").addEventListener("click", () => auswerten("zusammenfassung"));
-$("btn-antwort").addEventListener("click", () => auswerten("antwort"));
+/* ── STARTEN: die gewaehlte Vorlage ausfuehren ──────────────────────────────
+ *
+ * Ein Knopf statt zweier (Vorgabe 2026-09-02). Der gesendete Modus ist nur ein
+ * Wunsch – die Art der Vorlage entscheidet am Server. Hier wird sie trotzdem
+ * mitgeschickt, soweit bekannt: so stimmt die Wartemeldung, und ein Server
+ * einer aelteren Fassung tut wenigstens das Naheliegende.
+ */
+$("btn-start").addEventListener("click", () => auswerten(vorlagenArt($("f-vorlage").value)));
 
 /* ── Überarbeiten: erst das Kommentarfeld LESEN, dann auswerten ────────────
  *
@@ -1259,18 +1364,18 @@ $("btn-ueberarbeiten").addEventListener("click", async () => {
 $("f-auto").addEventListener("change", async (ereignis) => {
   const wert = ereignis.target.value;
   try {
-    await frage({ art: "merken", auto_modus: wert });
+    await frage({ art: "merken", auto_vorlage: wert });
   } catch (e) {
     // Zurueckdrehen: ein Pulldown, das einen nicht gespeicherten Wert zeigt,
     // ist schlimmer als eine Fehlermeldung.
-    autoZeigen(_autoModus);
+    autoZeigen(_autoVorlage);
     melde(e.message);
     return;
   }
   autoZeigen(wert);
-  melde(_autoModus
-    ? "Gespeichert. Beim nächsten Ticket startet „"
-      + (_autoModus === "antwort" ? "Antwort vorschlagen" : "Zusammenfassen")
+  melde(_autoVorlage
+    ? "Gespeichert. Beim nächsten Ticket läuft die Vorlage „"
+      + vorlagenName(_autoVorlage)
       + "“ von selbst – für das gerade offene nicht mehr."
     : "Gespeichert. Es startet nichts mehr von selbst.");
 });
@@ -1380,6 +1485,82 @@ let _vorlBearbeitet = "";      // Kennung der gerade bearbeiteten Vorlage
 // Speichern einer Vorlage) die gerade getroffene Auswahl.
 let _vorlBeruehrt = false;
 
+/** Die Art der Vorlage zu einer Kennung – "zusammenfassung", wenn unbekannt.
+ *
+ * Dieselbe fail-safe Richtung wie `jira_vorlagen.art_von` am Server: eine
+ * unbekannte Kennung (Liste noch nicht geladen, Vorlage inzwischen geloescht)
+ * darf nicht als "antwort" gelten. Der Wert ist hier ohnehin nur ein Wunsch –
+ * entschieden wird am Server.
+ */
+/* ── DAS BEARBEITEN-FORMULAR WANDERT ───────────────────────────────────────
+ *
+ * Vorgabe 2026-09-02: „Bearbeiten" zeigt die Bearbeitung DIREKT UNTERHALB des
+ * gewaehlten Eintrags, nicht am Ende der Liste. Bei mehreren Vorlagen war
+ * sonst nicht erkennbar, welche gerade bearbeitet wird – man las ein Formular
+ * ohne Bezug.
+ *
+ * ES IST GENAU EIN CONTAINER, DER VERSCHOBEN WIRD (`#vorl-form`), kein zweites
+ * Formular: zwei waeren zwei Wege zum Speichern, die beim naechsten Feld
+ * auseinanderlaufen. Dieselbe Bauart wie beim Rollen-Formular in
+ * /settings (`.role-card > .role-row + #role-edit`).
+ *
+ * ⚠ DER HEIMATPLATZ WIRD NUR BEIM ERSTEN VERSCHIEBEN GEMERKT. Wer ihn spaeter
+ * neu ausliest, merkt sich die verschobene Position als "Heimat" – und das
+ * Formular kommt nie mehr zurueck.
+ *
+ * ⚠ UND ES MUSS VOR JEDEM NEUAUFBAU DER LISTE HEIMGEHOLT WERDEN: haengt es in
+ * einem `<li>`, wuerde `liste.innerHTML = ""` es MITLOESCHEN – danach gaebe es
+ * kein Namensfeld, keinen Speichern-Knopf und keinen Fehler, der das erklaert.
+ */
+let _formHeimat = null;
+
+function formPlatz(zeile) {
+  const form = $("vorl-form");
+  if (!form) return;
+  if (!_formHeimat) {
+    _formHeimat = { eltern: form.parentNode, davor: form.nextSibling };
+  }
+  if (zeile) {
+    zeile.appendChild(form);
+  } else if (_formHeimat.eltern) {
+    _formHeimat.eltern.insertBefore(form, _formHeimat.davor);
+  }
+}
+
+function vorlagenArt(id) {
+  if (!id) return "zusammenfassung";
+  const alle = (_vorlagen.global || []).concat(_vorlagen.eigene || []);
+  const v = alle.find((x) => x.id === id);
+  return (v && v.art === "antwort") ? "antwort" : "zusammenfassung";
+}
+
+/** Der Name einer Vorlage zu einer Kennung – oder die Kennung selbst. */
+function vorlagenName(id) {
+  const alle = (_vorlagen.global || []).concat(_vorlagen.eigene || []);
+  const v = alle.find((x) => x.id === id);
+  return (v && v.name) || id;
+}
+
+/** Beschriftet den Startknopf nach der gewaehlten Vorlage.
+ *
+ * ⚠ EIN KNOPF, DER ZWEI VERSCHIEDENE DINGE TUN KANN, MUSS SAGEN WELCHES.
+ * Das Dreieck bleibt dasselbe (Starten ist Starten), aber Tooltip und
+ * Hilfsmittel-Beschriftung nennen das Ergebnis – sonst ist von aussen nicht
+ * erkennbar, ob eine Zusammenfassung fuer den Mitarbeiter oder ein Entwurf
+ * fuer den KUNDEN entsteht. Und das ist ein Unterschied, der zaehlt.
+ */
+function startTitelSetzen() {
+  const b = $("btn-start");
+  if (!b) return;
+  const id = $("f-vorlage").value || "";
+  const t = !id ? "Zusammenfassung erstellen (ohne Vorlage)"
+    : (vorlagenArt(id) === "antwort"
+        ? "Antwortentwurf erstellen – Vorlage „" + vorlagenName(id) + "“"
+        : "Zusammenfassung erstellen – Vorlage „" + vorlagenName(id) + "“");
+  b.title = t;
+  b.setAttribute("aria-label", t);
+}
+
 function vorlagenZeichnen() {
   const sel = $("f-vorlage");
   const gewaehlt = sel.value;
@@ -1416,15 +1597,40 @@ function vorlagenZeichnen() {
   if (sel.value !== wunsch) sel.value = "";
 
   const liste = $("vorl-liste");
+  /* ⚠ ZUERST DAS FORMULAR HEIMHOLEN. Haengt es in einer Zeile, wuerde das
+   * `innerHTML = ""` gleich darunter es mitloeschen – siehe `formPlatz`.
+   * Nach dem Aufbau wird es unter seine Zeile zurueckgesetzt (`_vorlBearbeitet`),
+   * damit ein Neuaufbau (Speichern, Stern, Loeschen) die Bearbeitung nicht
+   * wegreisst. */
+  formPlatz(null);
   liste.innerHTML = "";
   for (const [art, vs] of [["global", _vorlagen.global], ["eigen", _vorlagen.eigene]]) {
     for (const v of vs) {
       // Änderbar ist nur, was einem gehört – oder alles, wenn man Admin ist.
       const darf = (art === "eigen") || _vorlagen.darf_global;
       const li = document.createElement("li");
+      li.dataset.vid = v.id;
+      /* Die FLEX-Zeile liegt eine Ebene tiefer als das `<li>` – nur so kann das
+       * Bearbeiten-Formular darunter stehen statt daneben (popup.css). */
+      const zeile = document.createElement("div");
+      zeile.className = "vorl-zeile";
+      li.appendChild(zeile);
       const name = document.createElement("span");
       name.textContent = v.name + (art === "global" ? " (gemeinsam)" : "");
-      li.appendChild(name);
+      zeile.appendChild(name);
+
+      /* WAS DIE VORLAGE TUT, gehoert in die Zeile: eine Antwort-Vorlage
+       * erzeugt einen Text fuer einen KUNDEN, eine Zusammenfassung einen fuer
+       * den Mitarbeiter. Das ist der wichtigste Unterschied zwischen zwei
+       * Zeilen, die sonst gleich aussehen. Die Zusammenfassung ist die Vorgabe
+       * und bleibt unbeschriftet – eine Marke an jeder Zeile waere Rauschen. */
+      if (v.art === "antwort") {
+        const am = document.createElement("span");
+        am.className = "vorl-art";
+        am.textContent = "Antwort";
+        am.title = "Erzeugt einen Antwortentwurf für den Melder";
+        zeile.appendChild(am);
+      }
 
       /* WAS DIE VORLAGE DARF, gehoert in die Zeile: eine Vorlage, die
        * nachschlaegt, ist von einer, die nur das Ticket liest, sonst nicht zu
@@ -1436,7 +1642,7 @@ function vorlagenZeichnen() {
         const bm = document.createElement("span");
         bm.className = "vorl-ber";
         bm.textContent = "🔎 " + wirksam;
-        li.appendChild(bm);
+        zeile.appendChild(bm);
       }
 
       /* DER STERN STEHT AN JEDER ZEILE, auch an fremden (gemeinsamen)
@@ -1454,7 +1660,7 @@ function vorlagenZeichnen() {
       stern.setAttribute("aria-pressed", istStd ? "true" : "false");
       stern.textContent = istStd ? "★" : "☆";
       stern.addEventListener("click", () => standardSetzen(istStd ? "" : v.id));
-      li.appendChild(stern);
+      zeile.appendChild(stern);
 
       if (darf) {
         const bearb = document.createElement("button");
@@ -1462,8 +1668,8 @@ function vorlagenZeichnen() {
         bearb.className = "leise ico";
         bearb.title = "Bearbeiten";
         bearb.textContent = "✎";
-        bearb.addEventListener("click", () => vorlageInsFormular(v, art === "global"));
-        li.appendChild(bearb);
+        bearb.addEventListener("click", () => vorlageInsFormular(v, art === "global", li));
+        zeile.appendChild(bearb);
 
         const weg = document.createElement("button");
         weg.type = "button";
@@ -1477,12 +1683,25 @@ function vorlagenZeichnen() {
           + '<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>'
           + '<line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>';
         weg.addEventListener("click", () => vorlageLoeschen(v));
-        li.appendChild(weg);
+        zeile.appendChild(weg);
       }
       liste.appendChild(li);
     }
   }
+  /* Die Bearbeitung ueberlebt den Neuaufbau: das `<li>` ist ein anderes
+   * Element als vorher, deshalb wird es ueber die Kennung wiedergefunden.
+   * Ist die Vorlage inzwischen weg, bleibt das Formular am Heimatplatz. */
+  if (_vorlBearbeitet) {
+    const li = liste.querySelector('li[data-vid="' + _vorlBearbeitet + '"]');
+    if (li) formPlatz(li);
+  }
   $("vorl-global-zeile").hidden = !_vorlagen.darf_global;
+  // Das Automatik-Pulldown zeigt DIESELBEN Vorlagen – aus einer Quelle
+  // gezeichnet, damit die beiden Listen nicht auseinanderlaufen.
+  autoOptionenZeichnen(true);
+  // Der Startknopf sagt, was er tut; das haengt an der gewaehlten Vorlage und
+  // die kann sich hier gerade geaendert haben.
+  startTitelSetzen();
   /* ⚠ DIE ZEILEN-KNOEPFE ENTSTEHEN HIER ERST – Stern, Bearbeiten, Loeschen.
    * Ein einmaliger Durchlauf ueber `button` beim Tab-Wechsel erwischt sie
    * nicht: sie existieren zu dem Zeitpunkt noch gar nicht, und beim naechsten
@@ -1554,12 +1773,21 @@ function bereicheGewaehlt() {
     .map((c) => c.dataset.ber);
 }
 
-function vorlageInsFormular(v, global_) {
+/** Fuellt das Bearbeiten-Formular und stellt es an seinen Platz.
+ *
+ * ``zeile`` ist das ``<li>``, unter dem es stehen soll; ohne Angabe (also bei
+ * „Neu" und nach dem Speichern) geht es an seinen Heimatplatz hinter der Liste.
+ */
+function vorlageInsFormular(v, global_, zeile) {
   _vorlBearbeitet = v ? v.id : "";
-  $("f-vorl-name").value = v ? v.name : "";
-  $("f-vorl-text").value = v ? v.text : "";
+  $("f-vorl-name").value = (v && v.name) || "";
+  $("f-vorl-text").value = (v && v.text) || "";
+  // Ohne Angabe die Zusammenfassung – dieselbe Vorgabe wie am Server
+  // (`jira_vorlagen.art_von`), damit ein leeres Feld nicht zur Antwort wird.
+  $("f-vorl-art").value = (v && v.art === "antwort") ? "antwort" : "zusammenfassung";
   $("f-vorl-global").checked = !!global_;
   bereicheZeichnen(v ? v.bereiche : []);
+  formPlatz(zeile || null);
   $("vorl-hinweis").textContent = v ? "Ändert „" + v.name + "“." : "";
 }
 
@@ -1586,6 +1814,11 @@ async function vorlagenLaden() {
   } catch (e) {
     // Ohne Vorlagen bleibt „Ohne Vorlage“ – kein Grund, den Rest zu sperren.
     $("vorl-hinweis").textContent = e.message;
+    /* ⚠ MIT `false`: bei einem LADEFEHLER darf die Automatik-Einstellung nicht
+     * geraeumt werden. Die Liste ist dann leer, weil der Server nicht
+     * antwortete – nicht, weil die Vorlage geloescht wurde. Ein Netzfehler
+     * darf keine Einstellung loeschen. */
+    autoOptionenZeichnen(false);
   }
 }
 
@@ -1626,7 +1859,10 @@ async function vorlageLoeschen(v) {
 // Eine eigene Wahl gewinnt gegen den Standard, bis das Fenster wieder zugeht.
 // Ohne diesen Merker holte jedes Neuzeichnen (Speichern, Löschen, Stern) den
 // Standard zurück und verstellte die gerade getroffene Auswahl.
-$("f-vorlage").addEventListener("change", () => { _vorlBeruehrt = true; });
+$("f-vorlage").addEventListener("change", () => {
+  _vorlBeruehrt = true;
+  startTitelSetzen();
+});
 
 $("btn-vorlagen").addEventListener("click", () => {
   const box = $("vorlagen-box");
@@ -1647,6 +1883,11 @@ $("btn-vorl-speichern").addEventListener("click", async () => {
     const a = await frage({
       art: "vorlage_speichern",
       wert: { id: _vorlBearbeitet, name, text, global: $("f-vorl-global").checked,
+              /* IMMER mitsenden. Ein FEHLENDES Feld heisst am Server
+               * "unveraendert" (damit eine aeltere Erweiterung nichts
+               * umstellt) – dann liesse sich eine Antwort-Vorlage nie wieder
+               * zur Zusammenfassung machen. */
+              art: $("f-vorl-art").value,
               /* IMMER mitsenden – auch die leere Liste. Sie heisst "keine
                * Bereiche"; ein FEHLENDES Feld heisst "unveraendert" (damit eine
                * aeltere Erweiterung nichts loescht), und dann liesse sich ein

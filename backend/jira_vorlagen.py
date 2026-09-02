@@ -46,11 +46,30 @@ Deshalb ist es das einzige Feld dieses Moduls mit einer Rechtepruefung:
   ``jira_assist.wirksame_bereiche`` beim Lauf ein zweites Mal. Beide Tore sind
   noetig: das erste erklaert dem Benutzer den Fehler, das zweite haelt ihn.
 
-⚠ WORAUF DIE BEREICHE WIRKEN: auf ALLE drei Knoepfe der Erweiterung
-(Zusammenfassen, Antwort vorschlagen, Antwort ueberarbeiten) – der TEXT dagegen
-nur auf die Zusammenfassung, wie bisher. Die Oberflaeche sagt das; ohne diesen
-Satz waere nicht erklaerbar, warum eine Vorlage bei einem Antwortvorschlag
-"nichts tut" und trotzdem nachschlaegt.
+⚠ WORAUF DIE BEREICHE WIRKEN: auf jede Auswertung der Erweiterung, also auch
+auf "meinen Kommentar ueberarbeiten". Der TEXT dagegen wirkt dort NICHT – beim
+Ueberarbeiten ist der Entwurf des Mitarbeiters die Vorgabe, eine Vorlage wuerde
+ihn ueberschreiben statt ihn zu verbessern.
+
+DIE ART: WAS EINE VORLAGE UEBERHAUPT TUT (2026-09-02)
+-----------------------------------------------------
+Bis dahin war eine Vorlage immer eine Zusammenfassung, und "Antwort
+vorschlagen" war ein eigener Knopf daneben. Seit die Oberflaeche nur noch EIN
+Startsymbol hat, das die gewaehlte Vorlage ausfuehrt, muss die Vorlage selbst
+sagen, was herauskommen soll: ``art`` ist ``"zusammenfassung"`` (Vorgabe) oder
+``"antwort"``.
+
+**Fail-safe ist die Zusammenfassung, nicht die Antwort** (``art_von``): ein
+unbekannter Wert, ein Altbestand ohne das Feld, eine beschaedigte Datei – alles
+wird zur Zusammenfassung. Die Richtung ist Absicht. Eine Zusammenfassung liest
+ein Mitarbeiter; ein Antworttext ist fuer einen KUNDEN gedacht und laeuft unter
+eigenen Regeln (nichts zusagen, keine Termine, keine Platzhalter). Im Zweifel
+in den strengeren Modus zu fallen ist harmlos, umgekehrt waere es das nicht.
+
+Seit es die Art gibt, wirkt der TEXT in BEIDEN Modi – bei einer Antwort-Vorlage
+als Vorgabe fuer Ton und Aufbau des Entwurfs. Vorher wurde er ausserhalb der
+Zusammenfassung verworfen; eine Antwort-Vorlage waere damit eine Vorlage
+gewesen, deren Anweisung nichts tut.
 """
 
 from __future__ import annotations
@@ -68,6 +87,10 @@ TEXT_MAX = 2000
 NAME_MAX = 60
 MAX_JE_BENUTZER = 20
 
+# Was eine Vorlage TUT. Die Reihenfolge ist die des Pulldowns; das ERSTE ist
+# zugleich die fail-safe Vorgabe (siehe `art_von`).
+ARTEN = ("zusammenfassung", "antwort")
+
 _DATEI = Path(__file__).resolve().parent.parent / "data" / "jira_vorlagen.json"
 
 # ── Mitgelieferte Vorschlaege ───────────────────────────────────────────────
@@ -77,12 +100,14 @@ _DATEI = Path(__file__).resolve().parent.parent / "data" / "jira_vorlagen.json"
 VORSCHLAEGE = [
     {
         "name": "Überblick (Standard)",
+        "art": "zusammenfassung",
         "text": ("Fasse den Vorgang für jemanden zusammen, der ihn zum ersten "
                  "Mal sieht: worum es geht, was bisher passiert ist, woran es "
                  "aktuell hängt und was offen bleibt."),
     },
     {
         "name": "Kurz für die Leitung",
+        "art": "zusammenfassung",
         "text": ("Halte dich sehr kurz: höchstens fünf Sätze. Nenne die Lage, "
                  "die Auswirkung für den Kunden und den nächsten Schritt. "
                  "Keine technischen Einzelheiten, keine Namen von Bauteilen "
@@ -90,6 +115,7 @@ VORSCHLAEGE = [
     },
     {
         "name": "Technisch mit Verlauf",
+        "art": "zusammenfassung",
         "text": ("Gib den technischen Sachstand wieder: Symptom, betroffene "
                  "Komponenten, was bereits geprüft oder ausgeschlossen wurde, "
                  "und welche Spur als Nächstes verfolgt werden sollte. Nenne "
@@ -98,6 +124,7 @@ VORSCHLAEGE = [
     },
     {
         "name": "Was fehlt uns noch?",
+        "art": "zusammenfassung",
         "text": ("Konzentriere dich ausschließlich darauf, welche Angaben zur "
                  "Bearbeitung fehlen: Welche Fragen sind unbeantwortet, welche "
                  "Daten hat der Melder nicht geliefert, worauf warten wir? "
@@ -105,12 +132,44 @@ VORSCHLAEGE = [
     },
     {
         "name": "Übergabe an Kollegen",
+        "art": "zusammenfassung",
         "text": ("Schreibe eine Übergabe für einen Kollegen, der den Vorgang "
                  "übernimmt: Stand, was bereits zugesagt wurde, womit der "
                  "Kunde rechnet, und was als Nächstes zu tun ist. Weise "
                  "ausdrücklich auf Zusagen mit Termin hin."),
     },
 ]
+
+
+# ── Die Vorlage, die den frueheren Knopf "Antwort vorschlagen" ersetzt ──────
+# Sie ist der Grund, warum es `art` gibt: bis 2026-09-02 war der
+# Antwortvorschlag ein eigener Knopf neben dem Zusammenfassen. Seit die
+# Oberflaeche nur noch EIN Startsymbol hat, muss diese Aktion als Vorlage
+# waehlbar sein – sonst waere sie ersatzlos weg.
+#
+# Ihr Text bestimmt nur FORM und AUFBAU. Die Schutzregeln fuer Texte, die an
+# einen Kunden gehen (nichts zusagen, keine Termine, keine Preise, keine
+# Platzhalter), stehen unveraendert im System-Prompt und lassen sich von hier
+# aus nicht aufheben – siehe `jira_assist._system_prompt`.
+ANTWORT_VORSCHLAG = {
+    "name": "Antwort an den Melder",
+    "art": "antwort",
+    "text": ("Formuliere den Entwurf einer Antwort an den Melder: freundlich, "
+             "sachlich und ohne Fachjargon. Nimm zuerst Bezug auf sein "
+             "Anliegen, nenne dann den Stand und zum Schluss den nächsten "
+             "Schritt."),
+}
+
+# WAS EIN FRISCHER SERVER BEKOMMT – eine Quelle, keine Rechnung.
+# `saeen()` legt genau das an, und ein Test, der "alle mitgelieferten" zaehlen
+# will, zaehlt hier: eine Aufzaehlung im Test waere beim naechsten Vorschlag
+# eine Zeitbombe (Register).
+SAAT = VORSCHLAEGE + [ANTWORT_VORSCHLAG]
+
+# Marker in der Datei: die Vorlage oben wurde bereits EINMAL nachgetragen.
+# Ohne ihn kaeme sie nach dem Loeschen bei jedem Zugriff zurueck – dieselbe
+# Regel wie bei `saeen()`, nur fuer einen Nachtrag statt fuer die Erstsaat.
+_MARKE_ANTWORT = "saat_antwort"
 
 
 class VorlagenFehler(Exception):
@@ -154,18 +213,99 @@ def _speichern(d: dict) -> None:
         pass
 
 
+def art_von(v) -> str:
+    """Die Art einer Vorlage – IMMER ein gueltiger Wert.
+
+    ⚠ DIE RICHTUNG IST DIE SICHERHEITSENTSCHEIDUNG: alles Unklare wird zur
+    ``zusammenfassung``. Ein fehlendes Feld (jede Vorlage von vor dem
+    2026-09-02), ein Tippfehler in der Datei, ein Wert aus einer kuenftigen
+    Fassung – nichts davon darf als ``antwort`` durchgehen. Eine Zusammenfassung
+    liest ein Mitarbeiter; ein Antworttext ist fuer einen KUNDEN gedacht und
+    laeuft unter eigenen Regeln. In den strengeren Modus zu fallen ist harmlos,
+    umgekehrt waere es das nicht.
+    """
+    if isinstance(v, dict):
+        v = v.get("art")
+    roh = str(v or "").strip().lower()
+    return roh if roh in ARTEN else ARTEN[0]
+
+
+def _ansicht(v: dict) -> dict:
+    """Eine Vorlage, wie die Oberflaeche sie sehen soll.
+
+    KOPIE mit garantiertem ``art``: die Oberflaeche muss die Art nicht selbst
+    erraten, und ein Altbestand ohne das Feld wird dabei NICHT auf Platte
+    geaendert (``art_von`` beantwortet die Frage beim Lesen). Eine Kopie, weil
+    der Rueckgabewert das Haus verlaesst – ein Aufrufer, der daran etwas
+    verstellt, darf nicht den geladenen Bestand treffen.
+    """
+    aus = dict(v or {})
+    aus["art"] = art_von(aus)
+    return aus
+
+
+def _nachtrag_antwort() -> None:
+    """Traegt ``ANTWORT_VORSCHLAG`` genau EINMAL in eine bestehende Datei nach.
+
+    **Warum es das braucht:** ``saeen()`` legt die Vorschlaege nur an, wenn die
+    Datei noch gar nicht existiert – bewusst, sonst kaeme eine geloeschte
+    Vorgabe bei jedem Zugriff zurueck. Auf jedem laufenden Server existiert sie
+    aber langst. Ohne diesen Nachtrag waere die Aktion "Antwort vorschlagen"
+    dort nach dem Update ersatzlos weg: der Knopf ist entfernt, und die Vorlage,
+    die ihn ersetzt, gaebe es nicht.
+
+    Der Marker macht daraus einen EINMALIGEN Vorgang. Wer die Vorlage danach
+    loescht oder umbenennt, behaelt seine Entscheidung.
+
+    ⚠ EINE BESCHAEDIGTE DATEI WIRD NICHT ANGEFASST. ``_laden()`` gibt bei einem
+    Parse-Fehler bewusst einen leeren Bestand zurueck, damit der Bereich nicht
+    sperrt – wuerde hier darauf geschrieben, waere der Bestand des Kunden weg,
+    obwohl der Administrator ihn noch ansehen wollte. Deshalb liest diese
+    Funktion selbst und streng.
+    """
+    try:
+        d = json.loads(_DATEI.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return
+    if not isinstance(d, dict) or d.get(_MARKE_ANTWORT):
+        return
+    if not isinstance(d.get("global"), list):
+        # Kein brauchbarer Bestand – dann ist auch kein Nachtrag moeglich.
+        return
+    d["global"].append({
+        "id": uuid.uuid4().hex[:12],
+        "name": ANTWORT_VORSCHLAG["name"],
+        "art": ANTWORT_VORSCHLAG["art"],
+        "text": ANTWORT_VORSCHLAG["text"],
+        "bereiche": [],
+        "erstellt": int(time.time()),
+    })
+    d[_MARKE_ANTWORT] = 1
+    _speichern(d)
+
+
 def saeen() -> None:
-    """Legt die Vorschlaege an – NUR, wenn die Datei noch gar nicht existiert."""
+    """Legt die Vorschlaege an – NUR, wenn die Datei noch gar nicht existiert.
+
+    Auf einer bestehenden Datei wird stattdessen einmalig die Antwort-Vorlage
+    nachgetragen (``_nachtrag_antwort``).
+    """
     if _DATEI.exists():
+        _nachtrag_antwort()
         return
     d = _leer()
-    for v in VORSCHLAEGE:
+    for v in SAAT:
         d["global"].append({
             "id": uuid.uuid4().hex[:12],
             "name": v["name"],
+            "art": art_von(v),
             "text": v["text"],
             "erstellt": int(time.time()),
         })
+    # Frisch gesaet heisst: der Nachtrag ist erledigt. Ohne diese Zeile wuerde
+    # `_nachtrag_antwort` die Vorlage beim naechsten Zugriff ein zweites Mal
+    # anlegen.
+    d[_MARKE_ANTWORT] = 1
     _speichern(d)
 
 
@@ -235,11 +375,15 @@ def liste(user: str, ist_admin: bool = False) -> dict:
     ``standard`` ist die Kennung der persoenlichen Standard-Vorlage – schon
     GEPRUEFT (siehe ``_standard_aus``): zeigt der gespeicherte Wert ins Leere,
     kommt ``""`` heraus. Die Oberflaeche waehlt danach vor und setzt den Stern.
+
+    Jeder Eintrag traegt ``art`` – auch ein Altbestand, der das Feld nicht hat
+    (``_ansicht``). Die Oberflaeche startet damit den richtigen Modus und muss
+    ihn nicht erraten.
     """
     saeen()
     d = _laden()
-    global_ = list(d.get("global") or [])
-    eigene = list((d.get("benutzer") or {}).get(_key(user)) or [])
+    global_ = [_ansicht(v) for v in (d.get("global") or [])]
+    eigene = [_ansicht(v) for v in ((d.get("benutzer") or {}).get(_key(user)) or [])]
     return {
         "global": global_,
         "eigene": eigene,
@@ -311,12 +455,18 @@ def _key(user: str) -> str:
 
 def speichern(user: str, name: str, text: str, vid: str = "",
               global_: bool = False, ist_admin: bool = False,
-              bereiche=None) -> dict:
+              bereiche=None, art=None) -> dict:
     """Legt eine Vorlage an oder aendert sie.
 
     ``bereiche=None`` heisst "nicht gesendet" und laesst ein bestehendes Feld
     unangetastet – ein Aufrufer, der die Bereiche nicht kennt (aeltere
-    Erweiterung), darf sie nicht loeschen.
+    Erweiterung), darf sie nicht loeschen. Dasselbe gilt fuer ``art=None``.
+
+    Ein unbekannter Wert in ``art`` wird ABGEWIESEN, nicht stillschweigend zur
+    Zusammenfassung gemacht: hier kommt er aus einem Pulldown, ein Fehlgriff
+    ist also ein Fehler des Aufrufers – und eine Vorlage, die etwas anderes tut
+    als bestellt, faellt niemandem auf. Beim LESEN ist die Abwaegung umgekehrt
+    (``art_von``): dort ist der strengere Modus die richtige Antwort.
     """
     # ⚠ SAEEN AUCH HIER, nicht nur in `liste()`. Ist die Datei noch nicht da und
     # der ERSTE Zugriff ein Schreibvorgang, entsteht sie mit genau dieser einen
@@ -327,6 +477,12 @@ def speichern(user: str, name: str, text: str, vid: str = "",
     saeen()
     n, t = _pruefe(name, text)
     ber = _pruefe_bereiche(bereiche)
+    a = None
+    if art is not None:
+        a = str(art or "").strip().lower()
+        if a not in ARTEN:
+            raise VorlagenFehler("Unbekannte Art '%s'. Erlaubt sind: %s."
+                                 % (art, ", ".join(ARTEN)))
     if global_ and not ist_admin:
         raise VorlagenFehler("Nur Administratoren dürfen gemeinsame Vorlagen "
                              "anlegen.")
@@ -342,14 +498,19 @@ def speichern(user: str, name: str, text: str, vid: str = "",
                 v["name"], v["text"] = n, t
                 if ber is not None:
                     v["bereiche"] = ber
+                if a is not None:
+                    v["art"] = a
                 _speichern(d)
-                return v
+                return _ansicht(v)
         raise VorlagenFehler("Die Vorlage wurde nicht gefunden.")
 
     if len(ziel) >= MAX_JE_BENUTZER:
         raise VorlagenFehler("Mehr als %d Vorlagen sind nicht vorgesehen."
                              % MAX_JE_BENUTZER)
     neu = {"id": uuid.uuid4().hex[:12], "name": n, "text": t,
+           # Ohne Angabe die Zusammenfassung – dieselbe fail-safe Richtung wie
+           # in `art_von`, und der Zustand jeder Vorlage von vor dem 2026-09-02.
+           "art": a or ARTEN[0],
            # Neu angelegt OHNE Angabe = keine Bereiche. Fail-closed, und
            # zugleich der Zustand jeder Vorlage, die vor dem 2026-09-01
            # entstanden ist.
@@ -357,7 +518,7 @@ def speichern(user: str, name: str, text: str, vid: str = "",
            "erstellt": int(time.time())}
     ziel.append(neu)
     _speichern(d)
-    return neu
+    return _ansicht(neu)
 
 
 def loeschen(user: str, vid: str, ist_admin: bool = False) -> bool:

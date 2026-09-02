@@ -55,7 +55,7 @@ Drei Punkte, die man beim Anfassen kennen muss:
 **Was die Leiste kostet:** sie überlebt den Tab-Wechsel, also muss der Ticketbezug bei
 jedem Wechsel neu geprüft werden (`popup.js::tabWechsel`) – sonst stünde ein fertiger
 Antwortentwurf zu Ticket A neben dem geöffneten Ticket B. Und `activeTab` gilt nur für
-den Tab, aus dem die Leiste geöffnet wurde; für „Antwort überarbeiten" und „Einfügen" in weiteren
+den Tab, aus dem die Leiste geöffnet wurde; für „Meinen Kommentar überarbeiten" und „Einfügen" in weiteren
 Tabs erfragt sie einmalig ein dauerhaftes Zugriffsrecht auf den Jira-Server.
 
 **⚠ `sidePanel` und `sidebarAction` NIE über `api` ansprechen.** `api` ist
@@ -87,15 +87,39 @@ Drei weitere Fallen, die das im ersten Anlauf halb tot gemacht haben (gemeldet, 
 installiert sich das Paket klaglos und die Leiste ist still 380 px schmal.
 `tests/test_browser_addon.js` prüft das als Regel, nicht als Aufzählung.
 
-## Automatik bei neuem Ticket (seit 0.4.0)
+## Die Vorlage ist die Aktion (seit 0.8.0)
 
-Im Pulldown **Bei neuem Ticket automatisch** lässt sich eine der beiden Auswertungen
-(*Zusammenfassen* oder *Antwort vorschlagen*) so einstellen, dass sie von selbst startet,
-sobald ein Ticket erkannt wird. **Vorgabe ist „Nichts"** – jeder Lauf kostet eine
-Auswertung auf dem Server, das darf nicht ungefragt passieren.
+Es gibt **ein** Startsymbol – ein Dreieck links vom Pulldown **Vorlage** – und es führt die
+gewählte Vorlage aus. Was dabei herauskommt, sagt die **Art** der Vorlage
+(`jira_vorlagen.ARTEN`): *Zusammenfassung* für den Bearbeiter oder *Antwort an den Melder*
+für den Kunden. **Ohne Vorlage** entsteht eine Zusammenfassung.
 
-*Antwort überarbeiten* steht bewusst nicht zur Wahl: sie braucht einen Entwurf, den der
-Bearbeiter selbst ins Kommentarfeld geschrieben hat – bei einem gerade geöffneten Ticket
+Bis 0.7.1 standen dort zwei Knöpfe, *Zusammenfassen* und *Antwort vorschlagen*. Beide sind
+jetzt Vorlagen; die mitgelieferte **Antwort an den Melder** ersetzt den zweiten Knopf und
+wird auf bestehenden Servern **einmalig nachgetragen** (`jira_vorlagen._nachtrag_antwort`) –
+ohne diesen Nachtrag wäre die Aktion nach dem Update ersatzlos weg.
+
+**Der Modus wird am SERVER aus der Vorlage bestimmt** (`jira_assist.auswerten`), nicht im
+Fenster. Das Feld `modus` im Request ist nur ein Wunsch: so gibt es eine Quelle, und ein
+Fenster einer älteren Fassung kann keine Antwort-Vorlage als Zusammenfassung fahren.
+Ausgenommen ist *Meinen Kommentar überarbeiten* – eine Vorlage darf diese Aufgabe nicht
+umbiegen, sonst würde statt einer Korrektur ein völlig neuer Text entstehen.
+
+## Automatik bei neuem Ticket (seit 0.4.0, Vorlagen seit 0.8.0)
+
+Im Pulldown **Bei neuem Ticket automatisch** lässt sich eine **Vorlage** so einstellen, dass
+sie von selbst startet, sobald ein Ticket erkannt wird. **Vorgabe ist „Nichts"** – jeder Lauf
+kostet eine Auswertung auf dem Server, das darf nicht ungefragt passieren.
+
+Gespeichert wird die **Kennung** der Vorlage im Feld `auto_vorlage`. Der frühere Feldname
+`auto_modus` wird nicht mehr gelesen: ein alter Wert ließe sich nicht verlässlich auf eine
+Vorlage abbilden, deshalb ist die Automatik nach dem Update **aus**, bis jemand eine Vorlage
+wählt. Zeigt die gespeicherte Kennung ins Leere (Vorlage gelöscht), schaltet
+`popup.js::autoOptionenZeichnen` die Automatik ab **und sagt es** – ein stilles Umbiegen auf
+eine andere Vorlage wäre schlimmer.
+
+*Meinen Kommentar überarbeiten* steht bewusst nicht zur Wahl: es braucht einen Entwurf, den
+der Bearbeiter selbst ins Kommentarfeld geschrieben hat – bei einem gerade geöffneten Ticket
 gibt es den per Definition nicht.
 
 **„Neu" heißt: höchstens ein automatischer Lauf je Ticket.** Zwei Schranken zusammen:

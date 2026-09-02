@@ -102,53 +102,30 @@
        markierten Bereichs ist ohne Ticket gesperrt (Begruendung in
        popup.js::knoepfeAktualisieren). -->
   <section id="bereich-arbeit" hidden>
-    <div class="knopfreihe">
-      <button type="button" id="btn-zusammenfassung" class="haupt">Zusammenfassen</button>
-      <button type="button" id="btn-antwort" class="haupt">Antwort vorschlagen</button>
-      <button type="button" id="btn-ueberarbeiten" class="haupt">Antwort überarbeiten</button>
-    </div>
-    <!-- Die Voraussetzung ist unsichtbar und muss deshalb dastehen: das Feld
-         wird über den zuletzt gesetzten Cursor gefunden. Ohne diesen Satz
-         drückt jemand den Knopf und bekommt „kein Text gefunden“, ohne zu
-         wissen, was er anders machen soll. -->
-    <p class="hinweis" id="ueberarb-hinweis">
-      <b>Antwort überarbeiten</b> liest den Entwurf aus dem Kommentarfeld, in dem
-      zuletzt der Cursor stand, und gleicht ihn mit dem Ticketverlauf ab.
-    </p>
+    <!-- ── DIE VORLAGE IST DIE AKTION ────────────────────────────────────
+         Bis 2026-09-02 standen hier zwei Knöpfe („Zusammenfassen“, „Antwort
+         vorschlagen“). Beide sind jetzt Vorlagen: das Dreieck führt die
+         gewählte aus, und was dabei herauskommt, sagt ihre Art
+         (jira_vorlagen.ARTEN). Deshalb steht die Zeile ganz oben – sie ist
+         nicht mehr eine Einstellung neben der Aktion, sie IST die Aktion.
 
-    <!-- AUTOMATIK BEI NEUEM TICKET.
-         Bewusst KEIN Knopf, sondern eine Einstellung: sie gilt über das
-         Fenster hinaus. Und bewusst OHNE `data-ohne-ticket` – ein <select>
-         wird von der Ticket-Sperre gar nicht erfasst (die greift nur auf
-         <button>), und das ist hier richtig: wer auf einem fremden Tab steht,
-         muss die Automatik trotzdem AUSschalten können.
-         „Antwort überarbeiten" steht bewusst NICHT zur Wahl: es braucht einen
-         Entwurf, den man selbst ins Kommentarfeld geschrieben hat – bei einem
-         gerade erst geöffneten Ticket gibt es den per Definition nicht. -->
+         Das Zahnrad öffnet die Verwaltung; eigene Vorlagen darf jeder anlegen,
+         gemeinsame nur ein Administrator. -->
     <label class="feld">
-      <span>Bei neuem Ticket automatisch</span>
-      <select id="f-auto" class="voll">
-        <option value="">Nichts – nur auf Knopfdruck</option>
-        <option value="zusammenfassung">Zusammenfassen</option>
-        <option value="antwort">Antwort vorschlagen</option>
-      </select>
-    </label>
-    <p class="hinweis" id="auto-hinweis">
-      Läuft höchstens <b>einmal je Ticket</b> und kostet jedes Mal eine
-      Auswertung. Ein zweiter Lauf ist ein Klick auf den Knopf.
-    </p>
-
-    <!-- Vorlage. Das Zahnrad öffnet die Verwaltung – eigene Vorlagen darf jeder
-         anlegen, gemeinsame nur ein Administrator.
-         ⚠ SIE HIESS "Vorlage für die Zusammenfassung", und das ist seit
-         2026-09-01 nur noch halb wahr: der Anweisungstext wirkt weiter nur beim
-         Zusammenfassen, die freigeschalteten Nachschlage-Bereiche gelten für
-         alle drei Knöpfe. Eine Beschriftung, die einen Zustand behauptet, den
-         sie nicht kennt, kostet Zeit (Register) – der ganze Satz steht im
-         `title`, weil er in 380 Pixel Breite nicht als Fließtext danebenpasst. -->
-    <label class="feld">
-      <span title="Der Anweisungstext einer Vorlage wirkt nur beim Zusammenfassen. Freigeschaltete Nachschlage-Bereiche gelten für alle drei Knöpfe.">Vorlage</span>
+      <span title="Die Vorlage bestimmt, was das Dreieck tut: eine Zusammenfassung für dich oder einen Antwortentwurf für den Melder. Freigeschaltete Nachschlage-Bereiche gelten für jede Auswertung.">Vorlage</span>
       <div class="feld-zeile">
+        <!-- STARTEN. Nur ein Symbol – die Beschriftung daneben steht schon im
+             Pulldown, und in 380 Pixel Breite wäre ein Knopf mit Text neben
+             einem Auswahlfeld und einem Zahnrad nicht mehr unterzubringen.
+             INLINE-SVG, kein Zeichen und kein Emoji: ▶ (U+25B6) wird je nach
+             System als farbiges Emoji gerendert und folgt dann keinem Thema –
+             dieselbe Begründung wie beim Mülleimer in der Vorlagenliste.
+             `title`/`aria-label` setzt popup.js NACH der gewählten Art: ein
+             Knopf, der zwei verschiedene Dinge tun kann, muss sagen welches. -->
+        <button type="button" id="btn-start" class="haupt ico-start"
+                title="Vorlage ausführen" aria-label="Vorlage ausführen"><svg
+          viewBox="0 0 24 24" width="13" height="13" fill="currentColor"
+          aria-hidden="true"><polygon points="6 4 20 12 6 20"/></svg></button>
         <!-- „Ohne Vorlage“, NICHT „Standard“: seit eine Vorlage als Standard
              markierbar ist, hieße dasselbe Wort zwei verschiedene Dinge.
              popup.js baut die Liste neu auf und setzt denselben Text. -->
@@ -164,11 +141,52 @@
                 title="Vorlagen verwalten" aria-label="Vorlagen verwalten">⚙</button>
       </div>
     </label>
+    <p class="hinweis" id="start-hinweis">
+      Das Dreieck führt die gewählte Vorlage aus. <b>Ohne Vorlage</b> entsteht
+      eine Zusammenfassung des Tickets.
+    </p>
 
     <label class="feld">
       <span>Zusatzwunsch <em>(optional)</em></span>
       <input type="text" id="f-hinweis" placeholder="z. B. kurz halten, auf Englisch">
     </label>
+
+    <div class="knopfreihe">
+      <button type="button" id="btn-ueberarbeiten" class="haupt">Meinen Kommentar überarbeiten</button>
+    </div>
+    <!-- Die Voraussetzung ist unsichtbar und muss deshalb dastehen: das Feld
+         wird über den zuletzt gesetzten Cursor gefunden. Ohne diesen Satz
+         drückt jemand den Knopf und bekommt „kein Text gefunden“, ohne zu
+         wissen, was er anders machen soll. -->
+    <p class="hinweis" id="ueberarb-hinweis">
+      <b>Meinen Kommentar überarbeiten</b> liest den Entwurf aus dem
+      Kommentarfeld, in dem zuletzt der Cursor stand, und gleicht ihn mit dem
+      Ticketverlauf ab.
+    </p>
+
+    <!-- AUTOMATIK BEI NEUEM TICKET.
+         Bewusst KEIN Knopf, sondern eine Einstellung: sie gilt über das
+         Fenster hinaus. Und bewusst OHNE `data-ohne-ticket` – ein <select>
+         wird von der Ticket-Sperre gar nicht erfasst (die greift nur auf
+         <button>), und das ist hier richtig: wer auf einem fremden Tab steht,
+         muss die Automatik trotzdem AUSschalten können.
+         „Meinen Kommentar überarbeiten" steht bewusst NICHT zur Wahl: es
+         braucht einen Entwurf, den man selbst ins Kommentarfeld geschrieben
+         hat – bei einem gerade erst geöffneten Ticket gibt es den per
+         Definition nicht.
+         ⚠ ZUR WAHL STEHEN VORLAGEN, nicht mehr zwei feste Aktionen: die Liste
+         füllt popup.js aus denselben Vorlagen wie das Pulldown darüber
+         (autoOptionenZeichnen). Gespeichert wird die KENNUNG der Vorlage. -->
+    <label class="feld">
+      <span>Bei neuem Ticket automatisch</span>
+      <select id="f-auto" class="voll">
+        <option value="">Nichts – nur auf Knopfdruck</option>
+      </select>
+    </label>
+    <p class="hinweis" id="auto-hinweis">
+      Läuft höchstens <b>einmal je Ticket</b> und kostet jedes Mal eine
+      Auswertung. Ein zweiter Lauf ist ein Klick auf den Knopf.
+    </p>
 
     <!-- Vorlagen-Verwaltung: bleibt im selben Fenster, damit die Auswahl
          daneben sichtbar bleibt. -->
@@ -184,14 +202,37 @@
                 aria-label="Schließen">&times;</button>
       </div>
       <ul class="vorl-liste" id="vorl-liste"></ul>
+      <!-- ⚠ DAS FORMULAR WANDERT (Vorgabe 2026-09-02).
+           „Bearbeiten“ hängt es DIREKT UNTER die angeklickte Zeile, statt es am
+           Ende der Liste stehen zu lassen – bei zwanzig Vorlagen war sonst
+           nicht erkennbar, welche gerade bearbeitet wird.
+           Es ist genau EIN Container, der verschoben wird (popup.js::_formPlatz),
+           nicht zwei Formulare: zwei wären zwei Wege zum Speichern, die
+           auseinanderlaufen. Der Heimatplatz ist hier, direkt hinter der Liste;
+           dorthin kehrt es für „Neu“ und vor jedem Neuaufbau der Liste zurück –
+           `liste.innerHTML = ""` würde es sonst MITLÖSCHEN. -->
+      <div id="vorl-form">
       <label class="feld">
         <span>Name</span>
         <input type="text" id="f-vorl-name" maxlength="60" placeholder="z. B. Kurz für die Leitung">
       </label>
+      <!-- WAS DIE VORLAGE TUT. Sie bestimmt seit 2026-09-02 den Modus des
+           Laufs: „Zusammenfassung“ schreibt für den Mitarbeiter, „Antwort an
+           den Melder“ einen Entwurf für den Kunden – mit eigenen Schutzregeln
+           im System-Prompt (nichts zusagen, keine Termine, keine Platzhalter).
+           Vorgabe ist die Zusammenfassung; dieselbe fail-safe Richtung wie in
+           jira_vorlagen.art_von. -->
+      <label class="feld">
+        <span>Art</span>
+        <select id="f-vorl-art" class="voll">
+          <option value="zusammenfassung">Zusammenfassung (für mich)</option>
+          <option value="antwort">Antwort an den Melder</option>
+        </select>
+      </label>
       <label class="feld">
         <span>Anweisung</span>
         <textarea id="f-vorl-text" rows="4"
-                  placeholder="Worauf soll die Zusammenfassung hinauslaufen?"></textarea>
+                  placeholder="Worauf soll das Ergebnis hinauslaufen?"></textarea>
       </label>
       <!-- Werkzeug-Bereiche DIESER Vorlage. Der Block bleibt VERSTECKT, solange
            der Administrator nichts freigeschaltet hat (Einstellungen → Jira →
@@ -202,8 +243,8 @@
            nicht auseinanderlaufen. -->
       <div class="feld" id="vorl-ber-zeile" hidden>
         <span>Nachschlagen erlauben</span>
-        <p class="hinweis" id="vorl-ber-hinweis">Gilt für alle drei Knöpfe;
-           der Anweisungstext oben nur für die Zusammenfassung. Der Haken
+        <p class="hinweis" id="vorl-ber-hinweis">Gilt auch beim Überarbeiten
+           deines Kommentars; der Anweisungstext oben dort nicht. Der Haken
            <em>erlaubt</em> das Nachschlagen – verlangen muss es die
            Anweisung.</p>
         <div id="vorl-bereiche"></div>
@@ -215,6 +256,11 @@
         <button type="button" id="btn-vorl-speichern" class="haupt">Speichern</button>
         <button type="button" id="btn-vorl-neu" class="leise">Neu</button>
       </div>
+      </div><!-- /vorl-form -->
+      <!-- Die Rückmeldung bleibt BEWUSST ausserhalb des wandernden Formulars:
+           sie gilt auch für Löschen und Stern, die gar kein Formular öffnen –
+           und sie soll immer an derselben Stelle stehen, nicht mal hier und
+           mal unter der siebten Zeile. -->
       <p class="hinweis" id="vorl-hinweis"></p>
     </div>
 

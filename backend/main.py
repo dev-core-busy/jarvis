@@ -12268,6 +12268,11 @@ async def jira_assist_vorlage_speichern(
             # aeltere Erweiterung kennt das Feld nicht). Geprueft wird im Modul,
             # damit die Freigabe-Schranke nicht am Endpunkt haengt.
             bereiche=(b or {}).get("bereiche"),
+            # Dasselbe fuer die Art: fehlt das Feld, bleibt sie unveraendert –
+            # sonst wuerde eine aeltere Erweiterung beim Speichern jede
+            # Antwort-Vorlage zur Zusammenfassung machen. Ein UNBEKANNTER Wert
+            # wird im Modul abgewiesen, nicht stillschweigend ersetzt.
+            art=(b or {}).get("art"),
         )
     except jira_vorlagen.VorlagenFehler as f:
         return JSONResponse({"ok": False, "error": str(f)}, status_code=400)

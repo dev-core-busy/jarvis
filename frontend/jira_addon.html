@@ -200,10 +200,10 @@
         <ol class="ja-steps">
             <li data-i18n-html="jaddon.use_1">Ein Jira-Ticket öffnen, sodass die Ticketnummer in der Adresszeile steht (<code>…/browse/ABC-1234</code>).</li>
             <li data-i18n-html="jaddon.use_2">Auf das Symbol klicken. Oben rechts im Fenster steht die erkannte Ticketnummer – steht dort nichts, ist der Tab kein Ticket.</li>
-            <li data-i18n-html="jaddon.use_3"><b>Zusammenfassen</b> gibt einen Überblick: worum es geht, was bisher passiert ist, woran es hängt und was offen bleibt.</li>
-            <li data-i18n-html="jaddon.use_4"><b>Antwort vorschlagen</b> formuliert einen Entwurf an den Melder. Im Feld <b>Zusatzwunsch</b> lassen sich Vorgaben ergänzen, etwa „kurz halten“ oder „auf Englisch“.</li>
-            <li data-i18n-html="jaddon.use_4b"><b>Antwort überarbeiten</b> nimmt den Text, den du bereits <b>selbst ins Kommentarfeld geschrieben</b> hast, gleicht ihn mit dem Ticketverlauf ab und gibt ihn korrigiert zurück – Sprache, Ton und die Angaben aus dem Vorgang. Dafür muss der Cursor zuletzt in diesem Kommentarfeld gestanden haben; passt etwas nicht zum Ticket, steht es als Hinweis unter dem Text und wird <b>nicht</b> mitgeschickt.</li>
-            <li data-i18n-html="jaddon.use_4c"><b>Bei neuem Ticket automatisch</b> lässt eine der beiden Auswertungen von selbst starten, sobald ein Ticket erkannt wird – höchstens <b>einmal je Ticket</b>, und nur, wenn noch kein Ergebnis dazu vorliegt. Vorgabe ist „Nichts“: jeder Lauf kostet eine Auswertung. Ein Umschalten wirkt ab dem <b>nächsten</b> Ticket.</li>
+            <li data-i18n-html="jaddon.use_3"><b>Vorlage wählen und das Dreieck drücken.</b> Die Vorlage bestimmt, was entsteht: eine Zusammenfassung des Vorgangs oder einen Antwortentwurf an den Melder. <b>Ohne Vorlage</b> kommt eine Zusammenfassung – worum es geht, was bisher passiert ist, woran es hängt und was offen bleibt.</li>
+            <li data-i18n-html="jaddon.use_4">Für einen <b>Antwortentwurf</b> gibt es Vorlagen der Art <b>Antwort an den Melder</b> – mitgeliefert ist „Antwort an den Melder“. Im Feld <b>Zusatzwunsch</b> lassen sich Vorgaben für den einzelnen Lauf ergänzen, etwa „kurz halten“ oder „auf Englisch“. Eigene Vorlagen legst du über das <b>Zahnrad</b> an; dort wird auch die Art gewählt.</li>
+            <li data-i18n-html="jaddon.use_4b"><b>Meinen Kommentar überarbeiten</b> nimmt den Text, den du bereits <b>selbst ins Kommentarfeld geschrieben</b> hast, gleicht ihn mit dem Ticketverlauf ab und gibt ihn korrigiert zurück – Sprache, Ton und die Angaben aus dem Vorgang. Dafür muss der Cursor zuletzt in diesem Kommentarfeld gestanden haben; passt etwas nicht zum Ticket, steht es als Hinweis unter dem Text und wird <b>nicht</b> mitgeschickt.</li>
+            <li data-i18n-html="jaddon.use_4c"><b>Bei neuem Ticket automatisch</b> lässt eine <b>Vorlage</b> von selbst starten, sobald ein Ticket erkannt wird – höchstens <b>einmal je Ticket</b>, und nur, wenn noch kein Ergebnis dazu vorliegt. Vorgabe ist „Nichts“: jeder Lauf kostet eine Auswertung. Ein Umschalten wirkt ab dem <b>nächsten</b> Ticket.</li>
             <li data-i18n-html="jaddon.use_5">Der Text im Fenster ist <b>bearbeitbar</b>. Erst danach <b>Als Kommentar übernehmen</b> – das <b>ersetzt</b> den bisherigen Inhalt des Kommentarfeldes (in Jira holt Strg+Z ihn zurück); oder <b>Kopieren</b>, wenn das Kommentarfeld nicht gefunden wird. <b>Leeren</b> verwirft ihn samt Zusatzwunsch; das passiert auch von selbst, sobald ein anderes Ticket offen ist.</li>
             <li data-i18n-html="jaddon.use_6">Abgeschickt wird in Jira, von Hand.</li>
         </ol>
@@ -216,7 +216,7 @@
         <ul class="ja-limits">
             <li data-i18n-html="jaddon.view_1">Der Schalter steht am unteren Rand und wirkt in beide Richtungen – umstellen geht jederzeit, auch aus der Leiste zurück zum Fenster.</li>
             <li data-i18n-html="jaddon.view_2">In der Seitenleiste wechselt die Erweiterung mit, sobald du ein anderes Ticket öffnest. Ein bereits erzeugter Text zu einem anderen Vorgang wird dabei <b>verworfen</b> – er darf nicht versehentlich im falschen Ticket landen.</li>
-            <li data-i18n-html="jaddon.view_3">In der Leiste fragt die Erweiterung einmalig nach dem Zugriffsrecht auf den Jira-Server. Das ist nötig, weil das kurzfristige Recht aus dem Klick auf das Symbol nur für den Tab gilt, aus dem die Leiste geöffnet wurde. Ohne das Recht bleiben <b>Antwort überarbeiten</b> und <b>Als Kommentar übernehmen</b> auf diesen einen Tab beschränkt.</li>
+            <li data-i18n-html="jaddon.view_3">In der Leiste fragt die Erweiterung einmalig nach dem Zugriffsrecht auf den Jira-Server. Das ist nötig, weil das kurzfristige Recht aus dem Klick auf das Symbol nur für den Tab gilt, aus dem die Leiste geöffnet wurde. Ohne das Recht bleiben <b>Meinen Kommentar überarbeiten</b> und <b>Als Kommentar übernehmen</b> auf diesen einen Tab beschränkt.</li>
         </ul>
         <p class="ja-hint" data-i18n="jaddon.view_note">Chrome stellt die Leiste beim nächsten Öffnen wieder auf seine Standardbreite; Firefox behält die eingestellte Breite.</p>
     </section>
@@ -226,7 +226,7 @@
         <ul class="ja-limits">
             <li data-i18n-html="jaddon.limit_1"><b>Sie schreibt nichts in Jira.</b> Weder Kommentare noch Änderungen am Ticket. Der Vorschlag wird eingefügt, abgeschickt wird von Hand.</li>
             <li data-i18n-html="jaddon.limit_2"><b>Sie kann nichts nachschlagen.</b> Was nicht im Ticket steht, weiß sie nicht – sie hat für diese Auswertung keinerlei Werkzeuge. Das ist bewusst so: in ein Ticket schreibt ein Kunde, was er will, und dieser Text darf keine Aktionen auslösen können.</li>
-            <li data-i18n-html="jaddon.limit_3"><b>Sie liest die Seite nicht.</b> Übertragen wird die Ticketnummer aus der Adresszeile; Beschreibung und Verlauf holt der Server selbst über die Jira-Schnittstelle. Die einzige Ausnahme ist <b>Antwort überarbeiten</b>: dabei geht der Inhalt des Kommentarfeldes mit – also genau der Text, den du überarbeiten lässt, und sonst nichts von der Seite.</li>
+            <li data-i18n-html="jaddon.limit_3"><b>Sie liest die Seite nicht.</b> Übertragen wird die Ticketnummer aus der Adresszeile; Beschreibung und Verlauf holt der Server selbst über die Jira-Schnittstelle. Die einzige Ausnahme ist <b>Meinen Kommentar überarbeiten</b>: dabei geht der Inhalt des Kommentarfeldes mit – also genau der Text, den du überarbeiten lässt, und sonst nichts von der Seite.</li>
             <li data-i18n-html="jaddon.limit_4"><b>Der Vorschlag ist ein Entwurf.</b> Er kann Aussagen enthalten, die fachlich nicht tragen. Vor dem Abschicken lesen – die Verantwortung für das, was an den Kunden geht, bleibt beim Absender.</li>
         </ul>
         <!-- WAS AUF DIESEM SERVER GILT, nicht ein Satz darüber: der Punkt zum
@@ -262,7 +262,7 @@
 <script src="/static/js/cpubar.js?v=1"></script>
 <script src="/static/js/syspackages.js?v=2"></script>
 <script src="/static/js/theme.js?v=3"></script>
-<script src="/static/js/i18n.js?v=207"></script>
+<script src="/static/js/i18n.js?v=208"></script>
 <script src="/static/js/branding.js?v=26"></script>
 <script src="/static/js/sessions.js?v=8"></script>
 <script src="/static/js/logo_home.js?v=1"></script>

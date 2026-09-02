@@ -209,7 +209,13 @@ jv._DATEI.write_text(json.dumps({
 }), encoding="utf-8")
 d = jv.liste("alice")
 check("eine Datei ohne 'standard' ist kein Fehler", d["standard"] == "")
-check("und die Vorlagen sind unveraendert lesbar", len(d["global"]) == 1)
+# GEPRUEFT WIRD DIE VORLAGE, NICHT DIE ANZAHL: seit 2026-09-02 traegt `saeen()`
+# in eine bestehende Datei einmalig die Antwort-Vorlage nach - eine feste Zahl
+# meldete hier einen Fehler, den es nicht gibt (Register).
+check("und die Vorlage ist unveraendert lesbar",
+      any(v["id"] == "g1" and v["text"] == "Text." for v in d["global"]))
+check("eine Vorlage ohne 'art' gilt als Zusammenfassung (fail-safe)",
+      [v for v in d["global"] if v["id"] == "g1"][0]["art"] == "zusammenfassung")
 jv.standard_setzen("alice", "g1")
 check("das Feld entsteht beim ersten Setzen", jv.liste("alice")["standard"] == "g1")
 
@@ -367,6 +373,136 @@ prumpf = m4.group(1) if m4 else ""
 check("sie nimmt den Request entgegen", "request: Request" in prumpf)
 check("und gibt addin.basis_url(request) an paket_bauen weiter",
       "paket_bauen(" in prumpf and "basis_url(request)" in prumpf)
+
+# ═════════════════════════════════════════════════════════════════════════════
+section("14) Die ART einer Vorlage (2026-09-02)")
+# ═════════════════════════════════════════════════════════════════════════════
+# Seit die Erweiterung nur noch EIN Startsymbol hat, sagt die Vorlage selbst,
+# was sie tut. Der Unterschied ist nicht kosmetisch: eine Zusammenfassung liest
+# ein Mitarbeiter, ein Antworttext geht an einen KUNDEN und laeuft unter eigenen
+# Regeln im System-Prompt.
+check("es gibt genau zwei Arten", list(jv.ARTEN) == ["zusammenfassung", "antwort"],
+      str(jv.ARTEN))
+check("die Zusammenfassung ist die erste – und damit die Vorgabe",
+      jv.ARTEN[0] == "zusammenfassung")
+
+# ── art_von: fail-safe in die STRENGERE Richtung ────────────────────────────
+# Alles Unklare wird zur Zusammenfassung. In den strengeren Modus zu fallen ist
+# harmlos; umgekehrt entstuende aus einem Altbestand ungefragt Kundentext.
+for roh, soll, warum in [
+    ({}, "zusammenfassung", "fehlendes Feld (Altbestand)"),
+    ({"art": None}, "zusammenfassung", "None"),
+    ({"art": ""}, "zusammenfassung", "leer"),
+    ({"art": "quatsch"}, "zusammenfassung", "unbekannter Wert"),
+    ({"art": "ANTWORT"}, "antwort", "Grossschreibung wird erkannt"),
+    ({"art": " antwort "}, "antwort", "Leerraum wird erkannt"),
+    ({"art": "antwort"}, "antwort", "der Normalfall"),
+]:
+    check("art_von: %s -> %s" % (warum, soll), jv.art_von(roh) == soll,
+          jv.art_von(roh))
+check("art_von nimmt auch den blossen Wert", jv.art_von("antwort") == "antwort")
+
+# ── Speichern: unbekannte Art wird ABGEWIESEN, nicht ersetzt ───────────────
+# Hier kommt der Wert aus einem Pulldown - ein Fehlgriff ist ein Fehler des
+# Aufrufers, und eine Vorlage, die etwas anderes tut als bestellt, faellt
+# niemandem auf.
+v = jv.speichern("artuser", "Antwortform", "freundlich", art="antwort")
+check("angelegt mit der gewaehlten Art", v["art"] == "antwort", v.get("art"))
+check("und sie steht auch auf Platte",
+      jv.eintrag_fuer("artuser", v["id"])["art"] == "antwort")
+# ⚠ IM try: ein Speichern OHNE `art` DARF nicht werfen. Genau das war der Fall,
+# als die Gegenprobe zu dieser Zeile nicht biss - der Lauf brach mit einer
+# Ausnahme ab, und weil nur FAILs gezaehlt wurden, sah das wie ein bestandener
+# Test aus (Register). Eine Pruefung darf nicht werfen.
+try:
+    v2 = jv.speichern("artuser", "Antwortform", "freundlich", vid=v["id"])
+    check("ein FEHLENDES Feld laesst die Art unangetastet (aeltere Erweiterung)",
+          v2["art"] == "antwort", v2.get("art"))
+except Exception as _e:  # noqa: BLE001
+    check("ein FEHLENDES Feld laesst die Art unangetastet (aeltere Erweiterung)",
+          False, "es wirft: %s" % _e)
+v3 = jv.speichern("artuser", "Antwortform", "freundlich", vid=v["id"],
+                  art="zusammenfassung")
+check("ausdruecklich umgestellt wird sie aber", v3["art"] == "zusammenfassung",
+      v3.get("art"))
+try:
+    jv.speichern("artuser", "X", "y", art="ueberarbeiten")
+    check("eine unbekannte Art wird abgewiesen", False)
+except jv.VorlagenFehler as f:
+    check("eine unbekannte Art wird abgewiesen und BENANNT",
+          "ueberarbeiten" in str(f) and "zusammenfassung" in str(f), str(f))
+try:
+    ohne = jv.speichern("artuser", "Ohne Angabe", "x")
+    check("neu ohne Angabe = Zusammenfassung (fail-safe)",
+          ohne["art"] == "zusammenfassung", ohne.get("art"))
+except Exception as _e:  # noqa: BLE001
+    check("neu ohne Angabe = Zusammenfassung (fail-safe)", False,
+          "es wirft: %s" % _e)
+
+# ═════════════════════════════════════════════════════════════════════════════
+section("15) Die Antwort-Vorlage wird EINMALIG nachgetragen")
+# ═════════════════════════════════════════════════════════════════════════════
+# WARUM ES DAS BRAUCHT: `saeen()` legt die Vorschlaege nur an, wenn die Datei
+# fehlt. Auf jedem laufenden Server existiert sie langst - ohne Nachtrag waere
+# die Aktion "Antwort vorschlagen" nach dem Update ersatzlos weg (der Knopf ist
+# entfernt, und die Vorlage, die ihn ersetzt, gaebe es nicht).
+_sicherung = jv._DATEI.read_bytes() if jv._DATEI.exists() else None
+
+# (a) Frisches System: alles auf einmal, Marker gesetzt.
+jv._DATEI.unlink(missing_ok=True)
+jv.saeen()
+d = json.loads(jv._DATEI.read_text(encoding="utf-8"))
+check("frisch gesaet: alle mitgelieferten Vorlagen",
+      len(d["global"]) == len(jv.SAAT), str(len(d["global"])))
+check("darunter die Antwort-Vorlage",
+      any(v["art"] == "antwort" for v in d["global"]))
+check("und der Marker steht (sonst kaeme sie ein zweites Mal)",
+      bool(d.get(jv._MARKE_ANTWORT)))
+jv.saeen(); jv.saeen()
+check("mehrfaches Saeen aendert nichts",
+      len(json.loads(jv._DATEI.read_text(encoding="utf-8"))["global"])
+      == len(jv.SAAT))
+
+# (b) Bestandssystem: nur die Antwort-Vorlage kommt dazu, sonst nichts.
+jv._DATEI.write_text(json.dumps({
+    "global": [{"id": "alt1", "name": "Bestand", "text": "T."}],
+    "benutzer": {"bob": [{"id": "b1", "name": "Meine", "text": "M."}]},
+    "standard": {"bob": "b1"},
+}), encoding="utf-8")
+jv.saeen()
+d = json.loads(jv._DATEI.read_text(encoding="utf-8"))
+check("Bestand: genau EINE Vorlage kommt dazu", len(d["global"]) == 2,
+      str(len(d["global"])))
+check("und es ist die Antwort-Vorlage",
+      [v for v in d["global"] if v.get("art") == "antwort"][0]["name"]
+      == jv.ANTWORT_VORSCHLAG["name"])
+check("die bestehende bleibt unangetastet",
+      d["global"][0] == {"id": "alt1", "name": "Bestand", "text": "T."})
+check("eigene Vorlagen und der Standard bleiben ebenfalls",
+      d["benutzer"]["bob"][0]["id"] == "b1" and d["standard"]["bob"] == "b1")
+jv.saeen()
+check("ein zweiter Lauf traegt NICHTS mehr nach",
+      len(json.loads(jv._DATEI.read_text(encoding="utf-8"))["global"]) == 2)
+
+# (c) Geloescht heisst geloescht - die Entscheidung des Administrators haelt.
+_antw = [v for v in d["global"] if v.get("art") == "antwort"][0]
+jv.loeschen("bob", _antw["id"], ist_admin=True)
+jv.saeen()
+check("nach dem Loeschen kommt sie NICHT zurueck",
+      not any(v.get("art") == "antwort"
+              for v in json.loads(jv._DATEI.read_text(encoding="utf-8"))["global"]))
+
+# (d) ⚠ EINE BESCHAEDIGTE DATEI WIRD NICHT ANGEFASST. `_laden()` gibt bei einem
+#     Parse-Fehler bewusst einen leeren Bestand zurueck, damit der Bereich nicht
+#     sperrt. Wuerde der Nachtrag darauf schreiben, waere der Bestand des Kunden
+#     weg - obwohl der Administrator ihn noch ansehen wollte.
+jv._DATEI.write_text("{kaputt", encoding="utf-8")
+jv.saeen()
+check("eine beschaedigte Datei bleibt unveraendert",
+      jv._DATEI.read_text(encoding="utf-8") == "{kaputt")
+
+if _sicherung is not None:
+    jv._DATEI.write_bytes(_sicherung)
 
 print("\n%d OK, %d FAIL" % (_ok, _fail))
 sys.exit(1 if _fail else 0)

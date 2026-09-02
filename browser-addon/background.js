@@ -36,7 +36,7 @@ const api = (typeof browser !== "undefined") ? browser : chrome;
  * tun ist.
  * Bei jeder Aenderung an den Nachrichtenfaellen HOCHZAEHLEN. Ein Test
  * vergleicht beide Zahlen. */
-const STAND = 5;
+const STAND = 6;
 
 const EINST = "einstellungen";   // storage.local: { basis }
 const SITZUNG = "sitzung";       // storage.local: { token, benutzer }
@@ -45,8 +45,21 @@ const ERGEBNIS = "ergebnis";     // storage.local: letzter Lauf (siehe unten)
 /* ── AUTOMATIK BEI NEUEM TICKET ─────────────────────────────────────────────
  *
  * Zwei Werte in `einstellungen`:
- *   auto_modus    "" | "zusammenfassung" | "antwort"  – Vorgabe LEER (aus).
- *   auto_gelaufen [key, ...]                          – Ringspeicher, s.u.
+ *   auto_vorlage  "" | <Kennung einer Vorlage>  – Vorgabe LEER (aus).
+ *   auto_gelaufen [key, ...]                    – Ringspeicher, s.u.
+ *
+ * ⚠ BIS 2026-09-02 HIESS DAS FELD `auto_modus` und trug einen Modus
+ * ("zusammenfassung"/"antwort"). Seit die Automatik VORLAGEN anbietet, steht
+ * dort eine Vorlagen-Kennung – und deshalb ein NEUER Feldname statt einer
+ * Umdeutung: ein alter Wert wird schlicht nicht mehr gelesen, die Automatik
+ * ist nach dem Update also aus, bis jemand eine Vorlage waehlt.
+ *
+ * Das ist die fail-closed Richtung und Absicht: der alte Wert liesse sich
+ * nicht verlaesslich auf eine Vorlage abbilden (welche der fuenf
+ * Zusammenfassungs-Vorlagen waere gemeint?), und eine Automatik, die nach
+ * einem Update etwas ANDERES tut als bestellt, waere schlimmer als eine, die
+ * einmal neu eingestellt werden muss. Ein hoeherer `STAND` macht den
+ * Unterschied fuer ein halb aktualisiertes Fenster sichtbar.
  *
  * WARUM DER RING SEIN MUSS: ohne ihn feuert jeder Tab-Wechsel zurueck auf ein
  * schon gesehenes Ticket einen weiteren LLM-Lauf. In der Seitenleiste wechselt
@@ -64,17 +77,25 @@ const ERGEBNIS = "ergebnis";     // storage.local: letzter Lauf (siehe unten)
  * Tab-Wechsel erneut angefragt. Preis: schlaegt der eine automatische Lauf
  * fehl, gibt es keinen zweiten von selbst – der Knopf daneben steht bereit.
  */
-const AUTO_MODI = ["zusammenfassung", "antwort"];
 const AUTO_MERK_MAX = 20;
 
-/** Nimmt nur die zwei erlaubten Modi an – alles andere heisst "aus".
+/* Wie eine Vorlagen-Kennung aussieht: `uuid4().hex[:12]` am Server
+ * (jira_vorlagen.speichern). Geprueft wird die FORM, nicht die Existenz – ob
+ * es die Vorlage noch gibt, weiss nur der Server, und der Hintergrund fragt
+ * ihn dafuer nicht. Das Fenster raeumt eine verschwundene Vorlage auf, sobald
+ * es die Liste geladen hat (popup.js::autoOptionenZeichnen). */
+const AUTO_ID_RE = /^[0-9a-f]{1,32}$/;
+
+/** Nimmt nur eine wohlgeformte Vorlagen-Kennung an – alles andere heisst "aus".
  *
- * Fail-closed wie bei `ansicht`: ein Tippfehler in der Ablage (oder ein Wert
- * aus einer kuenftigen Fassung) darf nicht in einem dritten, undefinierten
- * Zustand enden. "aus" ist die Lage, die niemanden ueberrascht.
+ * Fail-closed wie bei `ansicht`: ein Tippfehler in der Ablage, ein Wert aus
+ * einer kuenftigen Fassung und ausdruecklich auch der ALTE Modus-Wert
+ * ("zusammenfassung"/"antwort") fallen hier heraus. "aus" ist die Lage, die
+ * niemanden ueberrascht.
  */
-function autoModus(wert) {
-  return AUTO_MODI.indexOf(String(wert || "")) >= 0 ? String(wert) : "";
+function autoVorlage(wert) {
+  const w = String(wert || "");
+  return AUTO_ID_RE.test(w) ? w : "";
 }
 
 async function einstLesen() {
@@ -111,8 +132,8 @@ async function einstSchreiben(teil) {
    * das Feld gar nicht kennt) darf nicht in einem dritten, undefinierten
    * Zustand enden - dann oeffnet gar nichts mehr, und niemand sieht warum. */
   if (teil.ansicht !== undefined) neu.ansicht = (teil.ansicht === "leiste") ? "leiste" : "popup";
-  // Siehe AUTO_MODI: unbekannt = aus.
-  if (teil.auto_modus !== undefined) neu.auto_modus = autoModus(teil.auto_modus);
+  // Siehe `autoVorlage`: unbekannt = aus.
+  if (teil.auto_vorlage !== undefined) neu.auto_vorlage = autoVorlage(teil.auto_vorlage);
   /* Der Ring wird hier GEKAPPT, nicht beim Lesen: was einmal in der Ablage
    * steht, waechst sonst mit jedem Ticket weiter – und niemand sieht es. */
   if (teil.auto_gelaufen !== undefined) {
@@ -353,19 +374,24 @@ async function ergebnisSchreiben(wert) {
  * Ticketnummer zweimal durchlassen, und die Zusage "hoechstens ein Lauf je
  * Ticket" waere keine.
  *
- * Gibt `{ modus, starten }` zurueck. `modus` steht auch dann drin, wenn nicht
- * gestartet wird – das Fenster kann so unterscheiden, ob die Automatik aus ist
- * oder ob dieses Ticket bereits gelaufen war.
+ * Gibt `{ vorlage, starten }` zurueck. `vorlage` steht auch dann drin, wenn
+ * nicht gestartet wird – das Fenster kann so unterscheiden, ob die Automatik
+ * aus ist oder ob dieses Ticket bereits gelaufen war.
+ *
+ * WAS die Vorlage tut (Zusammenfassung oder Antwortentwurf), steht hier
+ * NICHT – das entscheidet der Server aus ihrer Art. Der Hintergrund kennt die
+ * Vorlagen gar nicht, und er soll sie auch nicht kennen muessen: eine zweite
+ * Stelle, die aus einer Kennung einen Modus macht, waere eine zweite Wahrheit.
  */
 async function autoStart(key) {
   const e = await einstLesen();
-  const modus = autoModus(e.auto_modus);
-  if (!modus || !key) return { modus, starten: false };
+  const vorlage = autoVorlage(e.auto_vorlage);
+  if (!vorlage || !key) return { vorlage, starten: false };
   const gelaufen = Array.isArray(e.auto_gelaufen) ? e.auto_gelaufen : [];
-  if (gelaufen.indexOf(key) >= 0) return { modus, starten: false };
+  if (gelaufen.indexOf(key) >= 0) return { vorlage, starten: false };
   // Vermerken VOR dem Lauf – siehe AUTO_MERK_MAX.
   await einstSchreiben({ auto_gelaufen: gelaufen.concat([key]) });
-  return { modus, starten: true };
+  return { vorlage, starten: true };
 }
 
 /** Ein Aufruf an Jarvis. Wirft mit KLARTEXT – der Text geht 1:1 ins Popup. */
@@ -502,7 +528,7 @@ api.runtime.onMessage.addListener((nachricht, absender, antworten) => {
                       leiste_moeglich: leisteMoeglich(),
                       // Welche Aktion bei einem neuen Ticket von selbst
                       // startet ("" = keine, das ist die Vorgabe).
-                      auto_modus: autoModus(e.auto_modus),
+                      auto_vorlage: autoVorlage(e.auto_vorlage),
                       // Damit das Fenster merkt, wenn hier noch eine aeltere
                       // Fassung antwortet (siehe STAND).
                       stand: STAND,
@@ -537,7 +563,7 @@ api.runtime.onMessage.addListener((nachricht, absender, antworten) => {
           // und der naechste Benutzer an diesem Rechner hat damit nichts zu tun.
           await ergebnisSchreiben(null);
           /* Aus demselben Grund faellt der Ring: es sind die Ticketnummern des
-           * vorigen Benutzers. Der EINSTELLUNG (auto_modus) passiert nichts –
+           * vorigen Benutzers. Der EINSTELLUNG (auto_vorlage) passiert nichts –
            * die gehoert zu diesem Browser, nicht zu einer Anmeldung. */
           await einstSchreiben({ auto_gelaufen: [] });
           antworten({ ok: true });

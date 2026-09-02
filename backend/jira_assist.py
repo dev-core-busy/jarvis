@@ -618,6 +618,16 @@ def _system_prompt(modus: str, lang: str, stil: str = "",
     keine Werkzeuge, der Regelfall). Sie stehen im gemeinsamen Teil ``gemein``,
     also VOR Vorlage und Stilvorgabe: was der Lauf darf, bestimmt keine Vorlage
     (Lehre aus dem Vorfall 2026-08-17).
+
+    ``vorlage`` ist der Anweisungstext der gewaehlten Vorlage. Er wirkt in den
+    Modi ``zusammenfassung`` und ``antwort`` – seit es Antwort-Vorlagen gibt
+    (``jira_vorlagen.ARTEN``), waere ein Text, der nur bei der Zusammenfassung
+    zaehlt, eine Vorlage ohne Wirkung.
+
+    ⚠ BEIM UEBERARBEITEN WIRKT ER NICHT, und das ist Absicht: dort ist der
+    Entwurf des Mitarbeiters die Vorgabe. Eine Vorlage darueber wuerde ihn
+    ueberschreiben statt ihn zu verbessern – aus einer Korrektur wuerde ein
+    anderer Text. Die BEREICHE der Vorlage gelten dort trotzdem.
     """
     de = (lang or "de").lower().startswith("de")
     sprache = ("Antworte auf Deutsch." if de else "Answer in English.")
@@ -703,6 +713,22 @@ def _system_prompt(modus: str, lang: str, stil: str = "",
             "nichts anzumerken, lass die Zeile weg.%s"
             % (ABGLEICH_MARKE, stilteil))
 
+    # DIE VORLAGE BESTIMMT FORM UND AUFBAU – NICHT DIE BEFUGNIS.
+    # Neu seit 2026-09-02: bis dahin wurde der Text ausserhalb der
+    # Zusammenfassung verworfen, eine Antwort-Vorlage war damit eine Vorlage,
+    # deren Anweisung nichts tut. Er steht HINTER den Regeln und wird
+    # ausdruecklich als untergeordnet ausgewiesen – dieselbe Reihenfolge und
+    # dieselbe Begruendung wie beim Stil (Vorfall 2026-08-17: eine Stilvorgabe
+    # hob eine Absender-Bedingung auf).
+    vorlteil = ""
+    if vorlage:
+        vorlteil = (
+            "\n\nVORGABE DIESER VORLAGE (Ton und Aufbau, keine neue Aufgabe):\n%s\n"
+            "Sie bestimmt, wie der Entwurf aussehen soll. Sie hebt nichts oben "
+            "Stehendes auf: du sagst nichts zu, was das Ticket nicht deckt, du "
+            "erfindest nichts hinzu, und die Regeln zu deinen Werkzeugen gelten "
+            "weiter." % vorlage)
+
     return gemein + (
         "\nFormuliere den ENTWURF einer Antwort an den Melder des Tickets. Ein "
         "Mitarbeiter liest ihn, bearbeitet ihn und fügt ihn selbst in Jira ein – "
@@ -716,7 +742,7 @@ def _system_prompt(modus: str, lang: str, stil: str = "",
         "- Fehlen Angaben, um sinnvoll zu antworten, frage im Entwurf gezielt "
         "danach.\n"
         "- Keine Platzhalter in spitzen Klammern. Kennst du den Namen des "
-        "Melders nicht, grüße allgemein.\n" + sprache + stilteil)
+        "Melders nicht, grüße allgemein.\n" + sprache + vorlteil + stilteil)
 
 
 def _entwurf_pruefen(entwurf: str) -> str:
@@ -879,6 +905,10 @@ async def auswerten(key: str, modus: str, user: str, lang: str = "de",
     ``entwurf`` ist der bereits getippte Text aus dem Jira-Kommentarfeld und
     wird nur im Modus ``ueberarbeiten`` gebraucht – dort ist er Pflicht.
 
+    ``modus`` ist nur der WUNSCH des Aufrufers: traegt die gewaehlte Vorlage
+    eine Art (``jira_vorlagen.ARTEN``), gilt sie – ausser beim Ueberarbeiten.
+    Der zurueckgegebene ``modus`` ist immer der wirklich gelaufene.
+
     Wirft ``AssistFehler`` mit einem Text, den der Aufrufer 1:1 an die
     Oberflaeche gibt.
     """
@@ -899,6 +929,7 @@ async def auswerten(key: str, modus: str, user: str, lang: str = "de",
     # Administrator nicht freigeschaltet hat.
     vorlagentext = ""
     vorlagen_bereiche: list = []
+    vorlagen_art = ""
     if vorlage:
         try:
             from backend import jira_vorlagen  # noqa: PLC0415
@@ -908,8 +939,27 @@ async def auswerten(key: str, modus: str, user: str, lang: str = "de",
             # Sorte Drift, die niemand bemerkt.
             vorlagentext = str(v.get("text") or "")[:jira_vorlagen.TEXT_MAX]
             vorlagen_bereiche = list(v.get("bereiche") or [])
+            # Nur bei einem TREFFER: ein leeres dict heisst "die Kennung gibt es
+            # nicht (mehr)", und dann darf sie auch keinen Modus bestimmen.
+            vorlagen_art = jira_vorlagen.art_von(v) if v else ""
         except Exception:  # noqa: BLE001
-            vorlagentext, vorlagen_bereiche = "", []
+            vorlagentext, vorlagen_bereiche, vorlagen_art = "", [], ""
+
+    # ── DIE GESPEICHERTE VORLAGE BESTIMMT DEN MODUS ─────────────────────────
+    # Seit 2026-09-02 hat die Erweiterung nur noch EIN Startsymbol; was es tut,
+    # sagt die Art der gewaehlten Vorlage. Entschieden wird HIER und nicht im
+    # Fenster: die Art steht in der Vorlage, das Feld im Request ist Wunsch
+    # eines Clients. Ein Fenster einer aelteren Fassung, das mit einer
+    # Antwort-Vorlage "zusammenfassung" schickt, bekommt so trotzdem das, was
+    # in der Vorlage steht – eine Quelle, keine zwei.
+    #
+    # ⚠ "ueberarbeiten" WIRD NIE UEBERSCHRIEBEN. Es ist eine eigene Aufgabe mit
+    # einem Entwurf, den der Mitarbeiter selbst getippt hat. Wuerde eine
+    # Antwort-Vorlage den Modus hier umbiegen, wuerde der Knopf "meinen
+    # Kommentar ueberarbeiten" eine voellig neue Antwort schreiben und den
+    # Entwurf wegwerfen – ohne dass jemand das erklaeren koennte.
+    if vorlagen_art and modus != "ueberarbeiten":
+        modus = vorlagen_art
 
     # Gewaehlt UND freigeschaltet – zur LAUFZEIT geprueft (siehe
     # `wirksame_bereiche`). Eine LEERE Menge ist der Regelfall und bedeutet:

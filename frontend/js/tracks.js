@@ -51,6 +51,14 @@
     }
     function sprache() { return (window._lang === 'en') ? 'en' : 'de'; }
     function token() {
+    /* Abruf-Schluessel statt Sitzungstoken in ?token= (frontend/js/dlkey.js).
+       Rueckfall auf das Sitzungstoken nur, solange das Modul fehlt oder der
+       Schluessel noch unterwegs ist – sonst waere ein Bild/Download tot. */
+    function _dlk() {
+        return (window.JarvisDL && window.JarvisDL.schluessel())
+            || localStorage.getItem('jarvis_token') || '';
+    }
+
         for (var i = 0; i < TOKEN_KEYS.length; i++) {
             var v = localStorage.getItem(TOKEN_KEYS[i]);
             if (v) return v;
@@ -595,7 +603,7 @@
                 // Das Token gehoert an den Link, nicht in gespeicherten Text:
                 // <a download> kann keinen Authorization-Header setzen.
                 return '<a class="st-chip" href="' + esc(f.url) +
-                    (f.url.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(token()) +
+                    (f.url.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(_dlk()) +
                     '" download><span aria-hidden="true">&#10515;</span>' + esc(f.name) + '</a>';
             }).join('');
             var letzter = (j.schritte || [])[(j.schritte || []).length - 1];
@@ -907,7 +915,7 @@
             box.innerHTML = '<div class="st-scroll">' + e.map(function (x) {
                 var chips = (x.dateien || []).map(function (f) {
                     return '<a class="st-chip" href="' + esc(f.url) +
-                        (f.url.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(token()) +
+                        (f.url.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(_dlk()) +
                         '" download><span aria-hidden="true">&#10515;</span>' + esc(f.name) + '</a>';
                 }).join('');
                 return '<div class="st-log-row' + (x.ok ? '' : ' is-bad') + '">' +

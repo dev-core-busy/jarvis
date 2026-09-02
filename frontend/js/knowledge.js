@@ -550,6 +550,14 @@ class JarvisKnowledgeManager {
     _bindFilePreview(box) {
         if (!box) return;
         const token = () => localStorage.getItem('jarvis_token') || '';
+        /* Abruf-Schluessel statt Sitzungstoken in ?token= (frontend/js/dlkey.js).
+       Rueckfall auf das Sitzungstoken nur, solange das Modul fehlt oder der
+       Schluessel noch unterwegs ist – sonst waere ein Bild/Download tot. */
+        function _dlk() {
+            return (window.JarvisDL && window.JarvisDL.schluessel())
+                || localStorage.getItem('jarvis_token') || '';
+        }
+
         const T = (k, d) => (window.t && window.t(k)) || d;
         if (!this._filePreviewCache) this._filePreviewCache = {};
         const cache = this._filePreviewCache;
@@ -581,7 +589,7 @@ class JarvisKnowledgeManager {
         // disp=inline: neue URL, damit alte im Browser gecachte attachment-Antwort
         // (die den PDF-Download ausloeste) nicht wiederverwendet wird.
         const rawUrl = (p) => '/api/knowledge/file_raw?path=' + encodeURIComponent(p)
-            + '&token=' + encodeURIComponent(token()) + '&disp=inline';
+            + '&token=' + encodeURIComponent(_dlk()) + '&disp=inline';
 
         const place = (anchor) => {
             const r = anchor.getBoundingClientRect();

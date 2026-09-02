@@ -311,8 +311,16 @@ window.KbMatrix = (function () {
         }
         const IMG = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico'];
         const _tok = () => localStorage.getItem('jarvis_token') || '';
+    /* Abruf-Schluessel statt Sitzungstoken in ?token= (frontend/js/dlkey.js).
+       Rueckfall auf das Sitzungstoken nur, solange das Modul fehlt oder der
+       Schluessel noch unterwegs ist – sonst waere ein Bild/Download tot. */
+    function _dlk() {
+        return (window.JarvisDL && window.JarvisDL.schluessel())
+            || localStorage.getItem('jarvis_token') || '';
+    }
+
         const rawUrl = (p) => '/api/knowledge/file_raw?path=' + encodeURIComponent(p)
-            + '&token=' + encodeURIComponent(_tok()) + '&disp=inline';
+            + '&token=' + encodeURIComponent(_dlk()) + '&disp=inline';
         function show(cell) {
             cancelHide();
             const path = cell.closest('tr').dataset.path;

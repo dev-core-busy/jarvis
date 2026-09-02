@@ -21,6 +21,14 @@
     const TOKEN_KEYS = ['jarvis_token', 'jarvis_chat_token', 'jarvis_uc_token'];
 
     function _token() {
+    /* Abruf-Schluessel statt Sitzungstoken in ?token= (frontend/js/dlkey.js).
+       Rueckfall auf das Sitzungstoken nur, solange das Modul fehlt oder der
+       Schluessel noch unterwegs ist – sonst waere ein Bild/Download tot. */
+    function _dlk() {
+        return (window.JarvisDL && window.JarvisDL.schluessel())
+            || localStorage.getItem('jarvis_token') || '';
+    }
+
         for (const k of TOKEN_KEYS) {
             const v = localStorage.getItem(k);
             if (v) return v;
@@ -442,7 +450,7 @@
         const body = document.getElementById('jv-iss-body');
         const footer = document.getElementById('jv-iss-footer');
         const attHtml = (issue.attachments || []).map(name => {
-            const url = `/api/issues/${encodeURIComponent(issue.id)}/attachments/${encodeURIComponent(name)}?token=${encodeURIComponent(_token())}`;
+            const url = `/api/issues/${encodeURIComponent(issue.id)}/attachments/${encodeURIComponent(name)}?token=${encodeURIComponent(_dlk())}`;
             const isImg = /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(name);
             const delBtn = canEdit
                 ? `<button class="jv-iss-attach-del" data-name="${_escape(name)}" title="Loeschen">${JarvisIcons.trash()}</button>`

@@ -60,6 +60,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.config import config, REASONING_EFFORT_VALUES
 from backend.security import get_certificate_path
 from backend import security_guard
+from backend import download_key as _dlkey
 from backend import user_sessions as _user_sessions
 from backend import documents as _documents
 from backend import attachments as _attachments
@@ -1707,14 +1708,44 @@ def _kb_strip_editor_fields(user: str, data: dict) -> dict:
         ]}
 
 
+def _query_benutzer(request: Request) -> str | None:
+    """Benutzer aus ``?token=`` – Abruf-Schluessel ZUERST, Sitzungstoken als Alt-Weg.
+
+    Der Abruf-Schluessel (``backend/download_key.py``) ist das, was seit dem
+    2026-09-02 in Datei-Adressen steht. Das Sitzungstoken wird hier weiter
+    angenommen, solange ``download_key_strict`` aus ist – die Android-App baut
+    ihre Anhang-Adresse damit, und ``/docs`` ruft ein Mensch von Hand so auf.
+    **Jede Alt-Nutzung wird protokolliert**: ohne diese Zeile weiss niemand, wann
+    der Schalter gefahrlos umgelegt werden kann.
+    """
+    wert = request.query_params.get("token", "")
+    if not wert:
+        return None
+    if _dlkey.ist_abrufschluessel(wert):
+        # Ein abgelaufener Schluessel faellt hier durch und wird NICHT als
+        # Sitzungstoken nachgeprueft – die Form ist eindeutig.
+        return _dlkey.pruefen(wert)
+    name = verify_token(wert)
+    if name and _dlkey.streng():
+        print(f"[AUTH] Sitzungstoken in ?token= abgewiesen (streng): "
+              f"{request.url.path} [{name}]", flush=True)
+        return None
+    if name:
+        print(f"[AUTH] ALT-WEG: Sitzungstoken in ?token= auf {request.url.path} "
+              f"[{name}] – erwartet wird ein Abruf-Schluessel", flush=True)
+    return name
+
+
 async def require_auth_or_query(request: Request) -> str:
     """Auth via Header ODER ?token= Query-Parameter (fuer img/audio Tags) ODER
-    Agent-API-Key (Header/Query) -> Benutzer ``api`` (native Clients)."""
+    Agent-API-Key (Header/Query) -> Benutzer ``api`` (native Clients).
+
+    ``?token=`` traegt seit dem 2026-09-02 einen **Abruf-Schluessel**, nicht mehr
+    das Sitzungstoken (siehe ``backend/download_key.py``)."""
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
     username = verify_token(token)
     if not username:
-        token = request.query_params.get("token", "")
-        username = verify_token(token)
+        username = _query_benutzer(request)
     if username:
         if _user_must_change(username):
             raise HTTPException(status_code=403, detail="Kennwort muss zuerst geaendert werden.")
@@ -2831,7 +2862,10 @@ async def require_admin_or_query(request: Request) -> str:
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
     username = verify_token(token)
     if not username:
-        username = verify_token(request.query_params.get("token", ""))
+        # Auch hier zuerst der Abruf-Schluessel. Er traegt den Benutzer, die
+        # Admin-Pruefung unten arbeitet also unveraendert weiter – ein
+        # Abruf-Schluessel macht aus niemandem einen Administrator.
+        username = _query_benutzer(request)
     if not username:
         raise HTTPException(status_code=401, detail="Nicht authentifiziert")
     if username not in ALLOWED_USERS and not _user_is_admin(username):
@@ -5754,6 +5788,27 @@ async def get_generated_image(name: str):
         return JSONResponse({"error": "nicht gefunden"}, status_code=404)
     return FileResponse(str(p), media_type=_MEDIA[ext],
                         headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.get("/api/download-key")
+async def download_key_holen(user: str = Depends(require_auth)):
+    """Kurzlebiger Abruf-Schluessel fuer Datei-Adressen (jeder Angemeldete).
+
+    Ersetzt das Sitzungstoken in ``?token=``. Der Client holt ihn EINMAL je
+    Tab und haelt ihn im ``sessionStorage`` – alle vierzehn Stellen, die eine
+    Datei-Adresse bauen, tun das synchron beim Rendern und koennen nicht je
+    Link auf den Server warten (siehe ``backend/download_key.py``).
+
+    Bewusst OHNE Ziel-Parameter: der Schluessel ist an den Benutzer gebunden,
+    nicht an eine Datei. Ein Ziel entgegenzunehmen wuerde eine Bindung
+    vortaeuschen, die es nicht gibt.
+    """
+    try:
+        key, exp = _dlkey.erzeugen(user)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "key": key, "exp": exp,
+                         "ttl_min": _dlkey.ttl_minuten()})
 
 
 @app.get("/api/documents/{name}")

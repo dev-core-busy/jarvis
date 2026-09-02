@@ -6,6 +6,14 @@
 
     var $ = function (id) { return document.getElementById(id); };
     var token = localStorage.getItem('jarvis_token') || '';
+    /* Abruf-Schluessel statt Sitzungstoken in ?token= (frontend/js/dlkey.js).
+       Rueckfall auf das Sitzungstoken nur, solange das Modul fehlt oder der
+       Schluessel noch unterwegs ist – sonst waere ein Bild/Download tot. */
+    function _dlk() {
+        return (window.JarvisDL && window.JarvisDL.schluessel())
+            || localStorage.getItem('jarvis_token') || '';
+    }
+
     var SCOPE = { groups: [], folders: [], is_editor: false, user: '' };
 
     // i18n-Helfer: liefert Übersetzung oder (fallback) den Key; {slots} via .replace().
@@ -633,7 +641,7 @@
             var chips = f.groups.map(function (g) {
                 return '<span class="wi-chip" style="border-color:' + esc(g.color) + ';font-size:0.7rem;">' + esc(g.name) + '</span>';
             }).join(' ');
-            var url = '/api/wissen/file?path=' + encodeURIComponent(f.path) + '&token=' + encodeURIComponent(token);
+            var url = '/api/wissen/file?path=' + encodeURIComponent(f.path) + '&token=' + encodeURIComponent(_dlk());
             return '<div class="wi-item" data-path="' + esc(f.path) + '">'
                 + '<a class="nm wi-flink" href="' + esc(url) + '" target="_blank" rel="noopener" title="' + esc(t('wissen.open_file')) + '">' + esc(f.name) + '</a>'
                 + chips

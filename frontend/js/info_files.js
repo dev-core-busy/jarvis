@@ -20,6 +20,12 @@
     var TOKEN_KEYS = ['jarvis_token', 'jarvis_chat_token', 'jarvis_uc_token'];
 
     function token() {
+    /* Abruf-Schluessel statt Sitzungstoken in ?token= (frontend/js/dlkey.js). */
+    function _dlk() {
+        return (window.JarvisDL && window.JarvisDL.schluessel())
+            || localStorage.getItem('jarvis_token') || '';
+    }
+
         for (var i = 0; i < TOKEN_KEYS.length; i++) {
             var t = null;
             try { t = localStorage.getItem(TOKEN_KEYS[i]); } catch (e) { t = null; }
@@ -167,10 +173,11 @@
                          + '<span class="pt-info-meta">' + esc(hostOf(f.url)) + '</span>'
                          + '</a>';
                 }
-                // Das Token gehoert NUR ins DOM (wie chatlib.js::_withToken):
+                // Der Schluessel gehoert NUR ins DOM (wie chatlib.js::_withToken):
                 // die Liste wird bei jedem Laden neu gebaut, nichts gespeichert.
+                // Seit 2026-09-02 ist das ein Abruf-Schluessel, kein Sitzungstoken.
                 var href = '/api/info_files/' + encodeURIComponent(f.name)
-                         + (tk ? '?token=' + encodeURIComponent(tk) : '');
+                         + (_dlk() ? '?token=' + encodeURIComponent(_dlk()) : '');
                 var inline = !!INLINE[f.kind];
                 var attrs = inline
                     ? 'target="_blank" rel="noopener"'

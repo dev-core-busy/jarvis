@@ -129,6 +129,11 @@
 
         function _withToken(url) {
             if (!/^\/api\/documents\//.test(url || '')) return url;
+            // Abruf-Schluessel statt Sitzungstoken (frontend/js/dlkey.js): ein weitergegebener Link ist damit 15 Minuten Lesezugriff, nicht 30 Tage volle Sitzung.
+            // Faellt das Modul aus (aeltere Seite ohne dlkey.js), bleibt es beim
+            // bisherigen Verhalten – ein toter Download-Chip waere schlechter als
+            // der bekannte Zustand.
+            if (window.JarvisDL) return window.JarvisDL.url(url);
             const tk = _sessToken();
             if (!tk) return url;
             return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(tk);

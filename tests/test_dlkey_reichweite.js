@@ -322,6 +322,77 @@ const DATEIEN = [
         Array.from(eintraege).map((a) => a.getAttribute('href')).join(' | '));
 
     w.close();
+
+    /* ── Teil 5: Meldungen MIT Anhang ────────────────────────────────────────
+     *
+     * GEMELDET am 2026-09-03 (ECHT): "Issues geben den Fehler
+     * 'Fehler: _dlk is not defined' aus und sind nicht mehr anzeigbar, sobald
+     * ein Anhang hinzugefuegt wird." Dieselbe Ursache wie beim Dokumente-Panel,
+     * nur eine andere Aufrufstelle: `_renderDetail` baut die Anhang-Adresse mit
+     * `_dlk()`, und der Wurf landet im `catch` von `_showDetail`, das den GANZEN
+     * Rumpf durch `Fehler: <Meldung>` ersetzt. Die Meldung ist also nicht nur
+     * ein Anhang ohne Bild – die Detailansicht ist weg.
+     *
+     * Ohne Anhang faellt es nicht auf: dann laeuft `_dlk()` gar nicht. Der Fall
+     * braucht deshalb zwingend eine Meldung MIT Anhang. */
+    abschnitt('5. Der zweite gemeldete Fall: Meldung mit Anhang ist anzeigbar');
+
+    const MELDUNG = {
+        id: 'TEST-1', title: 'Test', description: 'Anhang-Probe', kind: 'bug',
+        status: 'offen', created_by: 'jarvis', created_at: '2026-09-03T10:00:00',
+        attachments: ['screenshot.png', 'notiz.txt']
+    };
+
+    const dom2 = new JSDOM(fs.readFileSync(path.join(ROOT, 'frontend/portal.html'), 'utf8'),
+        { url: 'https://localhost/portal', runScripts: 'outside-only' });
+    const w2 = dom2.window;
+    w2.localStorage.setItem('jarvis_token', 'benutzer:1:abc');
+    w2.localStorage.setItem('jarvis_user', 'jarvis');
+    w2.JarvisDL = { schluessel: () => 'JDL1.probe', url: (u) => u + '?token=JDL1.probe' };
+    w2.confirm = () => false;
+    w2.fetch = function (u) {
+        const pfad = String(u).split('?')[0];
+        const gib = (o) => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(o) });
+        if (pfad === '/api/issues/TEST-1') {
+            return gib({ issue: MELDUNG, can_edit: true, can_delete: true,
+                         current_user: 'jarvis', is_admin: true });
+        }
+        if (pfad === '/api/issues/notifications') return gib({ count: 0, items: [] });
+        return gib({});
+    };
+    // icons.js ist auf jeder Seite das erste Skript – `JarvisIcons.trash()` steckt
+    // im Anhang-Markup, ohne das Modul wirft schon der Muelleimer.
+    // i18n.js UND icons.js sind auf jeder Seite geladen; `issues.js` ruft
+    // `window.t()` schon beim Aufbau des Fensters und `JarvisIcons.trash()` im
+    // Anhang-Markup. Beides echt statt gestubbt – ein Test, der weniger laedt
+    // als die Seite, prueft eine Kette, die es nicht gibt.
+    w2.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8'));
+    w2.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/icons.js'), 'utf8'));
+    w2.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/issues.js'), 'utf8'));
+    w2.JarvisIssues.openIssue('TEST-1');
+    await new Promise((r) => setTimeout(r, 60));
+
+    const d2 = w2.document;
+    const rumpf = d2.getElementById('jv-iss-body');
+    const fehler = rumpf ? rumpf.querySelector('.jv-iss-err') : null;
+    pruefe('die Detailansicht ist gerendert', !!rumpf && rumpf.innerHTML.length > 0);
+    pruefe('KEINE Fehlermeldung im Rumpf', !fehler,
+        fehler ? fehler.textContent : '');
+    // Der gemeldete Wortlaut ausdruecklich – damit die Gegenprobe ihn nachweist.
+    pruefe('insbesondere nicht "_dlk is not defined"',
+        !!rumpf && rumpf.innerHTML.indexOf('_dlk is not defined') < 0);
+    const anhaenge = rumpf ? rumpf.querySelectorAll('.jv-iss-attach-item') : [];
+    pruefe(`beide Anhaenge sind gezeichnet`, anhaenge.length === MELDUNG.attachments.length,
+        'gezeichnet: ' + anhaenge.length);
+    const adressen = Array.from(rumpf ? rumpf.querySelectorAll('.jv-iss-attach-item a') : [])
+        .map((a) => a.getAttribute('href') || '');
+    pruefe('jede Anhang-Adresse traegt den Abruf-Schluessel',
+        adressen.length > 0 && adressen.every((u) => /token=JDL1\.probe/.test(u)),
+        adressen.join(' | ').slice(0, 160));
+    pruefe('keine Anhang-Adresse traegt das Sitzungstoken',
+        adressen.length > 0 && !adressen.some((u) => /benutzer%3A1/.test(u)));
+
+    w2.close();
     console.log(`\n\x1b[1mErgebnis: ${ok}/${ok + fail}\x1b[0m`);
     process.exit(fail === 0 ? 0 : 1);
 })();

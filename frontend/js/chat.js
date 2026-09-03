@@ -1160,7 +1160,10 @@
         pdfBtn.className = 'bubble-act-btn';
         pdfBtn.title = (window.t ? window.t('bubble.export_pdf') : 'Als PDF exportieren');
         pdfBtn.setAttribute('aria-label', pdfBtn.title);
-        pdfBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 18 15 15"/></svg>';
+        // Dasselbe Symbol wie der Kontextmenue-Eintrag "Chat als PDF" – EINE
+        // Quelle (chatlib), sonst laufen die beiden beim naechsten Feinschliff
+        // auseinander und derselbe Vorgang traegt zwei Zeichen.
+        pdfBtn.innerHTML = (window.JarvisChatLib?.pdfIcon?.() || '');
         pdfBtn.addEventListener('click', () => _exportBubblePdf(bubble));
         bar.appendChild(pdfBtn);
         return bar;
@@ -1185,6 +1188,47 @@
         setTimeout(() => { try { w.print(); } catch (e) {} }, 350);
     }
 
+    // ── "Chat als PDF": der KOMPLETTE Verlauf der Sitzung ────────────────────
+    // Der Eintrag steht in JEDEM Bubble-Kontextmenue, weil er sich nicht auf die
+    // angeklickte Sprechblase bezieht – von jeder Stelle im Verlauf aus derselbe
+    // Weg. Gebaut wird das Dokument in chatlib (`exportTranscriptPdf`), damit es
+    // NUR EINE Fassung gibt: /userchat hat dieselben `.msg-row`-Strukturen.
+    function _ctxPdfItem() {
+        return {
+            label: (window.t ? window.t('chatpdf.ctx') : 'Chat als PDF'),
+            icon: (window.JarvisChatLib?.pdfIcon?.() || '⤓'),
+            onClick: () => _exportChatPdf(),
+        };
+    }
+
+    function _exportChatPdf() {
+        const lib = window.JarvisChatLib;
+        if (!lib || !lib.exportTranscriptPdf) return;
+        // Genommen wird, was der Benutzer SIEHT. Zeilen fremder Agenten sind per
+        // display:none ausgeblendet (Multi-Agent-Ansicht) – sie stillschweigend
+        // mitzudrucken waere ein Verlauf, den es so nie gab; sie stillschweigend
+        // WEGZULASSEN waere aber genauso falsch: die Anzahl steht deshalb im Kopf
+        // des PDF (gleiche Regel wie bei `cron_list`).
+        const alle = Array.from(messagesEl.querySelectorAll('.msg-row, .date-sep'));
+        const sichtbar = alle.filter(r => !(r.style && r.style.display === 'none'));
+        const versteckt = alle.filter(r => r.classList.contains('msg-row')).length
+                        - sichtbar.filter(r => r.classList.contains('msg-row')).length;
+        const hinweise = [];
+        if (versteckt > 0) {
+            hinweise.push((window.t ? window.t('chatpdf.hidden_agents')
+                                    : '{n} Nachricht(en) anderer Agenten sind nicht enthalten.')
+                          .split('{n}').join(String(versteckt)));
+        }
+        const s = _sessions.find(x => x.id === _activeSid);
+        lib.exportTranscriptPdf({
+            rows: sichtbar,
+            titel: (s && s.title) || (window.t ? window.t('chat.untitled') : 'Chat'),
+            userName: _currentUser || (window.t ? window.t('chatpdf.you') : 'Du'),
+            botName: window.jarvisMarke ? window.jarvisMarke() : 'Jarvis',
+            hinweise: hinweise,
+        });
+    }
+
     // Kontextmenue-Items (Bearbeiten/Kopieren/Loeschen)
     function _buildBubbleCtxItems(row, bubble, role, ev) {
         const items = [];
@@ -1201,6 +1245,7 @@
                 label: (window.t ? window.t('bubble.ctx.copy') : 'Text kopieren'), icon: '⧉',
                 onClick: () => window.JarvisChatLib?.copyTextToClipboard?.(txt),
             });
+            items.push(_ctxPdfItem());
             items.push({
                 label: (window.t ? window.t('bubble.ctx.delete') : 'Löschen'), icon: JarvisIcons.trash(), danger: true,
                 onClick: () => _selCtl.startSelectionDelete(row),
@@ -1217,6 +1262,7 @@
             label: (window.t ? window.t('bubble.ctx.copy') : 'Text kopieren'), icon: '⧉',
             onClick: () => window.JarvisChatLib?.copyTextToClipboard?.(txt),
         });
+        items.push(_ctxPdfItem());
         items.push({
             label: (window.t ? window.t('bubble.ctx.delete') : 'Löschen'), icon: JarvisIcons.trash(), danger: true,
             onClick: () => _selCtl.startSelectionDelete(row),

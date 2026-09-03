@@ -1049,6 +1049,462 @@
         return [];
     }
 
+    /* ───────────────────────────────────────────────────────────── *
+     *  Verlauf als PDF (eigenes Druckfenster)
+     *
+     *  Aufgerufen aus dem Bubble-Kontextmenue ("Chat als PDF"). Gebaut
+     *  wird ein EIGENES Fenster mit eigenem, hellem Druck-CSS – NICHT
+     *  ueber `body.printing-doc` wie die Dokument-Dialoge in /settings:
+     *  der Chat ist eine 100dvh-App mit fixer Titelleiste, scrollender
+     *  Liste, Seitenleiste und Agenten-Panel. Im eigenen Fenster steht
+     *  das Ergebnis fest, ohne dass ein vergessener @media-print-Block
+     *  die halbe Oberflaeche mitdruckt.
+     *
+     *  VIER DINGE, DIE MAN NICHT UEBERGEHEN DARF:
+     *
+     *  1) `open()` MUSS SYNCHRON in der Benutzergeste stehen. Nach dem
+     *     ersten `await` ist die Geste verbraucht, der Browser lehnt das
+     *     Fenster ab – und sichtbar passiert dann GAR NICHTS (dieselbe
+     *     Falle wie bei `sidePanel.open` in der Jira-Erweiterung).
+     *     Deshalb: Fenster zuerst, mit Ladehinweis (eine leere weisse
+     *     Flaeche sieht wie ein Fehler aus), Einbetten danach.
+     *
+     *  2) EIN <canvas> IST IM KLON LEER. `cloneNode(true)` kopiert das
+     *     Element, nicht seinen Bildinhalt – ein Chart.js-Diagramm waere
+     *     im PDF eine leere Flaeche. Es wird deshalb aus dem ORIGINAL
+     *     per `toDataURL()` gelesen und als <img> eingesetzt.
+     *
+     *  3) BILDER WERDEN EINGEBETTET (data:), nicht verlinkt. Zwei
+     *     Gruende, jeder allein hinreichend: der Abruf-Schluessel in
+     *     `/api/documents/...?token=JDL1...` gilt 15 Minuten – wer den
+     *     Druckdialog liegen laesst, druckt sonst leere Rahmen; und der
+     *     Druck startet nicht zuverlaessig erst nach dem Bildladen.
+     *     Schlaegt das Einbetten fehl, bleibt die absolute URL als
+     *     Rueckfall stehen und das PDF SAGT, wie viele Bilder betroffen
+     *     sind – ein stilles Loch waere schlimmer als der Hinweis.
+     *
+     *  4) DER GRUND UNTER DIAGRAMM UND SCHAUBILD FOLGT DEM THEMA.
+     *     Beide werden theme-abhaengig gerendert (charts.js liest
+     *     --bg-secondary, mermaid_blocks.js waehlt 'dark'/'default'):
+     *     im dunklen Thema ist die Schrift HELL. Pauschal Weiss zu
+     *     unterlegen – so macht es das Kopieren in die Zwischenablage –
+     *     ergaebe hier ein unlesbares Bild. Genommen wird deshalb die
+     *     GEMESSENE Hintergrundfarbe des Blocks.
+     * ───────────────────────────────────────────────────────────── */
+
+    // Deckel. Ohne sie sprengt ein Verlauf mit 200 Bildern den Speicher des
+    // Druckfensters; ueberzaehlige Bilder bleiben verlinkt statt eingebettet.
+    var PDF_MAX_BILDER = 60;
+    var PDF_MAX_BYTES  = 25 * 1024 * 1024;
+    var PDF_WARTEN_MS  = 5000;   // Deckel fuers Warten auf das Bildladen
+
+    /* Was im Druck nichts zu suchen hat: Bedienelemente und Abspieler.
+     * `style` steht ABSICHTLICH NICHT drin – ein Mermaid-<svg> traegt sein
+     * eigenes <style>, ohne das ist das Schaubild farblos. */
+    var PDF_WEG = [
+        '.bubble-actions', '.msg-edit-btn', '.msg-retry-btn', '.jv-msg-check',
+        '.jv-bubble-edit-btn', '.jarvis-chart-tools', '.uc-ig-more',
+        'button', 'input', 'audio', 'video', 'script',
+    ].join(',');
+
+    var _PDF_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"'
+        + ' stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+        + '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>'
+        + '<polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/>'
+        + '<polyline points="9 15 12 18 15 15"/></svg>';
+
+    function _cssWert(name, fallback) {
+        try {
+            var v = global.getComputedStyle(document.body).getPropertyValue(name);
+            return (v || '').trim() || fallback;
+        } catch (_) { return fallback; }
+    }
+
+    /* Gemessener Hintergrund eines Blocks. Transparent zaehlt NICHT als Farbe –
+     * sonst legt man Schwarz-auf-Transparent auf weisses Papier und wundert
+     * sich ueber ein leeres Rechteck. */
+    function _pdfGrund(el) {
+        var kette = [];
+        var n = el;
+        while (n && n.nodeType === 1 && kette.length < 6) { kette.push(n); n = n.parentNode; }
+        for (var i = 0; i < kette.length; i++) {
+            var c = '';
+            try { c = global.getComputedStyle(kette[i]).backgroundColor || ''; } catch (_) { c = ''; }
+            if (c && !/^(transparent|rgba\(0,\s*0,\s*0,\s*0\))$/.test(c.replace(/\s+/g, ' ').trim())) return c;
+        }
+        return _cssWert('--bg-secondary', '#ffffff');
+    }
+
+    /* Diagramm als PNG-Data-URL, mit dem gemessenen Grund darunter (siehe (4)). */
+    function _pdfCanvasBild(canvas) {
+        var grund = _pdfGrund(canvas.closest ? (canvas.closest('.jarvis-chart') || canvas) : canvas);
+        var c = document.createElement('canvas');
+        c.width = Math.max(1, canvas.width);
+        c.height = Math.max(1, canvas.height);
+        var ctx = c.getContext('2d');
+        ctx.fillStyle = grund;
+        ctx.fillRect(0, 0, c.width, c.height);
+        ctx.drawImage(canvas, 0, 0);
+        return c.toDataURL('image/png');
+    }
+
+    function _pdfZeit(row) {
+        var t = row.querySelector('.msg-time');
+        if (!t) return '';
+        // Bei Benutzer-Zeilen stehen im Zeitfeld auch Wiederholen- und
+        // Bearbeiten-Knopf. Am Klon entfernt, dann bleibt genau die Uhrzeit.
+        var k = t.cloneNode(true);
+        k.querySelectorAll('button').forEach(function (b) { b.remove(); });
+        return (k.textContent || '').replace(/\s+/g, ' ').trim();
+    }
+
+    /* Baut aus den uebergebenen Zeilen ein SAUBERES Druck-Markup.
+     * Bewusst eigene Klassen statt der Chat-Klassen: das Druckfenster laedt
+     * chat.css nicht, und eine halb uebernommene Sprechblasen-Optik saehe
+     * schlechter aus als ein schlichtes Protokoll.
+     * Synchron und ohne Netzzugriff – dadurch in einem Test messbar. */
+    function transcriptToPrintDom(rows, opts) {
+        opts = opts || {};
+        var liste = Array.prototype.slice.call(rows || []);
+        var wurzel = document.createElement('div');
+        wurzel.className = 'jv-pdf-verlauf';
+        var stats = { nachrichten: 0, diagramme: 0, schaubilder: 0, bilder: 0, trenner: 0 };
+        var botName  = opts.botName  || (global.jarvisMarke ? global.jarvisMarke() : 'Jarvis');
+        var userName = opts.userName || _tt('chatpdf.you', 'Du');
+
+        for (var i = 0; i < liste.length; i++) {
+            var row = liste[i];
+            if (!row || row.nodeType !== 1 || !row.classList) continue;
+
+            if (row.classList.contains('date-sep')) {
+                var d = document.createElement('div');
+                d.className = 'jv-pdf-datum';
+                d.textContent = (row.textContent || '').trim();
+                wurzel.appendChild(d);
+                stats.trenner++;
+                continue;
+            }
+            if (!row.classList.contains('msg-row')) continue;
+            var bubble = row.querySelector('.msg-bubble');
+            if (!bubble) continue;
+
+            var istUser = row.classList.contains('user');
+            var art = document.createElement('article');
+            art.className = 'jv-pdf-msg ' + (istUser ? 'user' : 'bot');
+
+            var kopf = document.createElement('div');
+            kopf.className = 'jv-pdf-kopf';
+            var wer = document.createElement('span');
+            wer.className = 'jv-pdf-wer';
+            wer.textContent = istUser ? userName : botName;
+            var wann = document.createElement('span');
+            wann.className = 'jv-pdf-wann';
+            wann.textContent = _pdfZeit(row);
+            kopf.appendChild(wer);
+            kopf.appendChild(wann);
+            art.appendChild(kopf);
+
+            var rumpf = document.createElement('div');
+            rumpf.className = 'jv-pdf-body';
+            var klon = bubble.cloneNode(true);
+            _pdfAufraeumen(bubble, klon, stats);
+            while (klon.firstChild) rumpf.appendChild(klon.firstChild);
+            art.appendChild(rumpf);
+
+            var st = row.querySelector('.msg-stats');
+            if (st && (st.textContent || '').trim()) {
+                var sz = document.createElement('div');
+                sz.className = 'jv-pdf-stats';
+                sz.textContent = st.textContent.trim();
+                art.appendChild(sz);
+            }
+
+            wurzel.appendChild(art);
+            stats.nachrichten++;
+        }
+        return { el: wurzel, stats: stats };
+    }
+
+    /* Klon druckfertig machen. `orig` ist noetig, weil der Bildinhalt eines
+     * <canvas> nur dort vorliegt (siehe (2)). Die Reihenfolge von
+     * `querySelectorAll` ist in Original und Klon dieselbe – deshalb genuegt
+     * der Index, ohne das Original anzufassen. */
+    function _pdfAufraeumen(orig, klon, stats) {
+        stats = stats || {};
+        klon.querySelectorAll(PDF_WEG).forEach(function (el) { el.remove(); });
+
+        var oc = orig.querySelectorAll('canvas');
+        var kc = klon.querySelectorAll('canvas');
+        for (var j = 0; j < kc.length; j++) {
+            var ersatz = null;
+            try {
+                var q = oc[j];
+                if (q && q.width && q.toDataURL) {
+                    var img = document.createElement('img');
+                    img.className = 'jv-pdf-bild';
+                    img.setAttribute('src', _pdfCanvasBild(q));
+                    ersatz = img;
+                }
+            } catch (_) { ersatz = null; }
+            if (!ersatz) {
+                // Ehrlicher Platzhalter statt einer leeren Flaeche: sonst haelt
+                // der Leser das PDF fuer vollstaendig.
+                ersatz = document.createElement('div');
+                ersatz.className = 'jv-pdf-fehlt';
+                ersatz.textContent = _tt('chatpdf.chart_missing', '[Diagramm nicht uebernommen]');
+            }
+            if (kc[j].parentNode) kc[j].parentNode.replaceChild(ersatz, kc[j]);
+            stats.diagramme = (stats.diagramme || 0) + 1;
+        }
+
+        // Schaubild (Mermaid-SVG): bleibt als SVG – das druckt scharf. Nur der
+        // Grund muss mit, sonst steht helle Schrift auf weissem Papier.
+        var os = orig.querySelectorAll('.jarvis-mermaid');
+        var ks = klon.querySelectorAll('.jarvis-mermaid');
+        for (var m = 0; m < ks.length; m++) {
+            try { ks[m].style.background = _pdfGrund(os[m] || ks[m]); } catch (_) {}
+            ks[m].style.padding = '8px';
+            ks[m].style.borderRadius = '8px';
+            stats.schaubilder = (stats.schaubilder || 0) + 1;
+        }
+
+        klon.querySelectorAll('img').forEach(function (im) {
+            im.classList.add('jv-pdf-bild');
+            im.removeAttribute('loading');
+            im.removeAttribute('onload');
+            stats.bilder = (stats.bilder || 0) + 1;
+        });
+        return klon;
+    }
+
+    function _blobDataUrl(blob) {
+        return new Promise(function (res, rej) {
+            try {
+                var fr = new FileReader();
+                fr.onload = function () { res(String(fr.result || '')); };
+                fr.onerror = function () { rej(new Error('FileReader')); };
+                fr.readAsDataURL(blob);
+            } catch (e) { rej(e); }
+        });
+    }
+
+    /* Bilder als data:-URI einbetten (siehe (3)). Rueckgabe: wie viele
+     * eingebettet und wie viele nur verlinkt sind – die zweite Zahl gehoert
+     * ins PDF, nicht in die Konsole. */
+    async function _pdfBilderEinbetten(el) {
+        var imgs = Array.prototype.slice.call(el.querySelectorAll('img'));
+        var eingebettet = 0, verlinkt = 0, bytes = 0;
+        for (var i = 0; i < imgs.length; i++) {
+            var im = imgs[i];
+            var src = im.getAttribute('src') || '';
+            if (!src) { im.remove(); continue; }
+            if (/^data:/.test(src)) { eingebettet++; continue; }
+            if (eingebettet >= PDF_MAX_BILDER || bytes >= PDF_MAX_BYTES) {
+                im.setAttribute('src', _absolut(src)); verlinkt++; continue;
+            }
+            try {
+                var r = await fetch(_absolut(src), { credentials: 'same-origin' });
+                if (!r || !r.ok) throw new Error('HTTP ' + (r && r.status));
+                var b = await r.blob();
+                bytes += (b && b.size) || 0;
+                im.setAttribute('src', await _blobDataUrl(b));
+                eingebettet++;
+            } catch (e) {
+                // Rueckfall aufs Netz: solange der Abruf-Schluessel gilt, kommt
+                // das Bild noch an. Gezaehlt wird es trotzdem als "nicht sicher".
+                im.setAttribute('src', _absolut(src));
+                verlinkt++;
+            }
+        }
+        return { eingebettet: eingebettet, verlinkt: verlinkt };
+    }
+
+    /* Druck-CSS des Fensters. Akzentfarbe wird aus der laufenden Oberflaeche
+     * GEMESSEN – damit folgt das PDF dem Branding, ohne es zu kopieren. */
+    function _pdfStil(akzent) {
+        return '@page{margin:16mm 14mm;}'
+            + 'html,body{background:#fff;}'
+            + 'body{font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;'
+            + 'line-height:1.55;color:#111;margin:0 auto;max-width:860px;padding:24px 18px 40px;'
+            + '-webkit-print-color-adjust:exact;print-color-adjust:exact;}'
+            + '.jv-pdf-bar{display:flex;gap:10px;align-items:center;margin-bottom:18px;}'
+            + '.jv-pdf-bar button{font:inherit;padding:7px 14px;border-radius:8px;border:1px solid ' + akzent + ';'
+            + 'background:' + akzent + ';color:#fff;cursor:pointer;}'
+            + '.jv-pdf-bar span{color:#555;font-size:.85rem;}'
+            + '.jv-pdf-titel{font-size:1.35rem;font-weight:700;margin:0 0 4px;}'
+            + '.jv-pdf-meta{color:#555;font-size:.85rem;margin:0 0 4px;}'
+            + '.jv-pdf-warn{color:#8a4b00;font-size:.85rem;margin:2px 0 0;}'
+            + '.jv-pdf-head{border-bottom:2px solid ' + akzent + ';padding-bottom:10px;margin-bottom:18px;}'
+            + '.jv-pdf-datum{text-align:center;color:#555;font-size:.8rem;margin:18px 0 10px;'
+            + 'border-top:1px solid #ddd;padding-top:8px;}'
+            + '.jv-pdf-msg{margin:0 0 15px;padding:2px 0 2px 12px;border-left:3px solid #cbd5e1;}'
+            + '.jv-pdf-msg.user{border-left-color:' + akzent + ';}'
+            /* NUR der Kopf wird zusammengehalten. `break-inside:avoid` auf die
+               ganze Nachricht wuerde eine lange Antwort auf die naechste Seite
+               schieben und halbe Seiten leer lassen. */
+            + '.jv-pdf-kopf{display:flex;gap:8px;align-items:baseline;margin-bottom:3px;'
+            + 'break-after:avoid;page-break-after:avoid;}'
+            + '.jv-pdf-wer{font-weight:700;font-size:.9rem;}'
+            + '.jv-pdf-wann{color:#666;font-size:.75rem;}'
+            + '.jv-pdf-stats{color:#666;font-size:.72rem;margin-top:3px;}'
+            + '.jv-pdf-body>*:first-child{margin-top:0;}'
+            + '.jv-pdf-body>*:last-child{margin-bottom:0;}'
+            /* max-height ist kein Schoenheitswert: ein hohes Bild plus
+               `break-inside:avoid` schiebt sich auf die naechste Seite und
+               laesst die halbe davor LEER – gemessen an einem echten Export. */
+            + 'img,svg,.jarvis-mermaid,.jv-pdf-bild{max-width:100%;height:auto;'
+            + 'max-height:16cm;break-inside:avoid;page-break-inside:avoid;}'
+            + 'pre{background:#f4f4f5;border-radius:8px;padding:12px;white-space:pre-wrap;'
+            + 'word-break:break-word;break-inside:avoid;page-break-inside:avoid;}'
+            + 'code{background:#f4f4f5;border-radius:4px;padding:1px 4px;}'
+            + 'pre code{padding:0;background:none;}'
+            + 'table{border-collapse:collapse;width:100%;break-inside:avoid;page-break-inside:avoid;}'
+            + 'td,th{border:1px solid #ccc;padding:5px 9px;text-align:left;}'
+            + 'a{color:#1d4ed8;word-break:break-all;}'
+            + 'h1,h2,h3{line-height:1.25;break-after:avoid;page-break-after:avoid;}'
+            + 'blockquote{border-left:3px solid #ddd;margin:8px 0;padding:2px 0 2px 10px;color:#333;}'
+            + '.jv-pdf-fehlt{color:#8a4b00;font-size:.85rem;font-style:italic;}'
+            + '.jv-pdf-laden{color:#555;}'
+            + '@media print{.jv-pdf-bar{display:none;}}';
+    }
+
+    function _pdfSkelett(titel, akzent, ladeText) {
+        return '<!doctype html><html lang="' + (global._lang === 'en' ? 'en' : 'de') + '"><head>'
+            + '<meta charset="utf-8">'
+            // Ohne <base> loesen relative Adressen (Bilder, die nicht eingebettet
+            // werden konnten) gegen "about:blank" auf und sind damit tot.
+            + '<base href="' + escapeHtml(global.location.origin + '/') + '">'
+            + '<title>' + escapeHtml(titel) + '</title>'
+            + '<style>' + _pdfStil(akzent) + '</style></head><body>'
+            + '<p class="jv-pdf-laden" id="jv-pdf-laden">' + escapeHtml(ladeText) + '</p>'
+            + '<div id="jv-pdf-wurzel"></div></body></html>';
+    }
+
+    /* Warten, bis alle Bilder im Druckfenster wirklich da sind. Ohne das
+     * druckt Chrome gelegentlich leere Rahmen. MIT DECKEL – ein einzelnes
+     * totes Bild darf den Druck nicht dauerhaft verhindern. */
+    function _pdfBilderFertig(w) {
+        var imgs = Array.prototype.slice.call(w.document.images || []);
+        var offen = imgs.filter(function (i) { return !i.complete; });
+        if (!offen.length) return Promise.resolve();
+        return new Promise(function (res) {
+            var rest = offen.length;
+            var fertig = function () { if (--rest <= 0) res(); };
+            offen.forEach(function (i) {
+                i.addEventListener('load', fertig, { once: true });
+                i.addEventListener('error', fertig, { once: true });
+            });
+            // Der Timer gehoert dem DRUCKFENSTER, nicht dieser Seite: schliesst
+            // der Benutzer es, verfaellt er mit, statt ins Leere zu laufen.
+            (w.setTimeout || setTimeout)(res, PDF_WARTEN_MS);
+        });
+    }
+
+    /**
+     * Den uebergebenen Verlauf als PDF anbieten (Druckfenster).
+     *
+     * opts = {
+     *   rows,                 // DOM-Zeilen (.msg-row / .date-sep) in Anzeigereihenfolge
+     *   titel,                // Sitzungstitel – wird auch der Fenstertitel und
+     *                         //   damit Chromes Vorschlag fuer den Dateinamen
+     *   botName, userName,    // Beschriftung der Sprecher
+     *   hinweise: [string],   // Zeilen, die im Kopf stehen muessen (z.B. was FEHLT)
+     * }
+     */
+    async function exportTranscriptPdf(opts) {
+        opts = opts || {};
+        var rows = Array.prototype.slice.call(opts.rows || []);
+        var hatNachricht = rows.some(function (r) {
+            return r && r.classList && r.classList.contains('msg-row') && r.querySelector('.msg-bubble');
+        });
+        if (!hatNachricht) {
+            _toast(_tt('chatpdf.empty', 'Dieser Verlauf ist leer – es gibt nichts zu exportieren.'), true);
+            return false;
+        }
+
+        var titel = (opts.titel || _tt('chatpdf.fallback_title', 'Chat')).trim()
+                 || _tt('chatpdf.fallback_title', 'Chat');
+        var stand = new Date();
+        var datei = titel + ' – ' + stand.toLocaleDateString();
+        var akzent = _cssWert('--accent', '#6366f1');
+
+        // (1) Fenster ZUERST, synchron. Kein await davor!
+        var w = null;
+        try { w = global.open('', '_blank'); } catch (_) { w = null; }
+        if (!w) {
+            _toast(_tt('bubble.popup_blocked', 'Bitte Pop-ups erlauben, um als PDF zu exportieren.'), true);
+            return false;
+        }
+        try {
+            w.document.write(_pdfSkelett(datei, akzent,
+                _tt('chatpdf.prep', 'Das PDF wird vorbereitet …')));
+            w.document.close();
+        } catch (e) {
+            _toast(_tt('chatpdf.failed', 'Der PDF-Export ist fehlgeschlagen.'), true);
+            return false;
+        }
+
+        var gebaut = transcriptToPrintDom(rows, opts);
+        var bilder = { eingebettet: 0, verlinkt: 0 };
+        try { bilder = await _pdfBilderEinbetten(gebaut.el); } catch (_) {}
+
+        var hinweise = (opts.hinweise || []).slice();
+        if (bilder.verlinkt > 0) {
+            hinweise.push(_tt('chatpdf.img_linked',
+                '{n} Bild(er) konnten nicht eingebettet werden – sie fehlen im PDF womöglich.')
+                .split('{n}').join(String(bilder.verlinkt)));
+        }
+
+        try {
+            var d = w.document;
+            var laden = d.getElementById('jv-pdf-laden');
+            if (laden) laden.remove();
+
+            var bar = d.createElement('div');
+            bar.className = 'jv-pdf-bar';
+            var btn = d.createElement('button');
+            btn.type = 'button';
+            btn.textContent = _tt('chatpdf.print_btn', 'Drucken / Als PDF speichern');
+            btn.addEventListener('click', function () { try { w.print(); } catch (_) {} });
+            var tip = d.createElement('span');
+            tip.textContent = _tt('chatpdf.hint', 'Im Druckdialog „Als PDF speichern" wählen.');
+            bar.appendChild(btn);
+            bar.appendChild(tip);
+
+            var kopf = d.createElement('div');
+            kopf.className = 'jv-pdf-head';
+            var h = d.createElement('p');
+            h.className = 'jv-pdf-titel';
+            h.textContent = titel;
+            kopf.appendChild(h);
+            var meta = d.createElement('p');
+            meta.className = 'jv-pdf-meta';
+            meta.textContent = _tt('chatpdf.exported', 'Exportiert am {d}').split('{d}').join(stand.toLocaleString())
+                + ' · ' + _tt('chatpdf.msgs', '{n} Nachrichten').split('{n}').join(String(gebaut.stats.nachrichten));
+            kopf.appendChild(meta);
+            hinweise.forEach(function (txt) {
+                if (!txt) return;
+                var p = d.createElement('p');
+                p.className = 'jv-pdf-warn';
+                p.textContent = txt;
+                kopf.appendChild(p);
+            });
+
+            var ziel = d.getElementById('jv-pdf-wurzel') || d.body;
+            ziel.parentNode.insertBefore(bar, ziel);
+            ziel.parentNode.insertBefore(kopf, ziel);
+            // importNode: der Baum gehoert einem ANDEREN Dokument.
+            ziel.appendChild(d.importNode(gebaut.el, true));
+        } catch (e) {
+            _toast(_tt('chatpdf.failed', 'Der PDF-Export ist fehlgeschlagen.'), true);
+            return false;
+        }
+
+        await _pdfBilderFertig(w);
+        try { w.focus(); w.print(); } catch (_) { /* der Knopf im Fenster bleibt */ }
+        return true;
+    }
+
     /* ── Namespace exponieren ─────────────────────────────────── */
     global.JarvisChatLib = {
         escapeHtml: escapeHtml,
@@ -1072,5 +1528,8 @@
         mediaCtxItems: mediaCtxItems,
         copyElementAsImage: copyElementAsImage,
         installAttachmentDrag: installAttachmentDrag,
+        exportTranscriptPdf: exportTranscriptPdf,
+        transcriptToPrintDom: transcriptToPrintDom,
+        pdfIcon: function () { return _PDF_SVG; },
     };
 })(typeof window !== 'undefined' ? window : this);

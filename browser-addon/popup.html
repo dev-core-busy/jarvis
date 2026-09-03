@@ -404,10 +404,33 @@
          Das Zahnrad ist DASSELBE Zeichen wie am Vorlagen-Knopf – zwei Zahnräder
          in verschiedener Darstellung sähen nach einem Fehler aus. Es trägt
          keine eigene Aussage und ist für Hilfsmittel deshalb versteckt. -->
+    <!-- ⚠ DIE UEBERSCHRIFT IST EIN <button>, kein klickbares <h2>. Ein <h2>
+         ist von sich aus weder fokussierbar noch als Bedienelement erkennbar –
+         der Abschnitt waere mit der Tastatur nicht aufklappbar.
+         ⚠ UND ER TRAEGT `data-ohne-ticket`. Die Ticket-Sperre sperrt pauschal
+         JEDEN <button> ohne dieses Attribut (fail-closed, popup.js::
+         knoepfeAktualisieren). Ohne es waere der ganze Abschnitt auf einem Tab
+         ohne erkanntes Ticket UNERREICHBAR – genau der Fehler, der am
+         2026-08-31 fuer das Zahnrad der Vorlagen gemeldet wurde: eine
+         Einstellung dieses Browsers hat mit dem offenen Tab nichts zu tun. -->
     <div class="abschnitt">
       <h2 class="abschnitt-titel">
-        <span aria-hidden="true">⚙</span> Einstellungen
+        <button type="button" id="btn-einst" class="abschnitt-knopf"
+                aria-expanded="false" aria-controls="einst-inhalt"
+                data-ohne-ticket>
+          <span aria-hidden="true">⚙</span>
+          <span class="abschnitt-wort">Einstellungen</span>
+          <span class="abschnitt-pfeil" id="einst-pfeil" aria-hidden="true">▸</span>
+        </button>
       </h2>
+
+      <!-- Startet ZU und der Zustand wird gemerkt (storage.local, Feld
+           `einst_offen`). Die Einstellungen werden einmal getroffen und gelten
+           darueber hinaus; sie muessen nicht bei jedem Oeffnen Platz kosten.
+           Der Seitenleisten-Schalter bleibt bewusst DRAUSSEN (siehe unten) –
+           er muss auch ohne Anmeldung erreichbar sein, dieser Abschnitt liegt
+           im Arbeitsbereich. -->
+      <div id="einst-inhalt" hidden>
 
     <!-- AUTOMATIK BEI NEUEM TICKET.
          Bewusst KEIN Knopf, sondern eine Einstellung: sie gilt über das
@@ -432,6 +455,7 @@
       Läuft höchstens <b>einmal je Ticket</b> und kostet jedes Mal eine
       Auswertung. Ein zweiter Lauf ist ein Klick auf den Knopf.
     </p>
+      </div><!-- /einst-inhalt -->
     </div><!-- /abschnitt Einstellungen -->
 
 

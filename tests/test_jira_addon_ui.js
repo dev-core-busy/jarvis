@@ -391,6 +391,77 @@ section("9) Die Anleitung nennt den ersten Pulldown-Eintrag richtig");
         fb.slice(0, 80));
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+section("10) Die Anleitung nennt die Seitenleiste als Vorgabe (2026-09-03)");
+// ═══════════════════════════════════════════════════════════════════════════
+/* Vorgabe des Nutzers: die Leiste ist die Vorgabe, sofern der Browser sie
+ * kann. Bis 0.8.5 stand hier "oeffnet ein kleines Fenster - so ist es
+ * voreingestellt". Eine Anleitung, die eine andere Vorgabe behauptet als die
+ * wirksame, schickt den Benutzer suchen. */
+{
+  const deVon = I18N.search(/^\s{0,4}de\s*:\s*\{/m);
+  const enVon = I18N.search(/^\s{0,4}en\s*:\s*\{/m);
+  const holen = (block) => {
+    const o = {};
+    const rx = /'(jaddon\.[a-z0-9_]+)':\s*'((?:[^'\\]|\\.)*)'/g;
+    let m;
+    while ((m = rx.exec(block))) o[m[1]] = m[2].replace(/\\'/g, "'");
+    return o;
+  };
+  const DE = holen(I18N.slice(deVon, enVon));
+  const EN = holen(I18N.slice(enVon));
+  check(Object.keys(DE).length > 30 && Object.keys(EN).length > 30,
+        "Positivkontrolle: die jaddon-Schluessel wurden gelesen",
+        Object.keys(DE).length + " / " + Object.keys(EN).length);
+
+  for (const [name, T] of [["DE", DE], ["EN", EN]]) {
+    const p = T["jaddon.view_p"] || "";
+    check(/Seitenleiste|side panel/i.test(p.split(/–|-/)[0] || p),
+          name + ": view_p nennt zuerst die Seitenleiste", p.slice(0, 90));
+    check(/voreingestellt|the default/i.test(p),
+          name + ": und sagt ausdruecklich, dass sie die Vorgabe ist");
+    /* Die Vorgabe gilt NUR, wenn der Browser eine Leiste kennt - das gehoert
+     * in den Text, sonst sucht ein Benutzer ohne Leiste den Fehler bei sich. */
+    check(/sofern|provided/i.test(p),
+          name + ": und dass das am Browser haengt");
+    check(!/kleines Fenster – so ist es voreingestellt/.test(p)
+          && !/opens a small window – that is the default/.test(p),
+          name + ": die alte Vorgabe-Aussage ist weg");
+  }
+  /* ⚠ AUCH IM ENGLISCHEN STEHT DER DEUTSCHE SCHALTERTEXT: das Fenster der
+   * Erweiterung ist einsprachig. Wer hier "Open as side panel" schreibt,
+   * laesst den Leser nach einem Bedienelement suchen, das es nicht gibt -
+   * dieselbe Regel wie bei use_3 (Gloss in Klammern). */
+  check(/Als Seitenleiste öffnen/.test(EN["jaddon.view_p"] || ""),
+        "EN: view_p nennt den Schalter bei SEINEM (deutschen) Namen",
+        (EN["jaddon.view_p"] || "").slice(-90));
+
+  /* ⚠ DAS RUECKFALL-MARKUP IST EINE REGEL UEBER ALLE SCHLUESSEL, nicht nur
+   * ueber use_3. Genau die Luecke hat dieser Lauf am 2026-09-03 gefunden:
+   * `setup_note` ("das Zugangstoken wird bewusst nicht dauerhaft
+   * gespeichert"), `use_note` und `limit_2` ("Sie kann nichts nachschlagen")
+   * standen im Markup noch in ihrer ALTEN, inzwischen falschen Fassung - drei
+   * Aussagen, die ein Leser sieht, bevor i18n laeuft, und von denen zwei das
+   * Gegenteil des heutigen Verhaltens behaupten. */
+  {
+    const rx = new RegExp(
+      '<(\\w+)[^>]*?data-i18n(?:-html)?="(jaddon\\.[a-z0-9_]+)"[^>]*>'
+      + '([\\s\\S]*?)</\\1>', "g");
+    let m, gezaehlt = 0, schief = [];
+    while ((m = rx.exec(HTML))) {
+      const k = m[2], fb = m[3].trim();
+      gezaehlt++;
+      if (!(k in DE)) { schief.push(k + " (kein DE-Text)"); continue; }
+      if (fb !== DE[k]) schief.push(k);
+    }
+    check(gezaehlt > 40, "Positivkontrolle: Rueckfall-Texte gefunden",
+          String(gezaehlt));
+    check(schief.length === 0,
+          "jeder Rueckfall-Text in jira_addon.html ist deckungsgleich mit DE",
+          schief.join(", "));
+  }
+}
+
 console.log("\n" + ok + " OK, " + fail + " FAIL");
 process.exit(fail ? 1 : 0);
 })();

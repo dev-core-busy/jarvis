@@ -20,12 +20,28 @@ was gerade aufgeklappt ist.
 Dahinter läuft **kein Agent**, sondern ein einzelner Modellaufruf ohne Werkzeuge. Der Grund
 steht im Kopf von `backend/jira_assist.py`: in ein Ticket schreibt ein Kunde, was er will.
 
-## Popup oder Seitenleiste (seit 0.3.0)
+## Seitenleiste oder Popup (seit 0.3.0, Vorgabe seit 0.9.0)
 
-Der Klick auf das Symbol öffnet **voreingestellt ein Popup**. Ein Schalter am Fuß des
-Fensters stellt auf **Seitenleiste** um; sie bleibt beim Arbeiten im Ticket offen und
-lässt sich in der Breite ziehen. Ein Popup kann das nicht – der Browser zeichnet es um
-seinen Inhalt und klemmt es auf 800 × 600, eine API zum Bemessen gibt es nicht.
+Der Klick auf das Symbol öffnet **voreingestellt die Seitenleiste** – sofern der Browser
+eine kennt. Sie bleibt beim Arbeiten im Ticket offen und lässt sich in der Breite
+ziehen. Ein Popup kann das nicht – der Browser zeichnet es um seinen Inhalt und klemmt
+es auf 800 × 600, eine API zum Bemessen gibt es nicht. Ein Schalter am Fuß des Fensters
+stellt jederzeit zurück auf **Popup**.
+
+**Die Vorgabe hat bis 0.8.5 „Popup" gelautet** (umgestellt auf Anweisung 2026-09-03).
+Beim Ausrollen ist das eine sichtbare Änderung: wer den Schalter nie angefasst hat,
+bekommt ab dem ersten Klick die Leiste. Wer ausdrücklich „Popup" gewählt hat, behält es –
+`ansichtLesen()` kennt deshalb **drei** Zustände (`leiste` / `popup` / Feld fehlt), nicht
+zwei: eine Vorgabe darf eine Entscheidung nicht überstimmen.
+
+**`leisteMoeglich()` ist Teil der Vorgabe, nicht Beiwerk.** Auf einem Browser ohne
+Leiste leert `ansichtAnwenden` den Popup-Pfad, `onClicked` findet danach keine
+Leisten-API – und der Klick aufs Symbol öffnet **gar nichts**. Fail-safe ist hier die
+schmalere Funktion. Aus demselben Grund bleiben zwei Manifest-Schlüssel unangetastet:
+`action.default_popup` (gilt, bis der Service-Worker das erste Mal lief, und ist der
+Rückfall, falls `setPopup` scheitert) und `sidebar_action.open_at_install: false` –
+Firefox klappte die Leiste sonst schon beim Installieren ungefragt auf, und Chrome kennt
+dafür keine Entsprechung. Die Vorgabe greift in beiden Browsern beim **ersten Klick**.
 
 **Es ist dieselbe `popup.html`.** Eine zweite Oberfläche wäre eine Kopie, und Kopien
 laufen auseinander – dieselbe Begründung, aus der es zwei Manifeste, aber nur eine
@@ -107,9 +123,78 @@ Fenster einer älteren Fassung kann keine Antwort-Vorlage als Zusammenfassung fa
 Ausgenommen ist *Meinen Kommentar überarbeiten* – eine Vorlage darf diese Aufgabe nicht
 umbiegen, sonst würde statt einer Korrektur ein völlig neuer Text entstehen.
 
+## Ein gemerkter Lauf JE TICKET (seit 0.9.0)
+
+Gemeldet: *„nach Reiterwechsel ist die Antwort leider wieder weg (oder das Antwort-Feld einfach
+nur nicht mehr sichtbar?)"*. Im echten Chrome gemessen: **wirklich weg**. Es gab genau **einen**
+Speicherplatz, und der Reiterwechsel rief `felderLeeren` – also die Funktion, die Anzeige *und*
+Ablage abräumt. Beim Zurückwechseln stand das Feld leer da, ohne jede Erklärung; in der
+Seitenleiste (seit 0.9.0 die Vorgabe) passiert das beim normalen Arbeiten ständig.
+
+Der Speicher ist jetzt eine **Abbildung Ticket → Lauf** (`ergebnisse` in `storage.local`), gedeckelt
+auf **fünf** Einträge (`ERGEBNIS_MAX`; verdrängt wird der älteste, ein Eintrag ohne Zeitstempel gilt
+als ältester). Ein vor dem Update gemerkter Lauf wird **einmalig migriert**, der alte Einzelplatz
+danach entfernt.
+
+* **Die Sicherheitszusage bleibt unangetastet und wird strenger:** angezeigt wird nur der Eintrag,
+  dessen `key` dem **offenen** Ticket entspricht. Deshalb eine Abbildung und keine Liste – es gibt
+  keinen Zustand, in dem ein Text zu Vorgang A neben Vorgang B steht. Das Fenster fragt je Ticket
+  (`{art:"ergebnis", key}`) und bekommt einen fremden Entwurf gar nicht mehr zu sehen.
+* **`zustand` liefert das Ergebnis NICHT mehr mit.** Zu dem Zeitpunkt weiß nur das Fenster, welcher
+  Vorgang offen ist (es ermittelt den Tab erst danach). Den „letzten" mitzuschicken wäre genau der
+  Zustand, gegen den die Schranke gebaut ist.
+* **`anzeigeLeeren` vs. `felderLeeren` ist der Kern.** Reiterwechsel → nur Anzeige. Leeren/Reset →
+  auch Ablage, und dann mit Ziel: `{wert:null, key}` nimmt einen Eintrag, `{wert:null, alle:true}`
+  alle. Ein `{wert:null}` **ohne** beides räumt bewusst nichts – so sah der Aufruf vor dem Fix aus.
+* **Der Merk-Timer muss beim Leeren der Anzeige mit.** Wer den Vorschlag bearbeitet hat, hat einen
+  Timer offen, der `_letztes` eine halbe Sekunde später zurückschreibt – ohne `clearTimeout`
+  schriebe er nach dem Wechsel den Text unter dem Schlüssel des **vorigen** Tickets erneut, mit dem
+  Inhalt, den das Feld zufällig gerade hat.
+* **Preis, ausdrücklich:** es liegt mehr Kundentext auf der Platte des Arbeitsplatzes – bis zu fünf
+  Ticket-Entwürfe, bis zum Leeren, Zurücksetzen oder Abmelden. Deshalb der Deckel: ohne ihn wüchse
+  der Bestand mit jedem angesehenen Vorgang weiter, unbemerkt.
+* **Was bleibt:** ein Ticket **ohne** Eintrag zeigt ein leeres Feld und **schweigt** – so sieht
+  jeder frisch geöffnete Vorgang aus, eine Meldung wäre Rauschen. Wird ein Eintrag durch den Deckel
+  verdrängt, ist das von „gab es noch nie" nicht zu unterscheiden.
+
+## Der Abschnitt „⚙ Einstellungen" klappt ein (seit 0.9.0)
+
+Sichtbar bleiben **Zahnrad und Wort**, alles darunter (Pulldown und Hinweis) fällt weg.
+**Startzustand ZU**, der Zustand wird gemerkt (`einst_offen` in `storage.local`). Grund: die
+Einstellungen werden einmal getroffen und gelten über das Fenster hinaus – sie müssen nicht
+bei jedem Öffnen Platz kosten, während darüber die eigentliche Arbeit steht. Gemessen bei
+380 × 600: die Seite wird von 536 auf 434 px kürzer.
+
+Vier Punkte, die man beim Anfassen kennen muss:
+
+* **Die Überschrift ist ein `<button>`, kein klickbares `<h2>`.** Ein `<h2>` ist von sich aus
+  weder fokussierbar noch als Bedienelement erkennbar – der Abschnitt wäre mit der Tastatur
+  nicht aufklappbar. Das CSS nimmt dem Knopf alles Knopfhafte wieder ab und holt Größe,
+  Halbfett und Dämpfung über `font: inherit` aus `.abschnitt-titel`.
+* **Er trägt `data-ohne-ticket`.** Die Ticket-Sperre sperrt pauschal jeden `<button>` ohne
+  dieses Attribut (fail-closed). Ohne es wäre der ganze Abschnitt auf einem Tab **ohne**
+  erkanntes Ticket unerreichbar – genau der Fehler, der am 2026-08-31 für das Zahnrad der
+  Vorlagen gemeldet wurde: eine Einstellung dieses Browsers hat mit dem offenen Tab nichts
+  zu tun.
+* **Das Markup startet mit `hidden` und `aria-expanded="false"`.** Ohne beides blitzte der
+  Abschnitt bei jedem Öffnen kurz auf, bevor der Zustand aus dem Hintergrund da ist.
+* **Der Zustand liegt im Hintergrund, nicht im Fenster.** Das Fenster wird bei jedem Klick
+  daneben zerstört; ein Merker im Modul wäre beim nächsten Öffnen weg, und ein Abschnitt, der
+  sich jedes Mal wieder zuklappt, ist genau die Sorte Bedienelement, die niemand benutzt.
+  `einst_offen` muss deshalb in `einstSchreiben` stehen – ein Feld, das dort fehlt, wird
+  **wortlos** verworfen (ein Test prüft das als Regel).
+
+**Der Seitenleisten-Schalter bleibt DRAUSSEN** (Entscheidung 2026-09-03). Er steht bewusst
+außerhalb von Anmeldung und Arbeitsbereich: wer in der Leiste steht und zurück zum Fenster
+will, muss das auch ohne Konto können – dieser Abschnitt liegt dagegen im Arbeitsbereich.
+In der Leiste steht unter ihm **kein Hinweis** mehr; „Die Breite ziehst du an der Kante der
+Leiste." war eine Auskunft an jemanden, der die Leiste vor sich hat und ihre Kante sieht. Im
+Popup bleibt der Hinweis: dort ist die Wirkung eines Klicks nicht ablesbar.
+
 ## Automatik bei neuem Ticket (seit 0.4.0, Vorlagen seit 0.8.0)
 
-Im Pulldown **Bei neuem Ticket automatisch** lässt sich eine **Vorlage** so einstellen, dass
+Im Pulldown **Bei neuem Ticket automatisch** (unter **⚙ Einstellungen**, eingeklappt) lässt
+sich eine **Vorlage** so einstellen, dass
 sie von selbst startet, sobald ein Ticket erkannt wird. **Vorgabe ist „Nichts"** – jeder Lauf
 kostet eine Auswertung auf dem Server, das darf nicht ungefragt passieren.
 

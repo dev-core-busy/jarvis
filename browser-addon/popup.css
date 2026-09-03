@@ -543,6 +543,55 @@ html.leiste #f-ergebnis {
   color: var(--gedaempft);
 }
 
+/* ── Einklappbarer Abschnitt (Vorgabe 2026-09-03) ──────────────────────────
+ *
+ * ⚠ EIN KNOPF, DER WIE EINE UEBERSCHRIFT AUSSEHEN MUSS. Alles, was ein Browser
+ * einem <button> von sich aus mitgibt (Rahmen, Flaeche, eigene Schrift,
+ * Mittelsatz), wird hier zurueckgenommen – der Abschnitt soll sich einordnen,
+ * nicht mit den Arbeitsknoepfen um Aufmerksamkeit ringen.
+ * `font: inherit` und `color: inherit` holen Groesse, Halbfett und Daempfung
+ * aus `.abschnitt-titel`: so gibt es die Werte genau EINMAL, und ein
+ * spaeterer Feinschliff dort wirkt hier mit.
+ * `width: 100%` ist Absicht – die ganze Zeile ist die Klickflaeche, nicht nur
+ * das Wort. Bewusst NICHT `.btn-*`: die tragen im Projekt ihre eigene
+ * Breiten- und Farbregel (Register). */
+.abschnitt-knopf {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+/* `:focus-visible`, nicht `:focus` – letzteres liesse nach jedem Mausklick
+ * einen Rahmen stehen. */
+.abschnitt-knopf:focus-visible {
+  outline: 2px solid var(--akzent);
+  outline-offset: 2px;
+}
+/* ⚠ `min-width: 0` IST PFLICHT, nicht Kosmetik: ein Flex-Kind schrumpft von
+ * sich aus nicht unter seine Inhaltsbreite – ohne diese Zeile schoebe ein
+ * laengerer Abschnittsname den Pfeil aus dem 380 px breiten Fenster, statt
+ * dass der Text umbricht (Register). */
+.abschnitt-wort {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* Der Pfeil sagt den Zustand als ZEICHEN, nicht nur ueber `aria-expanded`:
+ * eine Klappzeile ohne sichtbare Marke sieht wie eine blosse Ueberschrift aus,
+ * und niemand kommt auf die Idee, sie anzuklicken. */
+.abschnitt-pfeil {
+  flex: 0 0 auto;
+  font-size: 10px;
+  line-height: 1;
+}
+
 /* ── Umschalter Popup ↔ Seitenleiste ───────────────────────────────────────
  * Steht am Fuss und ist bewusst leise gezeichnet: eine Einstellung, die man
  * einmal trifft, darf nicht mit den Arbeitsknoepfen um Aufmerksamkeit ringen.

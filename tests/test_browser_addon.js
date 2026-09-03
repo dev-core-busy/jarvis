@@ -253,8 +253,9 @@ check(/case "abmelden"[\s\S]{0,220}sitzungSchreiben\(\{\}\)/.test(bgOhne),
 // Das Ergebnis ueberlebt das Schliessen des Fensters – ein Popup schliesst
 // beim Wechsel in den Jira-Tab, und eine Auswertung dauert ~13 Sekunden.
 check(/ergebnisSchreiben/.test(bgOhne), "das Ergebnis wird gemerkt");
-check(/case "abmelden"[\s\S]{0,320}ergebnisSchreiben\(null\)/.test(bgOhne),
-      "beim Abmelden geht es mit (es enthaelt Ticketinhalte)");
+check(/case "abmelden"[\s\S]{0,320}ergebnisseLoeschen\(\)/.test(bgOhne),
+      "beim Abmelden gehen ALLE mit (es sind Ticketinhalte des vorigen "
+      + "Benutzers an diesem Rechner)");
 
 // ═══════════════════════════════════════════════════════════════════════════
 section("5) Die injizierte Funktion ist SELBSTSTAENDIG");
@@ -1406,12 +1407,22 @@ section("8) Die Ticketnummer-Erkennung – ausgefuehrt");
             tabs: { onActivated: { addListener() {} },
                     onUpdated: { addListener() {} } },
           };
+          /* ⚠ WIE DER ECHTE HINTERGRUND SEIT 2026-09-03: das Gedaechtnis
+           * liegt JE TICKET, und die Zustands-Antwort liefert es gar nicht
+           * mehr mit (dort ist noch unbekannt, welcher Vorgang offen ist).
+           * Gefragt wird gezielt - und geantwortet wird NUR bei passendem
+           * Schluessel. KEINE BACKTICKS in diesem Vorspann: er steht selbst in
+           * einem Template-Literal und wuerde es beenden (Register, vierter
+           * Fall). */
           async function frage(n) {
             gesendet.push(n);
             if (n && n.art === "zustand") {
               return { ok: true, basis: "https://s.test", angemeldet: true,
-                       stand: (bgStand === undefined) ? STAND : bgStand,
-                       ergebnis: gemerkt };
+                       stand: (bgStand === undefined) ? STAND : bgStand };
+            }
+            if (n && n.art === "ergebnis") {
+              return { ok: true,
+                       ergebnis: (gemerkt && gemerkt.key === n.key) ? gemerkt : null };
             }
             return { ok: true };
           }
@@ -1485,24 +1496,34 @@ section("8) Die Ticketnummer-Erkennung – ausgefuehrt");
     check(r.geloescht === false, 'das Gedaechtnis wird NICHT geloescht');
   }
 
-  // 2) ANDERES Ticket -> leeren.
+  /* 2) ANDERES Ticket -> die ANZEIGE ist leer, das GEDAECHTNIS bleibt.
+   *
+   * ⚠ HIER STAND "und das GEDAECHTNIS ist geloescht (sonst kommt der Text
+   * zurueck)". Genau das war der am 2026-09-03 gemeldete Datenverlust: "nach
+   * Reiterwechsel ist die Antwort leider wieder weg". Dass der Text
+   * zurueckkommt, ist seither die ZUSAGE - er liegt je Ticket, und die
+   * Schranke haelt trotzdem, weil nur der Eintrag zum OFFENEN Ticket
+   * angezeigt wird (das Fenster fragt gezielt danach). */
   {
     const r = await laufMit('XYZ-9', GEMERKT, false);
-    check(r.text === '', 'anderes Ticket: der Text ist weg', r.text);
+    check(r.text === '', 'anderes Ticket: die Anzeige ist leer', r.text);
     check(r.sichtbar === false, 'das Feld ist ausgeblendet');
     check(r.fuss === '', 'die Fusszeile ebenfalls', r.fuss);
     check(r.hinweis === '', 'auch der Zusatzwunsch', r.hinweis);
-    check(r.geloescht === true,
-          'und das GEDAECHTNIS ist geloescht (sonst kommt der Text zurueck)');
-    check(/ABC-1/.test(r.meldung) && /XYZ-9/.test(r.meldung),
-          'die Meldung nennt beide Ticketnummern', r.meldung);
+    check(r.geloescht === false,
+          'das GEDAECHTNIS von ABC-1 bleibt (Zurueckwechseln holt es)');
+    check(r.meldung === '',
+          'und es gibt keine Meldung - ein frisches Ticket sieht so aus',
+          r.meldung);
   }
 
-  // 3) KEIN Ticket im Tab -> ebenfalls leeren.
+  /* 3) KEIN Ticket im Tab -> Anzeige leer, Gedaechtnis bleibt ebenfalls.
+   * Auch das war vorher ein Loeschbefehl: wer aus einem Ticket kurz ins
+   * Intranet wechselte, verlor die Auswertung. */
   {
     const r = await laufMit('', GEMERKT, false);
-    check(r.text === '', 'kein Ticket: der Text ist weg', r.text);
-    check(r.geloescht === true, 'und das Gedaechtnis ebenfalls');
+    check(r.text === '', 'kein Ticket: die Anzeige ist leer', r.text);
+    check(r.geloescht === false, 'das Gedaechtnis bleibt auch hier');
     check(/browse/.test(r.meldung),
           'die Meldung sagt weiterhin, was zu tun ist', r.meldung);
   }
@@ -1530,12 +1551,32 @@ section("8) Die Ticketnummer-Erkennung – ausgefuehrt");
         'und ist verdrahtet');
   /* ⚠ DER LAUFENDE MERK-TIMER MUSS GESTOPPT WERDEN: wer den Vorschlag
    * bearbeitet hat, hat einen Timer offen, der `_letztes` eine halbe Sekunde
-   * spaeter zurueckschreibt - das Gedaechtnis waere sofort wieder da. */
+   * spaeter zurueckschreibt - das Gedaechtnis waere sofort wieder da.
+   *
+   * ⚠ SEIT 2026-09-03 STEHT DAS IN `anzeigeLeeren`, nicht mehr in
+   * `felderLeeren`. Geprueft wird deshalb die KETTE, nicht die Schreibweise:
+   * `felderLeeren` ruft `anzeigeLeeren`, und dort liegen Timer und Merker. Die
+   * frueheren Pruefungen suchten die Zeilen IM Rumpf und meldeten nach dem
+   * Aufteilen einen Fehler, den es nicht gab (Register). */
   const fl = (POPUP_JS.match(/async function felderLeeren\([\s\S]*?\n\}/) || [''])[0];
-  check(/clearTimeout\(_merkTimer\)/.test(fl),
-        'felderLeeren stoppt den laufenden Merk-Timer');
-  check(/wert:\s*null/.test(fl), 'und loescht das Gedaechtnis wirklich');
-  check(/_letztes = null/.test(fl), 'der lokale Merker faellt mit');
+  const al = (POPUP_JS.match(/function anzeigeLeeren\([\s\S]*?\n\}/) || [''])[0];
+  check(!!al, 'popup.js hat anzeigeLeeren()');
+  check(/anzeigeLeeren\(\)/.test(fl),
+        'felderLeeren raeumt die Anzeige ueber anzeigeLeeren ab');
+  check(/clearTimeout\(_merkTimer\)/.test(al),
+        'und dort wird der laufende Merk-Timer gestoppt');
+  check(/wert:\s*null/.test(fl), 'felderLeeren loescht das Gedaechtnis wirklich');
+  check(/_letztes = null/.test(al), 'der lokale Merker faellt mit');
+  /* ⚠ UND DIE GEGENRICHTUNG: `anzeigeLeeren` darf das Gedaechtnis NICHT
+   * anfassen - genau daran hing der gemeldete Datenverlust beim
+   * Reiterwechsel. */
+  check(!/ergebnis_merken/.test(al),
+        'anzeigeLeeren fasst die Ablage NICHT an (Reiterwechsel darf nichts '
+        + 'loeschen)');
+  /* Ein `{wert: null}` OHNE Schluessel raeumt im Hintergrund bewusst nichts -
+   * felderLeeren muss also sagen, WAS weg soll. */
+  check(/alle: true/.test(fl) && /key/.test(fl),
+        'und sagt dabei, ob EIN Eintrag oder alle gemeint sind');
 }
 
 /* ── 9) ZUGRIFFSRECHT VOR ANMELDUNG – der Fix zu "man muss sich 2x anmelden"
@@ -2057,7 +2098,10 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
     const { teile: t2, drin: d2 } = popupTeile(
       // textZuFeld/feldZuText: die Attrappe baut und liest den Feldinhalt damit.
       ["tabWechsel", "textZuFeld", "feldZuText"], ["tabErmitteln", "frage"]);
-    check(d2.has("ticketLageAnwenden") && d2.has("felderLeeren"),
+    /* ⚠ `anzeigeLeeren`, NICHT `felderLeeren`: der Reiterwechsel blendet nur
+     * aus. Erreichte er `felderLeeren`, waere der gemeldete Datenverlust
+     * zurueck - deshalb steht die Gegenrichtung unten als eigene Pruefung. */
+    check(d2.has("ticketLageAnwenden") && d2.has("anzeigeLeeren"),
           "der Schnitt um tabWechsel zieht die Leer-Logik mit",
           [...d2].join(","));
 
@@ -2104,7 +2148,17 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
             let _tabUrl = "https://jira.test/browse/" + (nachKey || "X-1");
             let _windowId = 7, _tabId = 1;
             const api = { permissions: { contains: async () => true } };
-            async function frage(n) { gesendet.push(n); return { ok: true }; }
+            /* Das Gedaechtnis liegt JE TICKET und wird gezielt erfragt -
+             * geantwortet wird nur bei passendem Schluessel, wie im echten
+             * Hintergrund. KEINE BACKTICKS hier (Template-Literal). */
+            async function frage(n) {
+              gesendet.push(n);
+              if (n && n.art === "ergebnis") {
+                return { ok: true,
+                         ergebnis: (gemerkt && gemerkt.key === n.key) ? gemerkt : null };
+              }
+              return { ok: true };
+            }
             async function tabErmitteln() {
               _key = nachKey; el.ticket.textContent = _key || "";
             }
@@ -2128,15 +2182,32 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
     const G = { key: "ABC-1", text: "Sehr geehrte Damen und Herren …",
                 modus: "antwort", zeit: Date.now(), kommentare: 3 };
 
-    // 1) Wechsel auf ein ANDERES Ticket -> leeren, auch im Gedaechtnis.
+    /* 1) Wechsel auf ein ANDERES Ticket -> die ANZEIGE geht, die Ablage
+     *    bleibt (Vorgabe 2026-09-03, gemeldet als "nach Reiterwechsel ist die
+     *    Antwort leider wieder weg").
+     * ⚠ DIE SCHRANKE HAELT WEITERHIN: was im Feld steht, gehoert immer zum
+     *    offenen Ticket - der fremde Entwurf erreicht das Fenster gar nicht,
+     *    weil es je Ticket fragt (die Attrappe antwortet nur bei passendem
+     *    Schluessel, genau wie der Hintergrund). */
     {
       const r = await wechselLauf("ABC-1", "XYZ-9", G, false);
-      check(r.text === "", "Tab-Wechsel auf ein anderes Ticket leert das Feld",
+      check(r.text === "", "Tab-Wechsel auf ein anderes Ticket leert die Anzeige",
             r.text);
-      check(r.sichtbar === false, "und blendet es aus");
-      check(r.geloescht === true, "das Gedaechtnis wird mit geleert");
-      check(/XYZ-9/.test(r.meldung) && /ABC-1/.test(r.meldung),
-            "die Meldung nennt beide Vorgaenge", r.meldung);
+      check(r.sichtbar === false, "und blendet das Feld aus");
+      check(r.geloescht === false,
+            "das Gedaechtnis von ABC-1 bleibt - Zurueckwechseln holt es");
+    }
+    /* 1b) UND ZURUECK: derselbe Lauf mit dem Eintrag zum ZIEL-Ticket zeigt
+     *     ihn wieder. Das ist die eigentliche Zusage; ohne diese Pruefung
+     *     wuerde "loescht nicht" auch von einer Fassung erfuellt, die den Text
+     *     nie wieder findet. */
+    {
+      const Z = { key: "XYZ-9", text: "Antwort zu XYZ-9",
+                  modus: "antwort", zeit: Date.now(), kommentare: 1 };
+      const r = await wechselLauf("ABC-1", "XYZ-9", Z, false);
+      check(r.text === Z.text, "zurueck auf ein Ticket MIT Eintrag: er ist da",
+            r.text);
+      check(r.sichtbar === true, "und das Feld ist sichtbar");
     }
     // 2) Derselbe Vorgang bleibt derselbe - kein Wechsel, nichts passiert.
     {
@@ -2144,11 +2215,12 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
       check(r.text === G.text, "gleiches Ticket: der Text bleibt", r.text);
       check(r.geloescht === false, "und das Gedaechtnis bleibt");
     }
-    // 3) Tab ohne Ticket -> ebenfalls leeren (der Text gehoert nirgendwohin).
+    // 3) Tab ohne Ticket -> Anzeige leer, Ablage bleibt.
     {
       const r = await wechselLauf("ABC-1", "", G, false);
-      check(r.text === "", "Tab ohne Ticket: der Text ist weg");
-      check(r.geloescht === true, "auch hier faellt das Gedaechtnis");
+      check(r.text === "", "Tab ohne Ticket: die Anzeige ist leer");
+      check(r.geloescht === false,
+            "auch ein Ausflug ins Intranet kostet die Auswertung nicht");
     }
     /* 4) WAEHREND EINER LAUFENDEN AUSWERTUNG WIRD NICHT GELEERT. Der Benutzer
      *    wartet auf genau dieses Ergebnis; es wegzuwerfen, weil er nebenbei
@@ -2339,7 +2411,14 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
      * fehlt der Schalter, wurde er ausgeblendet, oder liegt er nur ausserhalb
      * des Sichtfensters? Ein unsichtbares Bedienelement ist unerklaerbar. */
     const az = schneidePopup("ansichtZeigen");
-    check(!!az && /zeile\.hidden = false;/.test(az) && !/hidden = true/.test(az),
+    /* ⚠ GEPRUEFT WIRD DIE ZEILE, NICHT JEDES `hidden` IM RUMPF. Hier stand
+     * `!/hidden = true/` ueber den GANZEN Rumpf - und schlug an, sobald der
+     * HINWEIS-Absatz darin versteckt wird (2026-09-03, Vorgabe "Die Breite
+     * ziehst du an der Kante der Leiste." raus). Der Waechter meldete damit
+     * einen Fehler, den es nicht gab: die Zeile blieb die ganze Zeit sichtbar.
+     * Register - die Eigenschaft messen, nicht ein Vorkommen irgendwo. */
+    check(!!az && /zeile\.hidden = false;/.test(az)
+          && !/zeile\.hidden = true/.test(az),
           "die Ansichts-Zeile bleibt IMMER sichtbar");
     /* ⚠ UND SIE WIRD NICHT GESPERRT. Die Faehigkeitspruefung war eine
      * Vermutung und lag falsch (sie fragte `api.sidePanel`, das es in Chrome
@@ -2779,6 +2858,8 @@ section("11) Ohne Ticket ist alles gesperrt (Vorgabe 2026-08-30)");
     ["jn-nein", "dito fuer die Rueckfrage beim Einfuegen"],
     ["btn-vorlagen", "Vorlagen verwalten braucht kein Ticket (gemeldet 2026-08-31)"],
     ["btn-vorl-speichern", "sonst laesst sich die geoeffnete Box nicht benutzen"],
+    ["btn-einst", "der Einstellungen-Abschnitt gehoert diesem Browser, nicht "
+                  + "dem offenen Tab (2026-09-03)"],
   ]) {
     check(ausnahme.has(id), id + " bleibt bedienbar - " + grund);
   }
@@ -5488,6 +5569,458 @@ section("24) Einstellungen-Abschnitt und die wandernde Meldung");
         "melde() platziert selbst (fail-safe, nicht nur zeige())");
   check(/meldungPlatzieren\(\)/.test(schneidePopup("zeige") || ""),
         "und zeige() ebenfalls - VOR der Meldung, die gleich darauf folgt");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("25) Die Seitenleiste ist die VORGABE (2026-09-03)");
+// ═══════════════════════════════════════════════════════════════════════════
+/* Vorgabe des Nutzers: "Start als 'Seitenleiste' soll bei Browsern Default
+ * Einstellung sein sofern es unterstuetzt wird."
+ *
+ * ⚠ GEMESSEN, NICHT GELESEN. Eine Quelltext-Pruefung ("kommt `leisteMoeglich`
+ * in `ansichtLesen` vor") bliebe gruen, wenn jemand die Reihenfolge dreht oder
+ * einen Zweig ueberspringt - und die Aussage haengt an genau dieser
+ * Reihenfolge: eine ausdrueckliche Wahl muss die Vorgabe SCHLAGEN, nicht
+ * umgekehrt.
+ */
+{
+  const teilBG = (name) => (BG.match(new RegExp(
+    "(?:async )?function " + name + "\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}")) || [null])[0];
+  /* Transitiv sammeln, nicht als gepflegte Liste: die feste Liste hat in
+   * dieser Datei fuenfmal dazu gefuehrt, dass der Lauf mit einem nackten
+   * ReferenceError ABBRACH statt fehlzuschlagen - kein FAIL, keine Zaehlzeile,
+   * der Waechter sah aus, als waere er nie gelaufen (Register). */
+  const sammle = (start) => {
+    const teile = [], drin = new Set(), offen = start.slice();
+    while (offen.length) {
+      const n = offen.shift();
+      if (drin.has(n)) continue;
+      const k = teilBG(n);
+      if (!k) continue;
+      drin.add(n); teile.push(k);
+      for (const t of k.match(/\b[A-Za-z_$][\w$]*(?=\s*\()/g) || []) {
+        if (!drin.has(t) && teilBG(t)) offen.push(t);
+      }
+    }
+    return { code: teile.join("\n"), drin };
+  };
+  const { code, drin } = sammle(["ansichtLesen"]);
+  check(drin.has("ansichtLesen"), "background.js hat ansichtLesen()");
+  check(drin.has("einstLesen") && drin.has("leisteMoeglich"),
+        "der Schnitt zieht einstLesen() und leisteMoeglich() mit",
+        [...drin].join(","));
+  check(drin.has("zweig") && drin.has("_wurzeln"),
+        "und die API-Wurzelsuche darunter");
+  /* Modul-Konstante - faellt aus JEDEM Funktions-Schnitt heraus. Fehlte sie,
+   * warf `einstLesen` einen ReferenceError (Register, sechster Fall). */
+  const EINST_ZEILE = (BG.match(/const EINST = "[^"]+";/) || [""])[0];
+  check(/^const EINST = "/.test(EINST_ZEILE),
+        "der Ablage-Schluessel steht im Schnitt", EINST_ZEILE);
+
+  /* Die Welten werden als ECHTE Globale gestellt (nicht als `api`-Objekt) -
+   * `zweig()` sucht an BEIDEN Wurzeln, und genau diese Aufloesung war 2026-09-02
+   * der gemeldete Fehler. */
+  const lauf = async (gespeichert, kannLeiste) => {
+    const einst = {};
+    if (gespeichert !== undefined) einst.ansicht = gespeichert;
+    const welt = {
+      storage: { local: { get: async (k) => ({ [k]: einst }) } },
+      runtime: { getManifest: () => (kannLeiste
+        ? { side_panel: { default_path: "popup.html" } } : {}) },
+    };
+    // Ohne Leisten-API an den Wurzeln entscheidet der Rueckfall in
+    // leisteMoeglich() - beide Wege muessen "keine Leiste" sagen.
+    const C = kannLeiste ? { sidePanel: { setOptions() {} } } : {};
+    return await new Function("api", "chrome", "browser",
+      EINST_ZEILE + "\n" + code + "\nreturn ansichtLesen();")(welt, C, undefined);
+  };
+
+  check(await lauf(undefined, true) === "leiste",
+        "nichts gewaehlt + Browser kann eine Leiste → LEISTE (die Aenderung)",
+        await lauf(undefined, true));
+  /* ⚠ DAS IST DIE HALBE FEHLERSTELLUNG, DIE ZAEHLT: auf einem Browser ohne
+   * Leiste leert `ansichtAnwenden` den Popup-Pfad, `onClicked` findet danach
+   * keine Leisten-API - und der Klick aufs Symbol oeffnet GAR NICHTS. */
+  check(await lauf(undefined, false) === "popup",
+        "nichts gewaehlt + keine Leiste → Popup (sonst oeffnet der Klick nichts)",
+        await lauf(undefined, false));
+  check(await lauf("popup", true) === "popup",
+        "eine ausdrueckliche Wahl SCHLAEGT die Vorgabe");
+  check(await lauf("leiste", true) === "leiste",
+        "und die ausdrueckliche Leiste bleibt die Leiste");
+  /* Ausdruecklich "leiste" auf einem Browser ohne Leiste bleibt "leiste" -
+   * bewusst. Die Faehigkeitspruefung hat 2026-08-30 nachweislich FALSCH
+   * gemeldet ("dieser Browser kann das nicht" auf einem, der es kann); sie
+   * darf deshalb eine Entscheidung des Benutzers nicht ueberstimmen. Fuer den
+   * Fall meldet `leisteOeffnen` den Fehlschlag im Klartext. */
+  check(await lauf("leiste", false) === "leiste",
+        "sie wird NICHT von der Faehigkeitspruefung ueberstimmt");
+  for (const muell of ["", "sidebar", "POPUP", "1"]) {
+    check(await lauf(muell, true) === "leiste",
+          "ein unbekannter Wert (" + JSON.stringify(muell)
+          + ") zaehlt wie 'nichts gewaehlt'");
+  }
+
+  /* ⚠ DRIFT-SCHRANKE: der `zustand`-Fall darf die Ansicht NICHT selbst
+   * ableiten. Dort stand derselbe Vergleich ein zweites Mal - seit die Leiste
+   * die Vorgabe ist, haette der Schalter im Fenster "Popup" angezeigt,
+   * waehrend der Klick aufs Symbol die Leiste oeffnet. Eine Anzeige, die einen
+   * anderen Zustand behauptet als den wirksamen, kostet in diesem Projekt
+   * regelmaessig Stunden. */
+  {
+    const zust = (ohneKommentare(BG).match(/case "zustand":[\s\S]*?\n        \}/)
+                  || [""])[0];
+    check(zust.length > 200, "der zustand-Fall wurde geschnitten",
+          zust.length + " Zeichen");
+    check(/ansicht:\s*await ansichtLesen\(\)/.test(zust),
+          "er liefert die Ansicht ueber ansichtLesen()");
+    check(zust.indexOf('"leiste"') < 0,
+          "und leitet sie nicht selbst ab (kein zweiter Vergleich)");
+  }
+
+  /* Die zwei Manifest-Schluessel, die trotz der neuen Vorgabe BLEIBEN. */
+  for (const [name, m] of [["Chrome", M_CHROME], ["Firefox", M_FF]]) {
+    check(!!(m.action && m.action.default_popup),
+          name + ": `action.default_popup` bleibt - Rueckfall, falls setPopup "
+          + "scheitert (sonst oeffnet gar nichts)");
+  }
+  check(M_FF.sidebar_action && M_FF.sidebar_action.open_at_install === false,
+        "Firefox: open_at_install bleibt false - die Vorgabe greift beim "
+        + "ersten KLICK, nicht beim Installieren");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("26) Der Einstellungen-Abschnitt klappt ein (2026-09-03)");
+// ═══════════════════════════════════════════════════════════════════════════
+/* Vorgabe des Nutzers: "Zahnrad und Text bleiben stehen, Rest wird
+ * ein/ausgeklappt" – Startzustand ZU, der Zustand wird gemerkt.
+ *
+ * ⚠ AUSGEFUEHRT GEGEN DIE ECHTE `popup.html`. Eine Quelltext-Pruefung waere
+ * hier besonders wertlos: dass `hidden` gesetzt wird, sagt nichts darueber,
+ * WELCHES Element es trifft – und genau das ist die Zusage (Kopf bleibt,
+ * Inhalt geht). */
+{
+  const { teile: einstT, drin: einstD } =
+    popupTeile(["einstAbschnittZeigen"], ["$", "frage"]);
+  check(einstD.has("einstAbschnittZeigen"),
+        "popup.js hat einstAbschnittZeigen()");
+  const hdl = (POPUP_JS.match(
+    /_btnEinst\.addEventListener\("click", \(\) => \{([\s\S]*?)\n  \}\);/)
+    || [null, null])[1];
+  check(!!hdl, "und der Klick auf die Ueberschrift ist verdrahtet");
+
+  /* ⚠ `_einstOffen` IST EINE MODUL-VARIABLE und faellt aus JEDEM
+   * Funktions-Schnitt heraus. Fehlte sie hier, braeche der Lauf mit einem
+   * nackten ReferenceError ab – kein FAIL, keine Zaehlzeile, der Waechter sah
+   * aus, als waere er nie gelaufen. In dieser Datei der siebte Fall. */
+  const lauf = (vorgabe) => {
+    const dom = new JSDOM(POPUP_HTML, { url: "https://x.test/",
+                                        runScripts: "outside-only" });
+    const w = dom.window;
+    const gemerkt = [];
+    try {
+      const bau = new w.Function("$", "frage",
+        "let _einstOffen = false;\n" + einstT.join("\n")
+        + "\nreturn { zeigen: einstAbschnittZeigen,"
+        + " klick: function () {" + hdl + "},"
+        + " offen: function () { return _einstOffen; } };");
+      const a = bau((id) => w.document.getElementById(id),
+                    (n) => { gemerkt.push(n); return Promise.resolve({ ok: true }); });
+      const lies = () => {
+        const k = w.document.getElementById("btn-einst");
+        const i = w.document.getElementById("einst-inhalt");
+        const p = w.document.getElementById("einst-pfeil");
+        return { zu: i.hidden, aria: k.getAttribute("aria-expanded"),
+                 pfeil: p.textContent.trim(), merker: a.offen(),
+                 // Bleibt der Kopf stehen? Er darf NICHT im Inhalt liegen.
+                 kopfDrin: i.contains(k),
+                 // Und was im Inhalt liegen MUSS.
+                 hatPulldown: !!i.querySelector("#f-auto"),
+                 hatHinweis: !!i.querySelector("#auto-hinweis") };
+      };
+      const anfang = lies();
+      a.zeigen(vorgabe);
+      const nach = lies();
+      a.klick();
+      const auf = lies();
+      a.klick();
+      const zu = lies();
+      return { anfang, nach, auf, zu, gemerkt };
+    } finally { w.close(); }
+  };
+
+  const r = lauf(false);
+  check(!!r, "der Lauf gegen das echte Markup ist durch");
+
+  /* ⚠ DAS MARKUP SELBST MUSS ZU STARTEN. Ohne `hidden` und
+   * `aria-expanded="false"` im HTML blitzte der Abschnitt bei JEDEM Oeffnen
+   * kurz auf, bevor der Zustand aus dem Hintergrund da ist – dieselbe Falle
+   * wie `sec-sect-rem-box` im Sicherheits-Reiter. */
+  check(r.anfang.zu === true,
+        "das Markup startet ZUGEKLAPPT (kein Aufblitzen)");
+  check(r.anfang.aria === "false",
+        "und sagt das auch Hilfsmitteln (aria-expanded)");
+
+  /* DIE ZUSAGE: Zahnrad und Wort bleiben stehen, der Rest faellt weg. */
+  check(r.anfang.kopfDrin === false,
+        "der Kopf (Zahnrad + Wort) liegt NICHT im einklappbaren Teil");
+  check(r.nach.hatPulldown && r.nach.hatHinweis,
+        "Pulldown und Hinweis liegen darin");
+
+  check(r.nach.zu === true && r.nach.merker === false,
+        "einst_offen=false laesst ihn zu");
+  check(r.auf.zu === false && r.auf.aria === "true" && r.auf.merker === true,
+        "ein Klick klappt auf", JSON.stringify(r.auf));
+  check(r.auf.pfeil === "▾" && r.anfang.pfeil === "▸",
+        "der Pfeil sagt den Zustand als ZEICHEN, nicht nur ueber aria",
+        r.anfang.pfeil + " / " + r.auf.pfeil);
+  check(r.zu.zu === true && r.zu.aria === "false" && r.zu.merker === false,
+        "und der zweite Klick wieder zu");
+
+  /* ⚠ DER ZUSTAND MUSS GEMERKT WERDEN. Dieses Fenster wird bei jedem Klick
+   * daneben zerstoert – ein Merker im Modul waere beim naechsten Oeffnen weg,
+   * und ein Abschnitt, der sich jedes Mal wieder zuklappt, ist genau die Sorte
+   * Bedienelement, die niemand benutzt. */
+  check(r.gemerkt.length === 2
+        && r.gemerkt.every((n) => n && n.art === "merken"),
+        "jeder Klick merkt sich den Zustand", JSON.stringify(r.gemerkt));
+  check(r.gemerkt[0] && r.gemerkt[0].einst_offen === true
+        && r.gemerkt[1] && r.gemerkt[1].einst_offen === false,
+        "und zwar mit dem NEUEN Wert", JSON.stringify(r.gemerkt));
+
+  const r2 = lauf(true);
+  check(r2 && r2.nach.zu === false && r2.nach.aria === "true",
+        "ein gemerktes einst_offen=true klappt ihn beim Oeffnen auf");
+
+  // Der Zustand kommt aus dem Hintergrund, nicht aus dem Fenster.
+  check(/einstAbschnittZeigen\(z\.einst_offen === true\)/.test(POPUP_JS),
+        "start() belegt ihn aus dem Zustand des Hintergrunds");
+  /* `=== true`, nicht `!!`: ein aelterer Hintergrund schickt das Feld nicht
+   * mit, und `undefined` muss dann "zu" heissen – die Vorgabe. */
+  check(/einst_offen: e\.einst_offen === true/.test(ohneKommentare(BG)),
+        "und der Hintergrund liefert es fail-closed aus der Ablage");
+
+  /* CSS: der Knopf muss wie eine Ueberschrift AUSSEHEN. */
+  const knopfRegel = (POPUP_CSS.match(/\.abschnitt-knopf \{([^}]*)\}/) || ["", ""])[1];
+  for (const [muster, was] of [
+    [/background:\s*none/, "keine Knopf-Flaeche"],
+    [/border:\s*0/, "kein Knopf-Rahmen"],
+    [/font:\s*inherit/, "die Schrift der Ueberschrift"],
+    [/cursor:\s*pointer/, "und einen Zeiger, der ihn als klickbar zeigt"],
+  ]) {
+    check(muster.test(knopfRegel), ".abschnitt-knopf hat " + was,
+          knopfRegel.trim().slice(0, 80));
+  }
+  /* Ohne `min-width: 0` schiebt ein laengerer Name den Pfeil aus dem 380 px
+   * breiten Fenster, statt dass der Text umbricht (Register). */
+  const wortRegel = (POPUP_CSS.match(/\.abschnitt-wort \{([^}]*)\}/) || ["", ""])[1];
+  check(/min-width:\s*0/.test(wortRegel),
+        ".abschnitt-wort hat min-width: 0", wortRegel.trim());
+
+  /* ── Der Leisten-Hinweis ist raus (Vorgabe 2026-09-03) ─────────────────
+   * "Die Breite ziehst du an der Kante der Leiste." war eine Auskunft an
+   * jemanden, der die Leiste vor sich hat und ihre Kante sieht. */
+  const az = schneidePopup("ansichtZeigen") || "";
+  check(!/Die Breite ziehst du/.test(ohneKommentare(az)),
+        "in der Leiste steht kein Hinweis mehr");
+  check(/h\.hidden = true/.test(az),
+        "der Hinweis-Absatz wird dort ausgeblendet (kein leerer Kasten)");
+  check(/Symbol in der Symbolleiste/.test(az),
+        "im Popup bleibt der Hinweis - dort ist die Wirkung nicht ablesbar");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("27) Ein gemerkter Lauf JE TICKET (2026-09-03)");
+// ═══════════════════════════════════════════════════════════════════════════
+/* Gemeldet: "nach Reiterwechsel ist die Antwort leider wieder weg (oder das
+ * Antwort-Feld einfach nur nicht mehr sichtbar?)". Gemessen im echten Chrome:
+ * wirklich weg - es gab EINEN Speicherplatz, und der Wechsel leerte ihn.
+ *
+ * ⚠ DIE ABLAGE WIRD AUSGEFUEHRT, nicht gelesen. Ring, Migration und die drei
+ * Loeschfaelle sind Verhalten; ein Quelltext-Test saehe nicht, ob der RICHTIGE
+ * Eintrag verdraengt wird. */
+{
+  const teilBG = (name) => (BG.match(new RegExp(
+    "(?:async )?function " + name + "\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}")) || [null])[0];
+  const sammle = (start) => {
+    const teile = [], drin = new Set(), offen = start.slice();
+    while (offen.length) {
+      const n = offen.shift();
+      if (drin.has(n)) continue;
+      const k = teilBG(n);
+      if (!k) continue;
+      drin.add(n); teile.push(k);
+      for (const t of k.match(/\b[A-Za-z_$][\w$]*(?=\s*\()/g) || []) {
+        if (!drin.has(t) && teilBG(t)) offen.push(t);
+      }
+    }
+    return { code: teile.join("\n"), drin };
+  };
+  const { code, drin } = sammle(["ergebnisLesen", "ergebnisSchreiben",
+                                 "ergebnisLoeschen", "ergebnisseLoeschen"]);
+  for (const f of ["ergebnisseLesen", "ergebnisLesen", "ergebnisSchreiben",
+                   "ergebnisLoeschen", "ergebnisseLoeschen"]) {
+    check(drin.has(f), "background.js hat " + f + "()");
+  }
+  /* Modul-Konstanten - fallen aus jedem Funktions-Schnitt heraus (Register). */
+  const KONST = (BG.match(/const ERGEBNIS = "[^"]+";/) || [""])[0] + "\n"
+    + (BG.match(/const ERGEBNISSE = "[^"]+";/) || [""])[0] + "\n"
+    + (BG.match(/const ERGEBNIS_MAX = \d+;/) || [""])[0];
+  check(/ERGEBNISSE/.test(KONST) && /ERGEBNIS_MAX/.test(KONST),
+        "die Ablage-Schluessel und der Deckel stehen im Schnitt", KONST.replace(/\n/g, " "));
+  const MAX = Number((KONST.match(/ERGEBNIS_MAX = (\d+)/) || [0, 0])[1]);
+  check(MAX >= 2, "der Deckel ist eine sinnvolle Zahl", String(MAX));
+
+  /* Eine Ablage, die sich wie `storage.local` verhaelt - inklusive der
+   * Array-Form von get/remove, die der echte Code benutzt. */
+  const welt = (anfang) => {
+    const ablage = Object.assign({}, anfang);
+    return {
+      ablage,
+      api: { storage: { local: {
+        get: async (k) => {
+          const keys = Array.isArray(k) ? k : [k];
+          const o = {};
+          for (const n of keys) if (n in ablage) o[n] = ablage[n];
+          return o;
+        },
+        set: async (o) => { Object.assign(ablage, o); },
+        remove: async (k) => {
+          for (const n of (Array.isArray(k) ? k : [k])) delete ablage[n];
+        },
+      } } },
+    };
+  };
+  const fahre = async (anfang, schritte) => {
+    const w = welt(anfang);
+    const f = new Function("api", KONST + "\n" + code
+      + "\nreturn (async (schritte) => { const aus = [];"
+      + " for (const s of schritte) aus.push(await s({ ergebnisLesen,"
+      + " ergebnisSchreiben, ergebnisLoeschen, ergebnisseLoeschen,"
+      + " ergebnisseLesen })); return aus; });")(w.api);
+    const aus = await f(schritte);
+    return { aus, ablage: w.ablage };
+  };
+  const lauf = (key, text, zeit) => ({ key, text, zeit, modus: "antwort" });
+
+  // ── a) Zwei Tickets nebeneinander - und BEIDE bleiben ──────────────────
+  {
+    const r = await fahre({}, [
+      (f) => f.ergebnisSchreiben(lauf("ABC-1", "Text A", 1000)),
+      (f) => f.ergebnisSchreiben(lauf("XYZ-9", "Text B", 2000)),
+      (f) => f.ergebnisLesen("ABC-1"),
+      (f) => f.ergebnisLesen("XYZ-9"),
+      (f) => f.ergebnisLesen("QRS-3"),
+    ]);
+    check(r.aus[2] && r.aus[2].text === "Text A",
+          "ABC-1 ist nach dem Lauf zu XYZ-9 immer noch da (DIE Aenderung)",
+          JSON.stringify(r.aus[2]));
+    check(r.aus[3] && r.aus[3].text === "Text B", "und XYZ-9 ebenfalls");
+    check(r.aus[4] === null,
+          "zu einem Ticket ohne Eintrag kommt NULL, nicht der letzte Text");
+  }
+
+  /* ⚠ b) DIE SCHRANKE: ein Eintrag mit falschem `key` im Rumpf wird NICHT
+   * ausgeliefert. Sonst haette ein von Hand verstellter Ablage-Eintrag den
+   * Text zu Vorgang A neben Vorgang B gestellt - und ein Klick auf "Als
+   * Kommentar uebernehmen" schickt ihn an den falschen Kunden. */
+  {
+    const r = await fahre({ ergebnisse: { "ABC-1": lauf("XYZ-9", "fremd", 1) } },
+                          [(f) => f.ergebnisLesen("ABC-1")]);
+    check(r.aus[0] === null,
+          "ein Eintrag, dessen key nicht passt, wird verworfen");
+  }
+  { // und ein Eintrag ohne Text ist kein Ergebnis
+    const r = await fahre({ ergebnisse: { "ABC-1": lauf("ABC-1", "", 1) } },
+                          [(f) => f.ergebnisLesen("ABC-1")]);
+    check(r.aus[0] === null, "ein leerer Text zaehlt nicht als Ergebnis");
+  }
+
+  // ── c) Der Deckel verdraengt den AELTESTEN ─────────────────────────────
+  {
+    const schritte = [];
+    for (let i = 1; i <= MAX + 2; i++) {
+      schritte.push((f) => f.ergebnisSchreiben(lauf("T-" + i, "Text " + i, i * 100)));
+    }
+    schritte.push((f) => f.ergebnisseLesen());
+    const r = await fahre({}, schritte);
+    const karte = r.aus[r.aus.length - 1];
+    check(Object.keys(karte).length === MAX,
+          "es bleiben genau " + MAX + " Eintraege", Object.keys(karte).join(","));
+    check(!karte["T-1"] && !karte["T-2"],
+          "und zwar OHNE die zwei aeltesten", Object.keys(karte).join(","));
+    check(!!karte["T-" + (MAX + 2)], "der neueste ist dabei");
+  }
+  { /* Ein Eintrag OHNE Zeitstempel gilt als aeltester - sonst waere er
+     * unloeschbar und der Deckel liesse sich damit aushebeln. */
+    const anfang = { ergebnisse: {} };
+    anfang.ergebnisse["ALT-0"] = { key: "ALT-0", text: "ohne Zeit" };
+    const schritte = [];
+    for (let i = 1; i <= MAX; i++) {
+      schritte.push((f) => f.ergebnisSchreiben(lauf("N-" + i, "x", i * 100)));
+    }
+    schritte.push((f) => f.ergebnisseLesen());
+    const r = await fahre(anfang, schritte);
+    check(!r.aus[r.aus.length - 1]["ALT-0"],
+          "ein Eintrag ohne Zeitstempel wird als aeltester verdraengt");
+  }
+
+  // ── d) Die drei Loeschfaelle ───────────────────────────────────────────
+  {
+    const anfang = { ergebnisse: { "ABC-1": lauf("ABC-1", "A", 1),
+                                   "XYZ-9": lauf("XYZ-9", "B", 2) } };
+    const r = await fahre(anfang, [
+      (f) => f.ergebnisLoeschen("ABC-1"),
+      (f) => f.ergebnisseLesen(),
+    ]);
+    const k = r.aus[1];
+    check(!k["ABC-1"] && !!k["XYZ-9"],
+          "'Leeren' nimmt GENAU einen Eintrag", Object.keys(k).join(","));
+  }
+  {
+    const anfang = { ergebnis: lauf("OLD-1", "alt", 1),
+                     ergebnisse: { "ABC-1": lauf("ABC-1", "A", 1) } };
+    const r = await fahre(anfang, [(f) => f.ergebnisseLoeschen()]);
+    check(!("ergebnisse" in r.ablage) && !("ergebnis" in r.ablage),
+          "Zuruecksetzen/Abmelden raeumt ALLES, auch den alten Einzelplatz",
+          Object.keys(r.ablage).join(","));
+  }
+
+  /* ── e) MIGRATION: ein vor dem Update gemerkter Lauf geht nicht verloren.
+   * Wer gerade eine Auswertung offen hatte, hat sie bezahlt. */
+  {
+    const r = await fahre({ ergebnis: lauf("ABC-1", "vor dem Update", 5) }, [
+      (f) => f.ergebnisLesen("ABC-1"),
+      (f) => f.ergebnisLesen("ABC-1"),
+    ]);
+    check(r.aus[0] && r.aus[0].text === "vor dem Update",
+          "der alte Einzelplatz wird uebernommen", JSON.stringify(r.aus[0]));
+    check(!("ergebnis" in r.ablage),
+          "und danach entfernt - keine zweite Wahrheit",
+          Object.keys(r.ablage).join(","));
+    check(r.aus[1] && r.aus[1].text === "vor dem Update",
+          "der zweite Aufruf liefert ihn weiter (idempotent)");
+  }
+
+  /* ── f) Der Reiterwechsel darf NICHT loeschen - als REGEL im Fenster.
+   * Ein `{wert: null}` OHNE Schluessel raeumt im Hintergrund nichts; genau so
+   * sah der Aufruf vor dem Fix aus, und er kam beim bloszen Wechsel. */
+  {
+    const bgOhneK = ohneKommentare(BG);
+    const em = (bgOhneK.match(/case "ergebnis_merken":[\s\S]*?break;/) || [""])[0];
+    check(em.length > 60, "der Fall ergebnis_merken wurde geschnitten",
+          String(em.length));
+    check(/nachricht\.alle/.test(em) && /nachricht\.key/.test(em),
+          "er unterscheidet 'alles' von 'genau dieses Ticket'", em.trim());
+    check(/case "ergebnis":/.test(bgOhneK),
+          "und es gibt einen Fall, der EIN Ticket erfragt");
+    /* ⚠ Die Zustands-Antwort darf das Ergebnis NICHT mehr mitschicken: dort
+     * ist noch unbekannt, welcher Vorgang offen ist. */
+    const zust = (bgOhneK.match(/case "zustand":[\s\S]*?\n        \}/) || [""])[0];
+    check(zust.length > 200, "der zustand-Fall wurde geschnitten");
+    check(!/ergebnis:/.test(zust),
+          "die Zustands-Antwort schickt keinen Text ohne belegten Ticketbezug");
+  }
 }
 
 console.log("\n" + ok + " OK, " + fail + " FAIL");

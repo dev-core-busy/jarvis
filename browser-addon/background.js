@@ -66,11 +66,23 @@ const api = new Proxy({}, {
  * tun ist.
  * Bei jeder Aenderung an den Nachrichtenfaellen HOCHZAEHLEN. Ein Test
  * vergleicht beide Zahlen. */
-const STAND = 6;
+const STAND = 8;
 
 const EINST = "einstellungen";   // storage.local: { basis }
 const SITZUNG = "sitzung";       // storage.local: { token, benutzer }
-const ERGEBNIS = "ergebnis";     // storage.local: letzter Lauf (siehe unten)
+const ERGEBNIS = "ergebnis";     // ALT: EIN Lauf. Wird migriert, s.u.
+const ERGEBNISSE = "ergebnisse"; // storage.local: { <ticket>: lauf } (s.u.)
+
+/* Wie viele Ticket-Ergebnisse gleichzeitig vorgehalten werden.
+ *
+ * ⚠ FUENF, NICHT UNBEGRENZT – und das ist eine Abwaegung, keine runde Zahl.
+ * In jedem Eintrag steht Kundentext aus einem Ticket. Er liegt in
+ * `storage.local`, also auf der Platte des Arbeitsplatzes, bis der Benutzer
+ * sich abmeldet oder zuruecksetzt. Ohne Deckel wuechse dieser Bestand mit
+ * jedem angesehenen Vorgang weiter, unbemerkt.
+ * Fuenf deckt ab, wofuer der Speicher da ist: zwischen ein paar Vorgaengen
+ * hin- und herwechseln, ohne eine bezahlte Auswertung zu verlieren. */
+const ERGEBNIS_MAX = 5;
 
 /* ── AUTOMATIK BEI NEUEM TICKET ─────────────────────────────────────────────
  *
@@ -164,6 +176,13 @@ async function einstSchreiben(teil) {
   if (teil.ansicht !== undefined) neu.ansicht = (teil.ansicht === "leiste") ? "leiste" : "popup";
   // Siehe `autoVorlage`: unbekannt = aus.
   if (teil.auto_vorlage !== undefined) neu.auto_vorlage = autoVorlage(teil.auto_vorlage);
+  /* Ist der Einstellungen-Abschnitt im Fenster aufgeklappt? Vorgabe ZU, und
+   * `!!` macht aus jedem Muellwert einen der zwei erlaubten Zustaende. Ohne
+   * diese Zeile wuerde das Feld hier WORTLOS verworfen – der Benutzer klappt
+   * auf, und beim naechsten Oeffnen ist es wieder zu, ohne Fehlermeldung.
+   * Genau dieser Fall ist der Grund fuer `STAND` (ein Test prueft die Regel
+   * "jedes per `merken` geschickte Feld muss hier stehen"). */
+  if (teil.einst_offen !== undefined) neu.einst_offen = !!teil.einst_offen;
   /* Der Ring wird hier GEKAPPT, nicht beim Lesen: was einmal in der Ablage
    * steht, waechst sonst mit jedem Ticket weiter – und niemand sieht es. */
   if (teil.auto_gelaufen !== undefined) {
@@ -189,6 +208,24 @@ async function einstSchreiben(teil) {
  * DER UMSCHALTER IST `action.setPopup`. Solange ein Popup gesetzt ist, gewinnt
  * es – `openPanelOnActionClick` bleibt dann wirkungslos und `onClicked` feuert
  * nicht. Erst ein LEERER Popup-Pfad gibt den Klick frei.
+ *
+ * ⚠ DIE VORGABE IST SEIT 2026-09-03 DIE LEISTE (siehe `ansichtLesen`) – und
+ * genau deshalb bleiben ZWEI Manifest-Schluessel, wie sie sind:
+ *
+ *   `action.default_popup: "popup.html"` BLEIBT STEHEN. Er gilt in den
+ *   Millisekunden, bevor dieser Service-Worker das erste Mal laeuft, und er
+ *   ist der Rueckfall, falls `setPopup` scheitert: dann oeffnet der Klick
+ *   wenigstens das Popup. Ohne ihn waere der schlechteste Ausgang „es oeffnet
+ *   gar nichts, und niemand sieht warum". Ein Popup zu viel ist ein
+ *   Schoenheitsfehler, ein totes Symbol ist ein Ausfall.
+ *
+ *   `sidebar_action.open_at_install: false` BLEIBT EBENFALLS. Die Begruendung
+ *   von 2026-08-30 („die Vorgabe ist ja das Popup") ist damit weggefallen, die
+ *   Entscheidung nicht: Firefox klappte die Leiste sonst schon beim
+ *   INSTALLIEREN auf – ohne Klick, ohne Anlass, mit der Anmeldemaske darin –,
+ *   und Chrome kennt dafuer gar keine Entsprechung. Die Vorgabe greift in
+ *   beiden Browsern beim ERSTEN Klick auf das Symbol; dass sie in einem davon
+ *   zusaetzlich ungefragt aufgeht, waere kein Gewinn, sondern eine Abweichung.
  */
 /* ── Herstellereigene APIs: NICHT ueber `api` ansprechen ───────────────────
  *
@@ -313,8 +350,32 @@ async function kontextArt(absender) {
   }
 }
 
+/** Welche Ansicht gilt – und die VORGABE ist seit 2026-09-03 die Seitenleiste.
+ *
+ * ⚠ HIER STAND „alles ausser `leiste` heisst Popup" – und das war zugleich die
+ * Vorgabe: wer nie umgeschaltet hat, bekam ein Popup. Auf Anweisung ist die
+ * Leiste jetzt die Vorgabe, **sofern der Browser sie kann**. Sie bleibt beim
+ * Arbeiten im Ticket offen, folgt dem Tab-Wechsel und laesst sich in der
+ * Breite ziehen; ein Popup kann keines davon (der Browser zeichnet es um den
+ * Inhalt und klemmt es auf 800x600).
+ *
+ * DREI ZUSTAENDE, NICHT ZWEI – darin liegt die ganze Aenderung:
+ *   "leiste"  ausdruecklich gewaehlt
+ *   "popup"   ausdruecklich gewaehlt – bleibt Popup, auch wenn eine Leiste da
+ *             waere: eine Vorgabe darf eine Entscheidung nicht ueberstimmen
+ *   fehlt     nichts gewaehlt → Leiste, wenn moeglich, sonst Popup
+ * `einstSchreiben` speichert nur einen der beiden ausdruecklichen Werte; das
+ * Fehlen entsteht also ausschliesslich durch „noch nie angefasst".
+ *
+ * ⚠ OHNE `leisteMoeglich()` WAERE DIE VORGABE EIN TOTALAUSFALL: auf einem
+ * Browser ohne Leiste leert `ansichtAnwenden` den Popup-Pfad, `onClicked`
+ * findet danach keine Leisten-API – und der Klick auf das Symbol oeffnet GAR
+ * NICHTS. Fail-safe ist hier die schmalere Funktion, nicht die schoenere.
+ */
 async function ansichtLesen() {
-  return ((await einstLesen()).ansicht === "leiste") ? "leiste" : "popup";
+  const wert = (await einstLesen()).ansicht;
+  if (wert === "leiste" || wert === "popup") return wert;
+  return leisteMoeglich() ? "leiste" : "popup";
 }
 
 /* WIRD BEI JEDEM START DES HINTERGRUNDS GERUFEN – und das ist noetig, nicht
@@ -385,14 +446,84 @@ async function sitzungSchreiben(wert) {
  * Oeffnen nicht erkennbar, zu welchem Vorgang der Text gehoert, und das ist
  * gefaehrlicher als kein Text.
  */
-async function ergebnisLesen() {
-  const d = await api.storage.local.get(ERGEBNIS);
-  return d[ERGEBNIS] || null;
+/* ⚠ EIN EINTRAG JE TICKET (Vorgabe 2026-09-03), vorher genau EINER insgesamt.
+ *
+ * DER GEMELDETE FALL: "nach Reiterwechsel ist die Antwort leider wieder weg".
+ * Zutreffend, und gemessen – der Text war wirklich fort, nicht nur verborgen:
+ * bei einem Wechsel auf ein anderes Ticket wurde der eine Speicherplatz
+ * GELEERT, und beim Zurueckwechseln stand das Feld leer da, ohne jede
+ * Erklaerung. In der Seitenleiste (seit 0.9.0 die Vorgabe) passiert genau das
+ * beim normalen Arbeiten staendig.
+ *
+ * ⚠ DIE SICHERHEITSZUSAGE BLEIBT UNANGETASTET, und sie wird sogar strenger:
+ * angezeigt wird immer nur der Eintrag, dessen `key` dem OFFENEN Ticket
+ * entspricht. Genau deshalb ist der Speicher eine ABBILDUNG Ticket → Lauf und
+ * nicht eine Liste: es gibt keinen Zustand, in dem ein Text zu Vorgang A neben
+ * Vorgang B stehen kann, und das Fenster bekommt einen fremden Entwurf gar
+ * nicht mehr zu sehen (es fragt je Ticket, siehe Fall "ergebnis").
+ */
+async function ergebnisseLesen() {
+  const d = await api.storage.local.get([ERGEBNISSE, ERGEBNIS]);
+  const m = d[ERGEBNISSE];
+  const karte = (m && typeof m === "object" && !Array.isArray(m)) ? m : {};
+  /* MIGRATION, genau einmal: ein vor dem Update gemerkter Lauf soll nicht
+   * verloren gehen – wer gerade eine Auswertung offen hatte, hat sie bezahlt.
+   * Der alte Schluessel wird danach entfernt, damit hier keine zweite Wahrheit
+   * stehenbleibt. */
+  const alt = d[ERGEBNIS];
+  if (alt && alt.key && !karte[alt.key]) {
+    karte[alt.key] = alt;
+    try {
+      await api.storage.local.set({ [ERGEBNISSE]: karte });
+      await api.storage.local.remove(ERGEBNIS);
+    } catch (e) { /* dann eben beim naechsten Mal */ }
+  }
+  return karte;
+}
+
+/** Der gemerkte Lauf zu GENAU diesem Ticket – oder null. */
+async function ergebnisLesen(key) {
+  if (!key) return null;
+  const e = (await ergebnisseLesen())[key];
+  return (e && e.key === key && e.text) ? e : null;
 }
 
 async function ergebnisSchreiben(wert) {
-  if (wert) await api.storage.local.set({ [ERGEBNIS]: wert });
-  else await api.storage.local.remove(ERGEBNIS);
+  if (!wert || !wert.key) return;
+  const karte = await ergebnisseLesen();
+  karte[wert.key] = wert;
+  /* GEKAPPT WIRD BEIM SCHREIBEN, nicht beim Lesen: was einmal in der Ablage
+   * steht, waechst sonst weiter, und niemand sieht es. Verworfen wird der
+   * AELTESTE (kleinstes `zeit`) – ein Eintrag ohne Zeitstempel gilt als
+   * aeltester, sonst waere er unloeschbar. */
+  const schluessel = Object.keys(karte);
+  if (schluessel.length > ERGEBNIS_MAX) {
+    schluessel
+      .sort((a, b) => ((karte[b] && karte[b].zeit) || 0)
+                      - ((karte[a] && karte[a].zeit) || 0))
+      .slice(ERGEBNIS_MAX)
+      .forEach((k) => { delete karte[k]; });
+  }
+  await api.storage.local.set({ [ERGEBNISSE]: karte });
+}
+
+/** Loescht EINEN Eintrag ("Leeren" im Ergebnisbereich). */
+async function ergebnisLoeschen(key) {
+  if (!key) return;
+  const karte = await ergebnisseLesen();
+  if (!(key in karte)) return;
+  delete karte[key];
+  await api.storage.local.set({ [ERGEBNISSE]: karte });
+}
+
+/** Loescht ALLES (Abmelden, Zuruecksetzen).
+ *
+ * Beides ist eine ausdrueckliche Handlung des Benutzers – und beim Abmelden
+ * sind es die Ticketinhalte des VORIGEN Benutzers an diesem Rechner. Der alte
+ * Einzelplatz wird mitgeraeumt: ein Altbestand, der die Migration noch nicht
+ * gesehen hat, darf ein Abmelden nicht ueberleben. */
+async function ergebnisseLoeschen() {
+  await api.storage.local.remove([ERGEBNISSE, ERGEBNIS]);
 }
 
 /** Darf fuer dieses Ticket automatisch ausgewertet werden – und womit?
@@ -551,22 +682,39 @@ api.runtime.onMessage.addListener((nachricht, absender, antworten) => {
                       // Berechtigungsabfrage lief.
                       benutzer_vorschlag: e.benutzer || "",
                       zugriff_erfragt: !!e.zugriff_erfragt,
-                      // Welche Ansicht gilt, und kann dieser Browser ueberhaupt
-                      // eine Leiste? Ein Schalter fuer etwas, das es nicht gibt,
-                      // ist schlimmer als kein Schalter.
-                      ansicht: (e.ansicht === "leiste") ? "leiste" : "popup",
+                      /* Welche Ansicht gilt, und kann dieser Browser
+                       * ueberhaupt eine Leiste?
+                       * ⚠ UEBER `ansichtLesen()`, NICHT ueber `e.ansicht`.
+                       * Hier stand der Vergleich ein zweites Mal – seit die
+                       * Leiste die Vorgabe ist, haette der Schalter „Popup"
+                       * angezeigt, waehrend der Klick auf das Symbol die
+                       * Leiste oeffnet. Eine Anzeige, die einen anderen
+                       * Zustand behauptet als den wirksamen, kostet in diesem
+                       * Projekt regelmaessig Stunden. Eine Quelle, keine zwei. */
+                      ansicht: await ansichtLesen(),
                       leiste_moeglich: leisteMoeglich(),
                       // Welche Aktion bei einem neuen Ticket von selbst
                       // startet ("" = keine, das ist die Vorgabe).
                       auto_vorlage: autoVorlage(e.auto_vorlage),
+                      /* Ist der Einstellungen-Abschnitt aufgeklappt?
+                       * `=== true` und nicht `!!`: ein Altbestand ohne das
+                       * Feld muss "zu" ergeben, also die Vorgabe. */
+                      einst_offen: e.einst_offen === true,
                       // Damit das Fenster merkt, wenn hier noch eine aeltere
                       // Fassung antwortet (siehe STAND).
                       stand: STAND,
                       // "SIDE_PANEL" | "POPUP" | "" (nicht feststellbar).
                       // Das Fenster entscheidet danach, ob es Tab-Wechsel
                       // beobachten muss - siehe kontextArt().
-                      kontext: await kontextArt(absender),
-                      ergebnis: await ergebnisLesen() });
+                      kontext: await kontextArt(absender) });
+          /* ⚠ HIER STAND `ergebnis: await ergebnisLesen()`. Seit es EINEN
+           * Eintrag JE TICKET gibt, kann diese Antwort ihn gar nicht mehr
+           * liefern: welcher Vorgang offen ist, weiss zu diesem Zeitpunkt nur
+           * das Fenster (es ermittelt den Tab erst danach). Den einen
+           * "letzten" mitzuschicken waere genau der Zustand, gegen den die
+           * ganze Schranke gebaut ist – ein Text zu Vorgang A neben Vorgang B.
+           * Das Fenster fragt deshalb gezielt nach (Fall "ergebnis"), und
+           * bekommt einen fremden Entwurf nie zu sehen. */
           break;
         }
         case "merken":
@@ -591,7 +739,7 @@ api.runtime.onMessage.addListener((nachricht, absender, antworten) => {
           await sitzungSchreiben({});
           // Beim Abmelden geht auch das Ergebnis – es enthaelt Ticketinhalte,
           // und der naechste Benutzer an diesem Rechner hat damit nichts zu tun.
-          await ergebnisSchreiben(null);
+          await ergebnisseLoeschen();
           /* Aus demselben Grund faellt der Ring: es sind die Ticketnummern des
            * vorigen Benutzers. Der EINSTELLUNG (auto_vorlage) passiert nichts –
            * die gehoert zu diesem Browser, nicht zu einer Anmeldung. */
@@ -601,8 +749,23 @@ api.runtime.onMessage.addListener((nachricht, absender, antworten) => {
         case "auto_start":
           antworten(Object.assign({ ok: true }, await autoStart(nachricht.key || "")));
           break;
+        /* Der gemerkte Lauf zu GENAU einem Ticket. Ohne `key` gibt es nichts
+         * – geraten wird hier nicht, ein falscher Text ist gefaehrlicher als
+         * keiner. */
+        case "ergebnis":
+          antworten({ ok: true, ergebnis: await ergebnisLesen(nachricht.key || "") });
+          break;
+        /* DREI FAELLE, und die Unterscheidung ist der Kern der Aenderung:
+         *   wert            → anlegen/ersetzen (der Schluessel steckt darin)
+         *   null + key      → NUR diesen Eintrag weg ("Leeren")
+         *   null + alle     → alles weg (Zuruecksetzen)
+         * Ein `null` OHNE beides raeumt bewusst NICHTS: bis 2026-09-03 loeschte
+         * genau dieser Aufruf den einzigen Speicherplatz, und er kam auch beim
+         * bloszen Reiterwechsel – das war der gemeldete Datenverlust. */
         case "ergebnis_merken":
-          await ergebnisSchreiben(nachricht.wert || null);
+          if (nachricht.wert) await ergebnisSchreiben(nachricht.wert);
+          else if (nachricht.alle) await ergebnisseLoeschen();
+          else if (nachricht.key) await ergebnisLoeschen(nachricht.key);
           antworten({ ok: true });
           break;
         case "branding": {

@@ -103,7 +103,7 @@ function brauche(name, methode) {
  * Begruendung dort; kurz: Chrome laedt diese Seite bei jedem Oeffnen frisch,
  * behaelt den Service-Worker aber im Speicher. Ohne diesen Abgleich sieht ein
  * halb aktualisierter Zustand wie ein Programmierfehler aus. */
-const STAND = 6;
+const STAND = 8;
 
 const $ = (id) => document.getElementById(id);
 const el = {
@@ -695,6 +695,10 @@ async function start() {
    * Feld nicht mit; `autoZeigen` macht daraus "aus" (fail-closed: eine
    * Automatik, die man nicht sieht, darf nicht laufen). */
   autoZeigen(z.auto_vorlage);
+  /* Nach `autoZeigen`, damit das Pulldown schon gefuellt ist, wenn der
+   * Abschnitt aufgeht. Ein aelterer Hintergrund schickt das Feld nicht mit –
+   * `=== true` macht daraus "zu", also die Vorgabe. */
+  einstAbschnittZeigen(z.einst_offen === true);
   if (!z.angemeldet) {
     await zugriffAnzeigen();
     /* Nach dem Wiederöffnen SAGEN, was passiert ist. Ohne diesen Satz sieht
@@ -733,7 +737,7 @@ async function start() {
      * Einladung, ihn zu benutzen; die stärkere Antwort ist, ihn wegzuräumen.
      * Der Ticketbezug ist hier keine Bequemlichkeit, sondern eine
      * Sicherheitsfrage: das Ergebnis geht am Ende an einen echten Kunden. */
-    await ticketLageAnwenden(z.ergebnis);
+    await ticketLageAnwenden();
     leisteBeobachten();
   }
 
@@ -755,22 +759,27 @@ async function start() {
  * Seitenleiste dieselbe Pruefung BEI JEDEM TAB-WECHSEL braucht – im Popup lief
  * sie genau einmal, weil das Fenster danach ohnehin zu war.
  */
-async function ticketLageAnwenden(gemerkt) {
-  const passt = gemerkt && gemerkt.key && _key && gemerkt.key === _key;
+async function ticketLageAnwenden() {
+  /* ⚠ GEHOLT WIRD JE TICKET, statt einen mitgegebenen Text zu pruefen. Damit
+   * haelt diese Funktion einen fremden Entwurf gar nicht mehr in der Hand –
+   * vorher bekam sie ihn und musste ihn wegwerfen, und dabei ging die Ablage
+   * mit (siehe `anzeigeLeeren`). Der Wechsel BLENDET jetzt nur aus. */
+  const gemerkt = await gemerktesHolen(_key);
+  const passt = !!(gemerkt && _key && gemerkt.key === _key);
   if (passt) {
     zeigeGemerktes(gemerkt);
-  } else if (gemerkt && gemerkt.text) {
-    await felderLeeren(_key
-      ? "Der gemerkte Text gehörte zu " + gemerkt.key + ", offen ist "
-        + _key + " – die Felder wurden geleert."
-      : "Kein Jira-Ticket in diesem Tab. Der gemerkte Text zu "
-        + gemerkt.key + " wurde entfernt. Öffne ein Ticket "
-        + "(…/browse/ABC-123).");
   } else if (!_key) {
+    anzeigeLeeren();
     // Kein Fehler, sondern eine Auskunft: die Erweiterung ist bereit, dieser
     // Tab ist nur kein Ticket.
     melde("Kein Jira-Ticket in diesem Tab. Öffne ein Ticket (…/browse/ABC-123).");
   } else {
+    /* Ticket offen, aber (noch) kein Ergebnis dazu: Anzeige leeren, SCHWEIGEN.
+     * Eine Meldung waere hier Rauschen – so sieht jedes frisch geoeffnete
+     * Ticket aus, und die Knoepfe darueber sagen selbst, was zu tun ist.
+     * ⚠ Das Gedaechtnis der ANDEREN Tickets bleibt dabei liegen: genau das ist
+     * die Aenderung vom 2026-09-03. */
+    anzeigeLeeren();
     melde("");
   }
   await zugriffZeileAktualisieren();
@@ -1016,7 +1025,7 @@ async function tabWechsel() {
     await zugriffZeileAktualisieren();
     return;
   }
-  await ticketLageAnwenden(_letztes);
+  await ticketLageAnwenden();
 }
 
 /** Alles wegräumen, was zu einem Ticket gehört – Anzeige UND Gedächtnis.
@@ -1225,7 +1234,23 @@ function feldZuText(el) {
     .replace(/^\n+/, "").replace(/\n+$/, "");
 }
 
-async function felderLeeren(meldungstext) {
+/* ⚠ ANZEIGE LEEREN IST NICHT DASSELBE WIE GEDAECHTNIS LEEREN – und dass hier
+ * bis 2026-09-03 nur EINE Funktion stand, war der gemeldete Datenverlust
+ * ("nach Reiterwechsel ist die Antwort leider wieder weg").
+ *
+ * `felderLeeren` warf beides zusammen weg, und der Reiterwechsel rief es: wer
+ * nebenbei ein anderes Ticket aufmachte, verlor eine bezahlte Auswertung
+ * ENDGUELTIG – beim Zurueckwechseln stand das Feld leer da, ohne Erklaerung.
+ * Getrennt wird jetzt nach der Frage, die dahintersteht:
+ *   Reiterwechsel  – "zeig mir, was zu DIESEM Ticket gehoert" → nur Anzeige
+ *   Leeren / Reset – "wirf das weg"                           → auch Ablage
+ */
+function anzeigeLeeren() {
+  /* ⚠ DER MERK-TIMER MUSS MIT: wer den Vorschlag bearbeitet hat, hat einen
+   * Timer offen, der `_letztes` eine halbe Sekunde spaeter zurueckschreibt.
+   * Ohne `clearTimeout` schriebe er nach dem Wechsel den Text erneut in die
+   * Ablage – unter dem Schluessel des VORIGEN Tickets, aber mit dem Inhalt,
+   * den das Feld zufaellig gerade hat. */
   clearTimeout(_merkTimer);
   _letztes = null;
   _fremdesErgebnis = false;
@@ -1233,10 +1258,42 @@ async function felderLeeren(meldungstext) {
   el.ergebnis.hidden = true;
   el.ergebnisFuss.textContent = "";
   el.hinweis.value = "";
-  // Fehlschlag ist hier nicht schlimm: die Anzeige ist bereits leer, und beim
-  // nächsten Öffnen greift dieselbe Prüfung erneut.
-  try { await frage({ art: "ergebnis_merken", wert: null }); } catch (e) {}
+}
+
+/** Anzeige UND Ablage. `alle` nur beim Zuruecksetzen. */
+async function felderLeeren(meldungstext, alle) {
+  const key = (_letztes && _letztes.key) || _key || "";
+  anzeigeLeeren();
+  /* Fehlschlag ist hier nicht schlimm: die Anzeige ist bereits leer, und beim
+   * naechsten Oeffnen greift dieselbe Pruefung erneut.
+   * ⚠ MIT `key` bzw. `alle` – ein `{wert: null}` ohne beides raeumt im
+   * Hintergrund bewusst NICHTS mehr (Begruendung dort). */
+  try {
+    await frage(alle
+      ? { art: "ergebnis_merken", wert: null, alle: true }
+      : { art: "ergebnis_merken", wert: null, key });
+  } catch (e) {}
   melde(meldungstext || "");
+}
+
+/** Der gemerkte Lauf zu diesem Ticket – aus dem Hintergrund, nie aus `_letztes`.
+ *
+ * `_letztes` gehoert dem gerade ANGEZEIGTEN Text; nach einem Reiterwechsel ist
+ * das der Text des vorigen Tickets. Wer ihn hier verwendete, baute genau den
+ * Zustand, gegen den die Schranke gebaut ist.
+ * Ein aelterer Hintergrund kennt die Anfrage nicht: dann gibt es kein
+ * Gedaechtnis (fail-closed) und der Benutzer startet neu – schlimmer waere ein
+ * Text ohne belegten Ticketbezug.
+ */
+async function gemerktesHolen(key) {
+  if (!key) return null;
+  try {
+    const a = await frage({ art: "ergebnis", key });
+    const g = a && a.ergebnis;
+    return (g && g.key === key && g.text) ? g : null;
+  } catch (e) {
+    return null;
+  }
 }
 
 /* Ein gemerktes Ergebnis wieder anzeigen.
@@ -1469,7 +1526,7 @@ $("btn-reset").addEventListener("click", async () => {
   try {
     await frage({ art: "merken", auto_gelaufen: [] });
   } catch (e) { /* aelterer Hintergrund: dann bleibt der Ring stehen */ }
-  await felderLeeren("Zurückgesetzt. Anmeldung, Adresse und Ansicht bleiben.");
+  await felderLeeren("Zurückgesetzt. Anmeldung, Adresse und Ansicht bleiben.", true);
 });
 
 el.abmelden.addEventListener("click", async () => {
@@ -2580,7 +2637,7 @@ $("btn-leiste-zugriff").addEventListener("click", () => {
      * Ticketnummer. Ohne das stuende weiter "Kein Ticket gefunden" da, obwohl
      * gerade alles dafuer erledigt wurde. */
     await tabErmitteln();
-    await ticketLageAnwenden(_letztes);
+    await ticketLageAnwenden();
   }).catch((e) => {
     melde("Die Berechtigungsabfrage schlug fehl: " + ((e && e.message) || e));
   });
@@ -2625,14 +2682,67 @@ function ansichtZeigen(wert, moeglich) {
   kasten.disabled = false;
   zeile.classList.remove("aus");
   if (!h) return;
-  h.textContent = _leiste
-    ? "Die Breite ziehst du an der Kante der Leiste."
-    : (moeglich
-      ? "Öffnet sich beim nächsten Klick auf das Symbol in der Symbolleiste."
-      : "Öffnet sich beim nächsten Klick auf das Symbol. Sollte nichts "
-        + "passieren, kennt dieser Browser keine Seitenleiste für "
-        + "Erweiterungen (nötig: Chrome/Edge ab 114, Firefox ab 115).");
+  /* ⚠ IN DER LEISTE STEHT HIER NICHTS (Vorgabe 2026-09-03).
+   *
+   * Hier stand "Die Breite ziehst du an der Kante der Leiste." – eine Auskunft
+   * an jemanden, der die Leiste bereits vor sich hat und ihre Kante sieht. Ein
+   * Hinweis, der nur den Zustand beschreibt, in dem man ohnehin steht, ist
+   * Rauschen: er kostet Platz und verdraengt die Aussagen, die sich
+   * unterscheiden. Dieselbe Entscheidung wie beim entfernten TTS/STT-Hinweis
+   * in jeder Faehigkeiten-Box.
+   * Der Hinweis fuer den Popup-Fall BLEIBT – dort sagt er, was ein Klick auf
+   * das Kaestchen bewirkt, und das ist von aussen nicht ablesbar. */
+  if (_leiste) { h.textContent = ""; h.hidden = true; return; }
+  h.textContent = moeglich
+    ? "Öffnet sich beim nächsten Klick auf das Symbol in der Symbolleiste."
+    : "Öffnet sich beim nächsten Klick auf das Symbol. Sollte nichts "
+      + "passieren, kennt dieser Browser keine Seitenleiste für "
+      + "Erweiterungen (nötig: Chrome/Edge ab 114, Firefox ab 115).";
   h.hidden = false;
+}
+
+/* ── Der Einstellungen-Abschnitt klappt ein (Vorgabe 2026-09-03) ───────────
+ *
+ * Sichtbar bleiben Zahnrad und Wort, alles darunter faellt weg. Grund: die
+ * Einstellungen werden EINMAL getroffen und gelten ueber das Fenster hinaus –
+ * sie muessen nicht bei jedem Oeffnen Platz kosten, waehrend darueber die
+ * eigentliche Arbeit steht.
+ *
+ * ⚠ DER ZUSTAND LIEGT IM HINTERGRUND (`einst_offen` in storage.local), nicht
+ * hier: dieses Fenster wird bei jedem Klick daneben ZERSTOERT. Ein Merker im
+ * Modul waere beim naechsten Oeffnen weg, und ein Abschnitt, der sich jedes
+ * Mal wieder zuklappt, ist genau die Sorte Bedienelement, die niemand benutzt.
+ *
+ * ⚠ DER ABSCHNITT STARTET ZU – auch das Markup traegt `hidden` und
+ * `aria-expanded="false"`. Ohne beides blitzte er bei jedem Oeffnen kurz auf,
+ * bevor der Zustand aus dem Hintergrund da ist (dieselbe Falle wie
+ * `sec-sect-rem-box` im Sicherheits-Reiter).
+ */
+let _einstOffen = false;
+
+function einstAbschnittZeigen(offen) {
+  _einstOffen = !!offen;
+  const knopf = $("btn-einst");
+  const inhalt = $("einst-inhalt");
+  const pfeil = $("einst-pfeil");
+  if (!knopf || !inhalt) return;
+  inhalt.hidden = !_einstOffen;
+  knopf.setAttribute("aria-expanded", _einstOffen ? "true" : "false");
+  /* Der Pfeil ist die SICHTBARE Haelfte der Aussage. `aria-expanded` allein
+   * sieht niemand, der die Seite mit den Augen liest. */
+  if (pfeil) pfeil.textContent = _einstOffen ? "▾" : "▸";
+}
+
+const _btnEinst = $("btn-einst");
+if (_btnEinst) {
+  _btnEinst.addEventListener("click", () => {
+    einstAbschnittZeigen(!_einstOffen);
+    /* NICHT abgewartet: das Aufklappen soll sofort passieren, und das Merken
+     * ist eine Bequemlichkeit. Ein Fehlschlag darf den Klick nicht
+     * verschlucken – er kostet dann nur, dass der Zustand beim naechsten
+     * Oeffnen wieder auf der Vorgabe steht. */
+    frage({ art: "merken", einst_offen: _einstOffen }).catch(() => {});
+  });
 }
 
 /** Oeffnet die Leiste. Gibt zurueck, ob sie WIRKLICH aufgegangen ist.

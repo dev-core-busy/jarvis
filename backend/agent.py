@@ -382,6 +382,38 @@ _CMD_WRAPPERS = re.compile(
 )
 
 
+def _cmd_segmente(cmd: str) -> list:
+    """Zerlegt einen Shell-Befehl in Segmente und streift die Wrapper ab.
+
+    Rueckgabe: die Texte, die jeweils an einer BEFEHLSPOSITION beginnen –
+    Grundlage fuer jede Wort-Regel, die den Befehl meint und nicht ein Argument.
+
+    **Die Zerlegung gehoert auf den ENTZITIERTEN Text** (``sandbox.strip_quoted``):
+    ``_CMD_SPLIT`` trennt an ``;``/``|``/``&&``/``$(``, und ein solches Zeichen
+    INNERHALB von Anfuehrungszeichen erzeugt sonst ein Pseudo-Segment, das am
+    Anfang ein fremdes Wort tragen kann (``grep "foo; rm -rf /" datei``). Das
+    Entzitieren macht der Aufrufer, damit er im Fehlerfall selbst entscheidet.
+
+    Herausgeloest aus ``_forbidden_command_hit`` (2026-09-03), weil die
+    Internet-Heuristik dieselbe Zerlegung braucht: sie prueste bis dahin den
+    ROHEN Befehl und traf damit Wortlaute in Zeichenketten – dieselbe
+    Fehlerklasse, die fuer die verbotenen Verben am 2026-08-05 behoben wurde.
+    Zwei Fassungen waeren beim naechsten Feinschliff auseinandergelaufen.
+    """
+    out = []
+    for seg in _CMD_SPLIT.split(cmd or ""):
+        seg = seg.strip().lstrip("({ ")
+        # Wrapper wiederholt abstreifen: `sudo nohup rm -rf …`
+        for _ in range(4):
+            neu = _CMD_WRAPPERS.sub("", seg, count=1)
+            if neu == seg:
+                break
+            seg = neu.strip()
+        if seg:
+            out.append(seg)
+    return out
+
+
 def _forbidden_command_hit(cmd: str) -> str:
     """Sucht ein verbotenes Verb an einer BEFEHLSPOSITION; Rueckgabe = Treffer oder "".
 
@@ -413,16 +445,7 @@ def _forbidden_command_hit(cmd: str) -> str:
     except Exception:  # noqa: BLE001
         m = _LDAP_SHELL_FORBIDDEN.search(cmd or "")
         return m.group(0) if m else ""
-    for seg in _CMD_SPLIT.split(text):
-        seg = seg.strip().lstrip("({ ")
-        # Wrapper wiederholt abstreifen: `sudo nohup rm -rf …`
-        for _ in range(4):
-            neu = _CMD_WRAPPERS.sub("", seg, count=1)
-            if neu == seg:
-                break
-            seg = neu.strip()
-        if not seg:
-            continue
+    for seg in _cmd_segmente(text):
         m = _LDAP_SHELL_FORBIDDEN.match(seg)
         if m:
             return m.group(0)
@@ -696,22 +719,79 @@ _GENERATED_URL_RE = re.compile(
     r"/api/generated/[\w.\-]+\.(?:png|jpe?g|gif|webp|bmp|svg)", re.IGNORECASE)
 
 
-def _shell_hits_internet(cmd: str) -> bool:
-    """Heuristik: Greift dieser Shell-Befehl (vermutlich) ins Internet?
-    Loopback-Ziele bleiben erlaubt."""
+def _shell_internet_hit(cmd: str) -> str:
+    """Greift dieser Shell-Befehl (vermutlich) ins Internet? Treffer oder "".
+
+    ZWEI STUFEN, und die Trennung IST der Fix (Vorfall 2026-09-03, ECHT):
+
+    * **Nutzlast** – ``_SCRIPT_NET`` ueber den ROHEN Befehl. ``python3 -c
+      "urllib.request.urlopen('http://x')"`` steht komplett in
+      Anfuehrungszeichen; wer hier entzitiert, sieht den Zugriff nicht mehr.
+    * **Werkzeuge** – ``_NET_TOOLS``/``_GIT_NET``/``_DL_TOOLS`` nur an einer
+      BEFEHLSPOSITION (``_cmd_segmente`` auf dem entzitierten Text, ``match``
+      statt ``search``).
+
+    **Warum nicht wie vorher ``search`` ueber den ganzen Befehl:** das traf jedes
+    Wort, auch als Beschriftung in einer Zeichenkette. Gemessen an einem echten
+    Lauf auf ECHT – ein Diagramm der Firewall-Freigaben:
+
+        ports = [("22","SSH"), ("80","HTTP"), ("443","HTTPS")]
+            -> _NET_TOOLS  Treffer 'SSH'
+            -> _DL_TOOLS   Treffer 'HTTP'  +  _BARE_EXTERNAL_HOST 'matplotlib.use'
+
+    Ein Benutzer ohne Internet-Freigabe konnte damit **kein einziges Netz- oder
+    Portdiagramm zeichnen**, und die Meldung nannte "curl/wget/ssh/git" – daraus
+    kann weder er noch das Modell ableiten, was zu aendern ist; das Modell
+    probiert danach Varianten, bis der Lauf aus ist. Es ist dieselbe
+    Fehlerklasse, die am 2026-08-05 fuer ``_LDAP_SHELL_FORBIDDEN`` behoben wurde
+    (``grep "systemctl restart" …`` sperrte Konten) – nur war sie hier nie
+    angewandt, und es gab keinen Waechter, der das gemeldet haette.
+
+    Der dritte Treffer zeigt den Zusatzschaden: ``matplotlib.use`` sieht fuer
+    ``_BARE_EXTERNAL_HOST`` wie ein Hostname aus. Deshalb werden URL und
+    schemenloser Host nur noch geprueft, wenn ein Download-Werkzeug WIRKLICH an
+    Befehlsposition steht; dann aber weiter am rohen Befehl (die URL steckt in
+    der Regel in Anfuehrungszeichen).
+
+    **Diese Schicht ist Tiefenverteidigung, nicht die Grenze.** Benutzer ohne
+    Internet-Freigabe laufen als eigener, netzgesperrter OS-Benutzer
+    (``sandbox_shell_user_noinet`` + Egress-Filter) – deshalb ist ein
+    Fehlalarm hier reiner Funktionsverlust ohne Sicherheitsgewinn. Ein
+    Fehltreffer wird ausserdem NICHT als Sicherheitsverstoss protokolliert
+    (siehe Dispatch), kann also kein Konto sperren.
+    """
     if not cmd:
-        return False
-    if _SCRIPT_NET.search(cmd) or _NET_TOOLS.search(cmd) or _GIT_NET.search(cmd):
-        return True
-    if _DL_TOOLS.search(cmd):
+        return ""
+    m = _SCRIPT_NET.search(cmd)
+    if m:
+        return m.group(0)
+    try:
+        from backend import sandbox as _sb
+        text = _sb.strip_quoted(cmd)
+    except Exception:  # noqa: BLE001
+        text = cmd                      # fail-closed: dann prueft die Regel alles
+    for seg in _cmd_segmente(text):
+        m = _NET_TOOLS.match(seg) or _GIT_NET.match(seg)
+        if m:
+            return m.group(0)
+        m = _DL_TOOLS.match(seg)
+        if not m:
+            continue
+        # Ein Download-Werkzeug steht an Befehlsposition – ab hier wieder der
+        # ROHE Befehl: `curl "https://…"` traegt sein Ziel in Anfuehrungszeichen.
         if _URL_EXTERNAL.search(cmd):
-            return True
+            return m.group(0)
         # Schemenloser externer Host (z.B. 'curl example.com'). Nur pruefen, wenn
         # gar kein Schema vorkommt – sonst wuerden Datei-Argumente wie 'out.json'
         # bei erlaubten localhost-URLs Fehlalarme ausloesen.
         if '://' not in cmd and _BARE_EXTERNAL_HOST.search(cmd):
-            return True
-    return False
+            return m.group(0)
+    return ""
+
+
+def _shell_hits_internet(cmd: str) -> bool:
+    """Bool-Fassung von ``_shell_internet_hit`` (Bestands-Aufrufer)."""
+    return bool(_shell_internet_hit(cmd))
 
 # ── Instructions aus data/instructions/*.md laden ─────────────────────────
 #
@@ -3517,9 +3597,16 @@ KRITISCH – Autonomie-Regeln:
                     print(f"[AGENT] BLOCKED Internet-Tool '{name}' fuer User '{_uname}' (kein Internet-Zugang)", flush=True)
                     result = "Zugriff verweigert: Internet-Abfragen sind fuer deinen Benutzer nicht freigeschaltet."
                     _ldap_blocked = True
-                elif name == "shell_execute" and _shell_hits_internet(args.get("command", "")):
-                    print(f"[AGENT] BLOCKED Internet-Shell fuer User '{_uname}' (kein Internet-Zugang)", flush=True)
-                    result = "Zugriff verweigert: Internet-Zugriff (curl/wget/ssh/git/…) ist fuer deinen Benutzer nicht freigeschaltet."
+                elif name == "shell_execute" and (_net_hit := _shell_internet_hit(args.get("command", ""))):
+                    print(f"[AGENT] BLOCKED Internet-Shell fuer User '{_uname}' "
+                          f"(kein Internet-Zugang, Treffer '{_net_hit}')", flush=True)
+                    # Das getroffene Wort NENNEN: "curl/wget/ssh/git/…" liess weder
+                    # den Benutzer noch das Modell erkennen, was zu aendern ist –
+                    # das Modell probierte danach Varianten desselben Befehls.
+                    result = (f"Zugriff verweigert: '{_net_hit}' greift ins Internet, und das ist fuer "
+                              "deinen Benutzer nicht freigeschaltet. Dasselbe Wort in "
+                              "Anfuehrungszeichen (z.B. als Beschriftung in einem Diagramm) ist "
+                              "erlaubt – nur als Befehl nicht.")
                     _ldap_blocked = True
 
             # SAP-Zugriff: SAP-Tools nur fuer freigeschaltete Benutzer (Einstellungen

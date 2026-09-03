@@ -344,6 +344,33 @@ def _under(rp: Path, roots) -> bool:
     return False
 
 
+def _fremdes_arbeitsverzeichnis(rp: Path, benutzer: str) -> str:
+    """Begruendung, wenn der Pfad in den Arbeitsbereich eines ANDEREN gehoert.
+
+    Die Arbeitskopien der Anhaenge und die Arbeitsverzeichnisse liegen je Benutzer
+    unter ``/tmp/jarvis-anhaenge/<kennung>/`` bzw. ``/tmp/jarvis-arbeit/<kennung>/``.
+    Der Mount-Namespace verbirgt sie nur vor der SHELL; ein Werkzeug im
+    Dienstprozess (``filesystem``, ``office_read``, ``xlsx_read_range``,
+    ``create_chart``) laeuft daneben und koennte sie sonst einfach oeffnen –
+    lesend UND schreibend.
+
+    EINE Fassung fuer beide Richtungen: bis 2026-09-03 stand diese Pruefung nur im
+    read-Zweig, und der write-Zweig lief daran vorbei. Rueckgabe "" = in Ordnung
+    (auch fuer jeden Pfad ausserhalb dieser Wurzeln – dort stellt sich die Frage
+    nicht). Fehler beim Pruefen sind kein Verbot: ohne ``lauf_tmp`` gibt es die
+    Verzeichnisse gar nicht.
+    """
+    try:
+        from backend import lauf_tmp as _lt
+        if _lt.gehoert_anhang(rp, benutzer) is False:
+            return "dieser Anhang gehört einem anderen Benutzer"
+        if _lt.gehoert_arbeitsbereich(rp, benutzer) is False:
+            return "diese Datei gehört einem anderen Benutzer"
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
 def authorize_fs(action: str, path: str, username: str | None = None) -> tuple[bool, str]:
     """Zugriffsentscheidung fuers filesystem-Tool (nur Domain-Nutzer).
 
@@ -370,6 +397,21 @@ def authorize_fs(action: str, path: str, username: str | None = None) -> tuple[b
             return False, "geschützte Datei"
         if not _under(rp, WRITE_ROOTS):
             return False, "Schreiben ist nur im Arbeitsbereich (/tmp oder data/documents) erlaubt"
+        # DIE EIGENTUEMER-SCHRANKE GALT NUR FUERS LESEN (gefunden 2026-09-03).
+        # Der Umbau vom 23.08. hat den Backend-Weg fuer `read`/`list` geschlossen,
+        # den fuer `write` nicht: `filesystem write /tmp/jarvis-arbeit/<fremd>/
+        # ergebnis.xlsx` lief durch – das Verzeichnis ist 0770 mit der DIENSTgruppe,
+        # und das Werkzeug laeuft im Dienstprozess. Ein Domain-Benutzer konnte damit
+        # die Ergebnisdatei eines anderen ueberschreiben; die Namen sind ratbar
+        # (`ergebnis.xlsx`), und vor dem 23.08. nannte `filesystem list /tmp` sie ihm.
+        # Ohne diese Zeilen waere der EACCES-Rueckfall in filesystem.py (unlink +
+        # neu anlegen) sogar ein Weg, fremde Dateien zu LOESCHEN.
+        # data/documents ist hier ausgenommen: dort gilt "wer schreibt, besitzt"
+        # (documents.register_upload), und `may_see_document` ist fail-closed –
+        # eine NEUE Datei waere damit fuer ihren eigenen Erzeuger unschreibbar.
+        _fremd = _fremdes_arbeitsverzeichnis(rp, benutzer)
+        if _fremd:
+            return False, _fremd
         return True, ""
     # read / list / exists
     if is_sensitive(rp):
@@ -388,18 +430,9 @@ def authorize_fs(action: str, path: str, username: str | None = None) -> tuple[b
     # anderen ueber JEDES Backend-Werkzeug oeffnen (office_read,
     # xlsx_read_range, create_chart), sobald er den Namen kannte. Den Namen
     # nannte ihm `filesystem list /tmp`.
-    try:
-        from backend import lauf_tmp as _lt
-        if _lt.gehoert_anhang(rp, benutzer) is False:
-            return False, "dieser Anhang gehört einem anderen Benutzer"
-        # Dasselbe fuer die Arbeitsverzeichnisse. Der Namespace verbirgt sie nur
-        # vor der SHELL; ein Werkzeug im Dienstprozess (filesystem, office_read,
-        # xlsx_read_range) koennte die Ergebnisdatei eines FREMDEN Benutzers
-        # sonst einfach oeffnen – und ein Verzeichnis-Listing nennt die Namen.
-        if _lt.gehoert_arbeitsbereich(rp, benutzer) is False:
-            return False, "diese Datei gehört einem anderen Benutzer"
-    except Exception:  # noqa: BLE001
-        pass
+    _fremd = _fremdes_arbeitsverzeichnis(rp, benutzer)
+    if _fremd:
+        return False, _fremd
     return True, ""
 
 

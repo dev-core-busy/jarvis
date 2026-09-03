@@ -60,6 +60,62 @@ class FileSystemTool(BaseTool):
         except Exception:
             pass
 
+    @staticmethod
+    def _schreibe(p: Path, text: str, anhaengen: bool) -> None:
+        """Schreibt – und ERSETZT eine Datei, die der Shell-Seite gehoert.
+
+        WARUM DAS NOETIG IST (Vorfall 2026-09-03, ECHT): im Arbeitsverzeichnis
+        eines Benutzers schreiben ZWEI Identitaeten – die Shell als
+        ``jarvis_sandbox*``, dieses Werkzeug als Dienstbenutzer. Eine vorhandene
+        Datei zu ueberschreiben verlangt Schreibrecht auf der DATEI; das
+        Verzeichnis-Bit hilft dabei nicht. Gemeldet wurde deshalb ein blankes
+        "Zugriff verweigert: /tmp/jarvis-arbeit/<kennung>/firewall_chart.py" –
+        ein EACCES, der wie eine Sicherheitsentscheidung aussieht, waehrend die
+        Datei dem Benutzer selbst gehoert und nur ein Shell-Schritt davor sie
+        angelegt hat.
+
+        ``ARBEIT_MODUS``/``umask 002`` beseitigen die Ursache fuer NEUE Dateien.
+        Dieser Zweig ist das Netz fuer den Altbestand: nach einem Deploy liegen
+        genau die 0644-Dateien der letzten Stunden noch da – und das
+        Arbeitsverzeichnis haengt am Benutzer, nicht am Lauf.
+
+        Ersetzen ist ueber das VERZEICHNIS erlaubt (0770, Dienstgruppe), also
+        ``unlink`` + neu anlegen. Beim Anhaengen wird der alte Inhalt vorher
+        gelesen – lesen darf der Dienst immer.
+
+        **Nur im Arbeitsverzeichnis** (``lauf_tmp.im_lauf``): sonst waere das ein
+        allgemeiner "loesche, was du nicht ueberschreiben darfst"-Mechanismus.
+        Dass der Pfad ueberhaupt hierher kommt, hat ``authorize_fs`` entschieden –
+        seit demselben Tag prueft es auch beim Schreiben, dass der Arbeitsbereich
+        dem Benutzer gehoert.
+        """
+        modus = "a" if anhaengen else "w"
+        try:
+            with open(p, modus, encoding="utf-8") as f:
+                f.write(text)
+        except PermissionError:
+            from backend import lauf_tmp as _lt
+            if not (p.is_file() and _lt.im_lauf(p)):
+                raise
+            alt = ""
+            if anhaengen:
+                try:
+                    alt = p.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    raise                       # nicht lesbar -> nichts erfinden
+            p.unlink()
+            p.write_text(alt + text, encoding="utf-8")
+            print(f"[FS] {p} gehoerte der Shell-Seite – ersetzt", flush=True)
+        # Beide Seiten sollen die Datei anfassen koennen: das Backend hat gerade
+        # mit umask 022 geschrieben, der Sandbox-Benutzer ist in keiner
+        # gemeinsamen Gruppe. Ohne diesen Schritt scheitert `>> /tmp/daten.csv`
+        # im Lauf an einer Datei, die das Modell selbst angelegt hat.
+        try:
+            from backend import lauf_tmp as _lt
+            _lt.im_lauf_freigeben(p)
+        except Exception:  # noqa: BLE001
+            pass
+
     async def execute(
         self,
         action: str,
@@ -86,14 +142,13 @@ class FileSystemTool(BaseTool):
 
             elif action == "write":
                 p.parent.mkdir(parents=True, exist_ok=True)
-                p.write_text(content, encoding="utf-8")
+                self._schreibe(p, content, anhaengen=False)
                 self._claim(p)
                 return f"✅ Datei geschrieben: {p} ({len(content)} Zeichen)"
 
             elif action == "append":
                 p.parent.mkdir(parents=True, exist_ok=True)
-                with open(p, "a", encoding="utf-8") as f:
-                    f.write(content)
+                self._schreibe(p, content, anhaengen=True)
                 self._claim(p)
                 return f"✅ An Datei angehängt: {p}"
 
@@ -149,7 +204,13 @@ class FileSystemTool(BaseTool):
             else:
                 return f"Unbekannte Aktion: {action}"
 
-        except PermissionError:
-            return f"❌ Zugriff verweigert: {p}"
+        except PermissionError as e:
+            # Kein Policy-Verbot, sondern das Betriebssystem – das muss die
+            # Meldung sagen. "Zugriff verweigert" allein hat auf ECHT die Suche
+            # in die falsche Richtung geschickt (vermutete Sandbox-Regel), und
+            # das Modell wich auf einen anderen Weg aus statt den Pfad zu aendern.
+            return (f"❌ Dateisystem-Fehler (keine Berechtigung) bei {p}: {e.strerror}. "
+                    "Das ist keine Sicherheitssperre – die Datei gehört einem anderen "
+                    "Systemkonto. Versuche einen anderen Dateinamen.")
         except Exception as e:
             return f"Fehler: {str(e)}"

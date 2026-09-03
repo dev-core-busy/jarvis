@@ -98,6 +98,7 @@ import os
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import time
 import uuid
@@ -111,6 +112,42 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # ploetzlich Verwaltungsverzeichnisse zeigt.
 TMP_ECHT = Path("/tmp")
 ARBEIT_ROOT = TMP_ECHT / "jarvis-arbeit"
+
+# Modus der Arbeitsverzeichnisse: 0770 PLUS setgid (Vorfall 2026-09-03, ECHT).
+#
+# IN DIESEM VERZEICHNIS SCHREIBEN ZWEI IDENTITAETEN: die Shell als
+# ``jarvis_sandbox*``, die Backend-Werkzeuge (filesystem, office, xlsx_*,
+# create_chart) als Dienstbenutzer. Mit umask 022 entstehen dabei 0644-Dateien –
+# und eine vorhandene Datei zu UEBERSCHREIBEN verlangt Schreibrecht auf der
+# DATEI, nicht auf dem Verzeichnis. Ergebnis: keine Seite konnte die Datei der
+# anderen ersetzen. Gemeldet als "Zugriff verweigert:
+# /tmp/jarvis-arbeit/<kennung>/firewall_chart.py" – eine Meldung, die wie eine
+# Sicherheitsentscheidung aussieht und ein simpler EACCES ist. Weil das
+# Verzeichnis am BENUTZER haengt und Stunden ueberlebt, blockiert auch das
+# Zwischenprodukt von vorhin.
+#
+# ``setgid`` gibt jeder neu erzeugten Datei die Gruppe des Verzeichnisses
+# (= Dienstgruppe) statt der Primaergruppe des Erzeugers. Zusammen mit
+# ``umask 002`` in der Sandbox (siehe ``sandbox_befehl``) ist eine Datei der
+# Shell damit fuer das Backend beschreibbar. Es vererbt sich auch auf
+# Unterverzeichnisse, die der Lauf selbst anlegt (``mkdir /tmp/zwischen``, der
+# matplotlib-Cache) – die gehoerten vorher dem Sandbox-Benutzer mit dessen
+# eigener Gruppe, und das Aufraeumen durch den Dienst scheiterte daran STILL.
+ARBEIT_MODUS = 0o2770
+
+# Die GEGENRICHTUNG braucht mehr, und das ist eine gemessene Einschraenkung, kein
+# Versehen: die Sandbox-Konten sind ausschliesslich in ihrer EIGENEN Gruppe
+# (nachgemessen ``uid=996(jarvis_sandbox_noinet) Gruppen=986(...)``) – und das
+# muss so bleiben, sonst kaemen sie ueber die Dienstgruppe an ``data/documents``,
+# ``data/chats`` und ``data/logs``. Eine Datei des Dienstes ist fuer die Shell
+# also nur ueber das "other"-Bit erreichbar. Deshalb 0666 fuer Dateien, die das
+# Backend IM Arbeitsverzeichnis anlegt.
+#
+# Das ist keine Weltfreigabe: das Verzeichnis selbst ist 0770 – wer nicht der
+# Sandbox-Benutzer ist und nicht in der Dienstgruppe, kann den Pfad nicht einmal
+# aufloesen (Positivkontrolle im Waechter). Dieselbe Argumentation wie bei den
+# Anhang-Arbeitskopien (Verzeichnis-Gate statt Dateirechte).
+LAUF_DATEI_MODUS = 0o666
 ANH_ROOT = TMP_ECHT / "jarvis-anhaenge"
 
 # Ziel des matplotlib-Caches IM Lauf. Er liegt jetzt einfach IM Arbeits-
@@ -431,7 +468,8 @@ def arbeit_bereitstellen(kennung: str, sandbox_user: str) -> Path | None:
         ziel.mkdir(parents=True, exist_ok=True)
         _, gid = _dienst_ids()
         os.chown(ziel, pw.pw_uid, gid)
-        os.chmod(ziel, 0o770)
+        # chmod NACH chown: ein chown loescht setgid/setuid wieder.
+        os.chmod(ziel, ARBEIT_MODUS)
         return ziel
     except Exception as e:  # noqa: BLE001
         _log(f"Arbeitsverzeichnis {ziel} nicht bereitstellbar: {e}")
@@ -562,7 +600,7 @@ def eigenes_verzeichnis_anlegen() -> Path | None:
         # alles in Ordnung war. Eine Meldung, die im Normalbetrieb erscheint,
         # entwertet das Journal.
         if lauf.verzeichnis.stat().st_uid == os.getuid():
-            os.chmod(lauf.verzeichnis, 0o770)
+            os.chmod(lauf.verzeichnis, ARBEIT_MODUS)
     except Exception as e:  # noqa: BLE001
         _log(f"Arbeitsverzeichnis nicht anlegbar: {e}")
         return None
@@ -724,6 +762,49 @@ def temp_verzeichnis() -> Path:
     return TMP_ECHT
 
 
+def im_lauf(pfad) -> bool:
+    """Liegt dieser Pfad in EINEM Arbeitsverzeichnis (egal welchem)?"""
+    try:
+        Path(os.path.realpath(str(pfad))).relative_to(ARBEIT_ROOT)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def im_lauf_freigeben(pfad) -> None:
+    """Macht eine vom DIENST geschriebene Datei im Arbeitsverzeichnis auch fuer
+    die Shell beschreibbar (``LAUF_DATEI_MODUS``).
+
+    Die Gegenrichtung zu ``umask 002`` + setgid: das Backend legt mit umask 022
+    an, und der Sandbox-Benutzer ist in keiner gemeinsamen Gruppe – ohne diesen
+    Schritt scheitert `echo x >> /tmp/daten.csv` im Lauf an einer Datei, die das
+    Modell selbst kurz zuvor per `filesystem write` angelegt hat.
+
+    **Ausserhalb der Arbeitsverzeichnisse passiert NICHTS.** Im echten ``/tmp``
+    (1777) waere 0666 eine Freigabe an jeden; die Schranke ist hier das
+    Verzeichnis-Gate 0770, nicht das Datei-Bit. Fail-safe in die richtige
+    Richtung: was nicht sicher im Arbeitsbereich liegt, bleibt wie es ist.
+    """
+    try:
+        if not im_lauf(pfad):
+            return
+        st = os.stat(pfad)
+        if not stat.S_ISREG(st.st_mode):
+            return
+        # NUR als Eigentuemer, und nur wenn wirklich etwas fehlt. Die Datei kann
+        # der Shell-Seite gehoeren (dann ist sie durch setgid + umask 002 schon
+        # richtig) – ``chmod`` auf eine fremde Datei ist EPERM, und die erste
+        # Fassung machte daraus im LIVE-Lauf eine Fehlerzeile bei JEDEM
+        # `filesystem write`, obwohl alles funktionierte. Dieselbe Falle wie in
+        # ``eigenes_verzeichnis_anlegen`` (2026-08-23): eine Meldung, die im
+        # Normalbetrieb erscheint, entwertet das Journal.
+        if (st.st_mode & 0o777) == LAUF_DATEI_MODUS or st.st_uid != os.getuid():
+            return
+        os.chmod(pfad, LAUF_DATEI_MODUS)
+    except OSError as e:
+        _log(f"Datei im Lauf nicht freigebbar ({pfad}): {e}")
+
+
 def temp_datei_freigeben(pfad: str) -> None:
     """Macht ein vom Dienst geschriebenes Skript fuer den Lauf LESBAR (0644).
 
@@ -739,7 +820,9 @@ def temp_datei_freigeben(pfad: str) -> None:
     Lauf-Verzeichnis.
     """
     try:
-        os.chmod(pfad, 0o644)
+        # Im Arbeitsverzeichnis gleich beidseitig beschreibbar (LAUF_DATEI_MODUS),
+        # sonst wie bisher 0644: im echten /tmp waere 0666 eine Weltfreigabe.
+        os.chmod(pfad, LAUF_DATEI_MODUS if im_lauf(pfad) else 0o644)
     except OSError as e:
         _log(f"Temp-Skript nicht freigebbar ({pfad}): {e}")
 
@@ -814,7 +897,7 @@ def einhaengepunkte(lauf_dir, ziele, sandbox_user: str) -> None:
                 teil = teil / stueck
                 teil.mkdir(exist_ok=True)
                 os.chown(teil, uid, gid)
-                os.chmod(teil, 0o770)
+                os.chmod(teil, ARBEIT_MODUS)
         except Exception as e:  # noqa: BLE001
             _log(f"Einhaengepunkt {ziel} nicht vorbereitbar: {e}")
 
@@ -944,6 +1027,16 @@ def sandbox_befehl(sandbox_user: str, command: str, lauf_dir=None,
         "--die-with-parent",
         "--new-session",
         "--chdir", "/tmp",
-        "--", "/bin/bash", "-c", command,
+        # umask 002: alles, was der Lauf in /tmp anlegt, wird gruppen-beschreibbar
+        # (0664/2775). Zusammen mit dem setgid-Bit des Arbeitsverzeichnisses
+        # (ARBEIT_MODUS) traegt die Datei damit die DIENSTgruppe und das Backend
+        # kann sie ersetzen – der gemeldete Fall vom 2026-09-03.
+        #
+        # NUR im isolierten Zweig: ohne Isolation liegt der Befehl im gemeinsamen
+        # /tmp (1777), dort waere eine Lockerung ohne jeden Gewinn – die Gruppe
+        # ist dann die Primaergruppe des Sandbox-Benutzers, in der niemand sonst
+        # ist. Und es steht VOR dem Befehl, nicht danach: ein `exit` im Befehl
+        # wuerde einen nachgestellten Teil verschlucken.
+        "--", "/bin/bash", "-c", "umask 002; " + command,
     ]
     return innen + " ".join(shlex.quote(t) for t in teile)

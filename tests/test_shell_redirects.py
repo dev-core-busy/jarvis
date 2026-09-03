@@ -343,9 +343,17 @@ for _n in ("_LDAP_SHELL_FORBIDDEN", "_CMD_SPLIT", "_CMD_WRAPPERS"):
     m = re.search(r'\n(' + _n + r'\s*=\s*re\.compile\(.*?\n\))', _src, re.S)
     assert m, f"{_n} nicht gefunden"
     exec(m.group(1), _ns)
-m = re.search(r'\ndef _forbidden_command_hit\(.*?(?=\ndef |\n# ──|\Z)', _src, re.S)
-exec(m.group(0), _ns)
+# TRANSITIV schneiden statt eine Liste zu pflegen: `_forbidden_command_hit` ruft
+# seit 2026-09-03 den Helfer `_cmd_segmente` (herausgeloest, weil die
+# Internet-Heuristik dieselbe Zerlegung braucht). Mit einer gepflegten Liste
+# brach dieser Harness mit einem nackten NameError ab – kein FAIL, keine
+# Bilanzzeile, der Waechter sah aus wie nicht gelaufen.
+for _fn in ("_cmd_segmente", "_forbidden_command_hit"):
+    m = re.search(r'\ndef ' + _fn + r'\(.*?(?=\ndef |\n# ──|\Z)', _src, re.S)
+    assert m, f"{_fn} nicht im Quelltext gefunden"
+    exec(m.group(0), _ns)
 hit = _ns["_forbidden_command_hit"]
+assert hit("sudo systemctl restart x"), "Positivkontrolle des Schnitts: Verb muss treffen"
 
 # Muss ERLAUBT sein: das Verb ist Suchbegriff, Dateiname oder Argument.
 for c in ['grep "systemctl restart" /tmp/journal.txt',

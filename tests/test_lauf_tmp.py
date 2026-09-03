@@ -389,9 +389,18 @@ with lt.lauf_scope("alice", privilegiert=False) as lauf:
     skript.write_text("print(1)")
     os.chmod(skript, 0o600)
     lt.temp_datei_freigeben(str(skript))
-    pruef("Temp-Skript wird auf 0644 freigegeben",
-          (os.stat(skript).st_mode & 0o777) == 0o644,
+    # Geprueft wird die EIGENSCHAFT, nicht die Zahl: der Sandbox-Benutzer ist in
+    # keiner gemeinsamen Gruppe, er kommt nur ueber das "other"-Bit an das Skript.
+    # (Stand 2026-09-03 sind es im Arbeitsverzeichnis 0666 statt 0644 – eine feste
+    # Zahl hat hier genau eine Aenderung spaeter einen Fehler gemeldet, den es
+    # nicht gab.)
+    _m = os.stat(skript).st_mode & 0o777
+    pruef("Temp-Skript ist fuer den Sandbox-Benutzer lesbar",
+          bool(_m & 0o004),
           "ALTFEHLER: mit 0600 kann jarvis_sandbox es nicht ausfuehren (Errno 13)")
+    pruef("Temp-Skript im Lauf ist beidseitig beschreibbar",
+          bool(_m & 0o002),
+          "im Arbeitsverzeichnis schreiben zwei Identitaeten (LAUF_DATEI_MODUS)")
     # Eigentuemer des Arbeitsbereichs
     fremder = lt.ARBEIT_ROOT / lt.benutzer_kennung("bob")
     fremder.mkdir(parents=True, exist_ok=True)

@@ -19,13 +19,13 @@
     // Token jeder Oberflaeche geoeffnet worden sein.
     var TOKEN_KEYS = ['jarvis_token', 'jarvis_chat_token', 'jarvis_uc_token'];
 
-    function token() {
     /* Abruf-Schluessel statt Sitzungstoken in ?token= (frontend/js/dlkey.js). */
     function _dlk() {
         return (window.JarvisDL && window.JarvisDL.schluessel())
             || localStorage.getItem('jarvis_token') || '';
     }
 
+    function token() {
         for (var i = 0; i < TOKEN_KEYS.length; i++) {
             var t = null;
             try { t = localStorage.getItem(TOKEN_KEYS[i]); } catch (e) { t = null; }

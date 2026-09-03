@@ -24,6 +24,17 @@ class JarvisVisionManager {
         this._lastFaceKey = '';         // Letzte erkannte Gesichter (Duplikat-Vermeidung)
     }
 
+    /* Abruf-Schluessel statt Sitzungstoken in ?token= (frontend/js/dlkey.js).
+       Die Vision-Medien haengen an require_admin_or_query – der Schluessel
+       traegt den Benutzer, die Admin-Pruefung dort arbeitet unveraendert.
+       ⚠ METHODE, keine Funktion in _feedTick(): die sechs Aufrufstellen liegen
+       in fuenf verschiedenen Methoden. Dort eingeschachtelt waeren fuenf davon
+       ausser Reichweite – genau der Fehler vom 2026-09-02. */
+    _dlk() {
+        return (window.JarvisDL && window.JarvisDL.schluessel())
+            || localStorage.getItem('jarvis_token') || '';
+    }
+
     /* ── Lifecycle ──────────────────────────────────────────────────── */
 
     async refresh() {
@@ -86,14 +97,6 @@ class JarvisVisionManager {
         const img = document.getElementById('vis-feed-img');
         if (!img) return;
         const token = encodeURIComponent(this._token());
-    /* Abruf-Schluessel statt Sitzungstoken in ?token= (frontend/js/dlkey.js).
-       Die Vision-Medien haengen an require_admin_or_query – der Schluessel
-       traegt den Benutzer, die Admin-Pruefung dort arbeitet unveraendert. */
-    function _dlk() {
-        return (window.JarvisDL && window.JarvisDL.schluessel())
-            || localStorage.getItem('jarvis_token') || '';
-    }
-
         if (!token) return;
         const newImg = new Image();
         newImg.onload = () => {
@@ -107,7 +110,7 @@ class JarvisVisionManager {
             const ph = document.getElementById('vis-feed-placeholder');
             if (ph) ph.textContent = window.t('vis.no_cam_image');
         };
-        newImg.src = `/api/vision/snapshot?t=${Date.now()}&token=${_dlk()}`;
+        newImg.src = `/api/vision/snapshot?t=${Date.now()}&token=${this._dlk()}`;
     }
 
     /* ── Log ──────────────────────────────────────────────────────── */
@@ -239,8 +242,7 @@ class JarvisVisionManager {
             if (this._feedActive) {
                 const img = document.getElementById('vis-feed-img');
                 if (img) {
-                    const token = encodeURIComponent(this._token());
-                    img.src = `/api/vision/snapshot?t=${Date.now()}&token=${_dlk()}`;
+                    img.src = `/api/vision/snapshot?t=${Date.now()}&token=${this._dlk()}`;
                     if (this._feedFrame === 0) this._feedFrame = 1;
                 }
             }
@@ -297,11 +299,10 @@ class JarvisVisionManager {
             el.innerHTML = '<span class="vis-no-faces">' + window.t('vision.no_faces_detected') + '</span>';
             return;
         }
-        const token = encodeURIComponent(this._token());
         el.innerHTML = faces.map((f, i) => {
             const conf = f.confidence ? `${(f.confidence * 100).toFixed(0)}%` : '';
             const icon = f.name === 'Unbekannt' ? '👤' : '✅';
-            const cropUrl = `/api/vision/face-crop/${i}?t=${Date.now()}&token=${_dlk()}`;
+            const cropUrl = `/api/vision/face-crop/${i}?t=${Date.now()}&token=${this._dlk()}`;
             return `<div class="vis-face-badge">
                 <img class="vis-face-crop" src="${cropUrl}"
                      onerror="this.style.display='none'" />
@@ -429,10 +430,9 @@ class JarvisVisionManager {
             this._wizardDetectPoll = null;
 
             // Face-Crop anzeigen
-            const token = encodeURIComponent(this._token());
             const cropImg = document.getElementById('vis-wizard-crop');
             if (cropImg) {
-                cropImg.src = `/api/vision/face-crop/0?t=${Date.now()}&token=${_dlk()}`;
+                cropImg.src = `/api/vision/face-crop/0?t=${Date.now()}&token=${this._dlk()}`;
             }
 
             // Schritt 2: Name eingeben
@@ -669,7 +669,6 @@ class JarvisVisionManager {
         }
 
         actions = actions || this._availableActions || [];
-        const token = encodeURIComponent(this._token());
 
         el.innerHTML = profiles.map(p => {
             const date = p.created_at ? new Date(p.created_at).toLocaleDateString('de-DE') : '';
@@ -707,7 +706,7 @@ class JarvisVisionManager {
             return `
                 <div class="vis-profile-item">
                     <div class="vis-profile-header">
-                        <img class="vis-profile-thumb" src="/api/vision/thumbnail/${encodeURIComponent(p.id)}?t=${Date.now()}&token=${_dlk()}"
+                        <img class="vis-profile-thumb" src="/api/vision/thumbnail/${encodeURIComponent(p.id)}?t=${Date.now()}&token=${this._dlk()}"
                              onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2250%22 height=%2250%22><rect fill=%22%23333%22 width=%2250%22 height=%2250%22/><text x=%2225%22 y=%2232%22 text-anchor=%22middle%22 fill=%22%23888%22 font-size=%2220%22>?</text></svg>'" />
                         <div class="vis-profile-info">
                             <strong>${this._esc(p.name)}</strong>
@@ -792,8 +791,7 @@ class JarvisVisionManager {
     }
 
     async _testGreetAudio(profileId) {
-        const token = encodeURIComponent(this._token());
-        const url = `/api/vision/greet-audio/${encodeURIComponent(profileId)}?token=${_dlk()}`;
+        const url = `/api/vision/greet-audio/${encodeURIComponent(profileId)}?token=${this._dlk()}`;
 
         // Button visuell als "ladend" markieren
         const btn = document.getElementById(`vis-test-${profileId}`);

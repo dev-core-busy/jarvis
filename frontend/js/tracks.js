@@ -50,7 +50,6 @@
         return (s && s !== key) ? s : fallback;
     }
     function sprache() { return (window._lang === 'en') ? 'en' : 'de'; }
-    function token() {
     /* Abruf-Schluessel statt Sitzungstoken in ?token= (frontend/js/dlkey.js).
        Rueckfall auf das Sitzungstoken nur, solange das Modul fehlt oder der
        Schluessel noch unterwegs ist – sonst waere ein Bild/Download tot. */
@@ -59,6 +58,7 @@
             || localStorage.getItem('jarvis_token') || '';
     }
 
+    function token() {
         for (var i = 0; i < TOKEN_KEYS.length; i++) {
             var v = localStorage.getItem(TOKEN_KEYS[i]);
             if (v) return v;

@@ -20,7 +20,6 @@
     // Reihenfolge: app.js (index.html), chat.js (chat.html), userchat.js (userchat.html)
     const TOKEN_KEYS = ['jarvis_token', 'jarvis_chat_token', 'jarvis_uc_token'];
 
-    function _token() {
     /* Abruf-Schluessel statt Sitzungstoken in ?token= (frontend/js/dlkey.js).
        Rueckfall auf das Sitzungstoken nur, solange das Modul fehlt oder der
        Schluessel noch unterwegs ist – sonst waere ein Bild/Download tot. */
@@ -29,6 +28,7 @@
             || localStorage.getItem('jarvis_token') || '';
     }
 
+    function _token() {
         for (const k of TOKEN_KEYS) {
             const v = localStorage.getItem(k);
             if (v) return v;

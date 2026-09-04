@@ -5368,7 +5368,19 @@ KRITISCH – Autonomie-Regeln:
             p = _hostpfad(raw)
             try:
                 if not p.is_file():
-                    _verfehlt_merken(raw, disp_name, "Datei nicht vorhanden")
+                    # SCHON GELIEFERT ist keine verfehlte Lieferung - dieselbe
+                    # Schranke, die der Pfad-Zweig (b) seit 2026-08-24 hat und
+                    # die hier fehlte. `_ingest` VERSCHIEBT die Quelle nach
+                    # data/documents; danach ist der /tmp-Pfad zwangslaeufig
+                    # weg. Wiederholt das Modell den Marker in der Endantwort -
+                    # und der System-Prompt verlangt ihn ausdruecklich -, stand
+                    # die Warnung NEBEN dem fertigen Chip und forderte zum
+                    # Neuerzeugen einer Datei auf, die es laengst gibt (auf
+                    # ECHT gemeldet am 2026-09-04, prozessautomatisierung.pptx).
+                    # Kein Journal-Eintrag in diesem Fall: er kaeme im
+                    # Normalbetrieb bei jeder Auslieferung.
+                    if not _schon(p):
+                        _verfehlt_merken(raw, disp_name, "Datei nicht vorhanden")
                     continue
                 rp = p.resolve()
                 key = str(rp)

@@ -362,6 +362,50 @@ def main() -> int:
         pruefe("dann auch KEINE Warnung",
                not any("⚠️" in m for m in s11.gesendet), str(s11.gesendet))
 
+        abschnitt("8) Wiederholter Liefer-Marker warnt NICHT (Vorfall 2026-09-04)")
+        # Gemeldet von ECHT: die PPTX wurde erzeugt, der Download funktionierte -
+        # und darunter stand "Konnte nicht zum Download bereitgestellt werden:
+        # prozessautomatisierung.pptx ... bitte die Datei erneut erzeugen lassen".
+        # Ursache: `_ingest` VERSCHIEBT die Quelle. Wurde die Datei schon aus
+        # einem Werkzeug-Ergebnis ausgeliefert und wiederholt das Modell in der
+        # Endantwort den Marker (der System-Prompt verlangt ihn), fand der
+        # Marker-Zweig sie nicht mehr - ihm fehlte der `_schon`-Waechter, den
+        # der Pfad-Zweig seit 2026-08-24 hat.
+        #
+        # Gemessen wird die EIGENSCHAFT (kommt eine Warnung neben dem Chip?),
+        # nicht das Vorkommen von `_schon` im Quelltext - eine Textsuche bliebe
+        # gruen, sobald jemand den Zweig spaeter ueberspringt.
+        def zwei_durchgaenge(t1, t2):
+            """Werkzeug-Ergebnis (melden=False) + Endantwort (melden=True)."""
+            d = Path("/tmp") / f"prozessautomatisierung_{uuid.uuid4().hex[:6]}.pptx"
+            d.write_bytes(b"PK\x03\x04egal")
+            aufraeumen.append(d)
+            s_ = AgentStub(EXT)
+            gesehen = set()
+            asyncio.run(deliver(s_, None, t1.format(p=d.as_posix()), gesehen, "u", jetzt, False))
+            chip = chip_url(s_.gesendet)
+            asyncio.run(deliver(s_, None, t2.format(p=d.as_posix()), gesehen, "u", jetzt, True))
+            return chip, [m for m in s_.gesendet if "Konnte nicht zum Download" in m]
+
+        for _name, _t1, _t2 in (
+                ("Pfad -> Pfad", "Gespeichert: {p}", "Fertig, die Datei liegt unter {p}."),
+                ("Pfad -> Marker", "Gespeichert: {p}", "Fertig.\n[[JARVIS_DELIVER:{p}]]"),
+                ("Marker -> Marker", "[[JARVIS_DELIVER:{p}]]", "Fertig.\n[[JARVIS_DELIVER:{p}]]"),
+                ("Marker -> Pfad", "[[JARVIS_DELIVER:{p}]]", "Fertig, die Datei liegt unter {p}.")):
+            _chip, _warn = zwei_durchgaenge(_t1, _t2)
+            pruefe(f"{_name}: der Chip entsteht", _chip is not None)
+            pruefe(f"{_name}: KEINE Warnung neben dem fertigen Chip", not _warn, str(_warn))
+
+        # Positivkontrolle - ohne sie waere "keine Warnung" trivial erfuellbar:
+        # eine Datei, die es NIE gab, muss weiterhin gemeldet werden.
+        s12 = AgentStub(EXT)
+        nie = Path("/tmp") / f"gibtsnicht_{uuid.uuid4().hex[:6]}.pptx"
+        asyncio.run(deliver(s12, None, f"[[JARVIS_DELIVER:{nie.as_posix()}]]",
+                            set(), "u", jetzt, True))
+        pruefe("eine nie erzeugte Datei wird weiterhin gemeldet",
+               any("Konnte nicht zum Download" in m and nie.name in m for m in s12.gesendet),
+               str(s12.gesendet))
+
         for f in aufraeumen:
             try:
                 f.unlink()

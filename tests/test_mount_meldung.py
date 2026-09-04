@@ -338,12 +338,9 @@ for k in ast.walk(baum_add):
 check("⚠ das mkdir des Einhaengepunkts ist abgesichert (kein HTTP 500)",
       mkdir_geschuetzt or ".mkdir(" not in add_code, add_code[:120])
 i_mkdir = add_code.find(".mkdir(")
-i_folders = add_code.find('kb_cfg["folders"]')
+i_folders = add_code.find("_kb_ordner_sicherstellen(")
 check("… und die Ordner-Eintragung folgt DANACH (sie darf nicht mitausfallen)",
       i_folders > i_mkdir >= 0, f"{i_mkdir} / {i_folders}")
-# Teilstring-Falle: "/mnt/jarvis-kb/share_1" steckt in ".../share_10".
-check("die Ordnerliste wird eintragsweise verglichen, nicht als Teilstring",
-      "folders.split(" in add_code, add_code[add_code.find("folders"):][:200])
 
 ops_quelle = (WURZEL / "backend" / "broker" / "ops.py").read_text()
 op_code = ""
@@ -406,6 +403,131 @@ zeile = [z for z in shtml.splitlines() if 'id="kb-mount-source"' in z]
 check("Positivkontrolle: das Quellfeld wurde gefunden", len(zeile) == 1, str(zeile))
 check("⚠ der Platzhalter haengt am TYP, nicht an der Sprache",
       bool(zeile) and "data-i18n-placeholder" not in zeile[0], zeile[0] if zeile else "")
+
+
+print("\n\033[1m6. Der Einhaengepunkt haengt NICHT am Listenindex\033[0m")
+#
+# ⚠ EIN FEHLER MIT DATENFOLGE: bis 2026-09-04 hiess der Einhaengepunkt
+# share_<idx>, und remove_mount macht mounts.pop(idx). Wer eine Freigabe aus
+# der MITTE loescht, verschob damit alle nachfolgenden: die Wissens-Ordnerliste
+# zeigte auf den Punkt der NACHBARfreigabe, der Status meldete "nicht
+# verbunden", obwohl die Freigabe noch hing, und ein Klick auf "Verbinden"
+# mountete dieselbe Quelle ein zweites Mal.
+
+_ns = {"Path": Path, "_MOUNT_BASE": Path("/mnt/jarvis-kb")}
+for _fn in ("_mount_path", "_freier_mountpunkt", "_mounts_migrieren"):
+    _code = schneide(HAUPT, _fn)
+    if not _code:
+        print(f"\033[31mABBRUCH: {_fn} gibt es nicht (umbenannt?)\033[0m")
+        sys.exit(2)
+    exec(compile(_code, "<schnitt>", "exec"), _ns)
+mp_fn, frei_fn, migr_fn = _ns["_mount_path"], _ns["_freier_mountpunkt"], _ns["_mounts_migrieren"]
+
+check("Positivkontrolle: die drei Helfer wurden geschnitten und laufen",
+      str(sicher(mp_fn, 3)) == "/mnt/jarvis-kb/share_3", str(sicher(mp_fn, 3)))
+
+# Der gespeicherte Pfad gewinnt gegen den Index – das IST der Fix.
+m1 = {"source": "//a/b", "mountpoint": "/mnt/jarvis-kb/share_7"}
+check("⚠ der gespeicherte Einhaengepunkt gewinnt gegen den Index",
+      str(sicher(mp_fn, 0, m1)) == "/mnt/jarvis-kb/share_7", str(sicher(mp_fn, 0, m1)))
+
+# Fremdeingabe: der Wert landet als Argument in einer ROOT-Operation.
+for boese in ("/etc", "/mnt/jarvis-kb/../../etc", "relativ", "", "/mnt/jarvis-kb"):
+    got = str(sicher(mp_fn, 5, {"mountpoint": boese}))
+    check(f"abgewiesen und auf den Index zurueckgefallen: {boese!r}",
+          got == "/mnt/jarvis-kb/share_5", got)
+
+# DIE EIGENSCHAFT: Loeschen aus der Mitte verschiebt nichts.
+bestand = [{"source": "//a/1", "mountpoint": "/mnt/jarvis-kb/share_0"},
+           {"source": "//a/2", "mountpoint": "/mnt/jarvis-kb/share_1"},
+           {"source": "//a/3", "mountpoint": "/mnt/jarvis-kb/share_2"}]
+vorher = {m["source"]: str(mp_fn(i, m)) for i, m in enumerate(bestand)}
+bestand.pop(0)                     # die erste Freigabe loeschen
+nachher = {m["source"]: str(mp_fn(i, m)) for i, m in enumerate(bestand)}
+check("⚠ nach dem Loeschen der ERSTEN Freigabe behalten die uebrigen ihren Pfad",
+      all(nachher[k] == vorher[k] for k in nachher), f"{vorher} -> {nachher}")
+# Gegenprobe der Messung: ohne gespeicherten Pfad WUERDE es sich verschieben.
+ohne = [{"source": "//a/2"}, {"source": "//a/3"}]
+check("Positivkontrolle: ohne gespeicherten Pfad verschiebt es sich sehr wohl",
+      str(mp_fn(0, ohne[0])) == "/mnt/jarvis-kb/share_0", str(mp_fn(0, ohne[0])))
+
+# Migration: der HEUTIGE Index wird festgeschrieben – nur so bleiben laufende
+# Mounts und die vorhandene folders-Liste gueltig.
+alt_best = [{"source": "//a/1"}, {"source": "//a/2"}]
+check("Migration schreibt und meldet das", migr_fn(alt_best) is True)
+check("… und zwar mit dem HEUTIGEN Index (laufende Mounts bleiben gueltig)",
+      [m["mountpoint"] for m in alt_best]
+      == ["/mnt/jarvis-kb/share_0", "/mnt/jarvis-kb/share_1"],
+      str(alt_best))
+check("… idempotent (ein zweiter Lauf schreibt nicht)", migr_fn(alt_best) is False)
+
+# Freie Vergabe: share_<len> waere nach einem Loeschen womoeglich belegt.
+belegt = [{"source": "//a/x", "mountpoint": "/mnt/jarvis-kb/share_1"}]
+frei = str(sicher(frei_fn, belegt))
+check("⚠ ein neuer Punkt kollidiert nicht mit einem vorhandenen",
+      frei != "/mnt/jarvis-kb/share_1" and frei.startswith("/mnt/jarvis-kb/share_"), frei)
+check("… und nimmt die kleinste freie Nummer", frei == "/mnt/jarvis-kb/share_0", frei)
+
+# REGEL statt Liste: jede Aufrufstelle muss den Eintrag mitgeben – damit faellt
+# auch ein KUENFTIGER Aufrufer auf, ohne dass jemand eine Liste pflegt.
+import re as _re2
+haupt_ohne = ohne_kommentare_py(HAUPT) if False else HAUPT
+roh_ohne = _re2.sub(r"#[^\n]*", "", haupt_ohne)
+nackt = _re2.findall(r"_mount_path\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)", roh_ohne)
+check("⚠ REGEL: kein _mount_path()-Aufruf ohne den Eintrag",
+      not nackt, f"ohne Eintrag aufgerufen: {nackt}")
+check("Positivkontrolle: es gibt ueberhaupt Aufrufstellen",
+      len(_re2.findall(r"_mount_path\(", roh_ohne)) >= 6,
+      str(len(_re2.findall(r"_mount_path\(", roh_ohne))))
+# Beim Bearbeiten darf der Punkt nicht neu vergeben werden (folders!).
+up_code = schneide(HAUPT, "update_mount")
+check("das Bearbeiten UEBERNIMMT den Einhaengepunkt",
+      '"mountpoint": str(mp)' in up_code and "_freier_mountpunkt" not in up_code,
+      up_code[-300:])
+# Die Migration muss VERDRAHTET sein – die Funktion allein nuetzt nichts, und
+# sie gehoert in _get_mounts_config (nicht in einen Startup-Hook): nur so greift
+# sie auch im Autostart-Pfad und bei jeder kuenftigen Aufrufstelle.
+get_code = schneide(HAUPT, "_get_mounts_config")
+check("Positivkontrolle: _get_mounts_config wurde geschnitten",
+      len(get_code) > 100 and "mounts" in get_code)
+check("⚠ die Migration ist verdrahtet (nicht nur vorhanden)",
+      "_mounts_migrieren(" in get_code, get_code[:200])
+check("… und das Ergebnis wird gespeichert",
+      "_save_mounts_config(" in get_code, get_code[:300])
+check("… ohne dass ein Fehler dabei die Liste verschluckt",
+      "except" in get_code and "return mounts" in get_code, get_code[-200:])
+
+# ⚠ EINE GEMOUNTETE FREIGABE, DIE NICHT IN `folders` STEHT, WIRD NICHT
+# INDIZIERT – sie liegt da und niemand findet ihren Inhalt. Genau so auf DEV
+# vorgefunden (zwei verbundene Freigaben, keine davon in der Liste): der
+# HTTP 500 beim Anlegen brach VOR der Pflege der Liste ab.
+ord_code = schneide(HAUPT, "_kb_ordner_sicherstellen")
+check("Positivkontrolle: _kb_ordner_sicherstellen wurde geschnitten",
+      len(ord_code) > 200 and "folders" in ord_code)
+check("… und vergleicht EINTRAGSWEISE, nicht als Teilstring",
+      "folders.split(" in ord_code, ord_code[:200])
+check("⚠ das Verbinden traegt den Ordner nach (heilt den Altbestand)",
+      "_kb_ordner_sicherstellen(" in mount_code, mount_code[:200])
+i_ord = mount_code.find("_kb_ordner_sicherstellen(")
+i_reidx = mount_code.find("force_reindex")
+check("… und zwar VOR dem Reindex (sonst laeuft der ueber die Freigabe nicht)",
+      0 <= i_ord < i_reidx, f"{i_ord} / {i_reidx}")
+# ⚠ Der Reindex darf die ANTWORT nicht aufhalten: seit die Freigabe in
+# `folders` steht, laeuft er ueber deren ganzen Inhalt – auf DEV lief der
+# Endpunkt dadurch in ein 300-s-Timeout, obwohl der Mount nach Sekunden stand.
+check("⚠ der Reindex laeuft als Hintergrund-Aufgabe, nicht im Request",
+      "asyncio.create_task(" in mount_code
+      and mount_code.find("asyncio.create_task(") < mount_code.rfind("return JSONResponse"),
+      mount_code[-400:])
+check("… und die Antwort sagt, dass der Index nachzieht",
+      "hinweis" in mount_code, mount_code[-200:])
+
+add_code2 = schneide(HAUPT, "add_mount")
+check("das Anlegen vergibt einen FREIEN Punkt und schreibt ihn fest",
+      "_freier_mountpunkt(" in add_code2 and '"mountpoint": str(mp)' in add_code2)
+check("… und benutzt fuer die Ordnerliste dieselbe Funktion (keine zweite Fassung)",
+      "_kb_ordner_sicherstellen(" in add_code2
+      and 'kb_cfg["folders"]' not in add_code2, add_code2[-300:])
 
 
 print("\n\033[1m5. Die Egress-Sperre darf keine Mounts blockieren\033[0m")

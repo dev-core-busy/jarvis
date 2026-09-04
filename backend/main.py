@@ -16822,9 +16822,22 @@ _MOUNT_BASE = Path("/mnt/jarvis-kb")
 def _get_mounts_config() -> list:
     try:
         states = config.get_skill_states()
-        return states.get("knowledge", {}).get("config", {}).get("mounts", [])
+        mounts = states.get("knowledge", {}).get("config", {}).get("mounts", [])
     except Exception:
         return []
+    # Altbestand einmalig mit einem STABILEN Einhaengepunkt versehen (siehe
+    # _mount_path). Hier und nicht in einem Startup-Hook, damit es auch den
+    # Autostart-Pfad und jede kuenftige Aufrufstelle deckt.
+    try:
+        if _mounts_migrieren(mounts):
+            _save_mounts_config(mounts)
+            print(f"[knowledge] Einhaengepunkte festgeschrieben "
+                  f"({len(mounts)} Freigaben) – sie haengen ab jetzt nicht mehr "
+                  f"am Listenindex.", flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"[knowledge] Migration der Einhaengepunkte uebersprungen: {e}",
+              flush=True)
+    return mounts
 
 
 def _save_mounts_config(mounts: list):
@@ -16836,8 +16849,108 @@ def _save_mounts_config(mounts: list):
     config.save_skill_state("knowledge", kb_state)
 
 
-def _mount_path(idx: int) -> Path:
+def _mount_path(idx: int, eintrag: dict | None = None) -> Path:
+    """Einhaengepunkt einer Freigabe – STABIL, nicht am Listenindex.
+
+    ⚠ DER LISTENINDEX WAR EIN FEHLER MIT DATENFOLGE. Bis 2026-09-04 hiess der
+    Einhaengepunkt ``share_<idx>``, und ``remove_mount`` macht
+    ``mounts.pop(idx)``: nach dem Loeschen einer Freigabe aus der MITTE zeigte
+    ``share_2`` auf die Freigabe, die vorher ``share_3`` war. Folgen, alle
+    still:
+      * die Wissens-Ordnerliste (``folders``) verweist auf den
+        Einhaengepunkt der NACHBARfreigabe – der Indexer liest fremde Daten
+        bzw. gar keine,
+      * der Status zeigt "nicht verbunden", obwohl die Freigabe unter ihrem
+        alten Pfad noch haengt,
+      * ein Klick auf "Verbinden" mountet dieselbe Quelle ein ZWEITES Mal
+        unter dem neuen Pfad.
+    Der Pfad steht deshalb jetzt IM Eintrag (``mountpoint``) und ueberlebt
+    jedes Loeschen.
+
+    Der Rueckfall auf ``share_<idx>`` bleibt fuer Eintraege, die noch keinen
+    gespeicherten Pfad haben – ``_mounts_migrieren()`` schreibt ihn beim ersten
+    Zugriff fest, und zwar mit GENAU dem heutigen Index: nur so bleiben die
+    laufenden Mounts und die vorhandene ``folders``-Liste gueltig.
+
+    Der gespeicherte Wert wird geprueft (unter _MOUNT_BASE, kein ``..``) – er
+    landet als Argument in einer Root-Operation.
+    """
+    if isinstance(eintrag, dict):
+        gespeichert = str(eintrag.get("mountpoint") or "").strip()
+        if (gespeichert.startswith(str(_MOUNT_BASE) + "/") and ".." not in gespeichert
+                and "\n" not in gespeichert):
+            return Path(gespeichert)
     return _MOUNT_BASE / f"share_{idx}"
+
+
+def _freier_mountpunkt(mounts: list) -> Path:
+    """Ein Einhaengepunkt, der von keiner Freigabe belegt und nicht gemountet ist.
+
+    ``share_<len(mounts)>`` waere falsch: nach einem Loeschen ist diese Nummer
+    womoeglich schon vergeben – und dann teilten sich zwei Freigaben einen
+    Ordner. Geprueft wird gegen die gespeicherten Pfade UND gegen
+    ``/proc/mounts`` (ein Mount ohne Eintrag ist ein Rueckstand, den man nicht
+    ueberbauen darf).
+    """
+    belegt = set()
+    for i, m in enumerate(mounts):
+        belegt.add(str(_mount_path(i, m)))
+    try:
+        with open("/proc/mounts", "r") as f:
+            for zeile in f:
+                teile = zeile.split(" ")
+                if len(teile) > 1 and teile[1].startswith(str(_MOUNT_BASE)):
+                    belegt.add(teile[1].replace("\\040", " "))
+    except OSError:
+        pass
+    for n in range(0, 1000):
+        kandidat = _MOUNT_BASE / f"share_{n}"
+        if str(kandidat) not in belegt:
+            return kandidat
+    return _MOUNT_BASE / f"share_{len(mounts)}"
+
+
+def _kb_ordner_sicherstellen(mp) -> bool:
+    """Den Einhaengepunkt in der Wissens-Ordnerliste (`folders`) fuehren.
+
+    ⚠ OHNE DIESEN EINTRAG IST DIE FREIGABE GEMOUNTET UND WIRD TROTZDEM NICHT
+    INDIZIERT – sie liegt da und niemand findet ihren Inhalt. Genau dieser
+    Zustand stand am 2026-09-04 auf DEV: zwei verbundene Freigaben, `folders`
+    ohne beide. Ursache war der HTTP 500 beim Anlegen (mkdir auf /mnt als
+    unprivilegiertes Backend) – der Abbruch lag VOR der Pflege der Liste.
+
+    Deshalb steht das jetzt auch am ERFOLGREICHEN VERBINDEN, nicht nur beim
+    Anlegen: so heilt der Altbestand von selbst, sobald jemand die Freigabe
+    benutzt.
+
+    Verglichen wird EINTRAGSWEISE, nicht als Teilstring – "share_1" steckt in
+    "share_10".
+    """
+    ziel = str(mp)
+    kb_state = config.get_skill_states().get("knowledge", {})
+    kb_cfg = kb_state.get("config", {})
+    folders = kb_cfg.get("folders", "data/knowledge")
+    if ziel in [f.strip() for f in folders.split(",")]:
+        return False
+    kb_cfg["folders"] = (folders + "," + ziel) if folders else ziel
+    kb_state["config"] = kb_cfg
+    config.save_skill_state("knowledge", kb_state)
+    return True
+
+
+def _mounts_migrieren(mounts: list) -> bool:
+    """Fehlende ``mountpoint``-Felder einmalig nachtragen. True = geschrieben.
+
+    Idempotent und aus ``_get_mounts_config()`` gerufen, damit es AUCH im
+    Autostart-Pfad greift. Es wird nur geschrieben, wenn wirklich etwas fehlt –
+    danach nie wieder.
+    """
+    geaendert = False
+    for i, m in enumerate(mounts):
+        if isinstance(m, dict) and not str(m.get("mountpoint") or "").strip():
+            m["mountpoint"] = str(_MOUNT_BASE / f"share_{i}")
+            geaendert = True
+    return geaendert
 
 
 # ─── Web-Extraktor ───────────────────────────────────────────────────────────
@@ -17181,8 +17294,8 @@ async def list_mounts(user: str = Depends(require_knowledge_editor)):
         hoechstens 2 s je Freigabe.
         """
         aus = []
-        for i in range(len(mounts)):
-            mp = _mount_path(i)
+        for i, m in enumerate(mounts):
+            mp = _mount_path(i, m)
             wert = _bounded_call(lambda p=mp: p.is_mount(), 2.0, None)
             aus.append((str(mp), wert))
         return aus
@@ -17221,17 +17334,21 @@ async def add_mount(request: Request, user: str = Depends(require_knowledge_edit
         return JSONResponse({"error": quell_fehler}, status_code=400)
 
     mounts = _get_mounts_config()
+    # Der Einhaengepunkt wird JETZT vergeben und festgeschrieben – nicht aus
+    # dem Listenindex abgeleitet (siehe _mount_path). Nach einem Loeschen aus
+    # der Mitte ist "share_<len>" womoeglich schon belegt.
+    mp = _freier_mountpunkt(mounts)
     mount_entry = {
         "type": mount_type,
         "source": source,
         "username": data.get("username", ""),
         "password": data.get("password", ""),
+        "mountpoint": str(mp),
     }
     mounts.append(mount_entry)
     _save_mounts_config(mounts)
 
     idx = len(mounts) - 1
-    mp = _mount_path(idx)
     # ⚠ DAS ANLEGEN DES EINHAENGEPUNKTS DARF NICHT FATAL SEIN. Im getrennten
     # Betrieb laeuft das Backend unprivilegiert, und /mnt gehoert root: das
     # mkdir scheiterte mit PermissionError, der Aufruf endete als nackter
@@ -17248,15 +17365,9 @@ async def add_mount(request: Request, user: str = Depends(require_knowledge_edit
               f"({e.strerror or e}) – der Root-Broker legt ihn beim Verbinden an.",
               flush=True)
 
-    # Ordner automatisch zur Knowledge-Liste hinzufuegen
-    kb_state = config.get_skill_states().get("knowledge", {})
-    kb_cfg = kb_state.get("config", {})
-    folders = kb_cfg.get("folders", "data/knowledge")
-    if str(mp) not in [f.strip() for f in folders.split(",")]:
-        folders = folders + "," + str(mp) if folders else str(mp)
-        kb_cfg["folders"] = folders
-        kb_state["config"] = kb_cfg
-        config.save_skill_state("knowledge", kb_state)
+    # Ordner automatisch zur Knowledge-Liste hinzufuegen (dieselbe Funktion wie
+    # beim Verbinden – zwei Fassungen liefen auseinander).
+    _kb_ordner_sicherstellen(mp)
 
     return JSONResponse({"ok": True, "index": idx})
 
@@ -17268,7 +17379,7 @@ async def remove_mount(idx: int, user: str = Depends(require_knowledge_editor)):
     if idx < 0 or idx >= len(mounts):
         return JSONResponse({"error": "Ungueltiger Index"}, status_code=404)
 
-    mp = _mount_path(idx)
+    mp = _mount_path(idx, mounts[idx])
     # Unmounten falls aktiv (Root-Broker)
     if mp.is_mount():
         from backend import broker_client
@@ -17304,15 +17415,19 @@ async def update_mount(idx: int, request: Request, user: str = Depends(require_k
     if quell_fehler:
         return JSONResponse({"error": quell_fehler}, status_code=400)
     # Unmounten falls aktiv (neue Credentials erfordern Neuverbindung; Root-Broker)
-    mp = _mount_path(idx)
+    mp = _mount_path(idx, mounts[idx])
     if mp.is_mount():
         from backend import broker_client
         await broker_client.call("umount_share", {"mountpoint": str(mp)}, user=user, timeout=30)
+    # ⚠ Der Einhaengepunkt wird UEBERNOMMEN, nicht neu vergeben: er steht in
+    # der Wissens-Ordnerliste (`folders`). Ein neuer Pfad beim Bearbeiten
+    # wuerde die Freigabe dort stillschweigend abkoppeln.
     mounts[idx] = {
         "type": data.get("type", "smb"),
         "source": source,
         "username": data.get("username", ""),
         "password": data.get("password", ""),
+        "mountpoint": str(mp),
     }
     _save_mounts_config(mounts)
     return JSONResponse({"ok": True})
@@ -17488,7 +17603,7 @@ async def mount_share(idx: int, user: str = Depends(require_knowledge_editor)):
         return JSONResponse({"error": "Ungueltiger Index"}, status_code=404)
 
     m = mounts[idx]
-    mp = _mount_path(idx)
+    mp = _mount_path(idx, m)
 
     mount_type = m.get("type", "smb")
     if mount_type not in ("smb", "nfs", "webdav"):
@@ -17527,27 +17642,39 @@ async def mount_share(idx: int, user: str = Depends(require_knowledge_editor)):
     mounts[idx]["auto_mount"] = True
     _save_mounts_config(mounts)
 
-    # Nach erfolgreichem Mount Index automatisch neu aufbauen
-    try:
-        from backend.tools.knowledge import force_reindex
-        await asyncio.to_thread(force_reindex)
-        # 'source' gab es hier NIE – der NameError landete im except darunter
-        # und meldete bei JEDEM erfolgreichen Mount einen Reindex-Fehler, den
-        # es nicht gab.
-        print(f"[knowledge] Reindex nach Mount {m.get('source','')} → {mp}", flush=True)
-    except Exception as e:
-        print(f"[knowledge] Reindex nach Mount fehlgeschlagen: {e}", flush=True)
+    # ⚠ VOR dem Reindex: ohne Eintrag in `folders` laeuft der Reindex ueber die
+    # Freigabe gar nicht (auf DEV so vorgefunden – zwei verbundene Freigaben,
+    # keine davon in der Liste). Das heilt hier auch den Altbestand.
+    if _kb_ordner_sicherstellen(mp):
+        print(f"[knowledge] {mp} in die Wissens-Ordnerliste aufgenommen.",
+              flush=True)
 
-    return JSONResponse({"ok": True, "mountpoint": str(mp)})
+    # ⚠ ALS HINTERGRUND-AUFGABE, NICHT IM REQUEST. Seit der Einhaengepunkt in
+    # `folders` steht (Fix 2026-09-04), laeuft der Reindex ueber die GANZE
+    # Freigabe – der Endpunkt hing dadurch minutenlang und lief auf DEV in ein
+    # 300-s-Timeout, obwohl der Mount nach Sekunden stand. Der Benutzer soll
+    # die Rueckmeldung zum MOUNT bekommen; der Index zieht nach.
+    async def _reindex_nach_mount():
+        try:
+            from backend.tools.knowledge import force_reindex
+            await asyncio.to_thread(force_reindex)
+            print(f"[knowledge] Reindex nach Mount {m.get('source','')} → {mp} "
+                  f"abgeschlossen", flush=True)
+        except Exception as e:  # noqa: BLE001
+            print(f"[knowledge] Reindex nach Mount fehlgeschlagen: {e}", flush=True)
+    asyncio.create_task(_reindex_nach_mount())
+
+    return JSONResponse({"ok": True, "mountpoint": str(mp),
+                         "hinweis": "Der Index wird im Hintergrund aktualisiert."})
 
 
 @app.post("/api/knowledge/mounts/{idx}/unmount")
 async def unmount_share(idx: int, user: str = Depends(require_knowledge_editor)):
     """Hängt eine Netzwerk-Freigabe aus und deaktiviert deren automatisches Einbinden."""
-    mp = _mount_path(idx)
+    mounts = _get_mounts_config()
+    mp = _mount_path(idx, mounts[idx] if 0 <= idx < len(mounts) else None)
     if not mp.is_mount():
         # Auch bei bereits getrenntem Mount: auto_mount deaktivieren
-        mounts = _get_mounts_config()
         if 0 <= idx < len(mounts):
             mounts[idx]["auto_mount"] = False
             _save_mounts_config(mounts)
@@ -20282,7 +20409,7 @@ async def startup():
                 if m.get("auto_mount") is False:
                     print(f"[knowledge] Überspringe {m['source']} (manuell getrennt)", flush=True)
                     continue
-                mp = _mount_path(idx)
+                mp = _mount_path(idx, m)
                 if mp.is_mount():
                     continue  # Bereits gemountet
                 source = m["source"]

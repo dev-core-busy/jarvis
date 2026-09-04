@@ -3602,9 +3602,17 @@ KRITISCH – Autonomie-Regeln:
                     _vr = _sg.record_violation(_uname, "chat", _viol[0], _viol[1],
                                                snippet=_json.dumps(args, ensure_ascii=False)[:_VIOL_DETAIL_MAX],
                                                tool=name,
-                                               task=getattr(self, '_current_task', '')[:_VIOL_TASK_MAX],
-                                               ip=getattr(self, '_current_client_ip', ''),
-                                               client_type=getattr(self, '_current_client_type', ''),
+                                               # ⚠ `or ""`: die drei Felder koennen None sein
+                                               # (ausserhalb eines Chat-Laufs nie gesetzt). Ohne
+                                               # das wirft der Schnitt TypeError, das breite
+                                               # `except` darunter verschluckt ihn – und der
+                                               # Verstoss wird UEBERHAUPT NICHT protokolliert.
+                                               # Auf DEV im echten Dispatch gemessen
+                                               # ("record_violation fehlgeschlagen: 'NoneType'
+                                               # object is not subscriptable").
+                                               task=(getattr(self, '_current_task', '') or '')[:_VIOL_TASK_MAX],
+                                               ip=getattr(self, '_current_client_ip', '') or '',
+                                               client_type=getattr(self, '_current_client_type', '') or '',
                                                exempt=_exempt, escalate=not _viol_soft,
                                                marke=_viol_marke)
                     if _vr.get("blocked"):

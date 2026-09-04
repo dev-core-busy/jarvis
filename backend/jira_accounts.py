@@ -242,6 +242,25 @@ def basis_url() -> str:
 
 # ── Lesen fuer die Oberflaeche ──────────────────────────────────────────────
 
+def klartext(user: str, feld: str) -> tuple[str, str]:
+    """Den gespeicherten Token dieses Benutzers im Klartext. (wert, fehler)
+
+    Anweisung und Begruendung: siehe ``sap_accounts.klartext``. ``zugang_info``
+    gibt weiterhin nichts heraus.
+    """
+    f = (feld or "").strip() or GEHEIMFELDER[0]
+    if f not in GEHEIMFELDER:
+        return "", f"Das Feld '{f}' ist kein Geheimfeld dieses Zugangs."
+    k = _laden().get(norm_user(user)) or {}
+    roh = str(k.get(f + "_enc") or "").strip()
+    if not roh:
+        return "", "In diesem Feld ist nichts gespeichert."
+    try:
+        return entschluesseln(roh), ""
+    except Exception as e:  # noqa: BLE001
+        return "", f"Entschluesselung fehlgeschlagen: {e}"
+
+
 def zugang_info(user: str) -> dict:
     """Fuer die Oberflaeche – OHNE Token, auch nicht maskiert.
 

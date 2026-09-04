@@ -550,12 +550,45 @@ def zertifikat_loesen(user: str, kanal: str) -> dict:
 
 # ── Lesen fuer die Oberflaeche ──────────────────────────────────────────────
 
+def klartext(user: str, feld: str) -> tuple[str, str]:
+    """Ein gespeichertes Geheimnis dieses Benutzers im Klartext. (wert, fehler)
+
+    ⚠ AUSDRUECKLICHE ANWEISUNG DES BETREIBERS (2026-09-04): das Auge am
+    Kennwortfeld soll das GESPEICHERTE Kennwort zeigen. Die Zusage im Modulkopf
+    ("kein Endpunkt gibt ein Kennwort heraus") gilt fuer ``zugang_info`` und
+    jede Uebersicht unveraendert weiter – herausgegeben wird nur auf diesen
+    einen, benannten Abruf, und der Aufrufer (``/api/secret/reveal``)
+    protokolliert ihn.
+
+    DIE FUNKTION LIEGT HIER UND NICHT IM ABRUF-ENDPUNKT: nur dieses Modul kennt
+    seine Feldnamen (``password_enc`` & Co.) und seinen Schluessel. Eine
+    zentrale Fassung muesste die Interna von vier Modulen nachbauen – und liefe
+    beim naechsten Feld auseinander.
+
+    Fail-closed: nur Felder aus ``GEHEIMFELDER``, nichts anderes.
+    """
+    f = (feld or "").strip() or GEHEIMFELDER[0]
+    if f not in GEHEIMFELDER:
+        return "", f"Das Feld '{f}' ist kein Geheimfeld dieses Zugangs."
+    k = _laden().get(norm_user(user)) or {}
+    roh = str(k.get(f + "_enc") or "").strip()
+    if not roh:
+        return "", "In diesem Feld ist nichts gespeichert."
+    try:
+        return entschluesseln(roh), ""
+    except Exception as e:  # noqa: BLE001
+        return "", f"Entschluesselung fehlgeschlagen: {e}"
+
+
 def zugang_info(user: str) -> dict:
     """Fuer die Oberflaeche – OHNE Kennwoerter, auch nicht maskiert.
 
     ``*_gesetzt`` ist die einzige Aussage darueber. Eine maskierte Form
     ("****") wuerde die Laenge verraten, und ein leeres Feld heisst in der
-    Oberflaeche "unveraendert" – dafuer braucht es nur ein Ja/Nein."""
+    Oberflaeche "unveraendert" – dafuer braucht es nur ein Ja/Nein.
+
+    (Den Klartext gibt ``klartext()`` heraus – ausdruecklich, einzeln und
+    protokolliert.)"""
     un = norm_user(user)
     k = _laden().get(un) or _leer(un)
     erlaubt = hosts_erlaubt()

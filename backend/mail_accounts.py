@@ -911,6 +911,34 @@ def format_fuer(user: str, wahl: str = "") -> str:
     return mail_body.FORMAT_HTML
 
 
+def klartext(user: str, feld: str = "passwort") -> tuple[str, str]:
+    """Das gespeicherte Kennwort dieses Postfachs im Klartext. (wert, fehler)
+
+    ⚠ AUSDRUECKLICHE ANWEISUNG DES BETREIBERS (2026-09-04): das Auge am
+    Kennwortfeld soll das GESPEICHERTE Kennwort zeigen. Die Zusage im Modulkopf
+    ("kein Endpunkt gibt ein Kennwort heraus, auch nicht maskiert") gilt fuer
+    ``konto_info`` und jede Uebersicht unveraendert weiter – herausgegeben wird
+    nur auf diesen einen, benannten Abruf, und der Aufrufer
+    (``/api/secret/reveal``) protokolliert ihn.
+
+    ⚠ DAS FELD HEISST HIER `pw_enc`, NICHT `passwort_enc`. Dieses Modul folgt
+    dem `<feld>_enc`-Muster der uebrigen Konten-Module NICHT – eine zentrale
+    Fassung dieser Funktion haette am ersten Tag den falschen Namen gelesen und
+    "nichts gespeichert" gemeldet. Genau deshalb liegt sie hier.
+    """
+    f = (feld or "").strip() or "passwort"
+    if f != "passwort":
+        return "", f"Das Feld '{f}' ist kein Geheimfeld dieses Postfachs."
+    k = _laden().get(norm_user(user)) or {}
+    roh = str(k.get("pw_enc") or "").strip()
+    if not roh:
+        return "", "Fuer dieses Postfach ist kein Kennwort gespeichert."
+    try:
+        return entschluesseln(roh), ""
+    except Exception as e:  # noqa: BLE001
+        return "", f"Entschluesselung fehlgeschlagen: {e}"
+
+
 def konto_info(user: str) -> dict:
     """Fuer die Oberflaeche – OHNE Kennwort, auch nicht maskiert.
 

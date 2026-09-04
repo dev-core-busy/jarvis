@@ -355,6 +355,31 @@ def _konto_fuer_schreiben(user: str) -> tuple[str, dict, dict]:
 
 # ── Lesen ───────────────────────────────────────────────────────────────────
 
+def klartext(user: str, feld: str) -> tuple[str, str]:
+    """Ein gespeichertes Geheimnis dieses Benutzers im Klartext. (wert, fehler)
+
+    Anweisung und Begruendung: siehe ``sap_accounts.klartext`` – dasselbe
+    Muster, hier fuer VEMAS. ``zugang_info`` gibt weiterhin nichts heraus.
+
+    ⚠ Besonderheit dieses Moduls: ``entschluesseln`` WIRFT NICHT, es gibt bei
+    einem unlesbaren Wert ``""`` zurueck. Ein leeres Ergebnis darf deshalb
+    nicht als "nichts gespeichert" gemeldet werden – es kann auch ein kaputter
+    Schluessel sein, und das sind zwei verschiedene Antworten.
+    """
+    f = (feld or "").strip() or GEHEIMFELDER[0]
+    if f not in GEHEIMFELDER:
+        return "", f"Das Feld '{f}' ist kein Geheimfeld dieses Zugangs."
+    k = _laden().get(norm_user(user)) or {}
+    roh = str(k.get(f + "_enc") or "").strip()
+    if not roh:
+        return "", "In diesem Feld ist nichts gespeichert."
+    wert = entschluesseln(roh)
+    if not wert:
+        return "", ("Der gespeicherte Wert liess sich nicht entschluesseln "
+                    "(Schluesseldatei getauscht?). Bitte neu eintragen.")
+    return wert, ""
+
+
 def zugang_info(user: str) -> dict:
     """Fuer die Oberflaeche – OHNE Kennwoerter, auch nicht maskiert.
 

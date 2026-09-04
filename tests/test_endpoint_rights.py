@@ -216,6 +216,11 @@ GUARDED_PREFIXES = [
     # fuer jeden, der eine passende Luecke sucht. Der Praefix steht hier, damit
     # die naechste Route unter /api/system/ nicht mit require_auth durchrutscht.
     "/api/system/",
+    # /api/secret/ (2026-09-04, mit dem Auge am Kennwortfeld): dort wird ein
+    # GESPEICHERTES Kennwort im Klartext herausgegeben. Der Praefix steht hier,
+    # damit die naechste Route darunter nicht mit require_auth durchrutscht -
+    # die eine, die es gibt, ist unten einzeln begruendet.
+    "/api/secret/",
 ]
 # Ausnahmen mit Begruendung – jede einzeln belegt, keine Sammelfreigabe.
 EXEMPT = {
@@ -268,6 +273,18 @@ EXEMPT = {
     # Bereichs-Freigabe und nicht Admin.
     ("get", "/api/jira/account"), ("post", "/api/jira/account"),
     ("delete", "/api/jira/account"), ("post", "/api/jira/account/test"),
+    # ── Kennwort im Klartext ansehen (2026-09-04) ──
+    # `require_auth` ist hier KEIN Rueckfall, sondern die einzige moegliche
+    # Dependency: die Rechte sind JE BEREICH verschieden und stehen deshalb im
+    # Rumpf (mail/sap/vemas/jira = der Eigentuemer mit Bereichs-Freigabe,
+    # mount = Wissens-Editor oder Admin, profil/skill/einstellung = nur Admin).
+    # Eine Dependency kann diese Matrix nicht ausdruecken - sie kennt den
+    # Bereich nicht, der erst im JSON-Rumpf steht (gleiche Lage wie
+    # POST /api/prompt/pruefen).
+    # WAS DAFUER GEPRUEFT WIRD, steht in tests/test_secret_reveal.py: die
+    # Matrix wird AUSGEFUEHRT gemessen, samt "kein Benutzername aus dem Rumpf"
+    # und "jeder Abruf ins Audit, nie der Wert".
+    ("post", "/api/secret/reveal"),
 }
 # Vision-Medien (Kamerabild, Gesichts-Ausschnitte, Trainings-Vorschau,
 # Begruessungs-Audio) brauchen ``?token=``, weil <img>/<audio> keine Header

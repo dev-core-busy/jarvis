@@ -5870,6 +5870,123 @@ async def download_key_holen(user: str = Depends(require_auth)):
                          "ttl_min": _dlkey.ttl_minuten()})
 
 
+@app.post("/api/secret/reveal")
+async def secret_reveal(request: Request, user: str = Depends(require_auth)):
+    """Ein gespeichertes Kennwort/Token im Klartext – auf ausdruecklichen Abruf.
+
+    ⚠ AUSDRUECKLICHE, WIEDERHOLTE ANWEISUNG DES BETREIBERS (2026-09-04): das
+    Auge am Kennwortfeld soll das GESPEICHERTE Kennwort zeigen, ueberall.
+    Begruendung, Preis und Abgrenzung stehen im Kopf von
+    ``backend/secret_reveal.py``; die Listen- und Status-Endpunkte geben
+    weiterhin nichts heraus.
+
+    DIE RECHTE LIEGEN HIER, weil nur hier die Dependencies und Freigabelisten
+    erreichbar sind – und sie sind je Bereich verschieden:
+
+    ============= =================================================
+    Bereich       wer darf
+    ============= =================================================
+    mail/sap/     der EIGENTUEMER; die Bereichs-Freigabe muss stehen
+    vemas/jira    (dieselbe wie fuer den Bereich selbst)
+    mount         Wissens-Editor oder Admin
+    einstellung   nur Administratoren
+    ============= =================================================
+
+    Es gibt bewusst KEINE Bereiche fuer LLM-Profile und Skill-Konfigurationen –
+    deren Formulare laden ihr Geheimnis laengst selbst im Klartext (Begruendung
+    in ``backend/secret_reveal.py``).
+
+    **Ein anderer Benutzer ist ueberhaupt nicht adressierbar**: die vier
+    Konten-Bereiche nehmen KEINEN Benutzernamen aus dem Rumpf, sie arbeiten mit
+    dem angemeldeten. Dieselbe Regel wie beim Empfaenger einer Erinnerung und
+    beim Verlaufs-Loeschen – sonst waere der Endpunkt ein Weg in fremde
+    Zugangsdaten.
+
+    Jeder Abruf geht ins Tool-Audit-Log, auch ein abgelehnter: das ist die
+    Gegenleistung fuer die Preisgabe. Protokolliert werden Bereich und
+    Kennung, **niemals der Wert**.
+    """
+    from backend import secret_reveal as _sr
+
+    t0 = time.time()
+    try:
+        data = await request.json()
+    except Exception:  # noqa: BLE001
+        data = {}
+    bereich = str(data.get("bereich") or "").strip().lower()
+    kennung = str(data.get("kennung") or "").strip()
+
+    def _prot(ergebnis: str) -> None:
+        # Im Audit steht WAS angesehen wurde, nicht der Wert. Ein Protokoll,
+        # das Geheimnisse enthaelt, ist selbst ein Geheimnis.
+        try:
+            # ⚠ DER IMPORT GEHOERT HIERHER: `audit_log` ist in main.py KEIN
+            # Modulname (jede andere Stelle holt es lokal). Ohne diese Zeile
+            # wirft der Aufruf NameError, das breite `except` darunter
+            # verschluckt ihn – und der Abruf wird STILL nicht protokolliert.
+            # Genau so gemessen bei der Live-Probe auf DEV (0 Eintraege bei
+            # gruenem Waechter), weil die Attrappe im Test den Namen selbst
+            # gestellt hatte.
+            from backend import audit_log as _al
+            _al.log_tool(user, "secret_reveal",
+                         {"bereich": bereich, "kennung": kennung[:120],
+                          "ergebnis": ergebnis},
+                         0, int((time.time() - t0) * 1000))
+        except Exception:  # noqa: BLE001
+            pass
+
+    ok, grund = _sr.drossel_ok(user)
+    if not ok:
+        _prot("gedrosselt")
+        return JSONResponse({"ok": False, "error": grund}, status_code=429)
+
+    admin = _is_admin_user(user)
+    quelle = _sr.benutzer_quelle(bereich)
+    if quelle is not None:
+        # Eigene Zugangsdaten: Freigabe wie fuer den Bereich selbst.
+        darf = {
+            "mail": _user_may_use_email,
+            "sap": _user_may_use_sap,
+            "vemas": _user_may_use_vemas,
+            "jira": _user_may_use_jira_assist,
+        }[bereich]
+        try:
+            erlaubt = bool(darf(user))
+        except Exception:  # noqa: BLE001
+            erlaubt = False          # fail-closed
+        if not erlaubt:
+            _prot("nicht freigegeben")
+            return JSONResponse(
+                {"ok": False, "error": f"Fuer '{bereich}' bist du nicht freigeschaltet."},
+                status_code=403)
+        wert, fehler = await asyncio.to_thread(quelle, user, kennung)
+    elif bereich == "mount":
+        if not (admin or _may_edit_knowledge(user)):
+            _prot("nicht berechtigt")
+            return JSONResponse({"ok": False, "error": "Nur fuer Wissens-Editoren."},
+                                status_code=403)
+        wert, fehler = await asyncio.to_thread(_sr.mount, kennung)
+    elif bereich == "einstellung":
+        if not admin:
+            _prot("nicht berechtigt")
+            return JSONResponse({"ok": False, "error": "Nur fuer Administratoren."},
+                                status_code=403)
+        wert, fehler = await asyncio.to_thread(_sr.einstellung, kennung)
+    else:
+        _prot("unbekannter Bereich")
+        return JSONResponse({"ok": False, "error": f"Unbekannter Bereich '{bereich}'."},
+                            status_code=400)
+
+    if fehler or not wert:
+        _prot("kein Wert")
+        return JSONResponse({"ok": False, "error": fehler or "Kein Wert gespeichert."},
+                            status_code=404)
+    _prot("herausgegeben")
+    print(f"[SECRET] '{user}' hat {bereich}:{kennung[:60]} im Klartext abgerufen",
+          flush=True)
+    return JSONResponse({"ok": True, "wert": wert})
+
+
 @app.get("/api/documents/{name}")
 async def get_document(name: str, user: str = Depends(require_auth_or_query)):
     """Liefert ein erzeugtes Office-Dokument aus (Office-Skill).

@@ -4234,7 +4234,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     </div>
                                     <div class="form-group" style="margin-bottom:0;">
                                         <label><span>Bind-Passwort</span></label>
-                                        <input type="password" id="ad-bind-password" autocomplete="new-password" placeholder="•••••• (leer lassen = unverändert)" style="width:60%;box-sizing:border-box;">
+                                        <input type="password" id="ad-bind-password" autocomplete="new-password" placeholder="•••••• (leer lassen = unverändert)" style="width:60%;box-sizing:border-box;" data-pw-quelle="einstellung" data-pw-kennung="ad_bind_password">
                                         <div id="ad-bind-pw-hint" style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;"></div>
                                     </div>
                                 </div>
@@ -5151,9 +5151,9 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
     <script src="/static/js/icons.js?v=2"></script>
-    <script src="/static/js/pwreveal.js?v=1"></script>
+    <script src="/static/js/pwreveal.js?v=2"></script>
     <script src="/static/js/dlkey.js?v=2"></script>
-    <script src="/static/js/i18n.js?v=218"></script>
+    <script src="/static/js/i18n.js?v=219"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=21"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -5164,7 +5164,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/skillcfg.js?v=6"></script>
     <script src="/static/js/google.js?v=13"></script>
     <script src="/static/js/whatsapp.js?v=16"></script>
-    <script src="/static/js/knowledge.js?v=100"></script>
+    <script src="/static/js/knowledge.js?v=101"></script>
     <!-- knowledge_sync NACH knowledge.js: die Ordnerliste fragt beim Zeichnen
          window.KnowledgeSync.sharedFolders() fuer den Zustand des 🔗-Symbols. -->
     <script src="/static/js/knowledge_sync.js?v=4"></script>

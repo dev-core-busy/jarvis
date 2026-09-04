@@ -205,21 +205,187 @@ section('5. REGEL: das Modul liegt auf JEDER Seite');
           falsch.length === 0, falsch.join(', '));
 }
 
-section('6. Das Auge verspricht nichts Falsches');
+section('6. Beschriftung und Abruf-Schranken');
 {
-    // Ein GESPEICHERTES Kennwort gibt kein Endpunkt heraus (mehrfach
-    // dokumentierte Zusage). Die Beschriftung darf nichts anderes behaupten.
     const i18n = fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8');
-    for (const k of ['common.pw_show', 'common.pw_hide', 'common.pw_keep']) {
+    for (const k of ['common.pw_show', 'common.pw_show_stored', 'common.pw_hide',
+                     'common.pw_keep', 'common.pw_loading', 'common.pw_none']) {
         const n = (i18n.match(new RegExp("'" + k + "'", 'g')) || []).length;
         check(`i18n-Schluessel in DE und EN: ${k}`, n === 2, String(n));
     }
-    const de = i18n.slice(i18n.indexOf("'common.pw_show'"), i18n.indexOf("'common.pw_show'") + 200);
-    check('⚠ die Beschriftung sagt, dass nur die EIGENE Eingabe sichtbar wird',
-          /tippst|type/i.test(de), de.slice(0, 120));
     const src = fs.readFileSync(path.join(ROOT, 'frontend/js/pwreveal.js'), 'utf8');
-    check('das Modul liest nirgends ein gespeichertes Kennwort',
-          !/fetch\(|XMLHttpRequest|localStorage/.test(src));
+    // ⚠ DIE ZUSAGE HAT SICH GEAENDERT (Anweisung des Betreibers 2026-09-04):
+    // das Auge zeigt auch den GESPEICHERTEN Wert. Bis dahin stand hier das
+    // Gegenteil ("das Modul liest nirgends ein gespeichertes Kennwort") –
+    // geprueft werden jetzt die SCHRANKEN dieses Abrufs.
+    check('⚠ der Klartext wird ueber /api/secret/reveal geholt',
+          /\/api\/secret\/reveal/.test(src));
+    const fn = src.slice(src.indexOf('function klartextHolen'),
+                         src.indexOf('function umschalten'));
+    check('Positivkontrolle: klartextHolen wurde geschnitten', fn.length > 300,
+          String(fn.length));
+    check('⚠ nur mit data-pw-quelle (ohne Quelle gibt es nichts zu holen)',
+          /pwQuelle/.test(fn));
+    check('⚠ nur bei LEEREM Feld (eine Eingabe darf nicht ueberschrieben werden)',
+          /inp\.value \|\|/.test(fn), fn.slice(0, 200));
+    check('⚠ nur EINMAL je Feld (sonst laeuft jedes Zuklappen in die Drossel)',
+          /pwGeholt/.test(fn));
+    // Der Abruf darf NICHT beim Laden der Seite passieren – sonst liegt das
+    // Geheimnis in jeder Seitenantwort und im DOM, und niemand hat es verlangt.
+    const beimStart = src.slice(src.indexOf('function versorge'),
+                                src.indexOf('function alle('));
+    check('⚠ und NICHT beim Versorgen des Feldes (nur auf Klick)',
+          !/klartextHolen/.test(beimStart), beimStart.slice(0, 160));
+    check('… der Aufruf haengt am Umschalten', /klartextHolen\(inp, knopf\)/.test(
+        src.slice(src.indexOf('function umschalten'),
+                  src.indexOf('function umschalten') + 400)));
+    // Ein Feld MIT Quelle sagt "Kennwort anzeigen", eines ohne "Eingabe
+    // anzeigen" – eine Beschriftung, die mehr verspricht als sie kann, ist
+    // schlechter als eine knappe.
+    check('die Beschriftung unterscheidet gespeichert von getippt',
+          /pw_show_stored/.test(src) && /pw_show'/.test(src));
+}
+
+section('6b. REGEL: kein ZWEITES Auge neben einem handverdrahteten');
+{
+    // ⚠ GEMESSEN AN DER ECHTEN settings.html, nicht an eigenem Markup: die
+    // handverdrahteten Knoepfe heissen dort verschieden (btn-eye-*,
+    // btn-toggle-profile-apikey, cf-token-toggle, Klasse sap-eye). Eine
+    // Namensliste im Modul hat genau einen davon getroffen – auf DEV stand
+    // deshalb ein zweites Auge im Profil-Formular.
+    //
+    // ⚠ UND GEZAEHLT WIRD IM FELDBLOCK, NICHT BEIM ELTERNTEIL: das Modul haengt
+    // das Feld in einen eigenen Wrapper, der handverdrahtete Knopf bleibt
+    // draussen. Wer nur die Geschwister des Feldes zaehlt, sieht die Dublette
+    // NICHT – die erste Fassung dieser Pruefung war deshalb blind (die
+    // Gegenprobe biss nicht).
+    const html = fs.readFileSync(path.join(ROOT, 'frontend/settings.html'), 'utf8');
+    const vc = new VirtualConsole();
+    const dom = new JSDOM(html, { url: 'https://localhost/settings',
+                                  runScripts: 'outside-only', virtualConsole: vc });
+    const w = dom.window;
+    w.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/icons.js'), 'utf8'));
+    w.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/pwreveal.js'), 'utf8'));
+    await sleep(30);
+    const dc = w.document;
+    const augig = (el) => el.tagName === 'BUTTON'
+        && /eye|auge|toggle/i.test((el.id || '') + ' ' + (el.className || ''));
+    const bloecke = new Set();
+    for (const inp of dc.querySelectorAll('input[type="password"]')) {
+        bloecke.add(inp.closest('.input-group') || inp.closest('.form-group')
+                    || inp.parentElement);
+    }
+    check('Positivkontrolle: Feldbloecke gefunden', bloecke.size >= 15,
+          String(bloecke.size));
+    const schief = [];
+    for (const blk of bloecke) {
+        if (!blk) continue;
+        const felder = blk.querySelectorAll('input[type="password"]').length;
+        let augen = 0;
+        for (const el of blk.querySelectorAll('.jv-pw-eye, button')) {
+            if ((el.classList && el.classList.contains('jv-pw-eye')) || augig(el)) augen++;
+        }
+        if (augen !== felder) {
+            schief.push((blk.id || blk.className || blk.tagName)
+                        + ': ' + augen + ' Augen fuer ' + felder + ' Felder');
+        }
+    }
+    check('⚠ GENAU EIN Auge je Kennwortfeld – nirgends zwei, nirgends keins',
+          schief.length === 0, schief.join(' | '));
+    w.close();
+}
+
+section('7. Ein Feld mit Quelle holt den Wert – eines ohne fragt nicht');
+{
+    const dom = baue(`<!doctype html><html><body>
+        <div><input type="password" id="mitQ" data-pw-quelle="mount" data-pw-kennung="2"
+                    data-pw-gesetzt="1"></div>
+        <div><input type="password" id="ohneQ"></div>
+    </body></html>`);
+    await sleep(30);
+    const w = dom.window, dc = w.document;
+    const rufe = [];
+    w.fetch = (url, init) => {
+        rufe.push({ url: String(url), body: init && init.body });
+        return Promise.resolve({ ok: true, status: 200,
+            json: () => Promise.resolve({ ok: true, wert: 'Geheim!23' }) });
+    };
+    // Ohne Quelle: kein Abruf.
+    auge(dc.getElementById('ohneQ')).click();
+    await sleep(30);
+    check('⚠ ein Feld ohne Quelle fragt den Server NICHT', rufe.length === 0,
+          JSON.stringify(rufe));
+    // Mit Quelle: genau ein Abruf, mit Bereich und Kennung.
+    const inp = dc.getElementById('mitQ');
+    auge(inp).click();
+    await sleep(40);
+    check('⚠ ein Feld mit Quelle holt den Klartext', rufe.length === 1,
+          JSON.stringify(rufe).slice(0, 160));
+    check('… an /api/secret/reveal',
+          rufe.length === 1 && /\/api\/secret\/reveal$/.test(rufe[0].url), rufe[0] && rufe[0].url);
+    check('… mit Bereich UND Kennung im Rumpf',
+          rufe.length === 1 && /"bereich":"mount"/.test(rufe[0].body)
+          && /"kennung":"2"/.test(rufe[0].body), rufe[0] && rufe[0].body);
+    check('⚠ der Wert steht danach im Feld', inp.value === 'Geheim!23', inp.value);
+    check('… das Feld ist sichtbar geschaltet', inp.type === 'text', inp.type);
+    // ⚠ DIE BESCHRIFTUNG MUSS DEN ZUSTAND NACH dem Abruf treffen: der Abruf
+    // laeuft asynchron und endet NACH dem Umschalten. Die erste Fassung stellte
+    // den gemerkten Titel wieder her und sagte "Kennwort anzeigen", waehrend das
+    // Kennwort sichtbar war (im echten Chrome gemessen).
+    check('⚠ und das Auge sagt danach "verbergen", nicht "anzeigen"',
+          /verberg/i.test(auge(inp).title), auge(inp).title);
+    check('… auch im aria-label',
+          /verberg/i.test(auge(inp).getAttribute('aria-label') || ''),
+          auge(inp).getAttribute('aria-label'));
+    check('… und der Sterne-Platzhalter ist weg (er stand fuer genau diesen Wert)',
+          !/^•+$/.test(inp.placeholder || ''), inp.placeholder);
+    // Zu- und wieder aufklappen darf NICHT erneut fragen.
+    auge(inp).click(); await sleep(10);
+    auge(inp).click(); await sleep(30);
+    check('⚠ ein zweites Aufklappen fragt nicht erneut', rufe.length === 1,
+          String(rufe.length));
+    dom.window.close();
+}
+
+section('8. Eine getippte Eingabe wird nie ueberschrieben');
+{
+    const dom = baue(`<!doctype html><html><body>
+        <input type="password" id="p" data-pw-quelle="mail" data-pw-kennung="passwort">
+    </body></html>`);
+    await sleep(30);
+    const w = dom.window, dc = w.document;
+    let gefragt = 0;
+    w.fetch = () => { gefragt++; return Promise.resolve({ ok: true, status: 200,
+        json: () => Promise.resolve({ ok: true, wert: 'vomServer' }) }); };
+    const inp = dc.getElementById('p');
+    inp.value = 'selbstGetippt';
+    auge(inp).click();
+    await sleep(40);
+    check('⚠ bei gefuelltem Feld wird nicht gefragt', gefragt === 0, String(gefragt));
+    check('… und die Eingabe steht unveraendert da', inp.value === 'selbstGetippt', inp.value);
+    dom.window.close();
+}
+
+section('9. Eine Absage landet am Feld, nicht in der Konsole');
+{
+    const dom = baue(`<!doctype html><html><body>
+        <input type="password" id="p" data-pw-quelle="einstellung" data-pw-kennung="ad_bind_password">
+    </body></html>`);
+    await sleep(30);
+    const w = dom.window, dc = w.document;
+    w.fetch = () => Promise.resolve({ ok: false, status: 403,
+        json: () => Promise.resolve({ ok: false, error: 'Nur fuer Administratoren.' }) });
+    const inp = dc.getElementById('p'), a = auge(inp);
+    a.click();
+    await sleep(40);
+    check('⚠ die Absage steht in der Beschriftung des Auges',
+          /Administratoren/.test(a.title), a.title);
+    check('… und im aria-label (Hilfsmittel lesen den Titel nicht)',
+          /Administratoren/.test(a.getAttribute('aria-label') || ''));
+    check('… das Feld bleibt leer', inp.value === '', inp.value);
+    check('… und ein zweiter Versuch bleibt moeglich',
+          inp.dataset.pwGeholt !== '1', inp.dataset.pwGeholt);
+    dom.window.close();
 }
 
 const fails = results.filter((r) => !r.ok).length;

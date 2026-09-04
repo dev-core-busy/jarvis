@@ -2603,7 +2603,7 @@ class JarvisKnowledgeManager {
                     </select>
                     <input type="text" class="kb-input kb-mount-edit-source" value="${this._escHtml(m.source||'')}" placeholder="${JarvisKnowledgeManager.MOUNT_BEISPIEL[m.type] || JarvisKnowledgeManager.MOUNT_BEISPIEL.smb}" />
                     <input type="text" class="kb-input kb-mount-edit-user" value="${this._escHtml(m.username||'')}" placeholder="${window.t('knowledge.share_user_ph')}" />
-                    <input type="password" class="kb-input kb-mount-edit-pass" data-pw-gesetzt="${m.has_password ? '1' : '0'}" placeholder="${m.has_password ? window.t('knowledge.share_pass_unchanged_ph') : window.t('knowledge.share_pass_ph')}" />
+                    <input type="password" class="kb-input kb-mount-edit-pass" data-pw-gesetzt="${m.has_password ? '1' : '0'}" data-pw-quelle="mount" data-pw-kennung="${i}" placeholder="${m.has_password ? window.t('knowledge.share_pass_unchanged_ph') : window.t('knowledge.share_pass_ph')}" />
                     <div class="kb-mount-actions">
                         <button class="kb-btn-action" onclick="window.knowledgeManager.saveEditMount(${i})">${window.t('knowledge.share_save_btn')}</button>
                         <button class="kb-btn-secondary" onclick="document.getElementById('kb-mount-edit-${i}').style.display='none'">${window.t('common.cancel')}</button>

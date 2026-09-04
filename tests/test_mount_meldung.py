@@ -462,11 +462,26 @@ check("… und zwar mit dem HEUTIGEN Index (laufende Mounts bleiben gueltig)",
 check("… idempotent (ein zweiter Lauf schreibt nicht)", migr_fn(alt_best) is False)
 
 # Freie Vergabe: share_<len> waere nach einem Loeschen womoeglich belegt.
-belegt = [{"source": "//a/x", "mountpoint": "/mnt/jarvis-kb/share_1"}]
+belegt = [{"source": "//a/x", "mountpoint": "/mnt/jarvis-kb/share_0"},
+          {"source": "//a/y", "mountpoint": "/mnt/jarvis-kb/share_2"}]
 frei = str(sicher(frei_fn, belegt))
 check("⚠ ein neuer Punkt kollidiert nicht mit einem vorhandenen",
-      frei != "/mnt/jarvis-kb/share_1" and frei.startswith("/mnt/jarvis-kb/share_"), frei)
-check("… und nimmt die kleinste freie Nummer", frei == "/mnt/jarvis-kb/share_0", frei)
+      frei not in ("/mnt/jarvis-kb/share_0", "/mnt/jarvis-kb/share_2")
+      and frei.startswith("/mnt/jarvis-kb/share_"), frei)
+def _belegt_auf_platte():
+    try:
+        with open("/proc/mounts") as f:
+            return {z.split(" ")[1] for z in f if len(z.split(" ")) > 1
+                    and z.split(" ")[1].startswith("/mnt/jarvis-kb")}
+    except OSError:
+        return set()
+
+
+_weg = {"/mnt/jarvis-kb/share_0", "/mnt/jarvis-kb/share_2"} | _belegt_auf_platte()
+_erwartet = next(f"/mnt/jarvis-kb/share_{n}" for n in range(1000)
+                 if f"/mnt/jarvis-kb/share_{n}" not in _weg)
+check("… und nimmt die kleinste freie Nummer", frei == _erwartet,
+      f"{frei} statt {_erwartet} (belegt: {sorted(_weg)})")
 
 # REGEL statt Liste: jede Aufrufstelle muss den Eintrag mitgeben – damit faellt
 # auch ein KUENFTIGER Aufrufer auf, ohne dass jemand eine Liste pflegt.

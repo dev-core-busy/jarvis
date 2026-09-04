@@ -431,7 +431,12 @@ def main() -> int:
                 ("Phantom-Marker in der Antwort",
                  "Fertig.\n[[JARVIS_DELIVER:/tmp/prozessautomatisierung.pptx]]"),
                 ("Rohname in data/documents genannt",
-                 "Fertig, gespeichert als data/documents/Prozessautomatisierung.pptx.")):
+                 "Fertig, gespeichert als data/documents/Prozessautomatisierung.pptx."),
+                # Auf DEV live gemessene Variante: der Marker traegt den ABSOLUTEN
+                # Pfad nach data/documents – auch dort gibt es die Datei nur unter
+                # ihrem Capability-Namen.
+                ("Marker auf den absoluten data/documents-Pfad",
+                 "Fertig.\n[[JARVIS_DELIVER:%s/Prozessautomatisierung.pptx]]" % docs.as_posix())):
             _chip, _warn = mit_office(_text)
             pruefe(f"{_name}: der Chip entsteht", _chip is not None)
             pruefe(f"{_name}: KEINE Warnung – die Datei ist beim Benutzer",
@@ -465,6 +470,32 @@ def main() -> int:
                    asyncio.run(deliver(s_, None,
                                        "Ich speichere sie unter /tmp/kuendigt_an.pptx.",
                                        set(), "u", jetzt, False)), s_.gesendet)[1])(AgentStub(EXT))))
+
+        abschnitt("10) Der Prompt fordert den Marker nur fuer eigene /tmp-Dateien")
+        # Die Namensregel oben faengt den Fehlalarm ab – sie beseitigt aber nicht
+        # den Grund. Auf ECHT gemessen (Journal, 4 Tage): 9 von 11 Meldungen
+        # entstanden, weil das Modell nach einem office_*-Werkzeug ZUSAETZLICH
+        # einen Marker auf einen /tmp-Pfad setzte, den es nie gab. Der Prompt
+        # verlangte den Marker fuer "JEDER ANDERE Dateityp" – logisch richtig,
+        # aber ohne den konkreten Gegenfall, und genau den ueberliest das Modell
+        # (dieselbe Lehre wie beim erfundenen Fehlschlag, 2026-08-30).
+        #
+        # ⚠ GEMESSEN, UND ES HILFT NICHT: auf DEV mit echtem Modell 1 von 4
+        # Laeufen VOR der Prompt-Zeile, 2 von 8 danach – unveraendert rund ein
+        # Viertel. Die Zeile bleibt als knapper Halbsatz stehen, weil sie sachlich
+        # richtig ist; TRAGEND ist die Namensregel oben. Wer hier eine laengere
+        # Belehrung einbaut, zahlt Prompt-Laenge fuer einen Effekt, der nicht
+        # nachweisbar ist.
+        _marker_zeile = next((z for z in QUELLE.split("\n")
+                              if "[[JARVIS_DELIVER:/tmp/<dateiname.ext>]]" in z), "")
+        pruefe("die Marker-Regel nennt die office_*-Ausnahme",
+               "office_" in _marker_zeile and "selbst geschrieben" in _marker_zeile,
+               _marker_zeile[-200:] or "Prompt-Zeile nicht gefunden")
+        _auto_zeile = next((z for z in QUELLE.split("\n")
+                            if "DU musst dich darum nicht kuemmern" in z), "")
+        pruefe("und die Auslieferungs-Regel sagt es fuer Office/Bilder ausdruecklich",
+               "KEINEN Liefer-Marker" in _auto_zeile,
+               _auto_zeile[-200:] or "Prompt-Zeile nicht gefunden")
 
         for f in aufraeumen:
             try:

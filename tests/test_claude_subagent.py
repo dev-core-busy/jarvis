@@ -876,6 +876,79 @@ check("605." not in _diaet and "65.986" not in _diaet,
       "... nennt keine Messwerte dieses Repos als die des Anwenders")
 
 
+# ═════════════════════════════════════════════════════════════════════════════
+# Nacharbeit 2026-09-04: WARUM wurden Auftraege abgelehnt?
+#
+# Gemessen an allen sieben bisherigen Delegationen (5 auf ECHT, 2 auf DEV):
+# 5 abgelehnt. Die Gruende waren richtig, aber in zwei Faellen sagten sie
+# nicht, was zu tun ist:
+#   * 087d8d707e6c: 121 s Lauf, Riegel GRUEN (22 OK, 0 FAIL), Grund "leerer
+#     Patch" – die wahre Ursache (Token-Grenze) stand nur in der Modellantwort.
+#   * c21400e77b80 / 536118b35b12: "Riegel ist rot" – WELCHE Pruefung, stand
+#     nur in der Riegel-Ausgabe, die man extra abrufen muss.
+print("\n\033[1mNacharbeit: Ablehnungsgruende sagen, was zu tun ist\033[0m")
+
+# (1) Die Token-Grenze wird als solche erkannt – ueber die KONSTANTE aus
+#     llm.py, nicht ueber ein abgetipptes Fragment.
+try:
+    from backend.llm import HINWEIS_UNVOLLSTAENDIG as _UNV
+except Exception as _e:  # noqa: BLE001
+    _UNV = ""
+check(bool(_UNV), "llm.HINWEIS_UNVOLLSTAENDIG ist erreichbar (Drift-Schranke)")
+_h = cs.lauf_hinweis(_UNV) if _UNV else ""
+check("Token" in _h or "token" in _h,
+      "⚠ die Token-Grenze wird als Ursache benannt", _h[:120])
+check("NICHT an der Aufgabe" in _h,
+      "... und ausdruecklich von einem Aufgaben-Fehler unterschieden", _h[:160])
+check("max_tokens" in _h or "Antwortlaenge" in _h,
+      "... mit dem Namen der Einstellung, die zu erhoehen ist", _h[:160])
+check("wiederholen" in _h,
+      "... und dem Hinweis, dass derselbe Auftrag danach unveraendert laeuft")
+# Der echte Antworttext eines Laufs enthaelt die Meldung MITTEN im Text.
+check(cs.lauf_hinweis("Ich fange an.\n" + _UNV + "\nEnde.") != "" if _UNV else False,
+      "... auch wenn die Meldung mitten in der Antwort steht")
+check(cs.lauf_hinweis("Alles erledigt, Datei angepasst.") == "",
+      "... und eine gewoehnliche Antwort erzeugt keinen Hinweis")
+
+# (2) Die roten Zeilen des Riegels stehen im Grund.
+_aus = ("\x1b[32m✓\x1b[0m alles gut\n"
+        "  \x1b[31m✗\x1b[0m de: kein Text nennt \"Jarvis\" ohne Eintrag – "
+        "security.ad_group_warning, cron.watcher_hint\n"
+        "\x1b[31m12 OK, 2 FAIL\x1b[0m\n")
+_f = cs.riegel_fails(_aus)
+check("security.ad_group_warning" in _f,
+      "⚠ die rote Zeile steht im Grund (nicht nur 'Riegel ist rot')", _f[:140])
+check("\x1b" not in _f,
+      "... ohne ANSI-Steuerzeichen (sie landen sonst im gespeicherten Grund)",
+      repr(_f)[:120])
+check("12 OK, 2 FAIL" not in _f,
+      "... und ohne die Bilanzzeile (die sagt nur, DASS etwas rot ist)", _f[:140])
+check(cs.riegel_fails("alles gruen\n17 OK, 0 FAIL") == "",
+      "... ein gruener Riegel erzeugt keine Zeile")
+check(cs.riegel_fails("") == "", "... und eine leere Ausgabe auch nicht")
+# Deckel: die Ausgabe eines Waechters kann hunderte Zeilen haben.
+_viele = "\n".join(f"  ✗ Pruefung {i}" for i in range(50))
+check(cs.riegel_fails(_viele).count("|") <= 4,
+      "... hoechstens ein paar Zeilen (ein Grund ist keine Testausgabe)")
+
+# (2b) Und sie ist VERDRAHTET – die Funktion allein nuetzt nichts.
+_quelle_cs = Path(cs.__file__).read_text()
+_i_bew = _quelle_cs.find("angenommen, gruende = bewerten(")
+_fenster = _quelle_cs[_i_bew:_i_bew + 900] if _i_bew > 0 else ""
+check(_i_bew > 0 and "riegel_fails(" in _fenster,
+      "⚠ riegel_fails wird im Ablehnungszweig wirklich angehaengt",
+      _fenster[:200])
+check("if not riegel_ok" in _fenster,
+      "... und nur bei rotem Riegel (ein gruener braucht keine Zeile)")
+check("lauf_hinweis(" in _fenster,
+      "... lauf_hinweis ebenfalls (Bestand)")
+
+# (3) Die Diagnose kippt das Urteil NICHT – bewerten() bleibt rein.
+import inspect as _insp2
+_bw = _insp2.getsource(cs.bewerten)
+check("riegel_fails" not in _bw and "lauf_hinweis" not in _bw,
+      "⚠ bewerten() liest weiterhin nichts davon (Urteil getrennt von Diagnose)")
+
 print("\n" + "=" * 62)
 print(f"  {_ok} OK, {_fail} FAIL")
 print("=" * 62)

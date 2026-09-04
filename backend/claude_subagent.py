@@ -783,7 +783,63 @@ def lauf_hinweis(antwort: str) -> str:
                 "Typischer Grund: das dem Benutzer zugewiesene LLM-Profil ist "
                 "nicht erreichbar (Einstellungen -> LLM-Profile). Die Ausnahme "
                 "steht im Journal des Dienstes und in der Telemetrie.")
+    # ⚠ DER HAEUFIGSTE ABLEHNUNGSGRUND, DER NICHT AN DER AUFGABE LAG.
+    # Gemessen am 2026-09-04 an den bisherigen sieben Delegationen: Auftrag
+    # 087d8d707e6c lief 121 s, der Riegel war GRUEN (22 OK, 0 FAIL) – und die
+    # Ablehnung lautete "leerer Patch". Die wahre Ursache stand nur in der
+    # Modellantwort: das Modell lief in die Token-Grenze. Wer den Grund liest,
+    # sucht den Fehler in der Aufgabe, waehrend das PROFIL zu klein ist.
+    #
+    # Geprueft wird gegen die KONSTANTE aus llm.py – sie ist ausdruecklich
+    # dafuer angelegt ("Aufrufer muessen diesen Fall ERKENNEN koennen"), und
+    # der Text darin ist mehrzeilig und wird gelegentlich nachgeschaerft. Ein
+    # abgetipptes Fragment liefe beim naechsten Feinschliff auseinander.
+    try:
+        from backend.llm import HINWEIS_UNVOLLSTAENDIG as _UNV
+    except Exception:  # noqa: BLE001
+        _UNV = ""
+    if _UNV and _UNV[:60] in t:
+        return ("Der Lauf ist in die Token-Grenze gelaufen (die Generierung "
+                "wurde mitten im Reasoning abgeschnitten) – deshalb ist kein "
+                "Patch entstanden. Das liegt NICHT an der Aufgabe: entweder "
+                "'Maximale Antwortlaenge' (llm_max_tokens) erhoehen, die "
+                "Denktiefe des Profils senken oder ein anderes Profil "
+                "zuweisen. Danach denselben Auftrag unveraendert wiederholen.")
     return ""
+
+
+def riegel_fails(ausgabe: str, max_zeilen: int = 4) -> str:
+    """Die roten Zeilen eines Riegels als EINE Diagnosezeile – oder "".
+
+    ⚠ "Riegel X ist rot." ist richtig und trotzdem nutzlos: welche Pruefung
+    rot war, steht nur in der Riegel-Ausgabe, und die muss der Auftraggeber
+    ueber einen zweiten Abruf holen. Gemessen an den bisherigen Delegationen
+    war das der Grund fuer drei von fuenf Ablehnungen – und in zwei Faellen
+    stand in der FAIL-Zeile woertlich, was noch fehlte
+    ("security.ad_group_warning, cron.watcher_hint").
+
+    ANSI-Farbcodes muessen raus: die Waechter dieses Projekts faerben ihre
+    Ausgabe, und die Steuerzeichen landen sonst im gespeicherten Grund und in
+    jeder Anzeige, die ihn ausgibt.
+    """
+    roh = (ausgabe or "")
+    sauber = re.sub(r"\x1b\[[0-9;]*m", "", roh)
+    treffer = []
+    for zeile in sauber.splitlines():
+        z = zeile.strip()
+        if not z:
+            continue
+        # Die Bilanzzeile ("12 OK, 2 FAIL") ist KEIN Befund – sie sagt nur,
+        # dass es welche gibt.
+        if re.match(r"^\d+\s+OK", z) or re.match(r"^Ergebnis:", z):
+            continue
+        if "✗" in z or "❌" in z or re.search(r"\bFAIL\b", z):
+            treffer.append(re.sub(r"\s+", " ", z)[:200])
+        if len(treffer) >= max_zeilen:
+            break
+    if not treffer:
+        return ""
+    return "Rot war: " + " | ".join(treffer)
 
 
 def bewerten(diff: str, geaendert: list, erlaubt: list, riegel_ok: bool,
@@ -1042,6 +1098,11 @@ async def job_ausfuehren(job_id: str) -> None:
         # Diagnose ANHAENGEN, nicht das Urteil aendern: "leerer Patch" ist
         # richtig, sagt aber nicht, WARUM nichts entstanden ist.
         if not angenommen:
+            if not riegel_ok:
+                # WAS rot war, nicht nur DASS etwas rot war.
+                fails = riegel_fails(riegel_aus)
+                if fails:
+                    gruende.append(fails)
             hinweis = lauf_hinweis(antwort)
             if hinweis:
                 gruende.append(hinweis)

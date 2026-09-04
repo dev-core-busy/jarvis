@@ -530,6 +530,40 @@ check("… und benutzt fuer die Ordnerliste dieselbe Funktion (keine zweite Fass
       and 'kb_cfg["folders"]' not in add_code2, add_code2[-300:])
 
 
+print("\n\033[1m7. Bearbeiten zeigt den hinterlegten Benutzer\033[0m")
+#
+# ⚠ GEMELDET 2026-09-04: "bei Einstellungen -> Wissen -> Netzwerk-Freigaben ->
+# bearbeiten wird ein hinterlegter Benutzer nicht angezeigt". Das Formular las
+# `m.username` und setzte es brav – der Endpunkt gab das Feld nur NIE heraus.
+# Und weil der leere Benutzername beim Speichern uebernommen wird (nur das
+# leere KENNWORT bedeutet "unveraendert"), LOESCHTE jedes Bearbeiten ihn.
+list_code = schneide(HAUPT, "list_mounts")
+check("Positivkontrolle: list_mounts wurde geschnitten",
+      len(list_code) > 300 and "result.append" in list_code)
+check("⚠ der Endpunkt liefert den Benutzernamen aus",
+      '"username"' in list_code, list_code[list_code.find("result.append"):][:300])
+check("… und ob ein Kennwort hinterlegt ist (fuer den Sterne-Platzhalter)",
+      '"has_password"' in list_code)
+# Das KENNWORT selbst darf nirgends herauskommen – mehrfach dokumentierte
+# Zusage des Projekts.
+import re as _re3
+feld_zeilen = _re3.findall(r'"(\w+)":\s*m\.get\("(\w+)"', list_code)
+check("⚠ und das Kennwort selbst NICHT",
+      all(q != "password" for _, q in feld_zeilen), str(feld_zeilen))
+
+kjs2 = (WURZEL / "frontend" / "js" / "knowledge.js").read_text()
+i_form = kjs2.find("kb-mount-edit-user")
+check("das Formular fuellt das Benutzerfeld", i_form > 0)
+zeile_user = kjs2[kjs2.rfind("\n", 0, i_form):kjs2.find("\n", i_form)]
+check("⚠ und maskiert den Wert (Fremdinhalt in einem value-Attribut)",
+      "_escHtml(m.username" in zeile_user, zeile_user.strip()[:160])
+i_pass = kjs2.find("kb-mount-edit-pass")
+zeile_pass = kjs2[kjs2.rfind("\n", 0, i_pass):kjs2.find("\n", i_pass)]
+check("das Kennwortfeld sagt, ob eines hinterlegt ist (data-pw-gesetzt)",
+      "data-pw-gesetzt" in zeile_pass and "has_password" in zeile_pass,
+      zeile_pass.strip()[:160])
+
+
 print("\n\033[1m5. Die Egress-Sperre darf keine Mounts blockieren\033[0m")
 #
 # ⚠ AM 2026-09-04 AUF DEV BEWIESEN: mit aktiver Internet-Sperre liess sich

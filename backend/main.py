@@ -17314,6 +17314,18 @@ async def list_mounts(user: str = Depends(require_knowledge_editor)):
             "unknown": wert is None,      # None = Deckel gerissen, Zustand unbekannt
             "auto_mount": m.get("auto_mount", True),
             "mountpoint": mountpoint,
+            # ⚠ GEMELDET 2026-09-04: "bei Bearbeiten wird ein hinterlegter
+            # Benutzer nicht angezeigt". Das Formular liest `m.username` und
+            # setzte es brav – der Endpunkt gab das Feld nur nie heraus. Wer
+            # danach speicherte, LOESCHTE damit den Benutzernamen: das leere
+            # Feld wurde als Eingabe uebernommen (das leere KENNWORT bedeutet
+            # "unveraendert", der leere Benutzer nicht).
+            "username": m.get("username", ""),
+            # Ob ein Kennwort hinterlegt ist, MUSS sichtbar sein – das Kennwort
+            # selbst wird nie herausgegeben. Ohne diese Angabe kann die
+            # Oberflaeche nicht zwischen "kein Kennwort" und "eines ist
+            # gespeichert, Feld leer lassen" unterscheiden.
+            "has_password": bool(str(m.get("password") or "").strip()),
         })
     return JSONResponse(result)
 

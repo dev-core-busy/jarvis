@@ -915,3 +915,44 @@ body.light .sapcert-state.is-err { color: color-mix(in srgb, var(--danger) 78%, 
        weiterhin. */
     .jv-pkg-tab .jv-pkg-s, .jv-pkg-tab th[data-sort="summary"] { display: none; }
 }
+
+
+/* ─── Auge am Kennwortfeld (frontend/js/pwreveal.js) ─────────────────────────
+   In theme.css und NICHT in style.css: Kennwortfelder gibt es auf jeder Seite
+   (Login, /email, /sap, /vemas, /jira-addon, die Office-Aufgabenfenster) –
+   style.css laedt nur /settings und /wissen. Register: globale Regeln gehoeren
+   hierher, sonst greift die Regel auf den uebrigen Seiten nicht. */
+.jv-pw-wrap { position: relative; display: block; }
+.jv-pw-host { position: relative; }
+
+/* Das Feld braucht Platz fuer den Knopf, sonst liegt er auf dem Text.
+   `!important` ist hier begruendet: viele dieser Felder tragen ein
+   Inline-`style` mit eigenem padding (gewachsener Bestand), und ein
+   Inline-Style gewinnt gegen jede Klassenregel. */
+.jv-pw-wrap > input[type="password"],
+.jv-pw-wrap > input[type="text"],
+.jv-pw-host > input[type="password"],
+.jv-pw-host > input[type="text"] { padding-right: 38px !important; }
+
+.jv-pw-eye {
+    position: absolute;
+    top: 50%;
+    right: 8px;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    padding: 4px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-muted, #888);
+    opacity: .8;
+    /* Ueber dem Feld, aber unter Dialogen/Popups. */
+    z-index: 2;
+    line-height: 1;
+}
+.jv-pw-eye:hover { opacity: 1; }
+/* :focus-visible, NICHT :focus – sonst bleibt nach jedem Mausklick ein
+   Rahmen stehen (Register). */
+.jv-pw-eye:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.jv-pw-eye .jv-ico { width: 15px; height: 15px; }

@@ -2585,7 +2585,7 @@ class JarvisKnowledgeManager {
                                   : (m.active ? window.t('knowledge.share_connected_title')
                                               : window.t('knowledge.share_disconnected_title'))}"></span>
                     <span class="kb-mount-type">${m.type}</span>
-                    <span class="kb-mount-source" title="${m.source}">${m.source}</span>
+                    <span class="kb-mount-source" title="${this._escHtml(m.source||'')}">${this._escHtml(m.source||'')}</span>
                     <button class="btn-icon btn-small" title="${m.active ? window.t('knowledge.share_disconnect_title') : window.t('knowledge.share_connect_title')}"
                         onclick="window.knowledgeManager.toggleMount(${i}, ${!m.active})">
                         ${m.active ? '⏏' : '▶'}
@@ -2601,9 +2601,9 @@ class JarvisKnowledgeManager {
                         <option value="nfs" ${m.type==='nfs'?'selected':''}>NFS</option>
                         <option value="webdav" ${m.type==='webdav'?'selected':''}>WebDAV</option>
                     </select>
-                    <input type="text" class="kb-input kb-mount-edit-source" value="${m.source}" placeholder="${JarvisKnowledgeManager.MOUNT_BEISPIEL[m.type] || JarvisKnowledgeManager.MOUNT_BEISPIEL.smb}" />
-                    <input type="text" class="kb-input kb-mount-edit-user" value="${m.username||''}" placeholder="${window.t('knowledge.share_user_ph')}" />
-                    <input type="password" class="kb-input kb-mount-edit-pass" placeholder="${window.t('knowledge.share_pass_unchanged_ph')}" />
+                    <input type="text" class="kb-input kb-mount-edit-source" value="${this._escHtml(m.source||'')}" placeholder="${JarvisKnowledgeManager.MOUNT_BEISPIEL[m.type] || JarvisKnowledgeManager.MOUNT_BEISPIEL.smb}" />
+                    <input type="text" class="kb-input kb-mount-edit-user" value="${this._escHtml(m.username||'')}" placeholder="${window.t('knowledge.share_user_ph')}" />
+                    <input type="password" class="kb-input kb-mount-edit-pass" data-pw-gesetzt="${m.has_password ? '1' : '0'}" placeholder="${m.has_password ? window.t('knowledge.share_pass_unchanged_ph') : window.t('knowledge.share_pass_ph')}" />
                     <div class="kb-mount-actions">
                         <button class="kb-btn-action" onclick="window.knowledgeManager.saveEditMount(${i})">${window.t('knowledge.share_save_btn')}</button>
                         <button class="kb-btn-secondary" onclick="document.getElementById('kb-mount-edit-${i}').style.display='none'">${window.t('common.cancel')}</button>

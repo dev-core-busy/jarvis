@@ -138,7 +138,22 @@ def _render_nft(uid, resolvers):
         "        ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } accept\n"
         "        ip6 daddr { fe80::/10, fc00::/7 } accept\n"
         f"{dns}"
-        "        drop\n"
+        # ⚠ DAS DROP MUSS AUF DEN SANDBOX-BENUTZER BESCHRAENKT SEIN.
+        # Ein nacktes "drop" trifft auch Verkehr OHNE Socket-Eigentuemer – und
+        # das sind die KERNEL-Sockets: der CIFS- und der NFS-Client des Kernels
+        # tragen keine skuid, fallen deshalb durch die erste Regel
+        # ("meta skuid != <uid> accept" ist bei fehlender skuid NICHT erfuellt)
+        # und landeten hier.
+        # FOLGE, am 2026-09-04 auf DEV gemessen und BEWIESEN: mit aktiver
+        # Egress-Sperre laesst sich KEINE Netzwerk-Freigabe mehr einbinden.
+        # mount meldete nur "fsconfig() failed: Operation now in progress", der
+        # Kernel "Error connecting to socket ... code = -115" – und ein
+        # Userspace-Test auf Port 445 gelang gleichzeitig, was die Suche
+        # zuverlaessig in die falsche Richtung schickte. Gegenprobe: eine
+        # vorangestellte accept-Regel fuer das Ziel -> 30 Pakete, gemountet.
+        # Die Sperre selbst aendert sich dadurch NICHT: fuer uid <uid> gilt
+        # unveraendert alles darueber und dann drop.
+        f"        meta skuid {uid} drop\n"
         "    }\n"
         "}\n"
     )

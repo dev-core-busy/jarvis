@@ -17209,10 +17209,16 @@ async def list_mounts(user: str = Depends(require_knowledge_editor)):
 async def add_mount(request: Request, user: str = Depends(require_knowledge_editor)):
     """Legt eine neue Netzwerk-Freigabe an und fügt deren Ordner der Wissensbasis hinzu."""
     data = await request.json()
-    source = data.get("source", "").strip()
     mount_type = data.get("type", "smb")
-    if not source:
-        return JSONResponse({"error": "Quelle fehlt"}, status_code=400)
+    # ⚠ HIER wird eine falsch geschriebene Quelle abgefangen – nicht erst beim
+    # Klick auf "Verbinden". Dort faellt sie nach bis zu 10 s Netz-Timeout auf,
+    # und die Meldung kommt dann vom System statt von der Eingabe. Gleichzeitig
+    # wird normalisiert: \\server\freigabe und smb://server/freigabe MEINEN
+    # dieselbe Freigabe, nur getippt, wie der Administrator sie kennt.
+    from backend import mount_quelle
+    source, quell_fehler = mount_quelle.pruefe(mount_type, data.get("source", ""))
+    if quell_fehler:
+        return JSONResponse({"error": quell_fehler}, status_code=400)
 
     mounts = _get_mounts_config()
     mount_entry = {
@@ -17226,13 +17232,27 @@ async def add_mount(request: Request, user: str = Depends(require_knowledge_edit
 
     idx = len(mounts) - 1
     mp = _mount_path(idx)
-    mp.mkdir(parents=True, exist_ok=True)
+    # ⚠ DAS ANLEGEN DES EINHAENGEPUNKTS DARF NICHT FATAL SEIN. Im getrennten
+    # Betrieb laeuft das Backend unprivilegiert, und /mnt gehoert root: das
+    # mkdir scheiterte mit PermissionError, der Aufruf endete als nackter
+    # HTTP 500 – und weil der Eintrag zwei Zeilen darueber SCHON gespeichert
+    # war, blieb eine halb angelegte Freigabe zurueck, deren Ordner nie in der
+    # Wissensliste landete. Auf DEV am 2026-09-04 im echten Bestand gemessen:
+    # drei Freigaben, keine einzige in `folders`.
+    # Gebraucht wird das Verzeichnis erst beim Verbinden – und dort legt es der
+    # Root-Broker selbst an (_op_mount_share).
+    try:
+        mp.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        print(f"[knowledge] Einhaengepunkt {mp} konnte nicht angelegt werden "
+              f"({e.strerror or e}) – der Root-Broker legt ihn beim Verbinden an.",
+              flush=True)
 
     # Ordner automatisch zur Knowledge-Liste hinzufuegen
     kb_state = config.get_skill_states().get("knowledge", {})
     kb_cfg = kb_state.get("config", {})
     folders = kb_cfg.get("folders", "data/knowledge")
-    if str(mp) not in folders:
+    if str(mp) not in [f.strip() for f in folders.split(",")]:
         folders = folders + "," + str(mp) if folders else str(mp)
         kb_cfg["folders"] = folders
         kb_state["config"] = kb_cfg
@@ -17276,9 +17296,13 @@ async def update_mount(idx: int, request: Request, user: str = Depends(require_k
     if idx < 0 or idx >= len(mounts):
         return JSONResponse({"error": "Ungueltiger Index"}, status_code=404)
     data = await request.json()
-    source = data.get("source", "").strip()
-    if not source:
-        return JSONResponse({"error": "Quelle fehlt"}, status_code=400)
+    # Dieselbe Schranke wie beim Anlegen – sonst waere das Bearbeiten der Weg,
+    # eine unmountbare Quelle doch noch in den Bestand zu bekommen.
+    from backend import mount_quelle
+    source, quell_fehler = mount_quelle.pruefe(data.get("type", "smb"),
+                                               data.get("source", ""))
+    if quell_fehler:
+        return JSONResponse({"error": quell_fehler}, status_code=400)
     # Unmounten falls aktiv (neue Credentials erfordern Neuverbindung; Root-Broker)
     mp = _mount_path(idx)
     if mp.is_mount():
@@ -17323,19 +17347,28 @@ def _mount_fehler_deuten(result: dict, mount_type: str, source: str) -> str:
                 "(Sicherheit → Root-Freigaben).")
 
     hinweise = []
+    # ⚠ DER KERNEL-CODE STICHT ALLE GENERISCHEN MUSTER. Ohne diese Schranke
+    # standen zwei Hinweise nebeneinander, die sich widersprachen: "Der Server
+    # hat nicht geantwortet" (aus 'Operation now in progress') UND "obwohl der
+    # Rechner antwortet" (aus dem Kernel-Code -115). Am 2026-09-04 live so
+    # gemessen – eine Meldung, die sich selbst widerspricht, ist schlimmer als
+    # eine unvollstaendige.
+    kern = re.search(r"failed w/return code = (-\d+)", roh)
+    if kern:
+        pass    # die Deutung des Codes steht weiter unten und gilt allein
     # ⚠ DIE MUSTER SIND LIVE GEMESSEN (DEV, util-linux 2.40 / Debian 13,
     # 2026-09-04) – die aus der Literatur bekannten "mount error(13)"-Texte
     # kommen dort GAR NICHT MEHR vor. Aktuelle mount-Fassungen melden
     # "fsconfig() failed: <Grund>", und der Grund ist ein Kernel-Errno-Text.
     # Wer hier nur nach den alten Mustern sucht, deutet nichts.
-    if "malformed unc" in n:
+    if not kern and ("malformed unc" in n):
         hinweise.append("Die Schreibweise der Quelle stimmt nicht – eine "
                         "SMB-Freigabe wird als //server/freigabe angegeben "
                         f"(eingetragen ist '{source}').")
-    if "now in progress" in n or "in bearbeitung" in n:
+    if not kern and ("now in progress" in n or "in bearbeitung" in n):
         hinweise.append(f"Der Server hat nicht geantwortet – '{source}' ist "
                         f"nicht erreichbar (Name/IP, Firewall, VPN, Server aus).")
-    if "pass remote address" in n:
+    if not kern and ("pass remote address" in n):
         # LIVE GEMESSEN: diese Meldung kommt auch, wenn die Quelle voellig in
         # Ordnung ist und schlicht 'nfs-common' fehlt (auf DEV nachgesehen:
         # Paket nicht installiert). Wer hier nur die Schreibweise nennt,
@@ -17348,31 +17381,69 @@ def _mount_fehler_deuten(result: dict, mount_type: str, source: str) -> str:
             hinweise.append("Bei NFS gehoert die Quelle in der Form "
                             "server:/export angegeben; ist sie das bereits, "
                             "fehlt auf dem Server 'nfs-common'.")
-    if "no such device" in n:
+    if not kern and ("no such device" in n):
         hinweise.append("Der Kernel kennt diesen Freigabetyp nicht – das "
                         "passende Paket fehlt (SMB: cifs-utils, NFS: "
                         "nfs-common, WebDAV: davfs2).")
-    if "timed out" in n or "timeout" in n:
+    if not kern and ("timed out" in n or "timeout" in n):
         hinweise.append(f"Der Server hat nicht geantwortet. Ist '{source}' "
                         f"erreichbar (Name/IP, Firewall, VPN)?")
-    if "permission denied" in n or "error(13)" in n:
+    if not kern and ("permission denied" in n or "error(13)" in n):
         hinweise.append("Zugang verweigert – Benutzername oder Kennwort passen "
                         "nicht, oder das Konto darf diese Freigabe nicht lesen. "
                         "Bei einem Domaenenkonto den Benutzer als "
                         "'DOMAENE\\benutzer' eintragen.")
-    if "no such file or directory" in n or "error(2)" in n:
+    if not kern and ("no such file or directory" in n or "error(2)" in n):
         hinweise.append(f"Diesen Freigabenamen gibt es auf dem Server nicht – "
                         f"Schreibweise von '{source}' pruefen "
                         f"(SMB: //server/freigabe).")
-    if "host is down" in n or "no route to host" in n or "unable to find suitable address" in n:
-        hinweise.append(f"Der Server '{source}' ist nicht erreichbar "
-                        f"(ausgeschaltet, falscher Name, kein Netzweg).")
-    if "unknown filesystem type" in n or "wrong fs type" in n:
+    # Der Kernel-Returncode ist die genaueste Auskunft, die es gibt – er kommt
+    # ueber _kernel_grund() aus dmesg. Reihenfolge: er GEWINNT gegen die
+    # generischen Muster, denn "Operation now in progress" sagt nichts.
+    if kern:
+        code = kern.group(1)
+        deutung = {
+            "-13": ("Zugang verweigert – Benutzername oder Kennwort passen "
+                    "nicht, oder das Konto darf diese Freigabe nicht lesen. "
+                    "Bei einem Domaenenkonto 'DOMAENE\\benutzer' eintragen."),
+            "-2": (f"Diesen Freigabenamen gibt es auf dem Server nicht – "
+                   f"Schreibweise von '{source}' pruefen."),
+            "-22": ("Der Server hat die Anfrage abgelehnt (ungueltige "
+                    "Parameter) – oft eine nicht unterstuetzte SMB-Version."),
+            "-95": ("Der Server unterstuetzt das verlangte Protokoll nicht "
+                    "(SMB-Version) – mit 'vers=2.1' oder 'vers=3.0' probieren."),
+            "-110": ("Zeitueberschreitung beim Verbindungsaufbau – der Server "
+                     "antwortet auf Port 445 nicht rechtzeitig."),
+            "-112": ("Der Server hat die Verbindung abgewiesen oder ist "
+                     "abgestuerzt (EHOSTDOWN)."),
+            "-115": ("Die Verbindung kam nicht zustande, obwohl der Rechner "
+                     "antwortet: Port 445 ist erreichbar, der SMB-Aufbau "
+                     "scheitert trotzdem. Zu pruefen sind SMB-Version, eine "
+                     "Firewall zwischen den Netzen und ob der Server "
+                     "SMB-Signierung erzwingt."),
+        }.get(code)
+        hinweise.append(deutung or f"Der Kernel meldet Fehlercode {code}.")
+    elif "error connecting to socket" in n:
+        hinweise.append("Der SMB-Verbindungsaufbau ist gescheitert. Ist Port "
+                        "445 zum Server offen und antwortet dort ein "
+                        "SMB-Dienst?")
+
+    if not kern and ("host is down" in n or "no route to host" in n
+                     or "unable to find suitable address" in n):
+        if "/mnt/" in roh:
+            hinweise.append("Unter dem Einhaengepunkt haengt ein abgestorbener "
+                            "Mount – er wird beim naechsten Versuch automatisch "
+                            "geloest (lazy umount). Bleibt es dabei, ist der "
+                            "Server tatsaechlich nicht erreichbar.")
+        else:
+            hinweise.append(f"Der Server '{source}' ist nicht erreichbar "
+                            f"(ausgeschaltet, falscher Name, kein Netzweg).")
+    if not kern and ("unknown filesystem type" in n or "wrong fs type" in n):
         paket = {"smb": "cifs-utils", "nfs": "nfs-common",
                  "webdav": "davfs2"}.get(mount_type, "")
         hinweise.append(f"Dem Server fehlt das Paket fuer diesen Freigabetyp"
                         + (f" – 'apt install {paket}'." if paket else "."))
-    if "access denied" in n or "logon failure" in n or "error(126)" in n:
+    if not kern and ("access denied" in n or "logon failure" in n or "error(126)" in n):
         hinweise.append("Die Anmeldung wurde abgelehnt (falsches Kennwort oder "
                         "gesperrtes Konto).")
 
@@ -17385,8 +17456,20 @@ def _mount_fehler_deuten(result: dict, mount_type: str, source: str) -> str:
     # hilft in einer Weboberflaeche niemandem – der Rest bleibt WOERTLICH
     # stehen (eine Deutung, die den Originaltext verschluckt, macht den
     # naechsten, unbekannten Fall unauffindbar).
+    # "dmesg(1) may have more information" fliegt raus – die Information SELBST
+    # steht seit 2026-09-04 in "[Kernel: ...]" dahinter und bleibt erhalten.
+    kern_teil = ""
+    m_kern = re.search(r"\[Kernel:[^\]]*\]", roh)
+    if m_kern:
+        # ZUERST herausziehen: der Kernel-Teil steht in DERSELBEN Zeile wie der
+        # dmesg-Hinweis, und der Filter darunter frisst bis Zeilenende – am
+        # 2026-09-04 live gesehen, die wichtigste Information verschwand.
+        kern_teil = m_kern.group(0)
+        roh = roh.replace(kern_teil, " ")
     roh = re.sub(r"\s*dmesg\(1\)[^\n]*", "", roh).strip()
     roh = re.sub(r"\s*\n\s*", " ", roh).strip(" .")
+    if kern_teil:
+        roh = (roh + " " + kern_teil).strip()
 
     # Die DEUTUNG STEHT VORN: sie sagt, was zu tun ist. Der Rohtext dahinter
     # in Klammern – ihn braucht, wer weitersuchen muss.
@@ -17422,6 +17505,17 @@ async def mount_share(idx: int, user: str = Depends(require_knowledge_editor)):
     }, user=user, timeout=60)
     if not result.get("ok"):
         text = _mount_fehler_deuten(result, mount_type, m.get("source", ""))
+        # Eine falsch geschriebene Quelle ist ein EINGABEfehler (400), kein
+        # Serverfehler (500) – sonst steht in jedem Monitoring ein 500er, wo
+        # jemand nur einen Schraegstrich vergessen hat. Erkennbar daran, dass
+        # die Formpruefung angeschlagen hat, bevor ueberhaupt gemountet wurde.
+        from backend import mount_quelle as _mq
+        _, formfehler = _mq.pruefe(mount_type, m.get("source", ""))
+        if formfehler:
+            print(f"[knowledge] Freigabe {idx} hat eine unbrauchbare Quelle: "
+                  f"{formfehler}", flush=True)
+            return JSONResponse({"error": f"Freigabe konnte nicht verbunden werden: "
+                                          f"{formfehler}"}, status_code=400)
         # Auch ins Journal: die Oberflaeche zeigt eine Zeile, hier steht der
         # ganze Vorgang mit Zeitpunkt und Benutzer.
         print(f"[knowledge] Mount fehlgeschlagen ({mount_type} {m.get('source','')}): "

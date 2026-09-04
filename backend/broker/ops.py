@@ -420,6 +420,122 @@ def _op_tika_status(args, stream):
                        "jar": str(onenote.finde_tika() or "")}}
 
 
+_KERNEL_FENSTER_S = 180   # siehe printk-Ratelimiting im Rumpf
+
+
+def _kernel_grund(seit: float, quelle: str = "") -> str:
+    """Die CIFS-/NFS-Zeilen des Kernels seit ``seit`` (Unix-Zeit).
+
+    ⚠ DAS IST DIE INFORMATION, DIE MOUNT SELBST ANKUENDIGT und die der
+    Benutzer nie zu sehen bekam: "dmesg(1) may have more information after
+    failed mount system call". Der Rueckgabewert von mount ist bei cifs oft nur
+    ``fsconfig() failed: Operation now in progress`` – der ECHTE Grund steht im
+    Kernel-Ring (``cifs_mount failed w/return code = -13`` = Kennwort falsch,
+    ``-2`` = Freigabe unbekannt, ``-115`` = Verbindung kam nicht zustande).
+    Am 2026-09-04 auf DEV gemessen: ohne diese Zeilen ist ein fehlgeschlagener
+    SMB-Mount von aussen nicht unterscheidbar von einem abgeschalteten Server –
+    und die Deutung lag prompt daneben, obwohl Ping und Port 445 offen waren.
+
+    Nur der Broker kann das: ``dmesg`` verlangt in der Regel root
+    (``kernel.dmesg_restrict``).
+    """
+    try:
+        r = _run(["dmesg", "--time-format=iso", "--level=err,warn,info,notice"],
+                 timeout=8, neutrale_sprache=True)
+        if not r.get("ok"):
+            return ""
+        treffer = []
+        for zeile in (r.get("stdout") or "").splitlines()[-800:]:
+            if not re.search(r"\b(CIFS|NFS|SMB)\b", zeile):
+                continue
+            m = re.match(r"^(\S+)\s+(.*)$", zeile.strip())
+            if not m:
+                continue
+            try:
+                import datetime as _dt
+                ts = _dt.datetime.fromisoformat(m.group(1)).timestamp()
+            except Exception:  # noqa: BLE001
+                continue
+            # ⚠ DAS FENSTER MUSS GROSSZUEGIG SEIN: der Kernel unterdrueckt
+            # WIEDERHOLTE identische Meldungen (printk-Ratelimiting). Ein
+            # zweiter Versuch gegen denselben Server erzeugt dann GAR KEINE
+            # neue Zeile – mit einem 2-Sekunden-Fenster kam nichts heraus,
+            # obwohl der Grund im Ring stand (am 2026-09-04 auf DEV gemessen).
+            if ts >= seit - _KERNEL_FENSTER_S:
+                treffer.append(m.group(2).strip())
+        if not treffer:
+            return ""
+        # Zuordnung ueber den INHALT, nicht nur ueber die Zeit: der Kernel nennt
+        # die Freigabe in "Attempting to mount //host/share". Ab dort zu lesen
+        # trennt den eigenen Versuch von einem parallelen auf eine andere
+        # Freigabe – und ueberlebt das Ratelimiting.
+        # ⚠ NICHT einfach "ab der letzten Attempting-Zeile": das
+        # printk-Ratelimiting unterdrueckt WIEDERHOLTE Fehlerzeilen, sodass ein
+        # zweiter Versuch nur noch "Attempting to mount" hinterlaesst – die
+        # Auskunft waere dann leer, obwohl der Grund zwei Zeilen darueber steht
+        # (am 2026-09-04 live in genau dieser Reihenfolge gemessen). Gesucht
+        # wird deshalb die inhaltlich TRAGENDE Zeile: der Returncode.
+        code = [z for z in treffer if "return code" in z]
+        fehler = [z for z in treffer if re.search(r"error|failed|denied|unable",
+                                                  z, re.IGNORECASE)]
+        wichtig = []
+        for kandidat in (code[-1:] + fehler[-2:]):
+            if kandidat not in wichtig:
+                wichtig.append(kandidat)
+        if not wichtig:
+            wichtig = treffer[-2:]
+        return " | ".join(wichtig)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _ist_eingehaengt(mp: str) -> bool:
+    """Steht der Pfad in /proc/mounts?
+
+    ⚠ ABSICHTLICH UEBER /proc/mounts UND NICHT UEBER stat()/is_mount(): auf
+    einem abgestorbenen CIFS-Mount wirft JEDER Zugriff ``[Errno 112] Host is
+    down`` – auch ``stat``, auch ``mkdir``, auch ``mountpoint``. Wer die Lage
+    per stat feststellen will, loest genau den Fehler aus, den er messen will.
+    """
+    try:
+        with open("/proc/mounts", "r") as f:
+            for zeile in f:
+                teile = zeile.split(" ")
+                if len(teile) > 1 and teile[1].replace("\\040", " ") == mp:
+                    return True
+    except OSError:
+        pass
+    return False
+
+
+def _mp_freimachen(mp: str) -> str:
+    """Einen bereits belegten Einhaengepunkt loesen. Rueckgabe: Hinweistext.
+
+    WARUM DAS NOETIG IST (gemeldet 2026-09-04, auf DEV nachgemessen): unter
+    ``/mnt/jarvis-kb/share_1`` hing ein CIFS-Mount, dessen Server nicht mehr
+    antwortete. Ein abgestorbener Mount BLOCKIERT jeden neuen Versuch – schon
+    das ``mkdir`` des Einhaengepunkts scheiterte mit EHOSTDOWN, und der Aufruf
+    endete als "Broker-Op-Fehler: [Errno 112] Host is down". Der Benutzer las
+    daraufhin, der SERVER sei nicht erreichbar; tatsaechlich war der alte
+    Mount das Hindernis.
+
+    Erst normal aushaengen, dann ``-l`` (lazy): ein toter CIFS-Mount laesst
+    sich nur so loesen. Unbedenklich, weil unmittelbar danach neu gemountet
+    wird.
+    """
+    if not _ist_eingehaengt(mp):
+        return ""
+    r = _run(["umount", mp], timeout=10, neutrale_sprache=True)
+    if r.get("ok"):
+        return "Der vorherige Mount wurde geloest. "
+    r2 = _run(["umount", "-l", mp], timeout=10, neutrale_sprache=True)
+    if r2.get("ok") or not _ist_eingehaengt(mp):
+        return ("Der vorherige Mount war abgestorben und wurde geloest "
+                "(lazy umount). ")
+    return ("ACHTUNG: unter dem Einhaengepunkt haengt ein Mount, der sich "
+            "nicht loesen laesst - der neue Versuch kann daran scheitern. ")
+
+
 def _op_mount_share(args, stream):
     """Netzwerk-Freigabe (SMB/NFS/WebDAV) read-only mounten – nur unter /mnt/."""
     from pathlib import Path
@@ -430,7 +546,29 @@ def _op_mount_share(args, stream):
     password = str(args.get("password", ""))
     if not source or not mp.startswith(MOUNT_PREFIX) or ".." in mp:
         return {"ok": False, "rc": -1, "stdout": "", "stderr": "Ungueltige Quelle/Mountpoint (nur /mnt/... erlaubt)"}
-    Path(mp).mkdir(parents=True, exist_ok=True)
+    # Zweite Schranke: die Form der Quelle. main.py prueft sie bereits beim
+    # Anlegen – hier steht sie noch einmal, weil der Broker auch von
+    # Altbestand-Eintraegen und kuenftigen Aufrufern erreicht wird, und weil
+    # die Zeichenkette gleich als Argument an 'mount' geht. EINE Regel, EIN Ort
+    # (backend/mount_quelle.py); zwei Fassungen liefen auseinander.
+    try:
+        from backend import mount_quelle as _mq
+        norm, fehler = _mq.pruefe(mount_type, source)
+        if fehler:
+            return {"ok": False, "rc": -1, "stdout": "", "stderr": fehler}
+        source = norm
+    except ImportError:
+        pass    # aeltere Installation: Verhalten wie bisher
+    # Einen belegten Einhaengepunkt ZUERST loesen – sonst scheitert schon das
+    # mkdir darunter (toter Mount, EHOSTDOWN) und der Grund ist nicht deutbar.
+    vorlauf = _mp_freimachen(mp)
+    try:
+        Path(mp).mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        return {"ok": False, "rc": -1, "stdout": "", "stderr": (
+            f"{vorlauf}Der Einhaengepunkt {mp} ist nicht benutzbar "
+            f"({e.strerror or e}). Haengt dort noch ein alter Mount? "
+            f"'umount -l {mp}' loest ihn.")}
     if mount_type == "smb":
         opts = "ro"
         if username:
@@ -456,7 +594,18 @@ def _op_mount_share(args, stream):
     else:
         return {"ok": False, "rc": -1, "stdout": "", "stderr": f"Unbekannter Typ: {mount_type}"}
     # Sprachneutral, weil main.py::_mount_fehler_deuten die Ausgabe deutet.
-    return _run(cmd, timeout=20, neutrale_sprache=True)
+    _t0 = time.time()
+    erg = _run(cmd, timeout=20, neutrale_sprache=True)
+    if not erg.get("ok"):
+        # Der Kernel weiss den Grund – mount reicht ihn nicht durch.
+        grund = _kernel_grund(_t0, source)
+        if grund:
+            erg["stderr"] = f"{str(erg.get('stderr') or '').strip()} [Kernel: {grund}]"
+    if vorlauf:
+        erg["stdout"] = vorlauf + str(erg.get("stdout") or "")
+        if not erg.get("ok"):
+            erg["stderr"] = vorlauf + str(erg.get("stderr") or "")
+    return erg
 
 
 def _op_umount_share(args, stream):

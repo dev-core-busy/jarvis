@@ -241,6 +241,52 @@ check('⚠ ein fehlgeschlagenes Loeschen meldet KEINEN Erfolg',
       /kb-notification-error/.test(notif.className) && /nope/.test(notif.textContent),
       notif.className + ' / ' + notif.textContent.slice(0, 80));
 
+section('8. Falsch geschriebene Quelle: Beispiel im Feld, Absage sichtbar');
+{
+    // Der Platzhalter zeigt das Beispiel des GEWAEHLTEN Typs – ein fester Text
+    // ("//server/freigabe oder server:/pfad") laesst den Benutzer raten,
+    // welche Haelfte fuer ihn gilt.
+    w.fetch = () => json([]);
+    await km.initMounts();
+    const typ = dc.getElementById('kb-mount-type');
+    const quelle = dc.getElementById('kb-mount-source');
+    check('Typ-Auswahl und Quellfeld vorhanden', !!typ && !!quelle);
+    check('Vorgabe SMB zeigt //server/freigabe',
+          quelle.placeholder === '//server/freigabe', quelle.placeholder);
+    typ.value = 'nfs';
+    typ.dispatchEvent(new w.Event('change'));
+    check('⚠ nach dem Wechsel auf NFS steht dort server:/export',
+          quelle.placeholder === 'server:/export', quelle.placeholder);
+    typ.value = 'webdav';
+    typ.dispatchEvent(new w.Event('change'));
+    check('… und bei WebDAV https://server/pfad',
+          quelle.placeholder === 'https://server/pfad', quelle.placeholder);
+    typ.value = 'smb';
+    typ.dispatchEvent(new w.Event('change'));
+
+    // Die Absage des Servers muss dort landen, wo der Benutzer steht.
+    // Das Formular wird wie vom Benutzer geoeffnet – im Markup steht es auf
+    // display:none, und ohne diesen Klick prueft "bleibt offen" gar nichts.
+    dc.getElementById('btn-kb-add-mount').click();
+    check('Positivkontrolle: das Formular ist offen',
+          dc.getElementById('kb-mount-form').style.display !== 'none');
+    quelle.value = 'srv/freigabe';
+    w.fetch = () => json({ error: "Vor dem Servernamen fehlen zwei Schraegstriche. "
+                                  + "Gemeint ist vermutlich '//srv/freigabe'." }, 400);
+    await km.saveMount();
+    await sleep(20);
+    check('⚠ die Absage steht an der Freigabenliste',
+          liste.nextElementSibling === notif && notif.style.display === 'block');
+    check('… und nennt die richtige Schreibweise',
+          /\/\/srv\/freigabe/.test(notif.textContent), notif.textContent.slice(0, 140));
+    check('… als Fehler, der stehen bleibt',
+          /kb-notification-error/.test(notif.className) && !km._notifTimer);
+    const form = dc.getElementById('kb-mount-form');
+    check('… und das Formular bleibt offen (die Eingabe geht nicht verloren)',
+          form.style.display !== 'none' && quelle.value === 'srv/freigabe',
+          form.style.display + ' / ' + quelle.value);
+}
+
 const fails = results.filter((r) => !r.ok).length;
 BILANZ = true;
 clearTimeout(WACHHUND);

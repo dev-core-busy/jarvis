@@ -40,6 +40,16 @@ def check(text, bedingung, detail=""):
         print(f"  \033[31m✗\033[0m {text}" + (f"  → {detail}" if detail else ""))
 
 
+def sicher(fn, *a, **k):
+    """Nie ungeprueft aufrufen: eine Pruefung, die WIRFT, bricht den Lauf ab –
+    und ein abgebrochener Waechter ist von einem bestandenen nicht zu
+    unterscheiden (Register). Genau so passiert, als Abschnitt 5 dazukam."""
+    try:
+        return fn(*a, **k)
+    except Exception as e:  # noqa: BLE001
+        return f"__FEHLER__ {type(e).__name__}: {e}"
+
+
 def schneide(quelle, name):
     """Genau diese Funktion aus main.py – kein Fenster, kein Textschnitt."""
     baum = ast.parse(quelle)
@@ -110,6 +120,47 @@ faelle = [
      {"ok": False, "rc": 32, "stderr": "mount: /mnt/kb_0: fsconfig() failed: "
       "Die Operation ist jetzt in Bearbeitung."},
      "smb", "//192.0.2.77/x", ["nicht erreichbar"]),
+    # ⚠ DER KERNEL-CODE IST DIE GENAUESTE AUSKUNFT und gewinnt gegen die
+    # generischen Muster: "Operation now in progress" sagt gar nichts, waehrend
+    # "-13" eindeutig das Kennwort meint. Live auf DEV gemessen (2026-09-04):
+    # ohne diese Zeilen ist ein SMB-Fehler von aussen nicht deutbar – und die
+    # Deutung lag prompt daneben (Ping 0,2 ms und Port 445 offen, trotzdem
+    # "Server nicht erreichbar").
+    ("Kernel -13 = Kennwort/Berechtigung",
+     {"ok": False, "rc": 32, "stderr": "mount: /mnt/kb_0: fsconfig() failed: "
+      "Operation now in progress. [Kernel: CIFS: VFS: cifs_mount failed "
+      "w/return code = -13]"},
+     "smb", "//srv/x", ["Kennwort"]),
+    ("Kernel -2 = Freigabe gibt es nicht",
+     {"ok": False, "rc": 32, "stderr": "[Kernel: cifs_mount failed w/return code = -2]"},
+     "smb", "//srv/tippfehler", ["gibt es auf dem Server nicht"]),
+    ("Kernel -115 = Verbindung kam nicht zustande, Rechner antwortet aber",
+     {"ok": False, "rc": 32, "stderr": "mount: /mnt/kb_0: fsconfig() failed: "
+      "Operation now in progress. [Kernel: CIFS: VFS: Error connecting to "
+      "socket. Aborting operation. | cifs_mount failed w/return code = -115]"},
+     "smb", "//191.100.147.90/knowledgebase_an_rag", ["SMB-Version"]),
+    ("Kernel -95 = SMB-Version",
+     {"ok": False, "rc": 32, "stderr": "[Kernel: cifs_mount failed w/return code = -95]"},
+     "smb", "//srv/x", ["vers="]),
+    ("⚠ der Kernel-Code STICHT das generische Muster",
+     {"ok": False, "rc": 32, "stderr": "mount error: Host is down [Kernel: "
+      "cifs_mount failed w/return code = -13]"},
+     "smb", "//srv/x", ["Kennwort"]),
+    ("ein unbekannter Kernel-Code wird beim NAMEN genannt",
+     {"ok": False, "rc": 32, "stderr": "[Kernel: cifs_mount failed w/return code = -524]"},
+     "smb", "//srv/x", ["-524"]),
+    ("'Error connecting to socket' ohne Code nennt Port 445",
+     {"ok": False, "rc": 32, "stderr": "CIFS: VFS: Error connecting to socket."},
+     "smb", "//srv/x", ["445"]),
+    # ⚠ GEMELDET 2026-09-04: derselbe Errno-Text, aber das Ziel ist ein PFAD –
+    # dann ist nicht der Server das Hindernis, sondern ein abgestorbener Mount.
+    ("ECHT: Host is down mit PFAD = toter Mount, nicht toter Server",
+     {"ok": False, "rc": -1, "stderr": "Broker-Op-Fehler: [Errno 112] Host is "
+      "down: '/mnt/jarvis-kb/share_1'"},
+     "smb", "//191.100.147.90/knowledgebase_an_rag", ["abgestorbener", "Mount"]),
+    ("… waehrend derselbe Text OHNE Pfad weiter auf den Server zeigt",
+     {"ok": False, "rc": 32, "stderr": "mount error: Host is down"},
+     "smb", "//srv/x", ["nicht erreichbar"]),
     ("ausstehende Root-Freigabe wird benannt",
      {"ok": False, "decision": "pending", "rc": None, "stderr": ""},
      "smb", "//srv/x", ["Root-Freigaben"]),
@@ -135,6 +186,19 @@ check("⚠ der Rohtext bleibt erhalten (die Deutung ergaenzt nur)", roh in t, t[
 t2 = deute({"ok": False, "rc": 32, "stderr": "mount: /mnt/x: fsconfig() failed: "
             "Malformed UNC in devname\n.\n       dmesg(1) may have more "
             "information after failed mount system call.\n"}, "smb", "srv")
+# ⚠ EINE MELDUNG DARF SICH NICHT SELBST WIDERSPRECHEN. Live gemessen stand
+# "Der Server hat nicht geantwortet" neben "obwohl der Rechner antwortet".
+t_k = deute({"ok": False, "rc": 32, "stderr": "mount: /mnt/x: fsconfig() failed: "
+             "Operation now in progress. dmesg(1) may have more information "
+             "after failed mount system call. [Kernel: CIFS: VFS: Error "
+             "connecting to socket. | cifs_mount failed w/return code = -115]"},
+            "smb", "//srv/x")
+check("⚠ der Kernel-Code sticht das generische 'nicht erreichbar'",
+      "nicht erreichbar" not in t_k and "SMB-Version" in t_k, t_k[:220])
+check("… und der Kernel-Teil bleibt in der Systemmeldung erhalten",
+      "-115" in t_k, t_k[:220])
+check("… waehrend der dmesg-Hinweis draussen bleibt", "dmesg" not in t_k, t_k[:220])
+
 check("⚠ die Deutung steht VOR der Systemmeldung",
       t2.index("//server/freigabe") < t2.index("fsconfig"), t2[:200])
 check("der dmesg-Hinweis ist raus (in einer Weboberflaeche nutzlos)",
@@ -162,6 +226,13 @@ check("der Fehlerzweig deutet, statt stderr roh durchzureichen",
       "_mount_fehler_deuten(" in mount_code, mount_code[:200])
 check("und er schreibt den Fehler ins Journal",
       "Mount fehlgeschlagen" in mount_code and "flush=True" in mount_code)
+# Ein Eingabefehler ist kein Serverfehler: eine unbrauchbare Quelle muss 400
+# ergeben, nicht 500 – sonst steht in jedem Monitoring ein Serverfehler, wo
+# jemand einen Schraegstrich vergessen hat.
+check("⚠ eine unbrauchbare Quelle beim Verbinden ergibt 400, nicht 500",
+      "status_code=400" in mount_code and "mount_quelle" in mount_code,
+      mount_code[mount_code.find("_mount_fehler_deuten"):][:300])
+
 un_code = schneide(HAUPT, "unmount_share")
 check("das Trennen deutet ebenfalls", "_mount_fehler_deuten(" in un_code)
 
@@ -173,6 +244,200 @@ zuweisungen = {t.id for n in ast.walk(baum) if isinstance(n, ast.Assign)
                for t in n.targets if isinstance(t, ast.Name)}
 check("⚠ kein Zugriff auf ein nicht zugewiesenes 'source' (NameError im Erfolgsfall)",
       "source" not in (namen - zuweisungen), str(sorted(namen - zuweisungen))[:200])
+
+
+print("\n\033[1m3. Eine falsch geschriebene Quelle wird beim EINGEBEN abgefangen\033[0m")
+#
+# VORGABE DES BETREIBERS (2026-09-04): "wenn im 'SMB/CIFS' Fall ein falsch
+# formatierter Pfad versucht wird einzugeben, muss das abgefangen werden."
+# Vorher nahm der Endpunkt JEDE nicht leere Zeichenkette an – der Fehler fiel
+# erst beim Klick auf "Verbinden" auf, nach bis zu 10 s Netz-Timeout.
+
+sys.path.insert(0, str(WURZEL))
+from backend import mount_quelle as MQ   # noqa: E402
+
+# Was ABGEWIESEN werden muss – jeweils mit einem Wort, das im Fehlertext
+# stehen MUSS, damit die Meldung den naechsten Schritt nennt.
+schlecht = [
+    ("smb", "srv/freigabe",        "//srv/freigabe"),   # die zwei Slashes fehlen
+    ("smb", "kein-pfad",           "//server/freigabe"),
+    ("smb", "//srv",               "freigabe"),         # Freigabename fehlt
+    ("smb", "//srv/",              "freigabe"),
+    ("smb", "C:\\daten\\x",        "lokaler Pfad"),
+    ("smb", "/mnt/daten",          "lokaler Pfad"),
+    ("smb", "",                    "//server/freigabe"),
+    ("smb", "//sr v/freigabe",     "Servername"),
+    ("smb", "//srv/frei\ngabe",    "Steuerzeichen"),
+    ("nfs", "export",              "server:/export"),
+    ("nfs", "/export",             "lokaler Pfad"),
+    ("nfs", "srv:export",          "absoluter Pfad"),
+    ("webdav", "srv/dav",          "https://server/pfad"),
+    ("blubb", "//srv/x",           "Freigabetyp"),
+]
+for typ, quelle, muss in schlecht:
+    norm, fehler = MQ.pruefe(typ, quelle)
+    check(f"abgewiesen: {typ} {quelle!r}",
+          bool(fehler) and not norm and muss.lower() in fehler.lower(),
+          f"norm={norm!r} fehler={fehler!r}")
+
+# Was ANGENOMMEN werden muss – und worauf es normalisiert wird. Ein
+# Administrator kennt //server/freigabe aus Linux, \\server\freigabe aus
+# Windows und smb://server/freigabe aus dem Dateimanager. Alle drei MEINEN
+# dieselbe Freigabe; das abzulehnen waere Schikane.
+gut = [
+    ("smb", "//srv/freigabe",             "//srv/freigabe"),
+    ("smb", "\\\\srv\\freigabe",             "//srv/freigabe"),
+    ("smb", "smb://srv/freigabe",         "//srv/freigabe"),
+    ("smb", "cifs://srv/freigabe",        "//srv/freigabe"),
+    ("smb", "  //srv/freigabe/  ",        "//srv/freigabe"),
+    ("smb", "///srv/freigabe",            "//srv/freigabe"),
+    ("smb", "//srv.firma.de/Abt Technik", "//srv.firma.de/Abt Technik"),
+    ("smb", "//192.0.2.7/daten/unter",    "//192.0.2.7/daten/unter"),
+    ("nfs", "srv:/export",                "srv:/export"),
+    ("nfs", "nfs://srv/export",           "srv:/export"),
+    ("webdav", "https://srv/dav/",        "https://srv/dav"),
+    ("webdav", "davs://srv/dav",          "https://srv/dav"),
+]
+for typ, quelle, erwartet in gut:
+    norm, fehler = MQ.pruefe(typ, quelle)
+    check(f"angenommen: {typ} {quelle!r} -> {erwartet!r}",
+          not fehler and norm == erwartet, f"norm={norm!r} fehler={fehler!r}")
+
+# Ein Leerzeichen im Freigabenamen ist in Windows-Netzen der Normalfall – wer
+# es verbietet, sperrt die Haelfte der Freigaben aus.
+check("Leerzeichen im Freigabenamen bleiben erhalten",
+      MQ.pruefe("smb", "//srv/Abt Technik")[0] == "//srv/Abt Technik")
+
+print("\n\033[1m4. Die Schranke sitzt an ALLEN Eingaengen\033[0m")
+
+for name in ("add_mount", "update_mount"):
+    code_ep = schneide(HAUPT, name)
+    check(f"{name}: prueft die Quelle ueber mount_quelle",
+          "mount_quelle.pruefe(" in code_ep, code_ep[:160])
+    # Die Pruefung muss VOR dem Speichern stehen – sonst landet die kaputte
+    # Quelle im Bestand und wird erst danach beanstandet.
+    i_pruef = code_ep.find("mount_quelle.pruefe(")
+    i_save = code_ep.find("_save_mounts_config(")
+    check(f"{name}: und zwar VOR dem Speichern",
+          i_pruef >= 0 and i_save > i_pruef, f"{i_pruef} / {i_save}")
+
+# ⚠ VON DER LIVE-PROBE GEFUNDEN (2026-09-04, DEV): das Anlegen einer Freigabe
+# endete im getrennten Betrieb mit nacktem HTTP 500. Das unprivilegierte
+# Backend machte mkdir auf /mnt/... (gehoert root) – und weil der Eintrag zwei
+# Zeilen darueber SCHON gespeichert war, blieb eine halb angelegte Freigabe
+# zurueck, deren Ordner nie in der Wissensliste landete. Im echten Bestand
+# gemessen: drei Freigaben, keine einzige in `folders`.
+add_code = schneide(HAUPT, "add_mount")
+baum_add = ast.parse(add_code)
+mkdir_geschuetzt = False
+for k in ast.walk(baum_add):
+    if isinstance(k, ast.Try):
+        quelle_try = ast.get_source_segment(add_code, k) or ""
+        if ".mkdir(" in quelle_try:
+            mkdir_geschuetzt = True
+check("⚠ das mkdir des Einhaengepunkts ist abgesichert (kein HTTP 500)",
+      mkdir_geschuetzt or ".mkdir(" not in add_code, add_code[:120])
+i_mkdir = add_code.find(".mkdir(")
+i_folders = add_code.find('kb_cfg["folders"]')
+check("… und die Ordner-Eintragung folgt DANACH (sie darf nicht mitausfallen)",
+      i_folders > i_mkdir >= 0, f"{i_mkdir} / {i_folders}")
+# Teilstring-Falle: "/mnt/jarvis-kb/share_1" steckt in ".../share_10".
+check("die Ordnerliste wird eintragsweise verglichen, nicht als Teilstring",
+      "folders.split(" in add_code, add_code[add_code.find("folders"):][:200])
+
+ops_quelle = (WURZEL / "backend" / "broker" / "ops.py").read_text()
+op_code = ""
+for k in ast.parse(ops_quelle).body:
+    if isinstance(k, ast.FunctionDef) and k.name == "_op_mount_share":
+        op_code = ast.get_source_segment(ops_quelle, k) or ""
+check("Positivkontrolle: die Broker-Op wurde geschnitten", len(op_code) > 200)
+check("auch der Broker prueft die Form (Tiefenverteidigung)",
+      "mount_quelle" in op_code and "pruefe(" in op_code, op_code[:200])
+check("… und benutzt die NORMALISIERTE Quelle fuer den mount-Aufruf",
+      "source = norm" in op_code, op_code[:200])
+# Der gemeldete Fall: ein abgestorbener Mount blockiert jeden neuen Versuch.
+check("⚠ ein belegter Einhaengepunkt wird VOR dem mkdir geloest",
+      "_mp_freimachen(" in op_code
+      and op_code.find("_mp_freimachen(") < op_code.find(".mkdir("),
+      op_code[:200])
+mkdir_try = any(isinstance(k, ast.Try) and ".mkdir(" in (ast.get_source_segment(op_code, k) or "")
+                for k in ast.walk(ast.parse(op_code)))
+check("… und das mkdir selbst wirft keinen Broker-Op-Fehler mehr", mkdir_try)
+check("der Hinweis auf den geloesten Mount landet im Ergebnis",
+      "vorlauf" in op_code and 'erg["stderr"]' in op_code)
+frei_code = ""
+for k in ast.parse(ops_quelle).body:
+    if isinstance(k, ast.FunctionDef) and k.name in ("_mp_freimachen", "_ist_eingehaengt"):
+        frei_code += (ast.get_source_segment(ops_quelle, k) or "") + "\n"
+check("Positivkontrolle: die Helfer wurden geschnitten", len(frei_code) > 300)
+kern_code = ""
+for k in ast.parse(ops_quelle).body:
+    if isinstance(k, ast.FunctionDef) and k.name == "_kernel_grund":
+        kern_code = ast.get_source_segment(ops_quelle, k) or ""
+check("Positivkontrolle: _kernel_grund wurde geschnitten", len(kern_code) > 200)
+check("⚠ der Broker holt den Kernel-Grund aus dmesg (nur root kann das)",
+      "dmesg" in kern_code and "CIFS" in kern_code, kern_code[:160])
+check("… und nur Zeilen DIESES Versuchs (der Ring reicht Tage zurueck)",
+      "seit" in kern_code and "fromisoformat" in kern_code)
+check("der mount-Zweig haengt den Kernel-Grund an einen Fehlschlag an",
+      "_kernel_grund(" in op_code and "[Kernel:" in op_code, op_code[-400:])
+check("… und NUR an einen Fehlschlag (ein Erfolg braucht keine dmesg-Zeile)",
+      'if not erg.get("ok")' in op_code)
+
+check("⚠ die Lage wird ueber /proc/mounts festgestellt, NICHT per stat",
+      "/proc/mounts" in frei_code and ".is_mount()" not in frei_code, frei_code[:160])
+check("… und ein toter Mount wird per lazy umount geloest",
+      '"-l"' in frei_code or "'-l'" in frei_code, frei_code[:200])
+
+# Drift-Schranke: die Beispiele stehen im Backend UND im Formular.
+kjs = (WURZEL / "frontend" / "js" / "knowledge.js").read_text()
+import re as _re
+block = kjs[kjs.find("JarvisKnowledgeManager.MOUNT_BEISPIEL = {"):]
+block = block[:block.find("};") + 2]
+check("Positivkontrolle: der Beispiel-Block wurde gefunden", len(block) > 40, block[:80])
+for typ, bsp in MQ.BEISPIEL.items():
+    check(f"Beispiel im Formular deckt sich mit dem Backend ({typ})",
+          f"'{bsp}'" in block, block)
+
+# Der Platzhalter darf nicht per data-i18n-placeholder gesetzt werden: applyLang()
+# wuerde den typabhaengigen Wert bei jedem Sprachwechsel ueberschreiben.
+shtml = (WURZEL / "frontend" / "settings.html").read_text()
+zeile = [z for z in shtml.splitlines() if 'id="kb-mount-source"' in z]
+check("Positivkontrolle: das Quellfeld wurde gefunden", len(zeile) == 1, str(zeile))
+check("⚠ der Platzhalter haengt am TYP, nicht an der Sprache",
+      bool(zeile) and "data-i18n-placeholder" not in zeile[0], zeile[0] if zeile else "")
+
+
+print("\n\033[1m5. Die Egress-Sperre darf keine Mounts blockieren\033[0m")
+#
+# ⚠ AM 2026-09-04 AUF DEV BEWIESEN: mit aktiver Internet-Sperre liess sich
+# KEINE Netzwerk-Freigabe mehr einbinden. Der Kernel-CIFS-Client hat keine
+# skuid, fiel deshalb durch "meta skuid != <uid> accept" und landete im
+# nackten "drop". Gegenprobe: eine vorangestellte accept-Regel fuer das Ziel →
+# 30 Pakete, gemountet, Inhalt sichtbar. Ein Userspace-Test auf Port 445
+# gelang die ganze Zeit – genau das schickte die Suche in die falsche Richtung.
+import types as _ty
+if "backend.egress_guard" not in sys.modules:
+    _d = _ty.ModuleType("dotenv"); _d.load_dotenv = lambda *a, **k: None
+    sys.modules.setdefault("dotenv", _d)
+from backend import egress_guard as EG   # noqa: E402
+
+regeln = sicher(EG._render_nft, 996, ["191.100.2.50"])
+check("Positivkontrolle: der Regelsatz wurde erzeugt",
+      isinstance(regeln, str) and "chain out" in regeln, str(regeln)[:120])
+zeilen = [z.strip() for z in str(regeln).splitlines() if z.strip()]
+drops = [z for z in zeilen if z.startswith("drop") or " drop" in z]
+check("es gibt genau eine drop-Regel", len(drops) == 1, str(drops))
+check("⚠ und sie trifft NUR den Sandbox-Benutzer (kein nacktes 'drop')",
+      bool(drops) and "skuid 996" in drops[0], str(drops))
+# Die Sperre selbst muss bleiben: fuer den Sandbox-Benutzer aendert sich nichts.
+check("die Sperre gilt weiter fuer den Sandbox-Benutzer",
+      "meta skuid != 996 accept" in regeln and "meta skuid 996 drop" in regeln)
+check("… und die Ausnahmen (Loopback, privat, DNS) stehen davor",
+      regeln.index("127.0.0.0/8") < regeln.index("skuid 996 drop")
+      and regeln.index("dport 53 accept") < regeln.index("skuid 996 drop"))
+check("die Kette bleibt im Whitelist-Muster (policy accept + gezieltes drop)",
+      "policy accept" in regeln)
 
 
 print(f"\n\033[1mErgebnis: {OK}/{OK + FAIL}\033[0m")

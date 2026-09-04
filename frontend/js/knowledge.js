@@ -2539,6 +2539,20 @@ class JarvisKnowledgeManager {
                 if (form) form.style.display = form.style.display === 'none' ? '' : 'none';
             });
         }
+        // Der Platzhalter zeigt das Beispiel des GEWAEHLTEN Typs. Ein fester
+        // Text ("//server/freigabe oder server:/pfad") laesst den Benutzer
+        // raten, welche Haelfte fuer ihn gilt – und genau daraus entstehen die
+        // Eingaben, die der Server ablehnen muss.
+        const typEl = document.getElementById('kb-mount-type');
+        if (typEl) {
+            const setzePlatzhalter = () => {
+                const q = document.getElementById('kb-mount-source');
+                const b = JarvisKnowledgeManager.MOUNT_BEISPIEL[typEl.value];
+                if (q && b) q.placeholder = b;
+            };
+            typEl.addEventListener('change', setzePlatzhalter);
+            setzePlatzhalter();
+        }
         await this.fetchMounts();
     }
 
@@ -2582,12 +2596,12 @@ class JarvisKnowledgeManager {
                         onclick="window.knowledgeManager.removeMount(${i})">${JarvisIcons.trash()}</button>
                 </div>
                 <div class="kb-mount-edit-form" id="kb-mount-edit-${i}" style="display:none;">
-                    <select class="kb-input kb-mount-edit-type">
+                    <select class="kb-input kb-mount-edit-type" onchange="window.knowledgeManager.mountBeispielNachziehen(this)">
                         <option value="smb" ${m.type==='smb'?'selected':''}>SMB/CIFS (Windows-Freigabe)</option>
                         <option value="nfs" ${m.type==='nfs'?'selected':''}>NFS</option>
                         <option value="webdav" ${m.type==='webdav'?'selected':''}>WebDAV</option>
                     </select>
-                    <input type="text" class="kb-input kb-mount-edit-source" value="${m.source}" placeholder="${window.t('knowledge.share_source_ph')}" />
+                    <input type="text" class="kb-input kb-mount-edit-source" value="${m.source}" placeholder="${JarvisKnowledgeManager.MOUNT_BEISPIEL[m.type] || JarvisKnowledgeManager.MOUNT_BEISPIEL.smb}" />
                     <input type="text" class="kb-input kb-mount-edit-user" value="${m.username||''}" placeholder="${window.t('knowledge.share_user_ph')}" />
                     <input type="password" class="kb-input kb-mount-edit-pass" placeholder="${window.t('knowledge.share_pass_unchanged_ph')}" />
                     <div class="kb-mount-actions">
@@ -2667,6 +2681,14 @@ class JarvisKnowledgeManager {
             this._showNotification(window.t('common.error') + ': ' + e.message,
                                    'error', 'kb-mount-list');
         }
+    }
+
+    /** Platzhalter des Quellfelds an den gewaehlten Typ anpassen. */
+    mountBeispielNachziehen(selectEl) {
+        const form = selectEl && selectEl.closest('.kb-mount-edit-form');
+        const q = form && form.querySelector('.kb-mount-edit-source');
+        const b = JarvisKnowledgeManager.MOUNT_BEISPIEL[selectEl.value];
+        if (q && b) q.placeholder = b;
     }
 
     async toggleMount(idx, mount) {
@@ -2787,6 +2809,15 @@ class JarvisKnowledgeManager {
         return (txt || '').trim() || `HTTP ${resp.status}`;
     }
 }
+
+// Beispiel je Freigabetyp – dieselben Werte wie in
+// backend/mount_quelle.py::BEISPIEL. Laufen sie auseinander, zeigt das
+// Formular ein Muster, das der Server ablehnt (Drift-Schranke im Test).
+JarvisKnowledgeManager.MOUNT_BEISPIEL = {
+    smb: '//server/freigabe',
+    nfs: 'server:/export',
+    webdav: 'https://server/pfad',
+};
 
 // Globale Instanz
 window.knowledgeManager = new JarvisKnowledgeManager();

@@ -4091,6 +4091,65 @@ async def startup_sandbox_python():
 
 
 @app.on_event("startup")
+async def startup_onenote_tika():
+    """Den OneNote-Import EINSATZBEREIT MACHEN – nicht nur nachsehen.
+
+    ⚠ HIER WIRD EINGERICHTET, NICHT GEMELDET. Eine Warnung im Journal, die
+    einen Administrator auffordert, ``sudo bash deploy/tika_setup.sh``
+    auszufuehren, setzt voraus, dass er sie zufaellig liest – und bis dahin
+    liegen .one-Dateien unlesbar im Wissensordner. Ausdrueckliche Vorgabe des
+    Betreibers (2026-09-04): die Einrichtung passiert automatisch.
+
+    Drei Wege greifen ineinander, und jeder deckt eine Luecke der anderen:
+      * ``start_jarvis_root.sh`` Schritt 6e – bei jedem Broker-Start (root).
+      * HIER – bei jedem Backend-Start, auch wenn der Broker nicht neu
+        gestartet wurde (Update-Pille macht genau das: pull + restart jarvis).
+      * ``onenote.text_aus_datei`` – sobald wirklich eine .one gelesen werden
+        soll, also auch Wochen spaeter ohne jeden Neustart.
+
+    ZUERST WIRD GEWARTET, DANN GEURTEILT: Schritt 6e laeuft im Hintergrund des
+    Broker-Starts und laedt beim ersten Mal 65 MB, das Backend startet parallel.
+    Wer sofort urteilt, stoesst eine zweite Einrichtung an, waehrend die erste
+    laeuft. Der Mindestabstand in ``onenote`` faengt das ab, aber die
+    Journal-Zeile waere trotzdem irrefuehrend.
+    """
+    async def _lauf():
+        try:
+            from backend.tools import onenote
+            if not await asyncio.to_thread(onenote.fehlender_baustein):
+                return                      # eingerichtet – nichts zu melden
+            if not onenote.automatik_an():
+                print("[OneNote/Tika] Nicht eingerichtet, Automatik abgeschaltet "
+                      "(JARVIS_TIKA_AUTO=0). .one-Dateien werden erfasst, aber "
+                      "nicht gelesen.", flush=True)
+                return
+            # Der Automatik des Broker-Starts Zeit lassen (apt + 65 MB).
+            await asyncio.sleep(180)
+            if not await asyncio.to_thread(onenote.fehlender_baustein):
+                return
+            # Sie hat nicht gegriffen (Broker nicht neu gestartet, Schritt 6e
+            # fehlgeschlagen) – also selbst einrichten. Hoechstens sechs
+            # Anlaeufe: ist der Netzweg zu repo1.maven.org zu, aendert der
+            # siebte nichts, und der Bedarfsweg bleibt ohnehin bestehen.
+            for versuch in range(6):
+                if versuch:
+                    await asyncio.sleep(onenote.WIEDERHOLUNG_S + 30)
+                    if not await asyncio.to_thread(onenote.fehlender_baustein):
+                        return
+                await asyncio.to_thread(onenote.einrichtung_anstossen,
+                                        "Backend-Start")
+                # Auf das Ende des Hintergrund-Laufs warten, damit der naechste
+                # Anlauf nicht in den Mindestabstand laeuft.
+                while onenote.einrichtung_laeuft():
+                    await asyncio.sleep(5)
+                if not await asyncio.to_thread(onenote.fehlender_baustein):
+                    return
+        except Exception as e:  # noqa: BLE001
+            print(f"[OneNote/Tika] Automatik uebersprungen: {e}", flush=True)
+    asyncio.create_task(_lauf())
+
+
+@app.on_event("startup")
 async def startup_lauf_isolation():
     """Privates /tmp pro Agent-Lauf pruefen – und den Ausfall SAGEN.
 
@@ -17235,6 +17294,109 @@ async def update_mount(idx: int, request: Request, user: str = Depends(require_k
     return JSONResponse({"ok": True})
 
 
+def _mount_fehler_deuten(result: dict, mount_type: str, source: str) -> str:
+    """Aus der rohen mount-Ausgabe eine Meldung machen, aus der man ableiten
+    kann, was zu tun ist.
+
+    ⚠ GEMELDET AM 2026-09-04: "Klick auf 'verbinden' liefert keine Information,
+    wenn etwas nicht klappt." Ein Teil davon war die Oberflaeche (die Meldung
+    stand ausserhalb des Sichtfensters), der andere DIESER Text: `mount
+    error(13)` ist richtig und trotzdem nutzlos – dieselbe Klasse wie
+    "curl/wget/ssh/git/..." bei der Egress-Heuristik oder "Illegal header
+    value" im LLM-Profil.
+
+    Der ROHE Text bleibt immer erhalten: die Deutung wird ergaenzt, nie
+    ersetzt. Eine Deutung, die die Originalmeldung verschluckt, macht den
+    naechsten, unbekannten Fall unauffindbar.
+    """
+    roh = (str(result.get("stderr") or "").strip()
+           or str(result.get("error") or "").strip()
+           or str(result.get("stdout") or "").strip())
+    rc = result.get("rc")
+    n = roh.lower()
+
+    if result.get("decision") == "pending":
+        return ("Die Root-Freigabe fuer das Einbinden steht aus – ein "
+                "Administrator gibt sie unter Sicherheit → Root-Freigaben frei.")
+    if result.get("decision") == "denied":
+        return ("Das Einbinden ist in der Root-Freigabeliste gesperrt "
+                "(Sicherheit → Root-Freigaben).")
+
+    hinweise = []
+    # ⚠ DIE MUSTER SIND LIVE GEMESSEN (DEV, util-linux 2.40 / Debian 13,
+    # 2026-09-04) – die aus der Literatur bekannten "mount error(13)"-Texte
+    # kommen dort GAR NICHT MEHR vor. Aktuelle mount-Fassungen melden
+    # "fsconfig() failed: <Grund>", und der Grund ist ein Kernel-Errno-Text.
+    # Wer hier nur nach den alten Mustern sucht, deutet nichts.
+    if "malformed unc" in n:
+        hinweise.append("Die Schreibweise der Quelle stimmt nicht – eine "
+                        "SMB-Freigabe wird als //server/freigabe angegeben "
+                        f"(eingetragen ist '{source}').")
+    if "now in progress" in n or "in bearbeitung" in n:
+        hinweise.append(f"Der Server hat nicht geantwortet – '{source}' ist "
+                        f"nicht erreichbar (Name/IP, Firewall, VPN, Server aus).")
+    if "pass remote address" in n:
+        # LIVE GEMESSEN: diese Meldung kommt auch, wenn die Quelle voellig in
+        # Ordnung ist und schlicht 'nfs-common' fehlt (auf DEV nachgesehen:
+        # Paket nicht installiert). Wer hier nur die Schreibweise nennt,
+        # schickt den Administrator auf die falsche Suche.
+        if re.match(r"^[^/\s:]+:/", source or ""):
+            hinweise.append("Die Quelle ist richtig geschrieben – auf diesem "
+                            "Server fehlt das NFS-Hilfsprogramm "
+                            "('apt install nfs-common').")
+        else:
+            hinweise.append("Bei NFS gehoert die Quelle in der Form "
+                            "server:/export angegeben; ist sie das bereits, "
+                            "fehlt auf dem Server 'nfs-common'.")
+    if "no such device" in n:
+        hinweise.append("Der Kernel kennt diesen Freigabetyp nicht – das "
+                        "passende Paket fehlt (SMB: cifs-utils, NFS: "
+                        "nfs-common, WebDAV: davfs2).")
+    if "timed out" in n or "timeout" in n:
+        hinweise.append(f"Der Server hat nicht geantwortet. Ist '{source}' "
+                        f"erreichbar (Name/IP, Firewall, VPN)?")
+    if "permission denied" in n or "error(13)" in n:
+        hinweise.append("Zugang verweigert – Benutzername oder Kennwort passen "
+                        "nicht, oder das Konto darf diese Freigabe nicht lesen. "
+                        "Bei einem Domaenenkonto den Benutzer als "
+                        "'DOMAENE\\benutzer' eintragen.")
+    if "no such file or directory" in n or "error(2)" in n:
+        hinweise.append(f"Diesen Freigabenamen gibt es auf dem Server nicht – "
+                        f"Schreibweise von '{source}' pruefen "
+                        f"(SMB: //server/freigabe).")
+    if "host is down" in n or "no route to host" in n or "unable to find suitable address" in n:
+        hinweise.append(f"Der Server '{source}' ist nicht erreichbar "
+                        f"(ausgeschaltet, falscher Name, kein Netzweg).")
+    if "unknown filesystem type" in n or "wrong fs type" in n:
+        paket = {"smb": "cifs-utils", "nfs": "nfs-common",
+                 "webdav": "davfs2"}.get(mount_type, "")
+        hinweise.append(f"Dem Server fehlt das Paket fuer diesen Freigabetyp"
+                        + (f" – 'apt install {paket}'." if paket else "."))
+    if "access denied" in n or "logon failure" in n or "error(126)" in n:
+        hinweise.append("Die Anmeldung wurde abgelehnt (falsches Kennwort oder "
+                        "gesperrtes Konto).")
+
+    if not roh:
+        hinweise.append(f"Der Einbinde-Befehl endete mit rc={rc} und ohne "
+                        f"Ausgabe. Einzelheiten stehen im Journal des Dienstes "
+                        f"(journalctl -u jarvis-broker.service).")
+
+    # "dmesg(1) may have more information" haengt an jeder mount-Meldung und
+    # hilft in einer Weboberflaeche niemandem – der Rest bleibt WOERTLICH
+    # stehen (eine Deutung, die den Originaltext verschluckt, macht den
+    # naechsten, unbekannten Fall unauffindbar).
+    roh = re.sub(r"\s*dmesg\(1\)[^\n]*", "", roh).strip()
+    roh = re.sub(r"\s*\n\s*", " ", roh).strip(" .")
+
+    # Die DEUTUNG STEHT VORN: sie sagt, was zu tun ist. Der Rohtext dahinter
+    # in Klammern – ihn braucht, wer weitersuchen muss.
+    if hinweise:
+        text = " ".join(hinweise) + (f" (Meldung des Systems: {roh})" if roh else "")
+    else:
+        text = roh
+    return text or f"Unbekannter Fehler (rc={rc})"
+
+
 @app.post("/api/knowledge/mounts/{idx}/mount")
 async def mount_share(idx: int, user: str = Depends(require_knowledge_editor)):
     """Bindet eine Netzwerk-Freigabe (SMB/NFS/WebDAV) ein und startet anschließend den Reindex."""
@@ -17259,8 +17421,13 @@ async def mount_share(idx: int, user: str = Depends(require_knowledge_editor)):
         "password": m.get("password", ""),
     }, user=user, timeout=60)
     if not result.get("ok"):
-        err = result.get("stderr") or result.get("error") or ""
-        return JSONResponse({"error": f"Mount fehlgeschlagen: {err.strip()}"}, status_code=500)
+        text = _mount_fehler_deuten(result, mount_type, m.get("source", ""))
+        # Auch ins Journal: die Oberflaeche zeigt eine Zeile, hier steht der
+        # ganze Vorgang mit Zeitpunkt und Benutzer.
+        print(f"[knowledge] Mount fehlgeschlagen ({mount_type} {m.get('source','')}): "
+              f"{text}", flush=True)
+        return JSONResponse({"error": f"Freigabe konnte nicht verbunden werden: {text}"},
+                            status_code=500)
 
     # auto_mount aktivieren – Benutzer will diese Freigabe verbunden haben
     mounts[idx]["auto_mount"] = True
@@ -17270,7 +17437,10 @@ async def mount_share(idx: int, user: str = Depends(require_knowledge_editor)):
     try:
         from backend.tools.knowledge import force_reindex
         await asyncio.to_thread(force_reindex)
-        print(f"[knowledge] Reindex nach Mount {source} → {mp}", flush=True)
+        # 'source' gab es hier NIE – der NameError landete im except darunter
+        # und meldete bei JEDEM erfolgreichen Mount einen Reindex-Fehler, den
+        # es nicht gab.
+        print(f"[knowledge] Reindex nach Mount {m.get('source','')} → {mp}", flush=True)
     except Exception as e:
         print(f"[knowledge] Reindex nach Mount fehlgeschlagen: {e}", flush=True)
 
@@ -17292,8 +17462,13 @@ async def unmount_share(idx: int, user: str = Depends(require_knowledge_editor))
     from backend import broker_client
     result = await broker_client.call("umount_share", {"mountpoint": str(mp)}, user=user, timeout=30)
     if not result.get("ok"):
-        err = result.get("stderr") or result.get("error") or ""
-        return JSONResponse({"error": f"Unmount fehlgeschlagen: {err.strip()}"}, status_code=500)
+        text = _mount_fehler_deuten(result, "", str(mp))
+        if "target is busy" in text.lower() or "device is busy" in text.lower():
+            text += (" — Auf die Freigabe wird gerade zugegriffen (laufender "
+                     "Indizierungslauf?). Nach dessen Ende erneut versuchen.")
+        print(f"[knowledge] Unmount fehlgeschlagen ({mp}): {text}", flush=True)
+        return JSONResponse({"error": f"Freigabe konnte nicht getrennt werden: {text}"},
+                            status_code=500)
 
     # auto_mount deaktivieren – manuelle Trennung respektieren
     mounts = _get_mounts_config()

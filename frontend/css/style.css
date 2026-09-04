@@ -4866,6 +4866,24 @@ select.input-field {
     color: #4ade80;
 }
 
+/* Schliessen-Knopf einer stehenbleibenden Fehlermeldung. Fehler verschwinden
+   NICHT von selbst (man muss sie lesen und oft kopieren koennen) – ohne diesen
+   Knopf bliebe die Zeile bis zum naechsten Ereignis stehen. */
+.kb-notification { position: relative; padding-right: 30px; }
+.kb-notif-close {
+    position: absolute;
+    top: 4px;
+    right: 6px;
+    background: none;
+    border: none;
+    padding: 2px;
+    line-height: 1;
+    cursor: pointer;
+    color: inherit;
+    opacity: .75;
+}
+.kb-notif-close:hover { opacity: 1; }
+
 .kb-notification-error {
     background: rgba(239, 68, 68, 0.15);
     border: 1px solid rgba(239, 68, 68, 0.3);

@@ -52,6 +52,8 @@ import re
 import shutil
 import signal
 import subprocess
+import threading
+import time
 import unicodedata
 from pathlib import Path
 
@@ -143,12 +145,19 @@ def finde_tika() -> Path | None:
 
 
 def fehlender_baustein() -> str:
-    """Klartext-Hinweis, WAS fehlt und wie man es behebt – oder "".
+    """Klartext-Auskunft, WAS fehlt und was gerade dagegen laeuft – oder "".
 
-    Ohne diese Meldung bekaeme der Administrator nur "Datei liess sich nicht
-    auslesen" und muesste raten. Dieselbe Ueberlegung wie beim PDF-Export ohne
-    LibreOffice (2026-07-28): daraus konnte weder Modell noch Nutzer ableiten,
-    was zu tun ist.
+    ⚠ DIESER TEXT FORDERT NICHT ZUR HANDARBEIT AUF. Die Einrichtung laeuft
+    automatisch: beim Broker-Start (``start_jarvis_root.sh`` Schritt 6e), beim
+    Backend-Start (``startup_onenote_tika``) und bei Bedarf, sobald eine
+    ``.one``-Datei gelesen werden soll (``text_aus_datei`` stoesst sie an).
+    Ein Hinweis, auf den ein Administrator zufaellig stossen muss, damit
+    ueberhaupt etwas passiert, ist keine Loesung – er ist die Beschreibung
+    eines liegengebliebenen Problems.
+
+    Der Handweg steht deshalb nur noch dort, wo die Automatik NICHT greifen
+    kann: wenn sie abgeschaltet ist (``JARVIS_TIKA_AUTO=0``) oder wenn es
+    keinen Weg zu Root-Rechten gibt (kein Broker und Backend unprivilegiert).
     """
     fehlt = []
     if not finde_java():
@@ -157,15 +166,150 @@ def fehlender_baustein() -> str:
         fehlt.append("Apache Tika (tika-app.jar)")
     if not fehlt:
         return ""
-    return (
-        "OneNote-Datei nicht lesbar – auf diesem Server fehlt: "
-        + " und ".join(fehlt)
-        + ". Ein Administrator behebt das mit 'sudo bash deploy/tika_setup.sh' "
-        "(installiert die Java-Laufzeit und legt tika-app.jar unter vendor/ ab). "
-        "Java allein kommt auch ueber Einstellungen -> Skills: der Wissens-Skill "
-        "zeigt dann die Plakette 'Abhaengigkeit fehlt' und daneben den Knopf "
-        "'Fehlende Abhaengigkeiten nachinstallieren'."
-    )
+    kopf = ("OneNote-Datei noch nicht lesbar – auf diesem Server fehlt: "
+            + " und ".join(fehlt) + ". ")
+
+    if einrichtung_laeuft():
+        return kopf + ("Die Einrichtung laeuft gerade automatisch (laedt eine "
+                       "Java-Laufzeit und ~65 MB Apache Tika). Danach wird die "
+                       "Datei beim naechsten Indizierungslauf gelesen – es ist "
+                       "nichts zu tun.")
+    if not automatik_an():
+        return kopf + ("Die automatische Einrichtung ist abgeschaltet "
+                       "(JARVIS_TIKA_AUTO=0). Entweder JARVIS_TIKA_JAR auf eine "
+                       "vorhandene tika-app.jar setzen oder einmalig "
+                       "'sudo bash deploy/tika_setup.sh' ausfuehren.")
+    fehler = letzter_einrichtungsfehler()
+    if fehler:
+        return kopf + ("Die automatische Einrichtung ist fehlgeschlagen: "
+                       + fehler + " Sie wird wiederholt; besteht das Problem "
+                       "fort, fehlt in aller Regel der Netzzugang zu "
+                       "repo1.maven.org (dann JARVIS_TIKA_JAR auf eine von Hand "
+                       "abgelegte tika-app.jar setzen).")
+    return kopf + ("Die Einrichtung wird automatisch angestossen; danach ist "
+                   "die Datei beim naechsten Indizierungslauf lesbar.")
+
+
+# ─── Automatische Einrichtung ────────────────────────────────────────────────
+#
+# WARUM DAS HIER STEHT UND NICHT NUR IM BOOTSTRAP: Schritt 6e in
+# start_jarvis_root.sh laeuft beim BROKER-START. Wer heute ein Notizbuch in
+# einen Wissensordner legt, wartet damit auf den naechsten Neustart – und in
+# der Zwischenzeit liegt die Datei unlesbar da. Ausdrueckliche Vorgabe des
+# Betreibers (2026-09-04): die Einrichtung passiert von selbst, ein
+# Administrator soll nichts abtippen muessen.
+
+_SPERRE = threading.Lock()
+_zustand: dict = {"laeuft": False, "letzter_start": 0.0,
+                  "letzter_fehler": "", "versuche": 0}
+
+# Mindestabstand zwischen zwei Versuchen. Ohne ihn stiesse JEDE unlesbare
+# .one-Datei eines Indizierungslaufs einen eigenen apt-Lauf an – bei 40 Dateien
+# waeren das 40 Versuche gegen dieselbe (womoeglich tote) Paketquelle.
+WIEDERHOLUNG_S = 1800
+
+
+def automatik_an() -> bool:
+    """FUNKTION, keine Modulkonstante – ein beim Import gelesener Wert waere
+    bis zum Dienstneustart eingefroren (Register)."""
+    return str(os.environ.get("JARVIS_TIKA_AUTO", "1")).strip() != "0"
+
+
+def einrichtung_laeuft() -> bool:
+    with _SPERRE:
+        return bool(_zustand["laeuft"])
+
+
+def letzter_einrichtungsfehler() -> str:
+    with _SPERRE:
+        return str(_zustand["letzter_fehler"])
+
+
+def einrichtung_zustand() -> dict:
+    with _SPERRE:
+        return dict(_zustand)
+
+
+def einrichtung_anstossen(ausloeser: str = "") -> str:
+    """Einrichtung im HINTERGRUND anstossen. Rueckgabe: was passiert ist.
+
+    Idempotent und fail-safe: bereits eingerichtet, Automatik aus, ein Lauf
+    laeuft schon, oder der letzte Versuch ist keine 30 Minuten her → es
+    passiert nichts, und die Rueckgabe sagt warum. Es wird NIE gewartet – der
+    Aufrufer (Indexer, Startup, Werkzeug) laeuft weiter.
+    """
+    if finde_java() and finde_tika():
+        return "bereits eingerichtet"
+    if not automatik_an():
+        return "Automatik abgeschaltet (JARVIS_TIKA_AUTO=0)"
+    jetzt = time.time()
+    with _SPERRE:
+        if _zustand["laeuft"]:
+            return "laeuft bereits"
+        if _zustand["letzter_start"] and jetzt - _zustand["letzter_start"] < WIEDERHOLUNG_S:
+            rest = int(WIEDERHOLUNG_S - (jetzt - _zustand["letzter_start"]))
+            return f"letzter Versuch zu jung (naechster in {rest} s)"
+        _zustand["laeuft"] = True
+        _zustand["letzter_start"] = jetzt
+        _zustand["versuche"] += 1
+    t = threading.Thread(target=_einrichten, args=(ausloeser,),
+                         name="tika-setup", daemon=True)
+    t.start()
+    return "angestossen"
+
+
+def _einrichten(ausloeser: str) -> None:
+    """Laeuft im Hintergrund-Thread. Darf unter keinen Umstaenden werfen."""
+    grund = f" (Ausloeser: {ausloeser})" if ausloeser else ""
+    fehler = ""
+    try:
+        print(f"[OneNote/Tika] Richte ein{grund} – Java-Laufzeit und ~65 MB "
+              f"Apache Tika werden geladen. Das kann einige Minuten dauern.",
+              flush=True)
+        from backend import broker_client
+        modus = broker_client.mode()
+        if modus == "none":
+            # Kein Broker und keine Root-Rechte: hier endet die Automatik, und
+            # das muss im Klartext dastehen statt still zu scheitern.
+            fehler = ("kein Weg zu Root-Rechten (Broker-Socket fehlt und das "
+                      "Backend laeuft unprivilegiert) – einmalig "
+                      "'sudo bash deploy/tika_setup.sh' ausfuehren oder den "
+                      "Root-Broker einrichten.")
+        else:
+            res = broker_client.call_sync("tika_setup", {}, user="system",
+                                          timeout=900)
+            if res.get("ok") and int(res.get("rc") or 0) == 0:
+                pass
+            elif res.get("decision") == "pending":
+                fehler = ("die Root-Freigabe steht aus – unter Sicherheit → "
+                          "Root-Freigaben freigeben.")
+            else:
+                roh = (str(res.get("stderr") or "").strip()
+                       or str(res.get("error") or "").strip()
+                       or str(res.get("stdout") or "").strip())
+                fehler = (roh.splitlines()[-1][:300] if roh
+                          else f"rc={res.get('rc')}")
+    except Exception as e:  # noqa: BLE001
+        fehler = f"{type(e).__name__}: {e}"
+
+    # Massgeblich ist der ZUSTAND auf Platte, nicht der Rueckgabewert des
+    # Skripts: es kann teilweise gelaufen sein (Java da, jar nicht), und ein
+    # rc=0 ohne vorhandene Datei waere eine Zusage, die nichts haelt.
+    java, jar = finde_java(), finde_tika()
+    if not fehler and not (java and jar):
+        offen = " und ".join([n for n, v in (("Java", java),
+                                             ("tika-app.jar", jar)) if not v])
+        fehler = (f"das Setup-Skript meldete Erfolg, aber {offen} fehlt "
+                  f"weiterhin auf Platte.")
+    with _SPERRE:
+        _zustand["laeuft"] = False
+        _zustand["letzter_fehler"] = "" if (java and jar) else (fehler or "unbekannt")
+    if java and jar:
+        print(f"[OneNote/Tika] Bereit – .one-Dateien werden beim naechsten "
+              f"Indizierungslauf gelesen (jar: {jar}).", flush=True)
+    else:
+        print(f"[OneNote/Tika] WARNUNG: Einrichtung fehlgeschlagen: "
+              f"{fehler or 'unbekannt'}", flush=True)
 
 
 # ─── Saeubern ────────────────────────────────────────────────────────────────
@@ -328,6 +472,12 @@ def text_aus_datei(pfad: Path, zeitlimit: int | None = None) -> tuple[str | None
     java = finde_java()
     jar = finde_tika()
     if not java or not jar:
+        # BEDARFSGETRIEBEN EINRICHTEN, statt es nur zu melden: hier steht fest,
+        # dass jemand wirklich ein Notizbuch indizieren will. Der Aufruf kehrt
+        # SOFORT zurueck (Arbeit im Hintergrund-Thread, hoechstens ein Lauf,
+        # Mindestabstand zwischen Versuchen) – dieser Indizierungslauf laeuft
+        # also unveraendert weiter, der naechste findet die Datei lesbar vor.
+        einrichtung_anstossen(f"Indizierung von {pfad.name}")
         return None, fehlender_baustein()
 
     limit = zeitlimit if zeitlimit is not None else zeitdeckel()

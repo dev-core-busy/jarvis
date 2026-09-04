@@ -32,7 +32,7 @@ MOUNT_PREFIX = "/mnt/"                      # Mounts nur unterhalb /mnt/
 # (shell_root, systemctl, chpasswd, mount_share, certbot, switch_session) werden
 # weiterhin vollstaendig auditiert.
 READONLY_OPS = {"sandbox_status", "egress_status", "apt_upgrades_status",
-                "unlock_screen", "vnc_restart"}
+                "tika_status", "unlock_screen", "vnc_restart"}
 
 
 def _norm_cmd(cmd: str) -> str:
@@ -40,10 +40,25 @@ def _norm_cmd(cmd: str) -> str:
     return re.sub(r"\s+", " ", (cmd or "").strip())[:200]
 
 
-def _run(cmd, timeout=30, input_text=None):
+def _run(cmd, timeout=30, input_text=None, neutrale_sprache=False):
+    """Befehl ausfuehren.
+
+    ``neutrale_sprache=True`` erzwingt LC_ALL=C. Noetig ueberall dort, wo eine
+    Fehlermeldung spaeter GEDEUTET wird: auf einem deutschen System liefert
+    ``mount`` "Die Operation ist jetzt in Bearbeitung." statt "Operation now in
+    progress" – live auf DEV gemessen (2026-09-04), und jedes Muster, das auf
+    den englischen Wortlaut zielt, greift dort ins Leere.
+    """
+    import os as _os
+    umgebung = None
+    if neutrale_sprache:
+        umgebung = dict(_os.environ)
+        umgebung["LC_ALL"] = "C"
+        umgebung.pop("LANG", None)
+        umgebung.pop("LANGUAGE", None)
     try:
         r = subprocess.run(cmd, capture_output=True, text=True,
-                           timeout=timeout, input=input_text)
+                           timeout=timeout, input=input_text, env=umgebung)
         return {"ok": r.returncode == 0, "rc": r.returncode,
                 "stdout": r.stdout or "", "stderr": r.stderr or ""}
     except Exception as e:  # noqa: BLE001
@@ -359,6 +374,52 @@ def _op_apt_upgrades_status(args, stream):
             "stdout": "", "stderr": ""}
 
 
+def _op_tika_setup(args, stream):
+    """Java + tika-app.jar bereitstellen (OneNote-Import, ``*.one``).
+
+    WARUM ALS BROKER-OP UND NICHT NUR IM BOOTSTRAP: Schritt 6e in
+    ``start_jarvis_root.sh`` laeuft nur beim BROKER-START. Wer heute ein
+    Notizbuch in einen Wissensordner legt, muesste bis zum naechsten Neustart
+    warten – und bis dahin sagt ihm nur eine Meldung, dass ein Administrator
+    ``sudo bash deploy/tika_setup.sh`` ausfuehren soll. Genau diese Handarbeit
+    ist der Zustand, den die Automatik beseitigen soll: mit dieser Op kann das
+    unprivilegierte Backend die Einrichtung JEDERZEIT selbst anstossen.
+
+    DER PFAD KOMMT NICHT AUS DEN ARGUMENTEN. Er wird relativ zu diesem Modul
+    aufgeloest; ein Argument waere hier gleichbedeutend mit "fuehre ein
+    beliebiges Skript als root aus" – also shell_root ohne dessen
+    Freigabepflicht. Die Op nimmt UEBERHAUPT keine Argumente entgegen.
+
+    Auto-allow wie die uebrigen System-Ops: sie stellt einen dokumentierten
+    Soll-Zustand her, ist idempotent und jederzeit widerrufbar (Sicherheit →
+    Root-Freigaben).
+    """
+    from pathlib import Path as _P
+    jdir = _P(__file__).resolve().parent.parent.parent
+    script = jdir / "deploy" / "tika_setup.sh"
+    if not script.is_file():
+        return {"ok": False, "rc": -1, "stdout": "",
+                "stderr": f"Setup-Skript fehlt: {script}"}
+    # 900 s: apt-get install default-jre-headless (~199 MB) plus 65 MB
+    # Download von Maven Central. Der Daemon deckelt ohnehin bei MAX_TIMEOUT.
+    return _stream_shell(f"bash {shlex.quote(str(script))}", str(jdir), 900, stream)
+
+
+def _op_tika_status(args, stream):
+    """Ist der OneNote-Import einsatzbereit? (nur lesen, nichts aendern)
+
+    Getrennt von ``tika_setup``, damit der Aufrufer VOR einer 900-Sekunden-Op
+    billig nachsehen kann – und damit ein Status-Poll nicht als Root-Eingriff
+    in der Freigabeliste und im Audit landet (siehe READONLY_OPS).
+    """
+    from backend.tools import onenote
+    fehlt = onenote.fehlender_baustein()
+    return {"ok": True, "rc": 0, "stdout": "", "stderr": "",
+            "result": {"bereit": not fehlt,
+                       "java": onenote.finde_java() or "",
+                       "jar": str(onenote.finde_tika() or "")}}
+
+
 def _op_mount_share(args, stream):
     """Netzwerk-Freigabe (SMB/NFS/WebDAV) read-only mounten – nur unter /mnt/."""
     from pathlib import Path
@@ -394,14 +455,15 @@ def _op_mount_share(args, stream):
         cmd = ["mount", "-t", "davfs", "-o", "ro", source, mp]
     else:
         return {"ok": False, "rc": -1, "stdout": "", "stderr": f"Unbekannter Typ: {mount_type}"}
-    return _run(cmd, timeout=20)
+    # Sprachneutral, weil main.py::_mount_fehler_deuten die Ausgabe deutet.
+    return _run(cmd, timeout=20, neutrale_sprache=True)
 
 
 def _op_umount_share(args, stream):
     mp = str(args.get("mountpoint", "")).strip()
     if not mp.startswith(MOUNT_PREFIX) or ".." in mp:
         return {"ok": False, "rc": -1, "stdout": "", "stderr": "Ungueltiger Mountpoint (nur /mnt/... erlaubt)"}
-    return _run(["umount", mp], timeout=15)
+    return _run(["umount", mp], timeout=15, neutrale_sprache=True)
 
 
 def _op_certbot_obtain(args, stream):
@@ -665,6 +727,16 @@ _REGISTRY = {
     "apt_upgrades_status": (
         _op_apt_upgrades_status, lambda a: "apt_upgrades_status",
         lambda a: "Status der automatischen Sicherheitsupdates abfragen (inkl. Trockenlauf)",
+        True, (),
+    ),
+    "tika_setup": (
+        _op_tika_setup, lambda a: "tika_setup",
+        lambda a: "OneNote-Import einrichten (Java-Laufzeit + Apache Tika bereitstellen)",
+        True, (),
+    ),
+    "tika_status": (
+        _op_tika_status, lambda a: "tika_status",
+        lambda a: "Status des OneNote-Imports abfragen (Java + tika-app.jar)",
         True, (),
     ),
     "mount_share": (

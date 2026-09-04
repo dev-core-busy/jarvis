@@ -300,6 +300,50 @@ if [ "${JARVIS_BWRAP_AUTO:-1}" != "0" ] && [ ! -x /usr/bin/bwrap ]; then
     ) &
 fi
 
+# 6e. Apache Tika sicherstellen (OneNote-Import, *.one)
+#
+# WARUM HIER: Der Import von OneNote-Abschnitten haengt an Java + tika-app.jar
+# (Begruendung samt Messwerten in backend/tools/onenote.py). Beides bringt KEIN
+# git pull mit – die jar ist 65 MB und liegt bewusst nicht im oeffentlichen
+# Repo. Ohne diesen Schritt bleibt es Handarbeit pro Server, und genau die ist
+# hier schon zweimal auseinandergelaufen (Python-Module der Agent-Shell,
+# LibreOffice fuer den PDF-Export: "bei dir geht es, bei mir nicht").
+# Dieselbe Begruendung wie bei 6c und 6d – bei mehreren Servern skaliert nur
+# eine Automatik.
+#
+# Im HINTERGRUND, damit der Broker-Socket nicht wartet: der erste Lauf
+# installiert eine Java-Laufzeit (~199 MB) und laedt 65 MB von Maven Central.
+# Das Skript ist idempotent und auf einem eingerichteten Server ein No-op
+# (Pruefsummen + Funktionsprobe, ~1 s).
+#
+# Abschaltbar mit JARVIS_TIKA_AUTO=0 – fuer Server ohne Netzzugang oder wenn
+# die jar bewusst von Hand gepflegt wird (dann sagt JARVIS_TIKA_JAR, wo sie
+# liegt).
+TIKA_SETUP="$JARVIS_DIR/deploy/tika_setup.sh"
+if [ "${JARVIS_TIKA_AUTO:-1}" != "0" ] && [ -f "$TIKA_SETUP" ]; then
+    (
+        if bash "$TIKA_SETUP" --pruefen >/dev/null 2>&1; then
+            :   # Java und jar liegen – nichts melden, sonst rauscht jeder Start
+        else
+            echo "[OneNote/Tika] Java oder tika-app.jar fehlt – richte ein (laedt ~65 MB)..."
+            # Ausgabe erst einsammeln, DANN filtern: eine Pipeline
+            # (`bash … | grep | sed`) liefert den Exit-Code des LETZTEN Glieds,
+            # der Fehlschlag des Skripts waere damit unsichtbar.
+            AUSGABE="$(bash "$TIKA_SETUP" 2>&1)"
+            RC=$?
+            # Nur die Zusammenfassung ins Journal – die curl-Fortschrittszeilen
+            # sind Rauschen und enthalten Wagenruecklaeufe.
+            printf '%s\n' "$AUSGABE" | grep -E '^(  [✓✗]|✓|✗|⚠)' \
+                | sed 's/^/[OneNote\/Tika] /'
+            if [ "$RC" -eq 0 ]; then
+                echo "[OneNote/Tika] Bereit – *.one wird beim naechsten Reindex gelesen."
+            else
+                echo "[OneNote/Tika] WARNUNG: Einrichtung fehlgeschlagen (rc=$RC; kein Netzzugang zu repo1.maven.org?). Das Backend wiederholt den Versuch selbsttaetig (beim Start und sobald eine .one-Datei indiziert werden soll) – bis dahin werden OneNote-Dateien erfasst, aber nicht gelesen. Bleibt es dabei, fehlt der Netzweg: dann JARVIS_TIKA_JAR auf eine von Hand abgelegte tika-app.jar setzen." >&2
+            fi
+        fi
+    ) &
+fi
+
 # 7. Root-Broker starten (Vordergrund-Prozess dieses Dienstes)
 echo "Starte Root-Broker..."
 export JARVIS_BROKER_GROUP="${JARVIS_BROKER_GROUP:-jarvis}"

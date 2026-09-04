@@ -2185,13 +2185,6 @@ def get_stats() -> dict:
         # dieselbe Falle wie beim Kontext-Schwellwert mit fest verdrahteter 30.
         # Kosten: ein shutil.which und zwei is_file() je Abruf.
         "onenote_support": _onenote_support(),
-        # BEWUSST NICHT in _get_static_stats(): das dict wird prozessweit
-        # gecacht, und die Voraussetzung fuer OneNote sind DATEIEN auf Platte
-        # (Java-Binary, tika-app.jar). Ein Administrator, der gerade
-        # deploy/tika_setup.sh gefahren hat, saehe die Plakette sonst bis zum
-        # Dienstneustart weiter rot und hielte das Skript fuer wirkungslos –
-        # dieselbe Falle wie beim Kontext-Schwellwert mit fest verdrahteter 30.
-        # Kosten: ein shutil.which und zwei is_file() je Abruf.
         "vector_db_available": vector_db_available,
         "vector_search": has_vector,
         "vector_files": vector_files,
@@ -2896,8 +2889,8 @@ class KnowledgeManageTool(BaseTool):
             if stats.get("onenote_support"):
                 formats.append("OneNote")
             else:
-                formats.append("OneNote ⚠️ (Java + Apache Tika nötig, "
-                               "deploy/tika_setup.sh)")
+                formats.append("OneNote ⚠️ (Java + Apache Tika – "
+                               "wird automatisch eingerichtet)")
             size_mb = stats["total_size_bytes"] / (1024 * 1024)
 
             # Vektor-Info

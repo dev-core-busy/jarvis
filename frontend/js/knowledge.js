@@ -2627,10 +2627,11 @@ class JarvisKnowledgeManager {
                 const err = await resp.json();
                 throw new Error(err.error || 'Fehler');
             }
-            this._showNotification(window.t('knowledge.share_updated'), 'success');
+            this._showNotification(window.t('knowledge.share_updated'), 'success', 'kb-mount-list');
             await this.fetchMounts();
         } catch (e) {
-            this._showNotification(window.t('common.error') + ': ' + e.message, 'error');
+            this._showNotification(window.t('common.error') + ': ' + e.message,
+                                   'error', 'kb-mount-list');
         }
     }
 
@@ -2654,64 +2655,136 @@ class JarvisKnowledgeManager {
                 },
                 body: JSON.stringify({ type, source, username, password })
             });
-            if (!resp.ok) {
-                const err = await resp.json();
-                throw new Error(err.error || 'Fehler');
-            }
+            if (!resp.ok) throw new Error(await this._fehlertext(resp));
             document.getElementById('kb-mount-form').style.display = 'none';
             document.getElementById('kb-mount-source').value = '';
             document.getElementById('kb-mount-user').value = '';
             document.getElementById('kb-mount-pass').value = '';
-            this._showNotification(window.t('knowledge.share_added'), 'success');
+            this._showNotification(window.t('knowledge.share_added'), 'success', 'kb-mount-list');
             await this.fetchMounts();
             await this.fetchStats();
         } catch (e) {
-            this._showNotification(window.t('common.error') + ': ' + e.message, 'error');
+            this._showNotification(window.t('common.error') + ': ' + e.message,
+                                   'error', 'kb-mount-list');
         }
     }
 
     async toggleMount(idx, mount) {
+        // Verbinden kann Sekunden dauern (SMB-Handshake, totes Ziel bis zum
+        // Timeout). Ohne Rueckmeldung sieht der Klick wie ein Nichts aus –
+        // deshalb sagt die Zeile SOFORT, dass gearbeitet wird.
+        this._showNotification(
+            window.t(mount ? 'knowledge.share_mounting' : 'knowledge.share_unmounting'),
+            'info', 'kb-mount-list');
         try {
             const action = mount ? 'mount' : 'unmount';
             const resp = await fetch(`/api/knowledge/mounts/${idx}/${action}`, {
                 method: 'POST',
                 headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
             });
-            if (!resp.ok) {
-                const err = await resp.json();
-                throw new Error(err.error || 'Fehler');
-            }
-            this._showNotification(mount ? window.t('knowledge.share_mounted') : window.t('knowledge.share_unmounted'), 'success');
+            if (!resp.ok) throw new Error(await this._fehlertext(resp));
+            this._showNotification(mount ? window.t('knowledge.share_mounted') : window.t('knowledge.share_unmounted'),
+                                   'success', 'kb-mount-list');
             await this.fetchMounts();
             await this.fetchStats();
         } catch (e) {
-            this._showNotification(window.t('common.error') + ': ' + e.message, 'error');
+            this._showNotification(window.t('common.error') + ': ' + e.message,
+                                   'error', 'kb-mount-list');
         }
     }
 
     async removeMount(idx) {
         if (!confirm(window.t('knowledge.share_remove_confirm'))) return;
         try {
-            await fetch(`/api/knowledge/mounts/${idx}`, {
+            const resp = await fetch(`/api/knowledge/mounts/${idx}`, {
                 method: 'DELETE',
                 headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
             });
-            this._showNotification(window.t('knowledge.share_removed'), 'success');
+            // Ohne diese Pruefung meldete der Aufruf auch bei 403/500 "entfernt"
+            // – und die Freigabe stand danach unveraendert in der Liste.
+            if (!resp.ok) throw new Error(await this._fehlertext(resp));
+            this._showNotification(window.t('knowledge.share_removed'), 'success', 'kb-mount-list');
             await this.fetchMounts();
         } catch (e) {
-            this._showNotification(window.t('common.error') + ': ' + e.message, 'error');
+            this._showNotification(window.t('common.error') + ': ' + e.message,
+                                   'error', 'kb-mount-list');
         }
     }
 
     // ─── Hilfsmethoden ────────────────────────────────────────────────
 
-    _showNotification(msg, type = 'info') {
+    /**
+     * Meldung anzeigen – AM ORT DER AKTION und, bei einem Fehler, dauerhaft.
+     *
+     * ⚠ GEMELDET AM 2026-09-04: "Klick auf 'verbinden' liefert keine
+     * Information, wenn etwas nicht klappt." Die Meldung gab es – sie stand
+     * nur rund 190 Markup-Zeilen ueber der Freigabenliste (settings.html:
+     * #kb-notification bei 2076, die Liste bei 2270), also ausserhalb des
+     * Sichtfensters, und war nach 3,5 s wieder weg. Aus Sicht des Benutzers
+     * passiert damit NICHTS. Dieselbe Fehlerklasse wie der Ansichts-Umschalter,
+     * der aus dem 600-px-Fenster gedrueckt wurde.
+     *
+     * Zwei Aenderungen, jede fuer sich noetig:
+     *  - Die Meldung WANDERT an den Container der Aktion (ein einziges
+     *    Element, das verschoben wird – zwei Meldungselemente liefen beim
+     *    naechsten Feinschliff auseinander). Heimatplatz wird nur beim ERSTEN
+     *    Verschieben gemerkt, sonst gilt die verschobene Position als Heimat.
+     *  - Ein FEHLER bleibt stehen, bis er weggeklickt oder von der naechsten
+     *    Meldung ersetzt wird. Einen Erfolg kann man verpassen, eine
+     *    Fehlerursache muss man lesen (und oft kopieren) koennen.
+     */
+    _showNotification(msg, type = 'info', anker = null) {
         const el = document.getElementById('kb-notification');
         if (!el) return;
-        el.textContent = msg;
+        if (!this._notifHeim) {
+            this._notifHeim = { eltern: el.parentNode, danach: el.nextSibling };
+        }
+        const ziel = (typeof anker === 'string') ? document.getElementById(anker) : anker;
+        if (ziel && ziel.parentNode) {
+            ziel.parentNode.insertBefore(el, ziel.nextSibling);
+        } else if (this._notifHeim.eltern) {
+            this._notifHeim.eltern.insertBefore(el, this._notifHeim.danach);
+        }
+        if (this._notifTimer) { clearTimeout(this._notifTimer); this._notifTimer = null; }
+
+        el.replaceChildren(document.createTextNode(msg));
         el.className = 'kb-notification kb-notification-' + type;
         el.style.display = 'block';
-        setTimeout(() => { el.style.display = 'none'; }, 3500);
+        if (type === 'error') {
+            // × = schliessen (Symbol-Semantik). Kein Muelleimer: es wird nichts
+            // geloescht, nur eine Meldung weggeraeumt.
+            const zu = document.createElement('button');
+            zu.className = 'kb-notif-close';
+            zu.type = 'button';
+            zu.title = (window.t ? window.t('common.close') : 'Schließen');
+            zu.setAttribute('aria-label', zu.title);
+            zu.innerHTML = (window.JarvisIcons ? window.JarvisIcons.close() : '&#10005;');
+            zu.onclick = () => { el.style.display = 'none'; };
+            el.appendChild(zu);
+            return;   // Fehler bleiben stehen – sie sind der Grund des Klicks
+        }
+        this._notifTimer = setTimeout(() => { el.style.display = 'none'; }, 3500);
+    }
+
+    /**
+     * Fehlertext aus einer Antwort holen – robust.
+     *
+     * `err.error` allein genuegt nicht: FastAPI meldet 401/403/422 in `detail`,
+     * und eine Antwort ohne JSON (Proxy-Fehlerseite, 502) laesst `resp.json()`
+     * werfen – daraus wurde bisher "Fehler: Unexpected token <", also erneut
+     * eine Meldung, aus der niemand etwas ableiten kann.
+     */
+    async _fehlertext(resp) {
+        let txt = '';
+        try {
+            const d = await resp.clone().json();
+            txt = d.error || d.detail || d.message || '';
+            if (txt && typeof txt !== 'string') txt = JSON.stringify(txt);
+        } catch (e) { /* keine JSON-Antwort */ }
+        if (!txt) {
+            try { txt = (await resp.text()).slice(0, 300); } catch (e) { /* egal */ }
+        }
+        return (txt || '').trim() || `HTTP ${resp.status}`;
     }
 }
 

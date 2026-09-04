@@ -128,6 +128,26 @@ if [ -f "$SANDBOX_PY" ]; then
     fi
 fi
 
+# Apache Tika (OneNote-Import): bei einer Erstinstallation SICHTBAR und synchron.
+# Der Broker-Bootstrap (Schritt 6e) holt es ohnehin im Hintergrund nach – hier
+# soll der Administrator es SEHEN, weil der erste Lauf eine Java-Laufzeit
+# installiert und 65 MB laedt. Gleiche Begruendung wie beim Block darueber.
+TIKA_SETUP="$(dirname "$0")/../tika_setup.sh"
+if [ -f "$TIKA_SETUP" ]; then
+    step "Apache Tika (OneNote-Import)"
+    if bash "$TIKA_SETUP" --pruefen >/dev/null 2>&1; then
+        echo "   ✅ Java und tika-app.jar vorhanden"
+    else
+        # Ausgabe erst einsammeln, DANN filtern (Pipeline-Exit-Code, s.o.).
+        _tkout="$(bash "$TIKA_SETUP" 2>&1)"; _tkrc=$?
+        printf '%s\n' "$_tkout" | grep -E '^(  [✓✗]|✓|✗|⚠)' | tail -n 8 | sed 's/^/   /'
+        # KEIN Abbruch: ohne Tika laeuft alles weiter, nur *.one bleibt
+        # ungelesen – und der Indexer sagt das im Klartext.
+        [ "$_tkrc" -eq 0 ] \
+            || echo "   ⚠️  fehlgeschlagen – das Backend wiederholt es selbsttaetig (Start + erste .one-Datei)"
+    fi
+fi
+
 echo ""
 if [ "$ok" = "1" ]; then
     echo "✅ Migration abgeschlossen: getrennter Betrieb aktiv."

@@ -3413,6 +3413,10 @@ KRITISCH – Autonomie-Regeln:
             _t0 = _time.monotonic()
             _ldap_blocked = False
             _viol = None   # (kind, detail) eines sicherheitsrelevanten Deny -> Eskalation
+            # Die getroffene SCHRANKE (nicht der Befehl). Gleiche Marke im
+            # Zeitfenster zaehlt einmal – siehe security_guard.record_violation.
+            # Leer = zaehlt einzeln wie bisher (fail-closed).
+            _viol_marke = ""
             # True = protokollieren, aber NICHT zur Konto-Sperre zaehlen (Sandbox-Grenze
             # statt Angriffsindiz). Vorgabe False: ein neuer Deny-Zweig eskaliert wie
             # bisher, es sei denn er setzt das Flag ausdruecklich.
@@ -3468,6 +3472,7 @@ KRITISCH – Autonomie-Regeln:
                         result = f"Zugriff verweigert: {_why}."
                         _ldap_blocked = True
                         _viol = ("fs-deny", f"{args.get('action')} {args.get('path')}")
+                        _viol_marke = f"fs:{str(args.get('path') or '')[:80].lower()}"
                         # Nur ein Secret-/System-Ziel ist ein Angriffsindiz. Ein
                         # GERATENER Pfad ist keines: das Modell probiert bei
                         # "suche in allen CSV-Dateien" der Reihe nach /opt, /var,
@@ -3489,6 +3494,7 @@ KRITISCH – Autonomie-Regeln:
                             result = f"Zugriff verweigert: {_why}."
                             _ldap_blocked = True
                             _viol = ("fs-deny", f"create_chart {_spath}")
+                            _viol_marke = f"fs:{str(_spath)[:80].lower()}"
                             # Gleiche Abwaegung wie bei filesystem: ein geratener
                             # Pfad ist keine Attacke, ein Secret-/System-Ziel schon.
                             _viol_soft = not _sbx.fs_target_sensitive(_spath)
@@ -3531,6 +3537,7 @@ KRITISCH – Autonomie-Regeln:
                             result = f"Zugriff verweigert: {_why}."
                             _ldap_blocked = True
                             _viol = ("fs-deny", f"{name} {_pv}")
+                            _viol_marke = f"fs:{str(_pv)[:80].lower()}"
                             # Gleiche Abwaegung wie bei filesystem/create_chart:
                             # ein geratener Pfad ist keine Attacke.
                             _viol_soft = not _sbx.fs_target_sensitive(_pv)
@@ -3540,7 +3547,7 @@ KRITISCH – Autonomie-Regeln:
                     # Heredoc-Koerper (z.B. eingebetteter Python-Code) NICHT als Shell-
                     # Redirects fehlinterpretieren -> nur die Shell-Struktur pruefen.
                     _cmd_sh = _strip_heredocs(_cmd)
-                    _shok, _shwhy = _sbx.authorize_shell(_cmd)
+                    _shok, _shwhy, _shmarke = _sbx.authorize_shell(_cmd)
                     _forb = _forbidden_command_hit(_cmd_sh)
                     if _forb:
                         print(f"[AGENT] BLOCKED shell command for Domain-User '{_uname}' (Verb: {_forb!r}): {_cmd[:80]}", flush=True)
@@ -3549,12 +3556,14 @@ KRITISCH – Autonomie-Regeln:
                                   "in Anführungszeichen (z.B. als Suchbegriff) ist ebenfalls erlaubt.")
                         _ldap_blocked = True
                         _viol = ("shell-forbidden", _cmd[:_VIOL_DETAIL_MAX])
+                        _viol_marke = "verb:" + _forb.strip().lower()
                     elif not _shok:
                         # Verschleierung (base64/eval/pipe-in-shell) oder Secret-/Root-Pfad
                         print(f"[AGENT] BLOCKED shell for Domain-User '{_uname}' ({_shwhy}): {_cmd[:80]}", flush=True)
                         result = f"Zugriff verweigert: {_shwhy}."
                         _ldap_blocked = True
                         _viol = ("shell-illegal", _cmd[:_VIOL_DETAIL_MAX])
+                        _viol_marke = _shmarke
                     # Nur noch der Parser entscheidet. Der frueher vorgeschaltete
                     # Detektor-Regex uebersah ausserdem '&>datei' (das '&' fiel in
                     # seine Lookbehind-Ausnahme) – ein Schreibziel ausserhalb /tmp
@@ -3572,6 +3581,9 @@ KRITISCH – Autonomie-Regeln:
                                   "(z.B. > /tmp/skript.py). Umleitungen nach /dev/null und 2>&1 sind erlaubt.")
                         _ldap_blocked = True
                         _viol = ("shell-write", _cmd[:_VIOL_DETAIL_MAX])
+                        # Die SCHRANKE ist das Ziel, nicht der Befehl: dreimal
+                        # nach demselben Ort schreiben zu wollen ist ein Irrtum.
+                        _viol_marke = f"schreibziel:{str(_bad)[:80].lower()}"
                         # Nur ein System-/Secret-Ziel ist ein Angriffsindiz und darf zur
                         # Konto-Sperre beitragen (siehe _shell_write_is_attack).
                         _viol_soft = not _shell_write_is_attack(_cmd_sh)
@@ -3593,7 +3605,8 @@ KRITISCH – Autonomie-Regeln:
                                                task=getattr(self, '_current_task', '')[:_VIOL_TASK_MAX],
                                                ip=getattr(self, '_current_client_ip', ''),
                                                client_type=getattr(self, '_current_client_type', ''),
-                                               exempt=_exempt, escalate=not _viol_soft)
+                                               exempt=_exempt, escalate=not _viol_soft,
+                                               marke=_viol_marke)
                     if _vr.get("blocked"):
                         result = ("🚫 Konto gesperrt: wiederholte sicherheitsrelevante Zugriffsversuche "
                                   "wurden erkannt. Bitte wende dich an einen lokalen Administrator.")

@@ -429,7 +429,8 @@ _TASK_MAX = 1000
 def record_violation(user: str, channel: str, kind: str, detail: str = "",
                      snippet: str = "", exempt: bool = False,
                      tool: str = "", task: str = "", ip: str = "",
-                     client_type: str = "", escalate: bool = True) -> dict:
+                     client_type: str = "", escalate: bool = True,
+                     marke: str = "") -> dict:
     """Protokolliert einen Richtlinien-Verstoss und sperrt den Account ab Schwelle.
     exempt=True (lokale/Admin-Konten) -> nur protokollieren, nie sperren.
     Fuer aussagekraeftiges Logging werden zusaetzlich Tool, ausloesende Anfrage
@@ -444,12 +445,33 @@ def record_violation(user: str, channel: str, kind: str, detail: str = "",
     **Der Filter unten prueft das Feld, nicht den Parameter** – damit zaehlen auch
     bereits gespeicherte weiche Einträge nicht mehr als Futter fuer eine spaetere
     Sperre.
+
+    ``marke`` benennt die getroffene SCHRANKE (nicht den Befehl), z.B.
+    ``pfad:/root`` oder ``verb:systemctl``. **Gleiche Marke im Zeitfenster zaehlt
+    EINMAL.**
+
+    ⚠ WARUM (Vorfall ECHT, 2026-09-04, 17:11): ein Benutzer wurde von drei
+    Lesesuchen in der Wissensdatenbank gesperrt – dreimal derselbe falsche Pfad
+    ``/root/jarvis/data/knowledge`` (er stand in einem alten Merksatz im
+    Gedaechtnis des Agenten), abgewiesen in DREI SEKUNDEN. Der Befehlstext war
+    jedes Mal ein anderer (``find`` / ``grep`` / ``find | xargs``), die Schranke
+    aber dieselbe. **Dreimal an dieselbe Tuer zu fassen ist ein Irrtum, drei
+    verschiedene Tueren sind ein Muster** – und nur das Muster ist ein
+    Angriffsindiz. Dieselbe Ueberlegung wie bei ``escalate=False`` fuer
+    ``blocked-tool``: was das MODELL waehlt, kann der Benutzer nicht vermeiden.
+
+    Die Schwelle bleibt unveraendert scharf, wo sie gemeint ist: wer drei
+    verschiedene Secret-Ziele abklopft, hat drei Marken. Eintraege OHNE Marke
+    zaehlen einzeln wie bisher (fail-closed – ein neuer Deny-Zweig verhaelt sich
+    ohne Zutun wie vorher).
     Rueckgabe: {'blocked': bool, 'count': int}."""
     ts = int(time.time())
     entry = {"ts": ts, "channel": channel, "method": "policy", "pattern": kind,
              "detail": (detail or "")[:_DETAIL_MAX], "snippet": (snippet or "")[:_DETAIL_MAX],
              "tool": tool or "", "task": (task or "")[:_TASK_MAX],
              "ip": ip or "", "client_type": client_type or ""}
+    if marke:
+        entry["marke"] = str(marke)[:120]
     if not escalate:
         entry["soft"] = True
     blocked_now = False
@@ -468,7 +490,12 @@ def record_violation(user: str, channel: str, kind: str, detail: str = "",
                 and _finde_key(state.get("blocked", {}), user) is None):
             recent = [e for e in allv[key]
                       if ts - e["ts"] <= cfg["window"] and not e.get("soft")]
-            if len(recent) >= cfg["count"]:
+            # Gezaehlt werden VERSCHIEDENE Schranken. Ohne Marke zaehlt der
+            # Eintrag fuer sich (Position im Fenster als Ersatzmarke) – damit
+            # bleibt das Verhalten fuer jeden Zweig, der keine setzt, exakt wie
+            # bisher.
+            marken = {e.get("marke") or ("#%d" % i) for i, e in enumerate(recent)}
+            if len(marken) >= cfg["count"]:
                 blk = state.setdefault("blocked", {})
                 blk[norm_user(user) or user] = {
                     "reason": f"policy:{kind}",

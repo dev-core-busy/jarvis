@@ -538,15 +538,53 @@ SHELL_SECRET_PATHS = re.compile(
 )
 
 
-def authorize_shell(cmd: str) -> tuple[bool, str]:
+def authorize_shell(cmd: str) -> tuple[bool, str, str]:
     """Zusatzpruefung fuer shell_execute (nur Domain-Nutzer), ergaenzt die
-    bestehenden Deny-Muster in agent.py."""
+    bestehenden Deny-Muster in agent.py.
+
+    Rueckgabe ``(erlaubt, begruendung, marke)``.
+
+    ⚠ DIE BEGRUENDUNG NENNT DEN TREFFER – und das ist kein Feinschliff, es ist
+    die Ursache eines Vorfalls (ECHT, 2026-09-04, 17:11): drei Lesesuchen in der
+    Wissensdatenbank auf ``/root/jarvis/data/knowledge`` (der Pfad stand in
+    einem alten Merksatz im Gedaechtnis des Agenten und existiert dort nicht)
+    wurden je mit "Zugriff auf ein geschuetztes Verzeichnis/eine Secret-Datei
+    ist gesperrt" abgewiesen. Weder der Benutzer noch das Modell konnten daraus
+    ableiten, WAS zu aendern ist – also kamen zwei Varianten DESSELBEN Pfades
+    hinterher, und **drei harte Verstoesse in drei Sekunden haben das Konto
+    gesperrt**. Dieselbe Fehlerklasse wie "curl/wget/ssh/git/…" bei der
+    Egress-Heuristik und "mount error(13)" bei den Freigaben: eine Meldung, die
+    richtig ist und trotzdem nicht sagt, was zu tun ist, kostet dasselbe wie
+    eine falsche.
+
+    Die ``marke`` benennt die getroffene SCHRANKE (nicht den Befehl). Der
+    Dispatch reicht sie an ``security_guard.record_violation`` weiter, damit
+    derselbe Riegel im Zeitfenster **einmal** zaehlt: dreimal an dieselbe Tuer
+    zu fassen ist ein Irrtum, drei verschiedene Tueren sind ein Muster.
+    """
     cmd = cmd or ""
-    if SHELL_OBFUSCATION.search(cmd) or SHELL_EXEC_WORDS.search(strip_quoted(cmd)):
-        return False, "verschleierte/dekodierte Ausführung (base64, eval, pipe-in-shell) ist gesperrt"
-    if SHELL_SECRET_PATHS.search(cmd):
-        return False, "Zugriff auf ein geschütztes Verzeichnis/eine Secret-Datei ist gesperrt"
-    return True, ""
+    m = SHELL_OBFUSCATION.search(cmd) or SHELL_EXEC_WORDS.search(strip_quoted(cmd))
+    if m:
+        return (False,
+                f"verschleierte/dekodierte Ausführung ist gesperrt (getroffen: "
+                f"'{m.group(0).strip()[:60]}'; base64, eval, pipe-in-shell)",
+                "obfuskation")
+    m = SHELL_SECRET_PATHS.search(cmd)
+    if m:
+        treffer = m.group(0).strip()[:60]
+        # Ein VERZEICHNIS-Treffer ist fast immer ein falsch geratener Ort – dort
+        # gehoert der richtige Weg in die Meldung. Bei einer Secret-DATEI
+        # (settings.json, .env, *.key) waere derselbe Satz irrefuehrend: die ist
+        # gesperrt, egal wo sie liegt.
+        if treffer.startswith("/"):
+            hinweis = ("Lesende Suchen laufen im Arbeitsverzeichnis; die "
+                       "Wissensdatenbank durchsuchst du mit knowledge_search "
+                       "(ihre Dateien liegen unter data/knowledge).")
+        else:
+            hinweis = "Diese Datei ist unabhängig vom Ort gesperrt."
+        return False, f"'{treffer}' ist gesperrt. {hinweis}", "pfad:" + treffer.lower()
+
+    return True, "", ""
 
 
 def wrap_sandboxed(command: str, sandbox_user: str, lauf_dir=None,

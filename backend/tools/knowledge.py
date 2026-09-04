@@ -49,6 +49,26 @@ EXTENSIONS_PPTX = {".pptx"}
 EXTENSIONS_VIDEO = {".mp4", ".mkv", ".avi", ".webm", ".mov", ".m4v", ".flv", ".wmv"}
 EXTENSIONS_AUDIO = {".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac", ".wma", ".opus"}
 EXTENSIONS_IMAGE = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tif", ".tiff", ".webp"}
+# OneNote-ABSCHNITTSDATEIEN. Bewusst OHNE ".onetoc2": das ist der
+# Notizbuch-Index ohne eigenen Inhalt, und der Parser (Apache Tika) hat dafuer
+# keinen Handler. Siehe backend/tools/onenote.py.
+EXTENSIONS_ONENOTE = {".one"}
+
+
+def alle_endungen() -> set:
+    """DIE EINE Quelle fuer "welche Datei ist indizierbar".
+
+    Bis 2026-09-04 stand diese Vereinigung an SECHS Stellen als Handarbeit
+    (zweimal hier, dreimal in main.py, einmal in knowledge_sync.py). Wer ein
+    Format ergaenzte, musste alle sechs finden – und die vergessene Stelle
+    faellt nicht auf, sie laesst die Datei nur still liegen: nicht indiziert,
+    nicht hochladbar oder nicht uebertragbar, je nachdem welche es war.
+    ``tests/test_onenote_import.py`` haelt fest, dass niemand die Vereinigung
+    wieder von Hand zusammensetzt.
+    """
+    return (EXTENSIONS_TEXT | EXTENSIONS_PDF | EXTENSIONS_DOCX | EXTENSIONS_XLSX
+            | EXTENSIONS_PPTX | EXTENSIONS_VIDEO | EXTENSIONS_AUDIO
+            | EXTENSIONS_IMAGE | EXTENSIONS_ONENOTE)
 
 _cache_lock = threading.Lock()
 _log = logging.getLogger("jarvis.knowledge")
@@ -1108,10 +1128,10 @@ def _unlesbar_grund(filepath: Path, max_bytes: int) -> str:
     suffix = filepath.suffix.lower()
     if not suffix:
         return "ohne Dateiendung – Format nicht bestimmbar"
-    bekannt = (EXTENSIONS_TEXT | EXTENSIONS_PDF | EXTENSIONS_DOCX | EXTENSIONS_XLSX
-               | EXTENSIONS_PPTX | EXTENSIONS_IMAGE | EXTENSIONS_VIDEO
-               | EXTENSIONS_AUDIO)
-    if suffix not in bekannt:
+    if suffix not in alle_endungen():
+        if suffix == ".onetoc2":
+            return ("OneNote-Notizbuch-Index – enthaelt keinen Inhalt, nur die "
+                    "Abschnittsliste. Indiziert werden die .one-Dateien daneben.")
         return f"Format {suffix} wird nicht unterstuetzt"
     # Bekanntes Format, passende Groesse -> der Parser selbst ist gescheitert.
     # Haeufigste Ursachen: beschaedigte Datei, passwortgeschuetztes PDF, oder ein
@@ -1123,6 +1143,16 @@ def _unlesbar_grund(filepath: Path, max_bytes: int) -> str:
         return "Bild ohne erkennbaren Text (OCR benoetigt tesseract-ocr)"
     if suffix in (EXTENSIONS_VIDEO | EXTENSIONS_AUDIO):
         return "Audio/Video ohne Transkript (benoetigt faster-whisper)"
+    if suffix in EXTENSIONS_ONENOTE:
+        # Der Grund steht im Extraktor: fehlt Java/Tika, ist das die Ursache
+        # und der Text nennt den Weg. Sonst war die Datei wirklich leer.
+        try:
+            from backend.tools.onenote import fehlender_baustein
+            hinweis = fehlender_baustein()
+        except Exception:  # noqa: BLE001
+            hinweis = ""
+        return hinweis or ("OneNote-Abschnitt ohne auslesbaren Text (leer, nur "
+                           "Handschrift oder nur Bilder ohne erkannten Text)")
     return f"{suffix}-Datei liess sich nicht auslesen (beschaedigt?)"
 
 
@@ -1314,6 +1344,18 @@ def _extract_text_rest(filepath: Path, max_bytes: int) -> str | None:
             return None
         except Exception:
             return None
+
+    if suffix in EXTENSIONS_ONENOTE:
+        # Der Grund wird hier nur protokolliert – der Aufrufer holt ihn bei
+        # Bedarf ueber _failure_reason. Ein zweiter Rueckgabewert haette jede
+        # Aufrufstelle von _extract_text_raw angefasst.
+        from backend.tools.onenote import text_aus_datei
+        text, grund = text_aus_datei(filepath)
+        if text is None:
+            _log.info(f"OneNote nicht gelesen: {filepath.name} – {grund}")
+        else:
+            _log.debug(f"OneNote gelesen: {filepath.name} – {grund}")
+        return text
 
     if suffix in EXTENSIONS_IMAGE:
         return _ocr_image(filepath)
@@ -1725,9 +1767,7 @@ def _all_files(folders: list[Path]) -> list[Path]:
     (``kg.prune`` arbeitet auf dieser Liste) – es verschwand damit aus
     „Meine Dateien", obwohl es unveraendert auf der Platte lag.
     """
-    all_exts = (EXTENSIONS_TEXT | EXTENSIONS_PDF | EXTENSIONS_DOCX | EXTENSIONS_XLSX
-                | EXTENSIONS_PPTX | EXTENSIONS_VIDEO | EXTENSIONS_AUDIO
-                | EXTENSIONS_IMAGE)
+    all_exts = alle_endungen()
     files = []
     for folder in folders:
         # Totes Netzlaufwerk nicht anfassen -> sonst blockiert os.walk minutenlang.
@@ -2049,6 +2089,15 @@ def _get_static_stats() -> dict:
         return _stats_cache
 
 
+def _onenote_support() -> bool:
+    """Sind Java UND tika-app.jar vorhanden? (Voraussetzung fuer *.one)"""
+    try:
+        from backend.tools.onenote import finde_java, finde_tika
+        return bool(finde_java() and finde_tika())
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def get_stats() -> dict:
     """Statistiken für die API – schnell, kein Netzwerk-/Modell-Scan."""
     folders = _get_folders()
@@ -2128,6 +2177,21 @@ def get_stats() -> dict:
         "total_chunks": total_chunks,
         "total_size_bytes": total_size,
         **_get_static_stats(),
+        # BEWUSST NICHT in _get_static_stats(): das dict wird prozessweit
+        # gecacht, und die Voraussetzung fuer OneNote sind DATEIEN auf Platte
+        # (Java-Binary, tika-app.jar). Ein Administrator, der gerade
+        # deploy/tika_setup.sh gefahren hat, saehe die Plakette sonst bis zum
+        # Dienstneustart weiter rot und hielte das Skript fuer wirkungslos –
+        # dieselbe Falle wie beim Kontext-Schwellwert mit fest verdrahteter 30.
+        # Kosten: ein shutil.which und zwei is_file() je Abruf.
+        "onenote_support": _onenote_support(),
+        # BEWUSST NICHT in _get_static_stats(): das dict wird prozessweit
+        # gecacht, und die Voraussetzung fuer OneNote sind DATEIEN auf Platte
+        # (Java-Binary, tika-app.jar). Ein Administrator, der gerade
+        # deploy/tika_setup.sh gefahren hat, saehe die Plakette sonst bis zum
+        # Dienstneustart weiter rot und hielte das Skript fuer wirkungslos –
+        # dieselbe Falle wie beim Kontext-Schwellwert mit fest verdrahteter 30.
+        # Kosten: ein shutil.which und zwei is_file() je Abruf.
         "vector_db_available": vector_db_available,
         "vector_search": has_vector,
         "vector_files": vector_files,
@@ -2829,6 +2893,11 @@ class KnowledgeManageTool(BaseTool):
                 _ocr_ok = False
             formats.append("Bilder/OCR" if _ocr_ok
                            else "Bilder/OCR ⚠️ (tesseract-ocr + pytesseract nötig)")
+            if stats.get("onenote_support"):
+                formats.append("OneNote")
+            else:
+                formats.append("OneNote ⚠️ (Java + Apache Tika nötig, "
+                               "deploy/tika_setup.sh)")
             size_mb = stats["total_size_bytes"] / (1024 * 1024)
 
             # Vektor-Info

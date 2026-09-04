@@ -203,3 +203,8 @@ data/short_tracks_log.jsonl
 *.keystore
 android/keystore.properties
 keystore.properties
+
+# Fremd-Binaerdateien, die per deploy/*-Skript geholt werden.
+# tika-app.jar ist 65 MB und wird fuer den OneNote-Import (*.one) gebraucht;
+# ein oeffentliches Repo ist nicht der Ort dafuer -> deploy/tika_setup.sh.
+vendor/

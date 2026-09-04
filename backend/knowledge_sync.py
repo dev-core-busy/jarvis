@@ -425,14 +425,10 @@ def _endungen() -> set:
     indizieren, und der Ordner ist bei ihm schreibgesperrt.
     """
     try:
-        from backend.tools.knowledge import (
-            EXTENSIONS_TEXT, EXTENSIONS_PDF, EXTENSIONS_DOCX, EXTENSIONS_XLSX,
-            EXTENSIONS_PPTX, EXTENSIONS_VIDEO, EXTENSIONS_AUDIO, EXTENSIONS_IMAGE)
-        return (EXTENSIONS_TEXT | EXTENSIONS_PDF | EXTENSIONS_DOCX | EXTENSIONS_XLSX
-                | EXTENSIONS_PPTX | EXTENSIONS_VIDEO | EXTENSIONS_AUDIO
-                | EXTENSIONS_IMAGE)
+        from backend.tools.knowledge import alle_endungen
+        return alle_endungen()
     except Exception:  # noqa: BLE001
-        return {".txt", ".md", ".pdf", ".docx", ".xlsx", ".pptx", ".csv"}
+        return {".txt", ".md", ".pdf", ".docx", ".xlsx", ".pptx", ".csv", ".one"}
 
 
 def sha256_datei(pfad: Path, blocks: int = 1024 * 1024) -> str:

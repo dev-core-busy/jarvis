@@ -1,10 +1,13 @@
 {
     "name": "Wissensdatenbank",
-    "description": "Lokale Dokumente durchsuchen (RAG) – Text, PDF, DOCX aus mehreren Ordnern",
+    "description": "Lokale Dokumente durchsuchen (RAG) – Text, PDF, DOCX, Office, OneNote aus mehreren Ordnern",
     "version": "2.0.0",
     "author": "Jarvis",
     "module": "main",
-    "tools": ["knowledge_search", "knowledge_manage"],
+    "tools": [
+        "knowledge_search",
+        "knowledge_manage"
+    ],
     "category": "wissen",
     "icon": "book",
     "system": true,
@@ -22,8 +25,13 @@
         }
     },
     "knowledge_docs": [],
-    "dependencies": ["pdfplumber", "python-docx"],
-    "optional_dependencies": ["faster-whisper"],
+    "dependencies": [
+        "pdfplumber",
+        "python-docx"
+    ],
+    "optional_dependencies": [
+        "faster-whisper"
+    ],
     "permissions": [],
     "help": {
         "details": "Durchsucht lokale Dokumente nach relevanten Inhalten – hybrid aus semantischer Vektorsuche (FAISS + multilingual-e5-small) und lexikalischer BM25-Suche, zusammengeführt per Reciprocal Rank Fusion. Die Kombination ist nötig, weil reine Embeddings bei exakten Bezeichnern (Fehlercodes, Parameternamen) schwach sind. Ohne FAISS fällt die Suche auf einen TF-IDF-Index zurück. Mehrere Ordner können gleichzeitig indiziert werden, auch Netzlaufwerke; nicht erreichbare Ordner werden übersprungen, ohne ihren Indexstand zu verlieren. Der Index wird mtime-basiert automatisch aktuell gehalten.",
@@ -44,6 +52,9 @@
             "Welche Dateien handeln vom Thema Buchhaltung oder Rechnungen?",
             "Füge den Ordner /home/jarvis/docs zur Wissensdatenbank hinzu"
         ],
-        "notes": "Neue Dateien werden beim nächsten Lauf automatisch erfasst (max. 10 je Suche); für größere Mengen 'reindex' ausführen. Unterstützte Formate: Text/Markdown/CSV/JSON, PDF (inkl. OCR bei Scans), DOCX, XLSX, PPTX, Bilder (OCR via Tesseract) sowie Audio/Video (Transkription via Whisper). Ordner werden kommagetrennt in den Einstellungen angegeben."
-    }
+        "notes": "Neue Dateien werden beim nächsten Lauf automatisch erfasst (max. 10 je Suche); für größere Mengen 'reindex' ausführen. Unterstützte Formate: Text/Markdown/CSV/JSON, PDF (inkl. OCR bei Scans), DOCX, XLSX, PPTX, OneNote-Abschnitte (*.one), Bilder (OCR via Tesseract) sowie Audio/Video (Transkription via Whisper). Ordner werden kommagetrennt in den Einstellungen angegeben. OneNote braucht zusätzlich Java und Apache Tika – einmalig einzurichten mit 'sudo bash deploy/tika_setup.sh'; ohne das bleiben .one-Dateien liegen und der Indexer nennt den Grund. Aus einer .one-Datei kommt der Text aller Seiten eines Abschnitts, aber ohne Seitengrenzen und nicht in der Seitenreihenfolge – Handschrift liefert keinen Text."
+    },
+    "system_packages": [
+        "default-jre-headless"
+    ]
 }

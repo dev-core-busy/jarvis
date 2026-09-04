@@ -1853,7 +1853,7 @@ const _I18N = {
         'knowledge.loading':             'Lädt…',
         'knowledge.webdav_hint':         'Wissensdatenbank als Netzlaufwerk einbinden (Windows/Mac/Linux Dateimanager).',
         'knowledge.webdav_save_hint':    '⚠️ Nach dem Speichern wird der {marke}-Server neu gestartet, damit der WebDAV-Dienst die neuen Zugangsdaten übernimmt.',
-        'knowledge.shares_hint':         'Externe SMB/NFS/WebDAV-Freigaben als Wissensquellen einbinden.',
+        'knowledge.shares_hint':         'Externe SMB/NFS/WebDAV-Freigaben als Wissensquellen einbinden. OneNote-Notizbücher auf einer Windows-Freigabe brauchen keinen eigenen Typ: sie liegen dort als *.one-Abschnittsdateien und werden mit indiziert (Voraussetzung siehe Plakette „OneNote“ oben).',
         'knowledge.folders_hint':        'Lokale Verzeichnisse, die in der Wissensdatenbank indiziert werden. Pfad relativ zum Projektroot (z.B. <code>data/knowledge</code>) oder absolut.',
 
         // ── MCP ───────────────────────────────────────────────
@@ -2714,6 +2714,8 @@ const _I18N = {
         'knowledge.support_video_missing': 'ffmpeg oder faster-whisper fehlt',
         'knowledge.support_image_ok': 'Bild-OCR aktiv (Tesseract + pytesseract)',
         'knowledge.support_image_missing': 'tesseract-ocr oder pytesseract fehlt',
+        'knowledge.support_onenote_ok': 'OneNote-Support aktiv (*.one)\nAus einem Abschnitt kommt der Text aller Seiten – ohne Seitengrenzen und nicht in Seitenreihenfolge. Handschrift liefert keinen Text.',
+        'knowledge.support_onenote_missing': 'OneNote (*.one) nicht lesbar – Java oder Apache Tika fehlt.\nEinrichten: sudo bash deploy/tika_setup.sh',
         'knowledge.support_vector_missing': 'faiss-cpu/sentence-transformers nicht installiert',
         'knowledge.support_faiss_missing': 'faiss-cpu nicht installiert',
         'ldap.title_browse': 'Verzeichnis durchsuchen',
@@ -5008,7 +5010,7 @@ const _I18N = {
         'knowledge.loading':             'Loading…',
         'knowledge.webdav_hint':         'Mount knowledge base as network drive (Windows/Mac/Linux file manager).',
         'knowledge.webdav_save_hint':    '⚠️ After saving, the {marke} server will restart so the WebDAV service picks up the new credentials.',
-        'knowledge.shares_hint':         'Mount external SMB/NFS/WebDAV shares as knowledge sources.',
+        'knowledge.shares_hint':         'Mount external SMB/NFS/WebDAV shares as knowledge sources. OneNote notebooks on a Windows share need no separate type: they sit there as *.one section files and are indexed along with everything else (prerequisites: see the „OneNote“ badge above).',
         'knowledge.folders_hint':        'Local directories indexed in the knowledge base. Path relative to project root (e.g. <code>data/knowledge</code>) or absolute.',
 
         // ── MCP ───────────────────────────────────────────────
@@ -5855,6 +5857,8 @@ const _I18N = {
         'knowledge.support_video_missing': 'ffmpeg or faster-whisper missing',
         'knowledge.support_image_ok': 'Image OCR active (Tesseract + pytesseract)',
         'knowledge.support_image_missing': 'tesseract-ocr or pytesseract missing',
+        'knowledge.support_onenote_ok': 'OneNote support active (*.one)\nA section yields the text of all its pages – without page boundaries and not in page order. Handwriting yields no text.',
+        'knowledge.support_onenote_missing': 'OneNote (*.one) not readable – Java or Apache Tika missing.\nSet up with: sudo bash deploy/tika_setup.sh',
         'knowledge.support_vector_missing': 'faiss-cpu/sentence-transformers not installed',
         'knowledge.support_faiss_missing': 'faiss-cpu not installed',
         'ldap.title_browse': 'Browse directory',

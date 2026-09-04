@@ -864,6 +864,11 @@ class JarvisKnowledgeManager {
         const videoTitle = stats.video_support ? window.t('knowledge.support_video_ok') : window.t('knowledge.support_video_missing');
         const imageIcon = stats.image_support ? '✅' : '⚠️';
         const imageTitle = stats.image_support ? window.t('knowledge.support_image_ok') : window.t('knowledge.support_image_missing');
+        // OneNote: die Plakette ist der EINZIGE Ort, an dem ein Administrator
+        // sieht, ob Java und Tika liegen. Ohne sie bleibt "meine .one-Dateien
+        // werden nicht indiziert" eine Suche im Journal.
+        const oneIcon = stats.onenote_support ? '✅' : '⚠️';
+        const oneTitle = stats.onenote_support ? window.t('knowledge.support_onenote_ok') : window.t('knowledge.support_onenote_missing');
         const vectorAvail = stats.vector_db_available;
         // Drei Zustaende des Vektorspeichers unterscheiden (siehe
         // knowledge.vector_store_status): "noch nie gebraucht" ist KEINE Stoerung.
@@ -954,6 +959,7 @@ class JarvisKnowledgeManager {
                 <span class="kb-format-badge" title="${pptxTitle}">${pptxIcon} PowerPoint</span>
                 <span class="kb-format-badge" title="${imageTitle}">${imageIcon} Bilder/OCR</span>
                 <span class="kb-format-badge" title="${videoTitle}">${videoIcon} Video/Audio</span>
+                <span class="kb-format-badge" title="${oneTitle}">${oneIcon} OneNote</span>
                 <span class="kb-format-badge" title="${vectorTitle}">${vectorIcon} ${window.t('knowledge.vektor_db')}</span>
             </div>
         `;

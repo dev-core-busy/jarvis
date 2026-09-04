@@ -645,9 +645,38 @@ for stelle in ('folder: str = Form("data/knowledge")',):
 check("_kb_mirror_guard(folder)" in src_main, "Upload prueft den Zielordner")
 
 src_sb = (ROOT / "backend" / "sandbox.py").read_text(encoding="utf-8")
+
+
+def _liste_aus_sandbox(name):
+    """Eintraege einer Modul-Liste per AST – NICHT ueber ein Zeichenfenster.
+
+    ⚠ VORBESTEHENDER FEHLALARM, gefunden am 2026-09-04: hier stand
+    ``src_sb[i:i + 2500]``. Der Eintrag "data/knowledge_sync.json" liegt
+    inzwischen 2919 Zeichen hinter dem Listenanfang – die Begruendungen davor
+    sind gewachsen. Der Test meldete damit einen Fehler, den es nicht gibt,
+    waehrend sandbox.py unveraendert korrekt war. Eine feste Zahl in einem Test
+    ist eine Zeitbombe (Register); geprueft wird jetzt die MITGLIEDSCHAFT.
+    """
+    import ast
+    baum = ast.parse(src_sb)
+    for k in ast.walk(baum):
+        if not isinstance(k, ast.Assign):
+            continue
+        for ziel in k.targets:
+            if isinstance(ziel, ast.Name) and ziel.id == name:
+                if isinstance(k.value, (ast.Tuple, ast.List, ast.Set)):
+                    return {e.value for e in k.value.elts
+                            if isinstance(e, ast.Constant) and isinstance(e.value, str)}
+    return None
+
+
 for liste in ("_APP_DENY_REL", "PRIVATE_FILES"):
-    i = src_sb.find(liste)
-    check("knowledge_sync.json" in src_sb[i:i + 2500], f"{liste} enthaelt knowledge_sync.json")
+    eintraege = _liste_aus_sandbox(liste)
+    check(eintraege is not None and len(eintraege) > 5,
+          f"Positivkontrolle: {liste} wurde als Liste gelesen",
+          str(None if eintraege is None else len(eintraege)))
+    check(bool(eintraege) and "data/knowledge_sync.json" in eintraege,
+          f"{liste} enthaelt knowledge_sync.json")
 check("knowledge_sync\\.json" in src_sb, "SHELL_SECRET_PATHS kennt knowledge_sync.json")
 
 src_lic = (ROOT / "backend" / "license.py").read_text(encoding="utf-8")

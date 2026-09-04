@@ -14892,11 +14892,9 @@ def _kb_move_folder(src_rel: str, dst_parent_rel: str):
 
 
 def _kb_supported_exts() -> set:
-    from backend.tools.knowledge import (
-        EXTENSIONS_TEXT, EXTENSIONS_PDF, EXTENSIONS_DOCX, EXTENSIONS_XLSX,
-        EXTENSIONS_PPTX, EXTENSIONS_VIDEO, EXTENSIONS_AUDIO, EXTENSIONS_IMAGE)
-    return (EXTENSIONS_TEXT | EXTENSIONS_PDF | EXTENSIONS_DOCX | EXTENSIONS_XLSX |
-            EXTENSIONS_PPTX | EXTENSIONS_VIDEO | EXTENSIONS_AUDIO | EXTENSIONS_IMAGE)
+    """Indizierbare Endungen – aus der EINEN Quelle in knowledge.py."""
+    from backend.tools.knowledge import alle_endungen
+    return alle_endungen()
 
 
 def _kb_has_subfolders(rel_path: str) -> bool:
@@ -15668,16 +15666,9 @@ async def upload_knowledge_files(
     _sperre = _kb_mirror_guard(folder)
     if _sperre is not None:
         return _sperre
-    from backend.tools.knowledge import (
-        _get_folders, PROJECT_ROOT,
-        EXTENSIONS_TEXT, EXTENSIONS_PDF, EXTENSIONS_DOCX,
-        EXTENSIONS_XLSX, EXTENSIONS_PPTX, EXTENSIONS_VIDEO, EXTENSIONS_AUDIO,
-        EXTENSIONS_IMAGE,
-    )
+    from backend.tools.knowledge import _get_folders, PROJECT_ROOT, alle_endungen
 
-    all_exts = (EXTENSIONS_TEXT | EXTENSIONS_PDF | EXTENSIONS_DOCX |
-                EXTENSIONS_XLSX | EXTENSIONS_PPTX | EXTENSIONS_VIDEO | EXTENSIONS_AUDIO |
-                EXTENSIONS_IMAGE)
+    all_exts = alle_endungen()
 
     # Zielordner validieren – konfigurierter Wurzelordner ODER ein Unterordner
     # darunter (Modell A: Unterordner erben die Wurzel).
@@ -15867,19 +15858,13 @@ async def wissen_upload(
     _sperre = _kb_mirror_guard(folder)
     if _sperre is not None:
         return _sperre
-    from backend.tools.knowledge import (
-        _get_folders, PROJECT_ROOT,
-        EXTENSIONS_TEXT, EXTENSIONS_PDF, EXTENSIONS_DOCX,
-        EXTENSIONS_XLSX, EXTENSIONS_PPTX, EXTENSIONS_VIDEO, EXTENSIONS_AUDIO,
-        EXTENSIONS_IMAGE,
-    )
+    from backend.tools.knowledge import _get_folders, PROJECT_ROOT, alle_endungen
     from backend import knowledge_groups as kg
     req_groups = [g.strip() for g in (groups or "").split(",") if g.strip()]
     ok, err = _wissen_check_groups(user, req_groups)
     if not ok:
         return JSONResponse({"error": err}, status_code=403)
-    all_exts = (EXTENSIONS_TEXT | EXTENSIONS_PDF | EXTENSIONS_DOCX | EXTENSIONS_XLSX |
-                EXTENSIONS_PPTX | EXTENSIONS_VIDEO | EXTENSIONS_AUDIO | EXTENSIONS_IMAGE)
+    all_exts = alle_endungen()
     # Ziel: konfigurierter Wurzelordner ODER ein Unterordner darunter (Modell A).
     root_rel = _kb_configured_root_for(folder)
     target = None

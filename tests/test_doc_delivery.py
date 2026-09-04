@@ -406,6 +406,66 @@ def main() -> int:
                any("Konnte nicht zum Download" in m and nie.name in m for m in s12.gesendet),
                str(s12.gesendet))
 
+        abschnitt("9) Datei ist beim Benutzer -> keine Warnung (Vorfall 2026-09-04)")
+        # Der Fix vom selben Tag (`_schon`) griff nur bei GLEICHEM Pfad. Gemeldet
+        # blieb: `office_create_powerpoint` legt die Datei mit Capability-Namen in
+        # data/documents (Chip via Zweig a), und das Modell nennt in derselben
+        # Antwort zusaetzlich einen Pfad, den es nie gab. Ein Pfad-Schluessel kann
+        # das nicht erkennen - verglichen wird deshalb der NAME.
+        def mit_office(zweiter_text, dateiname="Prozessautomatisierung.pptx"):
+            """(Chip?, Warnungen) – Werkzeug-Ergebnis, dann Endantwort."""
+            cap = f"{uuid.uuid4().hex}__{dateiname}"
+            docs.mkdir(parents=True, exist_ok=True)
+            (docs / cap).write_bytes(b"PK\x03\x04egal")
+            s_ = AgentStub(EXT)
+            gesehen = set()
+            werkzeug = f"✅ '{dateiname}' wurde erstellt.\n\n[📥 x](/api/documents/{cap})"
+            asyncio.run(deliver(s_, None, werkzeug, gesehen, "u", jetzt, False))
+            asyncio.run(deliver(s_, None, zweiter_text, gesehen, "u", jetzt, True))
+            return (chip_url(s_.gesendet),
+                    [m for m in s_.gesendet if "Konnte nicht zum Download" in m])
+
+        for _name, _text in (
+                ("Phantom-Pfad in der Antwort",
+                 "Fertig. Die Datei liegt unter /tmp/prozessautomatisierung.pptx."),
+                ("Phantom-Marker in der Antwort",
+                 "Fertig.\n[[JARVIS_DELIVER:/tmp/prozessautomatisierung.pptx]]"),
+                ("Rohname in data/documents genannt",
+                 "Fertig, gespeichert als data/documents/Prozessautomatisierung.pptx.")):
+            _chip, _warn = mit_office(_text)
+            pruefe(f"{_name}: der Chip entsteht", _chip is not None)
+            pruefe(f"{_name}: KEINE Warnung – die Datei ist beim Benutzer",
+                   not _warn, str(_warn))
+
+        # Positivkontrolle 1: nichts geliefert -> die Warnung MUSS kommen.
+        s13 = AgentStub(EXT)
+        nie2 = Path("/tmp") / f"fehlt_{uuid.uuid4().hex[:6]}.pptx"
+        asyncio.run(deliver(s13, None, f"Ergebnis: {nie2.as_posix()}", set(), "u", jetzt, True))
+        pruefe("ohne jede Auslieferung wird weiterhin gewarnt",
+               any("Konnte nicht zum Download" in m for m in s13.gesendet), str(s13.gesendet))
+
+        # Positivkontrolle 2 – die GRENZE der Regel: ein ANDERER Name wird
+        # weiterhin gemeldet, auch wenn nebenher etwas geliefert wurde. Ohne
+        # diese Haelfte waere die Schranke "es kam ja irgendein Chip" und wuerde
+        # eine echte verfehlte zweite Datei verschlucken.
+        _chip2, _warn2 = mit_office(f"Fertig. Zweite Datei: /tmp/anhang_{uuid.uuid4().hex[:6]}.csv")
+        pruefe("ein ANDERER Name wird weiterhin gemeldet", bool(_warn2), str(_chip2))
+
+        # Die Verdrahtung in run_task: ein ZWISCHENTEXT (neben Werkzeug-Aufrufen)
+        # ist nicht der letzte Text des Laufs und darf nichts melden – sonst warnt
+        # der Lauf, BEVOR das Werkzeug die angekuendigte Datei erzeugt.
+        _ruf = re.search(r"await self\._deliver_docs\(ws, text, _delivered_docs.*?\)",
+                         QUELLE, re.S)
+        pruefe("run_task meldet nur am letzten Text",
+               bool(_ruf) and "melden=True" not in _ruf.group(0)
+               and "is_intermediate" in _ruf.group(0),
+               _ruf.group(0) if _ruf else "Aufruf nicht gefunden")
+        pruefe("ein angekuendigter Pfad ohne Meldeauftrag warnt nicht",
+               not any("Konnte nicht zum Download" in m for m in (lambda s_: (
+                   asyncio.run(deliver(s_, None,
+                                       "Ich speichere sie unter /tmp/kuendigt_an.pptx.",
+                                       set(), "u", jetzt, False)), s_.gesendet)[1])(AgentStub(EXT))))
+
         for f in aufraeumen:
             try:
                 f.unlink()

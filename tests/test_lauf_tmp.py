@@ -623,9 +623,21 @@ pruef("ein verfehlter Liefer-Marker wird protokolliert",
 pruef("und dem Benutzer gemeldet",
       "Konnte nicht zum Download bereitgestellt werden" in ag,
       "der Chip ist der EINZIGE Weg zur Datei; faellt er aus, muss es sichtbar sein")
+# Geprueft wird die EIGENSCHAFT, nicht die Schreibweise: bis 2026-09-04 stand
+# hier die Zeichenkette "since=_task_start_time, melden=True" – und damit hat der
+# Waechter genau den Fehler festgeschrieben, den seine eigene Ueberschrift
+# ausschliesst. `melden=True` galt naemlich fuer JEDEN Text, auch fuer einen
+# Zwischentext neben Werkzeug-Aufrufen ("ich speichere sie unter /tmp/x.pptx").
+_ruf_text = re.search(r"await self\._deliver_docs\(ws, text, _delivered_docs.*?\)", ag, re.S)
+_ruf_tool = re.search(r"await self\._deliver_docs\(ws, result_str.*?\)", ag, re.S)
 pruef("gemeldet wird nur beim letzten Text des Laufs",
-      "since=_task_start_time, melden=True" in ag,
-      "ein Werkzeug-Ergebnis warnt sonst, bevor die Datei entstanden ist")
+      bool(_ruf_text) and "melden=True" not in _ruf_text.group(0)
+      and "is_intermediate" in _ruf_text.group(0),
+      "ein Zwischentext warnt sonst, bevor die Datei entstanden ist: "
+      + (_ruf_text.group(0) if _ruf_text else "Aufruf nicht gefunden"))
+pruef("ein Werkzeug-Ergebnis meldet gar nicht",
+      bool(_ruf_tool) and "melden=True" not in _ruf_tool.group(0),
+      _ruf_tool.group(0) if _ruf_tool else "Aufruf nicht gefunden")
 
 abschnitt("11. Auslieferung AUSSERHALB des Lauf-Scopes ist blind "
           "(Vorfall 2026-08-24, ECHT)")

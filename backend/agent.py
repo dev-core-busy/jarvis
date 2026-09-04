@@ -2392,6 +2392,7 @@ KRITISCH – Autonomie-Regeln:
                         # Bilder nur am Endergebnis: ein Bild, das an einem
                         # Zwischentext haengt, erschiene im Chat doppelt.
                         _display = self._anzeigetext(text, mit_bildern=not is_intermediate)
+                        _nur_absicht = False
                         if _display:
                             # Ein reines Selbstgespraech ("Ich werde jetzt …") ist
                             # keine Antwort. Es wird zwar angezeigt (der Benutzer
@@ -2409,9 +2410,18 @@ KRITISCH – Autonomie-Regeln:
                                 _log("Antwort war nur eine Absichtserklaerung – "
                                      "Nachschlag wird geholt.")
                         _conv_messages.append({"role": "assistant", "content": self._verlauf_text(text.strip())})
-                        # In der Antwort genannte Dokumente (auch /tmp-Pfade) als Chip ausliefern
+                        # In der Antwort genannte Dokumente (auch /tmp-Pfade) als Chip ausliefern.
+                        # `melden` heisst "das ist der letzte Text dieses Laufs" –
+                        # ein Zwischentext (neben Werkzeug-Aufrufen) und eine blosse
+                        # Absichtserklaerung sind es NICHT. Bis 2026-09-04 stand hier
+                        # ein festes True: kuendigte das Modell die Datei an ("ich
+                        # speichere sie unter /tmp/x.pptx"), warnte der Lauf, BEVOR
+                        # das Werkzeug sie erzeugt hat – Warnung und Chip standen
+                        # danach nebeneinander. Genau der Fall, den der Docstring von
+                        # `_deliver_docs` fuer Werkzeug-Ergebnisse ausschliesst.
                         await self._deliver_docs(ws, text, _delivered_docs, username,
-                                                 since=_task_start_time, melden=True)
+                                                 since=_task_start_time,
+                                                 melden=not (is_intermediate or _nur_absicht))
 
                 # Wenn keine Function Calls → fertig; User+Antwort in History eintragen
                 if not function_calls:
@@ -5193,6 +5203,17 @@ KRITISCH – Autonomie-Regeln:
 
         _IMG_EXT = {"png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"}
 
+        def _namensschluessel(n: str) -> str:
+            """Vergleichsform eines Dateinamens.
+
+            Fuer die Frage "hat der Benutzer diese Datei bekommen?" sind
+            Gross-/Kleinschreibung, Umlaute und Trennzeichen unerheblich: das
+            Werkzeug legt sie als ``Prozessautomatisierung.pptx`` ab, das Modell
+            nennt sie im Text als ``/tmp/prozessautomatisierung.pptx``.
+            """
+            b = _os.path.basename(str(n or "")).translate(_UML).lower()
+            return re.sub(r"[^a-z0-9.]+", "", b)
+
         def _ingest(src, dst):
             """Holt die Datei nach data/documents – Aufraeumen der Quelle ist OPTIONAL.
 
@@ -5250,6 +5271,10 @@ KRITISCH – Autonomie-Regeln:
                 _documents.register(url.rsplit("/", 1)[-1], _owner)
             except Exception as e:
                 _log(f"Eigentuemer-Eintrag fehlgeschlagen fuer {url}: {e}")
+            # Der NAME dieser Auslieferung – nicht nur der Pfad. Ein Pfad-Schluessel
+            # allein traegt nicht: das Werkzeug liefert aus data/documents, das
+            # Modell nennt im Text einen /tmp-Pfad, der nie existiert hat.
+            delivered.add("name:" + _namensschluessel(name))
             ext = url.rsplit(".", 1)[-1].lower() if "." in url else ""
             md = f"![{name}]({url})" if ext in _IMG_EXT else f"[📥 {name} herunterladen]({url})"
             await self._send_status(ws, md, highlight=True)
@@ -5349,12 +5374,22 @@ KRITISCH – Autonomie-Regeln:
         _verfehlt = []
 
         def _verfehlt_merken(rohpfad: str, anzeige: str, grund: str) -> None:
+            # DIE DATEI IST BEIM BENUTZER – dann ist nichts verfehlt (2026-09-04).
+            # Gemeldet von ECHT: die PPTX wurde ueber `office_create_powerpoint`
+            # nach data/documents geschrieben und als Chip ausgeliefert, das
+            # Modell nannte in derselben Antwort zusaetzlich einen Pfad, den es
+            # nie gab (`/tmp/prozessautomatisierung.pptx`). Der Pfad-Schluessel
+            # `_schon()` greift dort nicht – es ist ein ANDERER Pfad. Verglichen
+            # wird deshalb der NAME. Die Grenze bleibt eng: ein anderer Name
+            # wird weiterhin gemeldet, auch wenn nebenher etwas geliefert wurde.
+            _bereits = ("name:" + _namensschluessel(anzeige or rohpfad)) in delivered
             # Journal IMMER – der Grund ist die Diagnose, und sie fehlte bisher
             # vollstaendig. Das Dedup-Set nur beim meldenden Aufruf: ein frueher
             # gesetzter Merker wuerde sonst die Meldung am Ende unterdruecken.
-            _log(f"Liefer-Marker OHNE Auslieferung ({grund}): roh={rohpfad!r} "
-                 f"host={_hostpfad(rohpfad)!r}")
-            if not melden:
+            _log(f"Liefer-Marker OHNE Auslieferung ({grund}"
+                 f"{'; gleichnamige Datei war schon geliefert – keine Meldung' if _bereits else ''}"
+                 f"): roh={rohpfad!r} host={_hostpfad(rohpfad)!r}")
+            if not melden or _bereits:
                 return
             schluessel = "miss:" + rohpfad
             if schluessel in delivered:

@@ -17932,6 +17932,131 @@ async def unmount_share(idx: int, user: str = Depends(require_knowledge_editor))
     return JSONResponse({"ok": True})
 
 
+@app.get("/api/knowledge/cleanup/scan")
+async def cleanup_scan(user: str = Depends(require_local_auth)):
+    """Welche selbst geschriebenen Dateien kaemen zum Aufraeumen in Frage?
+
+    ⚠ ADMIN, nicht Wissens-Editor: hier werden Dateien angefasst, die in JEDEN
+    System-Prompt eingehen - auch in den eines Administrators. Das ist eine
+    andere Rechtefrage als das Pflegen von Wissensordnern.
+    """
+    from backend import wissen_aufraeumen as _wa
+    return JSONResponse({"ok": True, "dateien": await asyncio.to_thread(_wa.bestand)})
+
+
+@app.post("/api/knowledge/cleanup/analyse")
+async def cleanup_analyse(request: Request, user: str = Depends(require_local_auth)):
+    """Vorschlaege erzeugen - schreibt NICHTS.
+
+    Der Lauf benutzt das aktive LLM-Profil (Einstellungen → Profile). Ergebnis
+    ist ein Vorher/Nachher je Datei; geschrieben wird erst ueber
+    ``/apply`` mit dem Text, den ein Mensch bestaetigt hat.
+    """
+    from backend import wissen_aufraeumen as _wa
+    body = await request.json()
+    schluessel = [str(x) for x in (body.get("dateien") or []) if x]
+    if not schluessel:
+        return JSONResponse({"ok": False, "error": "Keine Datei ausgewaehlt."},
+                            status_code=400)
+    erg = await _wa.analysiere(schluessel, user=user)
+    return JSONResponse(erg, status_code=200 if erg.get("ok") else 400)
+
+
+@app.post("/api/knowledge/cleanup/prompt")
+async def cleanup_prompt(request: Request, user: str = Depends(require_local_auth)):
+    """Was bei EINER Anfrage tatsaechlich an das Modell geht – vorher/nachher.
+
+    Optional im Rumpf ``{"neu": {schluessel: inhalt}}``: dann wird zusaetzlich
+    gerechnet, was die Vorschlaege an der Gesamtsumme aendern wuerden - ohne
+    eine Datei anzufassen.
+    """
+    from backend import wissen_aufraeumen as _wa
+    neu = {}
+    try:
+        body = await request.json()
+        neu = {str(k): str(v) for k, v in (body.get("neu") or {}).items()}
+    except Exception:                                         # noqa: BLE001
+        pass
+    erg = await asyncio.to_thread(_wa.prompt_bilanz, neu or None)
+    return JSONResponse(erg, status_code=200 if erg.get("ok") else 500)
+
+
+@app.get("/api/knowledge/cleanup/quellen")
+async def cleanup_quellen(user: str = Depends(require_local_auth)):
+    """Welche Quellen gehen in den Widerspruchs-Abgleich (Namen, Groessen)."""
+    from backend import wissen_aufraeumen as _wa
+    return JSONResponse({"ok": True,
+                         "quellen": await asyncio.to_thread(_wa.konflikt_quellen)})
+
+
+@app.post("/api/knowledge/cleanup/regeln")
+async def cleanup_regeln(request: Request, user: str = Depends(require_local_auth)):
+    """Stufe 1: die wirksamen Regeln EINER Handvoll Quellen ableiten.
+
+    Geteilt, weil der ganze Abgleich live ueber zehn Minuten dauert - in einem
+    HTTP-Aufruf laeuft das in den ersten Proxy-Timeout.
+    """
+    from backend import wissen_aufraeumen as _wa
+    body = await request.json()
+    namen = [str(x) for x in (body.get("quellen") or []) if x]
+    if not namen:
+        return JSONResponse({"ok": False, "error": "Keine Quelle angegeben."},
+                            status_code=400)
+    erg = await _wa.regeln_fuer(namen)
+    return JSONResponse(erg, status_code=200 if erg.get("ok") else 400)
+
+
+@app.post("/api/knowledge/cleanup/abgleich")
+async def cleanup_abgleich(request: Request, user: str = Depends(require_local_auth)):
+    """Stufe 2: die gesammelten Regeln in EINEM Lauf auf Konflikte pruefen."""
+    from backend import wissen_aufraeumen as _wa
+    body = await request.json()
+    erg = await _wa.abgleichen([str(z) for z in (body.get("zeilen") or [])])
+    return JSONResponse(erg, status_code=200 if erg.get("ok") else 400)
+
+
+@app.post("/api/knowledge/cleanup/konflikte")
+async def cleanup_konflikte(user: str = Depends(require_local_auth)):
+    """Widersprueche ZWISCHEN allen Anweisungen (inkl. Basis-Prompt als Referenz).
+
+    Zweistufig: erst je Quelle die Regeln als Kurzform, dann die Gesamtliste in
+    EINEM Lauf. Die Einzelpruefung in ``/analyse`` kann dateiuebergreifende
+    Konflikte strukturell nicht sehen.
+    """
+    from backend import wissen_aufraeumen as _wa
+    erg = await _wa.gesamtpruefung(user=user)
+    return JSONResponse(erg, status_code=200 if erg.get("ok") else 400)
+
+
+@app.post("/api/knowledge/cleanup/apply")
+async def cleanup_apply(request: Request, user: str = Depends(require_local_auth)):
+    """Bestaetigte Aenderungen schreiben - mit Sicherung je Datei.
+
+    ⚠ Der Inhalt kommt aus dem Request, also von dem Menschen, der den
+    Vergleich gesehen hat - nicht aus dem Analyselauf. Das Modell hat an
+    dieser Stelle keine Stimme mehr. Der Schluessel wird gegen die eigene
+    Bestandsliste aufgeloest; einen Pfad nimmt der Endpunkt nicht entgegen.
+    """
+    from backend import wissen_aufraeumen as _wa
+    body = await request.json()
+    aend = [a for a in (body.get("aenderungen") or []) if isinstance(a, dict)]
+    if not aend:
+        return JSONResponse({"ok": False, "error": "Nichts zu uebernehmen."},
+                            status_code=400)
+    erg = await asyncio.to_thread(_wa.anwenden, aend, user)
+    try:
+        from backend import audit_log as _al
+        # ⚠ Es heisst log_tool, nicht log_action - ein erfundener Funktionsname
+        # landet im breiten except darunter und der Vorgang wird STILL nicht
+        # protokolliert (am 2026-09-04 genau so passiert, siehe secret_reveal).
+        _al.log_tool(user, "knowledge_cleanup",
+                     {"dateien": [e.get("schluessel") for e in (erg.get("erledigt") or [])][:40]},
+                     len(erg.get("erledigt") or []), 0)
+    except Exception as e:                                    # noqa: BLE001
+        print(f"[Aufraeumen] Audit fehlgeschlagen: {e}", flush=True)
+    return JSONResponse(erg)
+
+
 @app.post("/api/knowledge/mounts/{idx}/diagnose")
 async def diagnose_share(idx: int, user: str = Depends(require_knowledge_editor)):
     """Warum kommt diese Freigabe nicht zustande? NUR MESSEN, nichts aendern.

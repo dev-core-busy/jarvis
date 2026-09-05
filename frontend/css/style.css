@@ -4380,6 +4380,63 @@ select.input-field {
    schliesst - man muss ihn lesen und kopieren koennen. Deckende Flaeche, weil
    darunter die naechste Freigabe steht (Register: was ueber Inhalt liegt,
    braucht eine deckende Flaeche). */
+/* Wissen aufraeumen: Vorher/Nachher-Vergleich.
+   Der Diff MUSS ohne Farbe lesbar bleiben - deshalb traegt jede Zeile
+   zusaetzlich ein Vorzeichen (+/-). Farbe allein ist keine Information. */
+.kb-cl-gruppe { margin: 10px 0; }
+.kb-cl-gruppe-titel { font-weight: 600; font-size: .82rem; color: var(--text-secondary);
+    margin-bottom: 4px; text-transform: uppercase; letter-spacing: .04em; }
+.kb-cl-zeile { display: flex; align-items: center; gap: 8px; padding: 4px 6px;
+    border-radius: 6px; cursor: pointer; }
+.kb-cl-zeile:hover { background: var(--bg-glass); }
+.kb-cl-zeile.ist-gross { opacity: .55; cursor: default; }
+.kb-cl-name { font-weight: 600; font-size: .85rem; min-width: 0; word-break: break-all; }
+.kb-cl-meta { font-size: .76rem; color: var(--text-muted); }
+.kb-cl-warn { font-size: .76rem; color: var(--danger, #c0392b); }
+.kb-cl-aktion { display: flex; align-items: center; gap: 12px; margin: 14px 0 6px; flex-wrap: wrap; }
+.kb-cl-karte { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+    margin: 10px 0; background: var(--bg-secondary); }
+.kb-cl-karte.ist-fehler { border-color: var(--danger, #c0392b); }
+.kb-cl-kopf { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.kb-cl-uebernehmen { display: inline-flex; align-items: center; gap: 5px;
+    font-size: .8rem; cursor: pointer; white-space: nowrap; }
+.kb-cl-grund { font-size: .82rem; margin: 6px 0; line-height: 1.45; }
+.kb-cl-funde { margin: 4px 0 8px 18px; font-size: .8rem; }
+.kb-cl-diff { max-height: 40vh; overflow: auto; font-size: .76rem; line-height: 1.45;
+    background: var(--bg-glass); border-radius: 6px; padding: 8px 10px; margin: 6px 0 0;
+    white-space: pre-wrap; word-break: break-word; }
+.kb-cl-diff .dg { color: var(--text-muted); display: block; }
+.kb-cl-diff .dw { color: var(--danger, #c0392b); display: block; }
+.kb-cl-diff .dn { color: var(--success, #2e9e5b); display: block; }
+/* ⚠ IM HELLEN THEMA GEMESSEN: die Signalfarben liegen auf hellem Grund bei
+   2,54:1 (neu) bzw. 3,76:1 (entfernt) - fuer Text zu wenig. Eigene, dunklere
+   Toene nur hier; die Unterscheidbarkeit bleibt, die Lesbarkeit kommt dazu.
+   Dieselbe Stelle wie beim SAP-Zertifikat (Register). */
+body.light .kb-cl-diff .dw { color: #a5231a; }
+body.light .kb-cl-diff .dn { color: #146c38; }
+.kb-cl-bilanz { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px;
+    margin: 10px 0; background: var(--bg-secondary); font-size: .82rem; }
+.kb-cl-bilanz > summary { cursor: pointer; }
+.kb-cl-bilanz-tab { width: 100%; border-collapse: collapse; margin: 6px 0; }
+.kb-cl-bilanz-tab td { padding: 2px 8px 2px 0; vertical-align: top; }
+.kb-cl-zahl { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap;
+    font-weight: 600; }
+.kb-cl-spar { color: var(--success, #2e9e5b); }
+body.light .kb-cl-spar { color: #146c38; }
+.kb-cl-art { font-weight: 700; font-size: .78rem; text-transform: uppercase;
+    letter-spacing: .03em; }
+.kb-cl-karte.ist-warn { border-left: 3px solid var(--danger, #c0392b); }
+/* GEMESSEN statt beurteilt - die Unterscheidung ist die Aussage: diese Paare
+   stehen bei jedem Lauf gleich da, die Konflikte darueber koennen zwischen
+   zwei Laeufen abweichen (3/0/3 am 2026-09-05 gemessen). Deshalb ein eigener,
+   ruhiger Randstreifen statt der Warnfarbe - es ist ein Hinweis, kein Befund. */
+.kb-cl-karte.kb-cl-gemessen { border-left: 3px solid var(--text-muted); opacity: .92; }
+.kb-cl-mess { margin-top: 14px; }
+.kb-cl-tun { font-weight: 600; }
+
+.kb-cl-edit { width: 100%; min-height: 220px; margin-top: 8px; font-family: monospace;
+    font-size: .78rem; }
+
 .kb-mount-diag {
     background: var(--bg-secondary);
     border: 1px solid var(--border);

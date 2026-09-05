@@ -1010,6 +1010,11 @@ class JarvisKnowledgeManager {
                         title="${window.t('knowledge.compact.btn_title')}" ${cs.running ? 'disabled' : ''}>
                     ${cs.running ? window.t('knowledge.compact.running') : window.t('knowledge.compact.btn')}
                 </button>
+                <button class="kb-learned-open-btn" id="kb-cleanup-btn"
+                        onclick="window.knowledgeManager.cleanupOeffnen()"
+                        title="${window.t('knowledge.cleanup.btn_title')}">
+                    ${window.t('knowledge.cleanup.btn')}
+                </button>
                 <button class="kb-learned-open-btn" onclick="window.knowledgeManager.showCompactInfo(true)"
                         title="${window.t('knowledge.compact.info_title')}" style="font-weight:700;">❓</button>
                 <label class="kb-learned-embed-opt" title="${window.t('knowledge.compact.auto_title')}" style="display:inline-flex;align-items:center;gap:5px;font-size:0.78rem;color:var(--text-muted);margin-left:8px;cursor:pointer;">
@@ -1024,6 +1029,404 @@ class JarvisKnowledgeManager {
             <div id="kb-compact-status" style="display:none;font-size:0.8rem;margin-top:8px;"></div>
             <div id="kb-export-status" style="display:none;font-size:0.8rem;margin-top:8px;"></div>
             <div id="kb-learned-list" style="display:none;"></div>`;
+        }
+    }
+
+
+    // ─── Wissen aufräumen (Dopplungen, Widersprüche, Prompt-Straffung) ────
+    //
+    // ⚠ ES WIRD NIE OHNE BESTÄTIGUNG GESCHRIEBEN. Der Lauf liefert Vorschläge;
+    // übernommen wird der Text, den ein Mensch im Vergleich gesehen und
+    // gegebenenfalls bearbeitet hat. Diese Dateien steuern jeden künftigen
+    // Lauf des Agenten – ein stiller Automatismus wäre hier fahrlässig.
+
+    async cleanupOeffnen() {
+        const modal = document.getElementById('kb-cleanup-modal');
+        if (!modal) return;
+        modal.style.display = 'flex';
+        this._cleanupVorschlaege = null;
+        const box = document.getElementById('kb-cleanup-body');
+        box.innerHTML = `<p class="kb-hint">${window.t('knowledge.cleanup.loading')}</p>`;
+        document.getElementById('kb-cleanup-apply').style.display = 'none';
+        try {
+            const resp = await fetch('/api/knowledge/cleanup/scan', {
+                headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
+            });
+            if (!resp.ok) throw new Error(await this._fehlertext(resp));
+            const d = await resp.json();
+            this._cleanupDateien = d.dateien || [];
+            this._cleanupListe();
+            // Die Bilanz wird NACHGETRAGEN, nicht abgewartet: eine Liste darf
+            // nie auf eine zusaetzliche, nur erklaerende Anfrage warten
+            // (Register).
+            this.cleanupBilanz(null).then(b => {
+                const ziel = document.getElementById('kb-cl-bilanz-platz');
+                if (ziel && b) ziel.innerHTML = this._bilanzHtml(b, false);
+            });
+        } catch (e) {
+            box.innerHTML = `<p class="kb-hint" style="color:var(--danger);">${this._escHtml(e.message)}</p>`;
+        }
+    }
+
+
+    /**
+     * Bilanz: was bei EINER Anfrage tatsächlich an das Modell geht.
+     *
+     * ⚠ Ohne diese Zahl ist „−483 Zeichen bei tools.md" keine Aussage. Erst
+     * hier wird sichtbar, dass die Anweisungsdateien nur ein Drittel dessen
+     * ausmachen, was rausgeht – der Rest steht im Programmcode.
+     */
+    async cleanupBilanz(neu) {
+        try {
+            const resp = await fetch('/api/knowledge/cleanup/prompt', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json',
+                           'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') },
+                body: JSON.stringify({ neu: neu || {} })
+            });
+            if (!resp.ok) return null;
+            const b = await resp.json();
+            return b && b.ok ? b : null;
+        } catch (e) { return null; }
+    }
+
+    _bilanzHtml(b, mitVergleich) {
+        if (!b) return '';
+        const z = (n) => (n || 0).toLocaleString();
+        const spar = (b.summe || 0) - (b.summe_neu || 0);
+        const sparTok = (b.token_summe || 0) - (b.token_summe_neu || 0);
+        const wz = (b.werkzeuge || []).slice(0, 8).map(w =>
+            `<tr><td>${this._escHtml(w.name)}</td><td class="kb-cl-zahl">${z(w.bytes)}</td></tr>`).join('');
+        return `<details class="kb-cl-bilanz"${mitVergleich ? ' open' : ''}>
+          <summary>${this._escHtml(window.t('knowledge.cleanup.bilanz_titel'))}
+            <b>${z(b.summe)}</b> ${this._escHtml(window.t('knowledge.cleanup.chars'))}
+            (~${z(b.token_summe)} Token)${mitVergleich && spar > 0
+              ? ` → <b class="kb-cl-spar">${z(b.summe_neu)}</b> (−${z(spar)} / −${z(sparTok)} Token)` : ''}
+          </summary>
+          <table class="kb-cl-bilanz-tab"><tbody>
+            <tr><td>${this._escHtml(window.t('knowledge.cleanup.b_basis'))}</td>
+                <td class="kb-cl-zahl">${z(b.basis)}</td><td class="kb-cl-meta">${this._escHtml(window.t('knowledge.cleanup.b_basis_note'))}</td></tr>
+            <tr><td>${this._escHtml(window.t('knowledge.cleanup.b_anw'))}</td>
+                <td class="kb-cl-zahl">${z(b.anweisungen)}${mitVergleich && spar > 0 ? ` → ${z(b.anweisungen_neu)}` : ''}</td>
+                <td class="kb-cl-meta">${this._escHtml(window.t('knowledge.cleanup.b_anw_note'))}</td></tr>
+            <tr><td>${this._escHtml(window.t('knowledge.cleanup.b_wz'))} (${b.werkzeuge_anzahl})</td>
+                <td class="kb-cl-zahl">${z(b.werkzeuge_bytes)}</td><td class="kb-cl-meta">${this._escHtml(window.t('knowledge.cleanup.b_wz_note'))}</td></tr>
+          </tbody></table>
+          ${b.hinweis ? `<p class="kb-hint">${this._escHtml(b.hinweis)}</p>` : ''}
+          ${wz ? `<p class="kb-cl-gruppe-titel">${this._escHtml(window.t('knowledge.cleanup.b_wz_top'))}</p>
+                  <table class="kb-cl-bilanz-tab"><tbody>${wz}</tbody></table>` : ''}
+          <p class="kb-hint">${this._escHtml(window.t('knowledge.cleanup.b_token_note'))}</p>
+        </details>`;
+    }
+
+    /**
+     * Gesamtprüfung: Widersprüche ZWISCHEN den Quellen.
+     *
+     * ⚠ Die Einzelprüfung sieht so etwas strukturell nie – sie liest jede Datei
+     * für sich. Genau deshalb gibt es diesen zweiten Knopf.
+     */
+    async cleanupKonflikte() {
+        const st = document.getElementById('kb-cl-status');
+        const knopf = document.getElementById('kb-cl-konflikte');
+        if (knopf) knopf.disabled = true;
+        // ⚠ IN ZWEI STUFEN UND IN HAEPPCHEN: der ganze Abgleich dauert live
+        // ueber zehn Minuten - in einem einzigen Request laeuft das in den
+        // ersten Proxy-Timeout, und der Benutzer saehe nur einen Abbruch.
+        const kopf = { 'Content-Type': 'application/json',
+                       'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') };
+        try {
+            const qr = await fetch('/api/knowledge/cleanup/quellen', { headers: kopf });
+            if (!qr.ok) throw new Error(await this._fehlertext(qr));
+            const quellen = (await qr.json()).quellen || [];
+            const zeilen = [];
+            // ⚠ EINE Quelle je Aufruf. Live gemessen: zwei Quellen zusammen
+            // brauchten 212 s (BASIS + agents.md) – zu nah an jedem
+            // Proxy-Timeout. Einzeln ist der längste Aufruf halb so lang, und
+            // der Fortschritt ist feiner.
+            for (let i = 0; i < quellen.length; i += 1) {
+                const teil = quellen.slice(i, i + 1).map(q => q.name);
+                if (st) st.textContent = window.t('knowledge.cleanup.k_progress')
+                    .replace('{i}', Math.min(i + teil.length, quellen.length))
+                    .replace('{n}', quellen.length);
+                const rr = await fetch('/api/knowledge/cleanup/regeln', {
+                    method: 'POST', headers: kopf, body: JSON.stringify({ quellen: teil }) });
+                if (!rr.ok) throw new Error(await this._fehlertext(rr));
+                zeilen.push(...((await rr.json()).zeilen || []));
+            }
+            if (st) st.textContent = window.t('knowledge.cleanup.k_running');
+            const resp = await fetch('/api/knowledge/cleanup/abgleich', {
+                method: 'POST', headers: kopf, body: JSON.stringify({ zeilen }) });
+            if (!resp.ok) throw new Error(await this._fehlertext(resp));
+            const d = await resp.json();
+            d.quellen = quellen.length;
+            const box = document.getElementById('kb-cleanup-body');
+            const k = d.konflikte || [];
+            const aehnlich = d.aehnlich || [];
+            const farbe = { widerspruch: 'ist-warn', uebersteuerung: 'ist-warn', dopplung: '' };
+            box.innerHTML = `<p class="kb-hint">${this._escHtml(
+                    window.t('knowledge.cleanup.k_head')
+                        .replace('{q}', d.quellen || 0).replace('{r}', d.regeln || 0))}</p>`
+              + (k.length ? k.map(c => `
+                  <div class="kb-cl-karte ${farbe[c.art] || ''}">
+                    <div class="kb-cl-kopf">
+                      <span class="kb-cl-art">${this._escHtml(window.t('knowledge.cleanup.k_' + (c.art || '')) )}</span>
+                      <span class="kb-cl-meta">${this._escHtml((c.quellen || []).join(' + '))}</span>
+                    </div>
+                    <p class="kb-cl-grund"><b>A</b> ${this._escHtml(c.regel_a || '')}</p>
+                    <p class="kb-cl-grund"><b>B</b> ${this._escHtml(c.regel_b || '')}</p>
+                    ${c.was_tun ? `<p class="kb-cl-grund kb-cl-tun">→ ${this._escHtml(c.was_tun)}</p>` : ''}
+                  </div>`).join('')
+                 : `<p class="kb-hint">${this._escHtml(window.t('knowledge.cleanup.k_none'))}</p>`)
+              // ⚠ GEMESSEN, nicht beurteilt - eigene Gruppe. Das Modell
+              // antwortete auf dieselben 190 Regeln dreimal hintereinander
+              // 3 / 0 / 3; diese Paare stehen bei jedem Lauf gleich da.
+              + (aehnlich.length ? `<p class="kb-hint kb-cl-mess">${this._escHtml(
+                    window.t('knowledge.cleanup.k_mess').replace('{n}', aehnlich.length))}</p>`
+                  + aehnlich.map(c => `
+                  <div class="kb-cl-karte kb-cl-gemessen">
+                    <div class="kb-cl-kopf">
+                      <span class="kb-cl-art">${this._escHtml(window.t('knowledge.cleanup.k_aehnlich'))}</span>
+                      <span class="kb-cl-meta">${this._escHtml((c.quellen || []).join(' + '))}</span>
+                    </div>
+                    <p class="kb-cl-grund"><b>A</b> ${this._escHtml(c.regel_a || '')}</p>
+                    <p class="kb-cl-grund"><b>B</b> ${this._escHtml(c.regel_b || '')}</p>
+                  </div>`).join('') : '')
+              + `<p class="kb-hint">${this._escHtml(d.hinweis || '')}</p>`
+              + `<div class="kb-cl-aktion"><button class="btn-secondary"
+                    onclick="window.knowledgeManager.cleanupOeffnen()">${
+                    this._escHtml(window.t('knowledge.cleanup.k_back'))}</button></div>`;
+            document.getElementById('kb-cleanup-apply').style.display = 'none';
+        } catch (e) {
+            if (st) st.textContent = window.t('common.error') + ': ' + e.message;
+        } finally {
+            if (knopf) knopf.disabled = false;
+        }
+    }
+
+    cleanupSchliessen() {
+        const m = document.getElementById('kb-cleanup-modal');
+        if (m) m.style.display = 'none';
+    }
+
+    _cleanupListe() {
+        const box = document.getElementById('kb-cleanup-body');
+        const d = this._cleanupDateien || [];
+        if (!d.length) {
+            box.innerHTML = `<p class="kb-hint">${window.t('knowledge.cleanup.nothing')}</p>`;
+            return;
+        }
+        const gruppen = { anweisung: [], gedaechtnis: [], lernnotiz: [] };
+        d.forEach(f => (gruppen[f.art] || (gruppen[f.art] = [])).push(f));
+        let html = `<p class="kb-hint">${window.t('knowledge.cleanup.intro')}</p>`
+                 + `<div id="kb-cl-bilanz-platz"></div>`;
+        Object.keys(gruppen).forEach(art => {
+            if (!gruppen[art].length) return;
+            html += `<div class="kb-cl-gruppe"><div class="kb-cl-gruppe-titel">`
+                 + `${this._escHtml(window.t('knowledge.cleanup.art_' + art))}</div>`;
+            gruppen[art].forEach(f => {
+                const kb = (f.bytes / 1024).toFixed(1);
+                html += `<label class="kb-cl-zeile${f.zu_gross ? ' ist-gross' : ''}">
+                    <input type="checkbox" class="kb-cl-sel" value="${this._escHtml(f.schluessel)}"
+                           ${f.zu_gross ? 'disabled' : 'checked'}>
+                    <span class="kb-cl-name">${this._escHtml(f.name)}</span>
+                    <span class="kb-cl-meta">${kb} KB · ${this._escHtml(f.herkunft)}</span>
+                    ${f.zu_gross ? `<span class="kb-cl-warn">${window.t('knowledge.cleanup.too_big')}</span>` : ''}
+                </label>`;
+            });
+            html += `</div>`;
+        });
+        html += `<div class="kb-cl-aktion">
+            <button class="btn-primary" onclick="window.knowledgeManager.cleanupAnalysieren()"
+                    id="kb-cl-start">${window.t('knowledge.cleanup.start')}</button>
+            <button class="btn-secondary" onclick="window.knowledgeManager.cleanupKonflikte()"
+                    id="kb-cl-konflikte" title="${window.t('knowledge.cleanup.k_btn_title')}">
+                ${window.t('knowledge.cleanup.k_btn')}</button>
+            <span class="kb-hint" style="margin:0;">${window.t('knowledge.cleanup.start_hint')}</span>
+        </div><div id="kb-cl-status" class="kb-hint"></div>`;
+        box.innerHTML = html;
+    }
+
+    async cleanupAnalysieren() {
+        const sel = [...document.querySelectorAll('.kb-cl-sel:checked')].map(c => c.value);
+        const st = document.getElementById('kb-cl-status');
+        const knopf = document.getElementById('kb-cl-start');
+        if (!sel.length) { st.textContent = window.t('knowledge.cleanup.none_selected'); return; }
+        if (knopf) { knopf.disabled = true; }
+        // Der Lauf dauert je Datei einige Sekunden – ohne diese Zeile sieht der
+        // Klick wie ein Nichts aus.
+        // ⚠ IN HAEPPCHEN, NICHT ALLES IN EINEM REQUEST. Live gemessen: ein Lauf
+        // kostet rund 23 s je Datei – bei 40 Dateien wären das eine Viertelstunde
+        // in einer einzigen Anfrage, und der erste Proxy dazwischen bricht sie ab.
+        // Nebengewinn: der Fortschritt ist sichtbar, statt dass minutenlang
+        // nichts passiert.
+        const BLOCK = 3;
+        this._cleanupVorschlaege = [];
+        let modell = '';
+        try {
+            for (let i = 0; i < sel.length; i += BLOCK) {
+                const teil = sel.slice(i, i + BLOCK);
+                st.textContent = window.t('knowledge.cleanup.progress')
+                    .replace('{i}', Math.min(i + teil.length, sel.length))
+                    .replace('{n}', sel.length);
+                const resp = await fetch('/api/knowledge/cleanup/analyse', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json',
+                               'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') },
+                    body: JSON.stringify({ dateien: teil })
+                });
+                if (!resp.ok) throw new Error(await this._fehlertext(resp));
+                const d = await resp.json();
+                modell = d.modell || modell;
+                this._cleanupVorschlaege.push(...(d.ergebnisse || []));
+            }
+            this._cleanupVergleich(modell);
+        } catch (e) {
+            st.textContent = window.t('common.error') + ': ' + e.message;
+            if (knopf) knopf.disabled = false;
+        }
+    }
+
+    /** Zeilenweiser Vergleich (LCS). Zeigt, WAS sich ändert – nicht nur, DASS. */
+    _diffZeilen(alt, neu) {
+        const a = String(alt).split('\n'), b = String(neu).split('\n');
+        const n = a.length, m = b.length;
+        // Deckel: bei sehr großen Dateien wird nur die Bilanz gezeigt, statt
+        // den Browser mit einer Millionen-Zellen-Matrix zu belegen.
+        if (n * m > 4000000) return null;
+        const L = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
+        for (let i = n - 1; i >= 0; i--)
+            for (let j = m - 1; j >= 0; j--)
+                L[i][j] = a[i] === b[j] ? L[i + 1][j + 1] + 1
+                                        : Math.max(L[i + 1][j], L[i][j + 1]);
+        const out = [];
+        let i = 0, j = 0;
+        while (i < n && j < m) {
+            if (a[i] === b[j]) { out.push(['gleich', a[i]]); i++; j++; }
+            else if (L[i + 1][j] >= L[i][j + 1]) { out.push(['weg', a[i]]); i++; }
+            else { out.push(['neu', b[j]]); j++; }
+        }
+        while (i < n) out.push(['weg', a[i++]]);
+        while (j < m) out.push(['neu', b[j++]]);
+        return out;
+    }
+
+    _cleanupVergleich(modell) {
+        const box = document.getElementById('kb-cleanup-body');
+        const v = this._cleanupVorschlaege || [];
+        let html = `<p class="kb-hint">${window.t('knowledge.cleanup.result_hint')
+                    .replace('{modell}', this._escHtml(modell || '?'))}</p>`;
+        let aenderbar = 0;
+        v.forEach((r, idx) => {
+            if (!r.ok) {
+                html += `<div class="kb-cl-karte ist-fehler"><div class="kb-cl-kopf">
+                    <span class="kb-cl-name">${this._escHtml(r.schluessel)}</span>
+                    <span class="kb-cl-warn">${this._escHtml(r.fehler || '')}</span></div></div>`;
+                return;
+            }
+            if (!r.geaendert) {
+                html += `<div class="kb-cl-karte"><div class="kb-cl-kopf">
+                    <span class="kb-cl-name">${this._escHtml(r.schluessel)}</span>
+                    <span class="kb-cl-meta">${window.t('knowledge.cleanup.unchanged')}</span>
+                    ${r.fehler ? `<span class="kb-cl-warn">${this._escHtml(r.fehler)}</span>` : ''}
+                    </div></div>`;
+                return;
+            }
+            aenderbar++;
+            const d = this._diffZeilen(r.alt, r.neu);
+            const delta = r.bytes_neu - r.bytes_alt;
+            let diffHtml;
+            if (!d) {
+                diffHtml = `<p class="kb-hint">${window.t('knowledge.cleanup.diff_too_big')}</p>`;
+            } else {
+                diffHtml = '<pre class="kb-cl-diff">' + d.map(([art, zeile]) => {
+                    const t = this._escHtml(zeile) || '&nbsp;';
+                    if (art === 'gleich') return `<span class="dg">  ${t}</span>`;
+                    if (art === 'weg') return `<span class="dw">− ${t}</span>`;
+                    return `<span class="dn">+ ${t}</span>`;
+                }).join('\n') + '</pre>';
+            }
+            const funde = (r.funde || []).map(f =>
+                `<li><b>${this._escHtml(f.art || '')}</b>: ${this._escHtml(f.text || '')}</li>`).join('');
+            html += `<div class="kb-cl-karte">
+                <div class="kb-cl-kopf">
+                    <label class="kb-cl-uebernehmen">
+                        <input type="checkbox" class="kb-cl-take" data-idx="${idx}" checked>
+                        ${window.t('knowledge.cleanup.take')}
+                    </label>
+                    <span class="kb-cl-name">${this._escHtml(r.schluessel)}</span>
+                    <span class="kb-cl-meta">${r.bytes_alt} → ${r.bytes_neu} ${window.t('knowledge.cleanup.chars')}
+                        (${delta > 0 ? '+' : ''}${delta})</span>
+                    <button class="kb-hdr-btn" onclick="window.knowledgeManager.cleanupBearbeiten(${idx})"
+                            title="${window.t('knowledge.cleanup.edit_title')}">✎</button>
+                </div>
+                ${r.begruendung ? `<p class="kb-cl-grund">${this._escHtml(r.begruendung)}</p>` : ''}
+                ${funde ? `<ul class="kb-cl-funde">${funde}</ul>` : ''}
+                ${diffHtml}
+                <textarea class="kb-cl-edit" id="kb-cl-edit-${idx}" hidden
+                          spellcheck="false">${this._escHtml(r.neu)}</textarea>
+            </div>`;
+        });
+        box.innerHTML = html;
+        // Vorher/Nachher der GESAMTSUMME - erst hier wird aus "-483 Zeichen"
+        // eine Aussage darueber, was das je Anfrage bedeutet.
+        const neuJeDatei = {};
+        v.forEach(r => { if (r.ok && r.geaendert) neuJeDatei[r.schluessel] = r.neu; });
+        this.cleanupBilanz(neuJeDatei).then(b => {
+            if (!b) return;
+            const platz = document.createElement('div');
+            platz.innerHTML = this._bilanzHtml(b, true);
+            box.insertBefore(platz, box.firstChild ? box.firstChild.nextSibling : null);
+        });
+        const apply = document.getElementById('kb-cleanup-apply');
+        apply.style.display = aenderbar ? '' : 'none';
+        apply.textContent = window.t('knowledge.cleanup.apply').replace('{n}', aenderbar);
+    }
+
+    cleanupBearbeiten(idx) {
+        const t = document.getElementById(`kb-cl-edit-${idx}`);
+        if (t) t.hidden = !t.hidden;
+    }
+
+    async cleanupUebernehmen() {
+        const v = this._cleanupVorschlaege || [];
+        const aend = [];
+        document.querySelectorAll('.kb-cl-take:checked').forEach(c => {
+            const idx = parseInt(c.dataset.idx, 10);
+            const r = v[idx];
+            if (!r) return;
+            // Der bearbeitete Text gewinnt – der Mensch hat das letzte Wort.
+            const feld = document.getElementById(`kb-cl-edit-${idx}`);
+            aend.push({ schluessel: r.schluessel, neu: feld ? feld.value : r.neu });
+        });
+        if (!aend.length) return;
+        if (!confirm(window.t('knowledge.cleanup.confirm').replace('{n}', aend.length))) return;
+        const apply = document.getElementById('kb-cleanup-apply');
+        apply.disabled = true;
+        try {
+            const resp = await fetch('/api/knowledge/cleanup/apply', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json',
+                           'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') },
+                body: JSON.stringify({ aenderungen: aend })
+            });
+            if (!resp.ok) throw new Error(await this._fehlertext(resp));
+            const d = await resp.json();
+            const box = document.getElementById('kb-cleanup-body');
+            const fehler = (d.fehler || []).map(f =>
+                `<li style="color:var(--danger);">${this._escHtml(f.schluessel)}: ${this._escHtml(f.fehler)}</li>`).join('');
+            box.innerHTML = `<p class="kb-hint">${window.t('knowledge.cleanup.done')
+                    .replace('{n}', (d.erledigt || []).length)}</p>`
+                + ((d.erledigt || []).length
+                    ? `<ul class="kb-cl-funde">${d.erledigt.map(e =>
+                        `<li>${this._escHtml(e.schluessel)} · ${window.t('knowledge.cleanup.backup')}: `
+                        + `<code>${this._escHtml(e.sicherung)}</code></li>`).join('')}</ul>` : '')
+                + (fehler ? `<ul class="kb-cl-funde">${fehler}</ul>` : '')
+                + (d.hinweis ? `<p class="kb-hint"><b>${this._escHtml(d.hinweis)}</b></p>` : '');
+            apply.style.display = 'none';
+        } catch (e) {
+            this._showNotification(window.t('common.error') + ': ' + e.message, 'error', 'kb-cleanup-body');
+        } finally {
+            apply.disabled = false;
         }
     }
 

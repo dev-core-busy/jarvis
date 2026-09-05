@@ -608,6 +608,307 @@ def _op_mount_share(args, stream):
     return erg
 
 
+def _tcp_offen(host: str, port: int, timeout: float = 5.0):
+    """(offen?, Millisekunden, Fehlertext) fuer einen TCP-Verbindungsversuch."""
+    import socket as _s
+    t0 = time.time()
+    try:
+        v = _s.create_connection((host, port), timeout=timeout)
+        v.close()
+        return True, (time.time() - t0) * 1000, ""
+    except Exception as e:                                    # noqa: BLE001
+        return False, (time.time() - t0) * 1000, f"{type(e).__name__}: {e}"
+
+
+_SMB_DIALEKTE = {0x0202: "SMB 2.0.2", 0x0210: "SMB 2.1", 0x0300: "SMB 3.0",
+                 0x0302: "SMB 3.0.2", 0x0311: "SMB 3.1.1", 0x02FF: "Multi-Protocol"}
+
+
+def _smb2_negotiate(host: str, timeout: float = 6.0):
+    """Einen SMB2-NEGOTIATE senden und die Antwort deuten.
+
+    ⚠ DAS IST DER TEST, DER DEN FALL ENTSCHEIDET. Ein offener Port 445 sagt
+    NICHTS darueber, ob dort ein brauchbarer SMB-Dienst antwortet: am
+    2026-09-05 auf ECHT gemessen – TCP verbindet in 10 ms, und sobald das
+    erste SMB-Paket kommt, trennt die Gegenseite (Connection reset). Genau
+    diese Lage meldet der Kernel als Fehlercode 115, und genau sie ist von
+    "Server ausgeschaltet" nicht zu unterscheiden, solange niemand den
+    Handshake wirklich versucht.
+
+    Bewusst zu Fuss und ohne Fremdmodul: smbclient ist auf einem Server ohne
+    samba-client nicht vorhanden (auf ECHT nachgesehen), und eine Diagnose,
+    die selbst eine Installation voraussetzt, laeuft genau dann nicht, wenn
+    man sie braucht.
+    """
+    import socket as _s
+    import struct as _st
+    import uuid as _uuid
+    # ⚠ 0x0311 (SMB 3.1.1) FEHLT ABSICHTLICH. Wer diesen Dialekt anbietet, MUSS
+    # nach MS-SMB2 auch eine NegotiateContextList mitschicken (mindestens
+    # PREAUTH_INTEGRITY_CAPABILITIES); ohne sie antwortet der Server mit
+    # STATUS_INVALID_PARAMETER oder trennt gleich die Verbindung. Genau das ist
+    # am 2026-09-05 passiert: die Sonde meldete "Der Server weist den SMB-Aufbau
+    # ab", waehrend derselbe Server eine laufende Freigabe mit vers=3.1.1
+    # bediente. EINE FALSCHE SONDE IST SCHLIMMER ALS KEINE - sie erzeugt genau
+    # die Fehldiagnose, gegen die diese Funktion gebaut ist.
+    # Gemessen: ohne 3.1.1 einigt sich derselbe Server sofort auf 0x0302.
+    dialekte = (0x0202, 0x0210, 0x0300, 0x0302)
+    kopf = (b"\xfeSMB" + _st.pack("<HH", 64, 0) + _st.pack("<I", 0)
+            + _st.pack("<HH", 0, 1) + _st.pack("<II", 0, 0)
+            # MessageId 0: der erste Request einer Verbindung traegt 0. Mit 1
+            # hat derselbe Server die Verbindung zurueckgesetzt (gemessen).
+            + _st.pack("<Q", 0) + _st.pack("<II", 0, 0)
+            + _st.pack("<Q", 0) + b"\x00" * 16)
+    rumpf = (_st.pack("<HHHH", 36, len(dialekte), 1, 0) + _st.pack("<I", 0)
+             + _uuid.uuid4().bytes + _st.pack("<Q", 0)
+             + b"".join(_st.pack("<H", d) for d in dialekte))
+    paket = kopf + rumpf
+    try:
+        v = _s.create_connection((host, 445), timeout=timeout)
+        v.settimeout(timeout)
+        v.sendall(_st.pack(">I", len(paket)) + paket)
+        daten = v.recv(4096)
+        v.close()
+    except ConnectionResetError:
+        return {"ok": False, "art": "reset",
+                "text": "Die Gegenstelle hat die Verbindung getrennt, sobald "
+                        "das erste SMB-Paket kam."}
+    except Exception as e:                                    # noqa: BLE001
+        return {"ok": False, "art": "fehler", "text": f"{type(e).__name__}: {e}"}
+    if len(daten) < 74 or daten[4:8] != b"\xfeSMB":
+        return {"ok": False, "art": "fremd",
+                "text": f"Antwort ist kein SMB2 ({len(daten)} Bytes) – auf "
+                        f"Port 445 antwortet etwas anderes als ein SMB-Dienst."}
+    import struct as _st2
+    status = _st2.unpack("<I", daten[12:16])[0]
+    dialekt = _st2.unpack("<H", daten[72:74])[0]
+    name = _SMB_DIALEKTE.get(dialekt, f"0x{dialekt:04x}")
+    if status != 0:
+        return {"ok": False, "art": "status",
+                "text": f"Der SMB-Dienst antwortet, einigt sich aber auf keinen "
+                        f"Dialekt (Status 0x{status:08x}) – ein Versions-, kein "
+                        f"Netzproblem."}
+    return {"ok": True, "art": "ok", "dialekt": name,
+            "text": f"Der Server antwortet und einigt sich auf {name}."}
+
+
+def _egress_offen_fuer_kernel():
+    """Faengt die Egress-Kette Kernel-Sockets im Default-Zweig? (None = keine Kette)
+
+    Hintergrund im Register: ein CIFS-Mount wird vom KERNEL aufgebaut und hat
+    keinen Socket-Eigentuemer. Eine Regel ``meta skuid != <uid> accept`` ist
+    fuer ihn NICHT erfuellt – er faellt durch alle accept-Regeln und landet im
+    nackten ``drop``. Userspace-Tests laufen dabei einwandfrei, was die Suche
+    zuverlaessig in die falsche Richtung schickt.
+    """
+    r = _run(["nft", "list", "table", "inet", "jarvis_egress"], timeout=8,
+             neutrale_sprache=True)
+    if not r.get("ok"):
+        return None, ""
+    text = r.get("stdout") or ""
+    if not text.strip():
+        return None, ""
+    nackt = []
+    for zeile in text.splitlines():
+        z = zeile.strip()
+        if not z or z.startswith("#"):
+            continue
+        # Ein 'drop' OHNE jede Einschraenkung trifft auch den Kernel-Socket.
+        if re.search(r"\bdrop\b", z) and not re.search(r"\bskuid\b", z):
+            nackt.append(z)
+    return (not nackt), "; ".join(nackt[:3])
+
+
+def _op_mount_diagnose(args, stream):
+    """Warum kommt eine Netzwerk-Freigabe nicht zustande? NUR MESSEN.
+
+    ⚠ DIE OP VERAENDERT NICHTS – kein mount, kein umount, kein Schreiben. Sie
+    beantwortet die eine Frage, die eine Fehlermeldung von ``mount`` nicht
+    beantworten kann: liegt es am Netzweg, am Server, am SMB-Dienst, an der
+    eigenen Firewall oder an einem Rueckstand unter dem Einhaengepunkt.
+
+    ⚠ DAS ZIEL KOMMT AUS DER GESPEICHERTEN FREIGABE, nicht aus dem Formular.
+    Der Endpunkt loest den Index gegen die Konfiguration auf; sonst waere der
+    Knopf ein Portscanner mit Root-Rechten. Dieselbe Ueberlegung wie bei
+    ``tika_setup``, wo der Skriptpfad bewusst kein Argument ist.
+    """
+    mount_type = str(args.get("type", "smb"))
+    source = str(args.get("source", "")).strip()
+    mp = str(args.get("mountpoint", "")).strip()
+    if not source:
+        return {"ok": False, "rc": -1, "stdout": "", "stderr": "Keine Quelle angegeben."}
+
+    schritte = []
+    def merke(name, ok, text, wert=""):
+        schritte.append({"schritt": name, "ok": bool(ok), "text": text, "wert": wert})
+
+    # 1) Form und Zerlegung -------------------------------------------------
+    try:
+        from backend import mount_quelle as _mq
+        norm, fehler = _mq.pruefe(mount_type, source)
+        if fehler:
+            merke("Schreibweise", False, fehler)
+            return {"ok": True, "rc": 0, "stdout": "", "stderr": "",
+                    "result": {"quelle": source, "typ": mount_type,
+                               "schritte": schritte,
+                               "urteil": ["Die Quelle ist nicht brauchbar – "
+                                          "weiter gemessen wurde deshalb nicht."]}}
+        source = norm
+        merke("Schreibweise", True, f"in Ordnung: {source}")
+    except ImportError:
+        merke("Schreibweise", True, "nicht geprueft (aeltere Installation)")
+
+    if mount_type == "smb":
+        m = re.match(r"^//([^/]+)/(.*)$", source)
+        host, freigabe = (m.group(1), m.group(2)) if m else (source, "")
+    elif mount_type == "nfs":
+        host, _, freigabe = source.partition(":")
+    else:                                     # webdav: http(s)://host/pfad
+        rest = re.sub(r"^\w+://", "", source)
+        host, _, freigabe = rest.partition("/")
+    # 'benutzer@host' und 'host:port' abstreifen; ein Doppelpunkt-Wirrwarr
+    # (IPv6) bleibt unangetastet, sonst zerlegt man eine gueltige Adresse.
+    host = host.split("@")[-1]
+    if host.count(":") == 1:
+        host = host.split(":")[0]
+
+    # 2) Namensaufloesung ---------------------------------------------------
+    import socket as _sock
+    ist_ip = bool(re.match(r"^\d{1,3}(\.\d{1,3}){3}$", host))
+    if ist_ip:
+        merke("Namensaufloesung", True, f"{host} ist bereits eine IP-Adresse")
+        adressen = [host]
+    else:
+        try:
+            info = _sock.getaddrinfo(host, None)
+            adressen = sorted({a[4][0] for a in info})
+            merke("Namensaufloesung", True, f"{host} → {', '.join(adressen)}")
+        except Exception as e:                                # noqa: BLE001
+            merke("Namensaufloesung", False,
+                  f"Der Name '{host}' laesst sich nicht aufloesen ({type(e).__name__}).")
+            adressen = []
+
+    ziel = adressen[0] if adressen else host
+
+    # 3) ICMP ---------------------------------------------------------------
+    if adressen:
+        p = _run(["ping", "-c", "2", "-W", "2", ziel], timeout=8, neutrale_sprache=True)
+        pok = bool(p.get("ok"))
+        letzte = [z for z in (p.get("stdout") or "").splitlines() if "rtt" in z or "min/avg" in z]
+        merke("Ping", pok,
+              (letzte[-1] if letzte else "antwortet") if pok
+              else "keine Antwort (viele Netze verwerfen ICMP – das allein ist kein Fehler)")
+
+    # 4) Ports --------------------------------------------------------------
+    ports = {"smb": [445, 139], "nfs": [2049, 111], "webdav": [443, 80]}.get(mount_type, [445])
+    port_offen = {}
+    if adressen:
+        for prt in ports:
+            offen, ms, fehl = _tcp_offen(ziel, prt)
+            port_offen[prt] = offen
+            merke(f"TCP {prt}", offen,
+                  f"verbunden in {ms:.0f} ms" if offen else f"nicht erreichbar ({fehl})")
+
+    # 5) SMB-Handshake ------------------------------------------------------
+    smb = None
+    if mount_type == "smb" and port_offen.get(445):
+        smb = _smb2_negotiate(ziel)
+        merke("SMB-Handshake", smb["ok"], smb["text"], smb.get("dialekt", ""))
+
+    # 6) Einhaengepunkt -----------------------------------------------------
+    # ⚠ UEBER /proc/mounts, NIE per stat: auf einem abgestorbenen CIFS-Mount
+    # wirft jeder Zugriff EHOSTDOWN – wer so misst, loest den Fehler aus, den
+    # er messen will.
+    laeuft = False
+    if mp:
+        belegt = ""
+        try:
+            for zeile in open("/proc/mounts", encoding="utf-8", errors="replace"):
+                teile = zeile.split()
+                if len(teile) > 1 and teile[1] == mp.replace(" ", "\\040"):
+                    belegt = zeile.strip()
+                    break
+        except OSError:
+            pass
+        # ⚠ BELEGT IST NICHT GLEICH KAPUTT. Haengt dort GENAU DIESE Freigabe,
+        # ist das der Normalzustand und der staerkste Beweis, dass alles
+        # funktioniert - am 2026-09-05 auf DEV gesehen, wo die Diagnose eine
+        # laufende Freigabe als Problem auswies. Nur ein FREMDER oder toter
+        # Mount ist einer.
+        eigen = bool(belegt) and source in belegt
+        laeuft = eigen
+        merke("Einhaengepunkt", (not belegt) or eigen,
+              f"{mp} ist frei" if not belegt
+              else (f"diese Freigabe ist eingehaengt" if eigen
+                    else f"belegt von etwas anderem: {belegt[:140]} – ein "
+                         f"Rueckstand wird beim naechsten Verbinden geloest "
+                         f"(lazy umount)"))
+
+    # 7) Eigene Egress-Sperre ----------------------------------------------
+    frei, nackte = _egress_offen_fuer_kernel()
+    if frei is None:
+        merke("Egress-Firewall", True, "keine Kette 'jarvis_egress' – die "
+                                       "eigene Firewall kommt als Ursache nicht in Frage")
+    else:
+        merke("Egress-Firewall", frei,
+              "die Kette bindet ihr 'drop' an eine Benutzerkennung – "
+              "Kernel-Sockets (CIFS/NFS) kommen durch" if frei
+              else f"die Kette enthaelt ein 'drop' OHNE Benutzerbindung "
+                   f"({nackte}) – ein CIFS-Mount wird vom Kernel aufgebaut und "
+                   f"hat keinen Socket-Eigentuemer; er faellt genau dort hinein")
+
+    # 8) Kernel-Ring --------------------------------------------------------
+    kern = _kernel_grund(time.time() - 900, source)
+    if kern:
+        merke("Kernel-Meldungen", False, kern[:400])
+
+    # 9) Urteil -------------------------------------------------------------
+    urteil = []
+    if laeuft:
+        urteil.append("Diese Freigabe ist derzeit EINGEHAENGT und wird gelesen – "
+                      "Netzweg, Server und Zugangsdaten sind damit in Ordnung. "
+                      "Die Messungen darunter beschreiben den Weg, nicht ein Problem.")
+    elif not adressen:
+        urteil.append(f"Der Name '{host}' ist im Netz dieses Servers nicht "
+                      f"aufloesbar. Zu pruefen sind DNS, die Schreibweise und "
+                      f"ob statt des Namens die IP-Adresse eingetragen werden kann.")
+    elif not any(port_offen.values()):
+        urteil.append(f"Der Server '{host}' nimmt auf {' und '.join(str(p) for p in ports)} "
+                      f"keine Verbindung an. Das ist der Fall, den die Meldung "
+                      f"'nicht erreichbar' meint: Rechner aus, falsche Adresse, "
+                      f"oder eine Firewall zwischen den Netzen.")
+    elif mount_type == "smb" and smb and smb.get("art") == "status":
+        urteil.append(f"Der SMB-Dienst auf '{host}' antwortet, einigt sich aber "
+                      f"auf keine gemeinsame Protokollversion. Das ist ein "
+                      f"Versionsthema (zu alt oder zu streng eingestellt), "
+                      f"kein Netzproblem.")
+    elif mount_type == "smb" and smb and not smb["ok"]:
+        urteil.append(f"Der Server '{host}' ist erreichbar – Port 445 nimmt die "
+                      f"Verbindung an –, weist den SMB-Aufbau aber ab: {smb['text']} "
+                      f"Damit ist 'Server nicht erreichbar' als Erklaerung "
+                      f"ausgeschlossen. In Frage kommen: eine zu alte oder "
+                      f"abgeschaltete SMB-Version (SMB1 wird vom Kernel nicht "
+                      f"mehr angeboten), erzwungene SMB-Signierung, oder eine "
+                      f"Zwischenstelle (Firewall/IPS), die die TCP-Verbindung "
+                      f"annimmt und den SMB-Verkehr verwirft.")
+    elif mount_type == "smb" and smb and smb["ok"]:
+        urteil.append(f"Netzweg und SMB-Dienst sind in Ordnung ({smb['text']}). "
+                      f"Scheitert das Einbinden trotzdem, liegt es an den "
+                      f"Zugangsdaten oder an den Rechten auf der Freigabe "
+                      f"'{freigabe}' – nicht am Netz.")
+    else:
+        urteil.append(f"Der Server '{host}' nimmt Verbindungen an. Weiteres "
+                      f"siehe die einzelnen Schritte.")
+    if frei is False:
+        urteil.append("ZUSAETZLICH: die Egress-Firewall dieses Servers verwirft "
+                      "Verbindungen, die der Kernel selbst aufbaut. Das trifft "
+                      "JEDEN CIFS- und NFS-Mount, unabhaengig vom Ziel – "
+                      "'Sicherheit → Internet-Zugang' neu einrichten.")
+    return {"ok": True, "rc": 0, "stdout": "", "stderr": "",
+            "result": {"quelle": source, "typ": mount_type, "host": host,
+                       "schritte": schritte, "urteil": urteil}}
+
+
 def _op_umount_share(args, stream):
     mp = str(args.get("mountpoint", "")).strip()
     if not mp.startswith(MOUNT_PREFIX) or ".." in mp:
@@ -892,6 +1193,12 @@ _REGISTRY = {
         _op_mount_share,
         lambda a: f"mount_share:{a.get('type')}:{a.get('source')}",
         lambda a: f"Netzwerk-Freigabe mounten ({a.get('type')}): {a.get('source')} → {a.get('mountpoint')}",
+        True, ("password",),
+    ),
+    "mount_diagnose": (
+        _op_mount_diagnose,
+        lambda a: "mount_diagnose",
+        lambda a: f"Netzwerk-Freigabe pruefen (nur messen): {a.get('source')}",
         True, ("password",),
     ),
     "umount_share": (

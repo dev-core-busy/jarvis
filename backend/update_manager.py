@@ -251,6 +251,10 @@ def apply_update() -> dict:
     _git("stash", "push", "-m", "jarvis-auto-pre-update")
     stashed = _stash_count() > count_before
 
+    # Stand VOR dem Pull merken - nur so laesst sich hinterher feststellen,
+    # WAS sich geaendert hat (siehe broker_betroffen unten).
+    _, vorher_hash, _ = _git("rev-parse", "HEAD")
+
     # 2. Pull (mit explizitem Branch – funktioniert auch ohne Upstream-Tracking)
     rc, out, err = _git("pull", "origin", branch, timeout=60)
     if rc != 0:
@@ -269,16 +273,75 @@ def apply_update() -> dict:
             pop_note = ("\n⚠ Lokale Änderungen konnten nicht automatisch wiederhergestellt "
                         "werden: " + _mit_diagnose(pop_err, pop_err, pop_out))
 
-    return {"ok": True, "output": out + pop_note}
+    return {"ok": True, "output": out + pop_note,
+            "broker_betroffen": _broker_betroffen(vorher_hash)}
 
 
-def restart_service_delayed(delay_sec: float = 2.0, context: str = "Auto-Update angewendet"):
+def _broker_betroffen(vorher_hash: str) -> bool:
+    """Hat der Pull ``backend/broker/*`` angefasst?
+
+    ⚠ DER FALLSTRICK, DEN DIESE FUNKTION SCHLIESST: Der Root-Broker ist ein
+    EIGENER Prozess mit einer EIGENEN Kopie von ``backend/broker/*``. Die
+    Update-Pille startete bisher ausschliesslich ``jarvis.service`` neu - der
+    Broker lief danach mit ALTEM Code weiter, und jede neu hinzugekommene Op
+    antwortete ``502 unbekannte Op``. Im Register steht das seit Langem als
+    Deploy-Fallstrick; ausgerechnet der automatische Update-Weg hat es nie
+    beruecksichtigt. Ein Server, der ueber die Pille aktualisiert, bekam damit
+    stillschweigend einen halben Stand.
+
+    Fail-closed in die SICHERE Richtung: laesst sich der Vergleich nicht
+    fuehren (kein alter Hash, git antwortet nicht), wird der Broker
+    vorsichtshalber MIT neu gestartet. Ein Neustart zu viel kostet ein paar
+    Sekunden, ein vergessener kostet eine unerklaerliche Fehlfunktion.
+    """
+    if not vorher_hash:
+        return True
+    rc, out, _ = _git("diff", "--name-only", vorher_hash, "HEAD", timeout=30)
+    if rc != 0:
+        return True
+    return any(z.strip().startswith("backend/broker/") for z in out.splitlines())
+
+
+def restart_service_delayed(delay_sec: float = 2.0, context: str = "Auto-Update angewendet",
+                           auch_broker: bool = False):
     """Startet den Service nach delay_sec Sekunden neu (in einem Thread, via Root-Broker).
+
+    ``auch_broker=True`` startet ZUERST den Root-Broker neu - noetig, sobald ein
+    Update ``backend/broker/*`` angefasst hat (siehe ``_broker_betroffen``).
+
+    ⚠ ZUR REIHENFOLGE: erst der Broker, dann das Backend. Andersherum liefe das
+    frisch gestartete Backend gegen einen Broker mit altem Code.
+
+    ⚠ DER SELBSTNEUSTART SIEHT WIE EIN FEHLER AUS UND IST KEINER: der Broker
+    fuehrt den Befehl aus und beendet sich dabei selbst, die Antwort erreicht
+    uns also oft nicht mehr. Der Auftrag liegt zu diesem Zeitpunkt bereits bei
+    systemd. Deshalb wird der Rueckgabewert NICHT als Erfolgskriterium genommen
+    - gewartet wird auf den neuen Socket.
 
     context: informativer Ausloeser fuers Broker-Audit (Standard: Auto-Update)."""
     def _do():
         time.sleep(delay_sec)
         from backend import broker_client
+        if auch_broker:
+            print("[Update] backend/broker/* geaendert – starte den Root-Broker "
+                  "mit neu (sonst bleibt er auf altem Code).", flush=True)
+            try:
+                broker_client.systemctl_sync("restart", "jarvis-broker.service",
+                                             user="system", context=context)
+            except Exception as e:                            # noqa: BLE001
+                print(f"[Update] Broker-Neustart: {e} (erwartbar – er beendet "
+                      f"sich dabei selbst)", flush=True)
+            # Auf den neuen Socket warten. Der Bootstrap startet erst x11vnc und
+            # websockify; wer sofort danach eine Op ruft, bekommt 502 und sucht
+            # den Fehler im Code (Register).
+            sock = getattr(broker_client, "SOCKET_PATH", "/run/jarvis-broker.sock")
+            for _ in range(40):
+                time.sleep(1)
+                if os.path.exists(sock):
+                    break
+            else:
+                print("[Update] ⚠ Der Broker-Socket ist nach 40 s nicht da – "
+                      "der Neustart von jarvis.service laeuft trotzdem.", flush=True)
         res = broker_client.systemctl_sync("restart", "jarvis.service", user="system", context=context)
         if not res.get("ok"):
             print(f"[Update] Neustart via Broker fehlgeschlagen: {res.get('error') or res.get('stderr')}", flush=True)

@@ -2590,11 +2590,14 @@ class JarvisKnowledgeManager {
                         onclick="window.knowledgeManager.toggleMount(${i}, ${!m.active})">
                         ${m.active ? '⏏' : '▶'}
                     </button>
+                    <button class="btn-icon btn-small" title="${window.t('knowledge.share_diag_title')}"
+                        onclick="window.knowledgeManager.diagnoseMount(${i})">${JarvisIcons.lupe()}</button>
                     <button class="btn-icon btn-small" title="${window.t('knowledge.share_edit_title')}"
                         onclick="window.knowledgeManager.showEditMount(${i})">✏️</button>
                     <button class="btn-icon btn-small" title="${window.t('knowledge.share_remove_title')}"
                         onclick="window.knowledgeManager.removeMount(${i})">${JarvisIcons.trash()}</button>
                 </div>
+                <div class="kb-mount-diag" id="kb-mount-diag-${i}" hidden></div>
                 <div class="kb-mount-edit-form" id="kb-mount-edit-${i}" style="display:none;">
                     <select class="kb-input kb-mount-edit-type" onchange="window.knowledgeManager.mountBeispielNachziehen(this)">
                         <option value="smb" ${m.type==='smb'?'selected':''}>SMB/CIFS (Windows-Freigabe)</option>
@@ -2713,6 +2716,60 @@ class JarvisKnowledgeManager {
             this._showNotification(window.t('common.error') + ': ' + e.message,
                                    'error', 'kb-mount-list');
         }
+    }
+
+    /**
+     * Freigabe untersuchen – MESSEN statt raten.
+     *
+     * ⚠ DER ANLASS (gemeldet 2026-09-05): "Fehlermeldung bei SMB/CIFS nicht
+     * ausreichend". Der Benutzer las "Der Server ist nicht erreichbar
+     * (ausgeschaltet, falscher Name, kein Netzweg)", waehrend derselbe Server
+     * auf Ping in 7,9 ms und auf Port 445 in 10 ms antwortete – er wies
+     * lediglich den SMB-Aufbau ab. Eine Meldung kann WAHR und trotzdem
+     * nutzlos sein; hier war sie nicht einmal wahr.
+     *
+     * Der Bericht steht AM ORT DER FREIGABE und BLEIBT stehen – man muss ihn
+     * lesen und oft kopieren koennen. Ein zweiter Klick schliesst ihn.
+     */
+    async diagnoseMount(idx) {
+        const box = document.getElementById(`kb-mount-diag-${idx}`);
+        if (!box) return;
+        if (!box.hidden && box.dataset.fertig === '1') {   // zweiter Klick = zu
+            box.hidden = true; box.innerHTML = ''; box.dataset.fertig = '';
+            return;
+        }
+        box.hidden = false; box.dataset.fertig = '';
+        box.textContent = window.t('knowledge.share_diag_running');
+        try {
+            const resp = await fetch(`/api/knowledge/mounts/${idx}/diagnose`, {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
+            });
+            if (!resp.ok) throw new Error(await this._fehlertext(resp));
+            const d = await resp.json();
+            box.innerHTML = this._diagBericht(d);
+            box.dataset.fertig = '1';
+        } catch (e) {
+            box.textContent = window.t('common.error') + ': ' + e.message;
+            box.dataset.fertig = '1';
+        }
+    }
+
+    /** Bericht aufbauen. Fremdtext ausschliesslich maskiert – die Schritte
+     *  enthalten Servernamen und rohe Systemmeldungen. */
+    _diagBericht(d) {
+        const e = (t) => this._escHtml(String(t == null ? '' : t));
+        const urteil = (d.urteil || []).map(u =>
+            `<p class="kb-diag-urteil">${e(u)}</p>`).join('');
+        const zeilen = (d.schritte || []).map(s =>
+            `<tr class="${s.ok ? 'ok' : 'bad'}">`
+            + `<td class="kb-diag-mark">${s.ok ? '✓' : '✕'}</td>`
+            + `<td class="kb-diag-name">${e(s.schritt)}</td>`
+            + `<td class="kb-diag-text">${e(s.text)}</td></tr>`).join('');
+        return `<div class="kb-diag-kopf">${e(window.t('knowledge.share_diag_head'))}`
+            + ` <code>${e(d.quelle || '')}</code></div>`
+            + urteil
+            + `<table class="kb-diag-tab"><tbody>${zeilen}</tbody></table>`;
     }
 
     async removeMount(idx) {

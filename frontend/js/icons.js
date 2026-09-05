@@ -76,6 +76,16 @@
         return el;
     }
 
+    // LUPE = UNTERSUCHEN. Sie loescht nichts und schliesst nichts – sie misst
+    // und berichtet. Bewusst kein Emoji (siehe Kopf dieser Datei) und bewusst
+    // hier statt als Einzelstueck in knowledge.js: das naechste "pruefen" soll
+    // dasselbe Zeichen tragen.
+    var LUPE = '<svg class="jv-ico" viewBox="0 0 24 24" width="1em" height="1em"'
+        + ' fill="none" stroke="currentColor" stroke-width="2"'
+        + ' stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+        + '<circle cx="11" cy="11" r="7"/>'
+        + '<line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>';
+
     window.JarvisIcons = {
         /** Muelleimer – NUR fuer dauerhaftes Loeschen/Entfernen. */
         trash: function () { return MUELL; },
@@ -89,6 +99,8 @@
         eye: function () { return AUGE; },
         /** Durchgestrichenes Auge – Eingabe wieder verbergen. */
         eyeOff: function () { return AUGE_ZU; },
+        /** Lupe – untersuchen/messen. Veraendert nichts. */
+        lupe: function () { return LUPE; },
         setEye: function (el) { return setzen(el, AUGE); },
         setEyeOff: function (el) { return setzen(el, AUGE_ZU); }
     };

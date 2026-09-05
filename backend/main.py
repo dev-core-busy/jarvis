@@ -3800,7 +3800,13 @@ async def update_apply(user: str = Depends(require_local_auth)):
     from backend.update_manager import apply_update, restart_service_delayed
     result = await asyncio.to_thread(apply_update)
     if result["ok"]:
-        restart_service_delayed(delay_sec=2.0, context=f"Software-Update angewendet (ausgeloest von {user})")
+        # ⚠ auch_broker DURCHREICHEN: hat der Pull backend/broker/* angefasst,
+        # muss der Root-Broker mit neu starten - er haelt eine eigene Kopie und
+        # antwortet sonst auf jede neu hinzugekommene Op mit 502. Ohne diese
+        # Zeile bliebe die Funktion in update_manager wirkungslos.
+        restart_service_delayed(delay_sec=2.0,
+                                context=f"Software-Update angewendet (ausgeloest von {user})",
+                                auch_broker=bool(result.get("broker_betroffen")))
     return JSONResponse(result)
 
 
@@ -4066,6 +4072,86 @@ async def startup_jsdom():
                 print(text, flush=True)
         except Exception as e:  # noqa: BLE001
             print(f"[jsdom] Bereitstellung uebersprungen: {e}", flush=True)
+    asyncio.create_task(_lauf())
+
+
+@app.on_event("startup")
+async def startup_broker_aktualitaet():
+    """Laeuft der Root-Broker noch mit ALTEM Code? Dann nachziehen.
+
+    ⚠ DER FALLSTRICK, DEN DAS SCHLIESST, IST DER AELTESTE DEPLOY-FALLSTRICK DES
+    PROJEKTS: Der Broker ist ein EIGENER Prozess mit einer EIGENEN Kopie von
+    ``backend/broker/*``. Wer dort etwas aendert, muss ihn neu starten - ein
+    Neustart von ``jarvis.service`` allein genuegt nicht, jede neue Op antwortet
+    sonst ``502 unbekannte Op``. Im Register steht das seit Langem; ausgerechnet
+    die AUTOMATISCHEN Wege haben es nie beruecksichtigt:
+
+      * die Update-Pille startete nur ``jarvis.service``,
+      * der Auto-Update-Cron-Job ebenfalls (fest im Auftragstext),
+      * ein ``scp``-Deploy sowieso nicht.
+
+    Ein Server, der ueber einen dieser Wege aktualisiert wurde, bekam damit
+    STILL einen halben Stand: neues Backend, alter Broker. Diese Pruefung ist
+    deshalb bewusst am Backend-START aufgehaengt und nicht an einem der drei
+    Wege - so ist sie unabhaengig davon, WIE der Code auf den Server kam.
+
+    Gemessen wird die Zeit, nicht die Version: ist eine Datei unter
+    ``backend/broker/`` NEUER als der Startzeitpunkt des Broker-Dienstes, laeuft
+    er mit altem Code. ``systemctl show`` ist dafuer ohne root lesbar.
+
+    Fail-safe in die RUHIGE Richtung: bei jeder Unklarheit (kein Socket, keine
+    Zeitangabe, Ausnahme) passiert NICHTS. Ein Broker-Neustart beendet auch
+    x11vnc und websockify - er darf nicht auf Verdacht laufen.
+    Abschaltbar mit ``JARVIS_BROKER_AUTORESTART=0``.
+    """
+    if os.environ.get("JARVIS_BROKER_AUTORESTART", "1") == "0":
+        return
+
+    async def _lauf():
+        try:
+            from backend.broker import SOCKET_PATH
+            if not os.path.exists(SOCKET_PATH):
+                return          # kein getrennter Betrieb - nichts zu tun
+            p = await asyncio.create_subprocess_exec(
+                "systemctl", "show", "jarvis-broker.service",
+                "--property=ActiveEnterTimestampMonotonic", "--value",
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+            aus, _ = await p.communicate()
+            roh = (aus or b"").decode("utf-8", "replace").strip()
+            if not roh.isdigit() or roh == "0":
+                return          # keine verwertbare Zeitangabe
+            # Monotonic-Mikrosekunden in Wanduhr umrechnen: beide Uhren laufen
+            # gleich schnell, die Differenz zu JETZT ist das Alter.
+            with open("/proc/uptime", encoding="utf-8") as f:
+                uptime = float(f.read().split()[0])
+            broker_alter_s = uptime - int(roh) / 1_000_000
+            broker_start = time.time() - broker_alter_s
+
+            bdir = Path(__file__).resolve().parent / "broker"
+            neueste = max((d.stat().st_mtime for d in bdir.glob("*.py")), default=0)
+            if neueste <= broker_start + 10:      # 10 s Puffer fuer den Bootstrap
+                return
+
+            from datetime import datetime as _dt
+            print(f"[Broker] Der Root-Broker laeuft seit "
+                  f"{_dt.fromtimestamp(broker_start):%H:%M:%S}, "
+                  f"backend/broker/ ist von "
+                  f"{_dt.fromtimestamp(neueste):%H:%M:%S} – er wuerde neue "
+                  f"Operationen nicht kennen. Starte ihn nach.", flush=True)
+            from backend import broker_client
+            await asyncio.to_thread(
+                broker_client.systemctl_sync, "restart", "jarvis-broker.service",
+                user="system", context="Broker-Code war neuer als der laufende Dienst")
+            for _ in range(40):
+                await asyncio.sleep(1)
+                if os.path.exists(SOCKET_PATH):
+                    print("[Broker] ✓ nachgezogen.", flush=True)
+                    return
+            print("[Broker] ⚠ Socket nach 40 s nicht da – bitte nachsehen "
+                  "(systemctl status jarvis-broker.service).", flush=True)
+        except Exception as e:                                # noqa: BLE001
+            print(f"[Broker] Aktualitaetspruefung uebersprungen: {e}", flush=True)
+
     asyncio.create_task(_lauf())
 
 
@@ -17562,6 +17648,36 @@ async def update_mount(idx: int, request: Request, user: str = Depends(require_k
     return JSONResponse({"ok": True})
 
 
+# Kernel-Errno eines gescheiterten Mounts. ⚠ ZWEI FORMEN, DERSELBE CODE:
+# dmesg schreibt "cifs_mount failed w/return code = -115", mount.cifs schreibt
+# denselben Fehler in seiner EIGENEN Ausgabe als "mount error(115)" - positiv
+# und ohne dmesg. Wer nur die erste Form sucht, verschenkt die genaueste
+# Auskunft, die es gibt: am 2026-09-05 auf ECHT gemeldet, der Benutzer las
+# "Der Server ist nicht erreichbar", waehrend derselbe Server auf Ping (7,9 ms)
+# und Port 445 (10 ms) antwortete. Die Deutung zu -115 stand da und griff nie.
+_MOUNT_KERNCODES = {
+    "-13": ("Zugang verweigert - Benutzername oder Kennwort passen nicht, "
+            "oder das Konto darf diese Freigabe nicht lesen. Bei einem "
+            "Domaenenkonto 'DOMAENE\\benutzer' eintragen."),
+    "-2": ("Diesen Freigabenamen gibt es auf dem Server nicht - "
+           "Schreibweise pruefen."),
+    "-22": ("Der Server hat die Anfrage abgelehnt (ungueltige Parameter) - "
+            "oft eine nicht unterstuetzte SMB-Version."),
+    "-95": ("Der Server unterstuetzt das verlangte Protokoll nicht "
+            "(SMB-Version) - mit 'vers=2.1' oder 'vers=3.0' probieren."),
+    "-110": ("Zeitueberschreitung beim Verbindungsaufbau - der Server "
+             "antwortet auf Port 445 nicht rechtzeitig."),
+    "-112": ("Der Server hat die Verbindung abgewiesen oder ist abgestuerzt "
+             "(EHOSTDOWN)."),
+    "-115": ("Die Verbindung kam nicht zustande, OBWOHL der Rechner "
+             "antwortet: der Port ist erreichbar, der SMB-Aufbau scheitert "
+             "trotzdem. 'Server nicht erreichbar' ist damit ausgeschlossen. "
+             "Zu pruefen sind SMB-Version, erzwungene Signierung und eine "
+             "Zwischenstelle (Firewall/IPS), die TCP annimmt und SMB "
+             "verwirft. Der Knopf 'Analysieren' an der Freigabe misst das."),
+}
+
+
 def _mount_fehler_deuten(result: dict, mount_type: str, source: str) -> str:
     """Aus der rohen mount-Ausgabe eine Meldung machen, aus der man ableiten
     kann, was zu tun ist.
@@ -17597,9 +17713,16 @@ def _mount_fehler_deuten(result: dict, mount_type: str, source: str) -> str:
     # Rechner antwortet" (aus dem Kernel-Code -115). Am 2026-09-04 live so
     # gemessen – eine Meldung, die sich selbst widerspricht, ist schlimmer als
     # eine unvollstaendige.
-    kern = re.search(r"failed w/return code = (-\d+)", roh)
-    if kern:
-        pass    # die Deutung des Codes steht weiter unten und gilt allein
+    _m_kern = re.search(r"failed w/return code = (-\d+)", roh)
+    kern = _m_kern.group(1) if _m_kern else ""
+    if not kern:
+        # mount.cifs nennt denselben Errno positiv in der eigenen Ausgabe.
+        # ⚠ Diese Form sticht NUR, wenn die Tabelle den Code kennt: 'error(13)',
+        # 'error(2)' und 'error(126)' haben unten laengst eigene, bessere Texte,
+        # und ein "Der Kernel meldet Fehlercode -126" waere ein Rueckschritt.
+        _m2 = re.search(r"mount error\((\d+)\)", roh)
+        if _m2 and f"-{_m2.group(1)}" in _MOUNT_KERNCODES:
+            kern = f"-{_m2.group(1)}"
     # ⚠ DIE MUSTER SIND LIVE GEMESSEN (DEV, util-linux 2.40 / Debian 13,
     # 2026-09-04) – die aus der Literatur bekannten "mount error(13)"-Texte
     # kommen dort GAR NICHT MEHR vor. Aktuelle mount-Fassungen melden
@@ -17645,28 +17768,8 @@ def _mount_fehler_deuten(result: dict, mount_type: str, source: str) -> str:
     # ueber _kernel_grund() aus dmesg. Reihenfolge: er GEWINNT gegen die
     # generischen Muster, denn "Operation now in progress" sagt nichts.
     if kern:
-        code = kern.group(1)
-        deutung = {
-            "-13": ("Zugang verweigert – Benutzername oder Kennwort passen "
-                    "nicht, oder das Konto darf diese Freigabe nicht lesen. "
-                    "Bei einem Domaenenkonto 'DOMAENE\\benutzer' eintragen."),
-            "-2": (f"Diesen Freigabenamen gibt es auf dem Server nicht – "
-                   f"Schreibweise von '{source}' pruefen."),
-            "-22": ("Der Server hat die Anfrage abgelehnt (ungueltige "
-                    "Parameter) – oft eine nicht unterstuetzte SMB-Version."),
-            "-95": ("Der Server unterstuetzt das verlangte Protokoll nicht "
-                    "(SMB-Version) – mit 'vers=2.1' oder 'vers=3.0' probieren."),
-            "-110": ("Zeitueberschreitung beim Verbindungsaufbau – der Server "
-                     "antwortet auf Port 445 nicht rechtzeitig."),
-            "-112": ("Der Server hat die Verbindung abgewiesen oder ist "
-                     "abgestuerzt (EHOSTDOWN)."),
-            "-115": ("Die Verbindung kam nicht zustande, obwohl der Rechner "
-                     "antwortet: Port 445 ist erreichbar, der SMB-Aufbau "
-                     "scheitert trotzdem. Zu pruefen sind SMB-Version, eine "
-                     "Firewall zwischen den Netzen und ob der Server "
-                     "SMB-Signierung erzwingt."),
-        }.get(code)
-        hinweise.append(deutung or f"Der Kernel meldet Fehlercode {code}.")
+        hinweise.append(_MOUNT_KERNCODES.get(kern)
+                        or f"Der Kernel meldet Fehlercode {kern}.")
     elif "error connecting to socket" in n:
         hinweise.append("Der SMB-Verbindungsaufbau ist gescheitert. Ist Port "
                         "445 zum Server offen und antwortet dort ein "
@@ -17827,6 +17930,47 @@ async def unmount_share(idx: int, user: str = Depends(require_knowledge_editor))
         _save_mounts_config(mounts)
 
     return JSONResponse({"ok": True})
+
+
+@app.post("/api/knowledge/mounts/{idx}/diagnose")
+async def diagnose_share(idx: int, user: str = Depends(require_knowledge_editor)):
+    """Warum kommt diese Freigabe nicht zustande? NUR MESSEN, nichts aendern.
+
+    ⚠ DAS ZIEL KOMMT AUS DER GESPEICHERTEN FREIGABE, NICHT AUS DEM REQUEST.
+    Der Aufrufer nennt einen Index; Adresse und Typ holt der Endpunkt aus der
+    Konfiguration. Naehme er Host und Port entgegen, waere der Knopf ein
+    Portscanner mit Root-Rechten - dieselbe Ueberlegung wie bei ``tika_setup``,
+    wo der Skriptpfad bewusst kein Argument ist.
+
+    Der Anlass steht im Register: eine Meldung kann WAHR und trotzdem nutzlos
+    sein. Am 2026-09-05 las ein Administrator "Der Server ist nicht erreichbar
+    (ausgeschaltet, falscher Name, kein Netzweg)", waehrend derselbe Server auf
+    Ping in 7,9 ms und auf Port 445 in 10 ms antwortete - er wies lediglich den
+    SMB-Aufbau ab. Diese Unterscheidung kann ``mount`` nicht treffen, ein
+    gezielter Handshake schon.
+    """
+    mounts = _get_mounts_config()
+    if idx < 0 or idx >= len(mounts):
+        return JSONResponse({"error": "Ungueltiger Index"}, status_code=404)
+    m = mounts[idx]
+    mount_type = m.get("type", "smb")
+    if mount_type not in ("smb", "nfs", "webdav"):
+        return JSONResponse({"error": f"Unbekannter Typ: {mount_type}"}, status_code=400)
+
+    from backend import broker_client
+    result = await broker_client.call("mount_diagnose", {
+        "type": mount_type,
+        "source": m.get("source", ""),
+        "mountpoint": str(_mount_path(idx, m)),
+    }, user=user, timeout=90)
+    if not result.get("ok"):
+        grund = str(result.get("stderr") or result.get("error") or "").strip()
+        return JSONResponse({"error": f"Die Pruefung konnte nicht laufen: {grund}"},
+                            status_code=500)
+    bericht = result.get("result") or {}
+    print(f"[knowledge] Freigabe {idx} geprueft ({bericht.get('quelle','')}): "
+          f"{' | '.join(bericht.get('urteil') or [])[:300]}", flush=True)
+    return JSONResponse({"ok": True, **bericht})
 
 
 @app.get("/api/knowledge/webdav/status")

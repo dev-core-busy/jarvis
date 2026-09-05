@@ -71,6 +71,17 @@ if not code:
     sys.exit(2)
 
 ns = {"re": re}
+# ⚠ MODUL-KONSTANTEN FALLEN AUS JEDEM FUNKTIONS-SCHNITT HERAUS (Register).
+# Seit 2026-09-05 liest die Funktion die Kernel-Deutungen aus
+# _MOUNT_KERNCODES; ohne diese Zeilen bricht der Lauf mit einem nackten
+# NameError ab - und ein abgebrochener Lauf ist von "nicht gelaufen" nicht zu
+# unterscheiden.
+for _n in ast.parse(HAUPT).body:
+    if isinstance(_n, ast.Assign) and any(
+            getattr(_z, "id", "") == "_MOUNT_KERNCODES" for _z in _n.targets):
+        exec(compile(ast.get_source_segment(HAUPT, _n), "<konstante>", "exec"), ns)
+check("Positivkontrolle: die Kernel-Deutungen sind im Namensraum",
+      isinstance(ns.get("_MOUNT_KERNCODES"), dict) and "-115" in ns["_MOUNT_KERNCODES"])
 exec(compile(code, "<schnitt>", "exec"), ns)
 deute = ns["_mount_fehler_deuten"]
 
@@ -193,8 +204,14 @@ t_k = deute({"ok": False, "rc": 32, "stderr": "mount: /mnt/x: fsconfig() failed:
              "after failed mount system call. [Kernel: CIFS: VFS: Error "
              "connecting to socket. | cifs_mount failed w/return code = -115]"},
             "smb", "//srv/x")
+# ⚠ Gemessen wird die AUSSAGE, nicht das Wort: seit 2026-09-05 schliesst die
+# Deutung zu -115 "Server nicht erreichbar" ausdruecklich AUS und nennt den
+# Begriff deshalb selbst. Eine Suche nach der Zeichenkette meldete hier einen
+# Fehler, den es nicht gibt.
 check("⚠ der Kernel-Code sticht das generische 'nicht erreichbar'",
-      "nicht erreichbar" not in t_k and "SMB-Version" in t_k, t_k[:220])
+      "Der Server hat nicht geantwortet" not in t_k and "SMB-Version" in t_k, t_k[:220])
+check("… und er schliesst die falsche Erklaerung ausdruecklich aus",
+      "ausgeschlossen" in t_k, t_k[:220])
 check("… und der Kernel-Teil bleibt in der Systemmeldung erhalten",
       "-115" in t_k, t_k[:220])
 check("… waehrend der dmesg-Hinweis draussen bleibt", "dmesg" not in t_k, t_k[:220])

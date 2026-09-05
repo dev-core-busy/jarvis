@@ -1488,9 +1488,9 @@ const _I18N = {
         'knowledge.learned.delete_confirm': 'Diesen gelernten Eintrag löschen?',
         'knowledge.learned.deleted':     'Eintrag gelöscht',
         // Wissens-Verdichtung
-        'knowledge.cleanup.btn':          '🧹 Aufräumen',
+        'knowledge.cleanup.btn':          '🧹 Prompt optimieren',
         'knowledge.cleanup.btn_title':    'Erlerntes Wissen und selbst geschriebene Prompts auf Dopplungen und Widersprüche prüfen – zeigt einen Vorher/Nachher-Vergleich, schreibt erst nach Bestätigung',
-        'knowledge.cleanup.title':        'Erlerntes Wissen aufräumen',
+        'knowledge.cleanup.title':        'Prompt optimieren',
         'knowledge.cleanup.loading':      'Bestand wird ermittelt …',
         'knowledge.cleanup.nothing':      'Es gibt nichts aufzuräumen: keine veränderten Anweisungen, kein Gedächtnis, keine Lernnotizen.',
         'knowledge.cleanup.intro':        'Geprüft werden Dateien, die der Assistent selbst schreibt, und Anweisungen, die von der Vorgabe abweichen. Der Lauf schlägt nur vor – geschrieben wird erst, wenn du den Vergleich bestätigst. Vor jedem Schreiben wird eine Sicherung angelegt.',
@@ -4704,9 +4704,9 @@ const _I18N = {
         'knowledge.learned.delete_confirm': 'Delete this learned entry?',
         'knowledge.learned.deleted':     'Entry deleted',
         // Knowledge compaction
-        'knowledge.cleanup.btn':          '🧹 Clean up',
+        'knowledge.cleanup.btn':          '🧹 Optimise prompts',
         'knowledge.cleanup.btn_title':    'Check learned knowledge and self-written prompts for duplicates and contradictions – shows a before/after comparison, writes only after confirmation',
-        'knowledge.cleanup.title':        'Clean up learned knowledge',
+        'knowledge.cleanup.title':        'Optimise prompts',
         'knowledge.cleanup.loading':      'Collecting files …',
         'knowledge.cleanup.nothing':      'Nothing to clean up: no modified instructions, no memory, no learning notes.',
         'knowledge.cleanup.intro':        'Checked are files the assistant writes itself, plus instructions that differ from the default. The run only proposes – nothing is written until you confirm the comparison. A backup is made before every write.',

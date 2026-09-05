@@ -1043,7 +1043,13 @@ class JarvisKnowledgeManager {
     async cleanupOeffnen() {
         const modal = document.getElementById('kb-cleanup-modal');
         if (!modal) return;
-        modal.style.display = 'flex';
+        // ⚠ UEBER DIE KLASSE, NIEMALS ueber style.display: .modal traegt
+        // opacity: 0, sichtbar macht erst .open (mit !important). Ein
+        // display:flex allein oeffnet das Fenster UNSICHTBAR - und weil es
+        // inset:0 und z-index 10001 hat, liegt es danach als durchsichtige
+        // Schicht ueber der Seite und schluckt jeden weiteren Klick. Genau so
+        // gemeldet: "ein Klick darauf macht genau NICHTS" (2026-09-05).
+        modal.classList.add('open');
         this._cleanupVorschlaege = null;
         const box = document.getElementById('kb-cleanup-body');
         box.innerHTML = `<p class="kb-hint">${window.t('knowledge.cleanup.loading')}</p>`;
@@ -1205,7 +1211,7 @@ class JarvisKnowledgeManager {
 
     cleanupSchliessen() {
         const m = document.getElementById('kb-cleanup-modal');
-        if (m) m.style.display = 'none';
+        if (m) m.classList.remove('open');   // Gegenstueck zu classList.add('open')
     }
 
     _cleanupListe() {

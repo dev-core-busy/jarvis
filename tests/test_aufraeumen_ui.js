@@ -55,7 +55,8 @@ function methode(name) {
 }
 const teile = ['_diffZeilen', '_cleanupVergleich', '_escHtml', 'cleanupBearbeiten',
                'cleanupUebernehmen', '_fehlertext', '_bilanzHtml', 'cleanupBilanz',
-               'cleanupKonflikte'].map(methode);
+               'cleanupKonflikte', 'cleanupOeffnen', 'cleanupSchliessen',
+               '_cleanupListe'].map(methode);
 check('alle Bausteine geschnitten', teile.every(t => t.length > 20));
 
 const gesendet = [];
@@ -231,6 +232,76 @@ await M.cleanupKonflikte();
 const kb2 = document.getElementById('kb-cleanup-body');
 check('⚠ bei 0 Konflikten bleiben die gemessenen Paare sichtbar',
       kb2.querySelectorAll('.kb-cl-karte.kb-cl-gemessen').length === 1);
+
+// ═══ 6. Das Fenster geht WIRKLICH auf ═══════════════════════════════════════
+// ⚠ GEMELDET: "ein Klick darauf macht genau NICHTS". Ursache war
+// modal.style.display='flex' - .modal traegt aber opacity:0, sichtbar macht
+// erst .open (mit !important). Das Fenster ging damit UNSICHTBAR auf und lag
+// als durchsichtige Vollbildschicht ueber der Seite (inset:0, z-index 10001),
+// die jeden weiteren Klick schluckte.
+//
+// GEMESSEN WIRD DIE EIGENSCHAFT, nicht der Aufruf: das echte style.css wird
+// geladen und die WIRKSAME Deckkraft abgefragt. Eine Suche nach
+// "classList.add('open')" waere gruen, sobald jemand wieder auf display
+// umstellt - und der Fehler war ja gerade, dass display allein nicht genuegt.
+console.log('\n\x1b[1m6. Fenster oeffnet sichtbar\x1b[0m');
+// ⚠ GEZIELT DIE .modal-REGELN, nicht die ganze style.css: als ein einziges
+// <style> mit ueber 100 KB kaskadiert jsdom sie nicht mehr - die
+// Positivkontrolle unten hat genau das aufgedeckt.
+const CSS = fs.readFileSync(path.join(REPO, 'frontend/css/style.css'), 'utf8');
+const bloecke = (CSS.match(/\.modal\s*\{[^}]*\}/) || [''])[0]
+              + (CSS.match(/\.modal\.open\s*\{[^}]*\}/) || [''])[0];
+const stil = document.createElement('style');
+stil.textContent = bloecke;
+document.head.appendChild(stil);
+check('Positivkontrolle: beide .modal-Regeln geschnitten',
+      /opacity:\s*0/.test(bloecke) && /opacity:\s*1\s*!important/.test(bloecke));
+// ⚠ DAS ECHTE MARKUP, nicht das nachgebaute: der Platzhalter oben im Test-DOM
+// traegt KEIN class="modal" - damit griff keine einzige CSS-Regel, und die
+// Messung haette ihre eigene Annahme geprueft statt der Seite. (Register: ein
+// UI-Test, der sein Markup selbst schreibt, prueft seine eigene Annahme.)
+const HTML = fs.readFileSync(path.join(REPO, 'frontend/settings.html'), 'utf8');
+const tag = (HTML.match(/<div id="kb-cleanup-modal"[^>]*>/) || [''])[0];
+check('Positivkontrolle: das echte Modal-Markup gefunden', tag.length > 20);
+check('⚠ es traegt die Klasse "modal" (sonst greift keine Regel)',
+      /class="[^"]*\bmodal\b/.test(tag));
+const alt_el = document.getElementById('kb-cleanup-modal');
+const echt = document.createElement('div');
+echt.innerHTML = tag + '</div>';
+alt_el.replaceWith(echt.firstElementChild);
+const modal = document.getElementById('kb-cleanup-modal');
+const sicht = () => {
+    const c = window.getComputedStyle(modal);
+    return { d: c.display, o: parseFloat(c.opacity || '1') };
+};
+const zu = sicht();
+check('vor dem Klick ist das Fenster zu', zu.d === 'none');
+// Positivkontrolle: greift das echte CSS in dieser Umgebung ueberhaupt?
+check('Positivkontrolle: das echte style.css wirkt (opacity 0 im Ruhezustand)',
+      zu.o === 0);
+window.fetch = async () => ({ ok: true, json: async () => ({ ok: true, dateien: [] }) });
+await M.cleanupOeffnen();
+const auf = sicht();
+check('nach dem Klick ist es sichtbar (display)', auf.d === 'flex');
+check('⚠ UND deckend - sonst liegt es unsichtbar ueber der Seite',
+      auf.o > 0.9);
+M.cleanupSchliessen();
+check('Schliessen macht es wieder unsichtbar', sicht().d === 'none');
+
+// ⚠ REGEL statt Messung - und zwar aus einem gemessenen Grund: jsdom bildet
+// "Inline gegen !important" anders ab als ein Browser. Ein
+// modal.style.display='none' sieht hier wie geschlossen aus, waehrend
+// .modal.open{display:flex !important} es im echten Browser OFFEN liesse.
+// Deshalb wird das Modal ausschliesslich ueber die Klasse gesteuert.
+const KJS = fs.readFileSync(path.join(REPO, 'frontend/js/knowledge.js'), 'utf8')
+              .replace(/^\s*\/\/.*$/gm, '');
+check('Positivkontrolle: der Kommentar-Filter hat gearbeitet',
+      KJS.includes('cleanupOeffnen') && !KJS.includes('UEBER DIE KLASSE'));
+const stellen = (KJS.match(/kb-cleanup-modal[\s\S]{0,260}/g) || []);
+check('kein style.display auf dem Aufraeum-Fenster',
+      stellen.every(b => !/\bstyle\.display\s*=/.test(b.split('classList')[0])));
+check('es wird ueber classList mit "open" gesteuert',
+      /classList\.add\('open'\)/.test(KJS) && /classList\.remove\('open'\)/.test(KJS));
 
 clearTimeout(wachhund);
 console.log(`\n\x1b[1mErgebnis: ${OK} OK, ${FAIL} FAIL\x1b[0m`);

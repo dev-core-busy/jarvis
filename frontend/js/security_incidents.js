@@ -625,11 +625,19 @@
                 var mark = ok === true ? '✅' : (ok === false ? '❌' : '❔');
                 return '<div>' + mark + ' ' + esc(label) + '</div>';
             }
-            var head = d.ok
-                ? (d.egress_blocked === false
-                    ? '🟠 <b>Eingerichtet – aber Live-Test: Internet noch erreichbar!</b>'
-                    : '🟢 <b>Aktiv' + (d.egress_blocked === true ? ' &amp; live verifiziert' : '') + '</b>')
-                : '🔴 <b>Nicht (vollständig) eingerichtet</b>';
+            // ⚠ EINE VERALTETE KETTE IST KEIN NEBENBEFUND: ein 'drop' ohne
+            // Benutzerbindung trifft auch die Kernel-Sockets von CIFS/NFS -
+            // damit scheitert JEDE Netzwerk-Freigabe, waehrend jeder
+            // Userspace-Test gelingt. Die Sperre selbst funktioniert dabei,
+            // deshalb steht sie ganz oben und nicht als weitere Zeile unten.
+            var veraltet = (d.kernel_drop === true);
+            var head = veraltet
+                ? '🟠 <b>Aktiv – aber die Regel ist veraltet</b>'
+                : (d.ok
+                    ? (d.egress_blocked === false
+                        ? '🟠 <b>Eingerichtet – aber Live-Test: Internet noch erreichbar!</b>'
+                        : '🟢 <b>Aktiv' + (d.egress_blocked === true ? ' &amp; live verifiziert' : '') + '</b>')
+                    : '🔴 <b>Nicht (vollständig) eingerichtet</b>');
             var rows = ''
                 + row(d.configured, 'Einstellung gesetzt (No-Internet-Sandbox-Benutzer)')
                 + row(d.user_exists, 'Gesperrter OS-Benutzer: ' + (d.user || '') + (d.uid != null ? ' (uid ' + d.uid + ')' : ' — fehlt'))
@@ -637,6 +645,20 @@
                 + row(d.service_enabled, 'Autostart nach Reboot (systemd)');
             if (d.egress_blocked === true || d.egress_blocked === false) {
                 rows += row(d.egress_blocked, 'Live-Test: öffentliches Internet ' + (d.egress_blocked ? 'geblockt' : 'ERREICHBAR ⚠'));
+            }
+            if (veraltet) {
+                rows += '<div style="margin-top:6px;padding:8px 10px;border-radius:6px;'
+                     + 'border-left:3px solid var(--danger,#c0392b);background:var(--bg-glass);">'
+                     + '<b>Netzwerk-Freigaben sind damit nicht einbindbar.</b> '
+                     + 'Die Regel enthält ein <code>drop</code> ohne Benutzerbindung; '
+                     + 'CIFS- und NFS-Verbindungen baut der Kernel auf und sie tragen '
+                     + 'keine Benutzerkennung – sie fallen deshalb hinein. '
+                     + '„Einrichten / Reparieren“ zieht die Regel nach; '
+                     + 'an der Sperre selbst ändert sich dadurch nichts.'
+                     + (d.kernel_drop_zeilen
+                        ? '<div style="color:var(--text-muted);font-size:0.75rem;margin-top:4px;">'
+                          + esc(d.kernel_drop_zeilen) + '</div>' : '')
+                     + '</div>';
             }
             var res = (d.resolvers && d.resolvers.length)
                 ? '<div style="color:var(--text-muted);font-size:0.75rem;margin-top:4px;">Erlaubte DNS-Resolver: ' + esc(d.resolvers.join(', ')) + '</div>' : '';

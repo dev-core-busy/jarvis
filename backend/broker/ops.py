@@ -697,26 +697,20 @@ def _egress_offen_fuer_kernel():
 
     Hintergrund im Register: ein CIFS-Mount wird vom KERNEL aufgebaut und hat
     keinen Socket-Eigentuemer. Eine Regel ``meta skuid != <uid> accept`` ist
-    fuer ihn NICHT erfuellt – er faellt durch alle accept-Regeln und landet im
+    fuer ihn NICHT erfuellt - er faellt durch alle accept-Regeln und landet im
     nackten ``drop``. Userspace-Tests laufen dabei einwandfrei, was die Suche
     zuverlaessig in die falsche Richtung schickt.
+
+    ⚠ DIE MESSUNG LIEGT IN ``egress_guard.kette_veraltet()`` - hier stand bis
+    2026-09-05 eine ZWEITE, zeichengleiche Fassung. Zwei Fassungen derselben
+    Regel laufen beim naechsten Feinschliff auseinander, und dann sagt der
+    Analyse-Knopf etwas anderes als die Warnung beim Dienststart.
     """
-    r = _run(["nft", "list", "table", "inet", "jarvis_egress"], timeout=8,
-             neutrale_sprache=True)
-    if not r.get("ok"):
+    from backend import egress_guard
+    veraltet, zeilen = egress_guard.kette_veraltet()
+    if veraltet is None:
         return None, ""
-    text = r.get("stdout") or ""
-    if not text.strip():
-        return None, ""
-    nackt = []
-    for zeile in text.splitlines():
-        z = zeile.strip()
-        if not z or z.startswith("#"):
-            continue
-        # Ein 'drop' OHNE jede Einschraenkung trifft auch den Kernel-Socket.
-        if re.search(r"\bdrop\b", z) and not re.search(r"\bskuid\b", z):
-            nackt.append(z)
-    return (not nackt), "; ".join(nackt[:3])
+    return (not veraltet), zeilen
 
 
 def _op_mount_diagnose(args, stream):

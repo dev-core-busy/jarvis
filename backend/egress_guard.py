@@ -10,6 +10,7 @@ Laeuft als root (jarvis.service). Alle Kommandos sind fest verdrahtet; der
 einzige dynamische Input sind uid (aus pwd) und Resolver-IPs (aus resolv.conf,
 per ipaddress validiert) -> keine Shell-Injection.
 """
+import re
 import ipaddress
 import pwd
 import shutil
@@ -97,6 +98,43 @@ def _egress_blocked():
     return not (code[:1] in ("2", "3"))
 
 
+def kette_veraltet():
+    """Enthaelt die LAUFENDE Kette ein ``drop`` ohne Benutzerbindung?
+
+    Rueckgabe ``(veraltet, zeilen)``:
+      * ``True``  – ja: ein nacktes ``drop`` faengt auch Kernel-Sockets.
+      * ``False`` – nein, die Kette ist auf dem Stand von 2026-09-04.
+      * ``None``  – es gibt gar keine Kette (Sperre aus oder nie eingerichtet);
+        ausdruecklich NICHT dasselbe wie "in Ordnung".
+
+    ⚠ WARUM DAS EINE EIGENE FUNKTION IST: der Fix vom 2026-09-04 steckt im
+    RENDERER (``_render_nft``), die laufenden Regeln entstehen aber nur bei
+    ``setup()``. Weder ein ``git pull`` noch die Update-Pille noch ein
+    Dienst-Neustart fassen sie an – auf jedem Server, der die Sperre nutzt,
+    blieb der Fix damit wirkungslos, ohne dass es irgendwo aufgefallen waere.
+    Genau die Klasse "ein Fix, der still nicht ankommt". Diese Funktion ist die
+    Messung, auf der Warnung UND Selbstheilung aufsetzen.
+
+    Sie liest die WIRKSAMEN Regeln (``nft list``), nicht die Datei ``NFT_CONF``:
+    die kann laengst korrekt sein, waehrend im Kernel noch die alte Fassung
+    haengt – das ist sogar der Regelfall nach einem Update.
+    """
+    r = _run([NFT, "list", "table", "inet", NFT_TABLE], timeout=8)
+    if r.returncode != 0:
+        return None, ""
+    text = r.stdout or ""
+    if not text.strip():
+        return None, ""
+    nackt = []
+    for zeile in text.splitlines():
+        z = zeile.strip()
+        if not z or z.startswith("#"):
+            continue
+        if re.search(r"\bdrop\b", z) and not re.search(r"\bskuid\b", z):
+            nackt.append(z)
+    return bool(nackt), "; ".join(nackt[:3])
+
+
 def status(live=False):
     from backend.config import config
     setting = (config.get_setting("sandbox_shell_user_noinet", "") or "").strip()
@@ -112,6 +150,13 @@ def status(live=False):
         "resolvers": _resolvers(),
         "egress_blocked": None,
     }
+    # ⚠ Der Fix vom 2026-09-04 wirkt erst nach einem NEUEN setup(). Ohne diese
+    # Angabe im Status sieht niemand, dass die laufende Kette noch die alte ist
+    # - und jede SMB-/NFS-Freigabe scheitert mit einer Meldung, die in die
+    # falsche Richtung zeigt.
+    veraltet, zeilen = kette_veraltet()
+    st["kernel_drop"] = veraltet          # True = veraltet, None = keine Kette
+    st["kernel_drop_zeilen"] = zeilen
     if live:
         st["egress_blocked"] = _egress_blocked()
     st["ok"] = bool(st["configured"] and st["user_exists"] and st["nft_active"])

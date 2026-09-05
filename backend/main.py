@@ -4076,6 +4076,69 @@ async def startup_jsdom():
 
 
 @app.on_event("startup")
+async def startup_egress_kette():
+    """Laeuft die Internet-Sperre noch mit der ALTEN Regel? Dann WARNEN.
+
+    ⚠ DER FIX VOM 2026-09-04 ERREICHT VON SELBST KEINEN EINZIGEN SERVER. Er
+    steckt im RENDERER (``egress_guard._render_nft``); die laufenden
+    nft-Regeln entstehen aber ausschliesslich bei ``egress_setup``, und das
+    laeuft NUR auf Knopfdruck (*Sicherheit -> Internet-Zugang*). Weder ein
+    ``git pull`` noch die Update-Pille noch ein Dienst-Neustart fassen sie an.
+
+    Auf jedem System mit aktiver Sperre bleibt bis dahin JEDE SMB-/NFS-Freigabe
+    kaputt - mit einer Meldung, die in die falsche Richtung zeigt (am 04.09.
+    gemessen: Ping 0,2 ms, TCP 445 offen, SMB-Handshake gelingt, und der
+    Kernel-Mount scheitert trotzdem). Genau die Klasse "ein Fix, der still
+    nicht ankommt".
+
+    ⚠ HIER WIRD NUR GEMELDET, NICHT GEHANDELT. Das Nachziehen macht Schritt 6f
+    in ``start_jarvis_root.sh`` als root - ein Paketfilter ist eine andere
+    Kategorie als eine fehlende jar, und das Backend laeuft unprivilegiert.
+    Diese Zeile ist der Fall, in dem die Selbstheilung NICHT gegriffen hat
+    (Broker seit dem Update nicht neu gestartet, Automatik abgeschaltet).
+
+    Fail-safe in die RUHIGE Richtung: keine Kette, kein Socket, Ausnahme -> es
+    passiert nichts. Eine Warnung auf Verdacht ist schlimmer als keine.
+    """
+    async def _lauf():
+        try:
+            # ⚠ DIESE ZAHL IST KEINE ZUSAGE UEBER DEN ZEITPUNKT. Der Start
+            # laedt Whisper- und Embedding-Modell und BLOCKIERT dabei den
+            # Event-Loop; live gemessen erscheint die Zeile deshalb nach rund
+            # 45 s, nicht nach 20. Wer frueher nachsieht, haelt einen
+            # funktionierenden Hook fuer tot - genau das ist mir am 2026-09-05
+            # zweimal passiert. Die Wartezeit soll nur Schritt 6f den Vortritt
+            # lassen, damit nicht gewarnt wird, waehrend die Selbstheilung
+            # gerade laeuft.
+            await asyncio.sleep(20)
+            from backend import broker_client
+            res = await broker_client.call("egress_status", {}, user="system",
+                                           timeout=20)
+            st = (res or {}).get("result") or {}
+            if not st.get("nft_active"):
+                return                   # keine Kette - Sperre aus, nichts zu tun
+            if st.get("kernel_drop") is not True:
+                return                   # aktuell (oder nicht messbar)
+            print("[Egress] ⚠ Die laufende Internet-Sperre enthaelt ein 'drop' OHNE "
+                  "Benutzerbindung. Damit scheitert JEDE SMB-/NFS-Freigabe "
+                  "(Kernel-Sockets haben keine skuid), waehrend jeder "
+                  "Userspace-Test gelingt.", flush=True)
+            zeilen = (st.get("kernel_drop_zeilen") or "")[:200]
+            if zeilen:
+                print(f"[Egress]   betroffen: {zeilen}", flush=True)
+            print("[Egress]   Abhilfe: Einstellungen -> Sicherheit -> Internet-Zugang "
+                  "-> 'Einrichten / Reparieren'. Die Sperre selbst aendert sich "
+                  "dadurch NICHT.", flush=True)
+        except Exception as e:                                # noqa: BLE001
+            # ⚠ NICHT STILL: eine Warnung, die selbst ausfaellt, ist wertlos -
+            # und der Ausfall waere von "alles in Ordnung" nicht zu
+            # unterscheiden. Der Grund gehoert ins Journal, gehandelt wird
+            # trotzdem nicht.
+            print(f"[Egress] Zustand nicht pruefbar: {e}", flush=True)
+    asyncio.create_task(_lauf())
+
+
+@app.on_event("startup")
 async def startup_broker_aktualitaet():
     """Laeuft der Root-Broker noch mit ALTEM Code? Dann nachziehen.
 

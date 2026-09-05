@@ -344,6 +344,56 @@ if [ "${JARVIS_TIKA_AUTO:-1}" != "0" ] && [ -f "$TIKA_SETUP" ]; then
     ) &
 fi
 
+# 6f. Internet-Sperre: veraltete Regel nachziehen
+#
+# ⚠ DER FIX VOM 2026-09-04 KOMMT SONST AUF KEINEM SERVER AN. Er steckt im
+# RENDERER (backend/egress_guard.py::_render_nft) – die LAUFENDEN nft-Regeln
+# entstehen aber ausschliesslich bei egress_setup, und das laeuft nur auf
+# Knopfdruck unter Einstellungen -> Sicherheit -> Internet-Zugang. Weder ein
+# git pull noch die Update-Pille noch ein Dienst-Neustart fassen sie an.
+#
+# Die Folge waere still und teuer: auf jedem System mit aktiver Sperre
+# scheitert JEDE SMB-/NFS-Freigabe, weil ein 'drop' ohne Benutzerbindung auch
+# die Kernel-Sockets von CIFS/NFS trifft (die tragen keine skuid). Jeder
+# Userspace-Test gelingt dabei – die Fehlersuche laeuft zuverlaessig in die
+# falsche Richtung. Dieselbe Begruendung wie bei 6c/6d/6e: bei mehreren
+# Servern skaliert nur eine Automatik.
+#
+# ⚠ ES WIRD NUR NACHGEZOGEN, NIE EINGERICHTET. Gibt es gar keine Kette, ist die
+# Sperre bewusst aus – dann passiert hier NICHTS. Ein Paketfilter, der sich bei
+# jedem Start selbst aufsetzt, waere eine andere Kategorie als eine
+# nachgeladene jar. Fail-safe in die ruhige Richtung: bei jeder Unklarheit
+# (kein nft, keine Kette, Ausnahme) bleibt alles wie es ist.
+#
+# Abschaltbar mit JARVIS_EGRESS_AUTOFIX=0.
+if [ "${JARVIS_EGRESS_AUTOFIX:-1}" != "0" ] && command -v nft >/dev/null 2>&1; then
+    (
+        # Nur die WIRKSAMEN Regeln zaehlen, nicht die Datei: die kann laengst
+        # korrekt sein, waehrend im Kernel die alte Fassung haengt – nach einem
+        # Update ist genau das der Regelfall.
+        KETTE="$(nft list table inet jarvis_egress 2>/dev/null)"
+        if [ -n "$KETTE" ]; then
+            # Ein 'drop' OHNE skuid trifft auch Verkehr ohne Socket-Eigentuemer.
+            NACKT="$(printf '%s\n' "$KETTE" | grep -E '\bdrop\b' | grep -vE '\bskuid\b' | head -3)"
+            if [ -n "$NACKT" ]; then
+                echo "[Egress] Die laufende Sperre enthaelt ein 'drop' ohne Benutzerbindung – ziehe nach (SMB/NFS waeren sonst tot)."
+                AUSGABE="$(./venv/bin/python -c 'from backend import egress_guard as e; r=e.setup(); print("OK" if r.get("ok") else "FEHLER"); [print(" ", s["name"], "ok" if s["ok"] else "FEHLER", s.get("detail","")[:120]) for s in r.get("steps",[])]' 2>&1)"
+                RC=$?
+                printf '%s\n' "$AUSGABE" | sed 's/^/[Egress] /'
+                # ⚠ MASSGEBLICH IST DER ZUSTAND, NICHT DER RUECKGABEWERT: ein
+                # "Erfolg", der die alte Regel stehen laesst, ist eine Zusage,
+                # die der naechste Mount kassiert.
+                REST="$(nft list table inet jarvis_egress 2>/dev/null | grep -E '\bdrop\b' | grep -vE '\bskuid\b' | head -1)"
+                if [ -z "$REST" ]; then
+                    echo "[Egress] ✓ nachgezogen – Netzwerk-Freigaben funktionieren wieder."
+                else
+                    echo "[Egress] WARNUNG: die alte Regel steht weiterhin (rc=$RC). Abhilfe von Hand: Einstellungen -> Sicherheit -> Internet-Zugang -> 'Einrichten / Reparieren'." >&2
+                fi
+            fi
+        fi
+    ) &
+fi
+
 # 7. Root-Broker starten (Vordergrund-Prozess dieses Dienstes)
 echo "Starte Root-Broker..."
 export JARVIS_BROKER_GROUP="${JARVIS_BROKER_GROUP:-jarvis}"

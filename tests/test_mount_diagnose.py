@@ -19,6 +19,7 @@ Zwei Dinge werden hier gemessen, beide AUSGEFUEHRT statt im Quelltext gesucht:
 import ast
 import re
 import sys
+from pathlib import Path
 import time
 
 OK = FAIL = 0
@@ -137,8 +138,24 @@ check("alle vier Bausteine geschnitten",
                               "_smb2_negotiate", "_egress_offen_fuer_kernel")))
 
 
+# ⚠ Die Egress-Messung liegt seit 2026-09-05 in egress_guard.kette_veraltet() -
+# ops.py baut sie NICHT mehr selbst nach (eine zweite Fassung waere beim
+# naechsten Feinschliff auseinandergelaufen). Der Test stellt deshalb nicht
+# mehr nur ops._run, sondern laesst die ECHTE Funktion laufen und stellt nur
+# den nft-Aufruf darin - das ist die staerkere Aussage.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from backend import egress_guard as _eg                        # noqa: E402
+
+
+class _NftAntwort:
+    """Was subprocess.run zurueckgibt - egress_guard._run liefert genau das."""
+    def __init__(self, rc, out):
+        self.returncode, self.stdout, self.stderr = rc, out, ""
+
+
 def lauf(*, ports, smb, dns=True, egress=None, kern="", mounts=""):
     """Die ECHTE Op ausfuehren - nur Netz und Kernel sind gestellt."""
+    _eg._run = lambda *a, **k: _NftAntwort(0 if egress is not None else 1, egress or "")
     ns = {"re": re, "time": time}
     ns["_run"] = lambda cmd, **k: (
         {"ok": True, "stdout": "rtt min/avg/max = 7.9/7.9/7.9 ms", "stderr": ""}

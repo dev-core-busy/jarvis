@@ -1106,12 +1106,16 @@ class JarvisKnowledgeManager {
           </summary>
           <table class="kb-cl-bilanz-tab"><tbody>
             <tr><td>${this._escHtml(window.t('knowledge.cleanup.b_basis'))}</td>
-                <td class="kb-cl-zahl">${z(b.basis)}</td><td class="kb-cl-meta">${this._escHtml(window.t('knowledge.cleanup.b_basis_note'))}</td></tr>
+                <td class="kb-cl-zahl">${z(b.basis)}</td><td class="kb-cl-meta">${this._escHtml(window.t(
+                    b.zuschnitt_aktiv ? 'knowledge.cleanup.b_basis_note_zu'
+                                      : 'knowledge.cleanup.b_basis_note'))}</td></tr>
             <tr><td>${this._escHtml(window.t('knowledge.cleanup.b_anw'))}</td>
                 <td class="kb-cl-zahl">${z(b.anweisungen)}${mitVergleich && spar > 0 ? ` → ${z(b.anweisungen_neu)}` : ''}</td>
                 <td class="kb-cl-meta">${this._escHtml(window.t('knowledge.cleanup.b_anw_note'))}</td></tr>
             <tr><td>${this._escHtml(window.t('knowledge.cleanup.b_wz'))} (${b.werkzeuge_anzahl})</td>
-                <td class="kb-cl-zahl">${z(b.werkzeuge_bytes)}</td><td class="kb-cl-meta">${this._escHtml(window.t('knowledge.cleanup.b_wz_note'))}</td></tr>
+                <td class="kb-cl-zahl">${z(b.werkzeuge_bytes)}</td><td class="kb-cl-meta">${this._escHtml(window.t(
+                    b.zuschnitt_aktiv ? 'knowledge.cleanup.b_wz_note_zu'
+                                      : 'knowledge.cleanup.b_wz_note'))}</td></tr>
           </tbody></table>
           ${b.hinweis ? `<p class="kb-hint">${this._escHtml(b.hinweis)}</p>` : ''}
           ${wz ? `<p class="kb-cl-gruppe-titel">${this._escHtml(window.t('knowledge.cleanup.b_wz_top'))}</p>

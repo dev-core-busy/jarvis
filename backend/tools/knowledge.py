@@ -121,6 +121,110 @@ def _set_progress(**kwargs):
         _index_progress.update(kwargs)
 
 
+# ══ Der GRUND eines Fehlschlags, vom Extraktor bis zum Aufrufer ═══════════
+# ⚠ Der Kommentar in `_extract_text_raw` verwies auf ein `_failure_reason`, das
+# es NIE gab - der Grund ging deshalb verloren, und `_unlesbar_grund` RIET ihn.
+# Auf ECHT stand dadurch "OneNote-Abschnitt ohne auslesbaren Text" bei einer
+# 46-MB-Datei, die in Wahrheit in den 120-Sekunden-Zeitdeckel gelaufen war. Wer
+# den falschen Grund liest, sucht am falschen Ende.
+_extrakt_gruende: dict = {}
+_extrakt_grund_lock = threading.Lock()
+
+
+def _merke_extrakt_grund(filepath, grund: str) -> None:
+    if not grund:
+        return
+    with _extrakt_grund_lock:
+        _extrakt_gruende[str(filepath)] = str(grund)[:300]
+        if len(_extrakt_gruende) > 500:      # Deckel, aelteste zuerst
+            for k in list(_extrakt_gruende)[:len(_extrakt_gruende) - 500]:
+                _extrakt_gruende.pop(k, None)
+
+
+def _letzter_extrakt_grund(filepath) -> str:
+    """Was der Extraktor zuletzt zu DIESER Datei gemeldet hat ("" = nichts)."""
+    with _extrakt_grund_lock:
+        return _extrakt_gruende.get(str(filepath), "")
+
+
+# ══ Negativer Cache fuer unlesbare Dateien ════════════════════════════════
+# ⚠ AUF ECHT BEZAHLT (2026-09-06): eine 46,5-MB-Datei `Anleitungen SAP.one` lief
+# bei JEDEM inkrementellen Reindex in den 120-Sekunden-Deckel von Tika. Weil ein
+# Fehlschlag nirgends gemerkt wurde, versuchte es der naechste Lauf erneut - und
+# JEDE `knowledge_search` ruft `_rebuild_vector_index`. Gemessen: 120,7 / 120,9 /
+# 120,9 s je Suche, ein Chat-Auftrag mit vier Suchen dauerte 496,8 Sekunden.
+#
+# Der Cache merkt den Fehlschlag MIT mtime und Groesse: aendert sich die Datei,
+# wird sie wieder versucht. Damit heilt er von selbst und haelt trotzdem eine
+# dauerhaft unlesbare Datei aus dem heissen Pfad heraus.
+def _unlesbar_pfad() -> Path:
+    """FUNKTION, keine Konstante - der Index-Pfad kann in Tests umgebogen sein."""
+    try:
+        from backend.tools import vector_store as _vs
+        basis = Path(getattr(_vs, "INDEX_PATH", "")).parent
+        if str(basis) not in ("", "."):
+            return basis / "unlesbar.json"
+    except Exception:  # noqa: BLE001
+        pass
+    return PROJECT_ROOT / "data" / "vector_store" / "unlesbar.json"
+
+
+def _unlesbar_laden() -> dict:
+    try:
+        with open(_unlesbar_pfad(), encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _unlesbar_speichern(d: dict) -> None:
+    try:
+        p = _unlesbar_pfad()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False)
+        os.replace(tmp, p)
+    except Exception as e:  # noqa: BLE001
+        _log.warning("Negativ-Cache nicht schreibbar: %s", e)
+
+
+def _unlesbar_ueberspringen(path_str: str, mtime: float, groesse: int) -> str | None:
+    """Ist diese Datei bekannt unlesbar UND unveraendert? Dann der Grund, sonst None.
+
+    ⚠ mtime UND Groesse: eine geaenderte Datei bekommt eine neue Chance. Ohne
+    dieses Paar waere der Cache eine Sackgasse - eine reparierte Datei kaeme nie
+    wieder in den Index.
+    """
+    e = _unlesbar_laden().get(path_str)
+    if not isinstance(e, dict):
+        return None
+    if abs(float(e.get("mtime") or 0) - float(mtime)) > 1e-6:
+        return None
+    if int(e.get("groesse") or -1) != int(groesse):
+        return None
+    return str(e.get("grund") or "bekannt unlesbar")
+
+
+def _unlesbar_merken(path_str: str, mtime: float, groesse: int, grund: str) -> None:
+    d = _unlesbar_laden()
+    d[path_str] = {"mtime": float(mtime), "groesse": int(groesse),
+                   "grund": str(grund)[:300], "ts": time.time()}
+    # Deckel: der Cache soll nicht unbegrenzt wachsen, aelteste zuerst weg.
+    if len(d) > 2000:
+        for k, _v in sorted(d.items(), key=lambda x: x[1].get("ts", 0))[:len(d) - 2000]:
+            d.pop(k, None)
+    _unlesbar_speichern(d)
+
+
+def _unlesbar_vergessen(path_str: str) -> None:
+    """Nach einem Erfolg den Eintrag entfernen - sonst bleibt eine Karteileiche."""
+    d = _unlesbar_laden()
+    if d.pop(path_str, None) is not None:
+        _unlesbar_speichern(d)
+
+
 def _note_failed(path: str, grund: str) -> None:
     """Haelt eine gescheiterte Datei MIT GRUND fest – fuer die Oberflaeche.
 
@@ -304,13 +408,28 @@ def _rebuild_vector_index(folders: list[Path], max_bytes: int, force: bool = Fal
         _set_progress(vector_done=i + 1, phase=f"Vektor: {filepath.name[:40]}",
                       current_file=filepath.name)
         try:
-            mtime = filepath.stat().st_mtime
+            _st = filepath.stat()
+            mtime = _st.st_mtime
+            # ⚠ BEKANNT UNLESBAR UND UNVERAENDERT? Dann gar nicht erst versuchen.
+            # Ohne diese Zeile kostet eine dauerhaft unlesbare Datei bei JEDEM
+            # Reindex ihren vollen Zeitdeckel - und jede knowledge_search stoesst
+            # einen Reindex an. Auf ECHT waren das 120 s je Suche (2026-09-06).
+            _bekannt = _unlesbar_ueberspringen(path_str, mtime, _st.st_size)
+            if _bekannt is not None:
+                failed += 1
+                _note_failed(path_str, f"{_bekannt} (uebersprungen, unveraendert)")
+                continue
             text = _extract_text(filepath, max_bytes)
             if text and text.strip():
                 chunks = _chunk_text(text)
                 # save=False: nicht bei jeder Datei den ganzen Index schreiben.
                 vs.add_chunks(path_str, chunks, mtime, save=False)
                 changed += 1
+                # Erfolg: eine etwaige Karteileiche im Negativ-Cache raeumen.
+                try:
+                    _unlesbar_vergessen(path_str)
+                except Exception:  # noqa: BLE001
+                    pass
             elif text is None:
                 # NICHT lesbar (zu gross, Parser fehlt, defekt) – der bisherige
                 # Indexstand BLEIBT. Frueher wurde hier entfernt: eine wachsende
@@ -318,6 +437,12 @@ def _rebuild_vector_index(folders: list[Path], max_bytes: int, force: bool = Fal
                 # Chunks, ohne dass irgendwo ein Fehler auftauchte.
                 failed += 1
                 grund = _unlesbar_grund(filepath, max_bytes)
+                # ⚠ MERKEN, sonst kostet dieselbe Datei bei JEDER Suche erneut
+                # ihren Zeitdeckel (auf ECHT: 120 s je knowledge_search).
+                try:
+                    _unlesbar_merken(path_str, mtime, filepath.stat().st_size, grund)
+                except Exception:  # noqa: BLE001
+                    pass
                 if path_str in indexed:
                     _note_failed(path_str, f"{grund} – bisheriger Indexstand bleibt erhalten")
                     _log.warning("Nicht lesbar (%s), bisheriger Indexstand bleibt: %s",
@@ -1144,8 +1269,14 @@ def _unlesbar_grund(filepath: Path, max_bytes: int) -> str:
     if suffix in (EXTENSIONS_VIDEO | EXTENSIONS_AUDIO):
         return "Audio/Video ohne Transkript (benoetigt faster-whisper)"
     if suffix in EXTENSIONS_ONENOTE:
-        # Der Grund steht im Extraktor: fehlt Java/Tika, ist das die Ursache
-        # und der Text nennt den Weg. Sonst war die Datei wirklich leer.
+        # ⚠ DER ECHTE GRUND ZUERST. `text_aus_datei` liefert ihn mit ("Zeitlimit
+        # von 120 s ueberschritten"), er ging auf dem Weg hierher aber verloren -
+        # im Log stand dann "ohne auslesbaren Text" bei einer 46-MB-Datei, die in
+        # Wahrheit in den Zeitdeckel gelaufen war. Wer den falschen Grund liest,
+        # sucht am falschen Ende (auf ECHT am 2026-09-06 genau so passiert).
+        letzter = _letzter_extrakt_grund(filepath)
+        if letzter:
+            return letzter
         try:
             from backend.tools.onenote import fehlender_baustein
             hinweis = fehlender_baustein()
@@ -1346,11 +1477,13 @@ def _extract_text_rest(filepath: Path, max_bytes: int) -> str | None:
             return None
 
     if suffix in EXTENSIONS_ONENOTE:
-        # Der Grund wird hier nur protokolliert – der Aufrufer holt ihn bei
-        # Bedarf ueber _failure_reason. Ein zweiter Rueckgabewert haette jede
+        # Der Grund wird protokolliert UND gemerkt - der Aufrufer holt ihn
+        # ueber _letzter_extrakt_grund(). Ein zweiter Rueckgabewert haette jede
         # Aufrufstelle von _extract_text_raw angefasst.
         from backend.tools.onenote import text_aus_datei
         text, grund = text_aus_datei(filepath)
+        # Der Grund muss den Aufrufer erreichen - siehe _merke_extrakt_grund.
+        _merke_extrakt_grund(filepath, grund)
         if text is None:
             _log.info(f"OneNote nicht gelesen: {filepath.name} – {grund}")
         else:

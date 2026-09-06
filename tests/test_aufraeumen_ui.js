@@ -556,6 +556,27 @@ check('und er sagt, dass es eine OBERGRENZE ist',
 const I18N2 = fs.readFileSync(path.join(REPO, 'frontend/js/i18n.js'), 'utf8');
 check('der Text gibt es in DE und EN',
       (I18N2.match(/'knowledge\.cleanup\.b_zuschnitt':/g) || []).length === 2);
+// ⚠ VOM BETREIBER GEMELDET (2026-09-06): "gehen bei jeder Anfrage mit - nur im
+// Code aenderbar" stimmt seit dem Zuschnitt NICHT mehr. Eine Anzeige, die einen
+// Zustand behauptet, den sie nicht kennt - und hier widersprach sie sogar dem
+// Hinweis zwei Zeilen darunter. Die Erklaerspalten haengen jetzt am Zuschnitt.
+Bz.zuschnitt_aktiv = false;
+document.getElementById('kb-cleanup-body').innerHTML = M._bilanzHtml(Bz, false);
+let txtAus = document.getElementById('kb-cleanup-body').textContent;
+check('ohne Zuschnitt: "gehen bei jeder Anfrage mit"',
+      /bei jeder Anfrage mit/.test(txtAus));
+Bz.zuschnitt_aktiv = true;
+document.getElementById('kb-cleanup-body').innerHTML = M._bilanzHtml(Bz, false);
+let txtAn = document.getElementById('kb-cleanup-body').textContent;
+check('⚠ MIT Zuschnitt steht das NICHT mehr da (es waere falsch)',
+      !/bei jeder Anfrage mit/.test(txtAn));
+check('⚠ stattdessen: Obergrenze / nur das passende Buendel',
+      /Obergrenze/.test(txtAn) && /Bündel/.test(txtAn));
+check('auch die Basis-Zeile sagt, dass Abschnitte entfallen',
+      /entfallen/.test(txtAn));
+check('die vier neuen Texte gibt es in DE und EN',
+      (I18N2.match(/'knowledge\.cleanup\.b_wz_note_zu':/g) || []).length === 2
+      && (I18N2.match(/'knowledge\.cleanup\.b_basis_note_zu':/g) || []).length === 2);
 
 clearTimeout(wachhund);
 console.log(`\n\x1b[1mErgebnis: ${OK} OK, ${FAIL} FAIL\x1b[0m`);

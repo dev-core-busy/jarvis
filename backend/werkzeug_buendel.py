@@ -191,6 +191,24 @@ def zuschnitt(werkzeuge: list, aufgabe: str) -> tuple[list, str]:
     tr = themen(aufgabe)
     if not tr:
         return werkzeuge, "voll (kein Thema erkannt)"
+    return zuschnitt_themen(werkzeuge, tr)
+
+
+def zuschnitt_themen(werkzeuge: list, tr: set) -> tuple[list, str]:
+    """Dieselbe Regel, aber mit BEREITS bestimmten Themen.
+
+    ⚠ HIER LIEGT DIE REGEL - ``zuschnitt()`` bestimmt nur die Themen und ruft
+    dann hierher. Es gibt sie einmal, nicht zweimal: eine zweite Fassung liefe
+    beim naechsten Feinschliff auseinander, und dann zeigte die Bilanz eine
+    andere Spanne, als der Agent wirklich anwendet.
+
+    Gebraucht wird der Einstieg ohne Auftragstext von ``prompt_bilanz()``: die
+    Anzeige muss die SPANNE ueber alle Themen rechnen, und dafuer gibt es keinen
+    Auftrag - ein synthetischer Beispielsatz waere von den Regex-Mustern
+    abhaengig und damit eine zweite Heuristik.
+    """
+    if not tr:
+        return werkzeuge, "voll (kein Thema erkannt)"
     kern = set(KERN)
     behalten = [t for t in werkzeuge
                 if getattr(t, "name", "") in kern
@@ -201,6 +219,17 @@ def zuschnitt(werkzeuge: list, aufgabe: str) -> tuple[list, str]:
     if not behalten:
         return werkzeuge, "voll (Zuschnitt waere leer)"
     return behalten, "+".join(sorted(tr))
+
+
+def alle_themen() -> tuple[str, ...]:
+    """Die Themen, die die Heuristik ueberhaupt erkennen kann.
+
+    Aus ``_MUSTER`` abgeleitet, NICHT aus ``BUENDEL``: 'fach' und
+    'kommunikation' haben leere Buendel (sie kommen ueber PRAEFIXE) und wuerden
+    aus einer Buendel-Liste herausfallen - also genau die zwei Themen, die auf
+    ECHT die groessten Werkzeugfamilien tragen.
+    """
+    return tuple(sorted(_MUSTER))
 
 
 # ══ Prompt-Zuschnitt ══════════════════════════════════════════════════════

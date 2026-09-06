@@ -1519,6 +1519,13 @@ const _I18N = {
         'knowledge.cleanup.done':         '{n} Datei(en) geschrieben.',
         'knowledge.cleanup.backup':       'Sicherung',
         'knowledge.cleanup.bilanz_titel': 'Was bei einer Anfrage an das Modell geht:',
+        // ⚠ EIGENE Kopfzeile bei aktivem Zuschnitt: die Zahl dahinter ist dann die
+        // OBERGRENZE, nicht der Ist-Wert. Mit dem alten Titel war die Zeile eine
+        // Falschaussage (gemeldet 2026-09-06) - und sie ist die EINZIGE, die man im
+        // zugeklappten Zustand sieht.
+        'knowledge.cleanup.bilanz_titel_zu': 'Obergrenze je Anfrage:',
+        'knowledge.cleanup.bilanz_spanne': '– je Aufgabe gehen {min}–{max} Zeichen raus (~{tmin}–{tmax} Token), Werkzeug-Zuschnitt aktiv',
+        'knowledge.cleanup.bilanz_spanne_kurz': '– je Aufgabe geht weniger raus (Werkzeug-Zuschnitt aktiv)',
         'knowledge.cleanup.b_basis':      'Basis-Prompt',
         'knowledge.cleanup.b_basis_note': 'steht im Programmcode – hier nicht änderbar',
         'knowledge.cleanup.b_basis_note_zu': 'steht im Programmcode – Obergrenze: Abschnitte ohne passendes Werkzeug entfallen je Aufgabe',
@@ -1529,7 +1536,7 @@ const _I18N = {
         'knowledge.cleanup.b_wz_note_zu': 'Obergrenze – je Aufgabe geht nur das passende Bündel mit (Werkzeug-Zuschnitt aktiv)',
         'knowledge.cleanup.b_wz_top':     'Die größten Werkzeug-Schemata (Zeichen):',
         'knowledge.cleanup.b_token_note': 'Die Zeichen sind gemessen, die Token geschätzt (÷3,6). Der eigentliche Verlauf und die Anhänge kommen bei jeder Anfrage noch dazu.',
-        'knowledge.cleanup.b_zuschnitt':  'Hinweis: Der aufgabenabhängige Zuschnitt ist eingeschaltet. Die Zahlen oben sind die OBERGRENZE – je nach Auftrag geht weniger raus (gemessen: bis zu zwei Drittel weniger). Was hier gekürzt wird, wirkt in jedem Fall.',
+        'knowledge.cleanup.b_zuschnitt':  'Der aufgabenabhängige Zuschnitt ist eingeschaltet: Basis-Prompt und Werkzeug-Beschreibungen gehen nur so weit mit, wie die Aufgabe sie braucht – erkennt die Heuristik kein Thema, gilt die Obergrenze. Die Anweisungsdateien sind davon NICHT betroffen: was dieser Dialog kürzt, wirkt bei jeder Anfrage.',
         'knowledge.cleanup.k_btn':        'Widersprüche über alle Anweisungen',
         'knowledge.cleanup.k_btn_title':  'Prüft die Anweisungen GEGENEINANDER – Widersprüche zwischen zwei Dateien sieht die Einzelprüfung nicht. Der Basis-Prompt wird als Referenz einbezogen.',
         'knowledge.cleanup.k_running':    'Die Regeln werden jetzt gegeneinander geprüft …',
@@ -4743,6 +4750,9 @@ const _I18N = {
         'knowledge.cleanup.done':         '{n} file(s) written.',
         'knowledge.cleanup.backup':       'backup',
         'knowledge.cleanup.bilanz_titel': 'What goes to the model on a single request:',
+        'knowledge.cleanup.bilanz_titel_zu': 'Upper bound per request:',
+        'knowledge.cleanup.bilanz_spanne': '– per task {min}–{max} characters go out (~{tmin}–{tmax} tokens), tool cut enabled',
+        'knowledge.cleanup.bilanz_spanne_kurz': '– less goes out per task (tool cut enabled)',
         'knowledge.cleanup.b_basis':      'Base prompt',
         'knowledge.cleanup.b_basis_note': 'lives in the code – not editable here',
         'knowledge.cleanup.b_basis_note_zu': 'lives in the code – upper bound: sections without a matching tool are dropped per task',
@@ -4753,7 +4763,7 @@ const _I18N = {
         'knowledge.cleanup.b_wz_note_zu': 'upper bound – only the matching bundle is sent per task (tool cut enabled)',
         'knowledge.cleanup.b_wz_top':     'Largest tool schemas (characters):',
         'knowledge.cleanup.b_token_note': 'Characters are measured, tokens estimated (÷3.6). The conversation itself and attachments come on top of this with every request.',
-        'knowledge.cleanup.b_zuschnitt':  'Note: the task-based tool cut is enabled. The figures above are the UPPER BOUND – depending on the task, less is sent (measured: up to two thirds less). Whatever you trim here takes effect in every case.',
+        'knowledge.cleanup.b_zuschnitt':  'The task-based cut is enabled: base prompt and tool descriptions are only sent as far as the task needs them – if the heuristic detects no topic, the upper bound applies. The instruction files are NOT affected: whatever you trim here takes effect on every request.',
         'knowledge.cleanup.k_btn':        'Contradictions across all instructions',
         'knowledge.cleanup.k_btn_title':  'Checks the instructions AGAINST EACH OTHER – the per-file check cannot see a contradiction between two files. The base prompt is included as a reference.',
         'knowledge.cleanup.k_running':    'Now comparing the rules against each other …',

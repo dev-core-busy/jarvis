@@ -681,6 +681,13 @@ def prompt_bilanz(neu_je_datei: dict[str, str] | None = None) -> dict:
 
     Der Token-Wert ist eine SCHAETZUNG (``ZEICHEN_JE_TOKEN``) und sagt das auch;
     die Zeichen sind gemessen. Dieselbe Ehrlichkeit wie im Delegations-Bericht.
+
+    ⚠ BEI AKTIVEM WERKZEUG-ZUSCHNITT IST ``summe`` DIE OBERGRENZE, NICHT DER
+    IST-WERT. Dann stehen zusaetzlich ``zuschnitt_min``/``zuschnitt_max`` (samt
+    Thema) darin - die real gemessene Spanne ueber die einzelnen Themen. Wer die
+    Zahl anzeigt, MUSS die Beschriftung daran haengen: die Kopfzeile "Was bei
+    einer Anfrage an das Modell geht" war mit Zuschnitt eine Falschaussage
+    (gemeldet 2026-09-06), und der erklaerende Zusatz lag im zugeklappten Teil.
     """
     ZEICHEN_JE_TOKEN = 3.6
     aus = {"ok": True, "zeichen_je_token": ZEICHEN_JE_TOKEN, "hinweis": ""}
@@ -768,6 +775,49 @@ def prompt_bilanz(neu_je_datei: dict[str, str] | None = None) -> dict:
 
     def tok(n):
         return round(n / ZEICHEN_JE_TOKEN)
+
+    # ── Was der Zuschnitt davon uebrig laesst - GEMESSEN, nicht "weniger" ──
+    # ⚠ WARUM DAS HIERHER GEHOERT: die Kopfzeile heisst "Was bei einer Anfrage
+    # an das Modell geht" und nannte bei aktivem Zuschnitt trotzdem den vollen
+    # Satz. Der erklaerende Zusatz stand in der Meta-Spalte und in einer
+    # Fussnote - beide INNERHALB des <details>, das im Regelfall ZU ist. Der
+    # Administrator sah also genau eine Zeile, und die war falsch (gemeldet
+    # 2026-09-06). Eine Anzeige darf keinen Zustand behaupten, den sie nicht
+    # kennt - und der erklaerende Satz muss dort stehen, wo die Zahl steht.
+    #
+    # Die Spanne wird ueber die EINZELNEN Themen gerechnet: ein Auftrag trifft
+    # mindestens eines, mehrere sind additiv und liegen dazwischen bis zum
+    # vollen Satz. Ohne erkanntes Thema gilt die Obergrenze - das steht im Text.
+    if aus.get("zuschnitt_aktiv") and werkzeuge:
+        try:
+            from backend import werkzeug_buendel as _wb
+            sp_voll = getattr(type(ag), "SYSTEM_PROMPT", "") or ""
+            je_thema = {}
+            for thema in _wb.alle_themen():
+                gek, _g = _wb.zuschnitt_themen(list(werkzeuge), {thema})
+                erlaubt = {getattr(t, "name", "") for t in gek}
+                # Der Prompt-Zuschnitt greift auf SYSTEM_PROMPT; was
+                # _base_system_prompt danach anhaengt (Zeit, Rollen, Pflicht-
+                # Hinweise) traegt keine Abschnittsnummern und bleibt. Deshalb
+                # die ERSPARNIS dort rechnen und von der Obergrenze abziehen -
+                # nicht den zusammengesetzten Text neu schneiden.
+                p_text, _weg = _wb.prompt_zuschnitt(sp_voll, erlaubt)
+                basis_t = len(basis) - (len(sp_voll) - len(p_text))
+                wz_t = sum(w["bytes"] for w in wz if w["name"] in erlaubt)
+                je_thema[thema] = basis_t + len(anweisungen) + wz_t
+            if je_thema:
+                mi = min(je_thema, key=je_thema.get)
+                ma = max(je_thema, key=je_thema.get)
+                aus.update({
+                    "zuschnitt_min": je_thema[mi], "zuschnitt_min_thema": mi,
+                    "zuschnitt_max": je_thema[ma], "zuschnitt_max_thema": ma,
+                    "zuschnitt_token_min": tok(je_thema[mi]),
+                    "zuschnitt_token_max": tok(je_thema[ma]),
+                })
+        except Exception as e:                                # noqa: BLE001
+            # Fail-open: ohne Spanne bleibt die Obergrenze stehen, und die
+            # Kopfzeile sagt weiterhin, DASS zugeschnitten wird.
+            print(f"[Bilanz] Zuschnitt-Spanne uebersprungen: {e}", flush=True)
 
     aus.update({
         "basis": len(basis), "anweisungen": len(anweisungen),

@@ -4446,6 +4446,19 @@ body.light .kb-cl-diff .dn { color: #146c38; }
     font-weight: 600; }
 .kb-cl-spar { color: var(--success, #2e9e5b); }
 body.light .kb-cl-spar { color: #146c38; }
+/* Die gemessene Spanne steht NEBEN der Obergrenze, nicht darunter: sie ist die
+   Einschraenkung der Zahl davor und muss mit ihr zusammen gelesen werden.
+   Gedaempft und normal gewichtet, damit die Obergrenze die Hauptaussage bleibt;
+   `display: block` bei schmalem Fenster, sonst schiebt sie das <summary> in die
+   Breite und der Kasten laeuft ueber. */
+/* ⚠ EIGENE Toene statt --text-muted: der GEMESSEN 3,73:1 (dunkel) bzw. 3,72:1
+   (hell) - unter der 4,5:1-Grenze. Fuer eine Beschriftung waere das vertretbar,
+   hier steht aber eine ZAHL, die der Administrator lesen soll. Jetzt 6,92:1 und
+   5,81:1, beide weiterhin deutlich gedaempfter als der Fliesstext daneben.
+   Nur hier, nicht projektweit. */
+.kb-cl-spanne { color: #94a3b8; font-weight: 400; }
+body.light .kb-cl-spanne { color: #5b6678; }
+@media (max-width: 640px) { .kb-cl-spanne { display: block; margin-top: 2px; } }
 .kb-cl-art { font-weight: 700; font-size: .78rem; text-transform: uppercase;
     letter-spacing: .03em; }
 .kb-cl-karte.ist-warn { border-left: 3px solid var(--danger, #c0392b); }

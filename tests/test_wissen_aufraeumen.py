@@ -362,6 +362,9 @@ def _mit_agent(fn, mit_agent=True):
         elif hasattr(_pkg, "agent"):
             del _pkg.agent
 
+from backend import werkzeug_buendel as _wb_t
+wa_themen = set(_wb_t.alle_themen())
+
 b = _mit_agent(lambda: wa.prompt_bilanz())
 check("die Bilanz laeuft", b.get("ok") is True)
 check("sie nennt den Basis-Prompt", b.get("basis") == 1000)
@@ -382,6 +385,70 @@ check("⚠ und fasst die Datei dabei NICHT an",
 check("ohne laufenden Agenten wird das GESAGT, nicht geraten",
       "laeuft noch nicht" in (_mit_agent(lambda: wa.prompt_bilanz(),
                                          mit_agent=False).get("hinweis") or ""))
+
+# ── 6b2. Bei aktivem Zuschnitt ist die Summe die OBERGRENZE ───────────────
+# ⚠ GEMELDET 2026-09-06: die Kopfzeile hiess "Was bei einer Anfrage an das
+# Modell geht" und nannte den vollen Satz, obwohl der Werkzeug-Zuschnitt lief.
+# Die Korrektur stand in der Meta-Spalte und einer Fussnote - beide INNERHALB
+# des <details>, das im Regelfall ZU ist. Sichtbar war also genau eine Zeile,
+# und die war falsch. Gemessen wird hier die ZAHL dahinter; dass die Anzeige
+# sie richtig beschriftet, prueft test_aufraeumen_ui.js.
+print("\n\033[1m6b2. Zuschnitt: die Summe ist die Obergrenze, die Spanne wird gemessen\033[0m")
+
+class _AgentZu(_Agent):
+    # Echte Abschnittsnummern - ohne sie hat prompt_zuschnitt() nichts zu
+    # schneiden und die Spanne waere trivial gleich der Obergrenze.
+    SYSTEM_PROMPT = ("1. GRUNDREGEL: sei hoeflich. " + "x" * 200 + "\n"
+                     "15. BILDER: nimm generate_image. " + "y" * 900 + "\n"
+                     "16. OFFICE: nimm office_create_word. " + "z" * 900 + "\n"
+                     "20. DIAGRAMME: nimm create_chart. " + "w" * 900 + "\n")
+    def _base_system_prompt(self, voll=False):
+        return self.SYSTEM_PROMPT + "\n\n## JETZT\nMontag, 6. September 2026"
+    def _buendel_aktiv(self):
+        return True
+    def werkzeuge_fuer_anzeige(self):
+        return [_Werkzeug("knowledge_search", {"a": "b" * 100}, "k" * 50),
+                _Werkzeug("generate_image", {"a": "b" * 300}, "g" * 50),
+                _Werkzeug("office_create_word", {"a": "b" * 300}, "o" * 50),
+                _Werkzeug("create_chart", {"a": "b" * 300}, "c" * 50),
+                _Werkzeug("sap_odata_query", {"a": "b" * 900}, "s" * 50)]
+
+def _mit_zuschnitt(fn):
+    """Wie ``_mit_agent``, aber mit einem Agenten, der den Zuschnitt fuehrt."""
+    global _Agent
+    _echt, _Agent = _Agent, _AgentZu
+    try:
+        return _mit_agent(fn)
+    finally:
+        _Agent = _echt
+
+bz = _mit_zuschnitt(lambda: wa.prompt_bilanz())
+check("die Bilanz laeuft auch mit Zuschnitt", bz.get("ok") is True)
+check("⚠ sie SAGT, dass zugeschnitten wird", bz.get("zuschnitt_aktiv") is True)
+check("die Summe bleibt die volle Obergrenze (nicht der Zuschnitt eines Laufs)",
+      bz.get("werkzeuge_anzahl") == 5)
+check("⚠ die Spanne wird GERECHNET, nicht behauptet",
+      isinstance(bz.get("zuschnitt_min"), int) and isinstance(bz.get("zuschnitt_max"), int))
+check("und sie liegt UNTER der Obergrenze",
+      0 < bz.get("zuschnitt_min", 0) <= bz.get("zuschnitt_max", 0) < bz.get("summe", 0))
+check("die Spanne nennt ihre Themen (sonst ist die Zahl nicht deutbar)",
+      bz.get("zuschnitt_min_thema") in wa_themen and bz.get("zuschnitt_max_thema") in wa_themen)
+check("⚠ die ANWEISUNGSDATEIEN stecken in JEDER Spanne - genau das sagt der "
+      "Hinweistext zu ('was hier gekuerzt wird, wirkt in jedem Fall')",
+      bz.get("zuschnitt_min", 0) > bz.get("anweisungen", 0))
+check("die Token der Spanne sind mit derselben Schaetzung gerechnet",
+      bz.get("zuschnitt_token_min") == round(bz.get("zuschnitt_min", 0) / 3.6))
+# ⚠ Die Regel darf es nur EINMAL geben: rechnete die Bilanz selbst, statt
+# zuschnitt_themen() zu rufen, zeigte sie beim naechsten Feinschliff der
+# Buendel eine andere Spanne, als der Agent wirklich anwendet.
+_quelle_pb = open(REPO / "backend/wissen_aufraeumen.py", encoding="utf-8").read()
+_rumpf_pb = next((ast.unparse(x) for x in ast.walk(ast.parse(_quelle_pb))
+                  if isinstance(x, ast.FunctionDef) and x.name == "prompt_bilanz"), "")
+check("⚠ sie benutzt die ECHTE Zuschnitt-Regel, statt sie nachzubauen",
+      "zuschnitt_themen" in _rumpf_pb and "alle_themen" in _rumpf_pb)
+check("und den echten Prompt-Zuschnitt", "prompt_zuschnitt" in _rumpf_pb)
+check("ohne Zuschnitt gibt es KEINE Spanne (nichts zu erklaeren)",
+      "zuschnitt_min" not in b)
 
 print("\n\033[1m6c. Gesamtpruefung: ALLE Quellen, nicht nur geaenderte\033[0m")
 gp = ast.parse(schnitt_quelle := open(REPO / "backend/wissen_aufraeumen.py",

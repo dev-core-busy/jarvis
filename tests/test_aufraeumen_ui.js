@@ -578,6 +578,71 @@ check('die vier neuen Texte gibt es in DE und EN',
       (I18N2.match(/'knowledge\.cleanup\.b_wz_note_zu':/g) || []).length === 2
       && (I18N2.match(/'knowledge\.cleanup\.b_basis_note_zu':/g) || []).length === 2);
 
+console.log('\n\x1b[1m8d. Die KOPFZEILE selbst - sie ist die einzige, die man immer sieht\x1b[0m');
+// ⚠ ZWEITE MELDUNG DESSELBEN TAGES: "falscher Text hinter 'was bei einer
+// Anfrage an das Modell geht' ist doch immer noch bullshit - wir haben doch
+// Buendel-Zuschnitt geschaffen?!" Zutreffend. Die Korrektur von 8c hat die
+// Meta-Spalten und die Fussnote gefixt - also genau die Teile INNERHALB des
+// <details>, und das ist ohne Vergleich ZU. Die eine sichtbare Zeile blieb
+// stehen und behauptete weiter den vollen Satz als Ist-Wert.
+//
+// ⚠ DESHALB WIRD HIER DAS <summary> ISOLIERT GEMESSEN, nicht der textContent
+// des ganzen Kastens: "Obergrenze" steht auch in der Meta-Spalte, die Pruefung
+// waere darueber trivial wahr und der gemeldete Fehler bliebe gruen.
+const summ = () => {
+    const d = document.querySelector('.kb-cl-bilanz');
+    const sm = d && d.querySelector('summary');
+    return (sm && sm.textContent) || '';
+};
+const detOffen = () => {
+    const d = document.querySelector('.kb-cl-bilanz');
+    return !!(d && d.hasAttribute('open'));
+};
+Bz.zuschnitt_aktiv = false;
+delete Bz.zuschnitt_min; delete Bz.zuschnitt_max;
+document.getElementById('kb-cleanup-body').innerHTML = M._bilanzHtml(Bz, false);
+check('⚠ der Kasten ist im Regelfall ZU - nur das <summary> ist sichtbar',
+      !detOffen());
+check('ohne Zuschnitt heisst die Kopfzeile wie bisher',
+      /Was bei einer Anfrage an das Modell geht/.test(summ()));
+Bz.zuschnitt_aktiv = true;
+document.getElementById('kb-cleanup-body').innerHTML = M._bilanzHtml(Bz, false);
+check('⚠ MIT Zuschnitt behauptet die Kopfzeile das NICHT mehr',
+      !/Was bei einer Anfrage an das Modell geht/.test(summ()));
+check('sie nennt die Zahl als Obergrenze', /Obergrenze/.test(summ()));
+check('⚠ und ohne gerechnete Spanne behauptet sie KEINE zweite Zahl',
+      /Zuschnitt aktiv/.test(summ()) && !/–\s*[\d.]+–/.test(summ()));
+Bz.zuschnitt_min = 47110; Bz.zuschnitt_max = 88900;
+Bz.zuschnitt_token_min = 13086; Bz.zuschnitt_token_max = 24694;
+Bz.zuschnitt_min_thema = 'bild'; Bz.zuschnitt_max_thema = 'dokument';
+document.getElementById('kb-cleanup-body').innerHTML = M._bilanzHtml(Bz, false);
+const sTxt = summ();
+check('⚠ mit gemessener Spanne steht sie DANEBEN, nicht in der Fussnote',
+      /47\.?110/.test(sTxt) && /88\.?900/.test(sTxt));
+check('und die Obergrenze bleibt trotzdem stehen', /100\.?468/.test(sTxt));
+check('die Spanne traegt eine eigene Klasse (gedaempft, nicht fett)',
+      !!document.querySelector('.kb-cl-spanne'));
+const CSS_SP = fs.readFileSync(path.join(REPO, 'frontend/css/style.css'), 'utf8');
+// ⚠ NICHT nur "der Name kommt in einem Selektor vor" - das war die erste
+// Fassung, und ihre Gegenprobe biss NICHT: die @media-Regel darunter traegt
+// denselben Selektor und haelt das Muster am Leben, obwohl die Basisregel weg
+// ist. Gemessen wird die EIGENSCHAFT: gedaempft UND nicht fett, damit die
+// Obergrenze davor die Hauptaussage bleibt.
+const spBloecke = (CSS_SP.match(/\.kb-cl-spanne\s*\{[^}]*\}/g) || []);
+check('und diese Klasse hat CSS: gedaempft und normal gewichtet',
+      spBloecke.some(b => /color\s*:/.test(b) && /font-weight\s*:\s*400/.test(b)));
+check('die drei neuen Texte gibt es in DE und EN',
+      (I18N2.match(/'knowledge\.cleanup\.bilanz_titel_zu':/g) || []).length === 2
+      && (I18N2.match(/'knowledge\.cleanup\.bilanz_spanne':/g) || []).length === 2
+      && (I18N2.match(/'knowledge\.cleanup\.bilanz_spanne_kurz':/g) || []).length === 2);
+// ⚠ Der Hinweistext darunter darf die Spanne NICHT wiederholen - er soll das
+// erklaeren, was die Kopfzeile nicht sagt: dass die Anweisungsdateien vom
+// Zuschnitt gar nicht profitieren und deshalb in jedem Fall wirken. Genau das
+// ist die Aussage, um die es in DIESEM Dialog geht.
+const hz2 = document.querySelector('.kb-cl-zuschnitt');
+check('der Hinweis darunter erklaert die Anweisungsdateien',
+      /Anweisungsdateien/.test((hz2 && hz2.textContent) || ''));
+
 clearTimeout(wachhund);
 console.log(`\n\x1b[1mErgebnis: ${OK} OK, ${FAIL} FAIL\x1b[0m`);
 process.exit(FAIL ? 1 : 0);

@@ -1098,11 +1098,34 @@ class JarvisKnowledgeManager {
         const sparTok = (b.token_summe || 0) - (b.token_summe_neu || 0);
         const wz = (b.werkzeuge || []).slice(0, 8).map(w =>
             `<tr><td>${this._escHtml(w.name)}</td><td class="kb-cl-zahl">${z(w.bytes)}</td></tr>`).join('');
+        // ⚠ DIE KOPFZEILE IST DIE EINZIGE, DIE MAN IMMER SIEHT - das <details>
+        // ist ohne Vergleich ZU. Bei aktivem Zuschnitt ist `summe` deshalb
+        // ausdruecklich als OBERGRENZE zu beschriften und die gemessene Spanne
+        // gehoert DANEBEN, nicht in die Fussnote darunter: mit dem alten Titel
+        // ("Was bei einer Anfrage an das Modell geht: 84.785") war die Zeile
+        // eine Falschaussage, und die Korrektur lag im zugeklappten Teil
+        // (gemeldet 2026-09-06).
+        const zu = !!b.zuschnitt_aktiv;
+        const titel = window.t(zu ? 'knowledge.cleanup.bilanz_titel_zu'
+                                  : 'knowledge.cleanup.bilanz_titel');
+        // Fail-open: ohne gerechnete Spanne (aelteres Backend, Fehler beim
+        // Rechnen) bleibt die kurze Fassung - sie sagt DASS zugeschnitten wird,
+        // ohne eine Zahl zu behaupten.
+        let spanne = '';
+        if (zu) {
+            spanne = (b.zuschnitt_min && b.zuschnitt_max)
+                ? window.t('knowledge.cleanup.bilanz_spanne')
+                      .replace('{min}', z(b.zuschnitt_min)).replace('{max}', z(b.zuschnitt_max))
+                      .replace('{tmin}', z(b.zuschnitt_token_min))
+                      .replace('{tmax}', z(b.zuschnitt_token_max))
+                : window.t('knowledge.cleanup.bilanz_spanne_kurz');
+        }
         return `<details class="kb-cl-bilanz"${mitVergleich ? ' open' : ''}>
-          <summary>${this._escHtml(window.t('knowledge.cleanup.bilanz_titel'))}
+          <summary>${this._escHtml(titel)}
             <b>${z(b.summe)}</b> ${this._escHtml(window.t('knowledge.cleanup.chars'))}
             (~${z(b.token_summe)} Token)${mitVergleich && spar > 0
               ? ` → <b class="kb-cl-spar">${z(b.summe_neu)}</b> (−${z(spar)} / −${z(sparTok)} Token)` : ''}
+            ${spanne ? `<span class="kb-cl-spanne">${this._escHtml(spanne)}</span>` : ''}
           </summary>
           <table class="kb-cl-bilanz-tab"><tbody>
             <tr><td>${this._escHtml(window.t('knowledge.cleanup.b_basis'))}</td>

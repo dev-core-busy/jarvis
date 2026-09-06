@@ -14,16 +14,33 @@ import collections, json, sys, time
 tage = float(sys.argv[1]); zh = sys.argv[2]
 seit = time.time() - tage * 86400
 ruf = collections.Counter(); nach = []
-try:
-    for z in open(f"{zh}/data/logs/audit.jsonl", encoding="utf-8"):
-        try: e = json.loads(z)
-        except Exception: continue
-        if float(e.get("ts") or 0) < seit: continue
-        t = e.get("tool") or ""
-        ruf[t] += 1
-        if t == "werkzeuge_anfordern":
-            nach.append(e)
-except FileNotFoundError:
+# ⚠ ZWEI DINGE, die die Zahl sonst falsch machen:
+#  - `[task]` ist KEIN Werkzeug-Aufruf, sondern eine Zeile je Anfrage
+#    (audit_log.log_task). Mitgezaehlt waere die Gesamtzahl zu hoch und der
+#    Prozentsatz des Rueckwegs zu niedrig - also genau die Kennzahl verfaelscht,
+#    wegen der es dieses Skript gibt.
+#  - `read_log()` liest auch die rotierte `.bak`; wer nur die aktive Datei
+#    nimmt, verliert bei Altbestand einen Teil des Zeitraums.
+dateien = [f"{zh}/data/logs/audit.jsonl", f"{zh}/data/logs/audit.jsonl.bak"]
+gefunden = False
+for pfad in dateien:
+    try:
+        f = open(pfad, encoding="utf-8")
+    except FileNotFoundError:
+        continue
+    gefunden = True
+    with f:
+        for z in f:
+            try: e = json.loads(z)
+            except Exception: continue
+            if float(e.get("ts") or 0) < seit: continue
+            t = e.get("tool") or ""
+            if not t or t == "[task]":
+                continue
+            ruf[t] += 1
+            if t == "werkzeuge_anfordern":
+                nach.append(e)
+if not gefunden:
     print("kein Audit-Log gefunden"); raise SystemExit(2)
 gesamt = sum(ruf.values())
 n = ruf.get("werkzeuge_anfordern", 0)

@@ -361,9 +361,14 @@ class Config:
         self.LLM_REASONING_EFFORT = _valid_effort(data.get("llm_reasoning_effort"))
         try:
             self.LLM_MAX_TOKENS = max(256, min(int(data.get("llm_max_tokens") or 8192), 131072))
-            self.WERKZEUG_BUENDEL = data.get("werkzeug_buendel") is True
         except (TypeError, ValueError):
             self.LLM_MAX_TOKENS = 8192
+        # ⚠ NICHT im try von LLM_MAX_TOKENS: ein unbrauchbares llm_max_tokens in
+        # der settings.json haette den Schalter sonst STILL uebersprungen - mit
+        # gesetzter Umgebungsvariable bliebe der Zuschnitt dann eingeschaltet,
+        # obwohl der Administrator ihn in der Datei abgeschaltet hat. Ein still
+        # ignorierter Abschalter ist schlimmer als gar keiner.
+        self.WERKZEUG_BUENDEL = data.get("werkzeug_buendel") is True
         # Fehlt der Schluessel, bleibt der ENV-/Klassenwert stehen (gleiche
         # Begruendung wie bei docs_retention_days).
         if "image_profile_id" in data:

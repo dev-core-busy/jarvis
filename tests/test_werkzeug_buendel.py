@@ -279,5 +279,116 @@ check("_base_system_prompt ruft ihn (sonst wirkt er nirgends)",
 check("die Rollen-/Sub-Agent-Weiche ist unangetastet",
       "SUB_AGENT_PROMPT" in (ast.get_source_segment(AGENT, fn["_base_system_prompt"]) or ""))
 
+print("\n\033[1m10. Der AGENTEN-PFAD - nicht nur die Funktion (Review-Befund)\033[0m")
+# ⚠ DER TEUERSTE BEFUND DES REVIEWS: die Umkehrung steckte in `zuschnitt()`,
+# der Produktivpfad rief aber `erlaubte_namen()` - und die kennt PRAEFIXE nicht.
+# Bei den Themen 'fach'/'kommunikation' (leere Buendel) kollabierte der Satz auf
+# den nackten Kern: genau die auf ECHT bezahlte Regression, und der Waechter war
+# gruen, WEIL er die richtige Regel nur an der Funktion geprueft hat.
+# Hier laeuft der ECHTE Weg: _buendel_zuschnitt -> _buendel_erlaubt.
+class _FakeAgent:
+    _tool_instances = []
+    _role_tools = None
+    _buendel_voll = False
+    _current_task = ""
+    def _actor_is_privileged(self): return True
+    def actor_name(self): return "jarvis"
+
+_agent_q = AGENT
+_bz = ast.get_source_segment(_agent_q, fn["_buendel_zuschnitt"])
+_be = ast.get_source_segment(_agent_q, fn["_buendel_erlaubt"])
+_ba = ast.get_source_segment(_agent_q, fn["_buendel_aufgabe"])
+_bv = ast.get_source_segment(_agent_q, fn["_buendel_voll_aktiv"])
+_bk = ast.get_source_segment(_agent_q, fn["_buendel_aktiv"])
+_ns = {"contextvars": __import__("contextvars"),
+       "_BLOCKED_TOOLS_FOR_LDAP": set(), "_reminder_exempt": lambda *a: False}
+exec("import contextvars\n"
+     "_buendel_task_cv = contextvars.ContextVar('t', default=None)\n"
+     "_buendel_voll_cv = contextvars.ContextVar('v', default=False)\n"
+     "class A:\n" + "\n".join("    " + z for z in
+        (_bz + "\n" + _be + "\n" + _ba + "\n" + _bv + "\n" + _bk).split("\n")),
+     _ns)
+_A = _ns["A"]
+for k, v in _FakeAgent.__dict__.items():
+    if not k.startswith("__"):
+        setattr(_A, k, v)
+class _Cfg:  # der Schalter ist AN, sonst misst der Test nichts
+    WERKZEUG_BUENDEL = True
+import sys as _sys, types as _types
+_mod = _types.ModuleType("backend.config"); _mod.config = _Cfg()
+_alt = _sys.modules.get("backend.config")
+_sys.modules["backend.config"] = _mod
+
+_ag_obj = _A()
+# Genau die Werkzeuge, die auf ECHT benutzt werden und in der ersten Fassung
+# durch den AGENTEN-Pfad weggefallen waeren.
+_ECHT = ["knowledge_search", "memory_manage", "filesystem", "shell_execute",
+         "delegate", "spawn_agent", "werkzeuge_anfordern",
+         "sap_odata_query", "sap_odata_entity_sets", "jira_search",
+         "confluence_search", "vemas_query", "email_entwurf", "email_liste",
+         "office_create_powerpoint", "generate_image", "create_chart",
+         "windows_desktop", "cron_create", "reflection", "mcp_fremd_tool",
+         "secret_reveal", "branding_info", "knowledge_manage"]
+_ag_obj._tool_instances = [W(x) for x in _ECHT]
+
+def _durch_agent(aufgabe):
+    _ag_obj._current_task = aufgabe
+    _ag_obj._buendel_voll = False
+    g = sicher(_ag_obj._buendel_zuschnitt, list(_ag_obj._tool_instances))
+    return {getattr(t, "name", "") for t in g} if not isinstance(g, str) else set()
+
+_fach = _durch_agent("lies das Jira-Ticket NX-123")
+check("Positivkontrolle: der Agenten-Pfad kuerzt ueberhaupt",
+      0 < len(_fach) < len(_ECHT))
+check("⚠ bei Thema 'fach' bleiben die SAP-Werkzeuge (174x auf ECHT)",
+      "sap_odata_query" in _fach and "sap_odata_entity_sets" in _fach)
+check("⚠ und die Jira-/Confluence-/Vemas-Werkzeuge",
+      {"jira_search", "confluence_search", "vemas_query"} <= _fach)
+_komm = _durch_agent("schicke eine Mail an den Kunden")
+check("⚠ bei Thema 'kommunikation' bleibt die email_*-Familie",
+      {"email_entwurf", "email_liste"} <= _komm)
+for _a in ("generiere ein Bild einer Kuh", "erstelle eine PowerPoint",
+           "lies das Jira-Ticket NX-123", "schicke eine Mail an den Kunden"):
+    _n = _durch_agent(_a)
+    check(f"{_a[:26]}: delegate/spawn_agent bleiben",
+          {"delegate", "spawn_agent"} <= _n)
+    check(f"{_a[:26]}: Werkzeuge OHNE Thema bleiben (MCP, cron, reflection)",
+          {"mcp_fremd_tool", "cron_create", "reflection", "secret_reveal"} <= _n)
+_bild = _durch_agent("generiere ein Bild einer Kuh")
+check("es wird trotzdem etwas weggenommen (sonst spart es nichts)",
+      "sap_odata_query" not in _bild and "email_entwurf" not in _bild)
+if _alt is not None:
+    _sys.modules["backend.config"] = _alt
+
+print("\n\033[1m11. Weitere Review-Befunde\033[0m")
+check("⚠ der Rueckweg reicht den PROMPT nach (nicht nur die Werkzeuge)",
+      "_buendel_prompt_nachtrag" in AGENT
+      and "_buendel_prompt_nachtrag()" in (ast.get_source_segment(AGENT, fn["run_task"]) or ""))
+check("und das Signal wird je Lauf zurueckgesetzt",
+      AGENT.count("self._buendel_prompt_neu = False") >= 2)
+check("⚠ Lauf-Zustand liegt in ContextVars (geteilter Hauptagent!)",
+      "_buendel_task_cv" in AGENT and "_buendel_voll_cv" in AGENT)
+# ⚠ AUF DIE EIGENSCHAFT, NICHT AUF DAS VORKOMMEN: eine Gegenprobe, die
+# `_buendel_voll_cv.set(False)` in einen toten Zweig verpackt, liess die
+# Textsuche gruen. Geprueft wird per AST, dass es eine ECHTE Zuweisung auf
+# oberster Ebene der Funktion ist.
+_as = fn.get("actor_scope")
+_zuw = [k for k in getattr(_as, "body", [])
+        if isinstance(k, ast.Assign)
+        and isinstance(k.value, ast.Call)
+        and getattr(getattr(k.value.func, "value", None), "id", "") in
+            ("_buendel_voll_cv", "_buendel_task_cv")
+        and getattr(k.value.func, "attr", "") == "set"]
+check("und wird im actor_scope WIRKLICH gesetzt (echte Zuweisung, kein toter Zweig)",
+      len(_zuw) == 2)
+check("und im finally zurueckgenommen",
+      "_cv.reset(_tk)" in (ast.get_source_segment(AGENT, fn["actor_scope"]) or ""))
+check("⚠ WERKZEUG_BUENDEL steht NICHT im try von LLM_MAX_TOKENS",
+      not re.search(r"LLM_MAX_TOKENS = max\(256[^\n]*\n\s*self\.WERKZEUG_BUENDEL", CFG))
+ZS = io.open(os.path.join(REPO, "deploy/buendel_zaehlen.sh"), encoding="utf-8").read()
+check("⚠ das Zaehlskript ueberspringt [task] (sonst ist die Kennzahl falsch)",
+      't == "[task]"' in ZS)
+check("und liest die rotierte .bak mit", "audit.jsonl.bak" in ZS)
+
 print(f"\n\033[1mErgebnis: {OK} OK, {FAIL} FAIL\033[0m")
 sys.exit(1 if FAIL else 0)

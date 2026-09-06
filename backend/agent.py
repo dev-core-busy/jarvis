@@ -170,6 +170,15 @@ _ACTOR_UNSET = object()
 # asyncio.Task hat seine eigene Kopie, Sub-Agent-Tasks erben sie.
 # Wert: (username, privileged) oder None = keine Bindung.
 _actor_cv: contextvars.ContextVar = contextvars.ContextVar("jarvis_actor", default=None)
+# Lauf-lokaler Zustand des Werkzeug-Zuschnitts. ⚠ DIESELBE BEGRUENDUNG WIE BEI
+# `_actor_cv`: ein Cron-Lauf und ein Chat-Auftrag koennen GLEICHZEITIG auf
+# demselben Hauptagenten liegen. Als Objekt-Attribut wuerde der eine dem
+# anderen den Auftragstext bzw. den gerade angeforderten vollen Werkzeugkasten
+# unter den Fuessen wegziehen. Jeder asyncio.Task hat seine eigene Kopie.
+_buendel_task_cv: contextvars.ContextVar = contextvars.ContextVar(
+    "jarvis_buendel_task", default=None)
+_buendel_voll_cv: contextvars.ContextVar = contextvars.ContextVar(
+    "jarvis_buendel_voll", default=False)
 
 # Confluence/Jira sind im Chat ausschliesslich lesend nutzbar: schreibende Tools
 # werden dem Agenten gar nicht erst angeboten (gezielte read-only Abfragen).
@@ -1245,6 +1254,9 @@ KRITISCH – Autonomie-Regeln:
         # bliebe der geteilte Hauptagent nach einem einzigen Fehlgriff dauerhaft
         # auf dem vollen Satz und die Ersparnis waere nach dem ersten Lauf weg.
         self._buendel_voll: bool = False
+        # Signal des Rueckwegs: der Prompt muss beim naechsten Schritt
+        # nachgereicht werden (siehe _buendel_prompt_nachtrag).
+        self._buendel_prompt_neu: bool = False
         # Werkzeuge, die in DIESEM Lauf schon per Rollen-Rueckfall abgefangen
         # wurden – verhindert Ping-Pong bei einem dauerhaft scheiternden Tool.
         self._fallback_used: set = set()
@@ -1453,6 +1465,78 @@ KRITISCH – Autonomie-Regeln:
         except Exception:  # noqa: BLE001
             return list(self._tool_instances or [])
 
+    def _buendel_prompt_nachtrag(self) -> str:
+        """Die beim Zuschnitt entfernten Prompt-Abschnitte nachreichen.
+
+        Wird nur nach ``werkzeuge_anfordern`` wirksam und dann genau EINMAL:
+        das Flag wird dabei geloescht. Liefert "" in jedem anderen Fall - der
+        Regelweg bleibt also voellig unberuehrt.
+        """
+        if not getattr(self, "_buendel_prompt_neu", False):
+            return ""
+        self._buendel_prompt_neu = False
+        try:
+            from backend import werkzeug_buendel as _wb
+            erlaubt = self._buendel_erlaubt_ohne_voll()
+            if erlaubt is None:
+                return ""
+            _text, weg = _wb.prompt_zuschnitt(self.SYSTEM_PROMPT, erlaubt)
+            if not weg:
+                return ""
+            fehlend = [f"{nr}. {t}" for nr, t in _wb._bloecke(self.SYSTEM_PROMPT)
+                       if nr in weg]
+            if not fehlend:
+                return ""
+            print(f"[Buendel] Prompt-Nachtrag: Punkt {', '.join(weg)}", flush=True)
+            return ("\n\n## NACHGEREICHTE REGELN (voller Werkzeugkasten angefordert)\n"
+                    "Diese Punkte gelten ab jetzt zusaetzlich:\n\n" + "".join(fehlend))
+        except Exception as e:  # noqa: BLE001
+            print(f"[Buendel] Prompt-Nachtrag uebersprungen: {e}", flush=True)
+            return ""
+
+    def _buendel_erlaubt_ohne_voll(self) -> set | None:
+        """Wie ``_buendel_erlaubt``, aber OHNE die Voll-Ausnahme.
+
+        Wird nur vom Nachtrag gebraucht: dort ist ``_buendel_voll`` bereits
+        gesetzt, und ``_buendel_erlaubt`` gaebe deshalb None zurueck - dann
+        waere gar nicht mehr feststellbar, WAS vorher gefehlt hat.
+        """
+        if not self._buendel_aktiv():
+            return None
+        try:
+            from backend import werkzeug_buendel as _wb
+            gek, _g = _wb.zuschnitt(list(self._tool_instances or []),
+                                    self._buendel_aufgabe())
+            return {getattr(t, "name", "") for t in gek}
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _buendel_aufgabe(self) -> str:
+        """Der Auftragstext DIESES Laufs - nie der eines parallelen.
+
+        ⚠ ``_current_task`` ist ein Attribut des GETEILTEN Hauptagenten. Laufen
+        Chat und Cron gleichzeitig (im Projekt der dokumentierte Normalfall,
+        deshalb gibt es ``_actor_cv``), berechnete die Werkzeugliste des einen
+        Laufs sich aus dem Auftragstext des anderen - und der Prompt bliebe auf
+        den ersten zugeschnitten: Prompt und Werkzeuge liefen auseinander, genau
+        das, was ``_buendel_erlaubt`` verhindern soll.
+        """
+        aus_cv = _buendel_task_cv.get()
+        if aus_cv is not None:
+            return aus_cv
+        return getattr(self, "_current_task", "") or ""
+
+    def _buendel_voll_aktiv(self) -> bool:
+        """Hat DIESER Lauf den vollen Kasten angefordert?
+
+        Ebenfalls lauf-lokal: ein parallel startender Lauf setzt sonst das
+        Attribut zurueck und entzieht dem ersten mitten im Lauf die gerade
+        angeforderten Werkzeuge.
+        """
+        if _buendel_voll_cv.get():
+            return True
+        return bool(getattr(self, "_buendel_voll", False))
+
     def _buendel_aktiv(self) -> bool:
         """Ist der aufgabenabhaengige Zuschnitt eingeschaltet? Fail-closed."""
         try:
@@ -1487,17 +1571,13 @@ KRITISCH – Autonomie-Regeln:
         # ausgeschaltetem Feature muss das Angebot UNVERAENDERT bleiben.
         if not self._buendel_aktiv():
             return [t for t in tools if t.name != "werkzeuge_anfordern"]
-        if getattr(self, "_buendel_voll", False):
+        if self._buendel_voll_aktiv():
             return tools
         try:
             from backend import werkzeug_buendel as _wb
-            # ⚠ DIESELBE Quelle wie der Prompt-Zuschnitt (siehe _buendel_erlaubt).
-            erlaubt = self._buendel_erlaubt()
-            if erlaubt is None:
-                return tools
-            gek = [t for t in tools if t.name in erlaubt] or tools
-            grund = "+".join(sorted(_wb.themen(
-                getattr(self, "_current_task", "") or ""))) or "voll"
+            # ⚠ DIESELBE Funktion wie der Prompt-Zuschnitt (siehe _buendel_erlaubt) -
+            # sie traegt die Regel, nicht der Aufrufer.
+            gek, grund = _wb.zuschnitt(tools, self._buendel_aufgabe())
             if len(gek) != len(tools):
                 print(f"[Buendel] {len(tools)} -> {len(gek)} Werkzeuge ({grund})",
                       flush=True)
@@ -1595,11 +1675,19 @@ KRITISCH – Autonomie-Regeln:
         Fehlerklasse, die im Projekt schon dreimal teuer war ("ein Prompt ist
         Code"). ``None`` heisst wie ueberall "keine Beschraenkung".
         """
-        if not self._buendel_aktiv() or getattr(self, "_buendel_voll", False):
+        if not self._buendel_aktiv() or self._buendel_voll_aktiv():
             return None
         try:
             from backend import werkzeug_buendel as _wb
-            return _wb.erlaubte_namen(getattr(self, "_current_task", "") or "")
+            # ⚠ UEBER zuschnitt(), NICHT ueber erlaubte_namen(): nur zuschnitt()
+            # kennt die Regel "was KEINEM Thema zugeordnet ist, bleibt" und die
+            # PRAEFIXE. erlaubte_namen() liefert bloss KERN|BUENDEL[themen] -
+            # bei den Themen 'fach'/'kommunikation' (leere Buendel) waere das der
+            # nackte Kern, also genau die auf ECHT bezahlte Regression.
+            # Beide Zuschnitte muessen aus DERSELBEN Berechnung kommen.
+            gek, _grund = _wb.zuschnitt(list(self._tool_instances or []),
+                                        self._buendel_aufgabe())
+            return {getattr(t, "name", "") for t in gek}
         except Exception:  # noqa: BLE001
             return None
 
@@ -1836,13 +1924,21 @@ KRITISCH – Autonomie-Regeln:
             self._current_task = task
         # Lauf-isolierte Bindung (maßgeblich fuer den Sicherheitsentscheid)
         cv_token = _actor_cv.set((username or "", bool(privileged)))
+        # Der Werkzeug-Zuschnitt gehoert in DENSELBEN Lauf-Rahmen: der volle
+        # Kasten, den EIN Lauf anfordert, darf nicht fuer den parallelen gelten
+        # und nicht von dessen Start zurueckgesetzt werden.
+        b_voll_token = _buendel_voll_cv.set(False)
+        b_task_token = _buendel_task_cv.set(getattr(self, "_current_task", "") or "")
         try:
             yield
         finally:
-            try:
-                _actor_cv.reset(cv_token)
-            except Exception:  # noqa: BLE001
-                pass
+            for _tk, _cv in ((cv_token, _actor_cv),
+                             (b_voll_token, _buendel_voll_cv),
+                             (b_task_token, _buendel_task_cv)):
+                try:
+                    _cv.reset(_tk)
+                except Exception:  # noqa: BLE001
+                    pass
             for k in keys:
                 if had[k]:
                     setattr(self, k, before[k])
@@ -2117,6 +2213,7 @@ KRITISCH – Autonomie-Regeln:
         # geteilte Hauptagent nach acht Delegationen dauerhaft gesperrt.
         self._delegations_used = 0
         self._buendel_voll = False
+        self._buendel_prompt_neu = False
         self._fallback_used = set()
         # Bild-Sammlung fuer DIESEN Lauf. Sie existierte bisher NUR im
         # headless-Pfad (_run_headless) – im Chat war `current_task_images` None,
@@ -2737,6 +2834,14 @@ KRITISCH – Autonomie-Regeln:
                     )
                 )
 
+                # ⚠ HAT DIESER LAUF DEN VOLLEN KASTEN ANGEFORDERT? Dann muss der
+                # PROMPT MIT ZURUECK. Er wird einmal je Lauf gebaut, die
+                # Werkzeugliste bei jedem Schritt neu - ohne den Nachtrag bekaeme
+                # das Modell zwar office_create_powerpoint zurueck, aber die
+                # Hausvorlagen-Regeln (Punkt 16) blieben fuer den Rest des Laufs
+                # entfernt. Genau diese Lage ist am 2026-09-01 bezahlt worden.
+                system_prompt += self._buendel_prompt_nachtrag()
+
                 # Kontextfenster-Management: lange Historien komprimieren
                 chat_history = await self._compress_history(chat_history, system_prompt)
 
@@ -3093,6 +3198,7 @@ KRITISCH – Autonomie-Regeln:
         # Delegations-Deckel pro Auftrag (siehe run_task)
         self._delegations_used = 0
         self._buendel_voll = False
+        self._buendel_prompt_neu = False
         self._fallback_used = set()
         # Effektives LLM-Profil des (ggf. via _current_username gesetzten) Benutzers
         self._resolve_profile_for_user()

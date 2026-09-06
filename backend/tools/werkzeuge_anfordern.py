@@ -58,7 +58,24 @@ class WerkzeugeAnfordernTool(BaseTool):
         if agent is None:
             return ("HINWEIS_AN_NUTZER: Der volle Werkzeugkasten konnte nicht "
                     "freigeschaltet werden (kein Agent-Bezug).")
+        # ⚠ BEIDES: die ContextVar gilt lauf-lokal (ein paralleler Lauf darf sie
+        # nicht sehen und nicht zuruecksetzen), das Attribut ist der Rueckfall
+        # fuer Aufrufe ausserhalb eines actor_scope.
         setattr(agent, self.ATTRIBUT, True)
+        try:
+            from backend.agent import _buendel_voll_cv
+            _buendel_voll_cv.set(True)
+        except Exception:                                     # noqa: BLE001
+            pass
+        # ⚠ DER PROMPT MUSS MIT ZURUECK. Er wird EINMAL je Lauf gebaut, die
+        # Werkzeugliste bei jedem Schritt neu - ohne dieses Signal bekaeme das
+        # Modell zwar office_create_powerpoint zurueck, aber Punkt 16 (die
+        # Hausvorlagen-Regeln) bliebe fuer den Rest des Laufs entfernt. Genau
+        # diese Lage ist am 2026-09-01 schon einmal bezahlt worden.
+        try:
+            agent._buendel_prompt_neu = True
+        except Exception:                                     # noqa: BLE001
+            pass
         print(f"[Buendel] voller Werkzeugkasten angefordert: {grund or '(ohne Grund)'}",
               flush=True)
         return ("Der volle Werkzeugkasten steht ab dem naechsten Schritt zur "

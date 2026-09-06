@@ -440,8 +440,19 @@ check('Positivkontrolle: der Tuning-Container wurde geschnitten',
       iTun > 0 && tuning.includes('setting-tts-voice'));
 check('der Knopf steht IM Container "System-Einstellungen"',
       tuning.includes('id="btn-prompt-optimieren"'));
-check('⚠ er ruft dieselbe Funktion wie der Knopf unter Wissen',
-      /btn-prompt-optimieren[\s\S]{0,300}cleanupOeffnen\(\)/.test(tuning));
+check('er ruft cleanupOeffnen', /btn-prompt-optimieren[\s\S]{0,300}cleanupOeffnen\(\)/.test(tuning));
+// ⚠ GENAU EIN WEG IN DEN DIALOG (Vorgabe 2026-09-06): der frueher unter
+// Wissen -> Wissens-Verdichtung erzeugte Knopf ist entfernt. Zwei Wege waeren
+// zwei Stellen zum Pflegen - und die Erklaerung, WOFUER man ihn drueckt, gibt
+// es nur an der neuen. Gezaehlt werden die OEFFNER, nicht der "Zurueck"-Knopf
+// im Dialog selbst.
+const KJS2 = fs.readFileSync(path.join(REPO, 'frontend/js/knowledge.js'), 'utf8');
+check('⚠ der alte Knopf unter Wissens-Verdichtung ist weg',
+      !/id="kb-cleanup-btn"/.test(KJS2));
+const oeffner = (SH.match(/cleanupOeffnen\(\)/g) || []).length;
+check('im Markup gibt es genau EINEN Oeffner', oeffner === 1);
+check('und der i18n-Schluessel des alten Knopfes ist nicht mehr in Benutzung',
+      !/knowledge\.cleanup\.btn'/.test(KJS2) && !/knowledge\.cleanup\.btn'/.test(SH));
 check('⚠ er prueft vorher, dass es den Manager gibt (sonst wirft der Klick)',
       /knowledgeManager\s*&amp;&amp;\s*window\.knowledgeManager\.cleanupOeffnen/.test(tuning)
       || /knowledgeManager\s*&&\s*window\.knowledgeManager\.cleanupOeffnen/.test(tuning));

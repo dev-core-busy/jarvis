@@ -1010,11 +1010,6 @@ class JarvisKnowledgeManager {
                         title="${window.t('knowledge.compact.btn_title')}" ${cs.running ? 'disabled' : ''}>
                     ${cs.running ? window.t('knowledge.compact.running') : window.t('knowledge.compact.btn')}
                 </button>
-                <button class="kb-learned-open-btn" id="kb-cleanup-btn"
-                        onclick="window.knowledgeManager.cleanupOeffnen()"
-                        title="${window.t('knowledge.cleanup.btn_title')}">
-                    ${window.t('knowledge.cleanup.btn')}
-                </button>
                 <button class="kb-learned-open-btn" onclick="window.knowledgeManager.showCompactInfo(true)"
                         title="${window.t('knowledge.compact.info_title')}" style="font-weight:700;">❓</button>
                 <label class="kb-learned-embed-opt" title="${window.t('knowledge.compact.auto_title')}" style="display:inline-flex;align-items:center;gap:5px;font-size:0.78rem;color:var(--text-muted);margin-left:8px;cursor:pointer;">

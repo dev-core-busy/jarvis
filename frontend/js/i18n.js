@@ -1488,7 +1488,6 @@ const _I18N = {
         'knowledge.learned.delete_confirm': 'Diesen gelernten Eintrag löschen?',
         'knowledge.learned.deleted':     'Eintrag gelöscht',
         // Wissens-Verdichtung
-        'knowledge.cleanup.btn':          '🧹 Prompt optimieren',
         'knowledge.cleanup.btn_short':    'Prompt optimieren',
         'profile.section_prompt':         'Prompt & Anweisungen',
         'profile.prompt_opt_hint':        'Bei jeder Anfrage gehen der Basis-Prompt, deine Anweisungsdateien und die Beschreibungen aller Werkzeuge an das Modell. „Prompt optimieren“ misst, wie groß dieser Anteil wirklich ist, findet doppelte und widersprüchliche Anweisungen und schlägt Kürzungen vor. Geschrieben wird erst nach deiner Bestätigung – vorher siehst du jede Änderung im Vorher/Nachher-Vergleich, und von jeder Datei wird eine Sicherung angelegt.',
@@ -4711,7 +4710,6 @@ const _I18N = {
         'knowledge.learned.delete_confirm': 'Delete this learned entry?',
         'knowledge.learned.deleted':     'Entry deleted',
         // Knowledge compaction
-        'knowledge.cleanup.btn':          '🧹 Optimise prompts',
         'knowledge.cleanup.btn_short':    'Optimise prompts',
         'profile.section_prompt':         'Prompt & instructions',
         'profile.prompt_opt_hint':        'Every request sends the base prompt, your instruction files and the descriptions of all tools to the model. \'Optimise prompts\' measures how large that share really is, finds duplicate and contradictory instructions and proposes cuts. Nothing is written until you confirm – you see every change in a before/after comparison first, and a backup is made of each file.',

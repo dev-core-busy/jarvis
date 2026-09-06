@@ -97,5 +97,29 @@ check("⚠ und zwar VOR dem Speichern", 0 <= i_pruef < i_save)
 check("ein Fehlschlag wird protokolliert (sonst verschwindet es lautlos)",
       "nicht gespeichert" in q or "kein verwertbares Wissen" in q)
 
+print("\n\033[1m5. Das Aufraeumskript fasst NUR conv_* an\033[0m")
+# ⚠ AUF ECHT UM HAARESBREITE VERMIEDEN (2026-09-06): der Trockenlauf dort
+# meldete 5 `feedback_*.md` als "ohne Wissensgehalt" - Dateien mit 3.000 bis
+# 3.600 Zeichen echtem Inhalt. Sie schreibt main.py aus einer Benutzer-Bewertung
+# und haben ein anderes Format ("## Urspruengliche Antwort", "## Was war
+# schlecht"), fallen also durch die Fakten-Struktur-Pruefung. `_hat_substanz`
+# ist NUR fuer das Auto-Learning gebaut (learning.py schreibt ausschliesslich
+# conv_*.md). ZWEITES MAL an einem Tag, dass ein an DEV gemessenes Kriterium
+# auf ECHT Schaden angerichtet haette (nach den Werkzeug-Buendeln).
+AUF = io.open(os.path.join(REPO, "deploy/lernnotizen_aufraeumen.py"), encoding="utf-8").read()
+check("das Aufraeumskript existiert", len(AUF) > 500)
+check("⚠ es fasst NUR conv_*.md an",
+      'startswith("conv_")' in AUF)
+check("und meldet die uebersprungenen Gattungen (nicht stillschweigend)",
+      "unberuehrt" in AUF or "fremd" in AUF)
+check("⚠ es laedt das Kriterium aus learning.py (kein Nachbau)",
+      "_hat_substanz_laden" in AUF and "learning.py" in AUF)
+check("Trockenlauf ist die Vorgabe", '"--anwenden"' in AUF)
+check("und es sichert VOR dem Loeschen", "tarfile" in AUF and "unlink" in AUF)
+# Gegenprobe zur Zusage: learning.py darf keine feedback_-Dateien schreiben,
+# sonst traefe der Schreibfilter sie doch.
+check("⚠ learning.py schreibt kein feedback_* (der Filter trifft sie nie)",
+      "feedback_" not in Q)
+
 print(f"\n\033[1mErgebnis: {OK} OK, {FAIL} FAIL\033[0m")
 sys.exit(1 if FAIL else 0)

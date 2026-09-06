@@ -65,8 +65,19 @@ def main():
         print(f"Kein Verzeichnis {wurzel}")
         return 2
 
-    weg, bleibt = [], []
+    weg, bleibt, fremd = [], [], []
     for p in sorted(wurzel.rglob("*.md")):
+        # ⚠ NUR conv_*.md - das sind die Dateien des Auto-Learnings, fuer die
+        # `_hat_substanz` gebaut ist. `feedback_*.md` schreibt main.py aus einer
+        # Benutzer-Bewertung; sie haben ein voellig anderes Format ("## Urspruengliche
+        # Antwort", "## Was war schlecht") und faellen deshalb durch die
+        # Fakten-Struktur-Pruefung - obwohl sie 3.000 Zeichen echtes Wissen tragen.
+        # AUF ECHT WAERE DAS DER SCHADEN GEWESEN: der Trockenlauf dort meldete
+        # 5 solcher Dateien als "ohne Wissensgehalt". `knowledge_compactor.py`
+        # nimmt sie aus demselben Grund aus ("feedback_* bleibt unberuehrt").
+        if not p.name.startswith("conv_"):
+            fremd.append(p)
+            continue
         try:
             inhalt = faktenteil(p.read_text(encoding="utf-8"))
         except OSError as e:
@@ -75,9 +86,10 @@ def main():
             continue
         (bleibt if hat_substanz(inhalt) else weg).append(p)
 
-    print(f"Lernnotizen: {len(weg) + len(bleibt)}")
-    print(f"  ohne Wissensgehalt : {len(weg)}")
-    print(f"  bleiben            : {len(bleibt)}")
+    print(f"Lernnotizen: {len(weg) + len(bleibt) + len(fremd)}")
+    print(f"  conv_*  ohne Wissensgehalt : {len(weg)}")
+    print(f"  conv_*  bleiben            : {len(bleibt)}")
+    print(f"  andere Gattungen (unberuehrt, z.B. feedback_*): {len(fremd)}")
     if weg:
         print("\n  Beispiele (erste 5):")
         for p in weg[:5]:

@@ -4404,6 +4404,36 @@ select.input-field {
 .kb-cl-meta { font-size: .76rem; color: var(--text-muted); }
 .kb-cl-warn { font-size: .76rem; color: var(--danger, #c0392b); }
 .kb-cl-aktion { display: flex; align-items: center; gap: 12px; margin: 14px 0 6px; flex-wrap: wrap; }
+/* Statuszeile waehrend eines Laufs: rotierender Ring + pulsierender Text.
+   Ein Lauf braucht je Datei 20-30 s, der Text steht dazwischen unveraendert -
+   ohne den Ring ist "arbeitet noch" von "haengt" nicht zu unterscheiden.
+   Gleiche Bauart wie .kb-files-loading, damit es sich nicht wie ein zweites
+   Ladezeichen anfuehlt. */
+.kb-cl-laeuft {
+    display: flex;
+    /* ⚠ NICHT center: der Fortschrittstext nennt die zu erwartende Dauer und
+       bricht deshalb auf zwei Zeilen um - mittig ausgerichtet stuende der Ring
+       dann ZWISCHEN den Zeilen und gehoerte sichtbar zu keiner. Nur der
+       Screenshot zeigt das; die Messung "Ring ist da" war gruen. */
+    align-items: flex-start;
+    gap: 8px;
+    animation: kb-loading-pulse 1.4s ease-in-out infinite;
+}
+.kb-cl-laeuft::before {
+    content: '';
+    width: 13px;
+    height: 13px;
+    /* auf die Mitte der ERSTEN Textzeile (0.8rem, Zeilenhoehe ~19px) */
+    margin-top: 3px;
+    flex: 0 0 13px;
+    border: 2px solid rgba(var(--accent-rgb), 0.25);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+    .kb-cl-laeuft, .kb-cl-laeuft::before { animation: none; }
+}
 .kb-cl-karte { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
     margin: 10px 0; background: var(--bg-secondary); }
 .kb-cl-karte.ist-fehler { border-color: var(--danger, #c0392b); }

@@ -1156,7 +1156,6 @@ class JarvisKnowledgeManager {
      * für sich. Genau deshalb gibt es diesen zweiten Knopf.
      */
     async cleanupKonflikte() {
-        const st = document.getElementById('kb-cl-status');
         const knopf = document.getElementById('kb-cl-konflikte');
         if (knopf) knopf.disabled = true;
         // ⚠ IN ZWEI STUFEN UND IN HAEPPCHEN: der ganze Abgleich dauert live
@@ -1175,15 +1174,15 @@ class JarvisKnowledgeManager {
             // der Fortschritt ist feiner.
             for (let i = 0; i < quellen.length; i += 1) {
                 const teil = quellen.slice(i, i + 1).map(q => q.name);
-                if (st) st.textContent = window.t('knowledge.cleanup.k_progress')
+                this._clStatus(window.t('knowledge.cleanup.k_progress')
                     .replace('{i}', Math.min(i + teil.length, quellen.length))
-                    .replace('{n}', quellen.length);
+                    .replace('{n}', quellen.length), true);
                 const rr = await fetch('/api/knowledge/cleanup/regeln', {
                     method: 'POST', headers: kopf, body: JSON.stringify({ quellen: teil }) });
                 if (!rr.ok) throw new Error(await this._fehlertext(rr));
                 zeilen.push(...((await rr.json()).zeilen || []));
             }
-            if (st) st.textContent = window.t('knowledge.cleanup.k_running');
+            this._clStatus(window.t('knowledge.cleanup.k_running'), true);
             const resp = await fetch('/api/knowledge/cleanup/abgleich', {
                 method: 'POST', headers: kopf, body: JSON.stringify({ zeilen }) });
             if (!resp.ok) throw new Error(await this._fehlertext(resp));
@@ -1227,7 +1226,7 @@ class JarvisKnowledgeManager {
                     this._escHtml(window.t('knowledge.cleanup.k_back'))}</button></div>`;
             document.getElementById('kb-cleanup-apply').style.display = 'none';
         } catch (e) {
-            if (st) st.textContent = window.t('common.error') + ': ' + e.message;
+            this._clStatus(window.t('common.error') + ': ' + e.message, false);
         } finally {
             if (knopf) knopf.disabled = false;
         }
@@ -1276,11 +1275,31 @@ class JarvisKnowledgeManager {
         box.innerHTML = html;
     }
 
+    /**
+     * Statuszeile des Aufraeum-Dialogs - EINE Stelle fuer beide Laeufe
+     * (Analysieren und Gesamtpruefung).
+     *
+     * ⚠ `laeuft` ist nicht Kosmetik: beide Laeufe brauchen je Datei rund 20-30
+     * Sekunden, und zwischen zwei Fortschrittsmeldungen steht derselbe Text
+     * minutenlang unveraendert da. Ohne den drehenden Ring ist "es arbeitet
+     * noch" von "es haengt" nicht zu unterscheiden - dieselbe Bauart wie
+     * `.kb-files-loading` beim Aufklappen eines Ordners.
+     *
+     * Der Ring haengt an einer KLASSE (`::before`), nicht an eingefuegtem
+     * Markup: die Zeile wird ueber `textContent` gesetzt, ein Element darin
+     * waere beim naechsten Fortschrittsschritt wieder weg.
+     */
+    _clStatus(text, laeuft) {
+        const st = document.getElementById('kb-cl-status');
+        if (!st) return;
+        st.textContent = text;
+        st.classList.toggle('kb-cl-laeuft', !!laeuft);
+    }
+
     async cleanupAnalysieren() {
         const sel = [...document.querySelectorAll('.kb-cl-sel:checked')].map(c => c.value);
-        const st = document.getElementById('kb-cl-status');
         const knopf = document.getElementById('kb-cl-start');
-        if (!sel.length) { st.textContent = window.t('knowledge.cleanup.none_selected'); return; }
+        if (!sel.length) { this._clStatus(window.t('knowledge.cleanup.none_selected'), false); return; }
         if (knopf) { knopf.disabled = true; }
         // Der Lauf dauert je Datei einige Sekunden – ohne diese Zeile sieht der
         // Klick wie ein Nichts aus.
@@ -1295,9 +1314,9 @@ class JarvisKnowledgeManager {
         try {
             for (let i = 0; i < sel.length; i += BLOCK) {
                 const teil = sel.slice(i, i + BLOCK);
-                st.textContent = window.t('knowledge.cleanup.progress')
+                this._clStatus(window.t('knowledge.cleanup.progress')
                     .replace('{i}', Math.min(i + teil.length, sel.length))
-                    .replace('{n}', sel.length);
+                    .replace('{n}', sel.length), true);
                 const resp = await fetch('/api/knowledge/cleanup/analyse', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json',
@@ -1311,7 +1330,7 @@ class JarvisKnowledgeManager {
             }
             this._cleanupVergleich(modell);
         } catch (e) {
-            st.textContent = window.t('common.error') + ': ' + e.message;
+            this._clStatus(window.t('common.error') + ': ' + e.message, false);
             if (knopf) knopf.disabled = false;
         }
     }

@@ -56,7 +56,8 @@ function methode(name) {
 const teile = ['_diffZeilen', '_cleanupVergleich', '_escHtml', 'cleanupBearbeiten',
                'cleanupUebernehmen', '_fehlertext', '_bilanzHtml', 'cleanupBilanz',
                'cleanupKonflikte', 'cleanupOeffnen', 'cleanupSchliessen',
-               '_cleanupListe', '_cleanupZaehler', 'cleanupEinzelSpeichern'].map(methode);
+               '_cleanupListe', '_cleanupZaehler', 'cleanupEinzelSpeichern',
+               '_clStatus', 'cleanupAnalysieren'].map(methode);
 check('alle Bausteine geschnitten', teile.every(t => t.length > 20));
 
 const gesendet = [];
@@ -642,6 +643,84 @@ check('die drei neuen Texte gibt es in DE und EN',
 const hz2 = document.querySelector('.kb-cl-zuschnitt');
 check('der Hinweis darunter erklaert die Anweisungsdateien',
       /Anweisungsdateien/.test((hz2 && hz2.textContent) || ''));
+
+// ─────────────────────────────────────────────────────────────────────────
+console.log('\n\x1b[1m9. Waehrend des Laufs dreht sich sichtbar etwas\x1b[0m');
+// ⚠ GEMELDET: nach dem Klick auf "Analysieren" stand die Fortschrittszeile
+// minutenlang unveraendert da - "arbeitet noch" war von "haengt" nicht zu
+// unterscheiden. Gemessen wird deshalb der Zustand WAEHREND des Laufs, nicht
+// hinterher: die Attrappe haelt bei jedem Netzabruf fest, was das
+// Status-Element in diesem Moment traegt.
+document.getElementById('kb-cleanup-body').innerHTML =
+    `<label><input type="checkbox" class="kb-cl-sel" value="a" checked></label>
+     <label><input type="checkbox" class="kb-cl-sel" value="b" checked></label>
+     <button id="kb-cl-start"></button>
+     <div id="kb-cl-status" class="kb-hint"></div>`;
+const stEl = () => document.getElementById('kb-cl-status');
+const waehrend = [];
+global.fetch = window.fetch = async (url) => {
+    // ⚠ NUR die Analyse-Abrufe zaehlen. Der erste Anlauf nahm jeden fetch mit -
+    // auch den Bilanz-Abruf, den _cleanupVergleich NACH dem Lauf macht, wenn
+    // der Kasten samt Statuszeile laengst ersetzt ist: die Messung meldete
+    // einen Fehler, den es nicht gab.
+    if (/\/analyse$/.test(url)) {
+        const el = stEl();
+        waehrend.push({ text: el ? el.textContent : '', dreht: !!(el && el.classList.contains('kb-cl-laeuft')) });
+    }
+    return { ok: true, json: async () => ({ modell: 'testmodell', ergebnisse: [] }) };
+};
+await M.cleanupAnalysieren();
+check('der Lauf hat wirklich stattgefunden (Positivkontrolle)', waehrend.length > 0);
+check('⚠ waehrend des Laufs traegt die Statuszeile das Laufzeichen',
+      waehrend.length > 0 && waehrend.every(w => w.dreht));
+check('und der Fortschrittstext steht trotzdem da (Platzhalter ersetzt)',
+      waehrend.length > 0 && /\b2 von 2\b/.test(waehrend[0].text)
+      && !/\{i\}|\{n\}/.test(waehrend[0].text));
+// Nach dem Lauf ersetzt der Vergleich den ganzen Kasten - das Zeichen ist mit
+// dem Element weg. Die eigene Zusage bleibt trotzdem pruefbar:
+document.getElementById('kb-cleanup-body').innerHTML =
+    '<div id="kb-cl-status" class="kb-hint"></div>';
+M._clStatus('laeuft', true);
+check('_clStatus setzt das Zeichen', stEl().classList.contains('kb-cl-laeuft'));
+M._clStatus('fertig', false);
+check('⚠ und nimmt es zurueck - ein Zeichen, das nach dem Fehler weiterdreht, luegt',
+      !stEl().classList.contains('kb-cl-laeuft') && stEl().textContent === 'fertig');
+// Fehlerfall AUSGEFUEHRT: eine abgebrochene Analyse darf nicht weiterdrehen.
+global.fetch = window.fetch = async () => ({ ok: false, status: 500, json: async () => ({}), text: async () => 'kaputt' });
+document.getElementById('kb-cleanup-body').innerHTML =
+    `<label><input type="checkbox" class="kb-cl-sel" value="a" checked></label>
+     <button id="kb-cl-start"></button><div id="kb-cl-status" class="kb-hint"></div>`;
+await M.cleanupAnalysieren();
+check('⚠ nach einem Fehler steht der Grund da und nichts dreht sich mehr',
+      !stEl().classList.contains('kb-cl-laeuft') && stEl().textContent.length > 0);
+// Ohne Auswahl gibt es keinen Lauf - und damit auch kein Laufzeichen.
+document.getElementById('kb-cleanup-body').innerHTML =
+    '<button id="kb-cl-start"></button><div id="kb-cl-status" class="kb-hint"></div>';
+await M.cleanupAnalysieren();
+check('ohne Auswahl dreht sich nichts', !stEl().classList.contains('kb-cl-laeuft'));
+
+// Die EIGENSCHAFT im CSS, nicht das Vorkommen des Namens: es muss wirklich ein
+// rotierender Ring entstehen. (Lehre aus .kb-cl-spanne: eine @media-Regel mit
+// demselben Selektor haelt ein blosses Namensmuster am Leben.)
+const CSS_L = fs.readFileSync(path.join(REPO, 'frontend/css/style.css'), 'utf8');
+const ringBlock = (CSS_L.match(/\.kb-cl-laeuft::before\s*\{[^}]*\}/g) || []);
+check('⚠ die Klasse erzeugt einen rotierenden Ring (Rundung + Animation)',
+      ringBlock.some(b => /border-radius\s*:\s*50%/.test(b)
+                       && /animation\s*:\s*spin/.test(b)
+                       && /content\s*:/.test(b)));
+const basisBlock = (CSS_L.match(/\.kb-cl-laeuft\s*\{[^}]*\}/g) || []);
+check('und der Ring steht NEBEN dem Text, nicht darueber',
+      basisBlock.some(b => /display\s*:\s*flex/.test(b) && /gap\s*:/.test(b)));
+check('bewegungsempfindliche Benutzer bekommen keine Animation',
+      /prefers-reduced-motion[\s\S]{0,400}\.kb-cl-laeuft/.test(CSS_L));
+// Der Cache-Buster muss mit - sonst behaelt der Browser des Melders genau die
+// Fassung ohne Zeichen.
+['settings.html', 'wissen.html'].forEach(seite => {
+    const h = fs.readFileSync(path.join(REPO, 'frontend', seite), 'utf8');
+    check(`${seite}: knowledge.js und style.css sind neu genug`,
+          /knowledge\.js\?v=(11[3-9]|1[2-9]\d|[2-9]\d\d)/.test(h)
+          && /style\.css\?v=(17[6-9]|1[89]\d|[2-9]\d\d)/.test(h));
+});
 
 clearTimeout(wachhund);
 console.log(`\n\x1b[1mErgebnis: ${OK} OK, ${FAIL} FAIL\x1b[0m`);

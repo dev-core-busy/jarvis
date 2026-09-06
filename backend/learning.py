@@ -93,6 +93,38 @@ _LEARN_DENY = re.compile(
 )
 
 
+# ── Hat die Extraktion ueberhaupt Wissen geliefert? ───────────────────────
+# ⚠ AN ECHTEN DATEN GEMESSEN (DEV, 2026-09-06): von 71 Lernnotizen hatten
+# **53** als kompletten Inhalt das Wort "Standardantwort" - 75 % Muell, jede
+# davon im FAISS-Index und damit in jeder kuenftigen Suche. Sie entstehen bei
+# Auftraegen ohne Wissensgehalt ("Erzeuge ein Bild von einem Hund"): das Modell
+# liefert eine Floskel, und die wurde ungeprueft geschrieben.
+#
+# Der bisherige Filter war eine WORTLISTE ("NICHTS","KEINE","NONE") - genau die
+# Grundlage, die an dem Tag unvollstaendig ist, an dem ein Modell eine neue
+# Floskel erfindet. Geprueft wird deshalb die EIGENSCHAFT:
+#   - Laenge: gemessen 15 Zeichen (Muell) gegen >=170 (echtes Wissen). Die
+#     Schwelle liegt mit grossem Abstand dazwischen.
+#   - Struktur: echte Fakten folgen dem Format "- [Kategorie]: Text", das der
+#     Extraktions-Prompt verlangt. Eine Floskel hat es nie.
+# Beide Kriterien zusammen, weil jedes allein zu schwach waere: ein langer
+# Fliesstext ohne Struktur kann Wissen sein, eine kurze Zeile MIT Struktur auch.
+MIN_FAKTEN_ZEICHEN = 80
+
+
+def _hat_substanz(facts_text: str) -> bool:
+    """Ist das Wissen - oder eine Floskel? (True = speichern)"""
+    t = (facts_text or "").strip()
+    if len(t) < MIN_FAKTEN_ZEICHEN:
+        return False
+    # Mindestens eine Zeile im geforderten Format "- [Kategorie]: Inhalt".
+    for zeile in t.splitlines():
+        z = zeile.strip()
+        if z.startswith("-") and "[" in z and "]" in z and ":" in z.split("]", 1)[1]:
+            return True
+    return False
+
+
 def _sanitize_learned(facts_text: str) -> str:
     """Entfernt sicherheits-/rechte-bezogene Zeilen aus den zu lernenden Fakten."""
     kept = []
@@ -137,6 +169,13 @@ async def learn_from_conversation(
 
         # Sicherheits-Filter: rechte-/secret-bezogene "Fakten" niemals lernen
         facts_text = _sanitize_learned(facts_text)
+        # ⚠ SUBSTANZ-PRUEFUNG NACH dem Saeubern: erst danach steht fest, was
+        # wirklich uebrig bleibt. Ohne sie landeten 75 % Floskeln im Index.
+        if facts_text and not _hat_substanz(facts_text):
+            _log.info("Auto-Learning: kein verwertbares Wissen (%d Zeichen, "
+                      "keine Fakten-Struktur) - nicht gespeichert: %r",
+                      len(facts_text.strip()), facts_text.strip()[:60])
+            return
         if not facts_text:
             _log.info("Lernen uebersprungen: nur sicherheitsrelevante/gefilterte Inhalte")
             return

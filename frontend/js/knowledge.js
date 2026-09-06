@@ -1655,7 +1655,7 @@ class JarvisKnowledgeManager {
                         <span class="kb-learned-item-date">${dateStr} · ${f.size_kb} KB</span>
                         <div class="kb-learned-item-actions">
                             <button class="kb-btn-sm" onclick="window.knowledgeManager.toggleLearnedEdit('${safeId}', '${f.path.replace(/'/g,"\\'")}')">✏️</button>
-                            <button class="kb-btn-sm kb-btn-del" onclick="window.knowledgeManager.deleteLearnedFile('${f.path.replace(/'/g,"\\'")}')" title="${T('common.delete','Löschen')}">${JarvisIcons.trash()}</button>
+                            <button class="kb-btn-sm kb-btn-del" onclick="window.knowledgeManager.deleteLearnedFile('${f.path.replace(/'/g,"\\'")}')" title="${window.t('common.delete')}">${JarvisIcons.trash()}</button>
                         </div>
                     </div>
                     <div class="kb-learned-item-editor" id="${safeId}_editor" style="display:none;"></div>

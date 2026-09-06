@@ -1090,6 +1090,8 @@ Regeln:
     - DATEN-CHARTS/DIAGRAMME (Balken, Linien, Torten, Streu-, Histogramm etc. aus Zahlen/Tabellen): rendere ein PNG mit matplotlib bzw. seaborn via shell_execute nach /tmp (z.B. plt.savefig("/tmp/chart.png", dpi=150)). matplotlib und seaborn sind auf einem eingerichteten Server vorhanden und funktionieren headless (Backend Agg wird automatisch gesetzt) – auch im Sandbox-Modus; fuer Datenanalyse stehen pandas und numpy bereit. Das erzeugte PNG wird automatisch inline im Chat angezeigt. Behaupte das Fehlen dieser Pakete also nicht ungeprueft. Unterschied: matplotlib = gerenderte Datencharts; python-pptx-Formen = schematische Diagramme in einer Office-Datei.
     - MELDET EIN BEFEHL DENNOCH "ModuleNotFoundError", ist das keine Vermutung, sondern eine Tatsache: dann gilt der HINWEIS_AN_NUTZER unter der Ausgabe. Nimm den dort genannten Weg (in der Regel das passende office_*- oder create_chart-Werkzeug), suche NICHT nach weiteren Modulen oder Alternativ-Installationen und weiche NICHT auf ein schlechteres Ergebnis aus. Kannst du das Gewuenschte dadurch nicht liefern, sage dem Benutzer klar, welches Modul fehlt – ein Administrator kann es nachinstallieren.
     - WICHTIG: Temporaere Skripte UND Ausgabedateien IMMER unter /tmp anlegen (z.B. > /tmp/verarbeitung.py, df.to_excel("/tmp/ergebnis.xlsx"), plt.savefig("/tmp/chart.png")). NIEMALS in das Arbeitsverzeichnis schreiben (relative Pfade wie "> skript.py") – das ist fuer eingeschraenkte Benutzer gesperrt und schlaegt fehl.
+
+16b. ERGEBNIS-DATEIEN AUSLIEFERN (gilt fuer JEDE erzeugte Datei, nicht nur Office):
     - Das System erkennt JEDE erzeugte Datei automatisch (auch in /tmp) – Office-Dokumente (docx/xlsx/pptx/pdf) UND Bilder (png/jpg/gif/webp/svg, z.B. Diagramme/Schemata) – und liefert sie dem Nutzer aus: Dokumente als Download-Chip, Bilder als inline-Vorschau im Chat. DU musst dich darum nicht kuemmern – und setzt fuer diese Dateien KEINEN Liefer-Marker.
     - JEDER ANDERE Dateityp (z.B. .zip, .csv, .json, .txt, .xml, .mp4, .mp3 …), den der Nutzer erhalten soll: Datei nach /tmp schreiben und GENAU EINE eigene Zeile mit dem Liefer-Marker ausgeben: [[JARVIS_DELIVER:/tmp/<dateiname.ext>]] – das System haengt sie automatisch an den Chat an (Bilder inline, sonst Download). Optional mit Anzeigenamen: [[JARVIS_DELIVER:/tmp/roh.zip|Ergebnis.zip]]. NUR fuer Dateien, die DU selbst geschrieben hast und die dort wirklich liegen – nie fuer das Ergebnis eines office_*-Werkzeugs.
     - Praesentiere das Ergebnis NIEMALS als blossen lokalen Pfad ("liegt unter /tmp/...") und fordere den Nutzer NIEMALS auf, einen /tmp-Pfad zu verwenden – solche Pfade sind fuer ihn nicht erreichbar. Beschreibe einfach das Ergebnis; die Datei wird automatisch angehaengt.
@@ -1238,6 +1240,11 @@ KRITISCH – Autonomie-Regeln:
         self._role_max_steps: int = 0
         # Delegationen des LAUFENDEN Auftrags (wird pro Lauf zurueckgesetzt).
         self._delegations_used: int = 0
+        # Hat dieser Lauf den vollen Werkzeugkasten angefordert? Wird - wie
+        # `_delegations_used` - bei JEDEM Auftragsstart zurueckgesetzt: sonst
+        # bliebe der geteilte Hauptagent nach einem einzigen Fehlgriff dauerhaft
+        # auf dem vollen Satz und die Ersparnis waere nach dem ersten Lauf weg.
+        self._buendel_voll: bool = False
         # Werkzeuge, die in DIESEM Lauf schon per Rollen-Rueckfall abgefangen
         # wurden – verhindert Ping-Pong bei einem dauerhaft scheiternden Tool.
         self._fallback_used: set = set()
@@ -1413,10 +1420,91 @@ KRITISCH – Autonomie-Regeln:
             try:
                 from backend import agent_roles
                 if not agent_roles.namen(nur_aktive=True):
-                    return [t for t in tools if t.name != "delegate"]
+                    tools = [t for t in tools if t.name != "delegate"]
             except Exception:  # noqa: BLE001
-                return [t for t in tools if t.name != "delegate"]
-        return tools
+                tools = [t for t in tools if t.name != "delegate"]
+        return self._buendel_zuschnitt(tools)
+
+    def werkzeuge_fuer_anzeige(self) -> list:
+        """Der VOLLE Werkzeugsatz - fuer Bilanzen und Anzeigen.
+
+        ⚠ ``_llm_tools`` liefert seit dem Buendel-Zuschnitt den Satz des
+        LAUFENDEN Auftrags. Eine Anzeige, die das benutzt, meldet die Zahl des
+        zufaellig letzten Laufs (gemessen: 9 statt 86 Werkzeuge) - und niemand
+        sieht ihr an, dass sie nicht den Regelfall zeigt. Diese Methode aendert
+        keinen Zustand am geteilten Hauptagenten.
+        """
+        try:
+            merker = getattr(self, "_buendel_voll", False)
+            # Kein Setzen am Objekt: der Zuschnitt wird umgangen, indem die
+            # bereits gefilterte Liste OHNE Buendel neu gebildet wird.
+            tools = list(self._tool_instances or [])
+            allow = getattr(self, "_role_tools", None)
+            if allow is not None:
+                tools = [t for t in tools if t.name in allow]
+            if not self._actor_is_privileged():
+                _u = self.actor_name()
+                tools = [t for t in tools
+                         if t.name not in _BLOCKED_TOOLS_FOR_LDAP
+                         or _reminder_exempt(t.name, _u)]
+            if not self._buendel_aktiv() and not merker:
+                tools = [t for t in tools if t.name != "werkzeuge_anfordern"]
+            return tools
+        except Exception:  # noqa: BLE001
+            return list(self._tool_instances or [])
+
+    def _buendel_aktiv(self) -> bool:
+        """Ist der aufgabenabhaengige Zuschnitt eingeschaltet? Fail-closed."""
+        try:
+            from backend.config import config
+            return getattr(config, "WERKZEUG_BUENDEL", False) is True
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _buendel_zuschnitt(self, tools: list) -> list:
+        """Aufgabenabhaengiger Werkzeug-Zuschnitt (siehe werkzeug_buendel.py).
+
+        GEMESSEN am echten vLLM des aktiven Profils: der volle Satz kostet
+        25.866 Prompt-Token, ein Zuschnitt 8.349 (-68 %). Die Teilmenge muss
+        dafuer STABIL sein - eine neue Zusammenstellung je Aufgabe ist ein
+        Cache-Miss und kostet +48 % Latenz statt -14 %.
+
+        ⚠ VIER SCHRANKEN, alle in die harmlose Richtung:
+          - Vorgabe AUS. Ein Feature, das den Werkzeugkasten beschneidet, wird
+            nicht ungefragt aktiv - der Fehlgriff kostet ein Ergebnis, die
+            Ersparnis nur Token.
+          - Es kann nur WEGNEHMEN: ``tools`` ist bereits durch Rolle, Sperrliste
+            und Dispatch-Rechte gegangen. Wer die Richtung umkehrt, macht daraus
+            einen Weg um die Rechtepruefung (dieselbe Formel wie bei den Rollen).
+          - ``_buendel_voll`` (gesetzt von ``werkzeuge_anfordern``) hebt den
+            Zuschnitt fuer den RESTLICHEN Lauf auf.
+          - Jeder Fehler laesst den vollen Satz stehen.
+        """
+        # ⚠ ``werkzeuge_anfordern`` haengt IMMER im Kasten (damit es beim
+        # Einschalten sofort da ist), darf dem Modell aber nur angeboten werden,
+        # wenn es auch etwas bewirkt. Dieselbe Begruendung wie bei ``delegate``:
+        # ein Werkzeug ohne Ziel verleitet nur zu Fehlversuchen - und bei
+        # ausgeschaltetem Feature muss das Angebot UNVERAENDERT bleiben.
+        if not self._buendel_aktiv():
+            return [t for t in tools if t.name != "werkzeuge_anfordern"]
+        if getattr(self, "_buendel_voll", False):
+            return tools
+        try:
+            from backend import werkzeug_buendel as _wb
+            # ⚠ DIESELBE Quelle wie der Prompt-Zuschnitt (siehe _buendel_erlaubt).
+            erlaubt = self._buendel_erlaubt()
+            if erlaubt is None:
+                return tools
+            gek = [t for t in tools if t.name in erlaubt] or tools
+            grund = "+".join(sorted(_wb.themen(
+                getattr(self, "_current_task", "") or ""))) or "voll"
+            if len(gek) != len(tools):
+                print(f"[Buendel] {len(tools)} -> {len(gek)} Werkzeuge ({grund})",
+                      flush=True)
+            return gek
+        except Exception as e:  # noqa: BLE001
+            print(f"[Buendel] Zuschnitt uebersprungen: {e}", flush=True)
+            return tools
 
     def _delegation_moeglich(self) -> bool:
         """Liegt ``delegate`` im Werkzeugkasten DIESES Agenten?
@@ -1484,7 +1572,7 @@ KRITISCH – Autonomie-Regeln:
             # Ohne Zeitangabe laeuft der Agent wie vorher weiter.
             return ""
 
-    def _base_system_prompt(self) -> str:
+    def _base_system_prompt(self, voll: bool = False) -> str:
         """System-Prompt dieses Agenten: Rolle > Sub-Agent > Hauptagent.
 
         Der Zeit-Hinweis gilt in ALLEN drei Zweigen: er ist eine Tatsache ueber
@@ -1495,8 +1583,53 @@ KRITISCH – Autonomie-Regeln:
             return self._role_prompt + self._zeit_hinweis()
         if self.is_sub_agent:
             return self.SUB_AGENT_PROMPT + self._zeit_hinweis()
-        return (self.SYSTEM_PROMPT + self._fehlende_pflicht_tools()
+        return (self._prompt_zugeschnitten(voll) + self._fehlende_pflicht_tools()
                 + self._role_hinweis() + self._zeit_hinweis())
+
+    def _buendel_erlaubt(self) -> set | None:
+        """Die Namensmenge dieses Laufs - EINE Quelle fuer Prompt UND Werkzeuge.
+
+        ⚠ Beide muessen aus derselben Menge kommen. Liefe der Prompt-Zuschnitt
+        auf einer anderen Grundlage als ``_llm_tools``, naennte der Prompt
+        Werkzeuge, die gar nicht angeboten werden (oder umgekehrt) - genau die
+        Fehlerklasse, die im Projekt schon dreimal teuer war ("ein Prompt ist
+        Code"). ``None`` heisst wie ueberall "keine Beschraenkung".
+        """
+        if not self._buendel_aktiv() or getattr(self, "_buendel_voll", False):
+            return None
+        try:
+            from backend import werkzeug_buendel as _wb
+            return _wb.erlaubte_namen(getattr(self, "_current_task", "") or "")
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _prompt_zugeschnitten(self, voll: bool = False) -> str:
+        """Basis-Prompt ohne die Abschnitte, deren Werkzeuge nicht angeboten werden.
+
+        Punkt 15/16/20 sind zusammen 62 % des Prompts und nennen ausschliesslich
+        Skill-Werkzeuge; ohne das Werkzeug ist die Regel dazu keine Anweisung
+        mehr, sondern Rauschen. Gemessen: -48 % bei einem Bild-Auftrag, -58 %
+        bei einem Ticket-Auftrag, 0 % ohne erkanntes Thema.
+
+        Fail-open: jeder Fehler laesst den vollen Prompt stehen.
+        """
+        # ⚠ `voll=True` ist AUSSCHLIESSLICH fuer ANZEIGEN da (Prompt-Bilanz):
+        # dort muss die Obergrenze stehen, nicht der Zuschnitt des zufaellig
+        # letzten Laufs - sonst behauptet die Anzeige einen Zustand, der vom
+        # Zufall abhaengt. Es aendert KEINEN Zustand am geteilten Hauptagenten.
+        erlaubt = None if voll else self._buendel_erlaubt()
+        if erlaubt is None:
+            return self.SYSTEM_PROMPT
+        try:
+            from backend import werkzeug_buendel as _wb
+            text, weg = _wb.prompt_zuschnitt(self.SYSTEM_PROMPT, erlaubt)
+            if weg:
+                print(f"[Buendel] Prompt {len(self.SYSTEM_PROMPT)} -> {len(text)} "
+                      f"Zeichen (ohne Punkt {', '.join(weg)})", flush=True)
+            return text
+        except Exception as e:  # noqa: BLE001
+            print(f"[Buendel] Prompt-Zuschnitt uebersprungen: {e}", flush=True)
+            return self.SYSTEM_PROMPT
 
     # Werkzeuge, auf denen der SYSTEM_PROMPT ausdruecklich BESTEHT, die aber aus
     # SKILLS kommen und damit fehlen koennen. Ohne den Hinweis unten verlangt der
@@ -1774,6 +1907,16 @@ KRITISCH – Autonomie-Regeln:
         einem Skill kam und der Zustand dadurch sichtbar wurde.
         """
         is_sub_agent = self.is_sub_agent
+        # Der Rueckweg aus einem zu engen Werkzeug-Zuschnitt. Haengt bewusst
+        # HIER und nicht an einem Skill: er muss auch dann da sein, wenn der
+        # Zuschnitt gerade das Werkzeug weggenommen hat, das gebraucht wird.
+        # Ohne aktivierten Zuschnitt ist er wirkungslos (aber sichtbar) - das
+        # ist der Preis dafuer, dass er nie fehlt, wenn er gebraucht wird.
+        try:
+            from backend.tools.werkzeuge_anfordern import WerkzeugeAnfordernTool
+            self._tool_instances.append(WerkzeugeAnfordernTool(self))
+        except Exception as e:  # noqa: BLE001
+            print(f"[Buendel] werkzeuge_anfordern nicht geladen: {e}", flush=True)
         # spawn_agent Tool hinzufuegen (nur fuer Hauptagent)
         if not is_sub_agent:
             from backend.tools.subagent import SpawnAgentTool
@@ -1973,6 +2116,7 @@ KRITISCH – Autonomie-Regeln:
         # Delegations-Deckel gilt PRO AUFTRAG. Ohne diesen Reset waere der
         # geteilte Hauptagent nach acht Delegationen dauerhaft gesperrt.
         self._delegations_used = 0
+        self._buendel_voll = False
         self._fallback_used = set()
         # Bild-Sammlung fuer DIESEN Lauf. Sie existierte bisher NUR im
         # headless-Pfad (_run_headless) – im Chat war `current_task_images` None,
@@ -2948,6 +3092,7 @@ KRITISCH – Autonomie-Regeln:
             self.actor_name(), self._actor_is_privileged()))
         # Delegations-Deckel pro Auftrag (siehe run_task)
         self._delegations_used = 0
+        self._buendel_voll = False
         self._fallback_used = set()
         # Effektives LLM-Profil des (ggf. via _current_username gesetzten) Benutzers
         self._resolve_profile_for_user()

@@ -535,5 +535,26 @@ for fn in ("abgleichen", "gesamtpruefung"):
 
 shutil.rmtree(SAND, ignore_errors=True)
 check("Sandkasten restlos entfernt", not SAND.exists())
+print("\n\033[1mX. Die Bilanz misst die OBERGRENZE, nicht den Lauf-Zuschnitt\033[0m")
+# ⚠ Seit dem Buendel-Zuschnitt (2026-09-06) haengen `_base_system_prompt()` und
+# `_llm_tools` am LAUFENDEN Auftrag. Misst die Bilanz die, zeigt sie die Zahlen
+# des zufaellig letzten Laufs (gemessen: 11.416 statt 21.810 Zeichen, 8 statt 86
+# Werkzeuge) - eine Anzeige, die einen Zustand behauptet, den sie nicht kennt.
+import ast as _ast, io as _io, os as _os
+_wa_src = _io.open(_os.path.join(_os.path.dirname(_os.path.dirname(
+    _os.path.abspath(__file__))), "backend/wissen_aufraeumen.py"), encoding="utf-8").read()
+_fn = next((x for x in _ast.walk(_ast.parse(_wa_src))
+            if isinstance(x, _ast.FunctionDef) and x.name == "prompt_bilanz"), None)
+_q = _ast.get_source_segment(_wa_src, _fn) if _fn else ""
+check("prompt_bilanz gefunden", bool(_q))
+check("⚠ sie misst den Prompt mit voll=True (Obergrenze)",
+      "_base_system_prompt(voll=True)" in _q)
+check("⚠ und den Werkzeugsatz ueber werkzeuge_fuer_anzeige",
+      "werkzeuge_fuer_anzeige" in _q)
+check("sie faellt auf den alten Weg zurueck, wenn der Agent aelter ist",
+      "except TypeError" in _q)
+check("und weist einen aktiven Zuschnitt aus",
+      "zuschnitt_aktiv" in _q)
+
 print(f"\n\033[1mErgebnis: {OK} OK, {FAIL} FAIL\033[0m")
 sys.exit(1 if FAIL else 0)

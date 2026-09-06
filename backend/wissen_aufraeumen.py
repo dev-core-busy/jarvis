@@ -704,8 +704,26 @@ def prompt_bilanz(neu_je_datei: dict[str, str] | None = None) -> dict:
                 except Exception:                             # noqa: BLE001
                     ag = None
         if ag is not None:
-            basis = ag._base_system_prompt()
-            werkzeuge = list(getattr(ag, "_llm_tools", []) or [])
+            # ⚠ VOLL MESSEN, NICHT DEN ZUSCHNITT DES LETZTEN LAUFS. Seit dem
+            # Buendel-Zuschnitt (2026-09-06) haengen Prompt UND Werkzeugsatz am
+            # laufenden Auftrag: nach einem Bild-Auftrag saehe der Administrator
+            # 11.070 statt 21.464 Zeichen und 9 statt 86 Werkzeuge - eine Zahl,
+            # die vom Zufall des letzten Laufs abhaengt und das nicht sagt.
+            # Die Bilanz zeigt die OBERGRENZE; was der Zuschnitt davon spart,
+            # steht getrennt darunter.
+            try:
+                basis = ag._base_system_prompt(voll=True)
+            except TypeError:                                 # aelterer Stand
+                basis = ag._base_system_prompt()
+            if hasattr(ag, "werkzeuge_fuer_anzeige"):
+                werkzeuge = list(ag.werkzeuge_fuer_anzeige() or [])
+            else:
+                werkzeuge = list(getattr(ag, "_llm_tools", []) or [])
+            try:
+                if ag._buendel_aktiv():
+                    aus["zuschnitt_aktiv"] = True
+            except Exception:                                 # noqa: BLE001
+                pass
         else:
             # ⚠ Der Hauptagent ist LAZY - nach einem Neustart gibt es ihn erst
             # mit dem ersten Auftrag. Dann wird der Basis-Prompt ohne die

@@ -106,12 +106,18 @@ for n in _JA.body:
         _teile[n.targets[0].id] = _segment(n)
     elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in (
             "_pflicht_hinweise", "_fehlende_pflicht_tools", "_zeit_hinweis",
-            "_base_system_prompt"):
+            "_base_system_prompt", "_prompt_zugeschnitten", "_buendel_erlaubt",
+            "_buendel_aktiv"):
         _teile[n.name] = _segment(n)
 
+# ⚠ EINE GEPFLEGTE LISTE - und genau die hat beim Prompt-Zuschnitt (2026-09-06)
+# gefehlt: `_base_system_prompt` rief `_prompt_zugeschnitten`, das nicht mit
+# geschnitten war, und der Lauf brach mit AttributeError ab (kein FAIL, keine
+# Bilanz). Wer `_base_system_prompt` um einen Aufruf erweitert, traegt ihn HIER
+# nach - der Abbruch mit Exit 2 sagt es einem.
 for _pflicht in ("_SKILL_PFLICHT_TOOLS", "_pflicht_hinweise", "_zeit_hinweis",
                  "_base_system_prompt", "SYSTEM_PROMPT", "SUB_AGENT_PROMPT",
-                 "_fehlende_pflicht_tools"):
+                 "_fehlende_pflicht_tools", "_prompt_zugeschnitten"):
     if _pflicht not in _teile:
         # Exit 2 = der Test konnte nicht laufen (nicht "gruen"). Wichtig fuer die
         # Gegenprobe gegen einen alten Stand: dort fehlt `_pflicht_hinweise`, und

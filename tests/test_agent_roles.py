@@ -551,7 +551,14 @@ i_bp = AGENT.find("def _base_system_prompt")
 # Docstring, und alle drei Zweige haengen zusaetzlich `_zeit_hinweis()` an –
 # deshalb wird auf den Namen geprueft, nicht auf `return self.X` woertlich.
 fenster_bp = AGENT[i_bp:i_bp + 1600]
-pruefe("self.SUB_AGENT_PROMPT" in fenster_bp and "self.SYSTEM_PROMPT" in fenster_bp,
+# ⚠ AUF DIE EIGENSCHAFT, NICHT AUF DIE SCHREIBWEISE: der Hauptagent-Zweig
+# liefert seit dem Prompt-Zuschnitt (2026-09-06) `_prompt_zugeschnitten()`
+# statt `self.SYSTEM_PROMPT` woertlich - die Weiche Rolle/Sub-Agent/Hauptagent
+# ist dieselbe geblieben. Ein Test auf den Wortlaut meldete hier einen Fehler,
+# den es nicht gab (Register).
+pruefe("self.SUB_AGENT_PROMPT" in fenster_bp
+       and ("self.SYSTEM_PROMPT" in fenster_bp
+            or "_prompt_zugeschnitten" in fenster_bp),
        "ohne Rolle bleibt die alte Prompt-Weiche erhalten (Sub-Agent/Hauptagent)")
 pruefe(fenster_bp.count("_zeit_hinweis()") == 3,
        "alle drei Zweige liefern den aktuellen Zeitpunkt mit")

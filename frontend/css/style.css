@@ -4032,6 +4032,16 @@ select.input-field {
     border-top: 1px solid var(--border);
 }
 
+/* Erklaerung ueber einem Bedienelement in den System-Einstellungen. Der Knopf
+   "Prompt optimieren" braucht sie: was er aufraeumt, geht in JEDE Anfrage ein -
+   ohne den Satz ist nicht erkennbar, WOFUER man ihn drueckt. */
+.tuning-hint {
+    font-size: 0.8rem;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    margin: 0 0 8px;
+}
+
 .tuning-group-title {
     margin: 0 0 0.6rem 0;
     font-size: 0.85rem;
@@ -4397,6 +4407,19 @@ select.input-field {
 .kb-cl-karte { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
     margin: 10px 0; background: var(--bg-secondary); }
 .kb-cl-karte.ist-fehler { border-color: var(--danger, #c0392b); }
+/* Eine bereits geschriebene Karte: der Vergleich bleibt lesbar, aber sie ist
+   erkennbar erledigt - und traegt das ZUSAETZLICH als Wort ("gespeichert" in
+   der Statuszeile), nicht nur als Farbe. */
+.kb-cl-karte.ist-fertig { border-left: 3px solid var(--success, #2e9e5b); opacity: .9; }
+.kb-cl-karte-status { font-size: .8rem; margin: 6px 0 0; word-break: break-word; }
+.kb-cl-karte-status.ist-gut { color: var(--success, #2e9e5b); }
+.kb-cl-karte-status.ist-schlecht { color: var(--danger, #c0392b); }
+/* ⚠ IM HELLEN THEMA GEMESSEN - dieselbe Stelle wie beim Diff darunter:
+   das Gruen liegt auf hellem Grund bei 2,54:1 und ist als Text zu blass. */
+body.light .kb-cl-karte-status.ist-gut { color: #146c38; }
+body.light .kb-cl-karte-status.ist-schlecht { color: #a5231a; }
+/* Der Speichern-Knopf steht neben dem ✎ und darf nicht umbrechen. */
+.kb-cl-save { white-space: nowrap; }
 .kb-cl-kopf { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .kb-cl-uebernehmen { display: inline-flex; align-items: center; gap: 5px;
     font-size: .8rem; cursor: pointer; white-space: nowrap; }

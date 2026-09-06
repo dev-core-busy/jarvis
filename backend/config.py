@@ -214,6 +214,12 @@ class Config:
     # Feld NICHT – der getattr-Default 8192 galt immer, obwohl der Docstring
     # Konfigurierbarkeit versprach.
     LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "8192"))
+    # Aufgabenabhaengiger Werkzeug-Zuschnitt (backend/werkzeug_buendel.py).
+    # ⚠ VORGABE AUS: das Feature beschneidet, was das Modell SIEHT - ein zu
+    # enger Zuschnitt kostet ein Ergebnis, die Ersparnis nur Token. Die
+    # Fehlerlagen sind nicht gleich schwer, also wird es bewusst
+    # eingeschaltet, nicht stillschweigend uebernommen.
+    WERKZEUG_BUENDEL: bool = os.getenv("JARVIS_WERKZEUG_BUENDEL", "0") == "1"
     # Kennung des LLM-Profils, das BILDER erzeugt. "" = wie bisher das Profil des
     # laufenden Agenten.
     #
@@ -355,6 +361,7 @@ class Config:
         self.LLM_REASONING_EFFORT = _valid_effort(data.get("llm_reasoning_effort"))
         try:
             self.LLM_MAX_TOKENS = max(256, min(int(data.get("llm_max_tokens") or 8192), 131072))
+            self.WERKZEUG_BUENDEL = data.get("werkzeug_buendel") is True
         except (TypeError, ValueError):
             self.LLM_MAX_TOKENS = 8192
         # Fehlt der Schluessel, bleibt der ENV-/Klassenwert stehen (gleiche
@@ -469,6 +476,7 @@ class Config:
             "llm_timeout": self.LLM_TIMEOUT,
             "llm_reasoning_effort": self.LLM_REASONING_EFFORT,
             "llm_max_tokens": self.LLM_MAX_TOKENS,
+            "werkzeug_buendel": self.WERKZEUG_BUENDEL,
             "image_profile_id": self.IMAGE_PROFILE_ID,
             "docs_retention_days": self.DOCS_RETENTION_DAYS,
             "agent_api_key": self.AGENT_API_KEY,
@@ -500,6 +508,10 @@ class Config:
                 self.LLM_MAX_TOKENS = max(256, min(int(settings["llm_max_tokens"]), 131072))
             except (TypeError, ValueError):
                 pass
+        if "werkzeug_buendel" in settings:
+            # ⚠ `is True`, nicht bool(): ein "ja"/1 aus einer von Hand
+            # geschriebenen settings.json ist keine bewusste Entscheidung.
+            self.WERKZEUG_BUENDEL = settings["werkzeug_buendel"] is True
         if "image_profile_id" in settings:
             # Eine unbekannte Kennung wird ABGEWIESEN, nicht gespeichert: sonst
             # zeigt die Einstellung ins Leere und die Bildgenerierung sagt ab,

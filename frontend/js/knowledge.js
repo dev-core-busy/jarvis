@@ -1122,6 +1122,8 @@ class JarvisKnowledgeManager {
           ${wz ? `<p class="kb-cl-gruppe-titel">${this._escHtml(window.t('knowledge.cleanup.b_wz_top'))}</p>
                   <table class="kb-cl-bilanz-tab"><tbody>${wz}</tbody></table>` : ''}
           <p class="kb-hint">${this._escHtml(window.t('knowledge.cleanup.b_token_note'))}</p>
+          ${b.zuschnitt_aktiv ? `<p class="kb-hint kb-cl-zuschnitt">${
+              this._escHtml(window.t('knowledge.cleanup.b_zuschnitt'))}</p>` : ''}
         </details>`;
     }
 
@@ -1321,7 +1323,6 @@ class JarvisKnowledgeManager {
         const v = this._cleanupVorschlaege || [];
         let html = `<p class="kb-hint">${window.t('knowledge.cleanup.result_hint')
                     .replace('{modell}', this._escHtml(modell || '?'))}</p>`;
-        let aenderbar = 0;
         v.forEach((r, idx) => {
             if (!r.ok) {
                 html += `<div class="kb-cl-karte ist-fehler"><div class="kb-cl-kopf">
@@ -1337,7 +1338,6 @@ class JarvisKnowledgeManager {
                     </div></div>`;
                 return;
             }
-            aenderbar++;
             const d = this._diffZeilen(r.alt, r.neu);
             const delta = r.bytes_neu - r.bytes_alt;
             let diffHtml;
@@ -1353,7 +1353,7 @@ class JarvisKnowledgeManager {
             }
             const funde = (r.funde || []).map(f =>
                 `<li><b>${this._escHtml(f.art || '')}</b>: ${this._escHtml(f.text || '')}</li>`).join('');
-            html += `<div class="kb-cl-karte">
+            html += `<div class="kb-cl-karte" id="kb-cl-karte-${idx}">
                 <div class="kb-cl-kopf">
                     <label class="kb-cl-uebernehmen">
                         <input type="checkbox" class="kb-cl-take" data-idx="${idx}" checked>
@@ -1364,7 +1364,12 @@ class JarvisKnowledgeManager {
                         (${delta > 0 ? '+' : ''}${delta})</span>
                     <button class="kb-hdr-btn" onclick="window.knowledgeManager.cleanupBearbeiten(${idx})"
                             title="${window.t('knowledge.cleanup.edit_title')}">✎</button>
+                    <button class="kb-hdr-btn kb-cl-save" data-idx="${idx}"
+                            onclick="window.knowledgeManager.cleanupEinzelSpeichern(${idx}, this)"
+                            title="${window.t('knowledge.cleanup.save_one_title')}"
+                            >${window.t('knowledge.cleanup.save_one')}</button>
                 </div>
+                <div class="kb-cl-karte-status" id="kb-cl-stat-${idx}" hidden></div>
                 ${r.begruendung ? `<p class="kb-cl-grund">${this._escHtml(r.begruendung)}</p>` : ''}
                 ${funde ? `<ul class="kb-cl-funde">${funde}</ul>` : ''}
                 ${diffHtml}
@@ -1383,14 +1388,91 @@ class JarvisKnowledgeManager {
             platz.innerHTML = this._bilanzHtml(b, true);
             box.insertBefore(platz, box.firstChild ? box.firstChild.nextSibling : null);
         });
+        // ⚠ DER ZAEHLER WIRD AUS DEM DOM ABGELEITET, NICHT MITGEFUEHRT.
+        // Er sinkt damit sowohl beim Einzelspeichern (das Kaestchen verschwindet
+        // mit der erledigten Karte) als auch beim Abwaehlen - eine mitgefuehrte
+        // Variable liefe bei jedem neuen Weg auseinander, und der Knopf
+        // behauptete eine Zahl, die er nicht mehr einloest.
+        box.querySelectorAll('.kb-cl-take').forEach(
+            c => c.addEventListener('change', () => this._cleanupZaehler()));
+        this._cleanupZaehler();
+    }
+
+    /** Beschriftet den Sammel-Knopf mit dem, was er WIRKLICH tun wuerde. */
+    _cleanupZaehler() {
         const apply = document.getElementById('kb-cleanup-apply');
-        apply.style.display = aenderbar ? '' : 'none';
-        apply.textContent = window.t('knowledge.cleanup.apply').replace('{n}', aenderbar);
+        if (!apply) return 0;
+        const n = document.querySelectorAll('.kb-cl-take:checked').length;
+        apply.style.display = n ? '' : 'none';
+        apply.textContent = window.t('knowledge.cleanup.apply').replace('{n}', n);
+        return n;
     }
 
     cleanupBearbeiten(idx) {
         const t = document.getElementById(`kb-cl-edit-${idx}`);
         if (t) t.hidden = !t.hidden;
+    }
+
+    /**
+     * EINE Datei sofort schreiben - der Knopf neben ✎.
+     *
+     * ⚠ HIER GIBT ES BEWUSST KEINE RUECKFRAGE, und das ist kein Bruch der
+     * Zusage "es wird nie ohne Bestaetigung geschrieben": der Klick auf diesen
+     * Knopf IST die Bestaetigung, und er betrifft GENAU DIE Datei, deren
+     * Vergleich der Mensch gerade vor sich hat. Der Sammel-Knopf unten fragt
+     * weiter zurueck - dort stehen N Dateien auf einmal an, und die ueberblickt
+     * man im Moment des Klicks nicht. Gesichert wird serverseitig in beiden
+     * Faellen (.bak je Ziel), der Vorgang ist also umkehrbar.
+     *
+     * Geschrieben wird der BEARBEITETE Text, wenn es einen gibt - dieselbe
+     * Regel wie im Sammelweg: das Modell hat an dieser Stelle keine Stimme mehr.
+     */
+    async cleanupEinzelSpeichern(idx, btn) {
+        const r = (this._cleanupVorschlaege || [])[idx];
+        if (!r) return;
+        const feld = document.getElementById(`kb-cl-edit-${idx}`);
+        const text = feld ? feld.value : r.neu;
+        const stat = document.getElementById(`kb-cl-stat-${idx}`);
+        if (btn) { btn.disabled = true; }
+        try {
+            const resp = await fetch('/api/knowledge/cleanup/apply', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json',
+                           'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') },
+                body: JSON.stringify({ aenderungen: [{ schluessel: r.schluessel, neu: text }] })
+            });
+            if (!resp.ok) throw new Error(await this._fehlertext(resp));
+            const d = await resp.json();
+            const f = (d.fehler || [])[0];
+            if (f) throw new Error(f.fehler || '');
+            const e = (d.erledigt || [])[0] || {};
+            r.gespeichert = true;
+            // Die Karte wird ERLEDIGT: Kaestchen und beide Knoepfe verschwinden,
+            // der Vergleich bleibt lesbar. Ohne das Entfernen des Kaestchens
+            // liefe dieselbe Datei ueber den Sammel-Knopf ein zweites Mal.
+            const karte = document.getElementById(`kb-cl-karte-${idx}`);
+            if (karte) {
+                karte.classList.add('ist-fertig');
+                karte.querySelectorAll('.kb-cl-uebernehmen, .kb-cl-save').forEach(x => x.remove());
+            }
+            if (feld) { feld.readOnly = true; }
+            if (stat) {
+                stat.hidden = false;
+                stat.className = 'kb-cl-karte-status ist-gut';
+                stat.textContent = window.t('knowledge.cleanup.saved')
+                    + (e.sicherung ? ' · ' + window.t('knowledge.cleanup.backup')
+                                     + ': ' + e.sicherung : '')
+                    + (d.hinweis ? ' — ' + d.hinweis : '');
+            }
+        } catch (err) {
+            if (stat) {
+                stat.hidden = false;
+                stat.className = 'kb-cl-karte-status ist-schlecht';
+                stat.textContent = window.t('common.error') + ': ' + err.message;
+            }
+            if (btn) btn.disabled = false;
+        }
+        this._cleanupZaehler();
     }
 
     async cleanupUebernehmen() {

@@ -429,8 +429,24 @@ def finde() -> Befund:
                 continue
             ziel = zuordnung.get(e)
             if ziel is None:
+                # ⚠ ZWEI MELDEGRUENDE, und der zweite fehlte (auf ECHT am
+                # 2026-09-07 aufgefallen): `chats/nexusgeorge.moushe` laesst
+                # `pfad_teil` UNVERAENDERT (kein Backslash, kein @ mehr drin),
+                # fiel also durch die erste Bedingung und wurde GAR NICHT
+                # erwaehnt - obwohl der Benutzer seinen Chat unter dem neuen
+                # Namen nicht mehr findet. Ein Eintrag mit Domaenen-Praefix,
+                # den keine Namensquelle erklaert, gehoert gemeldet: zuordnen
+                # koennte ich ihn nur durch RUECKRECHNUNG, und die ist bei
+                # memory nicht eindeutig (Punkt gegen Unterstrich).
+                praefix_verdacht = any(
+                    e.lower().startswith(pre) and len(e) > len(pre)
+                    for pre in b.praefixe)
                 if pfad_teil(e, a.fallback) != e:
                     b.unzuordenbar.append((a.name, e))
+                elif praefix_verdacht:
+                    b.unzuordenbar.append(
+                        (a.name, f"{e} (Domaenen-Praefix, Benutzer in keiner "
+                                 f"Namensquelle - bitte von Hand pruefen)"))
                 continue
             qp, zp = a.pfad(e), a.pfad(ziel)
             if qp == zp:

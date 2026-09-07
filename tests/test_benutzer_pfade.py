@@ -550,6 +550,21 @@ try:
     check("security_state steht nicht in SCHLUESSEL_DATEIEN",
           not any("security_state" in n for n, _ in mig.SCHLUESSEL_DATEIEN))
 
+    print("\n=== 4e. Domaenen-Praefix ohne Namensquelle wird GEMELDET ===")
+    # ⚠ Auf ECHT aufgefallen: `chats/nexusgeorge.moushe` - "george.moushe"
+    # steht in keiner Namensquelle, und `pfad_teil` laesst den Eintrag
+    # UNVERAENDERT. Er fiel damit durch beide Bedingungen und wurde gar nicht
+    # erwaehnt, obwohl der Benutzer seinen Chat nicht mehr findet.
+    (D / "chats" / "nexusvoellig.fremd" / "aaa000bbb111").mkdir(parents=True)
+    b7 = mig.finde()
+    check(f"wird als unzuordenbar GEMELDET ({[e for _, e in b7.unzuordenbar]})",
+          any("nexusvoellig.fremd" in e for _, e in b7.unzuordenbar))
+    check("und NICHT angefasst",
+          not any(v.quelle.name == "nexusvoellig.fremd" for v in b7.vorgaenge))
+    mig.anwenden(b7, trocken=False)
+    check("Ordner steht nach dem Anwenden noch da",
+          (D / "chats" / "nexusvoellig.fremd" / "aaa000bbb111").is_dir())
+
     print("\n=== 5. Unzuordenbares wird GEMELDET, nicht geraten ===")
     (D / "memory_voelligUnbekannt_X.json").write_text("{}", encoding="utf-8")
     b3 = mig.finde()

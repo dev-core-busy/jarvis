@@ -871,7 +871,15 @@ pruefe(sandbox_py.count('"data/license.json"') >= 2,
        "license.json ist in _APP_DENY_REL UND PRIVATE_FILES")
 pruefe("license\\.json" in sandbox_py, "license.json steht im Shell-Muster")
 pruefe("license-manager/" in gitignore, "das Ausgabewerkzeug ist von git ausgenommen")
-pruefe("data/license.json" in gitignore, "der Lizenz-Zustand ist von git ausgenommen")
+# ⚠ WIRKUNG statt Wortlaut (2026-09-07): der Einzeleintrag ist einer Regel
+# `/data/*` gewichen; eine Textsuche haette den Umbau als Fehler gemeldet.
+import subprocess as _sp_gi
+pruefe(_sp_gi.run(["git", "-C", str(WURZEL), "check-ignore", "-q", "data/license.json"],
+                  stdout=_sp_gi.DEVNULL, stderr=_sp_gi.DEVNULL).returncode == 0,
+       "der Lizenz-Zustand ist von git ausgenommen")
+pruefe(_sp_gi.run(["git", "-C", str(WURZEL), "check-ignore", "-q", "backend/license.py"],
+                  stdout=_sp_gi.DEVNULL, stderr=_sp_gi.DEVNULL).returncode != 0,
+       "Positivkontrolle: backend/license.py bleibt sichtbar")
 
 manager_py = (WURZEL / "backend" / "skills" / "manager.py").read_text()
 pruefe("enabled_at" in manager_py, "enable_skill schreibt einen Zeitstempel")

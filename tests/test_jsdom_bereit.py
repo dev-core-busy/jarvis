@@ -63,9 +63,27 @@ check("pfad() sucht genau dort, wo installieren() schreibt",
       " | ".join(str(p) for p in jb._orte()))
 # Und der Ort MUSS in .gitignore stehen: 58 Pakete im oeffentlichen Repo wuerden
 # bei jedem `git clone --depth 1` des Auftrags mitkommen.
-ignore = (WURZEL / ".gitignore").read_text(encoding="utf-8")
-check("data/node_modules/ steht in .gitignore", "data/node_modules/" in ignore)
-check("und der npm-Cache ebenfalls", "data/.npm-cache/" in ignore)
+def _wird_ignoriert(pfad: str) -> bool:
+    """Wird dieser Pfad von .gitignore gedeckt?
+
+    ⚠ Ueber `git check-ignore`, NICHT ueber eine Textsuche in der .gitignore
+    (2026-09-07): dort stand die Regel frueher als Einzeleintrag, heute deckt
+    sie `/data/*` pauschal ab - eine Textsuche haette den Umbau als Fehler
+    gemeldet, obwohl die Zusage unveraendert gilt. Geprueft gehoert die
+    WIRKUNG, nicht der Wortlaut.
+    """
+    import subprocess as _sp
+    return _sp.run(["git", "-C", str(WURZEL), "check-ignore", "-q", pfad],
+                   stdout=_sp.DEVNULL, stderr=_sp.DEVNULL).returncode == 0
+
+
+check("data/node_modules/ ist von git ausgenommen",
+      _wird_ignoriert("data/node_modules/jsdom/package.json"))
+check("und der npm-Cache ebenfalls", _wird_ignoriert("data/.npm-cache/x"))
+# Positivkontrolle: eine Projektdatei darf NICHT ignoriert sein, sonst waere
+# die Pruefung oben trivial wahr (z.B. bei kaputtem git-Aufruf).
+check("Positivkontrolle: backend/main.py bleibt sichtbar",
+      not _wird_ignoriert("backend/main.py"))
 
 # ══════════════════════════════════════════════════════════════════════════
 abschnitt("2) Eine gesetzte Umgebungsvariable gewinnt")

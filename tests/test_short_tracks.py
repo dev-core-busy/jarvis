@@ -1003,9 +1003,17 @@ check(st.DATEI_MODUS == 0o640, "Dateien sind 0640")
 # Benutzer und werden pro Installation gepflegt (wie data/instructions und
 # data/email_rules.json). Ohne .gitignore-Eintrag landet die Registry im naechsten
 # Commit – auf DEV lag sie beim Bau schon als untracked Datei da.
-GI = (ROOT / ".gitignore").read_text(encoding="utf-8")
+# ⚠ Ueber `git check-ignore` und nicht als Textsuche (2026-09-07): die
+# Einzeleintraege sind einer Regel `/data/*` gewichen - geprueft gehoert die
+# WIRKUNG ("landet nicht im Repo"), nicht der Wortlaut der .gitignore.
+def _ignoriert(pfad):
+    import subprocess as _sp
+    return _sp.run(["git", "-C", str(ROOT), "check-ignore", "-q", pfad],
+                   stdout=_sp.DEVNULL, stderr=_sp.DEVNULL).returncode == 0
 for datei in ("data/short_tracks.json", "data/short_tracks_log.jsonl"):
-    check(datei in GI, "%s steht in .gitignore" % datei)
+    check(_ignoriert(datei), "%s ist von git ausgenommen" % datei)
+check(not _ignoriert("backend/short_tracks.py"),
+      "Positivkontrolle: backend/short_tracks.py bleibt sichtbar")
 
 
 # ═══════════════════════════════════════════════════════════════════════════

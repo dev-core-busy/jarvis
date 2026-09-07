@@ -167,6 +167,25 @@ def bekannte_benutzer() -> list[str]:
             for k in (quelle or {}):
                 if isinstance(k, str) and k.strip():
                     raus.add(norm_user(k))
+    # ⚠ WAS DIE EXTERNEN QUELLEN SCHON ERKLAEREN, IST KEIN EIGENER BELEG.
+    # Auf ECHT am 2026-09-07 bezahlt: `memory_karsten_moeller.json` ist die
+    # ALTE memory-Form von "karsten.moeller" (der Sanitizer machte aus dem
+    # Punkt einen Unterstrich) - `pfad_teil` laesst den Namen aber unveraendert
+    # und er beginnt nicht mit "nexus", also galt er als kanonisch und kam als
+    # SELBST-BELEG in die Kandidatenliste. Damit gab es zwei Kandidaten fuer
+    # denselben Eintrag `nexus_karsten_moeller` ("karsten.moeller" und
+    # "karsten_moeller"), und der LETZTE gewann: die Domaenen-Datei landete
+    # unter `memory_karsten_moeller.json` statt unter dem kanonischen Namen -
+    # der gemeldete Fehler war damit verschoben, nicht behoben.
+    praefixe = domaenen_praefixe()
+    erklaert: set[str] = set()
+    for a in ablagen():
+        for u in raus:
+            for roh in rohformen(u, praefixe):
+                alt_p = a.alt_sanitizer(roh)
+                if alt_p is not None:
+                    erklaert.add(str(alt_p).lower())
+
     # Die Ablagen selbst: ein bereits richtig benannter Eintrag ist ein Beleg
     # fuer den Namen (chats/andreas.bender beweist "andreas.bender").
     #
@@ -176,7 +195,6 @@ def bekannte_benutzer() -> list[str]:
     # (kein Backslash, kein @ mehr drin), der kaputte Eintrag sah damit wie ein
     # kanonischer aus, galt als "bekannter Benutzer" – und wurde von der
     # Zuordnung als bereits richtig uebersprungen. Die Migration fand NICHTS.
-    praefixe = domaenen_praefixe()
     for a in ablagen():
         for e in a.eintraege():
             if pfad_teil(e, a.fallback) != e:
@@ -189,6 +207,8 @@ def bekannte_benutzer() -> list[str]:
             # `api_claude-subagent-probe` sei ein Mensch.
             if any(e.lower().startswith(pre[:-1]) for pre in _KANAL_PRAEFIXE):
                 continue
+            if e.lower() in erklaert:
+                continue                      # siehe oben: kein eigener Beleg
             raus.add(e)
     d = _json(DATA / "issues.json")
     posten = d if isinstance(d, list) else (d or {}).get("issues", [])
@@ -367,6 +387,7 @@ def finde() -> Befund:
         kandidaten = list(b.benutzer) + kanal_kandidaten(vorhanden, a.alt_sanitizer) \
             + [_ANON_ACTOR]
         zuordnung: dict[str, str] = {}
+        mehrdeutig: set[str] = set()
         for u in kandidaten:
             ziel = pfad_teil(u, a.fallback)
             for roh in rohformen(u, b.praefixe):
@@ -380,8 +401,32 @@ def finde() -> Befund:
                     # zweite Haelfte des Denkfehlers aus bekannte_benutzer und
                     # ist ersatzlos weg: ``e != ziel`` sagt schon alles.
                     if e.lower() == str(alt).lower() and e != ziel:
+                        # ⚠ FAIL-CLOSED BEI MEHRDEUTIGKEIT. Vorher stand hier
+                        # eine schlichte Zuweisung - "der letzte gewinnt" -, und
+                        # genau das hat auf ECHT die Datei eines Menschen unter
+                        # dem falschen Namen abgelegt. Ein Zusammenfuehren ist
+                        # nicht rueckholbar, also wird bei Zweifel nichts
+                        # angefasst und gemeldet.
+                        vorher = zuordnung.get(e)
+                        if vorher is not None and vorher != ziel:
+                            mehrdeutig.add(e)
                         zuordnung[e] = ziel
+        # ⚠ DIE ZWEITE KONFLIKTART, und der echte Fall ist genau die:
+        # `memory_max_mueller.json` ist fuer den Benutzer "max_mueller" die
+        # RICHTIGE Ablage und fuer "max.mueller" Altbestand (der alte
+        # Sanitizer machte aus dem Punkt einen Unterstrich). Wer den Eintrag
+        # dann verschiebt, nimmt einem Menschen sein Gedaechtnis weg. Erkannt
+        # wird die Eigenschaft "ist Quelle eines Vorgangs UND fuer irgendeinen
+        # Kandidaten schon das Ziel" - ein Eintrag, der nur ZIEL ist
+        # (chats/andreas.bender), ist davon nicht betroffen.
+        eigenes_ziel = {pfad_teil(u, a.fallback) for u in kandidaten}
+        for e in list(zuordnung):
+            if e in eigenes_ziel:
+                mehrdeutig.add(e)
         for e in vorhanden:
+            if e in mehrdeutig:
+                b.unzuordenbar.append((a.name, f"{e} (mehrdeutig - nicht angefasst)"))
+                continue
             ziel = zuordnung.get(e)
             if ziel is None:
                 if pfad_teil(e, a.fallback) != e:
@@ -554,10 +599,20 @@ def anwenden(befund: Befund | None = None, trocken: bool = True) -> dict:
         try:
             if not v.quelle.exists():
                 v.hinweise.append("Quelle nicht mehr vorhanden – uebersprungen")
-            elif v.art == "umbenennen":
+            elif not v.ziel.exists():
                 v.ziel.parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(v.quelle), str(v.ziel))
             else:
+                # ⚠ DIE ART WIRD HIER NEU ENTSCHIEDEN, NICHT AUS DEM BEFUND
+                # UEBERNOMMEN. Zeigen ZWEI Quellen auf dasselbe Ziel (auf ECHT
+                # der Fall: `karsten_moeller` und `nexus_karsten_moeller`
+                # gehoeren beide zu "karsten.moeller"), sind beim Ermitteln
+                # noch beide "umbenennen" - das Ziel existiert ja nicht. Der
+                # erste Lauf legt es an, und der zweite `shutil.move` haette es
+                # UEBERSCHRIEBEN: Datenverlust. Ein gemeldeter Befund ist eine
+                # Momentaufnahme; massgeblich ist der Zustand beim Ausfuehren.
+                if v.art == "umbenennen":
+                    v.hinweise.append("Ziel entstand in diesem Lauf – zusammengefuehrt")
                 _MERGE[arten[v.ablage]](v.quelle, v.ziel, v.hinweise)
         except Exception as e:  # noqa: BLE001
             ergebnis["fehler"].append(f"{v.ablage}/{v.quelle.name}: {e}")

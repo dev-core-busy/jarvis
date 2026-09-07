@@ -427,6 +427,91 @@ try:
     check(f"zweiter Lauf findet nichts mehr ({len(b2.vorgaenge)} Vorgaenge)", not b2.vorgaenge)
     check(f"nichts unzuordenbar liegengeblieben ({b2.unzuordenbar})", not b2.unzuordenbar)
 
+    print("\n=== 4c. Der ECHT-Fall: alte memory-Form OHNE Punkt-Fassung ===")
+    # ⚠ DAS IST DER GEMELDETE FALL, und mein erster Testbestand hat ihn NICHT
+    # getroffen: dort lag als Ziel schon `memory_karsten.moeller.json`. Auf
+    # ECHT lagen `memory_karsten_moeller.json` (die ALTE Punkt->Unterstrich-
+    # Form) UND `memory_nexus_karsten_moeller.json` - und KEINE Punkt-Fassung.
+    # Ergebnis am 2026-09-07 live: `karsten_moeller` galt als eigener
+    # kanonischer Benutzer, und die Domaenen-Datei landete unter dem
+    # Unterstrich-Namen. Der Fehler war verschoben, nicht behoben.
+    for f in list(D.glob("memory_*.json")):
+        f.unlink()
+    (D / "memory_karsten_moeller.json").write_text(json.dumps({
+        "aus_unterstrich": {"value": "alte Form", "updated": "2026-05-01T10:00:00"}}),
+        encoding="utf-8")
+    (D / "memory_nexus_karsten_moeller.json").write_text(json.dumps({
+        "aus_domaene": {"value": "Domaenen-Form", "updated": "2026-09-01T10:00:00"}}),
+        encoding="utf-8")
+    b4 = mig.finde()
+    check(f"'karsten_moeller' gilt NICHT als eigener Benutzer ({b4.benutzer})",
+          "karsten_moeller" not in b4.benutzer)
+    ziele = {v.quelle.name: v.ziel.name for v in b4.vorgaenge if v.ablage == "memory"}
+    check(f"beide Fassungen zeigen auf memory_karsten.moeller.json ({ziele})",
+          ziele.get("memory_karsten_moeller.json") == "memory_karsten.moeller.json"
+          and ziele.get("memory_nexus_karsten_moeller.json") == "memory_karsten.moeller.json")
+    mig.anwenden(b4, trocken=False)
+    check("keine Unterstrich-Fassung mehr uebrig",
+          not (D / "memory_karsten_moeller.json").exists()
+          and not (D / "memory_nexus_karsten_moeller.json").exists())
+    km = sicher(lambda: json.loads((D / "memory_karsten.moeller.json").read_text(encoding="utf-8")))
+    check(f"BEIDE Inhalte sind in der kanonischen Datei ({sorted(km) if isinstance(km, dict) else km})",
+          isinstance(km, dict) and set(km) == {"aus_unterstrich", "aus_domaene"})
+    check(f"zweiter Lauf findet nichts mehr ({len(mig.finde().vorgaenge)})",
+          not mig.finde().vorgaenge)
+
+    print("\n=== 4d. Mehrdeutigkeit ist fail-closed ===")
+    # ⚠ AUSGEFUEHRT, nicht im Quelltext gelesen: eine Textsuche nach
+    # "mehrdeutig" bleibt gruen, sobald jemand nur die Zuweisung entfernt -
+    # genau so blieb die erste Fassung dieser Gegenprobe stumm.
+    #
+    # Der Fall: ZWEI EXTERN bekannte Namen bilden auf denselben alten
+    # Pfadteil ab, haben aber verschiedene Ziele. `_alt_memory` macht aus
+    # "max.mueller" UND aus "max_mueller" jeweils "max_mueller", die Ziele
+    # sind aber "max.mueller" bzw. "max_mueller". Wer hier "der letzte
+    # gewinnt" spielt, legt die Datei eines Menschen unter dem falschen
+    # Namen ab - und ein Zusammenfuehren ist nicht rueckholbar.
+    for f in list(D.glob("memory_*.json")):
+        f.unlink()
+    (D / "user_sessions.json").write_text(json.dumps(
+        {"users": {"max.mueller": {}, "max_mueller": {}}}), encoding="utf-8")
+    (D / "memory_max_mueller.json").write_text(json.dumps(
+        {"k": {"value": "wem gehoert das?", "updated": "2026-01-01T00:00:00"}}),
+        encoding="utf-8")
+    roh_vorher = (D / "memory_max_mueller.json").read_bytes()
+    b5 = mig.finde()
+    mem5 = [v for v in b5.vorgaenge if v.ablage == "memory"]
+    check(f"mehrdeutiger Eintrag steht NICHT in den Vorgaengen "
+          f"({[(v.quelle.name, v.ziel.name) for v in mem5]})", not mem5)
+    check(f"er wird als mehrdeutig GEMELDET ({b5.unzuordenbar})",
+          any("max_mueller" in e and "mehrdeutig" in e for _, e in b5.unzuordenbar))
+    mig.anwenden(b5, trocken=False)
+    check("die Datei ist unangetastet",
+          (D / "memory_max_mueller.json").exists()
+          and (D / "memory_max_mueller.json").read_bytes() == roh_vorher)
+
+    # Die ANDERE Mehrdeutigkeit: zwei Kandidaten, zwei VERSCHIEDENE Ziele,
+    # und keiner von beiden beansprucht den Eintrag als seinen eigenen.
+    # `a.b.c` und `a.b_c` bilden beide auf `a_b_c` ab, ihre Ziele sind aber
+    # `a.b.c` bzw. `a.b_c`. Ohne diesen Fall im Bestand blieb die Gegenprobe
+    # "der letzte gewinnt" stumm.
+    for f in list(D.glob("memory_*.json")):
+        f.unlink()
+    (D / "user_sessions.json").write_text(json.dumps(
+        {"users": {"a.b.c": {}, "a.b_c": {}}}), encoding="utf-8")
+    (D / "memory_a_b_c.json").write_text(json.dumps(
+        {"k": {"value": "wem?", "updated": "2026-01-01T00:00:00"}}), encoding="utf-8")
+    roh2 = (D / "memory_a_b_c.json").read_bytes()
+    b6 = mig.finde()
+    mem6 = [v for v in b6.vorgaenge if v.ablage == "memory"]
+    check(f"zwei verschiedene Ziele -> kein Vorgang "
+          f"({[(v.quelle.name, v.ziel.name) for v in mem6]})", not mem6)
+    check(f"als mehrdeutig gemeldet ({b6.unzuordenbar})",
+          any("a_b_c" in e and "mehrdeutig" in e for _, e in b6.unzuordenbar))
+    mig.anwenden(b6, trocken=False)
+    check("Datei unangetastet", (D / "memory_a_b_c.json").exists()
+          and (D / "memory_a_b_c.json").read_bytes() == roh2)
+
     print("\n=== 4b. Doppelte dict-Schluessel ===")
     (D / "issues_admin_seen.json").write_text(json.dumps({
         "nexus\\andreas.bender": "2026-09-05T00:00:00",

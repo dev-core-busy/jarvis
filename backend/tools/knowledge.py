@@ -350,7 +350,7 @@ def _rebuild_vector_index(folders: list[Path], max_bytes: int, force: bool = Fal
 
     # Nur erreichbare Ordner betrachten. Die Liste wird VOR dem Scan bestimmt,
     # damit Scan und Aufraeumen garantiert denselben Stand sehen.
-    alive = [f for f in folders if _safe_exists(f)]
+    alive = _nutzbare_ordner(folders, indexed, streng=force)
     if len(alive) != len(folders):
         missing = [str(f) for f in folders if f not in alive]
         _log.warning("Nicht erreichbare Wissensordner werden uebersprungen "
@@ -748,6 +748,75 @@ def _bounded_call(fn, timeout: float, default):
     th.start()
     th.join(timeout)
     return box["val"]
+
+
+def _ordner_abgehaengt(ordner, indexed) -> str | None:
+    """Sieht der Ordner aus wie eine ABGEHAENGTE Netzfreigabe?
+
+    Gibt den GRUND zurueck (fuer die Meldung) oder ``None``, wenn der Ordner
+    aufgeraeumt werden darf.
+
+    ⚠ AM 2026-09-07 BEZAHLT. `_safe_exists()` schuetzt gegen ein TOTES
+    Netzlaufwerk (blockiert, laeuft in den Timeout). Ein Einhaengepunkt OHNE
+    Mount ist aber etwas ganz anderes: ein gewoehnliches, leeres Verzeichnis,
+    das sofort antwortet - `_safe_exists` sagt dazu voellig zu Recht True.
+    Damit galt die Freigabe als "erreichbar und geleert", und der ausdrueckliche
+    Neuaufbau entfernte SAEMTLICHE Chunks ihres Wissens als verwaist.
+    Gemessen auf DEV: 1208 Chunks aus zwei OneNote-Dateien, weil
+    /mnt/jarvis-kb/share_0|1 nach einem Neustart nicht wieder eingehaengt waren.
+
+    DIE EIGENSCHAFT, NICHT DIE KONVENTION: geprueft wird nicht, ob der Pfad
+    unter /mnt liegt oder in der Mount-Konfiguration steht - sondern ob der
+    Ordner LEER ist, obwohl der Index Eintraege darunter fuehrt. Das trifft
+    genauso den ausgehaengten USB-Datentraeger, den umbenannten Ordner und die
+    Freigabe, die wegen fehlender Rechte leer erscheint.
+
+    Preis, ausdruecklich: wer einen Wissensordner ABSICHTLICH leert und ihn
+    konfiguriert laesst, behaelt verwaiste Eintraege im Index. Das ist die
+    harmlosere Halbfehlerstellung - ein Treffer auf eine geloeschte Datei ist
+    aergerlich, ein still verschwundener Wissensbestand ist teuer. Der Fall
+    wird protokolliert, damit er ueberhaupt bemerkbar ist.
+    """
+    praefix = str(ordner).rstrip(os.sep) + os.sep
+    if not any(p.startswith(praefix) for p in indexed):
+        return None           # nichts im Index -> es ist nichts zu verlieren
+    # ⚠ `is None` UND `len() == 0` sind ZWEI Befunde, nicht einer: "nicht
+    # lesbar" und "leer" verlangen vom Administrator verschiedene Handlungen.
+    # Eine Meldung "der Ordner ist leer" bei einem Rechteproblem schickt ihn
+    # in die falsche Richtung - deshalb gibt die Funktion den GRUND zurueck.
+    eintraege = _bounded_call(lambda: os.listdir(str(ordner)), 2.0, None)
+    if eintraege is None:
+        return "nicht lesbar (Timeout oder fehlende Rechte)"
+    if len(eintraege) == 0:
+        return "leer (vermutlich eine nicht eingehaengte Netzfreigabe)"
+    return None
+
+
+def _nutzbare_ordner(folders, indexed, streng: bool = True) -> list:
+    """Ordner, deren Indexstand aufgeraeumt werden DARF.
+
+    EINE Stelle fuer beide Aufrufer (Stale-Bereinigung im Neuaufbau und
+    Voll-Neuaufbau). Zwei Fassungen liefen beim naechsten Feinschliff
+    auseinander - und dann raeumt der eine Weg weg, was der andere schuetzt.
+
+    ``streng=False`` laesst die Abgehaengt-Pruefung aus. Sie kostet ein
+    ``listdir`` je Ordner, auf einer CIFS-Freigabe also einen Netz-Roundtrip -
+    auf dem SUCHPFAD waere das bei jeder Suche faellig und braechte dort
+    nichts: geloescht wird ausschliesslich im ausdruecklichen Neuaufbau.
+    """
+    nutzbar = []
+    for f in folders:
+        if not _safe_exists(f):
+            continue
+        grund = _ordner_abgehaengt(f, indexed) if streng else None
+        if grund:
+            _log.warning(
+                "Wissensordner liefert keine Datei, hat aber Eintraege im Index "
+                "- wird als abgehaengt behandelt, sein Indexstand bleibt "
+                "unangetastet: %s (%s)", f, grund)
+            continue
+        nutzbar.append(f)
+    return nutzbar
 
 
 def _get_max_bytes() -> int:
@@ -2584,7 +2653,11 @@ def _do_force_reindex(attempt: int = 1, resume_count: int = 0,
             # verloren (dieselbe Verwechslung wie im Suchpfad: "nicht
             # erreichbar" ist nicht "geloescht", nur hier mit dem groesseren
             # Hebel, weil der Neuaufbau ALLES anfasst).
-            alive = [f for f in folders if _safe_exists(f)]
+            # ⚠ Ein LEERER Einhaengepunkt darf hier nicht als erreichbar
+            # gelten: waeren alle Ordner "erreichbar", liefe vs.clear() -
+            # und der Neuaufbau wuerde das Wissen der abgehaengten
+            # Freigabe nicht wieder herstellen koennen.
+            alive = _nutzbare_ordner(folders, vs.get_indexed_files())
             if folders and not alive:
                 # Gar nichts erreichbar: abbrechen statt leeren. Der Aufrufer
                 # sieht einen Fehler, der bestehende Index bleibt unberuehrt.

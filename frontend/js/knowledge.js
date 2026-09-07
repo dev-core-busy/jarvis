@@ -1353,8 +1353,18 @@ class JarvisKnowledgeManager {
                  + `<div id="kb-cl-bilanz-platz"></div>`;
         Object.keys(gruppen).forEach(art => {
             if (!gruppen[art].length) return;
-            html += `<div class="kb-cl-gruppe"><div class="kb-cl-gruppe-titel">`
-                 + `${this._escHtml(window.t('knowledge.cleanup.art_' + art))}</div>`;
+            // ⚠ SAMMEL-KAESTCHEN JE BEREICH. Gemeldet: "da ansonsten zuviel
+            // geklickt werden muss" - auf DEV sind es 15 Eintraege in drei
+            // Bereichen, wer nur die Anweisungen pruefen will, klickt 13
+            // Haekchen weg. Es sitzt IM Titel, nicht daneben: die Zahl
+            // (n/m) macht den Zustand lesbar, ohne dass jemand Kaestchen
+            // zaehlt - Farbe bzw. Haken allein ist keine Information.
+            html += `<div class="kb-cl-gruppe" data-art="${this._escHtml(art)}">`
+                 + `<label class="kb-cl-gruppe-titel">`
+                 + `<input type="checkbox" class="kb-cl-alle" data-art="${this._escHtml(art)}">`
+                 + `<span>${this._escHtml(window.t('knowledge.cleanup.art_' + art))}</span>`
+                 + `<span class="kb-cl-gruppe-zahl" data-art="${this._escHtml(art)}"></span>`
+                 + `</label>`;
             gruppen[art].forEach(f => {
                 const kb = (f.bytes / 1024).toFixed(1);
                 html += `<label class="kb-cl-zeile${f.zu_gross ? ' ist-gross' : ''}">
@@ -1376,6 +1386,58 @@ class JarvisKnowledgeManager {
             <span class="kb-hint" style="margin:0;">${window.t('knowledge.cleanup.start_hint')}</span>
         </div><div id="kb-cl-status" class="kb-hint"></div>`;
         box.innerHTML = html;
+        this._cleanupAuswahlVerdrahten();
+    }
+
+    /**
+     * Sammel-Kaestchen je Bereich ("alle markieren / alle entfernen").
+     *
+     * ⚠ NUR auf `change` hoeren und NIE selbst umschalten: das Kaestchen sitzt
+     * in einem `<label>`, der Browser schaltet es bereits um - ein
+     * zusaetzliches `cb.checked = !cb.checked` hebt sich auf und der Klick tut
+     * unterm Strich gar nichts (im Projekt beim AD-Picker bezahlt).
+     *
+     * ⚠ GESPERRTE Zeilen (`zu_gross`) bleiben unangetastet - sie sind aus
+     * einem Grund gesperrt. Sie zaehlen deshalb auch nicht in die Bilanz (n/m),
+     * sonst behauptete "3/5" eine Auswahl, die gar nicht erreichbar ist.
+     */
+    _cleanupAuswahlVerdrahten() {
+        const box = document.getElementById('kb-cleanup-body');
+        if (!box) return;
+        const waehlbar = (art) => [...box.querySelectorAll(
+            `.kb-cl-gruppe[data-art="${art}"] .kb-cl-sel:not(:disabled)`)];
+
+        const stand = (art) => {
+            const w = waehlbar(art);
+            const n = w.filter(c => c.checked).length;
+            const master = box.querySelector(`.kb-cl-alle[data-art="${art}"]`);
+            const zahl = box.querySelector(`.kb-cl-gruppe-zahl[data-art="${art}"]`);
+            if (master) {
+                master.checked = w.length > 0 && n === w.length;
+                // Teilauswahl sichtbar machen - sonst sieht "einige gewaehlt"
+                // aus wie "keine gewaehlt".
+                master.indeterminate = n > 0 && n < w.length;
+                master.disabled = w.length === 0;
+                master.title = window.t(n === w.length
+                    ? 'knowledge.cleanup.none_title' : 'knowledge.cleanup.all_title');
+            }
+            if (zahl) zahl.textContent = w.length ? `(${n}/${w.length})` : '';
+        };
+
+        box.querySelectorAll('.kb-cl-alle').forEach(master => {
+            master.addEventListener('change', () => {
+                const art = master.dataset.art;
+                // `indeterminate` heisst: es gibt eine Teilauswahl. Ein Klick
+                // darauf soll ALLES waehlen, nicht alles abwaehlen.
+                const ziel = master.checked;
+                waehlbar(art).forEach(c => { c.checked = ziel; });
+                stand(art);
+            });
+        });
+        box.querySelectorAll('.kb-cl-sel').forEach(c => {
+            c.addEventListener('change', () => stand(c.closest('.kb-cl-gruppe')?.dataset.art));
+        });
+        box.querySelectorAll('.kb-cl-alle').forEach(m => stand(m.dataset.art));
     }
 
     /**

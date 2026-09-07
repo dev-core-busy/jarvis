@@ -4395,7 +4395,17 @@ select.input-field {
    zusaetzlich ein Vorzeichen (+/-). Farbe allein ist keine Information. */
 .kb-cl-gruppe { margin: 10px 0; }
 .kb-cl-gruppe-titel { font-weight: 600; font-size: .82rem; color: var(--text-secondary);
-    margin-bottom: 4px; text-transform: uppercase; letter-spacing: .04em; }
+    margin-bottom: 4px; text-transform: uppercase; letter-spacing: .04em;
+    /* Traegt seit 2026-09-07 das Sammel-Kaestchen des Bereichs. `inline-flex`
+       statt `flex`, damit die klickbare Flaeche nicht ueber die ganze Breite
+       laeuft - ein Klick weit rechts neben dem Text soll nicht umschalten. */
+    display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
+    user-select: none; }
+.kb-cl-gruppe-titel input { margin: 0; cursor: pointer; }
+.kb-cl-gruppe-titel input:disabled { cursor: default; }
+/* Die Zahl steht bewusst NICHT nur als Haken-Zustand da: "einige gewaehlt"
+   ist sonst von "alle gewaehlt" nur am halben Kaestchen zu unterscheiden. */
+.kb-cl-gruppe-zahl { font-weight: 500; color: var(--text-muted); letter-spacing: 0; }
 .kb-cl-zeile { display: flex; align-items: center; gap: 8px; padding: 4px 6px;
     border-radius: 6px; cursor: pointer; }
 .kb-cl-zeile:hover { background: var(--bg-glass); }

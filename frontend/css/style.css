@@ -8390,3 +8390,23 @@ body.light .kb-mirror-mark { color: color-mix(in srgb, var(--info) 72%, #000); }
     line-height: 1.4; }
 .xa-toggle:hover { background: rgba(var(--fg-rgb), .08); color: var(--text-primary);
     border-color: var(--accent); }
+
+/* ── Statusmeldung von „Dienst neu starten" (Einstellungen → KI & System) ──
+ * Eigene Toene statt der Signalfarben-Variablen, und zwar NUR hier:
+ * gemessen liegen --success (2,33:1), --warning (1,97:1) und --danger (3,45:1)
+ * im HELLEN Thema auf dem Grund dieser Zeile (#f4f5f7) alle UNTER 4,5:1 –
+ * eine Meldung, die man nicht lesen kann, ist keine. Im dunklen Thema sind die
+ * Variablen dagegen gut (7,61 / 8,99 / 5,13), deshalb bleiben sie dort.
+ * Nicht projektweit geaendert: die Variablen tragen auch Flaechen und Raender,
+ * wo ein anderer Massstab gilt (Grafik-Grenze 3:1). */
+/* Grundfarbe hier, NICHT inline: ein Inline-Style schlaegt jede
+ * Klassenregel – mit `color` im style-Attribut waeren die drei
+ * Klassen darunter wirkungslos (beim Bau am 2026-09-07 genau so
+ * passiert, gefunden erst im echten Browser). */
+#service-restart-status           { color: var(--text-secondary); }
+#service-restart-status.svc-ok   { color: var(--success); }
+#service-restart-status.svc-warn { color: var(--warning); }
+#service-restart-status.svc-err  { color: var(--danger); }
+body.light #service-restart-status.svc-ok   { color: #0b7355; }   /* 5,35:1 */
+body.light #service-restart-status.svc-warn { color: #8a5a04; }   /* 5,43:1 */
+body.light #service-restart-status.svc-err  { color: #c62828; }   /* 5,15:1 */

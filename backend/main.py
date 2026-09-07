@@ -7687,9 +7687,23 @@ async def get_cpu(user: str = Depends(require_auth)):
     return JSONResponse({"cpu": _cached_cpu_percent})
 
 
+# Startzeitpunkt DIESES Prozesses. Er ist der einzige belastbare Beweis, dass
+# ein Neustart wirklich stattgefunden hat: der Client merkt sich den Wert, loest
+# den Neustart aus und vergleicht danach. Ohne ihn koennte die Oberflaeche einen
+# Neustart nur VERMUTEN – und eine Anzeige darf keinen Zustand behaupten, den
+# sie nicht kennt. Eindeutig, weil uvicorn hier ohne `--workers` laeuft (ein
+# Prozess); mit mehreren Arbeitern traefe ein Abruf womoeglich einen alten.
+_PROZESS_START = time.time()
+
+
 @app.get("/api/health")
 async def health():
-    """Erweiterter Health-Check mit System- und Service-Status."""
+    """Erweiterter Health-Check mit System- und Service-Status.
+
+    ``started_at`` ist der Startzeitpunkt des Prozesses (Unix-Sekunden) – die
+    Messgrundlage fuer "Dienst neu starten" in den Einstellungen. Der Wert
+    verraet nichts, was dieser Endpunkt nicht ohnehin herausgibt (CPU, RAM,
+    Platte, Dienstzustaende)."""
     errors = config.validate()
 
     # System-Infos
@@ -7723,6 +7737,7 @@ async def health():
         "memory_percent": mem.percent,
         "disk_percent": disk.percent,
         "services": services,
+        "started_at": int(_PROZESS_START),
     })
 
 

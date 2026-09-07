@@ -23,7 +23,7 @@
     <link rel="stylesheet" href="/static/css/theme.css?v=23">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=8">
-    <link rel="stylesheet" href="/static/css/style.css?v=176">
+    <link rel="stylesheet" href="/static/css/style.css?v=177">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=6">
 </head>
 
@@ -1748,6 +1748,29 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                         <span id="lic-save-status" style="font-size:0.8rem;color:var(--text-secondary);"></span>
                                     </div>
                                     <small class="tab-note" style="opacity:0.7;display:block;margin-top:6px;" data-i18n="license.hint">Der Lizenzschlüssel wird vom Anbieter ausgestellt und ist an dieses System gebunden. Damit die gekaufte Stufe wirksam wird, muss die oben angezeigte Hardware-Kennung beim Anbieter hinterlegt sein – bis dahin läuft das System als FREE. Der Status (Gültigkeit, Widerruf, Stufenänderung) wird täglich beim Anbieter geprüft; ist der Prüfdienst vorübergehend nicht erreichbar, gilt der zuletzt bekannte Stand noch 14 Tage weiter. Ohne gültige Lizenz gelten die FREE-Grenzen: keine Software-Updates, ein LLM-Profil, fünf aktive Skills, fünf Benutzer und 50 Dateien in der Wissensdatenbank.</small>
+                                </div>
+
+                                <!-- Dienst neu starten. Steht am ENDE des Abschnitts, weil er die
+                                     Handlung ist, die NACH einer Änderung fällig wird: mehrere
+                                     Werte darüber wirken erst nach einem Neustart, und die
+                                     Nachwirkungs-Meldung des Aufräum-Dialogs
+                                     (wissen_aufraeumen._nachwirkung – das Gedächtnis liegt je
+                                     Benutzer im RAM) verweist ausdrücklich hierher.
+                                     ⚠ Bis 2026-09-07 gab es diesen Knopf NICHT: der Verweis
+                                     zeigte ins Leere, und der einzige Aufrufer von
+                                     /api/system/restart war das WebDAV-Formular unter „Wissen". -->
+                                <div class="tuning-group">
+                                    <h4 class="tuning-group-title" data-i18n="profile.section_restart">Dienst neu starten</h4>
+                                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                                        <button class="btn-secondary btn-small" id="btn-service-restart" type="button" style="flex:0 0 auto;width:auto;padding:4px 12px;font-size:0.78rem;" data-i18n="profile.restart_btn">Jetzt neu starten</button>
+                                        <!-- KEIN `color` im Inline-Style: ein Inline-Style schlaegt jede
+                                             Klassenregel, und die Farbe MUSS aus einer Klasse
+                                             kommen (sie ist je Thema verschieden – die
+                                             Signalfarben-Variablen sind im hellen Thema
+                                             gemessen zu blass). Grundfarbe steht in style.css. -->
+                                        <span id="service-restart-status" style="font-size:0.8rem;min-width:0;"></span>
+                                    </div>
+                                    <small class="tab-note" style="opacity:0.7;display:block;margin-top:6px;" data-i18n="profile.restart_hint">Startet den Jarvis-Dienst auf dem Server neu – nicht den Rechner. Nötig für Einstellungen, die erst beim Start gelesen werden, und nach dem Aufräumen der Gedächtnis-Dateien: die hält der Dienst je Benutzer im Speicher, ohne Neustart arbeitet der Agent mit dem alten Stand weiter und überschreibt die Korrektur beim nächsten Merken. Der Neustart dauert einige Sekunden und trennt in dieser Zeit ALLE angemeldeten Benutzer; laufende Agenten-Aufträge brechen ab. Dass er stattgefunden hat, wird an der Startzeit des Prozesses gemessen und hier gemeldet.</small>
                                 </div>
 
                             </div>
@@ -5190,7 +5213,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/icons.js?v=3"></script>
     <script src="/static/js/pwreveal.js?v=2"></script>
     <script src="/static/js/dlkey.js?v=2"></script>
-    <script src="/static/js/i18n.js?v=230"></script>
+    <script src="/static/js/i18n.js?v=231"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=21"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -5228,7 +5251,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/agent_roles.js?v=3"></script>
     <script src="/static/js/model_caps.js?v=6"></script>
     <script src="/static/js/alpha_sort.js?v=1"></script>
-    <script src="/static/js/app.js?v=204"></script>
+    <script src="/static/js/app.js?v=205"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

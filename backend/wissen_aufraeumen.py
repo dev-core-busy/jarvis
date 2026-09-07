@@ -650,12 +650,22 @@ def _nachwirkung(erledigt: list[dict]) -> str:
     Ohne Neustart benutzt der Agent den ALTEN Stand weiter – und ein spaeteres
     ``memory_manage save`` schreibt die Korrektur wieder zu. Genau das ist am
     2026-09-04 beim Bereinigen der ``/root/jarvis``-Merksaetze aufgefallen.
+
+    ⚠ DER VERWEIS MUSS EIN BEDIENELEMENT TREFFEN, DAS ES GIBT. Bis 2026-09-07
+    stand hier "(Einstellungen → KI & System)" – dort gab es aber keinen
+    Neustart-Knopf, der einzige Aufrufer von ``POST /api/system/restart`` war
+    das WebDAV-Formular unter *Wissen*. Der Knopf ist nachgezogen
+    (``#btn-service-restart``), und ein Waechter haelt beides zusammen:
+    ``tests/test_dienst_neustart.py`` prueft, dass der hier genannte Weg im
+    Markup existiert. Wer den Text aendert, aendert den Ort mit.
     """
     if any(e["schluessel"].startswith("gedaechtnis:") for e in erledigt):
         return ("Gedaechtnis-Dateien wurden geaendert: der Dienst haelt sie je "
                 "Benutzer im Speicher. Damit der Agent den neuen Stand benutzt "
                 "– und ihn nicht beim naechsten Merken wieder ueberschreibt – "
-                "ist ein Neustart noetig (Einstellungen → KI & System).")
+                "ist ein Neustart des DIENSTES noetig (nicht des Rechners): "
+                "Einstellungen → KI & System → System-Einstellungen → "
+                "„Dienst neu starten\".")
     if erledigt:
         return ("Anweisungsdateien werden bei jedem Auftrag frisch gelesen – "
                 "die Aenderung wirkt sofort.")

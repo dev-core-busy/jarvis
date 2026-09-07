@@ -1397,6 +1397,107 @@
                     }
                 });
             }
+            // Dienst neu starten (einmalig verdrahten).
+            // ⚠ DER ERFOLG WIRD GEMESSEN, NICHT BEHAUPTET: /api/health liefert
+            // `started_at` (Startzeit des Prozesses). Der Wert wird VOR dem
+            // Neustart geholt und danach verglichen – nur eine geaenderte
+            // Startzeit beweist, dass wirklich ein neuer Prozess laeuft.
+            // Ein blosses "wieder erreichbar" wuerde auch dann gemeldet, wenn
+            // der Neustart gar nicht stattgefunden hat (Broker-Op abgelehnt,
+            // Freigabe pending) – und das ist der Fall, in dem der Admin die
+            // Meldung am dringendsten braucht.
+            const _btnRs = document.getElementById('btn-service-restart');
+            if (_btnRs && !_btnRs._wired) {
+                _btnRs._wired = true;
+                const _health = async () => {
+                    // Kein Token noetig (/api/health ist offen); `no-store`,
+                    // weil ein zwischengespeicherter Wert den Vergleich
+                    // wertlos machen wuerde.
+                    const r = await fetch('/api/health', { cache: 'no-store' });
+                    if (!r.ok) throw new Error('http ' + r.status);
+                    return await r.json();
+                };
+                _btnRs.addEventListener('click', async () => {
+                    const st = document.getElementById('service-restart-status');
+                    const T = (k, d) => (window.t ? window.t(k) : null) || d;
+                    // Farbe ueber KLASSEN, nicht inline: die Signalfarben-Variablen
+                    // liegen im hellen Thema alle unter 4,5:1 auf dem Grund dieser
+                    // Zeile (gemessen: 2,33 / 1,97 / 3,45) und brauchen dort eigene
+                    // Toene – das geht nur in CSS, nicht in einem Inline-Style.
+                    const setz = (txt, art) => {
+                        if (!st) return;
+                        st.textContent = txt;
+                        st.classList.remove('svc-ok', 'svc-warn', 'svc-err');
+                        if (art) st.classList.add(art);
+                    };
+                    if (!window.confirm(T('profile.restart_confirm', 'Den Jarvis-Dienst jetzt neu starten?'))) return;
+
+                    let vorher = null;
+                    try { vorher = (await _health()).started_at || null; } catch (e) { /* messen, nicht scheitern */ }
+
+                    _btnRs.disabled = true;
+                    setz(T('profile.restart_sent', 'Neustart ausgelöst – warte auf den Dienst…'));
+                    try {
+                        const r = await fetch('/api/system/restart', {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${token}` }
+                        });
+                        if (!r.ok) throw new Error('http ' + r.status);
+                    } catch (e) {
+                        _btnRs.disabled = false;
+                        setz(T('profile.restart_failed', '✗ Neustart konnte nicht ausgelöst werden')
+                             + ' (' + (e && e.message ? e.message : '?') + ')', 'svc-err');
+                        return;
+                    }
+
+                    // Der Endpunkt antwortet SOFORT und startet erst danach
+                    // (1 s Verzoegerung im Backend) – wer hier gleich pollt,
+                    // erwischt den ALTEN Prozess und meldete Erfolg zu frueh.
+                    const t0 = Date.now();
+                    const DECKEL = 90000;      // bis der Dienst zurueck ist
+                    const OHNE_AUSFALL = 25000;  // ... aber nur so lange, wie ein
+                    //   Neustart ueberhaupt noch plausibel ist: hat der Dienst
+                    //   DURCHGEHEND geantwortet und immer dieselbe Startzeit
+                    //   gemeldet, ist er nie heruntergefahren. Dann weiter zu
+                    //   warten hiesse, den Admin 90 s auf eine Antwort warten
+                    //   zu lassen, die schon feststeht.
+                    const schlaf = (ms) => new Promise(r => setTimeout(r, ms));
+                    await schlaf(2500);
+                    let jetzt = null, ausfall = false;
+                    while (Date.now() - t0 < DECKEL) {
+                        try {
+                            const d = await _health();
+                            jetzt = d.started_at || null;
+                            // Ohne Vergleichswert (aelteres Backend ohne
+                            // `started_at`) genuegt die Erreichbarkeit – mehr
+                            // ist dann nicht messbar.
+                            if (vorher === null || jetzt === null || jetzt !== vorher) break;
+                            if (!ausfall && Date.now() - t0 > OHNE_AUSFALL) break;
+                        } catch (e) {
+                            // Der Dienst ist gerade weg. `jetzt` MUSS zurueck
+                            // auf null: sonst steht dort der Wert von VOR dem
+                            // Herunterfahren, und ein Dienst, der nicht
+                            // zurueckkommt, wuerde als "laeuft unveraendert
+                            // weiter" gemeldet – die falsche Diagnose.
+                            jetzt = null;
+                            ausfall = true;
+                        }
+                        await schlaf(1000);
+                    }
+                    const sek = Math.round((Date.now() - t0) / 1000);
+                    _btnRs.disabled = false;
+                    if (jetzt !== null && vorher !== null && jetzt === vorher) {
+                        setz(T('profile.restart_nochange', '⚠ Der Dienst läuft unverändert weiter.'),
+                             'svc-warn');
+                    } else if (jetzt === null && vorher !== null) {
+                        setz(T('profile.restart_slow', '⚠ Der Dienst antwortet noch nicht.')
+                             .split('{s}').join(String(sek)), 'svc-warn');
+                    } else {
+                        setz(T('profile.restart_back', '✓ Dienst wieder erreichbar')
+                             .split('{s}').join(String(sek)), 'svc-ok');
+                    }
+                });
+            }
             // Maximale Antwortlaenge speichern (einmalig verdrahten).
             // Grenzen wie im Backend (config.py): 256..131072.
             const _btnMt = document.getElementById('btn-save-llm-max-tokens');

@@ -18083,7 +18083,12 @@ async def cleanup_analyse(request: Request, user: str = Depends(require_local_au
     if not schluessel:
         return JSONResponse({"ok": False, "error": "Keine Datei ausgewaehlt."},
                             status_code=400)
-    erg = await _wa.analysiere(schluessel, user=user)
+    # Optional: die Funde der Gesamtpruefung. Dann raeumt der Lauf gezielt DIE
+    # auf, statt die Datei allgemein zu ueberarbeiten. Der Text ist Fremdeingabe
+    # (er stammt aus einer Modellantwort und kommt vom Client zurueck) und wird
+    # im Modul entschaerft, gedeckelt und markiert – wie ein Dateiinhalt.
+    konflikte = [k for k in (body.get("konflikte") or []) if isinstance(k, dict)]
+    erg = await _wa.analysiere(schluessel, user=user, konflikte=konflikte or None)
     return JSONResponse(erg, status_code=200 if erg.get("ok") else 400)
 
 
@@ -18151,6 +18156,21 @@ async def cleanup_konflikte(user: str = Depends(require_local_auth)):
     from backend import wissen_aufraeumen as _wa
     erg = await _wa.gesamtpruefung(user=user)
     return JSONResponse(erg, status_code=200 if erg.get("ok") else 400)
+
+
+@app.post("/api/knowledge/cleanup/behebbar")
+async def cleanup_behebbar(request: Request, user: str = Depends(require_local_auth)):
+    """Welche Dateien liessen sich zu diesen Konflikten anfassen – und was nicht?
+
+    ⚠ Die Auswahl trifft das BACKEND, nicht der Client: es kennt die Liste der
+    Anweisungsdateien. ``BASIS`` steht im Programmcode und ist nicht aenderbar –
+    ein Konflikt, an dem nur BASIS beteiligt ist, wird als OFFEN gemeldet,
+    statt einen Knopf anzubieten, der nichts tut.
+    """
+    from backend import wissen_aufraeumen as _wa
+    body = await request.json()
+    konflikte = [k for k in (body.get("konflikte") or []) if isinstance(k, dict)]
+    return JSONResponse({"ok": True, **_wa.behebbare_dateien(konflikte)})
 
 
 @app.post("/api/knowledge/cleanup/apply")

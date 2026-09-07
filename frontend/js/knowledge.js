@@ -1221,13 +1221,116 @@ class JarvisKnowledgeManager {
                     <p class="kb-cl-grund"><b>B</b> ${this._escHtml(c.regel_b || '')}</p>
                   </div>`).join('') : '')
               + `<p class="kb-hint">${this._escHtml(d.hinweis || '')}</p>`
-              + `<div class="kb-cl-aktion"><button class="btn-secondary"
+              + `<div class="kb-cl-aktion" id="kb-cl-k-aktion"><button class="btn-secondary"
                     onclick="window.knowledgeManager.cleanupOeffnen()">${
                     this._escHtml(window.t('knowledge.cleanup.k_back'))}</button></div>`;
             document.getElementById('kb-cleanup-apply').style.display = 'none';
+            // ⚠ Die Funde werden GEMERKT: bis 2026-09-07 endete die
+            // Gesamtpruefung hier – eine Analyse ohne jede Moeglichkeit, etwas
+            // zu aendern (gemeldet). Der Knopf unten macht daraus einen
+            // gezielten Aufraeum-Lauf ueber den VORHANDENEN Weg.
+            this._clKonflikte = k;
+            await this._clBehebenKnopf(k);
         } catch (e) {
             this._clStatus(window.t('common.error') + ': ' + e.message, false);
         } finally {
+            if (knopf) knopf.disabled = false;
+        }
+    }
+
+    /**
+     * Baut den Knopf "Diese Konflikte beheben" – und sagt, was NICHT geht.
+     *
+     * ⚠ Welche Dateien anfassbar sind, entscheidet das BACKEND (es kennt die
+     * Liste der Anweisungsdateien). `BASIS` steht im Programmcode: ein
+     * Konflikt, an dem nur BASIS beteiligt ist, laesst sich hier nicht
+     * beheben – das wird BENANNT, statt einen Knopf anzubieten, der nichts tut.
+     */
+    async _clBehebenKnopf(konflikte) {
+        const leiste = document.getElementById('kb-cl-k-aktion');
+        if (!leiste || !(konflikte || []).length) return;
+        let d;
+        try {
+            const r = await fetch('/api/knowledge/cleanup/behebbar', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json',
+                           'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') },
+                body: JSON.stringify({ konflikte })
+            });
+            if (!r.ok) return;                       // ohne Auskunft kein Knopf
+            d = await r.json();
+        } catch (e) { return; }
+        const namen = d.namen || [];
+        const offen = d.offen || [];
+        let html = '';
+        if (namen.length) {
+            html += `<button class="btn-primary" id="kb-cl-k-fix"
+                        onclick="window.knowledgeManager.cleanupKonflikteBeheben()"
+                        title="${this._escHtml(window.t('knowledge.cleanup.k_fix_title'))}"
+                        >${this._escHtml(window.t('knowledge.cleanup.k_fix')
+                            .replace('{n}', namen.length))}</button>`;
+        }
+        // Was liegen bleibt, steht DABEI – sonst haelt der Leser den Knopf
+        // fuer die Loesung aller angezeigten Funde.
+        let hinweis = '';
+        if (namen.length) {
+            hinweis += `<p class="kb-hint kb-cl-fixhint">${this._escHtml(
+                window.t('knowledge.cleanup.k_fix_hint').replace('{d}', namen.join(', ')))}</p>`;
+        }
+        if (offen.length) {
+            hinweis += `<p class="kb-hint kb-cl-fixhint">${this._escHtml(
+                window.t('knowledge.cleanup.k_fix_offen').replace('{n}', offen.length))}</p>`;
+        }
+        leiste.insertAdjacentHTML('afterbegin', html);
+        if (hinweis) leiste.insertAdjacentHTML('beforebegin', hinweis);
+    }
+
+    /**
+     * Die gemeldeten Konflikte beheben – ueber den VORHANDENEN Aufraeum-Weg.
+     *
+     * Kein zweiter Schreibpfad: es laeuft `/analyse` (nur mit den Konflikten
+     * als Hinweis) und danach derselbe Vergleich mit Vorher/Nachher, ✎, und
+     * "Übernehmen". Damit gelten dieselben Zusagen wie sonst – Sicherung je
+     * Datei, geschrieben wird der Text, den ein MENSCH gesehen hat.
+     */
+    async cleanupKonflikteBeheben() {
+        const knopf = document.getElementById('kb-cl-k-fix');
+        if (knopf) knopf.disabled = true;
+        const konflikte = this._clKonflikte || [];
+        const kopf = { 'Content-Type': 'application/json',
+                       'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') };
+        try {
+            const br = await fetch('/api/knowledge/cleanup/behebbar', {
+                method: 'POST', headers: kopf, body: JSON.stringify({ konflikte }) });
+            if (!br.ok) throw new Error(await this._fehlertext(br));
+            const dateien = (await br.json()).dateien || [];
+            if (!dateien.length) {
+                this._clStatus(window.t('knowledge.cleanup.k_fix_keine'), false);
+                if (knopf) knopf.disabled = false;
+                return;
+            }
+            // Haeppchenweise wie die Einzelpruefung: ein Lauf kostet je Datei
+            // einige Sekunden, alles in einem Request laeuft in den ersten
+            // Proxy-Timeout.
+            const BLOCK = 3;
+            this._cleanupVorschlaege = [];
+            let modell = '';
+            for (let i = 0; i < dateien.length; i += BLOCK) {
+                const teil = dateien.slice(i, i + BLOCK);
+                this._clStatus(window.t('knowledge.cleanup.progress')
+                    .replace('{i}', Math.min(i + teil.length, dateien.length))
+                    .replace('{n}', dateien.length), true);
+                const resp = await fetch('/api/knowledge/cleanup/analyse', {
+                    method: 'POST', headers: kopf,
+                    body: JSON.stringify({ dateien: teil, konflikte }) });
+                if (!resp.ok) throw new Error(await this._fehlertext(resp));
+                const d = await resp.json();
+                modell = d.modell || modell;
+                this._cleanupVorschlaege.push(...(d.ergebnisse || []));
+            }
+            this._cleanupVergleich(modell);
+        } catch (e) {
+            this._clStatus(window.t('common.error') + ': ' + e.message, false);
             if (knopf) knopf.disabled = false;
         }
     }

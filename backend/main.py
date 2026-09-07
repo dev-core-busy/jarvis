@@ -14927,14 +14927,19 @@ def _kb_norm_rel(rel_path: str) -> str:
     return (rel_path or "").strip().replace("\\", "/").strip("/")
 
 
-def _kb_configured_root_for(rel_path: str):
+def _kb_configured_root_for(rel_path: str, configured: list | None = None):
     """Konfigurierter Wurzelordner, unter dem ``rel_path`` (Datei oder Unterordner)
-    liegt – der TIEFSTE passende Ordner – oder None. Grundlage der Vererbung."""
+    liegt – der TIEFSTE passende Ordner – oder None. Grundlage der Vererbung.
+
+    ``configured`` ist ein reiner Beschleuniger: wer viele Pfade in EINEM
+    Durchlauf zuordnet (die Dateiliste in /wissen), holt die Ordnerliste einmal
+    statt je Datei. Die Zuordnungsregel bleibt bewusst hier – eine zweite
+    Fassung davon liefe beim naechsten Feinschliff auseinander."""
     rel = _kb_norm_rel(rel_path)
     if not rel:
         return None
     best = None
-    for f in _kb_current_folder_list():
+    for f in (_kb_current_folder_list() if configured is None else configured):
         fn = _kb_norm_rel(f)
         if rel == fn or rel.startswith(fn + "/"):
             if best is None or len(fn) > len(best):
@@ -16110,6 +16115,38 @@ def _wissen_allowed_folders(user: str, groups: list) -> list:
     return [f for f in configured if f in allowed]
 
 
+def _wissen_ordner_anzeige(rel_path: str, configured: list) -> str:
+    """Ordner einer Wissensdatei, wie ein Benutzer ihn in /wissen kennt.
+
+    Gespeichert ist ein technischer Pfad (``data/knowledge/learned/2026-09``,
+    ``mnt/jarvis-kb/share_1/OneNote-Jasmin/0039_Maris``). Angezeigt wird die
+    gleiche Sprache wie in der Ordner-Auswahl darueber: der NAME des
+    konfigurierten Wurzelordners plus die Unterordner darunter – also
+    ``knowledge/learned/2026-09`` bzw. ``share_1/OneNote-Jasmin/0039_Maris``.
+
+    DAS MUSS DAS BACKEND MACHEN, nicht der Client: der kennt nur ``SCOPE.folders``,
+    und dort fehlt ``data/knowledge`` bewusst (es ist unter /wissen kein
+    Speicherziel) – ausgerechnet der Ordner, in dem die meisten Dateien liegen.
+
+    Passt kein konfigurierter Wurzelordner (Ordner wurde aus der Konfiguration
+    genommen, Zuordnung blieb), bleibt der ROHE Verzeichnispfad stehen. Eine
+    leere Angabe waere genau der gemeldete Zustand.
+    """
+    rel = _kb_norm_rel(rel_path)
+    verz = rel.rsplit("/", 1)[0] if "/" in rel else ""
+    if not verz:
+        return ""
+    root = _kb_configured_root_for(rel, configured)
+    # Der Wurzelordner muss ein PRAEFIX des Verzeichnisses sein. Wird die
+    # Funktion versehentlich mit einem ORDNER-Pfad gerufen, liegt die Wurzel
+    # unter dem Verzeichnis – dann waere `verz[len(root):]` stiller Unsinn.
+    if not root or not verz.startswith(root):
+        return verz
+    unter = verz[len(root):].strip("/")
+    name = Path(root).name or root
+    return f"{name}/{unter}" if unter else name
+
+
 @app.get("/api/wissen/scope")
 async def wissen_scope(user: str = Depends(require_auth)):
     """Bereich des Nutzers: beschreibbare Wissensgruppen + verfuegbare Speicherordner.
@@ -16343,17 +16380,27 @@ async def wissen_upload(
 
 @app.get("/api/wissen/files")
 async def wissen_files(user: str = Depends(require_auth)):
-    """Wissensdateien, die den Gruppen des Nutzers zugeordnet sind (Lese-Scope)."""
+    """Wissensdateien, die den Gruppen des Nutzers zugeordnet sind (Lese-Scope).
+
+    ``folder`` ist der ORDNER der Datei in der Sprache der Oberflaeche
+    (``_wissen_ordner_anzeige``). Ohne ihn zeigte die Liste nur Dateinamen –
+    zwei gleichnamige Dateien in verschiedenen Unterordnern waren nicht
+    unterscheidbar, und wo eine Datei liegt, war gar nicht ablesbar
+    (gemeldet 2026-09-07)."""
     from backend import knowledge_groups as kg
     allowed = {g["id"]: g for g in _editable_groups_for(user)}
+    configured = _kb_current_folder_list()
     out = []
     for path, gids in kg.get_assignments_map().items():
         mine = [gid for gid in gids if gid in allowed]
         if mine:
             out.append({"path": path, "name": path.rsplit("/", 1)[-1],
+                        "folder": _wissen_ordner_anzeige(path, configured),
                         "groups": [{"id": gid, "name": allowed[gid]["name"],
                                     "color": allowed[gid].get("color", "#64748b")} for gid in mine]})
-    out.sort(key=lambda x: x["name"].lower())
+    # Name bleibt das erste Kriterium (danach sucht man), der Ordner das zweite:
+    # gleichnamige Dateien standen sonst in zufaelliger Reihenfolge nebeneinander.
+    out.sort(key=lambda x: (x["name"].lower(), x["folder"].lower()))
     return JSONResponse({"ok": True, "files": out})
 
 

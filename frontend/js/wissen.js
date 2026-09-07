@@ -618,6 +618,17 @@
         });
     }
 
+    // Ordner einer Datei fuer die Anzeige. Regelweg ist das Feld `folder` vom
+    // Server (er kennt die konfigurierten Wurzelordner, der Client nicht
+    // vollstaendig). Der Rueckfall greift, solange ein aelteres Backend laeuft
+    // (halber Deploy) – dann steht der rohe Verzeichnispfad da, statt nichts.
+    function ordnerText(f) {
+        if (f && f.folder) return f.folder;
+        var p = String((f && f.path) || '');
+        var i = p.lastIndexOf('/');
+        return i > 0 ? p.slice(0, i) : '';
+    }
+
     // Zeichnet die Dateiliste aus _files, eingeschraenkt auf die aktiven Gruppen.
     function renderFileList() {
         var box = $('wi-files-list');
@@ -642,8 +653,19 @@
                 return '<span class="wi-chip" style="border-color:' + esc(g.color) + ';font-size:0.7rem;">' + esc(g.name) + '</span>';
             }).join(' ');
             var url = '/api/wissen/file?path=' + encodeURIComponent(f.path) + '&token=' + encodeURIComponent(_dlk());
-            return '<div class="wi-item" data-path="' + esc(f.path) + '">'
+            var ord = ordnerText(f);
+            // Der Ordner steht SICHTBAR unter dem Namen, nicht nur im title:
+            // ein Tooltip ist unsichtbar, und zwei gleichnamige Dateien in
+            // verschiedenen Unterordnern waren so nicht zu unterscheiden.
+            var ordHtml = ord
+                ? '<div class="wi-fpath" title="' + esc(t('wissen.file_folder', { p: f.path })) + '">' + esc(ord) + '</div>'
+                : '';
+            return '<div class="wi-item" data-path="' + esc(f.path) + '"'
+                + ' data-label="' + esc(ord ? ord + '/' + f.name : f.name) + '">'
+                + '<div class="wi-fmeta">'
                 + '<a class="nm wi-flink" href="' + esc(url) + '" target="_blank" rel="noopener" title="' + esc(t('wissen.open_file')) + '">' + esc(f.name) + '</a>'
+                + ordHtml
+                + '</div>'
                 + chips
                 + '<button type="button" class="sec-btn small danger wi-file-del" title="' + esc(t('wissen.delete_file')) + '">' + JarvisIcons.trash() + '</button>'
                 + '</div>';
@@ -651,7 +673,10 @@
         box.querySelectorAll('.wi-file-del').forEach(function (btn) {
             btn.addEventListener('click', function () {
                 var row = btn.closest('.wi-item');
-                deleteFile(row.getAttribute('data-path'), (row.querySelector('.nm') || {}).textContent);
+                // Die Rueckfrage nennt Ordner UND Name (data-label) – bei
+                // gleichnamigen Dateien waere "Datei X loeschen?" nicht deutbar,
+                // und hier geht es um Datenverlust.
+                deleteFile(row.getAttribute('data-path'), row.getAttribute('data-label'));
             });
         });
     }

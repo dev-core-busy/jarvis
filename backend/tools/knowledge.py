@@ -2420,8 +2420,25 @@ def force_reindex(resume_count: int = 0, incremental: bool = False,
     - FAISS nicht verfuegbar → TF-IDF-Index
 
     ``incremental=True`` behaelt den bestehenden Index (kein ``vs.clear()``) und
-    ergaenzt nur fehlende/geaenderte Dateien – so setzt eine Wiederaufnahme nach
-    Absturz dort fort, wo sie war, statt bei 0 zu beginnen.
+    ergaenzt nur fehlende/geaenderte Dateien. Das Aufraeumen verwaister Eintraege
+    laeuft trotzdem (``_rebuild_vector_index(..., force=True)``), es entfaellt
+    ausschliesslich das Leeren.
+
+    **Es ist der richtige Weg, wann immer nur ETWAS DAZUKOMMT** - eine neu
+    eingebundene Netzwerk-Freigabe, ein Standort-Sync, ein Bulk-Import. Ohne das
+    Flag wird die GANZE Wissensdatenbank neu eingebettet (auf ECHT ~13 Minuten
+    fuer 12.387 Chunks), und waehrend des Laufs ist der Index leer: jede Suche
+    meldet dann "keine Treffer". Dieselbe Lehre steht in
+    ``web_extractor._index_single_file`` und ``knowledge_sync``.
+
+    ``resume_count > 0`` kennzeichnet eine WIEDERAUFNAHME nach Absturz - nur dort
+    wird der Startzeitpunkt des vorherigen Anlaufs uebernommen.
+
+    ⚠ ``incremental`` wirkt NUR im FAISS-Zweig. Ohne Vektor-Index (reiner
+    TF-IDF-Betrieb) loescht ``_do_force_reindex`` den Cache unabhaengig davon und
+    baut ihn vollstaendig neu - dort gibt es keinen inkrementellen Weg. FAISS ist
+    der Regelfall; die Einschraenkung steht hier, damit der Docstring nicht mehr
+    zusagt, als der Code haelt.
 
     Scheitert ein Lauf mit einer Ausnahme, wird er bis zu ``MAX_INDEX_ATTEMPTS``
     mal automatisch wiederholt. ``resume_count`` zaehlt Wiederaufnahmen nach
@@ -2613,9 +2630,16 @@ def _do_force_reindex(attempt: int = 1, resume_count: int = 0,
                       incremental: bool = False, resume_baseline: int = -1) -> dict:
     global _current_run
     started = time.time()
-    # Bei einer Wiederaufnahme den urspruenglichen Start beibehalten, damit die
+    # Bei einer WIEDERAUFNAHME den urspruenglichen Start beibehalten, damit die
     # "Letzter Indexlauf"-Zeit nicht bei jedem Anlauf springt.
-    if incremental:
+    #
+    # ⚠ ENTSCHEIDEND IST `resume_count`, NICHT `incremental`. Die beiden bedeuten
+    # Verschiedenes: `incremental` heisst "kein vs.clear()", `resume_count > 0`
+    # heisst "derselbe Lauf, naechster Anlauf". Solange das an `incremental`
+    # hing, zeigte JEDER inkrementelle Lauf (Standort-Sync, Mount) den
+    # Startzeitpunkt eines FREMDEN, frueheren Laufs an - eine Anzeige, die einen
+    # Zustand behauptet, den sie nicht kennt.
+    if resume_count > 0:
         prev = get_last_run()
         started = prev.get("started_at") or started
     _current_run = {"started_at": started, "attempt": attempt,

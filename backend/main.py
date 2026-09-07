@@ -17493,10 +17493,13 @@ async def knowledge_extract_confluence(request: Request, user: str = Depends(req
                 if job_id and job_id in _extract_progress:
                     _extract_progress[job_id]["done"] += 1
         if not do_audit:
-            # nach allen Seiten EINMAL reindizieren
+            # Nach allen Seiten EINMAL ergaenzen. `incremental=True`, weil hier
+            # nur Dateien DAZUKOMMEN - ein Voll-Neuaufbau leerte den Index und
+            # bettete die ganze Wissensdatenbank neu ein (Minuten bis Stunden),
+            # waehrenddessen liefe jede Suche ins Leere.
             try:
                 from backend.tools.knowledge import force_reindex
-                await asyncio.to_thread(force_reindex)
+                await asyncio.to_thread(force_reindex, incremental=True)
             except Exception as ex:
                 print(f"[Confluence-Bulk] Reindex fehlgeschlagen: {ex}", flush=True)
         if job_id and job_id in _extract_progress:
@@ -18080,10 +18083,18 @@ async def mount_share(idx: int, user: str = Depends(require_knowledge_editor)):
     # Freigabe – der Endpunkt hing dadurch minutenlang und lief auf DEV in ein
     # 300-s-Timeout, obwohl der Mount nach Sekunden stand. Der Benutzer soll
     # die Rueckmeldung zum MOUNT bekommen; der Index zieht nach.
+    #
+    # ⚠ UND ZWAR `incremental=True`: hier KOMMT ein Ordner DAZU, der Bestand
+    # aendert sich nicht. Ohne das Flag leert `_do_force_reindex` den Index
+    # (`vs.clear()`, sobald alle Ordner erreichbar sind) und bettet die GANZE
+    # Wissensdatenbank neu ein - auf ECHT ~13 Minuten, waehrend derer JEDE
+    # Wissenssuche ins Leere laeuft. Verwaiste Eintraege werden trotzdem
+    # aufgeraeumt. Gleiche Lehre wie in `web_extractor._index_single_file`,
+    # `knowledge_sync` und beim Loeschen einer Wissensdatei.
     async def _reindex_nach_mount():
         try:
             from backend.tools.knowledge import force_reindex
-            await asyncio.to_thread(force_reindex)
+            await asyncio.to_thread(force_reindex, incremental=True)
             print(f"[knowledge] Reindex nach Mount {m.get('source','')} → {mp} "
                   f"abgeschlossen", flush=True)
         except Exception as e:  # noqa: BLE001
@@ -21044,9 +21055,14 @@ async def startup():
                     err = (result.get("stderr") or result.get("error") or "").strip()
                     print(f"[knowledge] Auto-Mount fehlgeschlagen ({source}): {err}", flush=True)
             if needs_reindex:
+                # `incremental=True` aus demselben Grund wie beim Verbinden-Knopf:
+                # die Freigaben KOMMEN DAZU. Ein Voll-Neuaufbau leerte den Index
+                # und liess jede Wissenssuche fuer die Dauer des Laufs ins Leere
+                # laufen - direkt nach dem Dienststart, wo die ersten Anfragen
+                # kommen, ist das der schlechteste Zeitpunkt dafuer.
                 from backend.tools.knowledge import force_reindex
-                await _asyncio.to_thread(force_reindex)
-                print("[knowledge] Index nach Auto-Mount neu aufgebaut", flush=True)
+                await _asyncio.to_thread(force_reindex, incremental=True)
+                print("[knowledge] Index nach Auto-Mount ergaenzt", flush=True)
                 # Speicher nach Bulk-Indexierung an OS zurueckgeben
                 try:
                     from backend.tools.vector_store import release_memory_to_os

@@ -64,6 +64,7 @@ from backend import download_key as _dlkey
 from backend import user_sessions as _user_sessions
 from backend import documents as _documents
 from backend import attachments as _attachments
+from backend import benutzer as _benutzer
 
 # ─── App erstellen ────────────────────────────────────────────────────
 JARVIS_VERSION = "1.0.0"
@@ -4560,6 +4561,66 @@ async def startup_log_retention():
         asyncio.create_task(_loop())
     except Exception as e:  # noqa: BLE001
         print(f"[Retention] Startup-Fehler: {e}", flush=True)
+
+
+@app.on_event("startup")
+async def startup_benutzer_ablagen():
+    """Doppelte Benutzer-Ablagen zusammenfuehren (Vorfall 2026-09-07).
+
+    ⚠ SYNCHRON UND VOR DEM ERSTEN REQUEST, und das ist keine Bequemlichkeit:
+    laeuft die Zusammenfuehrung erst als Aufgabe nebenher, kann sich in der
+    Zwischenzeit jemand anmelden – dann legt der (korrigierte) Code eine
+    Ablage unter dem kanonischen Namen an, und aus einem Umbenennen wird ein
+    Zusammenfuehren. Datenverlust entsteht dabei nicht (der Merge kann das),
+    aber die einfache Lage ist die bessere.
+
+    Es haengt am BACKEND-START und nicht an einem Deploy-Skript: damit ist es
+    unabhaengig davon, WIE der Code auf den Server kam (Update-Pille,
+    Auto-Update-Cron, `scp`, `git pull` von Hand) – dieselbe Ueberlegung wie
+    bei `startup_broker_aktualitaet`. Ein Skript, das jemand von Hand fahren
+    muss, ist genau die Handarbeit, die DEV und ECHT auseinanderlaufen liess.
+
+    Der Neustart loest zugleich das Cache-Problem: `tools/memory.py` haelt je
+    Benutzer einen Cache im RAM (`_user_caches`) – wer die Dateien unter einem
+    laufenden Dienst zusammenfuehrt, dessen Korrektur ueberschreibt das
+    naechste `memory_manage save` (am 2026-09-04 bezahlt).
+
+    Fail-safe: jeder Fehler landet im Journal, der Dienst startet trotzdem.
+    Abschaltbar mit JARVIS_BENUTZER_MIGRATION=0.
+    """
+    if os.environ.get("JARVIS_BENUTZER_MIGRATION", "1").strip() == "0":
+        return
+    try:
+        from backend import benutzer_migration as _bm
+        t0 = time.time()
+        befund = _bm.finde()
+        if not befund.vorgaenge and not befund.unzuordenbar and not befund.schluessel:
+            return                     # der Regelfall: still bleiben
+        if befund.schluessel:
+            _bm.schluessel_aufraeumen(trocken=False)
+            for m in befund.schluessel:
+                print(f"[Benutzer-Ablagen] Schluessel: {m}", flush=True)
+        if befund.vorgaenge:
+            erg = _bm.anwenden(befund, trocken=False)
+            for v in erg["vorgaenge"]:
+                print(f"[Benutzer-Ablagen] {v['art']}: {v['ablage']} "
+                      f"'{v['quelle']}' -> '{v['ziel']}' (Benutzer {v['benutzer']})",
+                      flush=True)
+                for h in v.get("hinweise", []):
+                    print(f"[Benutzer-Ablagen]   {h}", flush=True)
+            for f in erg["fehler"]:
+                print(f"[Benutzer-Ablagen] ⚠ FEHLER {f}", flush=True)
+            if erg.get("sicherung"):
+                print(f"[Benutzer-Ablagen] Sicherung: {erg['sicherung']}", flush=True)
+            print(f"[Benutzer-Ablagen] ✓ {len(erg['vorgaenge'])} Vorgang/Vorgaenge "
+                  f"in {time.time() - t0:.2f}s", flush=True)
+        # Unzuordenbares wird GEMELDET und nicht geraten: ein falscher
+        # Zusammenschluss vermischt die Daten zweier Menschen.
+        for ablage, eintrag in befund.unzuordenbar:
+            print(f"[Benutzer-Ablagen] ⚠ nicht zuordenbar: {ablage} '{eintrag}' – "
+                  f"bleibt unangetastet (Benutzer in keiner Namensquelle)", flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"[Benutzer-Ablagen] Fehler beim Zusammenfuehren: {e}", flush=True)
 
 
 @app.on_event("startup")
@@ -9293,8 +9354,10 @@ def _sap_instr_path(user: str) -> Path:
     (``nexus\\andreas.bender``) keinen Pfadwechsel ausloest."""
     d = Path(__file__).parent.parent / "data" / "sap_instructions"
     d.mkdir(parents=True, exist_ok=True)
-    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", (user or "unbekannt").strip().lower())
-    return d / f"{safe or 'unbekannt'}.md"
+    # ⚠ Seit 2026-09-07 ueber benutzer.pfad_teil: das fruehere re.sub liess den
+    # Domaenenanteil stehen (``nexus_andreas.bender.md`` neben
+    # ``andreas.bender.md``) – zwei Anweisungsdateien fuer einen Menschen.
+    return d / f"{_benutzer.pfad_teil(user, 'unbekannt')}.md"
 
 
 def _load_sap_instructions(user: str) -> str:
@@ -9746,7 +9809,9 @@ def _vemas_instr_path(user: str) -> Path:
     ausloest."""
     d = Path(__file__).parent.parent / "data" / "vemas_instructions"
     d.mkdir(parents=True, exist_ok=True)
-    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", (user or "unbekannt").strip().lower())
+    # ⚠ Seit 2026-09-07 ueber benutzer.pfad_teil (der Waechter hat diese Ablage
+    # gefunden, nicht ich): das fruehere re.sub liess den Domaenenanteil stehen.
+    safe = _benutzer.pfad_teil(user, "unbekannt")
     return d / f"{safe or 'unbekannt'}.md"
 
 
@@ -13395,10 +13460,14 @@ def _support_jira_base() -> str:
 
 # ─── Userspezifische Support-Anweisungen (dauerhaft, sessionuebergreifend) ────
 def _support_instr_path(user: str) -> Path:
-    safe = "".join(c if (c.isalnum() or c in "._-") else "_" for c in (user or "anon")).strip("_") or "anon"
+    """Anweisungsdatei EINES Benutzers fuer /support.
+
+    ⚠ Seit 2026-09-07 ueber ``benutzer.pfad_teil`` – der fruehere Sanitizer
+    entschaerfte nur und liess den Domaenenanteil stehen.
+    """
     d = Path(__file__).parent.parent / "data" / "support_instructions"
     d.mkdir(parents=True, exist_ok=True)
-    return d / (safe + ".md")
+    return d / (_benutzer.pfad_teil(user, "anon") + ".md")
 
 
 def _load_support_instructions(user: str) -> str:

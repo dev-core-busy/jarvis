@@ -9,15 +9,22 @@ import json
 import threading
 from pathlib import Path
 
+from backend.benutzer import pfad_teil
+
 _DIR = Path(__file__).parent.parent / "data" / "chat_history"
 _LOCK = threading.Lock()
 _MAX = 400  # max. Nachrichten pro Benutzer
 
 
 def _safe_user(user: str) -> str:
-    """Dateiname-sicherer Benutzername (verhindert Pfad-Traversal)."""
-    u = (user or "anonymous").strip().lower()
-    return "".join(c for c in u if c.isalnum() or c in "._-@") or "anonymous"
+    """Dateiname-sicherer Benutzername (verhindert Pfad-Traversal).
+
+    ⚠ Seit 2026-09-07 ueber ``benutzer.pfad_teil`` – vorher wurde nur
+    kleingeschrieben und entschaerft, der Domaenenanteil blieb stehen:
+    ``nexus\\andreas.bender`` schrieb nach ``nexusandreas.bender.json``,
+    waehrend derselbe Mensch als ``andreas.bender`` eine zweite Datei bekam.
+    """
+    return pfad_teil(user, "anonymous")
 
 
 def _path(user: str) -> Path:

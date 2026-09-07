@@ -348,7 +348,12 @@ def norm_user(name: str) -> str:
     denselben Schluessel ergeben – sonst haengt der Zugriff auf die eigenen
     Dumps daran, wie sich der Benutzer angemeldet hat.
     """
-    return (name or "").split("@")[0].split("\\")[-1].strip().lower()
+    s = (name or "").strip()
+    # Kanal-Kennungen bleiben ganz (gleiche Ausnahme wie in benutzer.norm_user);
+    # ohne sie wird ``api:dom\quelle`` zu ``quelle``.
+    if not s or ":" in s:
+        return s.lower()
+    return s.split("@")[0].split("\\")[-1].strip().lower()
 
 
 # ── Ablage ──────────────────────────────────────────────────────────────────

@@ -19,6 +19,8 @@ import time
 import uuid
 from pathlib import Path
 
+from backend.benutzer import pfad_teil
+
 _ROOT = Path(__file__).parent.parent / "data" / "chats"
 _LOCK = threading.RLock()
 _MAX_TRANSCRIPT = 800   # max. Anzeige-Nachrichten pro Sitzung
@@ -33,7 +35,17 @@ def _safe(s: str, fallback: str) -> str:
 
 
 def _user_dir(user: str) -> Path:
-    return _ROOT / _safe(user, "anonymous")
+    """Ablageordner EINES Benutzers.
+
+    ⚠ ``pfad_teil`` und NICHT ``_safe`` (Fix 2026-09-07): letzteres entfernte
+    nur unbedenkliche Zeichen und liess den Domaenenanteil stehen – aus
+    ``nexus\\andreas.bender`` wurde der Ordner ``nexusandreas.bender`` neben
+    dem vorhandenen ``andreas.bender``. Auf DEV lagen so 1 und 8 Sitzungen
+    desselben Menschen in zwei Ordnern, und welchen er sah, hing an der
+    Tippform beim Anmelden. ``_safe`` bleibt fuer die SITZUNGS-Kennung
+    zustaendig – die ist kein Benutzername und darf nicht normalisiert werden.
+    """
+    return _ROOT / pfad_teil(user, "anonymous")
 
 
 def _sess_dir(user: str, sid: str) -> Path:

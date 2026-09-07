@@ -106,6 +106,13 @@ def _key(username: str) -> str:
     damit ``ANDREA.LADD`` und ``andrea.ladd@firma.local`` denselben Eintrag
     treffen – sonst erscheint dieselbe Person mehrfach in der Liste."""
     u = (username or "").strip().lower()
+    # ⚠ Kanal-Kennungen (wa:/tg:/api:) bleiben GANZ – der Waechter
+    # tests/test_benutzer_pfade.py hat 2026-09-07 gefunden, dass diese
+    # Ausnahme hier fehlte: ``api:dom\quelle`` wurde zu ``quelle`` und haette
+    # damit mit einem echten Benutzer NAMENS "quelle" denselben Eintrag
+    # geteilt. Alle uebrigen norm_user-Fassungen im Projekt haben sie.
+    if ":" in u:
+        return u
     if "@" in u:
         u = u.split("@", 1)[0]
     if "\\" in u:

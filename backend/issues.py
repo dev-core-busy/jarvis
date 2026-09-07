@@ -29,6 +29,8 @@ import threading
 import time
 import uuid
 from pathlib import Path
+
+from backend.benutzer import norm_user
 from typing import Any
 
 from backend.config import config, PROJECT_ROOT
@@ -108,7 +110,7 @@ def _save_admin_seen(d: dict) -> None:
 
 def is_jarvis(user: str) -> bool:
     """Ist der Benutzer der Admin-User 'jarvis'?"""
-    return (user or "").strip().lower() == JARVIS_USER
+    return norm_user(user) == JARVIS_USER
 
 
 def can_edit(issue: dict, user: str, is_admin: bool = False) -> bool:
@@ -135,7 +137,7 @@ def can_edit(issue: dict, user: str, is_admin: bool = False) -> bool:
     """
     if is_jarvis(user) or bool(is_admin):
         return True
-    if issue.get("author", "").strip().lower() != (user or "").strip().lower():
+    if norm_user(issue.get("author", "")) != norm_user(user):
         return False
     return issue.get("status") != "closed"
 
@@ -208,8 +210,8 @@ def list_issues(user: str, *, mine_only: bool = False,
         issues = _load_all()
 
     if mine_only:
-        u = (user or "").strip().lower()
-        issues = [i for i in issues if i.get("author", "").strip().lower() == u]
+        u = norm_user(user)
+        issues = [i for i in issues if norm_user(i.get("author", "")) == u]
     if status and status in VALID_STATUS:
         issues = [i for i in issues if i.get("status") == status]
     if type_ and type_ in VALID_TYPES:
@@ -334,7 +336,7 @@ def update_issue(user: str, issue_id: str, patch: dict,
             # Badge-Benachrichtigung fuer den Ersteller: JEDE Admin-Bearbeitung
             # (auch reiner Kommentar ohne Statuswechsel) zaehlt – ausser der
             # Ersteller bearbeitet sein eigenes Issue selbst.
-            if admin_changed and current.get("author", "").strip().lower() != (user or "").strip().lower():
+            if admin_changed and norm_user(current.get("author", "")) != norm_user(user):
                 current["admin_change_pending"] = True
 
         current["updated"] = _now_iso()
@@ -368,7 +370,7 @@ def unseen_details(user: str, is_admin: bool = False) -> list[dict]:
     Neueste zuerst. Der Rueckgabewert ist frei von Geheimnissen: er enthaelt
     nur, was ``list_issues`` ohnehin jedem angemeldeten Benutzer zeigt.
     """
-    u = (user or "").strip().lower()
+    u = norm_user(user)
     if not u:
         return []
     with _lock:
@@ -397,7 +399,7 @@ def unseen_details(user: str, is_admin: bool = False) -> list[dict]:
         return e
 
     for i in issues:
-        if i.get("author", "").strip().lower() != u:
+        if norm_user(i.get("author", "")) != u:
             continue
         if i.get("admin_change_pending"):
             treffer.append(_eintrag(i, "edited", i.get("updated", "")))
@@ -421,7 +423,7 @@ def unseen_details(user: str, is_admin: bool = False) -> list[dict]:
                 _save_admin_seen(seen_map)
             else:
                 for i in issues:
-                    if (i.get("author", "").strip().lower() != u
+                    if (norm_user(i.get("author", "")) != u
                             and i.get("created", "") > marker):
                         treffer.append(_eintrag(i, "new", i.get("created", "")))
 
@@ -446,14 +448,14 @@ def mark_seen(user: str, is_admin: bool = False) -> int:
     Benachrichtigung). Fuer Admins zusaetzlich: NEUE Issues anderer als gesehen
     markieren (Admin-Badge zuruecksetzen). Gibt die Anzahl aktualisierter
     eigener Issues zurueck."""
-    u = (user or "").strip().lower()
+    u = norm_user(user)
     if not u:
         return 0
     with _lock:
         issues = _load_all()
         changed = 0
         for i in issues:
-            if i.get("author", "").strip().lower() != u:
+            if norm_user(i.get("author", "")) != u:
                 continue
             touched = False
             if i.get("status_seen", "open") != i.get("status"):

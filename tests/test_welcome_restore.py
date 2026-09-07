@@ -33,6 +33,10 @@ def check(name, cond, detail=""):
 
 
 # ── Modul laden und den Ablageort umbiegen ───────────────────────────────────
+# ROOT muss im Pfad liegen: chat_sessions importiert seit 2026-09-07
+# `backend.benutzer` (EINE Normalisierung fuer alle Benutzer-Ablagen). Vorher
+# hatte die Datei nur stdlib-Importe und war deshalb isoliert ladbar.
+sys.path.insert(0, str(ROOT))
 spec = importlib.util.spec_from_file_location("cs_test", ROOT / "backend" / "chat_sessions.py")
 cs = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(cs)

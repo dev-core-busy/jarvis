@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from backend.benutzer import norm_user, pfad_teil
 from backend.tools.base import BaseTool
 
 # Memory-Verzeichnis
@@ -28,13 +29,18 @@ def _get_memory_path(username: str = "") -> Path:
     """Gibt den Memory-Dateipfad für einen Benutzer zurück.
 
     Leerer Username / 'jarvis' → Rückwärtskompatibel: data/memory.json
-    Andere User → data/memory_{username}.json
+    Andere User → data/memory_{pfad_teil}.json
+
+    ⚠ DER NAME WIRD NORMALISIERT (Fix 2026-09-07). Vorher stand hier ein
+    ``re.sub`` auf dem ROHEN Namen: ``nexus\\karsten.moeller`` ergab
+    ``memory_nexus_karsten_moeller.json`` und ``karsten.moeller`` daneben
+    ``memory_karsten_moeller.json`` – ZWEI Gedaechtnisse fuer einen Menschen,
+    und welches er bekam, hing daran, wie er sich angemeldet hat. Die
+    Zusammenfuehrung des Altbestands macht ``benutzer_migration``.
     """
-    if not username or username in ("jarvis", ""):
+    if not username or norm_user(username) == "jarvis":
         return MEMORY_FILE
-    # Nur sichere Dateinamen erlauben
-    safe = re.sub(r'[^a-zA-Z0-9_\-]', '_', username)
-    return _DATA_DIR / f"memory_{safe}.json"
+    return _DATA_DIR / f"memory_{pfad_teil(username)}.json"
 
 # Token-Limits
 TOKEN_LIMIT = 2000       # Warnung im System-Prompt

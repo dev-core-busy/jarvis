@@ -16,7 +16,9 @@ Anti-Halluzinations-Schutz:
 
 Architektur:
 - learn_from_conversation() wird als asyncio.Task (fire-and-forget) aufgerufen.
-- Schreibt Markdown-Datei nach data/knowledge/learned/YYYY-MM/conv_<ts>.md
+- Schreibt Markdown-Datei nach data/knowledge/learned/YYYY-MM/conv_<ts>_<kennung>.md
+  (die Kennung ist der Hash der Aufgabe – daran erkennt der naechste Lauf,
+   dass dieselbe Aufgabe schon gelernt wurde, siehe `bereits_gelernt`)
 - Indexiert die Datei sofort in FAISS (kein Warten auf naechsten knowledge_search).
 - Fehler sind non-critical und werden nur geloggt.
 """
@@ -125,6 +127,151 @@ def _hat_substanz(facts_text: str) -> bool:
     return False
 
 
+# ── Wissen ueber JARVIS SELBST ist kein Wissen ueber die Welt ─────────────
+# ⚠ AN ECHTEN DATEN GEMESSEN (DEV, 2026-09-07): von 108 Faktenzeilen des
+# gesamten Bestands (Archiv + laufender Monat + Konsolidat) reden **22** ueber
+# Jarvis selbst - eigene Installationspfade und eigene Werkzeugnamen. Der Satz
+# "Die Standardvorlage liegt unter /opt/jarvis/data/vorlagen/standard.pptx"
+# steht SECHSMAL im Bestand, jedes Mal anders formuliert.
+#
+# Das ist aus drei Gruenden wertlos bis schaedlich:
+#   1. Es steht bereits im System-Prompt bzw. in der Werkzeug-Beschreibung und
+#      geht damit ohnehin bei JEDER Anfrage mit - gelernt ist es doppelt.
+#   2. Es ist teilweise FALSCH: gemessen wurde "office_create_powerpoint
+#      erwartet fuer layout ausschliesslich abschnitt oder bild" - das ist ein
+#      Ausschnitt der Alias-Liste, nicht die Liste.
+#   3. Es fuellt den FAISS-Index und verdraengt bei jeder Wissenssuche echte
+#      Kundendokumentation (LEARNED_PENALTY daempft, entfernt aber nicht).
+#
+# DIE REGEL WIRD ABGELEITET, NICHT GEPFLEGT: die Pfade kommen aus PROJECT_ROOT
+# (also aus der eigenen Installation), die Werkzeugnamen aus den Werkzeugen,
+# die in GENAU DIESEM Lauf gearbeitet haben. Eine gepflegte Namensliste waere
+# an dem Tag unvollstaendig, an dem jemand einen Skill hinzufuegt.
+#
+# ⚠ DIE REGEL IST BEWUSST ENG. Gemessen kostet eine breitere Fassung (bare
+# `/tmp`, `backend/`, `tests/`) vier weitere Zeilen - und wuerde jeden
+# Kundenfakt treffen, in dem zufaellig `/tmp` vorkommt ("der Medistar-Import
+# legt seine Logs unter /tmp/medistar ab"). Dieselbe Falle wie die verworfene
+# Vokal-Regel im OneNote-Import: drei Muellzeilen gegen still verlorenes
+# Wissen ist ein schlechter Handel.
+
+def _eigene_pfade() -> list[str]:
+    """Installationspfade dieser Jarvis-Instanz (aus PROJECT_ROOT abgeleitet)."""
+    pfade = {str(PROJECT_ROOT)}
+    # Der Dienstbenutzer heisst wie das Projekt; sein Home taucht in
+    # Shell-Ergebnissen genauso auf wie der Installationspfad.
+    pfade.add(f"/home/{PROJECT_ROOT.name}")
+    pfade.add(f"{PROJECT_ROOT.name}_sandbox")
+    return [p for p in pfade if len(p) >= 6]
+
+
+def _redet_ueber_sich_selbst(zeile: str, werkzeuge: set[str]) -> bool:
+    """Beschreibt die Zeile Jarvis SELBST statt der Welt des Nutzers?"""
+    lc = zeile.lower()
+    for p in _eigene_pfade():
+        if p.lower() in lc:
+            return True
+    for w in werkzeuge:
+        # Wortgrenze: `delegate` darf nicht in "delegated" treffen.
+        if w and re.search(rf"\b{re.escape(w.lower())}\b", lc):
+            return True
+    return False
+
+
+def _ohne_selbstbezug(facts_text: str, werkzeuge: set[str]) -> str:
+    """Entfernt Zeilen, die ueber Jarvis selbst reden."""
+    if not werkzeuge and not _eigene_pfade():
+        return facts_text
+    kept = []
+    for line in (facts_text or "").splitlines():
+        if line.strip() and _redet_ueber_sich_selbst(line, werkzeuge):
+            _log.info("Lern-Filter: Selbstauskunft verworfen (steht schon im "
+                      "System-Prompt): %s", line.strip()[:100])
+            continue
+        kept.append(line)
+    return "\n".join(kept).strip()
+
+
+# ── Dieselbe Aufgabe wird nicht zweimal gelernt ───────────────────────────
+# ⚠ DER GEMELDETE FEHLER (DEV, 2026-09-07): unter "gelerntes Wissen" stand
+# NEUNMAL dieselbe Zeile "Gelernt: Erstelle eine PowerPoint-Praesentation mit
+# 6 Folien ueber die Vorteile...". Gemessen: neun Notizen in SECHS MINUTEN
+# (04.09., 07:38-07:44), alle aus demselben, wiederholt gefahrenen Auftrag.
+#
+# ⚠ ZWEI INHALTSBASIERTE ANSAETZE WURDEN GEMESSEN UND VERWORFEN - das ist der
+# Grund, warum hier die AUFGABE und nicht der INHALT verglichen wird:
+#   - lexikalisch (Wortueberdeckung der Faktenzeilen): erkannte 7 von 51
+#     Zeilen, uebersprang **0** Dateien. Das Modell formuliert jedes Mal neu.
+#   - semantisch (e5-Embeddings, dasselbe Modell wie der Vektor-Store):
+#     Dubletten-Paare median 0.857, fremde Paare median 0.823 - die
+#     Verteilungen ueberlappen, e5 komprimiert Cosine auf ein schmales Band.
+# Die Aufgabe dagegen ist ueber alle neun Laeufe BYTE-GLEICH.
+#
+# Gemessen ueber 684 echte Konversationen auf DEV: 68 % aller Laeufe
+# wiederholen eine schon gesehene Aufgabe ("mal mir ein bild" 99x,
+# "testfrage" 80x). Jeder dieser Laeufe kostete bisher einen LLM-Aufruf zur
+# Fakten-Extraktion UND eine weitere Datei im Index.
+#
+# KEIN INDEXFILE: die Kennung steht im DATEINAMEN. Damit ist der Bestand auf
+# Platte die einzige Wahrheit - wer eine Notiz loescht, laesst die Aufgabe von
+# selbst wieder lernbar werden. Ein Index daneben wuerde driften und im
+# Zweifel Wissen dauerhaft blockieren.
+
+_WIEDERHOL_FENSTER_VORGABE = 14
+
+
+def wiederhol_fenster_tage() -> int:
+    """Wie lange gilt eine Aufgabe als 'schon gelernt'? (0 = Dedup aus)
+
+    FUNKTION, keine Modulkonstante - ein beim Import gelesener Wert waere bis
+    zum Dienstneustart eingefroren.
+    """
+    import os
+    try:
+        v = int(os.environ.get("JARVIS_LERN_FENSTER_TAGE", _WIEDERHOL_FENSTER_VORGABE))
+    except (TypeError, ValueError):
+        return _WIEDERHOL_FENSTER_VORGABE
+    return max(0, min(v, 365))
+
+
+def _norm_task(task: str) -> str:
+    """Vergleichsform der Aufgabe (die Extraktion sieht ohnehin nur 200 Zeichen)."""
+    return re.sub(r"\s+", " ", (task or "")).strip().lower()[:200]
+
+
+def task_kennung(task: str) -> str:
+    """Kurzer, stabiler Schluessel der Aufgabe - steht im Dateinamen."""
+    import hashlib
+    return hashlib.sha1(_norm_task(task).encode("utf-8")).hexdigest()[:10]
+
+
+def bereits_gelernt(task: str) -> Path | None:
+    """Gibt die vorhandene Notiz zurueck, wenn diese Aufgabe schon gelernt wurde.
+
+    FAIL-SAFE IN DIE LERNENDE RICHTUNG: jeder Fehler gibt None zurueck, es wird
+    also gelernt. Ein fehlgeschlagener Vergleich kostet eine Dublette, ein
+    faelschlich angenommenes "kenne ich schon" kostet Wissen.
+    """
+    fenster = wiederhol_fenster_tage()
+    if fenster <= 0:
+        return None
+    kennung = task_kennung(task)
+    if not _norm_task(task):
+        return None
+    grenze = time.time() - fenster * 86400
+    try:
+        for p in LEARNED_DIR.rglob(f"conv_*_{kennung}.md"):
+            # Das Konsolidat traegt keine Aufgaben-Kennung und kann hier nicht
+            # treffen; der Vollstaendigkeit halber bleibt es trotzdem aussen vor.
+            if p.parent.name == "konsolidiert":
+                continue
+            if p.stat().st_mtime >= grenze:
+                return p
+    except Exception as e:  # noqa: BLE001 - Lernen darf daran nicht scheitern
+        _log.debug(f"Dedup-Pruefung fehlgeschlagen (es wird gelernt): {e}")
+    return None
+
+
 def _sanitize_learned(facts_text: str) -> str:
     """Entfernt sicherheits-/rechte-bezogene Zeilen aus den zu lernenden Fakten."""
     kept = []
@@ -159,6 +306,15 @@ async def learn_from_conversation(
             _log.debug(f"Lernen uebersprungen: zu wenige nutzbare Tool-Ergebnisse ({len(tool_results)})")
             return
 
+        # ⚠ DIE PRUEFUNG STEHT VOR DER EXTRAKTION, nicht danach: sie spart den
+        # LLM-Aufruf. Gemessen betrifft das 68 % aller Laeufe.
+        schon = bereits_gelernt(task)
+        if schon is not None:
+            _log.info("Auto-Learning uebersprungen: diese Aufgabe wurde bereits "
+                      "gelernt (%s, Fenster %d Tage) - %.60s",
+                      schon.name, wiederhol_fenster_tage(), task)
+            return
+
         _log.info(f"Starte Fakten-Extraktion fuer: {task[:80]}")
 
         # LLM-basierte Fakten-Extraktion
@@ -169,6 +325,12 @@ async def learn_from_conversation(
 
         # Sicherheits-Filter: rechte-/secret-bezogene "Fakten" niemals lernen
         facts_text = _sanitize_learned(facts_text)
+        # Selbstauskunft verwerfen (eigene Pfade / eigene Werkzeuge). Die
+        # Werkzeugnamen kommen aus DIESEM Lauf - keine gepflegte Liste.
+        facts_text = _ohne_selbstbezug(
+            facts_text,
+            {(m.get("tool") or "").strip() for m in conv_messages if m.get("role") == "tool"},
+        )
         # ⚠ SUBSTANZ-PRUEFUNG NACH dem Saeubern: erst danach steht fest, was
         # wirklich uebrig bleibt. Ohne sie landeten 75 % Floskeln im Index.
         if facts_text and not _hat_substanz(facts_text):
@@ -223,7 +385,11 @@ async def _extract_facts_llm(
         f"- Schlussfolgerungen oder Interpretationen des KI-Assistenten\n"
         f"- Allgemeinwissen das jeder kennt\n"
         f"- Fehlermeldungen (ausser der Loesungsweg ist dauerhaft relevant)\n"
-        f"- Informationen die in einer Woche nicht mehr stimmen\n\n"
+        f"- Informationen die in einer Woche nicht mehr stimmen\n"
+        f"- Angaben ueber DICH SELBST: eigene Installationspfade, Namen und Parameter "
+        f"deiner eigenen Werkzeuge, eigene Vorlagen- und Verzeichnisorte, eigene "
+        f"Sicherheits- und Sandbox-Regeln. Das steht bereits in deinem System-Prompt "
+        f"und in den Werkzeug-Beschreibungen - es ist kein neues Wissen.\n\n"
         f"ERLAUBT (dauerhaft nuetzlich, direkt aus Tool-Ausgaben belegbar):\n"
         f"- Stabile Konfigurationen: IP-Adressen, Ports, Pfade, Dateinamen, Versionsnummern\n"
         f"- Erlernte Vorgehensweisen und Loesungswege die sich wiederholen koennen\n"
@@ -276,7 +442,9 @@ def _save_and_index(task: str, facts_text: str) -> None:
 
     # Sicherer Dateiname
     ts = int(time.time())
-    filepath = month_dir / f"conv_{ts}.md"
+    # Die Kennung im Dateinamen IST der Dedup-Speicher (siehe bereits_gelernt):
+    # kein Indexfile daneben, das driften koennte.
+    filepath = month_dir / f"conv_{ts}_{task_kennung(task)}.md"
 
     # Task-Kurzname fuer Ueberschrift
     task_clean = re.sub(r'[^\w\s\-]', '', task[:80]).strip()

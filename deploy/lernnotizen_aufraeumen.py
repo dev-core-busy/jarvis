@@ -11,6 +11,13 @@ Hintergrund: von 71 Lernnotizen auf DEV hatten 53 als kompletten Inhalt das Wort
 "Standardantwort" (15 Zeichen). Sie entstehen bei Auftraegen ohne Wissensgehalt
 und standen alle im FAISS-Index, also in jeder Wissenssuche.
 
+Seit 2026-09-07 raeumt es zusaetzlich DUBLETTEN auf - Notizen, die dieselbe
+Aufgabe ein zweites Mal gelernt haben. Auf DEV waren 9 der 10 Notizen derselbe
+Auftrag, entstanden in SECHS MINUTEN aus wiederholten Testlaeufen. Das
+Kriterium ist dasselbe, das `learning.bereits_gelernt()` kuenftig beim
+Schreiben anwendet: gleiche Aufgabe = nicht noch einmal. **Behalten wird die
+AELTESTE** - genau die, die der neue Filter durchgelassen haette.
+
     python3 deploy/lernnotizen_aufraeumen.py            # Trockenlauf (Vorgabe)
     python3 deploy/lernnotizen_aufraeumen.py --anwenden # loescht, mit Sicherung
 
@@ -45,6 +52,20 @@ def _hat_substanz_laden():
     ns = {}
     exec(compile(ast.Module(body=teile, type_ignores=[]), "<schnitt>", "exec"), ns)
     return ns["_hat_substanz"]
+
+
+def ueberschrift(text: str) -> str:
+    """Die Aufgabe aus der ersten Zeile - `# Gelernt: <Aufgabe>`.
+
+    ⚠ NICHT ueber `learning.task_kennung()`: die vorhandenen Dateien tragen
+    keine Kennung im Namen, und die Ueberschrift ist eine GEKUERZTE, von
+    Sonderzeichen befreite Fassung der Aufgabe. Fuer die Frage "sind das
+    dieselben zwei Notizen?" ist genau sie der Vergleichsschluessel.
+    """
+    erste = (text.splitlines() or [""])[0]
+    if not erste.startswith("# Gelernt:"):
+        return ""          # Konsolidat und Fremdformate gruppieren nicht
+    return " ".join(erste[len("# Gelernt:"):].split()).lower()
 
 
 def faktenteil(text: str) -> str:
@@ -86,8 +107,31 @@ def main():
             continue
         (bleibt if hat_substanz(inhalt) else weg).append(p)
 
+    # ── Dubletten: dieselbe Aufgabe ein zweites Mal gelernt ──────────────
+    # Behalten wird die AELTESTE je Aufgabe - genau die, die
+    # `learning.bereits_gelernt()` durchgelassen haette; alle spaeteren
+    # waeren gar nicht erst entstanden.
+    gruppen: dict[str, list[Path]] = {}
+    for p in bleibt:
+        try:
+            k = ueberschrift(p.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            continue
+        if k:
+            gruppen.setdefault(k, []).append(p)
+    dublett = []
+    for k, gr in gruppen.items():
+        if len(gr) > 1:
+            gr.sort(key=lambda x: x.stat().st_mtime)      # aelteste zuerst
+            dublett.extend(gr[1:])
+    if dublett:
+        dset = set(dublett)
+        bleibt = [p for p in bleibt if p not in dset]
+        weg.extend(dublett)
+
     print(f"Lernnotizen: {len(weg) + len(bleibt) + len(fremd)}")
-    print(f"  conv_*  ohne Wissensgehalt : {len(weg)}")
+    print(f"  conv_*  ohne Wissensgehalt : {len(weg) - len(dublett)}")
+    print(f"  conv_*  Dubletten (gleiche Aufgabe, aeltere bleibt): {len(dublett)}")
     print(f"  conv_*  bleiben            : {len(bleibt)}")
     print(f"  andere Gattungen (unberuehrt, z.B. feedback_*): {len(fremd)}")
     if weg:

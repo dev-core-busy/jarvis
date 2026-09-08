@@ -29,6 +29,7 @@
     var TOKEN_KEYS = ['jarvis_token', 'jarvis_chat_token', 'jarvis_uc_token'];
 
     var _status = null;      // /api/email/status
+    var _addinPfad = '';     // Netzwerkordner der Add-in-Bereitstellung ('' = keiner)
     // Letzter Kontostand. Gebraucht wird davon nur `antwort_format` fuer die
     // Beschriftung "Vorgabe (Nur Text)" im Format-Pulldown; `zeigeKonto` fuellt
     // sonst nur Felder und behielt bisher nichts.
@@ -142,10 +143,71 @@
                 _bereicheLang = sprache();
                 zeigeKonto(d.konto || {});
                 zeigeServerHinweis(d);
+                zeigeAddinPfad(d);
             })
             .catch(function (e) {
                 melde('em-acct-status', e.message, 'fehler');
             });
+    }
+
+    /* Hat die Administration einen Ordner hinterlegt, ist der Download der
+       FALSCHE Weg: der Benutzer holte sich eine zweite Kopie, die niemand
+       aktualisiert, und installierte womoeglich einen aelteren Stand als alle
+       anderen. Deshalb wird der Knopf nicht ergaenzt, sondern ERSETZT - gleiche
+       Entscheidung wie in /excel.
+
+       Der Pfad kommt aus `/api/email/status`, also hinter der E-Mail-Freigabe:
+       ein UNC-Pfad nennt Servernamen und Freigabe des Hauses. Das ist keine
+       Zugangsdatenpreisgabe, aber auch nichts, was jeder erfahren muss, der den
+       Server erreicht.
+
+       FAIL-OPEN in die harmlose Richtung: ohne Feld (aelteres Backend, halber
+       Deploy) bleibt der Download-Knopf stehen. Ein fehlender Pfad kostet einen
+       Download, ein falsch behaupteter schickt den Benutzer in einen leeren
+       Ordner. */
+    function zeigeAddinPfad(d) {
+        var pfad = String((d && d.addin_ordner) || '').trim();
+        var dlrow = $('em-addin-dlrow'), pfadrow = $('em-addin-pfadrow');
+        var sdl = $('em-addin-steps-dl'), spf = $('em-addin-steps-pfad');
+        var note = $('em-addin-pfad-note');
+        _addinPfad = pfad;
+        if (dlrow) dlrow.hidden = !!pfad;
+        if (pfadrow) pfadrow.hidden = !pfad;
+        if (sdl) sdl.hidden = !!pfad;
+        if (spf) spf.hidden = !pfad;
+        if (note) note.hidden = !pfad;
+        if (pfad) {
+            var kasten = $('em-addin-pfad');
+            // textContent, NICHT innerHTML: der Pfad ist Freitext aus dem
+            // Einstellungs-Reiter und landete sonst ungeprueft in der Seite.
+            if (kasten) kasten.textContent = pfad;
+        }
+    }
+
+    /* Kopieren MELDET Erfolg UND Fehlschlag: in der Zwischenablage sieht man
+       nichts, und `navigator.clipboard` fehlt in unsicheren Kontexten ganz -
+       die Absage nennt deshalb den Ausweg (markieren), statt den Benutzer
+       glauben zu lassen, es haette geklappt. */
+    function kopiereAddinPfad() {
+        var s = $('em-addin-copy-status');
+        var setz = function (t, art) {
+            if (!s) return;
+            s.textContent = t || '';
+            s.style.color = art === 'fehler' ? 'var(--danger)' : 'var(--success, #2ecc71)';
+            if (t) setTimeout(function () { if (s.textContent === t) s.textContent = ''; }, 5000);
+        };
+        var schief = function () {
+            setz(T('mail.addin_pfad_copyfail',
+                'Kopieren nicht möglich – Pfad markieren und mit Strg+C kopieren.'), 'fehler');
+        };
+        if (!_addinPfad) { schief(); return; }
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(_addinPfad).then(function () {
+                    setz(T('mail.addin_pfad_copied', 'Kopiert.'));
+                }, schief);
+            } else { schief(); }
+        } catch (e) { schief(); }
     }
 
     function zeigeKonto(k) {
@@ -1310,18 +1372,30 @@
         // gefunden, im Markup unsichtbar). Die uebrigen Bindungen hier
         // uebergeben benannte Funktionen und benutzen `b` nicht; wer eine
         // Inline-Funktion ergaenzt, braucht eine EIGENE Variable.
-        var hilfeKnopf = $('em-addin-help');
-        if (hilfeKnopf) hilfeKnopf.addEventListener('click', function () {
-            var box = $('em-addin-steps');
-            if (!box) return;
-            var zu = box.classList.toggle('hidden');
-            hilfeKnopf.textContent = zu ? T('mail.addin_howto', 'Anleitung anzeigen')
-                : T('mail.addin_howto_hide', 'Anleitung ausblenden');
-            // Damit der Knopf nach einem Sprachwechsel den richtigen Text
-            // bekommt, merkt sich das Element seinen Zustand statt ihn aus der
-            // Beschriftung zurueckzulesen.
-            hilfeKnopf.dataset.i18n = zu ? 'mail.addin_howto' : 'mail.addin_howto_hide';
+        // ZWEI Knoepfe fuer EINE Box: je nach Bereitstellung ist der eine
+        // sichtbar und der andere versteckt (Download-Zeile bzw. Pfad-Zeile).
+        // Beide muessen umschalten UND beide ihre Beschriftung mitziehen -
+        // sonst steht am versteckten Knopf beim Umschalten der falsche Text,
+        // und der wird sichtbar, sobald die Administration den Pfad aendert.
+        var hilfeKnoepfe = ['em-addin-help', 'em-addin-help2'].map($)
+                                .filter(function (e) { return !!e; });
+        hilfeKnoepfe.forEach(function (kn) {
+            kn.addEventListener('click', function () {
+                var box = $('em-addin-steps');
+                if (!box) return;
+                var zu = box.classList.toggle('hidden');
+                hilfeKnoepfe.forEach(function (k2) {
+                    k2.textContent = zu ? T('mail.addin_howto', 'Anleitung anzeigen')
+                        : T('mail.addin_howto_hide', 'Anleitung ausblenden');
+                    // Damit der Knopf nach einem Sprachwechsel den richtigen
+                    // Text bekommt, merkt sich das Element seinen Zustand statt
+                    // ihn aus der Beschriftung zurueckzulesen.
+                    k2.dataset.i18n = zu ? 'mail.addin_howto' : 'mail.addin_howto_hide';
+                });
+            });
         });
+        var pfadKopie = $('em-addin-copy');
+        if (pfadKopie) pfadKopie.addEventListener('click', kopiereAddinPfad);
         var stilNeu = $('em-stil-neu');
         if (stilNeu) stilNeu.addEventListener('click', function () {
             oeffneStilFormular(null, null);

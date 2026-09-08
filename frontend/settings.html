@@ -3567,6 +3567,70 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                         </div>
 
+                        <!-- ═══ Bereitstellung des Outlook-Add-ins ═══
+                             Der Pfad ist HAUSINTERN und steht deshalb in der
+                             Einstellung, nicht im Quelltext: das Repo ist
+                             oeffentlich, und auf einem anderen Server gibt es
+                             diese Freigabe nicht. Leer = die Kachel "E-Mail"
+                             bietet wie bisher den Download an.
+                             Gelesen wird der Wert von den BENUTZERN ueber
+                             /api/email/status - /api/skills/*/config ist
+                             Administratoren vorbehalten.
+
+                             ⚠ DAS FELD VERTEILT NICHTS. Es gibt keine
+                             Browser-API, die in einen als TEXT genannten Ordner
+                             schreibt (showDirectoryPicker/showSaveFilePicker
+                             liefern ein Handle aus einem Dialog, startIn nimmt
+                             kein Pfad-Argument). Eine Seite, die in
+                             \\server\freigabe\... schreiben duerfte, weil dort
+                             jemand den Pfad hingetippt hat, waere genau die
+                             Luecke, die diese Grenze verhindert. Der zweite
+                             Knopf schreibt in einen EINMAL im Dialog gewaehlten
+                             Ordner - das ist so nah am "Hochladen", wie ein
+                             Browser kommt. Ausfuehrlich begruendet im Kopf von
+                             excel_admin.js. -->
+                        <div class="kb-section" id="em-sect-addin">
+                            <div class="kb-section-header kb-collapse-header" id="em-sect-addin-hdr">
+                                <h3 data-i18n="mailadm.sect_addin">Outlook-Add-in Bereitstellung</h3>
+                                <span class="sk-openclaw-toggle" id="em-sect-addin-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="em-sect-addin-body">
+                                <p class="kb-hint" style="margin-bottom:10px;" data-i18n-html="mailadm.addin_intro">Das Add-in bringt <code>/email</code> als Aufgabenfenster nach Outlook. Die Manifest-Datei wird bei jedem Abruf <b>für diesen Server</b> erzeugt – die enthaltenen Adressen zeigen auf ihn. Üblich im Haus ist <b>eine Ablage im Netz</b>: legen Sie die Datei einmal dorthin und tragen Sie den Ordner unten ein – dann sieht jeder Benutzer im Bereich <b>E-Mail</b> nur noch diesen Pfad. Bleibt das Feld leer, holt sich jeder die Datei selbst.</p>
+                                <p class="kb-hint" style="margin-bottom:10px;" data-i18n-html="mailadm.addin_note_dl"><b>Der Download landet nicht in der Ablage – das müssen Sie selbst tun.</b> „Herunterladen" gibt die Datei an Ihren Browser; wohin sie geht, entscheidet dessen Einstellung. <b>Kopieren Sie sie anschließend von Hand</b> in den Ordner. Eine Webseite darf nicht in einen Ordner schreiben, der ihr nur als <i>Text</i> genannt wurde – der eingetragene Pfad ist deshalb eine Angabe für Menschen, kein Ziel für den Browser. Wer die Datei ohne Umweg über den Download-Ordner ablegen will, nimmt in <b>Chrome oder Edge</b> den zweiten Knopf: dort wählen Sie den Zielordner <i>einmal</i> im Dialog aus, er wird gemerkt, und danach schreibt der Knopf direkt hinein.</p>
+
+                                <!-- #em-addin-download ist ein reines <a href> und wird
+                                     NICHT abgefangen: so entscheidet der Browser ueber
+                                     das Ziel, die Datei darf also auch auf den Desktop.
+                                     #em-addin-upload ist der Ordner-Weg (File System
+                                     Access API) und erscheint nur in Chrome/Edge - ein
+                                     Knopf, der in Firefox nichts tut, ist schlimmer als
+                                     keiner. -->
+                                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                                    <a class="btn-primary" id="em-addin-download" href="/addin/manifest.xml"
+                                       style="flex:0 0 auto;" data-i18n="mailadm.addin_dl">Manifest herunterladen</a>
+                                    <button class="btn-secondary" type="button" id="em-addin-upload"
+                                            style="flex:0 0 auto;display:none;" data-i18n="mailadm.addin_up">Ordner wählen und hineinschreiben</button>
+                                    <span class="kb-hint" id="em-addin-version"></span>
+                                    <span class="kb-hint" id="em-addin-dl-status"></span>
+                                </div>
+                                <p class="kb-hint" id="em-addin-warn" style="display:none;margin-top:8px;"></p>
+
+                                <div class="form-group" style="margin-top:14px;">
+                                    <label for="em-addin-pfad" data-i18n="mailadm.addin_path">Netzwerkordner für die Datei (optional)</label>
+                                    <input type="text" id="em-addin-pfad" class="config-input" maxlength="260"
+                                           placeholder="\\server\freigabe\office-addins"
+                                           style="width:100%;box-sizing:border-box;font-family:var(--font-mono,monospace);font-size:0.82rem;">
+                                    <p class="kb-hint" style="margin:4px 0 0;" data-i18n-html="mailadm.addin_path_hint">Der Ordner, in den <b>Sie</b> die Manifest-Datei legen. Ist hier etwas eingetragen, sieht der Benutzer im Bereich <b>E-Mail</b> <b>diesen Pfad statt des Download-Knopfes</b> – er holt die Datei dann von dort und wählt sie in Outlook aus. Leer lassen, wenn sich jeder die Datei selbst holen soll.</p>
+                                </div>
+                                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                                    <button type="button" class="btn-primary" id="em-addin-save" style="flex:0 0 auto;" data-i18n="mailadm.addin_save">Pfad speichern</button>
+                                    <span class="kb-hint" id="em-addin-status"></span>
+                                </div>
+
+                                <p class="kb-hint" style="margin-top:12px;" data-i18n-html="mailadm.addin_note">Nach einer Aktualisierung von {marke} gehört die Datei <b>nur dann</b> neu in die Ablage, wenn sich das <b>Manifest</b> geändert hat (Menüband, Berechtigungen, Adressen) – Aufgabenfenster und Logik liegen auf diesem Server und erreichen jede Installation beim nächsten Öffnen. Das Fenster weist die Benutzer selbst auf ein veraltetes Manifest hin.</p>
+                            </div>
+                        </div>
+
                         <div class="kb-section" id="em-sect-explore">
                             <div class="kb-section-header kb-collapse-header" id="em-sect-explore-hdr">
                                 <h3 data-i18n="mailadm.sect_explore">Exchange-Explorer</h3>
@@ -5213,7 +5277,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/icons.js?v=3"></script>
     <script src="/static/js/pwreveal.js?v=2"></script>
     <script src="/static/js/dlkey.js?v=2"></script>
-    <script src="/static/js/i18n.js?v=236"></script>
+    <script src="/static/js/i18n.js?v=237"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=21"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -5236,7 +5300,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/sapcert.js?v=1"></script>
     <script src="/static/js/sap.js?v=4"></script>
     <script src="/static/js/vemas.js?v=1"></script>
-    <script src="/static/js/email.js?v=4"></script>
+    <script src="/static/js/email.js?v=5"></script>
     <script src="/static/js/short_tracks_admin.js?v=2"></script>
     <script src="/static/js/kundenverwaltung.js?v=6"></script>
     <script src="/static/js/support_admin.js?v=11"></script>
@@ -5251,7 +5315,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/agent_roles.js?v=3"></script>
     <script src="/static/js/model_caps.js?v=6"></script>
     <script src="/static/js/alpha_sort.js?v=1"></script>
-    <script src="/static/js/app.js?v=205"></script>
+    <script src="/static/js/app.js?v=206"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

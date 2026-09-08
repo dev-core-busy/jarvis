@@ -108,6 +108,12 @@
             "description": "Kommagetrennt: mail, wissen, fach, dokumente, voll. 'mail' ist immer dabei. Der Benutzer kann je Regel NUR aus den hier freigegebenen Bereichen waehlen. Wird ueber die Kaestchen im Reiter gepflegt - 'voll' bedeutet: der Regel-Lauf bekommt den ganzen Werkzeugkasten des Benutzers.",
             "default": "mail"
         },
+        "addin_ordner_pfad": {
+            "type": "string",
+            "label": "Netzwerkordner fuer das Outlook-Add-in (optional)",
+            "description": "Der Ordner, in den DER ADMINISTRATOR die Manifest-Datei legt. Ist hier etwas eingetragen, sieht der Benutzer im Bereich 'E-Mail' diesen Pfad STATT des Download-Knopfes. Leer lassen, wenn sich jeder die Datei selbst holen soll. DAS FELD VERTEILT NICHTS - es sagt den Benutzern nur, wohin die Datei gelegt wurde. Wird ueber den Reiter gepflegt.",
+            "default": ""
+        },
         "takt_sekunden": {
             "type": "number",
             "label": "Pruefabstand des Zeitplans (Sekunden)",

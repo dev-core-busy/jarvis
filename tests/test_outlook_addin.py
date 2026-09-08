@@ -405,10 +405,45 @@ pruefe("em-addin-help" in PORTALJS and "addin_howto_hide" in PORTALJS,
 # Variable `var b`, die mehrfach zugewiesen wird. Eine Inline-Closure darueber
 # sieht beim Klick den ZULETZT zugewiesenen Wert – der Handler beschriftete
 # dadurch den Abmelde-Knopf oben rechts. Im Markup ist davon nichts zu sehen.
-_h = PORTALJS.split("em-addin-help", 1)[1].split("});", 1)[0]
+# ⚠ GESCHNITTEN UEBER DEN NAMEN, nicht bis zum ersten "});".
+# Die alte Grenze war eine Textmarke und hielt nur zufaellig: seit der Handler
+# ZWEI Knoepfe bedient (Download-Zeile und Pfad-Zeile, 2026-09-08), liegt das
+# erste "});" bereits in der `.filter(function (e) { … })`-Zeile - der Schnitt
+# war 95 Zeichen lang und die Pruefung damit sinnlos. Auch die Klammerbilanz
+# taugt nicht: die Deklaration schliesst ihre Klammern selbst, der Rumpf steht
+# in der FOLGENDEN Anweisung. Genommen wird deshalb der Bereich, in dem der
+# Variablenname ueberhaupt vorkommt - genau dort muss die Eigenschaft gelten.
+def _handler_block(js):
+    i = js.find("em-addin-help")
+    if i < 0:
+        return ""
+    start = js.rfind("\n", 0, i) + 1
+    # Name der eigenen Variablen aus der Deklarationszeile lesen.
+    zeile = js[start:js.find("\n", start)]
+    m = re.search(r"var\s+([A-Za-z_$][\w$]*)", zeile)
+    if not m:
+        return zeile
+    name = m.group(1)
+    letzte = js.rfind(name)
+    ende = js.find(";", letzte)
+    return js[start:(ende + 1) if ende > 0 else len(js)]
+
+
+_h = _handler_block(PORTALJS)
+# POSITIVKONTROLLE DES SCHNITTS: er muss den Handler-RUMPF enthalten (nicht nur
+# die Deklarationszeile) und nicht die halbe Datei. Ohne sie waere jede Aussage
+# darueber trivial.
+pruefe(300 < len(_h) < 4000 and "addin_howto" in _h and "classList" in _h,
+       "der Handler-Block ist plausibel geschnitten (%d Zeichen)" % len(_h))
 pruefe(not re.search(r"\bb\.(textContent|dataset|classList)", _h),
        "der Anleitung-Handler benutzt NICHT die geteilte Variable b")
-pruefe("hilfeKnopf" in _h, "er benutzt eine eigene Variable")
+# GEPRUEFT WIRD DIE EIGENSCHAFT, NICHT DER NAME: die Pruefung hing an der
+# Zeichenkette "hilfeKnopf" und meldete einen Fehler, als der Handler auf ZWEI
+# Knoepfe umgestellt wurde (`hilfeKnoepfe`, seit 2026-09-08 - Download-Zeile und
+# Pfad-Zeile haben je einen). Die Aussage, auf die es ankommt: er benutzt eine
+# EIGENE Variable, nicht die mehrfach zugewiesene `b`.
+pruefe(re.search(r"\bhilfeKn(opf|oepfe)\b", _h) is not None,
+       "er benutzt eine eigene Variable")
 
 # Ein <a> mit Knopf-Klasse ist ohne das hier unterstrichen und sieht aus wie
 # ein Textlink im Knopf (im Screenshot gesehen).
@@ -427,14 +462,43 @@ pruefe(not f_en, "Add-in-Abschnitt vollstaendig auf Englisch – fehlt: %s" % f_
 # Schluessel mit eingebetteter Auszeichnung MUESSEN data-i18n-html benutzen:
 # `applyLang()` setzt bei data-i18n den textContent und wuerde <code>/<b>
 # ersatzlos entfernen (Lehre vom E-Mail-Reiter, 2026-08-13).
-for k in ("mail.addin_s1", "mail.addin_s2", "mail.addin_s3", "mail.addin_note"):
+# UMGESTELLT 2026-09-08: die drei Einzel-<li> (mail.addin_s1..s3) sind zwei
+# vollstaendigen LISTEN gewichen (mail.addin_steps_dl / _pfad) - der erste
+# Schritt hat je nach Bereitstellung zwei Fassungen, und zwei getrennte Listen
+# sind der einzige tragfaehige Weg: `applyLang()` setzt `data-i18n-html` bei
+# jedem Sprachwechsel neu und wuerde ein per JS getauschtes <li> wortlos
+# zurueckdrehen. Die alten Schluessel sind entfernt, nicht bloss ungenutzt -
+# ein toter i18n-Schluessel ist eine Pflegelast ohne Gegenwert.
+for k in ("mail.addin_steps_dl", "mail.addin_steps_pfad", "mail.addin_pfad_note",
+          "mail.addin_note"):
     pruefe('data-i18n="%s"' % k not in EMAILHTML,
            "%s benutzt nicht data-i18n (das wuerde das Markup loeschen)" % k)
     pruefe('data-i18n-html="%s"' % k in EMAILHTML, "%s benutzt data-i18n-html" % k)
-for block, spr in ((de_block, "DE"), (en_block, "EN")):
-    w = re.search(r"'mail\.addin_s2':\s*'([^']*)'", block)
-    pruefe(bool(w) and "<b>" in w.group(1),
-           "der %s-Text von mail.addin_s2 traegt seine Auszeichnung" % spr)
+# ⚠ GEPRUEFT WIRD DIE ANZAHL GEGEN DAS MARKUP, nicht ein blosses "<li> kommt
+# vor". Beides ist eine Drift-Schranke: `applyLang()` ERSETZT den Inhalt der
+# Liste durch den i18n-Text - ergaenzt jemand im Markup einen Schritt und
+# vergisst den Text, sieht der Benutzer beim ersten Sprachwechsel einen Schritt
+# WENIGER, ohne dass etwas auffaellt. Eine feste Zahl waere eine Zeitbombe
+# (Register), deshalb ist das Markup der Massstab.
+for _id, _key in (("em-addin-steps-dl", "mail.addin_steps_dl"),
+                  ("em-addin-steps-pfad", "mail.addin_steps_pfad")):
+    _m = re.search(r'id="%s"[^>]*>([\s\S]*?)</ol>' % _id, EMAILHTML)
+    pruefe(_m is not None, "%s im Markup gefunden" % _id)
+    _soll = _m.group(1).count("<li>") if _m else 0
+    pruefe(_soll >= 3, "%s hat mehrere Schritte im Markup (%d)" % (_id, _soll))
+    for block, spr in ((de_block, "DE"), (en_block, "EN")):
+        w = re.search(r"'%s':\s*'([^']*)'" % re.escape(_key), block)
+        pruefe(bool(w), "%s im %s-Block vorhanden" % (_key, spr))
+        _txt = w.group(1) if w else ""
+        pruefe(_txt.count("<li>") == _soll,
+               "%s (%s) hat genauso viele Schritte wie das Markup (%d von %d)"
+               % (_key, spr, _txt.count("<li>"), _soll))
+        # Die eingebettete Auszeichnung ist der Grund fuer data-i18n-html -
+        # ohne sie waere der Schluessel dort falsch aufgehaengt.
+        pruefe("<b>" in _txt, "%s (%s) traegt seine Auszeichnung" % (_key, spr))
+# Die alten Einzel-Schluessel sind WEG, nicht bloss ungenutzt.
+for tot in ("mail.addin_s1", "mail.addin_s2", "mail.addin_s3"):
+    pruefe(("'%s':" % tot) not in I18N, "%s ist entfernt (kein toter Schluessel)" % tot)
 
 _note = re.search(r"'mail\.addin_note':\s*'([^']*)'", de_block)
 pruefe(bool(_note) and "Exchange" in _note.group(1) and "Zertifikat" in _note.group(1),

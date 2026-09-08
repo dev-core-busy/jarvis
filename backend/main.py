@@ -10594,6 +10594,29 @@ async def email_page():
                         headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 
+def _addin_ordner_pfad_safe() -> str:
+    """Der Netzwerkordner der Add-in-Bereitstellung – ``""`` bei jedem Problem.
+
+    **Eigener try-Block, getrennt von der uebrigen Statusauskunft.** Der Pfad
+    ist ein NEBENFELD; ein Fehler beim Lesen darf die Hauptauskunft (Konto,
+    Server, Regeln) nicht kippen und auch nicht zu einem 500er fuehren. Genau
+    die Trennung, die beim Zahnrad-Badge gefehlt hat: dort verschluckte ein
+    gemeinsames ``except`` einen NameError im Listenaufbau und **der Zaehler
+    fiel still auf 0**.
+
+    Leer heisst „nicht hinterlegt" – die Oberflaeche bietet dann wie bisher den
+    Download an. Das ist die harmlose Richtung: ein fehlender Pfad kostet einen
+    Download, ein falsch behaupteter schickt den Benutzer in einen Ordner, in
+    dem nichts liegt.
+    """
+    try:
+        from backend import addin
+        return addin.ordner_pfad()
+    except Exception as e:  # noqa: BLE001
+        print(f"[E-Mail] Add-in-Ordner nicht lesbar: {e}")
+        return ""
+
+
 @app.get("/api/email/status")
 async def email_status(lang: str = "de", user: str = Depends(require_email_access)):
     """Zustand des Bereichs fuer die Oberflaeche: Konto, Server, Bereiche, Regelzahl.
@@ -10620,6 +10643,16 @@ async def email_status(lang: str = "de", user: str = Depends(require_email_acces
         "bereiche": mail_rules.bereiche_katalog(lang),
         "kategorie": mail_accounts.kategorie_name(),
         "regeln": len(mail_rules.liste(user)),
+        # Wo liegt das Add-in-Manifest im Netz? Leer = die Administration
+        # verteilt nicht zentral, und die Kachel bietet wie bisher den Download
+        # an. HIER und nicht an einem eigenen Endpunkt: die Oberflaeche ruft
+        # `/api/email/status` ohnehin: ein zusaetzlicher Roundtrip fuer ein Feld
+        # waere der teuerste Weg (gleiche Entscheidung wie `paket_pfade` in
+        # `/api/jira/assist/health`). Und der Endpunkt haengt an
+        # `require_email_access`, liegt also schon hinter der Freigabe - ein
+        # UNC-Pfad nennt Servernamen und Freigabe des Hauses und ist nichts,
+        # was jeder erfahren muss, der den Server erreicht.
+        "addin_ordner": _addin_ordner_pfad_safe(),
         "grenzen": {
             "max_regeln": mail_rules.MAX_REGELN_JE_BENUTZER,
             "min_intervall": mail_rules.MIN_INTERVALL_MIN,

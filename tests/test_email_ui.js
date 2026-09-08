@@ -801,7 +801,15 @@ function baueReiter(opt) {
     // eine eigene Logik mit eigenem Markup – dabei stand der Titel RECHTS, weil
     // `.kb-section-header` `justify-content: space-between` setzt (im Screenshot
     // vom 2026-08-12 gesehen, jsdom rechnet kein Layout).
-    ['conn', 'areas', 'explore', 'accounts'].forEach(function (s) {
+    // DIE LISTE KOMMT AUS DEM MARKUP, sie wird nicht gepflegt: eine feste
+    // Aufzaehlung meldet beim naechsten Container einen Fehler, den es nicht
+    // gibt (2026-09-08 mit `em-sect-addin` genau so passiert – Register: eine
+    // feste Zahl in einem Test ist eine Zeitbombe).
+    const _emSects = [...new Set([...reiterPanel('email')
+        .matchAll(/id="em-sect-([a-z]+)-hdr"/g)].map(m => m[1]))];
+    pruefe(_emSects.length >= 4, 'der Reiter hat mehrere Klapp-Container ('
+        + _emSects.length + ': ' + _emSects.join(', ') + ')');
+    _emSects.forEach(function (s) {
         const hdr = SET_HTML.indexOf('id="em-sect-' + s + '-hdr"');
         pruefe(hdr > -1, 'Kopfzeile em-sect-' + s + '-hdr existiert');
         pruefe(SET_HTML.indexOf('id="em-sect-' + s + '-body"') > -1,
@@ -810,8 +818,10 @@ function baueReiter(opt) {
             'Umschalter em-sect-' + s + '-tog existiert');
     });
     const panel = reiterPanel('email');
-    pruefe((panel.match(/kb-collapse-header/g) || []).length === 4,
-        'alle vier Container nutzen das Projekt-Muster kb-collapse-header');
+    // JEDER Container, nicht "genau vier": geprueft wird die Eigenschaft.
+    pruefe((panel.match(/kb-collapse-header/g) || []).length === _emSects.length,
+        'JEDER Container nutzt das Projekt-Muster kb-collapse-header',
+        (panel.match(/kb-collapse-header/g) || []).length + ' von ' + _emSects.length);
     pruefe(panel.indexOf('data-em-sect') === -1,
         'die eigene Klapp-Verdrahtung ist verschwunden');
     // Geprueft wird die POSITION, nicht der Wortlaut des Tags: seit der
@@ -819,11 +829,19 @@ function baueReiter(opt) {
     // '<h3>' schlaegt dann an der eigenen Verbesserung an.
     const kopfzeilen = [...panel.matchAll(/kb-collapse-header[^>]*>\s*<(\w+)/g)]
         .map(m => m[1]);
-    pruefe(kopfzeilen.length === 4 && kopfzeilen.every(t => t === 'h3'),
-        'der Titel steht als <h3> zuerst (sonst schiebt space-between ihn nach rechts)',
-        JSON.stringify(kopfzeilen));
+    pruefe(kopfzeilen.length === _emSects.length && kopfzeilen.every(t => t === 'h3'),
+        'in JEDER Kopfzeile steht der Titel als <h3> zuerst (sonst schiebt '
+        + 'space-between ihn nach rechts)', JSON.stringify(kopfzeilen));
     pruefe(APP.indexOf('_initEmailCollapse') > -1 && APP.indexOf('window.initEmailCollapse') > -1,
-        'app.js registriert die vier Container bei _collapseInit');
+        'app.js registriert die Container bei _collapseInit');
+    // REGEL statt Liste: ohne Eintrag traegt das Markup zwar die Klassen, aber
+    // NICHTS bindet den Klick – der Container liesse sich nicht zuklappen, und
+    // im Markup ist davon nichts zu sehen.
+    const _ic = (APP.match(/function _initEmailCollapse\(\)[\s\S]*?\n        \}/) || [''])[0];
+    const _nichtGebunden = _emSects.filter(s => _ic.indexOf('em-sect-' + s + '-hdr') === -1);
+    pruefe(_nichtGebunden.length === 0,
+        'JEDER Container des Reiters ist in _initEmailCollapse gebunden',
+        JSON.stringify(_nichtGebunden));
     pruefe(ADMIN_JS.indexOf('window.initEmailCollapse') > -1,
         'email.js benutzt die zentrale Klapp-Logik statt einer eigenen');
 

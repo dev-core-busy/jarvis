@@ -247,6 +247,51 @@ def anzeigename() -> str:
     return (name or "Jarvis")[:40]
 
 
+# Deckel fuer den Netzwerkpfad der Bereitstellung. Er ist eine ANZEIGE, kein
+# Ziel – gedeckelt nur, damit die Oberflaeche in Form bleibt.
+ORDNER_PFAD_MAX = 260
+
+
+def ordner_pfad() -> str:
+    """Netzwerkordner, in dem das Manifest fuer die Benutzer liegt – "" wenn keiner.
+
+    **Warum das eine EINSTELLUNG ist und keine Konstante:** der Pfad ist
+    hausintern, dieses Repo ist oeffentlich, und auf einem anderen Server gibt
+    es diese Freigabe nicht. Gleiche Begruendung wie bei
+    ``excel_addin.katalog_pfad()`` und ``jira_assist.paket_pfade()``.
+
+    **Bewusst eine FUNKTION und kein Modulwert:** der Wert ist im Reiter
+    aenderbar und muss ohne Dienstneustart greifen (Muster
+    ``documents.retention_days()``).
+
+    ⚠ **Der Pfad ist eine Angabe fuer MENSCHEN, kein Ziel fuer den Server.**
+    Es wird nichts dorthin geschrieben und nichts von dort gelesen – die Datei
+    legt der Administrator selbst ab (siehe ``excel_admin.js``: es gibt keine
+    Browser-API, die in einen als Text genannten Ordner schreibt, und ein
+    Server, der eine SMB-Freigabe dafuer einbindet, waere ein ganz anderes
+    Kaliber). Deshalb wird die FORM nicht geprueft: UNC
+    (``\\\\server\\freigabe``), ein verbundenes Laufwerk (``X:\\...``) und eine
+    SharePoint-Adresse sind alle gueltig, und was davon im Haus gilt, weiss der
+    Administrator besser als eine Regex. Eine Formpruefung waere hier keine
+    Sicherheit, sondern eine Fehlerquelle.
+
+    Entfernt werden nur nicht druckbare Zeichen: der Wert geht in eine
+    Weboberflaeche und in einen Kopiervorgang – ein eingeschmuggelter
+    Zeilenumbruch zerlegte die einzeilige Anzeige. Maskiert bzw. per
+    ``textContent`` gesetzt wird zusaetzlich beim Anzeigen.
+    """
+    try:
+        from backend import mail_accounts  # noqa: PLC0415
+        cfg = mail_accounts.skill_config()
+    except Exception:  # noqa: BLE001
+        # Kein Skill, keine Konfiguration – dann gibt es auch keinen Pfad, und
+        # die Oberflaeche bietet wie bisher den Download an.
+        return ""
+    roh = str(cfg.get("addin_ordner_pfad") or "")
+    sauber = "".join(c for c in roh if c.isprintable())
+    return sauber.strip()[:ORDNER_PFAD_MAX]
+
+
 def dateiname() -> str:
     """Dateiname des Manifests fuer den Download – folgt dem Branding.
 

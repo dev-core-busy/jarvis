@@ -167,6 +167,18 @@
         .em-field input:focus, .em-field select:focus, .em-field textarea:focus {
             outline: none; border-color: var(--accent); }
         .em-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+        /* ⚠ `display: flex` UEBERSTIMMT das `hidden`-ATTRIBUT - ohne diese Regel
+           bleibt jede per `hidden` versteckte Zeile sichtbar. Steht woertlich im
+           Register (`.sp-row[hidden]` in /sap, `.em-*` hier). */
+        .em-row[hidden], .em-steps[hidden], .em-block[hidden] { display: none; }
+        /* Der Netzwerkpfad: einzeilig, zum Markieren und Kopieren. Monospace,
+           weil ein UNC-Pfad Zeichen enthaelt, die man auseinanderhalten muss
+           (l/I/1, 0/O). `overflow-wrap: anywhere`, weil ein Pfad ein Wort ohne
+           Trennstelle ist und den Kasten sonst sprengt. */
+        .em-pfad { margin-top: 10px; padding: 10px 12px; border-radius: 8px;
+            border: 1px solid var(--border); background: rgba(var(--fg-rgb, 148,163,184), .05);
+            font-family: var(--font-mono, monospace); font-size: .85rem;
+            overflow-wrap: anywhere; user-select: all; }
         .em-status { font-size: .8rem; color: var(--text-muted); }
 
         /* Regel-Liste: EINE Karte je Regel, das Formular wird KIND der Karte
@@ -467,19 +479,48 @@
             <div class="em-card-body">
                 <p class="em-hint" data-i18n="mail.addin_hint">Du kannst diese Seite auch direkt in Outlook öffnen – als Aufgabenfenster. Dort verwaltest du Postfach und Regeln wie hier und kannst zusätzlich die gerade markierte E-Mail sofort von einer Regel verarbeiten lassen.</p>
                 <div class="em-sep"></div>
-                <div class="em-row" style="margin-top:0;">
+                <!-- ZWEI WEGE, EINER SICHTBAR (2026-09-08).
+                     Hat die Administration einen Ordner hinterlegt, ist der
+                     Download der FALSCHE Weg: der Benutzer holte sich eine
+                     zweite Kopie, die niemand aktualisiert. Deshalb wird der
+                     Knopf nicht ergaenzt, sondern ERSETZT. Gleiche Bauart wie
+                     /excel (xp-dl-block / xp-pfad-block). -->
+                <div class="em-row" style="margin-top:0;" id="em-addin-dlrow">
                     <!-- Einfacher Link: der Endpunkt liefert die Datei mit
                          Content-Disposition, es braucht kein JavaScript. -->
                     <a class="em-btn em-btn-primary" id="em-addin-dl" href="/addin/manifest.xml"
                        data-i18n="mail.addin_download">Add-in-Datei herunterladen</a>
                     <button class="em-btn" id="em-addin-help" data-i18n="mail.addin_howto">Anleitung anzeigen</button>
                 </div>
+                <div class="em-block" id="em-addin-pfadrow" hidden>
+                    <p class="em-hint" data-i18n="mail.addin_pfad_text">Deine Administration hat die Add-in-Datei bereits im Netz abgelegt – du musst nichts herunterladen. Öffne diesen Ordner und hole dir die Datei von dort:</p>
+                    <div class="em-pfad" id="em-addin-pfad"></div>
+                    <div class="em-row">
+                        <button type="button" class="em-btn em-btn-primary" id="em-addin-copy"
+                                data-i18n="mail.addin_pfad_copy">Pfad kopieren</button>
+                        <button class="em-btn" id="em-addin-help2" data-i18n="mail.addin_howto">Anleitung anzeigen</button>
+                        <span class="em-hint" id="em-addin-copy-status"></span>
+                    </div>
+                </div>
                 <div id="em-addin-steps" class="hidden" style="margin-top:12px;">
-                    <ol class="em-hint" style="padding-left:18px; line-height:1.75;">
-                        <li data-i18n-html="mail.addin_s1">Auf „Add-in-Datei herunterladen" klicken – es wird eine XML-Datei gespeichert (der Name folgt der Firmenbezeichnung, z. B. <code>firma-outlook-addin.xml</code>).</li>
-                        <li data-i18n-html="mail.addin_s2">Outlook im Web öffnen → Einstellungen → <b>Add-Ins verwalten</b> → <b>Benutzerdefiniertes Add-In hinzufügen</b> → <b>Aus Datei hinzufügen…</b> und die gespeicherte Datei wählen.</li>
-                        <li data-i18n-html="mail.addin_s3">Fertig: In Outlook erscheint beim Lesen einer E-Mail im Menüband ein Knopf, der das Fenster öffnet. Das Add-in hängt am Postfach – es steht danach auch im Outlook auf deinem Rechner zur Verfügung.</li>
+                    <!-- Der erste Schritt hat ZWEI Fassungen: mit hinterlegtem
+                         Ordner waere "herunterladen" das Gegenteil dessen, was
+                         darueber steht ("du musst nichts herunterladen").
+                         ZWEI getrennte Listen und nicht eine, in der JS ein <li>
+                         austauscht - `applyLang()` setzt `data-i18n-html` bei
+                         jedem Sprachwechsel neu und wuerde die Aenderung wortlos
+                         zurueckdrehen (Lehre aus /excel). -->
+                    <ol class="em-hint em-steps" id="em-addin-steps-dl" style="padding-left:18px; line-height:1.75;" data-i18n-html="mail.addin_steps_dl">
+                        <li>Auf „Add-in-Datei herunterladen" klicken – es wird eine XML-Datei gespeichert (der Name folgt der Firmenbezeichnung, z. B. <code>firma-outlook-addin.xml</code>).</li>
+                        <li>Outlook im Web öffnen → Einstellungen → <b>Add-Ins verwalten</b> → <b>Benutzerdefiniertes Add-In hinzufügen</b> → <b>Aus Datei hinzufügen…</b> und die gespeicherte Datei wählen.</li>
+                        <li>Fertig: In Outlook erscheint beim Lesen einer E-Mail im Menüband ein Knopf, der das Fenster öffnet. Das Add-in hängt am Postfach – es steht danach auch im Outlook auf deinem Rechner zur Verfügung.</li>
                     </ol>
+                    <ol class="em-hint em-steps" id="em-addin-steps-pfad" style="padding-left:18px; line-height:1.75;" data-i18n-html="mail.addin_steps_pfad" hidden>
+                        <li>Den Ordner von oben im <b>Windows-Explorer</b> öffnen (Pfad kopieren und in die Adresszeile einfügen) und die <b>XML-Datei</b> daraus auf den eigenen Rechner kopieren – z. B. auf den Desktop.</li>
+                        <li>Outlook im Web öffnen → Einstellungen → <b>Add-Ins verwalten</b> → <b>Benutzerdefiniertes Add-In hinzufügen</b> → <b>Aus Datei hinzufügen…</b> und die kopierte Datei wählen.</li>
+                        <li>Fertig: In Outlook erscheint beim Lesen einer E-Mail im Menüband ein Knopf, der das Fenster öffnet. Das Add-in hängt am Postfach – es steht danach auch im Outlook auf deinem Rechner zur Verfügung.</li>
+                    </ol>
+                    <p class="em-hint" id="em-addin-pfad-note" style="margin-top:8px;" hidden data-i18n-html="mail.addin_pfad_note"><b>Kommst du nicht an den Ordner?</b> Dann fehlt dir die Berechtigung auf die Freigabe – wende dich an die Administration. Der Ordner wird <b>nicht</b> in Outlook eingetragen; er ist nur die Ablage, aus der du die Datei holst.</p>
                     <p class="em-hint" style="margin-top:10px;"><b data-i18n="mail.addin_note_title">Gut zu wissen:</b>
                         <span data-i18n-html="mail.addin_note">Das Add-in läuft im klassischen Outlook für Windows und in Outlook im Web. Das „neue Outlook" für Windows unterstützt Postfächer auf einem Exchange im eigenen Haus derzeit generell nicht – dort lässt sich das Konto gar nicht erst einrichten. Bleibt das Fenster in Outlook leer, fehlt auf dem Rechner das Zertifikat dieses Servers; dann hilft die IT-Abteilung weiter.</span></p>
                 </div>
@@ -493,13 +534,13 @@
 <script src="/static/js/dlkey.js?v=2"></script>
 <script src="/static/js/cpubar.js?v=1"></script>
 <script src="/static/js/syspackages.js?v=2"></script>
-<script src="/static/js/i18n.js?v=236"></script>
+<script src="/static/js/i18n.js?v=237"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
 <script src="/static/js/theme.js?v=3"></script>
 <script src="/static/js/branding.js?v=26"></script>
 <script src="/static/js/sessions.js?v=8"></script>
 <script src="/static/js/logo_home.js?v=1"></script>
-<script src="/static/js/email_portal.js?v=14"></script>
+<script src="/static/js/email_portal.js?v=15"></script>
 <script src="/static/js/settings_btn.js?v=4"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist).
      Der Ein/Aus-Schalter haengt sich VOR #btn-theme-toggle – deshalb muss der

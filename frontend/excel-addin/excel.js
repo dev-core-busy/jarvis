@@ -58,7 +58,22 @@
 
     var _office = false;      // Excel-Kontext vorhanden
     var _officeGrund = '';
-    var _kann19 = false;      // ExcelApi 1.9 (copyFrom/autoFill)
+    var _kann19 = false;      // ExcelApi 1.9 (copyFrom/autoFill/getSpecialCells)
+    var _kann110 = false;     // ExcelApi 1.10 (Zellkommentare)
+    /* Markierung geschriebener Zellen. Ohne sie weiss nach 30 geaenderten
+       Zellen niemand mehr, welche der Assistent angefasst hat – und bei
+       automatischer Uebernahme sieht man die Aenderung ueberhaupt nur an den
+       Zahlen. Vorgabe AN; abschaltbar, weil eine Markierung in einer Mappe,
+       die weitergegeben wird, stoeren kann. */
+    var MARK_KEY = 'jarvis_xl_markieren';
+    var MARK_FARBE = '#FFF2CC';
+    var _markRam = null;
+    /* Der zuletzt geschriebene Vorschlag mit seinen ALTWERTEN – die Grundlage
+       des Rueckwegs. Office.js-Schreibvorgaenge sind NICHT verlaesslich im
+       Undo-Stack von Excel: bekannte Faelle leeren ihn sogar (Formatierungen,
+       nicht unterstuetzte Aufrufe). Der frueher hier stehende Hinweis "mit
+       Strg+Z rueckgaengig" war deshalb eine Zusage, die Excel nicht einloest. */
+    var _rueckweg = null;
     var _laeuft = false;
     var _verlauf = [];        // [{rolle:'user'|'bot', text}]
     var _vorschlag = null;    // {aenderungen, abgelehnt, zusammenfassung}
@@ -107,6 +122,19 @@
         _autoRam = !!an;
         try { localStorage.setItem(AUTO_KEY, an ? '1' : '0'); }
         catch (e) { _speicherGeht = false; }
+    }
+
+    function markAn() {
+        try {
+            if (!_speicherGeht) return _markRam !== '0';
+            var v = localStorage.getItem(MARK_KEY);
+            return v !== '0';
+        } catch (e) { return _markRam !== '0'; }
+    }
+    function markSetzen(an) {
+        var v = an ? '1' : '0';
+        _markRam = v;
+        try { localStorage.setItem(MARK_KEY, v); } catch (e) { _speicherGeht = false; }
     }
 
     function token() {
@@ -212,6 +240,15 @@
                                 _kann19 = !!(Office.context && Office.context.requirements &&
                                     Office.context.requirements.isSetSupported('ExcelApi', '1.9'));
                             } catch (e) { _kann19 = false; }
+                            // Zellkommentare brauchen ExcelApi 1.10, das
+                            // Manifest verlangt 1.7. Fehlt die Fassung, bleibt
+                            // die farbige Markierung – sie allein sagt schon,
+                            // WELCHE Zellen der Assistent angefasst hat, und
+                            // das ist der wesentliche Teil.
+                            try {
+                                _kann110 = !!(Office.context && Office.context.requirements &&
+                                    Office.context.requirements.isSetSupported('ExcelApi', '1.10'));
+                            } catch (e) { _kann110 = false; }
                         } else {
                             _officeGrund = T('xl.no_excel',
                                 'Dieses Fenster läuft nicht in Excel. Die Tabellenfunktionen stehen deshalb nicht zur Verfügung.');
@@ -237,6 +274,33 @@
        hunderttausende Zellen. Gelesen werden je Blatt Dimension, Kopfzeile,
        Datentypen und bis zu vier Beispielzeilen – das bleibt klein, egal wie
        gross die Mappe ist. */
+    /* ── Ueberblick ueber die Mappe ─────────────────────────────────────
+       Was hier NICHT gelesen wird, kann das Modell nicht wissen. Bis
+       2026-09-08 waren es Werte, 5 Zeilen vom oberen Rand und `valueTypes` –
+       ohne Formeln, ohne Zahlenformate, ohne Spaltenbuchstaben. Ein
+       Rechenmodell war damit strukturell unverstehbar: auf "warum ist C42
+       falsch?" sah das Modell die ZAHL, nicht `=B42*C$3`.
+
+       DIE ROHWERTE GEHEN JETZT UNGEWANDELT HINAUS. Das frueher hier stehende
+       `String(z)` war der Typverlust: das Backend konnte Zahl und Text nicht
+       unterscheiden und musste den Datentyp aus `valueTypes` der ZWEITEN Zeile
+       raten – bei einer Mappe mit zwei Kopfzeilen also aus einer
+       Beschriftungszeile. JSON traegt Zahlen als Zahlen; die Erkennung von
+       Kopfzeile und Datenanfang liegt seither im Backend
+       (`backend/tabellenkopf.py`, dieselbe Regel wie beim Datei-Weg). */
+
+    /* Wie viele Blaetter die AUSFUEHRLICHE Probe bekommen. Bei 30 Blaettern
+       waeren 30 x 12 x 40 Zellen mit Wert, Formel und Format eine Antwort von
+       ueber hundert Kilobyte – in Excel im Web ueber eine Firmenleitung
+       merkbar. Priorisiert wird nach Relevanz (aktives Blatt, Blatt der
+       Auswahl), die uebrigen liefern ihren Umriss; das Backend sagt im
+       Ueberblick, dass Details fehlen, damit das Modell nachfordern kann. */
+    var DETAIL_BLAETTER = 8;
+    var PROBE_ZEILEN = 12;     // Suchtiefe der Kopfzeilen-Erkennung
+    var PROBE_SPALTEN = 40;
+    var UNTEN_ZEILEN = 3;      // Zeilen vom unteren Rand (Summenzeilen!)
+    var MAX_FEHLER = 30;
+
     function ueberblickLesen() {
         if (!_office || !window.Excel) return Promise.resolve(null);
         return Excel.run(function (ctx) {
@@ -250,24 +314,49 @@
             sel.load('address,rowCount,columnCount');
             var selBlatt = sel.worksheet;
             selBlatt.load('name');
+            /* Benannte Bereiche. Ein Modell, das `Steuersatz` nicht kennt,
+               kann keine Formel damit schreiben – es schreibt die ZAHL hinein,
+               und die Mappe verliert ihre eine Stellschraube. */
+            var namen = null;
+            try { namen = wb.names; namen.load('items/name,items/formula'); }
+            catch (e) { namen = null; }
 
             return ctx.sync().then(function () {
                 var ergebnis = {
                     name: wb.name || '',
                     aktiv: aktiv.name || '',
+                    namen: [],
                     blaetter: [],
                     auswahl: null
                 };
-                // Zweite Runde: je Blatt den benutzten Bereich, und daraus nur
-                // die ersten Zeilen. `getUsedRangeOrNullObject` ist Pflicht –
-                // `getUsedRange` WIRFT bei einem leeren Blatt, und ein leeres
-                // Blatt in der Mappe darf den ganzen Ueberblick nicht kippen.
+                if (namen && namen.items) {
+                    namen.items.slice(0, 40).forEach(function (n) {
+                        ergebnis.namen.push({ name: n.name || '', bezug: n.formula || '' });
+                    });
+                }
+
+                /* REIHENFOLGE IST EINE ENTSCHEIDUNG: aktives Blatt und Blatt
+                   der Auswahl zuerst. Sie sind die Blaetter, auf die sich eine
+                   Frage in aller Regel bezieht – und nur die ersten
+                   DETAIL_BLAETTER bekommen Formeln und untere Zeilen. */
+                var vorrang = {};
+                if (aktiv.name) vorrang[aktiv.name] = 1;
+                if (selBlatt.name) vorrang[selBlatt.name] = 1;
+                var namensliste = blaetter.items.map(function (b) { return b.name; });
+                var geordnet = namensliste.filter(function (n) { return vorrang[n]; })
+                    .concat(namensliste.filter(function (n) { return !vorrang[n]; }));
+
                 var infos = [];
-                blaetter.items.slice(0, 30).forEach(function (b) {
-                    var s = ctx.workbook.worksheets.getItem(b.name);
+                geordnet.slice(0, 30).forEach(function (bname, idx) {
+                    var s = ctx.workbook.worksheets.getItem(bname);
                     var u = s.getUsedRangeOrNullObject();
                     u.load('address,rowCount,columnCount,rowIndex,columnIndex,isNullObject');
-                    infos.push({ name: b.name, used: u, sheet: s });
+                    var tabs = null;
+                    try { tabs = s.tables; tabs.load('items/name'); } catch (e) { tabs = null; }
+                    infos.push({
+                        name: bname, used: u, sheet: s, tabs: tabs,
+                        detail: idx < DETAIL_BLAETTER
+                    });
                 });
 
                 // Auswahl vollstaendig (bis zu einer Grenze) – das ist der
@@ -281,60 +370,97 @@
 
                 return ctx.sync().then(function () {
                     infos.forEach(function (i) {
+                        var eintrag = { name: i.name };
                         if (i.used.isNullObject) {
-                            ergebnis.blaetter.push({ name: i.name, bereich: '', zeilen: 0, spalten: 0 });
+                            eintrag.bereich = ''; eintrag.zeilen = 0; eintrag.spalten = 0;
+                            ergebnis.blaetter.push(eintrag);
+                            i.eintrag = eintrag;
                             return;
                         }
-                        var zeilen = Math.min(i.used.rowCount, 5);
-                        var spalten = Math.min(i.used.columnCount, 30);
-                        var probe = i.sheet.getRangeByIndexes(
+                        eintrag.bereich = i.used.address || '';
+                        eintrag.zeilen = i.used.rowCount;
+                        eintrag.spalten = i.used.columnCount;
+                        // OHNE DIESE ZWEI ZAHLEN KANN DAS MODELL KEINE ADRESSE
+                        // BILDEN. Beginnt der benutzte Bereich bei C3, ist die
+                        // dritte Spalte E – wer ab A zaehlt, schreibt in die
+                        // falsche Spalte, und die Diff-Ansicht kann das nicht
+                        // zeigen (dort steht die gemeinte Adresse).
+                        eintrag.zeile_ab = (i.used.rowIndex || 0) + 1;
+                        eintrag.spalte_ab = (i.used.columnIndex || 0) + 1;
+                        ergebnis.blaetter.push(eintrag);
+                        i.eintrag = eintrag;
+
+                        var zeilen = Math.min(i.used.rowCount, PROBE_ZEILEN);
+                        var spalten = Math.min(i.used.columnCount, PROBE_SPALTEN);
+                        i.probe = i.sheet.getRangeByIndexes(
                             i.used.rowIndex, i.used.columnIndex, zeilen, spalten);
-                        probe.load('values,valueTypes');
-                        i.probe = probe;
-                        ergebnis.blaetter.push({
-                            name: i.name,
-                            bereich: i.used.address || '',
-                            zeilen: i.used.rowCount,
-                            spalten: i.used.columnCount
-                        });
+                        i.probe.load('values');
+                        if (i.detail) {
+                            // Formeln und Zahlenformate nur fuer die Blaetter,
+                            // die ausfuehrlich gehen – sie sind der teure Teil
+                            // der Antwort.
+                            i.probe.load('formulas,numberFormat');
+                        }
+
+                        // Untere Zeilen: Summen und Zwischentotale stehen dort.
+                        // Nur wenn sie NICHT ohnehin in der Probe liegen –
+                        // sonst stuende dieselbe Zeile zweimal im Ueberblick.
+                        if (i.detail && i.used.rowCount > PROBE_ZEILEN) {
+                            var ab = i.used.rowIndex + i.used.rowCount - UNTEN_ZEILEN;
+                            i.unten = i.sheet.getRangeByIndexes(
+                                ab, i.used.columnIndex, UNTEN_ZEILEN, spalten);
+                            i.unten.load('values,formulas');
+                            eintrag.untenAb = ab + 1;
+                        }
+
+                        // Fehlerzellen. `getSpecialCellsOrNullObject` braucht
+                        // ExcelApi 1.9; ohne die Fassung bleibt der Weg ueber
+                        // die Probewerte (unten) – der findet weniger, aber
+                        // NICHTS FALSCHES.
+                        if (i.detail && _kann19) {
+                            try {
+                                i.fehler = i.used.getSpecialCellsOrNullObject(
+                                    Excel.SpecialCellType.formulas,
+                                    Excel.SpecialCellValueType.errors);
+                                i.fehler.load('address,isNullObject');
+                            } catch (e) { i.fehler = null; }
+                        }
                     });
 
                     return ctx.sync().then(function () {
-                        infos.forEach(function (i, idx) {
-                            if (!i.probe) return;
-                            var w = i.probe.values || [];
-                            var t = i.probe.valueTypes || [];
-                            var eintrag = ergebnis.blaetter[idx];
-                            if (!w.length) return;
-                            eintrag.kopf = w[0].map(function (z) { return z === null ? '' : String(z); });
-                            // Datentypen aus der ZWEITEN Zeile: die erste ist in
-                            // aller Regel die Ueberschrift und damit ueberall Text –
-                            // aus ihr abgeleitete Typen waeren wertlos.
-                            if (t.length > 1) {
-                                eintrag.typen = t[1].map(typName);
-                            }
-                            eintrag.beispiele = w.slice(1).map(function (zeile) {
-                                return zeile.map(function (z) { return z === null ? '' : String(z); });
+                        // Dritte Runde: Tabellen-Bereiche brauchen getRange()
+                        // auf dem geladenen Table-Objekt.
+                        infos.forEach(function (i) {
+                            if (!i.tabs || !i.tabs.items || !i.tabs.items.length) return;
+                            i.tabRanges = [];
+                            i.tabs.items.slice(0, 10).forEach(function (t) {
+                                try {
+                                    var r = t.getRange(); r.load('address');
+                                    i.tabRanges.push({ name: t.name, r: r });
+                                } catch (e) { }
                             });
                         });
-                        if (selWerte) {
-                            ergebnis.auswahl = {
-                                blatt: selBlatt.name || '',
-                                adresse: (sel.address || '').replace(/^.*!/, ''),
-                                zeilen: sel.values || [],
-                                formeln: sel.formulas || []
-                            };
-                        } else if (sel.address) {
-                            // Zu grosse Auswahl: die ADRESSE ist trotzdem eine
-                            // Aussage ("er meint diesen Bereich"), die Werte
-                            // waeren es nicht mehr.
-                            ergebnis.auswahl = {
-                                blatt: selBlatt.name || '',
-                                adresse: (sel.address || '').replace(/^.*!/, ''),
-                                zeilen: [], formeln: []
-                            };
-                        }
-                        return ergebnis;
+                        return ctx.sync().then(function () {
+                            infos.forEach(function (i) { probeAuswerten(i); });
+                            if (selWerte) {
+                                ergebnis.auswahl = {
+                                    blatt: selBlatt.name || '',
+                                    adresse: (sel.address || '').replace(/^.*!/, ''),
+                                    zeilen: sel.values || [],
+                                    formeln: sel.formulas || []
+                                };
+                            } else if (sel.address) {
+                                // Zu grosse Auswahl: die ADRESSE ist trotzdem eine
+                                // Aussage ("er meint diesen Bereich"), die Werte
+                                // waeren es nicht mehr.
+                                ergebnis.auswahl = {
+                                    blatt: selBlatt.name || '',
+                                    adresse: (sel.address || '').replace(/^.*!/, ''),
+                                    zeilen: [], formeln: []
+                                };
+                            }
+                            return ergebnis;
+                        });
                     });
                 });
             });
@@ -344,15 +470,75 @@
         });
     }
 
-    function typName(t) {
-        switch (t) {
-            case 'Double': case 'Integer': return 'Zahl';
-            case 'String': return 'Text';
-            case 'Boolean': return 'Wahrheitswert';
-            case 'Error': return 'Fehler';
-            case 'Empty': return '';
-            default: return t ? String(t) : '';
+    /* Traegt die gelesenen Proben in den Blatt-Eintrag ein.
+       Eigene Funktion, weil sie sonst dreifach verschachtelt in
+       `ueberblickLesen` stehen wuerde – und weil sie einzeln pruefbar ist. */
+    function probeAuswerten(i) {
+        var e = i.eintrag;
+        if (!e || !i.probe) return;
+        try {
+            e.probe = i.probe.values || [];
+            if (i.detail) {
+                e.probeFormeln = i.probe.formulas || [];
+                e.probeFormate = i.probe.numberFormat || [];
+            }
+        } catch (err) { }
+        if (i.unten) {
+            try {
+                e.unten = i.unten.values || [];
+                e.untenFormeln = i.unten.formulas || [];
+            } catch (err) { delete e.untenAb; }
         }
+        if (i.tabRanges && i.tabRanges.length) {
+            e.tabellen = i.tabRanges.map(function (t) {
+                var adr = '';
+                try { adr = (t.r.address || '').replace(/^.*!/, ''); } catch (err) { }
+                return { name: t.name || '', bereich: adr };
+            });
+        }
+        // Fehlerzellen aus BEIDEN Quellen: die Sonderzellen-Abfrage (findet
+        // alle, braucht aber 1.9) und die Probewerte (findet nur die
+        // gezeigten, dafuer MIT Fehlerwert). Zusammengefuehrt, ohne Dubletten.
+        var fehler = [];
+        if (i.fehler) {
+            try {
+                if (!i.fehler.isNullObject && i.fehler.address) {
+                    String(i.fehler.address).split(',').forEach(function (a) {
+                        var adr = a.replace(/^.*!/, '').trim();
+                        if (adr) fehler.push({ adresse: adr, wert: '' });
+                    });
+                }
+            } catch (err) { }
+        }
+        var werte = e.probe || [];
+        for (var z = 0; z < werte.length; z++) {
+            if (!werte[z]) continue;
+            for (var sp = 0; sp < werte[z].length; sp++) {
+                var c = werte[z][sp];
+                if (typeof c !== 'string' || !fehlerwert(c)) continue;
+                var adr = indexZuSpalte((e.spalte_ab || 1) + sp) + ((e.zeile_ab || 1) + z);
+                var da = false;
+                for (var k = 0; k < fehler.length; k++) {
+                    if (fehler[k].adresse === adr) { fehler[k].wert = c; da = true; break; }
+                }
+                if (!da) fehler.push({ adresse: adr, wert: c });
+            }
+        }
+        if (fehler.length) e.fehler = fehler.slice(0, MAX_FEHLER);
+    }
+
+    /* Fehlerwerte. Geprueft wird gegen eine LISTE, nicht auf '#': eine Zelle
+       mit dem Text '#1 Kunde' ist kein Fehler, und eine Fehlerliste, die
+       harmlose Texte aufnimmt, macht die Fehlerzeile unbrauchbar. Deutsche und
+       englische Schreibweisen, weil Excel sie in der Sprache des Benutzers
+       zurueckgibt. Dieselbe Liste steht in `excel_ask._FEHLERWERTE`; der Test
+       vergleicht beide (Drift-Schranke). */
+    var FEHLERWERTE = ['#NAME?', '#REF!', '#BEZUG!', '#VALUE!', '#WERT!', '#DIV/0!',
+        '#N/A', '#NV', '#NUM!', '#ZAHL!', '#NULL!', '#LEER!',
+        '#SPILL!', '#UEBERLAUF!', '#CALC!', '#GETTING_DATA'];
+    function fehlerwert(w) {
+        if (typeof w !== 'string') return false;
+        return FEHLERWERTE.indexOf(w.trim().toUpperCase()) >= 0;
     }
 
     /* Liest einen vom Modell nachgeforderten Bereich ("Blatt!A1:D200"). */
@@ -508,13 +694,39 @@
         if (_erledigt) html += diffHtml(_erledigt, true);
         if (_vorschlag) html += diffHtml(_vorschlag);
         box.innerHTML = html;
-        if (_vorschlag) diffBinden();
+        // ⚠ AUCH BEIM ERLEDIGTEN VORSCHLAG BINDEN. Bis 2026-09-08 stand hier
+        // `if (_vorschlag)` – damals gab es im erledigten Diff keine Knoepfe.
+        // Seit dem Rueckweg (P2.12) und dem Sprung zur Zelle (P2.13) gibt es
+        // sie: ohne diese Zeile ist der "Zuruecknehmen"-Knopf SICHTBAR und
+        // UNVERDRAHTET – ein Klick tut nichts, und zwar bei der einzigen
+        // Funktion, die eine automatisch geschriebene Aenderung zurueckholt.
+        // Vom UI-Waechter gefunden, nicht beim Lesen.
+        if (_vorschlag || _erledigt) diffBinden();
         box.scrollTop = box.scrollHeight;
     }
 
     function zellText(a) {
         if (a.formel) return a.formel;
-        return a.wert === null || a.wert === undefined ? '' : String(a.wert);
+        if (a.werte && a.werte.length) {
+            // VERSCHIEDENE Werte lassen sich nicht in eine Zeile schreiben. Die
+            // ersten zeigen und die Zahl nennen ist ehrlicher als ein
+            // abgeschnittener Anfang, der wie der ganze Inhalt aussieht.
+            var flach = [];
+            a.werte.forEach(function (z) {
+                (z || []).forEach(function (c) {
+                    flach.push(c === null || c === undefined ? '' : String(c));
+                });
+            });
+            var kopf = flach.slice(0, 6).join(', ');
+            return flach.length > 6
+                ? kopf + ' … (' + flach.length + ' ' + T('xl.values', 'Werte') + ')'
+                : kopf;
+        }
+        if (a.wert !== null && a.wert !== undefined) return String(a.wert);
+        // Reiner Format-Eintrag: die Werte bleiben, nur die Anzeige aendert
+        // sich. Ein leeres Feld hier saehe wie "wird geleert" aus.
+        if (a.format) return T('xl.only_format', '(nur Zahlenformat)');
+        return '';
     }
 
     function diffHtml(v, erledigt) {
@@ -528,7 +740,20 @@
         h += '<div class="xl-diff-list">';
         (v.aenderungen || []).forEach(function (a, i) {
             var ort = (a.blatt ? a.blatt + '!' : '') + a.adresse;
-            h += '<div class="xl-cell"><span class="xl-cell-adr">' + esc(ort) + '</span>';
+            h += '<div class="xl-cell">';
+            // DIE ADRESSE IST EIN KNOPF. Ohne den Sprung ist sie eine
+            // Zeichenkette, die man in einer Mappe mit 13 Blaettern von Hand
+            // sucht – bei 30 Eintraegen liest sie dann niemand mehr nach, und
+            // die Bestaetigung wird zur Formsache.
+            h += '<button class="xl-cell-adr xl-goto" data-i="' + i + '" type="button" title="' +
+                esc(T('xl.goto', 'In der Tabelle anzeigen')) + '">' + esc(ort) + '</button>';
+            if (a._neuesBlatt) {
+                h += '<span class="xl-cell-new">' +
+                    esc(T('xl.sheet_new', 'neues Blatt')) + '</span>';
+            }
+            if (a.format) {
+                h += '<span class="xl-cell-fmt">' + esc(a.format) + '</span>';
+            }
             // Der ALTE Inhalt wird erst beim Uebernehmen gelesen; bis dahin
             // steht hier, was das Fenster beim Vorschlag vorgefunden hat.
             if (a._alt !== undefined && a._alt !== '') {
@@ -551,12 +776,23 @@
             h += '</div>';
         }
         if (erledigt) {
-            // KEINE Knoepfe: es ist schon geschrieben. Ein zweites
-            // "Uebernehmen" darunter wuerde behaupten, es waere noch offen.
+            // KEIN zweites "Uebernehmen": es ist schon geschrieben, und ein
+            // Knopf darunter wuerde behaupten, es waere noch offen. Statt
+            // dessen der Rueckweg – aber nur, solange DIESER Vorschlag der
+            // zuletzt geschriebene ist.
             h += '<div class="xl-diff-done">' + esc(v.auto
                 ? T('xl.applied_auto', 'Automatisch übernommen.')
-                : T('xl.applied_note', 'Übernommen.')) + '</div></div>';
-            return h;
+                : T('xl.applied_note', 'Übernommen.'));
+            if (v.angelegt && v.angelegt.length) {
+                h += ' ' + esc(T('xl.sheets_added', 'Neu angelegt:') + ' ' +
+                    v.angelegt.join(', '));
+            }
+            h += '</div>';
+            if (_rueckweg === v) {
+                h += '<div class="xl-row"><button class="xl-btn" id="xl-undo" type="button">' +
+                    esc(T('xl.undo', 'Zurücknehmen')) + '</button></div>';
+            }
+            return h + '</div>';
         }
         h += '<div class="xl-row">' +
             '<button class="xl-btn xl-btn-primary" id="xl-apply">' +
@@ -567,14 +803,36 @@
     }
 
     function diffBinden() {
-        var a = $('xl-apply'), d = $('xl-discard');
+        var a = $('xl-apply'), d = $('xl-discard'), u = $('xl-undo');
         if (a) a.onclick = uebernehmenFragen;
+        if (u) u.onclick = zuruecknehmen;
         if (d) {
             d.onclick = function () {
                 _vorschlag = null;
                 zeichneVerlauf();
                 melde('xl-status', T('xl.discarded', 'Vorschlag verworfen.'));
             };
+        }
+        // Die Adress-Knoepfe entstehen bei JEDEM Neuzeichnen neu – ein
+        // delegierter Zuhoerer am Verlauf statt Bindung je Knopf. Ohne das
+        // waeren sie nach dem naechsten `zeichneVerlauf()` tot und saehen
+        // bedienbar aus, ohne zu wirken (im Projekt beim Prompt-Pruef-Knopf
+        // bezahlt).
+        var chat = $('xl-chat');
+        if (chat && !chat._gotoGebunden) {
+            chat._gotoGebunden = true;
+            chat.addEventListener('click', function (ev) {
+                var k = ev.target && ev.target.closest ? ev.target.closest('.xl-goto') : null;
+                if (!k) return;
+                ev.preventDefault();
+                // Der EINTRAG wird zur Klickzeit gesucht, nicht gemerkt: der
+                // Vorschlag kann inzwischen geschrieben (`_erledigt`) oder
+                // verworfen sein.
+                var quelle = _vorschlag || _erledigt;
+                var i = parseInt(k.getAttribute('data-i'), 10);
+                var e = quelle && quelle.aenderungen ? quelle.aenderungen[i] : null;
+                if (e) zurZelle(e.blatt, e.adresse);
+            });
         }
     }
 
@@ -690,34 +948,64 @@
         zeichneVerlauf();
     }
 
+    /* Liest den Zustand VOR dem Schreiben.
+
+       Zwei Aufgaben in einem Zug, und die zweite ist die wichtigere:
+       (a) die Vorschau `_alt` fuer die Diff-Ansicht,
+       (b) der vollstaendige ALTZUSTAND als Grundlage des Rueckwegs
+           (`_altF` Formeln, `_altFmt` Zahlenformate, `_altFuell` Fuellfarbe).
+
+       (b) ist neu. Office.js-Schreibvorgaenge landen NICHT verlaesslich im
+       Undo-Stack von Excel – bekannte Faelle leeren ihn sogar. Ein Hinweis
+       "mach es mit Strg+Z rueckgaengig" ist damit eine Zusage, die der Browser
+       nicht einloest; der Rueckweg muss aus dem Fenster kommen. */
     function alteWerteLesen(aenderungen) {
         if (!_office || !window.Excel || !aenderungen.length) return Promise.resolve();
         return Excel.run(function (ctx) {
             var refs = aenderungen.map(function (a) {
                 try {
-                    var s = a.blatt ? ctx.workbook.worksheets.getItem(a.blatt)
+                    // getItemOrNullObject: ein Vorschlag darf ein Blatt
+                    // ANLEGEN (dann gibt es hier nichts zu lesen). Mit
+                    // getItem wuerde der ganze Lesevorgang scheitern und die
+                    // Diff-Ansicht bekaeme fuer JEDE Zelle keine Altwerte.
+                    var s = a.blatt ? ctx.workbook.worksheets.getItemOrNullObject(a.blatt)
                         : ctx.workbook.worksheets.getActiveWorksheet();
-                    var r = s.getRange(a.adresse);
-                    r.load('formulas,rowCount,columnCount');
-                    return r;
+                    s.load('isNullObject');
+                    return { s: s, a: a };
                 } catch (e) { return null; }
             });
             return ctx.sync().then(function () {
-                refs.forEach(function (r, i) {
-                    if (!r) return;
+                refs.forEach(function (o) {
+                    if (!o) return;
                     try {
-                        var f = r.formulas || [];
-                        var flach = [];
-                        f.forEach(function (z) {
-                            z.forEach(function (c) {
-                                if (c !== '' && c !== null) flach.push(String(c));
-                            });
-                        });
-                        aenderungen[i]._alt = flach.slice(0, 3).join(', ') +
-                            (flach.length > 3 ? ' …' : '');
-                        aenderungen[i]._zeilen = r.rowCount;
-                        aenderungen[i]._spalten = r.columnCount;
+                        if (o.s.isNullObject) { o.a._neuesBlatt = true; return; }
+                        var r = o.s.getRange(o.a.adresse);
+                        r.load('formulas,rowCount,columnCount,numberFormat');
+                        try { r.format.fill.load('color'); } catch (e) { }
+                        o.r = r;
                     } catch (e) { }
+                });
+                return ctx.sync().then(function () {
+                    refs.forEach(function (o) {
+                        if (!o || !o.r) return;
+                        try {
+                            var f = o.r.formulas || [];
+                            var flach = [];
+                            f.forEach(function (z) {
+                                z.forEach(function (c) {
+                                    if (c !== '' && c !== null) flach.push(String(c));
+                                });
+                            });
+                            o.a._alt = flach.slice(0, 3).join(', ') +
+                                (flach.length > 3 ? ' …' : '');
+                            o.a._zeilen = o.r.rowCount;
+                            o.a._spalten = o.r.columnCount;
+                            o.a._altF = f;
+                            o.a._altFmt = o.r.numberFormat || null;
+                            try { o.a._altFuell = o.r.format.fill.color || ''; }
+                            catch (e) { o.a._altFuell = ''; }
+                        } catch (e) { }
+                    });
                 });
             });
         }).catch(function (e) {
@@ -743,11 +1031,84 @@
         if (bekannt && zellen > n) {
             umfang += ' (' + zellen + ' ' + T('xl.cells', 'Zellen') + ')';
         }
-        frage(T('xl.apply_ask', 'Sollen die Änderungen jetzt in die Tabelle geschrieben werden?') +
-            '\n\n' + umfang,
-            T('xl.apply', 'Übernehmen'), false).then(function (ja) {
-                if (ja) uebernehmenJetzt();
-            });
+        // Ein NEUES BLATT gehoert in die Rueckfrage. Es ist die einzige
+        // Aenderung des Vorschlags, die die Mappe strukturell umbaut – und die
+        // einzige, die der Rueckweg unten nicht zurueckdrehen kann.
+        var neue = _vorschlag.aenderungen.filter(function (a) { return a._neuesBlatt; })
+            .map(function (a) { return a.blatt; })
+            .filter(function (b, i, arr) { return b && arr.indexOf(b) === i; });
+        var text = T('xl.apply_ask', 'Sollen die Änderungen jetzt in die Tabelle geschrieben werden?') +
+            '\n\n' + umfang;
+        if (neue.length) {
+            text += '\n\n' + T('xl.new_sheets', 'Neu angelegt wird:') + ' ' + neue.join(', ');
+        }
+        frage(text, T('xl.apply', 'Übernehmen'), false).then(function (ja) {
+            if (ja) uebernehmenJetzt();
+        });
+    }
+
+    /* Schreibt EINEN Eintrag in einen geladenen Bereich.
+       Herausgeloest, weil `uebernehmenJetzt` sonst vier Faelle tief
+       verschachtelt haette – und weil die Fallunterscheidung einzeln pruefbar
+       sein muss: sie entscheidet, ob eine Datenliste als 60 gleiche Werte oder
+       als 60 verschiedene in der Mappe landet. */
+    function eintragSchreiben(z) {
+        var a = z.a, r = z.r;
+        var zeilen = r.rowCount || 1;
+        var spalten = r.columnCount || 1;
+
+        // (1) Zahlenformat zuerst. Es darf ALLEIN kommen ("formatiere Spalte B
+        //     als Währung") – dann bleiben die Werte unangetastet.
+        if (a.format) {
+            try { r.numberFormat = fuellMatrix(a.format, zeilen, spalten); }
+            catch (e) { console.warn('[excel] Format nicht setzbar:', e); }
+        }
+
+        // (2) VERSCHIEDENE Werte. Bis 2026-09-08 gab es diesen Weg nicht: ein
+        //     `wert` wurde ueber den ganzen Bereich KOPIERT, und fuer 20 Zeilen
+        //     x 3 Spalten brauchte das Modell 60 Einzeleintraege – bei einem
+        //     Deckel von 200 Eintraegen war "trage die Daten ein" damit
+        //     strukturell nicht gut zu machen.
+        if (a.werte && a.werte.length) {
+            r.values = a.werte;
+            return;
+        }
+        if (a.formel) {
+            if (zeilen === 1 && spalten === 1) {
+                r.formulas = [[a.formel]];
+            } else if (_kann19) {
+                // Excel rechnet die Bezuege selbst um – der
+                // verlaesslichste Weg, wenn er verfuegbar ist.
+                r.getCell(0, 0).formulas = [[a.formel]];
+                z._fuellen = true;
+            } else {
+                var m = [];
+                for (var i = 0; i < zeilen; i++) {
+                    var reihe = [];
+                    for (var j = 0; j < spalten; j++) {
+                        reihe.push(formelVerschieben(a.formel, i, j));
+                    }
+                    m.push(reihe);
+                }
+                r.formulas = m;
+            }
+            return;
+        }
+        if (a.wert !== undefined && a.wert !== null) {
+            r.values = fuellMatrix(a.wert, zeilen, spalten);
+        }
+        // Kein Wert und keine Formel: dann war es ein reiner Format-Eintrag –
+        // (1) hat schon alles getan.
+    }
+
+    function fuellMatrix(wert, zeilen, spalten) {
+        var m = [];
+        for (var i = 0; i < zeilen; i++) {
+            var reihe = [];
+            for (var j = 0; j < spalten; j++) reihe.push(wert);
+            m.push(reihe);
+        }
+        return m;
     }
 
     function uebernehmenJetzt(auto) {
@@ -758,6 +1119,18 @@
         setzeLaeuft(true);
 
         Excel.run(function (ctx) {
+            // NEUE BLAETTER ZUERST. `getItem` auf ein fehlendes Blatt WIRFT –
+            // bis 2026-09-08 konnte ein Vorschlag deshalb kein Blatt anlegen,
+            // und "lege ein Auswertungsblatt an" scheiterte mit einer Meldung,
+            // die nach einem Fehler des Assistenten aussah.
+            var angelegt = [];
+            aenderungen.forEach(function (a) {
+                if (!a.blatt || !a._neuesBlatt) return;
+                if (angelegt.indexOf(a.blatt) >= 0) return;
+                try { ctx.workbook.worksheets.add(a.blatt); angelegt.push(a.blatt); }
+                catch (e) { console.warn('[excel] Blatt nicht anlegbar:', e); }
+            });
+
             var ziele = [];
             aenderungen.forEach(function (a) {
                 var s = a.blatt ? ctx.workbook.worksheets.getItem(a.blatt)
@@ -767,40 +1140,7 @@
                 ziele.push({ a: a, r: r, s: s });
             });
             return ctx.sync().then(function () {
-                ziele.forEach(function (z) {
-                    var zeilen = z.r.rowCount || 1;
-                    var spalten = z.r.columnCount || 1;
-                    if (z.a.formel) {
-                        if (zeilen === 1 && spalten === 1) {
-                            z.r.formulas = [[z.a.formel]];
-                        } else if (_kann19) {
-                            // Excel rechnet die Bezuege selbst um – der
-                            // verlaesslichste Weg, wenn er verfuegbar ist.
-                            var erste = z.r.getCell(0, 0);
-                            erste.formulas = [[z.a.formel]];
-                            z._fuellen = true;
-                        } else {
-                            var m = [];
-                            for (var i = 0; i < zeilen; i++) {
-                                var reihe = [];
-                                for (var j = 0; j < spalten; j++) {
-                                    reihe.push(formelVerschieben(z.a.formel, i, j));
-                                }
-                                m.push(reihe);
-                            }
-                            z.r.formulas = m;
-                        }
-                    } else {
-                        var w = z.a.wert === undefined ? '' : z.a.wert;
-                        var mv = [];
-                        for (var k = 0; k < zeilen; k++) {
-                            var rw = [];
-                            for (var l = 0; l < spalten; l++) rw.push(w);
-                            mv.push(rw);
-                        }
-                        z.r.values = mv;
-                    }
-                });
+                ziele.forEach(eintragSchreiben);
                 return ctx.sync();
             }).then(function () {
                 // Zweiter Schritt fuer die 1.9-Faelle: copyFrom braucht die
@@ -809,6 +1149,24 @@
                 if (!zuFuellen.length) return ctx.sync();
                 zuFuellen.forEach(function (z) {
                     z.r.copyFrom(z.r.getCell(0, 0), Excel.RangeCopyType.formulas);
+                });
+                return ctx.sync();
+            }).then(function () {
+                // MARKIEREN. Erst nach dem Schreiben, damit eine gescheiterte
+                // Aenderung nicht als erledigt markiert dasteht.
+                if (!markAn()) return ctx.sync();
+                ziele.forEach(function (z) {
+                    try { z.r.format.fill.color = MARK_FARBE; } catch (e) { }
+                    if (!_kann110 || !z.a.begruendung) return;
+                    try {
+                        // Der Kommentar traegt die BEGRUENDUNG des Modells. Sie
+                        // liegt ohnehin vor (sie steht in der Diff-Ansicht) und
+                        // ist an der Zelle die einzige Erklaerung, die auch
+                        // morgen noch da ist.
+                        ctx.workbook.comments.add(
+                            z.r.getCell(0, 0),
+                            T('xl.comment_pre', 'Jarvis:') + ' ' + z.a.begruendung);
+                    } catch (e) { }
                 });
                 return ctx.sync();
             }).then(function () {
@@ -823,13 +1181,11 @@
                     ziele.forEach(function (z) {
                         (z.r.values || []).forEach(function (zeile) {
                             zeile.forEach(function (c) {
-                                if (typeof c === 'string' && /^#(NAME\?|REF!|VALUE!|DIV\/0!|N\/A|NUM!|NULL!|BEZUG!|WERT!|NAME\?)/.test(c)) {
-                                    kaputt.push(z.a.adresse + ': ' + c);
-                                }
+                                if (fehlerwert(c)) kaputt.push(z.a.adresse + ': ' + c);
                             });
                         });
                     });
-                    return { kaputt: kaputt };
+                    return { kaputt: kaputt, angelegt: angelegt };
                 });
             });
         }).then(function (erg) {
@@ -837,7 +1193,13 @@
             // automatischer Uebernahme ist das die einzige Stelle, an der
             // steht, was gerade in die Mappe gelaufen ist.
             vorschlag.auto = !!auto;
+            vorschlag.angelegt = erg.angelegt || [];
             _erledigt = vorschlag;
+            // Der Rueckweg. Er haengt am ZULETZT geschriebenen Vorschlag: ein
+            // Stapel ueber mehrere Vorschlaege waere eine Zusage, die niemand
+            // pruefen kann (zwischendurch kann der Benutzer selbst getippt
+            // haben, und dann nimmt Schritt 2 seine Arbeit mit zurueck).
+            _rueckweg = vorschlag;
             _vorschlag = null;
             if (erg.kaputt.length) {
                 // Nicht stillschweigend stehen lassen: der Benutzer soll
@@ -846,7 +1208,7 @@
                     rolle: 'bot', fehler: true,
                     text: T('xl.err_cells', 'Achtung – diese Zellen zeigen einen Fehlerwert:') +
                         '\n' + erg.kaputt.slice(0, 10).join('\n') + '\n\n' +
-                        T('xl.err_hint', 'Du kannst die Änderung in Excel mit Strg+Z rückgängig machen.')
+                        T('xl.err_hint', 'Mit „Zurücknehmen" stellst du den Zustand von vorher wieder her.')
                 });
                 melde('xl-status', T('xl.written_err', 'Geschrieben – mit Fehlerwerten.'), 'fehler');
             } else {
@@ -860,6 +1222,99 @@
             _laeuft = false;
             setzeLaeuft(false);
         });
+    }
+
+    /* ── Zurücknehmen ──────────────────────────────────────────────────────
+       DER GRUND, WARUM ES DAS GEBEN MUSS: Office.js-Schreibvorgaenge sind
+       nicht verlaesslich im Undo-Stack von Excel – manche Aufrufe leeren ihn
+       sogar (Formatierungen, nicht unterstuetzte APIs). Das Fenster versprach
+       bis 2026-09-08 "mit Strg+Z rueckgaengig"; die skill.json sagte im selben
+       Atemzug das Gegenteil ("das Fenster bietet dafuer einen eigenen
+       Rueckweg") – den es nicht gab. Zwei Aussagen, beide falsch.
+
+       WAS ES ZURUECKNIMMT: Werte, Formeln, Zahlenformate und die Markierung.
+       WAS NICHT: ein neu angelegtes Blatt (es zu loeschen waere eine
+       Aenderung, die der Benutzer nicht bestellt hat – er koennte inzwischen
+       selbst hineingeschrieben haben). Der Hinweis sagt das. */
+    function zuruecknehmen() {
+        var v = _rueckweg;
+        if (!v || !v.aenderungen || !v.aenderungen.length) return;
+        var wieder = v.aenderungen.filter(function (a) { return a._altF; });
+        if (!wieder.length) {
+            melde('xl-status', T('xl.undo_none',
+                'Der Zustand von vorher ist nicht mehr bekannt.'), 'fehler');
+            return;
+        }
+        var hinweis = T('xl.undo_ask', 'Den Zustand vor dieser Änderung wiederherstellen?');
+        if (v.angelegt && v.angelegt.length) {
+            hinweis += '\n\n' + T('xl.undo_keeps_sheet',
+                'Neu angelegte Blätter bleiben bestehen:') + ' ' + v.angelegt.join(', ');
+        }
+        frage(hinweis, T('xl.undo', 'Zurücknehmen'), true).then(function (ja) {
+            if (!ja) return;
+            _laeuft = true; setzeLaeuft(true);
+            melde('xl-status', T('xl.undoing', 'Nehme zurück …'));
+            Excel.run(function (ctx) {
+                wieder.forEach(function (a) {
+                    try {
+                        var s = a.blatt ? ctx.workbook.worksheets.getItem(a.blatt)
+                            : ctx.workbook.worksheets.getActiveWorksheet();
+                        var r = s.getRange(a.adresse);
+                        // FORMELN zurueckschreiben, nicht Werte: `formulas`
+                        // traegt bei einer Formelzelle die Formel und bei einer
+                        // Wertzelle den Wert. Wer `values` nimmt, macht aus
+                        // jeder zurueckgenommenen Formel eine feste Zahl.
+                        r.formulas = a._altF;
+                        if (a.format && a._altFmt) r.numberFormat = a._altFmt;
+                        if (markAn()) {
+                            // Die vorherige Fuellfarbe wiederherstellen, wenn
+                            // sie bekannt ist. Bei einem Bereich mit
+                            // GEMISCHTEN Farben gibt Office.js keinen Wert
+                            // heraus – dann wird geleert, und der Hinweis sagt
+                            // es. Eine geratene Farbe waere schlechter.
+                            try {
+                                if (a._altFuell) r.format.fill.color = a._altFuell;
+                                else r.format.fill.clear();
+                            } catch (e) { }
+                        }
+                    } catch (e) { console.warn('[excel] Zurücknehmen:', e); }
+                });
+                return ctx.sync();
+            }).then(function () {
+                _rueckweg = null;
+                if (_erledigt === v) _erledigt = null;
+                _verlauf.push({
+                    rolle: 'bot',
+                    text: T('xl.undone', 'Die Änderung wurde zurückgenommen.')
+                });
+                melde('xl-status', T('xl.undone', 'Die Änderung wurde zurückgenommen.'), 'ok');
+                zeichneVerlauf();
+            }).catch(function (e) {
+                melde('xl-status', T('xl.undo_failed', 'Zurücknehmen fehlgeschlagen:') +
+                    ' ' + String(e && e.message || e), 'fehler');
+            }).then(function () {
+                _laeuft = false; setzeLaeuft(false);
+            });
+        });
+    }
+
+    /* Springt im Blatt zu einer Zelle und markiert sie.
+       Der Gegenwert von Claudes "cell-level citations": eine Adresse in der
+       Diff-Ansicht ist ohne diesen Weg eine Zeichenkette, die man von Hand
+       suchen muss. */
+    function zurZelle(blatt, adresse) {
+        if (!_office || !window.Excel) return;
+        Excel.run(function (ctx) {
+            var s = blatt ? ctx.workbook.worksheets.getItemOrNullObject(blatt)
+                : ctx.workbook.worksheets.getActiveWorksheet();
+            s.load('isNullObject');
+            return ctx.sync().then(function () {
+                if (s.isNullObject) return;
+                s.activate();
+                s.getRange(adresse).select();
+                return ctx.sync();
+            });
+        }).catch(function (e) { console.warn('[excel] Sprung:', e); });
     }
 
     function setzeLaeuft(an) {
@@ -977,6 +1432,11 @@
         $('xl-app').classList.remove('hidden');
         ctxZeigen();
         ctxAktualisieren();
+        // OHNE `await`: die Vorgaben sind ein Nebenfeld, und der Lauf holt sie
+        // ohnehin serverseitig – das Fenster darf nicht auf sie warten (dieselbe
+        // Regel wie bei der Freigabeliste in /wissen: eine Ansicht wartet nie
+        // auf eine nur schmueckende Anfrage).
+        anweisungenLaden();
         if (!_verlauf.length) {
             _verlauf.push({
                 rolle: 'bot',
@@ -1054,6 +1514,47 @@
             });
     }
 
+    /* ── Persoenliche Vorgaben ──────────────────────────────────────────
+       Sie ersetzen ``data/instructions/*.md``, das seit dem eigenen
+       System-Prompt (2026-09-08) nicht mehr in den Excel-Lauf geht. Wer eine
+       Hausregel in Excel braucht, traegt sie HIER ein – je Benutzer, weil eine
+       Vorgabe ueber Zahlenformate und Beschriftungen zur Arbeitsweise gehoert
+       und nicht zur Installation. */
+    function anweisungenLaden() {
+        var f = $('xl-anw');
+        if (!f) return Promise.resolve();
+        return sende('/api/excel/instructions', 'GET').then(function (d) {
+            if (d && d.ok) f.value = d.instructions || '';
+        }).catch(function () {
+            // Ein Fehlschlag bleibt STILL: die Vorgaben sind ein Nebenfeld,
+            // und eine Fehlermeldung beim Oeffnen des Fensters wuerde nach
+            // einem Anmeldeproblem aussehen, das es nicht gibt. Der Lauf
+            // arbeitet dann ohne sie – wie vor der Einfuehrung.
+        });
+    }
+
+    function anweisungenSpeichern() {
+        var f = $('xl-anw');
+        if (!f) return;
+        var k = $('xl-anw-save');
+        if (k) k.disabled = true;
+        melde('xl-anw-status', T('xl.instr_saving', 'Speichere …'));
+        sende('/api/excel/instructions', 'POST', { instructions: f.value })
+            .then(function (d) {
+                if (d && d.ok) {
+                    melde('xl-anw-status', T('xl.instr_saved', 'Gespeichert.'), 'ok');
+                } else {
+                    melde('xl-anw-status',
+                        (d && d.error) || T('xl.instr_failed', 'Nicht gespeichert.'), 'fehler');
+                }
+            })
+            .catch(function (err) {
+                melde('xl-anw-status', T('xl.instr_failed', 'Nicht gespeichert.') +
+                    ' ' + String(err && err.message || err), 'fehler');
+            })
+            .then(function () { if (k) k.disabled = false; });
+    }
+
     function abmelden() {
         // Abmelde-Signal VOR dem Verwerfen des Tokens, mit keepalive – ohne
         // das bricht der Browser die Anfrage beim Weiternavigieren ab.
@@ -1084,6 +1585,11 @@
             e.checked = autoAn();
             e.addEventListener('change', function () { autoSetzen(e.checked); });
         }
+        if ((e = $('xl-mark'))) {
+            e.checked = markAn();
+            e.addEventListener('change', function () { markSetzen(e.checked); });
+        }
+        if ((e = $('xl-anw-save'))) e.addEventListener('click', anweisungenSpeichern);
         if ((e = $('xl-logout'))) e.addEventListener('click', abmelden);
         if ((e = $('xl-frage'))) e.addEventListener('keydown', function (ev) {
             if (ev.key !== 'Enter') return;

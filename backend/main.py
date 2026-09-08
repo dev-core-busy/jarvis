@@ -10348,6 +10348,70 @@ _excel_agent_lock = asyncio.Lock()
 _EXCEL_TOOLS = {"excel_vorschlag"}
 
 
+def _excel_instr_path(user: str) -> Path:
+    """Ablage der persoenlichen Excel-Vorgaben (je Benutzer eine Datei).
+
+    Gleiche Bauart wie ``_sap_instr_path``: der Dateiname laeuft ueber
+    ``_benutzer.pfad_teil``, damit ein Domaenenname mit Backslash
+    (``nexus\\andreas.bender``) keinen Pfadwechsel ausloest UND nicht zwei
+    Dateien fuer denselben Menschen entstehen.
+    """
+    d = Path(__file__).parent.parent / "data" / "excel_instructions"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / f"{_benutzer.pfad_teil(user, 'unbekannt')}.md"
+
+
+def _load_excel_instructions(user: str) -> str:
+    """Die persoenlichen Vorgaben – "" bei jedem Problem.
+
+    **Fail-safe in die harmlose Richtung:** ohne Vorgaben arbeitet der Lauf wie
+    bisher. Eine unlesbare Datei darf die Frage nicht kippen – der Benutzer
+    wuerde den Fehler bei seiner Tabelle suchen.
+    """
+    try:
+        f = _excel_instr_path(user)
+        return f.read_text(encoding="utf-8") if f.exists() else ""
+    except Exception as e:  # noqa: BLE001
+        print(f"[excel] Vorgaben nicht lesbar: {e}", flush=True)
+        return ""
+
+
+@app.get("/api/excel/instructions")
+async def excel_instructions_get(user: str = Depends(require_excel_access)):
+    """Liest die persoenlichen Vorgaben des Benutzers fuer Excel-Laeufe."""
+    return JSONResponse({"ok": True,
+                         "instructions": _load_excel_instructions(user),
+                         "max_len": excel_ask_max_anweisungen()})
+
+
+@app.post("/api/excel/instructions")
+async def excel_instructions_set(request: Request,
+                                 user: str = Depends(require_excel_access)):
+    """Speichert die persoenlichen Vorgaben (dauerhaft, je Benutzer).
+
+    **Der Benutzer kommt ausschliesslich aus der Anmeldung**, nie aus dem Rumpf –
+    sonst waere der Endpunkt der bequemste Weg, einem Kollegen eine Vorgabe
+    unterzuschieben, die in JEDEN seiner Excel-Laeufe eingeht (gleiche Regel wie
+    beim Empfaenger einer Erinnerung).
+    """
+    body = await request.json()
+    text = str(body.get("instructions") or "")[:excel_ask_max_anweisungen()]
+    try:
+        _excel_instr_path(user).write_text(text, encoding="utf-8")
+        return JSONResponse({"ok": True})
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+def excel_ask_max_anweisungen() -> int:
+    """Laengengrenze der Vorgaben – aus ``excel_ask``, nicht hier verdrahtet."""
+    try:
+        from backend import excel_ask as _ea
+        return int(_ea.MAX_ANWEISUNGEN_LEN)
+    except Exception:  # noqa: BLE001
+        return 2000
+
+
 @app.get("/excel-addin/manifest.xml")
 async def excel_addin_manifest(request: Request):
     """XML-Manifest des Excel-Add-ins, passend zu DIESEM Server erzeugt.
@@ -10545,7 +10609,8 @@ async def excel_ask_endpoint(request: Request,
     auftrag, _kennung = excel_ask.auftrag(
         frage, ueberblick,
         vorgeschichte=vorgeschichte if isinstance(vorgeschichte, list) else None,
-        nachgeladen=nachgeladen if isinstance(nachgeladen, list) else None)
+        nachgeladen=nachgeladen if isinstance(nachgeladen, list) else None,
+        anweisungen=_load_excel_instructions(user))
 
     global _excel_agent
     from backend.agent import JarvisAgent
@@ -10557,6 +10622,26 @@ async def excel_ask_endpoint(request: Request,
         # nur in der Werkzeugliste, die das Modell sieht. Modelle rufen auch
         # nicht deklarierte Werkzeuge auf.
         _excel_agent._role_tools = set(_EXCEL_TOOLS)
+        # ⚠ EIGENER SYSTEM-PROMPT – bis 2026-09-08 fehlte diese Zeile, und das
+        # war ein gemessener Qualitaetsfehler. Ohne ``_role_prompt`` faellt
+        # ``_base_system_prompt()`` in den Hauptagenten-Zweig: der Lauf bekam
+        # 21.492 Zeichen Hauptagenten-Prompt plus ``load_instructions()`` (auf
+        # DEV 25.372) – darin ``shell_execute`` 10x, ``knowledge_search`` 8x,
+        # ``create_chart`` 6x, ``filesystem`` 5x, ``office_create_excel`` 4x,
+        # ``xlsx_edit``. **KEINES dieser Werkzeuge existiert in diesem Lauf**
+        # (``_role_tools`` laesst genau eines durch). Unser Excel-Vorspann stand
+        # erst dahinter.
+        #
+        # Das ist die Fehlerklasse "ein Prompt ist Code", die im Projekt schon
+        # viermal Geld gekostet hat: das Modell liest Anweisungen fuer eine
+        # Welt, die es hier nicht gibt, kuendigt Wege an, die es nicht hat, und
+        # weicht auf Erfundenes aus. Der Vorspann in ``excel_ask`` beschreibt
+        # den Lauf vollstaendig – er IST der System-Prompt.
+        #
+        # PREIS, ausdruecklich: ``data/instructions/*.md`` geht damit NICHT mehr
+        # mit. Dafuer gibt es die persoenlichen Vorgaben (P1.6) – Hausregeln, die
+        # in Excel gelten sollen, gehoeren dorthin.
+        _excel_agent._role_prompt = excel_ask.rollen_prompt()
         # Sammelliste ANLEGEN, bevor der Lauf startet: das Werkzeug haengt an
         # dieselbe Liste an. Eine Liste und kein Ersetzen des ContextVar-Werts,
         # damit die Aenderung auch dann sichtbar ist, wenn der Kontext beim

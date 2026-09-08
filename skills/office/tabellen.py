@@ -53,6 +53,8 @@ ERKANNT und im Ergebnis ausdruecklich gemeldet, statt es zu verschweigen.
 from __future__ import annotations
 
 import re
+
+from backend import tabellenkopf
 from pathlib import Path
 
 from backend.tools.base import BaseTool
@@ -321,27 +323,11 @@ def _kopfzeile(ws, zeile: int = 1) -> list[str]:
 
 
 # Wie viele Zeilen am Blattanfang fuer die Kopfzeilen-Erkennung angesehen werden.
-KOPF_SUCHTIEFE = 12
-
-
-def _hat_beschriftungen(row) -> bool:
-    """Enthaelt die Zeile echte Spaltennamen?
-
-    Echt heisst: Text, der WEDER eine Formel (``=B1``) NOCH eine reine Zahl ist.
-    Die Formel-Bedingung stammt aus der echten Datei von ECHT: in den Blaettern
-    2019-2026 ist die wiederholte Kopfzeile in Zeile 3 keine Beschriftung,
-    sondern ein VERWEIS auf Zeile 1 (``=B1``, ``=C1``, …). Weil die Mappe mit
-    ``data_only=False`` geoeffnet wird (sonst verlieren wir beim Speichern alle
-    Formeln), steht dort der Formeltext – als Spaltenname unbrauchbar.
-    """
-    gefuellt = [c for c in row if c is not None and str(c).strip() != ""]
-    if len(gefuellt) < 2:
-        return False
-    echte = [c for c in gefuellt
-             if isinstance(c, str)
-             and not c.lstrip().startswith("=")
-             and not c.strip().replace(".", "").replace(",", "").isdigit()]
-    return len(echte) / len(gefuellt) >= 0.5
+# Der Wert und die Regel dahinter liegen in ``backend/tabellenkopf.py`` – siehe
+# die Begruendung an ``_kopfzeile_raten``. Die Namen bleiben hier als Alias
+# bestehen, weil sie im Modul und in den Tests benutzt werden.
+KOPF_SUCHTIEFE = tabellenkopf.KOPF_SUCHTIEFE
+_hat_beschriftungen = tabellenkopf.hat_beschriftungen
 
 
 def _kopfzeile_raten(ws) -> tuple[int, int]:
@@ -377,43 +363,19 @@ def _kopfzeile_raten(ws) -> tuple[int, int]:
     ``"00000000083"`` – als TEXT gespeichert. Wer sie als Zahl zaehlt, haelt
     Zeile 1 fuer den Datenanfang und landet wieder bei der falschen Kopfzeile.
     """
-    zeilen: list[tuple[int, tuple]] = []
+    zeilen: list = []
     try:
-        for i, row in enumerate(ws.iter_rows(min_row=1, max_row=KOPF_SUCHTIEFE,
-                                             max_col=40, values_only=True), start=1):
-            zeilen.append((i, row))
+        for row in ws.iter_rows(min_row=1, max_row=tabellenkopf.KOPF_SUCHTIEFE,
+                                max_col=40, values_only=True):
+            zeilen.append(list(row))
     except Exception:  # noqa: BLE001
         return 1, 2
-
-    erste_daten = 0
-    for i, row in zeilen:
-        gefuellt = [c for c in row if c is not None and str(c).strip() != ""]
-        if len(gefuellt) < 3:          # zu duenn, um den Datenanfang zu belegen
-            continue
-        zahlen = [c for c in gefuellt
-                  if isinstance(c, (int, float)) and not isinstance(c, bool)]
-        if len(zahlen) / len(gefuellt) >= 0.5:
-            erste_daten = i
-            break
-
-    if erste_daten <= 1:
-        # Keine Datenzeile gefunden (reine Texttabelle) oder die Daten beginnen
-        # schon in Zeile 1 – dann ist Zeile 1 die beste verfuegbare Annahme.
-        return 1, 2
-
-    # Die BESCHRIFTUNGSZEILE ist die unterste Zeile oberhalb der Daten, die
-    # wirklich Namen enthaelt. Eine Formel-Wiederholung (``=B1``) wird dabei
-    # uebersprungen und die darueberliegende echte Beschriftung genommen.
-    ueber = list(reversed(zeilen[: erste_daten - 1]))
-    for i, row in ueber:
-        if _hat_beschriftungen(row):
-            return i, erste_daten
-    # Keine brauchbare Beschriftung gefunden: die letzte nicht-leere Zeile ist
-    # immer noch die beste Annahme (besser als blind Zeile 1).
-    for i, row in ueber:
-        if any(c is not None and str(c).strip() != "" for c in row):
-            return i, erste_daten
-    return 1, erste_daten
+    # DIE REGEL SELBST STEHT IN ``backend/tabellenkopf.py`` – hier wird nur das
+    # openpyxl-Blatt in Zeilen umgesetzt. Das Excel-Add-in ruft denselben Kern
+    # mit den Werten aus dem Client; eine zweite Fassung liefe beim naechsten
+    # Feinschliff auseinander (dann liest der Datei-Weg eine andere Kopfzeile
+    # als das Add-in, an derselben Mappe).
+    return tabellenkopf.kopf_und_daten(zeilen)
 
 
 def _kz(ws, vorgabe) -> tuple[int, int, bool]:

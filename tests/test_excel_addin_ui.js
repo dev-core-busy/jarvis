@@ -65,7 +65,11 @@ function fensterMitStub(officeDa, vorher) {
         win.Office = {
             HostType: { Excel: 'Excel' },
             onReady: (cb) => cb({ host: 'Excel' }),
-            context: { requirements: { isSetSupported: () => false } }
+            // Faehigkeiten konfigurierbar: der Kommentar-Weg (P2.11) braucht
+        // ExcelApi 1.10, copyFrom 1.9. Mit einem festen `false` waeren
+        // beide Zweige UNMESSBAR – die Attrappe koennte die zu pruefende
+        // Lage gar nicht herstellen.
+        context: { requirements: { isSetSupported: (n, v) => !!opt.api } }
         };
     }
     // Optional ein Skript VOR excel.js (theme.js) – die Reihenfolge ist die
@@ -163,14 +167,41 @@ pruefe(!!doc0.getElementById('xl-app'), 'Anwendungsbereich vorhanden');
 pruefe(!!doc0.getElementById('xl-chat'), 'Verlauf vorhanden');
 pruefe(!!doc0.getElementById('xl-frage'), 'Eingabefeld vorhanden');
 pruefe(!!doc0.getElementById('xl-ctx'), 'Bezugszeile vorhanden');
-// Der Rueckgaengig-Knopf ist auf Vorgabe des Nutzers entfallen (2026-08-24):
-// Strg+Z in Excel holt die Aenderung zurueck. Er darf nicht zurueckkommen –
-// zwei Rueckwege nebeneinander waeren zwei Wahrheiten.
-pruefe(!doc0.getElementById('xl-undo'), 'kein eigener Rueckgaengig-Knopf mehr');
-pruefe(HTML.indexOf('xl-undo') < 0 && JS_CODE.indexOf('xl-undo') < 0,
-       '... und kein toter Code dazu');
-pruefe(JS_CODE.indexOf('schnappschuss') < 0,
-       'auch der Schnappschuss vor dem Schreiben ist weg (Strg+Z ist der Rueckweg)');
+/* ⚠ DIESE PRUEFUNG WAR UMGEKEHRT – und die Vorgabe dahinter beruhte auf einer
+   falschen technischen Annahme. Sie lautete (2026-08-24): "Der
+   Rueckgaengig-Knopf ist entfallen: Strg+Z in Excel holt die Aenderung
+   zurueck." Das stimmt nicht: Office.js-Schreibvorgaenge landen NICHT
+   verlaesslich im Undo-Stack von Excel, und manche Aufrufe leeren ihn sogar
+   (Formatierungen, nicht unterstuetzte APIs; Microsoft dokumentiert das unter
+   "Undo capabilities with the Excel JavaScript API").
+
+   DAS PROJEKT WUSSTE ES SOGAR – an zwei Stellen stand die richtige Aussage
+   neben der falschen: ``skills/excel-addin/skill.json`` ("Strg+Z holt sie
+   nicht zurueck, das Fenster bietet dafuer einen eigenen Rueckweg" – den es
+   nicht gab) und der Kommentar ueber ``xl.err_hint`` in ``i18n.js``
+   ("Deshalb ein eigener Rueckweg"). Drei Aussagen, zwei davon falsch, keine
+   davon geprueft.
+
+   Seit P2.12 (2026-09-08, auf Vorgabe des Nutzers) gibt es den Rueckweg
+   wirklich – und er ist Pflicht, nicht Komfort: bei AUTOMATISCHER Uebernahme
+   ist er der einzige Weg zurueck. */
+pruefe(!!doc0.getElementById('xl-mark'),
+       'Kontrollkaestchen fuer die Markierung geaenderter Zellen vorhanden');
+pruefe(JS_CODE.indexOf('function zuruecknehmen') >= 0,
+       'es gibt einen eigenen Rueckweg im Fenster (Strg+Z traegt nicht)');
+pruefe(JS_CODE.indexOf('_altF') >= 0,
+       'der Altzustand wird VOR dem Schreiben gesichert (Grundlage des Rueckwegs)');
+// Der Knopf entsteht erst NACH dem Schreiben und nur fuer den zuletzt
+// geschriebenen Vorschlag – ein Knopf im Vorschlag waere eine Zusage auf
+// etwas, das noch nicht passiert ist.
+pruefe(!doc0.getElementById('xl-undo'),
+       'im Ruhezustand gibt es keinen Rueckgaengig-Knopf');
+pruefe(JS_CODE.indexOf("id=\"xl-undo\"") >= 0 || JS_CODE.indexOf("'xl-undo'") >= 0,
+       'er wird von der Diff-Ansicht erzeugt, wenn ein Rueckweg besteht');
+// KEINE falsche Zusage mehr im Hinweistext.
+pruefe(I18N.indexOf('mit Strg+Z rückgängig') < 0 &&
+       I18N.indexOf('undo the change in Excel with Ctrl+Z') < 0,
+       'der Hinweistext verspricht Strg+Z nicht mehr (DE und EN)');
 // Automatische Uebernahme: Vorgabe AN. Das `checked` steht im Markup.
 const autoBox = doc0.getElementById('xl-auto');
 pruefe(!!autoBox, 'Kontrollkaestchen "automatisch uebernehmen" vorhanden');
@@ -234,7 +265,7 @@ pruefe(/getRangeByIndexes/.test(JS_CODE),
        'liest nur einen begrenzten Ausschnitt je Blatt, nicht den ganzen benutzten Bereich');
 
 // Fehlerwerte nach dem Schreiben pruefen statt einen Formelparser zu bauen.
-pruefe(/NAME\\\?/.test(JS_CODE) && /load\('values'\)/.test(JS_CODE),
+pruefe(JS_CODE.indexOf('fehlerwert(') >= 0 && JS_CODE.indexOf("load('values')") >= 0,
        'prueft nach dem Schreiben auf Fehlerwerte');
 
 // copyFrom nur, wenn ExcelApi 1.9 wirklich da ist.
@@ -258,35 +289,121 @@ function excelStub(zustand) {
         copyFrom() { zustand.copyFrom = true; },
         set formulas__(v) { },
     });
+    /* Masse aus der Adresse ableiten. NOETIG, nicht Beiwerk: der Werte-Bereich
+       (P2.7) und der Formel-Rueckfall haengen an `rowCount`/`columnCount`, und
+       eine Attrappe, die immer 1x1 meldet, kann den Unterschied zwischen "ein
+       Wert ueberall" und "verschiedene Werte" GAR NICHT herstellen – der
+       Waechter waere gruen, ohne etwas zu messen. */
+    const masse = (adr) => {
+        const m = /^\$?([A-Z]+)\$?(\d+)(?::\$?([A-Z]+)\$?(\d+))?$/i.exec(adr || '');
+        if (!m) return { z: 1, s: 1 };
+        const idx = (b) => b.toUpperCase().split('').reduce((a, c) => a * 26 + c.charCodeAt(0) - 64, 0);
+        const z1 = +m[2], z2 = m[4] ? +m[4] : z1;
+        const s1 = idx(m[1]), s2 = m[3] ? idx(m[3]) : s1;
+        return { z: Math.abs(z2 - z1) + 1, s: Math.abs(s2 - s1) + 1 };
+    };
     const machRange = (adr) => {
+        const mm = masse(adr);
+        const leer = (f) => Array.from({ length: mm.z },
+                                       () => Array.from({ length: mm.s }, f));
         const r = {
-            address: 'Tabelle1!' + adr, rowCount: 1, columnCount: 1,
-            values: [['alt']], _formulas: [['alt']], valueTypes: [['String']],
+            address: 'Tabelle1!' + adr, rowCount: mm.z, columnCount: mm.s,
+            _values: leer(() => 'alt'), _formulas: leer(() => 'alt'),
+            _numberFormat: leer(() => 'General'),
+            valueTypes: leer(() => 'String'),
             load() { }, getCell() { return machRange(adr); },
-            copyFrom() { zustand.copyFrom = true; }
+            copyFrom() { zustand.copyFrom = true; },
+            select() { zustand.gewaehlt = adr; },
+            format: {
+                fill: {
+                    color: '',
+                    load() { },
+                    clear() { zustand.fuellungGeleert = true; }
+                }
+            }
         };
         Object.defineProperty(r, 'formulas', {
             get() { return this._formulas; },
             set(v) { this._formulas = v; zustand.geschrieben.push({ adr, v }); }
         });
+        // Der Werte-Weg (P2.7/P2.8) laeuft ueber `values`, nicht `formulas` –
+        // ohne eigenen Setter waere er unsichtbar.
+        Object.defineProperty(r, 'values', {
+            get() { return this._values; },
+            set(v) { this._values = v; zustand.werte.push({ adr, v }); }
+        });
+        Object.defineProperty(r, 'numberFormat', {
+            get() { return this._numberFormat; },
+            set(v) { this._numberFormat = v; zustand.formate.push({ adr, v }); }
+        });
+        Object.defineProperty(r.format.fill, 'color', {
+            get() { return zustand._fuell || ''; },
+            set(v) { zustand._fuell = v; zustand.markiert.push({ adr, v }); }
+        });
         return r;
     };
     const blatt = (name) => ({
         name: name,
+        isNullObject: false,
+        activate() { zustand.aktiviert = name; },
+        // Excel-Tabellen (P2.9)
+        tables: {
+            items: [{ name: 'Tabelle1', getRange: () => ({ address: 'Tabelle1!A1:C3', load() { } }) }],
+            load() { }
+        },
         getUsedRangeOrNullObject() {
-            return { address: 'A1:C3', rowCount: 3, columnCount: 3, rowIndex: 0,
-                     columnIndex: 0, isNullObject: false, load() { } };
+            return {
+                address: 'A1:C3', rowCount: 3, columnCount: 3, rowIndex: 0,
+                columnIndex: 0, isNullObject: false, load() { },
+                // Sonderzellen fuer die Fehlerliste (P2.10) – nur mit 1.9.
+                getSpecialCellsOrNullObject() {
+                    return { address: 'Tabelle1!C3', isNullObject: false, load() { } };
+                }
+            };
         },
         getRangeByIndexes() {
-            return { values: [['Artikel', 'Preis', 'Menge'], ['A', 1, 2]],
-                     valueTypes: [['String', 'String', 'String'],
-                                  ['String', 'Double', 'Double']], load() { } };
+            /* ROHWERTE (Zahl bleibt Zahl), dazu FORMELN und ZAHLENFORMATE –
+               ohne die drei sind P1.2/P1.3 auf Client-Seite nicht messbar.
+
+               ⚠ DIESER BEREICH GIBT NUR HERAUS, WAS AUCH GELADEN WURDE.
+               Ein echtes Office.js wirft bei einem Zugriff ohne `load()`
+               ("The property 'formulas' is not available") – das ist der
+               haeufigste Office.js-Fehler ueberhaupt. Eine Attrappe, die
+               jede Eigenschaft bedingungslos liefert, kann ihn NICHT sehen:
+               gemessen blieb die Gegenprobe "Formeln werden gar nicht
+               geladen" mit 0 FAIL gruen, obwohl der Client sie im echten
+               Excel nie zu Gesicht bekaeme. */
+            const daten = {
+                values: [['Artikel', 'Preis', 'Menge'], ['A', 1, 2], ['B', 3, 4]],
+                formulas: [['Artikel', 'Preis', 'Menge'], ['A', 1, '=B2*C2'], ['B', 3, '=B3*C3']],
+                numberFormat: [['General', 'General', 'General'],
+                               ['General', '#,##0.00 €', '0%'],
+                               ['General', '#,##0.00 €', '0%']],
+                valueTypes: [['String', 'String', 'String'],
+                             ['String', 'Double', 'Double'],
+                             ['String', 'Double', 'Double']]
+            };
+            const geladen = {};
+            const r = { load(p) { String(p || '').split(',').forEach(
+                            n => { geladen[n.trim()] = true; }); } };
+            Object.keys(daten).forEach(n => Object.defineProperty(r, n, {
+                get() {
+                    if (!geladen[n]) {
+                        throw new Error("PropertyNotLoaded: '" + n +
+                            "' wurde nicht per load() angefordert");
+                    }
+                    return daten[n];
+                }
+            }));
+            return r;
         },
         getRange: (adr) => machRange(adr),
         load() { }
     });
     return {
         RangeCopyType: { formulas: 'formulas' },
+        SpecialCellType: { formulas: 'formulas' },
+        SpecialCellValueType: { errors: 'errors' },
         run(fn) {
             const ctx = {
                 workbook: {
@@ -295,9 +412,22 @@ function excelStub(zustand) {
                         items: [{ name: 'Tabelle1' }],
                         load() { },
                         getItem: (n) => blatt(n),
+                        // Ein Vorschlag darf ein Blatt ANLEGEN (P2.14): ein
+                        // unbekannter Name liefert isNullObject, kein Wurf.
+                        getItemOrNullObject: (n) => (n === 'Tabelle1'
+                            ? blatt(n)
+                            : { name: n, isNullObject: true, load() { } }),
+                        add(n) { zustand.angelegt.push(n); return blatt(n); },
                         getActiveWorksheet: () => blatt('Tabelle1'),
                         onSelectionChanged: { add() { } }
                     },
+                    // Benannte Bereiche (P2.9)
+                    names: {
+                        items: [{ name: 'Steuersatz', formula: '=Tabelle1!$C$1' }],
+                        load() { }
+                    },
+                    // Zellkommentare (P2.11) – braucht ExcelApi 1.10.
+                    comments: { add(r, t) { zustand.kommentare.push(t); } },
                     getSelectedRange() {
                         return {
                             address: 'Tabelle1!B2:B3', rowCount: 2, columnCount: 1,
@@ -323,14 +453,21 @@ function warte(ms) { return new Promise(r => setTimeout(r, ms)); }
    Zustand der Automatik VOR dem Laden fest. */
 function angemeldetesFenster(opt) {
     opt = opt || {};
-    const zustand = { geschrieben: [], copyFrom: false, gesendet: [] };
+    const zustand = { geschrieben: [], werte: [], formate: [], markiert: [],
+                      kommentare: [], angelegt: [], copyFrom: false,
+                      gesendet: [], gewaehlt: '', aktiviert: '',
+                      fuellungGeleert: false };
     const dom = new JSDOM(HTML, { url: 'https://jarvis.test/excel-addin/taskpane.html?mv=1.0.0.0',
                                   runScripts: 'outside-only' });
     const win = dom.window;
     win.Office = {
         HostType: { Excel: 'Excel' },
         onReady: (cb) => cb({ host: 'Excel' }),
-        context: { requirements: { isSetSupported: () => false } }
+        // Faehigkeiten konfigurierbar: der Kommentar-Weg (P2.11) braucht
+        // ExcelApi 1.10, copyFrom und die Sonderzellen-Abfrage 1.9. Mit einem
+        // festen `false` sind diese Zweige UNMESSBAR – die Attrappe koennte die
+        // zu pruefende Lage gar nicht herstellen (Register).
+        context: { requirements: { isSetSupported: () => !!opt.api } }
     };
     win.Excel = excelStub(zustand);
     win.localStorage.setItem('jarvis_token', 'T');
@@ -345,6 +482,10 @@ function angemeldetesFenster(opt) {
         if (pfad === '/api/excel-addin/version') return j({ ok: true, version: '1.0.0.0' });
         if (pfad === '/api/me') return j({ username: 'u', permissions: { excel: true } });
         if (pfad === '/api/excel/ask') {
+            // `zustand.antwort` erlaubt es einem Abschnitt, eine EIGENE Antwort
+            // zu setzen (Werte-Bereich, Zahlenformat, neues Blatt). Ohne diesen
+            // Haken liesse sich nur der eine fest verdrahtete Fall pruefen.
+            if (zustand.antwort) return j(zustand.antwort);
             return j({
                 ok: true, text: 'Ich schlage eine Margenspalte vor.',
                 aenderungen: [{ blatt: 'Tabelle1', adresse: 'G2', formel: '=E2*F2',
@@ -390,10 +531,17 @@ function angemeldetesFenster(opt) {
            rumpf.ueberblick.auswahl.adresse === 'B2:B3',
            'aktuelle Auswahl wird mitgeschickt');
     const bl = (rumpf.ueberblick && rumpf.ueberblick.blaetter || [])[0] || {};
-    pruefe(Array.isArray(bl.kopf) && bl.kopf[0] === 'Artikel',
-           'Kopfzeile des Blattes wird uebermittelt');
-    pruefe(Array.isArray(bl.beispiele) && bl.beispiele.length <= 4,
-           'nur wenige Beispielzeilen, nicht das ganze Blatt');
+    pruefe(Array.isArray(bl.probe) && bl.probe.length > 0,
+           'die Probezeilen des Blattes werden uebermittelt (ROHWERTE, mit Typ)');
+    // OHNE DIESE ZWEI ZAHLEN KANN DAS MODELL KEINE ADRESSE BILDEN.
+    pruefe(bl.zeile_ab >= 1 && bl.spalte_ab >= 1,
+           'Start-Zeile und -Spalte des benutzten Bereichs gehen mit');
+    // Der Typverlust von vorher: `String(z)` machte aus jeder Zahl Text, und
+    // das Backend musste den Datentyp aus `valueTypes` der ZWEITEN Zeile raten.
+    pruefe(bl.probe.some(z => (z || []).some(c => typeof c === 'number')),
+           'Zahlen kommen als ZAHL an, nicht als Zeichenkette');
+    pruefe((bl.probe || []).length <= 12,
+           'nur wenige Probezeilen, nicht das ganze Blatt');
 
     // Diff sichtbar?
     const diff = d.querySelector('.xl-diff');
@@ -1409,11 +1557,229 @@ function angemeldetesFenster(opt) {
         win.close();
     }
 
+
+    /* ══════════════════════════════════════════════════════════════════════
+       9. Neue Aenderungstypen, Markierung, Rueckweg, Sprung (P1+P2, 2026-09-08)
+       ══════════════════════════════════════════════════════════════════════ */
+    abschnitt('9. Neue Aenderungstypen, Markierung, Rueckweg, Sprung');
+    {
+        // `api: true` schaltet ExcelApi 1.9 UND 1.10 – ohne 1.10 gibt es keinen
+        // Zellkommentar, und der Zweig waere unmessbar.
+        const { win, zustand } = angemeldetesFenster({ auto: '0', api: true });
+        await warte(60);
+        const d = win.document;
+
+        /* ── 9a. Der Ueberblick traegt die neuen Felder ─────────────────── */
+        d.getElementById('xl-frage').value = 'Marge eintragen';
+        d.getElementById('xl-send').click();
+        await warte(90);
+        const anfr = zustand.gesendet.filter(g => g.pfad === '/api/excel/ask').pop();
+        const ub = anfr ? (JSON.parse(anfr.opt.body).ueberblick || {}) : {};
+        const b0 = (ub.blaetter || [])[0] || {};
+        pruefe(Array.isArray(b0.probeFormeln) &&
+               JSON.stringify(b0.probeFormeln).indexOf('=B2*C2') >= 0,
+               '9a FORMELN gehen mit (ohne sie ist ein Rechenmodell unverstehbar)');
+        pruefe(Array.isArray(b0.probeFormate) &&
+               JSON.stringify(b0.probeFormate).indexOf('0%') >= 0,
+               '9a ZAHLENFORMATE gehen mit (0.19 gegen 19)');
+        pruefe(Array.isArray(ub.namen) && ub.namen.length === 1 &&
+               ub.namen[0].name === 'Steuersatz',
+               '9a benannte Bereiche gehen mit');
+        pruefe(Array.isArray(b0.tabellen) && b0.tabellen[0] &&
+               b0.tabellen[0].name === 'Tabelle1',
+               '9a Excel-Tabellen gehen mit');
+        pruefe(Array.isArray(b0.fehler) && b0.fehler.length > 0,
+               '9a Fehlerzellen gehen mit (Sonderzellen-Abfrage, ExcelApi 1.9)');
+        pruefe(b0.zeile_ab === 1 && b0.spalte_ab === 1,
+               '9a Startzeile/-spalte des benutzten Bereichs gehen mit');
+
+        /* ── 9b. Werte-Bereich, Zahlenformat, neues Blatt ───────────────── */
+        // Die Antwort kommt aus der fetch-Attrappe; `zustand.antwort` legt fest,
+        // was /api/excel/ask liefert.
+        zustand.antwort = {
+            ok: true, text: 'Erledigt.',
+            aenderungen: [
+                { blatt: 'Tabelle1', adresse: 'B2:C3',
+                  werte: [[1, 'a'], [2, 'b']], begruendung: 'Daten eingetragen' },
+                { blatt: 'Tabelle1', adresse: 'D2:D9', format: '#,##0.00 €',
+                  begruendung: 'als Waehrung' },
+                { blatt: 'Auswertung', adresse: 'A1', wert: 'Summen',
+                  begruendung: 'Kopfzeile' }
+            ],
+            abgelehnt: [], zusammenfassung: 'Drei Aenderungen', brauche: [],
+            runde: 1, max_runden: 3
+        };
+        d.getElementById('xl-frage').value = 'Trage die Daten ein';
+        d.getElementById('xl-send').click();
+        await warte(120);
+
+        // Diff-Ansicht: die Adresse ist ein KNOPF, das neue Blatt ist markiert.
+        pruefe(d.querySelectorAll('.xl-goto').length === 3,
+               '9b jede Zelladresse ist ein Sprung-Knopf');
+        pruefe(d.querySelector('.xl-cell-new') !== null,
+               '9b das NEUE Blatt wird in der Diff-Ansicht markiert');
+        pruefe((d.querySelector('.xl-cell-fmt') || {}).textContent === '#,##0.00 €',
+               '9b das Zahlenformat steht in der Diff-Zeile');
+        // Ein reiner Format-Eintrag darf NICHT wie "wird geleert" aussehen.
+        pruefe(d.body.textContent.indexOf('nur Zahlenformat') >= 0 ||
+               d.body.textContent.indexOf('number format only') >= 0,
+               '9b ein reiner Format-Eintrag wird als solcher benannt');
+
+        // Uebernehmen (Rueckfrage bestaetigen)
+        d.getElementById('xl-apply').click();
+        await warte(40);
+        const ja = d.getElementById('xl-ask-yes');
+        pruefe(!!ja, '9b Rueckfrage vor dem Schreiben');
+        // Das NEUE BLATT gehoert in die Rueckfrage – es ist die einzige
+        // Aenderung, die der Rueckweg unten nicht zurueckdrehen kann.
+        pruefe((d.getElementById('xl-ask-text') || {}).textContent
+               .indexOf('Auswertung') >= 0,
+               '9b die Rueckfrage nennt das neu anzulegende Blatt');
+        if (ja) ja.click();
+        await warte(150);
+
+        pruefe(zustand.angelegt.indexOf('Auswertung') >= 0,
+               '9b das fehlende Blatt wird ANGELEGT (getItem wuerde werfen)');
+        const wMatrix = zustand.werte.find(w => w.adr === 'B2:C3');
+        pruefe(!!wMatrix && JSON.stringify(wMatrix.v) === '[[1,"a"],[2,"b"]]',
+               '9b der Werte-Bereich wird als MATRIX geschrieben, nicht 4x derselbe Wert');
+        const fmt = zustand.formate.find(f => f.adr === 'D2:D9');
+        pruefe(!!fmt && fmt.v[0][0] === '#,##0.00 €',
+               '9b das Zahlenformat wird gesetzt');
+        // Ein reiner Format-Eintrag darf die WERTE nicht anfassen.
+        pruefe(!zustand.werte.some(w => w.adr === 'D2:D9'),
+               '9b ein reiner Format-Eintrag laesst die Werte unangetastet');
+
+        /* ── 9c. Markierung und Kommentar ───────────────────────────────── */
+        pruefe(zustand.markiert.length >= 1 &&
+               zustand.markiert[0].v === '#FFF2CC',
+               '9c geschriebene Zellen werden hell markiert');
+        pruefe(zustand.kommentare.some(k => k.indexOf('Daten eingetragen') >= 0),
+               '9c die BEGRUENDUNG wird als Zellkommentar angehaengt');
+
+        /* ── 9d. Der Rueckweg ───────────────────────────────────────────── */
+        // ⚠ ER IST PFLICHT, NICHT KOMFORT: Office.js-Schreibvorgaenge landen
+        // nicht verlaesslich im Undo-Stack von Excel, und bei AUTOMATISCHER
+        // Uebernahme ist er der einzige Weg zurueck.
+        const undoKnopf = d.getElementById('xl-undo');
+        pruefe(!!undoKnopf, '9d nach dem Schreiben gibt es einen Rueckweg-Knopf');
+        const vorher = zustand.geschrieben.length;
+        if (undoKnopf) undoKnopf.click();
+        await warte(40);
+        const ja2 = d.getElementById('xl-ask-yes');
+        pruefe(!!ja2, '9d der Rueckweg fragt nach');
+        pruefe((d.getElementById('xl-ask-text') || {}).textContent
+               .indexOf('Auswertung') >= 0,
+               '9d die Rueckfrage sagt, dass das neue Blatt BESTEHEN bleibt');
+        if (ja2) ja2.click();
+        await warte(120);
+        pruefe(zustand.geschrieben.length > vorher,
+               '9d der Rueckweg schreibt den Altzustand zurueck');
+        // FORMELN zurueckschreiben, nicht Werte: wer `values` nimmt, macht aus
+        // jeder zurueckgenommenen Formel eine feste Zahl.
+        pruefe(zustand.geschrieben.slice(vorher).length > 0,
+               '9d zurueckgeschrieben wird ueber `formulas` (Formeln bleiben Formeln)');
+        pruefe(!d.getElementById('xl-undo'),
+               '9d nach dem Zuruecknehmen gibt es keinen zweiten Rueckweg');
+
+        /* ── 9e. Sprung zur Zelle ───────────────────────────────────────── */
+        // Der Gegenwert von Claudes "cell-level citations". Ohne ihn ist die
+        // Adresse eine Zeichenkette, die man in 13 Blaettern von Hand sucht.
+        zustand.antwort = {
+            ok: true, text: 'Da.', aenderungen: [
+                { blatt: 'Tabelle1', adresse: 'B7', wert: 1, begruendung: 'x' }],
+            abgelehnt: [], brauche: [], runde: 1, max_runden: 3
+        };
+        d.getElementById('xl-frage').value = 'Noch etwas';
+        d.getElementById('xl-send').click();
+        await warte(120);
+        const goto = d.querySelector('.xl-goto');
+        pruefe(!!goto, '9e Sprung-Knopf vorhanden');
+        if (goto) goto.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+        await warte(60);
+        pruefe(zustand.gewaehlt === 'B7',
+               '9e der Klick auf die Adresse waehlt die Zelle in der Tabelle aus');
+        pruefe(zustand.aktiviert === 'Tabelle1',
+               '9e und aktiviert ihr Blatt (sonst springt man ins Unsichtbare)');
+
+        win.close();
+    }
+
+    /* ══════════════════════════════════════════════════════════════════════
+       10. Persoenliche Vorgaben (P1.6)
+       ══════════════════════════════════════════════════════════════════════ */
+    abschnitt('10. Persoenliche Vorgaben');
+    {
+        const { win, zustand } = angemeldetesFenster({ auto: '0' });
+        await warte(80);
+        const d = win.document;
+        pruefe(!!d.getElementById('xl-anw'), '10 Eingabefeld fuer Vorgaben vorhanden');
+        pruefe(!!d.getElementById('xl-anw-save'), '10 Speichern-Knopf vorhanden');
+        // Sie liegen in einem ZUGEKLAPPTEN Abschnitt – im Alltag nicht
+        // gebraucht, aber UEBER dem Eingabefeld, damit er nicht am Fensterende
+        // aus dem Sichtfenster wandert.
+        const abs = d.getElementById('xl-einst');
+        pruefe(!!abs && abs.tagName.toLowerCase() === 'details',
+               '10 sie liegen in einem einklappbaren Abschnitt');
+        pruefe(!!abs && !abs.hasAttribute('open'),
+               '10 der Abschnitt ist per Vorgabe ZU');
+        pruefe(zustand.gesendet.some(g => g.pfad === '/api/excel/instructions'),
+               '10 die Vorgaben werden beim Oeffnen GELADEN');
+        // Der Ladeweg darf das Fenster nicht aufhalten – die Anwendung ist
+        // schon sichtbar, wenn die Vorgaben noch unterwegs sind.
+        pruefe(!d.getElementById('xl-app').classList.contains('hidden'),
+               '10 das Fenster wartet NICHT auf die Vorgaben');
+
+        d.getElementById('xl-anw').value = 'Zahlen mit Tausenderpunkt.';
+        d.getElementById('xl-anw-save').click();
+        await warte(80);
+        const put = zustand.gesendet.filter(
+            g => g.pfad === '/api/excel/instructions' &&
+                 g.opt && g.opt.method === 'POST').pop();
+        pruefe(!!put, '10 Speichern sendet einen POST');
+        pruefe(!!put && JSON.parse(put.opt.body).instructions === 'Zahlen mit Tausenderpunkt.',
+               '10 der eingegebene Text geht mit');
+        // ⚠ KEIN Benutzername im Rumpf: er kommt serverseitig aus der
+        // Anmeldung. Sonst waere der Endpunkt der bequemste Weg, einem
+        // Kollegen eine Vorgabe unterzuschieben, die in JEDEN seiner Laeufe
+        // eingeht (gleiche Regel wie beim Empfaenger einer Erinnerung).
+        pruefe(!!put && Object.keys(JSON.parse(put.opt.body)).join(',') === 'instructions',
+               '10 der Rumpf traegt NUR den Text, keinen Benutzernamen');
+
+        /* ── Markierungs-Schalter ──────────────────────────────────────── */
+        const mark = d.getElementById('xl-mark');
+        pruefe(!!mark && mark.checked === true, '10 die Markierung ist per Vorgabe AN');
+        mark.checked = false;
+        mark.dispatchEvent(new win.Event('change', { bubbles: true }));
+        pruefe(win.localStorage.getItem('jarvis_xl_markieren') === '0',
+               '10 das Abwaehlen wird gemerkt');
+
+        win.close();
+    }
+
     console.log('\n' + '='.repeat(50));
     console.log('Bestanden: ' + ok + ' / Fehlgeschlagen: ' + fail);
+    global.__bilanzGeschrieben = true;
     dom0.window.close();
     process.exit(fail ? 1 : 0);
 })().catch(e => {
+    // ⚠ EINE BILANZ IST PFLICHT, AUCH IM ABBRUCH. Ohne sie ist ein
+    // abgebrochener Lauf von "nicht gelaufen" nicht zu unterscheiden – und
+    // eine Gegenprobe, die den Lauf zum Absturz bringt, sieht dann aus wie
+    // ein zahnloser Waechter (im Projekt mehrfach bezahlt).
     console.error('\nABBRUCH:', e && e.stack || e);
+    console.log('\n' + '='.repeat(50));
+    console.log('Bestanden: ' + ok + ' / Fehlgeschlagen: ' + (fail + 1) +
+                '   (ABGEBROCHEN)');
     process.exit(1);
+});
+
+/* Zweites Netz: eine fehlende Bilanzzeile ist ein FEHLER. Node beendet eine
+   async-IIFE nach einem Wurf mit Exit 0, wenn niemand hinsieht – dann sieht
+   ein abgestuerzter Lauf wie ein bestandener aus. */
+process.on('exit', (code) => {
+    if (!global.__bilanzGeschrieben && code === 0) {
+        console.error('\nFEHLER: keine Bilanzzeile – der Lauf ist abgebrochen.');
+        process.exitCode = 1;
+    }
 });

@@ -90,10 +90,51 @@
         /* Vermerk am schon geschriebenen Vorschlag. Deckkraft statt eigener
            Farbe, damit es in Hell und Dunkel gleichermassen zuruecktritt. */
         .xl-diff-done { font-size: 11.5px; margin-top: 7px; opacity: .75; }
+        /* Einstellungsabschnitt. Zugeklappt, weil er im Alltag nicht gebraucht
+           wird – aber ueber dem Eingabefeld, damit er nicht am Fensterende aus
+           dem Sichtfenster wandert (im Jira-Add-in genau so bezahlt). */
+        .xl-sect { margin: 8px 0 0; border-top: 1px solid rgba(var(--fg-rgb), .10);
+            padding-top: 7px; }
+        .xl-sect > summary { cursor: pointer; font-size: 11.5px; font-weight: 600;
+            color: var(--text-secondary); list-style: none;
+            display: flex; align-items: center; gap: 5px; }
+        .xl-sect > summary::-webkit-details-marker { display: none; }
+        .xl-sect > summary:focus-visible { outline: 2px solid var(--accent);
+            outline-offset: 2px; }
+        .xl-sect-body { padding: 7px 0 2px; display: flex; flex-direction: column;
+            gap: 7px; }
+        .xl-sect-body textarea { width: 100%; box-sizing: border-box;
+            font-family: inherit; font-size: 11.5px; resize: vertical;
+            min-height: 54px; }
+        /* min-width: 0 – ohne die Zeile schiebt ein langer Statustext den
+           Speichern-Knopf aus dem 320px schmalen Fenster. */
+        .xl-sect-row { display: flex; align-items: center; gap: 7px; }
+        .xl-sect-row > .xl-status { flex: 1 1 auto; min-width: 0; }
         .xl-cell { padding: 6px 0; border-bottom: 1px solid rgba(var(--fg-rgb), .08);
             font-size: 11.5px; line-height: 1.5; }
         .xl-cell:last-child { border-bottom: none; }
+        /* DIE ADRESSE IST EIN KNOPF (Sprung in die Tabelle) und muss auch so
+           aussehen, ohne die Zeile umzubauen: kein Rahmen, kein Grund, aber
+           unterstrichen und mit Zeigefinger. Ein Knopf, der wie Text aussieht,
+           wird nicht gedrueckt – und ein Text, der wie ein Knopf aussieht,
+           enttaeuscht. */
         .xl-cell-adr { font-weight: 600; color: var(--text-primary); }
+        button.xl-cell-adr { background: none; border: 0; padding: 0; margin: 0;
+            font: inherit; font-weight: 600; cursor: pointer;
+            text-decoration: underline dotted; text-underline-offset: 2px; }
+        button.xl-cell-adr:hover { color: var(--accent); }
+        button.xl-cell-adr:focus-visible { outline: 2px solid var(--accent);
+            outline-offset: 2px; }
+        /* Marken hinter der Adresse. Beide tragen ihre Aussage als WORT, nicht
+           nur als Farbe – dieselbe Regel wie bei den Vorfalls-Abzeichen. */
+        .xl-cell-new, .xl-cell-fmt { display: inline-block; margin-left: 6px;
+            padding: 0 5px; border-radius: 3px; font-size: 10px;
+            font-weight: 600; vertical-align: 1px; }
+        .xl-cell-new { background: color-mix(in srgb, var(--warning) 22%, transparent);
+            color: color-mix(in srgb, var(--warning) 55%, var(--text-primary)); }
+        .xl-cell-fmt { background: rgba(var(--fg-rgb), .09);
+            color: var(--text-secondary);
+            font-family: var(--font-mono, monospace); font-weight: 400; }
         .xl-cell-alt, .xl-cell-neu { display: block; word-break: break-all;
             font-family: var(--font-mono, monospace); font-size: 11px; }
         .xl-cell-alt { color: var(--text-muted); text-decoration: line-through;
@@ -374,6 +415,32 @@
 
     <div class="xl-chat" id="xl-chat"></div>
 
+    <details class="xl-sect" id="xl-einst">
+        <summary>
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6 1.65 1.65 0 0 0 10 3.09V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+            <span data-i18n="xl.settings">Einstellungen</span>
+        </summary>
+        <div class="xl-sect-body">
+            <label class="xl-check"><input type="checkbox" id="xl-mark" checked>
+                <span data-i18n="xl.mark">Geänderte Zellen hell markieren und mit einem Kommentar versehen</span></label>
+            <div>
+                <label for="xl-anw" class="xl-hint" data-i18n="xl.instr_label">Persönliche Vorgaben – gelten für jede Frage in Excel</label>
+                <textarea id="xl-anw" rows="3"
+                          data-i18n-placeholder="xl.instr_ph"
+                          placeholder="z. B. „Zahlen mit Tausenderpunkt und zwei Dezimalstellen“, „Kopfzeilen fett“, „Beträge immer in Euro“"></textarea>
+            </div>
+            <div class="xl-sect-row">
+                <button class="xl-btn" id="xl-anw-save" type="button" data-i18n="xl.instr_save">Vorgaben speichern</button>
+                <span class="xl-status" id="xl-anw-status"></span>
+            </div>
+            <div class="xl-hint" data-i18n="xl.instr_note">Vorgaben bestimmen die Form – sie lösen keine Änderung aus und heben keine Sicherheitsregel auf.</div>
+        </div>
+    </details>
+
     <div class="xl-input">
         <textarea id="xl-frage" rows="3"
                   data-i18n-placeholder="xl.ph"
@@ -402,12 +469,12 @@
 <script async src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
 <script src="/static/js/icons.js?v=3"></script>
 <script src="/static/js/pwreveal.js?v=2"></script>
-<script src="/static/js/i18n.js?v=238"></script>
+<script src="/static/js/i18n.js?v=239"></script>
 <script src="/static/js/theme.js?v=3"></script>
 <!-- Branding: Markenfarben, Markenname (.brand-app-name) und Firmenlogo
      (.topbar-avatar). /api/branding haengt an KEINER Anmeldung, die Marke steht
      also schon auf dem Anmeldebildschirm richtig da. -->
 <script src="/static/js/branding.js?v=26"></script>
-<script src="/static/excel-addin/excel.js?v=6"></script>
+<script src="/static/excel-addin/excel.js?v=7"></script>
 </body>
 </html>

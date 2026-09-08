@@ -46,8 +46,12 @@ class ExcelVorschlagTool(BaseTool):
             "jede Zelle mit altem und neuem Inhalt und bestätigt selbst. "
             "Formeln in ENGLISCHER Schreibweise mit Komma als Trennzeichen "
             "(=SUM(A1:A10), =IF(B2>0,B2*0.19,0)); Excel übersetzt sie in die "
-            "Sprache des Benutzers. Mehrere Zellen in EINEM Aufruf übergeben, "
-            "nicht in mehreren."
+            "Sprache des Benutzers. Je Eintrag genau eines von: 'formel' (eine "
+            "Formel für den ganzen Bereich), 'werte' (verschiedene Werte, "
+            "zeilenweise verschachtelt), 'wert' (ein Wert für jede Zelle) – "
+            "dazu optional 'format' für das Zahlenformat, das auch ALLEIN "
+            "stehen darf. Mehrere Zellen in EINEM Aufruf übergeben, nicht in "
+            "mehreren."
         )
 
     def parameters_schema(self) -> dict:
@@ -76,14 +80,37 @@ class ExcelVorschlagTool(BaseTool):
                             },
                             "formel": {
                                 "type": "STRING",
-                                "description": "Formel in englischer "
+                                "description": "EINE Formel in englischer "
                                                "Schreibweise, beginnend mit =. "
-                                               "Entweder formel ODER wert.",
+                                               "Gilt fuer den ganzen Bereich; "
+                                               "Excel rechnet die Bezuege je "
+                                               "Zeile weiter.",
+                            },
+                            "werte": {
+                                "type": "ARRAY",
+                                "description": "VERSCHIEDENE Werte, zeilenweise "
+                                               "verschachtelt: [[1,\"a\"],[2,\"b\"]]. "
+                                               "Die Masse muessen zum Bereich "
+                                               "passen. Fuer eine Datenliste ist "
+                                               "das der richtige Weg - nicht "
+                                               "viele Einzeleintraege.",
+                                "items": {"type": "ARRAY",
+                                          "items": {"type": "STRING"}},
                             },
                             "wert": {
                                 "type": "STRING",
-                                "description": "Fester Wert (Text oder Zahl), "
-                                               "wenn keine Formel gebraucht wird.",
+                                "description": "EIN fester Wert, der in JEDE "
+                                               "Zelle des Bereichs geschrieben "
+                                               "wird. Fuer verschiedene Werte "
+                                               "stattdessen 'werte' benutzen.",
+                            },
+                            "format": {
+                                "type": "STRING",
+                                "description": "Zahlenformat des Bereichs, z.B. "
+                                               "#,##0.00 \u20ac oder 0.0% oder "
+                                               "TT.MM.JJJJ. Darf ALLEIN stehen "
+                                               "(dann bleiben die Werte "
+                                               "unangetastet).",
                             },
                             "begruendung": {
                                 "type": "STRING",

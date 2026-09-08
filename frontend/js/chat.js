@@ -339,14 +339,22 @@
         if (_csNewBtn && !_csNewBtn._wired) { _csNewBtn._wired = true; _csNewBtn.addEventListener('click', _newSession); }
         const _csWelBtn = $('cs-welcome');
         if (_csWelBtn && !_csWelBtn._wired) { _csWelBtn._wired = true; _csWelBtn.addEventListener('click', _restoreWelcome); }
-        const _csPreBtn = $('cs-preprompt');
-        if (_csPreBtn && !_csPreBtn._wired) { _csPreBtn._wired = true; _csPreBtn.addEventListener('click', _openPreprompt); }
-        const _ppSave = $('btn-preprompt-save');
-        if (_ppSave && !_ppSave._wired) { _ppSave._wired = true; _ppSave.addEventListener('click', _savePreprompt); }
-        const _ppClose = $('btn-preprompt-close');
-        if (_ppClose && !_ppClose._wired) { _ppClose._wired = true; _ppClose.addEventListener('click', _closePreprompt); }
-        const _ppModal = $('preprompt-modal');
-        if (_ppModal && !_ppModal._wired) { _ppModal._wired = true; _ppModal.addEventListener('click', (e) => { if (e.target === _ppModal) _closePreprompt(); }); }
+        const _csSetBtn = $('cs-settings');
+        if (_csSetBtn && !_csSetBtn._wired) { _csSetBtn._wired = true; _csSetBtn.addEventListener('click', _openChatSettings); }
+        const _ppSave = $('btn-chat-settings-save');
+        if (_ppSave && !_ppSave._wired) { _ppSave._wired = true; _ppSave.addEventListener('click', _saveChatSettings); }
+        const _ppClose = $('btn-chat-settings-close');
+        if (_ppClose && !_ppClose._wired) { _ppClose._wired = true; _ppClose.addEventListener('click', _closeChatSettings); }
+        const _ppModal = $('chat-settings-modal');
+        if (_ppModal && !_ppModal._wired) { _ppModal._wired = true; _ppModal.addEventListener('click', (e) => { if (e.target === _ppModal) _closeChatSettings(); }); }
+        const _kbAll = $('chs-kb-all');
+        if (_kbAll && !_kbAll._wired) { _kbAll._wired = true; _kbAll.addEventListener('click', () => _kbDefSetzeAlle(true)); }
+        const _kbNone = $('chs-kb-none');
+        if (_kbNone && !_kbNone._wired) { _kbNone._wired = true; _kbNone.addEventListener('click', () => _kbDefSetzeAlle(false)); }
+        // Die Vorauswahl fuer neue Chats FRUEH laden: `_restoreHistory` wartet
+        // darauf, und sie laeuft parallel zum Abruf der Sitzung – so kostet sie
+        // praktisch keine Zeit und der erste neue Chat hat sie schon.
+        _kbDefLaden();
         const _csCol = $('cs-collapse'); if (_csCol && !_csCol._wired) { _csCol._wired = true; _csCol.addEventListener('click', () => _setSidebarCollapsed(true)); }
         const _csExp = $('cs-expand');   if (_csExp && !_csExp._wired) { _csExp._wired = true; _csExp.addEventListener('click', () => _setSidebarCollapsed(false)); }
         // Zuletzt gewählten Einklapp-Zustand wiederherstellen
@@ -538,6 +546,51 @@
     // Wissensgruppen-Filter (aufklappbare Checkbox-Liste in der Eingabeleiste)
     let _kbFilter = null;
     let _profSel = null;   // KI-Profil-Pulldown (hinter dem Wissensgruppen-Filter)
+    // ── Wissensquellen-Vorauswahl fuer NEUE Chats ────────────────────────────
+    // Gehalten wird die Liste der ABGEWAEHLTEN Gruppen-Ids (wie im Backend und
+    // wie im Filter selbst): eine spaeter angelegte Wissensgruppe ist damit von
+    // selbst dabei, statt still zu fehlen.
+    let _kbDefOff = null;      // Set der abgewaehlten Ids, null = noch nicht geladen
+    let _kbDefPromise = null;  // laufender/erledigter Abruf (einmal je Seitenaufbau)
+
+    // ⚠ Das Promise dient dem WARTEN, nicht der Rueckgabe: ein aufgeloestes
+    // Promise haelt seinen Wert fest, und nach dem Speichern im Dialog zeigt
+    // `_kbDefOff` auf ein NEUES Set. Wer den Promise-Wert liest, arbeitet mit
+    // dem Stand des ersten Abrufs weiter (gemessen: die frisch gespeicherte
+    // Vorauswahl griff erst nach einem Neuladen). Alle Leser nehmen deshalb
+    // nach dem `await` die VARIABLE.
+    function _kbDefLaden() {
+        if (_kbDefPromise) return _kbDefPromise;
+        _kbDefPromise = (async () => {
+            try {
+                const r = await fetch('/api/chat/kb-default', { headers: _authHdr() });
+                const d = await r.json();
+                if (d && d.ok) _kbDefOff = new Set(Array.isArray(d.off) ? d.off : []);
+            } catch (e) { /* aelteres Backend / Netzfehler: dann gilt "alle" */ }
+            // Fail-open: ohne Auskunft bleibt es beim bisherigen Verhalten.
+            if (!_kbDefOff) _kbDefOff = new Set();
+            return _kbDefOff;
+        })();
+        return _kbDefPromise;
+    }
+
+    // Vorauswahl in die Semantik des Filters uebersetzen:
+    // null = alle (kein Filter) · [] = keine · [ids] = nur diese.
+    // Braucht die Eintragsliste, weil "keine abgewaehlt" und "alle abgewaehlt"
+    // nur im Vergleich mit ihr zu unterscheiden sind.
+    async function _kbDefAlsAuswahl() {
+        await _kbDefLaden();
+        const off = _kbDefOff;
+        if (!off || off.size === 0) return null;
+        if (!window.KbGroupFilter || !window.KbGroupFilter.loadEntries) return null;
+        let alle = [];
+        try { alle = await window.KbGroupFilter.loadEntries(); } catch (e) { return null; }
+        if (!alle.length) return null;
+        const an = alle.filter(e => !off.has(e.id)).map(e => e.id);
+        if (an.length >= alle.length) return null;
+        return an;   // auch [] ist gueltig: "kein Wissen" ist eine bewusste Wahl
+    }
+
     function ensureKbFilter() {
         if (_kbFilter || !window.KbGroupFilter) return;
         const slot = document.getElementById('kb-filter-slot');
@@ -2216,49 +2269,196 @@
         }
     }
 
-    // ── Persönlicher Preprompt (Zahnrad neben "+ Neuer Chat") ────────────────
-    async function _openPreprompt() {
-        const modal = $('preprompt-modal');
+    // ── Einstellungen-Dialog (Zahnrad neben "+ Neuer Chat") ──────────────────
+    // Zwei Container: persoenlicher Preprompt (gilt fuer ALLE Chats) und die
+    // Wissensquellen-Vorauswahl (gilt fuer NEUE Chats). EIN Speichern-Knopf
+    // schreibt beides – die zwei Endpunkte setzen je ihren eigenen Wert
+    // vollstaendig, es gibt also keine Merge-Semantik, die man trennen muesste.
+    let _kbDefEintraege = null;   // geladene Eintragsliste, null = nicht ladbar
+
+    // Klappzustand der zwei Container. VORGABE: Preprompt offen, Wissensquellen
+    // zu – der Preprompt wird haeufiger angefasst, die Vorauswahl ist eine
+    // Einmal-Einstellung. Gemerkt wird die Wahl des Benutzers, sonst muesste er
+    // sie bei jedem Oeffnen neu treffen.
+    const _CHS_OFFEN_KEY = 'jarvis_chat_settings_open';
+    const _CHS_VORGABE = { preprompt: true, kb: false };
+
+    function _chsOffenLesen() {
+        // Fail-safe: ohne (oder mit kaputtem) gespeicherten Wert gelten die
+        // Vorgaben – localStorage kann in einem privaten Fenster auch werfen.
+        const st = Object.assign({}, _CHS_VORGABE);
+        try {
+            const d = JSON.parse(localStorage.getItem(_CHS_OFFEN_KEY) || '{}');
+            if (d && typeof d === 'object') {
+                Object.keys(_CHS_VORGABE).forEach(k => {
+                    if (typeof d[k] === 'boolean') st[k] = d[k];
+                });
+            }
+        } catch (e) { /* Vorgaben */ }
+        return st;
+    }
+
+    function _chsOffenSchreiben() {
+        const st = {};
+        document.querySelectorAll('#chat-settings-modal .chs-sect[data-chs]').forEach(d => {
+            st[d.dataset.chs] = d.open;
+        });
+        try { localStorage.setItem(_CHS_OFFEN_KEY, JSON.stringify(st)); } catch (e) {}
+    }
+
+    // Zustand anwenden und die Speicherung EINMAL verdrahten. Idempotent, weil
+    // der Dialog mehrfach geoeffnet wird.
+    function _chsKlappZustand() {
+        const st = _chsOffenLesen();
+        document.querySelectorAll('#chat-settings-modal .chs-sect[data-chs]').forEach(d => {
+            const soll = st[d.dataset.chs];
+            if (typeof soll === 'boolean') d.open = soll;
+            if (!d._chsWired) {
+                d._chsWired = true;
+                d.addEventListener('toggle', _chsOffenSchreiben);
+            }
+        });
+    }
+
+    async function _openChatSettings() {
+        const modal = $('chat-settings-modal');
         const ta = $('preprompt-text');
-        const st = $('preprompt-status');
-        if (!modal || !ta) return;
+        const st = $('chat-settings-status');
+        if (!modal) return;
         if (st) st.textContent = '';
-        ta.value = '';
+        if (ta) ta.value = '';
+        _chsKlappZustand();
         modal.classList.remove('hidden');
-        ta.focus();
+        if (ta) ta.focus();
+        // Beide Teile UNABHAENGIG laden: ein Fehler im einen darf den anderen
+        // nicht mitnehmen.
         try {
             const r = await fetch('/api/chat/preprompt', { headers: _csHeaders() });
             const d = await r.json();
-            if (d && d.ok) ta.value = d.preprompt || '';
+            if (d && d.ok && ta) ta.value = d.preprompt || '';
         } catch (e) {}
+        await _kbDefZeichnen();
     }
 
-    function _closePreprompt() {
-        const modal = $('preprompt-modal');
+    function _closeChatSettings() {
+        const modal = $('chat-settings-modal');
         if (modal) modal.classList.add('hidden');
     }
 
-    async function _savePreprompt() {
-        const ta = $('preprompt-text');
-        const st = $('preprompt-status');
-        const btn = $('btn-preprompt-save');
-        if (!ta) return;
-        if (btn) btn.disabled = true;
+    // Gruppenliste + Vorauswahl in den Dialog zeichnen.
+    async function _kbDefZeichnen() {
+        const box = $('chs-kb-list');
+        const hint = $('chs-kb-hint');
+        if (!box) return;
+        box.innerHTML = '<div class="chs-kb-empty">' + escapeHtml(window.t('common.loading') || '…') + '</div>';
+        await _kbDefLaden();
+        const off = _kbDefOff || new Set();
+        let alle = null;
         try {
-            const r = await fetch('/api/chat/preprompt', {
-                method: 'PUT',
-                headers: _csHeaders({ 'Content-Type': 'application/json' }),
-                body: JSON.stringify({ preprompt: ta.value })
-            });
-            const d = await r.json();
-            if (d && d.ok) {
-                if (st) st.textContent = window.t('chat.preprompt_saved');
-                setTimeout(_closePreprompt, 700);
-            } else if (st) {
-                st.textContent = window.t('common.error');
+            if (window.KbGroupFilter && window.KbGroupFilter.loadEntries) {
+                alle = await window.KbGroupFilter.loadEntries();
             }
-        } catch (e) {
-            if (st) st.textContent = window.t('common.error');
+        } catch (e) { alle = null; }
+        _kbDefEintraege = alle;
+        if (!alle) {
+            // Fail-safe: ohne Liste wird beim Speichern NICHTS an der Vorauswahl
+            // geaendert – sonst schriebe ein Speichern "nichts abgewaehlt" und
+            // loeschte eine vorhandene Einstellung.
+            box.innerHTML = '<div class="chs-kb-empty">' + escapeHtml(window.t('chat.kbdef_load_failed')) + '</div>';
+            if (hint) { hint.hidden = false; hint.className = 'chs-hint is-warn'; hint.textContent = window.t('chat.kbdef_load_failed'); }
+            return;
+        }
+        if (!alle.length) {
+            box.innerHTML = '<div class="chs-kb-empty">' + escapeHtml(window.t('kbfilter.empty')) + '</div>';
+            if (hint) hint.hidden = true;
+            return;
+        }
+        box.innerHTML = alle.map(e =>
+            '<label class="chs-kb-row"><input type="checkbox" value="' + escapeHtml(e.id) + '"' + (off.has(e.id) ? '' : ' checked') + '>' +
+            '<span class="chs-kb-dot" style="background:' + escapeHtml(e.color || '#94a3b8') + '"></span>' +
+            '<span class="chs-kb-name">' + escapeHtml(e.name) + '</span></label>'
+        ).join('');
+        // Nur auf `change` hoeren und NIE selbst umschalten: das Kaestchen sitzt
+        // in einem <label>, der Browser schaltet es bereits – ein zusaetzliches
+        // Umschalten hebt sich auf und der Klick tut unterm Strich nichts
+        // (im Projekt beim AD-Picker bezahlt).
+        box.querySelectorAll('input[type=checkbox]').forEach(cb => {
+            cb.addEventListener('change', _kbDefHinweis);
+        });
+        _kbDefHinweis();
+    }
+
+    function _kbDefSetzeAlle(an) {
+        const box = $('chs-kb-list');
+        if (!box) return;
+        box.querySelectorAll('input[type=checkbox]').forEach(cb => { cb.checked = !!an; });
+        _kbDefHinweis();
+    }
+
+    // Sagt es, wenn die Wahl bedeutet "neue Chats ohne Wissensdatenbank" –
+    // sonst ist das eine stille Nebenwirkung, die niemand mit dieser
+    // Einstellung verbindet.
+    function _kbDefHinweis() {
+        const box = $('chs-kb-list');
+        const hint = $('chs-kb-hint');
+        if (!box || !hint) return;
+        const cbs = Array.from(box.querySelectorAll('input[type=checkbox]'));
+        if (!cbs.length) { hint.hidden = true; return; }
+        const an = cbs.filter(cb => cb.checked).length;
+        if (an === 0) { hint.hidden = false; hint.className = 'chs-hint is-warn'; hint.textContent = window.t('chat.kbdef_none_hint'); }
+        else { hint.hidden = true; hint.textContent = ''; }
+    }
+
+    // Sprachwechsel bei OFFENEM Dialog: der Hinweis und die Ladezeile kommen aus
+    // t() und werden von applyLang() nicht erfasst – also neu zeichnen.
+    try {
+        window.addEventListener('jarvis-lang-changed', function () {
+            const m = $('chat-settings-modal');
+            if (m && !m.classList.contains('hidden')) { _kbDefHinweis(); }
+        });
+    } catch (e) { /* aeltere Umgebung ohne Ereignis: dann wie bisher */ }
+
+    async function _saveChatSettings() {
+        const ta = $('preprompt-text');
+        const st = $('chat-settings-status');
+        const btn = $('btn-chat-settings-save');
+        if (btn) btn.disabled = true;
+        const fehler = [];
+        try {
+            // (1) Preprompt
+            if (ta) {
+                try {
+                    const r = await fetch('/api/chat/preprompt', {
+                        method: 'PUT',
+                        headers: _csHeaders({ 'Content-Type': 'application/json' }),
+                        body: JSON.stringify({ preprompt: ta.value })
+                    });
+                    const d = await r.json();
+                    if (!d || !d.ok) fehler.push(window.t('chat.preprompt_heading'));
+                } catch (e) { fehler.push(window.t('chat.preprompt_heading')); }
+            }
+            // (2) Wissensquellen-Vorauswahl – NUR wenn die Liste wirklich vorlag
+            const box = $('chs-kb-list');
+            const cbs = box ? Array.from(box.querySelectorAll('input[type=checkbox]')) : [];
+            if (_kbDefEintraege && cbs.length) {
+                const off = cbs.filter(cb => !cb.checked).map(cb => cb.value);
+                try {
+                    const r = await fetch('/api/chat/kb-default', {
+                        method: 'PUT',
+                        headers: _csHeaders({ 'Content-Type': 'application/json' }),
+                        body: JSON.stringify({ off: off })
+                    });
+                    const d = await r.json();
+                    if (d && d.ok) _kbDefOff = new Set(Array.isArray(d.off) ? d.off : []);
+                    else fehler.push(window.t('chat.kbdef_heading'));
+                } catch (e) { fehler.push(window.t('chat.kbdef_heading')); }
+            }
+            if (st) {
+                st.textContent = fehler.length
+                    ? window.t('chat.settings_save_failed').replace('{t}', fehler.join(', '))
+                    : window.t('chat.preprompt_saved');
+            }
+            if (!fehler.length) setTimeout(_closeChatSettings, 700);
         } finally {
             if (btn) btn.disabled = false;
         }
@@ -2325,8 +2525,20 @@
         let _sdata = null;
         if (_activeSid) _sdata = await _csGet(_activeSid);
         _chatHistory = (_sdata && _sdata.transcript) || [];
-        // Wissensgruppen-Auswahl dieser Sitzung wiederherstellen (sonst: alle)
-        if (_kbFilter) _kbFilter.setSelection((_sdata && _sdata.kb_groups_set) ? _sdata.kb_groups : null);
+        // Wissensgruppen-Auswahl dieser Sitzung wiederherstellen.
+        //  - Sitzung hat eine gespeicherte Auswahl -> die gilt.
+        //  - FRISCHE Sitzung (kein Transkript, keine Auswahl) -> die persoenliche
+        //    Vorauswahl aus dem Einstellungen-Dialog.
+        //  - Alte Sitzung MIT Verlauf, aber ohne gespeicherte Auswahl -> "alle"
+        //    wie bisher: einen laufenden Chat still auf andere Wissensquellen
+        //    umzustellen wuerde seine Antworten aendern, ohne dass der Benutzer
+        //    etwas getan hat. Eine Vorauswahl, die dort nicht greift, kostet
+        //    dagegen nur einen Klick – die harmlosere Halbfehlerstellung.
+        if (_kbFilter) {
+            if (_sdata && _sdata.kb_groups_set) _kbFilter.setSelection(_sdata.kb_groups);
+            else if (_chatHistory.length === 0) _kbFilter.setSelection(await _kbDefAlsAuswahl());
+            else _kbFilter.setSelection(null);
+        }
         // Gewaehltes KI-Profil dieser Sitzung wiederherstellen + aktivieren
         if (_profSel && _sdata && _sdata.profile_id) _profSel.setSelected(_sdata.profile_id, { activate: true });
         if (_chatHistory.length === 0) {

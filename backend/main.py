@@ -6325,6 +6325,39 @@ async def chat_preprompt_save(request: Request, user: str = Depends(require_auth
     return JSONResponse({"ok": True, "preprompt": saved})
 
 
+@app.get("/api/chat/kb-default")
+async def chat_kb_default_get(user: str = Depends(require_auth)):
+    """Wissensquellen-Vorauswahl fuer NEUE Chats dieses Benutzers.
+
+    Geliefert werden die ABGEWAEHLTEN Gruppen-Ids (`off`) – nicht die
+    ausgewaehlten: so ist eine spaeter angelegte Wissensgruppe von selbst dabei
+    (Begruendung in chat_sessions.get_kb_default). `set` sagt, ob ueberhaupt
+    eine Vorauswahl hinterlegt ist.
+    """
+    from backend import chat_sessions as cs
+    off = cs.get_kb_default(user)
+    return JSONResponse({"ok": True, "off": off or [], "set": off is not None})
+
+
+@app.put("/api/chat/kb-default")
+async def chat_kb_default_save(request: Request, user: str = Depends(require_auth)):
+    """Wissensquellen-Vorauswahl speichern (leere Liste entfernt sie).
+
+    Der Benutzer kommt AUSSCHLIESSLICH aus der Anmeldung, nie aus dem Rumpf –
+    sonst waere der Endpunkt ein Weg in die Einstellungen fremder Benutzer.
+    """
+    from backend import chat_sessions as cs
+    off = []
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            off = body.get("off")
+    except Exception:  # noqa: BLE001
+        pass
+    saved = cs.save_kb_default(user, off)
+    return JSONResponse({"ok": True, "off": saved or [], "set": saved is not None})
+
+
 @app.get("/api/chat/sessions")
 async def chat_sessions_list(user: str = Depends(require_auth)):
     """Alle Chat-Sitzungen des Benutzers (neueste zuerst).

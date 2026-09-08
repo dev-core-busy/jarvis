@@ -76,6 +76,20 @@ window.KbGroupFilter = (function () {
         } catch (e) { return []; }
     }
 
+    // Der "ungruppiert"-Eintrag und die geladene Gruppenliste sind EINE Quelle
+    // fuer alle Anzeigen dieser Auswahl (Filter in der Eingabeleiste UND die
+    // Vorauswahl im Einstellungen-Dialog von /chat). Zwei Fassungen liefen beim
+    // naechsten Feinschliff auseinander, und dann haekt der Dialog etwas anderes
+    // an, als der Filter spaeter anwendet.
+    function ungroupedEntry() {
+        return { id: UNGROUPED, name: t('kbfilter.ungrouped', 'ungruppiert'), color: '#94a3b8' };
+    }
+    // Alle waehlbaren Eintraege (Gruppen + "ungruppiert"), frisch geladen.
+    async function loadEntries() {
+        var g = await loadGroups();
+        return g.concat([ungroupedEntry()]);
+    }
+
     // Sprachwechsel: das Abzeichen ("alle"/"all") und die Popup-Texte werden nur
     // beim Rendern gesetzt. applyLang() fasst sie nicht an, weil sie aus t()
     // kommen – deshalb bei `jarvis-lang-changed` neu zeichnen.
@@ -107,7 +121,7 @@ window.KbGroupFilter = (function () {
             localStorage.setItem(storageKey, JSON.stringify(Array.from(_off)));
         }
         function entries() {
-            return _groups.concat([{ id: UNGROUPED, name: t('kbfilter.ungrouped', 'ungruppiert'), color: '#94a3b8' }]);
+            return _groups.concat([ungroupedEntry()]);
         }
         // Programmatisch gesetzte Auswahl (aus einer Sitzung) auf _off anwenden.
         function applyDesired() {
@@ -211,5 +225,5 @@ window.KbGroupFilter = (function () {
         return pub;
     }
 
-    return { mount: mount };
+    return { mount: mount, loadEntries: loadEntries, UNGROUPED: UNGROUPED };
 })();

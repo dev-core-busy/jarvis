@@ -97,6 +97,83 @@ def save_preprompt(user: str, text: str) -> str:
     return text if text.strip() else ""
 
 
+# ─── Wissensquellen-Vorauswahl fuer NEUE Chats (pro Benutzer) ────────────────
+# Liegt in data/chats/<user>/kb_default.json und bestimmt, welche Wissensgruppen
+# in einem FRISCH angelegten Chat vorausgewaehlt sind. In einem laufenden Chat
+# entscheidet weiterhin die Auswahl in der Eingabeleiste (sie steht in der
+# meta.json der Sitzung).
+#
+# ⚠ GESPEICHERT WERDEN DIE ABGEWAEHLTEN IDS, nicht die ausgewaehlten. Eine
+# spaeter angelegte Wissensgruppe ist damit von selbst dabei, statt still zu
+# fehlen – dieselbe Ueberlegung, aus der der Filter der Eingabeleiste seine
+# Auswahl ebenfalls als "off"-Liste haelt. Wer hier auf die ausgewaehlten Ids
+# umstellt, laesst jede neue Gruppe unbemerkt aus allen neuen Chats fallen.
+
+_KB_DEFAULT_MAX_IDS = 200   # Deckel: die Liste kommt aus einem Request
+_KB_DEFAULT_ID_MAX = 64
+
+
+def _kb_ids_saeubern(werte) -> list[str]:
+    """Gruppen-Ids aus Fremdeingabe pruefen: nur nicht-leere Zeichenketten,
+    ohne Duplikate, in Reihenfolge, gedeckelt. Ungueltiges wird VERWORFEN,
+    nicht geraten."""
+    raus: list[str] = []
+    if not isinstance(werte, list):
+        return raus
+    gesehen = set()
+    for w in werte:
+        if not isinstance(w, str):
+            continue
+        w = w.strip()
+        if not w or len(w) > _KB_DEFAULT_ID_MAX or w in gesehen:
+            continue
+        gesehen.add(w)
+        raus.append(w)
+        if len(raus) >= _KB_DEFAULT_MAX_IDS:
+            break
+    return raus
+
+
+def get_kb_default(user: str) -> list[str] | None:
+    """Abgewaehlte Wissensgruppen fuer neue Chats.
+
+    ``None`` = keine Vorauswahl hinterlegt (dann sind alle Gruppen aktiv, also
+    das bisherige Verhalten). Eine leere Liste kommt nicht vor – sie bedeutet
+    dasselbe und wird beim Speichern zu "keine Vorauswahl" normalisiert.
+    """
+    p = _user_dir(user) / "kb_default.json"
+    try:
+        if p.exists():
+            d = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(d, dict) and isinstance(d.get("off"), list):
+                ids = _kb_ids_saeubern(d["off"])
+                return ids if ids else None
+    except Exception:
+        pass
+    return None
+
+
+def save_kb_default(user: str, ids) -> list[str] | None:
+    """Vorauswahl speichern (Liste der ABGEWAEHLTEN Gruppen-Ids).
+
+    Eine leere Liste entfernt die Datei: "nichts abgewaehlt" und "keine
+    Vorauswahl" bewirken beides "alle Gruppen aktiv" – ein Eintrag dafuer waere
+    eine Karteileiche. Rueckgabe ist der gespeicherte Stand (``None`` = keiner).
+    """
+    sauber = _kb_ids_saeubern(ids)
+    ud = _user_dir(user)
+    p = ud / "kb_default.json"
+    with _LOCK:
+        try:
+            if sauber:
+                ud.mkdir(parents=True, exist_ok=True)
+                p.write_text(json.dumps({"off": sauber}, ensure_ascii=False), encoding="utf-8")
+            elif p.exists():
+                p.unlink()
+        except Exception:
+            pass
+    return sauber if sauber else None
+
 # ─── Metadaten / Sitzungsverwaltung ──────────────────────────────────────────
 
 def _read_meta(sd: Path) -> dict | None:

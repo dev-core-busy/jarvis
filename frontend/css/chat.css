@@ -1288,6 +1288,107 @@ select option:hover {
 }
 .btn-modal-close:hover { border-color: var(--on-surface); color: var(--on-surface); }
 
+/* ─── Einstellungen-Dialog in /chat (Preprompt + Wissens-Vorauswahl) ────────
+   .modal-card hat width:380px und text-align:center – fuer zwei Container mit
+   Textfeld und Gruppenliste zu schmal und falsch ausgerichtet. Die Hoehe ist am
+   SICHTFENSTER begrenzt und nur der Koerper scrollt: der Speichern-Knopf im
+   Fuss bleibt damit auch bei vielen Wissensgruppen erreichbar. `min-height: 0`
+   ist dabei Pflicht – ohne das schrumpft der Koerper nicht unter seine
+   Inhaltshoehe, `overflow-y` bleibt wirkungslos und der Fuss wird aus dem
+   Fenster gedrueckt (dieselbe Falle wie im Update-Popup). */
+.chs-card {
+    width: 620px;
+    text-align: left;
+    padding: 24px 22px 18px;
+    display: flex; flex-direction: column;
+    max-height: calc(100vh - 64px);
+    min-height: 0;
+}
+.chs-card .modal-title { text-align: center; margin-bottom: 16px; flex: 0 0 auto; }
+.chs-body { flex: 1 1 auto; overflow-y: auto; min-height: 0; padding-right: 4px; }
+
+.chs-sect {
+    border: 1px solid var(--outline);
+    border-radius: 12px;
+    padding: 14px 14px 16px;
+    margin-bottom: 14px;
+}
+.chs-sect:last-child { margin-bottom: 0; }
+.chs-sect-title {
+    font-size: 14px; font-weight: 600;
+    color: var(--on-surface-strong);
+    margin: 0;
+    cursor: pointer;
+    list-style-position: outside;
+}
+.chs-sect-title:focus-visible { outline: 2px solid var(--purple); outline-offset: 2px; }
+/* Abstand nur im OFFENEN Zustand: ein zugeklappter Kasten soll kompakt sein,
+   sonst steht unter dem Titel eine leere Zeile. */
+.chs-sect[open] > .chs-sect-title { margin-bottom: 8px; }
+/* Gleiche Begruendung fuer das untere Polster des Kastens selbst. */
+.chs-sect:not([open]) { padding-bottom: 12px; }
+.chs-desc {
+    font-size: 12.5px; color: var(--muted);
+    line-height: 1.55; margin: 0 0 10px;
+}
+.chs-ta {
+    width: 100%; box-sizing: border-box;
+    padding: 10px 12px;
+    font-size: 13px; font-family: inherit; line-height: 1.5;
+    background: var(--bg); color: var(--on-surface);
+    border: 1px solid var(--outline); border-radius: 10px;
+    resize: vertical;
+}
+.chs-ta:focus { border-color: var(--purple); outline: none; }
+
+.chs-kb-actions { display: flex; gap: 8px; margin-bottom: 8px; }
+.chs-kb-a {
+    flex: 1 1 auto;
+    padding: 6px 10px; border-radius: 8px;
+    border: 1px solid var(--outline); background: transparent;
+    color: var(--muted); font-size: 12.5px; font-family: inherit;
+    cursor: pointer; transition: border-color .2s, color .2s;
+}
+.chs-kb-a:hover { color: var(--on-surface); border-color: var(--on-surface); }
+.chs-kb-a:focus-visible { outline: 2px solid var(--purple); outline-offset: 2px; }
+
+.chs-kb-list {
+    display: flex; flex-direction: column; gap: 2px;
+    border: 1px solid var(--outline); border-radius: 10px;
+    padding: 6px; background: var(--bg);
+}
+.chs-kb-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 6px; border-radius: 8px;
+    font-size: 13px; color: var(--on-surface-strong);
+    cursor: pointer;
+}
+.chs-kb-row:hover { background: rgba(var(--fg-rgb), .06); }
+.chs-kb-row input {
+    flex: 0 0 auto; cursor: pointer;
+    display: inline-block; width: auto;
+    padding: 0; margin: 0;
+}
+.chs-kb-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+/* min-width:0 ist Pflicht: ohne das schiebt ein langer Gruppenname den
+   Farbpunkt und das Kaestchen aus der Zeile, statt zu kuerzen. */
+.chs-kb-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chs-kb-empty { padding: 8px 6px; font-size: 12.5px; color: var(--muted); }
+
+.chs-hint { margin-top: 8px; font-size: 12.5px; line-height: 1.5; }
+.chs-hint.is-warn { color: var(--warning); }
+/* --warning misst auf der hellen Flaeche nur 2,15:1 (Vermerk in theme.css) –
+   dort wird der Ton abgedunkelt, genau wie bei den Zertifikats-Urteilen. */
+body.light .chs-hint.is-warn { color: color-mix(in srgb, var(--warning) 62%, #000); }
+
+.chs-foot { flex: 0 0 auto; padding-top: 12px; }
+.chs-status { font-size: 12.5px; color: var(--muted); min-height: 18px; line-height: 1.4; }
+.chs-btns { display: flex; gap: 8px; margin-top: 4px; }
+/* .btn-login und .btn-modal-close bringen width:100% mit – in einer Flex-Zeile
+   fressen sie sonst die ganze Breite (Register). */
+.chs-save { flex: 1 1 auto; width: auto; }
+.chs-close { flex: 0 0 auto; width: auto; margin-top: 0; padding: 10px 18px; }
+
 .btn-danger { background: var(--error) !important; }
 .btn-danger:hover { opacity: .85; }
 

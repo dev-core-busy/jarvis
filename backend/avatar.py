@@ -396,7 +396,7 @@ async def answer_from_sources(question: str, cfg: Optional[dict] = None,
     # Wissensdatenbank nur, wenn ausdruecklich eingeschaltet (eigene Checkbox).
     if cfg.get("use_rag"):
         try:
-            from backend.tools.knowledge import rag_search
+            from backend.tools.knowledge import rag_search, quell_anzeige
             from backend.sandbox import set_tool_user, reset_tool_user
             # Benutzerkontext setzen wie im Agenten-Dispatch, damit
             # benutzerbezogene Schranken auch auf diesem Weg greifen.
@@ -406,7 +406,12 @@ async def answer_from_sources(question: str, cfg: Optional[dict] = None,
             finally:
                 reset_tool_user(_tok)
             for _score, pfad, chunk in treffer:
-                blocks.append("### Quelle: Wissensdatenbank – %s\n%s" % (pfad, chunk))
+                # Dieselbe Funktion wie im knowledge_search-Werkzeug: der
+                # Avatar nennt seine Quellen genauso einem BENUTZER, und zwei
+                # Fassungen liefen beim naechsten Feinschliff auseinander.
+                # Fail-open auf den technischen Pfad (siehe quell_anzeige).
+                blocks.append("### Quelle: Wissensdatenbank – %s\n%s"
+                              % (quell_anzeige(pfad) or pfad, chunk))
             if treffer:
                 benutzte.append({"title": "Wissensdatenbank", "url": ""})
         except Exception as e:

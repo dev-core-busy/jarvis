@@ -727,6 +727,55 @@ _BARE_EXTERNAL_HOST = re.compile(
 _GENERATED_URL_RE = re.compile(
     r"/api/generated/[\w.\-]+\.(?:png|jpe?g|gif|webp|bmp|svg)", re.IGNORECASE)
 
+# Netzwerk-QUELLE einer Wissensdatei (knowledge_search nennt sie jetzt als
+# Quellangabe, siehe tools/knowledge.quell_anzeige). Sie muss in der Anzeige
+# STEHEN BLEIBEN – sie ist der einzige Weg, auf dem der Benutzer an das
+# Original kommt, und es gibt dafuer keinen Download-Chip.
+#
+# ⚠ GEMESSEN, nicht angenommen: die Regel "nackte lokale Dokumentpfade
+# entfernen" in `_clean_doc_refs` trifft jeden Pfad mit Schraegstrichen, der auf
+# eine Ergebnis-Endung endet. Aus "Quelle: srv:/export/Handbuch.pdf" wurde
+# "Quelle: srv:", aus "https://srv/dav/Handbuch.pdf" wurde "https:/" – die
+# Quellangabe war weg bzw. ein Fragment. (Die UNC-Form \\srv\share\x.pdf
+# ueberlebt schon strukturell, sie hat keinen Schraegstrich; sie steht hier
+# trotzdem, damit die Zusage nicht von einem Zufall abhaengt.)
+#
+# KEINE dieser drei Formen kann ein lokaler Ergebnispfad sein, es geht also
+# nichts verloren, was die Bereinigung entfernen SOLL:
+#   \\host\freigabe\…      UNC (SMB) – beginnt mit zwei Backslashes
+#   host:/export/…        NFS – mindestens zwei Zeichen vor dem Doppelpunkt,
+#                         also kein Windows-Laufwerk "C:/", und danach genau
+#                         EIN Schraegstrich, also kein "https://"
+#   http(s)://…           WebDAV. Dass damit auch eine BEIM NAMEN genannte
+#                         externe URL stehen bleibt, ist richtig und war schon
+#                         die erklaerte Absicht der Bild-Regel weiter unten
+#                         ("Externe http(s)-Bild-URLs bleiben unangetastet").
+#
+# ⚠ LEERZEICHEN SIND DER REGELFALL, NICHT DIE AUSNAHME. Freigabe- und
+# Dateinamen in Windows-Netzen enthalten staendig welche
+# ("…\\0039_Maris\\Anleitungen SAP.one" – gemeldet 2026-09-08). Ein Ausdruck,
+# der am Leerraum endet, maskiert nur den ANFANG des Pfades – und dann greift
+# eine der Regeln unten in den Rest. Gemessen:
+#   "\\srv\share\Mein Ordner\Datei.pdf" -> "\\srv\share\Mein Ordner\.pdf"
+#   "srv:/export/Mein Ordner/Datei.pdf"    -> "srv:/export/Mein "
+# Der erste Fall ist besonders hinterhaeltig: es war nicht die Pfad-Regel,
+# sondern die Aufraeumregel `\b(unter|in|…|datei)\s*([.,;:])` – eine Datei, die
+# wirklich "Datei.pdf" heisst, trifft sie.
+#
+# Deshalb steht VOR den leerraum-begrenzten Formen je eine, die Leerzeichen
+# erlaubt und LAZY an der DATEIENDUNG endet. Die Reihenfolge ist die Semantik:
+# Python nimmt die erste passende Alternative, und das muss die laengere sein.
+_NETZQUELLE_RE = re.compile(
+    # (a) mit Endung – Leerzeichen erlaubt, Ende an der ersten Endung
+    r"(?:\\\\[^\s\\]+(?:\\[^\\\n]+)*\\[^\\\n]*?"
+    r"|\b[A-Za-z0-9][\w.\-]+:/(?!/)(?:[^/\n]+/)*[^/\n]*?"
+    r"|\bhttps?://(?:[^/\s]+/)(?:[^/\n]+/)*[^/\n]*?)"
+    r"(?:\.[A-Za-z0-9]{1,8})+(?![A-Za-z0-9])"
+    # (b) ohne Endung – dann begrenzt der Leerraum (Freigabe- bzw. Ordnerpfad)
+    r"|\\\\[^\s\\]+\\\S+"
+    r"|\b[A-Za-z0-9][\w.\-]+:/(?!/)\S+"
+    r"|\bhttps?://\S+")
+
 
 def _shell_internet_hit(cmd: str) -> str:
     """Greift dieser Shell-Befehl (vermutlich) ins Internet? Treffer oder "".
@@ -4968,6 +5017,18 @@ KRITISCH – Autonomie-Regeln:
         text = re.sub(
             r"\[([^\]\n]*)\]\((?:/api/documents/[^)\n]+|[^)\n]*\.(?:" + _EXT_RE + r"))\)",
             r"\1", text)
+        # Netzwerk-Quellangaben in Sicherheit bringen – ERST HIER, nach der
+        # Markdown-Regel: ein `[Text](https://….pdf)` bleibt damit wie bisher ein
+        # blosses Label (dieselbe Behandlung wie fuer markdown-verlinkte externe
+        # Bilder, die ein Bestandstest festhaelt). Eine im Text GENANNTE
+        # Netzwerkquelle ueberlebt ab hier vollstaendig.
+        _netz_quellen: list[str] = []
+
+        def _netz_maskieren(m):
+            _netz_quellen.append(m.group(0))
+            return f"\x00JVNET{len(_netz_quellen) - 1}\x00"
+
+        text = _NETZQUELLE_RE.sub(_netz_maskieren, text)
         # Nackte lokale Dokumentpfade entfernen – EINE Regex mit optionalem fuehrenden
         # Slash, damit sowohl /tmp/x.pptx als auch data/documents/x.pptx VOLLSTAENDIG
         # (inkl. Slash/Prefix) verschwinden und keine Fragmente ('/', 'data') bleiben.
@@ -5004,6 +5065,9 @@ KRITISCH – Autonomie-Regeln:
         if _bild_urls:
             text = re.sub(r"\x00JVGEN(\d+)\x00",
                           lambda m: _bild_urls[int(m.group(1))], text)
+        if _netz_quellen:
+            text = re.sub(r"\x00JVNET(\d+)\x00",
+                          lambda m: _netz_quellen[int(m.group(1))], text)
         return text
 
     # ── Ergebnisdateien: EINE Liste fuer Auslieferung UND Textbereinigung ──

@@ -675,6 +675,31 @@ def _get_skill_config() -> dict:
         return {}
 
 
+def quell_anzeige(pfad: str) -> str:
+    """Netzwerkpfad einer Wissensdatei – "" wenn es keinen gibt.
+
+    ⚠ DIE QUELLANGABE IM CHAT WAR EINE SERVER-INTERNE NUMMER. Der Index fuehrt
+    Dateien aus Netzwerk-Freigaben unter ihrem Einhaengepunkt
+    (``/mnt/jarvis-kb/share_2/0039_Maris/Anleitungen SAP.one``), und genau den
+    hat das Modell als Quelle genannt: "Ordner share_0/0039_Maris/…". Damit
+    kann ein Benutzer nichts anfangen – er kennt die Freigabe, nicht die
+    Nummer, und oeffnen kann er den Pfad ohnehin nicht (Vorgabe des
+    Betreibers, 2026-09-08).
+
+    Die Zuordnung Einhaengepunkt -> Freigabe steht in ``mount_quelle``; die
+    Freigabenliste liegt in DIESER Skill-Konfiguration, deshalb braucht es
+    keinen Import aus ``main`` (der waere ein Zirkelimport).
+
+    Fail-open: keine Freigabe, kaputter Eintrag, Fehler -> "" , und der
+    Aufrufer laesst den technischen Pfad stehen.
+    """
+    try:
+        from backend import mount_quelle
+        return mount_quelle.netzpfad(_get_skill_config().get("mounts") or [], pfad)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _get_folders() -> list[Path]:
     cfg = _get_skill_config()
     folders_str = cfg.get("folders", DEFAULT_FOLDER)
@@ -2997,8 +3022,28 @@ class KnowledgeTool(BaseTool):
                 f"Wissensdatenbank dazu nichts enthält. Erfinde nichts hinzu.\n\n"
             ) + output
 
+        # Netzwerkpfade der Treffer. Der Hinweis steht nur da, wenn wirklich
+        # eine Freigabe beteiligt ist – bei Treffern aus data/knowledge waere er
+        # Rauschen (und kostet dann auch keine Token).
+        netz = {}
+        for _s, _fn, _c in results:
+            if _fn not in netz:
+                netz[_fn] = quell_anzeige(_fn)
+        if any(netz.values()):
+            output += (
+                "ℹ QUELLENANGABE: Nenne dem Benutzer als Quelle den NETZWERKPFAD, "
+                "der beim Treffer steht (\\\\Server\\Freigabe\\…) – nur den kann er "
+                "öffnen. Der Serverpfad /mnt/… ist AUSSCHLIESSLICH für "
+                "Werkzeugaufrufe und gehört nicht in die Antwort.\n\n"
+            )
+
         for i, (score, filename, chunk) in enumerate(results, 1):
-            output += f"--- [{i}] {filename} (Relevanz: {score:.2f}) ---\n"
+            _netz = netz.get(filename)
+            if _netz:
+                output += f"--- [{i}] {_netz} (Relevanz: {score:.2f}) ---\n"
+                output += f"[Serverpfad nur für Werkzeuge: {filename}]\n"
+            else:
+                output += f"--- [{i}] {filename} (Relevanz: {score:.2f}) ---\n"
             output += chunk.strip()[:CHUNK_OUTPUT_LIMIT] + "\n\n"
 
         return output

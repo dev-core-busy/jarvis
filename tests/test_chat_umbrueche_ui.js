@@ -251,10 +251,18 @@ console.log('\n5. /userchat (.uc-bubble)');
     pruefe('der Nachrichtentext wird getrimmt',
            (code.match(/\(msg\.text \|\| ''\)\.trim\(\)/g) || []).length >= 2);
 
-    // Cache-Buster: userchat.html ist selbst die CSS-Quelle, aber chat.css
-    // liegt dort ebenfalls – der Stand muss zu /chat passen (Abschnitt 4).
+    // Cache-Buster: chat.css liegt auf /chat UND /userchat – die Staende
+    // muessen zusammenpassen (sonst behaelt eine Seite die alte Fassung).
+    //
+    // ⚠ HIER STAND EINE FESTE ZAHL (`?v=50`). Die ist eine Zeitbombe: beim
+    // naechsten CSS-Fix meldet sie einen Fehler, den es nicht gibt – genau so
+    // am 2026-09-08 passiert. Geprueft wird die EIGENSCHAFT: derselbe Stand
+    // wie in chat.html.
+    const vUC = (UC_HTML.match(/chat\.css\?v=(\d+)/) || [])[1];
+    const vChat = (fs.readFileSync(path.join(FE, 'chat.html'), 'utf-8')
+                     .match(/chat\.css\?v=(\d+)/) || [])[1];
     pruefe('userchat.html bindet chat.css mit demselben Stand ein wie /chat',
-           /chat\.css\?v=50/.test(UC_HTML));
+           !!vUC && vUC === vChat, vUC + ' vs ' + vChat);
 }
 
 console.log('\n' + (fail === 0 ? 'ALLE ' + ok + ' PRUEFUNGEN OK' : ok + ' OK, ' + fail + ' FAIL'));

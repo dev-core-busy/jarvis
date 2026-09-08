@@ -956,3 +956,16 @@ body.light .sapcert-state.is-err { color: color-mix(in srgb, var(--danger) 78%, 
    Rahmen stehen (Register). */
 .jv-pw-eye:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .jv-pw-eye .jv-ico { width: 15px; height: 15px; }
+
+/* ── Netzwerkpfad einer Wissensquelle (Chat, /support, /sap) ──────────────────
+ * Er wird von renderMarkdown verlinkt (chatlib.js). Die Regel gehoert in
+ * theme.css und nicht in chat.css: renderMarkdown laeuft auch auf /support,
+ * /sap und im Skill-Dialog – in chat.css waere die Zeile dort wirkungslos.
+ *
+ * `overflow-wrap: anywhere` ist kein Feinschliff: ein UNC-Pfad ist ein Wort
+ * ohne Trennstelle ("\\191.100.147.90\OneNote_text_Jasmin\0039_Maris\…") und
+ * sprengt sonst die Blase bzw. erzeugt einen waagerechten Ueberlauf. */
+.jv-netzquelle {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}

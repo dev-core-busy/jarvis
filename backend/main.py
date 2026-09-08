@@ -14884,6 +14884,42 @@ async def read_knowledge_file_raw(path: str, user: str = Depends(require_auth_or
                         filename=resolved.name, content_disposition_type="inline")
 
 
+@app.get("/api/knowledge/netzquelle")
+async def read_knowledge_netzquelle(netz: str, user: str = Depends(require_auth_or_query)):
+    """Liefert eine Wissensdatei zu ihrem NETZWERKPFAD (``\\\\host\\freigabe\\…``).
+
+    WARUM ES DIESEN ZWEITEN WEG GIBT (Vorgabe des Betreibers, 2026-09-08): die
+    Chat-Antwort nennt als Quelle den Netzwerkpfad – und der soll ein LINK sein.
+    Ein ``file://``-Link taugt dafuer nicht: gemessen im echten Chrome verwirft
+    er die Navigation von einer https-Seite aus, ohne Meldung und ohne
+    Konsolenzeile – der Klick tut sichtbar GAR NICHTS. Also liefert der Server
+    die Datei aus, wie er es fuer ``/api/knowledge/file_raw`` schon tut.
+
+    DER AUSSCHLAGGEBENDE ENTWURFSPUNKT: die Umrechnung passiert HIER und nicht
+    im Modell. Das Frontend verlinkt jeden Netzwerkpfad, den es im Antworttext
+    findet – damit haengt der Link an KEINER Formatvorgabe an das LLM (und
+    ueberlebt auch Backticks, in die das Modell Pfade gern setzt).
+
+    Zwei Schranken, beide noetig: ``mount_quelle.serverpfad`` loest nur ueber
+    KONFIGURIERTE Freigaben auf (fail-closed, Traversal wird verworfen), und
+    danach prueft ``read_knowledge_file_raw`` unveraendert, dass die Datei in
+    einem Wissensordner liegt. Der zweite Teil ist die Sicherheitsschranke –
+    deshalb wird er BENUTZT und nicht nachgebaut.
+    """
+    from backend import mount_quelle
+    try:
+        mounts = _get_mounts_config()
+    except Exception as e:  # noqa: BLE001
+        print(f"[knowledge] Freigabenliste nicht lesbar: {e}", flush=True)
+        mounts = []
+    pfad = mount_quelle.serverpfad(mounts, netz)
+    if not pfad:
+        # 404, nicht 400: ob es zu diesem Netzwerkpfad eine Freigabe gibt, ist
+        # selbst eine Information (gleiche Regel wie bei den Dokument-URLs).
+        return JSONResponse({"error": "Datei nicht gefunden"}, status_code=404)
+    return await read_knowledge_file_raw(path=pfad, user=user)
+
+
 @app.put("/api/knowledge/file_write")
 async def write_knowledge_file(request: Request, user: str = Depends(require_knowledge_editor)):
     """Aktualisiert den Inhalt einer gelernten Datei und re-indexiert sie in FAISS."""

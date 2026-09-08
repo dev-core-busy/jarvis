@@ -115,6 +115,49 @@ def konstante(name: str):
     return u[name]
 
 
+def modul_konstanten() -> dict:
+    """Namensraum mit ALLEN modulweiten Konstanten aus agent.py – als REGEL.
+
+    ⚠ EINE GEPFLEGTE LISTE WAR HIER EIN FEHLER. Der Harness nannte nur
+    ``_GENERATED_URL_RE``; als ``_clean_doc_refs`` eine zweite Konstante
+    (``_NETZQUELLE_RE``) hinzubekam, brach der Lauf mit einem nackten
+    NameError ab – kein FAIL, keine Bilanzzeile, also von "nicht gelaufen"
+    nicht zu unterscheiden. Dieselbe Falle wie bei den Funktionslisten der
+    Popup-Harnesse.
+
+    Ausgefuehrt wird in QUELLTEXT-Reihenfolge (Konstanten bauen aufeinander
+    auf); was ohne fremde Importe nicht auswertbar ist, wird uebersprungen.
+    Das darf nicht still bleiben: ``pruefe_vorhanden()`` verlangt danach
+    ausdruecklich jeden Namen, den die geschnittene Funktion wirklich benutzt.
+    """
+    import ast as _ast
+    aus = {"re": re}
+    for k in _ast.parse(QUELLE).body:
+        if not isinstance(k, _ast.Assign) or len(k.targets) != 1:
+            continue
+        ziel = getattr(k.targets[0], "id", "")
+        if not ziel.startswith("_") or not ziel.isupper() and ziel.upper() != ziel:
+            continue
+        try:
+            exec(_ast.get_source_segment(QUELLE, k), aus)
+        except Exception:      # braucht einen fremden Import – nicht noetig
+            pass
+    return aus
+
+
+def pruefe_vorhanden(umg: dict, quelle_der_funktion: str) -> None:
+    """Jede ``_..._X``-Konstante, die die geschnittene Funktion nennt, MUSS da
+    sein – sonst stirbt der Lauf spaeter mitten in einer Pruefung."""
+    # Namen, die die Funktion SELBST setzt (``_EXT_RE = self._liefer_ext_re()``),
+    # sind lokal und gehoeren nicht in den Namensraum.
+    lokal = set(re.findall(r"^\s*(_[A-Z][A-Z0-9_]*)\s*(?::[^=\n]+)?=",
+                           quelle_der_funktion, re.M))
+    fehlt = sorted({n for n in re.findall(r"\b_[A-Z][A-Z0-9_]*\b", quelle_der_funktion)
+                    if n not in umg and n not in lokal})
+    if fehlt:
+        raise AssertionError("Konstanten fehlen im Testnamensraum: " + ", ".join(fehlt))
+
+
 def liefer_ext() -> tuple:
     i = QUELLE.index("_LIEFER_EXT = (")
     j = QUELLE.index("\n    )", i) + len("\n    )")
@@ -131,8 +174,10 @@ def teil1():
     kopf("1) _clean_doc_refs: /api/generated ueberlebt, Dokumentpfade nicht")
 
     ext = liefer_ext()
-    umg = {"re": re, "_GENERATED_URL_RE": konstante("_GENERATED_URL_RE")}
-    exec(quelle_von("_clean_doc_refs"), umg)
+    umg = modul_konstanten()
+    _q = quelle_von("_clean_doc_refs")
+    pruefe_vorhanden(umg, _q)
+    exec(_q, umg)
     roh = umg["_clean_doc_refs"]
 
     class Stub:

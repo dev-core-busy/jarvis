@@ -966,6 +966,26 @@ body.light .msg-edit-area { background: rgba(var(--shadow-rgb), 0.07); }
 }
 .msg-bubble a:hover { opacity: .8; }
 
+/* ⚠ IM HELLEN THEMA WAR JEDER LINK IN EINER BLASE UNLESBAR – gemessen im
+ * echten Chrome: --purple-light (rgb(187,134,252)) auf der hellen Blase ergibt
+ * 2,13:1, in einem <code> sogar 1,83:1. Die Grenze ist 4,5:1. Aufgefallen bei
+ * der Abnahme des Quell-Links (2026-09-08), betrifft aber ALLE Links im Chat.
+ *
+ * `color-mix` statt eines festen Tons, weil die Farbe brandingabhaengig ist:
+ * ein fester Violett-Ton saehe auf einer Installation mit roter Hausfarbe
+ * falsch aus. Dasselbe Mittel benutzt theme.css schon fuer die
+ * Zertifikats-Urteile. Nachgemessen im echten Chrome: 8,4:1 in der Blase und
+ * 7,2:1 im <code> – statt 2,13 bzw. 1,83.
+ *
+ * NUR im hellen Thema: im dunklen liegt derselbe Ton bei 6,47:1 bzw. 4,82:1.
+ *
+ * GRENZE, damit sie niemand fuer geloest haelt: keine feste Prozentzahl
+ * garantiert 4,5:1 fuer JEDE Hausfarbe – ein sehr HELLER Akzent (z.B. ein
+ * kraeftiges Gelb) liegt auch bei 55 % noch darunter (gerechnet 3,65:1). Fuer
+ * die Vorgabefarbe und die hier benutzte Hausfarbe ist es gemessen; wer eine
+ * helle Hausfarbe setzt, braucht hier einen eigenen Ton. */
+body.light .msg-bubble a { color: color-mix(in srgb, var(--accent) 55%, #000); }
+
 /* ─── Markdown: Trennlinie ───────────────────────────────────── */
 .msg-bubble hr {
     border: none;

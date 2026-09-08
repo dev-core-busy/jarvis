@@ -147,3 +147,149 @@ def _webdav(roh: str) -> tuple[str, str]:
         return "", (f"Die Adresse enthaelt keinen gueltigen Servernamen – "
                     f"Beispiel: {BEISPIEL['webdav']}")
     return s.rstrip("/") or s, ""
+
+
+# ─── Rueckrichtung: Serverpfad -> Netzwerkpfad ───────────────────────────────
+# WARUM (Vorgabe des Betreibers, 2026-09-08): eine /chat-Antwort nannte als
+# Quelle "Ordner share_0/0039_Maris/Anleitungen SAP.one". Das ist der
+# EINHAENGEPUNKT auf dem Server – eine Nummer, die niemand kennt und die der
+# Benutzer nirgends oeffnen kann. Er soll die Quelle anklicken bzw. in den
+# Explorer kopieren koennen, also
+# "\\191.100.147.90\OneNote_text_Jasmin\0039_Maris\Anleitungen SAP.one".
+#
+# Die Zuordnung MUSS hier liegen und nicht beim Aufrufer: die Regel "welche
+# Schreibweise meint dieselbe Freigabe" steht in `pruefe()` – eine zweite,
+# nachgebaute Fassung liefe beim naechsten Feinschliff auseinander (der
+# Altbestand auf DEV traegt seine Quelle bis heute in Windows-Schreibweise,
+# `\\191.100.147.90\Dokumentationen`; nur `pruefe()` versteht beides).
+
+
+def netzpfad(mounts, pfad: str) -> str:
+    """Serverpfad einer Wissensdatei -> Netzwerkpfad. "" = kein Netzwerkpfad.
+
+    ``mounts`` ist die Freigabenliste aus der Knowledge-Skill-Konfiguration
+    (je Eintrag ``mountpoint``, ``type``, ``source``).
+
+    FAIL-OPEN, und die Richtung ist Absicht: unbekannter Pfad, kaputter
+    Eintrag, unbrauchbare Quelle -> "" , und der Aufrufer laesst den
+    technischen Pfad stehen. Ein geratener Netzwerkpfad waere schlimmer als der
+    Einhaengepunkt – er sieht anklickbar aus und fuehrt ins Nichts.
+
+    Verglichen wird EINTRAGSWEISE, nicht als Teilstring: "/mnt/jarvis-kb/share_1"
+    steckt in "/mnt/jarvis-kb/share_10". Bei mehreren passenden Einhaengepunkten
+    (einer unter dem anderen) gewinnt der laengste – der ist der spezifischere.
+    """
+    p = str(pfad or "").strip()
+    if not p or not isinstance(mounts, (list, tuple)):
+        return ""
+    # Der Index fuehrt Mount-Pfade absolut; die Wissensgruppen-Manifeste kennen
+    # daneben die Form ohne fuehrenden Schraegstrich ("mnt/jarvis-kb/…").
+    kandidaten = [p] if p.startswith("/") else [p, "/" + p]
+
+    treffer = None
+    for m in mounts:
+        if not isinstance(m, dict):
+            continue
+        mp = str(m.get("mountpoint") or "").strip().rstrip("/")
+        if not mp:
+            continue
+        for k in kandidaten:
+            if k == mp:
+                rest = ""
+            elif k.startswith(mp + "/"):
+                rest = k[len(mp) + 1:]
+            else:
+                continue
+            if treffer is None or len(mp) > len(treffer[0]):
+                treffer = (mp, rest, m)
+            break
+    if treffer is None:
+        return ""
+
+    _, rest, m = treffer
+    typ = str(m.get("type") or "smb").strip().lower()
+    quelle, fehler = pruefe(typ, str(m.get("source") or ""))
+    if fehler or not quelle:
+        return ""
+    return _anhaengen(typ, quelle, rest)
+
+
+def _anhaengen(typ: str, quelle: str, rest: str) -> str:
+    """Unterpfad an die normalisierte Quelle haengen – in DEREN Schreibweise."""
+    teile = [t for t in rest.split("/") if t]
+    if typ == "smb":
+        # //host/freigabe -> \\host\freigabe: das ist die Form, die Windows
+        # oeffnet, und die einzige, die in einer Chat-Antwort ueberlebt
+        # (`agent._clean_doc_refs` entfernt Pfade mit Schraegstrichen, wenn sie
+        # auf eine Ergebnis-Endung enden – ein "//srv/x/Handbuch.pdf" waere aus
+        # der Anzeige verschwunden).
+        unc = "\\\\" + quelle[2:].replace("/", "\\")
+        return "\\".join([unc] + teile) if teile else unc
+    # NFS (host:/export) und WebDAV (https://host/pfad) tragen ihre Pfade mit
+    # Schraegstrichen – die Quelle ist dort selbst schon so geschrieben.
+    return "/".join([quelle.rstrip("/")] + teile) if teile else quelle
+
+
+def serverpfad(mounts, netz: str) -> str:
+    """Netzwerkpfad -> Serverpfad. "" = keiner Freigabe zuzuordnen.
+
+    Die Umkehrung von ``netzpfad()``. Sie gibt es, weil der Benutzer die Quelle
+    ANKLICKEN soll: die Chat-Antwort nennt den Netzwerkpfad, der Browser kann
+    ihn aber nicht oeffnen (gemessen: ein ``file://``-Link auf einer
+    https-Seite wird von Chrome verworfen – ohne Navigation und ohne eine
+    einzige Konsolenzeile, der Klick tut sichtbar GAR NICHTS). Der Weg, der
+    wirklich traegt, ist die Datei aus der Wissensdatenbank auszuliefern – und
+    dafuer braucht der Endpunkt den Serverpfad zurueck.
+
+    ⚠ HIER GILT FAIL-CLOSED, anders als in ``netzpfad()``: diese Funktion
+    entscheidet, WELCHE DATEI ausgeliefert wird. Was sich keiner konfigurierten
+    Freigabe zuordnen laesst, ergibt "" – und der Aufrufer antwortet 404. Sie
+    ist ausserdem NICHT die Sicherheitsschranke: der Endpunkt prueft danach
+    unveraendert, dass die aufgeloeste Datei in einem Wissensordner liegt.
+
+    Verglichen wird der FREIGABE-Teil ohne Ruecksicht auf Gross/Kleinschreibung
+    (Windows-Freigaben sind case-insensitiv, und der Benutzer bzw. das Modell
+    tippt sie mal so, mal so); der Unterpfad behaelt seine Schreibweise
+    UNVERAENDERT – das Dateisystem darunter ist case-sensitiv.
+    """
+    roh = str(netz or "").strip().strip('"').strip("'")
+    if not roh or not isinstance(mounts, (list, tuple)):
+        return ""
+    if _VERBOTEN_RE.search(roh):
+        return ""
+    # UNC (\\host\share\…) auf die Slash-Form bringen – in der liegen die
+    # normalisierten Quellen. NFS und WebDAV tragen sie schon.
+    s = roh.replace("\\", "/") if roh.startswith("\\\\") else roh
+    s = re.sub(r"^/{2,}", "//", s)
+
+    treffer = None
+    for m in mounts:
+        if not isinstance(m, dict):
+            continue
+        mp = str(m.get("mountpoint") or "").strip().rstrip("/")
+        if not mp:
+            continue
+        quelle, fehler = pruefe(str(m.get("type") or "smb"),
+                                str(m.get("source") or ""))
+        if fehler or not quelle:
+            continue
+        q = quelle.rstrip("/")
+        if s.lower() == q.lower():
+            rest = ""
+        elif s.lower().startswith(q.lower() + "/"):
+            rest = s[len(q) + 1:]
+        else:
+            continue
+        if treffer is None or len(q) > len(treffer[0]):
+            treffer = (q, rest, mp)
+    if treffer is None:
+        return ""
+
+    _, rest, mp = treffer
+    teile = [t for t in rest.split("/") if t]
+    # Kein ".." und kein leeres Segment – der Endpunkt loest danach zwar noch
+    # auf und prueft die Zugehoerigkeit, aber eine Traversal-Angabe gehoert
+    # nicht erst dort abgefangen.
+    if any(t == ".." or t == "." for t in teile):
+        return ""
+    return "/".join([mp] + teile) if teile else mp

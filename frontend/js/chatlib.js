@@ -128,7 +128,9 @@
         }
 
         function _withToken(url) {
-            if (!/^\/api\/documents\//.test(url || '')) return url;
+            // /api/knowledge/netzquelle gehoert dazu: der Quell-Link im Chat ist
+            // eine Navigation ohne Header und verlangt (wie file_raw) ?token=.
+            if (!/^\/api\/(?:documents\/|knowledge\/netzquelle\?)/.test(url || '')) return url;
             // Abruf-Schluessel statt Sitzungstoken (frontend/js/dlkey.js): ein weitergegebener Link ist damit 15 Minuten Lesezugriff, nicht 30 Tage volle Sitzung.
             // Faellt das Modul aus (aeltere Seite ohne dlkey.js), bleibt es beim
             // bisherigen Verhalten – ein toter Download-Chip waere schlechter als
@@ -137,6 +139,56 @@
             const tk = _sessToken();
             if (!tk) return url;
             return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(tk);
+        }
+
+        /* ── Netzwerkpfad einer Wissensquelle als LINK ─────────────────────
+         * Die Chat-Antwort nennt als Quelle den Netzwerkpfad der Freigabe
+         * (`\\\\host\\freigabe\\…`, siehe backend/tools/knowledge.quell_anzeige).
+         * Er soll klickbar sein wie jede andere Adresse.
+         *
+         * ⚠ EIN `file://`-LINK LEISTET DAS NICHT – gemessen im echten Chrome:
+         * die Navigation von einer https-Seite aus wird verworfen, ohne
+         * Meldung und ohne Konsolenzeile. Der Klick tut sichtbar GAR NICHTS.
+         * Deshalb zeigt der Link auf `/api/knowledge/netzquelle`, das die
+         * Datei aus der Wissensdatenbank ausliefert; der SICHTBARE Text bleibt
+         * der Netzwerkpfad, damit der Benutzer weiss, wo das Original liegt
+         * (und ihn per Rechtsklick/Markieren kopieren kann).
+         *
+         * Erkannt werden dieselben Formen wie in `agent._NETZQUELLE_RE`:
+         * UNC und `host:/export/…` (NFS). Mindestens ZWEI Zeichen vor dem
+         * Doppelpunkt, sonst waere `C:/temp/x.pdf` eine Netzwerkquelle; und
+         * `(?!/)` danach, sonst schluckt das Muster jedes `https://` – das
+         * verlinkt der gewoehnliche Autolinker weiter unten.
+         *
+         * ⚠ DIE DATEIENDUNG IST DER ANKER, UND ZWAR ZWINGEND. Freigabe- und
+         * Dateinamen enthalten in Windows-Netzen staendig LEERZEICHEN
+         * ("…\\0039_Maris\\Anleitungen SAP.one" – der gemeldete Fall). Ein
+         * Muster, das am Leerraum endet, schneidet den Pfad genau dort ab: der
+         * Link zeigte auf "…\\Anleitungen" und in Backticks entstand gar
+         * keiner. Im Fliesstext hat so ein Pfad kein anderes erkennbares Ende
+         * als seine Endung – deshalb sind Leerzeichen erlaubt und der Ausdruck
+         * endet LAZY an der ersten Endung nach dem letzten Trennzeichen.
+         * Nebeneffekt, gewollt: ein Pfad OHNE Endung wird NICHT verlinkt. Er
+         * liesse sich nicht begrenzen, und ein abgeschnittener Link ist
+         * schlimmer als reiner Text – er fuehrt auf einen 404. */
+        const _NETZ_UNC = '\\\\\\\\[^\\s\\\\<>"]+(?:\\\\[^\\\\<>"\\n]+)*\\\\[^\\\\<>"\\n]*?';
+        const _NETZ_NFS = '\\b[A-Za-z0-9][\\w.\\-]+:\\/(?!\\/)(?:[^\\/<>"\\n]+\\/)*[^\\/<>"\\n]*?';
+        const _NETZ_END = '(?:\\.[A-Za-z0-9]{1,8})+(?![A-Za-z0-9])';
+        const _NETZ_QUELL = '(?:' + _NETZ_UNC + '|' + _NETZ_NFS + ')' + _NETZ_END;
+        const _NETZ_RE = new RegExp(_NETZ_QUELL, 'g');
+
+        function _netzLink(pfad) {
+            // Kein Satzzeichen-Trim mehr: der Ausdruck endet an der Endung,
+            // damit liegt ein "." oder ")" dahinter von selbst ausserhalb
+            // (gemessen fuer "…SAP.one." und "(siehe …SAP.one)").
+            const rein = pfad;
+            const schwanz = '';
+            const roh = rein.replace(/&amp;/g, '&');
+            const url = _withToken('/api/knowledge/netzquelle?netz=' + encodeURIComponent(roh));
+            const tip = escapeHtml(_tt('media.netz_hint',
+                'Öffnet die Datei aus der Wissensdatenbank · Original:') + ' ' + roh);
+            return `<a href="${url}" target="_blank" rel="noopener noreferrer" `
+                 + `class="jv-netzquelle" title="${tip}">${rein}</a>` + schwanz;
         }
 
         function _inline(t) {
@@ -150,7 +202,18 @@
             // Inline-Code SOFORT sichern – vor jeder Formatierung. Sonst frisst die
             // Kursiv-Regex weiter unten die Unterstriche im Code-Inhalt, z.B. wuerde
             // `LOCAL_RECEIVE_PATH` als LOCAL<em>RECEIVE</em>PATH gerendert.
-            t = t.replace(/<code>[\s\S]*?<\/code>/g, (m) => _hold(m));
+            t = t.replace(/<code>([\s\S]*?)<\/code>/g, (m, inner) => {
+                // ⚠ GEMESSEN: das Modell setzt den Quellpfad in Backticks. Weil
+                // Inline-Code hier als ERSTES gesichert wird, saehe ein
+                // Autolinker weiter unten den Pfad NIE – der Link muss also
+                // schon hier entstehen. Nur wenn der Code-Inhalt GENAU ein
+                // Netzwerkpfad ist: ein Codeblock mit Text drumherum bleibt
+                // Code.
+                const p = inner.trim();
+                const g = new RegExp('^(?:' + _NETZ_QUELL + ')$');
+                if (p && g.test(p)) return _hold('<code>' + _netzLink(p) + '</code>');
+                return _hold(m);
+            });
 
             // Bilder ![alt](url)
             t = t.replace(/!\[([^\]\n]*)\]\(([^)\n]+)\)/g, (_, alt, url) => {
@@ -210,6 +273,10 @@
                 const href = /^www\./i.test(raw) ? 'https://' + raw : raw;
                 return `<a href="${href}" target="_blank" rel="noopener noreferrer">${url}</a>`;
             });
+            // Nackte Netzwerkpfade – NACH _protect(<a>), damit ein bereits
+            // gebauter Link nicht ein zweites Mal verlinkt wird.
+            _NETZ_RE.lastIndex = 0;
+            t = t.replace(_NETZ_RE, (pfad) => _netzLink(pfad));
             t = t.replace(/\x03P(\d+)\x03/g, (_, i) => _prot[+i]);
 
             // Bilder/Chips ganz am Ende wiederherstellen (nach jeder Formatierung)

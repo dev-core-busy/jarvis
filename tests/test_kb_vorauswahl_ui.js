@@ -45,11 +45,27 @@ const wachhund = setTimeout(() => {
     console.log('  \x1b[31m✗\x1b[0m Wachhund: Lauf haengt (25 s)');
     fail++; bilanz(); process.exit(1);
 }, 25000);
-wachhund.unref && wachhund.unref();
 
+let _bilanzGedruckt = false;
 function bilanz() {
+    _bilanzGedruckt = true;
     console.log('\n\x1b[1mErgebnis: ' + ok + ' OK, ' + fail + ' FAIL\x1b[0m');
 }
+/* ⚠ Ein Lauf, der ohne Bilanzzeile endet, ist von "nicht gelaufen" nicht zu
+ * unterscheiden – und mit Exit 0 sieht er wie ein bestandener aus. Die ganze
+ * Datei ist EINE async-IIFE: bricht sie mittendrin ab, wird alles danach
+ * uebersprungen. Dieser Haken zieht den Ausgang nach (im Projekt bezahlt). */
+process.on('exit', function (code) {
+    if (!_bilanzGedruckt) {
+        console.log('\n\x1b[31mABBRUCH ohne Bilanz\x1b[0m – ' + ok + ' OK, ' + fail
+            + ' FAIL bis zum Abbruch');
+        if (code === 0) process.exitCode = 1;
+    }
+});
+process.on('unhandledRejection', function (e) {
+    console.log('  \x1b[31m✗\x1b[0m unbehandelte Zurueckweisung: ' + (e && e.message));
+    fail++; bilanz(); process.exit(1);
+});
 
 const HTML = fs.readFileSync(path.join(ROOT, 'frontend', 'chat.html'), 'utf8');
 const CHATJS = fs.readFileSync(path.join(ROOT, 'frontend', 'js', 'chat.js'), 'utf8');
@@ -195,6 +211,22 @@ check('Positivkontrolle: die Bestandsregel setzt Layout-Eigenschaften',
 check('⚠ das Kaestchen der Gruppenzeile nimmt JEDE Layout-Eigenschaft von .modal-card input zurueck',
       offen.length === 0, 'nicht zurueckgenommen: ' + offen.join(', '));
 
+/* Gemeldet 2026-09-08: "'schliessen' und 'speichern' funktionieren erst nach
+ * vorherigem Klick auf eine Wissensgruppe". ⚠ NICHT REPRODUZIERT – und zwei
+ * naheliegende Erklaerungen sind im echten Chrome WIDERLEGT:
+ *   - z-index: .modal-overlay liegt auf 1000, die Popups der Eingabeleiste auf
+ *     10050 – der Dialog liegt trotzdem oben (Stapelkontexte), der erste Klick
+ *     wirkt auch mit dem alten Wert. Deshalb steht hier KEINE z-index-Zusage.
+ *   - Layout-Sprung: der Dialog wuchs nach dem Erscheinen um 29 px (Kasten
+ *     635 -> 693). Mit mousedown/mouseup ueber den Sprung hinweg kommt der
+ *     Klick trotzdem an: 29 px sind weniger als die 45 px Knopfhoehe.
+ * Der Abschnitt haelt deshalb eine VERBESSERUNG fest, keinen Fix: der Dialog
+ * wird erst sichtbar, wenn sein Inhalt steht (ein nachwachsender Dialog ist in
+ * jedem Fall schlechter), mit Doppelklick-Schutz und Wartezustand am Zahnrad. */
+section('2b. Der erste Klick muss treffen');
+check('das Zahnrad zeigt die Wartezeit (sonst wirkt der Klick tot)',
+      /cursor:\s*progress|opacity/.test(regel('.cs-collapse.is-busy')));
+
 // ── 3. Der Dialog im Betrieb ────────────────────────────────────────────────
 section('3. Dialog ausgefuehrt: zeichnen, klicken, speichern');
 
@@ -230,6 +262,9 @@ function baueUmgebung(entries, off, opt) {
     w.KbGroupFilter = {
         loadEntries: async function () {
             if (opt.entriesFehler) throw new Error('keine gruppen');
+            // `bremse` haelt den Abruf an: nur so ist der Zustand WAEHREND des
+            // Ladens messbar (ein aufgeloestes Promise waere sofort fertig).
+            if (opt.bremse) return await opt.bremse();
             return entries;
         },
         UNGROUPED: 'ungrouped'
@@ -260,7 +295,7 @@ function baueUmgebung(entries, off, opt) {
     // sie werden hier ausdruecklich mitgegeben.
     const konst = (CHATJS.match(/const _CHS_OFFEN_KEY[^\n]*\n\s*const _CHS_VORGABE[^\n]*/) || [''])[0];
     if (!konst) { console.log('  \x1b[31m✗\x1b[0m _CHS_OFFEN_KEY/_CHS_VORGABE nicht gefunden'); fail++; }
-    const src = 'let _kbDefOff = null, _kbDefPromise = null, _kbDefEintraege = null;\n' + konst + '\n'
+    const src = 'let _kbDefOff = null, _kbDefPromise = null, _kbDefEintraege = null, _chsLaeuft = false;\n' + konst + '\n'
         + teile.join('\n') + '\n'
         + 'w.__api = { oeffnen: _openChatSettings, alle: _kbDefSetzeAlle, '
         + 'speichern: _saveChatSettings, auswahl: _kbDefAlsAuswahl, hinweis: _kbDefHinweis, '
@@ -361,6 +396,37 @@ const EINTRAEGE = [
     await u.w.__api.oeffnen();
     check('nur "ungruppiert" vorhanden: eine Zeile',
           u.doc.querySelectorAll('#chs-kb-list input').length === 1);
+
+    /* ⚠ AUSGEFUEHRT: der Dialog darf NICHT sichtbar werden, solange die Liste
+     * noch fehlt – sonst waechst er unter dem Zeiger und der erste Klick auf
+     * "Speichern"/"Schliessen" geht verloren. Gemessen wird der Zustand
+     * WAEHREND des Ladens, nicht danach. */
+    section('3a. Sichtbar erst, wenn der Inhalt steht');
+    let loese;
+    u = baueUmgebung(EINTRAEGE, ['g2'], { bremse: () => new Promise(r => { loese = r; }) });
+    const pOffen = u.w.__api.oeffnen();
+    await new Promise(r => setTimeout(r, 0));
+    check('waehrend die Gruppen noch laden, bleibt der Dialog VERSTECKT',
+          u.doc.getElementById('chat-settings-modal').classList.contains('hidden'),
+          'sichtbar, obwohl die Liste fehlt');
+    check('und das Zahnrad zeigt den Wartezustand',
+          u.doc.getElementById('cs-settings').getAttribute('aria-busy') === 'true',
+          String(u.doc.getElementById('cs-settings').getAttribute('aria-busy')));
+    loese(EINTRAEGE);
+    await pOffen;
+    check('nach dem Laden ist der Dialog sichtbar UND die Liste steht',
+          !u.doc.getElementById('chat-settings-modal').classList.contains('hidden')
+          && u.doc.querySelectorAll('#chs-kb-list input').length === 3);
+    check('der Wartezustand ist wieder weg',
+          !u.doc.getElementById('cs-settings').hasAttribute('aria-busy'));
+    // Und ein zweiter Klick waehrend des Ladens darf nichts doppelt tun.
+    u = baueUmgebung(EINTRAEGE, [], { bremse: () => new Promise(r => { loese = r; }) });
+    const p1 = u.w.__api.oeffnen(); const p2 = u.w.__api.oeffnen();
+    await new Promise(r => setTimeout(r, 0));
+    loese(EINTRAEGE); await p1; await p2;
+    check('ein zweiter Klick auf das Zahnrad waehrend des Ladens laeuft nicht doppelt',
+          u.rufe.filter(r => r.url === '/api/chat/preprompt').length === 1,
+          'Abrufe: ' + u.rufe.filter(r => r.url === '/api/chat/preprompt').length);
 
     // ── 3b. Klappzustand ────────────────────────────────────────────────────
     section('3b. Klapp-Container: Vorgabe und gemerkte Wahl');

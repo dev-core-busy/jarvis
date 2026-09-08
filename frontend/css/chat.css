@@ -1288,6 +1288,10 @@ select option:hover {
 }
 .btn-modal-close:hover { border-color: var(--on-surface); color: var(--on-surface); }
 
+/* Das Zahnrad laedt den Dialog, bevor es ihn zeigt – ohne Rueckmeldung waere
+   der Klick in dieser Zeit von einem toten Knopf nicht zu unterscheiden. */
+.cs-collapse.is-busy { opacity: .55; cursor: progress; }
+
 /* ─── Einstellungen-Dialog in /chat (Preprompt + Wissens-Vorauswahl) ────────
    .modal-card hat width:380px und text-align:center – fuer zwei Container mit
    Textfeld und Gruppenliste zu schmal und falsch ausgerichtet. Die Hoehe ist am

@@ -2320,24 +2320,41 @@
         });
     }
 
+    // ⚠ ERST LADEN, DANN SICHTBAR MACHEN. Die Gruppenliste kommt asynchron, und
+    // sie steht IM Dialog: wird sie nachgetragen, waechst der Dialog und die
+    // Knoepfe im Fuss wandern nach unten. Gemessen: 29 px in den ersten 50 ms
+    // (Kasten 635 -> 693 px). Ein Klick auf "Speichern"/"Schliessen" in dieser
+    // Zeit trifft ins Leere – der Knopf sieht dann kaputt aus, obwohl er
+    // verdrahtet ist. Deshalb wird der Inhalt fertig aufgebaut, bevor der
+    // Dialog erscheint; das Zahnrad meldet die Wartezeit (aria-busy), sonst
+    // wirkt ein langsamer Abruf wie ein toter Knopf.
+    let _chsLaeuft = false;
     async function _openChatSettings() {
         const modal = $('chat-settings-modal');
         const ta = $('preprompt-text');
         const st = $('chat-settings-status');
-        if (!modal) return;
+        const zahn = $('cs-settings');
+        if (!modal || _chsLaeuft) return;
+        _chsLaeuft = true;
+        if (zahn) { zahn.setAttribute('aria-busy', 'true'); zahn.classList.add('is-busy'); }
         if (st) st.textContent = '';
         if (ta) ta.value = '';
         _chsKlappZustand();
+        try {
+            // Beide Teile UNABHAENGIG laden: ein Fehler im einen darf den
+            // anderen nicht mitnehmen.
+            try {
+                const r = await fetch('/api/chat/preprompt', { headers: _csHeaders() });
+                const d = await r.json();
+                if (d && d.ok && ta) ta.value = d.preprompt || '';
+            } catch (e) {}
+            await _kbDefZeichnen();
+        } finally {
+            _chsLaeuft = false;
+            if (zahn) { zahn.removeAttribute('aria-busy'); zahn.classList.remove('is-busy'); }
+        }
         modal.classList.remove('hidden');
         if (ta) ta.focus();
-        // Beide Teile UNABHAENGIG laden: ein Fehler im einen darf den anderen
-        // nicht mitnehmen.
-        try {
-            const r = await fetch('/api/chat/preprompt', { headers: _csHeaders() });
-            const d = await r.json();
-            if (d && d.ok && ta) ta.value = d.preprompt || '';
-        } catch (e) {}
-        await _kbDefZeichnen();
     }
 
     function _closeChatSettings() {

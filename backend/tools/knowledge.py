@@ -1814,9 +1814,19 @@ def relocate_folder_index(old_folder: Path, new_folder: Path) -> dict:
             "group_assignments": moved_groups}
 
 
-def purge_folder_index(folder: Path) -> dict:
-    """Entfernt alle Index-Eintraege (TF-IDF + FAISS) und Gruppen-Zuordnungen
-    unterhalb eines Ordners. Gibt Zaehler der entfernten Eintraege zurueck."""
+def purge_folder_index(folder: Path, gruppen: bool = True) -> dict:
+    """Entfernt alle Index-Eintraege (TF-IDF + FAISS) unterhalb eines Ordners.
+
+    ``gruppen=False`` laesst die Wissensgruppen-Zuordnungen stehen. Das ist der
+    Fall "Netzwerk-Freigabe getrennt": die Dateien sind vorerst weg, die
+    Freigabe kann aber jederzeit wieder verbunden werden – und dann sollen die
+    Dateien wieder in IHRER Gruppe liegen. Die Zuordnung ist Konfiguration des
+    Administrators, kein Index-Inhalt; sie mit zu loeschen waere ein Verlust,
+    den niemand bestellt hat (``kg.remove_prefix`` nimmt zusaetzlich die
+    Speicherordner der Gruppen mit). Beim LOESCHEN eines Ordners gilt das
+    Gegenteil, dort bleibt es bei ``True``.
+
+    Gibt Zaehler der entfernten Eintraege zurueck."""
     folder_s = str(folder)
 
     removed_tfidf = 0
@@ -1834,15 +1844,21 @@ def purge_folder_index(folder: Path) -> dict:
     if vs is not None:
         try:
             removed_vec = vs.remove_path_prefix(folder_s)
+            if removed_vec:
+                # ⚠ SPEICHERN: der Dienst haelt den Index im RAM. Ohne das
+                # steht die Bereinigung nur im Speicher und ist nach dem
+                # naechsten Neustart wieder da (Register, 2026-09-06).
+                vs.save()
         except Exception as e:
             _log.warning(f"FAISS-Bereinigung fehlgeschlagen: {e}")
 
     removed_groups = 0
-    try:
-        from backend import knowledge_groups as kg
-        removed_groups = kg.remove_prefix(_folder_rel(folder))
-    except Exception as e:
-        _log.warning(f"Gruppen-Bereinigung fehlgeschlagen: {e}")
+    if gruppen:
+        try:
+            from backend import knowledge_groups as kg
+            removed_groups = kg.remove_prefix(_folder_rel(folder))
+        except Exception as e:
+            _log.warning(f"Gruppen-Bereinigung fehlgeschlagen: {e}")
 
     _log.info(f"Ordner-Index bereinigt {folder_s}: "
               f"{removed_tfidf} TF-IDF-Dateien, {removed_vec} Vektor-Chunks, {removed_groups} Gruppen-Zuordnungen")

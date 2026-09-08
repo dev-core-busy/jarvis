@@ -18105,6 +18105,41 @@ async def mount_share(idx: int, user: str = Depends(require_knowledge_editor)):
                          "hinweis": "Der Index wird im Hintergrund aktualisiert."})
 
 
+def _mount_index_raeumen(mp: Path) -> dict | None:
+    """Nimmt die Dateien einer getrennten Freigabe aus dem Wissens-Index.
+
+    Warum ueberhaupt: eine getrennte Freigabe ist ein LEERES Verzeichnis, und
+    der Reindex fasst so etwas bewusst NICHT an – seit dem 2026-09-07 schuetzt
+    ``_ordner_abgehaengt()`` genau davor, dass ein nicht eingehaengter Mount
+    seinen ganzen Wissensbestand verliert. Dieser Schutz gilt dem UNBEABSICHTIGTEN
+    Fall (Freigabe nach einem Neustart nicht wieder da). Wer hier auf "Trennen"
+    drueckt, entscheidet sich ausdruecklich – dann sollen die Treffer auch aus
+    der Suche verschwinden, statt auf Dateien zu zeigen, die niemand mehr
+    oeffnen kann.
+
+    ⚠ DIE SCHRANKE IST DER PUNKT: das Ziel kommt aus der Konfiguration, nie aus
+    dem Request, und muss ECHT unterhalb von ``_MOUNT_BASE`` liegen. Ein leerer
+    oder verrutschter Pfad wuerde sonst mit einem Praefix-Vergleich den halben
+    Index leeren. Fail-closed: im Zweifel wird nichts angefasst.
+
+    Die Wissensgruppen-Zuordnungen bleiben stehen (``gruppen=False``) – die
+    Freigabe kann wieder verbunden werden, und dann gehoeren ihre Dateien
+    wieder in dieselbe Gruppe.
+    """
+    try:
+        ziel = Path(str(mp)).resolve()
+        basis = _MOUNT_BASE.resolve()
+        if ziel == basis or basis not in ziel.parents:
+            print(f"[knowledge] Index-Bereinigung abgelehnt (Ziel ausserhalb "
+                  f"{basis}): {ziel}", flush=True)
+            return None
+        from backend.tools.knowledge import purge_folder_index
+        return purge_folder_index(ziel, gruppen=False)
+    except Exception as e:  # noqa: BLE001
+        print(f"[knowledge] Index-Bereinigung fehlgeschlagen ({mp}): {e}", flush=True)
+        return None
+
+
 @app.post("/api/knowledge/mounts/{idx}/unmount")
 async def unmount_share(idx: int, user: str = Depends(require_knowledge_editor)):
     """Hängt eine Netzwerk-Freigabe aus und deaktiviert deren automatisches Einbinden."""
@@ -18115,7 +18150,11 @@ async def unmount_share(idx: int, user: str = Depends(require_knowledge_editor))
         if 0 <= idx < len(mounts):
             mounts[idx]["auto_mount"] = False
             _save_mounts_config(mounts)
-        return JSONResponse({"ok": True, "hint": "War nicht gemountet"})
+        # Auch hier aufraeumen: wer "Trennen" drueckt, will die Treffer los –
+        # unabhaengig davon, ob der Mount gerade noch stand.
+        entfernt = await asyncio.to_thread(_mount_index_raeumen, mp)
+        return JSONResponse({"ok": True, "hint": "War nicht gemountet",
+                             "index_bereinigt": entfernt})
 
     from backend import broker_client
     result = await broker_client.call("umount_share", {"mountpoint": str(mp)}, user=user, timeout=30)
@@ -18134,7 +18173,10 @@ async def unmount_share(idx: int, user: str = Depends(require_knowledge_editor))
         mounts[idx]["auto_mount"] = False
         _save_mounts_config(mounts)
 
-    return JSONResponse({"ok": True})
+    # ERST nach erfolgreichem Trennen bereinigen: scheitert das Aushaengen,
+    # sind die Dateien noch da und der Index bleibt richtig.
+    entfernt = await asyncio.to_thread(_mount_index_raeumen, mp)
+    return JSONResponse({"ok": True, "index_bereinigt": entfernt})
 
 
 @app.get("/api/knowledge/cleanup/scan")

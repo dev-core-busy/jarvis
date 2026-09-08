@@ -1925,6 +1925,7 @@ const _I18N = {
         'knowledge.share_unmounting':    'Trenne…',
         'knowledge.share_mounted':       'Freigabe verbunden',
         'knowledge.share_unmounted':     'Freigabe getrennt',
+        'knowledge.share_index_purged':  '{n} Abschnitte aus der Wissenssuche entfernt (kommen beim Verbinden zurück)',
         'knowledge.share_remove_confirm':'Freigabe entfernen?',
         'knowledge.share_removed':       'Freigabe entfernt',
         // Labels used in JS-generated HTML
@@ -5167,6 +5168,7 @@ const _I18N = {
         'knowledge.share_unmounting':    'Disconnecting…',
         'knowledge.share_mounted':       'Share connected',
         'knowledge.share_unmounted':     'Share disconnected',
+        'knowledge.share_index_purged':  '{n} sections removed from knowledge search (restored on reconnect)',
         'knowledge.share_remove_confirm':'Remove share?',
         'knowledge.share_removed':       'Share removed',
         // Labels used in JS-generated HTML

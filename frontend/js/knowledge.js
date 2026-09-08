@@ -3405,8 +3405,17 @@ class JarvisKnowledgeManager {
                 headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
             });
             if (!resp.ok) throw new Error(await this._fehlertext(resp));
-            this._showNotification(mount ? window.t('knowledge.share_mounted') : window.t('knowledge.share_unmounted'),
-                                   'success', 'kb-mount-list');
+            let text = mount ? window.t('knowledge.share_mounted') : window.t('knowledge.share_unmounted');
+            if (!mount) {
+                // Das Trennen nimmt die Dateien aus der Wissenssuche. Ohne diese
+                // Zahl sucht der Administrator spaeter den Grund dafuer, dass
+                // Treffer fehlen - die Handlung und ihre Folge gehoeren zusammen.
+                let bereinigt = null;
+                try { bereinigt = (await resp.json()).index_bereinigt; } catch (_e) { /* aeltere Fassung */ }
+                const chunks = bereinigt && bereinigt.vector_chunks;
+                if (chunks) text += ' – ' + window.t('knowledge.share_index_purged').replace('{n}', chunks);
+            }
+            this._showNotification(text, 'success', 'kb-mount-list');
             await this.fetchMounts();
             await this.fetchStats();
         } catch (e) {

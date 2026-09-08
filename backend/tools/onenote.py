@@ -47,8 +47,10 @@ onetoc" vermerkt). Eine Endung anzunehmen, fuer die es keinen Parser gibt,
 waere eine Zusage, die der naechste Schritt kassiert.
 """
 
+import html
 import os
 import re
+import selectors
 import shutil
 import signal
 import subprocess
@@ -73,19 +75,55 @@ _TIKA_GLOBS = ("vendor/tika-app-*.jar", "/usr/share/java/tika-app-*.jar")
 _JAVA_KANDIDATEN = ("java", "/usr/bin/java", "/usr/lib/jvm/default-java/bin/java")
 
 
-def zeitdeckel() -> int:
-    """Sekunden je Datei. FUNKTION, keine Modulkonstante – ein beim Import
-    gelesener Wert waere bis zum Dienstneustart nicht aenderbar.
+def stille_deckel() -> int:
+    """Sekunden OHNE JEDE AUSGABE, nach denen ein Lauf als haengend gilt.
 
-    120 s statt eines knapperen Werts, weil die Laufzeit an der DATEIGROESSE
-    haengt, nicht an der Seitenzahl: gemessen 1,4 s fuer 14 KB und 11,5 s fuer
-    435 KB. Ein mehrere Megabyte grosser Abschnitt braucht entsprechend mehr.
+    ⚠ DIESER WERT HAT DEN FESTEN GESAMTDECKEL ABGELOEST, und der Grund ist
+    gemessen, nicht geschaetzt: die alte Begruendung ("die Laufzeit haengt an
+    der DATEIGROESSE") ist WIDERLEGT. An der 46,5-MB-Datei von ECHT nachgemessen
+    (2026-09-07): 281 s Gesamtlaufzeit, davon 277 s Tesseract-OCR eingebetteter
+    Bildschirmfotos – dieselbe Datei ohne OCR braucht 4 s. Die Laufzeit haengt
+    an der Zahl eingebetteter BILDER, nicht an der Dateigroesse. Ein fester
+    Deckel schneidet damit ausgerechnet die inhaltsreichen Dateien ab: 86 % des
+    Textes jener Datei (7363 von 8508 Zeilen) stammen aus genau dieser OCR.
+
+    DER FORTSCHRITT LIEGT DIE GANZE ZEIT MESSBAR AUF STDOUT. Ueber denselben
+    Lauf gemessen: 74 Ausgaben, laengste Pause **13,9 s** (p95 9,2 s, Median
+    3,9 s). Der Prozess verstummt also nie laenger als 14 s, waehrend er 280 s
+    arbeitet – der alte Deckel hat einen Extraktor abgeschnitten, der im
+    Sekundentakt Text lieferte.
+
+    120 s ist bewusst DERSELBE Zahlenwert wie der fruehere Gesamtdeckel, nur mit
+    der richtigen Bezugsgroesse. Das laesst der laengsten gemessenen Pause das
+    8,6-fache an Luft – Reserve fuer eine langsamere Maschine, ein einzelnes
+    sehr grosses eingebettetes Bild und Last durch parallele Laeufe – und
+    schlaegt trotzdem zu, wenn ein Prozess wirklich haengt.
     """
     try:
-        wert = int(os.environ.get("JARVIS_ONENOTE_TIMEOUT", "120"))
+        wert = int(os.environ.get("JARVIS_ONENOTE_STILLE", "120"))
     except (TypeError, ValueError):
         return 120
-    return max(10, min(wert, 900))
+    return max(10, min(wert, 3600))
+
+
+def zeitdeckel() -> int:
+    """HARTE Obergrenze je Datei – die Notbremse HINTER dem Stille-Waechter.
+
+    Sie faengt nur noch den pathologischen Fall: einen Prozess, der zwar stetig
+    ausgibt, aber nie fertig wird (beschaedigter Revisionsbaum, Endlosschleife
+    im Parser). Ueber den Normalfall entscheidet `stille_deckel()`.
+
+    Vorgabe 3600 s statt der frueheren 120: mit dem Waechter davor darf sie
+    grosszuegig sein, und ein zu knapper Wert war genau der Fehler, der eine
+    46-MB-Datei mit 284 Chunks SAP-Anleitungswissen aus dem Index gehalten hat.
+    FUNKTION, keine Modulkonstante – ein beim Import gelesener Wert waere bis
+    zum Dienstneustart nicht aenderbar.
+    """
+    try:
+        wert = int(os.environ.get("JARVIS_ONENOTE_TIMEOUT", "3600"))
+    except (TypeError, ValueError):
+        return 3600
+    return max(60, min(wert, 86400))
 
 
 def jvm_heap() -> str:
@@ -398,6 +436,57 @@ def _entschaerfen(zeile: str) -> str:
     return re.sub(r"\s{2,}", " ", "".join(sauber)).strip()
 
 
+# ══ Eingebettete XPS-Ausdrucke ("nach OneNote drucken") ═══════════════════
+# ⚠ HIER LIEGT DER BESTE TEXT DER GANZEN DATEI – und er war bisher unbrauchbar.
+# Gemessen am 2026-09-07 an der 46,5-MB-SAP-Anleitung von ECHT: 325 Zeilen der
+# Form
+#     <Glyphs RenderTransform="0.166693,0,0,0.167,0,0" Fill="#ff000000"
+#             FontUri="/Documents/1/Resources/Fonts/C0E9….odttf"
+#             UnicodeString="Die Angebotserstellung bei Maris beginnt mit …" />
+# Das ist SAUBER GETIPPTER Fliesstext (kein OCR-Salat), verpackt in bis zu
+# 837 Zeichen Glyphen-Geometrie. Ungeoeffnet trug ein Chunk rund 5 % Nutztext
+# und 95 % GUIDs – das Embedding davon ist praktisch wertlos, und die Zeilen
+# machten 40 % der gesamten Textmasse aus.
+#
+# ``UnicodeString`` IST laut XPS-Spezifikation der Textinhalt eines
+# Glyphs-Elements. Das hier ist also keine Heuristik, sondern das Auspacken
+# eines Formats – anders als eine geratene Rauschregel (siehe die verworfene
+# Vokal-Regel im Kopf dieser Datei).
+_XPS_TEXT_RE = re.compile(r'UnicodeString="([^"]*)"')
+# Paketstruktur OHNE jeden Textgehalt: Beziehungen, Inhaltstypen, Paketstuecke.
+# ⚠ ZWEI Bedingungen, nicht eine: das Element ALLEIN reicht nicht als Grund.
+# Tika haengt Zeilen zusammen ("><Relationship …"), ein Anker am Zeilenanfang
+# geht deshalb ins Leere - gemessen blieben so 139 Zeilen stehen. Umgekehrt
+# waere "enthaelt <Relationship" zu breit fuer eine Notiz, die ueber OOXML
+# schreibt. Verworfen wird nur, was BEIDES traegt: das Struktur-Element UND
+# einen eindeutigen Paketmarker (XPS-Schema, obfuskierte Schrift, Inhaltstyp).
+_XPS_ELEMENT_RE = re.compile(r'<(Relationship|Override|Default|Types|\?xml)\b')
+_XPS_PAKET_RE = re.compile(
+    r'schemas\.microsoft\.com/xps|schemas\.openxmlformats\.org/package'
+    r'|\.odttf|\[Content_Types\]\.xml'
+)
+# Ein Paketstueck-Pfad ist fuer sich schon eindeutig: Tika nummeriert die
+# Stuecke eines Pakets als "…/[0].piece".
+_XPS_STUECK_RE = re.compile(r'\[\d+\]\.piece\s*$')
+
+
+def _xps_auspacken(zeile: str) -> str | None:
+    """Holt aus einer XPS-Glyphenzeile den Text – oder verwirft reine Struktur.
+
+    Rueckgabe: der Text, "" fuer "verwerfen", oder None fuer "nicht zustaendig".
+    Die Unterscheidung ist noetig, weil der Aufrufer nur im ersten Fall etwas
+    ersetzt und sonst seinen bisherigen Weg geht.
+    """
+    if "<Glyphs" in zeile:
+        stuecke = [html.unescape(t).strip() for t in _XPS_TEXT_RE.findall(zeile)]
+        return " ".join(t for t in stuecke if t)
+    if _XPS_STUECK_RE.search(zeile):
+        return ""
+    if _XPS_ELEMENT_RE.search(zeile) and _XPS_PAKET_RE.search(zeile):
+        return ""
+    return None
+
+
 def saeubern(roh: str) -> tuple[str, dict]:
     """Rohtext von Tika in indizierbaren Text ueberfuehren.
 
@@ -411,7 +500,8 @@ def saeubern(roh: str) -> tuple[str, dict]:
     nur einmal. Vertretbar – die Reihenfolge ist ohnehin nicht die der Seiten,
     eine Tabelle ist hier also nicht rekonstruierbar.
     """
-    bilanz = {"zeilen": 0, "dubletten": 0, "rauschen": 0, "zeit": 0, "behalten": 0}
+    bilanz = {"zeilen": 0, "dubletten": 0, "rauschen": 0, "zeit": 0,
+              "behalten": 0, "xps": 0}
     gesehen: set[str] = set()
     aus: list[str] = []
     for rohzeile in (roh or "").splitlines():
@@ -419,6 +509,16 @@ def saeubern(roh: str) -> tuple[str, dict]:
         if not zeile:
             continue
         bilanz["zeilen"] += 1
+        # Eingebettete XPS-Ausdrucke auspacken, BEVOR Rauschfilter und
+        # Dublettenpruefung greifen: eine 800-Zeichen-Glyphenzeile gilt sonst
+        # als einzigartiger Nutztext und schleppt ihre GUIDs in den Index.
+        _xps = _xps_auspacken(zeile)
+        if _xps is not None:
+            bilanz["xps"] = bilanz.get("xps", 0) + 1
+            if not _xps:
+                bilanz["rauschen"] += 1
+                continue
+            zeile = _xps
         if _ZEIT_RE.match(zeile):
             # Die reine Uhrzeit aus dem Seitenkopf sagt ohne ihre Seite nichts.
             bilanz["zeit"] += 1
@@ -462,7 +562,98 @@ def _fehlergrund(stderr: bytes, rc: int) -> str:
     return f"Rueckgabewert {rc}"
 
 
-def text_aus_datei(pfad: Path, zeitlimit: int | None = None) -> tuple[str | None, str]:
+def _abraeumen(proc) -> None:
+    """Beendet die ganze PROZESSGRUPPE und schliesst die Pipes.
+
+    ``proc.kill()`` allein laesst Kindprozesse als Waisen weiterlaufen
+    (Register) – Tika startet fuer die OCR echte ``tesseract``-Prozesse.
+    """
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except OSError:
+        try:
+            proc.kill()
+        except OSError:
+            pass
+    for pipe in (proc.stdout, proc.stderr):
+        try:
+            if pipe is not None:
+                pipe.close()
+        except OSError:
+            pass
+    try:
+        proc.wait(timeout=10)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _lies_stroemend(proc, stille_s: int, gesamt_s: int, melde=None):
+    """Liest stdout/stderr STROEMEND und schlaegt zu, wenn der Prozess VERSTUMMT.
+
+    Rueckgabe ``(stdout, stderr, abbruch, gelesen, dauer)``; ``abbruch`` ist
+    None oder ``("stille"|"gesamt", gelaufene_sekunden)``.
+
+    ⚠ WARUM NICHT ``communicate(timeout=...)``: das liest erst am Ende und kennt
+    deshalb nur EINE Frage – "ist die Gesamtzeit um?". Ob der Prozess dabei
+    arbeitet oder haengt, faellt unter den Tisch, obwohl der Unterschied die
+    ganze Zeit auf stdout steht.
+
+    ⚠ UND WARUM NICHT ``for line in proc.stdout``: das prueft keine Deadline und
+    laeuft bei einem stillen Prozess ewig weiter (Register). ``select`` mit
+    Zeitlimit kehrt auch dann zurueck, wenn NICHTS kommt – genau der Fall, um
+    den es hier geht.
+
+    Nebengewinn: beide Pipes werden fortlaufend geleert, ein voller Pipe-Puffer
+    kann den Extraktor also gar nicht erst blockieren.
+    """
+    sel = selectors.DefaultSelector()
+    sel.register(proc.stdout, selectors.EVENT_READ, "out")
+    sel.register(proc.stderr, selectors.EVENT_READ, "err")
+    teile: dict = {"out": [], "err": []}
+    start = time.monotonic()
+    letzte = start
+    zuletzt_gemeldet = start
+    gelesen = 0
+    abbruch = None
+    try:
+        while sel.get_map():
+            for key, _ in sel.select(timeout=1.0):
+                try:
+                    stueck = os.read(key.fileobj.fileno(), 65536)
+                except OSError:
+                    stueck = b""
+                if not stueck:          # EOF auf dieser Pipe
+                    sel.unregister(key.fileobj)
+                    continue
+                teile[key.data].append(stueck)
+                if key.data == "out":
+                    gelesen += len(stueck)
+                # JEDE Ausgabe zaehlt als Lebenszeichen, auch die auf stderr:
+                # gefragt ist "arbeitet er noch", nicht "liefert er Nutztext".
+                letzte = time.monotonic()
+            jetzt = time.monotonic()
+            if jetzt - letzte > stille_s:
+                abbruch = ("stille", jetzt - start)
+                break
+            if jetzt - start > gesamt_s:
+                abbruch = ("gesamt", jetzt - start)
+                break
+            # Ohne Lebenszeichen nach aussen sieht ein Admin minutenlang eine
+            # Anzeige, die sich nicht ruehrt, und haelt den Lauf fuer tot.
+            if melde is not None and jetzt - zuletzt_gemeldet >= 5:
+                zuletzt_gemeldet = jetzt
+                try:
+                    melde(gelesen, jetzt - start)
+                except Exception:  # noqa: BLE001
+                    pass
+    finally:
+        sel.close()
+    return (b"".join(teile["out"]), b"".join(teile["err"]),
+            abbruch, gelesen, time.monotonic() - start)
+
+
+def text_aus_datei(pfad: Path, zeitlimit: int | None = None,
+                   melde=None) -> tuple[str | None, str]:
     """Extrahiert Text aus einer ``.one``-Datei.
 
     Rueckgabe ``(text, grund)``: ``text`` ist None, wenn nichts herauskam –
@@ -501,21 +692,37 @@ def text_aus_datei(pfad: Path, zeitlimit: int | None = None) -> tuple[str | None
     except OSError as e:
         return None, f"Java liess sich nicht starten: {e.strerror or e}"
 
+    stille = stille_deckel()
     try:
-        roh, fehler = proc.communicate(timeout=limit)
-    except subprocess.TimeoutExpired:
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        except OSError:
-            proc.kill()
-        try:
-            proc.communicate(timeout=10)
-        except Exception:  # noqa: BLE001
-            pass
-        return None, (f"Zeitlimit von {limit} s ueberschritten – Datei zu gross "
-                      f"oder beschaedigt (JARVIS_ONENOTE_TIMEOUT erhoeht das Limit)")
+        roh, fehler, abbruch, gelesen, gelaufen = _lies_stroemend(
+            proc, stille, limit, melde)
     except Exception as e:  # noqa: BLE001
+        _abraeumen(proc)
         return None, f"Aufruf fehlgeschlagen: {e}"
+
+    if abbruch is not None:
+        _abraeumen(proc)
+        art, sek = abbruch
+        kb = gelesen // 1024
+        if art == "stille":
+            # Der Grund nennt BEIDE Zahlen: wer 500 KB gelesen hat und dann
+            # verstummt, hat ein anderes Problem als einer, der nie anfing.
+            return None, (f"Der Extraktor hat {stille} s lang nichts mehr "
+                          f"ausgegeben (nach {sek:.0f} s, {kb} KB gelesen) – "
+                          f"Datei vermutlich beschaedigt "
+                          f"(JARVIS_ONENOTE_STILLE aendert die Geduld)")
+        return None, (f"Harte Obergrenze von {limit} s erreicht "
+                      f"({kb} KB in {sek:.0f} s gelesen) – der Extraktor lieferte "
+                      f"bis zuletzt Text, JARVIS_ONENOTE_TIMEOUT hebt die Grenze")
+
+    try:
+        proc.wait(timeout=15)
+    except subprocess.TimeoutExpired:
+        # Beide Pipes stehen auf EOF, der Prozess endet aber nicht – ein Rest,
+        # den nur die Prozessgruppe faengt.
+        _abraeumen(proc)
+        return None, (f"Der Extraktor lieferte seine Ausgabe, endete danach aber "
+                      f"nicht ({gelesen // 1024} KB in {gelaufen:.0f} s)")
 
     if proc.returncode != 0:
         # Tika schreibt auch im Erfolgsfall Warnungen nach stderr – der

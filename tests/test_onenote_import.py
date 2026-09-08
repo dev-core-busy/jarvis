@@ -162,7 +162,8 @@ for _name in ("alle_endungen", "_unlesbar_grund", "_extract_text_raw", "get_stat
 # damit nicht von "bestanden" zu unterscheiden (Register). Fehlt eines,
 # endet der Waechter mit Exit 2: "konnte nicht laufen".
 for _name in ("saeubern", "text_aus_datei", "finde_java", "finde_tika",
-              "fehlender_baustein", "zeitdeckel", "jvm_heap",
+              "fehlender_baustein", "zeitdeckel", "stille_deckel", "jvm_heap",
+              "_lies_stroemend", "_abraeumen", "_xps_auspacken",
               "einrichtung_anstossen", "einrichtung_laeuft", "automatik_an",
               "letzter_einrichtungsfehler", "WIEDERHOLUNG_S", "_zustand"):
     if not hasattr(ON, _name):
@@ -285,7 +286,12 @@ check("alle vier Module lesen aus der einen Quelle",
 print("\n\033[1m3. Dispatch: der .one-Zweig ruft wirklich den Extraktor\033[0m")
 
 quelle_k = ohne_kommentare_py((WURZEL / "backend" / "tools" / "knowledge.py").read_text())
-check("_extract_text_rest ruft text_aus_datei", "text_aus_datei(filepath)" in quelle_k)
+check("_extract_text_rest ruft text_aus_datei",
+      "text_aus_datei(filepath" in quelle_k)
+# Der Fortschritt muss dabei durchgereicht werden - sonst steht in der
+# Oberflaeche minutenlang derselbe Dateiname und der Lauf sieht tot aus.
+check("und reicht einen Fortschritts-Callback durch",
+      "melde=" in quelle_k.split("text_aus_datei(filepath")[1][:40], quelle_k[:0])
 check("_failure_reason fragt den fehlenden Baustein ab", "fehlender_baustein" in quelle_k)
 check("get_stats liefert onenote_support", '"onenote_support"' in quelle_k)
 def rumpf(quelle, name):
@@ -317,8 +323,13 @@ check("onenote_support liegt NICHT im prozessweiten Cache, sondern in get_stats"
 spur = []
 
 
-def _attrappe(pfad, zeitlimit=None):
+def _attrappe(pfad, zeitlimit=None, melde=None):
+    # Signatur GENAU wie das Original: eine Attrappe, die mehr annimmt (etwa
+    # **kwargs), wuerde einen Aufruf durchwinken, den der echte Extraktor
+    # ablehnt (Register).
     spur.append(str(pfad))
+    if melde is not None:
+        melde(0, 0.0)          # der Aufrufer muss einen Callback vertragen
     return "AUS DER ATTRAPPE", "ok"
 
 
@@ -411,19 +422,40 @@ check("Heap-Grenze ist eine FUNKTION", callable(getattr(ON, "jvm_heap", None)))
 # OHNE BILANZ ab, und ein abgebrochener Waechter ist von einem bestandenen
 # nicht zu unterscheiden. In der Gegenprobe (12) genau so passiert.
 _deckel = sicher(lambda: ON.zeitdeckel())
-check("Zeitdeckel wird nach unten UND oben begrenzt",
-      isinstance(_deckel, int) and 10 <= _deckel <= 900, repr(_deckel))
+check("harte Obergrenze wird nach unten UND oben begrenzt",
+      isinstance(_deckel, int) and 60 <= _deckel <= 86400, repr(_deckel))
+_stille = sicher(lambda: ON.stille_deckel())
+check("Stille-Deckel ist eine FUNKTION und begrenzt",
+      isinstance(_stille, int) and 10 <= _stille <= 3600, repr(_stille))
+# ⚠ DIE EIGENTLICHE ZUSAGE: die Notbremse muss WEIT ueber der Geduld liegen.
+# Steht sie darunter, greift sie zuerst - und der Stille-Waechter, der den
+# Unterschied zwischen "arbeitet" und "haengt" kennt, kommt nie zum Zug.
+check("die Notbremse liegt deutlich ueber dem Stille-Deckel",
+      isinstance(_deckel, int) and isinstance(_stille, int) and _deckel >= 5 * _stille,
+      f"gesamt={_deckel} stille={_stille}")
 alt = os.environ.get("JARVIS_ONENOTE_TIMEOUT")
 try:
     os.environ["JARVIS_ONENOTE_TIMEOUT"] = "unfug"
     check("unbrauchbarer Zeitwert faellt auf die Vorgabe, statt zu werfen",
-          sicher(lambda: ON.zeitdeckel()) == 120)
+          sicher(lambda: ON.zeitdeckel()) == 3600)
     os.environ["JARVIS_ONENOTE_TIMEOUT"] = "5"
-    check("zu kleiner Zeitwert wird gehoben", sicher(lambda: ON.zeitdeckel()) == 10)
+    check("zu kleiner Zeitwert wird gehoben", sicher(lambda: ON.zeitdeckel()) == 60)
 finally:
     os.environ.pop("JARVIS_ONENOTE_TIMEOUT", None)
     if alt is not None:
         os.environ["JARVIS_ONENOTE_TIMEOUT"] = alt
+
+alt = os.environ.get("JARVIS_ONENOTE_STILLE")
+try:
+    os.environ["JARVIS_ONENOTE_STILLE"] = "unfug"
+    check("unbrauchbarer Stille-Wert faellt auf die Vorgabe",
+          sicher(lambda: ON.stille_deckel()) == 120)
+    os.environ["JARVIS_ONENOTE_STILLE"] = "3"
+    check("zu kleiner Stille-Wert wird gehoben", sicher(lambda: ON.stille_deckel()) == 10)
+finally:
+    os.environ.pop("JARVIS_ONENOTE_STILLE", None)
+    if alt is not None:
+        os.environ["JARVIS_ONENOTE_STILLE"] = alt
 
 alt = os.environ.get("JARVIS_ONENOTE_HEAP")
 try:
@@ -953,6 +985,227 @@ try:
           "args.get" not in _rumpf and "deploy" in _rumpf, _rumpf[:200])
 except Exception as _e:  # noqa: BLE001
     check(f"Broker-Ops pruefbar ({type(_e).__name__})", False, str(_e)[:160])
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+print("\n\033[1m11. Stille-Waechter statt festem Zeitdeckel\033[0m")
+import inspect
+import subprocess as _sp
+import time
+# ⚠ HIER WIRD DER ECHTE LESER AUSGEFUEHRT, mit echten Unterprozessen. Eine
+# Quelltext-Pruefung koennte die Frage gar nicht beantworten, um die es geht:
+# laeuft ein LANGSAMER, aber arbeitender Prozess durch - und ein HAENGENDER
+# nicht? Das entscheidet sich im Ablauf, nicht im Wortlaut.
+
+
+def _starte(shell_code):
+    return _sp.Popen(["sh", "-c", shell_code], stdout=_sp.PIPE, stderr=_sp.PIPE,
+                     start_new_session=True)
+
+
+# (a) DER GEMELDETE FALL: laeuft weit laenger als der alte Deckel, gibt aber
+#     regelmaessig aus. Gemessen an der echten 46-MB-Datei: 280 s Laufzeit,
+#     laengste Pause 13,9 s - genau dieses Verhaeltnis, nur in klein.
+_p = _starte('for i in 1 2 3 4 5 6; do echo "zeile $i"; sleep 1; done')
+_aus, _err, _abbruch, _gelesen, _dauer = ON._lies_stroemend(_p, stille_s=3, gesamt_s=60)
+check("ein langsamer, aber ARBEITENDER Lauf wird nicht abgebrochen",
+      _abbruch is None, f"abbruch={_abbruch}")
+check("er laeuft dabei laenger als seine Geduld je Pause (3 s)",
+      _dauer > 4, f"dauer={_dauer:.1f}s")
+check("und seine Ausgabe kommt VOLLSTAENDIG an",
+      _aus.count(b"zeile") == 6, _aus[:80])
+check("der Prozess ist danach beendet", _p.poll() is not None or _p.wait(5) is not None)
+
+# (b) HAENGT: gibt einmal aus und verstummt dann.
+_p = _starte('echo start; sleep 30')
+_t0 = time.monotonic()
+_aus, _err, _abbruch, _gelesen, _dauer = ON._lies_stroemend(_p, stille_s=2, gesamt_s=60)
+_gebraucht = time.monotonic() - _t0
+check("ein VERSTUMMTER Lauf wird abgebrochen", bool(_abbruch) and _abbruch[0] == "stille",
+      f"abbruch={_abbruch}")
+check("und zwar zuegig, nicht erst am Gesamtdeckel", _gebraucht < 10,
+      f"{_gebraucht:.1f}s")
+ON._abraeumen(_p)
+check("der haengende Prozess ist danach tot", _p.poll() is not None)
+
+# (c) STETIG, ABER ENDLOS: nur dafuer gibt es die harte Notbremse.
+_p = _starte('while true; do echo tick; sleep 0.2; done')
+_aus, _err, _abbruch, _gelesen, _dauer = ON._lies_stroemend(_p, stille_s=30, gesamt_s=3)
+check("ein endloser Lauf faellt in die harte Obergrenze",
+      bool(_abbruch) and _abbruch[0] == "gesamt", f"abbruch={_abbruch}")
+ON._abraeumen(_p)
+
+# (d) ⚠ KILLPG: Tika startet fuer die OCR echte tesseract-Prozesse. ``kill()``
+#     allein laesst sie als Waisen weiterlaufen (Register).
+_p = _starte('sleep 300 & echo $!; sleep 300')
+_zeile = _p.stdout.readline().strip()
+_enkel = int(_zeile) if _zeile.isdigit() else 0
+ON._abraeumen(_p)
+time.sleep(0.5)
+
+
+def _lebt(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+check("das Abraeumen faellt die ganze PROZESSGRUPPE (Enkel inbegriffen)",
+      _enkel > 0 and not _lebt(_enkel), f"enkel={_enkel} lebt={_lebt(_enkel) if _enkel else '?'}")
+
+# (e) Lebenszeichen nach aussen - ohne das sieht ein Admin minutenlang nichts.
+_meldungen = []
+_p = _starte('for i in 1 2 3 4 5 6 7 8 9 10 11 12; do echo x; sleep 1; done')
+ON._lies_stroemend(_p, stille_s=5, gesamt_s=60,
+                   melde=lambda b, sek: _meldungen.append((b, sek)))
+check("der Fortschritt wird nach aussen gemeldet", len(_meldungen) >= 2,
+      f"{len(_meldungen)} Meldungen")
+check("und er waechst mit (gelesene Bytes, Laufzeit)",
+      bool(_meldungen) and _meldungen[-1][0] >= _meldungen[0][0] and _meldungen[-1][1] > 0,
+      str(_meldungen[:3]))
+# Ein Fehler im Callback des Aufrufers darf die Extraktion nicht killen.
+# ⚠ Der Lauf MUSS laenger dauern als die Melde-Schwelle (5 s), sonst wird der
+# Callback nie gerufen und die Pruefung ist trivial wahr - in der Gegenprobe
+# genau so aufgefallen (+0 FAIL).
+_rufe = []
+_p = _starte('echo eins; sleep 7; echo zwei')
+
+
+def _kaputt(_b, _s):
+    _rufe.append(1)
+    raise RuntimeError("Callback des Aufrufers kracht")
+
+
+_aus, _, _abbruch, _, _ = ON._lies_stroemend(_p, stille_s=30, gesamt_s=60, melde=_kaputt)
+check("Positivkontrolle: der krachende Callback wurde ueberhaupt gerufen",
+      len(_rufe) >= 1, f"{len(_rufe)} Rufe")
+check("ein krachender Fortschritts-Callback bricht die Extraktion NICHT ab",
+      _abbruch is None and b"zwei" in _aus, f"abbruch={_abbruch} aus={_aus[:40]}")
+
+# (f) stderr zaehlt als Lebenszeichen: waehrend der OCR schreibt Tika INFO-Zeilen.
+#     Gefragt ist "arbeitet er noch", nicht "liefert er Nutztext".
+_p = _starte('for i in 1 2 3 4 5 6; do echo warnung >&2; sleep 1; done; echo fertig')
+_aus, _err, _abbruch, _, _ = ON._lies_stroemend(_p, stille_s=3, gesamt_s=60)
+check("Ausgabe auf stderr haelt den Lauf am Leben",
+      _abbruch is None and b"fertig" in _aus, f"abbruch={_abbruch}")
+
+# (g) Die Zusage nach einem Abbruch: KEIN halber Text, der als vollstaendig gilt.
+#     Ein Teiltext waere still verlorener Inhalt bei einer Datei, die danach als
+#     erfolgreich indiziert gilt - der mtime-Cache verhindert jeden zweiten
+#     Versuch (Register: ein Extraktor, der still Inhalt verliert, ist die
+#     schlechteste Variante).
+_quelle_te = ohne_kommentare_py(inspect.getsource(ON.text_aus_datei))
+import ast as _ast
+
+
+def _abbruchzweig_gibt_nur_none():
+    """Jedes ``return`` im Abbruch-Zweig muss None als ersten Wert liefern."""
+    # ⚠ NICHT die kommentarfreie Fassung: der Kommentar-Entferner zerlegt
+    #   mehrzeilige Ausdruecke, und der AST braucht gueltige Syntax. Kommentare
+    #   stoeren einen Syntaxbaum ohnehin nicht (Register).
+    baum = _ast.parse(inspect.getsource(ON.text_aus_datei))
+    fn = next(n for n in _ast.walk(baum) if isinstance(n, _ast.FunctionDef))
+    for knoten in _ast.walk(fn):
+        # Der Zweig, der auf ``abbruch`` prueft - egal wie er formuliert ist.
+        if not isinstance(knoten, _ast.If):
+            continue
+        if "abbruch" not in _ast.dump(knoten.test):
+            continue
+        for r in (x for x in _ast.walk(knoten) if isinstance(x, _ast.Return)):
+            wert = r.value
+            erst = wert.elts[0] if isinstance(wert, _ast.Tuple) and wert.elts else wert
+            if not (isinstance(erst, _ast.Constant) and erst.value is None):
+                return False, _ast.dump(erst)[:120]
+        return True, ""
+    return False, "kein Zweig auf 'abbruch' gefunden"
+
+
+_ok_zweig, _detail = paar(_abbruchzweig_gibt_nur_none) if False else _abbruchzweig_gibt_nur_none()
+check("nach einem Abbruch gibt text_aus_datei None zurueck, nie einen Teiltext "
+      "(ein halber Text gaelte als vollstaendig – der mtime-Cache verhindert "
+      "jeden zweiten Versuch)", _ok_zweig, _detail)
+check("der Grund nennt die gelesene Menge (500 KB und dann still ist ein "
+      "anderes Problem als nie angefangen)",
+      "KB gelesen" in _quelle_te)
+check("und er nennt den Stellhebel", "JARVIS_ONENOTE_STILLE" in _quelle_te)
+
+# (h) REGEL: kein communicate(timeout=) mehr im Extraktionspfad - es liest erst
+#     am Ende und kann den Unterschied "arbeitet/haengt" gar nicht sehen.
+check("⚠ der Extraktionspfad benutzt kein communicate(timeout=) mehr",
+      "communicate(timeout" not in _quelle_te, _quelle_te[:0])
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+print("\n\033[1m12. Eingebettete XPS-Ausdrucke auspacken\033[0m")
+# Die Zeilenform stammt 1:1 aus der Messung an der echten SAP-Anleitung von
+# ECHT (2026-09-07) – der TEXT darin ist ersetzt: Kundennamen und Adressen
+# gehoeren nicht in ein oeffentliches Repo.
+_GLYPH = ('<Glyphs RenderTransform="0.166693,0,0,0.167,0,0" Fill="#ff000000" '
+          'FontUri="/Documents/1/Resources/Fonts/C0E91E0F-DCB7-4047-919D-57162B6807CF.odttf" '
+          'FontRenderingEmSize="96" OriginX="139.2" OriginY="187.68" '
+          'UnicodeString="Die Angebotserstellung beginnt im Vorsystem " />')
+_REL = ('><Relationship Target="/Documents/1/Resources/Fonts/'
+        'C0E91E0F-DCB7-4047-919D-57162B6807CF.odttf" Id="R0" '
+        'Type="http://schemas.microsoft.com/xps/2005/06/required-resource" />')
+_STUECK = "Documents/1/Resources/Fonts/8656C6C5-278D-4CA4-9ABD-3D2CA2BBC848.odttf/[0].piece"
+
+_t = sicher(ON._xps_auspacken, _GLYPH)
+check("aus einer Glyphenzeile kommt der NUTZTEXT heraus",
+      _t == "Die Angebotserstellung beginnt im Vorsystem", repr(_t)[:120])
+check("und die Geometrie/GUIDs sind weg",
+      isinstance(_t, str) and "odttf" not in _t and "RenderTransform" not in _t)
+check("der Gewinn ist die Groessenordnung (5 % Nutztext in 95 % Struktur)",
+      isinstance(_t, str) and len(_t) < len(_GLYPH) / 5, f"{len(_t)} von {len(_GLYPH)}")
+
+check("XML-Entities werden aufgeloest",
+      sicher(ON._xps_auspacken,
+             '<Glyphs UnicodeString="Order &amp; Billing" />') == "Order & Billing")
+check("mehrere Textstuecke einer Zeile werden verbunden",
+      sicher(ON._xps_auspacken,
+             '<Glyphs UnicodeString="Auftrag " /><Glyphs UnicodeString="anlegen" />')
+      == "Auftrag anlegen")
+
+check("reine Paketstruktur wird verworfen (leerer String, nicht None)",
+      sicher(ON._xps_auspacken, _REL) == "")
+check("ein Paketstueck-Pfad ebenfalls", sicher(ON._xps_auspacken, _STUECK) == "")
+
+# ⚠ DIE GEGENRICHTUNG – dafuer sind es ZWEI Bedingungen. Eine Notiz, die ueber
+# XML schreibt, darf nicht verstuemmelt werden; genau daran ist im Projekt
+# schon einmal eine "kluge" Filterregel gescheitert (die Vokal-Regel).
+check("eine Notiz UEBER XML bleibt unangetastet",
+      sicher(ON._xps_auspacken,
+             '<Relationship Id="rId1"> ist das Grundelement einer .rels-Datei') is None)
+check("gewoehnlicher Text ist nicht betroffen (None = nicht zustaendig)",
+      sicher(ON._xps_auspacken, "Vertragsbeginn 01.05.2025, Fakturasperre pruefen") is None)
+check("ein Glyphs-Element OHNE Text ergibt kein Rauschen, sondern nichts",
+      sicher(ON._xps_auspacken, '<Glyphs Indices="3,1" />') == "")
+
+# Ende zu Ende durch saeubern(): der Nutztext bleibt, die Struktur faellt.
+_roh = "\n".join([_GLYPH, _REL, _STUECK, "Handnotiz: Kontrakt pruefen"])
+_sauber, _bilanz = paar(ON.saeubern, _roh)
+check("saeubern() liefert den ausgepackten Text",
+      isinstance(_sauber, str) and "Die Angebotserstellung beginnt im Vorsystem" in _sauber,
+      repr(_sauber)[:140])
+check("und die handgeschriebene Zeile daneben",
+      isinstance(_sauber, str) and "Handnotiz: Kontrakt pruefen" in _sauber)
+check("die Paketstruktur steht NICHT mehr im Ergebnis",
+      isinstance(_sauber, str) and "odttf" not in _sauber and ".piece" not in _sauber,
+      repr(_sauber)[:140])
+check("die Bilanz weist die XPS-Zeilen aus (sonst sieht niemand, dass es wirkt)",
+      isinstance(_bilanz, dict) and _bilanz.get("xps", 0) >= 3, str(_bilanz))
+
+# ⚠ REIHENFOLGE: erst auspacken, dann Rauschfilter/Dubletten. Andersherum gilt
+# eine 800-Zeichen-Glyphenzeile als einzigartiger Nutztext und schleppt ihre
+# GUIDs in den Index - gemessen waren das 40 % der gesamten Textmasse.
+_q_saeubern = ohne_kommentare_py(inspect.getsource(ON.saeubern))
+_i_xps = _q_saeubern.find("_xps_auspacken")
+_i_rausch = _q_saeubern.find("_ist_nutztext")
+_i_dub = _q_saeubern.find("in gesehen")
+check("das Auspacken steht VOR Rauschfilter und Dublettenpruefung",
+      0 < _i_xps < _i_rausch and _i_xps < _i_dub,
+      f"xps={_i_xps} rausch={_i_rausch} dub={_i_dub}")
 
 
 # ═════════════════════════════════════════════════════════════════════════════

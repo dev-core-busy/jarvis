@@ -1550,7 +1550,15 @@ def _extract_text_rest(filepath: Path, max_bytes: int) -> str | None:
         # ueber _letzter_extrakt_grund(). Ein zweiter Rueckgabewert haette jede
         # Aufrufstelle von _extract_text_raw angefasst.
         from backend.tools.onenote import text_aus_datei
-        text, grund = text_aus_datei(filepath)
+
+        # Ein Notizbuch mit vielen Bildschirmfotos laeuft Minuten (gemessen:
+        # 281 s fuer 46,5 MB, davon 277 s OCR). Ohne Lebenszeichen steht in der
+        # Oberflaeche minutenlang derselbe Dateiname, und der Lauf sieht tot aus.
+        def _fortschritt(bytes_gelesen: int, sekunden: float) -> None:
+            _set_progress(phase=f"OneNote: {filepath.name[:30]} – "
+                                f"{bytes_gelesen // 1024} KB, {sekunden:.0f}s")
+
+        text, grund = text_aus_datei(filepath, melde=_fortschritt)
         # Der Grund muss den Aufrufer erreichen - siehe _merke_extrakt_grund.
         _merke_extrakt_grund(filepath, grund)
         if text is None:

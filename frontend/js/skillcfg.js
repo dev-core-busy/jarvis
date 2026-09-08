@@ -8,7 +8,7 @@
    (skill.json → config_schema), sodass neue Manifest-Felder ohne
    Frontend-Aenderung erscheinen.
 
-   Reiter-Skills:  google, telegram, browser_control, claude_bridge,
+   Reiter-Skills:  google, telegram, browser_control,
                    agent_orchestrator, agent_autonomy_kit, avatar
    Ergaenzungen:   whatsapp (alles ausser debug_mode – das hat schon
                    einen Toggle im Logs-Abschnitt), knowledge
@@ -29,7 +29,6 @@
         google:             { container: 'skcfg-google' },
         telegram:           { container: 'skcfg-telegram' },
         browser_control:    { container: 'skcfg-browser_control' },
-        claude_bridge:      { container: 'skcfg-claude_bridge' },
         agent_autonomy_kit: { container: 'skcfg-agent_autonomy_kit' },
         avatar:             { container: 'skcfg-avatar' },
         claude_subagent:    { container: 'skcfg-claude_subagent' },
@@ -45,7 +44,6 @@
         google:             'settings-tab-btn-google',
         telegram:           'settings-tab-btn-telegram',
         browser_control:    'settings-tab-btn-browser',
-        claude_bridge:      'settings-tab-btn-claude-bridge',
         agent_orchestrator: 'settings-tab-btn-orchestrator',
         agent_autonomy_kit: 'settings-tab-btn-autonomy',
         avatar:             'settings-tab-btn-avatar',

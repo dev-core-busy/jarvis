@@ -139,7 +139,7 @@ unvereinbar gelten.
 das gesamte Repository findet genau einen Treffer – die Zeile `pyautogui==0.9.54` in
 `requirements.txt` selbst. Kein `import`, in keinem Backend-Modul und in keinem Skill.
 Die Desktop-Steuerung läuft vollständig über **`xdotool`** als Unterprozess
-(`backend/tools/desktop.py`, `skills/browser_control`, `skills/claude_bridge`) – also
+(`backend/tools/desktop.py`, `skills/browser_control`) – also
 über eine Prozessgrenze, mit der GPL-Frage gar nicht erst.
 
 Damit ist die gesamte GPL-Berührung auf der Python-Seite ein **Altbestand aus der
@@ -155,9 +155,9 @@ Pakete:
 | `PyGetWindow`, `PyRect`, `PyScreeze`, `pytweening`, `pyperclip` | BSD/MIT | unkritisch |
 
 `pyperclip` ist ebenfalls ungenutzt – die Zwischenablage läuft über `xclip`
-(`backend/tools/clipboard.py`), nicht über Python. Die einzige Erwähnung steht in
-`skills/claude_bridge/skill.md`, einer veralteten Beschreibung; der tatsächliche Code in
-`claude_bridge/main.py` ruft `xclip` auf.
+(`backend/tools/clipboard.py`), nicht über Python. Die einzige Erwähnung stand bis zum
+2026-09-08 in `skills/claude_bridge/skill.md`, einer veralteten Beschreibung (der Code
+dort rief ohnehin `xclip` auf); mit dem Entfernen des Skills gibt es sie nicht mehr.
 
 > ### ✅ Erledigt am 2026-07-31 (DEV **und** ECHT)
 > `pyautogui` ist aus `requirements.txt` entfernt, die neun Pakete sind auf DEV **und auf
@@ -353,7 +353,7 @@ Alle 27 Skills unter `skills/` sind Jarvis-eigener Quelltext und fallen unter di
 **Apache-2.0** des Repositorys. Keiner führt ein eigenes `license`-Feld:
 
 `agent_autonomy_kit`, `agent_orchestrator`, `avatar`, `branding`, `browser_control`,
-`claude_bridge`, `coding_agent`, `cognitive_evolution`, `confluence`, `cron`, `desktop`,
+`coding_agent`, `cognitive_evolution`, `confluence`, `cron`, `desktop`,
 `example_skill`, `filesystem`, `google`, `jarvis-vision`, `jira`, `knowledge`,
 `kundenverwaltung`, `memory`, `office`, `sap`, `screenshot`, `shell`, `support_assistant`,
 `telegram`, `vision`, `whatsapp`

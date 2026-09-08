@@ -239,6 +239,52 @@ console.log('\n5. app.js: der Rueckfall nennt den Reiter, statt ihn zu zaehlen')
            /btnProfiles\s*=\s*document\.querySelector\('\.settings-tab-btn\[data-settings-tab="profiles"\]'\)/.test(code));
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+   6. Keine verwaisten Reiter (Drift-Schranke, 2026-09-08)
+   ══════════════════════════════════════════════════════════════════════
+   Anlass war das Entfernen des Skills `claude_bridge`: sein Reiter hing an
+   FUENF Stellen (settings.html doppelt, skills.js, skillcfg.js zweimal,
+   app.js) plus zwei i18n-Schluesseln. Wer eine davon vergisst, hinterlaesst
+   eine Ruine, die NIEMAND sieht – ein Knopf ohne Panel bleibt unsichtbar
+   (`display:none` bis der Skill aktiv ist), ein Panel ohne Knopf ist
+   unerreichbar. Beides faellt erst auf, wenn jemand den Skill einschaltet.
+
+   Geprueft wird die EIGENSCHAFT in beide Richtungen, nicht das Fehlen eines
+   Namens – damit faellt auch ein KUENFTIGES Entfernen auf. */
+{
+    // Eigenes, frisch geladenes Fenster – die spaeteren Abschnitte dieser
+    // Datei rendern eigene Zustaende; wer ein fremdes DOM weiterbenutzt,
+    // prueft fremdes Markup (Register).
+    const { w: wR } = await seite('settings.html');
+    const docS = wR.document;
+    const btns = [...docS.querySelectorAll('.settings-tab-btn[data-settings-tab]')]
+        .map(b => b.getAttribute('data-settings-tab'));
+    const panels = [...docS.querySelectorAll('.settings-tab-content[id^="settings-tab-"]')]
+        .map(e => e.id.replace('settings-tab-', ''));
+    const ohnePanel = btns.filter(n => !docS.getElementById('settings-tab-' + n));
+    const ohneKnopf = panels.filter(n => !btns.includes(n));
+    pruefe('jeder Reiter-Knopf hat sein Panel', ohnePanel.length === 0,
+           ohnePanel.join(','));
+    pruefe('jedes Panel hat seinen Reiter-Knopf', ohneKnopf.length === 0,
+           ohneKnopf.join(','));
+    // Positivkontrolle: die Messung findet ueberhaupt Reiter. Ohne sie waeren
+    // beide Pruefungen ueber einer leeren Menge trivial wahr.
+    pruefe('die Messung findet die Reiter (Positivkontrolle)',
+           btns.length > 10 && panels.length > 10,
+           btns.length + ' Knoepfe / ' + panels.length + ' Panels');
+
+    // Und jeder Knopf mit `data-i18n` braucht seinen Schluessel – ein
+    // entfernter Skill laesst sonst einen toten Verweis stehen, und der Knopf
+    // zeigt nach dem ersten Sprachwechsel seinen Schluesselnamen.
+    const i18src = lies('js/i18n.js');
+    const ohneKey = [...docS.querySelectorAll('.settings-tab-btn[data-i18n]')]
+        .map(b => b.getAttribute('data-i18n'))
+        .filter(k => i18src.indexOf("'" + k + "'") < 0);
+    pruefe('jeder Reiter-Knopf hat seinen i18n-Schluessel', ohneKey.length === 0,
+           ohneKey.join(','));
+    wR.close();
+}
+
 console.log('\n' + (fail === 0 ? 'ALLE ' + ok + ' PRUEFUNGEN OK' : ok + ' OK, ' + fail + ' FAIL'));
 process.exit(fail === 0 ? 0 : 1);
 

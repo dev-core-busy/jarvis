@@ -744,7 +744,7 @@
         const tabKundenverwaltung = document.getElementById('settings-tab-kundenverwaltung');
         const tabSupport = document.getElementById('settings-tab-support');
         // Reiter, deren Inhalt generisch aus dem Skill-Manifest kommt (skillcfg.js)
-        const SKILLCFG_TABS = ['telegram', 'browser_control', 'claude_bridge',
+        const SKILLCFG_TABS = ['telegram', 'browser_control',
                                'agent_orchestrator', 'agent_autonomy_kit', 'avatar',
                                'claude_subagent'];
         const tabsSkillCfg = SKILLCFG_TABS.map(n => document.getElementById('settings-tab-' + n));
@@ -889,8 +889,8 @@
         });
 
         // ── Reiter der manifest-konfigurierten Skills (Google, Telegram,
-        //    Browser, Claude-Bridge, Orchestrator, Autonomie): jeweils nur
-        //    sichtbar, wenn der Skill aktiviert ist (skillcfg.js) ──
+        //    Browser, Orchestrator, Autonomie, Avatar, Claude-Subagent):
+        //    jeweils nur sichtbar, wenn der Skill aktiviert ist (skillcfg.js) ──
         window.updateSkillCfgTabVisibility = function updateSkillCfgTabVisibility() {
             if (window.SkillCfg) return window.SkillCfg.updateTabs();
         };

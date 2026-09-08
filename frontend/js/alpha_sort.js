@@ -41,8 +41,8 @@
      * Vergleichsfunktion fuer die AKTUELLE Sprache.
      * `numeric` – "Agent 2" vor "Agent 10".
      * `sensitivity: 'base'` – Gross/Klein und Akzente entscheiden nicht.
-     * `ignorePunctuation` – "E-Mail" zaehlt wie "EMail", "Claude-Bridge" wie
-     *   "ClaudeBridge"; sonst entscheidet das Trennzeichen darueber, wo ein
+     * `ignorePunctuation` – "E-Mail" zaehlt wie "EMail", "Claude-Subagent" wie
+     *   "ClaudeSubagent"; sonst entscheidet das Trennzeichen darueber, wo ein
      *   Eintrag landet, und das ist fuer den Leser nicht nachvollziehbar.
      */
     function vergleicher() {

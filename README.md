@@ -569,7 +569,6 @@ def get_tools(config: dict) -> list:
 | `cognitive_evolution` | Self-improving agent (analyze → propose → validate → apply) |
 | `coding_agent` | Autonomous coding agents (staff-engineer workflow) |
 | `claude_subagent` | Claude Code hands scoped coding tasks to Jarvis (`/claude`) |
-| `claude_bridge` | Delegate tasks to the Claude desktop app (xdotool) |
 
 **Appearance**
 

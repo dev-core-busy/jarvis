@@ -44,6 +44,13 @@ PORT, prof = 9337, "/tmp/chrome-vemas-ui"
 subprocess.run(["rm", "-rf", prof], check=False)
 
 print("\n\033[1m1. Bereich vorbereiten\033[0m")
+# ⚠ DEN VORGEFUNDENEN ZUSTAND SICHERN, nicht raten. Ein hartes `disable` im
+# Aufraeumen BEHAUPTET, der Skill sei vorher aus gewesen – war er an, nimmt die
+# Messung ihn dem Betreiber weg. Am 2026-09-09 bei der AI-Maus mehrfach
+# passiert und zu Recht scharf gemeldet.
+_vemas_war_an = any(
+    x.get("name") == "vemas" and x.get("enabled")
+    for x in (S.get("https://127.0.0.1/api/skills", timeout=30).json() or {}).get("skills", []))
 check("Skill an", S.post("https://127.0.0.1/api/skills/vemas/enable", timeout=90).status_code == 200)
 time.sleep(3)
 check("Freigabe gesetzt",
@@ -182,7 +189,8 @@ finally:
     S.post("https://127.0.0.1/api/skills/vemas/config",
            json={"base_url": "", "username": "", "password": "", "api_token": "",
                  "read_only": True, "resources": "", "vemas_product": ""}, timeout=20)
-    S.post("https://127.0.0.1/api/skills/vemas/disable", timeout=60)
+    if not _vemas_war_an:      # nur abschalten, wenn er vorher AUS war
+        S.post("https://127.0.0.1/api/skills/vemas/disable", timeout=60)
     time.sleep(2)
     check("permissions.vemas wieder False",
           S.get("https://127.0.0.1/api/me", timeout=15).json()

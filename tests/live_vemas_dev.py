@@ -121,6 +121,13 @@ try:
           S.get(BASIS + "/vemas", timeout=15).status_code == 404)
 
     print("\n\033[1m2. Skill einschalten\033[0m")
+    # ⚠ DEN VORGEFUNDENEN ZUSTAND SICHERN, nicht raten. Ein hartes `disable` im
+    # Aufraeumen BEHAUPTET, der Skill sei vorher aus gewesen – war er an, nimmt die
+    # Messung ihn dem Betreiber weg. Am 2026-09-09 bei der AI-Maus mehrfach
+    # passiert und zu Recht scharf gemeldet.
+    _vemas_war_an = any(
+        x.get("name") == "vemas" and x.get("enabled")
+        for x in (S.get(BASIS + "/api/skills", timeout=30).json() or {}).get("skills", []))
     r = S.post(BASIS + "/api/skills/vemas/enable", timeout=90)
     check("Skill eingeschaltet", r.status_code == 200, r.status_code)
     time.sleep(3)
@@ -287,7 +294,8 @@ finally:
         cfg_setzen(base_url="", username="", password="", api_token="",
                    read_only=True, resources="", vemas_product="",
                    hidden_analyses=[])
-        S.post(BASIS + "/api/skills/vemas/disable", timeout=60)
+        if not _vemas_war_an:      # nur abschalten, wenn er vorher AUS war
+            S.post(BASIS + "/api/skills/vemas/disable", timeout=60)
     except Exception as e:
         print("  Aufraeumen unvollstaendig:", e)
     time.sleep(2)

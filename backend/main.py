@@ -1482,6 +1482,46 @@ async def require_jira_vorlagen_access(request: Request,
                "Administrator")
 
 
+def _user_may_use_aimouse(user: str) -> bool:
+    """Prädikat: Darf der Benutzer AI Mouse benutzen?
+
+    Zuschnitt 1:1 wie ``_user_may_use_jira_assist``/``_user_may_use_sap``:
+    Benutzerliste ODER Gruppe, **leer = niemand** (ausdrücklich auch keine
+    lokalen Administratoren), **kein Admin-Bypass**.
+
+    WARUM ES DIE FREIGABE BRAUCHT: jede Anfrage ist ein echter Modellaufruf mit
+    einem Bild – das kostet spürbar mehr Token als eine Textfrage, und der
+    Bildinhalt ist Fremdtext, der sich nicht entschärfen lässt (Begründung im
+    Modul-Docstring von ``backend/ai_mouse.py``). Der Kreis derer, die das
+    dürfen, gehört deshalb ausdrücklich benannt und nicht implizit auf „jeder
+    Angemeldete" gesetzt.
+    """
+    u = (user or "").strip()
+    if not u:
+        return False
+    users_raw = config.get_setting("aimouse_allowed_users", "").strip()
+    grp = config.get_setting("aimouse_allowed_group", "").strip()
+    if not users_raw and not grp:
+        return False
+    plain = _norm_login(u)
+    if users_raw and plain in {_norm_login(x) for x in users_raw.split(",") if x.strip()}:
+        return True
+    if grp and _member_of_any_group(_user_group_dns_cache.get(plain, []), grp):
+        return True
+    return False
+
+
+async def require_aimouse_access(request: Request,
+                                 user: str = Depends(require_auth)) -> str:
+    """FastAPI Dependency: Prüft die Freigabe für /api/ai-mouse/*."""
+    if _user_may_use_aimouse(user):
+        return user
+    raise HTTPException(status_code=403,
+        detail="Kein Zugriff auf AI Mouse – nicht in der Benutzerliste/-Gruppe "
+               "freigeschaltet (Einstellungen → Sicherheit → Berechtigungen → "
+               "AI Mouse; ggf. neu einloggen für Gruppen-Aktualisierung)")
+
+
 def _user_may_use_claudesub(user: str) -> bool:
     """Prädikat: Darf der Benutzer Codearbeiten an Jarvis delegieren?
 
@@ -4241,6 +4281,40 @@ async def startup_sandbox_python():
 
 
 @app.on_event("startup")
+async def startup_ai_mouse_build():
+    """Die AI-Mouse-Anwendung EINSATZBEREIT MACHEN – nicht nur nachsehen.
+
+    ⚠ HIER WIRD GEBAUT, NICHT GEMELDET. Eine Zeile im Journal oder ein Satz im
+    Einstellungs-Reiter, der einen Administrator auffordert, ein Skript
+    auszuführen, setzt voraus, dass er ihn zufällig liest – und bis dahin
+    bleibt der Download im Portal aus. Ausdrückliche Vorgabe des Betreibers
+    (2026-09-04 für Tika, 2026-09-09 hier): die Einrichtung passiert
+    automatisch.
+
+    Als Task und nicht im Startpfad: der Bau dauert rund 30 Sekunden, und ein
+    Dienst, der so lange nicht antwortet, ist der schlechtere Tausch. Der
+    Vorlauf gibt Schritt 6g im Broker-Bootstrap die Gelegenheit, zuerst fertig
+    zu werden – sonst bauen beide dasselbe.
+    """
+    import asyncio  # noqa: PLC0415
+
+    async def _lauf():
+        try:
+            await asyncio.sleep(90)
+            from backend import ai_mouse  # noqa: PLC0415
+            if ai_mouse.paket_vorhanden():
+                return
+            was = ai_mouse.einrichtung_anstossen("Dienststart")
+            if was != "angestossen":
+                print("[AI-Mouse] nicht gebaut: %s" % was, flush=True)
+        except Exception as e:  # noqa: BLE001
+            # Eine Automatik, die still fehlschlaegt, ist keine.
+            print("[AI-Mouse] Startpruefung fehlgeschlagen: %s" % e, flush=True)
+
+    asyncio.create_task(_lauf())
+
+
+@app.on_event("startup")
 async def startup_onenote_tika():
     """Den OneNote-Import EINSATZBEREIT MACHEN – nicht nur nachsehen.
 
@@ -5459,6 +5533,11 @@ async def get_me(user: str = Depends(require_auth)):
             # Gleiche Logik wie sap/email/tracks: Freigabe UND aktiver Skill.
             "claudesub": (_user_may_use_claudesub(user)
                           and _skill_active("claude_subagent")),
+            # AI Mouse: Freigabe UND aktiver Skill. Die Windows-Anwendung fragt
+            # den Wert nach der Anmeldung ab und sagt im Klartext, was fehlt,
+            # statt bei jedem Rahmen in einen 403 zu laufen.
+            "ai_mouse": (_user_may_use_aimouse(user)
+                         and _skill_active("ai_mouse")),
             # Benutzer-Chat: haengt NUR am Skill-Zustand – eine eigene Freigabe
             # gibt es bewusst nicht (Begruendung in require_userchat_access).
             # Das Portal blendet Kachel UND Ungelesen-Badge daran ein; ohne das
@@ -6617,6 +6696,10 @@ async def save_settings(request: Request, user: str = Depends(require_local_auth
         config.save_setting("jira_assist_allowed_users", body["jira_assist_allowed_users"])
     if "jira_assist_allowed_group" in body:
         config.save_setting("jira_assist_allowed_group", body["jira_assist_allowed_group"])
+    if "aimouse_allowed_users" in body:
+        config.save_setting("aimouse_allowed_users", body["aimouse_allowed_users"])
+    if "aimouse_allowed_group" in body:
+        config.save_setting("aimouse_allowed_group", body["aimouse_allowed_group"])
     if "excel_allowed_users" in body:
         config.save_setting("excel_allowed_users", body["excel_allowed_users"])
     if "excel_allowed_group" in body:
@@ -6777,6 +6860,8 @@ async def get_ad_status(user: str = Depends(require_local_auth)):
         "email_users": config.get_setting("email_allowed_users", ""),
         "email_group": config.get_setting("email_allowed_group", ""),
         "jira_assist_users": config.get_setting("jira_assist_allowed_users", ""),
+        "aimouse_users": config.get_setting("aimouse_allowed_users", ""),
+        "aimouse_group": config.get_setting("aimouse_allowed_group", ""),
         "jira_assist_group": config.get_setting("jira_assist_allowed_group", ""),
         "tracks_users": config.get_setting("tracks_allowed_users", ""),
         "tracks_group": config.get_setting("tracks_allowed_group", ""),
@@ -13152,6 +13237,267 @@ async def jira_addon_seite():
     liegen ausschliesslich hinter `require_jira_assist_access`.
     """
     return FileResponse(FRONTEND_DIR / "jira_addon.html")
+
+
+# ─── AI Mouse (Bildschirmausschnitt vom Arbeitsplatz) ────────────────
+# Server-Haelfte der Windows-Anwendung unter `ai-mouse/`. Die Logik liegt in
+# `backend/ai_mouse.py`; hier stehen nur Rechte, Transport und Auslieferung.
+
+@app.post("/api/ai-mouse/analyze")
+async def ai_mouse_analyze(request: Request,
+                           user: str = Depends(require_aimouse_access)):
+    """Bildausschnitt + Frage auswerten. Der Arbeitsendpunkt der Anwendung.
+
+    Body: ``{"image": "data:image/png;base64,…", "prompt": "…",
+    "lang": "de"|"en"}``.
+
+    DER BENUTZER KOMMT AUSSCHLIESSLICH AUS DER ANMELDUNG, nie aus dem Rumpf –
+    sonst wäre der Endpunkt ein Weg, im Namen eines anderen zu fragen und
+    dessen Freigaben (SAP, VEMAS, Internet) zu erben. Dieselbe Regel wie beim
+    Empfänger einer Erinnerung und beim Verlaufs-Löschen.
+
+    Der Skill muss aktiv sein: die Freigabe allein genügt nicht, sonst liefe
+    ein abgeschalteter Bereich weiter (gleiche Prüfung wie bei /userchat).
+    """
+    from backend import ai_mouse  # noqa: PLC0415
+    if not ai_mouse.skill_aktiv():
+        return JSONResponse(
+            {"ok": False, "error": "Der Skill „AI Mouse“ ist auf diesem Server "
+                                   "nicht aktiv. Ein Administrator schaltet ihn "
+                                   "unter Einstellungen → Skills ein."},
+            status_code=403)
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungültiger JSON-Body."},
+                            status_code=400)
+    try:
+        ergebnis = await ai_mouse.analysieren(
+            bild_roh=str(body.get("image") or ""),
+            frage_roh=str(body.get("prompt") or ""),
+            user=user,
+            lang=str(body.get("lang") or "de"),
+            mime_wunsch=str(body.get("mime") or ""))
+    except ai_mouse.MausFehler as f:
+        # 400 und nicht 500: das sind fachliche Absagen (Bild zu groß, kein
+        # Bild, Drossel, Modell nicht erreichbar) mit einem Text, den die
+        # Anwendung 1:1 anzeigt. Ein 500er stünde in jedem Monitoring, wo
+        # jemand einen zu großen Ausschnitt gewählt hat.
+        return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
+    return JSONResponse(ergebnis)
+
+
+@app.get("/api/ai-mouse/health")
+async def ai_mouse_health(request: Request, lang: str = "de",
+                          user: str = Depends(require_aimouse_access)):
+    """Zustand für die Anwendung und die Anleitungsseite.
+
+    Liefert Marke und Akzentfarbe mit: die Anwendung brandet sich damit nach
+    der Anmeldung, ohne einen zweiten Abruf zu brauchen. Vor der Anmeldung
+    steht die Marke in der beim Paketbau gebrandeten ``settings.json`` – ein
+    Serverabruf erreicht die Anmeldemaske nicht (Register, 2026-08-27).
+    """
+    from backend import ai_mouse  # noqa: PLC0415
+    marke, akzent = ai_mouse.branding()
+    return JSONResponse({
+        "ok": True,
+        "skill_aktiv": ai_mouse.skill_aktiv(),
+        "bereiche": ai_mouse.bereiche_katalog(lang),
+        "aktive_bereiche": ai_mouse.freigegebene_bereiche(),
+        "max_bild_mb": round(ai_mouse.MAX_BILD_BYTES / 1048576.0, 1),
+        "paket_bereit": ai_mouse.paket_vorhanden(),
+        "paket_baut": bool(ai_mouse.bau_zustand().get("laeuft")),
+        "marke": marke,
+        "akzent": akzent,
+    })
+
+
+@app.get("/api/ai-mouse/paket")
+async def ai_mouse_paket(request: Request,
+                         user: str = Depends(require_aimouse_access)):
+    """Die Windows-Anwendung als ZIP – bei jedem Abruf frisch zusammengestellt.
+
+    ⚠ DIE .EXE WIRD HIER NICHT GEBAUT und kann es nicht: sie ist ein
+    Windows-WinForms-Programm, der Server ist Linux. Sie liegt vorkompiliert
+    unter ``vendor/ai-mouse/`` (wie ``vendor/tika-app.jar`` außerhalb des
+    Repos), und gebrandet wird die ``settings.json`` daneben – Text, den der
+    Server schreiben kann. Fehlt die Datei, sagt die Meldung, wie sie dorthin
+    kommt.
+    """
+    from backend import addin, ai_mouse  # noqa: PLC0415
+    marke, akzent = ai_mouse.branding()
+    # ⚠ BEI BEDARF BAUEN, nicht nur melden. Fehlt die Anwendung, wird der Bau
+    # hier angestoßen – ohne zu warten (er dauert eine halbe Minute). Der
+    # Benutzer bekommt sofort eine Antwort, die sagt, dass gerade gebaut wird;
+    # der nächste Klick liefert die Datei. Ohne diese Stelle müsste er bis zum
+    # nächsten Dienststart warten.
+    if not ai_mouse.paket_vorhanden():
+        was = ai_mouse.einrichtung_anstossen("Download angefordert")
+        if was in ("angestossen", "laeuft bereits"):
+            return JSONResponse(
+                {"ok": False, "baut": True,
+                 "error": "Die Anwendung wird gerade gebaut – das dauert etwa "
+                          "eine halbe Minute. Bitte gleich noch einmal "
+                          "herunterladen."},
+                status_code=409)
+    try:
+        name, rohdaten = ai_mouse.paket_bauen(
+            basis=addin.basis_url(request), marke=marke, akzent=akzent)
+    except ai_mouse.MausFehler as f:
+        return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
+    return Response(
+        content=rohdaten,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": 'attachment; filename="%s"' % name,
+            "Cache-Control": "no-store",
+        })
+
+
+@app.get("/api/ai-mouse/fragen")
+async def ai_mouse_fragen_lesen(request: Request,
+                                user: str = Depends(require_aimouse_access)):
+    """Die Fragen dieses Benutzers – gemeinsame und eigene.
+
+    Holt sich auch die Windows-Anwendung beim Start: sie hat seit dem
+    2026-09-09 keine ``prompts.json`` mehr.
+    """
+    from backend import ai_mouse_fragen as amf  # noqa: PLC0415
+    return JSONResponse({"ok": True,
+                         "fragen": amf.liste(user, _is_admin_user(user))})
+
+
+@app.post("/api/ai-mouse/fragen")
+async def ai_mouse_fragen_speichern(request: Request,
+                                    user: str = Depends(require_aimouse_access)):
+    """Frage anlegen oder ändern. Body: ``{id?, titel, prompt, gemeinsam?}``.
+
+    DER BENUTZER KOMMT AUS DER ANMELDUNG, nie aus dem Rumpf – sonst wäre der
+    Endpunkt ein Weg, einem Kollegen eine Frage unterzuschieben.
+    """
+    from backend import ai_mouse_fragen as amf  # noqa: PLC0415
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungültiger JSON-Body."},
+                            status_code=400)
+    try:
+        eintrag = amf.speichern(
+            user=user, fid=str(body.get("id") or "").strip(),
+            titel=str(body.get("titel") or ""),
+            prompt=str(body.get("prompt") or ""),
+            gemeinsam=bool(body.get("gemeinsam")),
+            ist_admin=_is_admin_user(user))
+    except amf.FragenFehler as f:
+        return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
+    return JSONResponse({"ok": True, "frage": eintrag})
+
+
+@app.delete("/api/ai-mouse/fragen/{fid}")
+async def ai_mouse_frage_loeschen(fid: str, request: Request,
+                                  user: str = Depends(require_aimouse_access)):
+    """Eine Frage löschen. Unbekannt oder fremd → **404**, nicht 403."""
+    from backend import ai_mouse_fragen as amf  # noqa: PLC0415
+    if not amf.loeschen(user, fid, _is_admin_user(user)):
+        return JSONResponse({"ok": False, "error": "Die Frage wurde nicht gefunden."},
+                            status_code=404)
+    return JSONResponse({"ok": True})
+
+
+@app.get("/api/ai-mouse/admin/areas")
+async def ai_mouse_areas_lesen(lang: str = "de",
+                               user: str = Depends(require_local_auth)):
+    """Bereichs-Katalog für den Einstellungs-Reiter.
+
+    ⚠ HÄNGT AN `require_local_auth` UND NICHT AN `require_aimouse_access`:
+    `_user_may_use_aimouse` kennt bewusst keinen Admin-Bypass. Ein Administrator
+    ohne eigene AI-Mouse-Freigabe könnte die Freischaltung sonst gar nicht
+    pflegen – genau dieselbe Stelle und dieselbe Begründung wie bei
+    `GET /api/sap/analyses/catalog` und `require_jira_vorlagen_access`.
+
+    Es ist KEINE Erweiterung der Nutzungsrechte: der Katalog enthält Namen,
+    Hinweistexte und Werkzeuglisten, keine Daten.
+    """
+    from backend import ai_mouse  # noqa: PLC0415
+    return JSONResponse({
+        "ok": True,
+        "bereiche": ai_mouse.bereiche_katalog(lang),
+        "skill_aktiv": ai_mouse.skill_aktiv(),
+        "paket_bereit": ai_mouse.paket_vorhanden(),
+        "paket_baut": bool(ai_mouse.bau_zustand().get("laeuft")),
+        "paket_fehler": str(ai_mouse.bau_zustand().get("fehler") or ""),
+        "sdk": ai_mouse.sdk_vorhanden(),
+    })
+
+
+@app.post("/api/ai-mouse/admin/areas")
+async def ai_mouse_areas_speichern(request: Request,
+                                   user: str = Depends(require_local_auth)):
+    """Werkzeug-Bereiche freischalten. Body: ``{"bereiche": ["wissen", …]}``.
+
+    Schreibt NUR das Freigabe-Feld in die Skill-Konfiguration; der SkillManager
+    merged. Ein Formular, das den ganzen Konfigurationsstand sendete, würde
+    andere Felder mit dem überschreiben, was gerade im Browser stand (Register:
+    eigener Knopf, eigene Teilmenge).
+
+    **Unbekannte Bereiche werden verworfen, nicht geraten** – sonst stünde in
+    der settings.json ein Wert, den `freigegebene_bereiche()` still ignoriert,
+    und der Administrator hielte eine Freigabe für erteilt, die es nicht gibt.
+    """
+    from backend import ai_mouse  # noqa: PLC0415
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungültiger JSON-Body."},
+                            status_code=400)
+    roh = body.get("bereiche")
+    if isinstance(roh, str):
+        roh = [t.strip() for t in roh.split(",")]
+    if not isinstance(roh, (list, tuple)):
+        roh = []
+    gewaehlt = {str(b).strip() for b in roh}
+    # Reihenfolge stabil nach BEREICHE – wie in freigegebene_bereiche().
+    sauber = [b for b in ai_mouse.BEREICHE if b in gewaehlt]
+    try:
+        # ⚠ `update_skill_config` SCHALTET EINEN UNBEKANNTEN SKILL EIN.
+        # Der Manager setzt `enabled = True`, wenn im Zustand kein solcher
+        # Schlüssel steht (skills/manager.py: `if "enabled" not in state`). Eine
+        # erste Fassung dieses Endpunkts hielt das für unerreichbar – GEMESSEN
+        # am 2026-09-09 auf DEV ist genau das passiert: das Speichern der
+        # Freigabe hat den Skill von selbst aktiviert. Eine Freigabe zu setzen
+        # ist NICHT dasselbe wie einen Bereich einzuschalten.
+        #
+        # Deshalb wird der Zustand vorher gelesen und danach wiederhergestellt.
+        # `update_skill_config` selbst MERGED (current_config.update) – es geht
+        # also nur das eine Feld hinaus, andere Einstellungen des Skills bleiben
+        # unangetastet.
+        mgr = _get_skill_manager()
+        vorher = config.get_skill_states().get(ai_mouse.SKILL_NAME, {})
+        war_bekannt = "enabled" in vorher
+        war_aktiv = bool(vorher.get("enabled"))
+        mgr.update_skill_config(
+            ai_mouse.SKILL_NAME, {ai_mouse.FREIGABE_FELD: ",".join(sauber)})
+        if not war_bekannt:
+            # Der Skill war dem System noch gar nicht bekannt: den Zustand
+            # zurückdrehen, statt ihn stillschweigend einzuschalten.
+            config.save_skill_state(ai_mouse.SKILL_NAME, {"enabled": war_aktiv})
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    # Zurück kommt der GESPEICHERTE Stand, nicht der gesendete: nur so sieht
+    # der Administrator, wenn ein Bereich verworfen wurde.
+    return JSONResponse({"ok": True, "bereiche": ai_mouse.freigegebene_bereiche()})
+
+
+@app.get("/ai-mouse")
+async def ai_mouse_seite():
+    """Anleitungs- und Downloadseite für AI Mouse.
+
+    Leere Hülle wie /jira-addon und /sap: eine Navigation trägt keinen
+    Authorization-Header, die Berechtigung kann hier also nicht geprüft werden.
+    Die Seite holt `/api/me` und leitet Unberechtigte aufs Portal; die DATEN
+    liegen ausschließlich hinter `require_aimouse_access`.
+    """
+    return FileResponse(FRONTEND_DIR / "ai_mouse.html")
 
 
 # ─── Kundenverwaltung (IBS-API) ──────────────────────────────────────

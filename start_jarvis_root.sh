@@ -344,6 +344,53 @@ if [ "${JARVIS_TIKA_AUTO:-1}" != "0" ] && [ -f "$TIKA_SETUP" ]; then
     ) &
 fi
 
+# 6g. AI-Mouse-Anwendung sicherstellen (Bildschirmausschnitt vom Arbeitsplatz)
+#
+# WARUM HIER: Die Windows-Anwendung wird aus ai-mouse/ uebersetzt (C#/.NET 8).
+# Ein git pull bringt die fertige Datei NICHT mit – sie ist 66 MB und liegt
+# bewusst nicht im oeffentlichen Repo. Ohne diesen Schritt bleibt der
+# Download-Knopf im Portal aus, und eine Meldung wuerde den Administrator ins
+# Terminal schicken: genau der Zustand, der fuer den OneNote-Import am
+# 2026-09-04 als inakzeptabel zurueckgewiesen wurde. Dieselbe Begruendung wie
+# bei 6c/6d/6e – bei mehreren Servern skaliert nur eine Automatik.
+#
+# Im HINTERGRUND, damit der Broker-Socket nicht wartet: der Bau dauert rund
+# 30 Sekunden (gemessen), ohne .NET-SDK kommen ~200 MB apt dazu. Das Skript ist
+# idempotent und auf einem eingerichteten Server ein No-op (--pruefen, ~0,01 s).
+#
+# Gebaut wird als DIENSTBENUTZER – eine als root angelegte Datei in vendor/
+# koennte das Backend spaeter nicht ersetzen (Register).
+#
+# Abschaltbar mit JARVIS_AIMOUSE_AUTO=0 – fuer Server ohne Netzzugang oder wenn
+# die Datei von Hand gepflegt wird (dann sagt JARVIS_AIMOUSE_EXE, wo sie liegt).
+AIMOUSE_BUILD="$JARVIS_DIR/deploy/ai_mouse_build.sh"
+if [ "${JARVIS_AIMOUSE_AUTO:-1}" != "0" ] && [ -f "$AIMOUSE_BUILD" ]; then
+    (
+        if bash "$AIMOUSE_BUILD" --pruefen >/dev/null 2>&1; then
+            :   # liegt bereit – nichts melden, sonst rauscht jeder Start
+        else
+            echo "[AI-Mouse] Anwendung fehlt – baue sie (etwa 30 s)..."
+            if ! command -v dotnet >/dev/null 2>&1; then
+                echo "[AI-Mouse] Kein .NET-SDK – installiere dotnet-sdk-8.0 (~200 MB)..."
+                DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1
+                DEBIAN_FRONTEND=noninteractive apt-get install -y -qq dotnet-sdk-8.0 >/dev/null 2>&1
+            fi
+            # Ausgabe erst einsammeln, DANN filtern: eine Pipeline liefert den
+            # Exit-Code des LETZTEN Glieds, der Fehlschlag waere unsichtbar.
+            if id jarvis >/dev/null 2>&1; then
+                AUSGABE="$(runuser -u jarvis -- bash "$AIMOUSE_BUILD" 2>&1)"
+            else
+                AUSGABE="$(bash "$AIMOUSE_BUILD" 2>&1)"
+            fi
+            RC=$?
+            printf '%s\n' "$AUSGABE" | sed 's/^/[AI-Mouse] /'
+            if [ "$RC" -ne 0 ]; then
+                echo "[AI-Mouse] WARNUNG: Bau fehlgeschlagen (rc=$RC). Das Backend wiederholt den Versuch selbsttaetig (beim Start und sobald jemand das Paket herunterladen will) – bis dahin bleibt der Download im Portal aus. Bleibt es dabei, fehlt das .NET-SDK oder der Netzweg zu NuGet: dann JARVIS_AIMOUSE_EXE auf eine von Hand gebaute AiMouse.exe setzen." >&2
+            fi
+        fi
+    ) &
+fi
+
 # 6f. Internet-Sperre: veraltete Regel nachziehen
 #
 # ⚠ DER FIX VOM 2026-09-04 KOMMT SONST AUF KEINEM SERVER AN. Er steckt im

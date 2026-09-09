@@ -706,6 +706,18 @@
             ]);
         }
 
+        // ── AI-Maus-Tab Collapse ───────────────────────────────────────────
+        // ⚠ JEDE .kb-section des Reiters gehoert hier hinein. Eine vergessene
+        // bleibt zugeklappt und laesst sich nicht oeffnen – der Wächter prueft
+        // das als REGEL (test_jira_tab_ui tut dasselbe fuer den Jira-Reiter),
+        // weil eine gepflegte Liste genau die neue Sektion vergisst.
+        function _initAimouseCollapse() {
+            _collapseInit([
+                { hdr: 'am-sect-tools-hdr', body: 'am-sect-tools-body', tog: 'am-sect-tools-tog' },
+                { hdr: 'am-sect-info-hdr', body: 'am-sect-info-body', tog: 'am-sect-info-tog' },
+            ]);
+        }
+
         // ── Vision-Tab Collapse ────────────────────────────────────────────
         function _initVisionCollapse() {
             _collapseInit([
@@ -739,6 +751,7 @@
         const tabCron    = document.getElementById('settings-tab-cron');
         const tabConfluence = document.getElementById('settings-tab-confluence');
         const tabJira    = document.getElementById('settings-tab-jira');
+        const tabAimouse = document.getElementById('settings-tab-aimouse');
         const tabSap     = document.getElementById('settings-tab-sap');
         const tabVemas   = document.getElementById('settings-tab-vemas');
         const tabKundenverwaltung = document.getElementById('settings-tab-kundenverwaltung');
@@ -837,6 +850,11 @@
                     tabJira.classList.add('active');
                     _initJiraCollapse();
                     if (window.JiraManager) window.JiraManager.onShow();
+                } else if (target === 'aimouse' && tabAimouse) {
+                    tabAimouse.style.display = '';
+                    tabAimouse.classList.add('active');
+                    _initAimouseCollapse();
+                    if (window.AiMouseAdmin) window.AiMouseAdmin.onShow();
                 } else if (target === 'sap' && tabSap) {
                     tabSap.style.display = '';
                     tabSap.classList.add('active');
@@ -1134,6 +1152,24 @@
             }
         };
 
+        // ── AI-Maus: Berechtigungsblock nur bei aktivem Skill ──
+        // Gleiche Begruendung wie bei sec-sub-jiraassist/-email/-tracks: ohne
+        // aktiven Skill gibt es den Bereich gar nicht, die Freigabe waere eine
+        // Freigabe fuer nichts.
+        window.updateAimouseSecVisibility = async function updateAimouseSecVisibility() {
+            const box = document.getElementById('sec-sub-aimouse');
+            if (!box) return;
+            try {
+                const skills = await _skillsOnce();
+                const sp = Array.isArray(skills)
+                    ? skills.find(s => s.dir_name === 'ai_mouse')
+                    : null;
+                box.style.display = (sp && sp.enabled) ? '' : 'none';
+            } catch (e) {
+                // Fehler ignorieren – der Block bleibt versteckt
+            }
+        };
+
         // ── Claude Subagent: Berechtigungsblock nur bei aktivem Skill ──
         // Gleiche Begruendung wie bei sec-sub-email/-sap/-tracks: ohne aktiven
         // Skill waere die Freigabe eine Freigabe fuer nichts.
@@ -1353,6 +1389,7 @@
             await updateEmailTabVisibility();
             await updateTracksSecVisibility();
             await updateJiraAssistSecVisibility();
+            await updateAimouseSecVisibility();
             await updateClaudesubSecVisibility();
             await updateExcelSecVisibility();
             await updateKundenverwaltungTabVisibility();

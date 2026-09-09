@@ -32,6 +32,8 @@
         'jiraassist-allowed-group':   { kind: 'groups', multi: true, sep: '\n', list: true },
         'excel-allowed-users':        { kind: 'users',  multi: true, sep: ',',  list: true },
         'excel-allowed-group':        { kind: 'groups', multi: true, sep: '\n', list: true },
+        'aimouse-allowed-users':      { kind: 'users',  multi: true, sep: ',',  list: true },
+        'aimouse-allowed-group':      { kind: 'groups', multi: true, sep: '\n', list: true },
         'claudesub-allowed-users':    { kind: 'users',  multi: true, sep: ',',  list: true },
         'claudesub-allowed-group':    { kind: 'groups', multi: true, sep: '\n', list: true }
     };

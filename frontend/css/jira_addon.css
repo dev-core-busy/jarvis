@@ -377,3 +377,144 @@ body {
     .ja-main { padding: 14px 12px 40px; }
     .ja-card { padding: 14px; }
 }
+
+/* ── AI Mouse (/ai-mouse) ─────────────────────────────────────────────────
+   Nur die Bereichsliste und die Fragen; alles uebrige benutzt die
+   .ja-*-Klassen dieser Datei mit. Eine eigene Datei waere eine zweite
+   Fassung derselben Kartenoptik - und die liefe beim naechsten Feinschliff
+   auseinander. */
+.am-bereich {
+    padding: 8px 0;
+    border-top: 1px solid var(--border);
+}
+.am-bereich:first-child { border-top: none; }
+
+/* Fragen-Verwaltung in der AI-Mouse-Kachel */
+.am-frage {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 0;
+    border-top: 1px solid var(--border);
+}
+.am-frage:first-child { border-top: none; }
+/* min-width: 0 ist Pflicht - ohne das schiebt ein langer Prompt die Knoepfe
+   aus der Zeile (Register). */
+.am-frage-txt { flex: 1; min-width: 0; }
+.am-frage-txt .nm { font-weight: 600; }
+.am-frage-txt .pr {
+    display: block;
+    color: var(--text-secondary);
+    font-size: 0.85em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.am-frage-marke {
+    font-size: 0.75em;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+.am-f-feld { margin-bottom: 10px; }
+.am-f-feld label { display: block; margin-bottom: 4px; font-size: 0.9em; }
+.am-f-feld input, .am-f-feld textarea { width: 100%; box-sizing: border-box; }
+.am-f-gem { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 10px; }
+
+/* ═══ AI-Maus: „Meine Fragen" ═══════════════════════════════════════════════
+   Bauform der Regelliste aus /email (Vorgabe 2026-09-09: „an das Design von
+   ‚Regeln für eingehende E-Mails' anpassen"). Dort steht das CSS INLINE in
+   email.html – eine gemeinsame Datei gäbe es erst, wenn man beide Seiten
+   umbaut; hier sind es eigene Klassen mit demselben Aussehen.
+
+   ⚠ Die KARTE umschließt Zeile UND Formular. Wenn zwei Dinge wie eines
+   aussehen sollen, gehört eines INS andere – sonst bleibt ein Spalt sichtbar,
+   egal wie die Radien gesetzt sind (im Projekt beim Rollen-Formular bezahlt). */
+.am-q-card { border: 1px solid var(--border); border-radius: var(--radius-md);
+    background: rgba(var(--fg-rgb), .02); margin-bottom: 10px; overflow: hidden; }
+.am-q-row { display: flex; align-items: center; gap: 10px; padding: 11px 14px; }
+/* min-width: 0 ist Pflicht – ohne das schiebt ein langer Prompt die Knöpfe
+   aus der Zeile, statt dass die Ellipse greift (Register). */
+.am-q-main { flex: 1 1 auto; min-width: 0; }
+.am-q-name { font-weight: 600; font-size: .92rem; }
+.am-q-meta { font-size: .76rem; color: var(--text-muted); margin-top: 2px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.am-q-acts { display: flex; gap: 4px; flex: 0 0 auto; }
+.am-q-btn { background: none; border: 1px solid var(--border);
+    color: var(--text-secondary); width: 30px; height: 30px; border-radius: 8px;
+    cursor: pointer; display: inline-flex; align-items: center;
+    justify-content: center; font-size: .9rem; }
+.am-q-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+.am-q-btn:disabled { opacity: .4; cursor: not-allowed; }
+.am-q-btn.is-danger:hover { border-color: var(--danger); color: var(--danger);
+    background: color-mix(in srgb, var(--danger) 10%, transparent); }
+/* Das Formular sitzt IN der Karte, unter der Zeile. */
+.am-q-edit { padding: 0 14px 14px; border-top: 1px solid var(--border); }
+.am-q-edit.hidden { display: none; }
+.am-q-feld { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; }
+.am-q-feld label { font-size: .8rem; color: var(--text-secondary); }
+.am-q-feld input, .am-q-feld textarea { width: 100%; padding: 8px 10px;
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    background: var(--bg-secondary); color: var(--text-primary);
+    font-family: inherit; font-size: .88rem; }
+.am-q-feld textarea { resize: vertical; min-height: 76px; }
+.am-q-hint { font-size: .76rem; color: var(--text-muted); }
+.am-q-gem { display: inline-flex; align-items: center; gap: 6px;
+    margin-top: 10px; font-size: .82rem; color: var(--text-secondary); }
+/* inline-flex, nicht flex: sonst liefe die klickbare Fläche über die ganze
+   Breite und ein Klick weit rechts schaltete das Kästchen um (Register). */
+.am-q-gem input { width: auto; margin: 0; }
+.am-q-acts-form { display: flex; gap: 8px; align-items: center;
+    flex-wrap: wrap; margin-top: 12px; }
+.am-q-empty { padding: 22px 14px; text-align: center; color: var(--text-muted);
+    font-size: .86rem; line-height: 1.6; }
+/* Farbe UND Wort: die Farbe allein ist keine Information (Projektregel). */
+.am-q-badge { display: inline-block; padding: 1px 7px; border-radius: 10px;
+    font-size: .7rem; font-weight: 600; background: rgba(var(--fg-rgb), .08);
+    color: var(--text-secondary); margin-left: 6px; }
+
+/* ═══ AI-Maus: aufklappbare Container ═══════════════════════════════════════
+   Bauform der Karten in /email (`.em-card-head`/`.em-caret`) – dort steht das
+   CSS inline in der Seite, hier sind es eigene Klassen mit demselben Verhalten. */
+.ja-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    cursor: pointer;
+    user-select: none;
+    /* Gemessen waere die Zeile sonst 20 px hoch – das ist fuer eine
+       Klickflaeche am unteren Rand des Vertretbaren (Touch-Ziele gelten ab
+       24 px als brauchbar). Die Kopfzeile ist das EINZIGE Bedienelement des
+       Containers, also bekommt sie eine ordentliche Flaeche. */
+    min-height: 32px;
+}
+.ja-card-head:hover h2 { color: var(--accent); }
+/* :focus-visible, nicht :focus – sonst bliebe nach jedem Mausklick ein
+   Rahmen stehen (Projektregel). */
+.ja-card-head:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 6px;
+}
+.ja-card-head h2 { margin-bottom: 0; }
+.ja-caret {
+    color: var(--text-muted);
+    font-size: .8rem;
+    flex: 0 0 auto;
+    transition: transform .15s;
+}
+.ja-card.is-zu .ja-caret { transform: rotate(-90deg); }
+.ja-card.is-zu .ja-card-body { display: none; }
+/* Der Abstand gehoert an den KOERPER – an der Kopfzeile bliebe er im
+   zugeklappten Zustand als Luecke stehen. */
+.ja-card-body { padding-top: 4px; }
+/* Zwischentitel der verschobenen Abschnitte („Grenzen", „Einrichten"). Sie
+   sind Teil ihres Containers geworden und muessen sich von dessen Ueberschrift
+   unterscheiden – sonst liest es sich wie zwei gleichrangige Karten. */
+.ja-card-body h3 {
+    font-size: .95rem;
+    font-weight: 600;
+    margin: 18px 0 8px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+}

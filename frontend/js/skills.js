@@ -83,6 +83,7 @@
         sap:               'sap',
         vemas:             'vemas',
         email:             'email',
+        ai_mouse:          'aimouse',
         'short-tracks':    'tracks',
         'excel-addin':     'excel',
         kundenverwaltung:  'kundenverwaltung',

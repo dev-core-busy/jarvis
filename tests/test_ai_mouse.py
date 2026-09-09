@@ -1,0 +1,1084 @@
+#!/usr/bin/env python3
+"""Waechter fuer AI Mouse (backend/ai_mouse.py + der Bild-Weg in agent.py).
+
+GEMESSEN WIRD DIE EIGENSCHAFT, NICHT DAS VORKOMMEN. Die echten Funktionen
+laufen; wo ein Modell oder ein Agent noetig waere, steht eine Attrappe, die
+AUFZEICHNET, was sie bekommen haette – nur so laesst sich belegen, dass
+``_role_tools`` gesetzt war und ``tools=[]`` wirklich leer ankam.
+
+Laeuft ohne fastapi und ohne google-genai: die Provider-Typen werden gestellt.
+"""
+import ast
+import base64
+import struct
+import sys
+import types as _pytypes
+import zlib
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+ok = fail = 0
+
+
+def check(beschreibung, bedingung):
+    """ACHTUNG Argumentreihenfolge: (Text, Bedingung).
+
+    Vertauscht waere jede nicht-leere Zeichenkette wahr und der Lauf meldete
+    lauter OK, ohne etwas geprueft zu haben – im Projekt am 2026-08-28 mit 57
+    Aufrufen passiert. Deshalb bricht die Funktion bei vertauschten Argumenten
+    hart ab.
+    """
+    global ok, fail
+    if not isinstance(beschreibung, str) or isinstance(bedingung, str):
+        print("ABBRUCH: check() mit vertauschten Argumenten aufgerufen: %r" % (beschreibung,))
+        sys.exit(2)
+    if bedingung:
+        ok += 1
+        print("  OK   %s" % beschreibung)
+    else:
+        fail += 1
+        print("  FAIL %s" % beschreibung)
+
+
+def sicher(fn, *a, **kw):
+    """Ruft auf und gibt bei einem Wurf den Fehler zurueck statt abzubrechen.
+
+    Ohne das bricht eine Gegenprobe mitten im Lauf ab – kein FAIL, keine
+    Bilanzzeile, und von "nicht gelaufen" nicht zu unterscheiden (Register).
+    """
+    try:
+        return fn(*a, **kw)
+    except Exception as e:  # noqa: BLE001
+        return e
+
+
+# ── google.genai stellen, falls nicht vorhanden ─────────────────────────────
+# `ai_mouse` importiert `types` erst IN `analysieren`, der Modul-Import geht
+# also ohnehin. Fuer den Lauf brauchen wir aber Part/Content.
+try:
+    from google.genai import types as gtypes  # noqa: F401
+    GENAI_ECHT = True
+except Exception:  # noqa: BLE001
+    GENAI_ECHT = False
+
+    class _Part:
+        def __init__(self, text=None, data=None, mime_type=None):
+            self.text = text
+            self.inline_data = None
+            if data is not None:
+                self.inline_data = _pytypes.SimpleNamespace(
+                    data=data, mime_type=mime_type)
+
+        @staticmethod
+        def from_text(text=""):
+            return _Part(text=text)
+
+        @staticmethod
+        def from_bytes(data=b"", mime_type=""):
+            return _Part(data=data, mime_type=mime_type)
+
+    class _Content:
+        def __init__(self, role="user", parts=None):
+            self.role = role
+            self.parts = parts or []
+
+    _mod = _pytypes.ModuleType("google.genai.types")
+    _mod.Part, _mod.Content = _Part, _Content
+    _genai = _pytypes.ModuleType("google.genai")
+    _genai.types = _mod
+    _google = sys.modules.get("google") or _pytypes.ModuleType("google")
+    _google.genai = _genai
+    sys.modules["google"] = _google
+    sys.modules["google.genai"] = _genai
+    sys.modules["google.genai.types"] = _mod
+
+from backend import ai_mouse as am  # noqa: E402
+
+# ⚠ `paket_bauen` SCHREIBT Vorgaben.cs im Arbeitsbaum (die Hauswerte gehen ja in
+# die Anwendung). Genau so sind am 2026-09-09 die Testplatzhalter "M" und
+# "https://h" ins Repo gelangt – und weil der automatische Bau sie damals nicht
+# ueberschrieb, trug die ausgelieferte EXE sie.
+#
+# Die Wiederherstellung haengt an `atexit` und nicht an einer Stelle mitten im
+# Lauf: ein zweiter Aufruf weiter unten lief sonst DANACH und verbog sie erneut
+# (genau so passiert). So ist auch ein kuenftig ergaenzter Aufruf gedeckt – und
+# ein Abbruch ebenfalls.
+_VORG = ROOT / "ai-mouse" / "src" / "AiMouse" / "Configuration" / "Vorgaben.cs"
+_VORG_SICHERUNG = _VORG.read_text(encoding="utf-8") if _VORG.is_file() else None
+
+
+def _vorgaben_heimholen():
+    if _VORG_SICHERUNG is None:
+        return
+    try:
+        if _VORG.read_text(encoding="utf-8") != _VORG_SICHERUNG:
+            _VORG.write_text(_VORG_SICHERUNG, encoding="utf-8")
+            print("  (Vorgaben.cs im Arbeitsbaum wiederhergestellt)")
+    except Exception as e:  # noqa: BLE001
+        print("  ⚠ Vorgaben.cs NICHT wiederhergestellt: %s" % e)
+
+
+import atexit  # noqa: E402
+
+atexit.register(_vorgaben_heimholen)
+
+print("\n=== 1. Bildpruefung (fail-closed) ===")
+
+
+def png_bytes(w=8, h=8):
+    """Ein WIRKLICH dekodierbares PNG. Erfundene Bytes belegen nichts."""
+    def chunk(t, d):
+        c = t + d
+        return struct.pack(">I", len(d)) + c + struct.pack(">I", zlib.crc32(c))
+    ihdr = struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)
+    raw = b"".join(b"\x00" + b"\x80\x40\x20" * w for _ in range(h))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
+            + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+
+
+PNG = png_bytes()
+URI = "data:image/png;base64," + base64.b64encode(PNG).decode()
+
+r = sicher(am.bild_pruefen, URI)
+check("Data-URI wird angenommen und als PNG erkannt",
+      isinstance(r, tuple) and r[0] == PNG and r[1] == "image/png")
+r = sicher(am.bild_pruefen, base64.b64encode(PNG).decode())
+check("nacktes base64 wird angenommen", isinstance(r, tuple) and r[0] == PNG)
+
+# DIE BYTES ENTSCHEIDEN, NICHT DIE TYPANGABE.
+r = sicher(am.bild_pruefen, "data:image/jpeg;base64," + base64.b64encode(PNG).decode())
+check("falsche Typangabe wird an den Bytes korrigiert",
+      isinstance(r, tuple) and r[1] == "image/png")
+r = sicher(am.bild_pruefen, "data:image/png;base64,"
+           + base64.b64encode(b"PK\x03\x04kein bild").decode())
+check("ZIP unter PNG-Kopf wird abgewiesen", isinstance(r, am.MausFehler))
+
+r = sicher(am.bild_pruefen, "data:image/gif;base64," + base64.b64encode(PNG).decode())
+check("Format ausserhalb der Whitelist wird abgewiesen", isinstance(r, am.MausFehler))
+r = sicher(am.bild_pruefen, "")
+check("leeres Bild wird abgewiesen", isinstance(r, am.MausFehler))
+r = sicher(am.bild_pruefen, "data:image/png;base64,%%%")
+check("kaputtes base64 wird abgewiesen", isinstance(r, am.MausFehler))
+
+# Der Deckel greift auf den DEKODIERTEN Bytes.
+gross = b"\x89PNG\r\n\x1a\n" + b"x" * (am.MAX_BILD_BYTES + 10)
+r = sicher(am.bild_pruefen, "data:image/png;base64," + base64.b64encode(gross).decode())
+check("Bild ueber dem Deckel wird abgewiesen", isinstance(r, am.MausFehler))
+check("die Meldung zum Deckel nennt die erlaubte Groesse",
+      isinstance(r, am.MausFehler) and "MB" in str(r))
+
+r = sicher(am.frage_pruefen, "   ")
+check("leere Frage wird abgewiesen", isinstance(r, am.MausFehler))
+check("Frage wird auf MAX_FRAGE gekuerzt",
+      len(am.frage_pruefen("a" * (am.MAX_FRAGE + 500))) == am.MAX_FRAGE)
+
+print("\n=== 2. Bereiche: Vorgabe leer, Whitelist, Laufzeit-Pruefung ===")
+
+_cfg = {}
+am.skill_config = lambda: _cfg  # noqa: E731
+
+_cfg.clear()
+check("VORGABE: ohne Konfiguration gibt es KEINE Bereiche",
+      am.freigegebene_bereiche() == [])
+check("ohne Bereiche ist die Werkzeugmenge LEER (nicht None)",
+      am.werkzeuge_fuer([]) == set())
+
+_cfg["bereiche"] = "wissen"
+check("freigeschalteter Bereich wird erkannt",
+      am.freigegebene_bereiche() == ["wissen"])
+check("Werkzeuge kommen aus BEREICHE", am.werkzeuge_fuer(["wissen"]) == {"knowledge_search"})
+
+_cfg["bereiche"] = "wissen,fach"
+check("Reihenfolge ist stabil nach BEREICHE, nicht nach Eingabe",
+      am.freigegebene_bereiche() == ["wissen", "fach"])
+_cfg["bereiche"] = "fach,wissen"
+check("auch bei umgekehrter Eingabe stabil",
+      am.freigegebene_bereiche() == ["wissen", "fach"])
+
+_cfg["bereiche"] = "wissen,erfunden"
+check("unbekannter Bereich wird verworfen, nicht geraten",
+      am.freigegebene_bereiche() == ["wissen"])
+check("werkzeuge_fuer ignoriert unbekannte Bereiche",
+      am.werkzeuge_fuer(["erfunden"]) == set())
+
+# NUR LESENDE WERKZEUGE – die tragende Zusage des Moduls.
+alle = am.werkzeuge_fuer(list(am.BEREICHE))
+verboten = [t for t in alle if any(w in t for w in
+            ("create", "add", "update", "delete", "write", "send", "upload"))]
+check("kein einziges schreibendes Werkzeug in den Bereichen", not verboten)
+
+print("\n=== 3. analysieren(): der Weg haengt an der leeren MENGE ===")
+
+_spur = {}
+
+
+class _Resp:
+    def __init__(self, text):
+        self.parts = [_pytypes.SimpleNamespace(text=text)]
+
+
+class _Provider:
+    async def generate_response(self, **kw):
+        _spur["direkt"] = kw
+        return _Resp("ANTWORT-DIREKT")
+
+
+_llm_stub = _pytypes.ModuleType("backend.llm")
+_llm_stub.provider_fuer_lauf = lambda **kw: (_Provider(), "modell-x")
+_llm_stub.scrub_secrets = lambda s: s
+sys.modules["backend.llm"] = _llm_stub
+
+
+async def _agent_stub(sysp, auftrag, bild_parts, werkzeuge, user):
+    _spur["agent"] = {"sysp": sysp, "auftrag": auftrag,
+                      "bilder": bild_parts, "werkzeuge": werkzeuge, "user": user}
+    return (am.ergebnis_marke(sysp.split("[[ERGEBNIS ")[1].split("]]")[0])
+            + " ANTWORT-AGENT" if "[[ERGEBNIS " in sysp else "ANTWORT-AGENT"), "modell-a"
+
+am._agent_lauf = _agent_stub
+
+
+def lauf(**kw):
+    import asyncio
+    am._reset_fuer_tests()
+    _spur.clear()
+    return sicher(asyncio.run, am.analysieren(
+        bild_roh=kw.get("bild", URI), frage_roh=kw.get("frage", "Was ist das?"),
+        user=kw.get("user", "tester"), lang=kw.get("lang", "de")))
+
+
+_cfg.clear()
+r = lauf()
+check("REGELFALL: ohne Bereiche laeuft der direkte Weg",
+      isinstance(r, dict) and "direkt" in _spur and "agent" not in _spur)
+check("REGELFALL: tools ist eine LEERE Liste",
+      _spur.get("direkt", {}).get("tools") == [])
+check("REGELFALL: die Antwort kommt beim Aufrufer an",
+      isinstance(r, dict) and r.get("text") == "ANTWORT-DIREKT")
+check("REGELFALL: bereiche im Ergebnis ist leer",
+      isinstance(r, dict) and r.get("bereiche") == [])
+
+# Das Bild MUSS im Aufruf stecken – sonst antwortet das Modell auf nichts.
+_teile = _spur.get("direkt", {}).get("contents", [{}])[0]
+_parts = getattr(_teile, "parts", [])
+check("REGELFALL: ein inline_data-Part mit den Bildbytes geht mit",
+      any(getattr(p, "inline_data", None) is not None
+          and p.inline_data.data == PNG for p in _parts))
+# Die Reihenfolge in DIESER Liste; auf der Leitung dreht llm.py sie um
+# (gemessen 2026-09-09) - das ist Bestandsverhalten und nicht Sache dieses Moduls.
+check("REGELFALL: das Bild steht in der Part-Liste vor dem Text",
+      _parts and getattr(_parts[0], "inline_data", None) is not None)
+check("REGELFALL: die Frage des Benutzers steht im Auftragstext",
+      any("Was ist das?" in (getattr(p, "text", "") or "") for p in _parts))
+
+_cfg["bereiche"] = "wissen"
+r = lauf()
+check("MIT Bereich: der Agentenweg laeuft", "agent" in _spur and "direkt" not in _spur)
+check("MIT Bereich: die Werkzeug-Whitelist ist genau der Bereich",
+      _spur.get("agent", {}).get("werkzeuge") == {"knowledge_search"})
+check("MIT Bereich: die Whitelist ist eine MENGE, nie None",
+      isinstance(_spur.get("agent", {}).get("werkzeuge"), set))
+check("MIT Bereich: das Bild geht als eigener Part an den Agenten",
+      len(_spur.get("agent", {}).get("bilder") or []) == 1)
+check("MIT Bereich: bereiche im Ergebnis benennt, was der Lauf durfte",
+      isinstance(r, dict) and r.get("bereiche") == ["wissen"])
+
+# ⚠ DIE FREIGABE WIRKT ZUR LAUFZEIT: Bereich zurueckgenommen -> sofort weg.
+_cfg["bereiche"] = ""
+r = lauf()
+check("Freigabe zurueckgenommen: sofort wieder der direkte Weg",
+      "direkt" in _spur and "agent" not in _spur)
+
+print("\n=== 4. Kein Weg an der Entscheidung des Administrators vorbei ===")
+
+src = (ROOT / "backend" / "ai_mouse.py").read_text(encoding="utf-8")
+baum = ast.parse(src)
+fn_analyse = next(n for n in ast.walk(baum)
+                  if isinstance(n, ast.AsyncFunctionDef) and n.name == "analysieren")
+args = [a.arg for a in fn_analyse.args.args]
+check("analysieren() nimmt KEINE Bereiche/Werkzeuge aus dem Aufruf entgegen",
+      not any(a in args for a in ("bereiche", "werkzeuge", "tools", "system_prompt")))
+check("die Bereiche kommen im Rumpf aus freigegebene_bereiche()",
+      any(isinstance(n, ast.Call) and getattr(n.func, "id", "") == "freigegebene_bereiche"
+          for n in ast.walk(fn_analyse)))
+
+print("\n=== 4b. Freigabe speichern schaltet den Skill NICHT ein ===")
+
+# ⚠ ECHTER FUND vom 2026-09-09, auf DEV gemessen: `update_skill_config` setzt
+# `enabled = True`, wenn der Skill dem System noch unbekannt ist
+# (skills/manager.py: `if "enabled" not in state`). Das Speichern der FREIGABE
+# hat den Bereich damit von selbst aktiviert. Eine Freigabe zu setzen ist nicht
+# dasselbe wie einen Bereich einzuschalten – deshalb ist das hier eine Regel.
+haupt = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
+mbaum = ast.parse(haupt)
+fn_save = next((n for n in ast.walk(mbaum)
+                if isinstance(n, ast.AsyncFunctionDef)
+                and n.name == "ai_mouse_areas_speichern"), None)
+check("der Speichern-Endpunkt existiert", fn_save is not None)
+if fn_save is not None:
+    roh_save = ast.get_source_segment(haupt, fn_save) or ""
+    # Kommentare raus - sonst liest der Waechter seine eigene Begruendung
+    # (dreizehnter Fall dieser Klasse im Projekt).
+    ohne_k = "\n".join(z.split("#")[0] for z in roh_save.splitlines())
+    check("der Zustand wird VOR dem Schreiben gelesen",
+          "get_skill_states()" in ohne_k)
+    check("ein unbekannter Skill wird nicht eingeschaltet",
+          "save_skill_state" in ohne_k and "enabled" in ohne_k)
+    # Die Reihenfolge zaehlt: erst lesen, dann schreiben, dann korrigieren.
+    i_lesen = ohne_k.find("get_skill_states()")
+    i_update = ohne_k.find("update_skill_config")
+    check("gelesen wird VOR dem Update (sonst ist der Vorzustand schon weg)",
+          0 <= i_lesen < i_update)
+    check("nur das Freigabe-Feld geht hinaus (Teilmenge, kein Formularstand)",
+          "FREIGABE_FELD" in ohne_k)
+
+print("\n=== 5. Actor ist hart unprivilegiert ===")
+
+_st = _pytypes.ModuleType("backend.short_tracks_runner")
+_st._rechte = lambda u: (True, True, True)
+sys.modules["backend.short_tracks_runner"] = _st
+a = am._actor("chef")
+check("privileged ist False", a.get("privileged") is False)
+check("der Benutzer wird durchgereicht", a.get("user") == "chef")
+check("Internet/SAP/VEMAS kommen vom Benutzer",
+      a.get("internet") and a.get("sap") and a.get("vemas"))
+src_actor = ast.get_source_segment(src, next(
+    n for n in ast.walk(baum) if isinstance(n, ast.FunctionDef) and n.name == "_actor"))
+check("privileged steht als Literal False im Code (nicht konfigurierbar)",
+      '"privileged": False' in src_actor)
+
+print("\n=== 6. agent.py: ohne _role_bilder BYTE-GLEICH ===")
+
+# Die Methode wird per ast geschnitten und WIRKLICH ausgefuehrt – agent.py
+# laesst sich hier nicht importieren (fastapi & Co.).
+asrc = (ROOT / "backend" / "agent.py").read_text(encoding="utf-8")
+abaum = ast.parse(asrc)
+mnode = next((n for n in ast.walk(abaum)
+              if isinstance(n, ast.FunctionDef) and n.name == "_headless_user_parts"), None)
+check("_headless_user_parts existiert", mnode is not None)
+
+if mnode is not None:
+    from google.genai import types as gt
+    ns = {"types": gt}
+    exec(ast.get_source_segment(asrc, mnode).replace("    def ", "def ", 1)
+         .replace("\n    ", "\n"), ns)
+    f = ns["_headless_user_parts"]
+
+    class _A:
+        pass
+    a0 = _A()
+    p0 = f(a0, "hallo")
+    check("ohne _role_bilder: genau EIN Text-Part (byte-gleich zum Vorzustand)",
+          len(p0) == 1 and getattr(p0[0], "text", None) == "hallo")
+    a0._role_bilder = []
+    check("mit LEERER Bildliste ebenfalls unveraendert", len(f(a0, "x")) == 1)
+    bild = gt.Part.from_bytes(data=PNG, mime_type="image/png")
+    a0._role_bilder = [bild]
+    p1 = f(a0, "hallo")
+    check("mit _role_bilder: Bild + Text", len(p1) == 2)
+    check("das Bild steht in der Part-Liste vorne",
+          getattr(p1[0], "inline_data", None) is not None
+          and getattr(p1[1], "text", None) == "hallo")
+
+# REGEL: in _run_headless darf der Benutzer-Content nicht mehr von Hand
+# gebaut werden - sonst faellt eine kuenftige Stelle still aus dem Bild-Weg.
+fn_head = next((n for n in ast.walk(abaum)
+                if isinstance(n, ast.AsyncFunctionDef) and n.name == "_run_headless"), None)
+check("_run_headless gefunden", fn_head is not None)
+if fn_head is not None:
+    roh_head = ast.get_source_segment(asrc, fn_head) or ""
+    check("_run_headless benutzt _headless_user_parts",
+          "_headless_user_parts" in roh_head)
+    # Genau EINE Ausnahme bleibt: der Auto-Learning-Aufruf (Faktenextraktion,
+    # dort waere ein Bild reiner Token-Aufwand). Mehr duerfen es nicht werden.
+    check("hoechstens EINE handgebaute Text-Stelle uebrig (Auto-Learning)",
+          roh_head.count("parts=[types.Part.from_text(text=task_text)]") <= 1)
+
+print("\n=== 7. Drift-Schranke: _FACH_LESEND steht in vier Modulen ===")
+
+
+def fach_liste(pfad, name):
+    """Holt die Fach-Werkzeugliste aus einem Modul, ohne es zu importieren."""
+    try:
+        q = (ROOT / pfad).read_text(encoding="utf-8")
+        b = ast.parse(q)
+    except Exception:  # noqa: BLE001
+        return None
+    for n in ast.walk(b):
+        # ⚠ BEIDE Zuweisungsformen: `X = {...}` ist ein Assign,
+        # `X: dict[str, dict] = {...}` ein AnnAssign. Die erste Fassung kannte
+        # nur Assign und meldete deshalb zwei Module als "nicht lesbar" –
+        # ein Fehler des Waechters, nicht der Daten.
+        if isinstance(n, ast.Assign):
+            ziele = [getattr(t, "id", "") for t in n.targets]
+        elif isinstance(n, ast.AnnAssign):
+            ziele = [getattr(n.target, "id", "")]
+        else:
+            continue
+        if n.value is None:
+            continue
+        if name not in ziele:
+            continue
+        # Einfache Liste (`_FACH_LESEND = [...]`).
+        if isinstance(n.value, (ast.List, ast.Tuple)):
+            try:
+                return set(ast.literal_eval(n.value))
+            except Exception:  # noqa: BLE001
+                return None
+        # ⚠ BEREICHE als dict: NICHT das ganze dict auswerten. Es enthaelt an
+        # anderer Stelle einen Aufruf (`list(...)`), und `literal_eval`
+        # scheitert dann am GANZEN Knoten – die zweite Fassung dieses Lesers
+        # meldete deshalb "nicht lesbar", obwohl die Listen identisch waren.
+        # Also gezielt zu BEREICHE["fach"]["tools"] navigieren.
+        if isinstance(n.value, ast.Dict):
+            for k, v in zip(n.value.keys, n.value.values):
+                if getattr(k, "value", None) != "fach" or not isinstance(v, ast.Dict):
+                    continue
+                for k2, v2 in zip(v.keys, v.values):
+                    if getattr(k2, "value", None) == "tools":
+                        try:
+                            return set(ast.literal_eval(v2))
+                        except Exception:  # noqa: BLE001
+                            return None
+        return None
+    return None
+
+
+meins = set(am._FACH_LESEND)
+check("die eigene Liste ist nicht leer (Positivkontrolle)", len(meins) > 5)
+for pfad, name in (("backend/jira_assist.py", "_FACH_LESEND"),
+                   ("backend/mail_rules.py", "BEREICHE"),
+                   ("backend/short_tracks.py", "BEREICHE")):
+    andere = fach_liste(pfad, name)
+    if andere is None:
+        check("%s: Fach-Liste lesbar" % pfad, False)
+    else:
+        check("%s traegt dieselbe Fach-Werkzeugliste" % pfad, andere == meins)
+
+print("\n=== 8. Paket: Branding und die ehrliche Grenze ===")
+
+# ⚠ ES GIBT KEINE settings.json UND KEINE prompts.json MEHR (Vorgabe des
+# Betreibers, 2026-09-09). Die Hauswerte gehen in den BAU (Vorgaben.cs), die
+# Fragen auf den Server, die Benutzereinstellungen in die Registry.
+cs = am.vorgaben_cs("https://host.example/", "Nexus DP", "#B80F2E")
+check("die Serveradresse steht im erzeugten Quelltext",
+      'Endpoint = "https://host.example"' in cs)
+check("der abschliessende Schraegstrich faellt weg",
+      'https://host.example/"' not in cs)
+check("die Marke steht darin", 'Marke = "Nexus DP"' in cs)
+check("der Akzent steht darin", '#B80F2E' in cs)
+check("KEIN Kennwort und KEIN Token", "kennwort" not in cs.lower() and "token" not in cs.lower())
+cs2 = am.vorgaben_cs("x", "M", "rot")
+check("unbrauchbare Farbe wird verworfen, nicht durchgereicht",
+      am.AKZENT_STANDARD in cs2 and "rot" not in cs2)
+
+# ⚠ DER WERT GEHT IN QUELLTEXT, der uebersetzt wird. Ein Anfuehrungszeichen im
+# Firmennamen wuerde die Datei zerlegen – oder waere eine Einschleusung in den
+# Bau. Deshalb wird escaped, nicht gehofft.
+boes = am.vorgaben_cs("h", 'A" ; class X { static void Y() {} } //', "#000000")
+check("Anfuehrungszeichen im Namen werden escaped", '\\"' in boes)
+check("der Quelltext bleibt eine einzige Klasse",
+      boes.count("internal static class") == 1)
+zeilen = am.vorgaben_cs("h", "A\nB", "#000000")
+check("ein Zeilenumbruch sprengt die Datei nicht",
+      zeilen.count("public const string Marke") == 1)
+
+check("es gibt keine settings.json mehr", not hasattr(am, "settings_gebrandet"))
+check("es gibt keine prompts.json mehr", not hasattr(am, "_prompts_vorgabe"))
+
+# Das Paket enthaelt NUR die Anwendung und die Kurzanleitung.
+#
+# ⚠ `paket_bauen` SCHREIBT Vorgaben.cs im Arbeitsbaum (die Hauswerte gehen ja
+# in die Anwendung). Genau so sind am 2026-09-09 die Testplatzhalter "M" und
+# "https://h" ins Repo gelangt – und weil der automatische Bau sie damals nicht
+# ueberschrieb, trug die ausgelieferte EXE sie. Der Wächter sichert die Datei
+# deshalb und stellt sie danach wieder her; ein Test, der den echten Bestand
+# veraendert, ist teurer als der Fehler, den er sucht (Register).
+if am.paket_vorhanden():
+    # ⚠ MIT DEN ECHTEN HAUSWERTEN rufen, nicht mit erfundenen. `_hauswerte_
+    # schreiben` ist dann idempotent, es wird nichts geschrieben und KEIN Bau
+    # angestossen. Mit "Testhaus"/"https://h" schrieb der Waechter die Quelle um
+    # UND startete einen Hintergrund-Thread, der sie NACH der Wiederherstellung
+    # noch einmal anfasste – so sind die Platzhalter ins Repo gelangt.
+    # Leerer `basis` heisst "bisherige Adresse behalten".
+    _mk, _ak = am.branding()
+    name, daten = am.paket_bauen("", _mk, _ak)
+    import io as _io, zipfile as _z
+    innen = sorted(x.filename for x in _z.ZipFile(_io.BytesIO(daten)).infolist())
+    check("im Paket liegt nur EXE + Kurzanleitung",
+          innen == ["AiMouse.exe", "LIESMICH.txt"])
+    check("keine Konfigurationsdatei im Paket",
+          not any(x.endswith(".json") for x in innen))
+else:
+    check("Paketinhalt geprueft (uebersprungen: keine EXE gebaut)", True)
+
+
+am.paket_vorhanden = lambda: False
+r = sicher(am.paket_bauen, "https://h", "M", "#000000")
+check("ohne hinterlegte EXE: Fehler statt kaputtem ZIP", isinstance(r, am.MausFehler))
+# ⚠ DIE MELDUNG DARF KEINE HANDARBEIT FORDERN. Eine Aufforderung, ein Skript
+# im Terminal auszufuehren, setzt voraus, dass ein Administrator sie zufaellig
+# liest – am 2026-09-04 fuer den OneNote-Import ausdruecklich als inakzeptabel
+# zurueckgewiesen, am 2026-09-09 hier erneut. Der Server baut selbst.
+txt = str(r) if isinstance(r, am.MausFehler) else ""
+check("die Meldung sagt, dass automatisch gebaut wird",
+      "automatisch" in txt.lower())
+check("die Meldung fordert KEINE Handarbeit (kein Skriptaufruf)",
+      "ai_mouse_build.sh" not in txt and "bash " not in txt)
+
+print("\n=== 8b. Die Automatik: idempotent und fail-safe ===")
+
+check("Vorgabe: die Automatik ist AN", am.automatik_an())
+import os as _os
+_os.environ["JARVIS_AIMOUSE_AUTO"] = "0"
+check("JARVIS_AIMOUSE_AUTO=0 schaltet sie ab", not am.automatik_an())
+check("abgeschaltet wird nichts angestossen",
+      am.einrichtung_anstossen("test").startswith("Automatik abgeschaltet"))
+_os.environ.pop("JARVIS_AIMOUSE_AUTO", None)
+
+# Liegt die Anwendung bereits, passiert NICHTS – auch das ist eine Zusage:
+# sonst baute jeder Abruf neu.
+am.paket_vorhanden = lambda: True
+check("bereits vorhanden -> kein Bau", am.einrichtung_anstossen("x") == "bereits vorhanden")
+am.paket_vorhanden = lambda: False
+
+# ⚠ MINDESTABSTAND: ohne ihn stiesse JEDER Abruf einen eigenen Bau an – auf
+# einem Server ohne SDK also im Minutentakt einen vergeblichen apt-Lauf.
+am._bau["laeuft"] = False
+am._bau["letzter_start"] = __import__("time").time()
+check("ein zu junger Versuch wird nicht wiederholt",
+      "zu jung" in am.einrichtung_anstossen("x"))
+am._bau["laeuft"] = True
+check("ein laufender Bau wird nicht doppelt angestossen",
+      am.einrichtung_anstossen("x") == "laeuft bereits")
+am._bau["laeuft"] = False
+am._bau["letzter_start"] = 0.0
+
+# ⚠ DER BAU BRAUCHT KEINE ROOT-RECHTE – und das ist eine Zusage, keine
+# Nebensache. Eine erste Fassung ging ueber eine Broker-Op mit
+# `apt-get install dotnet-sdk-8.0`; GEMESSEN am 2026-09-09 gibt es dieses Paket
+# in Debian 13 gar nicht. Das Bauskript holt sich das SDK stattdessen selbst
+# nach vendor/dotnet (Microsofts dotnet-install.sh) – ohne apt, ohne fremdes
+# Repo, ohne Broker. Weniger Rechte, weniger Teile, mehr Systeme.
+quelle = (ROOT / "backend" / "ai_mouse.py").read_text(encoding="utf-8")
+qbaum = ast.parse(quelle)
+fn_bau = next((n for n in ast.walk(qbaum)
+               if isinstance(n, ast.FunctionDef) and n.name == "_bauen"), None)
+check("_bauen existiert", fn_bau is not None)
+if fn_bau is not None:
+    roh_bau = ast.get_source_segment(quelle, fn_bau) or ""
+    ohne_bau = "\n".join(z.split("#")[0] for z in roh_bau.splitlines())
+    check("der Bau ruft das Skript direkt", "ai_mouse_build.sh" in ohne_bau)
+    check("KEIN Broker-Aufruf mehr im Bau", "broker" not in ohne_bau.lower())
+check("kein toter Broker-Zweig im Modul", "_sdk_nachinstallieren" not in quelle)
+ops = (ROOT / "backend" / "broker" / "ops.py").read_text(encoding="utf-8")
+check("keine verwaiste Broker-Op (Rechtefrage ohne Aufrufer)",
+      "ai_mouse_build" not in ops)
+
+# Das Skript muss das SDK selbst beschaffen koennen.
+skript = (ROOT / "deploy" / "ai_mouse_build.sh").read_text(encoding="utf-8")
+check("das Bauskript holt das SDK bei Bedarf selbst",
+      "dotnet-install.sh" in skript)
+check("es legt es unter vendor/ ab (dem Dienstbenutzer gehoerend)",
+      "vendor/dotnet" in skript)
+check("kein apt-Paket, das es auf Debian 13 nicht gibt",
+      "apt-get install -y dotnet-sdk" not in skript)
+check("abschaltbar", "JARVIS_AIMOUSE_SDK_AUTO" in skript)
+
+print("\n=== 8c. Die Sitzung ueberlebt Test und Speichern (C#-Regeln) ===")
+
+# ⚠ DIESER ABSCHNITT PRUEFT QUELLTEXT, NICHT VERHALTEN. Die Anwendung ist ein
+# Windows-Programm und laesst sich hier nicht ausfuehren; gemessen wird also
+# die EIGENSCHAFT im Code, nicht ihre Wirkung. Das ist schwaecher als ein Lauf
+# und steht deshalb ausdruecklich so da.
+#
+# GEMELDET am 2026-09-09: "die Authentifizierung wird beim Verbindung testen
+# abgefragt, aber nicht gespeichert". Zwei Ursachen, beide hier abgesichert.
+cs_tray = (ROOT / "ai-mouse" / "src" / "AiMouse" / "TrayApplicationContext.cs").read_text(encoding="utf-8")
+cs_client = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Vision" / "JarvisClient.cs").read_text(encoding="utf-8")
+
+
+def cs_block(quelle, kopf):
+    """Schneidet einen C#-Methodenrumpf ueber die Klammerbilanz.
+
+    Ein Schnitt "bis zur naechsten Leerzeile" oder "bis zum ersten }" wuerde
+    hier zu frueh enden (verschachtelte try-Bloecke) oder zu weit greifen und
+    fremden Code messen – der 446-Zeilen-Fehler aus dem Register.
+    """
+    i = quelle.find(kopf)
+    if i < 0:
+        return ""
+    j = quelle.index("{", i)
+    tiefe, k = 0, j
+    while k < len(quelle):
+        if quelle[k] == "{":
+            tiefe += 1
+        elif quelle[k] == "}":
+            tiefe -= 1
+            if tiefe == 0:
+                return quelle[i:k + 1]
+        k += 1
+    return quelle[i:]
+
+
+test = cs_block(cs_tray, "private async Task<string> TestConnectionAsync")
+check("TestConnectionAsync gefunden", len(test) > 200)
+if test:
+    # (1) Ein `using var` haette das Token beim Verlassen weggeworfen - genau
+    # der gemeldete Fall.
+    check("der Probe-Client ist KEIN `using var` (sonst stirbt das Token)",
+          "using var probeClient" not in test)
+    check("die Sitzung wird uebernommen", "SitzungUebernehmen" in test)
+    check("nur bei GLEICHER Adresse", "gleicheAdresse" in test)
+    check("die Adressen werden ueber EndpointResolver verglichen (eine Regel)",
+          test.count("EndpointResolver.Basis") >= 2)
+    check("der Benutzername wird gemerkt", "ConfigStore.SaveSettings" in test)
+    check("der Client wird auch im Fehlerfall freigegeben",
+          "finally" in test and "probeClient.Dispose()" in test)
+
+anw = cs_block(cs_tray, "private void ApplySettings")
+check("ApplySettings gefunden", len(anw) > 100)
+if anw:
+    # (2) Der schwerere Fall: JEDES Speichern baute den Client neu und warf die
+    # Anmeldung weg - auch ein blosser Sprachwechsel.
+    check("beim Speichern wird die Sitzung mitgenommen",
+          "SitzungUebernehmen" in anw)
+    check("aber NICHT bei geaenderter Adresse (Token gilt dort nicht)",
+          "!adresseNeu" in anw)
+    check("der alte Client wird freigegeben", "alt.Dispose()" in anw)
+
+uebern = cs_block(cs_client, "public void SitzungUebernehmen")
+check("SitzungUebernehmen gefunden", len(uebern) > 50)
+if uebern:
+    check("ein leeres Token wird nicht uebernommen",
+          "_token.Length > 0" in uebern)
+    check("null wird abgefangen", "is not null" in uebern)
+
+print("\n=== 8d. Die Fragen werden BEIM START geladen ===")
+# ⚠ VORGABE 2026-09-09: "Die Anwendung muss das beim Start laden!" Vorher hing
+# das Nachladen nur am Verbindungstest und am Tray-Menue – nach einer normalen
+# Anmeldung stand im Menue dauerhaft die eingebaute Vorgabeliste, und was jemand
+# im Portal eintrug, tauchte NIE auf (genau so gemeldet).
+#
+# Gemessen wird die EIGENSCHAFT "jeder Weg, der anmeldet, laedt danach", nicht
+# das Vorkommen des Namens irgendwo in der Datei.
+cs_sicher = cs_block(cs_tray, "private async Task<bool> SicherstellenAngemeldetAsync")
+check("SicherstellenAngemeldetAsync gefunden", len(cs_sicher) > 100)
+if cs_sicher:
+    check("nach der Anmeldung werden die Fragen geholt",
+          "FragenNachladenAsync" in cs_sicher)
+    # AWAIT, nicht nebenher: der Aufrufer baut unmittelbar danach das Menue.
+    # Ein nebenherlaufender Abruf waere ein Wettlauf, den der Benutzer als
+    # "die erste Frage fehlt noch" sieht.
+    check("und zwar ABGEWARTET, nicht nebenher",
+          "await FragenNachladenAsync()" in cs_sicher)
+    i_f = cs_sicher.find("FragenNachladenAsync")
+    i_r = cs_sicher.rfind("return true")
+    check("der Abruf steht VOR dem Erfolgs-Rueckgabewert",
+          0 < i_f < i_r)
+
+start = cs_block(cs_tray, "private async Task StartAnmeldungAsync")
+check("StartAnmeldungAsync gefunden", len(start) > 100)
+if start:
+    check("sie meldet an (und laedt damit die Fragen)",
+          "SicherstellenAngemeldetAsync" in start)
+    # Ohne Serveradresse waere die Anmeldemaske eine Sackgasse.
+    check("ohne Einrichtung fuehrt der Weg in die Einstellungen",
+          "ConfigStore.Eingerichtet()" in start and "ShowSettings()" in start)
+    # Ein Fehlerfenster beim Windows-Start waere Stoerung, kein Dienst.
+    check("ein Fehlschlag ist still", "catch (Exception)" in start)
+
+# Der Aufruf im Konstruktor ist die eigentliche Zusage – ohne ihn ist die
+# Methode toter Code, und "beim Start" waere unerfuellt.
+ktor = cs_block(cs_tray, "public TrayApplicationContext()")
+check("der Konstruktor stoesst die Start-Anmeldung an",
+      "StartAnmeldungAsync" in ktor)
+# BeginInvoke und nicht direkt: der Konstruktor laeuft VOR der
+# Nachrichtenschleife – ein modaler Dialog von dort haette kein Fenster, an dem
+# er haengen kann, und erschiene hinter allem anderen oder gar nicht.
+check("ueber BeginInvoke, nicht mitten im Konstruktor",
+      "BeginInvoke" in ktor and "StartAnmeldungAsync" in ktor.split("BeginInvoke")[-1])
+
+laden = cs_block(cs_tray, "private async Task FragenNachladenAsync")
+if laden:
+    # Eine LEERE Antwort darf die vorhandenen Fragen nicht wegwerfen: ein
+    # Serverfehler saehe sonst aus wie "alle Fragen geloescht".
+    check("eine leere Antwort ersetzt die Liste NICHT", "neu.Count > 0" in laden)
+    check("ohne Anmeldung wird gar nicht erst gefragt", "_client.Angemeldet" in laden)
+
+print("\n=== 8e. Erster Start: Adresse fragen, Sitzung merken, kein Kennwort ===")
+# ⚠ VORGABE 2026-09-09: "Beim ersten Start der EXE muss Server URL und
+# Anmeldedaten abgefragt werden, dann wenn die Anmeldung moeglich ist die
+# Prompts geladen werden und alles in die registry."
+cs_store = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Configuration" / "ConfigStore.cs").read_text(encoding="utf-8")
+cs_login = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Ui" / "LoginWindow.cs").read_text(encoding="utf-8")
+
+# (a) Die Adresse steht in den EINSTELLUNGEN, nicht in der Anmeldemaske
+# (Vorgabe 2026-09-09, zweite Aufforderung) – dort, wo sie auch spaeter
+# geaendert wird. Der Wächter für die Felder steht in Abschnitt 8f.
+check("die Anmeldemaske fragt die Adresse NICHT", "_adresse" not in cs_login)
+# Ein leerer Benutzername darf nicht durchgehen.
+check("ein leerer Benutzername wird abgefangen",
+      "FormClosing" in cs_login and "e.Cancel = true" in cs_login)
+
+# (b) Der erste Start wird an der ADRESSE erkannt, nicht am Schluessel.
+eingr = cs_block(cs_store, "public static bool Eingerichtet()")
+check("Eingerichtet() gefunden", len(eingr) > 30)
+check("es entscheidet die Serveradresse, nicht die Existenz des Schluessels",
+      'Lies(k, "Endpoint").Length > 0' in eingr)
+
+sicher2 = cs_block(cs_tray, "private async Task<bool> SicherstellenAngemeldetAsync")
+check("der erste Start wird ueber Eingerichtet() erkannt",
+      "ConfigStore.Eingerichtet()" in sicher2)
+check("und fuehrt in die Einstellungen", "ShowSettings()" in sicher2)
+i_anm = sicher2.find("AnmeldenAsync")
+
+# (c) Geschrieben wird erst NACH gelungener Anmeldung.
+i_save = sicher2.find("ConfigStore.SaveSettings")
+check("gespeichert wird erst NACH dem Anmelden", 0 < i_anm < i_save)
+check("die Sitzung wird gemerkt", "ConfigStore.SaveToken(_client.Token)" in sicher2)
+
+# (d) NIE ein Kennwort auf Platte – die zentrale Zusage.
+# ⚠ OHNE KOMMENTARE MESSEN. Der Modulkopf erklaert, WARUM hier nie ein
+# Kennwort steht – wer den Rohtext durchsucht, findet die eigene Begruendung
+# und meldet einen Fehler, den es nicht gibt (im Projekt der 14. Fall).
+#
+# SCHLICHT, nicht klug: eine Zustandsmaschine ueber C#-Strings stolpert ueber
+# verbatim-Literale (@"Software\AiMouse" – dort ist \ kein Escape); mein
+# erster Anlauf tat das und lieferte den Text unveraendert zurueck. Hier
+# genuegt "Zeile beginnt mit //", und die Positivkontrolle darunter belegt,
+# dass es wirklich gegriffen hat.
+store_code = "\n".join(z for z in cs_store.split("\n")
+                        if not z.lstrip().startswith("//"))
+check("Kommentar-Entferner greift (Positivkontrolle)",
+      "DataProtectionScope" in store_code and "DPAPI" not in store_code)
+check("ConfigStore schreibt kein Kennwort",
+      "Kennwort" not in store_code and "assword" not in store_code)
+tok = cs_block(cs_store, "public static void SaveToken")
+check("SaveToken gefunden", len(tok) > 50)
+if tok:
+    # DPAPI bindet den Wert an das Windows-Konto: ein anderer Benutzer
+    # desselben Rechners kann ihn nicht lesen, eine kopierte Registry ist
+    # woanders wertlos. Ohne das laege ein Token im Klartext, das die VOLLE
+    # Sitzung traegt.
+    check("das Token wird per DPAPI verschluesselt",
+          "ProtectedData.Protect" in tok and "DataProtectionScope.CurrentUser" in tok)
+    check("ein leeres Token LOESCHT den Wert (Rest waere gefaehrlich)",
+          "DeleteValue" in tok)
+
+# (e) Beim Start werden Sitzung UND Fragen uebernommen – ohne Serveraufruf.
+ktor2 = cs_block(cs_tray, "public TrayApplicationContext()")
+check("die gemerkte Sitzung wird beim Start uebernommen",
+      "_client.TokenSetzen(ConfigStore.LoadToken())" in ktor2)
+check("die gemerkten Fragen ebenso", "ConfigStore.LoadPrompts()" in ktor2)
+check("ohne gemerkte Fragen gelten die eingebauten",
+      "PromptItem.Defaults" in ktor2)
+laden2 = cs_block(cs_tray, "private async Task FragenNachladenAsync")
+check("geholte Fragen werden gemerkt", "ConfigStore.SavePrompts" in laden2)
+
+# (f) Ein Adresswechsel raeumt Sitzung und Fragen ab.
+anw2 = cs_block(cs_tray, "private void ApplySettings")
+check("bei neuer Adresse wird die gemerkte Sitzung verworfen",
+      "ConfigStore.SaveToken(null)" in anw2)
+check("und die Fragen des alten Kontos auch",
+      "ConfigStore.SavePrompts([])" in anw2)
+
+# (g) "Konfiguration neu laden" ist obsolet (Vorgabe).
+# Es gibt keine Dateien mehr, die man neu einlesen koennte.
+check("der Menuepunkt ist weg", "ReloadConfiguration" not in cs_tray)
+cs_texte = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Localization" / "Texte.cs").read_text(encoding="utf-8")
+check("und sein Text ebenfalls (kein toter Code)", "NeuLaden" not in cs_texte)
+
+def py_schnitt(name):
+    """Rumpf einer Funktion aus backend/ai_mouse.py – ueber den AST, damit ein
+    gleichlautender Name in einem Kommentar nicht mitgeschnitten wird."""
+    baum = ast.parse(quelle)
+    for k in ast.walk(baum):
+        if isinstance(k, (ast.FunctionDef, ast.AsyncFunctionDef)) and k.name == name:
+            zeilen = quelle.split("\n")[k.lineno - 1:k.end_lineno]
+            return "\n".join(zeilen)
+    return ""
+
+
+print("\n=== 8f. Branding, Zugangsdaten und Sprache (Vorgaben 2026-09-09) ===")
+cs_set = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Ui" / "SettingsWindow.cs").read_text(encoding="utf-8")
+# ⚠ DIE SICHERUNG, nicht die Datei: weiter oben hat ein `paket_bauen`-Aufruf
+# die Hauswerte dieses Servers hineingeschrieben. Gemeint ist hier aber der
+# Stand IM REPO – also der, mit dem der Lauf begonnen hat.
+cs_vorg = _VORG_SICHERUNG or ""
+
+# (a) ⚠ DAS BRANDING MUSS IN DIE EXE – gemeldet, weil der AUTOMATISCHE Bau
+# (Startup, Bootstrap 6g, auf Bedarf) mit dem lief, was zufaellig in
+# Vorgaben.cs stand. Im Repo waren das Testplatzhalter; die ausgelieferte
+# Anwendung trug damit weder Marke noch Farbe des Hauses.
+bauen = py_schnitt("_bauen")
+check("_bauen gefunden", len(bauen) > 50)
+check("der Bau setzt die Hauswerte SELBST", "_hauswerte_schreiben()" in bauen)
+i_hw = bauen.find("_hauswerte_schreiben")
+i_run = bauen.find("subprocess.run")
+check("und zwar VOR dem Aufruf des Bauskripts", 0 < i_hw < i_run)
+# Fail-open: lieber mit alten Werten bauen als gar nicht.
+check("ein Fehlschlag verhindert den Bau NICHT",
+      "except Exception" in bauen[i_hw:i_run])
+
+hw = py_schnitt("_hauswerte_schreiben")
+check("_hauswerte_schreiben gefunden", len(hw) > 50)
+check("Marke und Akzent kommen aus branding()", "branding()" in hw)
+check("die Sprache aus sprache()", "sprache()" in hw)
+# Ohne Request bleibt die Adresse stehen, statt geleert zu werden.
+check("ohne Adresse wird die bisherige uebernommen", "Endpoint" in hw)
+# EINE Stelle schreibt die Quelle – zwei liefen beim naechsten Feld auseinander.
+check("der Download-Weg benutzt dieselbe Funktion",
+      "_hauswerte_schreiben(basis)" in py_schnitt("_vorgaben_sicherstellen"))
+
+# Im Repo stehen ehrliche Vorgaben, keine Testreste.
+# ⚠ AUCH DAS BAU-SKRIPT MUSS SIE SETZEN – es ist der Weg des Bootstraps
+# (Schritt 6g) und der Handarbeit. Nur im Python-Weg zu korrigieren liess
+# genau diese Wege eine Anwendung ohne Hausmarke bauen (live gemessen:
+# vorher „Jarvis", nach dem Fix „Nexus DP").
+skript = (ROOT / "deploy" / "ai_mouse_build.sh").read_text(encoding="utf-8")
+check("das Bau-Skript setzt die Hauswerte", "_hauswerte_schreiben()" in skript)
+# ⚠ OHNE KOMMENTARE SUCHEN: der Skriptkopf zitiert `dotnet publish` in seiner
+# Begruendung, und `find()` traf diese Zeile statt des Aufrufs – der Waechter
+# meldete einen Fehler, den es nicht gab (15. Fall dieser Klasse).
+skript_code = "\n".join(z for z in skript.split("\n") if not z.lstrip().startswith("#"))
+i_hw2 = skript_code.find("_hauswerte_schreiben")
+i_pub = skript_code.find("dotnet publish")
+check("Kommentar-Filter greift (Positivkontrolle)",
+      "dotnet publish" in skript_code and "DEV-Hardware" not in skript_code)
+check("und zwar VOR dem Uebersetzen", 0 < i_hw2 < i_pub)
+check("ein Fehlschlag verhindert den Bau nicht (fail-open)",
+      "baue mit den vorhandenen" in skript)
+
+# ⚠ `branding()` MUSS OHNE GELADENES `main` FUNKTIONIEREN – ein frisches
+# Python (Skript, Bootstrap) hat es nicht, und ohne Rueckfall lieferte es dort
+# den Jarvis-Standard: genau der gemeldete Zustand.
+brd = py_schnitt("branding")
+check("branding() liest notfalls selbst aus der Konfiguration",
+      "get_skill_states()" in brd)
+
+check("keine Testplatzhalter im Repo",
+      '"M"' not in cs_vorg and '"https://h"' not in cs_vorg)
+# ⚠ NUR IM AUSLIEFERUNGSSTAND. Auf einem BETRIEBENEN Server hat der erste
+# Paket-Download die Adresse eingetragen – dort ist ein Wert richtig, und die
+# Pruefung meldete einen Fehler, den es nicht gibt (auf DEV genau so passiert).
+# Erkannt an der Marke: steht dort die Vorgabe, hat noch kein Bau stattgefunden.
+if 'Marke = "Jarvis"' in cs_vorg:
+    check("im Auslieferungsstand ist die Adresse LEER",
+          'Endpoint = ""' in cs_vorg)
+else:
+    check("Adresse: uebersprungen (Server hat eigene Hauswerte gesetzt)", True)
+
+# (c) i18n in die EXE.
+spr = py_schnitt("sprache")
+check("sprache() gefunden", len(spr) > 30)
+check("alles ausser 'en' ist Deutsch (fail-safe)", 'startswith("en")' in spr)
+check("die Sprache steht in den einkompilierten Vorgaben", "Sprache" in cs_vorg)
+cs_texte2 = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Localization" / "Texte.cs").read_text(encoding="utf-8")
+check("der Client liest sie von dort", "Vorgaben.Sprache" in cs_store)
+
+# (b) ⚠ DIE ZUGANGSDATEN GEHOEREN IN DIE EINSTELLUNGS-MASKE (zweite
+# Aufforderung des Betreibers). Vorher standen sie in einer eigenen Maske, die
+# nur beim ersten Start erschien – wer sein Kennwort aenderte, fand keinen Weg.
+# ⚠ NICHT die Deklaration pruefen, sondern die ZEILE IM FORMULAR: ein Feld,
+# das nur deklariert ist, sieht niemand. Zwei Gegenproben blieben dadurch
+# zuerst stumm (Register: die Eigenschaft messen, nicht das Vorkommen).
+check("der Einstellungsdialog ZEIGT ein Benutzerfeld",
+      "AddRow(layout, Texte.Benutzername, _benutzer)" in cs_set)
+check("und ein Kennwortfeld",
+      "AddRow(layout, Texte.Kennwort, _kennwort)" in cs_set)
+check("das Kennwort ist maskiert", "UseSystemPasswordChar = true" in cs_set)
+# Es darf NICHT in AppSettings landen: das wird gespeichert.
+check("das Kennwort ist KEINE Einstellung, sondern eine eigene Eigenschaft",
+      "public string Kennwort { get; private set; }" in cs_set)
+set_code = "\n".join(z for z in cs_set.split("\n") if not z.lstrip().startswith("//"))
+check("es wird nirgends in die Einstellungen geschrieben",
+      "Kennwort = _kennwort" not in set_code.replace("Kennwort = _kennwort.Text;", ""))
+# Ein leerer Benutzername darf den bisherigen nicht loeschen.
+check("leerer Benutzername laesst den bisherigen stehen",
+      "_ausgang.Benutzer" in cs_set)
+
+zeig = cs_block(cs_tray, "private void ShowSettings")
+check("nach dem Speichern wird mit Kennwort angemeldet",
+      "AnmeldenMitKennwortAsync" in zeig)
+check("aber NUR wenn eines eingegeben wurde",
+      "dialog.Kennwort.Length > 0" in zeig)
+anm = cs_block(cs_tray, "private async Task AnmeldenMitKennwortAsync")
+check("dieser Weg merkt die Sitzung", "ConfigStore.SaveToken" in anm)
+check("und holt die Fragen", "FragenNachladenAsync" in anm)
+check("ein Fehlschlag wird gemeldet", "ShowTrayError" in anm)
+
+# Der erste Start fuehrt in die EINSTELLUNGEN, nicht in eine eigene Maske.
+start2 = cs_block(cs_tray, "private async Task StartAnmeldungAsync")
+check("der erste Start oeffnet die Einstellungen", "ShowSettings()" in start2)
+sich3 = cs_block(cs_tray, "private async Task<bool> SicherstellenAngemeldetAsync")
+check("auch der Anmeldeweg schickt Uneingerichtete dorthin",
+      "ShowSettings()" in sich3)
+# Die Anmeldemaske fragt die Adresse NICHT mehr – toter Code waere sie sonst.
+cs_login2 = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Ui" / "LoginWindow.cs").read_text(encoding="utf-8")
+check("die Anmeldemaske hat kein Adressfeld mehr", "_adresse" not in cs_login2)
+check("und kein toter Text blieb zurueck", "AdresseUnbrauchbar" not in cs_texte2)
+
+print("\n=== 8g. Kein zweites Anmeldefenster (Vorgaben 2026-09-09) ===")
+# ⚠ ZWEI GEMELDETE FEHLER, beide Folge davon, dass die Zugangsdaten in den
+# Einstellungsdialog gewandert sind und ich die Wege drumherum nicht mitzog.
+
+# (1) „Verbindung testen" fragte die Zugangsdaten in einem EIGENEN Fenster ab,
+# waehrend sie zwei Zeilen darueber im Dialog standen.
+test = cs_block(cs_tray, "private async Task<string> TestConnectionAsync")
+check("TestConnectionAsync gefunden", len(test) > 100)
+check("es bekommt Benutzer und Kennwort UEBERGEBEN",
+      "string benutzer," in test and "string kennwort," in test)
+# ⚠ Der Einmal-Code BLEIBT eine Rueckfrage: er steht nicht im Dialog, und nur
+# die Oberflaeche kann ihn erfragen. Verboten ist die Frage nach BENUTZER und
+# KENNWORT – also der Aufruf ohne `totpNoetig`.
+import re as _re
+_fragen = [z for z in test.split("\n")
+           if "FrageAnmeldung(" in z and "totpNoetig" not in z]
+check("es fragt Benutzer/Kennwort NICHT mehr selbst ab (%s)" % (_fragen[:1] or "sauber"), not _fragen)
+# Ohne Kennwort wird die laufende Sitzung geprueft statt zu fragen – das ist
+# der haeufige Fall (Kleinigkeit geaendert, dann testen).
+check("ohne Kennwort wird die laufende Sitzung geprueft",
+      "kennwort.Length == 0" in test and "_client.Angemeldet" in test)
+check("bei fremder Adresse ohne Kennwort eine klare Absage",
+      "KennwortFehlt" in test)
+# ⚠ AM AUFRUF messen, nicht irgendwo in der Datei: `_benutzer.Text.Trim()`
+# steht auch in `BuildSettings` – die Pruefung blieb dadurch gruen, als der
+# Aufruf leere Zeichenketten uebergab.
+import re as _re2
+# Non-greedy stoppt an der ERSTEN Klammer – das ist `_benutzer.Text.Trim()`.
+# Deshalb bis zum letzten Argument schneiden, das jeder Aufruf hat.
+_i = cs_set.find("_tester(")
+_ruf = _re2.match(r"(.*?_testCts\.Token)", cs_set[_i:], _re2.S) if _i >= 0 else None
+check("der Dialog reicht die Felder AM AUFRUF durch",
+      bool(_ruf) and "_benutzer.Text" in _ruf.group(1) and "_kennwort.Text" in _ruf.group(1),
+)
+check("und seine Signatur nimmt sie an",
+      "Func<AppSettings, string, string, CancellationToken, Task<string>>" in cs_set)
+
+# (2) Direkt nach dem Start erschien ein Anmeldefenster.
+start3 = cs_block(cs_tray, "private async Task StartAnmeldungAsync")
+# ⚠ OHNE KOMMENTARE: der Block erklaert, WARUM er sich nicht anmeldet, und
+# nennt die Funktion dabei beim Namen (16. Fall dieser Klasse).
+start3_code = "\n".join(z for z in start3.split("\n") if not z.lstrip().startswith("//"))
+# ⚠ Die Positivkontrolle braucht einen Ausdruck, der NUR im Kommentar steht.
+# Mein erster ("gemeldet") steckt in „An\u0067emeldet" – der Filter sah kaputt
+# aus, obwohl er greift.
+check("Kommentar-Filter greift (Positivkontrolle)",
+      "ConfigStore.Eingerichtet()" in start3_code
+      and "Anmeldefenster" not in start3_code)
+check("der Start meldet sich NICHT selbst an",
+      "SicherstellenAngemeldetAsync" not in start3_code)
+check("er holt nur die Fragen – und nur mit gemerkter Sitzung",
+      "_client.Angemeldet" in start3 and "FragenNachladenAsync" in start3)
+# Ohne Einrichtung bleibt der Weg in die Einstellungen: sonst kann der
+# Benutzer gar nichts tun.
+check("uneingerichtet fuehrt es weiterhin in die Einstellungen",
+      "ConfigStore.Eingerichtet()" in start3 and "ShowSettings()" in start3)
+# Die Anmeldung passiert dort, wo sie gebraucht wird.
+check("der Rahmen-Weg meldet weiterhin an",
+      "SicherstellenAngemeldetAsync" in cs_tray)
+
+print("\n=== 8h. Anzeigename: DE AI-Maus, EN AI-Mouse (Vorgabe 2026-09-09) ===")
+import json as _json2
+_skill = _json2.loads((ROOT / "skills" / "ai_mouse" / "skill.json").read_text(encoding="utf-8"))
+check("der Skill heisst AI-Maus", _skill.get("name") == "AI-Maus")
+# ⚠ DER VERZEICHNISNAME BLEIBT `ai_mouse`. Daran haengen SKILL_NAME, die
+# Freigabefelder (`aimouse_allowed_*`) und die gespeicherten Skill-Zustaende –
+# ein Umbenennen waere ein stiller Verlust der Konfiguration auf jedem Server.
+check("der Verzeichnisname ist unveraendert", (ROOT / "skills" / "ai_mouse").is_dir())
+check("SKILL_NAME zeigt weiter darauf", 'SKILL_NAME = "ai_mouse"' in quelle)
+
+# Der Anzeigename ist zweisprachig – und jede Haelfte traegt IHRE Schreibweise.
+_i18 = (ROOT / "frontend" / "js" / "i18n.js").read_text(encoding="utf-8").split("\n")
+_gr = next(i for i, x in enumerate(_i18) if x.rstrip() == "    en: {")
+_de_falsch = [x.strip()[:60] for i, x in enumerate(_i18) if i < _gr and "AI-Mouse" in x]
+_en_falsch = [x.strip()[:60] for i, x in enumerate(_i18) if i >= _gr and "AI-Maus" in x]
+check("kein AI-Mouse in der deutschen Haelfte (%s)" % (_de_falsch[:1] or "sauber"), not _de_falsch)
+check("kein AI-Maus in der englischen Haelfte (%s)" % (_en_falsch[:1] or "sauber"), not _en_falsch)
+def _wert(schl, engl):
+    ab = _gr if engl else 0
+    bis = len(_i18) if engl else _gr
+    for i in range(ab, bis):
+        if ("'%s':" % schl) in _i18[i]:
+            return _i18[i].split(":", 1)[1].strip().rstrip(",").strip("'")
+    return None
+check("Kachel DE = AI-Maus", _wert("portal.card_aimouse", False) == "AI-Maus")
+check("Kachel EN = AI-Mouse", _wert("portal.card_aimouse", True) == "AI-Mouse")
+check("Seitentitel ebenso",
+      _wert("aimouse.title", False) == "AI-Maus" and _wert("aimouse.title", True) == "AI-Mouse")
+# Das Rueckfall-Markup gilt, bis i18n greift – es darf nicht die alte
+# Schreibweise zeigen.
+for _d in ("frontend/portal.html", "frontend/ai_mouse.html", "frontend/settings.html"):
+    check("%s ohne alte Schreibweise" % Path(_d).name,
+          "AI Mouse" not in (ROOT / _d).read_text(encoding="utf-8"))
+
+print("\n=== 8i. Erster Start und Branding der Fenster (Vorgaben 2026-09-09) ===")
+cs_login3 = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Ui" / "LoginWindow.cs").read_text(encoding="utf-8")
+cs_set3 = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Ui" / "SettingsWindow.cs").read_text(encoding="utf-8")
+cs_mark = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Ui" / "Marken.cs")
+
+# (a) „Eingerichtet" heisst: man kann damit ARBEITEN. Die Adresse allein
+# genuegt nicht – sie ist einkompiliert und wird beim ersten Speichern
+# mitgeschrieben; die Anwendung galt damit als eingerichtet, obwohl noch keine
+# Zugangsdaten hinterlegt waren, und der Dialog blieb aus.
+eing = cs_block(cs_store, "public static bool Eingerichtet()")
+check("Eingerichtet() verlangt Adresse UND Benutzer",
+      'Lies(k, "Endpoint")' in eing and 'Lies(k, "Benutzer")' in eing)
+check("und verknuepft sie mit UND, nicht ODER", "&&" in eing and "||" not in eing)
+
+# (b) Der Marken-Kopf gehoert BEIDEN Fenstern – aus EINER Fassung.
+check("es gibt ein gemeinsames Marken-Modul", cs_mark.is_file())
+if cs_mark.is_file():
+    mk = cs_mark.read_text(encoding="utf-8")
+    check("es liefert einen Kopf", "public static Label Kopf" in mk)
+    check("und die Hausfarbe", "public static Color AkzentFarbe" in mk)
+    # Fail-safe: eine kaputte Farbe darf kein Fenster blockieren.
+    check("eine unbrauchbare Farbe wird abgefangen",
+          "catch (Exception)" in mk and "SystemColors.ControlText" in mk)
+check("die Anmeldemaske benutzt es", "Marken.Kopf(" in cs_login3)
+check("der Einstellungsdialog ebenfalls", "Marken.Kopf(" in cs_set3)
+# Keine zweite Fassung: sonst traegt ein Fenster die Hausfarbe und das andere
+# nicht, und niemand kann erklaeren warum.
+check("keine eigene Farbfunktion mehr im Anmeldefenster",
+      "private static Color AkzentFarbe" not in cs_login3)
+check("und keine im Einstellungsdialog",
+      "private static Color AkzentFarbe" not in cs_set3)
+
+print("\n=== 9. System-Prompt: Bildinhalt ist Material ===")
+
+p_ohne = am._system_prompt([], "aa11")
+check("der Prompt sagt, dass Bildinhalt keine Anweisung ist",
+      "KEINE ANWEISUNG" in p_ohne.upper())
+check("ohne Bereiche steht keine Ergebnis-Marke im Prompt",
+      "[[ERGEBNIS" not in p_ohne)
+p_mit = am._system_prompt(["wissen"], "aa11")
+check("mit Bereichen traegt der Prompt die Ergebnis-Marke samt Kennung",
+      "[[ERGEBNIS aa11]]" in p_mit)
+check("mit Bereichen wird auf 'nur lesend' hingewiesen",
+      "lesend" in p_mit.lower())
+
+print("\n=== 10. Ergebnis-Marke: fail-open ===")
+
+check("Text nach der Marke wird herausgeschnitten",
+      am._ergebnis_teilen("Ich sehe nach.[[ERGEBNIS a1]]\nDas Ergebnis.", "a1")
+      == "Das Ergebnis.")
+check("OHNE Marke gilt der ganze Text (fail-open)",
+      am._ergebnis_teilen("Nur Text.", "a1") == "Nur Text.")
+check("Marke ohne Text dahinter: ganzer Text (fail-open)",
+      am._ergebnis_teilen("Vorher.[[ERGEBNIS a1]]   ", "a1") == "Vorher.[[ERGEBNIS a1]]   ")
+
+print("\n=== 11. Drossel ===")
+
+am._reset_fuer_tests()
+am._drosseln("u1")
+r = sicher(am._drosseln, "u1")
+check("zwei Anfragen unmittelbar hintereinander: die zweite wird gebremst",
+      isinstance(r, am.MausFehler))
+check("ein ANDERER Benutzer ist davon nicht betroffen",
+      not isinstance(sicher(am._drosseln, "u2"), am.MausFehler))
+
+print("\n%d OK, %d FAIL" % (ok, fail))
+sys.exit(1 if fail else 0)

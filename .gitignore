@@ -202,3 +202,12 @@ keystore.properties
 # tika-app.jar ist 65 MB und wird fuer den OneNote-Import (*.one) gebraucht;
 # ein oeffentliches Repo ist nicht der Ort dafuer -> deploy/tika_setup.sh.
 vendor/
+
+# AI Mouse (C#/.NET, ai-mouse/) – Build-Artefakte. Die fertige EXE gehoert
+# NICHT ins Repo (70–90 MB, und dieses Repo ist oeffentlich); sie liegt unter
+# vendor/ai-mouse/ – wie vendor/tika-app.jar.
+ai-mouse/**/bin/
+ai-mouse/**/obj/
+ai-mouse/publish/
+*.user
+.vs/

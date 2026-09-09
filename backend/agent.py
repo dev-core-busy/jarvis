@@ -3201,6 +3201,38 @@ KRITISCH – Autonomie-Regeln:
             run_outcome = "stopped"
         return run_outcome
 
+    def _headless_user_parts(self, task_text: str) -> list:
+        """Die Parts der Benutzer-Nachricht eines headless-Laufs.
+
+        BIS 2026-09-09 WAR EIN HEADLESS-LAUF REIN TEXTBASIERT – an vier Stellen
+        stand `[types.Part.from_text(text=task_text)]` woertlich. Wer ihm ein
+        BILD mitgeben will (AI Mouse: Bildschirmausschnitt vom Arbeitsplatz),
+        setzt `_role_bilder` am Agenten; die Parts stehen dann VOR dem Text.
+
+        Reihenfolge: das Bild steht vorne, wie beim Chat-Anhang in `run_task`.
+
+        ⚠ DAS IST DIE REIHENFOLGE IN DIESER LISTE, NICHT AUF DER LEITUNG.
+        Gemessen am 2026-09-09: `llm.py` baut fuer OpenAI-kompatible Server
+        `[text, ...bilder]` und dreht sie damit um. Wer sich hier auf eine
+        Reihenfolge beim Provider verlaesst, verlaesst sich auf etwas, das
+        diese Methode nicht bestimmt.
+
+        ⚠ OHNE `_role_bilder` IST DAS ERGEBNIS BYTE-GLEICH zum Vorzustand. Das
+        ist die Zusage dieser Methode, und ein Test misst sie: ein Feature mit
+        Vorgabe AUS darf im ausgeschalteten Zustand nichts veraendern.
+
+        `_role_bilder` ist ein ATTRIBUT und keine ContextVar – wie
+        `_role_tools`/`_role_prompt`. Das ist nur zulaessig, weil die Aufrufer
+        einen EIGENEN Agenten je Lauf bauen (`ai_mouse._agent_lauf`,
+        `jira_assist._agent_lauf`). Am geteilten Hauptagenten waere es die
+        Nebenlaeufigkeits-Falle, die `_buendel_voll_cv` loesen musste.
+        """
+        teile = [types.Part.from_text(text=task_text)]
+        bilder = getattr(self, "_role_bilder", None)
+        if bilder:
+            return list(bilder) + teile
+        return teile
+
     async def run_task_headless(self, task_text: str, reasoning_effort=None,
                                 actor=_ACTOR_UNSET) -> str:
         """Führt eine Aufgabe ohne WebSocket aus. Gibt das Ergebnis als String zurück.
@@ -3327,7 +3359,7 @@ KRITISCH – Autonomie-Regeln:
                     contents=[
                         types.Content(
                             role="user",
-                            parts=[types.Part.from_text(text=task_text)],
+                            parts=self._headless_user_parts(task_text),
                         )
                     ],
                     tools=self._llm_tools,
@@ -3451,7 +3483,7 @@ KRITISCH – Autonomie-Regeln:
                         contents=[
                             types.Content(
                                 role="user",
-                                parts=[types.Part.from_text(text=task_text)],
+                                parts=self._headless_user_parts(task_text),
                             ),
                             *chat_history,
                         ],
@@ -3496,7 +3528,7 @@ KRITISCH – Autonomie-Regeln:
                 _final_h_text = await _try_final_h(
                     "with_history",
                     [
-                        types.Content(role="user", parts=[types.Part.from_text(text=task_text)]),
+                        types.Content(role="user", parts=self._headless_user_parts(task_text)),
                         *chat_history,
                         _final_instruction_h,
                     ],
@@ -3507,10 +3539,14 @@ KRITISCH – Autonomie-Regeln:
                     _log("Headless Final-Versuch 1 leer – Reset-Variante (nur Original-Task)")
                     _final_h_text = await _try_final_h(
                         "reset_only_task",
-                        [types.Content(role="user", parts=[types.Part.from_text(text=(
+                        # Auch der Reset-Versuch braucht das Bild: ohne es
+                        # antwortet das Modell "aus seinem Wissen" ueber einen
+                        # Ausschnitt, den es nie gesehen hat – und erfindet
+                        # dann eine Begruendung (Register, 2026-08-30).
+                        [types.Content(role="user", parts=self._headless_user_parts(
                             f"{task_text}\n\n"
                             "(Antworte direkt aus deinem Wissen. Keine Tools verfügbar.)"
-                        ))])],
+                        ))],
                         "Du bist ein hilfreicher Assistent. Antworte vollstaendig und direkt in der Sprache der Frage.",
                     )
 

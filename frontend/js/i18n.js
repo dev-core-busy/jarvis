@@ -830,6 +830,20 @@ const _I18N = {
         'xl.written':                   'Änderungen wurden übernommen.',
         'xl.written_err':               'Geschrieben – mit Fehlerwerten.',
         'xl.write_failed':              'Schreiben fehlgeschlagen:',
+        'xl.applying':                  'Wird automatisch übernommen …',
+        // ── Diagnose-Protokoll (2026-09-09) ─────────────────────────────
+        // Ein Office.js-Fehler kommt als "Interner Fehler waehrend der
+        // Verarbeitung der Anforderung" heraus – ohne diese Ansicht ist er im
+        // Aufgabenfenster nicht zu beurteilen.
+        'xl.write_failed_hint':         'Einzelheiten stehen unter „Einstellungen → Diagnose-Protokoll".',
+        'xl.log':                       'Diagnose-Protokoll',
+        'xl.log_note':                  'Enthält Fehlermeldungen von Excel samt der Anweisung, die gescheitert ist – Zelladressen und Formate, aber keine Zellinhalte.',
+        'xl.log_empty':                 'Noch nichts protokolliert.',
+        'xl.log_copy':                  'Protokoll kopieren',
+        'xl.log_clear':                 'Leeren',
+        'xl.log_copied':                'Kopiert.',
+        'xl.log_copy_failed':           'Kopieren nicht möglich – Text markieren und mit Strg+C kopieren.',
+        'xl.log_cleared':               'Protokoll geleert.',
         // Office.js-Schreibvorgaenge landen NICHT im Undo-Stack von Excel –
         // Strg+Z holt sie nicht zurueck. Deshalb ein eigener Rueckweg.
         'xl.err_cells':                 'Achtung – diese Zellen zeigen einen Fehlerwert:',
@@ -4212,6 +4226,16 @@ const _I18N = {
         'xl.written':                   'Changes applied.',
         'xl.written_err':               'Written – with error values.',
         'xl.write_failed':              'Writing failed:',
+        'xl.applying':                  'Applying automatically ...',
+        'xl.write_failed_hint':         'Details are under "Settings -> Diagnostic log".',
+        'xl.log':                       'Diagnostic log',
+        'xl.log_note':                  'Contains error messages from Excel including the statement that failed - cell addresses and formats, but no cell contents.',
+        'xl.log_empty':                 'Nothing logged yet.',
+        'xl.log_copy':                  'Copy log',
+        'xl.log_clear':                 'Clear',
+        'xl.log_copied':                'Copied.',
+        'xl.log_copy_failed':           'Copying not possible - select the text and press Ctrl+C.',
+        'xl.log_cleared':               'Log cleared.',
         'xl.err_cells':                 'Careful – these cells show an error value:',
         'xl.err_hint':                  'Use "Undo change" to restore the previous state.',
         // ── Extended change types and undo (2026-09-08) ─────────────────

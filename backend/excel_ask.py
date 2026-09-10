@@ -278,6 +278,50 @@ def format_pruefen(fmt: str) -> str:
     return ""
 
 
+def format_normieren(fmt: str) -> str:
+    """Deutsche Datums-Platzhalter in die englische Schreibweise bringen.
+
+    **Office.js ``numberFormat`` erwartet IMMER die englische Form** und
+    uebersetzt nichts – anders als bei Formeln, wo Excel das selbst tut. Ein
+    ``TT.MM.JJJJ`` ergibt dort im besten Fall eine Spalte, die literal
+    "TT.MM.JJJJ" anzeigt statt des Datums.
+
+    Der Prompt gab bis zum 2026-09-09 selbst ``TT.MM.JJJJ`` als Beispiel vor –
+    das Modell hat also getan, was dort stand. Der Prompt ist korrigiert; das
+    hier ist die zweite Haelfte, **weil ein Prompt eine Bitte ist**.
+
+    **BEWUSST NUR T UND J.** Beide kommen in englischen Formatcodes ueberhaupt
+    nicht als Platzhalter vor, die Zuordnung ist also eindeutig (``M`` heisst
+    hier wie dort Monat). Das Dezimalkomma wird ausdruecklich NICHT angefasst:
+    in der englischen Form ist ``,`` das TAUSENDERtrennzeichen, und ``#,##0.00``
+    ist voellig richtig – wer dort pauschal Komma zu Punkt macht, zerstoert das
+    haeufigste Format ueberhaupt.
+
+    Literale in Anfuehrungszeichen bleiben unberuehrt: ``0" T"`` ist eine
+    Einheit, kein Tagesplatzhalter.
+    """
+    text = str(fmt or "")
+    if not any(c in text for c in "TJtj"):
+        return text
+    raus = []
+    in_text = False
+    for zeichen in text:
+        if zeichen == '"':
+            in_text = not in_text
+            raus.append(zeichen)
+            continue
+        if in_text:
+            raus.append(zeichen)
+            continue
+        if zeichen in "Tt":
+            raus.append("d" if zeichen == "t" else "D")
+        elif zeichen in "Jj":
+            raus.append("y" if zeichen == "j" else "Y")
+        else:
+            raus.append(zeichen)
+    return "".join(raus)
+
+
 def _matrix_pruefen(roh, zeilen: int, spalten: int) -> tuple[list | None, str]:
     """Formt ``werte`` in eine 2D-Liste passend zum Bereich – oder nennt den Grund.
 
@@ -460,7 +504,7 @@ def aenderungen_pruefen(roh) -> tuple[list, list]:
         elif wert is not None:
             sauber["wert"] = wert
         if hat_format:
-            sauber["format"] = str(fmt)[:MAX_FORMAT_LEN]
+            sauber["format"] = format_normieren(str(fmt)[:MAX_FORMAT_LEN])
         if eintrag.get("begruendung"):
             sauber["begruendung"] = str(eintrag["begruendung"])[:300]
         gueltig.append(sauber)
@@ -993,7 +1037,10 @@ WENN DU ETWAS ÄNDERN SOLLST
               Die Maße müssen zum Bereich passen. **Für eine Datenliste ist das
               der richtige Weg** – nicht 60 Einzeleinträge.
     `wert`    EIN Wert, der in JEDE Zelle des Bereichs geschrieben wird.
-    `format`  Zahlenformat des Bereichs (`#,##0.00 €`, `0,0%`, `TT.MM.JJJJ`).
+    `format`  Zahlenformat des Bereichs. **In ENGLISCHER Schreibweise**, wie
+              die Formeln: `#,##0.00 €`, `0.0%`, `dd.mm.yyyy`, `hh:mm`. Excel
+              zeigt es dem Benutzer in seiner Sprache an. Deutsche Codes
+              (`TT.MM.JJJJ`, `0,0%`) werden von Excel NICHT übersetzt.
               Darf ALLEIN stehen – dann bleiben die Werte unangetastet – oder
               neben `formel`/`werte`/`wert`.
 - Ein Blatt, das es noch nicht gibt, wird angelegt: gib den neuen Namen in

@@ -188,6 +188,16 @@
             flex: 1 1 100%; font-size: 11.5px; font-weight: 400;
             color: var(--text-secondary); line-height: 1.4; cursor: pointer; }
         .xl-check input { margin: 1px 0 0 0; flex: 0 0 auto; cursor: pointer; }
+        /* Das Protokoll ist eine MONOSPACE-Flaeche mit eigenem Scrollbereich:
+           die Zeilen sind lang (ganze Office.js-Anweisungen), und ohne
+           `max-height` schoebe es die Knoepfe darunter aus dem Fenster. */
+        .xl-sect-in { margin-top: 10px; }
+        .xl-log-out { font-family: ui-monospace, Consolas, monospace; font-size: 10.5px;
+            line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+            max-height: 28vh; overflow: auto; margin: 6px 0; padding: 8px;
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: 6px; color: var(--text-primary); }
+        .xl-log-n { font-size: 10.5px; color: var(--text-muted); margin-left: 4px; }
         .xl-status { font-size: 11.5px; color: var(--text-muted); line-height: 1.45;
             word-break: break-word; }
 
@@ -438,6 +448,29 @@
                 <span class="xl-status" id="xl-anw-status"></span>
             </div>
             <div class="xl-hint" data-i18n="xl.instr_note">Vorgaben bestimmen die Form – sie lösen keine Änderung aus und heben keine Sicherheitsregel auf.</div>
+
+            <!-- DIAGNOSE-PROTOKOLL. Ohne diese Ansicht ist ein Office.js-Fehler
+                 im Aufgabenfenster nicht zu beurteilen: "Interner Fehler
+                 während der Verarbeitung der Anforderung" nennt weder die
+                 Anweisung noch den Ort, und an die Entwicklerkonsole von
+                 WebView2 kommt am Arbeitsplatz niemand. Zugeklappt, damit sie
+                 im Regelfall nicht stört – die Zahl in der Kopfzeile sagt, ob
+                 sich das Aufklappen lohnt. -->
+            <details class="xl-sect xl-sect-in" id="xl-log">
+                <summary>
+                    <span data-i18n="xl.log">Diagnose-Protokoll</span>
+                    <span class="xl-log-n" id="xl-log-n"></span>
+                </summary>
+                <div class="xl-sect-body">
+                    <div class="xl-hint" data-i18n="xl.log_note">Enthält Fehlermeldungen von Excel samt der Anweisung, die gescheitert ist – Zelladressen und Formate, aber keine Zellinhalte.</div>
+                    <pre class="xl-log-out" id="xl-log-out"></pre>
+                    <div class="xl-sect-row">
+                        <button class="xl-btn" id="xl-log-copy" type="button" data-i18n="xl.log_copy">Protokoll kopieren</button>
+                        <button class="xl-btn" id="xl-log-clear" type="button" data-i18n="xl.log_clear">Leeren</button>
+                        <span class="xl-status" id="xl-log-status"></span>
+                    </div>
+                </div>
+            </details>
         </div>
     </details>
 

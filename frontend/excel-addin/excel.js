@@ -95,6 +95,90 @@
         });
     }
 
+    /* ── Diagnose-Protokoll ────────────────────────────────────────────
+       DER GRUND, WARUM ES DAS GEBEN MUSS: ein Office.js-Fehler kommt als
+       "Interner Fehler waehrend der Verarbeitung der Anforderung" heraus –
+       richtig und vollstaendig nutzlos. Die eigentliche Diagnose liegt in
+       `e.debugInfo` (`errorLocation`, `fullStatement`, `statements`), und die
+       wurde bis 2026-09-09 mit `String(e.message)` weggeworfen.
+       `console.warn` ist KEIN Ersatz: in einem Aufgabenfenster von Excel am
+       Arbeitsplatz (WebView2) kommt niemand an die Entwicklerkonsole – der
+       Bediener kann nur weitergeben, was das Fenster ihm ZEIGT.
+
+       WAS NICHT HINEINGEHOERT: Zellinhalte. Das Protokoll wird per Knopf
+       kopiert und weitergeschickt; es haelt deshalb nur ADRESSE, Feldart,
+       Zahlenformat und Groessen fest – nie einen Wert und nie eine Formel. */
+    var LOG_MAX = 60;
+    var _log = [];
+    function zeitstempel() {
+        try { return new Date().toISOString().slice(11, 23); }
+        catch (e) { return '?'; }
+    }
+    function protokoll(bereich, text) {
+        try {
+            _log.push(zeitstempel() + '  [' + bereich + '] ' + String(text));
+            if (_log.length > LOG_MAX) _log.splice(0, _log.length - LOG_MAX);
+            logZeichnen();
+        } catch (e) { }
+    }
+    /* Zerlegt einen Office.js-Fehler in die Teile, die eine Diagnose tragen.
+       `OfficeExtension.Error` traegt `code` und `debugInfo`; mit
+       `extendedErrorLogging` steht dort auch die SCHEITERNDE Anweisung –
+       genau die Angabe, die "interner Fehler" verschweigt. */
+    function fehlerDetails(e) {
+        var t = [];
+        if (!e) return 'kein Fehlerobjekt';
+        if (e.code) t.push('code=' + e.code);
+        t.push('message=' + String(e.message || e));
+        var d = e.debugInfo;
+        if (d) {
+            if (d.errorLocation) t.push('errorLocation=' + d.errorLocation);
+            if (d.fullStatement) t.push('statement=' + d.fullStatement);
+            else if (d.statements) t.push('statements=' + [].concat(d.statements).join(' | '));
+            if (d.surroundingStatements) {
+                t.push('umgebung=' + [].concat(d.surroundingStatements).join(' | '));
+            }
+            if (d.innerError) t.push('innerError=' + (d.innerError.message || d.innerError));
+        }
+        if (e.traceMessages && e.traceMessages.length) {
+            t.push('trace=' + e.traceMessages.join(' | '));
+        }
+        return t.join('\n    ');
+    }
+    /* Kurzfassung fuer die Statuszeile: Code und Ort. "Interner Fehler" allein
+       sagt dem Bediener nicht, ob er etwas aendern kann – der Ort schon. */
+    function fehlerKurz(e) {
+        var s = String((e && e.message) || e || '');
+        var zu = [];
+        if (e && e.code) zu.push(e.code);
+        if (e && e.debugInfo && e.debugInfo.errorLocation) zu.push(e.debugInfo.errorLocation);
+        return zu.length ? (s + ' (' + zu.join(' / ') + ')') : s;
+    }
+    /* Was GESCHRIEBEN werden sollte – ohne Inhalte. Ohne diese Zeile steht im
+       Protokoll ein Fehler ohne Gegenstand, und man kann nicht sagen, welcher
+       Eintrag ihn ausgeloest hat. */
+    function eintragKurz(a) {
+        var t = (a.blatt ? a.blatt + '!' : '') + a.adresse;
+        if (a.format) t += ' fmt=' + JSON.stringify(String(a.format));
+        if (a.werte && a.werte.length) t += ' werte=' + a.werte.length + 'x' +
+            ((a.werte[0] && a.werte[0].length) || 0);
+        else if (a.formel) t += ' formel(' + String(a.formel).length + ' Z.)';
+        else if (a.wert !== undefined && a.wert !== null) t += ' wert';
+        if (a._neuesBlatt) t += ' NEUES-BLATT';
+        if (a._zeilen && a._spalten) t += ' bereich=' + a._zeilen + 'x' + a._spalten;
+        return t;
+    }
+    function logText() {
+        if (!_log.length) return T('xl.log_empty', 'Noch nichts protokolliert.');
+        return _log.join('\n');
+    }
+    function logZeichnen() {
+        var e = $('xl-log-out');
+        if (e) e.textContent = logText();
+        var n = $('xl-log-n');
+        if (n) n.textContent = _log.length ? String(_log.length) : '';
+    }
+
     /* Rueckfall im Arbeitsspeicher. NOETIG, nicht vorsorglich: das
        Aufgabenfenster laeuft in Excel im Web in einem iframe, und dort ist
        Speicher fremder Herkunft je nach Browsereinstellung gesperrt. Ohne
@@ -234,6 +318,14 @@
             (function pruefe() {
                 if (window.Office && Office.onReady) {
                     Office.onReady(function (info) {
+                        /* SCHALTET DIE DIAGNOSE UEBERHAUPT ERST EIN. Ohne
+                           `extendedErrorLogging` bleibt `debugInfo` duenn:
+                           `fullStatement` und `statements` – also die Angabe,
+                           WELCHE Anweisung gescheitert ist – fuellt Office.js
+                           nur, wenn dieser Schalter steht. Er kostet nichts
+                           ausser etwas Speicher fuer die Anweisungstexte. */
+                        try { OfficeExtension.config.extendedErrorLogging = true; }
+                        catch (e) { }
                         if (info && info.host === Office.HostType.Excel) {
                             _office = true;
                             try {
@@ -249,6 +341,16 @@
                                 _kann110 = !!(Office.context && Office.context.requirements &&
                                     Office.context.requirements.isSetSupported('ExcelApi', '1.10'));
                             } catch (e) { _kann110 = false; }
+                            // Die Fassungen gehoeren ins Protokoll: ob eine
+                            // Zelle einen Kommentar bekommt (1.10) und ob eine
+                            // Formel per copyFrom gefuellt wird (1.9),
+                            // entscheidet sich hier – und beides sind Wege,
+                            // die scheitern koennen.
+                            protokoll('office', 'Excel bereit, ExcelApi 1.9=' +
+                                _kann19 + ' 1.10=' + _kann110 +
+                                ' platform=' + ((Office.context && Office.context.platform) || '?') +
+                                ' host=' + ((Office.context && Office.context.diagnostics &&
+                                    Office.context.diagnostics.version) || '?'));
                         } else {
                             _officeGrund = T('xl.no_excel',
                                 'Dieses Fenster läuft nicht in Excel. Die Tabellenfunktionen stehen deshalb nicht zur Verfügung.');
@@ -465,7 +567,7 @@
                 });
             });
         }).catch(function (e) {
-            console.warn('[excel] Ueberblick nicht lesbar:', e);
+            protokoll('ueberblick', 'nicht lesbar\n    ' + fehlerDetails(e));
             return null;
         });
     }
@@ -572,7 +674,7 @@
                 return { bereich: angabe, text: text };
             });
         }).catch(function (e) {
-            console.warn('[excel] Bereich nicht lesbar:', angabe, e);
+            protokoll('bereich', String(angabe) + ' nicht lesbar\n    ' + fehlerDetails(e));
             return null;
         });
     }
@@ -794,6 +896,13 @@
             }
             return h + '</div>';
         }
+        if (v.autoLaeuft) {
+            // Kein Knopf, aber auch keine stumme Flaeche: der Bediener soll
+            // sehen, dass gerade geschrieben WIRD.
+            h += '<div class="xl-diff-done">' +
+                esc(T('xl.applying', 'Wird automatisch übernommen …')) + '</div>';
+            return h + '</div>';
+        }
         h += '<div class="xl-row">' +
             '<button class="xl-btn xl-btn-primary" id="xl-apply">' +
             esc(T('xl.apply', 'Übernehmen')) + '</button>' +
@@ -922,7 +1031,16 @@
             _vorschlag = {
                 aenderungen: d.aenderungen || [],
                 abgelehnt: d.abgelehnt || [],
-                zusammenfassung: d.zusammenfassung || ''
+                zusammenfassung: d.zusammenfassung || '',
+                // WIRD GLEICH GESCHRIEBEN – dann gehoert kein „Uebernehmen"
+                // darunter. Bis 2026-09-09 zeichnete `fertig()` den Diff MIT
+                // Knoepfen und stiess die automatische Uebernahme erst danach
+                // an: bei einem grossen Bereich standen sie sekundenlang da,
+                // und wer in dieser Zeit drueckte, schrieb zweimal. Der Merker
+                // faellt weg, sobald der Vorgang endet – gelingt er, ist der
+                // Vorschlag erledigt, scheitert er, sind die Knoepfe der
+                // richtige naechste Schritt.
+                autoLaeuft: autoAn()
             };
             // Alten Inhalt der betroffenen Zellen holen, damit der Diff beide
             // Seiten zeigt. Ein Diff mit nur einer Seite ist kein Diff.
@@ -933,10 +1051,16 @@
             // Umgekehrte Reihenfolge = ein erledigter Diff ohne die linke
             // Seite, also wieder kein Diff.
             alteWerteLesen(_vorschlag.aenderungen).then(function () {
-                zeichneVerlauf();
-                if (autoAn() && _vorschlag && _vorschlag.aenderungen.length) {
+                if (_vorschlag && _vorschlag.autoLaeuft && _vorschlag.aenderungen.length) {
+                    zeichneVerlauf();
                     uebernehmenJetzt(true);
+                    return;
                 }
+                // Kein automatischer Lauf (oder nichts zu schreiben): der
+                // Merker darf nicht stehenbleiben, sonst waere der Vorschlag
+                // dauerhaft ohne Knoepfe – also unbedienbar.
+                if (_vorschlag) _vorschlag.autoLaeuft = false;
+                zeichneVerlauf();
             });
         }
         if (!d.text && !(d.aenderungen || []).length) {
@@ -1009,7 +1133,7 @@
                 });
             });
         }).catch(function (e) {
-            console.warn('[excel] alte Werte nicht lesbar:', e);
+            protokoll('altwerte', 'nicht lesbar\n    ' + fehlerDetails(e));
         });
     }
 
@@ -1061,7 +1185,9 @@
         //     als Währung") – dann bleiben die Werte unangetastet.
         if (a.format) {
             try { r.numberFormat = fuellMatrix(a.format, zeilen, spalten); }
-            catch (e) { console.warn('[excel] Format nicht setzbar:', e); }
+            catch (e) { protokoll('format', (a.blatt ? a.blatt + '!' : '') + a.adresse +
+                ' ' + JSON.stringify(String(a.format)) + ' nicht setzbar\n    ' +
+                fehlerDetails(e)); }
         }
 
         // (2) VERSCHIEDENE Werte. Bis 2026-09-08 gab es diesen Weg nicht: ein
@@ -1114,6 +1240,11 @@
     function uebernehmenJetzt(auto) {
         var vorschlag = _vorschlag;
         var aenderungen = vorschlag.aenderungen.slice();
+        protokoll('schreiben', (auto ? 'automatisch, ' : 'auf Knopfdruck, ') +
+            aenderungen.length + ' Eintraege, markieren=' + markAn());
+        aenderungen.forEach(function (a, i) {
+            protokoll('schreiben', '  [' + i + '] ' + eintragKurz(a));
+        });
         melde('xl-status', T('xl.writing', 'Schreibe …'));
         _laeuft = true;
         setzeLaeuft(true);
@@ -1128,7 +1259,8 @@
                 if (!a.blatt || !a._neuesBlatt) return;
                 if (angelegt.indexOf(a.blatt) >= 0) return;
                 try { ctx.workbook.worksheets.add(a.blatt); angelegt.push(a.blatt); }
-                catch (e) { console.warn('[excel] Blatt nicht anlegbar:', e); }
+                catch (e) { protokoll('blatt', a.blatt + ' nicht anlegbar\n    ' +
+                    fehlerDetails(e)); }
             });
 
             var ziele = [];
@@ -1152,24 +1284,6 @@
                 });
                 return ctx.sync();
             }).then(function () {
-                // MARKIEREN. Erst nach dem Schreiben, damit eine gescheiterte
-                // Aenderung nicht als erledigt markiert dasteht.
-                if (!markAn()) return ctx.sync();
-                ziele.forEach(function (z) {
-                    try { z.r.format.fill.color = MARK_FARBE; } catch (e) { }
-                    if (!_kann110 || !z.a.begruendung) return;
-                    try {
-                        // Der Kommentar traegt die BEGRUENDUNG des Modells. Sie
-                        // liegt ohnehin vor (sie steht in der Diff-Ansicht) und
-                        // ist an der Zelle die einzige Erklaerung, die auch
-                        // morgen noch da ist.
-                        ctx.workbook.comments.add(
-                            z.r.getCell(0, 0),
-                            T('xl.comment_pre', 'Jarvis:') + ' ' + z.a.begruendung);
-                    } catch (e) { }
-                });
-                return ctx.sync();
-            }).then(function () {
                 // FEHLERWERTE PRUEFEN statt einen Formelparser zu bauen:
                 // schreiben, zuruecklesen, auf #NAME?/#BEZUG! pruefen. Das ist
                 // ehrlicher als eine Syntaxpruefung, die die Excel-Grammatik nie
@@ -1188,6 +1302,18 @@
                     return { kaputt: kaputt, angelegt: angelegt };
                 });
             });
+        }).then(function (erg) {
+            // KOSMETIK IN EINEM EIGENEN LAUF, und das ist der Kern der
+            // Reparatur vom 2026-09-09: Markierung und Zellkommentar liefen
+            // bis dahin im SELBEN `Excel.run` wie das Schreiben. Ein
+            // `comments.add` auf eine Zelle, die schon einen Kommentar traegt,
+            // wirft – und zwar erst beim `ctx.sync()`, also AUSSERHALB der
+            // `try`-Bloecke daneben. Der ganze Vorgang landete damit im
+            // Fehlerzweig: die Meldung sagte "Schreiben fehlgeschlagen",
+            // waehrend die Werte laengst in der Mappe standen, und der
+            // Vorschlag blieb mit "Uebernehmen" stehen, als waere nichts
+            // passiert. **Eine Verzierung darf den Vorgang nicht kippen.**
+            return kosmetik(aenderungen).then(function () { return erg; });
         }).then(function (erg) {
             // Der geschriebene Vorschlag bleibt SICHTBAR (ohne Knoepfe) – bei
             // automatischer Uebernahme ist das die einzige Stelle, an der
@@ -1216,11 +1342,84 @@
             }
             zeichneVerlauf();
         }).catch(function (e) {
+            // DER VORSCHLAG BLEIBT OFFEN – aber jetzt mit Knoepfen: der
+            // automatische Weg ist gescheitert, der Bediener entscheidet.
+            if (vorschlag) vorschlag.autoLaeuft = false;
+            protokoll('schreiben', 'FEHLGESCHLAGEN\n    ' + fehlerDetails(e));
+            // DER FEHLER GEHOERT IN DEN VERLAUF, nicht nur in die Statuszeile
+            // am Fuss des Fensters. Bei automatischer Uebernahme steht sonst
+            // ein Vorschlag mit "Uebernehmen" da, und der einzige Hinweis
+            // darauf, dass gerade ein Schreibversuch gescheitert ist, liegt
+            // unterhalb des Sichtfensters.
+            _verlauf.push({
+                rolle: 'bot', fehler: true,
+                text: T('xl.write_failed', 'Schreiben fehlgeschlagen:') + ' ' +
+                    fehlerKurz(e) + '\n\n' +
+                    T('xl.write_failed_hint',
+                        'Einzelheiten stehen unter „Einstellungen → Diagnose-Protokoll".')
+            });
+            zeichneVerlauf();
             melde('xl-status', T('xl.write_failed', 'Schreiben fehlgeschlagen:') + ' ' +
-                String(e && e.message || e), 'fehler');
+                fehlerKurz(e), 'fehler');
         }).then(function () {
             _laeuft = false;
             setzeLaeuft(false);
+        });
+    }
+
+    /* Markierung und Zellkommentar – NACH dem Schreiben, in einem eigenen
+       Lauf, mit eigenem Fehlerzweig. Scheitert hier etwas, ist die Aenderung
+       trotzdem in der Mappe; der Bediener erfaehrt es ueber das Protokoll.
+
+       Der Kommentar wird ERSETZT statt hinzugefuegt: `comments.add` auf eine
+       Zelle, die schon einen traegt, wirft – und wer denselben Bereich zweimal
+       bearbeitet (der Normalfall beim Nachbessern), traefe genau darauf. */
+    function kosmetik(aenderungen) {
+        if (!markAn() || !_office || !window.Excel) return Promise.resolve();
+        return Excel.run(function (ctx) {
+            var ziele = [];
+            aenderungen.forEach(function (a) {
+                try {
+                    var s2 = a.blatt ? ctx.workbook.worksheets.getItem(a.blatt)
+                        : ctx.workbook.worksheets.getActiveWorksheet();
+                    var r = s2.getRange(a.adresse);
+                    ziele.push({ a: a, r: r });
+                } catch (e) { }
+            });
+            ziele.forEach(function (z) {
+                try { z.r.format.fill.color = MARK_FARBE; } catch (e) { }
+            });
+            return ctx.sync().then(function () {
+                if (!_kann110) return ctx.sync();
+                // Vorhandene Kommentare NACHSEHEN, statt blind anzulegen.
+                ziele.forEach(function (z) {
+                    if (!z.a.begruendung) return;
+                    try {
+                        z.k = ctx.workbook.comments.getItemByCell(
+                            (z.a.blatt ? z.a.blatt + '!' : '') + z.a.adresse.split(':')[0]);
+                        z.k.load('id');
+                    } catch (e) { z.k = null; }
+                });
+                // `getItemByCell` wirft bei einer Zelle OHNE Kommentar – der
+                // Fehler faellt beim sync an und wird hier bewusst geschluckt:
+                // "kein Kommentar da" ist die Regel, nicht die Ausnahme.
+                return ctx.sync().catch(function () { }).then(function () {
+                    ziele.forEach(function (z) {
+                        if (!z.a.begruendung) return;
+                        var text = T('xl.comment_pre', 'Jarvis:') + ' ' + z.a.begruendung;
+                        try {
+                            if (z.k && z.k.id) { z.k.content = text; return; }
+                        } catch (e) { }
+                        try {
+                            ctx.workbook.comments.add(z.r.getCell(0, 0), text);
+                        } catch (e) { }
+                    });
+                    return ctx.sync();
+                });
+            });
+        }).catch(function (e) {
+            protokoll('markierung', 'nicht gesetzt (die Aenderung selbst steht)\n    ' +
+                fehlerDetails(e));
         });
     }
 
@@ -1277,7 +1476,7 @@
                                 else r.format.fill.clear();
                             } catch (e) { }
                         }
-                    } catch (e) { console.warn('[excel] Zurücknehmen:', e); }
+                    } catch (e) { protokoll('zuruecknehmen', fehlerDetails(e)); }
                 });
                 return ctx.sync();
             }).then(function () {
@@ -1590,6 +1789,32 @@
             e.addEventListener('change', function () { markSetzen(e.checked); });
         }
         if ((e = $('xl-anw-save'))) e.addEventListener('click', anweisungenSpeichern);
+        // KOPIEREN IST DER ZWECK DER ANSICHT. Ein Protokoll, das man nur lesen
+        // kann, hilft niemandem: der Bediener muss es weitergeben koennen, und
+        // in einem 380 px breiten Fenster tippt es keiner ab. Der Fehlschlag
+        // wird GEMELDET – `navigator.clipboard` fehlt in unsicheren Kontexten
+        // ganz, und "hat scheinbar geklappt" waere hier der teuerste Ausgang.
+        if ((e = $('xl-log-copy'))) e.addEventListener('click', function () {
+            var t = logText();
+            var ok = function () {
+                melde('xl-log-status', T('xl.log_copied', 'Kopiert.'), 'ok');
+            };
+            var nein = function () {
+                melde('xl-log-status', T('xl.log_copy_failed',
+                    'Kopieren nicht möglich – Text markieren und mit Strg+C kopieren.'), 'fehler');
+            };
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(t).then(ok, nein);
+                } else { nein(); }
+            } catch (e2) { nein(); }
+        });
+        if ((e = $('xl-log-clear'))) e.addEventListener('click', function () {
+            _log = [];
+            logZeichnen();
+            melde('xl-log-status', T('xl.log_cleared', 'Protokoll geleert.'));
+        });
+        logZeichnen();
         if ((e = $('xl-logout'))) e.addEventListener('click', abmelden);
         if ((e = $('xl-frage'))) e.addEventListener('keydown', function (ev) {
             if (ev.key !== 'Enter') return;

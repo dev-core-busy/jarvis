@@ -24,7 +24,11 @@ internal static class Marken
         return new Label
         {
             Dock = DockStyle.Top,
-            Height = 38,
+            // ⚠ `AutoSize` statt fester Hoehe: die Marke steht in 12 pt fett –
+            //    bei 150%% Zoom ist sie hoeher als 38 px und wuerde unten
+            //    abgeschnitten. Die Mindesthoehe haelt das Aussehen bei 100%%.
+            AutoSize = true,
+            MinimumSize = new Size(0, 38),
             Padding = new Padding(12, 10, 12, 0),
             Text = s.Marke,
             Font = new Font("Segoe UI", 12f, FontStyle.Bold),

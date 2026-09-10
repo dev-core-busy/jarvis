@@ -29,6 +29,28 @@ internal sealed class ResultWindow : Form
         KeyPreview = true;
         Font = new Font("Segoe UI", 9f);
 
+        // ⚠ DPI-SKALIERUNG – gemeldet 2026-09-10: „bei Zoom groesser als 100%
+        // werden Felder unvollstaendig und abgeschnitten angezeigt".
+        //
+        // Die Ursache ist eine Kette aus drei Teilen:
+        //   1. `app.manifest` deklariert PerMonitorV2 – die Anwendung sagt
+        //      Windows damit „ich skaliere selbst", und Windows streckt das
+        //      Fenster NICHT mehr (kein Bitmap-Stretching als Notnagel).
+        //   2. `AutoScaleMode.Font` braucht `AutoScaleDimensions` als
+        //      Referenz. Die setzt sonst der Designer – diese Fenster sind
+        //      aber von Hand gebaut, der Wert blieb (0,0), und der
+        //      Skalierungsfaktor war damit 1.0. Es wurde also NICHT skaliert.
+        //   3. Die Schrift skaliert trotzdem: `new Font("Segoe UI", 9f)` ist
+        //      in PUNKT angegeben, und Punkt→Pixel haengt an der DPI.
+        // Ergebnis: groessere Schrift in unveraenderten Kaesten – abgeschnitten.
+        //
+        // `Dpi` statt `Font`: der Faktor kommt dann direkt aus der DPI und
+        // nicht aus einem Schriftvergleich, der bei fest gesetzter Punktgroesse
+        // ohnehin immer 1.0 ergibt. 96 ist 100%.
+        AutoScaleDimensions = new SizeF(96F, 96F);
+        AutoScaleMode = AutoScaleMode.Dpi;
+
+
         _header = new Label
         {
             Dock = DockStyle.Top,

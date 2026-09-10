@@ -54,8 +54,8 @@ internal sealed class SettingsWindow : Form
     private readonly Label _rdHinweis = new()
     {
         Dock = DockStyle.Fill,
-        AutoSize = false,
-        Height = 30,
+        // ⚠ Kein `Height = 30`: der Satz bricht bei groesserer Schrift um.
+        AutoSize = true,
         ForeColor = SystemColors.GrayText,
         Visible = false,
     };
@@ -114,7 +114,26 @@ internal sealed class SettingsWindow : Form
         MinimizeBox = false;
         MaximizeBox = true;
         ShowInTaskbar = true;
-        AutoScaleMode = AutoScaleMode.Font;
+        // ⚠ DPI-SKALIERUNG – gemeldet 2026-09-10: „bei Zoom groesser als 100%
+        // werden Felder unvollstaendig und abgeschnitten angezeigt".
+        //
+        // Die Ursache ist eine Kette aus drei Teilen:
+        //   1. `app.manifest` deklariert PerMonitorV2 – die Anwendung sagt
+        //      Windows damit „ich skaliere selbst", und Windows streckt das
+        //      Fenster NICHT mehr (kein Bitmap-Stretching als Notnagel).
+        //   2. `AutoScaleMode.Font` braucht `AutoScaleDimensions` als
+        //      Referenz. Die setzt sonst der Designer – diese Fenster sind
+        //      aber von Hand gebaut, der Wert blieb (0,0), und der
+        //      Skalierungsfaktor war damit 1.0. Es wurde also NICHT skaliert.
+        //   3. Die Schrift skaliert trotzdem: `new Font("Segoe UI", 9f)` ist
+        //      in PUNKT angegeben, und Punkt→Pixel haengt an der DPI.
+        // Ergebnis: groessere Schrift in unveraenderten Kaesten – abgeschnitten.
+        //
+        // `Dpi` statt `Font`: der Faktor kommt dann direkt aus der DPI und
+        // nicht aus einem Schriftvergleich, der bei fest gesetzter Punktgroesse
+        // ohnehin immer 1.0 ergibt. 96 ist 100%.
+        AutoScaleDimensions = new SizeF(96F, 96F);
+        AutoScaleMode = AutoScaleMode.Dpi;
         Font = new Font("Segoe UI", 9f);
         ClientSize = new Size(520, 420);
 
@@ -162,7 +181,16 @@ internal sealed class SettingsWindow : Form
         _status = new Label
         {
             Dock = DockStyle.Bottom,
-            Height = 52,
+            // ⚠ `AutoSize` STATT FESTER HOEHE: hier steht Fliesstext (Pfad,
+            //    Fehlermeldungen), der bei groesserer Schrift umbricht. Eine
+            //    feste Hoehe schneidet dann die zweite Zeile ab – und genau
+            //    das ist das gemeldete Symptom, nur eine Ebene tiefer als die
+            //    fehlende DPI-Skalierung. `AutoSize` mit `Bottom` waechst nach
+            //    oben, der Kasten bleibt also im Fenster.
+            // (`AutoSizeMode` gibt es am Label nicht – das ist eine
+            //  Eigenschaft von Containern.)
+            AutoSize = true,
+            MinimumSize = new Size(0, 52),
             Padding = new Padding(14, 0, 14, 6),
             ForeColor = SystemColors.GrayText,
             Text = ConfigStore.SettingsPath,

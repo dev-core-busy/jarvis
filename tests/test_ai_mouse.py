@@ -2007,5 +2007,73 @@ with _tf.TemporaryDirectory(prefix="baunoetig-") as _t:
         am._projekt_wurzel, am.exe_pfad = _alt_w, _alt_e
         am.paket_vorhanden, am.bau_noetig = _alt_p, _alt_b
 
+# ══════════════════════════════════════════════════════════════════════════
+# 19. Bildschirm-Zoom > 100 %% (gemeldet 2026-09-10)
+#
+# „Felder werden unvollstaendig und abgeschnitten angezeigt".
+#
+# ⚠ DIE URSACHE IST EINE KETTE AUS DREI TEILEN – jeder fuer sich sieht richtig
+# aus, erst zusammen ergeben sie den Fehler:
+#   1. `app.manifest` deklariert PerMonitorV2 → Windows streckt das Fenster
+#      NICHT mehr (kein Bitmap-Stretching als Notnagel).
+#   2. `AutoScaleMode.Font` braucht `AutoScaleDimensions` als Referenz – die
+#      setzt sonst der Designer. Diese Fenster sind von Hand gebaut, der Wert
+#      blieb (0,0), der Faktor damit 1.0: es wurde NICHT skaliert.
+#   3. Die Schrift skaliert trotzdem – `new Font("Segoe UI", 9f)` ist in PUNKT
+#      angegeben, und Punkt→Pixel haengt an der DPI.
+# ⇒ groessere Schrift in unveraenderten Kaesten.
+# ══════════════════════════════════════════════════════════════════════════
+print("\n--- 19. Zoom ueber 100 Prozent ---")
+
+_ui = ROOT / "ai-mouse" / "src" / "AiMouse" / "Ui"
+_manifest = (ROOT / "ai-mouse" / "src" / "AiMouse" / "app.manifest").read_text(encoding="utf-8")
+
+# (a) Die Voraussetzung, aus der die Pflicht folgt.
+check("das Manifest deklariert PerMonitorV2 (die App skaliert selbst)",
+      "PerMonitorV2" in _manifest)
+
+# (b) DIE REGEL: jedes Dialogfenster skaliert nach DPI – mit Referenzwert.
+#
+# ⚠ ALS REGEL UEBER ALLE FENSTER, nicht als Liste: ein kuenftiges Fenster
+#   faellt damit von selbst auf. Die Ausnahme steht EINZELN und begruendet.
+_AUSNAHMEN = {
+    # ⚠ SelectionOverlay arbeitet mit den PHYSISCHEN Pixelkoordinaten des
+    #   Maus-Hooks. Wuerde es skaliert, laege der Auswahlrahmen neben dem
+    #   Zeiger – und der aufgenommene Ausschnitt waere ein anderer als der
+    #   markierte. `AutoScaleMode.None` ist dort Absicht.
+    "SelectionOverlay.cs",
+}
+_fenster = []
+for _f in sorted(_ui.glob("*.cs")):
+    _q = cs_nackt(_f.read_text(encoding="utf-8"))
+    if ": Form" not in _q:
+        continue
+    _fenster.append(_f.name)
+    if _f.name in _AUSNAHMEN:
+        check("%s ist ausgenommen und sagt es (AutoScaleMode.None)" % _f.name,
+              "AutoScaleMode.None" in _q)
+        continue
+    check("%s skaliert nach DPI" % _f.name, "AutoScaleMode.Dpi" in _q)
+    # ⚠ OHNE REFERENZWERT IST DER FAKTOR UNDEFINIERT – genau daran lag es.
+    check("  … und hat den Referenzwert 96 dpi",
+          "AutoScaleDimensions = new SizeF(96F, 96F)" in _q)
+check("Positivkontrolle: es wurden ueberhaupt Fenster gefunden (%d)" % len(_fenster),
+      len(_fenster) >= 3)
+# ⚠ `Font` ist hier die falsche Betriebsart: bei fest gesetzter Punktgroesse
+#   ergibt der Schriftvergleich immer 1.0.
+check("kein Fenster benutzt mehr AutoScaleMode.Font",
+      not any("AutoScaleMode.Font" in cs_nackt((_ui / n).read_text(encoding="utf-8"))
+              for n in _fenster))
+
+# (c) Textfelder mit Fliesstext duerfen keine feste Hoehe haben – sonst
+#     schneiden sie die zweite Zeile ab, sobald die Schrift waechst.
+_sw = cs_nackt((_ui / "SettingsWindow.cs").read_text(encoding="utf-8"))
+check("der Status-Kasten waechst mit (AutoSize + Mindesthoehe)",
+      "AutoSize = true," in _sw and "MinimumSize = new Size(0, 52)" in _sw)
+check("  … und hat keine feste Hoehe mehr", "Height = 52," not in _sw)
+check("der Sperr-Hinweis ebenfalls", "Height = 30," not in _sw)
+_mk = cs_nackt((_ui / "Marken.cs").read_text(encoding="utf-8"))
+check("der Markenkopf waechst mit", "AutoSize = true" in _mk and "Height = 38," not in _mk)
+
 print("\n%d OK, %d FAIL" % (ok, fail))
 sys.exit(1 if fail else 0)

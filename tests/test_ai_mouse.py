@@ -539,11 +539,34 @@ check("abgeschaltet wird nichts angestossen",
       am.einrichtung_anstossen("test").startswith("Automatik abgeschaltet"))
 _os.environ.pop("JARVIS_AIMOUSE_AUTO", None)
 
-# Liegt die Anwendung bereits, passiert NICHTS – auch das ist eine Zusage:
-# sonst baute jeder Abruf neu.
+# Liegt eine AKTUELLE Anwendung bereits, passiert NICHTS – auch das ist eine
+# Zusage: sonst baute jeder Abruf neu.
+#
+# ⚠ HIER STAND NUR `paket_vorhanden = True`. Seit dem 2026-09-10 genuegt das
+# nicht mehr: eine vorhandene, aber VERALTETE Anwendung ist sehr wohl ein
+# Grund zu bauen (gemeldet von ECHT). Der Stub muss die neue Zusage abbilden,
+# sonst prueft er eine, die es nicht mehr gibt – und meldet einen Fehler, den
+# es nicht gibt.
+# ⚠ DIE ECHTEN FUNKTIONEN SICHERN, BEVOR sie ersetzt werden: Abschnitt 18
+#   fuehrt `bau_noetig` WIRKLICH aus – ohne diese Sicherung riefe er den Stub
+#   von hier und misst seine eigene Attrappe (genau so passiert).
+_ECHT_BAU_NOETIG = am.bau_noetig
+_ECHT_PAKET_VORHANDEN = am.paket_vorhanden
+
 am.paket_vorhanden = lambda: True
-check("bereits vorhanden -> kein Bau", am.einrichtung_anstossen("x") == "bereits vorhanden")
+am.bau_noetig = lambda: False
+check("bereits vorhanden UND aktuell -> kein Bau",
+      am.einrichtung_anstossen("x") == "bereits vorhanden")
+# Und die Gegenrichtung – die eigentliche Neuerung.
+am.bau_noetig = lambda: True
+check("vorhanden, aber VERALTET -> es wird gebaut",
+      am.einrichtung_anstossen("x") != "bereits vorhanden")
+# ⚠ BEIDE zurueckstellen – die folgenden Pruefungen wollen bis zur
+#   Zustandspruefung DURCHkommen. Bliebe `bau_noetig` auf False, gaebe
+#   `einrichtung_anstossen` schon vorher „bereits vorhanden" zurueck, und
+#   „zu jung"/„laeuft bereits" waeren nie erreichbar (genau so passiert).
 am.paket_vorhanden = lambda: False
+am.bau_noetig = lambda: True
 
 # ⚠ MINDESTABSTAND: ohne ihn stiesse JEDER Abruf einen eigenen Bau an – auf
 # einem Server ohne SDK also im Minutentakt einen vergeblichen apt-Lauf.
@@ -1884,6 +1907,105 @@ check("das Feld zeigt bei Unbekanntem 'keine' an", "gk >= 0 ? gk : 0" in sw2)
 for _n in ("GesteTaste", "GkKeine", "RdGesperrt"):
     _e = _texteintrag_cs(_n)
     check("Text %s ist zweisprachig" % _n, "T(" in _e and _e.count('"') >= 4)
+
+# ══════════════════════════════════════════════════════════════════════════
+# 18. Nach einem Update wird die EXE NEU GEBAUT (gemeldet 2026-09-10)
+#
+# „trotz update ist auf ECHT noch eine alte exe" – zutreffend und GEMESSEN:
+# Code `c875336` von 12:59, EXE von 06:04.
+#
+# ⚠ URSACHE: der Neubau haing ausschliesslich an den HAUSWERTEN
+# (`Vorgaben.cs`). Beide Wege fragten nur, ob IRGENDEINE Anwendung da ist –
+# `paket_vorhanden()` im Backend, `liegt_bereit()` im Bootstrap. Ein `git pull`
+# mit neuem Quelltext loeste damit NICHTS aus. Auf DEV fiel es nie auf, weil
+# dort nach jeder Aenderung von Hand gebaut wurde.
+#
+# Dieselbe Fehlerklasse wie beim Root-Broker: „ein Fix, der still nicht
+# ankommt". Und dieselbe Loesung: die ZEIT vergleichen, nicht eine Version.
+# ══════════════════════════════════════════════════════════════════════════
+print("\n--- 18. Neubau nach Update ---")
+
+cs_am = (ROOT / "backend" / "ai_mouse.py").read_text(encoding="utf-8")
+sh_bau = (ROOT / "deploy" / "ai_mouse_build.sh").read_text(encoding="utf-8")
+py_main = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
+
+check("es gibt eine Aktualitaets-Pruefung", "def bau_noetig(" in cs_am)
+check("sie vergleicht die ZEIT, nicht eine Version",
+      "st_mtime" in cs_am and "quellen_stand" in cs_am)
+# ⚠ `obj/` und `bin/` MUESSEN ausgenommen sein: dort liegen die Ergebnisse des
+#   letzten Baus, die per Definition juenger sind als die EXE – ohne die
+#   Ausnahme waere JEDER Dienststart ein Neubau.
+check("obj/ und bin/ sind ausgenommen (sonst Dauerbau)",
+      '"obj" in datei.parts' in cs_am and '"bin" in datei.parts' in cs_am)
+check("und im Bauskript ebenso",
+      "-name obj -o -name bin" in sh_bau and "-prune" in sh_bau)
+# ⚠ FAIL-SAFE IST „NICHT NOETIG" – ein Bau bei jedem Start waere teurer als
+#   eine Anwendung, die einen Tag alt ist.
+check("unlesbarer Quellstand baut NICHT (fail-safe)",
+      "if quellen <= 0:\n        return False" in cs_am)
+check("eine FEHLENDE Anwendung wird trotzdem immer gebaut",
+      "if not paket_vorhanden():\n        return True" in cs_am)
+
+# Beide Wege benutzen sie – einer allein waere die halbe Reparatur.
+check("der Dienststart prueft die Aktualitaet",
+      "if not ai_mouse.bau_noetig():" in py_main)
+check("  … und nicht mehr nur die Existenz",
+      "if ai_mouse.paket_vorhanden():\n                return" not in py_main)
+check("der Download-Weg ebenfalls",
+      "if not bau_noetig() and not erzwingen:" in cs_am)
+check("und der Bootstrap ueber --pruefen",
+      "aktuell()" in sh_bau and "    aktuell\n}" in sh_bau)
+
+# ⚠ „veraltet" und „fehlt" sind ZWEI Befunde – wer bei vorhandener Datei
+#   „NICHT vorhanden" liest, sucht am falschen Ende.
+check("die Meldung unterscheidet veraltet von fehlend",
+      "veraltet (Quelltext ist neuer)" in sh_bau)
+
+# ⚠ UND JETZT AUSGEFUEHRT. Die Pruefungen oben lesen nur den Quelltext – ein
+# `return False` ganz oben in `bau_noetig` macht alles tot, und sie blieben
+# gruen (Gegenprobe war damit zahnlos). Gemessen wird die EIGENSCHAFT.
+import tempfile as _tf  # noqa: PLC0415
+
+with _tf.TemporaryDirectory(prefix="baunoetig-") as _t:
+    _t = Path(_t)
+    (_t / "ai-mouse" / "src" / "AiMouse" / "obj").mkdir(parents=True)
+    (_t / "vendor" / "ai-mouse").mkdir(parents=True)
+    _q = _t / "ai-mouse" / "src" / "AiMouse" / "Program.cs"
+    _e = _t / "vendor" / "ai-mouse" / "AiMouse.exe"
+    _q.write_text("// quelle", encoding="utf-8")
+    _e.write_bytes(b"MZ" + b"\0" * 100)
+
+    _alt_w, _alt_e = am._projekt_wurzel, am.exe_pfad
+    _alt_p, _alt_b = am.paket_vorhanden, am.bau_noetig
+    am._projekt_wurzel = lambda: _t
+    am.exe_pfad = lambda: _e
+    am.paket_vorhanden = lambda: _e.is_file()
+    # ⚠ DIE ECHTE Funktion, nicht den Stub aus Abschnitt 5.
+    am.bau_noetig = _ECHT_BAU_NOETIG
+    try:
+        import os as _o
+        # (1) EXE juenger als die Quelle -> kein Bau
+        _o.utime(_q, (1000, 1000))
+        _o.utime(_e, (2000, 2000))
+        check("AUSGEFUEHRT: aktuelle EXE -> kein Bau noetig", am.bau_noetig() is False)
+
+        # (2) Quelle juenger -> Bau. ⚠ DER GEMELDETE FALL.
+        _o.utime(_q, (3000, 3000))
+        check("AUSGEFUEHRT: Quelltext neuer -> Bau noetig", am.bau_noetig() is True)
+
+        # (3) obj/ ist ausgenommen – sonst waere JEDER Start ein Neubau.
+        _o.utime(_q, (1000, 1000))
+        _ob = _t / "ai-mouse" / "src" / "AiMouse" / "obj" / "x.cs"
+        _ob.write_text("// artefakt", encoding="utf-8")
+        _o.utime(_ob, (9000, 9000))
+        check("AUSGEFUEHRT: obj/ loest KEINEN Bau aus", am.bau_noetig() is False)
+
+        # (4) keine EXE -> immer bauen
+        _e.unlink()
+        check("AUSGEFUEHRT: fehlende EXE -> Bau noetig", am.bau_noetig() is True)
+    finally:
+        am._projekt_wurzel, am.exe_pfad = _alt_w, _alt_e
+        am.paket_vorhanden, am.bau_noetig = _alt_p, _alt_b
 
 print("\n%d OK, %d FAIL" % (ok, fail))
 sys.exit(1 if fail else 0)

@@ -979,6 +979,58 @@ def bau_zustand() -> dict:
         return dict(_bau)
 
 
+def quellen_stand() -> float:
+    """Zeitstempel der juengsten Quelldatei der Anwendung – 0.0, wenn unlesbar.
+
+    ⚠ `obj/` IST AUSGENOMMEN: dort liegen die Ergebnisse des letzten Baus, die
+    per Definition juenger sind als die EXE. Ohne diese Ausnahme waere jeder
+    Vergleich unten immer wahr und die Anwendung wuerde bei jedem Dienststart
+    neu gebaut.
+    """
+    wurzel = _projekt_wurzel() / "ai-mouse" / "src"
+    juengste = 0.0
+    try:
+        for datei in wurzel.rglob("*"):
+            if not datei.is_file() or "obj" in datei.parts or "bin" in datei.parts:
+                continue
+            if datei.suffix.lower() not in (".cs", ".csproj", ".manifest"):
+                continue
+            juengste = max(juengste, datei.stat().st_mtime)
+    except OSError:
+        return 0.0
+    return juengste
+
+
+def bau_noetig() -> bool:
+    """Fehlt die Anwendung – oder ist sie AELTER als ihr Quelltext?
+
+    ⚠ WOZU DAS DA IST (gemeldet 2026-09-10 von ECHT: „trotz update ist noch
+    eine alte exe"): der Neubau haing ausschliesslich an den HAUSWERTEN
+    (`Vorgaben.cs`). Ein `git pull` mit neuem Quelltext loeste also NICHTS aus –
+    `paket_vorhanden()` sagte „ja, da ist eine", und die alte EXE wurde weiter
+    ausgeliefert. Auf ECHT gemessen: Code von 12:59, EXE von 06:04.
+
+    Es ist dieselbe Fehlerklasse wie beim Root-Broker („ein Fix, der still
+    nicht ankommt") und wird hier genauso geloest: die ZEIT wird verglichen,
+    nicht eine Version. Auf DEV fiel es nie auf, weil dort nach jeder
+    Aenderung von Hand gebaut wurde.
+
+    ⚠ FAIL-SAFE IST „NICHT NOETIG": laesst sich der Quellstand nicht lesen,
+    bleibt die vorhandene Anwendung stehen. Ein Bau bei jedem Dienststart waere
+    teurer als eine Anwendung, die einen Tag alt ist – und der Fall, dass gar
+    keine da ist, wird ohnehin zuerst geprueft.
+    """
+    if not paket_vorhanden():
+        return True
+    quellen = quellen_stand()
+    if quellen <= 0:
+        return False
+    try:
+        return exe_pfad().stat().st_mtime < quellen
+    except OSError:
+        return False
+
+
 def einrichtung_anstossen(ausloeser: str = "", erzwingen: bool = False) -> str:
     """Bau im HINTERGRUND anstossen. Rueckgabe: was passiert ist.
 
@@ -989,7 +1041,10 @@ def einrichtung_anstossen(ausloeser: str = "", erzwingen: bool = False) -> str:
     """
     # `erzwingen` gilt, wenn sich die HAUSWERTE geaendert haben: dann ist die
     # vorhandene Datei zwar da, traegt aber die alte Adresse oder Marke.
-    if paket_vorhanden() and not erzwingen:
+    # ⚠ `bau_noetig()` UND NICHT `paket_vorhanden()`: eine vorhandene, aber
+    #   VERALTETE Anwendung ist kein Grund, nichts zu tun – genau daran lag
+    #   der am 2026-09-10 gemeldete Fall (Begruendung dort).
+    if not bau_noetig() and not erzwingen:
         return "bereits vorhanden"
     if not automatik_an():
         return "Automatik abgeschaltet (JARVIS_AIMOUSE_AUTO=0)"

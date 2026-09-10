@@ -42,6 +42,9 @@ DATEIEN = {
     #   30 Laeufen veraendert liegen – am 2026-09-10 genau so passiert, danach
     #   meldete der Waechter 2 FAIL, die kein Codefehler waren.
     "vorgaben": SRC / "Configuration" / "Vorgaben.cs",
+    "ammod": ROOT / "backend" / "ai_mouse.py",
+    "bauskript": ROOT / "deploy" / "ai_mouse_build.sh",
+    "main": ROOT / "backend" / "main.py",
 }
 ORIG = {k: p.read_text(encoding="utf-8") for k, p in DATEIEN.items()}
 
@@ -206,6 +209,27 @@ PROBEN = [
      "_gesteTaste.SelectedIndexChanged += (_, _) => TastenfelderAbgleichen();", ""),
     ("Gestentaste wird nicht gespeichert", "sw",
      "            GestureKey = _RD_WERTE[Math.Clamp(_gesteTaste.SelectedIndex, 0, _RD_WERTE.Length - 1)],", ""),
+
+    # ── Neubau nach Update (gemeldet 2026-09-10 von ECHT) ─────────────────
+    # ⚠ MINIMAL UND SYNTAKTISCH SAUBER: eine Sabotage, die den Python-Parser
+    #   bricht, laesst den Waechter ABBRECHEN – und ein Lauf ohne Bilanzzeile
+    #   ist von "nicht gelaufen" nicht zu unterscheiden, sieht also wie ein
+    #   zahnloser Waechter aus (genau so passiert).
+    ("Aktualitaets-Pruefung ausgebaut", "ammod",
+     "    quellen = quellen_stand()", "    return False\n    quellen = quellen_stand()"),
+    ("obj/ nicht ausgenommen (Dauerbau)", "ammod",
+     '"obj" in datei.parts or "bin" in datei.parts', "False"),
+    ("fail-safe umgedreht (baut bei unlesbarem Quellstand)", "ammod",
+     "    if quellen <= 0:\n        return False", "    if quellen <= 0:\n        return True"),
+    ("Download-Weg prueft wieder nur die Existenz", "ammod",
+     "if not bau_noetig() and not erzwingen:", "if paket_vorhanden() and not erzwingen:"),
+    ("Dienststart prueft wieder nur die Existenz", "main",
+     "if not ai_mouse.bau_noetig():", "if ai_mouse.paket_vorhanden():"),
+    ("Bootstrap prueft wieder nur die Existenz", "bauskript",
+     "    aktuell\n}", "    return 0\n}"),
+    ("Meldung unterscheidet veraltet nicht mehr", "bauskript",
+     'meldung "veraltet (Quelltext ist neuer): $ZIEL/AiMouse.exe"',
+     'meldung "NICHT vorhanden: $ZIEL/AiMouse.exe"'),
 
     # (g) ein NEUER harter Text – faengt die Regel auch den naechsten Fall?
     ("ein neu hinzugefuegter harter UI-Text", "tray",

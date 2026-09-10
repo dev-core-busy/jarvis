@@ -46,7 +46,31 @@ meldung() { printf '[AI-Mouse] %s\n' "$*"; }
 # abgebrochener Download saehe sonst wie ein fertiger Stand aus. Die magischen
 # Bytes "MZ" hat jede PE-Datei.
 liegt_bereit() {
-    [ -s "$ZIEL/AiMouse.exe" ] && [ "$(head -c2 "$ZIEL/AiMouse.exe" 2>/dev/null)" = "MZ" ]
+    [ -s "$ZIEL/AiMouse.exe" ] || return 1
+    [ "$(head -c2 "$ZIEL/AiMouse.exe" 2>/dev/null)" = "MZ" ] || return 1
+    aktuell
+}
+
+# ⚠ IST DIE VORHANDENE EXE AUCH AKTUELL? (gemeldet 2026-09-10 von ECHT:
+# „trotz update ist noch eine alte exe"). Vorher zaehlte nur die EXISTENZ –
+# damit war `--pruefen` nach einem `git pull` weiter zufrieden, und Schritt 6g
+# des Bootstraps baute nichts nach. Auf ECHT gemessen: Quelltext 12:59,
+# EXE 06:04.
+#
+# `obj/` und `bin/` sind ausgenommen: dort liegen die Ergebnisse des letzten
+# Baus, die per Definition juenger sind als die EXE – ohne die Ausnahme waere
+# JEDER Start ein Neubau.
+#
+# ⚠ FAIL-SAFE IST „AKTUELL": laesst sich der Quellbaum nicht lesen, bleibt die
+# vorhandene Anwendung stehen. Ein Bau bei jedem Start waere teurer als eine
+# Anwendung, die einen Tag alt ist.
+aktuell() {
+    quelle="$WURZEL/ai-mouse/src"
+    [ -d "$quelle" ] || return 0
+    neuere=$(find "$quelle" \( -name obj -o -name bin \) -prune -o \
+             -type f \( -name '*.cs' -o -name '*.csproj' -o -name '*.manifest' \) \
+             -newer "$ZIEL/AiMouse.exe" -print 2>/dev/null | head -1)
+    [ -z "$neuere" ]
 }
 
 if [ "$NUR_PRUEFEN" = "1" ]; then
@@ -54,7 +78,14 @@ if [ "$NUR_PRUEFEN" = "1" ]; then
         meldung "bereit: $ZIEL/AiMouse.exe ($(du -h "$ZIEL/AiMouse.exe" | cut -f1))"
         exit 0
     fi
-    meldung "NICHT vorhanden: $ZIEL/AiMouse.exe"
+    # ⚠ „veraltet" und „fehlt" sind ZWEI Befunde. Wer bei vorhandener Datei
+    #   „NICHT vorhanden" liest, sucht am falschen Ende – dieselbe Klasse wie
+    #   „mount error(13)" (Register).
+    if [ -s "$ZIEL/AiMouse.exe" ]; then
+        meldung "veraltet (Quelltext ist neuer): $ZIEL/AiMouse.exe"
+    else
+        meldung "NICHT vorhanden: $ZIEL/AiMouse.exe"
+    fi
     exit 1
 fi
 

@@ -4302,7 +4302,12 @@ async def startup_ai_mouse_build():
         try:
             await asyncio.sleep(90)
             from backend import ai_mouse  # noqa: PLC0415
-            if ai_mouse.paket_vorhanden():
+            # ⚠ `bau_noetig()` UND NICHT `paket_vorhanden()`. Sonst genuegt
+            #   IRGENDEINE Anwendung, um nichts zu tun – auch eine, die zum
+            #   ausgerollten Code gar nicht mehr passt. Genau so lag auf ECHT
+            #   eine sieben Stunden alte EXE neben frischem Quelltext
+            #   (gemeldet 2026-09-10).
+            if not ai_mouse.bau_noetig():
                 return
             was = ai_mouse.einrichtung_anstossen("Dienststart")
             if was != "angestossen":

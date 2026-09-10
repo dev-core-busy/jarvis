@@ -173,6 +173,7 @@ internal sealed class Hook
     private Point _start;
 
     public GestenTaste Durchreichen { get; set; } = GestenTaste.Keine;
+    public GestenTaste GesteVerlangt { get; set; } = GestenTaste.Keine;
 
     // ⚠ ATTRAPPEN FUER DEN HALTE-ZWEIG (2026-09-10). Der `Timer` von WinForms
     //    ist hier nicht instanziierbar; gebraucht wird von ihm ohnehin nur
@@ -322,6 +323,28 @@ internal static class Programm
         };
     }
 
+    /// Die GESTENTASTE: verlangt die Geste eine Taste, gehoert der Klick ohne
+    /// sie der Anwendung – die Umkehrung von `Durchreichen`.
+    static object Geste(GestenTaste verlangt, int gehalten)
+    {
+        var h = new Hook { GesteVerlangt = verlangt };
+        NativeMethods.Gehalten = gehalten;
+        int lasso = 0;
+        h.DragStarted += _ => lasso++;
+        IntPtr down = An(h, NativeMethods.WM_RBUTTONDOWN, 100, 100);
+        // Eine Bewegung, damit sich zeigt, ob ueberhaupt ein Lasso entsteht.
+        An(h, NativeMethods.WM_MOUSEMOVE, 200, 200);
+        IntPtr up = An(h, NativeMethods.WM_RBUTTONUP, 200, 200);
+        return new Dictionary<string, object?>
+        {
+            ["fall"] = "geste:" + verlangt + ":" + gehalten,
+            ["downGeschluckt"] = down == (IntPtr)1,
+            ["upGeschluckt"] = up == (IntPtr)1,
+            ["lasso"] = lasso,
+            ["withheld"] = h.PressWithheld,
+        };
+    }
+
     /// Ein Ereignis an den Hook geben – wie `Lauf` es tut.
     static IntPtr An(Hook h, int msg, int x, int y)
     {
@@ -384,6 +407,13 @@ internal static class Programm
     public static void Main()
     {
         var raus = new List<object>();
+        foreach (var g in new[] { GestenTaste.Keine, GestenTaste.Strg })
+        {
+            foreach (var gh in new[] { 0, NativeMethods.VK_CONTROL })
+            {
+                raus.Add(Geste(g, gh));
+            }
+        }
         raus.Add(Halten("ziehbar -> durchgereicht", true, false, false, false));
         raus.Add(Halten("nicht ziehbar -> Lasso bleibt", false, false, false, false));
         raus.Add(Halten("schon am Ziehen -> nichts", true, true, false, false));
@@ -445,6 +475,40 @@ internal static class Programm
     # Die Tasten-Laeufe (ohne die neuen Halte-Faelle) – die Positivkontrollen
     # weiter unten beziehen sich ausschliesslich auf sie.
     tastenlaeufe = [e for e in erg if "downGeschluckt" in e]
+
+    # ══════════════════════════════════════════════════════════════════
+    # GESTENTASTE: die rechte Taste NUR mit Sondertaste (2026-09-10)
+    #
+    # ⚠ DAS IST DIE UMKEHRUNG von `Durchreichen`. Ohne Gestentaste nimmt die
+    #   Geste jeden Rechtsklick; MIT ihr gehoert er der Anwendung, ausser die
+    #   Taste wird gehalten. Beide gleichzeitig waeren widerspruechlich –
+    #   deshalb loest `TastenAus` das an EINER Stelle auf.
+    # ══════════════════════════════════════════════════════════════════
+    print("\n── Gestentaste: Lasso nur mit Sondertaste ──")
+
+    def gst(verlangt, gehalten):
+        return next(e for e in erg if e.get("fall") == f"geste:{verlangt}:{gehalten}")
+
+    e = gst("Keine", 0)
+    check("ohne Gestentaste: der Klick gehoert wie bisher der Geste",
+          e["downGeschluckt"] is True and e["lasso"] == 1)
+
+    # ⚠ DER FALL, DEN DER BETREIBER BESTELLT HAT.
+    e = gst("Strg", 0)
+    check("mit Gestentaste, ohne sie zu halten: der Klick geht an die Anwendung",
+          e["downGeschluckt"] is False and e["upGeschluckt"] is False)
+    check("  … und es entsteht KEIN Lasso", e["lasso"] == 0)
+    # ⚠ Der teure Fehler: bliebe `_pressWithheld` stehen, verschluckte der
+    #   naechste BUTTONUP den Klick des Benutzers.
+    check("  … und nichts bleibt zurueckgehalten", e["withheld"] is False)
+
+    e = gst("Strg", 0x11)
+    check("mit Gestentaste UND gehaltener Taste: die Geste greift",
+          e["downGeschluckt"] is True and e["lasso"] == 1)
+
+    e = gst("Keine", 0x11)
+    check("ohne Gestentaste stoert eine gehaltene Taste nicht",
+          e["downGeschluckt"] is True and e["lasso"] == 1)
 
     # ══════════════════════════════════════════════════════════════════
     # HALTEN OHNE BEWEGUNG → Rechtsziehen statt Lasso (2026-09-10)

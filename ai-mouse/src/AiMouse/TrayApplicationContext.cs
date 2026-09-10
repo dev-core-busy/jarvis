@@ -104,9 +104,14 @@ internal sealed class TrayApplicationContext : ApplicationContext
             ContextMenuStrip = BuildTrayMenu(),
         };
 
+        // ⚠ UEBER `TastenAus`, NICHT direkt: sonst gaelte die Aufloesung der
+        //    zwei Tastenfelder erst nach dem ersten Speichern, und bis dahin
+        //    koennten beide gleichzeitig aktiv sein.
+        (GestenTaste _g0, GestenTaste _d0) = TastenAus(_settings);
         _hook = new MouseGestureHook(_owner, _settings.DragThreshold)
         {
-            Durchreichen = GestenTasteAus(_settings.RightDragKey),
+            GesteVerlangt = _g0,
+            Durchreichen = _d0,
         };
         // Nach dem Halten pruefen, ob dort ein ziehbares Objekt liegt. Als
         // Delegat, damit der Hook ohne UI Automation testbar bleibt.
@@ -790,13 +795,55 @@ internal sealed class TrayApplicationContext : ApplicationContext
     /// „keine" hiesse, dass Windows' Right-Drag blockiert bleibt, und das ist
     /// die schlechtere Halbfehlerstellung – ein Tippfehler in der Registry darf
     /// nicht stillschweigend eine Systemfunktion abschalten.</summary>
-    private static GestenTaste GestenTasteAus(string? wert) =>
+    /// <summary>Die EINE Stelle, an der die zwei Tastenfelder aufgeloest werden.
+    ///
+    /// ⚠ SIE SIND ENTGEGENGESETZT UND KOENNEN SICH WIDERSPRECHEN: eine
+    /// Gestentaste heisst „der Rechtsklick gehoert der Anwendung, ausser mit
+    /// dieser Taste"; `RightDragKey` heisst „die Geste nimmt jeden Klick,
+    /// ausser mit dieser Taste". Beides gleichzeitig ergibt keinen Sinn –
+    /// waere `RightDragKey` dann noch gesetzt, koennte dieselbe Taste beides
+    /// bedeuten.
+    ///
+    /// Deshalb gewinnt die Gestentaste, und `Durchreichen` wird HIER
+    /// abgeschaltet, nicht nur in der Oberflaeche gesperrt: sonst haenge das
+    /// Verhalten daran, dass niemand die Registry von Hand anfasst.
+    /// </summary>
+    internal static (GestenTaste Geste, GestenTaste Durchreichen) TastenAus(AppSettings s)
+    {
+        GestenTaste geste = GestenTasteAus(s.GestureKey, GestenTaste.Keine);
+        return geste == GestenTaste.Keine
+            ? (GestenTaste.Keine, GestenTasteAus(s.RightDragKey))
+            : (geste, GestenTaste.Keine);
+    }
+
+    /// <summary>Wert -> Taste. <paramref name="vorgabe"/> gilt fuer alles
+    /// Unbekannte.
+    ///
+    /// ⚠ DIE VORGABE IST JE FELD EINE ANDERE, UND DAS IST KEIN VERSEHEN:
+    ///   * `RightDragKey` faellt auf <c>Strg</c> – ein Tippfehler in der
+    ///     Registry darf nicht stillschweigend Windows' Right-Drag abschalten.
+    ///   * `GestureKey` faellt auf <c>Keine</c> – dort waere <c>Strg</c> die
+    ///     falsche Richtung: ein unbekannter Wert wuerde die Geste ploetzlich
+    ///     an eine Taste binden, und der Benutzer haette schlicht kein Lasso
+    ///     mehr, ohne die Ursache sehen zu koennen.
+    /// Beide Male faellt es auf das BISHERIGE Verhalten zurueck.
+    /// </summary>
+    private static GestenTaste GestenTasteAus(string? wert,
+                                              GestenTaste vorgabe = GestenTaste.Strg) =>
         (wert ?? string.Empty).Trim().ToLowerInvariant() switch
         {
             "none" => GestenTaste.Keine,
+            // ⚠ HIER STAND `"" => GestenTaste.Keine` – TOTER CODE, und fuer
+            //   `RightDragKey` sogar die falsche Aussage: dort soll ein leerer
+            //   Wert die Vorgabe (Strg) ergeben, nicht "keine Taste". Fuer
+            //   `GestureKey` erledigt es der Vorgabe-Zweig ohnehin. Eine Zeile,
+            //   deren Entfernen messbar nichts aendert, ist keine zweite
+            //   Schranke – sie muss nur bei jeder Durchsicht mitgeprueft
+            //   werden (dieselbe Lehre wie beim `IsFile`-Guertel in LinkZiel).
+            "ctrl" => GestenTaste.Strg,
             "alt" => GestenTaste.Alt,
             "shift" => GestenTaste.Umschalt,
-            _ => GestenTaste.Strg,
+            _ => vorgabe,
         };
 
     /// <summary>Takes effect on the next capture; nothing needs restarting.</summary>
@@ -806,7 +853,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
                                          StringComparison.OrdinalIgnoreCase);
         _settings = settings;
         _hook.Threshold = settings.DragThreshold;
-        _hook.Durchreichen = GestenTasteAus(settings.RightDragKey);
+        (_hook.GesteVerlangt, _hook.Durchreichen) = TastenAus(settings);
         Texte.Anwenden(settings);
 
         // ⚠ BEI EINER NEUEN ADRESSE MUSS DIE SITZUNG WEG. Das Token gilt fuer

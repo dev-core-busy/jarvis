@@ -84,6 +84,10 @@ internal static class ConfigStore
             // Regel wie bei Endpoint und Sprache eine Zeile darueber).
             string rdk = Lies(k, "RightDragKey");
             if (rdk.Length > 0) { s.RightDragKey = rdk; }
+            // ⚠ Hier gilt "leer = Vorgabe" NICHT wie oben: leer IST die
+            //   Vorgabe (Geste ohne Zusatztaste). Ein fehlender Wert und ein
+            //   ausdrueckliches "keine" fuehren also zum selben Verhalten.
+            s.GestureKey = Lies(k, "GestureKey");
         }
         catch (Exception e)
         {
@@ -111,6 +115,7 @@ internal static class ConfigStore
             k.SetValue("TimeoutSeconds", settings.TimeoutSeconds);
             k.SetValue("DragThreshold", settings.DragThreshold);
             k.SetValue("RightDragKey", settings.RightDragKey ?? "ctrl");
+            k.SetValue("GestureKey", settings.GestureKey ?? string.Empty);
             k.SetValue("CopyResultToClipboard", settings.CopyResultToClipboard ? 1 : 0);
             return null;
         }

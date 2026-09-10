@@ -62,4 +62,24 @@ internal sealed class AppSettings
     /// Tastenwahl in <c>Input/GestenTaste.cs</c>.
     /// </summary>
     public string RightDragKey { get; set; } = "ctrl";
+
+    /// <summary>Taste, die die GESTE ausloest – die Umkehrung von
+    /// <see cref="RightDragKey"/>.
+    ///
+    /// ⚠ DIE BEIDEN SIND ENTGEGENGESETZT, UND DAS IST DER GANZE PUNKT:
+    ///   * <c>RightDragKey</c> (Vorgabe Strg): die Geste nimmt JEDEN
+    ///     Rechtsklick, die Taste reicht ihn ausnahmsweise durch.
+    ///   * <c>GestureKey</c> (Vorgabe leer): der Rechtsklick gehoert normal
+    ///     der Anwendung, und nur MIT der Taste greift die Geste.
+    ///
+    /// Vorgabe ist "" = wie bisher. Wer eine Gestentaste setzt, dreht das
+    /// Verhalten um: die rechte Maustaste funktioniert dann ueberall so, wie
+    /// Windows es vorsieht, und AI Mouse meldet sich nur auf Anforderung.
+    ///
+    /// ⚠ IST DIESES FELD GESETZT, IST <c>RightDragKey</c> BEDEUTUNGSLOS –
+    /// der Klick geht dann ohnehin an die Anwendung. Aufgeloest wird das an
+    /// EINER Stelle (<c>TrayApplicationContext.TastenAus</c>), damit
+    /// Oberflaeche und Verhalten nicht auseinanderlaufen koennen.
+    /// </summary>
+    public string GestureKey { get; set; } = string.Empty;
 }

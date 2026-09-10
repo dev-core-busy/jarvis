@@ -1467,8 +1467,13 @@ check("AppSettings-Vorgabe ist ctrl (nicht none)",
 tray_code = cs_nackt(cs_tray)
 umsetz = tray_code[tray_code.find("private static GestenTaste GestenTasteAus"):]
 umsetz = umsetz[:umsetz.find("private void ApplySettings")]
+# ⚠ HIER STAND `"_ => GestenTaste.Strg" in umsetz` – also die SCHREIBWEISE.
+# Seit die Umsetzung eine je Feld verschiedene Vorgabe nimmt (2026-09-10),
+# heisst der Zweig `_ => vorgabe`, und die Pruefung meldete einen Fehler, den
+# es nicht gibt. Gemessen wird die EIGENSCHAFT; AUSGEFUEHRT belegt es
+# `tests/live_tastenaus_dev.py` (dort ergibt "quatsch" nachweislich Strg).
 check("ein UNBEKANNTER gespeicherter Wert ergibt Strg, nicht Keine",
-      "_ => GestenTaste.Strg" in umsetz)
+      "GestenTaste vorgabe = GestenTaste.Strg" in umsetz and "_ => vorgabe," in umsetz)
 check('"none" bleibt waehlbar (Verhalten wie vorher)', '"none" => GestenTaste.Keine' in umsetz)
 
 # (d) Die Kette: gespeichert, gelesen, beim Start UND beim Speichern gesetzt.
@@ -1478,10 +1483,14 @@ check("wird in die Registry geschrieben", 'k.SetValue("RightDragKey"' in cs_stor
 check("und wieder gelesen", 'Lies(k, "RightDragKey")' in cs_store)
 check("ein LEERER gespeicherter Wert laesst die Vorgabe stehen",
       "if (rdk.Length > 0)" in cs_store)
+# ⚠ AUCH HIER STAND DIE SCHREIBWEISE. Seit es zwei entgegengesetzte
+# Tastenfelder gibt, laeuft beides ueber `TastenAus` – die Eigenschaft ist
+# „der Hook bekommt seine Tasten an beiden Stellen aus der Aufloesung",
+# nicht „dort steht dieser eine Ausdruck".
 check("beim Start wird der Hook damit gesetzt",
-      "Durchreichen = GestenTasteAus(_settings.RightDragKey)" in tray_code)
+      "TastenAus(_settings)" in tray_code)
 check("⚠ und beim Speichern der Einstellungen ebenfalls (sonst erst nach Neustart)",
-      "_hook.Durchreichen = GestenTasteAus(settings.RightDragKey)" in tray_code)
+      "(_hook.GesteVerlangt, _hook.Durchreichen) = TastenAus(settings);" in tray_code)
 
 # (e) Oberflaeche: Pulldown, Werte-Reihenfolge, Texte.
 sw_code = cs_nackt(cs_sw)
@@ -1780,6 +1789,101 @@ check("die Datei erklaert, warum es eine HEURISTIK ist",
       "Heuristik" in cs_regel or "HEURISTIK" in cs_regel)
 check("und warum im Zweifel NICHT gezogen wird",
       "fail-safe" in cs_regel.lower() or "FAIL-SAFE" in cs_regel)
+
+# ══════════════════════════════════════════════════════════════════════════
+# 17. Rechte Taste nur mit Sondertaste (Vorgabe 2026-09-10)
+#
+# „baue einen Schalter unter exe Einstellungen ein, der dem User ermoeglicht
+# zu entscheiden, ob er die rechte Taste nur in Verbindung einer Sondertaste
+# verwenden will (ALT oder STRG oder ...)".
+#
+# ⚠ DAS IST DIE UMKEHRUNG DER BESTEHENDEN EINSTELLUNG, und darin liegt die
+# ganze Schwierigkeit: `RightDragKey` heisst „die Geste nimmt jeden Klick,
+# ausser mit dieser Taste", `GestureKey` heisst „der Klick gehoert der
+# Anwendung, ausser mit dieser Taste". Beide gleichzeitig ergeben keinen Sinn –
+# dieselbe Taste koennte zweierlei bedeuten.
+# ══════════════════════════════════════════════════════════════════════════
+print("\n--- 17. Geste nur mit Sondertaste ---")
+
+cs_app = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Configuration"
+          / "AppSettings.cs").read_text(encoding="utf-8")
+cs_cfg = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Configuration"
+          / "ConfigStore.cs").read_text(encoding="utf-8")
+app_code, cfg_code = cs_nackt(cs_app), cs_nackt(cs_cfg)
+tray_code2, sw2 = cs_nackt(cs_tray), cs_nackt(cs_sw)
+hook3 = cs_nackt((ROOT / "ai-mouse" / "src" / "AiMouse" / "Input"
+                  / "MouseGestureHook.cs").read_text(encoding="utf-8"))
+
+# (a) Die Einstellung selbst.
+check("die Einstellung existiert", "GestureKey" in app_code)
+# ⚠ VORGABE LEER = wie bisher. Alles andere waere eine abschaltende Aenderung:
+#   nach dem Update haette niemand mehr ein Lasso, ohne etwas getan zu haben.
+check("Vorgabe ist LEER (Verhalten wie bisher)",
+      'GestureKey { get; set; } = string.Empty;' in app_code)
+check("sie wird gelesen und geschrieben",
+      'Lies(k, "GestureKey")' in cfg_code and 'SetValue("GestureKey"' in cfg_code)
+
+# (b) Der Hook.
+check("der Hook kennt die Gestentaste", "GesteVerlangt" in hook3)
+check("ohne gehaltene Taste gehoert der Klick der Anwendung",
+      "GesteVerlangt != GestenTaste.Keine && !TasteGehalten(GesteVerlangt)" in hook3)
+# ⚠ Der teure Fehler: bliebe `_pressWithheld` stehen, verschluckte der spaetere
+#   BUTTONUP den Klick des Benutzers.
+_i_g = hook3.find("GesteVerlangt != GestenTaste.Keine")
+_i_w = hook3.find("_pressWithheld = false;", _i_g)
+_i_b = hook3.find("break;", _i_g)
+check("  … und nichts bleibt zurueckgehalten", 0 < _i_w < _i_b)
+# ⚠ Die Reihenfolge ist Semantik: mit Gestentaste ist Durchreichen bedeutungslos.
+check("die Gestentaste wird VOR der Durchreich-Taste geprueft",
+      0 < _i_g < hook3.find("TasteGehalten(Durchreichen)"))
+
+# (c) DIE AUFLOESUNG – die eine Stelle.
+check("es gibt eine gemeinsame Aufloesung", "TastenAus" in tray_code2)
+check("und sie wird beim Setzen benutzt",
+      "(_hook.GesteVerlangt, _hook.Durchreichen) = TastenAus(settings);" in tray_code2)
+# ⚠ AUCH DER KONSTRUKTOR – sonst gaelte die Aufloesung erst nach dem ersten
+#   Speichern, und bis dahin koennten beide gleichzeitig aktiv sein.
+check("auch der Konstruktor geht darueber, nicht daran vorbei",
+      "TastenAus(_settings)" in tray_code2)
+check("kein direktes GestenTasteAus(RightDragKey) mehr am Hook",
+      "Durchreichen = GestenTasteAus(" not in tray_code2)
+# ⚠ Die Vorgaben sind ENTGEGENGESETZT und beide fallen auf das BISHERIGE
+#   Verhalten zurueck – ein Tippfehler darf weder das Lasso abschalten noch
+#   Windows' Right-Drag.
+check("die Gestentaste faellt bei Unbekanntem auf 'Keine'",
+      "GestenTasteAus(s.GestureKey, GestenTaste.Keine)" in tray_code2)
+check("die Durchreich-Taste weiterhin auf 'Strg'",
+      "_ => vorgabe," in tray_code2 and "GestenTaste vorgabe = GestenTaste.Strg" in tray_code2)
+
+# (d) Der Dialog.
+check("der Dialog hat ein Auswahlfeld dafuer", "_gesteTaste" in sw2)
+check("es steht VOR der Durchreich-Taste (die haengt davon ab)",
+      0 < sw2.find("Texte.GesteTaste, _gesteTaste")
+      < sw2.find("Texte.RechtsziehTaste, _rightDrag"))
+check("es wird gespeichert", "GestureKey = _RD_WERTE[" in sw2)
+check("und belegt", "s.GestureKey" in sw2)
+# ⚠ GESPERRT MIT BEGRUENDUNG STATT VERBORGEN (Projektregel): ein Feld, das je
+#   nach Einstellung verschwindet, ist von einem fehlenden nicht zu
+#   unterscheiden.
+check("die Durchreich-Taste wird gesperrt, wenn eine Gestentaste gilt",
+      "_rightDrag.Enabled = !mitGeste;" in sw2)
+check("  … und der Grund steht daneben",
+      "_rdHinweis.Text = mitGeste ? Texte.RdGesperrt" in sw2)
+check("  … sie wird NICHT versteckt",
+      "_rightDrag.Visible = false" not in sw2)
+# ⚠ Sofort, nicht erst beim Speichern – sonst steht die Sperre erst da, wenn
+#   der Dialog schon zu ist.
+check("die Sperre folgt der Auswahl sofort",
+      "SelectedIndexChanged += (_, _) => TastenfelderAbgleichen();" in sw2)
+check("und gilt schon beim Oeffnen",
+      sw2.count("TastenfelderAbgleichen()") >= 3)
+# ⚠ Unbekanntes zeigt hier 0 („keine"), beim anderen Feld 1 („Strg").
+check("das Feld zeigt bei Unbekanntem 'keine' an", "gk >= 0 ? gk : 0" in sw2)
+
+# (e) Texte zweisprachig.
+for _n in ("GesteTaste", "GkKeine", "RdGesperrt"):
+    _e = _texteintrag_cs(_n)
+    check("Text %s ist zweisprachig" % _n, "T(" in _e and _e.count('"') >= 4)
 
 print("\n%d OK, %d FAIL" % (ok, fail))
 sys.exit(1 if fail else 0)

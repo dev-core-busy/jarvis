@@ -115,6 +115,16 @@ internal static class Texte
     public static string RdKeine => T("(aus – Rechtsziehen gesperrt)",
                                       "(off – right-drag blocked)");
     public static string RdUmschalt => T("Umschalt", "Shift");
+
+    // ── Gestentaste (Vorgabe 2026-09-10) ───────────────────────────────────
+    // Die Beschriftung nennt die WIRKUNG. „Gestentaste" waere richtig und fuer
+    // niemanden verstaendlich.
+    public static string GesteTaste => T("Ausschnitt nur mit Taste",
+                                         "Capture only with key");
+    public static string GkKeine => T("(ohne Zusatztaste)", "(no extra key)");
+    public static string RdGesperrt => T(
+        "Nicht nötig: der Rechtsklick geht ohnehin an die Anwendung.",
+        "Not needed: the right-click already goes to the application.");
     public static string Zeitlimit => T("Zeitlimit (Sekunden)", "Timeout (seconds)");
     public static string ErgebnisKopieren => T(
         "Ergebnis sofort in die Zwischenablage", "Copy result to clipboard immediately");

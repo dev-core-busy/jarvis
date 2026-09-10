@@ -56,6 +56,20 @@ internal sealed class MouseGestureHook : IDisposable
     /// </summary>
     public GestenTaste Durchreichen { get; set; } = GestenTaste.Keine;
 
+    /// <summary>Taste, die die GESTE ueberhaupt erst ausloest – die Umkehrung
+    /// von <see cref="Durchreichen"/>.
+    ///
+    /// <c>Keine</c> (Vorgabe): die Geste nimmt jeden Rechtsklick, wie bisher.
+    /// Sonst gehoert der Rechtsklick der Anwendung, und nur waehrend diese
+    /// Taste gehalten wird, greift das Lasso.
+    ///
+    /// ⚠ IST SIE GESETZT, IST <see cref="Durchreichen"/> BEDEUTUNGSLOS – der
+    /// Klick geht dann ohnehin durch. Aufgeloest wird das beim Setzen, nicht
+    /// hier: zwei Felder, die sich widersprechen koennen, sind eine Frage der
+    /// Konfiguration, keine des Hooks.
+    /// </summary>
+    public GestenTaste GesteVerlangt { get; set; } = GestenTaste.Keine;
+
     /// <summary>True while a swallowed press is owed either to a gesture or to a replay.</summary>
     private bool _pressWithheld;
 
@@ -157,6 +171,20 @@ internal sealed class MouseGestureHook : IDisposable
                 }
 
                 _isDragging = false;
+
+                // ⚠ VERLANGT DIE GESTE EINE TASTE UND IST SIE NICHT GEDRUECKT,
+                //    gehoert der Klick der Anwendung – dann verhaelt sich die
+                //    rechte Maustaste ueberall so, wie Windows es vorsieht.
+                //    Diese Pruefung steht VOR `Durchreichen`: ist eine
+                //    Gestentaste gesetzt, waere jene ohnehin bedeutungslos.
+                //    `_pressWithheld = false` ist Pflicht – sonst haelte sich
+                //    der spaetere BUTTONUP fuer einen zurueckgehaltenen und
+                //    verschluckte den Klick des Benutzers.
+                if (GesteVerlangt != GestenTaste.Keine && !TasteGehalten(GesteVerlangt))
+                {
+                    _pressWithheld = false;
+                    break;
+                }
 
                 // Haelt der Benutzer die Durchreich-Taste, gehoert der Klick der
                 // Zielanwendung – wir fassen ihn gar nicht erst an, damit ihr

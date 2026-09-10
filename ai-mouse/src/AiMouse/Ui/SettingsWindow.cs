@@ -37,6 +37,29 @@ internal sealed class SettingsWindow : Form
         Dock = DockStyle.Fill,
         DropDownStyle = ComboBoxStyle.DropDownList,
     };
+    /// <summary>Taste, die die GESTE ausloest – die Umkehrung von
+    /// <see cref="_rightDrag"/>. Vorgabe leer = wie bisher.</summary>
+    private readonly ComboBox _gesteTaste = new()
+    {
+        Dock = DockStyle.Fill,
+        DropDownStyle = ComboBoxStyle.DropDownList,
+    };
+
+    /// <summary>Sagt, WARUM das Feld darunter gesperrt ist.
+    ///
+    /// ⚠ GESPERRT MIT BEGRUENDUNG STATT VERBORGEN (Projektregel): ein
+    /// Bedienelement, das je nach Einstellung verschwindet, ist von einem
+    /// fehlenden nicht zu unterscheiden – und niemand kann erklaeren, warum
+    /// es weg ist.</summary>
+    private readonly Label _rdHinweis = new()
+    {
+        Dock = DockStyle.Fill,
+        AutoSize = false,
+        Height = 30,
+        ForeColor = SystemColors.GrayText,
+        Visible = false,
+    };
+
     private readonly CheckBox _copyResult = new() { AutoSize = true };
 
     /// <summary>Prueft die eingetippten Einstellungen wirklich gegen den Server;
@@ -100,6 +123,11 @@ internal sealed class SettingsWindow : Form
         // Reihenfolge = _RD_WERTE. Eine Umsortierung hier ohne die Liste dort
         // waere eine still falsche Zuordnung – der Test haelt beide zusammen.
         _rightDrag.Items.AddRange([Texte.RdKeine, "Strg", "Alt", Texte.RdUmschalt]);
+        // Reihenfolge = _RD_WERTE, dieselbe Liste.
+        _gesteTaste.Items.AddRange([Texte.GkKeine, "Strg", "Alt", Texte.RdUmschalt]);
+        // ⚠ Sofort umschalten, nicht erst beim Speichern: sonst steht die
+        //    Sperre erst da, wenn der Dialog schon zu ist.
+        _gesteTaste.SelectedIndexChanged += (_, _) => TastenfelderAbgleichen();
 
         var layout = new TableLayoutPanel
         {
@@ -123,7 +151,12 @@ internal sealed class SettingsWindow : Form
         AddRow(layout, Texte.Sprache, _sprache);
         AddRow(layout, Texte.Zeitlimit, _timeout);
         AddRow(layout, Texte.Ziehschwelle, _dragThreshold);
+        // ⚠ DIE GESTENTASTE STEHT VOR DER DURCHREICH-TASTE: sie entscheidet,
+        //    ob jene ueberhaupt eine Bedeutung hat. Andersherum gelesen waere
+        //    die Sperre darunter nicht erklaerbar.
+        AddRow(layout, Texte.GesteTaste, _gesteTaste);
         AddRow(layout, Texte.RechtsziehTaste, _rightDrag);
+        AddRow(layout, string.Empty, _rdHinweis);
         AddRow(layout, string.Empty, _copyResult);
 
         _status = new Label
@@ -187,6 +220,13 @@ internal sealed class SettingsWindow : Form
         // Unbekannter Wert -> „Strg": dieselbe Richtung wie im Tray, damit die
         // Anzeige nicht etwas anderes behauptet als das, was wirklich gilt.
         _rightDrag.SelectedIndex = rd >= 0 ? rd : 1;
+        // ⚠ HIER FAELLT UNBEKANNTES AUF 0 („keine"), oben auf 1 („Strg") –
+        //    die Vorgaben der zwei Felder sind entgegengesetzt, und beide
+        //    zeigen damit das BISHERIGE Verhalten an (Begruendung in
+        //    `TrayApplicationContext.GestenTasteAus`).
+        int gk = Array.IndexOf(_RD_WERTE, (s.GestureKey ?? string.Empty).Trim().ToLowerInvariant());
+        _gesteTaste.SelectedIndex = gk >= 0 ? gk : 0;
+        TastenfelderAbgleichen();
     }
 
     private void OnSave(object? sender, EventArgs e)
@@ -285,6 +325,7 @@ internal sealed class SettingsWindow : Form
             DragThreshold = (int)_dragThreshold.Value,
             CopyResultToClipboard = _copyResult.Checked,
             RightDragKey = _RD_WERTE[Math.Clamp(_rightDrag.SelectedIndex, 0, _RD_WERTE.Length - 1)],
+            GestureKey = _RD_WERTE[Math.Clamp(_gesteTaste.SelectedIndex, 0, _RD_WERTE.Length - 1)],
             // ⚠ MARKE UND AKZENT DURCHREICHEN, NICHT NEU ERZEUGEN. Sie stehen
             // nicht im Dialog; wuerden sie hier ausgelassen, ueberschriebe das
             // Speichern das Branding des Pakets mit den Vorgabewerten – die
@@ -332,6 +373,23 @@ internal sealed class SettingsWindow : Form
         layout.Controls.Add(editor);
 
         editor.Margin = new Padding(0, 3, 0, 6);
+    }
+
+    /// <summary>Sperrt die Durchreich-Taste, sobald eine Gestentaste gilt.
+    ///
+    /// ⚠ Die beiden sind entgegengesetzt: mit Gestentaste geht der Rechtsklick
+    /// ohnehin an die Anwendung – „durchreichen mit Taste" haette dann keine
+    /// Bedeutung mehr, und dieselbe Taste koennte zweierlei heissen.
+    /// Die Sperre ist nur die ANZEIGE; durchgesetzt wird sie in
+    /// `TrayApplicationContext.TastenAus` (sonst haenge das Verhalten daran,
+    /// dass niemand die Registry von Hand anfasst).
+    /// </summary>
+    private void TastenfelderAbgleichen()
+    {
+        bool mitGeste = _gesteTaste.SelectedIndex > 0;
+        _rightDrag.Enabled = !mitGeste;
+        _rdHinweis.Text = mitGeste ? Texte.RdGesperrt : string.Empty;
+        _rdHinweis.Visible = mitGeste;
     }
 
     private static NumericUpDown Number(decimal min, decimal max, int decimals = 0, decimal increment = 1m) => new()

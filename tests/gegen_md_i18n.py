@@ -31,6 +31,8 @@ DATEIEN = {
     "pruef": SRC / "Input" / "ZiehbarPruefer.cs",
     "sysw": SRC / "Input" / "SystemWerte.cs",
     "hook": SRC / "Input" / "MouseGestureHook.cs",
+    "app": SRC / "Configuration" / "AppSettings.cs",
+    "sw": SRC / "Ui" / "SettingsWindow.cs",
     "erg": SRC / "Ui" / "ResultWindow.cs",
     "md": SRC / "Ui" / "Markdown.cs",
     "texte": SRC / "Localization" / "Texte.cs",
@@ -177,6 +179,33 @@ PROBEN = [
      "            Post(() => ReplayFailed?.Invoke(fehler));\n            return;", "            return;"),
     ("Timer nicht beim Aufraeumen gestoppt", "hook",
      "        _halten.Stop();\n        _halten.Dispose();", "        "),
+
+    # ── Geste nur mit Sondertaste (2026-09-10) ─────────────────────────────
+    ("Gestentaste-Vorgabe nicht mehr leer", "app",
+     'GestureKey { get; set; } = string.Empty;', 'GestureKey { get; set; } = "ctrl";'),
+    ("Hook prueft die Gestentaste nicht", "hook",
+     "if (GesteVerlangt != GestenTaste.Keine && !TasteGehalten(GesteVerlangt))", "if (false)"),
+    ("Gestentaste erst NACH der Durchreich-Taste", "hook",
+     "                if (GesteVerlangt != GestenTaste.Keine && !TasteGehalten(GesteVerlangt))\n                {\n                    _pressWithheld = false;\n                    break;\n                }\n\n",
+     ""),
+    ("Konstruktor geht an der Aufloesung vorbei", "tray",
+     "            GesteVerlangt = _g0,\n            Durchreichen = _d0,",
+     "            Durchreichen = GestenTasteAus(_settings.RightDragKey),"),
+    # ⚠ „Aufloesung laesst Durchreichen stehen" wird NICHT hier gemessen,
+    #   sondern in `tests/gegen_tastenaus_dev.py` – dort laeuft `TastenAus`
+    #   WIRKLICH. Eine Quelltext-Sabotage waere hier folgerichtig zahnlos; die
+    #   Gegenprobe gehoert an den Ort der Messung, nicht an diesen.
+    ("Gestentaste faellt auf Strg statt Keine", "tray",
+     "GestenTasteAus(s.GestureKey, GestenTaste.Keine)", "GestenTasteAus(s.GestureKey)"),
+    ("Dialog sperrt die Durchreich-Taste nicht", "sw",
+     "_rightDrag.Enabled = !mitGeste;", "_rightDrag.Enabled = true;"),
+    ("Sperre ohne Begruendung", "sw",
+     "_rdHinweis.Text = mitGeste ? Texte.RdGesperrt : string.Empty;",
+     "_rdHinweis.Text = string.Empty;"),
+    ("Sperre folgt der Auswahl nicht sofort", "sw",
+     "_gesteTaste.SelectedIndexChanged += (_, _) => TastenfelderAbgleichen();", ""),
+    ("Gestentaste wird nicht gespeichert", "sw",
+     "            GestureKey = _RD_WERTE[Math.Clamp(_gesteTaste.SelectedIndex, 0, _RD_WERTE.Length - 1)],", ""),
 
     # (g) ein NEUER harter Text – faengt die Regel auch den naechsten Fall?
     ("ein neu hinzugefuegter harter UI-Text", "tray",

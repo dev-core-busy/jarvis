@@ -1080,5 +1080,425 @@ check("zwei Anfragen unmittelbar hintereinander: die zweite wird gebremst",
 check("ein ANDERER Benutzer ist davon nicht betroffen",
       not isinstance(sicher(am._drosseln, "u2"), am.MausFehler))
 
+print("\n=== 12. Ergebnisfenster: klickbare Links (2026-09-10) ===")
+#
+# VORGABE: "kann das Ergebnisfenster RICH Text liefern, also einen klickbaren
+# Link?" – ja, ueber `RichTextBox.DetectUrls`. FORMATIERT WIRD NICHTS, nur
+# Adressen werden Links.
+#
+# ⚠ DER LINKTEXT IST FREMDTEXT: die Antwort entsteht aus einem
+# BILDSCHIRMAUSSCHNITT. `Process.Start(..., UseShellExecute = true)` startet
+# JEDES registrierte Schema – deshalb eine Erlaubnisliste. Was `Uri.TryCreate`
+# mit `ms-msdt:` oder `\\server\freigabe` wirklich macht, entscheidet die
+# .NET-Laufzeit und NICHT dieser Waechter: das misst
+# `tests/live_linkziel_dev.py`, indem es die ECHTE Klasse uebersetzt und
+# AUSFUEHRT. Hier steht die Verdrahtung.
+cs_ergebnis = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Ui"
+               / "ResultWindow.cs").read_text(encoding="utf-8")
+cs_linkziel = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Ui"
+               / "LinkZiel.cs").read_text(encoding="utf-8")
+
+
+def cs_nackt(s):
+    """C#-Kommentare zeilenweise weg – ein Waechter, der seine eigene
+    Begruendung liest, prueft nichts (Register, dreizehn belegte Faelle).
+    Bewusst die schlichte Variante samt Positivkontrolle darunter: ein
+    Zustandsautomat stolpert ueber verbatim-Literale und gibt den Text dann
+    unveraendert zurueck – am 2026-09-09 genau so passiert."""
+    return "\n".join(z for z in s.split("\n") if not z.lstrip().startswith("//"))
+
+
+erg_code = cs_nackt(cs_ergebnis)
+lz_code = cs_nackt(cs_linkziel)
+check("Positivkontrolle: der Kommentar-Entferner hat wirklich gekuerzt",
+      len(erg_code) < len(cs_ergebnis) and "RichTextBox" in erg_code)
+
+# (a) Das Ausgabefeld kann ueberhaupt Links.
+check("das Ausgabefeld ist eine RichTextBox (die TextBox konnte keine Links)",
+      "new RichTextBox" in erg_code and "new TextBox" not in erg_code)
+check("Linkerkennung ist eingeschaltet", "DetectUrls = true" in erg_code)
+# ⚠ Ohne Zuhoerer ist der Link blau und TOT – die RichTextBox oeffnet nichts.
+check("und der Klick ist verdrahtet (sonst ist der Link blau und wirkungslos)",
+      "LinkClicked" in erg_code and "LinkOeffnen" in erg_code)
+
+# (b) Geoeffnet wird NUR die gepruefte Adresse.
+oeffner = cs_block(cs_ergebnis, "private void LinkOeffnen")
+oeffner_code = cs_nackt(oeffner)
+check("der Oeffner fragt LinkZiel.IstWeb", "LinkZiel.IstWeb" in oeffner_code)
+check("⚠ und startet NUR die gepruefte Adresse (AbsoluteUri), nie den Rohtext",
+      "adresse.AbsoluteUri" in oeffner_code
+      and "ProcessStartInfo(ziel" not in oeffner_code)
+check("bei Ablehnung wird gar nicht erst gestartet (frueher Ausstieg)",
+      "return;" in oeffner_code and "Process.Start" in oeffner_code
+      and oeffner_code.index("return;") < oeffner_code.index("Process.Start"))
+# Eine stille Ablehnung waere von einem kaputten Fenster nicht zu unterscheiden.
+check("eine Ablehnung SAGT es (Grund + Ausweg im Kopf des Fensters)",
+      "Texte.LinkNichtGeoeffnet" in oeffner_code)
+check("ein Fehlschlag beim Oeffnen wird ebenfalls gemeldet",
+      "Texte.LinkFehler" in oeffner_code)
+
+# (c) Die Regel steht in EINER Klasse – und die haengt an keiner Oberflaeche
+#     (sonst waere sie nicht ausfuehrbar zu pruefen).
+check("die Pruefung liegt in LinkZiel", "static class LinkZiel" in lz_code)
+check("LinkZiel haengt an KEINER Oberflaeche (sonst nicht ausfuehrbar messbar)",
+      not any(w in lz_code for w in ("Form", "Control", "System.Windows.Forms",
+                                     "MessageBox", "RichTextBox")))
+check("⚠ ERLAUBNISLISTE statt Sperrliste (was morgen dazukommt, ist draussen)",
+      "UriSchemeHttp" in lz_code and "UriSchemeHttps" in lz_code)
+# ⚠ HIER STAND EINMAL "IsFile/IsUnc ist zusaetzlich ausgeschlossen" – die Zeile
+# im Code war NACHWEISLICH TOT (UNC und C:\… tragen in .NET das Schema `file`
+# und scheitern schon an der Erlaubnisliste; ihr Entfernen aenderte keinen
+# einzigen der 24 Live-Faelle). Sie ist deshalb raus, und diese Pruefung misst
+# jetzt, dass sie nicht als Schein-Tiefenverteidigung zurueckkommt. Dass UNC
+# WIRKLICH abgewiesen wird, misst `tests/live_linkziel_dev.py` ausgefuehrt.
+check("keine tote Zweitpruefung (IsFile/IsUnc waere hier wirkungslos)",
+      "IsUnc" not in lz_code and "IsFile" not in lz_code)
+check("nur LinkZiel entscheidet – im Fenster steht keine zweite Schema-Regel",
+      "UriScheme" not in erg_code)
+
+# (d) Der Rest des Fensters bleibt, wie er war.
+check("Kopieren funktioniert weiter", "Clipboard.SetText(_output.Text)" in erg_code)
+check("das Feld bleibt schreibgeschuetzt", "ReadOnly = true" in erg_code)
+check("es wird NICHT formatiert (kein Markdown-Parser im Fenster)",
+      "SelectionFont" not in erg_code and "Rtf" not in erg_code)
+
+# (e) Texte in DE UND EN.
+def _texteintrag_cs(name):
+    """Die Deklaration bis zu ihrem Ende – NICHT ein Fenster fester Groesse:
+    ein laengerer Text sprengt das sonst still, und der Waechter meldet einen
+    Fehler, den es nicht gibt (beim ersten Lauf genau so passiert)."""
+    i = cs_texte.find("public static string %s" % name)
+    if i < 0:
+        return ""
+    j = cs_texte.find(");", i)
+    k = cs_texte.find(";", i)
+    ende = (j + 2) if 0 <= j <= k + 200 else (k + 1 if k >= 0 else len(cs_texte))
+    return cs_texte[i:ende]
+
+
+for _n in ("LinkGeoeffnet", "LinkNichtGeoeffnet", "LinkFehler"):
+    _e = _texteintrag_cs(_n)
+    # ⚠ `T("` als Muster ist zu starr: bei einem mehrzeiligen Aufruf steht nach
+    # `T(` ein Umbruch. Geprueft wird die EIGENSCHAFT – Aufruf von T() mit zwei
+    # Zeichenketten.
+    check("Text %s ist zweisprachig hinterlegt (T(de, en))" % _n,
+          "T(" in _e and _e.count('"') >= 4)
+_lt = _texteintrag_cs("LinkNichtGeoeffnet")
+check("die Absage nennt den Ausweg (kopieren), nicht nur das Verbot",
+      "kopier" in _lt.lower() and "copy" in _lt.lower())
+
+print("\n=== 13. Vorgabe-Fragen: was ein neuer Benutzer bekommt (2026-09-10) ===")
+#
+# VORGABE: "der Administrator kann Default-Menue-Eintraege definieren, die beim
+# ersten Start uebernommen werden. Der Benutzer kann diese Defaults weiterhin
+# anpassen." Das ist NICHT dasselbe wie eine gemeinsame Frage (die gehoert dem
+# Administrator und ist fuer den Benutzer unveraenderlich) – deshalb ein
+# eigener Topf `vorgaben`, der beim ersten Kontakt KOPIERT wird.
+#
+# ⚠ SANDKASTEN: das Modul schreibt sonst in data/ai_mouse_fragen.json des
+#    laufenden Servers – ein Test, der die Fragen der Benutzer anfasst, ist
+#    teurer als der Fehler, den er sucht.
+import tempfile as _tf  # noqa: E402
+import shutil as _sh    # noqa: E402
+
+from backend import ai_mouse_fragen as amf  # noqa: E402
+
+_SAND = Path(_tf.mkdtemp(prefix="amf-"))
+_echt = amf._pfad()
+amf._pfad = lambda: _SAND / "fragen.json"
+if not str(amf._pfad()).startswith(str(_SAND)) or str(amf._pfad()) == str(_echt):
+    print("ABBRUCH: Sandkasten nicht wirksam – der Lauf wuerde den echten Bestand aendern.")
+    sys.exit(2)
+
+
+def _titel(liste):
+    return [e.get("titel") for e in liste]
+
+
+# (a) Die Saat ist genau das, was der Betreiber vorgegeben hat – WOERTLICH.
+SOLL = [
+    ("Text erkennen (OCR)", "Agiere als OCR-System. Erkenne den Text"),
+    ("extrahiere Adressdaten (OCR)", None),
+    ("was ist das ?", None),
+    ("Tabelle zusammenfassen", None),
+    ("suche homepage",
+     "suche die homepage der Adresse und zeige sie als klickbaren link an"),
+    ("übersetze nach Deutsch", "Agiere als OCR-System. Übersetze den Text nach Deutsch"),
+]
+vorg = amf.vorgaben_liste()
+check("es sind genau die sechs vorgegebenen Eintraege", len(vorg) == 6)
+check("Titel und Reihenfolge stimmen",
+      _titel(vorg) == [t for t, _ in SOLL])
+for i, (t_soll, p_soll) in enumerate(SOLL):
+    if p_soll is None or i >= len(vorg):
+        continue
+    check("Prompt woertlich uebernommen: %s" % t_soll, vorg[i].get("prompt") == p_soll)
+check("der lange Adress-Prompt ist vollstaendig (nicht gekuerzt)",
+      len(vorg) > 1 and "strukturierten Daten zurück" in vorg[1].get("prompt", "")
+      and len(vorg[1].get("prompt", "")) < amf.PROMPT_MAX)
+
+
+def _erste(liste):
+    """Erster Eintrag oder ein leeres dict – NIE ungeprueft dereferenzieren:
+    eine Gegenprobe, die den Lauf mit IndexError beendet, hinterlaesst keine
+    Bilanzzeile und ist von "nicht gelaufen" nicht zu unterscheiden."""
+    return liste[0] if liste else {}
+
+# (b) Der neue Benutzer bekommt sie als EIGENE – das ist die Zusage.
+l1 = amf.liste("neu.benutzer")
+check("ein neuer Benutzer bekommt alle sechs", len(l1) == 6)
+check("⚠ und zwar als EIGENE (aenderbar), nicht als gemeinsame",
+      all((not e["gemeinsam"]) and e["darf_aendern"] for e in l1))
+check("⚠ mit EIGENEN Kennungen (nicht denen der Vorgabe)",
+      not ({e["id"] for e in l1} & {v["id"] for v in vorg}))
+
+# (c) Was der Benutzer aendert, bleibt seins.
+sicher(amf.speichern, "neu.benutzer", _erste(l1).get("id", ""), "Mein eigener Titel", "Mein Text")
+l2 = amf.liste("neu.benutzer")
+check("eine geaenderte Vorgabe bleibt geaendert", "Mein eigener Titel" in _titel(l2))
+check("und die Vorgabe-Liste selbst ist unberuehrt",
+      _titel(amf.vorgaben_liste()) == [t for t, _ in SOLL])
+
+# (d) ⚠ Geloeschtes kommt NICHT zurueck (Marker je Benutzer).
+for e in amf.liste("neu.benutzer"):
+    amf.loeschen("neu.benutzer", e["id"])
+check("nach dem Loeschen ALLER Fragen ist die Liste leer", amf.liste("neu.benutzer") == [])
+check("⚠ und sie bleibt leer – die Vorgaben kommen nicht zurueck",
+      amf.liste("neu.benutzer") == [])
+
+# (e) Eine spaetere Aenderung der Vorgaben erreicht Bestandsbenutzer NICHT.
+amf.vorgabe_speichern("", "Ganz neue Vorgabe", "Text dazu")
+check("die neue Vorgabe steht in der Vorlage", "Ganz neue Vorgabe" in _titel(amf.vorgaben_liste()))
+check("⚠ ein Bestandsbenutzer bekommt sie NICHT nachtraeglich",
+      "Ganz neue Vorgabe" not in _titel(amf.liste("neu.benutzer")))
+check("ein WEITERER neuer Benutzer bekommt sie dagegen schon",
+      "Ganz neue Vorgabe" in _titel(amf.liste("zweiter.benutzer")))
+
+# (f) Der Altbestand der gemeinsamen Fragen wird EINMALIG geraeumt – und eine
+#     danach angelegte gemeinsame Frage ueberlebt. Ohne den Marker waere die
+#     Funktion "gemeinsame Frage" still kaputt.
+d = amf._laden()
+d["global_"] = [amf._neu("Alte gemeinsame", "Text")]
+d.pop("_global_geraeumt", None)
+amf._speichern(d)
+amf.liste("dritter.benutzer")
+check("der Altbestand der gemeinsamen Fragen wird geraeumt",
+      not (amf._laden().get("global_") or []))
+amf.speichern("admin.person", "", "Neue gemeinsame", "Text", gemeinsam=True, ist_admin=True)
+check("⚠ eine DANACH angelegte gemeinsame Frage ueberlebt (Marker greift)",
+      "Neue gemeinsame" in _titel(amf.liste("vierter.benutzer")))
+check("und sie ist fuer einen normalen Benutzer NICHT aenderbar",
+      all(e["darf_aendern"] is False
+          for e in amf.liste("vierter.benutzer") if e["gemeinsam"]))
+
+# (g) Pflege der Vorgaben.
+v = amf.vorgabe_speichern("", "Zum Aendern", "Alt")
+v2 = amf.vorgabe_speichern(v["id"], "Geaendert", "Neu")
+check("Vorgabe aendern behaelt die Kennung", v2["id"] == v["id"])
+check("und den neuen Text", v2["prompt"] == "Neu")
+check("Loeschen meldet Erfolg", amf.vorgabe_loeschen(v["id"]) is True)
+check("unbekannte Vorgabe: False (der Aufrufer antwortet 404)",
+      amf.vorgabe_loeschen("gibtsnicht") is False)
+check("leerer Titel wird abgewiesen",
+      isinstance(sicher(amf.vorgabe_speichern, "", "  ", "Text"), amf.FragenFehler))
+check("leerer Prompt wird abgewiesen",
+      isinstance(sicher(amf.vorgabe_speichern, "", "Titel", "  "), amf.FragenFehler))
+check("unbekannte Kennung beim Aendern wird abgewiesen (kein stilles Anlegen)",
+      isinstance(sicher(amf.vorgabe_speichern, "abc123", "T", "P"), amf.FragenFehler))
+
+# (h) Deckel: die Kopie darf die Grenze je Benutzer nicht sprengen.
+d = amf._laden()
+d["vorgaben"] = [amf._neu("V%d" % i, "P") for i in range(amf.MAX_JE_BENUTZER + 10)]
+amf._speichern(d)
+lv = amf.liste("deckel.benutzer")
+check("beim Kopieren greift der Deckel je Benutzer",
+      len(lv) <= amf.MAX_JE_BENUTZER + len(amf._laden().get("global_") or []))
+
+_sh.rmtree(_SAND, ignore_errors=True)
+
+# (i) Endpunkte + Oberflaeche.
+import re as _re  # noqa: E402
+_mq = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
+for _r, _m in (("/api/ai-mouse/admin/vorgaben", "get"),
+               ("/api/ai-mouse/admin/vorgaben", "post"),
+               ("/api/ai-mouse/admin/vorgaben/{fid}", "delete")):
+    check("Route %s (%s) vorhanden" % (_r, _m), ('app.%s("%s")' % (_m, _r)) in _mq)
+# ⚠ require_local_auth und NICHT require_aimouse_access: dessen Freigabe kennt
+# keinen Admin-Bypass – ein Administrator ohne eigene AI-Maus-Freigabe koennte
+# die Vorgaben sonst nicht pflegen (gleiche Stelle wie beim Bereichs-Katalog).
+_vb = _mq[_mq.find('@app.get("/api/ai-mouse/admin/vorgaben")'):]
+_vb = _vb[:_vb.find("@app.get(\"/api/ai-mouse/admin/areas\")")]
+# ⚠ OHNE KOMMENTARE UND DOCSTRINGS pruefen: die Begruendung im Rumpf nennt
+# `require_aimouse_access` woertlich ("und NICHT ..."), und der Waechter las
+# damit seine eigene Erklaerung – beim ersten Lauf genau so passiert
+# (vierzehnter Fall dieser Klasse im Projekt).
+_vb_code = "\n".join(z for z in _vb.split("\n")
+                     if not z.lstrip().startswith("#"))
+_vb_code = _re.sub(r'"""[\s\S]*?"""', "", _vb_code)
+check("Positivkontrolle: Kommentare/Docstrings sind wirklich raus",
+      len(_vb_code) < len(_vb) and "Depends(require_local_auth)" in _vb_code)
+check("alle drei haengen an require_local_auth",
+      _vb_code.count("Depends(require_local_auth)") == 3
+      and "require_aimouse_access" not in _vb_code)
+check("unbekannte Vorgabe beim Loeschen: 404 (nicht 403)",
+      "status_code=404" in _vb)
+
+_sh_html = (ROOT / "frontend" / "settings.html").read_text(encoding="utf-8")
+_adm = (ROOT / "frontend" / "js" / "ai_mouse_admin.js").read_text(encoding="utf-8")
+_app = (ROOT / "frontend" / "js" / "app.js").read_text(encoding="utf-8")
+_css = (ROOT / "frontend" / "css" / "style.css").read_text(encoding="utf-8")
+_i18n = (ROOT / "frontend" / "js" / "i18n.js").read_text(encoding="utf-8")
+
+check("der Container liegt im AI-Maus-Reiter", 'id="am-sect-vorg"' in _sh_html)
+# ⚠ JEDE .kb-section des Reiters muss in der Klapp-Verdrahtung stehen – eine
+# vergessene bleibt zugeklappt und laesst sich nicht oeffnen (der Kommentar in
+# app.js warnt genau davor).
+_tab = _sh_html[_sh_html.find('id="settings-tab-aimouse"'):]
+_tab = _tab[:_tab.find('id="settings-tab-tracks"')]
+_sekt = _re.findall(r'class="kb-section" id="([^"]+)"', _tab)
+check("jede Sektion des Reiters ist klappbar verdrahtet",
+      all(("'%s-hdr'" % s) in _app for s in _sekt))
+check("die Liste wird beim Oeffnen des Reiters geladen",
+      "vorgabenLaden" in _adm and "this.vorgabenLaden()" in _adm)
+check("Loeschen fragt nach", "confirm(" in _adm and "amvorg.del_ask" in _adm)
+check("der Muelleimer kommt aus JarvisIcons (Symbol-Semantik)",
+      "JarvisIcons.trash()" in _adm)
+# ⚠ KEIN ×-RUECKFALL an einem Loeschknopf: genau die Verwechslung, gegen die
+# icons.js gebaut ist. Der Zweig war toter Code (icons.js liegt auf jeder Seite
+# als erstes Skript) mit falscher Semantik – test_icon_semantik hat ihn gemeldet.
+check("und ohne ×-Rueckfall (× heisst schliessen, nie loeschen)",
+      "JarvisIcons.trash() : '×'" not in _adm)
+# Ein Ladefehler darf die Liste nicht LEEREN – sonst haelt ein Administrator
+# den Bestand fuer weg und legt alles neu an.
+_lade = _adm[_adm.find("vorgabenLaden: function"):]
+_lade = _lade[:_lade.find("vorgabenZeichnen: function")]
+check("ein Ladefehler leert die Liste nicht",
+      "setStatus('amvorg-status'" in _lade and "innerHTML" not in _lade)
+check("Werte gehen per .value ins Formular (kein Interpolieren ins Markup)",
+      "ti.value = v.titel" in _adm and 'value="' + "' + esc(v.titel)" not in _adm)
+for _k in ("amvorg.h", "amvorg.intro", "amvorg.warn", "amvorg.new", "amvorg.empty",
+           "amvorg.f_titel", "amvorg.f_prompt", "amvorg.saved", "amvorg.deleted",
+           "amvorg.del_ask"):
+    check("i18n %s in DE UND EN" % _k, _i18n.count("'%s'" % _k) >= 2)
+def _i18n_wert(schluessel, ab=0):
+    """Der WERT eines i18n-Schluessels ab Position `ab` – nicht die ganze Datei:
+    ueber den Gesamttext gesucht ist fast jedes Wort trivial vorhanden, und die
+    Gegenprobe biss nicht."""
+    i = _i18n.find("'%s':" % schluessel, ab)
+    if i < 0:
+        return "", -1
+    j = _i18n.find("\n", i)
+    return _i18n[i:j if j > 0 else len(_i18n)], i
+
+
+_w_de, _p_de = _i18n_wert("amvorg.warn")
+_w_en, _ = _i18n_wert("amvorg.warn", _p_de + 10 if _p_de >= 0 else 0)
+check("der Hinweis (DE) sagt, dass eine Aenderung Bestandsbenutzer NICHT erreicht",
+      "noch nie" in _w_de)
+check("der Hinweis (EN) ebenso", "never" in _w_en)
+check("Positivkontrolle: es sind zwei VERSCHIEDENE Texte (DE und EN gefunden)",
+      bool(_w_de) and bool(_w_en) and _w_de != _w_en)
+check("CSS: min-width am Textteil (sonst schiebt ein langer Prompt die Knoepfe raus)",
+      _re.search(r"\.am-vorg-main\s*\{[^}]*min-width:\s*0", _css) is not None)
+check("CSS: die Karte fasst das Formular ein (overflow hidden)",
+      _re.search(r"\.am-vorg-card\s*\{[^}]*overflow:\s*hidden", _css) is not None)
+
+print("\n=== 14. Rechtsziehen: Taste statt Erkennung (2026-09-10) ===")
+#
+# FRAGE: "wenn beim Rechtsklick ein ziehbares Objekt unter der Maus liegt, dann
+# Drag bevorzugen und KEIN Lasso – sinnvoll machbar?" ERKENNEN: nein. Ziehbarkeit
+# ist kein Zustand, den man abfragen kann; UIA-`IsDraggable` implementiert kaum
+# eine Anwendung; `LVM_HITTEST` hilft beim modernen Explorer nicht mehr. Und der
+# LL-Hook muss innerhalb `LowLevelHooksTimeout` (300 ms) zurueck – ein
+# UIA-Aufruf kann ihn stillschweigend aushaengen lassen.
+# UMGESETZT ist deshalb eine MODIFIKATORTASTE: sie reicht den Rechtsklick
+# durch, statt ihn fuer die Geste zu nehmen.
+#
+# ⚠ Die ENTSCHEIDUNG selbst wird nicht hier geprueft, sondern AUSGEFUEHRT in
+#    `tests/live_gestentaste_dev.py` (dort steht das .NET SDK). Hier steht die
+#    Verdrahtung durch die Einstellungs-Kette.
+cs_hook = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Input"
+           / "MouseGestureHook.cs").read_text(encoding="utf-8")
+cs_gtaste = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Input"
+             / "GestenTaste.cs").read_text(encoding="utf-8")
+cs_nm = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Interop"
+         / "NativeMethods.cs").read_text(encoding="utf-8")
+cs_appset = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Configuration"
+             / "AppSettings.cs").read_text(encoding="utf-8")
+cs_sw = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Ui"
+         / "SettingsWindow.cs").read_text(encoding="utf-8")
+
+hook_code = cs_nackt(cs_hook)
+check("Positivkontrolle: der Kommentar-Entferner hat gekuerzt",
+      len(hook_code) < len(cs_hook) and "WM_RBUTTONDOWN" in hook_code)
+
+# (a) Die Taste wird im DOWN geprueft – und zwar VOR dem Zurueckhalten.
+down = hook_code[hook_code.find("case NativeMethods.WM_RBUTTONDOWN"):]
+down = down[:down.find("case NativeMethods.WM_MOUSEMOVE")]
+check("die Taste wird beim Druecken geprueft", "TasteGehalten(Durchreichen)" in down)
+check("⚠ und ZWINGEND vor dem Zurueckhalten des Klicks",
+      down.find("TasteGehalten(Durchreichen)") < down.find("_pressWithheld = true"))
+# ⚠ Bliebe `_pressWithheld` stehen, verschluckte der spaetere BUTTONUP den
+#   Klick des Benutzers – er waere dann ganz weg.
+zweig = down[down.find("TasteGehalten(Durchreichen)"):]
+zweig = zweig[:zweig.find("InjectionGuard")]
+check("⚠ der Durchreich-Zweig setzt _pressWithheld ausdruecklich auf false",
+      "_pressWithheld = false" in zweig)
+check("und reicht den Klick durch (break, kein return 1)",
+      "break;" in zweig and "return (IntPtr)1" not in zweig)
+
+# (b) GetAsyncKeyState, nicht GetKeyState.
+check("⚠ GetAsyncKeyState (GetKeyState liest die Warteschlange DIESES Threads)",
+      "GetAsyncKeyState" in cs_nm and "GetKeyState(" not in cs_nm)
+check("nur das HOHE Bit zaehlt (das niedrige heisst 'war mal gedrueckt')",
+      "0x8000" in cs_nackt(cs_hook))
+check("die drei Tasten sind seitenunabhaengig (VK_CONTROL/VK_MENU/VK_SHIFT)",
+      all(v in cs_nm for v in ("VK_CONTROL", "VK_MENU", "VK_SHIFT")))
+
+# (c) Vorgabe und fail-safe-Richtung.
+check("AppSettings-Vorgabe ist ctrl (nicht none)",
+      'RightDragKey { get; set; } = "ctrl"' in cs_appset)
+tray_code = cs_nackt(cs_tray)
+umsetz = tray_code[tray_code.find("private static GestenTaste GestenTasteAus"):]
+umsetz = umsetz[:umsetz.find("private void ApplySettings")]
+check("ein UNBEKANNTER gespeicherter Wert ergibt Strg, nicht Keine",
+      "_ => GestenTaste.Strg" in umsetz)
+check('"none" bleibt waehlbar (Verhalten wie vorher)', '"none" => GestenTaste.Keine' in umsetz)
+
+# (d) Die Kette: gespeichert, gelesen, beim Start UND beim Speichern gesetzt.
+cs_store = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Configuration"
+            / "ConfigStore.cs").read_text(encoding="utf-8")
+check("wird in die Registry geschrieben", 'k.SetValue("RightDragKey"' in cs_store)
+check("und wieder gelesen", 'Lies(k, "RightDragKey")' in cs_store)
+check("ein LEERER gespeicherter Wert laesst die Vorgabe stehen",
+      "if (rdk.Length > 0)" in cs_store)
+check("beim Start wird der Hook damit gesetzt",
+      "Durchreichen = GestenTasteAus(_settings.RightDragKey)" in tray_code)
+check("⚠ und beim Speichern der Einstellungen ebenfalls (sonst erst nach Neustart)",
+      "_hook.Durchreichen = GestenTasteAus(settings.RightDragKey)" in tray_code)
+
+# (e) Oberflaeche: Pulldown, Werte-Reihenfolge, Texte.
+sw_code = cs_nackt(cs_sw)
+check("der Dialog hat ein Auswahlfeld", "_rightDrag" in sw_code and "AddRow" in sw_code)
+check("es wird gespeichert", "RightDragKey = _RD_WERTE[" in sw_code)
+# ⚠ Drift: Reihenfolge der Anzeige muss zur Werteliste passen, sonst speichert
+#   das Feld etwas anderes, als dasteht.
+check("Werteliste in der Reihenfolge des Pulldowns",
+      '["none", "ctrl", "alt", "shift"]' in sw_code)
+i_items = sw_code.find("_rightDrag.Items.AddRange")
+zeile = sw_code[i_items:sw_code.find("\n", i_items)]
+check("die Anzeige beginnt mit 'aus' und nennt dann Strg, Alt, Umschalt",
+      "RdKeine" in zeile and zeile.find("Strg") < zeile.find("Alt") < zeile.find("RdUmschalt"))
+check("unbekannter Wert zeigt Strg an (wie im Tray)", "rd >= 0 ? rd : 1" in sw_code)
+for _n in ("RechtsziehTaste", "RdKeine", "RdUmschalt"):
+    _e = _texteintrag_cs(_n)
+    check("Text %s ist zweisprachig" % _n, "T(" in _e and _e.count('"') >= 4)
+
+# (f) Die Begruendung steht am Code – sonst untersucht das jemand erneut.
+check("die Datei erklaert, warum eine Erkennung NICHT geht (UIA/Timeout)",
+      "IsDraggable" in cs_hook and "LowLevelHooksTimeout" in cs_hook)
+check("und warum gerade Strg die Vorgabe ist", "Umschalt" in cs_gtaste
+      and "erweiterte" in cs_gtaste.lower())
+
 print("\n%d OK, %d FAIL" % (ok, fail))
 sys.exit(1 if fail else 0)

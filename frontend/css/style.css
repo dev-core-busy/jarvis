@@ -8420,3 +8420,55 @@ body.light .kb-mirror-mark { color: color-mix(in srgb, var(--info) 72%, #000); }
 body.light #service-restart-status.svc-ok   { color: #0b7355; }   /* 5,35:1 */
 body.light #service-restart-status.svc-warn { color: #8a5a04; }   /* 5,43:1 */
 body.light #service-restart-status.svc-err  { color: #c62828; }   /* 5,15:1 */
+
+/* ═══ AI-Maus: Vorgabe-Fragen (Einstellungen → AI-Maus) ═════════════════════
+   Bauform wie die Vorlagenliste im Jira-Reiter: EINE Karte je Eintrag, das
+   Bearbeiten-Formular klappt DARIN auf. `overflow: hidden` an der Karte ist
+   der Grund, warum Zeile und Formular wie EIN Kasten aussehen – ohne das
+   stehen zwei Rechtecke uebereinander (Register: "wenn zwei Dinge wie eines
+   aussehen sollen, gehoert eines INS andere"). */
+.am-vorg-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 8px;
+    overflow: hidden;
+}
+.am-vorg-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px 12px;
+}
+/* ⚠ `min-width: 0` ist Pflicht: ein Flex-Kind schrumpft von sich aus nicht
+   unter seine Inhaltsbreite – ein langer Prompt schoebe die Knoepfe sonst aus
+   der Zeile (im Projekt mehrfach bezahlt). */
+.am-vorg-main { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.am-vorg-act {
+    flex: 0 0 auto;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    padding: 2px 4px;
+    line-height: 1;
+    font-size: 1rem;
+}
+.am-vorg-act:hover { color: var(--text-primary); }
+.am-vorg-act[data-akt="del"]:hover { color: var(--danger); }
+.am-vorg-form {
+    padding: 12px;
+    border-top: 1px solid var(--border);
+    background: rgba(var(--fg-rgb), 0.03);
+}
+.am-vorg-form .form-group { margin-bottom: 10px; }
+/* ⚠ DIE BREITE MUSS HIER STEHEN: `.form-group` bringt im Projekt KEINE mit –
+   die Felder daneben sind Zahlenfelder, die schmal richtig sind. Ohne diese
+   Regel ist das Titelfeld nur so breit wie sein Inhalt und das Textfeld
+   schmal; die Messung war gruen, gesehen hat es erst der Screenshot.
+   `box-sizing` dazu, sonst laeuft das Feld samt Polster ueber den Rand. */
+.am-vorg-form input[type="text"],
+.am-vorg-form textarea {
+    width: 100%;
+    box-sizing: border-box;
+}
+.am-vorg-form textarea { resize: vertical; min-height: 76px; }

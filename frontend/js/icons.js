@@ -86,6 +86,24 @@
         + '<circle cx="11" cy="11" r="7"/>'
         + '<line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>';
 
+    // SPRECHBLASE = VORAB-ANWEISUNG fuer ein Gespraech ("Prompt fuer diesen
+    // Chat"). Sie loescht nichts und schliesst nichts.
+    //
+    // ⚠ ZWEI FORMEN, NICHT ZWEI FARBEN. Ob fuer einen Chat ein eigener Prompt
+    // hinterlegt ist, ist eine Aussage – und Farbe allein ist keine Information
+    // (Register). Die gesetzte Form ist deshalb GEFUELLT, also an der Silhouette
+    // unterscheidbar; den Zustand in Worten traegt zusaetzlich title/aria-label
+    // des Knopfes. Dieselbe Loesung wie beim Stern der Jira-Vorlagen.
+    var BLASE = '<svg class="jv-ico jv-ico-prompt" ' + GEMEINSAM + '>' +
+        '<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>' +
+        '<line x1="8.5" y1="10" x2="15.5" y2="10"/>' +
+        '<line x1="8.5" y1="13.5" x2="13" y2="13.5"/></svg>';
+
+    var BLASE_VOLL = '<svg class="jv-ico jv-ico-prompt is-gesetzt" viewBox="0 0 24 24" ' +
+        'fill="currentColor" stroke="currentColor" stroke-width="2" ' +
+        'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' +
+        '<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>';
+
     window.JarvisIcons = {
         /** Muelleimer – NUR fuer dauerhaftes Loeschen/Entfernen. */
         trash: function () { return MUELL; },
@@ -102,6 +120,9 @@
         /** Lupe – untersuchen/messen. Veraendert nichts. */
         lupe: function () { return LUPE; },
         setEye: function (el) { return setzen(el, AUGE); },
-        setEyeOff: function (el) { return setzen(el, AUGE_ZU); }
+        setEyeOff: function (el) { return setzen(el, AUGE_ZU); },
+        /** Sprechblase – Vorab-Anweisung eines Chats. `gesetzt`=true: gefuellt. */
+        prompt: function (gesetzt) { return gesetzt ? BLASE_VOLL : BLASE; },
+        setPrompt: function (el, gesetzt) { return setzen(el, gesetzt ? BLASE_VOLL : BLASE); }
     };
 })();

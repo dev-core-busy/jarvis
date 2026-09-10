@@ -31,6 +31,12 @@ internal sealed class SettingsWindow : Form
     };
     private readonly NumericUpDown _timeout = Number(5, 3600);
     private readonly NumericUpDown _dragThreshold = Number(1, 100);
+    /// <summary>Taste, die den Rechtsklick durchreicht (Windows-Drag&Drop).</summary>
+    private readonly ComboBox _rightDrag = new()
+    {
+        Dock = DockStyle.Fill,
+        DropDownStyle = ComboBoxStyle.DropDownList,
+    };
     private readonly CheckBox _copyResult = new() { AutoSize = true };
 
     /// <summary>Prueft die eingetippten Einstellungen wirklich gegen den Server;
@@ -44,6 +50,9 @@ internal sealed class SettingsWindow : Form
     /// eingeben.
     /// </summary>
     private readonly Func<AppSettings, string, string, CancellationToken, Task<string>> _tester;
+
+    /// <summary>Gespeicherte Werte in der Reihenfolge des Pulldowns.</summary>
+    private static readonly string[] _RD_WERTE = ["none", "ctrl", "alt", "shift"];
 
     private readonly Button _testButton;
     private readonly Label _status;
@@ -88,6 +97,9 @@ internal sealed class SettingsWindow : Form
 
         _copyResult.Text = Texte.ErgebnisKopieren;
         _sprache.Items.AddRange(["Deutsch", "English"]);
+        // Reihenfolge = _RD_WERTE. Eine Umsortierung hier ohne die Liste dort
+        // waere eine still falsche Zuordnung – der Test haelt beide zusammen.
+        _rightDrag.Items.AddRange([Texte.RdKeine, "Strg", "Alt", Texte.RdUmschalt]);
 
         var layout = new TableLayoutPanel
         {
@@ -111,6 +123,7 @@ internal sealed class SettingsWindow : Form
         AddRow(layout, Texte.Sprache, _sprache);
         AddRow(layout, Texte.Zeitlimit, _timeout);
         AddRow(layout, Texte.Ziehschwelle, _dragThreshold);
+        AddRow(layout, Texte.RechtsziehTaste, _rightDrag);
         AddRow(layout, string.Empty, _copyResult);
 
         _status = new Label
@@ -170,6 +183,10 @@ internal sealed class SettingsWindow : Form
         _timeout.Value = Clamp(_timeout, s.TimeoutSeconds);
         _dragThreshold.Value = Clamp(_dragThreshold, s.DragThreshold);
         _copyResult.Checked = s.CopyResultToClipboard;
+        int rd = Array.IndexOf(_RD_WERTE, (s.RightDragKey ?? string.Empty).Trim().ToLowerInvariant());
+        // Unbekannter Wert -> „Strg": dieselbe Richtung wie im Tray, damit die
+        // Anzeige nicht etwas anderes behauptet als das, was wirklich gilt.
+        _rightDrag.SelectedIndex = rd >= 0 ? rd : 1;
     }
 
     private void OnSave(object? sender, EventArgs e)
@@ -267,6 +284,7 @@ internal sealed class SettingsWindow : Form
             TimeoutSeconds = (int)_timeout.Value,
             DragThreshold = (int)_dragThreshold.Value,
             CopyResultToClipboard = _copyResult.Checked,
+            RightDragKey = _RD_WERTE[Math.Clamp(_rightDrag.SelectedIndex, 0, _RD_WERTE.Length - 1)],
             // ⚠ MARKE UND AKZENT DURCHREICHEN, NICHT NEU ERZEUGEN. Sie stehen
             // nicht im Dialog; wuerden sie hier ausgelassen, ueberschriebe das
             // Speichern das Branding des Pakets mit den Vorgabewerten – die

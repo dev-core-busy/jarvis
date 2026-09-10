@@ -1,4 +1,7 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
+
+using AiMouse.Localization;
 
 namespace AiMouse.Ui;
 
@@ -6,7 +9,7 @@ namespace AiMouse.Ui;
 internal sealed class ResultWindow : Form
 {
     private readonly Label _header;
-    private readonly TextBox _output;
+    private readonly RichTextBox _output;
     private readonly Button _copyButton;
     private readonly CancellationTokenSource _cts;
 
@@ -35,17 +38,25 @@ internal sealed class ResultWindow : Form
             AutoEllipsis = true,
         };
 
-        _output = new TextBox
+        // RichTextBox statt TextBox – allein wegen `DetectUrls`: eine Adresse in
+        // der Antwort ist damit anklickbar, ohne dass wir den Text selbst
+        // zerlegen muessen. Formatiert wird NICHTS (kein Markdown): der Text
+        // sieht aus wie bisher, nur Adressen sind Links.
+        _output = new RichTextBox
         {
             Dock = DockStyle.Fill,
-            Multiline = true,
             ReadOnly = true,
-            ScrollBars = ScrollBars.Vertical,
+            DetectUrls = true,
+            ScrollBars = RichTextBoxScrollBars.Vertical,
             BorderStyle = BorderStyle.None,
             BackColor = SystemColors.Window,
             Margin = new Padding(10),
             WordWrap = true,
         };
+        // ⚠ Die RichTextBox oeffnet von allein NICHTS – ohne diesen Zuhoerer
+        // ist der Link blau und tot. Was geoeffnet werden darf, entscheidet
+        // `LinkZiel` (Begruendung dort).
+        _output.LinkClicked += (_, e) => LinkOeffnen(e.LinkText);
 
         var body = new Panel { Dock = DockStyle.Fill, Padding = new Padding(10, 4, 10, 4) };
         body.Controls.Add(_output);
@@ -118,6 +129,35 @@ internal sealed class ResultWindow : Form
         _output.Text = message.ReplaceLineEndings("\r\n");
         _output.Select(0, 0);
         _copyButton.Enabled = true;
+    }
+
+    /// <summary>Oeffnet einen angeklickten Link – ausschliesslich http/https.</summary>
+    private void LinkOeffnen(string? ziel)
+    {
+        if (!LinkZiel.IstWeb(ziel, out Uri? adresse) || adresse is null)
+        {
+            // ⚠ NICHT STILL ABLEHNEN. Ein Link, der blau aussieht und beim
+            // Klick nichts tut, ist von einem kaputten Fenster nicht zu
+            // unterscheiden – der Kopf sagt deshalb, dass und warum nicht.
+            _header.Text = Texte.LinkNichtGeoeffnet;
+            _header.ForeColor = Color.Firebrick;
+            return;
+        }
+
+        try
+        {
+            // `AbsoluteUri` und nicht der Rohtext: so geht genau die Adresse
+            // hinaus, die geprueft wurde.
+            Process.Start(new ProcessStartInfo(adresse.AbsoluteUri) { UseShellExecute = true })
+                ?.Dispose();
+            _header.Text = Texte.LinkGeoeffnet;
+            _header.ForeColor = SystemColors.GrayText;
+        }
+        catch (Exception ex)
+        {
+            _header.Text = Texte.LinkFehler + " " + ex.Message;
+            _header.ForeColor = Color.Firebrick;
+        }
     }
 
     private void CopyToClipboard()

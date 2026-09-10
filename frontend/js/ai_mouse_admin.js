@@ -56,6 +56,7 @@
         onShow: function () {
             this.bind();
             this.load();
+            this.vorgabenLaden();
         },
 
         bind: function () {
@@ -63,6 +64,8 @@
             this._gebunden = true;
             var save = $('amtool-save');
             if (save) { save.addEventListener('click', this.saveAreas.bind(this)); }
+            var neu = $('amvorg-neu');
+            if (neu) { neu.addEventListener('click', function () { Admin.vorgabeFormular(null); }); }
             window.addEventListener('jarvis-lang-changed', function () {
                 // Nur nachladen, wenn der Reiter überhaupt schon einmal
                 // gefüllt wurde – sonst holt ein Sprachwechsel auf einer
@@ -174,6 +177,164 @@
                     return self.load();
               })
               .catch(function (e) { setStatus('amtool-status', e.message, 'error'); });
+        },
+
+        // ── Vorgabe-Fragen ───────────────────────────────────────────────────
+        // Die VORLAGE fuer neue Benutzer. Bauform bewusst wie die Vorlagenliste
+        // im Jira-Reiter: eine Zeile je Eintrag, das Formular klappt DIREKT
+        // darunter auf – EIN Container, der wandert (zwei waeren zwei Wege zum
+        // Speichern, Register).
+        _vorgaben: null,
+        _vorgOffen: null,   // Kennung der gerade bearbeiteten Vorgabe ('' = neu)
+
+        vorgabenLaden: function () {
+            var self = this;
+            fetch('/api/ai-mouse/admin/vorgaben', { headers: authHeaders() })
+                .then(function (r) {
+                    if (!r.ok) {
+                        return r.json().catch(function () { return null; }).then(function (d) {
+                            throw new Error((d && (d.error || d.detail)) || ('HTTP ' + r.status));
+                        });
+                    }
+                    return r.json();
+                })
+                .then(function (d) {
+                    self._vorgaben = d.vorgaben || [];
+                    self.vorgabenZeichnen();
+                })
+                .catch(function (e) {
+                    // ⚠ Ein Ladefehler bleibt STEHEN und die Liste wird NICHT
+                    // geleert: eine leere Liste waere von "es gibt keine
+                    // Vorgaben" nicht zu unterscheiden – und wer darauf eine
+                    // anlegt, haelt den Bestand fuer weg.
+                    setStatus('amvorg-status', e.message, 'error');
+                });
+        },
+
+        vorgabenZeichnen: function () {
+            var box = $('amvorg-liste');
+            if (!box) { return; }
+            var vs = this._vorgaben || [];
+            if (!vs.length) {
+                box.innerHTML = '<p class="kb-hint">'
+                    + esc(t('amvorg.empty',
+                            'Keine Vorgaben – neue Benutzer starten dann mit einem leeren Menü.'))
+                    + '</p>';
+                return;
+            }
+            box.innerHTML = vs.map(function (v) {
+                return '<div class="am-vorg-card" data-vid="' + esc(v.id) + '">'
+                    + '<div class="am-vorg-row">'
+                    + '<div class="am-vorg-main"><b>' + esc(v.titel) + '</b>'
+                    + '<span class="kb-hint" style="display:block;">' + esc(v.prompt) + '</span>'
+                    + '</div>'
+                    + '<button type="button" class="am-vorg-act" data-akt="edit" title="'
+                    + esc(t('common.edit', 'Bearbeiten')) + '">✎</button>'
+                    + '<button type="button" class="am-vorg-act" data-akt="del" title="'
+                    + esc(t('common.delete', 'Löschen')) + '">'
+                    + window.JarvisIcons.trash() + '</button>'
+                    + '</div></div>';
+            }).join('');
+            box.querySelectorAll('.am-vorg-act').forEach(function (b) {
+                b.addEventListener('click', function () {
+                    var karte = b.closest('.am-vorg-card');
+                    var vid = karte ? karte.getAttribute('data-vid') : '';
+                    if (b.getAttribute('data-akt') === 'del') { Admin.vorgabeLoeschen(vid); }
+                    else { Admin.vorgabeFormular(vid); }
+                });
+            });
+            // Ein offenes Formular ueberlebt das Neuzeichnen – sonst schliesst
+            // sich der Kasten bei jedem Speichern eines Nachbarn.
+            if (this._vorgOffen !== null) { this.vorgabeFormular(this._vorgOffen, true); }
+        },
+
+        /** Formular unter der Zeile aufklappen. Zweiter Klick schliesst –
+         *  sonst tut der Knopf sichtbar nichts. */
+        vorgabeFormular: function (vid, wieder) {
+            var alt = $('amvorg-form');
+            if (alt && !wieder && this._vorgOffen === (vid || '')) {
+                this._vorgOffen = null;
+                alt.remove();
+                return;
+            }
+            if (alt) { alt.remove(); }
+            this._vorgOffen = vid || '';
+            var v = (this._vorgaben || []).find(function (x) { return x.id === vid; }) || {};
+            var form = document.createElement('div');
+            form.id = 'amvorg-form';
+            form.className = 'am-vorg-form';
+            form.innerHTML =
+                '<div class="form-group"><label>' + esc(t('amvorg.f_titel', 'Titel (Menüzeile)'))
+                + '</label><input type="text" id="amvorg-f-titel" maxlength="80"></div>'
+                + '<div class="form-group"><label>' + esc(t('amvorg.f_prompt', 'Anweisung an das Modell'))
+                + '</label><textarea id="amvorg-f-prompt" rows="4" maxlength="2000"></textarea></div>'
+                + '<div style="display:flex;gap:10px;flex-wrap:wrap;">'
+                + '<button type="button" class="btn-primary" id="amvorg-f-save">'
+                + esc(t('common.save', 'Speichern')) + '</button>'
+                + '<button type="button" class="btn-secondary" id="amvorg-f-abort">'
+                + esc(t('common.cancel', 'Abbrechen')) + '</button></div>';
+            // ⚠ Werte per .value setzen, NICHT ins Markup interpolieren: ein
+            // Anführungszeichen im Titel sprengt sonst das Attribut.
+            var karte = vid
+                ? document.querySelector('.am-vorg-card[data-vid="' + vid + '"]')
+                : null;
+            if (karte) { karte.appendChild(form); }
+            else { ($('amvorg-liste') || document.body).appendChild(form); }
+            var ti = $('amvorg-f-titel'), pr = $('amvorg-f-prompt');
+            if (ti) { ti.value = v.titel || ''; }
+            if (pr) { pr.value = v.prompt || ''; }
+            var sv = $('amvorg-f-save'), ab = $('amvorg-f-abort');
+            if (sv) { sv.addEventListener('click', function () { Admin.vorgabeSpeichern(vid || ''); }); }
+            if (ab) {
+                ab.addEventListener('click', function () {
+                    Admin._vorgOffen = null;
+                    var f = $('amvorg-form');
+                    if (f) { f.remove(); }
+                });
+            }
+            if (ti && !wieder) { ti.focus(); }
+        },
+
+        vorgabeSpeichern: function (vid) {
+            var ti = $('amvorg-f-titel'), pr = $('amvorg-f-prompt');
+            if (!ti || !pr) { return; }
+            setStatus('amvorg-status', t('common.saving', 'Speichere…'));
+            var self = this;
+            fetch('/api/ai-mouse/admin/vorgaben', {
+                method: 'POST',
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ id: vid || '', titel: ti.value, prompt: pr.value })
+            }).then(function (r) { return r.json(); })
+              .then(function (d) {
+                    if (!d || d.ok === false) {
+                        throw new Error((d && (d.error || d.detail)) || 'Fehler');
+                    }
+                    self._vorgOffen = null;
+                    var f = $('amvorg-form');
+                    if (f) { f.remove(); }
+                    setStatus('amvorg-status', t('amvorg.saved', '✓ Gespeichert.'), 'ok');
+                    return self.vorgabenLaden();
+              })
+              .catch(function (e) { setStatus('amvorg-status', e.message, 'error'); });
+        },
+
+        vorgabeLoeschen: function (vid) {
+            var v = (this._vorgaben || []).find(function (x) { return x.id === vid; }) || {};
+            if (!window.confirm(t('amvorg.del_ask', 'Vorgabe „{t}" wirklich löschen?')
+                    .replace('{t}', v.titel || ''))) { return; }
+            var self = this;
+            fetch('/api/ai-mouse/admin/vorgaben/' + encodeURIComponent(vid),
+                  { method: 'DELETE', headers: authHeaders() })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    if (!d || d.ok === false) {
+                        throw new Error((d && (d.error || d.detail)) || 'Fehler');
+                    }
+                    if (self._vorgOffen === vid) { self._vorgOffen = null; }
+                    setStatus('amvorg-status', t('amvorg.deleted', '✓ Entfernt.'), 'ok');
+                    return self.vorgabenLaden();
+                })
+                .catch(function (e) { setStatus('amvorg-status', e.message, 'error'); });
         }
     };
 

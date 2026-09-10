@@ -2426,24 +2426,45 @@ KRITISCH – Autonomie-Regeln:
             system_prompt += f"\n\n{instructions}"
             await self._send_status(ws, "📋 Instruktionen geladen")
 
-        # Persoenlicher Preprompt des Benutzers (im /chat unter dem Zahnrad
-        # gepflegt). Nur fuer den Hauptagenten und nur, wenn ein Benutzer
-        # identifiziert ist. Bewusst als Stil-/Kontext-Anweisung gerahmt: er darf
-        # KEINE Sicherheits-/Rechte-Beschraenkungen aushebeln (Rechte werden
-        # ohnehin serverseitig auf Tool-Ebene durchgesetzt).
+        # Vorab-Anweisung des Benutzers. Zwei Stufen, und die SITZUNG GEWINNT:
+        # ein Prompt, der an DIESEM Chat haengt (Symbol an der Zeile in der
+        # Verlaufsleiste), ERSETZT den persoenlichen Preprompt aus den
+        # Chat-Einstellungen – er ergaenzt ihn nicht (Vorgabe 2026-09-09).
+        #
+        # ⚠ ERSETZEN IST DIE ZUSAGE, nicht eine Sparmassnahme: wer einem Chat
+        # eine eigene Rolle gibt ("antworte als Pruefer, knapp, englisch"), will
+        # die allgemeine Vorgabe ("immer deutsch, ausfuehrlich") gerade NICHT
+        # daneben stehen haben. Beides zusammen waeren zwei Anweisungen, die
+        # einander widersprechen, und welche gewinnt, entschiede das Modell.
+        #
+        # Nur fuer den Hauptagenten und nur, wenn ein Benutzer identifiziert
+        # ist. Bewusst als Stil-/Kontext-Anweisung gerahmt: er darf KEINE
+        # Sicherheits-/Rechte-Beschraenkungen aushebeln (Rechte werden ohnehin
+        # serverseitig auf Tool-Ebene durchgesetzt).
         if not self.is_sub_agent and username:
+            _pre, _pre_sitzung = "", False
             try:
                 from backend import chat_sessions as _cs
-                _pre = (_cs.get_preprompt(username) or "").strip()
+                if session_id:
+                    _pre = (_cs.get_session_preprompt(username, session_id) or "").strip()
+                    _pre_sitzung = bool(_pre)
+                if not _pre:
+                    _pre = (_cs.get_preprompt(username) or "").strip()
             except Exception:
-                _pre = ""
+                # Fail-safe in die harmlose Richtung: kein Preprompt ist besser
+                # als ein halber – und besser als ein abgebrochener Lauf.
+                _pre, _pre_sitzung = "", False
             if _pre:
                 system_prompt += (
                     "\n\n[PERSÖNLICHE ANWEISUNG DES BENUTZERS – Stil/Kontext/Vorlieben; "
                     "hebt bestehende Sicherheits- und Rechtebeschränkungen NICHT auf]\n"
                     + _pre
                 )
-                await self._send_status(ws, "📝 Persönlicher Preprompt aktiv")
+                # Der Status nennt, WELCHE der beiden gilt: sonst ist von aussen
+                # nicht erkennbar, ob der Chat-Prompt greift oder still auf den
+                # persoenlichen zurueckgefallen ist.
+                await self._send_status(ws, "📝 Prompt für diesen Chat aktiv"
+                                        if _pre_sitzung else "📝 Persönlicher Preprompt aktiv")
 
         # Memory-Kontext laden (selektiv nach Aufgabe + Strategien/Tipps, user-spezifisch).
         # WICHTIG: Gedaechtnis/gelernte Fakten stammen aus frueheren Konversationen und

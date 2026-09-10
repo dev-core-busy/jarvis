@@ -30,6 +30,32 @@ internal sealed class MouseGestureHook : IDisposable
 
     private IntPtr _hookHandle;
 
+    /// <summary>Taste, die den Rechtsklick DURCHREICHT statt ihn zu nehmen.
+    ///
+    /// ⚠ WOZU DAS DA IST: der Hook verschluckt sonst JEDEN Rechtsklick bis zum
+    /// Loslassen – damit ist Windows' eigenes Right-Drag („Datei mit rechter
+    /// Maustaste ziehen" → Hierher kopieren/verschieben/Verknuepfung) tot,
+    /// solange die Anwendung laeuft. Die Zielanwendung sieht nie einen
+    /// gedrueckten Knopf und kann deshalb gar keinen Drag beginnen.
+    ///
+    /// ⚠ WARUM EINE TASTE UND KEINE ERKENNUNG: „liegt hier etwas Ziehbares?"
+    /// laesst sich unter Windows nicht zuverlaessig beantworten. Ziehbarkeit
+    /// ist kein Zustand, den man abfragen kann – sie entsteht erst dadurch,
+    /// dass die Anwendung auf gedrueckte Taste + Bewegung mit `DoDragDrop`
+    /// reagiert. UIA kennt zwar `IsDraggable`, aber Explorer, Office und
+    /// Browser implementieren es nicht (die Abfrage saegt fast ueberall
+    /// „nein"), und `LVM_HITTEST` hilft nur beim klassischen ListView – der
+    /// Explorer in Windows 10/11 rendert per DirectUI.
+    ///
+    /// ⚠ UND DER AUSSCHLAGGEBENDE GRUND IST DIE ZEIT: dieser Callback muss
+    /// innerhalb `LowLevelHooksTimeout` (Vorgabe 300 ms) zurueck, sonst haengt
+    /// Windows den Hook STILLSCHWEIGEND aus – die Geste waere dann tot, ohne
+    /// jede Meldung. Eine UIA-Abfrage ist ein Cross-Process-COM-Aufruf und
+    /// kann bei einer beschaeftigten Zielanwendung zig Millisekunden dauern.
+    /// `GetAsyncKeyState` kostet dagegen nichts.
+    /// </summary>
+    public GestenTaste Durchreichen { get; set; } = GestenTaste.Keine;
+
     /// <summary>True while a swallowed press is owed either to a gesture or to a replay.</summary>
     private bool _pressWithheld;
 
@@ -102,6 +128,17 @@ internal sealed class MouseGestureHook : IDisposable
                 }
 
                 _isDragging = false;
+
+                // Haelt der Benutzer die Durchreich-Taste, gehoert der Klick der
+                // Zielanwendung – wir fassen ihn gar nicht erst an, damit ihr
+                // Drag&Drop funktioniert. `_pressWithheld = false` ist dabei
+                // Pflicht: sonst haelte sich der spaetere BUTTONUP fuer einen,
+                // der zurueckgehalten wurde, und verschluckte ihn.
+                if (TasteGehalten(Durchreichen))
+                {
+                    _pressWithheld = false;
+                    break;
+                }
 
                 if (InjectionGuard.BlocksInjection())
                 {
@@ -188,6 +225,25 @@ internal sealed class MouseGestureHook : IDisposable
             // Handle already destroyed during shutdown. Covers ObjectDisposedException,
             // which derives from it.
         }
+    }
+
+    /// <summary>Ist die gewaehlte Modifikatortaste gerade physisch gedrueckt?
+    ///
+    /// Das hohe Bit von `GetAsyncKeyState` heisst „gerade unten". Das NIEDRIGE
+    /// Bit bedeutet etwas voellig anderes (seit dem letzten Aufruf einmal
+    /// gedrueckt gewesen) und darf hier NICHT mitgelesen werden – sonst wuerde
+    /// ein laengst losgelassenes Strg den naechsten Rechtsklick durchreichen.
+    /// </summary>
+    private static bool TasteGehalten(GestenTaste taste)
+    {
+        int vk = taste switch
+        {
+            GestenTaste.Strg => NativeMethods.VK_CONTROL,
+            GestenTaste.Alt => NativeMethods.VK_MENU,
+            GestenTaste.Umschalt => NativeMethods.VK_SHIFT,
+            _ => 0,
+        };
+        return vk != 0 && (NativeMethods.GetAsyncKeyState(vk) & 0x8000) != 0;
     }
 
     private static Rectangle Normalise(Point a, Point b) => Rectangle.FromLTRB(

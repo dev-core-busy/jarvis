@@ -52,4 +52,14 @@ internal sealed class AppSettings
 
     /// <summary>Put the model's answer on the clipboard as soon as it arrives.</summary>
     public bool CopyResultToClipboard { get; set; }
+
+    /// <summary>Taste, die den Rechtsklick an die Anwendung durchreicht statt
+    /// ihn fuer die Lasso-Geste zu nehmen: <c>none</c>, <c>ctrl</c>,
+    /// <c>alt</c> oder <c>shift</c>.
+    ///
+    /// ⚠ VORGABE `ctrl`: ohne sie ist Windows' Right-Drag („Datei mit rechter
+    /// Maustaste ziehen") blockiert, solange AI Mouse laeuft. Begruendung der
+    /// Tastenwahl in <c>Input/GestenTaste.cs</c>.
+    /// </summary>
+    public string RightDragKey { get; set; } = "ctrl";
 }

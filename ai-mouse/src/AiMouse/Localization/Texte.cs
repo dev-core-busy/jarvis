@@ -64,6 +64,18 @@ internal static class Texte
         "Für diese Antwort wurde zusätzlich nachgeschlagen: ",
         "Additional sources were consulted for this answer: ");
 
+    // Adressen in der Antwort sind anklickbar. Geoeffnet wird NUR http/https –
+    // der Text stammt aus einem Bildschirmausschnitt, siehe `Ui/LinkZiel.cs`.
+    // Die Absage nennt Grund UND Ausweg: ein blauer Link, der beim Klick nichts
+    // tut, ist von einem kaputten Fenster nicht zu unterscheiden.
+    public static string LinkGeoeffnet => T("Link im Browser geöffnet.",
+                                            "Link opened in your browser.");
+    public static string LinkNichtGeoeffnet => T(
+        "Nur Web-Adressen (http/https) werden geöffnet – diese nicht. Text markieren und kopieren.",
+        "Only web addresses (http/https) are opened – this one is not. Select the text and copy it.");
+    public static string LinkFehler => T("Link ließ sich nicht öffnen:",
+                                         "Could not open the link:");
+
     // ── Tray ────────────────────────────────────────────────────────────────
     public static string Einstellungen => T("Einstellungen…", "Settings…");
     public static string FragenBearbeiten => T("Fragen bearbeiten…", "Edit questions…");
@@ -77,6 +89,13 @@ internal static class Texte
     public static string Serveradresse => T("Serveradresse", "Server address");
     public static string Sprache => T("Sprache", "Language");
     public static string Ziehschwelle => T("Ziehschwelle (Pixel)", "Drag threshold (pixels)");
+    // Die Beschriftung nennt die WIRKUNG, nicht die Technik: „Rechtsklick
+    // durchreichen mit" waere richtig und fuer niemanden verstaendlich.
+    public static string RechtsziehTaste => T("Ziehen & Ablegen mit Taste",
+                                              "Drag & drop with key");
+    public static string RdKeine => T("(aus – Rechtsziehen gesperrt)",
+                                      "(off – right-drag blocked)");
+    public static string RdUmschalt => T("Umschalt", "Shift");
     public static string Zeitlimit => T("Zeitlimit (Sekunden)", "Timeout (seconds)");
     public static string ErgebnisKopieren => T(
         "Ergebnis sofort in die Zwischenablage", "Copy result to clipboard immediately");

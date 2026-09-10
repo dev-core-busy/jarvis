@@ -347,6 +347,15 @@
         if (_ppClose && !_ppClose._wired) { _ppClose._wired = true; _ppClose.addEventListener('click', _closeChatSettings); }
         const _ppModal = $('chat-settings-modal');
         if (_ppModal && !_ppModal._wired) { _ppModal._wired = true; _ppModal.addEventListener('click', (e) => { if (e.target === _ppModal) _closeChatSettings(); }); }
+        // Prompt fuer EINEN Chat (Sprechblase an der Zeile in der Verlaufsleiste)
+        const _spSave = $('btn-chat-prompt-save');
+        if (_spSave && !_spSave._wired) { _spSave._wired = true; _spSave.addEventListener('click', _saveSessionPrompt); }
+        const _spClose = $('btn-chat-prompt-close');
+        if (_spClose && !_spClose._wired) { _spClose._wired = true; _spClose.addEventListener('click', _closeSessionPrompt); }
+        const _spModal = $('chat-prompt-modal');
+        if (_spModal && !_spModal._wired) { _spModal._wired = true; _spModal.addEventListener('click', (e) => { if (e.target === _spModal) _closeSessionPrompt(); }); }
+        const _spTa = $('chat-prompt-text');
+        if (_spTa && !_spTa._wired) { _spTa._wired = true; _spTa.addEventListener('input', _spZustand); }
         const _kbAll = $('chs-kb-all');
         if (_kbAll && !_kbAll._wired) { _kbAll._wired = true; _kbAll.addEventListener('click', () => _kbDefSetzeAlle(true)); }
         const _kbNone = $('chs-kb-none');
@@ -2172,10 +2181,27 @@
             const title = document.createElement('span');
             title.className = 'cs-title'; title.textContent = s.title || window.t('chat.untitled');
             const ren = document.createElement('button'); ren.type = 'button'; ren.className = 'cs-act cs-ren'; ren.textContent = '✎'; ren.title = window.t('chat.rename');
+            // Sprechblase = Prompt fuer DIESEN Chat. Gefuellt, wenn einer
+            // hinterlegt ist – die Form ist die sichtbare Aussage, der Wortlaut
+            // steht in title/aria-label (Farbe allein waere keine Information).
+            const pr = document.createElement('button'); pr.type = 'button';
+            pr.className = 'cs-act cs-prompt' + (s.has_prompt ? ' is-gesetzt' : '');
+            JarvisIcons.setPrompt(pr, !!s.has_prompt);
+            pr.title = window.t(s.has_prompt ? 'chat.sprompt_btn_set' : 'chat.sprompt_btn');
+            pr.setAttribute('aria-label', pr.title);
             const del = document.createElement('button'); del.type = 'button'; del.className = 'cs-act cs-del'; JarvisIcons.setTrash(del); del.title = window.t('chat.delete');
-            item.appendChild(title); item.appendChild(ren); item.appendChild(del);
-            item.addEventListener('click', (e) => { if (e.target === ren || e.target === del) return; _switchSession(s.id); });
+            item.appendChild(title); item.appendChild(pr); item.appendChild(ren); item.appendChild(del);
+            // `contains` statt `e.target === …`: die Knoepfe tragen ein
+            // Inline-SVG, ein Klick trifft dort das <path> und nicht den Knopf.
+            // Getragen hat das bisher allein das `stopPropagation` in den
+            // Knopf-Handlern – diese Pruefung ist der Guertel dazu und faellt
+            // nicht aus, wenn ein kuenftiger Handler es vergisst.
+            item.addEventListener('click', (e) => {
+                if (pr.contains(e.target) || ren.contains(e.target) || del.contains(e.target)) return;
+                _switchSession(s.id);
+            });
             ren.addEventListener('click', (e) => { e.stopPropagation(); _renameSession(s); });
+            pr.addEventListener('click', (e) => { e.stopPropagation(); _openSessionPrompt(s); });
             del.addEventListener('click', (e) => { e.stopPropagation(); _deleteSession(s); });
             list.appendChild(item);
         });
@@ -2476,6 +2502,101 @@
                     : window.t('chat.preprompt_saved');
             }
             if (!fehler.length) setTimeout(_closeChatSettings, 700);
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    // ── Prompt fuer EINEN Chat (Sprechblase an der Zeile) ────────────────────
+    // Er ersetzt den persoenlichen Preprompt, solange er gefuellt ist. Der
+    // Dialog wird immer fuer die ANGEKLICKTE Sitzung geoeffnet, nicht fuer die
+    // aktive – deshalb steht der Chatname im Titel und die Kennung wird
+    // gemerkt, statt spaeter `_activeSid` zu lesen.
+    let _spSid = null;
+    let _spLaeuft = false;
+
+    async function _openSessionPrompt(s) {
+        const modal = $('chat-prompt-modal');
+        const ta = $('chat-prompt-text');
+        if (!modal || !s || _spLaeuft) return;
+        _spLaeuft = true;
+        _spSid = s.id;
+        const nameEl = $('chat-prompt-name');
+        if (nameEl) nameEl.textContent = s.title || window.t('chat.untitled');
+        const st = $('chat-prompt-status'); if (st) st.textContent = '';
+        if (ta) { ta.value = ''; ta.disabled = false; }
+        let ok = true;
+        try {
+            const r = await fetch('/api/chat/sessions/' + encodeURIComponent(s.id) + '/preprompt',
+                                  { headers: _csHeaders() });
+            const d = await r.json();
+            if (d && d.ok) { if (ta) ta.value = d.preprompt || ''; }
+            else ok = false;
+        } catch (e) { ok = false; }
+        finally { _spLaeuft = false; }
+        // ⚠ Ein Ladefehler darf NICHT als leeres Feld erscheinen: ein Speichern
+        // darauf wuerde einen vorhandenen Prompt loeschen, ohne dass jemand ihn
+        // gesehen hat. Also sagen, dass nichts geladen wurde, und das Feld
+        // sperren – der Benutzer kann es nach dem naechsten Versuch aendern.
+        if (!ok) {
+            if (ta) ta.disabled = true;
+            if (st) st.textContent = window.t('chat.sprompt_load_failed');
+        }
+        _spZustand();
+        // Erst sichtbar machen, wenn der Inhalt steht: ein Dialog, der nach dem
+        // Erscheinen waechst, verschiebt seine Knoepfe unter dem Zeiger weg.
+        modal.classList.remove('hidden');
+        if (ta && !ta.disabled) ta.focus();
+    }
+
+    function _closeSessionPrompt() {
+        const modal = $('chat-prompt-modal');
+        if (modal) modal.classList.add('hidden');
+        _spSid = null;
+    }
+
+    // Sagt, welche der beiden Anweisungen gerade greift. Ohne diese Zeile ist
+    // ein leeres Feld nicht von "es gilt nichts" zu unterscheiden – dabei gilt
+    // dann sehr wohl etwas, naemlich der persoenliche Preprompt.
+    function _spZustand() {
+        const el = $('chat-prompt-state');
+        const ta = $('chat-prompt-text');
+        if (!el || !ta) return;
+        el.textContent = ta.value.trim()
+            ? window.t('chat.sprompt_state_own')
+            : window.t('chat.sprompt_state_default');
+    }
+
+    async function _saveSessionPrompt() {
+        const ta = $('chat-prompt-text');
+        const st = $('chat-prompt-status');
+        const btn = $('btn-chat-prompt-save');
+        if (!ta || !_spSid || ta.disabled) return;
+        const sid = _spSid;
+        if (btn) btn.disabled = true;
+        try {
+            const r = await fetch('/api/chat/sessions/' + encodeURIComponent(sid) + '/preprompt', {
+                method: 'PUT',
+                headers: _csHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ preprompt: ta.value })
+            });
+            const d = await r.json();
+            if (d && d.ok) {
+                // Die Antwort des Servers gewinnt gegen den Formularstand: er
+                // deckelt die Laenge und entscheidet, ob noch etwas gilt.
+                ta.value = d.preprompt || '';
+                const s = _sessions.find(x => x.id === sid);
+                if (s) { s.has_prompt = !!d.has_prompt; _renderSidebar(); }
+                _spZustand();
+                if (st) st.textContent = window.t('chat.preprompt_saved');
+                setTimeout(_closeSessionPrompt, 700);
+            } else if (st) {
+                st.textContent = window.t('chat.settings_save_failed')
+                    .replace('{t}', window.t('chat.sprompt_title'));
+            }
+        } catch (e) {
+            if (st) st.textContent = window.t('chat.settings_save_failed')
+                .replace('{t}', window.t('chat.sprompt_title'));
         } finally {
             if (btn) btn.disabled = false;
         }

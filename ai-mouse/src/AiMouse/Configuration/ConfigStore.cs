@@ -80,6 +80,10 @@ internal static class ConfigStore
             s.TimeoutSeconds = Zahl(k, "TimeoutSeconds", s.TimeoutSeconds, 5, 3600);
             s.DragThreshold = Zahl(k, "DragThreshold", s.DragThreshold, 1, 100);
             s.CopyResultToClipboard = Zahl(k, "CopyResultToClipboard", 0, 0, 1) == 1;
+            // Leerer Wert = nichts gespeichert -> Vorgabe behalten (gleiche
+            // Regel wie bei Endpoint und Sprache eine Zeile darueber).
+            string rdk = Lies(k, "RightDragKey");
+            if (rdk.Length > 0) { s.RightDragKey = rdk; }
         }
         catch (Exception e)
         {
@@ -106,6 +110,7 @@ internal static class ConfigStore
             k.SetValue("Benutzer", settings.Benutzer ?? string.Empty);
             k.SetValue("TimeoutSeconds", settings.TimeoutSeconds);
             k.SetValue("DragThreshold", settings.DragThreshold);
+            k.SetValue("RightDragKey", settings.RightDragKey ?? "ctrl");
             k.SetValue("CopyResultToClipboard", settings.CopyResultToClipboard ? 1 : 0);
             return null;
         }

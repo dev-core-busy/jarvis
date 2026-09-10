@@ -714,6 +714,7 @@
         function _initAimouseCollapse() {
             _collapseInit([
                 { hdr: 'am-sect-tools-hdr', body: 'am-sect-tools-body', tog: 'am-sect-tools-tog' },
+                { hdr: 'am-sect-vorg-hdr', body: 'am-sect-vorg-body', tog: 'am-sect-vorg-tog' },
                 { hdr: 'am-sect-info-hdr', body: 'am-sect-info-body', tog: 'am-sect-info-tog' },
             ]);
         }

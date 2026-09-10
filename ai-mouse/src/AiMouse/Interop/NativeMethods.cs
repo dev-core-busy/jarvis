@@ -13,6 +13,12 @@ internal static class NativeMethods
 
     internal const int ERROR_ACCESS_DENIED = 5;
 
+    // Modifikatortasten fuer die Geste. `VK_CONTROL`/`VK_MENU`/`VK_SHIFT` sind
+    // die SEITENUNABHAENGIGEN Codes – links und rechts zaehlen also beide.
+    internal const int VK_SHIFT = 0x10;
+    internal const int VK_CONTROL = 0x11;
+    internal const int VK_MENU = 0x12;      // Alt
+
     internal const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
     internal const uint TOKEN_QUERY = 0x0008;
 
@@ -89,6 +95,17 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     internal static extern IntPtr GetForegroundWindow();
+
+    /// <summary>Physischer Tastenzustand – und zwar der zum Zeitpunkt des Aufrufs.
+    ///
+    /// ⚠ `GetAsyncKeyState` und NICHT `GetKeyState`: letzteres liefert den
+    /// Zustand aus der Nachrichtenwarteschlange des AUFRUFENDEN Threads. Im
+    /// Hook-Callback ist das der Thread dieser Anwendung – er bekommt die
+    /// Tastatureingaben des Benutzers gar nicht, die gehen an das Fenster im
+    /// Vordergrund. `GetKeyState` meldete dort also dauerhaft „nicht gedrueckt".
+    /// </summary>
+    [DllImport("user32.dll")]
+    internal static extern short GetAsyncKeyState(int vKey);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

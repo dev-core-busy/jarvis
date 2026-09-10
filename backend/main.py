@@ -6503,7 +6503,46 @@ async def chat_sessions_get(sid: str, user: str = Depends(require_auth)):
     return JSONResponse({"ok": True, "transcript": cs.load_transcript(user, sid),
                          "kb_groups": meta.get("kb_groups"),
                          "kb_groups_set": "kb_groups" in meta,
-                         "profile_id": meta.get("profile_id", "")})
+                         "profile_id": meta.get("profile_id", ""),
+                         "has_prompt": bool((meta.get("preprompt") or "").strip())})
+
+
+@app.get("/api/chat/sessions/{sid}/preprompt")
+async def chat_session_preprompt_get(sid: str, user: str = Depends(require_auth)):
+    """Eigener Prompt DIESER Sitzung (in /chat ueber das Symbol an der Zeile).
+
+    Ist einer hinterlegt, ERSETZT er den persoenlichen Preprompt des Benutzers
+    fuer diesen Chat. Der Benutzer kommt AUSSCHLIESSLICH aus der Anmeldung, nie
+    aus dem Rumpf – sonst waere der Endpunkt ein Weg in fremde Chatordner.
+    """
+    from backend import chat_sessions as cs
+    if not cs._valid(user, sid):
+        return JSONResponse({"ok": False, "error": "Nicht gefunden"}, status_code=404)
+    return JSONResponse({"ok": True, "preprompt": cs.get_session_preprompt(user, sid)})
+
+
+@app.put("/api/chat/sessions/{sid}/preprompt")
+async def chat_session_preprompt_save(sid: str, request: Request,
+                                      user: str = Depends(require_auth)):
+    """Eigenen Prompt der Sitzung speichern (leerer Text entfernt ihn).
+
+    Eigener Endpunkt und NICHT der PATCH daneben: der schreibt den Titel und
+    haette dann eine Merge-Semantik ("was nicht im Rumpf steht, bleibt?"), an
+    der im Projekt schon mehrfach ein Feld still verlorengegangen ist. Hier
+    setzt jeder Aufruf genau einen Wert vollstaendig.
+    """
+    from backend import chat_sessions as cs
+    if not cs._valid(user, sid):
+        return JSONResponse({"ok": False, "error": "Nicht gefunden"}, status_code=404)
+    text = ""
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            text = body.get("preprompt") or ""
+    except Exception:  # noqa: BLE001
+        pass
+    saved = cs.save_session_preprompt(user, sid, text)
+    return JSONResponse({"ok": True, "preprompt": saved, "has_prompt": bool(saved.strip())})
 
 
 @app.put("/api/chat/sessions/{sid}/transcript")
@@ -13400,6 +13439,48 @@ async def ai_mouse_frage_loeschen(fid: str, request: Request,
     from backend import ai_mouse_fragen as amf  # noqa: PLC0415
     if not amf.loeschen(user, fid, _is_admin_user(user)):
         return JSONResponse({"ok": False, "error": "Die Frage wurde nicht gefunden."},
+                            status_code=404)
+    return JSONResponse({"ok": True})
+
+
+@app.get("/api/ai-mouse/admin/vorgaben")
+async def ai_mouse_vorgaben_lesen(user: str = Depends(require_local_auth)):
+    """Vorgabe-Fragen: was ein Benutzer beim ERSTEN Start uebernimmt.
+
+    ⚠ `require_local_auth` und NICHT `require_aimouse_access` – dieselbe Stelle
+    und dieselbe Begruendung wie beim Bereichs-Katalog darueber:
+    `_user_may_use_aimouse` kennt bewusst keinen Admin-Bypass, ein Administrator
+    ohne eigene AI-Maus-Freigabe koennte die Vorgaben sonst nicht pflegen.
+    """
+    from backend import ai_mouse_fragen as amf  # noqa: PLC0415
+    return JSONResponse({"ok": True, "vorgaben": amf.vorgaben_liste()})
+
+
+@app.post("/api/ai-mouse/admin/vorgaben")
+async def ai_mouse_vorgabe_speichern(request: Request,
+                                     user: str = Depends(require_local_auth)):
+    """Vorgabe anlegen oder aendern. Body: ``{id?, titel, prompt}``."""
+    from backend import ai_mouse_fragen as amf  # noqa: PLC0415
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungültiger JSON-Body."},
+                            status_code=400)
+    try:
+        eintrag = amf.vorgabe_speichern(str(body.get("id") or "").strip(),
+                                        str(body.get("titel") or ""),
+                                        str(body.get("prompt") or ""))
+    except amf.FragenFehler as f:
+        return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
+    return JSONResponse({"ok": True, "vorgabe": eintrag})
+
+
+@app.delete("/api/ai-mouse/admin/vorgaben/{fid}")
+async def ai_mouse_vorgabe_loeschen(fid: str, user: str = Depends(require_local_auth)):
+    """Eine Vorgabe entfernen. Unbekannt → **404**."""
+    from backend import ai_mouse_fragen as amf  # noqa: PLC0415
+    if not amf.vorgabe_loeschen(fid):
+        return JSONResponse({"ok": False, "error": "Die Vorgabe wurde nicht gefunden."},
                             status_code=404)
     return JSONResponse({"ok": True})
 

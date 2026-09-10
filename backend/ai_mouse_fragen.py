@@ -102,36 +102,110 @@ def _norm(user: str) -> str:
     return u
 
 
-def _saeen(d: dict) -> bool:
-    """Vorgabe-Fragen anlegen – **nur wenn es noch gar keine gibt**.
+# ─── Vorgaben: was ein neuer Benutzer beim ERSTEN Mal bekommt ────────────────
+#
+# ⚠ DER UNTERSCHIED ZU „GEMEINSAM" IST DER KERN DIESES ABSCHNITTS, und er ist
+# von aussen nicht zu erraten:
+#
+#   gemeinsam (``global_``)  gilt fuer alle, gehoert dem ADMINISTRATOR – ein
+#                            Benutzer sieht sie und kann sie NICHT aendern.
+#   Vorgabe   (``vorgaben``) ist eine VORLAGE. Beim ersten Kontakt wird sie in
+#                            die eigene Liste des Benutzers KOPIERT – ab da
+#                            gehoeren die Eintraege ihm, mit eigenen Kennungen,
+#                            und er darf sie aendern und loeschen.
+#
+# Beides nebeneinander ist Absicht: „diese Frage gilt im Haus verbindlich" und
+# „so faengt jeder an" sind verschiedene Aussagen.
+_VORGABEN_SAAT = [
+    ("Text erkennen (OCR)",
+     "Agiere als OCR-System. Erkenne den Text"),
+    ("extrahiere Adressdaten (OCR)",
+     "Agiere als OCR-System. Extrahiere präzise den sichtbaren Text aus diesem "
+     "Bild ohne zusätzliche Kommentare oder Bewertungen. Strukturieren Sie die "
+     "erfassten Daten dabei explizit in folgende Adress- und Kontaktdaten: "
+     "Nachname, Vorname, Straße und Hausnummer, Postleitzahl, Ort, "
+     "E-Mail-Adresse, Mobilnummer, Ansprechpartner sowie ggf. weitere relevante "
+     "Felder. Geben Sie ausschließlich die extrahierten und strukturierten "
+     "Daten zurück."),
+    ("was ist das ?",
+     "Beschreibe knapp, was auf diesem Bildschirmausschnitt zu sehen ist und "
+     "worum es geht."),
+    ("Tabelle zusammenfassen",
+     "Fasse die Zahlen oder die Tabelle auf diesem Ausschnitt zusammen: worum "
+     "geht es, was fällt auf? Übernimm keine Zahl, die du nicht sicher lesen "
+     "kannst."),
+    ("suche homepage",
+     "suche die homepage der Adresse und zeige sie als klickbaren link an"),
+    ("übersetze nach Deutsch",
+     "Agiere als OCR-System. Übersetze den Text nach Deutsch"),
+]
 
-    Nicht pro fehlender Frage: eine bewusst gelöschte Vorgabe käme sonst bei
-    jedem Zugriff zurück (dieselbe Regel wie bei ``agent_roles.saeen``).
+
+def _saeen(d: dict) -> bool:
+    """Vorgabe-Liste anlegen und den Altbestand einmalig raeumen.
+
+    Zwei Schritte, beide **genau einmal** – jeder mit eigenem Marker:
+
+    (1) ``vorgaben`` wird mit der eingebauten Saat gefuellt, wenn es sie noch
+        gar nicht gibt. NICHT pro fehlendem Eintrag: eine bewusst geloeschte
+        Vorgabe kaeme sonst bei jedem Zugriff zurueck (Regel aus
+        ``agent_roles.saeen``).
+
+    (2) ⚠ DIE ALTEN GEMEINSAMEN FRAGEN WERDEN GELEERT (Vorgabe des Betreibers
+        2026-09-10). Bis dahin lagen die fuenf eingebauten Fragen in
+        ``global_`` – dort kann ein Benutzer sie nicht anpassen, und zwei davon
+        doppeln sich inhaltlich mit der neuen Vorgabe-Liste.
+
+        **Der Marker ``_global_geraeumt`` ist dabei nicht Beiwerk, sondern die
+        ganze Bedingung:** ohne ihn wuerde jede gemeinsame Frage, die ein
+        Administrator DANACH anlegt, beim naechsten Laden wieder verschwinden –
+        eine Funktion, die still nichts tut.
     """
-    if d.get("global_") or d.get("_gesaet"):
+    geaendert = False
+    if "vorgaben" not in d or not isinstance(d.get("vorgaben"), list):
+        d["vorgaben"] = []
+        geaendert = True
+    if not d["vorgaben"] and not d.get("_gesaet_vorgaben"):
+        d["vorgaben"] = [_neu(t, p) for t, p in _VORGABEN_SAAT]
+        d["_gesaet_vorgaben"] = True
+        geaendert = True
+    if not d.get("_global_geraeumt"):
+        if d.get("global_"):
+            d["global_"] = []
+        d["_global_geraeumt"] = True
+        geaendert = True
+    return geaendert
+
+
+def _uebernehmen(d: dict, user: str) -> bool:
+    """Die Vorgaben EINMALIG in die eigene Liste des Benutzers kopieren.
+
+    ⚠ MIT NEUEN KENNUNGEN: die Kopien gehoeren ab jetzt IHM – aendert der
+    Administrator spaeter eine Vorgabe, bleibt seine Fassung, wie sie ist. Das
+    ist der Sinn von „Vorgabe beim ersten Start" (und der Unterschied zu einer
+    gemeinsamen Frage).
+
+    ⚠ DER MARKER JE BENUTZER IST PFLICHT. Ohne ihn kaemen geloeschte Vorgaben
+    beim naechsten Start zurueck – dieselbe Einbahnstrasse wie beim
+    Willkommens-Chat, nur andersherum: dort durfte er nicht wiederkommen,
+    hier darf er es genauso wenig. Die Bedingung ist deshalb der MARKER und
+    NICHT „hat der Benutzer schon Fragen": wer seine letzte Frage loescht,
+    bekaeme sonst die ganze Vorgabeliste zurueck.
+    """
+    k = _norm(user)
+    if not k:
         return False
-    d["global_"] = [
-        _neu("Text herausziehen (OCR)",
-             "Gib den gesamten sichtbaren Text aus diesem Ausschnitt exakt "
-             "wieder – ohne Kommentar, ohne Zusammenfassung. Behalte "
-             "Zeilenumbrüche und Reihenfolge bei."),
-        _neu("Was ist das?",
-             "Beschreibe knapp, was auf diesem Bildschirmausschnitt zu sehen "
-             "ist und worum es geht."),
-        _neu("Fehlermeldung erklären",
-             "Auf dem Ausschnitt ist eine Fehlermeldung oder ein Programmfehler "
-             "zu sehen. Erkläre in einfachen Worten, was sie bedeutet, und "
-             "nenne den wahrscheinlichsten nächsten Schritt. Rate nicht – was "
-             "du nicht erkennen kannst, sagst du."),
-        _neu("Tabelle zusammenfassen",
-             "Fasse die Zahlen oder die Tabelle auf diesem Ausschnitt zusammen: "
-             "worum geht es, was fällt auf? Übernimm keine Zahl, die du nicht "
-             "sicher lesen kannst."),
-        _neu("Ins Deutsche übersetzen",
-             "Übersetze den Text auf diesem Ausschnitt ins Deutsche. Gib nur "
-             "die Übersetzung aus."),
-    ]
-    d["_gesaet"] = True
+    gesaet = d.setdefault("gesaet_fuer", [])
+    if not isinstance(gesaet, list):
+        gesaet = d["gesaet_fuer"] = []
+    if k in gesaet:
+        return False
+    eigen = d["benutzer"].setdefault(k, [])
+    frei = max(0, MAX_JE_BENUTZER - len(eigen))
+    for e in (d.get("vorgaben") or [])[:frei]:
+        if isinstance(e, dict) and e.get("titel"):
+            eigen.append(_neu(e.get("titel", ""), e.get("prompt", "")))
+    gesaet.append(k)
     return True
 
 
@@ -159,7 +233,10 @@ def liste(user: str, ist_admin: bool = False) -> list[dict]:
     """
     with _SPERRE:
         d = _laden()
-        if _saeen(d):
+        geaendert = _saeen(d)
+        # Der erste Kontakt DIESES Benutzers: Vorgaben in seine Liste kopieren.
+        geaendert = _uebernehmen(d, user) or geaendert
+        if geaendert:
             _speichern(d)
         eigen = d["benutzer"].get(_norm(user)) or []
         raus = [dict(e, gemeinsam=True, darf_aendern=bool(ist_admin))
@@ -209,6 +286,62 @@ def speichern(user: str, fid: str, titel: str, prompt: str,
         ziel.append(eintrag)
         _speichern(d)
     return dict(eintrag, gemeinsam=gemeinsam, darf_aendern=True)
+
+
+# ─── Vorgaben pflegen (nur Administrator) ────────────────────────────────────
+# Die Rechtefrage steht beim AUFRUFER (`require_local_auth` am Endpunkt) – hier
+# liegt nur die Datenhaltung, wie im uebrigen Modul.
+
+def vorgaben_liste() -> list[dict]:
+    """Die Vorgabe-Fragen (Vorlage fuer neue Benutzer)."""
+    with _SPERRE:
+        d = _laden()
+        if _saeen(d):
+            _speichern(d)
+        return [dict(e) for e in (d.get("vorgaben") or []) if isinstance(e, dict)]
+
+
+def vorgabe_speichern(fid: str, titel: str, prompt: str) -> dict:
+    """Vorgabe anlegen (``fid`` leer) oder aendern.
+
+    ⚠ WIRKT NUR AUF BENUTZER, DIE ES NOCH NICHT GAB. Wer die Vorgaben schon
+    bekommen hat, behaelt SEINE Fassung – das ist die Zusage von „Vorgabe beim
+    ersten Start" und der Grund, warum die Kopien eigene Kennungen tragen. Die
+    Oberflaeche sagt das ausdruecklich, sonst wartet ein Administrator auf eine
+    Wirkung, die nicht kommt.
+    """
+    t, p = _pruefe(titel, prompt)
+    with _SPERRE:
+        d = _laden()
+        _saeen(d)
+        vor = d.setdefault("vorgaben", [])
+        if fid:
+            alt = next((e for e in vor if e.get("id") == fid), None)
+            if alt is None:
+                raise FragenFehler("Die Vorgabe wurde nicht gefunden.")
+            alt["titel"], alt["prompt"] = t, p
+            eintrag = alt
+        else:
+            if len(vor) >= MAX_GEMEINSAM:
+                raise FragenFehler("Es sind höchstens %d Vorgaben möglich."
+                                   % MAX_GEMEINSAM)
+            eintrag = _neu(t, p)
+            vor.append(eintrag)
+        _speichern(d)
+    return dict(eintrag)
+
+
+def vorgabe_loeschen(fid: str) -> bool:
+    """Eine Vorgabe entfernen. Unbekannt → ``False`` (Aufrufer: 404)."""
+    with _SPERRE:
+        d = _laden()
+        _saeen(d)
+        vor = d.get("vorgaben") or []
+        if not any(e.get("id") == fid for e in vor):
+            return False
+        d["vorgaben"] = [e for e in vor if e.get("id") != fid]
+        _speichern(d)
+    return True
 
 
 def loeschen(user: str, fid: str, ist_admin: bool = False) -> bool:

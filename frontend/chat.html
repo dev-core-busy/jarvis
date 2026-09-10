@@ -8,7 +8,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
     <title>Jarvis Chat</title>
     <link rel="stylesheet" href="/static/css/theme.css?v=24">
-    <link rel="stylesheet" href="/static/css/chat.css?v=54">
+    <link rel="stylesheet" href="/static/css/chat.css?v=56">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=6">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=8">
@@ -337,6 +337,30 @@ sudo update-ca-certificates</code></pre>
     </div>
 </div>
 
+<!-- ═══ Prompt fuer EINEN Chat (Sprechblase an der Zeile in der Verlaufsleiste) ═══
+     Er ERSETZT den persoenlichen Preprompt aus den Einstellungen, solange er
+     gefuellt ist – leeren stellt den Default wieder her. Der Chatname steht im
+     Titel: der Dialog wird von einer beliebigen Zeile aus geoeffnet, auch von
+     einer, die gerade NICHT aktiv ist – ohne den Namen waere nicht erkennbar,
+     welchen Chat man gerade aendert. -->
+<div id="chat-prompt-modal" class="modal-overlay hidden">
+    <div class="modal-card chs-card">
+        <h2 class="modal-title"><span data-i18n="chat.sprompt_title">Prompt für diesen Chat</span><span id="chat-prompt-name" class="cp-name"></span></h2>
+        <div class="chs-body">
+            <p class="chs-desc" data-i18n="chat.sprompt_desc">Diese Anweisung gilt nur für diesen einen Chat und ERSETZT dabei Deinen persönlichen Preprompt aus den Einstellungen. Sie hebt keine Sicherheits- oder Rechtebeschränkungen auf. Leer lassen, um wieder den persönlichen Preprompt zu verwenden.</p>
+            <textarea id="chat-prompt-text" class="chs-ta" rows="9" data-tabfill data-i18n-placeholder="chat.sprompt_ph" placeholder="z.B. Antworte in diesem Chat als technischer Prüfer: knapp, sachlich, auf Englisch."></textarea>
+            <p id="chat-prompt-state" class="chs-hint"></p>
+        </div>
+        <div class="chs-foot">
+            <div id="chat-prompt-status" class="chs-status"></div>
+            <div class="chs-btns">
+                <button class="btn-login chs-save" id="btn-chat-prompt-save" data-i18n="common.save">Speichern</button>
+                <button class="btn-modal-close chs-close" id="btn-chat-prompt-close" data-i18n="common.close">Schließen</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- ═══ Multi-Agent-Panel (nur Admin; erscheint, wenn Sub-Agenten laufen) ═══ -->
 <div id="agent-panel" style="display:none;position:fixed;top:58px;right:12px;z-index:8000;width:220px;max-width:70vw;background:var(--bg-secondary);border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.5);overflow:hidden;">
     <div style="padding:8px 12px;border-bottom:1px solid var(--border);font-size:0.8rem;font-weight:600;color:var(--text-primary);">Agenten</div>
@@ -366,12 +390,12 @@ sudo update-ca-certificates</code></pre>
     </div>
 </div>
 
-<script src="/static/js/icons.js?v=3"></script>
+<script src="/static/js/icons.js?v=4"></script>
 <script src="/static/js/pwreveal.js?v=2"></script>
 <script src="/static/js/dlkey.js?v=2"></script>
 <script src="/static/js/cpubar.js?v=1"></script>
 <script src="/static/js/syspackages.js?v=2"></script>
-<script src="/static/js/i18n.js?v=249"></script>
+<script src="/static/js/i18n.js?v=251"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
 <!-- Gemeinsame Chat-Helfer (escapeHtml, renderMarkdown, History, Edit-Workflow) -->
 <script src="/static/js/chatlib.js?v=19"></script>
@@ -384,7 +408,7 @@ sudo update-ca-certificates</code></pre>
 <script src="/static/js/profile_switcher.js?v=5"></script>
 <script src="/static/js/sessions.js?v=8"></script>
 <script src="/static/js/logo_home.js?v=1"></script>
-<script src="/static/js/chat.js?v=109"></script>
+<script src="/static/js/chat.js?v=110"></script>
 <!-- Interaktive Charts (```chartjs) – Chart.js lokal gevendort (CSP: kein CDN) -->
 <script src="/static/js/vendor/chart.umd.min.js?v=1"></script>
 <!-- Chart.js-Plugins (MIT). MUESSEN nach chart.umd.min.js kommen – ihre

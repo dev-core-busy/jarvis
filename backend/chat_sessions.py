@@ -203,8 +203,13 @@ def list_sessions(user: str) -> list:
                     continue
                 m = _read_meta(sd)
                 if m and m.get("id"):
+                    # `has_prompt` sagt nur, DASS ein eigener Prompt hinterlegt ist –
+                    # nie seinen Inhalt. Die Seitenleiste braucht die Aussage fuer
+                    # jede Zeile; ohne sie muesste sie je Sitzung einen eigenen
+                    # Abruf machen (bei 30 Chats 30 Rundreisen beim Seitenaufbau).
                     out.append({"id": m["id"], "title": m.get("title", _DEFAULT_TITLE),
-                                "created": m.get("created", 0), "updated": m.get("updated", 0)})
+                                "created": m.get("created", 0), "updated": m.get("updated", 0),
+                                "has_prompt": bool((m.get("preprompt") or "").strip())})
     out.sort(key=lambda x: x.get("updated", 0), reverse=True)
     return out
 
@@ -383,6 +388,44 @@ def save_kb_groups(user: str, sid: str, groups) -> None:
             return
         meta["kb_groups"] = groups
         _write_meta(sd, meta)
+
+
+def get_session_preprompt(user: str, sid: str) -> str:
+    """Eigener Prompt DIESER Sitzung (leerer String, wenn keiner hinterlegt ist).
+
+    Er ERSETZT den persoenlichen Preprompt des Benutzers, er ergaenzt ihn nicht
+    (Vorgabe 2026-09-09): wer fuer einen Chat eine andere Rolle setzt, will die
+    allgemeine Vorgabe in der Regel gerade NICHT zusaetzlich haben – zwei
+    Anweisungen nebeneinander widersprechen sich sonst, und welche gewinnt,
+    entschiede das Modell. Die Aufloesung steht in `agent.py`; hier nur I/O.
+    """
+    m = get_meta(user, sid) or {}
+    t = m.get("preprompt")
+    return t if isinstance(t, str) else ""
+
+
+def save_session_preprompt(user: str, sid: str, text: str) -> str:
+    """Eigenen Prompt der Sitzung speichern; leerer Text ENTFERNT ihn.
+
+    "Entfernen" heisst hier: der Schluessel verschwindet aus der meta.json, und
+    damit greift wieder der persoenliche Preprompt. Ein leerer Eintrag waere
+    nicht davon zu unterscheiden – wuerde aber `has_prompt` und die Anzeige in
+    der Seitenleiste nach demselben Muster ohnehin auf "keiner" stellen.
+    Rueckgabe: der gespeicherte Text (leer, wenn keiner mehr gilt).
+    """
+    text = (text or "")[:_PREPROMPT_MAX]
+    with _LOCK:
+        sd = _sess_dir(user, sid)
+        meta = _read_meta(sd)
+        if not meta:
+            return ""
+        if text.strip():
+            meta["preprompt"] = text
+        else:
+            meta.pop("preprompt", None)
+            text = ""
+        _write_meta(sd, meta)
+    return text
 
 
 def save_profile(user: str, sid: str, profile_id) -> None:

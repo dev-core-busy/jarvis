@@ -104,7 +104,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
             ContextMenuStrip = BuildTrayMenu(),
         };
 
-        _hook = new MouseGestureHook(_owner, _settings.DragThreshold);
+        _hook = new MouseGestureHook(_owner, _settings.DragThreshold)
+        {
+            Durchreichen = GestenTasteAus(_settings.RightDragKey),
+        };
         _hook.DragStarted += point => _overlay.BeginSelection(point);
         _hook.DragMoved += point => _overlay.UpdateSelection(point);
         _hook.DragCompleted += OnDragCompleted;
@@ -763,6 +766,20 @@ internal sealed class TrayApplicationContext : ApplicationContext
         return true;
     }
 
+    /// <summary>Gespeicherter Text -> Taste. Ein UNBEKANNTER Wert ergibt
+    /// <see cref="GestenTaste.Strg"/> und nicht <see cref="GestenTaste.Keine"/>:
+    /// „keine" hiesse, dass Windows' Right-Drag blockiert bleibt, und das ist
+    /// die schlechtere Halbfehlerstellung – ein Tippfehler in der Registry darf
+    /// nicht stillschweigend eine Systemfunktion abschalten.</summary>
+    private static GestenTaste GestenTasteAus(string? wert) =>
+        (wert ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "none" => GestenTaste.Keine,
+            "alt" => GestenTaste.Alt,
+            "shift" => GestenTaste.Umschalt,
+            _ => GestenTaste.Strg,
+        };
+
     /// <summary>Takes effect on the next capture; nothing needs restarting.</summary>
     private void ApplySettings(AppSettings settings)
     {
@@ -770,6 +787,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
                                          StringComparison.OrdinalIgnoreCase);
         _settings = settings;
         _hook.Threshold = settings.DragThreshold;
+        _hook.Durchreichen = GestenTasteAus(settings.RightDragKey);
         Texte.Anwenden(settings);
 
         // ⚠ BEI EINER NEUEN ADRESSE MUSS DIE SITZUNG WEG. Das Token gilt fuer

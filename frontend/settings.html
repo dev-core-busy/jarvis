@@ -23,7 +23,7 @@
     <link rel="stylesheet" href="/static/css/theme.css?v=24">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=8">
-    <link rel="stylesheet" href="/static/css/style.css?v=178">
+    <link rel="stylesheet" href="/static/css/style.css?v=181">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=6">
 </head>
 
@@ -3839,6 +3839,28 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         </div>
                     </div>
 
+                    <!-- Vorgabe-Fragen: die VORLAGE fuer neue Benutzer. Sie wird
+                         beim ERSTEN Start in die eigene Liste kopiert und
+                         gehoert danach dem Benutzer – anders als eine
+                         gemeinsame Frage, die nur ein Administrator aendern
+                         darf. Der Unterschied steht als Hinweis in der Box,
+                         sonst ist er von aussen nicht zu erraten. -->
+                    <div class="kb-section" id="am-sect-vorg">
+                        <div class="kb-section-header kb-collapse-header" id="am-sect-vorg-hdr">
+                            <h3 data-i18n="amvorg.h">Vorgabe-Fragen für neue Benutzer</h3>
+                            <span class="sk-openclaw-toggle" id="am-sect-vorg-tog">▼</span>
+                        </div>
+                        <div class="kb-collapse-body" id="am-sect-vorg-body">
+                            <p class="kb-hint" data-i18n-html="amvorg.intro">Diese Einträge bekommt ein Benutzer <b>beim ersten Start</b> von AI-Maus in sein Menü kopiert. Ab dann gehören sie ihm: er darf sie ändern, ergänzen und löschen – seine Fassung bleibt erhalten.</p>
+                            <p class="kb-hint" data-i18n-html="amvorg.warn">⚠ Eine Änderung hier wirkt nur für Benutzer, die AI-Maus <b>noch nie</b> benutzt haben. Wer die Vorgaben schon bekommen hat, behält seine eigenen – das ist der Sinn einer Vorgabe. Eine Frage, die <b>für alle verbindlich</b> gelten soll, wird stattdessen im Portal unter <b>AI-Maus → Meine Fragen</b> als „für alle" angelegt.</p>
+                            <div id="amvorg-liste"></div>
+                            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                                <button class="btn-secondary" id="amvorg-neu" type="button" data-i18n="amvorg.new" style="flex:0 0 auto;">+ Vorgabe</button>
+                                <span id="amvorg-status" style="font-size:0.9em;"></span>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="kb-section" id="am-sect-info">
                         <div class="kb-section-header kb-collapse-header" id="am-sect-info-hdr">
                             <h3 data-i18n="amtool.state_h">Zustand</h3>
@@ -5335,10 +5357,10 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     details.sec-sub summary .sec-sub-hint { color: var(--text-muted); font-size: 0.78rem;
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
-    <script src="/static/js/icons.js?v=3"></script>
+    <script src="/static/js/icons.js?v=4"></script>
     <script src="/static/js/pwreveal.js?v=2"></script>
     <script src="/static/js/dlkey.js?v=2"></script>
-    <script src="/static/js/i18n.js?v=249"></script>
+    <script src="/static/js/i18n.js?v=251"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=21"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -5363,7 +5385,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/vemas.js?v=1"></script>
     <script src="/static/js/email.js?v=5"></script>
     <script src="/static/js/short_tracks_admin.js?v=2"></script>
-    <script src="/static/js/ai_mouse_admin.js?v=1"></script>
+    <script src="/static/js/ai_mouse_admin.js?v=3"></script>
     <script src="/static/js/kundenverwaltung.js?v=6"></script>
     <script src="/static/js/support_admin.js?v=11"></script>
     <script src="/static/js/telemetry.js?v=9"></script>
@@ -5377,7 +5399,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/agent_roles.js?v=3"></script>
     <script src="/static/js/model_caps.js?v=6"></script>
     <script src="/static/js/alpha_sort.js?v=2"></script>
-    <script src="/static/js/app.js?v=208"></script>
+    <script src="/static/js/app.js?v=209"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

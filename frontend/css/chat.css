@@ -261,6 +261,15 @@ body {
 .cs-item:hover .cs-act, .cs-item.active .cs-act { opacity: 1; }
 .cs-item .cs-act:hover { color: var(--text-primary); }
 .cs-item .cs-act.cs-del:hover { color: var(--danger); }
+/* ⚠ EIN HINTERLEGTER CHAT-PROMPT IST EIN ZUSTAND, KEINE AKTION.
+   Die uebrigen `.cs-act` stehen auf `opacity: 0` und erscheinen erst beim
+   Ueberfahren – fuer eine Anzeige waere das falsch: wer nicht mit der Maus
+   ueber jede Zeile faehrt, saehe nie, dass fuer diesen Chat ein eigener Prompt
+   gilt und sein persoenlicher Preprompt dort ausgesetzt ist. Die gesetzte
+   Sprechblase bleibt deshalb dauerhaft sichtbar; die LEERE verhaelt sich wie
+   die anderen Aktionen. Zusaetzlich die Markenfarbe – sie ist die zweite
+   Ebene, die Aussage traegt die gefuellte FORM und der title/aria-label. */
+.cs-item .cs-act.cs-prompt.is-gesetzt { opacity: 1; color: var(--accent); }
 .cs-empty { color: var(--text-muted); font-size: 0.82rem; padding: 8px 4px; }
 
 /* Fuss der Verlaufsleiste ("Beispiel-Prompts"). Er bleibt beim Scrollen stehen –
@@ -1310,6 +1319,17 @@ select option:hover {
 }
 .chs-card .modal-title { text-align: center; margin-bottom: 16px; flex: 0 0 auto; }
 .chs-body { flex: 1 1 auto; overflow-y: auto; min-height: 0; padding-right: 4px; }
+
+/* Chatname im Titel des Prompt-Dialogs. Er wird von einer beliebigen Zeile aus
+   geoeffnet, auch von einer nicht aktiven – ohne den Namen waere nicht
+   erkennbar, welcher Chat gerade geaendert wird. `display: block` samt Ellipse,
+   weil ein langer Titel den Dialog sonst breiter zoege als das Fenster. */
+.cp-name {
+    display: block; margin-top: 4px;
+    font-size: 13px; font-weight: 500; color: var(--muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cp-name:empty { display: none; }
 
 .chs-sect {
     border: 1px solid var(--outline);

@@ -133,6 +133,52 @@ setTimeout(()=>{
   c('beim Anlegen bleibt es am Heimatplatz',!!form&&!form.closest('.am-q-card'));
   const tI=$('am-f-titel'),pI=$('am-f-prompt'),sB=$('am-f-save');
   c('Eingabefelder und Speichern-Knopf vorhanden',!!tI&&!!pI&&!!sB);
+
+  // ⚠ REGEL, KEINE LISTE (Anlass 2026-09-10, gemeldet fuer „Neue Frage"):
+  // /ai-mouse laedt NUR theme.css und jira_addon.css. Ein Knopf mit
+  // `.btn-primary`/`.btn-secondary` – die stehen in style.css – ist hier kein
+  // halb gestylter, sondern ein NACKTER Browser-Standardknopf. Geprueft wird
+  // die EIGENSCHAFT: jeder Knopf traegt mindestens eine Klasse, die das CSS
+  // DIESER Seite wirklich definiert. Damit faellt auch der naechste Knopf auf,
+  // ohne dass jemand eine Liste pflegt. Das Formular ist hier offen, Speichern
+  // und Abbrechen sind also mit erfasst.
+  //
+  // Gezaehlt wird nur das ERSTE Element eines Selektors: theme.css enthaelt
+  // `.jv-pc-foot .btn-primary` – wer die Klasse dort mitzaehlt, baut sich einen
+  // zahnlosen Waechter, denn dieser Kontext gibt es auf /ai-mouse nicht.
+  const cssTxt=['frontend/css/theme.css','frontend/css/jira_addon.css']
+    .map(p=>fs.readFileSync(p,'utf8')).join('\n')
+    .replace(/\/\*[\s\S]*?\*\//g,'');           // Kommentare raus (Register)
+  const bekannt=new Set();
+  let mSel;const reSel=/([^{}]+)\{/g;
+  while((mSel=reSel.exec(cssTxt))!==null){
+    mSel[1].split(',').forEach(s=>{
+      const erst=s.trim().split(/[\s>+~]+/)[0];
+      let mK;const reK=/\.([A-Za-z][\w-]*)/g;
+      while((mK=reK.exec(erst))!==null){bekannt.add(mK[1]);}
+    });
+  }
+  // Positivkontrolle: ohne sie waere jede Aussage unten trivial wahr.
+  c('Positivkontrolle: das CSS wurde gelesen ('+bekannt.size+' Klassen)',
+    bekannt.has('ja-btn')&&bekannt.size>50);
+  c('Gegenprobe des Sammlers: .btn-primary gilt NICHT als definiert',
+    !bekannt.has('btn-primary')&&!bekannt.has('btn-secondary'));
+  const knoepfe=[...w.document.querySelectorAll('button')];
+  c('es gibt ueberhaupt Knoepfe zu pruefen ('+knoepfe.length+')',knoepfe.length>=8);
+  const nackt=knoepfe.filter(b=>![...b.classList].some(k=>bekannt.has(k)));
+  c('jeder Knopf traegt eine Klasse, die DIESE Seite kennt'
+    +(nackt.length?' – nackt: '+nackt.map(b=>b.id||'"'+b.textContent.trim().slice(0,18)+'"').join(', '):''),
+    nackt.length===0);
+  const neuB2=$('am-frage-neu');
+  c('"Neue Frage" traegt die Knopfklasse dieser Seite',
+    !!neuB2&&neuB2.classList.contains('ja-btn'));
+  c('und steht in einer .ja-dl-Zeile (die .ja-actions hatte KEIN CSS)',
+    !!neuB2&&!!neuB2.closest('.ja-dl'));
+  c('"Speichern" ist die Hauptaktion des Formulars',
+    !!sB&&sB.classList.contains('ja-btn')&&sB.classList.contains('ja-btn-haupt'));
+  c('"Abbrechen" ist es NICHT',
+    !!$('am-f-cancel')&&$('am-f-cancel').classList.contains('ja-btn')
+    &&!$('am-f-cancel').classList.contains('ja-btn-haupt'));
   if(!(tI&&pI&&sB)){console.log('\n'+ok+' OK, '+(fail)+' FAIL');clearTimeout(wd);w.close();process.exit(1);}
   tI.value='Neu';pI.value='P';
   sB.dispatchEvent(new w.MouseEvent('click',{bubbles:true}));

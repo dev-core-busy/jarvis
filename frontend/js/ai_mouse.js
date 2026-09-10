@@ -327,10 +327,14 @@
                   + '<span>' + esc(t('aimouse.q_gem',
                       'Für alle Benutzer (nur Administratoren)')) + '</span></label>'
                 : '')
+            // ⚠ `.ja-btn`, NICHT `.btn-primary`/`.btn-secondary`: /ai-mouse laedt
+            // style.css nicht, diese Klassen sind hier also unbekannt und die
+            // Knoepfe waeren nackte Browser-Standardknoepfe. `ja-btn-haupt`
+            // markiert die Hauptaktion der Gruppe (Muster des Jira-Zugangs).
             + '<div class="am-q-acts-form">'
-            + '<button class="btn-primary" id="am-f-save">'
+            + '<button type="button" class="ja-btn ja-btn-haupt" id="am-f-save">'
             + esc(t('aimouse.q_save', 'Speichern')) + '</button>'
-            + '<button class="btn-secondary" id="am-f-cancel">'
+            + '<button type="button" class="ja-btn" id="am-f-cancel">'
             + esc(t('aimouse.q_cancel', 'Abbrechen')) + '</button>'
             + '<span id="am-f-status" style="font-size:0.9em;"></span>'
             + '</div>';

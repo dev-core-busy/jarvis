@@ -138,8 +138,14 @@
                 jedem Arbeitsplatz. Gemeinsame Fragen gelten für alle und werden
                 von einem Administrator gepflegt.</p>
             <div id="am-fragen"></div>
-            <div class="ja-actions">
-                <button class="btn-secondary" id="am-frage-neu" data-i18n="aimouse.q_new">Neue Frage</button>
+            <!-- ⚠ `.ja-btn` + `.ja-dl`, NICHT `.btn-secondary`/`.ja-actions`:
+                 diese Seite laedt nur theme.css und jira_addon.css. `.btn-*`
+                 steht in style.css und `.ja-actions` nirgends – der Knopf war
+                 damit ein nackter Browser-Standardknopf in einer Zeile ohne
+                 Abstand. Dieselbe Vorgabe wie beim Download-Knopf oben. -->
+            <div class="ja-dl">
+                <button type="button" class="ja-btn" id="am-frage-neu"
+                        data-i18n="aimouse.q_new">Neue Frage</button>
             </div>
             <!-- EIN Formular-Container, der WANDERT: er wird beim Bearbeiten
                  unter die jeweilige Zeile gehaengt (Muster der E-Mail-Regeln,

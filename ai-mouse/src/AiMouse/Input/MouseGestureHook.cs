@@ -102,6 +102,16 @@ internal sealed class MouseGestureHook : IDisposable
     private bool _isDragging;
     private Point _start;
 
+    /// <summary>Die letzte RUHEPOSITION – der Bezugspunkt der Verweilzeit.
+    ///
+    /// ⚠ NICHT DASSELBE WIE <see cref="_start"/>: dort hat der Benutzer
+    /// gedrueckt, hier steht er gerade still. Beide fallen nur zusammen,
+    /// solange er sich gar nicht bewegt hat. Gemessen wird die Verweilzeit
+    /// gegen DIESEN Punkt, damit eine kleine Bewegung die Uhr zurueckstellt,
+    /// statt das Halten endgueltig zu beenden.
+    /// </summary>
+    private Point _haltenAnker;
+
     /// <summary>Raised once the drag threshold is crossed. Argument: anchor point.</summary>
     public event Action<Point>? DragStarted;
 
@@ -207,6 +217,7 @@ internal sealed class MouseGestureHook : IDisposable
                 _pressWithheld = true;
                 _durchgereicht = false;
                 _start = point;
+                _haltenAnker = point;
 
                 // Haelt der Benutzer still, wird nach der Verweilzeit des
                 // Systems geprueft, ob hier etwas Ziehbares liegt.
@@ -232,21 +243,44 @@ internal sealed class MouseGestureHook : IDisposable
                     break;
                 }
 
-                // Wer sich mehr als die Zieh-Toleranz des Systems bewegt,
-                // will kein Objekt ziehen, sondern einen Rahmen aufziehen.
-                if (_halten.Enabled && SystemWerte.UeberToleranz(_start, point))
-                {
-                    _halten.Stop();
-                }
-
                 if (!_isDragging)
                 {
                     if (Math.Abs(point.X - _start.X) <= _threshold && Math.Abs(point.Y - _start.Y) <= _threshold)
                     {
+                        // ⚠ EINE BEWEGUNG SETZT DEN VERWEILTIMER ZURUECK, SIE
+                        //    BRICHT IHN NICHT AB. Genau das ist die Semantik von
+                        //    `SPI_GETMOUSEHOVERTIME`, an der sich diese Zeit
+                        //    bemisst: Windows meldet „hover", wenn die Maus fuer
+                        //    die Verweilzeit INNERHALB eines Rechtecks bleibt –
+                        //    und zieht bei jeder groesseren Bewegung Anker und
+                        //    Uhr nach.
+                        //
+                        //    ⚠ HIER STAND `_halten.Stop()` OHNE NEUSTART, und das
+                        //    war der gemeldete Fehler (2026-09-10, „ziehen
+                        //    funktioniert trotz Rechtsklick und kurz warten
+                        //    nicht"): abgebrochen wurde schon ab der
+                        //    Zieh-Toleranz (SM_CXDRAG, 4 px), das Lasso beginnt
+                        //    aber erst ab `_threshold` (Vorgabe 8 px). Im Fenster
+                        //    dazwischen passierte damit GAR NICHTS mehr – kein
+                        //    Timer, kein Rahmen. Wer beim Druecken die Maus fuenf
+                        //    Pixel mitzieht und dann stillhaelt, wartete
+                        //    vergeblich; unter vier Pixeln ging es. Das ist der
+                        //    „nicht in 100 % der Versuche".
+                        if (_halten.Enabled && SystemWerte.UeberToleranz(_haltenAnker, point))
+                        {
+                            _haltenAnker = point;
+                            _halten.Stop();
+                            _halten.Start();
+                        }
+
                         break;
                     }
 
                     _isDragging = true;
+
+                    // ⚠ HIER gehoert der Abbruch hin, und nur hier: ab jetzt ist
+                    //    es nachweislich ein Rahmen und kein Objektziehen mehr.
+                    _halten.Stop();
 
                     // Snapshot the anchor: the field may move on before the post runs.
                     Point anchor = _start;
@@ -316,8 +350,14 @@ internal sealed class MouseGestureHook : IDisposable
             return;
         }
 
+        // ⚠ GEPRUEFT WIRD AN DER RUHEPOSITION, NICHT AM DRUCKPUNKT: der Druck
+        //    wird gleich an der AKTUELLEN Zeigerposition injiziert (`SendInput`
+        //    ohne MOVE), und das ist `_haltenAnker`. Wer hier `_start` nimmt,
+        //    fragt nach einer Stelle, an der der Klick gar nicht ankommt –
+        //    nach einer kleinen Bewegung koennen das zwei verschiedene
+        //    Bedienelemente sein.
         Func<Point, bool>? pruefer = LiegtObjektUnter;
-        if (pruefer is null || !pruefer(_start))
+        if (pruefer is null || !pruefer(_haltenAnker))
         {
             // Nichts Ziehbares – es bleibt beim bisherigen Verhalten, der
             // Benutzer kann weiter einen Rahmen aufziehen.

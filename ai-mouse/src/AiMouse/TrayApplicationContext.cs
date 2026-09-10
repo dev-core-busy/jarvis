@@ -404,11 +404,14 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
         try
         {
-            string dataUri;
-            using (capture)
-            {
-                dataUri = ScreenCapture.ToDataUri(capture);
-            }
+            // ⚠ HIER STAND `using (capture)` – das Bitmap war unmittelbar nach
+            //    dem Umwandeln weg. Seit dem Kopier-Knopf im Antwortfenster
+            //    (Vorgabe 2026-09-10) wird es dort noch gebraucht, also geht
+            //    das EIGENTUM an das Fenster ueber; freigegeben wird es beim
+            //    Schliessen. Uebergeben wird VOR der Anfrage: sie dauert, und
+            //    der Ausschnitt ist auch dann etwas wert, wenn sie scheitert.
+            window.BildUebernehmen(capture);
+            string dataUri = ScreenCapture.ToDataUri(capture);
 
             // Anmelden, falls noch keine Sitzung steht. Das Fenster steht
             // dabei schon offen und zeigt den Wartezustand – ohne das saehe
@@ -491,13 +494,13 @@ internal sealed class TrayApplicationContext : ApplicationContext
             return;
         }
 
-        try
+        // ⚠ DERSELBE WEG WIE IM ANTWORTFENSTER (`Ui.Zwischenablage`). Hier
+        //    stand ein eigenes `SetImage` samt eigenem `catch`; seit es den
+        //    Kopier-Knopf im Fenster gibt (2026-09-10), waeren das zwei
+        //    Fassungen fuer dieselbe Sache.
+        if (Zwischenablage.BildSetzen(capture) is { } fehler)
         {
-            Clipboard.SetImage(capture);
-        }
-        catch (Exception ex)
-        {
-            ShowTrayError(Texte.ZwischenablageBelegt + ex.Message);
+            ShowTrayError(fehler);
         }
     }
 

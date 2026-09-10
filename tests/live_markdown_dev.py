@@ -23,7 +23,20 @@ from pathlib import Path
 
 ROOT = Path("/opt/jarvis") if Path("/opt/jarvis/ai-mouse").is_dir() else \
     Path(__file__).resolve().parent.parent
-DOTNET = Path("/opt/jarvis/vendor/dotnet/dotnet")
+# ⚠ MEHRERE ORTE, nicht einer: auf DEV liegt das SDK unter `vendor/`, auf der
+#   Arbeitsmaschine im PATH. Ein Waechter, der nur auf einem Rechner laeuft,
+#   ist ein halber (Register, dieselbe Lehre wie bei der jsdom-Suche).
+def _dotnet() -> Path | None:
+    import shutil as _sh
+    for kandidat in (Path("/opt/jarvis/vendor/dotnet/dotnet"),
+                     ROOT / "vendor" / "dotnet" / "dotnet"):
+        if kandidat.exists():
+            return kandidat
+    gefunden = _sh.which("dotnet")
+    return Path(gefunden) if gefunden else None
+
+
+DOTNET = _dotnet()
 QUELLE = ROOT / "ai-mouse" / "src" / "AiMouse" / "Ui" / "Markdown.cs"
 PLUGIN = ROOT / "browser-addon" / "popup.js"
 
@@ -40,8 +53,9 @@ def check(text, bed, info=""):
         print(f"  FAIL {text}" + (f"  [{info}]" if info else ""))
 
 
-if not DOTNET.exists():
-    print(f"ABBRUCH: kein dotnet unter {DOTNET}")
+if DOTNET is None:
+    # Exit 2: "konnte nicht laufen" darf nie wie "bestanden" aussehen.
+    print("ABBRUCH: kein dotnet gefunden (vendor/dotnet oder PATH)")
     sys.exit(2)
 if not QUELLE.exists():
     print(f"ABBRUCH: {QUELLE} fehlt")

@@ -12,7 +12,19 @@ internal sealed class ResultWindow : Form
     private readonly Label _header;
     private readonly RichTextBox _output;
     private readonly Button _copyButton;
+    private readonly Button _bildButton;
     private readonly CancellationTokenSource _cts;
+
+    /// <summary>Der untersuchte Ausschnitt – zum Kopieren (Vorgabe 2026-09-10).
+    ///
+    /// ⚠ DAS FENSTER BESITZT IHN UND GIBT IHN FREI. Vorher lag er in einem
+    /// <c>using</c> beim Aufrufer und war unmittelbar nach dem Umwandeln in
+    /// die Data-URI weg; ein Kopier-Knopf haette dann auf ein freigegebenes
+    /// Bitmap gegriffen – also genau dann versagt, wenn ihn jemand benutzt.
+    /// Eigentum und Lebensdauer gehoeren zusammen: wer das Bild anzeigt, gibt
+    /// es auch frei (siehe <see cref="OnFormClosed"/>).
+    /// </summary>
+    private Bitmap? _bild;
 
     public ResultWindow(string title, CancellationTokenSource cts)
     {
@@ -85,21 +97,42 @@ internal sealed class ResultWindow : Form
         var body = new Panel { Dock = DockStyle.Fill, Padding = new Padding(10, 4, 10, 4) };
         body.Controls.Add(_output);
 
+        // ⚠ AutoSize STATT FESTER BREITE: „Text kopieren" und „Copy image"
+        //    sind laenger als die frueheren 90 px, und bei Bildschirm-Zoom
+        //    ueber 100 % waechst die Schrift zusaetzlich (Fix vom 2026-09-10).
+        //    Eine feste Breite schneidet die Beschriftung dann ab.
         _copyButton = new Button
         {
             Text = Texte.Kopieren,
-            Width = 90,
-            Height = 28,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            MinimumSize = new Size(90, 28),
             Enabled = false,
             Anchor = AnchorStyles.Right,
         };
         _copyButton.Click += (_, _) => CopyToClipboard();
 
+        // Der untersuchte Ausschnitt. Er ist ab dem Oeffnen da – der Knopf
+        // haengt deshalb NICHT an der Antwort des Modells, sondern am Bild:
+        // auch wenn die Anfrage scheitert, will der Benutzer den Ausschnitt
+        // womoeglich weiterverwenden.
+        _bildButton = new Button
+        {
+            Text = Texte.BildKopierenKnopf,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            MinimumSize = new Size(90, 28),
+            Enabled = false,
+            Anchor = AnchorStyles.Right,
+        };
+        _bildButton.Click += (_, _) => BildKopieren();
+
         var closeButton = new Button
         {
             Text = Texte.Schliessen,
-            Width = 90,
-            Height = 28,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            MinimumSize = new Size(90, 28),
             Anchor = AnchorStyles.Right,
         };
         closeButton.Click += (_, _) => Close();
@@ -111,8 +144,10 @@ internal sealed class ResultWindow : Form
             Height = 44,
             Padding = new Padding(10, 8, 10, 8),
         };
+        // FlowDirection ist RightToLeft: zuerst hinzugefuegt = ganz rechts.
         buttons.Controls.Add(closeButton);
         buttons.Controls.Add(_copyButton);
+        buttons.Controls.Add(_bildButton);
 
         Controls.Add(body);
         Controls.Add(buttons);
@@ -130,6 +165,27 @@ internal sealed class ResultWindow : Form
         int y = Math.Clamp(anchor.Y + 12, working.Top, Math.Max(working.Top, working.Bottom - Height));
 
         Location = new Point(x, y);
+    }
+
+    /// <summary>Uebergibt den untersuchten Ausschnitt – das Fenster besitzt ihn
+    /// ab jetzt und gibt ihn beim Schliessen frei.
+    ///
+    /// ⚠ EIN SCHON GESCHLOSSENES FENSTER GIBT IHN SOFORT FREI. Sonst leckt das
+    /// Bitmap genau in dem Fall, in dem der Benutzer schneller war als die
+    /// Anfrage – und ein Rueckgabewert, den niemand prueft, waere die
+    /// schlechtere Loesung.
+    /// </summary>
+    public void BildUebernehmen(Bitmap bild)
+    {
+        if (IsDisposed)
+        {
+            bild.Dispose();
+            return;
+        }
+
+        _bild?.Dispose();
+        _bild = bild;
+        _bildButton.Enabled = true;
     }
 
     public void ShowAnswer(string answer, bool copyToClipboard)
@@ -276,6 +332,37 @@ internal sealed class ResultWindow : Form
         }
     }
 
+    /// <summary>Legt den untersuchten Ausschnitt in die Zwischenablage.
+    ///
+    /// ⚠ UEBER <see cref="Zwischenablage.BildSetzen"/>, NICHT mit eigenem
+    /// <c>SetImage</c>: derselbe Weg wie im Auswahl-Menue – zwei Fassungen
+    /// liefen beim naechsten Feinschliff auseinander.
+    /// </summary>
+    private void BildKopieren()
+    {
+        if (_bild is null)
+        {
+            return;
+        }
+
+        string? fehler = Zwischenablage.BildSetzen(_bild);
+
+        // ⚠ ERFOLG UND FEHLSCHLAG SIND BEIDE EINE AUSKUNFT: in der
+        //    Zwischenablage sieht man nichts. Ohne Meldung fuegt der Benutzer
+        //    im Zweifel den vorigen Inhalt ein und haelt ihn fuer den
+        //    Ausschnitt.
+        if (fehler is null)
+        {
+            _header.Text = Texte.BildInZwischenablage;
+            _header.ForeColor = SystemColors.GrayText;
+        }
+        else
+        {
+            _header.Text = fehler;
+            _header.ForeColor = Color.Firebrick;
+        }
+    }
+
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         // Stop an in-flight request when the user closes the window early.
@@ -285,6 +372,13 @@ internal sealed class ResultWindow : Form
         }
 
         _cts.Dispose();
+
+        // ⚠ DER AUSSCHNITT GEHOERT DEM FENSTER – hier endet seine Lebensdauer.
+        //    Ein Bitmap ist ein GDI-Objekt; wer es liegen laesst, haelt bei
+        //    jedem Rahmen ein paar Megabyte fest, bis der Prozess endet.
+        _bild?.Dispose();
+        _bild = null;
+
         base.OnFormClosed(e);
     }
 }

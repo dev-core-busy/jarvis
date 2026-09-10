@@ -2075,5 +2075,97 @@ check("der Sperr-Hinweis ebenfalls", "Height = 30," not in _sw)
 _mk = cs_nackt((_ui / "Marken.cs").read_text(encoding="utf-8"))
 check("der Markenkopf waechst mit", "AutoSize = true" in _mk and "Height = 38," not in _mk)
 
+
+# ── Abschnitt 20: der Verweiltimer und der Bild-Knopf (2026-09-10) ──────────
+# Gemeldet: „ziehen funktioniert trotz Rechtsklick und kurz warten nicht mehr in
+# 100 % der Versuche" – und dazu der Wunsch nach einem Kopier-Knopf fuer den
+# untersuchten Ausschnitt.
+print("\n── Verweiltimer und Bild-Knopf ──")
+
+_hook_roh = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Input"
+             / "MouseGestureHook.cs").read_text(encoding="utf-8")
+_hook = cs_nackt(_hook_roh)
+check("Positivkontrolle: der Hook wurde gelesen und gekuerzt",
+      len(_hook) < len(_hook_roh) and "WM_RBUTTONDOWN" in _hook)
+
+# (a) ⚠ DER KERN DES FEHLERS: eine kleine Bewegung darf den Verweiltimer
+#     ZURUECKSETZEN, nicht abbrechen. Abgebrochen gehoert er erst, wenn das
+#     Lasso wirklich beginnt – dazwischen liegt das Fenster 4..8 px, in dem
+#     vorher GAR NICHTS mehr passierte.
+_bew = _hook[_hook.index("case NativeMethods.WM_MOUSEMOVE"):
+             _hook.index("case NativeMethods.WM_RBUTTONUP")]
+check("eine Bewegung startet den Verweiltimer NEU",
+      "_halten.Stop();" in _bew and "_halten.Start();" in _bew)
+check("  … gemessen gegen die letzte RUHEPOSITION, nicht den Druckpunkt",
+      "UeberToleranz(_haltenAnker, point)" in _bew
+      and "UeberToleranz(_start, point)" not in _bew)
+check("  … und der Anker wird dabei nachgezogen", "_haltenAnker = point;" in _bew)
+# Die Gegenrichtung: sobald ein Rahmen entsteht, ist Objektziehen vom Tisch.
+_ab_lasso = _bew[_bew.index("_isDragging = true;"):]
+check("erst das beginnende Lasso beendet das Halten",
+      "_halten.Stop();" in _ab_lasso)
+
+# (b) Der Anker muss beim Druecken gesetzt werden – ein Feld, das nur im
+#     Bewegungszweig geschrieben wird, traegt beim ersten Ablauf (0,0).
+_down = _hook[_hook.index("case NativeMethods.WM_RBUTTONDOWN"):
+              _hook.index("case NativeMethods.WM_MOUSEMOVE")]
+check("der Anker wird beim Druecken gesetzt", "_haltenAnker = point;" in _down)
+
+# (c) Geprueft wird, wo der Klick ANKOMMT: `SendRightDown` injiziert an der
+#     aktuellen Zeigerposition, und das ist die Ruheposition.
+_halten_fn = _hook[_hook.index("private void HaltenAbgelaufen"):]
+check("die Ziehbar-Pruefung fragt die Ruheposition ab",
+      "pruefer(_haltenAnker)" in _halten_fn and "pruefer(_start)" not in _halten_fn)
+
+# (d) Der Bild-Knopf im Antwortfenster.
+_rw_roh = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Ui"
+           / "ResultWindow.cs").read_text(encoding="utf-8")
+_rw = cs_nackt(_rw_roh)
+check("das Fenster hat einen Knopf fuer den Ausschnitt",
+      "_bildButton" in _rw and "Texte.BildKopierenKnopf" in _rw)
+check("er ist zunaechst gesperrt und wird mit dem Bild freigegeben",
+      "public void BildUebernehmen(Bitmap bild)" in _rw
+      and "_bildButton.Enabled = true;" in _rw)
+# ⚠ LEBENSDAUER: das Fenster besitzt das Bitmap und gibt es frei.
+check("das Fenster gibt den Ausschnitt beim Schliessen frei",
+      "_bild?.Dispose();" in _rw[_rw.index("OnFormClosed"):])
+check("  … und auch, wenn es beim Uebergeben schon zu ist (kein Leck)",
+      "if (IsDisposed)" in _rw[_rw.index("BildUebernehmen"):
+                               _rw.index("public void ShowAnswer")])
+# ⚠ ERFOLG UND FEHLSCHLAG SIND BEIDE EINE AUSKUNFT.
+_bk = _rw[_rw.index("private void BildKopieren"):]
+check("Erfolg wird gemeldet", "Texte.BildInZwischenablage" in _bk)
+check("  … und ein Fehlschlag ebenfalls", "Color.Firebrick" in _bk)
+
+# (e) Der Aufrufer darf das Bitmap NICHT mehr sofort freigeben.
+_tray = cs_nackt((ROOT / "ai-mouse" / "src" / "AiMouse"
+                  / "TrayApplicationContext.cs").read_text(encoding="utf-8"))
+check("der Aufrufer uebergibt den Ausschnitt ans Fenster",
+      "window.BildUebernehmen(capture);" in _tray)
+check("  … und gibt ihn nicht mehr selbst frei (kein `using (capture)`)",
+      "using (capture)" not in _tray)
+
+# (f) EINE Stelle fuer die Zwischenablage – zwei liefen auseinander.
+_zw = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Ui"
+       / "Zwischenablage.cs").read_text(encoding="utf-8")
+check("es gibt eine gemeinsame Kopier-Stelle", "public static string? BildSetzen" in _zw)
+_alle_cs = [p for p in (ROOT / "ai-mouse" / "src").rglob("*.cs") if "obj" not in p.parts]
+_setimage = [p.name for p in _alle_cs
+             if "Clipboard.SetImage" in cs_nackt(p.read_text(encoding="utf-8"))]
+check("und NUR dort steht ein SetImage (%s)" % ", ".join(_setimage) if _setimage
+      else "und NUR dort steht ein SetImage",
+      _setimage == ["Zwischenablage.cs"])
+
+# (g) Zwei Kopier-Knoepfe muessen sagen, was sie kopieren.
+_txt = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Localization"
+        / "Texte.cs").read_text(encoding="utf-8")
+check("der Textknopf heisst nicht mehr blosss 'Kopieren'",
+      'T("Text kopieren", "Copy text")' in _txt)
+check("  … und die Rueckmeldung nennt den Gegenstand",
+      'T("Text in die Zwischenablage kopiert.' in _txt
+      and 'T("Bild in die Zwischenablage kopiert.' in _txt)
+check("beide neuen Texte gibt es in DE und EN",
+      '"Copy image"' in _txt and '"Image copied to clipboard."' in _txt)
+
 print("\n%d OK, %d FAIL" % (ok, fail))
 sys.exit(1 if fail else 0)

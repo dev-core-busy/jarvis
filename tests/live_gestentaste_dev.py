@@ -25,7 +25,20 @@ from pathlib import Path
 
 ROOT = Path("/opt/jarvis") if Path("/opt/jarvis/ai-mouse").is_dir() else \
     Path(__file__).resolve().parent.parent
-DOTNET = Path("/opt/jarvis/vendor/dotnet/dotnet")
+# ⚠ MEHRERE ORTE, nicht einer: auf DEV liegt das SDK unter `vendor/`, auf der
+#   Arbeitsmaschine im PATH. Ein Waechter, der nur auf einem Rechner laeuft,
+#   ist ein halber (Register, dieselbe Lehre wie bei der jsdom-Suche).
+def _dotnet() -> Path | None:
+    import shutil as _sh
+    for kandidat in (Path("/opt/jarvis/vendor/dotnet/dotnet"),
+                     ROOT / "vendor" / "dotnet" / "dotnet"):
+        if kandidat.exists():
+            return kandidat
+    gefunden = _sh.which("dotnet")
+    return Path(gefunden) if gefunden else None
+
+
+DOTNET = _dotnet()
 HOOK = ROOT / "ai-mouse" / "src" / "AiMouse" / "Input" / "MouseGestureHook.cs"
 TASTE = ROOT / "ai-mouse" / "src" / "AiMouse" / "Input" / "GestenTaste.cs"
 
@@ -42,8 +55,9 @@ def check(text, bed, info=""):
         print(f"  FAIL {text}" + (f"  [{info}]" if info else ""))
 
 
-if not DOTNET.exists():
-    print(f"ABBRUCH: kein dotnet unter {DOTNET}")
+if DOTNET is None:
+    # Exit 2: "konnte nicht laufen" darf nie wie "bestanden" aussehen.
+    print("ABBRUCH: kein dotnet gefunden (vendor/dotnet oder PATH)")
     sys.exit(2)
 
 roh = HOOK.read_text(encoding="utf-8")
@@ -161,7 +175,17 @@ internal static class SystemWerte
 {
     public static int Verweilzeit() => 400;
     public static bool UeberToleranzWert;
-    public static bool UeberToleranz(Point a, Point b) => UeberToleranzWert;
+
+    /// ⚠ RECHNET WIRKLICH, statt eine Antwort zu diktieren: nur so ist
+    ///    ueberhaupt beobachtbar, GEGEN WELCHEN Punkt gemessen wird. Eine
+    ///    Attrappe, die die Argumente wegwirft, kann die Eigenschaft
+    ///    "der Anker wird nachgezogen" nicht zeigen - die Gegenprobe dazu blieb
+    ///    damit stumm (Register: eine Attrappe, die weniger kann als das
+    ///    Original, prueft eine Kette, die es nicht gibt).
+    public const int Tol = 4;
+    public static bool UeberToleranz(Point a, Point b)
+        => UeberToleranzWert
+           && (Math.Abs(b.X - a.X) > Tol || Math.Abs(b.Y - a.Y) > Tol);
 }
 
 internal sealed class Hook
@@ -171,6 +195,10 @@ internal sealed class Hook
     private bool _pressWithheld;
     private bool _isDragging;
     private Point _start;
+    // ⚠ NEU 2026-09-10: die letzte Ruheposition. Ein Feld faellt aus jedem
+    //    Funktions-Schnitt heraus und muss hier stehen, sonst uebersetzt der
+    //    geschnittene Code nicht (Register).
+    private Point _haltenAnker;
 
     public GestenTaste Durchreichen { get; set; } = GestenTaste.Keine;
     public GestenTaste GesteVerlangt { get; set; } = GestenTaste.Keine;
@@ -386,21 +414,70 @@ internal static class Programm
         };
     }
 
-    /// Bewegung waehrend des Haltens: stoppt sie den Timer?
-    static object Bewegung(string name, bool ueber)
+    /// Bewegung waehrend des Haltens - und was danach passiert.
+    ///
+    /// ⚠ HIER STAND DIE FALSCHE ZUSAGE: der Waechter prueste bis 2026-09-10,
+    ///    dass eine Bewegung ueber die Zieh-Toleranz den Timer STOPPT - und
+    ///    genau das war der gemeldete Fehler. Abgebrochen gehoert er erst,
+    ///    wenn das Lasso wirklich beginnt; eine kleine Bewegung setzt ihn
+    ///    zurueck (Semantik von SPI_GETMOUSEHOVERTIME).
+    static object Bewegung(string name, bool ueber, int dx)
     {
         var h = new Hook();
         h.LiegtObjektUnter = _ => true;
+        int lasso = 0;
+        h.DragStarted += _ => lasso++;
+        bool gemeldet = false;
+        h.Durchgereicht += () => gemeldet = true;
+        InputReplay.Downs = 0;
+        // ⚠ AUSDRUECKLICH ZURUECKSTELLEN: ein frueherer Fall setzt `Scheitert`
+        //    auf true, und ein Leck daraus meldet hier "nicht durchgereicht" -
+        //    ein Fehler, den der Code nicht hat (beim ersten Lauf genau so
+        //    passiert, Register).
+        InputReplay.Scheitert = false;
+        NativeMethods.Gehalten = 0;
+        NativeMethods.NurNachwirkung = false;
+
         An(h, NativeMethods.WM_RBUTTONDOWN, 10, 10);
         bool nachDown = h.Halten.Enabled;
+        int startsNachDown = h.Halten.Starts;
+
         SystemWerte.UeberToleranzWert = ueber;
-        An(h, NativeMethods.WM_MOUSEMOVE, 11, 11);
+        An(h, NativeMethods.WM_MOUSEMOVE, 10 + dx, 10);
+        // ⚠ EINE ZWEITE, KLEINE BEWEGUNG. Wird der Anker nachgezogen, liegt sie
+        //    innerhalb der Toleranz und startet den Timer NICHT erneut. Ohne
+        //    Nachziehen misst der Code weiter gegen den Druckpunkt und startet
+        //    ein zweites Mal - daran ist die Eigenschaft ueberhaupt erst zu
+        //    erkennen.
+        if (dx > 0 && dx < 8)
+        {
+            An(h, NativeMethods.WM_MOUSEMOVE, 10 + dx + 2, 10);
+        }
         SystemWerte.UeberToleranzWert = false;
+
+        bool timerNachMove = h.Halten.Enabled;
+        int neustarts = h.Halten.Starts - startsNachDown;
+
+        // ⚠ NUR WENN DER TIMER NOCH LAEUFT. Ein gestoppter WinForms-Timer
+        //    feuert nicht; wer `HaltenAbgelaufen` trotzdem ruft, misst einen
+        //    Ablauf, den es im Betrieb gar nicht gibt - und die Gegenprobe
+        //    meldet dann faelschlich "durchgereicht" fuer einen Stand, in dem
+        //    der Benutzer vergeblich wartet (beim ersten Lauf genau so gesehen).
+        if (h.Halten.Enabled)
+        {
+            h.HaltenTest();
+        }
+
         return new Dictionary<string, object?>
         {
             ["fall"] = name,
             ["timer_nach_down"] = nachDown,
-            ["timer_nach_move"] = h.Halten.Enabled,
+            ["timer_nach_move"] = timerNachMove,
+            ["neustarts"] = neustarts,
+            ["lasso"] = lasso,
+            ["durchgereicht"] = h.Durchgereicht_,
+            ["gemeldet"] = gemeldet,
+            ["downs"] = InputReplay.Downs,
         };
     }
 
@@ -419,8 +496,13 @@ internal static class Programm
         raus.Add(Halten("schon am Ziehen -> nichts", true, true, false, false));
         raus.Add(Halten("schon durchgereicht -> nichts", true, false, true, false));
         raus.Add(Halten("Injektion scheitert -> zurueckgedreht", true, false, false, true));
-        raus.Add(Bewegung("Bewegung ueber Toleranz stoppt den Timer", true));
-        raus.Add(Bewegung("Zittern unter der Toleranz nicht", false));
+        // ⚠ dx=5 liegt UEBER der Zieh-Toleranz (4) und UNTER `_threshold` (8) -
+        //    genau das Fenster, in dem der gemeldete Fehler sass. dx=1 waere
+        //    gar keine Bewegung im Sinne der Pruefung gewesen.
+        raus.Add(Bewegung("kleine Bewegung, dann stillhalten", true, 5));
+        raus.Add(Bewegung("Zittern unter der Toleranz", true, 1));
+        // dx=20 ueberschreitet `_threshold` - ab hier ist es ein Rahmen.
+        raus.Add(Bewegung("echtes Lasso", true, 20));
         raus.Add(LaufNachHaenger(GestenTaste.Strg, NativeMethods.VK_CONTROL));
         raus.Add(LaufNachwirkung(GestenTaste.Strg, NativeMethods.VK_CONTROL));
         foreach (var t in new[] { GestenTaste.Keine, GestenTaste.Strg,
@@ -556,15 +638,36 @@ internal static class Programm
     check("  … und der Zustand wird zurueckgedreht",
           e["durchgereicht"] is False, json.dumps(e))
 
-    e = halt("Bewegung ueber Toleranz stoppt den Timer")
+    # ⚠ DER GEMELDETE FALL (2026-09-10): rechte Taste druecken, die Maus rutscht
+    #   dabei ein paar Pixel mit, dann stillhalten. Bis dahin war der Timer
+    #   danach TOT - das Lasso beginnt aber erst ab `_threshold` (8 px), also
+    #   passierte im Fenster 5..8 px gar nichts mehr.
+    e = halt("kleine Bewegung, dann stillhalten")
     check("der Halte-Timer startet beim Druecken",
           e["timer_nach_down"] is True, json.dumps(e))
-    check("Bewegung ueber die Zieh-Toleranz beendet das Halten",
-          e["timer_nach_move"] is False, json.dumps(e))
+    check("eine kleine Bewegung SETZT ihn zurueck, statt ihn abzubrechen",
+          e["timer_nach_move"] is True and e["neustarts"] == 1, json.dumps(e))
+    check("  … es ist dabei KEIN Lasso entstanden",
+          e["lasso"] == 0, json.dumps(e))
+    check("  … und danach wird wirklich durchgereicht",
+          e["durchgereicht"] is True and e["downs"] == 1, json.dumps(e))
+    check("  … das Durchreichen wird gemeldet (der Rahmen muss weg)",
+          e["gemeldet"] is True, json.dumps(e))
 
-    e = halt("Zittern unter der Toleranz nicht")
-    check("Zittern unter der Toleranz beendet es NICHT",
-          e["timer_nach_move"] is True, json.dumps(e))
+    e = halt("Zittern unter der Toleranz")
+    check("Zittern unter der Toleranz laesst die Uhr WEITERlaufen",
+          e["timer_nach_move"] is True and e["neustarts"] == 0, json.dumps(e))
+    check("  … und reicht danach ebenfalls durch",
+          e["durchgereicht"] is True, json.dumps(e))
+
+    # Die Gegenrichtung: ein echtes Lasso beendet das Halten endgueltig.
+    e = halt("echtes Lasso")
+    check("ein Lasso ueber der Schwelle beendet das Halten",
+          e["timer_nach_move"] is False, json.dumps(e))
+    check("  … es entsteht ein Rahmen",
+          e["lasso"] == 1, json.dumps(e))
+    check("  … und NICHTS wird durchgereicht",
+          e["durchgereicht"] is False and e["downs"] == 0, json.dumps(e))
 
     print("\n── Vorgabe Strg: die Taste gibt den Klick frei ──")
     for ziehen in (False, True):

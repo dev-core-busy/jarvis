@@ -73,7 +73,12 @@ internal static class Texte
     // ── Geste und Auswertung ────────────────────────────────────────────────
     public static string Auswerten => T("Wird ausgewertet…", "Analysing…");
     public static string Ergebnis => T("Ergebnis", "Result");
-    public static string Kopieren => T("Kopieren", "Copy");
+    // ⚠ ZWEI KOPIER-KNOEPFE NEBENEINANDER MUESSEN SAGEN, WAS SIE KOPIEREN.
+    //   Bis 2026-09-10 hiess dieser schlicht „Kopieren" – das war eindeutig,
+    //   solange er allein stand. Neben „Bild kopieren" ist es die Frage, was
+    //   der andere denn kopiert.
+    public static string Kopieren => T("Text kopieren", "Copy text");
+    public static string BildKopierenKnopf => T("Bild kopieren", "Copy image");
     public static string Schliessen => T("Schließen", "Close");
     public static string EigeneFrage => T("Eigene Frage…", "Custom question…");
     public static string EigeneFrageTitel => T(
@@ -168,8 +173,13 @@ internal static class Texte
                                              "Waiting for the model…");
     public static string AnfrageFehlgeschlagen => T("Anfrage fehlgeschlagen",
                                                     "Request failed");
-    public static string InZwischenablage => T("In die Zwischenablage kopiert.",
-                                               "Copied to clipboard.");
+    // ⚠ DIE MELDUNG NENNT DEN GEGENSTAND: in der Zwischenablage sieht man
+    //   nicht, was drin liegt – bei zwei Kopier-Knoepfen ist „kopiert" allein
+    //   keine Auskunft.
+    public static string InZwischenablage => T("Text in die Zwischenablage kopiert.",
+                                               "Text copied to clipboard.");
+    public static string BildInZwischenablage =>
+        T("Bild in die Zwischenablage kopiert.", "Image copied to clipboard.");
 
     /// <summary>Zeichenzahl der ANGEZEIGTEN Antwort.
     ///

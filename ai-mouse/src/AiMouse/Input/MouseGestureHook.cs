@@ -59,6 +59,32 @@ internal sealed class MouseGestureHook : IDisposable
     /// <summary>True while a swallowed press is owed either to a gesture or to a replay.</summary>
     private bool _pressWithheld;
 
+    /// <summary>Laeuft, solange der Benutzer haelt, ohne zu ziehen.
+    ///
+    /// ⚠ EIN `System.Windows.Forms.Timer` UND KEIN `System.Threading.Timer`:
+    /// er feuert auf dem UI-Thread. Nur dort darf die Entscheidung fallen,
+    /// denn sie fasst denselben Zustand an wie der Hook-Callback – ein
+    /// Threading-Timer braeuchte eine Sperre um jedes Feld, und die haette im
+    /// Callback nichts zu suchen (er muss binnen `LowLevelHooksTimeout`
+    /// zurueck).</summary>
+    private readonly System.Windows.Forms.Timer _halten = new();
+
+    /// <summary>Ist der Druck bereits an die Anwendung durchgereicht?</summary>
+    private bool _durchgereicht;
+
+    /// <summary>Prueft, ob an dieser Stelle etwas Ziehbares liegt.
+    ///
+    /// Als Delegat, damit der Hook ohne UI Automation testbar bleibt – die
+    /// echte Pruefung braucht Windows, die Verdrahtung nicht.</summary>
+    public Func<Point, bool>? LiegtObjektUnter { get; set; }
+
+    /// <summary>Der Rechtsklick wurde an die Anwendung durchgereicht.
+    ///
+    /// Gemeldet wird das, damit ein laufender Auswahlrahmen verschwindet: er
+    /// waere sonst ein Rechteck ueber einem Ziehvorgang, das niemand mehr
+    /// wegbekommt.</summary>
+    public event Action? Durchgereicht;
+
     private bool _isDragging;
     private Point _start;
 
@@ -91,6 +117,9 @@ internal sealed class MouseGestureHook : IDisposable
 
         // Held in a field so the GC cannot collect the delegate while Windows owns it.
         _callback = HookProc;
+
+        _halten.Interval = SystemWerte.Verweilzeit();
+        _halten.Tick += (_, _) => HaltenAbgelaufen();
     }
 
     public void Install()
@@ -148,15 +177,38 @@ internal sealed class MouseGestureHook : IDisposable
                 }
 
                 _pressWithheld = true;
+                _durchgereicht = false;
                 _start = point;
+
+                // Haelt der Benutzer still, wird nach der Verweilzeit des
+                // Systems geprueft, ob hier etwas Ziehbares liegt.
+                if (LiegtObjektUnter is not null)
+                {
+                    _halten.Stop();
+                    _halten.Start();
+                }
 
                 // Withhold the press until the release tells us what the user meant.
                 return (IntPtr)1;
 
             case NativeMethods.WM_MOUSEMOVE:
+                // ⚠ Nach dem Durchreichen gehoert die Maus der Anwendung –
+                //    weder Lasso noch Timer duerfen hier noch etwas tun.
+                if (_durchgereicht)
+                {
+                    break;
+                }
+
                 if (!_pressWithheld)
                 {
                     break;
+                }
+
+                // Wer sich mehr als die Zieh-Toleranz des Systems bewegt,
+                // will kein Objekt ziehen, sondern einen Rahmen aufziehen.
+                if (_halten.Enabled && SystemWerte.UeberToleranz(_start, point))
+                {
+                    _halten.Stop();
                 }
 
                 if (!_isDragging)
@@ -181,6 +233,9 @@ internal sealed class MouseGestureHook : IDisposable
                 {
                     break;
                 }
+
+                // Losgelassen heisst: nicht mehr gehalten.
+                _halten.Stop();
 
                 if (!_pressWithheld)
                 {
@@ -208,6 +263,56 @@ internal sealed class MouseGestureHook : IDisposable
         }
 
         return NativeMethods.CallNextHookEx(_hookHandle, nCode, wParam, lParam);
+    }
+
+    /// <summary>Der Benutzer haelt, ohne zu ziehen – liegt hier etwas Ziehbares?
+    ///
+    /// ⚠ WARUM DIESE PRUEFUNG HIER STEHT UND NICHT IM HOOK-CALLBACK: der muss
+    /// binnen `LowLevelHooksTimeout` (Vorgabe 300 ms) zurueck, sonst haengt
+    /// Windows den Hook STILLSCHWEIGEND aus – die Geste waere dann tot, ohne
+    /// jede Meldung. Eine UIA-Abfrage geht ueber die Prozessgrenze in eine
+    /// fremde Anwendung und kann laenger dauern. Im Timer ist das unkritisch,
+    /// weil die Taste ohnehin gehalten wird.
+    ///
+    /// ⚠ UND DER ZUSTAND WIRD ERNEUT GEPRUEFT: zwischen dem Start des Timers
+    /// und diesem Aufruf kann der Benutzer losgelassen oder zu ziehen begonnen
+    /// haben. Ohne diese Pruefung wuerde mitten in ein laufendes Lasso hinein
+    /// ein Klick injiziert.
+    /// </summary>
+    private void HaltenAbgelaufen()
+    {
+        _halten.Stop();
+
+        if (!_pressWithheld || _isDragging || _durchgereicht)
+        {
+            return;
+        }
+
+        Func<Point, bool>? pruefer = LiegtObjektUnter;
+        if (pruefer is null || !pruefer(_start))
+        {
+            // Nichts Ziehbares – es bleibt beim bisherigen Verhalten, der
+            // Benutzer kann weiter einen Rahmen aufziehen.
+            return;
+        }
+
+        // ⚠ DIE REIHENFOLGE IST DIE SEMANTIK. Erst den Zustand umstellen,
+        //    DANN injizieren: der injizierte Druck laeuft durch denselben
+        //    Hook, und der muss ihn bereits als "gehoert der Anwendung"
+        //    sehen. Andersherum entstuende ein Wettlauf mit sich selbst.
+        _pressWithheld = false;
+        _durchgereicht = true;
+
+        if (InputReplay.SendRightDown() is { } fehler)
+        {
+            // ⚠ NICHT STILL: der Klick des Benutzers ist damit verloren – er
+            //    wurde verschluckt und konnte nicht weitergereicht werden.
+            _durchgereicht = false;
+            Post(() => ReplayFailed?.Invoke(fehler));
+            return;
+        }
+
+        Post(() => Durchgereicht?.Invoke());
     }
 
     /// <summary>
@@ -254,6 +359,9 @@ internal sealed class MouseGestureHook : IDisposable
 
     public void Dispose()
     {
+        _halten.Stop();
+        _halten.Dispose();
+
         if (_hookHandle != IntPtr.Zero)
         {
             NativeMethods.UnhookWindowsHookEx(_hookHandle);

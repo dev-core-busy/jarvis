@@ -100,7 +100,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             Icon = TrayIconFactory.Create(),
             Visible = true,
-            Text = "AI Mouse — right-click + drag to capture",
+            Text = $"{Texte.Marke} — {Texte.TrayHinweis}",
             ContextMenuStrip = BuildTrayMenu(),
         };
 
@@ -108,6 +108,25 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             Durchreichen = GestenTasteAus(_settings.RightDragKey),
         };
+        // Nach dem Halten pruefen, ob dort ein ziehbares Objekt liegt. Als
+        // Delegat, damit der Hook ohne UI Automation testbar bleibt.
+        //
+        // ⚠ DIE ZEITGRENZE IST KLEINER ALS DIE VERWEILZEIT: die Abfrage geht
+        //    in eine fremde Anwendung, und der Benutzer haelt waehrenddessen
+        //    die Taste. Wer hier eine Sekunde wartet, laesst ihn eine Sekunde
+        //    lang glauben, die Anwendung haenge.
+        _hook.LiegtObjektUnter = p => ZiehbarPruefer.LiegtObjektUnter(
+            p, TimeSpan.FromMilliseconds(250));
+
+        // ⚠ EIN LAUFENDER RAHMEN MUSS WEG, sobald der Klick der Anwendung
+        //    gehoert – sonst bleibt ein Auswahlrechteck ueber einem
+        //    Ziehvorgang stehen, das der Benutzer nicht mehr los wird.
+        _hook.Durchgereicht += () =>
+        {
+            _overlay.EndSelection();
+            DiscardPendingCapture();
+        };
+
         _hook.DragStarted += point => _overlay.BeginSelection(point);
         _hook.DragMoved += point => _overlay.UpdateSelection(point);
         _hook.DragCompleted += OnDragCompleted;
@@ -128,7 +147,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         string? startupWarning = settingsError ?? promptsError;
         if (startupWarning is not null)
         {
-            _trayIcon.ShowBalloonTip(5000, "AI Mouse", startupWarning, ToolTipIcon.Warning);
+            _trayIcon.ShowBalloonTip(5000, Texte.Marke, startupWarning, ToolTipIcon.Warning);
         }
 
         // ⚠ ANMELDUNG UND FRAGEN BEIM START – ausdrueckliche Vorgabe vom
@@ -155,11 +174,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
         _promptMenu.Items.Add(new ToolStripSeparator());
 
-        var copyItem = new ToolStripMenuItem("Copy image to clipboard");
+        var copyItem = new ToolStripMenuItem(Texte.BildKopieren);
         copyItem.Click += OnCopyImageClicked;
         _promptMenu.Items.Add(copyItem);
 
-        var saveItem = new ToolStripMenuItem("Save image as…");
+        var saveItem = new ToolStripMenuItem(Texte.BildSpeichern);
         saveItem.Click += OnSaveImageClicked;
         _promptMenu.Items.Add(saveItem);
 
@@ -226,7 +245,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             }
             ConfigStore.SaveToken(_client.Token);
             await FragenNachladenAsync().ConfigureAwait(true);
-            _trayIcon.ShowBalloonTip(3000, "AI Mouse", Texte.Angemeldet, ToolTipIcon.Info);
+            _trayIcon.ShowBalloonTip(3000, Texte.Marke, Texte.Angemeldet, ToolTipIcon.Info);
         }
         catch (Exception ex)
         {
@@ -319,7 +338,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
         catch (Exception ex)
         {
-            ShowTrayError($"Screen capture failed: {ex.Message}");
+            ShowTrayError(Texte.AufnahmeFehler + ex.Message);
             return;
         }
 
@@ -473,7 +492,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
         catch (Exception ex)
         {
-            ShowTrayError($"Clipboard is busy: {ex.Message}");
+            ShowTrayError(Texte.ZwischenablageBelegt + ex.Message);
         }
     }
 
@@ -487,7 +506,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
         using var dialog = new SaveFileDialog
         {
-            Filter = "PNG image|*.png",
+            Filter = Texte.PngFilter,
             FileName = $"ai-mouse-{DateTime.Now:yyyyMMdd-HHmmss}.png",
             InitialDirectory = ConfigStore.BaseDirectory,
         };
@@ -503,7 +522,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            ShowTrayError($"Could not save the image: {ex.Message}");
+            ShowTrayError(Texte.SpeichernFehler + ex.Message);
         }
     }
 
@@ -550,7 +569,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             }
 
             ApplySettings(dialog.Result);
-            _trayIcon.ShowBalloonTip(3000, "AI Mouse", Texte.Gespeichert, ToolTipIcon.Info);
+            _trayIcon.ShowBalloonTip(3000, Texte.Marke, Texte.Gespeichert, ToolTipIcon.Info);
 
             // ⚠ MIT KENNWORT WIRD ANGEMELDET (Vorgabe 2026-09-09: die
             // Zugangsdaten gehoeren in diesen Dialog). LEER heisst
@@ -835,7 +854,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
         catch (Exception ex)
         {
-            ShowTrayError($"Could not open {Path.GetFileName(path)}: {ex.Message}");
+            ShowTrayError($"{Texte.OeffnenFehler}{Path.GetFileName(path)}: {ex.Message}");
         }
     }
 
@@ -871,7 +890,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
     }
 
-    private void ShowTrayError(string message) => _trayIcon.ShowBalloonTip(5000, "AI Mouse", message, ToolTipIcon.Error);
+    private void ShowTrayError(string message) => _trayIcon.ShowBalloonTip(5000, Texte.Marke, message, ToolTipIcon.Error);
 
     private void BeginInvokeOnOwner(Action action)
     {

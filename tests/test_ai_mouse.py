@@ -10,6 +10,7 @@ Laeuft ohne fastapi und ohne google-genai: die Provider-Typen werden gestellt.
 """
 import ast
 import base64
+import re
 import struct
 import sys
 import types as _pytypes
@@ -1159,8 +1160,13 @@ check("nur LinkZiel entscheidet – im Fenster steht keine zweite Schema-Regel",
 # (d) Der Rest des Fensters bleibt, wie er war.
 check("Kopieren funktioniert weiter", "Clipboard.SetText(_output.Text)" in erg_code)
 check("das Feld bleibt schreibgeschuetzt", "ReadOnly = true" in erg_code)
-check("es wird NICHT formatiert (kein Markdown-Parser im Fenster)",
-      "SelectionFont" not in erg_code and "Rtf" not in erg_code)
+# ⚠ HIER STAND "es wird NICHT formatiert". Das war der Ist-Zustand vom
+# 2026-09-10 frueh und ist seit der Vorgabe „der MD-Parser wie im
+# Browser-Plugin" falsch – ein Test, der einen Zustand festschreibt statt einer
+# EIGENSCHAFT, meldet die Behebung als Fehler (Register).
+# Geblieben ist die Zusage, die weiter gilt: KEIN selbst gebautes RTF.
+check("die Anzeige baut kein RTF selbst (Fremdtext, Maskierung von \\ { })",
+      ".Rtf" not in erg_code and "SelectedRtf" not in erg_code)
 
 # (e) Texte in DE UND EN.
 def _texteintrag_cs(name):
@@ -1499,6 +1505,281 @@ check("die Datei erklaert, warum eine Erkennung NICHT geht (UIA/Timeout)",
       "IsDraggable" in cs_hook and "LowLevelHooksTimeout" in cs_hook)
 check("und warum gerade Strg die Vorgabe ist", "Umschalt" in cs_gtaste
       and "erweiterte" in cs_gtaste.lower())
+
+# ══════════════════════════════════════════════════════════════════════════
+# 15. Markdown im Ergebnisfenster + KEIN harter UI-Text mehr (2026-09-10)
+#
+# Gemeldet: „ich moechte doch den MD parser (wie im browser plugin) im
+# Ergebnisfenster" und „die Menues sind immer noch nicht i18n: 'copy image to
+# clipboard' und 'Save Image as'".
+#
+# ⚠ „IMMER NOCH" IST DER GRUND FUER DIE REGEL WEITER UNTEN. Zwei Eintraege
+# nachzutragen loest den Fall nicht: gemessen standen SIEBZEHN Literale hart
+# im Code, und `Texte.Kopieren`/`Texte.Schliessen` gab es sogar schon – sie
+# waren nur nie verdrahtet. Eine gepflegte Liste im Waechter waere beim
+# naechsten Knopf wieder unvollstaendig.
+# ══════════════════════════════════════════════════════════════════════════
+print("\n--- 15. Markdown-Parser + i18n ---")
+
+cs_md   = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Ui" / "Markdown.cs").read_text(encoding="utf-8")
+cs_tray = (ROOT / "ai-mouse" / "src" / "AiMouse" / "TrayApplicationContext.cs").read_text(encoding="utf-8")
+md_code   = cs_nackt(cs_md)
+tray_code = cs_nackt(cs_tray)
+check("Positivkontrolle: der Kommentar-Entferner hat auch hier gekuerzt",
+      len(md_code) < len(cs_md) and "ZuZeilen" in md_code)
+
+# (a) Die zwei gemeldeten Eintraege.
+check("'Bild in die Zwischenablage' kommt aus der Texttabelle",
+      "ToolStripMenuItem(Texte.BildKopieren)" in tray_code)
+check("'Bild speichern unter' kommt aus der Texttabelle",
+      "ToolStripMenuItem(Texte.BildSpeichern)" in tray_code)
+check("der Dateifilter des Speichern-Dialogs ebenfalls",
+      "Filter = Texte.PngFilter" in tray_code)
+
+# (b) DIE REGEL: kein UI-Literal ohne Texte./T().
+#
+# Gesucht wird an den Stellen, die einen Text ANZEIGEN. Ausnahmen stehen
+# EINZELN und begruendet – eine Sammelfreigabe waere das Ende der Regel.
+UI_STELLE = re.compile(
+    r"(ToolStripMenuItem\(|MessageBox\.Show\(|ShowBalloonTip\(|\bText\s*=|\bTitle\s*="
+    r"|\.Filter\s*=|ToolTipText\s*=)")
+LITERAL = re.compile(r'"([^"\\]{2,}?)"')
+AUSNAHMEN = {
+    # Schriftname – kein Anzeigetext, sondern eine Systemressource.
+    "Segoe UI",
+    # Prompts gehen an das MODELL, nicht an den Benutzer.
+    "Act as an OCR system. Extract all visible text from this image precisely without added commentary.",
+    "Describe the contents and key visual elements of this image in detail.",
+    "Analyze the error message or code shown in this snippet and propose a solution.",
+}
+harte = []
+for _f in sorted((ROOT / "ai-mouse" / "src" / "AiMouse").rglob("*.cs")):
+    if "obj" in _f.parts:
+        continue
+    for _i, _z in enumerate(cs_nackt(_f.read_text(encoding="utf-8")).split("\n"), 1):
+        if not UI_STELLE.search(_z):
+            continue
+        for _lit in LITERAL.findall(_z):
+            if _lit in AUSNAHMEN or not re.search(r"[A-Za-zÄÖÜäöü]", _lit):
+                continue
+            # Ein Format-Literal ist erlaubt, SOLANGE sein Inhalt aus der
+            # Tabelle kommt: $"{Texte.Marke} — {Texte.TrayHinweis}".
+            if "Texte." in _z:
+                continue
+            harte.append("%s:%d %r" % (_f.name, _i, _lit[:48]))
+check("REGEL: kein Oberflaechentext steht hart im Code (%s)"
+      % ("keiner" if not harte else " | ".join(harte[:6])), not harte)
+check("Positivkontrolle: die Regel sieht die UI-Stellen ueberhaupt",
+      UI_STELLE.search('var x = new ToolStripMenuItem("Test");') is not None)
+
+# (c) Die Marke wird nicht abgeschrieben.
+_marke_hart = [z for z in tray_code.split("\n") if '"AI Mouse"' in z]
+check("kein festes \"AI Mouse\" mehr im Tray-Code", not _marke_hart)
+check("das Ergebnisfenster nennt die Marke aus der Tabelle",
+      "Texte.Marke" in erg_code and '"AI Mouse' not in erg_code)
+check("die Marke kommt aus den Einstellungen, nicht aus einer Konstante",
+      "settings.Marke" in cs_texte and "_marke" in cs_texte)
+check("und faellt auf den einkompilierten Wert zurueck, nie auf leer",
+      "Vorgaben.Marke" in cs_texte)
+
+# (d) Der Parser – und die DRIFT-SCHRANKE zum Browser-Plugin.
+#
+# ⚠ DAS IST DER KERN DIESER PRUEFUNG: „wie im Browser-Plugin" ist eine
+# Zusage ueber die REGEL, nicht ueber das Ergebnis. Laufen die beiden
+# Ausdruecke auseinander, deutet dieselbe Antwort in Jira und in der AI-Maus
+# verschieden – und niemand koennte erklaeren warum.
+_pop = (ROOT / "browser-addon" / "popup.js").read_text(encoding="utf-8")
+_m = re.search(r"const _FETT_RE = /(.+?)/;", _pop)
+check("die Fett-Regel des Plugins ist auffindbar", _m is not None)
+if _m:
+    _js = _m.group(1)
+    _cs = re.search(r'new\(@"(.+?)",', md_code)
+    check("die Regel ist zeichengleich zum Plugin (%s)" % _js,
+          _cs is not None and _cs.group(1) == _js)
+check("der Parser liegt UI-frei (auf dem Bauserver ausfuehrbar)",
+      "Form" not in md_code and "RichTextBox" not in md_code
+      and "using System.Windows.Forms" not in cs_md)
+check("das Fenster benutzt ihn", "Markdown.ZuZeilen" in erg_code)
+# ⚠ NICHT auf das VORKOMMEN von `SelectionFont` pruefen – das bleibt wahr,
+# wenn jemand dort pauschal `normal` zuweist (Gegenprobe war damit zahnlos).
+# Gemessen wird die EIGENSCHAFT: die Schrift haengt am LAUF.
+_sf = [z for z in erg_code.split("\n") if "SelectionFont =" in z and "Fett" in z]
+check("die Schriftwahl haengt am Lauf, nicht pauschal am Normalfont", bool(_sf))
+check("und die Fettschrift ist aus dem Normalfont abgeleitet",
+      "new Font(normal, FontStyle.Bold)" in erg_code)
+check("Fehlermeldungen werden NICHT gedeutet (kein Markdown vom Server)",
+      "markdown: false" in erg_code)
+check("die Antwort schon", "markdown: true" in erg_code)
+
+# ⚠ `.Handle` ERZWINGT die Handle-Erzeugung – beim ersten Fuellen gibt es
+# noch keines, und ein erzwungener Aufbau waere eine Nebenwirkung ohne
+# Gegenwert.
+check("das Flackerschutz-Handle wird nicht erzwungen",
+      "IsHandleCreated" in erg_code)
+check("die Zeichenzahl zaehlt den ANGEZEIGTEN Text (ohne die Sternchen)",
+      "Texte.Zeichen(_output.TextLength)" in erg_code)
+
+# (e) Die eingebauten Fragen folgen einem Sprachwechsel.
+check("Defaults ist ein Ausdruckskoerper, kein einmaliger Initialisierer",
+      re.search(r"Defaults\s*=>", cs_prompt_item := (ROOT / "ai-mouse" / "src" / "AiMouse"
+                / "Configuration" / "PromptItem.cs").read_text(encoding="utf-8")) is not None)
+check("und ihre Titel kommen aus der Tabelle", "Texte.FrageOcr" in cs_prompt_item)
+check("der Prompt bleibt englisch (er geht an das Modell)",
+      "Act as an OCR system" in cs_prompt_item)
+
+# (f) Alle neuen Texte zweisprachig.
+for _n in ("BildKopieren", "BildSpeichern", "PngFilter", "WarteAufModell",
+           "AnfrageFehlgeschlagen", "InZwischenablage", "AufnahmeFehler",
+           "ZwischenablageBelegt", "SpeichernFehler", "OeffnenFehler",
+           "UnerwarteterFehler", "FrageOcr", "FrageBeschreiben", "FrageFehler"):
+    _e = _texteintrag_cs(_n)
+    check("Text %s ist zweisprachig" % _n, "T(" in _e and _e.count('"') >= 4)
+
+# ══════════════════════════════════════════════════════════════════════════
+# 16. Halten ohne Bewegung -> Rechtsziehen statt Lasso (2026-09-10)
+#
+# Vorgabe: „wenn ich die rechte Maustaste gedrueckt halte ohne sie zu bewegen
+# (an das entsprechende Windows timeout anpassen) soll geprueft werden, ob ein
+# dragable Object unterhalb vom Mauszeiger liegt … wenn ja, dann kein Lasso
+# ziehen sondern object drag starten".
+#
+# ⚠ WAS SICH GEGENUEBER DEM 2026-09-10 FRUEH GEAENDERT HAT: der Einwand gegen
+# eine Erkennung war der 300-ms-Deckel des Hook-Callbacks. Der gilt fuer einen
+# TIMER nicht – deshalb ist die Erkennung jetzt moeglich. Die anderen zwei
+# Einwaende bestehen weiter und stehen als Begruendung am Code: Ziehbarkeit ist
+# kein abfragbarer Zustand, und UIA `IsDragPatternAvailable` implementiert
+# kaum jemand. Es ist also eine HEURISTIK, und sie faellt im Zweifel auf NEIN.
+# ══════════════════════════════════════════════════════════════════════════
+print("\n--- 16. Halten -> Rechtsziehen ---")
+
+_in = ROOT / "ai-mouse" / "src" / "AiMouse" / "Input"
+cs_regel = (_in / "ZiehbarRegel.cs").read_text(encoding="utf-8")
+cs_pruef = (_in / "ZiehbarPruefer.cs").read_text(encoding="utf-8")
+cs_sysw = (_in / "SystemWerte.cs").read_text(encoding="utf-8")
+cs_hook2 = (_in / "MouseGestureHook.cs").read_text(encoding="utf-8")
+cs_reply = (_in / "InputReplay.cs").read_text(encoding="utf-8")
+regel_code, pruef_code = cs_nackt(cs_regel), cs_nackt(cs_pruef)
+sysw_code, hook2_code = cs_nackt(cs_sysw), cs_nackt(cs_hook2)
+check("Positivkontrolle: der Kommentar-Entferner hat gekuerzt",
+      len(pruef_code) < len(cs_pruef) and "ElementFromPoint" in pruef_code)
+
+# (a) ⚠ DER TEUERSTE PUNKT DER GANZEN AUFGABE: GUIDs und vtable-Positionen.
+#     Ein `[ComImport]`-Interface mit falscher Reihenfolge UEBERSETZT
+#     FEHLERFREI und ruft zur Laufzeit die falsche Funktion – der Absturz
+#     kaeme erst am Arbeitsplatz. Die Werte sind aus `UIAutomationClient.idl`
+#     (Windows SDK) verifiziert.
+for name, guid in (("IUIAutomation", "30cbe57d-d9d0-452a-ab13-7ac5ac4825ee"),
+                   ("IUIAutomationElement", "d22108aa-8ac5-49a5-837b-37bbb3d7591e"),
+                   ("CUIAutomation", "ff48dba4-60ef-4201-aa87-54103eef594e")):
+    check("GUID von %s ist die aus der SDK-IDL" % name, guid in pruef_code)
+
+def _vtable(quelle, interface):
+    """Methodennamen in DEKLARATIONSreihenfolge – das IST die vtable."""
+    # ⚠ PRAEFIX-FALLE: `find("interface IUIAutomation")` trifft
+    #   `IUIAutomationElement` zuerst, wenn das im Quelltext oben steht – der
+    #   Waechter meldete damit einen Fehler, den es nicht gab. Dieselbe Klasse
+    #   wie `share_1` in `share_10` (Register). Also auf Wortgrenze suchen.
+    m = re.search(r"\binterface\s+" + re.escape(interface) + r"\b(?!\w)", quelle)
+    if m is None:
+        return []
+    i = m.start()
+    j = quelle.find("{", i)
+    tiefe, k = 1, j + 1
+    while k < len(quelle) and tiefe:
+        if quelle[k] == "{":
+            tiefe += 1
+        elif quelle[k] == "}":
+            tiefe -= 1
+        k += 1
+    return re.findall(r"\b(\w+)\s*\([^)]*\)\s*;", quelle[j:k])
+
+_vt_a = _vtable(pruef_code, "IUIAutomation")
+check("ElementFromPoint steht an vtable-Position 5 (SDK-IDL)",
+      len(_vt_a) >= 5 and _vt_a[4] == "ElementFromPoint")
+_vt_e = _vtable(pruef_code, "IUIAutomationElement")
+check("GetCurrentPropertyValue steht an Position 8 (SDK-IDL)",
+      len(_vt_e) >= 8 and _vt_e[7] == "GetCurrentPropertyValue")
+# ⚠ Je weiter hinten die Methode liegt, desto mehr Platzhalter muessen exakt
+#   stimmen. Deshalb bewusst 8 statt 19 (get_CurrentControlType).
+check("und `get_CurrentControlType` wird bewusst NICHT benutzt (Position 19)",
+      "CurrentControlType" not in pruef_code)
+check("die Herkunft der Werte steht am Code",
+      "UIAutomationClient.idl" in cs_pruef)
+
+# (b) Die Regel ist von COM getrennt – sonst waere sie nicht messbar.
+check("die Entscheidung liegt COM-frei in ZiehbarRegel",
+      "ComImport" not in regel_code and "Marshal" not in regel_code)
+check("und der Pruefer benutzt sie, statt selbst zu entscheiden",
+      "ZiehbarRegel.IstZiehbar" in pruef_code)
+
+# (c) Fail-safe: im Zweifel KEIN Drag.
+# ⚠ NICHT auf das VORKOMMEN von `ergebnis = false` pruefen: das steht auch
+# als Initialisierung da und bleibt bei jeder Sabotage stehen (Gegenprobe war
+# damit zahnlos). Gemessen wird die EIGENSCHAFT: der catch-Zweig setzt false.
+_i_catch = pruef_code.find("catch")
+_i_ende = pruef_code.find("})", _i_catch)
+_catchblock = pruef_code[_i_catch:_i_ende] if 0 < _i_catch < _i_ende else ""
+check("der catch-Zweig der Abfrage setzt 'nicht ziehbar'",
+      "ergebnis = false;" in _catchblock and "ergebnis = true" not in _catchblock)
+check("Positivkontrolle: der catch-Block wurde ueberhaupt gefunden",
+      len(_catchblock) > 20)
+check("die Abfrage laeuft in einem eigenen Thread mit Zeitgrenze",
+      "SetApartmentState" in pruef_code and "Join(grenze)" in pruef_code)
+check("und der Thread ist ein Hintergrund-Thread (haengt er, stirbt er mit)",
+      "IsBackground = true" in pruef_code)
+# ⚠ Ohne STA kein COM.
+check("STA, weil COM es verlangt", "ApartmentState.STA" in pruef_code)
+
+# (d) Die Systemwerte – ausdrueckliche Vorgabe „an das Windows timeout anpassen".
+check("die Verweilzeit kommt von Windows (SPI_GETMOUSEHOVERTIME)",
+      "SPI_GETMOUSEHOVERTIME" in sysw_code)
+check("die Zieh-Toleranz ebenfalls (SM_CXDRAG/SM_CYDRAG)",
+      "SM_CXDRAG" in sysw_code and "SM_CYDRAG" in sysw_code)
+# ⚠ Eine Verweilzeit von 0 hiesse „sofort durchreichen" – dann gaebe es das
+#   Lasso praktisch nicht mehr, und niemand koennte sich erklaeren warum.
+check("eine unbrauchbare Verweilzeit wird begrenzt, nicht uebernommen",
+      "Clamp" in sysw_code and "VerweilVorgabe" in sysw_code)
+check("und eine Toleranz von 0 ebenso", "x > 0 ? x : 4" in sysw_code)
+
+# (e) Die Verdrahtung im Hook.
+check("der Halte-Timer laeuft auf dem UI-Thread (WinForms-Timer)",
+      "System.Windows.Forms.Timer" in hook2_code)
+check("er startet beim Druecken", "_halten.Start();" in hook2_code)
+check("Bewegung ueber die Toleranz beendet ihn",
+      "SystemWerte.UeberToleranz" in hook2_code and "_halten.Stop();" in hook2_code)
+# ⚠ Zwischen Timer-Start und Ablauf kann der Benutzer losgelassen haben oder
+#   zu ziehen begonnen haben – ohne diese Pruefung wuerde mitten in ein
+#   laufendes Lasso hinein ein Klick injiziert.
+check("der Zustand wird beim Ablauf ERNEUT geprueft",
+      "!_pressWithheld || _isDragging || _durchgereicht" in hook2_code)
+# ⚠ Erst den Zustand umstellen, DANN injizieren: der injizierte Druck laeuft
+#   durch denselben Hook und muss dort schon als "gehoert der Anwendung"
+#   ankommen.
+_i1 = hook2_code.find("_durchgereicht = true;")
+_i2 = hook2_code.find("InputReplay.SendRightDown()")
+check("erst Zustand umstellen, dann injizieren", 0 < _i1 < _i2)
+check("es wird NUR gedrueckt, nicht auch losgelassen",
+      "SendRightDown" in cs_reply and "SendRightDown" in hook2_code)
+check("  … und SendRightDown schickt wirklich nur ein DOWN",
+      cs_nackt(cs_reply).split("SendRightDown")[1].split("}")[0].count("RIGHTUP") == 0)
+# ⚠ Scheitert die Injektion, ist der Klick des Benutzers VERLOREN.
+check("eine gescheiterte Injektion wird gemeldet und zurueckgedreht",
+      "_durchgereicht = false;" in hook2_code and "ReplayFailed?.Invoke(fehler)" in hook2_code)
+check("ein laufender Auswahlrahmen wird abgeraeumt",
+      "Durchgereicht" in cs_nackt(cs_tray) and "_overlay.EndSelection()" in cs_nackt(cs_tray))
+check("der Pruefer ist als Delegat gesetzt (Hook bleibt ohne UIA testbar)",
+      "LiegtObjektUnter" in hook2_code and "Func<Point, bool>" in hook2_code)
+check("und im Tray mit einer Zeitgrenze verdrahtet",
+      "ZiehbarPruefer.LiegtObjektUnter" in cs_nackt(cs_tray)
+      and "FromMilliseconds" in cs_nackt(cs_tray))
+check("der Timer wird beim Aufraeumen gestoppt",
+      "_halten.Stop();" in hook2_code and "_halten.Dispose();" in hook2_code)
+
+# (f) Die Begruendung steht am Code – sonst untersucht das jemand erneut.
+check("die Datei erklaert, warum es eine HEURISTIK ist",
+      "Heuristik" in cs_regel or "HEURISTIK" in cs_regel)
+check("und warum im Zweifel NICHT gezogen wird",
+      "fail-safe" in cs_regel.lower() or "FAIL-SAFE" in cs_regel)
 
 print("\n%d OK, %d FAIL" % (ok, fail))
 sys.exit(1 if fail else 0)

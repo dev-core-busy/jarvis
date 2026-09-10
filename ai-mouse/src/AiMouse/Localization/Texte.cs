@@ -27,7 +27,26 @@ internal static class Texte
     {
         _englisch = (settings.Sprache ?? string.Empty)
             .Trim().StartsWith("en", StringComparison.OrdinalIgnoreCase);
+
+        string marke = (settings.Marke ?? string.Empty).Trim();
+        _marke = marke.Length > 0 ? marke : Vorgaben.Marke;
     }
+
+    /// <summary>Der Name des Hauses – fuer Fenstertitel und Hinweisblasen.
+    ///
+    /// ⚠ HIER STAND AN SECHS STELLEN "AI Mouse" FEST IM CODE. Das ist nicht
+    /// nur ein uebersehener Text, sondern ein Branding-Fehler: der Titel des
+    /// Ergebnisfensters und jede Hinweisblase nannten den Vorgabenamen, waehrend
+    /// der Kopf des Dialogs daneben die Hausmarke trug. Die Marke kommt beim
+    /// Paketbau vom Server (`Vorgaben.Marke`) und liegt in den Einstellungen –
+    /// sie darf an keiner Stelle abgeschrieben werden.
+    ///
+    /// Rueckfall ist der einkompilierte Wert, nie ein leerer Titel: ein Fenster
+    /// ohne Namen ist von einem kaputten nicht zu unterscheiden.
+    /// </summary>
+    public static string Marke => _marke;
+
+    private static string _marke = Vorgaben.Marke;
 
     public static bool IstEnglisch => _englisch;
 
@@ -121,8 +140,67 @@ internal static class Texte
         "Die Anmeldung ist abgelaufen. Bitte erneut anmelden.",
         "Your session has expired. Please sign in again.");
     public static string KeineFreigabe => T(
-        "Dein Konto ist für AI Mouse nicht freigeschaltet. Ein Administrator "
+        $"Dein Konto ist für {Marke} nicht freigeschaltet. Ein Administrator "
             + "trägt es unter Sicherheit → Berechtigungen ein.",
-        "Your account is not enabled for AI Mouse. An administrator can add it "
+        $"Your account is not enabled for {Marke}. An administrator can add it "
             + "under Security → Permissions.");
+
+    // ── Auswahl-Menue ───────────────────────────────────────────────────────
+    // Gemeldet 2026-09-10 („die Menüs sind immer noch nicht i18n"): diese zwei
+    // Eintraege standen als einzige des Menues hart auf Englisch.
+    public static string BildKopieren => T("Bild in die Zwischenablage",
+                                           "Copy image to clipboard");
+    public static string BildSpeichern => T("Bild speichern unter…", "Save image as…");
+    public static string PngFilter => T("PNG-Bild|*.png", "PNG image|*.png");
+
+    // ── Ergebnisfenster ─────────────────────────────────────────────────────
+    public static string WarteAufModell => T("Warte auf das Modell…",
+                                             "Waiting for the model…");
+    public static string AnfrageFehlgeschlagen => T("Anfrage fehlgeschlagen",
+                                                    "Request failed");
+    public static string InZwischenablage => T("In die Zwischenablage kopiert.",
+                                               "Copied to clipboard.");
+
+    /// <summary>Zeichenzahl der ANGEZEIGTEN Antwort.
+    ///
+    /// Gezaehlt wird, was im Fenster steht – also ohne die `**` der
+    /// Auszeichnung. Die Zahl soll zu dem passen, was der Benutzer sieht und
+    /// beim Kopieren bekommt.</summary>
+    public static string Zeichen(int n) => T($"{n} Zeichen", $"{n} characters");
+
+    // ── Meldungen aus dem Tray ──────────────────────────────────────────────
+    // Jede nennt den Grund; der technische Text des Systems haengt dahinter.
+    public static string AufnahmeFehler => T("Bildschirmaufnahme fehlgeschlagen: ",
+                                             "Screen capture failed: ");
+    public static string ZwischenablageBelegt => T(
+        "Die Zwischenablage ist gerade belegt: ", "The clipboard is busy: ");
+    public static string SpeichernFehler => T("Das Bild ließ sich nicht speichern: ",
+                                              "Could not save the image: ");
+    public static string OeffnenFehler => T("Ließ sich nicht öffnen: ",
+                                            "Could not open: ");
+    public static string UnerwarteterFehler => T("Unerwarteter Fehler:",
+                                                 "Unexpected error:");
+    public static string Unbekannt => T("unbekannt", "unknown");
+
+    /// <summary>UIPI hat die Weitergabe des Rechtsklicks abgelehnt.
+    ///
+    /// Der Klick des Benutzers ist in diesem Fall VERLOREN – die Meldung darf
+    /// deshalb nicht still bleiben und muss den Ausweg nennen.</summary>
+    public static string KlickNichtWeitergereichtAdmin => T(
+        $"Der Rechtsklick ließ sich nicht weiterreichen: das Fenster im Vordergrund "
+            + $"läuft mit erhöhten Rechten. Starte {Marke} als Administrator.",
+        $"The right-click could not be forwarded: the focused window runs elevated. "
+            + $"Start {Marke} as administrator.");
+    public static string KlickNichtWeitergereicht => T(
+        "Der Rechtsklick ließ sich nicht weiterreichen",
+        "The right-click could not be forwarded");
+
+    // ── Eingebaute Fragen (Rueckfall, wenn der Server keine liefert) ────────
+    // Der TITEL ist Oberflaeche und wird uebersetzt; der PROMPT geht an das
+    // Modell und bleibt englisch – dort ist die Sprache eine Eigenschaft des
+    // Auftrags, keine der Anzeige.
+    public static string FrageOcr => T("Text erkennen (OCR)", "Extract text (OCR)");
+    public static string FrageBeschreiben => T("Bild beschreiben", "Describe image");
+    public static string FrageFehler => T("Fehler / Code analysieren",
+                                          "Analyse error / code");
 }

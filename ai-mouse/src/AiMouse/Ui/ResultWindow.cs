@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
+using AiMouse.Interop;
 using AiMouse.Localization;
 
 namespace AiMouse.Ui;
@@ -17,7 +18,7 @@ internal sealed class ResultWindow : Form
     {
         _cts = cts;
 
-        Text = $"AI Mouse — {title}";
+        Text = $"{Texte.Marke} — {title}";
         StartPosition = FormStartPosition.Manual;
         MinimizeBox = false;
         MaximizeBox = true;
@@ -33,15 +34,16 @@ internal sealed class ResultWindow : Form
             Dock = DockStyle.Top,
             Height = 28,
             Padding = new Padding(10, 6, 10, 0),
-            Text = "Waiting for the model…",
+            Text = Texte.WarteAufModell,
             ForeColor = SystemColors.GrayText,
             AutoEllipsis = true,
         };
 
-        // RichTextBox statt TextBox – allein wegen `DetectUrls`: eine Adresse in
-        // der Antwort ist damit anklickbar, ohne dass wir den Text selbst
-        // zerlegen muessen. Formatiert wird NICHTS (kein Markdown): der Text
-        // sieht aus wie bisher, nur Adressen sind Links.
+        // RichTextBox statt TextBox aus ZWEI Gruenden: `DetectUrls` macht eine
+        // Adresse in der Antwort anklickbar, und `SelectionFont` erlaubt die
+        // Fettschrift fuer `**…**` (Vorgabe 2026-09-10: „der MD-Parser wie im
+        // Browser-Plugin"). Gedeutet wird ausschliesslich Fett – Begruendung
+        // in `Ui/Markdown.cs`.
         _output = new RichTextBox
         {
             Dock = DockStyle.Fill,
@@ -63,7 +65,7 @@ internal sealed class ResultWindow : Form
 
         _copyButton = new Button
         {
-            Text = "&Copy",
+            Text = Texte.Kopieren,
             Width = 90,
             Height = 28,
             Enabled = false,
@@ -73,7 +75,7 @@ internal sealed class ResultWindow : Form
 
         var closeButton = new Button
         {
-            Text = "&Close",
+            Text = Texte.Schliessen,
             Width = 90,
             Height = 28,
             Anchor = AnchorStyles.Right,
@@ -110,10 +112,9 @@ internal sealed class ResultWindow : Form
 
     public void ShowAnswer(string answer, bool copyToClipboard)
     {
-        _header.Text = $"{answer.Length} characters";
+        TextSetzen(answer, markdown: true);
+        _header.Text = Texte.Zeichen(_output.TextLength);
         _header.ForeColor = SystemColors.GrayText;
-        _output.Text = answer.ReplaceLineEndings("\r\n");
-        _output.Select(0, 0);
         _copyButton.Enabled = true;
 
         if (copyToClipboard)
@@ -124,11 +125,82 @@ internal sealed class ResultWindow : Form
 
     public void ShowError(string message)
     {
-        _header.Text = "Request failed";
+        // ⚠ EINE FEHLERMELDUNG WIRD NICHT GEDEUTET. Sie stammt vom Server oder
+        // aus einer Ausnahme und ist kein Markdown; ein `**` darin waere ein
+        // Zufall, und ihn als Auszeichnung zu lesen wuerde die Meldung
+        // verstuemmeln – gerade dort, wo man sie genau lesen muss.
+        TextSetzen(message, markdown: false);
+        _header.Text = Texte.AnfrageFehlgeschlagen;
         _header.ForeColor = Color.Firebrick;
-        _output.Text = message.ReplaceLineEndings("\r\n");
-        _output.Select(0, 0);
         _copyButton.Enabled = true;
+    }
+
+    /// <summary>Setzt den Inhalt – wahlweise mit gedeuteter Fettschrift.
+    ///
+    /// ⚠ AUFGEBAUT WIRD UEBER `AppendText` + `SelectionFont`, NICHT ueber
+    /// selbst gebautes RTF. Der Text ist FREMDTEXT (Modellantwort zu einem
+    /// Bildschirmausschnitt); in RTF muessten `\`, `{` und `}` maskiert werden,
+    /// und ein vergessener Fall zerlegt die Anzeige oder schmuggelt
+    /// Steuerworte ein. Ueber `AppendText` gibt es nichts zu maskieren.
+    ///
+    /// Das Neuzeichnen wird waehrenddessen abgeschaltet: sonst flackert das
+    /// Fenster bei jeder Fettstelle sichtbar.
+    /// </summary>
+    private void TextSetzen(string text, bool markdown)
+    {
+        _output.Clear();
+
+        Font normal = _output.Font;
+        using var fett = new Font(normal, FontStyle.Bold);
+
+        // ⚠ `IsHandleCreated` UND NICHT einfach `.Handle`: der Zugriff auf
+        // `Handle` ERZWINGT die Erzeugung des Fensterhandles. Beim ersten
+        // Fuellen kann das Steuerelement noch keines haben, und ein erzwungener
+        // Aufbau an dieser Stelle ist eine Nebenwirkung ohne Gegenwert – ohne
+        // Handle gibt es ohnehin nichts, was flackern koennte.
+        bool redraw = _output.IsHandleCreated;
+        if (redraw)
+        {
+            NativeMethods.SendMessageW(_output.Handle, NativeMethods.WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
+        }
+
+        try
+        {
+            if (!markdown)
+            {
+                _output.SelectionFont = normal;
+                _output.AppendText(text.ReplaceLineEndings("\r\n"));
+            }
+            else
+            {
+                IReadOnlyList<IReadOnlyList<Lauf>> zeilen = Markdown.ZuZeilen(text);
+                for (int i = 0; i < zeilen.Count; i++)
+                {
+                    if (i > 0)
+                    {
+                        _output.SelectionFont = normal;
+                        _output.AppendText("\r\n");
+                    }
+
+                    foreach (Lauf lauf in zeilen[i])
+                    {
+                        _output.SelectionFont = lauf.Fett ? fett : normal;
+                        _output.AppendText(lauf.Text);
+                    }
+                }
+            }
+        }
+        finally
+        {
+            if (redraw)
+            {
+                NativeMethods.SendMessageW(_output.Handle, NativeMethods.WM_SETREDRAW, (IntPtr)1, IntPtr.Zero);
+                _output.Invalidate();
+            }
+        }
+
+        _output.Select(0, 0);
+        _output.SelectionFont = normal;
     }
 
     /// <summary>Oeffnet einen angeklickten Link – ausschliesslich http/https.</summary>
@@ -169,8 +241,12 @@ internal sealed class ResultWindow : Form
 
         try
         {
+            // `_output.Text` ist bereits der Text OHNE `**` – gedeutet wurde
+            // beim Anzeigen. Kopiert wird damit genau das, was im Fenster
+            // steht; die Auszeichnung geht dabei verloren, und das ist richtig:
+            // in Mail, Ticket oder Word waere `**` reines Rauschen.
             Clipboard.SetText(_output.Text);
-            _header.Text = "Copied to clipboard";
+            _header.Text = Texte.InZwischenablage;
         }
         catch (ExternalException)
         {

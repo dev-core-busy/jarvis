@@ -1,3 +1,5 @@
+using AiMouse.Localization;
+
 namespace AiMouse;
 
 internal static class Program
@@ -49,8 +51,8 @@ internal static class Program
     }
 
     private static void ReportFatal(Exception? exception) => MessageBox.Show(
-        $"Unexpected error:\r\n\r\n{exception?.ToString() ?? "unknown"}",
-        "AI Mouse",
+        $"{Texte.UnerwarteterFehler}\r\n\r\n{exception?.ToString() ?? Texte.Unbekannt}",
+        Texte.Marke,
         MessageBoxButtons.OK,
         MessageBoxIcon.Error);
 }

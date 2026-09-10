@@ -13,6 +13,27 @@ internal static class NativeMethods
 
     internal const int ERROR_ACCESS_DENIED = 5;
 
+    /// <summary>Neuzeichnen eines Steuerelements aus- und wieder einschalten.
+    ///
+    /// Gebraucht beim stueckweisen Aufbau der Antwort im Ergebnisfenster: ohne
+    /// das flackert die RichTextBox bei jeder Fettstelle sichtbar.</summary>
+    internal const int WM_SETREDRAW = 0x000B;
+
+    /// <summary>Verweilzeit des Systems – „wie lange muss die Maus stillstehen".
+    ///
+    /// ⚠ DAS IST DER SYSTEMEIGENE WERT (Vorgabe 400 ms) und deshalb der
+    /// richtige fuer „gedrueckt halten, ohne zu bewegen". Eine eigene Zahl
+    /// waere auf einem Rechner mit angepassten Eingabehilfen falsch.</summary>
+    internal const uint SPI_GETMOUSEHOVERTIME = 0x0066;
+
+    /// <summary>Zieh-Toleranz des Systems (SM_CXDRAG / SM_CYDRAG, Vorgabe 4 px).
+    ///
+    /// „Ohne Bewegung" kann nicht null Pixel heissen – eine Hand zittert. Das
+    /// System hat dafuer bereits ein Mass, und genau daran misst auch jede
+    /// andere Anwendung, ob eine Bewegung ein Ziehen ist.</summary>
+    internal const int SM_CXDRAG = 68;
+    internal const int SM_CYDRAG = 69;
+
     // Modifikatortasten fuer die Geste. `VK_CONTROL`/`VK_MENU`/`VK_SHIFT` sind
     // die SEITENUNABHAENGIGEN Codes – links und rechts zaehlen also beide.
     internal const int VK_SHIFT = 0x10;
@@ -82,6 +103,17 @@ internal static class NativeMethods
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool UnhookWindowsHookEx(IntPtr hhk);
+
+    [DllImport("user32.dll")]
+    internal static extern int GetSystemMetrics(int nIndex);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool SystemParametersInfoW(uint uiAction, uint uiParam,
+                                                      ref uint pvParam, uint fWinIni);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    internal static extern IntPtr SendMessageW(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll")]
     internal static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);

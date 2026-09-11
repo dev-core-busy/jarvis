@@ -135,7 +135,7 @@ _VORGABEN_SAAT = [
      "geht es, was fällt auf? Übernimm keine Zahl, die du nicht sicher lesen "
      "kannst."),
     ("suche homepage",
-     "suche die homepage der Adresse und zeige sie als klickbaren link an"),
+     "suche die homepage der Adresse und zeige sie als klickbaren hyperlink an"),
     ("übersetze nach Deutsch",
      "Agiere als OCR-System. Übersetze den Text nach Deutsch"),
 ]

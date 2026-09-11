@@ -782,15 +782,20 @@
               '<label class="st-hint" style="display:flex;gap:6px;align-items:center;">' +
                 '<input type="checkbox" id="st-f-enabled"> <span data-i18n="tracks.f_enabled">Aktiv</span>' +
               '</label>' +
-              (_istAdmin && (id === 'neu')
+              // Der Haken steht beim ANLEGEN *und* beim BEARBEITEN – die
+              // Sichtbarkeit laesst sich seit 2026-09-10 umstellen. Nur fuer
+              // Administratoren: eine eigene Ablage "fuer alle" zu machen ist
+              // ihre Entscheidung, und eine globale kann ein Nicht-Admin
+              // ohnehin nicht bearbeiten (`darfAendern`).
+              (_istAdmin
                   ? '<label class="st-hint" style="display:flex;gap:6px;align-items:center;">' +
                     '<input type="checkbox" id="st-f-global"> <span data-i18n="tracks.f_global">Für alle Benutzer</span>' +
                     '<button type="button" class="st-info" data-help="st-help-global" aria-expanded="false" ' +
                       'data-i18n-title="tracks.help" title="Erklärung anzeigen">&#9432;</button></label>'
                   : '') +
             '</div>' +
-            (_istAdmin && (id === 'neu')
-                ? '<div class="st-help" id="st-help-global" data-i18n="tracks.help_global">Eine Ablage „für alle" erscheint bei jedem Benutzer. Der Lauf trägt immer die Rechte dessen, der etwas ablegt – nicht deine. Ob eine Ablage global ist, lässt sich später nicht ändern.</div>'
+            (_istAdmin
+                ? '<div class="st-help" id="st-help-global" data-i18n="tracks.help_global">Eine Ablage „für alle" erscheint bei jedem Benutzer. Der Lauf trägt immer die Rechte dessen, der etwas ablegt – nicht deine. Der Haken lässt sich später umstellen: Wegnehmen macht die Ablage wieder zu deiner eigenen und entzieht sie allen anderen. Bereits erzeugte Ergebnisse bleiben ihnen erhalten.</div>'
                 : '') +
             '<div class="st-row">' +
               '<button class="st-btn st-btn-primary" id="st-f-save" data-i18n="tracks.save">Speichern</button>' +
@@ -826,6 +831,12 @@
         $('st-f-effort').value = d.reasoning_effort || '';
         $('st-f-steps').value = d.max_steps || 0;
         $('st-f-enabled').checked = d.enabled !== false;
+        // Vorbelegen ist Pflicht, nicht Kosmetik: ein leerer Haken an einer
+        // Ablage, die "fuer alle" IST, wuerde beim naechsten Speichern als
+        // "privatisieren" gelesen – der Benutzer nimmt sie allen weg, ohne es
+        // gewollt zu haben.
+        var gv = $('st-f-global');
+        if (gv) gv.checked = !!d['global'];
         $('st-f-save').addEventListener('click', function () { speichere(id); });
         $('st-f-cancel').addEventListener('click', formSchliessen);
         if (window.applyLang) window.applyLang();
@@ -870,10 +881,14 @@
         if (!daten.name) { melde('st-f-status', T('tracks.need_name', 'Ein Name fehlt.'), 'fehler'); return; }
         if (!daten.prompt.trim()) { melde('st-f-status', T('tracks.need_prompt', 'Die Aufgabe fehlt.'), 'fehler'); return; }
         melde('st-f-status', T('tracks.saving', 'Wird gespeichert …'));
+        // Den Haken gibt es nur fuer Administratoren. Fehlt er, wird `global`
+        // NICHT gesendet – und der Server laesst die Sichtbarkeit dann
+        // unveraendert. Wer den Wert hier auf `false` vorbelegen wuerde, machte
+        // aus jedem Speichern eines Nicht-Admins ein Privatisieren.
+        var g = $('st-f-global');
+        if (g) daten['global'] = !!g.checked;
         var p;
         if (id === 'neu') {
-            var g = $('st-f-global');
-            if (g && g.checked) daten['global'] = true;
             p = sende('/api/tracks/dumps', 'POST', daten);
         } else {
             p = sende('/api/tracks/dumps/' + encodeURIComponent(id), 'PUT', daten);

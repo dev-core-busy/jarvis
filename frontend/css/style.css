@@ -2003,6 +2003,57 @@ body.light .model-discover-item:hover { background-color: #eef0f4 !important; }
     -webkit-text-fill-color: transparent;
 }
 
+/* Symbolgruppe im Modal-Kopf (Startseite, Vollbild, Schliessen).
+   `.modal-header` verteilt seine direkten Kinder mit `space-between` – ohne
+   diesen Container stuenden die Symbole ueber die ganze Kopfbreite verstreut
+   statt als Gruppe rechts. Der enge Abstand ist derselbe wie in den
+   Titelleisten (`gap: 4px`); `flex: 0 0 auto` verhindert, dass die Gruppe
+   unter Druck als Erste nachgibt. */
+.modal-head-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 0 0 auto;
+}
+
+/* Das Haus ist ein <a>, kein <button>: ohne diese Zeilen traegt es den
+   Unterstrich und die Linkfarbe des Browsers statt der Knopf-Optik. */
+.modal-head-actions a.btn-icon {
+    text-decoration: none;
+    color: var(--text-secondary);
+}
+
+.modal-head-actions a.btn-icon:hover {
+    color: var(--text-primary);
+    border-color: var(--accent);
+}
+
+/* ⚠ BESTANDSBEFUND, hier mitbehoben: `.btn-close-modal` hatte projektweit KEINE
+   einzige CSS-Regel – der Knopf war 12 px breit und trug die nackte
+   Browser-Optik. Allein am rechten Rand fiel das nicht auf; neben zwei
+   36-px-Symbolen sieht dieselbe Stelle nach einem Fehler aus. Die Regel gilt
+   bewusst nur INNERHALB der Gruppe: sie repariert, was sichtbar wurde, und
+   greift keiner anderen Stelle vor. */
+.modal-head-actions .btn-close-modal {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.4rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.modal-head-actions .btn-close-modal:hover {
+    color: var(--text-primary);
+    border-color: var(--accent);
+}
+
 /* Hellmodus: weiss->grau Gradient-Text waere unsichtbar -> solide dunkle Schrift */
 body.light .modal-header h2 {
     background: none;

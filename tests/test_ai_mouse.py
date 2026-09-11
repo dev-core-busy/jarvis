@@ -1250,8 +1250,11 @@ SOLL = [
     ("extrahiere Adressdaten (OCR)", None),
     ("was ist das ?", None),
     ("Tabelle zusammenfassen", None),
+    # Wortlaut nachgezogen 2026-09-10 ("link" -> "hyperlink", Vorgabe des
+    # Betreibers). Der woertliche Vergleich BLEIBT richtig: er haelt fest, was
+    # bestellt wurde – eine Pruefung gegen das Modul selbst waere trivial wahr.
     ("suche homepage",
-     "suche die homepage der Adresse und zeige sie als klickbaren link an"),
+     "suche die homepage der Adresse und zeige sie als klickbaren hyperlink an"),
     ("übersetze nach Deutsch", "Agiere als OCR-System. Übersetze den Text nach Deutsch"),
 ]
 vorg = amf.vorgaben_liste()

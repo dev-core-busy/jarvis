@@ -12055,15 +12055,27 @@ async def tracks_dump_create(request: Request, user: str = Depends(require_track
 @app.put("/api/tracks/dumps/{dump_id}")
 async def tracks_dump_update(dump_id: str, request: Request,
                              user: str = Depends(require_tracks_access)):
-    """Ablage aendern. ``id``, ``owner`` und ``global`` sind unveraenderlich."""
+    """Ablage aendern. ``id`` und ``owner`` sind unveraenderlich.
+
+    ``global`` wird VOR den Feldern herausgezogen und als eigener Parameter
+    uebergeben: es ist keine Eigenschaft wie die anderen, sondern eine
+    Rechtefrage (nur Administratoren), und die gehoert nicht in die
+    Feld-Whitelist ``AENDERBAR``. Fehlt es im Rumpf, bleibt die Sichtbarkeit
+    unveraendert – ein Aufrufer, der das Feld nicht kennt, darf eine Ablage
+    "fuer alle" nicht still privatisieren.
+    """
     from backend import short_tracks as _st
     try:
         body = await request.json()
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
+    felder = dict(body or {})
+    sichtbarkeit = None
+    if "global" in felder:
+        sichtbarkeit = bool(felder.pop("global"))
     try:
-        d = await asyncio.to_thread(_st.aendern, dump_id, body or {}, user,
-                                    _is_admin_user(user))
+        d = await asyncio.to_thread(_st.aendern, dump_id, felder, user,
+                                    _is_admin_user(user), sichtbarkeit)
     except _st.DumpFehler as e:
         # "nicht gefunden" ist auch die Antwort auf eine FREMDE Ablage – kein
         # Existenz-Orakel (gleiche Regel wie bei cron_delete).

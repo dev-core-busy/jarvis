@@ -241,7 +241,8 @@ try:
     st.aendern(d["id"], {"global": True}, U, ist_admin=True)
     check(False, "global nicht aenderbar")
 except st.DumpFehler as e:
-    check("nicht aendern" in str(e), "global auch fuer Admins nicht aenderbar")
+    check("nicht aendern" in str(e),
+          "global bleibt als RUMPF-FELD abgewiesen (der Weg ist der Parameter)")
 
 g = st.aendern(d["id"], {"name": "Rechnung neu", "enabled": False}, U)
 check(g["name"] == "Rechnung neu" and g["enabled"] is False, "Aendern wirkt")
@@ -1413,6 +1414,154 @@ check("aeltere" in _lauf_v and "frühere Fassung" in QUELLE_RUN,
 # Und der Hinweis nennt den Namen nur EINMAL, nicht fuenfmal denselben.
 check("dict.fromkeys(a[\"name\"] for a in aeltere)" in QUELLE_RUN,
       "gleichnamige Fassungen werden im Hinweis dedupliziert")
+
+
+print("\n── 15) Sichtbarkeit umstellen: eigen ↔ fuer alle ──")
+# Vorbild sind die Jira-Vorlagen (2026-09-02): der Haken "fuer alle" ist ein
+# VERSCHIEBEN, kein Neuanlegen. Hier haengt mehr an der Kennung als dort –
+# Protokoll, laufende Auftraege und Laufzaehler zeigen darauf.
+
+bereiche_frei("basis")
+grenzen(max_dumps=10)
+ADM, ADM2, FREMD = "admin", "admin2", "kollege"
+
+
+def _aend(*a, **kw):
+    """``aendern`` ohne zu werfen.
+
+    ⚠ EINE PRUEFUNG DARF NICHT WERFEN. Die erste Fassung rief ``st.aendern``
+    direkt – bei einer Gegenprobe warf der Aufruf, der Lauf endete mit einem
+    Traceback OHNE Bilanzzeile, und das ist von "gar nicht gelaufen" nicht zu
+    unterscheiden. Der Fehlertext landet als ``_fehler`` im Ergebnis, damit die
+    nachfolgenden Pruefungen ihn als Fehlschlag zaehlen statt abzubrechen.
+    """
+    try:
+        return st.aendern(*a, **kw)
+    except Exception as e:                                       # noqa: BLE001
+        return {"_fehler": str(e)}
+
+
+def _hol(did):
+    return st.holen(did) or {}
+
+_v = st.anlegen(ADM, {"name": "Verschiebbar", "prompt": "Lies die Datei."})
+_vid = _v["id"]
+check(_v["global"] is False, "startet als eigene Ablage")
+check(_hol(_vid).get("owner") == ADM, "Besitzer ist der Ersteller")
+
+# ── Die Vorgabe: NICHT gesendet heisst UNVERAENDERT ────────────────────────
+# Der wichtigste Fall des ganzen Abschnitts. Ein Aufrufer, der `global` nicht
+# kennt (aelterer Client, ein Skript, das nur den Prompt nachzieht), darf eine
+# Ablage "fuer alle" beim Speichern nicht still privatisieren.
+_hoch = _aend(_vid, {"name": "Fuer alle"}, ADM, ist_admin=True, global_=True)
+check(_hoch.get("global") is True, "eigen → fuer alle (Administrator)")
+check(_hoch.get("id") == _vid, "die Kennung bleibt beim Verschieben erhalten")
+check(_hoch.get("owner") == ADM, "beim Hochstufen bleibt der Besitzer stehen")
+_ohne = _aend(_vid, {"name": "Fuer alle v2"}, ADM, ist_admin=True)
+check(_ohne.get("global") is True,
+      "global_=None laesst die Sichtbarkeit UNVERAENDERT (fail-safe)")
+check(st.aendern.__doc__ and "nicht gesendet" in st.aendern.__doc__,
+      "die Dreiwertigkeit steht als Begruendung im Code")
+
+# Sichtbarkeit fuer Dritte – die eigentliche Wirkung
+check(any(x["id"] == _vid for x in st.sichtbar_fuer(FREMD)),
+      "eine Ablage 'fuer alle' erscheint bei einem fremden Benutzer")
+check(st.darf_benutzen(st.holen(_vid), FREMD) is True,
+      "und ein Fremder darf darauf ablegen")
+check(st.darf_aendern(st.holen(_vid), FREMD) is False,
+      "aendern darf er sie nicht")
+
+# ── Zurueckstellen: nur Admin, und der Handelnde uebernimmt sie ────────────
+try:
+    st.aendern(_vid, {}, FREMD, ist_admin=False, global_=False)
+    check(False, "Nicht-Admin kann eine globale Ablage privatisieren")
+except st.DumpFehler as e:
+    # Hier greift schon `darf_aendern` – eine globale Ablage gehoert Admins.
+    check("nicht gefunden" in str(e).lower(),
+          "Nicht-Admin kommt an eine globale Ablage gar nicht heran")
+
+_zurueck = _aend(_vid, {}, ADM2, ist_admin=True, global_=False)
+check(_zurueck.get("global") is False, "fuer alle → eigen (Administrator)")
+check(_zurueck.get("id") == _vid, "auch zurueck bleibt die Kennung erhalten")
+check(_zurueck.get("owner") == ADM2,
+      "der handelnde Administrator uebernimmt sie – sonst waere sie fuer ihn weg")
+check(not any(x["id"] == _vid for x in st.sichtbar_fuer(FREMD)),
+      "fuer den fremden Benutzer ist sie danach verschwunden")
+check(any(x["id"] == _vid for x in st.sichtbar_fuer(ADM2)),
+      "und beim Handelnden sichtbar geblieben (keine Einbahnstrasse)")
+check(st.aendern.__doc__ and "VERSCHIEBEN" in st.aendern.__doc__.upper(),
+      "'Umstellen heisst Verschieben' steht als Begruendung im Code")
+
+# ── Ein Benutzer darf seine EIGENE Ablage nicht fuer alle freigeben ────────
+_eig = st.anlegen(U, {"name": "Meine", "prompt": "Lies die Datei."})
+try:
+    st.aendern(_eig["id"], {}, U, ist_admin=False, global_=True)
+    check(False, "Nicht-Admin kann eine eigene Ablage fuer alle freigeben")
+except st.DumpFehler as e:
+    check("Administratoren" in str(e),
+          "Nicht-Admin: 'fuer alle' abgewiesen mit Klartext")
+check(_hol(_eig["id"]).get("global") is False, "und sie bleibt eigen")
+# Der abgewiesene Versuch darf auch die uebrigen Felder nicht geschrieben haben.
+_e2 = _aend(_eig["id"], {"name": "Umbenannt"}, U)
+check(_e2.get("name") == "Umbenannt" and _e2.get("global") is False,
+      "gewoehnliches Aendern bleibt fuer den Besitzer moeglich")
+
+# ── Deckel greifen auch beim Verschieben ───────────────────────────────────
+# Der Deckel wird aus dem IST-Stand abgeleitet, nicht auf eine feste Zahl
+# gesetzt: im Sandkasten liegen aus frueheren Abschnitten bereits globale
+# Ablagen, und ein hart gesetztes `1` liess das Anlegen der Probe selbst
+# scheitern – der Lauf brach dann OHNE Bilanzzeile ab.
+_alt_global = st.MAX_DUMPS_GLOBAL
+_kand = st.anlegen(ADM, {"name": "Kandidat", "prompt": "x"})
+try:
+    st.MAX_DUMPS_GLOBAL = max(1, len([x for x in st.sichtbar_fuer(ADM)
+                                      if x["global"]]))
+    try:
+        st.aendern(_kand["id"], {}, ADM, ist_admin=True, global_=True)
+        check(False, "Deckel fuer globale Ablagen greift beim Verschieben")
+    except st.DumpFehler as e:
+        check("hoechstens" in str(e),
+              "Hochstufen laeuft in den Deckel MAX_DUMPS_GLOBAL")
+    check(_hol(_kand["id"]).get("global") is False,
+          "der abgewiesene Kandidat bleibt eigen")
+finally:
+    st.MAX_DUMPS_GLOBAL = _alt_global
+    st.loeschen(_kand["id"], ADM, ist_admin=True)
+
+# Und in der Gegenrichtung gegen die Benutzergrenze. ⚠ ADM braucht dafuer
+# mindestens EINE eigene Ablage: `max_dumps_je_benutzer()` klemmt nach unten auf
+# 1, ein `grenzen(max_dumps=0)` waere also wirkungslos – die erste Fassung
+# meldete deshalb zwei FAIL, die der Code gar nicht hatte.
+_g2 = st.anlegen(ADM, {"name": "G2", "prompt": "x", "global": True},
+                 ist_admin=True)
+st.anlegen(ADM, {"name": "Belegt den Platz", "prompt": "x"})
+_eigene_vorher = len([x for x in st.sichtbar_fuer(ADM) if not x["global"]])
+check(_eigene_vorher >= 1, "Vorbedingung: der Administrator hat eigene Ablagen")
+grenzen(max_dumps=_eigene_vorher)
+try:
+    st.aendern(_g2["id"], {}, ADM, ist_admin=True, global_=False)
+    check(False, "Benutzergrenze greift beim Privatisieren")
+except st.DumpFehler as e:
+    check("hoechstens" in str(e),
+          "Privatisieren laeuft in die Grenze des uebernehmenden Benutzers")
+check(_hol(_g2["id"]).get("global") is True,
+      "die abgewiesene Ablage bleibt 'fuer alle'")
+grenzen(max_dumps=10)
+st.loeschen(_g2["id"], ADM, ist_admin=True)
+
+# ── Der Endpunkt zieht `global` VOR der Feld-Whitelist heraus ──────────────
+# Sonst schluege `AENDERBAR` zu ("Diese Felder lassen sich nicht aendern:
+# global") – gemessen am Rumpf, nicht am Vorkommen irgendwo in main.py.
+_put = abschnitt(nur_code(MAIN), "async def tracks_dump_update(", "@app.delete")
+check("felder.pop(\"global\")" in _put.replace("'", '"'),
+      "PUT nimmt `global` aus den Feldern heraus")
+_i_pop = _put.find("pop(")
+_i_call = _put.find("_st.aendern")
+check(0 <= _i_pop < _i_call, "und zwar VOR dem Aufruf von aendern()")
+check("sichtbarkeit" in _put and "_is_admin_user(user)" in _put,
+      "die Sichtbarkeit geht als eigener Parameter mit der Admin-Kennung")
+check('"global" in felder' in _put.replace("'", '"'),
+      "nicht gesendet bleibt `None` – kein stilles Privatisieren")
 
 
 # ═══════════════════════════════════════════════════════════════════════════

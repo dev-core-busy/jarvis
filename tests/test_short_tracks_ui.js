@@ -607,7 +607,8 @@ abschnitt('4. Formular: wandern, Umschalter, Speichern');
     pruefe(put[0].body.dateitypen === 'pdf, xlsx', 'mit den Typen');
     pruefe(put[0].body.bereiche.indexOf('basis') > -1, 'mit dem Pflicht-Bereich');
     pruefe(!('owner' in put[0].body) && !('global' in put[0].body) && !('id' in put[0].body),
-        'OHNE owner/global/id (unveraenderliche Felder werden nicht gesendet)');
+        'OHNE owner/global/id (owner und id sind unveraenderlich; `global` '
+        + 'sendet nur ein Administrator)');
     pruefe(w.document.getElementById('st-form') === null, 'das Formular schliesst sich');
     await schliesse(w);
 }
@@ -655,12 +656,74 @@ abschnitt('4. Formular: wandern, Umschalter, Speichern');
     await warte(80);
     const post = rufe.filter(r => r.methode === 'POST' && r.url === '/api/tracks/dumps');
     pruefe(post[0].body.global === true, 'und kann global anlegen');
-    // Beim BEARBEITEN gibt es das Kaestchen nicht (global ist unveraenderlich)
+    // ⚠ HIER STAND DIE ALTE ZUSAGE "beim Bearbeiten fehlt es (global ist
+    // unveraenderlich)". Seit 2026-09-10 ist die Sichtbarkeit umstellbar - ein
+    // Waechter, der das Symptom fuer die Zusage haelt, wuerde jede Behebung als
+    // Fehler melden.
+    rufe.length = 0;
     karte(w, 'bbbbbbbbbbbb').querySelector('[data-act="edit"]').click();
     await warte(20);
-    pruefe(w.document.getElementById('st-f-global') === null,
-        'beim Bearbeiten fehlt es (global ist unveraenderlich)');
+    const gk = w.document.getElementById('st-f-global');
+    pruefe(gk !== null, 'beim Bearbeiten steht das Kaestchen ebenfalls');
+    pruefe(gk && gk.checked === true,
+        'und ist bei einer Ablage "fuer alle" VORBELEGT');
+    if (gk) gk.checked = false;               // zuruecknehmen = privatisieren
+    w.document.getElementById('st-f-save').click();
+    await warte(80);
+    const put = rufe.filter(r => r.methode === 'PUT' && /bbbbbbbbbbbb$/.test(r.url));
+    pruefe(put.length === 1, 'Speichern schickt genau ein PUT');
+    pruefe(put.length === 1 && put[0].body.global === false,
+        'und traegt global:false - das Zuruecknehmen kommt am Server an');
+    // Gegenrichtung an einer EIGENEN Ablage: Kaestchen da, aber leer.
+    rufe.length = 0;
+    karte(w, 'aaaaaaaaaaaa').querySelector('[data-act="edit"]').click();
+    await warte(20);
+    const gk2 = w.document.getElementById('st-f-global');
+    pruefe(gk2 && gk2.checked === false,
+        'bei einer eigenen Ablage ist das Kaestchen leer');
+    if (gk2) gk2.checked = true;
+    w.document.getElementById('st-f-save').click();
+    await warte(80);
+    const put2 = rufe.filter(r => r.methode === 'PUT' && /aaaaaaaaaaaa$/.test(r.url));
+    pruefe(put2.length === 1 && put2[0].body.global === true,
+        'Anhaken sendet global:true');
     await schliesse(w);
+}
+{
+    // ⚠ DER GEFAEHRLICHE FALL: ein Nicht-Admin bearbeitet. Wuerde der Client
+    // `global: false` vorbelegen, machte JEDES Speichern aus einer Ablage "fuer
+    // alle" eine private - unbeabsichtigt und fuer alle anderen unerklaerlich.
+    // Das Feld darf deshalb GAR NICHT mitgehen (der Server laesst es dann).
+    const { w, rufe } = baue({ admin: false });
+    await warte(60);
+    karte(w, 'aaaaaaaaaaaa').querySelector('[data-act="edit"]').click();
+    await warte(20);
+    pruefe(w.document.getElementById('st-f-global') === null,
+        'ein Nicht-Admin sieht das Kaestchen nicht');
+    w.document.getElementById('st-f-save').click();
+    await warte(80);
+    const put = rufe.filter(r => r.methode === 'PUT');
+    pruefe(put.length === 1, 'sein Speichern schickt trotzdem ein PUT');
+    pruefe(!('global' in put[0].body),
+        'aber OHNE global - kein stilles Privatisieren');
+    await schliesse(w);
+}
+{
+    // Der Hilfetext darf die alte Zusage nicht mehr behaupten.
+    // Beide Sprachfassungen aus dem ECHTEN i18n.js: DE steht zuerst, EN
+    // dahinter. Die Positivkontrolle (genau zwei Treffer) ist Pflicht - ohne
+    // sie waeren die Pruefungen bei einem umbenannten Schluessel trivial wahr.
+    const treffer = I18N.match(/'tracks\.help_global':\s*'((?:[^'\\]|\\.)*)'/g) || [];
+    pruefe(treffer.length === 2,
+        'tracks.help_global steht in beiden Sprachen (Positivkontrolle)');
+    const de = treffer[0] || '';
+    const en = treffer[1] || '';
+    pruefe(de && de.indexOf('nicht ändern') === -1,
+        'der Hilfetext behauptet nicht mehr "laesst sich nicht aendern" (DE)');
+    pruefe(en && en.toLowerCase().indexOf('cannot be changed') === -1,
+        'dasselbe auf Englisch');
+    pruefe(de.indexOf('entzieht sie allen anderen') > -1,
+        'sondern nennt die FOLGE des Zuruecknehmens');
 }
 {
     // Fehlermeldung des Servers wird im Klartext gezeigt

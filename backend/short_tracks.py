@@ -419,13 +419,19 @@ def _alle_speichern(dumps: list[dict]) -> None:
 
 
 # ── Felder ──────────────────────────────────────────────────────────────────
-# NUR diese Felder darf ein PUT aendern. ``id``, ``owner`` und ``global`` sind
-# unveraenderlich:
+# NUR diese Felder darf ein PUT als gewoehnliches Feld aendern. ``id``, ``owner``
+# und ``global`` stehen bewusst NICHT darin:
 #   * ``owner`` – wer den Besitzer umschreiben kann, haengt einen Dump samt
 #     Prompt an einen fremden Benutzer (die Luecke, die scheduler.update_job bis
 #     2026-07-28 hatte).
 #   * ``global`` – sonst waere ``{"global": true}`` im Rumpf der Weg, einen
 #     eigenen Prompt fuer ALLE sichtbar zu machen, ohne Administrator zu sein.
+#
+# ⚠ ``global`` IST SEIT 2026-09-10 UMSTELLBAR – aber ueber den eigenen Parameter
+# ``global_`` von ``aendern()``, NICHT ueber diese Liste. Der Unterschied ist der
+# ganze Punkt: ein Feld dieser Liste laeuft ungeprueft durch ``_pruefe``, der
+# Parameter dagegen durch eine ausdrueckliche Admin-Pruefung. Wer ``global`` hier
+# eintraegt, macht aus der Rechtefrage wieder ein Rumpf-Feld.
 AENDERBAR = ("name", "beschreibung", "prompt", "bereiche", "dateitypen",
              "mehrfach", "profile_id", "reasoning_effort", "max_steps", "enabled")
 
@@ -715,8 +721,27 @@ def anlegen(user: str, felder: dict, ist_admin: bool = False) -> dict:
         return dict(d)
 
 
-def aendern(dump_id: str, felder: dict, user: str, ist_admin: bool = False) -> dict:
-    """Dump aendern. Fremde/unsichtbare Dumps → "nicht gefunden" (kein Orakel)."""
+def aendern(dump_id: str, felder: dict, user: str, ist_admin: bool = False,
+            global_: bool | None = None) -> dict:
+    """Dump aendern. Fremde/unsichtbare Dumps → "nicht gefunden" (kein Orakel).
+
+    ``global_`` ist DREIWERTIG, und das ist keine Feinheit:
+
+    * ``None`` = **nicht gesendet** → die Sichtbarkeit bleibt, wie sie ist.
+    * ``True``/``False`` = ausdrueckliche Umstellung durch einen Administrator.
+
+    Eine Vorgabe ``False`` waere hier ein Datenverlust fuer alle anderen: ein
+    Aufrufer, der das Feld nicht kennt (aelterer Client, ein Skript, das nur den
+    Prompt nachzieht), wuerde eine Ablage "fuer alle" beim naechsten Speichern
+    still privatisieren – und niemand koennte erklaeren, warum sie verschwunden
+    ist. Dieselbe Ueberlegung wie bei ``bereiche=None`` in
+    ``jira_vorlagen.speichern``.
+
+    UMSTELLEN HEISST VERSCHIEBEN, NICHT NEU ANLEGEN – die Kennung bleibt. Hier
+    haengt mehr daran als bei den Jira-Vorlagen: ``short_tracks_log.jsonl``,
+    die laufenden Auftraege im Runner und der Laufzaehler zeigen alle auf
+    ``id``. Eine neue Kennung waere ein stiller Bruch dieser Bezuege.
+    """
     with _lock:
         dumps = _alle()
         for i, d in enumerate(dumps):
@@ -728,10 +753,54 @@ def aendern(dump_id: str, felder: dict, user: str, ist_admin: bool = False) -> d
             if unbekannt:
                 raise DumpFehler("Diese Felder lassen sich nicht aendern: %s"
                                  % ", ".join(sorted(unbekannt)))
+            war_global = bool(d.get("global"))
+            ist_global = war_global if global_ is None else bool(global_)
+            besitzer = d.get("owner") or ""
+            if ist_global != war_global:
+                # Beide Richtungen sind Administratoren-Sache: "fuer alle" gibt
+                # einen Prompt an jeden weiter, "eigen" nimmt ihn allen wieder
+                # weg. Fuer die Richtung "eigen -> fuer alle" ist das dieselbe
+                # Schranke wie in `anlegen`.
+                if not ist_admin:
+                    raise DumpFehler(
+                        "Nur Administratoren koennen die Sichtbarkeit einer "
+                        "Ablage aendern.")
+                # Der umzustellende Dump zaehlt in KEINER der beiden Zaehlungen
+                # mit – der Zweig laeuft nur bei echtem Wechsel, und dann steht
+                # er jeweils auf der anderen Seite. Eine Ausklammerung ueber die
+                # Kennung waere hier nachweislich wirkungslos.
+                if ist_global:
+                    vorhanden = len([x for x in dumps if x.get("global")])
+                    if vorhanden >= MAX_DUMPS_GLOBAL:
+                        raise DumpFehler(
+                            "Es sind hoechstens %d Ablagen fuer alle moeglich "
+                            "(vorhanden: %d)." % (MAX_DUMPS_GLOBAL, vorhanden))
+                else:
+                    # ⚠ BEIM PRIVATISIEREN UEBERNIMMT DER HANDELNDE ADMINISTRATOR
+                    # DIE ABLAGE. Bliebe der urspruengliche Besitzer stehen,
+                    # waere die Ablage fuer ihn selbst sofort unsichtbar (ein
+                    # Administrator sieht fremde private Dumps NICHT, siehe
+                    # `sichtbar_fuer`) – er koennte den Schritt nicht einmal
+                    # rueckgaengig machen. Eine Einbahnstrasse, wie sie das
+                    # Projekt beim Willkommens-Chat schon einmal bezahlt hat.
+                    #
+                    # Das widerspricht "owner ist unveraenderlich" nur dem
+                    # Wortlaut nach: die Regel schuetzt davor, einen Dump einem
+                    # FREMDEN anzuhaengen. Hier ist das Ziel ausschliesslich der
+                    # Handelnde selbst und kommt NIE aus dem Rumpf.
+                    besitzer = norm_user(user)
+                    grenze = max_dumps_je_benutzer()
+                    eigene = len([x for x in dumps
+                                  if not x.get("global")
+                                  and norm_user(x.get("owner")) == besitzer])
+                    if eigene >= grenze:
+                        raise DumpFehler(
+                            "Es sind hoechstens %d eigene Ablagen moeglich "
+                            "(vorhanden: %d)." % (grenze, eigene))
             neu = _pruefe(felder or {}, d)
-            neu["id"] = d["id"]                  # unveraenderlich
-            neu["owner"] = d.get("owner") or ""  # unveraenderlich
-            neu["global"] = bool(d.get("global"))  # unveraenderlich
+            neu["id"] = d["id"]              # unveraenderlich
+            neu["owner"] = besitzer          # nur beim Privatisieren, auf sich selbst
+            neu["global"] = ist_global
             neu["laeufe"] = int(d.get("laeufe") or 0)
             neu["letzter_lauf"] = int(d.get("letzter_lauf") or 0)
             neu["angelegt"] = int(d.get("angelegt") or 0) or neu["angelegt"]

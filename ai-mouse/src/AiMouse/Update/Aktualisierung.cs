@@ -47,6 +47,28 @@ internal static class Aktualisierung
     public static Version Eigene =>
         Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0);
 
+    /// <summary>Dieselbe Version ZUM ANZEIGEN – dreiteilig, wie die csproj.
+    ///
+    /// ⚠ NICHT <c>Eigene.ToString()</c>: die Assembly traegt vier Teile
+    /// ("1.0.2.0"), der Server nennt in <c>/api/ai-mouse/health</c> drei
+    /// ("1.0.2"). Wer beides nebeneinander liest, haelt zwei Schreibweisen
+    /// derselben Zahl fuer zwei verschiedene Staende – und genau diese Frage
+    /// soll die Anzeige ja beantworten.
+    ///
+    /// ⚠ <c>Build</c> IST -1, WENN NICHT GESETZT (<c>new Version(0, 0)</c> –
+    /// der Rueckfall oben). Ungeprueft stuende dort "0.0.-1".
+    /// </summary>
+    public static string EigeneAnzeige
+    {
+        get
+        {
+            Version v = Eigene;
+            return v.Build >= 0
+                ? $"{v.Major}.{v.Minor}.{v.Build}"
+                : $"{v.Major}.{v.Minor}";
+        }
+    }
+
     /// <summary>Pfad der laufenden EXE – leer, wenn nicht ermittelbar.
     ///
     /// ⚠ NICHT <c>Assembly.Location</c>: bei <c>PublishSingleFile</c> ist das

@@ -120,6 +120,18 @@
         // Der Grund gehoert an den Knopf – sonst ist „grau" unerklaerlich.
         dl.title = _health.paket_bereit ? '' : t('aimouse.st_no_pkg',
             'Die Anwendung wird auf diesem Server gerade gebaut – der Download steht danach bereit.');
+
+        // ⚠ OHNE ANGABE BLEIBT SIE LEER, es steht dort NIE ein Platzhalter.
+        //    `klient_version` ist "" wenn die csproj nicht lesbar ist – das
+        //    heisst "unbekannt", und eine geratene Nummer waere genau die
+        //    Behauptung, gegen die die Anzeige gebaut ist. Ein aelteres Backend
+        //    liefert das Feld gar nicht; auch dann bleibt sie leer.
+        var vs = document.getElementById('am-version');
+        if (vs) {
+            var v = (_health.klient_version || '').trim();
+            // textContent, nicht innerHTML: der Wert kommt vom Server.
+            vs.textContent = v ? (t('aimouse.version', 'Version') + ' ' + v) : '';
+        }
     }
 
     /** Bereiche nur fuer Administratoren – und nur die FREIGESCHALTETEN.

@@ -6,7 +6,7 @@
     <title>AI-Maus</title>
     <link rel="icon" href="/static/favicon.ico">
     <link rel="stylesheet" href="/static/css/theme.css?v=24">
-    <link rel="stylesheet" href="/static/css/jira_addon.css?v=12">
+    <link rel="stylesheet" href="/static/css/jira_addon.css?v=13">
 </head>
 <body>
 <script>try{if(localStorage.getItem('jarvis_theme')!=='dark')document.body.classList.add('light');}catch(e){}</script>
@@ -100,6 +100,12 @@
             <div class="ja-dl">
                 <button type="button" class="ja-btn ja-btn-haupt" id="am-download"
                         data-i18n="aimouse.get_btn">Paket herunterladen</button>
+                <!-- Die Version des Pakets. Sie wird aus `health` GEFUELLT und
+                     steht bewusst nicht im Markup: eine abgetippte Zahl waere
+                     eine zweite Fassung und wuerde driften – dann behauptet die
+                     Kachel einen Stand, den das ZIP nicht hat. Ohne Angabe
+                     bleibt sie leer (siehe `downloadKnopfSetzen`). -->
+                <span id="am-version" class="ja-note"></span>
             </div>
             <div id="am-download-msg" class="ja-note"></div>
 
@@ -193,13 +199,13 @@
 <script src="/static/js/cpubar.js?v=1"></script>
 <script src="/static/js/syspackages.js?v=2"></script>
 <script src="/static/js/theme.js?v=3"></script>
-<script src="/static/js/i18n.js?v=253"></script>
+<script src="/static/js/i18n.js?v=254"></script>
 <script src="/static/js/branding.js?v=26"></script>
 <script src="/static/js/sessions.js?v=8"></script>
 <script src="/static/js/logo_home.js?v=1"></script>
 <script src="/static/js/settings_btn.js?v=4"></script>
 <script src="/static/js/activity.js?v=2"></script>
 <script src="/static/js/issues.js?v=12"></script>
-<script src="/static/js/ai_mouse.js?v=6"></script>
+<script src="/static/js/ai_mouse.js?v=7"></script>
 </body>
 </html>

@@ -295,8 +295,23 @@ body {
 }
 .ja-det[open] > summary { margin-bottom: 8px; }
 
+/* Hinweistext neben oder unter einer Aussage.
+ * ⚠ DIESE KLASSE WAR NIRGENDS DEFINIERT (gefunden 2026-09-11) – sie steht seit
+ *   ihrer Einfuehrung an sieben Stellen in `ai_mouse.html` im Markup und hatte
+ *   keine einzige Regel: die Hinweise sahen aus wie gewoehnlicher Fliesstext.
+ *   Dieselbe Fehlerklasse wie `.ja-actions` (Register) – eine Klasse ohne Regel
+ *   faellt niemandem auf, weil nichts kaputtgeht, es sieht nur falsch aus.
+ * `--text-secondary` und NICHT `--text-muted`: letzteres liegt in beiden Themen
+ *   unter 4,5:1 – fuer eine Beschriftung vertretbar, fuer eine Versionsnummer,
+ *   die man ABLESEN soll, nicht. */
+.ja-note { color: var(--text-secondary); font-size: 13px; }
+
 /* ── Knoepfe ───────────────────────────────────────────────────────────── */
 .ja-dl { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0 8px; }
+/* `align-self` nur hier, nicht `align-items` am Container: `.ja-dl` traegt auch
+ * der Jira-Reiter, und dort stehen mehrere Knoepfe nebeneinander. Ohne die
+ * Zeile wuerde der Text auf Knopfhoehe gestreckt und stuende oben statt mittig. */
+#am-version { align-self: center; }
 .ja-btn {
     /* flex:0 0 auto ist Pflicht: .btn-* aus dem Projekt tragen width:100% und
      * fressen in einer Flex-Zeile die ganze Breite (Register). Deshalb hier

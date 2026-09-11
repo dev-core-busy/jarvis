@@ -64,6 +64,15 @@ internal static class Texte
     public static string Anmelden => T("Anmelden", "Sign in");
     public static string Abbrechen => T("Abbrechen", "Cancel");
     public static string AnmeldungLaeuft => T("Anmeldung läuft…", "Signing in…");
+
+    /// <summary>Beschriftung der Versionsanzeige im Marken-Kopf.
+    ///
+    /// ⚠ IN BEIDEN SPRACHEN GLEICH – das ist kein vergessener Eintrag, sondern
+    /// dasselbe Wort. Er steht deshalb ausdruecklich in `ERLAUBT_GLEICH` von
+    /// `tests/live_texte_dev.py`; die Regel "DE ≠ EN" bleibt fuer alles andere
+    /// scharf, weil die Ausnahme einzeln eingetragen und begruendet ist.
+    /// </summary>
+    public static string Version => T("Version", "Version");
     public static string KeinServer => T(
         "Es ist keine Serveradresse hinterlegt. Trage sie unter „Einstellungen“ ein.",
         "No server address configured. Enter it under “Settings”.");

@@ -140,6 +140,7 @@ ERLAUBT_GLEICH = {
     "__Marke",       # ein Eigenname wird nicht uebersetzt
     "Marke",
     "PngFilter",     # "PNG-Bild|*.png" vs "PNG image|*.png" – s.u. gepruefte Ausnahme
+    "Version",       # dasselbe Wort in beiden Sprachen
 }
 unerwartet = [n for n in gleich if n not in ERLAUBT_GLEICH]
 check(f"Deutsch und Englisch unterscheiden sich ({len(gleich)} gleich)",

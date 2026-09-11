@@ -24,7 +24,11 @@
          Arbeitsplatz mit 1.0.0 bekommt KEIN Update – die Serverversion waere
          unveraendert, und `IstNeuer` sagt zu Recht nein. Der neue Text waere
          damit nur fuer Neu-Downloads da. -->
-    <Version>1.0.1</Version>
+    <!-- 1.0.2 (2026-09-11): die Version steht jetzt im Marken-Kopf und in der
+         Portal-Kachel. Bis dahin war sie nur ueber die Windows-Dateieigenschaften
+         zu sehen – ausgerechnet die Nummer, die man beim Melden eines Fehlers
+         zuerst braucht. -->
+    <Version>1.0.2</Version>
     <!-- DPI awareness is owned by app.manifest, not by ApplicationHighDpiMode: it has to
          be in effect from process start, before any screen coordinate is read.
          WFAC010 asks for the opposite; suppressed because that trade-off is intentional. -->

@@ -1062,8 +1062,20 @@ check("und verknuepft sie mit UND, nicht ODER", "&&" in eing and "||" not in ein
 check("es gibt ein gemeinsames Marken-Modul", cs_mark.is_file())
 if cs_mark.is_file():
     mk = cs_mark.read_text(encoding="utf-8")
-    check("es liefert einen Kopf", "public static Label Kopf" in mk)
+    # ⚠ DIE EIGENSCHAFT, NICHT DIE SCHREIBWEISE. Hier stand
+    #   `"public static Label Kopf" in mk` – das ist eine Aussage ueber den
+    #   RUECKGABETYP, nicht darueber, dass ein Kopf geliefert wird. Als der Kopf
+    #   um die Versionsanzeige wuchs (zwei Schriftgrade brauchen einen Container,
+    #   also `Control` statt `Label`), meldete der Waechter einen Fehler, den es
+    #   nicht gab. Ein Waechter, der eine Erweiterung verbietet, die er gar nicht
+    #   pruefen will, ist die haeufigste Fehlerklasse dieses Projekts.
+    check("es liefert einen Kopf",
+          re.search(r"public\s+static\s+\w+\s+Kopf\s*\(", mk) is not None)
     check("und die Hausfarbe", "public static Color AkzentFarbe" in mk)
+    # Die Version steht im GETEILTEN Kopf und damit in BEIDEN Fenstern – bis
+    # 2026-09-11 war sie nur ueber die Windows-Dateieigenschaften zu sehen.
+    check("der Kopf nennt die Version",
+          "Aktualisierung.EigeneAnzeige" in mk and "Texte.Version" in mk)
     # Fail-safe: eine kaputte Farbe darf kein Fenster blockieren.
     check("eine unbrauchbare Farbe wird abgefangen",
           "catch (Exception)" in mk and "SystemColors.ControlText" in mk)
@@ -2638,6 +2650,118 @@ check("er hat einen sichtbaren Tastatur-Fokus",
 check("der ausgeschaltete Griff behaelt die Breite",
       ".am-q-griff.is-aus" in _css23
       and "width: 20px" in _css23.split(".am-q-griff")[1][:200])
+
+print("\n=== 24. Die Version ist SICHTBAR (2026-09-11) ===")
+# Gemeldet: "wo finde ich die Versionsnummer der AI-Maus exe?" – sie stand in
+# der csproj, in den Windows-Dateieigenschaften und im health-Endpunkt, also an
+# drei Orten, die am Arbeitsplatz niemand aufschlaegt. Damit war die Frage, die
+# beim Melden eines Fehlers IMMER zuerst kommt, nur per Rechtsklick auf die EXE
+# zu beantworten.
+
+def _nach24(text, marke, laenge=400):
+    """Der Abschnitt HINTER `marke` – "" wenn es sie nicht gibt.
+
+    ⚠ NIE `text.split(marke)[1]`: fehlt die Marke, wirft das einen IndexError,
+      und die Gegenprobe bricht ab statt fehlzuschlagen. Genau so blieb
+      "Hinweisklasse wieder undefiniert" zuerst ohne Bilanz.
+    """
+    teile = text.split(marke, 1)
+    return teile[1][:laenge] if len(teile) > 1 else ""
+
+
+_akt24 = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Update" / "Aktualisierung.cs").read_text(encoding="utf-8")
+_mark24 = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Ui" / "Marken.cs").read_text(encoding="utf-8")
+_txt24 = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Localization" / "Texte.cs").read_text(encoding="utf-8")
+
+# ── Die Anzeigefassung ──────────────────────────────────────────────────────
+check("es gibt eine eigene Fassung ZUM ANZEIGEN",
+      "public static string EigeneAnzeige" in _akt24)
+# ⚠ Die Assembly traegt VIER Teile ("1.0.2.0"), der Server nennt DREI ("1.0.2").
+#   Wer beides nebeneinander liest, haelt zwei Schreibweisen derselben Zahl fuer
+#   zwei Staende – und genau diese Frage soll die Anzeige beantworten.
+_ea24 = _nach24(_akt24, "public static string EigeneAnzeige", 600)
+check("sie ist dreiteilig (nicht Eigene.ToString())",
+      "v.Major" in _ea24 and "v.Minor" in _ea24 and "v.Build" in _ea24
+      and "Eigene.ToString()" not in _ea24)
+# ⚠ Version(0,0).Build IST -1 – das ist der Rueckfall in `Eigene`. Ungeprueft
+#   stuende im Kopf "Version 0.0.-1".
+check("ein fehlender Build-Teil wird abgefangen (-1)", "v.Build >= 0" in _ea24)
+
+# ── Die Anzeigeregel WIRD AUSGEFUEHRT, nicht gelesen ────────────────────────
+# Ein Quelltext-Vergleich kann nicht sagen, WAS herauskommt. Die Formel wird
+# deshalb in Python nachgebildet UND gegen den C#-Quelltext abgeglichen, damit
+# sie nicht auseinanderlaufen kann.
+def _anzeige24(major, minor, build):
+    return ("%d.%d.%d" % (major, minor, build)) if build >= 0 else ("%d.%d" % (major, minor))
+
+for _maj, _min, _bld, _soll in (
+    (1, 0, 2, "1.0.2"),      # der Regelfall
+    (1, 0, 0, "1.0.0"),
+    (0, 10, 0, "0.10.0"),    # zweistellig – nicht als Text vergleichen
+    (0, 0, -1, "0.0"),       # der Rueckfall `new Version(0, 0)`
+):
+    check("Anzeige %d.%d(.%d) -> %s (ist: %s)"
+          % (_maj, _min, _bld, _soll, _anzeige24(_maj, _min, _bld)),
+          _anzeige24(_maj, _min, _bld) == _soll)
+
+# ── Der Kopf traegt sie, und zwar fuer BEIDE Fenster ────────────────────────
+check("der Kopf ist ein Container (zwei Schriftgrade)",
+      "FlowLayoutPanel" in _mark24)
+# ⚠ `Dock = Top` in einem AutoSize-Container ist der bekannte WinForms-Fallstrick;
+#   der Fluss waechst dagegen mit der Schrift – also auch bei 150 % Zoom.
+check("er waechst mit der Schrift (Zoom)",
+      "AutoSize = true" in _mark24 and "AutoSizeMode.GrowAndShrink" in _mark24)
+# ⚠ Passt die Version nicht mehr daneben, rutscht sie DARUNTER statt
+#   abgeschnitten zu werden – fail-safe in die lesbare Richtung.
+check("bei grosser Schrift bricht sie um statt zu verschwinden",
+      "WrapContents = true" in _mark24)
+check("die Marke steht weiter in der Hausfarbe",
+      "AkzentFarbe(s.Akzent)" in _mark24)
+# Kein hartes Literal – die Regel dieses Projekts fuer JEDEN UI-Text.
+check("die Beschriftung kommt aus Texte", "Texte.Version" in _mark24)
+check("und ist dort zweisprachig deklariert",
+      'public static string Version => T("Version", "Version")' in _txt24)
+# ⚠ In beiden Sprachen gleich – das MUSS die Ausnahmeliste kennen, sonst faellt
+#   der Live-Waechter ueber einen Eintrag, der korrekt ist.
+_lt24 = (ROOT / "tests" / "live_texte_dev.py").read_text(encoding="utf-8")
+check("die DE=EN-Ausnahme ist eingetragen und begruendet",
+      '"Version",' in _nach24(_lt24, "ERLAUBT_GLEICH", 400))
+
+# ── Die Portal-Kachel ───────────────────────────────────────────────────────
+_amjs24 = (ROOT / "frontend" / "js" / "ai_mouse.js").read_text(encoding="utf-8")
+check("die Kachel hat einen Platz fuer die Version", 'id="am-version"' in _amhtml)
+check("er steht beim Download-Knopf",
+      'id="am-version"' in _nach24(_amhtml, 'class="ja-dl"', 700))
+# ⚠ KEINE abgetippte Zahl im Markup: sie wuerde driften, und dann behauptet die
+#   Kachel einen Stand, den das ZIP nicht hat.
+check("die Zahl steht NICHT im Markup",
+      "klient_version" not in _amhtml)
+check("sie wird aus health gefuellt", "klient_version" in _amjs24)
+# ⚠ Ohne Angabe bleibt sie LEER – "" heisst unbekannt, und eine geratene Nummer
+#   waere genau die Behauptung, gegen die die Anzeige gebaut ist.
+_dk24 = _nach24(_amjs24, "function downloadKnopfSetzen", 1400)
+check("ohne Angabe bleibt sie leer (keine Behauptung)",
+      "_health.klient_version || ''" in _dk24 and "v ?" in _dk24)
+check("Fremdtext nur per textContent", "vs.textContent" in _dk24)
+_i24 = (ROOT / "frontend" / "js" / "i18n.js").read_text(encoding="utf-8")
+check("i18n: aimouse.version in DE und EN",
+      _i24.count("'aimouse.version'") >= 2)
+# ⚠ `.ja-note` war an SIEBEN Stellen im Markup und NIRGENDS definiert – die
+#   Hinweise sahen aus wie gewoehnlicher Fliesstext (Klasse `.ja-actions`, Register).
+check("die Hinweisklasse ist ueberhaupt definiert", ".ja-note" in _css23)
+# `--text-muted` liegt in beiden Themen unter 4,5:1 – fuer eine Zahl, die man
+# ABLESEN soll, zu blass.
+check("und nicht im zu blassen Ton",
+      "var(--text-secondary)" in _nach24(_css23, ".ja-note", 160))
+check("die Version steht mittig neben dem Knopf, nicht oben",
+      "align-self: center" in _nach24(_css23, "#am-version", 120))
+
+# ── Die Version selbst ──────────────────────────────────────────────────────
+# ⚠ EINE CLIENT-AENDERUNG OHNE ERHOEHUNG ERREICHT KEINEN ARBEITSPLATZ: der
+#   Server baut zwar neu, aber `IstNeuer` sagt bei gleicher Nummer zu Recht nein.
+check("die Version ist hochgezaehlt (ist: %s)" % (am.klient_version() or "—"),
+      am.klient_version() == "1.0.2")
+
 
 print("\n%d OK, %d FAIL" % (ok, fail))
 sys.exit(1 if fail else 0)

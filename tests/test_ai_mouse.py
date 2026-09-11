@@ -508,10 +508,15 @@ if am.paket_vorhanden():
     name, daten = am.paket_bauen("", _mk, _ak)
     import io as _io, zipfile as _z
     innen = sorted(x.filename for x in _z.ZipFile(_io.BytesIO(daten)).infolist())
-    check("im Paket liegt nur EXE + Kurzanleitung",
-          innen == ["AiMouse.exe", "LIESMICH.txt"])
+    # ⚠ GENAU EINE DATEI (Vorgabe 2026-09-11): die Kurzanleitung ist raus,
+    # derselbe Inhalt steht in der Kachel. Geprueft wird auf GLEICHHEIT, nicht
+    # auf "enthaelt die EXE" – sonst faellt eine kuenftig wieder ergaenzte
+    # Beilage nicht auf, und genau darum geht es hier.
+    check("im Paket liegt NUR die EXE", innen == ["AiMouse.exe"])
     check("keine Konfigurationsdatei im Paket",
           not any(x.endswith(".json") for x in innen))
+    check("keine Kurzanleitung im Paket",
+          not any("LIESMICH" in x.upper() or "README" in x.upper() for x in innen))
 else:
     check("Paketinhalt geprueft (uebersprungen: keine EXE gebaut)", True)
 
@@ -2169,6 +2174,171 @@ check("  … und die Rueckmeldung nennt den Gegenstand",
       and 'T("Bild in die Zwischenablage kopiert.' in _txt)
 check("beide neuen Texte gibt es in DE und EN",
       '"Copy image"' in _txt and '"Image copied to clipboard."' in _txt)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+print("\n[21] Version 1.0.0 und stille Aktualisierung (2026-09-11)")
+# ─────────────────────────────────────────────────────────────────────────────
+_proj = (ROOT / "ai-mouse" / "src" / "AiMouse" / "AiMouse.csproj").read_text(
+    encoding="utf-8")
+
+check("die csproj traegt eine <Version>",
+      bool(re.search(r"<Version>\s*[0-9]+(\.[0-9]+)*\s*</Version>", _proj)))
+check("klient_version() liest sie und liefert 1.0.0 oder mehr",
+      re.fullmatch(r"[0-9]+(\.[0-9]+){1,3}", am.klient_version() or "") is not None)
+
+# ⚠ EINE QUELLE: eine Backend-Konstante waere eine Kopie, und eine Kopie, die
+# driftet, erzeugt hier eine UPDATE-SCHLEIFE (Server behauptet eine Version,
+# die die EXE nicht hat -> jeder Arbeitsplatz laedt sie immer wieder).
+_am_code = "\n".join(
+    z for z in (ROOT / "backend" / "ai_mouse.py").read_text(
+        encoding="utf-8").split("\n") if not z.lstrip().startswith("#"))
+check("Kommentar-Filter greift (Positivkontrolle)",
+      "def klient_version" in _am_code and "UPDATE-SCHLEIFE" not in _am_code)
+check("die Version steht NICHT zusaetzlich als Backend-Konstante",
+      not re.search(r"^[A-Z_]*VERSION[A-Z_]*\s*=\s*[\"'][0-9]", _am_code,
+                    re.MULTILINE))
+check("klient_version liest die csproj (keine zweite Fassung)",
+      "AiMouse.csproj" in _am_code and "<Version>" in _am_code)
+
+# ⚠ Eine Versionserhoehung MUSS einen Neubau ausloesen – sonst liefert der
+# Server eine Nummer, die die EXE nicht traegt. Die csproj muss deshalb im
+# Quellen-Scan liegen.
+check("`.csproj` zaehlt in quellen_stand() (Neubau bei Versionswechsel)",
+      '".csproj"' in _am_code and "quellen_stand" in _am_code)
+
+_main_code = "\n".join(
+    z for z in (ROOT / "backend" / "main.py").read_text(
+        encoding="utf-8").split("\n") if not z.lstrip().startswith("#"))
+check("health liefert klient_version",
+      '"klient_version": ai_mouse.klient_version()' in _main_code)
+
+# ── Der Client ───────────────────────────────────────────────────────────────
+_upd = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Update"
+        / "Aktualisierung.cs").read_text(encoding="utf-8")
+_upd_code = "\n".join(z for z in _upd.split("\n")
+                      if not z.lstrip().startswith("//")
+                      and not z.lstrip().startswith("///"))
+check("Kommentar-Filter greift (Positivkontrolle, Update-Modul)",
+      "BeimStartEinwechseln" in _upd_code
+      and "Man-in-the-Middle" not in _upd_code)
+
+# ⚠ DER EIGENE PFAD DARF NICHT UEBER Assembly.Location KOMMEN: bei
+# PublishSingleFile ist das ein LEERER String, und dann findet der Einwechsel
+# seine eigene Datei nicht.
+check("der eigene Pfad kommt aus Environment.ProcessPath",
+      "Environment.ProcessPath" in _upd_code
+      and "Assembly.Location" not in _upd_code)
+
+# ⚠ Versionen als ZAHLEN und auf vier Teile normiert – sonst ist "1.0.0"
+# kleiner als "1.0.0.0" und jeder Start loest ein Update aus, das nichts
+# aendert (Endlosschleife), bzw. "0.10.0" gilt als aelter als "0.9.0".
+check("Versionsvergleich ueber Version.TryParse, nicht als Text",
+      "Version.TryParse" in _upd_code)
+check("  … und auf vier Teile normiert",
+      "Normiert" in _upd_code and "Math.Max" in _upd_code)
+
+# ⚠ DEN ZWEIG ISOLIEREN, nicht das Vorkommen zaehlen: `return false` steht in
+# diesem Modul mehrfach, die Gegenprobe ("unbekannte Version loest ein Update
+# aus") blieb deshalb gruen. Gemessen wird, was NACH der Bedingung kommt.
+_izweig = _upd_code[_upd_code.find("IsNullOrWhiteSpace(ziel)"):]
+_izweig = _izweig[:_izweig.find("TryParse")] if "TryParse" in _izweig else _izweig
+check("eine unbekannte Serverversion tut NICHTS (fail-safe)",
+      "IsNullOrWhiteSpace(ziel)" in _upd_code
+      and "return false;" in _izweig and "return true;" not in _izweig)
+
+# ⚠ DIE REIHENFOLGE IST DIE SICHERUNG: alte Datei erst umbenennen, dann die
+# neue an ihre Stelle – und bei Fehlschlag ZURUECKNEHMEN. Ohne die Ruecknahme
+# bliebe gar keine EXE stehen; die Anwendung waere auf diesem Arbeitsplatz weg.
+_ein = _upd_code[_upd_code.find("BeimStartEinwechseln"):]
+_ein = _ein[:_ein.find("PruefenUndHolenAsync")] if "PruefenUndHolenAsync" in _ein else _ein
+check("Einwechsel: alte Fassung wird umbenannt, nicht geloescht",
+      "File.Move(exe, alt" in _ein)
+check("Einwechsel: Fehlschlag wird ZURUECKGENOMMEN",
+      "File.Move(alt, exe" in _ein)
+check("Einwechsel: eine zu kleine Datei wird verworfen, nicht eingewechselt",
+      "1_000_000" in _ein)
+
+# ⚠ NICHTS WIRD SOFORT ERSETZT: das Ersetzen verlangt, dass sich die laufende
+# EXE beendet – und genau das ist nicht still (offenes Ergebnisfenster weg).
+# Geholt wird nur DANEBEN; eingewechselt beim naechsten Start.
+_hol = _upd_code[_upd_code.find("PruefenUndHolenAsync"):]
+check("das Holen startet nichts neu und beendet nichts",
+      "Process.Start" not in _hol and "Application.Exit" not in _hol
+      and "Environment.Exit" not in _hol)
+check("bereits geholte Fassung wird nicht erneut geladen",
+      'File.Exists(neu)' in _hol)
+check("Schreibrecht wird VOR dem Download geprueft",
+      _hol.find("schreibprobe") < _hol.find("paketHolen("))
+# ⚠ DIE ZUWEISUNG pruefen, nicht das Vorkommen von ".teil": der Name steht
+# auch im `catch`-Block (Aufraeumen), und die Gegenprobe `string teil = neu;`
+# blieb deshalb gruen – dabei waere genau das der Fehler, den ein abgebrochener
+# Download hinterlaesst: eine halbe `.neu`, die der naechste Start einwechselt.
+check("zuerst in eine Nebendatei, dann umbenennen",
+      'string teil = exe + ".teil";' in _hol
+      and "File.Move(teil, neu" in _hol)
+
+_prog = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Program.cs").read_text(
+    encoding="utf-8")
+_prog_code = "\n".join(z for z in _prog.split("\n")
+                       if not z.lstrip().startswith("//"))
+# ⚠ VOR ALLEM ANDEREN: ab dem ersten Fenster waere etwas zu verlieren.
+check("der Einwechsel steht vor Application.EnableVisualStyles",
+      0 < _prog_code.find("BeimStartEinwechseln")
+      < _prog_code.find("EnableVisualStyles"))
+# ⚠ UND ER DARF KEIN TOTER ZWEIG SEIN: die Gegenprobe `if (false && …)` liess
+# die POSITION unveraendert und blieb damit gruen – eine Pruefung auf die
+# Stelle beantwortet nicht, ob der Code je laeuft (Register: die Eigenschaft
+# messen, nicht das Vorkommen).
+check("  … und seine Bedingung ist kein toter Zweig",
+      "if (isOnlyInstance && Aktualisierung.NeueFassungLiegtBereit())"
+      in _prog_code)
+# ⚠ UND HINTER DER EINZELINSTANZ-SPERRE: zwei gleichzeitig gestartete
+# Instanzen wuerden sonst dieselbe Datei umbenennen.
+check("  … und hinter der Einzelinstanz-Sperre",
+      _prog_code.find("new Mutex(") < _prog_code.find("BeimStartEinwechseln"))
+# ⚠ Die Sperre MUSS vor dem Neustart freigegeben werden, sonst laeuft die neue
+# Instanz in die "laeuft bereits"-Meldung – genau dann, wenn aktualisiert wurde.
+check("die Einzelinstanz-Sperre wird vor dem Neustart freigegeben",
+      0 < _prog_code.find("ReleaseMutex")
+      < _prog_code.find("BeimStartEinwechseln()"))
+
+_tray_u = "\n".join(z for z in cs_tray.split("\n")
+                    if not z.lstrip().startswith("//")
+                    and not z.lstrip().startswith("///"))
+check("die Pruefung haengt an der Stelle, an der eine Sitzung existiert",
+      "AktualisierungPruefenAsync" in _tray_u
+      and "_ = AktualisierungPruefenAsync();" in _tray_u)
+# ⚠ NICHT ABGEWARTET: 66 MB Download darf das Fragenmenue nicht aufhalten.
+check("die Pruefung wird NICHT abgewartet",
+      "await AktualisierungPruefenAsync()" not in _tray_u)
+# ⚠ STILL heisst: kein Dialog, keine Blase, keine Fehlermeldung.
+_ap = _tray_u[_tray_u.find("private async Task AktualisierungPruefenAsync"):]
+_ap = _ap[:_ap.find("private void ShowTrayError")] if "private void ShowTrayError" in _ap else _ap
+check("die Pruefung meldet dem Benutzer NICHTS",
+      "MessageBox" not in _ap and "ShowBalloonTip" not in _ap
+      and "ShowTrayError" not in _ap)
+
+_cl_u = "\n".join(z for z in cs_client.split("\n")
+                  if not z.lstrip().startswith("//")
+                  and not z.lstrip().startswith("///"))
+check("der Client kennt ServerVersionAsync und PaketAsync",
+      "ServerVersionAsync" in _cl_u and "PaketAsync" in _cl_u)
+# ⚠ HIER KOMMT CODE UEBER DIE LEITUNG. Der Schutz ist die TLS-Pruefung des
+# Standard-HttpClient – eine Ausnahme dafuer waere ein Weg zur
+# Codeausfuehrung per Man-in-the-Middle.
+check("nirgends eine Zertifikats-Ausnahme im Client",
+      "ServerCertificateCustomValidationCallback" not in _cl_u
+      and "DangerousAcceptAnyServerCertificate" not in _cl_u)
+# ⚠ Der gemeinsame HttpClient traegt das Zeitlimit der AUSWERTUNG (bis 1 h);
+# ein haengender 66-MB-Download darf nicht stundenlang eine Verbindung halten.
+_pa = _cl_u[_cl_u.find("public async Task<byte[]> PaketAsync"):]
+_pa = _pa[:_pa.find("public async Task<List<PromptItem>>")] if "public async Task<List<PromptItem>>" in _pa else _pa
+check("PaketAsync hat ein eigenes, kurzes Zeitlimit",
+      "CancellationTokenSource(TimeSpan" in _pa)
+check("ServerVersionAsync wirft nicht (leer = unbekannt)",
+      "return string.Empty;" in _cl_u[_cl_u.find("ServerVersionAsync"):
+                                      _cl_u.find("PaketAsync")])
 
 print("\n%d OK, %d FAIL" % (ok, fail))
 sys.exit(1 if fail else 0)

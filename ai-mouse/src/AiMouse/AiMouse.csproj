@@ -9,6 +9,16 @@
     <LangVersion>latest</LangVersion>
     <AssemblyName>AiMouse</AssemblyName>
     <RootNamespace>AiMouse</RootNamespace>
+    <!-- ⚠ DIE EINE QUELLE DER VERSION (seit 1.0.0, 2026-09-11).
+         Sie beschreibt den CLIENT-CODE, also gehoert sie zu ihm – nicht in eine
+         Backend-Konstante, die eine Kopie waere und driften wuerde. Der Server
+         LIEST sie hier (`ai_mouse.klient_version()`) und nennt sie in
+         `/api/ai-mouse/health`; die Anwendung liest ihre EIGENE Assembly. Damit
+         koennen Server und EXE nicht auseinanderlaufen, solange die EXE aus
+         dieser Datei gebaut ist – und dafuer sorgt `bau_noetig()`: `.csproj`
+         zaehlt in `quellen_stand()`, eine Erhoehung hier loest den Neubau aus.
+         ⚠ WER SIE HOCHZAEHLT, LOEST AUF JEDEM ARBEITSPLATZ EIN UPDATE AUS. -->
+    <Version>1.0.0</Version>
     <!-- DPI awareness is owned by app.manifest, not by ApplicationHighDpiMode: it has to
          be in effect from process start, before any screen coordinate is read.
          WFAC010 asks for the opposite; suppressed because that trade-off is intentional. -->

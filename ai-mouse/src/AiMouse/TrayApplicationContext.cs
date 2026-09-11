@@ -5,6 +5,7 @@ using AiMouse.Localization;
 using AiMouse.Input;
 using AiMouse.Interop;
 using AiMouse.Ui;
+using AiMouse.Update;
 using AiMouse.Vision;
 
 namespace AiMouse;
@@ -937,6 +938,48 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             // Bewusst still: die vorhandene Liste bleibt gueltig, und ein
             // Fehlerfenster beim Start waere hier reine Stoerung.
+        }
+
+        // Gleicher Anlass, andere Aufgabe: eine neue Fassung bereitlegen.
+        // ⚠ NICHT ABGEWARTET – der Download ist rund 66 MB, und niemand soll
+        // deshalb auf sein Fragenmenue warten. Ausgeloest wird hier, weil
+        // diese Stelle GENAU DANN laeuft, wenn eine Sitzung existiert (beim
+        // Start mit gemerktem Token und nach jeder Anmeldung).
+        _ = AktualisierungPruefenAsync();
+    }
+
+    /// <summary>Prueft still, ob der Server eine neuere Fassung fuehrt.
+    ///
+    /// ⚠ ES WIRD NICHTS ERSETZT UND NICHTS NEU GESTARTET. Die neue Fassung
+    /// wird nur DANEBEN gelegt; eingewechselt wird beim naechsten
+    /// Programmstart (`Program.Main`). Das ist der Unterschied zwischen
+    /// "still" und "der Benutzer verliert sein offenes Ergebnisfenster" –
+    /// Begruendung im Kopf von `Update/Aktualisierung.cs`.
+    ///
+    /// ⚠ WIRFT NIE UND MELDET NICHTS. Eine Aktualisierung, die den Benutzer
+    /// mit einem Fehlerfenster behelligt, ist nicht still; und die Anwendung
+    /// funktioniert ohne sie unveraendert weiter.
+    /// </summary>
+    private async Task AktualisierungPruefenAsync()
+    {
+        try
+        {
+            if (!_client.Angemeldet)
+            {
+                return;
+            }
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(12));
+            string serverVersion = await _client.ServerVersionAsync(cts.Token)
+                .ConfigureAwait(false);
+            await Aktualisierung.PruefenUndHolenAsync(
+                serverVersion,
+                t => _client.PaketAsync(t),
+                cts.Token).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // Still. Siehe Docstring.
         }
     }
 

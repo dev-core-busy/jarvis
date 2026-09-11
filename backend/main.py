@@ -13365,20 +13365,31 @@ async def ai_mouse_health(request: Request, lang: str = "de",
         "paket_baut": bool(ai_mouse.bau_zustand().get("laeuft")),
         "marke": marke,
         "akzent": akzent,
+        # ⚠ HIER UND NICHT IN EINEM EIGENEN ENDPUNKT: die Anwendung ruft
+        # `health` nach jeder Anmeldung ohnehin – eine zweite Route waere ein
+        # Roundtrip fuer eine Zahl. Sie ist die Grundlage der stillen
+        # Aktualisierung (`Update/Aktualisierung.cs`); ein LEERER Wert heisst
+        # "unbekannt" und laesst die Anwendung NICHTS tun.
+        "klient_version": ai_mouse.klient_version(),
     })
 
 
 @app.get("/api/ai-mouse/paket")
 async def ai_mouse_paket(request: Request,
                          user: str = Depends(require_aimouse_access)):
-    """Die Windows-Anwendung als ZIP – bei jedem Abruf frisch zusammengestellt.
+    """Die Windows-Anwendung als ZIP – nur die EXE, sonst nichts.
 
-    ⚠ DIE .EXE WIRD HIER NICHT GEBAUT und kann es nicht: sie ist ein
-    Windows-WinForms-Programm, der Server ist Linux. Sie liegt vorkompiliert
-    unter ``vendor/ai-mouse/`` (wie ``vendor/tika-app.jar`` außerhalb des
-    Repos), und gebrandet wird die ``settings.json`` daneben – Text, den der
-    Server schreiben kann. Fehlt die Datei, sagt die Meldung, wie sie dorthin
-    kommt.
+    ⚠ DIESER TEXT BEHAUPTETE BIS 2026-09-11 DAS GEGENTEIL („die .EXE wird hier
+    nicht gebaut und kann es nicht … gebrandet wird die settings.json daneben").
+    Beides ist seit dem 2026-09-09 widerlegt: der Linux-Server ÜBERSETZT das
+    WinForms-Programm (`-p:EnableWindowsTargeting=true`, gemessen 25 s), und es
+    gibt keine settings.json mehr – die Hauswerte stehen im Programm, vor dem
+    Übersetzen eingesetzt. Ein Docstring, der eine Unmöglichkeit behauptet, die
+    nebenan gerade läuft, kostet bei der nächsten Fehlersuche Stunden.
+
+    Gebaut wird bei Bedarf (`bau_noetig()`), ausgeliefert wird die vorhandene
+    Datei. Seit 2026-09-11 liegt auch keine ``LIESMICH.txt`` mehr im ZIP: der
+    Inhalt steht in der Kachel, und eine Kopie daneben driftet.
     """
     from backend import addin, ai_mouse  # noqa: PLC0415
     marke, akzent = ai_mouse.branding()

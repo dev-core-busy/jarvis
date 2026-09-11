@@ -714,6 +714,35 @@ def exe_pfad():
     return _projekt_wurzel() / VENDOR_UNTER / EXE_NAME
 
 
+def csproj_pfad():
+    """Die Projektdatei der Anwendung – dort steht die Version."""
+    return _projekt_wurzel() / "ai-mouse" / "src" / "AiMouse" / "AiMouse.csproj"
+
+
+def klient_version() -> str:
+    """Die Version der Anwendung, GELESEN aus ``AiMouse.csproj``.
+
+    ⚠ EINE QUELLE, KEINE KOPIE. Die Version beschreibt den Client-Code; eine
+    Konstante hier waere eine zweite Fassung und wuerde driften – und die Folge
+    waere schlimmer als ein falscher Text: der Server behauptet dann eine
+    Version, die die EXE nicht hat, jeder Arbeitsplatz laedt sie, bekommt
+    wieder die alte und laedt erneut. Eine Update-Schleife, die niemand sieht.
+
+    ⚠ RUECKGABE "" HEISST "UNBEKANNT" UND IST KEIN FEHLER. Genau dann darf NICHT
+    aktualisiert werden: ohne verlaessliche Nummer ist jeder Vergleich geraten.
+    Dieselbe fail-safe Richtung wie beim Update-Hinweis der Jira-Erweiterung –
+    fehlt eine Angabe, wird nichts behauptet und nichts getan.
+    """
+    import re as _re  # noqa: PLC0415
+
+    try:
+        text = csproj_pfad().read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    m = _re.search(r"<Version>\s*([0-9]+(?:\.[0-9]+){0,3})\s*</Version>", text)
+    return m.group(1) if m else ""
+
+
 def paket_vorhanden() -> bool:
     """Liegt die EXE bereit? Fehlertolerant, im Zweifel ``False``.
 
@@ -775,10 +804,16 @@ def vorgaben_cs(basis: str, marke: str, akzent: str, sprache: str = "de") -> str
 def paket_bauen(basis: str = "", marke: str = "", akzent: str = "") -> tuple:
     """``(dateiname, zip_bytes)`` – die fertige Anwendung, gebrandet.
 
-    ⚠ IM PAKET LIEGT NUR NOCH DIE EXE (Vorgabe des Betreibers, 2026-09-09).
+    ⚠ IM PAKET LIEGT NUR DIE EXE – SONST NICHTS (Vorgabe des Betreibers,
+    2026-09-09 fuer die JSON-Dateien, 2026-09-11 fuer die Kurzanleitung).
     settings.json und prompts.json sind ENTFALLEN: die Hauswerte stehen im
     Programm (``vorgaben_cs``, beim Bau eingesetzt), die Fragen auf dem Server
     (``ai_mouse_fragen``), und was ein Benutzer einstellt, in der Registry.
+
+    ``LIESMICH.txt`` ist ebenfalls entfallen: derselbe Inhalt steht in der
+    Kachel, und eine Kopie im ZIP ist eine ZWEITE Fassung derselben Anleitung –
+    sie driftet, und die veraltete ist genau die, die am Arbeitsplatz liegt.
+    Ein Paket aus genau einer Datei braucht ohnehin keine Wegbeschreibung.
 
     Gebaut wird NEU, wenn sich die Hauswerte geaendert haben – erkennbar an
     ``Configuration/Vorgaben.cs``. Sonst wird die vorhandene Datei geliefert;
@@ -802,7 +837,6 @@ def paket_bauen(basis: str = "", marke: str = "", akzent: str = "") -> tuple:
     puffer = io.BytesIO()
     with zipfile.ZipFile(puffer, "w", zipfile.ZIP_DEFLATED) as z:
         z.write(p, EXE_NAME)
-        z.writestr("LIESMICH.txt", _liesmich(basis, marke))
     # Der Dateiname traegt die Marke – auf einem Arbeitsplatz liegen sonst
     # mehrere gleichnamige ZIPs verschiedener Installationen nebeneinander.
     sicher = re.sub(r"[^A-Za-z0-9_.-]+", "-", marke).strip("-") or "jarvis"
@@ -893,46 +927,13 @@ def _vorgaben_sicherstellen(basis: str, marke: str, akzent: str) -> bool:
         return False
 
 
-def _liesmich(basis: str, marke: str) -> str:
-    """Kurzanleitung im Paket – fuer den Fall, dass nur das ZIP weitergegeben
-    wird und die Seite im Portal nicht danebensteht."""
-    return (
-        "%s – AI Mouse\n"
-        "%s\n\n"
-        "Rechte Maustaste HALTEN und einen Rahmen aufziehen. Beim Loslassen\n"
-        "erscheint ein Menue mit Fragen; nach der Auswahl geht der Ausschnitt\n"
-        "an %s und die Antwort erscheint in einem Fenster.\n"
-        "Ein einfacher Rechtsklick verhaelt sich unveraendert.\n\n"
-        "Installation: AiMouse.exe irgendwohin kopieren (z. B.\n"
-        "%%LOCALAPPDATA%%\\AiMouse) und starten. Keine Installation, keine\n"
-        "Administratorrechte, keine Konfigurationsdateien. Fuer den Autostart\n"
-        "eine Verknuepfung in den Autostart-Ordner legen (Win+R,\n"
-        "'shell:startup').\n\n"
-        "Beim ersten Rahmen fragt die Anwendung nach Benutzername und Kennwort –\n"
-        "dieselben wie im Portal.\n\n"
-        "Server: %s (fest eingebaut, im Einstellungsdialog aenderbar)\n\n"
-        "DIE FRAGEN IM MENUE werden im Portal gepflegt: Kachel 'AI Mouse' →\n"
-        "'Meine Fragen'. Sie gelten fuer dich an jedem Arbeitsplatz. Im\n"
-        "Tray-Menue holt 'Konfiguration neu laden' den aktuellen Stand.\n\n"
-        "Eigene Einstellungen (Sprache, Ziehschwelle) liegen in der Registry\n"
-        "unter HKCU\\Software\\AiMouse – die Exe selbst bleibt unveraendert.\n\n"
-        "Was NICHT gespeichert wird: der Bildausschnitt. Er geht in die Anfrage\n"
-        "und ist danach weg.\n"
-        % (marke, "=" * (len(marke) + 12), marke, basis or "(nicht gesetzt)"))
-
-
-# ── Automatische Einrichtung ────────────────────────────────────────────────
-# ⚠ HIER STAND EINE MELDUNG, DIE DEN ADMINISTRATOR INS TERMINAL SCHICKTE
-# ("einmalig 'bash deploy/ai_mouse_build.sh' ausfuehren"). Genau das ist am
-# 2026-09-04 fuer Tika als **inakzeptabel** zurueckgewiesen worden: es ist
-# Hoffen darauf, dass jemand zufaellig auf einen Hinweis stoesst. Die Anwendung
-# wird deshalb SELBST gebaut – beim Dienststart und bei Bedarf.
-#
-# DER UNTERSCHIED ZU TIKA: hier braucht es in aller Regel KEINE Root-Rechte.
-# Gebaut wird nach `vendor/ai-mouse/`, und das gehoert dem Dienstbenutzer; das
-# .NET-SDK wird nur gelesen. Root braucht es einzig, wenn das SDK ueberhaupt
-# fehlt – dann laeuft die Installation ueber den Broker, sonst baut das
-# Backend direkt.
+# ⚠ DIESE DREI STANDEN HINTER `_liesmich` UND SIND BEIM ENTFERNEN DER FUNKTION
+# MITGELOESCHT WORDEN (2026-09-11). Ein Schnitt "von `def _liesmich(` bis zum
+# naechsten `\ndef `" nimmt alles mit, was dazwischen steht – hier drei
+# Modul-Variablen, ohne die `einrichtung_anstossen` mit `NameError` starb und
+# damit der ganze Bau-Mechanismus tot war. Gefunden hat es nur der Testlauf.
+# Merkregel: wer eine Funktion per Textschnitt entfernt, prueft, was zwischen
+# ihr und der naechsten steht.
 
 # Mindestabstand zwischen zwei Versuchen. Ohne ihn stiesse JEDER Abruf des
 # Pakets einen eigenen Bau an – bei einem Server ohne SDK also im Minutentakt

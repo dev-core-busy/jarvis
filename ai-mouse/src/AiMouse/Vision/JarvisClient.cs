@@ -270,6 +270,111 @@ internal sealed class JarvisClient : IDisposable
     /// geholte Liste. Ohne Fragen waere die Geste nutzlos – eine leere Liste
     /// nach einem Netzhaenger waere der schlechtere Ausgang.
     /// </summary>
+    /// <summary>Die Version, die der SERVER fuer die Anwendung fuehrt.
+    ///
+    /// Aus <c>/api/ai-mouse/health</c>, dem Feld <c>klient_version</c>. Der
+    /// Server liest sie aus der Projektdatei des Clients – es gibt also nur
+    /// EINE Quelle, und Server und EXE koennen nicht auseinanderlaufen.
+    ///
+    /// ⚠ RUECKGABE "" HEISST "UNBEKANNT", NICHT "KEINE NEUE". Diese Methode
+    /// wirft deshalb NICHT bei einem Netz- oder Serverfehler: eine stille
+    /// Aktualisierung darf an einer nicht erreichbaren Antwort nicht
+    /// haengenbleiben, und ein leerer Wert laesst den Aufrufer nichts tun.
+    /// </summary>
+    public async Task<string> ServerVersionAsync(CancellationToken ct)
+    {
+        try
+        {
+            if (!Angemeldet)
+            {
+                return string.Empty;
+            }
+
+            string basis = EndpointResolver.Basis(_settings.Endpoint);
+            if (basis.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            using var nachricht = new HttpRequestMessage(
+                HttpMethod.Get, basis + "/api/ai-mouse/health");
+            nachricht.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);
+
+            using HttpResponseMessage antwort =
+                await _http.SendAsync(nachricht, ct).ConfigureAwait(false);
+            if (!antwort.IsSuccessStatusCode)
+            {
+                return string.Empty;
+            }
+
+            string roh = await antwort.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            using JsonDocument doc = JsonDocument.Parse(roh);
+            return doc.RootElement.TryGetProperty("klient_version", out JsonElement v)
+                   && v.ValueKind == JsonValueKind.String
+                ? (v.GetString() ?? string.Empty)
+                : string.Empty;
+        }
+        catch (Exception)
+        {
+            return string.Empty;
+        }
+    }
+
+    /// <summary>Das Anwendungspaket (ZIP) – fuer die stille Aktualisierung.
+    ///
+    /// ⚠ HIER KOMMT AUSFUEHRBARER CODE UEBER DIE LEITUNG. Getragen wird das
+    /// von der TLS-Pruefung dieses <see cref="HttpClient"/> (Standard, ohne
+    /// Ausnahme) und vom Sitzungstoken – dasselbe Vertrauensniveau wie beim
+    /// Download von Hand im Portal. Wer hier eine Zertifikats-Ausnahme
+    /// einbaut, macht daraus einen Weg zur Codeausfuehrung per
+    /// Man-in-the-Middle.
+    ///
+    /// ⚠ EIGENES, KURZES ZEITLIMIT: das Paket ist rund 66 MB, und der
+    /// gemeinsame <see cref="HttpClient"/> traegt das Zeitlimit der
+    /// AUSWERTUNG (bis zu einer Stunde). Ein haengender Download darf nicht
+    /// stundenlang eine Verbindung halten.
+    /// </summary>
+    public async Task<byte[]> PaketAsync(CancellationToken ct)
+    {
+        if (!Angemeldet)
+        {
+            throw new AnmeldungNoetigException(Texte.AnmeldungFehlt);
+        }
+
+        string basis = EndpointResolver.Basis(_settings.Endpoint);
+        if (basis.Length == 0)
+        {
+            throw new VisionException(Texte.KeinServer);
+        }
+
+        using var eigenesLimit = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+        using var zusammen = CancellationTokenSource.CreateLinkedTokenSource(
+            ct, eigenesLimit.Token);
+
+        using var nachricht = new HttpRequestMessage(
+            HttpMethod.Get, basis + "/api/ai-mouse/paket");
+        nachricht.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);
+
+        using HttpResponseMessage antwort = await _http.SendAsync(
+            nachricht, HttpCompletionOption.ResponseHeadersRead, zusammen.Token)
+            .ConfigureAwait(false);
+        if (antwort.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            _token = string.Empty;
+            throw new AnmeldungNoetigException(Texte.Abgelaufen);
+        }
+
+        if (!antwort.IsSuccessStatusCode)
+        {
+            // 409 heisst "wird gerade gebaut" – kein Fehler, nur nichts zu
+            // holen. Der naechste Anlauf bekommt die Datei.
+            throw new VisionException("HTTP " + (int)antwort.StatusCode);
+        }
+
+        return await antwort.Content.ReadAsByteArrayAsync(zusammen.Token)
+            .ConfigureAwait(false);
+    }
+
     public async Task<List<PromptItem>> FragenAsync(CancellationToken ct)
     {
         if (!Angemeldet)

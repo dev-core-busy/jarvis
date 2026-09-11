@@ -18,7 +18,13 @@
          dieser Datei gebaut ist – und dafuer sorgt `bau_noetig()`: `.csproj`
          zaehlt in `quellen_stand()`, eine Erhoehung hier loest den Neubau aus.
          ⚠ WER SIE HOCHZAEHLT, LOEST AUF JEDEM ARBEITSPLATZ EIN UPDATE AUS. -->
-    <Version>1.0.0</Version>
+    <!-- 1.0.1 (2026-09-11): Beschriftung „Ziehen nur mit Taste".
+         ⚠ EINE TEXTAENDERUNG IST EINE VERSION WERT. Ohne Erhoehung baut der
+         Server zwar neu (`.cs` zaehlt in `quellen_stand()`), aber ein
+         Arbeitsplatz mit 1.0.0 bekommt KEIN Update – die Serverversion waere
+         unveraendert, und `IstNeuer` sagt zu Recht nein. Der neue Text waere
+         damit nur fuer Neu-Downloads da. -->
+    <Version>1.0.1</Version>
     <!-- DPI awareness is owned by app.manifest, not by ApplicationHighDpiMode: it has to
          be in effect from process start, before any screen coordinate is read.
          WFAC010 asks for the opposite; suppressed because that trade-off is intentional. -->

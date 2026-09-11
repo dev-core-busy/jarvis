@@ -24,6 +24,7 @@ Waechter durchsucht `tests/` selbst, damit auch ein kuenftiges Skript auffaellt.
     python3 tests/test_messung_zustand.py
 """
 
+import ast
 import re
 import sys
 from pathlib import Path
@@ -103,6 +104,76 @@ for p in dateien:
           bool(BEDINGT.search(quelle)),
           "ruft disable im Aufraeumen, ohne den Vorzustand zu unterscheiden – "
           "genau der gemeldete Fehler")
+
+
+print("\n\033[1m2b. Eine geaenderte REIHENFOLGE gehoert zurueckgestellt\033[0m")
+
+# ⚠ NEUE ZUSTANDSART, am 2026-09-11 bezahlt. Der Waechter kannte nur
+# Skill-Schalter – meine Live-Probe zur Fragen-Reihenfolge hat die Folge der
+# sechs echten Fragen umgedreht und am Ende nur die MENGE zurueckgeprueft
+# (`sorted(...) == sorted(...)`). Eine Messung, die ihren Gegenstand verstellt
+# und dann etwas ANDERES zurueckprueft, ist keine Wiederherstellung.
+#
+# Geprueft wird die EIGENSCHAFT, nicht ein Wortlaut: wer die Reihenfolge
+# schreibt, muss sie (a) vorher merken, (b) am Ende wieder senden und (c) auf
+# IDENTITAET pruefen – `sorted()` allein genuegt ausdruecklich nicht.
+SORT_MERKT = re.compile(r"\bvorher\b|\bvorgefunden|\bVORHER\b|\bfolge_vor\b")
+SORT_IDENT = re.compile(r"==\s*vorher\b|vorher\s*==|nach\s*==\s*vorher")
+# ⚠ DRITTE HAELFTE, von einer Gegenprobe gefunden: "merkt" und "prueft auf
+# Identitaet" bleiben wahr, wenn nur das ZURUECKSTELLEN fehlt – der Waechter
+# war damit fuer genau den Fall blind, den es zu verhindern gilt.
+SORT_ZURUECK = re.compile(r'"ids":\s*vorher\b|ids=vorher\b|sortieren\([^)]*vorher')
+
+
+def schreibt_reihenfolge(quelle: str) -> bool:
+    """⚠ EIN ECHTER AUFRUF, KEIN VORKOMMEN. Ein Gegenproben-Harness traegt
+    `amf.sortieren(...)` und den Endpunkt-Pfad als SABOTAGE-ANKER in
+    Zeichenketten – er fasst keine Daten an und stellt sich ueber seine
+    Datei-Sicherung wieder her. Wer das Muster im Text sucht, meldet ihn und
+    baut sich einen Fehlalarm (beim Bau dieser Regel gemessen)."""
+    try:
+        baum = ast.parse(quelle)
+    except SyntaxError:
+        return False
+    for k in ast.walk(baum):
+        if not isinstance(k, ast.Call):
+            continue
+        f = k.func
+        if isinstance(f, ast.Attribute) and f.attr == "sortieren":
+            return True                      # echter Aufruf der Sortierfunktion
+        # Ein HTTP-Aufruf: EIN Argument ist genau der Pfad (keine Codezeile),
+        # ein anderes nennt POST.
+        lits = [a.value for a in k.args
+                if isinstance(a, ast.Constant) and isinstance(a.value, str)]
+        pfad = any(x.strip().startswith("/api/") and "\n" not in x
+                   and x.rstrip("/").endswith("reihenfolge") for x in lits)
+        if pfad and any(x == "POST" for x in lits):
+            return True
+    return False
+
+
+betroffen_s = 0
+for p in dateien:
+    quelle = ohne_kommentare(p.read_text(encoding="utf-8", errors="replace"))
+    if not schreibt_reihenfolge(quelle):
+        continue
+    betroffen_s += 1
+    geprueft += 2
+    check("%s merkt die vorgefundene Reihenfolge" % p.name,
+          bool(SORT_MERKT.search(quelle)),
+          "aendert die Folge, ohne nachzusehen welche vorher galt")
+    check("%s prueft am Ende auf IDENTITAET, nicht nur auf die Menge" % p.name,
+          bool(SORT_IDENT.search(quelle)),
+          "sorted(...)==sorted(...) laesst eine verdrehte Folge durch – "
+          "genau der Fehler vom 2026-09-11")
+    geprueft += 1
+    check("%s stellt die vorgefundene Reihenfolge wirklich zurueck" % p.name,
+          bool(SORT_ZURUECK.search(quelle)),
+          "merkt sie und prueft sie, sendet sie aber nie zurueck")
+
+check("es gibt ueberhaupt Skripte dieser Art (Positivkontrolle)",
+      betroffen_s > 0,
+      "kein Skript schreibt eine Reihenfolge – der Abschnitt prueft dann nichts")
 
 
 print("\n\033[1m3. Der Kommentar-Filter greift wirklich\033[0m")

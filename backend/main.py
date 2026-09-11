@@ -13460,6 +13460,45 @@ async def ai_mouse_fragen_speichern(request: Request,
     return JSONResponse({"ok": True, "frage": eintrag})
 
 
+@app.post("/api/ai-mouse/fragen/reihenfolge")
+async def ai_mouse_fragen_sortieren(request: Request,
+                                    user: str = Depends(require_aimouse_access)):
+    """Die Reihenfolge der Fragen setzen (Ziehen in der Kachel).
+
+    ⚠ DER BENUTZER KOMMT AUS DER ANMELDUNG, nie aus dem Rumpf – sonst wäre der
+    Endpunkt der bequemste Weg, die Menü-Reihenfolge eines Kollegen umzustellen
+    (gleiche Regel wie beim Empfänger einer Erinnerung und beim Chat-Prompt).
+
+    ⚠ DIE ROUTE STEHT VOR ``/fragen/{fid}`` – FastAPI prüft innerhalb derselben
+    Methode in Registrierungsreihenfolge; das ist hier unkritisch (POST gegen
+    DELETE), aber die Reihenfolge bleibt bewusst so, damit ein künftiges
+    ``PUT/POST /fragen/{fid}`` den festen Pfad nicht abfängt.
+    """
+    from backend import ai_mouse_fragen as amf  # noqa: PLC0415
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."},
+                            status_code=400)
+    ids = (body or {}).get("ids")
+    if not isinstance(ids, list):
+        return JSONResponse({"ok": False, "error": "`ids` fehlt oder ist keine Liste."},
+                            status_code=400)
+    # Deckel: die Liste kommt aus dem Request. Mehr Kennungen als überhaupt
+    # Fragen erlaubt sind kann es nicht geben.
+    if len(ids) > (amf.MAX_JE_BENUTZER + amf.MAX_GEMEINSAM):
+        return JSONResponse({"ok": False, "error": "Zu viele Kennungen."},
+                            status_code=400)
+    bewegt = await asyncio.to_thread(amf.sortieren, user, ids,
+                                     _is_admin_user(user))
+    # Die neue Liste kommt mit zurück: die Oberfläche zeichnet danach aus der
+    # SERVER-Antwort, nicht aus ihrem eigenen Zwischenstand – sonst behauptet
+    # sie eine Reihenfolge, die der Server womöglich anders gespeichert hat
+    # (nicht genannte Einträge landen hinten).
+    return JSONResponse({"ok": True, "bewegt": bewegt,
+                         "fragen": amf.liste(user, _is_admin_user(user))})
+
+
 @app.delete("/api/ai-mouse/fragen/{fid}")
 async def ai_mouse_frage_loeschen(fid: str, request: Request,
                                   user: str = Depends(require_aimouse_access)):

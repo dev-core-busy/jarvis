@@ -2340,5 +2340,304 @@ check("ServerVersionAsync wirft nicht (leer = unbekannt)",
       "return string.Empty;" in _cl_u[_cl_u.find("ServerVersionAsync"):
                                       _cl_u.find("PaketAsync")])
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+print("\n[22] Beschriftung der beiden Tastenfelder (Vorgabe 2026-09-11)")
+# ─────────────────────────────────────────────────────────────────────────────
+_tx = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Localization"
+       / "Texte.cs").read_text(encoding="utf-8")
+check("das Rechtszieh-Feld heisst 'Ziehen nur mit Taste'",
+      'T("Ziehen nur mit Taste",' in _tx)
+check("  … und auf Englisch 'Drag only with key'",
+      '"Drag only with key"' in _tx)
+check("der alte Wortlaut kommt nicht zurueck",
+      "Ziehen & Ablegen mit Taste" not in _tx
+      and "Drag & drop with key" not in _tx)
+
+# ⚠ DIE PARALLELITAET IST DIE ZUSAGE: die zwei Felder stehen im Dialog
+# untereinander und sind Gegenstuecke (eines sperrt das Lasso, das andere
+# Windows' Rechtsziehen). Verschieden gebaute Beschriftungen lesen sich wie
+# zwei unabhaengige Features – genau das war der Grund fuer die Umbenennung.
+# Geprueft wird die EIGENSCHAFT, nicht der Wortlaut: beide nennen dieselbe
+# Bedingung in derselben Form.
+import re as _re22
+_paare = dict(_re22.findall(
+    r'public static string (RechtsziehTaste|GesteTaste) => T\("([^"]+)"', _tx))
+check("beide Tastenfelder gefunden (%s)" % ", ".join(sorted(_paare)),
+      len(_paare) == 2)
+check("beide sind gleich gebaut ('… nur mit Taste'): %s"
+      % " | ".join(sorted(_paare.values())),
+      bool(_paare) and all(v.endswith("nur mit Taste") for v in _paare.values()))
+# Und sie muessen sich UNTERSCHEIDEN – sonst ist im Dialog nicht erkennbar,
+# welches Feld welches ist.
+check("und sie sind trotzdem unterscheidbar",
+      len(set(_paare.values())) == 2)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+print("\n[23] Reihenfolge ziehen (Vorgabe 2026-09-11)")
+
+
+# ⚠ ZWEI HELFER, WEIL DREI GEGENPROBEN OHNE BILANZ ABGEBROCHEN SIND:
+#   * `_nach23` statt `split(...)[1]` – fehlt die Marke, wirft der Index, der
+#     Lauf endet ohne Bilanzzeile und ist von "nicht gelaufen" nicht zu
+#     unterscheiden (Register, hier drei Faelle auf einmal).
+#   * `_ruf23` fuer Aufrufe in den ECHTEN Code: eine sabotierte Sortierregel
+#     kann `None` in die Liste legen, und dann wirft erst `liste()`. Ein Wurf
+#     ist ein FAIL, kein Abbruch.
+def _nach23(text, marke, laenge=400):
+    i = text.find(marke)
+    return "" if i < 0 else text[i + len(marke):i + len(marke) + laenge]
+
+
+def _ruf23(fn, *a, **kw):
+    try:
+        return fn(*a, **kw), None
+    except Exception as e:  # noqa: BLE001
+        return None, "%s: %s" % (type(e).__name__, e)
+# ─────────────────────────────────────────────────────────────────────────────
+# Die echte Funktion laeuft im Sandkasten von Abschnitt [13] – gemessen wird
+# das ERGEBNIS, nicht das Vorkommen von `sortieren`.
+_U23 = "sortier.pruef"
+for _t in ("Alpha", "Beta", "Gamma", "Delta"):
+    amf.speichern(_U23, "", _t, "Prompt " + _t)
+_v = amf.liste(_U23)
+_eigen = [e for e in _v if not e.get("gemeinsam")]
+_ids = [e["id"] for e in _eigen]
+check("vier eigene Fragen angelegt (Positivkontrolle)", len(_ids) >= 4)
+
+# Umdrehen
+_r, _f = _ruf23(amf.sortieren, _U23, list(reversed(_ids)))
+_l, _f2 = _ruf23(amf.liste, _U23)
+check("die Reihenfolge folgt den uebergebenen Kennungen (%s)" % (_f or _f2 or "ok"),
+      _l is not None
+      and [e["id"] for e in _l if not e.get("gemeinsam")] == list(reversed(_ids)))
+
+# ⚠ TOLERANZ: eine unbekannte Kennung darf nichts kaputt machen, und ein NICHT
+# genannter Eintrag muss erhalten bleiben – sonst verschwindet eine Frage aus
+# dem Menue, nur weil die Oberflaeche sie nicht kannte.
+_lv, _ = _ruf23(amf.liste, _U23)
+_nach2_vorher = [e["id"] for e in (_lv or []) if not e.get("gemeinsam")]
+_r, _f = _ruf23(amf.sortieren, _U23, [_ids[0], "gibtsnicht", _ids[2]])
+_l, _f2 = _ruf23(amf.liste, _U23)
+_nach2 = [e["id"] for e in (_l or []) if not e.get("gemeinsam")]
+check("unbekannte Kennung wird verworfen, nicht geraten (%s)"
+      % (_f or _f2 or "ok"),
+      _f is None and _f2 is None
+      and set(_nach2) == set(_ids) and len(_nach2) == len(_ids))
+check("die genannten stehen vorn, in der gewuenschten Folge",
+      _nach2[0] == _ids[0] and _nach2[1] == _ids[2])
+# ⚠ DIE REIHENFOLGE, nicht nur die MENGE: eine Gegenprobe, die die nicht
+# genannten UMDREHT, blieb bei einem Mengenvergleich gruen.
+_uebrig23 = [i for i in _nach2_vorher if i not in (_ids[0], _ids[2])]
+check("nicht genannte Eintraege bleiben erhalten (hinten, in alter Folge): %r"
+      % (_nach2[2:] == _uebrig23,), _nach2[2:] == _uebrig23)
+
+# Eine doppelte Kennung darf den Eintrag nicht verdoppeln.
+_r, _f = _ruf23(amf.sortieren, _U23, [_ids[1], _ids[1]] + _ids)
+_l, _f2 = _ruf23(amf.liste, _U23)
+_nach3 = [e["id"] for e in (_l or []) if not e.get("gemeinsam")]
+check("doppelte Kennung verdoppelt den Eintrag nicht (%s)"
+      % (_f or _f2 or "ok"),
+      _f is None and _f2 is None
+      and len(_nach3) == len(set(_nach3)) == len(_ids))
+
+# Leere Liste: nichts tun (und nicht alles leeren).
+_vor4 = [e["id"] for e in amf.liste(_U23) if not e.get("gemeinsam")]
+check("leere Liste aendert nichts", _ruf23(amf.sortieren, _U23, [])[0] == 0
+      and [e["id"] for e in amf.liste(_U23) if not e.get("gemeinsam")] == _vor4)
+
+# ⚠ FREMDE FRAGEN BLEIBEN UNBERUEHRT: die Kennungen kommen aus dem Request.
+_U23B = "sortier.fremd"
+amf.speichern(_U23B, "", "Fremd1", "P1")
+amf.speichern(_U23B, "", "Fremd2", "P2")
+_fremd_vor = [e["id"] for e in amf.liste(_U23B)]
+_r, _f = _ruf23(amf.sortieren, _U23, list(reversed(_fremd_vor)))
+check("fremde Fragen lassen sich nicht umsortieren",
+      [e["id"] for e in amf.liste(_U23B)] == _fremd_vor)
+
+# ⚠ GEMEINSAME NUR ALS ADMINISTRATOR – geprueft in der Funktion, nicht nur in
+# der Oberflaeche.
+_g1 = amf.speichern(_U23, "", "Gem A", "PA", gemeinsam=True, ist_admin=True)
+_g2 = amf.speichern(_U23, "", "Gem B", "PB", gemeinsam=True, ist_admin=True)
+_gem_vor = [e["id"] for e in amf.liste(_U23) if e.get("gemeinsam")]
+check("zwei gemeinsame Fragen angelegt (Positivkontrolle)", len(_gem_vor) == 2)
+_r, _f = _ruf23(amf.sortieren, _U23, list(reversed(_gem_vor)), ist_admin=False)
+check("ein Nicht-Admin kann gemeinsame NICHT umsortieren",
+      [e["id"] for e in amf.liste(_U23) if e.get("gemeinsam")] == _gem_vor)
+_r, _f = _ruf23(amf.sortieren, _U23, list(reversed(_gem_vor)), ist_admin=True)
+check("ein Admin kann es",
+      [e["id"] for e in amf.liste(_U23) if e.get("gemeinsam")]
+      == list(reversed(_gem_vor)))
+
+# Die Gruppen bleiben getrennt: gemeinsame stehen weiter VORN.
+_alle = amf.liste(_U23)
+_erste_eigen = next((i for i, e in enumerate(_alle) if not e.get("gemeinsam")), 0)
+check("gemeinsame stehen weiter vor den eigenen",
+      all(e.get("gemeinsam") for e in _alle[:_erste_eigen])
+      and not any(e.get("gemeinsam") for e in _alle[_erste_eigen:]))
+
+# ── Endpunkt ────────────────────────────────────────────────────────────────
+_mq23 = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
+_mq23_ok = "\n".join(z for z in _mq23.split("\n")
+                      if not z.lstrip().startswith("#"))
+import ast as _ast23
+_b23 = _ast23.parse(_mq23)
+_r23 = ""
+for _n23 in _ast23.walk(_b23):
+    if (isinstance(_n23, (_ast23.FunctionDef, _ast23.AsyncFunctionDef))
+            and _n23.name == "ai_mouse_fragen_sortieren"):
+        _r23 = _ast23.get_source_segment(_mq23, _n23) or ""
+_r23_ok = "\n".join(z for z in _r23.split("\n")
+                     if not z.lstrip().startswith("#"))
+check("der Endpunkt existiert", len(_r23) > 100)
+check("er haengt an der Bereichs-Freigabe",
+      "Depends(require_aimouse_access)" in _r23_ok)
+# ⚠ DER BENUTZER KOMMT AUS DER ANMELDUNG, nie aus dem Rumpf.
+# ⚠ AUF `.get("user")` PRUEFEN, nicht auf `body.get("user")`: die Gegenprobe
+# schrieb `(body or {}).get("user")` und blieb damit gruen.
+check("kein Benutzername aus dem Rumpf",
+      not any(x in _r23_ok for x in ('.get("user")', ".get('user')",
+                                     '.get("benutzer")')))
+check("die Kennungsliste wird auf Typ geprueft",
+      "isinstance(ids, list)" in _r23_ok)
+check("es gibt einen Deckel auf die Anzahl",
+      "MAX_JE_BENUTZER" in _r23_ok and "MAX_GEMEINSAM" in _r23_ok)
+# ⚠ AN DER `sortieren`-ZEILE pruefen: `_is_admin_user(user)` steht auch in der
+# `liste()`-Zeile darunter – die Gegenprobe "Admin-Recht nicht durchgereicht"
+# blieb deshalb gruen.
+# ⚠ UEBER DEN AST, NICHT UEBER EIN TEXTFENSTER. 200 Zeichen ab `amf.sortieren`
+# reichen bis in die `liste()`-Zeile darunter, die `_is_admin_user(user)`
+# ebenfalls enthaelt – die Gegenprobe "Admin-Recht nicht durchgereicht" blieb
+# deshalb gruen. Geprueft werden jetzt die ARGUMENTE des Aufrufs.
+def _argtexte23(rumpf_quelle, funcname):
+    """Argumenttexte JEDES Aufrufs von `funcname` im Rumpf."""
+    raus = []
+    try:
+        baum = _ast23.parse(rumpf_quelle.strip())
+    except SyntaxError:
+        return raus
+    for k in _ast23.walk(baum):
+        if not isinstance(k, _ast23.Call):
+            continue
+        for arg in list(k.args) + [kw.value for kw in k.keywords]:
+            t = _ast23.unparse(arg) if hasattr(_ast23, "unparse") else ""
+            if t == funcname or t.endswith("." + funcname.split(".")[-1]):
+                raus.append([_ast23.unparse(x) for x in k.args])
+        f = _ast23.unparse(k.func) if hasattr(_ast23, "unparse") else ""
+        if f == funcname:
+            raus.append([_ast23.unparse(x) for x in k.args])
+    return raus
+
+
+# `amf.sortieren` wird ueber `to_thread` gerufen – die Argumente stehen also am
+# to_thread-Aufruf.
+_sortargs23 = _argtexte23(_r23, "amf.sortieren")
+check("der sortieren-Aufruf wurde gefunden (Positivkontrolle)", bool(_sortargs23))
+check("Admin-Rechte werden an sortieren durchgereicht",
+      any("_is_admin_user" in " ".join(a) for a in _sortargs23))
+# Blockierende Datei-Arbeit gehoert nicht in den Event-Loop.
+check("sortieren laeuft in einem Thread", "to_thread" in _r23_ok)
+# ⚠ `JSONResponse({` kommt in dieser Funktion MEHRFACH vor (die 400er-
+# Antworten) – `find` traf die erste und die Pruefung meldete einen Fehler, den
+# es nicht gab. Gemessen wird die EIGENSCHAFT: es gibt eine Rueckgabe, die
+# `"fragen"` aus `amf.liste(` fuellt.
+# ⚠ EBENFALLS UEBER DEN AST: die Textvariante war nicht verlaesslich (eine
+# Gegenprobe blieb gruen, und die Ursache liess sich am Text nicht sauber
+# ermitteln). Geprueft wird die EIGENSCHAFT: irgendeine Rueckgabe traegt einen
+# Schluessel "fragen", dessen Wert aus `amf.liste(...)` kommt.
+def _liefert_fragen23(quelle):
+    try:
+        baum = _ast23.parse(quelle.strip())
+    except SyntaxError:
+        return False
+    for k in _ast23.walk(baum):
+        if not isinstance(k, _ast23.Dict):
+            continue
+        for sch, wert in zip(k.keys, k.values):
+            if (isinstance(sch, _ast23.Constant) and sch.value == "fragen"
+                    and hasattr(_ast23, "unparse")
+                    and "liste(" in _ast23.unparse(wert)):
+                return True
+    return False
+
+
+check("die neue Liste kommt zurueck (Client zeichnet daraus)",
+      _liefert_fragen23(_r23))
+
+# ── Oberflaeche ─────────────────────────────────────────────────────────────
+_amjs = (ROOT / "frontend" / "js" / "ai_mouse.js").read_text(encoding="utf-8")
+# ⚠ AUCH BLOCK-KOMMENTARE ENTFERNEN. Ein Zeilenfilter auf `//` genuegt nicht:
+# die Begruendungen dieses Moduls stehen teils in `/* ... */`, und darin kommen
+# `dragover`, `preventDefault` und `data-gem` woertlich vor – vier Pruefungen
+# lasen so MEINEN EIGENEN KOMMENTAR und schlugen fehl, obwohl der Code stimmt
+# (die Falle in neuer Variante, jetzt der 16. Fall im Projekt).
+import re as _re23
+_amjs_ok = _re23.sub(r"/\*.*?\*/", "", _amjs, flags=_re23.S)
+_amjs_ok = "\n".join(z for z in _amjs_ok.split("\n")
+                      if not z.lstrip().startswith("//"))
+check("Kommentar-Filter greift (Positivkontrolle)",
+      "ziehenBinden" in _amjs_ok and "Register" not in _amjs_ok
+      and "Firefox" not in _amjs_ok)
+# ⚠ DER GRIFF HAENGT AN `darf_aendern` – ein Griff ohne Wirkung waere die
+# "ein Klick tut nichts"-Falle.
+# ⚠ AM GRIFF-BLOCK pruefen: `f.darf_aendern` steht auch bei `var acts` – die
+# Gegenprobe "Griff auch ohne darf_aendern" blieb ueber die ganze Datei gruen.
+check("der Ziehgriff haengt an darf_aendern",
+      "f.darf_aendern" in _nach23(_amjs_ok, "var griff =", 60)
+      and 'draggable="true"' in _nach23(_amjs_ok, "var griff =", 300))
+check("die Karte traegt ihre Gruppe als Merkmal", "data-gem=" in _amjs_ok)
+# ⚠ NUR INNERHALB DER GRUPPE: der Server sortiert je Topf.
+check("dragover lehnt ein fremdes Ziel ab",
+      "data-gem" in _nach23(_amjs_ok, "'dragover'", 400))
+check("drop prueft die Gruppe ebenfalls",
+      "data-gem" in _nach23(_amjs_ok, "'drop'", 500))
+# ⚠ preventDefault im dragover ist das, was das Ablegen ueberhaupt erlaubt.
+check("dragover ruft preventDefault",
+      "preventDefault" in _nach23(_amjs_ok, "'dragover'", 500))
+# ⚠ Ohne Nutzlast bricht Firefox das Ziehen ab.
+check("dragstart setzt eine Nutzlast", "setData(" in _amjs_ok)
+# ⚠ TASTATUR: ohne sie gaebe es ohne Maus GAR KEINEN Weg.
+check("der Griff ist per Tastatur bedienbar (Strg+Pfeil)",
+      "ctrlKey" in _amjs_ok and "ArrowUp" in _amjs_ok and "ArrowDown" in _amjs_ok)
+check("  … und der Fokus wandert mit",
+      ".focus()" in _nach23(_amjs_ok, "ctrlKey", 1200))
+# ⚠ AUS DER SERVER-ANTWORT ZEICHNEN, nicht aus dem DOM.
+check("nach dem Senden wird aus der Antwort gezeichnet",
+      "d.fragen" in _amjs_ok and "_fragen = d.fragen" in _amjs_ok)
+# ⚠ DIE FUNKTION SCHNEIDEN, nicht "das letzte catch" raten: in dieser Datei
+# gibt es mehrere, und der Schnitt traf eine fremde Stelle.
+_send23 = _amjs_ok.split("function reihenfolgeSenden")
+_send23 = _send23[1].split("function karteSchieben")[0] if len(_send23) > 1 else ""
+check("der Sende-Weg wurde gefunden (Positivkontrolle)", len(_send23) > 200)
+# ⚠ IM CATCH-ZWEIG pruefen: `zugMelden('')` steht auch am Anfang derselben
+# Funktion – die Gegenprobe "Fehlschlag wird verschwiegen" blieb gruen.
+_catch23 = _nach23(_send23, "catch", 500)
+check("ein Fehlschlag wird GEMELDET und neu gezeichnet",
+      "zugMelden" in _catch23 and "fragenZeichnen()" in _catch23)
+check("die Ziehmeldung hat einen Platz AUSSERHALB des Formulars",
+      "am-q-zug" in _amjs_ok)
+
+_amhtml = (ROOT / "frontend" / "ai_mouse.html").read_text(encoding="utf-8")
+check("der Meldeplatz steht im Markup und startet versteckt",
+      'id="am-q-zug"' in _amhtml
+      and "hidden" in _amhtml.split('id="am-q-zug"')[1][:200])
+# ⚠ `data-i18n-html`: der Hinweistext traegt ein <span>.
+check("der Hinweistext benutzt data-i18n-html (er traegt Markup)",
+      'data-i18n-html="aimouse.q_order"' in _amhtml)
+_i18n23 = (ROOT / "frontend" / "js" / "i18n.js").read_text(encoding="utf-8")
+for _k23 in ("aimouse.q_order", "aimouse.q_move", "aimouse.q_move_err"):
+    check("i18n: %s in DE und EN" % _k23,
+          _i18n23.count("'%s'" % _k23) >= 2)
+_css23 = (ROOT / "frontend" / "css" / "jira_addon.css").read_text(encoding="utf-8")
+# ⚠ flex: 0 0 auto – sonst gibt der Griff in der Flex-Zeile als Erstes nach.
+check("der Griff gibt in der Flex-Zeile nicht nach",
+      "flex: 0 0 auto" in _css23.split(".am-q-griff")[1][:200])
+check("er hat einen sichtbaren Tastatur-Fokus",
+      ".am-q-griff:focus-visible" in _css23)
+check("der ausgeschaltete Griff behaelt die Breite",
+      ".am-q-griff.is-aus" in _css23
+      and "width: 20px" in _css23.split(".am-q-griff")[1][:200])
+
 print("\n%d OK, %d FAIL" % (ok, fail))
 sys.exit(1 if fail else 0)

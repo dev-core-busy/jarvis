@@ -344,6 +344,79 @@ def vorgabe_loeschen(fid: str) -> bool:
     return True
 
 
+def sortieren(user: str, ids: list, ist_admin: bool = False) -> int:
+    """Die Reihenfolge der Fragen setzen. Rückgabe: Anzahl umsortierter Einträge.
+
+    ``ids`` ist die gewünschte Reihenfolge, wie die Oberfläche sie nach dem
+    Ziehen sieht – sie darf eigene UND gemeinsame Kennungen in EINER Liste
+    enthalten.
+
+    ⚠ SORTIERT WIRD JE TOPF, NICHT ÜBER BEIDE. Die Ansicht ist „gemeinsame
+    zuerst, eigene danach" (siehe ``liste``), und daran ändert das Ziehen
+    nichts: eine gemeinsame Frage gehört dem Administrator und steht bei JEDEM
+    Benutzer. Eine benutzereigene Reihenfolge ÜBER beide Töpfe bräuchte eine
+    zusätzliche Zuordnung je Benutzer – die wäre ehrlich machbar (so wie der
+    persönliche Standard bei den Jira-Vorlagen), löst aber ein Problem, das es
+    praktisch nicht gibt: die sechs Vorgabe-Fragen werden beim ersten Kontakt
+    als EIGENE kopiert (``_uebernehmen``), gemeinsame gibt es nur, wenn ein
+    Administrator welche anlegt. Die Oberfläche lässt deshalb gar nicht über
+    die Gruppengrenze ziehen – ein Ziehen, das nichts bewirkt, wäre schlimmer
+    als eines, das nicht angeboten wird.
+
+    ⚠ GEMEINSAME NUR ALS ADMINISTRATOR, geprüft HIER – die Kennungen kommen aus
+    dem Request. Ohne diese Schranke könnte jeder Benutzer die Reihenfolge im
+    Menü ALLER anderen umstellen.
+
+    ⚠ TOLERANT IN BEIDE RICHTUNGEN, und das ist kein Komfort: zwischen dem
+    Zeichnen der Liste und dem Ablegen kann eine Frage gelöscht oder eine neue
+    angelegt worden sein (zweiter Browser-Tab, Administrator).
+    * Unbekannte Kennungen werden **verworfen, nicht geraten**.
+    * Nicht genannte Einträge behalten ihre bisherige relative Reihenfolge und
+      landen **hinten** – so verschwindet keine Frage aus dem Menü, nur weil
+      die Oberfläche sie nicht kannte.
+    """
+    k = _norm(user)
+    gewuenscht = [str(x) for x in (ids or []) if isinstance(x, (str, int))]
+    if not gewuenscht:
+        return 0
+
+    def _neu_ordnen(topf: list) -> tuple[list, bool]:
+        """(neue Liste, hat sich etwas geändert) – Reihenfolge aus `gewuenscht`."""
+        vorhanden = [e for e in topf if isinstance(e, dict)]
+        nach_id = {}
+        for e in vorhanden:
+            eid = e.get("id")
+            if eid is not None and eid not in nach_id:
+                nach_id[eid] = e
+        # Erst die genannten, in der gewuenschten Folge; jede nur EINMAL (eine
+        # doppelte Kennung im Request darf den Eintrag nicht verdoppeln).
+        raus, gesehen = [], set()
+        for eid in gewuenscht:
+            e = nach_id.get(eid)
+            if e is not None and eid not in gesehen:
+                raus.append(e)
+                gesehen.add(eid)
+        # Dann alles Uebrige, in bisheriger Folge.
+        raus += [e for e in vorhanden if e.get("id") not in gesehen]
+        return raus, [e.get("id") for e in raus] != [e.get("id") for e in vorhanden]
+
+    with _SPERRE:
+        d = _laden()
+        bewegt = 0
+        eigen_neu, eigen_anders = _neu_ordnen(d["benutzer"].get(k) or [])
+        if eigen_anders:
+            d["benutzer"][k] = eigen_neu
+            bewegt += len(eigen_neu)
+        if ist_admin:
+            glob_neu, glob_anders = _neu_ordnen(d["global_"])
+            if glob_anders:
+                d["global_"] = glob_neu
+                bewegt += len(glob_neu)
+        if bewegt:
+            _speichern(d)
+    return bewegt
+
+
 def loeschen(user: str, fid: str, ist_admin: bool = False) -> bool:
     """Eine Frage löschen. Fremd oder unbekannt → ``False`` (der Aufrufer
     antwortet mit 404, nicht 403: ob eine fremde Frage existiert, ist selbst

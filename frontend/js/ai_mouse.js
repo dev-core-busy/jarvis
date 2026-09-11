@@ -253,8 +253,24 @@
                   + esc(t('common.delete', 'Löschen')) + '">'
                   + (window.JarvisIcons ? JarvisIcons.trash() : '') + '</button>'
                 : '';
-            return '<div class="am-q-card" data-qid="' + esc(f.id) + '">'
+            // ⚠ DER ZIEHGRIFF HAENGT AN `darf_aendern`, nicht an `gemeinsam`:
+            // wer einen Eintrag nicht bearbeiten darf, darf ihn auch nicht
+            // umsortieren – und bekommt gar keinen Griff. Ein Griff, der nichts
+            // bewirkt, ist schlimmer als keiner (Register: "gesperrt mit
+            // Begruendung schlaegt verborgen" gilt fuer BEDIENELEMENTE mit
+            // Zustand; ein Ziehgriff ohne Wirkung ist dagegen nur irritierend).
+            var griff = f.darf_aendern
+                ? '<span class="am-q-griff" draggable="true" tabindex="0"'
+                  + ' role="button" aria-label="'
+                  + esc(t('aimouse.q_move', 'Verschieben (ziehen, oder Strg+Pfeil)'))
+                  + '" title="'
+                  + esc(t('aimouse.q_move', 'Verschieben (ziehen, oder Strg+Pfeil)'))
+                  + '">⠿</span>'
+                : '<span class="am-q-griff is-aus" aria-hidden="true"></span>';
+            return '<div class="am-q-card" data-qid="' + esc(f.id) + '"'
+                + ' data-gem="' + (f.gemeinsam ? '1' : '0') + '">'
                 + '<div class="am-q-row">'
+                + griff
                 + '<div class="am-q-main">'
                 + '<div class="am-q-name">' + esc(f.titel)
                 // Farbe UND Wort – die Marke sagt, warum der Eintrag keine
@@ -283,6 +299,8 @@
             });
         });
 
+        ziehenBinden(box);
+
         // Ein offenes Formular wieder unter SEINE Zeile setzen. Das <div> ist
         // nach dem Neuaufbau ein anderes Element – wiedergefunden ueber die
         // Kennung, nicht ueber eine gemerkte Referenz.
@@ -292,6 +310,163 @@
             if (k && ff) { formZeigen(ff, k); }
             else { formZu(); }   // die Frage gibt es nicht mehr
         }
+    }
+
+    /* ── Reihenfolge ziehen (Vorgabe 2026-09-11) ───────────────────────────
+       Die Reihenfolge wirkt IM TRAY-MENUE der Anwendung: `BuildPromptMenu`
+       laeuft mit `foreach` ueber die Liste und sortiert NICHT selbst
+       (gemessen). Was hier gezogen wird, steht beim naechsten Start dort.
+
+       ⚠ NUR INNERHALB DER GRUPPE. Der Server sortiert je Topf (gemeinsame,
+       eigene) – ein Ablegen ueber die Gruppengrenze waere ein Zug, der nichts
+       bewirkt, und genau das ist die "ein Klick tut nichts"-Falle. Deshalb
+       lehnt `dragover` ein fremdes Ziel ab, statt es zu erlauben und den
+       Server entscheiden zu lassen. */
+    var _zieht = null;          // die Karte, die gerade gezogen wird
+
+    /** Meldung ueber der Fragenliste – nur fuer das Ziehen.
+     *
+     *  ⚠ EIGENER ORT, weil `am-f-status` im FORMULAR steckt: beim Ziehen ist
+     *  das Formular in der Regel zu, die Meldung waere unsichtbar. Eine
+     *  Meldung, die niemand sieht, ist keine (Register, mehrfach bezahlt). */
+    function zugMelden(text) {
+        var el = document.getElementById('am-q-zug');
+        if (!el) { return; }
+        el.textContent = text || '';
+        el.hidden = !text;
+    }
+
+    function reihenfolgeSenden() {
+        var box = document.getElementById('am-fragen');
+        if (!box) { return Promise.resolve(); }
+        var ids = [].map.call(box.querySelectorAll('.am-q-card'),
+                              function (k) { return k.getAttribute('data-qid'); });
+        zugMelden('');
+        return hole('/api/ai-mouse/fragen/reihenfolge', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids: ids })
+        }).then(function (r) {
+            return r.json().then(function (d) {
+                if (!r.ok || !d.ok) { throw new Error(fehlertext(d, 'HTTP ' + r.status)); }
+                return d;
+            });
+        }).then(function (d) {
+            // ⚠ AUS DER SERVER-ANTWORT ZEICHNEN, nicht aus dem eigenen
+            // Zwischenstand: der Server haengt nicht genannte Eintraege hinten
+            // an und sortiert je Topf. Wer den DOM fuer die Wahrheit haelt,
+            // zeigt eine Reihenfolge, die so nicht gespeichert ist.
+            if (d && d.fragen) { _fragen = d.fragen; fragenZeichnen(); }
+        }).catch(function (e) {
+            // Fehlschlag ist eine AUSKUNFT: der Benutzer hat gerade gezogen
+            // und muss wissen, dass es nicht gilt. Und neu zeichnen, damit die
+            // Anzeige keine Reihenfolge behauptet, die der Server nicht hat.
+            zugMelden(String((e && e.message) || e)
+                      || t('aimouse.q_move_err',
+                           'Die Reihenfolge konnte nicht gespeichert werden.'));
+            fragenZeichnen();
+        });
+    }
+
+    /** Verschiebt `karte` um `schritt` Plaetze – nur innerhalb ihrer Gruppe. */
+    function karteSchieben(karte, schritt) {
+        var gem = karte.getAttribute('data-gem');
+        var nachbar = karte;
+        for (var i = 0; i < Math.abs(schritt); i++) {
+            var n = (schritt < 0) ? nachbar.previousElementSibling
+                                  : nachbar.nextElementSibling;
+            // Ueber die Gruppengrenze nicht hinaus – und das Formular, das
+            // zwischen den Karten haengen kann, ist kein Ziel.
+            while (n && !n.classList.contains('am-q-card')) {
+                n = (schritt < 0) ? n.previousElementSibling : n.nextElementSibling;
+            }
+            if (!n || n.getAttribute('data-gem') !== gem) { break; }
+            nachbar = n;
+        }
+        if (nachbar === karte) { return false; }
+        var box = karte.parentNode;
+        if (schritt < 0) { box.insertBefore(karte, nachbar); }
+        else { box.insertBefore(karte, nachbar.nextElementSibling); }
+        return true;
+    }
+
+    function ziehenBinden(box) {
+        box.querySelectorAll('.am-q-griff[draggable="true"]').forEach(function (g) {
+            var karte = g.closest('.am-q-card');
+            if (!karte) { return; }
+
+            g.addEventListener('dragstart', function (ev) {
+                _zieht = karte;
+                karte.classList.add('is-zieht');
+                // Ohne Nutzlast bricht Firefox das Ziehen ab.
+                try {
+                    ev.dataTransfer.setData('text/plain',
+                                            karte.getAttribute('data-qid') || '');
+                    ev.dataTransfer.effectAllowed = 'move';
+                } catch (e) { /* aeltere Browser */ }
+            });
+            g.addEventListener('dragend', function () {
+                karte.classList.remove('is-zieht');
+                _zieht = null;
+                box.querySelectorAll('.is-ziel').forEach(function (x) {
+                    x.classList.remove('is-ziel');
+                });
+            });
+
+            // ⚠ TASTATUR: ein Ziehgriff allein ist nicht bedienbar – ohne
+            // Maus (und auf einem Touch-Gerät) gäbe es GAR KEINEN Weg, die
+            // Reihenfolge zu ändern. Strg+Pfeil kostet zehn Zeilen.
+            g.addEventListener('keydown', function (ev) {
+                if (!ev.ctrlKey || (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown')) {
+                    return;
+                }
+                ev.preventDefault();
+                if (karteSchieben(karte, ev.key === 'ArrowUp' ? -1 : 1)) {
+                    // Den Fokus mitnehmen: nach dem Neuzeichnen ist der Griff
+                    // ein anderes Element, sonst verliert die Tastatur ihn und
+                    // ein zweiter Druck landet im Nichts.
+                    var id = karte.getAttribute('data-qid');
+                    reihenfolgeSenden().then(function () {
+                        var neu = document.querySelector(
+                            '.am-q-card[data-qid="' + id + '"] .am-q-griff');
+                        if (neu && neu.focus) { neu.focus(); }
+                    });
+                }
+            });
+        });
+
+        // Die Karten sind die Ablegeziele – gebunden am Container, damit ein
+        // Neuaufbau nicht Handler an jeder Karte braucht.
+        box.querySelectorAll('.am-q-card').forEach(function (ziel) {
+            ziel.addEventListener('dragover', function (ev) {
+                if (!_zieht || ziel === _zieht) { return; }
+                // NUR innerhalb der Gruppe (siehe Kopf dieses Abschnitts).
+                if (ziel.getAttribute('data-gem') !== _zieht.getAttribute('data-gem')) {
+                    return;
+                }
+                ev.preventDefault();          // erst das erlaubt das Ablegen
+                ziel.classList.add('is-ziel');
+            });
+            ziel.addEventListener('dragleave', function () {
+                ziel.classList.remove('is-ziel');
+            });
+            ziel.addEventListener('drop', function (ev) {
+                ziel.classList.remove('is-ziel');
+                if (!_zieht || ziel === _zieht) { return; }
+                if (ziel.getAttribute('data-gem') !== _zieht.getAttribute('data-gem')) {
+                    return;
+                }
+                ev.preventDefault();
+                // Ober- oder untere Haelfte entscheidet, ob davor oder dahinter
+                // eingefuegt wird – sonst laesst sich der letzte Platz nicht
+                // erreichen.
+                var r = ziel.getBoundingClientRect();
+                var unten = (ev.clientY - r.top) > (r.height / 2);
+                ziel.parentNode.insertBefore(
+                    _zieht, unten ? ziel.nextElementSibling : ziel);
+                reihenfolgeSenden();
+            });
+        });
     }
 
     /** Formular oeffnen und unter die Karte haengen.

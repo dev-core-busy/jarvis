@@ -17,7 +17,25 @@
  */
 const fs = require('fs');
 const path = require('path');
-const { JSDOM, VirtualConsole } = require('/tmp/node_modules/jsdom');
+// ⚠ JSDOM AN ALLEN UEBLICHEN ORTEN SUCHEN, nicht an einem festen Pfad
+// verdrahten: mit `/tmp/node_modules/jsdom` lief dieser Waechter auf einer
+// Maschine, die es unter `~/node_modules` hat, GAR NICHT (MODULE_NOT_FOUND) –
+// und ein Waechter, der nicht laeuft, ist keiner. Muster uebernommen aus
+// `test_wissen_ordner_ui.js`. Exit 2, damit "konnte nicht laufen" nie wie
+// "bestanden" aussieht.
+let JSDOM, VirtualConsole;
+for (const kandidat of [process.env.JSDOM_PATH, 'jsdom',
+                        path.resolve(__dirname, '../node_modules/jsdom'),
+                        path.resolve(__dirname, '../data/node_modules/jsdom'),
+                        path.resolve(process.env.HOME || '/root', 'node_modules/jsdom'),
+                        '/tmp/node_modules/jsdom',
+                        '/usr/share/nodejs/jsdom'].filter(Boolean)) {
+    try { ({ JSDOM, VirtualConsole } = require(kandidat)); break; } catch (e) { /* naechster */ }
+}
+if (!JSDOM) {
+    console.log('\x1b[31mABBRUCH: jsdom nicht installiert (JSDOM_PATH setzen)\x1b[0m');
+    process.exit(2);
+}
 
 const ROOT = path.resolve(__dirname, '..');
 const FE = path.join(ROOT, 'frontend');
@@ -224,6 +242,54 @@ pruefe('Sprachwechsel zieht die Tooltips nach',
        CODE.indexOf('jarvis-lang-changed') > 0);
 pruefe('start() ist idempotent (Merker gegen zweiten Handler)',
        /_gestartet/.test(CODE));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Kachel-Beschreibungen: Markup und i18n muessen DECKUNGSGLEICH sein
+// ─────────────────────────────────────────────────────────────────────────────
+// ⚠ ALS REGEL UEBER ALLE KACHELN, nicht fuer eine: das Markup ist der
+// RUECKFALL, der erscheint, bis `applyLang()` gelaufen ist. Weicht er ab,
+// blitzt beim Laden der alte Text auf – und beim naechsten Textwechsel zieht
+// jemand nur eine der beiden Stellen nach. Damit faellt auch eine kuenftige
+// Kachel auf, ohne dass jemand eine Liste pflegt.
+{
+    const i18nQ = lies(path.join(FE, 'js/i18n.js'));
+    const bloecke = i18nQ.split(/\n\s{4}(?:de|en):\s*\{/);
+    // Der DEUTSCHE Block ist der erste nach dem Sprachschluessel.
+    const deBlock = bloecke.length > 1 ? bloecke[1] : i18nQ;
+
+    const dom = new JSDOM(HTML);
+    const karten = [...dom.window.document.querySelectorAll('.pt-card-desc[data-i18n]')];
+    pruefe('es gibt ueberhaupt Kachel-Beschreibungen (Positivkontrolle)',
+           karten.length > 3, `gefunden: ${karten.length}`);
+
+    let abweichend = [];
+    for (const el of karten) {
+        const key = el.getAttribute('data-i18n');
+        const m = deBlock.match(
+            new RegExp(`'${key.replace('.', '\\.')}':\\s*'((?:[^'\\\\]|\\\\.)*)'`));
+        if (!m) { abweichend.push(`${key}: kein DE-Text`); continue; }
+        const ausI18n = m[1].replace(/\\'/g, "'").replace(/\\\\/g, '\\');
+        const ausMarkup = (el.textContent || '').trim();
+        if (ausI18n !== ausMarkup) {
+            abweichend.push(`${key}: Markup "${ausMarkup.slice(0, 40)}" != i18n "${ausI18n.slice(0, 40)}"`);
+        }
+    }
+    pruefe('jede Kachel-Beschreibung stimmt mit ihrem DE-Text ueberein',
+           abweichend.length === 0, abweichend.slice(0, 3).join(' | '));
+
+    // ⚠ UND BEIDE SPRACHEN MUESSEN DEN SCHLUESSEL HABEN: ein nur auf Deutsch
+    // nachgezogener Text laesst die englische Oberflaeche etwas anderes
+    // behaupten (bei dieser Aenderung genau der Fall gewesen).
+    let fehlend = [];
+    for (const el of karten) {
+        const key = el.getAttribute('data-i18n');
+        const treffer = i18nQ.match(
+            new RegExp(`'${key.replace('.', '\\.')}':`, 'g')) || [];
+        if (treffer.length < 2) { fehlend.push(`${key} (${treffer.length}x)`); }
+    }
+    pruefe('jede Kachel-Beschreibung gibt es in DE UND EN',
+           fehlend.length === 0, fehlend.slice(0, 3).join(', '));
+}
 
 console.log(`\n\x1b[1m${ok} bestanden, ${fail} fehlgeschlagen\x1b[0m`);
 process.exit(fail ? 1 : 0);

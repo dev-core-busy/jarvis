@@ -115,8 +115,15 @@ internal static class Texte
     public static string Ziehschwelle => T("Ziehschwelle (Pixel)", "Drag threshold (pixels)");
     // Die Beschriftung nennt die WIRKUNG, nicht die Technik: „Rechtsklick
     // durchreichen mit" waere richtig und fuer niemanden verstaendlich.
-    public static string RechtsziehTaste => T("Ziehen & Ablegen mit Taste",
-                                              "Drag & drop with key");
+    //
+    // ⚠ „Ziehen nur mit Taste" (Vorgabe 2026-09-11), vorher „Ziehen & Ablegen
+    // mit Taste". Der neue Wortlaut ist PARALLEL zu `GesteTaste` darunter
+    // („Ausschnitt nur mit Taste") – zwei Felder, die im Dialog untereinander
+    // stehen und Gegenstuecke sind, muessen auch gleich gebaut klingen. Die
+    // alte Fassung las sich wie ein eigenes Feature („Drag & Ablegen"), nicht
+    // wie die Bedingung, die sie beschreibt.
+    public static string RechtsziehTaste => T("Ziehen nur mit Taste",
+                                              "Drag only with key");
     public static string RdKeine => T("(aus – Rechtsziehen gesperrt)",
                                       "(off – right-drag blocked)");
     public static string RdUmschalt => T("Umschalt", "Shift");

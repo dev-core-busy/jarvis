@@ -6,7 +6,7 @@
     <title>AI-Maus</title>
     <link rel="icon" href="/static/favicon.ico">
     <link rel="stylesheet" href="/static/css/theme.css?v=24">
-    <link rel="stylesheet" href="/static/css/jira_addon.css?v=11">
+    <link rel="stylesheet" href="/static/css/jira_addon.css?v=12">
 </head>
 <body>
 <script>try{if(localStorage.getItem('jarvis_theme')!=='dark')document.body.classList.add('light');}catch(e){}</script>
@@ -137,6 +137,18 @@
                 Menü, wenn du einen Rahmen aufgezogen hast. Sie gelten für dich an
                 jedem Arbeitsplatz. Gemeinsame Fragen gelten für alle und werden
                 von einem Administrator gepflegt.</p>
+            <!-- ⚠ `data-i18n-html`, NICHT `data-i18n`: der Text traegt ein <span>
+                 (der Beispiel-Griff). `data-i18n` setzt den textContent und
+                 wuerde das Markup beim ersten Sprachwechsel loeschen – dann
+                 stuende dort ein nacktes ⠿ ohne Formatierung (Register). -->
+            <p class="ja-note" data-i18n-html="aimouse.q_order">Die Reihenfolge bestimmst
+                du selbst: mit dem Griff <span class="am-q-griff-bsp">⠿</span> ziehen
+                (oder Strg+Pfeil). Genau so stehen die Fragen später im Menü.</p>
+            <!-- ⚠ EIGENER MELDEPLATZ, sichtbar OHNE offenes Formular: `am-f-status`
+                 steckt im Bearbeiten-Formular, und beim Ziehen ist das in der Regel
+                 zu – die Meldung wäre unsichtbar. `hidden` als Grundzustand, sonst
+                 stünde hier eine leere Zeile. -->
+            <div id="am-q-zug" class="am-q-zug" role="status" aria-live="polite" hidden></div>
             <div id="am-fragen"></div>
             <!-- ⚠ `.ja-btn` + `.ja-dl`, NICHT `.btn-secondary`/`.ja-actions`:
                  diese Seite laedt nur theme.css und jira_addon.css. `.btn-*`
@@ -181,13 +193,13 @@
 <script src="/static/js/cpubar.js?v=1"></script>
 <script src="/static/js/syspackages.js?v=2"></script>
 <script src="/static/js/theme.js?v=3"></script>
-<script src="/static/js/i18n.js?v=252"></script>
+<script src="/static/js/i18n.js?v=253"></script>
 <script src="/static/js/branding.js?v=26"></script>
 <script src="/static/js/sessions.js?v=8"></script>
 <script src="/static/js/logo_home.js?v=1"></script>
 <script src="/static/js/settings_btn.js?v=4"></script>
 <script src="/static/js/activity.js?v=2"></script>
 <script src="/static/js/issues.js?v=12"></script>
-<script src="/static/js/ai_mouse.js?v=5"></script>
+<script src="/static/js/ai_mouse.js?v=6"></script>
 </body>
 </html>

@@ -231,6 +231,56 @@ internal static class Texte
         "Der Rechtsklick ließ sich nicht weiterreichen",
         "The right-click could not be forwarded");
 
+    // ── Start: Tastenkombination und Autostart ──────────────────────────────
+
+    public static string StartAbschnitt => T("Start", "Startup");
+
+    public static string StartHotkey => T("Tastenkombination", "Keyboard shortcut");
+
+    /// <summary>Beschriftung des Aufnahmefeldes im Ruhezustand.</summary>
+    public static string HotkeyKeine => T("keine", "none");
+
+    /// <summary>Waehrend das Feld auf einen Tastendruck wartet.</summary>
+    public static string HotkeyDruecken => T("Tasten drücken…", "Press keys…");
+
+    /// <summary>⚠ NENNT BEIDE EINSCHRAENKUNGEN, die sonst niemand erraten kann:
+    /// dass Strg+Alt Pflicht ist, und dass die Kombination ueber eine
+    /// Verknuepfung im Startmenue wirkt (die die Anwendung dafuer anlegt).</summary>
+    public static string HotkeyHinweis => T(
+        "Startet die Anwendung, wenn sie nicht läuft — sonst meldet sie sich. "
+            + "Möglich ist Strg+Alt+Taste (zusätzlich Umschalt). Dafür wird eine "
+            + "Verknüpfung im Startmenü angelegt; ohne sie kann Windows keine "
+            + "Tastenkombination auf ein Programm legen.",
+        "Starts the app when it is not running — otherwise it reports in. "
+            + "Ctrl+Alt+key is possible (plus Shift). This requires a shortcut in "
+            + "the Start menu; without one Windows cannot bind a key combination "
+            + "to a program.");
+
+    /// <summary>⚠ Sagt, was der Benutzer tun kann, wenn nichts passiert. Ein
+    /// `.lnk`-Hotkey meldet NICHT, wenn die Kombination schon belegt ist – er
+    /// tut dann einfach nichts, und ohne diesen Satz sucht man den Fehler in
+    /// der Anwendung.</summary>
+    public static string HotkeyBelegtHinweis => T(
+        "Passiert nichts, ist die Kombination bereits vergeben — wähle eine andere.",
+        "If nothing happens the combination is already taken — pick another one.");
+
+    public static string MitWindowsStarten => T("Mit Windows starten",
+                                                "Start with Windows");
+
+    public static string StartwegeFehler => T(
+        "Die Start-Einstellungen ließen sich nicht anwenden: ",
+        "The startup settings could not be applied: ");
+
+    /// <summary>Antwort der laufenden Instanz auf einen zweiten Start.</summary>
+    public static string LaeuftBereitsBlase => T(
+        "Läuft bereits. Ziehe mit der rechten Maustaste einen Ausschnitt auf.",
+        "Already running. Drag a region with the right mouse button.");
+
+    /// <summary>Nur noch fuer den Fall, dass das Signal NICHT ankommt.</summary>
+    public static string LaeuftBereits => T(
+        $"{Marke} läuft bereits — das Symbol steht im Infobereich.",
+        $"{Marke} is already running — look for its icon in the notification area.");
+
     // ── Eingebaute Fragen (Rueckfall, wenn der Server keine liefert) ────────
     // Der TITEL ist Oberflaeche und wird uebersetzt; der PROMPT geht an das
     // Modell und bleibt englisch – dort ist die Sprache eine Eigenschaft des

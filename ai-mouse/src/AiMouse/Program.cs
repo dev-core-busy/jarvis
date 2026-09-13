@@ -1,4 +1,5 @@
 using AiMouse.Localization;
+using AiMouse.Start;
 using AiMouse.Update;
 
 namespace AiMouse;
@@ -47,13 +48,29 @@ internal static class Program
 
         if (!isOnlyInstance)
         {
-            MessageBox.Show(
-                "AI Mouse is already running — look for its icon in the notification area.",
-                "AI Mouse",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
+            // ⚠ KEIN MODALER DIALOG MEHR IM REGELFALL (2026-09-12). Seit die
+            // Anwendung ueber eine Tastenkombination gestartet werden kann, ist
+            // der Zweitstart der NORMALFALL: sie laeuft ja schon im
+            // Infobereich. Ein Dialog haette den Hotkey damit meistens zu einer
+            // Fehlermeldung gemacht.
+            //
+            // Gelingt das Signal nicht (die laufende Instanz ist gerade am
+            // Starten oder Beenden), bleibt der Dialog – eine gedrueckte Taste
+            // ohne JEDE Rueckmeldung waere der schlechtere Ausgang.
+            if (!Zweitstart.LaufendeInstanzWecken())
+            {
+                MessageBox.Show(
+                    Texte.LaeuftBereits,
+                    Texte.Marke,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
             return;
         }
+
+        // Erst hier, nicht frueher: vorher war noch offen, ob dieser Prozess
+        // ueberhaupt die laufende Instanz wird.
+        Zweitstart.AlsErsteInstanz();
 
         // Deliberately not ApplicationConfiguration.Initialize(): DPI awareness comes
         // from the manifest, so the generated SetHighDpiMode call would be a silent no-op.

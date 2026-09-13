@@ -82,4 +82,26 @@ internal sealed class AppSettings
     /// Oberflaeche und Verhalten nicht auseinanderlaufen koennen.
     /// </summary>
     public string GestureKey { get; set; } = string.Empty;
+
+    /// <summary>Tastenkombination, die die Anwendung STARTET, z. B.
+    /// <c>CTRL+ALT+A</c>. Leer = keine.
+    ///
+    /// ⚠ SIE WIRD NICHT VON DER ANWENDUNG REGISTRIERT, sondern von Windows:
+    /// ein laufendes Programm kann `RegisterHotKey` rufen, ein NICHT laufendes
+    /// nicht – und genau das soll die Kombination starten. Getragen wird sie
+    /// deshalb von einer Verknuepfung im Startmenue (<see cref="AiMouse.Start.Startwege"/>).
+    ///
+    /// Gespeichert in der lesbaren Wortform, nicht als Zahl – Begruendung in
+    /// <c>HotkeyWort.AlsText</c>.
+    /// </summary>
+    public string StartHotkey { get; set; } = string.Empty;
+
+    /// <summary>Verknuepfung im Autostart-Ordner anlegen.
+    ///
+    /// ⚠ VORGABE AUS. Ein Programm, das sich ungefragt in den Autostart
+    /// eintraegt, ist ein Eingriff in den Rechner des Benutzers – und es waere
+    /// bei einem Update eine abschaltende Aenderung in die falsche Richtung
+    /// (ploetzlich startet etwas mit, das vorher nicht mitstartete).
+    /// </summary>
+    public bool MitWindowsStarten { get; set; }
 }

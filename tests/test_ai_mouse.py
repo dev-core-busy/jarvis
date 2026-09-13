@@ -727,8 +727,13 @@ check("der Konstruktor stoesst die Start-Anmeldung an",
 # BeginInvoke und nicht direkt: der Konstruktor laeuft VOR der
 # Nachrichtenschleife – ein modaler Dialog von dort haette kein Fenster, an dem
 # er haengen kann, und erschiene hinter allem anderen oder gar nicht.
+# ⚠ DIE EIGENSCHAFT, NICHT DIE POSITION. Die erste Fassung nahm den Text nach
+#   dem LETZTEN "BeginInvoke" – und wurde falsch, sobald im Konstruktor ein
+#   zweiter Aufruf mit diesem Teilstring dazukam (`BeginInvokeOnOwner`, 2026-09-12).
+#   Sie meldete dann einen Fehler, den es nicht gab. Gemeint war immer: der
+#   Aufruf steht INNERHALB eines BeginInvoke-Ausdrucks, nicht nackt im Rumpf.
 check("ueber BeginInvoke, nicht mitten im Konstruktor",
-      "BeginInvoke" in ktor and "StartAnmeldungAsync" in ktor.split("BeginInvoke")[-1])
+      re.search(r"BeginInvoke\([^;]*StartAnmeldungAsync", ktor) is not None)
 
 laden = cs_block(cs_tray, "private async Task FragenNachladenAsync")
 if laden:
@@ -2760,7 +2765,191 @@ check("die Version steht mittig neben dem Knopf, nicht oben",
 # ⚠ EINE CLIENT-AENDERUNG OHNE ERHOEHUNG ERREICHT KEINEN ARBEITSPLATZ: der
 #   Server baut zwar neu, aber `IstNeuer` sagt bei gleicher Nummer zu Recht nein.
 check("die Version ist hochgezaehlt (ist: %s)" % (am.klient_version() or "—"),
-      am.klient_version() == "1.0.2")
+      am.klient_version() == "1.0.3")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 25. Start per Tastenkombination + Autostart (2026-09-12)
+# ════════════════════════════════════════════════════════════════════════════
+# Die RECHENREGEL (`HotkeyWort`) steht NICHT hier, sondern wird in
+# `tests/live_hotkeywort_dev.py` AUSGEFUEHRT – ein Quelltext-Waechter koennte
+# nur sagen, DASS es die Klasse gibt, nicht WAS sie ausrechnet. Hier steht die
+# Verdrahtung.
+print("\n── 25. Start per Tastenkombination + Autostart ──")
+
+_SRC25 = ROOT / "ai-mouse/src/AiMouse"
+
+
+def _quelle25(rel):
+    p = _SRC25 / rel
+    return p.read_text(encoding="utf-8") if p.exists() else ""
+
+
+def _ohne_komm25(s):
+    """⚠ PFLICHT: die Kommentare nennen die vtable-Nummern („// 11.") und jede
+    Begruendung woertlich. Wer sie mitliest, prueft seine eigene Erklaerung –
+    im Projekt vierzehnmal bezahlt."""
+    return "\n".join(z for z in s.split("\n") if not z.lstrip().startswith("//"))
+
+
+_vk25 = _quelle25("Start/Verknuepfung.cs")
+_zw25 = _quelle25("Start/Zweitstart.cs")
+_sw25 = _quelle25("Start/Startwege.cs")
+_hw25 = _quelle25("Start/HotkeyWort.cs")
+_prog25 = _ohne_komm25(_quelle25("Program.cs"))
+_tray25 = _ohne_komm25(_quelle25("TrayApplicationContext.cs"))
+_cfg25 = _ohne_komm25(_quelle25("Configuration/ConfigStore.cs"))
+_set25 = _ohne_komm25(_quelle25("Ui/SettingsWindow.cs"))
+_txt25 = _quelle25("Localization/Texte.cs")
+
+check("die vier neuen Dateien liegen unter Start/",
+      all(bool(x) for x in (_vk25, _zw25, _sw25, _hw25)))
+
+# ── Die vtable: der gefaehrlichste Punkt der ganzen Aenderung ───────────────
+# ⚠ EIN FALSCH NUMMERIERTES ComImport-INTERFACE UEBERSETZT FEHLERFREI und ruft
+#   zur Laufzeit die falsche Funktion – der Absturz kaeme erst am Arbeitsplatz.
+#   Geprueft wird deshalb die POSITION jeder benutzten Methode, nicht ihr
+#   blosses Vorkommen. Sollwerte aus shobjidl_core.idl; die Learn-Seite listet
+#   ALPHABETISCH und ist als vtable-Quelle wertlos.
+def _methoden25(quelle, interface):
+    """Methodennamen eines Interface-Blocks in DEKLARATIONSREIHENFOLGE.
+
+    ⚠ DIE ATTRIBUTE MUESSEN VORHER WEG. `[MarshalAs(UnmanagedType.LPWStr)]`
+    enthaelt selbst eine Klammer – ein Muster `\\([^)]*\\)` stoppt daran und
+    UEBERSIEHT genau die drei Methoden, die ein Attribut tragen. Der Waechter
+    meldete dadurch 15 statt 18 und „SetPath fehlt", obwohl die Deklaration
+    vollstaendig ist.
+    """
+    m = re.search(r"interface\s+" + interface + r"\s*\n?\s*\{(.*?)\n    \}",
+                  _ohne_komm25(quelle), re.S)
+    if not m:
+        return []
+    rumpf = re.sub(r"\[[^\]]*\]", " ", m.group(1))
+    return re.findall(r"\b(\w+)\s*\([^;]*\)\s*;", rumpf)
+
+
+_shell25 = _methoden25(_vk25, "IShellLinkW")
+_pers25 = _methoden25(_vk25, "IPersistFile")
+
+check("IShellLinkW deklariert alle 18 Methoden (ist: %d)" % len(_shell25),
+      len(_shell25) == 18)
+check("SetHotkey steht an 11. Stelle (ist: %s)"
+      % (_shell25.index("SetHotkey") + 1 if "SetHotkey" in _shell25 else "—"),
+      len(_shell25) >= 11 and _shell25[10] == "SetHotkey")
+check("SetPath steht an 18. Stelle (ist: %s)"
+      % (_shell25.index("SetPath") + 1 if "SetPath" in _shell25 else "—"),
+      len(_shell25) >= 18 and _shell25[17] == "SetPath")
+check("SetDescription steht an 5. Stelle",
+      len(_shell25) >= 5 and _shell25[4] == "SetDescription")
+check("SetWorkingDirectory steht an 7. Stelle",
+      len(_shell25) >= 7 and _shell25[6] == "SetWorkingDirectory")
+check("IPersistFile.Save steht an 4. Stelle (ist: %s)"
+      % (_pers25.index("Save") + 1 if "Save" in _pers25 else "—"),
+      len(_pers25) >= 4 and _pers25[3] == "Save")
+check("die drei GUIDs stehen (ShellLink, IShellLinkW, IPersistFile)",
+      "00021401-0000-0000-C000-000000000046" in _vk25
+      and "000214F9-0000-0000-C000-000000000046" in _vk25
+      and "0000010B-0000-0000-C000-000000000046" in _vk25)
+
+# ── Der Ablageort IST die tragende Bedingung ────────────────────────────────
+# ⚠ Ein Verknuepfungs-Hotkey wirkt NUR im Startmenue oder auf dem Desktop.
+#   Ein frei waehlbarer Ordner waere eine Einstellung, die still nichts tut.
+check("die Hotkey-Verknuepfung landet im Startmenue",
+      "SpecialFolder.Programs" in _vk25)
+check("der Autostart im Autostart-Ordner", "SpecialFolder.Startup" in _vk25)
+
+# ── Beide Wege werden IMMER angefasst, auch der abgeschaltete ───────────────
+# Wer nur anlegt, was eingeschaltet ist, laesst beim Ausschalten die alte
+# Verknuepfung liegen – und die startet weiter.
+check("ohne Hotkey wird die Verknuepfung ENTFERNT",
+      re.search(r"wort == HotkeyWort\.Keiner[\s\S]{0,300}Verknuepfung\.Entfernen",
+                _ohne_komm25(_sw25)) is not None)
+check("bei ausgeschaltetem Autostart wird ENTFERNT",
+      re.search(r"MitWindowsStarten[\s\S]{0,300}Verknuepfung\.Entfernen",
+                _ohne_komm25(_sw25)) is not None)
+check("die Autostart-Verknuepfung traegt KEINEN Hotkey (sonst zwei gleiche)",
+      "HotkeyWort.Keiner" in _ohne_komm25(_sw25).split("AutostartAnwenden")[-1])
+check("beide Fehlermeldungen bleiben erhalten, nicht nur die erste",
+      'f1 + " / " + f2' in _sw25)
+
+# ── Zweitstart: kein modaler Dialog im Regelfall ────────────────────────────
+_i_weck = _prog25.find("LaufendeInstanzWecken")
+_i_box = _prog25.find("MessageBox.Show")
+check("Program.cs weckt die laufende Instanz", _i_weck >= 0)
+check("und tut das VOR der MessageBox (sonst bleibt der Dialog der Regelfall)",
+      0 <= _i_weck < _i_box)
+check("die MessageBox haengt am FEHLSCHLAG des Signals",
+      re.search(r"if\s*\(!Zweitstart\.LaufendeInstanzWecken\(\)\)", _prog25) is not None)
+check("die erste Instanz legt das Signal an",
+      "Zweitstart.AlsErsteInstanz()" in _prog25)
+check("und zwar erst, nachdem feststeht, dass sie die erste ist",
+      _prog25.find("Zweitstart.AlsErsteInstanz()") > _prog25.find("if (!isOnlyInstance)"))
+check("das Signal traegt einen sitzungslokalen Namen",
+      r"Local\AiMouse.Zeigen" in _zw25)
+check("und nirgends einen globalen (der waeckte eine FREMDE Sitzung)",
+      "Global" not in _ohne_komm25(_zw25))
+# ⚠ AUF DER KOMMENTARFREIEN FASSUNG. Der Docstring zitiert `executeOnlyOnce:
+#   false` woertlich, um es zu begruenden – die Gegenprobe blieb dadurch gruen
+#   (15. Fall dieser Klasse im Projekt).
+check("die Beobachtung bleibt fuer JEDEN weiteren Zweitstart bestehen",
+      "executeOnlyOnce: false" in _ohne_komm25(_zw25))
+check("ein Fehler in der Reaktion beendet die Beobachtung nicht",
+      re.search(r"beiSignal\(\);[\s\S]{0,200}catch", _ohne_komm25(_zw25)) is not None)
+
+# ⚠ DER RUECKRUF KOMMT AUS EINEM POOL-THREAD. Ohne Marshalling waere der
+#   Fensterzugriff ein Fehler, den nur ein echter Windows-Lauf zeigt.
+check("die Reaktion wird auf den UI-Thread gereicht",
+      re.search(r"Zweitstart\.Beobachten\([\s\S]{0,160}BeginInvokeOnOwner", _tray25)
+      is not None)
+check("und beim Beenden wieder abgemeldet", "Zweitstart.Aufraeumen()" in _tray25)
+
+# ── Die Verknuepfungen werden beim Speichern nachgezogen ────────────────────
+# ⚠ DIE WIRKUNG, NICHT DAS VORKOMMEN: `if (false && Startwege.Anwenden(...))`
+#   enthaelt den Aufruf weiterhin und tut nichts – die Gegenprobe blieb gruen.
+check("ApplySettings wendet die Startwege an (und nicht in einem toten Zweig)",
+      re.search(r"if\s*\(Startwege\.Anwenden\(settings\)\s+is\s*\{", _tray25)
+      is not None)
+check("ein Fehlschlag wird gemeldet, nicht verschluckt",
+      re.search(r"Startwege\.Anwenden[\s\S]{0,200}ShowTrayError", _tray25) is not None)
+
+# ── Registry: was geschrieben wird, muss gelesen werden ─────────────────────
+# ⚠ DRIFT-SCHRANKE. Ein Feld, das nur geschrieben wird, ist eine Einstellung,
+#   die sich beim naechsten Start zurueckstellt – ohne jede Meldung.
+for _feld25 in ("StartHotkey", "MitWindowsStarten"):
+    check("ConfigStore SCHREIBT %s" % _feld25,
+          'k.SetValue("%s"' % _feld25 in _cfg25)
+    check("ConfigStore LIEST %s" % _feld25,
+          '"%s"' % _feld25 in _cfg25.split("public static string? SaveSettings")[0])
+
+# ── Der Dialog nimmt auf, statt tippen zu lassen ────────────────────────────
+check("das Hotkey-Feld ist schreibgeschuetzt (Aufnahme, kein Freitext)",
+      re.search(r"_hotkey\s*=\s*new\(\)[\s\S]{0,240}ReadOnly\s*=\s*true", _set25)
+      is not None)
+check("der Tastendruck wird abgefangen (sonst loest Alt+S 'Speichern' aus)",
+      "SuppressKeyPress = true" in _set25)
+check("Modifikatortasten allein zaehlen nicht als Kombination",
+      "Keys.ControlKey" in _set25 and "Keys.Menu" in _set25)
+check("BuildSettings uebernimmt die aufgenommene Kombination",
+      "StartHotkey = HotkeyWort.AlsText(_hkModifier, _hkVk)" in _set25)
+check("BuildSettings uebernimmt den Autostart-Schalter",
+      "MitWindowsStarten = _mitWindows.Checked" in _set25)
+check("der Hinweis nennt beide Einschraenkungen (Strg+Alt UND Verknuepfung)",
+      "HotkeyHinweis" in _set25 and "HotkeyBelegtHinweis" in _set25)
+
+# ── i18n: kein harter Text, beide Sprachen gefuellt ─────────────────────────
+for _k25 in ("StartAbschnitt", "StartHotkey", "HotkeyKeine", "HotkeyDruecken",
+             "HotkeyHinweis", "HotkeyBelegtHinweis", "MitWindowsStarten",
+             "StartwegeFehler", "LaeuftBereitsBlase", "LaeuftBereits"):
+    # ⚠ MIT `T(`: sonst bliebe ein hart verdrahteter deutscher Text gruen –
+    #   die Property gaebe es ja, sie waere nur einsprachig. Genau das hat eine
+    #   Gegenprobe aufgedeckt.
+    check("Texte kennt %s und uebersetzt es" % _k25,
+          re.search(r"string %s\s*=>\s*T\(" % _k25, _txt25) is not None)
+
+_m25 = re.search(r"HotkeyHinweis\s*=>\s*T\(([\s\S]{0,1200}?)\);", _txt25)
+check("der Hotkey-Hinweis ist in BEIDEN Sprachen gefuellt und verschieden",
+      _m25 is not None and "Start menu" in _m25.group(1)
+      and "Startmenü" in _m25.group(1))
 
 
 print("\n%d OK, %d FAIL" % (ok, fail))

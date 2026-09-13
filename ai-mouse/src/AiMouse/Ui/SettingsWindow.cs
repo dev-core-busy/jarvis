@@ -1,5 +1,6 @@
 using AiMouse.Configuration;
 using AiMouse.Localization;
+using AiMouse.Start;
 using AiMouse.Vision;
 
 namespace AiMouse.Ui;
@@ -61,6 +62,44 @@ internal sealed class SettingsWindow : Form
     };
 
     private readonly CheckBox _copyResult = new() { AutoSize = true };
+
+    /// <summary>Mit Windows starten (Verknuepfung im Autostart-Ordner).</summary>
+    private readonly CheckBox _mitWindows = new() { AutoSize = true };
+
+    /// <summary>AUFNAHMEFELD fuer die Tastenkombination – bewusst kein
+    /// Freitextfeld.
+    ///
+    /// ⚠ EIN TEXTFELD WAERE HIER DIE FALSCHE BAUFORM: der Benutzer muesste die
+    /// Schreibweise kennen („CTRL+ALT+A"), ein Tippfehler faellt erst auf, wenn
+    /// die Kombination spaeter nicht wirkt – und ein `.lnk`-Hotkey meldet
+    /// nicht, dass er unbrauchbar ist. Er tut dann einfach nichts. Aufnehmen
+    /// heisst: was hier steht, ist genau das, was gedrueckt wurde.
+    /// </summary>
+    private readonly TextBox _hotkey = new()
+    {
+        Dock = DockStyle.Fill,
+        ReadOnly = true,
+        TextAlign = HorizontalAlignment.Center,
+    };
+
+    private readonly Button _hotkeyLoeschen = new()
+    {
+        Dock = DockStyle.Right,
+        Width = 90,
+    };
+
+    /// <summary>Erklaert die zwei Einschraenkungen, die niemand erraten kann
+    /// (Strg+Alt Pflicht; wirkt ueber eine Verknuepfung im Startmenue).</summary>
+    private readonly Label _hotkeyHinweis = new()
+    {
+        Dock = DockStyle.Fill,
+        AutoSize = true,
+        ForeColor = SystemColors.GrayText,
+    };
+
+    /// <summary>Aufgenommene Kombination; <c>(0, 0)</c> = keine.</summary>
+    private int _hkModifier;
+    private int _hkVk;
 
     /// <summary>Prueft die eingetippten Einstellungen wirklich gegen den Server;
     /// eingespritzt, damit der Dialog nichts von HTTP wissen muss.</summary>
@@ -178,6 +217,38 @@ internal sealed class SettingsWindow : Form
         AddRow(layout, string.Empty, _rdHinweis);
         AddRow(layout, string.Empty, _copyResult);
 
+        // ── Start ────────────────────────────────────────────────────────────
+        // Eigener Abschnitt: darunter stehen keine Einstellungen der GESTE
+        // mehr, sondern zwei, die das Verhalten von WINDOWS betreffen (was beim
+        // Anmelden startet, worauf eine Tastenkombination liegt). Ohne die
+        // Trennlinie liest sich das wie ein weiteres Gestenfeld.
+        AddRow(layout, string.Empty, Trennlinie(Texte.StartAbschnitt));
+
+        _hotkey.KeyDown += OnHotkeyTaste;
+        // ⚠ RUECKMELDUNG, DASS DAS FELD AUFNIMMT. Ein schreibgeschuetztes Feld
+        //    sieht aus wie eine Anzeige – ohne diesen Wechsel probiert niemand,
+        //    einfach Tasten zu druecken.
+        _hotkey.Enter += (_, _) => _hotkey.Text = Texte.HotkeyDruecken;
+        _hotkey.Leave += (_, _) => HotkeySetzen(_hkModifier, _hkVk);
+        // ⚠ Auch `KeyPress` abfangen: sonst quittiert Windows die Eingabe in
+        //   einem ReadOnly-Feld mit einem Systemton bei jedem Tastendruck.
+        _hotkey.KeyPress += (_, ke) => ke.Handled = true;
+        _hotkeyLoeschen.Text = Texte.HotkeyKeine;
+        _hotkeyLoeschen.Click += (_, _) => HotkeySetzen(0, 0);
+
+        var hkZeile = new Panel { Dock = DockStyle.Fill, Height = 26 };
+        // Reihenfolge: der gefuellte Dock=Right-Knopf zuerst, sonst nimmt das
+        // Dock=Fill-Feld die ganze Breite und der Knopf landet ausserhalb.
+        hkZeile.Controls.Add(_hotkey);
+        hkZeile.Controls.Add(_hotkeyLoeschen);
+
+        AddRow(layout, Texte.StartHotkey, hkZeile);
+        _hotkeyHinweis.Text = Texte.HotkeyHinweis + " " + Texte.HotkeyBelegtHinweis;
+        AddRow(layout, string.Empty, _hotkeyHinweis);
+
+        _mitWindows.Text = Texte.MitWindowsStarten;
+        AddRow(layout, string.Empty, _mitWindows);
+
         _status = new Label
         {
             Dock = DockStyle.Bottom,
@@ -255,6 +326,62 @@ internal sealed class SettingsWindow : Form
         int gk = Array.IndexOf(_RD_WERTE, (s.GestureKey ?? string.Empty).Trim().ToLowerInvariant());
         _gesteTaste.SelectedIndex = gk >= 0 ? gk : 0;
         TastenfelderAbgleichen();
+
+        _mitWindows.Checked = s.MitWindowsStarten;
+        // Ein unbrauchbarer gespeicherter Wert ergibt (0,0) = „keine" – das ist
+        // dasselbe, was die Anwendung daraus macht (`Startwege` entfernt die
+        // Verknuepfung dann). Anzeige und Wirkung koennen so nicht
+        // auseinanderlaufen.
+        (int m, int v) = HotkeyWort.AusText(s.StartHotkey);
+        HotkeySetzen(m, v);
+    }
+
+    /// <summary>Nimmt einen Tastendruck als Kombination auf.</summary>
+    private void OnHotkeyTaste(object? sender, KeyEventArgs e)
+    {
+        // ⚠ BEIDES SETZEN: `Handled` allein laesst die Eingabe noch an die
+        //   Dialog-Mnemonics durch – Alt+S wuerde „Speichern" ausloesen,
+        //   waehrend der Benutzer eine Kombination aufnimmt.
+        e.Handled = true;
+        e.SuppressKeyPress = true;
+
+        int vk = (int)e.KeyCode;
+
+        // Eine gedrueckte Modifikatortaste ist noch keine Kombination – sonst
+        // stuende schon beim Greifen nach Strg etwas im Feld.
+        if (e.KeyCode is Keys.ControlKey or Keys.Menu or Keys.ShiftKey
+                      or Keys.LWin or Keys.RWin)
+        {
+            return;
+        }
+
+        // Rücktaste/Entf leeren – die naheliegende Geste, um etwas loszuwerden.
+        if (e.KeyCode is Keys.Back or Keys.Delete)
+        {
+            HotkeySetzen(0, 0);
+            return;
+        }
+
+        int mod = (e.Control ? HotkeyWort.ModStrg : 0)
+                | (e.Alt ? HotkeyWort.ModAlt : 0)
+                | (e.Shift ? HotkeyWort.ModUmschalt : 0);
+
+        // ⚠ UNZULAESSIGES WIRD NICHT UEBERNOMMEN UND NICHT KOMMENTIERT: der
+        //   Hinweis unter dem Feld steht ohnehin da und nennt die Regel. Ein
+        //   Dialogfenster bei jedem Tastendruck waere hier eine Zumutung –
+        //   man probiert beim Aufnehmen zwangslaeufig etwas aus.
+        if (HotkeyWort.IstZulaessig(mod, vk))
+        {
+            HotkeySetzen(mod, vk);
+        }
+    }
+
+    private void HotkeySetzen(int modifier, int vk)
+    {
+        bool gut = HotkeyWort.IstZulaessig(modifier, vk);
+        _hkModifier = gut ? modifier : 0;
+        _hkVk = gut ? vk : 0;
+        _hotkey.Text = gut ? HotkeyWort.AlsText(modifier, vk) : Texte.HotkeyKeine;
     }
 
     private void OnSave(object? sender, EventArgs e)
@@ -367,7 +494,48 @@ internal sealed class SettingsWindow : Form
             // ein Speichern ohne Eingabe die Anmeldung.
             Benutzer = _benutzer.Text.Trim().Length > 0
                 ? _benutzer.Text.Trim() : _ausgang.Benutzer,
+            // Aus der aufgenommenen Kombination, nicht aus dem Feldtext: dort
+            // steht bei „keine" ein uebersetztes Wort, das kein Hotkey ist.
+            StartHotkey = HotkeyWort.AlsText(_hkModifier, _hkVk),
+            MitWindowsStarten = _mitWindows.Checked,
         };
+    }
+
+    /// <summary>Waagerechte Linie mit Beschriftung – trennt die Start-Optionen
+    /// von den Gesten-Einstellungen darueber.</summary>
+    private static Control Trennlinie(string text)
+    {
+        var box = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            // ⚠ `AutoSize` + `WrapContents`: bei groesserer Schrift (Zoom)
+            //    rutscht die Linie unter den Text, statt abgeschnitten zu
+            //    werden – dieselbe Regel wie beim Marken-Kopf.
+            WrapContents = true,
+            Margin = new Padding(0, 10, 0, 2),
+        };
+
+        box.Controls.Add(new Label
+        {
+            Text = text,
+            AutoSize = true,
+            Font = new Font(SystemFonts.DefaultFont, FontStyle.Bold),
+            Margin = new Padding(0, 0, 8, 0),
+        });
+
+        box.Controls.Add(new Label
+        {
+            // Eine 1px-Linie als Label: ein eigenes Control dafuer waere mehr
+            // Aufwand als Gewinn.
+            AutoSize = false,
+            Height = 1,
+            Width = 300,
+            BorderStyle = BorderStyle.Fixed3D,
+            Margin = new Padding(0, 8, 0, 0),
+        });
+
+        return box;
     }
 
     protected override void OnFormClosed(FormClosedEventArgs e)

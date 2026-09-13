@@ -88,6 +88,10 @@ internal static class ConfigStore
             //   Vorgabe (Geste ohne Zusatztaste). Ein fehlender Wert und ein
             //   ausdrueckliches "keine" fuehren also zum selben Verhalten.
             s.GestureKey = Lies(k, "GestureKey");
+            // Leer IST die Vorgabe (keine Tastenkombination) – wie bei
+            // GestureKey darueber, nicht wie bei Endpoint.
+            s.StartHotkey = Lies(k, "StartHotkey");
+            s.MitWindowsStarten = Zahl(k, "MitWindowsStarten", 0, 0, 1) == 1;
         }
         catch (Exception e)
         {
@@ -117,6 +121,8 @@ internal static class ConfigStore
             k.SetValue("RightDragKey", settings.RightDragKey ?? "ctrl");
             k.SetValue("GestureKey", settings.GestureKey ?? string.Empty);
             k.SetValue("CopyResultToClipboard", settings.CopyResultToClipboard ? 1 : 0);
+            k.SetValue("StartHotkey", settings.StartHotkey ?? string.Empty);
+            k.SetValue("MitWindowsStarten", settings.MitWindowsStarten ? 1 : 0);
             return null;
         }
         catch (Exception e)

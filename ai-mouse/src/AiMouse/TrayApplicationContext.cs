@@ -4,6 +4,7 @@ using AiMouse.Configuration;
 using AiMouse.Localization;
 using AiMouse.Input;
 using AiMouse.Interop;
+using AiMouse.Start;
 using AiMouse.Ui;
 using AiMouse.Update;
 using AiMouse.Vision;
@@ -165,6 +166,20 @@ internal sealed class TrayApplicationContext : ApplicationContext
         // erschiene hinter allem anderen oder gar nicht. So wird sie im ersten
         // freien Takt geoeffnet, wenn die Anwendung bereits laeuft.
         _owner.BeginInvoke(new Action(() => { _ = StartAnmeldungAsync(); }));
+
+        // ⚠ ANTWORT AUF EINEN ZWEITEN START (Tastenkombination bei bereits
+        // laufender Anwendung). Der Rueckruf kommt aus einem POOL-THREAD –
+        // `BeginInvokeOnOwner` ist Pflicht, ein Fensterzugriff von dort waere
+        // ein Fehler, den nur ein echter Windows-Lauf zeigt.
+        //
+        // Die Reaktion ist bewusst eine BLASE und kein Auswahlmodus: den
+        // anzustossen hiesse, die Zustandslogik im Hook-Callback zu verdoppeln,
+        // und der steht unter `LowLevelHooksTimeout`. Die Blase sagt, dass die
+        // Taste angekommen ist, und wie es weitergeht – mehr verspricht sie
+        // nicht.
+        Zweitstart.Beobachten(() => BeginInvokeOnOwner(() =>
+            _trayIcon.ShowBalloonTip(4000, Texte.Marke, Texte.LaeuftBereitsBlase,
+                                     ToolTipIcon.Info)));
     }
 
     private void BuildPromptMenu()
@@ -860,6 +875,17 @@ internal sealed class TrayApplicationContext : ApplicationContext
         (_hook.GesteVerlangt, _hook.Durchreichen) = TastenAus(settings);
         Texte.Anwenden(settings);
 
+        // ⚠ DIE VERKNUEPFUNGEN WERDEN HIER NACHGEZOGEN, nicht im Dialog: er
+        // liefert nur einen geprueften Wert, angewandt wird er vom Aufrufer –
+        // dasselbe Muster wie beim Speichern selbst. Ein Fehlschlag ist KEIN
+        // Grund, die uebrigen Einstellungen zu verwerfen: er betrifft nur den
+        // Startweg, und der Benutzer muss ihn erfahren, statt sich zu wundern,
+        // warum seine Tastenkombination nichts tut.
+        if (Startwege.Anwenden(settings) is { } startFehler)
+        {
+            ShowTrayError(Texte.StartwegeFehler + startFehler);
+        }
+
         // ⚠ BEI EINER NEUEN ADRESSE MUSS DIE SITZUNG WEG. Das Token gilt fuer
         // den alten Server; es weiterzubenutzen ergaebe einen 401, der wie ein
         // Serverfehler aussieht. Auch das Zeitlimit steckt im HttpClient, also
@@ -999,6 +1025,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
     {
         if (disposing)
         {
+            // Zuerst: danach kann kein Rueckruf mehr auf Fenster zugreifen,
+            // die eine Zeile spaeter verschwinden.
+            Zweitstart.Aufraeumen();
             _hook.Dispose();
             _client.Dispose();
             DiscardPendingCapture();

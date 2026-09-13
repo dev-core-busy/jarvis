@@ -28,7 +28,14 @@
          Portal-Kachel. Bis dahin war sie nur ueber die Windows-Dateieigenschaften
          zu sehen – ausgerechnet die Nummer, die man beim Melden eines Fehlers
          zuerst braucht. -->
-    <Version>1.0.2</Version>
+    <!-- 1.0.3 (2026-09-12): Tastenkombination zum STARTEN + Autostart.
+         Beides ueber eine Windows-VERKNUEPFUNG, nicht ueber `RegisterHotKey`:
+         ein nicht laufendes Programm kann keinen Hotkey registrieren, und
+         genau das soll die Kombination ja tun. Dazu meldet sich ein Zweitstart
+         bei der laufenden Instanz, statt einen modalen Dialog zu zeigen – seit
+         es den Hotkey gibt, ist der Zweitstart der NORMALFALL, und der Dialog
+         haette ihn zuverlaessig zur Fehlermeldung gemacht. -->
+    <Version>1.0.3</Version>
     <!-- DPI awareness is owned by app.manifest, not by ApplicationHighDpiMode: it has to
          be in effect from process start, before any screen coordinate is read.
          WFAC010 asks for the opposite; suppressed because that trade-off is intentional. -->

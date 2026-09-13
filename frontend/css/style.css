@@ -4564,6 +4564,49 @@ body.light .kb-cl-spanne { color: #5b6678; }
 .kb-cl-edit { width: 100%; min-height: 220px; margin-top: 8px; font-family: monospace;
     font-size: .78rem; }
 
+/* Eigene Anweisung: abgesetzter Kasten unter den beiden Aufraeum-Knoepfen.
+   ⚠ ER MUSS SICH ABSETZEN. Ohne Trennlinie und eigenen Grund liest sich das
+   Feld wie ein weiteres Feld der Aktionszeile darueber - und der Knopf daneben
+   wie eine dritte Spielart von "Analysieren". Es ist aber etwas anderes: hier
+   gibt der Anwender die Aufgabe vor, dort laeuft der feste Auftrag. */
+.kb-cl-anw {
+    margin: 18px 0 6px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--accent);
+    border-radius: 8px;
+    background: var(--bg-secondary);
+}
+.kb-cl-anw-titel { display: block; font-weight: 600; font-size: .86rem; }
+.kb-cl-anw-text {
+    width: 100%;
+    /* ⚠ box-sizing ist Pflicht: .modal-card/.form-group geben Eingabefeldern
+       ein Innenpolster, und mit width:100% laeuft das Feld sonst ueber den
+       Kasten hinaus (im Projekt mehrfach bezahlt). */
+    box-sizing: border-box;
+    min-height: 62px;
+    resize: vertical;
+    font-family: inherit;
+    font-size: .82rem;
+    line-height: 1.45;
+}
+.kb-cl-anw .kb-cl-aktion { margin: 10px 0 0; }
+
+/* Die Anweisung ueber dem Ergebnis - sonst ist nach dem zweiten Lauf nicht
+   mehr zuzuordnen, welcher Vorschlag zu welcher Vorgabe gehoert. */
+.kb-cl-anw-echo {
+    display: flex; gap: 8px; flex-wrap: wrap;
+    margin: 8px 0 12px; padding: 8px 12px;
+    border-left: 3px solid var(--accent);
+    border-radius: 6px;
+    background: var(--bg-glass);
+    font-size: .82rem; line-height: 1.45;
+    /* Ohne min-width: 0 schiebt eine lange Anweisung ohne Leerzeichen den
+       Kasten ueber den Dialogrand hinaus. */
+    min-width: 0; overflow-wrap: anywhere;
+}
+.kb-cl-anw-echo-titel { font-weight: 600; color: var(--text-secondary); }
+
 .kb-mount-diag {
     background: var(--bg-secondary);
     border: 1px solid var(--border);

@@ -57,7 +57,8 @@ const teile = ['_diffZeilen', '_cleanupVergleich', '_escHtml', 'cleanupBearbeite
                'cleanupUebernehmen', '_fehlertext', '_bilanzHtml', 'cleanupBilanz',
                'cleanupKonflikte', 'cleanupOeffnen', 'cleanupSchliessen',
                '_cleanupListe', '_cleanupZaehler', 'cleanupEinzelSpeichern',
-               '_clStatus', 'cleanupAnalysieren'].map(methode);
+               '_clStatus', 'cleanupAnalysieren', '_cleanupAuswahlVerdrahten',
+               '_cleanupAnweisungVerdrahten', 'cleanupMitAnweisung'].map(methode);
 check('alle Bausteine geschnitten', teile.every(t => t.length > 20));
 
 const gesendet = [];
@@ -720,6 +721,151 @@ check('bewegungsempfindliche Benutzer bekommen keine Animation',
     check(`${seite}: knowledge.js und style.css sind neu genug`,
           /knowledge\.js\?v=(11[3-9]|1[2-9]\d|[2-9]\d\d)/.test(h)
           && /style\.css\?v=(17[6-9]|1[89]\d|[2-9]\d\d)/.test(h));
+});
+
+console.log('\n\x1b[1m10. Eigene Anweisung: Feld, Knopf und was gesendet wird\x1b[0m');
+// ⚠ AUSGEFUEHRT, nicht im Quelltext gesucht: ob ein Feld ENTSTEHT, ob der
+// Knopf wirklich gesperrt ist und was am Ende im Rumpf landet, kann eine
+// Textsuche nicht beantworten.
+const bodyEl = document.getElementById('kb-cleanup-body');
+M._cleanupDateien = [
+    { schluessel: 'anweisung:style.md', art: 'anweisung', name: 'style.md',
+      bytes: 900, herkunft: 'geaendert', zu_gross: false },
+    { schluessel: 'gedaechtnis:memory.json', art: 'gedaechtnis', name: 'memory.json',
+      bytes: 2000, herkunft: 'vom Agenten', zu_gross: false },
+];
+window.fetch = async () => ({ ok: true, json: async () => ({ ok: true }) });
+M._cleanupListe();
+const feld = document.getElementById('kb-cl-anw-text');
+const anwKnopf = document.getElementById('kb-cl-anw-start');
+check('das Eingabefeld wird gezeichnet', !!feld && feld.tagName === 'TEXTAREA');
+check('der zweite Knopf steht daneben', !!anwKnopf);
+check('das Feld erklaert sich selbst (Platzhalter mit Beispiel)',
+      !!feld && (feld.getAttribute('placeholder') || '').length > 20);
+check('⚠ der Knopf ist gesperrt, solange nichts drinsteht',
+      !!anwKnopf && anwKnopf.disabled === true);
+check('und sagt auch, warum (gesperrt MIT Begruendung, nicht verborgen)',
+      !!anwKnopf && (anwKnopf.title || '').length > 5 && anwKnopf.offsetParent !== undefined);
+// Tippen -> der Knopf wird frei. Ueber das ECHTE Ereignis, nicht per Hand.
+feld.value = 'Entferne alle Merksaetze zu Jira.';
+feld.dispatchEvent(new window.Event('input'));
+check('nach der Eingabe ist er bedienbar', anwKnopf.disabled === false);
+check('und der Titel sagt jetzt etwas anderes',
+      (anwKnopf.title || '') !== window.t('knowledge.cleanup.anw_btn_leer'));
+feld.value = '   ';
+feld.dispatchEvent(new window.Event('input'));
+check('nur Leerzeichen zaehlen nicht als Anweisung', anwKnopf.disabled === true);
+
+// Was geht wirklich raus?
+const gesendet10 = [];
+const f10roh = async (url, opt) => {
+    gesendet10.push({ url, body: JSON.parse((opt && opt.body) || '{}') });
+    if (/\/analyse$/.test(url)) {
+        return { ok: true, json: async () => ({ ok: true, modell: 'testmodell',
+            anweisung: 'x', ergebnisse: [{ schluessel: 'anweisung:style.md', ok: true,
+                geaendert: false, alt: 'a\n', neu: 'a\n',
+                begruendung: 'Drei Merksaetze nennen Jira.',
+                funde: [{ art: 'treffer', text: 'jira_zugang' }],
+                bytes_alt: 2, bytes_neu: 2 }] }) };
+    }
+    return { ok: true, json: async () => ({ ok: true }) };
+};
+// ⚠ WAEHREND DES LAUFS MUESSEN BEIDE KNOEPFE GESPERRT SEIN - sonst startet
+// ein zweiter Lauf in den ersten hinein und ueberschreibt die Vorschlagsliste.
+// Gemessen wird das IM Lauf (in der fetch-Attrappe), nicht davor oder danach.
+let gesperrtImLauf = null;
+const f10 = async (url, opt) => {
+    if (/\/analyse$/.test(url) && gesperrtImLauf === null) {
+        const a = document.getElementById('kb-cl-start');
+        const b = document.getElementById('kb-cl-anw-start');
+        gesperrtImLauf = !!(a && a.disabled) && !!(b && b.disabled);
+    }
+    return f10roh(url, opt);
+};
+window.fetch = f10; global.fetch = f10;
+feld.value = 'Entferne alle Merksaetze zu Jira.';
+feld.dispatchEvent(new window.Event('input'));
+await M.cleanupMitAnweisung();
+check('⚠ waehrend des Laufs sind BEIDE Knoepfe gesperrt', gesperrtImLauf === true);
+const anfr = gesendet10.filter(g => /\/analyse$/.test(g.url));
+check('der Klick loest einen Analyse-Lauf aus', anfr.length > 0);
+check('⚠ die Anweisung geht mit',
+      anfr.length > 0 && anfr[0].body.anweisung === 'Entferne alle Merksaetze zu Jira.');
+check('und genau die markierten Dateien',
+      anfr.length > 0 && Array.isArray(anfr[0].body.dateien) && anfr[0].body.dateien.length === 2);
+
+// Gegenrichtung: der gewoehnliche Knopf schickt KEINE Anweisung - auch dann
+// nicht, wenn im Feld etwas steht. Sonst taete er je nach Feldinhalt etwas
+// anderes, ohne dass es an ihm steht.
+gesendet10.length = 0;
+M._cleanupDateien = [{ schluessel: 'anweisung:style.md', art: 'anweisung',
+                       name: 'style.md', bytes: 900, herkunft: 'geaendert', zu_gross: false }];
+M._cleanupListe();
+const feld2 = document.getElementById('kb-cl-anw-text');
+feld2.value = 'Das hier soll NICHT gelten.';
+feld2.dispatchEvent(new window.Event('input'));
+await M.cleanupAnalysieren();
+const anfr2 = gesendet10.filter(g => /\/analyse$/.test(g.url));
+check('⚠ "Analysieren" schickt keine Anweisung mit, obwohl das Feld gefuellt ist',
+      anfr2.length > 0 && !anfr2[0].body.anweisung);
+
+console.log('\n\x1b[1m10b. Das Ergebnis sagt, wozu es gehoert\x1b[0m');
+M._cleanupVorschlaege = [{ schluessel: 'anweisung:style.md', ok: true, geaendert: false,
+                           alt: 'a\n', neu: 'a\n',
+                           begruendung: 'Drei Merksaetze nennen Jira.',
+                           funde: [{ art: 'treffer', text: 'jira_zugang' }],
+                           bytes_alt: 2, bytes_neu: 2 }];
+M._cleanupVergleich('testmodell', '<b>Entferne</b> alles zu Jira');
+const txt10 = bodyEl.textContent;
+const echoEl = bodyEl.querySelector('.kb-cl-anw-echo');
+// ⚠ GEMESSEN WIRD DER KASTEN, NICHT NUR DER TEXT. Steht die Anweisung
+// irgendwo im Fliesstext, greift keine der Regeln, die sie vom Ergebnis
+// absetzen - und sie liest sich wie ein Teil des Vorschlags.
+check('⚠ die Anweisung steht ueber dem Ergebnis - in ihrem eigenen Kasten',
+      !!echoEl && echoEl.textContent.includes('Entferne')
+      && echoEl.textContent.includes('alles zu Jira'));
+check('und der Kasten steht VOR der ersten Karte',
+      !!echoEl && !!bodyEl.querySelector('.kb-cl-karte')
+      && (echoEl.compareDocumentPosition(bodyEl.querySelector('.kb-cl-karte'))
+          & window.Node.DOCUMENT_POSITION_FOLLOWING) !== 0);
+check('⚠ sie wird MASKIERT (sie kaeme sonst als Markup ins Admin-DOM)',
+      !bodyEl.querySelector('.kb-cl-anw-echo b')
+      && bodyEl.innerHTML.includes('&lt;b&gt;'));
+check('⚠ bei "nichts geaendert" steht die ANTWORT da (sonst ist der Lauf wertlos)',
+      txt10.includes('Drei Merksaetze nennen Jira.'));
+check('auch die Funde werden gezeigt', txt10.includes('jira_zugang'));
+check('es gibt einen Weg zurueck zur Auswahl',
+      !!document.getElementById('kb-cl-zurueck'));
+
+// Ohne Anweisung: kein Echo-Kasten, und der alte Hinweistext gilt.
+M._cleanupVergleich('testmodell');
+check('ohne Anweisung erscheint kein Echo-Kasten',
+      !bodyEl.querySelector('.kb-cl-anw-echo'));
+
+console.log('\n\x1b[1m10c. CSS und Texte\x1b[0m');
+const CSS10 = fs.readFileSync(path.join(REPO, 'frontend/css/style.css'), 'utf8')
+                .replace(/\/\*[\s\S]*?\*\//g, '');
+check('Positivkontrolle: der Kommentar-Filter hat gearbeitet',
+      CSS10.includes('.kb-cl-anw') && !CSS10.includes('Eigene Anweisung: abgesetzter'));
+const anwBlock = (CSS10.match(/\.kb-cl-anw-text\s*\{[^}]*\}/) || [''])[0];
+check('das Feld hat eine eigene Regel', anwBlock.length > 10);
+check('⚠ box-sizing: sonst laeuft es mit width:100% aus dem Kasten',
+      /box-sizing\s*:\s*border-box/.test(anwBlock));
+const echoBlock = (CSS10.match(/\.kb-cl-anw-echo\s*\{[^}]*\}/) || [''])[0];
+check('⚠ min-width:0 am Echo - eine lange Anweisung sprengt sonst den Dialog',
+      /min-width\s*:\s*0/.test(echoBlock));
+['anw_titel', 'anw_hint', 'anw_ph', 'anw_btn', 'anw_btn_title', 'anw_btn_leer',
+ 'anw_note', 'anw_leer', 'anw_echo', 'result_hint_anw', 'back_title'].forEach(k => {
+    const key = 'knowledge.cleanup.' + k;
+    check(`Text "${k}" ist uebersetzt (kein Schluessel als Text)`,
+          window.t(key) !== key && window.t(key).length > 2);
+});
+// ⚠ REGEL ueber BEIDE Sprachen: ein Schluessel, den nur DE kennt, faellt in der
+// englischen Oberflaeche als Rohtext auf - und zwar erst beim Kunden.
+const I18N10 = fs.readFileSync(path.join(REPO, 'frontend/js/i18n.js'), 'utf8');
+['anw_titel', 'anw_btn', 'anw_echo', 'result_hint_anw', 'back_title'].forEach(k => {
+    check(`"${k}" steht in DE UND EN`,
+          (I18N10.match(new RegExp("'knowledge\\.cleanup\\." + k + "'", 'g')) || []).length === 2);
 });
 
 clearTimeout(wachhund);

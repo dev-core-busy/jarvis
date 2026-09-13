@@ -1384,9 +1384,27 @@ class JarvisKnowledgeManager {
                     id="kb-cl-konflikte" title="${window.t('knowledge.cleanup.k_btn_title')}">
                 ${window.t('knowledge.cleanup.k_btn')}</button>
             <span class="kb-hint" style="margin:0;">${window.t('knowledge.cleanup.start_hint')}</span>
-        </div><div id="kb-cl-status" class="kb-hint"></div>`;
+        </div>
+        <div class="kb-cl-anw">
+            <label class="kb-cl-anw-titel" for="kb-cl-anw-text">${
+                this._escHtml(window.t('knowledge.cleanup.anw_titel'))}</label>
+            <p class="kb-hint" style="margin:.2rem 0 .5rem;">${
+                this._escHtml(window.t('knowledge.cleanup.anw_hint'))}</p>
+            <textarea id="kb-cl-anw-text" class="kb-cl-anw-text" rows="3" spellcheck="false"
+                      placeholder="${this._escHtml(window.t('knowledge.cleanup.anw_ph'))}"></textarea>
+            <div class="kb-cl-aktion">
+                <button class="btn-secondary" id="kb-cl-anw-start" disabled
+                        onclick="window.knowledgeManager.cleanupMitAnweisung()"
+                        title="${this._escHtml(window.t('knowledge.cleanup.anw_btn_leer'))}">${
+                    this._escHtml(window.t('knowledge.cleanup.anw_btn'))}</button>
+                <span class="kb-hint" style="margin:0;">${
+                    this._escHtml(window.t('knowledge.cleanup.anw_note'))}</span>
+            </div>
+        </div>
+        <div id="kb-cl-status" class="kb-hint"></div>`;
         box.innerHTML = html;
         this._cleanupAuswahlVerdrahten();
+        this._cleanupAnweisungVerdrahten();
     }
 
     /**
@@ -1441,6 +1459,44 @@ class JarvisKnowledgeManager {
     }
 
     /**
+     * Das Anweisungsfeld: der Knopf bleibt gesperrt, solange nichts drinsteht.
+     *
+     * ⚠ GESPERRT MIT BEGRUENDUNG, NICHT VERBORGEN (Projektregel). Ein Knopf,
+     * der je nach Feldinhalt auftaucht und wieder verschwindet, ist von einem
+     * fehlenden nicht zu unterscheiden; der `title` sagt in beiden Zustaenden,
+     * was gilt. Ein klickbarer Knopf, der dann "bitte erst etwas eingeben"
+     * meldet, waere der schlechtere Weg - er laeuft ins Leere.
+     */
+    _cleanupAnweisungVerdrahten() {
+        const feld = document.getElementById('kb-cl-anw-text');
+        const knopf = document.getElementById('kb-cl-anw-start');
+        if (!feld || !knopf) return;
+        const stand = () => {
+            const leer = !feld.value.trim();
+            knopf.disabled = leer;
+            knopf.title = window.t(leer ? 'knowledge.cleanup.anw_btn_leer'
+                                        : 'knowledge.cleanup.anw_btn_title');
+        };
+        feld.addEventListener('input', stand);
+        stand();
+    }
+
+    /**
+     * Der Lauf mit eigener Anweisung - liest das Feld und uebergibt den Text.
+     *
+     * ⚠ Der Text wird NICHT gemerkt und NICHT vorbelegt: er gilt fuer genau
+     * diesen Lauf. Eine wiederverwendete Anweisung aus einer frueheren Sitzung
+     * waere eine Vorgabe, an die sich niemand mehr erinnert - und sie
+     * ueberschriebe am Ende Dateien, die in jeden System-Prompt eingehen.
+     */
+    cleanupMitAnweisung() {
+        const feld = document.getElementById('kb-cl-anw-text');
+        const text = (feld ? feld.value : '').trim();
+        if (!text) { this._clStatus(window.t('knowledge.cleanup.anw_leer'), false); return; }
+        this.cleanupAnalysieren(text);
+    }
+
+    /**
      * Statuszeile des Aufraeum-Dialogs - EINE Stelle fuer beide Laeufe
      * (Analysieren und Gesamtpruefung).
      *
@@ -1461,11 +1517,29 @@ class JarvisKnowledgeManager {
         st.classList.toggle('kb-cl-laeuft', !!laeuft);
     }
 
-    async cleanupAnalysieren() {
+    /**
+     * Der Analyselauf ueber die markierten Dateien.
+     *
+     * @param {string} anweisung  Leer = der uebliche Aufraeum-Lauf. Sonst die
+     *   frei formulierte Vorgabe des Anwenders; sie tritt an die Stelle des
+     *   Aufraeum-Auftrags (Begruendung im Backend bei `_VORSPANN_ANWEISUNG`).
+     *
+     * ⚠ EINE FUNKTION, ABER EIN AUSDRUECKLICHER PARAMETER. Das Feld hier selbst
+     * auszulesen waere bequemer und falsch: der Knopf "Analysieren" taete dann
+     * je nach Feldinhalt etwas anderes, ohne dass es an ihm steht - und wer
+     * eine Anweisung getippt und dann den falschen Knopf gedrueckt hat, bekaeme
+     * ein Ergebnis, das er nicht bestellt hat. Die zwei Knoepfe bleiben
+     * unterscheidbar.
+     */
+    async cleanupAnalysieren(anweisung = '') {
         const sel = [...document.querySelectorAll('.kb-cl-sel:checked')].map(c => c.value);
         const knopf = document.getElementById('kb-cl-start');
+        const knopf2 = document.getElementById('kb-cl-anw-start');
         if (!sel.length) { this._clStatus(window.t('knowledge.cleanup.none_selected'), false); return; }
+        // BEIDE Knoepfe sperren - sonst startet ein zweiter Lauf in den
+        // laufenden hinein und die Vorschlagsliste wuerde ueberschrieben.
         if (knopf) { knopf.disabled = true; }
+        if (knopf2) { knopf2.disabled = true; }
         // Der Lauf dauert je Datei einige Sekunden – ohne diese Zeile sieht der
         // Klick wie ein Nichts aus.
         // ⚠ IN HAEPPCHEN, NICHT ALLES IN EINEM REQUEST. Live gemessen: ein Lauf
@@ -1486,17 +1560,18 @@ class JarvisKnowledgeManager {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json',
                                'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') },
-                    body: JSON.stringify({ dateien: teil })
+                    body: JSON.stringify({ dateien: teil, anweisung })
                 });
                 if (!resp.ok) throw new Error(await this._fehlertext(resp));
                 const d = await resp.json();
                 modell = d.modell || modell;
                 this._cleanupVorschlaege.push(...(d.ergebnisse || []));
             }
-            this._cleanupVergleich(modell);
+            this._cleanupVergleich(modell, anweisung);
         } catch (e) {
             this._clStatus(window.t('common.error') + ': ' + e.message, false);
             if (knopf) knopf.disabled = false;
+            if (knopf2) knopf2.disabled = false;
         }
     }
 
@@ -1524,11 +1599,27 @@ class JarvisKnowledgeManager {
         return out;
     }
 
-    _cleanupVergleich(modell) {
+    /**
+     * @param {string} anweisung  War der Lauf eine eigene Vorgabe? Dann steht
+     *   sie ueber dem Ergebnis.
+     *
+     * ⚠ DIE ANWEISUNG GEHOERT UEBER DAS ERGEBNIS. Wer zwei oder drei Laeufe
+     * hintereinander faehrt, kann sonst nicht mehr zuordnen, welcher Vorschlag
+     * zu welcher Vorgabe gehoert - und bestaetigt am Ende eine Aenderung,
+     * deren Grund er nicht mehr kennt.
+     */
+    _cleanupVergleich(modell, anweisung = '') {
         const box = document.getElementById('kb-cleanup-body');
         const v = this._cleanupVorschlaege || [];
-        let html = `<p class="kb-hint">${window.t('knowledge.cleanup.result_hint')
+        let html = `<p class="kb-hint">${window.t(anweisung
+                        ? 'knowledge.cleanup.result_hint_anw'
+                        : 'knowledge.cleanup.result_hint')
                     .replace('{modell}', this._escHtml(modell || '?'))}</p>`;
+        if (anweisung) {
+            html += `<div class="kb-cl-anw-echo"><span class="kb-cl-anw-echo-titel">${
+                this._escHtml(window.t('knowledge.cleanup.anw_echo'))}</span>`
+                 + `<span>${this._escHtml(anweisung)}</span></div>`;
+        }
         v.forEach((r, idx) => {
             if (!r.ok) {
                 html += `<div class="kb-cl-karte ist-fehler"><div class="kb-cl-kopf">
@@ -1537,11 +1628,22 @@ class JarvisKnowledgeManager {
                 return;
             }
             if (!r.geaendert) {
+                // ⚠ BEGRUENDUNG UND FUNDE GEHOEREN AUCH HIERHIN. Bisher wurden
+                // sie bei "nichts zu aendern" verworfen - im Anweisungs-Modus
+                // ist das aber die ANTWORT: "pruefe, welche Merksaetze sich auf
+                // SAP beziehen" aendert nichts und liefert trotzdem ein
+                // Ergebnis. Auch im Aufraeum-Modus ist "nichts zu aendern,
+                // weil ..." mehr wert als "nichts zu aendern".
+                const fundeU = (r.funde || []).map(f =>
+                    `<li><b>${this._escHtml(f.art || '')}</b>: ${this._escHtml(f.text || '')}</li>`).join('');
                 html += `<div class="kb-cl-karte"><div class="kb-cl-kopf">
                     <span class="kb-cl-name">${this._escHtml(r.schluessel)}</span>
                     <span class="kb-cl-meta">${window.t('knowledge.cleanup.unchanged')}</span>
                     ${r.fehler ? `<span class="kb-cl-warn">${this._escHtml(r.fehler)}</span>` : ''}
-                    </div></div>`;
+                    </div>
+                    ${r.begruendung ? `<p class="kb-cl-grund">${this._escHtml(r.begruendung)}</p>` : ''}
+                    ${fundeU ? `<ul class="kb-cl-funde">${fundeU}</ul>` : ''}
+                    </div>`;
                 return;
             }
             const d = this._diffZeilen(r.alt, r.neu);
@@ -1583,6 +1685,18 @@ class JarvisKnowledgeManager {
                           spellcheck="false">${this._escHtml(r.neu)}</textarea>
             </div>`;
         });
+        // ⚠ OHNE RUECKWEG IST JEDER LAUF EINE EINBAHNSTRASSE. Bis hierher war
+        // der einzige Weg zurueck zur Auswahl das Schliessen und Neuoeffnen des
+        // Dialogs - hinnehmbar, solange es genau einen Lauf gab. Mit einer
+        // eigenen Anweisung ist "nochmal, anders formuliert" der Regelfall.
+        // Der Titel sagt, was dabei verloren geht; die Vorschlaege sind keine
+        // Daten, sie werden nur nicht uebernommen.
+        html += `<div class="kb-cl-aktion">
+            <button class="btn-secondary" id="kb-cl-zurueck"
+                    onclick="window.knowledgeManager.cleanupOeffnen()"
+                    title="${this._escHtml(window.t('knowledge.cleanup.back_title'))}">${
+                this._escHtml(window.t('knowledge.cleanup.k_back'))}</button>
+        </div>`;
         box.innerHTML = html;
         // Vorher/Nachher der GESAMTSUMME - erst hier wird aus "-483 Zeichen"
         // eine Aussage darueber, was das je Anfrage bedeutet.

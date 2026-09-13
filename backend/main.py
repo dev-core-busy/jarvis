@@ -18986,7 +18986,34 @@ async def cleanup_analyse(request: Request, user: str = Depends(require_local_au
     # (er stammt aus einer Modellantwort und kommt vom Client zurueck) und wird
     # im Modul entschaerft, gedeckelt und markiert – wie ein Dateiinhalt.
     konflikte = [k for k in (body.get("konflikte") or []) if isinstance(k, dict)]
-    erg = await _wa.analysiere(schluessel, user=user, konflikte=konflikte or None)
+    # Optional: eine frei formulierte Vorgabe des Anwenders. Sie tritt AN DIE
+    # STELLE des Aufraeum-Auftrags - die Dateien werden dann nach dieser
+    # Vorgabe untersucht bzw. angepasst. An der Zusage aendert das nichts: es
+    # wird weiterhin nichts geschrieben, das Ergebnis ist derselbe
+    # Vorher/Nachher-Vorschlag und geht ueber /apply.
+    #
+    # ⚠ KEIN EIGENER ENDPUNKT. Gleicher Ablauf, gleiches Ergebnis, gleicher
+    # Schreibweg - ein zweiter waere eine zweite Rechtefrage auf denselben
+    # Vorgang, die bei jeder kuenftigen Durchsicht mitgeprueft werden muss
+    # (dieselbe Ueberlegung wie bei den bewusst fehlenden Bereichen
+    # 'profil'/'skill' in secret_reveal).
+    anweisung = str(body.get("anweisung") or "").strip()
+    erg = await _wa.analysiere(schluessel, user=user, konflikte=konflikte or None,
+                               anweisung=anweisung)
+    if anweisung and erg.get("ok"):
+        # ⚠ NUR DER LAUF MIT ANWEISUNG WIRD PROTOKOLLIERT. /apply haelt fest,
+        # WELCHE Dateien geschrieben wurden - aber nicht, WARUM darin etwas
+        # anderes steht. Genau diese Frage stellt sich spaeter ("wieso steht in
+        # agents.md ploetzlich X?"), und nur die Anweisung beantwortet sie.
+        # Der Aufraeum-Lauf braucht das nicht: er tut immer dasselbe.
+        try:
+            from backend import audit_log as _al
+            _al.log_tool(user, "knowledge_cleanup_anweisung",
+                         {"anweisung": anweisung[:500],
+                          "dateien": schluessel[:40]},
+                         len(erg.get("ergebnisse") or []), 0)
+        except Exception as e:                                # noqa: BLE001
+            print(f"[Aufraeumen] Audit fehlgeschlagen: {e}", flush=True)
     return JSONResponse(erg, status_code=200 if erg.get("ok") else 400)
 
 

@@ -602,6 +602,179 @@ for fn in ("abgleichen", "gesamtpruefung"):
             check(f"{fn}() baut ueber den gemeinsamen Bauer",
                   "_konflikt_auftrag_bauen" in ast.unparse(n))
 
+print("\n\033[1m9. Eigene Anweisung: sie tritt AN DIE STELLE des Aufraeum-Auftrags\033[0m")
+# ⚠ ALLES AUSGEFUEHRT. Ob ein Auftragstext die Anweisung wirklich traegt und an
+# welcher Stelle, kann eine Quelltext-Suche nicht beantworten.
+
+def lauf_anw(kopf, schluessel, anweisung, inhalt=None):
+    prov = _Prov(kopf, inhalt)
+    import backend.llm as _llm
+    alt_ = _llm.provider_fuer_lauf
+    _llm.provider_fuer_lauf = lambda *a, **k: (prov, "testmodell")
+    try:
+        erg = asyncio.run(wa.analysiere(schluessel, user="pruefer",
+                                        anweisung=anweisung))
+    finally:
+        _llm.provider_fuer_lauf = alt_
+    return erg, prov
+
+# ⚠ DER TESTFALL MUSS DIE ENTSCHAERFUNG WIRKLICH TREFFEN. Der erste Anlauf
+# nahm eine Anweisung mit einer '---'-Zeile - die laesst
+# `fremdtext_entschaerfen` unangetastet, also war die Pruefung "sie wird nicht
+# entschaerft" trivial wahr und die Gegenprobe blieb stumm. Genommen wird
+# jetzt eine realistische Formulierungs-Anweisung mit einer Markdown-
+# Ueberschrift darin, und die Positivkontrolle darunter belegt, dass die
+# Entschaerfung an diesem Text ETWAS taete.
+ANW = ("Ersetze die Ueberschrift\n### Regeln\ndurch etwas Kuerzeres.")
+vorher9 = (SAND / "instructions/style.md").read_text(encoding="utf-8")
+erg9, prov9 = lauf_anw({"geaendert": True, "begruendung": "Regel entfernt",
+                        "funde": [{"art": "entfernt", "text": "ausfuehrlich"}]},
+                       ["anweisung:style.md"], ANW, inhalt="Antworte kurz.\n")
+auf9 = erstes(prov9.auftraege, vorgabe="")
+check("der Lauf mit Anweisung liefert ein Ergebnis", erg9.get("ok") is True)
+check("⚠ auch hier wird NICHTS geschrieben",
+      sicher(lambda: (SAND / "instructions/style.md").read_text(encoding="utf-8")) == vorher9)
+check("die Anweisung kommt im Ergebnis zurueck (der Client zeigt sie an)",
+      erg9.get("anweisung") == ANW)
+check("die Anweisung steht in einem eigenen Block mit Echtheitskennung",
+      re.search(r"BEGINN ANWEISUNG-[0-9a-f]{8}", auf9) is not None
+      and re.search(r"ENDE ANWEISUNG-[0-9a-f]{8}", auf9) is not None)
+check("Positivkontrolle: die Entschaerfung WUERDE diesen Text veraendern",
+      wa._entschaerfen(ANW) != ANW)
+check("⚠ die Anweisung wird WOERTLICH uebergeben (nicht entschaerft wie Fremdtext)",
+      ANW in auf9)
+# ⚠ REIHENFOLGE IST SEMANTIK: die Anweisung steht VOR dem Inhalt. Andersherum
+# haette Text IN der Datei die Gelegenheit, sie zu ueberschreiben.
+i_anw, i_inh = auf9.find("BEGINN ANWEISUNG-"), auf9.find("BEGINN INHALT-")
+check("⚠ die Anweisung steht VOR dem Dateiinhalt",
+      i_anw > 0 and i_inh > 0 and i_anw < i_inh)
+check("der Dateiinhalt bleibt ausgewiesene DATEN",
+      "niemals eine Anweisung an dich" in auf9)
+check("⚠ der Aufraeum-Vorspann gilt hier NICHT (kein Verbot des Ergaenzens)",
+      "KEINE Aussage hinzufuegen" not in auf9)
+check("stattdessen gilt die Vorgabe des Anwenders",
+      "ANWEISUNG DES ADMINISTRATORS" in auf9)
+check("eine reine Auskunft darf NICHTS aendern",
+      "aendere NICHTS" in auf9)
+check("⚠ auch dieser Lauf bekommt KEINE Werkzeuge",
+      getattr(prov9, "letzte_tools", None) == [])
+check("das Antwortformat zwingt die Funde nicht in die Aufraeum-Schubladen",
+      "dopplung|widerspruch|straffung" not in auf9)
+
+# Gegenrichtung: OHNE Anweisung bleibt alles exakt wie bisher.
+_, prov9b = lauf({"geaendert": False}, ["anweisung:style.md"])
+auf9b = erstes(prov9b.auftraege, vorgabe="")
+check("ohne Anweisung gilt weiterhin der Aufraeum-Auftrag",
+      "KEINE Aussage hinzufuegen" in auf9b and "ANWEISUNG DES ADMINISTRATORS" not in auf9b)
+check("ohne Anweisung bleibt das alte Antwortformat",
+      "dopplung|widerspruch|straffung" in auf9b)
+
+# Der Schluesselpaar-Hinweis ist eine AUFRAEUM-Aufgabe - im Anweisungs-Modus
+# waere er eine zweite, nicht bestellte Vorgabe.
+paar_json = json.dumps({"strategie_a_b": 1, "strategie_b_a": 2})
+check("Schluesselpaar-Hinweis: im Aufraeum-Modus vorhanden",
+      "namensaehnlich" in wa._auftrag_bauen("gedaechtnis", paar_json, "ffffffff").lower())
+check("⚠ im Anweisungs-Modus FEHLT er",
+      "namensaehnlich" not in wa._auftrag_bauen(
+          "gedaechtnis", paar_json, "ffffffff", anweisung="Zaehle die Eintraege.").lower())
+check("die Formatregel fuer Gedaechtnis bleibt trotzdem erhalten",
+      "JSON" in wa._auftrag_bauen("gedaechtnis", paar_json, "ffffffff",
+                                  anweisung="Zaehle die Eintraege."))
+
+# ⚠ ZU LANG WIRD ABGEWIESEN, NICHT GEKUERZT - und es laeuft KEIN Modellaufruf.
+prov9c = _Prov({"geaendert": False}, None)
+import backend.llm as _llm9
+_alt9 = _llm9.provider_fuer_lauf
+_llm9.provider_fuer_lauf = lambda *a, **k: (prov9c, "testmodell")
+try:
+    erg9c = asyncio.run(wa.analysiere(["anweisung:style.md"], user="p",
+                                      anweisung="x" * (wa.MAX_ANWEISUNG + 1)))
+finally:
+    _llm9.provider_fuer_lauf = _alt9
+check("eine zu lange Anweisung wird abgewiesen", erg9c.get("ok") is False)
+check("die Absage nennt die Grenze", str(wa.MAX_ANWEISUNG) in str(erg9c.get("error") or ""))
+check("⚠ und es wurde gar nicht erst gefragt", prov9c.auftraege == [])
+
+# ⚠ DIE ANWEISUNG MUSS AUCH DEN BLOCKWEISEN WEG ERREICHEN. Er greift bei jeder
+# grossen Gedaechtnisdatei - ohne Durchreichen liefe die Vorgabe dort STILL ins
+# Leere, und der Lauf meldete brav "nichts zu aendern".
+(SAND / "memory_gross.json").write_text(
+    json.dumps({f"k{i}": {"v": "x" * 200} for i in range(30)}), encoding="utf-8")
+erg9d, prov9d = lauf_anw({"geaendert": False}, ["gedaechtnis:memory_gross.json"],
+                         "Zaehle die Eintraege und nenne mir die Zahl.")
+check("die grosse Datei laeuft wirklich blockweise (mehr als ein Aufruf)",
+      len(prov9d.auftraege) > 1)
+check("⚠ JEDER Block traegt die Anweisung",
+      bool(prov9d.auftraege) and all("ANWEISUNG DES ADMINISTRATORS" in a
+                                     for a in prov9d.auftraege))
+check("und der Aufraeum-Vorspann fehlt auch dort",
+      all("KEINE Aussage hinzufuegen" not in a for a in prov9d.auftraege))
+
+# Nebenbefund vom 2026-09-13: der Auftrag verlangte ein Feld "neu_objekt", das
+# KEIN Parser dieses Moduls liest. Ein Modell, das dem folgt, liefert keinen
+# NEU-Block - der Lauf meldete dann "nichts zu aendern", obwohl es etwas zu
+# aendern gab.
+# ⚠ GEMESSEN WIRD DER CODE, NICHT DIE BEGRUENDUNG. Der Kommentar an der
+# reparierten Stelle nennt den alten Feldnamen woertlich - er muss ihn nennen,
+# sonst ist nicht nachvollziehbar, was da behoben wurde. Ein Waechter, der
+# seine eigene Begruendung liest, prueft nichts (im Projekt vierzehnmal
+# bezahlt), also zuerst die Kommentare heraus.
+def _ohne_kommentare(quelle: str) -> str:
+    import io as _io, tokenize as _tk
+    raus = []
+    try:
+        for tok in _tk.generate_tokens(_io.StringIO(quelle).readline):
+            if tok.type != _tk.COMMENT:
+                raus.append(tok.string)
+    except Exception:                                         # noqa: BLE001
+        return quelle          # fail-open: lieber zu streng als blind
+    return "\n".join(raus)
+
+_Q_OHNE = _ohne_kommentare(QUELLE)
+check("Positivkontrolle: die Kommentare sind wirklich heraus",
+      "HIER STAND" in QUELLE and "HIER STAND" not in _Q_OHNE)
+check("⚠ der Auftrag verlangt kein Feld, das niemand liest (neu_objekt)",
+      "neu_objekt" not in wa._auftrag_bauen("gedaechtnis", "{}", "ffffffff")
+      and "neu_objekt" not in _Q_OHNE)
+
+# ⚠ KOPF SAGT "geaendert", BLOCK FEHLT - live gemessen (2026-09-13). Bisher
+# wurde das still zu "nichts zu aendern", waehrend die Begruendung daneben eine
+# Aenderung behauptete. Seit die Begruendung auch bei "nichts geaendert"
+# angezeigt wird, stuenden dort zwei Aussagen, die einander widersprechen.
+erg9e, _ = lauf({"geaendert": True, "begruendung": "Alle Zeilen umgeschrieben."},
+                ["anweisung:style.md"], inhalt=None)
+r9e = erstes(erg9e.get("ergebnisse") or [], vorgabe={}) or {}
+check("ohne NEU-Block gilt die Datei als unveraendert", r9e.get("geaendert") is False)
+check("⚠ und der misslungene Lauf wird BENANNT, nicht verschwiegen",
+      "nicht mitgeliefert" in (r9e.get("fehler") or ""))
+# Gegenrichtung: ein ehrliches "nichts zu aendern" ist KEIN Fehler.
+erg9f, _ = lauf({"geaendert": False, "begruendung": "Nichts gefunden."},
+                ["anweisung:style.md"], inhalt=None)
+r9f = erstes(erg9f.get("ergebnisse") or [], vorgabe={}) or {}
+check("ein ehrliches \"nichts zu aendern\" bleibt ohne Fehlermeldung",
+      r9f.get("geaendert") is False and not (r9f.get("fehler") or ""))
+
+print("\n\033[1m9b. Endpunkt und Client reichen die Anweisung durch\033[0m")
+_haupt = (REPO / "backend/main.py").read_text(encoding="utf-8")
+_ep = next((ast.get_source_segment(_haupt, n) for n in ast.walk(ast.parse(_haupt))
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and n.name == "cleanup_analyse"), "")
+check("der Endpunkt wurde gefunden", bool(_ep))
+check("er nimmt die Anweisung aus dem Rumpf", 'body.get("anweisung")' in _ep)
+check("und reicht sie an analysiere() durch", "anweisung=anweisung" in _ep)
+check("⚠ KEIN zweiter Endpunkt fuer denselben Vorgang",
+      _haupt.count('@app.post("/api/knowledge/cleanup/analyse")') == 1
+      and "cleanup_anweisung" not in _haupt.replace("knowledge_cleanup_anweisung", ""))
+check("der Lauf mit Anweisung steht im Audit (er erklaert spaetere Aenderungen)",
+      "knowledge_cleanup_anweisung" in _ep and "log_tool" in _ep)
+
+_js = (REPO / "frontend/js/knowledge.js").read_text(encoding="utf-8")
+check("der Client sendet das Feld", '"anweisung"' in _js or "anweisung }" in _js)
+check("⚠ der Analysieren-Knopf liest das Feld NICHT selbst aus",
+      "cleanupAnalysieren(anweisung = '')" in _js
+      and "cleanupAnalysieren()\"" in _js)
+check("es gibt einen eigenen Einstieg mit Anweisung", "cleanupMitAnweisung()" in _js)
+
 shutil.rmtree(SAND, ignore_errors=True)
 check("Sandkasten restlos entfernt", not SAND.exists())
 print("\n\033[1mX. Die Bilanz misst die OBERGRENZE, nicht den Lauf-Zuschnitt\033[0m")

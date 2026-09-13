@@ -8,7 +8,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
     <title>Jarvis Chat</title>
     <link rel="stylesheet" href="/static/css/theme.css?v=24">
-    <link rel="stylesheet" href="/static/css/chat.css?v=56">
+    <link rel="stylesheet" href="/static/css/chat.css?v=57">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=6">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=8">
@@ -92,6 +92,15 @@
                     title="Willkommens-Chat mit Beispiel-Prompts wieder anzeigen">Beispiel-Prompts</button>
         </div>
     </aside>
+    <!-- Ziehgriff: Breite der Verlaufsleiste. `role="separator"` + tabindex ist
+         die ARIA-Bauform fuer einen Fenster-Teiler; die Werte (aria-valuenow/
+         -min/-max) setzt chat.js beim Anwenden, damit die angesagte Zahl nicht
+         von der wirklichen Breite abweichen kann. -->
+    <div id="cs-resize" class="cs-resize" role="separator" aria-orientation="vertical"
+         tabindex="0"
+         data-i18n-title="chat.sidebar_resize" data-i18n-aria="chat.sidebar_resize"
+         title="Breite der Verlaufsleiste ändern (Doppelklick: Vorgabe)"
+         aria-label="Breite der Verlaufsleiste ändern"></div>
     <div id="chat-main" class="chat-main">
     <!-- Top Bar -->
     <header class="topbar">
@@ -395,7 +404,7 @@ sudo update-ca-certificates</code></pre>
 <script src="/static/js/dlkey.js?v=2"></script>
 <script src="/static/js/cpubar.js?v=1"></script>
 <script src="/static/js/syspackages.js?v=2"></script>
-<script src="/static/js/i18n.js?v=257"></script>
+<script src="/static/js/i18n.js?v=258"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
 <!-- Gemeinsame Chat-Helfer (escapeHtml, renderMarkdown, History, Edit-Workflow) -->
 <script src="/static/js/chatlib.js?v=19"></script>
@@ -408,7 +417,7 @@ sudo update-ca-certificates</code></pre>
 <script src="/static/js/profile_switcher.js?v=5"></script>
 <script src="/static/js/sessions.js?v=8"></script>
 <script src="/static/js/logo_home.js?v=1"></script>
-<script src="/static/js/chat.js?v=110"></script>
+<script src="/static/js/chat.js?v=111"></script>
 <!-- Interaktive Charts (```chartjs) – Chart.js lokal gevendort (CSP: kein CDN) -->
 <script src="/static/js/vendor/chart.umd.min.js?v=1"></script>
 <!-- Chart.js-Plugins (MIT). MUESSEN nach chart.umd.min.js kommen – ihre

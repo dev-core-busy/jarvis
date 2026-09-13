@@ -204,6 +204,14 @@ body {
     display: flex;
     flex-direction: row;
     height: 100dvh;
+    /* Breite der Verlaufsleiste. ⚠ SIE STEHT HIER UND NICHT AUF DER LEISTE
+       SELBST, und das ist der ganze Grund fuer die Variable: das JS setzt beim
+       Ziehen einen Inline-Style, und ein Inline-Style auf `.chat-sidebar` wuerde
+       die Einklapp-Regel `.chat-screen.sidebar-collapsed .chat-sidebar` schlagen
+       (Inline gewinnt gegen jede Klasse). Wer einmal gezogen haette, koennte die
+       Leiste danach nie wieder einklappen. Auf dem ELTERNTEIL gesetzt bleibt die
+       Kaskade auf der Leiste unangetastet. */
+    --cs-w: 240px;
 }
 .chat-main {
     display: flex;
@@ -215,8 +223,8 @@ body {
 
 /* ─── Verlaufs-Sidebar (benutzereigene Chat-Sitzungen) ───────────── */
 .chat-sidebar {
-    flex: 0 0 240px;
-    width: 240px;
+    flex: 0 0 var(--cs-w);
+    width: var(--cs-w);
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -337,6 +345,54 @@ body {
 }
 .chat-screen.sidebar-collapsed .cs-expand { display: inline-flex; }
 
+/* ─── Ziehgriff zwischen Verlaufsleiste und Chat ──────────────────
+   Er ist GESCHWISTER der Leiste, nicht ihr Kind: die Leiste traegt
+   `overflow-y: auto`, ein Griff darin wuerde beim Scrollen mitwandern.
+
+   Die sichtbare Linie ist der 1px-Strich in der Mitte (`::before`), die
+   klickbare Flaeche ist 6px breit – eine 1px-Trefferflaeche findet mit der
+   Maus niemand. `touch-action: none` ist bei Pointer-Events PFLICHT: ohne das
+   nimmt der Browser die Geste als Scrollen und der Griff bewegt sich nicht.  */
+.cs-resize {
+    flex: 0 0 6px;
+    align-self: stretch;
+    position: relative;
+    z-index: 5;
+    cursor: col-resize;
+    background: transparent;
+    touch-action: none;
+    /* Der Griff liegt 3px UEBER der Leiste, damit die Trefferflaeche die
+       Randlinie mittig fasst und rechts kein Spalt zum Chat entsteht. */
+    margin-left: -3px;
+}
+.cs-resize::before {
+    content: '';
+    position: absolute;
+    top: 0; bottom: 0; left: 50%;
+    width: 2px;
+    transform: translateX(-50%);
+    border-radius: 2px;
+    background: transparent;
+    transition: background .12s;
+}
+.cs-resize:hover::before,
+.cs-resize:focus-visible::before,
+.cs-resize.is-zieht::before { background: var(--accent); }
+/* :focus-visible, nicht :focus – sonst bliebe nach jedem Mausklick ein
+   Strich stehen. Der eigene Rahmen entfaellt, die Linie IST die Rueckmeldung. */
+.cs-resize:focus { outline: none; }
+.cs-resize:focus-visible { outline: none; }
+/* Eingeklappt gibt es nichts zu ziehen – ein Griff an einer 0px-Leiste
+   wuerde sie aufziehen und den Einklapp-Zustand unerklaerbar machen. */
+.chat-screen.sidebar-collapsed .cs-resize { display: none; }
+
+/* Waehrend des Ziehens: keine Textauswahl, und vor allem KEINE Transition.
+   `.chat-sidebar` animiert `flex-basis`/`width` fuers Einklappen – beim Ziehen
+   liefe die Leiste dem Zeiger sichtbar hinterher. Der Zeiger bleibt ausserdem
+   `col-resize`, auch wenn er beim schnellen Ziehen ueber den Chat rutscht. */
+body.cs-resizing { user-select: none; cursor: col-resize; }
+body.cs-resizing .chat-sidebar { transition: none; }
+
 /* LLM-Profilumschalter (Popup an der Status-Pill) */
 .llm-pop {
     position: fixed; z-index: 10050; min-width: 200px; max-width: 300px;
@@ -355,7 +411,13 @@ body {
 .llm-pop-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (max-width: 720px) {
-    .chat-sidebar { flex-basis: 168px; width: 168px; }
+    /* Nur die VORGABE, nicht die Leiste selbst: haette diese Regel weiter
+       `flex-basis` direkt gesetzt, gewaenne sie gegen einen gezogenen Wert
+       (gleiche Spezifitaet, spaeter in der Datei) und das Ziehen waere auf
+       schmalen Fenstern wirkungslos. Ein gezogener Wert steht inline auf dem
+       Screen und schlaegt diese Zeile; dass er nicht zu breit wird, haelt die
+       am FENSTER gerechnete Obergrenze in chat.js. */
+    .chat-screen { --cs-w: 168px; }
 }
 
 /* ─── Top Bar ────────────────────────────────────────────────── */

@@ -368,6 +368,7 @@
         const _csExp = $('cs-expand');   if (_csExp && !_csExp._wired) { _csExp._wired = true; _csExp.addEventListener('click', () => _setSidebarCollapsed(false)); }
         // Zuletzt gewählten Einklapp-Zustand wiederherstellen
         try { _setSidebarCollapsed(localStorage.getItem('jarvis_chat_sidebar_collapsed') === '1'); } catch (e) {}
+        _initSidebarResize();
         // Auto-Focus nur auf Geraeten mit Maus/Tastatur: auf Touch-Geraeten oeffnet
         // focus() die Bildschirmtastatur und Chrome schiebt die Titelleiste aus dem Bild.
         if (!window.matchMedia('(pointer: coarse)').matches) msgInput.focus();
@@ -2641,6 +2642,137 @@
         const screen = document.getElementById('chat-screen');
         if (screen) screen.classList.toggle('sidebar-collapsed', !!collapsed);
         try { localStorage.setItem('jarvis_chat_sidebar_collapsed', collapsed ? '1' : '0'); } catch (e) {}
+    }
+
+    /* ─── Breite der Verlaufsleiste ziehen ────────────────────────────────
+       Gesetzt wird die CSS-Variable `--cs-w` auf `#chat-screen`, NIE ein
+       Inline-Style auf der Leiste: der schluege die Einklapp-Regel
+       (Inline gewinnt gegen jede Klasse), und wer einmal gezogen haette,
+       koennte die Leiste danach nicht mehr einklappen.                      */
+    const _CS_W_KEY  = 'jarvis_chat_sidebar_width';
+    const _CS_W_MIN  = 180;   // darunter quetscht der Kopf "+ Neuer Chat" und die zwei Knoepfe
+    const _CS_W_MAX  = 560;
+    const _CS_W_CHAT = 360;   // so viel bleibt dem Chat mindestens
+
+    // Obergrenze am AKTUELLEN Fenster. Ohne sie stuende eine einmal gezogene
+    // 560px-Leiste auf einem schmalen Laptop vor einem unbenutzbaren Chat –
+    // die Media-Query greift dort nicht mehr, weil der gezogene Wert inline
+    // auf dem Screen steht und gegen sie gewinnt.
+    function _csMax() {
+        return Math.max(_CS_W_MIN, Math.min(_CS_W_MAX, window.innerWidth - _CS_W_CHAT));
+    }
+    function _csGriff() { return document.getElementById('cs-resize'); }
+
+    /* ⚠ DIE AKTUELLE BREITE IST DER GESETZTE WERT, NICHT DER GEMESSENE.
+       `.chat-sidebar` animiert `width`/`flex-basis` (fuers Einklappen), und
+       waehrend einer laufenden Transition liefert getBoundingClientRect() den
+       ZWISCHENWERT. Wer davon ausgehend rechnet, verliert Schritte: in der
+       optischen Abnahme gemessen ergaben drei schnelle Pfeildrucke 256 statt
+       288 px, bei gedrueckt gehaltener Taste bewegte sich die Leiste kaum. */
+    function _csIstBreite() {
+        const screen = document.getElementById('chat-screen');
+        const n = parseInt(screen && screen.style.getPropertyValue('--cs-w'), 10);
+        if (Number.isFinite(n) && n > 0) return n;
+        const leiste = document.getElementById('chat-sidebar');   // noch nie gezogen
+        return leiste ? leiste.getBoundingClientRect().width : 240;
+    }
+
+    // px anwenden. `speichern=false` beim Nachziehen nach einer Fensteraenderung:
+    // ein kleineres Fenster darf den GEWUENSCHTEN Wert nicht ueberschreiben,
+    // sonst ist er nach einem Blick im geteilten Bildschirm dauerhaft weg.
+    function _csBreiteAnwenden(px, speichern) {
+        const screen = document.getElementById('chat-screen');
+        if (!screen) return null;
+        const w = Math.round(Math.max(_CS_W_MIN, Math.min(_csMax(), px)));
+        screen.style.setProperty('--cs-w', w + 'px');
+        const g = _csGriff();
+        if (g) {
+            g.setAttribute('aria-valuenow', String(w));
+            g.setAttribute('aria-valuemin', String(_CS_W_MIN));
+            g.setAttribute('aria-valuemax', String(_csMax()));
+        }
+        if (speichern) { try { localStorage.setItem(_CS_W_KEY, String(w)); } catch (e) {} }
+        return w;
+    }
+    // Zurueck auf die Vorgabe des Stylesheets: die Variable WEGNEHMEN, nicht
+    // auf 240 setzen – nur so gilt auf schmalen Fenstern wieder die Media-Query.
+    function _csBreiteZuruecksetzen() {
+        const screen = document.getElementById('chat-screen');
+        if (screen) screen.style.removeProperty('--cs-w');
+        try { localStorage.removeItem(_CS_W_KEY); } catch (e) {}
+        const g = _csGriff();
+        if (g) ['aria-valuenow', 'aria-valuemin', 'aria-valuemax'].forEach(a => g.removeAttribute(a));
+    }
+    function _csGespeicherteBreite() {
+        let roh = null;
+        try { roh = localStorage.getItem(_CS_W_KEY); } catch (e) {}
+        const n = parseInt(roh, 10);
+        return Number.isFinite(n) && n > 0 ? n : null;   // kaputter Wert = keine Angabe
+    }
+
+    function _initSidebarResize() {
+        const griff = _csGriff();
+        if (!griff || griff._wired) return;
+        griff._wired = true;
+
+        const gespeichert = _csGespeicherteBreite();
+        if (gespeichert !== null) _csBreiteAnwenden(gespeichert, false);
+
+        let startX = 0, startW = 0, aktiv = false;
+
+        griff.addEventListener('pointerdown', (e) => {
+            if (e.button !== undefined && e.button !== 0) return;   // nur die linke Taste
+            e.preventDefault();                     // sonst faengt der Browser eine Textauswahl an
+            aktiv = true;
+            startX = e.clientX;
+            startW = _csIstBreite();
+            griff.classList.add('is-zieht');
+            document.body.classList.add('cs-resizing');
+            // Pointer-Capture: die Bewegung bleibt beim Griff, auch wenn der
+            // Zeiger beim schnellen Ziehen laengst ueber dem Chat steht.
+            try { griff.setPointerCapture(e.pointerId); } catch (err) {}
+        });
+
+        griff.addEventListener('pointermove', (e) => {
+            if (!aktiv) return;
+            _csBreiteAnwenden(startW + (e.clientX - startX), false);
+        });
+
+        // Gespeichert wird ERST am Ende des Zuges – ein Schreibvorgang je
+        // Mausbewegung waere hunderte Zugriffe fuer einen einzigen Wert.
+        function ende(e) {
+            if (!aktiv) return;
+            aktiv = false;
+            griff.classList.remove('is-zieht');
+            document.body.classList.remove('cs-resizing');
+            try { griff.releasePointerCapture(e.pointerId); } catch (err) {}
+            _csBreiteAnwenden(_csIstBreite(), true);
+        }
+        griff.addEventListener('pointerup', ende);
+        griff.addEventListener('pointercancel', ende);
+
+        // Doppelklick stellt die Vorgabe wieder her – der Rueckweg, den man
+        // sonst nur durch pixelgenaues Zielen findet. Steht auch im title.
+        griff.addEventListener('dblclick', (e) => { e.preventDefault(); _csBreiteZuruecksetzen(); });
+
+        // Tastatur: ohne sie waere die Breite fuer jeden unerreichbar, der
+        // keine Maus benutzt. preventDefault ist Pflicht, sonst scrollt die Seite.
+        griff.addEventListener('keydown', (e) => {
+            const jetzt = _csIstBreite();
+            const schritt = e.shiftKey ? 48 : 16;
+            if (e.key === 'ArrowLeft')       { e.preventDefault(); _csBreiteAnwenden(jetzt - schritt, true); }
+            else if (e.key === 'ArrowRight') { e.preventDefault(); _csBreiteAnwenden(jetzt + schritt, true); }
+            else if (e.key === 'Home')       { e.preventDefault(); _csBreiteAnwenden(_CS_W_MIN, true); }
+            else if (e.key === 'End')        { e.preventDefault(); _csBreiteAnwenden(_csMax(), true); }
+            else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); _csBreiteZuruecksetzen(); }
+        });
+
+        // Kleineres Fenster: den gespeicherten Wunsch neu einpassen, ihn dabei
+        // aber NICHT ueberschreiben (siehe `speichern=false` oben).
+        window.addEventListener('resize', () => {
+            const w = _csGespeicherteBreite();
+            if (w !== null) _csBreiteAnwenden(w, false);
+        });
     }
     window._chatNewSession = _newSession;
 

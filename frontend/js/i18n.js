@@ -841,7 +841,7 @@ const _I18N = {
         // Aufgabenfenster nicht zu beurteilen.
         'xl.write_failed_hint':         'Einzelheiten stehen unter „Einstellungen → Diagnose-Protokoll".',
         'xl.log':                       'Diagnose-Protokoll',
-        'xl.log_note':                  'Enthält Fehlermeldungen von Excel samt der Anweisung, die gescheitert ist – Zelladressen und Formate, aber keine Zellinhalte.',
+        'xl.log_note':                  'Enthält Fehlermeldungen von Excel samt der Anweisung, die gescheitert ist. Excel gibt dabei einen gekürzten Ausschnitt dieser Anweisung heraus – darin können Werte aus den betroffenen Zellen stehen. Vor dem Weitergeben kurz durchsehen.',
         'xl.log_empty':                 'Noch nichts protokolliert.',
         'xl.log_copy':                  'Protokoll kopieren',
         'xl.log_clear':                 'Leeren',
@@ -4237,7 +4237,7 @@ const _I18N = {
         'xl.applying':                  'Applying automatically ...',
         'xl.write_failed_hint':         'Details are under "Settings -> Diagnostic log".',
         'xl.log':                       'Diagnostic log',
-        'xl.log_note':                  'Contains error messages from Excel including the statement that failed - cell addresses and formats, but no cell contents.',
+        'xl.log_note':                  'Contains error messages from Excel including the statement that failed. Excel returns a shortened excerpt of that statement - it may contain values from the cells involved. Please review before passing it on.',
         'xl.log_empty':                 'Nothing logged yet.',
         'xl.log_copy':                  'Copy log',
         'xl.log_clear':                 'Clear',

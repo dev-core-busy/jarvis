@@ -105,9 +105,16 @@
        Arbeitsplatz (WebView2) kommt niemand an die Entwicklerkonsole – der
        Bediener kann nur weitergeben, was das Fenster ihm ZEIGT.
 
-       WAS NICHT HINEINGEHOERT: Zellinhalte. Das Protokoll wird per Knopf
-       kopiert und weitergeschickt; es haelt deshalb nur ADRESSE, Feldart,
-       Zahlenformat und Groessen fest – nie einen Wert und nie eine Formel. */
+       WAS DIESE DATEI SELBST SCHREIBT, TRAEGT KEINE INHALTE: das Protokoll
+       wird per Knopf kopiert und weitergeschickt, `eintragKurz()` haelt
+       deshalb nur ADRESSE, Feldart, Zahlenformat und Groessen fest.
+       **Die Fehlermeldung von Excel ist die Ausnahme, und sie laesst sich
+       nicht vermeiden:** `debugInfo.fullStatement` lautet
+       `worksheet.getRange("G2").formulas = [["=E2*F2"]]` – die Anweisung
+       TRAEGT ihre Werte. Sie ist zugleich die einzige Angabe, die den Fehler
+       erklaert. Also: gedeckelt (`anweisungKurz`) und im Hinweistext der
+       Ansicht ausdruecklich benannt, statt eine Zusage zu geben, die der Code
+       nicht haelt. */
     var LOG_MAX = 60;
     var _log = [];
     function zeitstempel() {
@@ -121,6 +128,24 @@
             logZeichnen();
         } catch (e) { }
     }
+    /* ⚠ EINE OFFICE.JS-ANWEISUNG TRAEGT IHRE WERTE MIT.
+       `debugInfo.fullStatement` lautet nicht `range.formulas = …`, sondern
+       `worksheet.getRange("G2").formulas = [["=E2*F2"]]` – bei einem
+       Werte-Bereich steht dort die ganze Matrix. Zwei Folgen, und beide
+       zwingen zum Deckel: das Protokoll wird kopiert und WEITERGEGEBEN, und
+       eine Matrix mit tausend Zellen sprengt Ringpuffer und Anzeige.
+
+       Gekuerzt wird mit Ausweis – ein stiller Schnitt liesse den Leser
+       glauben, die Anweisung sei so kurz gewesen. Der Anfang bleibt stehen,
+       weil dort steht, WAS gesetzt wurde (Bereich und Eigenschaft); die Werte
+       kommen dahinter. */
+    var ANWEISUNG_MAX = 200;
+    function anweisungKurz(text) {
+        var s = String(text == null ? '' : text);
+        if (s.length <= ANWEISUNG_MAX) return s;
+        return s.slice(0, ANWEISUNG_MAX) +
+            ' …[' + (s.length - ANWEISUNG_MAX) + ' Zeichen gekürzt]';
+    }
     /* Zerlegt einen Office.js-Fehler in die Teile, die eine Diagnose tragen.
        `OfficeExtension.Error` traegt `code` und `debugInfo`; mit
        `extendedErrorLogging` steht dort auch die SCHEITERNDE Anweisung –
@@ -133,11 +158,15 @@
         var d = e.debugInfo;
         if (d) {
             if (d.errorLocation) t.push('errorLocation=' + d.errorLocation);
-            if (d.fullStatement) t.push('statement=' + d.fullStatement);
-            else if (d.statements) t.push('statements=' + [].concat(d.statements).join(' | '));
-            if (d.surroundingStatements) {
-                t.push('umgebung=' + [].concat(d.surroundingStatements).join(' | '));
+            if (d.fullStatement) t.push('statement=' + anweisungKurz(d.fullStatement));
+            else if (d.statements) {
+                t.push('statements=' + [].concat(d.statements)
+                    .map(anweisungKurz).join(' | '));
             }
+            // Die UMGEBUNG bleibt draussen: sie wiederholt die Anweisung und
+            // haengt beliebig viele weitere daran – bei einem Batch mit 200
+            // Eintraegen waere das Protokoll unlesbar, und jede dieser
+            // Anweisungen traegt wieder ihre Werte.
             if (d.innerError) t.push('innerError=' + (d.innerError.message || d.innerError));
         }
         if (e.traceMessages && e.traceMessages.length) {
@@ -1513,7 +1542,7 @@
                 s.getRange(adresse).select();
                 return ctx.sync();
             });
-        }).catch(function (e) { console.warn('[excel] Sprung:', e); });
+        }).catch(function (e) { protokoll('sprung', fehlerDetails(e)); });
     }
 
     function setzeLaeuft(an) {

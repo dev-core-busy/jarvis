@@ -1643,6 +1643,64 @@ pruefe(not excel_ask.ist_fehlerwert(12.5) and not excel_ask.ist_fehlerwert(None)
        "eine Zahl ist kein Fehlerwert")
 
 
+# ── 12l. Zahlenformate sind ENGLISCH – gemeldet 2026-09-09 ──────────────
+# Der Prompt gab bis dahin `TT.MM.JJJJ` und `0,0%` als Beispiele vor, also die
+# DEUTSCHE Schreibweise. Office.js `numberFormat` erwartet aber immer die
+# englische und uebersetzt NICHTS – anders als bei Formeln, wo Excel das selbst
+# tut. Im gemeldeten Fall schlug ein Vorschlag mit `TT.MM.JJJJ` beim Schreiben
+# fehl; im besten Fall zeigt die Spalte literal "TT.MM.JJJJ" statt des Datums.
+#
+# Die Lehre stand im Register ("OOXML-Formatcodes sind IMMER US-notiert") und
+# war an dieser Stelle nicht angewandt.
+_pr = excel_ask.rollen_prompt()
+# ⚠ DIE WARNUNG DARF DEN FALSCHEN CODE NENNEN – sonst kann sie nicht warnen.
+# Geprueft wird die EIGENSCHAFT: jedes Vorkommen eines deutschen Codes steht in
+# einem Satz, der ihn ausdruecklich als falsch kennzeichnet. Ein Waechter, der
+# den Negativ-Abschnitt mitliest, meldet einen Fehler, den es nicht gibt
+# (im Projekt beim WhatsApp-Prompt schon bezahlt).
+_negativ = ("Deutsche Codes", "NICHT übersetzt", "ergeben", "nicht erlaubt")
+_schlecht = []
+for _z in _pr.splitlines():
+    if "TT.MM.JJJJ" not in _z and "0,0%" not in _z:
+        continue
+    if not any(_n in _z for _n in _negativ):
+        _schlecht.append(_z.strip())
+pruefe(not _schlecht,
+       "deutsche Formatcodes stehen im Prompt NUR als Gegenbeispiel",
+       " | ".join(_schlecht))
+pruefe("dd.mm.yyyy" in _pr, "die Beispiele sind englisch geschrieben")
+pruefe(re.search(r"ENGLISCHER Schreibweise", _pr) is not None,
+       "und die Regel steht ausdruecklich da, nicht nur im Beispiel")
+# Positivkontrolle der Messmethode: ohne sie waere die Pruefung ueber einer
+# leeren Fundmenge trivial wahr.
+pruefe(any("TT.MM.JJJJ" in _z for _z in _pr.splitlines()),
+       "(Positivkontrolle: der Prompt WARNT ueberhaupt vor der deutschen Form)")
+
+# Zweite Haelfte: ein Prompt ist eine BITTE. Die Normierung haelt sie.
+_fn = excel_ask.format_normieren
+pruefe(_fn("TT.MM.JJJJ") == "DD.MM.YYYY", "TT.MM.JJJJ wird englisch",
+       repr(_fn("TT.MM.JJJJ")))
+pruefe(_fn("tt.mm.jjjj") == "dd.mm.yyyy", "auch klein geschrieben")
+pruefe(_fn("JJJJ-MM-TT") == "YYYY-MM-DD", "und in anderer Reihenfolge")
+# ⚠ DAS DEZIMALKOMMA WIRD NICHT ANGEFASST: in der englischen Form ist `,` das
+# TAUSENDERtrennzeichen, und `#,##0.00` ist voellig richtig. Wer dort pauschal
+# Komma zu Punkt macht, zerstoert das haeufigste Format ueberhaupt.
+pruefe(_fn("#,##0.00 €") == "#,##0.00 €",
+       "ein korrektes Waehrungsformat bleibt UNVERAENDERT", repr(_fn("#,##0.00 €")))
+pruefe(_fn("0.0%") == "0.0%" and _fn("hh:mm") == "hh:mm",
+       "englische Formate bleiben unveraendert")
+# Literale in Anfuehrungszeichen sind Einheiten, keine Platzhalter.
+pruefe(_fn('0" T"') == '0" T"', 'ein Literal "T" bleibt stehen (Tonnen, nicht Tag)',
+       repr(_fn('0" T"')))
+pruefe(_fn('#,##0" Jahre"') == '#,##0" Jahre"', "ebenso ein Literal mit J")
+# Die Normierung muss im WEG liegen, nicht nur als Funktion danebenstehen.
+_geprueft, _abgelehnt = excel_ask.aenderungen_pruefen(
+    [{"adresse": "A2:A32", "format": "TT.MM.JJJJ", "wert": 1}])
+pruefe(_geprueft and _geprueft[0].get("format") == "DD.MM.YYYY",
+       "und sie wird bei der Pruefung WIRKLICH angewandt",
+       repr(_geprueft))
+
+
 print("\n" + "=" * 52)
 print("Bestanden: %d / Fehlgeschlagen: %d" % (_ok, _fail))
 sys.exit(1 if _fail else 0)

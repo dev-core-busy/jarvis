@@ -48,7 +48,12 @@ BAUM = ast.parse(Q)
 # ── Die Funktionen SCHNEIDEN und WIRKLICH ausfuehren ─────────────────────
 # Der Import von backend.tools.knowledge zieht FAISS und
 # sentence-transformers mit - der Waechter soll ueberall laufen.
-NOETIG = {"_bounded_call", "_safe_exists", "_ordner_abgehaengt", "_nutzbare_ordner"}
+# ⚠ `_bewusst_getrennt` GEHOERT IN DEN SCHNITT: `_ordner_abgehaengt` ruft sie
+# seit 2026-09-13. Fehlt sie, stirbt der Lauf mit NameError – kein FAIL,
+# keine Bilanz, von "nicht gelaufen" nicht zu unterscheiden (genau so
+# passiert). Eine gepflegte Liste laesst immer die neueste Funktion fehlen.
+NOETIG = {"_bounded_call", "_safe_exists", "_ordner_abgehaengt",
+          "_nutzbare_ordner", "_bewusst_getrennt"}
 teile = [n for n in BAUM.body
          if isinstance(n, ast.FunctionDef) and n.name in NOETIG]
 gefunden = {n.name for n in teile}
@@ -62,8 +67,12 @@ import logging
 import threading
 import time
 
+# Die Mount-Konfiguration wird gestellt: `_bewusst_getrennt` liest sie ueber
+# `_get_skill_config`. Der Test setzt sie je Fall neu.
+_CFG = {"mounts": []}
 NS = {"os": os, "time": time, "threading": threading, "Path": Path,
-      "_log": logging.getLogger("test"), "_avail_down_until": {}}
+      "_log": logging.getLogger("test"), "_avail_down_until": {},
+      "_get_skill_config": lambda: _CFG}
 exec(compile(ast.Module(body=teile, type_ignores=[]), "<schnitt>", "exec"), NS)
 abgehaengt = NS["_ordner_abgehaengt"]
 nutzbar = NS["_nutzbare_ordner"]
@@ -188,5 +197,77 @@ check("sie nennt den GRUND als eigenen Platzhalter",
 
 import shutil
 shutil.rmtree(SAND, ignore_errors=True)
+print("\n\033[1m6. Absichtlich getrennt IST etwas anderes als ausgefallen\033[0m")
+# Vorgabe 2026-09-13: wer eine Freigabe bewusst trennt, will ihr Wissen nicht
+# mehr in der Suche haben. `auto_mount` ist die Willensaeusserung des
+# Benutzers - `umount_share` setzt sie auf False, `mount_share` auf True.
+#
+# ⚠ EIGENER ORDNER UND EIGENER INDEXSTAND. Der Abschnitt haette sonst am
+# Zustand der vorherigen gehangen: die loeschen `leer` zwischendurch, und
+# `_nutzbare_ordner` ueberspringt einen nicht existierenden Ordner voellig zu
+# Recht - die Pruefung meldete damit einen Fehler, den der Code nicht hat
+# (isoliert nachgestellt: dort ist er aufraeumbar). Auch der
+# Verfuegbarkeits-Cache wird geleert, den fuellen die Timeout-Faelle.
+NS["_avail_down_until"].clear()
+getrennt = SAND / "share_getrennt"
+getrennt.mkdir(parents=True, exist_ok=True)
+IDX6 = {str(getrennt / "onenote.one"): 1.0, str(voll / "handbuch.pdf"): 1.0}
+_mp = str(getrennt)
+
+_CFG["mounts"] = [{"mountpoint": _mp, "auto_mount": False}]
+check("ausdruecklich getrennt -> Index darf aufgeraeumt werden",
+      abgehaengt(getrennt, IDX6) is None)
+check("und der Ordner ist damit wieder aufraeumbar",
+      getrennt in nutzbar([getrennt, voll], IDX6, streng=True))
+
+_CFG["mounts"] = [{"mountpoint": _mp, "auto_mount": True}]
+check("verbunden gewuenscht, aber leer -> weiter GESCHUETZT",
+      abgehaengt(getrennt, IDX6) is not None)
+
+# ⚠ FAIL-SAFE: alles, was nicht NACHWEISLICH abgemeldet ist, bleibt geschuetzt.
+_CFG["mounts"] = [{"mountpoint": _mp}]
+check("Altbestand ohne auto_mount-Feld -> geschuetzt (nicht Falsyness pruefen)",
+      abgehaengt(getrennt, IDX6) is not None)
+
+_CFG["mounts"] = [{"mountpoint": _mp, "auto_mount": 0}]
+check("auto_mount als 0 zaehlt NICHT als abgemeldet (is False, nicht falsy)",
+      abgehaengt(getrennt, IDX6) is not None)
+
+_CFG["mounts"] = [{"mountpoint": str(voll), "auto_mount": False}]
+check("ein FREMDER Einhaengepunkt schuetzt diesen hier nicht weniger",
+      abgehaengt(getrennt, IDX6) is not None)
+
+_CFG["mounts"] = []
+check("gewoehnlicher Ordner (kein Einhaengepunkt) -> geschuetzt",
+      abgehaengt(getrennt, IDX6) is not None)
+
+_CFG["mounts"] = "kaputt"
+check("unbrauchbare Konfiguration -> geschuetzt (im Zweifel schuetzen)",
+      abgehaengt(getrennt, IDX6) is not None)
+
+# ⚠ EIN FALL, DER WIRKLICH WIRFT. `mounts = "kaputt"` reicht NICHT: ein String
+# ist iterierbar, `isinstance(m, dict)` ist je Zeichen False, die Funktion
+# laeuft sauber durch und erreicht den except-Zweig gar nicht. Die Gegenprobe
+# "fail-safe umgedreht" blieb damit gruen - sie traf einen Pfad, den der
+# Testfall nie nimmt.
+_orig_cfg = NS["_get_skill_config"]
+NS["_get_skill_config"] = lambda: (_ for _ in ()).throw(RuntimeError("Config kaputt"))
+try:
+    check("wirft die Konfiguration, bleibt der Ordner GESCHUETZT",
+          abgehaengt(getrennt, IDX6) is not None)
+finally:
+    NS["_get_skill_config"] = _orig_cfg
+
+# Positivkontrolle: der Schalter wirkt ueberhaupt in beide Richtungen - ohne sie
+# waere "geschuetzt" moeglicherweise nur deshalb wahr, weil der Ordner fehlt.
+_CFG["mounts"] = [{"mountpoint": _mp, "auto_mount": False}]
+_a = abgehaengt(getrennt, IDX6)
+_CFG["mounts"] = [{"mountpoint": _mp, "auto_mount": True}]
+_b = abgehaengt(getrennt, IDX6)
+check("Positivkontrolle: derselbe Ordner, zwei Ergebnisse je Schalter",
+      (_a is None) and (_b is not None))
+_CFG["mounts"] = []
+
+
 print(f"\n\033[1m{OK} OK, {FAIL} FAIL\033[0m")
 sys.exit(1 if FAIL else 0)

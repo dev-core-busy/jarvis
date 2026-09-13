@@ -176,6 +176,11 @@ _APP_DENY_REL = (
     # fremden Benutzer einen Zugang auf einen fremden Server unterzuschieben
     # (die Host-Freigabeliste prueft nur der Endpunkt, nicht das Dateisystem).
     "data/sap_accounts.json", "data/.sapkey",
+    # Kennwoerter der Netzwerk-Freigaben (backend/mount_credentials.py):
+    # `.mountkey` entschluesselt die `password_enc`-Felder in settings.json.
+    # Die Ablage selbst steht weiter unten ohnehin drin; der SCHLUESSEL
+    # ist die zweite Haelfte – einer ohne den anderen ist nutzlos.
+    "data/.mountkey",
     # Persoenliche Jira-Zugaenge (backend/jira_accounts.py): dieselbe Bauart und
     # dieselbe Begruendung wie bei SAP – `jira_accounts.json` + `.jirakey` sind
     # zusammen der KLARTEXT-Token jedes hinterlegten Jira-Benutzers. Ein
@@ -257,7 +262,8 @@ PRIVATE_FILE_MODE = 0o640
 # Delegations-Schluessel wird dauerhaft angezeigt und liegt deshalb im Klartext
 # darin – wer ihn liest, kann Codeauftraege unter fremder Kennung starten.
 PRIVATE_FILES_STRENG = ("data/.mailkey", "data/.sapkey", "data/.jirakey",
-                        "data/.vemaskey", "data/claude_subagent.json")
+                        "data/.vemaskey", "data/.mountkey",
+                        "data/claude_subagent.json")
 PRIVATE_FILE_MODE_STRENG = 0o600
 
 
@@ -521,6 +527,9 @@ SHELL_SECRET_PATHS = re.compile(
     # Dasselbe fuer VEMAS: vemas_accounts.json + .vemaskey ergeben die
     # Klartext-Kennwoerter der VEMAS-Benutzer.
     r'vemas_accounts\.json\b|\.vemaskey\b|'
+    # Kennwoerter der Netzwerk-Freigaben: .mountkey entschluesselt die
+    # password_enc-Felder in settings.json (das ohnehin gesperrt ist).
+    r'\.mountkey\b|'
     # Short Tracks: fremde Dump-Prompts samt Werkzeug-Zuschnitt (beschreibbar
     # waere das ein Dump mit `shell` unter fremder Kennung) und die
     # Ergebnistexte fremder Laeufe.

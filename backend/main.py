@@ -17924,6 +17924,39 @@ async def knowledge_assignments_set(request: Request, user: str = Depends(requir
 _MOUNT_BASE = Path("/mnt/jarvis-kb")
 
 
+def _mc_kennwort(m: dict) -> str:
+    """Klartext-Kennwort einer Freigabe fuer den Broker-Aufruf.
+
+    ⚠ FAIL-SAFE MIT KLARTEXT-MELDUNG: laesst sich das Kennwort nicht
+    entschluesseln (Schluesseldatei fehlt nach einem Restore), wird KEIN leerer
+    String stillschweigend weitergereicht – der Mount scheiterte sonst mit
+    "Berechtigung verweigert", und niemand kaeme auf die Schluesseldatei. Der
+    Grund steht im Journal, und der Mount laeuft als Gast weiter bzw. schlaegt
+    mit der Meldung des Systems fehl.
+    """
+    try:
+        from backend import mount_credentials as _mc
+        return _mc.kennwort_aus(m)
+    except Exception as e:  # noqa: BLE001
+        print(f"[Freigaben] Kennwort nicht lesbar: {e}", flush=True)
+        return ""
+
+
+def _mc_hat_kennwort(m: dict) -> bool:
+    """Ist ein Kennwort hinterlegt? Ohne es zu entschluesseln.
+
+    Die Antwort geht als `has_password` an die Oberflaeche (Sterne-Platzhalter)
+    – sie darf deshalb NIE den Schluessel brauchen: sonst zeigte die Liste nach
+    einem Restore "kein Kennwort", obwohl eines gespeichert ist, und der
+    naechste Bearbeiten-Klick loeschte es.
+    """
+    try:
+        from backend import mount_credentials as _mc
+        return _mc.hat_kennwort(m)
+    except Exception:  # noqa: BLE001
+        return bool(str((m or {}).get("password") or "").strip())
+
+
 def _get_mounts_config() -> list:
     try:
         states = config.get_skill_states()
@@ -18049,12 +18082,28 @@ def _mounts_migrieren(mounts: list) -> bool:
     Idempotent und aus ``_get_mounts_config()`` gerufen, damit es AUCH im
     Autostart-Pfad greift. Es wird nur geschrieben, wenn wirklich etwas fehlt –
     danach nie wieder.
+
+    Seit 2026-09-13 zieht sie zusaetzlich Klartext-Kennwoerter in die
+    verschluesselte Ablage um (``data/.mountkey``). Hier und nicht in einem
+    eigenen Startup-Hook, weil DIESE Funktion an der einzigen Stelle haengt,
+    die die Freigabenliste liest – damit greift der Umzug auch im
+    Autostart-Pfad und bei jedem kuenftigen Aufrufer, ohne dass jemand daran
+    denken muss.
     """
     geaendert = False
     for i, m in enumerate(mounts):
         if isinstance(m, dict) and not str(m.get("mountpoint") or "").strip():
             m["mountpoint"] = str(_MOUNT_BASE / f"share_{i}")
             geaendert = True
+    try:
+        from backend import mount_credentials as _mc
+        n = _mc.migriere(mounts)
+        if n:
+            geaendert = True
+            print(f"[Freigaben] {n} Kennwort/Kennwoerter verschluesselt abgelegt "
+                  f"(data/.mountkey)", flush=True)
+    except Exception as e:  # noqa: BLE001 – darf die Freigabenliste nie kippen
+        print(f"[Freigaben] Kennwort-Umzug uebersprungen: {e}", flush=True)
     return geaendert
 
 
@@ -18433,7 +18482,7 @@ async def list_mounts(user: str = Depends(require_knowledge_editor)):
             # selbst wird nie herausgegeben. Ohne diese Angabe kann die
             # Oberflaeche nicht zwischen "kein Kennwort" und "eines ist
             # gespeichert, Feld leer lassen" unterscheiden.
-            "has_password": bool(str(m.get("password") or "").strip()),
+            "has_password": _mc_hat_kennwort(m),
         })
     return JSONResponse(result)
 
@@ -18458,13 +18507,16 @@ async def add_mount(request: Request, user: str = Depends(require_knowledge_edit
     # dem Listenindex abgeleitet (siehe _mount_path). Nach einem Loeschen aus
     # der Mitte ist "share_<len>" womoeglich schon belegt.
     mp = _freier_mountpunkt(mounts)
+    from backend import mount_credentials as _mc
     mount_entry = {
         "type": mount_type,
         "source": source,
         "username": data.get("username", ""),
-        "password": data.get("password", ""),
         "mountpoint": str(mp),
     }
+    # Kennwort verschluesselt (data/.mountkey) – bis 2026-09-13 stand es im
+    # Klartext in settings.json, als einziger Zugang ohne Verschluesselung.
+    _mc.setze_kennwort(mount_entry, data.get("password", ""))
     mounts.append(mount_entry)
     _save_mounts_config(mounts)
 
@@ -18542,13 +18594,29 @@ async def update_mount(idx: int, request: Request, user: str = Depends(require_k
     # ⚠ Der Einhaengepunkt wird UEBERNOMMEN, nicht neu vergeben: er steht in
     # der Wissens-Ordnerliste (`folders`). Ein neuer Pfad beim Bearbeiten
     # wuerde die Freigabe dort stillschweigend abkoppeln.
-    mounts[idx] = {
+    from backend import mount_credentials as _mc
+    _alt = mounts[idx] if isinstance(mounts[idx], dict) else {}
+    _neu = {
         "type": data.get("type", "smb"),
         "source": source,
         "username": data.get("username", ""),
-        "password": data.get("password", ""),
         "mountpoint": str(mp),
+        # auto_mount gehoert zum Zustand der Freigabe, nicht zum Formular:
+        # ohne diese Zeile setzte jedes Bearbeiten sie auf die Vorgabe zurueck.
+        **({"auto_mount": _alt["auto_mount"]} if "auto_mount" in _alt else {}),
     }
+    # ⚠ LEERES KENNWORTFELD HEISST "UNVERAENDERT" – und das war bis 2026-09-13
+    # NICHT implementiert. Der Rumpf setzte `"password": data.get("password","")`
+    # und LOESCHTE damit das Kennwort, sobald jemand nur die Adresse korrigierte.
+    # Der Platzhalter im Formular verspricht seit jeher das Gegenteil ("leer
+    # lassen = unveraendert"), und im Client stand der Kommentar "leer = wird im
+    # Backend nicht geaendert WENN WIR DAS SO IMPLEMENTIEREN". Dieselbe Klasse
+    # wie der Benutzername-Verlust vom 2026-09-04, eine Zeile weiter.
+    if str(data.get("password") or ""):
+        _mc.setze_kennwort(_neu, data["password"])
+    else:
+        _mc.uebernehme_kennwort(_neu, _alt)
+    mounts[idx] = _neu
     _save_mounts_config(mounts)
     return JSONResponse({"ok": True})
 
@@ -18753,7 +18821,7 @@ async def mount_share(idx: int, user: str = Depends(require_knowledge_editor)):
         "source": m["source"],
         "mountpoint": str(mp),
         "username": m.get("username", ""),
-        "password": m.get("password", ""),
+        "password": _mc_kennwort(m),
     }, user=user, timeout=60)
     if not result.get("ok"):
         text = _mount_fehler_deuten(result, mount_type, m.get("source", ""))
@@ -21796,7 +21864,7 @@ async def startup():
                     "source": source,
                     "mountpoint": str(mp),
                     "username": m.get("username", ""),
-                    "password": m.get("password", ""),
+                    "password": _mc_kennwort(m),
                 }, user="system", timeout=60)
                 if result.get("ok"):
                     print(f"[knowledge] Auto-Mount: {source} → {mp}", flush=True)

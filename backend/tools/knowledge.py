@@ -758,6 +758,36 @@ def _bounded_call(fn, timeout: float, default):
     return box["val"]
 
 
+def _bewusst_getrennt(ordner) -> bool:
+    """Hat der Benutzer diesen Einhaengepunkt AUSDRUECKLICH getrennt?
+
+    Unterscheidet "Freigabe ausgefallen" von "Freigabe abgemeldet" – zwei
+    Lagen, die auf der Platte identisch aussehen (ein leeres Verzeichnis) und
+    entgegengesetzte Behandlung verlangen. Das Signal ist nicht geraten,
+    sondern gesetzt: `umount_share` schreibt `auto_mount = False`,
+    `mount_share` schreibt True.
+
+    ⚠ FAIL-SAFE IN DIE SCHUETZENDE RICHTUNG. `True` nur, wenn der Ordner
+    NACHWEISLICH ein konfigurierter Einhaengepunkt mit `auto_mount: False`
+    ist. Alles andere – ein gewoehnlicher Ordner, ein ausgehaengter
+    USB-Datentraeger, eine unlesbare Konfiguration – bleibt geschuetzt.
+    Geprueft wird `is False`, NICHT auf Falsyness: ein FEHLENDES Feld bedeutet
+    laut `mount_share` "true" (so liest es auch `/api/knowledge/mounts`), und
+    ein Altbestand ohne das Feld darf nicht als abgemeldet gelten.
+    """
+    try:
+        ziel = str(Path(ordner).resolve())
+        for m in (_get_skill_config().get("mounts") or []):
+            if not isinstance(m, dict) or m.get("auto_mount") is not False:
+                continue
+            mp = m.get("mountpoint")
+            if mp and str(Path(mp).resolve()) == ziel:
+                return True
+    except Exception:  # noqa: BLE001 – im Zweifel schuetzen
+        return False
+    return False
+
+
 def _ordner_abgehaengt(ordner, indexed) -> str | None:
     """Sieht der Ordner aus wie eine ABGEHAENGTE Netzfreigabe?
 
@@ -779,15 +809,25 @@ def _ordner_abgehaengt(ordner, indexed) -> str | None:
     genauso den ausgehaengten USB-Datentraeger, den umbenannten Ordner und die
     Freigabe, die wegen fehlender Rechte leer erscheint.
 
-    Preis, ausdruecklich: wer einen Wissensordner ABSICHTLICH leert und ihn
-    konfiguriert laesst, behaelt verwaiste Eintraege im Index. Das ist die
-    harmlosere Halbfehlerstellung - ein Treffer auf eine geloeschte Datei ist
-    aergerlich, ein still verschwundener Wissensbestand ist teuer. Der Fall
-    wird protokolliert, damit er ueberhaupt bemerkbar ist.
+    ⚠ SEIT 2026-09-13 GIBT ES EINE AUSNAHME, und sie loest den frueher hier
+    benannten Preis ein: hat der Benutzer die Freigabe AUSDRUECKLICH getrennt,
+    wird aufgeraeumt. Das ist keine Vermutung, sondern seine Willensaeusserung -
+    `umount_share` setzt `auto_mount = False` ("manuelle Trennung
+    respektieren"), `mount_share` setzt es auf True. Der Docstring-Satz "nicht
+    die Konfiguration befragen" gilt weiter fuer die Frage OB abgehaengt; ob es
+    ABSICHT war, kann nur die Konfiguration beantworten.
+
+    Rest-Preis: wer einen gewoehnlichen Wissensordner absichtlich leert (kein
+    Einhaengepunkt, also kein `auto_mount`), behaelt weiter verwaiste Eintraege.
+    Das bleibt die harmlosere Halbfehlerstellung - ein Treffer auf eine
+    geloeschte Datei ist aergerlich, ein still verschwundener Wissensbestand
+    ist teuer. Der Fall wird protokolliert, damit er bemerkbar ist.
     """
     praefix = str(ordner).rstrip(os.sep) + os.sep
     if not any(p.startswith(praefix) for p in indexed):
         return None           # nichts im Index -> es ist nichts zu verlieren
+    if _bewusst_getrennt(ordner):
+        return None           # ausdruecklich getrennt -> aufraeumen ist gewollt
     # ⚠ `is None` UND `len() == 0` sind ZWEI Befunde, nicht einer: "nicht
     # lesbar" und "leer" verlangen vom Administrator verschiedene Handlungen.
     # Eine Meldung "der Ordner ist leer" bei einem Rechteproblem schickt ihn

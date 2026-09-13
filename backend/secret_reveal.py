@@ -104,7 +104,16 @@ def mount(kennung: str) -> tuple[str, str]:
               .get("config", {}) or {}).get("mounts") or []
     if idx < 0 or idx >= len(mounts):
         return "", "Diese Freigabe gibt es nicht."
-    wert = str((mounts[idx] or {}).get("password") or "")
+    # Seit 2026-09-13 liegt das Kennwort verschluesselt (data/.mountkey).
+    # `kennwort_aus` liest beide Formen – ein Altbestand im Klartext bleibt
+    # lesbar, bis die Migration ihn umgezogen hat.
+    from backend import mount_credentials as _mc
+    try:
+        wert = _mc.kennwort_aus(mounts[idx] or {})
+    except Exception as e:  # noqa: BLE001
+        # Der GRUND gehoert an den Benutzer: "kein Kennwort hinterlegt" waere
+        # hier die falsche Auskunft – es ist eines da, nur nicht lesbar.
+        return "", str(e)
     if not wert:
         return "", "Fuer diese Freigabe ist kein Kennwort hinterlegt."
     return wert, ""

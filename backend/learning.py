@@ -1,7 +1,7 @@
 """Jarvis Learning System – Automatisches Lernen aus Konversationen.
 
 Nach jeder Konversation werden faktische Erkenntnisse aus Tool-Ergebnissen
-extrahiert und sofort in der Wissensdatenbank (FAISS) indexiert.
+extrahiert und als Markdown-Notiz unter data/erfahrung/ abgelegt.
 
 Kern-Prinzip: Lernen bedeutet, etwas NACHHER BESSER ODER RICHTIGER zu machen
 als VORHER. Ein gespeicherter Fakt ist nur dann eine Lernerkenntnis, wenn
@@ -14,12 +14,25 @@ Anti-Halluzinations-Schutz:
 - LLM-Prompt prueft jeden Fakt am Verbesserungs-Kriterium: "Hilft das in Zukunft?"
 - Leere / "NICHTS"-Antworten werden still verworfen.
 
+WO DAS LANDET – UND WARUM NICHT IN DER WISSENSDATENBANK (Vorgabe 2026-09-13):
+Diese Notizen sind VERFAHRENSwissen des Agenten ueber seine eigene Umgebung
+(Feldzuordnungen, Namenskonventionen, Shell-Beschraenkungen) – keine
+Kundendokumentation. Sie lagen bis 2026-09-13 unter data/knowledge/learned/,
+also INNERHALB eines Wissensordners, und wurden damit in dieselbe Vektor-DB
+indiziert wie Handbuecher und Kundenunterlagen. Dort trugen sie die
+Benutzerfrage als Ueberschrift und waren fuer genau diese Frage der perfekte
+semantische Treffer – unabhaengig vom Inhalt. Gegengehalten wurde mit einer
+Ranking-Abwertung (LEARNED_PENALTY); die ist ein Konstrukt, das bei jeder
+kuenftigen Durchsicht mitgeprueft werden muss und irgendwann still ausfaellt.
+Der Ordner liegt deshalb AUSSERHALB jedes Wissensordners: was nicht in der
+Ordnerliste steht, kann nicht hineinrutschen – keine Ausnahme, kein Gewicht,
+kein Filter. `_all_files()` sieht ihn gar nicht erst.
+
 Architektur:
 - learn_from_conversation() wird als asyncio.Task (fire-and-forget) aufgerufen.
-- Schreibt Markdown-Datei nach data/knowledge/learned/YYYY-MM/conv_<ts>_<kennung>.md
+- Schreibt Markdown-Datei nach data/erfahrung/YYYY-MM/conv_<ts>_<kennung>.md
   (die Kennung ist der Hash der Aufgabe – daran erkennt der naechste Lauf,
    dass dieselbe Aufgabe schon gelernt wurde, siehe `bereits_gelernt`)
-- Indexiert die Datei sofort in FAISS (kein Warten auf naechsten knowledge_search).
 - Fehler sind non-critical und werden nur geloggt.
 """
 
@@ -33,7 +46,41 @@ from pathlib import Path
 _log = logging.getLogger("jarvis.learning")
 
 PROJECT_ROOT = Path(__file__).parent.parent
-LEARNED_DIR = PROJECT_ROOT / "data" / "knowledge" / "learned"
+# DIE EINE QUELLE fuer den Ort des Erfahrungswissens. Jedes andere Modul
+# IMPORTIERT sie – ein nachgebauter Pfad (es gab drei davon) laeuft beim
+# naechsten Umzug auseinander, und die vergessene Stelle meldet sich nicht:
+# sie schreibt bzw. sucht nur an einem Ort, den niemand mehr liest.
+# ⚠ DIESER PFAD DARF NIE UNTER EINEM WISSENSORDNER LIEGEN – sonst indiziert
+# `_all_files()` ihn wieder mit (Waechter: tests/test_erfahrung_getrennt.py).
+LEARNED_DIR = PROJECT_ROOT / "data" / "erfahrung"
+
+# Der fruehere Ort. Wird nur noch von der einmaligen Migration gelesen.
+_ALTER_ORT = PROJECT_ROOT / "data" / "knowledge" / "learned"
+
+# Dateinamens-Praefix der Notizen (Vorgabe 2026-09-13: "conv_" -> "auto_lerned_").
+# ⚠ AUCH DAS IST EINE QUELLE, KEINE KONVENTION: der Name stand an acht Stellen
+# hart im Code (learning, knowledge_compactor, main, deploy-Skript). Wer ihn
+# aendert und eine Stelle vergisst, bekommt keinen Fehler – nur eine Suche, die
+# nichts mehr findet: die Dedup-Erkennung haelt jede Aufgabe fuer neu, die
+# Statistik zaehlt 0, und die Verdichtung sammelt nichts mehr ein.
+NOTIZ_PRAEFIX = "auto_lerned_"
+
+# Praefixe frueherer Fassungen – ausschliesslich fuer die Umbenennung beim
+# Umzug. Ein kuenftiger Wechsel traegt hier das dann alte Praefix nach.
+_ALTE_PRAEFIXE = ("conv_",)
+
+# Verfahrensdateien, die bis 2026-09-13 AUS DEM REPO in data/knowledge/ lagen
+# und damit in der Vektor-DB standen. Sie sind dort entfernt (.gitignore +
+# git rm); auf einem Server verschwinden die DATEIEN beim naechsten Pull.
+# ⚠ IHRE CHUNKS BLEIBEN DAVON UNBERUEHRT: der Suchpfad raeumt bewusst nichts
+# auf (ein kurz nicht erreichbares Netzlaufwerk wuerde sonst seinen ganzen
+# Share verlieren), und der Neuaufbau laeuft nur auf Knopfdruck. Bis dahin
+# lieferte die Suche Treffer aus Dateien, die es nicht mehr gibt.
+_REPO_VERFAHRENSDATEIEN = (
+    "browser_automation.md",   # byte-identisch mit der gleichnamigen Instruktion
+    "projektinfo.md",          # veraltete Zweitfassung (unaufgeloestes ${SERVER_IP})
+    "whatsapp_workflow.md",    # Kernregel steht in den Werkzeug-Beschreibungen
+)
 
 # Mindest-Tool-Ergebnisse (kein Lernen bei reinen Gespraechen ohne Tools)
 MIN_TOOL_OK_RESULTS = 1
@@ -140,8 +187,11 @@ def _hat_substanz(facts_text: str) -> bool:
 #   2. Es ist teilweise FALSCH: gemessen wurde "office_create_powerpoint
 #      erwartet fuer layout ausschliesslich abschnitt oder bild" - das ist ein
 #      Ausschnitt der Alias-Liste, nicht die Liste.
-#   3. Es fuellt den FAISS-Index und verdraengt bei jeder Wissenssuche echte
-#      Kundendokumentation (LEARNED_PENALTY daempft, entfernt aber nicht).
+#   3. Es blaeht die Notizen mit Angaben auf, die der Agent ohnehin hat.
+#      (Bis 2026-09-13 war Punkt 3 gravierender: die Notizen lagen im
+#       FAISS-Index und verdraengten dort echte Kundendokumentation. Seit dem
+#       Umzug nach data/erfahrung/ ist das vom Tisch - der Filter bleibt
+#       trotzdem, aus den Gruenden 1 und 2.)
 #
 # DIE REGEL WIRD ABGELEITET, NICHT GEPFLEGT: die Pfade kommen aus PROJECT_ROOT
 # (also aus der eigenen Installation), die Werkzeugnamen aus den Werkzeugen,
@@ -260,7 +310,7 @@ def bereits_gelernt(task: str) -> Path | None:
         return None
     grenze = time.time() - fenster * 86400
     try:
-        for p in LEARNED_DIR.rglob(f"conv_*_{kennung}.md"):
+        for p in LEARNED_DIR.rglob(f"{NOTIZ_PRAEFIX}*_{kennung}.md"):
             # Das Konsolidat traegt keine Aufgaben-Kennung und kann hier nicht
             # treffen; der Vollstaendigkeit halber bleibt es trotzdem aussen vor.
             if p.parent.name == "konsolidiert":
@@ -342,7 +392,7 @@ async def learn_from_conversation(
             _log.info("Lernen uebersprungen: nur sicherheitsrelevante/gefilterte Inhalte")
             return
 
-        # Fakten-Datei schreiben + sofort in FAISS indexieren
+        # Fakten-Datei schreiben (NICHT indizieren, siehe Modul-Kopf)
         await asyncio.to_thread(_save_and_index, task, facts_text)
 
     except asyncio.CancelledError:
@@ -431,7 +481,7 @@ async def _extract_facts_llm(
 
 
 def _save_and_index(task: str, facts_text: str) -> None:
-    """Schreibt Wissensdatei und indexiert sie sofort in FAISS.
+    """Schreibt die Erfahrungsnotiz nach LEARNED_DIR. Indiziert NICHT.
 
     Laeuft in einem Thread (via asyncio.to_thread).
     """
@@ -444,7 +494,7 @@ def _save_and_index(task: str, facts_text: str) -> None:
     ts = int(time.time())
     # Die Kennung im Dateinamen IST der Dedup-Speicher (siehe bereits_gelernt):
     # kein Indexfile daneben, das driften koennte.
-    filepath = month_dir / f"conv_{ts}_{task_kennung(task)}.md"
+    filepath = month_dir / f"{NOTIZ_PRAEFIX}{ts}_{task_kennung(task)}.md"
 
     # Task-Kurzname fuer Ueberschrift
     task_clean = re.sub(r'[^\w\s\-]', '', task[:80]).strip()
@@ -456,49 +506,201 @@ def _save_and_index(task: str, facts_text: str) -> None:
     )
 
     filepath.write_text(content, encoding="utf-8")
-    _log.info(f"Wissensdatei geschrieben: {filepath.name}")
+    _log.info(f"Erfahrungsnotiz geschrieben: {filepath.name}")
 
-    # Sofort in FAISS indexieren
-    _index_immediately(filepath, content)
+    # ⚠ HIER WIRD NICHT INDIZIERT, UND DAS IST DER ZWEITE HALBE FIX.
+    # Bis 2026-09-13 stand hier `_index_immediately(filepath, content)` – ein
+    # AKTIVER Weg in die Vektor-DB, unabhaengig vom Ordner-Scan. Den Ordner nur
+    # zu verschieben haette diesen Kanal OFFEN gelassen: `add_chunks_deferred`
+    # nimmt jeden Pfad entgegen, auch einen ausserhalb der Wissensordner. Die
+    # Chunks waeren suchbar gewesen und erst beim naechsten VOLL-Reindex als
+    # verwaist aufgefallen. Ebenso entfaellt die Zuordnung zur Gruppe "Erlernt":
+    # Wissensgruppen ordnen Dateien der Wissensdatenbank – hier gibt es nichts
+    # mehr zuzuordnen.
 
-    # Der Gruppe "Erlernt" zuordnen. Das geschah bisher NUR beim Oeffnen der
-    # Gruppenseite – bis dahin galt die Datei als "ungruppiert", und der
-    # Wissensgruppen-Filter lieferte je nach Vorgeschichte andere Ergebnisse.
+
+# ─── Umzug aus der Wissensdatenbank (einmalig, 2026-09-13) ───────────────────
+
+def _zielname(name: str) -> str:
+    """Dateiname mit aktuellem Praefix. Unbeteiligte Namen bleiben unangetastet.
+
+    ``feedback_*.md`` wird ABSICHTLICH nicht angefasst: das ist eine andere
+    Gattung (Benutzer-Bewertungen, geschrieben von main.py) mit anderem Aufbau.
+    Ein Verzeichnis kann mehrere Gattungen enthalten – wer ein Muster auf „alle
+    Dateien darin" anwendet, hat die Endung geprueft, nicht die Gattung.
+    """
+    for alt in _ALTE_PRAEFIXE:
+        if name.startswith(alt):
+            return NOTIZ_PRAEFIX + name[len(alt):]
+    return name
+
+
+def migriere_aus_wissensdatenbank() -> dict:
+    """Holt den Bestand aus ``data/knowledge/learned/`` nach ``data/erfahrung/``.
+
+    Drei Schritte, und alle drei sind noetig – der erste allein liesse die
+    Notizen weiter in der Vektor-DB stehen:
+      1. Dateien verschieben (der alte Ort liegt IN einem Wissensordner).
+      2. Die Chunks der alten Pfade aus dem Vektor-Index entfernen. Sonst
+         bleiben sie bis zum naechsten VOLL-Reindex suchbar – und der laeuft
+         nur auf Knopfdruck. Ein Suchlauf raeumt bewusst nichts auf
+         (siehe `_rebuild_vector_index`).
+      3. Die Wissensgruppen-Zuordnungen der alten Pfade entfernen, damit keine
+         Karteileichen in `.groups.json` zurueckbleiben.
+
+    Idempotent und fail-safe: gibt es den alten Ort nicht, passiert nichts und
+    es wird nichts protokolliert (eine Zeile bei jedem Start, die immer
+    dasselbe sagt, wird nach zwei Tagen nicht mehr gelesen). Jeder Schritt ist
+    einzeln abgesichert – ein fehlgeschlagenes Aufraeumen darf die bereits
+    verschobenen Dateien nicht zurueckdrehen.
+
+    ⚠ VERSCHOBEN, NICHT KOPIERT: zwei Staende derselben Notiz waeren genau der
+    Zustand, den der Umzug beseitigt – einer davon laege weiter im Index.
+    """
+    ergebnis = {"verschoben": 0, "umbenannt": 0, "chunks_entfernt": 0, "fehler": []}
+
+    import shutil
+
+    # (0) Notizen, die schon am neuen Ort liegen, aber noch das alte Praefix
+    # tragen. Das ist kein theoretischer Fall: wer nur den Ordner umzieht (von
+    # Hand, per Restore, per halbem Deploy), haette sonst Dateien, die
+    # `bereits_gelernt` und die Statistik nicht mehr finden – die Notiz liegt
+    # da, gilt aber als nicht vorhanden.
+    if LEARNED_DIR.exists():
+        try:
+            for datei in sorted(LEARNED_DIR.rglob("*.md")):
+                neuer = _zielname(datei.name)
+                if neuer == datei.name:
+                    continue
+                ziel = datei.with_name(neuer)
+                try:
+                    if ziel.exists():
+                        continue
+                    datei.rename(ziel)
+                    ergebnis["umbenannt"] += 1
+                except Exception as e:  # noqa: BLE001
+                    ergebnis["fehler"].append(f"{datei.name}: {e}")
+        except Exception as e:  # noqa: BLE001
+            ergebnis["fehler"].append(f"Umbenennen: {e}")
+
+    if not _ALTER_ORT.exists():
+        if ergebnis["umbenannt"]:
+            _log.info("Erfahrungsnotizen umbenannt: %d Datei(en) auf '%s'",
+                      ergebnis["umbenannt"], NOTIZ_PRAEFIX)
+        return ergebnis
+
+    alte_pfade: list[str] = []
     try:
-        from backend import knowledge_groups as kg
-        rel = str(filepath.relative_to(PROJECT_ROOT))
-        kg.auto_assign_system_files([rel])
-    except Exception as e:  # noqa: BLE001 – Lernen darf daran nicht scheitern
-        _log.debug(f"Gruppen-Zuordnung der Lernnotiz fehlgeschlagen: {e}")
+        for quelle in sorted(_ALTER_ORT.rglob("*")):
+            if not quelle.is_file():
+                continue
+            rel = quelle.relative_to(_ALTER_ORT)
+            # Verschieben UND umbenennen in einem Zug – zwei getrennte Laeufe
+            # haetten einen Zwischenzustand, in dem die Notiz am neuen Ort liegt
+            # und von keiner Suche gefunden wird.
+            ziel = LEARNED_DIR / rel.parent / _zielname(rel.name)
+            try:
+                ziel.parent.mkdir(parents=True, exist_ok=True)
+                if ziel.exists():
+                    # Teilmigration eines frueheren Laufs: der neue Ort gewinnt,
+                    # die alte Datei wird nur noch entfernt.
+                    quelle.unlink()
+                else:
+                    shutil.move(str(quelle), str(ziel))
+                alte_pfade.append(str(quelle))
+                ergebnis["verschoben"] += 1
+            except Exception as e:  # noqa: BLE001
+                ergebnis["fehler"].append(f"{rel}: {e}")
+    except Exception as e:  # noqa: BLE001
+        ergebnis["fehler"].append(f"Durchlauf: {e}")
+
+    # Leere Verzeichnisse des alten Ortes abraeumen – ein leerer Ordner unter
+    # data/knowledge/ ist harmlos, aber er laedt dazu ein, wieder etwas
+    # hineinzulegen.
+    if not ergebnis["fehler"]:
+        try:
+            shutil.rmtree(_ALTER_ORT, ignore_errors=True)
+        except Exception as e:  # noqa: BLE001
+            ergebnis["fehler"].append(f"Aufraeumen: {e}")
+
+    # Index: die alten Pfade sind jetzt verwaist.
+    if alte_pfade:
+        try:
+            from backend.tools.knowledge import _get_vector_store
+            vs = _get_vector_store()
+            if vs is not None:
+                ergebnis["chunks_entfernt"] = vs.remove_files(alte_pfade)
+        except Exception as e:  # noqa: BLE001
+            ergebnis["fehler"].append(f"Index: {e}")
+
+        # Wissensgruppen: Zuordnungen der alten Pfade entfernen.
+        try:
+            from backend import knowledge_groups as kg
+            rel_alt = []
+            for ap in alte_pfade:
+                try:
+                    rel_alt.append(str(Path(ap).relative_to(PROJECT_ROOT)))
+                except ValueError:
+                    pass
+            if rel_alt and hasattr(kg, "remove_assignments"):
+                kg.remove_assignments(rel_alt)
+        except Exception as e:  # noqa: BLE001
+            ergebnis["fehler"].append(f"Gruppen: {e}")
+
+    if ergebnis["verschoben"] or ergebnis["fehler"]:
+        _log.info(
+            "Erfahrungswissen umgezogen: %d Datei(en) nach %s (%d umbenannt), "
+            "%d Chunk(s) aus dem Vektor-Index entfernt%s",
+            ergebnis["verschoben"], LEARNED_DIR, ergebnis["umbenannt"],
+            ergebnis["chunks_entfernt"],
+            (" – FEHLER: " + "; ".join(ergebnis["fehler"])) if ergebnis["fehler"] else "",
+        )
+    return ergebnis
 
 
-def _index_immediately(filepath: Path, content: str) -> None:
-    """Indexiert eine neue Wissensdatei direkt in FAISS ohne Bulk-Rebuild."""
+def verfahrensdateien_aus_index_raeumen() -> dict:
+    """Chunks der ehemaligen Repo-Verfahrensdateien aus der Vektor-DB nehmen.
+
+    Gegenstueck zu `git rm` + .gitignore (Vorgabe 2026-09-13): auf einem Server
+    entfernt der naechste Pull die DATEIEN, ihre Chunks blieben aber bis zum
+    naechsten ausdruecklichen Neuaufbau im Index – die Suche lieferte also
+    Treffer aus Dateien, die es nicht mehr gibt.
+
+    ⚠ ES WIRD KEINE DATEI ANGEFASST. Liegt eine der drei noch auf der Platte
+    (Server ohne Pull, lokal geaenderte Fassung), bleibt sie unberuehrt und
+    ihre Chunks bleiben ebenfalls – sonst wuerde dieser Hook eine vorhandene
+    Datei stillschweigend unauffindbar machen. Geraeumt wird nur, was WEG ist.
+
+    Die Namensliste ist endlich und bekannt; eine allgemeine Regel „alles
+    aufraeumen, was nicht mehr existiert" waere hier gefaehrlich: genau daran
+    hat ein kurz nicht erreichbares Netzlaufwerk schon einmal seinen kompletten
+    Share aus dem Index verloren (siehe `_rebuild_vector_index`).
+    """
+    ergebnis = {"chunks_entfernt": 0, "fehler": []}
     try:
-        from backend.tools.knowledge import _get_vector_store, _chunk_text
-
+        from backend.tools.knowledge import _get_vector_store, _get_folders
         vs = _get_vector_store()
         if vs is None:
-            _log.debug("VectorStore nicht verfuegbar – FAISS-Indexierung uebersprungen")
-            return
+            return ergebnis
+        indiziert = vs.get_indexed_files()
+        if not indiziert:
+            return ergebnis
 
-        mtime = filepath.stat().st_mtime
-        chunks = _chunk_text(content)
-        if chunks:
-            # GEDROSSELT speichern statt bei jeder Notiz den kompletten Index:
-            # add_chunks() mit save=True schrieb Index UND Metadaten vollstaendig
-            # neu – bei 16.000 Chunks rund 50 MB fuer ein paar hundert Byte
-            # neuen Inhalt. Die Notiz ist trotzdem sofort suchbar (der Index im
-            # Speicher ist vollstaendig) und durch das Journal auch sofort
-            # absturzsicher; nur die teure Serialisierung wird gebuendelt.
-            geschrieben = vs.add_chunks_deferred(str(filepath), chunks, mtime)
-            _log.info(
-                f"FAISS: {len(chunks)} Chunk(s) fuer {filepath.name} sofort indexiert "
-                f"(Gesamt: {vs.chunk_count()} Chunks"
-                + (", Index gesichert)" if geschrieben else ", Journal)")
-            )
-    except Exception as e:
-        _log.warning(f"FAISS-Sofort-Indexierung fehlgeschlagen: {e}")
+        weg = []
+        for ordner in _get_folders():
+            for name in _REPO_VERFAHRENSDATEIEN:
+                kandidat = ordner / name
+                if str(kandidat) in indiziert and not kandidat.exists():
+                    weg.append(str(kandidat))
+        if weg:
+            ergebnis["chunks_entfernt"] = vs.remove_files(weg)
+            _log.info("Verfahrensdateien aus dem Vektor-Index entfernt: %d Chunk(s) "
+                      "aus %d Datei(en) – %s",
+                      ergebnis["chunks_entfernt"], len(weg),
+                      ", ".join(Path(w).name for w in weg))
+    except Exception as e:  # noqa: BLE001 – darf den Start nie aufhalten
+        ergebnis["fehler"].append(str(e))
+    return ergebnis
 
 
 # ─── Statistik-API ────────────────────────────────────────────────────────────
@@ -509,7 +711,7 @@ def get_learned_stats() -> dict:
         if not LEARNED_DIR.exists():
             return {"total_files": 0, "total_size_kb": 0, "months": []}
 
-        files = list(LEARNED_DIR.rglob("conv_*.md"))
+        files = list(LEARNED_DIR.rglob(f"{NOTIZ_PRAEFIX}*.md"))
         total_size = sum(f.stat().st_size for f in files if f.exists())
         months = sorted({f.parent.name for f in files}, reverse=True)
 

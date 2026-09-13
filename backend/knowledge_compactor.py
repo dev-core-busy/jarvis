@@ -1,12 +1,12 @@
 """Wissens-Verdichtung – konsolidiert automatisch gelernte Konversations-Fakten.
 
 Problem: learning.py schreibt pro Konversation eine eigene Datei
-(data/knowledge/learned/YYYY-MM/conv_<ts>.md). Mit der Zeit sammeln sich
+(data/erfahrung/YYYY-MM/auto_lerned_<ts>.md). Mit der Zeit sammeln sich
 viele Dateien mit doppelten oder widerspruechlichen Fakten an.
 
 Loesung: Ein LLM-Lauf verdichtet alle ABGESCHLOSSENEN Monate (der laufende
 Monat bleibt unangetastet) zusammen mit dem bisherigen konsolidierten
-Bestand zu wenigen Themen-Dateien unter learned/konsolidiert/.
+Bestand zu wenigen Themen-Dateien unter erfahrung/konsolidiert/.
 
 Regeln der Verdichtung:
 - Duplikate werden zusammengefuehrt (gleicher Fakt nur einmal)
@@ -34,12 +34,15 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from backend.learning import LEARNED_DIR, _sanitize_learned
+from backend.learning import LEARNED_DIR, NOTIZ_PRAEFIX, _sanitize_learned
 
 _log = logging.getLogger("jarvis.compactor")
 
 PROJECT_ROOT = Path(__file__).parent.parent
 KONSOLIDIERT_DIR = LEARNED_DIR / "konsolidiert"
+# Praefix der Themen-Dateien – leitet sich vom Notiz-Praefix ab, damit ein
+# Umbenennen an EINER Stelle beide Gattungen erfasst.
+_KONS_PRAEFIX = NOTIZ_PRAEFIX + "konsolidiert_"
 # Archiv ausserhalb von data/knowledge/ – sonst wuerde der Ordner-Scan
 # (_all_files in tools/knowledge.py) die Originale wieder indexieren
 ARCHIV_DIR = PROJECT_ROOT / "data" / "backups" / "learned_archiv"
@@ -91,10 +94,10 @@ def _finished_month_dirs() -> list[Path]:
 
 
 def _collect_files() -> list[Path]:
-    """Alle conv_*.md aus abgeschlossenen Monaten (feedback_* bleibt unberuehrt)."""
+    """Alle Notizen aus abgeschlossenen Monaten (feedback_* bleibt unberuehrt)."""
     files: list[Path] = []
     for d in _finished_month_dirs():
-        files.extend(sorted(d.glob("conv_*.md")))
+        files.extend(sorted(d.glob(f"{NOTIZ_PRAEFIX}*.md")))
     return files
 
 
@@ -103,7 +106,7 @@ def _read_bestand() -> str:
     if not KONSOLIDIERT_DIR.exists():
         return ""
     parts = []
-    for f in sorted(KONSOLIDIERT_DIR.glob("conv_konsolidiert_*.md")):
+    for f in sorted(KONSOLIDIERT_DIR.glob(f"{_KONS_PRAEFIX}*.md")):
         try:
             parts.append(f.read_text(encoding="utf-8"))
         except Exception:
@@ -228,7 +231,7 @@ def _apply_result(topics: list[tuple[str, str]], source_files: list[Path]) -> di
 
     # 1) Alte Konsolidat-Dateien ersetzen (aus Index + Disk entfernen)
     KONSOLIDIERT_DIR.mkdir(parents=True, exist_ok=True)
-    for old in KONSOLIDIERT_DIR.glob("conv_konsolidiert_*.md"):
+    for old in KONSOLIDIERT_DIR.glob(f"{_KONS_PRAEFIX}*.md"):
         if vs:
             try:
                 vs.remove_file(str(old))
@@ -237,11 +240,11 @@ def _apply_result(topics: list[tuple[str, str]], source_files: list[Path]) -> di
         old.unlink(missing_ok=True)
 
     # 2) Neue Themen-Dateien schreiben + sofort indexieren
-    #    (Dateiname beginnt mit conv_ → erscheint weiter in Liste/Statistik/Export)
+    #    (Dateiname traegt NOTIZ_PRAEFIX → erscheint weiter in Liste/Statistik/Export)
     written: list[Path] = []
     chunk_total = 0
     for title, body in topics:
-        fp = KONSOLIDIERT_DIR / f"conv_konsolidiert_{_slug(title)}.md"
+        fp = KONSOLIDIERT_DIR / f"{_KONS_PRAEFIX}{_slug(title)}.md"
         content = (
             f"# Konsolidiertes Wissen: {title}\n"
             f"Datum: {stamp}\n"

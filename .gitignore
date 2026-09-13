@@ -46,11 +46,19 @@ services/whatsapp-bridge/contacts.json
 !/data/google_auth/
 /data/google_auth/*
 !/data/google_auth/credentials.json.example
+# ⚠ data/knowledge/ ist der WISSENSSPEICHER DES KUNDEN – hier liegt NICHTS aus
+# dem Repo (Vorgabe 2026-09-13). Bis dahin standen drei Ausnahmen darunter, die
+# genau das unterliefen: browser_automation.md, projektinfo.md und
+# whatsapp_workflow.md. Alle drei waren VERFAHRENSwissen des Agenten und
+# lagen damit in derselben Vektor-DB wie Kundenhandbuecher – zwei davon
+# zusaetzlich DOPPELT, weil es sie als Instruktion ohnehin gibt
+# (browser_automation.md byte-identisch, projektinfo.md in einer veralteten
+# Zweitfassung mit unaufgeloestem ${SERVER_IP}). Wer eine Verhaltensregel
+# ausliefern will, legt sie nach data/instructions_default/ – von dort geht
+# sie in JEDEN Prompt, statt nur gefunden zu werden, wenn die semantische
+# Suche zufaellig anschlaegt. Waechter: tests/test_erfahrung_getrennt.py.
 !/data/knowledge/
 /data/knowledge/*
-!/data/knowledge/browser_automation.md
-!/data/knowledge/projektinfo.md
-!/data/knowledge/whatsapp_workflow.md
 
 # Ablage fuer die Info-Dokumente im Portal: legt der Dienst beim Start selbst
 # an (`startup_info_files_dir`), gefuellt wird sie vom Administrator und ist

@@ -97,19 +97,23 @@ check("⚠ und zwar VOR dem Speichern", 0 <= i_pruef < i_save)
 check("ein Fehlschlag wird protokolliert (sonst verschwindet es lautlos)",
       "nicht gespeichert" in q or "kein verwertbares Wissen" in q)
 
-print("\n\033[1m5. Das Aufraeumskript fasst NUR conv_* an\033[0m")
+print("\n\033[1m5. Das Aufraeumskript fasst NUR die Lernnotizen an\033[0m")
 # ⚠ AUF ECHT UM HAARESBREITE VERMIEDEN (2026-09-06): der Trockenlauf dort
 # meldete 5 `feedback_*.md` als "ohne Wissensgehalt" - Dateien mit 3.000 bis
 # 3.600 Zeichen echtem Inhalt. Sie schreibt main.py aus einer Benutzer-Bewertung
 # und haben ein anderes Format ("## Urspruengliche Antwort", "## Was war
 # schlecht"), fallen also durch die Fakten-Struktur-Pruefung. `_hat_substanz`
 # ist NUR fuer das Auto-Learning gebaut (learning.py schreibt ausschliesslich
-# conv_*.md). ZWEITES MAL an einem Tag, dass ein an DEV gemessenes Kriterium
+# Dateien mit NOTIZ_PRAEFIX). ZWEITES MAL an einem Tag, dass ein an DEV gemessenes Kriterium
 # auf ECHT Schaden angerichtet haette (nach den Werkzeug-Buendeln).
 AUF = io.open(os.path.join(REPO, "deploy/lernnotizen_aufraeumen.py"), encoding="utf-8").read()
 check("das Aufraeumskript existiert", len(AUF) > 500)
-check("⚠ es fasst NUR conv_*.md an",
-      'startswith("conv_")' in AUF)
+# Seit 2026-09-13 kommt das Praefix aus learning.NOTIZ_PRAEFIX – geprueft wird
+# die Eigenschaft ("es filtert auf das Praefix"), nicht der Wortlaut.
+check("⚠ es fasst NUR die Notizen mit dem Praefix an",
+      'startswith(praefix)' in AUF or 'startswith("conv_")' in AUF)
+check("⚠ und holt das Praefix aus learning.py (kein Nachbau)",
+      "NOTIZ_PRAEFIX" in AUF)
 check("und meldet die uebersprungenen Gattungen (nicht stillschweigend)",
       "unberuehrt" in AUF or "fremd" in AUF)
 check("⚠ es laedt das Kriterium aus learning.py (kein Nachbau)",
@@ -118,8 +122,42 @@ check("Trockenlauf ist die Vorgabe", '"--anwenden"' in AUF)
 check("und es sichert VOR dem Loeschen", "tarfile" in AUF and "unlink" in AUF)
 # Gegenprobe zur Zusage: learning.py darf keine feedback_-Dateien schreiben,
 # sonst traefe der Schreibfilter sie doch.
+# ⚠ AUF DEM KOMMENTARFREIEN QUELLTEXT: seit 2026-09-13 erklaert ein Docstring
+# in learning.py, warum die Migration feedback_* NICHT anfasst – und nennt das
+# Wort dabei. Der Waechter las damit seine eigene Begruendung (im Projekt der
+# fuenfzehnte Fall). Geprueft wird, ob der CODE es schreibt.
+def _ohne_text(q):
+    import ast as _a, io as _io, tokenize as _tk
+    zeilen = q.splitlines(keepends=True)
+    weg = []
+    try:
+        for tok in _tk.generate_tokens(_io.StringIO(q).readline):
+            if tok.type == _tk.COMMENT:
+                weg.append((tok.start, tok.end))
+    except Exception:
+        pass
+    for (z1, s1), (z2, s2) in reversed(weg):
+        if z1 == z2 and z1 - 1 < len(zeilen):
+            zl = zeilen[z1 - 1]
+            zeilen[z1 - 1] = zl[:s1] + " " * (s2 - s1) + zl[s2:]
+    ohne = "".join(zeilen)
+    try:
+        baum = _a.parse(ohne)
+    except SyntaxError:
+        return ohne
+    lz = ohne.splitlines()
+    for n in _a.walk(baum):
+        if isinstance(n, _a.Expr) and isinstance(n.value, _a.Constant) \
+                and isinstance(n.value.value, str):
+            for i in range(n.lineno - 1, min(n.end_lineno, len(lz))):
+                lz[i] = ""
+    return "\n".join(lz)
+
+_Q_CODE = _ohne_text(Q)
+check("Kommentar-Entferner greift (Positivkontrolle)",
+      "def learn_from_conversation" in _Q_CODE and "Anti-Halluzinations-Schutz" not in _Q_CODE)
 check("⚠ learning.py schreibt kein feedback_* (der Filter trifft sie nie)",
-      "feedback_" not in Q)
+      "feedback_" not in _Q_CODE)
 
 print(f"\n\033[1mErgebnis: {OK} OK, {FAIL} FAIL\033[0m")
 sys.exit(1 if FAIL else 0)

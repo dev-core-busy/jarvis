@@ -54,6 +54,30 @@ def _hat_substanz_laden():
     return ns["_hat_substanz"]
 
 
+def _ort_und_praefix():
+    """``LEARNED_DIR`` und ``NOTIZ_PRAEFIX`` aus learning.py schneiden.
+
+    Gleiche Technik und gleicher Grund wie bei `_hat_substanz_laden`: nicht
+    importieren (zieht config, LLM-Provider und FAISS mit) und NICHT nachbauen.
+    Ein hier abgetippter Pfad zeigte nach dem Umzug vom 2026-09-13 ins Leere –
+    das Skript haette dann "Kein Verzeichnis" gemeldet und waere fuer den
+    Bestand blind gewesen, ohne dass es nach einem Fehler aussieht.
+    """
+    q = io.open(ZUHAUSE / "backend/learning.py", encoding="utf-8").read()
+    baum = ast.parse(q)
+    gesucht = {"LEARNED_DIR", "NOTIZ_PRAEFIX"}
+    teile = [n for n in baum.body
+             if isinstance(n, ast.Assign)
+             and getattr(n.targets[0], "id", "") in gesucht]
+    if len(teile) != len(gesucht):
+        print("ABBRUCH: LEARNED_DIR/NOTIZ_PRAEFIX nicht gefunden - ohne den Ort "
+              "wird hier nichts geloescht.")
+        sys.exit(2)
+    ns = {"PROJECT_ROOT": ZUHAUSE, "Path": Path}
+    exec(compile(ast.Module(body=teile, type_ignores=[]), "<schnitt>", "exec"), ns)
+    return ns["LEARNED_DIR"], ns["NOTIZ_PRAEFIX"]
+
+
 def ueberschrift(text: str) -> str:
     """Die Aufgabe aus der ersten Zeile - `# Gelernt: <Aufgabe>`.
 
@@ -81,14 +105,15 @@ def main():
     args = ap.parse_args()
 
     hat_substanz = _hat_substanz_laden()
-    wurzel = ZUHAUSE / "data/knowledge/learned"
+    # Ort UND Praefix aus learning.py laden, nicht nachbauen (siehe dort).
+    wurzel, praefix = _ort_und_praefix()
     if not wurzel.is_dir():
         print(f"Kein Verzeichnis {wurzel}")
         return 2
 
     weg, bleibt, fremd = [], [], []
     for p in sorted(wurzel.rglob("*.md")):
-        # ⚠ NUR conv_*.md - das sind die Dateien des Auto-Learnings, fuer die
+        # ⚠ NUR die Auto-Learning-Notizen (NOTIZ_PRAEFIX), fuer die
         # `_hat_substanz` gebaut ist. `feedback_*.md` schreibt main.py aus einer
         # Benutzer-Bewertung; sie haben ein voellig anderes Format ("## Urspruengliche
         # Antwort", "## Was war schlecht") und faellen deshalb durch die
@@ -96,7 +121,7 @@ def main():
         # AUF ECHT WAERE DAS DER SCHADEN GEWESEN: der Trockenlauf dort meldete
         # 5 solcher Dateien als "ohne Wissensgehalt". `knowledge_compactor.py`
         # nimmt sie aus demselben Grund aus ("feedback_* bleibt unberuehrt").
-        if not p.name.startswith("conv_"):
+        if not p.name.startswith(praefix):
             fremd.append(p)
             continue
         try:
@@ -130,9 +155,9 @@ def main():
         weg.extend(dublett)
 
     print(f"Lernnotizen: {len(weg) + len(bleibt) + len(fremd)}")
-    print(f"  conv_*  ohne Wissensgehalt : {len(weg) - len(dublett)}")
-    print(f"  conv_*  Dubletten (gleiche Aufgabe, aeltere bleibt): {len(dublett)}")
-    print(f"  conv_*  bleiben            : {len(bleibt)}")
+    print(f"  Notizen ohne Wissensgehalt : {len(weg) - len(dublett)}")
+    print(f"  Notizen Dubletten (gleiche Aufgabe, aeltere bleibt): {len(dublett)}")
+    print(f"  Notizen bleiben            : {len(bleibt)}")
     print(f"  andere Gattungen (unberuehrt, z.B. feedback_*): {len(fremd)}")
     if weg:
         print("\n  Beispiele (erste 5):")
@@ -149,7 +174,7 @@ def main():
     # ⚠ SICHERUNG VOR DEM LOESCHEN. Ein Aufraeumskript ohne Rueckweg ist ein
     # Datenverlust mit freundlichem Namen.
     marke = time.strftime("%Y%m%d-%H%M%S")
-    sicherung = ZUHAUSE / f"data/knowledge/learned-muell-{marke}.tgz"
+    sicherung = wurzel.parent / f"{wurzel.name}-muell-{marke}.tgz"
     with tarfile.open(sicherung, "w:gz") as tar:
         for p in weg:
             tar.add(p, arcname=str(p.relative_to(wurzel)))

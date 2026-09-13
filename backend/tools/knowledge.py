@@ -499,23 +499,16 @@ def _rebuild_vector_index(folders: list[Path], max_bytes: int, force: bool = Fal
     return vs.chunk_count() > 0
 
 
-# Gelernte Konversationen (learned/conv_*.md) tragen die urspruengliche
-# Benutzerfrage als Ueberschrift. Dadurch sind sie fuer genau diese Frage der
-# perfekte semantische Treffer – unabhaengig davon, ob ihr Inhalt zur Frage
-# passt – und verdraengen die Primaerdokumentation vom ersten Platz. Das ist
-# eine selbstverstaerkende Schleife: eine falsche Antwort wird gelernt und beim
-# naechsten Mal bevorzugt wieder ausgeliefert. Deshalb im Ranking abwerten.
-LEARNED_PENALTY = 0.6
-
-
-def _is_learned_note(path_str: str) -> bool:
-    p = path_str.replace("\\", "/")
-    return "/knowledge/learned/" in p or "/knowledge/pending/" in p
-
-
-def _learned_weight(file_path: str) -> float:
-    """Herkunfts-Gewicht fuer das Ranking (1.0 = normal)."""
-    return LEARNED_PENALTY if _is_learned_note(file_path) else 1.0
+# ⚠ HIER STAND BIS 2026-09-13 `LEARNED_PENALTY = 0.6` samt `_is_learned_note`
+# und `_learned_weight`. Gelernte Notizen tragen die Benutzerfrage als
+# Ueberschrift und waren damit fuer genau diese Frage der perfekte semantische
+# Treffer – unabhaengig vom Inhalt; die Abwertung im Ranking war der Gegenzug.
+# Sie ist ersatzlos entfallen, weil das Erfahrungswissen seither GAR NICHT MEHR
+# indiziert wird (data/erfahrung/, ausserhalb jedes Wissensordners). Ein Gewicht
+# auf eine Herkunft, die es im Index nicht mehr gibt, ist kein Schutz mehr,
+# sondern ein Konstrukt, das bei jeder Durchsicht mitgeprueft werden muss –
+# und das irgendwann still ausfaellt, weil niemand es mehr zuordnen kann.
+# Die Trennung sitzt jetzt im Dateisystem, nicht im Ranking.
 
 
 class _TrefferListe(list):
@@ -543,11 +536,9 @@ def _vector_search(query: str, max_results: int,
     IN die Suche gereicht – nicht nachtraeglich gefiltert (Begruendung siehe
     ``VectorStore.search_hybrid``).
 
-    Die Abwertung gelernter Notizen wird als ``weight_fn`` IN die Suche gereicht,
-    damit sie VOR dem relativen Cut greift. Vorher lief sie hier nachtraeglich:
-    Stand eine gelernte Notiz auf Platz 1, wurde der Cut an ihrem unabgewerteten
-    Score gemessen – Primaerdokumente, die nach der Abwertung vorn gelegen
-    haetten, waren da schon verworfen.
+    Eine Herkunfts-Abwertung gibt es nicht mehr: gelernte Notizen liegen seit
+    2026-09-13 ausserhalb der Wissensordner und stehen deshalb gar nicht erst
+    im Index (siehe learning.py).
     """
     vs = _get_vector_store()
     if vs is None:
@@ -556,7 +547,6 @@ def _vector_search(query: str, max_results: int,
     # denselben BM25-Durchlauf ein ZWEITES Mal gerechnet, obwohl die Hybridsuche
     # das Ergebnis Millisekunden vorher schon hatte und wegwarf.
     results, ohne_anker = vs.search_hybrid_ex(query, max_results,
-                                              weight_fn=_learned_weight,
                                               allow_paths=allow_paths)
     if not results:
         return None
@@ -598,11 +588,6 @@ def find_similar_existing(doc: dict) -> dict:
     Fakten und die ersten Fragen – jede fuer sich, weil ein zusammengesetzter
     Text den Vektor verwaessert und dann zu allem maessig passt.
 
-    Gelernte Notizen werden AUSGESCHLOSSEN: sie tragen die Benutzerfrage als
-    Ueberschrift und waeren fuer eine Frage-Antwort-Abfrage immer der Top-Treffer,
-    unabhaengig vom Inhalt (dieselbe Selbstverstaerkung, deretwegen sie in der
-    normalen Suche mit LEARNED_PENALTY abgewertet werden).
-
     Rueckgabe: ``{"items": [{file, score, text, matched}], "checked": n}``
     """
     vs = _get_vector_store()
@@ -637,8 +622,6 @@ def find_similar_existing(doc: dict) -> dict:
             continue
         for score, pfad, chunk in treffer:
             if float(score) < AEHNLICH_AB:
-                continue
-            if _is_learned_note(pfad):
                 continue
             schluessel = f"{pfad}|{chunk[:80]}"
             if schluessel in gesehen:
@@ -2777,14 +2760,9 @@ def _do_force_reindex(attempt: int = 1, resume_count: int = 0,
         from backend import knowledge_groups as _kg
         basis = known_paths_with_disk()
         pruned = _kg.prune(basis)
-        # Systemgenerierte Dateien der Gruppe "Erlernt" zuordnen. Das lief
-        # bisher NUR beim Oeffnen der Gruppenseite – bis dahin galten gelernte
-        # Dateien als "ungruppiert", der Gruppenfilter lieferte je nach
-        # Vorgeschichte andere Ergebnisse.
-        assigned = _kg.auto_assign_system_files(basis)
-        if pruned or assigned:
+        if pruned:
             _log.info(f"Wissensgruppen gepflegt: {pruned} verwaiste Zuordnung(en) "
-                      f"entfernt, {assigned} Datei(en) automatisch zugeordnet")
+                      f"entfernt")
     except Exception as e:
         _log.warning(f"Gruppen-Pflege nach Reindex fehlgeschlagen: {e}")
 

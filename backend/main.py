@@ -4040,6 +4040,39 @@ async def startup_replay_vector_journal():
 
 
 @app.on_event("startup")
+async def startup_erfahrung_umzug():
+    """Erfahrungswissen aus der Wissensdatenbank holen (einmalig, 2026-09-13).
+
+    ⚠ DIE REIHENFOLGE IST PFLICHT: dieser Hook MUSS nach
+    `startup_replay_vector_journal` stehen. Das Journal kann Chunks gelernter
+    Notizen unter ihren ALTEN Pfaden enthalten (aus einem unsanften Ende vor
+    dem Umzug). Liefe der Umzug zuerst, spielte der Replay sie unmittelbar
+    danach wieder in den Index – die Notizen waeren verschoben UND trotzdem
+    suchbar, also genau der Zustand, den der Umzug beseitigt. Startup-Hooks
+    laufen in Registrierungsreihenfolge, und der Replay wartet sein
+    `to_thread` ab; danach ist das Journal leer.
+
+    Laeuft bei jedem Start, kostet auf einem umgezogenen System einen
+    `exists()` und schweigt dann.
+    """
+    try:
+        from backend.learning import (migriere_aus_wissensdatenbank,
+                                     verfahrensdateien_aus_index_raeumen)
+        erg = await asyncio.to_thread(migriere_aus_wissensdatenbank)
+        if erg.get("fehler"):
+            print(f"[Erfahrung] Umzug mit Fehlern: {'; '.join(erg['fehler'][:3])}",
+                  flush=True)
+        # Zweiter Teil: die ehemaligen Repo-Verfahrensdateien. Der Pull entfernt
+        # sie, ihre Chunks blieben sonst bis zum naechsten Neuaufbau stehen.
+        erg2 = await asyncio.to_thread(verfahrensdateien_aus_index_raeumen)
+        if erg2.get("fehler"):
+            print(f"[Erfahrung] Index-Aufraeumen: {'; '.join(erg2['fehler'][:3])}",
+                  flush=True)
+    except Exception as e:
+        print(f"[Erfahrung] Umzug fehlgeschlagen: {e}", flush=True)
+
+
+@app.on_event("startup")
 async def startup_warm_lexical_index():
     """BM25-Index im Hintergrund vorbauen, damit die ERSTE Wissenssuche nach
     einem Neustart ihn nicht bezahlt.
@@ -7887,7 +7920,11 @@ async def _feedback_self_improve(user_msg: str, bot_resp: str, rating: str) -> s
             return ""
 
         ts_str = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-        note_dir = Path("data/knowledge/learned")
+        # Ort aus learning.LEARNED_DIR, NICHT nachgebaut: der Pfad ist am
+        # 2026-09-13 aus der Wissensdatenbank herausgezogen worden, und diese
+        # Stelle hier war eine von dreien, die ihn selbst zusammensetzten.
+        from backend.learning import LEARNED_DIR as _erf_dir
+        note_dir = _erf_dir
         note_dir.mkdir(parents=True, exist_ok=True)
         note_file = note_dir / f"feedback_{int(time.time())}.md"
         note_file.write_text(
@@ -15227,11 +15264,11 @@ async def move_knowledge_files(request: Request, user: str = Depends(require_kno
 @app.get("/api/knowledge/learned")
 async def list_learned_files(user: str = Depends(require_admin_or_knowledge_editor)):
     """Listet alle automatisch gelernten Konversations-Dateien."""
-    from backend.learning import LEARNED_DIR, PROJECT_ROOT as LRN_ROOT
+    from backend.learning import LEARNED_DIR, NOTIZ_PRAEFIX, PROJECT_ROOT as LRN_ROOT
     result = []
     if not LEARNED_DIR.exists():
         return JSONResponse(result)
-    for md in sorted(LEARNED_DIR.rglob("conv_*.md"), reverse=True)[:100]:
+    for md in sorted(LEARNED_DIR.rglob(f"{NOTIZ_PRAEFIX}*.md"), reverse=True)[:100]:
         try:
             stat = md.stat()
             content = md.read_text(encoding="utf-8")
@@ -15294,8 +15331,10 @@ def _kb_struct_facts(content: str) -> list[str]:
 
 def _collect_knowledge_documents(include_embeddings: bool) -> tuple[list[dict], dict]:
     """Sammelt die Wissensbasis als Dokumente im Extraktor-Schema (strukturell, ohne LLM).
-    Gruppiert die Vektor-DB-Chunks pro Quelldatei; ergaenzt gelernte conv_*.md, die
-    (noch) nicht indexiert sind. Gibt (documents, vector_meta)."""
+    Gruppiert die Vektor-DB-Chunks pro Quelldatei. Gibt (documents, vector_meta).
+
+    Erfahrungsnotizen (data/erfahrung/) sind NICHT enthalten – sie gehoeren
+    seit 2026-09-13 nicht mehr zur Wissensbasis."""
     import hashlib as _hl
     from pathlib import Path as _P
     docs_by_file: dict[str, dict] = {}
@@ -15325,23 +15364,13 @@ def _collect_knowledge_documents(include_embeddings: bool) -> tuple[list[dict], 
     except Exception as e:
         vmeta["error"] = str(e)
 
-    # Gelernte Konversationen ergaenzen, falls nicht im Vektor-Index
-    try:
-        from backend.learning import LEARNED_DIR
-        if LEARNED_DIR.exists():
-            indexed = {str(_P(fp).resolve()) for fp in docs_by_file}
-            for md in LEARNED_DIR.rglob("conv_*.md"):
-                if str(md.resolve()) in indexed:
-                    continue
-                try:
-                    docs_by_file[str(md)] = {
-                        "chunks": [{"chunk_index": 0, "text": md.read_text(encoding="utf-8")}],
-                        "mtime": md.stat().st_mtime,
-                    }
-                except Exception:
-                    continue
-    except Exception:
-        pass
+    # ⚠ HIER WURDEN BIS 2026-09-13 die Erfahrungsnotizen ERGAENZT, "falls nicht
+    # im Vektor-Index". Diese Voraussetzung ist weggefallen: sie sind jetzt
+    # grundsaetzlich nicht im Index, weil sie nicht mehr zur Wissensbasis
+    # gehoeren (data/erfahrung/, ausserhalb jedes Wissensordners). Ein Export
+    # der "kompletten Wissensbasis" wuerde sie sonst als einzige Gattung
+    # mitnehmen, die gerade daraus entfernt wurde. Einsehbar bleiben sie ueber
+    # GET /api/knowledge/learned.
 
     documents = []
     for fp, d in docs_by_file.items():
@@ -15633,9 +15662,13 @@ async def open_knowledge_folder(request: Request, user: str = Depends(require_kn
 # Nur einfacher Ordnername (kein Pfad, kein fuehrender Punkt, kein Komma –
 # die Ordner-Liste wird kommagetrennt persistiert)
 _KB_FOLDER_NAME_RE = re.compile(r"^[A-Za-z0-9äöüÄÖÜß][A-Za-z0-9äöüÄÖÜß_. \-]{0,63}$")
-# data/-Unterordner mit Systemdaten – nie als Wissens-Ordner anlegen/umbenennen/loeschen
+# data/-Unterordner mit Systemdaten – nie als Wissens-Ordner anlegen/umbenennen/loeschen.
+# ⚠ "erfahrung" ist die Gegenprobe zum Umzug vom 2026-09-13: das Erfahrungswissen
+# liegt dort, WEIL es ausserhalb jedes Wissensordners liegen soll. Ohne diesen
+# Eintrag koennte es jemand als Wissensordner eintragen – und alles waere still
+# wieder im Index, ohne dass es nach einem Fehler aussieht.
 _KB_RESERVED_DATA_DIRS = {"knowledge", "vector_store", "chroma_db", "logs", "vision",
-                          "instructions", "learned", "backups", "wa_media"}
+                          "instructions", "learned", "erfahrung", "backups", "wa_media"}
 
 
 def _kb_validate_folder_name(name: str) -> str | None:
@@ -16883,11 +16916,11 @@ def _wissen_allowed_folders(user: str, groups: list) -> list:
 def _wissen_ordner_anzeige(rel_path: str, configured: list) -> str:
     """Ordner einer Wissensdatei, wie ein Benutzer ihn in /wissen kennt.
 
-    Gespeichert ist ein technischer Pfad (``data/knowledge/learned/2026-09``,
+    Gespeichert ist ein technischer Pfad (``data/knowledge/community``,
     ``mnt/jarvis-kb/share_1/OneNote-Jasmin/0039_Maris``). Angezeigt wird die
     gleiche Sprache wie in der Ordner-Auswahl darueber: der NAME des
     konfigurierten Wurzelordners plus die Unterordner darunter – also
-    ``knowledge/learned/2026-09`` bzw. ``share_1/OneNote-Jasmin/0039_Maris``.
+    ``knowledge/community`` bzw. ``share_1/OneNote-Jasmin/0039_Maris``.
 
     DAS MUSS DAS BACKEND MACHEN, nicht der Client: der kennt nur ``SCOPE.folders``,
     und dort fehlt ``data/knowledge`` bewusst (es ist unter /wissen kein
@@ -17741,9 +17774,6 @@ async def knowledge_groups_list(user: str = Depends(require_auth)):
         # Zähl-Basis: Index + Platte (gleiche Basis wie die Dokumentlisten,
         # sonst zeigt der Badge weniger als die Liste; tote Shares abgefangen)
         paths = known_paths_with_disk()
-        # Systemgenerierte Dateien (data/knowledge/learned/*) automatisch der
-        # Gruppe "Erlernt" zuordnen, statt sie als "ungruppiert" zu zeigen.
-        kg.auto_assign_system_files(paths)
         data = kg.list_groups(paths)
         return JSONResponse({"ok": True, **_kb_strip_editor_fields(user, data)})
     except Exception as e:
@@ -17776,9 +17806,6 @@ async def knowledge_groups_ungrouped(user: str = Depends(require_auth)):
     from backend.tools.knowledge import known_paths_with_disk
     try:
         paths = known_paths_with_disk()
-        # Systemgenerierte Dateien (data/knowledge/learned/*) vorab der Gruppe
-        # "Erlernt" zuordnen – so bleiben sie konsistent aus "ungruppiert" raus.
-        kg.auto_assign_system_files(paths)
         return JSONResponse({"ok": True, "files": kg.ungrouped_files(paths)})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)

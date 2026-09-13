@@ -1406,13 +1406,13 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
             </div>
             <div class="modal-body" style="overflow-y:auto;">
 
-                <p class="kb-hint"><b>Problem:</b> Das Lernsystem schreibt pro Konversation eine eigene Wissensdatei (<code>data/knowledge/learned/JJJJ-MM/conv_&lt;zeit&gt;.md</code>). Mit der Zeit sammeln sich viele Dateien mit <b>doppelten oder widersprüchlichen Fakten</b> an – jede Konversation lernt isoliert, niemand gleicht gegen den Bestand ab.</p>
+                <p class="kb-hint"><b>Problem:</b> Das Lernsystem schreibt pro Konversation eine eigene Wissensdatei (<code>data/erfahrung/JJJJ-MM/auto_lerned_&lt;zeit&gt;.md</code>). Mit der Zeit sammeln sich viele Dateien mit <b>doppelten oder widersprüchlichen Fakten</b> an – jede Konversation lernt isoliert, niemand gleicht gegen den Bestand ab.</p>
 
                 <h3>1. Was die Verdichtung macht</h3>
                 <ul>
                     <li>Sammelt alle Wissensdateien aus <b>abgeschlossenen Monaten</b> – der laufende Monat bleibt unangetastet.</li>
                     <li>Ein LLM-Lauf führt sie mit dem bisherigen konsolidierten Bestand zusammen: <b>Duplikate</b> werden zu einem Eintrag verschmolzen, bei <b>Widersprüchen gewinnt der Fakt mit dem neueren Datum</b> (das Datum steht im Kopf jeder Datei). Bei echter Unsicherheit bleiben beide Varianten mit Datum erhalten.</li>
-                    <li>Das Ergebnis wird <b>thematisch gruppiert</b> in wenige Dateien geschrieben (<code>learned/konsolidiert/</code>), z.&nbsp;B. Server &amp; Infrastruktur, Kunden, Vorgehensweisen.</li>
+                    <li>Das Ergebnis wird <b>thematisch gruppiert</b> in wenige Dateien geschrieben (<code>erfahrung/konsolidiert/</code>), z.&nbsp;B. Server &amp; Infrastruktur, Kunden, Vorgehensweisen.</li>
                     <li>Bei jedem weiteren Lauf werden neue Fakten <b>gegen den Bestand abgeglichen</b> – das Wissen konvergiert, statt jedes Mal neu geschrieben zu werden.</li>
                 </ul>
 

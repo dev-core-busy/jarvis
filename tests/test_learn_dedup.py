@@ -105,7 +105,7 @@ check("Kennung ist kurz und dateinamenstauglich",
 print("\n\033[1m2. bereits_gelernt: der gemeldete Fall\033[0m")
 mon = L.LEARNED_DIR / "2026-09"
 mon.mkdir(parents=True, exist_ok=True)
-erste = mon / f"conv_1788500280_{L.task_kennung(AUF)}.md"
+erste = mon / f"{L.NOTIZ_PRAEFIX}1788500280_{L.task_kennung(AUF)}.md"
 erste.write_text("# Gelernt: x\n\n- [A]: B\n", encoding="utf-8")
 
 check("dieselbe Aufgabe gilt als schon gelernt",
@@ -133,7 +133,7 @@ check("Fenster ist eine FUNKTION, keine eingefrorene Konstante",
 # Konsolidat darf nie treffen
 kons = L.LEARNED_DIR / "konsolidiert"
 kons.mkdir(exist_ok=True)
-(kons / f"conv_9999_{L.task_kennung('nur konsolidat')}.md").write_text("- [A]: B\n", encoding="utf-8")
+(kons / f"{L.NOTIZ_PRAEFIX}9999_{L.task_kennung('nur konsolidat')}.md").write_text("- [A]: B\n", encoding="utf-8")
 check("das Konsolidat blockiert kein Lernen",
       L.bereits_gelernt("nur konsolidat") is None)
 
@@ -216,7 +216,7 @@ check("neue Aufgabe: LLM wird gefragt", p1.aufrufe == 1)
 check("neue Aufgabe: es wird gespeichert", len(geschrieben) == 1)
 
 # Datei anlegen, wie es _save_and_index taete
-(mon / f"conv_{int(time.time())}_{L.task_kennung('Ganz neue Frage zu Medistar')}.md").write_text(
+(mon / f"{L.NOTIZ_PRAEFIX}{int(time.time())}_{L.task_kennung('Ganz neue Frage zu Medistar')}.md").write_text(
     "- [A]: B\n", encoding="utf-8")
 p2 = Prov()
 asyncio.run(L.learn_from_conversation("Ganz neue Frage zu Medistar", MSGS, p2, "m"))
@@ -229,10 +229,15 @@ check("⚠ reine Selbstauskunft wird NICHT gespeichert", len(geschrieben) == 1)
 
 print("\n\033[1m5. Der Dateiname traegt die Kennung (kein Indexfile)\033[0m")
 QUELLE = Q
+# ⚠ AUF DIE EIGENSCHAFT, NICHT AUF DIE SCHREIBWEISE: hier stand der Dateiname
+# woertlich ('f"conv_{ts}_..."'). Beim Umbenennen des Praefix am 2026-09-13
+# meldete das zwei Fehler, die es nicht gab – die Zusage war unveraendert
+# erfuellt. Geprueft wird jetzt, WAS der Name traegt und WOHER die Suche liest.
 check("Dateiname enthaelt task_kennung",
-      'f"conv_{ts}_{task_kennung(task)}.md"' in QUELLE)
+      "task_kennung(task)" in QUELLE and "NOTIZ_PRAEFIX" in QUELLE)
 check("die Suche geht ueber den Dateibestand, nicht ueber ein Indexfile",
-      'rglob(f"conv_*_{kennung}.md")' in QUELLE)
+      "rglob(f\"{NOTIZ_PRAEFIX}*_{kennung}.md\")" in QUELLE
+      or ("rglob" in QUELLE and "{kennung}.md" in QUELLE))
 
 print("\n\033[1m6. Die Reihenfolge IST die Ersparnis\033[0m")
 baum = ast.parse(QUELLE)

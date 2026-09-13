@@ -94,9 +94,25 @@ def _gedaechtnis() -> list[tuple[str, Path, str]]:
 
 
 def _lernnotizen() -> list[tuple[str, Path, str]]:
-    """``data/knowledge/learned/**/*.md`` – Auto-Learning."""
+    """``data/erfahrung/**/*.md`` – Auto-Learning.
+
+    Der Ort kommt aus ``learning.LEARNED_DIR`` und wird NICHT nachgebaut: er ist
+    am 2026-09-13 aus der Wissensdatenbank herausgezogen worden, und ein zweiter
+    Pfad hier haette still ins Leere gezeigt – die Aufraeum-Liste waere dann
+    einfach leer gewesen, ohne Fehler und ohne Hinweis.
+    """
     out = []
-    wurzel = DATA / "knowledge" / "learned"
+    try:
+        from backend.learning import LEARNED_DIR, PROJECT_ROOT as _LR
+        # ⚠ NAME AUS learning.py, WURZEL AUS DIESEM MODUL. `LEARNED_DIR` direkt
+        # zu nehmen waere falsch: `DATA` ist der Sandkasten-Schalter dieses
+        # Moduls (die Tests biegen ihn um), und ein absoluter Pfad aus einem
+        # fremden Modul umgeht ihn – der Test haette dann im ECHTEN System
+        # gelesen, mit gruener Sandkasten-Pruefung. Gefunden vom Bestandstest,
+        # nicht beim Lesen.
+        wurzel = DATA / LEARNED_DIR.relative_to(_LR / "data")
+    except Exception:  # noqa: BLE001 – Aufraeumen darf daran nicht scheitern
+        return out
     if not wurzel.is_dir():
         return out
     for d in sorted(wurzel.rglob("*.md")):

@@ -65,7 +65,9 @@ SAND = Path(tempfile.mkdtemp(prefix="jv-aufraeum-"))
 wa.DATA = SAND
 if not str(wa.DATA).startswith(str(SAND)):
     sys.exit(2)
-for unter in ("instructions", "instructions_default", "knowledge/learned"):
+# "erfahrung" statt "knowledge/learned": das Erfahrungswissen liegt seit
+# 2026-09-13 ausserhalb der Wissensdatenbank (siehe learning.LEARNED_DIR).
+for unter in ("instructions", "instructions_default", "erfahrung"):
     (SAND / unter).mkdir(parents=True, exist_ok=True)
 
 (SAND / "instructions_default/soul.md").write_text("Sei hilfreich.\n", encoding="utf-8")
@@ -77,8 +79,8 @@ for unter in ("instructions", "instructions_default", "knowledge/learned"):
 (SAND / "memory.json").write_text(json.dumps({"a": "x", "b": "x"}), encoding="utf-8")
 # Gross genug, um die Untergrenze zu ueberschreiten (winzige Notizen haben
 # nichts zu verdichten und werden bewusst gar nicht erst angeboten).
-(SAND / "knowledge/learned/n1.md").write_text("Notiz.\n" * 120, encoding="utf-8")
-(SAND / "knowledge/learned/winzig.md").write_text("# leer\n", encoding="utf-8")
+(SAND / "erfahrung/n1.md").write_text("Notiz.\n" * 120, encoding="utf-8")
+(SAND / "erfahrung/winzig.md").write_text("# leer\n", encoding="utf-8")
 
 print("\n\033[1m1. Bestand: nur was wirklich abweicht\033[0m")
 b = wa.bestand()

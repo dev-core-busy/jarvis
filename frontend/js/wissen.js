@@ -184,7 +184,7 @@
 
     // Speicherordner-Auswahl auf die gewaehlten Gruppen eingrenzen: angeboten
     // wird die Union der Speicherordner der angehakten Gruppen (Server liefert
-    // pro Gruppe g.folders; data/knowledge wird unter /wissen nie angeboten).
+    // pro Gruppe g.folders).
     // Gruppen ohne Zuordnung haben KEIN Speicherziel -> Ablage bleibt gesperrt.
     // Globale Editoren sehen immer alle Ordner ihres Scopes.
     function updateFolderOptions() {
@@ -208,7 +208,7 @@
             var d = f.depth || 0;
             var label = d
                 ? (new Array(d + 1).join(' ') + '↳ ' + f.name)
-                : (f.name + ' (' + f.path + ')');
+                : (f.name + ' (' + (f.display || anzeigePfad(f.path)) + ')');
             return '<option value="' + esc(f.path) + '">' + esc(label) + '</option>';
         }).join('');
         // Bisherige Auswahl erhalten, wenn sie weiterhin angeboten wird
@@ -425,7 +425,7 @@
                     + 'border-radius:6px;cursor:pointer;padding:7px 10px;padding-left:' + pad + 'px;'
                     + 'color:var(--text-primary);font-size:0.85rem;">'
                     + ((f.depth || 0) ? '↳' : '📁') + ' ' + esc(f.name)
-                    + ' <span style="color:var(--text-secondary);font-size:0.75rem;">' + esc(f.path) + '</span>'
+                    + ' <span style="color:var(--text-secondary);font-size:0.75rem;">' + esc(f.display || anzeigePfad(f.path)) + '</span>'
                     + '</button>';
             }).join('');
             modal.innerHTML = '<div style="background:var(--bg-secondary);border:1px solid var(--border);'
@@ -622,6 +622,20 @@
     // Server (er kennt die konfigurierten Wurzelordner, der Client nicht
     // vollstaendig). Der Rueckfall greift, solange ein aelteres Backend laeuft
     // (halber Deploy) – dann steht der rohe Verzeichnispfad da, statt nichts.
+    // Pfad ohne den Praefix, der in jeder Zeile derselbe ist (data/rag/, /mnt/rag/).
+    // Rueckfall zum Server-Feld `display`; ein Test haelt beide deckungsgleich.
+    function anzeigePfad(p) {
+        var s = String(p == null ? '' : p).replace(/\\/g, '/').trim().replace(/\/+$/, '');
+        if (!s) return '';
+        var basen = ['data/rag', '/mnt/rag', '/mnt/jarvis-kb'];
+        for (var i = 0; i < basen.length; i++) {
+            if (s.indexOf(basen[i] + '/') === 0) {
+                return s.slice(basen[i].length + 1).replace(/^\/+|\/+$/g, '') || s;
+            }
+        }
+        return s;
+    }
+
     function ordnerText(f) {
         if (f && f.folder) return f.folder;
         var p = String((f && f.path) || '');

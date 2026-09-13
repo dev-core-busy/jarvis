@@ -119,14 +119,18 @@ check("LEARNED_DIR ist gesetzt", isinstance(L.LEARNED_DIR, Path), repr(L.LEARNED
 check("NOTIZ_PRAEFIX ist gesetzt und nicht leer",
       isinstance(L.NOTIZ_PRAEFIX, str) and len(L.NOTIZ_PRAEFIX) > 2, repr(L.NOTIZ_PRAEFIX))
 
-# Die REGEL: gegen die Vorgabe-Ordnerliste des Wissens-Skills, nicht gegen
-# einen abgetippten Pfad. Kommt morgen ein Wissensordner dazu, faellt er hier auf.
-kq = ohne_kommentare(quelle("backend/tools/knowledge.py"))
-vorgabe = None
-for n in ast.parse(kq).body:
-    if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "DEFAULT_FOLDER":
-        vorgabe = n.value.value
-check("DEFAULT_FOLDER aus knowledge.py gelesen", isinstance(vorgabe, str), repr(vorgabe))
+# Die REGEL: gegen die Wurzel ALLER Wissensordner, nicht gegen einen
+# abgetippten Pfad. Kommt morgen ein Wissensordner dazu, liegt er darunter und
+# faellt hier auf.
+#
+# ⚠ DEN WERT IMPORTIEREN, NICHT PER AST RATEN. Die erste Fassung las
+# `DEFAULT_FOLDER` als String-Literal aus dem Syntaxbaum – seit es aus
+# `rag_pfad` kommt (2026-09-13), ist es ein NAME, und der Zugriff `n.value.value`
+# brach den Lauf ohne Bilanzzeile ab. Ein Test, der die Schreibweise prueft,
+# meldet einen Fehler, den es nicht gibt.
+from backend import rag_pfad as _rp                              # noqa: E402
+vorgabe = _rp.RAG_REL
+check("Wurzel der Wissensordner gelesen", isinstance(vorgabe, str) and vorgabe, repr(vorgabe))
 
 wissensordner = [(ROOT / p.strip()).resolve()
                  for p in (vorgabe or "").split(",") if p.strip()]
@@ -135,18 +139,23 @@ for wo in wissensordner:
     drin = erf == wo or wo in erf.parents
     check(f"LEARNED_DIR liegt NICHT unter '{wo.relative_to(ROOT)}'", not drin, str(erf))
 
+check("LEARNED_DIR liegt nicht unter data/rag",
+      "rag" not in erf.relative_to(ROOT).parts, str(erf))
 check("LEARNED_DIR liegt nicht unter data/knowledge",
       "knowledge" not in erf.relative_to(ROOT).parts, str(erf))
 
-# Die Gegenprobe zur Fehlkonfiguration: der Ordnername ist reserviert, damit
-# ihn niemand als Wissensordner eintragen kann.
-mq = ohne_kommentare(quelle("backend/main.py"))
-reserviert = None
-for n in ast.parse(mq).body:
-    if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "_KB_RESERVED_DATA_DIRS":
-        reserviert = {e.value for e in n.value.elts}
-check("Ordnername steht in _KB_RESERVED_DATA_DIRS",
-      isinstance(reserviert, set) and erf.name in reserviert, str(reserviert))
+# Die Gegenprobe zur Fehlkonfiguration: niemand darf data/erfahrung als
+# Wissensordner eintragen.
+#
+# ⚠ DIE STAERKERE ZUSAGE IST SEIT 2026-09-13 DIE STRUKTUR, nicht die
+# Namensliste: Wissensordner liegen ausschliesslich unter data/rag, und
+# data/erfahrung liegt dort nicht. Die Liste gibt es weiter – sie schuetzt den
+# einmaligen Umzug davor, einen Systemordner mitzuverschieben – und ist von
+# `backend/main.py` nach `backend/rag_pfad.SYSTEM_ORDNER` gewandert.
+check("data/erfahrung kann kein Wissensordner sein (Struktur)",
+      not _rp.ist_rag_ordner(str(erf.relative_to(ROOT))), str(erf))
+check("Ordnername steht in SYSTEM_ORDNER (Schutz des Umzugs)",
+      erf.name in _rp.SYSTEM_ORDNER, str(sorted(_rp.SYSTEM_ORDNER)))
 
 
 print("\n=== 2. Kein Modul baut Ort oder Praefix nach ===")

@@ -407,7 +407,10 @@ def _wissenspfad(rel: str) -> Path | None:
         from backend.tools.knowledge import _get_folders
         wurzeln = _get_folders()
     except Exception:  # noqa: BLE001
-        wurzeln = [PROJECT_ROOT / "data" / "knowledge"]
+        # Rueckfall: die Wurzel aller Wissensordner. Frueher stand hier
+        # `data/knowledge` – das ist seit 2026-09-13 reine Infrastruktur.
+        from backend import rag_pfad as _rag
+        wurzeln = [_rag.rag_wurzel()]
     for w in wurzeln:
         try:
             wa = Path(w).resolve()
@@ -654,19 +657,25 @@ PEER_UPDATABLE = ("name", "url", "token", "fingerprint", "group_id",
 
 
 def _pruefe_ziel(rel_ziel: str, eigene_id: str = "") -> str:
-    """Zielordner pruefen: unter ``data/``, kein bestehender Wissensordner, kein
-    Ziel eines anderen Standorts.
+    """Zielordner pruefen: unter ``data/rag/``, kein bestehender Wissensordner,
+    kein Ziel eines anderen Standorts.
 
     Der zweite Punkt ist der wichtige: ein Spiegel LOESCHT lokal, was entfernt
     fehlt. Auf einen gewachsenen Wissensordner gerichtet waere der erste Lauf
     ein Datenverlust.
+
+    Der Ort ist seit 2026-09-13 nicht mehr waehlbar: ein Spiegel IST ein
+    Wissensordner und liegt deshalb da, wo alle liegen. Die Schreibweisen
+    ``<name>``, ``data/<name>`` und ``data/rag/<name>`` meinen dasselbe – sie
+    abzulehnen waere Schikane, denn der Benutzer tippt hier einen Namen.
     """
-    rel = _rel(rel_ziel)
-    if not rel.startswith("data/"):
-        raise ValueError("Der Zielordner muss unter data/ liegen.")
-    name = rel[len("data/"):]
+    from backend import rag_pfad as _rag
+    rel = _rag.zu_rag(_rel(rel_ziel))
+    if not _rag.ist_rag_ordner(rel):
+        raise ValueError(f"Der Zielordner muss unter {_rag.RAG_REL}/ liegen.")
+    name = rel[len(_rag.RAG_REL) + 1:]
     if not name or "/" in name or ".." in name or name.startswith("."):
-        raise ValueError("Bitte einen einfachen Ordnernamen unter data/ angeben.")
+        raise ValueError(f"Bitte einen einfachen Ordnernamen unter {_rag.RAG_REL}/ angeben.")
     if not re.fullmatch(r"[A-Za-z0-9_\-]{1,60}", name):
         raise ValueError("Erlaubt sind Buchstaben, Zahlen, Unterstrich und Bindestrich.")
     with _lock:
@@ -812,7 +821,8 @@ def _ordner_abstellen(rel_ziel: str) -> bool:
         rest = [f for f in liste if _rel(f) != _rel(rel_ziel)]
         if len(rest) == len(liste):
             return False
-        cfg["folders"] = ",".join(rest) or "data/knowledge"
+        # Eine leere Ordnerliste ist ein gueltiger Zustand (siehe _kb_save_folder_list).
+        cfg["folders"] = ",".join(rest)
         state["config"] = cfg
         state.setdefault("enabled", True)
         config.save_skill_state("knowledge", state)
@@ -1356,7 +1366,7 @@ def _ordner_registrieren(rel_ziel: str) -> bool:
         states = config.get_skill_states()
         state = states.get("knowledge", {})
         cfg = dict(state.get("config", {}))
-        roh = cfg.get("folders") or "data/knowledge"
+        roh = cfg.get("folders") or ""
         liste = [f.strip() for f in str(roh).split(",") if f.strip()]
         if rel_ziel in liste:
             return False

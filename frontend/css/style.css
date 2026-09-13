@@ -4744,6 +4744,14 @@ body.light .kb-cl-spanne { color: #5b6678; }
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    /* ⚠ OHNE line-height SCHNEIDET `overflow: hidden` DEN UNTERSTRICH AB – aus
+       `share_1` wird sichtbar `share 1`, also ein FALSCHER Name. Der Unterstrich
+       liegt unterhalb der Grundlinie, und die Vorgabe-Zeilenhoehe laesst ihm
+       keinen Platz. `overflow: hidden` ist Pflicht (es traegt das Ellipsis),
+       also braucht die Zeile Hoehe.
+       Nur der Screenshot hat das gezeigt: die Messung las `textContent` und
+       fand den Namen korrekt – abgeschnitten wurde er erst beim Malen. */
+    line-height: 1.6;
 }
 
 .kb-folder-arrow {

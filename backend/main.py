@@ -65,6 +65,7 @@ from backend import user_sessions as _user_sessions
 from backend import documents as _documents
 from backend import attachments as _attachments
 from backend import benutzer as _benutzer
+from backend import rag_pfad as _rag
 
 # ─── App erstellen ────────────────────────────────────────────────────
 JARVIS_VERSION = "1.0.0"
@@ -4070,6 +4071,30 @@ async def startup_erfahrung_umzug():
                   flush=True)
     except Exception as e:
         print(f"[Erfahrung] Umzug fehlgeschlagen: {e}", flush=True)
+
+
+@app.on_event("startup")
+async def startup_rag_umzug():
+    """Wissensordner nach ``data/rag`` bzw. ``/mnt/rag`` holen (einmalig, 2026-09-13).
+
+    ⚠ DIE REIHENFOLGE IST PFLICHT, und zwar nach BEIDEN Seiten:
+
+    * NACH ``startup_replay_vector_journal`` – dieselbe Begruendung wie beim
+      Erfahrungs-Umzug darueber: das Journal kann Chunks unter den ALTEN Pfaden
+      enthalten; liefe der Umzug zuerst, spielte der Replay sie unmittelbar
+      danach wieder ein, und die Dateien waeren verschoben UND unter dem alten
+      Pfad indiziert.
+    * VOR ``startup_warm_lexical_index`` – der baut den BM25-Index aus den
+      Metadaten vor. Waermt er ihn mit den alten Pfaden, steht bis zum naechsten
+      Neustart eine Trefferliste bereit, deren Dateien es dort nicht mehr gibt.
+
+    Idempotent; auf einem umgezogenen System schweigt er.
+    """
+    try:
+        from backend.rag_migration import migriere
+        await asyncio.to_thread(migriere)
+    except Exception as e:
+        print(f"[RAG-Umzug] fehlgeschlagen: {e}", flush=True)
 
 
 @app.on_event("startup")
@@ -15003,6 +15028,11 @@ async def get_knowledge_stats(user: str = Depends(require_auth)):
     # Symbol in der Baum-Darstellung (Einstellungen -> Wissen).
     for f in data["folders"]:
         f["has_children"] = _kb_has_subfolders(f["path"])
+        # Anzeigename OHNE den `data/rag/`-Praefix: der ist in jeder Zeile
+        # derselbe, traegt also keine Information und verdraengt die, die sich
+        # unterscheidet (Vorgabe 2026-09-13). Der technische Pfad bleibt in
+        # `path` – der Client braucht ihn fuer jede Folge-Anfrage.
+        f["display"] = _rag.anzeige(f["path"])
     return JSONResponse(data)
 
 
@@ -15667,8 +15697,12 @@ _KB_FOLDER_NAME_RE = re.compile(r"^[A-Za-z0-9äöüÄÖÜß][A-Za-z0-9äöüÄÖ
 # liegt dort, WEIL es ausserhalb jedes Wissensordners liegen soll. Ohne diesen
 # Eintrag koennte es jemand als Wissensordner eintragen – und alles waere still
 # wieder im Index, ohne dass es nach einem Fehler aussieht.
-_KB_RESERVED_DATA_DIRS = {"knowledge", "vector_store", "chroma_db", "logs", "vision",
-                          "instructions", "learned", "erfahrung", "backups", "wa_media"}
+# Die frueher hier gefuehrte Liste reservierter data/-Namen ist nach
+# ``backend/rag_pfad.SYSTEM_ORDNER`` gewandert. Sie schuetzt dort den einmaligen
+# Umzug; fuer das ANLEGEN braucht es sie nicht mehr, weil neue Wissensordner
+# ausschliesslich unter ``data/rag/`` entstehen – und dort liegt kein
+# Systemverzeichnis. Eine Namensliste an dieser Stelle waere ab jetzt sogar eine
+# Falschaussage: ``data/rag/logs`` ist ein voellig gewoehnlicher Wissensordner.
 
 
 def _kb_validate_folder_name(name: str) -> str | None:
@@ -15677,8 +15711,6 @@ def _kb_validate_folder_name(name: str) -> str | None:
         return "Kein Ordnername angegeben"
     if not _KB_FOLDER_NAME_RE.match(name) or ".." in name or name.endswith("."):
         return "Ungültiger Ordnername (erlaubt: Buchstaben, Zahlen, _ . - und Leerzeichen)"
-    if name.lower() in _KB_RESERVED_DATA_DIRS:
-        return f"'{name}' ist ein reservierter Systemordner"
     return None
 
 
@@ -15697,8 +15729,12 @@ def _kb_find_config_folder(path_arg: str):
 
 def _kb_save_folder_list(folders: list[str]) -> bool:
     """Persistiert die Ordner-Liste in der Knowledge-Skill-Config."""
-    if not folders:
-        folders = ["data/knowledge"]
+    # Eine LEERE Liste ist ab 2026-09-13 ein gueltiger Zustand: die Ordner
+    # liegen unter data/rag, und ein frisches System hat dort noch keinen.
+    # Frueher stand hier `data/knowledge` – das ist inzwischen reine
+    # Infrastruktur (pending/, .groups.json, WebDAV) und kein Speicherziel.
+    # Ein erfundener Rueckfall legte sonst bei jedem Leeren der Liste einen
+    # Ordner an, den niemand bestellt hat.
     sm = _get_skill_manager()
     return sm.update_skill_config("knowledge", {"folders": ",".join(folders)})
 
@@ -16104,6 +16140,7 @@ async def browse_knowledge_dir(path: str = "", user: str = Depends(require_knowl
             except OSError:
                 has_children = False
             subfolders.append({"path": entry_rel, "name": entry.name,
+                               "display": _rag.anzeige(entry_rel),
                                "has_children": has_children})
         elif entry.is_file() and entry.suffix.lower() in exts:
             size = entry.stat().st_size
@@ -16140,6 +16177,7 @@ async def knowledge_folder_tree(user: str = Depends(require_knowledge_editor)):
                 continue
             entry_rel = entry.relative_to(PROJECT_ROOT).as_posix()
             out.append({"path": entry_rel, "name": entry.name,
+                        "display": _rag.anzeige(entry_rel),
                         "depth": depth + 1, "is_root": False})
             _walk(entry_rel, depth + 1)
 
@@ -16150,7 +16188,8 @@ async def knowledge_folder_tree(user: str = Depends(require_knowledge_editor)):
         # Totes Netzlaufwerk nicht anfassen – sonst blockiert iterdir() minutenlang
         if not _safe_exists(PROJECT_ROOT / rel):
             continue
-        out.append({"path": rel, "name": rel.rsplit("/", 1)[-1],
+        out.append({"path": rel, "name": _rag.anzeige(rel),
+                    "display": _rag.anzeige(rel),
                     "depth": 0, "is_root": True})
         _walk(rel, 0)
 
@@ -16293,18 +16332,32 @@ async def move_knowledge_subfolder(request: Request, user: str = Depends(require
 
 @app.post("/api/knowledge/folders")
 async def create_knowledge_folder(request: Request, user: str = Depends(require_knowledge_editor)):
-    """Legt einen neuen Wissens-Ordner unter data/ an und nimmt ihn in die Ordner-Liste auf.
+    """Legt einen neuen Wissens-Ordner unter ``data/rag/`` an und nimmt ihn in die Liste auf.
 
     Body: ``{"name": "<ordnername>", "groups": ["<gid>", ...]}`` – nur einfacher
-    Name (kein Pfad), ein fuehrendes ``data/`` wird toleriert. Der Ordner wird
-    physisch erstellt. ``groups`` (optional): der neue Ordner wird direkt als
-    Speicherordner bei diesen Wissensgruppen eingetragen (siehe /wissen)."""
+    Name (kein Pfad); die Schreibweisen ``data/<name>`` und ``data/rag/<name>``
+    werden toleriert und meinen dasselbe. Der Ordner wird physisch erstellt.
+    ``groups`` (optional): der neue Ordner wird direkt als Speicherordner bei
+    diesen Wissensgruppen eingetragen (siehe /wissen).
+
+    ⚠ DER ORT IST NICHT MEHR WAEHLBAR (Vorgabe 2026-09-13): Wissensordner liegen
+    ausschliesslich unter ``data/rag``. Vorher war jeder direkte
+    ``data/``-Unterordner erlaubt – also derselbe Raum wie ``data/chats``,
+    ``data/logs`` und ``data/instructions``; auseinandergehalten wurden die
+    beiden Welten von einer gepflegten Namensliste, und die ist an dem Tag
+    unvollstaendig, an dem ein neues Datenverzeichnis dazukommt."""
     from backend.tools.knowledge import PROJECT_ROOT
     from backend import knowledge_groups as kg
     data = await request.json()
-    name = (data.get("name") or "").strip()
-    if name.startswith("data/"):
-        name = name[len("data/"):].strip()
+    name = (data.get("name") or "").strip().replace("\\", "/").strip("/")
+    # Praefixe abstreifen, egal in welcher Schreibweise sie kommen.
+    if name.startswith(_rag.RAG_REL + "/"):
+        name = name[len(_rag.RAG_REL) + 1:].strip("/")
+    elif name.startswith("data/"):
+        name = name[len("data/"):].strip("/")
+    if "/" in name:
+        return JSONResponse({"error": "Nur ein einfacher Ordnername – Unterordner "
+                                      "werden im Ordner selbst angelegt"}, status_code=400)
     err = _kb_validate_folder_name(name)
     if err:
         return JSONResponse({"error": err}, status_code=400)
@@ -16318,8 +16371,12 @@ async def create_knowledge_folder(request: Request, user: str = Depends(require_
             return JSONResponse({"error": "Unbekannte Wissensgruppe(n): " + ", ".join(bad)},
                                 status_code=400)
 
-    target = PROJECT_ROOT / "data" / name
-    rel = f"data/{name}"
+    rel = _rag.zu_rag(name)
+    target = PROJECT_ROOT / rel
+    # Die Wurzel muss es geben, bevor ein Unterordner darin entsteht – auf einem
+    # frischen System hat der Startup-Umzug sie zwar angelegt, aber ein
+    # geloeschtes data/rag darf das Anlegen nicht mit einem 500er beenden.
+    _rag.rag_wurzel().mkdir(parents=True, exist_ok=True)
     if target.exists():
         # Existiert schon physisch: nur in die Liste aufnehmen (kein Fehler)
         folders = _kb_current_folder_list()
@@ -16346,12 +16403,12 @@ async def create_knowledge_folder(request: Request, user: str = Depends(require_
 
 @app.put("/api/knowledge/folders")
 async def rename_knowledge_folder(request: Request, user: str = Depends(require_knowledge_editor)):
-    """Benennt einen Wissens-Ordner unter data/ um – das indizierte Wissen zieht mit.
+    """Benennt einen Wissens-Ordner unter ``data/rag/`` um – das Wissen zieht mit.
 
-    Body: ``{"path": "data/<alt>", "new_name": "<neu>"}``. TF-IDF-Cache,
+    Body: ``{"path": "data/rag/<alt>", "new_name": "<neu>"}``. TF-IDF-Cache,
     FAISS-Metadaten (ohne Neu-Embedding) und Wissensgruppen-Zuordnungen werden
-    auf den neuen Pfad umgeschrieben. ``data/knowledge`` und Systemordner sind
-    geschuetzt; waehrend einer laufenden Indizierung nicht moeglich."""
+    auf den neuen Pfad umgeschrieben. Nur direkte Unterordner von ``data/rag``;
+    waehrend einer laufenden Indizierung nicht moeglich."""
     from backend.tools.knowledge import (PROJECT_ROOT, get_index_progress,
                                          relocate_folder_index)
     data = await request.json()
@@ -16365,12 +16422,9 @@ async def rename_knowledge_folder(request: Request, user: str = Depends(require_
     if folder is None:
         return JSONResponse({"error": f"Ordner '{path_arg}' nicht konfiguriert"}, status_code=404)
 
-    data_root = (PROJECT_ROOT / "data").resolve()
-    if folder.resolve().parent != data_root:
-        return JSONResponse({"error": "Nur direkte Unterordner von data/ können umbenannt werden"},
-                            status_code=400)
-    if folder.name.lower() in _KB_RESERVED_DATA_DIRS:
-        return JSONResponse({"error": f"'{rel}' ist ein geschützter Systemordner"}, status_code=400)
+    if not _rag.ist_rag_ordner(rel) or folder.resolve().parent != _rag.rag_wurzel().resolve():
+        return JSONResponse({"error": f"Nur Wissens-Ordner unter '{_rag.RAG_REL}/' können "
+                                      f"umbenannt werden"}, status_code=400)
     # Ein Spiegel-Ordner darf nicht umbenannt werden: der Standort-Eintrag zeigt
     # auf diesen Pfad, nach dem Umbenennen liefe der naechste Lauf in einen
     # leeren Ordner und legte alles erneut an (der alte blieb verwaist stehen).
@@ -16381,9 +16435,11 @@ async def rename_knowledge_folder(request: Request, user: str = Depends(require_
     err = _kb_validate_folder_name(new_name)
     if err:
         return JSONResponse({"error": err}, status_code=400)
-    new_folder = PROJECT_ROOT / "data" / new_name
+    new_rel_vor = _rag.zu_rag(new_name)
+    new_folder = PROJECT_ROOT / new_rel_vor
     if new_folder.exists():
-        return JSONResponse({"error": f"Zielordner 'data/{new_name}' existiert bereits"}, status_code=409)
+        return JSONResponse({"error": f"Zielordner '{_rag.anzeige(new_rel_vor)}' existiert bereits"},
+                            status_code=409)
 
     # 1) Physisch umbenennen (falls vorhanden)
     if folder.exists():
@@ -16393,7 +16449,7 @@ async def rename_knowledge_folder(request: Request, user: str = Depends(require_
             return JSONResponse({"error": f"Umbenennen fehlgeschlagen: {e}"}, status_code=500)
 
     # 2) Ordner-Liste aktualisieren
-    new_rel = f"data/{new_name}"
+    new_rel = new_rel_vor
     folders = [new_rel if f == rel else f for f in _kb_current_folder_list()]
     _kb_save_folder_list(folders)
 
@@ -16409,7 +16465,7 @@ async def delete_knowledge_folder(request: Request, user: str = Depends(require_
     Body: ``{"path": "...", "delete_files": bool}``. Index-Eintraege (TF-IDF +
     FAISS) und Gruppen-Zuordnungen des Ordners werden immer entfernt;
     ``delete_files=true`` loescht zusaetzlich das Verzeichnis auf der Platte
-    (nur direkte data/-Unterordner, nie ``data/knowledge``/Systemordner)."""
+    (nur direkte Unterordner von ``data/rag``)."""
     import shutil
     from backend.tools.knowledge import (PROJECT_ROOT, get_index_progress,
                                          purge_folder_index)
@@ -16437,11 +16493,10 @@ async def delete_knowledge_folder(request: Request, user: str = Depends(require_
     # 2) Optional: Verzeichnis physisch loeschen (nur data/-Unterordner)
     deleted_dir = False
     if delete_files:
-        data_root = (PROJECT_ROOT / "data").resolve()
         resolved = folder.resolve()
-        if resolved.parent != data_root or folder.name.lower() in _KB_RESERVED_DATA_DIRS:
-            return JSONResponse({"error": "Nur direkte Unterordner von data/ können gelöscht werden"},
-                                status_code=400)
+        if not _rag.ist_rag_ordner(rel) or resolved.parent != _rag.rag_wurzel().resolve():
+            return JSONResponse({"error": f"Nur Wissens-Ordner unter '{_rag.RAG_REL}/' können "
+                                          f"gelöscht werden"}, status_code=400)
         if resolved.exists():
             try:
                 shutil.rmtree(resolved)
@@ -16775,7 +16830,7 @@ async def kb_sync_status(user: str = Depends(require_local_auth)):
 @app.post("/api/knowledge/upload")
 async def upload_knowledge_files(
     files: list[UploadFile] = File(...),
-    folder: str = Form("data/knowledge"),
+    folder: str = Form(""),
     groups: str = Form(""),
     user: str = Depends(require_knowledge_editor),
 ):
@@ -16889,7 +16944,12 @@ def _wissen_check_groups(user: str, req_groups: list):
 
 # Der Default-Ordner wird unter /wissen NICHT als Speicherziel angeboten –
 # dort zaehlt nur die explizite Speicherordner-Zuordnung der Gruppen.
-_WISSEN_HIDDEN_FOLDERS = {"data/knowledge"}
+# Frueher stand hier ``data/knowledge``: der Default-Ordner wurde unter /wissen
+# nie als Speicherziel angeboten. Seit dem Umzug auf ``data/rag`` (2026-09-13)
+# ist er ueberhaupt kein Wissensordner mehr, die Ausnahme hat also keinen
+# Gegenstand. Die Menge bleibt als Aufhaenger stehen – wer je einen Ordner
+# ausblenden will, hat dafuer eine Stelle und keine zweite Regel.
+_WISSEN_HIDDEN_FOLDERS: set[str] = set()
 
 
 def _wissen_group_folders(group: dict, configured: list) -> list:
@@ -16902,8 +16962,7 @@ def _wissen_group_folders(group: dict, configured: list) -> list:
 def _wissen_allowed_folders(user: str, groups: list) -> list:
     """Speicherordner, die ein /wissen-Nutzer fuer die gegebenen Gruppen nutzen
     darf: globale Wissens-Editoren alle konfigurierten Ordner, sonst die Union
-    der Speicherordner der Gruppen (Reihenfolge wie konfiguriert). Der
-    Default-Ordner data/knowledge ist unter /wissen generell ausgenommen."""
+    der Speicherordner der Gruppen (Reihenfolge wie konfiguriert)."""
     configured = _kb_current_folder_list()
     if _may_edit_knowledge(user):
         return [f for f in configured if f not in _WISSEN_HIDDEN_FOLDERS]
@@ -16916,15 +16975,17 @@ def _wissen_allowed_folders(user: str, groups: list) -> list:
 def _wissen_ordner_anzeige(rel_path: str, configured: list) -> str:
     """Ordner einer Wissensdatei, wie ein Benutzer ihn in /wissen kennt.
 
-    Gespeichert ist ein technischer Pfad (``data/knowledge/community``,
-    ``mnt/jarvis-kb/share_1/OneNote-Jasmin/0039_Maris``). Angezeigt wird die
-    gleiche Sprache wie in der Ordner-Auswahl darueber: der NAME des
-    konfigurierten Wurzelordners plus die Unterordner darunter – also
-    ``knowledge/community`` bzw. ``share_1/OneNote-Jasmin/0039_Maris``.
+    Gespeichert ist ein technischer Pfad (``data/rag/community/handbuch``,
+    ``mnt/rag/share_1/OneNote-Jasmin/0039_Maris``). Angezeigt wird die gleiche
+    Sprache wie in der Ordner-Auswahl darueber: der NAME des konfigurierten
+    Wurzelordners plus die Unterordner darunter – also ``community/handbuch``
+    bzw. ``share_1/OneNote-Jasmin/0039_Maris``. Der Praefix ``data/rag/`` ist in
+    jeder Zeile derselbe, traegt also keine Information und faellt weg
+    (Vorgabe 2026-09-13).
 
-    DAS MUSS DAS BACKEND MACHEN, nicht der Client: der kennt nur ``SCOPE.folders``,
-    und dort fehlt ``data/knowledge`` bewusst (es ist unter /wissen kein
-    Speicherziel) – ausgerechnet der Ordner, in dem die meisten Dateien liegen.
+    DAS MUSS DAS BACKEND MACHEN, nicht der Client: Dateien koennen in JEDEM
+    konfigurierten Ordner liegen, auch in einem, den dieser Benutzer nicht
+    beschreiben darf – er kennt nur seine eigenen Speicherziele.
 
     Passt kein konfigurierter Wurzelordner (Ordner wurde aus der Konfiguration
     genommen, Zuordnung blieb), bleibt der ROHE Verzeichnispfad stehen. Eine
@@ -16950,8 +17011,7 @@ async def wissen_scope(user: str = Depends(require_auth)):
     """Bereich des Nutzers: beschreibbare Wissensgruppen + verfuegbare Speicherordner.
 
     ``folders`` enthaelt nur die Ordner, die dem Nutzer als Upload-Ziel zustehen
-    (globale Editoren: alle; sonst die Speicherordner seiner Gruppen). Der
-    Default-Ordner ``data/knowledge`` wird unter /wissen nie angeboten; Gruppen
+    (globale Editoren: alle; sonst die Speicherordner seiner Gruppen). Gruppen
     ohne Zuordnung haben dort kein Speicherziel. Zusaetzlich traegt jede Gruppe
     ihre eigenen Speicherordner (``folders``), damit die Auswahl clientseitig
     auf die gewaehlten Gruppen eingegrenzt werden kann."""
@@ -16963,9 +17023,11 @@ async def wissen_scope(user: str = Depends(require_auth)):
     # an seine Wurzel, damit der Client nach gewaehlten Gruppen filtern kann.
     folders = []
     for p in allowed:
-        folders.append({"path": p, "name": Path(p).name, "root": p, "depth": 0})
+        folders.append({"path": p, "name": Path(p).name, "display": _rag.anzeige(p),
+                        "root": p, "depth": 0})
         for sub in _kb_list_subfolders(p):
             folders.append({"path": sub["path"], "name": sub["name"],
+                            "display": _rag.anzeige(sub["path"]),
                             "root": p, "depth": sub["depth"]})
     return JSONResponse({
         "ok": True, "user": user, "is_editor": _may_edit_knowledge(user),
@@ -16981,7 +17043,7 @@ async def wissen_scope(user: str = Depends(require_auth)):
 async def wissen_upload(
     request: Request,
     files: list[UploadFile] = File(...),
-    folder: str = Form("data/knowledge"),
+    folder: str = Form(""),
     groups: str = Form(""),
     gen_questions: str = Form(""),
     job_id: str = Form(""),
@@ -17921,7 +17983,9 @@ async def knowledge_assignments_set(request: Request, user: str = Depends(requir
 
 # ─── Netzwerk-Freigaben (Mounts) ─────────────────────────────────────
 
-_MOUNT_BASE = Path("/mnt/jarvis-kb")
+# Wurzel der Einhaengepunkte – EINE Quelle (backend/rag_pfad.py), damit
+# Konfiguration, Broker-Argument und Quellenanzeige nicht auseinanderlaufen.
+_MOUNT_BASE = _rag.MOUNT_BASIS
 
 
 def _mc_kennwort(m: dict) -> str:
@@ -18067,7 +18131,7 @@ def _kb_ordner_sicherstellen(mp) -> bool:
     ziel = str(mp)
     kb_state = config.get_skill_states().get("knowledge", {})
     kb_cfg = kb_state.get("config", {})
-    folders = kb_cfg.get("folders", "data/knowledge")
+    folders = kb_cfg.get("folders", "")
     if ziel in [f.strip() for f in folders.split(",")]:
         return False
     kb_cfg["folders"] = (folders + "," + ziel) if folders else ziel
@@ -18560,9 +18624,9 @@ async def remove_mount(idx: int, user: str = Depends(require_knowledge_editor)):
     # Ordner aus Knowledge-Liste entfernen
     kb_state = config.get_skill_states().get("knowledge", {})
     kb_cfg = kb_state.get("config", {})
-    folders = kb_cfg.get("folders", "data/knowledge")
+    folders = kb_cfg.get("folders", "")
     folder_list = [f.strip() for f in folders.split(",") if f.strip() and f.strip() != str(mp)]
-    kb_cfg["folders"] = ",".join(folder_list) if folder_list else "data/knowledge"
+    kb_cfg["folders"] = ",".join(folder_list)
     kb_state["config"] = kb_cfg
 
     mounts.pop(idx)

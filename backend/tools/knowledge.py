@@ -19,7 +19,12 @@ from backend.config import config
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 INDEX_CACHE_PATH = PROJECT_ROOT / "data" / "knowledge_index.json"
-DEFAULT_FOLDER = "data/knowledge"
+# Wurzel aller lokalen Wissensordner. Sie ist SELBST kein Wissensordner – die
+# konfigurierten Ordner sind ihre Unterordner (Vorgabe 2026-09-13). Bis dahin
+# stand hier `data/knowledge`; das ist seit dem Umzug reine Infrastruktur
+# (pending/, .groups.json, WebDAV-Wurzel) und darf nicht mehr indiziert werden.
+from backend.rag_pfad import RAG_REL as RAG_BASIS_REL
+DEFAULT_FOLDER = RAG_BASIS_REL
 # Groessenlimit je Datei. Von 50 auf 150 angehoben (2026-08-01), nachdem auf
 # ECHT ein 130-MB-PDF (KBV-Bewertungsmassstab) als einziger ECHTER Indexfehler
 # uebrig blieb.
@@ -685,7 +690,7 @@ def quell_anzeige(pfad: str) -> str:
 
 def _get_folders() -> list[Path]:
     cfg = _get_skill_config()
-    folders_str = cfg.get("folders", DEFAULT_FOLDER)
+    folders_str = cfg.get("folders", "")
     paths = []
     for f in folders_str.split(","):
         f = f.strip()
@@ -695,7 +700,12 @@ def _get_folders() -> list[Path]:
         if not p.is_absolute():
             p = PROJECT_ROOT / p
         paths.append(p)
-    return paths or [PROJECT_ROOT / DEFAULT_FOLDER]
+    # ⚠ KEIN RUECKFALL AUF EINEN ERFUNDENEN ORDNER. Eine leere Liste ist seit
+    # 2026-09-13 ein gueltiger Zustand (ein frisches System hat unter data/rag
+    # noch keinen Ordner). Frueher stand hier `data/knowledge` – seit dem Umzug
+    # waere das ein Wissensordner, der den internen Entwurfs-Speicher und das
+    # Gruppen-Manifest mitindiziert.
+    return paths
 
 
 # ─── Nicht-blockierende Verfügbarkeitspruefung fuer (Netz-)Ordner ─────────────
@@ -2753,6 +2763,19 @@ def _do_force_reindex(attempt: int = 1, resume_count: int = 0,
             # gelten: waeren alle Ordner "erreichbar", liefe vs.clear() -
             # und der Neuaufbau wuerde das Wissen der abgehaengten
             # Freigabe nicht wieder herstellen koennen.
+            # ⚠ LEERE ORDNERLISTE HEISST NICHT "ALLES LOESCHEN". Seit die Liste
+            # leer sein DARF (2026-09-13, kein Rueckfall mehr auf einen
+            # erfundenen Ordner) faellt sie sonst in den Zweig darunter:
+            # `len(alive) == len(folders)` ist fuer 0 == 0 wahr, und vs.clear()
+            # wuerde den gesamten Index wegwerfen. Eine beschaedigte settings.json
+            # oder ein versehentlich geleertes Feld kostete damit den ganzen
+            # Bestand. Abbrechen ist die harmlosere Halbfehlerstellung: wer
+            # wirklich nichts mehr indiziert haben will, entfernt die Dateien.
+            if not folders:
+                raise RuntimeError(
+                    "Kein Wissensordner konfiguriert – Neuaufbau abgebrochen. "
+                    "Der bestehende Index bleibt erhalten. Ordner anlegen unter "
+                    "Einstellungen → Wissen.")
             alive = _nutzbare_ordner(folders, vs.get_indexed_files())
             if folders and not alive:
                 # Gar nichts erreichbar: abbrechen statt leeren. Der Aufrufer
@@ -2883,7 +2906,8 @@ class KnowledgeTool(BaseTool):
         if not query.strip():
             return "❌ Fehler: query-Parameter fehlt. Bitte knowledge_search erneut aufrufen und einen konkreten Suchbegriff aus der Benutzeranfrage als 'query' übergeben (z.B. knowledge_search({'query': 'LDT Import Medistar'}))."
 
-        # Standardordner sicherstellen
+        # Die Wurzel der Wissensordner sicherstellen (data/rag). Sie selbst ist
+        # kein Wissensordner – ohne sie koennte aber kein einziger angelegt werden.
         (PROJECT_ROOT / DEFAULT_FOLDER).mkdir(parents=True, exist_ok=True)
 
         folders = _get_folders()
@@ -3113,7 +3137,10 @@ class KnowledgeManageTool(BaseTool):
                     rel = str(f.relative_to(PROJECT_ROOT))
                 except ValueError:
                     rel = str(f)
-                lines.append(f"  {'✅' if _safe_exists(f) else '❌'} {rel}")
+                from backend.rag_pfad import anzeige as _anz
+                name = _anz(rel)
+                lines.append(f"  {'✅' if _safe_exists(f) else '❌'} {name}"
+                             + (f"  ({rel})" if name != rel else ""))
             return "📁 Knowledge-Ordner:\n" + "\n".join(lines)
 
         elif action == "add_folder":
@@ -3122,14 +3149,23 @@ class KnowledgeManageTool(BaseTool):
             states = config.get_skill_states()
             state = states.get("knowledge", {})
             cfg = state.get("config", {})
-            folders = [f.strip() for f in cfg.get("folders", DEFAULT_FOLDER).split(",") if f.strip()]
-            if folder_arg in folders:
-                return f"ℹ️ '{folder_arg}' ist bereits konfiguriert."
-            folders.append(folder_arg)
+            from backend import rag_pfad as _rag
+            ziel = _rag.zu_rag(folder_arg)
+            if not ziel or not _rag.ist_rag_ordner(ziel):
+                return (f"❌ '{folder_arg}' ist kein gültiger Wissens-Ordner. "
+                        f"Wissens-Ordner liegen ausschließlich unter "
+                        f"'{_rag.RAG_REL}/' – gib nur den Namen an "
+                        f"(z.B. 'handbuecher'). Netzwerk-Freigaben werden unter "
+                        f"Einstellungen → Wissen eingebunden, nicht hier.")
+            folders = [f.strip() for f in cfg.get("folders", "").split(",") if f.strip()]
+            if ziel in folders:
+                return f"ℹ️ '{_rag.anzeige(ziel)}' ist bereits konfiguriert."
+            (PROJECT_ROOT / ziel).mkdir(parents=True, exist_ok=True)
+            folders.append(ziel)
             cfg["folders"] = ",".join(folders)
             state["config"] = cfg
             config.save_skill_state("knowledge", state)
-            return f"✅ Ordner '{folder_arg}' hinzugefügt."
+            return f"✅ Ordner '{_rag.anzeige(ziel)}' hinzugefügt."
 
         elif action == "remove_folder":
             if not folder_arg:
@@ -3137,14 +3173,20 @@ class KnowledgeManageTool(BaseTool):
             states = config.get_skill_states()
             state = states.get("knowledge", {})
             cfg = state.get("config", {})
-            folders = [f.strip() for f in cfg.get("folders", DEFAULT_FOLDER).split(",") if f.strip()]
-            if folder_arg not in folders:
+            from backend import rag_pfad as _rag
+            folders = [f.strip() for f in cfg.get("folders", "").split(",") if f.strip()]
+            treffer = next((f for f in folders
+                            if f == folder_arg or _rag.anzeige(f) == folder_arg
+                            or f == _rag.zu_rag(folder_arg)), None)
+            if treffer is None:
                 return f"ℹ️ '{folder_arg}' nicht in der Liste."
-            folders.remove(folder_arg)
-            cfg["folders"] = ",".join(folders) if folders else DEFAULT_FOLDER
+            folders.remove(treffer)
+            # Kein Rueckfall auf einen erfundenen Ordner: eine leere Liste ist
+            # ein gueltiger Zustand (siehe _get_folders).
+            cfg["folders"] = ",".join(folders)
             state["config"] = cfg
             config.save_skill_state("knowledge", state)
-            return f"✅ Ordner '{folder_arg}' entfernt."
+            return f"✅ Ordner '{_rag.anzeige(treffer)}' entfernt."
 
         elif action == "reindex":
             result = await asyncio.to_thread(force_reindex)

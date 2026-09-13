@@ -8,7 +8,6 @@ class JarvisKnowledgeManager {
 
         // Buttons verbinden
         const btnReindex = document.getElementById('btn-kb-reindex');
-        const btnAddFolder = document.getElementById('btn-kb-add-folder');
         const btnCreateFolder = document.getElementById('btn-kb-create-folder');
 
         // Ein Knopf, zwei Funktionen: solange die Indizierung laeuft, bricht er ab.
@@ -16,14 +15,13 @@ class JarvisKnowledgeManager {
             if (this._indexRunning) this.cancelReindex();
             else this.reindex();
         });
-        if (btnAddFolder) btnAddFolder.addEventListener('click', () => this.addFolder());
         if (btnCreateFolder) btnCreateFolder.addEventListener('click', () => this.createFolder());
 
         // Enter-Taste im Eingabefeld
         const folderInput = document.getElementById('kb-folder-input');
         if (folderInput) {
             folderInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') this.addFolder();
+                if (e.key === 'Enter') this.createFolder();
             });
         }
     }
@@ -281,7 +279,7 @@ class JarvisKnowledgeManager {
                     <textarea id="kbgrp-perm-groups" class="kb-input" rows="2" style="width:100%;box-sizing:border-box;"></textarea>
                     <label class="kb-form-label" style="display:block;margin:16px 0 4px;">${T('kbgroups.folders_label', 'Speicherordner (/wissen)')}</label>
                     <p class="kb-hint" style="margin:0 0 6px;">${T('kbgroups.folders_hint',
-                        'Nutzern dieser Gruppe werden auf der /wissen-Seite nur diese Ordner als Speicherziel angeboten. Ohne Auswahl gilt der Standardordner data/knowledge.')}</p>
+                        'Nutzern dieser Gruppe werden auf der /wissen-Seite nur diese Ordner als Speicherziel angeboten. Ohne Auswahl hat die Gruppe dort kein Speicherziel.')}</p>
                     <div id="kbgrp-perm-folders" class="kb-grp-checks">${folderRows}</div>
                     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;">
                         <button type="button" id="kbgrp-perm-cancel" class="kb-btn-action">${T('common.cancel', 'Abbrechen')}</button>
@@ -2087,10 +2085,29 @@ class JarvisKnowledgeManager {
 
     // HTML eines Ordner-Knotens. Wurzeln behalten Bearbeiten/Entfernen; Unterordner
     // bekommen Löschen. Beide erhalten "Unterordner erstellen" (➕).
-    _folderNodeHtml(path, exists, isRoot, hasChildren) {
+    // Der Pfad, wie ein Mensch ihn liest: ohne den Praefix `data/rag/` bzw.
+    // `/mnt/rag/`, der in JEDER Zeile derselbe ist (Vorgabe 2026-09-13).
+    //
+    // ⚠ DAS IST DER RUECKFALL, nicht der Regelweg: die Endpunkte liefern
+    // `display` mit, berechnet von `backend/rag_pfad.anzeige()`. Dieser Helfer
+    // greift nur, wenn das Feld fehlt (aelteres Backend, halb ausgerollter
+    // Stand) – ohne ihn stuende dort der rohe Pfad, und der Umbau saehe wie ein
+    // Fehler aus. Ein Test haelt beide Fassungen deckungsgleich.
+    _anzeigePfad(path) {
+        const s = String(path == null ? '' : path).replace(/\\/g, '/').trim().replace(/\/+$/, '');
+        if (!s) return '';
+        for (const basis of ['data/rag', '/mnt/rag', '/mnt/jarvis-kb']) {
+            if (s.startsWith(basis + '/')) return s.slice(basis.length + 1).replace(/^\/+|\/+$/g, '') || s;
+        }
+        return s;
+    }
+
+    _folderNodeHtml(path, exists, isRoot, hasChildren, display) {
         const id = this._pathId(path);
         const sp = path.replace(/'/g, "\\'");
-        const name = isRoot ? path : path.split('/').pop();
+        // Wurzelordner: der ganze Weg ohne Praefix. Unterordner: nur ihr eigener
+        // Name – sie stehen eingerueckt unter ihrer Wurzel, der Rest waere Rauschen.
+        const name = isRoot ? (display || this._anzeigePfad(path)) : path.split('/').pop();
         // Symbol richtet sich danach, ob der Ordner Unterordner enthält:
         // 🗂️ = mit Unterordnern, 📁 = ohne, ⚠️ = existiert nicht.
         const icon = exists === false ? '⚠️' : (hasChildren ? '🗂️' : '📁');
@@ -2177,7 +2194,7 @@ class JarvisKnowledgeManager {
             el.innerHTML = `<div class="kb-empty">${window.t('knowledge.no_folders')}</div>`;
             return;
         }
-        el.innerHTML = folders.map(f => this._folderNodeHtml(f.path, f.exists, true, f.has_children)).join('');
+        el.innerHTML = folders.map(f => this._folderNodeHtml(f.path, f.exists, true, f.has_children, f.display)).join('');
     }
 
     // Ordner auf-/zuklappen; lädt Unterordner + Dateien per /api/knowledge/browse.
@@ -2343,7 +2360,7 @@ class JarvisKnowledgeManager {
                 <button class="kb-move-opt" data-path="${esc(f.path)}" type="button"
                     style="display:block;width:100%;text-align:left;background:none;border:none;border-radius:6px;cursor:pointer;padding:7px 10px;color:var(--text-primary);font-size:0.85rem;padding-left:${10 + f.depth * 16}px;">
                     ${f.is_root ? '📁' : '↳'} ${esc(f.name)}
-                    <span style="color:var(--text-muted);font-size:0.75rem;">${esc(f.path)}</span>
+                    <span style="color:var(--text-muted);font-size:0.75rem;">${esc(f.display || this._anzeigePfad(f.path))}</span>
                 </button>`).join('');
             modal.innerHTML = `
                 <div style="background:var(--bg-glass);border:1px solid var(--border);border-radius:12px;max-width:560px;width:90vw;max-height:75vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
@@ -2707,55 +2724,7 @@ class JarvisKnowledgeManager {
         }
     }
 
-    // ─── Ordner hinzufügen ────────────────────────────────────────────
-
-    async addFolder() {
-        const input = document.getElementById('kb-folder-input');
-        if (!input) return;
-
-        const folder = input.value.trim();
-        if (!folder) return;
-
-        // Einfacher Name (optional mit fuehrendem data/) -> Ordner ANLEGEN, falls
-        // er fehlt, und in die Liste aufnehmen (Create-Endpoint legt data/<name>
-        // physisch an; 409 = schon vorhanden = ok). Verhindert das Warndreieck
-        // "Ordner existiert nicht" beim Hinzufuegen eines neuen Namens.
-        // Echte Pfade (mit / oder absolut) werden wie bisher nur registriert.
-        const bareName = folder.replace(/^data\//, '');
-        const isSimpleName = !folder.startsWith('/') && !bareName.includes('/') && !bareName.includes('..');
-        const token = localStorage.getItem('jarvis_token') || '';
-        // Ausgewaehlte Wissensgruppen ("Beim Anlegen als Speicherordner zuordnen")
-        // – gilt fuer BEIDE Buttons; das Zuordnen erfolgt nur beim Create-Weg.
-        const groupsEl = document.getElementById('kb-folder-groups');
-        const groups = window.KbGroups ? window.KbGroups.readChecked(groupsEl) : [];
-        try {
-            if (isSimpleName) {
-                const resp = await fetch('/api/knowledge/folders', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-                    body: JSON.stringify({ name: bareName, groups })
-                });
-                const result = await resp.json().catch(() => ({}));
-                // 409 = Ordner ist bereits in der Liste -> kein Fehler
-                if (!resp.ok && resp.status !== 409) throw new Error(result.error || ('HTTP ' + resp.status));
-            } else {
-                const resp = await fetch('/api/skills/knowledge/config', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-                    body: JSON.stringify({ folders: await this._buildNewFolderList(folder, 'add') })
-                });
-                if (!resp.ok) throw new Error('HTTP ' + resp.status);
-            }
-            input.value = '';
-            this._showNotification(window.t('knowledge.folder_added'), 'success');
-            await this.fetchStats();
-            if (window.KbGroups) await this._refreshGroups();
-        } catch (e) {
-            this._showNotification(window.t('common.error') + ': ' + e.message, 'error');
-        }
-    }
-
-    // ─── Ordner neu anlegen (data/<name>, physisch + in der Liste) ────
+    // ─── Ordner neu anlegen (data/rag/<name>, physisch + in der Liste) ────
 
     async createFolder() {
         const input = document.getElementById('kb-folder-input');
@@ -2806,9 +2775,13 @@ class JarvisKnowledgeManager {
         const esc = KG ? KG.esc : (s => String(s == null ? '' : s).replace(/[&<>"]/g, c =>
             ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])));
 
-        const renameable = folder.startsWith('data/') && !folder.slice(5).includes('/')
-            && folder !== 'data/knowledge';
-        const curName = folder.replace(/^data\//, '');
+        // Umbenennen geht nur fuer einen WURZELordner unter data/rag – also
+        // genau eine Ebene tief. Unterordner haben ihren eigenen Knopf
+        // (`renameSubfolder`), Netzwerk-Freigaben werden ueber die Freigabe
+        // selbst verwaltet.
+        const RAG = 'data/rag/';
+        const renameable = folder.startsWith(RAG) && !folder.slice(RAG.length).includes('/');
+        const curName = renameable ? folder.slice(RAG.length) : this._anzeigePfad(folder);
 
         // Aktuelle Zuordnung: Gruppen, die diesen Ordner als Speicherordner fuehren
         const assigned = new Set();
@@ -2899,12 +2872,18 @@ class JarvisKnowledgeManager {
     }
 
     async removeFolder(folder) {
-        if (!confirm(window.t('knowledge.folder_remove_confirm').replace('{folder}', folder))) return;
+        // In der Rueckfrage steht der Name, den der Benutzer in der Liste sieht –
+        // der technische Pfad geht an den Server, nicht an den Menschen.
+        const gezeigt = this._anzeigePfad(folder);
+        if (!confirm(window.t('knowledge.folder_remove_confirm').replace('{folder}', gezeigt))) return;
 
-        // data/-Unterordner: nachfragen, ob Dateien + Wissen von der Platte sollen
+        // Wurzelordner unter data/rag (genau eine Ebene tief): nachfragen, ob die
+        // Dateien mit von der Platte sollen. Bei einer Netzwerk-Freigabe waere die
+        // Frage falsch – dort liegen fremde Daten, geloescht wird nur der Eintrag.
+        const RAG = 'data/rag/';
         let deleteFiles = false;
-        if (folder.startsWith('data/') && !folder.slice(5).includes('/') && folder !== 'data/knowledge') {
-            deleteFiles = confirm(window.t('knowledge.folder_delete_files_confirm').replace('{folder}', folder));
+        if (folder.startsWith(RAG) && !folder.slice(RAG.length).includes('/')) {
+            deleteFiles = confirm(window.t('knowledge.folder_delete_files_confirm').replace('{folder}', gezeigt));
         }
 
         try {
@@ -2925,24 +2904,6 @@ class JarvisKnowledgeManager {
         } catch (e) {
             this._showNotification(window.t('common.error') + ': ' + e.message, 'error');
         }
-    }
-
-    async _buildNewFolderList(folder, action) {
-        // Aktuelle Ordnerliste aus Stats laden
-        const resp = await fetch('/api/knowledge/stats', {
-            headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
-        });
-        const stats = await resp.json();
-        let folders = (stats.folders || []).map(f => f.path);
-
-        if (action === 'add') {
-            if (!folders.includes(folder)) folders.push(folder);
-        } else if (action === 'remove') {
-            folders = folders.filter(f => f !== folder);
-            if (folders.length === 0) folders = ['data/knowledge'];
-        }
-
-        return folders.join(',');
     }
 
     // ─── Reindex ─────────────────────────────────────────────────────

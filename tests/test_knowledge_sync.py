@@ -46,7 +46,7 @@ def section(t):
 
 # ── Attrappen VOR dem Import von knowledge_sync ─────────────────────────────
 TMP = Path(tempfile.mkdtemp(prefix="kbsync_test_"))
-WISSEN = TMP / "data" / "knowledge"
+WISSEN = TMP / "data" / "rag" / "wissen"
 FERN = WISSEN / "technik"                 # freigegebener Ordner (Rolle Geber)
 FERN.mkdir(parents=True)
 
@@ -81,7 +81,7 @@ _kg.get_group = lambda gid: next((g for g in _kg._groups if g["id"] == gid), Non
 _kg.set_assignment = lambda rel, gids: _kg._assign.__setitem__(rel, list(gids))
 _kg.add_folder_to_groups = lambda rel, gids: _kg._folder_calls.append((rel, list(gids)))
 
-_cfg_state = {"skills": {"knowledge": {"enabled": True, "config": {"folders": "data/knowledge"}}}}
+_cfg_state = {"skills": {"knowledge": {"enabled": True, "config": {"folders": "data/rag/wissen"}}}}
 _config = types.SimpleNamespace(
     get_skill_states=lambda: _cfg_state["skills"],
     save_skill_state=lambda name, state: _cfg_state["skills"].__setitem__(name, state),
@@ -127,7 +127,7 @@ def schreibe(pfad: Path, text: str, mtime: float | None = None):
 # ── 1. Token ────────────────────────────────────────────────────────────────
 section("1. Token und Freigabe-Auth")
 schreibe(FERN / "handbuch.md", "# Handbuch\ninhalt")
-share = ks.create_share("data/knowledge/technik", "Technik", "admin")
+share = ks.create_share("data/rag/wissen/technik", "Technik", "admin")
 token = share["token"]
 check(token.startswith(ks.TOKEN_PREFIX), "Token traegt das Praefix")
 check(token.split(".")[1] == share["id"], "Freigabe-Kennung steckt im Token")
@@ -153,7 +153,7 @@ token = neu["token"]
 # ── 2. Freigabe-Verwaltung ──────────────────────────────────────────────────
 section("2. Freigabe-Verwaltung")
 try:
-    ks.create_share("data/knowledge/technik")
+    ks.create_share("data/rag/wissen/technik")
     check(False, "zweite Freigabe auf denselben Ordner wird abgelehnt")
 except ValueError:
     check(True, "zweite Freigabe auf denselben Ordner wird abgelehnt")
@@ -167,7 +167,7 @@ for pfad in ("/etc", "data", "../etc", "data/documents"):
 geaendert = ks.update_share(share["id"], label="Neu", folder="data/documents",
                             token="JARVIS-KBS-1.x.y", id="fremd")
 check(geaendert["label"] == "Neu", "Beschriftung ist aenderbar")
-check(ks.get_share(share["id"])["folder"] == "data/knowledge/technik",
+check(ks.get_share(share["id"])["folder"] == "data/rag/wissen/technik",
       "folder ist NICHT ueber PATCH aenderbar")
 check(ks.share_by_token(token) is not None, "token ist NICHT ueber PATCH aenderbar")
 check("token" not in ks.list_shares()[0], "Liste ohne mit_token enthaelt kein Token")
@@ -260,25 +260,30 @@ for ziel in ("knowledge/x", "data/", "data/../etc", "data/a/b", "data/.geheim",
     except ValueError:
         check(True, f"Zielordner abgelehnt: {ziel!r}")
 try:
-    ks._pruefe_ziel("data/knowledge")
+    ks._pruefe_ziel("data/rag/wissen")
     check(False, "bestehender Wissensordner als Ziel abgelehnt")
 except ValueError:
     check(True, "bestehender Wissensordner als Ziel abgelehnt")
+# Und die Normierung: dieselbe Freigabe, drei Schreibweisen, ein Ergebnis.
+check(ks._pruefe_ziel("neuer_spiegel") == "data/rag/neuer_spiegel"
+      and ks._pruefe_ziel("data/neuer_spiegel") == "data/rag/neuer_spiegel"
+      and ks._pruefe_ziel("data/rag/neuer_spiegel") == "data/rag/neuer_spiegel",
+      "Zielordner wird auf data/rag normiert (drei Schreibweisen, ein Ergebnis)")
 
 try:
-    ks.create_peer("Standort 1", "https://s1", "falsches-token", "data/s1_technik")
+    ks.create_peer("Standort 1", "https://s1", "falsches-token", "data/rag/s1_technik")
     check(False, "Token ohne Praefix wird abgelehnt")
 except ValueError:
     check(True, "Token ohne Praefix wird abgelehnt")
 
-peer = ks.create_peer("Standort 1", "https://s1.example", token, "data/s1_technik",
+peer = ks.create_peer("Standort 1", "https://s1.example", token, "data/rag/s1_technik",
                       group_id="ibs", fingerprint="sha256:aa", auto=False,
                       interval=30, unit="minutes")
-check(peer["target_folder"] == "data/s1_technik", "Zielordner gespeichert")
+check(peer["target_folder"] == "data/rag/s1_technik", "Zielordner gespeichert")
 check("token" not in peer and peer["token_set"] is True,
       "Token geht nicht an die Oberflaeche, nur die Tatsache")
 try:
-    ks.create_peer("Standort 2", "https://s2.example", token, "data/s1_technik")
+    ks.create_peer("Standort 2", "https://s2.example", token, "data/rag/s1_technik")
     check(False, "zweiter Standort auf dasselbe Ziel abgelehnt")
 except ValueError:
     check(True, "zweiter Standort auf dasselbe Ziel abgelehnt")
@@ -295,9 +300,9 @@ ks.update_peer(peer["id"], state="paused")
 check(peer["id"] not in ks.faellige_standorte(), "pausierter Standort ist nicht faellig")
 ks.update_peer(peer["id"], state="active")
 
-geaendert = ks.update_peer(peer["id"], name="S1", target_folder="data/woanders",
+geaendert = ks.update_peer(peer["id"], name="S1", target_folder="data/rag/woanders",
                            interval=6, unit="hours", token="")
-check(geaendert["target_folder"] == "data/s1_technik",
+check(geaendert["target_folder"] == "data/rag/s1_technik",
       "target_folder ist NICHT ueber PATCH aenderbar")
 check(ks.get_peer(peer["id"])["token"] == token, "leeres Token laesst das alte stehen")
 check(geaendert["interval"] == 6 and geaendert["unit"] == "hours", "Intervall aenderbar")
@@ -306,20 +311,20 @@ check(ks.ziel_vorschlag("Standort 1", "Technik Süd") == "data/standort_1_techni
 
 # ── 6. Spiegel-Schutz ───────────────────────────────────────────────────────
 section("6. Spiegel-Schutz")
-check(ks.ist_spiegel("data/s1_technik") is True, "der Zielordner selbst ist Spiegel")
-check(ks.ist_spiegel("data/s1_technik/unter/a.md") is True, "Pfad darunter ist Spiegel")
-check(ks.ist_spiegel("data/s1_technikaehnlich") is False,
+check(ks.ist_spiegel("data/rag/s1_technik") is True, "der Zielordner selbst ist Spiegel")
+check(ks.ist_spiegel("data/rag/s1_technik/unter/a.md") is True, "Pfad darunter ist Spiegel")
+check(ks.ist_spiegel("data/rag/s1_technikaehnlich") is False,
       "aehnlich benannter Nachbarordner ist KEIN Spiegel")
-check(ks.ist_spiegel("data/knowledge") is False, "eigener Wissensordner ist kein Spiegel")
+check(ks.ist_spiegel("data/rag/wissen") is False, "eigener Wissensordner ist kein Spiegel")
 check(ks.ist_spiegel("") is False, "leerer Pfad ist kein Spiegel")
-grund = ks.schreibsperre("data/s1_technik/a.md")
+grund = ks.schreibsperre("data/rag/s1_technik/a.md")
 check("S1" in grund and "s1_technik" in grund,
       "Sperrmeldung nennt Standort und Ordner", grund)
-check(ks.schreibsperre("data/knowledge/a.md") == "", "kein Grund fuer normale Ordner")
+check(ks.schreibsperre("data/rag/wissen/a.md") == "", "kein Grund fuer normale Ordner")
 
 # ── 7. _sicheres_ziel (Schreiben beim Nehmer) ───────────────────────────────
 section("7. Zielpfade beim Nehmer")
-wurzel = TMP / "data" / "s1_technik"
+wurzel = TMP / "data" / "rag" / "s1_technik"
 wurzel.mkdir(parents=True, exist_ok=True)
 check(ks._sicheres_ziel(wurzel, "a/b/c.md") is not None, "normaler Unterpfad erlaubt")
 for boese in ("../ausbruch.md", "/etc/passwd", "..\\a.md", "C:/a.md", "", ".geheim.md",
@@ -468,11 +473,11 @@ check((wurzel / "unter" / "preise.csv").is_file(), "Unterordner wurde angelegt")
 check(not list(wurzel.rglob("*.kbsync.tmp")), "keine Nebendateien uebrig")
 check(_kn._reindex_calls == [{"incremental": True}],
       "Index wird INKREMENTELL nachgezogen", str(_kn._reindex_calls))
-check(_kg._assign.get("data/s1_technik/handbuch.md") == ["ibs"],
+check(_kg._assign.get("data/rag/s1_technik/handbuch.md") == ["ibs"],
       "Datei ist der gewaehlten Wissensgruppe zugeordnet")
 check(not _kg._folder_calls,
       "Spiegel wird NICHT Ablageziel der Gruppe", str(_kg._folder_calls))
-check("data/s1_technik" in _cfg_state["skills"]["knowledge"]["config"]["folders"],
+check("data/rag/s1_technik" in _cfg_state["skills"]["knowledge"]["config"]["folders"],
       "Zielordner ist als Wissensordner registriert")
 check(ks.gespiegelte_dateien() == 2, "gespiegelte Dateien werden gezaehlt")
 
@@ -577,7 +582,7 @@ check(ks.STATE_PATH.is_file(), "Zustandsdatei wurde geschrieben")
 check(oct(ks.STATE_PATH.stat().st_mode)[-3:] == "640", "Zustandsdatei ist 0640",
       oct(ks.STATE_PATH.stat().st_mode))
 roh = json.loads(ks.STATE_PATH.read_text())
-check(roh["peers"][0]["target_folder"] == "data/s1_technik", "Standort ist gespeichert")
+check(roh["peers"][0]["target_folder"] == "data/rag/s1_technik", "Standort ist gespeichert")
 ks._reset_fuer_tests()
 check(len(ks.list_peers()) == 1 and len(ks.list_shares()) == 1,
       "Zustand ueberlebt einen Neustart")
@@ -593,24 +598,24 @@ section("11. Standort loeschen")
 ks._reset_fuer_tests()
 ks.STATE_PATH.unlink(missing_ok=True)
 ks._reset_fuer_tests()
-sh2 = ks.create_share("data/knowledge/technik", "Technik", "admin")
-p2 = ks.create_peer("Standort 1", "https://s1.example", sh2["token"], "data/s1_technik",
+sh2 = ks.create_share("data/rag/wissen/technik", "Technik", "admin")
+p2 = ks.create_peer("Standort 1", "https://s1.example", sh2["token"], "data/rag/s1_technik",
                     group_id="ibs", fingerprint=_FP_A)
 res = ks.delete_peer(p2["id"], daten_entfernen=False)
 check(res["ok"] and res["folder_kept"], "Loeschen ohne Daten laesst die Kopie liegen")
 check(wurzel.is_dir(), "Ordner ist noch da")
-check("data/s1_technik" in _cfg_state["skills"]["knowledge"]["config"]["folders"],
+check("data/rag/s1_technik" in _cfg_state["skills"]["knowledge"]["config"]["folders"],
       "Ordner bleibt Wissensordner (weiter durchsuchbar)")
-check(ks.ist_spiegel("data/s1_technik") is False,
+check(ks.ist_spiegel("data/rag/s1_technik") is False,
       "nach dem Loeschen ist der Ordner kein Spiegel mehr (wieder beschreibbar)")
 
-p3 = ks.create_peer("Standort 1", "https://s1.example", sh2["token"], "data/s1_technik",
+p3 = ks.create_peer("Standort 1", "https://s1.example", sh2["token"], "data/rag/s1_technik",
                     group_id="ibs", fingerprint=_FP_A)
 res = ks.delete_peer(p3["id"], daten_entfernen=True)
 check(res["ok"] and res["removed_files"] >= 1, "Loeschen mit Daten entfernt Dateien",
       json.dumps(res))
 check(not wurzel.exists(), "Ordner ist weg")
-check("data/s1_technik" not in _cfg_state["skills"]["knowledge"]["config"]["folders"],
+check("data/rag/s1_technik" not in _cfg_state["skills"]["knowledge"]["config"]["folders"],
       "Ordner ist als Wissensordner abgemeldet")
 check(ks.delete_peer("gibtsnicht")["ok"] is False, "unbekannter Standort -> ok:false")
 
@@ -640,8 +645,11 @@ for route in ('@app.get("/api/knowledge/pull/manifest")',
 check(src_main.count("_kb_mirror_guard(") >= 10,
       "Spiegel-Sperre sitzt an allen Schreibpfaden",
       str(src_main.count("_kb_mirror_guard(")))
-for stelle in ('folder: str = Form("data/knowledge")',):
-    check(src_main.count(stelle) == 2, "beide Upload-Endpunkte haben einen Zielordner")
+check(src_main.count("folder: str = Form(") == 2,
+      "beide Upload-Endpunkte haben einen Zielordner-Parameter",
+      str(src_main.count("folder: str = Form(")))
+check('folder: str = Form("data/knowledge")' not in src_main,
+      "kein Endpunkt faellt mehr auf data/knowledge als Zielordner zurueck")
 check("_kb_mirror_guard(folder)" in src_main, "Upload prueft den Zielordner")
 
 src_sb = (ROOT / "backend" / "sandbox.py").read_text(encoding="utf-8")

@@ -92,8 +92,16 @@ def _roots(*paths):
 # Schreib-Arbeitsbereich fuer Domain-Nutzer
 WRITE_ROOTS = _roots("/tmp", str(PROJECT_ROOT / "data" / "documents"))
 # Lese-Allowlist fuer Domain-Nutzer (alles andere gesperrt -> Root/System dicht)
+# ⚠ DIE ALTEN ORTE BLEIBEN NEBEN DEN NEUEN STEHEN. Seit 2026-09-13 liegen
+# Wissensordner unter `data/rag` und Freigaben unter `/mnt/rag`. Der Umzug laeuft
+# beim Dienststart, ein bereits EINGEHAENGTER Mount bleibt aber bis zum naechsten
+# "Verbinden" an seinem alten Punkt – naehme man `/mnt/jarvis-kb` sofort heraus,
+# waere sein Inhalt fuer die Shell still unlesbar, und der Grund dafuer stuende
+# nirgends. Beide Orte tragen dieselbe Art Inhalt (Wissensdateien), die
+# Vertrauensstufe aendert sich also nicht.
 READ_ROOTS = _roots(
-    "/tmp", "/mnt/jarvis-kb",
+    "/tmp", "/mnt/rag", "/mnt/jarvis-kb",
+    str(PROJECT_ROOT / "data" / "rag"),
     str(PROJECT_ROOT / "data" / "knowledge"),
     str(PROJECT_ROOT / "data" / "documents"),
 )
@@ -231,8 +239,10 @@ _APP_DENY_REL = (
 # nur vom Dienst-Verzeichnis. Deswegen bekommt der Agent Anhaenge als
 # Arbeitskopie in /tmp (main.py) und nicht ueber data/documents.
 #
-# data/knowledge bleibt ABSICHTLICH lesbar: die Shell soll Wissensdateien
-# verarbeiten koennen (READ_ROOTS erlaubt es ausdruecklich).
+# data/rag bleibt ABSICHTLICH lesbar: die Shell soll Wissensdateien verarbeiten
+# koennen (READ_ROOTS erlaubt es ausdruecklich). data/knowledge steht dort
+# weiterhin daneben – es ist seit 2026-09-13 reine Infrastruktur (pending/,
+# .groups.json), enthaelt aber auf einem noch nicht umgezogenen System Wissen.
 PRIVATE_DIRS = ("data/documents", "data/chats", "data/logs")
 PRIVATE_MODE = 0o750
 
@@ -588,7 +598,7 @@ def authorize_shell(cmd: str) -> tuple[bool, str, str]:
         if treffer.startswith("/"):
             hinweis = ("Lesende Suchen laufen im Arbeitsverzeichnis; die "
                        "Wissensdatenbank durchsuchst du mit knowledge_search "
-                       "(ihre Dateien liegen unter data/knowledge).")
+                       "(ihre Dateien liegen unter data/rag).")
         else:
             hinweis = "Diese Datei ist unabhängig vom Ort gesperrt."
         return False, f"'{treffer}' ist gesperrt. {hinweis}", "pfad:" + treffer.lower()

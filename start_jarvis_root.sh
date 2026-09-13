@@ -300,6 +300,25 @@ if [ "${JARVIS_BWRAP_AUTO:-1}" != "0" ] && [ ! -x /usr/bin/bwrap ]; then
     ) &
 fi
 
+# 6h. Wurzel der Netzwerk-Freigaben anlegen (/mnt/rag)
+#
+# WARUM HIER: `/mnt` gehoert root, das Backend laeuft unprivilegiert – es kann
+# die Wurzel also nicht selbst anlegen. Der Broker legt den einzelnen
+# Einhaengepunkt beim Verbinden zwar mit an, aber bis dahin zeigt die
+# Ordnerliste auf ein Verzeichnis, das es nicht gibt: die Freigabe traegt in
+# der Oberflaeche ein Warndreieck "Ordner existiert nicht", und das ist eine
+# andere Aussage als "nicht verbunden".
+#
+# Eine Zeile, kein Netzzugriff, idempotent – deshalb synchron und nicht im
+# Hintergrund wie 6c–6g. Gemeldet wird nur ein Problem.
+if [ ! -d /mnt/rag ]; then
+    if mkdir -p /mnt/rag 2>/dev/null; then
+        chmod 755 /mnt/rag
+    else
+        echo "[Freigaben] WARNUNG: /mnt/rag nicht anlegbar. Netzwerk-Freigaben erscheinen bis dahin als 'Ordner existiert nicht'." >&2
+    fi
+fi
+
 # 6e. Apache Tika sicherstellen (OneNote-Import, *.one)
 #
 # WARUM HIER: Der Import von OneNote-Abschnitten haengt an Java + tika-app.jar

@@ -2764,8 +2764,29 @@ check("die Version steht mittig neben dem Knopf, nicht oben",
 # ── Die Version selbst ──────────────────────────────────────────────────────
 # ⚠ EINE CLIENT-AENDERUNG OHNE ERHOEHUNG ERREICHT KEINEN ARBEITSPLATZ: der
 #   Server baut zwar neu, aber `IstNeuer` sagt bei gleicher Nummer zu Recht nein.
-check("die Version ist hochgezaehlt (ist: %s)" % (am.klient_version() or "—"),
-      am.klient_version() == "1.0.3")
+# ⚠ HIER STAND `== "1.0.3"` – eine FESTE ZAHL, also eine Zeitbombe: beim
+#   naechsten Hochzaehlen meldet sie einen Fehler, den es nicht gibt (am
+#   2026-09-14 mit 1.0.4 zugeschnappt). Gemeint war nie eine bestimmte Nummer,
+#   sondern die EIGENSCHAFT: wer die Version aendert, begruendet sie in der
+#   Chronik – und wer die Chronik fortschreibt, vergisst die Version nicht.
+_ver26 = am.klient_version() or ""
+_csproj26 = (ROOT / "ai-mouse/src/AiMouse/AiMouse.csproj").read_text(encoding="utf-8")
+_chronik26 = re.findall(r"<!--\s*(\d+\.\d+\.\d+)\s*\(", _csproj26)
+
+check("die Version ist lesbar (ist: %s)" % (_ver26 or "—"),
+      re.fullmatch(r"\d+\.\d+\.\d+", _ver26) is not None)
+
+check("es gibt ueberhaupt eine Chronik (Positivkontrolle)",
+      len(_chronik26) >= 2)
+
+check("die gesetzte Version ist in der Chronik begruendet",
+      _ver26 in _chronik26)
+
+def _teile26(v):
+    return tuple(int(x) for x in v.split("."))
+
+check("und sie ist die juengste – die Chronik hinkt nicht hinterher",
+      bool(_chronik26) and _teile26(_ver26) == max(_teile26(v) for v in _chronik26))
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -2950,6 +2971,103 @@ _m25 = re.search(r"HotkeyHinweis\s*=>\s*T\(([\s\S]{0,1200}?)\);", _txt25)
 check("der Hotkey-Hinweis ist in BEIDEN Sprachen gefuellt und verschieden",
       _m25 is not None and "Start menu" in _m25.group(1)
       and "Startmenü" in _m25.group(1))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 26. Kein Bedienelement faellt aus dem Fenster (gemeldet 2026-09-14)
+#
+# ⚠ DER GEMELDETE FALL: „ich kann keine Einstellung fuer die Tastenkombination
+#   finden". Sie war seit 1.0.3 da – nur ausserhalb des Fensters. Gemessen:
+#   die Zeilenzahl des Einstellungsdialogs war seit dem Erstimport von 7 auf 14
+#   gewachsen, `ClientSize` stand unveraendert auf 420 px, und ein
+#   `FixedDialog` OHNE `AutoScroll` schneidet ueberzaehlige Zeilen nicht ab –
+#   er laesst sie weg, ohne jeden Hinweis.
+#
+# ⚠ GEPRUEFT WIRD DIE REGEL, NICHT DIESE EINE STELLE: jedes Fenster mit einem
+#   zeilenweise gefuellten Layout braucht den Rollbalken. Eine gepflegte Liste
+#   waere an dem Tag unvollstaendig, an dem jemand ein Fenster ergaenzt – und
+#   die fehlende Zeile meldet sich nicht, sie versteckt nur ein Bedienelement.
+# ══════════════════════════════════════════════════════════════════════════════
+
+_fenster26 = sorted(
+    q for q in _SRC25.rglob("*.cs")
+    if ": Form" in q.read_text(encoding="utf-8")
+)
+# Positivkontrolle: ohne sie waeren alle Pruefungen ueber einer leeren Menge
+# trivial wahr – und ein umbenanntes Verzeichnis saehe wie „alles in Ordnung" aus.
+check("es werden ueberhaupt Fenster gefunden (Positivkontrolle)",
+      len(_fenster26) >= 3)
+
+_zeilig26 = []
+for q in _fenster26:
+    roh = q.read_text(encoding="utf-8")
+    if "TableLayoutPanel" in roh:
+        _zeilig26.append((q.name, _ohne_komm25(roh)))
+
+check("es gibt zeilenbasierte Dialoge zu pruefen (Positivkontrolle)",
+      len(_zeilig26) >= 2)
+
+for _name26, _q26 in _zeilig26:
+    # Die EIGENSCHAFT: was nicht mehr hineinpasst, muss ERREICHBAR bleiben.
+    check("%s: zeilenbasiertes Layout mit Rollbalken (AutoScroll)" % _name26,
+          re.search(r"AutoScroll\s*=\s*true", _q26) is not None)
+
+# ── Der Regelweg im Einstellungsdialog: die Hoehe wird GERECHNET ────────────
+check("SettingsWindow: HoeheAnInhaltBinden existiert",
+      "private void HoeheAnInhaltBinden(" in _set25)
+
+check("SettingsWindow: der Konstruktor RUFT sie auch auf",
+      re.search(r"^\s*HoeheAnInhaltBinden\(", _set25, re.M) is not None)
+
+_m26 = re.search(r"private void HoeheAnInhaltBinden\([^)]*\)\s*\{", _set25)
+_rumpf26 = ""
+if _m26:
+    i = _m26.end() - 1
+    tiefe = 0
+    for j in range(i, len(_set25)):
+        if _set25[j] == "{":
+            tiefe += 1
+        elif _set25[j] == "}":
+            tiefe -= 1
+            if tiefe == 0:
+                _rumpf26 = _set25[i:j + 1]
+                break
+check("SettingsWindow: der Rumpf ist vollstaendig geschnitten (Positivkontrolle)",
+      len(_rumpf26) > 200)
+
+check("die Hoehe kommt aus dem Inhalt, nicht aus einer festen Zahl",
+      "GetPreferredSize(" in _rumpf26)
+
+# ⚠ OHNE DECKEL waere ein langer Dialog unten aus dem Bildschirm gewachsen –
+#   und die Knopfzeile ebenso unerreichbar wie vorher, nur andersherum.
+check("die gerechnete Hoehe ist auf den Bildschirm gedeckelt",
+      "WorkingArea" in _rumpf26)
+
+# ⚠ FAIL-SAFE: schlaegt die Rechnung fehl, bleibt die Startgroesse stehen und
+#   `AutoScroll` traegt. Ein Wurf hier duerfte NIE den Dialog verhindern.
+# ⚠ NICHT `"catch" in rumpf`: ein mit `when (false)` entschaerfter Block
+#   enthaelt das Wort weiterhin und faengt trotzdem nichts – die Gegenprobe
+#   blieb damit stumm. Geprueft wird ein catch OHNE Filter.
+_catch26 = re.search(r"catch\s*(?:\([^)]*\))?\s*(when\s*\([^)]*\))?\s*\{", _rumpf26)
+check("eine gescheiterte Rechnung laesst den Dialog trotzdem aufgehen",
+      _catch26 is not None and _catch26.group(1) is None)
+
+# ── Das dritte Netz: der Benutzer kann selbst nachhelfen ───────────────────
+check("SettingsWindow: kein FixedDialog mehr (Fenster ziehbar)",
+      "FormBorderStyle.FixedDialog" not in _set25)
+
+# ⚠ DIE MINDESTGROESSE DES FENSTERS, nicht irgendeine: `_status` traegt
+#   ebenfalls ein `MinimumSize` (im Objektinitialisierer, mit Komma am Ende).
+#   Der alte Regex fand jenes und blieb gruen, obwohl die des Fensters fehlte.
+#   Unterschieden am Semikolon – ein Initialisierer-Element endet mit Komma.
+check("SettingsWindow: MinimumSize gesetzt (nicht unbrauchbar klein ziehbar)",
+      re.search(r"^\s*MinimumSize\s*=\s*new Size\([^)]*\);", _set25, re.M) is not None)
+
+# Positivkontrolle des Kommentarfilters: die Begruendungen nennen „AutoScroll"
+# und „FixedDialog" woertlich – wer sie mitliest, prueft seine eigene Erklaerung.
+check("der Kommentarfilter greift (Positivkontrolle)",
+      "GERECHNET, NICHT GERATEN" not in _set25
+      and "GetPreferredSize(" in _set25)
 
 
 print("\n%d OK, %d FAIL" % (ok, fail))

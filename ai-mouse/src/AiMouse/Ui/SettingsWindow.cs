@@ -149,7 +149,17 @@ internal sealed class SettingsWindow : Form
         // (er ist auch ohne Anmeldung erreichbar).
         Text = current.Marke + " — " + Texte.Einstellungen.TrimEnd('…');
         StartPosition = FormStartPosition.CenterScreen;
-        FormBorderStyle = FormBorderStyle.FixedDialog;
+        // ⚠ `Sizable` STATT `FixedDialog` – gemeldet 2026-09-14: „ich kann
+        //    keine Einstellung fuer die Tastenkombination finden". Sie war da,
+        //    nur unerreichbar: die Zeilenzahl dieses Dialogs hat sich seit dem
+        //    Erstimport von 7 auf 14 verdoppelt, `ClientSize` blieb bei 420 px.
+        //    Ein `FixedDialog` ohne `AutoScroll` schneidet ueberzaehlige Zeilen
+        //    nicht ab – er laesst sie GANZ WEG, und nichts weist darauf hin.
+        //    Drei Netze gegen dieselbe Lage, in dieser Reihenfolge:
+        //      1. die Hoehe wird aus dem Inhalt GERECHNET (siehe unten),
+        //      2. `AutoScroll` faengt auf, was die Rechnung nicht trifft,
+        //      3. der Benutzer kann das Fenster selbst ziehen.
+        FormBorderStyle = FormBorderStyle.Sizable;
         MinimizeBox = false;
         MaximizeBox = true;
         ShowInTaskbar = true;
@@ -174,7 +184,12 @@ internal sealed class SettingsWindow : Form
         AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;
         Font = new Font("Segoe UI", 9f);
+        // Startwert; die tatsaechliche Hoehe rechnet `HoeheAnInhaltBinden()`
+        // am Ende des Konstruktors aus dem fertig gefuellten Layout aus.
         ClientSize = new Size(520, 420);
+        // Damit niemand den Dialog unbrauchbar klein zieht. Kleiner als die
+        // Startbreite, sonst laesst er sich gar nicht mehr schmaler machen.
+        MinimumSize = new Size(420, 320);
 
         _copyResult.Text = Texte.ErgebnisKopieren;
         _sprache.Items.AddRange(["Deutsch", "English"]);
@@ -193,6 +208,12 @@ internal sealed class SettingsWindow : Form
             ColumnCount = 2,
             Padding = new Padding(12),
             AutoSize = false,
+            // ⚠ DAS NETZ, NICHT DER REGELWEG: reicht der Platz doch nicht
+            //    (sehr grosser Zoom, kuenftige Zeilen, eine Schrift mit
+            //    hoeheren Zeilen), erscheint ein Rollbalken – statt dass die
+            //    unteren Zeilen wortlos verschwinden. Im Normalfall ist er
+            //    unsichtbar, weil die gerechnete Hoehe passt.
+            AutoScroll = true,
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -293,8 +314,12 @@ internal sealed class SettingsWindow : Form
         // ⚠ ZULETZT hinzugefuegt, damit er OBEN sitzt: bei `Dock = Top` gewinnt
         // das ZULETZT eingefuegte Element den oberen Platz (WinForms fuellt in
         // umgekehrter Reihenfolge der Controls-Sammlung).
-        Controls.Add(Marken.Kopf(current));
+        var kopf = Marken.Kopf(current);
+        Controls.Add(kopf);
         Controls.Add(_status);
+
+        // ⚠ ZULETZT: erst jetzt steht fest, wie hoch der Inhalt wirklich ist.
+        HoeheAnInhaltBinden(layout, kopf, buttons);
 
         AcceptButton = save;
         CancelButton = cancel;
@@ -552,6 +577,52 @@ internal sealed class SettingsWindow : Form
     {
         MessageBox.Show(this, message, Texte.FehlerTitel, MessageBoxButtons.OK, MessageBoxIcon.Warning);
         focus.Focus();
+    }
+
+    /// <summary>Setzt die Fensterhoehe auf das, was der Inhalt WIRKLICH
+    /// braucht – gedeckelt auf den nutzbaren Bildschirm.
+    ///
+    /// ⚠ GERECHNET, NICHT GERATEN. Eine feste Zahl ist an dem Tag falsch, an
+    /// dem eine Zeile dazukommt – hier geschehen: von 7 Zeilen beim Erstimport
+    /// auf 14, waehrend `ClientSize` bei 420 px stehenblieb. Die vier Zeilen
+    /// des Start-Abschnitts (Tastenkombination, Autostart) lagen damit
+    /// ausserhalb des Fensters, und ohne Rollbalken gab es keinen Weg dorthin:
+    /// gemeldet als „ich kann keine Einstellung fuer die Tastenkombination
+    /// finden". Bei Zoom &gt; 100% gilt dasselbe eine Stufe frueher, weil jede
+    /// Zeile dann hoeher ist – `GetPreferredSize` fragt WinForms nach dem
+    /// bereits skalierten Ergebnis und trifft deshalb beide Faelle.
+    ///
+    /// Faellt die Rechnung zu knapp aus – umbrechende Hinweiszeilen sind der
+    /// wahrscheinlichste Grund –, faengt `AutoScroll` am Layout den Rest auf.
+    /// Ein Fehler hier ist deshalb billig; eine feste Hoehe war es nicht.
+    /// </summary>
+    private void HoeheAnInhaltBinden(Control layout, Control kopf, Control buttons)
+    {
+        try
+        {
+            int zeilen = layout.GetPreferredSize(new Size(ClientSize.Width, 0)).Height;
+            int rand = Math.Max(kopf.Height, kopf.PreferredSize.Height)
+                     + buttons.Height
+                     + Math.Max(_status.PreferredSize.Height, _status.MinimumSize.Height);
+
+            // Die Reserve deckt Titelleiste und Rahmen ab – die zaehlen NICHT
+            // zu `ClientSize`, wuerden ein randvoll gerechnetes Fenster also
+            // unten aus dem Bildschirm schieben.
+            int platz = Screen.FromPoint(Cursor.Position).WorkingArea.Height - 80;
+
+            // Untergrenze ist die bisherige Hoehe: kleiner soll der Dialog nie
+            // starten, auch wenn die Rechnung etwas Absurdes liefert.
+            ClientSize = new Size(
+                ClientSize.Width,
+                Math.Clamp(zeilen + rand, 420, Math.Max(420, platz)));
+        }
+        catch
+        {
+            // ⚠ FAIL-SAFE IN DIE GROSSZUEGIGE RICHTUNG: lieber ein Fenster,
+            //    das mehr Platz nimmt als noetig, als eines, das
+            //    Bedienelemente verschluckt. Die Startgroesse bleibt stehen,
+            //    `AutoScroll` traegt den Rest.
+        }
     }
 
     private static void AddRow(TableLayoutPanel layout, string caption, Control editor)

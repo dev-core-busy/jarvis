@@ -69,6 +69,13 @@ internal sealed class LoginWindow : Form
             Dock = DockStyle.Fill,
             ColumnCount = 2,
             Padding = new Padding(12, 4, 12, 4),
+            // ⚠ DIESES FENSTER RECHNET SEINE HOEHE aus dem Inhalt (`ClientSize`
+            //    oben, mit und ohne Einmal-Code). Der Rollbalken ist trotzdem
+            //    Pflicht: er faengt auf, was die Rechnung nicht trifft – eine
+            //    umbrechende Zeile bei grossem Zoom, eine kuenftig ergaenzte
+            //    Zeile. Ohne ihn faellt sie WORTLOS aus dem Fenster, genau wie
+            //    die Tastenkombination in den Einstellungen (2026-09-14).
+            AutoScroll = true,
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));

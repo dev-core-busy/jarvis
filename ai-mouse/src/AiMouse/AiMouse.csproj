@@ -35,7 +35,15 @@
          bei der laufenden Instanz, statt einen modalen Dialog zu zeigen – seit
          es den Hotkey gibt, ist der Zweitstart der NORMALFALL, und der Dialog
          haette ihn zuverlaessig zur Fehlermeldung gemacht. -->
-    <Version>1.0.3</Version>
+    <!-- 1.0.4 (2026-09-14): der Einstellungsdialog zeigt wieder ALLE Zeilen.
+         Gemeldet als „ich kann keine Einstellung fuer die Tastenkombination
+         finden" – sie war seit 1.0.3 da, nur ausserhalb des Fensters: die
+         Zeilenzahl war seit dem Erstimport von 7 auf 14 gewachsen, die feste
+         `ClientSize` von 420 px nie mit. Ein `FixedDialog` ohne Rollbalken
+         schneidet nicht ab, er laesst weg – ohne jeden Hinweis. Die Hoehe wird
+         jetzt aus dem Inhalt gerechnet, `AutoScroll` faengt den Rest, und das
+         Fenster ist ziehbar. -->
+    <Version>1.0.4</Version>
     <!-- DPI awareness is owned by app.manifest, not by ApplicationHighDpiMode: it has to
          be in effect from process start, before any screen coordinate is read.
          WFAC010 asks for the opposite; suppressed because that trade-off is intentional. -->

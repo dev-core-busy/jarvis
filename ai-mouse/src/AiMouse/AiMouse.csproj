@@ -43,7 +43,17 @@
          schneidet nicht ab, er laesst weg – ohne jeden Hinweis. Die Hoehe wird
          jetzt aus dem Inhalt gerechnet, `AutoScroll` faengt den Rest, und das
          Fenster ist ziehbar. -->
-    <Version>1.0.4</Version>
+    <!-- 1.0.5 (2026-09-14): zwei gemeldete Fehler.
+         a) Das stille Update wechselte die Datei ein und startete NICHT neu:
+            `ReleaseMutex()` gibt die Besitzerschaft frei, nicht den NAMEN – die
+            neu gestartete Fassung hielt sich fuer einen Zweitstart und beendete
+            sich wortlos. Jetzt wird das Handle GESCHLOSSEN (Program.cs).
+         b) Der Einstellungsdialog war zerschossen: die automatische Platzierung
+            im TableLayoutPanel ueberspringt UNSICHTBARE Controls, und
+            `_rdHinweis` ist im Regelfall unsichtbar – ab dort rutschte alles um
+            eine Zelle. Jetzt werden die Zellen ausdruecklich angegeben, und
+            Zeilen ohne Beschriftung gehen ueber beide Spalten. -->
+    <Version>1.0.5</Version>
     <!-- DPI awareness is owned by app.manifest, not by ApplicationHighDpiMode: it has to
          be in effect from process start, before any screen coordinate is read.
          WFAC010 asks for the opposite; suppressed because that trade-off is intentional. -->

@@ -254,7 +254,7 @@ internal sealed class SettingsWindow : Form
         // ⚠ Auch `KeyPress` abfangen: sonst quittiert Windows die Eingabe in
         //   einem ReadOnly-Feld mit einem Systemton bei jedem Tastendruck.
         _hotkey.KeyPress += (_, ke) => ke.Handled = true;
-        _hotkeyLoeschen.Text = Texte.HotkeyKeine;
+        _hotkeyLoeschen.Text = Texte.HotkeyLoeschen;
         _hotkeyLoeschen.Click += (_, _) => HotkeySetzen(0, 0);
 
         var hkZeile = new Panel { Dock = DockStyle.Fill, Height = 26 };
@@ -553,9 +553,16 @@ internal sealed class SettingsWindow : Form
         {
             // Eine 1px-Linie als Label: ein eigenes Control dafuer waere mehr
             // Aufwand als Gewinn.
+            //
+            // ⚠ DIE BREITE IST BEWUSST KLEIN. Seit die Zeile ueber BEIDE
+            // Spalten geht, hat sie Platz – aber ein FlowLayoutPanel bricht um,
+            // sobald ein Element nicht mehr passt: eine zu breite Linie
+            // ruschte unter die Ueberschrift und liesse die Zeile doppelt so
+            // hoch werden. 220 px passen auch im schmalsten erlaubten Fenster
+            // (MinimumSize 420) neben die Beschriftung.
             AutoSize = false,
             Height = 1,
-            Width = 300,
+            Width = 220,
             BorderStyle = BorderStyle.Fixed3D,
             Margin = new Padding(0, 8, 0, 0),
         });
@@ -625,8 +632,43 @@ internal sealed class SettingsWindow : Form
         }
     }
 
+    /// <summary>Eine Zeile des Formulars – Beschriftung links, Bedienelement
+    /// rechts. Ohne Beschriftung gehoert dem Bedienelement die GANZE Breite.
+    ///
+    /// ⚠ DIE ZELLE WIRD AUSDRUECKLICH ANGEGEBEN, UND DAS IST DER FIX ZUM
+    /// ZERSCHOSSENEN DIALOG (gemeldet 2026-09-14, Screenshot).
+    ///
+    /// Vorher hiess es `layout.Controls.Add(control)` – also AUTOMATISCHE
+    /// Platzierung. Die Layout-Engine des TableLayoutPanel verteilt dabei nur,
+    /// was SICHTBAR ist: `_rdHinweis` ist im Regelfall unsichtbar (er erscheint
+    /// nur, wenn eine Gestentaste gilt), und ab dieser Stelle rutschte alles um
+    /// GENAU EINE Zelle nach vorn. Im Bild: das Kaestchen „Ergebnis sofort in
+    /// die Zwischenablage" stand in der 150 Pixel schmalen Beschriftungsspalte
+    /// und war abgeschnitten, die Trennlinie „Start" ragte in die Nachbarzelle
+    /// und ueberlappte mit „Tastenkombination", und der Hinweistext brach auf
+    /// eine handbreite Spalte um. Eine Verschiebung um eine Zelle sieht nicht
+    /// wie ein Platzierungsfehler aus, sondern wie ein kaputtes Fenster.
+    ///
+    /// ⚠ UND DER SPALTENSPRUNG IST KEIN SCHMUCK: eine Zeile ohne Beschriftung
+    /// hat links 150 Pixel zu verschenken. Kaestchen, Trennlinie und
+    /// Fliesstext brauchen sie – ohne `SetColumnSpan` bleibt der Text in der
+    /// rechten Spalte und bricht frueher um als noetig.
+    /// </summary>
     private static void AddRow(TableLayoutPanel layout, string caption, Control editor)
     {
+        int zeile = layout.RowStyles.Count;
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowCount = zeile + 1;
+
+        editor.Margin = new Padding(0, 3, 0, 6);
+
+        if (caption.Length == 0)
+        {
+            layout.Controls.Add(editor, 0, zeile);
+            layout.SetColumnSpan(editor, 2);
+            return;
+        }
+
         var label = new Label
         {
             Text = caption,
@@ -635,11 +677,8 @@ internal sealed class SettingsWindow : Form
             Margin = new Padding(0, 0, 8, 0),
         };
 
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.Controls.Add(label);
-        layout.Controls.Add(editor);
-
-        editor.Margin = new Padding(0, 3, 0, 6);
+        layout.Controls.Add(label, 0, zeile);
+        layout.Controls.Add(editor, 1, zeile);
     }
 
     /// <summary>Sperrt die Durchreich-Taste, sobald eine Gestentaste gilt.

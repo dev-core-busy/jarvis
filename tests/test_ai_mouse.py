@@ -3070,5 +3070,146 @@ check("der Kommentarfilter greift (Positivkontrolle)",
       and "GetPreferredSize(" in _set25)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Abschnitt 27: Update startet wirklich neu + der Dialog ist nicht verschoben
+# (gemeldet 2026-09-14, 1.0.5)
+# ─────────────────────────────────────────────────────────────────────────────
+# ZWEI GEMELDETE FEHLER, beide still:
+#   a) "AiMouse.exe.neu wird angelegt ... umbenannt ... aber nicht automatisch
+#      gestartet". `ReleaseMutex()` gibt die BESITZERSCHAFT frei, nicht den
+#      NAMEN - die neu gestartete Fassung bekam `createdNew = false`, hielt
+#      sich fuer einen Zweitstart und beendete sich wortlos.
+#   b) Der Einstellungsdialog war zerschossen (Screenshot): die automatische
+#      Platzierung im TableLayoutPanel ueberspringt UNSICHTBARE Controls, und
+#      `_rdHinweis` ist im Regelfall unsichtbar - ab dort rutschte alles um
+#      GENAU EINE Zelle.
+#
+# ⚠ WAS HIER NICHT GEHT, UND DAS GEHOERT GESAGT: es gibt kein Windows auf dem
+# Bauserver. Weder die Mutex-Semantik noch die WinForms-Layoutrechnung lassen
+# sich ausfuehren. Geprueft werden deshalb REGELN ueber den Quelltext - die
+# Eigenschaft "deterministisch platziert" ist genau das, was sich so pruefen
+# laesst, und sie ist unabhaengig von der Ursache richtig.
+print("\n=== 27) Update-Neustart und Dialog-Platzierung (1.0.5) ===")
+
+_prog27 = _ohne_komm25(_quelle25("Program.cs"))
+_set27 = _ohne_komm25(_quelle25("Ui/SettingsWindow.cs"))
+_txt27 = _quelle25("Localization/Texte.cs")
+
+check("Program.cs und SettingsWindow.cs wurden gelesen",
+      len(_prog27) > 500 and len(_set27) > 500)
+
+# ── a) Der Mutex wird GESCHLOSSEN, nicht nur freigegeben ───────────────────
+# ⚠ DIE REIHENFOLGE IST DIE AUSSAGE: Dispose MUSS vor dem Einwechseln stehen.
+#   Danach gerufen waere es wirkungslos - der Name ist dann schon vergeben,
+#   wenn die neue Fassung startet.
+_i_rel = _prog27.find("ReleaseMutex")
+_i_disp = _prog27.find("instanceLock.Dispose()")
+_i_wechsel = _prog27.find("BeimStartEinwechseln()")
+check("Program.cs gibt den Mutex frei", _i_rel >= 0)
+check("UND schliesst ihn (Dispose) - erst das gibt den NAMEN frei",
+      _i_disp >= 0)
+check("und zwar VOR dem Einwechseln (sonst ist es wirkungslos)",
+      0 <= _i_disp < _i_wechsel)
+check("danach ist die Variable null (kein Zugriff auf ein totes Handle)",
+      "instanceLock = null;" in _prog27)
+
+# ⚠ SCHLAEGT DER WECHSEL FEHL, GEHOERT DIE SPERRE ZURUECK. Ohne das liefe diese
+#   Instanz ungeschuetzt weiter - ein zweiter Start erzeugte eine zweite
+#   Instanz, obwohl gar kein Update stattgefunden hat.
+_nach = _prog27[_i_wechsel:] if _i_wechsel >= 0 else ""
+check("nach einem gescheiterten Wechsel wird die Sperre zurueckgeholt",
+      "new Mutex(initiallyOwned: true, SingleInstanceName, out isOnlyInstance)"
+      in _nach)
+
+# ⚠ `using var` KANN DAS NICHT ABBILDEN: die Variable wird zwischendurch
+#   geschlossen und danach neu belegt. Ein `using var` disposed am Scope-Ende
+#   das NEUE Objekt und liesse das alte als Zombie stehen.
+check("die Sperre haengt nicht mehr an `using var` (die Neubelegung braucht "
+      "try/finally)",
+      "using var instanceLock" not in _prog27)
+check("stattdessen wird sie im finally freigegeben",
+      "instanceLock?.Dispose();" in _prog27)
+
+# ── b) Die Zelle wird ANGEGEBEN, nicht der Reihe nach vergeben ─────────────
+_add27 = ""
+_i_add = _set27.find("private static void AddRow(")
+if _i_add >= 0:
+    _tiefe = 0
+    _begonnen = False
+    for _i in range(_i_add, len(_set27)):
+        if _set27[_i] == "{":
+            _tiefe += 1
+            _begonnen = True
+        elif _set27[_i] == "}":
+            _tiefe -= 1
+            if _begonnen and _tiefe == 0:
+                _add27 = _set27[_i_add:_i + 1]
+                break
+check("AddRow wurde geschnitten", len(_add27) > 200)
+
+# ⚠ DAS IST DER FIX: kein `Controls.Add(x)` mit EINEM Argument mehr. Genau so
+#   entstand die Verschiebung - die Layout-Engine verteilt automatisch, und
+#   unsichtbare Controls fallen dabei heraus.
+import re as _re27
+_einarg = _re27.findall(r"layout\.Controls\.Add\(\s*(\w+)\s*\)", _add27)
+check("AddRow platziert KEIN Control mehr ohne Zellenangabe "
+      "(unsichtbare Controls verschoben sonst alles danach)",
+      not _einarg)
+check("sondern gibt Spalte und Zeile an",
+      len(_re27.findall(r"layout\.Controls\.Add\([^;]*,\s*\d+\s*,\s*zeile\)",
+                        _add27)) >= 2)
+check("die Zeilennummer kommt aus den bereits angelegten RowStyles",
+      "layout.RowStyles.Count" in _add27)
+check("und RowCount wird mitgefuehrt", "layout.RowCount" in _add27)
+
+# ⚠ ZEILEN OHNE BESCHRIFTUNG GEHOEREN UEBER BEIDE SPALTEN. Sonst bleibt der
+#   Fliesstext in der rechten Spalte und bricht frueher um als noetig - im
+#   Screenshot war der Hotkey-Hinweis auf Handbreite gequetscht.
+check("eine Zeile ohne Beschriftung geht ueber beide Spalten",
+      "SetColumnSpan(editor, 2)" in _add27)
+check("und legt dafuer gar kein leeres Label an (das waere die Zelle, die "
+      "den Sprung verhindert)",
+      _add27.find("caption.Length == 0") < _add27.find("new Label"))
+
+# ── Die Trennlinie darf die Zeile nicht umbrechen lassen ───────────────────
+# Ein FlowLayoutPanel bricht um, sobald ein Element nicht mehr passt: eine zu
+# breite Linie rutschte unter die Ueberschrift und machte die Zeile doppelt so
+# hoch. Im schmalsten erlaubten Fenster (MinimumSize 420) muss sie danebenpassen.
+_lin = _re27.search(r"Height = 1,\s*Width = (\d+),", _set27)
+check("die Trennlinie hat eine Breite", _lin is not None)
+check("und sie passt ins schmalste erlaubte Fenster",
+      _lin is not None and int(_lin.group(1)) <= 260)
+
+# ── Der Loeschknopf sagt, was ein Klick TUT ────────────────────────────────
+# ⚠ Feld UND Knopf trugen beide "keine" - das eine ist der ZUSTAND, das andere
+#   eine AKTION. Zwei Bedienelemente nebeneinander mit demselben Wort sind
+#   nicht auseinanderzuhalten (Screenshot 2026-09-14).
+check("der Hotkey-Loeschknopf traegt NICHT denselben Text wie das Feld",
+      "_hotkeyLoeschen.Text = Texte.HotkeyKeine;" not in _set27)
+check("sondern einen eigenen", "_hotkeyLoeschen.Text = Texte.HotkeyLoeschen;"
+      in _set27)
+check("und der ist in beiden Sprachen gefuellt",
+      'HotkeyLoeschen => T("' in _txt27
+      and _re27.search(r'HotkeyLoeschen => T\("([^"]+)",\s*"([^"]+)"\)', _txt27)
+      is not None)
+_hl = _re27.search(r'HotkeyLoeschen => T\("([^"]+)",\s*"([^"]+)"\)', _txt27)
+_hk = _re27.search(r'HotkeyKeine => T\("([^"]+)",\s*"([^"]+)"\)', _txt27)
+check("und unterscheidet sich vom Zustandstext",
+      _hl is not None and _hk is not None and _hl.group(1) != _hk.group(1))
+
+# ── Version hochgezaehlt und begruendet ────────────────────────────────────
+# Eine Client-Aenderung ohne hoehere Version erreicht keinen Arbeitsplatz: der
+# Update-Weg vergleicht Versionen, nicht Dateien.
+_csproj27 = _quelle25("AiMouse.csproj")
+_v27 = _re27.search(r"<Version>([\d.]+)</Version>", _csproj27)
+check("die csproj nennt eine Version", _v27 is not None)
+check("sie ist hochgezaehlt (>= 1.0.5)",
+      _v27 is not None
+      and tuple(int(x) for x in _v27.group(1).split(".")) >= (1, 0, 5))
+check("und in der Chronik der csproj begruendet",
+      _v27 is not None and _v27.group(1) in _csproj27.replace(
+          "<Version>%s</Version>" % _v27.group(1), "", 1))
+
+
 print("\n%d OK, %d FAIL" % (ok, fail))
 sys.exit(1 if fail else 0)

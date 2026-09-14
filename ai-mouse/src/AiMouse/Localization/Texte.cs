@@ -240,6 +240,16 @@ internal static class Texte
     /// <summary>Beschriftung des Aufnahmefeldes im Ruhezustand.</summary>
     public static string HotkeyKeine => T("keine", "none");
 
+    /// <summary>Beschriftung des Knopfes, der die Kombination wieder loescht.
+    ///
+    /// ⚠ NICHT <see cref="HotkeyKeine"/> – der steht schon IM Feld daneben,
+    /// solange nichts belegt ist. Zwei Bedienelemente nebeneinander, die beide
+    /// „keine" sagen, sind nicht auseinanderzuhalten: das eine ist der
+    /// ZUSTAND, das andere eine AKTION (gemeldet 2026-09-14, Screenshot). Ein
+    /// Knopf sagt, was ein Klick TUT.
+    /// </summary>
+    public static string HotkeyLoeschen => T("Löschen", "Clear");
+
     /// <summary>Waehrend das Feld auf einen Tastendruck wartet.</summary>
     public static string HotkeyDruecken => T("Tasten drücken…", "Press keys…");
 

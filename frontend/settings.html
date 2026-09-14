@@ -3311,6 +3311,29 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                              Gelesen wird der Wert von den BENUTZERN ueber
                              /api/jira/assist/health – /api/skills/*/config ist
                              Administratoren vorbehalten. -->
+                        <div class="kb-section" id="ji-sect-tools">
+                            <div class="kb-section-header kb-collapse-header" id="ji-sect-tools-hdr">
+                                <h3 data-i18n="jtool.h">Werkzeug-Bereiche freischalten</h3>
+                                <span class="sk-openclaw-toggle" id="ji-sect-tools-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="ji-sect-tools-body">
+                                <p class="kb-hint" data-i18n-html="jtool.intro">Ohne Freigabe wertet der Assistent <b>allein den Ticketinhalt</b> aus – er kann nichts nachschlagen. Was hier freigeschaltet ist, kann ein Benutzer <b>je Vorlage</b> anhaken. Alle Bereiche sind <b>nur lesend</b> und arbeiten mit den Rechten des jeweiligen Benutzers (sein Jira-Token, sein SAP-Zugang).</p>
+                                <p class="kb-hint" data-i18n-html="jtool.warn">Der Ticketinhalt ist <b>Fremdtext</b>: was ein Kunde ins Ticket schreibt, sieht das Modell. Je weiter der Werkzeugkasten, desto größer die Angriffsfläche eines präparierten Tickets. Und bei <b>„Antwort vorschlagen"</b> geht das Ergebnis an einen Kunden – nachgeschlagene Inhalte aus fremden Vorgängen gehören dort nicht hinein. Der Vorschlag wird deshalb weiterhin von einem Menschen gelesen, bevor er abgeschickt wird.</p>
+                                <div id="jtool-areas"></div>
+                                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                                    <button class="btn-primary" id="jtool-save" type="button" data-i18n="jtool.save" style="flex:0 0 auto;">Freigabe speichern</button>
+                                    <span id="jtool-status" style="font-size:0.9em;"></span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- ═══ Vorlagen des Jira-Assistenten ═══
+                             Sie liessen sich bisher NUR im Fenster der
+                             Browser-Erweiterung pflegen – also ausgerechnet die
+                             GEMEINSAMEN, die einem Administrator gehoeren, in
+                             einem 360 Pixel breiten Popup und nur mit
+                             installierter Erweiterung. Endpunkte:
+                             /api/jira/assist/vorlagen (GET/POST/DELETE). -->
                         <div class="kb-section" id="ji-sect-share">
                             <div class="kb-section-header kb-collapse-header" id="ji-sect-share-hdr">
                                 <h3 data-i18n="jshare.h">Browser Plugin Bereitstellung</h3>
@@ -3361,29 +3384,6 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                              Eigener Knopf, eigene Teilmenge: der Endpunkt
                              /api/jira/admin/areas sendet NUR das Freigabe-Feld
                              und laesst den Jira-Zugang oben unberuehrt. -->
-                        <div class="kb-section" id="ji-sect-tools">
-                            <div class="kb-section-header kb-collapse-header" id="ji-sect-tools-hdr">
-                                <h3 data-i18n="jtool.h">Werkzeug-Bereiche freischalten</h3>
-                                <span class="sk-openclaw-toggle" id="ji-sect-tools-tog">▼</span>
-                            </div>
-                            <div class="kb-collapse-body" id="ji-sect-tools-body">
-                                <p class="kb-hint" data-i18n-html="jtool.intro">Ohne Freigabe wertet der Assistent <b>allein den Ticketinhalt</b> aus – er kann nichts nachschlagen. Was hier freigeschaltet ist, kann ein Benutzer <b>je Vorlage</b> anhaken. Alle Bereiche sind <b>nur lesend</b> und arbeiten mit den Rechten des jeweiligen Benutzers (sein Jira-Token, sein SAP-Zugang).</p>
-                                <p class="kb-hint" data-i18n-html="jtool.warn">Der Ticketinhalt ist <b>Fremdtext</b>: was ein Kunde ins Ticket schreibt, sieht das Modell. Je weiter der Werkzeugkasten, desto größer die Angriffsfläche eines präparierten Tickets. Und bei <b>„Antwort vorschlagen"</b> geht das Ergebnis an einen Kunden – nachgeschlagene Inhalte aus fremden Vorgängen gehören dort nicht hinein. Der Vorschlag wird deshalb weiterhin von einem Menschen gelesen, bevor er abgeschickt wird.</p>
-                                <div id="jtool-areas"></div>
-                                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-                                    <button class="btn-primary" id="jtool-save" type="button" data-i18n="jtool.save" style="flex:0 0 auto;">Freigabe speichern</button>
-                                    <span id="jtool-status" style="font-size:0.9em;"></span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- ═══ Vorlagen des Jira-Assistenten ═══
-                             Sie liessen sich bisher NUR im Fenster der
-                             Browser-Erweiterung pflegen – also ausgerechnet die
-                             GEMEINSAMEN, die einem Administrator gehoeren, in
-                             einem 360 Pixel breiten Popup und nur mit
-                             installierter Erweiterung. Endpunkte:
-                             /api/jira/assist/vorlagen (GET/POST/DELETE). -->
                         <div class="kb-section" id="ji-sect-vorl">
                             <div class="kb-section-header kb-collapse-header" id="ji-sect-vorl-hdr">
                                 <h3 data-i18n="jvorl.h">Browser Plugin Vorlagen</h3>

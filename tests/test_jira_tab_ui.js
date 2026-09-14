@@ -123,12 +123,22 @@ const berZeile = doc.getElementById('jvorl-ber-zeile');
 pruefe(!!berZeile && berZeile.style.display === 'none',
     'und starten versteckt (ohne Freigabe gibt es nichts zu waehlen)');
 
-// DIE POSITION IST VORGEGEBEN: zwischen Bereitstellung und Vorlagen.
+/* DIE POSITION IST VORGEGEBEN (Vorgabe des Betreibers 2026-09-14: die
+ * Bereitstellung von Platz 3 auf Platz 4).
+ *
+ * Neue Ordnung: … → Werkzeug-Bereiche → Bereitstellung → Vorlagen. Damit
+ * stehen die beiden „Browser Plugin"-Container NEBENEINANDER (Bereitstellung
+ * und Vorlagen); vorher trennte sie die Freischaltung, die inhaltlich zum
+ * Zugang darueber gehoert.
+ *
+ * Geprueft wird die REIHENFOLGE, nicht ein fester Index: kommt ein Container
+ * dazu, verschieben sich die Zahlen, die Ordnung der drei bleibt aber die
+ * Aussage. */
 const reihe = ALLE_SECT;
-pruefe(reihe.indexOf('ji-sect-share') >= 0
-    && reihe.indexOf('ji-sect-share') < reihe.indexOf('ji-sect-tools')
-    && reihe.indexOf('ji-sect-tools') < reihe.indexOf('ji-sect-vorl'),
-    'der Freigabe-Container steht zwischen „Bereitstellung" und „Vorlagen" – '
+pruefe(reihe.indexOf('ji-sect-tools') >= 0
+    && reihe.indexOf('ji-sect-tools') < reihe.indexOf('ji-sect-share')
+    && reihe.indexOf('ji-sect-share') < reihe.indexOf('ji-sect-vorl'),
+    'die Bereitstellung steht zwischen „Werkzeug-Bereiche" und „Vorlagen" – '
     + reihe.join(' → '));
 
 // Die alte h4-Ueberschrift "Verbindung" darf nicht daneben stehenbleiben –

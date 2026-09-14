@@ -380,6 +380,67 @@ QUELLE = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
 BAUM = ast.parse(QUELLE)
 
 
+def _ohne_kommentare(quelle: str) -> str:
+    """Kommentare UND DOCSTRINGS raus – sonst liest der Waechter seine eigene
+    Begruendung.
+
+    ⚠ HIER IST DAS KEIN FEINSCHLIFF, und der Docstring-Teil ist der
+    entscheidende: der Text in `main.py`, der das Entfallen der Felder
+    ERKLAERT, steht im DOCSTRING von `_user_may_use_feedback` und nennt
+    `feedback_allowed_users` woertlich. Ein Filter, der nur `#`-Zeilen
+    entfernt, laesst die Regressions-Pruefung dauerhaft rot aussehen – fuer
+    einen Zustand, der genau richtig ist (beim Bau gemessen).
+    """
+    import io
+    import tokenize
+    try:
+        baum = ast.parse(quelle)
+    except SyntaxError:
+        return quelle
+    zeilen = quelle.splitlines(keepends=True)
+    versatz = [0]
+    for z in zeilen:
+        versatz.append(versatz[-1] + len(z))
+    zeichen = list(quelle)
+
+    def loesche(z1, s1, z2, s2):
+        a, b = versatz[z1 - 1] + s1, versatz[z2 - 1] + s2
+        for i in range(a, min(b, len(zeichen))):
+            if zeichen[i] != "\n":
+                zeichen[i] = " "
+
+    for knoten in ast.walk(baum):
+        if not isinstance(knoten, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                                   ast.AsyncFunctionDef)):
+            continue
+        koerper = getattr(knoten, "body", [])
+        if (koerper and isinstance(koerper[0], ast.Expr)
+                and isinstance(koerper[0].value, ast.Constant)
+                and isinstance(koerper[0].value.value, str)):
+            d = koerper[0].value
+            loesche(d.lineno, d.col_offset, d.end_lineno, d.end_col_offset)
+    try:
+        for t in tokenize.generate_tokens(io.StringIO(quelle).readline):
+            if t.type == tokenize.COMMENT:
+                loesche(t.start[0], t.start[1], t.end[0], t.end[1])
+    except Exception:                                # noqa: BLE001
+        pass
+    return "".join(zeichen)
+
+
+KOMMENTARFREI = _ohne_kommentare(QUELLE)
+# Positivkontrolle des Filters: ohne sie waere nicht zu unterscheiden, ob er
+# greift oder ob die Datei den Text schlicht nicht enthaelt.
+assert "feedback_allowed_users" in QUELLE, "Erklaer-Kommentar fehlt – Filter unpruefbar"
+assert "feedback_allowed_users" not in KOMMENTARFREI, "Kommentarfilter greift nicht"
+
+# Der Rumpf des Rechte-Helfers – daran haengt die Aussage, WORAN die Freigabe haengt.
+_perm_helfer = None
+for _k in ast.walk(BAUM):
+    if isinstance(_k, ast.FunctionDef) and _k.name == "_user_may_use_feedback":
+        _perm_helfer = ast.get_source_segment(QUELLE, _k)
+
+
 def routen():
     """(Pfad, Methode, FunktionsKnoten, Dependency-Namen) je /api/feedback-Route."""
     raus = []
@@ -539,30 +600,57 @@ check("`permissions.feedback` verlangt Freigabe UND aktiven Skill",
       _perm is not None and "_user_may_use_feedback" in _perm
       and '_skill_active' in _perm,
       "ist: %s" % _perm)
-check("die Freigabe ist „leer = niemand“",
-      "feedback_allowed_users" in QUELLE and "feedback_allowed_group" in QUELLE)
+# ⚠ VORGABE DES BETREIBERS (2026-09-14): KEINE eigene Freigabeliste mehr –
+# es gilt, wer WISSEN BEARBEITEN darf. Die alten Felder duerfen nicht
+# zurueckkommen; sie waeren eine Einstellung, die gespeichert wird und nichts
+# bewirkt, und ein zweiter Ort fuer dieselbe Personengruppe.
+check("⚠ die eigene Feedback-Freigabeliste ist ERSATZLOS entfallen",
+      "feedback_allowed_users" not in KOMMENTARFREI
+      and "feedback_allowed_group" not in KOMMENTARFREI,
+      "die alten Felder sind zurueck")
+check("die Freigabe haengt an den Wissens-Editoren",
+      "_may_edit_knowledge" in (_perm_helfer or ""),
+      "ist: %s" % (_perm_helfer or "<nicht gefunden>"))
 
-# `_user_may_use_feedback` wirklich ausfuehren: leer muss `False` ergeben.
-weiche = None
+# `_user_may_use_feedback` wirklich ausfuehren – und zwar MIT der echten
+# `_may_edit_knowledge`, nicht mit einer Attrappe davon. Eine gestubbte
+# Abhaengigkeit wuerde genau die Eigenschaft ersetzen, um die es hier geht.
+_fn = {}
 for k in ast.walk(BAUM):
-    if isinstance(k, ast.FunctionDef) and k.name == "_user_may_use_feedback":
-        weiche = k
-check("der Rechte-Helfer existiert", weiche is not None)
-if weiche is not None:
-    ns = {"config": type("C", (), {"get_setting": staticmethod(lambda k, d="": "")})(),
-          "_norm_login": lambda x: x.lower(),
-          "_member_of_any_group": lambda a, b: False,
-          "_user_group_dns_cache": {}}
-    exec(compile(ast.Module(body=[weiche], type_ignores=[]), "<w>", "exec"), ns)
-    f_ = ns["_user_may_use_feedback"]
-    check("⚠ leere Freigabe heisst NIEMAND – auch kein Administrator",
-          f_("irgendwer") is False)
-    ns["config"] = type("C", (), {"get_setting": staticmethod(
-        lambda k, d="": "anna,bert" if k == "feedback_allowed_users" else "")})()
-    exec(compile(ast.Module(body=[weiche], type_ignores=[]), "<w>", "exec"), ns)
-    f_ = ns["_user_may_use_feedback"]
-    check("ein eingetragener Benutzer darf (Positivkontrolle)", f_("anna") is True)
+    if isinstance(k, ast.FunctionDef) and k.name in ("_user_may_use_feedback",
+                                                     "_may_edit_knowledge"):
+        _fn[k.name] = k
+check("der Rechte-Helfer existiert", "_user_may_use_feedback" in _fn)
+check("und `_may_edit_knowledge` wurde mitgeschnitten (Positivkontrolle)",
+      "_may_edit_knowledge" in _fn)
+
+if len(_fn) == 2:
+    def _lauf(editoren="", gruppe="", admins=("jarvis",), in_gruppe=False):
+        ns = {
+            "config": type("C", (), {"get_setting": staticmethod(
+                lambda k, d="": editoren if k == "ad_knowledge_editors"
+                else (gruppe if k == "ad_knowledge_editors_group" else ""))})(),
+            "ALLOWED_USERS": set(admins),
+            "_norm_login": lambda x: (x or "").strip().lower(),
+            "_knowledge_editor_cache": {},
+            "_gruppe_trifft": lambda *a: in_gruppe,
+        }
+        exec(compile(ast.Module(body=[_fn["_may_edit_knowledge"],
+                                      _fn["_user_may_use_feedback"]],
+                                type_ignores=[]), "<w>", "exec"), ns)
+        return ns["_user_may_use_feedback"]
+
+    f_ = _lauf()
+    check("⚠ nichts konfiguriert heisst NIEMAND – auch kein Administrator",
+          f_("irgendwer") is False and f_("jarvis") is False)
+    f_ = _lauf(editoren="anna,bert")
+    check("ein eingetragener Wissens-Editor darf (Positivkontrolle)", f_("anna") is True)
     check("ein nicht eingetragener nicht", f_("carla") is False)
+    check("der lokale Admin darf, sobald eine Einschraenkung existiert",
+          f_("jarvis") is True)
+    f_ = _lauf(gruppe="CN=Wissen,DC=x", in_gruppe=True)
+    check("Mitgliedschaft in der Editoren-Gruppe genuegt", f_("dora") is True)
+    check("ein leerer Benutzername nie", _lauf(editoren="anna")("") is False)
 
 FRONT = ROOT / "frontend"
 check("die Portal-Kachel steht im Markup",
@@ -572,10 +660,22 @@ check("und wird an `permissions.feedback` eingeblendet",
 st = (FRONT / "settings.html").read_text(encoding="utf-8")
 check("der Reiter-Knopf steht im Markup", 'id="settings-tab-btn-feedback"' in st)
 check("und sein Panel auch", 'id="settings-tab-feedback"' in st)
-check("der Freigabe-Block steht im Sicherheits-Reiter", 'id="sec-sub-feedback"' in st)
-check("der Freigabe-Block beschreibt FEEDBACK, nicht AI-Maus",
-      "Bildschirmausschnitt" not in st.split('id="sec-sub-feedback"')[1].split("</details>")[0],
-      "ein Text, der etwas anderes beschreibt, ist eine Falschaussage")
+# ⚠ UMGEKEHRTE ZUSAGE seit 2026-09-14: der eigene Freigabe-Block ist ERSATZLOS
+# entfallen, der Bereich haengt an den Wissens-Editoren. Ein zurueckkehrender
+# Block waere ein zweiter Ort fuer dieselbe Personengruppe.
+check("⚠ der eigene Freigabe-Block ist aus dem Sicherheits-Reiter entfernt",
+      'id="sec-sub-feedback"' not in st,
+      "der Block ist zurueck")
+check("und seine Felder ebenfalls",
+      'id="feedback-allowed-users"' not in st and 'id="feedback-allowed-group"' not in st)
+check("die tote Sichtbarkeits-Funktion ist weg",
+      "window.updateFeedbackSecVisibility" not in
+      (FRONT / "js" / "app.js").read_text(encoding="utf-8"),
+      "eine Funktion ohne Bedienelement ist toter Code")
+# Der Block, auf den jetzt verwiesen wird, MUSS es geben – sonst nennt die
+# Oberflaeche ein Bedienelement, das niemand findet.
+check("der Editoren-Block, an dem es jetzt haengt, existiert",
+      'id="ad-knowledge-editors"' in st)
 
 app_js = (FRONT / "js" / "app.js").read_text(encoding="utf-8")
 # ⚠ DIESE PRUEFUNG STEHT HIER, WEIL DIE EINBINDUNG GEFEHLT HAT (2026-09-14):
@@ -589,7 +689,9 @@ for _modul in ("feedback_admin.js", "ai_mouse_admin.js"):
           "sonst ist window.*Admin undefined und der Reiter bleibt leer")
 check("app.js kennt den Reiter", "settings-tab-feedback" in app_js)
 check("app.js ruft FeedbackAdmin.onShow()", "FeedbackAdmin" in app_js)
-check("app.js blendet den Sicherheits-Block ein", "sec-sub-feedback" in app_js)
+check("⚠ app.js fasst den entfallenen Sicherheits-Block nicht mehr an",
+      "sec-sub-feedback" not in app_js,
+      "Verdrahtung auf ein Bedienelement, das es nicht mehr gibt")
 check("das Panel steht in allSettingsTabs (sonst bleibt es beim Wechsel stehen)",
       "tabFeedback" in app_js.split("allSettingsTabs = ")[1].split("\n")[0])
 check("skills.js kennt den Reiter (Zahnrad-Sprung)",

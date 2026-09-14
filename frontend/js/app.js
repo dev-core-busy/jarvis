@@ -1189,23 +1189,10 @@
             }
         };
 
-        // ── Feedback: Berechtigungsblock nur bei aktivem Skill ──
-        // Gleiche Begruendung wie bei sec-sub-aimouse/-email/-tracks: ohne
-        // aktiven Skill gibt es den Bereich gar nicht, die Freigabe waere eine
-        // Freigabe fuer nichts.
-        window.updateFeedbackSecVisibility = async function updateFeedbackSecVisibility() {
-            const box = document.getElementById('sec-sub-feedback');
-            if (!box) return;
-            try {
-                const skills = await _skillsOnce();
-                const sp = Array.isArray(skills)
-                    ? skills.find(s => s.dir_name === 'feedback')
-                    : null;
-                box.style.display = (sp && sp.enabled) ? '' : 'none';
-            } catch (e) {
-                // Fehler ignorieren – der Block bleibt versteckt
-            }
-        };
+        // ⚠ `updateFeedbackSecVisibility` ist am 2026-09-14 ERSATZLOS entfallen:
+        // der Feedback-Bereich haengt jetzt an den Wissens-Editoren, es gibt
+        // keinen eigenen Berechtigungsblock mehr, der ein- oder auszublenden
+        // waere. Eine Funktion ohne Bedienelement ist toter Code.
 
         // ── Claude Subagent: Berechtigungsblock nur bei aktivem Skill ──
         // Gleiche Begruendung wie bei sec-sub-email/-sap/-tracks: ohne aktiven
@@ -1427,7 +1414,6 @@
             await updateTracksSecVisibility();
             await updateJiraAssistSecVisibility();
             await updateAimouseSecVisibility();
-            await updateFeedbackSecVisibility();
             await updateClaudesubSecVisibility();
             await updateExcelSecVisibility();
             await updateKundenverwaltungTabVisibility();

@@ -16,7 +16,7 @@
     "knowledge_docs": [],
     "permissions": [],
     "help": {
-        "details": "Der Skill schaltet den Bereich /feedback frei und gattert die Endpunkte /api/feedback/*. Die Formulare werden unter Einstellungen → Feedback gepflegt, die Benutzer fuellen sie ueber die Portal-Kachel aus.\n\nWer den Bereich benutzen darf, steht getrennt davon unter Einstellungen → Sicherheit → Berechtigungen → Feedback ('leer = niemand'). Beides muss stimmen: ohne aktiven Skill gibt es die Kachel nicht, ohne Freigabe keinen Zugriff.\n\nES LAEUFT KEIN MODELL. Eine Abgabe wird gespeichert, mehr nicht - es entstehen keine Token-Kosten und keine Wartezeit.",
+        "details": "Der Skill schaltet den Bereich /feedback frei und gattert die Endpunkte /api/feedback/*. Die Formulare werden unter Einstellungen → Feedback gepflegt, die Benutzer fuellen sie ueber die Portal-Kachel aus.\n\nDen Bereich benutzen darf, wer WISSEN BEARBEITEN darf (Einstellungen → Sicherheit → Berechtigungen → Wissen bearbeiten) - eine eigene Feedback-Liste gibt es seit 2026-09-14 nicht mehr. Beides muss stimmen: ohne aktiven Skill gibt es die Kachel nicht, ohne Editor-Recht keinen Zugriff. Die Verwaltung (Formulare, ALLE Abgaben, CSV-Export) bleibt Administratoren vorbehalten.\n\nES LAEUFT KEIN MODELL. Eine Abgabe wird gespeichert, mehr nicht - es entstehen keine Token-Kosten und keine Wartezeit.",
         "tools": [],
         "use_cases": [
             "Zufriedenheit mit einzelnen Modulen abfragen (Zeile = Modul, Sterne = Bewertung)",

@@ -1526,29 +1526,29 @@ async def require_aimouse_access(request: Request,
 def _user_may_use_feedback(user: str) -> bool:
     """Prädikat: Darf der Benutzer Feedback-Formulare ausfüllen?
 
-    Zuschnitt 1:1 wie ``_user_may_use_aimouse``/``_user_may_use_sap``:
-    Benutzerliste ODER Gruppe, **leer = niemand** (ausdrücklich auch keine
-    lokalen Administratoren), **kein Admin-Bypass**.
+    ⚠ KEINE EIGENE FREIGABELISTE (Vorgabe des Betreibers, 2026-09-14): es gilt
+    **wer Wissen bearbeiten darf**, also ``_may_edit_knowledge``. Die früheren
+    Felder ``feedback_allowed_users``/``feedback_allowed_group`` unter
+    *Sicherheit → Berechtigungen* sind ersatzlos entfallen.
 
-    WARUM ES DIE FREIGABE BRAUCHT, obwohl kein Modell läuft und nichts kostet:
-    eine Abgabe trägt den Benutzernamen und ist damit personenbezogen. Wer
-    Feedback abgeben darf, gehört ausdrücklich benannt und nicht implizit auf
-    „jeder Angemeldete" gesetzt – sonst steht in der Auswertung womöglich, wer
-    dort gar nicht gefragt werden sollte.
+    WARUM DAS PASST: Feedback ist die Rückmeldung zu den Inhalten, die genau
+    diese Personengruppe pflegt – eine zweite Liste daneben wäre ein zweiter
+    Ort, an dem dieselbe Personengruppe gepflegt werden muss, und zwei Listen
+    laufen auseinander. Die Eigenschaft „leer = niemand" bleibt dabei erhalten:
+    ``_may_edit_knowledge`` gibt ohne konfigurierte Editoren für JEDEN False
+    zurück (ausdrücklich auch für lokale Administratoren) und lässt lokale
+    Admins erst durch, sobald überhaupt eine Einschränkung existiert.
+
+    ⚠ DER ADMIN VERLIERT DADURCH NICHTS: die Verwaltung (Formulare, ALLE
+    Abgaben, CSV-Export) liegt unter ``/api/feedback/admin/*`` an
+    ``require_local_auth`` und ist von diesem Prädikat unberührt. Gesteuert
+    wird hier ausschließlich die Benutzerseite – Kachel, Formulare ausfüllen,
+    eigene Abgaben sehen.
     """
     u = (user or "").strip()
     if not u:
         return False
-    users_raw = config.get_setting("feedback_allowed_users", "").strip()
-    grp = config.get_setting("feedback_allowed_group", "").strip()
-    if not users_raw and not grp:
-        return False
-    plain = _norm_login(u)
-    if users_raw and plain in {_norm_login(x) for x in users_raw.split(",") if x.strip()}:
-        return True
-    if grp and _member_of_any_group(_user_group_dns_cache.get(plain, []), grp):
-        return True
-    return False
+    return _may_edit_knowledge(u)
 
 
 async def require_feedback_access(request: Request,
@@ -1556,10 +1556,14 @@ async def require_feedback_access(request: Request,
     """FastAPI Dependency: Prüft die Freigabe für /api/feedback/*."""
     if _user_may_use_feedback(user):
         return user
+    # ⚠ DIE MELDUNG MUSS DEN HEUTIGEN ORT NENNEN. Sie verwies auf
+    # „Berechtigungen → Feedback" – ein Bedienelement, das es nicht mehr gibt;
+    # ein Text, der ein Feld bei einem Namen nennt, den es nicht mehr gibt,
+    # schickt den Administrator suchen (im Projekt mehrfach bezahlt).
     raise HTTPException(status_code=403,
-        detail="Kein Zugriff auf Feedback – nicht in der Benutzerliste/-Gruppe "
-               "freigeschaltet (Einstellungen → Sicherheit → Berechtigungen → "
-               "Feedback; ggf. neu einloggen für Gruppen-Aktualisierung)")
+        detail="Kein Zugriff auf Feedback – der Bereich steht den Wissens-"
+               "Editoren offen (Einstellungen → Sicherheit → Berechtigungen → "
+               "Wissen bearbeiten; ggf. neu einloggen für Gruppen-Aktualisierung)")
 
 
 def _user_may_use_claudesub(user: str) -> bool:
@@ -6846,10 +6850,10 @@ async def save_settings(request: Request, user: str = Depends(require_local_auth
         config.save_setting("aimouse_allowed_users", body["aimouse_allowed_users"])
     if "aimouse_allowed_group" in body:
         config.save_setting("aimouse_allowed_group", body["aimouse_allowed_group"])
-    if "feedback_allowed_users" in body:
-        config.save_setting("feedback_allowed_users", body["feedback_allowed_users"])
-    if "feedback_allowed_group" in body:
-        config.save_setting("feedback_allowed_group", body["feedback_allowed_group"])
+    # ⚠ `feedback_allowed_users`/`-group` gibt es NICHT mehr: der Feedback-
+    # Bereich haengt seit 2026-09-14 an den Wissens-Editoren
+    # (`_may_edit_knowledge`). Ein weiterhin angenommenes Feld waere eine
+    # Einstellung, die gespeichert wird und nichts bewirkt.
     if "excel_allowed_users" in body:
         config.save_setting("excel_allowed_users", body["excel_allowed_users"])
     if "excel_allowed_group" in body:
@@ -7012,8 +7016,6 @@ async def get_ad_status(user: str = Depends(require_local_auth)):
         "jira_assist_users": config.get_setting("jira_assist_allowed_users", ""),
         "aimouse_users": config.get_setting("aimouse_allowed_users", ""),
         "aimouse_group": config.get_setting("aimouse_allowed_group", ""),
-        "feedback_users": config.get_setting("feedback_allowed_users", ""),
-        "feedback_group": config.get_setting("feedback_allowed_group", ""),
         "jira_assist_group": config.get_setting("jira_assist_allowed_group", ""),
         "tracks_users": config.get_setting("tracks_allowed_users", ""),
         "tracks_group": config.get_setting("tracks_allowed_group", ""),

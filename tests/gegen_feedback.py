@@ -122,13 +122,11 @@ PROBEN = [
     ("die Datei-I/O laeuft im Event-Loop", "backend/main.py",
      "    liste = await asyncio.to_thread(fb.formulare, True)",
      "    liste = fb.formulare(True)", BACKEND),
-    ("die Freigabe ist nicht mehr „leer = niemand“", "backend/main.py",
-     '    users_raw = config.get_setting("feedback_allowed_users", "").strip()\n'
-     '    grp = config.get_setting("feedback_allowed_group", "").strip()\n'
-     "    if not users_raw and not grp:\n        return False",
-     '    users_raw = config.get_setting("feedback_allowed_users", "").strip()\n'
-     '    grp = config.get_setting("feedback_allowed_group", "").strip()\n'
-     "    if not users_raw and not grp:\n        return True", BACKEND),
+    # ⚠ NACHGEZOGEN 2026-09-14: die eigene Freigabeliste ist entfallen, der
+    # Bereich haengt an den Wissens-Editoren. Die Sabotage hebt genau das auf.
+    ("die Freigabe haengt nicht mehr an den Wissens-Editoren", "backend/main.py",
+     "    return _may_edit_knowledge(u)",
+     "    return True", BACKEND),
     ("die Kachel haengt nicht mehr am Skill", "backend/main.py",
      '            "feedback": (_user_may_use_feedback(user)\n'
      '                         and _skill_active("feedback")),',
@@ -143,9 +141,9 @@ PROBEN = [
     ("das Panel steht nicht in allSettingsTabs", "frontend/js/app.js",
      "tabEmail, tabTracks, tabExcel, tabFeedback, tabKundenverwaltung",
      "tabEmail, tabTracks, tabExcel, tabKundenverwaltung", BACKEND),
-    ("der Freigabe-Text beschreibt wieder AI-Maus", "frontend/settings.html",
-     "dort füllen Benutzer die Formulare aus",
-     "dort zieht man einen Bildschirmausschnitt auf", BACKEND),
+    # ⚠ ENTFALLEN 2026-09-14 mit dem Freigabe-Block selbst: die Probe zielte auf
+    # dessen Hinweistext. Eine Probe, die ihr Ziel nicht mehr findet, bleibt
+    # sonst dauerhaft als "trifft nicht" stehen und verwaessert die Bilanz.
 
     # ── Oberflaeche ────────────────────────────────────────────────────────
     ("die Tabelle wird nicht gezeichnet", "frontend/js/feedback.js",

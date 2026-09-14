@@ -58,8 +58,8 @@ S.headers["Authorization"] = "Bearer " + TOKEN
 # ── Vorgefundenen Zustand merken ────────────────────────────────────────────
 _vor = config.get_skill_states()
 VOR_SKILL = (_vor.get("feedback") or {}).get("enabled")
-VOR_USERS = config.get_setting("feedback_allowed_users", "")
-VOR_GROUP = config.get_setting("feedback_allowed_group", "")
+VOR_USERS = config.get_setting("ad_knowledge_editors", "")
+VOR_GROUP = config.get_setting("ad_knowledge_editors_group", "")
 print("vorgefunden: skill=%r users=%r" % (VOR_SKILL, VOR_USERS))
 
 PROFIL = tempfile.mkdtemp(prefix="fbreiter-", dir=str(Path.home()))
@@ -126,8 +126,8 @@ def aufraeumen():
         if _f.exists() and not (json.loads(_f.read_text(encoding="utf-8"))
                                 .get("formulare") or []):
             _f.unlink()
-        config.save_setting("feedback_allowed_users", VOR_USERS)
-        config.save_setting("feedback_allowed_group", VOR_GROUP)
+        config.save_setting("ad_knowledge_editors", VOR_USERS)
+        config.save_setting("ad_knowledge_editors_group", VOR_GROUP)
         # Der Skill wird ueber den ECHTEN Endpunkt geschaltet – `enable_skill()`
         # im Messprozess erreicht den Dienst nicht (Skill-Zustaende im RAM).
         if VOR_SKILL is True:
@@ -148,8 +148,8 @@ def aufraeumen():
                 config.remove_skill_state("feedback")
             _neustart_und_melden(S, BASIS)
         print("\nFreigabe wiederhergestellt: users=%r group=%r"
-              % (config.get_setting("feedback_allowed_users", ""),
-                 config.get_setting("feedback_allowed_group", "")))
+              % (config.get_setting("ad_knowledge_editors", ""),
+                 config.get_setting("ad_knowledge_editors_group", "")))
         # ⚠ Ueber den Skill-Eintrag sagt diese Stelle bewusst NICHTS – den
         # kennt nur der DIENST; `_neustart_und_melden` berichtet ihn.
     except Exception as e:                                          # noqa: BLE001

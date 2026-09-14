@@ -65,8 +65,8 @@ from backend.skills.manager import SkillManager  # noqa: E402
 sm = SkillManager()
 _vor_states = config.get_skill_states()
 VOR_SKILL = (_vor_states.get("feedback") or {}).get("enabled")
-VOR_USERS = config.get_setting("feedback_allowed_users", "")
-VOR_GROUP = config.get_setting("feedback_allowed_group", "")
+VOR_USERS = config.get_setting("ad_knowledge_editors", "")
+VOR_GROUP = config.get_setting("ad_knowledge_editors_group", "")
 print("vorgefunden: skill=%r users=%r group=%r" % (VOR_SKILL, VOR_USERS, VOR_GROUP))
 
 TOKEN = M.generate_token("jarvis")
@@ -138,8 +138,8 @@ def zurueck():
                 _f.unlink()
     except Exception as _e:  # noqa: BLE001
         print("Aufraeumen unvollstaendig: %s" % _e)
-    config.save_setting("feedback_allowed_users", VOR_USERS)
-    config.save_setting("feedback_allowed_group", VOR_GROUP)
+    config.save_setting("ad_knowledge_editors", VOR_USERS)
+    config.save_setting("ad_knowledge_editors_group", VOR_GROUP)
     if VOR_SKILL is True:
         sm.enable_skill("feedback")
     elif VOR_SKILL is False:
@@ -157,8 +157,8 @@ def zurueck():
             config.remove_skill_state("feedback")
         _neustart_und_melden(None, None)
     print("\nFreigabe wiederhergestellt: users=%r group=%r"
-          % (config.get_setting("feedback_allowed_users", ""),
-             config.get_setting("feedback_allowed_group", "")))
+          % (config.get_setting("ad_knowledge_editors", ""),
+             config.get_setting("ad_knowledge_editors_group", "")))
     # ⚠ Ueber den Skill-Eintrag sagt diese Stelle bewusst NICHTS – den
     # kennt nur der DIENST; `_neustart_und_melden` berichtet ihn.
 
@@ -167,8 +167,8 @@ try:
     # ═══════════════════════════════════════════════════════════════════════
     print("\n1. Ohne Freigabe")
     # ═══════════════════════════════════════════════════════════════════════
-    config.save_setting("feedback_allowed_users", "")
-    config.save_setting("feedback_allowed_group", "")
+    config.save_setting("ad_knowledge_editors", "")
+    config.save_setting("ad_knowledge_editors_group", "")
     s, d, _ = ruf("/api/feedback/formulare", TOKEN)
     c("⚠ leere Freigabe: 403 auch fuer den lokalen Admin", s == 403, "ist %s" % s)
     s, d, _ = ruf("/api/feedback/formulare")
@@ -184,7 +184,7 @@ try:
     # ═══════════════════════════════════════════════════════════════════════
     print("\n2. Mit Freigabe und aktivem Skill")
     # ═══════════════════════════════════════════════════════════════════════
-    config.save_setting("feedback_allowed_users", "jarvis")
+    config.save_setting("ad_knowledge_editors", "jarvis")
     # ⚠ UEBER DEN ECHTEN ENDPUNKT, nicht ueber den SkillManager im Messprozess:
     # der DIENST haelt seine Skill-Zustaende im eigenen Speicher – ein
     # `enable_skill()` hier draussen erreicht ihn nicht (Register: dieselbe

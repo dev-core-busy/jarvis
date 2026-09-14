@@ -104,6 +104,25 @@
         'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' +
         '<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>';
 
+    // STERN = BEWERTUNG (eine von fuenf). Er loescht nichts und schliesst
+    // nichts – er traegt einen WERT.
+    //
+    // ⚠ ZWEI FORMEN, NICHT ZWEI FARBEN, aus demselben Grund wie bei der
+    // Sprechblase: ob ein Stern zur Bewertung gehoert, ist eine Aussage, und
+    // Farbe allein ist keine Information (Register). Der gesetzte ist GEFUELLT
+    // und damit an der Silhouette unterscheidbar – auch fuer jemanden, der
+    // Farben nicht unterscheiden kann, und auch auf einem Ausdruck.
+    var STERN_PFAD = '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 '
+        + '18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>';
+
+    var STERN = '<svg class="jv-ico jv-ico-star" ' + GEMEINSAM + '>'
+        + STERN_PFAD + '</svg>';
+
+    var STERN_VOLL = '<svg class="jv-ico jv-ico-star is-gesetzt" viewBox="0 0 24 24" '
+        + 'fill="currentColor" stroke="currentColor" stroke-width="2" '
+        + 'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" '
+        + 'focusable="false">' + STERN_PFAD + '</svg>';
+
     window.JarvisIcons = {
         /** Muelleimer – NUR fuer dauerhaftes Loeschen/Entfernen. */
         trash: function () { return MUELL; },
@@ -121,6 +140,9 @@
         lupe: function () { return LUPE; },
         setEye: function (el) { return setzen(el, AUGE); },
         setEyeOff: function (el) { return setzen(el, AUGE_ZU); },
+        /** Stern – ein Schritt einer Bewertung. `gefuellt`=true: ausgefuellt. */
+        star: function (gefuellt) { return gefuellt ? STERN_VOLL : STERN; },
+        setStar: function (el, gefuellt) { return setzen(el, gefuellt ? STERN_VOLL : STERN); },
         /** Sprechblase – Vorab-Anweisung eines Chats. `gesetzt`=true: gefuellt. */
         prompt: function (gesetzt) { return gesetzt ? BLASE_VOLL : BLASE; },
         setPrompt: function (el, gesetzt) { return setzen(el, gesetzt ? BLASE_VOLL : BLASE); }

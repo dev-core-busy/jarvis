@@ -84,6 +84,7 @@
         vemas:             'vemas',
         email:             'email',
         ai_mouse:          'aimouse',
+        feedback:          'feedback',
         'short-tracks':    'tracks',
         'excel-addin':     'excel',
         kundenverwaltung:  'kundenverwaltung',

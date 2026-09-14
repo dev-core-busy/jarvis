@@ -59,6 +59,9 @@
         // Wie short-tracks/excel-addin: hier, aber NICHT in TARGETS – der
         // Reiter zeigt eine handgebaute Oberflaeche (ai_mouse_admin.js).
         ai_mouse:           'settings-tab-btn-aimouse',
+        // Wie ai_mouse: hier, aber NICHT in TARGETS – der Reiter zeigt
+        // eine handgebaute Oberflaeche (feedback_admin.js).
+        feedback:           'settings-tab-btn-feedback',
     };
 
     const SVG_EYE_OPEN   = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';

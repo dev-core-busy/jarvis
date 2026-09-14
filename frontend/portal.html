@@ -506,6 +506,13 @@
             <div class="pt-card-title" data-i18n="portal.card_aimouse">AI-Maus</div>
             <div class="pt-card-desc" data-i18n="portal.card_aimouse_desc">Bildschirmausschnitt am Arbeitsplatz einrahmen und KI-Assistenten dazu fragen.</div>
         </a>
+        <!-- Feedback: Freigabe UND aktiver Skill (wie /email, /sap, /ai-mouse).
+             Eine Kachel, die in einen 403 fuehrt, ist schlimmer als keine. -->
+        <a class="pt-card hidden" id="pt-card-feedback" href="/feedback">
+            <div class="pt-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11H5a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-4"/><polygon points="12 2 14.09 6.26 18.5 6.91 15.25 10.04 16.18 14.41 12 12.27 7.82 14.41 8.75 10.04 5.5 6.91 9.91 6.26 12 2"/></svg></div>
+            <div class="pt-card-title" data-i18n="portal.card_feedback">Feedback</div>
+            <div class="pt-card-desc" data-i18n="portal.card_feedback_desc">Formulare ausfüllen: Zeilen anlegen, bewerten und abschicken.</div>
+        </a>
         <!-- Claude Subagent: haengt an Freigabe UND Skill-Zustand (wie /email,
              /sap, /tracks) – eine Kachel, die in einen 403 fuehrt, ist
              schlimmer als keine Kachel. -->
@@ -660,12 +667,12 @@ sudo update-ca-certificates</code></pre>
     </div>
 </div>
 
-<script src="/static/js/icons.js?v=4"></script>
+<script src="/static/js/icons.js?v=5"></script>
 <script src="/static/js/pwreveal.js?v=2"></script>
 <script src="/static/js/dlkey.js?v=2"></script>
 <script src="/static/js/cpubar.js?v=1"></script>
 <script src="/static/js/syspackages.js?v=2"></script>
-<script src="/static/js/i18n.js?v=260"></script>
+<script src="/static/js/i18n.js?v=261"></script>
 <script src="/static/js/theme.js?v=3"></script>
 <script src="/static/js/branding.js?v=26"></script>
 <script src="/static/js/security_incidents.js?v=33"></script>
@@ -798,6 +805,11 @@ sudo update-ca-certificates</code></pre>
         if (d.permissions && d.permissions.ai_mouse) {
             var amCard = document.getElementById('pt-card-aimouse');
             if (amCard) amCard.classList.remove('hidden');
+        }
+        // Feedback: Freigabe UND aktiver Skill.
+        if (d.permissions && d.permissions.feedback) {
+            var fbCard = document.getElementById('pt-card-feedback');
+            if (fbCard) fbCard.classList.remove('hidden');
         }
         // Jira-Assistent: Freigabe UND aktiver Jira-Skill.
         if (d.permissions && d.permissions.jira_assist) {

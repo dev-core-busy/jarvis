@@ -1523,6 +1523,45 @@ async def require_aimouse_access(request: Request,
                "AI Mouse; ggf. neu einloggen für Gruppen-Aktualisierung)")
 
 
+def _user_may_use_feedback(user: str) -> bool:
+    """Prädikat: Darf der Benutzer Feedback-Formulare ausfüllen?
+
+    Zuschnitt 1:1 wie ``_user_may_use_aimouse``/``_user_may_use_sap``:
+    Benutzerliste ODER Gruppe, **leer = niemand** (ausdrücklich auch keine
+    lokalen Administratoren), **kein Admin-Bypass**.
+
+    WARUM ES DIE FREIGABE BRAUCHT, obwohl kein Modell läuft und nichts kostet:
+    eine Abgabe trägt den Benutzernamen und ist damit personenbezogen. Wer
+    Feedback abgeben darf, gehört ausdrücklich benannt und nicht implizit auf
+    „jeder Angemeldete" gesetzt – sonst steht in der Auswertung womöglich, wer
+    dort gar nicht gefragt werden sollte.
+    """
+    u = (user or "").strip()
+    if not u:
+        return False
+    users_raw = config.get_setting("feedback_allowed_users", "").strip()
+    grp = config.get_setting("feedback_allowed_group", "").strip()
+    if not users_raw and not grp:
+        return False
+    plain = _norm_login(u)
+    if users_raw and plain in {_norm_login(x) for x in users_raw.split(",") if x.strip()}:
+        return True
+    if grp and _member_of_any_group(_user_group_dns_cache.get(plain, []), grp):
+        return True
+    return False
+
+
+async def require_feedback_access(request: Request,
+                                  user: str = Depends(require_auth)) -> str:
+    """FastAPI Dependency: Prüft die Freigabe für /api/feedback/*."""
+    if _user_may_use_feedback(user):
+        return user
+    raise HTTPException(status_code=403,
+        detail="Kein Zugriff auf Feedback – nicht in der Benutzerliste/-Gruppe "
+               "freigeschaltet (Einstellungen → Sicherheit → Berechtigungen → "
+               "Feedback; ggf. neu einloggen für Gruppen-Aktualisierung)")
+
+
 def _user_may_use_claudesub(user: str) -> bool:
     """Prädikat: Darf der Benutzer Codearbeiten an Jarvis delegieren?
 
@@ -5601,6 +5640,11 @@ async def get_me(user: str = Depends(require_auth)):
             # statt bei jedem Rahmen in einen 403 zu laufen.
             "ai_mouse": (_user_may_use_aimouse(user)
                          and _skill_active("ai_mouse")),
+            # Feedback: Freigabe UND aktiver Skill – gleiche Logik wie bei
+            # sap/email/tracks/ai_mouse. Eine Kachel, die in einen 403 fuehrt,
+            # ist schlimmer als keine Kachel.
+            "feedback": (_user_may_use_feedback(user)
+                         and _skill_active("feedback")),
             # Benutzer-Chat: haengt NUR am Skill-Zustand – eine eigene Freigabe
             # gibt es bewusst nicht (Begruendung in require_userchat_access).
             # Das Portal blendet Kachel UND Ungelesen-Badge daran ein; ohne das
@@ -6802,6 +6846,10 @@ async def save_settings(request: Request, user: str = Depends(require_local_auth
         config.save_setting("aimouse_allowed_users", body["aimouse_allowed_users"])
     if "aimouse_allowed_group" in body:
         config.save_setting("aimouse_allowed_group", body["aimouse_allowed_group"])
+    if "feedback_allowed_users" in body:
+        config.save_setting("feedback_allowed_users", body["feedback_allowed_users"])
+    if "feedback_allowed_group" in body:
+        config.save_setting("feedback_allowed_group", body["feedback_allowed_group"])
     if "excel_allowed_users" in body:
         config.save_setting("excel_allowed_users", body["excel_allowed_users"])
     if "excel_allowed_group" in body:
@@ -6964,6 +7012,8 @@ async def get_ad_status(user: str = Depends(require_local_auth)):
         "jira_assist_users": config.get_setting("jira_assist_allowed_users", ""),
         "aimouse_users": config.get_setting("aimouse_allowed_users", ""),
         "aimouse_group": config.get_setting("aimouse_allowed_group", ""),
+        "feedback_users": config.get_setting("feedback_allowed_users", ""),
+        "feedback_group": config.get_setting("feedback_allowed_group", ""),
         "jira_assist_group": config.get_setting("jira_assist_allowed_group", ""),
         "tracks_users": config.get_setting("tracks_allowed_users", ""),
         "tracks_group": config.get_setting("tracks_allowed_group", ""),
@@ -13708,6 +13758,208 @@ async def ai_mouse_seite():
     liegen ausschließlich hinter `require_aimouse_access`.
     """
     return FileResponse(FRONTEND_DIR / "ai_mouse.html")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Feedback-Formulare
+# ═══════════════════════════════════════════════════════════════════════════
+# Der Administrator definiert Spalten, der Benutzer fuellt Zeilen. Die Logik
+# liegt in `backend/feedback.py`; hier stehen nur Rechte und Transport.
+#
+# ⚠ ZWEI RECHTE-EBENEN, und sie sind verschieden zugeschnitten:
+#   `/api/feedback/*`        require_feedback_access  – ausfuellen und eigene sehen
+#   `/api/feedback/admin/*`  require_local_auth       – Formulare und ALLE Abgaben
+# Der Admin-Zweig haengt AUSDRUECKLICH NICHT an der Bereichs-Freigabe:
+# `_user_may_use_feedback` kennt bewusst keinen Admin-Bypass, ein Administrator
+# ohne eigene Freigabe koennte die Formulare sonst gar nicht pflegen – dieselbe
+# Stelle und dieselbe Begruendung wie bei `/api/ai-mouse/admin/*`.
+
+@app.get("/api/feedback/formulare")
+async def feedback_formulare_lesen(user: str = Depends(require_feedback_access)):
+    """Die ausfuellbaren Formulare – nur AKTIVE, mit ihren Spalten."""
+    from backend import feedback as fb  # noqa: PLC0415
+    liste = await asyncio.to_thread(fb.formulare, True)
+    return JSONResponse({"ok": True, "formulare": liste})
+
+
+@app.get("/api/feedback/meine")
+async def feedback_meine_abgaben(fid: str = "",
+                                 user: str = Depends(require_feedback_access)):
+    """Die eigenen Abgaben. **Nie die fremder** – auch nicht fuer Administratoren.
+
+    Wer alle sehen will, nimmt den Einstellungs-Reiter; das ist die bewusste
+    Trennung zwischen „meine Abgabe nachsehen" und „auswerten".
+    """
+    from backend import feedback as fb  # noqa: PLC0415
+    liste = await asyncio.to_thread(fb.abgaben, fid, user, True, 200)
+    return JSONResponse({"ok": True, "abgaben": liste})
+
+
+@app.post("/api/feedback/abgabe")
+async def feedback_abgabe_senden(request: Request,
+                                 user: str = Depends(require_feedback_access)):
+    """Eine ausgefuellte Abgabe speichern. Body: ``{formular_id, zeilen[]}``.
+
+    ⚠ DER BENUTZER KOMMT AUS DER ANMELDUNG, nie aus dem Rumpf – sonst waere der
+    Endpunkt der bequemste Weg, einem Kollegen eine Abgabe unterzuschieben
+    (gleiche Regel wie beim Empfaenger einer Erinnerung und beim Chat-Prompt).
+
+    ⚠ ES LAEUFT KEIN MODELL (Vorgabe des Betreibers 2026-09-14). Die Zeilen
+    werden geprueft und abgelegt, mehr nicht.
+    """
+    from backend import feedback as fb  # noqa: PLC0415
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungültiger JSON-Body."},
+                            status_code=400)
+    try:
+        eintrag = await asyncio.to_thread(
+            fb.abgabe_speichern, user,
+            str((body or {}).get("formular_id") or "").strip(),
+            (body or {}).get("zeilen"))
+    except fb.FeedbackFehler as f:
+        return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
+    return JSONResponse({"ok": True, "abgabe": eintrag})
+
+
+@app.get("/api/feedback/admin/formulare")
+async def feedback_admin_formulare(user: str = Depends(require_local_auth)):
+    """Alle Formulare – auch die abgeschalteten. Fuer den Einstellungs-Reiter."""
+    from backend import feedback as fb  # noqa: PLC0415
+    liste = await asyncio.to_thread(fb.formulare, False)
+    return JSONResponse({"ok": True, "formulare": liste,
+                         "typen": list(fb.SPALTEN_TYPEN),
+                         "max_spalten": fb.MAX_SPALTEN,
+                         "skill_aktiv": _skill_active("feedback")})
+
+
+# ⚠ STEHT VOR `/admin/formulare/{fid}`: FastAPI prueft innerhalb derselben
+# Methode in Registrierungsreihenfolge. Hier unkritisch (POST gegen DELETE),
+# die Reihenfolge bleibt aber bewusst so, damit ein kuenftiges
+# `POST /admin/formulare/{fid}` den festen Pfad nicht abfaengt.
+@app.post("/api/feedback/admin/formulare/reihenfolge")
+async def feedback_admin_sortieren(request: Request,
+                                   user: str = Depends(require_local_auth)):
+    """Die Reihenfolge der Formulare setzen. Body: ``{ids: [...]}``."""
+    from backend import feedback as fb  # noqa: PLC0415
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungültiger JSON-Body."},
+                            status_code=400)
+    ids = (body or {}).get("ids")
+    if not isinstance(ids, list):
+        return JSONResponse({"ok": False, "error": "`ids` fehlt oder ist keine Liste."},
+                            status_code=400)
+    if len(ids) > fb.MAX_FORMULARE:
+        return JSONResponse({"ok": False, "error": "Zu viele Kennungen."},
+                            status_code=400)
+    bewegt = await asyncio.to_thread(fb.formulare_sortieren, ids)
+    # Die neue Liste kommt MIT zurueck: die Oberflaeche zeichnet aus der
+    # SERVER-Antwort, nicht aus ihrem Zwischenstand – sonst behauptet sie eine
+    # Reihenfolge, die der Server womoeglich anders gespeichert hat.
+    return JSONResponse({"ok": True, "bewegt": bewegt,
+                         "formulare": await asyncio.to_thread(fb.formulare, False)})
+
+
+@app.post("/api/feedback/admin/formulare")
+async def feedback_admin_speichern(request: Request,
+                                   user: str = Depends(require_local_auth)):
+    """Formular anlegen oder aendern. Body: ``{id?, titel, beschreibung, spalten[], aktiv?}``."""
+    from backend import feedback as fb  # noqa: PLC0415
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungültiger JSON-Body."},
+                            status_code=400)
+    try:
+        eintrag = await asyncio.to_thread(
+            fb.formular_speichern,
+            str((body or {}).get("id") or "").strip(),
+            str((body or {}).get("titel") or ""),
+            str((body or {}).get("beschreibung") or ""),
+            (body or {}).get("spalten"),
+            (body or {}).get("aktiv") is not False)
+    except fb.FeedbackFehler as f:
+        return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
+    return JSONResponse({"ok": True, "formular": eintrag})
+
+
+@app.delete("/api/feedback/admin/formulare/{fid}")
+async def feedback_admin_loeschen(fid: str, user: str = Depends(require_local_auth)):
+    """Ein Formular entfernen. Unbekannt → **404**.
+
+    Die ABGABEN bleiben liegen (siehe `feedback.formular_loeschen`).
+    """
+    from backend import feedback as fb  # noqa: PLC0415
+    if not await asyncio.to_thread(fb.formular_loeschen, fid):
+        return JSONResponse({"ok": False, "error": "Das Formular wurde nicht gefunden."},
+                            status_code=404)
+    return JSONResponse({"ok": True})
+
+
+@app.get("/api/feedback/admin/abgaben")
+async def feedback_admin_abgaben(fid: str = "", limit: int = 500,
+                                 user: str = Depends(require_local_auth)):
+    """ALLE Abgaben – neueste zuerst. Nur fuer Administratoren."""
+    from backend import feedback as fb  # noqa: PLC0415
+    limit = max(1, min(2000, int(limit or 500)))
+    liste = await asyncio.to_thread(fb.abgaben, fid, "", False, limit)
+    return JSONResponse({"ok": True, "abgaben": liste, "anzahl": len(liste)})
+
+
+@app.delete("/api/feedback/admin/abgaben/{aid}")
+async def feedback_admin_abgabe_loeschen(aid: str,
+                                         user: str = Depends(require_local_auth)):
+    """Eine Abgabe entfernen. Unbekannt → **404**."""
+    from backend import feedback as fb  # noqa: PLC0415
+    if not await asyncio.to_thread(fb.abgabe_loeschen, aid):
+        return JSONResponse({"ok": False, "error": "Die Abgabe wurde nicht gefunden."},
+                            status_code=404)
+    return JSONResponse({"ok": True})
+
+
+@app.get("/api/feedback/admin/export")
+async def feedback_admin_export(fid: str = "",
+                                user: str = Depends(require_local_auth)):
+    """Alle Abgaben eines Formulars als CSV.
+
+    ⚠ MIT BEARER-HEADER, NICHT mit `?token=` in der Adresse: die Oberflaeche
+    holt die Datei per `fetch` und baut daraus einen Blob (wie der
+    Paketbericht in `syspackages.js`). Ein `<a href>` koennte keinen Header
+    setzen und braeuchte ein Token in der Adresszeile – das stuende dann im
+    Browser-Verlauf und in jedem Proxy-Protokoll.
+
+    Die Entschaerfung gegen CSV-Injection steht in `feedback.csv_zelle`.
+    """
+    from urllib.parse import quote  # noqa: PLC0415
+    from backend import feedback as fb  # noqa: PLC0415
+    if not fid:
+        return JSONResponse({"ok": False, "error": "`fid` fehlt."}, status_code=400)
+    name, inhalt = await asyncio.to_thread(fb.csv_export, fid)
+    return Response(
+        content=inhalt.encode("utf-8"),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            # Der Dateiname ist in `csv_export` bereits entschaerft (er geht in
+            # einen HTTP-Kopf); zusaetzlich die RFC-5987-Form fuer Umlaute.
+            "Content-Disposition": "attachment; filename*=utf-8''%s"
+                                   % quote(name, safe=""),
+            "Cache-Control": "no-store",
+        })
+
+
+@app.get("/feedback")
+async def feedback_seite():
+    """Die Ausfuell-Seite.
+
+    Leere Huelle wie /ai-mouse und /jira-addon: eine Navigation traegt keinen
+    Authorization-Header, die Berechtigung kann hier also nicht geprueft
+    werden. Die Seite holt `/api/me` und leitet Unberechtigte aufs Portal; die
+    DATEN liegen ausschliesslich hinter `require_feedback_access`.
+    """
+    return FileResponse(FRONTEND_DIR / "feedback.html")
 
 
 # ─── Kundenverwaltung (IBS-API) ──────────────────────────────────────

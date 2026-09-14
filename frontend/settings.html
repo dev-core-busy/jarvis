@@ -25,6 +25,10 @@
     <link rel="stylesheet" href="/static/css/avatar.css?v=8">
     <link rel="stylesheet" href="/static/css/style.css?v=185">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=6">
+    <!-- Feedback-Reiter. EINE Datei fuer /settings und /feedback: Tabelle,
+         Sterne und Abgabe-Karte werden an beiden Orten gebraucht, zwei
+         Fassungen waeren beim naechsten Feinschliff auseinandergelaufen. -->
+    <link rel="stylesheet" href="/static/css/feedback.css?v=1">
 </head>
 
 <body>
@@ -1568,6 +1572,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 <button class="settings-tab-btn" data-settings-tab="vemas" id="settings-tab-btn-vemas" style="display:none;">Vemas</button>
                 <button class="settings-tab-btn" data-settings-tab="email" id="settings-tab-btn-email" style="display:none;" data-i18n="settings.tab.email">E-Mail</button>
                 <button class="settings-tab-btn" data-settings-tab="aimouse" id="settings-tab-btn-aimouse" style="display:none;" data-i18n="settings.tab.aimouse">AI-Maus</button>
+                <button class="settings-tab-btn" data-settings-tab="feedback" id="settings-tab-btn-feedback" style="display:none;" data-i18n="settings.tab.feedback">Feedback</button>
                 <button class="settings-tab-btn" data-settings-tab="tracks" id="settings-tab-btn-tracks" style="display:none;" data-i18n="settings.tab.tracks">Short Tracks</button>
                 <button class="settings-tab-btn" data-settings-tab="excel" id="settings-tab-btn-excel" style="display:none;" data-i18n="settings.tab.excel">Excel</button>
                 <button class="settings-tab-btn" data-settings-tab="kundenverwaltung" id="settings-tab-btn-kundenverwaltung" style="display:none;" data-i18n="settings.tab.kundenverwaltung">Kundenverwaltung</button>
@@ -3896,6 +3901,63 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                     </div>
                 </div>
 
+                <!-- ═══ Reiter Feedback ═══
+                     Handgebaute Oberflaeche (feedback_admin.js), deshalb in
+                     TAB_BUTTONS und NICHT in TARGETS von skillcfg.js – wie
+                     ai_mouse, short-tracks und excel-addin.
+
+                     Bauform der Listen 1:1 wie "AI-Maus -> Meine Fragen": eine
+                     Karte je Eintrag, Ziehgriff fuer die Reihenfolge, und das
+                     Bearbeiten-Formular klappt DIREKT unter der Zeile auf. -->
+                <div id="settings-tab-feedback" class="settings-tab-content" style="display:none;">
+                    <div class="kb-section" id="fb-sect-form">
+                        <div class="kb-section-header kb-collapse-header" id="fb-sect-form-hdr">
+                            <h3 data-i18n="fbadm.h">Formulare</h3>
+                            <span class="sk-openclaw-toggle" id="fb-sect-form-tog">▼</span>
+                        </div>
+                        <div class="kb-collapse-body" id="fb-sect-form-body">
+                            <p class="kb-hint" data-i18n-html="fbadm.intro">Ein Formular ist eine <b>Tabelle</b>: du legst die <b>Spalten</b> fest, der Benutzer legt beliebig viele <b>Zeilen</b> an und füllt sie aus. Zwei Spaltentypen stehen zur Wahl – ein <b>Textfeld</b> und eine <b>5-Sterne-Bewertung</b>.</p>
+                            <p class="kb-hint" data-i18n-html="fbadm.warn">Eine Abgabe wird <b>nur gespeichert</b> – es läuft kein Modell, es entstehen keine Kosten. Die Spalten lassen sich später ändern: bereits abgegebene Zeilen bleiben trotzdem richtig beschriftet, weil jede Abgabe ihre damaligen Spalten mitspeichert.</p>
+                            <div id="fbadm-liste"></div>
+                            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px;">
+                                <button class="btn-secondary" id="fbadm-neu" type="button" data-i18n="fbadm.new" style="flex:0 0 auto;">+ Formular</button>
+                                <span id="fbadm-status" style="font-size:0.9em;"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Auswertung. Der CSV-Export geht ueber einen Blob, NICHT
+                         ueber einen Link mit ?token= – ein <a href> kann keinen
+                         Authorization-Header setzen, und das Token stuende dann
+                         im Browser-Verlauf (Register). -->
+                    <div class="kb-section" id="fb-sect-abg">
+                        <div class="kb-section-header kb-collapse-header" id="fb-sect-abg-hdr">
+                            <h3 data-i18n="fbadm.abg_h">Abgaben</h3>
+                            <span class="sk-openclaw-toggle" id="fb-sect-abg-tog">▼</span>
+                        </div>
+                        <div class="kb-collapse-body" id="fb-sect-abg-body">
+                            <p class="kb-hint" data-i18n-html="fbadm.abg_intro">Alle Abgaben zu einem Formular – neueste zuerst. Der Benutzer selbst sieht in seiner Kachel <b>nur die eigenen</b>.</p>
+                            <div class="fb-abg-kopf">
+                                <select id="fbadm-abg-sel" aria-label="Formular"></select>
+                                <button class="ja-btn" id="fbadm-export" type="button" data-i18n="fbadm.export">CSV herunterladen</button>
+                                <span id="fbadm-abg-status" style="font-size:0.9em;"></span>
+                            </div>
+                            <div id="fbadm-abgaben"></div>
+                        </div>
+                    </div>
+
+                    <div class="kb-section" id="fb-sect-info">
+                        <div class="kb-section-header kb-collapse-header" id="fb-sect-info-hdr">
+                            <h3 data-i18n="fbadm.state_h">Zustand</h3>
+                            <span class="sk-openclaw-toggle" id="fb-sect-info-tog">▼</span>
+                        </div>
+                        <div class="kb-collapse-body" id="fb-sect-info-body">
+                            <div id="fbadm-state"></div>
+                            <p class="kb-hint" data-i18n-html="fbadm.state_hint">Wer Feedback abgeben darf, steht getrennt davon unter <b>Sicherheit → Berechtigungen → Feedback</b> („leer = niemand"). Die Formulare füllen die Benutzer unter <b>Portal → Feedback</b> aus.</p>
+                        </div>
+                    </div>
+                </div>
+
                 <div id="settings-tab-tracks" class="settings-tab-content" style="display:none;">
                     <div class="kb-container">
                         <p class="kb-hint" data-i18n-html="tracksadm.intro">Der Bereich <b>Short Tracks</b> stellt jedem Benutzer <b>Ablagen</b> zur Verfügung: Felder mit einer hinterlegten Aufgabe. Wer eine Datei darauf zieht, löst sie aus. <b>Der Lauf trägt immer die Rechte dessen, der ablegt</b> – nie mehr. Die Ablagen selbst werden im Bereich <b>Short Tracks</b> (Kachel im Portal) gepflegt; hier stehen nur die Vorgaben für alle.</p>
@@ -4662,6 +4724,34 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 </div>
                                     </div>
                                 </details>
+<!-- ── Unter-Container: Feedback ──
+                                     Startet VERSTECKT und wird von app.js am Zustand des Skills
+                                     "feedback" eingeblendet – gleiches Muster wie
+                                     sec-sub-aimouse/-email/-tracks. -->
+                                <details class="sec-sub" data-sub="feedback" id="sec-sub-feedback" style="display:none;">
+                                    <summary><span>Feedback</span><span class="sec-sub-hint">– Wer darf Feedback-Formulare ausfüllen?</span></summary>
+                                    <div class="sec-sub-body">
+                                <p class="kb-hint" style="margin-bottom:10px;">Steuert den Zugriff auf den Bereich <b>Feedback</b> (Kachel im Portal): dort füllen Benutzer die Formulare aus, die unter <b>Einstellungen → Feedback</b> definiert sind. Leer = <b>niemand</b> – ausdrücklich <b>auch keine lokalen Administratoren</b>. <b>Warum das eine eigene Freigabe braucht, obwohl kein Modell läuft und nichts kostet:</b> eine Abgabe trägt den <b>Benutzernamen</b> und ist damit personenbezogen. Wer gefragt werden soll, gehört ausdrücklich benannt. <b>Ein Administrator sieht alle Abgaben</b> (Reiter „Feedback"), <b>der Benutzer nur seine eigenen.</b></p>
+
+                                <div class="form-group" style="margin-bottom:8px;">
+                                    <label>
+                                        <span>Erlaubte Benutzer</span>
+                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– Benutzernamen kommagetrennt, z.B. <code>mueller,schmidt</code></span>
+                                    </label>
+                                    <input type="text" id="feedback-allowed-users" placeholder="Leer = niemand (auch keine lokalen Admins)" style="width:60%;box-sizing:border-box;">
+                                </div>
+                                <div class="form-group" style="margin-bottom:8px;">
+                                    <label>
+                                        <span>Feedback-Gruppe (AD-Gruppe)</span>
+                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;" data-i18n="security.ad_group_hint">– zusätzlich zur Benutzerliste (ODER: Liste oder Gruppe genügt)</span>
+                                    </label>
+                                    <textarea id="feedback-allowed-group" rows="1" placeholder="z.B. CN=Feedback,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;"></textarea>
+                                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
+                                        <span data-i18n="security.ad_group_cache_hint">⚠ Gruppen-Mitgliedschaft wird beim Login ermittelt. Mit Service-Konto (Verzeichnis-Suche) wird sie automatisch nachgeprüft (Standard: alle 10 Min.) – Änderungen wirken dann ohne Neuanmeldung.</span>
+                                    </div>
+                                </div>
+                                    </div>
+                                </details>
                                 <!-- ── Unter-Container: Claude Subagent ──
                                      Startet VERSTECKT und wird von app.js am Zustand des Skills
                                      "claude_subagent" eingeblendet – gleiches Muster wie
@@ -4869,13 +4959,15 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             var _jaU = document.getElementById('jiraassist-allowed-users'); if (_jaU) _jaU.value = d.jira_assist_users || '';
                                             var _amU = document.getElementById('aimouse-allowed-users'); if (_amU) _amU.value = d.aimouse_users || '';
                                             var _amG = document.getElementById('aimouse-allowed-group'); if (_amG) _amG.value = d.aimouse_group || '';
+                                            var _fbU = document.getElementById('feedback-allowed-users'); if (_fbU) _fbU.value = d.feedback_users || '';
+                                            var _fbG = document.getElementById('feedback-allowed-group'); if (_fbG) _fbG.value = d.feedback_group || '';
                                             var _jaG = document.getElementById('jiraassist-allowed-group'); if (_jaG) _jaG.value = d.jira_assist_group || '';
                                             var _xlU = document.getElementById('excel-allowed-users'); if (_xlU) _xlU.value = d.excel_users || '';
                                             var _xlG = document.getElementById('excel-allowed-group'); if (_xlG) _xlG.value = d.excel_group || '';
                                             var _csU = document.getElementById('claudesub-allowed-users'); if (_csU) _csU.value = d.claudesub_users || '';
                                             var _csG = document.getElementById('claudesub-allowed-group'); if (_csG) _csG.value = d.claudesub_group || '';
                                             // Token-Listen (Chips) aller AD-Felder neu aufbauen (nach dem Setzen aller Werte)
-                                            ['ad-allowed-users','ad-allowed-group','ad-knowledge-editors','ad-knowledge-editors-group','ad-internet-users','ad-internet-group','ad-admins','ad-admins-group','sap-allowed-users','sap-allowed-group','vemas-allowed-users','vemas-allowed-group','email-allowed-users','email-allowed-group','tracks-allowed-users','tracks-allowed-group','jiraassist-allowed-users','jiraassist-allowed-group','aimouse-allowed-users','aimouse-allowed-group','excel-allowed-users','excel-allowed-group','claudesub-allowed-users','claudesub-allowed-group'].forEach(function(_id){ var _e=document.getElementById(_id); if(_e) _e.dispatchEvent(new Event('change')); });
+                                            ['ad-allowed-users','ad-allowed-group','ad-knowledge-editors','ad-knowledge-editors-group','ad-internet-users','ad-internet-group','ad-admins','ad-admins-group','sap-allowed-users','sap-allowed-group','vemas-allowed-users','vemas-allowed-group','email-allowed-users','email-allowed-group','tracks-allowed-users','tracks-allowed-group','jiraassist-allowed-users','jiraassist-allowed-group','aimouse-allowed-users','aimouse-allowed-group','feedback-allowed-users','feedback-allowed-group','excel-allowed-users','excel-allowed-group','claudesub-allowed-users','claudesub-allowed-group'].forEach(function(_id){ var _e=document.getElementById(_id); if(_e) _e.dispatchEvent(new Event('change')); });
                                             _adUpdateStatus(d);
                                         } catch(e) {}
                                     }
@@ -5064,6 +5156,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                                     jira_assist_allowed_group: (document.getElementById('jiraassist-allowed-group')||{}).value ? document.getElementById('jiraassist-allowed-group').value.trim() : '',
                                                     aimouse_allowed_users: (document.getElementById('aimouse-allowed-users')||{}).value ? document.getElementById('aimouse-allowed-users').value.trim() : '',
                                                     aimouse_allowed_group: (document.getElementById('aimouse-allowed-group')||{}).value ? document.getElementById('aimouse-allowed-group').value.trim() : '',
+                                                    feedback_allowed_users: (document.getElementById('feedback-allowed-users')||{}).value ? document.getElementById('feedback-allowed-users').value.trim() : '',
+                                                    feedback_allowed_group: (document.getElementById('feedback-allowed-group')||{}).value ? document.getElementById('feedback-allowed-group').value.trim() : '',
                                                     excel_allowed_users:       (document.getElementById('excel-allowed-users')||{}).value ? document.getElementById('excel-allowed-users').value.trim() : '',
                                                     excel_allowed_group:       (document.getElementById('excel-allowed-group')||{}).value ? document.getElementById('excel-allowed-group').value.trim() : '',
                                                     claudesub_allowed_users:   (document.getElementById('claudesub-allowed-users')||{}).value ? document.getElementById('claudesub-allowed-users').value.trim() : '',
@@ -5380,20 +5474,20 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     details.sec-sub summary .sec-sub-hint { color: var(--text-muted); font-size: 0.78rem;
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
-    <script src="/static/js/icons.js?v=4"></script>
+    <script src="/static/js/icons.js?v=5"></script>
     <script src="/static/js/pwreveal.js?v=2"></script>
     <script src="/static/js/dlkey.js?v=2"></script>
-    <script src="/static/js/i18n.js?v=260"></script>
+    <script src="/static/js/i18n.js?v=261"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=21"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
     <script src="/static/js/audit.js?v=4"></script>
     <script src="/static/js/kbgroups.js?v=4"></script>
-    <script src="/static/js/skills.js?v=46"></script>
+    <script src="/static/js/skills.js?v=47"></script>
     <script src="/static/js/chatlib.js?v=19"></script>
-    <script src="/static/js/skillcfg.js?v=8"></script>
+    <script src="/static/js/skillcfg.js?v=9"></script>
     <script src="/static/js/google.js?v=13"></script>
-    <script src="/static/js/whatsapp.js?v=16"></script>
+    <script src="/static/js/whatsapp.js?v=17"></script>
     <script src="/static/js/knowledge.js?v=118"></script>
     <!-- knowledge_sync NACH knowledge.js: die Ordnerliste fragt beim Zeichnen
          window.KnowledgeSync.sharedFolders() fuer den Zustand des 🔗-Symbols. -->
@@ -5409,6 +5503,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/email.js?v=5"></script>
     <script src="/static/js/short_tracks_admin.js?v=2"></script>
     <script src="/static/js/ai_mouse_admin.js?v=3"></script>
+    <script src="/static/js/feedback_admin.js?v=1"></script>
     <script src="/static/js/kundenverwaltung.js?v=6"></script>
     <script src="/static/js/support_admin.js?v=11"></script>
     <script src="/static/js/telemetry.js?v=9"></script>

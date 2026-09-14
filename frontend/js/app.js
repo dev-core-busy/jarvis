@@ -719,6 +719,18 @@
             ]);
         }
 
+        // ── Feedback-Tab Collapse ──────────────────────────────────────────
+        // ⚠ JEDE .kb-section des Reiters gehoert hier hinein (gleiche Regel wie
+        // beim AI-Maus- und Jira-Reiter): eine vergessene bleibt zugeklappt und
+        // laesst sich nicht oeffnen.
+        function _initFeedbackCollapse() {
+            _collapseInit([
+                { hdr: 'fb-sect-form-hdr', body: 'fb-sect-form-body', tog: 'fb-sect-form-tog' },
+                { hdr: 'fb-sect-abg-hdr',  body: 'fb-sect-abg-body',  tog: 'fb-sect-abg-tog'  },
+                { hdr: 'fb-sect-info-hdr', body: 'fb-sect-info-body', tog: 'fb-sect-info-tog' },
+            ]);
+        }
+
         // ── Vision-Tab Collapse ────────────────────────────────────────────
         function _initVisionCollapse() {
             _collapseInit([
@@ -753,6 +765,7 @@
         const tabConfluence = document.getElementById('settings-tab-confluence');
         const tabJira    = document.getElementById('settings-tab-jira');
         const tabAimouse = document.getElementById('settings-tab-aimouse');
+        const tabFeedback = document.getElementById('settings-tab-feedback');
         const tabSap     = document.getElementById('settings-tab-sap');
         const tabVemas   = document.getElementById('settings-tab-vemas');
         const tabKundenverwaltung = document.getElementById('settings-tab-kundenverwaltung');
@@ -765,7 +778,7 @@
         const tabEmail   = document.getElementById('settings-tab-email');
         const tabTracks  = document.getElementById('settings-tab-tracks');
         const tabExcel   = document.getElementById('settings-tab-excel');
-        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabBranding, tabConfluence, tabJira, tabSap, tabVemas, tabEmail, tabTracks, tabExcel, tabKundenverwaltung, tabSupport, tabMcp, tabTelemetry, tabSecurity, tabCron].concat(tabsSkillCfg);
+        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabBranding, tabConfluence, tabJira, tabSap, tabVemas, tabEmail, tabTracks, tabExcel, tabFeedback, tabKundenverwaltung, tabSupport, tabMcp, tabTelemetry, tabSecurity, tabCron].concat(tabsSkillCfg);
 
         settingsTabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -856,6 +869,11 @@
                     tabAimouse.classList.add('active');
                     _initAimouseCollapse();
                     if (window.AiMouseAdmin) window.AiMouseAdmin.onShow();
+                } else if (target === 'feedback' && tabFeedback) {
+                    tabFeedback.style.display = '';
+                    tabFeedback.classList.add('active');
+                    _initFeedbackCollapse();
+                    if (window.FeedbackAdmin) window.FeedbackAdmin.onShow();
                 } else if (target === 'sap' && tabSap) {
                     tabSap.style.display = '';
                     tabSap.classList.add('active');
@@ -1171,6 +1189,24 @@
             }
         };
 
+        // ── Feedback: Berechtigungsblock nur bei aktivem Skill ──
+        // Gleiche Begruendung wie bei sec-sub-aimouse/-email/-tracks: ohne
+        // aktiven Skill gibt es den Bereich gar nicht, die Freigabe waere eine
+        // Freigabe fuer nichts.
+        window.updateFeedbackSecVisibility = async function updateFeedbackSecVisibility() {
+            const box = document.getElementById('sec-sub-feedback');
+            if (!box) return;
+            try {
+                const skills = await _skillsOnce();
+                const sp = Array.isArray(skills)
+                    ? skills.find(s => s.dir_name === 'feedback')
+                    : null;
+                box.style.display = (sp && sp.enabled) ? '' : 'none';
+            } catch (e) {
+                // Fehler ignorieren – der Block bleibt versteckt
+            }
+        };
+
         // ── Claude Subagent: Berechtigungsblock nur bei aktivem Skill ──
         // Gleiche Begruendung wie bei sec-sub-email/-sap/-tracks: ohne aktiven
         // Skill waere die Freigabe eine Freigabe fuer nichts.
@@ -1391,6 +1427,7 @@
             await updateTracksSecVisibility();
             await updateJiraAssistSecVisibility();
             await updateAimouseSecVisibility();
+            await updateFeedbackSecVisibility();
             await updateClaudesubSecVisibility();
             await updateExcelSecVisibility();
             await updateKundenverwaltungTabVisibility();

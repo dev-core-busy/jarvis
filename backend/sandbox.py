@@ -147,6 +147,14 @@ _APP_DENY_REL = (
     # JEDER Zusammenfassung, und die globalen Vorlagen gelten fuer alle
     # Benutzer. Der Inhalt ist harmlos, die Schreibbarkeit nicht.
     "data/jira_vorlagen.json",
+    # Feedback-Formulare und -Abgaben (backend/feedback.py). Die ABGABEN sind
+    # personenbezogen: jede traegt den Benutzernamen und die Aussagen eines
+    # Menschen ueber seine Arbeit. Die Oberflaeche trennt bewusst („Administrator
+    # sieht alle, Benutzer nur seine eigenen") – ein `cat` in der Sandbox wuerde
+    # genau diese Schranke aushebeln, dieselbe Lage wie bei `data/chats`.
+    # Die FORMULARE stehen mit, weil ein beschreibbarer Bestand Spalten
+    # unterschieben koennte, unter denen spaeter abgegeben wird.
+    "data/feedback_formulare.json", "data/feedback_abgaben.jsonl",
     # Verankerte SAP-Serverzertifikate (backend/sap_cert.py). Der INHALT ist
     # oeffentlich – die SCHREIBBARKEIT ist das Problem: wer hier eine eigene CA
     # ablegt, laesst eine SAP-Verbindung gegen einen fremden Server laufen, ohne
@@ -261,7 +269,11 @@ PRIVATE_FILES = ("data/scheduled_jobs.json", "data/file_watchers.json",
                  "data/email_state.json", "data/email_log.jsonl",
                  "data/addin_links.json", "data/sap_accounts.json",
                  "data/jira_accounts.json", "data/vemas_accounts.json",
-                 "data/short_tracks.json", "data/short_tracks_log.jsonl")
+                 "data/short_tracks.json", "data/short_tracks_log.jsonl",
+                 # Feedback: die Abgaben sind personenbezogen (Benutzername +
+                 # Aussagen ueber die eigene Arbeit), die Formulare tragen
+                 # Betriebswissen. Gleiche Stufe wie die Cron-Auftraege darueber.
+                 "data/feedback_formulare.json", "data/feedback_abgaben.jsonl")
 PRIVATE_FILE_MODE = 0o640
 
 # Die Schluesseldateien der E-Mail-/SAP-Zugangsdaten sind strenger als 0640: sie
@@ -521,6 +533,9 @@ SHELL_SECRET_PATHS = re.compile(
     # dauerhafter Abschnitt im System-Prompt JEDER Zusammenfassung, fuer alle
     # Benutzer (siehe _APP_DENY_REL).
     r'jira_vorlagen\.json\b|'
+    # Feedback-Abgaben: personenbezogen. Die Oberflaeche trennt „Admin sieht
+    # alle, Benutzer nur seine eigenen" – ein `cat` in der Sandbox umginge das.
+    r'feedback_formulare\.json\b|feedback_abgaben\.jsonl\b|'
     # E-Mail-Skill: Postfach-Kennwoerter (email_accounts.json + .mailkey ergeben
     # zusammen den Klartext), fremde Regel-Prompts, fremde Absender/Betreffe.
     r'email_accounts\.json\b|\.mailkey\b|email_rules\.json\b|'

@@ -1,0 +1,28 @@
+{
+    "name": "Feedback",
+    "description": "Formulare nach Excel-Vorbild: ein Administrator legt die Spalten fest (Text oder 5-Sterne-Bewertung), die Benutzer fuellen beliebig viele Zeilen aus und senden sie ab. Die Abgaben werden gespeichert und lassen sich als CSV-Datei auswerten.",
+    "version": "1.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": [],
+    "category": "produktivitaet",
+    "icon": "clipboard-list",
+    "system": false,
+    "enabled": false,
+    "dependencies": [],
+    "system_packages": [],
+    "data_dirs": [],
+    "config_schema": {},
+    "knowledge_docs": [],
+    "permissions": [],
+    "help": {
+        "details": "Der Skill schaltet den Bereich /feedback frei und gattert die Endpunkte /api/feedback/*. Die Formulare werden unter Einstellungen → Feedback gepflegt, die Benutzer fuellen sie ueber die Portal-Kachel aus.\n\nWer den Bereich benutzen darf, steht getrennt davon unter Einstellungen → Sicherheit → Berechtigungen → Feedback ('leer = niemand'). Beides muss stimmen: ohne aktiven Skill gibt es die Kachel nicht, ohne Freigabe keinen Zugriff.\n\nES LAEUFT KEIN MODELL. Eine Abgabe wird gespeichert, mehr nicht - es entstehen keine Token-Kosten und keine Wartezeit.",
+        "tools": [],
+        "use_cases": [
+            "Zufriedenheit mit einzelnen Modulen abfragen (Zeile = Modul, Sterne = Bewertung)",
+            "Stoerungen sammeln, die kein Ticket wert sind",
+            "Schulungsbedarf je Abteilung erheben und als CSV auswerten"
+        ],
+        "notes": "Die Spalten eines Formulars lassen sich nachtraeglich aendern. Bereits abgegebene Zeilen bleiben trotzdem richtig beschriftet: jede Abgabe speichert die Spalten mit, die zum Zeitpunkt der Abgabe galten. Im CSV-Export erscheinen entfallene Spalten mit dem Zusatz '(entfernt)'.\n\nEin geloeschtes Formular nimmt seine Abgaben NICHT mit - sie bleiben in der Auswertung sichtbar."
+    }
+}

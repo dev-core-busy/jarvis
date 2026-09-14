@@ -1780,9 +1780,19 @@ check("der catch-Zweig der Abfrage setzt 'nicht ziehbar'",
       "ergebnis = false;" in _catchblock and "ergebnis = true" not in _catchblock)
 check("Positivkontrolle: der catch-Block wurde ueberhaupt gefunden",
       len(_catchblock) > 20)
-check("die Abfrage laeuft in einem eigenen Thread mit Zeitgrenze",
-      "SetApartmentState" in pruef_code and "Join(grenze)" in pruef_code)
-check("und der Thread ist ein Hintergrund-Thread (haengt er, stirbt er mit)",
+# ⚠ HIER STAND `"Join(grenze)" in pruef_code` – eine Pruefung auf die
+#   SCHREIBWEISE, und sie hat am 2026-09-14 den Fix als Fehler gemeldet.
+#   Gemeint war nie ein bestimmter Aufruf, sondern die EIGENSCHAFT: die
+#   COM-Arbeit laeuft nicht auf dem Aufrufer-Thread, und der Aufrufer wartet
+#   nur begrenzt. Genau so steht es jetzt da – nur eben mit einem
+#   wiederverwendeten Worker statt eines Threads je Abfrage (das alte
+#   `Join(grenze)` liess jeden haengenden Thread stehen und machte den Prozess
+#   am Ende unbeendbar; Abschnitt 28).
+check("die Abfrage laeuft nicht auf dem Aufrufer-Thread",
+      "SetApartmentState" in pruef_code)
+check("und der Aufrufer wartet nur mit Zeitgrenze",
+      re.search(r"\b(Join|WaitOne)\(\s*grenze\s*\)", pruef_code) is not None)
+check("der COM-Thread ist ein Hintergrund-Thread (er blockiert kein Beenden)",
       "IsBackground = true" in pruef_code)
 # ⚠ Ohne STA kein COM.
 check("STA, weil COM es verlangt", "ApartmentState.STA" in pruef_code)
@@ -3209,6 +3219,200 @@ check("sie ist hochgezaehlt (>= 1.0.5)",
 check("und in der Chronik der csproj begruendet",
       _v27 is not None and _v27.group(1) in _csproj27.replace(
           "<Version>%s</Version>" % _v27.group(1), "", 1))
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 28. Die Anwendung laesst sich beenden (1.0.6, 2026-09-14)
+# ══════════════════════════════════════════════════════════════════════════
+# GEMELDET: „die AiMouse.exe (1.0.5) haengt sich so auf, dass sie nicht ohne
+# System-Neustart zu entfernen ist." Zwei Prozesse, leere Fenster,
+# Tray-Symbole blieben, `taskkill /F` wirkungslos.
+#
+# URSACHE: `ZiehbarPruefer` erzeugte JE ABFRAGE einen STA-Thread und gab ihn
+# nach der Zeitgrenze auf. Antwortet die Zielanwendung nicht, bleibt der
+# Thread im Kernel-Wait stehen – mit COM-Apartment und Proxy. Sie haeuften
+# sich an; `ExitProcess` terminiert sie beim Beenden, ohne dass sie ihre
+# OLE32-Sperren freigeben, und die Detach-Sequenz deadlockt.
+#
+# ⚠ GEPRUEFT WIRD DIE EIGENSCHAFT: „es entsteht hoechstens EIN Thread" und
+# „das Beenden kann nicht an einer Detach-Sequenz haengen" – nicht, dass
+# irgendwo ein bestimmtes Wort vorkommt.
+print("\n=== 28. Beenden: kein Thread-Leck, kein Haenger ===")
+
+_zp28 = _quelle25("Input/ZiehbarPruefer.cs")
+_pe28 = _quelle25("Start/Prozessende.cs")
+_pr28 = _quelle25("Program.cs")
+_nm28 = _quelle25("Interop/NativeMethods.cs")
+
+
+def _ohne_komm28(s):
+    """Entfernt `//`-Zeilen UND `/* */`-Bloecke.
+
+    ⚠ PFLICHT, und `_ohne_komm25` reicht dafuer NICHT: die Begruendungen in
+    `Program.cs` und `Prozessende.cs` stehen in Blockkommentaren und nennen
+    jede gepruefte Eigenschaft woertlich („TerminateProcess", „ExitProcess",
+    „ein einziger Worker"). Wer sie mitliest, prueft seine eigene Erklaerung –
+    im Projekt fuenfzehnmal bezahlt.
+    """
+    s = re.sub(r"/\*.*?\*/", " ", s, flags=re.S)
+    return "\n".join(z for z in s.split("\n") if not z.lstrip().startswith("//"))
+
+
+_zp28k = _ohne_komm28(_zp28)
+_pe28k = _ohne_komm28(_pe28)
+_pr28k = _ohne_komm28(_pr28)
+
+check("ZiehbarPruefer und Prozessende liegen vor",
+      bool(_zp28) and bool(_pe28))
+
+# Positivkontrolle: ohne sie waere jede Abwesenheits-Pruefung unten trivial
+# wahr, sobald der Kommentar-Entferner zu viel wegnimmt.
+check("der Kommentar-Entferner laesst Code stehen (Positivkontrolle)",
+      "LiegtObjektUnter" in _zp28k and "TerminateProcess" in _pe28k)
+check("und entfernt Blockkommentare wirklich",
+      "OLE32" in _pe28 and "OLE32" not in _pe28k)
+
+
+def _rumpf28(quelle, signatur):
+    """Schneidet einen Methodenrumpf ueber Klammerzaehlung heraus.
+
+    ⚠ TAUGT NUR FUER METHODEN MIT BLOCK-RUMPF. Ein Ausdruckskoerper (`=>`)
+    hat keine oeffnende Klammer – die Suche naehme die der NAECHSTEN Methode
+    und der Schnitt waere fremder Code (im Projekt bei `GestenTasteAus` und
+    `Normiert` je einmal bezahlt). Beide hier geprueften Methoden haben einen
+    Block.
+    """
+    i = quelle.find(signatur)
+    if i < 0:
+        return ""
+    a = quelle.find("{", i)
+    if a < 0:
+        return ""
+    tiefe = 0
+    for j in range(a, len(quelle)):
+        if quelle[j] == "{":
+            tiefe += 1
+        elif quelle[j] == "}":
+            tiefe -= 1
+            if tiefe == 0:
+                return quelle[a:j + 1]
+    return ""
+
+
+_abfrage28 = _rumpf28(_zp28k, "public static bool LiegtObjektUnter")
+_schleife28 = _rumpf28(_zp28k, "private static void WorkerSchleife")
+_start28 = _rumpf28(_zp28k, "private static bool WorkerSicherstellen")
+
+check("die drei Rumpf-Schnitte greifen (Positivkontrolle)",
+      bool(_abfrage28) and bool(_schleife28) and bool(_start28))
+
+# ── Kein Thread je Abfrage – das ist der Kern ──────────────────────────────
+check("die Abfrage erzeugt KEINEN Thread mehr",
+      "new Thread" not in _abfrage28)
+check("es gibt in der ganzen Datei nur EINE Thread-Erzeugung",
+      _zp28k.count("new Thread") == 1)
+check("und sie steht im Start des Workers, nicht in der Abfrage",
+      "new Thread" in _start28)
+
+# ── Besetzt heisst ueberspringen, nicht anstellen ──────────────────────────
+check("die Abfrage prueft, ob der Worker frei ist",
+      re.search(r"Interlocked\.CompareExchange\(\s*ref\s+_beschaeftigt\s*,\s*1\s*,\s*0\s*\)",
+                _abfrage28) is not None)
+check("und gibt bei besetztem Worker sofort auf",
+      re.search(r"CompareExchange\([^;]*_beschaeftigt[^;]*\)\s*!=\s*0\s*\)\s*\{\s*return\s+false",
+                _abfrage28, re.S) is not None)
+
+# ⚠ DIE FREIGABE GEHOERT DEM WORKER. Gaebe der Aufrufer nach dem Timeout frei,
+#    entstuende beim naechsten Halten ein Auftrag an einen Thread, der noch im
+#    alten haengt – und das Leck waere zurueck, nur eine Ebene tiefer.
+check("der Aufrufer gibt den Worker nach einem Timeout NICHT frei",
+      _abfrage28.count("Interlocked.Exchange(ref _beschaeftigt, 0)") <= 1)
+check("der Worker gibt sich selbst wieder frei",
+      "Interlocked.Exchange(ref _beschaeftigt, 0)" in _schleife28)
+
+# ── Reihenfolge: erst melden, dann freigeben ───────────────────────────────
+_iSet28 = _schleife28.find("_fertig.Set()")
+_iFrei28 = _schleife28.find("Interlocked.Exchange(ref _beschaeftigt, 0)")
+check("im Worker steht das Melden VOR dem Freigeben",
+      0 <= _iSet28 < _iFrei28)
+
+# ── Alt-Signal verwerfen ───────────────────────────────────────────────────
+# Ein AutoResetEvent bleibt signalisiert, wenn niemand wartet: nach einem
+# Timeout-Auftrag kaeme der naechste Wait sofort durch – mit dem Ergebnis des
+# VORIGEN Punktes.
+_iReset28 = _abfrage28.find("_fertig.Reset()")
+_iAuftrag28 = _abfrage28.find("_auftrag.Set()")
+check("das Fertig-Signal wird vor dem neuen Auftrag zurueckgesetzt",
+      0 <= _iReset28 < _iAuftrag28)
+
+# ── Der Worker blockiert das Beenden nicht ─────────────────────────────────
+check("der Worker ist ein Hintergrund-Thread",
+      "IsBackground = true" in _start28)
+check("und laeuft im STA (COM verlangt es)",
+      "SetApartmentState(ApartmentState.STA)" in _start28)
+
+# ── Das Netz darunter: Prozessende ─────────────────────────────────────────
+check("NativeMethods deklariert TerminateProcess",
+      "TerminateProcess" in _ohne_komm28(_nm28))
+check("und GetCurrentProcess",
+      "GetCurrentProcess" in _ohne_komm28(_nm28))
+
+check("Prozessende.Hart ruft TerminateProcess",
+      re.search(r"NativeMethods\.TerminateProcess\(\s*NativeMethods\.GetCurrentProcess\(\)",
+                _pe28k) is not None)
+
+# ⚠ `Environment.Exit` ist KEIN Ersatz: es muendet selbst in `ExitProcess`,
+#    also genau in die Sequenz, die haengen kann. Es darf nur der Rueckfall
+#    HINTER dem TerminateProcess sein.
+_iTerm28 = _pe28k.find("TerminateProcess")
+_iEnv28 = _pe28k.find("Environment.Exit")
+check("Environment.Exit steht nur hinter TerminateProcess (Rueckfall)",
+      _iTerm28 >= 0 and (_iEnv28 < 0 or _iEnv28 > _iTerm28))
+
+# ── Main beendet auf JEDEM Weg hart ────────────────────────────────────────
+_main28 = _rumpf28(_pr28k, "private static void Main()")
+check("der Main-Schnitt greift (Positivkontrolle)", bool(_main28))
+check("Main ruft den Rumpf ueber eine eigene Methode",
+      "Starten()" in _main28)
+check("und beendet danach hart",
+      "Prozessende.Hart" in _main28)
+_iStarten28 = _main28.find("Starten()")
+_iHart28 = _main28.find("Prozessende.Hart")
+check("in dieser Reihenfolge – erst laufen, dann beenden",
+      0 <= _iStarten28 < _iHart28)
+
+# ⚠ Ohne eigene Methode liefe jedes `return` im Rumpf am harten Ende vorbei.
+check("der Rumpf liegt wirklich in Starten() und nicht mehr in Main()",
+      "private static void Starten()" in _pr28k
+      and "Application.Run" not in _main28)
+
+# ── Wachhund ueber dem Aufraeumen ──────────────────────────────────────────
+check("Program startet den Wachhund",
+      "Prozessende.WachhundStarten()" in _pr28k)
+_iWach28 = _pr28k.find("Prozessende.WachhundStarten()")
+_iDisp28 = _pr28k.find("context.Dispose()")
+check("und zwar VOR dem Aufraeumen, nicht danach",
+      0 <= _iWach28 < _iDisp28)
+check("das Aufraeumen laeuft auch bei einer Ausnahme (finally)",
+      re.search(r"finally\s*\{[^}]*WachhundStarten\(\)[^}]*context\.Dispose\(\)",
+                _pr28k, re.S) is not None)
+
+check("der Wachhund ist ein eigener Thread, kein Pool-Timer",
+      "new Thread" in _pe28k and "System.Threading.Timer" not in _pe28k)
+check("er ist ein Hintergrund-Thread",
+      "IsBackground = true" in _pe28k)
+check("und laeuft nur einmal (idempotent)",
+      re.search(r"Interlocked\.Exchange\(\s*ref\s+_wachhundLaeuft\s*,\s*1\s*\)\s*!=\s*0",
+                _pe28k) is not None)
+
+# ── Version ────────────────────────────────────────────────────────────────
+_csproj28 = _quelle25("AiMouse.csproj")
+_v28 = re.search(r"<Version>([\d.]+)</Version>", _csproj28)
+check("die Version ist auf mindestens 1.0.6 hochgezaehlt",
+      _v28 is not None
+      and tuple(int(x) for x in _v28.group(1).split(".")) >= (1, 0, 6))
+check("und der Fehler ist in der Chronik der csproj benannt",
+      "nicht ohne System-Neustart" in _csproj28)
 
 
 print("\n%d OK, %d FAIL" % (ok, fail))

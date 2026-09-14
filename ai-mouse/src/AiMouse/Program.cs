@@ -11,6 +11,34 @@ internal static class Program
     [STAThread]
     private static void Main()
     {
+        Starten();
+
+        /* ⚠ HART BEENDEN – UND ZWAR AUF JEDEM WEG AUS `Starten()`. Deshalb
+         * steht der Aufruf hier und nicht am Ende des Rumpfes: der springt an
+         * mehreren Stellen mit `return` heraus und liefe sonst daran vorbei.
+         *
+         * Gemeldet 2026-09-14 (Fassung 1.0.5): „die AiMouse.exe haengt sich so
+         * auf, dass sie nicht ohne System-Neustart zu entfernen ist." Der
+         * normale Rueckweg aus `Main` muendet in `ExitProcess`, und das nimmt
+         * den Loader-Lock und ruft `DLL_PROCESS_DETACH` in jeder geladenen
+         * DLL. Haengt dabei ein Thread in einem ausgehenden COM-Aufruf, wird er
+         * terminiert, ohne seine OLE32-Sperren freizugeben – und was sie als
+         * naechstes braucht, wartet ewig. Der Prozess steckt dann in seiner
+         * eigenen Beendigung fest: leeres Fenster, Tray-Symbol bleibt, und
+         * `taskkill /F` greift nicht mehr, weil die Beendigung ja laeuft.
+         *
+         * Die URSACHE ist an der Wurzel behoben (ein einziger Worker statt
+         * eines Threads je Abfrage – siehe `ZiehbarPruefer`). Das hier ist das
+         * Netz darunter: der Kernel raeumt den Prozess ab, ohne Detach-Sequenz.
+         *
+         * ⚠ ES DARF NICHTS MEHR ZU SPEICHERN GEBEN. Einstellungen schreibt der
+         * Dialog beim Speichern, nicht beim Beenden – nachgesehen, nicht
+         * angenommen. */
+        Prozessende.Hart(0);
+    }
+
+    private static void Starten()
+    {
         Mutex? instanceLock = new Mutex(initiallyOwned: true, SingleInstanceName, out bool isOnlyInstance);
         try
         {
@@ -112,9 +140,23 @@ internal static class Program
             return;
         }
 
-        using (context)
+        try
         {
             Application.Run(context);
+        }
+        finally
+        {
+            /* ⚠ DER WACHHUND STARTET VOR DEM AUFRAEUMEN, NICHT DANACH – sonst
+             * waere er genau dann zu spaet, wenn er gebraucht wird. Das
+             * Aufraeumen selbst kann haengen: `UnhookWindowsHookEx`, das
+             * Entfernen des Tray-Symbols (es geht an die Shell) oder ein
+             * Fenster-Dispose, das auf eine blockierte Nachrichtenschleife
+             * wartet. Laeuft es laenger als die Frist, wird hart beendet.
+             *
+             * Ersetzt das fruehere `using`: die Zusage „wird in jedem Fall
+             * aufgeraeumt" bleibt, nur kommt der Wachhund davor. */
+            Prozessende.WachhundStarten();
+            context.Dispose();
         }
         }
         finally

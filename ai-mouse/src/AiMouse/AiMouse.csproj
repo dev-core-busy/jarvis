@@ -53,7 +53,20 @@
             `_rdHinweis` ist im Regelfall unsichtbar – ab dort rutschte alles um
             eine Zelle. Jetzt werden die Zellen ausdruecklich angegeben, und
             Zeilen ohne Beschriftung gehen ueber beide Spalten. -->
-    <Version>1.0.5</Version>
+    <!-- 1.0.6 (2026-09-14): die Anwendung liess sich nicht mehr beenden.
+         Gemeldet als „haengt sich so auf, dass sie nicht ohne System-Neustart
+         zu entfernen ist" – zwei Prozesse, leere Fenster, Tray-Symbole blieben,
+         `taskkill /F` wirkungslos, und selbst das Loeschen der EXE half nicht.
+         URSACHE: `ZiehbarPruefer` erzeugte JE ABFRAGE einen STA-Thread und gab
+         ihn nach der Zeitgrenze auf. Antwortet die Zielanwendung nicht, bleibt
+         der Thread im Kernel-Wait stehen – mit COM-Apartment und Proxy. Sie
+         haeuften sich unbegrenzt an; beim Beenden terminiert `ExitProcess` sie,
+         ohne dass sie ihre OLE32-Sperren freigeben, und die Detach-Sequenz
+         laeuft in einen Deadlock. Jetzt genau EIN wiederverwendeter Worker
+         (haengt er, wird uebersprungen statt nachgelegt), dazu als Netz
+         darunter ein hartes `TerminateProcess` am Ende und ein Wachhund ueber
+         dem Aufraeumen. -->
+    <Version>1.0.6</Version>
     <!-- DPI awareness is owned by app.manifest, not by ApplicationHighDpiMode: it has to
          be in effect from process start, before any screen coordinate is read.
          WFAC010 asks for the opposite; suppressed because that trade-off is intentional. -->

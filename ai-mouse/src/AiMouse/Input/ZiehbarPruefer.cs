@@ -24,6 +24,29 @@ namespace AiMouse.Input;
 /// ⚠ DIESE KLASSE LAESST SICH AUF DEM BAUSERVER NICHT AUSFUEHREN (kein
 /// Windows). Die ENTSCHEIDUNG liegt deshalb in <see cref="ZiehbarRegel"/> und
 /// wird dort gemessen; hier bleibt nur das Beschaffen der Merkmale.
+///
+/// ═══════════════════════════════════════════════════════════════════════════
+/// ⚠ EIN DAUERHAFTER WORKER, NICHT EIN THREAD JE ABFRAGE – und das ist der
+/// wichtigste Satz dieser Datei.
+///
+/// Bis Fassung 1.0.5 erzeugte jede Abfrage einen eigenen STA-Thread und gab
+/// ihn nach der Zeitgrenze einfach auf („er stirbt spaetestens mit dem
+/// Prozess" – das stimmte nicht). Antwortet die Zielanwendung nicht, bleibt
+/// der Thread im Kernel-Wait stehen, mit initialisiertem COM-Apartment und
+/// einem Proxy auf ein fremdes Objekt. Beim naechsten Halten entstand der
+/// naechste. Sie haeuften sich unbegrenzt an – und beim Beenden lief die
+/// Anwendung dann in einen Deadlock, aus dem sie ohne Systemneustart nicht
+/// mehr herauskam (gemeldet 2026-09-14; die ganze Kette steht in
+/// <see cref="Start.Prozessende"/>).
+///
+/// Jetzt gibt es GENAU EINEN Worker. Haengt er, ist er „beschaeftigt", und
+/// jede weitere Abfrage wird sofort mit <c>false</c> beantwortet, OHNE einen
+/// zweiten Thread zu erzeugen. Der Schaden ist damit auf einen einzigen
+/// haengenden Thread begrenzt – egal, wie oft der Benutzer die Taste haelt.
+/// Kommt die Zielanwendung wieder zu sich, wird der Worker von selbst wieder
+/// frei und die Erkennung arbeitet weiter; es ist also keine Abschaltung auf
+/// Dauer, sondern eine Pause fuer die Dauer der Stoerung.
+/// ═══════════════════════════════════════════════════════════════════════════
 /// </summary>
 internal static class ZiehbarPruefer
 {
@@ -75,61 +98,176 @@ internal static class ZiehbarPruefer
     {
     }
 
+    /// <summary>Weckt den Worker: es liegt ein Auftrag an.</summary>
+    private static readonly AutoResetEvent _auftrag = new(false);
+
+    /// <summary>Der Worker meldet: Auftrag erledigt.</summary>
+    private static readonly AutoResetEvent _fertig = new(false);
+
+    /// <summary>1, solange ein Auftrag laeuft. Wird vom WORKER
+    /// zurueckgesetzt, nie vom Aufrufer – haengt der Worker, bleibt der Wert
+    /// auf 1 und alle weiteren Abfragen werden uebersprungen. Genau das ist
+    /// die Schranke gegen das Thread-Leck.</summary>
+    private static int _beschaeftigt;
+
+    /// <summary>Der Worker konnte nicht gestartet werden – dann gibt es die
+    /// Erkennung auf diesem System nicht, und es bleibt beim Lasso.</summary>
+    private static bool _ausgefallen;
+
+    private static Thread? _worker;
+    private static readonly object _startTor = new();
+
+    private static Point _punkt;
+    private static volatile bool _ergebnis;
+
     /// <summary>Liegt an <paramref name="p"/> ein ziehbares Objekt?
     ///
-    /// ⚠ LAEUFT IN EINEM EIGENEN STA-THREAD MIT ZEITGRENZE – und das ist
-    /// Pflicht, keine Vorsicht: `ElementFromPoint` ist ein Aufruf ueber die
-    /// Prozessgrenze in die ZIELANWENDUNG. Antwortet die gerade nicht (sie
-    /// rechnet, sie haengt, sie zeigt einen modalen Dialog), blockiert der
-    /// Aufruf – und liefe er auf dem UI-Thread, staende die ganze Anwendung
-    /// samt Maus-Hook still. Der Thread ist ein Hintergrund-Thread: laeuft er
-    /// in die Grenze, geben wir auf und er stirbt spaetestens mit dem Prozess.
-    ///
-    /// COM braucht STA; das setzt `SetApartmentState`, nicht wir von Hand.
+    /// ⚠ DER AUFRUF BLOCKIERT DEN AUFRUFER BIS ZU <paramref name="grenze"/>,
+    /// und der Aufrufer ist der UI-Thread – derselbe, der den
+    /// <c>WH_MOUSE_LL</c>-Hook bedient. Die Grenze muss deshalb deutlich
+    /// unter `LowLevelHooksTimeout` (Vorgabe 300 ms) bleiben, sonst haengt
+    /// Windows den Hook still aus und die ganze Geste ist tot.
     ///
     /// Jeder Fehler ergibt <c>false</c> – siehe die Begruendung in
     /// <see cref="ZiehbarRegel"/>: im Zweifel Lasso, nie Drag.
     /// </summary>
     public static bool LiegtObjektUnter(Point p, TimeSpan grenze)
     {
-        bool ergebnis = false;
-
-        var t = new Thread(() =>
+        if (_ausgefallen)
         {
+            return false;
+        }
+
+        // ⚠ BESETZT HEISST UEBERSPRINGEN, NICHT ANSTELLEN. Ein zweiter Auftrag
+        //    waere entweder ein zweiter Thread (das alte Leck) oder eine
+        //    Warteschlange, die sich bei einer haengenden Zielanwendung endlos
+        //    fuellt. Der Benutzer bekommt dann eben das Lasso – die harmlose
+        //    Richtung.
+        if (Interlocked.CompareExchange(ref _beschaeftigt, 1, 0) != 0)
+        {
+            return false;
+        }
+
+        if (!WorkerSicherstellen())
+        {
+            Interlocked.Exchange(ref _beschaeftigt, 0);
+            return false;
+        }
+
+        _punkt = p;
+        _ergebnis = false;
+
+        // ⚠ ALT-SIGNAL VERWERFEN: lief ein frueherer Auftrag in die Grenze,
+        //    hat der Worker sein `_fertig` gesetzt, ohne dass noch jemand
+        //    wartete. Ein AutoResetEvent bleibt dann signalisiert – der
+        //    naechste Wait kaeme sofort durch und lieferte das Ergebnis des
+        //    VORIGEN Punktes.
+        _fertig.Reset();
+        _auftrag.Set();
+
+        // Laeuft die Grenze ab, bleibt `_beschaeftigt` auf 1 stehen: der
+        // Worker arbeitet ja noch. Er gibt sich selbst wieder frei.
+        return _fertig.WaitOne(grenze) && _ergebnis;
+    }
+
+    /// <summary>Startet den Worker beim ersten Bedarf.</summary>
+    /// <returns><c>false</c>, wenn kein Worker zur Verfuegung steht.</returns>
+    private static bool WorkerSicherstellen()
+    {
+        lock (_startTor)
+        {
+            if (_ausgefallen)
+            {
+                return false;
+            }
+
+            if (_worker is not null)
+            {
+                return true;
+            }
+
             try
             {
-                var automation = (IUIAutomation)new CUIAutomation();
+                var t = new Thread(WorkerSchleife)
+                {
+                    // ⚠ HINTERGRUND: ein Vordergrund-Thread in einer
+                    //    Endlosschleife wuerde das Beenden der Anwendung
+                    //    verhindern.
+                    IsBackground = true,
+                    Name = "AiMouse.UIA-Worker",
+                };
+
+                // COM verlangt STA; das setzt der Laufzeit, nicht wir von Hand.
+                t.SetApartmentState(ApartmentState.STA);
+                t.Start();
+                _worker = t;
+                return true;
+            }
+            catch (Exception)
+            {
+                // Kein Thread, kein STA – die Erkennung gibt es hier nicht.
+                // Nicht erneut versuchen: waere der Versuch teuer und
+                // aussichtslos, kostete er bei jedem Halten Zeit.
+                _ausgefallen = true;
+                _worker = null;
+                return false;
+            }
+        }
+    }
+
+    /// <summary>Der eine Worker: wartet auf Auftraege und beantwortet sie.
+    ///
+    /// ⚠ DAS AUTOMATION-OBJEKT WIRD EINMAL ERZEUGT UND BEHALTEN. Es gehoert
+    /// dem STA dieses Threads und darf ihn nicht verlassen; es je Abfrage neu
+    /// anzulegen kostete jedes Mal eine COM-Aktivierung.
+    /// </summary>
+    private static void WorkerSchleife()
+    {
+        IUIAutomation? automation = null;
+
+        while (true)
+        {
+            _auftrag.WaitOne();
+
+            Point p = _punkt;
+            bool ergebnis = false;
+
+            try
+            {
+                automation ??= (IUIAutomation)new CUIAutomation();
+
                 IUIAutomationElement? el = automation.ElementFromPoint(
                     new POINT { x = p.X, y = p.Y });
-                if (el is null)
-                {
-                    return;
-                }
 
-                ergebnis = ZiehbarRegel.IstZiehbar(
-                    ZahlAus(el, UIA_ControlTypePropertyId),
-                    WahrheitAus(el, UIA_IsDragPatternAvailablePropertyId),
-                    WahrheitAus(el, UIA_IsSelectionItemPatternAvailablePropertyId));
+                if (el is not null)
+                {
+                    ergebnis = ZiehbarRegel.IstZiehbar(
+                        ZahlAus(el, UIA_ControlTypePropertyId),
+                        WahrheitAus(el, UIA_IsDragPatternAvailablePropertyId),
+                        WahrheitAus(el, UIA_IsSelectionItemPatternAvailablePropertyId));
+                }
             }
-            catch
+            catch (Exception)
             {
                 // UIA nicht verfuegbar, Zugriff verweigert, Element
                 // verschwunden – alles derselbe Ausgang: kein Drag.
+                //
+                // ⚠ DAS OBJEKT WIRD VERWORFEN: ist der Proxy einmal kaputt
+                //    (die Zielanwendung ist weg, RPC abgebrochen), bliebe er
+                //    es fuer alle weiteren Abfragen. Beim naechsten Auftrag
+                //    wird er neu geholt.
                 ergebnis = false;
+                automation = null;
             }
-        })
-        {
-            IsBackground = true,
-        };
 
-        t.SetApartmentState(ApartmentState.STA);
-        t.Start();
+            _ergebnis = ergebnis;
 
-        // ⚠ `Join` mit Grenze und KEIN `Abort` danach: einen Thread hart zu
-        // beenden gibt es in .NET aus gutem Grund nicht mehr – er haelt
-        // womoeglich eine COM-Sperre. Wir lassen ihn laufen und ignorieren
-        // ihn; `ergebnis` bleibt dann auf `false`.
-        return t.Join(grenze) && ergebnis;
+            // ⚠ REIHENFOLGE: erst melden, DANN freigeben. Andersherum koennte
+            //    ein neuer Auftrag hereinkommen und `_fertig` zuruecksetzen,
+            //    bevor der Wartende sein Signal gesehen hat.
+            _fertig.Set();
+            Interlocked.Exchange(ref _beschaeftigt, 0);
+        }
     }
 
     private static int ZahlAus(IUIAutomationElement el, int propertyId)

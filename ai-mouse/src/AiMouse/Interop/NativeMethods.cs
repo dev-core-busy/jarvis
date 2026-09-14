@@ -156,4 +156,33 @@ internal static class NativeMethods
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool CloseHandle(IntPtr hObject);
+
+    /// <summary>Pseudo-Handle auf den eigenen Prozess – braucht KEIN
+    /// <see cref="CloseHandle"/> (es ist kein echtes Handle, sondern die
+    /// Konstante -1).</summary>
+    [DllImport("kernel32.dll")]
+    internal static extern IntPtr GetCurrentProcess();
+
+    /// <summary>Beendet den Prozess SOFORT, ohne Aufraeumen.
+    ///
+    /// ⚠ DAS IST DER UNTERSCHIED ZU <c>ExitProcess</c>, UND ER IST DER GANZE
+    /// ZWECK: `ExitProcess` nimmt den Loader-Lock und ruft in jeder geladenen
+    /// DLL `DLL_PROCESS_DETACH`. Haengt dabei ein Thread in einem ausgehenden
+    /// COM-Aufruf (Kernel-Wait) und haelt eine OLE32-interne Sperre, wird er
+    /// zwar terminiert – seine Sperre gibt er dabei NICHT frei. Die naechste
+    /// DLL, die sie im Detach braucht, laeuft in einen Deadlock, und der
+    /// Prozess bleibt als Zombie stehen: Fenster ohne Inhalt, Tray-Symbol,
+    /// und `taskkill /F` greift nicht mehr, weil die Beendigung laengst
+    /// laeuft und nur nicht fertig wird.
+    ///
+    /// `TerminateProcess` geht diesen Weg gar nicht erst: der Kernel raeumt
+    /// den Prozess ab, kein Detach, kein Loader-Lock, kein COM-Aufraeumen.
+    ///
+    /// ⚠ ES DARF ERST GERUFEN WERDEN, WENN ALLES PERSISTENTE GESCHRIEBEN IST.
+    /// Danach laeuft nichts mehr – kein Finalizer, kein `finally`, kein
+    /// Flush eines Dateistroms.
+    /// </summary>
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool TerminateProcess(IntPtr hProcess, uint uExitCode);
 }

@@ -527,9 +527,17 @@ internal static class Programm
                   "private void HaltenAbgelaufen", "public void HaltenTest", 1)),
         encoding="utf-8")
 
+    # ⚠ BENUTZERABHAENGIGES HOME, KEIN FESTES `/tmp/dotnethome` (Fix
+    #   2026-09-14). `/tmp` ist 1777: legt ein Lauf als root dort das
+    #   NuGet-Profil an, kann der Dienstbenutzer es danach nicht mehr lesen,
+    #   und JEDER weitere Lauf bricht mit „Access to the path
+    #   '.../NuGet.Config' is denied" ab – ein Rueckstand vom 10.09. hat den
+    #   Test hier vier Tage lang fuer `jarvis` unbenutzbar gemacht. Derselbe
+    #   Fallstrick wie beim `/tmp/abw.txt`-Vorfall (Register).
+    heim = Path("/tmp/dotnethome-%d" % os.getuid())
+    heim.mkdir(mode=0o700, exist_ok=True)
     umg = dict(os.environ, DOTNET_CLI_TELEMETRY_OPTOUT="1", DOTNET_NOLOGO="1",
-               HOME="/tmp/dotnethome")
-    Path("/tmp/dotnethome").mkdir(exist_ok=True)
+               HOME=str(heim))
     b = subprocess.run([str(DOTNET), "build", "-c", "Release", "--nologo"],
                        cwd=ARB, capture_output=True, text=True, timeout=420, env=umg)
     if b.returncode != 0:

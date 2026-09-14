@@ -66,7 +66,28 @@
          (haengt er, wird uebersprungen statt nachgelegt), dazu als Netz
          darunter ein hartes `TerminateProcess` am Ende und ein Wachhund ueber
          dem Aufraeumen. -->
-    <Version>1.0.6</Version>
+    <!-- 1.0.7 (2026-09-14): die neue Fassung wurde ENDLOS geholt.
+         Gemeldet als „es wird JETZT JEDESMAL die neue exe auf den Rechner
+         kopiert" – zwischen zwei Screenshots im Abstand einer Minute lagen zwei
+         volle Zyklen zu je 66 MB. Auf Platte lag bereits 1.0.6, im Speicher
+         lief weiter 1.0.5.
+         ZWEI URSACHEN, beide behoben:
+         a) Der SERVER meldete eine Version, die er nicht auslieferte:
+            `klient_version()` liest die csproj (den QUELLTEXT), ausgeliefert
+            wird aber die gebaute EXE. Auf ECHT gemessen – csproj 10:39:48,
+            EXE 10:41:43: in diesen 1 min 55 s holte jeder Arbeitsplatz die
+            ALTE Anwendung, war danach unveraendert alt und fragte erneut. Das
+            Fenster geht bei JEDEM Rollout auf. Jetzt meldet der Server ""
+            (= unbekannt), solange ein Bau aussteht.
+         b) Dem Client fehlte ein GEDAECHTNIS. Die „liegt schon da"-Pruefung
+            greift nur, solange `.neu` daliegt; nach dem Einwechseln faengt
+            alles von vorn an, wenn die Anwendung danach trotzdem die alte
+            Fassung ist. Jetzt wird der Versuch als PAAR gemerkt (Ziel + eigene
+            Fassung): gleiche Ausgangslage = derselbe Fehlschlag, kein zweiter
+            Download. Heilt sich selbst, sobald ein Update wirklich ankommt.
+         Nebenbefund: `.alt` wurde nur aufgeraeumt, wenn eine `.neu` danebenlag
+         – die verdraengte Fassung blieb sonst fuer immer liegen. -->
+    <Version>1.0.7</Version>
     <!-- DPI awareness is owned by app.manifest, not by ApplicationHighDpiMode: it has to
          be in effect from process start, before any screen coordinate is read.
          WFAC010 asks for the opposite; suppressed because that trade-off is intentional. -->

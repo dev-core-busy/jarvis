@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Reflection;
+using AiMouse.Configuration;
 
 namespace AiMouse.Update;
 
@@ -145,6 +146,42 @@ internal static class Aktualisierung
         }
     }
 
+    /// <summary>Raeumt die verdraengte Fassung (<c>.alt</c>) weg.
+    ///
+    /// ⚠ EIGENE METHODE UND BEI JEDEM START GERUFEN – vorher stand das
+    /// Loeschen IN <see cref="BeimStartEinwechseln"/>, und das laeuft nur, wenn
+    /// eine <c>.neu</c> danebenliegt. Folge: nach dem letzten Update blieb die
+    /// alte Fassung fuer immer liegen (im gemeldeten Fall vom 2026-09-14 mit
+    /// 64 MB). Der Rueckstand entsteht beim Einwechseln, also gehoert das
+    /// Aufraeumen an den Start – nicht an die Bedingung, die zufaellig
+    /// daneben stand.
+    ///
+    /// Schlaegt es fehl (die Datei laeuft noch, Virenscanner haelt sie),
+    /// passiert nichts weiter: eine Datei zu viel neben der EXE stoert den
+    /// Betrieb nicht, und beim naechsten Start wird es erneut versucht.
+    /// </summary>
+    public static void RueckstandAufraeumen()
+    {
+        try
+        {
+            string exe = EigenerPfad;
+            if (exe.Length == 0)
+            {
+                return;
+            }
+
+            string alt = exe + AltSuffix;
+            if (File.Exists(alt))
+            {
+                File.Delete(alt);
+            }
+        }
+        catch (Exception)
+        {
+            // Siehe Docstring: kein Grund, irgendetwas abzubrechen.
+        }
+    }
+
     /// <summary>Wechselt eine bereitliegende neue Fassung ein und startet neu.
     ///
     /// Rueckgabe <c>true</c> = es wurde neu gestartet, der Aufrufer MUSS sich
@@ -167,20 +204,7 @@ internal static class Aktualisierung
         string neu = exe + NeuSuffix;
         string alt = exe + AltSuffix;
 
-        // Rueckstand des vorigen Wechsels wegraeumen – jetzt laeuft er nicht
-        // mehr und ist loeschbar. Schlaegt es fehl, ist das kein Grund,
-        // irgendetwas abzubrechen.
-        try
-        {
-            if (File.Exists(alt))
-            {
-                File.Delete(alt);
-            }
-        }
-        catch (Exception)
-        {
-            // Egal: eine Datei zu viel neben der EXE stoert nichts.
-        }
+        RueckstandAufraeumen();
 
         if (!File.Exists(neu))
         {
@@ -278,6 +302,40 @@ internal static class Aktualisierung
                 return "liegt bereit";
             }
 
+            /* ⚠ SCHLEIFEN-BREMSE – UND SIE IST DER EIGENTLICHE SCHUTZ HIER
+             * (gemeldet 2026-09-14: "es wird JEDESMAL die neue exe auf den
+             * Rechner kopiert").
+             *
+             * Die Pruefung darueber greift nur, SOLANGE `.neu` liegt. Nach dem
+             * Einwechseln ist sie weg – und wenn die Anwendung danach trotzdem
+             * die alte Fassung ist, faengt alles von vorn an: holen,
+             * einwechseln, unveraendert alt, holen. Gemessen wurde genau das:
+             * auf Platte lag bereits 1.0.6, im Speicher lief weiter 1.0.5, und
+             * zwischen zwei Screenshots im Abstand einer Minute lagen zwei
+             * volle Zyklen zu je 66 MB.
+             *
+             * Ein Update ohne Gedaechtnis ueber den letzten Versuch ist eine
+             * Endlosschleife – dieselbe Klasse wie "ein Zeitdeckel ohne
+             * Gedaechtnis ist eine wiederkehrende Rechnung" (OneNote, 06.09.),
+             * und die Antwort ist dieselbe: den Fehlschlag MERKEN.
+             *
+             * ⚠ WARUM NICHT AM SYMPTOM GEFLICKT: WARUM die alte Fassung
+             * weiterlief, laesst sich von hier aus nicht messen (es gibt kein
+             * Windows auf dem Bauserver). Diese Bremse wirkt unabhaengig davon.
+             * Sie kostet hoechstens ein verzoegertes Update, verhindert aber
+             * die Leitung im Kreis – die Halbfehlerstellungen sind nicht gleich
+             * schwer. */
+            (string gZiel, string gVon) = ConfigStore.LadeUpdateVersuch();
+            string ziel = (serverVersion ?? string.Empty).Trim();
+            if (gZiel.Length > 0
+                && string.Equals(gZiel, ziel, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(gVon, EigeneAnzeige, StringComparison.OrdinalIgnoreCase))
+            {
+                // Gleiches Ziel, gleiche Ausgangslage: der vorige Versuch hat
+                // nichts bewirkt. Ein zweiter aendert daran nichts.
+                return "schon versucht";
+            }
+
             // Schreibrecht VORHER pruefen – 66 MB zu laden, um dann am
             // Speichern zu scheitern, ist verschwendete Leitung.
             string probe = exe + ".schreibprobe";
@@ -324,6 +382,16 @@ internal static class Aktualisierung
             }
 
             File.Move(teil, neu, overwrite: true);
+
+            /* ⚠ GEMERKT WIRD ERST HIER – NACH DEM ERFOLGREICHEN ABLEGEN, nicht
+             * vor dem Laden. Der Unterschied ist die Fehlerrichtung: ein
+             * abgebrochener Download ist ein NETZfehler und soll beim naechsten
+             * Mal wieder versucht werden. Was die Bremse treffen soll, ist der
+             * andere Fall – eine Fassung, die vollstaendig bereitliegt und
+             * trotzdem nicht wirksam wird. Vor dem Laden gemerkt wuerde ein
+             * einziger Verbindungsabbruch das Update bis zum naechsten
+             * Versionswechsel blockieren. */
+            ConfigStore.MerkeUpdateVersuch(ziel, EigeneAnzeige);
             return "bereitgelegt";
         }
         catch (Exception e)

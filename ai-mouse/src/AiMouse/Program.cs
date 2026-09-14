@@ -48,6 +48,17 @@ internal static class Program
         // anderen, weil ab dem ersten Fenster etwas zu verlieren waere – hier
         // ist noch nichts da, der Wechsel dauert Millisekunden, und der
         // Benutzer sieht nur, dass das Tray-Symbol einmal erscheint.
+        /* ⚠ UNABHAENGIG VOM EINWECHSELN: die verdraengte Fassung wegraeumen.
+         * Sie entsteht beim Wechsel und ist erst danach loeschbar (eine
+         * laufende EXE laesst Windows umbenennen, nicht loeschen). Bis
+         * 2026-09-14 stand das Loeschen im Einwechsel-Zweig – der laeuft nur,
+         * wenn eine `.neu` danebenliegt, und so blieb die alte Fassung nach dem
+         * letzten Update fuer immer liegen (gemeldet mit 64 MB). */
+        if (isOnlyInstance)
+        {
+            Aktualisierung.RueckstandAufraeumen();
+        }
+
         if (isOnlyInstance && Aktualisierung.NeueFassungLiegtBereit())
         {
             /* ⚠ GESCHLOSSEN, NICHT NUR FREIGEGEBEN – UND GENAU DAS WAR DER

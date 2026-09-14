@@ -521,6 +521,13 @@ else:
     check("Paketinhalt geprueft (uebersprungen: keine EXE gebaut)", True)
 
 
+# ⚠ HIER, NICHT SPAETER: ab der naechsten Zeile ist `paket_vorhanden` ein Stub.
+# Die Sicherung stand bis 2026-09-14 rund 35 Zeilen weiter unten – sie sicherte
+# damit den STUB, und jeder, der sich auf `_ECHT_PAKET_VORHANDEN` verliess,
+# bekam `lambda: False`. Der Name log, und ein Abschnitt, der die echte Funktion
+# brauchte, mass eine Attrappe.
+_ECHT_PAKET_VORHANDEN = am.paket_vorhanden
+
 am.paket_vorhanden = lambda: False
 r = sicher(am.paket_bauen, "https://h", "M", "#000000")
 check("ohne hinterlegte EXE: Fehler statt kaputtem ZIP", isinstance(r, am.MausFehler))
@@ -556,7 +563,7 @@ _os.environ.pop("JARVIS_AIMOUSE_AUTO", None)
 #   fuehrt `bau_noetig` WIRKLICH aus – ohne diese Sicherung riefe er den Stub
 #   von hier und misst seine eigene Attrappe (genau so passiert).
 _ECHT_BAU_NOETIG = am.bau_noetig
-_ECHT_PAKET_VORHANDEN = am.paket_vorhanden
+# `_ECHT_PAKET_VORHANDEN` ist oben gesichert – vor der ersten Ersetzung.
 
 am.paket_vorhanden = lambda: True
 am.bau_noetig = lambda: False
@@ -2211,8 +2218,14 @@ _proj = (ROOT / "ai-mouse" / "src" / "AiMouse" / "AiMouse.csproj").read_text(
 
 check("die csproj traegt eine <Version>",
       bool(re.search(r"<Version>\s*[0-9]+(\.[0-9]+)*\s*</Version>", _proj)))
-check("klient_version() liest sie und liefert 1.0.0 oder mehr",
-      re.fullmatch(r"[0-9]+(\.[0-9]+){1,3}", am.klient_version() or "") is not None)
+# ⚠ `quelltext_version()`: gefragt ist, ob die csproj GELESEN wird.
+# `klient_version()` beantwortet seit 2026-09-14 eine andere Frage – was der
+# Server AUSLIEFERT – und schweigt, solange ein Bau aussteht. Das trifft hier
+# regelmaessig zu: ein frueherer Abschnitt dieses Waechters schreibt
+# `Vorgaben.cs` und macht den Quelltext damit neuer als die EXE. Mit
+# `klient_version()` meldete die Pruefung dann einen Fehler, den es nicht gibt.
+check("quelltext_version() liest sie und liefert 1.0.0 oder mehr",
+      re.fullmatch(r"[0-9]+(\.[0-9]+){1,3}", am.quelltext_version() or "") is not None)
 
 # ⚠ EINE QUELLE: eine Backend-Konstante waere eine Kopie, und eine Kopie, die
 # driftet, erzeugt hier eine UPDATE-SCHLEIFE (Server behauptet eine Version,
@@ -2779,7 +2792,13 @@ check("die Version steht mittig neben dem Knopf, nicht oben",
 #   2026-09-14 mit 1.0.4 zugeschnappt). Gemeint war nie eine bestimmte Nummer,
 #   sondern die EIGENSCHAFT: wer die Version aendert, begruendet sie in der
 #   Chronik – und wer die Chronik fortschreibt, vergisst die Version nicht.
-_ver26 = am.klient_version() or ""
+# ⚠ `quelltext_version()` UND NICHT `klient_version()`: hier geht es um die
+# Version, die der CODE traegt. `klient_version()` beantwortet seit 2026-09-14
+# eine andere Frage – was der Server AUSLIEFERT – und schweigt bewusst, solange
+# ein Bau aussteht. Mit ihr haenge dieser Waechter daran, ob zufaellig eine
+# aktuelle EXE danebenliegt, und meldete auf einer frischen Arbeitskopie einen
+# Fehler, den es nicht gibt.
+_ver26 = am.quelltext_version() or ""
 _csproj26 = (ROOT / "ai-mouse/src/AiMouse/AiMouse.csproj").read_text(encoding="utf-8")
 _chronik26 = re.findall(r"<!--\s*(\d+\.\d+\.\d+)\s*\(", _csproj26)
 
@@ -2793,10 +2812,18 @@ check("die gesetzte Version ist in der Chronik begruendet",
       _ver26 in _chronik26)
 
 def _teile26(v):
-    return tuple(int(x) for x in v.split("."))
+    # ⚠ NIE UNGEPRUEFT ZERLEGEN: bei leerer Version warf das frueher einen
+    # ValueError – der Lauf brach OHNE Bilanzzeile ab und war damit von „nicht
+    # gelaufen" nicht zu unterscheiden (Register). Ein unlesbarer Wert ist ein
+    # FAIL, kein Absturz.
+    try:
+        return tuple(int(x) for x in v.split("."))
+    except (ValueError, AttributeError):
+        return ()
 
 check("und sie ist die juengste – die Chronik hinkt nicht hinterher",
-      bool(_chronik26) and _teile26(_ver26) == max(_teile26(v) for v in _chronik26))
+      bool(_chronik26) and bool(_teile26(_ver26))
+      and _teile26(_ver26) == max(_teile26(v) for v in _chronik26))
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -3414,6 +3441,166 @@ check("die Version ist auf mindestens 1.0.6 hochgezaehlt",
 check("und der Fehler ist in der Chronik der csproj benannt",
       "nicht ohne System-Neustart" in _csproj28)
 
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 29. Die neue Fassung wurde ENDLOS geholt (gemeldet 2026-09-14, 1.0.7)
+#
+# „es wird JETZT JEDESMAL die neue exe auf den Rechner kopiert" – zwischen zwei
+# Screenshots im Abstand einer Minute lagen zwei volle Zyklen zu je 66 MB. Auf
+# Platte lag bereits 1.0.6, im Speicher lief weiter 1.0.5.
+#
+# ZWEI URSACHEN, und dieser Abschnitt haelt beide fest:
+#   a) SERVER – `klient_version()` las die csproj (den QUELLTEXT), ausgeliefert
+#      wird aber die gebaute EXE. Auf ECHT gemessen: csproj 10:39:48, EXE
+#      10:41:43. In diesen 1 min 55 s behauptete der Server eine Version, die er
+#      nicht lieferte. Das Fenster geht bei JEDEM Rollout auf.
+#   b) CLIENT – ohne Gedaechtnis ueber den letzten Versuch ist ein Update eine
+#      Endlosschleife (dieselbe Klasse wie „ein Zeitdeckel ohne Gedaechtnis ist
+#      eine wiederkehrende Rechnung", OneNote 06.09.).
+#
+# ⚠ (a) WIRD AUSGEFUEHRT, NICHT GELESEN. Ob `klient_version()` bei einer Drift
+# wirklich schweigt, kann eine Quelltext-Pruefung nicht beantworten – und die
+# Kommentare des Fixes nennen die Namen dutzendfach, eine Textsuche laese also
+# die eigene Begruendung (Register, vierzehnter Fall).
+print("\n── 29. Update-Schleife: Drift + Gedaechtnis ─────────────────────")
+
+import tempfile as _tf29
+import os as _os29
+
+
+def _drift29(exe_alter_als_quelle):
+    """Fuehrt `klient_version()` in einem Sandkasten aus.
+
+    `exe_alter_als_quelle=True` stellt den gemeldeten Zustand her: der
+    Quelltext ist neuer als die ausgelieferte Anwendung.
+    Rueckgabe: was der Server melden wuerde.
+    """
+    with _tf29.TemporaryDirectory() as d:
+        w = Path(d)
+        (w / "src").mkdir()
+        cs = w / "src" / "AiMouse.csproj"
+        cs.write_text("<Project><PropertyGroup><Version>2.5.1</Version>"
+                      "</PropertyGroup></Project>", encoding="utf-8")
+        exe = w / "AiMouse.exe"
+        exe.write_bytes(b"MZ" + b"\0" * 4096)
+
+        # Zeiten setzen: die EXE vor bzw. nach dem Quelltext.
+        t = 1_700_000_000
+        _os29.utime(cs, (t, t))
+        _os29.utime(exe, (t - 120, t - 120) if exe_alter_als_quelle
+                    else (t + 120, t + 120))
+
+        # ⚠ `quellen_stand()` GEHOERT MIT GESTELLT. Es laeuft sonst ueber den
+        # ECHTEN Quellbaum, und `bau_noetig()` vergleicht die Sandkasten-EXE
+        # gegen dessen Zeitstempel – das Ergebnis waere immer "Drift", und die
+        # Gegenrichtung dieser Messung nie pruefbar.
+        # ⚠ `bau_noetig` UND `paket_vorhanden` MUESSEN AUF DIE ECHTEN ZURUECK.
+        # Ein frueherer Abschnitt dieses Waechters setzt sie dauerhaft auf
+        # `True`/`False` und stellt sie NICHT zurueck – damit meldete
+        # `klient_version()` hier immer "", und die Gegenrichtung war nicht
+        # pruefbar (Register: Zustandsleck im Harness).
+        alt_exe, alt_cs = am.exe_pfad, am.csproj_pfad
+        alt_qs, alt_bn, alt_pv = am.quellen_stand, am.bau_noetig, am.paket_vorhanden
+        try:
+            am.exe_pfad = lambda: exe
+            am.csproj_pfad = lambda: cs
+            am.quellen_stand = lambda: _os29.stat(cs).st_mtime
+            am.bau_noetig = _ECHT_BAU_NOETIG
+            am.paket_vorhanden = _ECHT_PAKET_VORHANDEN
+            return am.klient_version()
+        finally:
+            am.exe_pfad, am.csproj_pfad = alt_exe, alt_cs
+            am.quellen_stand, am.bau_noetig = alt_qs, alt_bn
+            am.paket_vorhanden = alt_pv
+
+
+_ohne29 = sicher(_drift29, True)
+_mit29 = sicher(_drift29, False)
+
+check("bei DRIFT meldet der Server 'unbekannt' (der gemeldete Fall)",
+      _ohne29 == "")
+check("ist die EXE aktuell, wird die Version gemeldet (ist: %r)" % (_mit29,),
+      _mit29 == "2.5.1")
+# ⚠ POSITIVKONTROLLE: ohne sie waere „meldet '' " auch dann erfuellt, wenn die
+# Funktion NIE etwas meldet – und der Waechter damit wertlos.
+check("Positivkontrolle: die Messung kann ueberhaupt eine Version liefern",
+      _mit29 != "" and _mit29 != _ohne29)
+
+# ── Client: die Bremse und ihre Bausteine ──────────────────────────────────
+_akt29 = _quelle25("Update/Aktualisierung.cs")
+_cfg29 = _quelle25("Configuration/ConfigStore.cs")
+_prg29 = _quelle25("Program.cs")
+
+
+def _codeonly29(s):
+    """C#-Kommentare raus – sonst liest der Waechter seine eigene Begruendung.
+
+    Bewusst die schlichte Variante (nur ganze Kommentarzeilen): ein
+    zeichenweiser Zustandsautomat stolpert ueber verbatim-Literale wie
+    @"Software\\AiMouse" (am 2026-09-09 in dieser Datei bezahlt).
+    """
+    aus = []
+    for z in s.splitlines():
+        t = z.strip()
+        if t.startswith("//") or t.startswith("/*") or t.startswith("*"):
+            continue
+        aus.append(z)
+    return "\n".join(aus)
+
+
+_aktc29 = _codeonly29(_akt29)
+_cfgc29 = _codeonly29(_cfg29)
+_prgc29 = _codeonly29(_prg29)
+
+check("Positivkontrolle: der Kommentar-Filter hat wirklich gefiltert",
+      "SCHLEIFEN-BREMSE" in _akt29 and "SCHLEIFEN-BREMSE" not in _aktc29)
+
+check("der Client merkt sich den Versuch (ConfigStore)",
+      "MerkeUpdateVersuch" in _cfgc29 and "LadeUpdateVersuch" in _cfgc29)
+check("gemerkt wird das PAAR Ziel + eigene Fassung",
+      re.search(r'SetValue\("UpdateVersuchZiel"', _cfgc29) is not None
+      and re.search(r'SetValue\("UpdateVersuchVon"', _cfgc29) is not None)
+check("die Bremse fragt das Gedaechtnis ab",
+      "LadeUpdateVersuch()" in _aktc29)
+# ⚠ WAS HIER NICHT ZU MESSEN IST: ob die Bremse WIRKT. Eine totgelegte
+# Bedingung (`if (false && ...)`) liesse jede Textpruefung gruen – das hat eine
+# Gegenprobe gezeigt. Die Wirkung misst `tests/live_update_bremse_dev.py`,
+# indem es die ECHTE Klasse uebersetzt und den Ablauf faehrt. Hier bleibt nur
+# die schwache Aussage, dass niemand die Bedingung offensichtlich abschaltet.
+check("und ihre Bedingung ist nicht totgelegt",
+      re.search(r"if\s*\(\s*(false|0)\s*&&", _aktc29) is None)
+check("und vergleicht BEIDES – Ziel und Ausgangslage",
+      re.search(r"string\.Equals\(\s*gZiel\s*,", _aktc29) is not None
+      and re.search(r"string\.Equals\(\s*gVon\s*,\s*EigeneAnzeige", _aktc29)
+      is not None)
+
+# ⚠ DIE REIHENFOLGE IST DIE FEHLERRICHTUNG: gemerkt wird NACH dem Ablegen.
+# Vor dem Laden gemerkt wuerde ein einziger Verbindungsabbruch das Update bis
+# zum naechsten Versionswechsel blockieren.
+_iMove29 = _aktc29.find("File.Move(teil, neu")
+_iMerk29 = _aktc29.find("MerkeUpdateVersuch(")
+check("gemerkt wird NACH dem erfolgreichen Ablegen, nicht vor dem Laden",
+      0 <= _iMove29 < _iMerk29)
+
+# ── Der Rueckstand `.alt` ──────────────────────────────────────────────────
+check("das Aufraeumen von `.alt` ist eine eigene Funktion",
+      "RueckstandAufraeumen" in _aktc29)
+check("und haengt NICHT mehr am Vorhandensein einer `.neu`",
+      "RueckstandAufraeumen()" in _prgc29)
+
+# ── Version + Chronik (Eigenschaft, keine feste Zahl) ─────────────────────
+_csp29 = _quelle25("AiMouse.csproj")
+_mv29 = re.search(r"<Version>([\d.]+)</Version>", _csp29)
+_vers29 = _mv29.group(1) if _mv29 else ""
+check("die Version ist auf mindestens 1.0.7 hochgezaehlt",
+      bool(_vers29) and tuple(int(x) for x in _vers29.split(".")) >= (1, 0, 7))
+check("die gesetzte Version ist in der csproj-Chronik begruendet",
+      bool(_vers29) and ("%s (" % _vers29) in _csp29)
+_chr29 = [tuple(int(x) for x in v.split("."))
+          for v in re.findall(r"<!--\s*(\d+\.\d+\.\d+)\s*\(", _csp29)]
+check("und sie ist die hoechste dort genannte",
+      bool(_chr29) and max(_chr29) == tuple(int(x) for x in _vers29.split(".")))
 
 print("\n%d OK, %d FAIL" % (ok, fail))
 sys.exit(1 if fail else 0)

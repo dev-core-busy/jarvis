@@ -227,6 +227,54 @@ internal static class ConfigStore
         }
     }
 
+    /// <summary>Haelt fest, welche Fassung zuletzt geholt wurde – und von
+    /// WELCHER Fassung aus.
+    ///
+    /// ⚠ DAS PAAR IST DER GANZE WITZ, nicht die Zielversion allein. Gemerkt
+    /// wird "ich, Fassung <paramref name="eigene"/>, habe <paramref
+    /// name="ziel"/> geholt". Beim naechsten Mal ist damit unterscheidbar:
+    ///
+    ///   * dieselbe Ausgangslage → der Versuch hat NICHTS bewirkt, also nicht
+    ///     noch einmal 66 MB laden;
+    ///   * andere Ausgangslage → die Anwendung ist inzwischen gewechselt, es
+    ///     darf wieder geholt werden.
+    ///
+    /// Damit heilt sich die Bremse von selbst, sobald ein Update wirklich
+    /// ankommt – sie kann kein kuenftiges Update dauerhaft blockieren.
+    ///
+    /// Kein Geheimnis, deshalb Klartext. Schlaegt das Schreiben fehl, ist die
+    /// Bremse eben aus: das ist der Zustand von vorher, nicht schlimmer.
+    /// </summary>
+    public static void MerkeUpdateVersuch(string ziel, string eigene)
+    {
+        try
+        {
+            using RegistryKey k = Registry.CurrentUser.CreateSubKey(Schluessel);
+            k.SetValue("UpdateVersuchZiel", ziel ?? string.Empty);
+            k.SetValue("UpdateVersuchVon", eigene ?? string.Empty);
+        }
+        catch (Exception) { /* ohne Gedaechtnis wie bisher */ }
+    }
+
+    /// <summary>Der zuletzt gemerkte Versuch – leer, wenn es keinen gibt.</summary>
+    public static (string Ziel, string Von) LadeUpdateVersuch()
+    {
+        try
+        {
+            using RegistryKey? k = Registry.CurrentUser.OpenSubKey(Schluessel);
+            if (k is null)
+            {
+                return (string.Empty, string.Empty);
+            }
+
+            return (Lies(k, "UpdateVersuchZiel"), Lies(k, "UpdateVersuchVon"));
+        }
+        catch (Exception)
+        {
+            return (string.Empty, string.Empty);
+        }
+    }
+
     /// <summary>Ist die Anwendung schon eingerichtet?
     ///
     /// ⚠ ENTSCHEIDEND IST DIE SERVERADRESSE, nicht das Vorhandensein des

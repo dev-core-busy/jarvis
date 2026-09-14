@@ -719,19 +719,19 @@ def csproj_pfad():
     return _projekt_wurzel() / "ai-mouse" / "src" / "AiMouse" / "AiMouse.csproj"
 
 
-def klient_version() -> str:
-    """Die Version der Anwendung, GELESEN aus ``AiMouse.csproj``.
+def quelltext_version() -> str:
+    """Welche Version der QUELLTEXT traegt – gelesen aus ``AiMouse.csproj``.
 
-    ⚠ EINE QUELLE, KEINE KOPIE. Die Version beschreibt den Client-Code; eine
-    Konstante hier waere eine zweite Fassung und wuerde driften – und die Folge
-    waere schlimmer als ein falscher Text: der Server behauptet dann eine
-    Version, die die EXE nicht hat, jeder Arbeitsplatz laedt sie, bekommt
-    wieder die alte und laedt erneut. Eine Update-Schleife, die niemand sieht.
+    ⚠ NICHT ZU VERWECHSELN MIT :func:`klient_version`. Das hier ist eine
+    Aussage ueber den Code im Arbeitsbaum, jene eine ueber die Anwendung, die
+    der Server wirklich ausliefert. Bis zum 2026-09-14 war beides dieselbe
+    Funktion – und genau darin lag der Fehler: zwischen Rollout und Bau klaffen
+    die auseinander, und wer die Code-Version meldet, behauptet etwas, das er
+    nicht liefert.
 
-    ⚠ RUECKGABE "" HEISST "UNBEKANNT" UND IST KEIN FEHLER. Genau dann darf NICHT
-    aktualisiert werden: ohne verlaessliche Nummer ist jeder Vergleich geraten.
-    Dieselbe fail-safe Richtung wie beim Update-Hinweis der Jira-Erweiterung –
-    fehlt eine Angabe, wird nichts behauptet und nichts getan.
+    Gebraucht wird diese Fassung dort, wo die Frage wirklich dem Code gilt
+    (Chronik-Pruefung im Waechter). Fuer alles, was einen Arbeitsplatz zum
+    Handeln bringt, ist :func:`klient_version` zustaendig.
     """
     import re as _re  # noqa: PLC0415
 
@@ -741,6 +741,66 @@ def klient_version() -> str:
         return ""
     m = _re.search(r"<Version>\s*([0-9]+(?:\.[0-9]+){0,3})\s*</Version>", text)
     return m.group(1) if m else ""
+
+
+def klient_version() -> str:
+    """Die Version der Anwendung, DIE DER SERVER AUSLIEFERT.
+
+    ⚠ EINE QUELLE, KEINE KOPIE. Die Version beschreibt den Client-Code; eine
+    Konstante hier waere eine zweite Fassung und wuerde driften – und die Folge
+    waere schlimmer als ein falscher Text: der Server behauptet dann eine
+    Version, die die EXE nicht hat, jeder Arbeitsplatz laedt sie, bekommt
+    wieder die alte und laedt erneut. Eine Update-Schleife, die niemand sieht.
+
+    ⚠ UND GENAU DAS IST EINGETRETEN – mit der csproj als „zweiter Fassung".
+    Sie beschreibt den QUELLTEXT, ausgeliefert wird aber die gebaute EXE.
+    Gemeldet am 2026-09-14 („es wird JEDESMAL die neue exe kopiert"), auf ECHT
+    gemessen: csproj um 10:39:48 ausgerollt, EXE um 10:41:43 gebaut. In diesen
+    1 min 55 s holte jeder verbundene Arbeitsplatz 66 MB, wechselte ein, war
+    danach unveraendert alt und fragte erneut. Das Fenster geht bei JEDEM
+    Rollout auf – der Bau laeuft ja automatisch nach.
+
+    Deshalb gilt hier: gemeldet wird nur, was auch WIRKLICH auslieferbar ist.
+    ``bau_noetig()`` beantwortet genau diese Frage bereits (ist die EXE aelter
+    als ihr Quelltext?); steht ein Bau aus, ist die ausgelieferte Version
+    unbekannt.
+
+    ⚠ RUECKGABE "" HEISST "UNBEKANNT" UND IST KEIN FEHLER. Genau dann darf NICHT
+    aktualisiert werden: ohne verlaessliche Nummer ist jeder Vergleich geraten.
+    Dieselbe fail-safe Richtung wie beim Update-Hinweis der Jira-Erweiterung –
+    fehlt eine Angabe, wird nichts behauptet und nichts getan.
+    """
+    version = quelltext_version()
+    if not version:
+        return ""
+
+    # ⚠ NUR MELDEN, WENN DIE AUSGELIEFERTE EXE AUS GENAU DIESEM QUELLTEXT
+    # STAMMT. Der Docstring oben warnt vor einer "zweiten Fassung, die driftet"
+    # – und genau das IST die csproj gegenueber der EXE: sie beschreibt den
+    # CODE, ausgeliefert wird aber die gebaute Anwendung.
+    #
+    # GEMESSEN AUF ECHT (gemeldet 2026-09-14, "es wird JEDESMAL die neue exe
+    # kopiert"): csproj um 10:39:48 ausgerollt, EXE um 10:41:43 gebaut. In
+    # diesen 1 min 55 s meldete `health` die Version 1.0.6 und `/paket` lieferte
+    # die alte Anwendung – jeder verbundene Arbeitsplatz holte 66 MB, wechselte
+    # ein, war danach unveraendert alt und fragte erneut. Die Update-Schleife
+    # aus dem Docstring, nur mit der csproj als Quelle statt einer Konstanten.
+    #
+    # Das Fenster geht bei JEDEM Rollout auf (der Bau laeuft automatisch nach,
+    # auf einem frischen Server mit SDK-Download auch mal deutlich laenger).
+    # `bau_noetig()` misst genau diese Frage bereits – hier wird sie nur
+    # angewandt: steht ein Bau aus, ist die ausgelieferte Version UNBEKANNT,
+    # und "" laesst laut Client-Regel jeden Arbeitsplatz NICHTS tun.
+    try:
+        if bau_noetig():
+            return ""
+    except Exception:  # noqa: BLE001
+        # Laesst sich die Frage nicht beantworten, bleibt es beim bisherigen
+        # Verhalten. `bau_noetig()` ist selbst fail-safe; ein Fehler hier darf
+        # das Update nicht dauerhaft blockieren.
+        pass
+
+    return version
 
 
 def paket_vorhanden() -> bool:

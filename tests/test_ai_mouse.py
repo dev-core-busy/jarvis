@@ -10,6 +10,7 @@ Laeuft ohne fastapi und ohne google-genai: die Provider-Typen werden gestellt.
 """
 import ast
 import base64
+import copy
 import re
 import struct
 import sys
@@ -2238,8 +2239,46 @@ check("Kommentar-Filter greift (Positivkontrolle)",
 check("die Version steht NICHT zusaetzlich als Backend-Konstante",
       not re.search(r"^[A-Z_]*VERSION[A-Z_]*\s*=\s*[\"'][0-9]", _am_code,
                     re.MULTILINE))
-check("klient_version liest die csproj (keine zweite Fassung)",
+check("quelltext_version liest die csproj (keine zweite Fassung)",
       "AiMouse.csproj" in _am_code and "<Version>" in _am_code)
+
+
+def _py_nurcode(name):
+    """Rumpf einer Funktion aus ai_mouse.py OHNE Docstring und Kommentare.
+
+    ⚠ OHNE DAS LIEST DER WAECHTER SEINE EIGENE BEGRUENDUNG: der Docstring von
+    `klient_version` erklaert den Unterschied zu `quelltext_version` und nennt
+    beide Namen dutzendfach – eine Textsuche waere damit trivial wahr
+    (Register, vierzehnter Fall). `ast.unparse` gibt genau den Code zurueck.
+    """
+    baum = ast.parse(quelle)
+    for k in ast.walk(baum):
+        if isinstance(k, (ast.FunctionDef, ast.AsyncFunctionDef)) and k.name == name:
+            kopie = copy.deepcopy(k)
+            if (kopie.body and isinstance(kopie.body[0], ast.Expr)
+                    and isinstance(kopie.body[0].value, ast.Constant)
+                    and isinstance(kopie.body[0].value.value, str)):
+                kopie.body.pop(0)
+            return ast.unparse(kopie)
+    return ""
+
+
+# ⚠ UND `klient_version` LIEST SIE NICHT. Sie beantwortet die andere Frage –
+# was im PAKET liegt – und holt sie aus der Anwendung selbst. Stuende hier
+# wieder die csproj, waere die Drift (Quelltext ausgerollt, EXE noch alt)
+# zurueck, und mit ihr die Update-Schleife vom 2026-09-14.
+_kv_code = _py_nurcode("klient_version")
+check("Positivkontrolle: der Schnitt hat Docstring und Kommentare entfernt",
+      _kv_code.startswith("def klient_version")
+      and "Update-Schleife" not in _kv_code and len(_kv_code) < 400)
+check("klient_version nimmt die Version aus der ausgelieferten Anwendung",
+      "exe_version()" in _kv_code and "quelltext_version" not in _kv_code)
+# ⚠ UND NICHT MEHR AN EINEN RIEGEL GEHAENGT. Genau der hat am 2026-09-14 die
+# Anzeige unter „Anwendung holen" erschlagen: `bau_noetig()` ist nach jedem
+# Rollout wahr (auf ECHT 59 Minuten lang), und die Kachel nannte in dieser Zeit
+# GAR KEINE Version, waehrend der Knopf daneben ein Paket auslieferte.
+check("und haengt nicht mehr an `bau_noetig()` (die Anzeige blieb sonst leer)",
+      "bau_noetig" not in _kv_code)
 
 # ⚠ Eine Versionserhoehung MUSS einen Neubau ausloesen – sonst liefert der
 # Server eine Nummer, die die EXE nicht traegt. Die csproj muss deshalb im
@@ -2767,7 +2806,24 @@ check("die Zahl steht NICHT im Markup",
 check("sie wird aus health gefuellt", "klient_version" in _amjs24)
 # ⚠ Ohne Angabe bleibt sie LEER – "" heisst unbekannt, und eine geratene Nummer
 #   waere genau die Behauptung, gegen die die Anzeige gebaut ist.
-_dk24 = _nach24(_amjs24, "function downloadKnopfSetzen", 1400)
+# ⚠ HIER STAND EIN FENSTER FESTER GROESSE (`_nach24(..., 1400)`). Es hat am
+#   2026-09-14 zwei voellig richtige Pruefungen fehlschlagen lassen: ein
+#   ergaenzter Kommentar schob die gemessenen Zeilen aus dem Fenster. Geschnitten
+#   wird deshalb die FUNKTION – erkannt an der Ausrueckung dieser Datei, mit
+#   Positivkontrolle darunter (Register: ein Schnitt, der nichts trifft, macht
+#   jede Pruefung darauf trivial wahr).
+def _jsfunk24(quelle, kopf):
+    i = quelle.find(kopf)
+    if i < 0:
+        return ""
+    ende = quelle.find("\n    }\n", i)
+    return quelle[i:ende + 6] if ende > i else ""
+
+
+_dk24 = _jsfunk24(_amjs24, "function downloadKnopfSetzen")
+check("Positivkontrolle: der Schnitt trifft die ganze Funktion",
+      _dk24.startswith("function downloadKnopfSetzen")
+      and _dk24.rstrip().endswith("}") and "am-version" in _dk24)
 check("ohne Angabe bleibt sie leer (keine Behauptung)",
       "_health.klient_version || ''" in _dk24 and "v ?" in _dk24)
 check("Fremdtext nur per textContent", "vs.textContent" in _dk24)
@@ -3459,14 +3515,110 @@ check("und der Fehler ist in der Chronik der csproj benannt",
 #      Endlosschleife (dieselbe Klasse wie „ein Zeitdeckel ohne Gedaechtnis ist
 #      eine wiederkehrende Rechnung", OneNote 06.09.).
 #
+# ⚠ DIE ERSTE ANTWORT AUF (a) WAR EIN RIEGEL, UND DER HAT DIE ANZEIGE
+# ERSCHLAGEN – gemeldet am 2026-09-14 („Du hast die Versionsanzeige unter
+# AI-Maus → Anwendung holen unterschlagen"). `klient_version()` schwieg,
+# solange `bau_noetig()` wahr war; das ist nach JEDEM Rollout der Fall, auf
+# ECHT gemessen 59 Minuten lang (csproj 11:47, EXE 12:46). In dieser Zeit stand
+# in der Kachel KEINE Version, waehrend der Knopf daneben ein Paket auslieferte.
+#
+# ⚠ DIESER ABSCHNITT HIELT DAS SYMPTOM ALS ZUSAGE FEST („bei Drift meldet der
+# Server 'unbekannt'") – ein Waechter, der das Symptom fuer die Zusage haelt,
+# macht die Regression dauerhaft und lehnt jede Behebung ab (Register). Die
+# Zusage lautet jetzt: gemeldet wird die Version der AUSGELIEFERTEN Anwendung,
+# aus ihr selbst gelesen. Die Schleife ist damit strukturell unmoeglich statt
+# unterdrueckt – und die Anzeige stimmt in JEDEM Zustand.
+#
 # ⚠ (a) WIRD AUSGEFUEHRT, NICHT GELESEN. Ob `klient_version()` bei einer Drift
-# wirklich schweigt, kann eine Quelltext-Pruefung nicht beantworten – und die
-# Kommentare des Fixes nennen die Namen dutzendfach, eine Textsuche laese also
-# die eigene Begruendung (Register, vierzehnter Fall).
+# wirklich die alte Nummer nennt, kann eine Quelltext-Pruefung nicht
+# beantworten – und die Kommentare des Fixes nennen die Namen dutzendfach, eine
+# Textsuche laese also die eigene Begruendung (Register, vierzehnter Fall).
 print("\n── 29. Update-Schleife: Drift + Gedaechtnis ─────────────────────")
 
 import tempfile as _tf29
 import os as _os29
+
+
+def _rsrc_dir29(eintraege):
+    """Ein IMAGE_RESOURCE_DIRECTORY mit Id-Eintraegen ``(id, zeiger)``."""
+    b = struct.pack("<IIHHHH", 0, 0, 0, 0, 0, len(eintraege))
+    for kid, z in eintraege:
+        b += struct.pack("<II", kid, z)
+    return b
+
+
+def _versionsblock29(a, b_, c, d):
+    """VS_VERSION_INFO mit VS_FIXEDFILEINFO – so viel, wie die Regel braucht."""
+    kopf = "VS_VERSION_INFO\0".encode("utf-16-le")
+    fuell = b"\0" * ((4 - (len(kopf) + 6) % 4) % 4)
+    ffi = struct.pack("<II", 0xFEEF04BD, 0x00010000)
+    ffi += struct.pack("<II", (a << 16) | b_, (c << 16) | d)   # FileVersion
+    ffi += struct.pack("<II", (a << 16) | b_, (c << 16) | d)   # ProductVersion
+    ffi += b"\0" * 24
+    rumpf = kopf + fuell + ffi
+    return struct.pack("<HHH", len(rumpf) + 6, len(ffi), 0) + rumpf
+
+
+def _pe29(version=(1, 2, 3, 0), koeder=None, krumm=False):
+    """Eine winzige, gueltige PE-Datei, deren RT_VERSION ``version`` traegt.
+
+    ⚠ ``koeder`` legt einen ZWEITEN Versionsblock unter einem anderen
+    Ressourcentyp ab, und zwar VOR dem echten. Das ist kein Kunstgriff, sondern
+    die Lage in der ECHTEN Anwendung: dort steht (gemessen 2026-09-14 auf DEV)
+    Microsofts Laufzeit-Block bei Byte 9.590.334 vor unserem bei 9.609.534. Wer
+    „den ersten Treffer" nimmt, meldet 8.0.3126.42015 statt 1.0.7 – „der erste
+    ist keine Identitaet" (Register).
+
+    ⚠ ``krumm`` laesst den Dateneintrag VOR die Sektion zeigen. Ohne die
+    Bereichspruefung im Parser ist das kein Fehler, sondern ein NEGATIVER
+    Python-Schnitt – er liefert dann Bytes vom ENDE der Sektion, und der Server
+    meldete eine Version, die an dieser Stelle gar nicht steht. Nur mit diesem
+    Fall ist die Pruefung ueberhaupt messbar; ohne ihn waere sie eine Zeile,
+    deren Entfernen nichts aendert (Register).
+    """
+    rva = 0x4000
+    echt = _versionsblock29(*version)
+    fake = _versionsblock29(*koeder) if koeder else b""
+    namen = (("koeder",) if koeder else ()) + ("echt",)
+    rohe = {"koeder": fake, "echt": echt}
+
+    p = 16 + len(namen) * 8          # hinter dem Typ-Verzeichnis
+    lage = {}
+    for n in namen:
+        lage[n + "_d2"] = p; p += 24
+        lage[n + "_d3"] = p; p += 24
+        lage[n + "_de"] = p; p += 16
+    for n in namen:
+        lage[n + "_daten"] = p
+        p += len(rohe[n]) + ((4 - len(rohe[n]) % 4) % 4)
+    gesamt = p                        # Laenge der ganzen .rsrc-Sektion
+
+    typen = ([(24, 0x80000000 | lage["koeder_d2"])] if koeder else [])
+    typen.append((16, 0x80000000 | lage["echt_d2"]))
+    blob = _rsrc_dir29(typen)
+    for n in namen:
+        blob += _rsrc_dir29([(1, 0x80000000 | lage[n + "_d3"])])
+        blob += _rsrc_dir29([(1033, lage[n + "_de"])])
+        if krumm and n == "echt":
+            # Zeigt um eine ganze Sektionslaenge zu frueh: der Schnitt landet
+            # rechnerisch GENAU auf dem Koeder-Block.
+            blob += struct.pack("<IIII", rva + lage["koeder_daten"] - gesamt,
+                                len(fake), 0, 0)
+        else:
+            blob += struct.pack("<IIII", rva + lage[n + "_daten"], len(rohe[n]), 0, 0)
+    for n in namen:
+        blob += rohe[n] + b"\0" * ((4 - len(rohe[n]) % 4) % 4)
+
+    lf, opt_gr, roh_off = 0x80, 240, 0x400
+    kopf = bytearray(roh_off)
+    kopf[0:2] = b"MZ"
+    struct.pack_into("<I", kopf, 0x3C, lf)
+    kopf[lf:lf + 4] = b"PE\0\0"
+    struct.pack_into("<HHIIIHH", kopf, lf + 4, 0x8664, 1, 0, 0, 0, opt_gr, 0x22)
+    struct.pack_into("<8s", kopf, lf + 24 + opt_gr, b".rsrc")
+    struct.pack_into("<IIII", kopf, lf + 24 + opt_gr + 8,
+                     len(blob), rva, len(blob), roh_off)
+    return bytes(kopf) + blob
 
 
 def _drift29(exe_alter_als_quelle):
@@ -3482,8 +3634,13 @@ def _drift29(exe_alter_als_quelle):
         cs = w / "src" / "AiMouse.csproj"
         cs.write_text("<Project><PropertyGroup><Version>2.5.1</Version>"
                       "</PropertyGroup></Project>", encoding="utf-8")
+        # ⚠ EINE ECHTE PE-DATEI MIT VERSIONS-RESSOURCE, KEIN „MZ" + Nullen.
+        # Bei DRIFT traegt die ausgelieferte Anwendung die VORIGE Fassung
+        # (2.5.0), waehrend die csproj schon 2.5.1 nennt – genau der gemeldete
+        # Zustand. Ist sie aktuell, traegt sie 2.5.1 wie ihr Quelltext.
         exe = w / "AiMouse.exe"
-        exe.write_bytes(b"MZ" + b"\0" * 4096)
+        exe.write_bytes(_pe29((2, 5, 0, 0) if exe_alter_als_quelle
+                              else (2, 5, 1, 0)))
 
         # Zeiten setzen: die EXE vor bzw. nach dem Quelltext.
         t = 1_700_000_000
@@ -3518,13 +3675,21 @@ def _drift29(exe_alter_als_quelle):
 _ohne29 = sicher(_drift29, True)
 _mit29 = sicher(_drift29, False)
 
-check("bei DRIFT meldet der Server 'unbekannt' (der gemeldete Fall)",
-      _ohne29 == "")
-check("ist die EXE aktuell, wird die Version gemeldet (ist: %r)" % (_mit29,),
+# ⚠ DIE ZUSAGE HAT SICH GEAENDERT (2026-09-14, „Versionsanzeige unterschlagen"):
+# frueher stand hier „bei Drift meldet der Server 'unbekannt'". Das war das
+# SYMPTOM, nicht die Zusage – und es kostete die Anzeige in der Kachel. Gemeldet
+# wird jetzt, was im Paket liegt; bei Drift ist das die VORIGE Fassung.
+check("bei DRIFT meldet der Server die Version des PAKETS (ist: %r)" % (_ohne29,),
+      _ohne29 == "2.5.0")
+check("und NICHT die des Quelltextes (das war die Update-Schleife)",
+      _ohne29 != "2.5.1")
+check("und schweigt NICHT – sonst ist die Anzeige leer (der gemeldete Fall)",
+      _ohne29 != "")
+check("ist die EXE aktuell, wird deren Version gemeldet (ist: %r)" % (_mit29,),
       _mit29 == "2.5.1")
-# ⚠ POSITIVKONTROLLE: ohne sie waere „meldet '' " auch dann erfuellt, wenn die
-# Funktion NIE etwas meldet – und der Waechter damit wertlos.
-check("Positivkontrolle: die Messung kann ueberhaupt eine Version liefern",
+# ⚠ POSITIVKONTROLLE: ohne sie waeren die Vergleiche oben auch dann erfuellt,
+# wenn die Messung immer dasselbe liefert – und der Waechter damit wertlos.
+check("Positivkontrolle: die Messung unterscheidet die beiden Lagen",
       _mit29 != "" and _mit29 != _ohne29)
 
 # ── Client: die Bremse und ihre Bausteine ──────────────────────────────────
@@ -3601,6 +3766,131 @@ _chr29 = [tuple(int(x) for x in v.split("."))
           for v in re.findall(r"<!--\s*(\d+\.\d+\.\d+)\s*\(", _csp29)]
 check("und sie ist die hoechste dort genannte",
       bool(_chr29) and max(_chr29) == tuple(int(x) for x in _vers29.split(".")))
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 30. Die Versionsanzeige unter „Anwendung holen" (gemeldet 2026-09-14)
+#
+# „Du hast die Versionsanzeige unter User Kachel -> AI-Maus -> Anwendung holen
+# unterschlagen." Zutreffend, und die Ursache war meine: ein Wert wurde fuer
+# ZWEI Fragen benutzt. `klient_version()` schwieg, solange ein Bau ausstand –
+# fuer den Client richtig (nicht aktualisieren), fuer die Kachel eine
+# Falschaussage durch Schweigen: der Knopf lieferte ein Paket aus, dessen
+# Version niemand mehr nannte. Auf ECHT gemessen ging das Fenster bei jedem
+# Rollout auf, am 2026-09-14 von 11:47 (csproj) bis 12:46 (EXE) – 59 Minuten.
+#
+# Die Antwort ist die EINE Quelle, die nicht driften kann: die Anwendung
+# selbst. `_pe_version` liest ihre Ressource RT_VERSION – dieselbe Zahl, die
+# Windows in den Dateieigenschaften zeigt.
+#
+# ⚠ AUSGEFUEHRT, NICHT GELESEN. Ob der Parser den RICHTIGEN der beiden
+# Versionsbloecke nimmt, kann eine Quelltext-Pruefung nicht beantworten.
+print("\n── 30. Version aus der ausgelieferten Anwendung ──────────────────")
+
+import tempfile as _tf30
+
+
+def _pev30(daten):
+    """`_pe_version` auf eine Datei mit genau diesem Inhalt."""
+    with _tf30.TemporaryDirectory() as d:
+        p = Path(d) / "AiMouse.exe"
+        p.write_bytes(daten)
+        return am._pe_version(p)
+
+
+check("AUSGEFUEHRT: die Version kommt aus RT_VERSION",
+      sicher(_pev30, _pe29((1, 0, 7, 0))) == "1.0.7")
+
+# ⚠ DER KOEDER IST DER KERN DIESES ABSCHNITTS. In der echten Anwendung stehen
+# ZWEI VS_VERSION_INFO-Bloecke, und Microsofts steht VORNE (gemessen auf DEV:
+# 8.0.3126.42015 bei Byte 9.590.334, unserer bei 9.609.534). Ein Parser, der
+# „den ersten Treffer" nimmt, meldet die Version der .NET-Laufzeit.
+_mitk30 = _pe29((1, 0, 7, 0), koeder=(8, 0, 3126, 42015))
+check("AUSGEFUEHRT: ein vorangestellter FREMDER Block taeuscht sie nicht",
+      sicher(_pev30, _mitk30) == "1.0.7")
+_j30 = _mitk30.find(b"\xbd\x04\xef\xfe")
+_ms30, _ls30 = struct.unpack_from("<II", _mitk30, _j30 + 8)
+check("Positivkontrolle: der Koeder steht wirklich VORNE (waere: %d.%d.%d.%d)"
+      % (_ms30 >> 16, _ms30 & 0xFFFF, _ls30 >> 16, _ls30 & 0xFFFF),
+      (_ms30 >> 16) == 8)
+
+# ⚠ EIN KRUMMER ZEIGER IST DER GEFAEHRLICHSTE FALL: ohne Bereichspruefung wird
+# daraus ein NEGATIVER Python-Schnitt, der Bytes vom Ende der Sektion liest –
+# der Server meldete dann eine Version, die an der genannten Stelle gar nicht
+# steht. Eine falsche Zahl ist schlimmer als keine.
+check("AUSGEFUEHRT: ein Zeiger VOR die Sektion -> unbekannt",
+      sicher(_pev30, _pe29((1, 0, 7, 0), koeder=(8, 0, 3126, 42015),
+                           krumm=True)) == "")
+
+# Stellen, die eine Datei unbrauchbar machen – jede muss "" ergeben, nie eine
+# geratene Zahl. "" heisst "unbekannt", und der Client tut dann NICHTS.
+check("keine PE-Datei -> unbekannt", sicher(_pev30, b"das ist keine EXE") == "")
+check("abgeschnittene Datei -> unbekannt",
+      sicher(_pev30, _pe29((1, 0, 7, 0))[:300]) == "")
+# ⚠ Diese beiden treffen die AUSSEREN bzw. INNEREN Auffangzweige – die Faelle
+# darueber kommen gar nicht bis dorthin, der Fehlerzweig waere sonst ungeprueft
+# (gemessen: die Gegenprobe „geratene Zahl statt Schweigen" biss ohne sie nicht).
+check("unlesbarer Pfad (Verzeichnis) -> unbekannt",
+      sicher(lambda: am._pe_version(ROOT)) == "")
+check("kaputtes Ressourcen-Verzeichnis -> unbekannt",
+      sicher(_pev30, _pe29((1, 0, 7, 0))[:0x400 + 8]) == "")
+_ohne30 = bytearray(_pe29((1, 0, 7, 0)))
+_ohne30[_ohne30.find(b".rsrc"):_ohne30.find(b".rsrc") + 5] = b".text"
+check("ohne .rsrc-Sektion -> unbekannt", sicher(_pev30, bytes(_ohne30)) == "")
+check("Version 0.0.0.0 ist keine Auskunft",
+      sicher(_pev30, _pe29((0, 0, 0, 0))) == "")
+
+# Die csproj schreibt drei Stellen, die Ressource vier. Angezeigt wird die
+# Form, die der Betreiber kennt – eine vierte Null ist keine Information.
+check("1.0.7.0 wird als 1.0.7 gemeldet", sicher(_pev30, _pe29((1, 0, 7, 0))) == "1.0.7")
+check("eine echte vierte Stelle bleibt stehen",
+      sicher(_pev30, _pe29((1, 0, 7, 2))) == "1.0.7.2")
+
+# ⚠ DAS MERKEN GEHOERT GEPRUEFT: `health` haengt an jedem Seitenaufbau und an
+# jeder Anmeldung eines Arbeitsplatzes. Ohne Merker laege die Ressource bei
+# JEDEM Abruf neu zu lesen (gemessen auf DEV: 1,35 MB in einer 66-MB-Datei).
+_ev30 = _py_nurcode("exe_version")
+check("exe_version merkt sich das Ergebnis je Datei-Stand",
+      "_ver_merker" in _ev30)
+check("und der Schluessel enthaelt Zeitstempel UND Groesse (ein Bau faellt auf)",
+      "st_mtime_ns" in _ev30 and "st_size" in _ev30)
+
+
+def _merk30():
+    """Zwei Abrufe auf DIESELBE Datei – der zweite darf nicht neu lesen."""
+    with _tf30.TemporaryDirectory() as d:
+        p = Path(d) / "AiMouse.exe"
+        p.write_bytes(_pe29((3, 1, 4, 0)))
+        alt_pfad, alt_pev = am.exe_pfad, am._pe_version
+        zaehler = {"n": 0}
+
+        def gezaehlt(x):
+            zaehler["n"] += 1
+            return alt_pev(x)
+
+        try:
+            am.exe_pfad = lambda: p
+            am._pe_version = gezaehlt
+            a = am.exe_version()
+            b = am.exe_version()
+            return a, b, zaehler["n"]
+        finally:
+            am.exe_pfad, am._pe_version = alt_pfad, alt_pev
+
+
+_a30, _b30, _n30 = sicher(_merk30) or ("", "", -1)
+check("AUSGEFUEHRT: zweimal dieselbe Antwort (ist: %r/%r)" % (_a30, _b30),
+      _a30 == _b30 == "3.1.4")
+check("und GELESEN wird nur einmal (ist: %d)" % (_n30,), _n30 == 1)
+
+# ── Die Anzeige haengt daran ───────────────────────────────────────────────
+# Das Markup und der Renderer sind in Abschnitt 24 geprueft; hier geht es um
+# die Kette dahinter: ohne das Feld in `health` bleibt die Kachel leer.
+check("health liefert die Version weiterhin aus klient_version",
+      '"klient_version": ai_mouse.klient_version()' in _main_code)
+_amjs30 = (ROOT / "frontend" / "js" / "ai_mouse.js").read_text(encoding="utf-8")
+check("und der Renderer schreibt sie in #am-version",
+      "am-version" in _amjs30 and "_health.klient_version" in _amjs30)
 
 print("\n%d OK, %d FAIL" % (ok, fail))
 sys.exit(1 if fail else 0)

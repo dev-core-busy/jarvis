@@ -743,6 +743,136 @@ def quelltext_version() -> str:
     return m.group(1) if m else ""
 
 
+# ── Welche Version liegt im Paket? ───────────────────────────────────────────
+#
+# Beantwortet wird das aus der ANWENDUNG SELBST – aus ihrer Ressource
+# ``RT_VERSION``, also genau der Zahl, die Windows in den Dateieigenschaften
+# anzeigt. Das ist nicht Bequemlichkeit, sondern die einzige Quelle, die nicht
+# driften KANN: sie steckt in der Datei, die der Knopf ausliefert.
+_RT_VERSION = 16                  # Ressourcentyp "Dateiversion" (winuser.h)
+_FFI_SIG = b"\xbd\x04\xef\xfe"    # VS_FIXEDFILEINFO.dwSignature = 0xFEEF04BD
+_RSRC_MAX = 32 * 1024 * 1024      # Deckel: eine beschaedigte Datei darf den
+                                  # Dienst nicht in einen Riesen-Read schicken.
+_ver_merker: dict = {}
+
+
+def _pe_version(pfad) -> str:
+    """Die Dateiversion einer Windows-Anwendung – oder "" (unbekannt).
+
+    ⚠ GELESEN WIRD UEBER DAS RESSOURCEN-VERZEICHNIS, NICHT PER TEXTSUCHE. In
+    der gebauten Anwendung stehen (gemessen 2026-09-14 auf DEV) ZWEI Bloecke
+    ``VS_VERSION_INFO``: bei Byte 9.590.334 einer von Microsoft
+    (``.NET Runtime External Data Access Support``, 8.0.3126.42015) und bei
+    9.609.534 unserer (1.0.7.0). Wer „den ersten" nimmt, meldet die Version der
+    .NET-Laufzeit – „der erste ist keine Identitaet" (Register). Der Weg ueber
+    das Verzeichnis (Typ 16 → Name → Sprache) liefert dagegen genau den einen
+    Block, den das Betriebssystem als Dateiversion ansieht.
+
+    ⚠ JEDER FEHLER ERGIBT "" – keine Ausnahme, kein geratener Wert. "" heisst
+    „unbekannt", und die Client-Regel laesst bei „unbekannt" NICHTS tun; eine
+    geratene Nummer waere dagegen genau die Behauptung, gegen die diese
+    Funktion gebaut ist.
+    """
+    import struct  # noqa: PLC0415
+
+    try:
+        with open(pfad, "rb") as f:
+            kopf = f.read(4096)
+            if kopf[:2] != b"MZ" or len(kopf) < 0x40:
+                return ""
+            lf = struct.unpack_from("<I", kopf, 0x3C)[0]
+            if kopf[lf:lf + 4] != b"PE\0\0":
+                return ""
+            n_sek, = struct.unpack_from("<H", kopf, lf + 6)
+            opt_gr, = struct.unpack_from("<H", kopf, lf + 20)
+            tab = lf + 24 + opt_gr
+
+            rva = roh = groesse = 0
+            for i in range(min(n_sek, 96)):
+                off = tab + i * 40
+                if off + 40 > len(kopf):
+                    return ""
+                if kopf[off:off + 8].rstrip(b"\0") != b".rsrc":
+                    continue
+                _vgr, rva, groesse, roh = struct.unpack_from("<IIII", kopf, off + 8)
+                break
+            if not groesse or groesse > _RSRC_MAX:
+                return ""
+
+            f.seek(roh)
+            daten = f.read(groesse)
+    except (OSError, struct.error, ValueError):
+        return ""
+
+    def eintraege(off):
+        """Die Eintraege eines IMAGE_RESOURCE_DIRECTORY ab ``off``."""
+        n_name, n_id = struct.unpack_from("<HH", daten, off + 12)
+        return [struct.unpack_from("<II", daten, off + 16 + k * 8)
+                for k in range(min(n_name + n_id, 4096))]
+
+    try:
+        # Ebene 1: Typ. Benannte Eintraege (hoechstes Bit gesetzt) sind keine
+        # Typ-Nummern und koennen RT_VERSION deshalb gar nicht sein.
+        for kennung, zeiger in eintraege(0):
+            if kennung & 0x80000000 or kennung != _RT_VERSION:
+                continue
+            if not zeiger & 0x80000000:
+                return ""          # Typ-Ebene MUSS ein Unterverzeichnis sein.
+            # Ebene 2 (Name) und 3 (Sprache): der erste Eintrag genuegt – eine
+            # Anwendung mit mehreren Sprachfassungen traegt dieselbe Nummer.
+            for _n2, z2 in eintraege(zeiger & 0x7FFFFFFF)[:1]:
+                if not z2 & 0x80000000:
+                    return ""
+                for _n3, z3 in eintraege(z2 & 0x7FFFFFFF)[:1]:
+                    if z3 & 0x80000000:
+                        return ""  # Sprach-Ebene MUSS ein Dateneintrag sein.
+                    d_rva, d_gr = struct.unpack_from("<II", daten, z3)
+                    start = d_rva - rva
+                    if start < 0 or d_gr <= 0 or start + d_gr > len(daten):
+                        return ""
+                    block = daten[start:start + d_gr]
+                    j = block.find(_FFI_SIG)
+                    if j < 0 or j + 16 > len(block):
+                        return ""
+                    ms, ls = struct.unpack_from("<II", block, j + 8)
+                    if not ms and not ls:
+                        return ""  # 0.0.0.0 ist keine Auskunft.
+                    teile = [ms >> 16, ms & 0xFFFF, ls >> 16, ls & 0xFFFF]
+                    # Die csproj schreibt drei Stellen ("1.0.7"), die Ressource
+                    # traegt vier ("1.0.7.0"). Angezeigt wird die Form, die der
+                    # Betreiber kennt; der Client vergleicht ohnehin ueber
+                    # `Version.TryParse` und behandelt beide gleich.
+                    while len(teile) > 3 and teile[-1] == 0:
+                        teile.pop()
+                    return ".".join(str(x) for x in teile)
+        return ""
+    except (struct.error, ValueError, IndexError):
+        return ""
+
+
+def exe_version() -> str:
+    """Die Version der AUSGELIEFERTEN Anwendung – gemerkt je Datei-Stand.
+
+    ⚠ DAS MERKEN IST PFLICHT, KEINE OPTIMIERUNG. ``health`` haengt an jedem
+    Seitenaufbau und an jeder Anmeldung eines Arbeitsplatzes; die Ressourcen
+    laegen sonst bei jedem Abruf neu zu lesen (1,35 MB in einer 66-MB-Datei,
+    gemessen). Der Schluessel ist Zeitstempel UND Groesse: ein Bau schreibt die
+    Datei neu, damit faellt der Merker von selbst.
+    """
+    try:
+        p = exe_pfad()
+        st = p.stat()
+    except OSError:
+        return ""
+    schluessel = (str(p), st.st_mtime_ns, st.st_size)
+    if _ver_merker.get("schluessel") == schluessel:
+        return _ver_merker.get("wert", "")
+    wert = _pe_version(p)
+    _ver_merker["schluessel"] = schluessel
+    _ver_merker["wert"] = wert
+    return wert
+
+
 def klient_version() -> str:
     """Die Version der Anwendung, DIE DER SERVER AUSLIEFERT.
 
@@ -755,52 +885,35 @@ def klient_version() -> str:
     ⚠ UND GENAU DAS IST EINGETRETEN – mit der csproj als „zweiter Fassung".
     Sie beschreibt den QUELLTEXT, ausgeliefert wird aber die gebaute EXE.
     Gemeldet am 2026-09-14 („es wird JEDESMAL die neue exe kopiert"), auf ECHT
-    gemessen: csproj um 10:39:48 ausgerollt, EXE um 10:41:43 gebaut. In diesen
-    1 min 55 s holte jeder verbundene Arbeitsplatz 66 MB, wechselte ein, war
-    danach unveraendert alt und fragte erneut. Das Fenster geht bei JEDEM
-    Rollout auf – der Bau laeuft ja automatisch nach.
+    gemessen: csproj um 10:39:48 ausgerollt, EXE um 10:41:43 gebaut.
 
-    Deshalb gilt hier: gemeldet wird nur, was auch WIRKLICH auslieferbar ist.
-    ``bau_noetig()`` beantwortet genau diese Frage bereits (ist die EXE aelter
-    als ihr Quelltext?); steht ein Bau aus, ist die ausgelieferte Version
-    unbekannt.
+    ⚠ DIE ERSTE ANTWORT DARAUF WAR EIN RIEGEL – UND DER HAT DIE ANZEIGE
+    ERSCHLAGEN. Sie lautete: „steht ein Bau aus (``bau_noetig()``), melde
+    nichts". Fuer den Client richtig, fuer die Kachel eine Katastrophe: unter
+    *AI-Maus → Anwendung holen* stand DIE GANZE ZEIT KEINE VERSION, waehrend
+    der Knopf daneben munter ein Paket auslieferte. Auf ECHT gemessen ging das
+    Fenster am 2026-09-14 um 11:47 auf (Rollout) und erst um 12:46 wieder zu
+    (Bau) – **59 Minuten**. Genau darin hat der Betreiber nachgesehen
+    („Du hast die Versionsanzeige unterschlagen").
+
+    Der Fehler war nicht der Riegel, sondern die QUELLE davor: ein Wert wurde
+    fuer zwei verschiedene Fragen benutzt. Jetzt beantwortet jede Funktion ihre
+    eigene – :func:`quelltext_version` „was traegt der Code", diese hier „was
+    liegt im Paket" (:func:`exe_version`, aus der Anwendung selbst gelesen).
+
+    ⚠ DAMIT IST DER RIEGEL ERSATZLOS ENTFALLEN, und das ist gemessen, nicht
+    geschaetzt: waehrend der Drift meldet diese Funktion die Version der ALTEN,
+    ausgelieferten Anwendung – der Arbeitsplatz hat sie bereits und laedt
+    nichts. Die Schleife ist damit strukturell unmoeglich statt unterdrueckt.
+    Eine Zeile, deren Entfernen messbar nichts aendert, ist keine zweite
+    Schranke (Register).
 
     ⚠ RUECKGABE "" HEISST "UNBEKANNT" UND IST KEIN FEHLER. Genau dann darf NICHT
     aktualisiert werden: ohne verlaessliche Nummer ist jeder Vergleich geraten.
     Dieselbe fail-safe Richtung wie beim Update-Hinweis der Jira-Erweiterung –
     fehlt eine Angabe, wird nichts behauptet und nichts getan.
     """
-    version = quelltext_version()
-    if not version:
-        return ""
-
-    # ⚠ NUR MELDEN, WENN DIE AUSGELIEFERTE EXE AUS GENAU DIESEM QUELLTEXT
-    # STAMMT. Der Docstring oben warnt vor einer "zweiten Fassung, die driftet"
-    # – und genau das IST die csproj gegenueber der EXE: sie beschreibt den
-    # CODE, ausgeliefert wird aber die gebaute Anwendung.
-    #
-    # GEMESSEN AUF ECHT (gemeldet 2026-09-14, "es wird JEDESMAL die neue exe
-    # kopiert"): csproj um 10:39:48 ausgerollt, EXE um 10:41:43 gebaut. In
-    # diesen 1 min 55 s meldete `health` die Version 1.0.6 und `/paket` lieferte
-    # die alte Anwendung – jeder verbundene Arbeitsplatz holte 66 MB, wechselte
-    # ein, war danach unveraendert alt und fragte erneut. Die Update-Schleife
-    # aus dem Docstring, nur mit der csproj als Quelle statt einer Konstanten.
-    #
-    # Das Fenster geht bei JEDEM Rollout auf (der Bau laeuft automatisch nach,
-    # auf einem frischen Server mit SDK-Download auch mal deutlich laenger).
-    # `bau_noetig()` misst genau diese Frage bereits – hier wird sie nur
-    # angewandt: steht ein Bau aus, ist die ausgelieferte Version UNBEKANNT,
-    # und "" laesst laut Client-Regel jeden Arbeitsplatz NICHTS tun.
-    try:
-        if bau_noetig():
-            return ""
-    except Exception:  # noqa: BLE001
-        # Laesst sich die Frage nicht beantworten, bleibt es beim bisherigen
-        # Verhalten. `bau_noetig()` ist selbst fail-safe; ein Fehler hier darf
-        # das Update nicht dauerhaft blockieren.
-        pass
-
-    return version
+    return exe_version()
 
 
 def paket_vorhanden() -> bool:

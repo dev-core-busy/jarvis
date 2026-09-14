@@ -122,10 +122,18 @@
             'Die Anwendung wird auf diesem Server gerade gebaut – der Download steht danach bereit.');
 
         // ⚠ OHNE ANGABE BLEIBT SIE LEER, es steht dort NIE ein Platzhalter.
-        //    `klient_version` ist "" wenn die csproj nicht lesbar ist – das
-        //    heisst "unbekannt", und eine geratene Nummer waere genau die
-        //    Behauptung, gegen die die Anzeige gebaut ist. Ein aelteres Backend
-        //    liefert das Feld gar nicht; auch dann bleibt sie leer.
+        //    `klient_version` ist die Version DES PAKETS, das der Knopf daneben
+        //    ausliefert – der Server liest sie aus der Anwendung selbst. "" heisst
+        //    "unbekannt" (Datei unlesbar, oder ein aelteres Backend liefert das
+        //    Feld gar nicht); eine geratene Nummer waere genau die Behauptung,
+        //    gegen die die Anzeige gebaut ist.
+        //
+        //    ⚠ SIE BLIEB AM 2026-09-14 EINEN GANZEN ROLLOUT LANG LEER, weil der
+        //    Server sie an einen Update-Riegel gehaengt hatte (auf ECHT gemessen
+        //    59 Minuten). Gemeldet als „Du hast die Versionsanzeige unterschlagen".
+        //    Behoben wurde das am Server (`ai_mouse.exe_version`), hier ist nichts
+        //    zu tun – aber wer den Riegel dort wieder einbaut, loescht diese
+        //    Anzeige gleich mit.
         var vs = document.getElementById('am-version');
         if (vs) {
             var v = (_health.klient_version || '').trim();

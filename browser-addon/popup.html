@@ -283,6 +283,52 @@
            und sie soll immer an derselben Stelle stehen, nicht mal hier und
            mal unter der siebten Zeile. -->
       <p class="hinweis" id="vorl-hinweis"></p>
+
+      <!-- ⚠ VORLAGENWECHSEL AUTOMATISCH AUSFUEHREN (Vorgabe 2026-09-14).
+           Angehakt startet ein Wechsel im Pulldown oben den Lauf von selbst –
+           wer drei Vorlagen auf denselben Vorgang vergleichen will, spart damit
+           drei Klicks auf das Dreieck.
+
+           WARUM HIER UND NICHT IM EINSTELLUNGEN-ABSCHNITT: der Ort ist die
+           Vorgabe des Betreibers, und er traegt – die Einstellung beschreibt
+           das Verhalten GENAU DIESES Pulldowns, und wer Vorlagen vergleicht,
+           steht ohnehin in dieser Box. Eigene Fusszeile mit Trennstrich, damit
+           sie nicht wie eine Eigenschaft der gerade bearbeiteten Vorlage
+           aussieht: darueber werden DATEN gepflegt (auf dem Server), hier wird
+           ein VERHALTEN dieses Browsers eingestellt.
+
+           ⚠ SIE LIEGT AUSSERHALB VON `#vorl-form`. Das Formular wandert unter
+           die bearbeitete Zeile und ist zu, solange niemand bearbeitet – eine
+           Einstellung darin waere die meiste Zeit unsichtbar und stuende sonst
+           mal hier, mal unter der siebten Vorlage.
+
+           ⚠ VORGABE IST AN (Vorgabe des Betreibers 2026-09-14) – anders als bei
+           der Ticket-Automatik daneben, die AUS bleibt. Der Unterschied ist die
+           ABSICHT: dort startet etwas, ohne dass jemand etwas getan hat (ein
+           Tab-Wechsel genuegt); hier hat der Benutzer gerade ausdruecklich eine
+           andere Vorlage gewaehlt – auf genau dieses Ticket, mit genau dieser
+           Absicht. Der Klick auf das Dreieck danach war die Wiederholung einer
+           Entscheidung, die schon gefallen war.
+
+           ⚠ DAS `checked` STEHT IM MARKUP, NICHT IM SKRIPT – dieselbe Richtung
+           wie `class="neutral"` am <html> oben: die Vorgabe gilt, bevor
+           irgendein Abruf zurueck ist. popup.js NIMMT den Haken weg, wenn
+           gespeichert AUS steht. Umgekehrt (per JS setzen) blitzte bei jedem
+           Oeffnen kurz der falsche Zustand auf, und ein ausgefallenes Skript
+           liesse die Vorgabe ins Gegenteil kippen. -->
+      <div class="vorl-fuss">
+        <label class="vorl-auto">
+          <input type="checkbox" id="f-vorl-wechsel" checked>
+          <span>Vorlagenwechsel automatisch ausführen</span>
+        </label>
+        <!-- WAS DER HAKEN TUT UND KOSTET, GEHOERT DARUNTER. Ohne den Satz ist
+             nicht erkennbar, dass hinter jedem Wechsel ein Serverlauf steht –
+             und dass ein versehentlich verstellter Eintrag einen ausloest. -->
+        <p class="hinweis" id="vorl-wechsel-hinweis">
+          Ein Wechsel im Pulldown oben startet den Lauf dann von selbst. Jeder
+          Lauf kostet eine Auswertung; ohne erkanntes Ticket passiert nichts.
+        </p>
+      </div>
     </div>
 
     <!-- DER ZUSATZWUNSCH GEHOERT VOR DAS ERGEBNIS (Vorgabe 2026-09-02).

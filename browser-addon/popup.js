@@ -103,7 +103,7 @@ function brauche(name, methode) {
  * Begruendung dort; kurz: Chrome laedt diese Seite bei jedem Oeffnen frisch,
  * behaelt den Service-Worker aber im Speicher. Ohne diesen Abgleich sieht ein
  * halb aktualisierter Zustand wie ein Programmierfehler aus. */
-const STAND = 8;
+const STAND = 9;
 
 const $ = (id) => document.getElementById(id);
 const el = {
@@ -174,6 +174,46 @@ let _zugriffHerkunft = "";
  * Kopie fuer dieses Fenster, damit `autoAktionPruefen` bei ausgeschalteter
  * Automatik gar nicht erst den Hintergrund fragen muss. */
 let _autoVorlage = "";
+
+/* ── VORLAGENWECHSEL AUTOMATISCH AUSFUEHREN (Vorgabe 2026-09-14) ───────────
+ *
+ * Angehakt startet ein Wechsel im Vorlagen-Pulldown den Lauf von selbst.
+ *
+ * ⚠ VORGABE IST `true`, und das ist der Unterschied zur Ticket-Automatik
+ * daneben (`_autoVorlage`, Vorgabe aus): dort startet etwas, ohne dass jemand
+ * etwas getan hat – ein Tab-Wechsel genuegt. Hier hat der Benutzer gerade
+ * ausdruecklich eine andere Vorlage gewaehlt, auf genau dieses Ticket. Der
+ * Klick auf das Dreieck danach war die Wiederholung einer Entscheidung, die
+ * schon gefallen war.
+ *
+ * ⚠ DIE VORGABE STEHT AN DREI STELLEN UND MUSS ZUSAMMENPASSEN: `checked` im
+ * Markup (gilt, bevor ein Abruf zurueck ist), dieser Wert hier (gilt, wenn der
+ * Hintergrund das Feld gar nicht schickt – ein aelterer Stand) und
+ * `auto_wechsel !== false` im Hintergrund (gilt fuer einen Altbestand ohne das
+ * Feld). Faellt eine davon auf `false`, ist die Vorgabe fuer irgendeine Lage
+ * still ins Gegenteil gekippt. */
+let _autoWechsel = true;
+
+/* Der Verzoegerungs-Timer dazu.
+ *
+ * ⚠ ER IST PFLICHT, KEINE FEINHEIT. Ein `<select>` feuert `change` bei
+ * TASTATUR-Navigation fuer JEDEN Schritt: wer mit Pfeil-runter durch fuenf
+ * Vorlagen geht, loeste ohne Timer fuenf Serverlaeufe aus – fuenf bezahlte
+ * Auswertungen fuer vier Vorlagen, die er nur ueberflogen hat. Mit dem Timer
+ * kostet dasselbe Steppen genau EINEN Lauf, naemlich den der zuletzt
+ * gewaehlten Vorlage.
+ *
+ * 600 ms ist der Kompromiss: schnelles Steppen (Autorepeat liegt bei ~30 ms)
+ * wird sicher zusammengefasst, eine bewusste Auswahl mit der Maus startet
+ * gefuehlt sofort. */
+let _wechselTimer = null;
+/* ⚠ ZU WELCHEM TICKET GEHOERT DER WARTENDE WECHSEL? In der Seitenleiste kann
+ * der Tab innerhalb der 600 ms wechseln – ohne diesen Merker liefe die gerade
+ * gewaehlte Vorlage dann auf dem NAECHSTEN Vorgang, den niemand ausgewaehlt
+ * hat. Eine Pruefung auf `_key` allein genuegt dafuer nicht: der ist dann
+ * gesetzt, nur eben auf ein anderes Ticket. */
+let _wechselKey = "";
+const WECHSEL_VERZUG = 600;
 
 /** Traegt die verbindliche Antwort des Hintergrunds nach. */
 function leisteFeststellen(kontext) {
@@ -695,6 +735,10 @@ async function start() {
    * Feld nicht mit; `autoZeigen` macht daraus "aus" (fail-closed: eine
    * Automatik, die man nicht sieht, darf nicht laufen). */
   autoZeigen(z.auto_vorlage);
+  /* Der Haken in der Vorlagen-Box. Ein aelterer Hintergrund schickt das Feld
+   * nicht mit – dann bleibt es bei der Vorgabe AN (`wechselZeigen` schaltet
+   * nur AUS). Fail-safe in die Richtung der Vorgabe, nicht ins Gegenteil. */
+  wechselZeigen(z.auto_wechsel);
   /* Nach `autoZeigen`, damit das Pulldown schon gefuellt ist, wenn der
    * Abschnitt aufgeht. Ein aelterer Hintergrund schickt das Feld nicht mit –
    * `=== true` macht daraus "zu", also die Vorgabe. */
@@ -920,6 +964,78 @@ function autoOptionenZeichnen(geladen) {
   }
   f.value = _autoVorlage;
   if (f.value !== _autoVorlage) f.value = "";
+}
+
+/** Nimmt einen wartenden Vorlagenwechsel zurueck.
+ *
+ * Eigene Funktion, weil es ZWEI Aufrufer gibt: den naechsten Wechsel (der
+ * letzte gewinnt) und das Zuruecksetzen der Arbeitsflaeche – ein Lauf, der
+ * nach einem „Leeren" von selbst anlaeuft, waere das Gegenteil dessen, was der
+ * Knopf verspricht.
+ */
+function wechselAbbrechen() {
+  if (_wechselTimer) clearTimeout(_wechselTimer);
+  _wechselTimer = null;
+  _wechselKey = "";
+}
+
+/** Traegt den gespeicherten Zustand in das Kaestchen der Vorlagen-Box.
+ *
+ * ⚠ NUR AUSSCHALTEN IST EINE AENDERUNG. Die Vorgabe steht schon im Markup
+ * (`checked`) und in `_autoWechsel`; dieser Aufruf nimmt den Haken weg, wenn
+ * gespeichert AUS steht – und nichts anderes. Schickt ein aelterer Hintergrund
+ * das Feld gar nicht (`undefined`), bleibt es bei der Vorgabe AN: sonst waere
+ * ein halb aktualisiertes Paket eine stille Abschaltung.
+ */
+function wechselZeigen(wert) {
+  _autoWechsel = (wert !== false);
+  const c = $("f-vorl-wechsel");
+  if (c) c.checked = _autoWechsel;
+}
+
+/** Stoesst nach einem Wechsel im Vorlagen-Pulldown den Lauf an – verzoegert.
+ *
+ * ⚠ VIER SCHRANKEN, UND JEDE HAT EINEN EIGENEN GRUND:
+ *
+ *   - `_autoWechsel`  – die Einstellung. Aus heisst aus.
+ *   - `_key`          – ohne erkanntes Ticket passiert NICHTS, und zwar
+ *                       STILL. Das Pulldown ist auch auf einer fremden Seite
+ *                       bedienbar (die Ticket-Sperre greift nur auf <button>),
+ *                       und das ist richtig: man stellt die Vorlage fuer
+ *                       spaeter ein. Eine Fehlermeldung bei jedem Wechsel
+ *                       waere Laerm – gedrueckt hat niemand etwas.
+ *   - `_laeuft`       – waehrend eines Laufs wird nicht nachgelegt: ein
+ *                       zweiter Lauf in den ersten hinein ueberschriebe das
+ *                       Ergebnis, auf das der Benutzer gerade wartet.
+ *   - der Timer       – siehe `WECHSEL_VERZUG`: ein `<select>` feuert bei
+ *                       Pfeiltasten fuer JEDEN Schritt.
+ *
+ * ⚠ DIE PRUEFUNGEN STEHEN IM TIMER, NICHT DAVOR. Zwischen Wechsel und Ablauf
+ * kann ein Lauf begonnen haben (die Automatik bei neuem Ticket), oder der Tab
+ * hat in der Leiste gewechselt. Nur der Zustand ZUM ZEITPUNKT DES STARTS
+ * zaehlt.
+ *
+ * Ein neuer Wechsel setzt den Timer zurueck – der letzte gewinnt, nicht der
+ * erste.
+ */
+function wechselAnstossen() {
+  wechselAbbrechen();
+  if (!_autoWechsel) return;
+  _wechselKey = _key;
+  _wechselTimer = setTimeout(() => {
+    _wechselTimer = null;
+    if (!_autoWechsel || !_key || _laeuft) return;
+    // Der Tab hat gewechselt: der Wunsch galt einem anderen Vorgang.
+    if (_key !== _wechselKey) return;
+    // Nicht angemeldet: der Arbeitsbereich ist verborgen (Leiste nach einer
+    // Abmeldung). Gleiche Schranke wie in `autoAktionPruefen`.
+    if (el.arbeit && el.arbeit.hidden) return;
+    /* Die ART ist nur ein Wunsch – entschieden wird am Server aus der Art der
+     * Vorlage. Genau derselbe Aufruf wie beim Dreieck daneben: ein zweiter Weg
+     * in denselben Lauf waere eine zweite Fassung, die beim naechsten
+     * Feinschliff auseinanderlaeuft. */
+    auswerten(vorlagenArt($("f-vorlage").value));
+  }, WECHSEL_VERZUG);
 }
 
 /** Startet bei einem NEUEN Ticket die eingestellte Aktion von selbst.
@@ -1263,6 +1379,10 @@ function anzeigeLeeren() {
 /** Anzeige UND Ablage. `alle` nur beim Zuruecksetzen. */
 async function felderLeeren(meldungstext, alle) {
   const key = (_letztes && _letztes.key) || _key || "";
+  /* Ein wartender Vorlagenwechsel gehoert mit weg: er wuerde Sekunden spaeter
+   * genau das Feld fuellen, das hier gerade geleert wird (Reset-Knopf,
+   * „Leeren", Tab-Wechsel auf ein fremdes Ticket). */
+  wechselAbbrechen();
   anzeigeLeeren();
   /* Fehlschlag ist hier nicht schlimm: die Anzeige ist bereits leer, und beim
    * naechsten Oeffnen greift dieselbe Pruefung erneut.
@@ -2260,6 +2380,40 @@ async function vorlageLoeschen(v) {
 $("f-vorlage").addEventListener("change", () => {
   _vorlBeruehrt = true;
   startTitelSetzen();
+  /* ⚠ NUR BEI EINER ECHTEN BENUTZERWAHL. `change` feuert NICHT, wenn das Feld
+   * per `sel.value = …` gesetzt wird – und genau darauf beruht die Zusage:
+   * `vorlagenZeichnen` (nach Speichern, Loeschen, Stern), `felderLeeren` und
+   * das Wiederherstellen eines gemerkten Laufs stellen das Pulldown staendig
+   * programmatisch ein. Wuerde hier ein Lauf anlaufen, kostete jedes Speichern
+   * einer Vorlage eine Auswertung. */
+  wechselAnstossen();
+});
+
+/* ⚠ NUR AUF `change` HOEREN UND NIE SELBST UMSCHALTEN. Das Kaestchen sitzt in
+ * einem <label>; der Browser schaltet es bereits um, ein zusaetzliches
+ * `checked = !checked` hebt sich auf und der Klick taete unterm Strich gar
+ * nichts. Im Projekt beim AD-Picker bezahlt (Register).
+ *
+ * Gespeichert wird sofort – die Einstellung gilt ueber dieses Fenster hinaus,
+ * und im Popup gibt es kein „Speichern": ein Klick daneben zerstoert es. Ein
+ * Fehlschlag nimmt den Haken zurueck, sonst behauptet er einen Zustand, den es
+ * in der Ablage nicht gibt (gleiche Bauart wie der Ansichts-Schalter). */
+$("f-vorl-wechsel").addEventListener("change", async (ereignis) => {
+  const an = !!ereignis.target.checked;
+  _autoWechsel = an;
+  // Ein wartender Wechsel gehoert weg, sobald ausgeschaltet wird – sonst
+  // laeuft nach dem Abhaken noch einer an, und das sieht wie ein Fehler aus.
+  if (!an) wechselAbbrechen();
+  try {
+    await frage({ art: "merken", auto_wechsel: an });
+  } catch (e) {
+    _autoWechsel = !an;
+    ereignis.target.checked = !an;
+    $("vorl-hinweis").textContent = _standAlt
+      ? "Der Hintergrund der Erweiterung ist älter als dieses Fenster. Öffne "
+        + "chrome://extensions und drücke bei dieser Erweiterung auf Neu laden."
+      : e.message;
+  }
 });
 
 $("btn-vorlagen").addEventListener("click", () => {

@@ -78,6 +78,18 @@ const STAND_ZEILE = (POPUP_JS.match(/const STAND = \d+;/) || [""])[0];
  * `_BLOCK_RE` stehen in keinem Funktionsrumpf. Ohne sie warf der Lauf mitten
  * in `felderLeeren` – und weil die ganze Datei EINE async-IIFE ist, endete er
  * ohne Zaehlzeile. */
+/* ⚠ DIESELBE FALLE, 2026-09-14 erneut: seit `felderLeeren` einen wartenden
+ * Vorlagenwechsel abraeumt, zieht JEDER Schnitt, der es mitnimmt, auch
+ * `wechselAbbrechen` – und dessen Modul-Merker stehen in keinem Funktionsrumpf.
+ * Ohne sie WIRFT der Lauf statt fehlzuschlagen ("_wechselTimer is not
+ * defined"), und weil die Datei EINE async-IIFE ist, endet er ohne Bilanz. */
+const WECHSEL_KONST = [
+  (POPUP_JS.match(/let _autoWechsel = .*;/) || [""])[0],
+  (POPUP_JS.match(/let _wechselTimer = .*;/) || [""])[0],
+  (POPUP_JS.match(/let _wechselKey = .*;/) || [""])[0],
+  (POPUP_JS.match(/const WECHSEL_VERZUG = .*;/) || [""])[0],
+].join("\n");
+
 const FELD_KONST = [
   (POPUP_JS.match(/const _FETT_RE = .*;/) || [""])[0],
   (POPUP_JS.match(/const _BLOCK_RE = .*;/) || [""])[0],
@@ -1396,6 +1408,7 @@ section("8) Die Ticketnummer-Erkennung – ausgefuehrt");
           });
 ` + STAND_ZEILE + `
 ` + FELD_KONST + `
+` + WECHSEL_KONST + `
           /* Die Leisten-Umgebung. Hier gilt der Popup-Fall (_leiste = false);
            * den Leisten-Fall prueft Abschnitt 10.
            * KEINE Backticks in diesem Vorspann - er steht selbst in einem
@@ -2162,7 +2175,7 @@ section("10) Seitenleiste statt Popup (2026-08-30)");
             async function tabErmitteln() {
               _key = nachKey; el.ticket.textContent = _key || "";
             }
-` + FELD_KONST + "\n" + t2.join("\n") + `
+` + FELD_KONST + "\n" + WECHSEL_KONST + "\n" + t2.join("\n") + `
             return (async () => {
               textZuFeld(el.ergebnisFeld, (gemerkt && gemerkt.text) || "");
               el.ergebnis.hidden = !(gemerkt && gemerkt.text);
@@ -3387,7 +3400,7 @@ function feldWelt() {
     ["zuBloecken", "hatFett", "ohneFett", "textZuFeld", "feldZuText"], []);
   const dom = new JSDOM("<div id=e></div>", { runScripts: "outside-only" });
   const w = dom.window;
-  const F = new w.Function(FELD_KONST + "\n" + teile.join("\n")
+  const F = new w.Function(FELD_KONST + "\n" + WECHSEL_KONST + "\n" + teile.join("\n")
     + "\nreturn { zuBloecken, hatFett, ohneFett, textZuFeld, feldZuText };")();
   return { w, F, el: w.document.getElementById("e"), drin };
 }
@@ -3559,7 +3572,7 @@ function feldWelt() {
        * fallen aus dem Schnitt - dieselbe Falle wie bei _FETT_RE. */
       + (POPUP_JS.match(/const ARBEITSTEXT = \{[\s\S]*?\n\};/) || [""])[0] + "\n"
       + (POPUP_JS.match(/const FERTIGTEXT = \{[\s\S]*?\n\};/) || [""])[0] + "\n"
-      + FELD_KONST + "\n" + teile.join("\n") + "\n"
+      + FELD_KONST + "\n" + WECHSEL_KONST + "\n" + teile.join("\n") + "\n"
       + "return (async () => {\n"
       + "  await auswerten('ueberarbeiten', 'entwurf');\n"
       + "  return JSON.stringify({\n"
@@ -6021,6 +6034,453 @@ section("27) Ein gemerkter Lauf JE TICKET (2026-09-03)");
     check(!/ergebnis:/.test(zust),
           "die Zustands-Antwort schickt keinen Text ohne belegten Ticketbezug");
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("28) Vorlagenwechsel automatisch ausfuehren (2026-09-14)");
+// ═══════════════════════════════════════════════════════════════════════════
+/* Vorgabe des Betreibers: „'Vorlagen verwalten' erweitern um checkbox:
+ * 'Vorlagenwechsel automatisch ausfuehren'" – und nachgeschoben: „baue als
+ * default ein 'automatisch ausfuehren'".
+ *
+ * ZWEI DINGE WERDEN HIER GEMESSEN, UND DAS ZWEITE IST DAS TEURERE:
+ *   1. dass ein Wechsel im Pulldown den Lauf ueberhaupt anstoesst, und
+ *   2. dass er ihn NICHT anstoesst, wo es Geld oder Arbeit kostet –
+ *      Pfeiltasten-Steppen, kein Ticket, laufender Lauf, gewechselter Tab.
+ * Eine Quelltext-Suche koennte keines von beidem beantworten; die Kette
+ * Ereignis → Verzoegerung → Lauf wird deshalb AUSGEFUEHRT.
+ */
+
+// ── a) Struktur: der Haken sitzt in der Box, nicht im wandernden Formular ──
+{
+  const html = ohneKommentare(POPUP_HTML);
+  const box = (html.match(/<div id="vorlagen-box"[\s\S]*?\n    <\/div>/) || [""])[0];
+  check(box.length > 200, "die Vorlagen-Box wurde geschnitten", String(box.length));
+  check(/id="f-vorl-wechsel"/.test(box),
+        "das Kaestchen steht IN der Vorlagen-Verwaltung (Vorgabe des Ortes)");
+
+  /* ⚠ UND NICHT IM FORMULAR. `#vorl-form` wandert unter die gerade bearbeitete
+   * Zeile und ist zu, solange niemand bearbeitet – eine Einstellung darin waere
+   * die meiste Zeit unsichtbar und stuende sonst mal hier, mal unter der
+   * siebten Vorlage. */
+  const form = (box.match(/<div id="vorl-form"[\s\S]*?<\/div><!-- \/vorl-form -->/) || [""])[0];
+  check(form.length > 200, "das Bearbeiten-Formular wurde geschnitten",
+        String(form.length));
+  check(!/f-vorl-wechsel/.test(form),
+        "aber NICHT im wandernden Bearbeiten-Formular");
+
+  // Ein Kontrollkaestchen ist ein SATZ: <label> um Kaestchen und Text, sonst
+  // trifft ein Klick auf die Beschriftung ins Leere.
+  check(/<label class="vorl-auto">[\s\S]*?id="f-vorl-wechsel"[\s\S]*?<span>/.test(box),
+        "Kaestchen und Text liegen in EINEM <label>");
+  const css = lies("popup.css");
+  check(/\.vorl-auto\s*\{[\s\S]*?min-width:\s*0|\.vorl-auto\s*>\s*span\s*\{[^}]*min-width:\s*0/
+        .test(css),
+        "und der Text darf schrumpfen (min-width: 0), sonst sprengt er die "
+        + "380 Pixel breite Zeile");
+  check(/\.vorl-fuss\s*\{[^}]*border-top/.test(css),
+        "ein Trennstrich scheidet die Einstellung von der Datenpflege darueber");
+}
+
+// ── b) DIE VORGABE IST AN – an allen drei Stellen ─────────────────────────
+/* ⚠ SIE STEHT DREIMAL, UND ALLE DREI MUESSEN ZUSAMMENPASSEN: im Markup (gilt,
+ * bevor ein Abruf zurueck ist), im Fenster-Merker (gilt, wenn ein aelterer
+ * Hintergrund das Feld gar nicht schickt) und im Hintergrund (gilt fuer einen
+ * Altbestand ohne das Feld). Faellt eine davon auf `false`, ist die Vorgabe
+ * fuer irgendeine Lage still ins Gegenteil gekippt – und niemand sieht es. */
+{
+  const html = ohneKommentare(POPUP_HTML);
+  const inp = (html.match(/<input type="checkbox" id="f-vorl-wechsel"[^>]*>/) || [""])[0];
+  check(/\bchecked\b/.test(inp),
+        "Markup: das Kaestchen ist vorbelegt", inp.trim());
+  check(/let _autoWechsel = true;/.test(ohneKommentare(POPUP_JS)),
+        "Fenster: _autoWechsel startet auf true");
+  const bgOhne = ohneKommentare(BG);
+  check(/auto_wechsel: e\.auto_wechsel !== false/.test(bgOhne),
+        "Hintergrund: `!== false` (ein Altbestand OHNE das Feld ergibt AN)");
+  check(!/auto_wechsel: e\.auto_wechsel === true/.test(bgOhne),
+        "und NICHT `=== true` – das waere die stille Abschaltung fuer jeden, "
+        + "der die Einstellung nie angefasst hat");
+  check(/teil\.auto_wechsel !== undefined/.test(bgOhne),
+        "einstSchreiben kennt das Feld (sonst wird es wortlos verworfen)");
+}
+
+// ── c) Die Kette Wechsel → Verzoegerung → Lauf – AUSGEFUEHRT ──────────────
+{
+  const chHandler = (POPUP_JS.match(
+    /\$\("f-vorlage"\)\.addEventListener\("change",[\s\S]*?\n\}\);/) || [""])[0];
+  check(/wechselAnstossen\(\)/.test(chHandler),
+        "der Wechsel-Handler stoesst an", chHandler.trim().slice(0, 80));
+
+  const { teile, drin } = popupTeile(
+    ["wechselAnstossen", "wechselAbbrechen", "wechselZeigen",
+     "startTitelSetzen"], ["auswerten", "frage"]);
+  /* ⚠ NAMENS-GUARD GANZ OBEN, und er ist kein Beiwerk: gegen einen ALTEN
+   * Stand gibt es diese Funktionen nicht. Ohne den Guard stirbt der Lauf an
+   * einem nackten „wechselZeigen is not defined" – kein FAIL, keine
+   * Bilanzzeile, und weil die Datei EINE async-IIFE ist, ist das von „gar
+   * nicht gelaufen" nicht zu unterscheiden. Genau so sah die Gegenprobe
+   * „kompletter Altstand" beim ersten Mal aus (Register). */
+  const daZuLaufen = drin.has("wechselAnstossen") && drin.has("wechselZeigen")
+                     && drin.has("wechselAbbrechen") && !!chHandler;
+  check(daZuLaufen,
+        "popup.js hat wechselAnstossen(), wechselZeigen() und den Handler");
+
+  /* Die Modul-Konstanten stehen in keinem Funktionsrumpf und fallen aus jedem
+   * Schnitt heraus – fehlen sie, WIRFT der Lauf statt fehlzuschlagen
+   * (Register, in dieser Datei mehrfach bezahlt). */
+  const VERZUG_ZEILE = (POPUP_JS.match(/const WECHSEL_VERZUG = \d+;/) || [""])[0];
+  check(!!VERZUG_ZEILE, "WECHSEL_VERZUG ist eine Modul-Konstante", VERZUG_ZEILE);
+
+  /** Ein Lauf im gestellten Fenster.
+   *
+   * ⚠ DIE ZEIT WIRD VIRTUALISIERT, NICHT ABGEWARTET. `setTimeout` merkt den
+   * Rueckruf, statt ihn zu planen – damit misst der Waechter zugleich die
+   * Eigenschaft, um die es geht: VOR dem Ausloesen darf noch NICHTS gelaufen
+   * sein. Echte 600 ms je Fall waeren nicht nur langsam, sie koennten diese
+   * Aussage gar nicht treffen.
+   */
+  const lauf = (aufbau, schritte) => {
+    const dom = new JSDOM(POPUP_HTML, { url: "https://x.test/",
+                                        runScripts: "outside-only" });
+    const w = dom.window;
+    try {
+      const f = new w.Function("aufbau", "schritte", `
+        const $ = (id) => document.getElementById(id);
+        const el = { arbeit: $("bereich-arbeit") };
+        let _vorlagen = {
+          global: [{ id: "g1", name: "Kurz", art: "zusammenfassung" },
+                   { id: "g2", name: "An den Melder", art: "antwort" }],
+          eigene: [], darf_global: false, standard: "",
+        };
+        let _vorlBeruehrt = false, _standAlt = false;
+        let _key = "", _laeuft = false;
+        /* Die Modul-Merker des Wechsels (_autoWechsel, _wechselTimer,
+         * _wechselKey, WECHSEL_VERZUG) – sie stehen in keinem Funktionsrumpf
+         * und fallen sonst aus dem Schnitt. */
+        ` + WECHSEL_KONST + `
+
+        // Aufzeichner statt echter Arbeit.
+        const laeufe = [], gemerkt = [], geloescht = [];
+        let _gemeldet = null;
+        function melde(t) { _gemeldet = t; }
+        async function auswerten(modus, entwurf, vorlagenId) {
+          laeufe.push({ modus, vorlagenId, wahl: $("f-vorlage").value });
+        }
+        let _frageFehler = null;
+        async function frage(n) {
+          if (_frageFehler) throw new Error(_frageFehler);
+          gemerkt.push(n); return { ok: true };
+        }
+
+        /* Virtualisierte Zeit: der Rueckruf wird gemerkt, nicht geplant. */
+        let _warte = null, _id = 0;
+        function setTimeout(fn, ms) { _warte = { fn, ms, id: ++_id }; return _id; }
+        function clearTimeout(id) {
+          geloescht.push(id);
+          if (_warte && _warte.id === id) _warte = null;
+        }
+        function ausloesen() { const t = _warte; _warte = null; if (t) t.fn(); }
+
+        ` + teile.join("\n") + `
+        ` + chHandler + `
+
+        // Das Pulldown fuellen wie im Betrieb.
+        for (const v of _vorlagen.global) {
+          const o = document.createElement("option");
+          o.value = v.id; o.textContent = v.name;
+          $("f-vorlage").appendChild(o);
+        }
+        const waehle = (wert) => {
+          $("f-vorlage").value = wert;
+          $("f-vorlage").dispatchEvent(new Event("change"));
+        };
+        const zustand = () => ({
+          laeufe: laeufe.slice(), wartet: !!_warte,
+          ms: _warte ? _warte.ms : 0, geloescht: geloescht.length,
+          gemeldet: _gemeldet, gemerkt: gemerkt.slice(),
+          haken: $("f-vorl-wechsel").checked, merker: _autoWechsel,
+        });
+        const api = { waehle, ausloesen, zustand,
+                      setKey: (k) => { _key = k; },
+                      setLaeuft: (b) => { _laeuft = b; },
+                      setArbeitVersteckt: (b) => { el.arbeit.hidden = b; },
+                      setFehler: (m) => { _frageFehler = m; },
+                      wechselZeigen, wechselAbbrechen };
+        aufbau(api);
+        for (const s of schritte) s(api);
+        return JSON.stringify(zustand());`);
+      return JSON.parse(f(aufbau, schritte));
+    } finally { w.close(); }
+  };
+
+  const bereit = (a) => { a.setKey("ABC-1"); a.setArbeitVersteckt(false); };
+
+  if (!daZuLaufen) {
+    check(false, "die ausgefuehrten Faelle wurden UEBERSPRUNGEN – der "
+          + "Wechsel-Weg fehlt in popup.js");
+  } else {
+
+  // — Der Regelfall: verzoegert, dann genau EIN Lauf —
+  {
+    let vorher = null;
+    const r = lauf(bereit, [
+      (a) => a.waehle("g2"),
+      (a) => { vorher = a.zustand(); },
+      (a) => a.ausloesen(),
+    ]);
+    check(vorher && vorher.laeufe.length === 0,
+          "der Wechsel startet NICHT sofort – er wartet",
+          JSON.stringify(vorher && vorher.laeufe));
+    check(vorher && vorher.wartet && vorher.ms >= 300,
+          "und zwar spuerbar lange (gegen Pfeiltasten-Steppen)",
+          String(vorher && vorher.ms));
+    check(r.laeufe.length === 1, "nach Ablauf laeuft genau EINER",
+          JSON.stringify(r.laeufe));
+    check(r.laeufe[0] && r.laeufe[0].modus === "antwort",
+          "mit der Art der gewaehlten Vorlage", JSON.stringify(r.laeufe[0]));
+    /* ⚠ OHNE `vorlagenId`: genau derselbe Aufruf wie beim Dreieck daneben –
+     * das Feld gilt. Eine mitgegebene Kennung waere ein zweiter Weg in
+     * denselben Lauf, und zwei Wege laufen beim naechsten Feinschliff
+     * auseinander. */
+    check(r.laeufe[0] && r.laeufe[0].vorlagenId === undefined,
+          "und ueber dasselbe Feld wie der Startknopf");
+  }
+
+  // — Steppen mit Pfeiltasten kostet EINEN Lauf, nicht drei —
+  /* ⚠ DAS IST DER TEUERSTE FALL. Ein <select> feuert `change` bei Tastatur-
+   * Navigation fuer JEDEN Schritt: ohne Timer waeren das drei bezahlte
+   * Auswertungen fuer zwei Vorlagen, die nur ueberflogen wurden. */
+  {
+    const r = lauf(bereit, [
+      (a) => a.waehle("g1"),
+      (a) => a.waehle("g2"),
+      (a) => a.waehle(""),
+      (a) => a.ausloesen(),
+    ]);
+    check(r.laeufe.length === 1,
+          "drei Wechsel hintereinander ergeben EINEN Lauf",
+          JSON.stringify(r.laeufe));
+    check(r.laeufe[0] && r.laeufe[0].wahl === "",
+          "und zwar den der ZULETZT gewaehlten Vorlage (der letzte gewinnt)",
+          JSON.stringify(r.laeufe[0]));
+    check(r.geloescht >= 2, "die vorigen Timer wurden zurueckgenommen",
+          String(r.geloescht));
+  }
+
+  // — Haken aus: nichts wartet, nichts laeuft —
+  {
+    const r = lauf((a) => { bereit(a); a.wechselZeigen(false); }, [
+      (a) => a.waehle("g1"),
+      (a) => a.ausloesen(),
+    ]);
+    check(r.laeufe.length === 0 && !r.wartet,
+          "abgehakt startet nichts – und es wartet auch kein Timer",
+          JSON.stringify(r));
+  }
+
+  // — Ohne erkanntes Ticket: still nichts —
+  /* Das Pulldown ist auch auf einer fremden Seite bedienbar (die Ticket-Sperre
+   * greift nur auf <button>), und das ist richtig: man stellt die Vorlage fuer
+   * spaeter ein. Eine Fehlermeldung bei jedem Wechsel waere Laerm. */
+  {
+    const r = lauf((a) => { a.setKey(""); a.setArbeitVersteckt(false); }, [
+      (a) => a.waehle("g1"),
+      (a) => a.ausloesen(),
+    ]);
+    check(r.laeufe.length === 0, "ohne Ticket laeuft nichts");
+    check(r.gemeldet === null,
+          "und es wird auch nicht gemeckert – gedrueckt hat niemand etwas",
+          String(r.gemeldet));
+  }
+
+  // — Waehrend eines Laufs wird nicht nachgelegt —
+  {
+    const r = lauf((a) => { bereit(a); a.setLaeuft(true); }, [
+      (a) => a.waehle("g1"),
+      (a) => a.ausloesen(),
+    ]);
+    check(r.laeufe.length === 0,
+          "waehrend eines laufenden Vorgangs startet kein zweiter");
+  }
+
+  /* ⚠ UND DIE PRUEFUNG STEHT IM TIMER, NICHT DAVOR: der Lauf kann erst nach
+   * dem Wechsel begonnen haben (Automatik bei neuem Ticket). Nur der Zustand
+   * ZUM ZEITPUNKT DES STARTS zaehlt. */
+  {
+    const r = lauf(bereit, [
+      (a) => a.waehle("g1"),
+      (a) => a.setLaeuft(true),
+      (a) => a.ausloesen(),
+    ]);
+    check(r.laeufe.length === 0,
+          "ein Lauf, der erst NACH dem Wechsel beginnt, verhindert ihn auch");
+  }
+
+  // — Der Tab hat gewechselt: der Wunsch galt einem anderen Vorgang —
+  {
+    const r = lauf(bereit, [
+      (a) => a.waehle("g1"),
+      (a) => a.setKey("XYZ-9"),
+      (a) => a.ausloesen(),
+    ]);
+    check(r.laeufe.length === 0,
+          "nach einem Tab-Wechsel laeuft die Vorlage NICHT auf dem neuen Ticket",
+          JSON.stringify(r.laeufe));
+  }
+
+  // — Abgemeldet (Leiste): der Arbeitsbereich ist verborgen —
+  {
+    const r = lauf((a) => { bereit(a); a.setArbeitVersteckt(true); }, [
+      (a) => a.waehle("g1"),
+      (a) => a.ausloesen(),
+    ]);
+    check(r.laeufe.length === 0, "bei verborgenem Arbeitsbereich laeuft nichts");
+  }
+
+  // — Zuruecksetzen nimmt einen wartenden Wechsel zurueck —
+  {
+    const r = lauf(bereit, [
+      (a) => a.waehle("g1"),
+      (a) => a.wechselAbbrechen(),
+      (a) => a.ausloesen(),
+    ]);
+    check(r.laeufe.length === 0 && !r.wartet,
+          "wechselAbbrechen() raeumt den wartenden Lauf ab");
+  }
+
+  // — wechselZeigen schaltet NUR AUS —
+  {
+    const r = lauf((a) => {
+      a.wechselZeigen(undefined);   // aelterer Hintergrund: Feld fehlt
+    }, []);
+    check(r.haken === true && r.merker === true,
+          "ein Hintergrund ohne das Feld laesst die Vorgabe AN",
+          JSON.stringify({ haken: r.haken, merker: r.merker }));
+    const r2 = lauf((a) => a.wechselZeigen(false), []);
+    check(r2.haken === false && r2.merker === false,
+          "ein gespeichertes AUS nimmt den Haken weg");
+    const r3 = lauf((a) => { a.wechselZeigen(false); a.wechselZeigen(true); }, []);
+    check(r3.haken === true, "und ein gespeichertes AN setzt ihn wieder");
+  }
+
+  }   // Ende daZuLaufen
+}
+
+// ── d) Der Haken selbst – AUSGEFUEHRT ─────────────────────────────────────
+/* ⚠ NIE SELBST UMSCHALTEN. Das Kaestchen sitzt in einem <label>; der Browser
+ * schaltet es bereits um, ein zusaetzliches `checked = !checked` hebt sich auf
+ * und der Klick taete unterm Strich GAR NICHTS (im Projekt beim AD-Picker
+ * bezahlt, Register).
+ *
+ * ⚠ GEMESSEN STATT GELESEN, und das war noetig: ein Regex auf `checked = !`
+ * meldete den FEHLERZWEIG als Verstoss – dort ist das Zuruecknehmen genau
+ * richtig. Die Eigenschaft lautet „ein Ereignis kehrt den Zustand nicht um",
+ * und die beantwortet nur der Lauf. */
+{
+  const cb = (POPUP_JS.match(
+    /\$\("f-vorl-wechsel"\)\.addEventListener\("change",[\s\S]*?\n\}\);/) || [""])[0];
+  const cbDa = cb.length > 100;
+  check(cbDa, "der Handler des Kaestchens wurde geschnitten", String(cb.length));
+  if (!cbDa) {
+    // Guard wie in c): ohne Handler bricht der Lauf sonst ohne Bilanz ab.
+    check(false, "die ausgefuehrten Faelle wurden UEBERSPRUNGEN – das "
+          + "Kaestchen ist nicht verdrahtet");
+  } else {
+
+  const { teile } = popupTeile(["wechselAbbrechen"], []);
+  const hakenLauf = async (fehler) => {
+    const dom = new JSDOM(POPUP_HTML, { url: "https://x.test/",
+                                        runScripts: "outside-only" });
+    const w = dom.window;
+    try {
+      const f = new w.Function("fehler", `
+        const $ = (id) => document.getElementById(id);
+        ` + WECHSEL_KONST + `
+        let _standAlt = false;
+        const gemerkt = [];
+        async function frage(n) {
+          if (fehler) throw new Error(fehler);
+          gemerkt.push(n); return { ok: true };
+        }
+        function setTimeout(fn, ms) { return 1; }
+        function clearTimeout(id) {}
+        ` + teile.join("\n") + `
+        ` + cb + `
+        return (async () => {
+          const c = $("f-vorl-wechsel");
+          // Wie der Browser im <label>: er schaltet um, DANN feuert change.
+          c.checked = false;
+          c.dispatchEvent(new Event("change"));
+          // Der Handler ist async – dem Microtask Zeit lassen.
+          await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+          return JSON.stringify({ haken: c.checked, merker: _autoWechsel,
+                                  gemerkt, hinweis: $("vorl-hinweis").textContent });
+        })();`);
+      return JSON.parse(await f(fehler));
+    } finally { w.close(); }
+  };
+
+  const r = await hakenLauf(null);
+  check(r.haken === false,
+        "ein Ereignis kehrt den Zustand NICHT um (kein Doppel-Toggle)",
+        String(r.haken));
+  check(r.merker === false, "der Merker folgt dem Kaestchen");
+  check(r.gemerkt.length === 1 && r.gemerkt[0].art === "merken"
+        && r.gemerkt[0].auto_wechsel === false,
+        "und die Einstellung wird sofort gespeichert",
+        JSON.stringify(r.gemerkt));
+
+  /* ⚠ EIN FEHLSCHLAG NIMMT SICH ZURUECK. Sonst behauptet der Haken einen
+   * Zustand, den es in der Ablage nicht gibt – beim naechsten Oeffnen stuende
+   * er wieder anders da, ohne dass jemand etwas getan hat. */
+  const rf = await hakenLauf("Netz weg");
+  check(rf.haken === true && rf.merker === true,
+        "schlaegt das Speichern fehl, kippt beides zurueck",
+        JSON.stringify({ haken: rf.haken, merker: rf.merker }));
+  check(!!rf.hinweis, "und der Grund steht dabei", rf.hinweis);
+
+  }   // Ende cbDa
+}
+
+// ── e) Zuruecksetzen raeumt den wartenden Wechsel ab – als Regel ──────────
+{
+  const fl = schneidePopup("felderLeeren") || "";
+  check(fl.length > 100, "felderLeeren wurde geschnitten", String(fl.length));
+  check(/wechselAbbrechen\(\)/.test(fl),
+        "„Leeren“, Reset und Tab-Wechsel nehmen einen wartenden Lauf zurueck – "
+        + "sonst fuellt er Sekunden spaeter genau das Feld, das gerade geleert wurde");
+}
+
+// ── f) Verhaltensaenderung: STAND und Version hochgezaehlt ────────────────
+/* Ein NEUES Feld in `merken`/`zustand` ist eine Aenderung an den
+ * Nachrichtenfaellen: ein alter Hintergrund verwirft es wortlos und gibt es im
+ * Zustand nicht heraus. Genau dafuer gibt es STAND. Und die Erweiterung
+ * aktualisiert sich nicht von selbst – ohne hoehere Version erfaehrt niemand,
+ * dass es etwas Neues gibt (der Update-Hinweis vergleicht Zahlen, 0.10.0 ist
+ * also korrekt groesser als 0.9.0). */
+{
+  const sp = (POPUP_JS.match(/const STAND = (\d+);/) || [0, "0"])[1];
+  const sb = (BG.match(/const STAND = (\d+);/) || [0, "0"])[1];
+  check(sp === sb, "beide STAND-Werte sind gleich", sp + " / " + sb);
+  check(parseInt(sp, 10) >= 9,
+        "und hochgezaehlt (neues Feld in merken/zustand)", sp);
+  const v = M_CHROME.version.split(".").map(Number);
+  check(v[0] > 0 || v[1] >= 10,
+        "die Paketversion ist hochgezaehlt", M_CHROME.version);
+}
+
+// ── g) Die Anleitung im Portal nennt den Haken ────────────────────────────
+/* Ein Bedienelement, von dem die Anleitung nichts weiss, findet niemand – und
+ * dieses aendert das Verhalten des Pulldowns, ohne dass man es sieht. Der
+ * ENGLISCHE Text nennt es bei seinem DEUTSCHEN Namen: das Fenster der
+ * Erweiterung ist einsprachig, ein uebersetzter Name liesse den Leser nach
+ * einem Eintrag suchen, den es nicht gibt. */
+{
+  const i18n = fs.readFileSync(path.join(WURZEL, "frontend/js/i18n.js"), "utf8");
+  const treffer = (i18n.match(/Vorlagenwechsel automatisch ausführen/g) || []).length;
+  check(treffer >= 2,
+        "die Anleitung nennt den Haken in DE und EN", String(treffer));
 }
 
 console.log("\n" + ok + " OK, " + fail + " FAIL");

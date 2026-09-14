@@ -450,6 +450,36 @@ button.ico-start {
 .vorl-ber-opt b { display: block; font-weight: 600; }
 .vorl-ber-opt .hinweis { display: block; margin: 1px 0 0; }
 
+/* ── Fusszeile der Vorlagen-Verwaltung ──────────────────────────────────────
+ *
+ * DER TRENNSTRICH IST DIE AUSSAGE: darueber werden DATEN gepflegt (Vorlagen,
+ * die auf dem Server liegen und fuer andere gelten koennen), hier wird ein
+ * VERHALTEN dieses Browsers eingestellt. Ohne die Linie liest sich das
+ * Kaestchen wie eine weitere Eigenschaft der Liste darueber.
+ * Gleiche Bauform wie `.abschnitt` in der Seite, nur eine Ebene tiefer. */
+.vorl-fuss {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--rand);
+}
+/* Wie `.vorl-ber-opt`: ein Kontrollkaestchen ist ein SATZ, keine
+ * Feldbeschriftung – `.feld > span` (Block, gedaempft) wuerde den Text vom
+ * Kaestchen loesen und grau faerben. */
+.vorl-auto {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--schrift);
+  cursor: pointer;
+}
+.vorl-auto input { flex: 0 0 auto; margin-top: 2px; }
+/* `min-width: 0` ist Pflicht: ohne das schrumpft ein Flex-Kind nicht unter
+ * seine Inhaltsbreite, und der Satz sprengt im 380 Pixel breiten Fenster die
+ * Zeile, statt umzubrechen. */
+.vorl-auto > span { min-width: 0; overflow-wrap: anywhere; }
+#vorl-wechsel-hinweis { margin: 3px 0 0; }
+
 /* Der Kasten um die Kästchen. `.feld` ist ein <label> gewesen; hier ist es ein
  * <div>, damit ein Klick auf die Überschrift nicht das erste Kästchen umschaltet. */
 #vorl-ber-zeile > span { display: block; margin-bottom: 3px; font-size: 12px; color: var(--gedaempft); }

@@ -66,7 +66,7 @@ const api = new Proxy({}, {
  * tun ist.
  * Bei jeder Aenderung an den Nachrichtenfaellen HOCHZAEHLEN. Ein Test
  * vergleicht beide Zahlen. */
-const STAND = 8;
+const STAND = 9;
 
 const EINST = "einstellungen";   // storage.local: { basis }
 const SITZUNG = "sitzung";       // storage.local: { token, benutzer }
@@ -183,6 +183,13 @@ async function einstSchreiben(teil) {
    * Genau dieser Fall ist der Grund fuer `STAND` (ein Test prueft die Regel
    * "jedes per `merken` geschickte Feld muss hier stehen"). */
   if (teil.einst_offen !== undefined) neu.einst_offen = !!teil.einst_offen;
+  /* ⚠ STARTET EIN WECHSEL IM VORLAGEN-PULLDOWN DEN LAUF VON SELBST?
+   * Vorgabe AN (Vorgabe des Betreibers 2026-09-14) – und deshalb wird hier
+   * NUR der ausdrueckliche Wert gespeichert. Die Vorgabe selbst steht an der
+   * LESE-Stelle (`auto_wechsel !== false` im Zustand): ein Altbestand ohne
+   * das Feld muss AN ergeben, nicht AUS. `!!` macht aus jedem Muellwert einen
+   * der zwei erlaubten Zustaende. */
+  if (teil.auto_wechsel !== undefined) neu.auto_wechsel = !!teil.auto_wechsel;
   /* Der Ring wird hier GEKAPPT, nicht beim Lesen: was einmal in der Ablage
    * steht, waechst sonst mit jedem Ticket weiter – und niemand sieht es. */
   if (teil.auto_gelaufen !== undefined) {
@@ -700,6 +707,13 @@ api.runtime.onMessage.addListener((nachricht, absender, antworten) => {
                        * `=== true` und nicht `!!`: ein Altbestand ohne das
                        * Feld muss "zu" ergeben, also die Vorgabe. */
                       einst_offen: e.einst_offen === true,
+                      /* Startet ein Vorlagenwechsel den Lauf von selbst?
+                       * ⚠ `!== false` UND NICHT `=== true`: die Vorgabe ist
+                       * AN, also muss ein Altbestand OHNE das Feld AN ergeben.
+                       * Mit `=== true` waere die Einstellung fuer jeden, der
+                       * sie nie angefasst hat, still aus – und die Vorgabe
+                       * eine Behauptung, die nur fuer frische Profile gilt. */
+                      auto_wechsel: e.auto_wechsel !== false,
                       // Damit das Fenster merkt, wenn hier noch eine aeltere
                       // Fassung antwortet (siehe STAND).
                       stand: STAND,

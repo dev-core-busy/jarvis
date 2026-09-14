@@ -73,6 +73,16 @@ SERVER_HOHEIT = (
     "data/instructions/",   # pro Server gepflegt, der Server ist die Wahrheit
     "settings.json",
     ".env",
+    # ⚠ VOM SERVER ERZEUGT, nicht ausgerollt: `_hauswerte_schreiben()` schreibt
+    # Marke, Hausfarbe, Adresse und Sprache vor JEDEM Bau der AI-Maus hinein.
+    # Im Repo steht nur die ehrliche Vorgabe (Marke "Jarvis", Adresse leer).
+    # Ohne diesen Eintrag meldet JEDER Abgleich gegen einen betriebenen Server
+    # hier Drift – und ein Bericht, der immer dasselbe sagt, wird nach zwei Mal
+    # nicht mehr gelesen.
+    # PREIS, ehrlich: eine echte Aenderung an der Datei (neues Feld) faellt im
+    # Abgleich nicht mehr auf. Vertretbar, weil der Server sie ohnehin vor jedem
+    # Bau neu schreibt – aber es ist ein Tausch, keine reine Verbesserung.
+    "ai-mouse/src/AiMouse/Configuration/Vorgaben.cs",
 )
 
 

@@ -608,13 +608,13 @@ check("⚠ die eigene Feedback-Freigabeliste ist ERSATZLOS entfallen",
       "feedback_allowed_users" not in KOMMENTARFREI
       and "feedback_allowed_group" not in KOMMENTARFREI,
       "die alten Felder sind zurueck")
-check("die Freigabe haengt an den Wissens-Editoren",
-      "_may_edit_knowledge" in (_perm_helfer or ""),
+check("⚠ die Freigabe haengt am SELBEN Praedikat wie die Wissen-Kachel",
+      "_editable_groups_for" in (_perm_helfer or ""),
       "ist: %s" % (_perm_helfer or "<nicht gefunden>"))
 
-# `_user_may_use_feedback` wirklich ausfuehren – und zwar MIT der echten
-# `_may_edit_knowledge`, nicht mit einer Attrappe davon. Eine gestubbte
-# Abhaengigkeit wuerde genau die Eigenschaft ersetzen, um die es hier geht.
+# `_user_may_use_feedback` wirklich ausfuehren. `_editable_groups_for` wird
+# dabei gestellt – es liest Gruppendatei UND Index, und geprueft wird hier die
+# WEICHE, nicht jene Funktion.
 _fn = {}
 for k in ast.walk(BAUM):
     if isinstance(k, ast.FunctionDef) and k.name in ("_user_may_use_feedback",
@@ -625,38 +625,67 @@ check("und `_may_edit_knowledge` wurde mitgeschnitten (Positivkontrolle)",
       "_may_edit_knowledge" in _fn)
 
 if len(_fn) == 2:
-    def _lauf(editoren="", gruppe="", admins=("jarvis",), in_gruppe=False):
+    def _lauf(bereich=(), editoren="", wirft=False):
+        def _egf(u):
+            if wirft:
+                raise RuntimeError("Gruppendatei kaputt")
+            return list(bereich)
         ns = {
             "config": type("C", (), {"get_setting": staticmethod(
-                lambda k, d="": editoren if k == "ad_knowledge_editors"
-                else (gruppe if k == "ad_knowledge_editors_group" else ""))})(),
-            "ALLOWED_USERS": set(admins),
+                lambda k, d="": editoren if k == "ad_knowledge_editors" else "")})(),
+            "ALLOWED_USERS": {"jarvis"},
             "_norm_login": lambda x: (x or "").strip().lower(),
             "_knowledge_editor_cache": {},
-            "_gruppe_trifft": lambda *a: in_gruppe,
+            "_gruppe_trifft": lambda *a: False,
+            "_editable_groups_for": _egf,
+            "print": lambda *a, **k: None,
         }
         exec(compile(ast.Module(body=[_fn["_may_edit_knowledge"],
                                       _fn["_user_may_use_feedback"]],
                                 type_ignores=[]), "<w>", "exec"), ns)
         return ns["_user_may_use_feedback"]
 
-    f_ = _lauf()
-    check("⚠ nichts konfiguriert heisst NIEMAND – auch kein Administrator",
-          f_("irgendwer") is False and f_("jarvis") is False)
-    f_ = _lauf(editoren="anna,bert")
-    check("ein eingetragener Wissens-Editor darf (Positivkontrolle)", f_("anna") is True)
-    check("ein nicht eingetragener nicht", f_("carla") is False)
-    check("der lokale Admin darf, sobald eine Einschraenkung existiert",
-          f_("jarvis") is True)
-    f_ = _lauf(gruppe="CN=Wissen,DC=x", in_gruppe=True)
-    check("Mitgliedschaft in der Editoren-Gruppe genuegt", f_("dora") is True)
-    check("ein leerer Benutzername nie", _lauf(editoren="anna")("") is False)
+    check("⚠ kein Bereich heisst NIEMAND – auch kein Administrator",
+          _lauf(bereich=())("irgendwer") is False
+          and _lauf(bereich=())("jarvis") is False)
+    check("⚠ ein GRUPPEN-Editor darf (das war vorher NICHT so)",
+          _lauf(bereich=[{"id": "g1"}])("klaus") is True)
+    check("mehrere Gruppen ebenso", _lauf(bereich=[{"id": "a"}, {"id": "b"}])("anna") is True)
+    check("ein leerer Benutzername nie", _lauf(bereich=[{"id": "g1"}])("") is False)
+    # Fail-safe: der Rueckfall ist die ENGERE Menge, nicht die weitere.
+    check("⚠ faellt die Gruppen-Ermittlung aus, gilt der ENGERE Rueckfall",
+          _lauf(wirft=True, editoren="anna")("anna") is True
+          and _lauf(wirft=True, editoren="anna")("carla") is False)
+    check("und der Rueckfall oeffnet nichts, wenn nichts konfiguriert ist",
+          _lauf(wirft=True, editoren="")("anna") is False)
 
 FRONT = ROOT / "frontend"
 check("die Portal-Kachel steht im Markup",
       'id="pt-card-feedback"' in (FRONT / "portal.html").read_text(encoding="utf-8"))
 check("und wird an `permissions.feedback` eingeblendet",
       "permissions.feedback" in (FRONT / "portal.html").read_text(encoding="utf-8"))
+
+# ══ DRIFT-SCHRANKE: Wissen- und Feedback-Kachel muessen DIESELBE Quelle haben ══
+# ⚠ VORGABE DES BETREIBERS (Rueckfrage 2026-09-14): „gleiche Berechtigung und
+# Sichtbarkeit". Beide leiten sich deshalb aus `_editable_groups_for` ab – die
+# Wissen-Kachel ueber `/api/wissen/scope` (Feld `groups`), die Feedback-Kachel
+# ueber `permissions.feedback`. Wer eine der beiden Seiten auf ein anderes
+# Praedikat umhaengt, bricht die Zusage STILL: beide Kacheln sehen weiter
+# richtig aus, nur fuer verschiedene Leute. Gemessen wurde genau das – ein
+# Gruppen-Editor sah Wissen und kein Feedback.
+_scope_fn = None
+for _k in ast.walk(BAUM):
+    if (isinstance(_k, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and _k.name == "wissen_scope"):
+        _scope_fn = ast.get_source_segment(QUELLE, _k)
+check("der Scope-Endpunkt wurde gefunden (Positivkontrolle)", _scope_fn is not None)
+check("⚠ die Wissen-Kachel leitet sich aus `_editable_groups_for` ab",
+      _scope_fn is not None and "_editable_groups_for" in _scope_fn)
+check("⚠ die Feedback-Kachel aus DEMSELBEN Praedikat",
+      "_editable_groups_for" in (_perm_helfer or ""))
+check("die Wissen-Kachel haengt an genau diesem Feld (`groups`)",
+      'd.groups && d.groups.length' in (FRONT / "portal.html").read_text(encoding="utf-8"),
+      "die Einblende-Bedingung der Wissen-Kachel hat sich geaendert")
 st = (FRONT / "settings.html").read_text(encoding="utf-8")
 check("der Reiter-Knopf steht im Markup", 'id="settings-tab-btn-feedback"' in st)
 check("und sein Panel auch", 'id="settings-tab-feedback"' in st)

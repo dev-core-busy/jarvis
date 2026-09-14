@@ -1527,28 +1527,49 @@ def _user_may_use_feedback(user: str) -> bool:
     """Prädikat: Darf der Benutzer Feedback-Formulare ausfüllen?
 
     ⚠ KEINE EIGENE FREIGABELISTE (Vorgabe des Betreibers, 2026-09-14): es gilt
-    **wer Wissen bearbeiten darf**, also ``_may_edit_knowledge``. Die früheren
-    Felder ``feedback_allowed_users``/``feedback_allowed_group`` unter
+    **wer Wissen bearbeiten darf**. Die früheren Felder
+    ``feedback_allowed_users``/``feedback_allowed_group`` unter
     *Sicherheit → Berechtigungen* sind ersatzlos entfallen.
+
+    ⚠ MASSGEBLICH IST ``_editable_groups_for``, NICHT ``_may_edit_knowledge`` –
+    also **exakt dasselbe Prädikat wie die Wissen-Kachel** (Vorgabe nach
+    Rückfrage: „gleiche Berechtigung und Sichtbarkeit"). Der Unterschied ist
+    nicht akademisch, er war gemessen: ``_may_edit_knowledge`` kennt nur die
+    GLOBALEN Editoren, ``_editable_groups_for`` zusätzlich die Editoren EINER
+    einzelnen Wissensgruppe (``editors_users``/``editors_group``). Wer eine
+    Gruppe pflegt, sah die Wissen-Kachel und bekam KEINE Feedback-Kachel –
+    genau die Ungleichheit, die hier beseitigt wird. Ebenso die Gegenrichtung:
+    ohne angelegte Wissensgruppe gibt es keinen Bereich, also auch kein
+    Feedback.
 
     WARUM DAS PASST: Feedback ist die Rückmeldung zu den Inhalten, die genau
     diese Personengruppe pflegt – eine zweite Liste daneben wäre ein zweiter
-    Ort, an dem dieselbe Personengruppe gepflegt werden muss, und zwei Listen
-    laufen auseinander. Die Eigenschaft „leer = niemand" bleibt dabei erhalten:
-    ``_may_edit_knowledge`` gibt ohne konfigurierte Editoren für JEDEN False
-    zurück (ausdrücklich auch für lokale Administratoren) und lässt lokale
-    Admins erst durch, sobald überhaupt eine Einschränkung existiert.
+    Ort für dieselbe Personengruppe, und zwei Listen laufen auseinander.
 
     ⚠ DER ADMIN VERLIERT DADURCH NICHTS: die Verwaltung (Formulare, ALLE
     Abgaben, CSV-Export) liegt unter ``/api/feedback/admin/*`` an
     ``require_local_auth`` und ist von diesem Prädikat unberührt. Gesteuert
     wird hier ausschließlich die Benutzerseite – Kachel, Formulare ausfüllen,
     eigene Abgaben sehen.
+
+    KOSTEN, gemessen auf DEV: 0,23 ms warm / 1,89 ms kalt. Das Prädikat hängt
+    an ``/api/me`` und damit am heissen Pfad JEDER Seite – deshalb überhaupt
+    gemessen und nicht geschätzt.
     """
     u = (user or "").strip()
     if not u:
         return False
-    return _may_edit_knowledge(u)
+    # FAIL-SAFE IN DIE ENGERE RICHTUNG: `_editable_groups_for` liest die
+    # Gruppendatei und den Index und kann daher scheitern. `/api/me` liegt auf
+    # jeder Seite – ein Wurf hier nähme das ganze Portal mit. Der Rückfall ist
+    # bewusst das ENGERE `_may_edit_knowledge` (eine Teilmenge): er gibt im
+    # Störungsfall kein Recht heraus, das sonst niemand hätte.
+    try:
+        return bool(_editable_groups_for(u))
+    except Exception as e:                           # noqa: BLE001
+        print(f"[Feedback] Gruppen-Bereich nicht ermittelbar ({e}) – "
+              f"falle auf die globalen Wissens-Editoren zurueck")
+        return _may_edit_knowledge(u)
 
 
 async def require_feedback_access(request: Request,
@@ -1561,9 +1582,12 @@ async def require_feedback_access(request: Request,
     # ein Text, der ein Feld bei einem Namen nennt, den es nicht mehr gibt,
     # schickt den Administrator suchen (im Projekt mehrfach bezahlt).
     raise HTTPException(status_code=403,
-        detail="Kein Zugriff auf Feedback – der Bereich steht den Wissens-"
-               "Editoren offen (Einstellungen → Sicherheit → Berechtigungen → "
-               "Wissen bearbeiten; ggf. neu einloggen für Gruppen-Aktualisierung)")
+        detail="Kein Zugriff auf Feedback – der Bereich steht offen, wer Wissen "
+               "bearbeiten darf: entweder als globaler Wissens-Editor "
+               "(Einstellungen → Sicherheit → Berechtigungen → Wissen bearbeiten) "
+               "oder als Editor einer einzelnen Wissensgruppe (Einstellungen → "
+               "Wissen → Wissensgruppen). Ohne angelegte Wissensgruppe gibt es "
+               "den Bereich nicht. Ggf. neu einloggen für Gruppen-Aktualisierung.")
 
 
 def _user_may_use_claudesub(user: str) -> bool:

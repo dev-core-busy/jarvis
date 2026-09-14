@@ -124,9 +124,15 @@ PROBEN = [
      "    liste = fb.formulare(True)", BACKEND),
     # ⚠ NACHGEZOGEN 2026-09-14: die eigene Freigabeliste ist entfallen, der
     # Bereich haengt an den Wissens-Editoren. Die Sabotage hebt genau das auf.
-    ("die Freigabe haengt nicht mehr an den Wissens-Editoren", "backend/main.py",
-     "    return _may_edit_knowledge(u)",
-     "    return True", BACKEND),
+    # ⚠ Die Zusage lautet seit der Rueckfrage: DASSELBE Praedikat wie die
+    # Wissen-Kachel. Beide Sabotagen greifen genau das an.
+    ("die Freigabe haengt an gar nichts mehr", "backend/main.py",
+     "        return bool(_editable_groups_for(u))",
+     "        return True", BACKEND),
+    ("Feedback haengt wieder am ENGEREN Praedikat als die Wissen-Kachel",
+     "backend/main.py",
+     "        return bool(_editable_groups_for(u))",
+     "        return _may_edit_knowledge(u)", BACKEND),
     ("die Kachel haengt nicht mehr am Skill", "backend/main.py",
      '            "feedback": (_user_may_use_feedback(user)\n'
      '                         and _skill_active("feedback")),',

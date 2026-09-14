@@ -594,6 +594,96 @@
         return raw ? raw.split(',').filter(Boolean) : [];
     }
 
+    // ── Suche ueber "Mein Wissen" ───────────────────────────────────────
+    // Zwei Stufen, wie die Filter-Box der Massenzuordnung: Name/Ordner/Gruppe
+    // sofort aus den geladenen Daten, der DATEI-INHALT zusaetzlich (verzoegert)
+    // ueber /api/knowledge/content_search.
+    var SUCH_VERZUG = 300;     // ms - erst tippen lassen, dann den Server fragen
+    var SUCH_MIN = 2;          // kuerzer lohnt keine Inhaltssuche (Endpunkt liefert dann [])
+    var _inhaltFuer = null;    // zu WELCHEM Begriff die Treffer unten gehoeren
+    var _inhaltTreffer = null; // Set der Pfade oder null (= noch nichts vom Server)
+    var _suchTimer = null;
+
+    // Der Suchbegriff wird IMMER aus dem Feld gelesen, nie aus einer zweiten
+    // Variablen: so koennen Feldinhalt und gezeigte Liste nicht auseinander-
+    // laufen (Chrome-Autofill fuellt Felder ohne `input`-Ereignis - im
+    // Audit-Log hat genau das eine Liste "wirkungslos" aussehen lassen).
+    function suchText() {
+        var el = $('wi-files-q');
+        return el ? el.value.trim().toLowerCase() : '';
+    }
+
+    // ⚠ DIE PFADFORMEN DER BEIDEN ENDPUNKTE SIND NICHT GLEICH - gemessen:
+    // /api/wissen/files normalisiert ueber knowledge_groups._rel und streift
+    // dabei den fuehrenden Schraegstrich ab (`mnt/rag/share_1/x.pdf`),
+    // content_search gibt ihn zurueck (`/mnt/rag/share_1/x.pdf`). Ohne diese
+    // Angleichung traefe die Inhaltssuche bei JEDER Datei aus einer
+    // Netzwerk-Freigabe daneben - und das sind im Betrieb die meisten.
+    function pfadSchluessel(p) {
+        return String(p == null ? '' : p).replace(/\\/g, '/').replace(/^\/+/, '').toLowerCase();
+    }
+
+    // Text, den die Sofort-Suche durchsucht: was in der Zeile sichtbar ist.
+    function suchHeu(f) {
+        return ((f.name || '') + ' ' + ordnerText(f) + ' ' + (f.path || '') + ' '
+            + (f.groups || []).map(function (g) { return g.name || ''; }).join(' ')).toLowerCase();
+    }
+
+    function trifftSuche(f, q) {
+        if (!q) return true;
+        if (suchHeu(f).indexOf(q) !== -1) return true;
+        // Inhalts-Treffer zaehlen nur, wenn sie zum AKTUELLEN Begriff gehoeren
+        return !!(_inhaltTreffer && _inhaltFuer === q
+            && _inhaltTreffer.has(pfadSchluessel(f.path)));
+    }
+
+    // Sichtbarkeit der Suchzeile: sie gehoert dorthin, wo es etwas zu suchen
+    // gibt. Bei leerem Bereich sagt die Leermeldung ohnehin alles.
+    function renderFileSearch() {
+        var wrap = $('wi-files-search'), hint = $('wi-files-search-hint');
+        var an = _files.length > 0;
+        if (wrap) wrap.style.display = an ? '' : 'none';
+        if (hint) hint.style.display = an ? '' : 'none';
+    }
+
+    function bindFileSearch() {
+        var el = $('wi-files-q');
+        if (!el || el._gebunden) return;
+        el._gebunden = true;
+        el.addEventListener('input', function () {
+            var q = suchText();
+            clearTimeout(_suchTimer);
+            renderFileList();                 // Name/Ordner sofort
+            if (q.length < SUCH_MIN) { _inhaltFuer = null; _inhaltTreffer = null; return; }
+            _suchTimer = setTimeout(function () {
+                fetch('/api/knowledge/content_search?q=' + encodeURIComponent(q), { headers: authH() })
+                    .then(function (r) { return r.json(); })
+                    .then(function (d) {
+                        // Spart einen Neuaufbau, wenn inzwischen weitergetippt
+                        // wurde. Die KORREKTHEIT haengt daran NICHT: darueber
+                        // entscheidet `_inhaltFuer === q` beim Zeichnen - ein
+                        // Sequenz-Zaehler daneben waere messbar wirkungslos.
+                        if (suchText() !== q) return;
+                        if (!d || !d.ok) return;
+                        _inhaltFuer = q;
+                        _inhaltTreffer = new Set((d.files || []).map(pfadSchluessel));
+                        renderFileList();
+                    })
+                    .catch(function () { /* dann eben nur Name/Ordner */ });
+            }, SUCH_VERZUG);
+        });
+        // Escape leert das Feld - sonst muss man den Text von Hand loeschen,
+        // um die ganze Liste zurueckzubekommen.
+        el.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && el.value) {
+                e.preventDefault();
+                el.value = '';
+                _inhaltFuer = null; _inhaltTreffer = null;
+                renderFileList();
+            }
+        });
+    }
+
     function renderFileFilter() {
         var wrap = $('wi-files-filter'), boxes = $('wi-files-filter-boxes');
         if (!wrap || !boxes) return;
@@ -648,10 +738,12 @@
         var box = $('wi-files-list');
         if (!box) return;
         var off = hiddenGroups();
-        var shown = _files.filter(function (f) {
+        var q = suchText();
+        var inGruppe = _files.filter(function (f) {
             // Datei bleibt sichtbar, solange mindestens eine ihrer Gruppen aktiv ist
             return (f.groups || []).some(function (g) { return off.indexOf(g.id) === -1; });
         });
+        var shown = inGruppe.filter(function (f) { return trifftSuche(f, q); });
 
         var cnt = $('wi-files-count');
         if (cnt) {
@@ -661,7 +753,16 @@
         }
 
         if (!_files.length) { box.innerHTML = '<div class="wi-empty">' + t('wissen.no_files') + '</div>'; return; }
-        if (!shown.length) { box.innerHTML = '<div class="wi-empty">' + t('wissen.no_files_filtered') + '</div>'; return; }
+        // Die Leermeldung muss den GRUND nennen: "keine Dateien in den gewaehlten
+        // Wissensgruppen" waere bei einer erfolglosen Suche eine Falschaussage -
+        // der Benutzer sucht dann den Fehler beim Gruppenfilter.
+        if (!shown.length) {
+            var grund = (q && inGruppe.length)
+                ? t('wissen.no_files_search', { q: q })
+                : t('wissen.no_files_filtered');
+            box.innerHTML = '<div class="wi-empty">' + esc(grund) + '</div>';
+            return;
+        }
         box.innerHTML = shown.map(function (f) {
             var chips = f.groups.map(function (g) {
                 return '<span class="wi-chip" style="border-color:' + esc(g.color) + ';font-size:0.7rem;">' + esc(g.name) + '</span>';
@@ -700,6 +801,8 @@
             .then(function (r) { return r.json(); })
             .then(function (d) {
                 _files = (d && d.files) || [];
+                renderFileSearch();
+                bindFileSearch();
                 renderFileFilter();
                 renderFileList();
             })

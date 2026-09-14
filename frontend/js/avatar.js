@@ -33,16 +33,95 @@
             return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
         });
     }
-    // Escaped Text + klickbare URLs + Zeilenumbrueche
-    function fmt(s) {
+    /* Die Fett-Regel – ZEICHENGLEICH zu `_FETT_RE` in `browser-addon/popup.js`
+       und `Markdown.Fett` in `ai-mouse/src/AiMouse/Ui/Markdown.cs`.
+
+       Die `\S`-Waechter sind der ganze Unterschied zwischen brauchbar und
+       gefaehrlich: ohne sie wuerden `2 * 3 * 4`, `*.txt` und `** allein **`
+       als Auszeichnung gelesen – und der Text stammt aus einem Modell.
+
+       ⚠ ALS STRING GEBAUT, NICHT ALS LITERAL: `(?<=…)` ist im ganzen uebrigen
+       Frontend nirgends benutzt (gemessen: 0 Fundstellen). Ein Literal wuerde
+       auf Safari < 16.4 schon beim PARSEN dieser Datei werfen – und damit den
+       ganzen Avatar stilllegen, nicht nur die Fettschrift. So faellt dort
+       hoechstens das Fett aus. */
+    var _FETT_RE = (function () {
+        try { return new RegExp('\\*\\*(?=\\S)([^\\n]+?)(?<=\\S)\\*\\*'); }
+        catch (e) { return null; }
+    })();
+
+    /* Setzt `<strong>` – auf dem bereits MASKIERTEN Text.
+       Die Schleife ueber den Rest ist dieselbe wie im Plugin (`zuBloecken`):
+       kein `g`-Flag, kein wandernder `lastIndex`. Dass hier ueber den ganzen
+       Text statt zeilenweise gelaufen wird, aendert nichts – `[^\n]` laesst
+       kein Match ueber einen Umbruch hinweg zu. */
+    function fett(html) {
+        if (!_FETT_RE) return html;
+        var aus = '', rest = html, m;
+        while ((m = _FETT_RE.exec(rest))) {
+            aus += rest.slice(0, m.index) + '<strong>' + m[1] + '</strong>';
+            rest = rest.slice(m.index + m[0].length);
+        }
+        return aus + rest;
+    }
+
+    /* Escaped Text + klickbare URLs + Zeilenumbrueche; mit `md` zusaetzlich
+       `**fett**`.
+
+       ⚠ DIE REIHENFOLGE IST DIE SICHERHEIT UND ZUGLEICH DER URL-SCHUTZ:
+       maskiert wird ZUERST (ein `<b>` aus der Antwort ist danach Text, kein
+       Markup), die Fett-Regel laeuft DANACH – aber auf dem Text, in dem die
+       URLs schon durch Platzhalter ersetzt sind. Ein `**` INNERHALB einer
+       Adresse kann sie damit nicht zerreissen; ein Link INNERHALB eines
+       fetten Abschnitts bleibt trotzdem ein Link.
+
+       Bekannte Grenze: eine Adresse, die WIRKLICH auf `*` endet, wird um dieses
+       Zeichen kuerzer verlinkt (es bleibt als Text dahinter stehen). Der Fall
+       ist praktisch nicht existent, waehrend `**… https://x/doku**` der
+       Regelfall ist – siehe den Trim im URL-Zweig. */
+    function fmt(s, md) {
         var urls = [];
+        /* ⚠ KENNUNG JE AUFRUF – der Fremdtext darf den Platzhalter nicht
+           nachbauen koennen. Mit einer festen Marke (`@@U0@@`) wird eine
+           Antwort, die selbst diese Zeichenfolge enthaelt (ein Modell, das
+           eigenen Code zitiert), beim Zuruecksetzen ersetzt: durch
+           `"undefined"`, wenn kein Link im Text war, sonst durch eine
+           DUBLETTE des ersten Links. Beides ist stiller Textverlust in der
+           Antwort. `esc()` maskiert `@` nicht, es gibt also keine andere
+           Schranke davor. Dieselbe Technik wie bei den Fremdtext-Bloecken im
+           Backend; `toString(36)` liefert nur `0-9a-z`, die Marke ist damit
+           regex-sicher. */
+        var marke = (Math.random().toString(36) + Math.random().toString(36))
+            .replace(/[^a-z0-9]/g, '').slice(0, 10) || 'u0';
         var html = esc(s).replace(/(https?:\/\/[^\s<]+)/g, function (u) {
-            var tail = ''; var m = u.match(/[)\].,;:!?]+$/);
+            /* Markdown-Sternchen gehoeren in den Trim: `[^\s<]+` frisst sonst
+               die SCHLIESSENDEN mit, und `**Siehe https://x/doku**` verliert
+               sein Fett. Der abgeschnittene Teil geht nicht verloren – er
+               steht als `tail` hinter dem Link.
+
+               ⚠ NUR PAARWEISE (`\*\*`), NIE EIN EINZELNES `*`: eine Adresse
+               wie `https://server/api/*` ist echt, und ein einzeln getrimmtes
+               Sternchen liesse den Link auf ein ANDERES Ziel zeigen als der
+               sichtbare Text nennt. Die Alternation trimmt beliebige
+               Kombinationen am Ende (`doku**.`), ein alleinstehendes `*`
+               erfuellt `\*\*` aber nicht.
+
+               Bekannte Grenze: bei `https://x/a**wichtig**` (kein Leerzeichen
+               vor dem `**`) frisst `[^\s<]+` die Sternchen weiter in die
+               Adresse; getrimmt wird nur das schliessende Paar, und `wichtig`
+               bleibt Teil des Links. */
+            var tail = ''; var m = u.match(/(?:\*\*|[)\].,;:!?])+$/);
             if (m) { tail = m[0]; u = u.slice(0, -tail.length); }
-            urls.push('<a href="' + u + '" target="_blank" rel="noopener">' + u + '</a>' + tail);
-            return '@@U' + (urls.length - 1) + '@@';
+            /* Der `tail` bleibt AUSSERHALB des Platzhalters. Steckte er darin,
+               waere ein abgetrenntes `**` fuer die Fett-Regel unsichtbar und
+               `**Siehe https://x/doku**` bliebe ohne Fett. Am gerenderten
+               Ergebnis aendert die Umstellung nichts. */
+            urls.push('<a href="' + u + '" target="_blank" rel="noopener">' + u + '</a>');
+            return '@@' + marke + (urls.length - 1) + '@@' + tail;
         });
-        return html.replace(/@@U(\d+)@@/g, function (_, i) { return urls[+i]; });
+        if (md) html = fett(html);
+        return html.replace(new RegExp('@@' + marke + '(\\d+)@@', 'g'),
+                            function (_, i) { return urls[+i]; });
     }
     // Markdown-Reste fuer die Sprachausgabe entfernen
     function stripForSpeech(s) {
@@ -547,10 +626,19 @@
         d.textContent = text;
         els.log.appendChild(d); scrollLog(); return d;
     }
-    function addBot(text) {
+    /* `md` deutet `**fett**` – und steht AUSDRUECKLICH nur an den zwei
+       Stellen, an denen MODELLTEXT ankommt.
+
+       ⚠ FEHLERMELDUNGEN WERDEN NICHT GEDEUTET (dieselbe Zusage wie im
+       Ergebnisfenster der AI-Maus): sie stammen vom Server oder aus einer
+       Ausnahme, ein `**` darin waere Zufall – und als Auszeichnung gelesen
+       verstuemmelt es genau den Text, den man dann genau lesen muss. Die
+       Vorgabe AUS ist fail-safe: wer eine neue Meldung ergaenzt und den
+       Schalter vergisst, bekommt das Verhalten von vorher. */
+    function addBot(text, md) {
         var d = document.createElement('div');
         d.className = 'jav-msg jav-msg-bot';
-        d.innerHTML = fmt(text);
+        d.innerHTML = fmt(text, md);
         els.log.appendChild(d); scrollLog(); return d;
     }
     function addThinking() {
@@ -601,11 +689,13 @@
             // Serverseitig abgebrochen: eine Teilantwort ist besser als nichts,
             // wird aber NICHT vorgelesen (der Nutzer wollte ja Ruhe).
             if (res.d && res.d.stopped) {
-                addBot(ans ? ans : T('avatar.stopped', 'Abgebrochen.'));
+                if (ans) addBot(ans, true);
+                else addBot(T('avatar.stopped', 'Abgebrochen.'));
                 gesture('idle');
                 return;
             }
-            addBot(ans || T('avatar.empty', '(keine Antwort)'));
+            if (ans) addBot(ans, true);
+            else addBot(T('avatar.empty', '(keine Antwort)'));
             gesture('answer');
             if (viaVoice && cfg.speak_on_voice && !stumm() && ans) speak(ans);
         }).catch(function (err) {

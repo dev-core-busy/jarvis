@@ -168,6 +168,19 @@ body.jav-resizing #jav-panel { transition: none; }
 }
 .jav-msg { max-width: 88%; padding: 7px 10px; border-radius: 12px; word-wrap: break-word; }
 .jav-msg a { color: var(--accent-hover, #818cf8); word-break: break-all; }
+
+/* ⚠ BESTANDSBEFUND, GEMESSEN: `--accent-hover` ergibt im HELLEN Thema 2,30:1
+   auf der Blase – unter der 4,5:1-Grenze, also der Link im Antwortfenster war
+   dort kaum lesbar. Es ist derselbe Fall, der in `/chat` am 2026-09-08 schon
+   einmal behoben wurde (dort 2,13:1), und dieselbe Loesung: den Akzent
+   abdunkeln statt einen festen Ton zu setzen – die Farbe ist brandingabhaengig.
+
+   NUR im hellen Thema: dunkel liegt derselbe Ton bei 5,56:1.
+
+   GRENZE, damit sie niemand fuer geloest haelt: keine feste Prozentzahl
+   garantiert 4,5:1 fuer JEDE Hausfarbe – ein sehr heller Akzent braeuchte
+   dort einen eigenen Ton. */
+body.light .jav-msg a { color: color-mix(in srgb, var(--accent, #6366f1) 55%, #000); }
 .jav-msg-user {
     align-self: flex-end;
     background: var(--accent, #6366f1); color: #fff;

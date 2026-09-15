@@ -390,6 +390,14 @@ def _fremdes_arbeitsverzeichnis(rp: Path, benutzer: str) -> str:
     """
     try:
         from backend import lauf_tmp as _lt
+        # Die VERWALTUNGSWURZEL selbst: sie traegt die Liste der Kennungen aller
+        # Benutzer, und die Kennung ist aus dem Namen rueckrechenbar. Eine eigene
+        # Begruendung, weil "gehoert einem anderen" hier FALSCH waere – sie
+        # gehoert niemandem – und weil eine Meldung ohne Weg dazu fuehrt, dass
+        # das Modell Varianten desselben Zugriffs durchprobiert (Register).
+        if _lt.ist_verwaltungswurzel(rp):
+            return ("das ist ein internes Verwaltungsverzeichnis. Deine eigenen "
+                    "Anhänge nennt dir der Anhang-Hinweis mit vollem Pfad")
         if _lt.gehoert_anhang(rp, benutzer) is False:
             return "dieser Anhang gehört einem anderen Benutzer"
         if _lt.gehoert_arbeitsbereich(rp, benutzer) is False:

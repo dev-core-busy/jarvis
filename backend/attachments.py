@@ -189,4 +189,56 @@ def cleanup(ttl_min: int | None = None, now: float | None = None) -> list[str]:
             print(f"[Anhang] {p.name} nicht entfernbar: {e}", flush=True)
     if weg:
         print(f"[Anhang] {len(weg)} Arbeitskopie(n) nach {ttl} min entfernt", flush=True)
+    _leere_kennungen_entfernen(grenze, uid)
+    return weg
+
+
+def _leere_kennungen_entfernen(grenze: float, uid: int) -> list[str]:
+    """Raeumt LEERE Kennungs-Verzeichnisse unter ``ANH_ROOT`` ab.
+
+    ⚠ BIS 2026-09-15 BLIEBEN SIE FUER IMMER STEHEN. ``cleanup`` entfernte mit
+    ``unlink`` nur die DATEIEN, waehrend ``cleanup_arbeit`` daneben ``rmtree``
+    macht – auf ECHT gemessen: 6 von 7 Verzeichnissen leer, das aelteste seit
+    sieben Tagen. Weil der Verzeichnisname ``sha256(benutzer)[:8]`` ist, war das
+    ein monoton wachsendes ANWESENHEITSPROTOKOLL, das nie schrumpft: je Person,
+    die Jarvis je einen Anhang gegeben hat, ein dauerhafter Eintrag.
+
+    Drei Schranken, und die dritte ist die wichtigste:
+      * nur direkte Kinder von ``ANH_ROOT`` – niemals ``/tmp`` selbst (dort
+        liegen die Kopien ohne Isolation, und /tmp ist nicht unser Verzeichnis),
+      * Eigentuemer muss der eigene Benutzer sein,
+      * ``rmdir`` statt ``rmtree``: es entfernt AUSSCHLIESSLICH ein leeres
+        Verzeichnis und scheitert sonst im Kernel – atomar, also ohne die
+        Luecke zwischen "ist leer?" und "loeschen". Ein ``rmtree`` haette hier
+        die Anhaenge eines gerade laufenden Uploads mitgenommen.
+
+    **Die Frist ergibt sich von selbst und das ist Absicht:** ein ``unlink``
+    aktualisiert die mtime des ELTERNverzeichnisses. Ein gerade geleertes
+    Kennungs-Verzeichnis ist damit frisch und ueberlebt diesen Durchgang – es
+    faellt erst, wenn der Benutzer ``ttl`` lang nichts mehr angehaengt hat.
+    """
+    weg: list[str] = []
+    try:
+        from backend.lauf_tmp import ANH_ROOT
+        if not ANH_ROOT.is_dir():
+            return weg
+        kinder = list(ANH_ROOT.iterdir())
+    except Exception:  # noqa: BLE001
+        return weg
+    for d in kinder:
+        try:
+            st = d.lstat()
+            import stat as _stat
+            if not _stat.S_ISDIR(st.st_mode):     # Symlink/Datei: nicht anfassen
+                continue
+            if st.st_uid != uid or st.st_mtime >= grenze:
+                continue
+            d.rmdir()                              # scheitert, wenn NICHT leer
+            weg.append(d.name)
+        except OSError:
+            continue                               # nicht leer / parallel weg
+        except Exception as e:  # noqa: BLE001
+            print(f"[Anhang] {d.name} nicht entfernbar: {e}", flush=True)
+    if weg:
+        print(f"[Anhang] {len(weg)} leere(s) Kennungs-Verzeichnis(se) entfernt", flush=True)
     return weg

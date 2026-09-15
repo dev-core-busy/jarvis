@@ -646,6 +646,65 @@ _SESSION_ANHAENGE_MAX = 6          # je Sitzung; aeltere fallen heraus
 _SESSION_ANHAENGE_SITZUNGEN = 200  # insgesamt, gegen unbegrenztes Wachsen
 
 
+def _bild_als_datei(b64daten: str, dateiname: str, benutzer: str,
+                    sitzung: str, werkzeuge=None) -> str:
+    """Legt ein BILD zusaetzlich als Datei ab und liefert den Hinweis dazu.
+
+    ⚠ EIN BILD WURDE BIS 2026-09-15 NIE ZUR DATEI – daran ist der Vorfall auf
+    ECHT gescheitert. PDF und Office rufen ``_anhang_ablegen``, der Bild-Zweig
+    nicht: das Bild ging ausschliesslich als base64 ins Modell. Damit gab es
+    keinen Pfad – und ``bild_text_ersetzen`` verlangt einen (``pfad_parameter``).
+
+    Der System-Prompt sagte dem Modell woertlich "Den Pfad des Bildes nimmst du
+    aus dem Anhang-Hinweis", und den Hinweis gab es fuer Bilder nicht. Folge:
+    das Modell SAH das Bild (inline), sollte es bearbeiten, suchte die Datei,
+    fand sie nicht und enumerierte ``/tmp`` – acht Schritte, sechs Abweisungen,
+    am Ende ein erfundener Dateiname. **Ein Prompt ist Code:** wer eine Regel
+    schreibt, die einen Pfad voraussetzt, muss die Stelle mitbauen, die ihn
+    ERZEUGT.
+
+    EIGENE FUNKTION UND KEIN BLOCK IM WS-HANDLER: dort steckte der Zweig in 300
+    Zeilen Nachbarcode und liess sich nur ueber den Quelltext pruefen – eine
+    Sabotage, die den Aufruf umgeht (``(None, None) or _anhang_ablegen(...)``),
+    blieb dabei unbemerkt. Als Funktion ist die WIRKUNG messbar.
+
+    ``werkzeuge`` ist die Menge der vorhandenen Werkzeugnamen; ``None`` heisst
+    "unbekannt" und nennt sicherheitshalber keines – ein Hinweis auf ein
+    fehlendes Werkzeug endet in "Tool nicht gefunden".
+
+    Rueckgabe: der Hinweistext, oder ``""`` wenn nichts abgelegt werden konnte.
+    **FAIL-OPEN:** das ANSEHEN des Bildes darf nie daran haengen, dass die
+    Platte voll ist – der Aufrufer reicht das Bild unabhaengig davon inline
+    weiter.
+    """
+    # Das Dekodieren gehoert MIT in diese Fehlerbehandlung: ein kaputter
+    # base64-Anhang wuerde sonst den ganzen WS-Handler mitreissen, und das Bild
+    # ist an dieser Stelle laengst inline unterwegs.
+    try:
+        import base64 as _b64
+        ziel, arbeit = _anhang_ablegen(_b64.b64decode(b64daten), dateiname, benutzer)
+    except Exception as e:  # noqa: BLE001
+        print(f"[attach] Bild-Arbeitskopie fehlgeschlagen ({dateiname}): {e}", flush=True)
+        return ""
+    if ziel is None:
+        return ""
+    try:
+        _anhang_merken(sitzung, dateiname, ziel.name,
+                       arbeit.as_posix() if arbeit else "")
+    except Exception as e:  # noqa: BLE001
+        print(f"[attach] Bild nicht vermerkt ({dateiname}): {e}", flush=True)
+    pfad = arbeit.as_posix() if arbeit else f"data/documents/{ziel.name}"
+    bearb = ""
+    if werkzeuge and "bild_text_ersetzen" in werkzeuge:
+        bearb = (" Zum BEARBEITEN (z.B. Text im Bild ersetzen/übersetzen): "
+                 "bild_text_ersetzen mit genau diesem Pfad.")
+    # Der letzte Satz ist nicht Kosmetik: ohne ihn liest das Modell das Bild per
+    # filesystem ein, statt es anzusehen – es liegt ihm laengst vor.
+    return (f"[Bild '{dateiname}' liegt auch als Datei unter: {pfad}.{bearb} "
+            f"Zum blossen ANSEHEN brauchst du den Pfad nicht – das Bild liegt "
+            f"dir bereits vor.]")
+
+
 def _anhang_merken(sitzung: str, name: str, ablage: str, arbeitskopie: str) -> None:
     """Vermerkt einen Anhang fuer Folgefragen derselben Sitzung."""
     if not sitzung:
@@ -20996,6 +21055,19 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                 if _mime in _ALLOWED_IMG_MIME:
                     if len(_data) <= 14_000_000:   # max ~10 MB binary
                         image_attachments.append({"name": _name, "mime_type": _mime, "data": _data})
+                        # Das Bild ZUSAETZLICH als Datei ablegen – sonst hat das
+                        # Modell keinen Pfad fuer `bild_text_ersetzen` und sucht
+                        # einen (Vorfall 2026-09-15, siehe `_bild_als_datei`).
+                        # Fail-open: schlaegt es fehl, bleibt es beim inline-Bild.
+                        try:
+                            _vorh_i = {getattr(t, "name", "") for t in getattr(
+                                agent_manager.main_agent, "_tool_instances", [])}
+                        except Exception:  # noqa: BLE001
+                            _vorh_i = None
+                        _hinweis_i = _bild_als_datei(
+                            _data, _name, _get_ws_username(ws), chat_sid, _vorh_i)
+                        if _hinweis_i:
+                            _text_prepend.append(_hinweis_i)
                 elif _mime in _ALLOWED_AUD_MIME or _mime in _ALLOWED_VID_MIME:
                     if len(_data) > 34_000_000:    # max ~25 MB binary
                         continue

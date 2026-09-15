@@ -660,6 +660,38 @@ def anhang_binds(benutzer: str) -> list:
     return []
 
 
+def ist_verwaltungswurzel(pfad) -> bool:
+    """True fuer ``ANH_ROOT``/``ARBEIT_ROOT`` SELBST – nicht fuer deren Inhalt.
+
+    ⚠ DIE WURZEL WAR AUFLISTBAR, UND DAS WAR EIN LECK (Vorfall 2026-09-15, ECHT).
+    ``gehoert_anhang``/``gehoert_arbeitsbereich`` geben fuer die Wurzel ``None``
+    zurueck ("die Frage stellt sich nicht") – richtig fuer die EIGENTUEMER-Frage,
+    aber damit liess ``authorize_fs`` ein ``filesystem list /tmp/jarvis-anhaenge``
+    durch und nannte jedem Domain-Benutzer die Kennungen ALLER anderen.
+
+    Die Kennung ist ``sha256(benutzername)[:8]`` – mit einer Namensliste, die im
+    Haus jeder hat, in Sekunden rueckrechenbar (drei von sieben beim ersten
+    Versuch). Ablesbar war damit, WER WANN mit Jarvis gearbeitet hat. Der Umbau
+    vom 23.08. hat die Dateinamen verborgen und dabei die PERSONEN offengelegt –
+    die Enumeration war nicht geschlossen, sondern eine Ebene nach oben
+    verschoben.
+
+    Der Inhalt bleibt ueber die Eigentuemer-Schranke geregelt; hier geht es nur
+    um das Verzeichnis, das die Liste TRAEGT.
+    """
+    try:
+        rp = Path(pfad).resolve()
+    except Exception:  # noqa: BLE001
+        return False
+    for wurzel in (ANH_ROOT, ARBEIT_ROOT):
+        try:
+            if rp == wurzel.resolve():
+                return True
+        except Exception:  # noqa: BLE001
+            continue
+    return False
+
+
 def gehoert_anhang(pfad, benutzer: str) -> bool | None:
     """Gehoert eine Datei unter ANH_ROOT diesem Benutzer?
 

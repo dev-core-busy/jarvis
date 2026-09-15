@@ -4578,6 +4578,28 @@ body.light .kb-cl-spanne { color: #5b6678; }
     background: var(--bg-secondary);
 }
 .kb-cl-anw-titel { display: block; font-weight: 600; font-size: .86rem; }
+
+/* Vorlagen-Pulldown ueber dem Feld.
+   ⚠ min-width: 0 am Auswahlmenue ist Pflicht - `.input-field` bringt
+   `width: 100%` mit, und ein Flex-Kind schrumpft von sich aus nicht unter
+   seine Inhaltsbreite: der laengste Eintrag schoebe die Zeile sonst ueber den
+   Dialogrand hinaus (im Projekt mehrfach bezahlt). `flex-wrap` laesst die
+   Beschriftung bei schmalem Dialog nach oben rutschen, statt das Menue zu
+   quetschen. */
+.kb-cl-anw-vorl-zeile {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    margin: 0 0 8px;
+}
+.kb-cl-anw-vorl-label { font-size: .82rem; color: var(--text-secondary); }
+.kb-cl-anw-vorl {
+    flex: 1 1 240px;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 7px 34px 7px 10px;   /* flacher als ein Eingabefeld - es ist eine Beigabe */
+    background-position: right 10px center;
+    font-size: .82rem;
+}
+
 .kb-cl-anw-text {
     width: 100%;
     /* ⚠ box-sizing ist Pflicht: .modal-card/.form-group geben Eingabefeldern

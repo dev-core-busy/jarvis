@@ -1388,6 +1388,18 @@ class JarvisKnowledgeManager {
                 this._escHtml(window.t('knowledge.cleanup.anw_titel'))}</label>
             <p class="kb-hint" style="margin:.2rem 0 .5rem;">${
                 this._escHtml(window.t('knowledge.cleanup.anw_hint'))}</p>
+            <div class="kb-cl-anw-vorl-zeile">
+                <label class="kb-cl-anw-vorl-label" for="kb-cl-anw-vorlage">${
+                    this._escHtml(window.t('knowledge.cleanup.anw_vorl_label'))}</label>
+                <select id="kb-cl-anw-vorlage" class="input-field kb-cl-anw-vorl"
+                        title="${this._escHtml(window.t('knowledge.cleanup.anw_vorl_title'))}">
+                    <option value="">${
+                        this._escHtml(window.t('knowledge.cleanup.anw_vorl_leer'))}</option>
+                    ${this._anwVorlagen().map(k =>
+                        `<option value="${this._escHtml(k)}">${this._escHtml(
+                            window.t('knowledge.cleanup.anw_v_' + k))}</option>`).join('')}
+                </select>
+            </div>
             <textarea id="kb-cl-anw-text" class="kb-cl-anw-text" rows="3" spellcheck="false"
                       placeholder="${this._escHtml(window.t('knowledge.cleanup.anw_ph'))}"></textarea>
             <div class="kb-cl-aktion">
@@ -1465,6 +1477,29 @@ class JarvisKnowledgeManager {
      * was gilt. Ein klickbarer Knopf, der dann "bitte erst etwas eingeben"
      * meldet, waere der schlechtere Weg - er laeuft ins Leere.
      */
+    /**
+     * Vorformulierte Anweisungen fuer "Prompt optimieren" → Eigene Anweisung.
+     *
+     * Je Kennung ZWEI i18n-Schluessel: `anw_v_<k>` ist die kurze Beschriftung
+     * im Pulldown, `anw_vt_<k>` der Auftragstext, der ins Feld gesetzt wird.
+     * Getrennt, weil ein 300-Zeichen-Auftrag als Eintrag eines Auswahlmenues
+     * unlesbar waere - und weil die Beschriftung sagen soll, WAS passiert,
+     * nicht WIE der Auftrag formuliert ist.
+     *
+     * ⚠ EINE METHODE, KEINE MODUL- ODER KLASSEN-KONSTANTE. Solche Konstanten
+     * fallen aus jedem Funktions-Schnitt heraus, und der Waechter schneidet
+     * genau so - er braeuchte sonst eine eigene, driftende Zweitliste. So liest
+     * er die ECHTE Liste und leitet daraus ab, welche Schluessel in BEIDEN
+     * Sprachen vorliegen muessen: eine fuenfte Vorlage faellt von selbst auf.
+     *
+     * ⚠ DIE TEXTE STEHEN IN i18n, nicht hier - sonst gibt es sie nur auf
+     * Deutsch, und die englische Oberflaeche setzt einen deutschen Auftrag ins
+     * Feld.
+     */
+    _anwVorlagen() {
+        return ['sicherheit', 'veraltet', 'straffen', 'regeln'];
+    }
+
     _cleanupAnweisungVerdrahten() {
         const feld = document.getElementById('kb-cl-anw-text');
         const knopf = document.getElementById('kb-cl-anw-start');
@@ -1475,7 +1510,56 @@ class JarvisKnowledgeManager {
             knopf.title = window.t(leer ? 'knowledge.cleanup.anw_btn_leer'
                                         : 'knowledge.cleanup.anw_btn_title');
         };
-        feld.addEventListener('input', stand);
+        const sel = document.getElementById('kb-cl-anw-vorlage');
+        // Der zuletzt EINGESETZTE Vorlagentext. Daran haengen beide Richtungen:
+        // ob ein Wechsel etwas ueberschreibt, das der Anwender selbst getippt
+        // hat - und ob das Pulldown noch benennt, was im Feld steht.
+        this._anwVorlText = '';
+
+        feld.addEventListener('input', () => {
+            stand();
+            // ⚠ EINE ANZEIGE DARF KEINEN ZUSTAND BEHAUPTEN, DEN SIE NICHT KENNT.
+            // Sobald der Anwender den eingesetzten Text bearbeitet, ist es nicht
+            // mehr "die Vorlage" - das Pulldown faellt dann auf "eigene
+            // Anweisung" zurueck, statt weiter einen Namen zu nennen, der nicht
+            // mehr zum Feldinhalt passt.
+            if (sel && sel.value && feld.value !== this._anwVorlText) sel.value = '';
+        });
+
+        if (sel) sel.addEventListener('change', () => {
+            const k = sel.value;
+            if (!k) return;                    // "eigene Anweisung" - Feld in Ruhe lassen
+            const txt = window.t('knowledge.cleanup.anw_vt_' + k);
+            const da = feld.value.trim();
+            // ⚠ GETIPPTEN TEXT NICHT UNGEFRAGT WEGWERFEN. Eine Vorlage, die
+            // bereits eingesetzt und seither nicht angefasst wurde, darf eine
+            // andere ersetzen (dann ist nichts verloren); alles andere ist
+            // Arbeit des Anwenders und wird nur nach Rueckfrage ueberschrieben.
+            if (da && feld.value !== this._anwVorlText
+                && !window.confirm(window.t('knowledge.cleanup.anw_vorl_ersetzen'))) {
+                sel.value = '';                // die Wahl hat nicht stattgefunden
+                return;
+            }
+            // ⚠ REIHENFOLGE IST SEMANTIK: der Merker steht VOR dem Ereignis.
+            // Der `input`-Zweig oben stellt das Pulldown zurueck, sobald Feld
+            // und Merker auseinanderlaufen - waere er noch der alte, loeschte
+            // die eigene Meldung die gerade getroffene Wahl wieder.
+            feld.value = txt;
+            this._anwVorlText = txt;
+            // Das Ereignis ist Pflicht, nicht Kosmetik: am `input` haengt die
+            // Freigabe des Knopfes. Ohne es steht der Text da und "Anweisung
+            // ausfuehren" bleibt gesperrt - der Klick sieht dann wirkungslos aus.
+            feld.dispatchEvent(new Event('input', { bubbles: true }));
+            // ⚠ AN DEN ANFANG, NICHT ANS ENDE. `focus()` setzt den Cursor hinter
+            // den Text und scrollt dorthin - bei einem mehrzeiligen Auftrag sieht
+            // der Anwender dann dessen SCHLUSS und muss erst zurueckscrollen, um
+            // zu lesen, was er gleich ausfuehrt (im Screenshot gesehen, die
+            // Messung war gruen). Wer weiterschreiben will, klickt ohnehin hinein.
+            feld.focus();
+            try { feld.setSelectionRange(0, 0); } catch (e) { /* alte Browser */ }
+            feld.scrollTop = 0;
+        });
+
         stand();
     }
 

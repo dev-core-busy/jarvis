@@ -36,6 +36,13 @@ check('die echten Texte sind geladen (kein Schluessel als Text)',
 window.confirm = () => true;
 // Im Browser ist confirm global - im eval-Kontext von Node nicht.
 global.confirm = () => true;
+// ⚠ DASSELBE FUER `Event`, und hier ist es kein Formfehler: der Renderer baut
+// `new Event('input', …)` ohne window-Praefix (Projekt-Idiom, siehe
+// pwreveal.js/tabfill.js/prompt_check.js). Node hat ein EIGENES globales Event,
+// und jsdom lehnt das mit "parameter 1 is not of type 'Event'" ab - der Handler
+// bricht mitten drin ab, der Knopf bleibt gesperrt, und der Waechter meldet
+// einen Fehler, den es im Browser nicht gibt (dort ist Event === window.Event).
+global.Event = dom.window.Event;
 
 // Den ECHTEN Renderer laden - nicht nachbauen.
 const quelle = fs.readFileSync(path.join(REPO, 'frontend/js/knowledge.js'), 'utf8');
@@ -58,7 +65,8 @@ const teile = ['_diffZeilen', '_cleanupVergleich', '_escHtml', 'cleanupBearbeite
                'cleanupKonflikte', 'cleanupOeffnen', 'cleanupSchliessen',
                '_cleanupListe', '_cleanupZaehler', 'cleanupEinzelSpeichern',
                '_clStatus', 'cleanupAnalysieren', '_cleanupAuswahlVerdrahten',
-               '_cleanupAnweisungVerdrahten', 'cleanupMitAnweisung'].map(methode);
+               '_cleanupAnweisungVerdrahten', 'cleanupMitAnweisung',
+               '_anwVorlagen'].map(methode);
 check('alle Bausteine geschnitten', teile.every(t => t.length > 20));
 
 const gesendet = [];
@@ -867,6 +875,156 @@ const I18N10 = fs.readFileSync(path.join(REPO, 'frontend/js/i18n.js'), 'utf8');
     check(`"${k}" steht in DE UND EN`,
           (I18N10.match(new RegExp("'knowledge\\.cleanup\\." + k + "'", 'g')) || []).length === 2);
 });
+
+console.log('\n\x1b[1m10d. Vorlagen-Pulldown ueber dem Anweisungsfeld\x1b[0m');
+// ⚠ AUSGEFUEHRT: ob eine Auswahl den Text WIRKLICH ins Feld setzt und dabei den
+// Knopf freigibt, kann eine Quelltext-Suche nicht beantworten - genau daran
+// haengt, ob der Klick danach ins Leere laeuft.
+M._cleanupDateien = [{ schluessel: 'anweisung:style.md', art: 'anweisung',
+                       name: 'style.md', bytes: 900, herkunft: 'geaendert', zu_gross: false }];
+const f10d = async (url, opt) => {
+    gesendet10.push({ url, body: JSON.parse((opt && opt.body) || '{}') });
+    return { ok: true, json: async () => ({ ok: true, modell: 'testmodell', ergebnisse: [] }) };
+};
+window.fetch = f10d; global.fetch = f10d;
+M._cleanupListe();
+const vorl = document.getElementById('kb-cl-anw-vorlage');
+const feld3 = document.getElementById('kb-cl-anw-text');
+const knopf3 = document.getElementById('kb-cl-anw-start');
+// Die ECHTE Liste aus dem Produktivcode - keine Zweitliste im Test.
+const VORL = M._anwVorlagen();
+// ⚠ NIE UNGEPRUEFT DEREFERENZIEREN (Register): fehlt das Pulldown, wirft der
+// erste Zugriff darauf - der Lauf endet dann OHNE Bilanzzeile und ist von
+// "nicht gelaufen" nicht zu unterscheiden. Ein Leer-Ersatz laesst jede
+// folgende Pruefung ordentlich FAIL melden.
+const LEER = { value: '', options: [], tagName: '', dispatchEvent() {},
+               closest() { return null; },
+               compareDocumentPosition() { return 0; } };
+const vs = vorl || LEER;
+check('das Pulldown wird gezeichnet', !!vorl && vorl.tagName === 'SELECT');
+check('es steht VOR dem Eingabefeld (erst waehlen, dann bearbeiten)',
+      !!vorl && !!feld3 && (vs.compareDocumentPosition(feld3)
+          & window.Node.DOCUMENT_POSITION_FOLLOWING) !== 0);
+check('es liegt IM Anweisungs-Kasten, nicht in der Aktionszeile darueber',
+      !!vorl && !!vs.closest('.kb-cl-anw'));
+check('erster Eintrag ist "eigene Anweisung" und hat den leeren Wert',
+      !!vorl && vs.options.length > 1 && vs.options[0].value === '');
+check('jede Vorlage des Produktivcodes steht als Eintrag drin',
+      !!vorl && VORL.every(k => [...vs.options].some(o => o.value === k)));
+check('und keine darueber hinaus (die Liste ist die eine Quelle)',
+      !!vorl && vs.options.length === VORL.length + 1);
+check('⚠ die verlangte Sicherheits-Vorlage ist dabei', VORL.includes('sicherheit'));
+check('die Eintraege tragen eine LESBARE Beschriftung, nicht den Auftragstext',
+      !!vorl && [...vs.options].slice(1).every(o =>
+          o.textContent.trim().length > 4 && o.textContent.trim().length < 60));
+check('das Feld startet leer und der Knopf gesperrt',
+      feld3.value === '' && knopf3.disabled === true);
+
+// Auswahl -> Text im Feld, Knopf frei.
+let gefragt = 0;
+window.confirm = () => { gefragt++; return true; };
+global.confirm = window.confirm;
+vs.value = 'sicherheit';
+vs.dispatchEvent(new window.Event('change'));
+const txtSich = window.t('knowledge.cleanup.anw_vt_sicherheit');
+check('⚠ die Wahl setzt den Auftragstext ins Feld', feld3.value === txtSich);
+check('⚠ und der Knopf wird dabei frei (das input-Ereignis ist Pflicht)',
+      knopf3.disabled === false);
+check('bei leerem Feld wird NICHT nachgefragt', gefragt === 0);
+check('das Pulldown nennt danach weiter die Vorlage', vs.value === 'sicherheit');
+// ⚠ Der Anwender soll den ANFANG des Auftrags sehen, nicht dessen Schluss -
+// `focus()` setzt den Cursor sonst hinter den Text und scrollt dorthin.
+// Im Screenshot gesehen, waehrend die Messung gruen war.
+check('⚠ der Cursor steht am Anfang (sonst liest man das Ende des Auftrags)',
+      feld3.selectionStart === 0 && feld3.selectionEnd === 0 && feld3.scrollTop === 0);
+
+// Vorlage -> andere Vorlage: nichts zu verlieren, also keine Rueckfrage.
+vs.value = 'straffen';
+vs.dispatchEvent(new window.Event('change'));
+check('ein Wechsel zwischen zwei Vorlagen fragt nicht nach', gefragt === 0);
+check('und setzt den neuen Text',
+      feld3.value === window.t('knowledge.cleanup.anw_vt_straffen'));
+
+// ⚠ Bearbeiten des eingesetzten Textes: das Pulldown darf danach nicht mehr
+// behaupten, im Feld stehe die Vorlage.
+feld3.value = window.t('knowledge.cleanup.anw_vt_straffen') + ' Aber nur Abschnitt 3.';
+feld3.dispatchEvent(new window.Event('input'));
+check('⚠ bearbeiteter Text stellt das Pulldown auf "eigene Anweisung" zurueck',
+      vs.value === '');
+check('der Text bleibt dabei unangetastet', /Abschnitt 3/.test(feld3.value));
+
+// Getippter Text + abgelehnte Rueckfrage: nichts geht verloren.
+window.confirm = () => { gefragt++; return false; };
+global.confirm = window.confirm;
+feld3.value = 'Meine eigene, muehsam getippte Anweisung.';
+feld3.dispatchEvent(new window.Event('input'));
+vs.value = 'veraltet';
+vs.dispatchEvent(new window.Event('change'));
+check('⚠ vor dem Ueberschreiben getippten Textes wird gefragt', gefragt === 1);
+check('⚠ bei "nein" bleibt der getippte Text stehen',
+      feld3.value === 'Meine eigene, muehsam getippte Anweisung.');
+check('und das Pulldown faellt zurueck - die Wahl hat nicht stattgefunden',
+      vs.value === '');
+// Dieselbe Lage, diesmal bestaetigt.
+window.confirm = () => { gefragt++; return true; };
+global.confirm = window.confirm;
+vs.value = 'veraltet';
+vs.dispatchEvent(new window.Event('change'));
+check('bei "ja" wird ersetzt',
+      gefragt === 2 && feld3.value === window.t('knowledge.cleanup.anw_vt_veraltet'));
+
+// Was am Ende wirklich rausgeht.
+gesendet10.length = 0;
+vs.value = 'sicherheit';
+vs.dispatchEvent(new window.Event('change'));
+await M.cleanupMitAnweisung();
+const anfr3 = gesendet10.filter(g => /\/analyse$/.test(g.url));
+check('⚠ der Vorlagentext geht als Anweisung raus',
+      anfr3.length > 0 && anfr3[0].body.anweisung === txtSich);
+// Und nach eigener Bearbeitung genau der BEARBEITETE Text - nicht die Vorlage.
+gesendet10.length = 0;
+feld3.value = 'Nur Kennwoerter, sonst nichts.';
+feld3.dispatchEvent(new window.Event('input'));
+await M.cleanupMitAnweisung();
+const anfr4 = gesendet10.filter(g => /\/analyse$/.test(g.url));
+check('⚠ ausgefuehrt wird immer der Feldinhalt, nicht die gewaehlte Vorlage',
+      anfr4.length > 0 && anfr4[0].body.anweisung === 'Nur Kennwoerter, sonst nichts.');
+window.confirm = () => true; global.confirm = () => true;
+
+// ⚠ REGEL ueber die ECHTE Liste, keine Testliste: jede Vorlage braucht beide
+// Schluessel in BEIDEN Sprachen. Eine fuenfte faellt damit von selbst auf.
+const I10d = fs.readFileSync(path.join(REPO, 'frontend/js/i18n.js'), 'utf8');
+VORL.forEach(k => {
+    ['anw_v_' + k, 'anw_vt_' + k].forEach(s => {
+        const key = 'knowledge.cleanup.' + s;
+        check(`"${s}" ist uebersetzt und steht in DE UND EN`,
+              window.t(key) !== key
+              && (I10d.match(new RegExp("'knowledge\\.cleanup\\." + s + "'", 'g')) || []).length === 2);
+    });
+    const t = window.t('knowledge.cleanup.anw_vt_' + k);
+    // Ein Auftrag von drei Woertern taugt nicht, und ueber MAX_ANWEISUNG (2000
+    // Zeichen im Backend) wuerde er mit 400 abgewiesen - dann ist die Vorlage
+    // ein Knopf, der nur eine Fehlermeldung erzeugt.
+    check(`der Auftragstext "${k}" ist brauchbar lang und unter dem Deckel`,
+          t.length > 80 && t.length < 2000);
+});
+['anw_vorl_label', 'anw_vorl_leer', 'anw_vorl_title', 'anw_vorl_ersetzen'].forEach(k => {
+    const key = 'knowledge.cleanup.' + k;
+    check(`Text "${k}" steht in DE UND EN`,
+          window.t(key) !== key
+          && (I10d.match(new RegExp("'knowledge\\.cleanup\\." + k + "'", 'g')) || []).length === 2);
+});
+const CSS10d = fs.readFileSync(path.join(REPO, 'frontend/css/style.css'), 'utf8')
+                 .replace(/\/\*[\s\S]*?\*\//g, '');
+check('Positivkontrolle: der Kommentar-Filter hat gearbeitet',
+      CSS10d.includes('.kb-cl-anw-vorl') && !CSS10d.includes('Vorlagen-Pulldown ueber dem Feld'));
+const vBlock = (CSS10d.match(/\.kb-cl-anw-vorl\s*\{[^}]*\}/) || [''])[0];
+check('das Pulldown hat eine eigene Regel', vBlock.length > 10);
+check('⚠ min-width:0 - sonst sprengt der laengste Eintrag die Zeile',
+      /min-width\s*:\s*0/.test(vBlock));
+const zBlock = (CSS10d.match(/\.kb-cl-anw-vorl-zeile\s*\{[^}]*\}/) || [''])[0];
+check('die Zeile bricht um, statt das Menue zu quetschen',
+      /flex-wrap\s*:\s*wrap/.test(zBlock));
 
 clearTimeout(wachhund);
 console.log(`\n\x1b[1mErgebnis: ${OK} OK, ${FAIL} FAIL\x1b[0m`);

@@ -178,19 +178,53 @@ check("Frage wird auf MAX_FRAGE gekuerzt",
 
 print("\n=== 2. Bereiche: Vorgabe leer, Whitelist, Laufzeit-Pruefung ===")
 
+# ⚠ NAMENS-GUARD, UND ER MUSS VOR DIE ERSTE VERWENDUNG. Gegen einen aelteren
+# Stand gibt es die Namen von 1.0.8 nicht – ein nackter AttributeError beendet
+# den Lauf dann OHNE Bilanzzeile, und "konnte nicht laufen" waere von
+# "bestanden" nicht zu unterscheiden. Die Gegenprobe "KOMPLETTER ALTSTAND" hat
+# das gezeigt; ein Guard erst in Abschnitt 32 kam 200 Zeilen zu spaet.
+_fehlt = [n for n in ("BILD_WERKZEUG", "bild_werkzeug_da", "bild_aus_lauf",
+                      "ausschnitt_ablegen") if not hasattr(am, n)]
+if _fehlt:
+    check("ai_mouse traegt die Namen von 1.0.8 (fehlt: %s)" % ", ".join(_fehlt), False)
+    print("\n%d OK, %d FAIL" % (ok, fail))
+    sys.exit(1)
+
 _cfg = {}
 am.skill_config = lambda: _cfg  # noqa: E731
 
 _cfg.clear()
 check("VORGABE: ohne Konfiguration gibt es KEINE Bereiche",
       am.freigegebene_bereiche() == [])
-check("ohne Bereiche ist die Werkzeugmenge LEER (nicht None)",
-      am.werkzeuge_fuer([]) == set())
+# ⚠ DIE ZUSAGE HAT SICH AM 2026-09-15 GEAENDERT und steht hier deshalb neu:
+# bis dahin war die Menge ohne Bereiche LEER. Seit dem Bildwerkzeug kommt
+# `BILD_WERKZEUG` ohne Freigabe dazu (Vorgabe des Betreibers). Was NICHT
+# verhandelbar ist und weiter geprueft wird: es ist IMMER eine Menge, nie
+# `None` – `None` hiesse in `agent._role_tools` "keine Beschraenkung".
+check("ohne Bereiche ist die Werkzeugmenge nie None, sondern eine MENGE",
+      isinstance(am.werkzeuge_fuer([]), set))
+check("ohne Bereiche enthaelt sie GENAU das Bildwerkzeug",
+      am.werkzeuge_fuer([]) == {am.BILD_WERKZEUG})
+# Fuer eine ANZEIGE ("was hat der Administrator freigeschaltet") ist das
+# Bildwerkzeug keine Freigabe – dort bleibt die Menge leer.
+check("mit_bild=False liefert weiterhin die reine Freigabe-Menge",
+      am.werkzeuge_fuer([], mit_bild=False) == set())
 
 _cfg["bereiche"] = "wissen"
 check("freigeschalteter Bereich wird erkannt",
       am.freigegebene_bereiche() == ["wissen"])
-check("Werkzeuge kommen aus BEREICHE", am.werkzeuge_fuer(["wissen"]) == {"knowledge_search"})
+check("Werkzeuge kommen aus BEREICHE",
+      am.werkzeuge_fuer(["wissen"], mit_bild=False) == {"knowledge_search"})
+check("…und das Bildwerkzeug kommt dazu, ohne einen Bereich zu brauchen",
+      am.werkzeuge_fuer(["wissen"]) == {"knowledge_search", am.BILD_WERKZEUG})
+# FAIL-CLOSED: laesst sich das Werkzeug nicht laden, wird es NICHT angeboten –
+# sonst endet der Lauf in "Tool nicht gefunden" und hat dafuer den teureren
+# Agentenweg genommen.
+_echt_bwd = am.bild_werkzeug_da
+am.bild_werkzeug_da = lambda: False
+check("nicht ladbares Bildwerkzeug wird NICHT angeboten",
+      am.werkzeuge_fuer([]) == set())
+am.bild_werkzeug_da = _echt_bwd
 
 _cfg["bereiche"] = "wissen,fach"
 check("Reihenfolge ist stabil nach BEREICHE, nicht nach Eingabe",
@@ -203,7 +237,7 @@ _cfg["bereiche"] = "wissen,erfunden"
 check("unbekannter Bereich wird verworfen, nicht geraten",
       am.freigegebene_bereiche() == ["wissen"])
 check("werkzeuge_fuer ignoriert unbekannte Bereiche",
-      am.werkzeuge_fuer(["erfunden"]) == set())
+      am.werkzeuge_fuer(["erfunden"], mit_bild=False) == set())
 
 # NUR LESENDE WERKZEUGE – die tragende Zusage des Moduls.
 alle = am.werkzeuge_fuer(list(am.BEREICHE))
@@ -236,10 +270,33 @@ sys.modules["backend.llm"] = _llm_stub
 async def _agent_stub(sysp, auftrag, bild_parts, werkzeuge, user):
     _spur["agent"] = {"sysp": sysp, "auftrag": auftrag,
                       "bilder": bild_parts, "werkzeuge": werkzeuge, "user": user}
-    return (am.ergebnis_marke(sysp.split("[[ERGEBNIS ")[1].split("]]")[0])
-            + " ANTWORT-AGENT" if "[[ERGEBNIS " in sysp else "ANTWORT-AGENT"), "modell-a"
+    # DREI Rueckgabewerte seit 1.0.8: der dritte ist die Liste der im Lauf
+    # ERZEUGTEN Bilder (`agent.last_task_images`).
+    # ⚠ NICHT ueber `_spur` stellen – `lauf()` leert die Spur vor jedem Aufruf,
+    # der Wert waere also beim Lauf schon wieder weg (im ersten Anlauf genau so
+    # passiert: der Testfall war gruen-aus-dem-falschen-Grund nicht einmal,
+    # sondern schlicht rot).
+    return ((am.ergebnis_marke(sysp.split("[[ERGEBNIS ")[1].split("]]")[0])
+             + " ANTWORT-AGENT" if "[[ERGEBNIS " in sysp else "ANTWORT-AGENT"),
+            "modell-a", list(_erzeugte_bilder))
+
+
+# Was der Lauf an Bildern erzeugt hat. Ueberlebt `_spur.clear()`.
+_erzeugte_bilder: list = []
 
 am._agent_lauf = _agent_stub
+
+# ⚠ DIE ARBEITSKOPIE WIRD GESTELLT. Die echte Funktion schreibt nach
+# `lauf_tmp.anhang_ziel()` – ein Testlauf darf dort keine Dateien hinterlassen.
+# Sie wird in Abschnitt 3b getrennt und in einem Sandkasten AUSGEFUEHRT.
+_echt_ablegen = am.ausschnitt_ablegen
+
+
+def _ablegen_stub(daten, mime, user):
+    _spur["ablage"] = {"bytes": len(daten), "mime": mime, "user": user}
+    return _spur.get("pfad", "/tmp/jarvis-anhaenge/xx/anhang_abc_ausschnitt.png")
+
+am.ausschnitt_ablegen = _ablegen_stub
 
 
 def lauf(**kw):
@@ -251,16 +308,26 @@ def lauf(**kw):
         user=kw.get("user", "tester"), lang=kw.get("lang", "de")))
 
 
+# ── Lage A: KEIN Bildwerkzeug, keine Bereiche → der direkte Weg ────────────
+# ⚠ DIESE LAGE MUSS GESTELLT WERDEN, seit das Bildwerkzeug ohne Freigabe
+# dazukommt. Sie ist kein Kunstgriff: genau so laeuft es auf einem Server, auf
+# dem `bild_text_ersetzen` nicht ladbar ist – und der `tools=[]`-Zweig ist
+# deshalb KEIN toter Code.
+am.bild_werkzeug_da = lambda: False
 _cfg.clear()
 r = lauf()
-check("REGELFALL: ohne Bereiche laeuft der direkte Weg",
+check("OHNE Bildwerkzeug und ohne Bereiche laeuft der direkte Weg",
       isinstance(r, dict) and "direkt" in _spur and "agent" not in _spur)
-check("REGELFALL: tools ist eine LEERE Liste",
+check("…tools ist dann eine LEERE Liste",
       _spur.get("direkt", {}).get("tools") == [])
+check("…und es wird gar keine Arbeitskopie angelegt",
+      "ablage" not in _spur)
 check("REGELFALL: die Antwort kommt beim Aufrufer an",
       isinstance(r, dict) and r.get("text") == "ANTWORT-DIREKT")
 check("REGELFALL: bereiche im Ergebnis ist leer",
       isinstance(r, dict) and r.get("bereiche") == [])
+check("REGELFALL: das Feld bild ist leer, wenn keines erzeugt wurde",
+      isinstance(r, dict) and r.get("bild") == "")
 
 # Das Bild MUSS im Aufruf stecken – sonst antwortet das Modell auf nichts.
 _teile = _spur.get("direkt", {}).get("contents", [{}])[0]
@@ -275,11 +342,53 @@ check("REGELFALL: das Bild steht in der Part-Liste vor dem Text",
 check("REGELFALL: die Frage des Benutzers steht im Auftragstext",
       any("Was ist das?" in (getattr(p, "text", "") or "") for p in _parts))
 
+# ── Lage B: Bildwerkzeug da → Agentenweg, OHNE dass etwas freigegeben ist ──
+am.bild_werkzeug_da = _echt_bwd
+_cfg.clear()
+r = lauf()
+check("MIT Bildwerkzeug laeuft der Agentenweg auch OHNE Bereich",
+      "agent" in _spur and "direkt" not in _spur)
+check("…und die Whitelist ist GENAU das Bildwerkzeug",
+      _spur.get("agent", {}).get("werkzeuge") == {am.BILD_WERKZEUG})
+check("…die Arbeitskopie wird angelegt, mit den echten Bildbytes",
+      _spur.get("ablage", {}).get("bytes") == len(PNG))
+check("…der Prompt nennt den Pfad der Arbeitskopie",
+      "anhang_abc_ausschnitt.png" in _spur.get("agent", {}).get("sysp", ""))
+check("…und das Werkzeug beim Namen",
+      am.BILD_WERKZEUG in _spur.get("agent", {}).get("sysp", ""))
+check("…die Ergebnis-Marke ist dabei (sonst kommt der Zwischenstand mit)",
+      "[[ERGEBNIS " in _spur.get("agent", {}).get("sysp", ""))
+check("…bereiche im Ergebnis bleibt LEER – das Bildwerkzeug ist keine Freigabe",
+      isinstance(r, dict) and r.get("bereiche") == [])
+
+# ⚠ OHNE ARBEITSKOPIE FLIEGT DAS WERKZEUG RAUS. Es verlangt einen Pfad; es
+# ohne anzubieten kostet einen Schritt und endet in "Datei existiert nicht".
+_spur_pfad = _spur.get("pfad")
+_cfg.clear()
+r = sicher(lambda: None)  # Platzhalter, damit die Spur sauber startet
+
+
+def lauf_ohne_ablage(**kw):
+    import asyncio
+    am._reset_fuer_tests()
+    _spur.clear()
+    _spur["pfad"] = ""          # Ablage scheitert
+    return sicher(asyncio.run, am.analysieren(
+        bild_roh=URI, frage_roh="Was ist das?", user="tester", lang="de"))
+
+
+r = lauf_ohne_ablage()
+check("Ablage gescheitert: das Bildwerkzeug wird NICHT angeboten",
+      "direkt" in _spur and "agent" not in _spur)
+check("…und der Prompt nennt es dann mit keinem Wort",
+      am.BILD_WERKZEUG not in str(_spur.get("direkt", {}).get("system_prompt", "")))
+
 _cfg["bereiche"] = "wissen"
 r = lauf()
 check("MIT Bereich: der Agentenweg laeuft", "agent" in _spur and "direkt" not in _spur)
-check("MIT Bereich: die Werkzeug-Whitelist ist genau der Bereich",
-      _spur.get("agent", {}).get("werkzeuge") == {"knowledge_search"})
+check("MIT Bereich: die Werkzeug-Whitelist ist der Bereich PLUS das Bildwerkzeug",
+      _spur.get("agent", {}).get("werkzeuge")
+      == {"knowledge_search", am.BILD_WERKZEUG})
 check("MIT Bereich: die Whitelist ist eine MENGE, nie None",
       isinstance(_spur.get("agent", {}).get("werkzeuge"), set))
 check("MIT Bereich: das Bild geht als eigener Part an den Agenten",
@@ -288,10 +397,32 @@ check("MIT Bereich: bereiche im Ergebnis benennt, was der Lauf durfte",
       isinstance(r, dict) and r.get("bereiche") == ["wissen"])
 
 # ⚠ DIE FREIGABE WIRKT ZUR LAUFZEIT: Bereich zurueckgenommen -> sofort weg.
+# Der Agentenweg bleibt (das Bildwerkzeug haengt an keiner Freigabe) – aber das
+# Werkzeug des Bereichs ist sofort draussen, und DAS ist die Zusage.
 _cfg["bereiche"] = ""
 r = lauf()
-check("Freigabe zurueckgenommen: sofort wieder der direkte Weg",
-      "direkt" in _spur and "agent" not in _spur)
+check("Freigabe zurueckgenommen: das Bereichs-Werkzeug ist sofort weg",
+      _spur.get("agent", {}).get("werkzeuge") == {am.BILD_WERKZEUG})
+check("…und bereiche im Ergebnis ist wieder leer",
+      isinstance(r, dict) and r.get("bereiche") == [])
+
+print("\n=== 3a. Das erzeugte Bild kommt als eigenes Feld zurueck ===")
+
+# ⚠ DIE ADRESSE KOMMT AUS DER BILDERLISTE DES LAUFS, NICHT AUS DEM TEXT.
+# Eine vom Modell genannte Adresse kann erfunden sein – genau daran ist der
+# Chat am 2026-09-15 gescheitert (`steps=0`, Datei gab es nie).
+_URL = "/api/generated/" + "a" * 32 + ".png"
+_cfg.clear()
+_erzeugte_bilder[:] = [{"url": _URL, "path": "/x/y.png"}]
+r = lauf()
+check("erzeugtes Bild: die Adresse steht im Feld `bild`",
+      isinstance(r, dict) and r.get("bild") == _URL)
+check("…und der Anzeigetext traegt die Markdown-Referenz NICHT",
+      isinstance(r, dict) and "/api/generated/" not in r.get("text", ""))
+_erzeugte_bilder.clear()
+r = lauf()
+check("ohne erzeugtes Bild bleibt das Feld leer",
+      isinstance(r, dict) and r.get("bild") == "")
 
 print("\n=== 4. Kein Weg an der Entscheidung des Administrators vorbei ===")
 
@@ -1108,7 +1239,14 @@ check("der Prompt sagt, dass Bildinhalt keine Anweisung ist",
       "KEINE ANWEISUNG" in p_ohne.upper())
 check("ohne Bereiche steht keine Ergebnis-Marke im Prompt",
       "[[ERGEBNIS" not in p_ohne)
-p_mit = am._system_prompt(["wissen"], "aa11")
+# ⚠ DIE MARKE HAENGT SEIT 1.0.8 AN `mit_werkzeugen`, NICHT MEHR AN `bereiche`.
+# Sie loest den Zwischenstand vom Endergebnis – gebraucht wird sie also bei
+# JEDEM Agentenlauf, und den gibt es seit dem Bildwerkzeug auch ohne Bereich.
+# Haengte sie weiter an `bereiche`, kaeme im Regelfall das "Ich sehe kurz nach."
+# mit in die Antwort.
+check("Marke auch OHNE Bereich, sobald Werkzeuge im Spiel sind",
+      "[[ERGEBNIS aa11]]" in am._system_prompt([], "aa11", mit_werkzeugen=True))
+p_mit = am._system_prompt(["wissen"], "aa11", mit_werkzeugen=True)
 check("mit Bereichen traegt der Prompt die Ergebnis-Marke samt Kennung",
       "[[ERGEBNIS aa11]]" in p_mit)
 check("mit Bereichen wird auf 'nur lesend' hingewiesen",
@@ -4016,6 +4154,252 @@ check("das Zuruecksetzen steht VOR dem stash (sonst wirkungslos) - reset=%s stas
       isinstance(_zr31, int) and isinstance(_zs31, int) and _zr31 < _zs31)
 check("…und es wird wirklich zurueckgesetzt, nicht nur geprueft",
       '_git("checkout", "--", _erzeugt)' in _um31)
+
+print("\n=== 32) Erzeugtes Bild: Arbeitskopie, Bergung, Anzeige (2026-09-15) ===")
+
+# ── (a) bild_aus_lauf: AUSGEFUEHRT ────────────────────────────────────────
+# Eine Quelltext-Pruefung koennte "wird die Referenz entfernt?" gar nicht
+# beantworten – und genau daran haengt, ob im Fenster roher Markdown steht.
+_u32 = "/api/generated/" + "c" * 32 + ".png"
+_t32, _b32 = am.bild_aus_lauf(
+    "Hier ist das übersetzte Bild:\n\n![Uebersetztes Bild](%s)\n\nFertig." % _u32,
+    [{"url": _u32, "path": "/x"}])
+check("AUSGEFUEHRT: die Adresse wird aus der BILDERLISTE geborgen", _b32 == _u32)
+check("…die Markdown-Referenz fliegt aus dem Anzeigetext",
+      "/api/generated/" not in _t32 and "![" not in _t32)
+check("…der uebrige Text bleibt vollstaendig",
+      "Hier ist das übersetzte Bild:" in _t32 and "Fertig." in _t32)
+check("…und es klafft keine Luecke, wo die Referenz stand",
+      "\n\n\n" not in _t32)
+
+# ⚠ DER GEMELDETE FALL VOM 2026-09-15: Bild angekuendigt, keines erzeugt.
+_t32b, _b32b = am.bild_aus_lauf("Hier ist das Bild:\n\n![Bild](%s)" % _u32, [])
+check("erfundene Adresse: es wird NICHTS geborgen", _b32b == "")
+check("…die tote Referenz fliegt trotzdem raus",
+      "/api/generated/" not in _t32b)
+check("…UND die Zusage des Textes wird korrigiert (nicht still gelassen)",
+      "Systemhinweis" in _t32b)
+
+# Gegenrichtung: ohne jedes Bild bleibt der Text Zeichen fuer Zeichen stehen.
+_t32c, _b32c = am.bild_aus_lauf("Das ist ein Balkendiagramm.", [])
+check("ohne Bild im Spiel bleibt der Text unangetastet",
+      _t32c == "Das ist ein Balkendiagramm." and _b32c == "")
+
+# Mehrere Laeufe: das LETZTE Bild ist das Ergebnis.
+_u32d = "/api/generated/" + "d" * 32 + ".png"
+check("bei mehreren erzeugten Bildern gewinnt das letzte",
+      am.bild_aus_lauf("x", [{"url": _u32}, {"url": _u32d}])[1] == _u32d)
+# Eine Adresse, die der Ausliefer-Endpunkt ohnehin mit 400 abweisen wuerde,
+# wird gar nicht erst geborgen – sonst zeigt der Client auf einen Fehler.
+check("unbrauchbare Adresse wird nicht geborgen",
+      am.bild_aus_lauf("x", [{"url": "/api/generated/kurz.png"}])[1] == "")
+
+# ── (b) ausschnitt_ablegen: AUSGEFUEHRT, im Sandkasten ────────────────────
+# ⚠ SANDKASTEN MIT EXIT 2: die echte Funktion schreibt nach
+# `lauf_tmp.anhang_ziel()`. Ein Testlauf, der dort Dateien im Bestand
+# hinterlaesst, ist teurer als der Fehler, den er sucht.
+import tempfile as _tf32
+
+with _tf32.TemporaryDirectory() as _sk32:
+    _sk32p = Path(_sk32)
+
+    _lt32 = _pytypes.ModuleType("backend.lauf_tmp")
+    _lt32.anhang_ziel = lambda benutzer, name: _sk32p / ("anhang_deadbeef_" + name)
+    _alt_lt = sys.modules.get("backend.lauf_tmp")
+    sys.modules["backend.lauf_tmp"] = _lt32
+    try:
+        _pfad32 = _echt_ablegen(PNG, "image/png", "tester")
+    finally:
+        if _alt_lt is None:
+            sys.modules.pop("backend.lauf_tmp", None)
+        else:
+            sys.modules["backend.lauf_tmp"] = _alt_lt
+
+    check("AUSGEFUEHRT: die Arbeitskopie entsteht und der Pfad kommt zurueck",
+          bool(_pfad32) and Path(_pfad32).is_file())
+    check("…im Sandkasten und nirgends sonst",
+          str(_pfad32).startswith(str(_sk32p)))
+    check("…mit den echten Bildbytes",
+          Path(_pfad32).read_bytes() == PNG if _pfad32 else False)
+    check("…und 0644 – ausdruecklich OHNE Ausfuehrungsrecht",
+          (Path(_pfad32).stat().st_mode & 0o777) == 0o644 if _pfad32 else False)
+
+# FAIL-OPEN: scheitert die Ablage, kommt "" – der Lauf laeuft ohne
+# Bearbeitungs-Moeglichkeit weiter. Das ANSEHEN des Bildes darf nie daran
+# haengen, dass die Platte voll ist.
+_lt32f = _pytypes.ModuleType("backend.lauf_tmp")
+
+
+def _wirft32(benutzer, name):
+    raise OSError("Platte voll")
+
+
+_lt32f.anhang_ziel = _wirft32
+_alt_lt2 = sys.modules.get("backend.lauf_tmp")
+sys.modules["backend.lauf_tmp"] = _lt32f
+try:
+    # ⚠ UEBER `sicher`: hebt jemand das fail-open auf, WIRFT die Funktion – und
+    # der Lauf braeche hier ohne Bilanzzeile ab statt fehlzuschlagen (in der
+    # Gegenprobe genau so passiert).
+    _leer32 = sicher(_echt_ablegen, PNG, "image/png", "tester")
+finally:
+    if _alt_lt2 is None:
+        sys.modules.pop("backend.lauf_tmp", None)
+    else:
+        sys.modules["backend.lauf_tmp"] = _alt_lt2
+check("FAIL-OPEN: gescheiterte Ablage liefert \"\" statt zu werfen", _leer32 == "")
+
+# ── (c) REGEL: der Ausschnitt geht NICHT dauerhaft auf die Platte ─────────
+# Die Zusage des Modulkopfs. `main._anhang_ablegen` legt ZUSAETZLICH in
+# `data/documents` ab – wer sie hier benutzt, bricht sie still.
+_src32 = (ROOT / "backend" / "ai_mouse.py").read_text(encoding="utf-8")
+_baum32 = ast.parse(_src32)
+_fn_abl = next((n for n in ast.walk(_baum32)
+                if isinstance(n, ast.FunctionDef) and n.name == "ausschnitt_ablegen"), None)
+check("Positivkontrolle: ausschnitt_ablegen ist geschnitten", _fn_abl is not None)
+
+
+def _ohne_worte(fn, quelle):
+    """Der CODE einer Funktion – ohne Docstring, ohne Kommentare.
+
+    ⚠ OHNE DAS LIEST DER WAECHTER SEINE EIGENE BEGRUENDUNG. Der Docstring von
+    `ausschnitt_ablegen` erklaert woertlich, dass die Datei NICHT nach
+    `data/documents` geht – und nennt den Pfad dabei. Die Pruefung "kommt
+    `data/documents` vor" schlug deshalb an, obwohl der Code ihn nie anfasst.
+    Siebzehnter Fall dieser Klasse im Projekt; `tokenize` allein genuegt
+    nicht, es kennt nur `#`-Kommentare.
+    """
+    zeilen = quelle.splitlines()
+    start = fn.body[0].end_lineno if (
+        fn.body and isinstance(fn.body[0], ast.Expr)
+        and isinstance(getattr(fn.body[0], "value", None), ast.Constant)
+        and isinstance(fn.body[0].value.value, str)) else fn.lineno
+    roh = "\n".join(zeilen[start:fn.end_lineno])
+    return "\n".join(z for z in roh.splitlines() if not z.strip().startswith("#"))
+
+
+_abl_src = _ohne_worte(_fn_abl, _src32) if _fn_abl else ""
+# Positivkontrolle der Schnitt-Methode selbst: der CODE ist noch da, die
+# ERKLAERUNG nicht. Ohne sie waere jede Pruefung darunter trivial wahr.
+check("Positivkontrolle: der Schnitt behaelt den Code",
+      "anhang_ziel" in _abl_src and "chmod" in _abl_src)
+check("Positivkontrolle: …und entfernt die Begruendung",
+      "AUSDRUECKLICH NICHT" not in _abl_src)
+for _verboten in ("data/documents", "_anhang_ablegen", "register_upload"):
+    check("der Ausschnitt geht NICHT ueber %s" % _verboten,
+          _verboten not in _abl_src)
+check("…sondern ausschliesslich ueber lauf_tmp.anhang_ziel",
+      "anhang_ziel" in _abl_src)
+
+# ⚠ REGEL: die Bilder kommen aus `last_task_images`. Abschnitt 3 stellt
+# `_agent_lauf` durch einen Stub – die ECHTE Funktion laeuft dort also nie,
+# und ohne diese Regel bliebe die Zusage ungeprueft (in der Gegenprobe war
+# genau sie stumm).
+# `_agent_lauf` ist `async` – also AsyncFunctionDef. Ein Filter auf
+# FunctionDef allein findet sie nicht und meldet einen Fehler, den es nicht
+# gibt (im ersten Lauf genau so passiert).
+_fn_ag32 = next((n for n in ast.walk(_baum32)
+                 if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                 and n.name == "_agent_lauf"), None)
+check("Positivkontrolle: _agent_lauf ist geschnitten", _fn_ag32 is not None)
+_ag32 = _ohne_worte(_fn_ag32, _src32) if _fn_ag32 else ""
+check("_agent_lauf liest die erzeugten Bilder aus last_task_images",
+      "last_task_images" in _ag32)
+check("…und gibt sie als DRITTEN Wert zurueck",
+      bool(_fn_ag32) and any(isinstance(n, ast.Return) and isinstance(n.value, ast.Tuple)
+                             and len(n.value.elts) == 3
+                             for n in ast.walk(_fn_ag32)))
+
+# ── (d) C#: die Adressprüfung ist eine ERLAUBNISLISTE ────────────────────
+_cs_jc32 = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Vision" / "JarvisClient.cs").read_text(
+    encoding="utf-8")
+_pruef32 = cs_block(_cs_jc32, "private static string BildAdressePruefen")
+check("Positivkontrolle: BildAdressePruefen ist geschnitten", len(_pruef32) > 100)
+check("…sie verlangt den Praefix /api/generated/", "/api/generated/" in _pruef32)
+check("…genau 32 Hex-Zeichen", "32" in _pruef32 and "'f'" in _pruef32)
+check("…und eine Endung aus einer Liste, nicht irgendeine",
+      '"png"' in _pruef32 and "or" in _pruef32)
+check("…was nicht passt, kommt als LEER zurueck (nicht als Rohwert)",
+      _pruef32.count("string.Empty") >= 3)
+
+_holen32 = cs_block(_cs_jc32, "public async Task<byte[]?> BildHolenAsync")
+check("BildHolenAsync prueft die Adresse, bevor es abruft",
+      _holen32.find("BildAdressePruefen") < _holen32.find("GetByteArrayAsync")
+      and "BildAdressePruefen" in _holen32)
+# ⚠ NICHT AUF DAS WORT `catch` PRUEFEN. Ein mit `when (false)` entschaerfter
+# Block enthaelt es weiterhin und faengt trotzdem nichts – die Gegenprobe war
+# genau deshalb stumm (steht woertlich im Register).
+check("…und wirft NICHT: ein Fehlschlag kostet nur das Bild, nicht den Text",
+      "return null" in _holen32
+      and re.search(r"catch\s*\([^)]*\)\s*when\s*\(\s*false\s*\)", _holen32) is None
+      and re.search(r"catch\s*\([^)]*\)(?!\s*when\s*\(\s*false)", _holen32) is not None)
+
+# Die Antwort selbst: die Adresse geht durch die Pruefung, und ein Lauf, der
+# NUR ein Bild geliefert hat, ist erfolgreich.
+_ana32 = cs_block(_cs_jc32, "public async Task<MausAntwort> AnalysierenAsync")
+check("Positivkontrolle: AnalysierenAsync ist geschnitten", len(_ana32) > 200)
+check("die gelieferte Adresse laeuft durch die Erlaubnisliste",
+      "new MausAntwort(text, BildAdressePruefen(bild))" in _ana32)
+check("ein Lauf mit NUR einem Bild gilt nicht als Fehlschlag",
+      "text.Length == 0 && bild.Length == 0" in _ana32)
+
+# ── (e) Das Fenster: ohne Bild verhaelt es sich wie vorher ───────────────
+_cs_rw32 = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Ui" / "ResultWindow.cs").read_text(
+    encoding="utf-8")
+check("der Bildbereich ist per VORGABE eingeklappt",
+      "Panel2Collapsed = true" in _cs_rw32)
+_zeig32 = cs_block(_cs_rw32, "public void BildAnzeigen")
+check("Positivkontrolle: BildAnzeigen ist geschnitten", len(_zeig32) > 100)
+check("…aufgeklappt wird NUR dort", "Panel2Collapsed = false" in _zeig32)
+# ⚠ NICHT „steht irgendwo ein return davor" – das ist immer wahr (die
+# IsDisposed-Pruefung ganz oben). Gemessen wird der FEHLERZWEIG: faengt er die
+# Ausnahme und steigt aus, statt ein Ersatzbild zu bauen? Die Gegenprobe war
+# mit der groberen Fassung stumm.
+_catch32 = _zeig32.split("catch (Exception)", 1)[-1].split("}", 1)[0] \
+    if "catch (Exception)" in _zeig32 else ""
+check("…unbrauchbare Daten steigen im Fehlerzweig AUS (kein Ersatzbild)",
+      "return;" in _catch32 and "new Bitmap" not in _catch32)
+check("…und der Teiler-Abstand wird geklemmt (sonst wirft er bei kleinem Fenster)",
+      "Math.Min" in _zeig32 and "Panel1MinSize" in _zeig32)
+_zu32 = cs_block(_cs_rw32, "protected override void OnFormClosed")
+check("das erzeugte Bild wird beim Schliessen freigegeben",
+      "_ergebnisBild?.Dispose()" in _zu32)
+check("…und die Anzeige VORHER geloest (sonst zeichnet sie ein totes Bitmap)",
+      _zu32.find("_bildAnzeige.Image = null") < _zu32.find("_ergebnisBild?.Dispose()"))
+_kopf32 = cs_block(_cs_rw32, "private void KnopfBeschriften")
+check("ein Knopf, der zwei Bilder kopieren kann, sagt WELCHES",
+      "ErgebnisBildKopierenKnopf" in _kopf32 and "BildKopierenKnopf" in _kopf32)
+_kop32 = cs_block(_cs_rw32, "private void BildKopieren")
+check("…und kopiert dann auch das Ergebnis, nicht den Ausschnitt",
+      "_ergebnisBild ?? _bild" in _kop32)
+
+# ── (f) Der Ablauf im Tray: Text zuerst, Bild danach ─────────────────────
+_cs_tr32 = (ROOT / "ai-mouse" / "src" / "AiMouse" / "TrayApplicationContext.cs").read_text(
+    encoding="utf-8")
+_ausw32 = cs_block(_cs_tr32, "private async Task ErgebnisBildZeigenAsync")
+check("Positivkontrolle: ErgebnisBildZeigenAsync ist geschnitten", len(_ausw32) > 100)
+check("leere Adresse (der REGELFALL) bewirkt gar nichts",
+      "IsNullOrEmpty" in _ausw32)
+check("ein Fehlschlag beim Holen wird GEMELDET, nicht verschwiegen",
+      "BildNichtGeholt" in _ausw32)
+check("…und waehrenddessen steht ein Hinweis im Kopf",
+      "BildWirdGeholt" in _ausw32)
+# Die REIHENFOLGE ist die Zusage: der fertige Text wartet nicht auf das Bild.
+_i_ans = _cs_tr32.find("window.ShowAnswer(answer,")
+_i_bild = _cs_tr32.find("ErgebnisBildZeigenAsync(window, ergebnis.BildUrl")
+check("der Text erscheint VOR dem Bildabruf (er ist fertig)",
+      0 < _i_ans < _i_bild)
+check("auch der Wiederholungs-Zweig zeigt das Bild",
+      _cs_tr32.count("ErgebnisBildZeigenAsync(") >= 3)
+
+# Beide Sprachen – ein Text, den es nur auf Deutsch gibt, ist ein halber.
+_cs_tx32 = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Localization" / "Texte.cs").read_text(
+    encoding="utf-8")
+for _neu32 in ("ErgebnisBildKopierenKnopf", "BildWirdGeholt", "BildNichtGeholt"):
+    _z32 = cs_block(_cs_tx32, "public static string %s" % _neu32) or ""
+    _roh32 = _cs_tx32.split("public static string %s" % _neu32)[1].split(";")[0] \
+        if _neu32 in _cs_tx32 else ""
+    check("%s gibt es in DE und EN" % _neu32, _roh32.count('"') >= 4)
 
 print("\n%d OK, %d FAIL" % (ok, fail))
 sys.exit(1 if fail else 0)

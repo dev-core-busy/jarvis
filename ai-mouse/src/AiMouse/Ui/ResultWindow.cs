@@ -15,6 +15,23 @@ internal sealed class ResultWindow : Form
     private readonly Button _bildButton;
     private readonly CancellationTokenSource _cts;
 
+    /// <summary>Text oben, erzeugtes Bild unten. Panel2 ist per Vorgabe
+    /// EINGEKLAPPT – ohne Bild verhaelt sich das Fenster damit exakt wie
+    /// vorher, der Text fuellt alles.
+    ///
+    /// ⚠ DER TEILER IST VON ANFANG AN DA UND WIRD NUR AUFGEKLAPPT. Das Layout
+    /// zur Laufzeit umzubauen (Dock umstellen, Steuerelemente umhaengen) waere
+    /// der fehleranfaellige Weg fuer einen Fall, der im Regelbetrieb gar nicht
+    /// eintritt. Ein Schalter ist kein Umbau.
+    /// </summary>
+    private readonly SplitContainer _teiler;
+    private readonly PictureBox _bildAnzeige;
+
+    /// <summary>Das vom Server ERZEUGTE Bild (uebersetzter Ausschnitt), nicht
+    /// der Original-Ausschnitt. Beide koennen gleichzeitig vorliegen – deshalb
+    /// zwei Felder und ein Knopf, der sagt, welches er kopiert.</summary>
+    private Bitmap? _ergebnisBild;
+
     /// <summary>Der untersuchte Ausschnitt – zum Kopieren (Vorgabe 2026-09-10).
     ///
     /// ⚠ DAS FENSTER BESITZT IHN UND GIBT IHN FREI. Vorher lag er in einem
@@ -94,8 +111,31 @@ internal sealed class ResultWindow : Form
         // `LinkZiel` (Begruendung dort).
         _output.LinkClicked += (_, e) => LinkOeffnen(e.LinkText);
 
+        _bildAnzeige = new PictureBox
+        {
+            Dock = DockStyle.Fill,
+            // `Zoom` und nicht `StretchImage`: das Ergebnis ist ein
+            // uebersetzter Bildschirmausschnitt – ein verzerrtes Abbild waere
+            // unlesbar und saehe nach einem Fehler aus.
+            SizeMode = PictureBoxSizeMode.Zoom,
+            BackColor = SystemColors.ControlDark,
+        };
+
+        _teiler = new SplitContainer
+        {
+            Dock = DockStyle.Fill,
+            Orientation = Orientation.Horizontal,
+            // OHNE BILD IST ES UNSICHTBAR – der Text fuellt das Fenster wie
+            // bisher. Aufgeklappt wird nur in `BildAnzeigen`.
+            Panel2Collapsed = true,
+            Panel1MinSize = 60,
+            Panel2MinSize = 80,
+        };
+        _teiler.Panel1.Controls.Add(_output);
+        _teiler.Panel2.Controls.Add(_bildAnzeige);
+
         var body = new Panel { Dock = DockStyle.Fill, Padding = new Padding(10, 4, 10, 4) };
-        body.Controls.Add(_output);
+        body.Controls.Add(_teiler);
 
         // ⚠ AutoSize STATT FESTER BREITE: „Text kopieren" und „Copy image"
         //    sind laenger als die frueheren 90 px, und bei Bildschirm-Zoom
@@ -186,13 +226,117 @@ internal sealed class ResultWindow : Form
         _bild?.Dispose();
         _bild = bild;
         _bildButton.Enabled = true;
+        KnopfBeschriften();
+    }
+
+    /// <summary>Setzt eine kurze Meldung in die Kopfzeile.
+    ///
+    /// ⚠ DER RUHETEXT WIRD NICHT GEMERKT, SONDERN ABGELEITET (siehe
+    /// <see cref="KopfRuhe"/>). Ein vor einem asynchronen Schritt gemerkter
+    /// Text wird danach zurueckgeschrieben – und ueberschreibt dabei, was
+    /// inzwischen dort steht. Genau so behauptete am 2026-09-09 ein Auge
+    /// „Kennwort anzeigen", waehrend es das Kennwort zeigte.
+    /// </summary>
+    public void KopfHinweis(string text, bool fehler)
+    {
+        if (IsDisposed)
+        {
+            return;
+        }
+
+        _header.Text = text;
+        _header.ForeColor = fehler ? Color.Firebrick : SystemColors.GrayText;
+    }
+
+    /// <summary>Stellt die Ruhe-Beschriftung der Kopfzeile her.</summary>
+    private void KopfRuhe()
+    {
+        _header.Text = Texte.Zeichen(_output.TextLength);
+        _header.ForeColor = SystemColors.GrayText;
+    }
+
+    /// <summary>Zeigt ein vom Server ERZEUGTES Bild unter der Antwort.
+    ///
+    /// ⚠ DER AUFRUFER UEBERGIBT DIE ROHBYTES, NICHT EIN BITMAP. Grund ist die
+    /// Lebensdauer: ein <c>Bitmap</c> aus einem <c>MemoryStream</c> braucht
+    /// den Stream, solange es lebt (dokumentiertes GDI+-Verhalten) – wer ihn
+    /// beim Aufrufer in ein <c>using</c> setzt, bekommt beim ersten Zeichnen
+    /// eine Ausnahme. Hier bleibt beides zusammen, und das Fenster gibt es im
+    /// <see cref="OnFormClosed"/> frei.
+    ///
+    /// **FAIL-SAFE:** unbrauchbare Daten klappen den Bereich gar nicht erst
+    /// auf. Ein leerer grauer Kasten waere von einem kaputten Fenster nicht zu
+    /// unterscheiden – dann lieber nur der Text, den es ja gibt.
+    /// </summary>
+    public void BildAnzeigen(byte[]? rohdaten)
+    {
+        if (IsDisposed || rohdaten is null || rohdaten.Length == 0)
+        {
+            return;
+        }
+
+        Bitmap neu;
+        try
+        {
+            // Der Stream bleibt absichtlich OFFEN: siehe oben. Er haengt am
+            // Bitmap und wird mit ihm eingesammelt.
+            var strom = new MemoryStream(rohdaten, writable: false);
+            neu = new Bitmap(strom);
+        }
+        catch (Exception)
+        {
+            // Keine Bilddaten (Fehlerseite, abgeschnittener Download). Der
+            // Text steht bereits – mehr ist hier nicht zu retten.
+            return;
+        }
+
+        _ergebnisBild?.Dispose();
+        _ergebnisBild = neu;
+        _bildAnzeige.Image = neu;
+        _bildButton.Enabled = true;
+        KnopfBeschriften();
+
+        // Platz schaffen, BEVOR aufgeklappt wird: in einem 420 px hohen
+        // Fenster blieben sonst fuer Text und Bild je gut 150 px – beides
+        // unbrauchbar. Verkleinert wird nie, und ein vom Benutzer bereits
+        // vergroessertes Fenster bleibt, wie es ist.
+        if (WindowState == FormWindowState.Normal)
+        {
+            Size = new Size(Math.Max(Width, 640), Math.Max(Height, 620));
+        }
+
+        _teiler.Panel2Collapsed = false;
+        // Etwa ein Drittel fuer den Text, der Rest fuer das Bild: das Bild ist
+        // in diesem Fall die Antwort, der Text die Erlaeuterung dazu.
+        int wunsch = Math.Max(_teiler.Panel1MinSize, _teiler.Height / 3);
+        int hoechstens = Math.Max(_teiler.Panel1MinSize,
+                                  _teiler.Height - _teiler.Panel2MinSize - _teiler.SplitterWidth);
+        // Ohne diese Klemmung wirft `SplitterDistance` bei kleinem Fenster eine
+        // Ausnahme (Wert ausserhalb des Gueltigen) – und die risse den ganzen
+        // Anzeige-Weg mit, obwohl Text und Bild fertig vorliegen.
+        _teiler.SplitterDistance = Math.Min(wunsch, hoechstens);
+
+        // Der Kopf trug bis hier „Bild wird geladen…" – das ist vorbei.
+        KopfRuhe();
+    }
+
+    /// <summary>Beschriftet den Bild-Knopf nach dem, was er wirklich kopiert.
+    ///
+    /// ⚠ EIN KNOPF, DER ZWEI DINGE TUN KANN, MUSS SAGEN WELCHES. Liegt ein
+    /// erzeugtes Bild vor, ist das gemeint – danach hat der Benutzer gefragt;
+    /// sonst der Ausschnitt. Gleiche Beschriftung fuer beides waere ein
+    /// Bedienelement, dessen Wirkung man nur durch Ausprobieren erfaehrt.
+    /// </summary>
+    private void KnopfBeschriften()
+    {
+        _bildButton.Text = _ergebnisBild is not null
+            ? Texte.ErgebnisBildKopierenKnopf : Texte.BildKopierenKnopf;
     }
 
     public void ShowAnswer(string answer, bool copyToClipboard)
     {
         TextSetzen(answer, markdown: true);
-        _header.Text = Texte.Zeichen(_output.TextLength);
-        _header.ForeColor = SystemColors.GrayText;
+        KopfRuhe();
         _copyButton.Enabled = true;
 
         if (copyToClipboard)
@@ -340,12 +484,15 @@ internal sealed class ResultWindow : Form
     /// </summary>
     private void BildKopieren()
     {
-        if (_bild is null)
+        // DAS ERGEBNIS HAT VORRANG – es ist das, wonach der Benutzer gefragt
+        // hat. Der Knopf sagt es (siehe `KnopfBeschriften`).
+        Bitmap? quelle = _ergebnisBild ?? _bild;
+        if (quelle is null)
         {
             return;
         }
 
-        string? fehler = Zwischenablage.BildSetzen(_bild);
+        string? fehler = Zwischenablage.BildSetzen(quelle);
 
         // ⚠ ERFOLG UND FEHLSCHLAG SIND BEIDE EINE AUSKUNFT: in der
         //    Zwischenablage sieht man nichts. Ohne Meldung fuegt der Benutzer
@@ -378,6 +525,13 @@ internal sealed class ResultWindow : Form
         //    jedem Rahmen ein paar Megabyte fest, bis der Prozess endet.
         _bild?.Dispose();
         _bild = null;
+
+        // ⚠ ERST DIE ANZEIGE LOESEN, DANN FREIGEBEN. Eine PictureBox zeichnet
+        //    ihr Bild beim Aufraeumen unter Umstaenden noch einmal; ein
+        //    freigegebenes Bitmap waere dort eine Ausnahme im Schliessen-Pfad.
+        _bildAnzeige.Image = null;
+        _ergebnisBild?.Dispose();
+        _ergebnisBild = null;
 
         base.OnFormClosed(e);
     }

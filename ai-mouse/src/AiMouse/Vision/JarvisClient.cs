@@ -155,16 +155,26 @@ internal sealed class JarvisClient : IDisposable
         throw new VisionException(Fehlertext(wurzel, Texte.KeineAntwort));
     }
 
-    /// <summary>Bildausschnitt und Frage auswerten. Rueckgabe: die Antwort.
+    /// <summary>Bildausschnitt und Frage auswerten.
     ///
     /// <paramref name="bereiche"/> nimmt auf, was der Lauf zusaetzlich
     /// nachschlagen durfte – der Server liefert das mit, und das Fenster sagt
     /// es dem Benutzer. Ohne diese Angabe ist eine Antwort mit nachgeschlagenem
     /// Hintergrund von einer ohne nicht zu unterscheiden.
+    ///
+    /// ⚠ RUECKGABE IST SEIT 1.0.8 EIN <see cref="MausAntwort"/> UND KEIN STRING.
+    /// Grund ist das Feld <c>bild</c>: laesst der Benutzer den Text IM BILD
+    /// ersetzen ("uebersetze das Bild nach Deutsch"), erzeugt der Server ein
+    /// neues Bild und nennt dessen Adresse. Ein zweiter Sammelparameter neben
+    /// <paramref name="bereiche"/> waere die bequemere, aber schlechtere
+    /// Loesung – zwei Rueckgabewege fuer eine Antwort.
+    ///
+    /// Ein ALTER Server kennt das Feld nicht; dann bleibt <c>BildUrl</c> leer
+    /// und alles verhaelt sich wie bisher.
     /// </summary>
-    public async Task<string> AnalysierenAsync(string frage, string bildDataUri,
-                                               List<string> bereiche,
-                                               CancellationToken ct)
+    public async Task<MausAntwort> AnalysierenAsync(string frage, string bildDataUri,
+                                                    List<string> bereiche,
+                                                    CancellationToken ct)
     {
         if (!Angemeldet)
         {
@@ -245,7 +255,17 @@ internal sealed class JarvisClient : IDisposable
             }
             string text = wurzel.TryGetProperty("text", out JsonElement t)
                 ? (t.GetString() ?? string.Empty) : string.Empty;
-            return text.Length > 0 ? text : throw new VisionException(Texte.KeineAntwort);
+            string bild = wurzel.TryGetProperty("bild", out JsonElement bi)
+                ? (bi.GetString() ?? string.Empty) : string.Empty;
+
+            // ⚠ NUR WENN BEIDES FEHLT IST ES EIN FEHLSCHLAG. Ein Lauf, der
+            //    ausschliesslich ein Bild geliefert hat, ist erfolgreich –
+            //    beim Uebersetzen eines Bildes ist das Bild die Antwort.
+            if (text.Length == 0 && bild.Length == 0)
+            {
+                throw new VisionException(Texte.KeineAntwort);
+            }
+            return new MausAntwort(text, BildAdressePruefen(bild));
         }
 
         // 403 vom Freigabe-Gate: eigener Text mit dem Weg zur Abhilfe. Die
@@ -257,6 +277,86 @@ internal sealed class JarvisClient : IDisposable
             throw new VisionException(Texte.KeineFreigabe + "\n\n" + fehler);
         }
         throw new VisionException(fehler);
+    }
+
+    /// <summary>Nimmt eine Bildadresse nur in der Form an, die der Server
+    /// vergibt – sonst leer.
+    ///
+    /// ⚠ EINE ERLAUBNISLISTE, KEINE SPERRLISTE, und die Form ist dieselbe, die
+    /// <c>main.get_generated_image</c> durchlaesst: <c>/api/generated/</c> +
+    /// 32 Hex + bekannte Endung. Was hier nicht passt, wird gar nicht erst
+    /// abgerufen – ohne diese Schranke wuerde aus einem Serverfehler (oder
+    /// einer manipulierten Antwort) ein Abruf an eine beliebige Adresse.
+    ///
+    /// Sie ersetzt NICHT die Pruefung am Server: die bleibt die harte Grenze.
+    /// Hier geht es darum, dass der Client nur dorthin greift, wohin er soll.
+    /// </summary>
+    private static string BildAdressePruefen(string? roh)
+    {
+        string wert = (roh ?? string.Empty).Trim();
+        const string Praefix = "/api/generated/";
+        if (!wert.StartsWith(Praefix, StringComparison.Ordinal))
+        {
+            return string.Empty;
+        }
+
+        string rest = wert.Substring(Praefix.Length);
+        int punkt = rest.LastIndexOf('.');
+        if (punkt != 32)
+        {
+            return string.Empty;
+        }
+
+        for (int i = 0; i < 32; i++)
+        {
+            char c = rest[i];
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
+            {
+                return string.Empty;
+            }
+        }
+
+        string endung = rest.Substring(punkt + 1).ToLowerInvariant();
+        return endung is "png" or "jpg" or "jpeg" or "gif" or "webp"
+            ? wert : string.Empty;
+    }
+
+    /// <summary>Holt ein erzeugtes Bild. Rueckgabe <c>null</c>, wenn es nicht
+    /// geht.
+    ///
+    /// ⚠ OHNE TOKEN – und das ist kein Versehen: <c>/api/generated/&lt;hash&gt;</c>
+    /// ist eine Capability-URL, der 32-stellige Name IST die Berechtigung. Ein
+    /// Bearer-Header schadet nicht, aber er verspricht eine Pruefung, die es
+    /// dort nicht gibt.
+    ///
+    /// **FAIL-SAFE: ein Fehlschlag wirft nicht.** Das Bild ist eine Zugabe zur
+    /// Antwort; ein Netzhaenger beim Nachladen darf nicht die Textantwort
+    /// kosten, die laengst da ist. Der Aufrufer zeigt dann nur den Text.
+    /// </summary>
+    public async Task<byte[]?> BildHolenAsync(string relativeAdresse, CancellationToken ct)
+    {
+        string adresse = BildAdressePruefen(relativeAdresse);
+        if (adresse.Length == 0)
+        {
+            return null;
+        }
+
+        string basis = EndpointResolver.Basis(_settings.Endpoint);
+        if (basis.Length == 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            byte[] daten = await _http.GetByteArrayAsync(basis + adresse, ct)
+                .ConfigureAwait(false);
+            return daten.Length > 0 ? daten : null;
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            return null;
+        }
     }
 
     /// <summary>Holt die Fragen des angemeldeten Benutzers vom Server.
@@ -450,6 +550,15 @@ internal sealed class JarvisClient : IDisposable
 }
 
 /// <summary>Die Sitzung fehlt oder gilt nicht mehr – Anmeldemaske zeigen.</summary>
+/// <summary>Was bei einer Auswertung herauskommt: Text und – falls der Lauf
+/// eines erzeugt hat – die Adresse des Bildes.
+///
+/// <c>BildUrl</c> ist RELATIV (<c>/api/generated/…</c>) und geprueft; leer
+/// heisst "kein Bild". Sie ist eine Capability-URL: der Name traegt die
+/// Berechtigung, ein Token braucht es nicht.
+/// </summary>
+internal sealed record MausAntwort(string Text, string BildUrl);
+
 internal sealed class AnmeldungNoetigException : VisionException
 {
     public AnmeldungNoetigException(string message) : base(message) { }

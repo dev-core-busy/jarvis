@@ -87,7 +87,25 @@
             Download. Heilt sich selbst, sobald ein Update wirklich ankommt.
          Nebenbefund: `.alt` wurde nur aufgeraeumt, wenn eine `.neu` danebenlag
          – die verdraengte Fassung blieb sonst fuer immer liegen. -->
-    <Version>1.0.7</Version>
+    <!-- 1.0.8 (2026-09-15): ein vom Lauf ERZEUGTES Bild wird angezeigt.
+         Gemeldet als „wenn AI-Maus ein Bild anfordert, muss das auch
+         dargestellt werden koennen (Beispiel: ersetze englisch im Bild durch
+         deutsch)". Die Kette war an DREI Stellen unterbrochen, nicht nur an
+         der Anzeige:
+         a) `bild_text_ersetzen` stand in keinem Bereich – der Lauf hatte das
+            Werkzeug gar nicht. Es kommt jetzt OHNE Freigabe dazu (Vorgabe des
+            Betreibers): es liest keine Hausdaten, es bearbeitet genau den
+            Ausschnitt, den der Benutzer selbst aufgezogen hat.
+         b) Der Ausschnitt ging nur als `inline_data` raus – es gab KEINEN
+            Pfad, und das Werkzeug verlangt einen (`pfad_parameter`). Genau
+            dieser Zustand hat im Chat am 2026-09-15 acht Schritte gekostet.
+            Jetzt legt der Server eine fluechtige Arbeitskopie an.
+         c) Das Ergebnisfenster war eine reine RichTextBox: eine
+            `/api/generated/…`-Adresse erschien dort als TEXT. Jetzt ein
+            SplitContainer, dessen zweites Feld nur bei einem Bild aufklappt.
+         Die Adresse kommt aus `agent.last_task_images`, NICHT aus dem
+         Antworttext – eine vom Modell genannte Adresse kann erfunden sein. -->
+    <Version>1.0.8</Version>
     <!-- DPI awareness is owned by app.manifest, not by ApplicationHighDpiMode: it has to
          be in effect from process start, before any screen coordinate is read.
          WFAC010 asks for the opposite; suppressed because that trade-off is intentional. -->

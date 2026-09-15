@@ -439,13 +439,14 @@ internal sealed class TrayApplicationContext : ApplicationContext
             }
 
             var bereiche = new List<string>();
-            string answer = await _client.AnalysierenAsync(
+            MausAntwort ergebnis = await _client.AnalysierenAsync(
                 prompt.Prompt, dataUri, bereiche, cts.Token).ConfigureAwait(true);
 
             // WAS DER LAUF DURFTE, gehoert zur Antwort. Ohne diese Zeile ist
             // eine Antwort mit nachgeschlagenem Hintergrund von einer ohne
             // nicht zu unterscheiden - und genau das muss ein Mensch wissen,
             // der den Text gleich weiterverwendet.
+            string answer = ergebnis.Text;
             if (bereiche.Count > 0)
             {
                 answer += "\n\n— " + Texte.Nachgeschlagen + string.Join(", ", bereiche);
@@ -455,6 +456,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
             {
                 window.ShowAnswer(answer, _settings.CopyResultToClipboard);
             }
+
+            await ErgebnisBildZeigenAsync(window, ergebnis.BildUrl, cts.Token)
+                .ConfigureAwait(true);
         }
         catch (OperationCanceledException)
         {
@@ -471,10 +475,17 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 if (await SicherstellenAngemeldetAsync(cts.Token).ConfigureAwait(true))
                 {
                     var bereiche2 = new List<string>();
-                    string answer2 = await _client.AnalysierenAsync(
+                    MausAntwort zweit = await _client.AnalysierenAsync(
                         prompt.Prompt, ScreenCapture.ToDataUri(capture), bereiche2, cts.Token)
                         .ConfigureAwait(true);
-                    if (!window.IsDisposed) { window.ShowAnswer(answer2, _settings.CopyResultToClipboard); }
+                    if (!window.IsDisposed)
+                    {
+                        window.ShowAnswer(zweit.Text, _settings.CopyResultToClipboard);
+                        // AUCH HIER – sonst gibt es das Bild nur bei einer
+                        // Sitzung, die zufaellig noch gilt.
+                        await ErgebnisBildZeigenAsync(window, zweit.BildUrl, cts.Token)
+                            .ConfigureAwait(true);
+                    }
                 }
                 else if (!window.IsDisposed)
                 {
@@ -500,6 +511,44 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 window.ShowError($"{ex.GetType().Name}: {ex.Message}");
             }
         }
+    }
+
+    /// <summary>Holt ein vom Lauf erzeugtes Bild nach und zeigt es an.
+    ///
+    /// ⚠ NACH <c>ShowAnswer</c> UND NICHT DAVOR. Der Text ist fertig und soll
+    /// sofort dastehen; das Bild sind je nach Ausschnitt ein paar hundert
+    /// Kilobyte ueber dieselbe Leitung. Wer darauf wartet, bevor er den Text
+    /// zeigt, laesst den Benutzer ohne Grund vor einem leeren Fenster sitzen –
+    /// dieselbe Regel wie "eine Liste wartet nie auf eine schmueckende
+    /// Anfrage".
+    ///
+    /// Eine leere Adresse ist der REGELFALL (es wurde kein Bild erzeugt) und
+    /// bewirkt nichts. Ein FEHLSCHLAG beim Holen wird dagegen GEMELDET: der
+    /// Antworttext kuendigt das Bild an, und darunter nichts vorzufinden ist
+    /// von einem kaputten Fenster nicht zu unterscheiden.
+    /// </summary>
+    private async Task ErgebnisBildZeigenAsync(ResultWindow window, string bildUrl,
+                                               CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(bildUrl) || window.IsDisposed)
+        {
+            return;
+        }
+
+        window.KopfHinweis(Texte.BildWirdGeholt, fehler: false);
+        byte[]? daten = await _client.BildHolenAsync(bildUrl, ct).ConfigureAwait(true);
+        if (window.IsDisposed)
+        {
+            return;
+        }
+
+        if (daten is null)
+        {
+            window.KopfHinweis(Texte.BildNichtGeholt, fehler: true);
+            return;
+        }
+
+        window.BildAnzeigen(daten);
     }
 
     private void OnCopyImageClicked(object? sender, EventArgs e)

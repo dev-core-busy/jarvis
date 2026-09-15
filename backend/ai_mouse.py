@@ -52,10 +52,38 @@ Was hier bewusst NICHT liegt
   serverseitige Vorlagen gibt es nichts, woraus eine Auswahl kommen koennte –
   und eine Auswahl aus dem Request waere ein Weg an Werkzeuge vorbei an der
   Entscheidung des Administrators.
-* **Keine Speicherung des Bildes.** Der Ausschnitt geht in den Aufruf und ist
-  danach weg. Ein Bildschirmfoto kann alles enthalten, was der Benutzer gerade
-  offen hat – Gehaltslisten, fremde Postfaecher, Patientendaten. Es liegt
-  deshalb weder in ``data/documents`` noch im Konversationslog.
+* **Keine DAUERHAFTE Speicherung des Bildes.** Der Ausschnitt liegt weder in
+  ``data/documents`` noch im Konversationslog. Ein Bildschirmfoto kann alles
+  enthalten, was der Benutzer gerade offen hat – Gehaltslisten, fremde
+  Postfaecher, Patientendaten.
+
+⚠ DIESE ZUSAGE IST AM 2026-09-15 EINGESCHRAENKT WORDEN (Vorgabe des Betreibers)
+===============================================================================
+Bis dahin stand hier "Keine Speicherung des Bildes. Der Ausschnitt geht in den
+Aufruf und ist danach weg." Das gilt fuer die DAUERHAFTEN Orte weiter, aber
+nicht mehr wortwoertlich – und der Unterschied gehoert benannt, nicht
+stillschweigend ersetzt (gleiche Haltung wie bei ``secret_reveal``, wo eine
+mehrfach dokumentierte Zusage ebenfalls auf Anweisung umgekehrt wurde).
+
+Ausloeser war die Meldung "wenn AI-Maus ein Bild anfordert, muss das auch
+dargestellt werden koennen (Beispiel: ersetze englisch im Bild durch deutsch)".
+Dafuer braucht es zwei Dateien, und beide sind neu:
+
+* **Der Ausschnitt als Arbeitskopie** (``ausschnitt_ablegen``). ``bild_text_
+  ersetzen`` nimmt einen PFAD (``pfad_parameter``) – ohne Datei ist das Werkzeug
+  strukturell unerreichbar, genau wie im Chat bis zum Vorfall vom 2026-09-15.
+  Sie liegt in ``lauf_tmp.anhang_ziel()``: privat je Benutzer, 0644, und sie
+  verfaellt nach ``JARVIS_ATTACH_TTL_MIN`` (Vorgabe 30 min). Ausdruecklich NICHT
+  ueber ``main._anhang_ablegen`` – das legt zusaetzlich dauerhaft in
+  ``data/documents`` ab, und genau das bleibt hier ausgeschlossen.
+* **Das ERGEBNIS** unter ``data/generated_images/``. Das ist die eigentliche
+  Einschraenkung: die Datei bleibt liegen, und ``/api/generated/<hash>.png``
+  liefert sie **ohne Anmeldung** aus (Auth allein ueber den nicht erratbaren
+  32-stelligen Namen). Wer einen Ausschnitt mit Gehaltsliste uebersetzen laesst,
+  hat ihn danach dort. Das ist der Preis der Anzeige und war die bewusste Wahl.
+
+Was sich NICHT geaendert hat: das ORIGINAL geht weiterhin nirgendwo dauerhaft
+hin, und protokolliert wird der Bildinhalt nach wie vor nicht.
 """
 
 from __future__ import annotations
@@ -118,6 +146,46 @@ _FACH_LESEND = ["jira_search", "jira_get_issue", "jira_customer_tickets",
                 "confluence_list_spaces", "kv_tickets_by_buzzwords",
                 "sap_odata_query", "sap_sql_query", "sap_list_tables",
                 "sap_describe_table"]
+
+# ── Bildbearbeitung: IMMER dabei, ohne Schalter (Vorgabe 2026-09-15) ────────
+# Das Werkzeug steht NICHT in `BEREICHE` und braucht keine Freigabe. Zwei
+# Gruende, und der zweite ist der tragende:
+#
+#  * Es liest nichts und schreibt in keinen fremden Bestand. Es nimmt GENAU das
+#    Bild entgegen, das der Benutzer selbst aufgezogen hat, und legt daneben
+#    ein zweites. Die Bereiche schuetzen den Zugriff auf HAUSDATEN (Tickets,
+#    Wissen, SAP) – dieses Werkzeug kommt an keine davon.
+#  * Der Benutzer erwartet es. "Uebersetze das Bild" ist die Aufgabe, fuer die
+#    er den Rahmen aufzieht; ein Schalter, den ein Administrator erst umlegen
+#    muss, machte die Hauptfunktion zur Ausnahme.
+#
+# ⚠ WAS DAS KOSTET, damit es niemand spaeter fuer harmlos haelt: der Regelfall
+# ist damit KEIN einzelner Modellaufruf mehr, sondern ein Agentenlauf mit genau
+# einem Werkzeug. Eine einfache Frage ("was ist das?") laeuft weiter in einem
+# Schritt durch – aber ueber `run_task_headless` statt direkt. Der Zweig mit
+# `tools=[]` in `analysieren` bleibt trotzdem stehen und ist KEIN toter Code:
+# er greift, wenn das Werkzeug nicht ladbar ist (siehe `bild_werkzeug_da`).
+BILD_WERKZEUG = "bild_text_ersetzen"
+
+
+def bild_werkzeug_da() -> bool:
+    """Ob ``bild_text_ersetzen`` ueberhaupt geladen werden kann.
+
+    **FAIL-CLOSED:** im Zweifel `False`. Ein Werkzeug anzubieten, das der Agent
+    dann nicht hat, endet in "Tool nicht gefunden" – und der Lauf haette dafuer
+    den teureren Agentenweg genommen. Dieselbe Vorsicht wie bei
+    ``main._lese_tools``: genannt wird nur, was wirklich im Kasten liegt.
+
+    Geprueft wird der IMPORT, nicht `tesseract`/Pillow. Fehlen die, laedt das
+    Werkzeug trotzdem und antwortet mit einem `HINWEIS_AN_NUTZER`, der den Weg
+    nennt – diese Auskunft ist mehr wert als ein stilles Weglassen.
+    """
+    try:
+        from backend.tools.bild_text import BildTextErsetzenTool  # noqa: F401,PLC0415
+    except Exception:  # noqa: BLE001
+        return False
+    return True
+
 
 # ACHTUNG: `de`/`en`/`hinweis_*` sind BENUTZERSICHTBARE Texte und stehen
 # deshalb mit echten Umlauten hier. Die ASCII-Konvention gilt fuer Kommentare
@@ -217,20 +285,68 @@ def freigegebene_bereiche() -> list[str]:
     return [b for b in BEREICHE if b in gewaehlt]
 
 
-def werkzeuge_fuer(bereiche) -> set[str]:
+def werkzeuge_fuer(bereiche, mit_bild: bool = True) -> set[str]:
     """Werkzeug-Whitelist aus einer Bereichsliste.
 
     Rueckgabe ist IMMER eine Menge, **nie ``None``**: ``None`` heisst in
     ``agent._role_tools`` "keine Beschraenkung" und waere hier das Gegenteil
-    der Zusage dieses Moduls. Eine LEERE Menge ist der REGELFALL und heisst
-    "keine Werkzeuge" – nie auf Falsyness pruefen, sondern den WEG daran
+    der Zusage dieses Moduls. Nie auf Falsyness pruefen, sondern den WEG daran
     entscheiden (``analysieren``: leere Menge → EIN Aufruf mit tools=[]).
+
+    ``mit_bild`` nimmt ``BILD_WERKZEUG`` dazu – seit 2026-09-15 die Vorgabe und
+    ohne Freigabe (Begruendung an der Konstante). Es kommt nur dazu, wenn es
+    sich wirklich laden laesst; deshalb ist die leere Menge **weiterhin ein
+    moeglicher Zustand** und der ``tools=[]``-Zweig kein toter Code.
+
+    Der Parameter existiert fuer die Stelle, die die Menge fuer eine ANZEIGE
+    braucht (Bereichs-Katalog, Tests): dort ist "was hat der Administrator
+    freigeschaltet" die Frage, und das Bildwerkzeug ist keine Freigabe.
     """
     raus: set[str] = set()
     for b in (bereiche or []):
         if b in BEREICHE:
             raus.update(BEREICHE[b]["tools"])
+    if mit_bild and bild_werkzeug_da():
+        raus.add(BILD_WERKZEUG)
     return raus
+
+
+def ausschnitt_ablegen(daten: bytes, mime: str, user: str) -> str:
+    """Legt den Ausschnitt als Arbeitskopie ab und gibt den PFAD zurueck.
+
+    ⚠ OHNE DIESE DATEI IST ``bild_text_ersetzen`` STRUKTURELL UNERREICHBAR.
+    Das Werkzeug traegt ``pfad_parameter = ("pfad",)`` und verlangt eine Datei;
+    der Ausschnitt ging bis hierher ausschliesslich als ``inline_data`` raus.
+    Genau dieser Zustand hat im Chat am 2026-09-15 acht Schritte gekostet: das
+    Modell SAH das Bild, sollte es bearbeiten, suchte die Datei und enumerierte
+    ``/tmp``. **Wer eine Prompt-Regel schreibt, die einen Pfad voraussetzt, baut
+    die Stelle mit, die ihn erzeugt.**
+
+    ⚠ AUSDRUECKLICH NICHT ueber ``main._anhang_ablegen``: das legt die Datei
+    ZUSAETZLICH dauerhaft in ``data/documents`` ab. Hier gibt es nur die
+    fluechtige Kopie – privat je Benutzer, 0644, Verfall nach
+    ``JARVIS_ATTACH_TTL_MIN`` (Vorgabe 30 min, ``backend/attachments.py``
+    raeumt sie ab). Der Modulkopf nennt den Unterschied.
+
+    **FAIL-OPEN:** scheitert das Ablegen, kommt ``""`` zurueck und der Lauf
+    laeuft ohne Bearbeitungs-Moeglichkeit weiter. Das ANSEHEN des Ausschnitts
+    darf nie daran haengen, dass die Platte voll ist – das Bild geht davon
+    unabhaengig inline mit.
+    """
+    endung = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}.get(mime, "png")
+    try:
+        import os  # noqa: PLC0415
+
+        from backend import lauf_tmp as _lauf_tmp  # noqa: PLC0415
+        ziel = _lauf_tmp.anhang_ziel(user, "ausschnitt.%s" % endung)
+        ziel.write_bytes(daten)
+        # 0644 – ausdruecklich OHNE Ausfuehrungsrecht. Der Lauf ist
+        # unprivilegiert und liest die Datei als Sandbox-Benutzer.
+        os.chmod(ziel, 0o644)
+    except Exception as e:  # noqa: BLE001
+        print("[ai-mouse] Arbeitskopie fehlgeschlagen: %s" % e, flush=True)
+        return ""
+    return ziel.as_posix()
 
 
 def bereiche_katalog(lang: str = "de") -> list[dict]:
@@ -386,13 +502,26 @@ def frage_pruefen(roh: str) -> str:
     return text[:MAX_FRAGE]
 
 
-def _system_prompt(bereiche: list, kennung: str, lang: str = "de") -> str:
+def _system_prompt(bereiche: list, kennung: str, lang: str = "de",
+                   bild_pfad: str = "", mit_werkzeugen: bool = False) -> str:
     """Der System-Prompt des Laufs. Liegt HIER und nie im Request.
 
     Der Aufbau folgt der Reihenfolge, die im Projekt seit dem Vorfall vom
     2026-08-17 gilt: **die Regeln zuerst, das Material danach.** Eine Vorgabe,
     die vor der Regel steht, hebt sie auf – das hat damals zwei echte Mails an
     Fremde gekostet.
+
+    ``bild_pfad`` schaltet den Bearbeitungs-Abschnitt frei. **Leer heisst: kein
+    Wort davon** – ein Prompt, der ein Werkzeug oder einen Pfad nennt, den es
+    nicht gibt, ist die Fehlerklasse "ein Prompt ist Code" (im Projekt viermal
+    bezahlt). ``mit_werkzeugen`` haengt die Ergebnis-Marke an.
+
+    ⚠ DIE MARKE HING BIS 2026-09-15 AN ``bereiche``. Das war richtig, solange
+    ein Agentenlauf nur mit freigeschalteten Bereichen zustande kam – seit dem
+    Bildwerkzeug laeuft er auch ohne. Haengte sie weiter dort, kaeme im
+    Regelfall das "Ich sehe kurz nach." vor dem Werkzeugaufruf mit in die
+    Antwort: ``run_task_headless`` gibt ALLE Textteile aneinandergehaengt
+    zurueck.
     """
     en = str(lang).lower().startswith("en")
     zeilen = [
@@ -415,6 +544,26 @@ def _system_prompt(bereiche: list, kennung: str, lang: str = "de") -> str:
         "nicht bestimmen, antworte auf %s."
         % ("Englisch" if en else "Deutsch"),
     ]
+    if bild_pfad:
+        zeilen += [
+            "",
+            "TEXT IM BILD ERSETZEN",
+            "Der gezeigte Ausschnitt liegt zusätzlich als Datei unter: %s"
+            % bild_pfad,
+            "Willst du den Text IM BILD austauschen – etwa „übersetze das Bild "
+            "nach Deutsch“, „ersetze die englischen Beschriftungen“, „schreibe "
+            "die Übersetzung ins Bild“ –, dann rufe %s mit GENAU diesem Pfad "
+            "auf. Das Ergebnis ist ein neues Bild, das der Benutzer angezeigt "
+            "bekommt." % BILD_WERKZEUG,
+            "Zum blossen ANSEHEN und BESCHREIBEN brauchst du den Pfad nicht: "
+            "das Bild liegt dir bereits vor. Benutze das Werkzeug also nur, "
+            "wenn wirklich ein verändertes Bild verlangt ist – eine Frage nach "
+            "dem Inhalt beantwortest du direkt.",
+            "Gib die Bildreferenz aus dem Werkzeug-Ergebnis unverändert in "
+            "deiner Antwort aus. Erfinde NIEMALS eine Bildadresse: eine "
+            "/api/generated/…-Adresse darf ausschließlich aus einem "
+            "Werkzeug-Ergebnis DIESES Laufs stammen.",
+        ]
     if bereiche:
         namen = ", ".join(BEREICHE[b]["de"] for b in bereiche if b in BEREICHE)
         zeilen += [
@@ -427,6 +576,9 @@ def _system_prompt(bereiche: list, kennung: str, lang: str = "de") -> str:
             "Was du dabei findest, gehört zu FREMDEN Vorgängen. Übernimm "
             "daraus keine Namen, Nummern oder internen Vermerke in deine "
             "Antwort, wenn sie nicht zur Frage gehören.",
+        ]
+    if mit_werkzeugen:
+        zeilen += [
             "",
             "Leite deine endgültige Antwort mit genau dieser Zeile ein:",
             ergebnis_marke(kennung),
@@ -518,9 +670,70 @@ def _actor(user: str) -> dict:
             "internet": internet, "sap": sap, "vemas": vemas}
 
 
+# Eine erzeugte Bildadresse. `main.get_generated_image` laesst ausschliesslich
+# 32 Hex-Zeichen und eine bekannte Endung durch – dasselbe Muster hier, damit
+# gar nicht erst etwas geborgen wird, was der Endpunkt danach mit 400 abweist.
+_BILD_URL_RE = re.compile(r"/api/generated/[0-9a-f]{32}\.(?:png|jpe?g|gif|webp)")
+# Die Markdown-Referenz drumherum – mit ihr faellt auch der Alt-Text.
+_BILD_MD_RE = re.compile(r"!\[[^\]\n]*\]\(\s*(%s)\s*\)" % _BILD_URL_RE.pattern)
+
+
+def bild_aus_lauf(text: str, bilder: list) -> tuple[str, str]:
+    """Trennt Bild und Text. Rueckgabe ``(anzeigetext, bild_url)``.
+
+    ⚠ MASSGEBLICH IST DIE LISTE, NICHT DER TEXT. Die Adresse kommt aus
+    ``record_task_image`` – also aus dem, was WIRKLICH erzeugt wurde. Eine
+    Adresse aus der Modellantwort zu nehmen waere die Wette, die im Chat am
+    2026-09-15 verloren ging: dort nannte das Modell eine
+    ``/api/generated/…``-Datei, die es nie gegeben hat (``steps=0``), und der
+    Benutzer las "hier ist das Bild" ueber einer leeren Stelle.
+
+    Aus dem Anzeigetext fliegt die Markdown-Referenz heraus. Sie ist dort
+    Rauschen: das Fenster zeigt das Bild selbst, und
+    ``![Uebersetztes Bild](/api/generated/…)`` als ROHTEXT in einer
+    RichTextBox sieht wie ein Fehler aus. **Entfernt wird sie in BEIDEN
+    Faellen** – auch wenn nichts erzeugt wurde, denn dann zeigt sie auf nichts.
+
+    Kuendigt der Text ein Bild an, das es NICHT gibt, sagt der Hinweis das.
+    Eine Bereinigung, die eine ZUSAGE des Textes entfernt, muss die Zusage
+    mitkorrigieren – sonst bleibt "Hier ist das übersetzte Bild:" ueber einer
+    Leerzeile stehen, und das ist von einem kaputten Fenster nicht zu
+    unterscheiden (dieselbe Lehre wie ``_ohne_tote_bildrefs`` im Chat).
+    """
+    roh = text or ""
+    url = ""
+    for eintrag in reversed(bilder or []):
+        kandidat = str((eintrag or {}).get("url") or "")
+        if _BILD_URL_RE.fullmatch(kandidat):
+            # Das LETZTE erzeugte Bild ist das Ergebnis: wer zweimal ersetzen
+            # laesst, meint die zweite Fassung.
+            url = kandidat
+            break
+
+    hatte_referenz = bool(_BILD_MD_RE.search(roh) or _BILD_URL_RE.search(roh))
+    sauber = _BILD_MD_RE.sub("", roh)
+    sauber = _BILD_URL_RE.sub("", sauber)
+    # Hoechstens zwei Umbrueche am Stueck – sonst klafft dort, wo die Referenz
+    # stand, eine Luecke im Fenster.
+    sauber = re.sub(r"\n{3,}", "\n\n", sauber).strip()
+
+    if hatte_referenz and not url:
+        sauber = (sauber + "\n\n[Systemhinweis: Es wurde ein Bild angekündigt, "
+                  "aber keines erzeugt. Der Assistent hat die Adresse erfunden "
+                  "– bitte die Anfrage wiederholen.]").strip()
+    return sauber, url
+
+
 async def _agent_lauf(sysp: str, auftrag: str, bild_parts: list,
                       werkzeuge: set, user: str) -> tuple:
-    """Agentenlauf mit Werkzeug-Zuschnitt. Rueckgabe ``(text, modell)``.
+    """Agentenlauf mit Werkzeug-Zuschnitt. Rueckgabe ``(text, modell, bilder)``.
+
+    ``bilder`` ist die Liste der im Lauf ERZEUGTEN Bilder – ``agent.
+    last_task_images``, gefuellt von ``record_task_image``. **Das ist der
+    deterministische Weg und nicht die Wette darauf, dass das Modell die
+    Adresse korrekt abschreibt:** genau daran ist der Chat am 2026-09-15
+    gescheitert (erfundene ``/api/generated/…``-Adresse zu einer Datei, die es
+    nie gab). Der Rollen-Zweig in ``agent.py`` liest dieselbe Liste.
 
     EIGENER Agent je Aufruf – nicht der geteilte Hauptagent: der Assistent wird
     interaktiv benutzt und wuerde dort den Chat aller anderen blockieren; und
@@ -567,16 +780,24 @@ async def _agent_lauf(sysp: str, auftrag: str, bild_parts: list,
         from backend.llm import scrub_secrets  # noqa: PLC0415
         raise MausFehler("Die Auswertung ist fehlgeschlagen: %s"
                          % scrub_secrets(str(e))) from e
-    return (roh or ""), str(getattr(agent, "current_model", "") or "")
+    # `last_task_images` wird im `finally` von `_run_headless` gefuellt – sie
+    # steht also auch dann bereit, wenn der Lauf in seinen Deckel gelaufen ist.
+    bilder = list(getattr(agent, "last_task_images", None) or [])
+    return (roh or ""), str(getattr(agent, "current_model", "") or ""), bilder
 
 
 async def analysieren(bild_roh: str, frage_roh: str, user: str,
                       lang: str = "de", mime_wunsch: str = "") -> dict:
     """Bildausschnitt und Frage auswerten. Der eine Einstiegspunkt des Moduls.
 
-    OHNE freigeschaltete Werkzeug-Bereiche ist das EIN Aufruf mit ``tools=[]``
-    (Regelfall). Mit Bereichen laeuft ein Agent mit genau deren –
-    ausschliesslich lesenden – Werkzeugen.
+    Der Lauf bekommt ``BILD_WERKZEUG`` ohne Freigabe dazu (Vorgabe 2026-09-15)
+    und dazu die Werkzeuge der freigeschalteten Bereiche. Nur wenn am Ende gar
+    keines uebrig bleibt – Werkzeug nicht ladbar UND kein Bereich frei –, laeuft
+    der billigere Weg mit ``tools=[]``.
+
+    Rueckgabe enthaelt ``bild``: die Adresse eines im Lauf ERZEUGTEN Bildes
+    (leer, wenn keines entstand). Der Client zeigt es an; ``text`` ist dann
+    bereits ohne die Markdown-Referenz.
 
     Wirft ``MausFehler`` mit einem Text, den der Aufrufer 1:1 an die
     Oberflaeche gibt.
@@ -591,7 +812,19 @@ async def analysieren(bild_roh: str, frage_roh: str, user: str,
     bereiche = freigegebene_bereiche()
     werkzeuge = werkzeuge_fuer(bereiche)
     kennung = secrets.token_hex(4)
-    sysp = _system_prompt(bereiche, kennung, lang)
+    # DIE ARBEITSKOPIE NUR, WENN DAS BILDWERKZEUG WIRKLICH DABEI IST. Sonst
+    # entstuende bei jedem Rahmen eine Datei, die niemand liest – und der
+    # Prompt nennte einen Pfad fuer ein Werkzeug, das der Lauf gar nicht hat.
+    bild_pfad = (ausschnitt_ablegen(daten, mime, user)
+                 if BILD_WERKZEUG in werkzeuge else "")
+    # Ohne Arbeitskopie ist das Bildwerkzeug nutzlos: es verlangt einen Pfad.
+    # Es dann anzubieten kostet einen Schritt und endet in "Datei existiert
+    # nicht" – also fliegt es raus, und der Lauf faellt im Regelfall auf den
+    # billigeren `tools=[]`-Weg zurueck.
+    if BILD_WERKZEUG in werkzeuge and not bild_pfad:
+        werkzeuge = {w for w in werkzeuge if w != BILD_WERKZEUG}
+    sysp = _system_prompt(bereiche, kennung, lang, bild_pfad=bild_pfad,
+                          mit_werkzeugen=bool(werkzeuge))
 
     from google.genai import types  # noqa: PLC0415
 
@@ -621,8 +854,10 @@ async def analysieren(bild_roh: str, frage_roh: str, user: str,
     # ohne freigeschaltete Bereiche EIN Aufruf mit tools=[], mit Bereichen ein
     # Agentenlauf mit genau deren Werkzeugen. Entschieden wird an der leeren
     # MENGE, nie an Falsyness eines anderen Wertes.
+    bilder: list = []
     if werkzeuge:
-        roh, model = await _agent_lauf(sysp, auftrag, bild_parts, werkzeuge, user)
+        roh, model, bilder = await _agent_lauf(sysp, auftrag, bild_parts,
+                                               werkzeuge, user)
         roh = _ergebnis_teilen(roh, kennung)
     else:
         try:
@@ -646,7 +881,16 @@ async def analysieren(bild_roh: str, frage_roh: str, user: str,
             raise MausFehler("Das Modell konnte nicht befragt werden: %s"
                              % scrub_secrets(str(e))) from e
 
-    ergebnis = (roh or "").strip()
+    # Bild und Text trennen – VOR der Leerpruefung. Sonst gilt ein Lauf, der
+    # nichts als die Bildreferenz geliefert hat, als "keine Antwort", obwohl
+    # das Bild fertig danebenliegt.
+    ergebnis, bild_url = bild_aus_lauf(roh or "", bilder)
+    ergebnis = ergebnis.strip()
+    if not ergebnis and bild_url:
+        # Das Bild IST die Antwort. Ein leeres Textfeld saehe im Fenster wie
+        # ein Fehlschlag aus, obwohl der Lauf genau das geliefert hat, was
+        # verlangt war.
+        ergebnis = "Das bearbeitete Bild steht unten."
     if not ergebnis:
         # Der haeufigste Grund ist ein Profil ohne Bildverstaendnis – das sagt
         # die Meldung, statt den Benutzer raten zu lassen. Ein Textmodell
@@ -661,6 +905,12 @@ async def analysieren(bild_roh: str, frage_roh: str, user: str,
         "ok": True,
         "text": ergebnis[:MAX_ANTWORT],
         "modell": model,
+        # DIE ADRESSE DES ERZEUGTEN BILDES, leer wenn keines entstand. Der
+        # Client haengt sie an seine Serveradresse und zeigt das Bild an;
+        # `/api/generated/<hash>` braucht dafuer KEIN Token (Capability-URL).
+        # Ein aelterer Client ignoriert das Feld – die Antwort bleibt fuer ihn
+        # unveraendert brauchbar.
+        "bild": bild_url,
         # WAS DER LAUF DURFTE, gehoert ins Ergebnis. Ohne diese Angabe ist eine
         # Antwort mit nachgeschlagenem Hintergrund von einer ohne nicht zu
         # unterscheiden – und das muss ein Mensch wissen, der den Text

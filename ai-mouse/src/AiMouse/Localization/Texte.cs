@@ -88,6 +88,24 @@ internal static class Texte
     //   der andere denn kopiert.
     public static string Kopieren => T("Text kopieren", "Copy text");
     public static string BildKopierenKnopf => T("Bild kopieren", "Copy image");
+
+    // Derselbe Knopf, wenn der Lauf ein Bild ERZEUGT hat (Text im Bild
+    // ersetzt). Dann ist das Ergebnis gemeint und nicht der Ausschnitt – und
+    // das muss dranstehen, sonst kopiert der Benutzer das Falsche.
+    public static string ErgebnisBildKopierenKnopf =>
+        T("Ergebnis kopieren", "Copy result");
+
+    // Erscheint im Kopf, waehrend das erzeugte Bild geholt wird. Ein Fenster,
+    // in dem unter der Antwort noch nichts steht, sieht sonst fertig aus.
+    public static string BildWirdGeholt => T("Bild wird geladen…", "Loading image…");
+
+    // Der Lauf hat ein Bild erzeugt, es liess sich aber nicht holen. NICHT
+    // still lassen: der Text sagt dann "hier ist das Bild", und darunter waere
+    // nichts – von einem kaputten Fenster nicht zu unterscheiden.
+    public static string BildNichtGeholt => T(
+        "Das erzeugte Bild konnte nicht geladen werden.",
+        "The generated image could not be loaded.");
+
     public static string Schliessen => T("Schließen", "Close");
     public static string EigeneFrage => T("Eigene Frage…", "Custom question…");
     public static string EigeneFrageTitel => T(

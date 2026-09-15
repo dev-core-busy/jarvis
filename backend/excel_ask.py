@@ -42,6 +42,7 @@ import re
 import secrets
 from contextvars import ContextVar
 
+from backend import excel_objekte as _objekte
 from backend import fremdtext, tabellenkopf
 
 # ── Deckel ────────────────────────────────────────────────────────────────
@@ -402,6 +403,28 @@ def aenderungen_pruefen(roh) -> tuple[list, list]:
         if grund:
             abgelehnt.append({"blatt": blatt, "adresse": adresse[:60],
                               "grund": grund})
+            continue
+
+        # ── OBJEKT-EINTRAG (Pivot, Diagramm, Tabelle, bedingte Formatierung)
+        # Die Abzweigung steht VOR der Zell-Pruefung, und das ist kein Stil:
+        # ein Pivot-Eintrag traegt Felder, die unten eine andere Bedeutung
+        # haetten – die Zell-Pruefung wuerde sie als Wertematrix lesen und mit
+        # „Die Maße passen nicht zum Bereich" ablehnen. Ein Eintrag OHNE `typ`
+        # laeuft unveraendert weiter: die Vorgabe ist der Zell-Eintrag.
+        if _objekte.ist_objekt(eintrag):
+            sauber, ogrund = _objekte.objekt_pruefen(eintrag, blatt, adresse)
+            if ogrund:
+                abgelehnt.append({"blatt": blatt, "adresse": adresse,
+                                  "typ": str(eintrag.get("typ") or "")[:30],
+                                  "grund": ogrund})
+                continue
+            gesamt += zellen
+            if gesamt > MAX_ZELLEN_GESAMT:
+                abgelehnt.append({"blatt": blatt, "adresse": adresse,
+                                  "grund": "Der Vorschlag umfasst insgesamt mehr "
+                                           "als %d Zellen." % MAX_ZELLEN_GESAMT})
+                break
+            gueltig.append(sauber)
             continue
 
         hat_formel = "formel" in eintrag and eintrag.get("formel") not in (None, "")
@@ -1045,6 +1068,47 @@ WENN DU ETWAS ÄNDERN SOLLST
               neben `formel`/`werte`/`wert`.
 - Ein Blatt, das es noch nicht gibt, wird angelegt: gib den neuen Namen in
   `blatt` an. Der Benutzer sieht in der Bestätigung, dass ein Blatt entsteht.
+
+EXCEL-OBJEKTE: PIVOT, DIAGRAMM, TABELLE, BEDINGTE FORMATIERUNG
+Ein Eintrag mit dem Feld `typ` legt ein Objekt an statt Zellen zu füllen.
+`blatt` und `adresse` sagen WOHIN, alles Weitere hängt am Typ:
+    `typ:"pivot"`      `quelle` (mit Blatt, z. B. "Daten!A1:E200"), `name`,
+                       `zeilenfelder` ["Region"], `spaltenfelder` ["Quartal"],
+                       `wertfelder` [{"feld":"Umsatz","funktion":"sum"}].
+                       `adresse` ist die ZIELZELLE (obere linke Ecke).
+                       Erlaubte Funktionen: sum, count, average, max, min,
+                       product, countNumbers.
+    `typ:"diagramm"`   `art` (saeule, balken, linie, kreis, ring, punkt,
+                       flaeche), `quelle`, optional `titel`.
+                       `adresse` ist die Zelle, an der es sitzt.
+    `typ:"tabelle"`    `name`, optional `kopfzeile` (Vorgabe: ja).
+                       `adresse` ist der BEREICH, der zur Tabelle wird.
+                       Der Name darf KEIN Leerzeichen enthalten und nicht wie
+                       ein Zellbezug aussehen ("A1").
+    `typ:"bedingt"`    `regel`: "zellwert" (mit `operator` und `wert`, optional
+                       `wert2`, `farbe`, `textfarbe`), "farbskala" oder
+                       "datenbalken". `adresse` ist der Bereich.
+                       Operatoren: groesser, kleiner, gleich, ungleich,
+                       groesser_gleich, kleiner_gleich, zwischen, nicht_zwischen.
+- **Die Feldnamen eines Pivots müssen den Spaltenüberschriften der Quelle
+  entsprechen** – nimm sie aus dem Überblick, rate sie nicht.
+- Pivot-Tabellen brauchen Excel ab ExcelApi 1.8. Kann der Client das nicht,
+  wird GENAU DIESER Eintrag mit Grund abgelehnt; alles andere läuft. Du musst
+  das nicht vorher prüfen.
+
+WAS DIESES WERKZEUG NICHT KANN
+Sagst du etwas ab, dann NUR aus dieser Liste – und nenne den Grund so, wie er
+hier steht. **Erfinde keine technische Begründung.** Wenn du unsicher bist,
+sage, dass du es mit diesem Werkzeug nicht anlegen kannst, und beschreibe dem
+Benutzer den Weg von Hand:
+- Makros und VBA, Formularsteuerelemente, Schaltflächen.
+- Datenschnitte (Slicer), Zeitachsen, berechnete Pivot-Felder, Teilergebnisse
+  und Gruppierungen innerhalb einer Pivot-Tabelle.
+- Power Query, Datenmodell, externe Datenverbindungen.
+- Sparklines, Kommentare als eigener Eintrag, Zeilen/Spalten einfügen oder
+  löschen, Spaltenbreiten, Blattschutz, Fenster fixieren, Sortieren, Filtern.
+- Zellen verbinden, Rahmen, Schriftgrößen und Farben von Zellen (das Feld
+  `format` setzt NUR das Zahlenformat).
 - **Achte auf das Zahlenformat der Spalte.** Steht dort `0%`, ist der Wert für
   19 Prozent `0.19` und nicht `19` – die Anzeige multipliziert selbst.
 - **Formeln immer in englischer Schreibweise mit Komma** (`=SUM(A1:A10)`,

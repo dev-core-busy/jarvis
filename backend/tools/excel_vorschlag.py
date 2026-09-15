@@ -51,7 +51,10 @@ class ExcelVorschlagTool(BaseTool):
             "zeilenweise verschachtelt), 'wert' (ein Wert für jede Zelle) – "
             "dazu optional 'format' für das Zahlenformat, das auch ALLEIN "
             "stehen darf. Mehrere Zellen in EINEM Aufruf übergeben, nicht in "
-            "mehreren."
+            "mehreren. Mit dem Feld 'typ' legt ein Eintrag stattdessen ein "
+            "OBJEKT an: 'pivot' (Pivot-Tabelle), 'diagramm', 'tabelle' "
+            "(Bereich in eine Excel-Tabelle umwandeln) oder 'bedingt' "
+            "(bedingte Formatierung)."
         )
 
     def parameters_schema(self) -> dict:
@@ -106,11 +109,115 @@ class ExcelVorschlagTool(BaseTool):
                             },
                             "format": {
                                 "type": "STRING",
-                                "description": "Zahlenformat des Bereichs, z.B. "
+                                # \u26a0 DIE BEISPIELE SIND ENGLISCH, und das ist
+                                # kein Feinschliff: hier stand bis 2026-09-15
+                                # "TT.MM.JJJJ" \u2013 also genau der deutsche Code,
+                                # den der Prompt seit dem 2026-09-09 verbietet,
+                                # weil Office.js `numberFormat` NICHT
+                                # uebersetzt. Schema und Prompt sagten damit
+                                # das Gegenteil voneinander.
+                                "description": "Zahlenformat des Bereichs in "
+                                               "ENGLISCHER Schreibweise, z.B. "
                                                "#,##0.00 \u20ac oder 0.0% oder "
-                                               "TT.MM.JJJJ. Darf ALLEIN stehen "
+                                               "dd.mm.yyyy. Darf ALLEIN stehen "
                                                "(dann bleiben die Werte "
-                                               "unangetastet).",
+                                               "unangetastet). Deutsche Codes "
+                                               "wie TT.MM.JJJJ werden NICHT "
+                                               "uebersetzt und erscheinen "
+                                               "woertlich in der Zelle.",
+                            },
+                            # \u2500\u2500 Objekt-Eintraege \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+                            "typ": {
+                                "type": "STRING",
+                                "description": "Legt ein OBJEKT an statt Zellen "
+                                               "zu fuellen: 'pivot', 'diagramm', "
+                                               "'tabelle' oder 'bedingt'. Ohne "
+                                               "dieses Feld ist der Eintrag eine "
+                                               "gewoehnliche Zellaenderung.",
+                                "enum": ["pivot", "diagramm", "tabelle", "bedingt"],
+                            },
+                            "quelle": {
+                                "type": "STRING",
+                                "description": "Nur fuer 'pivot' und 'diagramm': "
+                                               "Quellbereich MIT Blattnamen, z.B. "
+                                               "Daten!A1:E200.",
+                            },
+                            "name": {
+                                "type": "STRING",
+                                "description": "Name des Objekts (pivot, tabelle, "
+                                               "diagramm). Ein Tabellenname darf "
+                                               "kein Leerzeichen enthalten und "
+                                               "nicht wie ein Zellbezug aussehen.",
+                            },
+                            "zeilenfelder": {
+                                "type": "ARRAY",
+                                "description": "Nur 'pivot': Spaltenueberschriften "
+                                               "der Quelle, die die ZEILEN bilden.",
+                                "items": {"type": "STRING"},
+                            },
+                            "spaltenfelder": {
+                                "type": "ARRAY",
+                                "description": "Nur 'pivot': Spaltenueberschriften "
+                                               "der Quelle, die die SPALTEN bilden.",
+                                "items": {"type": "STRING"},
+                            },
+                            "wertfelder": {
+                                "type": "ARRAY",
+                                "description": "Nur 'pivot': die auszuwertenden "
+                                               "Felder, z.B. [{\"feld\":\"Umsatz\","
+                                               "\"funktion\":\"sum\"}]. Erlaubt: "
+                                               "sum, count, average, max, min, "
+                                               "product, countNumbers.",
+                                "items": {"type": "OBJECT",
+                                          "properties": {
+                                              "feld": {"type": "STRING"},
+                                              "funktion": {"type": "STRING"},
+                                          }},
+                            },
+                            "art": {
+                                "type": "STRING",
+                                "description": "Nur 'diagramm': saeule, balken, "
+                                               "linie, kreis, ring, punkt oder "
+                                               "flaeche.",
+                            },
+                            "titel": {
+                                "type": "STRING",
+                                "description": "Nur 'diagramm': Ueberschrift.",
+                            },
+                            "kopfzeile": {
+                                "type": "BOOLEAN",
+                                "description": "Nur 'tabelle': hat der Bereich "
+                                               "eine Ueberschriftenzeile? Vorgabe "
+                                               "ja.",
+                            },
+                            "regel": {
+                                "type": "STRING",
+                                "description": "Nur 'bedingt': 'zellwert', "
+                                               "'farbskala' oder 'datenbalken'.",
+                            },
+                            "operator": {
+                                "type": "STRING",
+                                "description": "Nur 'bedingt'/'zellwert': "
+                                               "groesser, kleiner, gleich, "
+                                               "ungleich, groesser_gleich, "
+                                               "kleiner_gleich, zwischen, "
+                                               "nicht_zwischen.",
+                            },
+                            "wert2": {
+                                "type": "STRING",
+                                "description": "Nur 'bedingt' mit Operator "
+                                               "zwischen/nicht_zwischen: die "
+                                               "obere Grenze.",
+                            },
+                            "farbe": {
+                                "type": "STRING",
+                                "description": "Nur 'bedingt': Fuellfarbe als "
+                                               "#RRGGBB.",
+                            },
+                            "textfarbe": {
+                                "type": "STRING",
+                                "description": "Nur 'bedingt'/'zellwert': "
+                                               "Schriftfarbe als #RRGGBB.",
                             },
                             "begruendung": {
                                 "type": "STRING",

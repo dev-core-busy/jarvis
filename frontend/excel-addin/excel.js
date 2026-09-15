@@ -58,6 +58,7 @@
 
     var _office = false;      // Excel-Kontext vorhanden
     var _officeGrund = '';
+    var _kann18 = false;      // ExcelApi 1.8 (Pivot-Tabellen)
     var _kann19 = false;      // ExcelApi 1.9 (copyFrom/autoFill/getSpecialCells)
     var _kann110 = false;     // ExcelApi 1.10 (Zellkommentare)
     /* Markierung geschriebener Zellen. Ohne sie weiss nach 30 geaenderten
@@ -188,6 +189,26 @@
        Eintrag ihn ausgeloest hat. */
     function eintragKurz(a) {
         var t = (a.blatt ? a.blatt + '!' : '') + a.adresse;
+        if (a && a.typ) {
+            // Objekt-Eintrag: die Kennzeichen sind andere. Die Nutzdaten
+            // (Feldlisten) stehen bewusst NICHT drin – im Protokoll waeren sie
+            // Rauschen, und es wird ohnehin weitergegeben.
+            if (a.typ === 'pivot') {
+                return t + ' PIVOT ' + JSON.stringify(String(a.name || '')) +
+                    ' aus ' + (a.quelle || '?');
+            }
+            if (a.typ === 'diagramm') {
+                return t + ' DIAGRAMM ' + (a.art || '?') + ' aus ' + (a.quelle || '?');
+            }
+            if (a.typ === 'tabelle') {
+                return t + ' TABELLE ' + JSON.stringify(String(a.name || ''));
+            }
+            if (a.typ === 'bedingt') {
+                return t + ' BEDINGT ' + (a.regel || '?') +
+                    (a.operator ? ' ' + a.operator + ' ' + a.wert : '');
+            }
+            return t + ' ' + a.typ;
+        }
         if (a.format) t += ' fmt=' + JSON.stringify(String(a.format));
         if (a.werte && a.werte.length) t += ' werte=' + a.werte.length + 'x' +
             ((a.werte[0] && a.werte[0].length) || 0);
@@ -370,12 +391,26 @@
                                 _kann110 = !!(Office.context && Office.context.requirements &&
                                     Office.context.requirements.isSetSupported('ExcelApi', '1.10'));
                             } catch (e) { _kann110 = false; }
+                            // Pivot-Tabellen brauchen ExcelApi 1.8. Das
+                            // Manifest verlangt bewusst weiter 1.7: eine
+                            // hoehere MinVersion laesst das Add-in auf
+                            // aelteren Clients GAR NICHT laden – es erscheint
+                            // dann nicht einmal unter "Meine Add-Ins". Der
+                            // Hersteller empfiehlt fuer genau diesen Fall die
+                            // Laufzeitpruefung. Fehlt 1.8, wird EIN Eintrag
+                            // mit Grund abgelehnt, und alles andere laeuft.
+                            try {
+                                _kann18 = !!(Office.context && Office.context.requirements &&
+                                    Office.context.requirements.isSetSupported('ExcelApi', '1.8'));
+                            } catch (e) { _kann18 = false; }
                             // Die Fassungen gehoeren ins Protokoll: ob eine
-                            // Zelle einen Kommentar bekommt (1.10) und ob eine
-                            // Formel per copyFrom gefuellt wird (1.9),
-                            // entscheidet sich hier – und beides sind Wege,
+                            // Zelle einen Kommentar bekommt (1.10), ob eine
+                            // Formel per copyFrom gefuellt wird (1.9) und ob
+                            // eine Pivot-Tabelle entstehen kann (1.8),
+                            // entscheidet sich hier – und alle drei sind Wege,
                             // die scheitern koennen.
-                            protokoll('office', 'Excel bereit, ExcelApi 1.9=' +
+                            protokoll('office', 'Excel bereit, ExcelApi 1.8=' +
+                                _kann18 + ' 1.9=' +
                                 _kann19 + ' 1.10=' + _kann110 +
                                 ' platform=' + ((Office.context && Office.context.platform) || '?') +
                                 ' host=' + ((Office.context && Office.context.diagnostics &&
@@ -836,7 +871,48 @@
         box.scrollTop = box.scrollHeight;
     }
 
+    /* Beschreibt einen OBJEKT-Eintrag in einem Satz.
+       Der Benutzer bestaetigt damit etwas, das er nicht als "alter Wert → neuer
+       Wert" sehen kann – also muss hier stehen, WAS entsteht und WORAUS. */
+    function objektText(a) {
+        if (a.typ === 'pivot') {
+            var teile = [];
+            if ((a.zeilenfelder || []).length) {
+                teile.push(T('xl.piv_rows', 'Zeilen') + ': ' + a.zeilenfelder.join(', '));
+            }
+            if ((a.spaltenfelder || []).length) {
+                teile.push(T('xl.piv_cols', 'Spalten') + ': ' + a.spaltenfelder.join(', '));
+            }
+            if ((a.wertfelder || []).length) {
+                teile.push(T('xl.piv_vals', 'Werte') + ': ' + a.wertfelder.map(function (w) {
+                    return w.feld + ' (' + w.funktion + ')';
+                }).join(', '));
+            }
+            return T('xl.piv_from', 'Pivot-Tabelle aus') + ' ' + a.quelle +
+                (teile.length ? ' – ' + teile.join(' · ') : '');
+        }
+        if (a.typ === 'diagramm') {
+            return T('xl.chart_from', 'Diagramm') + ' (' + a.art + ') ' +
+                T('xl.chart_of', 'über') + ' ' + a.quelle +
+                (a.titel ? ' – "' + a.titel + '"' : '');
+        }
+        if (a.typ === 'tabelle') {
+            return T('xl.tbl_make', 'Bereich wird zur Excel-Tabelle') +
+                ' "' + (a.name || '') + '"' +
+                (a.kopfzeile === false ? ' (' + T('xl.tbl_nohead', 'ohne Überschriftenzeile') + ')' : '');
+        }
+        if (a.typ === 'bedingt') {
+            if (a.regel === 'farbskala') return T('xl.cf_scale', 'Bedingte Formatierung: Farbskala');
+            if (a.regel === 'datenbalken') return T('xl.cf_bar', 'Bedingte Formatierung: Datenbalken');
+            return T('xl.cf_value', 'Bedingte Formatierung:') + ' ' +
+                (a.operator || '') + ' ' + (a.wert || '') +
+                (a.wert2 ? ' … ' + a.wert2 : '');
+        }
+        return a.typ || '';
+    }
+
     function zellText(a) {
+        if (istObjekt(a)) return objektText(a);
         if (a.formel) return a.formel;
         if (a.werte && a.werte.length) {
             // VERSCHIEDENE Werte lassen sich nicht in eine Zeile schreiben. Die
@@ -884,6 +960,13 @@
             }
             if (a.format) {
                 h += '<span class="xl-cell-fmt">' + esc(a.format) + '</span>';
+            }
+            // DIE ART STEHT ALS WORT DA, nicht nur als Farbe. Ein Objekt-
+            // Eintrag tut etwas grundsaetzlich anderes als eine Zellaenderung –
+            // er kommt HINZU, statt etwas zu ersetzen –, und das muss man der
+            // Zeile ansehen, bevor man "Übernehmen" drückt.
+            if (istObjekt(a)) {
+                h += '<span class="xl-cell-typ">' + esc(typMarke(a.typ)) + '</span>';
             }
             // Der ALTE Inhalt wird erst beim Uebernehmen gelesen; bis dahin
             // steht hier, was das Fenster beim Vorschlag vorgefunden hat.
@@ -1114,6 +1197,13 @@
        nicht einloest; der Rueckweg muss aus dem Fenster kommen. */
     function alteWerteLesen(aenderungen) {
         if (!_office || !window.Excel || !aenderungen.length) return Promise.resolve();
+        // ⚠ OBJEKTE LAUFEN HIER MIT, ABER NUR FUER DIE BLATT-FRAGE.
+        // Sie haben keine Altwerte (ein Pivot ueberschreibt keine Zelle, es
+        // kommt hinzu) – ein gelesener "alter Wert" waere eine Behauptung ueber
+        // etwas, das es nie gab. Die Pruefung, ob ihr Blatt EXISTIERT, brauchen
+        // sie aber genauso: `_neuesBlatt` entscheidet unten darueber, ob das
+        // Blatt angelegt wird, und ohne diese Marke scheitert jede Pivot auf
+        // einem neuen Auswertungsblatt.
         return Excel.run(function (ctx) {
             var refs = aenderungen.map(function (a) {
                 try {
@@ -1132,6 +1222,9 @@
                     if (!o) return;
                     try {
                         if (o.s.isNullObject) { o.a._neuesBlatt = true; return; }
+                        // Ab hier gilt nur noch der Zell-Eintrag: ein Objekt
+                        // hat nichts zurueckzulesen.
+                        if (istObjekt(o.a)) return;
                         var r = o.s.getRange(o.a.adresse);
                         r.load('formulas,rowCount,columnCount,numberFormat');
                         try { r.format.fill.load('color'); } catch (e) { }
@@ -1266,9 +1359,196 @@
         return m;
     }
 
+    /* ── Excel-OBJEKTE (Pivot, Diagramm, Tabelle, bedingte Formatierung) ──
+       Bis 2026-09-15 konnte das Fenster nur Zellinhalte setzen, und das Modell
+       erklaerte das mit einer erfundenen technischen Begruendung ("Excel-Objekte
+       wie Pivots koennen nicht ueber API-Vorschlaege angelegt werden"). Office.js
+       kann es – gefehlt hat unser Werkzeug. */
+
+    function istObjekt(a) { return !!(a && a.typ); }
+
+    /* Beschriftung der Gattungs-Marke.
+       ⚠ DIE SCHLUESSEL STEHEN AUSGESCHRIEBEN, NICHT ZUSAMMENGESETZT.
+       Ein aus Praefix und Typnamen zur Laufzeit gebauter Schluessel war
+       kuerzer und fuer den i18n-Waechter UNSICHTBAR: der prueft, dass jeder
+       Schluessel in DE und EN existiert, und saehe nur das Praefix. Ein neuer
+       Typ haette damit still einen fehlenden Text bekommen. (Vom Bestandstest
+       gefunden, nicht beim Lesen – und der meldete danach ein zweites Mal,
+       weil dieser Kommentar das Muster urspruenglich woertlich zitierte.) */
+    var TYP_MARKE = {
+        pivot: function () { return T('xl.typ_pivot', 'Pivot'); },
+        diagramm: function () { return T('xl.typ_diagramm', 'Diagramm'); },
+        tabelle: function () { return T('xl.typ_tabelle', 'Tabelle'); },
+        bedingt: function () { return T('xl.typ_bedingt', 'Bedingt'); }
+    };
+    function typMarke(typ) {
+        return TYP_MARKE[typ] ? TYP_MARKE[typ]() : String(typ || '');
+    }
+
+    /* Loest einen Quellbereich MIT Blattnamen auf (`Daten!A1:E200`).
+       `charts.add` verlangt eine echte Range, kein Adressstring – anders als
+       `pivotTables.add`, das beides nimmt. */
+    function quellBereich(ctx, quelle) {
+        var t = String(quelle || '').trim();
+        var i = t.lastIndexOf('!');
+        if (i < 0) {
+            return ctx.workbook.worksheets.getActiveWorksheet().getRange(t);
+        }
+        var bl = t.slice(0, i);
+        if (bl.charAt(0) === "'" && bl.charAt(bl.length - 1) === "'") {
+            bl = bl.slice(1, -1);
+        }
+        return ctx.workbook.worksheets.getItem(bl).getRange(t.slice(i + 1));
+    }
+
+    function blattVon(ctx, name) {
+        return name ? ctx.workbook.worksheets.getItem(name)
+            : ctx.workbook.worksheets.getActiveWorksheet();
+    }
+
+    /* Erzeugt EIN Objekt – in einem EIGENEN `Excel.run`.
+
+       ⚠ WARUM JE OBJEKT EIN EIGENER LAUF: Office.js meldet Fehler erst beim
+       `ctx.sync()`, und in einem gemeinsamen Lauf bekommt man EINEN Fehler fuer
+       den ganzen Stapel – welches Objekt ihn ausgeloest hat, steht nirgends.
+       Ein kaputter Quellbereich im Diagramm wuerde die Pivot-Tabelle daneben
+       mitreissen. Das ist dieselbe Lehre wie bei der Kosmetik (2026-09-09),
+       nur konsequenter: **ein Fehlschlag darf nur sich selbst kosten.** */
+    function objektSchreiben(a) {
+        if (a.typ === 'pivot' && !_kann18) {
+            // Kein Wurf, sondern eine Absage MIT GRUND: das Manifest verlangt
+            // bewusst nur 1.7 (sonst laedt das Add-in auf aelteren Clients gar
+            // nicht), also ist dieser Fall vorgesehen und kein Defekt.
+            return Promise.resolve({
+                a: a, ok: false,
+                grund: T('xl.obj_no_api',
+                    'Dieses Excel kann keine Pivot-Tabellen über Add-ins anlegen (nötig ist ExcelApi 1.8).')
+            });
+        }
+        return Excel.run(function (ctx) {
+            var s = blattVon(ctx, a.blatt);
+            var erzeugt = null;
+            if (a.typ === 'pivot') {
+                // `add` nimmt die Quelle als Adressstring; das Ziel als Range,
+                // damit ein leerer Blattname das aktive Blatt trifft.
+                erzeugt = s.pivotTables.add(a.name, a.quelle, s.getRange(a.adresse));
+                (a.zeilenfelder || []).forEach(function (f) {
+                    erzeugt.rowHierarchies.add(erzeugt.hierarchies.getItem(f));
+                });
+                (a.spaltenfelder || []).forEach(function (f) {
+                    erzeugt.columnHierarchies.add(erzeugt.hierarchies.getItem(f));
+                });
+                (a.wertfelder || []).forEach(function (w) {
+                    var dh = erzeugt.dataHierarchies.add(
+                        erzeugt.hierarchies.getItem(w.feld));
+                    try { dh.summarizeBy = w.funktion; } catch (e) { }
+                });
+            } else if (a.typ === 'diagramm') {
+                erzeugt = s.charts.add(a.art, quellBereich(ctx, a.quelle), 'Auto');
+                try { erzeugt.setPosition(s.getRange(a.adresse)); } catch (e) { }
+                if (a.titel) { try { erzeugt.title.text = a.titel; } catch (e) { } }
+                if (a.name) { try { erzeugt.name = a.name; } catch (e) { } }
+            } else if (a.typ === 'tabelle') {
+                erzeugt = s.tables.add(a.adresse, a.kopfzeile !== false);
+                try { erzeugt.name = a.name; } catch (e) { }
+                if (a.stil) { try { erzeugt.style = a.stil; } catch (e) { } }
+            } else if (a.typ === 'bedingt') {
+                var r = s.getRange(a.adresse);
+                bedingtSetzen(r, a);
+                // Bedingte Formate haben keinen Namen – der Rueckweg greift
+                // ueber die Position (siehe `objektLoeschen`).
+                return ctx.sync().then(function () {
+                    a._angelegt = true;
+                    return { a: a, ok: true };
+                });
+            } else {
+                return Promise.resolve({ a: a, ok: false, grund: 'unbekannter Typ' });
+            }
+            // Den erzeugten NAMEN zuruecklesen: bei einem Diagramm ohne
+            // eigenen Namen vergibt Excel selbst einen, und ohne ihn gaebe es
+            // keinen Rueckweg.
+            try { erzeugt.load('name'); } catch (e) { }
+            return ctx.sync().then(function () {
+                try { a._objName = erzeugt.name || a.name || ''; }
+                catch (e) { a._objName = a.name || ''; }
+                // NUR ein wirklich angelegtes Objekt darf zurueckgenommen
+                // werden – sonst liefe der Rueckweg auf ein `getItem`, das
+                // wirft, und riss die uebrigen Ruecknahmen mit.
+                a._angelegt = true;
+                return { a: a, ok: true };
+            });
+        }).catch(function (e) {
+            protokoll('objekt', (a.typ || '?') + ' ' + (a.blatt ? a.blatt + '!' : '') +
+                a.adresse + ' nicht angelegt\n    ' + fehlerDetails(e));
+            return { a: a, ok: false, grund: fehlerKurz(e) };
+        });
+    }
+
+    /* Bedingte Formatierung. Drei Regeln statt der acht Office-Typen – jede
+       weitere waere eine weitere Gelegenheit, eine Vorgabe falsch zu setzen. */
+    function bedingtSetzen(r, a) {
+        var CF = Excel.ConditionalFormatType;
+        if (a.regel === 'farbskala') {
+            var cs = r.conditionalFormats.add(CF.colorScale);
+            cs.colorScale.criteria = {
+                minimum: { formula: null, type: Excel.ConditionalFormatColorCriterionType.lowestValue, color: '#F8696B' },
+                midpoint: { formula: '50', type: Excel.ConditionalFormatColorCriterionType.percentile, color: '#FFEB84' },
+                maximum: { formula: null, type: Excel.ConditionalFormatColorCriterionType.highestValue, color: a.farbe || '#63BE7B' }
+            };
+            return;
+        }
+        if (a.regel === 'datenbalken') {
+            var db = r.conditionalFormats.add(CF.dataBar);
+            if (a.farbe) { try { db.dataBar.positiveFormat.fillColor = a.farbe; } catch (e) { } }
+            return;
+        }
+        var cv = r.conditionalFormats.add(CF.cellValue);
+        if (a.farbe) { try { cv.cellValue.format.fill.color = a.farbe; } catch (e) { } }
+        if (a.textfarbe) { try { cv.cellValue.format.font.color = a.textfarbe; } catch (e) { } }
+        // `formula1` erwartet eine FORMEL, also mit fuehrendem "=". Ein nackter
+        // Wert wird von Excel teils als Text gelesen – dann greift die Regel nie.
+        var regel = { formula1: '=' + String(a.wert), operator: a.operator || 'GreaterThan' };
+        if (a.wert2 !== undefined && a.wert2 !== null && a.wert2 !== '') {
+            regel.formula2 = '=' + String(a.wert2);
+        }
+        cv.cellValue.rule = regel;
+    }
+
+    /* Nimmt EIN Objekt zurueck.
+
+       ⚠ EINE TABELLE WIRD NICHT GELOESCHT, SONDERN ZURUECKVERWANDELT.
+       `Table.delete()` entfernt in Office.js die Tabelle SAMT DATEN – beim
+       "Zuruecknehmen" waere das ein Datenverlust, und zwar genau an der
+       Stelle, an der der Benutzer den alten Zustand wiederhaben will.
+       `convertToRange()` (ExcelApi 1.2) macht daraus wieder einen gewoehnlichen
+       Bereich und laesst die Werte stehen. */
+    function objektLoeschen(ctx, a) {
+        var s = blattVon(ctx, a.blatt);
+        if (a.typ === 'pivot') {
+            s.pivotTables.getItem(a._objName || a.name).delete();
+        } else if (a.typ === 'diagramm') {
+            s.charts.getItem(a._objName || a.name).delete();
+        } else if (a.typ === 'tabelle') {
+            s.tables.getItem(a._objName || a.name).convertToRange();
+        } else if (a.typ === 'bedingt') {
+            // `add` haengt das neue Format laut Hersteller an die ERSTE
+            // Position ("at the first/top priority") – also ist Index 0 das
+            // gerade erzeugte. `clearAll()` waere falsch: es nimmt auch die
+            // Formate mit, die vorher schon da waren.
+            s.getRange(a.adresse).conditionalFormats.getItemAt(0).delete();
+        }
+    }
+
     function uebernehmenJetzt(auto) {
         var vorschlag = _vorschlag;
-        var aenderungen = vorschlag.aenderungen.slice();
+        var alle = vorschlag.aenderungen.slice();
+        // ⚠ ZELLEN ZUERST, OBJEKTE DANACH – die Reihenfolge ist die Semantik:
+        // eine Pivot-Tabelle oder ein Diagramm bezieht sich auf Daten, die
+        // DERSELBE Vorschlag gerade erst schreibt. Andersherum laege die
+        // Quelle beim Anlegen noch leer da, und Excel legte eine leere
+        // Auswertung an, die aussieht wie ein Fehler des Assistenten.
+        var objekte = alle.filter(istObjekt);
+        var aenderungen = alle.filter(function (a) { return !istObjekt(a); });
         protokoll('schreiben', (auto ? 'automatisch, ' : 'auf Knopfdruck, ') +
             aenderungen.length + ' Eintraege, markieren=' + markAn());
         aenderungen.forEach(function (a, i) {
@@ -1283,8 +1563,13 @@
             // bis 2026-09-08 konnte ein Vorschlag deshalb kein Blatt anlegen,
             // und "lege ein Auswertungsblatt an" scheiterte mit einer Meldung,
             // die nach einem Fehler des Assistenten aussah.
+            // ⚠ UEBER `alle`, NICHT ueber `aenderungen`: ein Objekt-Eintrag
+            // braucht sein Blatt genauso, und "lege die Auswertung als Pivot
+            // auf einem neuen Blatt an" ist der Regelfall, nicht die Ausnahme.
+            // Liefe die Schleife nur ueber die Zellen, scheiterte genau dieser
+            // Auftrag – mit einem Office.js-Wurf statt einer Erklaerung.
             var angelegt = [];
-            aenderungen.forEach(function (a) {
+            alle.forEach(function (a) {
                 if (!a.blatt || !a._neuesBlatt) return;
                 if (angelegt.indexOf(a.blatt) >= 0) return;
                 try { ctx.workbook.worksheets.add(a.blatt); angelegt.push(a.blatt); }
@@ -1344,6 +1629,39 @@
             // passiert. **Eine Verzierung darf den Vorgang nicht kippen.**
             return kosmetik(aenderungen).then(function () { return erg; });
         }).then(function (erg) {
+            // OBJEKTE ZULETZT – sie brauchen die Daten, die eben geschrieben
+            // wurden. Nacheinander, nicht parallel: zwei gleichzeitige
+            // `Excel.run` auf dieselbe Mappe sind ein Wettlauf um denselben
+            // Zustand, und die Reihenfolge der Objekte ist die des Vorschlags.
+            if (!objekte.length) { erg.objFehler = []; return erg; }
+            var objFehler = [];
+            return objekte.reduce(function (kette, a) {
+                return kette.then(function () {
+                    return objektSchreiben(a).then(function (r) {
+                        if (!r.ok) objFehler.push({ a: a, grund: r.grund });
+                    });
+                });
+            }, Promise.resolve()).then(function () {
+                erg.objFehler = objFehler;
+                return erg;
+            });
+        }).then(function (erg) {
+            // ⚠ EIN GESCHEITERTES OBJEKT IST KEINE VERZIERUNG. Anders als bei
+            // der Kosmetik hat der Benutzer es ausdruecklich bestellt – es
+            // gehoert in den VERLAUF, nicht nur ins Protokoll. Die Zellen
+            // stehen trotzdem; das sagt der Text auch, sonst haelt man den
+            // ganzen Vorgang fuer gescheitert.
+            if (erg.objFehler && erg.objFehler.length) {
+                _verlauf.push({
+                    rolle: 'bot', fehler: true,
+                    text: T('xl.obj_failed', 'Diese Objekte konnten nicht angelegt werden:') +
+                        '\n' + erg.objFehler.map(function (f) {
+                            return '• ' + eintragKurz(f.a) + ' – ' + f.grund;
+                        }).join('\n') + '\n\n' +
+                        T('xl.obj_failed_hint',
+                            'Die Zellenänderungen des Vorschlags sind davon unberührt und stehen in der Mappe.')
+                });
+            }
             // Der geschriebene Vorschlag bleibt SICHTBAR (ohne Knoepfe) – bei
             // automatischer Uebernahme ist das die einzige Stelle, an der
             // steht, was gerade in die Mappe gelaufen ist.
@@ -1468,12 +1786,32 @@
         var v = _rueckweg;
         if (!v || !v.aenderungen || !v.aenderungen.length) return;
         var wieder = v.aenderungen.filter(function (a) { return a._altF; });
-        if (!wieder.length) {
+        // Objekte werden ENTFERNT statt zurueckgeschrieben – sie haben keinen
+        // Vorzustand. Nur was wirklich angelegt wurde: ein gescheitertes
+        // Objekt gibt es nicht, und `getItem` darauf wuerde werfen.
+        var objekte = v.aenderungen.filter(function (a) {
+            return istObjekt(a) && a._angelegt;
+        });
+        if (!wieder.length && !objekte.length) {
             melde('xl-status', T('xl.undo_none',
                 'Der Zustand von vorher ist nicht mehr bekannt.'), 'fehler');
             return;
         }
         var hinweis = T('xl.undo_ask', 'Den Zustand vor dieser Änderung wiederherstellen?');
+        if (objekte.length) {
+            // WAS GENAU PASSIERT, GEHOERT IN DIE RUECKFRAGE. "Zurücknehmen"
+            // heisst bei einem Pivot "löschen" und bei einer Tabelle "wieder
+            // in einen normalen Bereich verwandeln" – zwei verschiedene Dinge,
+            // und beim zweiten ist die Frage "sind meine Daten dann weg?" die
+            // erste, die sich jeder stellt. Sie wird hier beantwortet.
+            var namen = objekte.map(function (a) { return eintragKurz(a); });
+            hinweis += '\n\n' + T('xl.undo_objects', 'Entfernt wird:') + '\n' +
+                namen.join('\n');
+            if (objekte.some(function (a) { return a.typ === 'tabelle'; })) {
+                hinweis += '\n\n' + T('xl.undo_table_keeps',
+                    'Eine Excel-Tabelle wird dabei in einen normalen Bereich zurückverwandelt – die Daten bleiben erhalten.');
+            }
+        }
         if (v.angelegt && v.angelegt.length) {
             hinweis += '\n\n' + T('xl.undo_keeps_sheet',
                 'Neu angelegte Blätter bleiben bestehen:') + ' ' + v.angelegt.join(', ');
@@ -1506,6 +1844,15 @@
                             } catch (e) { }
                         }
                     } catch (e) { protokoll('zuruecknehmen', fehlerDetails(e)); }
+                });
+                // Objekte im SELBEN Lauf entfernen: sie beruehren andere
+                // Strukturen als die Zellen daneben, ein Konflikt ist nicht
+                // moeglich. Je Objekt ein `try` – ein von Hand geloeschtes
+                // Diagramm darf die Ruecknahme der uebrigen nicht verhindern.
+                objekte.forEach(function (a) {
+                    try { objektLoeschen(ctx, a); }
+                    catch (e) { protokoll('zuruecknehmen', 'Objekt ' +
+                        eintragKurz(a) + '\n    ' + fehlerDetails(e)); }
                 });
                 return ctx.sync();
             }).then(function () {

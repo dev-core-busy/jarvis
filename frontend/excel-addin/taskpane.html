@@ -127,9 +127,18 @@
             outline-offset: 2px; }
         /* Marken hinter der Adresse. Beide tragen ihre Aussage als WORT, nicht
            nur als Farbe – dieselbe Regel wie bei den Vorfalls-Abzeichen. */
-        .xl-cell-new, .xl-cell-fmt { display: inline-block; margin-left: 6px;
+        .xl-cell-new, .xl-cell-fmt, .xl-cell-typ { display: inline-block; margin-left: 6px;
             padding: 0 5px; border-radius: 3px; font-size: 10px;
             font-weight: 600; vertical-align: 1px; }
+        /* Objekt-Eintrag (Pivot, Diagramm, Tabelle, bedingte Formatierung).
+           Eigene Farbe, weil er etwas anderes tut als eine Zellaenderung: er
+           kommt HINZU, statt einen Inhalt zu ersetzen – und sein Rueckweg ist
+           das Entfernen, nicht das Zurueckschreiben. `--accent` und nicht die
+           Warnfarbe: es ist kein Hinweis auf eine Gefahr, sondern eine
+           Gattungsangabe. */
+        .xl-cell-typ { background: color-mix(in srgb, var(--accent) 20%, transparent);
+            color: color-mix(in srgb, var(--accent) 60%, var(--text-primary));
+            text-transform: uppercase; letter-spacing: .4px; }
         .xl-cell-new { background: color-mix(in srgb, var(--warning) 22%, transparent);
             color: color-mix(in srgb, var(--warning) 55%, var(--text-primary)); }
         .xl-cell-fmt { background: rgba(var(--fg-rgb), .09);
@@ -502,12 +511,12 @@
 <script async src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
 <script src="/static/js/icons.js?v=5"></script>
 <script src="/static/js/pwreveal.js?v=2"></script>
-<script src="/static/js/i18n.js?v=265"></script>
+<script src="/static/js/i18n.js?v=266"></script>
 <script src="/static/js/theme.js?v=3"></script>
 <!-- Branding: Markenfarben, Markenname (.brand-app-name) und Firmenlogo
      (.topbar-avatar). /api/branding haengt an KEINER Anmeldung, die Marke steht
      also schon auf dem Anmeldebildschirm richtig da. -->
 <script src="/static/js/branding.js?v=26"></script>
-<script src="/static/excel-addin/excel.js?v=8"></script>
+<script src="/static/excel-addin/excel.js?v=9"></script>
 </body>
 </html>

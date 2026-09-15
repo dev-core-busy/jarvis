@@ -377,10 +377,227 @@ const warte = ms => new Promise(r => setTimeout(r, ms));
   c('⚠ ohne die Spalten zu verlieren',
     asp && (JSON.parse(asp.b).spalten || []).length === 3);
 
+  // ═════════════════════════════════════════════════════════════════════════
+  console.log('\n10. Bewertungsbogen: feste Zeilen + Spalte „fester Text"');
+  // ═════════════════════════════════════════════════════════════════════════
+  // Der Aufbau, den der Betreiber bestellt hat: Kriterium (nur lesbar),
+  // Anmerkung (Text), Bewertung (Sterne) – bei 6 vorgegebenen Zeilen.
+  const TEXTE = ['Erreichbarkeit', 'Reaktionszeit', 'Fachliche Qualität',
+                 'Freundlichkeit', 'Dokumentation', 'Gesamteindruck'];
+  const BOGEN = {
+    id: 'fb', titel: 'Gesamtbewertung', beschreibung: 'Bitte bewerten.', aktiv: true,
+    spalten: [{ id: 'k', name: 'Kriterium', typ: 'fest' },
+              { id: 'a', name: 'Anmerkung', typ: 'text' },
+              { id: 'b', name: 'Bewertung', typ: 'sterne' }],
+    zeilen: TEXTE.map((t, i) => ({ id: 'z' + i, werte: { k: t } }))
+  };
+  ({ w, doc, rufe } = seite({ formulare: [BOGEN] }));
+  await warte(60);
+
+  const zeilen = [...doc.querySelectorAll('#fb-tabelle tbody tr')];
+  c('es entstehen GENAU die 6 vorgegebenen Zeilen', zeilen.length === 6,
+    'gezeichnet: ' + zeilen.length);
+  const feste = [...doc.querySelectorAll('#fb-tabelle tbody td.fb-c-fest')];
+  c('jede Zeile traegt ihren festen Text', feste.length === 6
+    && feste.map(x => x.textContent).join('|') === TEXTE.join('|'),
+    feste.map(x => x.textContent).join('|'));
+  c('⚠ der feste Text ist KEIN Eingabefeld',
+    feste.every(td => !td.querySelector('input, textarea, select')),
+    'ein gesperrtes Feld sieht aus wie eines, das gerade klemmt');
+  c('die uebrigen Spalten sind weiterhin ausfuellbar',
+    doc.querySelectorAll('#fb-tabelle tbody input[type="text"]').length === 6
+    && doc.querySelectorAll('#fb-tabelle tbody .fb-sterne[role="radiogroup"]').length === 6);
+  c('⚠ es gibt KEINEN Muelleimer – die Struktur gehoert dem Administrator',
+    doc.querySelectorAll('#fb-tabelle .fb-row-del').length === 0);
+  c('und keine Aktionsspalte in der Kopfzeile',
+    doc.querySelectorAll('#fb-tabelle thead th.fb-c-akt').length === 0);
+  c('⚠ „+ Zeile" ist verborgen (es gibt keinen Zustand, in dem er wirkt)',
+    doc.getElementById('fb-zeile-neu').classList.contains('hidden'));
+
+  // Der Handler ist die zweite Schranke: `hidden` laesst sich entfernen.
+  doc.getElementById('fb-zeile-neu').classList.remove('hidden');
+  doc.getElementById('fb-zeile-neu').click();
+  await warte(20);
+  c('⚠ auch ein erzwungener Klick auf „+ Zeile" legt keine an',
+    doc.querySelectorAll('#fb-tabelle tbody tr').length === 6,
+    'eine so entstandene Zeile haette keine Kennung und fiele serverseitig heraus');
+
+  // Absenden: nur ein Stern in Zeile 3, sonst nichts.
+  const sterne3 = doc.querySelectorAll('#fb-tabelle tbody tr')[2]
+    .querySelectorAll('.fb-sterne button');
+  sterne3[3].click();                      // 4 von 5
+  await warte(20);
+  rufe.length = 0;
+  doc.getElementById('fb-senden').click();
+  await warte(60);
+  const post = rufe.find(r => r.u === '/api/feedback/abgabe');
+  c('das Absenden geht raus', !!post);
+  const bogenRumpf = post ? JSON.parse(post.b) : { zeilen: [] };
+  c('⚠ ALLE 6 Zeilen gehen mit – auch die leeren', bogenRumpf.zeilen.length === 6,
+    'sonst verschieben sich die Zeilen zwischen zwei Abgaben');
+  c('jede Zeile traegt ihre Kennung', bogenRumpf.zeilen.every(z => !!z._zid)
+    && bogenRumpf.zeilen.map(z => z._zid).join(',') === TEXTE.map((_, i) => 'z' + i).join(','));
+  c('⚠ DER FESTE TEXT WIRD NICHT MITGESCHICKT',
+    bogenRumpf.zeilen.every(z => !('k' in z)),
+    'was nicht gesendet wird, kann auch nicht gefaelscht aussehen');
+  c('der gesetzte Stern kommt an', bogenRumpf.zeilen[2].b === 4);
+
+  // Und die Gegenrichtung: ohne jede Eingabe darf nichts rausgehen.
+  ({ w, doc, rufe } = seite({ formulare: [BOGEN] }));
+  await warte(60);
+  rufe.length = 0;
+  doc.getElementById('fb-senden').click();
+  await warte(60);
+  c('⚠ ohne eine einzige Eingabe wird NICHT gesendet',
+    !rufe.some(r => r.u === '/api/feedback/abgabe'),
+    'der feste Text allein macht eine Zeile nicht ausgefuellt');
+  c('und der Grund steht am Formular',
+    doc.getElementById('fb-status').textContent.toLowerCase().indexOf('ausgef') >= 0,
+    doc.getElementById('fb-status').textContent);
+
+  // Bestandsverhalten: ein Formular OHNE feste Zeilen bleibt, wie es war.
+  ({ w, doc, rufe } = seite({}));
+  await warte(60);
+  c('ohne feste Zeilen bleibt „+ Zeile" sichtbar',
+    !doc.getElementById('fb-zeile-neu').classList.contains('hidden'));
+  c('und der Muelleimer ebenfalls',
+    doc.querySelectorAll('#fb-tabelle .fb-row-del').length === 1);
+
+  // ═════════════════════════════════════════════════════════════════════════
+  console.log('\n11. Der Editor pflegt die festen Zeilen');
+  // ═════════════════════════════════════════════════════════════════════════
+  // ⚠ AUSGEFUEHRT, NICHT GELESEN: dass `zeilenZeichnen()` irgendwo im
+  // Typ-Handler steht, sagt nichts darueber, ob die Felder wirklich dazukommen –
+  // ein `return;` davor laesst jede Quelltext-Pruefung gruen (in der Gegenprobe
+  // aufgefallen).
+  const da = new JSDOM(fs.readFileSync('frontend/settings.html', 'utf8'),
+                       { url: 'https://x/settings', runScripts: 'outside-only' });
+  const wa = da.window;
+  wa.localStorage.setItem('jarvis_token', 't');
+  const rufeA = [];
+  wa.fetch = (u, o2) => {
+    const p = String(u).split('?')[0];
+    rufeA.push({ u: p, m: (o2 && o2.method) || 'GET', b: o2 && o2.body });
+    const J = x => Promise.resolve({ ok: true, status: 200,
+                                     json: () => Promise.resolve(x) });
+    if (p === '/api/feedback/admin/formulare') {
+      return J({ ok: true, formulare: [BOGEN],
+                 typen: ['text', 'sterne', 'fest'],
+                 max_spalten: 12, max_feste_zeilen: 50, skill_aktiv: true });
+    }
+    if (p === '/api/feedback/admin/abgaben') { return J({ ok: true, abgaben: [] }); }
+    return J({ ok: true });
+  };
+  wa.confirm = () => true;
+  for (const f of ['js/icons.js', 'js/i18n.js', 'js/feedback_admin.js']) {
+    wa.eval(fs.readFileSync('frontend/' + f, 'utf8'));
+  }
+  wa.FeedbackAdmin.onShow();
+  await warte(60);
+  const ad = wa.document;
+
+  ad.querySelector('#fbadm-liste .fb-card [data-akt="edit"]').click();
+  await warte(20);
+  c('der Editor oeffnet', !!ad.getElementById('fbadm-form'));
+  c('der Typ „fester Text" steht im Pulldown',
+    [...ad.querySelectorAll('#fbadm-spalten .fb-sp-typ option')]
+      .some(o => o.value === 'fest'));
+  c('es gibt 6 Zeilen im Editor',
+    ad.querySelectorAll('#fbadm-zeilen .fb-z').length === 6);
+  c('je Zeile ein Feld fuer die `fest`-Spalte',
+    ad.querySelectorAll('#fbadm-zeilen .fb-z-wert').length === 6);
+  c('die Texte stehen darin',
+    [...ad.querySelectorAll('#fbadm-zeilen .fb-z-wert')].map(x => x.value).join('|')
+    === TEXTE.join('|'));
+  c('jede Zeile hat einen Muelleimer und einen Ziehgriff',
+    ad.querySelectorAll('#fbadm-zeilen .fb-z .jv-ico-trash').length === 6
+    && ad.querySelectorAll('#fbadm-zeilen .fb-z .fb-griff').length === 6);
+  c('der Hinweis sagt die FOLGE, nicht den Zustand',
+    (ad.getElementById('fbadm-zeilen-hint').textContent || '')
+      .indexOf('keine eigenen') >= 0,
+    ad.getElementById('fbadm-zeilen-hint').textContent);
+
+  // ⚠ DER FALL, DEN DIE GEGENPROBE VERLANGT: ein Typwechsel muss die
+  // Zeilenfelder nachziehen. Aus „Anmerkung" (text) wird eine zweite
+  // `fest`-Spalte – danach braucht JEDE Zeile ZWEI Felder.
+  const typSel = ad.querySelectorAll('#fbadm-spalten .fb-sp-typ')[1];
+  typSel.value = 'fest';
+  typSel.dispatchEvent(new wa.Event('change', { bubbles: true }));
+  await warte(20);
+  c('⚠ ein Typwechsel zieht die Zeilenfelder NACH',
+    ad.querySelectorAll('#fbadm-zeilen .fb-z-wert').length === 12,
+    'sonst faellt erst beim Speichern auf, dass die Zeilen fehlen: '
+    + ad.querySelectorAll('#fbadm-zeilen .fb-z-wert').length);
+
+  // Und zurueck – die Felder der zweiten Spalte verschwinden wieder.
+  typSel.value = 'text';
+  typSel.dispatchEvent(new wa.Event('change', { bubbles: true }));
+  await warte(20);
+  c('und wieder zurueck',
+    ad.querySelectorAll('#fbadm-zeilen .fb-z-wert').length === 6);
+
+  // Eine Zeile ergaenzen, wieder entfernen, dann endgueltig anlegen.
+  // ⚠ DAS ENTFERNEN WIRD HIER GEPRUEFT, NICHT NACH DEM SPEICHERN: der Editor
+  // schliesst beim Speichern, danach gibt es keinen Muelleimer mehr – die erste
+  // Fassung dieser Pruefung brach genau daran ab (und riss die Bilanz mit).
+  ad.getElementById('fbadm-z-neu').click();
+  await warte(20);
+  c('„+ Zeile" legt eine feste Zeile an',
+    ad.querySelectorAll('#fbadm-zeilen .fb-z').length === 7);
+  [...ad.querySelectorAll('#fbadm-zeilen .fb-z-del')].pop().click();
+  await warte(20);
+  c('der Muelleimer entfernt sie wieder',
+    ad.querySelectorAll('#fbadm-zeilen .fb-z').length === 6);
+  c('⚠ die LETZTE feste Zeile wird NICHT nachgelegt (0 ist ein gueltiger Zustand)',
+    (function () {
+      for (let i = 0; i < 10; i++) {
+        const b = ad.querySelector('#fbadm-zeilen .fb-z-del');
+        if (!b) { break; }
+        b.click();
+      }
+      return ad.querySelectorAll('#fbadm-zeilen .fb-z').length === 0;
+    })(),
+    'ohne feste Zeilen legt der Benutzer sie selbst an – das ist erlaubt');
+  c('⚠ und der Hinweis sagt VORHER, dass so nicht gespeichert werden kann',
+    ad.getElementById('fbadm-zeilen-hint').classList.contains('is-fehlt'),
+    'sonst drueckt der Administrator auf Speichern und sucht die Ursache oben');
+
+  // Jetzt die sechs Bestandszeilen wieder herstellen und eine siebte tippen.
+  for (let i = 0; i < 7; i++) { ad.getElementById('fbadm-z-neu').click(); }
+  await warte(20);
+  const felder = [...ad.querySelectorAll('#fbadm-zeilen .fb-z-wert')];
+  TEXTE.concat(['Preis-Leistung']).forEach((txt, i) => {
+    if (!felder[i]) { return; }
+    felder[i].value = txt;
+    felder[i].dispatchEvent(new wa.Event('input', { bubbles: true }));
+  });
+  const neuFeld = felder[felder.length - 1];
+  c('die Zeilen sind wieder da (Positivkontrolle)',
+    ad.querySelectorAll('#fbadm-zeilen .fb-z').length === 7
+    && neuFeld && neuFeld.value === 'Preis-Leistung');
+
+  rufeA.length = 0;
+  ad.getElementById('fbadm-f-save').click();
+  await warte(60);
+  const postA = rufeA.find(r => r.u === '/api/feedback/admin/formulare' && r.m === 'POST');
+  c('das Speichern geht raus', !!postA);
+  const rumpfA = postA ? JSON.parse(postA.b) : {};
+  c('⚠ die festen Zeilen gehen MIT', Array.isArray(rumpfA.zeilen)
+    && rumpfA.zeilen.length === 7,
+    'ohne sie laesst der Server das Formular unveraendert – der Editor waere wirkungslos');
+  c('die getippte Zeile ist dabei',
+    (rumpfA.zeilen || []).some(z => (z.werte || {}).k === 'Preis-Leistung'));
+  c('⚠ jede Zeile traegt eine alphanumerische Kennung',
+    (rumpfA.zeilen || []).length === 7
+    && (rumpfA.zeilen || []).every(z => /^[a-z0-9]+$/.test(z.id || '')),
+    'eine unbrauchbare Kennung vergibt der Server NEU – die Werte zeigten dann ins Leere');
+  c('und die Kennungen sind untereinander verschieden',
+    new Set((rumpfA.zeilen || []).map(z => z.id)).size === 7);
+
   console.log('\n' + '='.repeat(70));
   console.log(ok + ' OK, ' + fail + ' FAIL');
   clearTimeout(wd);
-  try { w.close(); ws.close(); } catch (e) { /* egal */ }
+  try { w.close(); ws.close(); wa.close(); } catch (e) { /* egal */ }
   process.exit(fail ? 1 : 0);
 })().catch(e => {
   // Ein Absturz darf nicht als Exit 0 ohne Bilanz enden (Register).

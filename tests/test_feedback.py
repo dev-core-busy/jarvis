@@ -738,6 +738,273 @@ check("⚠ JEDE Sektion des Reiters ist in _initFeedbackCollapse gebunden",
       not fehlend, "bleibt sonst zugeklappt und laesst sich nicht oeffnen: %r" % fehlend)
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+print("\n\033[1m10. Feste Zeilen + Spaltentyp `fest`\033[0m")
+# ═══════════════════════════════════════════════════════════════════════════
+# Die Bauform fuer einen Bewertungsbogen (Vorgabe des Betreibers 2026-09-15):
+# Spalte 1 nur lesbar, Spalte 2 Text, Spalte 3 Sterne – bei 6 vom Administrator
+# vorgegebenen Zeilen.
+#
+# ⚠ DIE TRAGENDE ZUSAGE IST, DASS DER FESTE TEXT AUS DER DEFINITION KOMMT.
+# Sie wird AUSGEFUEHRT geprueft, mit einem Request, der ihn zu faelschen
+# versucht – eine Quelltext-Suche koennte das nicht beantworten.
+
+check("`fest` ist ein bekannter Spaltentyp", fb.TYP_FEST in fb.SPALTEN_TYPEN)
+
+SP_BOGEN = [{"id": "spkrit", "name": "Kriterium", "typ": "fest"},
+            {"id": "spanm", "name": "Anmerkung", "typ": "text"},
+            {"id": "spbew", "name": "Bewertung", "typ": "sterne"}]
+TEXTE = ["Erreichbarkeit", "Reaktionszeit", "Fachliche Qualität",
+         "Freundlichkeit", "Dokumentation", "Gesamteindruck"]
+Z_BOGEN = [{"id": "z%d" % i, "werte": {"spkrit": t}} for i, t in enumerate(TEXTE)]
+
+def zv(formular, i, schluessel):
+    """Ein Vorgabewert aus einer Formular-DEFINITION – nie ungeprueft.
+
+    ⚠ Gleiche Lehre wie `za`: `f["zeilen"][2]` wirft, sobald eine Gegenprobe
+    die Zeilen wegfallen laesst (die Probe „Spalten-Kennung wird neu vergeben"
+    tut genau das – dann passen die Werte-Schluessel nicht mehr und die Zeilen
+    werden verworfen). Der Lauf endete dadurch OHNE Bilanzzeile.
+    """
+    if fehler(formular) or not isinstance(formular, dict):
+        return None
+    zs = formular.get("zeilen") or []
+    if not isinstance(zs, list) or i >= len(zs) or not isinstance(zs[i], dict):
+        return None
+    return (zs[i].get("werte") or {}).get(schluessel)
+
+
+def zn(formular):
+    """Anzahl der festen Zeilen – 0 bei jedem Fehlschlag."""
+    if fehler(formular) or not isinstance(formular, dict):
+        return 0
+    zs = formular.get("zeilen")
+    return len(zs) if isinstance(zs, list) else 0
+
+
+# ── Die Regel, die den alten Widerspruch aufloest ──────────────────────────
+r = sicher(fb.formular_speichern, "", "Ohne Zeilen", "", SP_BOGEN, True, [])
+check("⚠ `fest`-Spalte OHNE feste Zeilen wird ABGEWIESEN", fehler(r),
+      "sonst haette der Benutzer eine Zelle, die er weder lesen noch fuellen kann")
+check("die Absage nennt den Weg (nicht nur den Zustand)",
+      fehler(r) and "Feste Zeilen" in str(r[1]), str(r)[:90])
+
+r = sicher(fb.formular_speichern, "", "Nur fest", "",
+           [{"id": "a", "name": "A", "typ": "fest"}], True,
+           [{"id": "z0", "werte": {"a": "x"}}])
+check("⚠ ein Formular NUR aus `fest`-Spalten wird abgewiesen (Sackgasse)", fehler(r),
+      "der Benutzer koennte nichts eintragen und nie absenden")
+
+# Feste Zeilen OHNE `fest`-Spalte sind dagegen zulaessig: nummerierte Zeilen.
+r = sicher(fb.formular_speichern, "", "Nummeriert", "",
+           [{"id": "t1", "name": "Text", "typ": "text"}], True,
+           [{"id": "n1", "werte": {}}, {"id": "n2", "werte": {}}])
+check("feste Zeilen OHNE `fest`-Spalte sind erlaubt", zn(r) == 2)
+
+# ── Der Regelfall ─────────────────────────────────────────────────────────
+# ⚠ UEBER `muss`, NICHT ROH: ein roher Aufruf wirft, sobald eine Gegenprobe eine
+# fruehere Zusage verletzt (die Probe „Spalten-Kennung wird neu vergeben" laesst
+# genau diesen Aufruf scheitern) – der Lauf endet dann OHNE Bilanzzeile und ist
+# von „nicht gelaufen" nicht zu unterscheiden.
+bogen = muss("den Bewertungsbogen anlegen gelingt", fb.formular_speichern,
+             "", "Gesamtbewertung", "Bitte bewerten.", SP_BOGEN, True, Z_BOGEN)
+check("6 feste Zeilen gespeichert", zn(bogen) == 6)
+check("⚠ die Zeilen-Kennungen werden UEBERNOMMEN, nicht neu vergeben",
+      [z.get("id") for z in (bogen.get("zeilen") or []) if isinstance(z, dict)]
+      == ["z%d" % i for i in range(6)],
+      "eine neue Kennung macht jede bisherige Abgabe unzuordenbar")
+check("die Spalten-Kennungen werden uebernommen (sonst zeigen die Zeilenwerte ins Leere)",
+      [x.get("id") for x in (bogen.get("spalten") or []) if isinstance(x, dict)]
+      == ["spkrit", "spanm", "spbew"])
+
+# ── Abgabe: der Faelschungsversuch ────────────────────────────────────────
+ab = sicher(fb.abgabe_speichern, "nexus\\Andreas.Bender", bogen.get("id") or "?", [
+    {"_zid": "z0", "spkrit": "GEFAELSCHT", "spanm": "lief gut", "spbew": 5},
+    {"_zid": "z3", "spbew": 3},
+    {"_zid": "gibtesnicht", "spanm": "darf nicht ankommen"},
+])
+check("die Abgabe wird angenommen", not fehler(ab), str(ab)[:80])
+zeilen_ab = (ab.get("zeilen") or []) if not fehler(ab) else []
+
+
+def za(i, schluessel):
+    """Ein Zellwert aus der Abgabe – NIE ungeprueft dereferenzieren.
+
+    ⚠ `zeilen_ab[3].get(...)` wirft, sobald eine Sabotage Zeilen wegfallen
+    laesst: der Lauf endet dann OHNE Bilanzzeile, und das ist von „nicht
+    gelaufen" nicht zu unterscheiden. Genau so hat die Gegenprobe „leere feste
+    Zeilen fallen aus der Abgabe" statt eines FAIL einen Abbruch gemeldet.
+    """
+    if not isinstance(zeilen_ab, list) or i >= len(zeilen_ab):
+        return None
+    z = zeilen_ab[i]
+    return z.get(schluessel) if isinstance(z, dict) else None
+
+
+check("⚠ DER FESTE TEXT KOMMT AUS DER DEFINITION, nicht aus dem Request",
+      za(0, "spkrit") == "Erreichbarkeit",
+      "sonst stuende im Export eine Bewertung unter einer nie gestellten Frage")
+check("alle 6 festen Zeilen sind gespeichert – auch die leeren",
+      len(zeilen_ab) == 6,
+      "faellt eine heraus, verschieben sich die Zeilen zwischen zwei Abgaben")
+check("die Reihenfolge kommt aus der DEFINITION, nicht aus dem Request",
+      [z.get(fb.ZEILEN_ID) for z in zeilen_ab if isinstance(z, dict)]
+      == ["z%d" % i for i in range(6)])
+check("eine unbekannte Zeilen-Kennung wird verworfen",
+      all(isinstance(z, dict) and z.get(fb.ZEILEN_ID) in [x["id"] for x in Z_BOGEN]
+          for z in zeilen_ab))
+check("die eingetragenen Werte kommen an",
+      za(0, "spanm") == "lief gut" and za(0, "spbew") == 5
+      and za(3, "spbew") == 3)
+check("eine nicht ausgefuellte Zeile bleibt leer",
+      za(1, "spanm") == "" and za(1, "spbew") == 0)
+check("jede Zeile traegt ihre Kennung (fuer eine spaetere Auswertung)",
+      bool(zeilen_ab) and all(isinstance(z, dict) and z.get(fb.ZEILEN_ID)
+                              for z in zeilen_ab))
+
+r = sicher(fb.abgabe_speichern, "wer", bogen.get("id") or "?", [{"_zid": "z0"}])
+check("eine Abgabe OHNE eine einzige Eingabe wird abgewiesen", fehler(r),
+      "der feste Text allein macht eine Zeile nicht „ausgefuellt“")
+r = sicher(fb.abgabe_speichern, "wer", bogen.get("id") or "?", [])
+check("eine leere Zeilenliste wird abgewiesen", fehler(r))
+
+# ── Sentinel: ein aelterer Client darf die Zeilen nicht loeschen ──────────
+neu = sicher(fb.formular_speichern, bogen.get("id") or "?", "Neuer Titel", "",
+             bogen.get("spalten") or [], True)          # `zeilen` NICHT angegeben
+check("⚠ Speichern OHNE `zeilen` BEHAELT die festen Zeilen", zn(neu) == 6,
+      "sonst loescht ein halber Deploy beim Titel-Speichern den ganzen Bogen")
+check("die Texte sind dabei unveraendert",
+      zv(neu, 2, "spkrit") == "Fachliche Qualität")
+
+# ── Der Export traegt den festen Text ─────────────────────────────────────
+name_csv, inhalt_csv = fb.csv_export(bogen.get("id") or "?")
+check("der CSV-Kopf nennt die feste Spalte", "Kriterium" in inhalt_csv.splitlines()[0])
+check("der feste Text steht in der CSV-Zeile", "Erreichbarkeit" in inhalt_csv)
+check("der gefaelschte Text steht NICHT im Export", "GEFAELSCHT" not in inhalt_csv)
+
+# ── Ein Vorgabewert gilt NUR fuer `fest`-Spalten ──────────────────────────
+# Sonst waere er eine VORBELEGUNG – etwas anderes als das Bestellte, und in der
+# Abgabe von einer Eingabe des Benutzers nicht zu unterscheiden.
+vorbel = sicher(fb.formular_speichern, "", "Vorbelegt", "", SP_BOGEN, True,
+                [{"id": "zv", "werte": {"spkrit": "Frage",
+                                        "spanm": "VORBELEGT", "spbew": "5"}}])
+check("⚠ ein Vorgabewert fuer eine TEXT-Spalte wird verworfen",
+      zn(vorbel) == 1 and zv(vorbel, 0, "spanm") is None,
+      "eine Vorbelegung saehe in der Abgabe wie eine Eingabe des Benutzers aus")
+check("der Wert der `fest`-Spalte bleibt erhalten",
+      zv(vorbel, 0, "spkrit") == "Frage")
+ab_v = sicher(fb.abgabe_speichern, "wer",
+              (vorbel.get("id") if not fehler(vorbel) else "") or "?",
+              [{"_zid": "zv", "spbew": 2}])
+check("und er taucht auch in der Abgabe nicht auf",
+      not fehler(ab_v) and isinstance(ab_v, dict)
+      and ((ab_v.get("zeilen") or [{}])[0] or {}).get("spanm") == "")
+
+# ── Laengengrenze der Kennung (sie ist Fremdeingabe) ──────────────────────
+lang = sicher(fb.formular_speichern, "", "Lang", "",
+              [{"id": "a" * 500, "name": "A", "typ": "text"}], True, None)
+# ⚠ GEGEN EINE FESTE ZAHL, NICHT GEGEN `_ID_MAX`: mit der Konstanten als
+# Massstab ist die Pruefung trivial erfuellt, sobald jemand sie hochsetzt –
+# genau das hat die Gegenprobe „Kennung wieder unbegrenzt" aufgedeckt.
+check("⚠ eine ueberlange Kennung wird NEU vergeben",
+      not fehler(lang)
+      and len(((lang.get("spalten") or [{}])[0] or {}).get("id") or "") <= 64,
+      "sie steht in JEDER Zelle JEDER Abgabe")
+check("die Grenze selbst bleibt in einer vernuenftigen Groessenordnung",
+      fb._ID_MAX <= 64, "_ID_MAX = %r" % fb._ID_MAX)
+
+# ── Drift-Schranke: dieselben Werte in Backend und beiden Clients ─────────
+fb_js = (FRONT / "js" / "feedback.js").read_text(encoding="utf-8")
+fbadm_js = (FRONT / "js" / "feedback_admin.js").read_text(encoding="utf-8")
+check("⚠ `feedback.js` kennt denselben Typnamen wie das Backend",
+      ("var TYP_FEST = '%s'" % fb.TYP_FEST) in fb_js,
+      "sonst rendert die Seite die feste Spalte als Eingabefeld")
+check("⚠ `feedback.js` kennt dieselbe Zeilen-Kennung wie das Backend",
+      ("var ZEILEN_ID = '%s'" % fb.ZEILEN_ID) in fb_js,
+      "sonst ordnet der Server keine einzige Zeile zu – ohne Fehlermeldung")
+check("⚠ `feedback_admin.js` kennt denselben Typnamen",
+      ("var TYP_FEST = '%s'" % fb.TYP_FEST) in fbadm_js)
+
+# ── Regeln im Client, die sich nicht am Ergebnis messen lassen ────────────
+check("der Client schickt `fest`-Zellen ausdruecklich NICHT mit",
+      "s.typ !== TYP_FEST" in fb_js,
+      "was nicht gesendet wird, kann auch nicht gefaelscht aussehen")
+check("„+ Zeile“ ist bei festen Zeilen auch im HANDLER gesperrt",
+      "festeZeilen().length) { return; }" in fb_js,
+      "`hidden` laesst sich aus den Entwicklerwerkzeugen entfernen")
+check("eine `fest`-Zelle wird als TEXT gerendert, nicht als gesperrtes Feld",
+      "fb-c-fest" in fb_js and "td.textContent" in fb_js)
+def ohne_kommentare(js):
+    """Zeilenkommentare entfernen.
+
+    ⚠ NOETIG, WEIL DIE BEGRUENDUNGEN LAENGER SIND ALS DIE PRUEFFENSTER: die
+    erste Fassung dieser Pruefung suchte in den 300 Zeichen nach der Zuweisung
+    und fand `zeilenZeichnen()` nicht – dazwischen stand ein fuenfzeiliger
+    Kommentar. Sie meldete einen Fehler, den es nicht gab (Register:
+    Prueffenster fester Groesse).
+
+    Entfernt werden nur Zeilen, die NACH dem Einruecken mit `//` beginnen – ein
+    `https://` mitten in einer Zeile bleibt damit unangetastet.
+    """
+    return "\n".join(z for z in js.splitlines() if not z.strip().startswith("//"))
+
+
+fbadm_ok = ohne_kommentare(fbadm_js)
+check("Positivkontrolle: der Kommentar-Filter hat wirklich gefiltert",
+      "⚠ DIE ZEILEN MUESSEN NACHZIEHEN" in fbadm_js
+      and "⚠ DIE ZEILEN MUESSEN NACHZIEHEN" not in fbadm_ok,
+      "ohne diese Kontrolle waeren die Pruefungen darunter trivial wahr")
+check("der Editor zieht die Zeilenfelder bei einem TYP-Wechsel nach",
+      "Admin._entwurf[i].typ = typ.value;" in fbadm_ok
+      and "Admin.zeilenZeichnen();" in fbadm_ok.split(
+          "Admin._entwurf[i].typ = typ.value;")[1][:200],
+      "sonst faellt erst beim Speichern auf, dass die Zeilen fehlen")
+check("der Editor vergibt Spalten-Kennungen SELBST (noetig beim Anlegen)",
+      "function neueKennung()" in fbadm_js
+      and "id: neueKennung()" in fbadm_js,
+      "sonst kennt er beim Anlegen keinen Schluessel fuer die Zeilenwerte")
+check("der Arbeitsstand der Zeilen ist eine KOPIE (Abbrechen bleibt wirksam)",
+      "Object.keys(z.werte || {})" in fbadm_js)
+
+# Der Endpunkt muss den Sentinel durchreichen – sonst ist die Zusage oben tot.
+haupt = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
+check("⚠ der Endpunkt unterscheidet „nicht angegeben“ von „leer“",
+      '"zeilen" in body' in haupt and "_ZEILEN_UNGESETZT" in haupt,
+      "ohne das loescht ein aelterer Client die festen Zeilen")
+
+# Die i18n-Schluessel in BEIDEN Sprachen – ein fehlender englischer Text laesst
+# die Oberflaeche dort den Schluessel anzeigen.
+i18n = (FRONT / "js" / "i18n.js").read_text(encoding="utf-8")
+de_teil, en_teil = i18n.split("en:", 1) if "en:" in i18n else (i18n, "")
+for schluessel in ("fbadm.typ_fest", "fbadm.f_rows", "fbadm.row_new", "fbadm.rows_fixed",
+                   "fbadm.rows_free", "fbadm.rows_need",
+                   "fbadm.row_del", "fbadm.rows_n", "fbadm.row_max",
+                   "fbadm.row_n", "fbadm.row_nolabel", "fbadm.drag_row"):
+    check("i18n „%s“ in DE und EN" % schluessel,
+          i18n.count("'%s'" % schluessel) >= 2,
+          "ein fehlender Text zeigt dem Benutzer den Schluessel")
+
+css = (FRONT / "css" / "feedback.css").read_text(encoding="utf-8")
+check("`.fb-z` haelt den Muelleimer in der Zeile (`min-width: 0`)",
+      "min-width: 0" in css.split(".fb-z .fb-z-wert")[1][:120]
+      if ".fb-z .fb-z-wert" in css else False)
+# ⚠ BESTANDSFEHLER, gefunden bei der optischen Abnahme: auf `/feedback` gab es
+# gar keine `.hidden`-Regel – `classList.add('hidden')` war wirkungslos (der
+# „+ Zeile"-Knopf und die Formular-Auswahl standen sichtbar da). Ein
+# jsdom-Waechter kann das nicht sehen, die KLASSE ist ja gesetzt.
+check("⚠ `/feedback` hat ueberhaupt eine wirksame `.hidden`-Regel",
+      ".hidden { display: none !important; }" in css,
+      "sonst ist jedes classList.add('hidden') dieser Seite wirkungslos")
+geladen = [n for n in ("theme.css", "jira_addon.css", "feedback.css")
+           if ("css/" + n) in (FRONT / "feedback.html").read_text(encoding="utf-8")]
+check("und sie steht in einer Datei, die die Seite wirklich laedt",
+      "feedback.css" in geladen, "geladen: %r" % geladen)
+
+check("die feste Zelle ist nicht gedaempft (sie wird GELESEN)",
+      "--text-primary" in css.split("td.fb-c-fest")[1][:200]
+      if "td.fb-c-fest" in css else False)
+
+
 print("\n" + "=" * 70)
 print("\033[1mErgebnis: %d OK, %d FAIL\033[0m" % (_ok, _fail))
 sys.exit(1 if _fail else 0)

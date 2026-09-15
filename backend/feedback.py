@@ -2,10 +2,30 @@
 
 WAS ES IST: ein Formular ist eine Tabelle nach Excel-Vorbild. Der Administrator
 legt die SPALTEN fest (Name + Typ), der Benutzer legt beliebig viele ZEILEN an,
-fuellt sie aus und sendet sie ab. Zwei Spaltentypen:
+fuellt sie aus und sendet sie ab. Drei Spaltentypen:
 
     ``text``    ein Eingabefeld
     ``sterne``  eine 5-Sterne-Bewertung (0 = nicht bewertet)
+    ``fest``    nur zu lesender Text, vom Administrator je ZEILE vorgegeben
+
+ZWEI BAUFORMEN, und die zweite haengt am Typ ``fest`` (Vorgabe des Betreibers
+2026-09-15):
+
+    OHNE feste Zeilen  der Benutzer legt beliebig viele Zeilen an (Bestand)
+    MIT festen Zeilen  der Administrator gibt die Zeilen vor – ein
+                       Bewertungsbogen: Kriterium | Anmerkung | Bewertung
+
+⚠ ``fest`` UND FESTE ZEILEN GEHOEREN ZUSAMMEN. Eine ``fest``-Spalte in einem
+Formular ohne vorgegebene Zeilen waere genau der Widerspruch, den der Betreiber
+beim Bau gestrichen hat: der Benutzer legt eine Zeile an, und die Zelle ist
+leer und nicht ausfuellbar. ``formular_speichern`` weist das deshalb ab. Feste
+Zeilen OHNE ``fest``-Spalte sind dagegen zulaessig – dann sind es schlicht
+nummerierte Zeilen, die der Benutzer nicht vermehren kann.
+
+⚠ DER TEXT EINER ``fest``-ZELLE KOMMT AUS DER DEFINITION, NIE AUS DEM REQUEST.
+Das ist die tragende Zusage dieses Typs: koennte ein Client ihn mitschicken,
+stuende im Export eine Bewertung unter einer Frage, die so nie gestellt wurde –
+und niemand koennte das erkennen, weil die Abgabe ihren eigenen Snapshot traegt.
 
 ⚠ ES LAEUFT KEIN MODELL. Eine Abgabe wird gespeichert, mehr nicht (Vorgabe des
 Betreibers 2026-09-14). Das ist keine Sparmassnahme, sondern der Zuschnitt: die
@@ -50,6 +70,9 @@ ZELLE_MAX = 2000
 MAX_FORMULARE = 40
 MAX_SPALTEN = 12
 MAX_ZEILEN = 200
+# Feste Zeilen sind eine DEFINITION, keine Abgabe – eigener Deckel. 50 Zeilen
+# sind ein langer Bewertungsbogen; darueber fuellt ihn niemand mehr aus.
+MAX_FESTE_ZEILEN = 50
 # Gesamtbestand. Wird er ueberschritten, fallen die AELTESTEN Abgaben heraus –
 # und das wird protokolliert, nicht stillschweigend getan.
 MAX_ABGABEN = 5000
@@ -58,8 +81,36 @@ MAX_ABGABEN = 5000
 # (Pruefung beim Anlegen, Pruefung der Zellwerte, Katalog fuer die Oberflaeche).
 TYP_TEXT = "text"
 TYP_STERNE = "sterne"
-SPALTEN_TYPEN = (TYP_TEXT, TYP_STERNE)
+TYP_FEST = "fest"
+SPALTEN_TYPEN = (TYP_TEXT, TYP_STERNE, TYP_FEST)
 STERNE_MAX = 5
+
+# ⚠ SCHLUESSEL DER ZEILEN-KENNUNG IN EINER ABGEGEBENEN ZEILE. Er steht neben
+# den Spalten-Kennungen im selben dict; eine Kollision ist ausgeschlossen, weil
+# Spalten-Kennungen `isalnum()` sind (siehe `_spalten_pruefen`) und dieser
+# Schluessel mit `_` beginnt.
+#
+# Warum ueberhaupt: der feste Text kann spaeter umformuliert werden. Ohne
+# Kennung liesse sich „Zeile 3 ueber alle Abgaben hinweg" dann nicht mehr
+# beantworten – man haette nur noch zwei verschiedene Texte und keinen Beleg,
+# dass dieselbe Frage gemeint war.
+ZEILEN_ID = "_zid"
+
+# ⚠ KENNUNGEN DUERFEN AUS DEM REQUEST KOMMEN – sie MUESSEN es sogar: beim
+# ANLEGEN eines Formulars mit festen Zeilen braucht der Client die
+# Spalten-Kennung bereits, um die Zeilenwerte darunter abzulegen. Er vergibt sie
+# deshalb selbst, der Server uebernimmt sie (siehe `_spalten_pruefen`).
+#
+# Damit ist sie Fremdeingabe, und eine Laengengrenze gehoert dazu: ohne sie
+# waeren zwoelf Spalten mit je einem Megabyte Kennung moeglich, und die
+# Kennung steht in JEDER Zelle JEDER Abgabe.
+_ID_MAX = 32
+
+# Sentinel fuer `formular_speichern(zeilen=...)`: `None` heisst „keine festen
+# Zeilen", NICHT ANGEGEBEN heisst „die vorhandenen behalten". Ohne die
+# Unterscheidung wuerde ein aelterer Client (halber Deploy) beim Speichern eines
+# Titels sämtliche festen Zeilen loeschen.
+_ZEILEN_UNGESETZT = object()
 
 
 class FeedbackFehler(Exception):
@@ -160,7 +211,7 @@ def _spalten_pruefen(roh) -> list[dict]:
         # Eine doppelte oder unbrauchbare Kennung wird NEU vergeben statt
         # abgewiesen: sie kommt aus dem Request, und ein Formular, das sich
         # wegen einer Kennung nicht speichern laesst, waere eine Sackgasse.
-        if not sid or sid in gesehen or not sid.isalnum():
+        if not sid or sid in gesehen or not sid.isalnum() or len(sid) > _ID_MAX:
             sid = secrets.token_hex(4)
             while sid in gesehen:
                 sid = secrets.token_hex(4)
@@ -168,6 +219,62 @@ def _spalten_pruefen(roh) -> list[dict]:
         raus.append({"id": sid, "name": name, "typ": typ})
     if not raus:
         raise FeedbackFehler("Ein Formular braucht mindestens eine Spalte.")
+    # ⚠ EIN FORMULAR NUR AUS `fest`-SPALTEN IST EINE SACKGASSE: der Benutzer
+    # kann nichts eintragen, damit ist keine Zeile ausgefuellt, damit laesst
+    # sich nie absenden. Lieber beim Anlegen abweisen als den Benutzer vor eine
+    # Fehlermeldung laufen lassen, deren Ursache er nicht beheben kann.
+    if all(s["typ"] == TYP_FEST for s in raus):
+        raise FeedbackFehler(
+            "Mindestens eine Spalte muss ausfuellbar sein (Text oder Bewertung) – "
+            "sonst kann der Benutzer nichts abgeben.")
+    return raus
+
+
+def _feste_zeilen_pruefen(spalten: list[dict], roh) -> list[dict]:
+    """Die vom Administrator vorgegebenen Zeilen pruefen und normieren.
+
+    Aufbau je Zeile: ``{"id": <hex>, "werte": {<spalten_id>: <text>}}``.
+
+    ⚠ WERTE GIBT ES NUR FUER ``fest``-SPALTEN. Ein Vorgabewert fuer eine Text-
+    oder Sterne-Spalte waere eine VORBELEGUNG – also etwas anderes als das hier
+    Bestellte, und er saehe in der Abgabe wie eine Eingabe des Benutzers aus.
+    Fremde Schluessel werden deshalb verworfen, nicht gespeichert.
+
+    ⚠ DIE KENNUNG WIRD UEBERNOMMEN, WENN SIE MITKOMMT – gleiche Begruendung wie
+    bei den Spalten: die Abgaben zeigen ueber `ZEILEN_ID` darauf, und eine neu
+    vergebene Kennung macht die Zuordnung zu allen bisherigen Abgaben kaputt.
+    """
+    if roh is None:
+        return []
+    if not isinstance(roh, list):
+        raise FeedbackFehler("Die festen Zeilen sind keine Liste.")
+    if len(roh) > MAX_FESTE_ZEILEN:
+        raise FeedbackFehler("Es sind hoechstens %d feste Zeilen moeglich."
+                             % MAX_FESTE_ZEILEN)
+    fest_ids = [s["id"] for s in spalten if s["typ"] == TYP_FEST]
+    raus: list[dict] = []
+    gesehen: set[str] = set()
+    for e in roh:
+        if not isinstance(e, dict):
+            continue
+        roh_werte = e.get("werte")
+        werte: dict = {}
+        if isinstance(roh_werte, dict):
+            for sid in fest_ids:
+                werte[sid] = str(roh_werte.get(sid) or "").strip()[:ZELLE_MAX]
+        # Eine Zeile ohne jeden Text ist keine Zeile: in einem Bewertungsbogen
+        # waere sie eine unbeschriftete Zeile, die niemand zuordnen kann. Sie
+        # faellt heraus statt das Speichern scheitern zu lassen – der
+        # Administrator hat sie schlicht nicht gefuellt.
+        if fest_ids and not any(werte.values()):
+            continue
+        zid = str(e.get("id") or "").strip()
+        if not zid or zid in gesehen or not zid.isalnum() or len(zid) > _ID_MAX:
+            zid = secrets.token_hex(4)
+            while zid in gesehen:
+                zid = secrets.token_hex(4)
+        gesehen.add(zid)
+        raus.append({"id": zid, "werte": werte})
     return raus
 
 
@@ -192,11 +299,16 @@ def formular(fid: str) -> dict | None:
 
 
 def formular_speichern(fid: str, titel: str, beschreibung: str,
-                       spalten, aktiv: bool = True) -> dict:
+                       spalten, aktiv: bool = True,
+                       zeilen=_ZEILEN_UNGESETZT) -> dict:
     """Formular anlegen (``fid`` leer) oder aendern.
 
     Die Rechtefrage steht beim AUFRUFER (``require_local_auth`` am Endpunkt) –
     hier liegt nur die Datenhaltung, wie im uebrigen Modul.
+
+    ``zeilen`` sind die vom Administrator vorgegebenen FESTEN Zeilen. Nicht
+    angegeben = die vorhandenen behalten (siehe ``_ZEILEN_UNGESETZT``); ``None``
+    oder leere Liste = keine festen Zeilen, der Benutzer legt sie selbst an.
     """
     t = (titel or "").strip()[:TITEL_MAX]
     b = (beschreibung or "").strip()[:BESCHREIBUNG_MAX]
@@ -207,19 +319,34 @@ def formular_speichern(fid: str, titel: str, beschreibung: str,
     with _SPERRE:
         d = _laden()
         liste = d["formulare"]
-        if fid:
-            alt = next((f for f in liste if f.get("id") == fid), None)
-            if alt is None:
-                raise FeedbackFehler("Das Formular wurde nicht gefunden.")
+        alt = next((f for f in liste if f.get("id") == fid), None) if fid else None
+        if fid and alt is None:
+            raise FeedbackFehler("Das Formular wurde nicht gefunden.")
+        if zeilen is _ZEILEN_UNGESETZT:
+            # Bestand uebernehmen und gegen die NEUEN Spalten pruefen: wurde
+            # eine `fest`-Spalte entfernt, faellt ihr Text hier heraus.
+            vorhanden = (alt or {}).get("zeilen") or []
+        else:
+            vorhanden = zeilen
+        fz = _feste_zeilen_pruefen(sp, vorhanden)
+        # ⚠ DIE EINE REGEL, die den Widerspruch aufloest (siehe Modul-Docstring).
+        # Sie steht HIER und nicht in `_spalten_pruefen`, weil sie beide Seiten
+        # braucht – Spalten allein koennen sie nicht beantworten.
+        if any(s["typ"] == TYP_FEST for s in sp) and not fz:
+            raise FeedbackFehler(
+                "Eine Spalte vom Typ „fester Text“ braucht vorgegebene Zeilen – "
+                "sonst bliebe die Zelle leer und der Benutzer koennte sie nicht "
+                "fuellen. Lege unter „Feste Zeilen“ mindestens eine an.")
+        if alt is not None:
             alt.update({"titel": t, "beschreibung": b, "spalten": sp,
-                        "aktiv": bool(aktiv)})
+                        "aktiv": bool(aktiv), "zeilen": fz})
             eintrag = alt
         else:
             if len(liste) >= MAX_FORMULARE:
                 raise FeedbackFehler("Es sind hoechstens %d Formulare moeglich."
                                      % MAX_FORMULARE)
             eintrag = {"id": secrets.token_hex(6), "titel": t, "beschreibung": b,
-                       "spalten": sp, "aktiv": bool(aktiv),
+                       "spalten": sp, "zeilen": fz, "aktiv": bool(aktiv),
                        "erstellt": datetime.now().isoformat(timespec="seconds")}
             liste.append(eintrag)
         _speichern(d)
@@ -293,6 +420,13 @@ def _zelle_pruefen(spalte: dict, wert) -> tuple[str, object]:
     in einer Auswertung, die Zahlen erwartet.
     """
     typ = spalte.get("typ")
+    if typ == TYP_FEST:
+        # Darf hier gar nicht ankommen: der Wert einer `fest`-Zelle kommt aus
+        # der Definition (`_zeilen_fest_pruefen`), nie aus dem Request. Der
+        # Zweig ist die Notbremse, falls kuenftig jemand eine `fest`-Spalte
+        # durch den freien Zeilen-Weg schickt – dann steht dort NICHTS, statt
+        # dass der Client die Frage bestimmt.
+        return "", ""
     if typ == TYP_STERNE:
         try:
             n = int(wert)
@@ -335,6 +469,56 @@ def _zeilen_pruefen(spalten: list[dict], roh) -> list[dict]:
         if gefuellt:
             raus.append(zeile)
     if not raus:
+        raise FeedbackFehler("Es ist keine einzige Zeile ausgefuellt.")
+    return raus
+
+
+def _zeilen_fest_pruefen(spalten: list[dict], feste: list[dict], roh) -> list[dict]:
+    """Die Zeilen einer Abgabe zu einem Formular mit FESTEN Zeilen.
+
+    ⚠ DIE REIHENFOLGE UND DIE MENGE KOMMEN AUS DER DEFINITION, nicht aus dem
+    Request. Der Client liefert nur die ausgefuellten Zellen und sagt ueber
+    ``ZEILEN_ID``, zu welcher Zeile sie gehoeren; alles andere wird verworfen.
+    Damit hat JEDE Abgabe zu diesem Formular dieselbe Struktur – genau das
+    macht sie ueber Benutzer hinweg vergleichbar, und es ist der Grund, warum
+    der Betreiber zusaetzliche freie Zeilen ausgeschlossen hat.
+
+    ⚠ ALLE festen Zeilen werden gespeichert, auch die leer gebliebenen. Wer zu
+    einem Kriterium nichts sagt, hinterlaesst eine leere Zelle – im Export steht
+    sie unter ihrer Ueberschrift und ist als „nicht beantwortet" lesbar. Faellt
+    sie dagegen heraus, verschieben sich die Zeilen zwischen zwei Abgaben, und
+    eine Auswertung vergliche Kriterium 3 mit Kriterium 4.
+
+    Ausgefuellt sein muss trotzdem MINDESTENS EINE Zeile (Vorgabe des
+    Betreibers: keine Pflicht je Zeile) – sonst waere ein leeres Formular
+    abzusenden.
+    """
+    if roh is not None and not isinstance(roh, list):
+        raise FeedbackFehler("Die Zeilen fehlen oder sind keine Liste.")
+    eingang: dict = {}
+    for z in (roh or []):
+        if not isinstance(z, dict):
+            continue
+        zid = str(z.get(ZEILEN_ID) or "").strip()
+        if zid:
+            eingang[zid] = z
+
+    raus: list[dict] = []
+    gefuellt = False
+    for fz in feste:
+        geliefert = eingang.get(fz["id"]) or {}
+        zeile: dict = {ZEILEN_ID: fz["id"]}
+        for sp in spalten:
+            if sp["typ"] == TYP_FEST:
+                # AUS DER DEFINITION. Siehe Modul-Docstring.
+                zeile[sp["id"]] = (fz.get("werte") or {}).get(sp["id"], "")
+                continue
+            anzeige, wert = _zelle_pruefen(sp, geliefert.get(sp["id"]))
+            zeile[sp["id"]] = wert
+            if anzeige:
+                gefuellt = True
+        raus.append(zeile)
+    if not gefuellt:
         raise FeedbackFehler("Es ist keine einzige Zeile ausgefuellt.")
     return raus
 
@@ -409,7 +593,11 @@ def abgabe_speichern(user: str, fid: str, zeilen) -> dict:
     spalten = [s for s in (f.get("spalten") or []) if isinstance(s, dict)]
     if not spalten:
         raise FeedbackFehler("Das Formular hat keine Spalten.")
-    geprueft = _zeilen_pruefen(spalten, zeilen)
+    feste = [z for z in (f.get("zeilen") or []) if isinstance(z, dict) and z.get("id")]
+    if feste:
+        geprueft = _zeilen_fest_pruefen(spalten, feste, zeilen)
+    else:
+        geprueft = _zeilen_pruefen(spalten, zeilen)
     eintrag = {
         "id": secrets.token_hex(8),
         "formular_id": fid,

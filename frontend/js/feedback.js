@@ -18,6 +18,20 @@
     var _zeilen = [];       // [{spalten_id: wert}] – der Arbeitsstand
     var _sendet = false;
 
+    // ⚠ DRIFT-SCHRANKE: beide Werte stehen ebenso in `backend/feedback.py`
+    // (`TYP_FEST`, `ZEILEN_ID`). Laufen sie auseinander, rendert die Seite die
+    // feste Spalte als Eingabefeld bzw. der Server ordnet keine Zeile mehr zu –
+    // beides ohne Fehlermeldung. Ein Waechter vergleicht sie.
+    var TYP_FEST = 'fest';
+    var ZEILEN_ID = '_zid';
+
+    /** Die vom Administrator vorgegebenen Zeilen des gewaehlten Formulars.
+     *  Leer = der Benutzer legt seine Zeilen selbst an (Bestandsverhalten). */
+    function festeZeilen() {
+        var z = _aktiv && _aktiv.zeilen;
+        return Array.isArray(z) ? z : [];
+    }
+
     function tok() {
         try { return localStorage.getItem('jarvis_token') || ''; } catch (e) { return ''; }
     }
@@ -188,6 +202,29 @@
         return z;
     }
 
+    /** Den Arbeitsstand fuer das gewaehlte Formular aufbauen.
+     *
+     *  Bei FESTEN Zeilen entsteht je Vorgabe genau eine Zeile, in der
+     *  Reihenfolge der Definition. Der feste Text wird mitgenommen – aber nur
+     *  ZUR ANZEIGE: `senden()` schickt ihn nicht mit, er kommt serverseitig
+     *  wieder aus der Definition (siehe dort).
+     */
+    function zeilenAufbauen() {
+        var fest = festeZeilen();
+        if (!fest.length) { return [leereZeile()]; }
+        var spalten = (_aktiv && _aktiv.spalten) || [];
+        return fest.map(function (fz) {
+            var z = leereZeile();
+            z[ZEILEN_ID] = fz.id;
+            spalten.forEach(function (s) {
+                if (s.typ === TYP_FEST) {
+                    z[s.id] = (fz.werte || {})[s.id] || '';
+                }
+            });
+            return z;
+        });
+    }
+
     function tabelleZeichnen() {
         var box = $('fb-tabelle');
         if (!box) { return; }
@@ -201,11 +238,14 @@
             return;
         }
         var spalten = _aktiv.spalten || [];
+        // Bei festen Zeilen gibt es nichts zu entfernen und nichts anzulegen –
+        // die Struktur gehoert dem Administrator (Vorgabe des Betreibers).
+        var fest = festeZeilen().length > 0;
 
         var wrap = document.createElement('div');
         wrap.className = 'fb-tab-wrap';
         var tab = document.createElement('table');
-        tab.className = 'fb-tab';
+        tab.className = 'fb-tab' + (fest ? ' is-fest' : '');
 
         var thead = document.createElement('thead');
         var kopf = document.createElement('tr');
@@ -218,12 +258,14 @@
             th.textContent = s.name;          // textContent: Fremdtext
             kopf.appendChild(th);
         });
-        var thAkt = document.createElement('th');
-        thAkt.className = 'fb-c-akt';
-        // Leere Ueberschrift ueber der Knopfspalte: ein Wort waere Rauschen,
-        // die Bedeutung traegt der Knopf selbst ueber title/aria-label.
-        thAkt.setAttribute('aria-label', t('feedback.row_del', 'Zeile entfernen'));
-        kopf.appendChild(thAkt);
+        if (!fest) {
+            var thAkt = document.createElement('th');
+            thAkt.className = 'fb-c-akt';
+            // Leere Ueberschrift ueber der Knopfspalte: ein Wort waere Rauschen,
+            // die Bedeutung traegt der Knopf selbst ueber title/aria-label.
+            thAkt.setAttribute('aria-label', t('feedback.row_del', 'Zeile entfernen'));
+            kopf.appendChild(thAkt);
+        }
         thead.appendChild(kopf);
         tab.appendChild(thead);
 
@@ -237,7 +279,13 @@
 
             spalten.forEach(function (s) {
                 var td = document.createElement('td');
-                if (s.typ === 'sterne') {
+                if (s.typ === TYP_FEST) {
+                    // Nur zu lesen. textContent, weil der Text vom Server kommt;
+                    // und KEIN `disabled`-Eingabefeld: das sieht aus wie ein
+                    // Feld, das man fuellen koennte und das gerade klemmt.
+                    td.className = 'fb-c-fest';
+                    td.textContent = zeile[s.id] == null ? '' : String(zeile[s.id]);
+                } else if (s.typ === 'sterne') {
                     td.appendChild(sterneBauen(
                         parseInt(zeile[s.id] || 0, 10),
                         s.name + ' – ' + t('feedback.stars', 'Bewertung'),
@@ -255,6 +303,10 @@
                 tr.appendChild(td);
             });
 
+            if (fest) {
+                tbody.appendChild(tr);
+                return;
+            }
             var tdAkt = document.createElement('td');
             tdAkt.className = 'fb-c-akt';
             var del = document.createElement('button');
@@ -284,7 +336,7 @@
 
     function formularWaehlen(fid) {
         _aktiv = _formulare.find(function (f) { return f.id === fid; }) || _formulare[0] || null;
-        _zeilen = _aktiv ? [leereZeile()] : [];
+        _zeilen = _aktiv ? zeilenAufbauen() : [];
         var desc = $('fb-form-desc');
         if (desc) {
             desc.textContent = (_aktiv && _aktiv.beschreibung) || '';
@@ -295,6 +347,13 @@
             var b = $(id);
             if (b) { b.disabled = !_aktiv; }
         });
+        // ⚠ „+ Zeile" wird bei festen Zeilen VERSTECKT, nicht nur gesperrt. Die
+        // Projektregel „gesperrt mit Begruendung schlaegt verborgen" gilt fuer
+        // Bedienelemente mit ZUSTAND – hier gibt es keinen Zustand, in dem der
+        // Knopf je etwas tut: die Struktur gehoert dem Administrator. Ein grauer
+        // Knopf wuerde eine Moeglichkeit andeuten, die es nicht gibt.
+        var neu = $('fb-zeile-neu');
+        if (neu) { neu.classList.toggle('hidden', !!(_aktiv && festeZeilen().length)); }
         melde('');
         tabelleZeichnen();
         meineLaden();
@@ -320,20 +379,44 @@
 
     function senden() {
         if (!_aktiv || _sendet) { return; }
-        // Vor dem Senden aufraeumen: leere Zeilen weist der Server ohnehin ab,
-        // aber die Meldung „keine Zeile ausgefuellt" ist am Formular ehrlicher
-        // als eine Fehlermeldung vom Server.
-        var voll = _zeilen.filter(function (z) {
+        var fest = festeZeilen().length > 0;
+
+        /** Hat der BENUTZER in dieser Zeile etwas eingetragen? Eine
+         *  `fest`-Spalte zaehlt ausdruecklich NICHT mit – sonst waere jede
+         *  feste Zeile „gefuellt", nur weil ihr Kriterium dasteht, und ein
+         *  leeres Formular liesse sich absenden. */
+        function gefuellt(z) {
             return (_aktiv.spalten || []).some(function (s) {
+                if (s.typ === TYP_FEST) { return false; }
                 var w = z[s.id];
                 return (s.typ === 'sterne') ? (parseInt(w || 0, 10) > 0)
                                             : String(w || '').trim() !== '';
             });
-        });
-        if (!voll.length) {
+        }
+
+        // Vor dem Senden aufraeumen: leere Zeilen weist der Server ohnehin ab,
+        // aber die Meldung „keine Zeile ausgefuellt" ist am Formular ehrlicher
+        // als eine Fehlermeldung vom Server.
+        if (!_zeilen.some(gefuellt)) {
             melde(t('feedback.err_empty', 'Es ist keine einzige Zeile ausgefüllt.'), 'err');
             return;
         }
+        // ⚠ BEI FESTEN ZEILEN GEHEN ALLE RAUS, auch die leeren – der Server
+        // braucht sie nicht (er iteriert ueber die Definition), aber die
+        // Zuordnung ueber ZEILEN_ID ist damit vollstaendig und der Rumpf sagt,
+        // was der Benutzer gesehen hat. Ohne feste Zeilen bleibt es beim
+        // Bestand: nur gefuellte Zeilen.
+        // Die `fest`-Zellen werden AUSDRUECKLICH NICHT mitgeschickt: ihr Text
+        // kommt serverseitig aus der Definition, und was nicht gesendet wird,
+        // kann auch nicht gefaelscht aussehen.
+        var voll = (fest ? _zeilen : _zeilen.filter(gefuellt)).map(function (z) {
+            var raus = {};
+            if (z[ZEILEN_ID]) { raus[ZEILEN_ID] = z[ZEILEN_ID]; }
+            (_aktiv.spalten || []).forEach(function (s) {
+                if (s.typ !== TYP_FEST) { raus[s.id] = z[s.id]; }
+            });
+            return raus;
+        });
         _sendet = true;
         var knopf = $('fb-senden');
         if (knopf) { knopf.disabled = true; }
@@ -354,8 +437,9 @@
                 + t('feedback.sent_n', '{n} Zeile(n).').replace('{n}', (d.abgabe.zeilen || []).length),
                 'ok');
             // Frisches, leeres Formular: die Abgabe ist raus, der alte Stand
-            // stuende sonst da, als waere nichts passiert.
-            _zeilen = [leereZeile()];
+            // stuende sonst da, als waere nichts passiert. Bei festen Zeilen
+            // entsteht dabei wieder der vollstaendige Bogen.
+            _zeilen = zeilenAufbauen();
             tabelleZeichnen();
             meineLaden();
         }).catch(function (e) {
@@ -460,6 +544,10 @@
                     }
                     td.appendChild(sp);
                 } else {
+                    // Der feste Text steht in der Abgabe selbst (Snapshot) und
+                    // bekommt dieselbe Auszeichnung wie im Formular – sonst
+                    // saehe die Rueckschau anders aus als das Ausgefuellte.
+                    if (s.typ === TYP_FEST) { td.className = 'fb-c-fest'; }
                     td.textContent = z[s.id] == null ? '' : String(z[s.id]);
                 }
                 tr.appendChild(td);
@@ -480,7 +568,11 @@
         var neu = $('fb-zeile-neu');
         if (neu) {
             neu.addEventListener('click', function () {
-                if (!_aktiv) { return; }
+                // Der Knopf ist bei festen Zeilen versteckt – die Pruefung ist
+                // die zweite Schranke: `hidden` laesst sich aus den
+                // Entwicklerwerkzeugen entfernen, und eine so entstandene Zeile
+                // haette keine Kennung und fiele serverseitig lautlos heraus.
+                if (!_aktiv || festeZeilen().length) { return; }
                 _zeilen.push(leereZeile());
                 tabelleZeichnen();
                 // Der Fokus springt in die neue Zeile – sonst muss der Benutzer

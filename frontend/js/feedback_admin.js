@@ -165,12 +165,33 @@
             + 'title="' + esc(titel) + '" aria-label="' + esc(titel) + '">&#10287;</span>';
     }
 
+    // ⚠ DRIFT-SCHRANKE: `TYP_FEST` steht ebenso in `backend/feedback.py` und in
+    // `feedback.js`. Der Katalog vom Server (`_typen`) liefert die LISTE der
+    // Typen – welcher davon Zeilenwerte braucht, muss der Editor aber kennen.
+    var TYP_FEST = 'fest';
+
+    /** Eine Kennung, die der Client selbst vergibt.
+     *
+     *  ⚠ NOETIG, NICHT BEQUEM: beim ANLEGEN eines Formulars mit festen Zeilen
+     *  muss der Zeilenwert bereits unter einer Spalten-Kennung stehen – die
+     *  vergibt sonst erst der Server, also nach dem Speichern. Alphanumerisch
+     *  und kurz, weil `_spalten_pruefen` genau das verlangt und eine unbrauchbare
+     *  Kennung serverseitig NEU vergeben wuerde (womit die Zeilenwerte ins
+     *  Leere zeigten).
+     */
+    function neueKennung() {
+        return 'c' + Math.random().toString(36).slice(2, 10)
+            + Date.now().toString(36).slice(-4);
+    }
+
     var Admin = {
         _formulare: null,
-        _typen: ['text', 'sterne'],
+        _typen: ['text', 'sterne', 'fest'],
         _maxSpalten: 12,
+        _maxZeilen: 50,
         _offen: null,        // Kennung des gerade bearbeiteten Formulars ('' = neu)
         _entwurf: null,      // Spalten-Arbeitsstand des offenen Editors
+        _zeilen: null,       // Arbeitsstand der FESTEN Zeilen
         _gebunden: false,
         _abgaben: null,
         _abgFid: '',
@@ -207,6 +228,7 @@
                     self._formulare = d.formulare || [];
                     if (Array.isArray(d.typen) && d.typen.length) { self._typen = d.typen; }
                     if (d.max_spalten) { self._maxSpalten = d.max_spalten; }
+                    if (d.max_feste_zeilen) { self._maxZeilen = d.max_feste_zeilen; }
                     self.zeichnen();
                     self.zustandZeichnen(d);
                     self.abgabenAuswahl();
@@ -252,6 +274,7 @@
             }
             box.innerHTML = fs.map(function (f) {
                 var sp = (f.spalten || []).length;
+                var zn = (f.zeilen || []).length;
                 var aus = (f.aktiv === false);
                 return '<div class="fb-card' + (aus ? ' is-aus' : '') + '" data-id="'
                     + esc(f.id) + '">'
@@ -261,6 +284,11 @@
                     + '<span class="fb-card-name">' + esc(f.titel) + '</span>'
                     + '<span class="fb-card-meta">'
                     + esc(t('fbadm.cols', '{n} Spalte(n)').replace('{n}', sp))
+                    // Die Zeilenzahl steht nur bei FESTEN Zeilen da: „0 Zeilen"
+                    // waere bei einem freien Formular eine Falschaussage – dort
+                    // legt der Benutzer sie an, es sind also beliebig viele.
+                    + (zn ? ' · ' + esc(t('fbadm.rows_n', '{n} feste Zeile(n)')
+                        .replace('{n}', zn)) : '')
                     + (aus ? ' · ' + esc(t('fbadm.inactive', 'abgeschaltet')) : '')
                     + '</span></div>'
                     + '<label class="fb-aktiv" title="'
@@ -357,8 +385,16 @@
                     return { id: s.id, name: s.name, typ: s.typ };
                 });
                 if (!this._entwurf.length) {
-                    this._entwurf = [{ id: '', name: '', typ: 'text' }];
+                    this._entwurf = [{ id: neueKennung(), name: '', typ: 'text' }];
                 }
+                // Auch die festen Zeilen sind eine KOPIE (`werte` mit kopieren,
+                // sonst schreibt der Editor in den geladenen Bestand und
+                // „Abbrechen" waere wirkungslos).
+                this._zeilen = (f.zeilen || []).map(function (z) {
+                    var w = {};
+                    Object.keys(z.werte || {}).forEach(function (k) { w[k] = z.werte[k]; });
+                    return { id: z.id, werte: w };
+                });
             }
 
             var form = document.createElement('div');
@@ -375,6 +411,12 @@
                 + '<div id="fbadm-spalten"></div>'
                 + '<button type="button" class="ja-btn" id="fbadm-sp-neu">'
                 + esc(t('fbadm.col_new', '+ Spalte')) + '</button></div>'
+                + '<div class="fb-feld" id="fbadm-zeilen-feld"><label>'
+                + esc(t('fbadm.f_rows', 'Feste Zeilen')) + '</label>'
+                + '<p class="fb-hint" id="fbadm-zeilen-hint"></p>'
+                + '<div id="fbadm-zeilen"></div>'
+                + '<button type="button" class="ja-btn" id="fbadm-z-neu">'
+                + esc(t('fbadm.row_new', '+ Zeile')) + '</button></div>'
                 + '<div class="fb-edit-akt">'
                 + '<button type="button" class="ja-btn ja-btn-haupt" id="fbadm-f-save">'
                 + esc(t('common.save', 'Speichern')) + '</button>'
@@ -394,6 +436,23 @@
             if (ti) { ti.value = f.titel || ''; }
             if (de) { de.value = f.beschreibung || ''; }
             this.spaltenZeichnen();
+            this.zeilenZeichnen();
+
+            var zn = $('fbadm-z-neu');
+            if (zn) {
+                zn.addEventListener('click', function () {
+                    if ((Admin._zeilen || []).length >= Admin._maxZeilen) {
+                        setStatus('fbadm-f-status',
+                            t('fbadm.row_max', 'Mehr als {n} feste Zeilen sind nicht möglich.')
+                                .replace('{n}', Admin._maxZeilen), 'error');
+                        return;
+                    }
+                    Admin._zeilen.push({ id: neueKennung(), werte: {} });
+                    Admin.zeilenZeichnen();
+                    var felder = document.querySelectorAll('#fbadm-zeilen .fb-z-wert');
+                    if (felder.length) { felder[felder.length - 1].focus(); }
+                });
+            }
 
             var sn = $('fbadm-sp-neu');
             if (sn) {
@@ -404,7 +463,7 @@
                                 .replace('{n}', Admin._maxSpalten), 'error');
                         return;
                     }
-                    Admin._entwurf.push({ id: '', name: '', typ: 'text' });
+                    Admin._entwurf.push({ id: neueKennung(), name: '', typ: 'text' });
                     Admin.spaltenZeichnen();
                     var felder = document.querySelectorAll('#fbadm-spalten .fb-sp-name');
                     if (felder.length) { felder[felder.length - 1].focus(); }
@@ -420,6 +479,7 @@
         editorSchliessen: function () {
             this._offen = null;
             this._entwurf = null;
+            this._zeilen = null;
             var f = $('fbadm-form');
             if (f) { f.remove(); }
         },
@@ -460,6 +520,12 @@
                 if (typ) {
                     typ.addEventListener('change', function () {
                         Admin._entwurf[i].typ = typ.value;
+                        // ⚠ DIE ZEILEN MUESSEN NACHZIEHEN: aus einer Textspalte
+                        // eine `fest`-Spalte zu machen heisst, dass je Zeile ein
+                        // Eingabefeld dazukommt. Ohne diesen Aufruf bliebe der
+                        // Block unveraendert stehen, und der Administrator
+                        // saehe erst beim Speichern, dass etwas fehlt.
+                        Admin.zeilenZeichnen();
                     });
                 }
                 var del = zeile.querySelector('.fb-sp-del');
@@ -471,9 +537,11 @@
                         // speichern, und eine leere Liste sieht nach einem
                         // Fehler aus.
                         if (!Admin._entwurf.length) {
-                            Admin._entwurf.push({ id: '', name: '', typ: 'text' });
+                            Admin._entwurf.push({ id: neueKennung(), name: '', typ: 'text' });
                         }
                         Admin.spaltenZeichnen();
+                        // Mit der Spalte faellt ihr Feld in jeder Zeile weg.
+                        Admin.zeilenZeichnen();
                     });
                 }
             });
@@ -489,6 +557,96 @@
                 });
                 if (neu.length === Admin._entwurf.length) { Admin._entwurf = neu; }
                 Admin.spaltenZeichnen();
+                // Die Felder der Zeilen folgen der Spaltenreihenfolge.
+                Admin.zeilenZeichnen();
+            });
+        },
+
+        /** Die festen Zeilen des Arbeitsstands zeichnen.
+         *
+         *  Je Zeile ein Eingabefeld PRO `fest`-Spalte: der Text gehoert der
+         *  Zeile, nicht der Spalte – genau das ist der Unterschied zwischen
+         *  „Ueberschrift" und „Kriterium". Gibt es keine `fest`-Spalte, bleiben
+         *  nummerierte Zeilen ohne Text (zulaessig, siehe Modul-Docstring des
+         *  Backends).
+         */
+        zeilenZeichnen: function () {
+            var box = $('fbadm-zeilen');
+            if (!box) { return; }
+            var feste = (this._entwurf || []).filter(function (s) {
+                return s.typ === TYP_FEST;
+            });
+            var hint = $('fbadm-zeilen-hint');
+            if (hint) {
+                // ⚠ DREI ZUSTAENDE, NICHT ZWEI – und der mittlere ist der
+                // wichtigste: eine `fest`-Spalte OHNE Zeilen laesst sich gar
+                // nicht speichern. Der Hinweis sagt das VORHER; sonst drueckt
+                // der Administrator auf Speichern und bekommt eine Absage,
+                // deren Ursache er im Formular oben sucht.
+                var lage = !feste.length ? 'frei'
+                    : ((this._zeilen || []).length ? 'fest' : 'fehlt');
+                hint.textContent =
+                    lage === 'fest' ? t('fbadm.rows_fixed',
+                        'Der Benutzer bekommt genau diese Zeilen und kann keine eigenen anlegen. Der Text ist für ihn nur lesbar.')
+                    : lage === 'fehlt' ? t('fbadm.rows_need',
+                        'Die Spalte „fester Text" braucht mindestens eine Zeile – sonst lässt sich das Formular nicht speichern.')
+                    : t('fbadm.rows_free',
+                        'Ohne feste Zeilen legt der Benutzer seine Zeilen selbst an. Für eine Spalte vom Typ „fester Text" sind feste Zeilen nötig.');
+                // Die Lage steht auch als Klasse da – der Waechter misst die
+                // EIGENSCHAFT, nicht einen Wortlaut.
+                hint.className = 'fb-hint is-' + lage;
+            }
+            box.innerHTML = (this._zeilen || []).map(function (z, i) {
+                var felder = feste.map(function (sp) {
+                    return '<input type="text" class="fb-z-wert" maxlength="2000" '
+                        + 'data-sp="' + esc(sp.id) + '" data-idx="' + i + '" aria-label="'
+                        + esc((sp.name || t('fbadm.col_name', 'Überschrift'))
+                            + ' – ' + t('fbadm.row_n', 'Zeile {n}').replace('{n}', i + 1))
+                        + '" placeholder="' + esc(sp.name || '') + '">';
+                }).join('');
+                return '<div class="fb-z" data-id="z' + i + '" data-idx="' + i + '">'
+                    + griffMarkup(t('fbadm.drag_row', 'Zeile verschieben (ziehen oder Strg+Pfeil)'))
+                    + '<span class="fb-z-nr">' + (i + 1) + '</span>'
+                    + (felder || '<span class="fb-z-leer">'
+                        + esc(t('fbadm.row_nolabel', 'ohne Beschriftung')) + '</span>')
+                    + '<button type="button" class="fb-act fb-z-del" title="'
+                    + esc(t('fbadm.row_del', 'Zeile entfernen')) + '" aria-label="'
+                    + esc(t('fbadm.row_del', 'Zeile entfernen')) + '">'
+                    + window.JarvisIcons.trash() + '</button></div>';
+            }).join('');
+
+            // Werte setzen statt interpolieren: ein Anfuehrungszeichen im
+            // Kriteriumstext sprengt sonst das Attribut (Register).
+            box.querySelectorAll('.fb-z-wert').forEach(function (inp) {
+                var i = parseInt(inp.getAttribute('data-idx'), 10);
+                var sid = inp.getAttribute('data-sp');
+                var z = Admin._zeilen[i];
+                if (!z) { return; }
+                inp.value = (z.werte || {})[sid] || '';
+                inp.addEventListener('input', function () {
+                    if (!z.werte) { z.werte = {}; }
+                    z.werte[sid] = inp.value;
+                });
+            });
+            box.querySelectorAll('.fb-z-del').forEach(function (del, i) {
+                del.addEventListener('click', function () {
+                    Admin._zeilen.splice(i, 1);
+                    // Hier wird NICHT die letzte Zeile nachgelegt: „keine festen
+                    // Zeilen" ist ein gueltiger Zustand (der Benutzer legt sie
+                    // dann selbst an). Nur mit einer `fest`-Spalte ist er es
+                    // nicht – das faengt die Regel beim Speichern samt Grund ab.
+                    Admin.zeilenZeichnen();
+                });
+            });
+
+            ziehenBinden(box, 'fb-z', function (b) {
+                var neu = [];
+                b.querySelectorAll('.fb-z').forEach(function (z) {
+                    var i = parseInt(z.getAttribute('data-idx'), 10);
+                    if (!isNaN(i) && Admin._zeilen[i]) { neu.push(Admin._zeilen[i]); }
+                });
+                if (neu.length === Admin._zeilen.length) { Admin._zeilen = neu; }
+                Admin.zeilenZeichnen();
             });
         },
 
@@ -503,6 +661,10 @@
                 titel: ti.value,
                 beschreibung: de ? de.value : '',
                 spalten: this._entwurf || [],
+                // Immer mitschicken – auch leer. Der Server unterscheidet
+                // „nicht angegeben" (behalten) von „leer" (loeschen); wer die
+                // letzte feste Zeile entfernt, will sie auch los sein.
+                zeilen: this._zeilen || [],
                 // Beim Anlegen aktiv; beim Bearbeiten bleibt der Zustand, den
                 // der Schalter in der Zeile setzt – das Formular hier fasst ihn
                 // nicht an.

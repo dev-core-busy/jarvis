@@ -13857,6 +13857,7 @@ async def feedback_admin_formulare(user: str = Depends(require_local_auth)):
     return JSONResponse({"ok": True, "formulare": liste,
                          "typen": list(fb.SPALTEN_TYPEN),
                          "max_spalten": fb.MAX_SPALTEN,
+                         "max_feste_zeilen": fb.MAX_FESTE_ZEILEN,
                          "skill_aktiv": _skill_active("feedback")})
 
 
@@ -13892,21 +13893,32 @@ async def feedback_admin_sortieren(request: Request,
 @app.post("/api/feedback/admin/formulare")
 async def feedback_admin_speichern(request: Request,
                                    user: str = Depends(require_local_auth)):
-    """Formular anlegen oder aendern. Body: ``{id?, titel, beschreibung, spalten[], aktiv?}``."""
+    """Formular anlegen oder aendern.
+
+    Body: ``{id?, titel, beschreibung, spalten[], zeilen?[], aktiv?}``.
+
+    ⚠ `zeilen` WIRD NUR DURCHGEREICHT, WENN DER SCHLUESSEL DA IST. Fehlt er
+    (aelterer Client bei halbem Deploy), behaelt das Formular seine festen
+    Zeilen – ein `None` wuerde sie loeschen, und der Administrator saehe nach
+    dem Speichern eines Titels einen leeren Bewertungsbogen.
+    """
     from backend import feedback as fb  # noqa: PLC0415
     try:
         body = await request.json()
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungültiger JSON-Body."},
                             status_code=400)
+    body = body or {}
+    zeilen = body.get("zeilen") if "zeilen" in body else fb._ZEILEN_UNGESETZT
     try:
         eintrag = await asyncio.to_thread(
             fb.formular_speichern,
-            str((body or {}).get("id") or "").strip(),
-            str((body or {}).get("titel") or ""),
-            str((body or {}).get("beschreibung") or ""),
-            (body or {}).get("spalten"),
-            (body or {}).get("aktiv") is not False)
+            str(body.get("id") or "").strip(),
+            str(body.get("titel") or ""),
+            str(body.get("beschreibung") or ""),
+            body.get("spalten"),
+            body.get("aktiv") is not False,
+            zeilen)
     except fb.FeedbackFehler as f:
         return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
     return JSONResponse({"ok": True, "formular": eintrag})

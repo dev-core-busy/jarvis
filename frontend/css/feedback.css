@@ -37,6 +37,22 @@
    unbedienbar. */
 .fb-tab-wrap { overflow-x: auto; margin: 0 0 12px; }
 
+/* ⚠ BESTANDSFEHLER, gefunden bei der optischen Abnahme am 2026-09-15: auf
+   `/feedback` gab es GAR KEINE `.hidden`-Regel. `.hidden { display: none }`
+   steht nur in `chat.css`, und die laedt diese Seite nicht – `classList.add
+   ('hidden')` war damit wirkungslos. Betroffen waren die Formular-Auswahl
+   `#fb-pick` (sichtbar, obwohl es nur EIN Formular gibt), der Ladezustand von
+   `#fb-app` und der „+ Zeile"-Knopf bei festen Zeilen.
+
+   Ein jsdom-Waechter kann das strukturell nicht sehen: die KLASSE ist gesetzt,
+   nur gemalt wird trotzdem. Gesehen hat es der Screenshot.
+
+   `!important`, weil die versteckten Elemente eigene `display`-Werte tragen
+   (`.ja-btn` ist `inline-flex`, `.fb-pick` ist `flex`) und eine Klassenregel
+   sonst gleich stark waere – dieselbe Falle wie `.sp-row[hidden]` in `/sap`
+   (Register). */
+.hidden { display: none !important; }
+
 .fb-tab { width: 100%; border-collapse: collapse; font-size: .9rem; }
 
 .fb-tab th, .fb-tab td {
@@ -58,6 +74,20 @@
     width: 1%; white-space: nowrap; color: var(--text-muted); font-size: .8rem;
 }
 .fb-tab th.fb-c-akt, .fb-tab td.fb-c-akt { width: 1%; white-space: nowrap; }
+
+/* ⚠ DIE FESTE ZELLE IST INHALT, KEINE BESCHRIFTUNG – deshalb
+   `--text-primary` und halbfett, nicht `--text-muted`: sie traegt die Frage,
+   auf die sich die Bewertung daneben bezieht, und wird GELESEN. Gedaempft
+   liegt sie in beiden Themen unter 4,5:1 (Register).
+   Kein `white-space: nowrap`: ein Kriterium ist ein Satz und soll umbrechen,
+   statt die Tabelle breiter zu machen als das Fenster. */
+.fb-tab td.fb-c-fest {
+    color: var(--text-primary); font-weight: 600;
+    max-width: 22em; overflow-wrap: anywhere;
+}
+/* In einem Bogen mit festen Zeilen ist die erste Spalte die Frage – sie darf
+   den Eingabefeldern nicht den Platz nehmen. */
+.fb-tab.is-fest td.fb-c-fest { width: 30%; }
 
 .fb-tab input[type="text"] {
     width: 100%; box-sizing: border-box; min-width: 140px;
@@ -191,8 +221,8 @@
 .fb-griff:hover { color: var(--text-primary); }
 .fb-griff:active { cursor: grabbing; }
 .fb-griff:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.fb-card.is-zieht, .fb-sp.is-zieht { opacity: .45; }
-.fb-card.is-ziel, .fb-sp.is-ziel {
+.fb-card.is-zieht, .fb-sp.is-zieht, .fb-z.is-zieht { opacity: .45; }
+.fb-card.is-ziel, .fb-sp.is-ziel, .fb-z.is-ziel {
     border-color: var(--accent);
     box-shadow: inset 0 0 0 1px var(--accent);
 }
@@ -238,6 +268,34 @@
 /* Die Felder IN der Spaltenzeile duerfen die 100%-Regel von `.fb-feld` nicht
    erben – sonst sprengt der Name die Zeile. */
 .fb-feld .fb-sp input[type="text"] { width: auto; }
+
+/* ── Feste Zeilen im Editor ────────────────────────────────────────────────
+   Bauform der Spaltenzeile: EIN Container je Zeile, Griff links, Muelleimer
+   rechts, dazwischen je ein Feld pro `fest`-Spalte. */
+.fb-z {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+    padding: 6px; border: 1px solid var(--border);
+    border-radius: var(--radius-sm); background: var(--bg-secondary);
+}
+/* `min-width: 0` ist Pflicht: ein Flex-Kind schrumpft von sich aus nicht unter
+   seine Inhaltsbreite – ohne die Zeile schiebt ein langer Kriteriumstext den
+   Muelleimer aus dem Container (Register). */
+.fb-z .fb-z-wert { flex: 1 1 auto; min-width: 0; }
+.fb-z .fb-z-nr {
+    flex: 0 0 auto; min-width: 1.4em; text-align: right;
+    font-size: .8rem; color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+.fb-z .fb-z-leer {
+    flex: 1 1 auto; font-size: .85rem; color: var(--text-secondary);
+    font-style: italic;
+}
+/* Wie bei `.fb-sp`: die 100%-Regel von `.fb-feld` wuerde die Zeile sprengen. */
+.fb-feld .fb-z input[type="text"] { width: auto; }
+.fb-hint {
+    margin: 0 0 6px; font-size: .8rem; color: var(--text-secondary);
+    line-height: 1.5;
+}
 
 .fb-edit-akt { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .fb-edit-status { font-size: .85rem; }

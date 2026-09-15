@@ -35,6 +35,8 @@ DATEIEN = [
     "frontend/js/app.js",
     "frontend/feedback.html",
     "frontend/settings.html",
+    "frontend/css/feedback.css",
+    "frontend/js/i18n.js",
     "frontend/portal.html",
     "tests/test_feedback.py",
     "tests/test_feedback_ui.js",
@@ -49,8 +51,11 @@ PROBEN = [
     ("unbekannter Spaltentyp wird durchgelassen", "backend/feedback.py",
      "        if typ not in SPALTEN_TYPEN:",
      "        if False:", BACKEND),
+    # ⚠ NACHGEZOGEN 2026-09-15: die Bedingung traegt jetzt zusaetzlich die
+    # Laengengrenze. Eine Probe, die ihren Anker nicht mehr findet, meldet
+    # „trifft nicht" und sieht wie ein zahnloser Waechter aus.
     ("die Spalten-Kennung wird beim Bearbeiten neu vergeben", "backend/feedback.py",
-     "        if not sid or sid in gesehen or not sid.isalnum():",
+     "        if not sid or sid in gesehen or not sid.isalnum() or len(sid) > _ID_MAX:",
      "        if True:", BACKEND),
     ("unbekannte Spalten landen in der Abgabe", "backend/feedback.py",
      "        for sp in spalten:\n            anzeige, wert = _zelle_pruefen(sp, z.get(sp[\"id\"]))",
@@ -167,8 +172,11 @@ PROBEN = [
     ("die Zahl neben den Sternen fehlt", "frontend/js/feedback.js",
      "            anzeige.textContent = n ? (n + '/5') : '–';",
      "            anzeige.textContent = '';", UI),
+    # ⚠ NACHGEZOGEN 2026-09-15: die Pruefung heisst jetzt `_zeilen.some(gefuellt)`
+    # (sie muss `fest`-Spalten ausnehmen, sonst gilt jede feste Zeile als
+    # ausgefuellt, nur weil ihr Kriterium dasteht).
     ("eine leere Abgabe wird trotzdem gesendet", "frontend/js/feedback.js",
-     "        if (!voll.length) {",
+     "        if (!_zeilen.some(gefuellt)) {",
      "        if (false) {", UI),
     ("die Auswahl erscheint auch bei EINEM Formular", "frontend/js/feedback.js",
      "        pick.classList.toggle('hidden', _formulare.length < 2);",
@@ -204,14 +212,129 @@ PROBEN = [
     # undefined, `app.js` faengt das mit `if (window.FeedbackAdmin)` ab – und der
     # Reiter bleibt STILL leer. Der UI-Waechter kann das nicht sehen: er laedt die
     # Datei selbst.
+    # ⚠ OHNE CACHE-BUSTER IM ANKER: die erste Fassung suchte `?v=1` und traf
+    # nach dem naechsten Hochzaehlen nicht mehr – eine Probe, die ihr Ziel
+    # verfehlt, sieht wie ein zahnloser Waechter aus (2026-09-15 passiert).
     ("feedback_admin.js wird gar nicht eingebunden", "frontend/settings.html",
-     '    <script src="/static/js/feedback_admin.js?v=1"></script>\n',
-     "", BACKEND),
+     'src="/static/js/feedback_admin.js', 'src="/static/js/gibtesnicht.js', BACKEND),
     ("der Loeschknopf traegt ein × statt des Muelleimers", "frontend/js/feedback_admin.js",
      "                    + window.JarvisIcons.trash() + '</button>'\n"
      "                    + '</div></div>';",
      "                    + '×</button>'\n"
      "                    + '</div></div>';", UI),
+
+    # ── Feste Zeilen + Spaltentyp `fest` (2026-09-15) ──────────────────────
+    # Die tragende Zusage zuerst: der feste Text kommt aus der DEFINITION.
+    ("⚠ der feste Text kommt aus dem REQUEST", "backend/feedback.py",
+     '                zeile[sp["id"]] = (fz.get("werte") or {}).get(sp["id"], "")',
+     '                zeile[sp["id"]] = geliefert.get(sp["id"], "")', BACKEND),
+    ("die Regel `fest` braucht feste Zeilen ist ausgebaut", "backend/feedback.py",
+     '        if any(s["typ"] == TYP_FEST for s in sp) and not fz:',
+     "        if False:", BACKEND),
+    ("ein Formular nur aus `fest`-Spalten wird angenommen", "backend/feedback.py",
+     '    if all(s["typ"] == TYP_FEST for s in raus):',
+     "    if False:", BACKEND),
+    ("die Reihenfolge kommt aus dem Request", "backend/feedback.py",
+     "    for fz in feste:\n"
+     "        geliefert = eingang.get(fz[\"id\"]) or {}",
+     "    for fz in [eingang.get(f2[\"id\"]) or f2 for f2 in reversed(feste)]:\n"
+     "        geliefert = eingang.get(fz.get(\"id\")) or {}", BACKEND),
+    # ⚠ `gefuellt` gilt ueber ALLE Zeilen. Eine Sabotage `if gefuellt: append`
+    # ist deshalb wirkungslos, sobald die erste Zeile etwas traegt – sie sah wie
+    # ein zahnloser Waechter aus und war eine schlecht platzierte Probe.
+    ("leere feste Zeilen fallen aus der Abgabe", "backend/feedback.py",
+     "        raus.append(zeile)\n    if not gefuellt:",
+     "        if any(zeile.get(s2[\"id\"]) for s2 in spalten if s2[\"typ\"] != TYP_FEST):\n"
+     "            raus.append(zeile)\n    if not gefuellt:", BACKEND),
+    ("eine Abgabe ohne jede Eingabe wird angenommen", "backend/feedback.py",
+     "    if not gefuellt:\n"
+     '        raise FeedbackFehler("Es ist keine einzige Zeile ausgefuellt.")\n'
+     "    return raus",
+     "    if False:\n"
+     '        raise FeedbackFehler("Es ist keine einzige Zeile ausgefuellt.")\n'
+     "    return raus", BACKEND),
+    ("die Zeilen-Kennung wird neu vergeben", "backend/feedback.py",
+     "        if not zid or zid in gesehen or not zid.isalnum() or len(zid) > _ID_MAX:",
+     "        if True:", BACKEND),
+    ("die Zeilen-Kennung fehlt in der Abgabe", "backend/feedback.py",
+     '        zeile: dict = {ZEILEN_ID: fz["id"]}',
+     "        zeile: dict = {}", BACKEND),
+    ("ein Vorgabewert wird auch fuer Text-Spalten uebernommen", "backend/feedback.py",
+     "            for sid in fest_ids:",
+     "            for sid in list(roh_werte.keys()):", BACKEND),
+    ("die Kennung ist wieder unbegrenzt lang", "backend/feedback.py",
+     "_ID_MAX = 32", "_ID_MAX = 10 ** 9", BACKEND),
+    ("der Sentinel ist weg – ein alter Client loescht die Zeilen",
+     "backend/main.py",
+     '    zeilen = body.get("zeilen") if "zeilen" in body else fb._ZEILEN_UNGESETZT',
+     '    zeilen = body.get("zeilen")', BACKEND),
+
+    # ── Oberflaeche ────────────────────────────────────────────────────────
+    # ⚠ EINDEUTIGER ANKER: `if (s.typ === TYP_FEST) {` steht viermal in der
+    # Datei – die erste Fassung meldete „trifft nicht (4x)".
+    ("die feste Zelle wird als Eingabefeld gerendert", "frontend/js/feedback.js",
+     "                    td.className = 'fb-c-fest';",
+     "                    td.className = 'fb-c-egal'; if (false)", UI),
+    ("die festen Zeilen werden gar nicht aufgebaut", "frontend/js/feedback.js",
+     "        _zeilen = _aktiv ? zeilenAufbauen() : [];",
+     "        _zeilen = _aktiv ? [leereZeile()] : [];", UI),
+    ("der Muelleimer bleibt bei festen Zeilen stehen", "frontend/js/feedback.js",
+     "            if (fest) {\n                tbody.appendChild(tr);\n                return;\n            }",
+     "            if (false) {\n                tbody.appendChild(tr);\n                return;\n            }", UI),
+    ("„+ Zeile\" bleibt bei festen Zeilen sichtbar", "frontend/js/feedback.js",
+     "        if (neu) { neu.classList.toggle('hidden', !!(_aktiv && festeZeilen().length)); }",
+     "        if (neu) { neu.classList.toggle('hidden', false); }", UI),
+    ("der Handler laesst eine erzwungene Zeile zu", "frontend/js/feedback.js",
+     "                if (!_aktiv || festeZeilen().length) { return; }",
+     "                if (!_aktiv) { return; }", UI),
+    ("nur die gefuellten festen Zeilen gehen raus", "frontend/js/feedback.js",
+     "        var voll = (fest ? _zeilen : _zeilen.filter(gefuellt)).map(function (z) {",
+     "        var voll = _zeilen.filter(gefuellt).map(function (z) {", UI),
+    ("⚠ der feste Text wird mitgeschickt", "frontend/js/feedback.js",
+     "                if (s.typ !== TYP_FEST) { raus[s.id] = z[s.id]; }",
+     "                raus[s.id] = z[s.id];", UI),
+    ("die Zeilen-Kennung geht nicht mit", "frontend/js/feedback.js",
+     "            if (z[ZEILEN_ID]) { raus[ZEILEN_ID] = z[ZEILEN_ID]; }",
+     "            if (false) { raus[ZEILEN_ID] = z[ZEILEN_ID]; }", UI),
+    ("eine `fest`-Spalte zaehlt als ausgefuellt", "frontend/js/feedback.js",
+     "                if (s.typ === TYP_FEST) { return false; }",
+     "                if (false) { return false; }", UI),
+    ("der Typname driftet gegen das Backend", "frontend/js/feedback.js",
+     "    var TYP_FEST = 'fest';", "    var TYP_FEST = 'festtext';", BACKEND),
+    ("die Zeilen-Kennung driftet gegen das Backend", "frontend/js/feedback.js",
+     "    var ZEILEN_ID = '_zid';", "    var ZEILEN_ID = '_zeile';", BACKEND),
+    ("der Editor zieht die Zeilen bei einem Typwechsel nicht nach",
+     "frontend/js/feedback_admin.js",
+     "                        Admin._entwurf[i].typ = typ.value;",
+     "                        Admin._entwurf[i].typ = typ.value; return;", UI),
+    ("der Editor vergibt keine Spalten-Kennung", "frontend/js/feedback_admin.js",
+     "function neueKennung() {", "function _unbenutzt_neueKennung() {", BACKEND),
+    ("der Zeilen-Arbeitsstand ist eine REFERENZ, kein Kopie",
+     "frontend/js/feedback_admin.js",
+     "                    Object.keys(z.werte || {}).forEach(function (k) { w[k] = z.werte[k]; });\n"
+     "                    return { id: z.id, werte: w };",
+     "                    return { id: z.id, werte: z.werte };", BACKEND),
+    ("der Editor schickt die festen Zeilen nicht mit",
+     "frontend/js/feedback_admin.js",
+     "                zeilen: this._zeilen || [],", "", UI),
+    ("`min-width: 0` fehlt – der Muelleimer wandert aus der Zeile",
+     "frontend/css/feedback.css",
+     ".fb-z .fb-z-wert { flex: 1 1 auto; min-width: 0; }",
+     ".fb-z .fb-z-wert { flex: 1 1 auto; }", BACKEND),
+    ("die feste Zelle ist gedaempft (unter 4,5:1)", "frontend/css/feedback.css",
+     "    color: var(--text-primary); font-weight: 600;",
+     "    color: var(--text-muted); font-weight: 600;", BACKEND),
+    ("die `.hidden`-Regel fehlt wieder (Bestandsfehler)",
+     "frontend/css/feedback.css",
+     ".hidden { display: none !important; }", "", BACKEND),
+    ("ein i18n-Text fehlt auf Englisch", "frontend/js/i18n.js",
+     "        'fbadm.typ_fest':        'Fixed text (read-only)',", "", BACKEND),
+    # Der dritte Hinweis-Zustand: `fest`-Spalte, aber (noch) keine Zeile.
+    ("der Hinweis kennt den nicht speicherbaren Zustand nicht",
+     "frontend/js/feedback_admin.js",
+     "                var lage = !feste.length ? 'frei'\n"
+     "                    : ((this._zeilen || []).length ? 'fest' : 'fehlt');",
+     "                var lage = !feste.length ? 'frei' : 'fest';", UI),
 ]
 
 

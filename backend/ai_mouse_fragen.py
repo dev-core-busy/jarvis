@@ -177,40 +177,102 @@ def _saeen(d: dict) -> bool:
     return geaendert
 
 
+def _uebernommene(d: dict, k: str) -> list:
+    """Die Vorgabe-Kennungen, die DIESER Benutzer schon bekommen hat.
+
+    ⚠ MIT MIGRATION AUS DEM ALTBESTAND, und die ist der heikle Teil. Bis
+    2026-09-15 gab es nur ``gesaet_fuer: [benutzer]`` – „der war schon dran",
+    ohne zu wissen, WELCHE Vorgaben er bekommen hat. Wer dort steht, bekommt
+    deshalb die Kennungen der Vorgaben eingetragen, deren TITEL er heute
+    besitzt.
+
+    **Der Preis steht hier und nicht im Kleingedruckten:** wer eine Kopie
+    geloescht UND die zugehoerige Vorgabe behalten hat, bekommt sie beim
+    naechsten Zugriff genau einmal zurueck. Die Abwaegung ist eindeutig – das
+    kostet einen Klick, waehrend der Gegenfall (neue Vorgaben erreichen
+    niemanden, der schon einmal da war) den Administrator glauben laesst, seine
+    Pflege sei wirkungslos. Genau das wurde am 2026-09-15 zehnmal gemeldet.
+    """
+    karte = d.setdefault("vorgaben_bekommen", {})
+    if not isinstance(karte, dict):
+        karte = d["vorgaben_bekommen"] = {}
+    have = karte.get(k)
+    if isinstance(have, list):
+        return have
+    # Altbestand: ueber den TITEL zuordnen, was er schon hat.
+    gesaet = d.get("gesaet_fuer")
+    if isinstance(gesaet, list) and k in gesaet:
+        titel = {str(e.get("titel") or "") for e in (d["benutzer"].get(k) or [])
+                 if isinstance(e, dict)}
+        have = [str(v.get("id") or "") for v in (d.get("vorgaben") or [])
+                if isinstance(v, dict) and str(v.get("titel") or "") in titel]
+    else:
+        have = []
+    karte[k] = have
+    return have
+
+
 def _uebernehmen(d: dict, user: str) -> bool:
-    """Die Vorgaben EINMALIG in die eigene Liste des Benutzers kopieren.
+    """Vorgaben in die eigene Liste kopieren – auch NEU hinzugekommene.
 
     ⚠ MIT NEUEN KENNUNGEN: die Kopien gehoeren ab jetzt IHM – aendert der
     Administrator spaeter eine Vorgabe, bleibt seine Fassung, wie sie ist. Das
     ist der Sinn von „Vorgabe beim ersten Start" (und der Unterschied zu einer
     gemeinsamen Frage).
 
-    ⚠ DER MARKER JE BENUTZER IST PFLICHT. Ohne ihn kaemen geloeschte Vorgaben
-    beim naechsten Start zurueck – dieselbe Einbahnstrasse wie beim
-    Willkommens-Chat, nur andersherum: dort durfte er nicht wiederkommen,
-    hier darf er es genauso wenig. Die Bedingung ist deshalb der MARKER und
-    NICHT „hat der Benutzer schon Fragen": wer seine letzte Frage loescht,
-    bekaeme sonst die ganze Vorgabeliste zurueck.
+    ⚠ DER MARKER IST JE VORGABE, NICHT JE BENUTZER – und das ist der Fix vom
+    2026-09-15. Vorher hiess „schon dran gewesen" pauschal „bekommt nie wieder
+    etwas": ein Administrator konnte die Vorgabe-Liste pflegen, und fuer jeden
+    Bestandsbenutzer war das **wirkungslos**. Gemeldet mit acht gepflegten
+    Vorgaben und sechs Eintraegen im Menue.
+
+    ⚠ GELOESCHTES KOMMT TROTZDEM NICHT ZURUECK. Die Bedingung ist weiterhin der
+    MARKER und NICHT „hat er diese Frage": wer eine Kopie wegwirft, hat die
+    Vorgabe bekommen – dieselbe Einbahnstrasse wie beim Willkommens-Chat, nur
+    andersherum.
     """
     k = _norm(user)
     if not k:
         return False
-    gesaet = d.setdefault("gesaet_fuer", [])
-    if not isinstance(gesaet, list):
-        gesaet = d["gesaet_fuer"] = []
-    if k in gesaet:
-        return False
+    have = _uebernommene(d, k)
     eigen = d["benutzer"].setdefault(k, [])
-    frei = max(0, MAX_JE_BENUTZER - len(eigen))
-    for e in (d.get("vorgaben") or [])[:frei]:
-        if isinstance(e, dict) and e.get("titel"):
-            eigen.append(_neu(e.get("titel", ""), e.get("prompt", "")))
-    gesaet.append(k)
-    return True
+    geaendert = False
+    for e in (d.get("vorgaben") or []):
+        if not isinstance(e, dict) or not e.get("titel"):
+            continue
+        vid = str(e.get("id") or "")
+        if not vid or vid in have:
+            continue
+        have.append(vid)
+        geaendert = True
+        # Der Deckel gilt je Zugriff neu – sonst schiebt eine volle Liste die
+        # Kennung ungenutzt in `have` und die Vorgabe waere still verloren.
+        if len(eigen) < MAX_JE_BENUTZER:
+            eigen.append(_neu(e.get("titel", ""), e.get("prompt", ""), vid))
+        else:
+            have.remove(vid)
+    # `gesaet_fuer` weiter pflegen: ein Rueckschritt auf den alten Stand darf
+    # nicht die ganze Liste ein zweites Mal kopieren.
+    gesaet = d.setdefault("gesaet_fuer", [])
+    if isinstance(gesaet, list) and k not in gesaet:
+        gesaet.append(k)
+        geaendert = True
+    return geaendert
 
 
-def _neu(titel: str, prompt: str) -> dict:
-    return {"id": secrets.token_hex(6), "titel": titel, "prompt": prompt}
+def _neu(titel: str, prompt: str, von: str = "") -> dict:
+    """Ein neuer Eintrag. ``von`` ist die Kennung der QUELL-Vorgabe.
+
+    ⚠ ``von`` IST DER GANZE UNTERSCHIED ZWISCHEN „einmal gesät" UND „wird
+    nachgereicht". Ohne diese Spur lässt sich später nicht sagen, welche
+    Vorgabe ein Benutzer schon bekommen hat – die Kopie trägt bewusst eine
+    EIGENE Kennung (sie gehört ab jetzt ihm), und der Titel ist keine
+    Identität: er darf umbenannt werden.
+    """
+    e = {"id": secrets.token_hex(6), "titel": titel, "prompt": prompt}
+    if von:
+        e["von_vorgabe"] = von
+    return e
 
 
 def _pruefe(titel: str, prompt: str) -> tuple[str, str]:
@@ -304,11 +366,15 @@ def vorgaben_liste() -> list[dict]:
 def vorgabe_speichern(fid: str, titel: str, prompt: str) -> dict:
     """Vorgabe anlegen (``fid`` leer) oder aendern.
 
-    ⚠ WIRKT NUR AUF BENUTZER, DIE ES NOCH NICHT GAB. Wer die Vorgaben schon
-    bekommen hat, behaelt SEINE Fassung – das ist die Zusage von „Vorgabe beim
-    ersten Start" und der Grund, warum die Kopien eigene Kennungen tragen. Die
-    Oberflaeche sagt das ausdruecklich, sonst wartet ein Administrator auf eine
-    Wirkung, die nicht kommt.
+    ⚠ EINE NEUE VORGABE ERREICHT AUCH BESTANDSBENUTZER – seit 2026-09-15. Sie
+    wird beim naechsten Zugriff in ihre Liste kopiert (``_uebernehmen``, Marker
+    je Vorgabe). Bis dahin galt „einmal gesaet, nie wieder": die Pflege dieser
+    Liste war fuer jeden, der schon einmal da war, **wirkungslos**.
+
+    ⚠ EINE GEAENDERTE VORGABE WIRKT WEITERHIN NICHT RUECKWIRKEND. Wer die
+    Vorgabe schon hat, behaelt SEINE Fassung – das ist der Sinn von „Vorgabe"
+    (und der Unterschied zu einer gemeinsamen Frage, die allen gehoert). Wer
+    eine Aenderung bei allen sehen will, nimmt eine gemeinsame Frage.
     """
     t, p = _pruefe(titel, prompt)
     with _SPERRE:

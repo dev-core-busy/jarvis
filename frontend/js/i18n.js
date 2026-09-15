@@ -105,9 +105,9 @@ const _I18N = {
         // Vorgabe-Fragen: die VORLAGE fuer neue Benutzer. Der Unterschied zu
         // einer gemeinsamen Frage steht in den Hinweisen – er ist von aussen
         // nicht zu erraten.
-        'amvorg.h':              'Vorgabe-Fragen für neue Benutzer',
-        'amvorg.intro':          'Diese Einträge bekommt ein Benutzer <b>beim ersten Start</b> von AI-Maus in sein Menü kopiert. Ab dann gehören sie ihm: er darf sie ändern, ergänzen und löschen – seine Fassung bleibt erhalten.',
-        'amvorg.warn':           '⚠ Eine Änderung hier wirkt nur für Benutzer, die AI-Maus <b>noch nie</b> benutzt haben. Wer die Vorgaben schon bekommen hat, behält seine eigenen – das ist der Sinn einer Vorgabe. Eine Frage, die <b>für alle verbindlich</b> gelten soll, wird stattdessen im Portal unter <b>AI-Maus → Meine Fragen</b> als „für alle" angelegt.',
+        'amvorg.h':              'Vorgabe-Fragen für das Menü',
+        'amvorg.intro':          'Diese Einträge bekommt jeder Benutzer in sein Menü kopiert – beim ersten Start, und eine <b>neu hinzugefügte</b> Vorgabe auch später. Ab dann gehören sie ihm: er darf sie ändern, ergänzen und löschen – seine Fassung bleibt erhalten.',
+        'amvorg.warn':           '⚠ Eine <b>geänderte</b> Vorgabe wirkt nicht rückwirkend: wer sie schon hat, behält seine Fassung – das ist der Sinn einer Vorgabe. Eine Frage, die <b>für alle verbindlich</b> gelten und sich zentral ändern lassen soll, wird stattdessen im Portal unter <b>AI-Maus → Meine Fragen</b> als „für alle" angelegt.',
         'amvorg.new':            '+ Vorgabe',
         'amvorg.empty':          'Keine Vorgaben – neue Benutzer starten dann mit einem leeren Menü.',
         'amvorg.f_titel':        'Titel (Menüzeile)',
@@ -3642,9 +3642,9 @@ const _I18N = {
         'amtool.saved':          '✓ Enabled:',
         'amtool.nothing':        'nothing',
         'amtool.none':           'No areas available.',
-        'amvorg.h':              'Default questions for new users',
-        'amvorg.intro':          'A user receives these entries in their menu <b>on first start</b> of AI-Mouse. From then on they belong to that user: they can change, extend and delete them – their version stays.',
-        'amvorg.warn':           '⚠ A change here only affects users who have <b>never</b> used AI-Mouse. Anyone who already received the defaults keeps their own – that is what a default is for. A question that must apply to <b>everyone</b> is created in the portal under <b>AI-Mouse → My questions</b> as “for everyone” instead.',
+        'amvorg.h':              'Default questions for the menu',
+        'amvorg.intro':          'Every user receives these entries in their menu – on first start, and a <b>newly added</b> default later on as well. From then on they belong to that user: they can change, extend and delete them – their version stays.',
+        'amvorg.warn':           '⚠ A <b>changed</b> default does not apply retroactively: anyone who already has it keeps their version – that is what a default is for. A question that must apply to <b>everyone</b> and stay centrally editable is created in the portal under <b>AI-Mouse → My questions</b> as “for everyone” instead.',
         'amvorg.new':            '+ Default',
         'amvorg.empty':          'No defaults – new users then start with an empty menu.',
         'amvorg.f_titel':        'Title (menu entry)',

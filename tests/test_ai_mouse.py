@@ -1466,13 +1466,31 @@ check("nach dem Loeschen ALLER Fragen ist die Liste leer", amf.liste("neu.benutz
 check("⚠ und sie bleibt leer – die Vorgaben kommen nicht zurueck",
       amf.liste("neu.benutzer") == [])
 
-# (e) Eine spaetere Aenderung der Vorgaben erreicht Bestandsbenutzer NICHT.
+# (e) ⚠ EINE NEUE VORGABE ERREICHT AUCH BESTANDSBENUTZER (Fix 2026-09-15).
+#     Bis dahin stand hier das GEGENTEIL als Zusage – der Waechter hatte das
+#     Symptom festgeschrieben und haette jede Behebung abgelehnt. Gemeldet mit
+#     acht gepflegten Vorgaben und sechs Eintraegen im Menue.
+vorher = len(amf.liste("bestand.benutzer"))          # legt ihn als Bestand an
 amf.vorgabe_speichern("", "Ganz neue Vorgabe", "Text dazu")
 check("die neue Vorgabe steht in der Vorlage", "Ganz neue Vorgabe" in _titel(amf.vorgaben_liste()))
-check("⚠ ein Bestandsbenutzer bekommt sie NICHT nachtraeglich",
-      "Ganz neue Vorgabe" not in _titel(amf.liste("neu.benutzer")))
-check("ein WEITERER neuer Benutzer bekommt sie dagegen schon",
+_nach = _titel(amf.liste("bestand.benutzer"))
+check("⚠ ein Bestandsbenutzer bekommt sie NACHTRAEGLICH",
+      "Ganz neue Vorgabe" in _nach)
+check("…und zwar GENAU EINMAL (kein Zuwachs bei jedem Abruf)",
+      len(amf.liste("bestand.benutzer")) == vorher + 1)
+check("ein WEITERER neuer Benutzer bekommt sie ebenfalls",
       "Ganz neue Vorgabe" in _titel(amf.liste("zweiter.benutzer")))
+# ⚠ DIE GEGENRICHTUNG BLEIBT: geloescht ist geloescht.
+_id = [e["id"] for e in amf.liste("bestand.benutzer")
+       if e["titel"] == "Ganz neue Vorgabe"][0]
+amf.loeschen("bestand.benutzer", _id)
+check("⚠ und einmal geloescht kommt sie NICHT zurueck",
+      "Ganz neue Vorgabe" not in _titel(amf.liste("bestand.benutzer")))
+# Eine GEAENDERTE Vorgabe wirkt weiterhin nicht rueckwirkend.
+_vid = [v["id"] for v in amf.vorgaben_liste() if v["titel"] == "Ganz neue Vorgabe"][0]
+amf.vorgabe_speichern(_vid, "Umbenannt", "Text dazu")
+check("eine UMBENANNTE Vorgabe kommt nicht als neue durch",
+      "Umbenannt" not in _titel(amf.liste("bestand.benutzer")))
 
 # (f) Der Altbestand der gemeinsamen Fragen wird EINMALIG geraeumt – und eine
 #     danach angelegte gemeinsame Frage ueberlebt. Ohne den Marker waere die
@@ -1593,9 +1611,19 @@ def _i18n_wert(schluessel, ab=0):
 
 _w_de, _p_de = _i18n_wert("amvorg.warn")
 _w_en, _ = _i18n_wert("amvorg.warn", _p_de + 10 if _p_de >= 0 else 0)
-check("der Hinweis (DE) sagt, dass eine Aenderung Bestandsbenutzer NICHT erreicht",
-      "noch nie" in _w_de)
-check("der Hinweis (EN) ebenso", "never" in _w_en)
+# ⚠ DIE ZUSAGE HAT SICH AM 2026-09-15 GEDREHT: eine NEUE Vorgabe erreicht jetzt
+# jeden, eine GEAENDERTE weiterhin nur Neulinge. Der Hinweis muss die Grenze
+# benennen – vorher versprach er das Gegenteil und schickte den Administrator
+# auf eine Wirkung, die nicht kommt.
+check("der Hinweis (DE) nennt die Grenze: GEAENDERT wirkt nicht rueckwirkend",
+      "nderte" in _w_de and "ckwirkend" in _w_de)
+check("der Hinweis (EN) ebenso",
+      "changed" in _w_en and "retroactively" in _w_en)
+_i_de, _pi = _i18n_wert("amvorg.intro")
+_i_en, _ = _i18n_wert("amvorg.intro", _pi + 10 if _pi >= 0 else 0)
+check("die Einleitung (DE) sagt, dass NEUE Vorgaben auch spaeter ankommen",
+      "auch sp" in _i_de)
+check("die Einleitung (EN) ebenso", "later on" in _i_en)
 check("Positivkontrolle: es sind zwei VERSCHIEDENE Texte (DE und EN gefunden)",
       bool(_w_de) and bool(_w_en) and _w_de != _w_en)
 check("CSS: min-width am Textteil (sonst schiebt ein langer Prompt die Knoepfe raus)",

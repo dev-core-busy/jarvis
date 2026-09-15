@@ -329,8 +329,15 @@ def _():
 
 @probe("Version nicht hochgezaehlt")
 def _():
-    ersetze("ai-mouse/src/AiMouse/AiMouse.csproj", "<Version>1.0.8</Version>",
-            "<Version>1.0.7</Version>")
+    # ⚠ NICHT die Zahl festschreiben – sie wandert. Gemessen wird die
+    # EIGENSCHAFT: die gesetzte Version zurueckdrehen, welche auch immer es ist.
+    import re as _re
+    q = (ROOT / "ai-mouse/src/AiMouse/AiMouse.csproj").read_text(encoding="utf-8")
+    m = _re.search(r"<Version>(\d+)\.(\d+)\.(\d+)</Version>", q)
+    assert m, "Versionszeile nicht gefunden"
+    vor = "%s.%s.%d" % (m.group(1), m.group(2), int(m.group(3)) - 1)
+    ersetze("ai-mouse/src/AiMouse/AiMouse.csproj", m.group(0),
+            "<Version>%s</Version>" % vor)
 
 
 # ── h) Der Waechter selbst ────────────────────────────────────────────────
@@ -396,6 +403,66 @@ def _():
             '_dk24_code = "\\n".join(z for z in _dk24.splitlines()\n'
             '                       if not z.strip().startswith("//"))',
             "_dk24_code = _dk24")
+
+
+# ── j) Der stille Fehlschlag beim Laden der Fragen (1.0.9) ────────────────
+@probe("DER GEMELDETE FALL: der Abruffehler ist wieder still")
+def _():
+    s = lies(TR)
+    i = s.index("        catch (Exception ex)\n        {")
+    j = s.index("\n        }\n", i)
+    (ROOT / TR).write_text(
+        s[:i] + "        catch (Exception)\n        {\n" + s[j:], encoding="utf-8")
+
+
+@probe("'Server lieferte 0' bleibt still")
+def _():
+    s = lies(TR)
+    i = s.index("            else\n            {")
+    j = s.index("BuildPromptMenu();", i) + len("BuildPromptMenu();")
+    (ROOT / TR).write_text(s[:i] + "            else\n            {\n" + s[j:],
+                           encoding="utf-8")
+
+
+@probe("ein Erfolg loescht den Grund nicht (Warnung bleibt haengen)")
+def _():
+    ersetze(TR, "                _fragenFehler = null;\n", "")
+
+
+@probe("der Grund steht nicht im Menue")
+def _():
+    s = lies(TR)
+    i = s.index("        if (_fragenFehler is not null)")
+    j = s.index("        _promptMenu.Items.Add(new ToolStripSeparator());", i)
+    (ROOT / TR).write_text(s[:i] + s[j:], encoding="utf-8")
+
+
+@probe("der Warn-Eintrag laesst sich nicht erneut anstossen")
+def _():
+    ersetze(TR,
+            "            warn.Click += async (_, _) => await FragenNachladenAsync().ConfigureAwait(true);\n",
+            "")
+
+
+@probe("abgelaufene Anmeldung wird wie ein Netzfehler benannt")
+def _():
+    ersetze(TR, "            _fragenFehler = ex is AnmeldungNoetigException\n"
+                "                ? Texte.AnmeldungFehlt : Kurzgrund(ex);",
+            "            _fragenFehler = Kurzgrund(ex);")
+
+
+@probe("der Grund wird nicht gekuerzt (mehrzeilig im Menue)")
+def _():
+    ersetze(TR, '        string t = (ex.Message ?? string.Empty).Trim().ReplaceLineEndings(" ");',
+            "        string t = (ex.Message ?? string.Empty).Trim();")
+
+
+@probe("die neuen Texte gibt es nur auf Deutsch (Fragenliste)")
+def _():
+    ersetze(TX, '    public static string FragenLeer => T(\n'
+                '        "der Server hat keine geliefert. Klicken zum erneuten Versuch.",\n'
+                '        "the server returned none. Click to retry.");',
+            '    public static string FragenLeer => "der Server hat keine geliefert.";')
 
 
 @probe("KOMPLETTER ALTSTAND (backend/ai_mouse.py)")

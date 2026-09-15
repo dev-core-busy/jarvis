@@ -38,6 +38,17 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private JarvisClient _client;
     private IReadOnlyList<PromptItem> _prompts;
 
+    /// <summary>Warum die Fragenliste nicht vom Server kam – oder <c>null</c>.
+    ///
+    /// ⚠ BIS 1.0.9 GAB ES DAS NICHT, und der Fehlschlag war komplett still:
+    /// das Menue fiel auf die DREI eingebauten Fragen zurueck, ohne ein Wort.
+    /// Gemeldet am 2026-09-15 („weiterhin OHNE das vollstaendige Fragen-Menue")
+    /// – und von hier aus nicht diagnostizierbar, weil der Grund weggeworfen
+    /// wurde. `promptsError` (Zeile ~80) war dafuer vorgesehen und wurde NIE
+    /// gesetzt: toter Code.
+    /// </summary>
+    private string? _fragenFehler;
+
     /// <summary>Screenshot waiting for the user to pick a prompt; owned by this class.</summary>
     private Bitmap? _pendingCapture;
 
@@ -182,6 +193,14 @@ internal sealed class TrayApplicationContext : ApplicationContext
                                      ToolTipIcon.Info)));
     }
 
+    /// <summary>Kuerzt eine Ausnahme auf einen Satz fuer das Menue.</summary>
+    private static string Kurzgrund(Exception ex)
+    {
+        string t = (ex.Message ?? string.Empty).Trim().ReplaceLineEndings(" ");
+        if (t.Length == 0) { t = ex.GetType().Name; }
+        return t.Length > 90 ? t.Substring(0, 89) + "…" : t;
+    }
+
     private void BuildPromptMenu()
     {
         _promptMenu.Items.Clear();
@@ -191,6 +210,26 @@ internal sealed class TrayApplicationContext : ApplicationContext
             var item = new ToolStripMenuItem(prompt.Title) { Tag = prompt };
             item.Click += OnPromptItemClicked;
             _promptMenu.Items.Add(item);
+        }
+
+        // ⚠ DER GRUND STEHT DORT, WO DIE FRAGEN FEHLEN. Ohne diesen Eintrag
+        //    faellt das Menue bei einem Abruffehler stumm auf die drei
+        //    eingebauten Fragen zurueck, und der Benutzer haelt sie fuer seine
+        //    Liste – drei Meldungen und drei Runden Ratens lang genau so
+        //    passiert (2026-09-15).
+        //
+        //    Ein Klick versucht es erneut: der haeufigste Fall ist ein
+        //    Netzhaenger beim Start, und dann ist die Liste einen Klick
+        //    entfernt statt einen Programmneustart.
+        if (_fragenFehler is not null)
+        {
+            _promptMenu.Items.Add(new ToolStripSeparator());
+            var warn = new ToolStripMenuItem(Texte.FragenFehlen + " " + _fragenFehler)
+            {
+                ForeColor = Color.Firebrick,
+            };
+            warn.Click += async (_, _) => await FragenNachladenAsync().ConfigureAwait(true);
+            _promptMenu.Items.Add(warn);
         }
 
         _promptMenu.Items.Add(new ToolStripSeparator());
@@ -1006,13 +1045,34 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 // Merken, damit sie beim naechsten Start sofort dastehen.
                 ConfigStore.SavePrompts(neu);
                 _prompts = neu;
+                _fragenFehler = null;
+                BuildPromptMenu();
+            }
+            else
+            {
+                // ⚠ AUCH DAS WAR STILL. Der Server hat geantwortet, aber nichts
+                //    geliefert – der Benutzer sieht weiter die eingebauten drei
+                //    und haelt sie fuer seine Liste.
+                _fragenFehler = Texte.FragenLeer;
                 BuildPromptMenu();
             }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // Bewusst still: die vorhandene Liste bleibt gueltig, und ein
-            // Fehlerfenster beim Start waere hier reine Stoerung.
+            // ⚠ HIER WAR ES KOMPLETT STILL – und genau das hat drei Runden
+            //    Ratens gekostet (gemeldet 2026-09-15: „weiterhin OHNE das
+            //    vollstaendige Fragen-Menue"). Schlaegt der Abruf fehl, faellt
+            //    das Menue auf die DREI eingebauten Fragen zurueck, und die
+            //    Anwendung sagte kein Wort dazu: weder der Benutzer noch ein
+            //    Entwickler konnte den Grund sehen.
+            //
+            //    Ein Fehlerfenster beim Start waere weiterhin falsch – deshalb
+            //    steht der Grund IM MENUE, dort wo die Fragen fehlen, und ein
+            //    Klick versucht es erneut. Das ist dieselbe Regel wie ueberall
+            //    in diesem Projekt: eine Absage ist eine AUSKUNFT.
+            _fragenFehler = ex is AnmeldungNoetigException
+                ? Texte.AnmeldungFehlt : Kurzgrund(ex);
+            BuildPromptMenu();
         }
 
         // Gleicher Anlass, andere Aufgabe: eine neue Fassung bereitlegen.

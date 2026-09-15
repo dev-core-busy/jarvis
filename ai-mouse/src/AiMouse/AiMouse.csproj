@@ -105,7 +105,16 @@
             SplitContainer, dessen zweites Feld nur bei einem Bild aufklappt.
          Die Adresse kommt aus `agent.last_task_images`, NICHT aus dem
          Antworttext – eine vom Modell genannte Adresse kann erfunden sein. -->
-    <Version>1.0.8</Version>
+    <!-- 1.0.9 (2026-09-15): der Fehlschlag beim Laden der Fragen war STILL.
+         Gemeldet, dreimal: „weiterhin OHNE das vollstaendige Fragen-Menue".
+         `FragenNachladenAsync` fing JEDE Ausnahme wortlos ab, und der Fall
+         „Server lieferte 0" ebenso – das Menue fiel dann auf die DREI
+         eingebauten Fragen zurueck, ohne ein Wort. Damit war der Grund weder
+         fuer den Benutzer noch bei der Fehlersuche sichtbar: drei Runden
+         Ratens. `promptsError` war dafuer vorgesehen und wurde NIE gesetzt.
+         Jetzt steht der Grund IM MENUE, dort wo die Fragen fehlen, und ein
+         Klick versucht es erneut. -->
+    <Version>1.0.9</Version>
     <!-- DPI awareness is owned by app.manifest, not by ApplicationHighDpiMode: it has to
          be in effect from process start, before any screen coordinate is read.
          WFAC010 asks for the opposite; suppressed because that trade-off is intentional. -->

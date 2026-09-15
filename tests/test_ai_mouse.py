@@ -4448,5 +4448,68 @@ for _neu32 in ("ErgebnisBildKopierenKnopf", "BildWirdGeholt", "BildNichtGeholt")
         if _neu32 in _cs_tx32 else ""
     check("%s gibt es in DE und EN" % _neu32, _roh32.count('"') >= 4)
 
+print("\n=== 33) Fehlende Fragenliste wird BENANNT (1.0.9, 2026-09-15) ===")
+
+# ⚠ DER FEHLSCHLAG WAR KOMPLETT STILL, und das hat drei Runden Ratens
+# gekostet: `FragenNachladenAsync` fing jede Ausnahme wortlos ab, das Menue
+# fiel auf die DREI eingebauten Fragen zurueck, und weder der Benutzer noch
+# die Fehlersuche sah einen Grund. Gemeldet als „weiterhin OHNE das
+# vollstaendige Fragen-Menue".
+_tr33 = (ROOT / "ai-mouse" / "src" / "AiMouse" / "TrayApplicationContext.cs").read_text(
+    encoding="utf-8")
+_nach33 = cs_block(_tr33, "private async Task FragenNachladenAsync")
+check("Positivkontrolle: FragenNachladenAsync ist geschnitten", len(_nach33) > 200)
+# Ohne Kommentare: der Block erklaert den frueheren Zustand und nennt dabei
+# „still" – eine Textsuche laese die eigene Begruendung (Register).
+_nach33_code = "\n".join(z for z in _nach33.splitlines()
+                         if not z.strip().startswith("//"))
+check("Positivkontrolle: der Kommentar-Filter behaelt den Code",
+      "_client.FragenAsync" in _nach33_code and "still" not in _nach33_code.lower())
+
+check("ein Fehlschlag wird GEMERKT statt verschluckt",
+      "_fragenFehler =" in _nach33_code)
+check("…auch der Fall 'Server lieferte 0'",
+      "else" in _nach33_code and _nach33_code.count("_fragenFehler =") >= 3)
+check("…und das Menue wird danach neu gezeichnet",
+      _nach33_code.count("BuildPromptMenu()") >= 2)
+check("ein Erfolg loescht den Grund wieder (sonst bleibt die Warnung stehen)",
+      "_fragenFehler = null" in _nach33_code)
+# Eine abgelaufene Sitzung ist etwas anderes als ein Netzfehler – wer beides
+# gleich benennt, schickt den Benutzer in die falsche Richtung.
+check("eine abgelaufene Anmeldung wird als solche benannt",
+      "AnmeldungNoetigException" in _nach33_code)
+
+_menue33 = cs_block(_tr33, "private void BuildPromptMenu")
+check("Positivkontrolle: BuildPromptMenu ist geschnitten", len(_menue33) > 200)
+_menue33_code = "\n".join(z for z in _menue33.splitlines()
+                          if not z.strip().startswith("//"))
+check("der Grund steht IM MENUE, dort wo die Fragen fehlen",
+      "_fragenFehler" in _menue33_code and "Texte.FragenFehlen" in _menue33_code)
+check("…farblich als Warnung abgesetzt", "Firebrick" in _menue33_code)
+check("…und ein Klick versucht es erneut (statt Programmneustart)",
+      "FragenNachladenAsync" in _menue33_code)
+check("ohne Fehler bleibt das Menue unveraendert (kein Rauschen)",
+      "is not null" in _menue33_code)
+
+# Die Kuerzung: eine Ausnahme kann mehrzeilig und sehr lang sein – als
+# Menueeintrag waere das unbenutzbar.
+_kurz33 = cs_block(_tr33, "private static string Kurzgrund")
+check("Positivkontrolle: Kurzgrund ist geschnitten", len(_kurz33) > 80)
+check("der Grund wird auf eine Zeile gekuerzt",
+      "ReplaceLineEndings" in _kurz33 and "Substring" in _kurz33)
+check("…und ein leerer Text faellt auf den Ausnahmetyp zurueck",
+      "GetType().Name" in _kurz33)
+
+_tx33 = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Localization" / "Texte.cs").read_text(
+    encoding="utf-8")
+for _n33 in ("FragenFehlen", "FragenLeer"):
+    _z33 = _tx33.split("public static string %s" % _n33)[1].split(";")[0] \
+        if _n33 in _tx33 else ""
+    check("%s gibt es in DE und EN" % _n33, _z33.count('"') >= 4)
+
+check("die Version ist hochgezaehlt",
+      "<Version>1.0.9</Version>" in (ROOT / "ai-mouse" / "src" / "AiMouse"
+                                     / "AiMouse.csproj").read_text(encoding="utf-8"))
+
 print("\n%d OK, %d FAIL" % (ok, fail))
 sys.exit(1 if fail else 0)

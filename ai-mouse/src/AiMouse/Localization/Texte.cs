@@ -111,6 +111,15 @@ internal static class Texte
     public static string EigeneFrageTitel => T(
         "Was soll mit dem Ausschnitt geschehen?",
         "What should happen with this region?");
+    // ⚠ WENN DIE FRAGENLISTE FEHLT, MUSS DAS DRANSTEHEN. Bis 1.0.9 war der
+    // Fehlschlag still, und das Menue zeigte kommentarlos die drei eingebauten
+    // Fragen – der Benutzer hielt sie fuer seine Liste (dreimal gemeldet).
+    public static string FragenFehlen => T(
+        "⚠ Fragenliste nicht geladen –", "⚠ Question list not loaded –");
+    public static string FragenLeer => T(
+        "der Server hat keine geliefert. Klicken zum erneuten Versuch.",
+        "the server returned none. Click to retry.");
+
     public static string Nachgeschlagen => T(
         "Für diese Antwort wurde zusätzlich nachgeschlagen: ",
         "Additional sources were consulted for this answer: ");

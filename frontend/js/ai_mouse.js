@@ -139,6 +139,32 @@
             var v = (_health.klient_version || '').trim();
             // textContent, nicht innerHTML: der Wert kommt vom Server.
             vs.textContent = v ? (t('aimouse.version', 'Version') + ' ' + v) : '';
+
+            // ⚠ EINE ZAHL, DIE IHREN ZUSTAND VERSCHWEIGT, IST EINE HALBE
+            //    AUSKUNFT. Nach jedem Rollout klafft ein Fenster zwischen
+            //    „Quelltext ist neu" und „EXE ist gebaut" – auf ECHT am
+            //    2026-09-15 rund zwei Minuten. Die Kachel sagte darin nur
+            //    „Version 1.0.7", und das las sich wie „das Update hat nichts
+            //    gebracht". Gemeldet, zu Recht.
+            //
+            //    Gemessen wird der VERSIONSUNTERSCHIED, nicht `bau_noetig`:
+            //    das kostet 7,5 ms je Abruf (der Endpunkt haengt an jedem
+            //    Seitenaufbau UND an jeder Anmeldung eines Arbeitsplatzes),
+            //    und es meldete auch dann etwas, wenn sich an der VERSION gar
+            //    nichts aendert – etwa nach einem `git reset`, der nur
+            //    Zeitstempel anfasst. Dann gibt es fuer den Benutzer nichts
+            //    Neues, und die Anzeige soll schweigen.
+            //
+            //    BEIDE Angaben muessen dasein: fehlt eine (aelteres Backend,
+            //    Datei unlesbar), wird NICHTS behauptet.
+            var q = (_health.quelltext_version || '').trim();
+            if (v && q && q !== v) {
+                vs.textContent += ' · ' + (_health.paket_baut
+                    ? t('aimouse.baut_jetzt', '{v} wird gerade gebaut…')
+                        .replace('{v}', q)
+                    : t('aimouse.baut_gleich', '{v} wird in Kürze gebaut')
+                        .replace('{v}', q));
+            }
         }
     }
 

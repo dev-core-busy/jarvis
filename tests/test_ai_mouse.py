@@ -2965,9 +2965,42 @@ check("Positivkontrolle: der Schnitt trifft die ganze Funktion",
 check("ohne Angabe bleibt sie leer (keine Behauptung)",
       "_health.klient_version || ''" in _dk24 and "v ?" in _dk24)
 check("Fremdtext nur per textContent", "vs.textContent" in _dk24)
+
+# ── Das Bau-Fenster wird BENANNT (2026-09-15) ─────────────────────────────
+# ⚠ Nach jedem Rollout klafft es zwischen "Quelltext neu" und "EXE gebaut" –
+# auf ECHT rund zwei Minuten. Die Kachel sagte darin nur die ALTE Nummer und
+# verschwieg den Rest; gemeldet als „IMMER noch 1.0.7".
+# ⚠ OHNE KOMMENTARE. Der Block erklaert woertlich, WARUM dort nicht
+# `bau_noetig` steht – eine Suche auf dem Rohtext liest die eigene Begruendung
+# und meldet einen Fehler, den es nicht gibt (achtzehnter Fall im Projekt).
+_dk24_code = "\n".join(z for z in _dk24.splitlines()
+                       if not z.strip().startswith("//"))
+check("Positivkontrolle: der Kommentar-Filter behaelt den Code",
+      "vs.textContent" in _dk24_code and "bau_noetig" not in _dk24_code
+      and "bau_noetig" in _dk24)
+check("die Kachel nennt den Bau, statt nur die alte Nummer zu zeigen",
+      "quelltext_version" in _dk24_code)
+check("…sie vergleicht beide Angaben, statt bau_noetig zu holen",
+      "q !== v" in _dk24_code and "bau_noetig" not in _dk24_code)
+check("…und schweigt, wenn eine Angabe fehlt (keine Behauptung)",
+      "v && q &&" in _dk24)
+check("…laeuft ein Bau, sagt sie das anders als 'kommt gleich'",
+      "paket_baut" in _dk24 and "baut_jetzt" in _dk24 and "baut_gleich" in _dk24)
+
+# Der Endpunkt muss das Feld liefern – sonst ist die Anzeige tot.
+_mn24 = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
+check("health liefert quelltext_version",
+      '"quelltext_version": ai_mouse.quelltext_version()' in _mn24)
+# (Die Gegenprobe „klient_version liest wieder die csproj" steht in
+#  Abschnitt 32 – dort gibt es den AST-Schnitt samt Docstring-Filter. Ein
+#  Fenster fester Groesse trifft hier fast nur den Docstring, und der nennt
+#  „csproj" und „quelltext_version" in seiner BEGRUENDUNG.)
+
 _i24 = (ROOT / "frontend" / "js" / "i18n.js").read_text(encoding="utf-8")
 check("i18n: aimouse.version in DE und EN",
       _i24.count("'aimouse.version'") >= 2)
+for _neu24 in ("aimouse.baut_jetzt", "aimouse.baut_gleich"):
+    check("i18n: %s in DE und EN" % _neu24, _i24.count("'%s'" % _neu24) >= 2)
 # ⚠ `.ja-note` war an SIEBEN Stellen im Markup und NIRGENDS definiert – die
 #   Hinweise sahen aus wie gewoehnlicher Fliesstext (Klasse `.ja-actions`, Register).
 check("die Hinweisklasse ist ueberhaupt definiert", ".ja-note" in _css23)
@@ -4305,6 +4338,20 @@ check("Positivkontrolle: _agent_lauf ist geschnitten", _fn_ag32 is not None)
 _ag32 = _ohne_worte(_fn_ag32, _src32) if _fn_ag32 else ""
 check("_agent_lauf liest die erzeugten Bilder aus last_task_images",
       "last_task_images" in _ag32)
+
+# ⚠ DIE TRENNUNG VON 1.0.7 MUSS BLEIBEN: `klient_version` liest die
+# AUSGELIEFERTE EXE, nie den Quelltext. `quelltext_version` steht seit
+# 2026-09-15 zusaetzlich in `health` – aber ausschliesslich fuer die Anzeige.
+# Wer das hier zusammenlegt, baut die Update-Schleife zurueck (66 MB im Kreis).
+# Docstring MUSS weg: er nennt „csproj" und die Schleife in seiner Begruendung.
+_fn_kv = next((n for n in ast.walk(_baum32)
+               if isinstance(n, ast.FunctionDef) and n.name == "klient_version"), None)
+check("Positivkontrolle: klient_version ist geschnitten", _fn_kv is not None)
+_kv32 = _ohne_worte(_fn_kv, _src32) if _fn_kv else ""
+check("klient_version liest die AUSGELIEFERTE EXE",
+      "exe_version()" in _kv32)
+check("…und NICHT den Quelltext (das war die Update-Schleife von 1.0.7)",
+      "quelltext_version" not in _kv32 and "csproj" not in _kv32)
 check("…und gibt sie als DRITTEN Wert zurueck",
       bool(_fn_ag32) and any(isinstance(n, ast.Return) and isinstance(n.value, ast.Tuple)
                              and len(n.value.elts) == 3

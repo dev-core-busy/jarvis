@@ -220,6 +220,11 @@ const _I18N = {
         'aimouse.get_p':         'Das Paket enthält die fertige Anwendung. Marke und Serveradresse dieses Hauses sind darin eingebaut – beim ersten Start trägst du nur deine Zugangsdaten ein. Keine Installation, keine Administratorrechte.',
         'aimouse.get_btn':       'Paket herunterladen',
         'aimouse.version':       'Version',
+        // Das Fenster zwischen Rollout und fertig gebauter EXE. Ohne diese
+        // zwei Zeilen sagt die Kachel nur die alte Nummer – und das liest sich
+        // wie „das Update hat nichts gebracht" (gemeldet 2026-09-15).
+        'aimouse.baut_jetzt':    '{v} wird gerade gebaut…',
+        'aimouse.baut_gleich':   '{v} wird in Kürze gebaut',
         'aimouse.get_running':   'Wird zusammengestellt…',
         'aimouse.get_ok':        'Heruntergeladen: ',
         'aimouse.install_h':     'Einrichten',
@@ -3752,6 +3757,8 @@ const _I18N = {
         'aimouse.get_p':         'The package contains the ready-made application. Your organisation\u2019s name and server address are built in – on first start you only enter your credentials. No installation, no administrator rights.',
         'aimouse.get_btn':       'Download package',
         'aimouse.version':       'Version',
+        'aimouse.baut_jetzt':    '{v} is being built…',
+        'aimouse.baut_gleich':   '{v} will be built shortly',
         'aimouse.get_running':   'Assembling…',
         'aimouse.get_ok':        'Downloaded: ',
         'aimouse.install_h':     'Setting up',

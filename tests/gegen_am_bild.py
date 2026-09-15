@@ -28,10 +28,12 @@ JC = "ai-mouse/src/AiMouse/Vision/JarvisClient.cs"
 RW = "ai-mouse/src/AiMouse/Ui/ResultWindow.cs"
 TR = "ai-mouse/src/AiMouse/TrayApplicationContext.cs"
 TX = "ai-mouse/src/AiMouse/Localization/Texte.cs"
+AMJS = "frontend/js/ai_mouse.js"
 
-DATEIEN = [AM, JC, RW, TR, TX,
+DATEIEN = [AM, JC, RW, TR, TX, AMJS,
            "ai-mouse/src/AiMouse/AiMouse.csproj",
            "ai-mouse/src/AiMouse/Configuration/Vorgaben.cs",
+           "backend/main.py", "frontend/js/i18n.js",
            "tests/test_ai_mouse.py"]
 
 
@@ -338,10 +340,78 @@ def _():
             "_abl_src = ast.get_source_segment(_src32, _fn_abl) if _fn_abl else \"\"")
 
 
+# ── i) Das Bau-Fenster in der Kachel ──────────────────────────────────────
+@probe("DER GEMELDETE FALL: die Kachel zeigt nur die alte Nummer")
+def _():
+    s = lies(AMJS)
+    i = s.index("var q = (_health.quelltext_version")
+    j = s.index("        }\n    }", i)
+    (ROOT / AMJS).write_text(s[:i] + s[j:], encoding="utf-8")
+
+
+@probe("sie holt wieder bau_noetig (7,5 ms im heissen Pfad)")
+def _():
+    ersetze(AMJS, "var q = (_health.quelltext_version || '').trim();",
+            "var q = (_health.bau_noetig ? 'x' : '') || '';")
+
+
+@probe("sie behauptet etwas, obwohl eine Angabe fehlt")
+def _():
+    ersetze(AMJS, "if (v && q && q !== v) {", "if (q !== v) {")
+
+
+@probe("laufender und anstehender Bau sind nicht unterscheidbar")
+def _():
+    ersetze(AMJS, "vs.textContent += ' · ' + (_health.paket_baut\n"
+                  "                    ? t('aimouse.baut_jetzt', '{v} wird gerade gebaut…')\n"
+                  "                        .replace('{v}', q)\n"
+                  "                    : t('aimouse.baut_gleich', '{v} wird in Kürze gebaut')\n"
+                  "                        .replace('{v}', q));",
+            "vs.textContent += ' · ' + t('aimouse.baut_gleich', '{v}').replace('{v}', q);")
+
+
+@probe("health liefert quelltext_version nicht mehr (Anzeige tot)")
+def _():
+    ersetze("backend/main.py",
+            '        "quelltext_version": ai_mouse.quelltext_version(),', "")
+
+
+@probe("⚠ klient_version liest wieder die csproj (Update-Schleife von 1.0.7)")
+def _():
+    s = lies(AM)
+    alt = "    return exe_version()"
+    assert alt in s, "Anker fehlt"
+    (ROOT / AM).write_text(s.replace(alt, "    return quelltext_version()", 1),
+                           encoding="utf-8")
+
+
+@probe("die neuen Texte gibt es nur auf Deutsch (Bau-Hinweis)")
+def _():
+    ersetze("frontend/js/i18n.js", "        'aimouse.baut_jetzt':    '{v} is being built…',\n", "")
+
+
+@probe("der Waechter liest wieder seinen eigenen Kommentar mit")
+def _():
+    ersetze("tests/test_ai_mouse.py",
+            '_dk24_code = "\\n".join(z for z in _dk24.splitlines()\n'
+            '                       if not z.strip().startswith("//"))',
+            "_dk24_code = _dk24")
+
+
 @probe("KOMPLETTER ALTSTAND (backend/ai_mouse.py)")
 def _():
-    alt = subprocess.run(["git", "show", "HEAD:" + AM], cwd=ROOT,
+    # ⚠ NICHT `HEAD`: sobald die Aenderung committet ist, IST HEAD der neue
+    # Stand – und die Probe sabotiert nichts mehr (genau so passiert, sie war
+    # stumm). Gesucht wird der Commit, der `BILD_WERKZEUG` eingefuehrt hat;
+    # sein Vorgaenger ist der Altstand. Ein fester Hash waere eine Zeitbombe
+    # (Historie-Rewrites gab es in diesem Projekt zweimal).
+    einf = subprocess.run(["git", "log", "-S", "BILD_WERKZEUG", "--format=%H",
+                           "--", AM], cwd=ROOT, capture_output=True, text=True,
+                          check=True).stdout.split()
+    assert einf, "Einfuehrungs-Commit nicht gefunden"
+    alt = subprocess.run(["git", "show", einf[-1] + "~1:" + AM], cwd=ROOT,
                          capture_output=True, text=True, check=True).stdout
+    assert "BILD_WERKZEUG" not in alt, "der geholte Stand ist nicht der Altstand"
     (ROOT / AM).write_text(alt, encoding="utf-8")
 
 

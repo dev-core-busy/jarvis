@@ -13568,6 +13568,22 @@ async def ai_mouse_health(request: Request, lang: str = "de",
         # Aktualisierung (`Update/Aktualisierung.cs`); ein LEERER Wert heisst
         # "unbekannt" und laesst die Anwendung NICHTS tun.
         "klient_version": ai_mouse.klient_version(),
+        # ⚠ WAS DER QUELLTEXT TRAEGT – ausschliesslich fuer die ANZEIGE, nie
+        # fuer die Update-Entscheidung. Genau diese Verwechslung war der Fehler
+        # von 1.0.7: der Server meldete die csproj-Version, ausgeliefert wurde
+        # die alte EXE, und jeder Arbeitsplatz lud 66 MB im Kreis. Das Update
+        # haengt unveraendert allein an `klient_version` (der EXE).
+        #
+        # Wozu es hier trotzdem steht: weichen beide ab, wird gerade gebaut –
+        # und die Kachel sagte in diesem Fenster nur „Version 1.0.7" und
+        # verschwieg den Rest. Auf ECHT am 2026-09-15 gemeldet („IMMER noch
+        # 1.0.7"), waehrend der Bau seit 90 Sekunden lief.
+        #
+        # `quelltext_version` liest EINE Datei (gemessen 0,07 ms). Bewusst
+        # NICHT `bau_noetig()`: das stattet ueber den ganzen Quellbaum und
+        # kostet 7,5 ms – zu viel fuer einen Endpunkt, der an jedem
+        # Seitenaufbau UND an jeder Anmeldung eines Arbeitsplatzes haengt.
+        "quelltext_version": ai_mouse.quelltext_version(),
     })
 
 

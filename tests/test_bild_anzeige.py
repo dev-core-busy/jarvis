@@ -552,11 +552,151 @@ def teil4():
         _CL._CONV_DIR, _CL._INDEX = _ECHT, _ECHT / "index.jsonl"
 
 
+# ═════════════════════════════════════════════════════════════════════════════
+# 3b) Eine ENTFERNTE Bildzusage darf nicht STILL bleiben (Vorfall 2026-09-15)
+# ═════════════════════════════════════════════════════════════════════════════
+
+def klassen_konstante(name: str) -> str:
+    """Den Wert einer Klassen-Konstante aus agent.py holen - NICHT abtippen.
+
+    Eine abgetippte Zweitfassung liefe beim naechsten Feinschliff auseinander,
+    und der Waechter prueefte dann seinen eigenen Text statt des Codes.
+    """
+    for node in ast.walk(BAUM):
+        if isinstance(node, ast.Assign):
+            for z in node.targets:
+                if isinstance(z, ast.Name) and z.id == name:
+                    return ast.literal_eval(node.value)
+    raise AssertionError(f"Klassen-Konstante {name} nicht gefunden")
+
+
+def teil3b():
+    kopf("3b) Bild angekuendigt, keines da -> der Benutzer erfaehrt es")
+
+    HINWEIS = klassen_konstante("_KEIN_BILD_HINWEIS")
+    check(len(HINWEIS) > 40 and "Bild" in HINWEIS,
+          "es gibt einen Hinweistext, und er nennt das Bild beim Namen")
+
+    q = quelle_von("_anzeigetext")
+
+    class Stub:
+        """Die Kette, aber mit einem _ohne_tote_bildrefs, das WIRKLICH entfernt."""
+        _KEIN_BILD_HINWEIS = HINWEIS
+        nachtrag = ""          # was _mit_bildern anhaengt
+        entfernen = True       # ob die Referenz als tot gilt
+
+        def _ohne_tool_markup(self, t):
+            return t
+
+        def _bilddaten_bergen(self, tool_name, t, fuer_anzeige=False):
+            return t
+
+        def _clean_doc_refs(self, t):
+            return t
+
+        def _expand_charts(self, t):
+            return t
+
+        def _ohne_tote_bildrefs(self, t):
+            if not self.entfernen:
+                return t
+            return re.sub(r"!\[[^\]]*\]\(/api/generated/[^)]*\)", "", t)
+
+        def _mit_bildern(self, t):
+            return (t + self.nachtrag) if self.nachtrag else t
+
+    umg = {}
+    exec(q, umg)
+    Stub._anzeigetext = umg["_anzeigetext"]
+    s = Stub()
+
+    # ── Der gemeldete Fall, WOERTLICH ──────────────────────────────────────
+    # andreas.bender, "playground COMMON", 15.09.2026 13:41. Das Modell rief
+    # KEIN Werkzeug (steps=0) und erfand die Adresse; die Datei existiert nicht.
+    ECHT = ("Hier ist das generierte Bild mit der deutschen Übersetzung:\n\n"
+            "![Wissensebene Slide](/api/generated/8f03991e6d02785630884b246d0390e3.png)\n\n"
+            "*(Hinweis: KI-Bildgeneratoren haben oft Schwierigkeiten...)*")
+    s.entfernen, s.nachtrag = True, ""
+    aus = s._anzeigetext(ECHT)
+    check("/api/generated/" not in aus,
+          "die erfundene Referenz ist weg (das war schon richtig)")
+    check(HINWEIS in aus,
+          "…aber der Benutzer erfaehrt, dass kein Bild erzeugt wurde", aus[-160:])
+    check("Hier ist das generierte Bild" in aus,
+          "der Modelltext selbst bleibt unangetastet")
+
+    # ── Gegenrichtung 1: _mit_bildern traegt das ECHTE Bild nach ───────────
+    # Das ist der Fall, fuer den `_ohne_tote_bildrefs` urspruenglich gebaut
+    # wurde (Modell verzaehlt sich beim Abschreiben, 2026-08-29). Hier WAERE
+    # ein Hinweis eine Falschaussage - es ist ja ein Bild da.
+    s.entfernen, s.nachtrag = True, "\n\n![Bild](/api/generated/echt.png)"
+    aus = s._anzeigetext(ECHT)
+    check(HINWEIS not in aus,
+          "wird ein echtes Bild nachgetragen, gibt es KEINEN Hinweis")
+    check("/api/generated/echt.png" in aus, "…und das Bild ist da")
+
+    # ── Gegenrichtung 2: die Referenz lebt ─────────────────────────────────
+    s.entfernen, s.nachtrag = False, ""
+    aus = s._anzeigetext(ECHT)
+    check(HINWEIS not in aus, "eine gueltige Bildreferenz loest keinen Hinweis aus")
+
+    # ── Gegenrichtung 3: gar kein Bildanspruch ─────────────────────────────
+    s.entfernen, s.nachtrag = True, ""
+    aus = s._anzeigetext("Von heute bis zum 31.12. sind es 113 Tage.")
+    check(HINWEIS not in aus,
+          "eine Antwort ohne Bildanspruch bekommt keinen Hinweis")
+
+    # ── Zwischentexte: der Zweig darf dort gar nicht laufen ────────────────
+    aus = s._anzeigetext(ECHT, mit_bildern=False)
+    check(HINWEIS not in aus,
+          "ein Zwischentext bekommt keinen Hinweis (dort wird nichts nachgetragen)")
+
+    # ── Die Messung muss VOR der Bereinigung stattfinden ───────────────────
+    rumpf = _ohne_docstring(methode("_anzeigetext"))
+    i_mess = rumpf.find("nannte_bild")
+    i_tot = rumpf.find("_ohne_tote_bildrefs")
+    check(0 <= i_mess < i_tot,
+          "gemessen wird VOR dem Entfernen - danach ist die Frage nicht mehr beantwortbar",
+          f"mess={i_mess} tot={i_tot}")
+
+    # ── Der Prompt verbietet das Erfinden ausdruecklich ────────────────────
+    kopf("3b2) Die Prompt-Regeln zum Vorfall")
+    sp = konstante_text("SYSTEM_PROMPT")
+    check("ERFINDE NIEMALS SELBST EINE `/api/generated/...`-ADRESSE" in sp,
+          "Punkt 15 verbietet das Erfinden einer Bildadresse")
+    # ⚠ DIE ZUSAGE HAT SICH GEAENDERT, und der Waechter musste mit. Bis zum
+    # Nachmittag des 2026-09-15 stand hier "Bildbearbeitung ist unmoeglich" -
+    # richtig, SOLANGE es kein Werkzeug dafuer gab. Seit `bild_text_ersetzen`
+    # existiert, waere dieselbe Pruefung eine Regression, die jede Erweiterung
+    # ablehnt (Register: ein Waechter, der das Symptom fuer die Zusage haelt,
+    # macht sie dauerhaft). Gemessen wird jetzt die EIGENSCHAFT: der Prompt
+    # nennt den richtigen Weg und verbietet den falschen.
+    check("bild_text_ersetzen" in sp,
+          "…und nennt bild_text_ersetzen als Weg fuer Text IN einem Bild")
+    i_reg = sp.find("TEXT IN EINEM VORHANDENEN BILD ERSETZEN")
+    check(i_reg >= 0 and "NIEMALS `generate_image`" in sp[i_reg:i_reg + 260],
+          "…und verbietet generate_image genau dafuer")
+
+
+def konstante_text(name: str) -> str:
+    """Eine String-Konstante des Moduls (der System-Prompt) im Original."""
+    for node in ast.walk(BAUM):
+        if isinstance(node, ast.Assign):
+            for z in node.targets:
+                if isinstance(z, ast.Name) and z.id == name:
+                    try:
+                        return ast.literal_eval(node.value)
+                    except Exception:
+                        return ast.get_source_segment(QUELLE, node.value) or ""
+    raise AssertionError(f"Konstante {name} nicht gefunden")
+
+
 def main():
     print("\033[1mErzeugte Bilder muessen im Chat ankommen (Vorfall 2026-08-26)\033[0m")
     teil1()
     teil2()
     teil3()
+    teil3b()
     teil4()
     print("\n" + "=" * 62)
     n = _zaehler["ok"] + _zaehler["fail"]

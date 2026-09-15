@@ -77,7 +77,7 @@ KERN = (
 # danebenliegen kann.
 BUENDEL: dict[str, tuple[str, ...]] = {
     "bild": (
-        "generate_image", "search_image", "screenshot",
+        "generate_image", "search_image", "screenshot", "bild_text_ersetzen",
     ),
     "diagramm": (
         "create_chart",
@@ -108,7 +108,7 @@ _MUSTER: dict[str, str] = {
     # Deutschen steht das Schluesselwort meistens HINTEN im Wort. Wo das
     # vorkommt, faengt das Muster mit \w* an. Fehltreffer gehen dabei in die
     # harmlose Richtung (mehr Werkzeuge, nicht weniger).
-    "bild": r"(\bbild\b|\w*bildschirm|\bfoto|\bgrafik|\billustration|\blogo\b|"
+    "bild": r"(\bbild(er|es|ern|e)?\b|\w*bildschirm|\bfoto|\bgrafik|\billustration|\blogo\b|"
             r"\bmale\b|\bzeichne|\brender|\bscreenshot|\bimage\b|\bpicture\b)",
     "diagramm": r"(\w*diagramm|\w*chart\b|\bbalken|\bkurve|\btorte|\bplot\b|"
                 r"\bvisualisier|\w*auswertung|\w*statistik|\w*kennzahl)",

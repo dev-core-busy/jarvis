@@ -1135,6 +1135,8 @@ Regeln:
     - SUCHEN/ZEIGEN eines vorhandenen Bildes ("bitte ein Bild von ...", "such/finde ein Bild von ...", "zeig mir ein Bild von ...") -> IMMER search_image.
     OEFFNE NIEMALS einen Browser auf dem Desktop, um ein Bild zu zeigen (kein browser_control, kein desktop_*). Gib die vom Tool zurueckgegebene Markdown-Bildreferenz ![..](url) UNVERAENDERT in deiner Antwort aus.
     - SCHREIBE NIEMALS BILDDATEN IN DEINE ANTWORT: keine base64-Zeichenketten, keine "data:image/...;base64,..."-Adresse – weder ganz noch auszugsweise, auch nicht aus einem Werkzeug-Ergebnis oder aus dem bisherigen Gespraech kopiert. Ein Bild entsteht AUSSCHLIESSLICH ueber generate_image bzw. search_image; deren `/api/generated/...`-Referenz ist der einzige Weg, auf dem ein Bild beim Benutzer ankommt. Du kannst Bilddaten NICHT selbst zusammensetzen – der Versuch erzeugt eine Zeichenwueste oder ein kaputtes Bild. Kannst du kein Bild liefern, SAGE DAS.
+    - ERFINDE NIEMALS SELBST EINE `/api/generated/...`-ADRESSE. Sie darf AUSSCHLIESSLICH aus dem Ergebnis eines Werkzeugaufrufs in DIESEM Lauf stammen. Aus einer frueheren Antwort abgeschrieben, aus dem Gespraechsverlauf kopiert oder selbst zusammengesetzt zeigt sie ins Leere: der Benutzer liest einen Satz, der ein Bild ankuendigt, und sieht KEIN Bild. Hast du kein Bild-Werkzeug aufgerufen, gibt es kein Bild – dann schreibe weder "hier ist das generierte Bild" noch eine Adresse, sondern SAGE, dass du keines erzeugen konntest, und warum.
+    - TEXT IN EINEM VORHANDENEN BILD ERSETZEN -> `bild_text_ersetzen`, NIEMALS `generate_image`. Letzteres erzeugt ein NEUES Bild aus einer Textbeschreibung und kann in einem gelieferten Bild nichts austauschen. Ausloeser: "uebersetze das Bild", "schreibe die Uebersetzung ins Bild", "ersetze den Text im Bild", "uebersetze die Folie und behalte das Layout". Den Pfad des Bildes nimmst du aus dem Anhang-Hinweis. Steht `bild_text_ersetzen` nicht zur Verfuegung, SAGE, dass du ein vorhandenes Bild nicht bearbeiten kannst, und liefere den uebersetzten Text.
     - EIN WERKZEUG-ERGEBNIS MIT EINER `/api/generated/...`-ADRESSE IST EIN ERFOLG. Melde dann NIEMALS einen Fehlschlag, und erfinde erst recht keine Fehlermeldung ("Failed to parse", "JSON-Fehler", "interner Fehler" o.ae.) – gab es einen Fehler, steht er im Ergebnis. Uebernimm die Zeile `![...](/api/generated/...)` unveraendert in deine Antwort. Das gilt auch, wenn das Ergebnis aus einer delegierten Rolle kommt und in eckigen Klammern eingeleitet wird: die Klammer ist ein Hinweis an dich, keine Stoerungsmeldung.
 
 16. OFFICE-DOKUMENTE (Word/Excel/PowerPoint/PDF):
@@ -2143,6 +2145,11 @@ KRITISCH – Autonomie-Regeln:
             print(f"[AGENT {self.agent_id}] GenerateImageTool nicht geladen: {e}", flush=True)
 
         # Bildsuche im Web (zeigt Bild inline im Chat, statt Browser zu oeffnen)
+        try:
+            from backend.tools.bild_text import BildTextErsetzenTool
+            self._tool_instances.append(BildTextErsetzenTool())
+        except Exception as e:  # noqa: BLE001
+            print(f"[AGENT {self.agent_id}] BildTextErsetzenTool nicht geladen: {e}", flush=True)
         try:
             from backend.tools.image_search import SearchImageTool
             self._tool_instances.append(SearchImageTool())
@@ -5035,9 +5042,35 @@ KRITISCH – Autonomie-Regeln:
         t = self._clean_doc_refs(t.strip()).strip()
         t = self._expand_charts(t)
         if mit_bildern:
+            # ⚠ NANNTE DER TEXT EIN BILD? Die Antwort darauf muss VOR der
+            # Bereinigung feststehen – danach ist die Referenz weg und die
+            # Frage nicht mehr beantwortbar.
+            nannte_bild = "/api/generated/" in t
             t = self._ohne_tote_bildrefs(t)
             t = self._mit_bildern(t)
+            if nannte_bild and "/api/generated/" not in t:
+                t = (t.rstrip() + "\n\n" + self._KEIN_BILD_HINWEIS).strip()
         return t
+
+    # Der Satz, der die Luecke schliesst. GEMELDET VON ECHT 2026-09-15
+    # ("playground COMMON"): auf "uebersetze das Bild ... Generiere dazu ein
+    # neues Bild" antwortete das Modell "Hier ist das generierte Bild mit der
+    # deutschen Uebersetzung:" und nannte
+    # `![...](/api/generated/8f03991e6d02785630884b246d0390e3.png)` – eine
+    # Adresse, die es FREI ERFUNDEN hat: `steps=0`, kein einziger
+    # Werkzeugaufruf, die Datei existiert nicht. `_ohne_tote_bildrefs` hat die
+    # Referenz voellig zu Recht entfernt – aber STILL, und uebrig blieb ein
+    # Satz, der ein Bild ankuendigt, gefolgt von einer LEERZEILE.
+    #
+    # MERKREGEL: eine Bereinigung, die eine ZUSAGE des Textes entfernt, muss
+    # die Zusage mitkorrigieren. Sonst ist der Fehler fuer den Benutzer
+    # ununterscheidbar von einem kaputten Frontend – und die einzige Spur steht
+    # im Journal, wo sie niemand liest.
+    _KEIN_BILD_HINWEIS = (
+        "⚠ *Hinweis des Systems: In dieser Antwort wurde ein Bild angekuendigt, "
+        "aber keines erzeugt – die genannte Bildadresse zeigt ins Leere. "
+        "Bitte die Anfrage wiederholen.*"
+    )
 
     # Bildreferenz auf ein erzeugtes Bild – die Adresse in Gruppe 1.
     _GEN_REF_RE = re.compile(r"!\[[^\]]*\]\(\s*(/api/generated/[^)\s]+)\s*\)")

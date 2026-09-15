@@ -237,11 +237,44 @@ def _stash_count() -> int:
     return len(out.splitlines())
 
 
+# Dateien, die der Server SELBST erzeugt und die deshalb nicht versioniert
+# sind. Vor einem Pull wird eine noch verfolgte Fassung zurueckgesetzt - siehe
+# die ausfuehrliche Begruendung in apply_update().
+_ERZEUGTE_DATEIEN = (
+    "ai-mouse/src/AiMouse/Configuration/Vorgaben.cs",
+)
+
+
 def apply_update() -> dict:
     """Führt git pull aus. Lokal geänderte Dateien werden per stash/pop bewahrt."""
     # Aktuellen Branch ermitteln (für gezieltes Pull ohne Upstream-Tracking)
     _, branch, _ = _git("rev-parse", "--abbrev-ref", "HEAD")
     branch = branch or "master"
+
+    # 0. ERZEUGTE Dateien zuruecksetzen, BEVOR gestasht wird.
+    #
+    # ⚠ GEMESSEN AM 2026-09-15, und der Befund ist die Begruendung: eine Datei,
+    # die hier VERFOLGT und lokal GEAENDERT ist und im eingehenden Commit aus
+    # dem Index faellt, laesst `stash pop` mit einem ungelosten Konflikt
+    # zurueck (`DU`, aendern/loeschen). Der Dienst startet zwar - es entstehen
+    # keine Konfliktmarker -, aber **jeder weitere Pull scheitert**, bis jemand
+    # den Konflikt von Hand aufloest. Genau dieser Zustand hat ECHT am
+    # 2026-08-30 handlungsunfaehig gemacht, und der Betreiber kann ihn ohne
+    # fremde Hilfe nicht einmal SEHEN: sein Update meldet Erfolg.
+    #
+    # Betroffen ist `Vorgaben.cs` (Marke, Akzent, Adresse der AI-Maus): sie
+    # wird vor JEDEM Bau neu geschrieben und steht seit dem 2026-09-15 in der
+    # .gitignore. Das Zuruecksetzen ist verlustfrei - die Hauswerte schreibt
+    # der naechste Bau ohnehin aus dem Branding des Servers.
+    #
+    # Nach der Migration laeuft die Schleife ins Leere (die Datei ist dann
+    # nicht mehr verfolgt, `ls-files` liefert nichts). Sie bleibt trotzdem
+    # stehen: ein Server, der diesen Commit erst spaeter zieht, braucht sie -
+    # und ein zweiter Eintrag kostet nichts.
+    for _erzeugt in _ERZEUGTE_DATEIEN:
+        rc, aus, _ = _git("ls-files", "--error-unmatch", _erzeugt)
+        if rc == 0 and aus.strip():
+            _git("checkout", "--", _erzeugt)
 
     # 1. Lokale Änderungen stashen – verhindert Merge-Konflikte bei data/-Dateien
     #    Locale-unabhängig: Stash-Anzahl vor/nach push vergleichen statt den

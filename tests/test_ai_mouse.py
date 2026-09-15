@@ -3892,5 +3892,130 @@ _amjs30 = (ROOT / "frontend" / "js" / "ai_mouse.js").read_text(encoding="utf-8")
 check("und der Renderer schreibt sie in #am-version",
       "am-version" in _amjs30 and "_health.klient_version" in _amjs30)
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 31) Vorgaben.cs ist ERZEUGT - und darf deshalb nicht verfolgt sein
+# ═══════════════════════════════════════════════════════════════════════════
+# ⚠ AUF ECHT WAR SIE EINE ZUENDSCHNUR: der Bau schreibt die Hauswerte hinein,
+# die Datei war git-verfolgt und stand damit dauerhaft als geaendert im
+# Arbeitsbaum. Die Update-Pille macht stash -> pull -> stash pop; genau so
+# entstanden am 2026-09-14 Konfliktmarker in 20 Dateien und eine
+# Neustart-Schleife des Dienstes.
+print("\n=== 31) Vorgaben.cs: erzeugt, nicht versioniert ===")
+
+import subprocess as _sp31
+
+_VORG31 = "ai-mouse/src/AiMouse/Configuration/Vorgaben.cs"
+
+
+def _git31(*args):
+    try:
+        r = _sp31.run(["git", "-C", str(ROOT), *args],
+                      capture_output=True, text=True, timeout=30)
+        return r.returncode, r.stdout.strip()
+    except Exception as e:  # noqa: BLE001
+        return 99, f"!! {e}"
+
+
+# ⚠ POSITIVKONTROLLE ZUERST - und sie ist die BEDINGUNG. Auf DEV scheitert git
+# mit "dubiose Besitzverhaeltnisse"; eine leere Antwort saehe dann aus wie
+# "nicht verfolgt" und der Waechter waere gruen, ohne etwas geprueft zu haben
+# (am 2026-09-13 genau so passiert). "Konnte nicht laufen" darf nie wie
+# "bestanden" aussehen.
+_rc31, _egal = _git31("ls-files", "backend/ai_mouse.py")
+_git_geht = (_rc31 == 0 and _egal.strip() == "backend/ai_mouse.py")
+check("Positivkontrolle: git arbeitet hier ueberhaupt (sonst ist alles darunter wertlos)",
+      _git_geht)
+
+if _git_geht:
+    _rc, _aus = _git31("ls-files", _VORG31)
+    check("Vorgaben.cs ist NICHT von git verfolgt (ist: %r)" % (_aus,), _aus == "")
+    _rc, _aus = _git31("check-ignore", _VORG31)
+    check("…und wird von .gitignore wirklich erfasst", _rc == 0)
+else:
+    check("Vorgaben.cs ist NICHT von git verfolgt - NICHT PRUEFBAR", False)
+    check("…und wird von .gitignore wirklich erfasst - NICHT PRUEFBAR", False)
+
+# Der Grund steht in der .gitignore, nicht nur im Kopf der Datei.
+_gi31 = (ROOT / ".gitignore").read_text(encoding="utf-8")
+check("die .gitignore begruendet es (Auto-Update/stash pop)",
+      "Vorgaben.cs" in _gi31 and "stash pop" in _gi31)
+
+# ── Sie muss auch dann entstehen, wenn sie FEHLT ──────────────────────────
+# Ein frischer Klon hat sie nicht mehr. Waere `_hauswerte_schreiben` darauf
+# angewiesen, dass sie schon da ist, waere die Umstellung ein Bau, der nie
+# wieder laeuft. AUSGEFUEHRT gemessen, nicht gelesen.
+import tempfile as _tf31
+
+def _erzeugt_bei_abwesenheit():
+    with _tf31.TemporaryDirectory() as d:
+        wurzel = Path(d)
+        ziel = wurzel / "ai-mouse" / "src" / "AiMouse" / "Configuration" / "Vorgaben.cs"
+        ziel.parent.mkdir(parents=True)
+        _echt_wurzel = am._projekt_wurzel
+        _echt_brand = am.branding
+        _echt_spr = am.sprache
+        try:
+            am._projekt_wurzel = lambda: wurzel
+            am.branding = lambda: ("Testhaus", "#123456")
+            am.sprache = lambda: "de"
+            assert not ziel.exists(), "Aufbau: Datei duerfte noch nicht da sein"
+            geaendert = am._hauswerte_schreiben()
+            return ziel.exists(), geaendert, (ziel.read_text(encoding="utf-8")
+                                              if ziel.exists() else "")
+        finally:
+            am._projekt_wurzel = _echt_wurzel
+            am.branding = _echt_brand
+            am.sprache = _echt_spr
+
+
+_erg31 = sicher(_erzeugt_bei_abwesenheit)
+_da31, _ge31, _inh31 = _erg31 if isinstance(_erg31, tuple) else (False, False, str(_erg31))
+check("AUSGEFUEHRT: _hauswerte_schreiben erzeugt die Datei, wenn sie FEHLT", _da31)
+check("…und meldet die Aenderung", _ge31 is True)
+check("…mit den Hauswerten darin", "Testhaus" in _inh31 and "#123456" in _inh31)
+
+# ── Das Bau-Skript darf nicht in einen Compilerfehler laufen ──────────────
+_bau31 = (ROOT / "deploy" / "ai_mouse_build.sh").read_text(encoding="utf-8")
+check("das Bau-Skript prueft, ob Vorgaben.cs danach existiert",
+      "Configuration/Vorgaben.cs" in _bau31 and 'if [ ! -f "$VORGABEN" ]' in _bau31)
+check("…und bricht mit Grund ab statt mit einem Compilerfehler",
+      "fehlt und konnte nicht erzeugt werden" in _bau31)
+
+# ── Der Update-Weg darf ECHT nicht handlungsunfaehig zuruecklassen ────────
+# GEMESSEN (Simulation mit echtem git): ist die Datei verfolgt UND lokal
+# geaendert, waehrend der eingehende Commit sie aus dem Index nimmt, endet
+# `stash pop` in einem ungelosten Konflikt (DU) - der Dienst laeuft, aber JEDER
+# weitere Pull scheitert. Genau so hing ECHT am 2026-08-30 fest.
+_um31 = (ROOT / "backend" / "update_manager.py").read_text(encoding="utf-8")
+check("update_manager kennt die erzeugten Dateien",
+      "_ERZEUGTE_DATEIEN" in _um31
+      and "ai-mouse/src/AiMouse/Configuration/Vorgaben.cs" in _um31)
+
+# REIHENFOLGE IST SEMANTIK: nach dem stash waere das Zuruecksetzen wirkungslos,
+# die Aenderung laege dann schon im Stash und der pop erzeugte den Konflikt.
+import ast as _ast31
+
+def _reihenfolge31():
+    baum = _ast31.parse(_um31)
+    fn = next(n for n in _ast31.walk(baum)
+              if isinstance(n, _ast31.FunctionDef) and n.name == "apply_update")
+    z_reset = z_stash = None
+    for k in _ast31.walk(fn):
+        if isinstance(k, _ast31.For) and getattr(k.iter, "id", "") == "_ERZEUGTE_DATEIEN":
+            z_reset = k.lineno
+        if isinstance(k, _ast31.Call) and getattr(k.func, "id", "") == "_git":
+            roh = [a for a in k.args if isinstance(a, _ast31.Constant)]
+            if roh and roh[0].value == "stash" and len(roh) > 1 and roh[1].value == "push":
+                z_stash = k.lineno
+    return z_reset, z_stash
+
+_zr31, _zs31 = sicher(_reihenfolge31) or (None, None)
+check("das Zuruecksetzen steht VOR dem stash (sonst wirkungslos) - reset=%s stash=%s"
+      % (_zr31, _zs31),
+      isinstance(_zr31, int) and isinstance(_zs31, int) and _zr31 < _zs31)
+check("…und es wird wirklich zurueckgesetzt, nicht nur geprueft",
+      '_git("checkout", "--", _erzeugt)' in _um31)
+
 print("\n%d OK, %d FAIL" % (ok, fail))
 sys.exit(1 if fail else 0)

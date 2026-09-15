@@ -173,6 +173,19 @@ ai_mouse._hauswerte_schreiben()
     fi
 fi
 
+# ⚠ FAIL-OPEN GILT NUR, SOLANGE DIE DATEI DA IST. Sie steht seit 2026-09-15 in
+# .gitignore (erzeugt, nicht gepflegt) - ein frischer Klon hat sie also nicht.
+# Ohne sie stirbt `dotnet publish` an einem Compilerfehler, den niemand dieser
+# Ursache zuordnet. Ein Abbruch MIT GRUND ist der bessere Ausgang.
+VORGABEN="$WURZEL/ai-mouse/src/AiMouse/Configuration/Vorgaben.cs"
+if [ ! -f "$VORGABEN" ]; then
+    meldung "FEHLER: $VORGABEN fehlt und konnte nicht erzeugt werden."
+    meldung "  Sie wird aus dem Branding des Servers geschrieben"
+    meldung "  (backend/ai_mouse.py::_hauswerte_schreiben) und steht bewusst"
+    meldung "  nicht im Repo. Laeuft der Dienst? Ist backend/ erreichbar?"
+    exit 1
+fi
+
 meldung "baue $RUNTIME (dauert etwa eine halbe Minute)…"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT

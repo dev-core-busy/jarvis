@@ -219,3 +219,22 @@ ai-mouse/**/obj/
 ai-mouse/publish/
 *.user
 .vs/
+
+# Hauswerte der AI-Maus-Anwendung (Marke, Akzentfarbe, Serveradresse, Sprache).
+# ERZEUGT, nicht gepflegt: `backend/ai_mouse.py::_hauswerte_schreiben` schreibt
+# sie vor JEDEM Bau aus dem Branding des Servers - die Datei sagt das im eigenen
+# Kopf ("⚠ ERZEUGT - nicht von Hand aendern").
+#
+# ⚠ SIE WAR VERFOLGT, UND DAS IST AUF EINEM SERVER MIT AUTO-UPDATE EINE
+# ZUENDSCHNUR. Auf ECHT stand sie dauerhaft als geaendert im Arbeitsbaum (der
+# Bau schreibt die Hauswerte hinein); die Update-Pille macht stash -> pull ->
+# stash pop, und genau so entstanden am 2026-09-14 Konfliktmarker in 20 Dateien
+# und eine Neustart-Schleife des Dienstes. Eine erzeugte Datei gehoert nicht in
+# die Versionierung - gleiche Begruendung wie data/instructions/ und
+# data/vorlagen/.
+#
+# Ein frischer Klon hat sie nicht; das ist unkritisch, weil jeder Bau-Weg
+# (Startup-Hook, Bootstrap 6g, Bedarf, deploy/ai_mouse_build.sh) sie zuvor
+# erzeugt. Kann er das nicht, bricht der Bau MIT GRUND ab statt in einem
+# Compilerfehler zu sterben.
+/ai-mouse/src/AiMouse/Configuration/Vorgaben.cs

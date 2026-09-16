@@ -113,6 +113,9 @@ ABGABE = {
     "spalten": [{"id": "c1", "name": "Modul", "typ": "text"},
                 {"id": "c2", "name": "Bewertung", "typ": "sterne"}],
     "zeilen": [{"c1": "Rechnungswesen", "c2": 4},
+               # ⚠ MEHRZEILIG: ob ein Umbruch beim Lesen wieder ein Umbruch ist,
+               # sieht keine Messung ueber `textContent` – nur die Zellhoehe.
+               {"c1": "Erste Zeile\nZweite Zeile\n\nNach einer Leerzeile", "c2": 3},
                {"c1": "Donaudampfschifffahrtsgesellschaftskapitaenspruefung", "c2": 2}]}
 
 SEITE = r"""<!DOCTYPE html><html lang="de"><head><meta charset="utf-8">
@@ -309,12 +312,74 @@ with connect(ws, open_timeout=20, max_size=40_000_000) as sock:
           return (b.right>a.right+1||b.left<a.left-1)?1:0;})()""")
         check("der Muelleimer bleibt im Tabellen-Container", raus == 0, str(raus))
 
-        # ── Das Eingabefeld ist breit genug zum Tippen ───────────────────────
+        # ── Das Antwortfeld: breit genug, und es WAECHST ────────────────────
+        #
+        # ⚠ DAS IST DIE MESSUNG, DIE JSDOM NICHT KANN. Dort gibt es kein Layout,
+        # `scrollHeight` ist immer 0 – ob ein Absatz im Feld wirklich sichtbar
+        # wird oder hinter einer Bildlaufleiste verschwindet, entscheidet sich
+        # erst im echten Browser.
         fb = js(sock, "(function(){var i=document.querySelector("
-                      "'#fb-tabelle input[type=text]');"
+                      "'#fb-tabelle textarea');"
                       "return i?Math.round(i.getBoundingClientRect().width):0;})()")
-        check("das Eingabefeld ist benutzbar breit (>=110px)", (fb or 0) >= 110,
+        check("das Antwortfeld ist benutzbar breit (>=110px)", (fb or 0) >= 110,
               f"{fb}px")
+        ist_ta = js(sock, "(function(){var i=document.querySelector("
+                          "'#fb-tabelle textarea');return i?1:0;})()")
+        check("und es ist ein mehrzeiliges Feld", ist_ta == 1)
+
+        h_vor = js(sock, "(function(){var i=document.querySelector("
+                         "'#fb-tabelle textarea');"
+                         "return i?Math.round(i.getBoundingClientRect().height):0;})()")
+        js(sock, """(function(){
+          var i=document.querySelector('#fb-tabelle textarea');
+          i.value='Zeile eins\\nZeile zwei\\nZeile drei\\nZeile vier\\nZeile fuenf';
+          i.dispatchEvent(new Event('input',{bubbles:true}));})()""")
+        time.sleep(0.4)
+        h_nach = js(sock, "(function(){var i=document.querySelector("
+                          "'#fb-tabelle textarea');"
+                          "return i?Math.round(i.getBoundingClientRect().height):0;})()")
+        check(f"⚠ das Feld WAECHST mit dem Inhalt ({h_vor} → {h_nach} px)",
+              (h_nach or 0) > (h_vor or 0) + 20,
+              "ohne Wachsen steht ein Absatz hinter einer Bildlaufleiste")
+        # ⚠ `scrollHeight <= clientHeight`: die Hoehenformel muss den RAHMEN
+        # mitrechnen (box-sizing: border-box) – sonst bleibt das Feld zwei Pixel
+        # zu klein und zeigt dauerhaft eine Bildlaufleiste, obwohl gerade
+        # nachgemessen wurde.
+        rest = js(sock, "(function(){var i=document.querySelector("
+                        "'#fb-tabelle textarea');"
+                        "return i?(i.scrollHeight - i.clientHeight):999;})()")
+        check("und zeigt danach KEINE Bildlaufleiste", (rest or 0) <= 1,
+              f"scrollHeight - clientHeight = {rest}")
+        tf = farbe(js(sock, "getComputedStyle(document.querySelector("
+                            "'#fb-tabelle textarea')).color"))
+        tg = farbe(js(sock, "getComputedStyle(document.querySelector("
+                            "'#fb-tabelle textarea')).backgroundColor"))
+        # Halbdurchsichtige Flaeche ueber den Seitengrund legen (Register).
+        k3 = kontrast(tf, tg if sum(tg) else grund)
+        check(f"der getippte Text ist lesbar (>=4.5:1) – {k3:.2f}:1", k3 >= 4.5,
+              f"{tf} auf {tg}")
+        ueber_ta = js(sock, "document.documentElement.scrollWidth - "
+                            "document.documentElement.clientWidth")
+        check("das gewachsene Feld sprengt die Seite nicht",
+              (ueber_ta or 0) <= 1, f"{ueber_ta}px")
+
+        # ── Die Rueckschau: ein Umbruch ist wieder ein Umbruch ───────────────
+        hoehen = js(sock, """(function(){
+          var tds=document.querySelectorAll('.fb-abgabe-body .fb-tab tbody td');
+          var mehr=0, ein=0;
+          for(var i=0;i<tds.length;i++){
+            var t=tds[i].textContent||'';
+            var h=Math.round(tds[i].getBoundingClientRect().height);
+            if(t.indexOf('Erste Zeile')>=0){mehr=h;}
+            else if(t.indexOf('Rechnungswesen')>=0){ein=h;}
+          }
+          return mehr*10000+ein;})()""")
+        m_h, e_h = ((hoehen or 0) // 10000), ((hoehen or 0) % 10000)
+        check("die mehrzeilige Zelle ist gezeichnet (Positivkontrolle)", m_h > 0,
+              f"mehrzeilig {m_h}px, einzeilig {e_h}px")
+        check(f"⚠ sie ist HOEHER als eine einzeilige ({m_h} vs. {e_h} px)",
+              m_h > e_h + 20,
+              "ohne pre-wrap macht HTML aus jedem Umbruch ein Leerzeichen")
 
         # ── Die eigenen Abgaben: unteilbares Wort sprengt nichts ─────────────
         ueber2 = js(sock, """(function(){

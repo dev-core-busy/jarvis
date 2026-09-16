@@ -335,6 +335,52 @@ PROBEN = [
      "                var lage = !feste.length ? 'frei'\n"
      "                    : ((this._zeilen || []).length ? 'fest' : 'fehlt');",
      "                var lage = !feste.length ? 'frei' : 'fest';", UI),
+
+    # ── Mehrzeilige Antworten (2026-09-16) ─────────────────────────────────
+    ("das Antwortfeld ist wieder einzeilig", "frontend/js/feedback.js",
+     "        var ta = document.createElement('textarea');\n"
+     "        ta.rows = FELD_ZEILEN;",
+     "        var ta = document.createElement('input');\n"
+     "        ta.type = 'text';", UI),
+    ("der Umbruch wird beim Speichern zu einem Leerzeichen",
+     "backend/feedback.py",
+     '    return roh.replace("\\r\\n", "\\n").replace("\\r", "\\n").strip()[:ZELLE_MAX]',
+     '    return " ".join(roh.split()).strip()[:ZELLE_MAX]', BACKEND),
+    ("CRLF wird nicht vereinheitlicht", "backend/feedback.py",
+     '    return roh.replace("\\r\\n", "\\n").replace("\\r", "\\n").strip()[:ZELLE_MAX]',
+     "    return roh.strip()[:ZELLE_MAX]", BACKEND),
+    ("die Normierung wird gar nicht benutzt", "backend/feedback.py",
+     '    text = _mehrzeilig_normieren("" if wert is None else str(wert))',
+     '    text = ("" if wert is None else str(wert)).strip()[:ZELLE_MAX]', BACKEND),
+    # ⚠ HIER STAND EINE PROBE „strip() laeuft vor der Normierung" – sie biss
+    # NICHT, und das war ein Befund ueber meinen KOMMENTAR, nicht ueber den
+    # Code: `str.strip()` zaehlt `\r` und `\n` selbst zum Leerraum, die
+    # Reihenfolge ist also gleichwertig (an neun Faellen gemessen, kein
+    # Unterschied). Die falsche Begruendung im Docstring ist korrigiert; eine
+    # Probe auf eine Eigenschaft, die es nicht gibt, waere ein zahnloser
+    # Waechter mit Anspruch (Register: der `IsFile`-Guertel).
+    ("die Lese-Zelle bricht nicht mehr um (kein pre-wrap)",
+     "frontend/css/feedback.css",
+     "    white-space: pre-wrap; overflow-wrap: anywhere;",
+     "    overflow-wrap: anywhere;", BACKEND),
+    ("die Anzeige vergibt die Klasse `fb-c-text` nicht mehr",
+     "frontend/js/feedback.js",
+     "                    td.className = (s.typ === TYP_FEST) ? 'fb-c-fest' : 'fb-c-text';",
+     "                    if (s.typ === TYP_FEST) { td.className = 'fb-c-fest'; }", UI),
+    # Die ZWEITE Anzeigestelle – eine allein waere die halbe Reparatur.
+    ("die Auswertung im Reiter vergibt sie nicht",
+     "frontend/js/feedback_admin.js",
+     "                            td.className = (sp.typ === TYP_FEST) ? 'fb-c-fest' : 'fb-c-text';",
+     "                            td.className = '';", BACKEND),
+    ("der Fokus-Sprung sucht wieder `input[type=text]`",
+     "frontend/js/feedback.js",
+     "var felder = document.querySelectorAll('#fb-tabelle tbody tr:last-child textarea');",
+     "var felder = document.querySelectorAll('#fb-tabelle tbody tr:last-child input[type=\"text\"]');",
+     UI),
+    ("bei Hoehe 0 wird die Hoehe trotzdem gesetzt", "frontend/js/feedback.js",
+     "        if (inhalt > 0) {", "        if (true) {", BACKEND),
+    ("beim Aufklappen wird nicht nachgemessen", "frontend/js/feedback.js",
+     "                if (!neuZu) { hoehenNachziehen(); }", "", BACKEND),
 ]
 
 

@@ -436,8 +436,39 @@ def _zelle_pruefen(spalte: dict, wert) -> tuple[str, object]:
         # Abgabe nicht scheitern lassen, sie ist nur keine 7.
         n = max(0, min(STERNE_MAX, n))
         return (str(n) if n else ""), n
-    text = ("" if wert is None else str(wert)).strip()[:ZELLE_MAX]
+    text = _mehrzeilig_normieren("" if wert is None else str(wert))
     return text, text
+
+
+def _mehrzeilig_normieren(roh: str) -> str:
+    """Einen Textwert normieren – Zeilenumbrueche bleiben ERHALTEN.
+
+    ⚠ DIE ZEILENENDEN WERDEN VEREINHEITLICHT (``\\r\\n``/``\\r`` → ``\\n``).
+    Die ``textarea``-Eigenschaft ``.value`` liefert im Browser bereits ``\\n``,
+    ein abgesendetes HTML-Formular dagegen ``\\r\\n`` – und ein Client, der den
+    Endpunkt direkt bedient, schickt was er will. Ohne Normierung laegen im
+    selben Bestand zwei Schreibweisen desselben Umbruchs: die Anzeige zeigt in
+    der einen Fassung eine Leerzeile zu viel (``\\r`` IST in einer
+    ``white-space: pre-wrap``-Zelle ein Umbruch), und ``csv_zelle`` entschaerft
+    einen Wert, der mit ``\\r`` beginnt, mit einem Apostroph – sichtbar, fuer
+    den Leser unerklaerlich.
+
+    ``strip()`` entfernt danach den Leerraum an beiden Enden – also auch die
+    Leerzeilen, die beim Tippen hinten entstehen.
+
+    ⚠ DIE REIHENFOLGE VON ``strip`` UND ``replace`` IST HIER GLEICHWERTIG, und
+    das steht hier, damit es niemand erneut prueft: ``str.strip()`` zaehlt
+    ``\\r`` und ``\\n`` selbst zum Leerraum, und der Deckel greift in beiden
+    Fassungen zuletzt. An neun Faellen gemessen (CRLF/CR am Ende, innen, nur
+    Leerraum, leer, ueberlanger Text mit CRLF): **kein einziger Unterschied**.
+    Eine fruehere Fassung dieses Docstrings behauptete das Gegenteil – die
+    Gegenprobe dazu biss nicht, und das war ein Befund ueber den KOMMENTAR,
+    nicht ueber den Code (Register: der ``IsFile``-Guertel).
+
+    Der Deckel ``ZELLE_MAX`` gilt wie bisher und begrenzt damit auch die Zahl
+    der Zeilen – 2000 Zeichen sind hoechstens 2000 Umbrueche.
+    """
+    return roh.replace("\r\n", "\n").replace("\r", "\n").strip()[:ZELLE_MAX]
 
 
 def _zeilen_pruefen(spalten: list[dict], roh) -> list[dict]:

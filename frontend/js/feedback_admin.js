@@ -845,6 +845,13 @@
                             zahl.textContent = n ? (n + '/5') : '–';
                             td.appendChild(zahl);
                         } else {
+                            // ⚠ `pre-wrap` (siehe `.fb-c-text`): eine Antwort
+                            // darf mehrzeilig sein, und HTML macht aus einem
+                            // Umbruch sonst ein Leerzeichen. Ohne diese Zeile
+                            // laese die AUSWERTUNG die Absaetze anders als der
+                            // Benutzer sie geschrieben hat – dieselbe Lehre wie
+                            // in `feedback.js`, nur die zweite Anzeigestelle.
+                            td.className = (sp.typ === TYP_FEST) ? 'fb-c-fest' : 'fb-c-text';
                             td.textContent = z[sp.id] == null ? '' : String(z[sp.id]);
                         }
                         tr.appendChild(td);

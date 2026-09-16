@@ -89,16 +89,50 @@
    den Eingabefeldern nicht den Platz nehmen. */
 .fb-tab.is-fest td.fb-c-fest { width: 30%; }
 
-.fb-tab input[type="text"] {
+/* ── Antwortfeld ───────────────────────────────────────────────────────────
+   ⚠ MEHRZEILIG (Vorgabe des Betreibers 2026-09-16). Es war ein
+   `input[type="text"]`; die Regel dafuer ist ERSATZLOS weg, weil es in `.fb-tab`
+   kein einziges Textfeld mehr gibt – eine Regel ohne Gegenstand muesste bei
+   jeder Durchsicht mitgeprueft werden (Register). Die Felder des Admin-Editors
+   (`.fb-sp`, `.fb-z`) liegen NICHT in einer `.fb-tab` und sind unberuehrt. */
+.fb-tab textarea {
     width: 100%; box-sizing: border-box; min-width: 140px;
     padding: 6px 9px; border-radius: var(--radius-sm);
     border: 1px solid var(--border);
     background: var(--bg-glass); color: var(--text-primary);
     font-size: .9rem; font-family: inherit;
+    /* `inherit` waere `normal` – in einer `textarea` rechnet der Browser die
+       Hoehe aus `rows` MAL Zeilenhoehe; ohne festen Wert weicht sie je nach
+       Schrift ab, und `rows="2"` waere mal zwei, mal anderthalb Zeilen hoch. */
+    line-height: 1.45;
+    /* Waagerecht ziehen wuerde die Tabellenspalte sprengen; senkrecht ist der
+       Rueckweg, falls die Hoehenanpassung im JS einmal nicht greift. */
+    resize: vertical;
+    /* ⚠ `auto`, NICHT `hidden`: faellt die Hoehenanpassung aus (zugeklappter
+       Container, alter Browser), bleibt der Inhalt ueber die Bildlaufleiste
+       erreichbar. `hidden` wuerde ihn abschneiden – die teurere
+       Halbfehlerstellung. */
+    overflow-y: auto;
 }
-.fb-tab input[type="text"]:focus-visible {
+.fb-tab textarea:focus-visible {
     outline: 2px solid var(--accent); outline-offset: 1px;
 }
+
+/* ⚠ EINE ANTWORT DARF MEHRZEILIG SEIN – beim LESEN genauso wie beim Schreiben.
+   HTML macht aus einem Umbruch ein Leerzeichen; ohne `pre-wrap` saehe der
+   Benutzer unter „Meine Abgaben" einen Textklumpen, wo er Absaetze geschrieben
+   hat (Register: /chat, 2026-08-31). `anywhere`, damit eine lange Antwort die
+   Tabelle nicht breiter macht als das Fenster. */
+.fb-tab td.fb-c-text {
+    white-space: pre-wrap; overflow-wrap: anywhere;
+    max-width: 34em; min-width: 8em;
+}
+
+/* Mit mehrzeiligen Feldern steht die Zeilennummer sonst mittig neben einem
+   hohen Feld. `top` richtet alles an der ERSTEN Zeile aus – dort steht die
+   Aussage. */
+.fb-tab td { vertical-align: top; }
+.fb-tab td.fb-c-nr { padding-top: 14px; }
 
 /* Zeile entfernen – Muelleimer (Symbol-Semantik: hier wird etwas entfernt). */
 .fb-row-del {
@@ -152,7 +186,8 @@
 
 @media (max-width: 720px) {
     .fb-tab th, .fb-tab td { padding: 6px 7px; }
-    .fb-tab input[type="text"] { min-width: 110px; }
+    .fb-tab textarea { min-width: 110px; }
+    .fb-tab td.fb-c-nr { padding-top: 12px; }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

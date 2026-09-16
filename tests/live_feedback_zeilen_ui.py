@@ -192,7 +192,10 @@ try:
         # Vorfahren ist jedes Rechteck 0 und jede Schranke trivial wahr.
         masse = js(ws, """(function(){
           var td = document.querySelector('#fb-tabelle td.fb-c-fest');
-          var inp = document.querySelector('#fb-tabelle tbody input[type=text]');
+          // ⚠ `textarea`: die Antwortfelder sind seit 2026-09-16 mehrzeilig.
+          // Der alte Selektor faende NICHTS, `masse` waere `null` – und alle
+          // drei Pruefungen darunter meldeten einen Fehler, den es nicht gibt.
+          var inp = document.querySelector('#fb-tabelle tbody textarea');
           var tab = document.querySelector('#fb-tabelle .fb-tab');
           if(!td||!inp||!tab) return null;
           var a = td.getBoundingClientRect(), b = inp.getBoundingClientRect();

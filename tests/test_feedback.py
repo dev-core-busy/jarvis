@@ -1005,6 +1005,110 @@ check("die feste Zelle ist nicht gedaempft (sie wird GELESEN)",
       if "td.fb-c-fest" in css else False)
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+print("\n\033[1m11. Mehrzeilige Antworten (Vorgabe 2026-09-16)\033[0m")
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# ⚠ GEMESSEN WIRD DER GANZE WEG: dass ein Umbruch die Ablage erreicht, dort
+# EINHEITLICH liegt und den CSV-Export nicht zerlegt. Ein Test, der nur
+# `_mehrzeilig_normieren` prueft, saehe nicht, ob `_zelle_pruefen` sie
+# ueberhaupt benutzt.
+
+check("⚠ ein Umbruch ueberlebt die Zellpruefung",
+      fb._mehrzeilig_normieren("a\nb") == "a\nb",
+      "ohne Umbrueche waere ein mehrzeiliges Feld sinnlos")
+check("⚠ CRLF wird zu LF vereinheitlicht",
+      fb._mehrzeilig_normieren("a\r\nb") == "a\nb",
+      "sonst laegen zwei Schreibweisen desselben Umbruchs im selben Bestand")
+check("ein einzelnes CR ebenso (alte Macs, handgebaute Aufrufer)",
+      fb._mehrzeilig_normieren("a\rb") == "a\nb")
+check("⚠ Leerzeilen am ENDE fallen weg",
+      fb._mehrzeilig_normieren("Text\r\n\r\n  ") == "Text",
+      "strip() NACH der Normierung – vorher bliebe ein \\r stehen")
+check("eine Leerzeile INNEN bleibt (sie trennt Absaetze)",
+      fb._mehrzeilig_normieren("a\n\nb") == "a\n\nb")
+check("der Zeichendeckel gilt weiterhin",
+      len(fb._mehrzeilig_normieren("x\n" * 5000)) == fb.ZELLE_MAX)
+
+# ── Der Rundlauf durch eine echte Abgabe ────────────────────────────────────
+fm = muss("Mehrzeilen-Formular anlegen gelingt", fb.formular_speichern, "",
+          "Mehrzeilig", "", [{"name": "Antwort", "typ": "text"},
+                             {"name": "Note", "typ": "sterne"}])
+SM = {s["name"]: s["id"] for s in fm.get("spalten", [])}
+LANG = "Erste Zeile\r\nZweite Zeile\r\n\r\nNach einer Leerzeile"
+ab = muss("die mehrzeilige Abgabe gelingt", fb.abgabe_speichern, "bea", fm["id"],
+          [{SM["Antwort"]: LANG, SM["Note"]: 4}])
+gespeichert = (ab or {}).get("zeilen", [{}])[0].get(SM["Antwort"], "")
+check("⚠ der gespeicherte Wert traegt die Umbrueche",
+      gespeichert.count("\n") == 3, repr(gespeichert))
+check("und zwar als LF, nicht als CRLF",
+      "\r" not in gespeichert, repr(gespeichert))
+check("der Text ist inhaltlich vollstaendig",
+      gespeichert == "Erste Zeile\nZweite Zeile\n\nNach einer Leerzeile",
+      repr(gespeichert))
+
+# ── CSV: der Umbruch darf die STRUKTUR nicht zerlegen ───────────────────────
+#
+# ⚠ DAS IST DIE TEUERSTE STELLE. Ein nacktes `\n` in einer Zelle wuerde eine
+# CSV-Datei mitten in der Zeile brechen – aus einer Abgabe wuerden vier
+# unzusammenhaengende Zeilen, und das faellt erst in Excel auf. Gemessen wird
+# mit einem ECHTEN Konsumenten (`csv.reader`), nicht mit einer Textsuche.
+import csv as _csv          # noqa: E402  (nur hier gebraucht)
+import io as _io            # noqa: E402
+
+_, ctext = fb.csv_export(fm["id"])
+zeilen_csv = list(_csv.reader(_io.StringIO(ctext.lstrip("﻿")), delimiter=";"))
+check("⚠ der Umbruch zerlegt die CSV-Struktur NICHT",
+      len(zeilen_csv) == 2, "gelesen: %d Zeilen statt 2" % len(zeilen_csv))
+check("und die Zelle traegt den vollstaendigen Text",
+      len(zeilen_csv) == 2 and zeilen_csv[1][4].count("\n") == 3,
+      repr(zeilen_csv[1][4] if len(zeilen_csv) == 2 else None))
+check("der Wert steht dafuer in Anfuehrungszeichen",
+      '"Erste Zeile' in ctext,
+      "ohne Quoting bricht die Datei an jedem Umbruch")
+# Positivkontrolle: der Leser sieht ueberhaupt die richtige Spaltenzahl –
+# sonst waere „2 Zeilen" auch bei einer kaputten Datei zufaellig wahr.
+check("Positivkontrolle: die Kopfzeile hat 6 Spalten",
+      len(zeilen_csv) == 2 and len(zeilen_csv[0]) == 6,
+      repr(zeilen_csv[0] if zeilen_csv else None))
+
+# ── Die Oberflaeche: textarea statt input, und die Anzeige bricht um ────────
+fbjs = (FRONT / "js" / "feedback.js").read_text(encoding="utf-8")
+fbjs_ok = ohne_kommentare(fbjs)
+check("⚠ das Antwortfeld ist ein `textarea`",
+      "createElement('textarea')" in fbjs_ok,
+      "ein `input` nimmt keinen Umbruch auf")
+check("und es gibt kein `input type=text` mehr in der Tabelle",
+      "inp.type = 'text'" not in fbjs_ok)
+check("⚠ der Fokus-Sprung nach „+ Zeile\" sucht `textarea`",
+      "tr:last-child textarea" in fbjs_ok,
+      "der alte Selektor faende nichts – der Knopf taete still weniger")
+check("die Hoehe wird an den Inhalt angepasst",
+      "scrollHeight" in fbjs_ok and "hoeheAnpassen" in fbjs_ok)
+check("⚠ bei Hoehe 0 wird NICHTS gesetzt (zugeklappter Container)",
+      "inhalt > 0" in fbjs_ok,
+      "sonst ist das Feld nach dem Aufklappen unsichtbar (Register)")
+check("⚠ und beim Aufklappen wird nachgemessen",
+      "hoehenNachziehen" in fbjs_ok and "if (!neuZu)" in fbjs_ok,
+      "in einem zugeklappten Container ist scrollHeight 0")
+
+check("⚠ die Lese-Zelle traegt `pre-wrap`",
+      "white-space: pre-wrap" in css.split("fb-c-text")[1][:200]
+      if "fb-c-text" in css else False,
+      "HTML macht aus einem Umbruch sonst ein Leerzeichen")
+for datei in ("feedback.js", "feedback_admin.js"):
+    quelle = ohne_kommentare((FRONT / "js" / datei).read_text(encoding="utf-8"))
+    check("%s zeichnet die Lese-Zelle mit `fb-c-text`" % datei,
+          "'fb-c-text'" in quelle,
+          "beide Anzeigestellen – eine allein waere die halbe Reparatur")
+check("⚠ die tote `input[type=\"text\"]`-Regel ist aus dem Tabellen-CSS raus",
+      ".fb-tab input[type=\"text\"]" not in css,
+      "eine Regel ohne Gegenstand muss bei jeder Durchsicht mitgeprueft werden")
+check("dafuer gibt es eine `.fb-tab textarea`-Regel", ".fb-tab textarea" in css)
+
+fb.formular_loeschen(fm["id"])
+
+
 print("\n" + "=" * 70)
 print("\033[1mErgebnis: %d OK, %d FAIL\033[0m" % (_ok, _fail))
 sys.exit(1 if _fail else 0)

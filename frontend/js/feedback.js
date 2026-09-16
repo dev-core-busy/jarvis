@@ -95,6 +95,11 @@
                 var neuZu = !karte.classList.contains('is-zu');
                 karte.classList.toggle('is-zu', neuZu);
                 kopf.setAttribute('aria-expanded', neuZu ? 'false' : 'true');
+                // ⚠ BEIM SICHTBARWERDEN NACHMESSEN: in einem zugeklappten
+                // Container ist `scrollHeight` 0, die Antwortfelder behalten
+                // dort ihre Starthoehe. Ohne dieses Nachziehen stuende ein
+                // langer Text nach dem Aufklappen in einem zu kleinen Feld.
+                if (!neuZu) { hoehenNachziehen(); }
                 var liste = klappZustand().filter(function (x) { return x !== id; });
                 if (neuZu) { liste.push(id); }
                 try { localStorage.setItem(KLAPP_SPEICHER, JSON.stringify(liste)); }
@@ -190,6 +195,79 @@
         huelle.appendChild(box);
         huelle.appendChild(anzeige);
         return huelle;
+    }
+
+    // ── Antwortfelder ──────────────────────────────────────────────────────
+    //
+    // ⚠ EIN `textarea`, KEIN `input` (Vorgabe des Betreibers 2026-09-16).
+    // Eine Antwort ist oft ein Absatz; in einem einzeiligen Feld liess sich
+    // ueberhaupt kein Umbruch eingeben – der Deckel von 2000 Zeichen stand
+    // schon immer da, benutzbar waren sie nicht.
+    //
+    // ⚠ ENTER FUEGT EINEN UMBRUCH EIN UND SENDET NICHT AB. Das ist hier
+    // gefahrlos, weil der Absende-Weg ausschliesslich am Knopf haengt: es gibt
+    // kein `<form>` und keinen Enter-Handler auf der Seite. Wer hier je einen
+    // ergaenzt, macht aus jedem Absatzwechsel eine Abgabe.
+
+    /** Startzeilen. Zwei statt einer: eine einzeilige `textarea` sieht aus wie
+     *  ein `input` – dass man hier einen Absatz schreiben darf, soll man SEHEN,
+     *  ohne es auszuprobieren. */
+    var FELD_ZEILEN = 2;
+
+    /** Die Hoehe an den Inhalt anpassen.
+     *
+     *  ⚠ BEI HOEHE 0 WIRD NICHTS GESETZT. In einem zugeklappten Container
+     *  (`.ja-card.is-zu`) ist `scrollHeight` 0 – wer das naiv uebernimmt, setzt
+     *  die Hoehe auf 0 und das Feld ist nach dem Aufklappen unsichtbar
+     *  (Register: dieselbe Falle bei der Verstossliste, 2026-07-30). Deshalb
+     *  zieht `klappInit` beim Sichtbarwerden nach.
+     *
+     *  `height = 'auto'` VOR dem Messen ist Pflicht: `scrollHeight` waechst
+     *  sonst nur, es schrumpft nie wieder – geloeschter Text liesse das Feld
+     *  hoch stehen.
+     *
+     *  ⚠ DER RAHMEN MUSS DAZU. Das Feld ist `box-sizing: border-box`, `height`
+     *  meint dort die Hoehe MIT Rahmen – `scrollHeight` enthaelt aber nur
+     *  Inhalt und Polster. Ohne die zwei Pixel ist das Feld dauerhaft zu klein
+     *  und zeigt eine Bildlaufleiste, obwohl gerade nachgemessen wurde.
+     */
+    function hoeheAnpassen(ta) {
+        if (!ta) { return; }
+        var alt = ta.style.height;
+        ta.style.height = 'auto';
+        var inhalt = ta.scrollHeight;
+        // offsetHeight - clientHeight = Rahmen (und eine etwaige waagerechte
+        // Bildlaufleiste). Negativ kann das nicht werden.
+        var rahmen = Math.max(0, ta.offsetHeight - ta.clientHeight);
+        if (inhalt > 0) {
+            ta.style.height = (inhalt + rahmen) + 'px';
+        } else {
+            // Unsichtbar (zugeklappt, `display:none`): den vorherigen Stand
+            // zuruecklegen, statt eine gemessene Null festzuschreiben.
+            ta.style.height = alt;
+        }
+    }
+
+    /** Alle Antwortfelder nachmessen – nach dem Einhaengen und beim Aufklappen.
+     *  Vor dem Einhaengen ins Dokument ist `scrollHeight` 0, ein Aufruf mitten
+     *  im Bauen der Tabelle waere also wirkungslos. */
+    function hoehenNachziehen() {
+        document.querySelectorAll('#fb-tabelle textarea').forEach(hoeheAnpassen);
+    }
+
+    function textfeldBauen(spalte, zeile) {
+        var ta = document.createElement('textarea');
+        ta.rows = FELD_ZEILEN;
+        ta.maxLength = 2000;
+        ta.className = 'fb-feld-text';
+        ta.setAttribute('aria-label', spalte.name);
+        // ⚠ .value setzen, NICHT ins Markup interpolieren.
+        ta.value = zeile[spalte.id] == null ? '' : String(zeile[spalte.id]);
+        ta.addEventListener('input', function () {
+            zeile[spalte.id] = ta.value;
+            hoeheAnpassen(ta);
+        });
+        return ta;
     }
 
     // ── Tabelle ────────────────────────────────────────────────────────────
@@ -291,14 +369,7 @@
                         s.name + ' – ' + t('feedback.stars', 'Bewertung'),
                         function (n) { zeile[s.id] = n; }));
                 } else {
-                    var inp = document.createElement('input');
-                    inp.type = 'text';
-                    inp.maxLength = 2000;
-                    inp.setAttribute('aria-label', s.name);
-                    // ⚠ .value setzen, NICHT ins Markup interpolieren.
-                    inp.value = zeile[s.id] == null ? '' : String(zeile[s.id]);
-                    inp.addEventListener('input', function () { zeile[s.id] = inp.value; });
-                    td.appendChild(inp);
+                    td.appendChild(textfeldBauen(s, zeile));
                 }
                 tr.appendChild(td);
             });
@@ -332,6 +403,9 @@
         tab.appendChild(tbody);
         wrap.appendChild(tab);
         box.appendChild(wrap);
+        // ⚠ ERST JETZT: vor dem Einhaengen ins Dokument ist `scrollHeight` 0,
+        // ein Nachmessen waehrend des Bauens waere wirkungslos.
+        hoehenNachziehen();
     }
 
     function formularWaehlen(fid) {
@@ -547,7 +621,11 @@
                     // Der feste Text steht in der Abgabe selbst (Snapshot) und
                     // bekommt dieselbe Auszeichnung wie im Formular – sonst
                     // saehe die Rueckschau anders aus als das Ausgefuellte.
-                    if (s.typ === TYP_FEST) { td.className = 'fb-c-fest'; }
+                    // ⚠ `fb-c-text` traegt `white-space: pre-wrap`: eine
+                    // Antwort darf mehrzeilig sein, und HTML macht aus einem
+                    // Umbruch sonst ein LEERZEICHEN – der Benutzer saehe seine
+                    // Absaetze nicht wieder (Register: /chat, 2026-08-31).
+                    td.className = (s.typ === TYP_FEST) ? 'fb-c-fest' : 'fb-c-text';
                     td.textContent = z[s.id] == null ? '' : String(z[s.id]);
                 }
                 tr.appendChild(td);
@@ -577,7 +655,10 @@
                 tabelleZeichnen();
                 // Der Fokus springt in die neue Zeile – sonst muss der Benutzer
                 // nach jedem Klick erst wieder hinklicken.
-                var felder = document.querySelectorAll('#fb-tabelle tbody tr:last-child input[type="text"]');
+                // ⚠ `textarea`, nicht `input[type="text"]`: der alte Selektor
+                // fand nach der Umstellung auf mehrzeilige Felder nichts mehr,
+                // und der Knopf tat still weniger als vorher.
+                var felder = document.querySelectorAll('#fb-tabelle tbody tr:last-child textarea');
                 if (felder.length) { felder[0].focus(); }
             });
         }

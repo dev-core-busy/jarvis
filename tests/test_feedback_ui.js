@@ -96,8 +96,10 @@ const warte = ms => new Promise(r => setTimeout(r, ms));
     JSON.stringify(kopf));
   c('es gibt genau EINE Zeile zum Start',
     doc.querySelectorAll('#fb-tabelle tbody tr').length === 1);
-  c('eine Text-Spalte ist ein Eingabefeld',
-    doc.querySelectorAll('#fb-tabelle tbody input[type="text"]').length === 2);
+  c('⚠ eine Text-Spalte ist ein MEHRZEILIGES Feld',
+    doc.querySelectorAll('#fb-tabelle tbody textarea').length === 2
+    && doc.querySelectorAll('#fb-tabelle tbody input[type="text"]').length === 0,
+    'ein einzeiliges Feld nimmt keinen Absatz auf (Vorgabe 2026-09-16)');
   c('eine Sterne-Spalte ist eine Radiogruppe',
     !!doc.querySelector('#fb-tabelle tbody .fb-sterne[role="radiogroup"]'));
   c('mit genau fuenf Knoepfen',
@@ -181,7 +183,7 @@ const warte = ms => new Promise(r => setTimeout(r, ms));
   c('und die Meldung sagt warum',
     doc.getElementById('fb-status').textContent.length > 5);
 
-  const feld = doc.querySelector('#fb-tabelle tbody input[type="text"]');
+  const feld = doc.querySelector('#fb-tabelle tbody textarea');
   feld.value = 'Rechnungswesen';
   feld.dispatchEvent(new w.Event('input', { bubbles: true }));
   doc.querySelector('#fb-tabelle tbody .fb-sterne').children[2].click();
@@ -202,7 +204,7 @@ const warte = ms => new Promise(r => setTimeout(r, ms));
     'er kommt aus der Anmeldung');
   c('nach dem Senden steht ein frisches, leeres Formular da',
     doc.querySelectorAll('#fb-tabelle tbody tr').length === 1
-    && doc.querySelector('#fb-tabelle tbody input[type="text"]').value === '');
+    && doc.querySelector('#fb-tabelle tbody textarea').value === '');
   c('und eine Bestaetigung', doc.getElementById('fb-status').classList.contains('is-ok'));
 
   // ═════════════════════════════════════════════════════════════════════════
@@ -405,7 +407,7 @@ const warte = ms => new Promise(r => setTimeout(r, ms));
     feste.every(td => !td.querySelector('input, textarea, select')),
     'ein gesperrtes Feld sieht aus wie eines, das gerade klemmt');
   c('die uebrigen Spalten sind weiterhin ausfuellbar',
-    doc.querySelectorAll('#fb-tabelle tbody input[type="text"]').length === 6
+    doc.querySelectorAll('#fb-tabelle tbody textarea').length === 6
     && doc.querySelectorAll('#fb-tabelle tbody .fb-sterne[role="radiogroup"]').length === 6);
   c('⚠ es gibt KEINEN Muelleimer – die Struktur gehoert dem Administrator',
     doc.querySelectorAll('#fb-tabelle .fb-row-del').length === 0);
@@ -593,6 +595,87 @@ const warte = ms => new Promise(r => setTimeout(r, ms));
     'eine unbrauchbare Kennung vergibt der Server NEU – die Werte zeigten dann ins Leere');
   c('und die Kennungen sind untereinander verschieden',
     new Set((rumpfA.zeilen || []).map(z => z.id)).size === 7);
+
+  // ═════════════════════════════════════════════════════════════════════════
+  console.log('\n9. Mehrzeilige Antwortfelder (Vorgabe 2026-09-16)');
+  // ═════════════════════════════════════════════════════════════════════════
+  //
+  // ⚠ GEMESSEN WIRD DIE EIGENSCHAFT, NICHT DER TAGNAME: dass ein Umbruch
+  // eingegeben werden KANN, beim Absenden ANKOMMT und beim Wiederlesen wieder
+  // als Umbruch dasteht. Eine Suche nach `createElement('textarea')` bliebe
+  // gruen, wenn der Wert unterwegs bei der ersten Zeile abgeschnitten wuerde.
+  const MEHR = 'Erste Zeile\nZweite Zeile\n\nNach einer Leerzeile';
+  ({ w, doc, rufe } = seite({}));
+  await warte(60);
+
+  const ta = doc.querySelector('#fb-tabelle tbody textarea');
+  c('das Antwortfeld ist ein textarea', !!ta && ta.tagName === 'TEXTAREA');
+  c('mit mehr als einer sichtbaren Zeile', !!ta && Number(ta.rows) >= 2,
+    'ein einzeiliges textarea sieht aus wie ein input – man muss es SEHEN');
+  c('der Zeichendeckel bleibt bei 2000 (ZELLE_MAX)',
+    !!ta && Number(ta.maxLength) === 2000);
+
+  ta.value = MEHR;
+  ta.dispatchEvent(new w.Event('input', { bubbles: true }));
+  rufe.length = 0;
+  doc.getElementById('fb-senden').click();
+  await warte(60);
+  const g9 = rufe.find(r => r.u === '/api/feedback/abgabe');
+  c('eine mehrzeilige Antwort wird gesendet', !!g9);
+  const r9 = g9 ? JSON.parse(g9.b) : {};
+  c('⚠ die Umbrueche kommen VOLLSTAENDIG im Rumpf an',
+    !!(r9.zeilen && r9.zeilen[0] && r9.zeilen[0].c1 === MEHR),
+    JSON.stringify(r9.zeilen && r9.zeilen[0]));
+
+  // ── Die Rueckschau: derselbe Text muss wieder als Absatz dastehen ────────
+  const ABG = [{
+    id: 'a9', formular_titel: 'Modulbewertung', zeit: '2026-09-16T10:00:00',
+    spalten: FORM.spalten,
+    zeilen: [{ c1: MEHR, c2: 4, c3: '' }]
+  }];
+  ({ w, doc, rufe } = seite({ meine: ABG }));
+  await warte(60);
+  const zelle = [...doc.querySelectorAll('#fb-meine .fb-tab tbody td')]
+    .find(td => td.textContent.indexOf('Erste Zeile') >= 0);
+  c('die eigene Abgabe wird angezeigt (Positivkontrolle)', !!zelle);
+  c('⚠ der Umbruch steht noch im Text',
+    !!zelle && zelle.textContent === MEHR,
+    JSON.stringify(zelle && zelle.textContent));
+  c('⚠ und die Zelle traegt `fb-c-text` (pre-wrap)',
+    !!zelle && zelle.classList.contains('fb-c-text'),
+    'ohne pre-wrap macht HTML aus jedem Umbruch ein Leerzeichen – '
+    + 'der Benutzer saehe seine Absaetze nicht wieder');
+  // Gegenrichtung: die Sterne-Zelle darf die Klasse NICHT bekommen (sie traegt
+  // Knoepfe, keinen Text) – sonst ist die Pruefung darueber trivial wahr.
+  const sZelle = doc.querySelector('#fb-meine .fb-tab tbody td .fb-sterne');
+  c('die Sterne-Zelle bleibt unangetastet',
+    !!sZelle && !sZelle.closest('td').classList.contains('fb-c-text'));
+
+  // ── Der Fokus-Sprung nach „+ Zeile" ─────────────────────────────────────
+  //
+  // ⚠ DIESE PRUEFUNG IST DER GRUND, WARUM DER SELEKTOR MITGEZOGEN WURDE: er
+  // suchte `input[type="text"]` und faende nach der Umstellung NICHTS mehr –
+  // der Knopf haette still weniger getan als vorher.
+  ({ w, doc, rufe } = seite({}));
+  await warte(60);
+  doc.getElementById('fb-zeile-neu').click();
+  const letzte = [...doc.querySelectorAll('#fb-tabelle tbody tr')].pop();
+  c('nach „+ Zeile" steht der Fokus in der NEUEN Zeile',
+    !!letzte && !!doc.activeElement
+    && doc.activeElement.tagName === 'TEXTAREA'
+    && letzte.contains(doc.activeElement),
+    'aktiv: ' + (doc.activeElement && doc.activeElement.tagName));
+
+  // ── Enter darf nicht absenden ───────────────────────────────────────────
+  rufe.length = 0;
+  const ta2 = doc.querySelector('#fb-tabelle tbody textarea');
+  ta2.value = 'Zeile';
+  ta2.dispatchEvent(new w.Event('input', { bubbles: true }));
+  ta2.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  await warte(30);
+  c('⚠ Enter im Antwortfeld sendet NICHT ab',
+    !rufe.some(r => r.u === '/api/feedback/abgabe'),
+    'sonst waere jeder Absatzwechsel eine Abgabe');
 
   console.log('\n' + '='.repeat(70));
   console.log(ok + ' OK, ' + fail + ' FAIL');

@@ -570,6 +570,52 @@ def _anhang_ausfuehrbar(endung: str, mime: str, rohdaten: bytes) -> str:
     return ""
 
 
+# Magische Bytes -> MIME. GENAU die Formate, die `_ALLOWED_IMG_MIME` annimmt
+# und ein Browser in einem <img> darstellt; TIFF/HEIC stehen bewusst nicht hier
+# (ein erkanntes image/tiff wuerde in der Chat-Blase als Bild gezeichnet, das
+# kein Browser zeigt – aus einem Datei-Chip wuerde ein kaputtes Bild).
+_ANHANG_BILD_MAGIC = (
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+    (b"BM", "image/bmp"),
+)
+
+
+def _bild_mime_aus_bytes(daten_b64: str) -> str:
+    """MIME eines Bildes aus den magischen Bytes – "" wenn es keines ist.
+
+    ⚠ DER VOM BROWSER GEMELDETE TYP IST NICHT VERLAESSLICH. Unter Windows kommt
+    er aus der Registry; hat ein Bildbetrachter die ``.jpg``-Zuordnung
+    uebernommen und dort nichts hinterlassen, meldet der Browser "" oder
+    ``application/octet-stream``. Der Anhang faellt dann in den Dokument-Zweig
+    weiter unten: das Bild wird abgelegt, aber NIE als Bild an das Modell
+    gegeben – es sieht die Datei gar nicht (gemeldet 2026-09-16, dort zeichnete
+    auch die Chat-Blase einen Datei-Chip statt des Bildes).
+
+    Der Client korrigiert das seit derselben Aenderung selbst; DIESE Haelfte ist
+    trotzdem noetig und nicht doppelt gemoppelt: ein offener Tab schickt noch
+    den alten Stand, und die Android-App sowie jeder API-Aufrufer gehen ohnehin
+    an ihm vorbei. Fail-open: bei unbrauchbaren Daten bleibt es beim gemeldeten
+    Typ."""
+    # ⚠ `base64` ist in diesem Modul NICHT auf oberster Ebene importiert (jede
+    # andere Stelle holt es lokal). Ohne diese Zeile wirft der Aufruf einen
+    # NameError, den das `except` darunter verschluckt – die Funktion gaebe
+    # dann IMMER "" zurueck und waere still wirkungslos.
+    import base64 as _b64m
+    try:
+        kopf = _b64m.b64decode((daten_b64 or "")[:32], validate=False)
+    except Exception:  # noqa: BLE001
+        return ""
+    for signatur, mime in _ANHANG_BILD_MAGIC:
+        if kopf.startswith(signatur):
+            return mime
+    if kopf[:4] == b"RIFF" and kopf[8:12] == b"WEBP":
+        return "image/webp"
+    return ""
+
+
 def _anhang_ablegen(rohdaten: bytes, dateiname: str, benutzer: str):
     """Legt einen Anhang ab und gibt ``(dauerhaft, arbeitskopie)`` zurueck.
 
@@ -21068,6 +21114,14 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                 # daher nur auf vorhandene Daten pruefen; Klassifizierung sonst per Endung.
                 if not _data:
                     continue
+                # Die BYTES stechen den gemeldeten Typ – siehe
+                # `_bild_mime_aus_bytes`. Sie sprechen nur, wenn sie ein Bild
+                # beweisen; ein PDF, ein Video oder eine Tabelle behaelt seinen
+                # gemeldeten Typ unangetastet.
+                if _mime not in _ALLOWED_IMG_MIME:
+                    _magisch = _bild_mime_aus_bytes(_data)
+                    if _magisch:
+                        _mime = _magisch
                 if _mime in _ALLOWED_IMG_MIME:
                     if len(_data) <= 14_000_000:   # max ~10 MB binary
                         image_attachments.append({"name": _name, "mime_type": _mime, "data": _data})
@@ -21084,6 +21138,14 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                             _data, _name, _get_ws_username(ws), chat_sid, _vorh_i)
                         if _hinweis_i:
                             _text_prepend.append(_hinweis_i)
+                    else:
+                        # SICHTBAR melden statt wortlos ueberspringen: bis hier
+                        # hatte der Zweig KEIN else – ein Kamera-Bild ueber
+                        # 10 MB verschwand ohne eine einzige Meldung, und der
+                        # Benutzer sah eine Antwort, die das Bild nicht kennt.
+                        _text_prepend.append(
+                            f"[Bild {_name}: zu gross zum Ansehen – hoechstens 10 MB. "
+                            f"Bitte verkleinert erneut anhaengen.]")
                 elif _mime in _ALLOWED_AUD_MIME or _mime in _ALLOWED_VID_MIME:
                     if len(_data) > 34_000_000:    # max ~25 MB binary
                         continue

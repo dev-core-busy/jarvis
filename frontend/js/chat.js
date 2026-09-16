@@ -701,6 +701,46 @@
         });
     }
 
+    /* ⚠ DER MIME-TYP DES BROWSERS IST NICHT VERLAESSLICH – DIE BYTES SIND ES.
+     *
+     * `file.type` kommt unter Windows aus der Registry (Content Type der
+     * Endung). Hat ein Bildbetrachter die .jpg-Zuordnung uebernommen und dort
+     * nichts oder etwas Fremdes hinterlassen, meldet der Browser "" oder
+     * application/octet-stream – und JEDE mime-basierte Stelle faellt durch:
+     * die gesendete Nachricht zeichnet einen Datei-Chip statt des Bildes
+     * ("JPG wird als Text angezeigt", gemeldet 2026-09-16), und der Server
+     * behandelt den Anhang als Dokument, sodass das MODELL das Bild gar nicht
+     * sieht. Ein GIF ist davon in der Regel nicht betroffen – daher der
+     * Unterschied, der wie ein Format-Problem aussah und keines war.
+     *
+     * DIE TABELLE DECKT GENAU DIE FORMATE AB, DIE BEIDE SEITEN KOENNEN: der
+     * Browser zeigt sie in einem <img>, und `_ALLOWED_IMG_MIME` in main.py
+     * nimmt sie als Bild an. TIFF steht bewusst NICHT hier – ein erkanntes
+     * image/tiff wuerde in der Blase als Bild gezeichnet, das kein Browser
+     * darstellt: aus einem Datei-Chip wuerde ein kaputtes Bild. */
+    const _BILD_MAGIE = [
+        [[0xFF, 0xD8, 0xFF], 'image/jpeg'],
+        [[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], 'image/png'],
+        [[0x47, 0x49, 0x46, 0x38], 'image/gif'],          // GIF87a / GIF89a
+        [[0x42, 0x4D], 'image/bmp'],
+    ];
+    function _bildMimeAusBytes(b64) {
+        let kopf;
+        // Fail-open: ist die Zeichenkette unbrauchbar, bleibt es beim
+        // gemeldeten Typ – eine geratene Aussage waere schlechter als keine.
+        try {
+            const roh = atob(String(b64 || '').slice(0, 32));
+            kopf = Array.from(roh, c => c.charCodeAt(0));
+        } catch (e) { return ''; }
+        for (const [sig, mime] of _BILD_MAGIE) {
+            if (sig.every((b, i) => kopf[i] === b)) return mime;
+        }
+        // WEBP: "RIFF" .... "WEBP" – die Kennung steht erst ab Byte 8.
+        if (kopf[0] === 0x52 && kopf[1] === 0x49 && kopf[2] === 0x46 && kopf[3] === 0x46 &&
+            kopf[8] === 0x57 && kopf[9] === 0x45 && kopf[10] === 0x42 && kopf[11] === 0x50) return 'image/webp';
+        return '';
+    }
+
     async function addFiles(files) {
         const unsupported = [];
         for (const file of Array.from(files)) {
@@ -722,21 +762,26 @@
                 continue;
             }
             if (_pendingAttachments.length >= 5) { showToast(window.t('chat.max_files')); break; }
-            let type = 'file';
-            if (mime.startsWith('image/') || ['jpg','jpeg','png','gif','bmp','tif','tiff','webp'].includes(ext)) type = 'image';
-            else if (mime.startsWith('audio/') || ['mp3','m4a','wav','ogg','aac','flac'].includes(ext)) type = 'audio';
-            else if (mime.startsWith('video/') || ['mp4','mov','mkv','avi','webm','mpeg'].includes(ext)) type = 'video';
-            else if (mime === 'application/pdf' || ext === 'pdf') type = 'pdf';
-            else type = 'document';
+            let b64;
             try {
-                const b64 = await new Promise((res,rej) => {
+                b64 = await new Promise((res,rej) => {
                     const r = new FileReader();
                     r.onload = e => res(e.target.result.split(',')[1]);
                     r.onerror = rej;
                     r.readAsDataURL(file);
                 });
-                _pendingAttachments.push({ name: file.name, mime_type: mime, data: b64, type, _bytes: file.size });
-            } catch(e) { showToast(window.t('chat.file_read_error').replace('{f}', file.name)); }
+            } catch(e) { showToast(window.t('chat.file_read_error').replace('{f}', file.name)); continue; }
+            // Die Bytes stechen den gemeldeten Typ – siehe _bildMimeAusBytes.
+            // Sie sprechen nur, wenn sie ein Bild BEWEISEN; ein PDF, ein Video
+            // oder eine Tabelle behaelt seinen gemeldeten Typ unangetastet.
+            const mimeEff = _bildMimeAusBytes(b64) || mime;
+            let type = 'file';
+            if (mimeEff.startsWith('image/') || ['jpg','jpeg','png','gif','bmp','tif','tiff','webp'].includes(ext)) type = 'image';
+            else if (mimeEff.startsWith('audio/') || ['mp3','m4a','wav','ogg','aac','flac'].includes(ext)) type = 'audio';
+            else if (mimeEff.startsWith('video/') || ['mp4','mov','mkv','avi','webm','mpeg'].includes(ext)) type = 'video';
+            else if (mimeEff === 'application/pdf' || ext === 'pdf') type = 'pdf';
+            else type = 'document';
+            _pendingAttachments.push({ name: file.name, mime_type: mimeEff, data: b64, type, _bytes: file.size });
         }
         if (unsupported.length > 0) {
             const fmts = [...new Set(unsupported)].join(', ');
@@ -748,6 +793,62 @@
     if (btnAttach) btnAttach.addEventListener('click', () => attachInput && attachInput.click());
     if (attachInput) {
         attachInput.addEventListener('change', async () => { await addFiles(attachInput.files); attachInput.value = ''; });
+    }
+
+    /* Einfuegen aus der Zwischenablage (Strg+V im Eingabefeld).
+     *
+     * Wunsch des Betreibers 2026-09-16: ein im Bildbetrachter kopiertes Bild
+     * soll SICHTBAR im Chat landen – nicht als Link und nicht als Dateiname.
+     * Genau das tut es: die Zwischenablage liefert ein File, und `addFiles()`
+     * ist der vorhandene, einzige Weg zum Anhang. Ein eigener Pfad daneben
+     * waere eine zweite Fassung derselben Regeln (Groessen-Deckel,
+     * Sperrliste, Bild-Erkennung aus den Bytes) und liefe auseinander.
+     *
+     * DIE ZWISCHENABLAGE TRAEGT MEHRERE FASSUNGEN GLEICHZEITIG: wer aus einer
+     * Webseite kopiert, hat neben der Bilddatei auch text/html und text/plain
+     * darin. Genommen wird ausschliesslich `kind === 'file'`; gibt es keine,
+     * bleibt der Vorgang UNANGETASTET – sonst waere das Einfuegen von Text in
+     * das Eingabefeld kaputt. Deshalb steht `preventDefault()` erst hinter
+     * dieser Pruefung. */
+    if (msgInput) {
+        msgInput.addEventListener('paste', async (e) => {
+            const dt = e.clipboardData || window.clipboardData;
+            if (!dt) return;
+            const dateien = [];
+            for (const eintrag of Array.from(dt.items || [])) {
+                if (eintrag.kind !== 'file') continue;
+                const f = eintrag.getAsFile();
+                if (!f) continue;
+                // Ein Bild aus der Zwischenablage hat oft KEINEN Namen. Ohne
+                // einen waere der Anhang-Chip leer beschriftet und die Datei
+                // auf dem Server "datei" – der Zeitstempel macht mehrere
+                // Einfuegungen zudem unterscheidbar. Bewusst ein technischer,
+                // sprachneutraler Name: ein Dateiname ist kein Oberflaechentext.
+                if (f.name) { dateien.push(f); continue; }
+                const endung = (f.type || '').split('/')[1] || 'png';
+                const z = new Date();
+                const zz = n => String(n).padStart(2, '0');
+                const name = `clipboard-${z.getFullYear()}${zz(z.getMonth()+1)}${zz(z.getDate())}`
+                           + `-${zz(z.getHours())}${zz(z.getMinutes())}${zz(z.getSeconds())}.${endung}`;
+                try { dateien.push(new File([f], name, { type: f.type })); }
+                catch (err) { dateien.push(f); }   // File-Konstruktor fehlt: lieber namenlos als gar nicht
+            }
+            if (dateien.length === 0) return;   // reiner Text: der Browser macht es selbst
+            e.preventDefault();
+            await addFiles(dateien);
+        });
+        /* Ablegen DIREKT auf dem Eingabefeld. Ohne diesen Zuhoerer greift die
+         * Vorgabe des Browsers: Chrome navigiert zur abgelegten Datei und
+         * nimmt den bereits getippten Text mit. Das Ziel ist dasselbe wie beim
+         * Nachrichtenbereich – nur der offensichtlichere Ort. */
+        msgInput.addEventListener('dragover', e => {
+            if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) e.preventDefault();
+        });
+        msgInput.addEventListener('drop', async e => {
+            if (!e.dataTransfer || e.dataTransfer.files.length === 0) return;
+            e.preventDefault();
+            await addFiles(e.dataTransfer.files);
+        });
     }
 
     // Drag & Drop auf Nachrichten-Bereich

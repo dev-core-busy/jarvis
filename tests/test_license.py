@@ -290,13 +290,68 @@ pruefe(not lic.hwid_passt("H1-x-y-z", "H2-x-y-z"), "fremde Version passt nicht")
 pruefe(not lic.hwid_passt(H, "H1-bbbbbbbbbbbb-aaaaaaaaaaaa-ffffffffffff"),
        "vertauschte Merkmale sind kein Treffer")
 
-# Echte Kennung des laufenden Systems ist wohlgeformt
+# ── Fehlende Merkmale (gemeldet 2026-09-17 aus dem Docker-Betrieb) ─────────
+# Der Platzhalter `-` IST das Trennzeichen; eine Zerlegung per split() macht
+# daraus einen leeren String und ein Feld zu viel.
+#
+# ⚠ DIE KENNUNGEN WERDEN HIER GEBAUT WIE IN hwid(), NICHT ABGETIPPT. Genau
+# daran ist die erste Fassung dieses Abschnitts gescheitert: ein von Hand
+# geschriebenes `H1-<a>--<c>` gibt es gar nicht – ein fehlendes Merkmal in der
+# MITTE erzeugt drei Striche (`H1-<a>---<c>`), weil der Platzhalter zwischen
+# zwei Trennern steht. Auf dem erfundenen Material sah es so aus, als koennte
+# ein gemeinsamer Platzhalter als Treffer zaehlen; mit der echten Form kann er
+# es nicht. Testmaterial, das der Erzeuger nie produziert, belegt nichts.
+def kennung(*merkmale: str) -> str:
+    """Kennung aus drei Merkmalen – dieselbe Bauart wie in license.hwid()."""
+    return "H1-" + "-".join(m or "-" for m in merkmale)
+
+A, B, C, F = "a" * 12, "b" * 12, "c" * 12, "f" * 12
+pruefe(kennung(A, B, C) == H, "Testhelfer baut dieselbe Form wie hwid()")
+
+D = kennung(A, B, "")            # ohne MAC-Merkmal – der Container-Fall
+pruefe(lic.hwid_passt(D, D),
+       "Kennung mit fehlendem Merkmal passt auf SICH SELBST", D)
+pruefe(lic.hwid_passt(D, kennung(A, B, C)),
+       "ein fehlendes Merkmal hindert die zwei vorhandenen nicht")
+# Ein gemeinsam FEHLENDES Merkmal darf kein Treffer sein – sonst genuegte ein
+# einziges echtes (z.B. die machine-id aus einem geteilten Abbild).
+pruefe(not lic.hwid_passt(kennung(A, "", C), kennung(A, "", F)),
+       "gemeinsam fehlendes Merkmal zählt NICHT als Treffer",
+       kennung(A, "", C))
+pruefe(not lic.hwid_passt(kennung("", "", ""), kennung("", "", "")),
+       "Kennung ganz ohne Merkmale passt nie")
+pruefe(not lic.hwid_passt(D, kennung(A, F, "")),
+       "ein Treffer plus ein fehlendes Merkmal genügt nicht")
+# Jede Stellung des Platzhalters muss zerlegbar sein – die alte Fassung
+# scheiterte an ALLEN dreien.
+for i, name in enumerate(("machine-id", "rootfs", "mac")):
+    m = [A, B, C]
+    m[i] = ""
+    k = kennung(*m)
+    pruefe(lic.hwid_teile(k) is not None and lic.hwid_passt(k, k),
+           f"fehlendes Merkmal an Position {i + 1} ({name}) ist zerlegbar", k)
+
+# Zerlegung: der Platzhalter bleibt als solcher erkennbar
+pruefe(lic.hwid_teile(D) == ["aaaaaaaaaaaa", "bbbbbbbbbbbb", "-"],
+       "hwid_teile() hält das fehlende Merkmal als '-' fest", lic.hwid_teile(D))
+pruefe(lic.hwid_teile("H1-aaaaaaaaaaaa-bbbbbbbbbbbb") is None,
+       "hwid_teile() weist ein unbrauchbares Format ab")
+pruefe(lic.hwid_teile(H + "-dddddddddddd") is None and lic.hwid_teile(H + "x") is None,
+       "angehängtes Zeichen macht die Kennung ungültig (fullmatch, nicht match)")
+pruefe(lic.hwid_teile("  " + H.upper() + "  ") == H.split("-")[1:],
+       "Leerraum und Großschreibung beim Eintragen sind kein Supportfall")
+
+# Echte Kennung des laufenden Systems ist wohlgeformt.
+# ⚠ Die zweite Pruefung ist eine Aussage ueber die UMGEBUNG, nicht ueber den
+# Code: in einem Container liefert das System nachweislich weniger als zwei
+# Merkmale (keine MAC mit Geraeteverweis, overlay ohne UUID). Sie ist dort zu
+# Recht rot – und genau das ist der Befund, nicht ein Fehler dieser Datei.
 lic._hwid_cache = ""
 echt = lic.hwid()
 lic._hwid_cache = H
-pruefe(echt.startswith("H1-") and len(echt.split("-")) == 4,
+pruefe(lic.hwid_teile(echt) is not None,
        "echte Kennung hat das Format H1-a-b-c", echt)
-pruefe(sum(1 for t in echt.split("-")[1:] if t != "-") >= 2,
+pruefe(sum(1 for t in (lic.hwid_teile(echt) or []) if t != "-") >= 2,
        "echtes System liefert mindestens zwei Merkmale", echt)
 
 # ═══════════════════════════════════════════════════════════════════════════

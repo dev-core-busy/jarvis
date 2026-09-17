@@ -293,15 +293,52 @@ def hwid() -> str:
     return _hwid_cache
 
 
+# Zerlegung der Kennung. ⚠ NICHT `split("-")` – der Platzhalter fuer ein
+# fehlendes Merkmal IST das Trennzeichen, und `split` macht daraus einen
+# LEEREN String. Zwei Folgen, beide am 2026-09-17 gemessen:
+#   * ein leeres Merkmal am Ende ergibt ein Feld zu viel -> die Laengenpruefung
+#     schlug zu, und eine Kennung passte nicht einmal auf SICH SELBST
+#     (der gemeldete Docker-Fall: `H1-<a>-<b>--`).
+#   * ein leeres Merkmal in der MITTE ergibt weiterhin vier Felder, und die
+#     Schranke `x != "-"` konnte nach dem Split NIE greifen (das Zeichen gibt
+#     es dort nicht mehr) – zwei gemeinsam leere Felder zaehlten als TREFFER.
+#     Damit genuegte EIN echtes Merkmal fuer die Bindung, also genau das, was
+#     der Docstring von hwid() ausschliesst.
+# Der regulaere Ausdruck ist eindeutig, weil ein Merkmal immer 12 Hexziffern
+# lang ist und der Platzhalter genau ein Zeichen: das FORMAT bleibt damit
+# unveraendert, und jede bereits ausgestellte Kennung gilt weiter.
+# ⚠ IGNORECASE und die Kleinschreibung erst bei der RUECKGABE: ein `.lower()`
+# auf die ganze Eingabe macht aus dem Praefix `H1-` ein `h1-`, und dann trifft
+# das Muster nichts mehr – der Fix waere damit schlimmer als der Fehler.
+_HWID_RE = re.compile(r"H1-([0-9a-f]{12}|-)-([0-9a-f]{12}|-)-([0-9a-f]{12}|-)",
+                      re.IGNORECASE)
+
+
+def hwid_teile(kennung: str) -> list[str] | None:
+    """Die drei Merkmale einer Kennung, oder None bei unbrauchbarem Format.
+
+    `-` steht fuer ein fehlendes Merkmal und bleibt als solches erkennbar –
+    das ist der ganze Zweck dieser Funktion.
+    """
+    treffer = _HWID_RE.fullmatch(str(kennung).strip())
+    return [t.lower() for t in treffer.groups()] if treffer else None
+
+
 def hwid_passt(erwartet: str, aktuell: str | None = None) -> bool:
-    """2 von 3 Merkmalen muessen uebereinstimmen (positionsgenau)."""
+    """2 von 3 Merkmalen muessen uebereinstimmen (positionsgenau).
+
+    Ein fehlendes Merkmal (`-`) zaehlt NIE als Treffer, auch wenn es auf
+    beiden Seiten fehlt: sonst waere ein Merkmal, das eine ganze Gattung von
+    Systemen nicht liefern kann (Container haben keine MAC mit Geraeteverweis),
+    ein geschenkter Treffer fuer jedes System dieser Gattung.
+    """
     aktuell = aktuell or hwid()
     try:
-        a = str(erwartet).split("-")
-        b = str(aktuell).split("-")
-        if len(a) != 4 or len(b) != 4 or a[0] != "H1" or b[0] != "H1":
+        a = hwid_teile(erwartet)
+        b = hwid_teile(aktuell)
+        if a is None or b is None:
             return False
-        treffer = sum(1 for x, y in zip(a[1:], b[1:]) if x == y and x != "-")
+        treffer = sum(1 for x, y in zip(a, b) if x == y and x != "-")
         return treffer >= 2
     except Exception:
         return False

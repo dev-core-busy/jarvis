@@ -38,9 +38,20 @@ window.KbMatrix = (function () {
     let _contentCache = {};  // path -> Inhalts-Vorschau (lazy)
     let _sortKey = null;     // aktuelle Sortierspalte (null = Name aufsteigend)
     let _sortDir = 1;        // 1 = aufsteigend, -1 = absteigend
+    // Kopf-Kaestchen "nicht zugeordnet": zeigt NUR Dateien ohne jede Gruppe.
+    // VORGABE AN - die Massenzuordnung oeffnet damit gefiltert, weil genau das
+    // ihre Aufgabe ist (die noch nicht zugeordneten abarbeiten). Vertretbar ist
+    // das nur, WEIL der Zaehler beide Zahlen nennt (siehe _zaehlerSetzen) -
+    // sonst haelt man die gefilterte Liste fuer den ganzen Bestand.
+    let _nurUngruppiert = true;
+    // Server-Treffer der Inhaltssuche, MIT der Anfrage gemerkt zu der sie gehoeren:
+    // wer weitertippt, bekommt sonst Treffer zu einem Begriff, der nicht mehr im
+    // Feld steht.
+    let _inhaltTreffer = null;   // { q, set }
 
     async function open() {
         const KG = window.KbGroups;
+        _inhaltTreffer = null;   // Treffer eines frueheren Aufrufs gelten nicht mehr
         if (KG && !KG.all().length) await KG.load();
         _groups = KG ? KG.all() : [];
 
@@ -185,6 +196,10 @@ window.KbMatrix = (function () {
                 <div class="kbm-head">
                     <span class="kbm-title">${T('kbmatrix.title', 'Wissensgruppen-Tabelle')}
                         <span class="kbm-count">${_rows.length} ${T('kbmatrix.docs', 'Dokumente')}</span></span>
+                    <label class="kbm-nogrp-lbl" title="${_attr(T('kbmatrix.only_ungrouped_tip', 'Zeigt nur Dokumente, die keiner einzigen Wissensgruppe zugeordnet sind'))}">
+                        <input type="checkbox" class="kbm-nogrp"${_nurUngruppiert ? ' checked' : ''}>
+                        <span>${_esc(T('kbmatrix.only_ungrouped', 'nicht zugeordnet'))}</span>
+                    </label>
                     <input type="text" class="kbm-filter" placeholder="${T('kbmatrix.filter', 'Filter…')}">
                     <button class="kbm-close" title="${T('common.close', 'Schließen')}">✕</button>
                 </div>
@@ -196,6 +211,47 @@ window.KbMatrix = (function () {
 
         _applyFitWidths(ov);
         _bind(ov);
+        // Sichtbarkeit und Zaehler stellt AUSSCHLIESSLICH die Filterregel her -
+        // auch beim ersten Zeichnen, sonst stuende die Tabelle beim Oeffnen
+        // ungefiltert da, obwohl das Kaestchen angehakt ist.
+        _filterAnwenden(ov);
+    }
+
+    // Die EINE Filterregel. Suchbegriff und Kaestchen "nicht zugeordnet" sind
+    // UND-verknuepft; beide Zustaende werden aus dem Feld bzw. dem Kaestchen
+    // GELESEN, nie aus einer zweiten Variablen - so koennen Anzeige und
+    // Bedienelement nicht auseinanderlaufen.
+    function _filterAnwenden(ov) {
+        if (!ov) return;
+        const feld = ov.querySelector('.kbm-filter');
+        const q = feld ? feld.value.trim().toLowerCase() : '';
+        const treffer = (_inhaltTreffer && _inhaltTreffer.q === q) ? _inhaltTreffer.set : null;
+        let gezeigt = 0;
+        ov.querySelectorAll('tbody tr').forEach(tr => {
+            const pfad = tr.dataset.path;
+            const textOk = !q || tr.textContent.toLowerCase().indexOf(q) !== -1
+                || (treffer && treffer.has(pfad));
+            // "nicht zugeordnet" = keine EINZIGE Gruppe an dieser Datei
+            const grpOk = !_nurUngruppiert || (_assign[pfad] || []).length === 0;
+            const sichtbar = textOk && grpOk;
+            tr.style.display = sichtbar ? '' : 'none';
+            if (sichtbar) gezeigt++;
+        });
+        _zaehlerSetzen(ov, gezeigt);
+    }
+
+    // Der Zaehler nennt BEIDE Zahlen, sobald etwas ausgeblendet ist. Eine
+    // gefilterte Liste, die nur "N Dokumente" sagt, wird fuer den ganzen Bestand
+    // gehalten - und weil das Kaestchen per Vorgabe angehakt ist, waere das hier
+    // der Regelfall.
+    function _zaehlerSetzen(ov, gezeigt) {
+        const el = ov.querySelector('.kbm-count');
+        if (!el) return;
+        const ges = _rows.length;
+        el.textContent = (gezeigt === ges)
+            ? ges + ' ' + T('kbmatrix.docs', 'Dokumente')
+            : T('kbmatrix.count_of', '{n} von {m} Dokumenten')
+                .replace('{n}', gezeigt).replace('{m}', ges);
     }
 
     function _bind(ov) {
@@ -206,17 +262,10 @@ window.KbMatrix = (function () {
         // ueber den DATEI-INHALT via Server (extrahierte Text-Chunks, z.B. JSON).
         const filter = ov.querySelector('.kbm-filter');
         let fSeq = 0, fTimer = null;
-        const applyFilter = (q, contentHits) => {
-            ov.querySelectorAll('tbody tr').forEach(tr => {
-                const hit = !q || tr.textContent.toLowerCase().indexOf(q) !== -1
-                    || (contentHits && contentHits.has(tr.dataset.path));
-                tr.style.display = hit ? '' : 'none';
-            });
-        };
         filter.addEventListener('input', () => {
             const q = filter.value.trim().toLowerCase();
             clearTimeout(fTimer);
-            applyFilter(q, null);
+            _filterAnwenden(ov);
             if (q.length < 2) return;
             fTimer = setTimeout(async () => {
                 const mySeq = ++fSeq;
@@ -225,9 +274,18 @@ window.KbMatrix = (function () {
                     const d = await r.json();
                     // Antwort verwerfen, wenn inzwischen weitergetippt wurde
                     if (mySeq !== fSeq || filter.value.trim().toLowerCase() !== q) return;
-                    if (d && d.ok) applyFilter(q, new Set(d.files || []));
+                    if (d && d.ok) { _inhaltTreffer = { q: q, set: new Set(d.files || []) }; _filterAnwenden(ov); }
                 } catch (e) { /* dann eben nur Text-Treffer */ }
             }, 300);
+        });
+
+        // Kaestchen "nicht zugeordnet". NUR auf 'change' hoeren und NIE selbst
+        // umschalten - es sitzt in einem <label>, der Browser schaltet bereits um;
+        // ein zusaetzliches Setzen hoebe sich auf und der Klick taete gar nichts.
+        const nogrp = ov.querySelector('.kbm-nogrp');
+        if (nogrp) nogrp.addEventListener('change', () => {
+            _nurUngruppiert = nogrp.checked;
+            _filterAnwenden(ov);
         });
 
         // Klick auf sortierbaren Spaltenkopf -> sortieren (Resizer ausklammern).
@@ -388,6 +446,10 @@ window.KbMatrix = (function () {
         _assign[path] = ids;
         const cnt = ov.querySelector('.kbm-th-count[data-gid="' + CSS.escape(gid) + '"]');
         if (cnt) cnt.textContent = _groupCount(gid);
+        // Die Zeile kann durch diese Zuordnung aus der gefilterten Menge fallen
+        // (sie ist dann nicht mehr "nicht zugeordnet"). Ohne das Nachziehen bliebe
+        // sie sichtbar und der Zaehler nennte eine Zahl, die nicht mehr stimmt.
+        _filterAnwenden(ov);
         try {
             await window.KbGroups.setAssignment(path, ids);
         } catch (err) {
@@ -396,6 +458,7 @@ window.KbMatrix = (function () {
             cell.classList.toggle('on', on);
             cell.querySelector('.kbm-check').textContent = on ? '✓' : '';
             if (cnt) cnt.textContent = _groupCount(gid);
+            _filterAnwenden(ov);
         }
     }
 
@@ -435,8 +498,9 @@ window.KbMatrix = (function () {
             delete _assign[path];
             _rows = _rows.filter(r => r.path !== path);
             tr.remove();
-            const cnt = ov.querySelector('.kbm-count');
-            if (cnt) cnt.textContent = _rows.length + ' ' + T('kbmatrix.docs', 'Dokumente');
+            // Zaehler ueber die Filterregel, nicht von Hand: sonst stuende dort
+            // die Gesamtzahl, waehrend die Liste gefiltert ist.
+            _filterAnwenden(ov);
             // Gruppen-Zähler in den Kopfzeilen neu setzen
             ov.querySelectorAll('.kbm-th-count').forEach(el => { el.textContent = _groupCount(el.dataset.gid); });
         } catch (e) {

@@ -2536,7 +2536,22 @@ body.light .modal-header h2 {
     padding: 12px 16px; border-bottom: 1px solid rgba(var(--fg-rgb), 0.08);
 }
 .kbm-title { font-weight: 700; font-size: 0.95rem; color: var(--text-primary); }
-.kbm-count { font-weight: 400; font-size: 0.8rem; color: var(--text-muted); margin-left: 6px; }
+/* Der Zaehler nennt bei aktivem Filter ZWEI Zahlen und ist damit die Stelle, an
+   der man ablesen muss, was ausgeblendet ist - --text-muted liegt in beiden
+   Themen unter 4,5:1 und taugt fuer eine Beschriftung, nicht fuer eine Zahl. */
+.kbm-count { font-weight: 400; font-size: 0.8rem; color: var(--text-secondary); margin-left: 6px; }
+/* Kaestchen "nicht zugeordnet": steht LINKS neben dem Filterfeld - beide schraenken
+   die Ansicht ein und gehoeren zusammen. Das Filterfeld traegt margin-left:auto;
+   stuende das an beiden, teilten sie sich den freien Raum und die zwei Filter
+   stuenden weit auseinander - deshalb wandert das auto auf das Label und die
+   Nachbarregel nimmt es dem Feld. */
+.kbm-nogrp-lbl {
+    margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
+    font-size: 0.82rem; color: var(--text-secondary);
+    cursor: pointer; white-space: nowrap; user-select: none;
+}
+.kbm-nogrp-lbl input { margin: 0; cursor: pointer; }
+.kbm-nogrp-lbl + .kbm-filter { margin-left: 0; }
 .kbm-filter {
     margin-left: auto; width: 240px; max-width: 40vw;
     padding: 6px 10px; border-radius: 8px; font-size: 0.85rem;

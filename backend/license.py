@@ -324,6 +324,124 @@ def hwid_teile(kennung: str) -> list[str] | None:
     return [t.lower() for t in treffer.groups()] if treffer else None
 
 
+# ─── Instanz-Kennung (Container) ───────────────────────────────────────────
+#
+# ⚠ IM CONTAINER IST "2 von 3" STRUKTURELL NICHT ERFUELLBAR – gemeldet
+# 2026-09-17 und aus dem Code belegt: `_mac()` verlangt einen Geraeteverweis,
+# den ein veth-Endpunkt nicht hat; `_rootfs_uuid()` faellt bei `overlay` auf
+# die Geraetenummer zurueck, und die wechselt mit jedem `--force-recreate`;
+# `/etc/machine-id` stammt aus dem Abbild und ist bei ALLEN Nutzern desselben
+# Abbilds gleich. Uebrig bleibt ein Merkmal, und das ist obendrein geteilt.
+#
+# Deshalb dort eine eigene Kennung `D1-<32 Hex>` aus einer Datei im
+# Daten-Volume. **DAS IST EINE ABSENKUNG, UND SIE STEHT HIER, DAMIT SIE
+# NIEMAND FUER GLEICHWERTIG HAELT:** ein Hardware-Merkmal beschreibt die
+# Maschine, diese Datei ist ein GEHEIMNIS – wer das Volume kopiert, kopiert
+# die Bindung mit. Das eigene Praefix ist der Zweck: der Betreiber sieht in
+# der Statusdatei, welche Lizenzen nur schwach gebunden sind, und kann das
+# beim Ausstellen beruecksichtigen (kurze Laufzeit, `auto_renew`).
+#
+# Was sie dafuer leistet und was `H1` im Container nicht kann: sie ueberlebt
+# den Neubau des Containers und ist je Installation eindeutig – damit ist sie
+# zugleich die Identitaet, an der sich spaeter Mehrfachnutzung ueberhaupt
+# ERKENNEN liesse.
+
+INSTANZ_FILE = PROJECT_ROOT / "data" / ".instanz"
+
+
+def docker_modus() -> bool:
+    """Laeuft dieser Prozess in einem Container?
+
+    `JARVIS_DOCKER` setzt die mitgelieferte `docker-compose.yml`; `/.dockerenv`
+    ist das Netz fuer eine Installation, die den Container anders startet.
+    **Kein Rateschluss ueber fehlende Merkmale:** eine Kennung, die sich selbst
+    abschwaecht, sobald ein Merkmal ausfaellt, waere auf Blech ein Rueckschritt
+    (ein abgezogenes Netzwerkkabel duerfte die Bindung nicht lockern).
+    """
+    if os.environ.get("JARVIS_DOCKER", "0") == "1":
+        return True
+    try:
+        return Path("/.dockerenv").exists()
+    except Exception:
+        return False
+
+
+def instanz_kennung() -> str:
+    """`D1-<32 Hex>` aus `data/.instanz`, beim ersten Aufruf erzeugt.
+
+    Die Datei liegt im Daten-Volume und ueberlebt damit jeden Container-Neubau
+    – genau das, was der Hardware-Kennung dort fehlt. Sie ist 0600 und steht in
+    den Sperrlisten der Sandbox: ein Shell-Befehl darf sie nicht lesen, sonst
+    waere die Bindung ueber einen Chat-Auftrag auslesbar.
+
+    Faellt das Schreiben aus (Volume nur lesbar), wird KEINE geraten – die
+    Funktion gibt "" zurueck, und `kennung()` faellt auf die Hardware-Kennung
+    zurueck. Eine Kennung, die sich bei jedem Start aendert, waere schlimmer
+    als gar keine: sie erzeugt lauter scheinbar neue Installationen.
+    """
+    try:
+        roh = INSTANZ_FILE.read_text().strip()
+        if re.fullmatch(r"[0-9a-f]{32}", roh):
+            return "D1-" + roh
+    except Exception:
+        pass
+    try:
+        neu = uuid.uuid4().hex
+        INSTANZ_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = INSTANZ_FILE.with_suffix(".tmp")
+        tmp.write_text(neu + "\n")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, INSTANZ_FILE)
+        return "D1-" + neu
+    except Exception:
+        return ""
+
+
+def kennung() -> str:
+    """Die Kennung, an die eine Lizenz gebunden wird – die EINE Quelle.
+
+    Im Container die Instanz-Kennung, sonst die Hardware-Kennung. Aufrufer
+    fragen NIE `hwid()` direkt: sonst entsteht ein halber Umbau, bei dem eine
+    Stelle die Maschine meint und die naechste die Instanz – und beide sehen
+    fuer sich richtig aus. Ein Waechter haelt die Regel fest.
+    """
+    if docker_modus():
+        eigene = instanz_kennung()
+        if eigene:
+            return eigene
+    return hwid()
+
+
+def kennung_format_ok(k: str) -> bool:
+    """Ist das eine eintragbare Kennung – `H1-…` ODER `D1-…`?
+
+    Die EINE Formatregel fuer beide Seiten: der Lizenz-Manager prueft damit die
+    Eingabe des Bedieners. Ohne sie haette er eine eigene Fassung – und die lief
+    bereits einmal auseinander (2026-09-17: eine Kennung mit fehlendem mittlerem
+    Merkmal war hier gueltig und dort nicht eintragbar, der Kunde blieb ohne
+    erkennbaren Grund auf FREE).
+    """
+    return bindungsart(k) != "unbekannt" and (
+        hwid_teile(k) is not None
+        or re.fullmatch(r"D1-[0-9a-f]{32}", str(k).strip(), re.IGNORECASE) is not None
+    )
+
+
+def bindungsart(k: str | None = None) -> str:
+    """`hardware`, `instanz` oder `unbekannt` – fuer die Anzeige im Panel.
+
+    Der Benutzer soll sehen, WORAN seine Lizenz haengt: bei `instanz` genuegt
+    eine Kopie des Daten-Volumes, bei `hardware` nicht.
+    """
+    k = k if k is not None else kennung()
+    k = str(k).strip().upper()
+    if k.startswith("D1-"):
+        return "instanz"
+    if k.startswith("H1-"):
+        return "hardware"
+    return "unbekannt"
+
+
 def hwid_passt(erwartet: str, aktuell: str | None = None) -> bool:
     """2 von 3 Merkmalen muessen uebereinstimmen (positionsgenau).
 
@@ -331,8 +449,22 @@ def hwid_passt(erwartet: str, aktuell: str | None = None) -> bool:
     beiden Seiten fehlt: sonst waere ein Merkmal, das eine ganze Gattung von
     Systemen nicht liefern kann (Container haben keine MAC mit Geraeteverweis),
     ein geschenkter Treffer fuer jedes System dieser Gattung.
+
+    Fuer eine Instanz-Kennung (`D1-…`) gilt die Toleranz NICHT: sie hat nur ein
+    Merkmal, und "1 von 1 mit Toleranz" gibt es nicht – verglichen wird exakt.
+    Eine `D1` passt nie auf eine `H1` und umgekehrt; ein Wechsel der
+    Betriebsart (Container ↔ Blech) ist ein anderes System und braucht einen
+    bewussten Eintrag beim Anbieter.
     """
-    aktuell = aktuell or hwid()
+    aktuell = aktuell if aktuell is not None else kennung()
+    aktuell = aktuell or kennung()
+    try:
+        e = str(erwartet).strip().upper()
+        a = str(aktuell).strip().upper()
+        if e.startswith("D1-") or a.startswith("D1-"):
+            return bool(re.fullmatch(r"D1-[0-9A-F]{32}", e)) and e == a
+    except Exception:
+        return False
     try:
         a = hwid_teile(erwartet)
         b = hwid_teile(aktuell)
@@ -599,7 +731,7 @@ def pruefen(force: bool = False) -> dict:
             return _nach_pruefung(zustand_vorher, force)
 
         # Selbstbindung beim ersten Start mit diesem Schluessel
-        eigene = hwid()
+        eigene = kennung()
         if not daten.get("gebunden_hwid"):
             daten["gebunden_hwid"] = eigene
             daten["gebunden_am"] = _jetzt()
@@ -703,7 +835,10 @@ def _zustand_berechnen() -> dict:
             "grund": "",
             "hinweis": "",
             "banner": "",
-            "hwid": hwid(),
+            # Feldname bleibt `hwid` (Statusdienst-Format), der INHALT kann
+            # im Container eine Instanz-Kennung sein – siehe kennung().
+            "hwid": kennung(),
+            "bindungsart": bindungsart(),
             "gebunden": False,
             "firma": (nutzdaten or {}).get("firma", ""),
             "abteilung": (nutzdaten or {}).get("abteilung", ""),

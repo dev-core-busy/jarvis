@@ -5777,7 +5777,7 @@ KRITISCH – Autonomie-Regeln:
         # Projektverzeichnis ausliefer-faehig geworden.
         _DENY_EXT = {"env", "key", "pem", "crt", "cer", "p12", "pfx", "jks", "keystore"}
         _DENY_NAME = ("id_rsa", "id_ed25519", "id_dsa", ".env", "settings.json",
-                      "credentials", "ad_cache.json", "license.json",
+                      "credentials", "ad_cache.json", "license.json", ".instanz",
                       "knowledge_sync.json", "agent_roles.json", "security_state.json",
                       "scheduled_jobs.json", "file_watchers.json", ".owners.json",
                       "jira_vorlagen.json")

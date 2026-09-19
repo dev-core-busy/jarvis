@@ -137,6 +137,11 @@ _APP_DENY_REL = (
     # ein beschreibbarer Zustand waere der bequemste Weg, sich selbst eine
     # hoehere Stufe zu geben.
     "data/license.json",
+    # Instanz-Kennung im Container (backend/license.py). Anders als die
+    # Hardware-Kennung ist das ein GEHEIMNIS: wer sie liest, kann die
+    # Lizenzbindung auf ein anderes System uebertragen. Ein `cat` in der
+    # Sandbox – also ueber einen Chat-Auftrag – geht sie nichts an.
+    "data/.instanz",
     # Rollen-Definitionen (backend/agent_roles.py): der dort gespeicherte Prompt
     # geht in KUENFTIGE Laeufe – dasselbe Persistenz-Substrat wie
     # data/instructions. Ein beschreibbarer Eintrag waere ein dauerhafter Kanal
@@ -263,6 +268,7 @@ PRIVATE_MODE = 0o750
 # Leserechte, genau wie 2026-07-28 bei data/chats.
 PRIVATE_FILES = ("data/scheduled_jobs.json", "data/file_watchers.json",
                  "data/security_state.json", "data/license.json",
+                 "data/.instanz",
                  "data/agent_roles.json", "data/ad_cache.json",
                  "data/knowledge_sync.json", "data/jira_vorlagen.json",
                  "data/email_accounts.json", "data/email_rules.json",
@@ -536,6 +542,7 @@ SHELL_SECRET_PATHS = re.compile(
     r'\.env\b|settings\.json\b|memory\.json\b|auth_state\.json\b|credentials\.json\b|'
     r'scheduled_jobs\.json\b|file_watchers\.json\b|security_state\.json\b|'
     r'license\.json\b|license_root\.pub\b|agent_roles\.json\b|ad_cache\.json\b|'
+    r'/\.instanz\b|'
     r'knowledge_sync\.json\b|'
     # Prompt-Vorlagen des Jira-Assistenten: beschreibbar waere das ein
     # dauerhafter Abschnitt im System-Prompt JEDER Zusammenfassung, fuer alle

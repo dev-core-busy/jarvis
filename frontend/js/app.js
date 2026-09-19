@@ -1808,6 +1808,24 @@
                 lim.style.display = teile.length ? 'block' : 'none';
             }
             _licSet('lic-hwid', z.hwid || '–');
+            // Die Beschriftung folgt der BINDUNGSART: im Container ist das
+            // keine Hardware-Kennung, und "Hardware" zu schreiben waere eine
+            // Falschaussage. Umgestellt wird das data-i18n-ATTRIBUT, nicht nur
+            // der Text – sonst holt der naechste Sprachwechsel das alte Label
+            // zurueck.
+            (function () {
+                const instanz = z.bindungsart === 'instanz';
+                const lbl = document.querySelector('[data-i18n^="license.hwid_label"],[data-i18n="license.instanz_label"]');
+                if (lbl) {
+                    const key = instanz ? 'license.instanz_label' : 'license.hwid_label';
+                    lbl.setAttribute('data-i18n', key);
+                    lbl.textContent = T(key, instanz
+                        ? 'Instanz-Kennung dieses Systems (Container)'
+                        : 'Hardware-Kennung dieses Systems');
+                }
+                const hint = document.getElementById('lic-bind-hint');
+                if (hint) hint.hidden = !instanz;
+            })();
             const ta = document.getElementById('lic-token');
             // Das Eingabefeld NICHT ueberschreiben, waehrend jemand darin tippt.
             if (ta && document.activeElement !== ta && !z.hat_token) ta.value = '';

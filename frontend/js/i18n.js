@@ -2263,6 +2263,22 @@ const _I18N = {
         'uc.placeholder':       'Nachricht schreiben…',
 
         // ── Skills ───────────────────────────────────────────
+        // ── Suchfeld im Kopf der Einstellungen (settings_search.js) ──
+        // Der Suchraum sind die SKILLS und ihre Konfigurationsfelder. Das
+        // steht ausdruecklich in scope/none: ein Feld im Kopf der GANZEN
+        // Einstellungen weckt sonst die Erwartung, es finde auch Profile,
+        // Sicherheit oder Wissen.
+        'stsuche.ph':           'Skill oder Einstellung suchen…',
+        'stsuche.aria':         'Einstellungen durchsuchen',
+        'stsuche.results':      'Suchtreffer',
+        'stsuche.scope':        'Durchsucht Reiter, Abschnitte, Felder und Skills.',
+        'stsuche.none':         'Kein Treffer für „{q}“ in den Einstellungen.',
+        'stsuche.loading':      'Lade Skills…',
+        'stsuche.load_failed':  'Die Skill-Liste konnte nicht geladen werden.',
+        'stsuche.not_installed':'nicht installiert',
+        'stsuche.more':         '{n} von {g} Treffern – tippe ein Wort mehr.',
+        'stsuche.no_skills':    'Ohne die Skill-Liste – es wurde nur in der Oberfläche gesucht.',
+
         'skills.available':     '📦 Mögliche Skills',
         'skills.installed':     '✅ Installierte Skills',
         'skills.select_hint':   'Skill auswählen und per <strong>Hinzufügen</strong> aktivieren.',
@@ -5775,6 +5791,18 @@ const _I18N = {
         'uc.placeholder':       'Write a message…',
 
         // ── Skills ───────────────────────────────────────────
+        // ── Search field in the settings header (settings_search.js) ──
+        'stsuche.ph':           'Search skill or setting…',
+        'stsuche.aria':         'Search settings',
+        'stsuche.results':      'Search results',
+        'stsuche.scope':        'Searches tabs, sections, fields and skills.',
+        'stsuche.none':         'No match for “{q}” in the settings.',
+        'stsuche.loading':      'Loading skills…',
+        'stsuche.load_failed':  'The skill list could not be loaded.',
+        'stsuche.not_installed':'not installed',
+        'stsuche.more':         '{n} of {g} matches – type another word.',
+        'stsuche.no_skills':    'Without the skill list – only the interface was searched.',
+
         'skills.available':     '📦 Available Skills',
         'skills.installed':     '✅ Installed Skills',
         'skills.select_hint':   'Select a skill and click <strong>Add</strong> to activate it.',

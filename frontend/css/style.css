@@ -2013,7 +2013,225 @@ body.light .model-discover-item:hover { background-color: #eef0f4 !important; }
     display: flex;
     align-items: center;
     gap: 4px;
+    /* War `flex: 0 0 auto` (die Gruppe durfte nie schrumpfen). Seit das
+       Suchfeld darin sitzt, muss sie es: sonst laeuft die Gruppe auf einem
+       schmalen Fenster ueber den Kopf hinaus. Geschrumpft wird ausschliesslich
+       das FELD (`.st-such-wrap` ist das einzige Kind mit flex-shrink) – die
+       Symbole behalten ihre 36 px, siehe die Regel darunter. */
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+/* Die Symbole der Gruppe schrumpfen NICHT. Ohne diese Zeile zoege ein enger
+   Kopf sie in die Breite ihres Inhalts zusammen, und aus dem Haus wuerde ein
+   schmaler Strich. */
+.modal-head-actions > .btn-icon,
+.modal-head-actions > .btn-close-modal {
     flex: 0 0 auto;
+}
+
+/* ══ Suchfeld im Modal-Kopf (settings_search.js) ═════════════════════════
+   Vorbild: Android-Systemeinstellungen; Bauform wie das Benutzer-Panel in
+   /portal (abgesetztes Panel unter dem Feld, deckende Flaeche).
+   ⚠ Diese Regeln gelten NUR fuer /settings – deshalb style.css und nicht
+   theme.css: ein Suchfeld im Modal-Kopf gibt es auf keiner anderen Seite. */
+.st-such-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    /* Schrumpfen erlaubt (schmales Fenster), aber nie unter eine Breite, in
+       der man das getippte Wort noch sieht. */
+    flex: 0 1 240px;
+    min-width: 0;
+    margin-right: 6px;
+}
+
+.st-such-lupe {
+    position: absolute;
+    left: 9px;
+    display: flex;
+    align-items: center;
+    pointer-events: none;      /* sonst faengt sie den Klick ins Feld ab */
+    color: var(--text-muted);
+    font-size: 0.95rem;
+}
+
+.st-such-feld {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 7px 10px 7px 30px;
+    font-size: 0.82rem;
+    font-family: inherit;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: rgba(var(--fg-rgb), 0.05);
+    color: var(--text-primary);
+}
+
+.st-such-feld::placeholder { color: var(--text-muted); }
+
+.st-such-feld:focus {
+    outline: none;
+    border-color: var(--accent);
+    background: rgba(var(--fg-rgb), 0.08);
+}
+
+/* ⚠ DER BEZUGSRAHMEN IST DER KOPF, NICHT DAS SUCHFELD - und das ist der
+   ganze Fix. `.modal-content` traegt `overflow: hidden`; solange das Panel am
+   Feld hing, mass `max-width: 100%` die FELDbreite und konnte es nicht am
+   Modalrand halten: bei 520 px Fensterbreite begann es links AUSSERHALB des
+   Modals und die Titel waren abgeschnitten (im Screenshot gesehen - die
+   Messung bei 1400 px war gruen, weil dort links genug Platz ist).
+   ⚠ MEIN FRUEHERER KOMMENTAR BEHAUPTETE HIER "nach links ist immer Platz
+   (der Titel steht dort)" - genau das ist bei schmalem Fenster falsch.
+   Mit dem Kopf als Bezug ist die Zusage strukturell: breiter als der Kopf
+   kann das Panel nicht werden, und der Kopf endet am Modalrand. */
+#settings-modal .modal-header { position: relative; }
+
+.st-such-panel {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 2rem;                      /* = waagerechter Innenabstand des Kopfes */
+    left: auto;
+    z-index: 60;
+    width: 380px;
+    max-width: calc(100% - 4rem);     /* beide Innenabstaende */
+    /* DECKEND: darunter liegen die Reiterleiste und der Inhalt der
+       Einstellungen – bei halbtransparentem Grund scheint der Text durch. */
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(var(--shadow-rgb), 0.28);
+    overflow: hidden;
+}
+
+.st-such-panel[hidden] { display: none; }
+
+/* Die Hoehe haengt am SICHTFENSTER, nicht an einer festen Zahl: das Modal ist
+   hoechstens 90vh hoch und schneidet ab (overflow: hidden). Mit einer festen
+   Hoehe waere die Liste auf einem niedrigen Fenster unten abgeschnitten. */
+.st-such-liste {
+    max-height: min(46vh, 340px);
+    overflow-y: auto;
+    padding: 4px;
+}
+
+.st-such-item {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 6px 9px;
+    border-radius: 7px;
+    cursor: pointer;
+    min-width: 0;
+}
+
+.st-such-item.is-aktiv,
+.st-such-item:hover { background: rgba(var(--accent-rgb), 0.12); }
+
+/* Titel und Marke in EINER Zeile, aber als getrennte Kinder: nur der Titel
+   kuerzt mit Ellipse, die Marke behaelt ihre Breite. */
+.st-such-kopf {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.st-such-titel {
+    flex: 0 1 auto;
+    font-size: 0.83rem;
+    line-height: 1.3;
+    font-weight: 600;
+    color: var(--text-primary);
+    /* min-width: 0 ist Pflicht: ohne sie schrumpft der Text nicht unter seine
+       Inhaltsbreite und ein langer Feldname sprengt das Panel. */
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.st-such-pfad {
+    font-size: 0.7rem;
+    line-height: 1.35;
+    color: var(--text-secondary);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Hervorhebung der Fundstelle. `mark` bringt vom Browser einen gelben Grund
+   mit, der in beiden Themen fremd wirkt – hier die Hausfarbe. */
+.st-such-mark {
+    background: rgba(var(--accent-rgb), 0.28);
+    color: inherit;
+    border-radius: 3px;
+    padding: 0 1px;
+}
+
+.st-such-marke {
+    flex: 0 0 auto;
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    padding: 1px 6px;
+    border-radius: 6px;
+    background: rgba(var(--fg-rgb), 0.08);
+    color: var(--text-muted);
+    vertical-align: middle;
+}
+
+.st-such-marke.is-neu {
+    background: color-mix(in srgb, var(--warning, #f59e0b) 22%, transparent);
+    color: var(--warning, #f59e0b);
+}
+
+.st-such-leer { padding: 14px 12px; font-size: 0.8rem; color: var(--text-muted); }
+
+/* Der Suchraum steht IMMER hier – siehe den Kommentar im Markup. */
+.st-such-hinweis {
+    padding: 8px 12px 10px;
+    font-size: 0.68rem;
+    line-height: 1.35;
+    color: var(--text-secondary);
+    border-top: 1px solid var(--border);
+}
+
+/* Angesprungener Eintrag in der Skill-Liste (skills.js::zeigeInListe).
+   Eine ANTWORT auf den Klick ("hier ist er"), kein Zustand – sie verfaellt. */
+.sk-item-treffer {
+    box-shadow: 0 0 0 2px var(--accent);
+    border-radius: 8px;
+}
+
+/* Angesprungener Punkt der OBERFLAECHE (settings_search.js::zumElement) –
+   Reiterknopf, Abschnitts-Kopfzeile oder Beschriftung. Gleiche Bauart und
+   gleiche Begruendung wie oben: eine Antwort auf den Klick, kein Zustand.
+   ⚠ `box-shadow` und NICHT `outline`/`border`: beide aendern die Groesse bzw.
+   den Platzbedarf des Elements – eine Beschriftung in einer Formularzeile
+   wuerde dadurch sichtbar springen, und zwar genau in dem Moment, in dem der
+   Benutzer hinsieht. */
+.st-such-treffer {
+    box-shadow: 0 0 0 2px var(--accent);
+    border-radius: 6px;
+}
+
+/* Der Titel muss schrumpfen duerfen, sonst drueckt er das Suchfeld aus dem
+   Kopf. Gilt fuer jedes Modal – ein `min-width: 0` erlaubt nur das
+   Schrumpfen, es aendert nichts an der Darstellung. */
+.modal-header h2 {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    /* ⚠ `overflow: hidden` OHNE Zeilenhoehe FRISST UNTERLAENGEN – das 'g' in
+       „Einstellungen" liegt unter der Grundlinie (im Projekt am Ordnernamen
+       `share_1` bezahlt, 2026-09-13). */
+    line-height: 1.4;
 }
 
 /* Das Haus ist ein <a>, kein <button>: ohne diese Zeilen traegt es den

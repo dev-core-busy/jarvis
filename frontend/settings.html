@@ -23,7 +23,7 @@
     <link rel="stylesheet" href="/static/css/theme.css?v=24">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=9">
-    <link rel="stylesheet" href="/static/css/style.css?v=187">
+    <link rel="stylesheet" href="/static/css/style.css?v=190">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=6">
     <!-- Feedback-Reiter. EINE Datei fuer /settings und /feedback: Tabelle,
          Sterne und Abgabe-Karte werden an beiden Orten gebraucht, zwei
@@ -1535,6 +1535,31 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                      Gruppe wirken sollen, brauchen sie einen gemeinsamen Container
                      (dieselbe Lehre wie bei den Titelleisten, 2026-08-22). -->
                 <div class="modal-head-actions">
+                    <!-- Suchfeld (Vorbild: Android-Systemeinstellungen; Bauform
+                         wie das Benutzer-Panel in /portal). LINKS vom Haus, weil
+                         es zum Titel gehoert und nicht zu den Fenster-Aktionen
+                         (Startseite / Vollbild / Schliessen) rechts daneben.
+                         Gesucht wird in den GANZEN Einstellungen: Reiter,
+                         Abschnitte, Feldbeschriftungen und die Skills samt
+                         ihren Konfigurationsfeldern. Der Suchraum steht im
+                         Fuss des Vorschlagsfeldes UND in der Leermeldung –
+                         eine Anzeige, die mehr verspricht als sie leistet,
+                         kostet mehr Zeit als eine, die es nicht gibt.
+                         (Bis 2026-09-20 waren es NUR die Skills; gemeldet
+                         wurde „Eingabe ldap findet nichts" – siehe den
+                         Modulkopf von settings_search.js.)
+                         Verdrahtung: settings_search.js (aus app.js::openModal). -->
+                    <div class="st-such-wrap" id="st-such-wrap">
+                        <span class="st-such-lupe" id="st-such-lupe" aria-hidden="true"></span>
+                        <input type="search" id="st-such-feld" class="st-such-feld"
+                               autocomplete="off" spellcheck="false"
+                               role="combobox" aria-autocomplete="list"
+                               aria-expanded="false" aria-controls="st-such-liste"
+                               placeholder="Skill oder Einstellung suchen…"
+                               data-i18n-placeholder="stsuche.ph"
+                               aria-label="Einstellungen durchsuchen"
+                               data-i18n-aria="stsuche.aria">
+                    </div>
                     <!-- /settings hat KEINE Titelleiste – das Modal IST die ganze
                          Oberflaeche. Ohne dieses Haus fuehrt von hier kein Weg
                          zurueck ausser der Adresszeile. Ein <a href>, kein
@@ -1553,6 +1578,22 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                     </a>
                     <button class="btn-icon btn-maximize-settings" id="btn-maximize-settings" title="Vollbild ein/aus" aria-label="Vollbild">⛶</button>
                     <button class="btn-close-modal" id="btn-close-settings">&times;</button>
+                </div>
+                <!-- ⚠ DAS PANEL IST KIND DES KOPFES, NICHT DES SUCHFELDES.
+                     `.modal-content` traegt `overflow: hidden`; solange das
+                     Panel am Feld hing, war sein Bezugsrahmen so breit wie das
+                     FELD - und `max-width` konnte es nicht am Modalrand halten:
+                     bei 520 px Fensterbreite ragte es links heraus und die
+                     Titel waren abgeschnitten (im Screenshot gesehen, die
+                     Messung bei 1400 px war gruen). Als Kind des Kopfes gilt
+                     `max-width: calc(100% - 4rem)` gegen die KOPFbreite, und
+                     damit kann es den Rand strukturell nicht mehr ueberschreiten.
+                     Es ist `position: absolute`, also KEIN Flex-Kind - die
+                     Verteilung von Titel und Symbolgruppe bleibt unberuehrt. -->
+                <div class="st-such-panel" id="st-such-panel" hidden>
+                    <div class="st-such-liste" id="st-such-liste" role="listbox"
+                         aria-label="Suchtreffer" data-i18n-aria="stsuche.results"></div>
+                    <div class="st-such-hinweis" id="st-such-hinweis"></div>
                 </div>
             </div>
 
@@ -5464,13 +5505,13 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/icons.js?v=5"></script>
     <script src="/static/js/pwreveal.js?v=2"></script>
     <script src="/static/js/dlkey.js?v=2"></script>
-    <script src="/static/js/i18n.js?v=271"></script>
+    <script src="/static/js/i18n.js?v=273"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=21"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
     <script src="/static/js/audit.js?v=4"></script>
     <script src="/static/js/kbgroups.js?v=4"></script>
-    <script src="/static/js/skills.js?v=47"></script>
+    <script src="/static/js/skills.js?v=48"></script>
     <script src="/static/js/chatlib.js?v=19"></script>
     <script src="/static/js/skillcfg.js?v=9"></script>
     <script src="/static/js/google.js?v=13"></script>
@@ -5504,7 +5545,9 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/agent_roles.js?v=3"></script>
     <script src="/static/js/model_caps.js?v=6"></script>
     <script src="/static/js/alpha_sort.js?v=2"></script>
-    <script src="/static/js/app.js?v=211"></script>
+    <!-- Suchfeld im Modal-Kopf. VOR app.js: dessen openModal ruft SettingsSearch.init(). -->
+    <script src="/static/js/settings_search.js?v=3"></script>
+    <script src="/static/js/app.js?v=212"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

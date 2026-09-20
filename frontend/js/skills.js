@@ -258,6 +258,11 @@
             const item = document.createElement('div');
             item.className = 'sk-item' + (isOpenClaw ? ' sk-item-oc' : '')
                 + (skill.enabled ? '' : ' sk-item-disabled');
+            // Adresse der Zeile. Ohne sie ist ein einzelner Eintrag von aussen
+            // nicht auffindbar – die Suche im Kopf der Einstellungen springt
+            // genau hierher, wenn ein Skill keinen eigenen Konfigurationspunkt
+            // hat (zeigeInListe).
+            item.setAttribute('data-skill', dirName);
             item.innerHTML = `
                 <span class="sk-item-icon">${icon}</span>
                 <div class="sk-item-info">
@@ -398,6 +403,7 @@
 
             const item = document.createElement('div');
             item.className = 'sk-avail-item';
+            item.setAttribute('data-skill', dirName);   // siehe _mkInstalledItem
             item.innerHTML = `
                 <span class="sk-item-icon sk-item-icon-dim">${icon}</span>
                 <div class="sk-item-info">
@@ -1075,6 +1081,119 @@
 
         // ─── Konfiguration ────────────────────────────────────────────
 
+        // ── Konfigurationspunkt eines Skills ──────────────────────────
+        //
+        // ⚠ DIE DREI FUNKTIONEN HIER SIND DIE EINE REGEL DAFUER, WAS
+        // "Konfigurationspunkt" HEISST. Das Zahnrad in der Liste, das Suchfeld
+        // im Kopf der Einstellungen (settings_search.js) und jeder kuenftige
+        // Aufrufer bekommen dieselbe Antwort. Zwei Fassungen liefen beim
+        // naechsten Feinschliff auseinander – und dann fuehrt ein Treffer der
+        // Suche woandershin als das Zahnrad daneben, ohne dass es jemand
+        // erklaeren koennte.
+
+        /** Skill-Objekt zu einem Verzeichnisnamen (oder undefined). */
+        _findeSkill(name) {
+            return this.skills.find(
+                s => (s.dir_name || s.path?.split('/').pop() || s.name) === name);
+        }
+
+        /** WOHIN fuehrt dieser Skill? Reine Auskunft, veraendert nichts –
+         *  die Suche beschriftet ihre Treffer damit.
+         *  `skill` darf uebergeben werden, wenn der Aufrufer die Liste schon
+         *  hat (die Reiterliste hier kann leer sein, solange der Skills-Reiter
+         *  nie geoeffnet wurde).
+         *
+         *  'reiter'    – eigener Einstellungs-Reiter (hat Vorrang, er kann mehr)
+         *  'dialog'    – generischer Dialog aus dem config_schema
+         *  'liste'     – kein Konfigurationspunkt: nur der Eintrag in der Liste
+         *  'moegliche' – noch nicht installiert
+         */
+        zielFuer(name, skill) {
+            const s = skill || this._findeSkill(name);
+            // Kein Flag gesetzt = Altbestand; dann entscheidet enabled. Ist der
+            // Skill hier gar nicht bekannt, gilt "installiert" – sonst schickte
+            // eine unvollstaendige Liste den Benutzer faelschlich zu den
+            // moeglichen Skills.
+            const installiert = s
+                ? (s.installed !== undefined ? s.installed : s.enabled)
+                : true;
+            // Ein nicht installierter Skill hat noch KEINEN Konfigurationspunkt:
+            // der naechste Schritt ist das Hinzufuegen, nicht das Einstellen.
+            if (!installiert) return { art: 'moegliche', reiter: '' };
+            const tabBtn = tabButtonFor(name);
+            if (tabBtn) return { art: 'reiter', reiter: tabBtn.textContent.trim() };
+            if (s && s.config_schema && Object.keys(s.config_schema).length > 0) {
+                return { art: 'dialog', reiter: '' };
+            }
+            return { art: 'liste', reiter: '' };
+        }
+
+        /** Fuehrt wirklich dorthin. Rueckgabe = genommene Art (fuer Messungen). */
+        async zumKonfigurationspunkt(name) {
+            // Die Liste kann leer sein, wenn der Skills-Reiter nie geoeffnet
+            // wurde – dann faende der generische Dialog sein Schema nicht.
+            if (!this.skills.length) {
+                try { await this.loadSkills(); } catch (e) { /* Liste bleibt leer */ }
+            }
+            const ziel = this.zielFuer(name);
+            if (ziel.art === 'reiter' || ziel.art === 'dialog') {
+                await this._openConfig(name);
+                return ziel.art;
+            }
+            await this.zeigeInListe(name, ziel.art === 'liste');
+            return ziel.art;
+        }
+
+        /** Zeigt den Eintrag im Skills-Reiter: Reiter aktivieren, Abschnitt
+         *  aufklappen, Zeile anspringen und kurz hervorheben.
+         *
+         *  ⚠ BEI DEN MOEGLICHEN SKILLS GENUEGT DAS AUFKLAPPEN NICHT: jene Liste
+         *  ist zusaetzlich nach Kategorie UND Suchbegriff gefiltert – ein noch
+         *  gesetzter Filter liesse den gesuchten Eintrag gar nicht erst
+         *  entstehen, und der Klick saehe wirkungslos aus. Beide Filter werden
+         *  deshalb geloest, BEVOR neu gezeichnet wird.
+         */
+        async zeigeInListe(name, installiert) {
+            const tb = document.querySelector('.settings-tab-btn[data-settings-tab="skills"]');
+            if (tb && tb.style.display !== 'none') tb.click();
+            if (!installiert) {
+                this.categoryFilter = 'all';
+                this.searchVal = '';
+                const feld = document.getElementById('sk-search');
+                if (feld) feld.value = '';
+            }
+            try { await this.loadSkills(); } catch (e) { /* alte Liste bleibt stehen */ }
+            this._abschnittOeffnen(installiert);
+            // KEIN CSS-Selektor mit dem Namen darin: `CSS.escape` gibt es in
+            // jsdom nicht, und ein ungeschuetzter Name waere ausserdem ein
+            // Selektor-Bruch. Gesucht wird ueber den Attributwert.
+            let el = null;
+            const kandidaten = document.querySelectorAll('[data-skill]');
+            for (let i = 0; i < kandidaten.length; i++) {
+                if (kandidaten[i].getAttribute('data-skill') === name) { el = kandidaten[i]; break; }
+            }
+            if (!el) return false;
+            el.classList.add('sk-item-treffer');
+            if (typeof el.scrollIntoView === 'function') {
+                el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            }
+            // Die Hervorhebung ist eine ANTWORT auf den Klick ("hier ist er"),
+            // kein Zustand – sie verfaellt wieder.
+            setTimeout(() => el.classList.remove('sk-item-treffer'), 2600);
+            return true;
+        }
+
+        /** Klappt einen der beiden Abschnitte auf – NUR wenn er zu ist:
+         *  ein blindes click() klappte einen offenen Abschnitt ZU. Geklickt
+         *  wird die vorhandene Kopfzeile, damit der gemerkte Zustand mitlaeuft. */
+        _abschnittOeffnen(installiert) {
+            const zu = installiert ? this._instCollapsed : this._availCollapsed;
+            if (!zu) return;
+            const hdr = document.getElementById(
+                installiert ? 'sk-installed-header' : 'sk-available-header');
+            if (hdr) hdr.click();
+        }
+
         async _openConfig(name) {
             // Skills mit eigenem Settings-Reiter: direkt dorthin wechseln
             const tabBtn = tabButtonFor(name);
@@ -1083,7 +1202,7 @@
                 if (typeof tabBtn.scrollIntoView === 'function') {
                     tabBtn.scrollIntoView({ block: 'nearest', inline: 'nearest' });
                 }
-                return;
+                return 'reiter';
             }
 
             const token = localStorage.getItem('jarvis_token') || '';
@@ -1092,11 +1211,12 @@
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
                 const data  = await resp.json();
-                const skill = this.skills.find(
-                    s => (s.dir_name || s.path?.split('/').pop()) === name);
-                if (!skill?.config_schema) return;
+                const skill = this._findeSkill(name);
+                if (!skill?.config_schema) return null;
                 this._showConfigDialog(name, skill.config_schema, data.config || {});
+                return 'dialog';
             } catch (e) { console.error('Config laden fehlgeschlagen:', e); }
+            return null;
         }
 
         _showConfigDialog(name, schema, currentConfig) {

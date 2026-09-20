@@ -568,6 +568,12 @@
         let skillManager = null;
         if (window.JarvisSkillManager) {
             skillManager = new window.JarvisSkillManager();
+            // Nach aussen sichtbar wie window.knowledgeManager/visionManager:
+            // das Suchfeld im Kopf der Einstellungen fragt darueber, WOHIN ein
+            // Skill fuehrt, und laesst ihn dorthin fuehren. Ohne die Zeile
+            // muesste es die Reiterzuordnung nachbauen – also eine zweite
+            // Fassung derselben Tabelle pflegen.
+            window.skillManager = skillManager;
         }
 
         // ── Wissen-Tab: Abschnitte einklappbar ──
@@ -964,6 +970,11 @@
                 .catch(e => { _skillsInflight = null; throw e; });
             return _skillsInflight;
         }
+        // Dieselbe Antwort fuer alle Aufrufer – auch fuer Module ausserhalb
+        // dieser Datei (settings_search.js). Ein eigener Abruf dort waere ein
+        // zusaetzlicher Roundtrip auf dem heissen Pfad des Modal-Aufbaus und
+        // haette einen eigenen, abweichenden Zwischenspeicher.
+        window.jarvisSkillsOnce = _skillsOnce;
 
         window.updateWhatsAppTabVisibility = async function updateWhatsAppTabVisibility() {
             if (!waTabBtn) return;
@@ -1706,6 +1717,9 @@
             if (tabGoogle) { tabGoogle.style.display = 'none'; tabGoogle.classList.remove('active'); }
             if (tabVision) { tabVision.style.display = 'none'; tabVision.classList.remove('active'); }
             if (tabTelemetry) { tabTelemetry.style.display = 'none'; tabTelemetry.classList.remove('active'); }
+            // Suchfeld im Kopf. Idempotent; hier und nicht beim Laden der Seite,
+            // weil der Kopf erst mit dem Modal wirklich benutzbar ist.
+            if (window.SettingsSearch) window.SettingsSearch.init();
             modal.classList.add('open');
         };
         const closeModal = () => {

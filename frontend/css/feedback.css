@@ -53,6 +53,73 @@
    (Register). */
 .hidden { display: none !important; }
 
+/* ── Maximieren (2026-09-20) ───────────────────────────────────────────────
+   Der Knopf in der Kopfzeile von „Formular ausfuellen" gibt der Tabelle den
+   ganzen Bildschirm. Bauform 1:1 aus `/tracks` (`.st-card.is-max`) – dasselbe
+   Bedienelement, dieselbe Optik, dieselben Zeichen; ein zweiter Entwurf fuer
+   dieselbe Sache waere beim naechsten Feinschliff eine Drift.
+
+   ⚠ WARUM ES DAS HIER BRAUCHT: `.ja-main` deckelt die Breite auf 820 px, und
+   ein Bogen mit mehreren Spalten plus mehrzeiligen Antwortfeldern laeuft darin
+   in den waagerechten Scroller von `.fb-tab-wrap`. Im Vollbild steht die
+   Tabelle in voller Fensterbreite.
+
+   Die Karte fuellt den Bereich UNTER der Titelleiste – nicht den ganzen
+   Bildschirm: Abmelden, Theme- und Sprachumschalter bleiben erreichbar.
+   `--fb-top` wird aus der gemessenen Hoehe der Titelleiste gesetzt (der Wert
+   hier ist nur der Rueckfall, falls das Messen ausfaellt).
+   `z-index: 25` liegt UNTER der Titelleiste (die traegt 30 in
+   `jira_addon.css`) – sie muss sichtbar und bedienbar bleiben. */
+.ja-card.is-max {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    top: var(--fb-top, 53px); z-index: 25; margin: 0;
+    border-radius: 0; border-left: none; border-right: none;
+    /* DECKEND: darunter liegt die Seite. Eine halbtransparente Flaeche liesse
+       den Text darunter durchscheinen (Projektregel). */
+    background: var(--bg-primary);
+    display: flex; flex-direction: column; overflow: hidden;
+}
+/* Die Kopfzeile bleibt beim Scrollen stehen – sonst ist der Knopf zum
+   Verkleinern weg, sobald man nach unten gescrollt hat. */
+.ja-card.is-max > .ja-card-head {
+    position: sticky; top: 0; z-index: 1;
+    background: var(--bg-primary); padding: 4px 0 10px;
+    border-bottom: 1px solid var(--border); margin-bottom: 6px;
+}
+/* ⚠ `min-height: 0` IST PFLICHT: ein Flex-Kind schrumpft von sich aus nicht
+   unter seine Inhaltshoehe – ohne die Zeile waechst der Koerper ueber die
+   Karte hinaus, `overflow-y` bleibt wirkungslos und der Absenden-Knopf steht
+   ausserhalb des Bildes (Register: Update-Popup). */
+.ja-card.is-max > .ja-card-body {
+    flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 4px;
+}
+/* Die Seite dahinter darf nicht mitscrollen. */
+body.fb-maxed { overflow: hidden; }
+
+/* Knopf + Caret als GRUPPE – `.ja-card-head` ist `space-between` und wuerde
+   drei Kinder gleichmaessig verteilen. */
+.fb-head-acts { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+
+/* Bauform von `.st-icon-btn` aus /tracks. Eigene Klasse, weil `.st-icon-btn`
+   inline in `tracks.html` steht: diese Seite laedt die Datei nicht, und eine
+   Klasse aus einem nicht geladenen Stylesheet ist gar kein Styling
+   (Register, im Projekt dreimal bezahlt). */
+.fb-icon-btn {
+    background: none; border: 1px solid var(--border);
+    color: var(--text-secondary); width: 28px; height: 28px;
+    border-radius: 8px; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: .85rem; line-height: 1; flex: 0 0 auto; font-family: inherit;
+}
+.fb-icon-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+/* Der gedrueckte Zustand ist am KNOPF zu sehen, nicht nur am Zeichen – wie
+   `.btn-maximize-settings.active` im Einstellungs-Dialog. */
+.fb-icon-btn.active {
+    border-color: var(--accent); color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.fb-icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 .fb-tab { width: 100%; border-collapse: collapse; font-size: .9rem; }
 
 .fb-tab th, .fb-tab td {

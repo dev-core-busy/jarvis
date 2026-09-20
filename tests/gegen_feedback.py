@@ -379,8 +379,59 @@ PROBEN = [
      UI),
     ("bei Hoehe 0 wird die Hoehe trotzdem gesetzt", "frontend/js/feedback.js",
      "        if (inhalt > 0) {", "        if (true) {", BACKEND),
+    # ⚠ NACHGEZOGEN 2026-09-20: der Anker ist beim Herausloesen von
+    # `klappSetzen` gewandert (der Maximierer braucht dieselbe Funktion). Eine
+    # Probe, die ihren Anker nicht mehr findet, meldet „trifft nicht" und sieht
+    # wie ein zahnloser Waechter aus (Register).
     ("beim Aufklappen wird nicht nachgemessen", "frontend/js/feedback.js",
-     "                if (!neuZu) { hoehenNachziehen(); }", "", BACKEND),
+     "        if (!zu) { hoehenNachziehen(); }", "", BACKEND),
+
+    # ── Maximieren (2026-09-20) ────────────────────────────────────────────
+    ("der Knopf fehlt im Markup", "frontend/feedback.html",
+     'class="fb-icon-btn" data-act="max"', 'class="fb-icon-btn" data-act="maxX"', UI),
+    ("`maxInit` wird nicht gerufen – der Knopf haette keine Wirkung",
+     "frontend/js/feedback.js", "        maxInit();", "", UI),
+    ("Knopf und Caret sind KEINE Gruppe mehr", "frontend/feedback.html",
+     '<span class="fb-head-acts">', '<span class="fb-head-acts-X">', UI),
+    ("eine zugeklappte Karte wird beim Maximieren nicht aufgeklappt",
+     "frontend/js/feedback.js",
+     "        if (an && karte.classList.contains('is-zu')) { klappSetzen(karte, false); }",
+     "", UI),
+    ("die Feldhoehen werden nach dem Umschalten nicht nachgezogen",
+     "frontend/js/feedback.js",
+     "        hoehenNachziehen();\n    }\n\n    function maxUmschalten(karte) {",
+     "    }\n\n    function maxUmschalten(karte) {", UI),
+    ("Escape verkleinert nicht mehr", "frontend/js/feedback.js",
+     "            if (ev.key !== 'Escape') { return; }", "            return;", UI),
+    ("die Beschriftung wechselt nicht mit dem Zustand", "frontend/js/feedback.js",
+     "            var k = an ? 'feedback.minimize' : 'feedback.maximize';",
+     "            var k = 'feedback.maximize';", UI),
+    ("die i18n-Attribute wandern NICHT mit", "frontend/js/feedback.js",
+     "            b.setAttribute('data-i18n-title', k);\n"
+     "            b.setAttribute('data-i18n-aria', k);\n",
+     "", UI),
+    ("`aria-label` bleibt leer", "frontend/js/feedback.js",
+     "            b.setAttribute('aria-label', txt);", "", UI),
+    ("der Karten-Koerper scrollt nicht (min-height fehlt)",
+     "frontend/css/feedback.css",
+     "    flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 4px;",
+     "    flex: 1 1 auto; padding-right: 4px;", UI),
+    ("die Flaeche ist nicht mehr deckend", "frontend/css/feedback.css",
+     "    background: var(--bg-primary);\n"
+     "    display: flex; flex-direction: column; overflow: hidden;",
+     "    display: flex; flex-direction: column; overflow: hidden;", UI),
+    ("die Karte liegt UEBER der Titelleiste", "frontend/css/feedback.css",
+     "top: var(--fb-top, 53px); z-index: 25; margin: 0;",
+     "top: var(--fb-top, 53px); z-index: 99; margin: 0;", UI),
+    ("der Knopf hat keine eigenen CSS-Regeln", "frontend/css/feedback.css",
+     ".fb-icon-btn {", ".fb-icon-btn-X {", UI),
+    ("ein tracks-Schluessel wird wiederverwendet", "frontend/js/feedback.js",
+     "            var k = an ? 'feedback.minimize' : 'feedback.maximize';",
+     "            var k = an ? 'tracks.minimize' : 'tracks.maximize';", UI),
+    ('"Meine Abgaben" bekommt den Knopf auch', "frontend/feedback.html",
+     '<h2 data-i18n="feedback.mine_h">Meine Abgaben</h2>',
+     '<h2 data-i18n="feedback.mine_h">Meine Abgaben</h2>\n'
+     '                <button type="button" data-act="max"></button>', UI),
 ]
 
 

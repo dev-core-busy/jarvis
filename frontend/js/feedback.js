@@ -82,6 +82,28 @@
         }
     }
 
+    /** Einen Container auf- oder zuklappen und den Zustand merken.
+     *
+     *  ⚠ DIE EINE STELLE DAFUER. `maxUmschalten` braucht sie ebenfalls (eine
+     *  zugeklappte Karte zu maximieren ergaebe eine leere Flaeche); eine
+     *  zweite Fassung liefe beim naechsten Feinschliff auseinander und der
+     *  gemerkte Zustand haette je nach Weg eine andere Bedeutung. */
+    function klappSetzen(karte, zu) {
+        var kopf = karte.querySelector('.ja-card-head');
+        var id = karte.getAttribute('data-klapp');
+        karte.classList.toggle('is-zu', !!zu);
+        if (kopf) { kopf.setAttribute('aria-expanded', zu ? 'false' : 'true'); }
+        // ⚠ BEIM SICHTBARWERDEN NACHMESSEN: in einem zugeklappten Container
+        // ist `scrollHeight` 0, die Antwortfelder behalten dort ihre
+        // Starthoehe. Ohne dieses Nachziehen stuende ein langer Text nach dem
+        // Aufklappen in einem zu kleinen Feld.
+        if (!zu) { hoehenNachziehen(); }
+        var liste = klappZustand().filter(function (x) { return x !== id; });
+        if (zu) { liste.push(id); }
+        try { localStorage.setItem(KLAPP_SPEICHER, JSON.stringify(liste)); }
+        catch (e) { /* privater Modus: der Zustand gilt nur fuer diese Seite */ }
+    }
+
     function klappInit() {
         var zu = klappZustand();
         document.querySelectorAll('.ja-card[data-klapp]').forEach(function (karte) {
@@ -92,18 +114,7 @@
             karte.classList.toggle('is-zu', istZu);
             kopf.setAttribute('aria-expanded', istZu ? 'false' : 'true');
             function um() {
-                var neuZu = !karte.classList.contains('is-zu');
-                karte.classList.toggle('is-zu', neuZu);
-                kopf.setAttribute('aria-expanded', neuZu ? 'false' : 'true');
-                // ⚠ BEIM SICHTBARWERDEN NACHMESSEN: in einem zugeklappten
-                // Container ist `scrollHeight` 0, die Antwortfelder behalten
-                // dort ihre Starthoehe. Ohne dieses Nachziehen stuende ein
-                // langer Text nach dem Aufklappen in einem zu kleinen Feld.
-                if (!neuZu) { hoehenNachziehen(); }
-                var liste = klappZustand().filter(function (x) { return x !== id; });
-                if (neuZu) { liste.push(id); }
-                try { localStorage.setItem(KLAPP_SPEICHER, JSON.stringify(liste)); }
-                catch (e) { /* privater Modus: der Zustand gilt nur fuer diese Seite */ }
+                klappSetzen(karte, !karte.classList.contains('is-zu'));
             }
             kopf.addEventListener('click', function (ev) {
                 // ⚠ OHNE DIESE AUSNAHME klappt jeder Knopf in der Kopfzeile den
@@ -117,6 +128,105 @@
                     um();
                 }
             });
+        });
+    }
+
+    // ── Maximieren ────────────────────────────────────────
+    //
+    // Die Karte fuellt den Bereich unter der Titelleiste. Bauform 1:1 aus
+    // `/tracks` (`maxSetzen`/`maxUmschalten`/`maxInit`) – dasselbe
+    // Bedienelement soll sich ueberall gleich verhalten, und ein zweiter
+    // Entwurf fuer dieselbe Sache ist im Projekt regelmaessig auseinander
+    // gelaufen.
+    //
+    // ⚠ DER ZUSTAND WIRD BEWUSST NICHT GEMERKT (anders als Auf/Zu): ein
+    // Vollbild, das beim naechsten Oeffnen der Seite noch an ist, sieht wie ein
+    // Fehler aus – man sucht die uebrigen Karten. Es ist ein Arbeitsmodus fuer
+    // den Moment.
+    //
+    // Dass ein Klick auf den Knopf nicht zugleich die Karte zuklappt, erledigt
+    // die vorhandene Ausnahme in `klappInit` (`closest('button, …')`).
+
+    /** Die Hoehe der Titelleiste MESSEN statt zu raten: sie waechst mit einer
+     *  laengeren Markenbezeichnung und bricht auf schmalen Fenstern um. */
+    function topAbstandSetzen() {
+        var bar = document.querySelector('.topbar');
+        var h = bar ? Math.round(bar.getBoundingClientRect().height) : 0;
+        if (h > 0) { document.documentElement.style.setProperty('--fb-top', h + 'px'); }
+    }
+
+    function maxSetzen(karte, an) {
+        karte.classList.toggle('is-max', !!an);
+        document.body.classList.toggle('fb-maxed', !!an);
+        var b = karte.querySelector('[data-act="max"]');
+        if (b) {
+            // DIESELBEN ZEICHEN wie der Vollbild-Knopf des Einstellungs-Dialogs
+            // (#btn-maximize-settings), `modal_expand.js` und /tracks:
+            // ⛶ zum Maximieren, 🗗 zum Verkleinern. Sie sind die
+            // ausdrueckliche Ausnahme von der Emoji-Regel des Projekts – wer
+            // zwischen den Fenstern wechselt, soll dasselbe Zeichen fuer
+            // dieselbe Sache sehen (Vorgabe des Nutzers 2026-08-18).
+            b.innerHTML = an ? '&#128471;' : '&#9974;';
+            b.classList.toggle('active', !!an);
+            b.setAttribute('aria-pressed', an ? 'true' : 'false');
+            var k = an ? 'feedback.minimize' : 'feedback.maximize';
+            var txt = t(k, an ? 'Verkleinern' : 'Maximieren');
+            // Titel UND aria-label: das Zeichen allein wird als
+            // „square four corners“ vorgelesen. Die `data-i18n-*`-Attribute
+            // muessen mitwandern, sonst holt der naechste Sprachwechsel den
+            // Text des ANDEREN Zustands zurueck.
+            b.setAttribute('data-i18n-title', k);
+            b.setAttribute('data-i18n-aria', k);
+            b.title = txt;
+            b.setAttribute('aria-label', txt);
+        }
+        if (an) { topAbstandSetzen(); }
+        // ⚠ DIE FELDHOEHEN MUESSEN NACHGEZOGEN WERDEN – das ist der Unterschied
+        // zu /tracks: `hoeheAnpassen` schreibt eine feste px-Hoehe, und das
+        // Umschalten aendert die BREITE der Tabelle (820 px gegen Fensterbreite).
+        // Derselbe Text braucht dann andere Zeilen; ohne Nachmessen steht ein
+        // zu hohes oder ein abgeschnittenes Feld da.
+        hoehenNachziehen();
+    }
+
+    function maxUmschalten(karte) {
+        var an = !karte.classList.contains('is-max');
+        // Erst alle anderen verkleinern – zwei maximierte Karten uebereinander
+        // waeren ein Zustand, den niemand aufloesen kann.
+        document.querySelectorAll('.ja-card.is-max').forEach(function (k) {
+            if (k !== karte) { maxSetzen(k, false); }
+        });
+        // Eine zugeklappte Karte zu maximieren ergaebe eine leere Flaeche.
+        if (an && karte.classList.contains('is-zu')) { klappSetzen(karte, false); }
+        maxSetzen(karte, an);
+    }
+
+    function maxInit() {
+        document.querySelectorAll('.ja-card[data-klapp]').forEach(function (karte) {
+            var b = karte.querySelector('[data-act="max"]');
+            if (!b) { return; }
+            b.addEventListener('click', function (ev) {
+                // `preventDefault` UND `stopPropagation`: der Knopf sitzt in
+                // der Klapp-Kopfzeile (Register: AD-Picker).
+                ev.preventDefault();
+                ev.stopPropagation();
+                maxUmschalten(karte);
+            });
+        });
+        // Escape verkleinert – der uebliche Weg heraus aus einem Vollbild.
+        document.addEventListener('keydown', function (ev) {
+            if (ev.key !== 'Escape') { return; }
+            // Hat ein anderer Handler die Taste schon verbraucht (ein offener
+            // Dialog), bleibt das Vollbild stehen: sonst raeumt ein Escape
+            // zwei Dinge auf einmal weg.
+            if (ev.defaultPrevented) { return; }
+            var offen = document.querySelector('.ja-card.is-max');
+            if (offen) { ev.preventDefault(); maxSetzen(offen, false); }
+        });
+        // Wird das Fenster schmaler, aendert sich die Hoehe der Titelleiste
+        // (Umbruch) – der Abstand muss mitgehen, sonst verdeckt sie den Kopf.
+        window.addEventListener('resize', function () {
+            if (document.querySelector('.ja-card.is-max')) { topAbstandSetzen(); }
         });
     }
 
@@ -694,6 +804,9 @@
         // ihren gemerkten Zustand sofort haben – sonst klappen sie sichtbar zu,
         // nachdem die Seite schon dastand.
         klappInit();
+        // Nach `klappInit`: `maxUmschalten` klappt eine zugeklappte Karte erst
+        // auf, und dafuer muss der Klapp-Zustand bereits stehen.
+        maxInit();
         binden();
 
         hole('/api/me').then(function (r) {

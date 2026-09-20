@@ -126,6 +126,8 @@ const _I18N = {
         // ── Feedback (Bereich /feedback + Einstellungs-Reiter) ──
         'feedback.title':        'Feedback',
         'feedback.form_h':       'Formular ausfüllen',
+        'feedback.maximize':     'Maximieren',
+        'feedback.minimize':     'Verkleinern',
         'feedback.pick':         'Formular',
         'feedback.row_new':      '+ Zeile',
         'feedback.row_del':      'Zeile entfernen',
@@ -3668,6 +3670,8 @@ const _I18N = {
         // ── Feedback (area /feedback + settings tab) ──
         'feedback.title':        'Feedback',
         'feedback.form_h':       'Fill in a form',
+        'feedback.maximize':     'Maximise',
+        'feedback.minimize':     'Restore',
         'feedback.pick':         'Form',
         'feedback.row_new':      '+ Row',
         'feedback.row_del':      'Remove row',

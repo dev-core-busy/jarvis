@@ -1088,8 +1088,14 @@ check("die Hoehe wird an den Inhalt angepasst",
 check("⚠ bei Hoehe 0 wird NICHTS gesetzt (zugeklappter Container)",
       "inhalt > 0" in fbjs_ok,
       "sonst ist das Feld nach dem Aufklappen unsichtbar (Register)")
+_ks = fbjs_ok.split("function klappSetzen")
+check("es gibt EINE Funktion fuer den Klapp-Zustand",
+      len(_ks) == 2,
+      "`maxUmschalten` braucht sie ebenfalls – zwei Fassungen liefen "
+      "beim naechsten Feinschliff auseinander")
+_ks_rumpf = _ks[1][:_ks[1].find("\n    function ")] if len(_ks) == 2 else ""
 check("⚠ und beim Aufklappen wird nachgemessen",
-      "hoehenNachziehen" in fbjs_ok and "if (!neuZu)" in fbjs_ok,
+      "hoehenNachziehen()" in _ks_rumpf,
       "in einem zugeklappten Container ist scrollHeight 0")
 
 check("⚠ die Lese-Zelle traegt `pre-wrap`",

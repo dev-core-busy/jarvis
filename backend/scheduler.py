@@ -32,12 +32,24 @@ class CronManager:
     def __init__(self):
         self._scheduler = AsyncIOScheduler(timezone="Europe/Berlin")
         self._jobs: list[dict] = []
+        # ⚠ DER BESTAND IST ERST NACH _load() GUELTIG - und das ist keine
+        # Feinheit, sondern ein bezahlter Datenverlust (2026-09-21, ECHT):
+        # ein Startup-Hook rief add_job(), BEVOR start() gelaufen war. _jobs war
+        # dabei die leere Liste aus diesem Konstruktor, add_job haengte an, und
+        # _save() schrieb eine Liste mit GENAU EINEM Eintrag auf die Platte -
+        # der taegliche Auto-Update-Auftrag war damit weg. Kein Fehler, keine
+        # Meldung: das Journal sagte nur "1 Jobs geladen", wie an jedem Tag
+        # davor auch (dort war es der andere Job).
+        # Deshalb entscheidet ab jetzt NICHT mehr die Aufrufreihenfolge:
+        # jeder Zugriff laedt bei Bedarf selbst (_ensure_loaded), und _save()
+        # verweigert den Dienst, solange nie geladen wurde.
+        self._geladen = False
 
     # ─── Lifecycle ───────────────────────────────────────────────────────────
 
     def start(self):
         JOBS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        self._load()
+        self._ensure_loaded()
         for job in self._jobs:
             if job.get("enabled"):
                 self._register(job)
@@ -51,9 +63,11 @@ class CronManager:
     # ─── CRUD ────────────────────────────────────────────────────────────────
 
     def list_jobs(self) -> list[dict]:
+        self._ensure_loaded()
         return self._jobs
 
     def get_job(self, job_id: str) -> Optional[dict]:
+        self._ensure_loaded()
         return next((j for j in self._jobs if j["id"] == job_id), None)
 
     def add_job(self, label: str, cron: str, task: str, enabled: bool = True,
@@ -91,6 +105,7 @@ class CronManager:
         darin, wird der Job STILL zu einem Agentenlauf - er laeuft dann, tut
         etwas voellig anderes als bestellt, und niemand sieht warum.
         """
+        self._ensure_loaded()
         job = {
             "id": job_id or str(uuid.uuid4()),
             "label": label,
@@ -129,6 +144,7 @@ class CronManager:
     UPDATABLE_FIELDS = {"label", "cron", "task", "enabled", "once"}
 
     def update_job(self, job_id: str, **fields) -> dict:
+        self._ensure_loaded()
         job = self.get_job(job_id)
         if not job:
             raise ValueError(f"Job {job_id} nicht gefunden")
@@ -145,6 +161,7 @@ class CronManager:
         return job
 
     def delete_job(self, job_id: str):
+        self._ensure_loaded()
         job = self.get_job(job_id)
         if not job:
             raise ValueError(f"Job {job_id} nicht gefunden")
@@ -167,6 +184,7 @@ class CronManager:
         (vgl. UPDATABLE_FIELDS). Damit ist auch ein Altbestand-Job ohne Besitzer
         reparierbar, statt dauerhaft unprivilegiert zu scheitern.
         """
+        self._ensure_loaded()
         job = self.get_job(job_id)
         if not job:
             raise ValueError(f"Job {job_id} nicht gefunden")
@@ -301,6 +319,18 @@ class CronManager:
         except Exception as e:
             raise ValueError(f"Ungültiger Cron-Ausdruck '{cron_expr}': {e}")
 
+    def _ensure_loaded(self):
+        """Den Bestand von der Platte holen, falls das noch nicht geschehen ist.
+
+        ⚠ JEDER Zugriff auf _jobs laeuft hierueber - auch die lesenden. Der
+        Grund ist der Vorfall vom 2026-09-21: ein Aufrufer VOR start() sah die
+        leere Anfangsliste und hat damit den Bestand ueberschrieben. Wer das
+        ueber die Reihenfolge der Startup-Hooks loesen will, loest es nur fuer
+        die Hooks, die es heute gibt.
+        """
+        if not self._geladen:
+            self._load()
+
     def _load(self):
         if JOBS_FILE.exists():
             try:
@@ -324,8 +354,27 @@ class CronManager:
             print(f"[Scheduler] {_legacy} Job(s) ohne Auftraggeber – laufen "
                   f"unprivilegiert bis ein Admin sie uebernimmt "
                   f"(Einstellungen -> Cron -> Übernehmen)", flush=True)
+        # Erst ab hier ist _jobs der Bestand der Platte - vorher ist es die
+        # leere Anfangsliste, und die darf nie gespeichert werden.
+        self._geladen = True
 
     def _save(self):
+        """Den Bestand schreiben - aber NIE einen, der nie gelesen wurde.
+
+        ⚠ FAIL-CLOSED, und die Richtung ist eine Abwaegung: eine nicht
+        gespeicherte Aenderung ist nach dem naechsten Neustart weg (aergerlich),
+        eine gespeicherte LEERE Liste loescht fremde Auftraege (teuer, und am
+        2026-09-21 auf ECHT wirklich passiert). Im Normalbetrieb ist dieser
+        Zweig unerreichbar, weil jeder CRUD-Weg vorher _ensure_loaded() ruft -
+        er faengt den NAECHSTEN Pfad ab, der _jobs direkt anfasst.
+        Still ist er nicht: ein uebergangener Schreibvorgang gehoert ins
+        Journal, sonst sucht niemand nach der fehlenden Aenderung.
+        """
+        if not self._geladen:
+            print("[Scheduler] ⚠ Speichern uebersprungen: der Bestand wurde nie "
+                  "geladen. Das haette bestehende Auftraege geloescht.",
+                  flush=True)
+            return
         JOBS_FILE.write_text(json.dumps(self._jobs, indent=2, ensure_ascii=False))
 
 

@@ -206,15 +206,36 @@ section('2. Pulldown – Angebot und Grundzustand');
 }
 
 // ════════════════════════════════════════════════════════════════════════
-section('3. Die AUSWAHL bindet ein – mit der Reichweite des Moments');
+section('3. Der KNOPF bindet ein – die Auswahl gibt ihn nur frei (Vorgabe 2026-09-21)');
 {
+    // ⚠ DER GEMELDETE FALL: ein Wechsel im Pulldown darf NICHTS einbinden.
+    // Ein <select> feuert `change` bei Tastatur-Navigation fuer JEDEN
+    // Pfeilschritt - wer durch die Liste geht, haette sonst jeden ueberflogenen
+    // Bereich eingebunden, jeden als eigenen Serveraufruf.
     const s = await seite({ spaces: SPACES });
     const sel = s.doc.getElementById('wi-cfb-space');
+    const btn = s.doc.getElementById('wi-cfb-add');
+    check('Knopf vorhanden', !!btn);
+    check('⚠ ohne Auswahl ist er GESPERRT', btn && btn.disabled === true);
+    check('⚠ und sagt im title, was zu tun ist',
+          btn && /auswählen|choose/i.test(btn.title || ''), btn ? `title="${btn.title}"` : '');
+
     sel.value = 'NEXUS';
     sel.dispatchEvent(new s.win.Event('change', { bubbles: true }));
     await warten(60);
+    check('⚠ der Wechsel im Pulldown bindet NICHTS ein',
+          s.rufe.filter(r => r.pfad === '/api/wissen/confluence/bindung' && r.m === 'POST').length === 0,
+          JSON.stringify(s.rufe.filter(r => r.m === 'POST')));
+    check('⚠ er GIBT den Knopf frei', btn.disabled === false);
+    check('und der title ist dann leer (kein unerklaerter Tooltip)', !btn.title);
+    check('nichts in der Liste, solange nicht uebernommen wurde',
+          s.doc.querySelectorAll('#wi-cfb-list .wi-item').length === 0);
+
+    // Jetzt der Klick – DAS bindet ein.
+    btn.click();
+    await warten(60);
     const post = s.rufe.filter(r => r.pfad === '/api/wissen/confluence/bindung' && r.m === 'POST');
-    check('genau EIN POST', post.length === 1, `${post.length}`);
+    check('genau EIN POST nach dem Klick', post.length === 1, `${post.length}`);
     check('der gewaehlte Schluessel geht mit', post[0] && post[0].body.key === 'NEXUS');
     check('⚠ inkl_unter faehrt den Haken mit (angehakt -> true)',
           post[0] && post[0].body.inkl_unter === true, JSON.stringify(post[0] && post[0].body));
@@ -228,11 +249,15 @@ section('3. Die AUSWAHL bindet ein – mit der Reichweite des Moments');
     check('die Reichweite steht als WORT dabei',
           /mit Untergeordnetem/.test(liste.textContent), liste.textContent.trim());
     check('das Pulldown steht wieder auf dem Platzhalter', sel.value === '');
+    check('⚠ und der Knopf ist danach wieder gesperrt (nichts gewaehlt)',
+          btn.disabled === true);
 
-    // Zweite Auswahl -> zweiter konfigurierter Bereich (so lautet die Vorgabe)
+    // Zweite Uebernahme -> zweiter konfigurierter Bereich (so lautet die Vorgabe)
     s.doc.getElementById('wi-cfb-sub').checked = false;
     sel.value = 'OPS';
     sel.dispatchEvent(new s.win.Event('change', { bubbles: true }));
+    await warten(20);
+    btn.click();
     await warten(60);
     const post2 = s.rufe.filter(r => r.pfad === '/api/wissen/confluence/bindung' && r.m === 'POST');
     check('⚠ ein weiterer Bereich wird ZWEITER Eintrag (nicht Ersatz)',
@@ -245,21 +270,34 @@ section('3. Die AUSWAHL bindet ein – mit der Reichweite des Moments');
     s.zu();
 }
 {
+    // Der gesperrte Knopf darf NICHTS ausloesen – auch nicht, wenn jemand
+    // (oder ein Skript) ihn trotzdem klickt.
     const s = await seite({ spaces: SPACES });
-    const sel = s.doc.getElementById('wi-cfb-space');
-    // Der Platzhalter darf NICHTS ausloesen.
-    sel.value = '';
-    sel.dispatchEvent(new s.win.Event('change', { bubbles: true }));
+    const btn = s.doc.getElementById('wi-cfb-add');
+    btn.click();
     await warten(40);
-    check('Platzhalter loest keinen Serveraufruf aus',
+    check('gesperrter Knopf loest keinen Serveraufruf aus',
           s.rufe.filter(r => r.m === 'POST').length === 0);
+    s.zu();
+}
+{
+    // Alles eingebunden -> kein freier Bereich -> der Knopf bleibt gesperrt.
+    const s = await seite({ spaces: SPACES, bindung: { ok: true, aktiv: true, bereiche: [
+        { id: 'a', key: 'NEXUS', name: 'N', inkl_unter: true },
+        { id: 'b', key: 'OPS', name: 'O', inkl_unter: false }] } });
+    check('⚠ nichts uebernehmbar -> Knopf gesperrt MIT Grund',
+          s.doc.getElementById('wi-cfb-add').disabled === true
+          && !!s.doc.getElementById('wi-cfb-add').title);
     s.zu();
 }
 {
     const s = await seite({ spaces: SPACES, postFehler: true });
     const sel = s.doc.getElementById('wi-cfb-space');
+    const btn = s.doc.getElementById('wi-cfb-add');
     sel.value = 'NEXUS';
     sel.dispatchEvent(new s.win.Event('change', { bubbles: true }));
+    await warten(20);
+    btn.click();
     await warten(60);
     check('⚠ ein Fehlschlag wird GESAGT',
           /nicht sichtbar|erlaubt/.test(s.doc.getElementById('wi-cfb-status').textContent),

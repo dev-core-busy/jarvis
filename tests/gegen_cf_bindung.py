@@ -112,6 +112,18 @@ def _tausche_bloecke(s: str) -> str:
     return s[:a] + s[b:e] + s[a:b] + s[e:]
 
 
+# Sabotage-Bausteine, die sich schlecht inline schreiben lassen.
+KNOPF_MARKUP = (
+    '                <button type="button" class="sec-btn primary wi-cfb-add" id="wi-cfb-add"\n'
+    '                        data-i18n="wissen.cfb_add" disabled>Übernehmen</button>\n'
+)
+KLICK = (
+    "        var cfbBtn = $('wi-cfb-add');\n"
+    "        if (cfbBtn) cfbBtn.addEventListener('click', function () {\n"
+    "            cfbAdd(($('wi-cfb-space') || {}).value);\n"
+    "        });"
+)
+
 PROBEN = [
     ("Dubletten-Pruefung raus", CFB,
      'if isinstance(b, dict) and (b.get("key") or "") == k:\n                raise BindungFehler("Dieser Bereich ist bereits eingebunden.")',
@@ -196,9 +208,28 @@ PROBEN = [
      "        'wissen.cfb_scope_top': 'this entry only',\n", "", PY_W),
 
     # ── Oberflaeche: hier misst nur der ausgefuehrte Renderer ──────────────
-    ("die AUSWAHL bindet nicht mehr ein", WJS,
-     "if (cfbSel) cfbSel.addEventListener('change', function () { cfbAdd(cfbSel.value); });",
-     "if (cfbSel) { /* Verdrahtung weg */ }", JS_W),
+    # ── Übernahme per KNOPF (Vorgabe 2026-09-21) ────────────────
+    ("Klick-Verdrahtung des Knopfes raus", WJS, KLICK, "        /* Verdrahtung weg */", JS_W),
+
+    # ⚠ DER GEMELDETE ZUSTAND: das Pulldown bindet wieder direkt ein.
+    ("das Pulldown bindet wieder SOFORT ein (Altstand)", WJS,
+     "if (cfbSel) cfbSel.addEventListener('change', function () { cfbAddKnopf(); });",
+     "if (cfbSel) cfbSel.addEventListener('change', function () { cfbAdd(cfbSel.value); });", JS_W),
+
+    ("Knopf ist ohne Auswahl nicht gesperrt", WJS,
+     "btn.disabled = !!laeuft || !key || (sel && sel.disabled);",
+     "btn.disabled = false;", JS_W),
+
+    ("gesperrter Knopf ohne Grund im title", WJS,
+     "btn.title = btn.disabled ? t('wissen.cfb_add_hint') : '';", "btn.title = '';", JS_W),
+
+    ("Knopfzustand wird nach dem Zeichnen nicht nachgezogen", WJS,
+     "        sel.value = '';\n        cfbAddKnopf();", "        sel.value = '';", JS_W),
+
+    ("Knopf aus dem Markup", HTML, KNOPF_MARKUP, "", PY_W),
+
+    ("Knopf startet nicht gesperrt", HTML,
+     'data-i18n="wissen.cfb_add" disabled>', 'data-i18n="wissen.cfb_add">', PY_W),
 
     ("Container auch ohne aktiven Skill sichtbar", WJS,
      "        if (!_cfbAktiv) { sec.style.display = 'none'; return; }",

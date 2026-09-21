@@ -1354,6 +1354,20 @@
                     + esc((sp.name || sp.key) + ' (' + sp.key + ')') + '</option>';
             }).join('');
         sel.value = '';
+        cfbAddKnopf();
+    }
+
+    // Der Uebernehmen-Knopf folgt der Auswahl. GESPERRT MIT GRUND statt
+    // verborgen (Projektregel): ein Knopf, der je nach Datenlage auftaucht und
+    // wieder verschwindet, ist unerklaerbar - und ohne den `title` kann niemand
+    // ableiten, WAS zu tun ist, damit er wieder geht.
+    function cfbAddKnopf(laeuft) {
+        var btn = $('wi-cfb-add');
+        if (!btn) return;
+        var sel = $('wi-cfb-space');
+        var key = sel ? sel.value : '';
+        btn.disabled = !!laeuft || !key || (sel && sel.disabled);
+        btn.title = btn.disabled ? t('wissen.cfb_add_hint') : '';
     }
 
     function cfbRenderList() {
@@ -1387,14 +1401,22 @@
         });
     }
 
-    // Auswahl im Pulldown = Einbindung. Der Haken wird dabei SO uebernommen,
-    // wie er im Moment der Auswahl steht (so lautet die Vorgabe) - deshalb
-    // steht er neben dem Pulldown und nicht an der fertigen Zeile.
+    // KNOPFDRUCK = Einbindung (Vorgabe 2026-09-21). Der Haken wird dabei SO
+    // uebernommen, wie er im Moment des Klicks steht - deshalb steht er neben
+    // dem Pulldown und nicht an der fertigen Zeile.
+    //
+    // ⚠ NICHT AM `change` DES PULLDOWNS. Ein `<select>` feuert `change` bei
+    // Tastatur-Navigation fuer JEDEN Pfeilschritt: wer mit den Pfeiltasten
+    // durch die Liste geht, haette jeden ueberflogenen Bereich eingebunden -
+    // jeden davon als eigenen Serveraufruf, und danach faellt er aus dem
+    // Angebot heraus. Dasselbe gilt fuer einen Fehlgriff mit der Maus: eine
+    // Auswahl ist kein Auftrag.
     function cfbAdd(key) {
         if (!key) return;
         var sel = $('wi-cfb-space');
         var sub = !!(($('wi-cfb-sub') || {}).checked);
         if (sel) sel.disabled = true;
+        cfbAddKnopf(true);
         cfbStatus(t('common.loading'));
         fetch('/api/wissen/confluence/bindung', {
             method: 'POST', headers: authH({ 'Content-Type': 'application/json' }),
@@ -1793,8 +1815,14 @@
             cfSearch.addEventListener('blur', function () { setTimeout(closeSpaceDropdown, 150); });
         }
         // Dynamische Confluence-Einbindung: die AUSWAHL bindet ein (Vorgabe).
+        // Die AUSWAHL gibt den Knopf nur FREI - eingebunden wird erst auf
+        // Knopfdruck (Vorgabe 2026-09-21, Begruendung an cfbAdd).
         var cfbSel = $('wi-cfb-space');
-        if (cfbSel) cfbSel.addEventListener('change', function () { cfbAdd(cfbSel.value); });
+        if (cfbSel) cfbSel.addEventListener('change', function () { cfbAddKnopf(); });
+        var cfbBtn = $('wi-cfb-add');
+        if (cfbBtn) cfbBtn.addEventListener('click', function () {
+            cfbAdd(($('wi-cfb-space') || {}).value);
+        });
 
         var cfRefresh = $('wi-cf-refresh'); if (cfRefresh) cfRefresh.addEventListener('click', function () { loadCfSpaces(true); });
 

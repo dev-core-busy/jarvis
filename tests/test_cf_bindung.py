@@ -19,6 +19,7 @@ ueberschreibt, ist teurer als der Fehler, den er sucht.
 from __future__ import annotations
 
 import ast
+import re
 import io
 import json
 import os
@@ -337,8 +338,22 @@ check("⚠ das Kaestchen ist per Vorgabe ANGEHAKT",
 check("Liste der konfigurierten Bereiche", 'id="wi-cfb-list"' in block)
 check("der Container ist einklappbar wie die uebrigen",
       "'wi-sec-cfbind'" in JS and "wi-sec-upload" in JS)
-check("die AUSWAHL bindet ein (change am Pulldown)",
-      "wi-cfb-space" in JS and "addEventListener('change'" in JS)
+# ⚠ ÜBERNOMMEN WIRD PER KNOPF, nicht schon beim Wechsel im Pulldown (Vorgabe
+# 2026-09-21). Geprueft wird die EIGENSCHAFT, nicht die Schreibweise: der Knopf
+# existiert, er ruft cfbAdd, und der `change`-Zweig des Pulldowns tut es NICHT
+# mehr - sonst waere die Umstellung nur halb und jeder Pfeilschritt baende ein.
+check("Knopf zum Uebernehmen im Markup", 'id="wi-cfb-add"' in block)
+check("⚠ der Knopf startet gesperrt (ohne Auswahl gibt es nichts zu uebernehmen)",
+      re.search(r'id="wi-cfb-add"[^>]*\bdisabled', block) is not None
+      or re.search(r'\bdisabled[^>]*id="wi-cfb-add"', block) is not None)
+_klick = re.search(r"cfbBtn\.addEventListener\('click',\s*function[^)]*\)\s*\{([^}]*)\}", JS)
+check("⚠ der KNOPF bindet ein (Klick ruft cfbAdd)",
+      _klick is not None and "cfbAdd(" in _klick.group(1),
+      _klick.group(1).strip() if _klick else "kein Klick-Handler")
+_chg = re.search(r"cfbSel\.addEventListener\('change',\s*function[^)]*\)\s*\{([^}]*)\}", JS)
+check("⚠ das Pulldown bindet NICHT mehr ein (change gibt nur den Knopf frei)",
+      _chg is not None and "cfbAdd(" not in _chg.group(1),
+      _chg.group(1).strip() if _chg else "kein change-Handler")
 check("Muelleimer zum Loesen der Einbindung (kein ×)",
       "JarvisIcons.trash()" in JS.split("wi-cfb-del")[0][-400:] or "wi-cfb-del" in JS)
 check("⚠ die Reichweite steht als WORT in der Zeile, nicht nur als Farbe",
@@ -351,7 +366,6 @@ check("der Hinweis sagt, dass der Abgleich noch fehlt", "wissen.cfb_soon" in HTM
 # ════════════════════════════════════════════════════════════════════════════
 section("6. i18n – REGEL ueber die im Code benutzten Schluessel")
 I18N = (ROOT / "frontend" / "js" / "i18n.js").read_text(encoding="utf-8")
-import re  # noqa: E402
 benutzt = set(re.findall(r"wissen\.(?:cfb_[a-z_]+|sec_cfbind(?:_desc)?)", HTML + JS))
 check("es werden ueberhaupt Schluessel benutzt (Positivkontrolle)", len(benutzt) >= 10,
       f"{len(benutzt)}")

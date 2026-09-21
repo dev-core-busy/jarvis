@@ -146,6 +146,7 @@
                 loadFiles();
                 loadPending();
                 loadCfSpaces();
+                cfbLaden();
             })
             .catch(function () { showLogin(); });
     }
@@ -1280,6 +1281,156 @@
         extractUrl();
     }
 
+    // ── Dynamische Confluence-Einbindung ────────────────────────────────
+    // Ein Pulldown-Eintrag ist die BASIS des spaeteren Imports; der Haken
+    // "inkl. Unterseiten" bestimmt, ob alles ihm Untergeordnete mitzaehlt.
+    // Die Liste ist global (sie speist die gemeinsame Wissensdatenbank).
+    //
+    // ⚠ HIER WIRD NOCH NICHTS IMPORTIERT (Vorgabe 2026-09-21) - der Container
+    // pflegt die Einbindung, der Abgleich folgt spaeter. Der Hinweistext im
+    // Markup sagt das; ohne ihn wartet jemand auf Wissen, das nicht kommt.
+    var _cfbAktiv = false;       // Skill installiert+aktiv UND konfiguriert
+    var _cfbBereiche = null;     // eingebundene Bereiche (null = noch nicht geladen)
+    var _cfbSpacesFertig = false; // Bereichsliste des Extraktors durchgelaufen?
+
+    function cfbStatus(msg, warn) {
+        var el = $('wi-cfb-status');
+        if (!el) return;
+        el.textContent = msg || '';
+        el.style.color = warn ? 'var(--danger)' : '';
+    }
+
+    // Wird von loadCfSpaces gerufen, sobald die Bereichsliste steht ODER
+    // endgueltig gescheitert ist. Beides muss ankommen: ohne den Fehlerfall
+    // stuende im Pulldown fuer immer "Lade...".
+    function cfbSpacesFertig() { _cfbSpacesFertig = true; cfbRender(); }
+
+    function cfbLaden() {
+        fetch('/api/wissen/confluence/bindung', { headers: authH() })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d || !d.ok) { _cfbAktiv = false; cfbRender(); return; }
+                _cfbAktiv = !!d.aktiv;
+                _cfbBereiche = d.bereiche || [];
+                cfbRender();
+            })
+            // Faellt der Abruf aus, bleibt der Container weg: lieber nichts
+            // anbieten als eine Pflegeflaeche, die nicht speichern kann.
+            .catch(function () { _cfbAktiv = false; cfbRender(); });
+    }
+
+    function cfbRender() {
+        var sec = $('wi-sec-cfbind');
+        if (!sec) return;
+        // Sichtbar GENAU nach der Vorgabe: Skill installiert+aktiv UND
+        // konfiguriert. Alles andere (keine Bereiche sichtbar, Abruf noch
+        // unterwegs) wird IM Container gesagt - ein Container, der je nach
+        // Datenlage auftaucht und verschwindet, ist unerklaerbar.
+        if (!_cfbAktiv) { sec.style.display = 'none'; return; }
+        sec.style.display = '';
+        cfbRenderPick();
+        cfbRenderList();
+    }
+
+    function cfbRenderPick() {
+        var sel = $('wi-cfb-space');
+        if (!sel) return;
+        var drin = {};
+        (_cfbBereiche || []).forEach(function (b) { if (b && b.key) drin[b.key] = true; });
+        // Bereits eingebundene Bereiche fallen aus dem Angebot - sonst laeuft
+        // die Auswahl in ein "ist bereits eingebunden", und der Benutzer kann
+        // sich nicht erklaeren, warum nichts passiert.
+        var frei = (_cfSpaces || []).filter(function (sp) { return !drin[sp.key]; });
+
+        var ph = t('wissen.cfb_pick'), aus = false;
+        if (!_cfbSpacesFertig && !_cfSpaces) { ph = t('common.loading'); aus = true; }
+        else if (!(_cfSpaces || []).length) { ph = t('wissen.cfb_nospaces'); aus = true; }
+        else if (!frei.length) { ph = t('wissen.cfb_all_bound'); aus = true; }
+
+        sel.disabled = aus;
+        sel.innerHTML = '<option value="">' + esc(ph) + '</option>'
+            + frei.map(function (sp) {
+                return '<option value="' + esc(sp.key) + '">'
+                    + esc((sp.name || sp.key) + ' (' + sp.key + ')') + '</option>';
+            }).join('');
+        sel.value = '';
+    }
+
+    function cfbRenderList() {
+        var box = $('wi-cfb-list');
+        if (!box) return;
+        var arr = _cfbBereiche || [];
+        if (!arr.length) {
+            box.innerHTML = '<div class="wi-empty">' + esc(t('wissen.cfb_none')) + '</div>';
+            return;
+        }
+        box.innerHTML = arr.map(function (b) {
+            // Die Reichweite steht als WORT da, nicht nur als Farbe oder Haken -
+            // sonst ist "mit Unterseiten" von "ohne" nicht zu unterscheiden.
+            var tag = b.inkl_unter ? t('wissen.cfb_scope_sub') : t('wissen.cfb_scope_top');
+            return '<div class="wi-item" data-id="' + esc(b.id) + '"'
+                + ' data-label="' + esc(b.name || b.key) + '">'
+                + '<div class="wi-fmeta">'
+                + '<span class="nm">' + esc(b.name || b.key) + '</span>'
+                + '<div class="wi-fpath">' + esc(b.key) + '</div>'
+                + '</div>'
+                + '<span class="wi-cfb-scope-tag">' + esc(tag) + '</span>'
+                + '<button type="button" class="sec-btn small danger wi-cfb-del" title="'
+                + esc(t('wissen.cfb_del')) + '">' + JarvisIcons.trash() + '</button>'
+                + '</div>';
+        }).join('');
+        box.querySelectorAll('.wi-cfb-del').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var row = btn.closest('.wi-item');
+                cfbEntfernen(row.getAttribute('data-id'), row.getAttribute('data-label'));
+            });
+        });
+    }
+
+    // Auswahl im Pulldown = Einbindung. Der Haken wird dabei SO uebernommen,
+    // wie er im Moment der Auswahl steht (so lautet die Vorgabe) - deshalb
+    // steht er neben dem Pulldown und nicht an der fertigen Zeile.
+    function cfbAdd(key) {
+        if (!key) return;
+        var sel = $('wi-cfb-space');
+        var sub = !!(($('wi-cfb-sub') || {}).checked);
+        if (sel) sel.disabled = true;
+        cfbStatus(t('common.loading'));
+        fetch('/api/wissen/confluence/bindung', {
+            method: 'POST', headers: authH({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ key: key, inkl_unter: sub })
+        }).then(function (r) { return r.json(); })
+          .then(function (d) {
+              if (!d || !d.ok) {
+                  cfbStatus('⚠️ ' + ((d && d.error) || t('wissen.cfb_err')), true);
+                  cfbRenderPick();   // Auswahl zuruecksetzen, Pulldown wieder frei
+                  return;
+              }
+              // Die Antwort des Servers gewinnt gegen den Formularstand: er
+              // vergibt die Kennung und kennt den Anzeigenamen des Bereichs.
+              _cfbBereiche = d.bereiche || [];
+              cfbStatus('✅ ' + t('wissen.cfb_added',
+                        { n: (d.bereich && d.bereich.name) || key }));
+              cfbRender();
+          })
+          .catch(function () { cfbStatus('⚠️ ' + t('wissen.cfb_err'), true); cfbRenderPick(); });
+    }
+
+    function cfbEntfernen(id, label) {
+        if (!id) return;
+        if (!window.confirm(t('wissen.cfb_del_ask', { n: label || id }))) return;
+        fetch('/api/wissen/confluence/bindung/' + encodeURIComponent(id),
+              { method: 'DELETE', headers: authH() })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d || !d.ok) { cfbStatus('⚠️ ' + ((d && d.error) || t('wissen.cfb_err')), true); return; }
+                _cfbBereiche = d.bereiche || [];
+                cfbStatus('🗑️ ' + t('wissen.cfb_removed', { n: label || id }));
+                cfbRender();
+            })
+            .catch(function () { cfbStatus('⚠️ ' + t('wissen.cfb_err'), true); });
+    }
+
     // ── Confluence-Import (alle sichtbaren Bereiche) ────────────────────
     // Suchbare Bereichsauswahl (analog Einstellungen → Wissen → Confluence):
     // Freitext-Suche mit Dropdown, danach Seiten-Mehrfachauswahl.
@@ -1309,16 +1460,23 @@
                     _cfSpaces = [];
                     if (tabBtn) tabBtn.style.display = 'none';
                     if (_extTab === 'cf') switchExtTab('url');   // Tab entfaellt -> zurueck auf URL
+                    cfbSpacesFertig();
                     return;
                 }
                 _cfSpaces = spaces;
                 if (tabBtn) tabBtn.style.display = '';
                 if (input) input.placeholder = t('wissen.cf_space_search') + ' (' + spaces.length + ')';
                 if (_ddOpen) renderCfSpaceDropdown();
+                // EINE Quelle fuer die Bereichsliste: der Einbindungs-Container
+                // benutzt dieselbe wie der Extraktor. Zwei Abrufe liefen beim
+                // naechsten Feinschliff auseinander - und dann boete das
+                // Pulldown andere Bereiche an als der Import daneben.
+                cfbSpacesFertig();
             })
             .catch(function () {
                 if (tabBtn) tabBtn.style.display = 'none';
                 if (_extTab === 'cf') switchExtTab('url');
+                cfbSpacesFertig();
             });
     }
 
@@ -1601,7 +1759,8 @@
 
         // Einklappbare Container (Zustand pro Browser gemerkt, analog Einstellungen).
         // Der Pfeil steht fest im Markup (eigener Span, damit applyLang ihn nicht wegwischt).
-        ['wi-sec-matrix', 'wi-sec-groups', 'wi-sec-upload', 'wi-sec-files'].forEach(function (id) {
+        ['wi-sec-matrix', 'wi-sec-groups', 'wi-sec-upload', 'wi-sec-cfbind',
+         'wi-sec-files'].forEach(function (id) {
             var sec = $(id); if (!sec) return;
             var h = sec.querySelector('h2'); if (!h) return;
             var tog = h.querySelector('.wi-sec-tog'); if (!tog) return;
@@ -1633,6 +1792,10 @@
             cfSearch.addEventListener('keydown', spaceSearchKey);
             cfSearch.addEventListener('blur', function () { setTimeout(closeSpaceDropdown, 150); });
         }
+        // Dynamische Confluence-Einbindung: die AUSWAHL bindet ein (Vorgabe).
+        var cfbSel = $('wi-cfb-space');
+        if (cfbSel) cfbSel.addEventListener('change', function () { cfbAdd(cfbSel.value); });
+
         var cfRefresh = $('wi-cf-refresh'); if (cfRefresh) cfRefresh.addEventListener('click', function () { loadCfSpaces(true); });
 
         // Massenzuordnung: Tabellen-Overlay öffnen (nur für globale Wissens-Editoren sichtbar)

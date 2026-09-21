@@ -18173,6 +18173,119 @@ async def wissen_confluence_pages(space: str = "", user: str = Depends(require_a
         return JSONResponse({"ok": False, "status": e.status, "error": str(e)})
 
 
+# ─── Dynamische Confluence-Einbindung (/wissen) ──────────────────────────────
+# Der Editor waehlt einen sichtbaren Bereich aus einem Pulldown; dieser erscheint
+# danach als konfigurierter Bereich. Die Liste ist GLOBAL (sie speist die
+# gemeinsame Wissensdatenbank) und wird von `backend/confluence_bindung.py`
+# gehalten.
+#
+# ⚠ ES WIRD HIER NOCH NICHTS IMPORTIERT (Vorgabe 2026-09-21: nur bis zu diesem
+# Punkt bauen). Die Endpunkte pflegen die Einbindung – der Abgleich folgt.
+
+
+def _cfb_aktiv() -> tuple[bool, bool]:
+    """(Skill aktiv?, konfiguriert?) fuer die Sichtbarkeit des Containers.
+
+    BEIDES gehoert geprueft: die Vorgabe lautet „nur sichtbar, wenn der Skill
+    installiert und aktiv ist UND konfiguriert wurde". `_skill_active` deckt
+    installiert+aktiv ab, `ConfluenceClient.configured` die Zugangsdaten. Der
+    Confluence-Reiter des Extraktors daneben prueft bewusst nur die Zugangsdaten
+    – er wird hier NICHT mit umgestellt, das waere eine Verhaltensaenderung an
+    einer Funktion, die niemand gemeldet hat.
+    """
+    try:
+        return bool(_skill_active("confluence")), bool(_confluence_client().configured)
+    except Exception as e:  # noqa: BLE001
+        print(f"[Wissen/CF-Bindung] Zustand nicht ermittelbar: {e}")
+        return False, False
+
+
+@app.get("/api/wissen/confluence/bindung")
+async def wissen_cf_bindung_lesen(user: str = Depends(require_auth)):
+    """Zustand + eingebundene Bereiche fuer den Container unter /wissen.
+
+    Antwortet AUCH dann mit 200, wenn der Skill aus oder nicht konfiguriert ist –
+    genau daran entscheidet der Client, ob der Container ueberhaupt erscheint.
+    Ein Fehlercode waere hier eine Stoerungsmeldung fuer einen voellig normalen
+    Zustand.
+    """
+    if not _editable_groups_for(user):
+        return JSONResponse({"ok": False, "error": "Dir ist kein Wissensbereich zugewiesen."},
+                            status_code=403)
+    import backend.confluence_bindung as _cfb
+    skill, conf = _cfb_aktiv()
+    return JSONResponse({"ok": True, "skill_aktiv": skill, "configured": conf,
+                         "aktiv": skill and conf,
+                         "bereiche": _cfb.liste() if (skill and conf) else []})
+
+
+@app.post("/api/wissen/confluence/bindung")
+async def wissen_cf_bindung_anlegen(request: Request, user: str = Depends(require_auth)):
+    """Einen sichtbaren Bereich einbinden. Body: ``{key, inkl_unter}``.
+
+    ⚠ DER ANZEIGENAME KOMMT VOM SERVER, nicht aus dem Rumpf – und der
+    Schluessel muss in den SICHTBAREN Bereichen stehen (dieselbe Schranke wie
+    `wissen_confluence_pages`). Ohne sie waere der Endpunkt der bequemste Weg,
+    einen Bereich einzubinden, den der hinterlegte Token gar nicht lesen darf:
+    die Liste sieht danach gepflegt aus und der spaetere Abgleich laeuft
+    dauerhaft in ein 404.
+
+    Der BENUTZER kommt ausschliesslich aus der Anmeldung (`von`), nie aus dem
+    Rumpf.
+    """
+    if not _editable_groups_for(user):
+        return JSONResponse({"ok": False, "error": "Dir ist kein Wissensbereich zugewiesen."},
+                            status_code=403)
+    import backend.confluence_bindung as _cfb
+    from backend.confluence_client import ConfluenceError
+    skill, conf = _cfb_aktiv()
+    if not skill:
+        return JSONResponse({"ok": False, "error": "Der Confluence-Skill ist nicht aktiv."},
+                            status_code=400)
+    if not conf:
+        return JSONResponse({"ok": False, "error": "Confluence ist nicht konfiguriert."},
+                            status_code=400)
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    key = str(body.get("key") or "").strip()
+    inkl = body.get("inkl_unter")
+    if not key:
+        return JSONResponse({"ok": False, "error": "Es wurde kein Bereich gewaehlt."},
+                            status_code=400)
+    c = _confluence_client()
+    try:
+        sichtbar = await _wissen_visible_spaces(c)
+    except ConfluenceError as e:
+        return JSONResponse({"ok": False, "status": e.status, "error": str(e)}, status_code=502)
+    treffer = next((s for s in sichtbar if (s.get("key") or "") == key), None)
+    if treffer is None:
+        return JSONResponse({"ok": False, "error": "Bereich nicht sichtbar/erlaubt."},
+                            status_code=403)
+    try:
+        eintrag = _cfb.hinzufuegen(key, treffer.get("name") or key,
+                                   inkl is True, _display_name(user))
+    except _cfb.BindungFehler as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": f"Konnte nicht gespeichert werden: {e}"},
+                            status_code=500)
+    return JSONResponse({"ok": True, "bereich": eintrag, "bereiche": _cfb.liste()})
+
+
+@app.delete("/api/wissen/confluence/bindung/{bid}")
+async def wissen_cf_bindung_loeschen(bid: str, user: str = Depends(require_auth)):
+    """Eine Einbindung loesen (Muelleimer in der Liste)."""
+    if not _editable_groups_for(user):
+        return JSONResponse({"ok": False, "error": "Dir ist kein Wissensbereich zugewiesen."},
+                            status_code=403)
+    import backend.confluence_bindung as _cfb
+    if not _cfb.entfernen(bid):
+        return JSONResponse({"ok": False, "error": "Einbindung nicht gefunden."}, status_code=404)
+    return JSONResponse({"ok": True, "bereiche": _cfb.liste()})
+
+
 @app.post("/api/wissen/extract/confluence")
 async def wissen_extract_confluence(request: Request, user: str = Depends(require_auth)):
     """Confluence-Import fuer /wissen -> Entwuerfe (Pending), dem Nutzer zugeordnet.

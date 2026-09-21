@@ -31,9 +31,21 @@ wie ein ABSTURZ aus und loest eine Wiederaufnahme aus.
 Deshalb: erst eine **rein lesende Vorpruefung**, und nur wenn wirklich etwas
 anliegt, laeuft der EINE vorhandene Weg (``force_reindex(incremental=True)``).
 Im Regelfall - nichts geaendert - passiert damit gar nichts und niemand merkt
-den Takt. Einen zweiten Indizierweg gibt es ausdruecklich NICHT; die Erkennung
+den Lauf. Einen zweiten Indizierweg gibt es ausdruecklich NICHT; die Erkennung
 teilt sich mit dem Reindex dieselben Funktionen (``_geaenderte_dateien``,
 ``_verwaiste_dateien``), sonst driften Vorpruefung und Lauf auseinander.
+
+⚠ AUSGELOEST WIRD ES VON EINEM CRON-AUFTRAG (Vorgabe 2026-09-21), sichtbar und
+steuerbar unter *Einstellungen → Tasks → Cron-Aufgaben*. Der fruehere eigene
+Takt im Startup-Hook ist damit ENTFALLEN - zwei Ausloeser fuer dieselbe Sache
+waeren zwei Fassungen, und der Administrator koennte den einen abschalten,
+waehrend der andere weiterlaeuft: "ich habe es doch deaktiviert, warum
+indiziert es trotzdem?" ist genau der Zustand, den niemand erklaeren kann.
+
+⚠ DER AUFTRAG LAEUFT OHNE AGENT. ``scheduler._execute`` hat dafuer einen
+eigenen Zweig (``kind="wissensabgleich"``), wie bei den Erinnerungen. Wer ihn
+durch einen Agentenlauf ersetzt, macht aus einer deterministischen
+Wartungsaufgabe einen LLM-Aufruf, der raten darf, ob er etwas tut.
 """
 from __future__ import annotations
 
@@ -41,32 +53,22 @@ import os
 import threading
 import time
 
-_TAKT_VORGABE = 300         # 5 Minuten
-_TAKT_MIN = 30              # darunter wird der Scan zur Dauerlast
-_TAKT_MAX = 86400           # ein Tag
+def abgeschaltet() -> bool:
+    """NOTAUS ueber die Dienstumgebung (``JARVIS_RAG_AUTOINDEX=0``).
 
-
-def takt_sek() -> int:
-    """Wie oft nachgesehen wird. ``0`` = Automatik aus.
+    ⚠ NICHT DER REGELWEG. Gesteuert wird ueber den Cron-Auftrag - Intervall
+    aendern, deaktivieren, loeschen. Diese Variable ist der Weg fuer einen
+    Server, auf dem der Abgleich generell nicht laufen soll, ohne dafuer am
+    Datenbestand zu drehen; sie wirkt AUCH, wenn der Auftrag aktiv ist.
 
     ⚠ FUNKTION, KEINE KONSTANTE - ein beim Import gelesener Wert waere bis zum
     Dienstneustart eingefroren, und genau daran ist im Projekt schon mehrfach
     eine Einstellung wirkungslos geblieben.
 
-    Die Untergrenze ist kein Schoenheitswert: der Takt scannt bei jedem Lauf
-    alle Wissensordner inklusive Netzlaufwerken. Ein 1-Sekunden-Takt waere ein
-    Dauerfeuer von Netz-Roundtrips gegen den Dateiserver.
+    Vorgabe ist AN: alles ausser einem ausdruecklichen Aus zaehlt als ein.
     """
-    roh = os.environ.get("JARVIS_RAG_AUTOINDEX_SEK")
-    if roh is None or str(roh).strip() == "":
-        return _TAKT_VORGABE
-    try:
-        wert = int(str(roh).strip())
-    except (TypeError, ValueError):
-        return _TAKT_VORGABE
-    if wert <= 0:
-        return 0
-    return max(_TAKT_MIN, min(_TAKT_MAX, wert))
+    roh = str(os.environ.get("JARVIS_RAG_AUTOINDEX", "")).strip().lower()
+    return roh in ("0", "false", "nein", "off", "aus")
 
 
 # Zustand nur im Speicher: die Frage "laeuft die Automatik" ist nach einem
@@ -85,11 +87,27 @@ _zustand: dict = {
 
 
 def zustand() -> dict:
-    """Momentaufnahme fuer die Oberflaeche (Kopie, damit niemand hineinschreibt)."""
+    """Momentaufnahme fuer die Oberflaeche (Kopie, damit niemand hineinschreibt).
+
+    ⚠ ``aktiv`` wird aus dem ECHTEN Auftrag abgeleitet, nicht behauptet: er muss
+    existieren, aktiviert sein und der Notaus darf nicht greifen. Eine Anzeige,
+    die "Automatik laeuft" sagt, waehrend der Administrator den Auftrag gerade
+    deaktiviert hat, waere genau die Falschaussage, wegen der im Projekt schon
+    mehrfach am falschen Ende gesucht wurde.
+    """
     with _zustand_lock:
         d = dict(_zustand)
-    d["takt_sek"] = takt_sek()
-    d["aktiv"] = d["takt_sek"] > 0
+    d["notaus"] = abgeschaltet()
+    job = None
+    try:
+        from backend.scheduler import cron_manager
+        job = cron_manager.get_job(AUFTRAG_ID)
+    except Exception:  # noqa: BLE001
+        pass
+    d["auftrag_da"] = job is not None
+    d["auftrag_an"] = bool(job and job.get("enabled"))
+    d["cron"] = (job or {}).get("cron", "")
+    d["aktiv"] = d["auftrag_an"] and not d["notaus"]
     return d
 
 
@@ -148,8 +166,9 @@ def lauf() -> dict:
     """
     from backend.tools import knowledge as K
 
-    if takt_sek() <= 0:
-        return {"indiziert": False, "grund": "Automatik ist abgeschaltet"}
+    if abgeschaltet():
+        return {"indiziert": False,
+                "grund": "Wissensabgleich ist abgeschaltet (JARVIS_RAG_AUTOINDEX=0)"}
 
     # Laeuft bereits ein Reindex (Wiederaufnahme nach Absturz, Auto-Mount,
     # Knopf in der Oberflaeche)? Dann NICHT zusaetzlich scannen - der Scan
@@ -196,3 +215,78 @@ def lauf() -> dict:
         _zustand["laeufe"] += 1
         _zustand["letzter_grund"] = grund
     return {**stand, "indiziert": True, "grund": grund}
+
+
+# ══ Der Cron-Auftrag ══════════════════════════════════════════════════════
+AUFTRAG_ID = "wissensabgleich"
+AUFTRAG_CRON = "*/5 * * * *"          # alle fuenf Minuten
+_SAAT_MARKE = "wissensabgleich_gesaet"
+
+
+def _auftrag_anlegen(cron: str = "") -> dict:
+    """Den Wartungsauftrag anlegen bzw. ersetzen.
+
+    ⚠ ``owner_privileged=False`` ist hier richtig und kein Versehen: der Job
+    startet KEINEN Agenten und fuehrt nichts aus, was Rechte braeuchte - er
+    ruft eine Funktion im Dienst. Systemrechte waeren eine Vollmacht ohne
+    Gegenstand. Deshalb zeigt die Oberflaeche fuer ihn auch keinen
+    Uebernehmen-Knopf (🔑), genau wie bei den Erinnerungen.
+    """
+    from backend.scheduler import cron_manager
+    return cron_manager.add_job(
+        label="Wissensabgleich",
+        cron=cron or AUFTRAG_CRON,
+        task="Sieht nach, ob sich in den Wissensordnern etwas geaendert hat, "
+             "und indiziert nur dann nach (kein Agentenlauf).",
+        enabled=True,
+        job_id=AUFTRAG_ID,
+        kind="wissensabgleich",
+        created_via="rag_autoindex",
+    )
+
+
+def auftrag_vorhanden() -> bool:
+    try:
+        from backend.scheduler import cron_manager
+        return cron_manager.get_job(AUFTRAG_ID) is not None
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def auftrag_sicherstellen() -> dict:
+    """Beim Dienststart: den Auftrag EINMALIG anlegen.
+
+    ⚠ MIT MARKE, und die ist der ganze Punkt: ohne sie kaeme ein bewusst
+    GELOESCHTER Auftrag bei jedem Neustart zurueck - aus einer Entscheidung des
+    Administrators wuerde ein wiederkehrender Fehler. Dieselbe Ueberlegung wie
+    bei den Vorgabe-Rollen und der nachgetragenen Jira-Vorlage.
+
+    Der Rueckweg ist ``auftrag_wiederherstellen()`` - eine Einbahnstrasse waere
+    hier teuer: ohne Auftrag gibt es gar keine Automatik mehr.
+    """
+    try:
+        from backend.config import config
+        if auftrag_vorhanden():
+            return {"angelegt": False, "grund": "vorhanden"}
+        if config.get_setting(_SAAT_MARKE):
+            return {"angelegt": False, "grund": "bewusst geloescht"}
+        _auftrag_anlegen()
+        config.save_setting(_SAAT_MARKE, True)
+        return {"angelegt": True, "grund": "erstmalig angelegt"}
+    except Exception as e:  # noqa: BLE001
+        return {"angelegt": False, "grund": f"fehlgeschlagen: {e}"}
+
+
+def auftrag_wiederherstellen(cron: str = "") -> dict:
+    """Den Auftrag auf ausdruecklichen Wunsch neu anlegen (Rueckweg).
+
+    Anders als ``auftrag_sicherstellen`` fragt das die Marke NICHT - hier hat
+    ein Administrator ausdruecklich darum gebeten.
+    """
+    from backend.config import config
+    job = _auftrag_anlegen(cron)
+    try:
+        config.save_setting(_SAAT_MARKE, True)
+    except Exception:  # noqa: BLE001
+        pass
+    return {"angelegt": True, "job": job}

@@ -397,12 +397,22 @@ window.cronManager = new (class JarvisCronManager {
             // Das muss man sehen koennen – sonst haelt ein Admin den Eintrag fuer
             // einen Auftrag, den ein Netzwerk-Benutzer angelegt hat.
             const isRem = job.kind === 'reminder';
+            // Wartungsauftrag (kind='wissensabgleich', seit 2026-09-21): sieht
+            // nach, ob sich in den Wissensordnern etwas geaendert hat, und
+            // indiziert nur dann nach. Ebenfalls OHNE Agent - auch das muss man
+            // sehen koennen, sonst haelt ein Admin den Auftragstext fuer etwas,
+            // das ein Modell ausfuehrt.
+            const isWiss = job.kind === 'wissensabgleich';
             const kindBadge = isRem
                 ? `<span class="cron-owner-badge cron-badge-user" title="${this._esc(window.t('cron.kind_reminder_hint'))}">`
-                  + `${this._esc(window.t('cron.kind_reminder'))}</span> ` : '';
+                  + `${this._esc(window.t('cron.kind_reminder'))}</span> `
+                : (isWiss
+                ? `<span class="cron-owner-badge cron-badge-user" title="${this._esc(window.t('cron.kind_wissen_hint'))}">`
+                  + `${this._esc(window.t('cron.kind_wissen'))}</span> ` : '');
             // Übernehmen (= Systemrechte) ist bei einer Erinnerung sinnlos: sie
-            // fuehrt nichts aus. Knopf deshalb nur bei Agenten-Auftraegen.
-            const claimBtn = (!job.owner_privileged && !isRem)
+            // fuehrt nichts aus. Dasselbe gilt fuer den Wissensabgleich - er
+            // ruft eine Funktion im Dienst, keine Rechte im Spiel.
+            const claimBtn = (!job.owner_privileged && !isRem && !isWiss)
                 ? `<button class="kb-btn-icon cron-claim-btn" data-id="${job.id}" `
                   + `title="${this._esc(window.t('cron.claim_title'))}">🔑</button>` : '';
             return `

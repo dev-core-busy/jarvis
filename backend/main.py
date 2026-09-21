@@ -4799,55 +4799,38 @@ async def startup_knowledge_sync():
 
 @app.on_event("startup")
 async def startup_rag_autoindex():
-    """Automatischer Wissens-Index - JEDE Aenderung kommt ohne Zutun an.
+    """Den Wartungsauftrag "Wissensabgleich" sicherstellen (Vorgabe 2026-09-21).
 
-    Vorgabe 2026-09-21. Vorher war der einzige automatische Weg ein Nebeneffekt
-    der Suche, und der hatte drei Loecher: ohne Suche passierte gar nichts,
-    hoechstens zehn Dateien je Suche, und Loeschungen wirkten ueberhaupt nicht
-    (die Begruendung im Kopf von ``backend/rag_autoindex.py``).
+    Ausgeloest wird der Abgleich von einem CRON-AUFTRAG, sichtbar und steuerbar
+    unter *Einstellungen → Tasks → Cron-Aufgaben*. Dieser Hook legt ihn nur
+    EINMALIG an; er faehrt selbst nichts aus.
 
-    ⚠ DER TAKT WARTET NACH DEM LAUF, nicht auf einer festen Uhr. Dauert ein
-    Durchgang laenger als das Intervall - ein grosser Schwung neuer Dateien auf
-    einer langsamen Freigabe -, kann er sich so nicht selbst ueberholen.
-    ``_reindex_lock`` in ``force_reindex`` ist die zweite Schranke.
+    ⚠ HIER LAEUFT KEIN EIGENER TAKT MEHR. Die erste Fassung hatte einen - zwei
+    Ausloeser fuer dieselbe Sache waeren zwei Fassungen, und der Administrator
+    koennte den Auftrag deaktivieren, waehrend der Takt weiterlaeuft: "ich habe
+    es doch abgeschaltet, warum indiziert es trotzdem?" ist genau der Zustand,
+    den niemand erklaeren kann.
 
-    ⚠ ERSTER LAUF VERZOEGERT: der Dienststart laedt Embedding-Modelle, waermt
-    den BM25-Index vor (+45 s) und startet den Standort-Sync (+90 s). Ein Scan
-    mittendrin liefe gegen alles davon. 150 s setzt ihn hinter beides.
+    ⚠ ANGELEGT WIRD MIT MARKE: ein bewusst GELOESCHTER Auftrag kommt nicht bei
+    jedem Neustart zurueck (sonst wird aus der Entscheidung des Administrators
+    ein wiederkehrender Fehler). Der Rueckweg ist
+    ``POST /api/knowledge/autoindex/restore``.
 
-    Im Regelfall ist der Takt STILL: gemeldet wird nur, was er wirklich getan
-    hat, und ein Fehlschlag. Eine Zeile alle fuenf Minuten, die immer dasselbe
-    sagt, wird nach zwei Tagen nicht mehr gelesen - die eine Startzeile bleibt,
-    damit ueberhaupt belegt ist, dass die Automatik laeuft.
+    Gemeldet wird nur, was wirklich passiert ist - eine Zeile bei jedem Start,
+    die immer dasselbe sagt, wird nach zwei Tagen nicht mehr gelesen.
     """
     from backend import rag_autoindex as _ai
-
-    takt = _ai.takt_sek()
-    if takt <= 0:
-        print("[RAG-Auto] abgeschaltet (JARVIS_RAG_AUTOINDEX_SEK=0) - "
-              "Aenderungen kommen dann nur ueber die Suche bzw. 'Neu indizieren' an",
-              flush=True)
-        return
-
-    async def _loop():
-        await asyncio.sleep(150)
-        while True:
-            try:
-                ergebnis = await asyncio.to_thread(_ai.lauf)
-                if ergebnis.get("indiziert"):
-                    print(f"[RAG-Auto] {ergebnis.get('grund')} - Index aktualisiert",
-                          flush=True)
-                elif "fehlgeschlagen" in str(ergebnis.get("grund", "")):
-                    print(f"[RAG-Auto] {ergebnis.get('grund')}", flush=True)
-            except Exception as e:  # noqa: BLE001
-                print(f"[RAG-Auto] Takt-Lauf fehlgeschlagen: {e}", flush=True)
-            # NACH dem Lauf warten (siehe Docstring) und das Intervall bei
-            # jedem Durchgang neu lesen - so wirkt eine Umstellung ohne Neustart.
-            await asyncio.sleep(max(30, _ai.takt_sek()))
-
     try:
-        asyncio.create_task(_loop())
-        print(f"[RAG-Auto] Automatik aktiv - Pruefung alle {takt} s", flush=True)
+        erg = await asyncio.to_thread(_ai.auftrag_sicherstellen)
+        if erg.get("angelegt"):
+            print(f"[RAG-Auto] Cron-Auftrag 'Wissensabgleich' angelegt "
+                  f"({_ai.AUFTRAG_CRON})", flush=True)
+        elif "fehlgeschlagen" in str(erg.get("grund", "")):
+            print(f"[RAG-Auto] Auftrag konnte nicht angelegt werden: "
+                  f"{erg.get('grund')}", flush=True)
+        if _ai.abgeschaltet():
+            print("[RAG-Auto] NOTAUS aktiv (JARVIS_RAG_AUTOINDEX=0) - der "
+                  "Auftrag laeuft, tut aber nichts", flush=True)
     except Exception as e:  # noqa: BLE001
         print(f"[RAG-Auto] Startup-Fehler: {e}", flush=True)
 
@@ -15569,6 +15552,28 @@ async def reindex_knowledge(user: str = Depends(require_knowledge_editor)):
             pass
     asyncio.create_task(_run_reindex())
     return JSONResponse({"started": True})
+
+
+@app.post("/api/knowledge/autoindex/restore")
+async def restore_autoindex_job(user: str = Depends(require_local_auth)):
+    """Den Cron-Auftrag "Wissensabgleich" neu anlegen (Rueckweg).
+
+    ⚠ WARUM ES DEN GIBT: der Auftrag wird beim ersten Start EINMALIG gesaet und
+    danach nie wieder - ein bewusst geloeschter soll nicht bei jedem Neustart
+    zurueckkommen. Ohne diesen Weg waere das eine Einbahnstrasse: kein Auftrag,
+    keine Automatik, und die Cron-Oberflaeche kann keinen Auftrag mit
+    ``kind="wissensabgleich"`` anlegen. Dieselbe Ueberlegung wie beim
+    Willkommens-Chat (``POST /api/chat/welcome/restore``).
+
+    Admin-Sache, wie alles im Cron-Bereich: ein zeitgesteuerter Auslaeuser ist
+    Persistenz-Substrat.
+    """
+    from backend import rag_autoindex as _ai
+    try:
+        erg = await asyncio.to_thread(_ai.auftrag_wiederherstellen)
+        return JSONResponse({"ok": True, "job": erg.get("job")})
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
 @app.post("/api/knowledge/reindex/cancel")

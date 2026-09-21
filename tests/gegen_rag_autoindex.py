@@ -31,6 +31,7 @@ DATEIEN = [
     "backend/rag_autoindex.py",
     "backend/tools/knowledge.py",
     "backend/main.py",
+    "backend/scheduler.py",
     "tests/test_rag_autoindex.py",
 ]
 
@@ -110,25 +111,10 @@ PROBEN = [
         ("backend/rag_autoindex.py",
          'if K.get_index_progress().get("running"):',
          'if False:')]),
-    ("takt_sek als Konstante (Umstellung wirkt erst nach Neustart)", [
+    ("Notaus als Konstante (Umstellung wirkt erst nach Neustart)", [
         ("backend/rag_autoindex.py",
-         '    roh = os.environ.get("JARVIS_RAG_AUTOINDEX_SEK")',
-         '    roh = None; _ = os.environ.get("JARVIS_RAG_AUTOINDEX_SEK")')]),
-    ("gewartet wird VOR dem Lauf (Takt kann sich selbst ueberholen)", [
-        ("backend/main.py",
-         """            try:
-                ergebnis = await asyncio.to_thread(_ai.lauf)""",
-         """            await asyncio.sleep(max(30, _ai.takt_sek()))
-            try:
-                ergebnis = await asyncio.to_thread(_ai.lauf)"""),
-        ("backend/main.py",
-         """            await asyncio.sleep(max(30, _ai.takt_sek()))
-
-    try:
-        asyncio.create_task(_loop())""",
-         """
-    try:
-        asyncio.create_task(_loop())""")]),
+         '    roh = str(os.environ.get("JARVIS_RAG_AUTOINDEX", "")).strip().lower()',
+         '    roh = ""; _ = os.environ.get("JARVIS_RAG_AUTOINDEX")')]),
     ("die Vorpruefung indiziert selbst (zweiter Indizierweg)", [
         ("backend/rag_autoindex.py",
          "    geaendert = K._geaenderte_dateien(files, indexed)",
@@ -144,6 +130,38 @@ PROBEN = [
          '    if False:')]),
     ("Zustand ist keine Kopie (Aufrufer kann hineinschreiben)", [
         ("backend/rag_autoindex.py", "        d = dict(_zustand)", "        d = _zustand")]),
+    ("⚠ 'wissensabgleich' faellt aus der kind-Whitelist (wird STILL zum Agentenjob)", [
+        ("backend/scheduler.py",
+         '"kind": kind if kind in ("agent", "reminder", "wissensabgleich") else "agent",',
+         '"kind": kind if kind in ("agent", "reminder") else "agent",')]),
+    ("⚠ der Ausfuehrungs-Zweig faellt weg (Reindex per LLM statt direkt)", [
+        ("backend/scheduler.py",
+         'elif job.get("kind") == "wissensabgleich":',
+         'elif False:')]),
+    ("kind wird nachtraeglich aenderbar (Umschreiben zum Agentenjob)", [
+        ("backend/scheduler.py",
+         'UPDATABLE_FIELDS = {"label", "cron", "task", "enabled", "once"}',
+         'UPDATABLE_FIELDS = {"label", "cron", "task", "enabled", "once", "kind"}')]),
+    ("Saat ohne Marke (bewusst geloeschter Auftrag kommt zurueck)", [
+        ("backend/rag_autoindex.py",
+         "        if config.get_setting(_SAAT_MARKE):",
+         "        if False:")]),
+    ("Rueckweg fragt die Marke (Einbahnstrasse)", [
+        ("backend/rag_autoindex.py",
+         "    job = _auftrag_anlegen(cron)\n    try:",
+         "    if config.get_setting(_SAAT_MARKE):\n        return {\"angelegt\": False}\n    job = _auftrag_anlegen(cron)\n    try:")]),
+    ("zustand() behauptet 'aktiv' ohne den Auftrag zu lesen", [
+        ("backend/rag_autoindex.py",
+         '    d["aktiv"] = d["auftrag_an"] and not d["notaus"]',
+         '    d["aktiv"] = True')]),
+    ("Startup faehrt wieder einen eigenen Takt (zweiter Ausloeser)", [
+        ("backend/main.py",
+         "    from backend import rag_autoindex as _ai\n    try:\n        erg = await asyncio.to_thread(_ai.auftrag_sicherstellen)",
+         "    from backend import rag_autoindex as _ai\n\n    async def _loop():\n        while True:\n            await asyncio.sleep(300)\n            await asyncio.to_thread(_ai.lauf)\n    asyncio.create_task(_loop())\n    try:\n        erg = await asyncio.to_thread(_ai.auftrag_sicherstellen)")]),
+    ("Auftrag bekommt Systemrechte (Vollmacht ohne Gegenstand)", [
+        ("backend/rag_autoindex.py",
+         '        created_via="rag_autoindex",',
+         '        owner_privileged=True,\n        created_via="rag_autoindex",')]),
 ]
 
 

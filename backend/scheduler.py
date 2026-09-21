@@ -80,6 +80,16 @@ class CronManager:
                        unprivilegierter Messenger-Absender eine Erinnerung
                        setzen, ohne sich damit einen zeitversetzten
                        Agentenlauf einzurichten.
+          'wissensabgleich' – Wartungsauftrag (seit 2026-09-21): sieht nach, ob
+                       sich in den Wissensordnern etwas geaendert hat, und
+                       indiziert nur dann nach. Ebenfalls OHNE LLM und OHNE
+                       Werkzeuge - ein Modell zu bitten, einen Reindex
+                       anzustossen, waere teuer, unzuverlaessig und voellig
+                       unnoetig fuer eine deterministische Wartungsaufgabe.
+
+        ⚠ EINE NEUE ART GEHOERT IN DIE WHITELIST WEITER UNTEN. Steht sie nicht
+        darin, wird der Job STILL zu einem Agentenlauf - er laeuft dann, tut
+        etwas voellig anderes als bestellt, und niemand sieht warum.
         """
         job = {
             "id": job_id or str(uuid.uuid4()),
@@ -88,7 +98,7 @@ class CronManager:
             "task": task,
             "enabled": enabled,
             "once": once,   # True → Job löscht sich nach einmaligem Ausführen
-            "kind": kind if kind in ("agent", "reminder") else "agent",
+            "kind": kind if kind in ("agent", "reminder", "wissensabgleich") else "agent",
             "payload": dict(payload or {}),
             "owner": owner or "",
             "owner_privileged": bool(owner_privileged),
@@ -222,6 +232,14 @@ class CronManager:
                 # Auftrag, den ein injizierter Nachrichtentext steuern kann.
                 from backend import reminders
                 result = await reminders.deliver(job.get("payload") or {})
+            elif job.get("kind") == "wissensabgleich":
+                # Wartungsauftrag: KEIN Agent, kein LLM, kein Werkzeug - aus
+                # demselben Grund wie oben, nur andersherum begruendet: hier
+                # gibt es schlicht nichts zu entscheiden. Der Lauf sieht nach,
+                # ob sich etwas geaendert hat, und indiziert nur dann nach.
+                from backend import rag_autoindex
+                erg = await asyncio.to_thread(rag_autoindex.lauf)
+                result = str(erg.get("grund") or "")
             elif _agent_manager:
                 agent = _agent_manager.get_or_create_main()
                 result = await agent.run_task_headless(

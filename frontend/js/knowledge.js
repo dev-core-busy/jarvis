@@ -17,6 +17,16 @@ class JarvisKnowledgeManager {
         });
         if (btnCreateFolder) btnCreateFolder.addEventListener('click', () => this.createFolder());
 
+        // ⚠ DELEGIERT, nicht je Knopf: der Knopf "Wissensabgleich anlegen"
+        // entsteht erst beim Zeichnen der Statistik-Kachel und verschwindet
+        // bei jedem Neuzeichnen. Direkt gebunden waere der Handler danach weg -
+        // und der Knopf saehe funktionsfaehig aus, ohne zu wirken.
+        document.addEventListener('click', (e) => {
+            const b = e.target && e.target.closest
+                ? e.target.closest('#kb-autoindex-restore') : null;
+            if (b) { e.preventDefault(); this.restoreAutoIndex(); }
+        });
+
         // Enter-Taste im Eingabefeld
         const folderInput = document.getElementById('kb-folder-input');
         if (folderInput) {
@@ -3229,11 +3239,23 @@ class JarvisKnowledgeManager {
     _autoIndexLine(a) {
         if (!a || typeof a !== 'object') return '';
         const parts = [];
-        if (!a.aktiv) {
-            parts.push(window.t('knowledge.autoindex_off'));
+        let warnung = false;
+
+        if (!a.auftrag_da) {
+            // Einbahnstrasse vermeiden: der Auftrag wird nur EINMALIG gesaet,
+            // ein geloeschter kommt nicht von selbst zurueck - also gehoert
+            // der Weg zurueck genau hierhin, wo der Zustand steht.
+            parts.push(window.t('knowledge.autoindex_missing'));
+            warnung = true;
+        } else if (a.notaus) {
+            parts.push(window.t('knowledge.autoindex_notaus'));
+            warnung = true;
+        } else if (!a.auftrag_an) {
+            parts.push(window.t('knowledge.autoindex_disabled'));
+            warnung = true;
         } else {
-            const min = Math.max(1, Math.round((a.takt_sek || 0) / 60));
-            parts.push(window.t('knowledge.autoindex_on').replace('{n}', min));
+            parts.push(window.t('knowledge.autoindex_on')
+                .replace('{cron}', this._escHtml(a.cron || '')));
             if (a.letzte_aenderung) {
                 parts.push(`${window.t('knowledge.autoindex_last')}: `
                          + `${this._fmtDateTime(a.letzte_aenderung)}`
@@ -3245,10 +3267,36 @@ class JarvisKnowledgeManager {
         }
         // Ein Fehlschlag wird GENANNT, nicht verschluckt.
         const fehler = a.letzter_fehler ? String(a.letzter_fehler) : '';
-        if (fehler) parts.push('⚠ ' + this._escHtml(fehler.slice(0, 80)));
-        const color = (a.aktiv && !fehler) ? 'var(--text-secondary)' : 'var(--warning)';
+        if (fehler) { parts.push('⚠ ' + this._escHtml(fehler.slice(0, 80))); warnung = true; }
+
+        const color = warnung ? 'var(--warning)' : 'var(--text-secondary)';
+        const knopf = !a.auftrag_da
+            ? ` <button id="kb-autoindex-restore" class="kb-btn-icon" style="font-size:.72rem;">`
+              + `${this._escHtml(window.t('knowledge.autoindex_restore'))}</button>` : '';
         return `<div class="kb-autoindex" style="font-size:0.75rem;color:${color};`
-             + `margin:2px 0 6px;">${parts.join(' · ')}</div>`;
+             + `margin:2px 0 6px;">${parts.join(' · ')}${knopf}</div>`;
+    }
+
+    /** Den Cron-Auftrag "Wissensabgleich" neu anlegen (Rueckweg).
+     *
+     * ⚠ Delegiert gebunden, NICHT je Knopf: die Statistik-Kachel wird bei jeder
+     * Aktualisierung neu gezeichnet, ein direkt gebundener Handler waere danach
+     * weg - und der Knopf saehe funktionsfaehig aus, ohne zu wirken.
+     */
+    async restoreAutoIndex() {
+        try {
+            const r = await fetch('/api/knowledge/autoindex/restore', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json',
+                           'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') },
+            });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok || !d.ok) throw new Error(d.error || `HTTP ${r.status}`);
+            this._showNotification(window.t('knowledge.autoindex_restored'), 'success');
+            this.fetchStats();
+        } catch (e) {
+            this._showNotification(String(e.message || e), 'error');
+        }
     }
 
     /** Zeile "Letzter Indexlauf: <Datum/Uhrzeit> · Dauer · Ergebnis" (leer wenn nie gelaufen). */

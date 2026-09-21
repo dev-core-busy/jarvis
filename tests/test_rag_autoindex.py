@@ -249,9 +249,49 @@ class FakeK(types.ModuleType):
         return {"ok": True}
 
 
+class FakeCron(types.ModuleType):
+    """Scheduler-Attrappe: haelt genau den einen Wartungsauftrag."""
+
+    def __init__(self):
+        super().__init__("backend.scheduler")
+        self.jobs = {}
+        self.angelegt = []
+
+        aussen = self
+
+        class Mgr:
+            def get_job(self, jid):
+                return aussen.jobs.get(jid)
+
+            def add_job(self, **kw):
+                aussen.angelegt.append(kw)
+                j = dict(kw); j["id"] = kw.get("job_id")
+                aussen.jobs[kw.get("job_id")] = j
+                return j
+
+        self.cron_manager = Mgr()
+
+
+class FakeConfig(types.ModuleType):
+    def __init__(self):
+        super().__init__("backend.config")
+        self.werte = {}
+        aussen = self
+
+        class C:
+            def get_setting(self, k, d=None):
+                return aussen.werte.get(k, d)
+
+            def save_setting(self, k, v):
+                aussen.werte[k] = v
+
+        self.config = C()
+
+
 def frisch(**felder):
-    """Automatik-Modul mit frischem Zustand und frischer knowledge-Attrappe."""
-    for m in ("backend.rag_autoindex", "backend.tools.knowledge", "backend.tools", "backend"):
+    """Automatik-Modul mit frischem Zustand und frischen Attrappen."""
+    for m in ("backend.rag_autoindex", "backend.tools.knowledge", "backend.tools",
+              "backend.scheduler", "backend.config", "backend"):
         sys.modules.pop(m, None)
     fk = FakeK()
     for k, v in felder.items():
@@ -261,7 +301,11 @@ def frisch(**felder):
     sys.modules["backend.tools"] = tools
     sys.modules["backend.tools.knowledge"] = fk
     tools.knowledge = fk
+    fc = FakeCron(); sys.modules["backend.scheduler"] = fc
+    cfg = FakeConfig(); sys.modules["backend.config"] = cfg
     from backend import rag_autoindex as ai
+    ai._test_cron = fc
+    ai._test_config = cfg
     return ai, fk
 
 
@@ -302,14 +346,14 @@ check("laufender Indexlauf: kein zweiter wird angestossen", fk.reindex_rufe == [
 check("laufender Indexlauf: Grund wird genannt",
       isinstance(r, dict) and "laeuft bereits" in r.get("grund", ""))
 
-# (f) Automatik abgeschaltet
-os.environ["JARVIS_RAG_AUTOINDEX_SEK"] = "0"
+# (f) Notaus
+os.environ["JARVIS_RAG_AUTOINDEX"] = "0"
 ai, fk = frisch(idx={}, dateien=[FakePath("/kb/neu.md", 1.0)])
 r = sicher(ai.lauf)
-check("abgeschaltet: kein Indexlauf", fk.reindex_rufe == [])
-check("abgeschaltet: Grund wird genannt",
+check("Notaus: kein Indexlauf", fk.reindex_rufe == [])
+check("Notaus: Grund wird genannt",
       isinstance(r, dict) and "abgeschaltet" in r.get("grund", ""))
-os.environ.pop("JARVIS_RAG_AUTOINDEX_SEK", None)
+os.environ.pop("JARVIS_RAG_AUTOINDEX", None)
 
 # (g) Pruefung wirft -> lauf() wirft NICHT
 ai, fk = frisch(pruef_wirft=True)
@@ -333,7 +377,8 @@ z = sicher(ai.zustand)
 check("Zustand: Lauf wird gezaehlt", isinstance(z, dict) and z.get("laeufe") == 1)
 check("Zustand: Zeitpunkt der Pruefung gesetzt",
       isinstance(z, dict) and float(z.get("letzte_pruefung") or 0) > 0)
-check("Zustand: meldet sich als aktiv", isinstance(z, dict) and z.get("aktiv") is True)
+check("Zustand: der Grund des Laufs wird gemerkt",
+      isinstance(z, dict) and "neu/geaendert" in (z.get("letzter_grund") or ""))
 z2 = sicher(ai.zustand)
 if isinstance(z, dict) and isinstance(z2, dict):
     z["laeufe"] = 999
@@ -368,26 +413,134 @@ check("ohne Vektor-Index: KEIN Indexlauf", _kv.reindex_rufe == [])
 check("ohne Vektor-Index: meldet die Ursache, nicht 'nichts geaendert'",
       isinstance(r, dict) and "Vektor-Index" in r.get("grund", ""))
 
-# ══ 6. takt_sek(): Funktion, Vorgabe, Grenzen ═════════════════════════════
-print("\n6. takt_sek()")
+# ══ 6. Notaus ════════════════════════════════════════════════════════════
+print("\n6. Notaus (JARVIS_RAG_AUTOINDEX)")
 ai, _ = frisch()
-os.environ.pop("JARVIS_RAG_AUTOINDEX_SEK", None)
-check("Vorgabe ist 300 s", ai.takt_sek() == 300)
-os.environ["JARVIS_RAG_AUTOINDEX_SEK"] = "0"
-check("0 schaltet ab", ai.takt_sek() == 0)
-os.environ["JARVIS_RAG_AUTOINDEX_SEK"] = "1"
-check("Untergrenze greift (kein Dauerfeuer gegen den Dateiserver)",
-      ai.takt_sek() == 30)
-os.environ["JARVIS_RAG_AUTOINDEX_SEK"] = "999999"
-check("Obergrenze greift", ai.takt_sek() == 86400)
-os.environ["JARVIS_RAG_AUTOINDEX_SEK"] = "quatsch"
-check("unbrauchbarer Wert -> Vorgabe (nicht aus!)", ai.takt_sek() == 300)
-os.environ["JARVIS_RAG_AUTOINDEX_SEK"] = "600"
-check("gueltiger Wert wirkt OHNE Neustart (Funktion, keine Konstante)",
-      ai.takt_sek() == 600)
-os.environ.pop("JARVIS_RAG_AUTOINDEX_SEK", None)
+os.environ.pop("JARVIS_RAG_AUTOINDEX", None)
+check("Vorgabe ist AN (kein Eintrag = laeuft)", ai.abgeschaltet() is False)
+for wert in ("0", "false", "nein", "off", "aus", "AUS"):
+    os.environ["JARVIS_RAG_AUTOINDEX"] = wert
+    check(f"'{wert}' schaltet ab", ai.abgeschaltet() is True)
+os.environ["JARVIS_RAG_AUTOINDEX"] = "1"
+check("'1' laesst laufen", ai.abgeschaltet() is False)
+os.environ["JARVIS_RAG_AUTOINDEX"] = "quatsch"
+check("unbrauchbarer Wert laesst laufen (nicht aus!)", ai.abgeschaltet() is False)
+os.environ["JARVIS_RAG_AUTOINDEX"] = "0"
+check("wirkt OHNE Neustart (Funktion, keine Konstante)", ai.abgeschaltet() is True)
+os.environ.pop("JARVIS_RAG_AUTOINDEX", None)
 
-# ══ 7. Der Takt ist verdrahtet ════════════════════════════════════════════
+# ══ 6b. Der Cron-Auftrag ══════════════════════════════════════════════════
+print("\n6b. Cron-Auftrag: Saat, Marke, Rueckweg")
+ai, _ = frisch()
+cron, cfg = ai._test_cron, ai._test_config
+
+erg = sicher(ai.auftrag_sicherstellen)
+check("erster Start legt den Auftrag an", isinstance(erg, dict) and erg.get("angelegt") is True)
+check("genau EIN Auftrag angelegt", len(cron.angelegt) == 1)
+kw = cron.angelegt[0] if cron.angelegt else {}
+check("⚠ kind='wissensabgleich' (sonst waere es ein Agentenlauf)",
+      kw.get("kind") == "wissensabgleich")
+check("feste Auftrags-Kennung", kw.get("job_id") == ai.AUFTRAG_ID)
+check("laeuft OHNE Systemrechte (er fuehrt nichts aus)",
+      not kw.get("owner_privileged"))
+check("ist beim Anlegen aktiv", kw.get("enabled") is True)
+
+erg2 = sicher(ai.auftrag_sicherstellen)
+check("zweiter Start legt NICHTS neu an (idempotent)",
+      isinstance(erg2, dict) and erg2.get("angelegt") is False and len(cron.angelegt) == 1)
+
+# ⚠ Bewusst geloescht: darf NICHT beim naechsten Start zurueckkommen.
+cron.jobs.clear()
+erg3 = sicher(ai.auftrag_sicherstellen)
+check("bewusst geloescht: kommt beim Neustart NICHT zurueck",
+      isinstance(erg3, dict) and erg3.get("angelegt") is False and len(cron.angelegt) == 1)
+check("und der Grund wird genannt",
+      isinstance(erg3, dict) and "geloescht" in erg3.get("grund", ""))
+
+# ... aber der Rueckweg legt ihn wieder an (keine Einbahnstrasse).
+erg4 = sicher(ai.auftrag_wiederherstellen)
+check("Rueckweg legt ihn neu an", isinstance(erg4, dict) and erg4.get("angelegt") is True)
+check("Rueckweg fragt die Marke NICHT", len(cron.angelegt) == 2)
+
+# ══ 6c. zustand() leitet 'aktiv' aus dem ECHTEN Auftrag ab ════════════════
+print("\n6c. zustand() spiegelt den echten Auftrag")
+ai, _ = frisch()
+cron = ai._test_cron
+z = sicher(ai.zustand)
+check("ohne Auftrag: nicht aktiv", isinstance(z, dict) and z.get("aktiv") is False)
+check("ohne Auftrag: auftrag_da=False", isinstance(z, dict) and z.get("auftrag_da") is False)
+
+sicher(ai.auftrag_sicherstellen)
+z = sicher(ai.zustand)
+check("mit aktivem Auftrag: aktiv", isinstance(z, dict) and z.get("aktiv") is True)
+check("der Cron-Ausdruck wird gemeldet", isinstance(z, dict) and z.get("cron") == ai.AUFTRAG_CRON)
+
+# Deaktiviert -> die Anzeige darf NICHT "laeuft" behaupten
+cron.jobs[ai.AUFTRAG_ID]["enabled"] = False
+z = sicher(ai.zustand)
+check("⚠ deaktivierter Auftrag: NICHT aktiv (Anzeige luegt nicht)",
+      isinstance(z, dict) and z.get("aktiv") is False)
+check("deaktivierter Auftrag: auftrag_da bleibt True (er existiert ja)",
+      isinstance(z, dict) and z.get("auftrag_da") is True)
+
+cron.jobs[ai.AUFTRAG_ID]["enabled"] = True
+os.environ["JARVIS_RAG_AUTOINDEX"] = "0"
+z = sicher(ai.zustand)
+check("⚠ Notaus schlaegt den aktiven Auftrag (Anzeige sagt die Wahrheit)",
+      isinstance(z, dict) and z.get("aktiv") is False and z.get("notaus") is True)
+os.environ.pop("JARVIS_RAG_AUTOINDEX", None)
+
+# ══ 6d. Der Scheduler kennt die Art ═══════════════════════════════════════
+print("\n6d. Scheduler: dritte Job-Art")
+SCHED_SRC = (ROOT / "backend" / "scheduler.py").read_text(encoding="utf-8")
+sched_clean = ohne_worte(SCHED_SRC)
+sb_roh = ast.parse(SCHED_SRC)
+check("Positivkontrolle: Begruendungen aus dem Prueftext entfernt",
+      "Erinnerungs-Ausnahme" not in sched_clean and "add_job" in sched_clean)
+# ⚠ Steht die Art NICHT in der Whitelist, wird der Job STILL zu einem
+# Agentenlauf - er laeuft, tut etwas anderes als bestellt, und niemand sieht es.
+# ⚠ Per AST, nicht per Text: `ast.unparse` normiert auf EINFACHE
+# Anfuehrungszeichen, ein Prueftext mit doppelten findet nie etwas.
+_erlaubt = set()
+for _n in ast.walk(sb_roh):
+    if isinstance(_n, ast.Compare) and isinstance(_n.ops[0], ast.In) \
+            and isinstance(_n.left, ast.Name) and _n.left.id == "kind":
+        for _c in ast.walk(_n.comparators[0]):
+            if isinstance(_c, ast.Constant) and isinstance(_c.value, str):
+                _erlaubt.add(_c.value)
+check(f"⚠ 'wissensabgleich' steht in der kind-Whitelist (gefunden: {sorted(_erlaubt)})",
+      "wissensabgleich" in _erlaubt)
+check("und die beiden alten Arten sind weiterhin drin",
+      {"agent", "reminder"} <= _erlaubt)
+sb = ast.parse(SCHED_SRC)
+sb_roh = sb
+ex = next((n for n in ast.walk(sb)
+           if isinstance(n, ast.AsyncFunctionDef) and n.name == "_execute"), None)
+check("_execute gefunden", ex is not None)
+if ex is not None:
+    q = ast.unparse(ex)
+    check("_execute hat einen Zweig fuer 'wissensabgleich'", "'wissensabgleich'" in q)
+    check("und er ruft die Automatik, NICHT den Agenten",
+          "rag_autoindex" in q and "lauf" in q)
+    # Die Reihenfolge ist tragend: der Zweig muss VOR dem Agenten-Zweig stehen.
+    i_w = q.find("'wissensabgleich'")
+    i_a = q.find("run_task_headless")
+    check("⚠ der Zweig steht VOR dem Agenten-Zweig (sonst nie erreicht)",
+          i_w > 0 and i_a > i_w)
+# kind darf nicht nachtraeglich umgeschrieben werden koennen
+_upd = set()
+for _n in ast.walk(sb_roh):
+    if isinstance(_n, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "UPDATABLE_FIELDS" for t in _n.targets):
+        for _c in ast.walk(_n.value):
+            if isinstance(_c, ast.Constant) and isinstance(_c.value, str):
+                _upd.add(_c.value)
+check(f"UPDATABLE_FIELDS gefunden ({sorted(_upd)})", bool(_upd))
+check("⚠ 'kind' steht NICHT darin (kein Umschreiben zum Agentenjob)",
+      "kind" not in _upd)
+check("⚠ 'payload' steht NICHT darin", "payload" not in _upd)
+
+# ══ 7. Startup-Hook: saet, faehrt aber KEINEN eigenen Takt ════════════════
 print("\n7. Startup-Hook")
 m_baum = ast.parse(MAIN_SRC)
 hook = next((n for n in ast.walk(m_baum)
@@ -396,22 +549,20 @@ check("startup_rag_autoindex existiert", hook is not None)
 if hook is not None:
     dek = [ast.unparse(d) for d in hook.decorator_list]
     check("haengt am Startup", any("on_event" in d and "startup" in d for d in dek))
-    q = ast.unparse(hook)
-    check("ruft die Automatik (rag_autoindex.lauf)", ".lauf" in q)
-    check("laeuft im Thread (blockierender Scan gehoert nicht in den Event-Loop)",
+    # Docstring weg - er erklaert, warum es KEINEN Takt mehr gibt, und nennt
+    # dabei die Woerter, auf die geprueft wird.
+    hook_clean = ast.parse(ohne_worte(MAIN_SRC))
+    hk = next((n for n in ast.walk(hook_clean)
+               if isinstance(n, ast.AsyncFunctionDef) and n.name == "startup_rag_autoindex"), None)
+    q = ast.unparse(hk) if hk is not None else ""
+    check("Positivkontrolle: Hook auch ohne Docstring gefunden", bool(q))
+    check("stellt den Auftrag sicher", "auftrag_sicherstellen" in q)
+    check("laeuft im Thread (Dateizugriff gehoert nicht in den Event-Loop)",
           "to_thread" in q)
-    # Reihenfolge: erst warten, dann die Schleife
-    i_sleep = q.find("sleep(150)")
-    i_while = q.find("while True")
-    check("erster Lauf ist verzoegert (Start laedt Modelle, waermt BM25 vor)",
-          i_sleep > 0 and i_while > i_sleep)
-    # Nach dem Lauf warten, nicht auf fester Uhr
-    i_ruf = q.find(".lauf")
-    i_warte = q.rfind("await asyncio.sleep(max(")
-    check("gewartet wird NACH dem Lauf (Takt kann sich nicht selbst ueberholen)",
-          i_ruf > 0 and i_warte > i_ruf)
-    check("das Intervall wird bei jedem Durchgang neu gelesen",
-          "takt_sek()" in q.split("while True")[-1])
+    # ⚠ KEIN zweiter Ausloeser: der Cron-Auftrag ist der einzige.
+    check("⚠ faehrt KEINEN eigenen Takt mehr (kein zweiter Ausloeser)",
+          "while True" not in q and "create_task" not in q)
+    check("ruft die Automatik nicht selbst aus", ".lauf(" not in q)
 
 print(f"\nErgebnis: {ok} OK, {fail} FAIL")
 sys.exit(1 if fail else 0)

@@ -328,6 +328,64 @@ def preload_embedding_model():
         print(f"[knowledge] Embedding-Modell Preload fehlgeschlagen: {e}", flush=True)
 
 
+def _autoindex_zustand() -> dict:
+    """Zustand der Index-Automatik fuer die Oberflaeche, fail-safe.
+
+    Lazy importiert: ``rag_autoindex`` greift seinerseits auf dieses Modul zu -
+    ein Import auf Modulebene waere ein Zirkel. Faellt es aus, meldet die Kachel
+    ``aktiv: False`` statt die ganze Statistik mitzureissen.
+    """
+    try:
+        from backend import rag_autoindex as _ai
+        return _ai.zustand()
+    except Exception:  # noqa: BLE001
+        return {"aktiv": False, "takt_sek": 0}
+
+
+def _verwaiste_dateien(current_paths: set, indexed: dict, alive: list) -> list:
+    """Index-Eintraege, deren Datei es nicht mehr gibt - NUR aus erreichbaren Ordnern.
+
+    ⚠ DIE EINE FASSUNG. Zweiter Aufrufer ist die Automatik, die WISSEN will, ob
+    etwas aufzuraeumen ist, ohne einen Lauf anzustossen. Liefe sie mit einer
+    eigenen Fassung, meldete sie im Zweifel Loeschungen, die der Reindex danach
+    gar nicht abraeumt - ein Takt, der bei jedem Durchgang feuert und nichts tut.
+
+    ⚠ DER PRAEFIX BRAUCHT DEN TRENNER (``share_1`` steckt in ``share_10``), und
+    ein Ordner, der gerade nicht erreichbar ist, steht NICHT in ``alive``: sein
+    Indexstand bleibt damit unangetastet. Genau daran haengt, dass ein kurz
+    stummes Netzlaufwerk nicht seinen ganzen Share aus dem Index verliert.
+    """
+    alive_prefixes = tuple(str(r).rstrip(os.sep) + os.sep for r in alive)
+    return [p for p in indexed
+            if p not in current_paths and p.startswith(alive_prefixes)]
+
+
+def _geaenderte_dateien(files: list[Path], indexed: dict) -> list[Path]:
+    """Welche Dateien sind neu oder haben sich seit dem Indexstand geaendert?
+
+    ⚠ DIE EINE FASSUNG DIESER REGEL. Sie hat zwei Aufrufer, die verschiedene
+    Fragen stellen: ``_rebuild_vector_index`` will die Liste ABARBEITEN, die
+    Automatik (``backend/rag_autoindex.py``) will nur WISSEN, ob etwas anliegt -
+    ohne einen Indexlauf anzustossen. Zwei Fassungen liefen beim naechsten
+    Feinschliff auseinander, und dann meldet die Automatik "nichts zu tun",
+    waehrend der Reindex sehr wohl etwas gefunden haette (oder umgekehrt: sie
+    stiesse bei jedem Takt einen Lauf an, der dann nichts tut).
+
+    Eine Datei, deren ``stat()`` scheitert (Netzlaufwerk gerade weg, Rechte),
+    wird UEBERSPRUNGEN, nicht als geaendert gewertet - sonst erzeugt ein kurz
+    stolperndes Share bei jedem Takt einen Reindex.
+    """
+    geaendert: list[Path] = []
+    for filepath in files:
+        try:
+            mtime = filepath.stat().st_mtime
+        except Exception:  # noqa: BLE001
+            continue
+        if indexed.get(str(filepath)) != mtime:
+            geaendert.append(filepath)
+    return geaendert
+
+
 def _rebuild_vector_index(folders: list[Path], max_bytes: int, force: bool = False) -> bool:
     """Inkrementeller Vektor-Index Aufbau. Gibt True zurueck wenn Index Inhalt hat.
 
@@ -369,24 +427,14 @@ def _rebuild_vector_index(folders: list[Path], max_bytes: int, force: bool = Fal
     # Verwaiste Eintraege entfernen – nur beim ausdruecklichen Neuaufbau und nur
     # fuer Dateien aus ERREICHBAREN Ordnern. In EINEM Neuaufbau statt N.
     if force:
-        alive_prefixes = tuple(str(r).rstrip(os.sep) + os.sep for r in alive)
-        stale = [p for p in indexed
-                 if p not in current_paths and p.startswith(alive_prefixes)]
+        stale = _verwaiste_dateien(current_paths, indexed, alive)
         if stale:
             removed = vs.remove_files(stale)
             _log.info(f"{len(stale)} verwaiste Datei(en) aus dem Index entfernt "
                       f"({removed} Chunks)")
 
-    # Neue/geaenderte Dateien ermitteln
-    to_index = []
-    for filepath in files:
-        path_str = str(filepath)
-        try:
-            mtime = filepath.stat().st_mtime
-        except Exception:
-            continue
-        if indexed.get(path_str) != mtime:
-            to_index.append(filepath)
+    # Neue/geaenderte Dateien ermitteln (EINE Regel, siehe _geaenderte_dateien)
+    to_index = _geaenderte_dateien(files, indexed)
 
     if not force and len(to_index) > INLINE_LIMIT:
         _log.info(f"{len(to_index)} neue/geaenderte Dateien – nur {INLINE_LIMIT} inline, Rest via Neu-Indizieren")
@@ -2481,6 +2529,11 @@ def get_stats() -> dict:
         "index_phase": get_index_progress()["phase"],
         "index_failed": get_index_progress().get("failed", 0),
         "last_index_run": get_last_run(),
+        # Zustand der Automatik (Vorgabe 2026-09-21). ⚠ BEWUSST IM UNGECACHTEN
+        # TEIL: `_get_static_stats` wird prozessweit gehalten, und dieser Wert
+        # aendert sich bei jedem Takt - gecacht zeigte die Kachel dauerhaft den
+        # Stand des ersten Abrufs (dieselbe Falle wie bei `onenote_support`).
+        "rag_autoindex": _autoindex_zustand(),
         # Zustand der Vektorsuche sichtbar machen: ein fehlgeschlagener Aufbau
         # war bisher nur an einer Journal-Zeile erkennbar.
         "vector_store_state": vector_store_status(),

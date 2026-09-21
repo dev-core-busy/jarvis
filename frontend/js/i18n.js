@@ -2045,6 +2045,12 @@ const _I18N = {
         'knowledge.index_started':       'Start',
         'knowledge.index_duration':      'Dauer',
         'knowledge.last_index_run':      'Letzter Indexlauf',
+        // Zustand der Index-Automatik (Vorgabe 2026-09-21): sie ist im Regelfall
+        // still, diese Zeile ist der einzige Beleg, dass sie ueberhaupt laeuft.
+        'knowledge.autoindex_on':        'Automatik: prueft alle {n} Min auf Aenderungen',
+        'knowledge.autoindex_off':       '⚠ Automatik abgeschaltet – Aenderungen kommen nur ueber die Suche oder "Neu indizieren" an',
+        'knowledge.autoindex_last':      'zuletzt aktualisiert',
+        'knowledge.autoindex_checked':   'zuletzt geprueft',
         'knowledge.index_status_cancelled': 'abgebrochen',
         'knowledge.index_status_error':  'fehlgeschlagen',
         'knowledge.index_status_interrupted': '⚠ unterbrochen',
@@ -5580,6 +5586,10 @@ const _I18N = {
         'knowledge.index_started':       'Start',
         'knowledge.index_duration':      'Duration',
         'knowledge.last_index_run':      'Last index run',
+        'knowledge.autoindex_on':        'Automatic: checks for changes every {n} min',
+        'knowledge.autoindex_off':       '⚠ Automatic indexing is off – changes only arrive via search or "Re-index"',
+        'knowledge.autoindex_last':      'last updated',
+        'knowledge.autoindex_checked':   'last checked',
         'knowledge.index_status_cancelled': 'cancelled',
         'knowledge.index_status_error':  'failed',
         'knowledge.index_status_interrupted': '⚠ interrupted',

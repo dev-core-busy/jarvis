@@ -945,6 +945,7 @@ class JarvisKnowledgeManager {
                 </div>
             </div>
             ${this._lastRunLine(stats.last_index_run)}
+            ${this._autoIndexLine(stats.rag_autoindex)}
             <div class="kb-search-mode" style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;">
                 <span class="kb-search-mode-label">${window.t('knowledge.search_active_label')}</span>
                 <span id="kb-active-label" style="font-size:0.75rem;">${activeText}</span>
@@ -3212,6 +3213,42 @@ class JarvisKnowledgeManager {
                 statEls[2].textContent = p.chunks;
             }
         }
+    }
+
+    /** Zeile zum Zustand der Index-Automatik (Vorgabe 2026-09-21).
+     *
+     * ⚠ SIE IST DER EINZIGE BELEG, dass die Automatik laeuft. Der Takt ist im
+     * Regelfall still (er meldet nur, was er wirklich getan hat) - ohne diese
+     * Zeile waere "sie ist tot" von "es hat sich nichts geaendert" nicht zu
+     * unterscheiden, und genau daran ist im Projekt schon mehrfach eine
+     * Automatik unbemerkt ausgefallen.
+     *
+     * Fehlt das Feld (aelteres Backend, halber Deploy), wird NICHTS behauptet -
+     * eine Anzeige darf keinen Zustand nennen, den sie nicht kennt.
+     */
+    _autoIndexLine(a) {
+        if (!a || typeof a !== 'object') return '';
+        const parts = [];
+        if (!a.aktiv) {
+            parts.push(window.t('knowledge.autoindex_off'));
+        } else {
+            const min = Math.max(1, Math.round((a.takt_sek || 0) / 60));
+            parts.push(window.t('knowledge.autoindex_on').replace('{n}', min));
+            if (a.letzte_aenderung) {
+                parts.push(`${window.t('knowledge.autoindex_last')}: `
+                         + `${this._fmtDateTime(a.letzte_aenderung)}`
+                         + (a.letzter_grund ? ` (${this._escHtml(a.letzter_grund)})` : ''));
+            } else if (a.letzte_pruefung) {
+                parts.push(`${window.t('knowledge.autoindex_checked')}: `
+                         + this._fmtDateTime(a.letzte_pruefung));
+            }
+        }
+        // Ein Fehlschlag wird GENANNT, nicht verschluckt.
+        const fehler = a.letzter_fehler ? String(a.letzter_fehler) : '';
+        if (fehler) parts.push('⚠ ' + this._escHtml(fehler.slice(0, 80)));
+        const color = (a.aktiv && !fehler) ? 'var(--text-secondary)' : 'var(--warning)';
+        return `<div class="kb-autoindex" style="font-size:0.75rem;color:${color};`
+             + `margin:2px 0 6px;">${parts.join(' · ')}</div>`;
     }
 
     /** Zeile "Letzter Indexlauf: <Datum/Uhrzeit> · Dauer · Ergebnis" (leer wenn nie gelaufen). */

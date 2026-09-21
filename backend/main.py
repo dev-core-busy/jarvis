@@ -4798,6 +4798,61 @@ async def startup_knowledge_sync():
 
 
 @app.on_event("startup")
+async def startup_rag_autoindex():
+    """Automatischer Wissens-Index - JEDE Aenderung kommt ohne Zutun an.
+
+    Vorgabe 2026-09-21. Vorher war der einzige automatische Weg ein Nebeneffekt
+    der Suche, und der hatte drei Loecher: ohne Suche passierte gar nichts,
+    hoechstens zehn Dateien je Suche, und Loeschungen wirkten ueberhaupt nicht
+    (die Begruendung im Kopf von ``backend/rag_autoindex.py``).
+
+    ⚠ DER TAKT WARTET NACH DEM LAUF, nicht auf einer festen Uhr. Dauert ein
+    Durchgang laenger als das Intervall - ein grosser Schwung neuer Dateien auf
+    einer langsamen Freigabe -, kann er sich so nicht selbst ueberholen.
+    ``_reindex_lock`` in ``force_reindex`` ist die zweite Schranke.
+
+    ⚠ ERSTER LAUF VERZOEGERT: der Dienststart laedt Embedding-Modelle, waermt
+    den BM25-Index vor (+45 s) und startet den Standort-Sync (+90 s). Ein Scan
+    mittendrin liefe gegen alles davon. 150 s setzt ihn hinter beides.
+
+    Im Regelfall ist der Takt STILL: gemeldet wird nur, was er wirklich getan
+    hat, und ein Fehlschlag. Eine Zeile alle fuenf Minuten, die immer dasselbe
+    sagt, wird nach zwei Tagen nicht mehr gelesen - die eine Startzeile bleibt,
+    damit ueberhaupt belegt ist, dass die Automatik laeuft.
+    """
+    from backend import rag_autoindex as _ai
+
+    takt = _ai.takt_sek()
+    if takt <= 0:
+        print("[RAG-Auto] abgeschaltet (JARVIS_RAG_AUTOINDEX_SEK=0) - "
+              "Aenderungen kommen dann nur ueber die Suche bzw. 'Neu indizieren' an",
+              flush=True)
+        return
+
+    async def _loop():
+        await asyncio.sleep(150)
+        while True:
+            try:
+                ergebnis = await asyncio.to_thread(_ai.lauf)
+                if ergebnis.get("indiziert"):
+                    print(f"[RAG-Auto] {ergebnis.get('grund')} - Index aktualisiert",
+                          flush=True)
+                elif "fehlgeschlagen" in str(ergebnis.get("grund", "")):
+                    print(f"[RAG-Auto] {ergebnis.get('grund')}", flush=True)
+            except Exception as e:  # noqa: BLE001
+                print(f"[RAG-Auto] Takt-Lauf fehlgeschlagen: {e}", flush=True)
+            # NACH dem Lauf warten (siehe Docstring) und das Intervall bei
+            # jedem Durchgang neu lesen - so wirkt eine Umstellung ohne Neustart.
+            await asyncio.sleep(max(30, _ai.takt_sek()))
+
+    try:
+        asyncio.create_task(_loop())
+        print(f"[RAG-Auto] Automatik aktiv - Pruefung alle {takt} s", flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"[RAG-Auto] Startup-Fehler: {e}", flush=True)
+
+
+@app.on_event("startup")
 async def startup_email_rules():
     """Zeitplan der E-Mail-Regeln (Bereich /email).
 

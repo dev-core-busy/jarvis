@@ -511,7 +511,8 @@ def record_violation(user: str, channel: str, kind: str, detail: str = "",
     return {"blocked": blocked_now, "count": len(allv.get(key, []))}
 
 
-def list_recent_violations(limit: int = 100, mit_logonly: bool = True) -> list:
+def list_recent_violations(limit: int = 100, mit_logonly: bool = True,
+                           user_filter: str = "") -> list:
     """Letzte Richtlinien-Verstoesse (benutzeruebergreifend, neueste zuerst).
 
     ``mit_logonly`` nimmt die NUR PROTOKOLLIERTEN Vorfaelle mit auf – die von
@@ -529,6 +530,20 @@ def list_recent_violations(limit: int = 100, mit_logonly: bool = True) -> list:
     Admin-Liste. Eine Zusage, die der Code nicht haelt, ist im Zweifel
     gefaehrlicher als eine fehlende Funktion: niemand sieht, dass ein Postfach
     oder eine Ablage beschossen wird.
+
+    ``user_filter`` waehlt EINEN Benutzer aus – und zwar **vor** dem
+    ``limit``-Schnitt. Das ist der ganze Punkt und keine Feinheit:
+    gespeichert werden bis zu 100 Eintraege JE BENUTZER, herausgegeben
+    werden aber nur die neuesten ``limit`` ueber alle hinweg. Wer erst
+    schneidet und dann filtert, zeigt nicht "die letzten N von X",
+    sondern "Xs Anteil an den letzten N" – bei mehreren aktiven
+    Benutzern sind das still fast keine. Dieselbe Lehre wie beim
+    Wissensgruppen-Filter, der deshalb IN die Suche gehoert.
+
+    Verglichen wird ROH und normalisiert (``norm_user``): die Oberflaeche
+    zeigt Namen MIT Domaenen-Praefix (``nexus\\a.b``), der Schluessel im
+    Speicher traegt je nach Tippform des Anmeldefelds mal einen und mal
+    keinen – ein Vergleich auf dem Rohwert fände dann nichts.
     """
     with _lock:
         state = _load()
@@ -549,9 +564,55 @@ def list_recent_violations(limit: int = 100, mit_logonly: bool = True) -> list:
             "soft": True, "soft_reason": "nur protokolliert – der Text stammt von "
                                          "einem Fremden, dieser Eintrag sperrt nichts",
         })
+    if user_filter:
+        # VOR dem Schnitt – siehe Docstring. Roh ODER normalisiert, damit
+        # ein aus der Anzeige uebernommenes "nexus\\a.b" den Eintrag "a.b"
+        # findet und umgekehrt.
+        f_roh = user_filter.strip().lower()
+        f_norm = norm_user(user_filter)
+        flat = [e for e in flat
+                if (e.get("user") or "").strip().lower() == f_roh
+                or (f_norm and norm_user(e.get("user") or "") == f_norm)]
     flat.sort(key=lambda x: x.get("ts", 0), reverse=True)
     return flat[:limit]
 
+
+
+def known_violation_users() -> list[str]:
+    """Benutzer, zu denen Vorfaelle vorliegen – neueste Aktivitaet zuerst.
+
+    ⚠ AUS DEM GANZEN SPEICHER, NICHT AUS DER ANGEZEIGTEN LISTE. Die Anzeige
+    zeigt die neuesten 150 ueber alle Benutzer hinweg; wer das Pulldown daraus
+    baut, laesst genau die Benutzer weg, deren Eintraege alle aelter sind – und
+    bietet damit keinen Weg zu Daten an, die es gibt. Ein Pulldown, das seinen
+    eigenen Datenbestand verschweigt, ist schlimmer als keines.
+
+    ``logonly`` ist mitgezaehlt: diese Eintraege stehen in derselben Liste, also
+    muessen sie auch filterbar sein. Eintraege ohne Benutzer werden ausgelassen
+    – sie erscheinen als "?" in der Liste und waeren ueber kein Pulldown
+    erreichbar; sie anzubieten hiesse, einen Filter anzubieten, der nichts
+    findet.
+    """
+    with _lock:
+        state = _load()
+        allv = state.get("violations", {})
+        logonly = list(state.get("logonly") or [])
+    letzte: dict[str, int] = {}
+    for user, entries in allv.items():
+        if not user:
+            continue
+        for e in entries:
+            ts = e.get("ts", 0)
+            if ts > letzte.get(user, -1):
+                letzte[user] = ts
+    for e in logonly:
+        user = e.get("user") or ""
+        if not user:
+            continue
+        ts = e.get("ts", 0)
+        if ts > letzte.get(user, -1):
+            letzte[user] = ts
+    return [u for u, _ in sorted(letzte.items(), key=lambda p: (-p[1], p[0]))]
 
 # ── Verschleierte (base64-kodierte) Payloads erkennen ────────────────────────
 import base64 as _b64

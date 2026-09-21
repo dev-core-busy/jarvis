@@ -1292,7 +1292,10 @@ check(_SG.count("ignoriere-anweisungen") == 1, "die neuen Muster sind benannt")
 # `list_recent_violations` gab aber nur `violations` heraus – der Docstring von
 # `inspect` verspricht ausdruecklich das Gegenteil ("bleibt in der Oberflaeche
 # sichtbar"). Zwei Vorfaelle in der Datei, null in der Liste.
-_lrv = abschnitt(_SG, "def list_recent_violations", "# ── Verschleierte")
+# Endmarke ist die naechste Funktion, nicht der uebernaechste Abschnitt:
+# seit `known_violation_users` dazwischen steht, schnitte die alte Marke
+# fremden Code mit – ein zu weiter Schnitt misst nicht mehr, was er nennt.
+_lrv = abschnitt(_SG, "def list_recent_violations", "def known_violation_users")
 check("logonly" in _lrv, "list_recent_violations nimmt die logonly-Eintraege mit")
 check('"soft": True' in _lrv, "und kennzeichnet sie als weich (keine Auto-Sperre)")
 check('"detail"' in _lrv, "der beanstandete Text landet im Feld, das die Oberflaeche zeigt")

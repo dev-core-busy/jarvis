@@ -5953,10 +5953,47 @@ async def security_incidents_unblock(request: Request, user: str = Depends(requi
 
 
 @app.get("/api/security/violations")
-async def security_violations(user: str = Depends(require_local_auth)):
-    """Letzte Richtlinien-Verstoesse (Sandbox-/Autorisierungs-Deny) – Admin."""
-    return JSONResponse(_mit_anzeigenamen(
-        {"violations": security_guard.list_recent_violations(150)}))
+async def security_violations(request: Request, user: str = Depends(require_local_auth)):
+    """Letzte Richtlinien-Verstoesse (Sandbox-/Autorisierungs-Deny) – Admin.
+
+    ``?user=`` filtert auf EINEN Benutzer. Der Filter wirkt im Speicher, **vor**
+    dem 150er-Schnitt (siehe ``list_recent_violations``) – nachtraeglich
+    gefiltert zeigte er nur den Anteil dieses Benutzers an den letzten 150 und
+    verloere still alles Aeltere.
+
+    ⚠ DER PARAMETER WIRD AUS ``request.query_params`` GELESEN, nicht als
+    Funktionsargument: der Name ``user`` gehoert hier schon der Dependency.
+    Genau so macht es ``/api/conv_log``, das Vorbild dieses Filters.
+
+    Mitgeliefert wird ``users`` (alle Benutzer mit Vorfaellen, aus dem GANZEN
+    Speicher) und ``gesamt`` (die Zahlen OHNE Filter). Beides in derselben
+    Antwort statt in eigenen Endpunkten: die Oberflaeche braucht es genau dort,
+    wo sie die Liste zeichnet, und zwei Aufrufe laesen die Zustandsdatei zweimal
+    und koennten auseinanderlaufen.
+
+    ``gesamt`` ist noetig, weil der Zaehler in der Kopfzeile auch bei aktivem
+    Filter den vollen Bestand nennen muss – er ist die Aussage darueber, WAS
+    passiert ist; der Filter bestimmt nur, was gerade auf dem Bildschirm steht.
+    """
+    uf = (request.query_params.get("user") or "").strip()
+    liste = security_guard.list_recent_violations(150, user_filter=uf)
+    # Ohne Filter ist die gefilterte Liste zugleich die ungefilterte – dann
+    # genuegt EIN Lesen der Zustandsdatei (der haeufige Fall).
+    voll = liste if not uf else security_guard.list_recent_violations(150)
+    hart = sum(1 for v in voll if not v.get("soft"))
+    # Nach der Namensaufbereitung DOPPELTE entfernen: derselbe Mensch kann zwei
+    # Schluessel haben (einmal getippt mit, einmal ohne Domaenen-Praefix) und
+    # steht dann zweimal im Pulldown. Beide Eintraege fuehren ohnehin zur selben
+    # Auswahl – der Filter vergleicht normalisiert.
+    namen, gesehen = [], set()
+    for n in _mit_anzeigenamen(security_guard.known_violation_users()):
+        if n not in gesehen:
+            gesehen.add(n)
+            namen.append(n)
+    return JSONResponse(_mit_anzeigenamen({
+        "violations": liste,
+        "gesamt": {"hart": hart, "weich": len(voll) - hart, "anzahl": len(voll)},
+    }) | {"users": namen})
 
 
 @app.get("/api/security/sandbox")

@@ -28,6 +28,7 @@ Rechtepruefungen den ROHEN Wert vergleichen:
     python3 tests/test_display_names.py
 """
 
+import ast
 import re
 import sys
 import types
@@ -115,6 +116,69 @@ pruefe("_NAMENSFELDER" in MAIN and '"username"' in MAIN.split("_NAMENSFELDER")[1
        "die Namensfelder sind eine ausdrueckliche Liste (kein Raten)")
 
 # Je Endpunkt: die Rueckgabe MUSS durch _mit_anzeigenamen gehen.
+#
+# ⚠ GESCHNITTEN WIRD DIE FUNKTION, NICHT EIN FENSTER FESTER GROESSE. Bis
+# 2026-09-21 stand hier `MAIN[i:i+1400]`: als der Endpunkt der Zugriffs-
+# Verstoesse einen laengeren Docstring bekam, rutschte der Aufruf aus dem
+# Fenster und der Waechter meldete einen Fehler, den es nicht gab – dieselbe
+# Falle wie in test_ai_mouse.py. Gemessen wird die EIGENSCHAFT ("die Rueckgabe
+# dieser Funktion laeuft durch die Aufbereitung"), also gehoert die ganze
+# Funktion in den Schnitt.
+_BAUM = ast.parse(MAIN)
+
+
+def _endpunkt(route: str):
+    """Der Funktionsknoten, dessen Dekorator diese Route traegt (None = nicht da).
+
+    Quote-unabhaengig: `ast.unparse` normiert auf EINFACHE Anfuehrungszeichen,
+    im Quelltext stehen doppelte – wer roh vergleicht, findet nie etwas. Und
+    das fuehrende "@" gehoert NICHT zum Dekorator-Ausdruck.
+    """
+    ziel = route.lstrip("@").replace('"', "'")
+    for k in ast.walk(_BAUM):
+        if not isinstance(k, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for d in k.decorator_list:
+            if ziel in ast.unparse(d).replace('"', "'"):
+                return k
+    return None
+
+
+def _gibt_aufbereitet_zurueck(fn) -> bool:
+    """Geht die RUECKGABE durch _mit_anzeigenamen?
+
+    ⚠ NICHT "kommt der Name irgendwo in der Funktion vor". Genau das war die
+    Schwaeche bis 2026-09-21: eine Funktion mit ZWEI Aufrufen blieb gruen,
+    nachdem der entscheidende entfernt war – die Gegenprobe biss nicht. Gemessen
+    wird deshalb der Rueckgabe-Ausdruck; ein Zwischenschritt
+    (``liste = _mit_anzeigenamen(...)`` und ``return {... liste ...}``, so macht
+    es /api/issues) wird ueber den Variablennamen mitverfolgt.
+    """
+    if fn is None:
+        return False
+    aufbereitet = set()
+    for k in ast.walk(fn):
+        if isinstance(k, ast.Assign) and "_mit_anzeigenamen" in ast.unparse(k.value):
+            for z in k.targets:
+                if isinstance(z, ast.Name):
+                    aufbereitet.add(z.id)
+    for k in ast.walk(fn):
+        if not isinstance(k, ast.Return) or k.value is None:
+            continue
+        src = ast.unparse(k.value)
+        if "_mit_anzeigenamen" in src:
+            return True
+        namen = {n.id for n in ast.walk(k.value) if isinstance(n, ast.Name)}
+        if namen & aufbereitet:
+            return True
+    return False
+
+
+# Positivkontrolle: ohne sie waere jede Pruefung darunter ueber einem leeren
+# Schnitt trivial FALSCH – und man suchte den Fehler im Produktivcode.
+pruefe(_endpunkt('@app.get("/api/conv_log")') is not None,
+       "Positivkontrolle: der Funktions-Schnitt greift")
+
 for route, marker, was in [
     ('@app.get("/api/conv_log")', "get_conversations", "LLM-Verlauf (der gemeldete Fall)"),
     ('@app.get("/api/conv_log/users")', "get_known_users", "Filter-Liste des Verlaufs"),
@@ -125,10 +189,9 @@ for route, marker, was in [
     ('@app.get("/api/telemetry/stats")', "get_stats", "Telemetrie (geleert von …)"),
     ('@app.get("/api/issues")', "list_issues", "Issue-Melder"),
 ]:
-    i = MAIN.find(route)
-    fenster = MAIN[i:i + 1400] if i >= 0 else ""
-    pruefe(i >= 0 and "_mit_anzeigenamen" in fenster, f"{was}: Namen aufbereitet",
-           f"Route {route} " + ("nicht gefunden" if i < 0 else "ohne Aufbereitung"))
+    fn = _endpunkt(route)
+    pruefe(fn is not None and _gibt_aufbereitet_zurueck(fn), f"{was}: Namen aufbereitet",
+           f"Route {route} " + ("nicht gefunden" if fn is None else "ohne Aufbereitung"))
 
 # Gesperrte Konten + Cron liegen in groesseren Funktionen
 pruefe('"blocked": _mit_anzeigenamen(security_guard.list_blocked())' in MAIN,

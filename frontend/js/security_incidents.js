@@ -176,10 +176,7 @@
             // Ohne live=1: nur Zustand lesen, kein Trockenlauf (der dauert)
             Mgr.loadUnattended(false);
             // Letzte Zugriffs-Verstöße
-            fetch('/api/security/violations', { headers: authHeaders() })
-                .then(function (r) { return r.ok ? r.json() : null; })
-                .then(function (d) { Mgr.renderViolations((d && d.violations) || []); })
-                .catch(function () {});
+            Mgr.loadViolations();
             // Internet-Egress-Sperre (Status ohne Live-Test = schnell)
             Mgr.loadEgress(false);
             // Root-Broker (Rechte-Trennung + Freigabeliste)
@@ -1014,6 +1011,14 @@
          * cron_list, das die ANZAHL ausgeblendeter Auftraege nennt). */
         VIOL_FILTER_KEY: 'jarvis_sec_viol_nur_hart',
         _violAlle: null,
+        /* Zahlen OHNE jeden Filter – der Zaehler in der Kopfzeile nennt sie
+         * auch dann, wenn die Liste gefiltert ist. */
+        _violGesamt: null,
+        /* Der gerade angewandte Benutzer-Filter. GELESEN wird immer dieser
+         * Wert, nie das Pulldown: waehrend eines laufenden Abrufs kann dort
+         * schon etwas anderes stehen, und die Zeile ueber der Liste soll den
+         * Filter benennen, zu dem die Liste WIRKLICH gehoert. */
+        _violUser: '',
         nurHart: function () {
             try { return localStorage.getItem(Mgr.VIOL_FILTER_KEY) === '1'; }
             catch (e) { return false; }
@@ -1032,6 +1037,74 @@
             });
         },
 
+        /* Holt die Vorfaelle – mit dem gewaehlten Benutzer als SERVER-seitigem
+         * Filter.
+         *
+         * ⚠ WARUM NICHT IM CLIENT GEFILTERT: der Endpunkt gibt die neuesten 150
+         * ueber ALLE Benutzer heraus, gespeichert sind aber bis zu 100 JE
+         * BENUTZER. Wer die 150 holt und dann filtert, zeigt nicht "die letzten
+         * N von X", sondern "Xs Anteil an den letzten 150". Gemessen an einem
+         * Bestand mit drei Benutzern: **0 statt 40** Eintraege – der Filter
+         * haette dem Administrator eine leere Liste gezeigt, obwohl es 40 gibt.
+         * Dieselbe Lehre wie beim Wissensgruppen-Filter, der deshalb IN die
+         * Suche gehoert und nicht dahinter. */
+        loadViolations: function () {
+            var url = '/api/security/violations';
+            var sel = $('sec-viol-user');
+            var u = sel ? sel.value : '';
+            if (u) url += '?user=' + encodeURIComponent(u);
+            return fetch(url, { headers: authHeaders() })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) {
+                    if (!d) return;
+                    Mgr._violUser = u;
+                    Mgr._violGesamt = d.gesamt || null;
+                    Mgr.fuelleViolUser(d.users || []);
+                    Mgr.renderViolations(d.violations || []);
+                })
+                .catch(function () {});
+        },
+
+        /* Baut das Benutzer-Pulldown. Die Liste kommt aus dem GANZEN Speicher
+         * (nicht aus den angezeigten 150) – sonst fehlte im Pulldown genau der
+         * Benutzer, dessen Eintraege alle aelter sind, und man haette keinen
+         * Weg zu Daten, die es gibt.
+         *
+         * Die getroffene Wahl bleibt beim Neuaufbau stehen; ein Benutzer, der
+         * inzwischen aus dem Speicher gefallen ist, wird ausdruecklich
+         * beibehalten – sonst spraenge die Auswahl beim naechsten Laden
+         * wortlos auf "Alle" zurueck und die Liste zeigte etwas anderes, als
+         * das Pulldown behauptet. */
+        fuelleViolUser: function (users) {
+            var sel = $('sec-viol-user');
+            if (!sel) return;
+            if (!sel._violBound) {
+                sel._violBound = true;
+                sel.addEventListener('change', function () { Mgr.loadViolations(); });
+            }
+            var cur = sel.value;
+            var alle = (users || []).slice();
+            if (cur && alle.indexOf(cur) === -1) alle.push(cur);
+            sel.innerHTML = '';
+            var o0 = document.createElement('option');
+            o0.value = '';
+            o0.textContent = T('security.viol_all_users', 'Alle Benutzer');
+            sel.appendChild(o0);
+            alle.forEach(function (u) {
+                var o = document.createElement('option');
+                // textContent, nicht innerHTML: der Name kommt aus dem
+                // Anmeldefeld eines Fremden und landet in der Admin-Flaeche.
+                o.value = u; o.textContent = u;
+                if (u === cur) o.selected = true;
+                sel.appendChild(o);
+            });
+            // Ein Pulldown ohne Auswahl ist Rauschen – aber nur verbergen, wenn
+            // es wirklich nichts zu waehlen gibt (und nie, solange ein Filter
+            // aktiv ist: sonst verschwaende der Weg zurueck zu "Alle").
+            var row = $('sec-viol-filterrow');
+            if (row) row.hidden = !alle.length && !cur;
+        },
+
         renderViolations: function (list) {
             var box = $('sec-viol-list');
             if (!box) return;
@@ -1044,35 +1117,66 @@
             list.forEach(function (v) { if (v.soft) weich++; else hart++; });
             // Der Zaehler nennt IMMER den Gesamtbestand – auch bei aktivem Filter.
             // Er ist die Aussage darueber, was passiert ist; der Filter bestimmt
-            // nur, was gerade auf dem Bildschirm steht.
+            // nur, was gerade auf dem Bildschirm steht. Beim Benutzer-Filter ist
+            // dieser Bestand NICHT mehr aus `list` ableitbar (der Server hat schon
+            // gefiltert) – deshalb liefert der Endpunkt `gesamt` mit. Ohne das
+            // Feld (aelteres Backend) gilt die Liste selbst, also das Verhalten
+            // von vorher.
+            var uf = Mgr._violUser || '';
+            var g = Mgr._violGesamt
+                || { hart: hart, weich: weich, anzahl: list.length };
             var cnt = $('sec-viol-count');
-            if (cnt) cnt.textContent = list.length ? Mgr.violCount(hart, weich) : '';
+            if (cnt) cnt.textContent = g.anzahl ? Mgr.violCount(g.hart, g.weich) : '';
             var filter = Mgr.nurHart();
             var box2 = $('sec-viol-onlyhard-box');
             // Ein Filter ohne etwas zu filtern ist Rauschen – aber nur ausblenden,
-            // wenn die Liste leer ist: waere er bei "0 Grenzen" weg, verschwaende
+            // wenn es GAR NICHTS gibt: waere er bei "0 Grenzen" weg, verschwaende
             // ein Bedienelement, dessen Zustand gemerkt ist (und der Benutzer
-            // wuesste nicht, warum spaeter wieder etwas fehlt).
-            if (box2) box2.hidden = !list.length;
+            // wuesste nicht, warum spaeter wieder etwas fehlt). Massgeblich ist
+            // der Gesamtbestand, nicht die gefilterte Liste – sonst verschwindet
+            // das Kaestchen, sobald ein Benutzer ohne Treffer gewaehlt ist.
+            if (box2) box2.hidden = !g.anzahl;
             var zeige = filter ? list.filter(function (v) { return !v.soft; }) : list;
             if (!zeige.length) {
                 box.style.maxHeight = '';
                 box.classList.remove('sec-scrollbox');
                 // Die Leermeldung darf NICHT behaupten, es sei nichts passiert,
-                // wenn nur der Filter alles ausblendet.
-                var leer = (filter && weich)
-                    ? T('security.viol_only_soft', 'Keine Verstöße – {n} Grenzen sind ausgeblendet.')
-                        .replace('{n}', weich)
-                    : T('security.no_violations', 'Keine Verstöße protokolliert.');
+                // wenn nur ein Filter alles ausblendet – und bei gewaehltem
+                // Benutzer erst recht nicht: der Bestand hat dann `g.anzahl`
+                // Eintraege, sie gehoeren nur anderen.
+                var leer;
+                if (filter && weich) {
+                    leer = uf
+                        ? T('security.viol_only_soft_user',
+                            'Keine Verstöße für {u} – {n} Grenzen sind ausgeblendet.')
+                            .replace('{u}', uf).replace('{n}', weich)
+                        : T('security.viol_only_soft', 'Keine Verstöße – {n} Grenzen sind ausgeblendet.')
+                            .replace('{n}', weich);
+                } else if (uf) {
+                    leer = T('security.viol_none_user', 'Keine Einträge für {u} ({m} insgesamt).')
+                        .replace('{u}', uf).replace('{m}', g.anzahl);
+                } else {
+                    leer = T('security.no_violations', 'Keine Verstöße protokolliert.');
+                }
                 box.innerHTML = '<p class="kb-hint">' + esc(leer) + '</p>';
                 return;
             }
             var versteckt = list.length - zeige.length;
-            box.innerHTML = (versteckt
-                ? '<p class="kb-hint sec-viol-hidden">'
+            // Zwei Hinweiszeilen, jede fuer ihren Filter: die Liste sagt
+            // ausdruecklich, was sie verschweigt.
+            var hinweis = '';
+            if (uf) {
+                hinweis += '<p class="kb-hint sec-viol-hidden">'
+                    + esc(T('security.viol_user_active', 'Gefiltert nach {u}: {n} von {m} Einträgen.')
+                        .replace('{u}', uf).replace('{n}', list.length).replace('{m}', g.anzahl))
+                    + '</p>';
+            }
+            if (versteckt) {
+                hinweis += '<p class="kb-hint sec-viol-hidden">'
                     + esc(T('security.viol_hidden', '{n} Grenzen ausgeblendet.').replace('{n}', versteckt))
-                    + '</p>'
-                : '') + zeige.map(function (v) {
+                    + '</p>';
+            }
+            box.innerHTML = hinweis + zeige.map(function (v) {
                 // Das Abzeichen traegt die Aussage als WORT, nicht nur als Farbe
                 // (dieselbe Regel wie bei den Anwesenheits-Pillen): wer die Liste
                 // in Graustufen ausdruckt oder Farben nicht unterscheidet, muss

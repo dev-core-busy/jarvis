@@ -5334,6 +5334,30 @@ body.light .kb-cl-spanne { color: #5b6678; }
 /* Sagt bei aktivem Filter, WIE VIEL nicht zu sehen ist. Ohne diese Zeile
    haelt der Administrator die gefilterte Liste fuer den Gesamtbestand. */
 .sec-viol-hidden { margin: 0 0 6px; font-style: italic; }
+/* Filterzeile: Benutzer-Pulldown und "Nur Verstoesse" nebeneinander.
+   flex-wrap, damit die beiden auf einem schmalen Fenster untereinander rutschen
+   statt aus dem Abschnitt zu laufen. */
+.sec-viol-filter {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 14px;
+    margin: 0 0 10px;
+}
+.sec-viol-filter > label[for] { font-size: 0.82rem; color: var(--text-secondary); }
+/* min-width: 0 ist Pflicht – ein Flex-Kind schrumpft von sich aus nicht unter
+   seine Inhaltsbreite, ein langer Benutzername schoebe das Kaestchen daneben
+   sonst aus dem Abschnitt. max-width deckelt das Pulldown zusaetzlich. */
+.sec-viol-user {
+    min-width: 0;
+    max-width: 18rem;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-size: 0.78rem;
+}
 .sec-viol-badge {
     display: inline-block;
     margin-right: 8px;

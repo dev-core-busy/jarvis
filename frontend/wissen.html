@@ -157,12 +157,24 @@
            deshalb im TEXT, die Farbe ist die zweite Ebene.
            Der Abstand nach oben bleibt: ohne ihn klebt der Hinweis am untersten
            Eintrag und liest sich wie dessen Fussnote (im Screenshot gesehen). */
-        .wi-cfb-soon { margin-top: 12px; color: var(--danger); font-weight: 600;
-                       border-left: 3px solid var(--danger); border-radius: 8px;
-                       padding: 8px 12px; background: rgba(var(--danger-rgb), 0.08); }
+        /* ⚠ DER SELEKTOR MUSS SPEZIFISCHER SEIN ALS `.wi-section .desc` (0,2,0).
+           Der Hinweis traegt beide Klassen, und mit `.wi-cfb-soon` allein (0,1,0)
+           gewann die Vorgabefarbe: im DUNKLEN Thema stand er grau da, im hellen
+           rot (dort greift die body.light-Regel). Gesehen hat das nur die
+           optische Abnahme - der Quelltext-Waechter fand `--danger` und war
+           gruen. Register: erst die Klasse ansehen, dann benutzen. */
+        /* ⚠ --danger PUR reicht in KEINEM der beiden Themen: dunkel gemessen
+           4,40:1, hell 3,45:1 - beide unter 4,5:1. Also in beide Richtungen
+           angepasst, nicht nur ins Helle (gemessen 5,55:1 bzw. 5,19:1). */
+        .wi-section p.wi-cfb-soon { margin-top: 12px;
+                       color: color-mix(in srgb, var(--danger) 80%, #fff);
+                       font-weight: 600; border-left: 3px solid var(--danger);
+                       border-radius: 8px; padding: 8px 12px;
+                       background: rgba(var(--danger-rgb), 0.08); }
         /* --danger liegt im hellen Thema bei 3,45:1 und damit unter 4,5:1 -
            dieselbe Abdunklung wie bei den Zertifikats-Urteilen in theme.css. */
-        body.light .wi-cfb-soon { color: color-mix(in srgb, var(--danger) 78%, #000); }
+        body.light .wi-section p.wi-cfb-soon {
+                       color: color-mix(in srgb, var(--danger) 78%, #000); }
         .wi-review { border: 1px solid rgba(var(--accent-rgb),0.4); border-radius: 10px; padding: 14px 16px; margin-top: 12px;
             background: rgba(var(--accent-rgb), 0.05); }
         .wi-review pre { white-space: pre-wrap; word-break: break-word; font-size: 0.82rem; max-height: 220px; overflow: auto;

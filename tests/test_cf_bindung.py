@@ -381,16 +381,43 @@ mm = re.search(r'data-i18n="wissen\.cfb_soon">([^<]*)<', HTML)
 check("das Rueckfall-Markup traegt denselben Text wie DE",
       bool(mm) and mm.group(1) == DE, (mm.group(1)[:50] if mm else "kein Markup"))
 
-# Deutlich heisst: eine Warnfarbe, und die muss im hellen Thema abgedunkelt
-# sein - --danger liegt dort bei 3,45:1 und damit unter 4,5:1.
-regel = re.search(r"\.wi-cfb-soon\s*\{([^}]*)\}", CSS_BLOCK)
+# Deutlich heisst: eine Warnfarbe - und die muss in BEIDEN Themen angepasst
+# sein (--danger pur: dunkel 4,40:1, hell 3,45:1, beide unter 4,5:1).
+# ⚠ OHNE KOMMENTARE MESSEN. Die Begruendung ueber der Basis-Regel nennt
+# `body.light` (sie erklaert ja, warum es dort anders aussah) - mit Kommentar
+# gelesen galt die Basis-Regel als Hell-Regel, und der Waechter meldete drei
+# Fehler, die es nicht gab. Register, x-ter Fall.
+CSS_OK = re.sub(r"/\*.*?\*/", " ", CSS_BLOCK, flags=re.S)
+check("POSITIVKONTROLLE: die Kommentare sind wirklich weg",
+      "Register: erst die Klasse ansehen" not in CSS_OK
+      and "Register: erst die Klasse ansehen" in CSS_BLOCK)
+treffer = [(m.group(1).strip(), m.group(2))
+           for m in re.finditer(r"([^{};]*wi-cfb-soon[^{};]*)\{([^}]*)\}", CSS_OK)]
+check("es gibt ueberhaupt Regeln fuer den Hinweis (Positivkontrolle)",
+      len(treffer) >= 2, f"{len(treffer)}")
+basis = next((t for t in treffer if "body.light" not in t[0]), None)
+hell = next((t for t in treffer if "body.light" in t[0]), None)
 check("der Hinweis traegt eine Warnfarbe",
-      bool(regel) and "--danger" in regel.group(1))
+      bool(basis) and "--danger" in basis[1])
 check("und ist halbfett abgesetzt",
-      bool(regel) and "font-weight" in regel.group(1))
-check("im hellen Thema ist die Farbe abgedunkelt (sonst unter 4,5:1)",
-      re.search(r"body\.light\s+\.wi-cfb-soon\s*\{[^}]*color-mix", CSS_BLOCK)
-      is not None)
+      bool(basis) and "font-weight" in basis[1])
+check("im hellen Thema ist die Farbe eigens gesetzt (sonst unter 4,5:1)",
+      bool(hell) and "color-mix" in hell[1])
+
+# ⚠ SPEZIFITAET, und das ist der Befund dieses Laufs: der Hinweis traegt beide
+# Klassen (desc + wi-cfb-soon). Mit `.wi-cfb-soon` allein (0,1,0) gewann
+# `.wi-section .desc` (0,2,0), und im DUNKLEN Thema stand er grau da - der
+# Quelltext fand `--danger` und war trotzdem gruen. Gesehen hat es nur die
+# optische Abnahme.
+def klassen(sel):
+    return sel.count(".") - (1 if "body.light" in sel else 0)
+desc = re.search(r"([^{};]*\.desc[^{};]*)\{", CSS_OK)
+check("die Farbregel ist spezifischer als die .desc-Vorgabe "
+      f"(Hinweis: {basis[0] if basis else '?'})",
+      bool(basis) and bool(desc)
+      and klassen(basis[0]) >= klassen(desc.group(1))
+      and re.search(r"\bp\.wi-cfb-soon", basis[0]) is not None,
+      f".desc={desc.group(1).strip() if desc else '?'}")
 
 
 # ── Aufraeumen ──────────────────────────────────────────────────────────────

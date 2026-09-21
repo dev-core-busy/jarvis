@@ -866,6 +866,139 @@ console.log('\n7. Regeln (Drift, Verdrahtung, i18n)');
            !/_SETTINGS_SECTIONS/.test(q));
 }
 
+// ── Abschnitt 9: Zwischenueberschriften INNERHALB eines Abschnitts ─────────
+// Gemeldet: „Gesperrte Konten erscheint nicht als Ergebnis in der Suche."
+// Zutreffend, und es war eine ganze EBENE: die Oberflaeche hat vier davon
+// (Reiter → Abschnitt → Zwischenueberschrift → Beschriftung), indiziert waren
+// drei. Gemessen fielen 57 Punkte durch, darunter saemtliche Berechtigungs-
+// Bloecke des Sicherheits-Reiters.
+{
+    const { w } = await seiteVoll(KORPUS);
+
+    // Der gemeldete Fall, woertlich.
+    await tippe(w, 'gesperrte konten');
+    const tGk = titelTexte(w);
+    pruefe('„gesperrte konten" findet etwas (der gemeldete Fall)', tGk.length > 0,
+           String(tGk.length));
+    pruefe('… und zwar genau diesen Punkt', (tGk[0] || '') === 'Gesperrte Konten',
+           tGk[0] || '(nichts)');
+    pruefe('… mit dem Pfad zu seinem Abschnitt',
+           /Sicherheit/.test(pfadTexte(w)[0] || ''), pfadTexte(w)[0] || '(leer)');
+
+    // Die neue Art ist im Index, und zwar in nennenswerter Zahl: eine Handvoll
+    // hiesse, dass die Schleife ausgefallen ist und nur Zufallstreffer bleiben.
+    await tippe(w, 'zugriff');
+    const idx9 = w.SettingsSearch._index() || [];
+    const unter = idx9.filter(e => e.art === 'unterabschnitt');
+    const doc = w.document;
+    pruefe('Zwischenueberschriften sind indiziert', unter.length >= 30,
+           String(unter.length));
+
+    // ⚠ EINE ABSCHNITTS-KOPFZEILE STEHT SCHON IM INDEX. Ohne den
+    // `closest('.kb-collapse-header')`-Filter entstuende ein zweiter Eintrag
+    // fuer denselben Punkt – gemessen genau einer („Pull-Synchronisation") –,
+    // dessen Klick den Abschnitt NICHT aufklappt: der Aufklapp-Zweig haengt an
+    // `art === 'abschnitt'`.
+    //
+    // ⚠ GEMESSEN WIRD DIE STRUKTUR, NICHT DER TITEL. Ein Vergleich auf
+    // Titelgleichheit war BLIND: der Abschnitt heisst „Pull-Synchronisation ❓"
+    // (das textContent zieht das Symbol des Hilfe-Knopfes mit), der
+    // Doppeleintrag nur „Pull-Synchronisation" – die Gegenprobe blieb stumm.
+    const inHdr = unter.filter(e => e.el && e.el.closest
+                                 && e.el.closest('.kb-collapse-header'))
+                       .map(e => e.titel);
+    pruefe('Positivkontrolle: es gibt Abschnitts-Kopfzeilen im Markup',
+           doc.querySelectorAll('.kb-collapse-header h3').length >= 10,
+           String(doc.querySelectorAll('.kb-collapse-header h3').length));
+    pruefe('keine Abschnitts-Kopfzeile steht doppelt im Index',
+           inHdr.length === 0, inHdr.slice(0, 3).join(' | '));
+
+    // ⚠ DIE REGEL, DIE EINE KUENFTIGE UEBERSCHRIFT MITNIMMT: jeder sichtbare
+    // Berechtigungs-Block des Sicherheits-Reiters ist auffindbar. Gepflegt wird
+    // dafuer nichts - gelesen wird das Markup.
+    const sichtbareSubs = [].slice.call(doc.querySelectorAll('details.sec-sub'))
+        .filter(x => x.style.display !== 'none');
+    const titelImIndex = new Set(unter.map(e => e.titel));
+    const fehlend = sichtbareSubs.map(x => {
+        const sm = x.querySelector('summary');
+        const sp = sm && sm.querySelector('span');
+        return sp ? (sp.textContent || '').trim() : '';
+    }).filter(t2 => t2 && !titelImIndex.has(t2));
+    pruefe('Positivkontrolle: es gibt sichtbare sec-sub-Bloecke',
+           sichtbareSubs.length >= 5, String(sichtbareSubs.length));
+    pruefe('JEDER sichtbare sec-sub-Block ist auffindbar', fehlend.length === 0,
+           fehlend.slice(0, 5).join(' | '));
+
+    // ⚠ EIN VERSTECKTER BLOCK IST KEIN ZIEL. `#sec-sub-sap` traegt
+    // `display:none`, solange der SAP-Skill aus ist - ein Treffer dorthin
+    // fuehrte auf eine Zeile, die es auf diesem System nicht gibt.
+    const sap = doc.getElementById('sec-sub-sap');
+    pruefe('Positivkontrolle: der SAP-Block ist im Testaufbau versteckt',
+           !!sap && sap.style.display === 'none', sap ? sap.style.display : '(fehlt)');
+    pruefe('ein versteckter Block steht NICHT im Index',
+           !titelImIndex.has('SAP-Zugriff'), 'SAP-Zugriff gefunden');
+
+    // ⚠ TITEL UND ERLAEUTERUNG TRENNEN - sonst steht als Titel
+    // „SAP-Zugriff– Wer darf SAP-Daten lesen (Reiter, SQL, Tools)?" da.
+    await tippe(w, 'internet-zugang');
+    const tIz = titelTexte(w);
+    pruefe('ein <summary> wird in Titel und Erlaeuterung getrennt',
+           (tIz[0] || '') === 'Internet-Zugang', tIz[0] || '(nichts)');
+    pruefe('… und die Erlaeuterung bleibt DURCHSUCHBAR',
+           (await (async () => { await tippe(w, 'internet ergebnissen');
+                                 return titelTexte(w).length > 0; })()),
+           'nichts gefunden');
+
+    // ⚠ DER SPRUNG MUSS DAS <details> OEFFNEN - sonst landet der Treffer auf
+    // einer geschlossenen Zeile, also derselbe Fehler eine Ebene tiefer.
+    //
+    // ⚠ GEMESSEN WIRD AN EINEM TREFFER TIEF IM BLOCK, NICHT AM <summary>:
+    // die Aufklapp-Kette beginnt bei `el.parentNode`, und bei einem
+    // <summary>-Treffer ist das bereits sein eigenes <details> – der Fall
+    // oeffnet sich also auch dann, wenn die Kette gar nicht greift, und eine
+    // Sabotage daran bliebe stumm. Eine Feldbeschriftung INNERHALB des Blocks
+    // kann nur die Kette erreichen.
+    const det = doc.querySelector('details.sec-sub[data-sub="internet"]');
+    await tippe(w, 'internet-zugang');
+    pruefe('Positivkontrolle: der Block ist VOR dem Klick zu',
+           !!det && det.open === false, det ? String(det.open) : '(fehlt)');
+    klick(zeile(w, 0), w);
+    await tickCount(8);
+    pruefe('der Klick auf die Ueberschrift klappt das <details> AUF',
+           !!det && det.open === true, det ? String(det.open) : '(fehlt)');
+
+    if (det) det.open = false;
+    await tippe(w, 'internet-gruppe');
+    pruefe('Positivkontrolle: ein Treffer TIEF im Block existiert',
+           zeilen(w).length > 0, String(zeilen(w).length));
+    pruefe('… und der Block ist davor wieder zu',
+           !!det && det.open === false, det ? String(det.open) : '(fehlt)');
+    klick(zeile(w, 0), w);
+    await tickCount(8);
+    pruefe('ein Treffer IM Block klappt ihn ebenfalls auf',
+           !!det && det.open === true, det ? String(det.open) : '(fehlt)');
+}
+
+// ── Abschnitt 10: die Regel steht im Code, nicht als Liste ─────────────────
+{
+    const q10 = ohneKommentare(liesJs('frontend/js/settings_search.js'));
+    pruefe('die Zwischenueberschriften kommen aus dem DOM',
+           /querySelectorAll\('h3, h4, summary'\)/.test(q10));
+    // ⚠ ZUGEKLAPPT IST NICHT VERSTECKT: eine pauschale DETAILS-Ausnahme in der
+    // Erreichbarkeitspruefung liess `#sec-sub-sap` (display:none) in den Index.
+    pruefe('die Erreichbarkeit nimmt <details> NICHT pauschal aus',
+           !/display === 'none'[\s\S]{0,160}tagName !== 'DETAILS'/.test(q10));
+    // ⚠ NUR EIN WEG ZUM AUFKLAPPEN: ein zusaetzlicher Zweig „oeffne dein
+    // eigenes <details>" war gemessen wirkungslos (die Kette deckt ihn ab) und
+    // muesste bei jeder Durchsicht mitgeprueft werden.
+    pruefe('genau EIN Weg oeffnet ein <details>',
+           (q10.match(/\.open = true/g) || []).length === 1,
+           String((q10.match(/\.open = true/g) || []).length));
+    pruefe('Titel und Erlaeuterung werden von EINER Funktion getrennt',
+           (q10.match(/function teileAuf\(/g) || []).length === 1
+           && (q10.match(/teileAuf\(/g) || []).length >= 3);
+}
+
 console.log('\n' + (fail === 0 ? '\x1b[32m' : '\x1b[31m') +
             'Ergebnis: ' + ok + ' OK, ' + fail + ' FAIL\x1b[0m');
 bilanz = true;

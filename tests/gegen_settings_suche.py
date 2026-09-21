@@ -86,7 +86,7 @@ PROBEN = [
     # wenn der Schluessel FEHLT – solange er existiert, ist der Rueckfall im
     # Code tot, und eine Sabotage daran misst nichts (erster Lauf: beisst nicht).
     ("die Leermeldung verschweigt den Suchraum", "frontend/js/i18n.js",
-     "'stsuche.none':         'Kein Treffer für „{q}“ in den Skills.',",
+     "'stsuche.none':         'Kein Treffer für „{q}“ in den Einstellungen.',",
      "'stsuche.none':         'Kein Treffer für „{q}“.',"),
     ("der Anfangs-Bonus ueberspringt eine Stufe", "frontend/js/settings_search.js",
      "                var wert = f.g * (p === 0 ? 1.2 : 1);",
@@ -110,11 +110,11 @@ PROBEN = [
 
     # ── Ziel / Bedienung ───────────────────────────────────────────────────
     ("der Klick fuehrt nirgendwohin", "frontend/js/settings_search.js",
-     "            sm.zumKonfigurationspunkt(tr.e.dirName);",
-     "            void tr;"),
+     "            sm.zumKonfigurationspunkt(e.dirName);",
+     "            void e;"),
     ("nach dem Klick bleibt Panel und Begriff stehen", "frontend/js/settings_search.js",
-     "        beenden();\n        var sm = window.skillManager;",
-     "        var sm = window.skillManager;"),
+     "        var e = tr.e;\n        beenden();",
+     "        var e = tr.e;"),
     ("Escape laeuft bis zum Modal durch", "frontend/js/settings_search.js",
      "                    e.stopPropagation();\n                    e.preventDefault();\n                } else if (offen()) {",
      "                } else if (offen()) {"),
@@ -234,10 +234,6 @@ PROBEN = [
     ("ein Skill-Reiter erscheint zusaetzlich als Reiter", "frontend/js/settings_search.js",
      "            if (ausSkill[tab]) continue;",
      "            if (false) continue;"),
-    ("Beschriftung und Erlaeuterung nicht getrennt", "frontend/js/settings_search.js",
-     "            var txt = saeubere(teile[0]);",
-     "            var txt = saeubere(teile.join(' '));"),
-
     # ── Der Sprung ─────────────────────────────────────────────────────────
     ("der Treffer klickt den Reiter nicht", "frontend/js/settings_search.js",
      "        if (tb && tb.style.display !== 'none') tb.click();\n\n        var el = e.el;",
@@ -270,6 +266,36 @@ PROBEN = [
     ("Leermeldung nennt den Suchraum nicht", "frontend/js/i18n.js",
      "        'stsuche.none':         'Kein Treffer für „{q}“ in den Einstellungen.',",
      "        'stsuche.none':         'Kein Treffer für „{q}“.',"),
+    # ── Zwischenueberschriften (gemeldet: „Gesperrte Konten" fehlt) ─────────
+    ("Zwischenueberschriften nicht indiziert", "frontend/js/settings_search.js",
+     "        var ueber = d.querySelectorAll('h3, h4, summary');",
+     "        var ueber = [];"),
+    ("nur <h4>, keine <summary>", "frontend/js/settings_search.js",
+     "        var ueber = d.querySelectorAll('h3, h4, summary');",
+     "        var ueber = d.querySelectorAll('h4');"),
+    ("Abschnitts-Kopfzeilen doppeln sich", "frontend/js/settings_search.js",
+     "            if (uel.closest && uel.closest('.kb-collapse-header')) continue;",
+     "            if (false) continue;"),
+    ("versteckter Block kommt in den Index", "frontend/js/settings_search.js",
+     "            if (unerreichbar(uel)) continue;",
+     "            if (false) continue;"),
+    ("<details> pauschal erreichbar (zugeklappt = versteckt verwechselt)",
+     "frontend/js/settings_search.js",
+     "                    && !(p.classList && p.classList.contains('kb-collapse-body'))) return true;",
+     "                    && !(p.classList && p.classList.contains('kb-collapse-body'))\n"
+     "                    && p.tagName !== 'DETAILS') return true;"),
+    ("Titel und Erlaeuterung nicht getrennt", "frontend/js/settings_search.js",
+     "            return { titel: saeubere(teile[0]), zusatz: saeubere(teile.slice(1).join(' ')) };",
+     "            return { titel: saeubere(teile.join(' ')), zusatz: '' };"),
+    ("der Sprung oeffnet das <details> nicht", "frontend/js/settings_search.js",
+     "            else if (p.tagName === 'DETAILS' && !p.open) kette.unshift(p);",
+     "            else if (false) kette.unshift(p);"),
+    ("zwei Fassungen der Titel-Trennung", "frontend/js/settings_search.js",
+     "            var zerlegt = teileAuf(lab);\n            if (!zerlegt) continue;",
+     "            var zerlegt = (function (x) { var t = (x.textContent || '').trim();\n"
+     "                return t ? { titel: t, zusatz: '' } : null; })(lab);\n"
+     "            if (!zerlegt) continue;"),
+
 ]
 
 

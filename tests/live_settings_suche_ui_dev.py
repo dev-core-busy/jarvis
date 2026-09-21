@@ -503,6 +503,71 @@ with connect(ws, open_timeout=20, max_size=80_000_000) as sock:
         check("… und der Punkt steht im Bild", lage.get("sichtbar") is True, json.dumps(lage))
         bild(sock, f"stsuche-{thema}-ldap-ziel.png")
 
+        # ── Der gemeldete Fall: „Gesperrte Konten" (2026-09-21) ────────────
+        #
+        # Eine Zwischenueberschrift INNERHALB eines Abschnitts – die vierte
+        # Ebene, die bis dahin gar nicht indiziert war. Gemessen an der
+        # ausgelieferten Seite, weil nur dort die Reiter eingeblendet und die
+        # Klapp-Handler gebunden sind.
+        js(sock, """(function(){var f=document.getElementById('st-such-feld');
+            f.value=''; f.dispatchEvent(new Event('input',{bubbles:true}));
+            f.focus();})()""")
+        for z in "gesperrte konten":
+            cdp(sock, "Input.dispatchKeyEvent", type="keyDown", text=z)
+            cdp(sock, "Input.dispatchKeyEvent", type="keyUp")
+        time.sleep(1.2)
+        nG = js(sock, "document.querySelectorAll('#st-such-liste .st-such-item').length")
+        check("„gesperrte konten“ findet etwas (der gemeldete Fall)",
+              bool(nG) and nG > 0, str(nG))
+        tG = js(sock, """(function(){var e=document.querySelector(
+            '#st-such-liste .st-such-item .st-such-titel');
+            return e?e.textContent:'';})()""") or ""
+        check("… und zwar genau diesen Punkt", tG.strip() == "Gesperrte Konten", tG[:70])
+        bild(sock, f"stsuche-{thema}-gesperrt.png")
+
+        js(sock, "document.querySelector('#st-such-liste .st-such-item').click();")
+        time.sleep(0.6)
+        lg = js(sock, """(function(){
+            var hv=document.querySelector('.st-such-treffer');
+            var r=hv?hv.getBoundingClientRect():null;
+            return { hervor: !!hv,
+                     sichtbar: r ? (r.height>0 && r.top<window.innerHeight && r.bottom>0) : false };
+        })()""") or {}
+        check("der Klick hebt „Gesperrte Konten“ hervor", lg.get("hervor") is True,
+              json.dumps(lg))
+        check("… und der Punkt steht im Bild", lg.get("sichtbar") is True, json.dumps(lg))
+        bild(sock, f"stsuche-{thema}-gesperrt-ziel.png")
+
+        # ⚠ EIN <details> MUSS DER KLICK OEFFNEN. Die Berechtigungs-Bloecke des
+        # Sicherheits-Reiters sind so gebaut und starten ZU; ohne das landete
+        # der Treffer auf einer geschlossenen Zeile.
+        js(sock, """(function(){
+            var d=document.querySelector('details.sec-sub[data-sub="internet"]');
+            if(d) d.open=false;
+            var f=document.getElementById('st-such-feld');
+            f.value=''; f.dispatchEvent(new Event('input',{bubbles:true}));
+            f.focus();})()""")
+        for z in "internet-zugang":
+            cdp(sock, "Input.dispatchKeyEvent", type="keyDown", text=z)
+            cdp(sock, "Input.dispatchKeyEvent", type="keyUp")
+        time.sleep(1.2)
+        vor = js(sock, """(function(){var d=document.querySelector(
+            'details.sec-sub[data-sub="internet"]'); return d?d.open:null;})()""")
+        check("Positivkontrolle: der Block ist VOR dem Klick zu", vor is False, str(vor))
+        nI = js(sock, "document.querySelectorAll('#st-such-liste .st-such-item').length")
+        check("„internet-zugang“ findet etwas", bool(nI) and nI > 0, str(nI))
+        js(sock, "document.querySelector('#st-such-liste .st-such-item').click();")
+        time.sleep(0.6)
+        nach = js(sock, """(function(){var d=document.querySelector(
+            'details.sec-sub[data-sub="internet"]');
+            var r=d?d.getBoundingClientRect():null;
+            return { open: d?d.open:null,
+                     sichtbar: r ? (r.height>0 && r.top<window.innerHeight && r.bottom>0) : false };
+        })()""") or {}
+        check("der Klick klappt das <details> AUF", nach.get("open") is True, json.dumps(nach))
+        check("… und der Block steht im Bild", nach.get("sichtbar") is True, json.dumps(nach))
+        bild(sock, f"stsuche-{thema}-internet-ziel.png")
+
         fehler = js(sock, "window.__fehler")
         check("keine JS-Fehler auf der Seite", not fehler, str(fehler)[:300])
 

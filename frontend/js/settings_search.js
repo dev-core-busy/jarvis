@@ -253,6 +253,77 @@
 
         function reiterName(tab) { return knoepfe[tab] || tab; }
 
+        function saeubere(x) {
+            return String(x == null ? '' : x).replace(/\s+/g, ' ').trim()
+                    .replace(/^[–—-]\s*/, '').replace(/[:：]\s*$/, '');
+        }
+
+        // Trennt Beschriftung und Erlaeuterung. Die Bauform ist in den
+        // Einstellungen regelmaessig – ein <label> wie eine Ueberschrift:
+        // das ERSTE Element-Kind mit Text ist die Beschriftung, alles Weitere
+        // erlaeutert sie (meist ein <span> in `--text-muted` bzw.
+        // `.sec-sub-hint`).
+        //
+        // ⚠ OHNE DIE TRENNUNG STEHT ALS „TITEL" EINE ZEILE FLIESSTEXT DA –
+        // „SAP-Zugriff– Wer darf SAP-Daten lesen (Reiter, SQL, Tools)?" –, und
+        // die Trefferliste ist unlesbar. Der Rest geht als `zusatz` mit und
+        // bleibt DURCHSUCHBAR („kommagetrennt" ist ein legitimer Suchbegriff),
+        // er ist nur kein Titel.
+        function teileAuf(el) {
+            var teile = [], roh = '';
+            for (var c = 0; c < el.childNodes.length; c++) {
+                var kn = el.childNodes[c];
+                if (kn.nodeType === 3) {
+                    roh += kn.nodeValue;
+                } else if (kn.nodeType === 1 && /^(SPAN|B|STRONG|I|EM|CODE|SMALL)$/.test(kn.tagName)) {
+                    if (roh.trim()) { teile.push(roh.trim()); roh = ''; }
+                    teile.push((kn.textContent || '').replace(/\s+/g, ' ').trim());
+                }
+                // <input>, <select> und Gleiches tragen keinen Text und werden
+                // uebersprungen - bei einem Kaestchen steht die Beschriftung
+                // dahinter, nicht darin.
+            }
+            if (roh.trim()) teile.push(roh.trim());
+            teile = teile.filter(function (x) { return x.length > 0; });
+            if (!teile.length) return null;
+            return { titel: saeubere(teile[0]), zusatz: saeubere(teile.slice(1).join(' ')) };
+        }
+
+        // Name des umschliessenden Klappabschnitts (fuer den Pfad).
+        function absNameVon(el) {
+            var absEl = el.closest ? el.closest('.kb-collapse-body') : null;
+            if (!absEl || !absEl.id) return '';
+            var hEl = d.getElementById(absEl.id.replace(/-body$/, '-hdr'));
+            var hh = hEl && hEl.querySelector ? hEl.querySelector('h3, h4') : null;
+            return hh ? (hh.textContent || '').replace(/\s+/g, ' ').trim() : '';
+        }
+
+        // ⚠ EIN PUNKT, ZU DEM DER SPRUNG NICHT KOMMT, IST KEIN ZIEL.
+        // `display:none` heisst hier NICHT immer „unerreichbar": ein
+        // zugeklappter `.kb-collapse-body` traegt es im Ruhezustand, und genau
+        // den oeffnet `zumElement`. Alles andere bleibt zu, und ein Treffer
+        // dorthin fuehrte ins Leere.
+        //
+        // ⚠ ZUGEKLAPPT IST NICHT VERSTECKT – und diese Verwechslung war hier
+        // schon eingebaut: ein <details> klappt ueber `open` zu, `display:none`
+        // daran bedeutet etwas anderes. `#sec-sub-sap` traegt es, solange der
+        // SAP-Skill aus ist; mit einer pauschalen DETAILS-Ausnahme stand
+        // „SAP-Zugriff" im Index eines Systems, auf dem es den Block gar nicht
+        // gibt (gemessen).
+        // Gelaufen wird nur bis zum Reiter-Panel: das ist bei jedem inaktiven
+        // Reiter versteckt, und genau den macht der Sprung als erstes sichtbar.
+        function unerreichbar(el) {
+            var p = el.parentNode;
+            while (p && p.nodeType === 1 && p !== d.body) {
+                var id = p.id || '';
+                if (id.indexOf('settings-tab-') === 0) return false;
+                if (p.style && p.style.display === 'none'
+                    && !(p.classList && p.classList.contains('kb-collapse-body'))) return true;
+                p = p.parentNode;
+            }
+            return false;
+        }
+
         // Abschnitte
         var gesehen = {};
         var hdrs = d.querySelectorAll('.kb-collapse-header');
@@ -273,6 +344,57 @@
             gesehen[tab2 + '\u0000' + falte(titel).s] = true;
         }
 
+        // ── Zwischenueberschriften INNERHALB eines Abschnitts ───────────────
+        //
+        // ⚠ HIER FIEL EINE GANZE EBENE DURCH, UND ZWAR STILL. Gemeldet wurde
+        // „Gesperrte Konten erscheint nicht in der Suche" – gemessen waren es
+        // 57 Punkte: 41 <h4>, 2 <h3> und 14 <summary>, darunter SAEMTLICHE
+        // Berechtigungs-Bloecke des Sicherheits-Reiters („SAP-Zugriff",
+        // „Internet-Zugang", „Administratoren", …), „Lizenz", „Dienst neu
+        // starten", „Farben – Hellmodus", „EWS (Exchange Web Services)".
+        //
+        // Der Grund ist derselbe wie beim gemeldeten „ldap findet nichts":
+        // die Struktur-Annahme ging von DREI Ebenen aus (Reiter → Abschnitt →
+        // Beschriftung), und ein Abschnitt hat in dieser Oberflaeche eine
+        // vierte darin – gebaut mal als <h4>, mal als aufklappbares <details>.
+        // Ein Feld, das „Berechtigungen" findet, aber nicht „SAP-Zugriff",
+        // fuehrt zur Ueberschrift ueber dreizehn Bloecken statt zu dem, der
+        // gemeint ist.
+        //
+        // Gelesen wird wieder das lebende DOM: <h3>/<h4>/<summary> in einem
+        // Reiter-Panel, die NICHT selbst eine Abschnitts-Kopfzeile sind.
+        var ueber = d.querySelectorAll('h3, h4, summary');
+        for (var u = 0; u < ueber.length; u++) {
+            var uel = ueber[u];
+            var tabU = reiterVon(uel);
+            if (!tabU || !knoepfe[tabU]) continue;
+            // Eine Abschnitts-Kopfzeile steht oben schon im Index.
+            if (uel.closest && uel.closest('.kb-collapse-header')) continue;
+            if (unerreichbar(uel)) continue;
+
+            var zerU = teileAuf(uel);
+            if (!zerU) continue;
+            var titU = zerU.titel;
+            if (titU.length < 3 || titU.length > 90) continue;
+
+            var absU = absNameVon(uel);
+            var schlU = tabU + '\u0000' + falte(titU).s;
+            if (gesehen[schlU]) continue;
+            gesehen[schlU] = true;
+
+            raus.push({
+                art: 'unterabschnitt', el: uel, reiter: tabU, reiterName: reiterName(tabU),
+                abschnitt: absU, titel: titU, zusatz: kuerze(zerU.zusatz, 70),
+                installiert: true, aus: false,
+                felder: [
+                    feld(titU, G_TITEL, true),
+                    feld(zerU.zusatz, G_TEXT, false),
+                    feld(absU, G_KAT, false),
+                    feld(reiterName(tabU), G_KAT, false),
+                ].filter(Boolean),
+            });
+        }
+
         // Beschriftungen einzelner Einstellungen
         var labs = d.querySelectorAll('label');
         var dop = {};
@@ -280,46 +402,12 @@
             var lab = labs[m];
             var tab3 = reiterVon(lab);
             if (!tab3 || !knoepfe[tab3]) continue;
-            // ⚠ BESCHRIFTUNG UND ERLAEUTERUNG TRENNEN - sonst steht als „Titel"
-            // eine ganze Zeile Fliesstext da („Admin-Benutzer – Benutzernamen
-            // kommagetrennt, z.B. …"), und die Trefferliste ist unlesbar.
-            // Die Bauform ist regelmaessig: das ERSTE Element-Kind mit Text ist
-            // die Beschriftung, alles Weitere erlaeutert sie (meist ein <span>
-            // in `--text-muted`). Der Rest geht als `zusatz` mit - er bleibt
-            // DURCHSUCHBAR („kommagetrennt" ist ein legitimer Suchbegriff), nur
-            // ist er kein Titel.
-            var teile = [], roh = '';
-            for (var c = 0; c < lab.childNodes.length; c++) {
-                var kn = lab.childNodes[c];
-                if (kn.nodeType === 3) {
-                    roh += kn.nodeValue;
-                } else if (kn.nodeType === 1 && /^(SPAN|B|STRONG|I|EM|CODE|SMALL)$/.test(kn.tagName)) {
-                    if (roh.trim()) { teile.push(roh.trim()); roh = ''; }
-                    teile.push((kn.textContent || '').replace(/\s+/g, ' ').trim());
-                }
-                // <input>, <select> und Gleiches tragen keinen Text und werden
-                // uebersprungen - bei einem Kaestchen steht die Beschriftung
-                // dahinter, nicht darin.
-            }
-            if (roh.trim()) teile.push(roh.trim());
-            teile = teile.filter(function (x) { return x.length > 0; });
-            if (!teile.length) continue;
-
-            function saeubere(x) {
-                return x.replace(/\s+/g, ' ').trim()
-                        .replace(/^[–—-]\s*/, '').replace(/[:：]\s*$/, '');
-            }
-            var txt = saeubere(teile[0]);
-            var erlaeuterung = saeubere(teile.slice(1).join(' '));
+            var zerlegt = teileAuf(lab);
+            if (!zerlegt) continue;
+            var txt = zerlegt.titel, erlaeuterung = zerlegt.zusatz;
             if (txt.length < 3 || txt.length > 90) continue;
 
-            var absEl = lab.closest ? lab.closest('.kb-collapse-body') : null;
-            var absName = '';
-            if (absEl && absEl.id) {
-                var hEl = d.getElementById(absEl.id.replace(/-body$/, '-hdr'));
-                var hh = hEl && hEl.querySelector ? hEl.querySelector('h3, h4') : null;
-                if (hh) absName = (hh.textContent || '').replace(/\s+/g, ' ').trim();
-            }
+            var absName = absNameVon(lab);
             // Eine Beschriftung, die genauso heisst wie ihr Abschnitt, ist
             // keine zweite Aussage.
             var schl = tab3 + '\u0000' + (absName || '') + '\u0000' + falte(txt).s;
@@ -446,7 +534,7 @@
         // ⚠ DER PFAD IST BEI DER OBERFLAECHE KEINE ZIERDE, SONDERN DIE
         // UNTERSCHEIDUNG: „Aktiv" gibt es in einem Dutzend Abschnitten, und
         // ohne „Reiter › Abschnitt" waeren die Zeilen nicht auseinanderzuhalten.
-        if (e.art === 'einstellung') {
+        if (e.art === 'einstellung' || e.art === 'unterabschnitt') {
             return e.abschnitt ? e.reiterName + ' › ' + e.abschnitt : e.reiterName;
         }
         if (e.art === 'abschnitt') return e.reiterName;
@@ -625,10 +713,31 @@
         while (p && p.nodeType === 1 && p !== document.body) {
             if (p.classList && p.classList.contains('kb-collapse-body')
                 && p.style.display === 'none' && p.id) kette.unshift(p);
+            // ⚠ EIN <details> GEHOERT MIT AUFGEKLAPPT. Die Berechtigungs-
+            // Bloecke des Sicherheits-Reiters („SAP-Zugriff", „Internet-Zugang",
+            // …) und „Letzte Zugriffs-Verstoesse" sind so gebaut und starten ZU;
+            // ohne diesen Zweig landete der Treffer auf einer geschlossenen
+            // Zeile – also derselbe Fehler eine Ebene tiefer.
+            //
+            // Das deckt BEIDE Lagen ab: einen Treffer TIEF im Block (eine
+            // Feldbeschriftung darin) und das <summary> selbst – die Kette
+            // beginnt bei `el.parentNode`, und das IST dessen <details>. Ein
+            // zusaetzlicher Zweig „oeffne dein eigenes <details>" stand hier
+            // kurz und war MESSBAR wirkungslos (beide Faelle oeffneten auch
+            // ohne ihn); eine Zeile, deren Entfernen nichts aendert, ist keine
+            // zweite Schranke, sondern eine, die jede Durchsicht mitpruefen
+            // muss.
+            //
+            // ⚠ `open = true` UND NICHT `click()` auf das <summary>: ein Klick
+            // auf einen bereits offenen Block SCHLIESST ihn. Das
+            // `toggle`-Ereignis, an dem die Zustands-Speicherung haengt, feuert
+            // bei der Zuweisung genauso.
+            else if (p.tagName === 'DETAILS' && !p.open) kette.unshift(p);
             p = p.parentNode;
         }
-        kette.forEach(function (body) {
-            var hdr = document.getElementById(body.id.replace(/-body$/, '-hdr'));
+        kette.forEach(function (box) {
+            if (box.tagName === 'DETAILS') { box.open = true; return; }
+            var hdr = document.getElementById(box.id.replace(/-body$/, '-hdr'));
             if (hdr) hdr.click();
         });
         // Der Treffer SELBST ist bei einem Abschnitt die Kopfzeile: sie
@@ -658,7 +767,8 @@
         if (!tr) return;
         var e = tr.e;
         beenden();
-        if (e.art === 'reiter' || e.art === 'abschnitt' || e.art === 'einstellung') {
+        if (e.art === 'reiter' || e.art === 'abschnitt' || e.art === 'einstellung'
+            || e.art === 'unterabschnitt') {
             zumElement(e);
             return;
         }

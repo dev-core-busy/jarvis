@@ -18389,6 +18389,43 @@ def _cfb_aktiv() -> tuple[bool, bool]:
         return False, False
 
 
+def _cfb_mit_gruppen(bereiche: list) -> list:
+    """Jede Einbindung um die ANZEIGENAMEN ihrer Wissensgruppen ergaenzen.
+
+    ⚠ DIE NAMEN KOMMEN VOM SERVER, und zwar aus ALLEN Gruppen – nicht aus den
+    Gruppen des Abrufenden. Der Client kennt ueber ``/api/wissen/scope`` nur
+    SEINEN Bereich; haette er die Namen von dort aufgeloest, saehe ein Editor
+    einer anderen Gruppe die Zuordnung eines Kollegen als „unbekannte Gruppe" –
+    eine Falschaussage ueber einen voellig normalen Zustand. Die Namen sind
+    dabei keine Preisgabe: ``GET /api/knowledge/groups`` gibt sie ohnehin jedem
+    Angemeldeten heraus (das Pulldown in /chat braucht sie).
+
+    Eine Kennung, zu der es keine Gruppe mehr gibt, bleibt AUSSEN VOR – so kann
+    die Oberflaeche sie als geloescht benennen, statt eine Zuordnung zu zeigen,
+    die es nicht mehr gibt.
+    """
+    try:
+        from backend import knowledge_groups as kg
+        bekannt = {g["id"]: g for g in kg.list_groups().get("groups", [])}
+    except Exception as e:  # noqa: BLE001
+        # Fail-open in die HARMLOSE Richtung: ohne Namen zeigt die Oberflaeche
+        # die Kennungen – eine Liste ganz zu verweigern waere teurer.
+        print(f"[Wissen/CF-Bindung] Gruppennamen nicht ermittelbar: {e}")
+        return bereiche
+    aus = []
+    for b in bereiche:
+        c = dict(b)
+        info = []
+        for gid in (c.get("gruppen") or []):
+            g = bekannt.get(gid)
+            if g:
+                info.append({"id": g["id"], "name": g.get("name") or g["id"],
+                             "color": g.get("color") or ""})
+        c["gruppen_info"] = info
+        aus.append(c)
+    return aus
+
+
 @app.get("/api/wissen/confluence/bindung")
 async def wissen_cf_bindung_lesen(user: str = Depends(require_auth)):
     """Zustand + eingebundene Bereiche fuer den Container unter /wissen.
@@ -18405,7 +18442,7 @@ async def wissen_cf_bindung_lesen(user: str = Depends(require_auth)):
     skill, conf = _cfb_aktiv()
     return JSONResponse({"ok": True, "skill_aktiv": skill, "configured": conf,
                          "aktiv": skill and conf,
-                         "bereiche": _cfb.liste() if (skill and conf) else []})
+                         "bereiche": _cfb_mit_gruppen(_cfb.liste()) if (skill and conf) else []})
 
 
 @app.post("/api/wissen/confluence/bindung")
@@ -18421,6 +18458,12 @@ async def wissen_cf_bindung_anlegen(request: Request, user: str = Depends(requir
 
     Der BENUTZER kommt ausschliesslich aus der Anmeldung (`von`), nie aus dem
     Rumpf.
+
+    ⚠ MINDESTENS EINE WISSENSGRUPPE IST PFLICHT (Vorgabe 2026-09-22) – und sie
+    muss im Bereich des Anlegenden liegen. Beides prueft `_wissen_check_groups`,
+    dieselbe Regel, die auch ueber Upload und Entwurfs-Freigabe entscheidet: eine
+    zweite Fassung liefe beim naechsten Feinschliff auseinander, und dann duerfte
+    man hier zuordnen, was man dort nicht darf.
     """
     if not _editable_groups_for(user):
         return JSONResponse({"ok": False, "error": "Dir ist kein Wissensbereich zugewiesen."},
@@ -18440,9 +18483,23 @@ async def wissen_cf_bindung_anlegen(request: Request, user: str = Depends(requir
         body = {}
     key = str(body.get("key") or "").strip()
     inkl = body.get("inkl_unter")
+    # ⚠ GETRIMMT, NICHT NUR AUF FALSYNESS GEFILTERT. `["", "  "]` ueberlebt ein
+    # blosses `if g`, und `_wissen_check_groups` meldet dann "Keine Berechtigung
+    # fuer Gruppe(n):   " – richtig abgewiesen, aber der Grund schickt an die
+    # falsche Stelle (es fehlt eine Auswahl, es fehlt kein Recht). Live
+    # gemessen; dieselbe Normierung macht `_gruppen_pruefen` in der Ablage.
+    req_groups = [t for t in (str(g or "").strip()
+                              for g in ((body.get("groups") if isinstance(body, dict) else None) or []))
+                  if t]
     if not key:
         return JSONResponse({"ok": False, "error": "Es wurde kein Bereich gewaehlt."},
                             status_code=400)
+    # VOR dem Confluence-Abruf: die Gruppenpruefung ist rein oertlich, der Abruf
+    # der sichtbaren Bereiche eine Netzrundreise. Eine fehlende Zuordnung soll
+    # nicht erst nach einer Anfrage an ein fremdes System auffallen.
+    ok, err = _wissen_check_groups(user, req_groups)
+    if not ok:
+        return JSONResponse({"ok": False, "error": err}, status_code=403)
     c = _confluence_client()
     try:
         sichtbar = await _wissen_visible_spaces(c)
@@ -18454,13 +18511,14 @@ async def wissen_cf_bindung_anlegen(request: Request, user: str = Depends(requir
                             status_code=403)
     try:
         eintrag = _cfb.hinzufuegen(key, treffer.get("name") or key,
-                                   inkl is True, _display_name(user))
+                                   inkl is True, _display_name(user), req_groups)
     except _cfb.BindungFehler as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": f"Konnte nicht gespeichert werden: {e}"},
                             status_code=500)
-    return JSONResponse({"ok": True, "bereich": eintrag, "bereiche": _cfb.liste()})
+    return JSONResponse({"ok": True, "bereich": eintrag,
+                         "bereiche": _cfb_mit_gruppen(_cfb.liste())})
 
 
 @app.delete("/api/wissen/confluence/bindung/{bid}")
@@ -18472,7 +18530,7 @@ async def wissen_cf_bindung_loeschen(bid: str, user: str = Depends(require_auth)
     import backend.confluence_bindung as _cfb
     if not _cfb.entfernen(bid):
         return JSONResponse({"ok": False, "error": "Einbindung nicht gefunden."}, status_code=404)
-    return JSONResponse({"ok": True, "bereiche": _cfb.liste()})
+    return JSONResponse({"ok": True, "bereiche": _cfb_mit_gruppen(_cfb.liste())})
 
 
 @app.post("/api/wissen/extract/confluence")

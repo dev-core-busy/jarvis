@@ -124,7 +124,129 @@ KLICK = (
     "        });"
 )
 
+def _gruppenpruefung_verschieben(s: str) -> str:
+    """Schiebt die Wissensgruppen-Pruefung HINTER das Einbinden.
+
+    Sie steht dann immer noch da – aber wirkungslos: der Eintrag ist zu dem
+    Zeitpunkt geschrieben. Genau diese Reihenfolge sichert der Waechter zu, und
+    eine Textsuche saehe den Unterschied nicht."""
+    block = ("""    ok, err = _wissen_check_groups(user, req_groups)\n"""
+             """    if not ok:\n"""
+             """        return JSONResponse({"ok": False, "error": err}, status_code=403)\n""")
+    anker = """    return JSONResponse({"ok": True, "bereich": eintrag,"""
+    if s.count(block) != 1 or s.count(anker) != 1:
+        return s
+    return s.replace(block, "").replace(anker, block + anker)
+
+
 PROBEN = [
+    # ── Wissensgruppen-Pflicht (Vorgabe 2026-09-22) ────────────────────────
+    ("⚠ Pflicht im Modul raus (Einbindung ohne Ziel moeglich)", CFB,
+     '    if not aus:\n        raise BindungFehler("Bitte mindestens eine Wissensgruppe zuordnen.")',
+     '    if False:\n        raise BindungFehler("Bitte mindestens eine Wissensgruppe zuordnen.")', PY_W),
+
+    ("die Zuordnung wird gar nicht gespeichert", CFB,
+     '            "gruppen": gr,\n', '', PY_W),
+
+    # Eine Zeichenkette ist iterierbar und nie gemeint: "technik" wuerde sonst
+    # zu den Gruppen 't','e','c','h','n','i','k'.
+    ("Zeichenkette zaehlt wieder als Gruppenliste", CFB,
+     'if isinstance(gruppen, str) or not isinstance(gruppen, (list, tuple)):',
+     'if not isinstance(gruppen, (list, tuple, str)):', PY_W),
+
+    ("Deckel fuer die Gruppenzahl raus", CFB,
+     'if len(aus) > MAX_GRUPPEN:', 'if False:', PY_W),
+
+    ("Laengen-/Steuerzeichenpruefung der Kennung raus", CFB,
+     'if len(k) > GRUPPE_MAX or any(ord(c) < 32 for c in k):', 'if False:', PY_W),
+
+    # ⚠ `_wissen_check_groups(user, req_groups)` steht mehrfach in main.py
+    # (auch bei der Entwurfs-Freigabe) – der Anker nimmt deshalb den Kommentar
+    # des CF-Endpunkts mit.
+    # ⚠ LIVE GEFUNDEN: ohne `strip()` laeuft eine Eingabe aus Leerraum in
+    # "Keine Berechtigung fuer Gruppe(n):   " – richtig abgewiesen, falscher Grund.
+    ("Kennungen werden nicht mehr getrimmt (irrefuehrender Grund)", MAIN,
+     '''    req_groups = [t for t in (str(g or "").strip()
+                              for g in ((body.get("groups") if isinstance(body, dict) else None) or []))
+                  if t]''',
+     '''    req_groups = [g for g in ((body.get("groups") if isinstance(body, dict) else None) or []) if g]''',
+     PY_W),
+
+    ("⚠ Endpunkt prueft die Zuordnung nicht mehr", MAIN,
+     '    ok, err = _wissen_check_groups(user, req_groups)\n    if not ok:\n'
+     '        return JSONResponse({"ok": False, "error": err}, status_code=403)\n'
+     '    c = _confluence_client()',
+     '    ok, err = (True, None)\n    if not ok:\n'
+     '        return JSONResponse({"ok": False, "error": err}, status_code=403)\n'
+     '    c = _confluence_client()', PY_W),
+
+    ("⚠ Gruppenpruefung erst NACH dem Einbinden", MAIN,
+     _gruppenpruefung_verschieben, None, PY_W),
+
+    ("die geprueften Gruppen werden nicht uebergeben", MAIN,
+     '_display_name(user), req_groups)', '_display_name(user))', PY_W),
+
+    # ⚠ Der Client kennt nur SEINEN Bereich – haette der Server die Namen von
+    # dort aufgeloest, saehe ein Editor die Zuordnung eines Kollegen als
+    # "geloeschte Gruppe". Eine Falschaussage ueber einen normalen Zustand.
+    ("Gruppennamen aus dem Bereich des Abrufers statt aus allen", MAIN,
+     'bekannt = {g["id"]: g for g in kg.list_groups().get("groups", [])}',
+     'bekannt = {g["id"]: g for g in _editable_groups_for("")}', PY_W),
+
+    ("GET liefert die Bereiche ohne Gruppennamen", MAIN,
+     '"bereiche": _cfb_mit_gruppen(_cfb.liste()) if (skill and conf) else []',
+     '"bereiche": _cfb.liste() if (skill and conf) else []', PY_W),
+
+    ("Wissensgruppen-Reihe aus dem Markup", HTML,
+     '                <div class="wi-groups" id="wi-cfb-groups"></div>',
+     '                <div class="wi-groups"></div>', PY_W),
+
+    ("die Reihe steht unter der Auswahlzeile statt darueber", HTML,
+     (lambda s: (
+         s.replace('            <div class="wi-cfb-groups-wrap">\n'
+                   '                <label data-i18n="wissen.groups_label">Wissensgruppen (dein Bereich) *</label>\n'
+                   '                <div class="wi-groups" id="wi-cfb-groups"></div>\n'
+                   '            </div>\n', "", 1)
+          .replace('            <div class="wi-status" id="wi-cfb-status"></div>',
+                   '            <div class="wi-cfb-groups-wrap">\n'
+                   '                <label data-i18n="wissen.groups_label">Wissensgruppen (dein Bereich) *</label>\n'
+                   '                <div class="wi-groups" id="wi-cfb-groups"></div>\n'
+                   '            </div>\n'
+                   '            <div class="wi-status" id="wi-cfb-status"></div>', 1))),
+     None, PY_W),
+
+    ("⚠ der Knopf verlangt keine Wissensgruppe mehr", WJS,
+     'btn.disabled = !!laeuft || _cfbLaeuft || !key || !grp || (sel && sel.disabled);',
+     'btn.disabled = !!laeuft || _cfbLaeuft || !key || (sel && sel.disabled);', JS_W),
+
+    ("der Grund nennt wieder nur den Bereich", WJS,
+     "            : (!key ? t('wissen.cfb_add_hint') : t('wissen.cfb_need_group'));",
+     "            : t('wissen.cfb_add_hint');", JS_W),
+
+    ("⚠ die Zuordnung geht nicht mit dem Rumpf raus", WJS,
+     'body: JSON.stringify({ key: key, inkl_unter: sub, groups: grp })',
+     'body: JSON.stringify({ key: key, inkl_unter: sub })', JS_W),
+
+    ("⚠ die Gruppen werden bei jedem Render neu gezeichnet (Auswahl weg)", WJS,
+     "        if (box.querySelector('.wi-grp-cfb')) return;\n", "", JS_W),
+
+    ("die Kaestchen geben den Knopf nicht frei", WJS,
+     "        if (cfbGrp) cfbGrp.addEventListener('change', function () { cfbAddKnopf(); });",
+     "        if (cfbGrp) { /* nichts */ }", JS_W),
+
+    ("⚠ eine Einbindung ohne Zuordnung wird NICHT mehr benannt", WJS,
+     '            if (!gi.length) {', '            if (false) {', JS_W),
+
+    ("⚠ Rueckfall auf die Kennungen raus (aelteres Backend -> Falschaussage)", WJS,
+     "            if (!gi) gi = ids.map(function (id) { return { id: id, name: id, color: '' }; });",
+     "            if (!gi) gi = [];", JS_W),
+
+    ("eine geloeschte Gruppe wird verschwiegen", WJS,
+     '            } else if (gi.length < ids.length) {', '            } else if (false) {', JS_W),
+
+    ("neuer i18n-Schluessel fehlt in EN", I18N,
+     "        'wissen.cfb_need_group': 'Select at least one knowledge group',\n", "", PY_W),
+
     ("Dubletten-Pruefung raus", CFB,
      'if isinstance(b, dict) and (b.get("key") or "") == k:\n                raise BindungFehler("Dieser Bereich ist bereits eingebunden.")',
      'if False:\n                raise BindungFehler("Dieser Bereich ist bereits eingebunden.")', PY_W),
@@ -185,8 +307,12 @@ PROBEN = [
      'return bool(_skill_active("confluence")), bool(_confluence_client().configured)',
      'return True, bool(_confluence_client().configured)', PY_W),
 
+    # ⚠ Der Name steht ZWEIMAL in sandbox.py (auch in PRIVATE_FILES, dort tief
+    # eingerueckt). Ohne den fuehrenden Zeilenumbruch traf die Ersetzung beide
+    # und die Probe war unbrauchbar – gegen HEAD gemessen ebenso, also
+    # Vorzustand und nicht Folge dieser Aenderung.
     ("Ablage faellt aus _APP_DENY_REL", SB,
-     '    "data/confluence_bindung.json",\n', '', PY_W),
+     '\n    "data/confluence_bindung.json",\n', '\n', PY_W),
 
     # ⚠ Diese Probe MUSS wirklich verschieben. Ein blosser Kommentar davor
     # laesst die Reihenfolge unveraendert – die erste Fassung sah dadurch wie
@@ -217,11 +343,13 @@ PROBEN = [
      "if (cfbSel) cfbSel.addEventListener('change', function () { cfbAdd(cfbSel.value); });", JS_W),
 
     ("Knopf ist ohne Auswahl nicht gesperrt", WJS,
-     "btn.disabled = !!laeuft || !key || (sel && sel.disabled);",
+     "btn.disabled = !!laeuft || _cfbLaeuft || !key || !grp || (sel && sel.disabled);",
      "btn.disabled = false;", JS_W),
 
     ("gesperrter Knopf ohne Grund im title", WJS,
-     "btn.title = btn.disabled ? t('wissen.cfb_add_hint') : '';", "btn.title = '';", JS_W),
+     "        btn.title = !btn.disabled ? ''\n"
+     "            : (!key ? t('wissen.cfb_add_hint') : t('wissen.cfb_need_group'));",
+     "        btn.title = '';", JS_W),
 
     ("Knopfzustand wird nach dem Zeichnen nicht nachgezogen", WJS,
      "        sel.value = '';\n        cfbAddKnopf();", "        sel.value = '';", JS_W),
@@ -240,8 +368,8 @@ PROBEN = [
      "var frei = (_cfSpaces || []);", JS_W),
 
     ("inkl_unter wird nicht mitgesendet", WJS,
-     "body: JSON.stringify({ key: key, inkl_unter: sub })",
-     "body: JSON.stringify({ key: key })", JS_W),
+     "body: JSON.stringify({ key: key, inkl_unter: sub, groups: grp })",
+     "body: JSON.stringify({ key: key, groups: grp })", JS_W),
 
     ("Bereichsname unmaskiert in die Liste", WJS,
      "+ '<span class=\"nm\">' + esc(b.name || b.key) + '</span>'",

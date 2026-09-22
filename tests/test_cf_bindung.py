@@ -116,7 +116,7 @@ section("2. Das Modul laeuft wirklich")
 
 check("leerer Bestand -> leere Liste", sicher(cfb.liste) == [])
 
-e1 = sicher(cfb.hinzufuegen, "NEXUS", "NEXUS Dokumentation", True, "nexus\\a.bender")
+e1 = sicher(cfb.hinzufuegen, "NEXUS", "NEXUS Dokumentation", True, "nexus\\a.bender", ["technik"])
 check("hinzufuegen liefert einen Eintrag", isinstance(e1, dict), str(e1))
 if isinstance(e1, dict):
     check("Eintrag traegt eine Kennung", bool(e1.get("id")))
@@ -126,24 +126,26 @@ if isinstance(e1, dict):
     check("der Anleger wird festgehalten", e1.get("von") == "nexus\\a.bender")
     check("typ steht in der Ablage (Reichweite spaeter erweiterbar)",
           e1.get("typ") == "space")
+    check("die Wissensgruppen stehen in der Ablage", e1.get("gruppen") == ["technik"],
+          str(e1.get("gruppen")))
 
 check("liste() enthaelt den Eintrag", [b.get("key") for b in cfb.liste()] == ["NEXUS"])
 check("ist_eingebunden erkennt ihn", cfb.ist_eingebunden("NEXUS") is True)
 check("ist_eingebunden meldet einen fremden nicht", cfb.ist_eingebunden("ANDERS") is False)
 
-d = sicher(cfb.hinzufuegen, "NEXUS", "Noch mal", True, "x")
+d = sicher(cfb.hinzufuegen, "NEXUS", "Noch mal", True, "x", ["technik"])
 check("⚠ derselbe Bereich wird nicht zweimal eingebunden", isinstance(d, cfb.BindungFehler),
       f"kam durch: {d}")
 
 # ⚠ Falsyness waere hier falsch: ein "ja" oder eine 1 aus einer von Hand
 # geschriebenen Datei ist keine bewusste Entscheidung.
-e2 = sicher(cfb.hinzufuegen, "OPS", "Betrieb", False, "x")
+e2 = sicher(cfb.hinzufuegen, "OPS", "Betrieb", False, "x", ["technik"])
 check("inkl_unter False wird uebernommen",
       isinstance(e2, dict) and e2.get("inkl_unter") is False)
-e3 = sicher(cfb.hinzufuegen, "DOCS", "Doku", "ja", "x")
+e3 = sicher(cfb.hinzufuegen, "DOCS", "Doku", "ja", "x", ["technik"])
 check("⚠ inkl_unter='ja' zaehlt NICHT als gesetzt (is True, nicht Falsyness)",
       isinstance(e3, dict) and e3.get("inkl_unter") is False, str(e3))
-e4 = sicher(cfb.hinzufuegen, "TEAM", "", True, "x")
+e4 = sicher(cfb.hinzufuegen, "TEAM", "", True, "x", ["technik"])
 check("leerer Name faellt auf den Schluessel zurueck",
       isinstance(e4, dict) and e4.get("name") == "TEAM")
 
@@ -155,7 +157,7 @@ for gut, was in [("24H", "kurz, gross"), ("NEXUSKIS", "lang, gross"),
                  ("~Anna-Lena.Buscetta@nexus-schweiz.ch", "persoenlicher Bereich"),
                  ("~andrea.stegmann@nexus-ag.de", "persoenlich, klein"),
                  ("ds_2024", "Unterstrich"), ("a+b@x.de", "Plus")]:
-    r = sicher(cfb.hinzufuegen, gut, "X " + was, True, "x")
+    r = sicher(cfb.hinzufuegen, gut, "X " + was, True, "x", ["technik"])
     check(f"echter Schluessel wird ANGENOMMEN ({was})", isinstance(r, dict), f"abgewiesen: {r}")
     if isinstance(r, dict):
         check(f"  und ungekuerzt gespeichert ({was})", r.get("key") == gut, r.get("key"))
@@ -164,7 +166,7 @@ for gut, was in [("24H", "kurz, gross"), ("NEXUSKIS", "lang, gross"),
 for boes, was in [("", "leer"), ("a b", "Leerzeichen"), ("x" * 200, "zu lang"),
                   ("../../etc", "Pfadanteil"), ("a\nb", "Zeilenumbruch"),
                   ('a"b', "Anfuehrungszeichen"), ("a/b", "Schraegstrich")]:
-    r = sicher(cfb.hinzufuegen, boes, "X", True, "x")
+    r = sicher(cfb.hinzufuegen, boes, "X", True, "x", ["technik"])
     check(f"unbrauchbarer Schluessel abgewiesen ({was})", isinstance(r, cfb.BindungFehler),
           f"kam durch: {r}")
 
@@ -174,8 +176,8 @@ check("Reihenfolge bleibt die des Einbindens",
 # Deckel
 bis = cfb.MAX_BEREICHE - len(cfb.liste())
 for i in range(bis):
-    cfb.hinzufuegen(f"AUTO{i}", f"Auto {i}", True, "x")
-r = sicher(cfb.hinzufuegen, "ZUVIEL", "Zu viel", True, "x")
+    cfb.hinzufuegen(f"AUTO{i}", f"Auto {i}", True, "x", ["technik"])
+r = sicher(cfb.hinzufuegen, "ZUVIEL", "Zu viel", True, "x", ["technik"])
 check(f"Deckel {cfb.MAX_BEREICHE} greift", isinstance(r, cfb.BindungFehler), f"kam durch: {r}")
 check("der Deckel nennt die Zahl", isinstance(r, cfb.BindungFehler) and str(cfb.MAX_BEREICHE) in str(r))
 
@@ -187,7 +189,7 @@ check("zweites Entfernen meldet FALSE (nicht gefunden)",
 check("unbekannte Kennung entfernt nichts", cfb.entfernen("gibtsnicht") is False)
 check("leere Kennung entfernt nichts", cfb.entfernen("") is False)
 check("nach dem Entfernen ist wieder Platz",
-      isinstance(sicher(cfb.hinzufuegen, "NEUDA", "Neu da", True, "x"), dict))
+      isinstance(sicher(cfb.hinzufuegen, "NEUDA", "Neu da", True, "x", ["technik"]), dict))
 
 # Rechte
 mode = sicher(lambda: oct(os.stat(cfb._pfad()).st_mode & 0o777))
@@ -214,6 +216,68 @@ with contextlib.redirect_stdout(_buf2):
     cfb.liste()
 check("(Positivkontrolle) der Normalfall meldet NICHTS", _buf2.getvalue() == "",
       repr(_buf2.getvalue()[:120]))
+
+
+# ════════════════════════════════════════════════════════════════════════════
+section("2b. Wissensgruppen-Pflicht (Vorgabe 2026-09-22) – AUSGEFUEHRT")
+# ⚠ DIE ZUSAGE IST SEIT DEM 2026-09-22 UMGEKEHRT: bis dahin liess sich ein
+# Bereich OHNE Zuordnung einbinden. Das ist keine Regression, sondern die
+# Vorgabe – und sie wird hier gemessen, nicht gelesen.
+#
+# Die Pruefung im Modul ist KEINE Doppelung des Endpunkts: sie sitzt an der
+# ABLAGE, also vor jedem kuenftigen zweiten Aufrufer (Abgleich, Migration,
+# Werkzeug). Ob sie greift, kann nur ein Aufruf beantworten.
+for leer, was in [(None, "gar nicht uebergeben"), ([], "leere Liste"),
+                  (["", "  "], "nur Leerraum"), (["", None], "leer und None")]:
+    r = sicher(cfb.hinzufuegen, "OHNEGRP", "Ohne", True, "x", leer)
+    check(f"⚠ ohne Wissensgruppe wird NICHT eingebunden ({was})",
+          isinstance(r, cfb.BindungFehler), f"kam durch: {r}")
+check("der Grund nennt die Wissensgruppe",
+      "Wissensgruppe" in str(sicher(cfb.hinzufuegen, "OHNEGRP", "Ohne", True, "x", [])))
+check("und es bleibt wirklich nichts liegen", not cfb.ist_eingebunden("OHNEGRP"))
+
+# Eine Zeichenkette ist iterierbar und nie gemeint (Register): "technik" waere
+# sonst eine Zuordnung zu den Gruppen 't','e','c','h'...
+r = sicher(cfb.hinzufuegen, "STR", "Str", True, "x", "technik")
+check("⚠ eine Zeichenkette statt einer Liste wird abgewiesen",
+      isinstance(r, cfb.BindungFehler), f"kam durch: {r}")
+
+m = sicher(cfb.hinzufuegen, "MEHR", "Mehrere", True, "x", ["technik", "vertrieb", "technik"])
+check("mehrere Gruppen werden uebernommen",
+      isinstance(m, dict) and m.get("gruppen") == ["technik", "vertrieb"],
+      str(m if not isinstance(m, dict) else m.get("gruppen")))
+check("Dubletten werden still zusammengefasst (Reihenfolge bleibt)",
+      isinstance(m, dict) and m.get("gruppen") == ["technik", "vertrieb"])
+if isinstance(m, dict):
+    cfb.entfernen(m["id"])
+
+r = sicher(cfb.hinzufuegen, "LANG", "Lang", True, "x", ["g" * (cfb.GRUPPE_MAX + 1)])
+check("eine ueberlange Kennung wird abgewiesen", isinstance(r, cfb.BindungFehler), f"kam durch: {r}")
+r = sicher(cfb.hinzufuegen, "CTRL", "Ctrl", True, "x", ["a\nb"])
+check("eine Kennung mit Zeilenumbruch wird abgewiesen", isinstance(r, cfb.BindungFehler), f"kam durch: {r}")
+r = sicher(cfb.hinzufuegen, "VIELE", "Viele", True, "x",
+           [f"g{i}" for i in range(cfb.MAX_GRUPPEN + 1)])
+check(f"Deckel {cfb.MAX_GRUPPEN} Gruppen greift", isinstance(r, cfb.BindungFehler), f"kam durch: {r}")
+
+# ⚠ MUSS-FREI: die Form wird bewusst NUR grob geprueft. `_slugify` liefert
+# heute `[a-z0-9-]+`; eine engere Regel hier wuerde bei der naechsten Aenderung
+# dort gueltige Einbindungen abweisen (Register: eine Formregel, die Funktionen
+# abschaltet, braucht eine Muss-frei-Liste).
+for gid in ["technik", "it-betrieb", "gruppe-2", "a", "abteilung-vertrieb-nord"]:
+    r = sicher(cfb.hinzufuegen, "OK" + gid[:3].upper(), "X", True, "x", [gid])
+    check(f"echte Gruppen-Kennung wird ANGENOMMEN ({gid})", isinstance(r, dict), f"abgewiesen: {r}")
+    if isinstance(r, dict):
+        cfb.entfernen(r["id"])
+
+# ⚠ ALTBESTAND BEKOMMT KEINE ERFUNDENE ZUORDNUNG. Ein Eintrag ohne `gruppen`
+# bleibt, wie er ist – die Oberflaeche benennt ihn.
+cfb._pfad().write_text(json.dumps({"version": 1, "bereiche": [
+    {"id": "alt1", "typ": "space", "key": "ALT", "name": "Alt", "inkl_unter": True}]}),
+    encoding="utf-8")
+alt_liste = cfb.liste()
+check("Altbestand bleibt lesbar", len(alt_liste) == 1)
+check("⚠ und bekommt KEINE geratene Zuordnung",
+      "gruppen" not in alt_liste[0], str(alt_liste[0].get("gruppen")))
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -284,6 +348,59 @@ check("⚠ POST: Skill/Konfiguration werden VOR dem Einbinden geprueft",
       i_akt >= 0 and i_add >= 0 and i_akt < i_add, f"{i_akt} / {i_add}")
 check("POST: der Name kommt aus dem gefundenen Bereich",
       "treffer.get('name')" in pr, "Name nicht aus der Sichtbarkeitsliste")
+
+# ── Wissensgruppen-Pflicht am Endpunkt (Vorgabe 2026-09-22) ─────────────
+# ⚠ `groups` IST DER EINE WERT, DER AUS DEM RUMPF KOMMEN DARF – er ist die
+# Auswahl des Benutzers. Was ihn ungefaehrlich macht, ist die Pruefung dahinter:
+# `_wissen_check_groups` laesst NUR Gruppen aus dem Bereich des Anmeldenden zu.
+check("POST: die Wissensgruppen werden aus dem Rumpf gelesen",
+      "body.get('groups')" in pr, "kein groups im Rumpf")
+# ⚠ LIVE GEMESSEN (2026-09-22): `["", "  "]` ueberlebt ein blosses `if g`, und
+# `_wissen_check_groups` meldet dann "Keine Berechtigung fuer Gruppe(n):   " –
+# richtig abgewiesen, aber der Grund schickt an die falsche Stelle.
+check("⚠ POST: die Kennungen werden GETRIMMT, nicht nur auf Falsyness gefiltert",
+      ".strip()" in pr and "req_groups" in pr,
+      "sonst laeuft eine leere Eingabe in eine Rechte-Meldung")
+
+# Die Gegenprobe dazu laeuft ueber den geschnittenen Rumpf: sie misst, welcher
+# Grund herauskommt. Hier genuegt die Regel – den Grund messen Live-Probe und
+# Modul-Test (Abschnitt 2b).
+_lz = [n for n in ast.walk(POST) if isinstance(n, ast.Assign)
+       and any(isinstance(t, ast.Name) and t.id == "req_groups" for t in n.targets)]
+check("req_groups wird genau einmal belegt", len(_lz) == 1, f"{len(_lz)}x")
+check("und die Belegung trimmt jede Kennung",
+      len(_lz) == 1 and "strip()" in ast.unparse(_lz[0]),
+      ast.unparse(_lz[0]) if _lz else "")
+i_grp = folge.index("_wissen_check_groups") if "_wissen_check_groups" in folge else -1
+check("⚠ POST: die Zuordnung wird gegen den Bereich des Nutzers geprueft", i_grp >= 0,
+      "_wissen_check_groups fehlt – eine eigene Fassung liefe auseinander")
+check("⚠ POST: die Gruppenpruefung steht VOR dem Einbinden",
+      i_grp >= 0 and i_add >= 0 and i_grp < i_add, f"{i_grp} / {i_add}")
+# Billig vor teuer: die Gruppenpruefung ist oertlich, `_wissen_visible_spaces`
+# eine Netzrundreise zu Confluence.
+check("POST: die Gruppenpruefung steht VOR dem Confluence-Abruf",
+      i_grp >= 0 and i_sicht >= 0 and i_grp < i_sicht, f"{i_grp} / {i_sicht}")
+_add_call = next((n for n in ast.walk(POST) if isinstance(n, ast.Call)
+                  and isinstance(n.func, ast.Attribute) and n.func.attr == "hinzufuegen"), None)
+check("⚠ POST: die Gruppen werden wirklich UEBERGEBEN (nicht nur geprueft)",
+      _add_call is not None and any(
+          isinstance(a, ast.Name) and a.id == "req_groups" for a in _add_call.args),
+      ast.unparse(_add_call) if _add_call else "kein Aufruf")
+
+# Die Anzeigenamen der Gruppen kommen vom SERVER – und aus ALLEN Gruppen.
+_mg = next((k for k in ast.walk(ast.parse(MAIN))
+            if isinstance(k, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and k.name == "_cfb_mit_gruppen"), None)
+check("_cfb_mit_gruppen vorhanden", _mg is not None)
+_mgq = ast.unparse(_mg) if _mg else ""
+check("⚠ die Namen kommen aus ALLEN Wissensgruppen, nicht aus dem Bereich des Abrufers",
+      "list_groups" in _mgq and "_editable_groups_for" not in _mgq,
+      "sonst saehe ein Editor die Zuordnung eines Kollegen als geloeschte Gruppe")
+check("eine Kennung ohne Gruppe bleibt aussen vor (die Oberflaeche benennt sie)",
+      "gruppen_info" in _mgq)
+for nm, k in [("GET", GET), ("POST", POST), ("DELETE", DEL)]:
+    check(f"{nm}: liefert die Bereiche MIT Gruppennamen",
+          "_cfb_mit_gruppen" in rumpf(k), "nicht angereichert")
 
 # GET darf auch im Ruhezustand 200 antworten – sonst waere ein voellig
 # normaler Zustand (Skill aus) eine Stoerungsmeldung.
@@ -361,6 +478,48 @@ check("⚠ die Reichweite steht als WORT in der Zeile, nicht nur als Farbe",
 check("EINE Quelle fuer die Bereichsliste (der Container fragt nicht selbst ab)",
       JS.count("/api/wissen/confluence/spaces") == 1)
 check("der Hinweis sagt, dass der Abgleich noch fehlt", "wissen.cfb_soon" in HTML)
+
+# ── Wissensgruppen-Pflicht in der Oberflaeche (Vorgabe 2026-09-22) ──────
+i_grp_box = HTML.find('id="wi-cfb-groups"')
+i_pick = HTML.find('class="wi-cfb-pick"')
+check("Wissensgruppen-Reihe im Container", i_grp_box > 0)
+check("⚠ sie steht UEBER der Auswahlzeile (alles, was der Knopf braucht, darueber)",
+      0 < i_grp_box < i_pick, f"groups={i_grp_box} pick={i_pick}")
+check("sie ist beschriftet (Pflichtfeld)", 'data-i18n="wissen.groups_label"' in block)
+check("der Hinweis erklaert, wofuer die Zuordnung ist", "wissen.cfb_groups_hint" in HTML)
+check("die Kaestchen entstehen ueber das vorhandene groupBoxes()",
+      "groupBoxes('cfb')" in JS, "eigene Fassung statt der gemeinsamen Regel")
+check("⚠ der Knopf verlangt eine Wissensgruppe",
+      "checkedGroups('cfb')" in JS and re.search(r"btn\.disabled\s*=[^;]*!grp", JS) is not None,
+      "cfbAddKnopf prueft die Auswahl nicht")
+check("⚠ und der Grund unterscheidet die beiden Faelle (Bereich / Gruppe)",
+      "wissen.cfb_need_group" in JS and "wissen.cfb_add_hint" in JS)
+_snd = re.search(r"JSON\.stringify\(\{ key: key[^}]*\}\)", JS)
+check("⚠ die Zuordnung geht wirklich mit dem Rumpf raus",
+      _snd is not None and "groups:" in _snd.group(0),
+      _snd.group(0) if _snd else "kein Rumpf gefunden")
+check("die Kaestchen geben den Knopf frei (delegiert am Container)",
+      re.search(r"cfbGrp\.addEventListener\('change'", JS) is not None)
+# ⚠ Ein zweites Zeichnen wuerde die Haekchen verwerfen: cfbRender() laeuft nach
+# JEDEM Einbinden und Entfernen.
+_rg = re.search(r"function cfbRenderGroups\(\)\s*\{([\s\S]*?)\n    \}", JS)
+check("cfbRenderGroups vorhanden", _rg is not None)
+check("⚠ die Gruppen werden NICHT bei jedem Render neu gezeichnet",
+      _rg is not None and "querySelector('.wi-grp-cfb')" in _rg.group(1) and "return" in _rg.group(1),
+      "sonst ist die Auswahl nach dem Einbinden weg")
+check("die Liste zeigt die zugeordneten Gruppen",
+      "gruppen_info" in JS and "wi-chip" in JS.split("wi-cfb-scope-tag")[0][-1500:])
+check("⚠ eine Einbindung OHNE Zuordnung wird BENANNT (Altbestand)",
+      "wissen.cfb_nogroup" in JS and "wi-cfb-nogrp" in JS)
+check("und eine geloeschte Gruppe ebenfalls", "wissen.cfb_grp_gone" in JS)
+check("die Marke dafuer ist gestaltet (nicht nur eine Klasse ohne Regel)",
+      ".wi-cfb-nogrp" in HTML)
+# Der Beschriftungs-Schluessel ist derselbe wie im Extraktor – gleiche
+# Bedeutung, gleicher Text. Er faellt nicht unter das cfb_-Muster von
+# Abschnitt 6 und wird deshalb hier geprueft.
+check("wissen.groups_label steht in DE UND EN",
+      (ROOT / "frontend" / "js" / "i18n.js").read_text(encoding="utf-8")
+      .count("'wissen.groups_label':") == 2)
 
 
 # ════════════════════════════════════════════════════════════════════════════

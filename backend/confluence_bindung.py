@@ -19,6 +19,23 @@ untergeordnete Bereiche – was immer Confluence unter dem Eintrag fuehrt), ohne
 Haken nur die Basis selbst. **Vorgabe ist AN.** Das Feld wird hier nur
 gespeichert; ausgewertet wird es erst vom spaeteren Abgleich.
 
+⚠ JEDE EINBINDUNG TRAEGT MINDESTENS EINE WISSENSGRUPPE (Vorgabe des
+Betreibers 2026-09-22). Ohne sie waere beim spaeteren Abgleich nicht
+entscheidbar, WOHIN das geholte Wissen gehoert – und die Zuordnung liesse sich
+danach nur noch raten. ``gruppen`` haelt die Kennungen; ob der Anlegende sie
+ueberhaupt beschreiben darf, prueft der Endpunkt (``_wissen_check_groups``) –
+dieses Modul kennt die Wissensgruppen nicht und soll sie nicht kennen.
+
+Die leere Liste wird hier trotzdem ABGEWIESEN, und das ist keine Doppelung des
+Endpunkts, sondern die Schranke an der ABLAGE: ein kuenftiger zweiter Aufrufer
+(Abgleich, Migrationsskript, Werkzeug) kann damit keinen Eintrag anlegen, der
+fachlich unbrauchbar ist. Gemessen wird sie am direkten Modulaufruf.
+
+⚠ ALTBESTAND HAT KEIN ``gruppen`` – und bekommt hier auch keines. Ein geratener
+Wert waere eine Zuordnung, die niemand getroffen hat; die Oberflaeche BENENNT
+solche Eintraege stattdessen („keiner Wissensgruppe zugeordnet"). Wer sie
+zuordnen will, loest die Einbindung und bindet neu ein.
+
 ⚠ DIE LISTE IST GLOBAL, NICHT JE BENUTZER. Sie speist die gemeinsame
 Wissensdatenbank – zwei Benutzer koennen nicht verschiedene Einbindungen fuer
 denselben Bestand haben. ``von`` haelt nur fest, WER eingebunden hat (fuer die
@@ -52,6 +69,12 @@ _SPERRE = threading.Lock()
 MAX_BEREICHE = 50
 KEY_MAX = 100
 NAME_MAX = 200
+# Deckel fuer die Wissensgruppen einer Einbindung. Die harte Schranke ist
+# `_wissen_check_groups` im Endpunkt (nur Gruppen aus dem eigenen Bereich, und
+# die gibt es wirklich); das hier faengt Muell und Ueberlaenge ab, BEVOR etwas
+# in die Ablage geschrieben wird.
+MAX_GRUPPEN = 50
+GRUPPE_MAX = 80
 
 # ⚠ DIE ZEICHENMENGE IST GEMESSEN, NICHT GERATEN. Eine erste Fassung liess
 # `@` weg – am echten Bestand (489 Bereiche) fielen damit **185** durch, naemlich
@@ -132,6 +155,40 @@ def _kuerzen(s, maxlen: int) -> str:
     return (str(s or "").strip())[:maxlen]
 
 
+def _gruppen_pruefen(gruppen) -> list[str]:
+    """Kennungen der Wissensgruppen normieren und pruefen. Wirft ``BindungFehler``.
+
+    ⚠ MINDESTENS EINE IST PFLICHT. Eine Einbindung ohne Ziel kann der spaetere
+    Abgleich nicht ausfuehren – er wuesste nicht, welcher Wissensgruppe das
+    geholte Wissen gehoert.
+
+    Die FORM wird bewusst nur grob geprueft (Laenge, keine Steuerzeichen): eng
+    an der heutigen Id-Vergabe (`knowledge_groups._slugify` liefert `[a-z0-9-]+`)
+    wuerde diese Regel bei der naechsten Aenderung dort gueltige Einbindungen
+    abweisen. Ob es die Gruppe WIRKLICH gibt und ob der Anlegende sie beschreiben
+    darf, entscheidet ohnehin der Endpunkt.
+    """
+    if gruppen is None:
+        gruppen = []
+    if isinstance(gruppen, str) or not isinstance(gruppen, (list, tuple)):
+        raise BindungFehler("Die Wissensgruppen wurden in unerwarteter Form uebergeben.")
+    aus: list[str] = []
+    for g in gruppen:
+        k = str(g or "").strip()
+        if not k:
+            continue
+        if len(k) > GRUPPE_MAX or any(ord(c) < 32 for c in k):
+            raise BindungFehler("Eine Wissensgruppen-Kennung hat eine unerwartete Form.")
+        if k not in aus:          # Dubletten still zusammenfassen, Reihenfolge behalten
+            aus.append(k)
+    if not aus:
+        raise BindungFehler("Bitte mindestens eine Wissensgruppe zuordnen.")
+    if len(aus) > MAX_GRUPPEN:
+        raise BindungFehler(
+            "Mehr als %d Wissensgruppen sind nicht vorgesehen." % MAX_GRUPPEN)
+    return aus
+
+
 def liste() -> list[dict]:
     """Alle eingebundenen Bereiche, in der Reihenfolge des Einbindens."""
     with _SPERRE:
@@ -143,12 +200,19 @@ def ist_eingebunden(key: str) -> bool:
     return bool(k) and any((b.get("key") or "") == k for b in liste())
 
 
-def hinzufuegen(key: str, name: str, inkl_unter: bool, von: str = "") -> dict:
+def hinzufuegen(key: str, name: str, inkl_unter: bool, von: str = "",
+                gruppen=None) -> dict:
     """Einen Bereich einbinden. Wirft ``BindungFehler`` mit Klartext.
 
     ``name`` ist der ANZEIGENAME und gehoert vom Aufrufer aus der Liste der
     sichtbaren Bereiche geholt (siehe Modulkopf). Fehlt er, steht der Schluessel
     da – das ist haesslich, aber keine Falschaussage.
+
+    ``gruppen`` sind die Kennungen der Wissensgruppen, denen der Bereich
+    zugeordnet wird – **mindestens eine**. Der Vorgabewert ``None`` ist kein
+    Entgegenkommen: er laeuft in dieselbe Abweisung wie eine leere Liste, damit
+    ein Aufrufer, der sie schlicht vergisst, LAUT scheitert statt still einen
+    unbrauchbaren Eintrag anzulegen.
     """
     # ⚠ DER SCHLUESSEL WIRD NIE GEKUERZT, SONDERN ABGEWIESEN. Eine gekuerzte
     # Kennung ist eine ANDERE Kennung: sie sieht in der Liste plausibel aus,
@@ -160,6 +224,9 @@ def hinzufuegen(key: str, name: str, inkl_unter: bool, von: str = "") -> dict:
         raise BindungFehler("Es wurde kein Bereich gewaehlt.")
     if len(k) > KEY_MAX or not _KEY_RE.match(k):
         raise BindungFehler("Der Bereichs-Schluessel hat eine unerwartete Form.")
+    # VOR der Sperre: die Pruefung ist rein rechnerisch und soll den Bestand
+    # nicht blockieren, waehrend sie eine Fehleingabe zurueckweist.
+    gr = _gruppen_pruefen(gruppen)
     with _SPERRE:
         d = _laden()
         bereiche = d["bereiche"]
@@ -183,6 +250,8 @@ def hinzufuegen(key: str, name: str, inkl_unter: bool, von: str = "") -> dict:
             # ``is True`` und nicht ``bool()``: ein "ja" oder eine 1 aus einer
             # von Hand geschriebenen Datei ist keine bewusste Entscheidung.
             "inkl_unter": inkl_unter is True,
+            # Die Zuordnung, ohne die der spaetere Abgleich kein Ziel haette.
+            "gruppen": gr,
             "angelegt": datetime.now().isoformat(timespec="seconds"),
             "von": _kuerzen(von, 120),
         }

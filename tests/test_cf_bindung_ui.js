@@ -52,7 +52,9 @@ const ICO  = fs.readFileSync(path.join(ROOT, 'frontend/js/icons.js'), 'utf8');
  * `bindung` – was /api/wissen/confluence/bindung liefert
  * Gemerkt werden alle Aufrufe, damit die Pruefungen den RUMPF messen koennen. */
 async function seite(opt) {
-    const o = Object.assign({ spaces: [], bindung: { ok: true, aktiv: true, bereiche: [] } }, opt || {});
+    const o = Object.assign({ spaces: [], bindung: { ok: true, aktiv: true, bereiche: [] },
+                             groups: [{ id: 'g1', name: 'Technik', color: '#888', folders: ['data/rag/x'] }] },
+                           opt || {});
     const dom = new JSDOM(HTML, { url: 'https://example.invalid/wissen', runScripts: 'outside-only' });
     const win = dom.window;
     win.localStorage.setItem('jarvis_token', 'T');
@@ -65,8 +67,14 @@ async function seite(opt) {
         rufe.push({ pfad, m, body });
         const j = (d) => Promise.resolve({ status: 200, ok: true, json: () => Promise.resolve(d) });
         if (pfad === '/api/wissen/scope')
+            /* ⚠ VORGABE IST EINE Gruppe – `groupBoxes` hakt sie dann von selbst
+               an (Bestandsverhalten: bei genau einer gibt es nichts zu waehlen).
+               Waere der Vorgabe-Aufbau zweigruppig, waere der Uebernehmen-Knopf
+               in JEDEM Bestandsfall gesperrt und die Pruefungen darunter
+               maessen etwas anderes, als sie behaupten. Der Fall MIT Auswahl
+               wird in Abschnitt 5 ausdruecklich hergestellt. */
             return j({ ok: true, user: 'a.bender', is_editor: false,
-                       groups: [{ id: 'g1', name: 'Technik', color: '#888', folders: ['data/rag/x'] }],
+                       groups: o.groups,
                        folders: [{ path: 'data/rag/x', name: 'x', display: 'x', root: 'data/rag/x', depth: 0 }] });
         if (pfad === '/api/wissen/confluence/spaces')
             return o.spacesFehler ? Promise.reject(new Error('weg'))
@@ -77,7 +85,12 @@ async function seite(opt) {
                 if (o.postFehler) return j({ ok: false, error: 'Bereich nicht sichtbar/erlaubt.' });
                 const sp = o.spaces.filter(s => s.key === body.key)[0] || { name: body.key };
                 const neu = { id: 'id-' + body.key, typ: 'space', key: body.key,
-                              name: sp.name, inkl_unter: body.inkl_unter === true };
+                              name: sp.name, inkl_unter: body.inkl_unter === true,
+                              gruppen: body.groups || [],
+                              gruppen_info: (body.groups || []).map(function (id) {
+                                  const g = o.groups.filter(x => x.id === id)[0];
+                                  return { id: id, name: g ? g.name : id, color: g ? g.color : '' };
+                              }) };
                 o.bindung.bereiche = (o.bindung.bereiche || []).concat([neu]);
                 return j({ ok: true, bereich: neu, bereiche: o.bindung.bereiche });
             }
@@ -339,7 +352,152 @@ section('4. Entfernen – der Rueckweg');
 }
 
 // ════════════════════════════════════════════════════════════════════════
-section('5. Fremdtext und Sprachwechsel');
+section('5. Wissensgruppen-Pflicht (Vorgabe 2026-09-22)');
+const ZWEI = [{ id: 'g1', name: 'Technik', color: '#888', folders: ['data/rag/x'] },
+              { id: 'g2', name: 'Vertrieb', color: '#4a8', folders: ['data/rag/x'] }];
+{
+    // Eine einzige Gruppe: `groupBoxes` hakt sie an – es gibt nichts zu waehlen.
+    const s = await seite({ spaces: SPACES });
+    const box = s.doc.getElementById('wi-cfb-groups');
+    check('Wissensgruppen-Reihe wird gezeichnet', box && box.querySelectorAll('.wi-grp-cfb').length === 1,
+          box ? `${box.querySelectorAll('.wi-grp-cfb').length}` : 'fehlt');
+    check('der Gruppenname steht dabei', /Technik/.test(box.textContent), box.textContent.trim());
+    check('bei genau EINER Gruppe ist sie vorbelegt',
+          box.querySelector('.wi-grp-cfb').checked === true);
+    s.zu();
+}
+{
+    // ⚠ DER GEMELDETE FALL: ohne Zuordnung darf nichts gespeichert werden.
+    const s = await seite({ spaces: SPACES, groups: ZWEI });
+    const sel = s.doc.getElementById('wi-cfb-space');
+    const btn = s.doc.getElementById('wi-cfb-add');
+    const box = s.doc.getElementById('wi-cfb-groups');
+    const kaesten = box.querySelectorAll('.wi-grp-cfb');
+    check('bei MEHREREN Gruppen ist keine vorbelegt', kaesten.length === 2
+          && !kaesten[0].checked && !kaesten[1].checked);
+
+    sel.value = 'NEXUS';
+    sel.dispatchEvent(new s.win.Event('change', { bubbles: true }));
+    await warten(20);
+    check('⚠ Bereich gewaehlt, aber KEINE Gruppe -> Knopf bleibt gesperrt',
+          btn.disabled === true);
+    // ⚠ DER GRUND MUSS DER RICHTIGE SEIN: "Bereich auswaehlen" schickt hier an
+    // die falsche Stelle – der Bereich steht ja.
+    check('⚠ und der title nennt die WISSENSGRUPPE, nicht den Bereich',
+          /Wissensgruppe/i.test(btn.title || ''), `title="${btn.title}"`);
+
+    // Trotzdem klicken: es darf nichts rausgehen.
+    btn.click();
+    await warten(40);
+    check('⚠ ein Klick darauf loest keinen Serveraufruf aus',
+          s.rufe.filter(r => r.m === 'POST').length === 0,
+          JSON.stringify(s.rufe.filter(r => r.m === 'POST')));
+
+    // Haken setzen -> der Knopf geht auf.
+    kaesten[1].checked = true;
+    kaesten[1].dispatchEvent(new s.win.Event('change', { bubbles: true }));
+    await warten(20);
+    check('⚠ mit gewaehlter Gruppe ist der Knopf frei', btn.disabled === false);
+    check('und der title ist dann leer', !btn.title);
+
+    btn.click();
+    await warten(60);
+    const post = s.rufe.filter(r => r.pfad === '/api/wissen/confluence/bindung' && r.m === 'POST');
+    check('genau EIN POST', post.length === 1, `${post.length}`);
+    check('⚠ die gewaehlte Wissensgruppe geht mit dem Rumpf raus',
+          post[0] && JSON.stringify(post[0].body.groups) === JSON.stringify(['g2']),
+          JSON.stringify(post[0] && post[0].body));
+    check('die Zuordnung steht in der Liste',
+          /Vertrieb/.test(s.doc.getElementById('wi-cfb-list').textContent),
+          s.doc.getElementById('wi-cfb-list').textContent.trim());
+
+    // ⚠ Die Auswahl muss den Neuaufbau ueberleben: cfbRender() laeuft nach
+    // JEDEM Einbinden. Wer mehrere Bereiche derselben Gruppe zuordnet, soll
+    // sie nicht jedes Mal neu setzen muessen.
+    const k2 = s.doc.querySelectorAll('#wi-cfb-groups .wi-grp-cfb');
+    check('⚠ die Gruppen-Auswahl ueberlebt das Einbinden',
+          k2.length === 2 && k2[1].checked === true,
+          Array.from(k2).map(c => c.value + '=' + c.checked).join(','));
+    sel.value = 'OPS';
+    sel.dispatchEvent(new s.win.Event('change', { bubbles: true }));
+    await warten(20);
+    check('⚠ und der Knopf ist ohne erneutes Anhaken sofort frei', btn.disabled === false);
+    btn.click();
+    await warten(60);
+    const post2 = s.rufe.filter(r => r.pfad === '/api/wissen/confluence/bindung' && r.m === 'POST');
+    check('der zweite Bereich traegt dieselbe Zuordnung',
+          post2[1] && JSON.stringify(post2[1].body.groups) === JSON.stringify(['g2']),
+          JSON.stringify(post2[1] && post2[1].body));
+    s.zu();
+}
+{
+    // Mehrfachauswahl
+    const s = await seite({ spaces: SPACES, groups: ZWEI });
+    const sel = s.doc.getElementById('wi-cfb-space');
+    const btn = s.doc.getElementById('wi-cfb-add');
+    s.doc.querySelectorAll('#wi-cfb-groups .wi-grp-cfb').forEach(c => {
+        c.checked = true; c.dispatchEvent(new s.win.Event('change', { bubbles: true }));
+    });
+    sel.value = 'NEXUS';
+    sel.dispatchEvent(new s.win.Event('change', { bubbles: true }));
+    await warten(20);
+    btn.click();
+    await warten(60);
+    const post = s.rufe.filter(r => r.m === 'POST');
+    check('mehrere Gruppen gehen gemeinsam raus',
+          post[0] && JSON.stringify(post[0].body.groups) === JSON.stringify(['g1', 'g2']),
+          JSON.stringify(post[0] && post[0].body));
+    check('beide stehen in der Liste',
+          /Technik/.test(s.doc.getElementById('wi-cfb-list').textContent)
+          && /Vertrieb/.test(s.doc.getElementById('wi-cfb-list').textContent));
+    s.zu();
+}
+{
+    // ⚠ ALTBESTAND (vor der Pflicht) wird BENANNT, nicht verschwiegen – eine
+    // Einbindung ohne Ziel kann der spaetere Abgleich nicht ausfuehren.
+    const s = await seite({ spaces: SPACES, bindung: { ok: true, aktiv: true, bereiche: [
+        { id: 'a', key: 'NEXUS', name: 'NEXUS Dokumentation', inkl_unter: true }] } });
+    const li = s.doc.getElementById('wi-cfb-list');
+    check('⚠ Einbindung ohne Zuordnung wird als solche benannt',
+          /keiner Wissensgruppe zugeordnet/.test(li.textContent), li.textContent.trim());
+    // ⚠ NIE UNGEPRUEFT DEREFERENZIEREN: fehlt die Marke, WIRFT `.title` – der
+    // Lauf bricht dann ohne Bilanz ab und ist von "nicht gelaufen" nicht zu
+    // unterscheiden. Genau so hat die Gegenprobe "Marke raus" statt 2 FAIL
+    // einen Abbruch gemeldet (Register).
+    const marke = li.querySelector('.wi-cfb-nogrp');
+    check('und die Marke ist als solche gestaltet', !!marke);
+    check('der Hinweis nennt den Weg (entfernen und neu einbinden)',
+          !!marke && /neu einbinden|Entferne/.test(marke.title || ''),
+          marke ? marke.title : 'keine Marke');
+    s.zu();
+}
+{
+    // Eine Gruppe wurde geloescht: 2 Kennungen, nur 1 aufloesbar.
+    const s = await seite({ spaces: SPACES, bindung: { ok: true, aktiv: true, bereiche: [
+        { id: 'a', key: 'NEXUS', name: 'N', inkl_unter: true, gruppen: ['g1', 'weg'],
+          gruppen_info: [{ id: 'g1', name: 'Technik', color: '#888' }] }] } });
+    const li = s.doc.getElementById('wi-cfb-list');
+    check('die vorhandene Gruppe steht da', /Technik/.test(li.textContent));
+    check('⚠ und die geloeschte wird BENANNT (nicht verschwiegen)',
+          /1 .*gel(ö|oe)scht/i.test(li.textContent), li.textContent.trim());
+    s.zu();
+}
+{
+    // ⚠ HALBER DEPLOY: ein aelteres Backend liefert `gruppen`, aber kein
+    // `gruppen_info`. Dann stehen die Kennungen da – haesslich, aber KEINE
+    // Falschaussage "keiner Gruppe zugeordnet".
+    const s = await seite({ spaces: SPACES, bindung: { ok: true, aktiv: true, bereiche: [
+        { id: 'a', key: 'NEXUS', name: 'N', inkl_unter: true, gruppen: ['g1'] }] } });
+    const li = s.doc.getElementById('wi-cfb-list');
+    check('⚠ ohne gruppen_info werden die Kennungen gezeigt', /g1/.test(li.textContent),
+          li.textContent.trim());
+    check('⚠ und NICHT faelschlich "keiner Wissensgruppe zugeordnet"',
+          !/keiner Wissensgruppe/.test(li.textContent), li.textContent.trim());
+    s.zu();
+}
+
+// ════════════════════════════════════════════════════════════════════════
+section('6. Fremdtext und Sprachwechsel');
 {
     const s = await seite({ spaces: [{ key: 'X', name: '<img src=x onerror=alert(1)>' }],
         bindung: { ok: true, aktiv: true, bereiche: [

@@ -1292,6 +1292,11 @@
     var _cfbAktiv = false;       // Skill installiert+aktiv UND konfiguriert
     var _cfbBereiche = null;     // eingebundene Bereiche (null = noch nicht geladen)
     var _cfbSpacesFertig = false; // Bereichsliste des Extraktors durchgelaufen?
+    // ⚠ EIGENER MERKER STATT NUR DES ARGUMENTS von cfbAddKnopf(): waehrend des
+    // POST kann der Benutzer ein Wissensgruppen-Kaestchen umstellen, und dessen
+    // change-Handler ruft cfbAddKnopf() OHNE Argument - der Knopf waere wieder
+    // frei und ein zweiter POST moeglich, mitten im ersten.
+    var _cfbLaeuft = false;
 
     function cfbStatus(msg, warn) {
         var el = $('wi-cfb-status');
@@ -1328,8 +1333,31 @@
         // Datenlage auftaucht und verschwindet, ist unerklaerbar.
         if (!_cfbAktiv) { sec.style.display = 'none'; return; }
         sec.style.display = '';
+        cfbRenderGroups();
         cfbRenderPick();
         cfbRenderList();
+    }
+
+    // ⚠ MINDESTENS EINE WISSENSGRUPPE IST PFLICHT (Vorgabe 2026-09-22) - sonst
+    // waere beim spaeteren Abgleich nicht entscheidbar, WOHIN das geholte
+    // Wissen gehoert. Angeboten wird der eigene Bereich (`SCOPE.groups`), also
+    // dieselbe Menge wie im Informationsextraktor darueber.
+    //
+    // ⚠ NUR EINMAL ZEICHNEN. cfbRender() laeuft nach JEDEM Einbinden und
+    // Entfernen; wuerde hier neu gezeichnet, waere die Haekchen-Auswahl danach
+    // weg - und wer mehrere Bereiche derselben Gruppe zuordnet, muesste sie
+    // jedes Mal von vorn setzen.
+    //
+    // Ist der eigene Bereich leer, bleibt die Reihe leer und der Knopf gesperrt
+    // MIT GRUND. Eine eigene Erklaerung dafuer gibt es bewusst nicht: ohne
+    // Wissensgruppe antwortet der Endpunkt mit 403, der Container erscheint
+    // dann gar nicht - ein Text fuer einen unerreichbaren Zustand waere toter
+    // Code.
+    function cfbRenderGroups() {
+        var box = $('wi-cfb-groups');
+        if (!box) return;
+        if (box.querySelector('.wi-grp-cfb')) return;
+        box.innerHTML = groupBoxes('cfb');
     }
 
     function cfbRenderPick() {
@@ -1366,8 +1394,14 @@
         if (!btn) return;
         var sel = $('wi-cfb-space');
         var key = sel ? sel.value : '';
-        btn.disabled = !!laeuft || !key || (sel && sel.disabled);
-        btn.title = btn.disabled ? t('wissen.cfb_add_hint') : '';
+        var grp = checkedGroups('cfb').length;
+        btn.disabled = !!laeuft || _cfbLaeuft || !key || !grp || (sel && sel.disabled);
+        // ⚠ DER GRUND MUSS DER RICHTIGE SEIN. Ein Knopf, der "Bereich waehlen"
+        // sagt, obwohl der Bereich steht und die Wissensgruppe fehlt, schickt
+        // den Benutzer an die falsche Stelle - dieselbe Klasse wie
+        // "mount error(13)": richtig und trotzdem nutzlos.
+        btn.title = !btn.disabled ? ''
+            : (!key ? t('wissen.cfb_add_hint') : t('wissen.cfb_need_group'));
     }
 
     function cfbRenderList() {
@@ -1382,12 +1416,35 @@
             // Die Reichweite steht als WORT da, nicht nur als Farbe oder Haken -
             // sonst ist "mit Unterseiten" von "ohne" nicht zu unterscheiden.
             var tag = b.inkl_unter ? t('wissen.cfb_scope_sub') : t('wissen.cfb_scope_top');
+            // ⚠ DIE NAMEN KOMMEN VOM SERVER (`gruppen_info`), nicht aus
+            // SCOPE.groups: der Client kennt nur SEINEN Bereich, und die
+            // Zuordnung eines Kollegen saehe sonst wie eine geloeschte Gruppe
+            // aus. Fehlt das Feld ganz (aelteres Backend, halber Deploy),
+            // stehen die Kennungen da - haesslich, aber keine Falschaussage.
+            var ids = b.gruppen || [];
+            var gi = b.gruppen_info;
+            if (!gi) gi = ids.map(function (id) { return { id: id, name: id, color: '' }; });
+            var chips = gi.map(function (g) {
+                return '<span class="wi-chip" style="border-color:' + esc(g.color || 'var(--border)')
+                    + ';font-size:0.7rem;">' + esc(g.name || g.id) + '</span>';
+            }).join(' ');
+            // Keine Zuordnung (Altbestand vor 2026-09-22) bzw. eine Gruppe, die
+            // es nicht mehr gibt: beides wird BENANNT statt verschwiegen - eine
+            // Einbindung ohne Ziel kann der spaetere Abgleich nicht ausfuehren.
+            if (!gi.length) {
+                chips = '<span class="wi-cfb-nogrp" title="' + esc(t('wissen.cfb_nogroup_hint'))
+                    + '">' + esc(t('wissen.cfb_nogroup')) + '</span>';
+            } else if (gi.length < ids.length) {
+                chips += ' <span class="wi-cfb-nogrp">'
+                    + esc(t('wissen.cfb_grp_gone', { n: ids.length - gi.length })) + '</span>';
+            }
             return '<div class="wi-item" data-id="' + esc(b.id) + '"'
                 + ' data-label="' + esc(b.name || b.key) + '">'
                 + '<div class="wi-fmeta">'
                 + '<span class="nm">' + esc(b.name || b.key) + '</span>'
                 + '<div class="wi-fpath">' + esc(b.key) + '</div>'
                 + '</div>'
+                + chips
                 + '<span class="wi-cfb-scope-tag">' + esc(tag) + '</span>'
                 + '<button type="button" class="sec-btn small danger wi-cfb-del" title="'
                 + esc(t('wissen.cfb_del')) + '">' + JarvisIcons.trash() + '</button>'
@@ -1415,14 +1472,21 @@
         if (!key) return;
         var sel = $('wi-cfb-space');
         var sub = !!(($('wi-cfb-sub') || {}).checked);
+        var grp = checkedGroups('cfb');
+        // Zweite Schranke neben dem gesperrten Knopf: das Kaestchen laesst sich
+        // waehrend eines Laufs umstellen, und der Server weist es ohnehin ab -
+        // aber der Benutzer soll den Grund HIER lesen, nicht als Serverfehler.
+        if (!grp.length) { cfbStatus('⚠️ ' + t('wissen.cfb_need_group'), true); return; }
         if (sel) sel.disabled = true;
+        _cfbLaeuft = true;
         cfbAddKnopf(true);
         cfbStatus(t('common.loading'));
         fetch('/api/wissen/confluence/bindung', {
             method: 'POST', headers: authH({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ key: key, inkl_unter: sub })
+            body: JSON.stringify({ key: key, inkl_unter: sub, groups: grp })
         }).then(function (r) { return r.json(); })
           .then(function (d) {
+              _cfbLaeuft = false;
               if (!d || !d.ok) {
                   cfbStatus('⚠️ ' + ((d && d.error) || t('wissen.cfb_err')), true);
                   cfbRenderPick();   // Auswahl zuruecksetzen, Pulldown wieder frei
@@ -1435,7 +1499,10 @@
                         { n: (d.bereich && d.bereich.name) || key }));
               cfbRender();
           })
-          .catch(function () { cfbStatus('⚠️ ' + t('wissen.cfb_err'), true); cfbRenderPick(); });
+          .catch(function () {
+              _cfbLaeuft = false;
+              cfbStatus('⚠️ ' + t('wissen.cfb_err'), true); cfbRenderPick();
+          });
     }
 
     function cfbEntfernen(id, label) {
@@ -1823,6 +1890,13 @@
         if (cfbBtn) cfbBtn.addEventListener('click', function () {
             cfbAdd(($('wi-cfb-space') || {}).value);
         });
+        // Wissensgruppen-Pflicht: der Knopf folgt der Auswahl. DELEGIERT am
+        // Container - die Kaestchen entstehen erst beim Zeichnen, ein direkt
+        // gebundener Handler waere danach weg. Nur auf `change` hoeren und NIE
+        // selbst umschalten: die Kaestchen stecken in einem <label>, der
+        // Browser schaltet bereits um (am AD-Picker bezahlt).
+        var cfbGrp = $('wi-cfb-groups');
+        if (cfbGrp) cfbGrp.addEventListener('change', function () { cfbAddKnopf(); });
 
         var cfRefresh = $('wi-cf-refresh'); if (cfRefresh) cfRefresh.addEventListener('click', function () { loadCfSpaces(true); });
 

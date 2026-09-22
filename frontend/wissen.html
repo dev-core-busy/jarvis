@@ -148,6 +148,21 @@
            Flex-Container, und ohne `flex: 0 0 auto` zoege ein Knopf mit
            Vorgabe-Flex Breite vom Pulldown ab. */
         .wi-cfb-add { flex: 0 0 auto; }
+        /* Wissensgruppen-Pflicht: Beschriftung wie im Extraktor darueber
+           (dieselbe Groesse/Farbe), damit beide Bloecke als dasselbe gelesen
+           werden. `margin-bottom: 0` am Wrap, weil der Hinweistext darunter
+           seinen eigenen Abstand mitbringt. */
+        .wi-cfb-groups-wrap { margin-top: 6px; }
+        .wi-cfb-groups-wrap > label { display: block; font-size: 0.78rem;
+                                      color: var(--text-secondary); margin-bottom: 6px; }
+        /* Eine Zuordnung, deren Gruppe es nicht mehr gibt bzw. gar keine:
+           beides ist eine AUSSAGE und darf nicht wie ein gewoehnlicher Chip
+           aussehen. `--warning` statt `--danger`: es ist ein Rueckstand, kein
+           Fehlschlag – und der Text traegt die Aussage, die Farbe ist die
+           zweite Ebene. */
+        .wi-cfb-nogrp { font-size: 0.72rem; padding: 2px 8px; border-radius: 999px;
+                        border: 1px dashed var(--warning); color: var(--text-primary);
+                        white-space: nowrap; flex: 0 0 auto; }
         .wi-cfb-scope { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto;
                         font-size: 0.85rem; color: var(--text-primary); cursor: pointer; }
         /* Reichweite als WORT, nicht nur als Farbe – dieselbe Regel wie bei den
@@ -406,6 +421,19 @@
                  geht, hätte sonst jeden überflogenen Bereich eingebunden. Der Knopf
                  bleibt sichtbar und ist ohne Auswahl GESPERRT MIT GRUND (title) –
                  ein Knopf, der je nach Datenlage verschwindet, ist unerklärbar. -->
+            <!-- ⚠ MINDESTENS EINE WISSENSGRUPPE IST PFLICHT (Vorgabe 2026-09-22).
+                 Sie steht ÜBER der Auswahlzeile, weil der Übernehmen-Knopf dort
+                 klebt: alles, was er braucht, soll darüber stehen – und der
+                 Informationsextraktor darüber ordnet die Gruppen an derselben
+                 Stelle an (erst der Bereich, dann die Aktion).
+                 Der Schlüssel `wissen.groups_label` ist bewusst DERSELBE wie
+                 dort: gleiche Bedeutung, gleicher Text – zwei Schlüssel dafür
+                 liefen beim nächsten Umformulieren auseinander. -->
+            <div class="wi-cfb-groups-wrap">
+                <label data-i18n="wissen.groups_label">Wissensgruppen (dein Bereich) *</label>
+                <div class="wi-groups" id="wi-cfb-groups"></div>
+            </div>
+            <p class="desc" data-i18n="wissen.cfb_groups_hint">Der eingebundene Bereich wird beim späteren Abgleich diesen Wissensgruppen zugeordnet.</p>
             <div class="wi-cfb-pick">
                 <select class="wi-input" id="wi-cfb-space">
                     <option value="" data-i18n="wissen.cfb_pick">– Bereich wählen –</option>
@@ -454,7 +482,7 @@
     <script src="/static/js/dlkey.js?v=2"></script>
     <script src="/static/js/cpubar.js?v=1"></script>
     <script src="/static/js/syspackages.js?v=2"></script>
-    <script src="/static/js/i18n.js?v=281"></script>
+    <script src="/static/js/i18n.js?v=282"></script>
     <script src="/static/js/theme.js?v=3"></script>
     <script src="/static/js/profile_switcher.js?v=5"></script>
     <script src="/static/js/issues.js?v=12"></script>
@@ -464,7 +492,7 @@
     <script src="/static/js/knowledge.js?v=121"></script>
     <script src="/static/js/sessions.js?v=8"></script>
     <script src="/static/js/logo_home.js?v=1"></script>
-    <script src="/static/js/wissen.js?v=48"></script>
+    <script src="/static/js/wissen.js?v=49"></script>
 <script src="/static/js/settings_btn.js?v=4"></script>
     <script src="/static/js/branding.js?v=26"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->

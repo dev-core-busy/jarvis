@@ -3913,6 +3913,94 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         </div>
                     </div>
 
+                    <!-- Bereitstellung im Netz (A). ⚠ WOZU: eine ueber den
+                         BROWSER geladene Datei traegt die Zonen-Markierung von
+                         Windows und laeuft beim ersten Start in die
+                         SmartScreen-Warnung; eine von einer Intranet-Freigabe
+                         kopierte nicht. Das ist der einzige Weg, der die
+                         Warnung wirklich abstellt – ein Zertifikat kann das
+                         seit 2024 nicht mehr (Container darunter). -->
+                    <div class="kb-section" id="am-sect-share">
+                        <div class="kb-section-header kb-collapse-header" id="am-sect-share-hdr">
+                            <h3 data-i18n="amshare.h">Bereitstellung im Netz</h3>
+                            <span class="sk-openclaw-toggle" id="am-sect-share-tog">▼</span>
+                        </div>
+                        <div class="kb-collapse-body" id="am-sect-share-body">
+                            <p class="kb-hint" data-i18n-html="amshare.intro">Liegt hier ein Pfad, zeigt die Kachel <b>AI-Maus</b> ihn statt des Download-Knopfes an. Der Grund ist die Sicherheitswarnung beim ersten Start: Windows markiert jede über den <b>Browser</b> geladene Datei, und SmartScreen fragt dann nach. Eine von einer <b>Netzfreigabe</b> kopierte Datei trägt diese Markierung nicht – die Warnung bleibt aus.</p>
+                            <p class="kb-hint" data-i18n-html="amshare.warn">⚠ Die Datei kommt nicht von selbst dorthin. <b>Sie</b> holen sie mit dem Knopf unten und legen sie auf der Freigabe ab – <b>nach jedem Versionswechsel erneut</b>, sonst verteilt die Freigabe einen alten Stand. Leer lassen heißt: Download wie bisher.</p>
+                            <div class="form-group">
+                                <label data-i18n="amshare.lab">Pfad zur AiMouse.exe auf der Freigabe</label>
+                                <input type="text" id="amshare-pfad" class="input-field"
+                                       autocomplete="off" spellcheck="false"
+                                       placeholder="\\server\freigabe\tools\AiMouse.exe">
+                            </div>
+                            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                                <button class="btn-primary" id="amshare-save" type="button" data-i18n="amshare.save" style="flex:0 0 auto;">Pfad speichern</button>
+                                <span id="amshare-status" style="font-size:0.9em;"></span>
+                            </div>
+                            <!-- ⚠ DER DOWNLOAD GEHOERT HIERHER, NICHT IN DIE BENUTZER-KACHEL.
+                                 Dort sah ihn nur der Admin - dieselbe Seite fuer zwei Leute
+                                 verschieden, und er sah nicht, was seine Benutzer sehen. Hier
+                                 steht er neben dem Feld, in das der Pfad kommt; genau so machen
+                                 es das Outlook- und das Excel-Add-in.
+
+                                 ⚠ ABER EIN <button>, KEIN <a href> - anders als dort. Beim
+                                 Outlook-Add-in ist das Manifest eine winzige, ohnehin offene
+                                 Datei; hier sind es 66 MB hinter einer Freigabe, und ein Link
+                                 braeuchte den Token IN DER ADRESSE. Der stuende dann in der
+                                 Adresszeile, im Verlauf und in jedem Proxy-Log. Geladen wird
+                                 als Blob mit Authorization-Kopf - dieselbe Wahl wie in der
+                                 Kachel und beim Paket der Jira-Erweiterung. -->
+                            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
+                                <button class="btn-secondary" id="amshare-dl" type="button"
+                                        style="flex:0 0 auto;"
+                                        data-i18n="amshare.dl">Paket herunterladen</button>
+                                <span id="amshare-dl-hint" class="kb-hint" style="margin:0;"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Code-Signatur (B). ⚠ SIE SCHALTET SmartScreen NICHT AB
+                         – das steht auch im Hinweistext, weil die Erwartung
+                         anders herum verbreitet ist. Was sie leistet: ein
+                         verifizierter Herausgebername und eine erkennbare
+                         Manipulation. Hochgeladen wird der PRIVATE
+                         Signierschluessel des Hauses; es gibt bewusst keinen
+                         Weg, ihn wieder herauszulesen. -->
+                    <div class="kb-section" id="am-sect-sign">
+                        <div class="kb-section-header kb-collapse-header" id="am-sect-sign-hdr">
+                            <h3 data-i18n="amsign.h">Code-Signatur</h3>
+                            <span class="sk-openclaw-toggle" id="am-sect-sign-tog">▼</span>
+                        </div>
+                        <div class="kb-collapse-body" id="am-sect-sign-body">
+                            <p class="kb-hint" data-i18n-html="amsign.intro">Ist hier ein Zertifikat hinterlegt, wird die Anwendung <b>nach jedem Bau</b> signiert. Damit sieht der Benutzer in den Dateieigenschaften, von wem sie stammt, und eine nachträgliche Veränderung fällt auf. Für ein Zertifikat der <b>Firmen-CA</b> ist das der übliche Weg – die Domänenrechner vertrauen ihr bereits.</p>
+                            <p class="kb-hint" data-i18n-html="amsign.warn">⚠ <b>Die Signatur schaltet SmartScreen nicht ab.</b> Microsoft hat die Sofort-Reputation für EV-Zertifikate 2024 entfernt; seither entsteht sie allein über das Download-Volumen, das ein Haus-Werkzeug nie erreicht. Wer die Warnung beim ersten Start loswerden will, nutzt die <b>Bereitstellung im Netz</b> darüber. Beides zusammen ist der vollständige Ausbau.</p>
+                            <div id="amsign-state" class="kb-hint"></div>
+                            <div class="form-group">
+                                <label data-i18n="amsign.file">Zertifikat (.pfx / .p12, mit privatem Schlüssel)</label>
+                                <input type="file" id="amsign-datei" class="input-field" accept=".pfx,.p12">
+                            </div>
+                            <div class="form-group">
+                                <label data-i18n="amsign.pw">Kennwort des Zertifikats</label>
+                                <input type="password" id="amsign-pw" class="input-field"
+                                       autocomplete="new-password"
+                                       data-i18n-placeholder="amsign.pw_ph" placeholder="wird verschlüsselt gespeichert">
+                            </div>
+                            <div class="form-group">
+                                <label data-i18n="amsign.tsa">Zeitstempel-Dienst (RFC 3161)</label>
+                                <input type="text" id="amsign-tsa" class="input-field"
+                                       autocomplete="off" spellcheck="false"
+                                       placeholder="http://timestamp.digicert.com">
+                                <small class="form-hint" data-i18n="amsign.tsa_hint">Ohne Zeitstempel wird die Signatur ungültig, sobald das Zertifikat abläuft – auch für längst verteilte Dateien. Leer lassen nur, wenn der Server keinen Weg nach außen hat.</small>
+                            </div>
+                            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                                <button class="btn-primary" id="amsign-save" type="button" data-i18n="amsign.save" style="flex:0 0 auto;">Speichern</button>
+                                <button class="btn-secondary" id="amsign-del" type="button" data-i18n="amsign.del" style="flex:0 0 auto;">Zertifikat entfernen</button>
+                                <span id="amsign-status" style="font-size:0.9em;"></span>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Vorgabe-Fragen: die VORLAGE fuer neue Benutzer. Sie wird
                          beim ERSTEN Start in die eigene Liste kopiert und
                          gehoert danach dem Benutzer – anders als eine
@@ -5516,7 +5604,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/icons.js?v=5"></script>
     <script src="/static/js/pwreveal.js?v=2"></script>
     <script src="/static/js/dlkey.js?v=2"></script>
-    <script src="/static/js/i18n.js?v=279"></script>
+    <script src="/static/js/i18n.js?v=281"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=22"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -5541,7 +5629,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/vemas.js?v=1"></script>
     <script src="/static/js/email.js?v=5"></script>
     <script src="/static/js/short_tracks_admin.js?v=2"></script>
-    <script src="/static/js/ai_mouse_admin.js?v=3"></script>
+    <script src="/static/js/ai_mouse_admin.js?v=5"></script>
     <script src="/static/js/feedback_admin.js?v=3"></script>
     <script src="/static/js/kundenverwaltung.js?v=6"></script>
     <script src="/static/js/support_admin.js?v=11"></script>
@@ -5558,7 +5646,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/alpha_sort.js?v=2"></script>
     <!-- Suchfeld im Modal-Kopf. VOR app.js: dessen openModal ruft SettingsSearch.init(). -->
     <script src="/static/js/settings_search.js?v=4"></script>
-    <script src="/static/js/app.js?v=212"></script>
+    <script src="/static/js/app.js?v=213"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

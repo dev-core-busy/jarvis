@@ -13671,7 +13671,7 @@ async def ai_mouse_health(request: Request, lang: str = "de",
     steht die Marke in der beim Paketbau gebrandeten ``settings.json`` – ein
     Serverabruf erreicht die Anmeldemaske nicht (Register, 2026-08-27).
     """
-    from backend import ai_mouse  # noqa: PLC0415
+    from backend import ai_mouse, ai_mouse_signatur  # noqa: PLC0415
     marke, akzent = ai_mouse.branding()
     return JSONResponse({
         "ok": True,
@@ -13681,6 +13681,17 @@ async def ai_mouse_health(request: Request, lang: str = "de",
         "max_bild_mb": round(ai_mouse.MAX_BILD_BYTES / 1048576.0, 1),
         "paket_bereit": ai_mouse.paket_vorhanden(),
         "paket_baut": bool(ai_mouse.bau_zustand().get("laeuft")),
+        # ⚠ LIEGT DIE ANWENDUNG AUF EINER FREIGABE? Dann zeigt die Kachel den
+        # PFAD statt des Download-Knopfes. Eine ueber den BROWSER geladene
+        # Datei traegt die Zonen-Markierung von Windows und laeuft in die
+        # SmartScreen-Warnung; eine von einer Intranet-Freigabe kopierte nicht.
+        # Leer = nicht hinterlegt = Download wie bisher.
+        # Muster: `jira_assist.paket_pfade()` (Browser-Erweiterung, 2026-08-28).
+        "freigabe_pfad": ai_mouse.freigabe_pfad(),
+        # Der SIGNATURZUSTAND – ausschliesslich Metadaten, NIE das Zertifikat
+        # und nie das Kennwort. Der Administrator sieht daran, ob die Datei,
+        # die er gerade verteilt, wirklich signiert ist.
+        "signatur": ai_mouse_signatur.zustand_kurz(),
         "marke": marke,
         "akzent": akzent,
         # ⚠ HIER UND NICHT IN EINEM EIGENEN ENDPUNKT: die Anwendung ruft
@@ -13708,9 +13719,37 @@ async def ai_mouse_health(request: Request, lang: str = "de",
     })
 
 
+async def require_aimouse_paket(request: Request,
+                                user: str = Depends(require_auth)) -> str:
+    """Das Paket holen – Freigabe **oder** Administrator.
+
+    ⚠ WARUM HIER EIN ADMIN-ZWEIG STEHT und bei den uebrigen
+    ``/api/ai-mouse/``-Routen nicht: ``_user_may_use_aimouse`` kennt bewusst
+    keinen Admin-Bypass. Seit 2026-09-22 liegt der Download aber im
+    ADMIN-REITER – dort holt der Administrator die Datei, um sie auf die
+    Netzfreigabe zu legen. Ohne diesen Zweig waere genau dieser Knopf fuer
+    einen Administrator OHNE eigene AI-Maus-Freigabe ein 403, und die
+    Bereitstellung eine Einbahnstrasse. Dieselbe Stelle und dieselbe
+    Begruendung wie bei ``require_jira_vorlagen_access`` und
+    ``GET /api/sap/analyses/catalog``.
+
+    ⚠ ES IST KEINE RECHTEERWEITERUNG. Das ZIP enthaelt die EXE, sonst nichts –
+    und die kann ohne Freigabe gar nichts: ``/api/ai-mouse/analyze`` und
+    ``/fragen`` haengen unveraendert an ``require_aimouse_access``. Ein
+    Administrator, der das Paket holt, bekommt eine Anwendung, die sich bei ihm
+    nicht anmelden kann.
+    """
+    if _user_may_use_aimouse(user) or _is_admin_user(user):
+        return user
+    raise HTTPException(status_code=403,
+        detail="Kein Zugriff auf AI Mouse – nicht in der Benutzerliste/-Gruppe "
+               "freigeschaltet (Einstellungen → Sicherheit → Berechtigungen → "
+               "AI Mouse; ggf. neu einloggen für Gruppen-Aktualisierung)")
+
+
 @app.get("/api/ai-mouse/paket")
 async def ai_mouse_paket(request: Request,
-                         user: str = Depends(require_aimouse_access)):
+                         user: str = Depends(require_aimouse_paket)):
     """Die Windows-Anwendung als ZIP – nur die EXE, sonst nichts.
 
     ⚠ DIESER TEXT BEHAUPTETE BIS 2026-09-11 DAS GEGENTEIL („die .EXE wird hier
@@ -13909,6 +13948,11 @@ async def ai_mouse_areas_lesen(lang: str = "de",
         "paket_baut": bool(ai_mouse.bau_zustand().get("laeuft")),
         "paket_fehler": str(ai_mouse.bau_zustand().get("fehler") or ""),
         "sdk": ai_mouse.sdk_vorhanden(),
+        # Der hinterlegte Netzwerkpfad – der Reiter fuellt damit sein Feld.
+        # Hier und nicht in einem eigenen Abruf: der Reiter holt diesen
+        # Endpunkt beim Oeffnen ohnehin.
+        "freigabe_pfad": ai_mouse.freigabe_pfad(),
+        "max_pfad": ai_mouse.MAX_PFAD,
     })
 
 
@@ -13968,6 +14012,151 @@ async def ai_mouse_areas_speichern(request: Request,
     # Zurück kommt der GESPEICHERTE Stand, nicht der gesendete: nur so sieht
     # der Administrator, wenn ein Bereich verworfen wurde.
     return JSONResponse({"ok": True, "bereiche": ai_mouse.freigegebene_bereiche()})
+
+
+@app.post("/api/ai-mouse/admin/bereitstellung")
+async def ai_mouse_bereitstellung(request: Request,
+                                  user: str = Depends(require_local_auth)):
+    """Den Netzwerkpfad zur fertigen Anwendung setzen. Body: ``{"pfad": "…"}``.
+
+    ⚠ EIGENER KNOPF, EIGENE TEILMENGE: geschrieben wird NUR dieses eine Feld,
+    der SkillManager merged. Ein Formular, das den ganzen Konfigurationsstand
+    sendete, wuerde die Werkzeug-Freigabe daneben mit dem ueberschreiben, was
+    gerade im Browser stand (Register – genau so ist im Jira-Reiter einmal ein
+    Zugangstoken verschwunden).
+
+    Der Wert wird **nicht auf Form geprueft**: UNC, Laufwerksbuchstabe und
+    ``smb://`` sind alle gueltig, und was davon im Haus gilt, weiss der
+    Administrator besser als eine Regex. Getrimmt und gedeckelt wird in
+    ``ai_mouse.freigabe_pfad()`` beim Lesen.
+    """
+    from backend import ai_mouse  # noqa: PLC0415
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungültiger JSON-Body."},
+                            status_code=400)
+    pfad = str(body.get("pfad") or "").strip()
+    if len(pfad) > ai_mouse.MAX_PFAD:
+        return JSONResponse(
+            {"ok": False, "error": "Der Pfad ist zu lang (höchstens %d Zeichen)."
+             % ai_mouse.MAX_PFAD}, status_code=400)
+    try:
+        # ⚠ DERSELBE WEG WIE BEI `admin/areas`, einschliesslich der Rettung des
+        # Ein/Aus-Zustands: `update_skill_config` setzt `enabled = True`, wenn
+        # im Zustand kein solcher Schluessel steht – auf DEV am 2026-09-09
+        # gemessen, dort hat das Speichern einer Freigabe den Skill von selbst
+        # eingeschaltet. Einen Pfad zu hinterlegen ist NICHT dasselbe wie einen
+        # Bereich einzuschalten. Eine eigene Fassung dieser Mechanik waere beim
+        # naechsten Feinschliff auseinandergelaufen.
+        mgr = _get_skill_manager()
+        vorher = config.get_skill_states().get(ai_mouse.SKILL_NAME, {})
+        war_bekannt = "enabled" in vorher
+        war_aktiv = bool(vorher.get("enabled"))
+        mgr.update_skill_config(ai_mouse.SKILL_NAME, {ai_mouse.PFAD_FELD: pfad})
+        if not war_bekannt:
+            config.save_skill_state(ai_mouse.SKILL_NAME, {"enabled": war_aktiv})
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    # Zurueck kommt der GESPEICHERTE Stand, nicht der gesendete.
+    return JSONResponse({"ok": True, "pfad": ai_mouse.freigabe_pfad()})
+
+
+# ── Code-Signatur der AI-Maus ───────────────────────────────────────────────
+#
+# ⚠ ALLE DREI HAENGEN AN `require_local_auth`, und das ist hier die strengste
+# Stufe im ganzen Bereich: was hier hochgeladen wird, ist der PRIVATE
+# SIGNIERSCHLUESSEL des Hauses. Dieselbe Begruendung wie bei `admin/areas` –
+# `_user_may_use_aimouse` kennt keinen Admin-Bypass, ein Administrator ohne
+# eigene AI-Maus-Freigabe koennte die Signatur sonst gar nicht einrichten.
+#
+# ⚠ ES GIBT BEWUSST KEINEN LESE-ENDPUNKT FUER DAS ZERTIFIKAT ODER DAS
+# KENNWORT. Das unterscheidet diesen Bereich ausdruecklich von
+# `secret_reveal`: ein privater Signierschluessel ist kein Zugangsdatum, das
+# jemand „nachsehen" muss – wer ihn braucht, hat ihn. `zustand()` gibt nur
+# Metadaten heraus.
+@app.get("/api/ai-mouse/admin/signatur")
+async def ai_mouse_signatur_status(user: str = Depends(require_local_auth)):
+    """Zustand der Code-Signatur – Metadaten, nie ein Geheimnis."""
+    from backend import ai_mouse_signatur  # noqa: PLC0415
+    return JSONResponse({"ok": True, **ai_mouse_signatur.zustand()})
+
+
+@app.post("/api/ai-mouse/admin/signatur")
+async def ai_mouse_signatur_setzen(
+        datei: UploadFile = File(None),
+        kennwort: str = Form(""),
+        tsa: str = Form(None),
+        user: str = Depends(require_local_auth)):
+    """Zertifikat hinterlegen – oder nur den Zeitstempel-Dienst aendern.
+
+    ⚠ OHNE DATEI WIRD NUR DER ZEITSTEMPEL GEAENDERT. Sonst muesste ein
+    Administrator, der die TSA-Adresse korrigieren will, das ganze Zertifikat
+    erneut hochladen – und haette es womoeglich gar nicht zur Hand.
+
+    ⚠ DIE VORHANDENE ANWENDUNG WIRD DIREKT NACHSIGNIERT, statt einen Neubau zu
+    erzwingen: der Bau dauert eine halbe Minute und wuerde an der Datei nichts
+    aendern, was die Signatur betrifft. Das Signieren selbst sind Sekunden.
+    Es laeuft ueber `to_thread`, weil `osslsigncode` ein Unterprozess ist und
+    der Zeitstempel-Dienst ein FREMDER Server – im Event-Loop staende der
+    Dienst fuer alle (Register: `Path.is_mount` auf totem CIFS, 20,4 s).
+    """
+    from backend import ai_mouse, ai_mouse_signatur  # noqa: PLC0415
+
+    rohdaten = b""
+    if datei is not None:
+        try:
+            # Ueber `.file` in Haeppchen: ein `await datei.read()` legt die
+            # ganze Datei in den RAM (gleiche Regel wie beim Wissens-Upload).
+            rohdaten = await asyncio.to_thread(
+                datei.file.read, ai_mouse_signatur.MAX_PFX_BYTES + 1)
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"ok": False, "error": "Die Datei liess sich "
+                                 "nicht lesen: %s" % e}, status_code=400)
+
+    try:
+        if rohdaten:
+            zustand = await asyncio.to_thread(
+                ai_mouse_signatur.zertifikat_setzen, rohdaten, kennwort,
+                tsa if tsa is not None else "")
+        elif tsa is not None:
+            zustand = await asyncio.to_thread(ai_mouse_signatur.tsa_setzen, tsa)
+        else:
+            return JSONResponse(
+                {"ok": False, "error": "Es wurde weder eine Zertifikatsdatei "
+                 "noch ein Zeitstempel-Dienst uebergeben."}, status_code=400)
+    except ai_mouse_signatur.SignaturFehler as f:
+        # 400 mit Klartext, nicht 200 mit ok:false – ein Fehlschlag muss auch
+        # dort sichtbar sein, wo nur der Status gelesen wird.
+        return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+    hinweis = ""
+    if ai_mouse_signatur.zertifikat_da() and ai_mouse.paket_vorhanden():
+        ok, grund = await asyncio.to_thread(
+            ai_mouse_signatur.signieren, ai_mouse.exe_pfad())
+        hinweis = grund if grund else ""
+        if not ok and not grund:
+            hinweis = ""
+    return JSONResponse({"ok": True, "hinweis": hinweis,
+                         **ai_mouse_signatur.zustand()})
+
+
+@app.delete("/api/ai-mouse/admin/signatur")
+async def ai_mouse_signatur_entfernen(user: str = Depends(require_local_auth)):
+    """Zertifikat und Kennwort loeschen.
+
+    Die bereits gebaute Anwendung bleibt, wie sie ist – sie nachtraeglich zu
+    entsignieren waere ein Eingriff in eine ausgelieferte Datei ohne Gegenwert.
+    Beim naechsten Bau entsteht ohnehin eine unsignierte.
+    """
+    from backend import ai_mouse_signatur  # noqa: PLC0415
+    try:
+        zustand = await asyncio.to_thread(ai_mouse_signatur.zertifikat_entfernen)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, **zustand})
 
 
 @app.get("/ai-mouse")

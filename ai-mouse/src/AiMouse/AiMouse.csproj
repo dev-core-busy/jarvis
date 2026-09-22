@@ -114,7 +114,19 @@
          Ratens. `promptsError` war dafuer vorgesehen und wurde NIE gesetzt.
          Jetzt steht der Grund IM MENUE, dort wo die Fragen fehlen, und ein
          Klick versucht es erneut. -->
-    <Version>1.0.9</Version>
+    <!-- 1.0.10 (2026-09-22): kein Selbst-Update von einer NETZFREIGABE.
+         Gefragt: „Ist sichergestellt, dass die AiMouse.exe updates vom
+         Netzwerkpfad holt?" Gemessen: die Aktualisierung holt immer vom SERVER
+         (richtig so), sie schreibt aber neben die LAUFENDE Datei. Wer die EXE
+         direkt von der Freigabe startet, legte damit `AiMouse.exe.neu` auf die
+         GEMEINSAME Datei und tauschte sie beim naechsten Start fuer alle aus –
+         von einem beliebigen Arbeitsplatz aus, waehrend andere sie womoeglich
+         gerade ausfuehren. Bei einer schreibgeschuetzten Freigabe war es nur
+         still: kein Update, kein Wort, monatelang eine alte Fassung.
+         Jetzt: `VonNetzfreigabe()` (UNC + Netzlaufwerk) schaltet die
+         Selbstaktualisierung ab UND das Tray-Menue nennt die vorliegende
+         Version samt Weg („deine Administration rollt den neuen Stand aus"). -->
+    <Version>1.0.10</Version>
     <!-- DPI awareness is owned by app.manifest, not by ApplicationHighDpiMode: it has to
          be in effect from process start, before any screen coordinate is read.
          WFAC010 asks for the opposite; suppressed because that trade-off is intentional. -->

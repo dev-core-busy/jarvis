@@ -1180,6 +1180,52 @@ def paket_vorhanden() -> bool:
         return False
 
 
+# ── Bereitstellung ueber eine Netzfreigabe ─────────────────────────────────
+#
+# ⚠ WOZU DAS DA IST, und es ist NICHT Bequemlichkeit: die Warnung, die ein
+# Benutzer beim Start sieht, ist SmartScreen – und die laesst sich durch ein
+# Zertifikat nicht mehr abschalten. Microsoft hat die Sofort-Reputation fuer
+# EV-Zertifikate 2024 entfernt; OV, EV und Microsofts eigener Signierdienst
+# bauen Reputation seither gleichermassen ueber das DOWNLOAD-VOLUMEN auf
+# ("several weeks and hundreds of clean installs from a wide audience").
+# Ein Haus-Werkzeug auf ein paar Dutzend Arbeitsplaetzen erreicht das NIE –
+# ein gekauftes Zertifikat ist hier also nicht zu teuer, sondern strukturell
+# wirkungslos.
+#
+# Was Microsoft fuer genau diese Lage nennt: "Enterprises may distribute files
+# from Trusted Intranet locations not subject to SmartScreen review." Also:
+# nicht ueber den Browser laden, sondern von einer Freigabe holen. Der Browser
+# setzt die Zonen-Markierung (Mark of the Web), ein Kopieren von einer
+# Intranet-Freigabe nicht – und ohne Markierung gibt es keine Pruefung.
+#
+# Das Muster ist von `jira_assist.PFAD_FELDER`/`paket_pfade()` abgeschrieben,
+# nicht neu erfunden: dort wird die Browser-Erweiterung seit 2026-08-28 genauso
+# verteilt.
+PFAD_FELD = "exe_pfad"
+# Ein Pfad ist eine ANZEIGE, kein Ziel: er wird nie geoeffnet, nur angezeigt
+# und kopiert. Der Deckel haelt die Oberflaeche in Form.
+MAX_PFAD = 300
+
+
+def freigabe_pfad() -> str:
+    """Wo liegt die fertige Anwendung im Netz? ``""`` = nicht hinterlegt.
+
+    **Leer heisst „nicht hinterlegt"** – und dann zeigt die Kachel wie bisher
+    den Download-Knopf. Genau darum ist das eine EINSTELLUNG und keine
+    Konstante: der Pfad ist hausintern, das Repo ist oeffentlich, und auf einem
+    anderen Server gibt es diese Freigabe nicht.
+
+    Der Wert ist Fremdeingabe aus einem Formular und wird von der Oberflaeche
+    ausschliesslich per ``textContent`` gesetzt – hier wird er nur getrimmt und
+    gedeckelt, nicht auf Form geprueft: UNC (``\\\\server\\freigabe``),
+    Laufwerksbuchstabe und ``smb://`` sind alle gueltig, und was davon im Haus
+    gilt, weiss der Administrator besser als eine Regex.
+    """
+    wert = str(skill_config().get(PFAD_FELD) or "").strip()
+    # Zeilenumbrueche wuerden die einzeilige Anzeige zerlegen.
+    return wert.replace("\r", " ").replace("\n", " ")[:MAX_PFAD]
+
+
 def _cs_text(wert: str) -> str:
     """Eine Zeichenkette fuer eine C#-Quelldatei – sicher escaped.
 

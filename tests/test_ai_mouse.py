@@ -4535,9 +4535,106 @@ for _n33 in ("FragenFehlen", "FragenLeer"):
         if _n33 in _tx33 else ""
     check("%s gibt es in DE und EN" % _n33, _z33.count('"') >= 4)
 
-check("die Version ist hochgezaehlt",
-      "<Version>1.0.9</Version>" in (ROOT / "ai-mouse" / "src" / "AiMouse"
-                                     / "AiMouse.csproj").read_text(encoding="utf-8"))
+# ⚠ KEINE FESTE VERSIONSZAHL – die ist eine Zeitbombe und ist am 2026-09-14
+#   schon einmal zugeschnappt (Register). Gemeint ist die EIGENSCHAFT: wer die
+#   Version aendert, begruendet sie in der csproj-Chronik – und wer die Chronik
+#   fortschreibt, vergisst die Version nicht.
+_csproj34 = (ROOT / "ai-mouse" / "src" / "AiMouse"
+             / "AiMouse.csproj").read_text(encoding="utf-8")
+_mv34 = re.search(r"<Version>([\d.]+)</Version>", _csproj34)
+check("die Version steht in der csproj", _mv34 is not None)
+if _mv34:
+    _gesetzt34 = _mv34.group(1)
+    _chronik34 = re.findall(r"<!--\s*([\d]+\.[\d]+\.[\d]+)\s*\(", _csproj34)
+    check("Positivkontrolle: die Chronik nennt Versionen", len(_chronik34) >= 3)
+    check("die gesetzte Version %s ist in der Chronik begruendet" % _gesetzt34,
+          _gesetzt34 in _chronik34)
+
+    def _z34(v):
+        return tuple(int(x) for x in v.split("."))
+    check("und sie ist die HOECHSTE dort genannte",
+          bool(_chronik34) and _z34(_gesetzt34) == max(_z34(v) for v in _chronik34))
+
+def cs_tray34():
+    """Frisch lesen – `cs_tray` ist in dieser Datei mehrfach neu belegt, und
+    welcher Stand am Ende gilt, soll hier nicht vom Zufall abhaengen."""
+    return (ROOT / "ai-mouse" / "src" / "AiMouse"
+            / "TrayApplicationContext.cs").read_text(encoding="utf-8")
+
+
+# ── 34. Kein Selbst-Update von einer Netzfreigabe (2026-09-22) ──────────────
+# ⚠ DIE REGEL SELBST WIRD AUSGEFUEHRT geprueft: `tests/live_netzpfad_dev.py`
+#   uebersetzt die ECHTE Klasse und faehrt sie ueber echte Pfade. Hier steht
+#   nur, was ein Quelltext BEANTWORTEN kann – die VERDRAHTUNG.
+print("\n=== 34. Kein Selbst-Update von einer Netzfreigabe ===")
+_akt34 = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Update"
+          / "Aktualisierung.cs").read_text(encoding="utf-8")
+_hol34 = cs_block(_akt34, "public static async Task<string> PruefenUndHolenAsync")
+check("Positivkontrolle: PruefenUndHolenAsync ist geschnitten", len(_hol34) > 500)
+check("es gibt die Regel IstNetzpfad", "internal static bool IstNetzpfad" in _akt34)
+check("…und VonNetzfreigabe benutzt sie",
+      re.search(r"VonNetzfreigabe\(\)\s*=>\s*IstNetzpfad\(EigenerPfad\)", _akt34)
+      is not None)
+check("der Riegel steht im Holweg", "VonNetzfreigabe()" in _hol34)
+
+# ⚠ REIHENFOLGE: HINTER der Versionspruefung. Davor meldete die Anwendung bei
+#   JEDEM Start etwas – und ein Hinweis, der immer dasteht, wird nach zwei
+#   Tagen nicht mehr gelesen.
+_iNeu34 = _hol34.find("IstNeuer(")
+_iNetz34 = _hol34.find("VonNetzfreigabe()")
+check("…und zwar HINTER der Versionspruefung (IstNeuer@%d, Riegel@%d)"
+      % (_iNeu34, _iNetz34), 0 <= _iNeu34 < _iNetz34)
+# …und VOR dem Laden: 66 MB zu holen, um sie dann nicht zu benutzen, waere
+# verschwendete Leitung.
+_iHol34 = _hol34.find("paketHolen(")
+check("…und VOR dem Holen des Pakets (Riegel@%d, paketHolen@%d)"
+      % (_iNetz34, _iHol34), 0 <= _iNetz34 < _iHol34)
+
+# ⚠ ABSCHALTEN OHNE ES ZU SAGEN WAERE STILL – dieselbe Klasse wie der
+#   verschluckte Fragen-Fehlschlag (1.0.9).
+# ⚠ NICHT ueber das VORKOMMEN von "NetzVersion" messen: die Zeile daneben
+#   setzt sie fuer den Normalfall zurueck (`NetzVersion = string.Empty`), und
+#   die blieb bei der Sabotage stehen – die Gegenprobe war STUMM (2026-09-22).
+#   Gemessen wird die ZUWEISUNG AUS DER SERVERVERSION im Netzfreigabe-Zweig.
+check("die vorliegende Version wird gemerkt",
+      re.search(r"NetzVersion\s*=\s*\(?\s*serverVersion", _hol34) is not None)
+check("…und im Normalfall wieder geleert",
+      re.search(r"NetzVersion\s*=\s*string\.Empty", _hol34) is not None)
+check("…in Rot und NICHT anklickbar (es gibt nichts zu wiederholen)",
+      re.search(r"NetzVersion[\s\S]{0,400}Firebrick[\s\S]{0,120}Enabled = false",
+                cs_tray34()) is not None)
+# ⚠ UND DIE ANZEIGE HAENGT AN DER BEDINGUNG, nicht nur an einem Vorkommen:
+#   `NetzVersion` steht im Block ohnehin (als Format-Argument), eine Sabotage
+#   auf `if (false)` liess das Fenster-Muster oben wahr – die Gegenprobe
+#   „das Tray-Menue sagt nichts" war STUMM (2026-09-22). Ein stilles
+#   Abschalten ist der schlechtere Ausgang (Register, 1.0.9).
+check("…und die Anzeige haengt an NetzVersion.Length",
+      re.search(r"if\s*\([^)]*NetzVersion\.Length\s*>\s*0\s*\)",
+                cs_tray34()) is not None)
+
+# ⚠ DIE KLASSE BLEIBT TEXTFREI – wie `Ui/LinkZiel`. Sonst haengt eine
+#   Infrastruktur-Klasse an der Lokalisierung und die Regel waere nicht mehr
+#   ohne UI pruefbar (genau daran ist der erste Bau gescheitert: CS0103).
+check("Aktualisierung.cs kennt `Texte` NICHT", "Texte." not in _akt34)
+_tx34 = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Localization"
+         / "Texte.cs").read_text(encoding="utf-8")
+_z34t = _tx34.split("public static string UpdateNetzfreigabe")[1].split(";")[0] \
+    if "UpdateNetzfreigabe" in _tx34 else ""
+check("UpdateNetzfreigabe gibt es in DE und EN", _z34t.count('"') >= 4)
+# ⚠ BEIDE Versionen muessen vorkommen – nur die vorliegende zu nennen laesst
+#   offen, ob der Arbeitsplatz veraltet ist; {0} Server, {1} laufende Fassung.
+# ⚠ JE SPRACHFASSUNG ZAEHLEN, nicht "kommt vor": eine Sabotage, die {1} nur
+#   aus dem DEUTSCHEN Text nimmt, laesst ein `in`-Muster wahr – der englische
+#   traegt es ja noch (Register; am 2026-09-22 als STUMME Gegenprobe gemessen).
+#   Zwei Fassungen, also zwei Vorkommen je Platzhalter.
+check("…und BEIDE Sprachfassungen nennen die vorliegende Version",
+      _z34t.count("{0}") == 2)
+check("…und BEIDE auch die laufende",
+      _z34t.count("{1}") == 2)
+check("…der Text nennt BEIDE Versionen", "{0}" in _z34t and "{1}" in _z34t)
+# Eine Warnung ohne Weg zur Abhilfe ist nur Laerm.
+check("…und wer den neuen Stand ausrollt",
+      "dministration" in _z34t and "dministrator" in _z34t)
 
 print("\n%d OK, %d FAIL" % (ok, fail))
 sys.exit(1 if fail else 0)

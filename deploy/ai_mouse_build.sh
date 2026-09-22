@@ -224,6 +224,49 @@ mkdir -p "$ZIEL"
 cp "$TMP/AiMouse.exe" "$ZIEL/.AiMouse.exe.neu"
 mv "$ZIEL/.AiMouse.exe.neu" "$ZIEL/AiMouse.exe"
 
+# ── Signieren ───────────────────────────────────────────────────────────────
+# ⚠ HIER UND NICHT NUR IM DIENST – dieselbe Begruendung wie bei den Hauswerten
+# ein paar Zeilen weiter oben, und derselbe Fehler, der dort am 2026-09-09
+# bezahlt wurde: dieses Skript rufen auch der Bootstrap (Schritt 6g) und ein
+# Administrator von Hand. Stuende die Signatur nur im Python-Weg, bauten genau
+# diese Wege eine UNSIGNIERTE Anwendung – und niemand saehe warum.
+#
+# ⚠ ES MUSS NACH DEM BAU PASSIEREN. Eine Signatur haengt am Inhalt der Datei;
+# wer danach noch etwas an ihr aendert, macht sie ungueltig.
+#
+# Fail-open (Entscheidung des Betreibers): ist kein Zertifikat hinterlegt,
+# passiert nichts. Scheitert das Signieren, wird die Anwendung trotzdem
+# ausgeliefert – der Grund steht im Journal und in der Oberflaeche.
+if [ -n "$PY" ]; then
+    # ⚠ AUSGABE IN EINE VARIABLE, DANN AUSWERTEN – nicht `… | grep`: eine
+    # Pipeline liefert den Exit-Code ihres LETZTEN Glieds, und genau dieser
+    # Fallstrick hat im Projekt schon zweimal einen Fehlschlag als Erfolg
+    # gemeldet. Die letzte Zeile genuegt, weil die Funktion genau eine schreibt;
+    # ein Traceback landet ebenfalls dort und faellt in den `*`-Zweig.
+    # ⚠ DREI ZUSTAENDE, NICHT ZWEI. "kein Zertifikat hinterlegt" ist der
+    # Normalfall und KEIN Fehler – eine Warnung ohne Grund bei jedem Bau waere
+    # genau die Zeile, die nach zwei Tagen niemand mehr liest.
+    SIG="$("$PY" - "$WURZEL" "$ZIEL/AiMouse.exe" <<'ENDE' 2>&1 | tail -1
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+try:
+    from backend import ai_mouse_signatur as s
+    ok, grund = s.signieren(Path(sys.argv[2]))
+    print(("OK " + grund if ok else ("FEHLER " + grund if grund else "AUS")).strip())
+except Exception as e:          # noqa: BLE001
+    print("FEHLER %s" % e)
+ENDE
+)"
+    case "$SIG" in
+        "AUS")      : ;;   # kein Zertifikat hinterlegt – still, wie gewollt
+        "OK "*)     meldung "signiert. ${SIG#OK }" ;;
+        "OK")       meldung "signiert." ;;
+        "FEHLER "*) meldung "WARNUNG: nicht signiert – ${SIG#FEHLER }" ;;
+        *)          meldung "WARNUNG: Signaturschritt unklar – $SIG" ;;
+    esac
+fi
+
 # Dem Dienstbenutzer uebereignen, falls als root gelaufen – sonst kann das
 # Backend die Datei spaeter nicht ersetzen (Register: als root angelegte
 # Dateien legen den naechsten Lauf lahm).

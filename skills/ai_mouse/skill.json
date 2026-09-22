@@ -1,36 +1,45 @@
 {
-    "name": "AI-Maus",
-    "description": "Bildschirmausschnitt vom Arbeitsplatz an das Hausmodell: Der Benutzer haelt die rechte Maustaste, zieht einen Rahmen auf und stellt eine Frage dazu – die Antwort erscheint in einem kleinen Fenster. Die Windows-Anwendung dafuer wird hier gebrandet zum Download bereitgestellt.",
-    "version": "1.0.0",
-    "author": "Jarvis",
-    "module": "main",
-    "tools": [],
-    "category": "produktivitaet",
-    "icon": "mouse-pointer",
-    "system": false,
-    "enabled": false,
-    "dependencies": [],
-    "system_packages": [],
-    "data_dirs": [],
-    "config_schema": {
-        "bereiche": {
-            "type": "string",
-            "label": "Freigeschaltete Werkzeug-Bereiche",
-            "description": "Komma-getrennt: wissen, fach. LEER (Vorgabe) heisst KEINE Werkzeuge – dann ist jede Anfrage genau ein Modellaufruf mit dem Bild, ohne Agent. Wird hier etwas eingetragen, laeuft stattdessen ein Agent mit genau diesen – ausschliesslich lesenden – Werkzeugen. ACHTUNG: Was auf dem Bildschirm des Benutzers steht, steuert dann eine Suche in echten Vorgaengen; ein Bildinhalt laesst sich nicht entschaerfen. Im Zweifel leer lassen.",
-            "default": "",
-            "required": false
-        }
+  "name": "AI-Maus",
+  "description": "Bildschirmausschnitt vom Arbeitsplatz an das Hausmodell: Der Benutzer haelt die rechte Maustaste, zieht einen Rahmen auf und stellt eine Frage dazu – die Antwort erscheint in einem kleinen Fenster. Die Windows-Anwendung dafuer wird hier gebrandet zum Download bereitgestellt.",
+  "version": "1.0.0",
+  "author": "Jarvis",
+  "module": "main",
+  "tools": [],
+  "category": "produktivitaet",
+  "icon": "mouse-pointer",
+  "system": false,
+  "enabled": false,
+  "dependencies": [],
+  "system_packages": [
+    "osslsigncode"
+  ],
+  "data_dirs": [],
+  "config_schema": {
+    "bereiche": {
+      "type": "string",
+      "label": "Freigeschaltete Werkzeug-Bereiche",
+      "description": "Komma-getrennt: wissen, fach. LEER (Vorgabe) heisst KEINE Werkzeuge – dann ist jede Anfrage genau ein Modellaufruf mit dem Bild, ohne Agent. Wird hier etwas eingetragen, laeuft stattdessen ein Agent mit genau diesen – ausschliesslich lesenden – Werkzeugen. ACHTUNG: Was auf dem Bildschirm des Benutzers steht, steuert dann eine Suche in echten Vorgaengen; ein Bildinhalt laesst sich nicht entschaerfen. Im Zweifel leer lassen.",
+      "default": "",
+      "required": false
     },
-    "knowledge_docs": [],
-    "permissions": [],
-    "help": {
-        "details": "Server-Haelfte der Windows-Anwendung AI-Maus (Quellcode unter ai-mouse/). Der Skill stellt selbst KEINE Agent-Werkzeuge bereit – er schaltet den Bereich /ai-mouse frei, gattert die Endpunkte /api/ai-mouse/* und haelt die Freigabe der Werkzeug-Bereiche.\n\nWer den Bereich benutzen darf, steht getrennt davon unter Einstellungen → Sicherheit → Berechtigungen → AI-Maus ('leer = niemand'). Beides muss stimmen: ohne aktiven Skill gibt es die Kachel nicht, ohne Freigabe keinen Zugriff.",
-        "tools": [],
-        "use_cases": [
-            "Fehlermeldung auf dem Bildschirm einrahmen und fragen, was sie bedeutet",
-            "Text aus einem Screenshot herausziehen, der sich nicht markieren laesst",
-            "Eine Tabelle oder ein Diagramm einrahmen und zusammenfassen lassen"
-        ],
-        "notes": "Das aktive LLM-Profil muss Bilder verstehen – ein reines Textmodell antwortet auf einen Bildausschnitt oft mit gar nichts. Pruefen laesst sich das unter KI & System → Profile ueber das ⓘ neben dem Modell.\n\nDer Bildausschnitt wird NICHT gespeichert: er geht in den Modellaufruf und ist danach weg. Ein Bildschirmfoto kann alles enthalten, was gerade offen ist."
+    "exe_pfad": {
+      "type": "string",
+      "label": "Netzwerkordner mit der fertigen Anwendung",
+      "description": "Vollstaendiger Pfad zur AiMouse.exe auf einer Netzfreigabe (z.B. \\\\\\\\server\\\\freigabe\\\\tools\\\\AiMouse.exe). Leer = die Kachel bietet stattdessen den Download an. WOZU: eine ueber den BROWSER geladene Datei traegt die Zonen-Markierung von Windows und laeuft in die SmartScreen-Warnung; eine von einer Intranet-Freigabe kopierte nicht. Das ist der einzige Weg, der die Warnung bei der Erstinstallation wirklich abstellt - ein Code-Signing-Zertifikat kann das seit 2024 nicht mehr. Die Datei legt ein Administrator dort ab (Download-Knopf, der ihm weiterhin angezeigt wird); nach jedem Versionswechsel muss sie erneuert werden.",
+      "default": "",
+      "required": false
     }
+  },
+  "knowledge_docs": [],
+  "permissions": [],
+  "help": {
+    "details": "Server-Haelfte der Windows-Anwendung AI-Maus (Quellcode unter ai-mouse/). Der Skill stellt selbst KEINE Agent-Werkzeuge bereit – er schaltet den Bereich /ai-mouse frei, gattert die Endpunkte /api/ai-mouse/* und haelt die Freigabe der Werkzeug-Bereiche.\n\nWer den Bereich benutzen darf, steht getrennt davon unter Einstellungen → Sicherheit → Berechtigungen → AI-Maus ('leer = niemand'). Beides muss stimmen: ohne aktiven Skill gibt es die Kachel nicht, ohne Freigabe keinen Zugriff.",
+    "tools": [],
+    "use_cases": [
+      "Fehlermeldung auf dem Bildschirm einrahmen und fragen, was sie bedeutet",
+      "Text aus einem Screenshot herausziehen, der sich nicht markieren laesst",
+      "Eine Tabelle oder ein Diagramm einrahmen und zusammenfassen lassen"
+    ],
+    "notes": "Das aktive LLM-Profil muss Bilder verstehen – ein reines Textmodell antwortet auf einen Bildausschnitt oft mit gar nichts. Pruefen laesst sich das unter KI & System → Profile ueber das ⓘ neben dem Modell.\n\nDer Bildausschnitt wird NICHT gespeichert: er geht in den Modellaufruf und ist danach weg. Ein Bildschirmfoto kann alles enthalten, was gerade offen ist."
+  }
 }

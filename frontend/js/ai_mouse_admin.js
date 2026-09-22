@@ -57,6 +57,7 @@
             this.bind();
             this.load();
             this.vorgabenLaden();
+            this.signaturLaden();
         },
 
         bind: function () {
@@ -66,6 +67,14 @@
             if (save) { save.addEventListener('click', this.saveAreas.bind(this)); }
             var neu = $('amvorg-neu');
             if (neu) { neu.addEventListener('click', function () { Admin.vorgabeFormular(null); }); }
+            var shSave = $('amshare-save');
+            if (shSave) { shSave.addEventListener('click', this.saveShare.bind(this)); }
+            var shDl = $('amshare-dl');
+            if (shDl) { shDl.addEventListener('click', this.holePaket.bind(this)); }
+            var sgSave = $('amsign-save');
+            if (sgSave) { sgSave.addEventListener('click', this.saveSignatur.bind(this)); }
+            var sgDel = $('amsign-del');
+            if (sgDel) { sgDel.addEventListener('click', this.delSignatur.bind(this)); }
             window.addEventListener('jarvis-lang-changed', function () {
                 // Nur nachladen, wenn der Reiter überhaupt schon einmal
                 // gefüllt wurde – sonst holt ein Sprachwechsel auf einer
@@ -91,6 +100,13 @@
                     self._bereiche = d.bereiche || [];
                     self.renderAreas();
                     self.renderState(d);
+                    // ⚠ NUR FUELLEN, WENN DER BENUTZER NICHT GERADE TIPPT –
+                    //   ein Sprachwechsel ruft `load()` erneut, und eine halb
+                    //   eingegebene Adresse waere sonst weg.
+                    var sp = $('amshare-pfad');
+                    if (sp && document.activeElement !== sp) {
+                        sp.value = d.freigabe_pfad || '';
+                    }
                 })
                 .catch(function (e) {
                     // Ein Fehlschlag bleibt STEHEN. Ein leerer Container wäre
@@ -120,6 +136,242 @@
                     + esc((b.werkzeuge || []).join(', ')) + '</span>'
                     + '</span></label>';
             }).join('');
+        },
+
+        // ── Bereitstellung im Netz (A) ──────────────────────────────────────
+        /** Das Paket holen, um es auf die Freigabe zu legen.
+         *
+         * ⚠ ALS BLOB, NICHT ALS <a href> MIT ?token=. Ein Link braeuchte den
+         * Token in der Adresse, und der stuende dann in der Adresszeile, im
+         * Verlauf und in jedem Proxy-Log – dieselbe Wahl wie in der Kachel und
+         * beim Paket der Jira-Erweiterung. Das Outlook-Add-in macht es anders,
+         * dort ist das Manifest aber winzig und ohnehin offen.
+         *
+         * ⚠ DER ENDPUNKT BRAUCHT EINEN ADMIN-ZWEIG, und den hat er seit dem
+         * 2026-09-22: `_user_may_use_aimouse` kennt keinen Admin-Bypass, ein
+         * Administrator OHNE AI-Maus-Freigabe bekaeme hier sonst ein 403 –
+         * und die Bereitstellung waere eine Einbahnstrasse.
+         */
+        holePaket: function () {
+            var knopf = $('amshare-dl');
+            var hinweis = $('amshare-dl-hint');
+            if (!knopf || knopf.disabled) { return; }
+            var alt = knopf.textContent;
+            knopf.disabled = true;
+            knopf.textContent = t('amshare.dl_running', 'Wird zusammengestellt…');
+            if (hinweis) { hinweis.textContent = ''; }
+
+            fetch('/api/ai-mouse/paket', { headers: authHeaders() })
+                .then(function (r) {
+                    if (!r.ok) {
+                        return r.json().catch(function () { return null; })
+                            .then(function (d) {
+                                throw new Error((d && (d.detail || d.error))
+                                                || ('HTTP ' + r.status));
+                            });
+                    }
+                    // Den Dateinamen aus dem Kopf nehmen – er traegt die Marke.
+                    var name = 'ai-mouse.zip';
+                    var m = (r.headers.get('Content-Disposition') || '')
+                        .match(/filename="([^"]+)"/);
+                    if (m) { name = m[1]; }
+                    return r.blob().then(function (b) { return [name, b]; });
+                })
+                .then(function (paar) {
+                    var url = URL.createObjectURL(paar[1]);
+                    var a = document.createElement('a');
+                    a.href = url;
+                    a.download = paar[0];
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    // Erst nach dem Klick freigeben – vorher ist sie tot.
+                    setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+                    if (hinweis) {
+                        hinweis.textContent =
+                            t('amshare.dl_ok', 'Heruntergeladen: ') + paar[0];
+                    }
+                })
+                .catch(function (e) {
+                    // ⚠ EIN FEHLSCHLAG BLEIBT STEHEN – einen Erfolg kann man
+                    //   verpassen, eine Fehlerursache muss man lesen koennen.
+                    if (hinweis) { hinweis.textContent = String(e.message || e); }
+                })
+                .finally(function () {
+                    knopf.disabled = false;
+                    knopf.textContent = alt;
+                });
+        },
+
+        saveShare: function () {
+            var el = $('amshare-pfad');
+            if (!el) { return; }
+            setStatus('amshare-status', t('amshare.saving', 'Wird gespeichert…'));
+            fetch('/api/ai-mouse/admin/bereitstellung', {
+                method: 'POST',
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ pfad: el.value })
+            }).then(function (r) {
+                return r.json().catch(function () { return null; }).then(function (d) {
+                    if (!r.ok || !d || !d.ok) {
+                        throw new Error((d && (d.error || d.detail)) || ('HTTP ' + r.status));
+                    }
+                    return d;
+                });
+            }).then(function (d) {
+                // Der GESPEICHERTE Stand gewinnt gegen das Formular – nur so
+                // sieht der Administrator, wenn der Wert gekuerzt wurde.
+                el.value = d.pfad || '';
+                setStatus('amshare-status', d.pfad
+                    ? t('amshare.ok', 'Gespeichert – die Kachel zeigt jetzt den Pfad.')
+                    : t('amshare.ok_off', 'Gespeichert – die Kachel bietet wieder den Download an.'),
+                    'ok');
+            }).catch(function (e) {
+                setStatus('amshare-status', e.message, 'error');
+            });
+        },
+
+        // ── Code-Signatur (B) ───────────────────────────────────────────────
+        signaturLaden: function () {
+            var self = this;
+            fetch('/api/ai-mouse/admin/signatur', { headers: authHeaders() })
+                .then(function (r) {
+                    if (!r.ok) {
+                        return r.json().catch(function () { return null; }).then(function (d) {
+                            throw new Error((d && (d.error || d.detail)) || ('HTTP ' + r.status));
+                        });
+                    }
+                    return r.json();
+                })
+                .then(function (d) { self.renderSignatur(d); })
+                .catch(function (e) {
+                    // ⚠ DER ZUSTAND WIRD NICHT GELEERT. Eine leere Anzeige
+                    //   waere von „kein Zertifikat hinterlegt" nicht zu
+                    //   unterscheiden – und wer darauf eines hochlaedt, ersetzt
+                    //   womoeglich ein funktionierendes.
+                    setStatus('amsign-status', e.message, 'error');
+                });
+        },
+
+        /** Der Zustand in Worten. Farbe ist hier die zweite Ebene, nicht die
+         *  Aussage – dieselbe Regel wie bei den Anwesenheits-Pillen. */
+        renderSignatur: function (d) {
+            var box = $('amsign-state');
+            var tsa = $('amsign-tsa');
+            if (tsa && document.activeElement !== tsa) {
+                tsa.value = d.tsa || '';
+                tsa.placeholder = d.tsa_standard || 'http://timestamp.digicert.com';
+            }
+            if (!box) { return; }
+            var zeilen = [];
+
+            if (!d.werkzeug_da) {
+                // Ohne das Programm passiert gar nichts – das gehoert zuerst
+                // gesagt, samt Weg (keine Aufforderung zur Handarbeit ohne ihn).
+                zeilen.push('⚠ ' + esc(d.werkzeug_hinweis || ''));
+            }
+            if (!d.zertifikat) {
+                zeilen.push(esc(t('amsign.st_none',
+                    'Kein Zertifikat hinterlegt – die Anwendung wird unsigniert ausgeliefert.')));
+            } else {
+                zeilen.push(esc(t('amsign.st_cert', 'Zertifikat: {b} (ausgestellt von {a}, gültig bis {d})')
+                    .replace('{b}', d.betreff || '?')
+                    .replace('{a}', d.aussteller || '?')
+                    .replace('{d}', d.gueltig_bis || '?')));
+                if (d.abgelaufen) {
+                    zeilen.push('⚠ ' + esc(t('amsign.st_exp',
+                        'Das Zertifikat ist abgelaufen – es wird nicht mehr signiert.')));
+                }
+            }
+            // ⚠ DIE AUSSAGE UEBER DIE AUSGELIEFERTE DATEI IST DIE WICHTIGSTE:
+            //   sie wird am PE-Header GEMESSEN, nicht aus der Einstellung
+            //   abgeleitet. „Zertifikat hinterlegt" heisst nicht „die Datei,
+            //   die der Knopf ausliefert, ist signiert".
+            zeilen.push(d.exe_signiert
+                ? '✓ ' + esc(t('amsign.st_signed', 'Die bereitliegende Anwendung ist signiert.'))
+                : esc(t('amsign.st_unsigned', 'Die bereitliegende Anwendung ist nicht signiert.')));
+            if (d.exe_signiert && d.ohne_zeitstempel) {
+                zeilen.push('⚠ ' + esc(t('amsign.st_nots',
+                    'Signiert OHNE Zeitstempel – die Signatur wird ungültig, sobald das Zertifikat abläuft.')));
+            }
+            if (d.letzter_fehler) {
+                zeilen.push('⚠ ' + esc(t('amsign.st_err', 'Letzter Fehlschlag: ')) + esc(d.letzter_fehler));
+            }
+            box.innerHTML = zeilen.map(function (z) {
+                return '<div style="margin:2px 0;">' + z + '</div>';
+            }).join('');
+        },
+
+        saveSignatur: function () {
+            var datei = $('amsign-datei');
+            var pw = $('amsign-pw');
+            var tsa = $('amsign-tsa');
+            var self = this;
+            var f = datei && datei.files && datei.files[0] ? datei.files[0] : null;
+
+            // Ohne Datei wird NUR der Zeitstempel geaendert – sonst muesste
+            // ein Administrator, der die Adresse korrigiert, das ganze
+            // Zertifikat erneut hochladen (und haette es womoeglich nicht zur
+            // Hand).
+            var fd = new FormData();
+            if (f) {
+                fd.append('datei', f);
+                fd.append('kennwort', pw ? pw.value : '');
+            }
+            if (tsa) { fd.append('tsa', tsa.value); }
+
+            setStatus('amsign-status', f
+                ? t('amsign.saving', 'Zertifikat wird geprüft und die Anwendung signiert…')
+                : t('amsign.saving_tsa', 'Wird gespeichert…'));
+
+            // ⚠ KEIN Content-Type setzen: den multipart-Trenner bestimmt der
+            //   Browser, ein selbst gesetzter Kopf macht den Rumpf unlesbar.
+            fetch('/api/ai-mouse/admin/signatur', {
+                method: 'POST', headers: authHeaders(), body: fd
+            }).then(function (r) {
+                return r.json().catch(function () { return null; }).then(function (d) {
+                    if (!r.ok || !d || !d.ok) {
+                        throw new Error((d && (d.error || d.detail)) || ('HTTP ' + r.status));
+                    }
+                    return d;
+                });
+            }).then(function (d) {
+                self.renderSignatur(d);
+                // Das Kennwort NIE stehen lassen – es gibt keinen Weg, es
+                // wieder auszulesen, also hat es im Formular nichts verloren.
+                if (pw) { pw.value = ''; }
+                if (datei) { datei.value = ''; }
+                setStatus('amsign-status',
+                    d.hinweis || t('amsign.ok', 'Gespeichert.'),
+                    d.hinweis ? 'error' : 'ok');
+            }).catch(function (e) {
+                setStatus('amsign-status', e.message, 'error');
+            });
+        },
+
+        delSignatur: function () {
+            if (!window.confirm(t('amsign.del_ask',
+                'Zertifikat und Kennwort wirklich entfernen? Künftige Auslieferungen sind dann unsigniert.'))) {
+                return;
+            }
+            var self = this;
+            setStatus('amsign-status', t('amsign.deleting', 'Wird entfernt…'));
+            fetch('/api/ai-mouse/admin/signatur', {
+                method: 'DELETE', headers: authHeaders()
+            }).then(function (r) {
+                return r.json().catch(function () { return null; }).then(function (d) {
+                    if (!r.ok || !d || !d.ok) {
+                        throw new Error((d && (d.error || d.detail)) || ('HTTP ' + r.status));
+                    }
+                    return d;
+                });
+            }).then(function (d) {
+                self.renderSignatur(d);
+                setStatus('amsign-status', t('amsign.del_ok',
+                    'Entfernt. Die bereits gebaute Anwendung bleibt unverändert.'), 'ok');
+            }).catch(function (e) {
+                setStatus('amsign-status', e.message, 'error');
+            });
         },
 
         /** Zustand: beantwortet „warum passiert nichts?" ohne einen Blick in

@@ -120,6 +120,22 @@ internal static class Texte
         "der Server hat keine geliefert. Klicken zum erneuten Versuch.",
         "the server returned none. Click to retry.");
 
+    // ⚠ EINE NEUERE FASSUNG LIEGT VOR, ABER DIESE ANWENDUNG LAEUFT VON EINER
+    // NETZFREIGABE und darf sich deshalb nicht selbst ersetzen – sonst taeuscht
+    // ein beliebiger Arbeitsplatz die gemeinsame Datei fuer alle aus. {0} ist
+    // die Fassung auf dem Server, {1} die laufende.
+    //
+    // Der Text sagt BEIDES: dass es etwas Neues gibt, und wer es ausrollt.
+    // Ohne den zweiten Teil wuesste der Benutzer nicht, was er tun soll – und
+    // eine Warnung ohne Weg zur Abhilfe ist nur Laerm.
+    public static string UpdateNetzfreigabe => T(
+        "⚠ Version {0} liegt vor (hier läuft {1}). Diese Anwendung startet von "
+        + "einer Netzfreigabe und aktualisiert sich nicht selbst – deine "
+        + "Administration rollt den neuen Stand aus.",
+        "⚠ Version {0} is available (this is {1}). This copy runs from a "
+        + "network share and does not update itself – your administrators roll "
+        + "out the new build.");
+
     public static string Nachgeschlagen => T(
         "Für diese Antwort wurde zusätzlich nachgeschlagen: ",
         "Additional sources were consulted for this answer: ");

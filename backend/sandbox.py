@@ -220,6 +220,17 @@ _APP_DENY_REL = (
     # untergeschobenen Zugang zuzuordnen – und bei freigeschaltetem Schreiben
     # buchte der naechste Lauf dann in dessen Namen.
     "data/vemas_accounts.json", "data/.vemaskey",
+    # Code-Signatur der AI-Maus (backend/ai_mouse_signatur.py).
+    # ⚠ DAS IST DAS SCHWERSTE GEHEIMNIS IN DIESEM VERZEICHNIS: `.aimouse_sign
+    # .pfx` enthaelt den PRIVATEN SIGNIERSCHLUESSEL des Hauses, `.aimousesignkey`
+    # entschluesselt das Kennwort dazu. Wer beides liest, kann BELIEBIGEN Code
+    # im Namen der Firma signieren – und der laeuft auf jedem Domaenenrechner,
+    # der der Firmen-CA vertraut, ohne Herausgeber-Warnung. Das ist kein
+    # Zugangsdatum eines einzelnen Benutzers, sondern die Vertrauensgrundlage
+    # ALLER Arbeitsplaetze. SCHREIBEN waere der Weg, ein fremdes Zertifikat
+    # unterzuschieben und damit kuenftige Auslieferungen zu signieren.
+    "data/ai_mouse_signatur.json", "data/.aimousesignkey",
+    "data/.aimouse_sign.pfx",
     # Outlook-Add-in (backend/addin_sso.py): ordnet Exchange-Postfaecher den
     # Jarvis-Konten zu und ist damit die Grundlage der kennwortlosen Anmeldung.
     # SCHREIBEN heisst hier: das eigene Postfach auf einen fremden – gern einen
@@ -287,7 +298,12 @@ PRIVATE_FILES = ("data/scheduled_jobs.json", "data/file_watchers.json",
                  "data/feedback_formulare.json", "data/feedback_abgaben.jsonl",
                  # Confluence-Einbindung: Betriebswissen (interne Bereichsnamen)
                  # und ein Bestand, der den spaeteren Wissensabgleich steuert.
-                 "data/confluence_bindung.json")
+                 "data/confluence_bindung.json",
+                 # AI-Maus-Signatur: Metadaten des Zertifikats (Betreff,
+                 # Aussteller, Laufzeit) und das VERSCHLUESSELTE Kennwort. Das
+                 # Zertifikat selbst und seine Schluesseldatei sind strenger,
+                 # siehe PRIVATE_FILES_STRENG.
+                 "data/ai_mouse_signatur.json")
 PRIVATE_FILE_MODE = 0o640
 
 # Die Schluesseldateien der E-Mail-/SAP-Zugangsdaten sind strenger als 0640: sie
@@ -299,7 +315,10 @@ PRIVATE_FILE_MODE = 0o640
 # darin – wer ihn liest, kann Codeauftraege unter fremder Kennung starten.
 PRIVATE_FILES_STRENG = ("data/.mailkey", "data/.sapkey", "data/.jirakey",
                         "data/.vemaskey", "data/.mountkey",
-                        "data/claude_subagent.json")
+                        "data/claude_subagent.json",
+                        # Der private Signierschluessel des Hauses und sein
+                        # Kennwort – die strengste Stufe ist hier das Mindeste.
+                        "data/.aimouse_sign.pfx", "data/.aimousesignkey")
 PRIVATE_FILE_MODE_STRENG = 0o600
 
 
@@ -579,6 +598,10 @@ SHELL_SECRET_PATHS = re.compile(
     # Dasselbe fuer VEMAS: vemas_accounts.json + .vemaskey ergeben die
     # Klartext-Kennwoerter der VEMAS-Benutzer.
     r'vemas_accounts\.json\b|\.vemaskey\b|'
+    # AI-Maus-Signatur: .aimouse_sign.pfx ist der private Signierschluessel des
+    # Hauses, .aimousesignkey entschluesselt sein Kennwort. Zusammen erlauben
+    # sie, beliebigen Code im Namen der Firma zu signieren.
+    r'ai_mouse_signatur\.json\b|\.aimousesignkey\b|\.aimouse_sign\.pfx\b|'
     # Kennwoerter der Netzwerk-Freigaben: .mountkey entschluesselt die
     # password_enc-Felder in settings.json (das ohnehin gesperrt ist).
     r'\.mountkey\b|'

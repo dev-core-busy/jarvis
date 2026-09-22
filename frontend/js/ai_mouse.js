@@ -113,7 +113,104 @@
     // koennen, ohne den Server dazu zu bringen.
     window.__amHealth = function (h) { _health = h; downloadKnopfSetzen(); };
 
+    /* ── Bereitstellung ueber eine Netzfreigabe ──────────────────────────────
+     *
+     * ⚠ WOZU, und es ist NICHT Bequemlichkeit: eine ueber den BROWSER geladene
+     * Datei traegt die Zonen-Markierung von Windows (Mark of the Web) und
+     * laeuft beim ersten Start in die SmartScreen-Warnung. Eine von einer
+     * Intranet-Freigabe kopierte nicht – Microsoft nennt "Trusted Intranet
+     * locations" ausdruecklich als den Weg, der davon ausgenommen ist. Ein
+     * Code-Signing-Zertifikat kann das seit 2024 NICHT mehr leisten (die
+     * Sofort-Reputation fuer EV wurde entfernt; Reputation entsteht seither
+     * ueber Download-Volumen, das ein Haus-Werkzeug nie erreicht).
+     *
+     * Bauform und Begruendung sind von `jira_addon.js::paketBlock` abgeschrieben,
+     * wo die Browser-Erweiterung seit 2026-08-28 genauso verteilt wird.
+     */
+    function kopieren(pfad, knopf) {
+        var alt = knopf.textContent;
+        var fertig = function (text) {
+            knopf.textContent = text;
+            setTimeout(function () { knopf.textContent = alt; }, 2000);
+        };
+        var misslungen = function () {
+            // Rueckmeldung ist Pflicht: in der Zwischenablage sieht man nichts,
+            // und `navigator.clipboard` fehlt in unsicheren Kontexten ganz.
+            // Ein stiller Fehlschlag waere von "hat geklappt" nicht zu
+            // unterscheiden – die Absage nennt deshalb den Ausweg.
+            fertig(t('aimouse.copy_err', 'ging nicht – von Hand markieren'));
+        };
+        try {
+            navigator.clipboard.writeText(pfad).then(function () {
+                fertig(t('aimouse.copy_ok', 'kopiert ✓'));
+            }, misslungen);
+        } catch (e) { misslungen(); }
+    }
+
+    function freigabeZeichnen() {
+        var box = document.getElementById('am-freigabe');
+        var dlBox = document.getElementById('am-dl-box');
+        if (!box || !_health) { return; }
+        var pfad = (_health.freigabe_pfad || '').trim();
+
+        box.textContent = '';
+        if (!pfad) {
+            // Nicht hinterlegt: alles wie bisher.
+            if (dlBox) { dlBox.classList.remove('hidden'); }
+            return;
+        }
+
+        var zeile = document.createElement('div');
+        zeile.className = 'ja-pfad';
+
+        var lab = document.createElement('div');
+        lab.className = 'ja-pfad-lab';
+        lab.textContent = t('aimouse.share_lab', 'Im Netz bereitgestellt');
+
+        var wert = document.createElement('code');
+        wert.className = 'ja-pfad-wert';
+        wert.textContent = pfad;          // NIE innerHTML – Fremdeingabe
+        wert.id = 'am-freigabe-pfad';
+
+        var knopf = document.createElement('button');
+        knopf.type = 'button';
+        knopf.className = 'ja-btn';
+        knopf.id = 'am-freigabe-copy';
+        knopf.textContent = t('aimouse.share_copy', 'Pfad kopieren');
+        knopf.addEventListener('click', function () { kopieren(pfad, knopf); });
+
+        zeile.appendChild(lab);
+        zeile.appendChild(wert);
+        zeile.appendChild(knopf);
+        box.appendChild(zeile);
+
+        var hinweis = document.createElement('p');
+        hinweis.className = 'ja-note';
+        hinweis.textContent = t('aimouse.share_hint',
+            'Pfad kopieren und im Windows-Explorer in die Adresszeile einfügen, '
+            + 'dann die Datei auf den eigenen Rechner kopieren. Von dort '
+            + 'startet sie ohne Sicherheitswarnung. Kommst du nicht an die '
+            + 'Freigabe, wende dich an die Administration.');
+        box.appendChild(hinweis);
+
+        // ⚠ DER DOWNLOAD IST HIER FUER JEDEN WEG – AUCH FUER ADMINISTRATOREN.
+        //
+        // Die erste Fassung liess ihn dem Admin stehen, „sonst gaebe es keinen
+        // Weg mehr an die Datei". Der Einwand war richtig, die STELLE falsch:
+        // dies ist die BENUTZER-Kachel, und ein Knopf, den nur eine Rolle
+        // sieht, macht dieselbe Seite fuer zwei Leute verschieden – man kann
+        // sich am Telefon nicht mehr darueber verstaendigen, und der Admin
+        // sieht nicht, was seine Benutzer sehen.
+        //
+        // Der Weg an die Datei steht dort, wo der Administrator ohnehin
+        // arbeitet: *Einstellungen → AI-Maus → Bereitstellung im Netz*, direkt
+        // neben dem Feld, in das er den Pfad eintraegt. Genau so machen es das
+        // Outlook- und das Excel-Add-in.
+        if (dlBox) { dlBox.classList.add('hidden'); }
+    }
+
     function downloadKnopfSetzen() {
+        freigabeZeichnen();
         var dl = document.getElementById('am-download');
         if (!dl || !_health) { return; }
         dl.disabled = !_health.paket_bereit;

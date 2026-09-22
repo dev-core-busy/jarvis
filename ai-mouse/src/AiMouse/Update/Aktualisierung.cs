@@ -39,6 +39,19 @@ internal static class Aktualisierung
     /// <summary>Die neue Fassung liegt unter diesem Namen daneben.</summary>
     private const string NeuSuffix = ".neu";
 
+    /// <summary>Die Fassung, die auf dem Server liegt – gesetzt NUR, wenn sie
+    /// neuer ist und diese Anwendung sie nicht selbst holen darf (Start von
+    /// einer Netzfreigabe). Sonst leer.
+    ///
+    /// ⚠ ABSCHALTEN OHNE ES ZU SAGEN WAERE DER SCHLECHTERE AUSGANG: der
+    /// Benutzer arbeitete sonst monatelang mit einer alten Fassung, und die
+    /// einzige Spur waere ein Rueckgabewert, den niemand liest – dieselbe
+    /// Lehre wie beim still verschluckten Fragen-Fehlschlag (1.0.9). Den SATZ
+    /// baut das Tray-Menue; diese Klasse bleibt textfrei, genau wie
+    /// <c>Ui/LinkZiel</c>. Sonst haengt eine Infrastruktur-Klasse an der
+    /// Lokalisierung, und die Regel waere nicht mehr ohne UI pruefbar.</summary>
+    public static string NetzVersion { get; private set; } = string.Empty;
+
     /// <summary>Die verdraengte Fassung – eine laufende EXE laesst sich
     /// UMBENENNEN, aber nicht loeschen. Aufgeraeumt wird beim naechsten Start.
     /// </summary>
@@ -67,6 +80,79 @@ internal static class Aktualisierung
             return v.Build >= 0
                 ? $"{v.Major}.{v.Minor}.{v.Build}"
                 : $"{v.Major}.{v.Minor}";
+        }
+    }
+
+    /// <summary>Laeuft die Anwendung von einer NETZFREIGABE? (2026-09-22)
+    ///
+    /// ⚠ WARUM DAS DIE SELBSTAKTUALISIERUNG ABSCHALTEN MUSS – und warum es der
+    /// gefaehrlichste Fall dieser Klasse ist:
+    ///
+    /// Seit der Bereitstellung im Netz liegt die EXE auf einer Freigabe, und
+    /// die Anleitung sagt ausdruecklich „auf den eigenen Rechner kopieren".
+    /// Wer sie trotzdem DIREKT von dort startet, laesst
+    /// <see cref="PruefenUndHolenAsync"/> neben der GEMEINSAMEN Datei
+    /// arbeiten: die neue Fassung landet als <c>AiMouse.exe.neu</c> auf der
+    /// Freigabe, und der naechste Start tauscht sie fuer ALLE aus – ausgeloest
+    /// von einem beliebigen Arbeitsplatz, waehrend andere die Datei womoeglich
+    /// gerade ausfuehren. Der Administrator verliert damit die Kontrolle
+    /// darueber, welcher Stand verteilt wird; genau dafuer hat er die Freigabe.
+    ///
+    /// ⚠ BEI EINER SCHREIBGESCHUETZTEN FREIGABE WAERE ES NUR STILL: die
+    /// Schreibprobe scheitert, es passiert nichts – und der Benutzer arbeitet
+    /// monatelang mit einer alten Fassung, ohne es zu erfahren. Deshalb wird
+    /// hier nicht nur abgeschaltet, sondern GESAGT (siehe
+    /// <see cref="NetzHinweis"/>).
+    ///
+    /// ⚠ FAIL-SAFE IN RICHTUNG „LOKAL", und das ist eine Abwaegung: ein
+    /// faelschlich als Freigabe erkannter Pfad nimmt einer normalen
+    /// Installation dauerhaft die Aktualisierung – teurer als der umgekehrte
+    /// Fall, weil er jeden Arbeitsplatz trifft statt der wenigen, die von der
+    /// Freigabe starten. Der haeufige Fall (UNC, <c>\\server\...</c>) ist
+    /// ohnehin an einer Zeichenkette erkennbar und kann nicht fehlschlagen;
+    /// nur die Laufwerksabfrage kann werfen, und die faellt dann auf „lokal".
+    /// </summary>
+    public static bool VonNetzfreigabe() => IstNetzpfad(EigenerPfad);
+
+    /// <summary>Die reine Regel – ohne <see cref="EigenerPfad"/>, damit sie
+    /// AUSGEFUEHRT geprueft werden kann.
+    ///
+    /// ⚠ DIESELBE TRENNUNG WIE BEI <c>ZiehbarRegel</c> GEGEN
+    /// <c>ZiehbarPruefer</c>: was an <c>Environment.ProcessPath</c> haengt,
+    /// laesst sich nur auf einem Windows-Arbeitsplatz messen – die Entscheidung
+    /// selbst dagegen ueberall. Ein Waechter, der nur den Quelltext lesen kann,
+    /// beantwortet nicht, was bei <c>\\?\UNC\srv\x</c> herauskommt.
+    /// </summary>
+    internal static bool IstNetzpfad(string exe)
+    {
+        if (string.IsNullOrEmpty(exe))
+        {
+            return false;
+        }
+        // UNC – der haeufige Fall, reine Zeichenkette, kann nicht scheitern.
+        // `\\?\UNC\server\...` ist die lange Form desselben.
+        if (exe.StartsWith(@"\\", StringComparison.Ordinal)
+            && !exe.StartsWith(@"\\?\", StringComparison.Ordinal))
+        {
+            return true;
+        }
+        if (exe.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        // Verbundenes Netzlaufwerk (Z:\...). Nur das kann werfen.
+        try
+        {
+            string? wurzel = Path.GetPathRoot(exe);
+            if (string.IsNullOrEmpty(wurzel))
+            {
+                return false;
+            }
+            return new DriveInfo(wurzel).DriveType == DriveType.Network;
+        }
+        catch (Exception)
+        {
+            return false;   // siehe Docstring: fail-safe in Richtung "lokal"
         }
     }
 
@@ -292,6 +378,24 @@ internal static class Aktualisierung
             {
                 return string.Empty;
             }
+
+            /* ⚠ VON EINER NETZFREIGABE WIRD NICHT SELBST AKTUALISIERT.
+             *
+             * Sonst legt ein beliebiger Arbeitsplatz `AiMouse.exe.neu` auf die
+             * GEMEINSAME Datei und tauscht sie beim naechsten Start fuer alle
+             * aus – waehrend andere sie womoeglich gerade ausfuehren. Welcher
+             * Stand verteilt wird, entscheidet der Administrator; genau dafuer
+             * gibt es die Freigabe.
+             *
+             * ⚠ DIE PRUEFUNG STEHT HINTER `IstNeuer`: ohne eine neuere Fassung
+             * gibt es nichts zu melden, und ein Hinweis, der bei jedem Start
+             * erscheint, wird nach zwei Tagen nicht mehr gelesen. */
+            if (VonNetzfreigabe())
+            {
+                NetzVersion = (serverVersion ?? string.Empty).Trim();
+                return "Netzfreigabe";
+            }
+            NetzVersion = string.Empty;
 
             string neu = exe + NeuSuffix;
 

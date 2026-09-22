@@ -221,6 +221,20 @@ GUARDED_PREFIXES = [
     # damit die naechste Route darunter nicht mit require_auth durchrutscht -
     # die eine, die es gibt, ist unten einzeln begruendet.
     "/api/secret/",
+    # /api/ai-mouse/admin/ (2026-09-21, mit der Code-Signatur): dort wird der
+    # PRIVATE SIGNIERSCHLUESSEL des Hauses hochgelegt. Wer ihn bekommt, kann
+    # beliebigen Code im Namen der Firma signieren – und der laeuft auf jedem
+    # Domaenenrechner, der der Firmen-CA vertraut, ohne Herausgeber-Warnung.
+    #
+    # ⚠ NUR DER admin-ZWEIG. `/api/ai-mouse/` selbst haengt bewusst an
+    # `require_aimouse_access` (Freigabeliste ODER Gruppe, leer = niemand,
+    # KEIN Admin-Bypass) – ein Praefix ueber den ganzen Bereich wuerde health,
+    # paket, fragen und analyze faelschlich melden.
+    #
+    # ⚠ WOZU, obwohl die GET/Schreiben-Regel darueber den Fall schon faengt:
+    # jene vergleicht die Schranken UNTEREINANDER. Laegen ALLE vier Routen auf
+    # require_auth, waeren sie gleich stark und die Regel bliebe still.
+    "/api/ai-mouse/admin/",
 ]
 # Ausnahmen mit Begruendung – jede einzeln belegt, keine Sammelfreigabe.
 EXEMPT = {

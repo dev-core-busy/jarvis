@@ -232,6 +232,30 @@ internal sealed class TrayApplicationContext : ApplicationContext
             _promptMenu.Items.Add(warn);
         }
 
+        // ⚠ EINE NEUERE FASSUNG LIEGT VOR, ABER DIESE ANWENDUNG DARF SIE NICHT
+        //    SELBST HOLEN (Start von einer Netzfreigabe, 2026-09-22).
+        //
+        //    Ohne diese Zeile waere das Abschalten STILL: der Benutzer
+        //    arbeitete monatelang mit einer alten Fassung, und die einzige Spur
+        //    waere ein Rueckgabewert, den niemand liest – dieselbe Klasse wie
+        //    der verschluckte Fragen-Fehlschlag darueber.
+        //
+        //    KEIN Klick-Zweig: hier gibt es nichts zu wiederholen. Den Stand
+        //    auf der Freigabe erneuert der Administrator, und genau das sagt
+        //    der Text.
+        if (Update.Aktualisierung.NetzVersion.Length > 0)
+        {
+            _promptMenu.Items.Add(new ToolStripSeparator());
+            _promptMenu.Items.Add(new ToolStripMenuItem(string.Format(
+                Texte.UpdateNetzfreigabe,
+                Update.Aktualisierung.NetzVersion,
+                Update.Aktualisierung.EigeneAnzeige))
+            {
+                ForeColor = Color.Firebrick,
+                Enabled = false,
+            });
+        }
+
         _promptMenu.Items.Add(new ToolStripSeparator());
 
         var copyItem = new ToolStripMenuItem(Texte.BildKopieren);

@@ -97,7 +97,13 @@
             <!-- Bauform des Jira-Zugangs (`.ja-dl` + `.ja-btn ja-btn-haupt`) –
                  Vorgabe 2026-09-09. `.btn-primary` ist ein Formular-Knopf mit
                  `width: 100%`, der hier die ganze Zeile gefressen haette. -->
-            <div class="ja-dl">
+            <!-- ⚠ DIE FREIGABE-ZEILE WIRD GERENDERT, NICHT VORGEHALTEN: ob sie
+                 erscheint, haengt an einer Einstellung (`freigabe_pfad` aus
+                 `health`), und der Pfad ist Fremdeingabe – er wird
+                 ausschliesslich per `textContent` gesetzt. Im Markup stuende
+                 er als zweite Fassung und wuerde driften. -->
+            <div id="am-freigabe"></div>
+            <div class="ja-dl" id="am-dl-box">
                 <button type="button" class="ja-btn ja-btn-haupt" id="am-download"
                         data-i18n="aimouse.get_btn">Paket herunterladen</button>
                 <!-- Die Version des Pakets. Sie wird aus `health` GEFUELLT und
@@ -199,13 +205,13 @@
 <script src="/static/js/cpubar.js?v=1"></script>
 <script src="/static/js/syspackages.js?v=2"></script>
 <script src="/static/js/theme.js?v=3"></script>
-<script src="/static/js/i18n.js?v=279"></script>
+<script src="/static/js/i18n.js?v=281"></script>
 <script src="/static/js/branding.js?v=26"></script>
 <script src="/static/js/sessions.js?v=8"></script>
 <script src="/static/js/logo_home.js?v=1"></script>
 <script src="/static/js/settings_btn.js?v=4"></script>
 <script src="/static/js/activity.js?v=2"></script>
 <script src="/static/js/issues.js?v=12"></script>
-<script src="/static/js/ai_mouse.js?v=9"></script>
+<script src="/static/js/ai_mouse.js?v=11"></script>
 </body>
 </html>

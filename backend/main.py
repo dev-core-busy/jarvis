@@ -16810,10 +16810,44 @@ def _kb_has_subfolders(rel_path: str) -> bool:
     return False
 
 
+def _kb_baum_key(rel: str) -> tuple:
+    """Sortierschluessel fuer die HIERARCHISCHE Reihenfolge einer flachen
+    Ordnerliste: jedes Kind steht direkt unter seinem Elternordner, je Ebene
+    alphabetisch ohne Ruecksicht auf Gross-/Kleinschreibung.
+
+    Der Tupel-Vergleich leistet das von selbst: der Pfad eines Ordners ist
+    Praefix seiner Kinder, und ein kuerzeres Tupel gilt als kleiner. Damit steht
+    der Elternordner vor seinen Kindern und beide vor dem naechsten Geschwister
+    – genau die Tiefensuche, die ein Mensch als "den Baum" liest.
+
+    ⚠ DIESELBE REGEL wie ``knowledge_folder_tree`` und ``browse_knowledge_dir``
+    (dort ``name.lower()`` je Ebene). Laufen sie auseinander, zeigt dieselbe
+    Ordnerstruktur je nach Bildschirm eine andere Reihenfolge, ohne dass sich
+    etwas geaendert haette; ein Waechter faehrt beide Wege gegen denselben Baum.
+
+    ⚠ ALPHABETISCH, NICHT NATUERLICH-NUMERISCH: ``10`` steht vor ``9``, aber
+    hinter ``09``. Das ist die Regel der beiden Nachbarstellen – eine
+    abweichende hier waere die naechste Drift."""
+    return tuple(teil.lower() for teil in Path(rel).parts)
+
+
 def _kb_list_subfolders(root_rel: str) -> list:
     """Alle physischen Unterordner (rekursiv) unterhalb eines Ordners:
     ``[{path, name, depth}]`` relativ zu PROJECT_ROOT (Forward-Slashes).
-    Versteckte Ordner und der interne pending-Speicher werden ausgelassen."""
+    Versteckte Ordner und der interne pending-Speicher werden ausgelassen.
+
+    Die Liste ist HIERARCHISCH sortiert (``_kb_baum_key``) – Kinder direkt
+    unter ihrem Elternordner. Client-Seite (``wissen.js::updateFolderOptions``
+    und das Verschieben-Modal) zeichnet in der gelieferten Reihenfolge und
+    rueckt nur nach ``depth`` ein; ohne die Sortierung hier ist der Baum dort
+    falsch.
+
+    ⚠ ``os.walk`` GIBT NICHT IN DIESER REIHENFOLGE AUS: es liefert je
+    Verzeichnis ERST alle Kinder und steigt danach ab. Die Unterordner eines
+    frueh einsortierten Ordners landen damit am Ende der Liste – eingerueckt
+    unter einem FREMDEN Elternordner, also als falsche Aussage ueber die
+    Struktur (gemeldet 2026-09-24). Die Sortierung ist deshalb Pflicht, kein
+    Schoenheitsschritt."""
     from backend.tools.knowledge import PROJECT_ROOT, _is_pending_path, _safe_exists
     base = PROJECT_ROOT / _kb_norm_rel(root_rel)
     # Totes Netzlaufwerk nicht anfassen -> sonst blockiert os.walk minutenlang.
@@ -16834,6 +16868,7 @@ def _kb_list_subfolders(root_rel: str) -> list:
             rel = Path(os.path.join(dirpath, d)).relative_to(PROJECT_ROOT).as_posix()
             out.append({"path": rel, "name": d,
                         "depth": len(Path(rel).parts) - root_depth})
+    out.sort(key=lambda e: _kb_baum_key(e["path"]))
     return out
 
 

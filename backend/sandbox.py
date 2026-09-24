@@ -252,6 +252,21 @@ _APP_DENY_REL = (
     # eigener Eintrag laesst kuenftige Laeufe unter fremder Kennung starten.
     # Deshalb steht die Datei zusaetzlich in PRIVATE_FILES_STRENG (0600).
     "data/claude_subagent.json",
+    # ⚠ `data/generated_images` STEHT HIER ABSICHTLICH NICHT (geprueft 2026-09-24).
+    # Es ist seit demselben Tag in PRIVATE_DIRS (0750) – das schliesst den
+    # SHELL-Weg, und der war die Luecke. Der WERKZEUG-Weg ist ohnehin zu: der
+    # Ordner steht nicht in READ_ROOTS, `authorize_fs` weist read/list/write
+    # bereits ab ("Lesen ist nur in den Wissens-/Arbeitsverzeichnissen erlaubt").
+    # Ein Eintrag hier wuerde also NICHT die Sperre aendern, sondern nur die
+    # HAERTE: aus einem weichen Vermerk wuerde ein Angriffsindiz, und drei
+    # Versuche im 600-s-Fenster sperren das Konto.
+    # Das waere hier falsch, weil der Pfad NAHELIEGT: das Modell hat
+    # `/api/generated/<32 Hex>.png` in seinem Kontext, und "bearbeite das Bild
+    # von vorhin" laesst es plausibel `data/generated_images/<hash>.png` raten.
+    # Genau diese Klasse hat am 2026-09-04 ein Konto fuer drei Lesesuchen
+    # gesperrt und steht seit 2026-08-05 als Regel da: ein GERATENER Pfad ist
+    # weich, ein Secret-/System-Ziel hart. Wer das hier nachtraegt, tauscht eine
+    # geschlossene Luecke gegen Kontosperren fuer harmlose Auftraege.
 )
 
 
@@ -272,7 +287,23 @@ _APP_DENY_REL = (
 # koennen (READ_ROOTS erlaubt es ausdruecklich). data/knowledge steht dort
 # weiterhin daneben – es ist seit 2026-09-13 reine Infrastruktur (pending/,
 # .groups.json), enthaelt aber auf einem noch nicht umgezogenen System Wissen.
-PRIVATE_DIRS = ("data/documents", "data/chats", "data/logs")
+#
+# ⚠ data/generated_images GEHOERT DAZU – AUS EINEM EIGENEN GRUND (2026-09-24).
+# Dort liegen die erzeugten Bilder, und ihre Zugangskontrolle IST der Dateiname:
+# `/api/generated/<32 Hex>` kommt bewusst OHNE Anmeldung aus (ein <img> kann
+# keinen Authorization-Header setzen, und vier Clients holen die Adresse nativ –
+# Browser, AI-Maus, Android, windows-app-go). Ein AUFLISTBARER Ordner hebt damit
+# die ganze Capability-URL aus: wer die Namen hat, hat die URLs, und die gelten
+# fuer jeden Browser ohne Token.
+# Auf DEV gemessen (0755, vor diesem Fix): `runuser -u jarvis_sandbox -- ls`
+# lieferte alle 39 Namen, `od` den PNG-Kopf – waehrend data/documents korrekt
+# verweigerte. Ein Domain-Benutzer haette sich per shell_execute die Namen holen
+# und danach JEDES Bild JEDES Kollegen abrufen koennen; die Bilder entstehen aus
+# Chat-Auftraegen und Bildschirmausschnitten der AI-Maus.
+# Es ist dieselbe Fehlerklasse wie /tmp/jarvis-anhaenge am 2026-09-15: die
+# Eigentuemer-Trennung hielt, die Enumeration eine Ebene hoeher nicht.
+PRIVATE_DIRS = ("data/documents", "data/chats", "data/logs",
+                "data/generated_images")
 PRIVATE_MODE = 0o750
 
 # Einzelne Dateien direkt in data/, die kein Domain-Nutzer lesen darf. Das

@@ -64,6 +64,7 @@ from backend import download_key as _dlkey
 from backend import user_sessions as _user_sessions
 from backend import documents as _documents
 from backend import attachments as _attachments
+from backend import bild_ablage as _bildablage
 from backend import benutzer as _benutzer
 from backend import rag_pfad as _rag
 
@@ -4680,6 +4681,41 @@ async def startup_pending_retention():
         asyncio.create_task(_loop())
     except Exception as e:  # noqa: BLE001
         print(f"[Extraktor] Startup-Fehler: {e}", flush=True)
+
+
+@app.on_event("startup")
+async def startup_bilder_retention():
+    """Vorhaltezeit fuer erzeugte Bilder durchsetzen (Vorgabe 30 Tage).
+
+    Bis 2026-09-24 gab es fuer ``data/generated_images`` KEIN Aufraeumen – die
+    Bilder blieben unbegrenzt liegen, waehrend jede Nachbar-Ablage eine Frist
+    hat (auf DEV gemessen: 39 Dateien, 40 MB, aeltestes ueber drei Monate).
+
+    Erster Lauf sofort (raeumt den Altbestand nach einem Neustart ab), danach
+    taeglich – ein Server, der monatelang laeuft, wuerde sonst nie aufraeumen.
+    ``JARVIS_GENIMG_TTL_DAYS=0`` schaltet es ab.
+
+    ⚠ Die Schleife laeuft AUCH bei "dauerhaft" weiter und fragt die Frist bei
+    jedem Durchlauf neu (``ttl_days()`` ist eine Funktion) – sonst wuerde ein
+    Umstellen von 0 auf 30 erst beim naechsten Dienststart greifen. Gleiche
+    Bauart und gleiche Begruendung wie ``startup_documents_retention``.
+
+    ⚠ Eine geloeschte Datei macht die Referenz im gespeicherten Chat-Verlauf
+    tot. Das faengt ``agent._ohne_tote_bildrefs`` ab (Hinweis statt kaputtem
+    Bild) – **ohne diesen vorhandenen Fix waere dieser Hook nicht vertretbar.**
+    """
+    async def _loop():
+        while True:
+            try:
+                if _bildablage.ttl_days() > 0:
+                    await asyncio.to_thread(_bildablage.cleanup)
+            except Exception as e:  # noqa: BLE001
+                print(f"[Bilder] Aufraeumen fehlgeschlagen: {e}", flush=True)
+            await asyncio.sleep(86400)
+    try:
+        asyncio.create_task(_loop())
+    except Exception as e:  # noqa: BLE001
+        print(f"[Bilder] Startup-Fehler: {e}", flush=True)
 
 
 @app.on_event("startup")

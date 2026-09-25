@@ -158,10 +158,17 @@ print("\n\033[1m5. DIE EIGENSCHAFT: der Extraktor wird nicht mehr gerufen\033[0m
 # im Reindex nicht abgefragt wird, kostet die 120 s trotzdem.
 import ast                                                      # noqa: E402
 _b = ast.parse(QUELLE)
-_fn = next((n for n in ast.walk(_b) if isinstance(n, ast.FunctionDef)
-            and n.name == "_rebuild_vector_index"), None)
-_q = ast.get_source_segment(QUELLE, _fn) if _fn else ""
-check("_rebuild_vector_index gefunden", bool(_q))
+# ⚠ DIE EIGENSCHAFT GILT DEM INDEXLAUF, NICHT EINER BESTIMMTEN FUNKTION.
+# Bis 2026-09-25 steckte der Lauf in `_rebuild_vector_index`; seit der
+# Nebenlaeufigkeits-Sperre ist dort die WEICHE und der Lauf in
+# `_vector_index_lauf`. Ein Schnitt auf den alten Namen meldete danach VIER
+# Fehler, die es nicht gibt - und haette die Umstrukturierung abgelehnt.
+# Genommen wird deshalb der GANZE Vektor-Indexweg.
+_WEG = ("_rebuild_vector_index", "_inline_vector_index", "_vector_index_lauf")
+_teile = [ast.get_source_segment(QUELLE, n) or "" for n in ast.walk(_b)
+          if isinstance(n, ast.FunctionDef) and n.name in _WEG]
+_q = "\n".join(_teile)
+check(f"der Vektor-Indexweg gefunden ({len(_teile)} Funktionen)", bool(_q))
 i_skip = _q.find("_unlesbar_ueberspringen")
 i_extr = _q.find("_extract_text(")
 check("⚠ die Cache-Abfrage steht VOR der Extraktion",

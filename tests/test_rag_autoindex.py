@@ -136,15 +136,20 @@ check("verwaist: KEIN erreichbarer Ordner -> nichts wird abgeraeumt",
 # ══ 2. DRIFT: der Reindex ruft dieselben Regeln ═══════════════════════════
 print("\n2. Drift-Schranke: eine Fassung, zwei Aufrufer")
 k_baum = ast.parse(K_SRC)
-reb = next((n for n in ast.walk(k_baum)
-            if isinstance(n, ast.FunctionDef) and n.name == "_rebuild_vector_index"), None)
-check("_rebuild_vector_index gefunden", reb is not None)
-if reb is not None:
-    rufe = {n.func.id for n in ast.walk(reb)
+# ⚠ DIE DRIFT-SCHRANKE GILT DEM INDEXLAUF, NICHT EINEM FUNKTIONSNAMEN.
+# Seit der Nebenlaeufigkeits-Sperre (2026-09-25) ist `_rebuild_vector_index` nur
+# noch die WEICHE; gearbeitet wird in `_vector_index_lauf`. Ein Schnitt auf den
+# alten Namen meldete danach zwei Fehler, die es nicht gibt.
+_WEG = ("_rebuild_vector_index", "_inline_vector_index", "_vector_index_lauf")
+weg_fns = [n for n in ast.walk(k_baum)
+           if isinstance(n, ast.FunctionDef) and n.name in _WEG]
+check(f"der Vektor-Indexweg gefunden ({len(weg_fns)} Funktionen)", bool(weg_fns))
+if weg_fns:
+    rufe = {n.func.id for fn in weg_fns for n in ast.walk(fn)
             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
-    check("_rebuild_vector_index RUFT _geaenderte_dateien (baut sie nicht nach)",
+    check("der Indexlauf RUFT _geaenderte_dateien (baut sie nicht nach)",
           "_geaenderte_dateien" in rufe)
-    check("_rebuild_vector_index RUFT _verwaiste_dateien",
+    check("der Indexlauf RUFT _verwaiste_dateien",
           "_verwaiste_dateien" in rufe)
 
 ai_baum = ast.parse(AI_SRC)

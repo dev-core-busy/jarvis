@@ -110,6 +110,9 @@ _current_run: dict = {}
 # Verhindert PARALLELE Reindex-Laeufe – sonst teilen sie sich _index_progress und
 # die Zaehler ueberschreiben sich (z.B. vector_done=48 / vector_total=10 -> 480%).
 _reindex_lock = threading.Lock()
+# Suchpfad-Indexlauf: hoechstens EINER gleichzeitig. Wer sie nicht bekommt,
+# UEBERSPRINGT den Lauf (kein Warten) – siehe _rebuild_vector_index.
+_inline_index_lock = threading.Lock()
 # Kam waehrend eines laufenden Reindex eine weitere Anfrage, wird GENAU EINMAL
 # nachgeholt (coalesced) – so gehen frisch hinzugefuegte Dateien nicht verloren.
 _reindex_rerun = threading.Event()
@@ -410,7 +413,52 @@ def _rebuild_vector_index(folders: list[Path], max_bytes: int, force: bool = Fal
         if not indexed:
             _log.debug("Vektor-Index leer – bitte Neu-Indizieren ausfuehren")
             return False
+        # ⚠ NUR EIN INLINE-LAUF GLEICHZEITIG (2026-09-24).
+        # Der Suchpfad lief bisher OHNE jede Sperre: ``_reindex_lock`` nimmt nur
+        # ``force_reindex``. N gleichzeitige ``knowledge_search`` starteten damit
+        # N Indexlaeufe in eigenen Threads – und zwar ueber DIESELBEN Dateien, denn
+        # die mtime wird erst NACH Erfolg geschrieben, keiner sieht den anderen.
+        # Bei einem Bestand aus 90 % PDF heisst das: dieselbe Seite mehrfach
+        # gleichzeitig durch die OCR.
+        #
+        # ⚠ NICHT WARTEN, SONDERN UEBERSPRINGEN. Eine blockierende Sperre haengt
+        # die Suche an einen Indexlauf, der Minuten dauern kann – der Benutzer
+        # bekaeme dann gar keine Antwort statt einer aus einem Index, der ein paar
+        # Sekunden alt ist. Die Halbfehlerstellungen sind nicht gleich schwer.
+        #
+        # ⚠ DIE RUECKGABE MUSS DIESELBE BLEIBEN. ``False`` heisst fuer den
+        # Aufrufer "kein Vektor-Index" und schickt ihn in den TF-IDF-Rueckfall
+        # bzw. in die Meldung "bitte neu indizieren" – fuer einen uebersprungenen
+        # Lauf waere das eine Falschaussage ueber einen vollstaendig nutzbaren Index.
+        if not _inline_index_lock.acquire(blocking=False):
+            _log.debug("Inline-Indexlauf laeuft bereits – diese Suche nutzt den "
+                       "vorhandenen Index")
+            return vs.chunk_count() > 0
+        try:
+            return _inline_vector_index(vs, indexed, folders, max_bytes)
+        finally:
+            _inline_index_lock.release()
 
+    return _vector_index_lauf(vs, indexed, folders, max_bytes, force)
+
+
+def _inline_vector_index(vs, indexed, folders, max_bytes) -> bool:
+    """Suchpfad-Lauf – haelt zusaetzlich den Voll-Reindex aus dem Weg.
+
+    ``force_reindex`` arbeitet unter ``_reindex_lock`` denselben Bestand ab.
+    Laeuft er, ist ein Inline-Lauf daneben reine Doppelarbeit an denselben
+    Dateien – und teuer, weil OCR und Einbettung dabei zweimal passieren.
+    """
+    if _reindex_lock.locked():
+        _log.debug("Neu-Indizieren laeuft – Inline-Lauf entfaellt fuer diese Suche")
+        return vs.chunk_count() > 0
+    return _vector_index_lauf(vs, indexed, folders, max_bytes, force=False)
+
+
+def _vector_index_lauf(vs, indexed, folders: list[Path], max_bytes: int,
+                       force: bool) -> bool:
+    """Der eigentliche Lauf. Von beiden Wegen (Suchpfad, Neuaufbau) benutzt –
+    EINE Fassung, damit die Regeln nicht auseinanderlaufen."""
     # Nur erreichbare Ordner betrachten. Die Liste wird VOR dem Scan bestimmt,
     # damit Scan und Aufraeumen garantiert denselben Stand sehen.
     alive = _nutzbare_ordner(folders, indexed, streng=force)
@@ -994,46 +1042,136 @@ def _transcribe_media(filepath: Path) -> str | None:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+# ══ Tesseract-Aufruf: EINE Stelle, begrenzt und mit Zeitdeckel ════════════
+# ⚠ AUF ECHT BEZAHLT (2026-09-24): 116 neue PDFs standen zur Indizierung an.
+# Der Suchpfad arbeitet sie in 10er-Haeppchen ab (INLINE_LIMIT) – gemessen
+# 7 Dateien in 3 Minuten, also rund 26 s je Datei auf einem 4-Kern-Server,
+# waehrend mehrere Benutzer gleichzeitig suchten. Die CPU lag bei 100 %.
+#
+# URSACHE: pytesseract startet tesseract mit der GEERBTEN Umgebung, und
+# tesseract parallelisiert sich intern ueber OpenMP – es belegt damit ALLE
+# Kerne. Laufen mehrere Erkennungen gleichzeitig, kaempfen sie um dieselben
+# Kerne und werden langsamer statt schneller. Zwei andere Module dieses
+# Projekts hatten die Begrenzung laengst, samt Messung:
+#   skills/office/pdf_formular.py – 8 Seiten: 69,1 s ohne, 4,5 s mit (Faktor 15)
+#   backend/tools/bild_text.py    – dieselbe Begruendung, dazu timeout=180
+# Ausgerechnet HIER, im heissen Pfad jeder ``knowledge_search``, fehlte sie.
+#
+# ⚠ DIE VARIABLE DARF NICHT GLOBAL GESETZT WERDEN. ``os.environ`` gilt fuer den
+# ganzen Dienst und traefe auch Embeddings und Bildmodelle im selben Prozess.
+# Deshalb wird tesseract DIREKT mit eigener Umgebung aufgerufen statt ueber
+# pytesseract – genau wie in den beiden Modulen oben.
+_OCR_UMGEBUNG = {"OMP_THREAD_LIMIT": "1"}
+
+
+def _ocr_zeitdeckel() -> int:
+    """Sekunden je Bild/Seite. FUNKTION, keine Konstante.
+
+    Ein beim Import gelesener Wert waere bis zum Dienstneustart eingefroren.
+    Ohne Deckel laeuft ein haengender tesseract unbegrenzt weiter – und im
+    Suchpfad wartet ein Benutzer darauf.
+    """
+    try:
+        v = int(os.environ.get("JARVIS_OCR_TIMEOUT", "120"))
+        return v if 5 <= v <= 3600 else 120
+    except (TypeError, ValueError):
+        return 120
+
+
+def _ocr_datei(bildpfad: str, lang: str | None) -> str:
+    """EINE Bilddatei erkennen. Gibt "" zurueck, wenn nichts herauskommt.
+
+    Wirft NICHT – OCR ist ein Rueckfall, und ein Fehlschlag darf die
+    Extraktion der uebrigen Seiten nicht mitreissen.
+    """
+    umgebung = dict(os.environ)          # TESSDATA_PREFIX & Co. muessen bleiben
+    umgebung.update(_OCR_UMGEBUNG)
+    befehl = ["tesseract", bildpfad, "stdout"]
+    if lang:
+        befehl += ["-l", lang]
+    try:
+        fertig = subprocess.run(befehl, capture_output=True, text=True,
+                                timeout=_ocr_zeitdeckel(), env=umgebung, check=False)
+    except subprocess.TimeoutExpired:
+        _log.warning("OCR-Zeitlimit (%ds) ueberschritten: %s",
+                     _ocr_zeitdeckel(), os.path.basename(bildpfad))
+        return ""
+    except FileNotFoundError:
+        _log.warning("tesseract nicht gefunden – OCR deaktiviert")
+        return ""
+    except Exception as e:  # noqa: BLE001
+        _log.warning("OCR fehlgeschlagen (%s): %s", os.path.basename(bildpfad), e)
+        return ""
+    if fertig.returncode != 0:
+        _log.warning("OCR meldet Fehler (%s): %s", os.path.basename(bildpfad),
+                     (fertig.stderr or "").strip()[:200])
+        return ""
+    return (fertig.stdout or "").strip()
+
+
 def _ocr_image(filepath: Path) -> str | None:
     """OCR auf einem Bild via Tesseract (Deutsch+Englisch). Gibt erkannten Text zurueck.
 
-    Lokal, kein LLM. Voraussetzung: System-Paket 'tesseract-ocr' (+ Sprachpakete)
-    und Python-Pakete 'pytesseract' + 'Pillow'. Fehlt etwas, wird None zurueckgegeben
-    (das LLM kann dann ggf. noch das Bild selbst auswerten – siehe extract_from_file).
+    Lokal, kein LLM. Voraussetzung: System-Paket 'tesseract-ocr' (+ Sprachpakete).
+    Fehlt etwas, wird None zurueckgegeben (das LLM kann dann ggf. noch das Bild
+    selbst auswerten – siehe extract_from_file).
     """
+    lang = _ocr_sprachen()
+    # Regelweg: tesseract direkt auf die Datei. Leptonica liest alle Formate aus
+    # EXTENSIONS_IMAGE (png/jpg/gif/bmp/tif/webp) von sich aus.
+    text = _ocr_datei(str(filepath), lang)
+    if text:
+        return text
+    # Rueckfall ueber Pillow: ein Format, mit dem Leptonica nichts anfangen kann
+    # (exotische Kompression, CMYK-TIFF), laesst sich ueber PNG noch retten.
+    # Der Umweg kostet eine Temp-Datei und laeuft deshalb NUR, wenn der direkte
+    # Weg nichts geliefert hat.
+    tmpdir = None
     try:
-        import pytesseract
         from PIL import Image
     except ImportError:
-        _log.warning("pytesseract/Pillow nicht installiert – Bild-OCR deaktiviert")
+        _log.warning("Pillow nicht installiert – kein OCR-Rueckfall ueber PNG")
         return None
     try:
-        # Sprachen auf verfuegbare beschraenken (deu/eng), sonst Tesseract-Default
-        lang = None
-        try:
-            avail = set(pytesseract.get_languages(config=""))
-            sel = [l for l in ("deu", "eng") if l in avail]
-            lang = "+".join(sel) if sel else None
-        except Exception:
-            lang = "deu+eng"
+        tmpdir = tempfile.mkdtemp(prefix="ocr_")
+        ziel = os.path.join(tmpdir, "seite.png")
         with Image.open(str(filepath)) as img:
             img.load()
-            text = pytesseract.image_to_string(img, lang=lang) if lang else pytesseract.image_to_string(img)
-        text = (text or "").strip()
+            img.convert("RGB").save(ziel, "PNG")
+        text = _ocr_datei(ziel, lang)
         return text or None
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         _log.warning(f"Bild-OCR fehlgeschlagen ({filepath.name}): {e}")
         return None
+    finally:
+        if tmpdir:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+_ocr_sprachen_cache: list = []      # [] = noch nicht ermittelt
 
 
 def _ocr_sprachen() -> str | None:
-    """Verfuegbare Tesseract-Sprachen auf deu/eng eingegrenzt."""
+    """Verfuegbare Tesseract-Sprachen auf deu/eng eingegrenzt.
+
+    GEMERKT: die Abfrage ist ein Unterprozess, und sie steht im heissen Pfad
+    (je Bild bzw. je PDF). Die installierten Sprachpakete aendern sich zur
+    Laufzeit nicht – kommt eines dazu, greift es nach dem naechsten Neustart.
+    """
+    if _ocr_sprachen_cache:
+        return _ocr_sprachen_cache[0]
+    wert: str | None = "deu+eng"
     try:
-        import pytesseract
-        avail = set(pytesseract.get_languages(config=""))
-        return "+".join([l for l in ("deu", "eng") if l in avail]) or None
-    except Exception:
-        return "deu+eng"
+        fertig = subprocess.run(["tesseract", "--list-langs"],
+                                capture_output=True, text=True, timeout=30, check=False)
+        # Die erste Zeile ist eine Ueberschrift ("List of available languages")
+        vorhanden = {z.strip() for z in (fertig.stdout or "").splitlines()[1:]}
+        if vorhanden:
+            wert = "+".join([l for l in ("deu", "eng") if l in vorhanden]) or None
+    except Exception:  # noqa: BLE001
+        pass                                   # Vorgabe deu+eng, tesseract entscheidet
+    _ocr_sprachen_cache.append(wert)
+    return wert
 
 
 def _ocr_pdf_seiten(pdf_bytes: bytes, erste: int = 1, letzte: int = 20) -> dict[int, str]:
@@ -1046,27 +1184,35 @@ def _ocr_pdf_seiten(pdf_bytes: bytes, erste: int = 1, letzte: int = 20) -> dict[
     """
     try:
         from pdf2image import convert_from_bytes
-        import pytesseract
     except ImportError:
-        _log.warning("pdf2image/pytesseract fehlt – PDF-OCR deaktiviert")
+        _log.warning("pdf2image fehlt – PDF-OCR deaktiviert")
         return {}
     if letzte < erste:
         return {}
-    try:
-        images = convert_from_bytes(pdf_bytes, dpi=200, first_page=erste, last_page=letzte)
-    except Exception as e:
-        _log.warning("PDF->Bild fehlgeschlagen: %s", e)
-        return {}
     lang = _ocr_sprachen()
     aus: dict[int, str] = {}
-    for versatz, img in enumerate(images):
-        try:
-            t = pytesseract.image_to_string(img, lang=lang) if lang else pytesseract.image_to_string(img)
-            t = (t or "").strip()
+    tmpdir = None
+    try:
+        # ⚠ paths_only: die Seiten kommen als DATEIEN statt als PIL-Bilder im
+        # Speicher. Zwei Gruende: tesseract wird direkt auf die Datei angesetzt
+        # (nur so laesst sich seine Umgebung begrenzen, siehe _ocr_datei), und
+        # 30 Seiten a 200 dpi liegen nicht mehr gleichzeitig im Heap.
+        tmpdir = tempfile.mkdtemp(prefix="pdfocr_")
+        pfade = convert_from_bytes(pdf_bytes, dpi=200, first_page=erste,
+                                   last_page=letzte, output_folder=tmpdir,
+                                   fmt="png", paths_only=True)
+    except Exception as e:
+        _log.warning("PDF->Bild fehlgeschlagen: %s", e)
+        if tmpdir:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        return {}
+    try:
+        for versatz, pfad in enumerate(pfade):
+            t = _ocr_datei(str(pfad), lang)
             if t:
                 aus[erste + versatz] = t
-        except Exception:
-            continue
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
     return aus
 
 
@@ -2408,10 +2554,11 @@ def _get_static_stats() -> dict:
             from faster_whisper import WhisperModel
             if shutil.which("ffmpeg"): has_video = True
         except ImportError: pass
-        try:
-            import pytesseract  # noqa: F401
-            if shutil.which("tesseract"): has_image = True
-        except ImportError: pass
+        # Bild-OCR haengt AM PROGRAMM, nicht mehr an pytesseract: _ocr_datei ruft
+        # tesseract direkt (nur so laesst sich seine Umgebung begrenzen). Wer hier
+        # weiter pytesseract verlangt, meldet "nicht verfuegbar" fuer eine OCR,
+        # die laeuft – eine Anzeige, die einen Zustand behauptet, den sie nicht hat.
+        if shutil.which("tesseract"): has_image = True
 
         _stats_cache = {
             "pdf_support": has_pdf, "docx_support": has_docx,
@@ -3289,15 +3436,15 @@ class KnowledgeManageTool(BaseTool):
                 formats.append("Video/Audio")
             else:
                 formats.append("Video/Audio ⚠️ (ffmpeg + faster-whisper nötig)")
-            # Bild-OCR (Tesseract)
+            # Bild-OCR: entscheidend ist das PROGRAMM tesseract (siehe _ocr_datei),
+            # nicht das Python-Paket pytesseract – das braucht der OCR-Weg nicht mehr.
             try:
-                import pytesseract as _pt  # noqa: F401
                 import shutil as _sh
                 _ocr_ok = bool(_sh.which("tesseract"))
             except Exception:
                 _ocr_ok = False
             formats.append("Bilder/OCR" if _ocr_ok
-                           else "Bilder/OCR ⚠️ (tesseract-ocr + pytesseract nötig)")
+                           else "Bilder/OCR ⚠️ (System-Paket tesseract-ocr nötig)")
             if stats.get("onenote_support"):
                 formats.append("OneNote")
             else:

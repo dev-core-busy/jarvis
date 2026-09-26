@@ -101,7 +101,9 @@ const GRUPPEN = [
 
 let gesendet = [];   // Aufrufe an setAssignment
 
-async function baueSeite() {
+async function baueSeite(dateien, zuordnung) {
+    dateien  = dateien  || DATEIEN;
+    zuordnung = zuordnung || ZUORDNUNG;
     const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>',
                           { url: 'https://pruef.local/wissen', runScripts: 'outside-only' });
     const win = dom.window;
@@ -110,7 +112,7 @@ async function baueSeite() {
     // fetch-Attrappe: nur die Endpunkte, die kbmatrix.open() wirklich ruft.
     const holen = async (url) => {
         const pfad = String(url).split('?')[0];
-        if (pfad === '/api/knowledge/files')   return { ok: true, json: async () => DATEIEN };
+        if (pfad === '/api/knowledge/files')   return { ok: true, json: async () => dateien };
         if (pfad === '/api/knowledge/pending') return { ok: true, json: async () => [] };
         if (pfad === '/api/knowledge/content_search') return { ok: true, json: async () => ({ ok: true, files: [] }) };
         return { ok: true, json: async () => ({}) };
@@ -132,7 +134,7 @@ async function baueSeite() {
         UNGROUPED: 'ungrouped',
         all: () => GRUPPEN,
         load: async () => GRUPPEN,
-        getMap: async () => JSON.parse(JSON.stringify(ZUORDNUNG)),
+        getMap: async () => JSON.parse(JSON.stringify(zuordnung)),
         setAssignment: async (p, ids) => { gesendet.push({ path: p, ids: ids.slice() }); return { ok: true }; },
     };
 
@@ -318,8 +320,107 @@ check('die alte, getrennte applyFilter-Fassung ist weg', !/const\s+applyFilter\s
 check('der Zaehler wird nirgends von Hand gesetzt (nur ueber _zaehlerSetzen)',
       (MATRIXJS.match(/\.kbm-count'\)/g) || []).length === 1);
 
+// ── 12. Netzwerk-Freigaben: die ZWEI Pfadformen ─────────────────────────────
+section('12. Zugeordnete Datei aus einer Freigabe traegt ihren Haken');
+/* DER GEMELDETE FALL (2026-09-26): "Haken bei zugeordneten Dokumenten fehlen,
+ * wenn 'nicht zugeordnet' angehakt ist".
+ * `/api/knowledge/files` liefert fuer Dateien ausserhalb von PROJECT_ROOT
+ * `str(f)` – also MIT fuehrendem Schraegstrich; das Zuordnungs-Manifest traegt
+ * denselben Pfad ueber `_rel()` OHNE. Auf ECHT gemessen: 89 zugeordnete Dateien
+ * aus drei Freigaben standen deshalb ohne Haken in der "nicht zugeordnet"-Liste.
+ * ⚠ Der Testbestand der Abschnitte 1-11 kennt nur `data/rag/...` und kann diese
+ * Frage strukturell NICHT beantworten – deshalb ein eigener Bestand. Ein Pfad mit
+ * GROSSBUCHSTABEN ist dabei Absicht: wer hier `wissen.js::pfadSchluessel`
+ * (mit toLowerCase) uebernimmt, greift still daneben. */
+const M_DATEIEN = [{
+    folder: 'mnt/rag/share_1',
+    files: [
+        { path: '/mnt/rag/share_1/Turbomed/Turbomed.docx', name: 'Turbomed.docx' },
+        { path: '/mnt/rag/share_1/Tomedo/Tomedo.docx',     name: 'Tomedo.docx' },
+        { path: '/mnt/rag/share_1/offen/Neu.docx',         name: 'Neu.docx' },
+    ],
+}, {
+    folder: 'data/rag/doku',
+    files: [{ path: 'data/rag/doku/lokal.md', name: 'lokal.md' }],
+}];
+// Schluessel GENAU so, wie das Manifest sie traegt: ohne fuehrenden Schraegstrich.
+const M_ZUORDNUNG = {
+    'mnt/rag/share_1/Turbomed/Turbomed.docx': ['g1'],
+    'mnt/rag/share_1/Tomedo/Tomedo.docx':     ['g1', 'g2'],
+    'data/rag/doku/lokal.md':                 ['g2'],
+};
+const win2 = await baueSeite(M_DATEIEN, M_ZUORDNUNG);
+await win2.KbMatrix.open();
+const ov2 = win2.document.getElementById('kbm-overlay');
+check('Tabelle mit Freigabe-Bestand ist aufgebaut', !!ov2);
+check('alle 4 Zeilen im DOM', zeilen(win2).length === 4, 'Zeilen: ' + zeilen(win2).length);
+
+function haken(win, pfad, gid) {
+    const tr = zeilen(win).find(t => t.dataset.path === pfad);
+    if (!tr) return 'ZEILE FEHLT';
+    const z = tr.querySelector('.kbm-gcell[data-gid="' + gid + '"]');
+    if (!z) return 'ZELLE FEHLT';
+    return z.classList.contains('on') && z.textContent.indexOf('✓') !== -1;
+}
+check('⚠ die zugeordnete Freigabe-Datei traegt ihren Haken (g1)',
+      haken(win2, '/mnt/rag/share_1/Turbomed/Turbomed.docx', 'g1') === true,
+      String(haken(win2, '/mnt/rag/share_1/Turbomed/Turbomed.docx', 'g1')));
+check('⚠ zweite Gruppe an derselben Datei ebenfalls (g2)',
+      haken(win2, '/mnt/rag/share_1/Tomedo/Tomedo.docx', 'g2') === true);
+check('Gegenrichtung: die NICHT zugeordnete Freigabe-Datei hat keinen Haken',
+      haken(win2, '/mnt/rag/share_1/offen/Neu.docx', 'g1') === false);
+check('Positivkontrolle: die lokale Datei traegt ihren Haken wie bisher',
+      haken(win2, 'data/rag/doku/lokal.md', 'g2') === true);
+
+let s2 = sichtbare(win2);
+check('⚠ bei aktivem Haken ist NUR die wirklich ungruppierte Zeile sichtbar',
+      s2.length === 1 && s2[0] === '/mnt/rag/share_1/offen/Neu.docx', s2.join(', '));
+check('der Zaehler sagt 1 von 4', /\b1\b/.test(zaehlerText(win2)) && /\b4\b/.test(zaehlerText(win2)),
+      zaehlerText(win2));
+
+// Der Spaltenzaehler im Kopf zaehlt ueber die Manifest-Schluessel. Er war schon
+// vorher richtig - genau daran war der Widerspruch sichtbar: "g1: 2" ueber einer
+// Tabelle, in der keine Zeile einen Haken trug.
+const kopfG1 = ov2.querySelector('.kbm-th-count[data-gid="g1"]');
+check('Spaltenzaehler g1 nennt 2', kopfG1 && kopfG1.textContent.trim() === '2',
+      kopfG1 ? kopfG1.textContent : '-');
+
+// Zuordnen: der lokale Stand darf KEINEN zweiten Schluessel erzeugen, sonst
+// zaehlt _groupCount doppelt.
+const vorherGesendet = gesendet.length;
+const trNeu = zeilen(win2).find(t => t.dataset.path === '/mnt/rag/share_1/offen/Neu.docx');
+const zelleNeu = trNeu && trNeu.querySelector('.kbm-gcell[data-gid="g1"]');
+check('Gruppen-Zelle der ungruppierten Freigabe-Datei gefunden', !!zelleNeu);
+zelleNeu.click();
+await new Promise(r => win2.setTimeout(r, 0));
+check('die Zuordnung geht an den Server',
+      gesendet.length === vorherGesendet + 1
+      && gesendet[gesendet.length - 1].path === '/mnt/rag/share_1/offen/Neu.docx',
+      JSON.stringify(gesendet.slice(vorherGesendet)));
+check('⚠ der Spaltenzaehler g1 steht danach auf 3 (kein doppelter Schluessel)',
+      kopfG1.textContent.trim() === '3', kopfG1.textContent);
+check('und die Zeile faellt aus der gefilterten Menge',
+      sichtbare(win2).length === 0, sichtbare(win2).join(', '));
+
+// ── 13. Regel: _assign wird nur ueber _akey indiziert ────────────────────────
+section('13. Regel: jeder Zugriff auf _assign laeuft ueber die Normalisierung');
+/* Damit faellt auch eine KUENFTIGE Stelle auf, ohne dass jemand eine Liste
+ * pflegt. Kommentare vorher entfernen - der Code erklaert die zwei Pfadformen
+ * und nennt `_assign[row.path]` dabei woertlich. */
+const JS_REIN = MATRIXJS.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
+check('Positivkontrolle: der Kommentar-Filter hat den Code nicht zerlegt',
+      JS_REIN.includes('function _akey(') && !JS_REIN.includes('89 Dateien aus drei Freigaben'));
+const roh = (JS_REIN.match(/_assign\[(?!_akey\(|key\]|p\])/g) || []);
+check('kein _assign[...] ohne _akey/key', roh.length === 0, 'Stellen: ' + roh.length);
+check('_gids() ist die eine Lesestelle und normiert',
+      /function\s+_gids\s*\(\s*path\s*\)\s*\{\s*return\s+_assign\[_akey\(path\)\]/.test(JS_REIN));
+check('_akey entfernt fuehrende Schraegstriche', /replace\(\/\^\\\/\+\/,\s*''\)/.test(JS_REIN));
+check('⚠ _akey senkt NICHT die Gross/Kleinschreibung (Manifest-Schluessel sind case-sensitiv)',
+      !/function\s+_akey[\s\S]{0,200}?toLowerCase/.test(JS_REIN));
+
 clearTimeout(wachhund);
 win.close();
+win2.close();
 bilanz();
 process.exit(fail ? 1 : 0);
 

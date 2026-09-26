@@ -32,6 +32,22 @@ window.KbMatrix = (function () {
     }
     function T(k, d) { return (window.t && window.t(k)) || d; }
 
+    /* ⚠ ZWEI PFADFORMEN – der Schluessel fuer _assign muss normiert werden.
+     * `/api/knowledge/files` liefert fuer Dateien AUSSERHALB von PROJECT_ROOT
+     * `str(f)`, also `/mnt/rag/share_1/x.docx` MIT fuehrendem Schraegstrich;
+     * `knowledge_groups._rel()` macht beim Schreiben ein `lstrip("/")`, im
+     * Manifest steht also `mnt/rag/share_1/x.docx`. Ohne diese Angleichung ist
+     * `_assign[row.path]` fuer JEDE Datei aus einer Netzwerk-Freigabe undefined:
+     * kein Haken, und die Zeile gilt als "nicht zugeordnet" (auf ECHT gemessen:
+     * 89 Dateien aus drei Freigaben).
+     * ⚠ NICHT `wissen.js::pfadSchluessel` benutzen – das senkt zusaetzlich
+     * Gross/Klein. Dort werden zwei MENGEN verglichen, hier wird INDIZIERT, und
+     * die Schluessel des Manifests sind case-sensitiv (`Turbomed/Turbomed.docx`).
+     * Backslashes werden bewusst NICHT behandelt: die Pfade kommen aus Pythons
+     * `str(f)` auf Linux, eine Zeile ohne messbare Wirkung waere nur eine
+     * weitere, die jede kuenftige Durchsicht mitpruefen muss. */
+    function _akey(p) { return String(p == null ? '' : p).replace(/^\/+/, ''); }
+
     let _rows = [];      // [{path,name,desc,source,docId,doc}]
     let _assign = {};    // path -> [group-ids]
     let _groups = [];
@@ -84,6 +100,8 @@ window.KbMatrix = (function () {
         _render();
     }
 
+    function _gids(path) { return _assign[_akey(path)] || []; }
+
     function _groupCount(gid) {
         let n = 0;
         for (const p in _assign) if ((_assign[p] || []).includes(gid)) n++;
@@ -111,8 +129,8 @@ window.KbMatrix = (function () {
         if (_sortKey.slice(0, 2) === 'g:') {
             const gid = _sortKey.slice(2);
             _rows.sort((a, b) => {
-                const av = (_assign[a.path] || []).includes(gid) ? 1 : 0;
-                const bv = (_assign[b.path] || []).includes(gid) ? 1 : 0;
+                const av = _gids(a.path).includes(gid) ? 1 : 0;
+                const bv = _gids(b.path).includes(gid) ? 1 : 0;
                 return (bv - av) * _sortDir || byName(a, b);
             });
         } else {
@@ -169,7 +187,7 @@ window.KbMatrix = (function () {
 
         const tbody = '<tbody>' + _rows.map(row => {
             const gcells = _groups.map(g => {
-                const on = (_assign[row.path] || []).includes(g.id);
+                const on = _gids(row.path).includes(g.id);
                 return `<td class="kbm-gcell${on ? ' on' : ''}" data-gid="${_attr(g.id)}" style="--grp:${_attr(g.color)}">`
                     + `<span class="kbm-check">${on ? '✓' : ''}</span></td>`;
             }).join('');
@@ -232,7 +250,7 @@ window.KbMatrix = (function () {
             const textOk = !q || tr.textContent.toLowerCase().indexOf(q) !== -1
                 || (treffer && treffer.has(pfad));
             // "nicht zugeordnet" = keine EINZIGE Gruppe an dieser Datei
-            const grpOk = !_nurUngruppiert || (_assign[pfad] || []).length === 0;
+            const grpOk = !_nurUngruppiert || _gids(pfad).length === 0;
             const sichtbar = textOk && grpOk;
             tr.style.display = sichtbar ? '' : 'none';
             if (sichtbar) gezeigt++;
@@ -436,14 +454,18 @@ window.KbMatrix = (function () {
     async function _toggle(cell, ov) {
         const tr = cell.closest('tr');
         const path = tr.dataset.path;
+        // ⚠ Geschrieben wird unter dem NORMIERTEN Schluessel. Ein zweiter
+        // Eintrag in der Slash-Form waere fuer den Haken unsichtbar und liesse
+        // _groupCount (es zaehlt ueber ALLE Schluessel) doppelt zaehlen.
+        const key = _akey(path);
         const gid = cell.dataset.gid;
-        let ids = (_assign[path] || []).slice();
+        let ids = _gids(path).slice();
         const on = ids.includes(gid);
         ids = on ? ids.filter(x => x !== gid) : ids.concat(gid);
         // Optimistisch umschalten
         cell.classList.toggle('on', !on);
         cell.querySelector('.kbm-check').textContent = !on ? '✓' : '';
-        _assign[path] = ids;
+        _assign[key] = ids;
         const cnt = ov.querySelector('.kbm-th-count[data-gid="' + CSS.escape(gid) + '"]');
         if (cnt) cnt.textContent = _groupCount(gid);
         // Die Zeile kann durch diese Zuordnung aus der gefilterten Menge fallen
@@ -454,7 +476,7 @@ window.KbMatrix = (function () {
             await window.KbGroups.setAssignment(path, ids);
         } catch (err) {
             // Zurückrollen bei Fehler
-            _assign[path] = on ? ids.concat(gid) : ids.filter(x => x !== gid);
+            _assign[key] = on ? ids.concat(gid) : ids.filter(x => x !== gid);
             cell.classList.toggle('on', on);
             cell.querySelector('.kbm-check').textContent = on ? '✓' : '';
             if (cnt) cnt.textContent = _groupCount(gid);
@@ -495,7 +517,7 @@ window.KbMatrix = (function () {
                 });
                 if (!r.ok) { alert(T('kbmatrix.delete_failed', 'Löschen fehlgeschlagen.')); return; }
             }
-            delete _assign[path];
+            delete _assign[_akey(path)];
             _rows = _rows.filter(r => r.path !== path);
             tr.remove();
             // Zaehler ueber die Filterregel, nicht von Hand: sonst stuende dort

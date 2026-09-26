@@ -89,7 +89,7 @@ PROBEN = [
 
     ("Gruppen-Bedingung aus der Filterregel", "frontend/js/kbmatrix.js",
      lambda: patch("frontend/js/kbmatrix.js",
-                   "const grpOk = !_nurUngruppiert || (_assign[pfad] || []).length === 0;",
+                   "const grpOk = !_nurUngruppiert || _gids(pfad).length === 0;",
                    "const grpOk = true;")),
 
     ("Text und Kaestchen ODER-verknuepft statt UND", "frontend/js/kbmatrix.js",
@@ -144,6 +144,49 @@ PROBEN = [
      lambda: patch("frontend/js/i18n.js",
                    "'kbmatrix.count_of':             '{n} von {m} Dokumenten',",
                    "'kbmatrix.count_of':             '{n} Dokumente',")),
+
+    # ── Pfadform-Fix (2026-09-26) ───────────────────────────────────────────
+    # ⚠ DER KOMPLETTE ALTSTAND: gar keine Normalisierung. Das ist der gemeldete
+    # Zustand - zugeordnete Freigabe-Dateien ohne Haken in der "nicht
+    # zugeordnet"-Liste.
+    ("ALTSTAND: keine Normalisierung (_akey gibt den Pfad roh zurueck)",
+     "frontend/js/kbmatrix.js",
+     lambda: patch("frontend/js/kbmatrix.js",
+                   "    function _akey(p) { return String(p == null ? '' : p).replace(/^\\/+/, ''); }",
+                   "    function _akey(p) { return String(p == null ? '' : p); }")),
+
+    # Eine Fassung MIT toLowerCase sieht wie die vorhandene Regel aus wissen.js
+    # aus und greift bei jedem Pfad mit Grossbuchstaben still daneben.
+    ("_akey senkt Gross/Klein (wissen.js-Fassung uebernommen)",
+     "frontend/js/kbmatrix.js",
+     lambda: patch("frontend/js/kbmatrix.js",
+                   "    function _akey(p) { return String(p == null ? '' : p).replace(/^\\/+/, ''); }",
+                   "    function _akey(p) { return String(p == null ? '' : p).replace(/^\\/+/, '').toLowerCase(); }")),
+
+    ("Haken liest _assign wieder direkt (nur der Renderer)",
+     "frontend/js/kbmatrix.js",
+     lambda: patch("frontend/js/kbmatrix.js",
+                   "                const on = _gids(row.path).includes(g.id);",
+                   "                const on = (_assign[row.path] || []).includes(g.id);")),
+
+    ("Filterregel liest _assign wieder direkt", "frontend/js/kbmatrix.js",
+     lambda: patch("frontend/js/kbmatrix.js",
+                   "const grpOk = !_nurUngruppiert || _gids(pfad).length === 0;",
+                   "const grpOk = !_nurUngruppiert || (_assign[pfad] || []).length === 0;")),
+
+    # Schreibt der Klick unter dem ROHEN Pfad, entsteht ein zweiter Schluessel:
+    # _groupCount zaehlt ueber ALLE Schluessel und meldet eine Zuordnung zu viel.
+    ("Zuordnen schreibt unter dem rohen Pfad (doppelter Schluessel)",
+     "frontend/js/kbmatrix.js",
+     lambda: patch("frontend/js/kbmatrix.js",
+                   "        _assign[key] = ids;",
+                   "        _assign[path] = ids;")),
+
+    ("Sortierung nach Gruppenspalte liest _assign direkt",
+     "frontend/js/kbmatrix.js",
+     lambda: patch("frontend/js/kbmatrix.js",
+                   "                const av = _gids(a.path).includes(gid) ? 1 : 0;",
+                   "                const av = (_assign[a.path] || []).includes(gid) ? 1 : 0;")),
 
     ("CSS des Labels ganz raus", "frontend/css/style.css",
      lambda: patch("frontend/css/style.css", ".kbm-nogrp-lbl {", ".kbm-nogrp-lbl-weg {")),

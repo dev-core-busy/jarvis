@@ -1128,13 +1128,18 @@ Full license texts are included in the `LICENSES/` directory.
 
 ## License
 
-Jarvis AI Desktop Agent is licensed under the **Apache License 2.0 (Apache-2.0)**.
+Jarvis AI Desktop Agent is **source-available** under the **Elastic License 2.0 (ELv2)**.
 
 This means:
-- ✅ Free to use, modify, and distribute — for personal and commercial purposes
-- ✅ May be embedded in proprietary/closed-source products; no obligation to publish your changes
-- ✅ Includes an explicit patent grant
-- ⚠️ Keep the copyright/`NOTICE` and license notices; mark files you changed
+- ✅ Free to use, copy, modify and run — self-hosted, for personal and commercial purposes
+- ✅ You may distribute it and derivative works, under the same terms
+- ❌ You may not provide Jarvis to third parties as a hosted or managed service
+- ❌ You may not move, change, disable or circumvent the license key functionality
+- ⚠️ Keep all licensing, copyright and other notices
+
+The WhatsApp bridge (`services/whatsapp-bridge/`) is licensed separately under the
+Apache License 2.0. Versions published before 2026-10-15 were licensed under Apache 2.0;
+those grants remain in effect for those versions.
 
 See [LICENSE](LICENSE) and [NOTICE](NOTICE) for the full text. Third-party
 components remain under their own licenses (see *Third-Party Licenses* above).
@@ -1143,7 +1148,7 @@ components remain under their own licenses (see *Third-Party Licenses* above).
 
 <div align="center">
 
-**Built with ❤️ for the open-source community**
+**Built with ❤️ on the shoulders of open-source projects**
 
 [jarvis-ai.info](https://jarvis-ai.info) · [GitHub](https://github.com/dev-core-busy/jarvis) · [Issues](https://github.com/dev-core-busy/jarvis/issues)
 
@@ -1151,6 +1156,6 @@ components remain under their own licenses (see *Third-Party Licenses* above).
 
 Developed by Andreas Bender with [Claude](https://claude.ai) (Anthropic) – code, architecture & landing page.
 
-© 2026 Andreas Bender · Licensed under [Apache-2.0](LICENSE)
+© 2026 Andreas Bender · Licensed under the [Elastic License 2.0](LICENSE)
 
 </div>

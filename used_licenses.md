@@ -40,9 +40,13 @@ oder aus dem Gedächtnis:
 
 ## 2. Die eigene Lizenz
 
-Das Repository steht unter **Apache-2.0** (`LICENSE`, 201 Zeilen, unverändert).
-Die 39 Backend-Module, 27 Skills und das gesamte Frontend fallen darunter; keiner der
-Skills führt ein eigenes `license`-Feld in seinem `skill.json`.
+Das Repository steht seit 2026-10-15 unter der **Elastic License 2.0** (`LICENSE`,
+offizieller Text von Elastic, 93 Zeilen, unverändert). Backend, Skills und Frontend
+fallen darunter; keiner der Skills führt ein eigenes `license`-Feld in seinem
+`skill.json`. **Ausnahme:** `services/whatsapp-bridge/` steht unter Apache-2.0 (eigene
+`LICENSE`) – sie bündelt eine GPL-3.0-Bibliothek, und Apache-2.0 ist mit GPL-3.0
+verträglich, ELv2 nicht. Bis 2026-10-15 stand das ganze Repository unter Apache-2.0;
+die Ausführungen unten zu Apache-2.0 gelten deshalb für die Bridge und für Altfassungen.
 
 Das ist der Bezugspunkt für alles Weitere: **Apache-2.0 ist gebefreudig, aber nicht
 beliebig kombinierbar.** Zwei Richtungen sind relevant und werden unten konkret:
@@ -267,6 +271,12 @@ der saubere Ausweg.
 > MIT-Lizenz **und** sagt ausdrücklich, dass sie die Figur NICHT abdeckt.
 >
 > **Offen bleibt die Figur selbst** – das ist eine Entscheidung, keine Codearbeit.
+>
+> ### ✅ Entschieden am 2026-10-15 (Repository wird öffentlich)
+> Die Figur (`agents/Clippy/`) ist **nicht mehr im Repository** und steht in
+> `.gitignore`; sie liegt nur noch auf den bestehenden Servern. Eine frische
+> Installation zeigt den Platzhalter (`avatar.js`: gewählte Figur → Clippy →
+> SVG-Platzhalter). In der Git-Historie vor dem 2026-10-15 ist sie noch enthalten.
 
 ### 4.7 Zwei Pakete ohne Lizenzangabe ✅
 
@@ -356,7 +366,7 @@ dieser Erhebung. Die Einheitlichkeit der Herausgeber macht das Ergebnis dennoch 
 ## 8. Eigene Skills
 
 Alle 27 Skills unter `skills/` sind Jarvis-eigener Quelltext und fallen unter die
-**Apache-2.0** des Repositorys. Keiner führt ein eigenes `license`-Feld:
+**Elastic License 2.0** des Repositorys. Keiner führt ein eigenes `license`-Feld:
 
 `agent_autonomy_kit`, `agent_orchestrator`, `avatar`, `branding`, `browser_control`,
 `coding_agent`, `cognitive_evolution`, `confluence`, `cron`, `desktop`,

@@ -1,10 +1,19 @@
 Jarvis AI Desktop Agent
 Copyright 2026 Andreas Bender
 
-Licensed under the Apache License, Version 2.0 (see the LICENSE file).
+Licensed under the Elastic License 2.0 (see the LICENSE file).
+SPDX-License-Identifier: Elastic-2.0
 
-This product bundles and/or invokes third-party open-source components that
-remain under their own licenses (MIT, BSD, Apache-2.0, LGPL-3.0, MPL-2.0,
-GPL-2.0). See the "Third-Party Licenses" section of README.md for the list.
+Exception: the WhatsApp bridge in services/whatsapp-bridge/ is licensed under
+the Apache License, Version 2.0 (see services/whatsapp-bridge/LICENSE). It runs
+as a separate process and bundles a GPL-3.0 library (libsignal-node); when
+distributed, that component is subject to the GPL-3.0.
+
+Versions of this software published before 2026-10-15 were licensed under the
+Apache License, Version 2.0; those grants remain in effect for those versions.
+
+This product bundles and/or invokes third-party components that remain under
+their own licenses (MIT, BSD, Apache-2.0, LGPL-3.0, MPL-2.0, GPL-2.0). See the
+"Third-Party Licenses" section of README.md and used_licenses.md for the list.
 GPL-2.0 system programs (e.g. x11vnc, Openbox) are invoked as separate
 processes and are not linked into this Work.

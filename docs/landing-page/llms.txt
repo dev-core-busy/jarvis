@@ -1,6 +1,6 @@
 # Jarvis AI Desktop Agent
 
-> Autonomous open-source AI desktop agent for Linux with multi-LLM support, desktop control via VNC, WhatsApp and Exchange email integration, and an extensible skill system.
+> Autonomous self-hosted AI desktop agent for Linux with multi-LLM support, desktop control via VNC, WhatsApp and Exchange email integration, and an extensible skill system.
 
 ## Overview
 
@@ -58,7 +58,7 @@ Updates: Re-run the same install script – it auto-detects existing installatio
 
 - Website: https://jarvis-ai.info
 - GitHub: https://github.com/dev-core-busy/jarvis
-- License: Apache-2.0
+- License: Elastic License 2.0 (source-available)
 
 ## Credits
 

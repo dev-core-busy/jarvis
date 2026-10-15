@@ -1,6 +1,9 @@
 # NOTICE — Fremdkomponenten und Lizenzhinweise
 
-Jarvis steht unter der **Apache License 2.0** (siehe `LICENSE`).
+Jarvis steht seit 2026-10-15 unter der **Elastic License 2.0** (siehe `LICENSE`).
+Ausnahme: die WhatsApp-Bridge (`services/whatsapp-bridge/`) steht unter der
+**Apache License 2.0** (eigene `LICENSE` dort). Fassungen vor dem 2026-10-15 standen
+unter Apache 2.0; diese Rechte bleiben fuer jene Fassungen bestehen.
 
 Diese Datei enthält die Hinweise, die bei einer **Weitergabe** mitzuliefern sind:
 getroffene Lizenzwahlen, geforderte Namensnennungen und die Quelltext-Angebote für

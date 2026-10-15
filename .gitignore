@@ -276,3 +276,8 @@ ai-mouse/publish/
 
 # Klartext-Proben der Echtwert-Gegenprobe (nur lokal beim Betreiber)
 tests/echtwerte_proben.local.txt
+
+# Clippy-Figur (Grafik/Klaenge des Office-Assistenten): Microsoft-Werk, NICHT
+# mitlizenziert (used_licenses.md 4.6). Seit 2026-10-15 nicht mehr im oeffentlichen
+# Repo; liegt nur auf den Servern. Fehlt sie, zeigt der Avatar den Platzhalter.
+frontend/vendor/clippy/agents/Clippy/

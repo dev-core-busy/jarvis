@@ -76,11 +76,11 @@ Dafuer braucht es zwei Dateien, und beide sind neu:
   verfaellt nach ``JARVIS_ATTACH_TTL_MIN`` (Vorgabe 30 min). Ausdruecklich NICHT
   ueber ``main._anhang_ablegen`` – das legt zusaetzlich dauerhaft in
   ``data/documents`` ab, und genau das bleibt hier ausgeschlossen.
-* **Das ERGEBNIS** unter ``data/generated_images/``. Das ist die eigentliche
-  Einschraenkung: die Datei bleibt liegen, und ``/api/generated/<hash>.png``
-  liefert sie **ohne Anmeldung** aus (Auth allein ueber den nicht erratbaren
-  32-stelligen Namen). Wer einen Ausschnitt mit Gehaltsliste uebersetzen laesst,
-  hat ihn danach dort. Das ist der Preis der Anzeige und war die bewusste Wahl.
+* **Das ERGEBNIS** unter ``data/generated_images/``. Die Datei bleibt liegen
+  (Frist ``bild_ablage``, Vorgabe 30 Tage). Seit 2026-10-15 liefert
+  ``/api/generated/<hash>.png`` sie NUR an Angemeldete aus; bis dahin genuegte
+  der nicht erratbare Name, und ein uebersetzter Ausschnitt mit Gehaltsliste war
+  fuer jeden abrufbar, der die Adresse hatte.
 
 Was sich NICHT geaendert hat: das ORIGINAL geht weiterhin nirgendwo dauerhaft
 hin, und protokolliert wird der Bildinhalt nach wie vor nicht.
@@ -907,9 +907,9 @@ async def analysieren(bild_roh: str, frage_roh: str, user: str,
         "modell": model,
         # DIE ADRESSE DES ERZEUGTEN BILDES, leer wenn keines entstand. Der
         # Client haengt sie an seine Serveradresse und zeigt das Bild an;
-        # `/api/generated/<hash>` braucht dafuer KEIN Token (Capability-URL).
-        # Ein aelterer Client ignoriert das Feld – die Antwort bleibt fuer ihn
-        # unveraendert brauchbar.
+        # Seit 2026-10-15 holt er es MIT seinem Token (Bearer); eine AI-Maus vor
+        # 1.0.11 bekommt 401 und zeigt nur den Text – ohne Uebergangsfrist,
+        # Entscheidung des Betreibers.
         "bild": bild_url,
         # WAS DER LAUF DURFTE, gehoert ins Ergebnis. Ohne diese Angabe ist eine
         # Antwort mit nachgeschlagenem Hintergrund von einer ohne nicht zu

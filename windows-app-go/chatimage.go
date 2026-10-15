@@ -21,6 +21,18 @@ import (
 // imgServerBase ist die HTTPS-Basis (z.B. "https://jarvis.firma.local"), gesetzt aus der ServerURL.
 var imgServerBase string
 
+// imgToken liefert das AKTUELLE Token (Funktion statt Wert: der Einstellungs-
+// dialog kann es zur Laufzeit aendern). Seit 2026-10-15 verlangt der Server fuer
+// /api/generated/ eine Anmeldung; vorher war die Adresse ohne Anmeldung abrufbar.
+var imgToken = func() string { return "" }
+
+// SetImageAuth setzt die Quelle des Tokens fuer den Bildabruf.
+func SetImageAuth(f func() string) {
+	if f != nil {
+		imgToken = f
+	}
+}
+
 // SetImageServer leitet die HTTPS-Basis aus der konfigurierten ServerURL ab.
 func SetImageServer(serverURL string) {
 	u := strings.TrimSpace(serverURL)
@@ -53,7 +65,14 @@ func fetchImageBytes(url string) ([]byte, error) {
 		Timeout:   20 * time.Second,
 		Transport: &http.Transport{TLSClientConfig: tlsvertrauen.ServerTLS(url)},
 	}
-	resp, err := client.Get(url)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if tok := imgToken(); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}

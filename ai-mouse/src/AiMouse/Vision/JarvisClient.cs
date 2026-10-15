@@ -324,10 +324,10 @@ internal sealed class JarvisClient : IDisposable
     /// <summary>Holt ein erzeugtes Bild. Rueckgabe <c>null</c>, wenn es nicht
     /// geht.
     ///
-    /// ⚠ OHNE TOKEN – und das ist kein Versehen: <c>/api/generated/&lt;hash&gt;</c>
-    /// ist eine Capability-URL, der 32-stellige Name IST die Berechtigung. Ein
-    /// Bearer-Header schadet nicht, aber er verspricht eine Pruefung, die es
-    /// dort nicht gibt.
+    /// ⚠ MIT TOKEN (seit 2026-10-15). Bis dahin war <c>/api/generated/&lt;hash&gt;</c>
+    /// eine Capability-URL ohne Anmeldung – jedes Ergebnisbild war 30 Tage fuer
+    /// jeden abrufbar, der die Adresse kannte. Jetzt verlangt der Server eine
+    /// Anmeldung; ohne Token kommt 401 und das Bild bleibt aus.
     ///
     /// **FAIL-SAFE: ein Fehlschlag wirft nicht.** Das Bild ist eine Zugabe zur
     /// Antwort; ein Netzhaenger beim Nachladen darf nicht die Textantwort
@@ -349,8 +349,20 @@ internal sealed class JarvisClient : IDisposable
 
         try
         {
-            byte[] daten = await _http.GetByteArrayAsync(basis + adresse, ct)
+            using var anfrage = new HttpRequestMessage(HttpMethod.Get, basis + adresse);
+            if (_token.Length > 0)
+            {
+                anfrage.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);
+            }
+
+            using HttpResponseMessage antwort = await _http.SendAsync(anfrage, ct)
                 .ConfigureAwait(false);
+            if (!antwort.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            byte[] daten = await antwort.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
             return daten.Length > 0 ? daten : null;
         }
         catch (Exception e) when (e is not OperationCanceledException)

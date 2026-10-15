@@ -148,7 +148,8 @@
         function _withToken(url) {
             // /api/knowledge/netzquelle gehoert dazu: der Quell-Link im Chat ist
             // eine Navigation ohne Header und verlangt (wie file_raw) ?token=.
-            if (!/^\/api\/(?:documents\/|knowledge\/netzquelle\?)/.test(url || '')) return url;
+            // /api/generated/ seit 2026-10-15: erzeugte Bilder verlangen eine Anmeldung.
+            if (!/^\/api\/(?:documents\/|knowledge\/netzquelle\?|generated\/)/.test(url || '')) return url;
             // Abruf-Schluessel statt Sitzungstoken (frontend/js/dlkey.js): ein weitergegebener Link ist damit 15 Minuten Lesezugriff, nicht 30 Tage volle Sitzung.
             // Faellt das Modul aus (aeltere Seite ohne dlkey.js), bleibt es beim
             // bisherigen Verhalten – ein toter Download-Chip waere schlechter als

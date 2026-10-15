@@ -88,7 +88,6 @@ AUSNAHMEN: dict[tuple[str, str], tuple[str, str]] = {
     ("GET", "/api/branding/portal-video"): ("oeffentlich", "Portal-Video der Marke"),
     ("GET", "/api/cert"): ("oeffentlich", "Server-Zertifikat zum Importieren (oeffentlicher Schluessel)"),
     ("POST", "/api/csp-report"): ("oeffentlich", "CSP-Verstossmeldungen des Browsers (BSI H4), ohne Sitzung gesendet"),
-    ("GET", "/api/generated/{name}"): ("oeffentlich", "Bild per nicht erratbarer 128-Bit-Kennung (Capability-Adresse)"),
     ("GET", "/api/addin/version"): ("oeffentlich", "Versionsabgleich des Add-ins"),
     ("GET", "/api/excel-addin/version"): ("oeffentlich", "Versionsabgleich des Add-ins"),
     ("GET", "/api/avatar/config"): ("selbst", "Avatar-Darstellung; prueft Sitzung/Schluessel im Rumpf"),

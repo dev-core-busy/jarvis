@@ -40,6 +40,6 @@
       "Text aus einem Screenshot herausziehen, der sich nicht markieren laesst",
       "Eine Tabelle oder ein Diagramm einrahmen und zusammenfassen lassen"
     ],
-    "notes": "Das aktive LLM-Profil muss Bilder verstehen – ein reines Textmodell antwortet auf einen Bildausschnitt oft mit gar nichts. Pruefen laesst sich das unter KI & System → Profile ueber das ⓘ neben dem Modell.\n\nDer Bildausschnitt wird NICHT gespeichert: er geht in den Modellaufruf und ist danach weg. Ein Bildschirmfoto kann alles enthalten, was gerade offen ist."
+    "notes": "Das aktive LLM-Profil muss Bilder verstehen – ein reines Textmodell antwortet auf einen Bildausschnitt oft mit gar nichts. Pruefen laesst sich das unter KI & System → Profile ueber das ⓘ neben dem Modell.\n\nDer Bildausschnitt selbst wird nicht dauerhaft gespeichert. Ein bearbeitetes Ergebnisbild (etwa mit uebersetztem Text) bleibt bis zur Frist der Bildablage (Vorgabe 30 Tage) und ist seit 2026-10-15 nur nach Anmeldung abrufbar. Ein Bildschirmfoto kann alles enthalten, was gerade offen ist."
   }
 }

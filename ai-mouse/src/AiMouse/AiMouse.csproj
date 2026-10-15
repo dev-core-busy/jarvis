@@ -126,7 +126,13 @@
          Jetzt: `VonNetzfreigabe()` (UNC + Netzlaufwerk) schaltet die
          Selbstaktualisierung ab UND das Tray-Menue nennt die vorliegende
          Version samt Weg („deine Administration rollt den neuen Stand aus"). -->
-    <Version>1.0.10</Version>
+    <!-- 1.0.11 (2026-10-15): Ergebnisbild MIT Anmeldung holen. Der Server
+         verlangt fuer /api/generated/ seit diesem Tag ein Token (vorher war
+         jedes Ergebnisbild 30 Tage ohne Anmeldung abrufbar). Entscheidung des
+         Betreibers: ohne Uebergangsfrist – eine 1.0.10 zeigt nur noch den Text,
+         das Bild bleibt aus, bis die neue Fassung da ist (Selbstaktualisierung
+         bzw. Ausrollen ueber die Freigabe). -->
+    <Version>1.0.11</Version>
     <!-- DPI awareness is owned by app.manifest, not by ApplicationHighDpiMode: it has to
          be in effect from process start, before any screen coordinate is read.
          WFAC010 asks for the opposite; suppressed because that trade-off is intentional. -->

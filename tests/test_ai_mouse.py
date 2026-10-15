@@ -4420,9 +4420,11 @@ check("…was nicht passt, kommt als LEER zurueck (nicht als Rohwert)",
       _pruef32.count("string.Empty") >= 3)
 
 _holen32 = cs_block(_cs_jc32, "public async Task<byte[]?> BildHolenAsync")
+# Der Abruf ist seit 2026-10-15 ``SendAsync`` (mit Bearer-Token, der Server
+# verlangt fuer /api/generated/ eine Anmeldung); vorher ``GetByteArrayAsync``.
 check("BildHolenAsync prueft die Adresse, bevor es abruft",
-      _holen32.find("BildAdressePruefen") < _holen32.find("GetByteArrayAsync")
-      and "BildAdressePruefen" in _holen32)
+      "BildAdressePruefen" in _holen32 and "SendAsync" in _holen32
+      and _holen32.find("BildAdressePruefen") < _holen32.find("SendAsync"))
 # ⚠ NICHT AUF DAS WORT `catch` PRUEFEN. Ein mit `when (false)` entschaerfter
 # Block enthaelt es weiterhin und faengt trotzdem nichts – die Gegenprobe war
 # genau deshalb stumm (steht woertlich im Register).

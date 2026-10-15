@@ -307,12 +307,11 @@ _APP_DENY_REL = (
 # .groups.json), enthaelt aber auf einem noch nicht umgezogenen System Wissen.
 #
 # ⚠ data/generated_images GEHOERT DAZU – AUS EINEM EIGENEN GRUND (2026-09-24).
-# Dort liegen die erzeugten Bilder, und ihre Zugangskontrolle IST der Dateiname:
-# `/api/generated/<32 Hex>` kommt bewusst OHNE Anmeldung aus (ein <img> kann
-# keinen Authorization-Header setzen, und vier Clients holen die Adresse nativ –
-# Browser, AI-Maus, Android, windows-app-go). Ein AUFLISTBARER Ordner hebt damit
-# die ganze Capability-URL aus: wer die Namen hat, hat die URLs, und die gelten
-# fuer jeden Browser ohne Token.
+# Dort liegen die erzeugten Bilder. Bis 2026-10-15 war ihre Zugangskontrolle
+# ALLEIN der Dateiname (`/api/generated/<32 Hex>` ohne Anmeldung); seitdem
+# verlangt der Endpunkt eine Anmeldung (Abruf-Schluessel im Browser, Bearer in
+# den Apps). Der Verzeichnismodus bleibt trotzdem: ein AUFLISTBARER Ordner
+# verriete jedem Sandbox-Benutzer die Namen und damit die Inhalte per Shell.
 # Auf DEV gemessen (0755, vor diesem Fix): `runuser -u jarvis_sandbox -- ls`
 # lieferte alle 39 Namen, `od` den PNG-Kopf – waehrend data/documents korrekt
 # verweigerte. Ein Domain-Benutzer haette sich per shell_execute die Namen holen

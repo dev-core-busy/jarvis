@@ -44,15 +44,20 @@ private val bildClient: OkHttpClient by lazy {
     ServerVertrauen.anwenden(OkHttpClient.Builder()).build()
 }
 
-/** Laedt ein generiertes/gesuchtes Bild vom Server und zeigt es inline an. */
+/** Laedt ein generiertes/gesuchtes Bild vom Server und zeigt es inline an.
+ *
+ *  Seit 2026-10-15 verlangt der Server dafuer eine Anmeldung: das Token geht als
+ *  `Authorization: Bearer` mit (vorher war die Adresse ohne Anmeldung abrufbar). */
 @Composable
-fun GeneratedImage(serverUrl: String, path: String) {
+fun GeneratedImage(serverUrl: String, path: String, authToken: String = "") {
     var bmp by remember(path) { mutableStateOf<Bitmap?>(null) }
-    LaunchedEffect(path, serverUrl) {
+    LaunchedEffect(path, serverUrl, authToken) {
         bmp = withContext(Dispatchers.IO) {
             try {
                 val full = serverUrl.trimEnd('/') + path
-                val req = Request.Builder().url(full).build()
+                val req = Request.Builder().url(full).apply {
+                    if (authToken.isNotBlank()) header("Authorization", "Bearer $authToken")
+                }.build()
                 bildClient.newCall(req).execute().use { resp ->
                     if (!resp.isSuccessful) return@withContext null
                     val bytes = resp.body?.bytes() ?: return@withContext null

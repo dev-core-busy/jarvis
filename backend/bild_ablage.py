@@ -28,9 +28,11 @@ Betreibers, 30 Tage):** ein Bild in einem zwei Monate alten Chat ist weg, und
 die Nachricht daneben sagt dann, dass es nicht mehr vorliegt. Wer das nicht
 will, setzt ``JARVIS_GENIMG_TTL_DAYS=0``.
 
-**Was die Frist NICHT ist: eine Zugriffsschranke.** Die Zugangskontrolle ist der
-Dateiname (``/api/generated/<32 Hex>`` kommt ohne Anmeldung aus), und den
-schuetzt seit 2026-09-24 der Verzeichnismodus 0750 (``sandbox.PRIVATE_DIRS``) –
+**Was die Frist NICHT ist: eine Zugriffsschranke.** Die Zugangskontrolle ist seit
+2026-10-15 eine ANMELDUNG (``/api/generated/<32 Hex>`` haengt an
+``require_auth_or_query``; bis dahin kam die Adresse ohne Anmeldung aus und der
+Dateiname war die einzige Schranke). Den Namen schuetzt zusaetzlich seit
+2026-09-24 der Verzeichnismodus 0750 (``sandbox.PRIVATE_DIRS``) –
 vorher war der Ordner auflistbar, womit ein Domain-Benutzer per Shell alle
 Capability-Namen und damit alle URLs bekam. Die Frist ist Datenminimierung
 obendrauf: was nicht mehr liegt, kann auch ueber eine weitergegebene Adresse

@@ -279,6 +279,7 @@ fun ChatScreen(
                             onEdit = { newText -> viewModel.editUserMessage(msg.id, newText) },
                             lang = settings.uiLang,
                             serverUrl = settings.serverUrl,
+                            authToken = settings.apiKey,
                         )
                     }
                 }
@@ -483,6 +484,8 @@ fun MessageBubble(
     onEdit: (String) -> Unit = {},
     lang: String = "de",
     serverUrl: String = "",
+    // Seit 2026-10-15 verlangt /api/generated/ eine Anmeldung (Bearer).
+    authToken: String = "",
 ) {
     val isUser = msg.role == MessageRole.USER
     var showEditDialog by remember(msg.id) { mutableStateOf(false) }
@@ -655,7 +658,7 @@ fun MessageBubble(
                             )
                         }
                         // Generierte/gesuchte Bilder inline anzeigen
-                        imgUrls.forEach { p -> GeneratedImage(serverUrl = serverUrl, path = p) }
+                        imgUrls.forEach { p -> GeneratedImage(serverUrl = serverUrl, path = p, authToken = authToken) }
                         if (cleanAnswer.isBlank() && imgUrls.isEmpty() && msg.isStreaming) {
                             // Noch keine Antwort → Punkte als Platzhalter
                             Spacer(modifier = Modifier.height(4.dp))

@@ -8291,11 +8291,21 @@ async def download_cert():
 
 
 @app.get("/api/generated/{name}")
-async def get_generated_image(name: str):
-    """Liefert ein generiertes/gesuchtes Bild aus.
+async def get_generated_image(name: str, user: str = Depends(require_auth_or_query)):
+    """Liefert ein generiertes/gesuchtes Bild aus – NUR an Angemeldete.
 
-    Auth via Capability-URL: der Dateiname ist ein nicht erratbarer 32-stelliger
-    Hex-UUID. So funktionieren <img>-Tags in allen Frontends ohne Token-Handling.
+    Bis 2026-10-15 eine Capability-Adresse OHNE Anmeldung: Schutz war allein der
+    nicht erratbare 32-Hex-Name. Damit war jedes erzeugte Bild 30 Tage lang fuer
+    JEDEN abrufbar, der die Adresse hatte – aus einem weitergeleiteten Chat, einem
+    Browserverlauf, einem Proxy-Protokoll. Entscheidung des Betreibers: Anmeldung,
+    sofort, ohne Uebergangsfrist fuer alte App-Fassungen.
+
+    Wie die Clients sich ausweisen (``require_auth_or_query``):
+      * Browser-``<img>``: Abruf-Schluessel in ``?token=`` (``chatlib._withToken``
+        haengt ihn an, ``dlkey.js`` zieht ihn in gerenderten Bildern nach);
+      * Android, Windows-Client, AI-Maus: ``Authorization: Bearer``.
+    ``Cache-Control: private`` – ein gemeinsamer Zwischenspeicher darf ein
+    angemeldetes Bild nicht an Dritte weitergeben.
     """
     _MEDIA = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
               "gif": "image/gif", "webp": "image/webp"}
@@ -8307,7 +8317,7 @@ async def get_generated_image(name: str):
     if not p.exists():
         return JSONResponse({"error": "nicht gefunden"}, status_code=404)
     return FileResponse(str(p), media_type=_MEDIA[ext],
-                        headers={"Cache-Control": "public, max-age=86400"})
+                        headers={"Cache-Control": "private, max-age=86400"})
 
 
 @app.get("/api/download-key")

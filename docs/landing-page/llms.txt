@@ -8,6 +8,8 @@ Jarvis is a self-hosted AI agent that runs on any Linux server. It provides a fu
 
 ## Key Features
 
+- **AI Mouse for Windows**: Hold the right mouse button, drag a frame around anything on the Windows screen, pick a question – the self-hosted model answers in a small window next to it. Portable single EXE built and branded by the own Jarvis server (German/English), no installation or admin rights; network-share distribution, optional Authenticode signing, automatic updates; access only for approved users or AD groups; questions managed centrally in the portal; optional read-only lookups in the knowledge base, Jira, Confluence and SAP; can replace text inside an image. Only an encrypted session token is stored, never a password. Requires a vision-capable model
+- **Security Hardened to BSI Requirements**: Systematically checked against requirements of Germany's Federal Office for Information Security (IT-Grundschutz APP.3.1, TR-02102); 34 measures implemented, each with an automated test. Not a BSI certification
 - **Desktop Control**: Full Linux desktop via Xvfb/VNC, controlled by the AI agent in real-time
 - **Multi-LLM Support**: Google Gemini, Anthropic Claude, OpenRouter (300+ models), any OpenAI-compatible API, local models via Ollama/LM Studio
 - **Multi-Agent Orchestration**: Main agent can spawn autonomous sub-agents for parallel task execution

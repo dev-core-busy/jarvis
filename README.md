@@ -5,6 +5,7 @@
 **A self-hosted, autonomous AI agent for Linux — it plans, executes, and gets real work done.**
 
 [![Python](https://img.shields.io/badge/Python-3.13-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![AI Mouse](https://img.shields.io/badge/NEW-AI_Mouse_for_Windows-06b6d4)](#ai-mouse)
 [![BSI](https://img.shields.io/badge/Security-hardened_to_BSI_requirements-10b981)](#bsi)
 [![License](https://img.shields.io/badge/License-Elastic_2.0-blue)](LICENSE)
 [![Version](https://img.shields.io/badge/Version-1.0.0-orange)](https://github.com/dev-core-busy/jarvis/releases)
@@ -13,6 +14,9 @@
 [![OpenClaw Compatible](https://img.shields.io/badge/OpenClaw-Compatible-6366f1)](https://github.com/dev-core-busy/jarvis#openclaw-skill-ecosystem)
 
 *Control your Linux desktop with natural language. Receive tasks via WhatsApp. Search your knowledge base. Automate everything.*
+
+### 🖱️ New: the AI Mouse — drag a frame around anything on your Windows screen, pick a question, get the answer
+**Your self-hosted AI in every Windows program — no copying, no saving screenshots, no switching windows** — [details](#ai-mouse)
 
 ### 🛡️ Hardened to the requirements of Germany's Federal Office for Information Security (BSI)
 **IT-Grundschutz APP.3.1 · TR-02102 · 34 measures implemented, each secured by automated tests** — [details](#bsi)
@@ -24,6 +28,37 @@
 ![Jarvis portal — role-based hub for chat, support and admin tools](docs/screenshots/portal.png)
 
 </div>
+
+---
+
+<a id="ai-mouse"></a>
+
+## 🖱️ AI Mouse — ask your screen
+
+> **The AI Mouse brings your self-hosted AI into every Windows program.** Hold the right mouse
+> button, drag a frame around an error message, a table, a chart or foreign-language text, pick a
+> question — and the answer appears in a small window right next to it.
+
+| 1 | 2 | 3 | 4 |
+|---|---|---|---|
+| **Hold the right mouse button** over any window | **Drag a frame** around what you are asking about — a normal right-click still works | **Pick a question** from your list (“read the text”, “explain this error”, “translate” …) or type your own | **Read the answer** in a small window next to it — ready to copy |
+
+- 📦 **Portable, no installation** — a single Windows file, no admin rights needed. Your own Jarvis
+  server builds it, with your brand and language (German/English).
+- 🏢 **Built for the company** — distribution via a network share, optional Authenticode signing,
+  automatic updates; access only for explicitly approved users or AD groups.
+- 💬 **Questions managed centrally** — everyone keeps their own list in the portal, administrators
+  provide shared templates; the menu is available even offline.
+- 🔎 **With your knowledge** — optionally looks things up read-only in the knowledge base or in Jira,
+  Confluence and SAP, enabled by the administrator.
+- 🖼️ **Replace text in images** — e.g. swap the English labels of a screenshot for German ones; the
+  edited image appears in the answer window.
+- 🔐 **Securely connected** — signs in to your Jarvis; only an encrypted session token (DPAPI) is
+  stored, never a password. Screen content is treated as untrusted: read-only tools, no special
+  privileges.
+
+<sub>Requires Windows 11 (64-bit) and a language model that can read images. Provided in the Jarvis
+portal under “AI Mouse” and enabled by the administrator. Source: `ai-mouse/` (C#/.NET 8).</sub>
 
 ---
 
@@ -69,6 +104,7 @@ filter) are applied by the operator when setting up the server — see `deploy/s
 
 ## 📋 Table of Contents
 
+- [AI Mouse — ask your screen](#ai-mouse)
 - [Security hardened to BSI requirements](#bsi)
 - [Overview](#overview)
 - [Screenshots](#screenshots)

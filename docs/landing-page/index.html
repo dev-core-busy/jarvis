@@ -203,6 +203,18 @@
         .bsi-section .feature-card { border-color: rgba(16,185,129,0.25); }
         .bsi-fuss { max-width: 820px; margin: 28px auto 0; color: var(--text-muted); font-size: 0.82rem; line-height: 1.6; text-align: center; }
         .badge-bsi { border-color: var(--success) !important; color: var(--success) !important; }
+        /* AI-Maus: eigener, hervorgehobener Abschnitt */
+        nav a { white-space: nowrap; }
+        .maus-section { background: linear-gradient(180deg, rgba(6,182,212,0.10), rgba(6,182,212,0.02)); border-top: 1px solid rgba(6,182,212,0.35); border-bottom: 1px solid rgba(6,182,212,0.35); }
+        .maus-siegel { display: inline-flex; align-items: center; gap: 10px; padding: 8px 18px; border-radius: 999px; border: 1px solid var(--cyan); color: var(--cyan); font-weight: 700; letter-spacing: 0.04em; background: rgba(6,182,212,0.10); }
+        .maus-schritte { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; margin: 8px 0 36px; }
+        .maus-schritt { position: relative; padding: 22px 18px 18px; border-radius: var(--radius-lg); background: var(--bg-glass); border: 1px solid rgba(6,182,212,0.25); }
+        .maus-nr { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 50%; background: var(--cyan); color: var(--bg); font-family: var(--font-title); font-weight: 700; margin-bottom: 12px; }
+        .maus-schritt b { display: block; color: var(--text-primary); margin-bottom: 6px; }
+        .maus-schritt span { color: var(--text-secondary); font-size: 0.9rem; line-height: 1.6; }
+        .maus-section .feature-card { border-color: rgba(6,182,212,0.25); }
+        .maus-fuss { max-width: 820px; margin: 28px auto 0; color: var(--text-muted); font-size: 0.82rem; line-height: 1.6; text-align: center; }
+        .badge-maus { border-color: var(--cyan) !important; color: var(--cyan) !important; }
         /* Contribute */
         .contribute { background: rgba(99,102,241,0.04); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
         .contribute-inner { max-width: 760px; margin: 0 auto; text-align: center; }
@@ -405,6 +417,14 @@
 
         .grid-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 24px; }
 
+        /* Navigationsleiste bei mittlerer Breite: erst enger, dann kleiner; als
+           Netz scrollt die Linkleiste in sich, statt Sprache/GitHub aus dem Bild
+           zu schieben (seit AI-Maus und BSI dazukamen, 2026-10-15). */
+        .nav-logo, .nav-right { flex-shrink: 0; }
+        .nav-links { min-width: 0; overflow-x: auto; scrollbar-width: none; margin: 0 16px; }
+        .nav-links::-webkit-scrollbar { display: none; }
+        @media (max-width: 1440px) { nav { padding: 0 20px; } .nav-links { gap: 18px; } .nav-links a { font-size: 0.82rem; } }
+        @media (max-width: 1200px) { .nav-links { gap: 12px; } .nav-links a { font-size: 0.78rem; } }
         @media (max-width: 768px) {
             nav { padding: 0 16px; }
             .nav-links { display: none; }
@@ -422,8 +442,10 @@
     <div class="nav-links">
         <a href="#features"    class="t-de">Funktionen</a>
         <a href="#features"    class="t-en">Features</a>
-        <a href="#bsi" class="t-de" style="color:var(--success);font-weight:700;">🛡️ BSI-Sicherheit</a>
-        <a href="#bsi" class="t-en" style="color:var(--success);font-weight:700;">🛡️ BSI Security</a>
+        <a href="#ai-maus" class="t-de" style="color:var(--cyan);font-weight:700;">🖱️ AI-Maus</a>
+        <a href="#ai-maus" class="t-en" style="color:var(--cyan);font-weight:700;">🖱️ AI Mouse</a>
+        <a href="#bsi" class="t-de" style="color:var(--success);font-weight:700;">🛡️ BSI</a>
+        <a href="#bsi" class="t-en" style="color:var(--success);font-weight:700;">🛡️ BSI</a>
         <a href="#privacy"     class="t-de">Datenschutz</a>
         <a href="#privacy"     class="t-en">Privacy</a>
         <a href="#openclaw">OpenClaw</a>
@@ -461,6 +483,8 @@
         <p class="hero-tagline t-en">Your <strong>autonomous AI agent</strong> for the Linux desktop</p>
         <p class="hero-sub t-de">Steuert Desktop, Browser &amp; Shell · RAG auf eigenen Dokumenten · Multi-Agenten · lokal &amp; erweiterbar</p>
         <p class="hero-sub t-en">Controls desktop, browser &amp; shell · RAG on your own documents · multi-agent · local &amp; extensible</p>
+        <p class="hero-sub t-de"><a href="#ai-maus" style="color:var(--cyan);font-weight:600;">Neu: die AI-Maus – Rahmen um etwas auf dem Bildschirm ziehen, Frage wählen, Antwort bekommen →</a></p>
+        <p class="hero-sub t-en"><a href="#ai-maus" style="color:var(--cyan);font-weight:600;">New: the AI Mouse – drag a frame around anything on screen, pick a question, get the answer →</a></p>
         <div class="hero-actions">
             <a href="#install" class="btn-primary">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
@@ -476,11 +500,98 @@
         <div class="hero-badges">
             <span class="badge">Python 3.13</span>
             <span class="badge">FastAPI</span>
+            <span class="badge badge-maus">🖱️ AI-Maus</span>
             <span class="badge badge-bsi">🛡️ BSI-gehärtet</span>
             <span class="badge">ELv2</span>
             <span class="badge">v1.0.0</span>
             <span class="badge">OpenClaw-Compatible</span>
         </div>
+    </div>
+</section>
+
+<section id="ai-maus" class="maus-section">
+    <div class="container">
+        <div class="bsi-kopf reveal">
+            <span class="maus-siegel">🖱️ <span class="t-de">AI-MAUS FÜR WINDOWS</span><span class="t-en">AI MOUSE FOR WINDOWS</span></span>
+            <h2 class="section-title">
+                <span class="t-de">Fragen Sie Ihren Bildschirm</span>
+                <span class="t-en">Ask your screen</span>
+            </h2>
+            <p class="section-sub">
+                <span class="t-de">Die <strong>AI-Maus</strong> bringt Ihre KI in jedes Windows-Programm: Rahmen um eine Stelle ziehen, Frage wählen – fertig. Kein Kopieren, kein Screenshot-Speichern, kein Fensterwechsel.</span>
+                <span class="t-en">The <strong>AI Mouse</strong> brings your AI into every Windows program: drag a frame around something, pick a question – done. No copying, no saving screenshots, no switching windows.</span>
+            </p>
+        </div>
+        <div class="maus-schritte">
+            <div class="maus-schritt reveal">
+                <div class="maus-nr">1</div>
+                <b class="t-de">Rechte Maustaste halten</b><b class="t-en">Hold the right mouse button</b>
+                <span class="t-de">Über jedem Fenster – Fehlermeldung, Tabelle, Diagramm, fremdsprachiger Text.</span><span class="t-en">Over any window – an error message, a table, a chart, foreign-language text.</span>
+            </div>
+            <div class="maus-schritt reveal">
+                <div class="maus-nr">2</div>
+                <b class="t-de">Rahmen ziehen</b><b class="t-en">Drag a frame</b>
+                <span class="t-de">Den Bereich markieren, um den es geht. Ein normaler Rechtsklick funktioniert weiter wie gewohnt.</span><span class="t-en">Mark the area you are asking about. A normal right-click keeps working as usual.</span>
+            </div>
+            <div class="maus-schritt reveal">
+                <div class="maus-nr">3</div>
+                <b class="t-de">Frage wählen</b><b class="t-en">Pick a question</b>
+                <span class="t-de">Aus der eigenen Liste – „Text erkennen“, „Fehler erklären“, „übersetzen“ … – oder frei formulieren.</span><span class="t-en">From your own list – “read the text”, “explain this error”, “translate” … – or type your own.</span>
+            </div>
+            <div class="maus-schritt reveal">
+                <div class="maus-nr">4</div>
+                <b class="t-de">Antwort lesen</b><b class="t-en">Read the answer</b>
+                <span class="t-de">Ihre selbst gehostete KI antwortet in einem kleinen Fenster direkt daneben – zum Kopieren bereit.</span><span class="t-en">Your self-hosted AI answers in a small window right next to it – ready to copy.</span>
+            </div>
+        </div>
+        <div class="features-grid">
+            <div class="feature-card reveal">
+                <div class="feature-icon">📦</div>
+                <div class="feature-title t-de">Portabel, ohne Installation</div>
+                <div class="feature-title t-en">Portable, no installation</div>
+                <div class="feature-desc t-de">Eine einzelne Windows-Datei, keine Installation und keine Admin-Rechte nötig. Ihr eigener Jarvis-Server baut sie – mit Ihrer Marke und Sprache (Deutsch/Englisch).</div>
+                <div class="feature-desc t-en">A single Windows file, no installation and no admin rights needed. Your own Jarvis server builds it – with your brand and language (German/English).</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">🏢</div>
+                <div class="feature-title t-de">Für das Unternehmen gemacht</div>
+                <div class="feature-title t-en">Built for the company</div>
+                <div class="feature-desc t-de">Verteilung über eine Netzwerkfreigabe, optionale Code-Signatur, automatische Aktualisierung. Zugang nur für ausdrücklich freigegebene Benutzer oder AD-Gruppen.</div>
+                <div class="feature-desc t-en">Distribution via a network share, optional code signing, automatic updates. Access only for explicitly approved users or AD groups.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">💬</div>
+                <div class="feature-title t-de">Fragen zentral gepflegt</div>
+                <div class="feature-title t-en">Questions managed centrally</div>
+                <div class="feature-desc t-de">Jeder pflegt seine Fragen im Portal; Administratoren geben gemeinsame Vorlagen vor. Das Menü steht auch ohne Verbindung bereit.</div>
+                <div class="feature-desc t-en">Everyone manages their questions in the portal; administrators provide shared templates. The menu is available even offline.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">🔎</div>
+                <div class="feature-title t-de">Mit Ihrem Wissen</div>
+                <div class="feature-title t-en">With your knowledge</div>
+                <div class="feature-desc t-de">Auf Wunsch schlägt die AI-Maus lesend in der Wissensdatenbank oder in Jira, Confluence und SAP nach – vom Administrator freigeschaltet.</div>
+                <div class="feature-desc t-en">Optionally, the AI Mouse looks things up read-only in the knowledge base or in Jira, Confluence and SAP – enabled by the administrator.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">🖼️</div>
+                <div class="feature-title t-de">Text im Bild ersetzen</div>
+                <div class="feature-title t-en">Replace text in images</div>
+                <div class="feature-desc t-de">Zum Beispiel englische Beschriftungen eines Screenshots durch deutsche ersetzen – das bearbeitete Bild erscheint direkt im Antwortfenster.</div>
+                <div class="feature-desc t-en">For example, replace the English labels of a screenshot with German ones – the edited image appears right in the answer window.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">🔐</div>
+                <div class="feature-title t-de">Sicher angebunden</div>
+                <div class="feature-title t-en">Securely connected</div>
+                <div class="feature-desc t-de">Anmeldung an Ihrem Jarvis; gespeichert wird nur ein verschlüsseltes Sitzungs-Token, nie ein Kennwort. Bildschirminhalt gilt als nicht vertrauenswürdig: nur lesende Werkzeuge, ohne Sonderrechte.</div>
+                <div class="feature-desc t-en">Sign-in to your Jarvis; only an encrypted session token is stored, never a password. Screen content is treated as untrusted: read-only tools, no special privileges.</div>
+            </div>
+        </div>
+        <p class="maus-fuss">
+            <span class="t-de">Voraussetzung: Windows 11 (64 Bit) und ein Sprachmodell, das Bilder lesen kann. Die AI-Maus wird im Jarvis-Portal unter „AI-Maus“ bereitgestellt und vom Administrator freigeschaltet.</span>
+            <span class="t-en">Requirements: Windows 11 (64-bit) and a language model that can read images. The AI Mouse is provided in the Jarvis portal under “AI Mouse” and enabled by the administrator.</span>
+        </p>
     </div>
 </section>
 

@@ -1277,6 +1277,10 @@ const _I18N = {
         'login.totp_setup.qr_alt': 'QR-Code für die Authenticator-App',
         // Einstellungen -> Sicherheit: Anmeldeschutz (BSI M3)
         'security.anmeldeschutz_h':      'Anmeldeschutz',
+        'security.anm_quelle_domaene':   'Die Zahl ist aus der Sperrrichtlinie der Domäne abgeleitet: {marke} sperrt einen Versuch, bevor die Domäne das Konto sperren würde.',
+        'security.anm_quelle_ohne':      'Die Sperrrichtlinie der Domäne ist nicht lesbar (Dienstkonto fehlt oder ist ungültig) – deshalb gilt vorsichtshalber ein niedriger Wert.',
+        'security.anm_quelle_ohne_sperre': 'Die Domäne sperrt Konten nicht nach Fehlversuchen – es gilt der Standardwert.',
+        'security.anm_spruehen':         'Angriff erkannt (Password Spraying): fehlgeschlagene Anmeldungen für {konten} verschiedene Konten. Alle Anmeldungen werden bis {zeit} Uhr gebremst.',
         'security.anmeldeschutz_hint':   'Nach {max} falschen Anmeldeversuchen innerhalb von {fenster} Minuten ist ein Konto {sperre} Minuten lang für die Anmeldung gesperrt – unabhängig davon, von welchem Gerät aus probiert wird. Die Sperre läuft von selbst ab.',
         'security.admin_2fa_pflicht_h':  'Pflicht für Administratoren',
         'security.admin_2fa_pflicht':    'Administratoren müssen die Zwei-Faktor-Anmeldung nutzen',
@@ -5402,6 +5406,10 @@ const _I18N = {
         'login.totp_setup.qr_alt': 'QR code for the authenticator app',
         // Einstellungen -> Sicherheit: Anmeldeschutz (BSI M3)
         'security.anmeldeschutz_h':      'Sign-in protection',
+        'security.anm_quelle_domaene':   'This number is derived from the domain lockout policy: {marke} locks one attempt before the domain would lock the account.',
+        'security.anm_quelle_ohne':      'The domain lockout policy cannot be read (service account missing or invalid) – a low value applies as a precaution.',
+        'security.anm_quelle_ohne_sperre': 'The domain does not lock accounts after failed attempts – the default value applies.',
+        'security.anm_spruehen':         'Attack detected (password spraying): failed sign-ins for {konten} different accounts. All sign-ins are slowed down until {zeit}.',
         'security.anmeldeschutz_hint':   'After {max} failed sign-in attempts within {fenster} minutes an account is locked for sign-in for {sperre} minutes – no matter which device the attempts come from. The lock expires on its own.',
         'security.admin_2fa_pflicht_h':  'Mandatory for administrators',
         'security.admin_2fa_pflicht':    'Administrators must use two-factor sign-in',

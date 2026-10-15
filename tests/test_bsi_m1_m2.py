@@ -17,6 +17,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import tempfile
 import threading
 import types
@@ -266,13 +267,19 @@ class _Req:
 
 SK = contextvars.ContextVar("_sk", default=None)
 AA = contextvars.ContextVar("_aa", default=None)
+# Attrappe der Spruehlage in der Form von anmelde_schutz.sprueh_neu_melden:
+# genau EINMAL ein Dict, danach None.
+SPRUEH: list = []
 NS = {
     "json": json, "Request": object,
     "_sicherheits_log": _Protokoll,
     "_sitzung_kontext": SK, "_admin_anfrage": AA,
     "_norm_login": lambda n: (n or "").split("@")[0].split("\\")[-1].strip().lower(),
     "_anmelde_schutz": types.SimpleNamespace(fehlversuch=lambda ip, konto: konto == "opfer",
-                                             KONTO_SPERRE_S=900),
+                                             KONTO_SPERRE_S=900,
+                                             sprueh_neu_melden=lambda: SPRUEH.pop(0) if SPRUEH else None,
+                                             SPRUEH_FENSTER_S=600, SPRUEH_ABSTAND_S=2.0),
+    "time": time,
 }
 exec(_ausfuehrbar("_antwort_json", "_anmeldung_protokollieren", "_record_login_attempt",
                   "_admin_pruefung_merken", "_sicherheits_protokoll_mw",
@@ -319,6 +326,16 @@ NS["_record_login_attempt"]("10.3.3.3", "anderer")
 check("Kontosperre wird protokolliert (nur wenn sie DADURCH entsteht)",
       len(EREIGNISSE) == 1 and EREIGNISSE[0]["art"] == "konto_gesperrt"
       and EREIGNISSE[0]["benutzer"] == "opfer" and EREIGNISSE[0]["ip"] == "10.3.3.3")
+
+
+# Spruehangriff: EINMAL protokolliert (Password Spraying, 2026-10-15)
+EREIGNISSE.clear()
+SPRUEH.append({"seit": 1, "bis": 2000000000, "konten": 12})
+NS["_record_login_attempt"]("10.4.4.4", "x1")
+NS["_record_login_attempt"]("10.4.4.5", "x2")
+_sp = [e for e in EREIGNISSE if e["art"] == "spruehangriff"]
+check("Spruehangriff wird genau EINMAL protokolliert, mit Kontenzahl",
+      len(_sp) == 1 and _sp[0].get("konten") == 12 and _sp[0]["ip"] == "10.4.4.4")
 
 
 # Verdrahtung am Syntaxbaum: der Anmeldeweg hat EINEN Ausgang ueber das Protokoll

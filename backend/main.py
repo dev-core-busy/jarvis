@@ -1066,6 +1066,17 @@ def _record_login_attempt(ip: str, username: str = ""):
         _sicherheits_log.ereignis("konto_gesperrt", benutzer=_norm_login(username), ip=ip,
                                   ergebnis="gesperrt",
                                   dauer_s=_anmelde_schutz.KONTO_SPERRE_S)
+    # Password Spraying: EINMAL je Angriff melden (Sicherheitsprotokoll mit
+    # Hash-Kette + Journal); die Admin-Ansicht zeigt die Lage, solange sie gilt.
+    lage = _anmelde_schutz.sprueh_neu_melden()
+    if lage:
+        _sicherheits_log.ereignis("spruehangriff", ip=ip, ergebnis="erkannt",
+                                  konten=lage["konten"], bis=lage["bis"])
+        print(f"[Anmeldeschutz] SPRUEHANGRIFF erkannt: Fehlversuche fuer "
+              f"{lage['konten']} verschiedene Konten in "
+              f"{_anmelde_schutz.SPRUEH_FENSTER_S // 60} min – Anmeldungen gebremst "
+              f"(1 je {_anmelde_schutz.SPRUEH_ABSTAND_S:g} s) bis "
+              f"{time.strftime('%H:%M', time.localtime(lage['bis']))}", flush=True)
 
 
 def _konto_sperre_antwort(username: str):
@@ -2666,6 +2677,160 @@ def _mask_key(key: str) -> str:
     return "***" + key[-4:]
 
 
+def _gruppen_passen(member_of, groups) -> str:
+    """Die erste freigegebene Gruppe, in der ``member_of`` Mitglied ist, sonst "".
+
+    EINE Fassung fuer die Pruefung nach dem Bind (``_ad_user_allowed``) und die
+    VOR dem Bind (``_ad_vorab_freigabe``) – zwei Kopien desselben Vergleichs
+    liefen frueher oder spaeter auseinander, und dann schickte die Vorabpruefung
+    Kennwoerter zum DC, die die Nachpruefung ablehnt (oder umgekehrt)."""
+    member_lower = [str(g).lower() for g in (member_of or [])]
+    for want in groups:
+        want_lower = want.lower()
+        want_prefix = _group_cn_prefix(want)
+        for gl in member_lower:
+            if gl == want_lower or gl.startswith(want_prefix):
+                return want
+    return ""
+
+
+_VORAB_DIENST_PAUSE_S = 600
+_vorab_dienst_pause = {"bis": 0.0}
+
+
+def _ad_sperrrichtlinie_lesen() -> dict | None:
+    """Sperrrichtlinie der Domaene ueber das Dienstkonto: {schwelle, fenster_s}.
+
+    ``lockoutThreshold`` = Fehlversuche bis zur Sperre (0 = nie),
+    ``lockOutObservationWindow`` = Zeitraum, in dem sie zaehlen. ldap3 liefert
+    das Fenster je nach Schema als ``timedelta`` oder als negative Zahl in
+    100-ns-Schritten – beides wird verstanden. None = nicht lesbar.
+
+    GRENZE: eine feinkoernige Kennwortrichtlinie (PSO) kann fuer einzelne
+    Gruppen strenger sein; sie steht nicht am Domaenenobjekt. Deshalb ist die
+    Untergrenze in ``anmelde_schutz`` 1 und die Rueckfallschwelle 2."""
+    try:
+        from backend import ldap_directory
+        import ldap3
+        conn, base_dn = ldap_directory._bind()
+    except Exception as e:  # noqa: BLE001
+        print(f"[Anmeldeschutz] Sperrrichtlinie der Domaene nicht lesbar ({e})", flush=True)
+        return None
+    try:
+        conn.search(search_base=base_dn, search_filter="(objectClass=domain)",
+                    search_scope=ldap3.BASE,
+                    attributes=["lockoutThreshold", "lockOutObservationWindow"])
+        if not conn.entries:
+            return None
+        e = conn.entries[0]
+        schwelle = int(e["lockoutThreshold"].value or 0) if "lockoutThreshold" in e else 0
+        roh = e["lockOutObservationWindow"].value if "lockOutObservationWindow" in e else 0
+        if hasattr(roh, "total_seconds"):
+            fenster = abs(roh.total_seconds())
+        else:
+            fenster = abs(int(roh or 0)) / 1e7
+        return {"schwelle": schwelle, "fenster_s": fenster}
+    except Exception as e:  # noqa: BLE001
+        print(f"[Anmeldeschutz] Sperrrichtlinie: Suche gescheitert ({e})", flush=True)
+        return None
+    finally:
+        try:
+            conn.unbind()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _anmelde_schwellen_aktualisieren() -> None:
+    """Kontoschwelle aus der Domaenen-Richtlinie ableiten und setzen (blocking)."""
+    ad_aktiv = bool(config.get_setting("ad_server", "") and config.get_setting("ad_domain", ""))
+    richtlinie = _ad_sperrrichtlinie_lesen() if ad_aktiv else None
+    vorher = (_anmelde_schutz.KONTO_MAX, _anmelde_schutz.KONTO_FENSTER_S)
+    _anmelde_schutz.schwellen_setzen(*_anmelde_schutz.schwellen_aus_richtlinie(richtlinie, ad_aktiv))
+    jetzt = (_anmelde_schutz.KONTO_MAX, _anmelde_schutz.KONTO_FENSTER_S)
+    if jetzt != vorher:
+        print(f"[Anmeldeschutz] Kontoschwelle {jetzt[0]} Fehlversuche in {jetzt[1] // 60} min "
+              f"(Quelle: {_anmelde_schutz.SCHWELLEN_QUELLE}"
+              + (f", Domaene sperrt nach {richtlinie['schwelle']}" if richtlinie else "")
+              + ")", flush=True)
+
+
+async def _anmelde_schwellen_schleife():
+    """Beim Start und stuendlich: eine geaenderte Domaenen-Richtlinie greift ohne Neustart."""
+    while True:
+        try:
+            await asyncio.to_thread(_anmelde_schwellen_aktualisieren)
+        except Exception as e:  # noqa: BLE001
+            print(f"[Anmeldeschutz] Schwellen nicht aktualisiert: {e}", flush=True)
+        await asyncio.sleep(3600)
+
+
+@app.on_event("startup")
+async def _anmelde_schwellen_start():
+    asyncio.create_task(_anmelde_schwellen_schleife())
+
+
+def _ad_vorab_freigabe(username: str) -> str:
+    """Darf dieser Name sich anmelden – BEVOR sein Kennwort zum DC geht?
+
+    ``"ja"``, ``"nein"`` oder ``"unbekannt"``.
+
+    WARUM (2026-10-15, Password Spraying): bis hierher wurde erst mit dem
+    Kennwort gebunden und DANACH die Freigabe geprueft. Ein richtiges Kennwort
+    ohne Jarvis-Freigabe ergab "Keine Anmeldeberechtigung" (403), ein falsches
+    "Passwort falsch" (401) – die Anmeldung verriet damit fuer JEDES
+    Domaenenkonto, ob ein geratenes Kennwort stimmt. Jetzt geht ein Kennwort
+    nur noch fuer freigegebene Namen zum DC; alle Fehlschlaege antworten gleich.
+
+    ``"unbekannt"`` (kein Dienstkonto, Dienst-Bind oder Suche gescheitert) heisst:
+    wie bisher binden – die Antwort ist trotzdem einheitlich. NIE ``"nein"`` aus
+    einem Fehler: das sperrte bei einem kaputten Dienstkonto alle Gruppenmitglieder
+    aus. ``"nein"`` nur, wenn das Verzeichnis die Frage BEANTWORTET hat."""
+    plain = _norm_login(username)
+    users_raw = (config.get_setting("ad_allowed_users", "") or "").strip()
+    group_raw = (config.get_setting("ad_allowed_group", "") or "").strip()
+    if not users_raw and not group_raw:
+        return "nein"
+    if users_raw and plain in {_norm_login(u) for u in users_raw.split(",") if u.strip()}:
+        return "ja"
+    if not group_raw:
+        return "nein"
+    if not (config.get_setting("ad_bind_user", "") or "").strip():
+        return "unbekannt"
+    groups = [g.strip() for g in group_raw.splitlines() if g.strip()]
+    # Gedaechtnis fuer einen gescheiterten Dienst-Bind: ohne es bindet JEDER
+    # Anmeldeversuch eines Spruehangriffs mit dem Dienstkonto – ist dessen
+    # Kennwort falsch hinterlegt, sperrt der Angriff genau dieses Konto im AD.
+    if time.time() < _vorab_dienst_pause["bis"]:
+        return "unbekannt"
+    try:
+        from backend import ldap_directory
+        conn, base_dn = ldap_directory._bind()
+    except Exception as e:  # noqa: BLE001
+        _vorab_dienst_pause["bis"] = time.time() + _VORAB_DIENST_PAUSE_S
+        print(f"[AUTH] Vorabpruefung '{plain}': Dienst-Bind gescheitert ({e}) – "
+              f"pruefe {_VORAB_DIENST_PAUSE_S // 60} min lang wie bisher nach dem Bind",
+              flush=True)
+        return "unbekannt"
+    try:
+        conn.search(search_base=base_dn,
+                    search_filter=f"(sAMAccountName={_ldap_escape(plain)})",
+                    attributes=["memberOf"])
+        if not conn.entries:
+            return "nein"           # gibt es nicht -> der Bind scheiterte ohnehin
+        e = conn.entries[0]
+        member_of = e["memberOf"].values if "memberOf" in e else []
+        return "ja" if _gruppen_passen(member_of, groups) else "nein"
+    except Exception as e:  # noqa: BLE001
+        print(f"[AUTH] Vorabpruefung '{plain}': Suche gescheitert ({e}) – "
+              f"pruefe wie bisher nach dem Bind", flush=True)
+        return "unbekannt"
+    finally:
+        try:
+            conn.unbind()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def _ad_user_allowed(conn, username: str, base_dn: str) -> bool:
     """Prüft die Anmeldeberechtigung eines AD-Benutzers nach erfolgreichem Bind.
 
@@ -2744,14 +2909,10 @@ def _ad_user_allowed(conn, username: str, base_dn: str) -> bool:
                   f"(Suchbasis '{base_dn}' – passt die Domaene?)", flush=True)
             return False
         member_of = conn.entries[0]["memberOf"].values if "memberOf" in conn.entries[0] else []
-        member_lower = [g.lower() for g in member_of]
-        for want in groups:
-            want_lower = want.lower()
-            want_prefix = _group_cn_prefix(want)
-            for gl in member_lower:
-                if gl == want_lower or gl.startswith(want_prefix):
-                    print(f"[AUTH] AD-Gruppe: '{plain}' ist Mitglied von '{want}' – Zugriff erlaubt", flush=True)
-                    return True
+        treffer = _gruppen_passen(member_of, groups)
+        if treffer:
+            print(f"[AUTH] AD-Gruppe: '{plain}' ist Mitglied von '{treffer}' – Zugriff erlaubt", flush=True)
+            return True
         print(f"[AUTH] AD-Gruppe: '{plain}' NICHT Mitglied der erlaubten Gruppen {groups} – Zugriff verweigert", flush=True)
         return False
 
@@ -3602,6 +3763,15 @@ def authenticate_linux_user(username: str, password: str, details: dict | None =
             # mit `except: pass` – scheiterte er, ging das AD-Kennwort im
             # Klartext zum DC. Jetzt: ohne gesicherte Verbindung kein Bind.
             from backend import ldap_tls
+            # Password Spraying: ein Kennwort geht nur fuer freigegebene Namen
+            # zum DC (siehe _ad_vorab_freigabe). Kein Bind -> kein Fehlversuch
+            # im AD, und kein Orakel "Kennwort stimmt, aber nicht freigegeben".
+            if _ad_vorab_freigabe(username) == "nein":
+                print(f"[AUTH] AD-Login abgewiesen VOR der Kennwortpruefung "
+                      f"(nicht freigegeben): {bind_user}", flush=True)
+                if details is not None:
+                    details["reason"] = "nicht_freigegeben"
+                return False
             try:
                 conn = ldap_tls.verbinden(ad_server, bind_user, password, timeout=5)
             except ldap_tls.TlsFehler as e:
@@ -4517,8 +4687,17 @@ async def _anmeldung_protokollieren(request: Request, resp, weg: str):
 
 @app.post("/api/login")
 async def login(request: Request):
-    """Multi-User Login via Linux PAM → Token + Desktop-Session-Wechsel."""
+    """Multi-User Login via Linux PAM → Token + Desktop-Session-Wechsel.
+
+    Rahmen gegen Password Spraying (``anmelde_schutz``): waehrend eines
+    erkannten Angriffs wird JEDE Anmeldung gebremst, und JEDE fehlgeschlagene
+    dauert mindestens gleich lang – sonst verriete die Antwortzeit, ob das
+    Kennwort zum Domain-Controller ging."""
+    _start = _anmelde_schutz.uhr()
+    await _anmelde_schutz.bremse()
     resp = await _login_ablauf(request)
+    if getattr(resp, "status_code", 200) >= 400:
+        await _anmelde_schutz.angleichen(_start)
     await _anmeldung_protokollieren(request, resp, "kennwort")
     return resp
 
@@ -4554,23 +4733,24 @@ async def _login_ablauf(request: Request):
     _ad_srv = config.get_setting("ad_server", "")
     _ad_dom = config.get_setting("ad_domain", "")
     if username not in ALLOWED_USERS and not (_ad_srv and _ad_dom):
-        _record_login_attempt(client_ip)
+        _record_login_attempt(client_ip, username)
         print(f"[AUTH] Anmeldung verweigert (kein LDAP, nicht in ALLOWED_USERS): {username}", flush=True)
+        # Dieselbe Antwort wie bei falschem Kennwort (Password Spraying): eine
+        # eigene verriete, welche Namen hier ueberhaupt in Frage kommen.
         return JSONResponse(
-            {"success": False, "error": "Keine Anmeldeberechtigung"},
-            status_code=403,
+            {"success": False, "error": "Benutzername oder Passwort falsch"},
+            status_code=401,
         )
 
     _auth_details: dict = {}
     if not authenticate_linux_user(username, password, _auth_details):
-        # Anmeldedaten korrekt, aber keine Berechtigung (z.B. nicht in AD-Whitelist):
-        # KEIN Brute-Force-Fehlversuch – sonst sperrt eine berechtigungslose, aber
-        # passwortrichtige Anmeldung die Client-IP (hinter NAT auch fuer Dritte).
-        if _auth_details.get("reason") == "not_authorized":
-            return JSONResponse(
-                {"success": False, "error": "Keine Anmeldeberechtigung"},
-                status_code=403,
-            )
+        # Nicht freigegeben (vor oder nach dem Bind): DIESELBE Antwort und
+        # derselbe Fehlversuch wie bei falschem Kennwort. Bis 2026-10-15 stand
+        # hier 403 "Keine Anmeldeberechtigung" OHNE Fehlversuch – damit verriet
+        # die Anmeldung beim Password Spraying, dass ein geratenes Domaenen-
+        # Kennwort stimmt. Der Preis: ein nicht freigegebener Benutzer mit
+        # richtigem Kennwort liest "Benutzername oder Passwort falsch" und
+        # zaehlt gegen die IP-Grenze. Der Grund steht im Journal.
         # Keine gesicherte Verbindung zum DC (BSI H5): das Kennwort wurde gar
         # nicht geprueft – kein Fehlversuch, und keine Meldung "Passwort falsch",
         # die den Benutzer zum Wiederholen treibt.
@@ -5173,7 +5353,9 @@ async def anmeldeschutz_status(user: str = Depends(require_local_auth)):
                                      for s in _anmelde_schutz.gesperrte_konten()],
                          "konto_max": _anmelde_schutz.KONTO_MAX,
                          "konto_fenster_min": _anmelde_schutz.KONTO_FENSTER_S // 60,
-                         "konto_sperre_min": _anmelde_schutz.KONTO_SPERRE_S // 60})
+                         "konto_sperre_min": _anmelde_schutz.KONTO_SPERRE_S // 60,
+                         "schwellen_quelle": _anmelde_schutz.SCHWELLEN_QUELLE,
+                         "spruehen": _anmelde_schutz.spruehlage()})
 
 
 @app.post("/api/admin/anmeldeschutz")
@@ -8970,6 +9152,12 @@ async def save_settings(request: Request, user: str = Depends(require_local_auth
     body = await request.json()
     config.save_global_settings(body)
     # AD-Konfiguration separat persistieren
+    if any(k in body for k in ("ad_server", "ad_domain", "ad_bind_user", "ad_bind_password")):
+        # Kontoschwelle sofort neu aus der Domaenen-Richtlinie (nach dem
+        # Speichern, daher als Aufgabe) – sonst gaelte bis zur naechsten
+        # Stunde die alte, und ueber Jarvis liessen sich Domaenenkonten sperren.
+        asyncio.get_running_loop().call_soon(
+            lambda: asyncio.create_task(asyncio.to_thread(_anmelde_schwellen_aktualisieren)))
     if "ad_server" in body:
         config.save_setting("ad_server", body["ad_server"])
     if "ad_domain" in body:

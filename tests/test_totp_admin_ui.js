@@ -178,6 +178,48 @@ const warte = (ms) => new Promise(r => setTimeout(r, ms || 20));
     check('Abbrechen schliesst die Bestaetigung', r2.querySelector('.sec-totp-confirm').hasAttribute('hidden'));
     w.close();
 
+    // ── C: Anmeldeschutz – Quelle der Schwelle und Spruehangriff (2026-10-15) ──
+    console.log('\nC  Anmeldeschutz: Schwellen-Quelle und Spruehangriff');
+    function schutzUmgebung(antwort) {
+        const dom = new JSDOM('<!doctype html><body><p id="sec-anm-hint"></p>'
+                              + '<div id="sec-anm-sperren"></div></body>',
+                              { runScripts: 'outside-only', url: 'https://jarvis.test/settings' });
+        const w = dom.window;
+        sitzungLaden(w, { token: 'TOK' });
+        w.jarvisMarke = () => 'Beispielmarke';
+        w.fetch = (url) => {
+            const pfad = String(url).split('?')[0];
+            const a = pfad === '/api/admin/anmeldeschutz' ? { status: 200, body: antwort }
+                                                          : { status: 404, body: {} };
+            return Promise.resolve({ ok: a.status < 400, status: a.status, json: () => Promise.resolve(a.body) });
+        };
+        w.eval(MODUL);
+        return { w, d: w.document };
+    }
+    const basis = { ok: true, admin_2fa_pflicht: true, sperren: [], konto_max: 2,
+                    konto_fenster_min: 30, konto_sperre_min: 15, schwellen_quelle: 'domaene' };
+    let s = schutzUmgebung(Object.assign({}, basis, { spruehen: { aktiv: true, konten: 12, bis: 2000000000 } }));
+    s.w.TotpAdmin.onShow(); await warte(50);
+    const balken = s.d.getElementById('sec-anm-spruehen');
+    check('(Positivkontrolle) Hinweis zur Schwelle gefuellt', /2/.test(s.d.getElementById('sec-anm-hint').textContent));
+    check('laufender Spruehangriff: Warnbalken als Alarm', !!balken && balken.getAttribute('role') === 'alert');
+    check('Warnbalken nennt die Kontenzahl', !!balken && /12/.test(balken.textContent), balken && balken.textContent);
+    check('Warnbalken ohne Farbangabe ausserhalb der Variablen',
+          !!balken && !/#[0-9a-f]{3,6}\b|rgb\(/i.test(balken.getAttribute('style') || ''));
+    const quelle = s.d.getElementById('sec-anm-quelle');
+    check('Quelle der Schwelle steht unter dem Hinweis', !!quelle && /Domäne|domain/i.test(quelle.textContent));
+    check('Quelle nennt die Marke, nicht den Platzhalter',
+          !!quelle && quelle.textContent.includes('Beispielmarke') && !quelle.textContent.includes('{marke}'));
+    s.w.TotpAdmin.onShow(); await warte(50);
+    check('erneutes Laden doppelt nichts', s.d.querySelectorAll('#sec-anm-spruehen').length === 1
+          && s.d.querySelectorAll('#sec-anm-quelle').length === 1);
+    s.w.close();
+    s = schutzUmgebung(Object.assign({}, basis, { schwellen_quelle: 'vorgabe', spruehen: { aktiv: false, konten: 3 } }));
+    s.w.TotpAdmin.onShow(); await warte(50);
+    check('kein Angriff: kein Warnbalken', !s.d.getElementById('sec-anm-spruehen'));
+    check('Vorgabe ohne Domaene: keine Quellzeile', !s.d.getElementById('sec-anm-quelle'));
+    s.w.close();
+
     bilanz = true;
     console.log('\n\x1b[1mErgebnis: ' + ok + '/' + (ok + fail) + '\x1b[0m');
     process.exit(fail ? 1 : 0);

@@ -40,7 +40,7 @@
       "downloadUrl": "https://github.com/dev-core-busy/jarvis",
       "operatingSystem": "Linux",
       "applicationCategory": "DeveloperApplication",
-      "license": "https://www.apache.org/licenses/LICENSE-2.0",
+      "license": "https://www.elastic.co/licensing/elastic-license",
       "softwareVersion": "1.0.0",
       "programmingLanguage": ["Python", "JavaScript"],
       "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
@@ -192,6 +192,17 @@
         .manifesto-lead strong { color: var(--text-primary); }
         .manifesto-lead em { color: var(--accent-hover); font-style: normal; font-weight: 600; }
 
+        /* BSI-Haertung: bewusst hervorgehobener Abschnitt direkt unter dem Kopf */
+        .bsi-section { background: linear-gradient(180deg, rgba(16,185,129,0.10), rgba(16,185,129,0.02)); border-top: 1px solid rgba(16,185,129,0.35); border-bottom: 1px solid rgba(16,185,129,0.35); }
+        .bsi-kopf { display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; margin-bottom: 36px; }
+        .bsi-siegel { display: inline-flex; align-items: center; gap: 10px; padding: 8px 18px; border-radius: 999px; border: 1px solid var(--success); color: var(--success); font-weight: 700; letter-spacing: 0.04em; background: rgba(16,185,129,0.10); }
+        .bsi-zahlen { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; margin: 8px 0 32px; }
+        .bsi-zahl { flex: 1 1 180px; max-width: 260px; padding: 14px 18px; border-radius: var(--radius-md); background: var(--bg-glass); border: 1px solid var(--border); text-align: center; }
+        .bsi-zahl b { display: block; font-family: var(--font-title); font-size: 1.6rem; color: var(--success); }
+        .bsi-zahl span { color: var(--text-secondary); font-size: 0.85rem; }
+        .bsi-section .feature-card { border-color: rgba(16,185,129,0.25); }
+        .bsi-fuss { max-width: 820px; margin: 28px auto 0; color: var(--text-muted); font-size: 0.82rem; line-height: 1.6; text-align: center; }
+        .badge-bsi { border-color: var(--success) !important; color: var(--success) !important; }
         /* Contribute */
         .contribute { background: rgba(99,102,241,0.04); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
         .contribute-inner { max-width: 760px; margin: 0 auto; text-align: center; }
@@ -411,6 +422,8 @@
     <div class="nav-links">
         <a href="#features"    class="t-de">Funktionen</a>
         <a href="#features"    class="t-en">Features</a>
+        <a href="#bsi" class="t-de" style="color:var(--success);font-weight:700;">🛡️ BSI-Sicherheit</a>
+        <a href="#bsi" class="t-en" style="color:var(--success);font-weight:700;">🛡️ BSI Security</a>
         <a href="#privacy"     class="t-de">Datenschutz</a>
         <a href="#privacy"     class="t-en">Privacy</a>
         <a href="#openclaw">OpenClaw</a>
@@ -441,7 +454,7 @@
     <div class="hero-content">
         <div class="hero-eyebrow">
             <span class="dot"></span>
-            <span>Source available · ELv2</span>
+            <span>Gehärtet nach BSI-Vorgaben · Source available · ELv2</span>
         </div>
         <h1 class="hero-title">JARVIS</h1>
         <p class="hero-tagline t-de">Dein <strong>autonomer KI-Agent</strong> für den Linux-Desktop</p>
@@ -463,10 +476,80 @@
         <div class="hero-badges">
             <span class="badge">Python 3.13</span>
             <span class="badge">FastAPI</span>
+            <span class="badge badge-bsi">🛡️ BSI-gehärtet</span>
             <span class="badge">ELv2</span>
             <span class="badge">v1.0.0</span>
             <span class="badge">OpenClaw-Compatible</span>
         </div>
+    </div>
+</section>
+
+<section id="bsi" class="bsi-section">
+    <div class="container">
+        <div class="bsi-kopf reveal">
+            <span class="bsi-siegel">🛡️ <span class="t-de">GEHÄRTET NACH BSI-VORGABEN</span><span class="t-en">HARDENED TO BSI REQUIREMENTS</span></span>
+            <h2 class="section-title">
+                <span class="t-de">Sicherheit nach den Vorgaben des BSI</span>
+                <span class="t-en">Security built on BSI requirements</span>
+            </h2>
+            <p class="section-sub">
+                <span class="t-de">Jarvis wurde systematisch gegen die Anforderungen des <strong>Bundesamts für Sicherheit in der Informationstechnik</strong> abgeglichen – IT-Grundschutz-Baustein <strong>APP.3.1</strong> (Webanwendungen) und Technische Richtlinie <strong>TR-02102</strong> (Kryptografie). Jede Maßnahme ist im Code umgesetzt und durch automatische Tests abgesichert.</span>
+                <span class="t-en">Jarvis was systematically checked against the requirements of Germany's <strong>Federal Office for Information Security (BSI)</strong> – IT-Grundschutz module <strong>APP.3.1</strong> (web applications) and technical guideline <strong>TR-02102</strong> (cryptography). Every measure is implemented in code and secured by automated tests.</span>
+            </p>
+        </div>
+        <div class="bsi-zahlen reveal">
+            <div class="bsi-zahl"><b>34</b><span class="t-de">umgesetzte Maßnahmen</span><span class="t-en">measures implemented</span></div>
+            <div class="bsi-zahl"><b>3 + 13</b><span class="t-de">kritische und hohe Befunde behoben</span><span class="t-en">critical and high findings fixed</span></div>
+            <div class="bsi-zahl"><b>34</b><span class="t-de">automatische Sicherheitstests</span><span class="t-en">automated security tests</span></div>
+        </div>
+        <div class="features-grid">
+            <div class="feature-card reveal">
+                <div class="feature-icon">🔐</div>
+                <div class="feature-title t-de">Kryptografie nach BSI TR-02102</div>
+                <div class="feature-title t-en">Cryptography per BSI TR-02102</div>
+                <div class="feature-desc t-de">TLS 1.2 nur mit den Cipher-Suites der <strong>BSI TR-02102-2</strong>, TLS 1.3 nur AES-GCM, eigene Zertifikate mit RSA 3072. Sicherheits-Header (HSTS, Clickjacking-Schutz, nosniff) nach IT-Grundschutz APP.3.1.A21.</div>
+                <div class="feature-desc t-en">TLS 1.2 restricted to the cipher suites of <strong>BSI TR-02102-2</strong>, TLS 1.3 to AES-GCM only, own certificates with RSA 3072. Security headers (HSTS, clickjacking protection, nosniff) per IT-Grundschutz APP.3.1.A21.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">🪪</div>
+                <div class="feature-title t-de">Anmeldung und Sitzung</div>
+                <div class="feature-title t-en">Login and session</div>
+                <div class="feature-desc t-de">Zwei-Faktor-Pflicht für Administratoren, Kontosperre nach Fehlversuchen, Sitzungen mit Höchstdauer und Leerlauf-Ende (APP.3.1.A7), Sitzung im HttpOnly-Cookie mit CSRF-Schutz und Content-Security-Policy.</div>
+                <div class="feature-desc t-en">Mandatory two-factor authentication for administrators, account lockout after failed attempts, sessions with maximum lifetime and idle timeout (APP.3.1.A7), session in an HttpOnly cookie with CSRF protection and Content-Security-Policy.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">🧱</div>
+                <div class="feature-title t-de">Strikte Rechtetrennung</div>
+                <div class="feature-title t-en">Strict privilege separation</div>
+                <div class="feature-desc t-de">Die Anwendung läuft unprivilegiert und systemd-gehärtet. Root-Aktionen nur über einen getrennten Broker mit benannten Operationen und TOTP-Freigabe. Jeder Endpunkt ist standardmäßig gesperrt (Deny-by-default).</div>
+                <div class="feature-desc t-en">The application runs unprivileged and systemd-hardened. Root actions only via a separate broker with named operations and TOTP approval. Every endpoint is denied by default.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">🤖</div>
+                <div class="feature-title t-de">KI unter Kontrolle</div>
+                <div class="feature-title t-en">AI under control</div>
+                <div class="feature-desc t-de">Werkzeug-Ergebnisse werden gegen Prompt-Injection gerahmt. Externe oder löschende Aktionen brauchen eine Bestätigung. Shell-Befehle laufen in einer verpflichtenden Sandbox mit eigenem Netz und Ressourcengrenzen – ohne Sandbox keine Ausführung.</div>
+                <div class="feature-desc t-en">Tool results are framed against prompt injection. External or deleting actions require confirmation. Shell commands run in a mandatory sandbox with its own network and resource limits – no sandbox, no execution.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">🗝️</div>
+                <div class="feature-title t-de">Geheimnisse und Daten</div>
+                <div class="feature-title t-en">Secrets and data</div>
+                <div class="feature-desc t-de">Zugangsdaten verschlüsselt, der Hauptschlüssel liegt außerhalb der Daten. Anzeigen eines Geheimnisses nur nach erneuter Bestätigung. Löschfristen für Verläufe und Protokolle, Sicherheitsprotokoll mit Hash-Kette.</div>
+                <div class="feature-desc t-en">Credentials encrypted, the master key is kept outside the data. Revealing a secret requires re-confirmation. Retention periods for histories and logs, security log with a hash chain.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">📦</div>
+                <div class="feature-title t-de">Sichere Lieferkette</div>
+                <div class="feature-title t-en">Secure supply chain</div>
+                <div class="feature-desc t-de">Updates werden nur mit gültiger Signatur angenommen. Automatische Prüfung jeder Änderung: Abhängigkeits-Audit, SBOM, statische Analyse und Secret-Scan.</div>
+                <div class="feature-desc t-en">Updates are only accepted with a valid signature. Every change is checked automatically: dependency audit, SBOM, static analysis and secret scanning.</div>
+            </div>
+        </div>
+        <p class="bsi-fuss">
+            <span class="t-de">Grundlage ist ein Abgleich mit den BSI-Anforderungen (Stand 29.09.2026) und die daraus umgesetzten Maßnahmen. Es handelt sich nicht um eine Zertifizierung oder Prüfung durch das BSI. Einzelne Maßnahmen (z. B. SSH-Härtung, Paketfilter) setzt der Betreiber bei der Einrichtung des Servers um.</span>
+            <span class="t-en">This is based on a comparison with BSI requirements (as of 2026-09-29) and the measures implemented as a result. It is not a certification or audit by the BSI. Some measures (e.g. SSH hardening, packet filter) are applied by the operator when setting up the server.</span>
+        </p>
     </div>
 </section>
 
@@ -1574,8 +1657,8 @@ docker compose up -d</code>
                 </ul>
                 <a href="https://jarvis-ai.info/downloads/jarvis.exe" class="btn-windows">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>
-                    <span class="t-de">Download · Portable EXE · v0.894</span>
-                    <span class="t-en">Download · Portable EXE · v0.894</span>
+                    <span class="t-de">Download · Portable EXE · v0.895</span>
+                    <span class="t-en">Download · Portable EXE · v0.895</span>
                 </a>
                 <span class="btn-windows-note t-de">Windows 10/11 · 64-bit · Portable – kein Setup nötig</span>
                 <span class="btn-windows-note t-en">Windows 10/11 · 64-bit · Portable – no installer needed</span>
@@ -1593,11 +1676,11 @@ docker compose up -d</code>
         </h2>
         <p class="contribute-text reveal">
             <span class="t-de">
-                Der Quelltext von Jarvis ist <strong>offen einsehbar</strong> (Elastic License 2.0). Ob du einen Bug gefunden hast, eine neue Skill-Idee mitbringst, die Dokumentation verbessern möchtest oder einfach neugierig bist wie alles funktioniert: jede Beteiligung ist willkommen.<br><br>
+                Der Quelltext von Jarvis ist <strong>offen einsehbar</strong> (Elastic License 2.0) – selbst betreiben, anpassen und intern einsetzen ist ausdrücklich erlaubt; nicht erlaubt sind ein Angebot als gehosteter Dienst für Dritte und das Umgehen der Lizenzschlüssel. Beiträge stehen unter derselben Lizenz. Ob du einen Bug gefunden hast, eine neue Skill-Idee mitbringst, die Dokumentation verbessern möchtest oder einfach neugierig bist wie alles funktioniert: jede Beteiligung ist willkommen.<br><br>
                 Fork das Repo, öffne einen Issue oder schreib direkt einen Pull Request. Die Architektur ist bewusst modular gehalten – neue Skills lassen sich in wenigen Zeilen Python ergänzen, ohne den Core zu berühren. Lass uns gemeinsam etwas Großartiges bauen.
             </span>
             <span class="t-en">
-                The source code of Jarvis is <strong>openly available</strong> (Elastic License 2.0). Whether you've found a bug, have a new skill idea, want to improve the docs, or are simply curious how it all works: every contribution is welcome.<br><br>
+                The source code of Jarvis is <strong>openly available</strong> (Elastic License 2.0) – running it yourself, adapting it and using it internally is explicitly allowed; offering it to third parties as a hosted service and circumventing the license keys is not. Contributions are made under the same license. Whether you've found a bug, have a new skill idea, want to improve the docs, or are simply curious how it all works: every contribution is welcome.<br><br>
                 Fork the repo, open an issue, or write a pull request directly. The architecture is intentionally modular – new skills can be added in just a few lines of Python without touching the core. Let's build something great together.
             </span>
         </p>

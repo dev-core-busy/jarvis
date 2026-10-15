@@ -5,13 +5,17 @@
 **A self-hosted, autonomous AI agent for Linux — it plans, executes, and gets real work done.**
 
 [![Python](https://img.shields.io/badge/Python-3.13-blue?logo=python&logoColor=white)](https://www.python.org/)
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue?logo=apache)](LICENSE)
+[![BSI](https://img.shields.io/badge/Security-hardened_to_BSI_requirements-10b981)](#bsi)
+[![License](https://img.shields.io/badge/License-Elastic_2.0-blue)](LICENSE)
 [![Version](https://img.shields.io/badge/Version-1.0.0-orange)](https://github.com/dev-core-busy/jarvis/releases)
 [![Platform](https://img.shields.io/badge/Platform-Linux-lightgrey?logo=linux)](https://www.linux.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-Welcome-brightgreen)](https://github.com/dev-core-busy/jarvis/pulls)
 [![OpenClaw Compatible](https://img.shields.io/badge/OpenClaw-Compatible-6366f1)](https://github.com/dev-core-busy/jarvis#openclaw-skill-ecosystem)
 
 *Control your Linux desktop with natural language. Receive tasks via WhatsApp. Search your knowledge base. Automate everything.*
+
+### 🛡️ Hardened to the requirements of Germany's Federal Office for Information Security (BSI)
+**IT-Grundschutz APP.3.1 · TR-02102 · 34 measures implemented, each secured by automated tests** — [details](#bsi)
 
 [**Live Demo**](https://jarvis-ai.info) · [**Report Bug**](https://github.com/dev-core-busy/jarvis/issues) · [**Request Feature**](https://github.com/dev-core-busy/jarvis/issues) · [**Contribute**](#contributing)
 
@@ -23,8 +27,49 @@
 
 ---
 
+<a id="bsi"></a>
+
+## 🛡️ Security hardened to BSI requirements
+
+> **Jarvis was systematically checked against the requirements of the German Federal Office for
+> Information Security (BSI)** — IT-Grundschutz module **APP.3.1** (web applications) and technical
+> guideline **TR-02102** (cryptography). Every resulting measure is implemented in code and secured
+> by an automated guard test that fails if the protection is removed.
+
+| | |
+|---|---|
+| **34** | measures implemented (3 critical, 13 high, 12 medium, 6 low findings) |
+| **34** | automated security tests, plus counter-tests that deliberately break a fix to prove the test bites |
+
+**What this means in practice**
+
+- 🔐 **Cryptography per BSI TR-02102** — TLS 1.2 restricted to the TR-02102-2 cipher suites, TLS 1.3 to
+  AES-GCM, own certificates with RSA 3072; security headers (HSTS, clickjacking protection, nosniff)
+  per APP.3.1.A21.
+- 🪪 **Login and session** — mandatory 2FA for administrators, account lockout after failed attempts,
+  sessions with maximum lifetime and idle timeout (APP.3.1.A7), session in an HttpOnly cookie with
+  CSRF protection, enforced Content-Security-Policy.
+- 🧱 **Strict privilege separation** — the application runs unprivileged and systemd-hardened; root
+  actions only through a separate broker with named operations and TOTP approval; every endpoint is
+  denied by default.
+- 🤖 **AI under control** — tool results are framed against prompt injection; external or deleting
+  actions require confirmation; shell commands run in a mandatory sandbox (own network namespace,
+  resource limits) — no sandbox, no execution.
+- 🗝️ **Secrets and data** — credentials encrypted with a master key kept outside the data directory;
+  revealing a secret requires re-confirmation; retention periods for histories and logs; tamper-evident
+  security log (hash chain).
+- 📦 **Secure supply chain** — updates are only accepted with a valid signature; every change runs
+  through dependency audit, SBOM, static analysis and secret scanning.
+
+<sub>Based on a comparison with BSI requirements (as of 2026-09-29) and the measures implemented as a
+result. This is not a certification or audit by the BSI. Some measures (e.g. SSH hardening, packet
+filter) are applied by the operator when setting up the server — see `deploy/security/README.md`.</sub>
+
+---
+
 ## 📋 Table of Contents
 
+- [Security hardened to BSI requirements](#bsi)
 - [Overview](#overview)
 - [Screenshots](#screenshots)
 - [Key Features](#key-features)
@@ -135,10 +180,10 @@ Built to be opened to a whole team — every restriction is **enforced in code**
 
 ### 🔐 Authentication & Access
 - **Active Directory / LDAP** authentication (no domain join required)
-- **2FA / TOTP** for all users
+- **2FA / TOTP** — mandatory for administrators, available for all users
 - Granular **knowledge-editor permissions** (per user or AD group)
 - HTTPS with auto-generated self-signed certificates or Let's Encrypt
-- Token-based auth (HMAC-SHA256, 30-day validity)
+- Session in an HttpOnly cookie with CSRF token; maximum lifetime (default 12 h) and idle timeout (default 120 min), revocable per session
 
 ### 🌐 Google Workspace Integration
 Manage Gmail, Google Calendar, and Google Drive through natural language commands — powered by the openclaw/gog CLI.
@@ -829,7 +874,7 @@ Jarvis is designed to be exposed to non-admin (network/domain) users. All limits
 - **No privilege escalation:** sub-agents inherit the caller's confinement; "learned facts" are treated as untrusted context and a top-priority safety rule can't be overridden.
 - **Configurable** under `Settings → Security` (attack-prevention panel, sandbox status, violation log). Full technical write-up is available in-app via the ❓ button there.
 
-> The hard guarantee comes from the OS sandbox; the pattern-based checks are defense-in-depth. Enable the OS sandbox by provisioning an unprivileged user and tightening file permissions (see in-app docs).
+> The hard guarantee comes from the OS sandbox; the pattern-based checks are defense-in-depth. The OS sandbox is **mandatory and fail-closed** for network users: if it is not available, the shell is refused instead of running unconfined.
 
 ### Two-Factor Authentication (TOTP)
 

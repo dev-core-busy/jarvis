@@ -430,6 +430,9 @@ _fn.args.defaults = [ast.Constant(None) for _ in _fn.args.defaults]
 _ns: dict = {
     "ALLOWED_USERS": set(), "config": _cfg.config, "time": __import__("time"),
     "_ad_user_allowed": lambda *a: True,
+    # Vorabpruefung (Password Spraying, 2026-10-15): hier "freigegeben", damit
+    # der TLS-Weg erreicht wird – gemessen wird sie in test_anmelde_spruehen.py.
+    "_ad_vorab_freigabe": lambda username: "ja",
     "_check_knowledge_edit_permission_with_conn": lambda *a: False,
     "_check_internet_access_with_conn": lambda *a: False,
     "_check_admin_with_conn": lambda *a: False,

@@ -57,8 +57,9 @@ PROBEN = [
      '        if _tage:\n', '        if _tage and cut is not None:\n'),
     # ── main.py ──
     ("Login ohne Protokoll", MA,
-     '    resp = await _login_ablauf(request)\n    await _anmeldung_protokollieren(request, resp, "kennwort")\n',
-     '    resp = await _login_ablauf(request)\n'),
+     # Nur die Protokollzeile: seit 2026-10-15 steht zwischen Ablauf und
+     # Protokoll die Mindestdauer gegen Password Spraying.
+     '    await _anmeldung_protokollieren(request, resp, "kennwort")\n', ''),
     ("SSO ohne Protokoll", MA,
      '    await _anmeldung_protokollieren(request, resp, "outlook_sso")\n', ''),
     ("Fehlschlaege nicht protokolliert", MA,

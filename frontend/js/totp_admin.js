@@ -161,10 +161,46 @@
                 if (h) h.textContent = fuellen(T('security.anmeldeschutz_hint',
                     'Nach {max} falschen Anmeldeversuchen innerhalb von {fenster} Minuten ist ein Konto {sperre} Minuten lang für die Anmeldung gesperrt – unabhängig davon, von welchem Gerät aus probiert wird. Die Sperre läuft von selbst ab.'),
                     { max: d.konto_max, fenster: d.konto_fenster_min, sperre: d.konto_sperre_min });
+                if (h) quelleZeigen(h, d.schwellen_quelle);
+                if (box) spruehenZeigen(box, d.spruehen || {});
                 if (cb) cb.checked = !!d.admin_2fa_pflicht;
                 sperrenZeigen(Array.isArray(d.sperren) ? d.sperren : []);
             })
             .catch(function () { if (box) hinweis(box, 'security.totp_load_failed', 'Die Liste konnte nicht geladen werden.'); });
+    }
+
+    // Woher die Kontoschwelle kommt (Password Spraying, 2026-10-15): mit Domaene
+    // liegt sie UNTER deren Sperrschwelle, sonst liessen sich ueber Jarvis
+    // Domaenenkonten sperren. Ohne diese Zeile wirkt "2 Versuche" wie ein Fehler.
+    var QUELLEN = {
+        domaene: ['security.anm_quelle_domaene', 'Die Zahl ist aus der Sperrrichtlinie der Domäne abgeleitet: {marke} sperrt einen Versuch, bevor die Domäne das Konto sperren würde.'],
+        ohne_richtlinie: ['security.anm_quelle_ohne', 'Die Sperrrichtlinie der Domäne ist nicht lesbar (Dienstkonto fehlt oder ist ungültig) – deshalb gilt vorsichtshalber ein niedriger Wert.'],
+        domaene_ohne_sperre: ['security.anm_quelle_ohne_sperre', 'Die Domäne sperrt Konten nicht nach Fehlversuchen – es gilt der Standardwert.']
+    };
+
+    function quelleZeigen(h, quelle) {
+        var alt = document.getElementById('sec-anm-quelle');
+        if (alt) alt.remove();
+        var q = QUELLEN[quelle];
+        if (!q) return;
+        var marke = 'Jarvis';
+        try { if (window.jarvisMarke) marke = window.jarvisMarke() || marke; } catch (e) { /* Rueckfall */ }
+        var p = el('p', { 'id': 'sec-anm-quelle', 'class': 'kb-hint', 'style': 'margin-top:4px;' },
+            fuellen(T(q[0], q[1]), { marke: marke }));
+        h.parentNode.insertBefore(p, h.nextSibling);
+    }
+
+    function spruehenZeigen(box, s) {
+        var alt = document.getElementById('sec-anm-spruehen');
+        if (alt) alt.remove();
+        if (!s.aktiv) return;
+        var zeit = new Date((s.bis || 0) * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        var div = el('div', { 'id': 'sec-anm-spruehen', 'role': 'alert',
+            'style': 'border:1px solid var(--danger);border-left-width:4px;border-radius:8px;padding:10px 12px;margin-bottom:10px;'
+                   + 'background:color-mix(in srgb, var(--danger) 12%, var(--bg-secondary));color:var(--text-primary);' },
+            fuellen(T('security.anm_spruehen', 'Angriff erkannt (Password Spraying): fehlgeschlagene Anmeldungen für {konten} verschiedene Konten. Alle Anmeldungen werden bis {zeit} Uhr gebremst.'),
+                { konten: s.konten, zeit: zeit }));
+        box.parentNode.insertBefore(div, box);
     }
 
     function sperrenZeigen(sperren) {

@@ -1,0 +1,30 @@
+{
+    "name": "Beispiel-Skill",
+    "description": "Ein Beispiel-Skill als Vorlage",
+    "version": "1.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": ["example_greet"],
+    "category": "sonstige",
+    "icon": "puzzle",
+    "system": false,
+    "enabled": false,
+    "config_schema": {},
+    "knowledge_docs": [],
+    "dependencies": [],
+    "permissions": [],
+    "help": {
+        "details": "Ein minimaler Beispiel-Skill als Vorlage für eigene Skill-Entwicklung. Zeigt die grundlegende Struktur einer skill.json und main.py mit einem einfachen Tool.",
+        "tools": [
+            {
+                "name": "example_greet",
+                "label": "Begrüßung",
+                "desc": "Gibt eine einfache Begrüßungsnachricht zurück. Dient als Demonstration der Tool-Grundstruktur."
+            }
+        ],
+        "use_cases": [
+            "Sage mir 'Hallo' (Test des Beispiel-Skills)"
+        ],
+        "notes": "Dieser Skill dient nur als Entwicklervorlage. Zum Erstellen eigener Skills: Verzeichnis unter skills/<name>/ anlegen, skill.json und main.py nach diesem Muster erstellen."
+    }
+}

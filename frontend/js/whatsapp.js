@@ -1,0 +1,424 @@
+/**
+ * Jarvis WhatsApp Manager – Frontend-Steuerung für WhatsApp-Tab
+ */
+
+class JarvisWhatsAppManager {
+    constructor() {
+        this._pollInterval = null;
+        this._logPollInterval = null;
+        this._qrLibLoaded = false;
+
+        // Buttons verbinden
+        const btnReconnect = document.getElementById('btn-wa-reconnect');
+        const btnLogout = document.getElementById('btn-wa-logout');
+        if (btnReconnect) btnReconnect.addEventListener('click', () => this.reconnect());
+        if (btnLogout) btnLogout.addEventListener('click', () => this.logout());
+
+        // Log-Controls
+        const btnLogsRefresh = document.getElementById('btn-wa-logs-refresh');
+        const btnLogsClear = document.getElementById('btn-wa-logs-clear');
+        const debugToggle = document.getElementById('wa-debug-toggle');
+        const logFilter = document.getElementById('wa-log-filter');
+        const logSource = document.getElementById('wa-log-source');
+
+        if (btnLogsRefresh) btnLogsRefresh.addEventListener('click', () => this.fetchLogs());
+        if (btnLogsClear) btnLogsClear.addEventListener('click', () => this.clearLogs());
+        if (debugToggle) debugToggle.addEventListener('change', (e) => this.toggleDebug(e.target.checked));
+        if (logFilter) logFilter.addEventListener('change', () => this.fetchLogs());
+        if (logSource) logSource.addEventListener('change', () => this.fetchLogs());
+
+        // Debug-Toggle Initialzustand laden
+        this._loadDebugState();
+    }
+
+    async refresh() {
+        this._startPolling();
+        await this._fetchStatus();
+        await this.fetchLogs();
+        this._startLogPolling();
+    }
+
+    stop() {
+        this._stopPolling();
+        this._stopLogPolling();
+    }
+
+    _startPolling() {
+        this._stopPolling();
+        this._pollInterval = setInterval(() => this._fetchStatus(), 3000);
+    }
+
+    _stopPolling() {
+        if (this._pollInterval) {
+            clearInterval(this._pollInterval);
+            this._pollInterval = null;
+        }
+    }
+
+    async _fetchStatus() {
+        try {
+            const token = window.JarvisSitzung.token();
+            const resp = await fetch('/api/whatsapp/status', { headers: { 'Authorization': 'Bearer ' + token } });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+            this._updateUI(data);
+
+            // QR-Code laden wenn noetig
+            if (data.state === 'qr_pending' && data.has_qr) {
+                await this._fetchQR();
+            }
+        } catch (e) {
+            this._updateUI({
+                state: 'error',
+                connected_number: null,
+                has_qr: false,
+                message_count: 0,
+                last_error: window.t('whatsapp.bridge_unreachable')
+            });
+        }
+    }
+
+    _updateUI(data) {
+        const state = data.state || 'disconnected';
+        const number = data.connected_number;
+        const msgCount = data.message_count || 0;
+        const lastError = data.last_error;
+
+        // Status-Badge
+        const badge = document.getElementById('wa-status-badge');
+        if (badge) {
+            badge.className = 'wa-status-badge ' + state;
+            const labels = {
+                'connected': window.t('whatsapp.state_connected'),
+                'qr_pending': window.t('whatsapp.state_qr'),
+                'connecting': window.t('whatsapp.state_connecting'),
+                'disconnected': window.t('whatsapp.state_disconnected'),
+                'error': window.t('common.error')
+            };
+            badge.textContent = labels[state] || state;
+        }
+
+        // Status-Icon
+        const icon = document.getElementById('wa-status-icon');
+        if (icon) {
+            icon.className = 'wa-status-icon';
+            if (state === 'disconnected' || state === 'error') icon.classList.add('disconnected');
+            if (state === 'connecting') icon.classList.add('connecting');
+        }
+
+        // Status-Text
+        const statusText = document.getElementById('wa-status-text');
+        if (statusText) {
+            const texts = {
+                'connected': window.t('whatsapp.status_connected'),
+                'qr_pending': window.t('whatsapp.status_qr'),
+                'connecting': window.t('common.connecting'),
+                'disconnected': window.t('whatsapp.status_disconnected'),
+                'error': window.t('common.error')
+            };
+            statusText.textContent = texts[state] || window.t('whatsapp.status_unknown');
+        }
+
+        // Detail-Text
+        const detail = document.getElementById('wa-status-detail');
+        if (detail) {
+            if (lastError) {
+                detail.textContent = lastError;
+            } else if (state === 'connected') {
+                detail.textContent = window.t('wa.ready');
+            } else if (state === 'qr_pending') {
+                detail.textContent = window.t('whatsapp.qr_scan_hint');
+            } else {
+                detail.textContent = '';
+            }
+        }
+
+        // Stats
+        const numEl = document.getElementById('wa-connected-number');
+        if (numEl) numEl.textContent = number ? `+${number}` : '--';
+
+        const msgEl = document.getElementById('wa-msg-count');
+        if (msgEl) msgEl.textContent = msgCount;
+
+        // QR-Section Sichtbarkeit
+        const qrSection = document.getElementById('wa-qr-section');
+        if (qrSection) {
+            if (state === 'connected') {
+                qrSection.style.display = 'none';
+            } else {
+                qrSection.style.display = '';
+            }
+        }
+
+        // Bei Verbindung: "Connected" im QR-Bereich zeigen
+        if (state === 'connected') {
+            const qrBox = document.getElementById('wa-qr-box');
+            if (qrBox) {
+                qrBox.innerHTML = `
+                    <div class="wa-qr-connected">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                            <polyline points="22 4 12 14.01 9 11.01"/>
+                        </svg>
+                        ${window.t('whatsapp.state_connected')}
+                    </div>`;
+            }
+        }
+    }
+
+    async _fetchQR() {
+        try {
+            const token = window.JarvisSitzung.token();
+            const resp = await fetch('/api/whatsapp/qr', { headers: { 'Authorization': 'Bearer ' + token } });
+            if (!resp.ok) return;
+            const data = await resp.json();
+
+            if (data.qr) {
+                await this._renderQR(data.qr);
+            }
+        } catch (e) {
+            console.error('[WA] QR-Fetch Fehler:', e);
+        }
+    }
+
+    async _renderQR(qrData) {
+        const qrBox = document.getElementById('wa-qr-box');
+        if (!qrBox) return;
+
+        // QRCode-Library laden falls noetig
+        if (!this._qrLibLoaded) {
+            await this._loadQRLib();
+        }
+
+        if (typeof QRCode === 'undefined') {
+            qrBox.innerHTML = '<div class="wa-qr-loading">' + window.t('whatsapp.qr_lib_missing') + '</div>';
+            return;
+        }
+
+        // QR-Code rendern
+        qrBox.innerHTML = '';
+        try {
+            new QRCode(qrBox, {
+                text: qrData,
+                width: 200,
+                height: 200,
+                colorDark: '#000000',
+                colorLight: '#ffffff',
+                correctLevel: QRCode.CorrectLevel.M,
+            });
+        } catch (e) {
+            // Fallback: Einfaches Canvas
+            qrBox.innerHTML = '<div class="wa-qr-loading">' + window.t('whatsapp.qr_generating') + '</div>';
+            console.error('[WA] QR-Render Fehler:', e);
+        }
+    }
+
+    async _loadQRLib() {
+        if (typeof QRCode !== 'undefined') {
+            this._qrLibLoaded = true;
+            return;
+        }
+
+        return new Promise((resolve) => {
+            const script = document.createElement('script');
+            // ⚠ LOKAL, NIE VOM CDN. Bis 2026-10-05 stand hier
+            // 'https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js' - das
+            // verstiess gegen "Nie wieder extern einbinden" (ein <link> auf
+            // fonts.googleapis.com hat hier schon eine Admin-Oberflaeche
+            // gekostet) UND war in jeder Umgebung mit Egress-Sperre tot: der
+            // onerror-Zweig unten greift dann, der QR-Code bleibt aus, und die
+            // WhatsApp-Anmeldung ist ohne erkennbaren Grund nicht moeglich.
+            // Herkunft, Pruefsumme und Lizenz: frontend/js/vendor/HERKUNFT.txt.
+            // Der Cache-Buster gehoert AN DEN PFAD - diese Einbindung steht in
+            // keiner HTML-Seite, test_cache_buster.py sieht sie also nicht.
+            script.src = '/static/js/vendor/qrcode.min.js?v=1';
+            script.onload = () => {
+                this._qrLibLoaded = true;
+                resolve();
+            };
+            script.onerror = () => {
+                console.error('[WA] QRCode-Library konnte nicht geladen werden');
+                // Fallback: eigene minimale QR-Darstellung
+                this._qrLibLoaded = false;
+                resolve();
+            };
+            document.head.appendChild(script);
+        });
+    }
+
+    // ─── Log-Polling ──────────────────────────────────────────────
+
+    _startLogPolling() {
+        this._stopLogPolling();
+        this._logPollInterval = setInterval(() => this.fetchLogs(), 5000);
+    }
+
+    _stopLogPolling() {
+        if (this._logPollInterval) {
+            clearInterval(this._logPollInterval);
+            this._logPollInterval = null;
+        }
+    }
+
+    async _loadDebugState() {
+        try {
+            const token = window.JarvisSitzung.token();
+            // Der Pfad war '/api/skills/whatsapp' – den gibt es nur als DELETE,
+            // ein GET darauf beantwortet der Server mit 405. Weil der Fehler in
+            // `if (resp.ok)` verschwand, blieb der Debug-Schalter STILL auf
+            // "aus", egal was gespeichert war. Richtig ist der Config-Endpunkt.
+            // (Gefunden am 2026-07-31 ueber eine 405-Meldung in der Konsole.)
+            const resp = await fetch('/api/skills/whatsapp/config', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (resp.ok) {
+                const data = await resp.json();
+                const dbg = data.config?.debug_mode || false;
+                const toggle = document.getElementById('wa-debug-toggle');
+                if (toggle) toggle.checked = dbg;
+            }
+        } catch (e) { /* ignore */ }
+    }
+
+    async toggleDebug(enabled) {
+        try {
+            const token = window.JarvisSitzung.token();
+            await fetch('/api/skills/whatsapp/config', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ debug_mode: enabled })
+            });
+        } catch (e) {
+            console.error('[WA] Debug-Toggle Fehler:', e);
+        }
+    }
+
+    async fetchLogs() {
+        const token = window.JarvisSitzung.token();
+        const levelFilter = document.getElementById('wa-log-filter')?.value || '';
+        const source = document.getElementById('wa-log-source')?.value || '';
+        const container = document.getElementById('wa-logs-container');
+        if (!container) return;
+
+        let allLogs = [];
+
+        try {
+            // Backend-Logs
+            if (source !== 'bridge') {
+                const params = new URLSearchParams({ lines: '150' });
+                if (levelFilter) params.set('level', levelFilter);
+                const resp = await fetch(`/api/whatsapp/logs?${params}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    allLogs.push(...(data.logs || []).map(l => ({ ...l, src: 'B' })));
+                }
+            }
+
+            // Bridge-Logs (via Proxy)
+            if (source !== 'backend') {
+                const params = new URLSearchParams({ lines: '150' });
+                if (levelFilter) params.set('level', levelFilter);
+                const resp = await fetch(`/api/whatsapp/bridge-logs?${params}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    allLogs.push(...(data.logs || []).map(l => ({ ...l, src: 'W' })));
+                }
+            }
+        } catch (e) {
+            container.innerHTML = '<div class="wa-logs-empty">' + window.t('whatsapp.logs_load_failed') + '</div>';
+            return;
+        }
+
+        if (allLogs.length === 0) {
+            container.innerHTML = '<div class="wa-logs-empty">' + window.t('wa.no_logs') + '</div>';
+            return;
+        }
+
+        // Nach Zeitstempel sortieren
+        allLogs.sort((a, b) => (a.ts || '').localeCompare(b.ts || ''));
+        const last200 = allLogs.slice(-200);
+
+        const wasScrolledToBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 20;
+
+        container.innerHTML = last200.map(e => {
+            const ts = (e.ts || '').substring(11, 19);
+            const meta = e.meta ? `<div class="wa-log-meta">${this._escHtml(JSON.stringify(e.meta))}</div>` : '';
+            return `<div class="wa-log-entry">` +
+                `<span class="wa-log-ts">${ts}</span>` +
+                `<span class="wa-log-level ${e.level}">${e.level}</span>` +
+                `<span class="wa-log-cat">[${e.src}/${e.cat || '?'}]</span>` +
+                `<span class="wa-log-msg">${this._escHtml(e.msg || '')}${meta}</span>` +
+                `</div>`;
+        }).join('');
+
+        if (wasScrolledToBottom) {
+            container.scrollTop = container.scrollHeight;
+        }
+    }
+
+    async clearLogs() {
+        const token = window.JarvisSitzung.token();
+        try {
+            await Promise.all([
+                fetch('/api/whatsapp/logs', {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }),
+                fetch('/api/whatsapp/bridge-logs', {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                })
+            ]);
+            await this.fetchLogs();
+        } catch (e) {
+            console.error('[WA] Logs-Clear Fehler:', e);
+        }
+    }
+
+    _escHtml(s) {
+        return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    // ─── Verbindungs-Aktionen ───────────────────────────────────────
+
+    async reconnect() {
+        try {
+            const token = window.JarvisSitzung.token();
+            const resp = await fetch('/api/whatsapp/reconnect', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token } });
+            const data = await resp.json();
+            if (data.success) {
+                // Warte kurz, dann Status neu laden
+                setTimeout(() => this._fetchStatus(), 2000);
+            }
+        } catch (e) {
+            console.error('[WA] Reconnect Fehler:', e);
+        }
+    }
+
+    async logout() {
+        if (!confirm('WhatsApp wirklich abmelden? Du musst den QR-Code erneut scannen.')) return;
+
+        try {
+            const token = window.JarvisSitzung.token();
+            const resp = await fetch('/api/whatsapp/logout', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token } });
+            const data = await resp.json();
+            if (data.success) {
+                setTimeout(() => this._fetchStatus(), 3000);
+            }
+        } catch (e) {
+            console.error('[WA] Logout Fehler:', e);
+        }
+    }
+}
+
+// Global initialisieren
+document.addEventListener('DOMContentLoaded', () => {
+    window.waManager = new JarvisWhatsAppManager();
+});

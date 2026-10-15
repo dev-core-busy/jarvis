@@ -1,0 +1,39 @@
+# gitleaks: gepruefte Fehlalarme (BSI M6, neu gefasst 2026-10-15 beim Neustart der
+# Historie). Je Zeile ein Fingerabdruck <datei>:<regel>:<zeile> OHNE Commit-SHA –
+# die fruehere Form <commit>:... hing an Commits, die es nach dem Neustart nicht
+# mehr gibt, und haette danach nichts mehr abgedeckt.
+# Alle Funde sind Platzhalter in der API-Doku (DEIN_API_KEY) oder erfundene
+# Testwerte in tests/ – einzeln angesehen. Ein NEUER Fund (andere Zeile, andere
+# Regel) ist davon nicht gedeckt; verschiebt sich eine Zeile, meldet gitleaks
+# sie erneut und sie wird neu bewertet.
+frontend/settings.html:curl-auth-header:333
+frontend/settings.html:curl-auth-header:421
+frontend/settings.html:curl-auth-header:477
+frontend/settings.html:curl-auth-header:526
+frontend/settings.html:curl-auth-header:561
+frontend/settings.html:curl-auth-header:635
+frontend/settings.html:curl-auth-header:723
+frontend/settings.html:curl-auth-header:779
+frontend/settings.html:curl-auth-header:828
+frontend/settings.html:curl-auth-header:863
+frontend/support-api.html:curl-auth-header:161
+frontend/support-api.html:curl-auth-header:249
+frontend/support-api.html:curl-auth-header:305
+frontend/support-api.html:curl-auth-header:354
+frontend/support-api.html:curl-auth-header:389
+frontend/support-api.html:curl-auth-header:487
+frontend/support-api.html:curl-auth-header:575
+frontend/support-api.html:curl-auth-header:631
+frontend/support-api.html:curl-auth-header:680
+frontend/support-api.html:curl-auth-header:715
+tests/gegen_secret_key_platzhalter.py:generic-api-key:32
+tests/test_agent_keys_ui.js:generic-api-key:51
+tests/test_bildmasse.py:generic-api-key:234
+tests/test_bsi_m5.py:generic-api-key:911
+tests/test_knowledge_sync.py:generic-api-key:168
+tests/test_knowledge_sync_ui.js:generic-api-key:126
+tests/test_knowledge_sync_ui.js:generic-api-key:129
+tests/test_knowledge_sync_ui.js:generic-api-key:298
+tests/test_knowledge_sync_ui.js:generic-api-key:428
+tests/test_knowledge_sync_ui.js:generic-api-key:466
+tests/test_totp_setup_knopf_ui.js:generic-api-key:73

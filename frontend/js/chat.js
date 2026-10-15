@@ -1,0 +1,3794 @@
+/**
+ * Jarvis Chat UI – WebSocket-basierte Chat-Oberfläche
+ * Android-identisches Bubble-Design mit LDAP-Authentifizierung
+ */
+(() => {
+    'use strict';
+
+    // ─── State ──────────────────────────────────────────────────
+    // SSO: jeden gueltigen Login-Token akzeptieren (kein Re-Login bei Seitenwechsel)
+    // Der EIGENE Schluessel hat Vorrang (Argument), dahinter die gemeinsame
+    // Kette aus sitzung.js. ⚠ DIESE ZEILE WAR DIE URSACHE DES VORFALLS VOM
+    // 2026-10-01: sie schreibt `jarvis_chat_token` und NIE `jarvis_token` –
+    // `dlkey.js` las aber nur letzteren, und damit trug jeder Download-Link im
+    // Chat gar kein Token (401, vom Browser als Anmeldefrage angezeigt).
+    let token = window.JarvisSitzung.token('jarvis_chat_token');
+    if (token) localStorage.setItem('jarvis_chat_token', token);
+    // Eindeutige Fenster-ID fuer Live-Sync (eigene Echo-Events ignorieren)
+    const _clientId = 'chat-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    let _currentUser = window.JarvisSitzung.benutzer('jarvis_chat_user');
+    let _isAdmin = false;   // jarvis/lokaler Admin -> Update-Pill/VNC/Multi-Agent sichtbar
+    let ws = null;
+    // Multi-Agent (nur Admin): Agent-Infos + aktive Ansicht + Sub-Agent-Streams
+    let _activeAgentId = '_main';
+    const _agentInfos = {};   // agent_id -> {label, state, is_sub_agent}
+    const _subBubbles = {};   // agent_id -> Streaming-Bubble eines Sub-Agenten
+    let reconnectAttempts = 0;
+    const MAX_RECONNECT = 20;
+    let agentRunning = false;
+    let currentBotBubble = null;   // Streaming-Ziel
+    let lastDate = '';
+    // Wachhund gegen einen dauerhaft "laufenden" Zustand: agentRunning wird
+    // sonst NUR von den WS-Ereignissen started/finished gesetzt. Bleibt
+    // 'finished' aus (Verbindungsabbruch, Prozessende, verschluckte Ausnahme),
+    // waere die Oberflaeche fuer immer blockiert.
+    let _lastWsMsgAt = 0;
+    let _runWatchdog = null;
+    // Grosszuegig: ein einzelner LLM-Aufruf kann minutenlang schweigen (kein
+    // Streaming), waehrend Werkzeuge laufend Status senden. Die Frist ist eine
+    // NOTBREMSE, keine Zeitmessung – sie darf nie einen echten Lauf abwuergen.
+    const RUN_SILENCE_MS = 10 * 60 * 1000;
+
+    // TTS-State
+    let ttsEnabled = false;
+    let _ttsAudio = null;
+    let _ttsBuf = '';              // sammelt Bot-Text während Streaming
+
+    // Feedback-State
+    let _lastUserMsg  = '';        // letzte gesendete Benutzerfrage
+    let _lastBotResp  = '';        // letzte vollständige Bot-Antwort
+    let _lastBotCol   = null;      // .msg-col des letzten Bot-Bubbles
+    let _lastStats    = '';        // Statistik-Text des letzten Bot-Bubbles
+    // Sitzung, in der die AKTUELL laufende Anfrage gestellt wurde. Antworten werden
+    // immer DORTHIN geroutet – auch wenn der Benutzer waehrenddessen den Verlauf
+    // wechselt (dann: Chunks puffern statt anzeigen, am Ende remote persistieren).
+    let _runSid = null;
+
+    // Verlauf-Persistenz
+    const _HISTORY_KEY = 'jarvis_chat_history_v1';
+    const _HISTORY_MAX = 120;
+    let _chatHistory   = [];
+    // Benutzereigene Chat-Sitzungen (Sidebar-Historie)
+    let _sessions  = [];
+    let _activeSid = null;
+    const _CS_DEFAULT_TITLE = 'Neuer Chat';   // Backend-Standardtitel (chat_sessions._DEFAULT_TITLE)
+    // Auswahlmodus der Verlaufsleiste (mehrere Chats zusammen loeschen).
+    // `_selIds` haelt Ids, keine Indizes: ein Index verschiebt sich beim
+    // Loeschen aus der Mitte und zeigt danach auf den Nachbarn.
+    let _selMode = false;
+    let _selIds  = new Set();
+
+    // ─── DOM ────────────────────────────────────────────────────
+    const $ = id => document.getElementById(id);
+    const loginScreen  = $('login-screen');
+    const chatScreen   = $('chat-screen');
+    const loginForm    = $('login-form');
+    const loginUser    = $('login-user');
+    const loginPass    = $('login-pass');
+    const loginBtn     = $('btn-login');
+    const loginError   = $('login-error');
+    const eyeBtn       = $('eye-btn');
+    const totpRow      = $('totp-row');
+    const loginTotp    = $('login-totp');
+    const messagesEl   = $('messages');
+    const msgInput     = $('msg-input');
+    const sendBtn      = $('btn-send');
+    const stopBtn      = $('btn-stop');
+    const btnAttach    = $('btn-attach');
+    const attachInput  = $('attach-input');
+    const attachBar    = $('attach-preview-bar');
+    const attachToast  = $('attach-toast');
+    const logoutBtn    = $('btn-logout');
+    const statusDot    = $('status-dot');
+    const totpSetupBtn = $('btn-totp-setup');
+    const totpModal    = $('totp-modal');
+    const btnTtsChat   = $('btn-tts-chat');
+    const chatTtsVoice = $('chat-tts-voice');
+    const chatTtsIconOn  = $('chat-tts-icon-on');
+    const chatTtsIconOff = $('chat-tts-icon-off');
+    const btnSelectMsgs  = $('btn-select-msgs');
+    const msgSelectBar   = $('msg-select-bar');
+    const msgSelectCount = $('msg-select-count');
+    const btnMsgDelSel   = $('btn-msg-del-sel');
+    const btnMsgSelCancel = $('btn-msg-sel-cancel');
+
+    // ═════════════════════════════════════════════════════════════
+    //  TTS
+    // ═════════════════════════════════════════════════════════════
+
+    function _updateTtsChatBtn() {
+        if (!btnTtsChat) return;
+        if (chatTtsIconOn)  chatTtsIconOn.style.display  = ttsEnabled ? '' : 'none';
+        if (chatTtsIconOff) chatTtsIconOff.style.display = ttsEnabled ? 'none' : '';
+        const voiceWrap = $('tts-voice-wrap');
+        if (voiceWrap) voiceWrap.style.display = ttsEnabled ? '' : 'none';
+        btnTtsChat.title = window.t(ttsEnabled ? 'chat.tts_on' : 'chat.tts_off');
+    }
+
+    async function _loadChatTtsVoices(savedVoice) {
+        if (!chatTtsVoice) return;
+        try {
+            const resp = await fetch('/api/tts/voices', { headers: { 'Authorization': `Bearer ${token}` } });
+            if (!resp.ok) return;
+            const voices = await resp.json();
+            chatTtsVoice.innerHTML = '<option value="">' + window.t('chat.voice_default') + '</option>';
+            voices.forEach(v => {
+                const opt = document.createElement('option');
+                opt.value = v.name;
+                opt.textContent = v.display || v.name;
+                chatTtsVoice.appendChild(opt);
+            });
+            if (savedVoice) chatTtsVoice.value = savedVoice;
+        } catch (e) { /* ignore */ }
+    }
+
+    async function _saveChatTtsSettings() {
+        // LocalStorage = primaere Persistenz (funktioniert fuer alle User, auch LDAP)
+        // Backend = best-effort (klappt nur fuer lokale Admin-User wegen require_local_auth)
+        try {
+            localStorage.setItem('jarvis_chat_tts_enabled', ttsEnabled ? '1' : '0');
+            localStorage.setItem('jarvis_chat_tts_voice', chatTtsVoice?.value || '');
+        } catch (e) { /* ignore */ }
+        try {
+            await fetch('/api/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ tts_enabled: ttsEnabled, tts_voice: chatTtsVoice?.value || '' })
+            });
+        } catch (e) { /* ignore */ }
+    }
+
+    function stopSpeak() {
+        if (_ttsAudio) { _ttsAudio.pause(); _ttsAudio.src = ''; _ttsAudio = null; }
+    }
+
+    async function speak(text) {
+        if (!ttsEnabled || !text) return;
+        const clean = text.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').trim();
+        if (!clean) return;
+        stopSpeak();
+        const voice = chatTtsVoice?.value || '';
+        try {
+            const resp = await fetch('/api/tts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ text: clean, voice })
+            });
+            if (!resp.ok) return;
+            const blob = await resp.blob();
+            const url = URL.createObjectURL(blob);
+            _ttsAudio = new Audio(url);
+            _ttsAudio.onended = () => { URL.revokeObjectURL(url); _ttsAudio = null; };
+            _ttsAudio.play().catch(() => {});
+        } catch (e) { console.warn('[TTS] Fehler:', e); }
+    }
+
+    if (btnTtsChat) {
+        btnTtsChat.addEventListener('click', () => {
+            ttsEnabled = !ttsEnabled;
+            _updateTtsChatBtn();
+            if (!ttsEnabled) stopSpeak();
+            _saveChatTtsSettings();
+        });
+    }
+    if (chatTtsVoice) {
+        chatTtsVoice.addEventListener('change', () => _saveChatTtsSettings());
+    }
+
+    const btnTtsPreviewChat = $('btn-tts-preview-chat');
+    if (btnTtsPreviewChat && chatTtsVoice) {
+        btnTtsPreviewChat.addEventListener('click', async () => {
+            const voice = chatTtsVoice.value;
+            let previewText = window._lang === 'en'
+                ? 'Hello, I am Jarvis, your autonomous AI assistant.'
+                : 'Hallo, ich bin Jarvis, dein autonomer KI-Assistent.';
+            // Branding: separater Assistenten-Name ersetzt "Jarvis" in der Vorschau
+            if (window.brandAssistantName) previewText = previewText.replace(/Jarvis/g, window.brandAssistantName);
+            btnTtsPreviewChat.disabled = true;
+            btnTtsPreviewChat.innerHTML = '⏳';
+            try {
+                const resp = await fetch('/api/tts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ text: previewText, voice: voice || '' })
+                });
+                if (!resp.ok) throw new Error('TTS error');
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const audio = new Audio(url);
+                btnTtsPreviewChat.innerHTML = '🔊';
+                audio.onended = () => { URL.revokeObjectURL(url); btnTtsPreviewChat.innerHTML = '▶'; btnTtsPreviewChat.disabled = false; };
+                audio.onerror  = () => { URL.revokeObjectURL(url); btnTtsPreviewChat.innerHTML = '▶'; btnTtsPreviewChat.disabled = false; };
+                await audio.play();
+            } catch (e) {
+                btnTtsPreviewChat.innerHTML = '▶';
+                btnTtsPreviewChat.disabled = false;
+            }
+        });
+    }
+
+    // ═════════════════════════════════════════════════════════════
+    //  LOGIN
+    // ═════════════════════════════════════════════════════════════
+
+    // ─── Eye-Button (SVG Auge / durchgestrichenes Auge) ───────
+    const eyeSvgOpen = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
+    const eyeSvgClosed = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+        <line x1="1" y1="1" x2="23" y2="23"/></svg>`;
+
+    eyeBtn.addEventListener('click', () => {
+        const show = loginPass.type === 'password';
+        loginPass.type = show ? 'text' : 'password';
+        eyeBtn.innerHTML = show ? eyeSvgClosed : eyeSvgOpen;
+    });
+
+    loginForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        loginError.textContent = '';
+        loginBtn.disabled = true;
+        loginBtn.textContent = window.t('chat.connecting');
+
+        try {
+            const payload = {
+                username: loginUser.value.trim(),
+                password: loginPass.value,
+            };
+            // TOTP-Code mitschicken falls Feld sichtbar
+            if (!totpRow.classList.contains('hidden') && loginTotp.value.trim()) {
+                payload.totp_code = loginTotp.value.trim();
+            }
+
+            const resp = await fetch('/api/login', {
+                method: 'POST',
+                headers: window.JarvisSitzung.anmeldeKopf({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify(payload),
+            });
+            const data = await resp.json();
+
+            if (data.success && data.token && data.account_blocked) {
+                // Sicherheitsschicht: Konto gesperrt → nur Hinweis + Protokoll
+                token = data.token;
+                localStorage.setItem('jarvis_chat_token', token);
+                if (window.SecurityIncidents) window.SecurityIncidents.showBlockedScreen(data.block_reason, data.block_incidents);
+            } else if (data.success && data.token && data.must_change_password) {
+                // Lokaler Erst-Login: Kennwortaenderung ist nur im Hauptfenster moeglich.
+                loginError.textContent = window.t('chat.change_pw_main_first');
+            } else if (data.success && data.token) {
+                token = data.token;
+                localStorage.setItem('jarvis_chat_token', token);
+                _currentUser = data.username || loginUser.value.trim();
+                localStorage.setItem('jarvis_chat_user', _currentUser);
+                _isAdmin = !!data.is_admin;
+                totpRow.classList.add('hidden');
+                loginTotp.value = '';
+                showChat();
+            } else if (data.requires_totp) {
+                // Passwort korrekt, 2FA-Code nötig
+                totpRow.classList.remove('hidden');
+                loginTotp.focus();
+                if (data.error && data.error !== '2FA-Code erforderlich') {
+                    loginError.textContent = data.error;
+                }
+            } else {
+                loginError.textContent = data.error || window.t('chat.login_failed');
+            }
+        } catch (err) {
+            loginError.textContent = window.t('chat.connection_error');
+        } finally {
+            loginBtn.disabled = false;
+            loginBtn.textContent = window.t('chat.submit');
+        }
+    });
+
+    // ── Status-Dot = Erreichbarkeit des AKTIVEN LLM-Profils (wie Hauptseite) ──
+    //    erreichbar -> gruen (.connected), sonst rot (.disconnected). Kein Doppelklick.
+    let _llmStatusTimer = null;
+    async function _checkLlmStatus() {
+        if (!statusDot) return;
+        try {
+            const res = await fetch('/api/llm/active-status', {
+                headers: { 'Authorization': 'Bearer ' + token }
+            });
+            if (!res.ok) {
+                statusDot.className = 'topbar-dot disconnected';
+                statusDot.title = window.t('chat.llm_status_unavailable');
+                return;
+            }
+            const d = await res.json();
+            const reachable = (d.status === 'ok' || d.status === 'degraded');
+            statusDot.className = 'topbar-dot ' + (reachable ? 'connected' : 'disconnected');
+            const name = d.profile_name ? ' – ' + d.profile_name : '';
+            if (d.status === 'ok')            statusDot.title = window.t('chat.llm_reachable') + name;
+            else if (d.status === 'degraded') statusDot.title = window.t('chat.llm_reachable_no_model') + name;
+            else                              statusDot.title = window.t('chat.llm_unreachable') + name;
+        } catch (e) {
+            statusDot.className = 'topbar-dot disconnected';
+            statusDot.title = window.t('chat.llm_unreachable');
+        }
+    }
+    function _startLlmStatusIndicator() {
+        _checkLlmStatus();
+        if (!_llmStatusTimer) _llmStatusTimer = setInterval(_checkLlmStatus, 30000);
+    }
+
+    function showChat() {
+        window.JarvisSitzung.maskeFreigeben();
+        loginScreen.classList.add('hidden');
+        chatScreen.classList.remove('hidden');
+        ensureKbFilter();
+        // Angemeldeter Benutzer: als Tooltip am Logout-Button ('<user> abmelden')
+        const _logoutBtn = $('btn-logout');
+        if (_logoutBtn && _currentUser) _logoutBtn.title = window.t('chat.logout_user').replace('{u}', _currentUser);
+        // Das Einstellungs-Zahnrad blendet `settings_btn.js` zentral aus
+        // `/api/me` ein (EINE Stelle fuer alle Bereichsseiten).
+        // Update-Pill nur fuer Admins (jarvis/lokaler Admin) einblenden + starten
+        const _updWrap = $('chat-update-wrap');
+        if (_isAdmin && _updWrap) {
+            _updWrap.style.display = '';
+            if (window.JarvisUpdateWidget) window.JarvisUpdateWidget.init();
+        }
+        // Desktop/VNC-Button: nach /portal verschoben (dort fuer alle Admins)
+        // CPU-Auslastung: cpubar.js blendet sie selbst ein, sobald ein Token
+        // vorliegt – die Werte kommen zusaetzlich ueber das WS-Ereignis 'cpu'.
+        _setupDebugToggle();
+        connectWS();
+        _startLlmStatusIndicator();
+        _initSessions();
+        const _csNewBtn = $('cs-new');
+        if (_csNewBtn && !_csNewBtn._wired) { _csNewBtn._wired = true; _csNewBtn.addEventListener('click', _newSession); }
+        // Auswahlmodus der Verlaufsleiste (mehrere Chats zusammen loeschen)
+        const _csSelBtn = $('cs-selmode');
+        if (_csSelBtn && !_csSelBtn._wired) { _csSelBtn._wired = true; _csSelBtn.addEventListener('click', () => _selModus(!_selMode)); }
+        const _csSelDel = $('cs-seldel');
+        if (_csSelDel && !_csSelDel._wired) { _csSelDel._wired = true; _csSelDel.addEventListener('click', _deleteSelected); }
+        // Nur auf 'change' hoeren – im <label> schaltet der Browser das
+        // Kaestchen bereits selbst um.
+        const _csSelAll = $('cs-all');
+        if (_csSelAll && !_csSelAll._wired) { _csSelAll._wired = true; _csSelAll.addEventListener('change', () => _selAlle(_csSelAll.checked)); }
+        const _csWelBtn = $('cs-welcome');
+        if (_csWelBtn && !_csWelBtn._wired) { _csWelBtn._wired = true; _csWelBtn.addEventListener('click', _restoreWelcome); }
+        const _csSetBtn = $('cs-settings');
+        if (_csSetBtn && !_csSetBtn._wired) { _csSetBtn._wired = true; _csSetBtn.addEventListener('click', _openChatSettings); }
+        const _ppSave = $('btn-chat-settings-save');
+        if (_ppSave && !_ppSave._wired) { _ppSave._wired = true; _ppSave.addEventListener('click', _saveChatSettings); }
+        const _ppClose = $('btn-chat-settings-close');
+        if (_ppClose && !_ppClose._wired) { _ppClose._wired = true; _ppClose.addEventListener('click', _closeChatSettings); }
+        const _ppModal = $('chat-settings-modal');
+        if (_ppModal && !_ppModal._wired) { _ppModal._wired = true; _ppModal.addEventListener('click', (e) => { if (e.target === _ppModal) _closeChatSettings(); }); }
+        // Prompt fuer EINEN Chat (Sprechblase an der Zeile in der Verlaufsleiste)
+        const _spSave = $('btn-chat-prompt-save');
+        if (_spSave && !_spSave._wired) { _spSave._wired = true; _spSave.addEventListener('click', _saveSessionPrompt); }
+        const _spClose = $('btn-chat-prompt-close');
+        if (_spClose && !_spClose._wired) { _spClose._wired = true; _spClose.addEventListener('click', _closeSessionPrompt); }
+        const _spModal = $('chat-prompt-modal');
+        if (_spModal && !_spModal._wired) { _spModal._wired = true; _spModal.addEventListener('click', (e) => { if (e.target === _spModal) _closeSessionPrompt(); }); }
+        const _spTa = $('chat-prompt-text');
+        if (_spTa && !_spTa._wired) { _spTa._wired = true; _spTa.addEventListener('input', _spZustand); }
+        const _kbAll = $('chs-kb-all');
+        if (_kbAll && !_kbAll._wired) { _kbAll._wired = true; _kbAll.addEventListener('click', () => _kbDefSetzeAlle(true)); }
+        const _kbNone = $('chs-kb-none');
+        if (_kbNone && !_kbNone._wired) { _kbNone._wired = true; _kbNone.addEventListener('click', () => _kbDefSetzeAlle(false)); }
+        // Die Vorauswahl fuer neue Chats FRUEH laden: `_restoreHistory` wartet
+        // darauf, und sie laeuft parallel zum Abruf der Sitzung – so kostet sie
+        // praktisch keine Zeit und der erste neue Chat hat sie schon.
+        _kbDefLaden();
+        const _csCol = $('cs-collapse'); if (_csCol && !_csCol._wired) { _csCol._wired = true; _csCol.addEventListener('click', () => _setSidebarCollapsed(true)); }
+        const _csExp = $('cs-expand');   if (_csExp && !_csExp._wired) { _csExp._wired = true; _csExp.addEventListener('click', () => _setSidebarCollapsed(false)); }
+        // Zuletzt gewählten Einklapp-Zustand wiederherstellen
+        try { _setSidebarCollapsed(localStorage.getItem('jarvis_chat_sidebar_collapsed') === '1'); } catch (e) {}
+        _initSidebarResize();
+        // Auto-Focus nur auf Geraeten mit Maus/Tastatur: auf Touch-Geraeten oeffnet
+        // focus() die Bildschirmtastatur und Chrome schiebt die Titelleiste aus dem Bild.
+        if (!window.matchMedia('(pointer: coarse)').matches) msgInput.focus();
+        _startContextIndicator();
+        // TTS-Einstellungen laden: LocalStorage hat Vorrang vor Backend
+        const lsEnabled = localStorage.getItem('jarvis_chat_tts_enabled');
+        const lsVoice   = localStorage.getItem('jarvis_chat_tts_voice');
+        if (lsEnabled !== null) {
+            ttsEnabled = lsEnabled === '1';
+            _updateTtsChatBtn();
+            _loadChatTtsVoices(lsVoice || '');
+        } else {
+            // Fallback: Backend-Settings (klappt nur fuer lokale Admins)
+            fetch('/api/settings', { headers: { 'Authorization': `Bearer ${token}` } })
+                .then(r => r.json())
+                .then(d => {
+                    ttsEnabled = d.tts_enabled || false;
+                    _updateTtsChatBtn();
+                    _loadChatTtsVoices(d.tts_voice || '');
+                }).catch(() => { _loadChatTtsVoices(''); });
+        }
+    }
+
+    // ─── Kontext-Indikator ────────────────────────────────────────────
+    let _ctxTimer = null;
+    const _authHdr = (extra) => Object.assign({ 'Authorization': 'Bearer ' + token }, extra || {});
+
+    async function _updateContextIndicator() {
+        // Nur die Kontext-Pille wird ein-/ausgeblendet; der Debug-Umschalter rechts
+        // daneben bleibt immer sichtbar (auch wenn noch kein Kontext existiert).
+        const pill = document.getElementById('ctx-indicator-pill');
+        const text = document.getElementById('ctx-indicator-text');
+        if (!pill) return;
+        // Pille IMMER anzeigen – auch bei leerem Kontext (0 Einträge) und direkt
+        // beim ersten Oeffnen/Verlaufswechsel (nicht erst nach erfolgreichem Fetch).
+        pill.style.display = 'inline-flex';
+        try {
+            const q = _activeSid ? ('?session_id=' + encodeURIComponent(_activeSid)) : '';
+            const r = await fetch('/api/context/stats' + q, { headers: _authHdr() });
+            if (!r.ok) return;
+            const d = await r.json();
+            const n = d.history_entries || 0;
+            text.textContent = window.t('chat.ctx_label').replace('{n}', n).replace('{pct}', d.fills_pct ?? 0);
+            // Welche Sitzung dieser Kontext ist, gehoert sichtbar dazu: die
+            // Verwechslung von "Trenner" und "neue Sitzung" war nur moeglich, weil
+            // man es nirgends ablesen konnte.
+            const _s = _sessions.find(x => x.id === _activeSid);
+            pill.title = window.t('chat.ctx_session_hint')
+                .replace('{title}', (_s && _s.title) || window.t('chat.untitled_session'))
+                .replace('{id}', _activeSid || '–');
+        } catch (e) { /* offline – Pille bleibt mit letztem Stand sichtbar */ }
+    }
+
+    // ─── Debug-Umschalter (rechts von der Kontext-Pille) ─────────────────
+    // AN: Zwischenschritte (Tool/LLM/Fortschritt) dauerhaft als Status-Zeilen.
+    // AUS (Default): nur die transiente Aktivitätszeile.
+    let _chatDebug = false;
+    try { _chatDebug = localStorage.getItem('jarvis_chat_debug') === '1'; } catch (e) {}
+    function _updateDebugBtn() {
+        const b = document.getElementById('ctx-debug-toggle');
+        if (!b) return;
+        b.classList.toggle('active', _chatDebug);
+        b.setAttribute('aria-pressed', _chatDebug ? 'true' : 'false');
+        // Zustand dem Tooltip voranstellen ("Debug ist ein-/ausgeschaltet · …")
+        const state = _chatDebug
+            ? (window.t ? window.t('chat.debug_on') : 'Debug ist eingeschaltet')
+            : (window.t ? window.t('chat.debug_off') : 'Debug ist ausgeschaltet');
+        const base = (window.t ? window.t('chat.debug_toggle') : 'Debug-Ansicht: Zwischenschritte anzeigen');
+        b.title = state + ' · ' + base;
+        b.setAttribute('aria-label', b.title);
+    }
+    function _setupDebugToggle() {
+        const b = document.getElementById('ctx-debug-toggle');
+        if (!b || b._wired) return;
+        b._wired = true;
+        b.addEventListener('click', function () {
+            _chatDebug = !_chatDebug;
+            try { localStorage.setItem('jarvis_chat_debug', _chatDebug ? '1' : '0'); } catch (e) {}
+            _updateDebugBtn();
+        });
+        // Bei Sprachwechsel den zusammengesetzten Titel neu setzen (applyLang wuerde
+        // ihn sonst nicht kennen – wir tragen kein data-i18n-title mehr am Button).
+        if (window.setLang && !window._chatDbgLangWrapped) {
+            window._chatDbgLangWrapped = true;
+            const _orig = window.setLang;
+            window.setLang = function () { const r = _orig.apply(this, arguments); try { _updateDebugBtn(); } catch (e) {} return r; };
+        }
+        _updateDebugBtn();
+    }
+
+    function _startContextIndicator() {
+        _updateContextIndicator();
+        _ctxTimer = setInterval(_updateContextIndicator, 8000);
+    }
+
+    window._clearUserContext = async function () {
+        try {
+            const r = await fetch('/api/context/clear', {
+                method: 'POST', headers: _authHdr({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ session_id: _activeSid || '' })
+            });
+            const d = await r.json();
+            if (d.ok) _updateContextIndicator();   // Pille bleibt sichtbar, zeigt 0-Stand
+        } catch (e) { /* ignore */ }
+    };
+    // Knopf "Kontext zuruecksetzen" – frueher Inline-onclick (BSI H4: CSP ohne
+    // Inline-Handler). Delegiert, der Knopf steht statisch in chat.html.
+    document.addEventListener('click', function (e) {
+        if (e.target && e.target.closest && e.target.closest('#ctx-indicator-clear')) {
+            window._clearUserContext();
+        }
+    });
+
+    function logout() {
+        // Abmeldung beim Server melden, SOLANGE das Token noch gilt – danach
+        // ist sie nicht mehr authentifizierbar. Ohne dieses Signal kann der
+        // Server "abgemeldet" nicht von "still geworden" unterscheiden.
+        if (window.JarvisSession) window.JarvisSession.logout(token);
+        token = '';
+        // Global abmelden (SSO): alle Seiten-Token entfernen
+        localStorage.removeItem('jarvis_chat_token');
+        localStorage.removeItem('jarvis_token');
+        localStorage.removeItem('jarvis_uc_token');
+        if (ws) { ws.close(); ws = null; }
+        chatScreen.classList.add('hidden');
+        window.JarvisSitzung.maskeFreigeben();
+        loginScreen.classList.remove('hidden');
+        loginPass.value = '';
+        loginError.textContent = '';
+    }
+
+    logoutBtn.addEventListener('click', logout);
+
+    // ═════════════════════════════════════════════════════════════
+    //  WEBSOCKET
+    // ═════════════════════════════════════════════════════════════
+
+    function connectWS() {
+        if (ws && ws.readyState <= 1) return;
+
+        const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        ws = new WebSocket(`${proto}//${location.host}/ws`);
+
+        // #status-dot zeigt den LLM-Profil-Status (s. _checkLlmStatus), nicht den WS-Status.
+
+        ws.onopen = () => {
+            reconnectAttempts = 0;
+            // Beim Server registrieren (setzt Benutzer der WS) → Live-Sync-Events empfangen
+            wsSend({ type: 'hello' });
+        };
+
+        ws.onmessage = (evt) => {
+            _lastWsMsgAt = Date.now();
+            try {
+                const msg = JSON.parse(evt.data);
+                handleMessage(msg);
+            } catch { /* ignore non-JSON */ }
+        };
+
+        ws.onclose = () => {
+            // Der Lauf ist fuer dieses Fenster verloren: das Backend sendet
+            // 'finished' an den TOTEN Socket (und _send_status verschluckt den
+            // Fehler), ein Reconnect erzeugt eine NEUE Verbindung, an die
+            // niemand mehr etwas schickt. Ohne Freigabe blieb agentRunning
+            // dauerhaft true – damit war sowohl das Senden (sendMessage) als
+            // auch das Wiederholen (↻) blockiert und nur ein Neuladen half.
+            _releaseRun('conn');
+            scheduleReconnect();
+        };
+
+        ws.onerror = () => {};
+    }
+
+    function scheduleReconnect() {
+        if (reconnectAttempts >= MAX_RECONNECT) return;
+        reconnectAttempts++;
+        const delay = 2000 * Math.min(reconnectAttempts, 5);
+        setTimeout(connectWS, delay);
+    }
+
+    /** Sendet ueber den WebSocket. Rueckgabe: true = abgeschickt, false = keine
+     *  offene Verbindung (die Freigabekarte zeigt dann "nicht gesendet"). */
+    function wsSend(obj) {
+        if (!ws || ws.readyState !== 1) return false;
+        ws.send(JSON.stringify({ ...obj, token }));
+        return true;
+    }
+
+    // ═════════════════════════════════════════════════════════════
+    //  NACHRICHT SENDEN
+    // ═════════════════════════════════════════════════════════════
+
+    // ─── Datei-Anhänge ──────────────────────────────────────────
+    let _pendingAttachments = [];
+
+    // Wissensgruppen-Filter (aufklappbare Checkbox-Liste in der Eingabeleiste)
+    let _kbFilter = null;
+    let _profSel = null;   // KI-Profil-Pulldown (hinter dem Wissensgruppen-Filter)
+    // ── Wissensquellen-Vorauswahl fuer NEUE Chats ────────────────────────────
+    // Gehalten wird die Liste der ABGEWAEHLTEN Gruppen-Ids (wie im Backend und
+    // wie im Filter selbst): eine spaeter angelegte Wissensgruppe ist damit von
+    // selbst dabei, statt still zu fehlen.
+    let _kbDefOff = null;      // Set der abgewaehlten Ids, null = noch nicht geladen
+    let _kbDefPromise = null;  // laufender/erledigter Abruf (einmal je Seitenaufbau)
+
+    // ⚠ Das Promise dient dem WARTEN, nicht der Rueckgabe: ein aufgeloestes
+    // Promise haelt seinen Wert fest, und nach dem Speichern im Dialog zeigt
+    // `_kbDefOff` auf ein NEUES Set. Wer den Promise-Wert liest, arbeitet mit
+    // dem Stand des ersten Abrufs weiter (gemessen: die frisch gespeicherte
+    // Vorauswahl griff erst nach einem Neuladen). Alle Leser nehmen deshalb
+    // nach dem `await` die VARIABLE.
+    function _kbDefLaden() {
+        if (_kbDefPromise) return _kbDefPromise;
+        _kbDefPromise = (async () => {
+            try {
+                const r = await fetch('/api/chat/kb-default', { headers: _authHdr() });
+                const d = await r.json();
+                if (d && d.ok) _kbDefOff = new Set(Array.isArray(d.off) ? d.off : []);
+            } catch (e) { /* aelteres Backend / Netzfehler: dann gilt "alle" */ }
+            // Fail-open: ohne Auskunft bleibt es beim bisherigen Verhalten.
+            if (!_kbDefOff) _kbDefOff = new Set();
+            return _kbDefOff;
+        })();
+        return _kbDefPromise;
+    }
+
+    // Vorauswahl in die Semantik des Filters uebersetzen:
+    // null = alle (kein Filter) · [] = keine · [ids] = nur diese.
+    // Braucht die Eintragsliste, weil "keine abgewaehlt" und "alle abgewaehlt"
+    // nur im Vergleich mit ihr zu unterscheiden sind.
+    async function _kbDefAlsAuswahl() {
+        await _kbDefLaden();
+        const off = _kbDefOff;
+        if (!off || off.size === 0) return null;
+        if (!window.KbGroupFilter || !window.KbGroupFilter.loadEntries) return null;
+        let alle = [];
+        try { alle = await window.KbGroupFilter.loadEntries(); } catch (e) { return null; }
+        if (!alle.length) return null;
+        const an = alle.filter(e => !off.has(e.id)).map(e => e.id);
+        if (an.length >= alle.length) return null;
+        return an;   // auch [] ist gueltig: "kein Wissen" ist eine bewusste Wahl
+    }
+
+    function ensureKbFilter() {
+        if (_kbFilter || !window.KbGroupFilter) return;
+        const slot = document.getElementById('kb-filter-slot');
+        if (!slot) return;
+        _kbFilter = window.KbGroupFilter.mount({ anchor: slot, place: 'append', direction: 'up', key: 'chat' });
+        // Auswahländerung sofort in der aktiven Sitzung merken
+        if (_kbFilter.onChange) _kbFilter.onChange(function () { _persistSession(); });
+        // KI-Profil-Pulldown direkt HINTER den Wissensgruppen; Auswahl pro Sitzung merken
+        if (window.ProfileSwitcher && !_profSel) {
+            _profSel = window.ProfileSwitcher.mount({
+                anchor: slot, place: 'append',
+                headers: function () { return _authHdr(); },
+                onChange: function () { _persistSession(); if (typeof _checkLlmStatus === 'function') _checkLlmStatus(); }
+            });
+        }
+    }
+
+    // Anhaenge: SPERRLISTE statt Zulassungsliste (Vorgabe 2026-08-12).
+    // Vorher standen hier ~20 erlaubte Endungen; alles andere wurde abgewiesen,
+    // und der Server tat dasselbe noch einmal - ein PDF wurde ausserdem nie als
+    // Datei abgelegt. Jetzt gilt: alles ausser Ausfuehrbarem. Die Liste MUSS mit
+    // _ANHANG_EXEC_EXT in backend/main.py uebereinstimmen; der Server prueft
+    // zusaetzlich die magischen Bytes, hier geht es nur um eine sofortige,
+    // verstaendliche Rueckmeldung ohne Upload.
+    const _EXEC_EXT = new Set([
+        'exe','com','msi','msp','dll','sys','drv','efi','ko','scr','cpl',
+        'bat','cmd','ps1','psm1','psd1','vbs','vbe','wsf','wsh','hta',
+        'js','jse','mjs','cjs','jar','class','apk','dex','reg','lnk','url',
+        'sh','bash','zsh','ksh','csh','fish','run','bin','elf','out',
+        'so','dylib','a','o','py','pyc','pyo','pyz','pyw','pl','pm',
+        'rb','php','phar','lua','tcl','awk','asp','aspx','jsp','cgi',
+        'app','deb','rpm','pkg','dmg','appimage','gadget','workflow',
+    ]);
+    // 50 MB je Datei UND je Nachricht. Die Datei geht base64-kodiert ueber den
+    // WebSocket (Faktor 4/3), uvicorn laesst 100 MB je Nachricht zu - deshalb ist
+    // die SUMME ebenfalls gedeckelt: sonst reisst die Verbindung bei mehreren
+    // grossen Dateien ohne jede Meldung ab.
+    const _MAX_FILE_BYTES = 50 * 1024 * 1024;
+
+    let _toastTimer = null;
+    function showToast(msg) {
+        if (!attachToast) return;
+        attachToast.textContent = msg;
+        attachToast.classList.add('show');
+        clearTimeout(_toastTimer);
+        _toastTimer = setTimeout(() => attachToast.classList.remove('show'), 4000);
+    }
+
+    function renderPreviews() {
+        if (!attachBar) return;
+        attachBar.innerHTML = '';
+        if (_pendingAttachments.length === 0) {
+            attachBar.style.display = 'none';
+            if (btnAttach) btnAttach.classList.remove('has-files');
+            sendBtn.disabled = !msgInput.value.trim();
+            return;
+        }
+        attachBar.style.display = 'flex';
+        if (btnAttach) btnAttach.classList.add('has-files');
+        sendBtn.disabled = false;
+        _pendingAttachments.forEach((att, idx) => {
+            const chip = document.createElement('div');
+            chip.className = 'attach-chip';
+            if (att.type === 'image') {
+                const img = document.createElement('img');
+                img.src = `data:${att.mime_type};base64,${att.data}`;
+                chip.appendChild(img);
+            } else {
+                const ico = document.createElement('span');
+                ico.className = 'attach-chip-icon';
+                const _ext = (att.name.split('.').pop() || '').toLowerCase();
+                let icon = '📎';
+                if (att.type === 'audio') icon = '🎵';
+                else if (att.type === 'pdf') icon = '📄';
+                else if (att.type === 'video') icon = '🎬';
+                else if (['xlsx','xls','ods','csv','tsv'].includes(_ext)) icon = '📊';
+                else if (['docx','doc','odt','rtf'].includes(_ext)) icon = '📝';
+                else if (['pptx','ppt','odp'].includes(_ext)) icon = '📑';
+                else if (['txt','md','rst','json'].includes(_ext)) icon = '📄';
+                ico.textContent = icon;
+                chip.appendChild(ico);
+            }
+            const nm = document.createElement('span');
+            nm.className = 'attach-chip-name';
+            nm.textContent = att.name.length > 16 ? att.name.slice(0,14)+'…' : att.name;
+            nm.title = att.name;
+            chip.appendChild(nm);
+            const rm = document.createElement('button');
+            rm.className = 'attach-chip-remove';
+            // × = aus der Auswahl nehmen. Der Anhang ist noch nicht gesendet,
+            // es wird nichts geloescht (Symbol-Regel: siehe js/icons.js).
+            rm.title = (window.t ? window.t('common.unselect') : 'Aus Auswahl nehmen');
+            rm.textContent = '×';
+            rm.type = 'button';
+            rm.addEventListener('click', () => { _pendingAttachments.splice(idx,1); renderPreviews(); });
+            chip.appendChild(rm);
+            attachBar.appendChild(chip);
+        });
+    }
+
+    /* ⚠ DER MIME-TYP DES BROWSERS IST NICHT VERLAESSLICH – DIE BYTES SIND ES.
+     *
+     * `file.type` kommt unter Windows aus der Registry (Content Type der
+     * Endung). Hat ein Bildbetrachter die .jpg-Zuordnung uebernommen und dort
+     * nichts oder etwas Fremdes hinterlassen, meldet der Browser "" oder
+     * application/octet-stream – und JEDE mime-basierte Stelle faellt durch:
+     * die gesendete Nachricht zeichnet einen Datei-Chip statt des Bildes
+     * ("JPG wird als Text angezeigt", gemeldet 2026-09-16), und der Server
+     * behandelt den Anhang als Dokument, sodass das MODELL das Bild gar nicht
+     * sieht. Ein GIF ist davon in der Regel nicht betroffen – daher der
+     * Unterschied, der wie ein Format-Problem aussah und keines war.
+     *
+     * DIE TABELLE DECKT GENAU DIE FORMATE AB, DIE BEIDE SEITEN KOENNEN: der
+     * Browser zeigt sie in einem <img>, und `_ALLOWED_IMG_MIME` in main.py
+     * nimmt sie als Bild an. TIFF steht bewusst NICHT hier – ein erkanntes
+     * image/tiff wuerde in der Blase als Bild gezeichnet, das kein Browser
+     * darstellt: aus einem Datei-Chip wuerde ein kaputtes Bild. */
+    const _BILD_MAGIE = [
+        [[0xFF, 0xD8, 0xFF], 'image/jpeg'],
+        [[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], 'image/png'],
+        [[0x47, 0x49, 0x46, 0x38], 'image/gif'],          // GIF87a / GIF89a
+        [[0x42, 0x4D], 'image/bmp'],
+    ];
+    function _bildMimeAusBytes(b64) {
+        let kopf;
+        // Fail-open: ist die Zeichenkette unbrauchbar, bleibt es beim
+        // gemeldeten Typ – eine geratene Aussage waere schlechter als keine.
+        try {
+            const roh = atob(String(b64 || '').slice(0, 32));
+            kopf = Array.from(roh, c => c.charCodeAt(0));
+        } catch (e) { return ''; }
+        for (const [sig, mime] of _BILD_MAGIE) {
+            if (sig.every((b, i) => kopf[i] === b)) return mime;
+        }
+        // WEBP: "RIFF" .... "WEBP" – die Kennung steht erst ab Byte 8.
+        if (kopf[0] === 0x52 && kopf[1] === 0x49 && kopf[2] === 0x46 && kopf[3] === 0x46 &&
+            kopf[8] === 0x57 && kopf[9] === 0x45 && kopf[10] === 0x42 && kopf[11] === 0x50) return 'image/webp';
+        return '';
+    }
+
+    /* ⚠ EXCEL LEGT BEIM KOPIEREN AUCH EIN BILD IN DIE ZWISCHENABLAGE.
+     *
+     * Eine kopierte Zellauswahl traegt drei Fassungen gleichzeitig: text/html
+     * (eine <table>), text/plain (Tabulator-getrennt) und ein image/png der
+     * Auswahl. Der Einfuege-Zuhoerer nahm bis hier stets die Datei – aus einer
+     * Tabelle wurde ein Bildschirmfoto, das das Modell erst per Bilderkennung
+     * zuruecklesen muss (gemeldet 2026-09-28). Word, LibreOffice und
+     * PowerPoint tun dasselbe mit markiertem Text.
+     *
+     * ERKANNT WIRD DIE QUELLE, NICHT DIE FORM: ein Bild aus einer Webseite
+     * traegt ebenfalls text/html daneben. Deshalb entscheidet die Kennung, die
+     * Office/LibreOffice in ihr HTML schreiben – eine Webseite hat sie nicht,
+     * und dort bleibt das Bild der Anhang. */
+    const _OFFICE_HTML = /urn:schemas-microsoft-com:office|name=["']?ProgId|content=["']?LibreOffice|google-sheets-html-origin/i;
+    const _TABELLE_INLINE_MAX = 6000;   // Zeichen – darueber als Datei-Anhang
+
+    function _mdZelle(s) {
+        // Markdown-Tabellen kennen keinen Zeilenumbruch in der Zelle, und ein
+        // '|' wuerde die Spalte teilen.
+        return String(s || '').replace(/ /g, ' ').replace(/\s+/g, ' ').trim().replace(/\|/g, '\\|');
+    }
+
+    /* Raster aus der HTML-Fassung. colspan/rowspan werden als leere Zellen
+     * aufgefuellt – sonst rutschen die Werte darunter eine Spalte nach links. */
+    function _rasterAusHtml(html) {
+        let doc;
+        try { doc = new DOMParser().parseFromString(html, 'text/html'); } catch (e) { return []; }
+        const tab = doc.querySelector('table');
+        if (!tab) return [];
+        const raster = [], belegt = [];
+        Array.from(tab.rows || []).forEach((tr, r) => {
+            const zeile = raster[r] = raster[r] || [];
+            let c = 0;
+            for (const td of Array.from(tr.cells || [])) {
+                while (belegt[r] && belegt[r][c]) c++;
+                const breit = Math.max(1, parseInt(td.getAttribute('colspan'), 10) || 1);
+                const hoch = Math.max(1, parseInt(td.getAttribute('rowspan'), 10) || 1);
+                for (let i = 0; i < hoch; i++) {
+                    for (let j = 0; j < breit; j++) {
+                        const rr = r + i;
+                        (belegt[rr] = belegt[rr] || [])[c + j] = true;
+                        const z = raster[rr] = raster[rr] || [];
+                        z[c + j] = (i === 0 && j === 0) ? _mdZelle(td.textContent) : '';
+                    }
+                }
+                c += breit;
+            }
+            for (let j = 0; j < zeile.length; j++) if (zeile[j] === undefined) zeile[j] = '';
+        });
+        return raster;
+    }
+
+    /* Raster aus der Tabulator-Fassung (Rueckfall, wenn das HTML keine
+     * Tabelle liefert). Excel setzt Zellen mit Umbruch oder Anfuehrungszeichen
+     * in "…" und verdoppelt innere Anfuehrungszeichen. */
+    function _rasterAusTsv(text) {
+        const raster = [];
+        let zeile = [], zelle = '', inQ = false;
+        const s = String(text || '').replace(/\r\n?/g, '\n');
+        for (let i = 0; i < s.length; i++) {
+            const ch = s[i];
+            if (inQ) {
+                if (ch === '"' && s[i + 1] === '"') { zelle += '"'; i++; }
+                else if (ch === '"') inQ = false;
+                else zelle += ch;
+            } else if (ch === '"' && zelle === '') inQ = true;
+            else if (ch === '\t') { zeile.push(_mdZelle(zelle)); zelle = ''; }
+            else if (ch === '\n') { zeile.push(_mdZelle(zelle)); raster.push(zeile); zeile = []; zelle = ''; }
+            else zelle += ch;
+        }
+        if (zelle !== '' || zeile.length) { zeile.push(_mdZelle(zelle)); raster.push(zeile); }
+        return raster;
+    }
+
+    /* Raster -> Markdown. Leere Zeilen und leere Randspalten fallen weg (eine
+     * Excel-Auswahl ist oft breiter als die Daten). Eine einzelne Zelle ist
+     * keine Tabelle: dann kommt nur ihr Text zurueck. */
+    function _rasterZuMarkdown(raster) {
+        let z = raster.filter(r => r.some(c => c !== ''));
+        if (!z.length) return '';
+        const breite = Math.max(...z.map(r => r.length));
+        z = z.map(r => r.concat(Array(breite - r.length).fill('')));
+        const voll = j => z.some(r => r[j] !== '');
+        let von = 0, bis = breite - 1;
+        while (von <= bis && !voll(von)) von++;
+        while (bis >= von && !voll(bis)) bis--;
+        z = z.map(r => r.slice(von, bis + 1));
+        if (z.length === 1 && z[0].length === 1) return z[0][0];
+        const zeile = r => '| ' + r.join(' | ') + ' |';
+        return [zeile(z[0]), zeile(z[0].map(() => '---')), ...z.slice(1).map(zeile)].join('\n');
+    }
+
+    /* Entscheidung fuer eine Zwischenablage MIT Datei:
+     *   {art:'tabelle', text}  – Office-Tabelle, als Markdown einfuegen
+     *   {art:'text'}           – Office-Text ohne Bild, der Browser fuegt ihn ein
+     *   null                   – kein Office: wie bisher die Datei anhaengen */
+    function _officeEinfuegen(dt) {
+        let html = '', plain = '';
+        try { html = dt.getData('text/html') || ''; plain = dt.getData('text/plain') || ''; }
+        catch (e) { return null; }
+        if (!_OFFICE_HTML.test(html)) return null;
+        let raster = /<table[\s>]/i.test(html) ? _rasterAusHtml(html) : [];
+        if (!raster.length && /\t/.test(plain)) raster = _rasterAusTsv(plain);
+        const md = _rasterZuMarkdown(raster);
+        if (md) return { art: 'tabelle', text: md };
+        // Ein eingebettetes Bild ist ein Bild-Wunsch (kopierte Grafik aus
+        // Word/PowerPoint) – dann bleibt es beim Anhang.
+        if (plain.trim() && !/<img[\s>]|v:imagedata/i.test(html)) return { art: 'text' };
+        return null;
+    }
+
+    async function addFiles(files) {
+        const unsupported = [];
+        for (const file of Array.from(files)) {
+            const mime = (file.type || '').toLowerCase();
+            const ext = file.name.includes('.') ? file.name.split('.').pop().toLowerCase() : '';
+            if (_EXEC_EXT.has(ext)) {
+                unsupported.push(ext ? '.'+ext.toUpperCase() : (mime||'?')); continue;
+            }
+            if (file.size > _MAX_FILE_BYTES) {
+                showToast(window.t('chat.file_too_big')
+                    .replace('{f}', file.name)
+                    .replace('{n}', Math.round(_MAX_FILE_BYTES / (1024*1024))));
+                continue;
+            }
+            const _summe = _pendingAttachments.reduce((a, x) => a + (x._bytes || 0), 0);
+            if (_summe + file.size > _MAX_FILE_BYTES) {
+                showToast(window.t('chat.attach_total_too_big')
+                    .replace('{n}', Math.round(_MAX_FILE_BYTES / (1024*1024))));
+                continue;
+            }
+            if (_pendingAttachments.length >= 5) { showToast(window.t('chat.max_files')); break; }
+            let b64;
+            try {
+                b64 = await new Promise((res,rej) => {
+                    const r = new FileReader();
+                    r.onload = e => res(e.target.result.split(',')[1]);
+                    r.onerror = rej;
+                    r.readAsDataURL(file);
+                });
+            } catch(e) { showToast(window.t('chat.file_read_error').replace('{f}', file.name)); continue; }
+            // Die Bytes stechen den gemeldeten Typ – siehe _bildMimeAusBytes.
+            // Sie sprechen nur, wenn sie ein Bild BEWEISEN; ein PDF, ein Video
+            // oder eine Tabelle behaelt seinen gemeldeten Typ unangetastet.
+            const mimeEff = _bildMimeAusBytes(b64) || mime;
+            let type = 'file';
+            if (mimeEff.startsWith('image/') || ['jpg','jpeg','png','gif','bmp','tif','tiff','webp'].includes(ext)) type = 'image';
+            else if (mimeEff.startsWith('audio/') || ['mp3','m4a','wav','ogg','aac','flac'].includes(ext)) type = 'audio';
+            else if (mimeEff.startsWith('video/') || ['mp4','mov','mkv','avi','webm','mpeg'].includes(ext)) type = 'video';
+            else if (mimeEff === 'application/pdf' || ext === 'pdf') type = 'pdf';
+            else type = 'document';
+            _pendingAttachments.push({ name: file.name, mime_type: mimeEff, data: b64, type, _bytes: file.size });
+        }
+        if (unsupported.length > 0) {
+            const fmts = [...new Set(unsupported)].join(', ');
+            showToast(window.t('chat.format_unsupported').replace('{f}', fmts));
+        }
+        renderPreviews();
+    }
+
+    if (btnAttach) btnAttach.addEventListener('click', () => attachInput && attachInput.click());
+    if (attachInput) {
+        attachInput.addEventListener('change', async () => { await addFiles(attachInput.files); attachInput.value = ''; });
+    }
+
+    /* Einfuegen aus der Zwischenablage (Strg+V im Eingabefeld).
+     *
+     * Wunsch des Betreibers 2026-09-16: ein im Bildbetrachter kopiertes Bild
+     * soll SICHTBAR im Chat landen – nicht als Link und nicht als Dateiname.
+     * Genau das tut es: die Zwischenablage liefert ein File, und `addFiles()`
+     * ist der vorhandene, einzige Weg zum Anhang. Ein eigener Pfad daneben
+     * waere eine zweite Fassung derselben Regeln (Groessen-Deckel,
+     * Sperrliste, Bild-Erkennung aus den Bytes) und liefe auseinander.
+     *
+     * DIE ZWISCHENABLAGE TRAEGT MEHRERE FASSUNGEN GLEICHZEITIG: wer aus einer
+     * Webseite kopiert, hat neben der Bilddatei auch text/html und text/plain
+     * darin. Genommen wird ausschliesslich `kind === 'file'`; gibt es keine,
+     * bleibt der Vorgang UNANGETASTET – sonst waere das Einfuegen von Text in
+     * das Eingabefeld kaputt. Deshalb steht `preventDefault()` erst hinter
+     * dieser Pruefung. */
+    if (msgInput) {
+        msgInput.addEventListener('paste', async (e) => {
+            const dt = e.clipboardData || window.clipboardData;
+            if (!dt) return;
+            const dateien = [];
+            for (const eintrag of Array.from(dt.items || [])) {
+                if (eintrag.kind !== 'file') continue;
+                const f = eintrag.getAsFile();
+                if (!f) continue;
+                // Ein Bild aus der Zwischenablage hat oft KEINEN Namen. Ohne
+                // einen waere der Anhang-Chip leer beschriftet und die Datei
+                // auf dem Server "datei" – der Zeitstempel macht mehrere
+                // Einfuegungen zudem unterscheidbar. Bewusst ein technischer,
+                // sprachneutraler Name: ein Dateiname ist kein Oberflaechentext.
+                if (f.name) { dateien.push(f); continue; }
+                const endung = (f.type || '').split('/')[1] || 'png';
+                const z = new Date();
+                const zz = n => String(n).padStart(2, '0');
+                const name = `clipboard-${z.getFullYear()}${zz(z.getMonth()+1)}${zz(z.getDate())}`
+                           + `-${zz(z.getHours())}${zz(z.getMinutes())}${zz(z.getSeconds())}.${endung}`;
+                try { dateien.push(new File([f], name, { type: f.type })); }
+                catch (err) { dateien.push(f); }   // File-Konstruktor fehlt: lieber namenlos als gar nicht
+            }
+            if (dateien.length === 0) return;   // reiner Text: der Browser macht es selbst
+            // Aus Excel/Word kopiert: das Bild daneben ist nur eine Ansicht
+            // der Auswahl – gemeint ist der Inhalt (siehe _officeEinfuegen).
+            const office = _officeEinfuegen(dt);
+            if (office && office.art === 'text') return;   // Browser fuegt text/plain ein
+            e.preventDefault();
+            if (office && office.art === 'tabelle') {
+                if (office.text.length <= _TABELLE_INLINE_MAX) {
+                    const a = msgInput.selectionStart ?? msgInput.value.length;
+                    const b = msgInput.selectionEnd ?? a;
+                    // Eine Tabelle braucht eine eigene Zeile, sonst haengt ihre
+                    // erste Zeile am getippten Satz.
+                    const vor = a > 0 && !/\n$/.test(msgInput.value.slice(0, a)) ? '\n' : '';
+                    msgInput.setRangeText(vor + office.text + '\n', a, b, 'end');
+                    msgInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    return;
+                }
+                // Grosse Tabelle: als Textdatei anhaengen – der Server bettet
+                // .md bis 200 KB als Text ein, und das Eingabefeld bleibt bedienbar.
+                const tabName = dateien[0].name.replace(/\.[^.]+$/, '') + '.md';
+                try { dateien.splice(0, dateien.length, new File([office.text], tabName, { type: 'text/markdown' })); }
+                catch (err) { /* File-Konstruktor fehlt: dann eben das Bild */ }
+            }
+            await addFiles(dateien);
+        });
+        /* Ablegen DIREKT auf dem Eingabefeld. Ohne diesen Zuhoerer greift die
+         * Vorgabe des Browsers: Chrome navigiert zur abgelegten Datei und
+         * nimmt den bereits getippten Text mit. Das Ziel ist dasselbe wie beim
+         * Nachrichtenbereich – nur der offensichtlichere Ort. */
+        msgInput.addEventListener('dragover', e => {
+            if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) e.preventDefault();
+        });
+        msgInput.addEventListener('drop', async e => {
+            if (!e.dataTransfer || e.dataTransfer.files.length === 0) return;
+            e.preventDefault();
+            await addFiles(e.dataTransfer.files);
+        });
+    }
+
+    // Drag & Drop auf Nachrichten-Bereich
+    if (messagesEl) {
+        messagesEl.addEventListener('dragover', e => { e.preventDefault(); messagesEl.classList.add('drag-over'); });
+        messagesEl.addEventListener('dragleave', e => { if (!messagesEl.contains(e.relatedTarget)) messagesEl.classList.remove('drag-over'); });
+        messagesEl.addEventListener('drop', async e => {
+            e.preventDefault(); messagesEl.classList.remove('drag-over');
+            if (e.dataTransfer && e.dataTransfer.files.length > 0) await addFiles(e.dataTransfer.files);
+        });
+    }
+
+    function sendMessage(_zweiterVersuch) {
+        // Ohne aktive Sitzung erst eine beschaffen und dann erneut senden – sonst
+        // ginge dieser Auftrag am Sitzungskontext vorbei (siehe _ensureSession).
+        // GENAU EIN Nachversuch: klappt das Anlegen nicht (Server weg), wird die
+        // Nachricht trotzdem gesendet. Eine Endlosschleife aus Sende-Versuchen
+        // waere schlimmer als ein Auftrag ohne Sitzungsbezug.
+        if (!_activeSid && !_zweiterVersuch) {
+            const _t = msgInput.value;
+            _ensureSession().then(function () {
+                if (msgInput.value === _t) sendMessage(true);
+            });
+            return;
+        }
+        const text = msgInput.value.trim();
+        if (!text && _pendingAttachments.length === 0) return;
+        // Nur EINE laufende Anfrage pro Fenster: das Frontend fuehrt Streaming-,
+        // Verlauf- und Statistik-State fuer genau einen Lauf. Ein zweiter Start
+        // (z.B. nach Verlaufs-Wechsel) wuerde beide Antworten vermischen.
+        if (agentRunning) {
+            alert(window.t ? window.t('bubble.block_running') : 'Bitte stoppe zuerst die laufende Aufgabe.');
+            return;
+        }
+        const finalText = text || window.t('chat.analyze_attachments');
+
+        _lastUserMsg = finalText;
+        _lastBotResp = '';
+        _lastBotCol  = null;
+        _lastStats   = '';
+
+        const userBubble = addBubble(finalText, 'user', null, _activeAgentId);
+        if (_pendingAttachments.length > 0) {
+            // Snapshot der Anhänge für Rendering (vor dem Leeren von _pendingAttachments)
+            const attSnap = _pendingAttachments.map(a => ({ name: a.name, mime_type: a.mime_type, data: a.data }));
+            _renderAttachments(userBubble, { attachments: attSnap });
+        }
+
+        // Benutzernachricht im Verlauf speichern (nur Text + Hinweis, kein base64)
+        const _attIcon = m => { m = (m || '').toLowerCase(); return m.startsWith('image/') ? '🖼️' : m === 'application/pdf' ? '📄' : m.startsWith('audio/') ? '🎵' : m.startsWith('video/') ? '🎬' : '📎'; };
+        const attNote = _pendingAttachments.length > 0
+            ? ' [' + _pendingAttachments.map(a => `${_attIcon(a.mime_type)} ${a.name || window.t('chat.file')}`).join(', ') + ']'
+            : '';
+        const _userEntry = { role: 'user', text: finalText + attNote, time: timeStr(), date: _currentDateStr(), ts: Date.now() };
+        if (attNote) { _userEntry.att_note = attNote; _userEntry.att_count = _pendingAttachments.length; }
+        _chatHistory.push(_userEntry);
+        _saveHistory();
+        _syncAppend(_userEntry);
+        // bestaetigung: dieser Client zeigt Bestaetigungskarten (BSI H9) –
+        // ohne die Angabe weist das Backend Aktionen mit Aussenwirkung ab.
+        const msg = { type: 'task', text: finalText, lang: window._lang || 'de', bestaetigung: true };
+        if (attNote) {
+            // Das Backend meldet die Ablage der Bilder unter dieser Kennung zurueck,
+            // damit sie nach dem Neuladen wieder angezeigt werden koennen.
+            msg.att_ref = 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+            _attRefs.set(msg.att_ref, _userEntry);
+        }
+        if (_activeSid) msg.session_id = _activeSid;
+        _runSid = _activeSid;   // Ursprungs-Sitzung dieser Anfrage merken (Antwort-Routing)
+        // Multi-Agent: an aktiven Sub-Agenten richten (sonst Hauptagent)
+        if (_activeAgentId && _activeAgentId !== '_main') msg.agent_id = _activeAgentId;
+        if (_pendingAttachments.length > 0) {
+            msg.attachments = _pendingAttachments.map(a => ({ name: a.name, mime_type: a.mime_type, data: a.data }));
+        }
+        // Wissensgruppen-Filter: null = alle (Feld weglassen), [] = keine, [ids] = nur diese
+        if (_kbFilter) {
+            const _sel = _kbFilter.getSelection();
+            if (_sel !== null) msg.kb_groups = _sel;
+        }
+        wsSend(msg);
+
+        msgInput.value = '';
+        msgInput.style.height = '';
+        _pendingAttachments = [];
+        renderPreviews();
+        sendBtn.disabled = true;
+    }
+
+    sendBtn.addEventListener('click', sendMessage);
+
+    msgInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
+        }
+    });
+
+    msgInput.addEventListener('input', () => {
+        sendBtn.disabled = !msgInput.value.trim() && _pendingAttachments.length === 0;
+        // Auto-resize
+        msgInput.style.height = '';
+        msgInput.style.height = Math.min(msgInput.scrollHeight, 120) + 'px';
+    });
+
+    // Stop-Button
+    stopBtn.addEventListener('click', () => {
+        wsSend({ type: 'control', action: 'stop' });
+    });
+
+    // ═════════════════════════════════════════════════════════════
+    //  NACHRICHTEN VERARBEITEN
+    // ═════════════════════════════════════════════════════════════
+
+    // att_ref -> Verlaufs-Eintrag der Frage, deren Bilder das Backend gleich ablegt
+    const _attRefs = new Map();
+    function _onAttachmentsStored(msg) {
+        const entry = _attRefs.get(msg.att_ref);
+        _attRefs.delete(msg.att_ref);
+        // Inzwischen andere Sitzung geoeffnet? Dann NICHT speichern – _persistSession
+        // schriebe den Eintrag sonst in das Transkript der falschen Sitzung.
+        if (!entry || !_chatHistory.includes(entry) || !Array.isArray(msg.items)) return;
+        const items = msg.items
+            .filter(it => it && typeof it.doc === 'string' && it.doc)
+            .map(it => ({ name: String(it.name || ''), mime_type: String(it.mime_type || ''), doc: it.doc }));
+        if (!items.length) return;
+        entry.attachments = items;
+        _saveHistory();
+        _persistSession();
+    }
+
+    function handleMessage(msg) {
+        switch (msg.type) {
+            case 'attachments_stored':
+                _onAttachmentsStored(msg);
+                break;
+            case 'status':
+                handleStatus(msg);
+                break;
+
+            case 'agent_event':
+                handleAgentEvent(msg);
+                break;
+
+            case 'shared_history_append':
+                _applyRemoteAppend(msg.message, msg.origin);
+                break;
+
+            case 'llm_stats':
+                appendStats(msg);
+                break;
+
+            // BSI H9: Aktion mit Aussen-/Loeschwirkung wartet auf einen Klick
+            case 'bestaetigung_anfrage':
+                if (window.JarvisBestaetigung) {
+                    removeWelcome();
+                    window.JarvisBestaetigung.anfrage(msg, {
+                        container: messagesEl, senden: wsSend, scroll: scrollToBottom });
+                } else {
+                    // Modul nicht geladen: ablehnen statt den Lauf bis zur Frist
+                    // haengen zu lassen.
+                    wsSend({ type: 'bestaetigung_antwort', id: msg.id, erlaubt: false });
+                }
+                break;
+
+            case 'bestaetigung_erledigt':
+                if (window.JarvisBestaetigung) window.JarvisBestaetigung.erledigt(msg);
+                break;
+
+            case 'error':
+                if (msg.message === 'Nicht autorisiert') {
+                    logout();
+                }
+                break;
+
+            case 'session_invalid':
+                // Anmeldeberechtigung entzogen → abmelden, danach greift die
+                // Login-Sperre ('Keine Anmeldeberechtigung').
+                if (msg.message) alert(msg.message);
+                logout();
+                break;
+
+            case 'security_blocked':
+                if (window.SecurityIncidents) window.SecurityIncidents.fetchAndShowBlocked();
+                break;
+
+            case 'cpu':
+                updateCPU(msg.value);
+                break;
+
+            case 'pong':
+                break; // ignorieren
+        }
+    }
+
+    // CPU-Bar aus dem WS-Ereignis aktualisieren. Gezeichnet wird ueber die
+    // gemeinsame Fassung (frontend/js/cpubar.js); der WebSocket ist hier nur
+    // die schnellere Quelle – die Anzeige selbst gehoert nicht /chat allein.
+    function updateCPU(percent) {
+        if (window.JarvisCpuBar) window.JarvisCpuBar.setzeWert(percent);
+    }
+
+    function handleStatus(msg) {
+        const text = msg.message || '';
+        if (!text) return;
+
+        // Status-Nachrichten erkennen: beginnen immer mit einem bekannten Emoji
+        const STATUS_PREFIXES = ['🚀','🔧','📋','⏳','💬','💻','✅','⚠️','❌','🧠','⏸','▶','⏹','📊','🧩','🔎','🔄'];
+        const isStatus = STATUS_PREFIXES.some(p => text.startsWith(p));
+
+        // Multi-Agent: Sub-Agent-Ausgabe in eine eigene (getaggte) Bubble lenken
+        const _aid = msg.agent_id || '_main';
+        const _isSub = _aid !== '_main' && _agentInfos[_aid] && _agentInfos[_aid].is_sub_agent;
+
+        // Antwort-Routing: gehoert der laufende Lauf zu einer ANDEREN Sitzung als der
+        // gerade geoeffneten, nichts in die aktuelle Ansicht zeichnen. Antwort-Text
+        // wird in _lastBotResp gepuffert und bei 'finished' in die Ursprungs-Sitzung
+        // persistiert (bzw. beim Rueckwechsel als Streaming-Bubble fortgesetzt).
+        const _detached = !_isSub && _runSid && _activeSid !== _runSid;
+
+        // ⚠ DAUERHAFTE MELDUNG – entscheidet VOR der Präfix-Regel.
+        // Vorfall 2026-10-06 (ECHT): das Backend sendet „Konnte nicht zum
+        // Download bereitgestellt werden: …" mit highlight=true, damit die
+        // Zeile dort steht, wo der Benutzer den Download erwartet. Weil der
+        // Text mit ⚠️ beginnt, griff die Präfix-Regel zuerst: der
+        // highlight-Zweig wurde übersprungen und die Meldung landete in der
+        // transienten Aktivitätszeile, die `_clearActivity()` am Laufende
+        // wieder entfernt. Der Benutzer bekam weder Datei noch Begründung.
+        // Die Reihenfolge von highlight/isStatus umzudrehen war NICHT möglich:
+        // „⏳ Warte auf LLM-Antwort…" kommt ebenfalls mit highlight=true und
+        // MUSS transient bleiben. Deshalb ein eigenes Feld (`persist`).
+        // Dieser Block steht hinter `_detached` – davor wäre die Konstante in
+        // ihrer temporalen Totzone und jede solche Meldung ein ReferenceError.
+        if (msg.persist) {
+            if (_detached) return;   // fremde Sitzung: hier nichts zeichnen
+            _clearActivity();        // Spinner weg, die Meldung bleibt stehen
+            addStatusLine(text, true);
+            return;
+        }
+
+        if (msg.highlight && !isStatus) {
+            if (_isSub) {
+                _appendSubBubble(_aid, text);   // Sub-Agent: getaggt, kein TTS
+            } else if (_detached) {
+                _ttsBuf += (text + ' ');
+                _lastBotResp = (_lastBotResp ? _lastBotResp + '\n' : '') + text;
+            } else {
+                // Echter LLM-Antwort-Text (highlight=true, kein Status-Emoji) → Bot-Bubble + TTS
+                _ttsBuf += (text + ' ');
+                appendToBotBubble(text);
+            }
+        } else if (isStatus) {
+            if (_detached) return;   // Status/Aktivitaet einer fremden Sitzung nicht anzeigen
+            if (text.startsWith('⏸') || text.startsWith('▶') || text.startsWith('⏹')) {
+                addStatusLine(text);
+            } else if (_chatDebug) {
+                // Debug-Ansicht: Zwischenschritte dauerhaft als Status-Zeilen anzeigen
+                addStatusLine(text);
+            } else {
+                // Standard: laufende Aktivität nur als transiente Zeile (Spinner)
+                _setActivity(text);
+            }
+        }
+    }
+
+    // ── Live-Aktivitäts-/Fortschrittszeile (Spinner + aktueller Status) ──
+    let _activityEl = null;
+    function _setActivity(text) {
+        if (!messagesEl) return;
+        if (!_activityEl) {
+            _activityEl = document.createElement('div');
+            _activityEl.className = 'chat-activity';
+            _activityEl.innerHTML = '<span class="chat-activity-spinner"></span><span class="chat-activity-text"></span>';
+        }
+        const t = _activityEl.querySelector('.chat-activity-text');
+        if (t) t.textContent = text;
+        messagesEl.appendChild(_activityEl);   // immer ans Ende
+        scrollToBottom();
+    }
+    function _clearActivity() {
+        if (_activityEl && _activityEl.parentNode) _activityEl.parentNode.removeChild(_activityEl);
+        _activityEl = null;
+    }
+
+    // Streaming-Bubble eines Sub-Agenten (getaggt; nur sichtbar wenn aktiv)
+    function _appendSubBubble(agentId, text) {
+        let b = _subBubbles[agentId];
+        if (!b) {
+            b = addBubble(text, 'bot', null, agentId);
+            b._rawText = text;
+            _subBubbles[agentId] = b;
+        } else {
+            b._rawText = (b._rawText || '') + '\n' + text;
+            b.innerHTML = renderMarkdown(b._rawText.trim());
+            if ((b.closest('.msg-row')?.dataset.agentId || '_main') === _activeAgentId) scrollToBottom();
+        }
+    }
+
+    function handleAgentEvent(msg) {
+        const ev = msg.event;
+        const agent = msg.agent || {};
+        const isSub = !!agent.is_sub_agent;
+
+        if (ev === 'started' && !isSub) {
+            // Hauptagent: neuer Lauf -> Agent-Infos/Sub-Streams zuruecksetzen
+            agentRunning = true;
+            _startRunWatchdog();
+            _ttsBuf = '';
+            stopBtn.classList.remove('hidden');
+            currentBotBubble = null;
+            Object.keys(_agentInfos).forEach(k => delete _agentInfos[k]);
+            Object.keys(_subBubbles).forEach(k => delete _subBubbles[k]);
+            _activeAgentId = '_main';
+            // Beschriftung IMMER selbst bestimmen, nicht `agent.label` vom
+            // Server: der liefert das technische "Hauptagent" ohne Marke, und
+            // der fruehere Rueckfall war ein hart verdrahtetes 'Jarvis'.
+            if (agent.agent_id) _agentInfos[agent.agent_id] = { label: _mainAgentLabel(), state: 'running', is_sub_agent: false };
+        } else if (ev === 'finished' && !isSub) {
+            agentRunning = false;
+            _stopRunWatchdog();
+            stopBtn.classList.add('hidden');
+            _clearActivity();
+            removeStreamingDots();
+            currentBotBubble = null;
+            _updateContextIndicator();
+            const toSpeak = _ttsBuf.trim();
+            _ttsBuf = '';
+            if (toSpeak) speak(toSpeak);
+            // Antwort-Routing: IMMER in die Sitzung schreiben, in der die Frage
+            // gestellt wurde – nicht in den gerade geoeffneten Verlauf.
+            const _isRemote = _persistBotAnswer();
+            if (_lastBotCol && _lastBotResp && !_isRemote) {
+                _appendFeedbackRow(_lastBotCol, _lastUserMsg, _lastBotResp);
+                _lastBotCol = null;
+            }
+        }
+
+        // ── Sub-Agent-Lebenszyklus (Multi-Agent-Sidebar, nur Admin sichtbar) ──
+        if ((ev === 'started' || ev === 'spawned') && isSub) {
+            _agentInfos[agent.agent_id] = { label: agent.label || agent.agent_id, state: 'running', is_sub_agent: true };
+        }
+        if (ev === 'finished' && isSub && _agentInfos[agent.agent_id]) {
+            _agentInfos[agent.agent_id].state = 'idle';
+            if (_activeAgentId === agent.agent_id) _switchToAgent('_main');
+            const rid = agent.agent_id;
+            setTimeout(() => {
+                if (_agentInfos[rid] && _agentInfos[rid].state !== 'paused') { delete _agentInfos[rid]; _renderAgentPanel(); }
+            }, 5000);   // 5 s sichtbar bleiben: die Delegation soll man sehen
+        }
+        if (ev === 'paused' && isSub && _agentInfos[agent.agent_id]) _agentInfos[agent.agent_id].state = 'paused';
+
+        // Gesamtliste aus dem Event uebernehmen (falls mitgeliefert). Fuer den
+        // HAUPTagenten gilt auch hier die eigene Beschriftung – sonst
+        // ueberschriebe die Serverliste sie eine Zeile spaeter wieder mit
+        // "Hauptagent" ohne Marke.
+        (msg.agents || []).forEach(a => {
+            _agentInfos[a.agent_id] = {
+                label: a.is_sub_agent ? a.label : _mainAgentLabel(),
+                state: a.state, is_sub_agent: a.is_sub_agent };
+        });
+        // …UND Karten entfernen, die es im Backend nicht mehr gibt. Das forEach
+        // oben schreibt nur, es raeumt nicht ab: ein Sub-Agent, der beim Senden
+        // des Ereignisses schon aus dem AgentManager entfernt war, blieb dadurch
+        // dauerhaft in der Sidebar stehen (gemeldet 2026-08-10 fuer den
+        // Rollen-Agenten „Rolle: Bild-Erzeuger"). Die Liste des Backends ist die
+        // Wahrheit; ein pausierter Agent bleibt ausgenommen, er soll sichtbar
+        // bleiben, bis der Benutzer entscheidet.
+        if (Array.isArray(msg.agents) && msg.agents.length) {
+            const lebend = new Set(msg.agents.map(a => a.agent_id));
+            Object.keys(_agentInfos).forEach(id => {
+                const info = _agentInfos[id];
+                // NUR noch 'running' gemeldete Karten abraeumen. Ein Agent, der
+                // gerade auf 'idle' gesetzt wurde, gehoert dem Ausblende-Timer –
+                // sonst verschwindet die Karte im selben Moment, in dem sie
+                // „fertig" anzeigt, und man sieht die Delegation ueberhaupt nicht
+                // (genau so gemeldet 2026-08-10).
+                if (info && info.is_sub_agent && info.state === 'running'
+                        && !lebend.has(id)) {
+                    delete _agentInfos[id];
+                    if (_activeAgentId === id) _switchToAgent('_main');
+                }
+            });
+        }
+
+        _renderAgentPanel();
+    }
+
+    // Wechselt die angezeigte Agenten-Ansicht (filtert Nachrichten per data-agent-id)
+    function _switchToAgent(agentId) {
+        _activeAgentId = agentId;
+        messagesEl.querySelectorAll('.msg-row').forEach(r => {
+            const a = r.dataset.agentId || '_main';
+            r.style.display = (a === agentId) ? '' : 'none';
+        });
+        _renderAgentPanel();
+        scrollToBottom();
+    }
+
+    // Beschriftung der Hauptagent-Karte: Markenname aus dem Branding, dahinter
+    // die Rolle. Hier stand fest "Jarvis" – auf einem White-Label-System nannte
+    // die Agentenliste damit das Produkt dahinter, waehrend jede andere Stelle
+    // den Assistenten-Namen zeigt. jarvisMarke() faellt ohne Branding selbst auf
+    // "Jarvis" zurueck, das Verhalten einer ungebrandeten Installation aendert
+    // sich also nicht.
+    function _mainAgentLabel() {
+        const marke = (window.jarvisMarke ? window.jarvisMarke() : '') || 'Jarvis';
+        const rolle = window.t ? window.t('agent.main') : 'Hauptagent';
+        return marke + ' · ' + rolle;
+    }
+
+    // Rendert das Multi-Agent-Panel (nur Admin, nur wenn Sub-Agenten existieren)
+    function _renderAgentPanel() {
+        const panel = $('agent-panel'), list = $('agent-panel-list');
+        if (!panel || !list) return;
+        const subs = Object.keys(_agentInfos).filter(id => _agentInfos[id].is_sub_agent);
+        if (!_isAdmin || subs.length === 0) { panel.style.display = 'none'; return; }
+        panel.style.display = '';
+        const ids = ['_main'].concat(subs);
+        const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+        list.innerHTML = ids.map(id => {
+            const info = id === '_main'
+                ? { label: _mainAgentLabel(), state: agentRunning ? 'running' : 'idle', is_sub_agent: false }
+                : _agentInfos[id];
+            if (!info) return '';
+            const dot = info.state === 'running' ? 'var(--warning)' : info.state === 'paused' ? 'var(--accent)' : 'var(--success)';
+            const act = id === _activeAgentId;
+            const txt = info.label || id;
+            // title, weil die Karte nur 220 px breit ist und laengere Namen mit
+            // Ellipse abgeschnitten werden – ein abgeschnittener Markenname
+            // waere sonst nicht lesbar.
+            return '<div class="agent-card" data-agent-id="' + esc(id) + '" style="display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;cursor:pointer;margin-bottom:4px;'
+                + (act ? 'background:rgba(var(--accent-rgb,99,102,241),0.18);' : '') + '">'
+                + '<span style="width:8px;height:8px;border-radius:50%;background:' + dot + ';flex-shrink:0;"></span>'
+                + '<span title="' + esc(txt) + '" style="font-size:0.82rem;color:var(--text-primary,#f8fafc);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(txt) + '</span>'
+                + '</div>';
+        }).join('');
+        list.querySelectorAll('.agent-card').forEach(c => c.addEventListener('click', () => _switchToAgent(c.dataset.agentId)));
+    }
+
+    // Die Karten werden aus einem String gebaut, applyLang() erreicht sie nicht –
+    // ohne diesen Zuhoerer bliebe "Hauptagent" nach einem Sprachwechsel stehen,
+    // bis das naechste Agent-Ereignis eintrifft. Ohne sichtbares Panel kostet
+    // der Aufruf nichts (fruehes return).
+    window.addEventListener('jarvis-lang-changed', function () {
+        try { _renderAgentPanel(); } catch (e) { /* egal */ }
+    });
+
+    // ═════════════════════════════════════════════════════════════
+    //  BUBBLES RENDERN
+    // ═════════════════════════════════════════════════════════════
+
+    function addBubble(text, role, customTime, agentId) {
+        removeWelcome();
+        maybeAddDateSep();
+
+        const row = document.createElement('div');
+        row.className = `msg-row ${role}`;
+        // Multi-Agent: Zeile dem Agenten zuordnen; nicht aktive Agenten ausblenden
+        const _aid = agentId || '_main';
+        row.dataset.agentId = _aid;
+        if (_aid !== _activeAgentId) row.style.display = 'none';
+
+        // Timestamp
+        const timeEl = document.createElement('div');
+        timeEl.className = 'msg-time';
+
+        // Bubble
+        const bubble = document.createElement('div');
+        bubble.className = 'msg-bubble';
+        bubble.innerHTML = role === 'user' ? escapeHtml(text) : renderMarkdown(text);
+
+        // Wiederholen- + Edit-Button für User-Bubbles (Wiederholen links vom Bearbeiten)
+        if (role === 'user') {
+            timeEl.appendChild(_makeRetryBtn(row, bubble));
+            const editBtn = document.createElement('button');
+            editBtn.type = 'button';
+            editBtn.className = 'msg-edit-btn';
+            editBtn.title = (window.t ? window.t('bubble.edit_msg') : 'Nachricht bearbeiten');
+            editBtn.setAttribute('aria-label', editBtn.title);
+            JarvisIcons.setPencil(editBtn);
+            editBtn.addEventListener('click', () => _editUserBubble(row, bubble));
+            timeEl.appendChild(editBtn);
+            const timeSpan = document.createElement('span');
+            timeSpan.textContent = customTime || timeStr();
+            timeEl.appendChild(timeSpan);
+            row.dataset.rawText = text;
+        } else {
+            timeEl.textContent = customTime || timeStr();
+        }
+
+        const col = document.createElement('div');
+        col.appendChild(timeEl);
+        col.appendChild(bubble);
+
+        if (role === 'bot') {
+            const avatar = document.createElement('div');
+            avatar.className = 'msg-avatar';
+            avatar.textContent = 'J';
+            if (window.brandAvatar) window.brandAvatar(avatar);
+            row.appendChild(avatar);
+            col.appendChild(_botActions(bubble));
+        }
+
+        row.appendChild(col);
+        messagesEl.appendChild(row);
+        scrollToBottom();
+
+        // ── Kontextmenue (Rechtsklick / Long-Press) ────────────────
+        if (window.JarvisChatLib && window.JarvisChatLib.setupBubbleContextMenu) {
+            window.JarvisChatLib.setupBubbleContextMenu(row, (ev) => _buildBubbleCtxItems(row, bubble, role, ev));
+        }
+
+        // Im Auswahlmodus neue Bubble direkt mit Checkbox versehen
+        if (_selCtl && _selCtl.isActive()) _selCtl.addCheckboxToRow(row);
+
+        return bubble;
+    }
+
+    // Dezente Aktions-Buttons unter Bot-Bubbles: Kopieren + PDF-Export.
+    function _botActions(bubble) {
+        const bar = document.createElement('div');
+        bar.className = 'bubble-actions';
+        // In Zwischenablage kopieren
+        const copyBtn = document.createElement('button');
+        copyBtn.type = 'button';
+        copyBtn.className = 'bubble-act-btn';
+        copyBtn.title = (window.t ? window.t('bubble.copy_clip') : 'In Zwischenablage kopieren');
+        copyBtn.setAttribute('aria-label', copyBtn.title);
+        copyBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+        copyBtn.addEventListener('click', () => {
+            const t = bubble.textContent || '';
+            const done = () => { copyBtn.classList.add('ok'); setTimeout(() => copyBtn.classList.remove('ok'), 1200); };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(t).then(done).catch(() => { window.JarvisChatLib && window.JarvisChatLib.copyTextToClipboard && window.JarvisChatLib.copyTextToClipboard(t); done(); });
+            } else { window.JarvisChatLib && window.JarvisChatLib.copyTextToClipboard && window.JarvisChatLib.copyTextToClipboard(t); done(); }
+        });
+        bar.appendChild(copyBtn);
+        // Als PDF exportieren (Druckfenster -> "Als PDF speichern")
+        const pdfBtn = document.createElement('button');
+        pdfBtn.type = 'button';
+        pdfBtn.className = 'bubble-act-btn';
+        pdfBtn.title = (window.t ? window.t('bubble.export_pdf') : 'Als PDF exportieren');
+        pdfBtn.setAttribute('aria-label', pdfBtn.title);
+        // Dasselbe Symbol wie der Kontextmenue-Eintrag "Chat als PDF" – EINE
+        // Quelle (chatlib), sonst laufen die beiden beim naechsten Feinschliff
+        // auseinander und derselbe Vorgang traegt zwei Zeichen.
+        pdfBtn.innerHTML = (window.JarvisChatLib?.pdfIcon?.() || '');
+        pdfBtn.addEventListener('click', () => _exportBubblePdf(bubble));
+        bar.appendChild(pdfBtn);
+        return bar;
+    }
+
+    // PDF-Export ohne externe Libs: Druckfenster mit gerendertem Bubble-Inhalt.
+    function _exportBubblePdf(bubble) {
+        const w = window.open('', '_blank');
+        if (!w) { alert(window.t ? window.t('bubble.popup_blocked') : 'Bitte Pop-ups erlauben, um als PDF zu exportieren.'); return; }
+        const title = (window.t ? window.t('chat.title') : 'Chat');
+        w.document.write(
+            '<!doctype html><html><head><meta charset="utf-8"><title>' + title + '</title>'
+            + '<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.55;color:#111;max-width:820px;margin:0 auto;padding:28px;}'
+            + 'pre{background:#f4f4f5;border-radius:8px;padding:12px;overflow:auto;white-space:pre-wrap;word-break:break-word;}'
+            + 'code{background:#f4f4f5;border-radius:4px;padding:1px 4px;} pre code{padding:0;background:none;}'
+            + 'img,video{max-width:100%;} table{border-collapse:collapse;width:100%;} td,th{border:1px solid #ccc;padding:5px 9px;text-align:left;}'
+            + 'a{color:#4338ca;word-break:break-all;} h1,h2,h3{line-height:1.25;}</style></head><body>'
+            + (bubble.innerHTML || '') + '</body></html>'
+        );
+        w.document.close();
+        w.focus();
+        setTimeout(() => { try { w.print(); } catch (e) {} }, 350);
+    }
+
+    // ── "Chat als PDF": der KOMPLETTE Verlauf der Sitzung ────────────────────
+    // Der Eintrag steht in JEDEM Bubble-Kontextmenue, weil er sich nicht auf die
+    // angeklickte Sprechblase bezieht – von jeder Stelle im Verlauf aus derselbe
+    // Weg. Gebaut wird das Dokument in chatlib (`exportTranscriptPdf`), damit es
+    // NUR EINE Fassung gibt: /userchat hat dieselben `.msg-row`-Strukturen.
+    function _ctxPdfItem() {
+        return {
+            label: (window.t ? window.t('chatpdf.ctx') : 'Chat als PDF'),
+            icon: (window.JarvisChatLib?.pdfIcon?.() || '⤓'),
+            onClick: () => _exportChatPdf(),
+        };
+    }
+
+    function _exportChatPdf() {
+        const lib = window.JarvisChatLib;
+        if (!lib || !lib.exportTranscriptPdf) return;
+        // Genommen wird, was der Benutzer SIEHT. Zeilen fremder Agenten sind per
+        // display:none ausgeblendet (Multi-Agent-Ansicht) – sie stillschweigend
+        // mitzudrucken waere ein Verlauf, den es so nie gab; sie stillschweigend
+        // WEGZULASSEN waere aber genauso falsch: die Anzahl steht deshalb im Kopf
+        // des PDF (gleiche Regel wie bei `cron_list`).
+        const alle = Array.from(messagesEl.querySelectorAll('.msg-row, .date-sep'));
+        const sichtbar = alle.filter(r => !(r.style && r.style.display === 'none'));
+        const versteckt = alle.filter(r => r.classList.contains('msg-row')).length
+                        - sichtbar.filter(r => r.classList.contains('msg-row')).length;
+        const hinweise = [];
+        if (versteckt > 0) {
+            hinweise.push((window.t ? window.t('chatpdf.hidden_agents')
+                                    : '{n} Nachricht(en) anderer Agenten sind nicht enthalten.')
+                          .split('{n}').join(String(versteckt)));
+        }
+        const s = _sessions.find(x => x.id === _activeSid);
+        lib.exportTranscriptPdf({
+            rows: sichtbar,
+            titel: (s && s.title) || (window.t ? window.t('chat.untitled') : 'Chat'),
+            userName: _currentUser || (window.t ? window.t('chatpdf.you') : 'Du'),
+            botName: window.jarvisMarke ? window.jarvisMarke() : 'Jarvis',
+            hinweise: hinweise,
+        });
+    }
+
+    // Kontextmenue-Items (Bearbeiten/Kopieren/Loeschen)
+    function _buildBubbleCtxItems(row, bubble, role, ev) {
+        const items = [];
+        const txt = (row.dataset && row.dataset.rawText) ||
+                    (bubble && (bubble.textContent || '')) || '';
+        // Wurde auf ein Bild, ein Diagramm oder einen Datei-Chip geklickt, stehen
+        // dessen Aktionen GANZ OBEN – das ist dann die Absicht des Klicks. Die
+        // Bubble-Eintraege (Text kopieren, Loeschen) bleiben darunter erreichbar.
+        // Bei einem Treffer entfaellt "Bearbeiten": ein Bild bearbeitet man nicht.
+        const medien = window.JarvisChatLib?.mediaCtxItems?.(ev) || [];
+        if (medien.length) {
+            items.push(...medien);
+            items.push({
+                label: (window.t ? window.t('bubble.ctx.copy') : 'Text kopieren'), icon: '⧉',
+                onClick: () => window.JarvisChatLib?.copyTextToClipboard?.(txt),
+            });
+            items.push(_ctxPdfItem());
+            items.push({
+                label: (window.t ? window.t('bubble.ctx.delete') : 'Löschen'), icon: JarvisIcons.trash(), danger: true,
+                onClick: () => _selCtl.startSelectionDelete(row),
+            });
+            return items;
+        }
+        if (role === 'user') {
+            items.push({
+                label: (window.t ? window.t('bubble.ctx.edit') : 'Bearbeiten'), icon: JarvisIcons.pencil(),
+                onClick: () => _editUserBubble(row, bubble),
+            });
+        }
+        items.push({
+            label: (window.t ? window.t('bubble.ctx.copy') : 'Text kopieren'), icon: '⧉',
+            onClick: () => window.JarvisChatLib?.copyTextToClipboard?.(txt),
+        });
+        items.push(_ctxPdfItem());
+        items.push({
+            label: (window.t ? window.t('bubble.ctx.delete') : 'Löschen'), icon: JarvisIcons.trash(), danger: true,
+            onClick: () => _selCtl.startSelectionDelete(row),
+        });
+        return items;
+    }
+
+    // Loescht NUR die angeklickte Bubble (analog Android-App-Verhalten).
+    // Nachfolgende Antworten/Dialoge bleiben erhalten. Backend-Agent-History
+    // wird nicht angetastet (User-Anker/Tool-Call-Verkettung bleibt intakt).
+    // Verlaufseintrag, dem im DOM genau eine .msg-row entspricht. Der Willkommens-
+    // Eintrag (kind:"welcome") hat role:"bot", wird aber als Karte gerendert – er
+    // darf deshalb bei JEDER Index-Zuordnung DOM<->Verlauf uebersprungen werden,
+    // sonst loescht ein Klick auf die erste Bot-Antwort den falschen Eintrag.
+    function _isRowEntry(e) { return !!e && e.kind !== 'welcome'; }
+
+    // Zu einer Sprechblase den Text IHRER Frage finden: bei einer Antwort also
+    // den der davorstehenden Benutzer-Sprechblase. Der Server entfernt darueber
+    // den ganzen Zug aus dem LLM-Kontext (siehe _forgetInContext).
+    function _fragetextVon(row) {
+        let r = row;
+        while (r) {
+            if (r.classList && r.classList.contains('msg-row') && r.classList.contains('user')) {
+                // Derselbe Zugriff wie im Edit-Modus: der ROHE Text haengt an der
+                // ZEILE (`dataset.rawText`), nicht an der Sprechblase – deren
+                // textContent traegt den gerenderten Stand.
+                const b = r.querySelector('.msg-bubble');
+                return ((r.dataset && r.dataset.rawText) || (b ? b.textContent : '') || '').trim();
+            }
+            r = r.previousElementSibling;
+        }
+        return '';
+    }
+
+    // Geloeschte Nachrichten auch aus dem LLM-Kontext nehmen.
+    // OHNE DAS IST LOESCHEN NUR KOSMETIK: `_persistSession` schreibt das
+    // Transkript, der Kontext liegt in einer zweiten Datei und blieb bis
+    // 2026-08-30 unangetastet – das Modell kannte die geloeschte Nachricht
+    // weiter (auf ECHT gemessen). Best effort: schlaegt der Aufruf fehl, ist der
+    // sichtbare Verlauf trotzdem schon aufgeraeumt.
+    function _forgetInContext(fragen) {
+        const liste = (fragen || []).filter(t => t && t.trim());
+        if (!liste.length || !_activeSid || !token) return;
+        fetch('/api/chat/sessions/' + encodeURIComponent(_activeSid) + '/context/forget', {
+            method: 'POST', headers: _csHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ questions: liste })
+        }).catch(() => {});
+    }
+
+    function _deleteBubble(row, role) {
+        if (!row || !row.parentNode) return;
+        if (_editingRow && _editingRow !== row) {
+            try { _restoreBubble(_editingRow.querySelector('.msg-bubble'), _editingRow); } catch(_) {}
+        }
+
+        const isUser = (role === 'user');
+        const promptTxt = window.t
+            ? (isUser ? window.t('bubble.del_user_q') : window.t('bubble.del_bot_a'))
+            : (isUser ? 'Diese Frage löschen?' : 'Diese Antwort löschen?');
+        if (!confirm(promptTxt)) return;
+
+        const rowSel = isUser ? '.msg-row.user' : '.msg-row.bot';
+        const sameRoleRows = messagesEl.querySelectorAll(rowSel);
+        const roleIndex    = Array.from(sameRoleRows).indexOf(row);
+
+        // Streaming-State leeren, falls die aktive Bot-Bubble entfernt wird
+        if (!isUser && row.contains(currentBotBubble)) {
+            currentBotBubble = null;
+            _lastBotCol = null; _lastBotResp = ''; _lastStats = '';
+        }
+        if (_editingRow === row) _editingRow = null;
+
+        // VOR dem Entfernen lesen – danach hat die Zeile keine Nachbarn mehr.
+        const _frage = _fragetextVon(row);
+
+        row.parentNode.removeChild(row);
+
+        if (Array.isArray(_chatHistory) && roleIndex >= 0) {
+            const wantRoles = isUser ? ['user'] : ['bot', 'assistant'];
+            let seen = 0;
+            for (let i = 0; i < _chatHistory.length; i++) {
+                const e = _chatHistory[i];
+                if (_isRowEntry(e) && wantRoles.includes(e.role)) {
+                    if (seen === roleIndex) { _chatHistory.splice(i, 1); break; }
+                    seen++;
+                }
+            }
+            _saveHistory();
+            _syncReplace();
+        }
+        _forgetInContext([_frage]);
+    }
+
+    // ─── Mehrfachauswahl: Nachrichten per Checkbox loeschen ──────
+    //  Lebenszyklus in chatlib.js (createSelectionController). Hier nur
+    //  die seitenspezifische Loeschlogik (lokale History + DOM).
+    const _selCtl = window.JarvisChatLib.createSelectionController({
+        container: messagesEl,
+        rowSelector: '.msg-row',
+        checkboxClass: 'msg-check',
+        bar: msgSelectBar,
+        countEl: msgSelectCount,
+        delBtn: btnMsgDelSel,
+        toggleBtn: btnSelectMsgs,
+        cancelBtn: btnMsgSelCancel,
+        onEnter: () => {
+            if (_editingRow) { try { _restoreBubble(_editingRow.querySelector('.msg-bubble'), _editingRow); } catch(_) {} }
+        },
+        onDelete: (checked) => {
+            // Solange die Zeilen noch im DOM haengen: Fragetexte einsammeln.
+            const _fragen = checked.map(_fragetextVon);
+            const userRows = Array.from(messagesEl.querySelectorAll('.msg-row.user'));
+            const botRows  = Array.from(messagesEl.querySelectorAll('.msg-row.bot'));
+            const delUser = new Set();
+            const delBot  = new Set();
+            for (const row of checked) {
+                if (row.classList.contains('user')) {
+                    const i = userRows.indexOf(row);
+                    if (i >= 0) delUser.add(i);
+                } else {
+                    const i = botRows.indexOf(row);
+                    if (i >= 0) delBot.add(i);
+                    if (row.contains(currentBotBubble)) {
+                        currentBotBubble = null; _lastBotCol = null; _lastBotResp = ''; _lastStats = '';
+                    }
+                }
+                if (_editingRow === row) _editingRow = null;
+            }
+
+            if (Array.isArray(_chatHistory)) {
+                let uSeen = 0, bSeen = 0;
+                _chatHistory = _chatHistory.filter(e => {
+                    if (!e) return false;
+                    if (!_isRowEntry(e)) return true;   // Willkommens-Karte: keine .msg-row
+                    if (e.role === 'user') { const keep = !delUser.has(uSeen); uSeen++; return keep; }
+                    if (e.role === 'bot' || e.role === 'assistant') { const keep = !delBot.has(bSeen); bSeen++; return keep; }
+                    return true;
+                });
+                _saveHistory();
+                _syncReplace();
+            }
+
+            checked.forEach(row => { if (row.parentNode) row.parentNode.removeChild(row); });
+
+            // Verwaiste Datums-Separatoren entfernen
+            messagesEl.querySelectorAll('.date-sep').forEach(sep => {
+                let n = sep.nextElementSibling;
+                while (n && !n.classList.contains('msg-row')) {
+                    if (n.classList.contains('date-sep')) { n = null; break; }
+                    n = n.nextElementSibling;
+                }
+                if (!n) sep.remove();
+            });
+
+            _forgetInContext(_fragen);
+        },
+    });
+
+    // ─── Edit-Modus für User-Bubbles (delegiert an chatlib.js) ───
+    let _editingRow = null;
+
+    function _editUserBubble(row, bubble) {
+        if (_editingRow) return;
+        if (!row || !bubble) return;
+        if (!(window.JarvisChatLib && window.JarvisChatLib.enterEditMode)) {
+            alert(window.t('chat.editlib_missing'));
+            return;
+        }
+        const ok = window.JarvisChatLib.enterEditMode(row, bubble, {
+            editBtnSelector: '.msg-edit-btn',
+            areaClass:    'msg-edit-area',
+            actionsClass: 'msg-edit-actions',
+            saveClass:    'msg-edit-save',
+            cancelClass:  'msg-edit-cancel',
+            isBlocked: () => agentRunning,
+            blockMessage: (window.t ? window.t('bubble.block_running') : 'Bitte stoppe zuerst die laufende Aufgabe.'),
+            onCommit: (newText) => _submitEdit(row, bubble, newText),
+            onCancel: () => { _editingRow = null; },
+        });
+        if (ok) _editingRow = row;
+    }
+
+    function _restoreBubble(bubble, row) {
+        if (window.JarvisChatLib && window.JarvisChatLib.exitEditMode) {
+            window.JarvisChatLib.exitEditMode(row, bubble, { editBtnSelector: '.msg-edit-btn' });
+        }
+        _editingRow = null;
+    }
+
+    // ─── Wiederholen: dieselbe Anfrage erneut senden (dezent, wie Bearbeiten) ───
+    function _makeRetryBtn(row, bubble) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'msg-edit-btn msg-retry-btn';
+        b.title = (window.t ? window.t('bubble.retry_msg') : 'Anfrage wiederholen');
+        b.setAttribute('aria-label', b.title);
+        b.textContent = '↻';
+        b.addEventListener('click', () => _retryUserBubble(row, bubble));
+        return b;
+    }
+    function _retryUserBubble(row, bubble) {
+        if (_editingRow) return;
+        if (agentRunning) { alert(window.t ? window.t('bubble.block_running') : 'Bitte stoppe zuerst die laufende Aufgabe.'); return; }
+        const txt = (row && row.dataset && row.dataset.rawText) || (bubble ? bubble.textContent : '');
+        if (!txt || !txt.trim()) return;
+        // Gleiche Logik wie Bearbeiten, nur mit unverändertem Text: History/DOM ab
+        // dieser Nachricht trimmen und die Anfrage neu stellen.
+        _submitEdit(row, bubble, txt);
+    }
+
+    function _submitEdit(row, bubble, newText) {
+        const allUserRows = messagesEl.querySelectorAll('.msg-row.user');
+        const userIndex = Array.from(allUserRows).indexOf(row);
+        if (userIndex < 0) { _restoreBubble(bubble, row); return; }
+
+        // DOM: alles nach dieser Row entfernen
+        if (window.JarvisChatLib && window.JarvisChatLib.removeRowsAfter) {
+            window.JarvisChatLib.removeRowsAfter(row);
+        }
+
+        // Streaming-State zurücksetzen
+        currentBotBubble = null;
+        _lastBotCol = null;
+        _lastBotResp = '';
+        _lastStats = '';
+
+        // _chatHistory trimmen + Text aktualisieren (in place)
+        if (window.JarvisChatLib && window.JarvisChatLib.truncateHistoryToUserIndex) {
+            window.JarvisChatLib.truncateHistoryToUserIndex(
+                _chatHistory, userIndex, newText,
+                { timeStr: timeStr(), dateStr: _currentDateStr() }
+            );
+        }
+        // Die neu gestellte Frage traegt keine Anhaenge mehr – der Verweis darf
+        // nach dem Neuladen kein Bild zeigen, das gar nicht mitging.
+        const _edited = _chatHistory[_chatHistory.length - 1];
+        if (_edited && _edited.role === 'user') {
+            delete _edited.attachments; delete _edited.att_note; delete _edited.att_count;
+        }
+        _saveHistory();
+        _syncReplace();
+
+        // Bubble visuell zurücksetzen mit neuem Text
+        bubble.classList.remove('editing');
+        bubble.innerHTML = escapeHtml(newText);
+        delete bubble.dataset.origHtml;
+        row.dataset.rawText = newText;
+        const editBtn = row.querySelector('.msg-edit-btn');
+        if (editBtn) editBtn.style.visibility = '';
+        const timeSpan = row.querySelector('.msg-time span');
+        if (timeSpan) timeSpan.textContent = timeStr();
+        _editingRow = null;
+
+        // WS-Task mit truncate-Hint
+        _lastUserMsg = newText;
+        _lastBotResp = '';
+        _lastBotCol  = null;
+        _lastStats   = '';
+        _runSid = _activeSid;   // Ursprungs-Sitzung dieser Anfrage merken (Antwort-Routing)
+        wsSend({
+            type: 'task',
+            text: newText,
+            lang: window._lang || 'de',
+            bestaetigung: true,
+            truncate_user_msg_index: userIndex,
+            session_id: _activeSid || undefined,
+        });
+    }
+
+    function appendToBotBubble(text) {
+        _clearActivity();   // finale Antwort kommt → Aktivitätszeile entfernen
+        if (!currentBotBubble) {
+            currentBotBubble = addBubble(text, 'bot');
+            _lastBotCol = currentBotBubble.parentElement; // .msg-col merken
+            addStreamingDots();
+        } else {
+            currentBotBubble.innerHTML = renderMarkdown(
+                (currentBotBubble._rawText || '') + '\n' + text
+            );
+        }
+        currentBotBubble._rawText = (currentBotBubble._rawText || '') + '\n' + text;
+        _lastBotResp = currentBotBubble._rawText.trim();
+        scrollToBottom();
+    }
+
+    function appendStats(msg) {
+        const secNum = (msg.duration_ms || 0) / 1000;
+        const dur = secNum.toFixed(1);
+        const tokens = msg.total_tokens || 0;
+        const outTok = msg.output_tokens || 0;
+        const steps = msg.steps || 0;
+        let s = `${dur}s · ${tokens} Tokens`;
+        if (outTok > 0 && secNum > 0) {
+            const tps = outTok / secNum;
+            s += ` · ${tps >= 100 ? tps.toFixed(0) : tps.toFixed(1)} tok/s`;
+        }
+        s += ' · ' + window.t('chat.n_steps').replace('{n}', steps);
+        // Statistik IMMER merken (wird mit der Antwort persistiert) – auch wenn der
+        // Benutzer gerade eine andere Sitzung geoeffnet hat (keine Bubble sichtbar).
+        _lastStats = s;
+        if (!currentBotBubble) return;
+        removeStreamingDots();
+        const stats = document.createElement('div');
+        stats.className = 'msg-stats';
+        stats.textContent = _lastStats;
+        currentBotBubble.parentElement.appendChild(stats);
+        scrollToBottom();
+    }
+
+    /* Antwort in den Verlauf schreiben – IMMER in die Sitzung, in der die
+     * Frage gestellt wurde, nicht in den gerade geoeffneten Verlauf.
+     * Aus dem 'finished'-Handler herausgezogen, weil _releaseRun() dasselbe
+     * braucht: bei einem Verbindungsabbruch soll der bereits gestreamte Text
+     * nicht verloren gehen (er steht sichtbar im Fenster, wuerde beim naechsten
+     * Laden aber fehlen). Rueckgabe: true, wenn die Antwort in eine ANDERE
+     * Sitzung ging (dann keine Feedback-Zeile im aktuellen Fenster). */
+    function _persistBotAnswer() {
+        const _origin = _runSid;
+        _runSid = null;
+        const _isRemote = !!(_origin && _origin !== _activeSid);
+        if (_lastBotResp) {
+            const entry = { role: 'bot', text: _lastBotResp, time: timeStr(),
+                            date: _currentDateStr(), stats: _lastStats, ts: Date.now() };
+            if (_isRemote) {
+                _appendToSessionTranscript(_origin, entry);
+            } else {
+                _chatHistory.push(entry);
+                _saveHistory();
+                _syncAppend(entry);
+                _maybeRefreshTitle();   // Auto-Benennung nach der ersten Antwort in die Sidebar uebernehmen
+            }
+        }
+        return _isRemote;
+    }
+
+    /* Laufzustand freigeben, wenn kein 'finished' mehr zu erwarten ist.
+     * Zwei Ausloeser: Verbindungsabbruch ('conn') und Stille-Notbremse
+     * ('silence'). Der Hinweis ist der WICHTIGE Teil – ein Fenster, das
+     * einfach aufhoert, sieht wie eine fertige Antwort aus, die es nicht gibt.
+     * Idempotent: laeuft nichts, passiert nichts (ein Reconnect nach einem
+     * ruhigen Fenster darf keine Meldung erzeugen). */
+    function _releaseRun(grund) {
+        _stopRunWatchdog();
+        if (!agentRunning) return;
+        agentRunning = false;
+        try { stopBtn.classList.add('hidden'); } catch (e) { /* egal */ }
+        _clearActivity();
+        removeStreamingDots();
+        currentBotBubble = null;
+        _lastBotCol = null;
+        _ttsBuf = '';               // sonst spricht der naechste Lauf alten Text
+        _persistBotAnswer();        // bereits gestreamten Teiltext sichern
+        _lastBotResp = '';
+        const fallback = grund === 'conn'
+            ? '⚠️ Verbindung unterbrochen – eine Antwort kann verloren gegangen sein. Die Anfrage lässt sich mit ↻ erneut senden.'
+            : '⚠️ Seit 10 Minuten keine Rückmeldung vom Server – die Eingabe ist wieder frei. Die Anfrage lässt sich mit ↻ erneut senden.';
+        const key = grund === 'conn' ? 'chat.run_lost_conn' : 'chat.run_lost_silence';
+        addStatusLine(window.t ? (window.t(key) !== key ? window.t(key) : fallback) : fallback);
+        try { _renderAgentPanel(); } catch (e) { /* Panel ist optional */ }
+    }
+
+    function _startRunWatchdog() {
+        _lastWsMsgAt = Date.now();
+        if (_runWatchdog) return;
+        _runWatchdog = setInterval(function () {
+            if (!agentRunning) { _stopRunWatchdog(); return; }
+            if (Date.now() - _lastWsMsgAt > RUN_SILENCE_MS) _releaseRun('silence');
+        }, 30000);
+    }
+
+    function _stopRunWatchdog() {
+        if (_runWatchdog) { clearInterval(_runWatchdog); _runWatchdog = null; }
+    }
+
+    // `wichtig=true`: eine Meldung, die der Benutzer LESEN muss (verfehlte
+    // Auslieferung, keine Antwort vom LLM). `.msg-status` allein ist 12 px,
+    // grau und zentriert – als Hinweis auf eine fehlende Datei zu leise.
+    function addStatusLine(text, wichtig) {
+        const el = document.createElement('div');
+        el.className = wichtig ? 'msg-status msg-status-warn' : 'msg-status';
+        el.textContent = text;
+        messagesEl.appendChild(el);
+        scrollToBottom();
+    }
+
+    // ─── Streaming Dots ─────────────────────────────────────────
+    function addStreamingDots() {
+        removeStreamingDots();
+        const dots = document.createElement('div');
+        dots.className = 'streaming-dots';
+        dots.id = 'streaming-dots';
+        dots.textContent = '●●●';
+        messagesEl.appendChild(dots);
+        scrollToBottom();
+    }
+
+    function removeStreamingDots() {
+        const el = $('streaming-dots');
+        if (el) el.remove();
+    }
+
+    // ─── Date Separator ─────────────────────────────────────────
+    function _dateLabel(str) {
+        const fmt = d => d.toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', year:'numeric' });
+        const todayStr = fmt(new Date());
+        const yesterStr = fmt(new Date(Date.now() - 86400000));
+        if (str === todayStr)   return window.t('chat.today');
+        if (str === yesterStr)  return window.t('chat.yesterday');
+        return str;
+    }
+
+    function maybeAddDateSep() {
+        const today = new Date().toLocaleDateString('de-DE', {
+            day: '2-digit', month: '2-digit', year: 'numeric'
+        });
+        if (today === lastDate) return;
+        lastDate = today;
+
+        const sep = document.createElement('div');
+        sep.className = 'date-sep';
+        sep.innerHTML = `<span>${_dateLabel(today)}</span>`;
+        messagesEl.appendChild(sep);
+    }
+
+    // ─── Helpers (delegieren an chatlib.js) ─────────────────────
+    function timeStr() {
+        return (window.JarvisChatLib && window.JarvisChatLib.timeStr)
+            ? window.JarvisChatLib.timeStr()
+            : new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function scrollToBottom() {
+        requestAnimationFrame(() => {
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        });
+    }
+
+    function removeWelcome() {
+        const w = messagesEl.querySelector('.welcome-msg');
+        if (w) w.remove();
+    }
+
+    // ─── Datei-Anhang-Rendering (Galerie, Lightbox, Kontextmenü) ─
+
+    function _dataUrl(att) {
+        // Aus dem Verlauf wiederhergestellt: kein base64, nur der Ablagename
+        // (siehe 'attachments_stored'). Der Abruf-Schluessel kommt erst beim
+        // Rendern dazu – im gespeicherten Verlauf hat er nichts zu suchen.
+        if (!att.data && att.doc) {
+            const u = '/api/chat/attachment/' + encodeURIComponent(att.doc);
+            return window.JarvisDL ? window.JarvisDL.url(u) : u;
+        }
+        return `data:${att.mime_type};base64,${att.data}`;
+    }
+
+    // Lightbox
+    let _lbAtts = [], _lbIdx = 0;
+    function openLightbox(atts, idx) {
+        _lbAtts = atts; _lbIdx = idx;
+        _lbUpdate();
+        document.getElementById('uc-lightbox')?.classList.add('open');
+    }
+    function closeLightbox() {
+        document.getElementById('uc-lightbox')?.classList.remove('open');
+    }
+    function _lbUpdate() {
+        const img     = document.getElementById('uc-lb-img');
+        const counter = document.getElementById('uc-lb-counter');
+        const prev    = document.getElementById('uc-lb-prev');
+        const next    = document.getElementById('uc-lb-next');
+        if (!img) return;
+        const att = _lbAtts[_lbIdx];
+        img.src = _dataUrl(att);
+        img.alt = att.name || '';
+        if (counter) counter.textContent = _lbAtts.length > 1 ? `${_lbIdx + 1} / ${_lbAtts.length}` : '';
+        if (prev)    prev.style.display  = _lbAtts.length > 1 ? '' : 'none';
+        if (next)    next.style.display  = _lbAtts.length > 1 ? '' : 'none';
+    }
+    document.addEventListener('keydown', e => {
+        const lb = document.getElementById('uc-lightbox');
+        if (!lb || !lb.classList.contains('open')) return;
+        if (e.key === 'Escape') closeLightbox();
+        if (e.key === 'ArrowLeft')  { _lbIdx = (_lbIdx - 1 + _lbAtts.length) % _lbAtts.length; _lbUpdate(); }
+        if (e.key === 'ArrowRight') { _lbIdx = (_lbIdx + 1) % _lbAtts.length; _lbUpdate(); }
+    });
+    (function initLightbox() {
+        document.getElementById('uc-lb-close')?.addEventListener('click', closeLightbox);
+        document.getElementById('uc-lb-prev')?.addEventListener('click', () => {
+            _lbIdx = (_lbIdx - 1 + _lbAtts.length) % _lbAtts.length; _lbUpdate();
+        });
+        document.getElementById('uc-lb-next')?.addEventListener('click', () => {
+            _lbIdx = (_lbIdx + 1) % _lbAtts.length; _lbUpdate();
+        });
+        document.getElementById('uc-lb-save')?.addEventListener('click', () => {
+            const att = _lbAtts[_lbIdx];
+            Object.assign(document.createElement('a'), { href: _dataUrl(att), download: att.name || 'bild' }).click();
+        });
+        document.getElementById('uc-lightbox')?.addEventListener('click', e => {
+            if (e.target === document.getElementById('uc-lightbox')) closeLightbox();
+        });
+    })();
+
+    // Kontextmenü
+    let _ctxAtt = null;
+    function showCtxMenu(e, att) {
+        e.preventDefault(); e.stopPropagation();
+        _ctxAtt = att;
+        const menu = document.getElementById('uc-ctx-menu');
+        if (!menu) return;
+        const x = Math.min(e.clientX, window.innerWidth - 180);
+        const y = Math.min(e.clientY, window.innerHeight - 60);
+        menu.style.left = x + 'px';
+        menu.style.top  = y + 'px';
+        menu.classList.add('open');
+    }
+    function hideCtxMenu() { document.getElementById('uc-ctx-menu')?.classList.remove('open'); }
+    document.addEventListener('click', hideCtxMenu);
+    document.getElementById('uc-ctx-save-btn')?.addEventListener('click', () => {
+        if (!_ctxAtt) return;
+        Object.assign(document.createElement('a'), { href: _dataUrl(_ctxAtt), download: _ctxAtt.name || 'datei' }).click();
+        hideCtxMenu();
+    });
+
+    // Long-Press (Mobile)
+    function addLongPress(el, callback) {
+        let timer = null;
+        el.addEventListener('touchstart', e => { timer = setTimeout(() => callback(e.touches[0]), 600); }, { passive: true });
+        el.addEventListener('touchend', () => clearTimeout(timer));
+        el.addEventListener('touchmove', () => clearTimeout(timer));
+    }
+
+    // Anhang-Rendering
+    function _renderAttachments(bubble, msg) {
+        const atts = msg.attachments || [];
+        if (atts.length === 0) return;
+        const imgAtts   = atts.filter(a => (a.mime_type || '').startsWith('image/'));
+        const otherAtts = atts.filter(a => !(a.mime_type || '').startsWith('image/'));
+
+        if (imgAtts.length > 0) {
+            const MAX = 4;
+            const gallery = document.createElement('div');
+            gallery.className = 'uc-img-gallery uc-ig-' + Math.min(imgAtts.length, MAX);
+            gallery.style.marginTop = bubble.innerHTML.trim() ? '6px' : '0';
+            imgAtts.slice(0, MAX).forEach((att, i) => {
+                const cell = document.createElement('div');
+                cell.className = 'uc-ig-cell';
+                const img = document.createElement('img');
+                img.src = _dataUrl(att);
+                img.alt = att.name || window.t('chat.image');
+                img.loading = 'lazy';
+                cell.appendChild(img);
+                if (i === MAX - 1 && imgAtts.length > MAX) {
+                    const ov = document.createElement('div');
+                    ov.className = 'uc-ig-more';
+                    ov.textContent = '+' + (imgAtts.length - MAX + 1);
+                    cell.appendChild(ov);
+                }
+                cell.addEventListener('click', e => { e.stopPropagation(); openLightbox(imgAtts, i); });
+                cell.addEventListener('contextmenu', e => showCtxMenu(e, att));
+                addLongPress(cell, e => showCtxMenu(e, att));
+                gallery.appendChild(cell);
+            });
+            bubble.appendChild(gallery);
+        }
+        for (const att of otherAtts) {
+            bubble.appendChild(_renderFileChip(att));
+        }
+    }
+
+    function _renderFileChip(att) {
+        const mime = (att.mime_type || '').toLowerCase();
+        const src  = _dataUrl(att);
+        const wrap = document.createElement('div');
+        wrap.className = 'uc-file-chip';
+        wrap.style.marginTop = '4px';
+
+        if (mime.startsWith('audio/')) {
+            wrap.classList.add('audio');
+            wrap.innerHTML = `<div class="uc-fc-icon">🎵</div>
+                <div class="uc-fc-info">
+                    <span class="uc-fc-name" title="${escapeHtml(att.name||'')}">${escapeHtml(att.name||'Audio')}</span>
+                    <span class="uc-fc-badge">Audio</span>
+                </div>`;
+            const player = document.createElement('audio');
+            player.controls = true; player.src = src; player.className = 'uc-fc-player';
+            wrap.appendChild(player);
+        } else if (mime.startsWith('video/')) {
+            wrap.classList.add('video');
+            wrap.innerHTML = `<div class="uc-fc-icon">🎬</div>
+                <div class="uc-fc-info">
+                    <span class="uc-fc-name" title="${escapeHtml(att.name||'')}">${escapeHtml(att.name||'Video')}</span>
+                    <span class="uc-fc-badge">Video</span>
+                </div>`;
+            const player = document.createElement('video');
+            player.controls = true; player.src = src; player.className = 'uc-fc-player'; player.style.maxWidth = '220px';
+            wrap.appendChild(player);
+        } else {
+            const isPdf = mime === 'application/pdf';
+            wrap.classList.add(isPdf ? 'pdf' : 'other');
+            const icon  = isPdf ? '📄' : '📎';
+            const badge = isPdf ? 'PDF' : att.name?.split('.').pop()?.toUpperCase() || 'Datei';
+            wrap.innerHTML = `<div class="uc-fc-icon">${icon}</div>
+                <div class="uc-fc-info" style="flex:1;min-width:0;">
+                    <span class="uc-fc-name" title="${escapeHtml(att.name||'')}">${escapeHtml(att.name||window.t('chat.file'))}</span>
+                    <span class="uc-fc-badge">${escapeHtml(badge)}</span>
+                </div>
+                <a class="uc-fc-dl" href="${src}" download="${escapeHtml(att.name||'datei')}" title="${escapeHtml(window.t('chat.download'))}">⬇</a>`;
+            // BSI H4 (CSP ohne Inline-Skript, 2026-10-04): stopPropagation
+            // frueher als onclick-Attribut - jetzt als Listener direkt am Link
+            // (gleiche Phase: Ziel-Element, vor jedem Vorfahren-Listener).
+            const _dl = wrap.querySelector('a.uc-fc-dl');
+            if (_dl) _dl.addEventListener('click', e => e.stopPropagation());
+            wrap.addEventListener('contextmenu', e => showCtxMenu(e, att));
+            addLongPress(wrap, e => showCtxMenu(e, att));
+        }
+        return wrap;
+    }
+
+    // ─── Verlauf-Persistenz (delegiert an chatlib.js) ───────────
+    function _currentDateStr() {
+        return (window.JarvisChatLib && window.JarvisChatLib.currentDateStr)
+            ? window.JarvisChatLib.currentDateStr()
+            : new Date().toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    }
+
+    function _saveHistory() {
+        if (_chatHistory.length > _HISTORY_MAX) _chatHistory = _chatHistory.slice(-_HISTORY_MAX);
+        if (window.JarvisChatLib && window.JarvisChatLib.saveHistory) {
+            window.JarvisChatLib.saveHistory(_HISTORY_KEY, _chatHistory, _HISTORY_MAX);
+        } else {
+            try { localStorage.setItem(_HISTORY_KEY, JSON.stringify(_chatHistory)); }
+            catch(e) { /* QuotaExceeded */ }
+        }
+    }
+
+    function _loadHistory() {
+        if (window.JarvisChatLib && window.JarvisChatLib.loadHistory) {
+            return window.JarvisChatLib.loadHistory(_HISTORY_KEY);
+        }
+        try {
+            const raw = localStorage.getItem(_HISTORY_KEY);
+            return raw ? (JSON.parse(raw) || []) : [];
+        } catch(e) { return []; }
+    }
+
+    function _addHistoryBubble(entry) {
+        const row = document.createElement('div');
+        row.className = `msg-row ${entry.role}`;
+
+        const timeEl = document.createElement('div');
+        timeEl.className = 'msg-time';
+
+        const bubble = document.createElement('div');
+        bubble.className = 'msg-bubble';
+        // Gespeicherte Bilder: sie selbst zeigen statt des Hinweises "[🖼️ name]".
+        // Nur wenn ALLE Anhaenge einen Verweis haben – sonst ginge der Hinweis
+        // auf die uebrigen (PDF, Audio …) mit verloren.
+        const _atts = (entry.role === 'user' && Array.isArray(entry.attachments)) ? entry.attachments : [];
+        let _shownText = entry.text;
+        if (_atts.length && entry.att_note && typeof entry.text === 'string'
+                && entry.text.endsWith(entry.att_note)
+                && _atts.length === entry.att_count) {
+            _shownText = entry.text.slice(0, entry.text.length - entry.att_note.length);
+        }
+        bubble.innerHTML = entry.role === 'user'
+            ? escapeHtml(_shownText)
+            : renderMarkdown(entry.text);
+        if (_atts.length) {
+            _renderAttachments(bubble, { attachments: _atts });
+            // Ablage abgelaufen (Aufbewahrungsfrist) oder fremd: totes Bild weg,
+            // dann wenigstens wieder den Namen zeigen.
+            bubble.querySelectorAll('.uc-ig-cell img').forEach(img => {
+                img.addEventListener('error', () => {
+                    const gal = img.closest('.uc-img-gallery');
+                    img.closest('.uc-ig-cell')?.remove();
+                    if (gal && !gal.querySelector('.uc-ig-cell')) bubble.textContent = entry.text;
+                }, { once: true });
+            });
+        }
+
+        // Wiederholen- + Edit-Button für User-Bubbles (auch nach Reload nutzbar)
+        if (entry.role === 'user') {
+            timeEl.appendChild(_makeRetryBtn(row, bubble));
+            const editBtn = document.createElement('button');
+            editBtn.type = 'button';
+            editBtn.className = 'msg-edit-btn';
+            editBtn.title = (window.t ? window.t('bubble.edit_msg') : 'Nachricht bearbeiten');
+            editBtn.setAttribute('aria-label', editBtn.title);
+            JarvisIcons.setPencil(editBtn);
+            editBtn.addEventListener('click', () => _editUserBubble(row, bubble));
+            timeEl.appendChild(editBtn);
+            const timeSpan = document.createElement('span');
+            timeSpan.textContent = entry.time || '';
+            timeEl.appendChild(timeSpan);
+            row.dataset.rawText = _shownText;
+        } else {
+            timeEl.textContent = entry.time || '';
+        }
+
+        const col = document.createElement('div');
+        col.appendChild(timeEl);
+        col.appendChild(bubble);
+
+        if (entry.role === 'bot') {
+            const avatar = document.createElement('div');
+            avatar.className = 'msg-avatar';
+            avatar.textContent = 'J';
+            if (window.brandAvatar) window.brandAvatar(avatar);
+            row.appendChild(avatar);
+
+            if (entry.stats) {
+                const stats = document.createElement('div');
+                stats.className = 'msg-stats';
+                stats.textContent = entry.stats;
+                col.appendChild(stats);
+            }
+            col.appendChild(_botActions(bubble));
+        }
+
+        row.appendChild(col);
+        messagesEl.appendChild(row);
+
+        // Kontextmenue auch fuer restaurierte Bubbles aktivieren (vorher fehlte
+        // dieser Hook, weshalb Rechtsklick im /chat-Popup nur Browser-Menue zeigte).
+        if (window.JarvisChatLib && window.JarvisChatLib.setupBubbleContextMenu) {
+            window.JarvisChatLib.setupBubbleContextMenu(row, (ev) => _buildBubbleCtxItems(row, bubble, entry.role, ev));
+        }
+    }
+
+    // ── Willkommens-Karte "Beispiel Prompts" ─────────────────────────────────
+    // Das Backend legt pro Benutzer EINMALIG eine Sitzung "Beispiel Prompts" an,
+    // deren Transkript nur einen Eintrag mit kind:"welcome" enthaelt (siehe
+    // backend/chat_sessions.py::ensure_welcome_session). Der sichtbare Inhalt
+    // entsteht hier aus i18n-Keys – so bleibt DE/EN umschaltbar und der Text muss
+    // nicht doppelt (Backend + Oberflaeche) gepflegt werden.
+    // Reihenfolge = Anzeigereihenfolge; icon ist reine Deko (aria-hidden).
+    const _WELCOME_EXAMPLES = [
+        { key: 'excel', icon: '📊' },
+        { key: 'word',  icon: '📝' },
+        { key: 'ppt',   icon: '📑' },
+        { key: 'data',  icon: '📎' },
+        { key: 'kb',    icon: '📚' },
+        // 'web' und 'image' entfernt (2026-08-04): fuer Web-Recherche existiert kein
+        // Werkzeug, und generate_image laeuft ueber das AKTIVE Profil – ist das ein
+        // Textmodell, liefert das Beispiel nur eine Fehlermeldung. Ersetzt durch zwei
+        // Quellen, die intern und ohne Internet-Freigabe erreichbar sind.
+        { key: 'jira',  icon: '🎫' },
+        { key: 'conf',  icon: '📘' },
+        // 'cron' und 'multi' entfernt (2026-08-04): cron_create und spawn_agent stehen
+        // beide in _BLOCKED_TOOLS_FOR_LDAP – fuer Domaenen-Benutzer also gesperrt; der
+        // Cron-Prompt nannte zusaetzlich Kalendertermine (google-Skill nicht aktiv).
+        { key: 'ibs',   icon: '👥' },
+        { key: 'multi2', icon: '🔎' },
+        { key: 'code',  icon: '💻' },
+        // 'viz' (2026-09-28): eingefuegte Tabelle direkt als Diagramm (create_chart).
+        { key: 'viz',   icon: '📈' },
+        // 'image' zurueck (2026-09-28): seit 2026-09-02 malt generate_image mit dem
+        // eigenen BILDPROFIL (config.IMAGE_PROFILE_ID) statt mit dem Textprofil des
+        // Laufs – der Grund fuer das Entfernen am 2026-08-04 ist damit entfallen.
+        { key: 'image', icon: '🎨' },
+    ];
+
+    /** Baut die Willkommens-Karte mit anklickbaren Beispiel-Prompts. */
+    function _renderWelcomeCard(entry) {
+        const card = document.createElement('div');
+        card.className = 'welcome-card';
+
+        const head = document.createElement('p');
+        head.className = 'welcome-card-head';
+        head.setAttribute('data-i18n', 'chat.welcome_head');
+        head.textContent = window.t('chat.welcome_head');
+
+        const intro = document.createElement('p');
+        intro.className = 'welcome-card-intro';
+        intro.setAttribute('data-i18n', 'chat.welcome_intro');
+        // Notfall-Text des Backends nutzen, falls die i18n-Tabelle den Key nicht kennt
+        intro.textContent = window.t('chat.welcome_intro') === 'chat.welcome_intro'
+            ? ((entry && entry.text) || '') : window.t('chat.welcome_intro');
+
+        const grid = document.createElement('div');
+        grid.className = 'wex-grid';
+        _WELCOME_EXAMPLES.forEach(ex => {
+            const labelKey  = 'chat.wex_' + ex.key + '_label';
+            const descKey   = 'chat.wex_' + ex.key + '_desc';
+            const promptKey = 'chat.wex_' + ex.key + '_prompt';
+
+            const chip = document.createElement('button');
+            chip.type = 'button';
+            chip.className = 'wex-chip';
+            // Prompt NICHT hier einfrieren, sondern beim Klick frisch uebersetzen –
+            // sonst haette ein Sprachwechsel den alten Text weitergesendet.
+            chip.dataset.promptKey = promptKey;
+            chip.setAttribute('data-i18n-title', promptKey);
+            chip.title = window.t(promptKey);
+
+            const icon = document.createElement('span');
+            icon.className = 'wex-icon';
+            icon.setAttribute('aria-hidden', 'true');
+            icon.textContent = ex.icon;
+
+            const txt = document.createElement('span');
+            txt.className = 'wex-text';
+            const lab = document.createElement('span');
+            lab.className = 'wex-label';
+            lab.setAttribute('data-i18n', labelKey);
+            lab.textContent = window.t(labelKey);
+            const desc = document.createElement('span');
+            desc.className = 'wex-desc';
+            desc.setAttribute('data-i18n', descKey);
+            desc.textContent = window.t(descKey);
+            txt.appendChild(lab); txt.appendChild(desc);
+
+            chip.appendChild(icon); chip.appendChild(txt);
+            chip.addEventListener('click', () => _useExamplePrompt(window.t(chip.dataset.promptKey)));
+            grid.appendChild(chip);
+        });
+
+        const hint = document.createElement('p');
+        hint.className = 'welcome-card-hint';
+        hint.setAttribute('data-i18n', 'chat.welcome_hint');
+        hint.textContent = window.t('chat.welcome_hint');
+
+        card.appendChild(head);
+        card.appendChild(intro);
+        card.appendChild(grid);
+        card.appendChild(hint);
+        return card;
+    }
+
+    /** Beispiel-Prompt in die Eingabe uebernehmen und abschicken. */
+    function _useExamplePrompt(text) {
+        if (!text) return;
+        msgInput.value = text;
+        msgInput.dispatchEvent(new Event('input'));   // Auto-Resize + Senden-Knopf aktivieren
+        // Laeuft schon eine Anfrage, bleibt der Text stehen (sendMessage warnt) –
+        // der Benutzer kann ihn dann nach dem Stoppen selbst abschicken.
+        sendMessage();
+        if (!agentRunning) msgInput.focus();
+    }
+
+    // ── Chat-Sitzungen: Persistenz je aktiver Sitzung (statt geteilter History) ──
+    function _csHeaders(extra) { return Object.assign({ 'Authorization': 'Bearer ' + token }, extra || {}); }
+    function _sidKey() { return 'jarvis_chat_sid_' + (_currentUser || 'anon'); }
+    // Transkript der aktiven Sitzung serverseitig speichern (nach jedem Turn/Edit)
+    function _persistSession() {
+        if (!_activeSid || !token) return;
+        const body = { messages: _chatHistory };
+        // Wissensgruppen-Auswahl der Sitzung mitspeichern (null=alle, []=keine, [ids])
+        if (_kbFilter) body.kb_groups = _kbFilter.getSelection();
+        // Gewaehltes KI-Profil der Sitzung mitspeichern (Pulldown-Zustand im Verlauf)
+        if (_profSel) body.profile_id = _profSel.getSelected() || '';
+        fetch('/api/chat/sessions/' + encodeURIComponent(_activeSid) + '/transcript', {
+            method: 'PUT', headers: _csHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify(body)
+        }).catch(() => {});
+    }
+    // Kompatible Namen zu den bisherigen Aufrufstellen -> alle schreiben die Sitzung
+    function _syncAppend(_msg) { _persistSession(); }
+    function _syncReplace() { _persistSession(); }
+
+    // Bot-Antwort in das Transkript einer NICHT geoeffneten Sitzung anhaengen
+    // (Antwort-Routing: die Frage wurde dort gestellt, der Benutzer hat inzwischen
+    // den Verlauf gewechselt). Nur `messages` senden – kb_groups/profile_id der
+    // Ziel-Sitzung bleiben unangetastet.
+    async function _appendToSessionTranscript(sid, entry) {
+        try {
+            const d = await _csGet(sid);
+            if (!d) return;   // Sitzung inzwischen geloescht
+            const msgs = (d.transcript || []);
+            msgs.push(entry);
+            await fetch('/api/chat/sessions/' + encodeURIComponent(sid) + '/transcript', {
+                method: 'PUT', headers: _csHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ messages: msgs })
+            });
+            // Sidebar aktualisieren (Auto-Benennung/updated der Ursprungs-Sitzung)
+            const list = await _csList();
+            if (list.length) { _sessions = list; _renderSidebar(); }
+        } catch (e) { /* best effort */ }
+    }
+
+    async function _csList() {
+        try { const r = await fetch('/api/chat/sessions', { headers: _csHeaders() }); const d = await r.json(); return (d && d.sessions) || []; }
+        catch (e) { return []; }
+    }
+    async function _csCreate(title) {
+        try {
+            const r = await fetch('/api/chat/sessions', { method: 'POST', headers: _csHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ title: title || '' }) });
+            const d = await r.json(); return d && d.session;
+        } catch (e) { return null; }
+    }
+    async function _csGet(sid) {
+        try { const r = await fetch('/api/chat/sessions/' + encodeURIComponent(sid), { headers: _csHeaders() }); if (!r.ok) return null; return await r.json(); }
+        catch (e) { return null; }
+    }
+
+    function _renderSidebar() {
+        const list = document.getElementById('cs-list');
+        if (!list) return;
+        // Ids, die es nicht mehr gibt, fallen aus der Auswahl – sonst schickte
+        // "Löschen (3)" Ids mit, die laengst weg sind, und die Zahl am Knopf
+        // behauptete eine Auswahl, die die Liste gar nicht zeigt.
+        if (_selIds.size) {
+            const da = new Set(_sessions.map(x => x.id));
+            Array.from(_selIds).forEach(id => { if (!da.has(id)) _selIds.delete(id); });
+        }
+        _renderTools();
+        if (!_sessions.length) { list.innerHTML = '<div class="cs-empty">' + escapeHtml(window.t('chat.no_sessions')) + '</div>'; return; }
+        list.innerHTML = '';
+        _sessions.forEach(s => {
+            const item = document.createElement('div');
+            item.className = 'cs-item' + (s.id === _activeSid ? ' active' : '')
+                           + (_selMode && _selIds.has(s.id) ? ' cs-picked' : '');
+            // Im Auswahlmodus ersetzt das Kaestchen die Aktionsknoepfe: ein
+            // Muelleimer je Zeile NEBEN einer Mehrfachauswahl liesse offen,
+            // welche der beiden Loeschungen ein Klick ausloest.
+            if (_selMode) {
+                const cb = document.createElement('input');
+                cb.type = 'checkbox'; cb.className = 'cs-check';
+                cb.checked = _selIds.has(s.id);
+                cb.setAttribute('aria-label', s.title || window.t('chat.untitled'));
+                const titleSel = document.createElement('span');
+                titleSel.className = 'cs-title'; titleSel.textContent = s.title || window.t('chat.untitled');
+                item.appendChild(cb); item.appendChild(titleSel);
+                // NUR auf 'change' hoeren und im Klick der Zeile den Knopf
+                // auslassen: ein zusaetzliches `cb.checked = !cb.checked` hebt
+                // die Umschaltung des Browsers wieder auf.
+                cb.addEventListener('change', () => _selSetze(s.id, cb.checked));
+                item.addEventListener('click', (e) => {
+                    if (cb.contains(e.target)) return;
+                    _selSetze(s.id, !_selIds.has(s.id));
+                });
+                list.appendChild(item);
+                return;
+            }
+            const title = document.createElement('span');
+            title.className = 'cs-title'; title.textContent = s.title || window.t('chat.untitled');
+            const ren = document.createElement('button'); ren.type = 'button'; ren.className = 'cs-act cs-ren'; JarvisIcons.setPencil(ren); ren.title = window.t('chat.rename');
+            // Sprechblase = Prompt fuer DIESEN Chat. Gefuellt, wenn einer
+            // hinterlegt ist – die Form ist die sichtbare Aussage, der Wortlaut
+            // steht in title/aria-label (Farbe allein waere keine Information).
+            const pr = document.createElement('button'); pr.type = 'button';
+            pr.className = 'cs-act cs-prompt' + (s.has_prompt ? ' is-gesetzt' : '');
+            JarvisIcons.setPrompt(pr, !!s.has_prompt);
+            pr.title = window.t(s.has_prompt ? 'chat.sprompt_btn_set' : 'chat.sprompt_btn');
+            pr.setAttribute('aria-label', pr.title);
+            const del = document.createElement('button'); del.type = 'button'; del.className = 'cs-act cs-del'; JarvisIcons.setTrash(del); del.title = window.t('chat.delete');
+            item.appendChild(title); item.appendChild(pr); item.appendChild(ren); item.appendChild(del);
+            // `contains` statt `e.target === …`: die Knoepfe tragen ein
+            // Inline-SVG, ein Klick trifft dort das <path> und nicht den Knopf.
+            // Getragen hat das bisher allein das `stopPropagation` in den
+            // Knopf-Handlern – diese Pruefung ist der Guertel dazu und faellt
+            // nicht aus, wenn ein kuenftiger Handler es vergisst.
+            item.addEventListener('click', (e) => {
+                if (pr.contains(e.target) || ren.contains(e.target) || del.contains(e.target)) return;
+                _switchSession(s.id);
+            });
+            ren.addEventListener('click', (e) => { e.stopPropagation(); _renameSession(s); });
+            pr.addEventListener('click', (e) => { e.stopPropagation(); _openSessionPrompt(s); });
+            del.addEventListener('click', (e) => { e.stopPropagation(); _deleteSession(s); });
+            list.appendChild(item);
+        });
+    }
+
+    /* ─── Auswahlmodus: mehrere Chats zusammen loeschen ────────────────────
+       Der Modus ist bewusst ein eigener Zustand und nicht Strg-Klick: ein
+       unsichtbarer Handgriff findet niemand, und der Muelleimer je Zeile soll
+       weiter genau EINEN Chat meinen.                                        */
+    function _renderTools() {
+        const bar = $('cs-tools');
+        if (!bar) return;
+        // Ohne Chats gibt es nichts auszuwaehlen – dann verschwindet die Zeile
+        // ganz, samt eines etwa noch offenen Auswahlmodus.
+        if (!_sessions.length && _selMode) { _selMode = false; _selIds.clear(); }
+        bar.hidden = !_sessions.length;
+        const modus = $('cs-selmode');
+        if (modus) {
+            // Der Umschalter wechselt seine BESCHRIFTUNG mit dem Zustand –
+            // gleichbleibender Text saehe beim Zurueckschalten wie ein
+            // wirkungsloser Klick aus. Der i18n-Schluessel wandert im Attribut
+            // mit, damit applyLang() nach einem Sprachwechsel den Text des
+            // AKTUELLEN Zustands setzt und nicht den der Vorgabe.
+            const k  = _selMode ? 'chat.select_cancel' : 'chat.select_many';
+            const kt = _selMode ? 'chat.select_cancel_title' : 'chat.select_many_title';
+            modus.setAttribute('data-i18n', k);
+            modus.textContent = window.t(k);
+            modus.setAttribute('data-i18n-title', kt);
+            modus.title = window.t(kt);
+        }
+        const allWrap = $('cs-all-wrap'), all = $('cs-all');
+        if (allWrap) allWrap.hidden = !_selMode;
+        if (all) {
+            const voll = _selIds.size > 0 && _selIds.size === _sessions.length;
+            all.checked = _selMode && voll;
+            all.indeterminate = _selMode && _selIds.size > 0 && !voll;
+        }
+        const del = $('cs-seldel');
+        if (del) {
+            del.hidden = !_selMode;
+            del.disabled = _selIds.size === 0;
+            const ico = $('cs-seldel-ico');
+            if (ico && !ico.firstChild) JarvisIcons.setTrash(ico);
+            const txt = $('cs-seldel-txt');
+            // Die Zahl steht IM Knopf: sie ist die einzige Stelle, an der vor
+            // dem Klick steht, wie viele Chats gleich verschwinden.
+            if (txt) txt.textContent = window.t('chat.delete_selected').replace('{n}', String(_selIds.size));
+        }
+    }
+
+    function _selSetze(id, an) {
+        if (an) _selIds.add(id); else _selIds.delete(id);
+        _renderSidebar();
+    }
+
+    function _selModus(an) {
+        _selMode = !!an;
+        _selIds.clear();       // ein neuer Durchgang beginnt leer
+        _renderSidebar();
+    }
+
+    function _selAlle(an) {
+        _selIds.clear();
+        if (an) _sessions.forEach(s => _selIds.add(s.id));
+        _renderSidebar();
+    }
+
+    // Ausgewaehlte Chats in EINEM Aufruf loeschen. Teilerfolge werden benannt:
+    // der Server sagt, welche Ids weg sind – nur die fallen aus der Liste,
+    // sonst verschwaende die Oberflaeche einen Chat, den es noch gibt.
+    async function _deleteSelected() {
+        const ids = _sessions.filter(s => _selIds.has(s.id)).map(s => s.id);
+        if (!ids.length) return;
+        if (!window.confirm(window.t('chat.delete_many_confirm').replace('{n}', String(ids.length)))) return;
+        let d = null;
+        try {
+            const r = await fetch('/api/chat/sessions/delete', {
+                method: 'POST', headers: _csHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ ids })
+            });
+            d = await r.json();
+        } catch (e) { d = null; }
+        if (!d || !Array.isArray(d.deleted)) { showToast(window.t('chat.delete_many_failed')); return; }
+        const weg = new Set(d.deleted);
+        _sessions = _sessions.filter(x => !weg.has(x.id));
+        _selMode = false; _selIds.clear();
+        if (weg.size) showToast(window.t('chat.delete_many_done').replace('{n}', String(weg.size)));
+        const offen = (d.failed || []).length;
+        // Ein Fehlschlag darf nicht still bleiben – sonst steht der Chat wieder
+        // in der Liste und niemand weiss, warum.
+        if (offen) showToast(window.t('chat.delete_many_partial').replace('{n}', String(offen)));
+        await _nachLoeschen(weg.has(_activeSid));
+    }
+
+    // Gemeinsamer Nachlauf von Einzel- und Sammel-Loeschung: war die AKTIVE
+    // Sitzung dabei, muss eine andere geoeffnet werden – und ist keine mehr da,
+    // eine neue entstehen, sonst steht der Chat ohne `session_id` da.
+    async function _nachLoeschen(aktiveWeg) {
+        if (!aktiveWeg) { _renderSidebar(); return; }
+        _activeSid = _sessions[0] ? _sessions[0].id : null;
+        if (!_activeSid) {
+            const ns = await _csCreate('');
+            if (ns) { _sessions.unshift(ns); _activeSid = ns.id; }
+        }
+        try { localStorage.setItem(_sidKey(), _activeSid || ''); } catch (e) {}
+        _renderSidebar();
+        await _restoreHistory();
+        _updateContextIndicator();
+    }
+
+    // Die Verlaufsleiste wird aus JS gebaut, applyLang() erreicht sie nur ueber
+    // die data-i18n-Attribute der Werkzeugzeile – die Zahl am Loeschknopf
+    // ("Löschen (3)") und der Platzhalter "(ohne Titel)" haengen dagegen am
+    // Aufruf von window.t(). Ohne diesen Zuhoerer blieben sie nach einem
+    // Sprachwechsel in der alten Sprache stehen. `_renderSidebar` ruft selbst
+    // KEIN applyLang – sonst baute sich die Leiste endlos neu auf.
+    window.addEventListener('jarvis-lang-changed', function () {
+        try { _renderSidebar(); } catch (e) { /* egal */ }
+    });
+
+    // Sicherstellen, dass eine Sitzung aktiv IST, bevor gesendet wird.
+    // Fenster, in dem das fehlen konnte: zwischen Seitenaufbau und dem Ende von
+    // _initSessions() (Liste holen / erste Sitzung anlegen) ist _activeSid noch
+    // null. Wer in dieser Zehntelsekunde abschickt, sendet den Auftrag OHNE
+    // session_id – der Kontext landet dann im sitzungslosen Bucket
+    // (_hist_key ohne Id) und gehoert zu keiner Sitzung der Seitenleiste.
+    async function _ensureSession() {
+        if (_activeSid) return _activeSid;
+        try { await _initSessions(); } catch (e) {}
+        if (!_activeSid) {
+            const ns = await _csCreate('');
+            if (ns) { _sessions.unshift(ns); _activeSid = ns.id; _renderSidebar(); }
+        }
+        return _activeSid;
+    }
+
+    async function _initSessions() {
+        _sessions = await _csList();
+        let want = null; try { want = localStorage.getItem(_sidKey()); } catch (e) {}
+        let active = _sessions.find(s => s.id === want) || _sessions[0] || null;
+        if (!active) { active = await _csCreate(''); if (active) _sessions.unshift(active); }
+        _activeSid = active ? active.id : null;
+        if (_activeSid) { try { localStorage.setItem(_sidKey(), _activeSid); } catch (e) {} }
+        _renderSidebar();
+        await _restoreHistory();        _updateContextIndicator();
+    }
+
+    async function _switchSession(sid) {
+        if (sid === _activeSid) return;
+        _persistSession();
+        _activeSid = sid;
+        try { localStorage.setItem(_sidKey(), sid); } catch (e) {}
+        _renderSidebar();
+        await _restoreHistory();        _updateContextIndicator();
+        // Laeuft gerade eine Anfrage DIESER Sitzung (Rueckwechsel waehrend Streaming):
+        // bisher gepufferten Antwort-Text als Streaming-Bubble fortsetzen.
+        if (agentRunning && _runSid === sid && _lastBotResp) {
+            currentBotBubble = addBubble(_lastBotResp, 'bot');
+            currentBotBubble._rawText = _lastBotResp;
+            _lastBotCol = currentBotBubble.parentElement;
+            addStreamingDots();
+            scrollToBottom();
+        }
+    }
+
+    async function _newSession() {
+        _persistSession();
+        const s = await _csCreate('');
+        if (!s) return;
+        _sessions.unshift(s);
+        _activeSid = s.id;
+        try { localStorage.setItem(_sidKey(), s.id); } catch (e) {}
+        _renderSidebar();
+        await _restoreHistory();        _updateContextIndicator();
+        if (typeof msgInput !== 'undefined' && msgInput) msgInput.focus();
+    }
+
+    // ── Willkommens-Chat "Beispiel Prompts" zurueckholen ─────────────────────
+    // Das Backend legt ihn pro Benutzer nur EINMAL an und merkt sich das per
+    // Marker – nach dem Loeschen kam er nie wieder. Dieser Knopf ist der
+    // ausdrueckliche Weg zurueck; ist der Chat noch da, springt er nur hinein
+    // (der Endpunkt legt dann bewusst KEINEN zweiten gleichen Namens an).
+    async function _restoreWelcome() {
+        const btn = $('cs-welcome');
+        if (btn) btn.disabled = true;
+        try {
+            const r = await fetch('/api/chat/welcome/restore', { method: 'POST', headers: _csHeaders() });
+            const d = await r.json();
+            if (!d || !d.ok || !d.session) { showToast(window.t('chat.welcome_restore_failed')); return; }
+            _persistSession();
+            // Liste frisch holen statt den einen Eintrag einzuschieben: sonst
+            // stuende die neue Sitzung an falscher Stelle (sortiert nach updated).
+            const list = await _csList();
+            if (list && list.length) _sessions = list;
+            if (!_sessions.some(x => x.id === d.session.id)) _sessions.unshift(d.session);
+            _activeSid = d.session.id;
+            try { localStorage.setItem(_sidKey(), _activeSid); } catch (e) {}
+            _renderSidebar();
+            await _restoreHistory();
+            _updateContextIndicator();
+            showToast(window.t(d.restored ? 'chat.welcome_restored' : 'chat.welcome_present'));
+        } catch (e) {
+            showToast(window.t('chat.welcome_restore_failed'));
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    // ── Einstellungen-Dialog (Zahnrad neben "+ Neuer Chat") ──────────────────
+    // Zwei Container: persoenlicher Preprompt (gilt fuer ALLE Chats) und die
+    // Wissensquellen-Vorauswahl (gilt fuer NEUE Chats). EIN Speichern-Knopf
+    // schreibt beides – die zwei Endpunkte setzen je ihren eigenen Wert
+    // vollstaendig, es gibt also keine Merge-Semantik, die man trennen muesste.
+    let _kbDefEintraege = null;   // geladene Eintragsliste, null = nicht ladbar
+
+    // Klappzustand der zwei Container. VORGABE: Preprompt offen, Wissensquellen
+    // zu – der Preprompt wird haeufiger angefasst, die Vorauswahl ist eine
+    // Einmal-Einstellung. Gemerkt wird die Wahl des Benutzers, sonst muesste er
+    // sie bei jedem Oeffnen neu treffen.
+    const _CHS_OFFEN_KEY = 'jarvis_chat_settings_open';
+    const _CHS_VORGABE = { preprompt: true, kb: false };
+
+    function _chsOffenLesen() {
+        // Fail-safe: ohne (oder mit kaputtem) gespeicherten Wert gelten die
+        // Vorgaben – localStorage kann in einem privaten Fenster auch werfen.
+        const st = Object.assign({}, _CHS_VORGABE);
+        try {
+            const d = JSON.parse(localStorage.getItem(_CHS_OFFEN_KEY) || '{}');
+            if (d && typeof d === 'object') {
+                Object.keys(_CHS_VORGABE).forEach(k => {
+                    if (typeof d[k] === 'boolean') st[k] = d[k];
+                });
+            }
+        } catch (e) { /* Vorgaben */ }
+        return st;
+    }
+
+    function _chsOffenSchreiben() {
+        const st = {};
+        document.querySelectorAll('#chat-settings-modal .chs-sect[data-chs]').forEach(d => {
+            st[d.dataset.chs] = d.open;
+        });
+        try { localStorage.setItem(_CHS_OFFEN_KEY, JSON.stringify(st)); } catch (e) {}
+    }
+
+    // Zustand anwenden und die Speicherung EINMAL verdrahten. Idempotent, weil
+    // der Dialog mehrfach geoeffnet wird.
+    function _chsKlappZustand() {
+        const st = _chsOffenLesen();
+        document.querySelectorAll('#chat-settings-modal .chs-sect[data-chs]').forEach(d => {
+            const soll = st[d.dataset.chs];
+            if (typeof soll === 'boolean') d.open = soll;
+            if (!d._chsWired) {
+                d._chsWired = true;
+                d.addEventListener('toggle', _chsOffenSchreiben);
+            }
+        });
+    }
+
+    // ⚠ ERST LADEN, DANN SICHTBAR MACHEN. Die Gruppenliste kommt asynchron, und
+    // sie steht IM Dialog: wird sie nachgetragen, waechst der Dialog und die
+    // Knoepfe im Fuss wandern nach unten. Gemessen: 29 px in den ersten 50 ms
+    // (Kasten 635 -> 693 px). Ein Klick auf "Speichern"/"Schliessen" in dieser
+    // Zeit trifft ins Leere – der Knopf sieht dann kaputt aus, obwohl er
+    // verdrahtet ist. Deshalb wird der Inhalt fertig aufgebaut, bevor der
+    // Dialog erscheint; das Zahnrad meldet die Wartezeit (aria-busy), sonst
+    // wirkt ein langsamer Abruf wie ein toter Knopf.
+    let _chsLaeuft = false;
+    async function _openChatSettings() {
+        const modal = $('chat-settings-modal');
+        const ta = $('preprompt-text');
+        const st = $('chat-settings-status');
+        const zahn = $('cs-settings');
+        if (!modal || _chsLaeuft) return;
+        _chsLaeuft = true;
+        if (zahn) { zahn.setAttribute('aria-busy', 'true'); zahn.classList.add('is-busy'); }
+        if (st) st.textContent = '';
+        if (ta) ta.value = '';
+        _chsKlappZustand();
+        try {
+            // Beide Teile UNABHAENGIG laden: ein Fehler im einen darf den
+            // anderen nicht mitnehmen.
+            try {
+                const r = await fetch('/api/chat/preprompt', { headers: _csHeaders() });
+                const d = await r.json();
+                if (d && d.ok && ta) ta.value = d.preprompt || '';
+            } catch (e) {}
+            await _kbDefZeichnen();
+        } finally {
+            _chsLaeuft = false;
+            if (zahn) { zahn.removeAttribute('aria-busy'); zahn.classList.remove('is-busy'); }
+        }
+        modal.classList.remove('hidden');
+        if (ta) ta.focus();
+    }
+
+    function _closeChatSettings() {
+        const modal = $('chat-settings-modal');
+        if (modal) modal.classList.add('hidden');
+    }
+
+    // Gruppenliste + Vorauswahl in den Dialog zeichnen.
+    async function _kbDefZeichnen() {
+        const box = $('chs-kb-list');
+        const hint = $('chs-kb-hint');
+        if (!box) return;
+        box.innerHTML = '<div class="chs-kb-empty">' + escapeHtml(window.t('common.loading') || '…') + '</div>';
+        await _kbDefLaden();
+        const off = _kbDefOff || new Set();
+        let alle = null;
+        try {
+            if (window.KbGroupFilter && window.KbGroupFilter.loadEntries) {
+                alle = await window.KbGroupFilter.loadEntries();
+            }
+        } catch (e) { alle = null; }
+        _kbDefEintraege = alle;
+        if (!alle) {
+            // Fail-safe: ohne Liste wird beim Speichern NICHTS an der Vorauswahl
+            // geaendert – sonst schriebe ein Speichern "nichts abgewaehlt" und
+            // loeschte eine vorhandene Einstellung.
+            box.innerHTML = '<div class="chs-kb-empty">' + escapeHtml(window.t('chat.kbdef_load_failed')) + '</div>';
+            if (hint) { hint.hidden = false; hint.className = 'chs-hint is-warn'; hint.textContent = window.t('chat.kbdef_load_failed'); }
+            return;
+        }
+        if (!alle.length) {
+            box.innerHTML = '<div class="chs-kb-empty">' + escapeHtml(window.t('kbfilter.empty')) + '</div>';
+            if (hint) hint.hidden = true;
+            return;
+        }
+        box.innerHTML = alle.map(e =>
+            '<label class="chs-kb-row"><input type="checkbox" value="' + escapeHtml(e.id) + '"' + (off.has(e.id) ? '' : ' checked') + '>' +
+            '<span class="chs-kb-dot" style="background:' + escapeHtml(e.color || '#94a3b8') + '"></span>' +
+            '<span class="chs-kb-name">' + escapeHtml(e.name) + '</span></label>'
+        ).join('');
+        // Nur auf `change` hoeren und NIE selbst umschalten: das Kaestchen sitzt
+        // in einem <label>, der Browser schaltet es bereits – ein zusaetzliches
+        // Umschalten hebt sich auf und der Klick tut unterm Strich nichts
+        // (im Projekt beim AD-Picker bezahlt).
+        box.querySelectorAll('input[type=checkbox]').forEach(cb => {
+            cb.addEventListener('change', _kbDefHinweis);
+        });
+        _kbDefHinweis();
+    }
+
+    function _kbDefSetzeAlle(an) {
+        const box = $('chs-kb-list');
+        if (!box) return;
+        box.querySelectorAll('input[type=checkbox]').forEach(cb => { cb.checked = !!an; });
+        _kbDefHinweis();
+    }
+
+    // Sagt es, wenn die Wahl bedeutet "neue Chats ohne Wissensdatenbank" –
+    // sonst ist das eine stille Nebenwirkung, die niemand mit dieser
+    // Einstellung verbindet.
+    function _kbDefHinweis() {
+        const box = $('chs-kb-list');
+        const hint = $('chs-kb-hint');
+        if (!box || !hint) return;
+        const cbs = Array.from(box.querySelectorAll('input[type=checkbox]'));
+        if (!cbs.length) { hint.hidden = true; return; }
+        const an = cbs.filter(cb => cb.checked).length;
+        if (an === 0) { hint.hidden = false; hint.className = 'chs-hint is-warn'; hint.textContent = window.t('chat.kbdef_none_hint'); }
+        else { hint.hidden = true; hint.textContent = ''; }
+    }
+
+    // Sprachwechsel bei OFFENEM Dialog: der Hinweis und die Ladezeile kommen aus
+    // t() und werden von applyLang() nicht erfasst – also neu zeichnen.
+    try {
+        window.addEventListener('jarvis-lang-changed', function () {
+            const m = $('chat-settings-modal');
+            if (m && !m.classList.contains('hidden')) { _kbDefHinweis(); }
+        });
+    } catch (e) { /* aeltere Umgebung ohne Ereignis: dann wie bisher */ }
+
+    async function _saveChatSettings() {
+        const ta = $('preprompt-text');
+        const st = $('chat-settings-status');
+        const btn = $('btn-chat-settings-save');
+        if (btn) btn.disabled = true;
+        const fehler = [];
+        try {
+            // (1) Preprompt
+            if (ta) {
+                try {
+                    const r = await fetch('/api/chat/preprompt', {
+                        method: 'PUT',
+                        headers: _csHeaders({ 'Content-Type': 'application/json' }),
+                        body: JSON.stringify({ preprompt: ta.value })
+                    });
+                    const d = await r.json();
+                    if (!d || !d.ok) fehler.push(window.t('chat.preprompt_heading'));
+                } catch (e) { fehler.push(window.t('chat.preprompt_heading')); }
+            }
+            // (2) Wissensquellen-Vorauswahl – NUR wenn die Liste wirklich vorlag
+            const box = $('chs-kb-list');
+            const cbs = box ? Array.from(box.querySelectorAll('input[type=checkbox]')) : [];
+            if (_kbDefEintraege && cbs.length) {
+                const off = cbs.filter(cb => !cb.checked).map(cb => cb.value);
+                try {
+                    const r = await fetch('/api/chat/kb-default', {
+                        method: 'PUT',
+                        headers: _csHeaders({ 'Content-Type': 'application/json' }),
+                        body: JSON.stringify({ off: off })
+                    });
+                    const d = await r.json();
+                    if (d && d.ok) _kbDefOff = new Set(Array.isArray(d.off) ? d.off : []);
+                    else fehler.push(window.t('chat.kbdef_heading'));
+                } catch (e) { fehler.push(window.t('chat.kbdef_heading')); }
+            }
+            if (st) {
+                st.textContent = fehler.length
+                    ? window.t('chat.settings_save_failed').replace('{t}', fehler.join(', '))
+                    : window.t('chat.preprompt_saved');
+            }
+            if (!fehler.length) setTimeout(_closeChatSettings, 700);
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    // ── Prompt fuer EINEN Chat (Sprechblase an der Zeile) ────────────────────
+    // Er ersetzt den persoenlichen Preprompt, solange er gefuellt ist. Der
+    // Dialog wird immer fuer die ANGEKLICKTE Sitzung geoeffnet, nicht fuer die
+    // aktive – deshalb steht der Chatname im Titel und die Kennung wird
+    // gemerkt, statt spaeter `_activeSid` zu lesen.
+    let _spSid = null;
+    let _spLaeuft = false;
+
+    async function _openSessionPrompt(s) {
+        const modal = $('chat-prompt-modal');
+        const ta = $('chat-prompt-text');
+        if (!modal || !s || _spLaeuft) return;
+        _spLaeuft = true;
+        _spSid = s.id;
+        const nameEl = $('chat-prompt-name');
+        if (nameEl) nameEl.textContent = s.title || window.t('chat.untitled');
+        const st = $('chat-prompt-status'); if (st) st.textContent = '';
+        if (ta) { ta.value = ''; ta.disabled = false; }
+        let ok = true;
+        try {
+            const r = await fetch('/api/chat/sessions/' + encodeURIComponent(s.id) + '/preprompt',
+                                  { headers: _csHeaders() });
+            const d = await r.json();
+            if (d && d.ok) { if (ta) ta.value = d.preprompt || ''; }
+            else ok = false;
+        } catch (e) { ok = false; }
+        finally { _spLaeuft = false; }
+        // ⚠ Ein Ladefehler darf NICHT als leeres Feld erscheinen: ein Speichern
+        // darauf wuerde einen vorhandenen Prompt loeschen, ohne dass jemand ihn
+        // gesehen hat. Also sagen, dass nichts geladen wurde, und das Feld
+        // sperren – der Benutzer kann es nach dem naechsten Versuch aendern.
+        if (!ok) {
+            if (ta) ta.disabled = true;
+            if (st) st.textContent = window.t('chat.sprompt_load_failed');
+        }
+        _spZustand();
+        // Erst sichtbar machen, wenn der Inhalt steht: ein Dialog, der nach dem
+        // Erscheinen waechst, verschiebt seine Knoepfe unter dem Zeiger weg.
+        modal.classList.remove('hidden');
+        if (ta && !ta.disabled) ta.focus();
+    }
+
+    function _closeSessionPrompt() {
+        const modal = $('chat-prompt-modal');
+        if (modal) modal.classList.add('hidden');
+        _spSid = null;
+    }
+
+    // Sagt, welche der beiden Anweisungen gerade greift. Ohne diese Zeile ist
+    // ein leeres Feld nicht von "es gilt nichts" zu unterscheiden – dabei gilt
+    // dann sehr wohl etwas, naemlich der persoenliche Preprompt.
+    function _spZustand() {
+        const el = $('chat-prompt-state');
+        const ta = $('chat-prompt-text');
+        if (!el || !ta) return;
+        el.textContent = ta.value.trim()
+            ? window.t('chat.sprompt_state_own')
+            : window.t('chat.sprompt_state_default');
+    }
+
+    async function _saveSessionPrompt() {
+        const ta = $('chat-prompt-text');
+        const st = $('chat-prompt-status');
+        const btn = $('btn-chat-prompt-save');
+        if (!ta || !_spSid || ta.disabled) return;
+        const sid = _spSid;
+        if (btn) btn.disabled = true;
+        try {
+            const r = await fetch('/api/chat/sessions/' + encodeURIComponent(sid) + '/preprompt', {
+                method: 'PUT',
+                headers: _csHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ preprompt: ta.value })
+            });
+            const d = await r.json();
+            if (d && d.ok) {
+                // Die Antwort des Servers gewinnt gegen den Formularstand: er
+                // deckelt die Laenge und entscheidet, ob noch etwas gilt.
+                ta.value = d.preprompt || '';
+                const s = _sessions.find(x => x.id === sid);
+                if (s) { s.has_prompt = !!d.has_prompt; _renderSidebar(); }
+                _spZustand();
+                if (st) st.textContent = window.t('chat.preprompt_saved');
+                setTimeout(_closeSessionPrompt, 700);
+            } else if (st) {
+                st.textContent = window.t('chat.settings_save_failed')
+                    .replace('{t}', window.t('chat.sprompt_title'));
+            }
+        } catch (e) {
+            if (st) st.textContent = window.t('chat.settings_save_failed')
+                .replace('{t}', window.t('chat.sprompt_title'));
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    async function _renameSession(s) {
+        const nn = window.prompt(window.t('chat.rename_prompt'), s.title || '');
+        if (nn == null) return;
+        const title = nn.trim(); if (!title) return;
+        try {
+            const r = await fetch('/api/chat/sessions/' + encodeURIComponent(s.id), { method: 'PATCH', headers: _csHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ title }) });
+            const d = await r.json();
+            if (d && d.ok && d.session) { s.title = d.session.title; _renderSidebar(); }
+        } catch (e) {}
+    }
+
+    async function _deleteSession(s) {
+        if (!window.confirm(window.t('chat.delete_confirm').replace('{name}', s.title || ''))) return;
+        try { await fetch('/api/chat/sessions/' + encodeURIComponent(s.id), { method: 'DELETE', headers: _csHeaders() }); } catch (e) {}
+        const warAktiv = (_activeSid === s.id);
+        _sessions = _sessions.filter(x => x.id !== s.id);
+        await _nachLoeschen(warAktiv);
+    }
+    // Nach der ersten Antwort den vom Backend automatisch gesetzten Titel
+    // (erster Nachrichtentext) in die Sidebar uebernehmen.
+    async function _maybeRefreshTitle() {
+        const s = _sessions.find(x => x.id === _activeSid);
+        if (!s || (s.title && s.title !== _CS_DEFAULT_TITLE)) return;
+        const list = await _csList();
+        const ns = list.find(x => x.id === _activeSid);
+        if (ns && ns.title && ns.title !== s.title) { s.title = ns.title; _renderSidebar(); }
+    }
+    // Verlaufs-Sidebar ein-/ausklappen (nach links); Zustand pro Browser gemerkt.
+    function _setSidebarCollapsed(collapsed) {
+        const screen = document.getElementById('chat-screen');
+        if (screen) screen.classList.toggle('sidebar-collapsed', !!collapsed);
+        try { localStorage.setItem('jarvis_chat_sidebar_collapsed', collapsed ? '1' : '0'); } catch (e) {}
+    }
+
+    /* ─── Breite der Verlaufsleiste ziehen ────────────────────────────────
+       Gesetzt wird die CSS-Variable `--cs-w` auf `#chat-screen`, NIE ein
+       Inline-Style auf der Leiste: der schluege die Einklapp-Regel
+       (Inline gewinnt gegen jede Klasse), und wer einmal gezogen haette,
+       koennte die Leiste danach nicht mehr einklappen.                      */
+    const _CS_W_KEY  = 'jarvis_chat_sidebar_width';
+    const _CS_W_MIN  = 180;   // darunter quetscht der Kopf "+ Neuer Chat" und die zwei Knoepfe
+    const _CS_W_MAX  = 560;
+    const _CS_W_CHAT = 360;   // so viel bleibt dem Chat mindestens
+
+    // Obergrenze am AKTUELLEN Fenster. Ohne sie stuende eine einmal gezogene
+    // 560px-Leiste auf einem schmalen Laptop vor einem unbenutzbaren Chat –
+    // die Media-Query greift dort nicht mehr, weil der gezogene Wert inline
+    // auf dem Screen steht und gegen sie gewinnt.
+    function _csMax() {
+        return Math.max(_CS_W_MIN, Math.min(_CS_W_MAX, window.innerWidth - _CS_W_CHAT));
+    }
+    function _csGriff() { return document.getElementById('cs-resize'); }
+
+    /* ⚠ DIE AKTUELLE BREITE IST DER GESETZTE WERT, NICHT DER GEMESSENE.
+       `.chat-sidebar` animiert `width`/`flex-basis` (fuers Einklappen), und
+       waehrend einer laufenden Transition liefert getBoundingClientRect() den
+       ZWISCHENWERT. Wer davon ausgehend rechnet, verliert Schritte: in der
+       optischen Abnahme gemessen ergaben drei schnelle Pfeildrucke 256 statt
+       288 px, bei gedrueckt gehaltener Taste bewegte sich die Leiste kaum. */
+    function _csIstBreite() {
+        const screen = document.getElementById('chat-screen');
+        const n = parseInt(screen && screen.style.getPropertyValue('--cs-w'), 10);
+        if (Number.isFinite(n) && n > 0) return n;
+        const leiste = document.getElementById('chat-sidebar');   // noch nie gezogen
+        return leiste ? leiste.getBoundingClientRect().width : 240;
+    }
+
+    // px anwenden. `speichern=false` beim Nachziehen nach einer Fensteraenderung:
+    // ein kleineres Fenster darf den GEWUENSCHTEN Wert nicht ueberschreiben,
+    // sonst ist er nach einem Blick im geteilten Bildschirm dauerhaft weg.
+    function _csBreiteAnwenden(px, speichern) {
+        const screen = document.getElementById('chat-screen');
+        if (!screen) return null;
+        const w = Math.round(Math.max(_CS_W_MIN, Math.min(_csMax(), px)));
+        screen.style.setProperty('--cs-w', w + 'px');
+        const g = _csGriff();
+        if (g) {
+            g.setAttribute('aria-valuenow', String(w));
+            g.setAttribute('aria-valuemin', String(_CS_W_MIN));
+            g.setAttribute('aria-valuemax', String(_csMax()));
+        }
+        if (speichern) { try { localStorage.setItem(_CS_W_KEY, String(w)); } catch (e) {} }
+        return w;
+    }
+    // Zurueck auf die Vorgabe des Stylesheets: die Variable WEGNEHMEN, nicht
+    // auf 240 setzen – nur so gilt auf schmalen Fenstern wieder die Media-Query.
+    function _csBreiteZuruecksetzen() {
+        const screen = document.getElementById('chat-screen');
+        if (screen) screen.style.removeProperty('--cs-w');
+        try { localStorage.removeItem(_CS_W_KEY); } catch (e) {}
+        const g = _csGriff();
+        if (g) ['aria-valuenow', 'aria-valuemin', 'aria-valuemax'].forEach(a => g.removeAttribute(a));
+    }
+    function _csGespeicherteBreite() {
+        let roh = null;
+        try { roh = localStorage.getItem(_CS_W_KEY); } catch (e) {}
+        const n = parseInt(roh, 10);
+        return Number.isFinite(n) && n > 0 ? n : null;   // kaputter Wert = keine Angabe
+    }
+
+    function _initSidebarResize() {
+        const griff = _csGriff();
+        if (!griff || griff._wired) return;
+        griff._wired = true;
+
+        const gespeichert = _csGespeicherteBreite();
+        if (gespeichert !== null) _csBreiteAnwenden(gespeichert, false);
+
+        let startX = 0, startW = 0, aktiv = false;
+
+        griff.addEventListener('pointerdown', (e) => {
+            if (e.button !== undefined && e.button !== 0) return;   // nur die linke Taste
+            e.preventDefault();                     // sonst faengt der Browser eine Textauswahl an
+            aktiv = true;
+            startX = e.clientX;
+            startW = _csIstBreite();
+            griff.classList.add('is-zieht');
+            document.body.classList.add('cs-resizing');
+            // Pointer-Capture: die Bewegung bleibt beim Griff, auch wenn der
+            // Zeiger beim schnellen Ziehen laengst ueber dem Chat steht.
+            try { griff.setPointerCapture(e.pointerId); } catch (err) {}
+        });
+
+        griff.addEventListener('pointermove', (e) => {
+            if (!aktiv) return;
+            _csBreiteAnwenden(startW + (e.clientX - startX), false);
+        });
+
+        // Gespeichert wird ERST am Ende des Zuges – ein Schreibvorgang je
+        // Mausbewegung waere hunderte Zugriffe fuer einen einzigen Wert.
+        function ende(e) {
+            if (!aktiv) return;
+            aktiv = false;
+            griff.classList.remove('is-zieht');
+            document.body.classList.remove('cs-resizing');
+            try { griff.releasePointerCapture(e.pointerId); } catch (err) {}
+            _csBreiteAnwenden(_csIstBreite(), true);
+        }
+        griff.addEventListener('pointerup', ende);
+        griff.addEventListener('pointercancel', ende);
+
+        // Doppelklick stellt die Vorgabe wieder her – der Rueckweg, den man
+        // sonst nur durch pixelgenaues Zielen findet. Steht auch im title.
+        griff.addEventListener('dblclick', (e) => { e.preventDefault(); _csBreiteZuruecksetzen(); });
+
+        // Tastatur: ohne sie waere die Breite fuer jeden unerreichbar, der
+        // keine Maus benutzt. preventDefault ist Pflicht, sonst scrollt die Seite.
+        griff.addEventListener('keydown', (e) => {
+            const jetzt = _csIstBreite();
+            const schritt = e.shiftKey ? 48 : 16;
+            if (e.key === 'ArrowLeft')       { e.preventDefault(); _csBreiteAnwenden(jetzt - schritt, true); }
+            else if (e.key === 'ArrowRight') { e.preventDefault(); _csBreiteAnwenden(jetzt + schritt, true); }
+            else if (e.key === 'Home')       { e.preventDefault(); _csBreiteAnwenden(_CS_W_MIN, true); }
+            else if (e.key === 'End')        { e.preventDefault(); _csBreiteAnwenden(_csMax(), true); }
+            else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); _csBreiteZuruecksetzen(); }
+        });
+
+        // Kleineres Fenster: den gespeicherten Wunsch neu einpassen, ihn dabei
+        // aber NICHT ueberschreiben (siehe `speichern=false` oben).
+        window.addEventListener('resize', () => {
+            const w = _csGespeicherteBreite();
+            if (w !== null) _csBreiteAnwenden(w, false);
+        });
+    }
+    window._chatNewSession = _newSession;
+
+    // Live-Sync: vom anderen Fenster (gleicher Benutzer) angehaengte Nachricht
+    // sofort darstellen, ohne sie erneut ans Backend zu senden.
+    function _applyRemoteAppend(entry, origin) {
+        if (origin && origin === _clientId) return;       // eigenes Echo ignorieren
+        if (!entry || (entry.role !== 'user' && entry.role !== 'bot')) return;
+        if (entry.ts && _chatHistory.some(m => m && m.ts === entry.ts)) return;  // Dedup
+        removeWelcome();
+        maybeAddDateSep();
+        _addHistoryBubble(entry);
+        _chatHistory.push(entry);
+        scrollToBottom();
+    }
+    async function _restoreHistory() {
+        // Sichtbares Transkript der AKTIVEN Sitzung laden und die Anzeige ersetzen.
+        messagesEl.innerHTML = '';
+        currentBotBubble = null;
+        let _sdata = null;
+        if (_activeSid) _sdata = await _csGet(_activeSid);
+        _chatHistory = (_sdata && _sdata.transcript) || [];
+        // Wissensgruppen-Auswahl dieser Sitzung wiederherstellen.
+        //  - Sitzung hat eine gespeicherte Auswahl -> die gilt.
+        //  - FRISCHE Sitzung (kein Transkript, keine Auswahl) -> die persoenliche
+        //    Vorauswahl aus dem Einstellungen-Dialog.
+        //  - Alte Sitzung MIT Verlauf, aber ohne gespeicherte Auswahl -> "alle"
+        //    wie bisher: einen laufenden Chat still auf andere Wissensquellen
+        //    umzustellen wuerde seine Antworten aendern, ohne dass der Benutzer
+        //    etwas getan hat. Eine Vorauswahl, die dort nicht greift, kostet
+        //    dagegen nur einen Klick – die harmlosere Halbfehlerstellung.
+        if (_kbFilter) {
+            if (_sdata && _sdata.kb_groups_set) _kbFilter.setSelection(_sdata.kb_groups);
+            else if (_chatHistory.length === 0) _kbFilter.setSelection(await _kbDefAlsAuswahl());
+            else _kbFilter.setSelection(null);
+        }
+        // Gewaehltes KI-Profil dieser Sitzung wiederherstellen + aktivieren
+        if (_profSel && _sdata && _sdata.profile_id) _profSel.setSelected(_sdata.profile_id, { activate: true });
+        if (_chatHistory.length === 0) {
+            // Willkommensnachricht (wie im Ausgangszustand)
+            messagesEl.innerHTML = '<div class="welcome-msg">'
+                + '<p data-i18n="chat.greeting">Hallo! Ich bin Jarvis.</p>'
+                + '<p class="welcome-sub" data-i18n="chat.greeting_sub">Wie kann ich dir helfen?</p></div>';
+            if (window.applyLang) window.applyLang();
+            // Branding auf die frisch gerenderte Begruessung anwenden (Assistenten-Name)
+            if (window.applyBrandingNow) window.applyBrandingNow();
+            return;
+        }
+
+        removeWelcome();
+        let restoredDate = '';
+        let hasWelcome = false;   // Willkommens-Karte gerendert? -> applyLang nachziehen
+
+        for (const entry of _chatHistory) {
+            if (entry.date && entry.date !== restoredDate) {
+                restoredDate = entry.date;
+                const sep = document.createElement('div');
+                sep.className = 'date-sep';
+                sep.innerHTML = `<span>${_dateLabel(entry.date)}</span>`;
+                messagesEl.appendChild(sep);
+            }
+
+            // Willkommens-Eintrag: Karte mit anklickbaren Beispiel-Prompts statt Bubble
+            if (entry.kind === 'welcome') {
+                messagesEl.appendChild(_renderWelcomeCard(entry));
+                hasWelcome = true;
+                continue;
+            }
+
+            if (entry.role === 'user' || entry.role === 'bot') {
+                _addHistoryBubble(entry);
+            }
+        }
+
+        // lastDate mit dem letzten wiederhergestellten Datum synchronisieren,
+        // damit maybeAddDateSep() keinen doppelten Separator erzeugt
+        if (restoredDate) lastDate = restoredDate;
+
+        // Visueller Trenner zwischen alten und neuen Nachrichten – entfaellt beim
+        // noch unbenutzten Willkommens-Chat (dort gibt es keine "alten" Nachrichten).
+        //
+        // ACHTUNG BESCHRIFTUNG: Der Trenner hiess bis 2026-07-28 "Neue Sitzung" und
+        // war damit grob irrefuehrend – er erscheint, wenn eine BESTEHENDE Sitzung
+        // wieder geoeffnet wird, und trennt nur wiederhergestellte von neuen
+        // Nachrichten. Der Kontext lief weiter. Auf ECHT fuehrte genau das zu der
+        // Fehlannahme, "Neue Sitzung" habe eine neue Backend-Sitzung erzeugt, und
+        // damit zur Suche nach einem Fehler, den es nicht gab (die Trennung ueber
+        // session_id/_hist_key ist nachgewiesen intakt). Eine neue Sitzung entsteht
+        // AUSSCHLIESSLICH ueber "+ Neuer Chat" (_newSession).
+        const onlyWelcome = _chatHistory.length === 1 && _chatHistory[0] && _chatHistory[0].kind === 'welcome';
+        if (!onlyWelcome) {
+            const divider = document.createElement('div');
+            divider.className = 'date-sep';
+            divider.style.opacity = '0.45';
+            divider.innerHTML = `<span>── ${escapeHtml(window.t('chat.session_continued'))} ──</span>`;
+            messagesEl.appendChild(divider);
+        }
+
+        // Sprache/Branding auf die frisch gerenderte Willkommens-Karte anwenden
+        if (hasWelcome) {
+            if (window.applyLang) window.applyLang();
+            if (window.applyBrandingNow) window.applyBrandingNow();
+        }
+
+        scrollToBottom();
+    }
+
+    function escapeHtml(str) {
+        if (window.JarvisChatLib && window.JarvisChatLib.escapeHtml) {
+            return window.JarvisChatLib.escapeHtml(str);
+        }
+        const d = document.createElement('div');
+        d.textContent = str;
+        return d.innerHTML;
+    }
+
+    /** Markdown → HTML, delegiert an chatlib.js (einheitlicher Renderer). */
+    function renderMarkdown(text) {
+        if (window.JarvisChatLib && window.JarvisChatLib.renderMarkdown) {
+            return window.JarvisChatLib.renderMarkdown(text);
+        }
+        // Fallback (sollte nie greifen, da chat.html chatlib.js vor chat.js lädt)
+        return escapeHtml(text).replace(/\n/g, '<br>');
+    }
+
+    // ═════════════════════════════════════════════════════════════
+    //  THEME TOGGLE (Light/Dark)
+    // ═════════════════════════════════════════════════════════════
+
+    function applyTheme(light) {
+        document.body.classList.toggle('light', light);
+        // Beide Button-Icon-Paare synchron aktualisieren
+        [['theme-icon-moon', 'theme-icon-sun'],
+         ['login-theme-icon-moon', 'login-theme-icon-sun']].forEach(([moonId, sunId]) => {
+            const moon = $(moonId), sun = $(sunId);
+            if (moon) moon.classList.toggle('hidden', light);
+            if (sun)  sun.classList.toggle('hidden', !light);
+        });
+        localStorage.setItem('jarvis_theme', light ? 'light' : 'dark');
+        // Branding ueber den Theme-Wechsel informieren (Logo/Farben neu waehlen)
+        try { document.dispatchEvent(new CustomEvent('jarvis:themechange', { detail: { light: light } })); } catch (e) {}
+    }
+
+    // Gespeicherte Präferenz laden (seitenuebergreifender Schluessel).
+    // Vorgabe HELL (2026-08-25): nur ein ausdrueckliches 'dark' schaltet um.
+    // applyTheme wird IMMER gerufen, auch fuer Dunkel – es setzt neben der
+    // Klasse auch die Sonne/Mond-Symbole; wuerde es im Dunkel-Fall
+    // uebersprungen, zeigten die Symbole den Stand des HTML-Markups statt
+    // den tatsaechlichen.
+    const savedTheme = localStorage.getItem('jarvis_theme');
+    applyTheme(savedTheme !== 'dark');
+
+    // Beide Theme-Buttons registrieren
+    ['btn-theme', 'btn-theme-login'].forEach(id => {
+        const btn = $(id);
+        if (btn) btn.addEventListener('click', () => {
+            applyTheme(!document.body.classList.contains('light'));
+        });
+    });
+
+    // ═════════════════════════════════════════════════════════════
+    //  INIT
+    // ═════════════════════════════════════════════════════════════
+
+    // ═════════════════════════════════════════════════════════════
+    //  2FA SETUP MODAL
+    // ═════════════════════════════════════════════════════════════
+
+    // 2FA nach /portal verschoben – Block nur aktiv, falls Elemente vorhanden.
+    if (totpSetupBtn && totpModal) {
+    const totpModalError = $('totp-modal-error');
+    const totpActive     = $('totp-active');
+    const totpSetupFlow  = $('totp-setup-flow');
+
+    totpSetupBtn.addEventListener('click', async () => {
+        totpModalError.textContent = '';
+        totpActive.classList.add('hidden');
+        totpSetupFlow.classList.add('hidden');
+
+        // Status abfragen
+        try {
+            const resp = await fetch('/api/auth/totp/status', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await resp.json();
+
+            if (data.enabled) {
+                totpActive.classList.remove('hidden');
+            } else {
+                // Setup starten: QR-Code holen
+                const setup = await fetch('/api/auth/totp/setup', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const sdata = await setup.json();
+
+                $('totp-qr').innerHTML = `<img src="${sdata.qr_code}" alt="QR-Code">`;
+                $('totp-secret-code').textContent = sdata.secret;
+                $('totp-verify-code').value = '';
+                totpSetupFlow.classList.remove('hidden');
+            }
+        } catch {
+            totpModalError.textContent = window.t('chat.connection_error');
+        }
+
+        totpModal.classList.remove('hidden');
+    });
+
+    // Modal schließen
+    $('btn-totp-close').addEventListener('click', () => {
+        totpModal.classList.add('hidden');
+    });
+    totpModal.addEventListener('click', (e) => {
+        if (e.target === totpModal) totpModal.classList.add('hidden');
+    });
+
+    // 2FA aktivieren (Code verifizieren)
+    $('btn-totp-verify').addEventListener('click', async () => {
+        const code = $('totp-verify-code').value.trim();
+        if (!code) return;
+        totpModalError.textContent = '';
+
+        try {
+            const resp = await fetch('/api/auth/totp/verify', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ code }),
+            });
+            const data = await resp.json();
+            if (data.success) {
+                totpModal.classList.add('hidden');
+                addStatusLine('✅ ' + window.t('chat.totp_enabled'));
+            } else {
+                totpModalError.textContent = data.error || window.t('chat.verify_failed');
+            }
+        } catch {
+            totpModalError.textContent = window.t('chat.connection_error');
+        }
+    });
+
+    // 2FA deaktivieren
+    $('btn-totp-disable').addEventListener('click', async () => {
+        const password = $('totp-disable-pass').value;
+        if (!password) return;
+        totpModalError.textContent = '';
+
+        try {
+            const resp = await fetch('/api/auth/totp/disable', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ password }),
+            });
+            const data = await resp.json();
+            if (data.success) {
+                totpModal.classList.add('hidden');
+                $('totp-disable-pass').value = '';
+                addStatusLine('🔓 ' + window.t('chat.totp_disabled'));
+            } else {
+                totpModalError.textContent = data.error || window.t('chat.disable_failed');
+            }
+        } catch {
+            totpModalError.textContent = window.t('chat.connection_error');
+        }
+    });
+    }  // Ende 2FA-Guard
+
+    // ═════════════════════════════════════════════════════════════
+    //  INIT
+    // ═════════════════════════════════════════════════════════════
+
+    // ═════════════════════════════════════════════════════════════
+    //  SSL-ZERTIFIKAT MODAL
+    // ═════════════════════════════════════════════════════════════
+
+    const certModal = $('cert-modal');
+    $('btn-cert')?.addEventListener('click', () => certModal.classList.remove('hidden'));
+    $('btn-cert-close')?.addEventListener('click', () => certModal.classList.add('hidden'));
+    certModal?.addEventListener('click', (e) => {
+        if (e.target === certModal) certModal.classList.add('hidden');
+    });
+
+    // ── SSL-/Verbindungs-Sicherheit: Warnbanner + Badge (wie im Hauptfenster) ──
+    function _openCertModal() { if (certModal) certModal.classList.remove('hidden'); }
+    function checkSecurity() {
+        const banner = $('security-banner');
+        const bannerText = $('security-banner-text');
+        const indicator = $('security-indicator');
+        const isHttps = location.protocol === 'https:';
+        const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+        const certDismissed = localStorage.getItem('jarvis_cert_dismissed') === 'true';
+
+        if (!isHttps && !isLocal) {
+            if (banner) {
+                banner.hidden = false;
+                banner.style.display = 'block';
+                if (bannerText) bannerText.textContent = (window.t ? window.t('panel.security_banner') : 'Verbindung unsicher');
+            }
+            if (indicator) {
+                indicator.className = 'security-badge';
+                indicator.title = (window.t ? window.t('panel.security_critical') : 'Kritisch: Keine Verschlüsselung');
+            }
+            // Beim ersten unsicheren Aufruf das Zertifikat-Modal automatisch öffnen
+            if (!certDismissed) setTimeout(_openCertModal, 600);
+        } else {
+            if (banner) { banner.hidden = true; banner.style.display = 'none'; }
+            if (indicator) {
+                indicator.className = 'security-badge secure';
+                indicator.title = (window.t ? window.t('panel.security_secure') : 'Gesichert');
+            }
+        }
+    }
+    $('security-indicator')?.addEventListener('click', _openCertModal);
+    $('btn-banner-help')?.addEventListener('click', _openCertModal);
+    $('btn-close-banner')?.addEventListener('click', () => {
+        const banner = $('security-banner');
+        if (banner) banner.style.display = 'none';
+        try { localStorage.setItem('jarvis_cert_dismissed', 'true'); } catch (e) {}
+    });
+    checkSecurity();
+
+    // Desktop/VNC-Overlay: nach /portal verschoben (portal.html + vnc.js)
+
+    // Tab-Wechsel
+    document.querySelectorAll('.cert-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.cert-tab').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            ['win', 'linux', 'browser'].forEach(t => {
+                const el = $('cert-tab-' + t);
+                if (el) el.classList.toggle('hidden', btn.dataset.certTab !== t);
+            });
+        });
+    });
+
+    // ─── Spracheingabe (Mic-Button) ──────────────────────────────────
+    // Erkannt wird auf dem eigenen Server (stt.js -> /api/stt, Whisper lokal),
+    // NICHT mit window.SpeechRecognition: Chrome/Edge schicken das Audio dort an
+    // die Cloud von Google bzw. Microsoft.
+    const btnMic = $('btn-mic');
+    let micLauf = null;
+
+    if (btnMic) {
+        if (window.JarvisSTT && window.JarvisSTT.verfuegbar()) {
+            const STT_MELDUNG = {
+                kein_zugriff: 'stt.no_access', kein_mikrofon: 'stt.no_mic',
+                keine_sprache: 'stt.no_speech', nicht_unterstuetzt: 'common.stt_unsupported',
+                server: 'stt.failed',
+            };
+            btnMic.addEventListener('click', () => {
+                // Zweiter Klick beendet die Aufnahme sofort (statt auf die Pause zu warten)
+                if (micLauf) { micLauf.stoppen(); return; }
+                btnMic.classList.add('recording');
+                micLauf = window.JarvisSTT.starten({
+                    token,
+                    lang: window._lang,
+                    onText: (text) => {
+                        if (!msgInput) return;
+                        msgInput.value = text;
+                        msgInput.dispatchEvent(new Event('input'));
+                        sendMessage(); // erkannten Text sofort senden
+                    },
+                    // Aufnahme vorbei, Server erkennt noch: eigener Zustand samt Text
+                    onVerarbeitung: () => {
+                        btnMic.classList.remove('recording');
+                        btnMic.classList.add('transcribing');
+                        btnMic.title = window.t('stt.working');
+                    },
+                    onFehler: (code) => showToast(window.t(STT_MELDUNG[code] || 'stt.failed')),
+                    onEnde: () => {
+                        micLauf = null;
+                        btnMic.classList.remove('recording', 'transcribing');
+                        btnMic.title = window.t('chat.mic');
+                    },
+                });
+            });
+        } else {
+            // Browser unterstützt keine Spracheingabe → Button ausblenden
+            btnMic.style.display = 'none';
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════
+    //  FEEDBACK
+    // ═════════════════════════════════════════════════════════════
+
+    function _appendFeedbackRow(col, userMsg, botResp) {
+        const row = document.createElement('div');
+        row.className = 'msg-feedback-row';
+        // SVG-Icons statt Emoji – konsistent zu Windows-App + Hauptfenster.
+        const SVG_UP   = `<svg viewBox="0 0 24 24" width="14" height="14" fill="#FFCA28"><path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>`;
+        const SVG_DOWN = `<svg viewBox="0 0 24 24" width="14" height="14" fill="#FFCA28"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>`;
+        const SVG_X    = `<svg viewBox="0 0 24 24" width="14" height="14" fill="#E74C3C"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>`;
+        const _tGood  = window.t ? window.t('feedback.good')  : 'Gute Antwort';
+        const _tBad   = window.t ? window.t('feedback.bad')   : 'Schlechte Antwort';
+        const _tWrong = window.t ? window.t('feedback.wrong') : 'Falsche Antwort';
+        row.innerHTML =
+            `<button class="msg-fb-btn" data-r="positive" title="${_tGood}">${SVG_UP}</button>` +
+            `<button class="msg-fb-btn" data-r="negative" title="${_tBad}">${SVG_DOWN}</button>` +
+            `<button class="msg-fb-btn" data-r="wrong"    title="${_tWrong}">${SVG_X}</button>`;
+        col.appendChild(row);
+
+        row.querySelectorAll('.msg-fb-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const rating = btn.dataset.r;
+                row.querySelectorAll('.msg-fb-btn').forEach(b => b.disabled = true);
+                btn.classList.add('msg-fb-active');
+                try {
+                    const res = await fetch('/api/feedback', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ token, rating, user_message: userMsg, bot_response: botResp }),
+                    });
+                    const data = await res.json();
+                    // Kurze Bestätigung anzeigen
+                    const info = document.createElement('div');
+                    info.className = 'msg-fb-info';
+                    info.textContent = data.message || (window.t ? window.t('feedback.thanks') : 'Danke!');
+                    row.replaceWith(info);
+                    // LLM-Analyse mit Alternativen als Jarvis-Antwort einblenden
+                    if (data.analysis) {
+                        addBubble(data.analysis, 'bot');
+                    }
+                } catch {
+                    btn.disabled = false;
+                }
+            });
+        });
+    }
+
+    // Einmalig Feedback-CSS einfügen
+    (function _injectFeedbackCss() {
+        const id = 'jarvis-feedback-css';
+        if (document.getElementById(id)) return;
+        const s = document.createElement('style');
+        s.id = id;
+        s.textContent = `
+.msg-feedback-row{display:flex;gap:4px;margin-top:4px;padding-left:2px;align-items:center;}
+.msg-fb-btn{background:none;border:1px solid var(--outline);border-radius:50%;
+  width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;
+  padding:0;cursor:pointer;transition:all .15s;line-height:0;}
+.msg-fb-btn svg{display:block;}
+.msg-fb-btn:hover:not(:disabled){border-color:var(--accent);background:var(--surface-variant);transform:scale(1.12);}
+.msg-fb-btn:disabled{cursor:default;opacity:.5;}
+.msg-fb-btn.msg-fb-active{border-color:rgba(var(--accent-rgb),.7);background:rgba(var(--accent-rgb),.2);}
+.msg-fb-info{font-size:.75rem;color:var(--muted);margin-top:4px;padding-left:2px;}
+        `;
+        document.head.appendChild(s);
+    })();
+
+    // Token vorhanden? → Benutzer vom Server holen (validiert Token + liefert Namen
+    // fuer die Titelleiste), dann direkt zum Chat. Offline (PWA) → graceful Fallback.
+    if (token) {
+        fetch('/api/me', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        }).then(r => {
+            if (!r.ok) { logout(); return null; }
+            return r.json();
+        }).then(d => {
+            if (d && d.username) {
+                _currentUser = d.username;
+                localStorage.setItem('jarvis_chat_user', _currentUser);
+            }
+            if (d) _isAdmin = !!d.is_admin;
+            if (d !== null) showChat();
+        }).catch(() => showChat());
+    }
+
+    // PWA Service Worker DEAKTIVIERT: der Offline-Cache hatte wiederholt veraltete
+    // CSS/JS ausgeliefert (z.B. Branding am Senden-Button, CPU-Rahmen). Die App
+    // braucht ohnehin durchgehend Netz (WebSocket/LLM). Daher aktiv abmelden +
+    // Caches leeren, damit Updates IMMER sofort greifen.
+    //
+    // ⚠ DIESER BLOCK IST NICHT TOTER CODE UND DARF NICHT AUFGERAEUMT WERDEN, auch
+    // wenn `frontend/sw.js` seit 2026-10-05 nicht mehr existiert und es im ganzen
+    // Repo keine einzige `register()`-Stelle mehr gibt. Er raeumt die ALTEN
+    // Registrierungen auf den Browsern der Benutzer ab - die ueberleben jedes
+    // Deploy und jedes Loeschen auf dem Server, weil ein Service Worker im Browser
+    // lebt, nicht im Repo. Wer ihn entfernt, laesst genau die Installationen mit
+    // dem alten Offline-Cache zurueck, die der Fix von damals heilen sollte - und
+    // merkt es nicht, weil der eigene Browser laengst sauber ist.
+    // Messbar ist das nicht am Code: der Beweis ist ein Browser, der noch eine
+    // Registrierung haelt.
+    if ('serviceWorker' in navigator) {
+        try {
+            navigator.serviceWorker.getRegistrations().then((regs) => {
+                regs.forEach((r) => r.unregister());
+            }).catch(() => {});
+            if (window.caches && caches.keys) {
+                caches.keys().then((keys) => keys.forEach((k) => caches.delete(k))).catch(() => {});
+            }
+        } catch (e) { /* ignorieren */ }
+    }
+})();

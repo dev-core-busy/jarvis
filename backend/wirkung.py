@@ -1,0 +1,463 @@
+"""Werkzeuge nach Wirkung einstufen und vor Aussen-/Loeschwirkung bestaetigen (BSI H9).
+
+Befund H9 aus dem BSI-Abgleich vom 2026-09-29: der Haupt-Agent sendete und
+loeschte E-Mails, schrieb in Confluence/Jira und fuehrte Shell-Befehle aus,
+ohne dass ein Mensch die einzelne Aktion gesehen hatte. Zusammen mit H8
+(Fremdtext im Werkzeugergebnis) ist das der klassische Weg einer Indirect
+Prompt Injection: eine praeparierte Mail laesst den Agenten eine zweite Mail
+schreiben.
+
+Massnahme: Werkzeuge nach Wirkung klassifizieren; Aussen- und Loeschwirkung
+nur nach Klick in der Oberflaeche. Das Modell kann den Klick nicht erzeugen –
+die Antwort kommt als eigene WebSocket-Nachricht des angemeldeten Benutzers.
+
+## Wo das Tor gilt (Betreiberentscheid 2026-10-04)
+
+* **Interaktiver Chat im Browser:** Bestaetigung per Klick.
+* **Client ohne Bestaetigungsdialog** (Windows-/Android-App): die Aktion
+  unterbleibt, das Modell bekommt einen Hinweis fuer den Benutzer.
+* **Laeufe ohne Oberflaeche** (Cron, Dateiwaechter, Telegram/WhatsApp,
+  Mail-Regeln, Agent-API, …): seit 2026-10-11 FREIGABE JE AUFTRAG
+  (Betreiberentscheid, BSI H8/H9-Rest). Der Einstieg setzt ``auftrag_cv`` mit
+  der Freigabe des Auftrags/der Regel/des Kanals ("Darf nach außen wirken").
+  Ohne Freigabe wird die Aktion abgewiesen und gemeldet; OHNE jeden Auftrag
+  ebenso (fail-closed) – ein kuenftiger, vergessener Einstieg wirkt damit nicht
+  still nach aussen. Bestand behaelt sein Verhalten: Auftraege, Regeln und
+  Kanaele, die vor dieser Aenderung existierten, bekommen die Freigabe beim
+  ersten Laden einmalig festgeschrieben; neue starten ohne.
+  ``cron_create`` bleibt selbst bestaetigungspflichtig – sonst waere "lege einen
+  Auftrag an, der die Mail spaeter schickt" der Umweg – und kann die Freigabe
+  NICHT setzen (nur ein Admin in der Oberflaeche).
+* **Shell:** nur OHNE Sandbox. Ein Befehl als Sandbox-Benutzer laeuft mit
+  eingegrenzten Schreibpfaden und braucht keinen Klick.
+  Netz hat er nur, wenn der Benutzer unter Berechtigungen die Internet-
+  Freigabe hat (``_user_has_internet_access``); sonst ``--unshare-net``.
+  Dass ein Sandbox-Befehl MIT Freigabe ohne Klick ins Netz senden kann, ist
+  Betreiberentscheid vom 2026-10-11 (Code-Review): die Internet-Freigabe
+  selbst ist die Zustimmung. Wer das aendert, aendert es hier UND in
+  ``einstufen()``.
+
+Unterscheidbar wird "Lauf ohne Oberflaeche" von "Client ohne Dialog" ueber den
+``kanal_cv``: ``run_task`` setzt ihn (mit oder ohne Dialogfaehigkeit), ein
+headless-Lauf nicht. Ein Rollen-/Unter-Agent, den ein Chat-Lauf startet, ERBT
+den Kanal (ContextVar, ``await`` bzw. ``create_task`` kopiert den Kontext) –
+sonst waere die Delegation an eine Rolle mit ``email_senden`` der Umweg.
+
+## Einstufung: Regel mit einer Tabelle, kein stilles Durchlassen
+
+``einstufen()`` fragt zuerst das Werkzeug selbst (Attribut ``wirkung``: eine
+Klasse, ``None`` oder eine Funktion der Argumente), dann die Tabelle unten.
+MCP-Werkzeuge ohne eigene Angabe gelten als Aussenwirkung (fremder Code,
+unbekannte Wirkung – fail-closed). Damit eine neue Funktion nicht still in die
+Klasse "ohne Wirkung" faellt, prueft ``tests/test_bsi_h9.py`` als REGEL ueber
+alle Werkzeugnamen: wer nach Senden/Loeschen/Anlegen klingt, muss eingestuft
+sein (Tabelle oder Attribut).
+"""
+
+import asyncio
+import contextvars
+import re
+from contextlib import contextmanager
+import secrets
+from dataclasses import dataclass, field
+from typing import Any, Callable
+
+AUSSEN = "aussen"          # erreicht andere Menschen oder fremde Systeme
+LOESCHEN = "loeschen"      # entfernt Daten
+SHELL = "shell"            # Befehl ohne Sandbox – Wirkung nicht eingegrenzt
+ZEITPLAN = "zeitplan"      # legt einen Auftrag an, der spaeter OHNE Rueckfrage laeuft
+
+KLASSEN = (AUSSEN, LOESCHEN, SHELL, ZEITPLAN)
+
+# Wie lange eine Anfrage auf den Klick wartet. Danach gilt sie als abgelehnt –
+# ein vergessener Tab darf den Lauf nicht unbegrenzt festhalten.
+FRIST_S = 300
+
+# Anzeige der Argumente im Dialog: lang genug, um eine Mail vor dem Senden
+# wirklich lesen zu koennen; die Kuerzung wird beziffert.
+_ANZEIGE_MAX = 4000
+
+
+def _aktion(args: dict) -> str:
+    return str((args or {}).get("action") or "").strip().strip("\"'").lower()
+
+
+def _je_aktion(**zuordnung: str) -> Callable[[dict], "str | None"]:
+    """Einstufung nach dem Argument ``action`` (Google-, Speicher-Werkzeuge)."""
+    def _f(args: dict):
+        return zuordnung.get(_aktion(args))
+    return _f
+
+
+# Ziel eines Verschiebens, das einem Loeschen gleichkommt. Ohne diese Zeile
+# waere ``email_verschieben`` nach "Geloeschte Elemente" der Weg um die
+# Bestaetigung von ``email_loeschen`` herum (dessen Vorgabe ist genau der
+# Papierkorb).
+_PAPIERKORB = re.compile(
+    r"papierkorb|gel(ö|oe)scht|trash|deleted|junk|spam", re.IGNORECASE)
+
+
+def _email_verschieben(args: dict):
+    ziel = str((args or {}).get("ziel") or (args or {}).get("ordner") or "")
+    return LOESCHEN if _PAPIERKORB.search(ziel) else None
+
+
+TABELLE: dict[str, "str | Callable[[dict], str | None]"] = {
+    # E-Mail (eigenes Postfach)
+    "email_senden": AUSSEN,
+    "email_antworten": AUSSEN,
+    "email_weiterleiten": AUSSEN,
+    "email_loeschen": LOESCHEN,
+    "email_verschieben": _email_verschieben,
+    # Nachrichten an Dritte
+    "whatsapp_send": AUSSEN,
+    "telegram_send": AUSSEN,
+    # Fremdsysteme mit Schreibzugriff
+    "confluence_create_page": AUSSEN,
+    "confluence_update_page": AUSSEN,
+    "confluence_add_comment": AUSSEN,
+    "confluence_upload_attachment": AUSSEN,
+    "confluence_delete_page": LOESCHEN,
+    "jira_add_comment": AUSSEN,
+    "jira_create_issue": AUSSEN,
+    "vemas_write": AUSSEN,
+    "google_gmail": _je_aktion(send_mail=AUSSEN, reply_mail=AUSSEN),
+    # Ein Termin mit Teilnehmern verschickt Einladungen.
+    "google_calendar": _je_aktion(create_event=AUSSEN, update_event=AUSSEN,
+                                  delete_event=LOESCHEN),
+    # Zeitversetzt ohne Rueckfrage
+    "cron_create": ZEITPLAN,
+    "cron_delete": LOESCHEN,
+    # Eigene Datenbestaende
+    "memory_manage": _je_aktion(delete=LOESCHEN),
+    "knowledge_manage": _je_aktion(remove_folder=LOESCHEN),
+}
+
+
+def einstufen(name: str, args: dict, *, tool: Any = None,
+              sandbox: bool = False, fremd: bool = False) -> "str | None":
+    """Wirkungsklasse eines Aufrufs oder ``None`` (keine Bestaetigung noetig).
+
+    ``sandbox``: der Shell-Befehl laeuft als Sandbox-Benutzer.
+    ``fremd``: MCP-Werkzeug (fremder Code).
+    """
+    if name == "shell_execute":
+        return None if sandbox else SHELL
+    if tool is not None and hasattr(tool, "wirkung"):
+        regel = getattr(tool, "wirkung")
+    elif name in TABELLE:
+        regel = TABELLE[name]
+    elif fremd:
+        return AUSSEN
+    else:
+        return None
+    if callable(regel):
+        try:
+            regel = regel(dict(args or {}))
+        except Exception:  # noqa: BLE001
+            # Eine Einstufung, die selbst scheitert, ist "unbekannt" – und
+            # unbekannt heisst hier: fragen.
+            return AUSSEN
+    if regel is None:
+        return None
+    return regel if regel in KLASSEN else AUSSEN
+
+
+def anzeige_argumente(args: dict) -> list:
+    """Argumente fuer den Dialog: ``[[name, wert], …]`` in Aufrufreihenfolge.
+
+    Interne Argumente (``_status_callback``, ``_sandbox_user`` …) beginnen mit
+    ``_`` und stammen nicht vom Modell – sie gehoeren nicht in den Dialog.
+    """
+    zeilen = []
+    for k, v in (args or {}).items():
+        if str(k).startswith("_"):
+            continue
+        if isinstance(v, str):
+            wert = v
+        else:
+            try:
+                import json
+                wert = json.dumps(v, ensure_ascii=False)
+            except Exception:  # noqa: BLE001
+                wert = str(v)
+        if len(wert) > _ANZEIGE_MAX:
+            wert = (f"[gekürzt: {_ANZEIGE_MAX} von {len(wert)} Zeichen]\n"
+                    + wert[:_ANZEIGE_MAX])
+        zeilen.append([str(k), wert])
+    return zeilen
+
+
+# ── Kanal zur Oberflaeche ───────────────────────────────────────────────────
+
+@dataclass
+class Kanal:
+    """Der Weg zum Menschen, der eine Aktion dieses Laufs bestaetigen kann."""
+    ws: Any
+    username: str
+    kann_bestaetigen: bool
+    agent_id: str = ""
+
+
+kanal_cv: contextvars.ContextVar = contextvars.ContextVar(
+    "jarvis_bestaetigung_kanal", default=None)
+
+
+@dataclass
+class _Offen:
+    zukunft: "asyncio.Future"
+    kanal: Kanal
+    werkzeug: str
+    klasse: str
+    angelegt: float = field(default=0.0)
+
+
+_offen: dict[str, _Offen] = {}
+
+
+@dataclass(frozen=True)
+class Auftrag:
+    """Freigabe eines Laufs ohne Oberflaeche (BSI H8/H9-Rest, 2026-10-11).
+
+    ``quelle`` nennt den Auftrag fuer Meldung und Journal ("cron:<id>",
+    "regel:<id>", "telegram", …); ``aussenwirkung`` ist die Freigabe – nur ein
+    echtes ``True`` gibt frei.
+    """
+    quelle: str
+    aussenwirkung: bool = False
+
+
+auftrag_cv: contextvars.ContextVar = contextvars.ContextVar(
+    "jarvis_wirkung_auftrag", default=None)
+
+
+@contextmanager
+def auftrag(quelle: str, aussenwirkung):
+    """Freigabe fuer die Dauer eines headless-Laufs setzen (und sicher zuruecknehmen).
+
+    Rollen, an die dieser Lauf delegiert, ERBEN sie (ContextVar) – die
+    Delegation ist kein Umweg und keine Erweiterung.
+    """
+    marke = auftrag_cv.set(Auftrag(str(quelle or "unbenannt"), aussenwirkung is True))
+    try:
+        yield
+    finally:
+        auftrag_cv.reset(marke)
+
+
+# Kanaele ohne Oberflaeche, deren Freigabe in der Skill-Konfiguration steht
+# (Feld "aussenwirkung"), und die Einstellung fuer die Agent-API.
+KANAL_SKILLS = ("telegram", "whatsapp")
+EINSTELLUNG_AGENT_API = "agent_api_aussenwirkung"
+
+
+def kanal_freigabe(skill: str) -> bool:
+    """Freigabe eines Messenger-Kanals – nur ein echtes True, Fehler = nein."""
+    try:
+        from backend.config import config
+        cfg = (config.get_skill_states().get(skill) or {}).get("config") or {}
+        return cfg.get("aussenwirkung") is True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def agent_api_freigabe() -> bool:
+    try:
+        from backend.config import config
+        return config.get_setting(EINSTELLUNG_AGENT_API, False) is True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def bestand_festschreiben(bestand: bool) -> list:
+    """Einmalig beim Start: Kanaele/Agent-API ohne Angabe behalten ihr Verhalten.
+
+    Messenger: ein Skill mit vorhandener Konfiguration ohne das Feld stammt aus
+    der Zeit, in der der Kanal als Zustimmung galt -> True festschreiben. Ein
+    noch nie konfigurierter Skill bekommt nichts (Vorgabe nein).
+    Agent-API: bei bestehender Installation True, bei Erstinstallation False.
+    Ein gesetzter Wert wird nie angefasst. Rueckgabe: Liste der Aenderungen.
+    """
+    geaendert = []
+    try:
+        from backend.config import config
+        states = config.get_skill_states()
+        for skill in KANAL_SKILLS:
+            st = states.get(skill) or {}
+            cfg = st.get("config")
+            if isinstance(cfg, dict) and cfg and "aussenwirkung" not in cfg:
+                neu = dict(st)
+                neu["config"] = {**cfg, "aussenwirkung": True}
+                config.save_skill_state(skill, neu)
+                geaendert.append(f"{skill}=True")
+        if config.get_setting(EINSTELLUNG_AGENT_API, None) is None:
+            config.save_setting(EINSTELLUNG_AGENT_API, bool(bestand))
+            geaendert.append(f"agent_api={bool(bestand)}")
+    except Exception as e:  # noqa: BLE001
+        print(f"[H9] Freigaben des Bestands nicht festgeschrieben: {e}", flush=True)
+    if geaendert:
+        print(f"[H9] Freigabe 'Darf nach außen wirken' festgeschrieben (Bestand): "
+              f"{', '.join(geaendert)}", flush=True)
+    return geaendert
+
+
+async def mit_auftrag(quelle: str, aussenwirkung, lauf):
+    """``await``-bare Form von ``auftrag()`` fuer einen einzelnen Lauf."""
+    with auftrag(quelle, aussenwirkung):
+        return await lauf
+
+
+async def ohne_dialog(username: str, lauf):
+    """Lauf aus einer Oberflaeche OHNE Bestaetigungsdialog (Avatar, SAP-/VEMAS-
+    Abfrage, Support-Assistent).
+
+    Betreiberentscheid 2026-10-11 (BSI H9): diese Oberflaechen starten Laeufe
+    mit vollem Werkzeugkasten, koennen aber keine Bestaetigungskarte zeigen –
+    sie gelten wie die Windows-/Android-App als "Client ohne Dialog": Aussen-
+    und Loeschwirkung wird mit Hinweis auf den Browser-Chat abgewiesen. Das
+    gilt ausdruecklich auch fuer vemas_write aus der VEMAS-Abfrage.
+    """
+    marke = kanal_cv.set(Kanal(ws=None, username=str(username or ""),
+                               kann_bestaetigen=False))
+    try:
+        return await lauf
+    finally:
+        kanal_cv.reset(marke)
+
+
+def hinweis_ohne_dialog(name: str) -> str:
+    return (f"NICHT AUSGEFÜHRT: '{name}' wirkt nach außen bzw. löscht Daten und braucht "
+            "deshalb eine Bestätigung per Klick. Diese Anwendung kann keine "
+            "Bestätigung anzeigen. Sage dem Benutzer, dass er die Aktion im Chat "
+            "im Browser auslösen kann. Versuche sie NICHT auf anderem Weg.")
+
+
+def hinweis_abgelehnt(name: str) -> str:
+    # Die erste Fassung ("hat nicht freigegeben") las das Modell auf DEV als
+    # RECHTEFRAGE und riet dem Benutzer, sich an einen Admin zu wenden
+    # (2026-10-04). Deshalb ausdruecklich: Klick in der Karte, eigene Entscheidung.
+    return (f"ABGELEHNT: Der Benutzer hat '{name}' soeben selbst in der "
+            "Bestätigungskarte mit „Ablehnen“ abgelehnt – das ist seine Entscheidung, "
+            "kein Rechte- oder Systemfehler. Die Aktion wurde nicht ausgeführt. Bestätige "
+            "ihm kurz, dass nichts geschehen ist. Versuche sie NICHT auf anderem Weg "
+            "(andere Werkzeuge, Shell, Delegation).")
+
+
+def hinweis_ohne_freigabe(name: str, quelle: "str | None") -> str:
+    wo = f"Dieser Auftrag ({quelle})" if quelle else "Dieser Lauf"
+    return (f"NICHT AUSGEFÜHRT: '{name}' wirkt nach außen bzw. löscht Daten. {wo} läuft "
+            "ohne Oberfläche und hat dafür keine Freigabe. Die Freigabe wird am "
+            "Auftrag, an der Regel bzw. am Kanal gesetzt („Darf nach außen wirken“). "
+            "Nenne das im Ergebnis. Versuche die Aktion NICHT auf anderem Weg.")
+
+
+def hinweis_frist(name: str) -> str:
+    return (f"NICHT AUSGEFÜHRT: Für '{name}' kam innerhalb von {FRIST_S // 60} "
+            "Minuten keine Bestätigung. Die Aktion wurde nicht ausgeführt.")
+
+
+def hinweis_nicht_zustellbar(name: str) -> str:
+    return (f"NICHT AUSGEFÜHRT: Die Bestätigung für '{name}' konnte nicht "
+            "angezeigt werden (Verbindung unterbrochen).")
+
+
+async def _senden(ws, nachricht: dict) -> bool:
+    try:
+        await ws.send_json(nachricht)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+async def freigabe(name: str, args: dict, klasse: str) -> "str | None":
+    """Holt die Bestaetigung ein. ``None`` = ausfuehren, sonst das Ergebnis
+    fuer das Modell (warum die Aktion unterblieb).
+
+    Ohne Kanal (Lauf ohne Oberflaeche) entscheidet die Freigabe des Auftrags
+    (``auftrag_cv``) – siehe Modulkopf.
+    """
+    kanal = kanal_cv.get()
+    if kanal is None:
+        a = auftrag_cv.get()
+        if a is not None and a.aussenwirkung is True:
+            return None
+        quelle = a.quelle if a is not None else None
+        print(f"[H9] {name} ({klasse}) abgewiesen: Lauf ohne Oberflaeche "
+              f"{'(' + quelle + ') ' if quelle else '(ohne Auftrag) '}ohne Freigabe",
+              flush=True)
+        return hinweis_ohne_freigabe(name, quelle)
+    if not kanal.kann_bestaetigen or kanal.ws is None:
+        print(f"[H9] {name} ({klasse}) fuer '{kanal.username}' abgewiesen: "
+              "Client ohne Bestaetigungsdialog", flush=True)
+        return hinweis_ohne_dialog(name)
+
+    loop = asyncio.get_running_loop()
+    kennung = secrets.token_urlsafe(12)
+    eintrag = _Offen(zukunft=loop.create_future(), kanal=kanal,
+                     werkzeug=name, klasse=klasse, angelegt=loop.time())
+    _offen[kennung] = eintrag
+    erledigt_grund = "abgebrochen"
+    try:
+        if not await _senden(kanal.ws, {
+            "type": "bestaetigung_anfrage",
+            "id": kennung,
+            "werkzeug": name,
+            "klasse": klasse,
+            "argumente": anzeige_argumente(args),
+            "frist_s": FRIST_S,
+            "agent_id": kanal.agent_id,
+        }):
+            erledigt_grund = "nicht_zustellbar"
+            return hinweis_nicht_zustellbar(name)
+        print(f"[H9] Bestaetigung angefragt: {name} ({klasse}) fuer "
+              f"'{kanal.username}'", flush=True)
+        try:
+            erlaubt = await asyncio.wait_for(eintrag.zukunft, FRIST_S)
+        except asyncio.TimeoutError:
+            erledigt_grund = "frist"
+            print(f"[H9] {name} fuer '{kanal.username}': keine Antwort in "
+                  f"{FRIST_S} s – nicht ausgefuehrt", flush=True)
+            return hinweis_frist(name)
+        erledigt_grund = "erlaubt" if erlaubt else "abgelehnt"
+        print(f"[H9] {name} ({klasse}) fuer '{kanal.username}': "
+              f"{'FREIGEGEBEN' if erlaubt else 'ABGELEHNT'}", flush=True)
+        return None if erlaubt else hinweis_abgelehnt(name)
+    finally:
+        _offen.pop(kennung, None)
+        # Die Oberflaeche erfaehrt, dass die Karte nicht mehr wartet – auch bei
+        # Stop (CancelledError) und Frist. Bei Klick ist es die Quittung.
+        # Nicht abwarten: im Abbruchfall darf finally nicht erneut blockieren.
+        if erledigt_grund != "nicht_zustellbar":
+            try:
+                asyncio.ensure_future(_senden(kanal.ws, {
+                    "type": "bestaetigung_erledigt", "id": kennung,
+                    "grund": erledigt_grund}))
+            except Exception:  # noqa: BLE001
+                pass
+
+
+def antwort(kennung: str, username: str, ws: Any, erlaubt: bool) -> bool:
+    """Klick aus der Oberflaeche zustellen. ``True`` = zugestellt.
+
+    Antworten darf nur der Benutzer, dem die Anfrage gilt – ein zweiter
+    angemeldeter Benutzer koennte sonst fremde Aktionen freigeben. Ohne
+    Benutzernamen (API-Schluessel) nur dieselbe Verbindung.
+    """
+    eintrag = _offen.get(str(kennung or ""))
+    if eintrag is None or eintrag.zukunft.done():
+        return False
+    soll = eintrag.kanal.username
+    if soll:
+        if username != soll:
+            print(f"[H9] Antwort auf Anfrage von '{soll}' durch '{username}' "
+                  "verworfen", flush=True)
+            return False
+    elif ws is not eintrag.kanal.ws:
+        return False
+    eintrag.zukunft.set_result(erlaubt is True)
+    return True
+
+
+def offene_anzahl() -> int:
+    """Fuer Tests und Diagnose."""
+    return len(_offen)

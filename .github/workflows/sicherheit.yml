@@ -1,0 +1,171 @@
+# Sicherheits-CI (BSI M6): Waechter, Abhaengigkeits-Audit, SBOM, SAST, Secret-Scan.
+#
+# Vorher lief in der CI nur der Docker-Bau – keine Tests, kein pip-audit/npm audit,
+# keine SBOM, kein Secret-Scanning (BSI-Abgleich ECHT, 2026-09-29).
+#
+# Ausnahmen sind DATEIEN im Repo, nicht Schalter in diesem Workflow – jede mit Grund:
+#   tests/ci_ausnahmen.txt            Waechter, die in der CI nicht laufen koennen
+#   deploy/security/pip_audit_ausnahmen.txt   bewertete Python-Schwachstellen (mit Pruefdatum)
+#   .gitleaksignore                   gepruefte Fehlalarme (Platzhalter, Testwerte)
+name: Sicherheit
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    # Woechentlich auch ohne Commit: neue CVEs betreffen den unveraenderten Stand
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+
+  # ── Python: Waechter + pip-audit + SBOM ──────────────────────────────────────
+  python:
+    name: Python – Waechter, pip-audit, SBOM
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Ganze Historie: test_secret_key_platzhalter liest alte Staende per git
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      # Wie auf den Servern (DEV gemessen 2026-10-06): ohne wngerman entscheidet
+      # die PDF-Qualitaetspruefung anders (backend/tools/knowledge.py::_wortliste),
+      # ohne bubblewrap/User-Namespaces brechen die Sandbox-Waechter mit Exit 2 ab.
+      - name: Systempakete (OCR/PDF, Wortliste, Sandbox wie auf den Servern)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            tesseract-ocr tesseract-ocr-deu poppler-utils wngerman bubblewrap >/dev/null
+          # Ubuntu 24.04 sperrt unprivilegierte User-Namespaces per AppArmor;
+          # Debian (die Server) nicht. unshare -r / bwrap brauchen sie.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+
+      - name: venv + Abhaengigkeiten (torch aus dem CPU-Index, wie in requirements.txt beschrieben)
+        run: |
+          python -m venv venv
+          venv/bin/pip install -q --upgrade pip setuptools
+          venv/bin/pip install -q --index-url https://download.pytorch.org/whl/cpu "torch==2.10.0+cpu"
+          venv/bin/pip install -q -r requirements.txt
+          venv/bin/pip check
+
+      # Werkzeuge in EIGENER venv: in der Dienst-venv installiert, wuerde pip-audit
+      # sich selbst und seine Abhaengigkeiten mitpruefen und die SBOM verfaelschen.
+      - name: Werkzeuge (pip-audit, CycloneDX)
+        run: |
+          python -m venv werkzeug
+          werkzeug/bin/pip install -q pip-audit cyclonedx-bom
+
+      - name: pip-audit (bekannte Schwachstellen)
+        run: |
+          # Ausnahmen: "ID  JJJJ-MM-TT  # Grund"; abgelaufen oder ohne Grund -> rot
+          ARGS=$(python3 deploy/security/pip_audit_ausnahmen.py --argumente)
+          werkzeug/bin/pip-audit --progress-spinner off \
+            --path "$(ls -d venv/lib/python3*/site-packages)" $ARGS
+
+      - name: SBOM (CycloneDX) der Python-Umgebung
+        if: always()
+        run: werkzeug/bin/cyclonedx-py environment venv --output-format JSON --output-file sbom-python.cdx.json
+
+      # ⚠ OHNE PAKETNAMEN - die Fassungen stehen in package.json und sind dort
+      # FESTGENAGELT (keine ^-Spanne). Vorher stand hier "jsdom acorn", also
+      # bei JEDEM Lauf die jeweils aktuelle Fassung, waehrend der Arbeitsplatz
+      # seine installierte behielt. Am 2026-10-11 war genau dieser Unterschied
+      # zweimal die Ursache fuer "lokal gruen, CI rot" - und beide Male sah es
+      # wie ein Produktfehler aus: der Excel-Waechter (jsdom 25 gegen 30) und
+      # test_review_niedrig_ui (border-color wird erst ab jsdom 30 als
+      # "currentcolor" serialisiert). tests/test_pruefwerkzeug_pin.js
+      # vergleicht das INSTALLIERTE gegen den Pin und meldet jede Abweichung.
+      - name: jsdom + acorn fuer die UI-Waechter (Fassungen aus package.json)
+        run: npm install --no-save --no-audit --no-fund
+
+      - name: Waechter (tests/test_*.py, tests/test_*.js)
+        run: venv/bin/python tests/ci_lauf.py --parallel 4 --zeitdeckel 300 --ausnahmen-pruefen
+
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: sbom-python
+          path: sbom-python.cdx.json
+          if-no-files-found: warn
+
+  # ── Node: npm audit + SBOM der WhatsApp-Bridge ──────────────────────────────
+  node:
+    name: Node – npm audit, SBOM (WhatsApp-Bridge)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: services/whatsapp-bridge
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: npm ci
+        run: npm ci --omit=dev --no-fund
+      - name: npm audit (ab "moderate")
+        run: npm audit --omit=dev --audit-level=moderate
+      - name: SBOM (CycloneDX)
+        if: always()
+        run: npx --yes @cyclonedx/cyclonedx-npm@4 --omit dev --output-format JSON --output-file ../../sbom-whatsapp-bridge.cdx.json
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: sbom-whatsapp-bridge
+          path: sbom-whatsapp-bridge.cdx.json
+          if-no-files-found: warn
+
+  # ── SAST: bandit, nur hohe Schwere UND hohe Sicherheit ──────────────────────
+  # Bewusst eng: der Lauf soll bei einem NEUEN schweren Fund rot werden, nicht
+  # dauerhaft rot sein. Bestehende, gewollte Stellen tragen "# nosec Bxxx" mit
+  # Begruendung in der Zeile darueber.
+  sast:
+    name: SAST – bandit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - run: pip install -q bandit
+      - run: bandit -q -r backend skills -lll -iii
+
+  # ── Secret-Scanning: gitleaks ueber die GANZE Historie ──────────────────────
+  # Die Binaerdatei direkt (nicht gitleaks-action: die verlangt fuer
+  # Organisationskonten eine Lizenz), Version + Pruefsumme festgeschrieben.
+  secrets:
+    name: Secret-Scan – gitleaks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GITLEAKS_VERSION: '8.28.0'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: gitleaks holen und pruefen
+        run: |
+          f="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          curl -fsSL -o "$f" "$base/$f"
+          curl -fsSL -o checksums.txt "$base/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          grep " $f\$" checksums.txt | sha256sum -c -
+          tar xzf "$f" gitleaks
+      - name: gitleaks (Historie)
+        run: ./gitleaks git --no-banner --redact --exit-code 1 .

@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Support Assistent</title>
+    <link rel="stylesheet" href="/static/css/theme.css?v=34">
+    <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
+    <link rel="stylesheet" href="/static/css/avatar.css?v=10">
+    <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: var(--font-body);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+        /* Titelleiste exakt nach Vorbild /chat (.topbar) – identische Hoehe */
+        .topbar {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 10px 16px; border-bottom: 1px solid var(--border);
+            background: var(--bg-glass); backdrop-filter: blur(8px);
+            position: sticky; top: 0; z-index: 10;
+        }
+        .topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+        .topbar-right { display: flex; align-items: center; gap: 4px; }
+        .topbar-avatar {
+            width: 32px; height: 32px; border-radius: 50%;
+            background: var(--gradient); display: flex; align-items: center;
+            justify-content: center; font-size: 14px; font-weight: 700; color: #fff; flex-shrink: 0;
+            overflow: hidden;
+        }
+        .topbar-title { font-size: 19px; font-weight: 600; white-space: nowrap; }
+        .sup-status-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+            background: var(--text-muted); transition: background .3s ease; }
+        .sup-status-dot.connected { background: var(--success); box-shadow: 0 0 6px var(--success); }
+        .sup-status-dot.disconnected { background: var(--danger); }
+        .sup-own-badge {
+            display: inline-flex; align-items: center; max-width: 220px;
+            padding: 3px 10px; border-radius: 12px;
+            background: rgba(var(--fg-rgb, 148,163,184), 0.06);
+            border: 1px solid rgba(var(--fg-rgb, 148,163,184), 0.1);
+            color: var(--text-secondary); font-size: 0.78rem; font-weight: 600;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .sup-own-badge:empty { display: none; }
+        .sup-spacer { flex: 1; }
+        .btn-theme {
+            background: none; border: none; color: #888899;
+            padding: 4px 8px; border-radius: 8px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: color .2s, background .2s;
+        }
+        .btn-theme:hover { background: rgba(var(--accent-rgb), .12); color: var(--accent); }
+        .btn-theme svg { width: 20px; height: 20px; }
+        body.light .btn-theme { color: #777788; }
+        .hidden { display: none !important; }
+
+        .sup-hist-wrap { position: relative; }
+        .sup-hist-btn {
+            background: none; border: 1px solid var(--border); color: var(--text-secondary);
+            height: 32px; padding: 0 12px; border-radius: 8px; cursor: pointer;
+            font-size: 0.85rem; display: flex; align-items: center; gap: 6px; font-family: var(--font-body);
+        }
+        .sup-hist-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+        .sup-hist-panel {
+            position: absolute; right: 0; top: calc(100% + 6px); width: 320px; max-width: 80vw;
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: var(--radius-md); box-shadow: var(--shadow-lg); z-index: 50;
+            max-height: 60vh; overflow-y: auto;
+        }
+        .sup-hist-head { display: flex; align-items: center; justify-content: space-between;
+            padding: 10px 14px; border-bottom: 1px solid var(--border); position: sticky; top: 0;
+            background: var(--bg-secondary); }
+        .sup-hist-head strong { font-size: 0.85rem; }
+        .sup-hist-clear { background: none; border: none; color: var(--text-muted); cursor: pointer;
+            font-size: 0.78rem; }
+        .sup-hist-clear:hover { color: var(--danger); }
+        .sup-hist-item { padding: 9px 14px; cursor: pointer; border-bottom: 1px solid rgba(var(--fg-rgb), .05);
+            display: flex; align-items: center; gap: 8px; }
+        /* `min-width: 0` ist PFLICHT, nicht Kosmetik: ein Flex-Kind schrumpft
+           von sich aus nicht unter seine Inhaltsbreite – ohne diese Zeile
+           schiebt eine lange Anfrage den Muelleimer aus dem Panel, statt dass
+           das Ellipsis in .sup-hist-q greift. */
+        .sup-hist-text { flex: 1 1 auto; min-width: 0; }
+        /* Muelleimer am Eintrag: loescht GENAU DIESEN Verlaufseintrag. */
+        .sup-hist-del { flex: 0 0 auto; background: none; border: none; padding: 4px;
+            margin: -4px -4px -4px 0; color: var(--text-muted); cursor: pointer;
+            border-radius: 6px; display: flex; align-items: center; line-height: 1; }
+        .sup-hist-del:hover { color: var(--danger); background: rgba(var(--danger-rgb), .12); }
+        .sup-hist-del:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+        .sup-hist-item:hover { background: rgba(var(--accent-rgb), .08); }
+        .sup-hist-q { font-size: 0.86rem; color: var(--text-primary);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .sup-hist-meta { font-size: 0.72rem; color: var(--text-muted); margin-top: 2px; }
+        .sup-hist-empty { padding: 22px 14px; text-align: center; color: var(--text-muted); font-size: 0.84rem; }
+        .sup-instr-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 50;
+            display: flex; align-items: center; justify-content: center; padding: 16px; }
+        .sup-instr-overlay.hidden { display: none; }
+        .sup-instr-modal { background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: 12px; width: 640px; max-width: 100%; max-height: 85vh; display: flex;
+            flex-direction: column; padding: 18px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+        .sup-instr-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+        .sup-instr-hint { font-size: 0.82rem; color: var(--text-muted); margin: 0 0 10px; line-height: 1.4; }
+        .sup-instr-admin { margin: 0 0 14px; }
+        .sup-instr-admin.hidden { display: none; }
+        .sup-instr-admin-label { display: block; font-size: 0.78rem; font-weight: 600;
+            color: var(--text-secondary); margin: 0 0 4px; }
+        .sup-instr-admin-box { width: 100%; box-sizing: border-box; max-height: 160px; overflow-y: auto;
+            background: rgba(var(--fg-rgb), .04); border: 1px solid var(--border); border-radius: 8px;
+            padding: 10px 12px; font-family: var(--font-body); font-size: 0.85rem; line-height: 1.5;
+            color: var(--text-secondary); white-space: pre-wrap; word-break: break-word; }
+        .sup-instr-text { width: 100%; box-sizing: border-box; min-height: 220px; resize: vertical;
+            background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border);
+            border-radius: 8px; padding: 10px; font-family: var(--font-body); font-size: 0.9rem; line-height: 1.5; }
+        .sup-instr-text:focus { border-color: var(--accent); outline: none; }
+        .sup-instr-foot { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 12px; }
+        .sup-instr-status { font-size: 0.82rem; color: var(--text-muted); margin-right: auto; }
+
+        .sup-wrap { max-width: 760px; margin: 0 auto; padding: 28px 20px 60px; }
+
+        .sup-search-card {
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: var(--radius-lg); padding: 18px; box-shadow: var(--shadow-md);
+        }
+        .sup-search-row { display: flex; gap: 10px; align-items: stretch; }
+        #sup-input {
+            flex: 1; resize: vertical; min-height: 46px; max-height: 220px;
+            background: rgba(var(--fg-rgb), .05); border: 1px solid var(--border);
+            border-radius: var(--radius-md); color: var(--text-primary);
+            padding: 12px 14px; font-size: 0.95rem; font-family: var(--font-body);
+            line-height: 1.4; outline: none;
+        }
+        #sup-input:focus { border-color: var(--accent); }
+        .sup-btn {
+            background: var(--accent); color: #fff; border: none; cursor: pointer;
+            border-radius: var(--radius-md); padding: 0 22px; font-size: 0.95rem;
+            font-weight: 600; white-space: nowrap;
+        }
+        .sup-btn:hover { background: var(--accent-hover); }
+        .sup-btn:disabled { opacity: .55; cursor: default; }
+        /* Abbrechen-Button rechts neben der "Suche läuft…"-Zeile */
+        .sup-meta-row { display: flex; align-items: center; gap: 12px; }
+        .sup-meta-row .sup-meta { margin-bottom: 12px; margin-top: 18px; }
+        .sup-btn-cancel {
+            background: var(--danger); color: #fff; border: none; cursor: pointer;
+            border-radius: var(--radius-md); padding: 5px 14px; font-size: 0.82rem;
+            font-weight: 600; white-space: nowrap; flex: 0 0 auto; line-height: 1.3;
+        }
+        .sup-btn-cancel:hover { filter: brightness(1.1); }
+        /* de/en-Umschalter exakt wie in /chat (Groesse) */
+        .lang-toggle { display: flex; gap: 2px; background: rgba(var(--fg-rgb, 148,163,184), 0.05);
+            border: 1px solid rgba(var(--fg-rgb, 148,163,184), 0.1); border-radius: 8px; padding: 2px; }
+        .lang-toggle-btn { background: transparent; border: none; color: var(--text-secondary);
+            font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em; padding: 3px 10px;
+            border-radius: 6px; cursor: pointer; font-family: var(--font-body);
+            transition: background 0.15s, color 0.15s; }
+        .lang-toggle-btn:hover { color: var(--text-primary); }
+        .lang-toggle-btn.active { background: rgba(var(--accent-rgb), 0.35); color: var(--text-primary); }
+        /* Zwei verschiedene Dinge in einer Zeile: die Kaestchen links bestimmen, WAS
+           abgefragt wird (Quellen), das rechte NUR die Form der Antwort (Ausgabe).
+           Deshalb zwei benannte Gruppen - die Beschriftung traegt die Aussage, das
+           abgesetzte Feld macht sie auf einen Blick sichtbar. */
+        .sup-opts { display: flex; gap: 10px 20px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+        .sup-opts-grp { display: flex; align-items: center; gap: 8px 18px; flex-wrap: wrap; }
+        .sup-opts-cap { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.07em;
+            text-transform: uppercase; color: var(--text-muted); white-space: nowrap; }
+        .sup-opts-grp-out { padding: 5px 12px; border-radius: var(--radius-md);
+            background: rgba(var(--fg-rgb), 0.06); border: 1px solid var(--border); }
+        .sup-opts label { display: flex; align-items: center; gap: 7px; font-size: 0.88rem;
+            color: var(--text-secondary); cursor: pointer; }
+        .sup-opts input { accent-color: var(--accent); width: 16px; height: 16px; }
+
+        .sup-filters { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px;
+            padding-top: 12px; border-top: 1px solid var(--border); }
+        .sup-filters label { display: flex; align-items: center; gap: 6px; font-size: 0.78rem;
+            color: var(--text-muted); }
+        .sup-filters select { background: var(--bg-secondary); border: 1px solid var(--border);
+            color: var(--text-primary); border-radius: 8px; padding: 5px 8px; font-size: 0.82rem;
+            font-family: var(--font-body); cursor: pointer; }
+        .sup-filters select option { background: var(--bg-secondary); color: var(--text-primary); }
+
+        /* Erweiterte Einstellungen – einklappbar (Zustand benutzerbasiert gespeichert) */
+        .sup-adv-toggle { display: inline-flex; align-items: center; gap: 6px; margin-top: 12px;
+            background: none; border: none; color: var(--text-muted); cursor: pointer;
+            font-size: 0.82rem; font-weight: 600; font-family: var(--font-body); padding: 4px 0; }
+        .sup-adv-toggle:hover { color: var(--accent); }
+        .sup-adv-caret { transition: transform .2s ease; flex-shrink: 0; }
+        .sup-adv-toggle[aria-expanded="true"] .sup-adv-caret { transform: rotate(90deg); }
+        .sup-adv.hidden { display: none; }
+        .sup-adv > .sup-filters:first-child { margin-top: 8px; }
+
+        .sup-meta { color: var(--text-secondary); font-size: 0.84rem; margin: 18px 2px 12px; }
+        .sup-meta-more { color: var(--accent-hover); cursor: pointer; text-decoration: none; font-weight: 600; }
+        .sup-meta-more:hover { text-decoration: underline; }
+        /* Live-Volltextfilter am rechten Rand der Ergebniszeile */
+        .sup-filter-text {
+            margin-left: auto; flex: 0 0 auto; min-width: 160px; max-width: 260px;
+            background: rgba(var(--fg-rgb), .05); border: 1px solid var(--border);
+            color: var(--text-primary); border-radius: 8px; padding: 6px 10px;
+            font-size: 0.82rem; font-family: var(--font-body);
+        }
+        .sup-filter-text:focus { outline: none; border-color: var(--accent-hover); }
+        .sup-filter-text::placeholder { color: var(--text-muted); }
+        /* Hervorhebung der Filter-Treffer in den Ergebnissen */
+        .sup-hl { background: rgba(var(--accent-rgb), .38); color: inherit;
+            border-radius: 3px; padding: 0 1px; }
+
+        .sup-ai-card {
+            background: var(--bg-secondary); border: 1px solid rgba(var(--accent-rgb), .35);
+            border-radius: var(--radius-lg); padding: 16px 18px; margin-bottom: 16px;
+            position: relative; overflow: hidden;
+        }
+        .sup-ai-card::before {
+            content: ''; position: absolute; left: 0; top: 0; height: 3px; width: 100%;
+            background: var(--gradient);
+        }
+        .sup-ai-label { font-size: 0.72rem; letter-spacing: .12em; font-weight: 700;
+            color: var(--accent-hover); text-transform: uppercase; margin-bottom: 8px; }
+        .sup-ai-text { font-size: 0.92rem; line-height: 1.55; white-space: pre-wrap; }
+        /* Markdown-gerenderte Zusammenfassung (Renderer erzeugt Block-HTML) */
+        .sup-ai-text.sup-ai-md { white-space: normal; }
+        .sup-ai-md table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 0.86rem; }
+        .sup-ai-md th, .sup-ai-md td { border: 1px solid var(--border); padding: 5px 9px; text-align: left; vertical-align: top; }
+        .sup-ai-md th { background: rgba(var(--fg-rgb), .06); font-weight: 600; }
+        .sup-ai-md h1, .sup-ai-md h2, .sup-ai-md h3, .sup-ai-md h4 { margin: 12px 0 4px; line-height: 1.25; }
+        .sup-ai-md h1 { font-size: 1.15rem; } .sup-ai-md h2 { font-size: 1.06rem; } .sup-ai-md h3, .sup-ai-md h4 { font-size: 0.98rem; }
+        .sup-ai-md ul, .sup-ai-md ol { margin: 4px 0 6px 1.25rem; }
+        .sup-ai-md li { margin: 2px 0; }
+        .sup-ai-md pre { background: rgba(var(--fg-rgb), .08); border-radius: 8px; padding: 10px; overflow-x: auto; }
+        .sup-ai-md code { background: rgba(var(--fg-rgb), .1); border-radius: 4px; padding: 1px 4px; }
+        .sup-ai-md pre code { background: none; padding: 0; }
+        .sup-ai-md a { color: var(--accent-hover); word-break: break-word; }
+        .sup-ai-md blockquote { border-left: 3px solid var(--border); margin: 6px 0; padding: 2px 10px; color: var(--text-secondary); }
+        /* 'mehr'/'weniger'-Einklappen ab >6 Zeilen (KI-Texte + Ergebnis-Karten) */
+        .sup-ai-collapsed { overflow: hidden; position: relative; }
+        .sup-ai-collapsed::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 46px; background: linear-gradient(rgba(0,0,0,0), var(--bg-secondary)); pointer-events: none; }
+        .sup-ai-more { background: none; border: none; color: var(--accent-hover); cursor: pointer; font-size: 0.85rem; font-weight: 600; padding: 8px 0 0; font-family: var(--font-body); }
+        .sup-ai-more:hover { text-decoration: underline; }
+
+        .sup-block {
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: var(--radius-lg); padding: 14px 16px; margin-bottom: 12px;
+        }
+        .sup-block-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .sup-block-num { color: var(--text-muted); font-weight: 600; }
+        .sup-block-title { font-weight: 600; font-size: 1rem; flex: 1; min-width: 0;
+            display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+            overflow: hidden; line-height: 1.3; word-break: break-word; }
+        .sup-badge-src {
+            font-size: 0.66rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+            padding: 2px 8px; border-radius: 6px; background: rgba(var(--accent-rgb), .15);
+            color: var(--accent-hover);
+        }
+        .sup-badge-score {
+            font-size: 0.78rem; font-weight: 700; color: #fff; background: var(--accent);
+            padding: 3px 9px; border-radius: 6px; white-space: nowrap;
+        }
+        .sup-block-body {
+            margin-top: 10px; padding: 10px 12px; border-radius: var(--radius-md);
+            background: rgba(var(--fg-rgb), .04); font-size: 0.88rem; line-height: 1.5;
+            color: var(--text-secondary);
+            /* Inhalt als Markdown; eingeklappt via max-height (JS _applyHeightClamp) */
+        }
+        .sup-block-body.sup-ai-md > :first-child { margin-top: 0; }
+        .sup-block-body.sup-ai-md > :last-child { margin-bottom: 0; }
+        .sup-block-src { margin-top: 8px; font-size: 0.8rem; color: var(--text-muted); }
+        .sup-block-dates { margin-top: 4px; font-size: 0.76rem; color: var(--text-muted); }
+        .sup-block-src a { color: var(--accent-hover); text-decoration: none; word-break: break-all; cursor: pointer; }
+        .sup-block-src a:hover { text-decoration: underline; }
+        .sup-ai-btn {
+            font-size: 0.74rem; font-weight: 600; cursor: pointer; white-space: nowrap;
+            padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(var(--accent-rgb), .45);
+            background: rgba(var(--accent-rgb), .12); color: var(--accent-hover);
+        }
+        .sup-ai-btn:hover:not(:disabled) { background: rgba(var(--accent-rgb), .22); }
+        .sup-ai-btn:disabled { opacity: .6; cursor: default; }
+        /* Zustand nach erfolgter Analyse: neutral/sekundaer abgesetzt (kein Akzent) */
+        .sup-ai-btn.done {
+            border-color: var(--border); background: transparent; color: var(--text-muted);
+        }
+        .sup-ai-btn.done:hover:not(:disabled) {
+            background: rgba(var(--fg-rgb), .06); color: var(--text-secondary);
+        }
+
+        .sup-doc-modal { position: fixed; inset: 0; z-index: 200; display: flex; align-items: center;
+            justify-content: center; background: rgba(var(--shadow-rgb), .6); backdrop-filter: blur(4px); padding: 20px; }
+        .sup-doc-card { background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); width: min(1000px, 100%);
+            max-height: 88vh; display: flex; flex-direction: column; }
+        /* Vergroessert / Vollbild */
+        .sup-doc-card.sup-doc-max { width: 97vw; max-width: 97vw; height: 95vh; max-height: 95vh; }
+        .sup-doc-card.sup-doc-max #sup-doc-body { flex: 1; }
+        .sup-doc-card.sup-doc-max #sup-doc-embed .sup-doc-frame { height: 100%; }
+        .sup-doc-card.sup-doc-max #sup-doc-embed .sup-doc-img { max-height: 100%; }
+        .sup-doc-head { display: flex; align-items: center; justify-content: space-between;
+            padding: 12px 16px; border-bottom: 1px solid var(--border); gap: 12px; }
+        .sup-doc-head strong { font-size: 0.95rem; min-width: 0; word-break: break-word; }
+        .sup-doc-head button { background: none; border: none; color: var(--text-secondary);
+            font-size: 1.2rem; cursor: pointer; flex-shrink: 0; }
+        .sup-doc-head button:hover { color: var(--text-primary); }
+        .sup-doc-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+        #sup-doc-body { margin: 0; padding: 16px; overflow: auto; white-space: pre-wrap;
+            word-break: break-word; font-family: var(--font-mono); font-size: 0.82rem; line-height: 1.5;
+            color: var(--text-primary); }
+        #sup-doc-body a { color: var(--accent-hover); }
+        #sup-doc-embed { flex: 1; display: flex; min-height: 0; }
+        #sup-doc-embed.hidden { display: none; }
+        #sup-doc-embed .sup-doc-frame { flex: 1; width: 100%; height: 78vh; border: 0; background: #fff; border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
+        #sup-doc-embed .sup-doc-img { max-width: 100%; max-height: 78vh; margin: auto; object-fit: contain; }
+        #sup-doc-embed .sup-doc-note { margin: auto; padding: 40px 20px; text-align: center; color: var(--text-secondary); font-size: 0.9rem; }
+        #sup-doc-embed .sup-doc-note a { color: var(--accent-hover); font-weight: 600; cursor: pointer; }
+        .sup-help-body { padding: 16px 18px; overflow: auto; font-size: 0.9rem; line-height: 1.55;
+            color: var(--text-primary); }
+        .sup-help-body h4 { margin: 14px 0 6px; font-size: 0.92rem; color: var(--accent-hover); }
+        .sup-help-body h4:first-child { margin-top: 0; }
+        .sup-help-body ul { margin: 0 0 4px; padding-left: 20px; }
+        .sup-help-body li { margin: 4px 0; }
+        .sup-help-body code { background: rgba(var(--fg-rgb), .08); padding: 1px 5px; border-radius: 4px;
+            font-size: 0.82rem; }
+        .sup-block-link { font-size: 0.8rem; margin-top: 8px; display: inline-block;
+            color: var(--accent-hover); text-decoration: none; }
+        .sup-block-link:hover { text-decoration: underline; }
+        .sup-empty { text-align: center; color: var(--text-muted); padding: 40px 0; }
+
+        /* Drei Spalten: Jira | Confluence | RAG */
+        .sup-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 16px; align-items: start; }
+        .sup-col { min-width: 0; }
+        .sup-col-head { font-size: 0.8rem; font-weight: 700; text-transform: uppercase;
+            letter-spacing: .06em; color: var(--accent-hover); padding: 0 2px 8px;
+            border-bottom: 2px solid rgba(var(--accent-rgb), .3); margin-bottom: 12px;
+            display: flex; align-items: center; gap: 8px; }
+        .sup-col-count { background: rgba(var(--accent-rgb), .15); color: var(--accent-hover);
+            border-radius: 10px; padding: 1px 8px; font-size: 0.72rem; font-weight: 700; }
+        .sup-col .sup-block { padding: 12px 13px; }
+        .sup-col .sup-block-title { font-size: 0.9rem; }
+        .sup-spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(var(--fg-rgb),.2);
+            border-top-color: var(--accent); border-radius: 50%; animation: supspin .7s linear infinite;
+            vertical-align: -2px; margin-right: 6px; }
+        @keyframes supspin { to { transform: rotate(360deg); } }
+
+        /* Login */
+        .sup-login { position: fixed; inset: 0; display: flex; align-items: center;
+            justify-content: center; background: var(--bg-primary); z-index: 100; }
+        .sup-login-card { background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: var(--radius-lg); padding: 30px; width: min(360px, 90vw);
+            box-shadow: var(--shadow-lg); text-align: center; }
+        .sup-login-avatar { width: 56px; height: 56px; border-radius: 50%; margin: 0 auto 14px;
+            background: var(--gradient); display: flex; align-items: center; justify-content: center;
+            font-size: 1.5rem; font-weight: 700; color: #fff; }
+        .sup-login-card h1 { font-size: 1.2rem; margin-bottom: 18px; }
+        .sup-login-card input { width: 100%; margin-bottom: 10px; padding: 11px 13px;
+            border-radius: var(--radius-md); border: 1px solid var(--border);
+            background: rgba(var(--fg-rgb), .05); color: var(--text-primary); font-size: 0.92rem; }
+        .sup-login-err { color: var(--danger); font-size: 0.82rem; min-height: 18px; }
+    </style>
+</head>
+<body>
+<script src="/static/js/theme_frueh.js?v=1"></script>
+
+<!-- Login -->
+<div id="sup-login" class="sup-login hidden">
+    <div class="sup-login-card">
+        <div class="sup-login-avatar login-avatar">J</div>
+        <h1><span class="brand-app-name">Jarvis</span> <span data-i18n="sup.assistant">Support Assistent</span></h1>
+        <form id="sup-login-form">
+            <input type="text" id="sup-login-user" data-i18n-placeholder="sup.login_user" placeholder="Benutzername" autocomplete="username" required>
+            <input type="password" id="sup-login-pass" data-i18n-placeholder="sup.login_pass" placeholder="Passwort" autocomplete="current-password" required>
+            <button class="sup-btn" type="submit" style="width:100%;padding:11px;" data-i18n="sup.login_submit">Anmelden</button>
+            <div class="sup-login-err" id="sup-login-err"></div>
+        </form>
+    </div>
+</div>
+
+<!-- App -->
+<div id="sup-app" class="hidden">
+    <header class="topbar">
+        <div class="topbar-left">
+            <div class="topbar-avatar">J</div>
+            <span class="topbar-title"><span class="brand-app-name">Jarvis</span> <span data-i18n="sup.assistant">Support-Assistent</span></span>
+            <span class="sup-status-dot" id="sup-status-dot" title="LLM-Status"></span>
+            <!-- CPU-Auslastung (fuer alle sichtbar) -->
+            <div class="jv-cpu-bar" id="cpu-bar" title="CPU-Auslastung" data-i18n-title="wissen.cpu_load">
+                <div class="cpu-bar-fill" id="cpu-bar-fill" style="width:0%"></div>
+                <span class="cpu-bar-label" id="cpu-bar-label">CPU: 0%</span>
+            </div>
+        </div>
+        <div class="topbar-right">
+            <div class="lang-toggle" id="sup-lang-toggle">
+                <button class="lang-toggle-btn" data-lang="de" data-setlang="de" title="Deutsch">DE</button>
+                <button class="lang-toggle-btn" data-lang="en" data-setlang="en" title="English">EN</button>
+            </div>
+            <button class="btn-theme" id="sup-help-btn" data-i18n-title="sup.help_title" title="Hilfe: Score & Trefferzahl" style="font-weight:700;">?</button>
+            <button class="sup-hist-btn" id="sup-instr-btn" data-i18n-title="sup.instr_title" title="Eigene Anweisungen an den Assistenten">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                <span data-i18n="sup.instructions">Anweisungen</span>
+            </button>
+            <div class="sup-hist-wrap">
+                <button class="sup-hist-btn" id="sup-hist-btn" data-i18n-title="sup.history" title="Suchverlauf">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>
+                    <span data-i18n="sup.history">Verlauf</span>
+                </button>
+                <div class="sup-hist-panel hidden" id="sup-hist-panel">
+                    <div class="sup-hist-head"><strong data-i18n="sup.history">Verlauf</strong><button class="sup-hist-clear" id="sup-hist-clear" type="button" data-i18n="sup.clear">Leeren</button></div>
+                    <div id="sup-hist-list"></div>
+                </div>
+            </div>
+            <button class="btn-theme jv-issues-btn" id="sup-issues-btn" data-i18n-title="sup.issues" title="Issues / Feedback" data-issues-oeffnen style="position:relative;">
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            </button>
+            <button class="btn-theme" id="btn-theme-toggle" data-i18n-title="sup.theme" title="Hell/Dunkel umschalten">
+                <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                <svg class="theme-icon-sun" style="display:none;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            </button>
+            <a href="/portal" class="btn-theme" data-i18n-title="nav.home" title="Startseite" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            </a>
+            <!-- Setup/Einstellungen: nur fuer Admins, direkt vor Logout -->
+            <button class="btn-theme" id="sup-settings-btn" data-jarvis-settings="/support" data-i18n-title="nav.settings" title="Einstellungen" style="display:none;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </button>
+            <button class="btn-theme" id="sup-logout-btn" title="Abmelden">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            </button>
+        </div>
+    </header>
+
+    <div id="sup-instr-overlay" class="sup-instr-overlay hidden">
+        <div class="sup-instr-modal">
+            <div class="sup-instr-head">
+                <strong data-i18n="sup.instr_heading">Eigene Anweisungen an den Support-Assistenten</strong>
+                <button class="sup-hist-clear" id="sup-instr-close" type="button" data-i18n-title="common.close" title="Schließen">✕</button>
+            </div>
+            <p class="sup-instr-hint" data-i18n="sup.instr_hint">Diese Anweisungen gelten dauerhaft und sessionübergreifend nur für dich und werden bei jeder KI-Zusammenfassung berücksichtigt (z. B. Tonfall, Fokus, Formatvorgaben).</p>
+            <div id="sup-instr-admin" class="sup-instr-admin hidden">
+                <span class="sup-instr-admin-label" data-i18n="sup.instr_admin_label">Administratives Prompt (aus den Einstellungen, nur lesbar)</span>
+                <div id="sup-instr-admin-box" class="sup-instr-admin-box"></div>
+            </div>
+            <textarea id="sup-instr-text" class="sup-instr-text" data-tabfill placeholder="z. B. Antworte knapp in Stichpunkten. Priorisiere offene Tickets. Nenne immer den Ticket-Key."></textarea>
+            <div class="sup-instr-foot">
+                <span id="sup-instr-status" class="sup-instr-status"></span>
+                <button class="sup-hist-btn" id="sup-instr-save" type="button" data-i18n="common.save">Speichern</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="sup-wrap" data-jv-breit>
+        <!-- Seite maximieren (Vorbild /wissen, Vorgabe 2026-09-28): der Knopf
+             sitzt AUSSERHALB der Kacheln ganz oben; maximiert nutzen ALLE
+             Kacheln die volle Fensterbreite. Logik in seite_breit.js. -->
+        <div class="jv-max-row">
+            <button type="button" class="jv-max-btn" id="jv-max" data-seite="support" aria-pressed="false"
+                    data-i18n-title="common.maximize" data-i18n-aria="common.maximize"
+                    title="Maximieren" aria-label="Maximieren">&#9974;</button>
+        </div>
+        <div class="sup-search-card">
+            <div class="sup-search-row">
+                <textarea id="sup-input" data-i18n-placeholder="sup.input_ph" placeholder="Anfrage eingeben … (mehrzeilig möglich)"></textarea>
+                <button class="sup-btn" id="sup-search-btn" type="button" data-i18n="sup.search">Suchen</button>
+            </div>
+            <div class="sup-opts">
+                <!-- Gruppe 1: WAS abgefragt wird. -->
+                <div class="sup-opts-grp" id="sup-opts-src">
+                    <span class="sup-opts-cap" data-i18n="sup.opt_cap_src">Quellen</span>
+                    <label id="sup-opt-jira-wrap" class="hidden"><input type="checkbox" id="sup-opt-jira" checked> <span data-i18n="sup.opt_jira">alle Jira Tickets</span></label>
+                    <label id="sup-opt-open-wrap" class="hidden"><input type="checkbox" id="sup-opt-open" checked> <span data-i18n="sup.opt_open">offene Jira Tickets</span></label>
+                    <label id="sup-opt-conf-wrap" class="hidden"><input type="checkbox" id="sup-opt-conf" checked> <span data-i18n="sup.opt_conf">Confluence</span></label>
+                    <label><input type="checkbox" id="sup-opt-rag" checked> <span data-i18n="sup.opt_rag">RAG einbeziehen</span></label>
+                    <!-- IBS-Tickets: nur klickbar, wenn Kundenverwaltungs-API (URL + Key) konfiguriert ist -->
+                    <label id="sup-opt-ibs-wrap"><input type="checkbox" id="sup-opt-ibs" disabled> <span data-i18n="sup.opt_ibs">IBS Tickets</span></label>
+                    <!-- Fachsysteme: sichtbar nur mit Freigabe + aktivem Skill, klickbar nur
+                         mit hinterlegtem Zugang. Die Berechtigung prueft der Server. -->
+                    <label id="sup-opt-sap-wrap" class="hidden"><input type="checkbox" id="sup-opt-sap" disabled> <span data-i18n="sup.opt_sap">SAP</span></label>
+                    <label id="sup-opt-vemas-wrap" class="hidden"><input type="checkbox" id="sup-opt-vemas" disabled> <span data-i18n="sup.opt_vemas">VEMAS</span></label>
+                </div>
+                <!-- Gruppe 2: KEINE Quelle - sie bestimmt nur, WIE die Treffer ausgegeben
+                     werden. Steht deshalb abgesetzt in einem eigenen Feld. -->
+                <div class="sup-opts-grp sup-opts-grp-out" id="sup-opts-out">
+                    <span class="sup-opts-cap" data-i18n="sup.opt_cap_out">Ausgabe</span>
+                    <label id="sup-opt-ai-wrap" data-i18n-title="sup.opt_ai_hint" title="Fasst die gefundenen Treffer zusätzlich per KI zusammen – fragt keine weitere Quelle ab"><input type="checkbox" id="sup-opt-ai" checked> <span data-i18n="sup.opt_ai">KI-Gesamtzusammenfassung</span></label>
+                </div>
+            </div>
+            <button type="button" id="sup-adv-toggle" class="sup-adv-toggle" aria-expanded="false">
+                <svg class="sup-adv-caret" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"></polyline></svg>
+                <span data-i18n="sup.adv_toggle">Erweiterte Einstellungen</span>
+            </button>
+            <div id="sup-adv" class="sup-adv hidden">
+            <!-- Wissensgruppen-Filter + KI-Profil-Pulldown (per JS befüllt) -->
+            <div class="sup-filters" id="sup-adv-llm">
+                <div id="kb-filter-slot"></div>
+                <div id="sup-profile-slot"></div>
+            </div>
+            <div class="sup-filters" id="sup-filters">
+                <label><span data-i18n="sup.f_source">Quelle</span>
+                    <select id="sup-f-source">
+                        <option value="" data-i18n="sup.all">Alle</option>
+                        <option value="WISSEN" data-i18n="sup.knowledge">Wissen</option>
+                        <option value="JIRA">Jira</option>
+                        <option value="CONFLUENCE">Confluence</option>
+                        <option value="IBS">IBS</option>
+                        <option value="SAP">SAP</option>
+                        <option value="VEMAS">VEMAS</option>
+                    </select>
+                </label>
+                <label><span data-i18n="sup.f_rel">Relevanz</span>
+                    <select id="sup-f-rel">
+                        <option value="0" data-i18n="sup.all">Alle</option>
+                        <option value="50">≥ 50&nbsp;%</option>
+                        <option value="70">≥ 70&nbsp;%</option>
+                        <option value="90">≥ 90&nbsp;%</option>
+                    </select>
+                </label>
+                <label><span data-i18n="sup.f_sort">Sortierung</span>
+                    <select id="sup-f-sort">
+                        <option value="score" data-i18n="sup.sort_rel">Relevanz</option>
+                        <option value="source" data-i18n="sup.sort_source">Quelle</option>
+                        <option value="title" data-i18n="sup.sort_title">Titel A–Z</option>
+                    </select>
+                </label>
+                <label><span data-i18n="sup.f_count">Anzahl</span>
+                    <select id="sup-f-limit">
+                        <option value="0" data-i18n="sup.all">Alle</option>
+                        <option value="5">Top 5</option>
+                        <option value="10">Top 10</option>
+                        <option value="20">Top 20</option>
+                    </select>
+                </label>
+            </div>
+            <div class="sup-filters" id="sup-user-display" style="border-top:none;padding-top:6px;">
+                <label><span data-i18n="sup.ki_lines">Sätze (Zusammenfassung)</span>
+                    <input type="number" id="sup-u-sumlines" min="2" step="1"
+                        style="width:58px;background:rgba(var(--fg-rgb),.05);border:1px solid var(--border);color:var(--text-primary);border-radius:8px;padding:5px 6px;font-size:0.82rem;font-family:var(--font-body);">
+                </label>
+                <span id="sup-u-hint" style="font-size:0.72rem;color:var(--text-muted);align-self:center;"></span>
+                <label><span data-i18n="sup.ticket_count">Ticketanzahl</span>
+                    <input type="number" id="sup-u-tickets" min="1" step="1"
+                        style="width:58px;background:rgba(var(--fg-rgb),.05);border:1px solid var(--border);color:var(--text-primary);border-radius:8px;padding:5px 6px;font-size:0.82rem;font-family:var(--font-body);">
+                </label>
+                <span id="sup-u-thint" style="font-size:0.72rem;color:var(--text-muted);align-self:center;"></span>
+            </div>
+            </div>
+        </div>
+
+        <div class="sup-meta-row">
+            <div id="sup-meta" class="sup-meta hidden"></div>
+            <button class="sup-btn-cancel hidden" id="sup-cancel-btn" type="button" data-i18n="sup.cancel">Abbrechen</button>
+            <input type="search" id="sup-filter-text" class="sup-filter-text hidden" autocomplete="off"
+                   data-i18n-placeholder="sup.filter_ph" placeholder="Ergebnisse filtern …"
+                   data-i18n-title="sup.filter_title" title="Angezeigte Treffer nach eingegebenem Text filtern (Volltext). Leeren zeigt wieder alle.">
+        </div>
+        <div id="sup-results"></div>
+    </div>
+</div>
+
+<!-- Dokument-Viewer (lokale Wissensquellen) -->
+<!-- Hilfe: Score & Trefferzahl -->
+<div id="sup-help-modal" class="sup-doc-modal hidden">
+    <div class="sup-doc-card">
+        <div class="sup-doc-head"><strong>Wie funktionieren Score und Trefferzahl?</strong><button id="sup-help-close" type="button" title="Schließen">✕</button></div>
+        <div class="sup-help-body">
+            <h4>Score („Zutreffend in %")</h4>
+            <ul>
+                <li>Der Score zeigt, wie gut ein Treffer zur Anfrage passt – er wird je Quelle unterschiedlich berechnet.</li>
+                <li><strong>Wissen (RAG):</strong> semantische Ähnlichkeit zwischen Anfrage und Textabschnitt (Vektor-Suche, 0–100&nbsp;%); ohne Vektor-Index ersatzweise die TF-IDF-Trefferstärke relativ zum besten Treffer.</li>
+                <li><strong>Jira &amp; Confluence:</strong> die Such-API liefert bereits nach Relevanz sortiert – daher ein rangbasierter Wert (erster Treffer am höchsten, dann absteigend), zusätzlich angehoben durch die Wort-Überlappung zwischen Anfrage und Titel/Zusammenfassung.</li>
+                <li>Die Werte liegen im Bereich ca. <code>20–96&nbsp;%</code>: ein gefundener Treffer ist nie 0&nbsp;% und selten exakt 100&nbsp;%.</li>
+                <li>Alle Quellen werden danach gemeinsam nach Score absteigend sortiert und als eine Liste angezeigt.</li>
+            </ul>
+            <h4>Anzahl der Treffer</h4>
+            <ul>
+                <li>Pro Suche werden bis zu <strong>8 Wissens-</strong> und <strong>6 Confluence-</strong>Treffer geholt; die <strong>Jira-Trefferzahl</strong> stellst du über das Feld <strong>„Ticketanzahl"</strong> selbst ein (Standard&nbsp;12, Maximum vom Administrator festgelegt).</li>
+                <li>Die Ergebniszeile zeigt „<strong>X von Y Treffer</strong>": Y = insgesamt gefunden, X = nach den aktuellen Filtern angezeigt.</li>
+                <li>Die vier Pulldowns grenzen die Anzeige nachträglich ein (ohne neue Suche): <strong>Quelle</strong>, <strong>Mindest-Relevanz</strong> (z.&nbsp;B. ≥&nbsp;70&nbsp;%), <strong>Sortierung</strong> und <strong>Anzahl</strong> (Top&nbsp;5/10/20).</li>
+                <li>Welche Quellen durchsucht werden, steuern die Checkboxen <em>alle Jira Tickets</em> / <em>offene Jira Tickets</em> (nur eins davon), <em>Confluence</em> und <em>RAG einbeziehen</em> – das verändert Trefferzahl und Score-Mix direkt.</li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<div id="sup-doc-modal" class="sup-doc-modal hidden">
+    <div class="sup-doc-card">
+        <div class="sup-doc-head"><strong id="sup-doc-title">Dokument</strong>
+            <span class="sup-doc-actions">
+                <button id="sup-doc-max" type="button" title="Vergrößern" data-i18n-title="sup.doc_maximize">⛶</button>
+                <button id="sup-doc-close" type="button" title="Schließen">✕</button>
+            </span></div>
+        <pre id="sup-doc-body"></pre>
+        <div id="sup-doc-embed" class="hidden"></div>
+    </div>
+</div>
+
+<script src="/static/js/sitzung.js?v=3"></script>
+<script src="/static/js/konto_hinweise.js?v=2"></script>
+<script src="/static/js/icons.js?v=8"></script>
+<script src="/static/js/pwreveal.js?v=4"></script>
+<script src="/static/js/dlkey.js?v=4"></script>
+<script src="/static/js/cpubar.js?v=2"></script>
+<script src="/static/js/syspackages.js?v=3"></script>
+<script src="/static/js/sysload.js?v=5"></script>
+<script src="/static/js/i18n.js?v=339"></script>
+<script src="/static/js/seite_breit.js?v=1"></script>
+<script src="/static/js/tabfill.js?v=2"></script>
+<script src="/static/js/theme.js?v=3"></script>
+<script src="/static/js/branding.js?v=27"></script>
+<script src="/static/js/issues.js?v=14"></script>
+<script src="/static/js/chatlib.js?v=23"></script>
+<!-- Wissensgruppen-Filter (Checkbox-Auswahl der genutzten Gruppen) -->
+<script src="/static/js/kbgroups.js?v=6"></script>
+<script src="/static/js/kbgroupfilter.js?v=9"></script>
+<script src="/static/js/profile_switcher.js?v=5"></script>
+<script src="/static/js/sessions.js?v=9"></script>
+<script src="/static/js/logo_home.js?v=1"></script>
+<script src="/static/js/support.js?v=61"></script>
+<!-- Diagramme: der Support-Assistent antwortet ueber denselben
+     Markdown-Renderer (chatlib.js), erzeugte also bisher Platzhalter fuer
+     ```chartjs-Bloecke, die niemand hydratisiert hat – ein leerer Kasten.
+     Reihenfolge: Chart.js, dann Plugins, dann charts.js. -->
+<script src="/static/js/vendor/chart.umd.min.js?v=1"></script>
+<script src="/static/js/vendor/chartjs-plugin-datalabels.min.js?v=1"></script>
+<script src="/static/js/vendor/chartjs-plugin-annotation.min.js?v=1"></script>
+<script src="/static/js/charts.js?v=4"></script>
+<script src="/static/js/mermaid_blocks.js?v=2"></script>
+<script src="/static/js/settings_btn.js?v=5"></script>
+<!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
+<script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
+<script src="/static/vendor/clippy/clippy.min.js"></script>
+<script src="/static/js/stt.js?v=3"></script>
+<script src="/static/js/avatar.js?v=17"></script>
+<script src="/static/js/activity.js?v=3"></script>
+</body>
+</html>

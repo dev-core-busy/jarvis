@@ -1,0 +1,524 @@
+"""Benutzereigene Chat-Sitzungen fuer /chat.
+
+Jeder Benutzer hat einen Hauptordner; jede Chat-Sitzung liegt in einem eigenen
+Unterordner darin:
+
+    data/chats/<benutzer>/<sitzungs-id>/
+        meta.json        – {id, title, created, updated}
+        transcript.json  – sichtbarer Chatverlauf (Bubbles, Anzeige)
+        context.json      – LLM-Kontextspeicher dieser Sitzung (serialisierte
+                            google-genai types.Content, volle Treue inkl. Anhaenge)
+
+So laesst sich pro Eintrag der Verlauf UND der zugehoerige Kontext laden und
+fortsetzen. Der Kontext-(De)Serializer liegt in agent.py; hier nur Datei-I/O.
+"""
+
+import json
+import threading
+import time
+import uuid
+from pathlib import Path
+
+from backend.benutzer import pfad_teil
+
+_ROOT = Path(__file__).parent.parent / "data" / "chats"
+_LOCK = threading.RLock()
+_MAX_TRANSCRIPT = 800   # max. Anzeige-Nachrichten pro Sitzung
+_DEFAULT_TITLE = "Neuer Chat"
+
+
+def _safe(s: str, fallback: str) -> str:
+    """Datei-/pfadsicherer Name (verhindert Traversal).
+
+    ⚠ Ein REINER PUNKTNAME faellt auf den Fallback (Review 2026-10-07): ``.``
+    und ``..`` ueberleben den Zeichenfilter, und ``_sess_dir(u, "..")`` ist
+    ``data/chats`` – ein ``POST /api/chat/sessions/delete {"ids":[".."]}``
+    loeschte per rmtree die Chats ALLER Benutzer. Gleiche Regel wie
+    ``benutzer.pfad_teil``."""
+    s = (s or "").strip()
+    out = "".join(c for c in s if c.isalnum() or c in "._-@")
+    if not out.strip("."):
+        return fallback
+    return out
+
+
+def _user_dir(user: str) -> Path:
+    """Ablageordner EINES Benutzers.
+
+    ⚠ ``pfad_teil`` und NICHT ``_safe`` (Fix 2026-09-07): letzteres entfernte
+    nur unbedenkliche Zeichen und liess den Domaenenanteil stehen – aus
+    ``firma\\m.mustermann`` wurde der Ordner ``firmam.mustermann`` neben
+    dem vorhandenen ``m.mustermann``. Auf DEV lagen so 1 und 8 Sitzungen
+    desselben Menschen in zwei Ordnern, und welchen er sah, hing an der
+    Tippform beim Anmelden. ``_safe`` bleibt fuer die SITZUNGS-Kennung
+    zustaendig – die ist kein Benutzername und darf nicht normalisiert werden.
+    """
+    return _ROOT / pfad_teil(user, "anonymous")
+
+
+def _sess_dir(user: str, sid: str) -> Path:
+    return _user_dir(user) / _safe(sid, "")
+
+
+def _valid(user: str, sid: str) -> bool:
+    if not _safe(sid, ""):
+        return False
+    sd = _sess_dir(user, sid)
+    # Zweite Schranke: die Sitzung ist ein DIREKTES Kind des Benutzerordners
+    # (auch nach Aufloesen von Symlinks) – nie der Ordner selbst, nie darueber.
+    try:
+        if sd.resolve().parent != _user_dir(user).resolve():
+            return False
+    except OSError:
+        return False
+    return sd.is_dir()
+
+
+def new_id() -> str:
+    return uuid.uuid4().hex[:12]
+
+
+# ─── Benutzer-Preprompt (persoenliche Vorab-Anweisung fuer /chat) ─────────────
+# Gilt pro Benutzer (nicht pro Sitzung) und wird dem System-Prompt des
+# Hauptagenten vorangestellt. Liegt in data/chats/<user>/preprompt.txt.
+
+_PREPROMPT_MAX = 8000
+
+
+def get_preprompt(user: str) -> str:
+    """Liefert den persoenlichen Preprompt des Benutzers (leerer String, wenn keiner)."""
+    p = _user_dir(user) / "preprompt.txt"
+    try:
+        if p.exists():
+            return p.read_text(encoding="utf-8")
+    except Exception:
+        pass
+    return ""
+
+
+def save_preprompt(user: str, text: str) -> str:
+    """Speichert den persoenlichen Preprompt des Benutzers (auf _PREPROMPT_MAX
+    Zeichen begrenzt). Leerer Text loescht die Datei. Rueckgabe: gespeicherter Text."""
+    text = (text or "")[:_PREPROMPT_MAX]
+    ud = _user_dir(user)
+    p = ud / "preprompt.txt"
+    with _LOCK:
+        try:
+            if text.strip():
+                ud.mkdir(parents=True, exist_ok=True)
+                p.write_text(text, encoding="utf-8")
+            elif p.exists():
+                p.unlink()
+        except Exception:
+            pass
+    return text if text.strip() else ""
+
+
+# ─── Wissensquellen-Vorauswahl fuer NEUE Chats (pro Benutzer) ────────────────
+# Liegt in data/chats/<user>/kb_default.json und bestimmt, welche Wissensgruppen
+# in einem FRISCH angelegten Chat vorausgewaehlt sind. In einem laufenden Chat
+# entscheidet weiterhin die Auswahl in der Eingabeleiste (sie steht in der
+# meta.json der Sitzung).
+#
+# ⚠ GESPEICHERT WERDEN DIE ABGEWAEHLTEN IDS, nicht die ausgewaehlten. Eine
+# spaeter angelegte Wissensgruppe ist damit von selbst dabei, statt still zu
+# fehlen – dieselbe Ueberlegung, aus der der Filter der Eingabeleiste seine
+# Auswahl ebenfalls als "off"-Liste haelt. Wer hier auf die ausgewaehlten Ids
+# umstellt, laesst jede neue Gruppe unbemerkt aus allen neuen Chats fallen.
+
+_KB_DEFAULT_MAX_IDS = 200   # Deckel: die Liste kommt aus einem Request
+_KB_DEFAULT_ID_MAX = 64
+
+
+def _kb_ids_saeubern(werte) -> list[str]:
+    """Gruppen-Ids aus Fremdeingabe pruefen: nur nicht-leere Zeichenketten,
+    ohne Duplikate, in Reihenfolge, gedeckelt. Ungueltiges wird VERWORFEN,
+    nicht geraten."""
+    raus: list[str] = []
+    if not isinstance(werte, list):
+        return raus
+    gesehen = set()
+    for w in werte:
+        if not isinstance(w, str):
+            continue
+        w = w.strip()
+        if not w or len(w) > _KB_DEFAULT_ID_MAX or w in gesehen:
+            continue
+        gesehen.add(w)
+        raus.append(w)
+        if len(raus) >= _KB_DEFAULT_MAX_IDS:
+            break
+    return raus
+
+
+def get_kb_default(user: str) -> list[str] | None:
+    """Abgewaehlte Wissensgruppen fuer neue Chats.
+
+    ``None`` = keine Vorauswahl hinterlegt (dann sind alle Gruppen aktiv, also
+    das bisherige Verhalten). Eine leere Liste kommt nicht vor – sie bedeutet
+    dasselbe und wird beim Speichern zu "keine Vorauswahl" normalisiert.
+    """
+    p = _user_dir(user) / "kb_default.json"
+    try:
+        if p.exists():
+            d = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(d, dict) and isinstance(d.get("off"), list):
+                ids = _kb_ids_saeubern(d["off"])
+                return ids if ids else None
+    except Exception:
+        pass
+    return None
+
+
+def save_kb_default(user: str, ids) -> list[str] | None:
+    """Vorauswahl speichern (Liste der ABGEWAEHLTEN Gruppen-Ids).
+
+    Eine leere Liste entfernt die Datei: "nichts abgewaehlt" und "keine
+    Vorauswahl" bewirken beides "alle Gruppen aktiv" – ein Eintrag dafuer waere
+    eine Karteileiche. Rueckgabe ist der gespeicherte Stand (``None`` = keiner).
+    """
+    sauber = _kb_ids_saeubern(ids)
+    ud = _user_dir(user)
+    p = ud / "kb_default.json"
+    with _LOCK:
+        try:
+            if sauber:
+                ud.mkdir(parents=True, exist_ok=True)
+                p.write_text(json.dumps({"off": sauber}, ensure_ascii=False), encoding="utf-8")
+            elif p.exists():
+                p.unlink()
+        except Exception:
+            pass
+    return sauber if sauber else None
+
+# ─── Metadaten / Sitzungsverwaltung ──────────────────────────────────────────
+
+def _read_meta(sd: Path) -> dict | None:
+    p = sd / "meta.json"
+    if not p.exists():
+        return None
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else None
+    except Exception:
+        return None
+
+
+def _write_meta(sd: Path, meta: dict) -> None:
+    sd.mkdir(parents=True, exist_ok=True)
+    (sd / "meta.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+
+
+def list_sessions(user: str) -> list:
+    """Alle Sitzungen des Benutzers, neueste zuerst."""
+    ud = _user_dir(user)
+    out = []
+    with _LOCK:
+        if ud.is_dir():
+            for sd in ud.iterdir():
+                if not sd.is_dir():
+                    continue
+                m = _read_meta(sd)
+                if m and m.get("id"):
+                    # `has_prompt` sagt nur, DASS ein eigener Prompt hinterlegt ist –
+                    # nie seinen Inhalt. Die Seitenleiste braucht die Aussage fuer
+                    # jede Zeile; ohne sie muesste sie je Sitzung einen eigenen
+                    # Abruf machen (bei 30 Chats 30 Rundreisen beim Seitenaufbau).
+                    out.append({"id": m["id"], "title": m.get("title", _DEFAULT_TITLE),
+                                "created": m.get("created", 0), "updated": m.get("updated", 0),
+                                "has_prompt": bool((m.get("preprompt") or "").strip())})
+    out.sort(key=lambda x: x.get("updated", 0), reverse=True)
+    return out
+
+
+def create_session(user: str, title: str = "") -> dict:
+    sid = new_id()
+    now = int(time.time())
+    meta = {"id": sid, "title": (title or _DEFAULT_TITLE).strip()[:120] or _DEFAULT_TITLE,
+            "created": now, "updated": now}
+    with _LOCK:
+        _write_meta(_sess_dir(user, sid), meta)
+    return meta
+
+
+# ─── Willkommens-Chat "Beispiel Prompts" ─────────────────────────────────────
+# Jeder Benutzer bekommt beim ERSTEN /chat-Aufruf eine vorbereitete Sitzung mit
+# anklickbaren Beispiel-Prompts. Der Eintrag traegt nur `kind: "welcome"` – den
+# sichtbaren Text baut das Frontend aus i18n-Keys (DE/EN), damit die Inhalte
+# nicht doppelt (Backend + Oberflaeche) gepflegt werden muessen. `text` ist eine
+# reine Notfall-Beschreibung, falls die Oberflaeche den Sondertyp nicht kennt.
+WELCOME_TITLE = "Beispiel Prompts"
+_WELCOME_MARK = ".welcome_v1"      # Marker: schon angelegt (auch nach Loeschen)
+_WELCOME_FALLBACK = ("Willkommen! Hier findest du Beispiel-Prompts, die zeigen, "
+                     "was ich fuer dich tun kann.")
+
+
+def welcome_done(user: str) -> bool:
+    """True, wenn der Willkommens-Chat fuer diesen Benutzer bereits angelegt wurde."""
+    return (_user_dir(user) / _WELCOME_MARK).exists()
+
+
+def ensure_welcome_session(user: str) -> dict | None:
+    """Legt einmalig den Willkommens-Chat "Beispiel Prompts" an.
+
+    Rueckgabe: die neue Sitzung oder None, wenn schon vorhanden/nicht noetig.
+    Der Marker verhindert ein Wiederauftauchen, nachdem der Benutzer die Sitzung
+    geloescht hat – eine Willkommensmeldung, die sich nicht wegraeumen laesst,
+    waere eine Zumutung.
+    """
+    with _LOCK:
+        ud = _user_dir(user)
+        mark = ud / _WELCOME_MARK
+        if mark.exists():
+            return None
+        sess = create_session(user, WELCOME_TITLE)
+        # Kennzeichnung im meta.json: so findet _ist_welcome() den Chat wieder,
+        # ohne jedes Transkript lesen zu muessen (Altbestand traegt sie nicht –
+        # dafuer gibt es dort den Rueckfall ueber Titel + Transkript).
+        sd = _sess_dir(user, sess["id"])
+        m = _read_meta(sd) or {}
+        m["kind"] = "welcome"
+        _write_meta(sd, m)
+        now = time.localtime()
+        save_transcript(user, sess["id"], [{
+            "role": "bot",
+            "kind": "welcome",
+            "text": _WELCOME_FALLBACK,
+            "time": time.strftime("%H:%M", now),
+            "date": time.strftime("%d.%m.%Y", now),
+            "ts": int(time.time() * 1000),
+        }])
+        try:
+            ud.mkdir(parents=True, exist_ok=True)
+            mark.write_text("1", encoding="utf-8")
+        except Exception:
+            # Ohne Marker wuerde der Chat beim naechsten Aufruf erneut entstehen;
+            # das ist unschoen, aber kein Grund, den /chat-Aufruf scheitern zu lassen.
+            pass
+        return sess
+
+
+def _ist_welcome(user: str, sid: str, meta: dict | None) -> bool:
+    """True, wenn diese Sitzung der Willkommens-Chat ist.
+
+    Zwei Wege, weil der Altbestand die Kennzeichnung im meta.json noch nicht hat:
+    (1) `kind == "welcome"` im meta – seit 2026-08-25 beim Anlegen gesetzt;
+    (2) Rueckfall Titel + erster Transkript-Eintrag. Der Titel ALLEIN genuegt
+    NICHT – ein Benutzer darf einen echten Chat so nennen, und der wuerde sonst
+    als Willkommens-Chat gelten (und die Wiederherstellung stillschweigend
+    verweigern).
+    """
+    m = meta or {}
+    if m.get("kind") == "welcome":
+        return True
+    if m.get("title") != WELCOME_TITLE:
+        return False
+    tr = load_transcript(user, sid)
+    return bool(tr) and isinstance(tr[0], dict) and tr[0].get("kind") == "welcome"
+
+
+def find_welcome_session(user: str) -> dict | None:
+    """Die vorhandene Willkommens-Sitzung des Benutzers, sonst None."""
+    with _LOCK:
+        ud = _user_dir(user)
+        if not ud.is_dir():
+            return None
+        for sd in ud.iterdir():
+            if not sd.is_dir():
+                continue
+            m = _read_meta(sd)
+            sid = (m or {}).get("id")
+            if not sid or not _ist_welcome(user, sid, m):
+                continue
+            return {"id": sid, "title": m.get("title", WELCOME_TITLE),
+                    "created": m.get("created", 0), "updated": m.get("updated", 0)}
+    return None
+
+
+def restore_welcome_session(user: str) -> tuple[dict | None, bool]:
+    """Stellt den Willkommens-Chat "Beispiel Prompts" wieder her.
+
+    Rueckgabe: `(Sitzung, neu_angelegt)`. Ist er noch vorhanden, wird er
+    UNVERAENDERT zurueckgegeben – ein zweiter Eintrag gleichen Namens waere
+    Verwirrung, kein Dienst; der Aufrufer springt dann einfach hinein.
+
+    Der Marker wird nur entfernt, wenn wirklich keiner mehr da ist: er ist die
+    einzige Stelle, die "schon gehabt" festhaelt, und `ensure_welcome_session()`
+    legt ohne ihn an. Der BENUTZER kommt vom Aufrufer aus der Anmeldung, nie aus
+    einem Request-Feld – sonst waere das ein Weg, in fremde Chatordner zu
+    schreiben.
+    """
+    with _LOCK:
+        vorhanden = find_welcome_session(user)
+        if vorhanden:
+            return vorhanden, False
+        mark = _user_dir(user) / _WELCOME_MARK
+        try:
+            if mark.exists():
+                mark.unlink()
+        except Exception:  # noqa: BLE001
+            # Ohne entfernten Marker legt ensure_welcome_session() nichts an;
+            # der Aufrufer meldet das als Fehlschlag (kein stiller Erfolg).
+            pass
+        sess = ensure_welcome_session(user)
+        return sess, bool(sess)
+
+
+def rename_session(user: str, sid: str, title: str) -> dict | None:
+    with _LOCK:
+        if not _valid(user, sid):
+            return None
+        sd = _sess_dir(user, sid)
+        meta = _read_meta(sd) or {"id": sid, "created": int(time.time())}
+        meta["title"] = (title or _DEFAULT_TITLE).strip()[:120] or _DEFAULT_TITLE
+        meta["updated"] = int(time.time())
+        _write_meta(sd, meta)
+        return {"id": sid, "title": meta["title"], "updated": meta["updated"]}
+
+
+def delete_session(user: str, sid: str) -> bool:
+    import shutil
+    with _LOCK:
+        if not _valid(user, sid):
+            return False
+        try:
+            shutil.rmtree(_sess_dir(user, sid))
+            return True
+        except Exception:
+            return False
+
+
+def get_meta(user: str, sid: str) -> dict | None:
+    """Rohe Metadaten einer Sitzung (inkl. gespeicherter kb_groups) oder None."""
+    with _LOCK:
+        if not _valid(user, sid):
+            return None
+        return _read_meta(_sess_dir(user, sid))
+
+
+def save_kb_groups(user: str, sid: str, groups) -> None:
+    """Wissensgruppen-Auswahl der Sitzung merken (None=alle, []=keine, [ids]=nur diese)."""
+    with _LOCK:
+        sd = _sess_dir(user, sid)
+        meta = _read_meta(sd)
+        if not meta:
+            return
+        meta["kb_groups"] = groups
+        _write_meta(sd, meta)
+
+
+def get_session_preprompt(user: str, sid: str) -> str:
+    """Eigener Prompt DIESER Sitzung (leerer String, wenn keiner hinterlegt ist).
+
+    Er ERSETZT den persoenlichen Preprompt des Benutzers, er ergaenzt ihn nicht
+    (Vorgabe 2026-09-09): wer fuer einen Chat eine andere Rolle setzt, will die
+    allgemeine Vorgabe in der Regel gerade NICHT zusaetzlich haben – zwei
+    Anweisungen nebeneinander widersprechen sich sonst, und welche gewinnt,
+    entschiede das Modell. Die Aufloesung steht in `agent.py`; hier nur I/O.
+    """
+    m = get_meta(user, sid) or {}
+    t = m.get("preprompt")
+    return t if isinstance(t, str) else ""
+
+
+def save_session_preprompt(user: str, sid: str, text: str) -> str:
+    """Eigenen Prompt der Sitzung speichern; leerer Text ENTFERNT ihn.
+
+    "Entfernen" heisst hier: der Schluessel verschwindet aus der meta.json, und
+    damit greift wieder der persoenliche Preprompt. Ein leerer Eintrag waere
+    nicht davon zu unterscheiden – wuerde aber `has_prompt` und die Anzeige in
+    der Seitenleiste nach demselben Muster ohnehin auf "keiner" stellen.
+    Rueckgabe: der gespeicherte Text (leer, wenn keiner mehr gilt).
+    """
+    text = (text or "")[:_PREPROMPT_MAX]
+    with _LOCK:
+        sd = _sess_dir(user, sid)
+        meta = _read_meta(sd)
+        if not meta:
+            return ""
+        if text.strip():
+            meta["preprompt"] = text
+        else:
+            meta.pop("preprompt", None)
+            text = ""
+        _write_meta(sd, meta)
+    return text
+
+
+def save_profile(user: str, sid: str, profile_id) -> None:
+    """Gewaehltes KI-Profil der Sitzung merken (fuer den Profil-Pulldown in /chat)."""
+    with _LOCK:
+        sd = _sess_dir(user, sid)
+        meta = _read_meta(sd)
+        if not meta:
+            return
+        meta["profile_id"] = (profile_id or "")
+        _write_meta(sd, meta)
+
+
+def touch(user: str, sid: str, auto_title: str = "") -> None:
+    """Aktualisiert den updated-Zeitstempel; setzt bei noch unbenanntem Chat
+    optional einen Titel aus dem ersten Nutzertext."""
+    with _LOCK:
+        sd = _sess_dir(user, sid)
+        meta = _read_meta(sd)
+        if not meta:
+            return
+        meta["updated"] = int(time.time())
+        if auto_title and meta.get("title", _DEFAULT_TITLE) == _DEFAULT_TITLE:
+            meta["title"] = " ".join(auto_title.split())[:60] or _DEFAULT_TITLE
+        _write_meta(sd, meta)
+
+
+# ─── Transkript (Anzeige) ────────────────────────────────────────────────────
+
+def load_transcript(user: str, sid: str) -> list:
+    with _LOCK:
+        if not _valid(user, sid):
+            return []
+        p = _sess_dir(user, sid) / "transcript.json"
+        if not p.exists():
+            return []
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+            return d if isinstance(d, list) else []
+        except Exception:
+            return []
+
+
+def save_transcript(user: str, sid: str, messages: list) -> list:
+    if not isinstance(messages, list):
+        messages = []
+    messages = messages[-_MAX_TRANSCRIPT:]
+    with _LOCK:
+        if not _valid(user, sid):
+            return []
+        (_sess_dir(user, sid) / "transcript.json").write_text(
+            json.dumps(messages, ensure_ascii=False), encoding="utf-8")
+    return messages
+
+
+# ─── LLM-Kontext (serialisierte types.Content-Dicts) ─────────────────────────
+
+def load_context(user: str, sid: str) -> list:
+    with _LOCK:
+        if not _valid(user, sid):
+            return []
+        p = _sess_dir(user, sid) / "context.json"
+        if not p.exists():
+            return []
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+            return d if isinstance(d, list) else []
+        except Exception:
+            return []
+
+
+def save_context(user: str, sid: str, content_dicts: list) -> None:
+    if not isinstance(content_dicts, list):
+        return
+    with _LOCK:
+        if not _valid(user, sid):
+            return
+        (_sess_dir(user, sid) / "context.json").write_text(
+            json.dumps(content_dicts, ensure_ascii=False), encoding="utf-8")

@@ -1,0 +1,1563 @@
+"""Operations-Registry des Root-Brokers: Validierung, Policy-Pruefung, Ausfuehrung.
+
+Jede Operation ist benannt und validiert ihre Argumente HART (Whitelists,
+Pfad-Prefixe) – der Broker fuehrt nie unvalidierte Eingaben aus. Ausnahme ist
+die bewusst generische Operation 'shell_root': sie startet IMMER als
+'pending'-Eintrag und laeuft erst nach expliziter Admin-Freigabe.
+
+dispatch() wird sowohl vom Broker-Daemon (Socket) als auch vom root-Fallback
+des Clients (Alt-Installationen, Backend laeuft noch als root) genutzt.
+"""
+
+import os
+import re
+import shlex
+import subprocess
+import time
+from pathlib import Path
+
+from backend.broker import CODE_ROOT, PROJECT_ROOT, policy
+
+# ── Whitelists ───────────────────────────────────────────────────────────────
+SYSTEMCTL_UNITS = {
+    "jarvis.service", "whatsapp-bridge.service", "lightdm", "lightdm.service",
+    "jarvis-egress.service", "jarvis-broker.service",
+}
+SYSTEMCTL_ACTIONS = {"start", "stop", "restart", "reload", "enable", "disable",
+                     "is-active", "is-enabled", "daemon-reload"}
+SANDBOX_USER_PREFIX = "jarvis_sandbox"      # harte Grenze: nur Sandbox-User
+MOUNT_PREFIX = "/mnt/"                      # Mounts nur unterhalb /mnt/
+# Wissens-Freigaben sind DATEN. Ohne nosuid wuerde eine SUID-root-Datei auf einem
+# NFS-Server, den der Absender einer Freigabe kontrolliert, hier als root laufen
+# (Befund K2-d, 2026-09-29). noexec/nodev aus demselben Grund.
+MOUNT_OPTS = "ro,nosuid,nodev,noexec"
+# Automatische/interne Wartungs- und Status-Ops OHNE forensischen Wert: werden
+# WEDER in der Freigabeliste registriert NOCH auditiert, sonst fluten sie beides
+# mit inhaltslosen "executed (rc=0)"-Eintraegen (UI-Status-Polls, die im Takt
+# feuernde Bildschirm-Entsperrung, VNC-Neustart). Aussagekraeftige Ops
+# (shell_root, systemctl, chpasswd, mount_share, certbot, switch_session) werden
+# weiterhin vollstaendig auditiert.
+READONLY_OPS = {"sandbox_status", "egress_status", "apt_upgrades_status",
+                "tika_status", "unlock_screen", "vnc_restart"}
+
+
+def _norm_cmd(cmd: str) -> str:
+    """Kommando fuer den Policy-Key normalisieren (Whitespace kollabieren)."""
+    return re.sub(r"\s+", " ", (cmd or "").strip())[:200]
+
+
+def _run(cmd, timeout=30, input_text=None, neutrale_sprache=False,
+         umgebung_zusatz=None):
+    """Befehl ausfuehren.
+
+    ``neutrale_sprache=True`` erzwingt LC_ALL=C. Noetig ueberall dort, wo eine
+    Fehlermeldung spaeter GEDEUTET wird: auf einem deutschen System liefert
+    ``mount`` "Die Operation ist jetzt in Bearbeitung." statt "Operation now in
+    progress" – live auf DEV gemessen (2026-09-04), und jedes Muster, das auf
+    den englischen Wortlaut zielt, greift dort ins Leere.
+
+    ``umgebung_zusatz``: zusaetzliche Umgebungsvariablen nur fuer DIESEN
+    Aufruf (z.B. ``PASSWD`` fuer mount.cifs – ein Kennwort gehoert nicht in
+    die Argumentliste).
+    """
+    import os as _os
+    umgebung = None
+    if neutrale_sprache or umgebung_zusatz:
+        umgebung = dict(_os.environ)
+    if neutrale_sprache:
+        umgebung["LC_ALL"] = "C"
+        umgebung.pop("LANG", None)
+        umgebung.pop("LANGUAGE", None)
+    if umgebung_zusatz:
+        umgebung.update(umgebung_zusatz)
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True,
+                           timeout=timeout, input=input_text, env=umgebung)
+        return {"ok": r.returncode == 0, "rc": r.returncode,
+                "stdout": r.stdout or "", "stderr": r.stderr or ""}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "rc": -1, "stdout": "", "stderr": str(e)}
+
+
+def _stream_shell(command: str, cwd: str | None, timeout: int, stream) -> dict:
+    """Shell-Befehl mit zeilenweisem stdout-Streaming ausfuehren (wie shell.py)."""
+    import os as _os
+    env = _os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    try:
+        proc = subprocess.Popen(
+            # bandit B602: gewollt – Root-Shell per TOTP-Freigabe, der Befehl IST die Op
+            command, shell=True, cwd=cwd or None, env=env,  # nosec B602
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            # EIGENE Prozessgruppe, damit ein Timeout den GANZEN Baum trifft.
+            # `proc.kill()` beendet nur die aeussere Shell; die Kette
+            # runuser -> setpriv -> bwrap -> bash -> python lief danach weiter
+            # (Waise, die weiter Rechenzeit und Speicher verbraucht und in ein
+            # gerade abgeraeumtes Lauf-Verzeichnis schreibt). Mit der Isolation
+            # faellt das mehr auf, der Fehler ist aber aelter.
+            start_new_session=True,
+        )
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "rc": -1, "stdout": "", "stderr": str(e)}
+
+    def _abwuergen():
+        """Ganze Prozessgruppe beenden – erst freundlich, dann hart."""
+        import signal as _sig
+        for signum in (_sig.SIGTERM, _sig.SIGKILL):
+            try:
+                _os.killpg(_os.getpgid(proc.pid), signum)
+            except (ProcessLookupError, PermissionError):
+                break
+            try:
+                proc.wait(timeout=3)
+                return
+            except subprocess.TimeoutExpired:
+                continue
+        try:
+            proc.kill()
+        except Exception:  # noqa: BLE001
+            pass
+
+    lines = []
+    grenze = max(5, timeout)
+    deadline = time.monotonic() + grenze
+    # WACHHUND, und er ist noetig: die Deadline unten wird nur geprueft, wenn eine
+    # ZEILE ankommt. `for line in proc.stdout` blockiert bei einem stillen Befehl
+    # (`sleep 300`) unbegrenzt – gemessen am 23.08.2026: der Op-Timeout von 3 s lief
+    # ins Leere, erst der Client brach nach 33 s ab, und der Prozessbaum lebte
+    # danach WEITER (Waise, die Rechenzeit verbraucht und in ein bereits
+    # abgeraeumtes Lauf-Verzeichnis schreibt). Der Fehler ist aelter als die
+    # Isolation; mit ihr faellt er auf.
+    import threading as _th
+    _wachhund = _th.Timer(grenze + 1, _abwuergen)
+    _wachhund.daemon = True
+    _wachhund.start()
+    try:
+        for line in proc.stdout:
+            if time.monotonic() > deadline:
+                _abwuergen()
+                return {"ok": False, "rc": -1, "stdout": "\n".join(lines),
+                        "stderr": f"Timeout nach {timeout}s. Befehl abgebrochen."}
+            line = line.rstrip("\n")
+            lines.append(line)
+            if stream:
+                try:
+                    stream(line)
+                except Exception:  # noqa: BLE001
+                    pass
+        proc.wait(timeout=10)
+        stderr = (proc.stderr.read() or "") if proc.stderr else ""
+    except subprocess.TimeoutExpired:
+        _abwuergen()
+        return {"ok": False, "rc": -1, "stdout": "\n".join(lines),
+                "stderr": f"Timeout nach {timeout}s. Befehl abgebrochen."}
+    finally:
+        _wachhund.cancel()
+    if proc.returncode is not None and proc.returncode < 0:
+        # Vom Wachhund beendet: als Timeout melden, nicht als "Signal -9". Der
+        # Agent soll wissen, dass er zu lange gebraucht hat.
+        return {"ok": False, "rc": -1, "stdout": "\n".join(lines),
+                "stderr": f"Timeout nach {timeout}s. Befehl abgebrochen."}
+    return {"ok": proc.returncode == 0, "rc": proc.returncode,
+            "stdout": "\n".join(lines), "stderr": stderr}
+
+
+# ── Operationen ──────────────────────────────────────────────────────────────
+# Jede Op: key(args) -> Policy-Key, desc(args) -> Beschreibung (Admin-UI),
+#          run(args, stream) -> Ergebnis-Dict, default_allow, redact-Felder.
+
+def _op_systemctl(args, stream):
+    action = str(args.get("action", "")).strip()
+    unit = str(args.get("unit", "")).strip()
+    if action not in SYSTEMCTL_ACTIONS:
+        return {"ok": False, "rc": -1, "stdout": "", "stderr": f"Aktion nicht erlaubt: {action}"}
+    if action == "daemon-reload":
+        return _run(["systemctl", "daemon-reload"], timeout=30)
+    if unit not in SYSTEMCTL_UNITS:
+        return {"ok": False, "rc": -1, "stdout": "", "stderr": f"Unit nicht in Whitelist: {unit}"}
+    cmd = ["systemctl", action, unit]
+    if action in ("enable", "disable"):
+        cmd = ["systemctl", action, "--now", unit] if args.get("now") else cmd
+    return _run(cmd, timeout=60)
+
+
+def _op_unlock_screen(args, stream):
+    from backend import desktop_control
+    desktop_control.unlock_desktop_screen(str(args.get("target_user") or "jarvis"))
+    return {"ok": True, "rc": 0, "stdout": "Bildschirm entsperrt", "stderr": ""}
+
+
+# Wer darf ueberhaupt Ziel eines Desktop-Session-Wechsels sein?
+#
+# VORGABE DES NUTZERS (2026-08-18): am lokalen Desktop arbeiten AUSSCHLIESSLICH
+# der lokale Benutzer `jarvis` und – ueber genau dessen Sitzung – die
+# Administratoren. Sonst niemand.
+#
+# WARUM DAS HIER STEHT UND NICHT NUR BEIM AUFRUFER: bis heute prueste diese Op
+# nur das ZEICHENMUSTER des Namens. Ein Domaenen-Benutzer, der sich als
+# `s.fischer` (ohne `firma\`) anmeldete, kam damit durch – und
+# `switch_desktop_session` schrieb diesen Namen in den LightDM-Autologin,
+# obwohl es das Konto lokal gar nicht gibt. Auf ECHT ist das 25-mal passiert:
+# Autologin auf ein nicht existierendes Konto, x11vnc gekillt, LightDM neu
+# gestartet (53 Eintraege im Broker-Journal), danach 40 s vergebliches Warten
+# auf eine Session, die nie entsteht. Der laufende Desktop war jedes Mal weg.
+#
+# Ein Zeichenmuster ist keine Berechtigung. Geprueft wird deshalb beides:
+# Whitelist UND Existenz des lokalen Kontos (fail-closed).
+_DESKTOP_USERS = {"jarvis"}
+
+
+def _op_switch_session(args, stream):
+    from backend import desktop_control
+    username = str(args.get("username", "")).strip()
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.\-]{0,31}", username):
+        return {"ok": False, "rc": -1, "stdout": "", "stderr": "Ungueltiger Benutzername"}
+    if username not in _DESKTOP_USERS:
+        return {"ok": False, "rc": -1, "stdout": "",
+                "stderr": "Der lokale Desktop gehoert '%s'. Ein Session-Wechsel zu "
+                          "'%s' ist nicht vorgesehen." % ("/".join(sorted(_DESKTOP_USERS)),
+                                                          username)}
+    try:
+        import pwd
+        pwd.getpwnam(username)
+    except Exception:  # noqa: BLE001
+        return {"ok": False, "rc": -1, "stdout": "",
+                "stderr": "'%s' ist kein lokales Konto – der Autologin wuerde ins "
+                          "Leere zeigen und den Desktop unbrauchbar machen." % username}
+    desktop_control.switch_desktop_session(username)
+    return {"ok": True, "rc": 0, "stdout": f"Session-Wechsel zu {username} ausgefuehrt", "stderr": ""}
+
+
+def _op_vnc_restart(args, stream):
+    from backend import desktop_control
+    out = desktop_control.restart_vnc()
+    return {"ok": True, "rc": 0, "stdout": out or "x11vnc neu gestartet", "stderr": ""}
+
+
+# Gruppen, deren Mitglieder root werden koennen. Ein Kennwort fuer ein solches
+# Konto zu setzen hiesse: das unprivilegierte Backend bestimmt ein sudo-Kennwort.
+_ROOT_GRUPPEN = {"root", "sudo", "wheel", "admin"}
+
+
+def _kann_root_werden(username: str) -> str:
+    """Grund, warum ``username`` root-faehig ist – oder '' (fail-closed bei Fehlern)."""
+    import grp
+    import pwd
+    try:
+        pw = pwd.getpwnam(username)
+    except KeyError:
+        return "kein lokales Konto"
+    if pw.pw_uid < 1000:
+        return f"Systemkonto (uid {pw.pw_uid})"
+    try:
+        gids = os.getgrouplist(username, pw.pw_gid)
+        namen = {grp.getgrgid(g).gr_name for g in gids}
+    except Exception as e:  # noqa: BLE001
+        return f"Gruppen nicht lesbar ({e})"
+    treffer = sorted(namen & _ROOT_GRUPPEN)
+    if treffer:
+        return "Mitglied von " + ", ".join(treffer)
+    # sudoers kann Rechte auch ohne Gruppe vergeben (Eintrag fuer den Namen).
+    # Massgeblich sind nur Regeln, die das KENNWORT verlangen – eine
+    # NOPASSWD-Regel wirkt ohnehin, mit oder ohne gesetztes Kennwort. (Gemessen
+    # 2026-09-29: auf dem Entwicklerrechner darf JEDES Konto ein Update-Skript
+    # per NOPASSWD starten; die erste Fassung hielt deshalb alle fuer root-faehig.)
+    r = _run(["sudo", "-n", "-l", "-U", username], timeout=10, neutrale_sprache=True)
+    if r.get("ok"):
+        text = r.get("stdout") or ""
+        if "may run the following commands" in text:
+            regeln = text.split("may run the following commands", 1)[1].splitlines()[1:]
+            mit_kennwort = [z.strip() for z in regeln
+                            if z.strip().startswith("(") and "NOPASSWD:" not in z]
+            if mit_kennwort:
+                return f"hat sudo-Rechte mit Kennwort ({mit_kennwort[0][:60]})"
+    return ""
+
+
+def _op_chpasswd(args, stream):
+    """Linux-Kennwort setzen – NUR fuer das Desktop-/Anmeldekonto und nur, wenn
+    es NICHT root werden kann.
+
+    Befund K2 (2026-09-29): die Op war automatisch erlaubt und prueste nur das
+    Zeichenmuster. Das unprivilegierte Backend konnte damit das Kennwort von
+    root setzen – oder das eines sudo-Mitglieds. Genutzt wird sie ausschliesslich
+    fuer den Kennwortwechsel des lokalen Kontos ``jarvis`` (main.py,
+    ALLOWED_USERS); alles andere ist hier fehl am Platz.
+    """
+    from backend import desktop_control
+    username = str(args.get("username", "")).strip()
+    password = str(args.get("password", ""))
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.\-]{0,31}", username):
+        return {"ok": False, "rc": -1, "stdout": "", "stderr": "Ungueltiger Benutzername"}
+    if username not in _DESKTOP_USERS:
+        return {"ok": False, "rc": -1, "stdout": "",
+                "stderr": f"Kennwortwechsel ueber Jarvis ist nur fuer "
+                          f"{'/'.join(sorted(_DESKTOP_USERS))} vorgesehen, nicht fuer '{username}'."}
+    grund = _kann_root_werden(username)
+    if grund:
+        return {"ok": False, "rc": -1, "stdout": "",
+                "stderr": f"Das Konto '{username}' kann root werden ({grund}). Sein "
+                          f"Kennwort laesst sich deshalb nicht ueber Jarvis setzen – "
+                          f"das waere ein sudo-Kennwort in der Hand des Dienstes. "
+                          f"Als root: passwd {username}"}
+    ok = desktop_control.change_linux_password(username, password)
+    return {"ok": ok, "rc": 0 if ok else 1,
+            "stdout": "Kennwort gesetzt" if ok else "", "stderr": "" if ok else "chpasswd fehlgeschlagen"}
+
+
+def _abgelehnt(grund: str) -> dict:
+    """Antwort einer fail-closed abgewiesenen Sandbox-Anfrage (BSI H10).
+
+    ``rc`` fehlt ABSICHTLICH: der Befehl ist nicht gelaufen, und das Backend
+    wertet ``isolation`` nur bei einem gelaufenen Befehl aus. ``abgelehnt``
+    traegt den Grund fuer Benutzer und Journal.
+    """
+    print(f"[Broker] Sandbox-Lauf abgewiesen: {grund}", flush=True)
+    return {"ok": False, "abgelehnt": grund, "stdout": "", "stderr": grund,
+            "isolation": False}
+
+
+def _op_sandbox_lauf(args, stream):
+    """Shell-Befehl als Sandbox-Benutzer – mit ALLEN Grenzen oder gar nicht.
+
+    BSI H10 (2026-10-05). Loest ``sandbox_exec`` ab, und zwar unter NEUEM
+    Namen: ein Broker-Prozess mit alter Code-Kopie kennt diese Op nicht und
+    antwortet "unbekannte Op" – der Befehl laeuft dann NICHT. Unter dem alten
+    Namen haette ein alter Broker die neuen Argumente klaglos angenommen und
+    ohne Grenzen ausgefuehrt (Register: eine BESTEHENDE Op ist schlimmer als
+    eine unbekannte; Vorfall 2026-08-24).
+
+    Was hier dazukommt (``backend/sandbox_grenzen.py``):
+
+    * **fail-closed**: ``bereit()`` – Sandbox-Benutzer, bwrap, systemd-run,
+      Loopback-Sperre. Fehlt etwas, Antwort ``abgelehnt`` ohne Ausfuehrung.
+    * **Ressourcengrenzen** per ``systemd-run --scope``. Die Werte kommen vom
+      Backend und werden HIER geklemmt – der Broker ist die Grenze.
+    * **Netz**: ``ohne_netz`` -> ``--unshare-net``. Fuer den netzgesperrten
+      Sandbox-Benutzer IMMER, unabhaengig vom Argument.
+    * **Arbeitsverzeichnis Pflicht** fuer Domain-Benutzer: wer eine Kennung
+      schickt, bekommt sein privates ``/tmp`` oder keinen Lauf. Ohne Kennung
+      nur mit ``ohne_lauf`` (Administratoren mit Schalter "Sandbox auch fuer
+      Administratoren"): eigener Namespace im echten ``/tmp``, die privaten
+      Bereiche der Domain-Benutzer darin durch ein leeres tmpfs verdeckt.
+
+    PRIVATES /tmp (seit 2026-08-23) wie bisher: das Verzeichnis wird HIER
+    angelegt und dem Sandbox-Benutzer uebertragen (chown braucht root). Das
+    Argument ``arbeit`` ist ABSICHTLICH eine Kennung und kein Pfad (8 Hex);
+    die Bindungen werden validiert.
+    """
+    import pwd
+    user = str(args.get("user", "")).strip()
+    command = str(args.get("command", ""))
+    timeout = int(args.get("timeout") or 120)
+    if not user.startswith(SANDBOX_USER_PREFIX):
+        return _abgelehnt(f"Kein Sandbox-User: {user}")
+    try:
+        if pwd.getpwnam(user).pw_uid == 0:
+            return _abgelehnt("Sandbox-User darf nicht uid 0 haben")
+    except KeyError:
+        return _abgelehnt(f"OS-Benutzer fehlt: {user}")
+    from backend import lauf_tmp as _lt
+    from backend import sandbox_grenzen as _sg
+    ok, grund = _sg.bereit(user)
+    if not ok:
+        return _abgelehnt(grund)
+    ohne_netz = bool(args.get("ohne_netz")) or user == _sg.NOINET_USER
+    grenzen = _sg.grenzen_pruefen(args.get("grenzen"))
+    kennung = str(args.get("arbeit") or "")
+    lauf_dir = None
+    binds, rw, verbergen = [], [], []
+    try:
+        if kennung:
+            lauf_dir = _lt.arbeit_bereitstellen(kennung, user)
+            if not lauf_dir:
+                return _abgelehnt("privates Arbeitsverzeichnis nicht bereitstellbar")
+            binds = _lt.binds_pruefen(args.get("ro_binds"))
+            rw = _lt.rw_binds_pruefen(args.get("rw_binds"))
+            # Einhaengepunkte VORHER anlegen (root). Ueberlaesst man das bwrap,
+            # gehoeren sie dem Sandbox-Benutzer samt eigener Gruppe und das
+            # Backend kann darin nichts mehr aufraeumen.
+            _lt.einhaengepunkte(lauf_dir, list(binds) + list(rw), user)
+        elif args.get("ohne_lauf") is True:
+            # Echtes /tmp, aber die privaten Bereiche der Domain-Benutzer sind
+            # darin NICHT VORHANDEN. Die Wurzeln legt root an – fehlten sie,
+            # entstuenden sie beim Mount als Eigentum des Sandbox-Benutzers.
+            for w in (_lt.ARBEIT_ROOT, _lt.ANH_ROOT):
+                _lt._wurzel_sicherstellen(w, 0o755)
+                verbergen.append(str(w))
+        else:
+            return _abgelehnt("kein privates Arbeitsverzeichnis angefordert")
+        wrapped = _lt.sandbox_befehl(
+            user, command, lauf_dir, binds, rw_binds=rw, pflicht=True,
+            ohne_netz=ohne_netz, verbergen=verbergen,
+            praefix=_sg.scope_praefix(grenzen, timeout))
+    except Exception as e:  # noqa: BLE001
+        return _abgelehnt(f"Isolation nicht anwendbar: {e}")
+    res = _stream_shell(wrapped, str(lauf_dir) if lauf_dir else "/tmp", timeout, stream)
+    # DIE ANTWORT SAGT, WAS ANGEWANDT WURDE – das Backend stuetzt seine
+    # Pfad-Uebersetzung darauf (``isolation`` = privates /tmp, siehe
+    # lauf_tmp.melde_ausfuehrung) und seine Meldung an den Benutzer (Grenzen).
+    try:
+        res["isolation"] = bool(lauf_dir)
+        res["sandbox"] = True
+        res["ohne_netz"] = ohne_netz
+        res["grenzen"] = grenzen
+        res["grenze_getroffen"] = _sg.grenze_vermutlich_getroffen(res.get("rc"))
+    except Exception:  # noqa: BLE001
+        pass
+    return res
+
+
+def _op_shell_root(args, stream):
+    """Beliebiger Root-Shell-Befehl – laeuft NUR nach expliziter Admin-Freigabe
+    (default_allow=False -> erster Aufruf erzeugt einen Pending-Eintrag)."""
+    command = str(args.get("command", ""))
+    timeout = int(args.get("timeout") or 120)
+    cwd = str(args.get("cwd") or "") or None
+    if not command.strip():
+        return {"ok": False, "rc": -1, "stdout": "", "stderr": "Kein Befehl angegeben"}
+    return _stream_shell(command, cwd, timeout, stream)
+
+
+def _op_lauf_aufraeumen(args, stream):
+    """Arbeitsverzeichnis eines Benutzers entfernen (oder alle abgelaufenen).
+
+    Braucht root, weil der Agent darin eigene Unterverzeichnisse anlegt
+    (``mkdir /tmp/zwischen``, matplotlib-Cache); die gehoeren dem
+    Sandbox-Benutzer mit dessen eigener Gruppe, und das unprivilegierte Backend
+    darf darin nichts loeschen. Ohne diesen Weg sammelten sich die Verzeichnisse
+    still in /tmp – genau der Zustand, den die Isolation beseitigen soll.
+
+    Die Kennung wird in ``lauf_tmp`` hart geprueft (8 Hex) und ausschliesslich
+    unter ARBEIT_ROOT aufgeloest: ein Pfad aus einem Argument kann hier keine
+    Loeschung an anderer Stelle ausloesen.
+    """
+    from backend import lauf_tmp as _lt
+    weg = _lt.aufraeumen_root(str(args.get("arbeit") or ""),
+                              int(args.get("alter_min") or 0))
+    return {"ok": True, "rc": 0, "result": {"entfernt": weg}, "stdout": "", "stderr": ""}
+
+
+def _op_sandbox_setup(args, stream):
+    from backend import sandbox_guard
+    return {"ok": True, "rc": 0, "result": sandbox_guard.setup(), "stdout": "", "stderr": ""}
+
+
+def _op_sandbox_status(args, stream):
+    from backend import sandbox_guard
+    return {"ok": True, "rc": 0, "result": sandbox_guard.status(live=bool(args.get("live"))),
+            "stdout": "", "stderr": ""}
+
+
+def _op_egress_setup(args, stream):
+    from backend import egress_guard
+    return {"ok": True, "rc": 0, "result": egress_guard.setup(), "stdout": "", "stderr": ""}
+
+
+def _op_egress_teardown(args, stream):
+    from backend import egress_guard
+    return {"ok": True, "rc": 0, "result": egress_guard.teardown(), "stdout": "", "stderr": ""}
+
+
+def _op_egress_status(args, stream):
+    from backend import egress_guard
+    return {"ok": True, "rc": 0, "result": egress_guard.status(live=bool(args.get("live"))),
+            "stdout": "", "stderr": ""}
+
+
+def _op_apt_upgrades_setup(args, stream):
+    from backend import apt_upgrades
+    return {"ok": True, "rc": 0, "result": apt_upgrades.setup(), "stdout": "", "stderr": ""}
+
+
+def _op_apt_upgrades_teardown(args, stream):
+    from backend import apt_upgrades
+    return {"ok": True, "rc": 0, "result": apt_upgrades.teardown(), "stdout": "", "stderr": ""}
+
+
+def _op_apt_upgrades_status(args, stream):
+    from backend import apt_upgrades
+    return {"ok": True, "rc": 0,
+            "result": apt_upgrades.status(live=bool(args.get("live"))),
+            "stdout": "", "stderr": ""}
+
+
+def _op_tika_setup(args, stream):
+    """Java + tika-app.jar bereitstellen (OneNote-Import, ``*.one``).
+
+    WARUM ALS BROKER-OP UND NICHT NUR IM BOOTSTRAP: Schritt 6e in
+    ``start_jarvis_root.sh`` laeuft nur beim BROKER-START. Wer heute ein
+    Notizbuch in einen Wissensordner legt, muesste bis zum naechsten Neustart
+    warten – und bis dahin sagt ihm nur eine Meldung, dass ein Administrator
+    ``sudo bash deploy/tika_setup.sh`` ausfuehren soll. Genau diese Handarbeit
+    ist der Zustand, den die Automatik beseitigen soll: mit dieser Op kann das
+    unprivilegierte Backend die Einrichtung JEDERZEIT selbst anstossen.
+
+    DER PFAD KOMMT NICHT AUS DEN ARGUMENTEN. Er wird relativ zu diesem Modul
+    aufgeloest; ein Argument waere hier gleichbedeutend mit "fuehre ein
+    beliebiges Skript als root aus" – also shell_root ohne dessen
+    Freigabepflicht. Die Op nimmt UEBERHAUPT keine Argumente entgegen.
+
+    Auto-allow wie die uebrigen System-Ops: sie stellt einen dokumentierten
+    Soll-Zustand her, ist idempotent und jederzeit widerrufbar (Sicherheit →
+    Root-Freigaben).
+    """
+    # Das SKRIPT kommt aus dem Code des Brokers (root-eigene Kopie, Befund K1),
+    # das ZIEL (vendor/) aus dem Datenbaum. Aus /opt/jarvis wird als root nichts
+    # ausgefuehrt – dort koennte der Dienstbenutzer das Skript vorher ersetzen.
+    script = CODE_ROOT / "deploy" / "tika_setup.sh"
+    if not script.is_file():
+        return {"ok": False, "rc": -1, "stdout": "",
+                "stderr": f"Setup-Skript fehlt: {script}"}
+    # 900 s: apt-get install default-jre-headless (~199 MB) plus 65 MB
+    # Download von Maven Central. Der Daemon deckelt ohnehin bei MAX_TIMEOUT.
+    befehl = (f"JARVIS_DIR={shlex.quote(str(PROJECT_ROOT))} "
+              f"bash {shlex.quote(str(script))}")
+    return _stream_shell(befehl, str(CODE_ROOT), 900, stream)
+
+
+def _op_journal_lesen(args, stream):
+    """Protokoll einer Jarvis-Einheit lesen (BSI M8).
+
+    Ersetzt die Gruppen ``adm``/``systemd-journal`` des Dienstbenutzers. Regeln
+    und Begruendung in ``backend/broker/journal.py``; hier nur Ausfuehrung:
+    Argumentliste ohne Shell, Ausgabe gekappt und Geheimnisse geschwaerzt.
+    Auditiert wie jede Op (KEIN READONLY_OPS-Eintrag): wer wann welches
+    Protokoll gelesen hat, ist forensisch von Wert, und die Op wird nicht im
+    Takt abgefragt.
+    """
+    from backend.broker import journal
+    try:
+        norm = journal.pruefen(args)
+    except ValueError as e:
+        return {"ok": False, "rc": 2, "stdout": "", "stderr": str(e)}
+    try:
+        r = subprocess.run(journal.argv(norm), capture_output=True, text=True,
+                           timeout=60, errors="replace")
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return {"ok": False, "rc": -1, "stdout": "", "stderr": f"journalctl: {e}"}
+    aus = r.stdout or ""
+    gekappt = 0
+    if len(aus) > journal.AUSGABE_MAX:
+        gekappt = len(aus) - journal.AUSGABE_MAX
+        # Hinweis VOR den Ausschnitt – am Ende schnitte ihn die naechste Kappung weg
+        aus = ("[gekappt: die ersten %d Zeichen fehlen]\n" % gekappt) + aus[-journal.AUSGABE_MAX:]
+    try:
+        from backend import url_geheimnis
+        aus = "\n".join(url_geheimnis.schwaerzen(z) for z in aus.split("\n"))
+    except Exception:  # noqa: BLE001
+        pass
+    # rc 1 mit leerer Ausgabe heisst bei --grep "kein Treffer", nicht Fehler
+    ok = r.returncode == 0 or (r.returncode == 1 and norm.get("suche") and not r.stderr.strip())
+    return {"ok": bool(ok), "rc": r.returncode, "stdout": aus,
+            "stderr": (r.stderr or "")[-2000:], "einheit": norm["einheit"],
+            "zeilen": norm["zeilen"], "gekappt": gekappt}
+
+
+def _op_tika_status(args, stream):
+    """Ist der OneNote-Import einsatzbereit? (nur lesen, nichts aendern)
+
+    Getrennt von ``tika_setup``, damit der Aufrufer VOR einer 900-Sekunden-Op
+    billig nachsehen kann – und damit ein Status-Poll nicht als Root-Eingriff
+    in der Freigabeliste und im Audit landet (siehe READONLY_OPS).
+    """
+    from backend.tools import onenote
+    fehlt = onenote.fehlender_baustein()
+    return {"ok": True, "rc": 0, "stdout": "", "stderr": "",
+            "result": {"bereit": not fehlt,
+                       "java": onenote.finde_java() or "",
+                       "jar": str(onenote.finde_tika() or "")}}
+
+
+_KERNEL_FENSTER_S = 180   # siehe printk-Ratelimiting im Rumpf
+
+
+def _kernel_grund(seit: float, quelle: str = "") -> str:
+    """Die CIFS-/NFS-Zeilen des Kernels seit ``seit`` (Unix-Zeit).
+
+    ⚠ DAS IST DIE INFORMATION, DIE MOUNT SELBST ANKUENDIGT und die der
+    Benutzer nie zu sehen bekam: "dmesg(1) may have more information after
+    failed mount system call". Der Rueckgabewert von mount ist bei cifs oft nur
+    ``fsconfig() failed: Operation now in progress`` – der ECHTE Grund steht im
+    Kernel-Ring (``cifs_mount failed w/return code = -13`` = Kennwort falsch,
+    ``-2`` = Freigabe unbekannt, ``-115`` = Verbindung kam nicht zustande).
+    Am 2026-09-04 auf DEV gemessen: ohne diese Zeilen ist ein fehlgeschlagener
+    SMB-Mount von aussen nicht unterscheidbar von einem abgeschalteten Server –
+    und die Deutung lag prompt daneben, obwohl Ping und Port 445 offen waren.
+
+    Nur der Broker kann das: ``dmesg`` verlangt in der Regel root
+    (``kernel.dmesg_restrict``).
+    """
+    try:
+        r = _run(["dmesg", "--time-format=iso", "--level=err,warn,info,notice"],
+                 timeout=8, neutrale_sprache=True)
+        if not r.get("ok"):
+            return ""
+        treffer = []
+        for zeile in (r.get("stdout") or "").splitlines()[-800:]:
+            if not re.search(r"\b(CIFS|NFS|SMB)\b", zeile):
+                continue
+            m = re.match(r"^(\S+)\s+(.*)$", zeile.strip())
+            if not m:
+                continue
+            try:
+                import datetime as _dt
+                ts = _dt.datetime.fromisoformat(m.group(1)).timestamp()
+            except Exception:  # noqa: BLE001
+                continue
+            # ⚠ DAS FENSTER MUSS GROSSZUEGIG SEIN: der Kernel unterdrueckt
+            # WIEDERHOLTE identische Meldungen (printk-Ratelimiting). Ein
+            # zweiter Versuch gegen denselben Server erzeugt dann GAR KEINE
+            # neue Zeile – mit einem 2-Sekunden-Fenster kam nichts heraus,
+            # obwohl der Grund im Ring stand (am 2026-09-04 auf DEV gemessen).
+            if ts >= seit - _KERNEL_FENSTER_S:
+                treffer.append(m.group(2).strip())
+        if not treffer:
+            return ""
+        # Zuordnung ueber den INHALT, nicht nur ueber die Zeit: der Kernel nennt
+        # die Freigabe in "Attempting to mount //host/share". Ab dort zu lesen
+        # trennt den eigenen Versuch von einem parallelen auf eine andere
+        # Freigabe – und ueberlebt das Ratelimiting.
+        # ⚠ NICHT einfach "ab der letzten Attempting-Zeile": das
+        # printk-Ratelimiting unterdrueckt WIEDERHOLTE Fehlerzeilen, sodass ein
+        # zweiter Versuch nur noch "Attempting to mount" hinterlaesst – die
+        # Auskunft waere dann leer, obwohl der Grund zwei Zeilen darueber steht
+        # (am 2026-09-04 live in genau dieser Reihenfolge gemessen). Gesucht
+        # wird deshalb die inhaltlich TRAGENDE Zeile: der Returncode.
+        code = [z for z in treffer if "return code" in z]
+        fehler = [z for z in treffer if re.search(r"error|failed|denied|unable",
+                                                  z, re.IGNORECASE)]
+        wichtig = []
+        for kandidat in (code[-1:] + fehler[-2:]):
+            if kandidat not in wichtig:
+                wichtig.append(kandidat)
+        if not wichtig:
+            wichtig = treffer[-2:]
+        return " | ".join(wichtig)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _ist_eingehaengt(mp: str) -> bool:
+    """Steht der Pfad in /proc/mounts?
+
+    ⚠ ABSICHTLICH UEBER /proc/mounts UND NICHT UEBER stat()/is_mount(): auf
+    einem abgestorbenen CIFS-Mount wirft JEDER Zugriff ``[Errno 112] Host is
+    down`` – auch ``stat``, auch ``mkdir``, auch ``mountpoint``. Wer die Lage
+    per stat feststellen will, loest genau den Fehler aus, den er messen will.
+    """
+    try:
+        with open("/proc/mounts", "r") as f:
+            for zeile in f:
+                teile = zeile.split(" ")
+                if len(teile) > 1 and teile[1].replace("\\040", " ") == mp:
+                    return True
+    except OSError:
+        pass
+    return False
+
+
+def _mp_freimachen(mp: str) -> str:
+    """Einen bereits belegten Einhaengepunkt loesen. Rueckgabe: Hinweistext.
+
+    WARUM DAS NOETIG IST (gemeldet 2026-09-04, auf DEV nachgemessen): unter
+    ``/mnt/jarvis-kb/share_1`` hing ein CIFS-Mount, dessen Server nicht mehr
+    antwortete. Ein abgestorbener Mount BLOCKIERT jeden neuen Versuch – schon
+    das ``mkdir`` des Einhaengepunkts scheiterte mit EHOSTDOWN, und der Aufruf
+    endete als "Broker-Op-Fehler: [Errno 112] Host is down". Der Benutzer las
+    daraufhin, der SERVER sei nicht erreichbar; tatsaechlich war der alte
+    Mount das Hindernis.
+
+    Erst normal aushaengen, dann ``-l`` (lazy): ein toter CIFS-Mount laesst
+    sich nur so loesen. Unbedenklich, weil unmittelbar danach neu gemountet
+    wird.
+    """
+    if not _ist_eingehaengt(mp):
+        return ""
+    r = _run(["umount", mp], timeout=10, neutrale_sprache=True)
+    if r.get("ok"):
+        return "Der vorherige Mount wurde geloest. "
+    r2 = _run(["umount", "-l", mp], timeout=10, neutrale_sprache=True)
+    if r2.get("ok") or not _ist_eingehaengt(mp):
+        return ("Der vorherige Mount war abgestorben und wurde geloest "
+                "(lazy umount). ")
+    return ("ACHTUNG: unter dem Einhaengepunkt haengt ein Mount, der sich "
+            "nicht loesen laesst - der neue Versuch kann daran scheitern. ")
+
+
+DAVFS_SECRETS = Path("/etc/davfs2/secrets")
+
+
+def _davfs_feld(wert: str) -> str:
+    """Ein Feld der davfs2-Secrets-Zeile: in Anfuehrungszeichen, ``\\`` und
+    ``"`` mit Rueckstrich (Format laut davfs2.conf(5))."""
+    return '"' + wert.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _davfs_secrets_setzen(mp: str, username: str, password: str,
+                          datei: "Path | None" = None) -> str:
+    """Zugang fuer den Einhaengepunkt ``mp`` in die davfs2-Secrets schreiben;
+    Rueckgabe Fehlertext oder "".
+
+    Code-Review 2026-10-07: Benutzer und Kennwort gingen ungeprueft und
+    ungequotet in die Zeile – ein Zeilenumbruch erzeugte zusaetzliche
+    Eintraege (fuer FREMDE Einhaengepunkte), ein Leerzeichen zerlegte das
+    Kennwort. Und ``if mp not in content`` war ein Teilstring-Vergleich: ein
+    geaendertes Kennwort kam nie an, und ``…/share_1`` galt als vorhanden,
+    sobald ``…/share_10`` eingetragen war.
+    """
+    datei = datei or DAVFS_SECRETS
+    for name, wert in (("Benutzername", username), ("Kennwort", password)):
+        if any(ord(c) < 32 or ord(c) == 127 for c in (wert or "")):
+            return f"{name} enthaelt Steuerzeichen (z. B. Zeilenumbruch) – abgewiesen."
+    if any(ord(c) < 33 or ord(c) == 127 for c in mp):
+        return "Einhaengepunkt unzulaessig."
+    zeile = f"{_davfs_feld(mp)} {_davfs_feld(username or '')} {_davfs_feld(password or '')}"
+    try:
+        alt = datei.read_text().splitlines() if datei.exists() else []
+    except OSError as e:
+        return f"davfs2-Zugangsdatei nicht lesbar: {e}"
+    behalten = []
+    for z in alt:
+        try:
+            erstes = shlex.split(z, comments=True)[:1]
+        except ValueError:
+            erstes = []
+        if erstes == [mp]:
+            continue          # alter Eintrag fuer GENAU diesen Einhaengepunkt
+        behalten.append(z)
+    datei.parent.mkdir(parents=True, exist_ok=True)
+    tmp = datei.with_name(datei.name + ".tmp")
+    fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write("\n".join(behalten + [zeile]) + "\n")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, datei)
+    return ""
+
+
+def _cifs_anmeldung(username: str, password: str):
+    """(mount-Optionen, Zusatz-Umgebung, Fehlertext) fuer eine SMB-Anmeldung.
+
+    ⚠ ZWEI GEMESSENE FEHLER (ECHT/DEV, 2026-09-28, mount.cifs 7.4):
+
+    1. ``username=FIRMA/benutzer`` und ``username=FIRMA\\benutzer`` werden
+       NICHT in Domaene und Benutzer zerlegt – der ganze String geht als
+       Benutzername zum Server, der lehnt ab (``Send error in SessSetup =
+       -13``), obwohl dieselben Daten mit smbclient und unter Windows
+       funktionieren. Erst ``username=benutzer,domain=FIRMA`` meldet an.
+       Die Oberflaeche empfiehlt "DOMAENE\\benutzer" – also wird hier zerlegt.
+    2. Das Kennwort stand als ``password=...`` in der Optionsliste. Ein Komma
+       darin beendet die Option, der Rest wird als eigene Option gelesen.
+       Es geht deshalb ueber ``PASSWD`` in der Umgebung (liest mount.cifs
+       selbst, beliebige Zeichen) – und steht nebenbei nicht mehr in der
+       Prozessliste.
+
+    ``benutzer@domain.tld`` bleibt unveraendert, das nimmt der Server so an.
+    """
+    user = (username or "").strip()
+    if not user:
+        return f"{MOUNT_OPTS},guest", None, ""
+    domain = ""
+    for trenner in ("\\", "/"):
+        if trenner in user:
+            domain, _, user = user.partition(trenner)
+            domain, user = domain.strip(), user.strip()
+            break
+    if not user:
+        return "", None, ("Der Benutzername fehlt – eingetragen ist nur die "
+                          "Domaene. Beispiel: DOMAENE\\benutzer")
+    if "," in user or "," in domain:
+        return "", None, ("Benutzername und Domaene duerfen kein Komma "
+                          "enthalten.")
+    opts = f"{MOUNT_OPTS},username={user}"
+    if domain:
+        opts += f",domain={domain}"
+    if not password:
+        # Leeres PASSWD liesse mount.cifs nach einem Kennwort fragen (ohne
+        # Terminal: Abbruch). Ein leeres password= enthaelt kein Komma.
+        return opts + ",password=", None, ""
+    return opts, {"PASSWD": password}, ""
+
+
+def _op_mount_share(args, stream):
+    """Netzwerk-Freigabe (SMB/NFS/WebDAV) read-only mounten – nur unter /mnt/."""
+    from pathlib import Path
+    mount_type = str(args.get("type", "smb"))
+    source = str(args.get("source", "")).strip()
+    mp = str(args.get("mountpoint", "")).strip()
+    username = str(args.get("username", ""))
+    password = str(args.get("password", ""))
+    if not source or not mp.startswith(MOUNT_PREFIX) or ".." in mp:
+        return {"ok": False, "rc": -1, "stdout": "", "stderr": "Ungueltige Quelle/Mountpoint (nur /mnt/... erlaubt)"}
+    # Zweite Schranke: die Form der Quelle. main.py prueft sie bereits beim
+    # Anlegen – hier steht sie noch einmal, weil der Broker auch von
+    # Altbestand-Eintraegen und kuenftigen Aufrufern erreicht wird, und weil
+    # die Zeichenkette gleich als Argument an 'mount' geht. EINE Regel, EIN Ort
+    # (backend/mount_quelle.py); zwei Fassungen liefen auseinander.
+    try:
+        from backend import mount_quelle as _mq
+        norm, fehler = _mq.pruefe(mount_type, source)
+        if fehler:
+            return {"ok": False, "rc": -1, "stdout": "", "stderr": fehler}
+        source = norm
+    except ImportError:
+        pass    # aeltere Installation: Verhalten wie bisher
+    # Einen belegten Einhaengepunkt ZUERST loesen – sonst scheitert schon das
+    # mkdir darunter (toter Mount, EHOSTDOWN) und der Grund ist nicht deutbar.
+    vorlauf = _mp_freimachen(mp)
+    try:
+        Path(mp).mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        return {"ok": False, "rc": -1, "stdout": "", "stderr": (
+            f"{vorlauf}Der Einhaengepunkt {mp} ist nicht benutzbar "
+            f"({e.strerror or e}). Haengt dort noch ein alter Mount? "
+            f"'umount -l {mp}' loest ihn.")}
+    umgebung_zusatz = None
+    if mount_type == "smb":
+        opts, umgebung_zusatz, fehler = _cifs_anmeldung(username, password)
+        if fehler:
+            return {"ok": False, "rc": -1, "stdout": "", "stderr": fehler}
+        cmd = ["mount", "-t", "cifs", source, mp, "-o", opts]
+    elif mount_type == "nfs":
+        cmd = ["mount", "-t", "nfs", "-o", MOUNT_OPTS, source, mp]
+    elif mount_type == "webdav":
+        # davfs2: Credentials in root-eigene Secrets-Datei schreiben
+        fehler = _davfs_secrets_setzen(mp, username, password)
+        if fehler:
+            return {"ok": False, "rc": -1, "stdout": "", "stderr": fehler}
+        cmd = ["mount", "-t", "davfs", "-o", MOUNT_OPTS, source, mp]
+    else:
+        return {"ok": False, "rc": -1, "stdout": "", "stderr": f"Unbekannter Typ: {mount_type}"}
+    # Sprachneutral, weil main.py::_mount_fehler_deuten die Ausgabe deutet.
+    _t0 = time.time()
+    erg = _run(cmd, timeout=20, neutrale_sprache=True,
+               umgebung_zusatz=umgebung_zusatz)
+    if not erg.get("ok"):
+        # Der Kernel weiss den Grund – mount reicht ihn nicht durch.
+        grund = _kernel_grund(_t0, source)
+        if grund:
+            erg["stderr"] = f"{str(erg.get('stderr') or '').strip()} [Kernel: {grund}]"
+    if vorlauf:
+        erg["stdout"] = vorlauf + str(erg.get("stdout") or "")
+        if not erg.get("ok"):
+            erg["stderr"] = vorlauf + str(erg.get("stderr") or "")
+    return erg
+
+
+def _tcp_offen(host: str, port: int, timeout: float = 5.0):
+    """(offen?, Millisekunden, Fehlertext) fuer einen TCP-Verbindungsversuch."""
+    import socket as _s
+    t0 = time.time()
+    try:
+        v = _s.create_connection((host, port), timeout=timeout)
+        v.close()
+        return True, (time.time() - t0) * 1000, ""
+    except Exception as e:                                    # noqa: BLE001
+        return False, (time.time() - t0) * 1000, f"{type(e).__name__}: {e}"
+
+
+_SMB_DIALEKTE = {0x0202: "SMB 2.0.2", 0x0210: "SMB 2.1", 0x0300: "SMB 3.0",
+                 0x0302: "SMB 3.0.2", 0x0311: "SMB 3.1.1", 0x02FF: "Multi-Protocol"}
+
+
+def _smb2_negotiate(host: str, timeout: float = 6.0):
+    """Einen SMB2-NEGOTIATE senden und die Antwort deuten.
+
+    ⚠ DAS IST DER TEST, DER DEN FALL ENTSCHEIDET. Ein offener Port 445 sagt
+    NICHTS darueber, ob dort ein brauchbarer SMB-Dienst antwortet: am
+    2026-09-05 auf ECHT gemessen – TCP verbindet in 10 ms, und sobald das
+    erste SMB-Paket kommt, trennt die Gegenseite (Connection reset). Genau
+    diese Lage meldet der Kernel als Fehlercode 115, und genau sie ist von
+    "Server ausgeschaltet" nicht zu unterscheiden, solange niemand den
+    Handshake wirklich versucht.
+
+    Bewusst zu Fuss und ohne Fremdmodul: smbclient ist auf einem Server ohne
+    samba-client nicht vorhanden (auf ECHT nachgesehen), und eine Diagnose,
+    die selbst eine Installation voraussetzt, laeuft genau dann nicht, wenn
+    man sie braucht.
+    """
+    import socket as _s
+    import struct as _st
+    import uuid as _uuid
+    # ⚠ 0x0311 (SMB 3.1.1) FEHLT ABSICHTLICH. Wer diesen Dialekt anbietet, MUSS
+    # nach MS-SMB2 auch eine NegotiateContextList mitschicken (mindestens
+    # PREAUTH_INTEGRITY_CAPABILITIES); ohne sie antwortet der Server mit
+    # STATUS_INVALID_PARAMETER oder trennt gleich die Verbindung. Genau das ist
+    # am 2026-09-05 passiert: die Sonde meldete "Der Server weist den SMB-Aufbau
+    # ab", waehrend derselbe Server eine laufende Freigabe mit vers=3.1.1
+    # bediente. EINE FALSCHE SONDE IST SCHLIMMER ALS KEINE - sie erzeugt genau
+    # die Fehldiagnose, gegen die diese Funktion gebaut ist.
+    # Gemessen: ohne 3.1.1 einigt sich derselbe Server sofort auf 0x0302.
+    dialekte = (0x0202, 0x0210, 0x0300, 0x0302)
+    kopf = (b"\xfeSMB" + _st.pack("<HH", 64, 0) + _st.pack("<I", 0)
+            + _st.pack("<HH", 0, 1) + _st.pack("<II", 0, 0)
+            # MessageId 0: der erste Request einer Verbindung traegt 0. Mit 1
+            # hat derselbe Server die Verbindung zurueckgesetzt (gemessen).
+            + _st.pack("<Q", 0) + _st.pack("<II", 0, 0)
+            + _st.pack("<Q", 0) + b"\x00" * 16)
+    rumpf = (_st.pack("<HHHH", 36, len(dialekte), 1, 0) + _st.pack("<I", 0)
+             + _uuid.uuid4().bytes + _st.pack("<Q", 0)
+             + b"".join(_st.pack("<H", d) for d in dialekte))
+    paket = kopf + rumpf
+    try:
+        v = _s.create_connection((host, 445), timeout=timeout)
+        v.settimeout(timeout)
+        v.sendall(_st.pack(">I", len(paket)) + paket)
+        daten = v.recv(4096)
+        v.close()
+    except ConnectionResetError:
+        return {"ok": False, "art": "reset",
+                "text": "Die Gegenstelle hat die Verbindung getrennt, sobald "
+                        "das erste SMB-Paket kam."}
+    except Exception as e:                                    # noqa: BLE001
+        return {"ok": False, "art": "fehler", "text": f"{type(e).__name__}: {e}"}
+    if len(daten) < 74 or daten[4:8] != b"\xfeSMB":
+        return {"ok": False, "art": "fremd",
+                "text": f"Antwort ist kein SMB2 ({len(daten)} Bytes) – auf "
+                        f"Port 445 antwortet etwas anderes als ein SMB-Dienst."}
+    import struct as _st2
+    status = _st2.unpack("<I", daten[12:16])[0]
+    dialekt = _st2.unpack("<H", daten[72:74])[0]
+    name = _SMB_DIALEKTE.get(dialekt, f"0x{dialekt:04x}")
+    if status != 0:
+        return {"ok": False, "art": "status",
+                "text": f"Der SMB-Dienst antwortet, einigt sich aber auf keinen "
+                        f"Dialekt (Status 0x{status:08x}) – ein Versions-, kein "
+                        f"Netzproblem."}
+    return {"ok": True, "art": "ok", "dialekt": name,
+            "text": f"Der Server antwortet und einigt sich auf {name}."}
+
+
+def _egress_offen_fuer_kernel():
+    """Faengt die Egress-Kette Kernel-Sockets im Default-Zweig? (None = keine Kette)
+
+    Hintergrund im Register: ein CIFS-Mount wird vom KERNEL aufgebaut und hat
+    keinen Socket-Eigentuemer. Eine Regel ``meta skuid != <uid> accept`` ist
+    fuer ihn NICHT erfuellt - er faellt durch alle accept-Regeln und landet im
+    nackten ``drop``. Userspace-Tests laufen dabei einwandfrei, was die Suche
+    zuverlaessig in die falsche Richtung schickt.
+
+    ⚠ DIE MESSUNG LIEGT IN ``egress_guard.kette_veraltet()`` - hier stand bis
+    2026-09-05 eine ZWEITE, zeichengleiche Fassung. Zwei Fassungen derselben
+    Regel laufen beim naechsten Feinschliff auseinander, und dann sagt der
+    Analyse-Knopf etwas anderes als die Warnung beim Dienststart.
+    """
+    from backend import egress_guard
+    veraltet, zeilen = egress_guard.kette_veraltet()
+    if veraltet is None:
+        return None, ""
+    return (not veraltet), zeilen
+
+
+def _op_mount_diagnose(args, stream):
+    """Warum kommt eine Netzwerk-Freigabe nicht zustande? NUR MESSEN.
+
+    ⚠ DIE OP VERAENDERT NICHTS – kein mount, kein umount, kein Schreiben. Sie
+    beantwortet die eine Frage, die eine Fehlermeldung von ``mount`` nicht
+    beantworten kann: liegt es am Netzweg, am Server, am SMB-Dienst, an der
+    eigenen Firewall oder an einem Rueckstand unter dem Einhaengepunkt.
+
+    ⚠ DAS ZIEL KOMMT AUS DER GESPEICHERTEN FREIGABE, nicht aus dem Formular.
+    Der Endpunkt loest den Index gegen die Konfiguration auf; sonst waere der
+    Knopf ein Portscanner mit Root-Rechten. Dieselbe Ueberlegung wie bei
+    ``tika_setup``, wo der Skriptpfad bewusst kein Argument ist.
+    """
+    mount_type = str(args.get("type", "smb"))
+    source = str(args.get("source", "")).strip()
+    mp = str(args.get("mountpoint", "")).strip()
+    if not source:
+        return {"ok": False, "rc": -1, "stdout": "", "stderr": "Keine Quelle angegeben."}
+
+    schritte = []
+    def merke(name, ok, text, wert=""):
+        schritte.append({"schritt": name, "ok": bool(ok), "text": text, "wert": wert})
+
+    # 1) Form und Zerlegung -------------------------------------------------
+    try:
+        from backend import mount_quelle as _mq
+        norm, fehler = _mq.pruefe(mount_type, source)
+        if fehler:
+            merke("Schreibweise", False, fehler)
+            return {"ok": True, "rc": 0, "stdout": "", "stderr": "",
+                    "result": {"quelle": source, "typ": mount_type,
+                               "schritte": schritte,
+                               "urteil": ["Die Quelle ist nicht brauchbar – "
+                                          "weiter gemessen wurde deshalb nicht."]}}
+        source = norm
+        merke("Schreibweise", True, f"in Ordnung: {source}")
+    except ImportError:
+        merke("Schreibweise", True, "nicht geprueft (aeltere Installation)")
+
+    if mount_type == "smb":
+        m = re.match(r"^//([^/]+)/(.*)$", source)
+        host, freigabe = (m.group(1), m.group(2)) if m else (source, "")
+    elif mount_type == "nfs":
+        host, _, freigabe = source.partition(":")
+    else:                                     # webdav: http(s)://host/pfad
+        rest = re.sub(r"^\w+://", "", source)
+        host, _, freigabe = rest.partition("/")
+    # 'benutzer@host' und 'host:port' abstreifen; ein Doppelpunkt-Wirrwarr
+    # (IPv6) bleibt unangetastet, sonst zerlegt man eine gueltige Adresse.
+    host = host.split("@")[-1]
+    if host.count(":") == 1:
+        host = host.split(":")[0]
+
+    # 2) Namensaufloesung ---------------------------------------------------
+    import socket as _sock
+    ist_ip = bool(re.match(r"^\d{1,3}(\.\d{1,3}){3}$", host))
+    if ist_ip:
+        merke("Namensaufloesung", True, f"{host} ist bereits eine IP-Adresse")
+        adressen = [host]
+    else:
+        try:
+            info = _sock.getaddrinfo(host, None)
+            adressen = sorted({a[4][0] for a in info})
+            merke("Namensaufloesung", True, f"{host} → {', '.join(adressen)}")
+        except Exception as e:                                # noqa: BLE001
+            merke("Namensaufloesung", False,
+                  f"Der Name '{host}' laesst sich nicht aufloesen ({type(e).__name__}).")
+            adressen = []
+
+    ziel = adressen[0] if adressen else host
+
+    # 3) ICMP ---------------------------------------------------------------
+    if adressen:
+        p = _run(["ping", "-c", "2", "-W", "2", ziel], timeout=8, neutrale_sprache=True)
+        pok = bool(p.get("ok"))
+        letzte = [z for z in (p.get("stdout") or "").splitlines() if "rtt" in z or "min/avg" in z]
+        merke("Ping", pok,
+              (letzte[-1] if letzte else "antwortet") if pok
+              else "keine Antwort (viele Netze verwerfen ICMP – das allein ist kein Fehler)")
+
+    # 4) Ports --------------------------------------------------------------
+    ports = {"smb": [445, 139], "nfs": [2049, 111], "webdav": [443, 80]}.get(mount_type, [445])
+    port_offen = {}
+    if adressen:
+        for prt in ports:
+            offen, ms, fehl = _tcp_offen(ziel, prt)
+            port_offen[prt] = offen
+            merke(f"TCP {prt}", offen,
+                  f"verbunden in {ms:.0f} ms" if offen else f"nicht erreichbar ({fehl})")
+
+    # 5) SMB-Handshake ------------------------------------------------------
+    smb = None
+    if mount_type == "smb" and port_offen.get(445):
+        smb = _smb2_negotiate(ziel)
+        merke("SMB-Handshake", smb["ok"], smb["text"], smb.get("dialekt", ""))
+
+    # 6) Einhaengepunkt -----------------------------------------------------
+    # ⚠ UEBER /proc/mounts, NIE per stat: auf einem abgestorbenen CIFS-Mount
+    # wirft jeder Zugriff EHOSTDOWN – wer so misst, loest den Fehler aus, den
+    # er messen will.
+    laeuft = False
+    if mp:
+        belegt = ""
+        try:
+            for zeile in open("/proc/mounts", encoding="utf-8", errors="replace"):
+                teile = zeile.split()
+                if len(teile) > 1 and teile[1] == mp.replace(" ", "\\040"):
+                    belegt = zeile.strip()
+                    break
+        except OSError:
+            pass
+        # ⚠ BELEGT IST NICHT GLEICH KAPUTT. Haengt dort GENAU DIESE Freigabe,
+        # ist das der Normalzustand und der staerkste Beweis, dass alles
+        # funktioniert - am 2026-09-05 auf DEV gesehen, wo die Diagnose eine
+        # laufende Freigabe als Problem auswies. Nur ein FREMDER oder toter
+        # Mount ist einer.
+        eigen = bool(belegt) and source in belegt
+        laeuft = eigen
+        merke("Einhaengepunkt", (not belegt) or eigen,
+              f"{mp} ist frei" if not belegt
+              else (f"diese Freigabe ist eingehaengt" if eigen
+                    else f"belegt von etwas anderem: {belegt[:140]} – ein "
+                         f"Rueckstand wird beim naechsten Verbinden geloest "
+                         f"(lazy umount)"))
+
+    # 7) Eigene Egress-Sperre ----------------------------------------------
+    frei, nackte = _egress_offen_fuer_kernel()
+    if frei is None:
+        merke("Egress-Firewall", True, "keine Kette 'jarvis_egress' – die "
+                                       "eigene Firewall kommt als Ursache nicht in Frage")
+    else:
+        merke("Egress-Firewall", frei,
+              "die Kette bindet ihr 'drop' an eine Benutzerkennung – "
+              "Kernel-Sockets (CIFS/NFS) kommen durch" if frei
+              else f"die Kette enthaelt ein 'drop' OHNE Benutzerbindung "
+                   f"({nackte}) – ein CIFS-Mount wird vom Kernel aufgebaut und "
+                   f"hat keinen Socket-Eigentuemer; er faellt genau dort hinein")
+
+    # 8) Kernel-Ring --------------------------------------------------------
+    kern = _kernel_grund(time.time() - 900, source)
+    if kern:
+        merke("Kernel-Meldungen", False, kern[:400])
+
+    # 9) Urteil -------------------------------------------------------------
+    urteil = []
+    if laeuft:
+        urteil.append("Diese Freigabe ist derzeit EINGEHAENGT und wird gelesen – "
+                      "Netzweg, Server und Zugangsdaten sind damit in Ordnung. "
+                      "Die Messungen darunter beschreiben den Weg, nicht ein Problem.")
+    elif not adressen:
+        urteil.append(f"Der Name '{host}' ist im Netz dieses Servers nicht "
+                      f"aufloesbar. Zu pruefen sind DNS, die Schreibweise und "
+                      f"ob statt des Namens die IP-Adresse eingetragen werden kann.")
+    elif not any(port_offen.values()):
+        urteil.append(f"Der Server '{host}' nimmt auf {' und '.join(str(p) for p in ports)} "
+                      f"keine Verbindung an. Das ist der Fall, den die Meldung "
+                      f"'nicht erreichbar' meint: Rechner aus, falsche Adresse, "
+                      f"oder eine Firewall zwischen den Netzen.")
+    elif mount_type == "smb" and smb and smb.get("art") == "status":
+        urteil.append(f"Der SMB-Dienst auf '{host}' antwortet, einigt sich aber "
+                      f"auf keine gemeinsame Protokollversion. Das ist ein "
+                      f"Versionsthema (zu alt oder zu streng eingestellt), "
+                      f"kein Netzproblem.")
+    elif mount_type == "smb" and smb and not smb["ok"]:
+        urteil.append(f"Der Server '{host}' ist erreichbar – Port 445 nimmt die "
+                      f"Verbindung an –, weist den SMB-Aufbau aber ab: {smb['text']} "
+                      f"Damit ist 'Server nicht erreichbar' als Erklaerung "
+                      f"ausgeschlossen. In Frage kommen: eine zu alte oder "
+                      f"abgeschaltete SMB-Version (SMB1 wird vom Kernel nicht "
+                      f"mehr angeboten), erzwungene SMB-Signierung, oder eine "
+                      f"Zwischenstelle (Firewall/IPS), die die TCP-Verbindung "
+                      f"annimmt und den SMB-Verkehr verwirft.")
+    elif mount_type == "smb" and smb and smb["ok"]:
+        urteil.append(f"Netzweg und SMB-Dienst sind in Ordnung ({smb['text']}). "
+                      f"Scheitert das Einbinden trotzdem, liegt es an den "
+                      f"Zugangsdaten oder an den Rechten auf der Freigabe "
+                      f"'{freigabe}' – nicht am Netz.")
+    else:
+        urteil.append(f"Der Server '{host}' nimmt Verbindungen an. Weiteres "
+                      f"siehe die einzelnen Schritte.")
+    if frei is False:
+        urteil.append("ZUSAETZLICH: die Egress-Firewall dieses Servers verwirft "
+                      "Verbindungen, die der Kernel selbst aufbaut. Das trifft "
+                      "JEDEN CIFS- und NFS-Mount, unabhaengig vom Ziel – "
+                      "'Sicherheit → Internet-Zugang' neu einrichten.")
+    return {"ok": True, "rc": 0, "stdout": "", "stderr": "",
+            "result": {"quelle": source, "typ": mount_type, "host": host,
+                       "schritte": schritte, "urteil": urteil}}
+
+
+def _op_umount_share(args, stream):
+    mp = str(args.get("mountpoint", "")).strip()
+    if not mp.startswith(MOUNT_PREFIX) or ".." in mp:
+        return {"ok": False, "rc": -1, "stdout": "", "stderr": "Ungueltiger Mountpoint (nur /mnt/... erlaubt)"}
+    return _run(["umount", mp], timeout=15, neutrale_sprache=True)
+
+
+def _op_certbot_obtain(args, stream):
+    """Let's-Encrypt-Zertifikat via certbot standalone holen, Zertifikate nach
+    certs/ KOPIEREN (nicht symlinken) und dem Dienst-Benutzer geben – noetig,
+    weil das unprivilegierte Backend /etc/letsencrypt nicht lesen darf.
+    Renewal-Hook sorgt dafuer, dass Erneuerungen wieder kopiert werden."""
+    import os
+    import shutil
+    from pathlib import Path
+
+    domain = str(args.get("domain", "")).strip()
+    email = str(args.get("email", "")).strip()
+    service_user = str(args.get("service_user", "jarvis")).strip()
+    if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,}$', domain):
+        return {"ok": False, "rc": -1, "stdout": "", "stderr": "Ungueltige Domain"}
+    if not re.match(r'^[^@]+@[^@]+\.[^@]+$', email):
+        return {"ok": False, "rc": -1, "stdout": "", "stderr": "Ungueltige E-Mail"}
+    # ⚠ service_user landet im Renewal-Hook, den certbot bei JEDER Erneuerung
+    # als root ausfuehrt (Code-Review 2026-10-07): ungeprueft war das eine
+    # Befehlsinjektion in ein Root-Skript ueber eine automatisch erlaubte Op.
+    # Nur ein Systemname, der als Konto EXISTIERT und nicht root ist – vor
+    # jedem Schritt, damit ein abgewiesener Aufruf nichts anfasst.
+    if not re.fullmatch(r'[a-z_][a-z0-9_-]{0,31}', service_user):
+        return {"ok": False, "rc": -1, "stdout": "", "stderr": "Ungueltiger Dienst-Benutzer"}
+    import pwd
+    try:
+        _pw_dienst = pwd.getpwnam(service_user)
+    except KeyError:
+        return {"ok": False, "rc": -1, "stdout": "", "stderr": "Dienst-Benutzer existiert nicht"}
+    if _pw_dienst.pw_uid == 0:
+        return {"ok": False, "rc": -1, "stdout": "", "stderr": "Dienst-Benutzer darf nicht root sein"}
+
+    def say(line):
+        if stream:
+            try:
+                stream(line)
+            except Exception:  # noqa: BLE001
+                pass
+
+    # 1. certbot sicherstellen
+    certbot = None
+    for cp in ["/usr/bin/certbot", "/usr/local/bin/certbot"]:
+        if Path(cp).exists():
+            certbot = cp
+            break
+    if not certbot:
+        say("📦 certbot nicht gefunden – installiere...")
+        r = _stream_shell("apt-get install -y certbot", None, 300, stream)
+        if Path("/usr/bin/certbot").exists():
+            certbot = "/usr/bin/certbot"
+        else:
+            return {"ok": False, "rc": r["rc"], "stdout": r["stdout"],
+                    "stderr": "certbot konnte nicht installiert werden"}
+
+    # 2. certbot standalone
+    say(f"🌐 Führe certbot aus: {certbot} certonly --standalone -d {domain}")
+    cmd = " ".join([certbot, "certonly", "--standalone", "--non-interactive",
+                    "--agree-tos", "-m", shlex.quote(email), "-d", shlex.quote(domain)])
+    r = _stream_shell(cmd, None, 300, stream)
+    if r["rc"] != 0:
+        return {"ok": False, "rc": r["rc"], "stdout": r["stdout"],
+                "stderr": f"certbot fehlgeschlagen (Exit-Code {r['rc']})"}
+
+    le_fullchain = Path(f"/etc/letsencrypt/live/{domain}/fullchain.pem")
+    le_privkey = Path(f"/etc/letsencrypt/live/{domain}/privkey.pem")
+    if not le_fullchain.exists() or not le_privkey.exists():
+        return {"ok": False, "rc": 1, "stdout": r["stdout"],
+                "stderr": f"Zertifikatsdateien nicht gefunden unter /etc/letsencrypt/live/{domain}/"}
+
+    # 3. In certs/ kopieren + Dienst-Benutzer als Eigentuemer
+    uid, gid = _pw_dienst.pw_uid, _pw_dienst.pw_gid
+    copied = []
+    for certs_dir in [PROJECT_ROOT / "certs"]:
+        if not certs_dir.parent.exists():
+            continue
+        certs_dir.mkdir(parents=True, exist_ok=True)
+        cert_dst, key_dst = certs_dir / "server.crt", certs_dir / "server.key"
+        for f in (cert_dst, key_dst):
+            if f.exists() and not f.is_symlink():
+                try:
+                    f.rename(f.with_suffix(".bak"))
+                except Exception:  # noqa: BLE001
+                    pass
+            if f.is_symlink():
+                f.unlink()
+        shutil.copy2(str(le_fullchain), str(cert_dst))
+        shutil.copy2(str(le_privkey), str(key_dst))
+        os.chmod(key_dst, 0o600)
+        os.chmod(cert_dst, 0o644)
+        if uid:
+            os.chown(cert_dst, uid, gid)
+            os.chown(key_dst, uid, gid)
+        copied.append(str(certs_dir))
+        say(f"📋 Zertifikat kopiert nach {certs_dir}/ (Eigentuemer: {service_user})")
+
+    # 4. Renewal-Hook: bei certbot-Erneuerung erneut kopieren + Dienst neu starten
+    hook_dir = Path("/etc/letsencrypt/renewal-hooks/deploy")
+    try:
+        hook_dir.mkdir(parents=True, exist_ok=True)
+        hook = hook_dir / "jarvis-copy-certs.sh"
+        hook.write_text(
+            "#!/bin/bash\n"
+            "# Auto-generiert von Jarvis (backend/broker/ops.py): kopiert erneuerte\n"
+            "# Let's-Encrypt-Zertifikate ins Jarvis-certs/-Verzeichnis.\n"
+            f"for D in {shlex.quote(str(PROJECT_ROOT / 'certs'))}; do\n"
+            f"  [ -d \"$D\" ] || continue\n"
+            f"  cp -L /etc/letsencrypt/live/{domain}/fullchain.pem \"$D/server.crt\"\n"
+            f"  cp -L /etc/letsencrypt/live/{domain}/privkey.pem \"$D/server.key\"\n"
+            f"  chmod 644 \"$D/server.crt\"; chmod 600 \"$D/server.key\"\n"
+            f"  chown {shlex.quote(service_user + ':' + service_user)} \"$D/server.crt\" \"$D/server.key\" 2>/dev/null\n"
+            "done\n"
+            "systemctl restart jarvis.service\n")
+        hook.chmod(0o755)
+        say("🔁 Renewal-Hook installiert (automatische Erneuerung kopiert Zertifikate erneut)")
+    except Exception as e:  # noqa: BLE001
+        say(f"⚠️ Renewal-Hook konnte nicht installiert werden: {e}")
+
+    return {"ok": True, "rc": 0, "stdout": "Zertifikat erhalten und installiert: " + ", ".join(copied),
+            "stderr": ""}
+
+
+def _op_broker_mode(script_name: str, unit: str, args):
+    """Betriebsart-Wechsel (getrennt <-> Alt-Betrieb) ueber das jeweilige
+    Deploy-Skript. Laeuft ALS TRANSIENTE systemd-Unit (systemd-run), weil das
+    Skript jarvis.service/jarvis-broker.service neu startet – ein Kind-Prozess
+    in deren cgroup wuerde beim Restart mitgekillt. Rueckgabe sofort
+    ('gestartet'); Fortschritt via journalctl -u <unit> bzw. Status-Polling."""
+    # Skript aus dem Broker-Code (root-eigen), Zielbaum = Datenbaum (Befund K1).
+    jdir = PROJECT_ROOT
+    script = CODE_ROOT / "deploy" / "security" / script_name
+    if not script.exists():
+        return {"ok": False, "rc": -1, "stdout": "",
+                "stderr": f"Skript fehlt: {script}"}
+    svc_user = str(args.get("service_user") or "jarvis").strip() or "jarvis"
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.\-]{0,31}", svc_user):
+        return {"ok": False, "rc": -1, "stdout": "", "stderr": "Ungueltiger Dienst-Benutzer"}
+    # Preflight SYNCHRON (Fehler sofort in der UI statt Polling-Timeout):
+    # Der Dienst-Benutzer muss das Elternverzeichnis betreten koennen – bei
+    # Installationen unter /root (0700) wuerde die Migration das Backend
+    # unstartbar machen. Das Skript prueft dasselbe nochmal (Defense-in-Depth).
+    if script_name == "setup_broker.sh":
+        chk = _run(["runuser", "-u", svc_user, "--", "test", "-x", str(jdir.parent)],
+                   timeout=10)
+        if not chk.get("ok"):
+            return {"ok": False, "rc": -1, "stdout": "", "stderr": (
+                f"Preflight fehlgeschlagen: Benutzer '{svc_user}' kann "
+                f"{jdir.parent} nicht betreten (z.B. Installation unter /root)"
+                f"{(' – ' + chk['stderr'].strip()) if chk.get('stderr') else ''}. "
+                "Getrennter Betrieb ist mit diesem Layout nicht moeglich – "
+                "es wurde nichts veraendert. Jarvis zuerst nach /opt/jarvis umziehen.")}
+    cmd = ["systemd-run", "--collect", f"--unit={unit}",
+           "bash", str(script), str(jdir)]
+    if script_name == "setup_broker.sh":
+        cmd.append(svc_user)
+    r = _run(cmd, timeout=20)
+    if not r.get("ok"):
+        return r
+    return {"ok": True, "rc": 0, "stderr": "",
+            "stdout": (f"Umstellung gestartet (transiente Unit '{unit}'). "
+                       f"Die Dienste starten gleich neu – Fortschritt: "
+                       f"journalctl -u {unit}")}
+
+
+def _op_broker_setup(args, stream):
+    return _op_broker_mode("setup_broker.sh", "jarvis-broker-migrate", args)
+
+
+def _op_broker_teardown(args, stream):
+    return _op_broker_mode("teardown_broker.sh", "jarvis-broker-restore", args)
+
+
+# name -> (run, key_fn, desc_fn, default_allow, redact_fields)
+_REGISTRY = {
+    "broker_setup": (
+        _op_broker_setup,
+        lambda a: "broker_setup",
+        lambda a: "Getrennten Betrieb einrichten/reparieren (unprivilegiertes Backend + Root-Broker)",
+        True, (),
+    ),
+    "broker_teardown": (
+        _op_broker_teardown,
+        lambda a: "broker_teardown",
+        lambda a: "Alt-Betrieb wiederherstellen (Backend als root, Broker-Dienst deaktivieren)",
+        # NICHT automatisch (K2-b): die Op macht das Backend wieder zu root.
+        False, (),
+    ),
+    "systemctl": (
+        _op_systemctl,
+        lambda a: f"systemctl:{a.get('action')}:{a.get('unit') or '-'}",
+        lambda a: f"Dienststeuerung: systemctl {a.get('action')} {a.get('unit') or ''}".strip(),
+        True, (),
+    ),
+    "unlock_screen": (
+        _op_unlock_screen,
+        lambda a: "unlock_screen",
+        lambda a: "Desktop-Bildschirmsperre aufheben (VNC-Zugriff)",
+        True, (),
+    ),
+    "switch_session": (
+        _op_switch_session,
+        lambda a: "switch_session",
+        lambda a: "Desktop-Session wechseln (LightDM-Autologin + Neustart)",
+        True, (),
+    ),
+    "vnc_restart": (
+        _op_vnc_restart,
+        lambda a: "vnc_restart",
+        lambda a: "x11vnc-Server neu starten (Display :0)",
+        True, (),
+    ),
+    "chpasswd": (
+        _op_chpasswd,
+        lambda a: "chpasswd",
+        lambda a: "Linux-Kennwort eines Benutzers setzen (Erst-Login/Passwortwechsel)",
+        True, ("password",),
+    ),
+    # BSI H10: loest "sandbox_exec" ab (neuer Name, damit ein alter Broker
+    # "unbekannte Op" sagt statt ohne Grenzen auszufuehren).
+    "sandbox_lauf": (
+        _op_sandbox_lauf,
+        lambda a: f"sandbox_lauf:{a.get('user')}",
+        lambda a: f"Shell-Befehl als unprivilegierter Sandbox-User '{a.get('user')}' ausfuehren (mit Grenzen)",
+        True, (),
+    ),
+    "lauf_aufraeumen": (
+        _op_lauf_aufraeumen,
+        lambda a: "lauf_aufraeumen",
+        lambda a: "Arbeitsverzeichnis eines Benutzers entfernen (privates /tmp)",
+        True, (),
+    ),
+    "sandbox_setup": (
+        _op_sandbox_setup, lambda a: "sandbox_setup",
+        lambda a: "OS-Sandbox einrichten (User anlegen, Secret-Dateirechte)",
+        True, (),
+    ),
+    "sandbox_status": (
+        _op_sandbox_status, lambda a: "sandbox_status",
+        lambda a: "OS-Sandbox-Status abfragen (inkl. Isolationstest)",
+        True, (),
+    ),
+    "egress_setup": (
+        _op_egress_setup, lambda a: "egress_setup",
+        lambda a: "Internet-Egress-Sperre einrichten (nftables + Autostart)",
+        True, (),
+    ),
+    "egress_teardown": (
+        _op_egress_teardown, lambda a: "egress_teardown",
+        lambda a: "Internet-Egress-Sperre deaktivieren",
+        True, (),
+    ),
+    "egress_status": (
+        _op_egress_status, lambda a: "egress_status",
+        lambda a: "Egress-Sperre-Status abfragen (inkl. Live-Test)",
+        True, (),
+    ),
+    "apt_upgrades_setup": (
+        _op_apt_upgrades_setup, lambda a: "apt_upgrades_setup",
+        lambda a: "Automatische Sicherheitsupdates einschalten (unattended-upgrades, "
+                  "nur Sicherheits-Quelle, kein Reboot, kein Aufraeumen)",
+        True, (),
+    ),
+    "apt_upgrades_teardown": (
+        _op_apt_upgrades_teardown, lambda a: "apt_upgrades_teardown",
+        lambda a: "Automatische Sicherheitsupdates ausschalten (Index-Refresh bleibt)",
+        True, (),
+    ),
+    "apt_upgrades_status": (
+        _op_apt_upgrades_status, lambda a: "apt_upgrades_status",
+        lambda a: "Status der automatischen Sicherheitsupdates abfragen (inkl. Trockenlauf)",
+        True, (),
+    ),
+    "tika_setup": (
+        _op_tika_setup, lambda a: "tika_setup",
+        lambda a: "OneNote-Import einrichten (Java-Laufzeit + Apache Tika bereitstellen)",
+        True, (),
+    ),
+    "tika_status": (
+        _op_tika_status, lambda a: "tika_status",
+        lambda a: "Status des OneNote-Imports abfragen (Java + tika-app.jar)",
+        True, (),
+    ),
+    "mount_share": (
+        _op_mount_share,
+        lambda a: f"mount_share:{a.get('type')}:{a.get('source')}",
+        lambda a: f"Netzwerk-Freigabe mounten ({a.get('type')}): {a.get('source')} → {a.get('mountpoint')}",
+        True, ("password",),
+    ),
+    "mount_diagnose": (
+        _op_mount_diagnose,
+        lambda a: "mount_diagnose",
+        lambda a: f"Netzwerk-Freigabe pruefen (nur messen): {a.get('source')}",
+        True, ("password",),
+    ),
+    "umount_share": (
+        _op_umount_share,
+        lambda a: "umount_share",
+        lambda a: f"Netzwerk-Freigabe aushaengen: {a.get('mountpoint')}",
+        True, (),
+    ),
+    "certbot_obtain": (
+        _op_certbot_obtain,
+        lambda a: "certbot_obtain",
+        lambda a: f"Let's-Encrypt-Zertifikat beantragen fuer {a.get('domain')}",
+        True, (),
+    ),
+    "journal_lesen": (
+        _op_journal_lesen,
+        lambda a: "journal_lesen:" + str(a.get("einheit") or "-")[:60],
+        lambda a: "Protokoll einer Jarvis-Einheit lesen: " + str(a.get("einheit") or "")[:60],
+        True, (),
+    ),
+    "shell_root": (
+        _op_shell_root,
+        lambda a: "shell_root:" + _norm_cmd(str(a.get("command", ""))),
+        lambda a: "Root-Shell-Befehl: " + _norm_cmd(str(a.get("command", ""))),
+        False, (),   # ← IMMER erst Admin-Freigabe (pending)
+    ),
+}
+
+
+# Ops ohne default_allow, deren Bestands-Eintraege beim Start zurueckgesetzt
+# werden (policy.herabstufen) – abgeleitet, nicht gepflegt.
+OHNE_AUTOMATIK = {name for name, e in _REGISTRY.items() if not e[3]}
+
+
+def redact_args(op: str, args: dict) -> dict:
+    """Sensible Felder (Passwoerter) fuer Audit/Anzeige maskieren."""
+    entry = _REGISTRY.get(op)
+    if not entry:
+        return dict(args or {})
+    out = dict(args or {})
+    for f in entry[4]:
+        if f in out and out[f]:
+            out[f] = "***"
+    return out
+
+
+def _args_info(op: str, args: dict) -> str:
+    """Kompakte Klartext-Darstellung der konkreten (maskierten) Argumente
+    fuers Audit-Log ('welcher Befehl/welche Unit/welcher User genau?') –
+    macht die 'Beispiele' in der Admin-UI aussagekraeftig. Interne Felder
+    (_context) und Leerwerte werden ausgelassen."""
+    red = redact_args(op, args)
+    red.pop("_context", None)
+    parts = []
+    for k, v in red.items():
+        if v is None or v == "" or v == [] or v == {}:
+            continue
+        s = _norm_cmd(str(v)) if isinstance(v, str) else str(v)
+        if len(s) > 140:
+            s = s[:139] + "…"
+        parts.append(f"{k}={s}")
+    return " ".join(parts)[:300]
+
+
+def dispatch(op: str, args: dict, user: str = "", stream=None, peer: str = "") -> dict:
+    """Operation ausfuehren: Policy pruefen (Eintrag beim ersten Auftauchen
+    anlegen), bei 'allow' ausfuehren, sonst pending/denied zurueckgeben."""
+    args = args or {}
+    entry = _REGISTRY.get(op)
+    if not entry:
+        return {"ok": False, "decision": "unknown-op",
+                "error": f"Unbekannte Broker-Operation: {op}"}
+    run, key_fn, desc_fn, default_allow, _redact = entry
+    try:
+        key = key_fn(args)
+        desc = desc_fn(args)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "decision": "invalid", "error": f"Ungueltige Argumente: {e}"}
+
+    # Reine Lese-/Statusabfragen (vom Frontend beim Tab-Oeffnen automatisch
+    # ausgeloest) sind KEINE sicherheitsrelevanten Operationen: sie werden weder
+    # in der Freigabeliste registriert noch auditiert (sonst fluten sie beides
+    # mit inhaltslosen "executed (rc=0)"-Eintraegen).
+    if op in READONLY_OPS:
+        try:
+            result = run(args, stream)
+        except Exception as e:  # noqa: BLE001
+            result = {"ok": False, "rc": -1, "stdout": "", "stderr": f"Broker-Op-Fehler: {e}"}
+        result.setdefault("ok", False)
+        result["decision"] = "allowed"
+        result["key"] = key
+        return result
+
+    # Rein informativer Ausloeser-Kontext (z.B. Agent-Task-Auszug). Wird NUR
+    # ins Audit geschrieben und fliesst nie in key/desc/Policy/Befehl ein.
+    context = str(args.get("_context") or "")[:300]
+    # Konkrete (maskierte) Argumente dieser Ausfuehrung fuers Audit-Log
+    info = _args_info(op, args)
+
+    decision = policy.check(key, op, desc, user, default_allow)
+    if decision == policy.DENY:
+        policy.audit(user, op, key, "denied", context=context, info=info, peer=peer)
+        return {"ok": False, "decision": "denied", "key": key,
+                "error": "Vom Administrator abgelehnt"}
+    if decision == policy.PENDING:
+        policy.audit(user, op, key, "pending", context=context, info=info, peer=peer)
+        return {"ok": False, "decision": "pending", "key": key,
+                "error": "Wartet auf Admin-Freigabe"}
+
+    t0 = time.monotonic()
+    try:
+        result = run(args, stream)
+    except Exception as e:  # noqa: BLE001
+        result = {"ok": False, "rc": -1, "stdout": "", "stderr": f"Broker-Op-Fehler: {e}"}
+    dur = int((time.monotonic() - t0) * 1000)
+    # Detail: stderr hat Vorrang (Fehlerursache); bei Erfolg ein stdout-Auszug,
+    # damit auch rc=0-Eintraege aussagen, WAS passiert ist.
+    detail = (result.get("stderr") or result.get("stdout") or "")[:200]
+    policy.audit(user, op, key, "executed", rc=result.get("rc"),
+                 duration_ms=dur, detail=detail, context=context, info=info, peer=peer)
+    result.setdefault("ok", False)
+    result["decision"] = "allowed"
+    result["key"] = key
+    return result

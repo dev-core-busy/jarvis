@@ -1,0 +1,435 @@
+"""Jarvis Datei-Watcher – überwacht Ordner und triggert Agent-Tasks bei Dateiänderungen."""
+
+import asyncio
+import fnmatch
+import json
+import time
+import uuid
+from pathlib import Path
+from typing import Optional
+
+from watchdog.events import FileSystemEventHandler, FileCreatedEvent, FileModifiedEvent, FileDeletedEvent, FileMovedEvent
+from watchdog.observers import Observer
+
+WATCHERS_FILE = Path("data/file_watchers.json")
+
+# Auftraggeber-Name fuer Watcher ohne gespeicherten Besitzer (Altbestand):
+# unprivilegiert und ohne eigene Dokumente (Eigentuemer-Schranke fail-closed).
+_LEGACY_ACTOR = "__trigger_ohne_besitzer__"
+
+# Wird von main.py gesetzt
+_agent_manager = None
+_broadcast_fn = None  # async fn(msg: dict) → sendet an alle WS-Clients
+_loop = None          # asyncio Event-Loop (wird beim Start gespeichert)
+_llm_check_fn = None  # async () -> bool : aktives LLM-Profil erreichbar?
+_wa_send_fn = None     # async (path, method, data) -> dict : WhatsApp-Bridge
+
+
+def init(agent_manager, broadcast_fn, llm_check_fn=None, wa_send_fn=None):
+    global _agent_manager, _broadcast_fn, _llm_check_fn, _wa_send_fn
+    _agent_manager = agent_manager
+    _broadcast_fn = broadcast_fn
+    _llm_check_fn = llm_check_fn
+    _wa_send_fn = wa_send_fn
+
+
+class _JarvisFileHandler(FileSystemEventHandler):
+    """Watchdog Event-Handler für einen einzelnen Watcher."""
+
+    def __init__(self, watcher: dict, watcher_manager):
+        super().__init__()
+        self._watcher = watcher
+        self._manager = watcher_manager
+
+    def _matches(self, path: str) -> bool:
+        """Prüft ob Dateipfad dem konfigurierten Pattern entspricht."""
+        filename = Path(path).name
+        pattern = self._watcher.get("pattern", "*")
+        return fnmatch.fnmatch(filename, pattern)
+
+    def on_created(self, event):
+        if not event.is_directory and "created" in self._watcher.get("events", []):
+            if self._matches(event.src_path):
+                self._trigger(event.src_path, "created")
+
+    def on_modified(self, event):
+        if not event.is_directory and "modified" in self._watcher.get("events", []):
+            if self._matches(event.src_path):
+                self._trigger(event.src_path, "modified")
+
+    def on_deleted(self, event):
+        if not event.is_directory and "deleted" in self._watcher.get("events", []):
+            if self._matches(event.src_path):
+                self._trigger(event.src_path, "deleted")
+
+    def on_moved(self, event):
+        if not event.is_directory and "moved" in self._watcher.get("events", []):
+            if self._matches(event.dest_path):
+                self._trigger(event.dest_path, "moved", src=event.src_path)
+
+    def _trigger(self, filepath: str, event_type: str, src: str = None):
+        """Aktion asynchron ausführen."""
+        if _loop and _loop.is_running():
+            ctx = {"filepath": filepath, "filename": Path(filepath).name,
+                   "event_type": event_type, "src": src or ""}
+            asyncio.run_coroutine_threadsafe(
+                self._manager._execute(self._watcher["id"], ctx),
+                _loop,
+            )
+
+
+class WatcherManager:
+    def __init__(self):
+        self._observer = Observer()
+        self._watchers: list[dict] = []
+        self._watches: dict[str, object] = {}  # id → watchdog-Watch
+        self._llm_poll_task = None
+        self._llm_poll_interval = 60  # Sekunden zwischen LLM-Erreichbarkeitschecks
+
+    # ─── Lifecycle ───────────────────────────────────────────────────────────
+
+    def start(self):
+        global _loop
+        _loop = asyncio.get_event_loop()
+        WATCHERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        self._load()
+        self._observer.start()
+        for w in self._watchers:
+            if w.get("enabled"):
+                self._register(w)
+        print(f"[TriggerWatcher] gestartet – {len(self._watchers)} Trigger geladen", flush=True)
+        # Hintergrund-Poller fuer llm_down-Trigger
+        if self._llm_poll_task is None:
+            self._llm_poll_task = _loop.create_task(self._llm_poll_loop())
+
+    def stop(self):
+        try:
+            self._observer.stop()
+            self._observer.join(timeout=3)
+        except Exception:
+            pass
+
+    # ─── CRUD ────────────────────────────────────────────────────────────────
+
+    def list_watchers(self) -> list[dict]:
+        return self._watchers
+
+    def get_watcher(self, watcher_id: str) -> Optional[dict]:
+        return next((w for w in self._watchers if w["id"] == watcher_id), None)
+
+    def add_watcher(self, label: str, trigger_type: str = "file",
+                    action_type: str = "agent_task",
+                    path: str = "", pattern: str = "*", events: list = None,
+                    task: str = "", wa_to: str = "", wa_message: str = "",
+                    webhook_url: str = "", webhook_body: str = "",
+                    email_to: str = "", email_subject: str = "", email_body: str = "",
+                    enabled: bool = True,
+                    owner: str = "", owner_privileged: bool = False,
+                    aussenwirkung: bool = False,
+                    webhook_tls_pruefen: bool = True) -> dict:
+        if not isinstance(webhook_tls_pruefen, bool):
+            raise ValueError("webhook_tls_pruefen muss true/false sein")
+        watcher = {
+            "id": str(uuid.uuid4()),
+            "label": label,
+            # Auftraggeber-Bindung: entscheidet, mit welchen Rechten die
+            # Agent-Aktion spaeter laeuft (analog scheduler.py). Ein Trigger ist
+            # eine zeitversetzte Ausfuehrung – ohne Bindung liefe er mit der
+            # Identitaet, die zufaellig am geteilten Hauptagenten hing.
+            "owner": owner or "",
+            "owner_privileged": bool(owner_privileged),
+            # BSI H8/H9-Rest (2026-10-11): darf die AGENTEN-Aktion nach aussen
+            # wirken/loeschen? Vorgabe NEIN. Die direkten Aktionen (whatsapp,
+            # webhook, email) sind selbst die ausdrueckliche Wahl des Admins.
+            "aussenwirkung": aussenwirkung is True,
+            "trigger_type": trigger_type,      # "file" | "llm_down"
+            "action_type": action_type,        # "agent_task" | "whatsapp" | "webhook"
+            "path": path,
+            "pattern": pattern,
+            "events": events or ["created"],
+            "task": task,
+            "wa_to": wa_to,
+            "wa_message": wa_message,
+            "webhook_url": webhook_url,
+            "webhook_body": webhook_body,
+            # BSI M12: Zertifikatspruefung des Webhook-Ziels. Vorgabe JA; nur ein
+            # ausdrueckliches false schaltet ab, und jeder Aufruf ohne Pruefung
+            # landet im Sicherheitsprotokoll (_do_webhook).
+            "webhook_tls_pruefen": webhook_tls_pruefen,
+            "email_to": email_to,
+            "email_subject": email_subject,
+            "email_body": email_body,
+            "enabled": enabled,
+            "last_triggered": None,
+            "last_result": None,
+            "_llm_state": None,                # interner Zustand fuer llm_down
+        }
+        self._watchers.append(watcher)
+        if enabled:
+            self._register(watcher)
+        self._save()
+        return watcher
+
+    # Die Auftraggeber-Bindung ist bewusst NICHT aenderbar (analog
+    # scheduler.UPDATABLE_FIELDS): sonst koennte ein Domain-Nutzer per PUT
+    # `owner_privileged: true` setzen.
+    UPDATABLE_FIELDS = {
+        "label", "trigger_type", "action_type", "path", "pattern", "events",
+        "task", "wa_to", "wa_message", "webhook_url", "webhook_body",
+        "email_to", "email_subject", "email_body", "enabled", "aussenwirkung",
+        "webhook_tls_pruefen",
+    }
+
+    def update_watcher(self, watcher_id: str, **fields) -> dict:
+        watcher = self.get_watcher(watcher_id)
+        if not watcher:
+            raise ValueError(f"Watcher {watcher_id} nicht gefunden")
+        fields = {k: v for k, v in fields.items() if k in self.UPDATABLE_FIELDS}
+        if "aussenwirkung" in fields and not isinstance(fields["aussenwirkung"], bool):
+            raise ValueError("aussenwirkung muss true/false sein")
+        if "webhook_tls_pruefen" in fields and not isinstance(fields["webhook_tls_pruefen"], bool):
+            raise ValueError("webhook_tls_pruefen muss true/false sein")
+        self._unregister(watcher_id)
+        watcher.update(fields)
+        if watcher.get("enabled"):
+            self._register(watcher)
+        self._save()
+        return watcher
+
+    def delete_watcher(self, watcher_id: str):
+        watcher = self.get_watcher(watcher_id)
+        if not watcher:
+            raise ValueError(f"Watcher {watcher_id} nicht gefunden")
+        self._unregister(watcher_id)
+        self._watchers = [w for w in self._watchers if w["id"] != watcher_id]
+        self._save()
+
+    # ─── Interna ─────────────────────────────────────────────────────────────
+
+    def _register(self, watcher: dict):
+        """Watcher im Observer registrieren (nur Datei-Trigger; llm_down via Poller)."""
+        if watcher.get("trigger_type", "file") != "file":
+            return
+        path = watcher.get("path", "")
+        if not Path(path).is_dir():
+            print(f"[FileWatcher] Pfad existiert nicht: '{path}' – Watcher '{watcher['label']}' deaktiviert", flush=True)
+            return
+        try:
+            handler = _JarvisFileHandler(watcher, self)
+            watch = self._observer.schedule(handler, path, recursive=False)
+            self._watches[watcher["id"]] = watch
+            print(f"[FileWatcher] Registriert: '{watcher['label']}' → {path} ({watcher.get('pattern', '*')})", flush=True)
+        except Exception as e:
+            print(f"[FileWatcher] Fehler beim Registrieren: {e}", flush=True)
+
+    def _unregister(self, watcher_id: str):
+        watch = self._watches.pop(watcher_id, None)
+        if watch:
+            try:
+                self._observer.unschedule(watch)
+            except Exception:
+                pass
+
+    async def _execute(self, watcher_id: str, context: dict) -> str:
+        """Aktion eines Triggers ausführen (Agent-Task / WhatsApp / Webhook)."""
+        watcher = self.get_watcher(watcher_id)
+        if not watcher:
+            return "Watcher nicht gefunden"
+
+        filepath = context.get("filepath", "")
+        filename = context.get("filename", "")
+        event_type = context.get("event_type", "")
+        label = watcher["label"]
+        action = watcher.get("action_type", "agent_task")
+
+        def _fill(s: str) -> str:
+            out = s or ""
+            for k, v in context.items():
+                if not k.startswith("_"):
+                    out = out.replace("{" + k + "}", str(v))
+            return out.replace("{event}", str(event_type))
+
+        print(f"[TriggerWatcher] Event '{event_type}' → '{label}' (Aktion: {action})", flush=True)
+
+        if _broadcast_fn:
+            await _broadcast_fn({
+                "type": "watcher_event", "event": "started",
+                "watcher_id": watcher_id, "label": label,
+                "filepath": filepath, "filename": filename, "event_type": event_type,
+            })
+
+        result = ""
+        t0 = time.time()
+        try:
+            if action == "whatsapp":
+                result = await self._do_whatsapp(watcher.get("wa_to", ""), _fill(watcher.get("wa_message", "")))
+            elif action == "webhook":
+                result = await self._do_webhook(watcher.get("webhook_url", ""), _fill(watcher.get("webhook_body", "")), context,
+                                                tls_pruefen=watcher.get("webhook_tls_pruefen") is not False,
+                                                watcher=watcher)
+            elif action == "email":
+                result = await self._do_email(watcher.get("email_to", ""),
+                                              _fill(watcher.get("email_subject", "")),
+                                              _fill(watcher.get("email_body", "")))
+            else:  # agent_task
+                if _agent_manager:
+                    agent = _agent_manager.get_or_create_main()
+                    # Rechte des Anlegenden, nicht des Zufalls: ein Watcher ohne
+                    # Besitzer laeuft unprivilegiert (fail-closed, s. scheduler.py).
+                    _owner = (watcher.get("owner") or "").strip()
+                    from backend import wirkung as _wirkung
+                    with _wirkung.auftrag(f"Trigger '{label}'",
+                                          watcher.get("aussenwirkung") is True):
+                        result = await agent.run_task_headless(
+                            _fill(watcher.get("task", "")),
+                            actor={"user": _owner or _LEGACY_ACTOR,
+                                   "privileged": bool(watcher.get("owner_privileged")) and bool(_owner)})
+                else:
+                    result = "Fehler: AgentManager nicht verfügbar"
+            duration = round(time.time() - t0, 1)
+            print(f"[TriggerWatcher] '{label}' abgeschlossen in {duration}s", flush=True)
+        except Exception as e:
+            result = f"Fehler: {e}"
+            print(f"[TriggerWatcher] '{label}' Fehler: {e}", flush=True)
+
+        watcher["last_triggered"] = int(time.time())
+        watcher["last_result"] = (result or "")[:500]
+        self._save()
+
+        if _broadcast_fn:
+            await _broadcast_fn({
+                "type": "watcher_event", "event": "finished",
+                "watcher_id": watcher_id, "label": label, "result": watcher["last_result"],
+            })
+        return result
+
+    # ─── Aktionen ────────────────────────────────────────────────────────────
+    async def _do_whatsapp(self, to: str, message: str) -> str:
+        if not _wa_send_fn:
+            return "WhatsApp nicht verfügbar (Bridge nicht initialisiert)"
+        if not to or not message:
+            return "WhatsApp: Empfänger oder Nachricht fehlt"
+        r = await _wa_send_fn("/send", method="POST", data={"to": to, "message": message})
+        if isinstance(r, dict) and r.get("error"):
+            return f"WhatsApp-Fehler: {r.get('error')}"
+        return f"WhatsApp an {to} gesendet"
+
+    async def _do_webhook(self, url: str, body: str, context: dict, *,
+                          tls_pruefen: bool = True, watcher: dict | None = None) -> str:
+        """HTTP-POST an das Webhook-Ziel.
+
+        BSI M12 (2026-10-12): bis hierher lief JEDER Webhook fest mit
+        ``verify=False`` – ein Angreifer im Netz konnte Ziel und Inhalt
+        (Dateinamen, Ereignisse) mitlesen oder umlenken. Jetzt gilt die
+        normale Pruefung; die Ausnahme ist eine Eigenschaft des einzelnen
+        Watchers (nur Admins legen Watcher an) und wird bei JEDEM Aufruf
+        protokolliert, nicht nur beim Einschalten – sonst sieht man im
+        Protokoll nicht, dass sie noch wirkt.
+        """
+        if not url:
+            return "Webhook: keine URL"
+        import httpx
+        payload = {"text": body, **{k: v for k, v in context.items() if not k.startswith('_')}}
+        if not tls_pruefen:
+            from urllib.parse import urlsplit
+            from backend import sicherheits_log
+            w = watcher or {}
+            sicherheits_log.ereignis(
+                "tls_pruefung_aus", benutzer=w.get("owner", ""), ergebnis="webhook",
+                ziel=urlsplit(url).netloc, watcher=w.get("id", ""))
+            print(f"[TriggerWatcher] Webhook OHNE Zertifikatspruefung an {urlsplit(url).netloc}",
+                  flush=True)
+        # bandit B501 nur fuer den ausdruecklich konfigurierten Ausnahmefall.
+        async with httpx.AsyncClient(timeout=15.0, verify=bool(tls_pruefen)) as client:  # nosec B501
+            resp = await client.post(url, json=payload)
+        return f"Webhook {url} → HTTP {resp.status_code}"
+
+    async def _do_email(self, to: str, subject: str, body: str) -> str:
+        """E-Mail via Gmail-API (OAuth) – LLM-unabhaengig. Erfordert verbundenes Google-Konto."""
+        if not to:
+            return "E-Mail: kein Empfänger angegeben"
+        subject = subject or "Jarvis Trigger"
+
+        def _send():
+            import base64
+            from email.mime.text import MIMEText
+            from backend.tools.google_gmail import _get_service
+            svc = _get_service()  # wirft, wenn Google nicht verbunden
+            msg = MIMEText(body or "", "plain", "utf-8")
+            msg["To"] = to
+            msg["Subject"] = subject
+            raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+            svc.users().messages().send(userId="me", body={"raw": raw}).execute()
+            return f"E-Mail an {to} gesendet"
+
+        try:
+            return await asyncio.to_thread(_send)
+        except Exception as e:
+            return f"E-Mail nicht möglich (Google verbunden?): {e}"
+
+    # ─── LLM-down Poller ─────────────────────────────────────────────────────
+    async def _llm_poll_loop(self):
+        """Prüft periodisch das aktive LLM-Profil; feuert llm_down-Trigger beim Übergang erreichbar→down."""
+        while True:
+            try:
+                await asyncio.sleep(self._llm_poll_interval)
+                llm_watchers = [w for w in self._watchers
+                                if w.get("enabled") and w.get("trigger_type") == "llm_down"]
+                if not llm_watchers or not _llm_check_fn:
+                    continue
+                reachable = bool(await _llm_check_fn())
+                for w in llm_watchers:
+                    prev = w.get("_llm_state")
+                    w["_llm_state"] = reachable
+                    # Trigger nur wenn es jetzt down ist UND vorher nicht schon down war (kein Spam)
+                    if (not reachable) and (prev is not False):
+                        await self._execute(w["id"], {"event_type": "llm_down",
+                                                      "filepath": "", "filename": ""})
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"[TriggerWatcher] LLM-Poll Fehler: {e}", flush=True)
+
+    # ─── Issue-Trigger ───────────────────────────────────────────────────────
+    def on_issue_created(self, issue: dict):
+        """Wird beim Erstellen eines Issues aufgerufen -> issue_created-Trigger feuern."""
+        if not (_loop and _loop.is_running()):
+            return
+        ctx = {
+            "event_type": "issue_created",
+            "issue_title": issue.get("title", ""),
+            "issue_author": issue.get("author", ""),
+            "issue_type": issue.get("type", ""),
+            "issue_id": issue.get("id", ""),
+            "filepath": "", "filename": "",
+        }
+        for w in self._watchers:
+            if w.get("enabled") and w.get("trigger_type") == "issue_created":
+                asyncio.run_coroutine_threadsafe(self._execute(w["id"], dict(ctx)), _loop)
+
+    def _load(self):
+        if WATCHERS_FILE.exists():
+            try:
+                self._watchers = json.loads(WATCHERS_FILE.read_text())
+            except Exception as e:
+                print(f"[FileWatcher] Ladefehler: {e}", flush=True)
+                self._watchers = []
+                return
+            # BSI H8/H9-Rest (2026-10-11): Bestand behaelt sein Verhalten –
+            # Trigger ohne das Feld bekommen die Freigabe einmalig festgeschrieben.
+            alt = [w for w in self._watchers if isinstance(w, dict) and "aussenwirkung" not in w]
+            for w in alt:
+                w["aussenwirkung"] = True
+            if alt:
+                print(f"[FileWatcher] {len(alt)} bestehende(r) Trigger: Freigabe "
+                      f"'Darf nach außen wirken' festgeschrieben (Bestand, BSI H9)", flush=True)
+                self._save()
+        else:
+            self._watchers = []
+
+    def _save(self):
+        WATCHERS_FILE.write_text(json.dumps(self._watchers, indent=2, ensure_ascii=False))
+
+
+# Singleton
+watcher_manager = WatcherManager()

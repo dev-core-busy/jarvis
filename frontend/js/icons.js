@@ -1,0 +1,175 @@
+/**
+ * Zentrale Symbole fuer Bedienelemente – EINE Quelle der Wahrheit.
+ *
+ * ═══ DIE DESIGN-ENTSCHEIDUNG (2026-08-19, Vorgabe des Nutzers) ═══
+ *
+ *   MUELLEIMER  =  LOESCHEN.  Etwas Gespeichertes wird dauerhaft entfernt:
+ *                  Datei, Eintrag, Regel, Profil, Sitzung, Protokoll, Freigabe.
+ *   ×           =  SCHLIESSEN / ABBRECHEN.  Ein Fenster, ein Panel, ein
+ *                  Formular geht zu. Es geht nichts verloren.
+ *
+ * Vorher stand fuer BEIDES ein × – in derselben Oberflaeche, teils in
+ * derselben Zeile. Wer ein Panel schliessen wollte, konnte damit einen
+ * Eintrag loeschen. Genau das ist der Grund fuer diese Datei.
+ *
+ * ═══ WARUM SVG UND KEIN EMOJI ═══
+ *
+ * 🗑️ ist ein Emoji: es wird je nach System FARBIG gerendert, folgt keiner
+ * Theme-Variablen und fehlt auf manchen Systemen ganz (dann steht dort ein
+ * grauer Kasten – im Projekt schon zweimal passiert). Das Inline-SVG erbt
+ * `currentColor`, folgt also Hell/Dunkel und der Markenfarbe, und ist auf
+ * jedem System gleich. Dieselbe Begruendung wie bei `.kb-hdr-btn`.
+ *
+ * ═══ BENUTZUNG ═══
+ *
+ *   In Template-Strings:   `<button …>${JarvisIcons.trash()}</button>`
+ *   Bei textContent:       JarvisIcons.setTrash(knopf)   // statt .textContent = '×'
+ *   Als Symbol-Angabe:     icon: JarvisIcons.trash()      // z.B. Kontextmenue
+ *
+ * Die Datei wird auf JEDER Seite als ERSTES Skript eingebunden (vor i18n.js) –
+ * andere Module rufen sie beim Rendern auf, und ein fehlendes `JarvisIcons`
+ * waere dort ein harter Fehler mitten in einem Template-String. Ein Test haelt
+ * die Einbindung auf allen Seiten fest.
+ *
+ * KEIN Text im Symbol: die Bedeutung steht im `title`/`aria-label` des Knopfes,
+ * und die kommt aus i18n. Ein Symbol traegt keine Sprache.
+ */
+(function () {
+    'use strict';
+
+    // Strichzeichnungen im Stil der uebrigen Symbole des Projekts (feather).
+    // `aria-hidden` + `focusable="false"`: das Symbol ist Dekoration, die
+    // Bedeutung liefert der Knopf ueber title/aria-label. Ohne das liest ein
+    // Screenreader an manchen Stellen nichts und an anderen doppelt vor.
+    var GEMEINSAM = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+                    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ' +
+                    'aria-hidden="true" focusable="false"';
+
+    var MUELL = '<svg class="jv-ico jv-ico-trash" ' + GEMEINSAM + '>' +
+        '<polyline points="3 6 5 6 21 6"/>' +
+        '<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>' +
+        '<line x1="10" y1="11" x2="10" y2="17"/>' +
+        '<line x1="14" y1="11" x2="14" y2="17"/></svg>';
+
+    var KREUZ = '<svg class="jv-ico jv-ico-close" ' + GEMEINSAM + '>' +
+        '<line x1="18" y1="6" x2="6" y2="18"/>' +
+        '<line x1="6" y1="6" x2="18" y2="18"/></svg>';
+
+    // Auge / durchgestrichenes Auge – NUR fuer "Eingabe sichtbar machen".
+    // Sie sagen NICHTS ueber ein gespeichertes Kennwort: das gibt kein
+    // Endpunkt heraus (mehrfach dokumentierte Zusage). Sichtbar wird
+    // ausschliesslich, was gerade im Feld getippt steht.
+    var AUGE = '<svg class="jv-ico jv-ico-eye" ' + GEMEINSAM + '>' +
+        '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>' +
+        '<circle cx="12" cy="12" r="3"/></svg>';
+
+    var AUGE_ZU = '<svg class="jv-ico jv-ico-eye-off" ' + GEMEINSAM + '>' +
+        '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>' +
+        '<path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>' +
+        '<path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/>' +
+        '<line x1="1" y1="1" x2="23" y2="23"/></svg>';
+
+    // STIFT = BEARBEITEN. Etwas Gespeichertes wird in einer Maske geaendert –
+    // er loescht nichts (Muelleimer), schliesst nichts (Kreuz) und sieht nur
+    // nach (Lupe/Auge).
+    //
+    // ⚠ ER STEHT NUR AN EINEM BEDIENELEMENT, DAS WIRKLICH BEARBEITEN KANN.
+    // Genau daran hing der gemeldete Fehler vom 2026-10-03: die Spalte der
+    // Massenzuordnung trug einen Stift an JEDER Zeile und oeffnete bei
+    // gewoehnlichen Dateien eine Leseansicht. Ein Stift an einer Zeile, die
+    // nur lesen kann, ist eine Falschaussage – kein Schoenheitsfehler.
+    var STIFT = '<svg class="jv-ico jv-ico-pencil" ' + GEMEINSAM + '>' +
+        '<path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>';
+
+    function setzen(el, markup) {
+        if (!el) return el;
+        // innerHTML mit KONSTANTEM Markup – hier kommt nichts von aussen hinein.
+        el.innerHTML = markup;
+        return el;
+    }
+
+    // LUPE = UNTERSUCHEN. Sie loescht nichts und schliesst nichts – sie misst
+    // und berichtet. Bewusst kein Emoji (siehe Kopf dieser Datei) und bewusst
+    // hier statt als Einzelstueck in knowledge.js: das naechste "pruefen" soll
+    // dasselbe Zeichen tragen.
+    var LUPE = '<svg class="jv-ico" viewBox="0 0 24 24" width="1em" height="1em"'
+        + ' fill="none" stroke="currentColor" stroke-width="2"'
+        + ' stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+        + '<circle cx="11" cy="11" r="7"/>'
+        + '<line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>';
+
+    // SPRECHBLASE = VORAB-ANWEISUNG fuer ein Gespraech ("Prompt fuer diesen
+    // Chat"). Sie loescht nichts und schliesst nichts.
+    //
+    // ⚠ ZWEI FORMEN, NICHT ZWEI FARBEN. Ob fuer einen Chat ein eigener Prompt
+    // hinterlegt ist, ist eine Aussage – und Farbe allein ist keine Information
+    // (Register). Die gesetzte Form ist deshalb GEFUELLT, also an der Silhouette
+    // unterscheidbar; den Zustand in Worten traegt zusaetzlich title/aria-label
+    // des Knopfes. Dieselbe Loesung wie beim Stern der Jira-Vorlagen.
+    var BLASE = '<svg class="jv-ico jv-ico-prompt" ' + GEMEINSAM + '>' +
+        '<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>' +
+        '<line x1="8.5" y1="10" x2="15.5" y2="10"/>' +
+        '<line x1="8.5" y1="13.5" x2="13" y2="13.5"/></svg>';
+
+    var BLASE_VOLL = '<svg class="jv-ico jv-ico-prompt is-gesetzt" viewBox="0 0 24 24" ' +
+        'fill="currentColor" stroke="currentColor" stroke-width="2" ' +
+        'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' +
+        '<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>';
+
+    // STERN = BEWERTUNG (eine von fuenf). Er loescht nichts und schliesst
+    // nichts – er traegt einen WERT.
+    //
+    // ⚠ ZWEI FORMEN, NICHT ZWEI FARBEN, aus demselben Grund wie bei der
+    // Sprechblase: ob ein Stern zur Bewertung gehoert, ist eine Aussage, und
+    // Farbe allein ist keine Information (Register). Der gesetzte ist GEFUELLT
+    // und damit an der Silhouette unterscheidbar – auch fuer jemanden, der
+    // Farben nicht unterscheiden kann, und auch auf einem Ausdruck.
+    var STERN_PFAD = '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 '
+        + '18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>';
+
+    var STERN = '<svg class="jv-ico jv-ico-star" ' + GEMEINSAM + '>'
+        + STERN_PFAD + '</svg>';
+
+    var STERN_VOLL = '<svg class="jv-ico jv-ico-star is-gesetzt" viewBox="0 0 24 24" '
+        + 'fill="currentColor" stroke="currentColor" stroke-width="2" '
+        + 'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" '
+        + 'focusable="false">' + STERN_PFAD + '</svg>';
+
+    // SCHLOSS = BESCHRAENKT (nur lokal erreichbar, abgesichert). Es loescht
+    // nichts und schliesst nichts – es traegt einen ZUSTAND. Ersetzt das
+    // Schloss-Emoji der API-Doku (Code-Review 2026-10-07).
+    var SCHLOSS = '<svg class="jv-ico jv-ico-lock" ' + GEMEINSAM + '>' +
+        '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>' +
+        '<path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
+
+    window.JarvisIcons = {
+        /** Schloss – Zustand "beschraenkt/abgesichert", keine Aktion. */
+        lock: function () { return SCHLOSS; },
+        /** Muelleimer – NUR fuer dauerhaftes Loeschen/Entfernen. */
+        trash: function () { return MUELL; },
+        /** Kreuz – NUR fuer Schliessen/Abbrechen. */
+        close: function () { return KREUZ; },
+        /** Ersetzt den Inhalt eines Elements durch den Muelleimer. */
+        setTrash: function (el) { return setzen(el, MUELL); },
+        /** Ersetzt den Inhalt eines Elements durch das Kreuz. */
+        setClose: function (el) { return setzen(el, KREUZ); },
+        /** Auge – NUR "Eingabe sichtbar machen", nie fuer etwas Gespeichertes. */
+        eye: function () { return AUGE; },
+        /** Durchgestrichenes Auge – Eingabe wieder verbergen. */
+        eyeOff: function () { return AUGE_ZU; },
+        /** Lupe – untersuchen/messen. Veraendert nichts. */
+        lupe: function () { return LUPE; },
+        /** Stift – NUR an einem Element, das wirklich bearbeiten kann. */
+        pencil: function () { return STIFT; },
+        /** Ersetzt den Inhalt eines Elements durch den Stift. */
+        setPencil: function (el) { return setzen(el, STIFT); },
+        setEye: function (el) { return setzen(el, AUGE); },
+        setEyeOff: function (el) { return setzen(el, AUGE_ZU); },
+        /** Stern – ein Schritt einer Bewertung. `gefuellt`=true: ausgefuellt. */
+        star: function (gefuellt) { return gefuellt ? STERN_VOLL : STERN; },
+        setStar: function (el, gefuellt) { return setzen(el, gefuellt ? STERN_VOLL : STERN); },
+        /** Sprechblase – Vorab-Anweisung eines Chats. `gesetzt`=true: gefuellt. */
+        prompt: function (gesetzt) { return gesetzt ? BLASE_VOLL : BLASE; },
+        setPrompt: function (el, gesetzt) { return setzen(el, gesetzt ? BLASE_VOLL : BLASE); }
+    };
+})();

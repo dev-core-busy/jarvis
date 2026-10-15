@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Confluence</title>
+    <link rel="icon" href="/static/favicon.ico">
+    <link rel="stylesheet" href="/static/css/theme.css?v=34">
+    <!-- BEWUSST `jira_addon.css`, keine eigene Datei: die `.ja-*`-Klassen sind
+         die Bauform ALLER Bereichsseiten dieser Art – /ai-mouse laedt sie aus
+         demselben Grund. Eine eigene Datei waere eine zweite Fassung derselben
+         Kartenoptik, und die laeuft beim naechsten Feinschliff auseinander. -->
+    <link rel="stylesheet" href="/static/css/jira_addon.css?v=13">
+</head>
+<body>
+<script src="/static/js/theme_frueh.js?v=1"></script>
+
+<div id="ca-app" class="hidden">
+    <header class="topbar">
+        <div class="topbar-left">
+            <div class="topbar-avatar">J</div>
+            <span class="topbar-title"><span class="brand-app-name">Jarvis</span>
+                <span data-i18n="caddon.title">Confluence</span></span>
+        </div>
+        <!-- Symbolgruppe: eigener Container mit gap 4px. Ein flaches Anhaengen an
+             .topbar erbt deren gap 10px, das ist der Abstand fuer den Titelbereich –
+             genau der gemeldete Fehler auf /portal (Waechter: test_topbar_symbole_ui). -->
+        <div class="topbar-right">
+            <div class="lang-toggle" id="ca-lang-toggle">
+                <button class="lang-toggle-btn" data-lang="de" data-setlang="de" title="Deutsch">DE</button>
+                <button class="lang-toggle-btn" data-lang="en" data-setlang="en" title="English">EN</button>
+            </div>
+            <button class="btn-theme jv-issues-btn" id="ca-issues-btn" data-i18n-title="sup.issues" title="Issues / Feedback"
+                    data-issues-oeffnen>
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            </button>
+            <button class="btn-theme" id="btn-theme-toggle" title="Hell/Dunkel umschalten" data-i18n-title="chat.theme">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            </button>
+            <button class="btn-theme" id="ca-portal-btn" title="Zum Portal" data-i18n-title="nav.home">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            </button>
+            <button class="btn-theme" id="ca-settings-btn" data-jarvis-settings="/confluence-addon" data-i18n-title="nav.settings" title="Einstellungen" style="display:none;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </button>
+            <button class="btn-theme" id="ca-logout-btn" title="Abmelden" data-i18n-title="chat.logout">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            </button>
+        </div>
+    </header>
+
+<main class="ja-main" data-jv-breit>
+    <!-- Seite maximieren (Vorbild /wissen und /jira-addon): der Knopf sitzt
+         AUSSERHALB der Kacheln ganz oben. Logik in seite_breit.js. -->
+    <div class="jv-max-row">
+        <button type="button" class="jv-max-btn" id="jv-max" data-seite="confluence-addon" aria-pressed="false"
+                data-i18n-title="common.maximize" data-i18n-aria="common.maximize"
+                title="Maximieren" aria-label="Maximieren">&#9974;</button>
+    </div>
+
+    <!-- ══ Mein Confluence-Zugang ════════════════════════════════════════
+         Bauform 1:1 uebernommen aus dem ersten Container von /jira-addon
+         (Vorgabe 2026-09-29: "kopiere die Jira Kachel ... wir benoetigen nur
+         den ersten Container"). Der Plugin-Container der Jira-Seite hat hier
+         keinen Gegenstand – es gibt keine Confluence-Browser-Erweiterung.
+
+         OFFEN, weil es der einzige Container der Seite ist: ein zugeklappter
+         Bereich auf einer ansonsten leeren Seite sieht wie ein Ladefehler aus.
+
+         Wer /confluence-addon betreten darf, darf ihn pflegen: die
+         Berechtigungsfrage ist dieselbe wie fuer den ganzen Bereich. Eine
+         zusaetzliche Freigabe waere eine Schranke vor einer offenen Tuer – der
+         Token erweitert keine Rechte, er ERSETZT die des Sammelzugangs durch
+         die eigenen. -->
+    <details class="ja-sect" id="ca-sect-account" open>
+        <summary>
+            <span data-i18n="caddon.acc_h">Mein Confluence-Zugang</span>
+            <span class="ja-acc-pill" id="ca-acc-pill"></span>
+        </summary>
+        <div class="ja-sect-body">
+            <p class="ja-hint" data-i18n-html="caddon.acc_hint">Hinterlege hier deinen eigenen Confluence-Token. Dann laufen Confluence-Abfragen im Chat mit <b>deinen</b> Berechtigungen – du siehst genau die Bereiche und Seiten, für die du in Confluence freigegeben bist, und angelegte Seiten oder Kommentare erscheinen unter <b>deinem</b> Namen. Ohne eigenen Token gilt der gemeinsame Zugang, den ein Administrator hinterlegt hat.</p>
+
+            <!-- Zustand des eigenen Zugangs: WER der Token in Confluence ist und
+                 wann er zuletzt funktioniert hat. Ohne diese Zeile ist ein
+                 Token eine Zeichenkette ohne Aussage, und ein abgelaufener
+                 faellt erst auf, wenn eine Auswertung nichts findet. -->
+            <div class="ja-acc-note" id="ca-acc-note"></div>
+
+            <div class="ja-acc-row">
+                <label class="ja-acc-field">
+                    <span class="ja-acc-lab" data-i18n="caddon.acc_server">Confluence-Server</span>
+                    <!-- NUR ANZEIGE: die Adresse gehört dem Administrator. Ein
+                         freies Adressfeld wäre eine SSRF-Fläche ohne Gegenwert –
+                         es gibt genau ein Haus-Confluence (confluence_accounts,
+                         Docstring). -->
+                    <input class="ja-acc-input" id="ca-acc-server" type="text" readonly disabled>
+                </label>
+                <label class="ja-acc-field">
+                    <span class="ja-acc-lab" data-i18n="caddon.acc_token">Persönlicher Token (PAT)</span>
+                    <input class="ja-acc-input" id="ca-acc-token" type="password" autocomplete="off"
+                           data-i18n-placeholder="caddon.acc_token_ph" placeholder="leer lassen = unverändert" data-pw-quelle="confluence" data-pw-kennung="api_token">
+                </label>
+            </div>
+
+            <label class="ja-acc-check"><input type="checkbox" id="ca-acc-aktiv" checked>
+                <span data-i18n="caddon.acc_active">Eigenen Zugang verwenden</span></label>
+
+            <div class="ja-dl">
+                <button type="button" class="ja-btn ja-btn-haupt" id="ca-acc-save" data-i18n="caddon.acc_save">Speichern</button>
+                <button type="button" class="ja-btn" id="ca-acc-test" data-i18n="caddon.acc_test">Verbindung testen</button>
+                <button type="button" class="ja-btn" id="ca-acc-del" data-i18n="caddon.acc_del">Zugang entfernen</button>
+            </div>
+            <p class="ja-hint" id="ca-acc-msg" hidden></p>
+
+            <details class="ja-det">
+                <summary data-i18n="caddon.acc_how_h">Wo finde ich meinen Token?</summary>
+                <ol class="ja-steps">
+                    <li data-i18n-html="caddon.acc_how_1">In Confluence oben rechts auf das <b>eigene Profilbild</b> klicken und <b>Profil</b> öffnen.</li>
+                    <li data-i18n-html="caddon.acc_how_2">Links <b>Persönliche Zugriffstoken</b> (Personal Access Tokens) wählen.</li>
+                    <li data-i18n-html="caddon.acc_how_3"><b>Token erstellen</b>, einen Namen vergeben (z. B. „{marke}“) und eine Laufzeit setzen.</li>
+                    <li data-i18n-html="caddon.acc_how_4">Den angezeigten Token <b>sofort kopieren</b> – Confluence zeigt ihn nur ein einziges Mal – und hier einfügen.</li>
+                </ol>
+                <p class="ja-hint" data-i18n="caddon.acc_how_note">Der Token wird verschlüsselt gespeichert und nie wieder angezeigt – auch nicht dir. Läuft er ab, trägst du hier einfach einen neuen ein.</p>
+            </details>
+
+            <!-- WO DER TOKEN WIRKT UND WO NICHT – ausdruecklich, weil sonst
+                 jemand auf eine Wirkung wartet, die es nicht gibt: der
+                 Wissensabgleich und der Confluence-Import fuellen die
+                 GEMEINSAME Wissensdatenbank und benutzen weiter den
+                 gemeinsamen Zugang. Ein Container, der eine Zusage macht, die
+                 er nicht einloest, ist von einem defekten nicht zu
+                 unterscheiden. -->
+            <p class="ja-hint" data-i18n-html="caddon.acc_scope"><b>Wo der eigene Token gilt:</b> bei Confluence-Anfragen im Chat – suchen, Seiten lesen, Seiten anlegen und ändern, kommentieren, Anhänge. <b>Nicht</b> beim automatischen Wissensabgleich und beim Import in die Wissensdatenbank: die füllen den gemeinsamen Wissensbestand für alle und laufen deshalb weiter über den gemeinsamen Zugang.</p>
+        </div>
+    </details>
+</main>
+</div>
+
+<script src="/static/js/sitzung.js?v=3"></script>
+<script src="/static/js/konto_hinweise.js?v=2"></script>
+<script src="/static/js/icons.js?v=8"></script>
+<script src="/static/js/pwreveal.js?v=4"></script>
+<script src="/static/js/dlkey.js?v=4"></script>
+<script src="/static/js/cpubar.js?v=2"></script>
+<script src="/static/js/syspackages.js?v=3"></script>
+<script src="/static/js/sysload.js?v=5"></script>
+<script src="/static/js/theme.js?v=3"></script>
+<script src="/static/js/i18n.js?v=339"></script>
+<script src="/static/js/seite_breit.js?v=1"></script>
+<script src="/static/js/branding.js?v=27"></script>
+<script src="/static/js/sessions.js?v=9"></script>
+<script src="/static/js/logo_home.js?v=1"></script>
+<script src="/static/js/settings_btn.js?v=5"></script>
+<script src="/static/js/activity.js?v=3"></script>
+<script src="/static/js/issues.js?v=14"></script>
+<script src="/static/js/confluence_addon.js?v=2"></script>
+</body>
+</html>

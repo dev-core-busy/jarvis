@@ -1,0 +1,24 @@
+OneNote-Beispieldateien fuer tests/test_onenote_import.py
+
+HERKUNFT: Testkorpus von Apache Tika, Lizenz Apache-2.0.
+  https://github.com/apache/tika/tree/main/tika-parsers/tika-parsers-standard/
+  tika-parsers-standard-modules/tika-parser-microsoft-module/src/test/resources/
+  test-documents/
+
+  abschnitt_2016.one  = testOneNote2016.one            (OneNote 2016, 14 KB)
+  abschnitt_o365.one  = testOneNoteFromOffice365.one    (Office 365, 29 KB)
+  abschnitt_bild.one  = testOneNoteEmbeddedImage.one    (mit eingebettetem Bild, 51 KB)
+
+WARUM ECHTE DATEIEN UND KEINE NACHGEBAUTEN: ".one" ist das binaere
+MS-ONESTORE-Format mit Revisionsbaum, Eigenschaftsmengen und CRC-gesicherten
+Kopfstrukturen. Es laesst sich nicht sinnvoll synthetisieren – und ein
+Testmaterial, das ein echter Konsument nicht oeffnet, belegt nichts (dieselbe
+Lehre wie bei tests/test_xlsx_patch.py, wo synthetisches Material zweimal kein
+gueltiges xlsx war). Anders als beim Formular-PDF gibt es hier keinen
+Datenschutzgrund gegen echte Dateien: es sind Apaches oeffentliche Testdaten
+ohne Personenbezug.
+
+Die drei sind bewusst KLEIN gewaehlt (zusammen 94 KB). Sie decken die drei
+Faelle ab, die der Extraktor unterscheiden muss: normaler Abschnitt mit
+Dubletten aus Revisionen, Abschnitt mit sehr wenig Text, und ein Abschnitt,
+dessen Rohbytes Bild-Metadaten (ICC/XMP) in den Textstrom spuelen.

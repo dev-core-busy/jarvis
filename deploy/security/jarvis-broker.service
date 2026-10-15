@@ -1,0 +1,21 @@
+[Unit]
+Description=Jarvis Root-Broker (privilegierte Operationen + Desktop/VNC-Bootstrap)
+After=network-online.target lightdm.service
+Wants=network-online.target
+
+# Code aus der ROOT-EIGENEN Kopie (deploy/security/broker_installieren.sh), nicht
+# aus /opt/jarvis: dieser Baum gehoert dem Dienstbenutzer (Befund K1, 2026-09-29).
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/usr/local/lib/jarvis-broker
+Environment=DISPLAY=:0
+Environment=JARVIS_BROKER_GROUP=jarvis
+Environment=JARVIS_DIR=/opt/jarvis
+ExecStart=/usr/local/lib/jarvis-broker/start_jarvis_root.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

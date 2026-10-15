@@ -1,0 +1,301 @@
+"""Werkzeug ``excel_vorschlag`` – Zellaenderungen fuer das Excel-Add-in sammeln.
+
+**Dieses Werkzeug schreibt NICHTS.** Es nimmt die vom Modell vorgeschlagenen
+Zellaenderungen entgegen, prueft sie (``excel_ask.aenderungen_pruefen``) und
+legt sie in der Sammelliste des laufenden Auftrags ab. Geschrieben wird
+ausschliesslich im Aufgabenfenster, nachdem der Benutzer sie in einer
+Diff-Ansicht gesehen und bestaetigt hat.
+
+WARUM EIN WERKZEUG UND KEIN JSON-BLOCK IN DER ANTWORT
+------------------------------------------------------
+Ein Block im Antworttext waere die naheliegende Alternative und ist die
+schlechtere: er muesste aus Prosa herausgeschnitten werden, das Modell
+formatiert ihn mal mit und mal ohne Codezaun, und ein Tippfehler im JSON
+bleibt bis zur Anzeige unbemerkt. Ein Werkzeug hat ein Schema, das Modell
+kennt die Feldnamen, und die Pruefung laeuft, bevor irgendetwas beim Benutzer
+ankommt – **das Modell bekommt den Ablehnungsgrund zurueck und kann im selben
+Lauf korrigieren.** Genau das ist der Vorteil, den ein Textblock nicht hat.
+
+Das Werkzeug liegt im allgemeinen Werkzeugkasten (``_attach_extra_tools``),
+ist aber nur innerhalb eines Excel-Laufs wirksam: ausserhalb gibt es keine
+Sammelliste, und es sagt das im Klartext, statt stillschweigend ins Leere zu
+schreiben.
+"""
+
+from __future__ import annotations
+
+import json
+
+from backend.tools.base import BaseTool
+from backend import excel_ask
+
+
+class ExcelVorschlagTool(BaseTool):
+    """Schlaegt Aenderungen an der im Add-in geoeffneten Arbeitsmappe vor."""
+
+    @property
+    def name(self) -> str:
+        return "excel_vorschlag"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Schlägt Änderungen an der Arbeitsmappe vor, die der Benutzer "
+            "gerade in Excel geöffnet hat. NUR im Excel-Aufgabenfenster "
+            "verwendbar. Das Werkzeug schreibt nichts – der Benutzer sieht "
+            "jede Zelle mit altem und neuem Inhalt und bestätigt selbst. "
+            "Formeln in ENGLISCHER Schreibweise mit Komma als Trennzeichen "
+            "(=SUM(A1:A10), =IF(B2>0,B2*0.19,0)); Excel übersetzt sie in die "
+            "Sprache des Benutzers. Je Eintrag genau eines von: 'formel' (eine "
+            "Formel für den ganzen Bereich), 'werte' (verschiedene Werte, "
+            "zeilenweise verschachtelt), 'wert' (ein Wert für jede Zelle) – "
+            "dazu optional 'format' für das Zahlenformat, das auch ALLEIN "
+            "stehen darf. Mehrere Zellen in EINEM Aufruf übergeben, nicht in "
+            "mehreren. Mit dem Feld 'typ' legt ein Eintrag stattdessen ein "
+            "OBJEKT an: 'pivot' (Pivot-Tabelle), 'diagramm', 'tabelle' "
+            "(Bereich in eine Excel-Tabelle umwandeln) oder 'bedingt' "
+            "(bedingte Formatierung)."
+        )
+
+    def parameters_schema(self) -> dict:
+        # Gemini-Schreibweise (OBJECT/ARRAY/STRING) wie im uebrigen Projekt –
+        # ``llm._normalize_schema`` senkt sie fuer OpenAI-kompatible Server
+        # (Fix 2026-08-17: ein strenger Server lehnt "OBJECT" mit 400 ab).
+        return {
+            "type": "OBJECT",
+            "properties": {
+                "aenderungen": {
+                    "type": "ARRAY",
+                    "description": "Liste der Zellen, die geändert werden sollen.",
+                    "items": {
+                        "type": "OBJECT",
+                        "properties": {
+                            "blatt": {
+                                "type": "STRING",
+                                "description": "Name des Tabellenblatts. Leer "
+                                               "lassen für das aktive Blatt.",
+                            },
+                            "adresse": {
+                                "type": "STRING",
+                                "description": "Zelle oder Bereich in "
+                                               "A1-Schreibweise, z. B. B7 oder "
+                                               "B7:D20. OHNE Blattnamen.",
+                            },
+                            "formel": {
+                                "type": "STRING",
+                                "description": "EINE Formel in englischer "
+                                               "Schreibweise, beginnend mit =. "
+                                               "Gilt fuer den ganzen Bereich; "
+                                               "Excel rechnet die Bezuege je "
+                                               "Zeile weiter.",
+                            },
+                            "werte": {
+                                "type": "ARRAY",
+                                "description": "VERSCHIEDENE Werte, zeilenweise "
+                                               "verschachtelt: [[1,\"a\"],[2,\"b\"]]. "
+                                               "Die Masse muessen zum Bereich "
+                                               "passen. Fuer eine Datenliste ist "
+                                               "das der richtige Weg - nicht "
+                                               "viele Einzeleintraege.",
+                                "items": {"type": "ARRAY",
+                                          "items": {"type": "STRING"}},
+                            },
+                            "wert": {
+                                "type": "STRING",
+                                "description": "EIN fester Wert, der in JEDE "
+                                               "Zelle des Bereichs geschrieben "
+                                               "wird. Fuer verschiedene Werte "
+                                               "stattdessen 'werte' benutzen.",
+                            },
+                            "format": {
+                                "type": "STRING",
+                                # \u26a0 DIE BEISPIELE SIND ENGLISCH, und das ist
+                                # kein Feinschliff: hier stand bis 2026-09-15
+                                # "TT.MM.JJJJ" \u2013 also genau der deutsche Code,
+                                # den der Prompt seit dem 2026-09-09 verbietet,
+                                # weil Office.js `numberFormat` NICHT
+                                # uebersetzt. Schema und Prompt sagten damit
+                                # das Gegenteil voneinander.
+                                "description": "Zahlenformat des Bereichs in "
+                                               "ENGLISCHER Schreibweise, z.B. "
+                                               "#,##0.00 \u20ac oder 0.0% oder "
+                                               "dd.mm.yyyy. Darf ALLEIN stehen "
+                                               "(dann bleiben die Werte "
+                                               "unangetastet). Deutsche Codes "
+                                               "wie TT.MM.JJJJ werden NICHT "
+                                               "uebersetzt und erscheinen "
+                                               "woertlich in der Zelle.",
+                            },
+                            # \u2500\u2500 Objekt-Eintraege \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+                            "typ": {
+                                "type": "STRING",
+                                "description": "Legt ein OBJEKT an statt Zellen "
+                                               "zu fuellen: 'pivot', 'diagramm', "
+                                               "'tabelle' oder 'bedingt'. Ohne "
+                                               "dieses Feld ist der Eintrag eine "
+                                               "gewoehnliche Zellaenderung.",
+                                "enum": ["pivot", "diagramm", "tabelle", "bedingt"],
+                            },
+                            "quelle": {
+                                "type": "STRING",
+                                "description": "Nur fuer 'pivot' und 'diagramm': "
+                                               "Quellbereich MIT Blattnamen, z.B. "
+                                               "Daten!A1:E200.",
+                            },
+                            "name": {
+                                "type": "STRING",
+                                "description": "Name des Objekts (pivot, tabelle, "
+                                               "diagramm). Ein Tabellenname darf "
+                                               "kein Leerzeichen enthalten und "
+                                               "nicht wie ein Zellbezug aussehen.",
+                            },
+                            "zeilenfelder": {
+                                "type": "ARRAY",
+                                "description": "Nur 'pivot': Spaltenueberschriften "
+                                               "der Quelle, die die ZEILEN bilden.",
+                                "items": {"type": "STRING"},
+                            },
+                            "spaltenfelder": {
+                                "type": "ARRAY",
+                                "description": "Nur 'pivot': Spaltenueberschriften "
+                                               "der Quelle, die die SPALTEN bilden.",
+                                "items": {"type": "STRING"},
+                            },
+                            "wertfelder": {
+                                "type": "ARRAY",
+                                "description": "Nur 'pivot': die auszuwertenden "
+                                               "Felder, z.B. [{\"feld\":\"Umsatz\","
+                                               "\"funktion\":\"sum\"}]. Erlaubt: "
+                                               "sum, count, average, max, min, "
+                                               "product, countNumbers.",
+                                "items": {"type": "OBJECT",
+                                          "properties": {
+                                              "feld": {"type": "STRING"},
+                                              "funktion": {"type": "STRING"},
+                                          }},
+                            },
+                            "art": {
+                                "type": "STRING",
+                                "description": "Nur 'diagramm': saeule, balken, "
+                                               "linie, kreis, ring, punkt oder "
+                                               "flaeche.",
+                            },
+                            "titel": {
+                                "type": "STRING",
+                                "description": "Nur 'diagramm': Ueberschrift.",
+                            },
+                            "kopfzeile": {
+                                "type": "BOOLEAN",
+                                "description": "Nur 'tabelle': hat der Bereich "
+                                               "eine Ueberschriftenzeile? Vorgabe "
+                                               "ja.",
+                            },
+                            "regel": {
+                                "type": "STRING",
+                                "description": "Nur 'bedingt': 'zellwert', "
+                                               "'farbskala' oder 'datenbalken'.",
+                            },
+                            "operator": {
+                                "type": "STRING",
+                                "description": "Nur 'bedingt'/'zellwert': "
+                                               "groesser, kleiner, gleich, "
+                                               "ungleich, groesser_gleich, "
+                                               "kleiner_gleich, zwischen, "
+                                               "nicht_zwischen.",
+                            },
+                            "wert2": {
+                                "type": "STRING",
+                                "description": "Nur 'bedingt' mit Operator "
+                                               "zwischen/nicht_zwischen: die "
+                                               "obere Grenze.",
+                            },
+                            "farbe": {
+                                "type": "STRING",
+                                "description": "Nur 'bedingt': Fuellfarbe als "
+                                               "#RRGGBB.",
+                            },
+                            "textfarbe": {
+                                "type": "STRING",
+                                "description": "Nur 'bedingt'/'zellwert': "
+                                               "Schriftfarbe als #RRGGBB.",
+                            },
+                            "begruendung": {
+                                "type": "STRING",
+                                "description": "Ein kurzer Satz, was der Eintrag "
+                                               "bewirkt. Wird dem Benutzer neben "
+                                               "der Zelle angezeigt.",
+                            },
+                        },
+                        "required": ["adresse"],
+                    },
+                },
+                "zusammenfassung": {
+                    "type": "STRING",
+                    "description": "Ein Satz über den Vorschlag als Ganzes.",
+                },
+            },
+            "required": ["aenderungen"],
+        }
+
+    async def execute(self, **kwargs) -> str:
+        puffer = excel_ask.puffer()
+        if puffer is None:
+            # Das Werkzeug liegt im allgemeinen Kasten und kann deshalb auch im
+            # normalen Chat aufgerufen werden. Dort gibt es keine geoeffnete
+            # Mappe – das ist kein Fehler, sondern der falsche Ort.
+            return ("HINWEIS_AN_NUTZER: Dieses Werkzeug wirkt nur im "
+                    "Excel-Aufgabenfenster. Hier gibt es keine geöffnete "
+                    "Arbeitsmappe. Für Änderungen an einer Datei sind "
+                    "xlsx_edit und xlsx_merge zuständig.")
+
+        roh = kwargs.get("aenderungen")
+        # Modelle liefern verschachtelte Argumente gelegentlich als JSON-STRING
+        # statt als Liste. Das tolerant zu parsen ist kein Luxus: die harte
+        # Variante endet in "keine Änderungen übergeben", obwohl das Modell
+        # alles richtig gemeint hat (dieselbe Lehre wie bei xlsx_merge).
+        if isinstance(roh, str):
+            try:
+                roh = json.loads(roh)
+            except Exception:  # noqa: BLE001
+                return ("Fehler: 'aenderungen' konnte nicht gelesen werden – "
+                        "erwartet wird eine Liste von Objekten mit den Feldern "
+                        "adresse und formel bzw. wert.")
+        if isinstance(roh, dict):
+            roh = [roh]          # eine einzelne Aenderung, nicht eingepackt
+        if not isinstance(roh, list) or not roh:
+            return ("Fehler: Es wurden keine Änderungen übergeben. Erwartet "
+                    "wird eine Liste von Objekten mit adresse und formel/wert.")
+
+        gueltig, abgelehnt = excel_ask.aenderungen_pruefen(roh)
+
+        # AUCH die abgelehnten wandern in den Puffer, nicht nur die gueltigen:
+        # der Benutzer muss erfahren, dass etwas aussortiert wurde. Sonst sieht
+        # er drei statt fuenf Zellen und haelt das fuer den ganzen Vorschlag –
+        # dasselbe stille Verschlucken, das die Pruefung verhindern soll.
+        if gueltig or abgelehnt:
+            puffer.append({
+                "aenderungen": gueltig,
+                "abgelehnt": abgelehnt,
+                "zusammenfassung": str(kwargs.get("zusammenfassung") or "")[:400],
+            })
+
+        zeilen = []
+        if gueltig:
+            zeilen.append("%d Änderung(en) vorgemerkt. Der Benutzer sieht sie "
+                          "jetzt zur Bestätigung; du musst nichts weiter tun "
+                          "und darfst sie NICHT zusätzlich als Text ausgeben."
+                          % len(gueltig))
+        if abgelehnt:
+            # Der Grund geht ausdruecklich an das Modell zurueck – es kann im
+            # selben Lauf korrigieren. Das ist der Zweck der Pruefung an dieser
+            # Stelle.
+            zeilen.append("%d Eintrag/Einträge wurden ABGELEHNT:" % len(abgelehnt))
+            for a in abgelehnt[:20]:
+                ort = a.get("adresse") or "(ohne Adresse)"
+                if a.get("blatt"):
+                    ort = "%s!%s" % (a["blatt"], ort)
+                zeilen.append("  - %s: %s" % (ort, a.get("grund", "")))
+            if not gueltig:
+                zeilen.append("Es wurde nichts vorgemerkt. Korrigiere die "
+                              "Einträge und rufe das Werkzeug erneut auf.")
+        return "\n".join(zeilen)

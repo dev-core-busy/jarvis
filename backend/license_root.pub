@@ -1,0 +1,12 @@
+# Öffentlicher Root-Schlüssel der Lizenz-Ausgabestelle (Ed25519, Base64url).
+#
+# Nur damit kann diese Installation prüfen, ob ein Lizenzschlüssel echt ist.
+# Der zugehörige PRIVATE Schlüssel liegt ausschließlich im Werkzeug
+# `license-manager/` (nicht im Repo) und ist dort mit einer Passphrase
+# geschützt – ohne ihn lässt sich keine Lizenz ausstellen.
+#
+# Ein Austausch dieser Zeile entwertet alle bisher ausgegebenen Lizenzen; das
+# ist genau dann gewollt, wenn der Root-Schlüssel neu erzeugt wurde
+# (`lizenzmanager.py init --kraft`). Danach müssen alle Lizenzen mit
+# `lizenzmanager.py neu-signieren` erneuert und neu verteilt werden.
+q889-MOeuf4_Q9YnklCm0Ms8IkOdPpGQHRPyplwtllI

@@ -1,0 +1,43 @@
+Schriftdatei, die an den BROWSER ausgeliefert wird
+==================================================
+
+Bis 2026-10-05 holte `templates/index.html` die Schrift mit einem <link> von
+fonts.googleapis.com. Genau diese Einbindung hat in diesem Projekt schon einmal
+eine Admin-Oberflaeche gekostet (Ladezeit-Vorfall; im Register unter "Nie wieder
+extern einbinden"). Dazu laeuft Jarvis in Umgebungen mit Egress-Sperre: dort
+scheitert der Abruf, und zwar STILL - die Seite waere ohne jede Meldung auf
+sans-serif gefallen, und niemand haette den Zusammenhang gesehen.
+
+
+inter-latin.woff2
+-----------------
+Schrift    Inter v20 (Variable Font, Gewichtsachse)
+Bezug      https://fonts.gstatic.com/s/inter/v20/
+             UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7.woff2
+           ermittelt aus https://fonts.googleapis.com/css2?family=Inter:wght@400;600
+           mit einem aktuellen Browser-User-Agent (ohne ihn liefert Google
+           woff statt woff2)
+Projekt    https://github.com/rsms/inter
+Groesse    48256 Bytes
+SHA-256    3100e775e8616cd2611beecfa23a4263d7037586789b43f035236a2e6fbd4c62
+Geprueft   2026-10-05
+Lizenz     SIL Open Font License 1.1
+           Copyright (c) 2016 The Inter Project Authors
+           Belegt aus der LICENSE.txt des Upstream-Projekts, nicht geraten.
+           Die OFL verlangt die Weitergabe des Copyright-Hinweises - deshalb
+           steht er hier.
+Benutzt    static/style.css, @font-face 'Inter'
+
+⚠ EINE DATEI REICHT FUER BEIDE GEWICHTE - gemessen, nicht angenommen: Google
+liefert fuer `wght@400` und `wght@600` im latin-Schnitt DIESELBE URL aus (beide
+Eintraege im CSS zeigen auf dieselbe Datei). Inter v20 ist eine Variable Font;
+das @font-face deklariert deshalb `font-weight: 100 900`. Der frueher
+angeforderte Schnitt 300 wird im Stylesheet nirgends benutzt, und
+`font-weight: bold` (700) hat der alte <link> gar nicht geladen - er stand
+also schon vorher auf synthetischem Fettdruck.
+
+Der `unicode-range` ist aus Googles latin-Block UEBERNOMMEN, nicht erfunden:
+ohne ihn laedt der Browser die Datei auch fuer Zeichen, die sie nicht enthaelt.
+
+Pruefen:
+  sha256sum skills/jarvis-vision/static/fonts/inter-latin.woff2

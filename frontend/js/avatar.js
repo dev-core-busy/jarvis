@@ -1,0 +1,844 @@
+/* ═══════════════════════════════════════════════════════════════════
+   Avatar-Assistent – Frontend-Widget
+   ───────────────────────────────────────────────────────────────────
+   Zeigt eine sprechende Figur (Clippy-Sprite via clippy.js ODER einen
+   SVG-Platzhalter) mit eigener Text-/Spracheingabe. Anfragen laufen ueber
+   /api/avatar/ask (serverseitiger Override-Abgleich, sonst Agent). Bei
+   Spracheingabe wird die Antwort zusaetzlich per /api/tts vorgelesen. Der
+   Lautsprecher-Schalter in der Eingabezeile schaltet den Avatar komplett
+   stumm – Figur-Geraeusche UND Sprachausgabe.
+
+   Aktiv nur, wenn der Avatar-Skill eingeschaltet ist (/api/avatar/config
+   liefert active:true). Eingebunden in chat.html (spaeter portal/support).
+   Externe Abhaengigkeit: jQuery + clippy.min.js (nur fuer die Sprite-Figur),
+   beide selbst gehostet unter /static/vendor/clippy/.
+   ═══════════════════════════════════════════════════════════════════ */
+(function () {
+    'use strict';
+
+    // ── Hilfen ──────────────────────────────────────────────────────
+    // Je nach Seite liegt das Sitzungstoken unter einem anderen Schluessel –
+    // die Kette steht in sitzung.js (siehe den Vorfall dort vom 2026-10-01).
+    function token() {
+        return window.JarvisSitzung.token();
+    }
+    function T(key, fallback) {
+        try { var s = window.t ? window.t(key) : ''; if (s && s !== key) return s; } catch (e) {}
+        return fallback;
+    }
+    function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+        });
+    }
+    /* Die Fett-Regel – ZEICHENGLEICH zu `_FETT_RE` in `browser-addon/popup.js`
+       und `Markdown.Fett` in `ai-mouse/src/AiMouse/Ui/Markdown.cs`.
+
+       Die `\S`-Waechter sind der ganze Unterschied zwischen brauchbar und
+       gefaehrlich: ohne sie wuerden `2 * 3 * 4`, `*.txt` und `** allein **`
+       als Auszeichnung gelesen – und der Text stammt aus einem Modell.
+
+       ⚠ ALS STRING GEBAUT, NICHT ALS LITERAL: `(?<=…)` ist im ganzen uebrigen
+       Frontend nirgends benutzt (gemessen: 0 Fundstellen). Ein Literal wuerde
+       auf Safari < 16.4 schon beim PARSEN dieser Datei werfen – und damit den
+       ganzen Avatar stilllegen, nicht nur die Fettschrift. So faellt dort
+       hoechstens das Fett aus. */
+    var _FETT_RE = (function () {
+        try { return new RegExp('\\*\\*(?=\\S)([^\\n]+?)(?<=\\S)\\*\\*'); }
+        catch (e) { return null; }
+    })();
+
+    /* Setzt `<strong>` – auf dem bereits MASKIERTEN Text.
+       Die Schleife ueber den Rest ist dieselbe wie im Plugin (`zuBloecken`):
+       kein `g`-Flag, kein wandernder `lastIndex`. Dass hier ueber den ganzen
+       Text statt zeilenweise gelaufen wird, aendert nichts – `[^\n]` laesst
+       kein Match ueber einen Umbruch hinweg zu. */
+    function fett(html) {
+        if (!_FETT_RE) return html;
+        var aus = '', rest = html, m;
+        while ((m = _FETT_RE.exec(rest))) {
+            aus += rest.slice(0, m.index) + '<strong>' + m[1] + '</strong>';
+            rest = rest.slice(m.index + m[0].length);
+        }
+        return aus + rest;
+    }
+
+    /* Escaped Text + klickbare URLs + Zeilenumbrueche; mit `md` zusaetzlich
+       `**fett**`.
+
+       ⚠ DIE REIHENFOLGE IST DIE SICHERHEIT UND ZUGLEICH DER URL-SCHUTZ:
+       maskiert wird ZUERST (ein `<b>` aus der Antwort ist danach Text, kein
+       Markup), die Fett-Regel laeuft DANACH – aber auf dem Text, in dem die
+       URLs schon durch Platzhalter ersetzt sind. Ein `**` INNERHALB einer
+       Adresse kann sie damit nicht zerreissen; ein Link INNERHALB eines
+       fetten Abschnitts bleibt trotzdem ein Link.
+
+       Bekannte Grenze: eine Adresse, die WIRKLICH auf `*` endet, wird um dieses
+       Zeichen kuerzer verlinkt (es bleibt als Text dahinter stehen). Der Fall
+       ist praktisch nicht existent, waehrend `**… https://x/doku**` der
+       Regelfall ist – siehe den Trim im URL-Zweig. */
+    function fmt(s, md) {
+        var urls = [];
+        /* ⚠ KENNUNG JE AUFRUF – der Fremdtext darf den Platzhalter nicht
+           nachbauen koennen. Mit einer festen Marke (`@@U0@@`) wird eine
+           Antwort, die selbst diese Zeichenfolge enthaelt (ein Modell, das
+           eigenen Code zitiert), beim Zuruecksetzen ersetzt: durch
+           `"undefined"`, wenn kein Link im Text war, sonst durch eine
+           DUBLETTE des ersten Links. Beides ist stiller Textverlust in der
+           Antwort. `esc()` maskiert `@` nicht, es gibt also keine andere
+           Schranke davor. Dieselbe Technik wie bei den Fremdtext-Bloecken im
+           Backend; `toString(36)` liefert nur `0-9a-z`, die Marke ist damit
+           regex-sicher. */
+        var marke = (Math.random().toString(36) + Math.random().toString(36))
+            .replace(/[^a-z0-9]/g, '').slice(0, 10) || 'u0';
+        var html = esc(s).replace(/(https?:\/\/[^\s<]+)/g, function (u) {
+            /* Markdown-Sternchen gehoeren in den Trim: `[^\s<]+` frisst sonst
+               die SCHLIESSENDEN mit, und `**Siehe https://x/doku**` verliert
+               sein Fett. Der abgeschnittene Teil geht nicht verloren – er
+               steht als `tail` hinter dem Link.
+
+               ⚠ NUR PAARWEISE (`\*\*`), NIE EIN EINZELNES `*`: eine Adresse
+               wie `https://server/api/*` ist echt, und ein einzeln getrimmtes
+               Sternchen liesse den Link auf ein ANDERES Ziel zeigen als der
+               sichtbare Text nennt. Die Alternation trimmt beliebige
+               Kombinationen am Ende (`doku**.`), ein alleinstehendes `*`
+               erfuellt `\*\*` aber nicht.
+
+               Bekannte Grenze: bei `https://x/a**wichtig**` (kein Leerzeichen
+               vor dem `**`) frisst `[^\s<]+` die Sternchen weiter in die
+               Adresse; getrimmt wird nur das schliessende Paar, und `wichtig`
+               bleibt Teil des Links. */
+            var tail = ''; var m = u.match(/(?:\*\*|[)\].,;:!?])+$/);
+            if (m) { tail = m[0]; u = u.slice(0, -tail.length); }
+            /* Der `tail` bleibt AUSSERHALB des Platzhalters. Steckte er darin,
+               waere ein abgetrenntes `**` fuer die Fett-Regel unsichtbar und
+               `**Siehe https://x/doku**` bliebe ohne Fett. Am gerenderten
+               Ergebnis aendert die Umstellung nichts. */
+            urls.push('<a href="' + u + '" target="_blank" rel="noopener">' + u + '</a>');
+            return '@@' + marke + (urls.length - 1) + '@@' + tail;
+        });
+        if (md) html = fett(html);
+        return html.replace(new RegExp('@@' + marke + '(\\d+)@@', 'g'),
+                            function (_, i) { return urls[+i]; });
+    }
+    // Markdown-Reste fuer die Sprachausgabe entfernen
+    function stripForSpeech(s) {
+        return String(s || '')
+            .replace(/```[\s\S]*?```/g, ' ')
+            .replace(/\[([^\]]+)\]\((?:https?:[^)]+)\)/g, '$1')
+            .replace(/https?:\/\/\S+/g, '')
+            .replace(/[*_`#>]/g, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    var cfg = null;          // /api/avatar/config
+    var brand = null;        // /api/branding (Logo + Marken-Name)
+    var agent = null;        // clippy-Agent (falls graphic=clippy)
+    var busy = false;
+    var aborter = null;      // AbortController der laufenden Anfrage
+    var stopped = false;     // true = Abbruch wurde vom Nutzer ausgeloest
+    var recog = null;
+    var listening = false;
+    var els = {};
+    var aktivAudio = null;   // laufende Sprachausgabe (fuer den Stumm-Schalter)
+
+    // ── Start ───────────────────────────────────────────────────────
+    document.addEventListener('DOMContentLoaded', function () {
+        if (!token()) return;   // nicht angemeldet
+        fetch('/api/avatar/config', { headers: { 'Authorization': 'Bearer ' + token() } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d || !d.active) return;   // Skill aus
+                cfg = d;
+                // Der Schalter haengt NUR an dieser Antwort – nicht zusaetzlich
+                // am Branding. Sonst erscheint er bei langsamem Netz spaet, und
+                // wer den Avatar ausgeschaltet hat, sieht ihn erst gar nicht
+                // (und kaeme nicht zurueck).
+                injectToggle();
+                if (istAus()) return;
+                // Branding ist oeffentlich; ohne aktiven Branding-Skill kommt
+                // {active:false} und alle Rueckfaelle greifen wie bisher.
+                return fetch('/api/branding')
+                    .then(function (r) { return r.ok ? r.json() : null; })
+                    .catch(function () { return null; })
+                    .then(function (bd) { brand = bd; build(); });
+            })
+            .catch(function () {});
+    });
+
+    // ── Ein/Aus je Seite ────────────────────────────────────────────
+    // Der Zustand haengt am Pfad, nicht global: der Avatar soll z.B. im Chat
+    // stoeren duerfen und im Portal sichtbar bleiben (Vorgabe „pro Seite").
+    var AUS_KEY = 'jarvis_avatar_off:';
+    var toggleBtn = null;
+
+    function seitenSchluessel() {
+        return AUS_KEY + ((location.pathname || '/').replace(/\/+$/, '') || '/');
+    }
+    function istAus() {
+        try { return localStorage.getItem(seitenSchluessel()) === '1'; } catch (e) { return false; }
+    }
+    function setzeAus(aus) {
+        try {
+            if (aus) localStorage.setItem(seitenSchluessel(), '1');
+            else localStorage.removeItem(seitenSchluessel());
+        } catch (e) {}
+    }
+
+    // ── Stummschaltung ──────────────────────────────────────────────
+    // Der Lautsprecher in der Eingabezeile schaltet ALLES stumm, was der Avatar
+    // von sich gibt – nicht nur die Sprachausgabe:
+    //   * die Geraeusche der Figur (Clippy bringt 15 Toene mit, die clippy.js
+    //     bei bestimmten Animations-Frames abspielt),
+    //   * die vorgelesene Antwort nach einer Mikrofon-Frage.
+    // WANN vorgelesen wird, entscheidet weiterhin die Skill-Einstellung
+    // „Bei Spracheingabe vorlesen"; der Schalter hier legt nur den Hauptschalter
+    // um. Wahl des Nutzers, im Browser gemerkt (wie die Fenstergroesse).
+    // Vorgabe ist NICHT stumm – der Ton gehoert zur Figur.
+    var MUTE_KEY = 'jarvis_avatar_mute';
+
+    function stumm() {
+        try { return localStorage.getItem(MUTE_KEY) === '1'; } catch (e) { return false; }
+    }
+    function setzeStumm(an) {
+        try {
+            if (an) localStorage.setItem(MUTE_KEY, '1');
+            else localStorage.removeItem(MUTE_KEY);
+        } catch (e) {}
+    }
+
+    // Die Figur-Toene liegen als vorgeladene Audio-Objekte im Animator
+    // (clippy.js: `_animator._sounds`, Name -> Audio). Es gibt keine
+    // oeffentliche Schnittstelle dafuer, deshalb der Zugriff auf die interne
+    // Struktur – abgesichert, damit eine andere clippy-Fassung nichts bricht.
+    // `muted` statt `volume = 0`, weil clippy die Objekte wiederverwendet und
+    // eine Lautstaerke sonst bei jedem Abspielen zurueckgesetzt werden koennte.
+    function applyMute() {
+        var aus = stumm();
+        try {
+            var s = agent && agent._animator && agent._animator._sounds;
+            if (s) Object.keys(s).forEach(function (k) {
+                var a = s[k];
+                if (!a) return;
+                a.muted = aus;
+                // Ein gerade laufender Ton muss sofort aufhoeren – sonst
+                // klingt die Figur nach dem Stummschalten noch zu Ende.
+                if (aus) { try { a.pause(); a.currentTime = 0; } catch (e) {} }
+            });
+        } catch (e) {}
+        if (aus) stopSpeech();
+    }
+
+    function stopSpeech() {
+        if (!aktivAudio) return;
+        try { aktivAudio.pause(); } catch (e) {}
+        try { if (aktivAudio.src) URL.revokeObjectURL(aktivAudio.src); } catch (e) {}
+        aktivAudio = null;
+        setTalking(false);
+    }
+
+    function zeichneSpeak() {
+        if (!els.speak) return;
+        var aus = stumm();
+        els.speak.textContent = aus ? '🔇' : '🔊';
+        els.speak.classList.toggle('jav-off', aus);
+        var titel = aus ? T('avatar.sound_on', 'Ton einschalten')
+                        : T('avatar.sound_off', 'Stummschalten');
+        els.speak.title = titel;
+        els.speak.setAttribute('aria-label', titel);
+        els.speak.setAttribute('aria-pressed', aus ? 'true' : 'false');
+    }
+
+    // Sichtbarer Zustand: durchgestrichenes Symbol = Avatar aus
+    var SVG_AN = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"'
+        + ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+        + '<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>'
+        + '<circle cx="9.5" cy="11" r="1"/><circle cx="14.5" cy="11" r="1"/>'
+        + '<path d="M9 14.5c.8.7 1.9 1 3 1s2.2-.3 3-1"/></svg>';
+    var SVG_AUS = SVG_AN.replace('</svg>', '<line x1="3" y1="21" x2="21" y2="3"/></svg>');
+
+    // Der Knopf wird zur Laufzeit eingehaengt und uebernimmt die Klassen des
+    // Ankers – so passt er ohne Extrawurst zum Stil JEDER Seite.
+    //
+    // Anker ist seit 2026-08-22 der ISSUES-Knopf (`.jv-issues-btn`), nicht
+    // mehr der Theme-Knopf: die Reihenfolge der Titelsymbole lautet von
+    // rechts nach links Abmelden, Einstellungen, Startseite, Hell/Dunkel,
+    // Issues, Avatar, Sprachausgabe. Der Avatar steht also LINKS von Issues.
+    // Der Theme-Knopf bleibt als Rueckfall fuer Seiten ohne Issues-Knopf.
+    function injectToggle() {
+        if (toggleBtn) return;
+        var anker = document.querySelector('.jv-issues-btn')
+                 || document.getElementById('btn-theme-toggle')
+                 || document.getElementById('btn-theme');   // /chat; NICHT btn-theme-login
+        toggleBtn = document.createElement('button');
+        toggleBtn.type = 'button';
+        toggleBtn.id = 'jav-toggle';
+        if (anker && anker.parentNode) {
+            toggleBtn.className = anker.className;
+            // Die Anker-Klasse selbst darf NICHT mitkommen: sonst waere der
+            // Avatar-Knopf beim naechsten Einhaengen sein eigener Anker.
+            toggleBtn.classList.remove('jv-issues-btn');
+            anker.parentNode.insertBefore(toggleBtn, anker);
+        } else {
+            // Seiten ohne Symbolleiste (z.B. /settings): frei schwebend oben rechts
+            toggleBtn.className = 'jav-toggle-float';
+            document.body.appendChild(toggleBtn);
+        }
+        toggleBtn.addEventListener('click', function () {
+            var ausJetzt = !istAus();
+            setzeAus(ausJetzt);
+            zeichneToggle();
+            if (ausJetzt) { destroy(); return; }
+            // Beim Einschalten kann das Branding noch fehlen: es wird beim
+            // Laden uebersprungen, wenn der Avatar aus ist. Ohne dieses
+            // Nachladen bekaeme man Standardname statt Marke und kein Logo.
+            if (brand !== null) { build(); return; }
+            fetch('/api/branding')
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .catch(function () { return null; })
+                .then(function (bd) { brand = bd; build(); });
+        });
+        zeichneToggle();
+    }
+
+    function zeichneToggle() {
+        if (!toggleBtn) return;
+        var aus = istAus();
+        toggleBtn.innerHTML = aus ? SVG_AUS : SVG_AN;
+        toggleBtn.classList.toggle('jav-toggle-off', aus);
+        var t = aus ? T('avatar.toggle_show', 'Avatar einblenden')
+                    : T('avatar.toggle_hide', 'Avatar ausblenden');
+        toggleBtn.title = t;
+        toggleBtn.setAttribute('aria-label', t);
+        toggleBtn.setAttribute('aria-pressed', aus ? 'false' : 'true');
+    }
+
+    // Widget vollstaendig abraeumen. Wichtig: laufende Sprite-Rueckrufe ueber
+    // figurGen entwerten und die von clippy an <body> gehaengten Knoten
+    // mitnehmen – sonst bleibt beim Ausschalten eine Figur stehen.
+    function destroy() {
+        clearTimeout(figurTimer);
+        figurGen++;
+        stopSpeech();                  // sonst spricht eine Figur weiter, die es nicht mehr gibt
+        if (els.root) els.root.remove();
+        Array.prototype.forEach.call(
+            document.querySelectorAll('body > .clippy, body > .clippy-balloon'),
+            function (n) { n.remove(); });
+        agent = null;
+        busy = false;
+        els = {};
+    }
+
+    // ── DOM aufbauen ────────────────────────────────────────────────
+    function build() {
+        if (els.root) return;          // schon aufgebaut (Doppelklick auf den Schalter)
+        var root = document.createElement('div');
+        root.id = 'jav-root';
+        root.className = (cfg.position === 'bottom-left') ? 'jav-pos-bl' : 'jav-pos-br';
+        // Auf Seiten mit eigener Eingabezeile am unteren Rand (/chat) sass die
+        // Figur GENAU ueber dem Senden-Knopf und fing dessen Klicks ab.
+        if (document.getElementById('chat-screen')) root.classList.add('jav-above-input');
+        // Name: eigenes Feld > Branding (Assistenten- bzw. Firmenname) > Standard.
+        // Ohne den Branding-Rueckfall hiesse die Figur in einer White-Label-
+        // Installation "Assistent", waehrend der Rest der Seite die Marke traegt.
+        var title = cfg.title
+            || (brand && brand.active && (brand.assistant_name || brand.company_name))
+            || T('avatar.title_default', 'Assistent');
+        root.innerHTML =
+            '<div id="jav-panel" class="jav-hidden">'
+            + '  <div id="jav-grip" title="' + esc(T('avatar.resize', 'Größe ändern')) + '"></div>'
+            + '  <div class="jav-header"><span class="jav-dot"></span>'
+            + '    <span id="jav-title"></span>'
+            + '    <button id="jav-close" title="' + esc(T('avatar.close', 'Schließen')) + '">×</button>'
+            + '  </div>'
+            + '  <div id="jav-log"></div>'
+            + '  <div class="jav-input">'
+            + '    <button id="jav-mic" class="jav-ibtn" title="' + esc(T('avatar.mic', 'Sprechen')) + '">🎤</button>'
+            + '    <button id="jav-speak" class="jav-ibtn" aria-pressed="false"></button>'
+            + '    <input id="jav-text" type="text" autocomplete="off" placeholder="' + esc(T('avatar.placeholder', 'Frag mich etwas…')) + '">'
+            + '    <button id="jav-send" class="jav-ibtn" title="' + esc(T('avatar.send', 'Senden')) + '">➤</button>'
+            + '    <button id="jav-stop" class="jav-ibtn jav-hidden" title="' + esc(T('avatar.stop', 'Abbrechen')) + '">■</button>'
+            + '  </div>'
+            + '</div>'
+            + '<div id="jav-figure" title="' + esc(title) + '"></div>';
+        document.body.appendChild(root);
+
+        els.root = root;
+        els.panel = root.querySelector('#jav-panel');
+        els.log = root.querySelector('#jav-log');
+        els.figure = root.querySelector('#jav-figure');
+        els.text = root.querySelector('#jav-text');
+        els.mic = root.querySelector('#jav-mic');
+        els.speak = root.querySelector('#jav-speak');
+        els.send = root.querySelector('#jav-send');
+        els.stop = root.querySelector('#jav-stop');
+        els.grip = root.querySelector('#jav-grip');
+        root.querySelector('#jav-title').textContent = title;
+
+        // Ereignisse
+        els.figure.addEventListener('click', toggle);
+        root.querySelector('#jav-close').addEventListener('click', function () { setOpen(false); });
+        els.send.addEventListener('click', sendFromInput);
+        els.stop.addEventListener('click', stopRun);
+        els.text.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); sendFromInput(); }
+        });
+        els.mic.addEventListener('click', toggleMic);
+        els.speak.addEventListener('click', function () {
+            setzeStumm(!stumm());
+            zeichneSpeak();
+            applyMute();               // wirkt sofort, auch auf laufenden Ton
+        });
+        zeichneSpeak();
+        initResize();
+
+        renderFigure();
+
+        if (cfg.auto_open) setTimeout(function () { setOpen(true); }, 400);
+    }
+
+    // ── Groesse aendern + merken ────────────────────────────────────
+    // Gespeichert wird im localStorage, gilt also fuer den Browser dieses
+    // Nutzers und ueberdauert die Sitzung.
+    var SIZE_KEY = 'jarvis_avatar_size';
+    var MIN_W = 260, MIN_H = 120;
+
+    function maxW() { return Math.max(MIN_W, window.innerWidth - 36); }
+    function maxH() { return Math.max(MIN_H, Math.round(window.innerHeight * 0.75)); }
+
+    function loadSize() {
+        try {
+            var d = JSON.parse(localStorage.getItem(SIZE_KEY) || 'null');
+            if (d && d.w && d.h) return d;
+        } catch (e) {}
+        return null;
+    }
+
+    // Breite ans Panel, Hoehe an den Nachrichtenbereich.
+    // WICHTIG: die Hoehe darf NICHT als Inline-Stil am Panel haengen – beim
+    // Schliessen klappt es ueber `.jav-hidden { height: 0 }` ein, und ein
+    // Inline-Wert wuerde diese Regel ueberstimmen (das Panel bliebe offen).
+    function applySize(w, h) {
+        w = Math.max(MIN_W, Math.min(w, maxW()));
+        h = Math.max(MIN_H, Math.min(h, maxH()));
+        els.panel.style.width = w + 'px';
+        els.log.style.height = h + 'px';
+        els.log.style.maxHeight = 'none';   // sonst kappt die 46vh-Regel
+        return { w: w, h: h };
+    }
+
+    function initResize() {
+        var s = loadSize();
+        if (s) applySize(s.w, s.h);
+
+        var startX = 0, startY = 0, startW = 0, startH = 0, aktiv = false;
+        var links = !els.root.classList.contains('jav-pos-bl');  // Griff links?
+
+        els.grip.addEventListener('pointerdown', function (e) {
+            e.preventDefault();
+            aktiv = true;
+            startX = e.clientX; startY = e.clientY;
+            startW = els.panel.getBoundingClientRect().width;
+            startH = els.log.getBoundingClientRect().height;
+            document.body.classList.add('jav-resizing');
+            try { els.grip.setPointerCapture(e.pointerId); } catch (err) {}
+        });
+
+        els.grip.addEventListener('pointermove', function (e) {
+            if (!aktiv) return;
+            // Das Widget haengt unten rechts (bzw. links). Zieht man den Griff
+            // nach oben/aussen, wird es GROESSER – daher die Vorzeichen.
+            var dx = links ? (startX - e.clientX) : (e.clientX - startX);
+            applySize(startW + dx, startH + (startY - e.clientY));
+        });
+
+        function ende(e) {
+            if (!aktiv) return;
+            aktiv = false;
+            document.body.classList.remove('jav-resizing');
+            try { els.grip.releasePointerCapture(e.pointerId); } catch (err) {}
+            try {
+                localStorage.setItem(SIZE_KEY, JSON.stringify({
+                    w: Math.round(els.panel.getBoundingClientRect().width),
+                    h: Math.round(els.log.getBoundingClientRect().height)
+                }));
+            } catch (err) {}
+        }
+        els.grip.addEventListener('pointerup', ende);
+        els.grip.addEventListener('pointercancel', ende);
+
+        // Kleineres Fenster in der naechsten Sitzung: gespeicherte Groesse
+        // wieder einpassen, sonst ragt das Panel aus dem Bild.
+        // Nur EINMAL registrieren – build() laeuft beim Ein-/Ausschalten erneut,
+        // sonst sammeln sich Zuhoerer auf einem laengst entfernten Panel.
+        if (!resizeGebunden) {
+            resizeGebunden = true;
+            window.addEventListener('resize', function () {
+                if (!els.panel || !els.panel.style.width) return;
+                applySize(parseInt(els.panel.style.width, 10) || MIN_W,
+                          parseInt(els.log.style.height, 10) || MIN_H);
+            });
+        }
+    }
+    var resizeGebunden = false;
+
+    // ── Figur rendern ───────────────────────────────────────────────
+    // Reihenfolge: gewaehlte Figur → RUECKFALL 'Clippy' → SVG-Platzhalter.
+    // Clippy ist der ausdrueckliche Rueckfall (Vorgabe 2026-07-30); der
+    // SVG-Platzhalter greift nur noch, wenn auch Clippy nicht kommt – eine
+    // leere Ecke darf es nie geben.
+    var FALLBACK = 'Clippy';
+    var figurGen = 0;          // zaehlt Renderversuche (verwaiste Rueckrufe verwerfen)
+    var figurTimer = null;
+    // Wartezeit, bevor der Platzhalter als LADEZUSTAND erscheint.
+    // Er wurde frueher sofort gezeichnet – dadurch blitzte bei jedem
+    // Seitenwechsel kurz eine ANDERE Figur auf, bevor die gewaehlte da war
+    // (gemessen auf DEV: Sprite nach 73–147 ms, Aufblitzen 37–59 ms).
+    // Deutlich darueber liegen heisst: im Normalfall sieht man ihn nie, bei
+    // echter Verzoegerung aber schon – eine dauerhaft leere Ecke waere
+    // schlimmer als ein spaeter Ladezustand.
+    var PLACEHOLDER_DELAY = 1200;
+
+    function renderFigure() {
+        clearTimeout(figurTimer);
+
+        if (cfg.graphic === 'placeholder') { placeholder(); return; }  // Wunschfigur
+
+        if (cfg.graphic === 'branding' && brandLogo()) {
+            // Bild per DOM setzen statt per innerHTML, damit ein kaputter
+            // Logo-Link nicht als Bildruine stehenbleibt, sondern auf Clippy
+            // zurueckfaellt (Rueckfallkette gilt auch hier).
+            var img = document.createElement('img');
+            img.className = 'jav-logo';
+            img.id = 'jav-ph';
+            img.alt = '';
+            img.addEventListener('error', function () { loadSprite(FALLBACK, true); });
+            img.src = brandLogo();
+            els.figure.innerHTML = '';
+            els.figure.appendChild(img);
+            return;
+        }
+
+        figurTimer = setTimeout(function () {
+            if (!els.figure.firstChild) placeholder();
+        }, PLACEHOLDER_DELAY);
+
+        if (cfg.graphic === 'branding') {
+            loadSprite(FALLBACK, true);                 // kein Logo -> Clippy
+            return;
+        }
+        loadSprite(cfg.is_sprite ? cfg.graphic : FALLBACK, !cfg.is_sprite);
+    }
+
+    // Laedt einen Sprite-Satz. Scheitert er ODER bleibt er haengen, wird EINMAL
+    // auf Clippy zurueckgefallen. Das Haengen ist real: steht in `sounds-mp3.js`
+    // ein anderer Agentenname als im Ordner, ruft clippy WEDER den Erfolgs- noch
+    // den Fehler-Rueckruf – ohne Zeitgrenze bliebe es fuer immer beim Platzhalter.
+    function loadSprite(name, istRueckfall) {
+        if (!window.clippy) return;                     // Platzhalter bleibt
+        var gen = ++figurGen;
+        var erledigt = false;
+
+        function gescheitert() {
+            if (erledigt || gen !== figurGen) return;
+            erledigt = true;
+            if (!istRueckfall && name !== FALLBACK) loadSprite(FALLBACK, true);
+        }
+
+        try {
+            window.clippy.BASE_PATH = (cfg.assets_base || '/static/vendor/clippy') + '/agents/';
+            window.clippy.load(name, function (ag) {
+                if (gen !== figurGen) return;           // ueberholter Versuch
+                erledigt = true;
+                clearTimeout(figurTimer);               // kein Ladezustand mehr noetig
+                agent = ag;
+                // Die Toene der Figur entstehen ERST hier (clippy laedt sie mit
+                // dem Sprite). Ohne diesen Aufruf waere die Figur nach einem
+                // Seitenwechsel wieder laut, obwohl der Schalter auf stumm steht.
+                applyMute();
+                try { ag.show(true); } catch (e) {}
+                // clippy haengt sein Element an <body>; bevorzugt das Element
+                // DIESES Agenten nehmen – bei einem Rueckfall liegen sonst zwei
+                // `.clippy`-Knoten herum und man erwischt den falschen.
+                var cl = (ag && ag._el && ag._el[0]) || document.querySelector('body > .clippy');
+                if (cl && els.figure) {
+                    els.figure.innerHTML = '';          // Platzhalter ersetzen
+                    els.figure.appendChild(cl);
+                    // KEIN eigener Klick-Handler auf dem Sprite: der Klick
+                    // blubbert zu #jav-figure, das schon `toggle` traegt. Ein
+                    // zweiter Handler hier schaltete zweimal um – unterm Strich
+                    // gar nicht, und ein Klick direkt auf Clippy tat nichts
+                    // (nur der schmale Rand daneben wirkte).
+                }
+                // verwaiste Knoten des gescheiterten Versuchs entfernen
+                Array.prototype.forEach.call(
+                    document.querySelectorAll('body > .clippy'),
+                    function (n) { if (n !== cl) n.remove(); });
+            }, gescheitert);
+        } catch (e) { gescheitert(); return; }
+
+        setTimeout(gescheitert, 6000);
+    }
+
+    // Logo aus dem Branding-Skill (Hell-Variante faellt auf Dunkel zurueck).
+    // Leer, wenn kein Branding aktiv ist -> dann greift der SVG-Platzhalter,
+    // damit "branding" ohne hinterlegtes Logo keine leere Ecke hinterlaesst.
+    function brandLogo() {
+        if (!brand || !brand.active) return '';
+        var hell = document.body && document.body.classList.contains('light');
+        return (hell ? (brand.logo_url_light || brand.logo_url) : brand.logo_url) || '';
+    }
+
+    function placeholder() {
+        els.figure.innerHTML =
+            '<svg class="jav-ph" id="jav-ph" viewBox="0 0 96 96" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">'
+            + '<line class="jav-antenna" x1="48" y1="6" x2="48" y2="18" stroke="var(--accent,#6366f1)" stroke-width="3" stroke-linecap="round"/>'
+            + '<circle class="jav-antenna" cx="48" cy="6" r="4" fill="var(--accent,#6366f1)"/>'
+            + '<rect x="18" y="18" width="60" height="52" rx="14" fill="var(--bg-secondary,#232833)" stroke="var(--accent,#6366f1)" stroke-width="3"/>'
+            + '<circle cx="36" cy="40" r="7" fill="#fff"/><circle cx="36" cy="41" r="3.4" fill="#1b1f27"/>'
+            + '<circle cx="60" cy="40" r="7" fill="#fff"/><circle cx="60" cy="41" r="3.4" fill="#1b1f27"/>'
+            + '<rect class="jav-mouth" x="38" y="54" width="20" height="7" rx="3.5" fill="var(--accent,#6366f1)"/>'
+            + '<rect x="30" y="70" width="36" height="16" rx="6" fill="var(--bg-secondary,#232833)" stroke="var(--accent,#6366f1)" stroke-width="3"/>'
+            + '</svg>';
+    }
+
+    // ── Oeffnen/Schliessen ──────────────────────────────────────────
+    function setOpen(open) {
+        els.panel.classList.toggle('jav-hidden', !open);
+        if (open) {
+            if (!els.log.dataset.greeted) {
+                var g = cfg.greeting || T('avatar.greeting_default', 'Hallo! Wie kann ich helfen?');
+                addBot(g);
+                els.log.dataset.greeted = '1';
+            }
+            setTimeout(function () { els.text && els.text.focus(); }, 60);
+        }
+    }
+    function toggle() { setOpen(els.panel.classList.contains('jav-hidden')); }
+
+    // ── Nachrichten ─────────────────────────────────────────────────
+    function addUser(text) {
+        var d = document.createElement('div');
+        d.className = 'jav-msg jav-msg-user';
+        d.textContent = text;
+        els.log.appendChild(d); scrollLog(); return d;
+    }
+    /* `md` deutet `**fett**` – und steht AUSDRUECKLICH nur an den zwei
+       Stellen, an denen MODELLTEXT ankommt.
+
+       ⚠ FEHLERMELDUNGEN WERDEN NICHT GEDEUTET (dieselbe Zusage wie im
+       Ergebnisfenster der AI-Maus): sie stammen vom Server oder aus einer
+       Ausnahme, ein `**` darin waere Zufall – und als Auszeichnung gelesen
+       verstuemmelt es genau den Text, den man dann genau lesen muss. Die
+       Vorgabe AUS ist fail-safe: wer eine neue Meldung ergaenzt und den
+       Schalter vergisst, bekommt das Verhalten von vorher. */
+    function addBot(text, md) {
+        var d = document.createElement('div');
+        d.className = 'jav-msg jav-msg-bot';
+        d.innerHTML = fmt(text, md);
+        els.log.appendChild(d); scrollLog(); return d;
+    }
+    function addThinking() {
+        var d = document.createElement('div');
+        d.className = 'jav-msg jav-msg-bot jav-thinking';
+        d.innerHTML = esc(T('avatar.thinking', 'Denke nach')) + '<span class="jav-dots"></span>';
+        els.log.appendChild(d); scrollLog(); return d;
+    }
+    function scrollLog() { els.log.scrollTop = els.log.scrollHeight; }
+
+    // ── Senden ──────────────────────────────────────────────────────
+    function sendFromInput() {
+        var v = (els.text.value || '').trim();
+        if (!v) return;
+        els.text.value = '';
+        ask(v, false);
+    }
+
+    function ask(text, viaVoice) {
+        if (busy) return;
+        busy = true;
+        setBusyUi(true);
+        setOpen(true);
+        addUser(text);
+        var think = addThinking();
+        gesture('think');
+
+        aborter = ('AbortController' in window) ? new AbortController() : null;
+        stopped = false;
+
+        fetch('/api/avatar/ask', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: text, voice: !!viaVoice }),
+            signal: aborter ? aborter.signal : undefined
+        }).then(function (r) {
+            return r.json().then(function (d) { return { ok: r.ok, status: r.status, d: d }; });
+        }).then(function (res) {
+            think.remove();
+            if (!res.ok) {
+                if (res.status === 423) { addBot(T('avatar.blocked', 'Konto gesperrt (Sicherheitsverstoß).')); }
+                else if (res.status === 401) { addBot(T('avatar.reauth', 'Bitte neu anmelden.')); }
+                else { addBot((res.d && res.d.detail) || T('avatar.error', 'Es ist ein Fehler aufgetreten.')); }
+                gesture('idle');
+                return;
+            }
+            var ans = (res.d && res.d.answer) || '';
+            // Serverseitig abgebrochen: eine Teilantwort ist besser als nichts,
+            // wird aber NICHT vorgelesen (der Nutzer wollte ja Ruhe).
+            if (res.d && res.d.stopped) {
+                if (ans) addBot(ans, true);
+                else addBot(T('avatar.stopped', 'Abgebrochen.'));
+                gesture('idle');
+                return;
+            }
+            if (ans) addBot(ans, true);
+            else addBot(T('avatar.empty', '(keine Antwort)'));
+            gesture('answer');
+            if (viaVoice && cfg.speak_on_voice && !stumm() && ans) speak(ans);
+        }).catch(function (err) {
+            think.remove();
+            // Vom Abbrechen-Knopf ausgeloest -> kein Fehler, sondern Absicht.
+            if (stopped || (err && err.name === 'AbortError')) {
+                addBot(T('avatar.stopped', 'Abgebrochen.'));
+            } else {
+                addBot(T('avatar.error', 'Es ist ein Fehler aufgetreten.'));
+            }
+            gesture('idle');
+        }).finally(function () {
+            busy = false; aborter = null;
+            setBusyUi(false);
+        });
+    }
+
+    // Laufende Anfrage abbrechen: Server anweisen aufzuhoeren UND den fetch
+    // abbrechen. Nur das Abbrechen im Browser wuerde den Agenten serverseitig
+    // weiterlaufen lassen (verbrauchte Modell-Aufrufe ohne Empfaenger).
+    function stopRun() {
+        if (!busy) return;
+        stopped = true;
+        if (els.stop) els.stop.disabled = true;
+        fetch('/api/avatar/stop', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token() }
+        }).catch(function () {}).finally(function () {
+            // Erst nach der Stop-Meldung abbrechen – sonst kann der Browser die
+            // Verbindung schliessen, bevor der Server den Auftrag kennt.
+            if (aborter) { try { aborter.abort(); } catch (e) {} }
+        });
+    }
+
+    // Senden-/Abbrechen-Knopf tauschen (wie im Chat)
+    function setBusyUi(on) {
+        if (els.send) els.send.classList.toggle('jav-hidden', !!on);
+        if (els.stop) {
+            els.stop.classList.toggle('jav-hidden', !on);
+            els.stop.disabled = false;
+        }
+        if (els.text) els.text.disabled = !!on;
+        // Mikrofon waehrend eines Laufs sperren: ask() wuerde ohnehin abweisen,
+        // ein klickbarer Knopf ohne Wirkung sieht aber nach einem Fehler aus.
+        if (els.mic) els.mic.disabled = !!on;
+    }
+
+    // ── Figur-Gesten ────────────────────────────────────────────────
+    function gesture(kind) {
+        if (agent) {
+            try {
+                if (kind === 'think') play(['Thinking', 'Processing', 'GetAttention']);
+                else if (kind === 'answer') play(['Explain', 'Congratulate', 'GestureRight', 'Wave']);
+            } catch (e) {}
+        }
+    }
+    function play(names) {
+        if (!agent) return;
+        var have = {};
+        try { (agent.animations() || []).forEach(function (a) { have[a] = 1; }); } catch (e) { return; }
+        for (var i = 0; i < names.length; i++) { if (have[names[i]]) { try { agent.play(names[i]); } catch (e) {} return; } }
+    }
+
+    // ── Sprachausgabe (TTS) ─────────────────────────────────────────
+    function setTalking(on) {
+        var ph = document.getElementById('jav-ph');
+        if (ph) ph.classList.toggle('talking', !!on);
+        if (on) play(['Explain', 'GestureRight']);
+    }
+    function speak(text) {
+        if (stumm()) return;
+        var clean = stripForSpeech(text);
+        if (!clean) return;
+        stopSpeech();                       // nie zwei Ansagen uebereinander
+        var voice = localStorage.getItem('jarvis_chat_tts_voice') || '';
+        fetch('/api/tts', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: clean, voice: voice })
+        }).then(function (r) { return r.ok ? r.blob() : null; })
+          .then(function (blob) {
+              if (!blob) return;
+              // Der Nutzer kann waehrend der TTS-Erzeugung stumm geschaltet
+              // haben – dann darf die fertige Datei nicht doch noch losplappern.
+              if (stumm()) return;
+              var url = URL.createObjectURL(blob);
+              var a = new Audio(url);
+              aktivAudio = a;
+              function fertig() {
+                  if (aktivAudio === a) aktivAudio = null;
+                  setTalking(false);
+                  URL.revokeObjectURL(url);
+              }
+              setTalking(true);
+              a.onended = fertig;
+              a.onerror = fertig;
+              a.play().catch(fertig);
+          }).catch(function () {});
+    }
+
+    // ── Spracheingabe (eigener Server, stt.js) ──────────────────────
+    // Bewusst NICHT window.SpeechRecognition: Chrome/Edge schicken das Audio
+    // dort an die Cloud von Google bzw. Microsoft. stt.js nimmt nur auf,
+    // erkannt wird mit dem lokalen Whisper (/api/stt).
+    var STT_MELDUNG = {
+        kein_zugriff: ['stt.no_access', 'Kein Zugriff auf das Mikrofon – bitte im Browser erlauben.'],
+        kein_mikrofon: ['stt.no_mic', 'Kein Mikrofon gefunden.'],
+        keine_sprache: ['stt.no_speech', 'Keine Sprache erkannt.'],
+        nicht_unterstuetzt: ['avatar.no_mic', 'Spracheingabe wird von diesem Browser nicht unterstützt.'],
+        server: ['stt.failed', 'Die Spracherkennung ist fehlgeschlagen.']
+    };
+    function toggleMic() {
+        if (!window.JarvisSTT || !window.JarvisSTT.verfuegbar()) {
+            addBot(T('avatar.no_mic', 'Spracheingabe wird von diesem Browser nicht unterstützt.'));
+            setOpen(true);
+            return;
+        }
+        // Zweiter Klick beendet die Aufnahme sofort (statt auf die Pause zu warten)
+        if (listening) { if (recog) recog.stoppen(); return; }
+        listening = true;
+        els.mic.classList.add('jav-listening');
+        setOpen(true);
+        recog = window.JarvisSTT.starten({
+            token: token(),
+            lang: window._lang,
+            // Aufnahme vorbei, Server erkennt noch: eigener Zustand samt Text
+            onVerarbeitung: function () {
+                els.mic.classList.remove('jav-listening');
+                els.mic.classList.add('jav-transcribing');
+                els.mic.title = T('stt.working', 'Sprache wird erkannt …');
+            },
+            onText: function (t) { ask(t, true); },   // via Mikrofon -> Antwort wird vorgelesen
+            onFehler: function (code) {
+                var m = STT_MELDUNG[code] || STT_MELDUNG.server;
+                addBot(T(m[0], m[1]));
+            },
+            onEnde: stopMic
+        });
+    }
+    function stopMic() {
+        listening = false;
+        recog = null;
+        if (els.mic) {
+            els.mic.classList.remove('jav-listening', 'jav-transcribing');
+            els.mic.title = T('avatar.mic', 'Sprechen');
+        }
+    }
+})();

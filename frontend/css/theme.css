@@ -1,0 +1,1272 @@
+/* ═══════════════════════════════════════════════════════════════════
+   Jarvis – Gemeinsame Theme-Variablen (Single Source of Truth)
+   ───────────────────────────────────────────────────────────────────
+   Wird VOR style.css / chat.css auf ALLEN Seiten eingebunden.
+   Dark = :root (Default), Hell = body.light.
+   Der Branding-Skill (branding.js) ueberschreibt diese Variablen zur
+   Laufzeit inline auf <body> → wirkt dadurch einheitlich auf allen Seiten.
+   chat.css aliast seine eigenen Namen (--purple/--bg/--surface/…) auf
+   diese Variablen, damit Branding + Dark/Light ueberall identisch greifen.
+   ═══════════════════════════════════════════════════════════════════ */
+:root {
+    /* Native Controls (Select-Popups, Scrollbars, Date-Picker) folgen dem Theme. */
+    color-scheme: dark;
+
+    /* Tinten-/Schatten-Basis (Dark = Weiss/Schwarz); im Light-Theme gekippt.
+       Alle rgba(var(--fg-rgb), …)-Raender/-Overlays folgen automatisch. */
+    --fg-rgb: 255, 255, 255;
+    --shadow-rgb: 0, 0, 0;
+
+    --bg-primary: #0a0e17;
+    --bg-secondary: #111827;
+    --bg-glass: rgba(15, 23, 42, 0.75);
+    --bg-glass-heavy: rgba(15, 23, 42, 0.9);
+    /* Eingabefelder und Bedienflaechen INNERHALB einer Karte (Toenung statt
+       fester Farbe, damit sie dem Theme folgt).
+       ACHTUNG: Der Eintrag in body.light ist PFLICHT und keine Dopplung –
+       siehe die Begruendung dort. */
+    --bg-input: rgba(var(--fg-rgb), 0.06);
+
+    --border: rgba(var(--fg-rgb), 0.08);
+    --border-hover: rgba(var(--fg-rgb), 0.15);
+
+    --text-primary: #f8fafc;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+
+    /* Akzent = Markenfarbe (Default Lila, von Branding ueberschrieben) */
+    --accent: #9B59B6;
+    --accent-hover: #BB86FC;
+    --accent-dark: #6A0DAD;
+    --accent-glow: rgba(155, 89, 182, 0.4);
+    --accent-light: rgba(155, 89, 182, 0.1);
+    /* RGB-Tripel des Akzents fuer Toenungen rgba(var(--accent-rgb), …).
+       Wird von branding.js aus der Markenfarbe mitgesetzt. */
+    --accent-rgb: 155, 89, 182;
+    --text-on-accent: #fff;     /* Schrift auf Akzent-/Signalflaechen */
+    /* Akzent-Verlauf fuer Primaer-Buttons (.btn-primary). Akzentbasiert,
+       damit Branding automatisch greift. */
+    --gradient: linear-gradient(135deg, var(--accent), var(--accent-dark));
+
+    --success: #10b981;
+    --warning: #f59e0b;
+    --danger: #ef4444;
+    --info: #3b82f6;
+    /* RGB-Tripel der Statusfarben fuer Toenungen rgba(var(--…-rgb), α). */
+    --success-rgb: 16, 185, 129;
+    --warning-rgb: 245, 158, 11;
+    --danger-rgb: 239, 68, 68;
+    --info-rgb: 59, 130, 246;
+    /* Schrift AUF einer Signalflaeche (Warn-/Gefahr-Badge). Bewusst in BEIDEN
+       Themes derselbe Wert und im Light-Theme NICHT ueberschrieben: die Flaeche
+       darunter (--warning/--danger) wechselt ja auch nicht. Ein helles Pendant
+       waere auf Amber unlesbar (gemessen 2,1:1 gegen 9,6:1). */
+    --on-signal: #101828;
+
+    --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --radius-xl: 24px;
+
+    --shadow-sm: 0 2px 8px rgba(var(--shadow-rgb), 0.3);
+    --shadow-md: 0 4px 16px rgba(var(--shadow-rgb), 0.4);
+    --shadow-lg: 0 8px 32px rgba(var(--shadow-rgb), 0.5);
+    --shadow-glow: 0 0 30px var(--accent-glow);
+
+    --transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ─── Sprachbloecke (lange Fliesstext-Inhalte, z.B. API-Doku) ─────────
+   i18n.js applyLang() setzt html[data-lang]. Default (kein Attribut) = DE. */
+html[data-lang="en"] .i18n-de { display: none !important; }
+html:not([data-lang="en"]) .i18n-en { display: none !important; }
+
+/* ─── Der Akzent-Verlauf muss AUF BODY neu berechnet werden ──────────────
+   `--gradient` steht oben in `:root` (= <html>) und verweist auf `var(--accent)`.
+   Eine Custom Property wird aber auf dem Element BERECHNET, auf dem sie
+   deklariert ist – der fertige Verlauf wird danach nur noch weitervererbt.
+   branding.js setzt die Markenfarbe per Inline-Style auf <body>, also EINE
+   Ebene darunter: der Verlauf blieb dadurch Jarvis-Violett, obwohl der
+   Kommentar an der Deklaration ausdruecklich "damit Branding automatisch
+   greift" verspricht. Aufgefallen am Outlook-Aufgabenfenster (gemeldet
+   2026-08-17): Logo und Markenname standen rot da, der Anmelden-Knopf daneben
+   violett – betroffen war aber JEDE Seite mit `var(--gradient)` (13 Stellen).
+   Diese Zeile deklariert dieselbe Formel noch einmal auf <body>; dort ist die
+   Markenfarbe gesetzt und wird eingerechnet. OHNE Branding kommt exakt derselbe
+   Verlauf heraus wie vorher (`--accent` ist dann der geerbte Vorgabewert). */
+body {
+    --gradient: linear-gradient(135deg, var(--accent), var(--accent-dark));
+    /* Gleiche Falle, am 2026-08-18 mitgemessen: der Schein blieb violett
+       (`rgba(155, 89, 182, .4)`), obwohl `--accent-glow` auf body rot war. */
+    --shadow-glow: 0 0 30px var(--accent-glow);
+}
+
+/* ─── Hell-Theme: kippt nur die Basis-Variablen, alles andere folgt ─── */
+body.light {
+    color-scheme: light;
+
+    --fg-rgb: 17, 24, 39;
+    --shadow-rgb: 15, 23, 42;
+
+    --bg-primary: #f4f5f7;
+    --bg-secondary: #ffffff;
+    --bg-glass: rgba(255, 255, 255, 0.78);
+    --bg-glass-heavy: rgba(255, 255, 255, 0.92);
+    --bg-input: rgba(var(--fg-rgb), 0.06);
+
+    --border: rgba(var(--fg-rgb), 0.12);
+    --border-hover: rgba(var(--fg-rgb), 0.22);
+
+    /* MUESSEN hier wiederholt werden, obwohl die Formel identisch ist: eine
+       Custom Property wird auf dem Element BERECHNET, auf dem sie deklariert
+       ist. Die :root-Fassung friert also auf dem DUNKEL-Wert von --shadow-rgb
+       (0,0,0) ein, und das --shadow-rgb: 15,23,42 zwei Zeilen weiter oben
+       waere wirkungslos. Gemessen am 2026-08-20: ohne diese drei Zeilen kommt
+       im Hell-Theme reines Schwarz heraus statt des Schiefertons.
+       Gleiche Falle wie --gradient (2026-08-17) und --bg-input darueber. */
+    --shadow-sm: 0 2px 8px rgba(var(--shadow-rgb), 0.3);
+    --shadow-md: 0 4px 16px rgba(var(--shadow-rgb), 0.4);
+    --shadow-lg: 0 8px 32px rgba(var(--shadow-rgb), 0.5);
+
+    --text-primary: #1a2233;
+    --text-secondary: #4a5568;
+    --text-muted: #7a8599;
+}
+
+/* ─── Native Dropdowns (option/optgroup) ────────────────────────────────────
+   Steht ABSICHTLICH hier und nicht in style.css: style.css wird nur von
+   settings.html und wissen.html geladen. Auf portal/chat/userchat/support gab
+   es die Regel deshalb nicht – der Browser fuellte das Auswahlmenue mit Weiss,
+   erbte aber die helle Schriftfarbe des Feldes: weisse Schrift auf weissem
+   Grund (gemeldet 2026-07-29 fuer "Issue bearbeiten" → Status). theme.css laedt
+   JEDE Seite, damit gilt die Regel auch fuer Widgets, die ihr CSS selbst
+   mitbringen (issues.js, kbmatrix.js, profile_switcher.js …).
+   Deckende Flaeche ist Pflicht: ein halbtransparenter Feld-Hintergrund
+   (rgba(var(--fg-rgb),.06)) wird im Popup zu fast Weiss. */
+select option,
+select optgroup {
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+}
+select option:checked,
+select option:hover {
+    background-color: var(--accent);
+    color: #ffffff;   /* Text auf Akzentflaeche – gilt in beiden Themes */
+}
+
+/* ─── Diagramme im Chat (```chartjs / ```mermaid) ───────────────────────────
+   Steht hier und NICHT in chat.css – gleiche Begruendung wie bei den
+   Dropdowns oben: chat.css laedt nur chat.html und userchat.html, waehrend
+   charts.js auch von sap.html eingebunden wird. Dort hatte der Container
+   deshalb gar keine Regeln – ohne Hoehe rendert ein Chart.js-Canvas mit
+   maintainAspectRatio:false ins Nichts. */
+.jarvis-chart {
+    position: relative;
+    width: 100%;
+    max-width: 640px;
+    height: 340px;
+    margin: 12px 0;
+    padding: 12px 14px;
+    background: rgba(var(--fg-rgb), 0.03);
+    border: 1px solid rgba(var(--fg-rgb), 0.1);
+    border-radius: 12px;
+    box-sizing: border-box;
+}
+.jarvis-chart canvas { width: 100% !important; height: 100% !important; }
+.jarvis-chart-err {
+    height: auto;
+    color: var(--text-secondary, #f0a0a0);
+    font-size: 0.85rem;
+    font-style: italic;
+}
+
+/* Werkzeugleiste (PNG speichern). Liegt IM Container ueber dem Canvas, wird
+   erst beim Hovern sichtbar und ist deshalb deckend – halbtransparent
+   scheinen die Datenpunkte darunter durch. */
+.jarvis-chart-tools {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    display: flex;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity var(--transition, .2s);
+    z-index: 2;
+}
+.jarvis-chart:hover .jarvis-chart-tools,
+.jarvis-chart-tools:focus-within { opacity: 1; }
+.jarvis-chart-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    cursor: pointer;
+    color: var(--text-secondary);
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border, rgba(var(--fg-rgb), 0.12));
+    border-radius: 6px;
+    transition: color var(--transition, .2s), border-color var(--transition, .2s);
+}
+.jarvis-chart-btn:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+/* Mermaid-Schaubilder (Fluss-, Sequenz-, Gantt-Diagramme). Kein festes
+   Hoehenmass: das SVG bringt seine eigenen Ausmasse mit. */
+.jarvis-mermaid {
+    position: relative;
+    margin: 12px 0;
+    padding: 12px 14px;
+    overflow-x: auto;
+    background: rgba(var(--fg-rgb), 0.03);
+    border: 1px solid rgba(var(--fg-rgb), 0.1);
+    border-radius: 12px;
+    box-sizing: border-box;
+}
+.jarvis-mermaid > svg { max-width: 100%; height: auto; display: block; }
+.jarvis-mermaid-err {
+    color: var(--text-secondary, #f0a0a0);
+    font-size: 0.85rem;
+    font-style: italic;
+    white-space: pre-wrap;
+}
+
+/* Hinweis "⇥ Tab übernimmt den Vorschlag" (frontend/js/tabfill.js).
+   Steht in theme.css und NICHT in style.css: die Felder liegen auf sechs
+   Seiten, und style.css laedt nur /settings und /wissen (gleiche Begruendung
+   wie bei `select option`). Dezent und einzeilig – der Hinweis erscheint nur,
+   solange das Feld leer und fokussiert ist. */
+.jv-tabfill-hint {
+    display: block;
+    margin-top: 4px;
+    font-size: 0.72rem;
+    line-height: 1.4;
+    color: var(--text-muted);
+    opacity: 0.85;
+    pointer-events: none;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Symbole fuer Bedienelemente (frontend/js/icons.js)
+
+   DESIGN-ENTSCHEIDUNG 2026-08-19: Muelleimer = LOESCHEN, × = SCHLIESSEN.
+   Vorher stand fuer beides ein × – teils in derselben Zeile.
+
+   Die Regeln stehen in theme.css und NICHT in style.css: die Symbole
+   erscheinen auf JEDER Seite, style.css laedt aber nur /settings und /wissen
+   (gleiche Begruendung wie bei `select option`, 2026-07-29).
+
+   `1em` + `vertical-align`: das SVG soll genauso gross wirken wie das
+   Text-× daneben – sonst springt die Zeilenhoehe in gemischten Knopfleisten.
+   ═══════════════════════════════════════════════════════════════════════ */
+.jv-ico {
+    width: 1em;
+    height: 1em;
+    display: inline-block;
+    vertical-align: -0.125em;
+    flex-shrink: 0;        /* in Flex-Knopfleisten nicht zusammendruecken lassen */
+}
+/* Der Muelleimer ist filigraner als das Kreuz und wirkt bei gleicher Groesse
+   kleiner – minimal aufziehen, damit beide optisch gleich schwer sind. */
+.jv-ico-trash { width: 1.05em; height: 1.05em; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   CPU-Auslastung in der Titelleiste (frontend/js/cpubar.js)
+
+   Steht in theme.css und NICHT in style.css: die Anzeige erscheint auf
+   JEDER angemeldeten Seite, style.css laedt aber nur /settings und /wissen
+   (gleiche Begruendung wie bei `select option`, 2026-07-29).
+
+   Bis 2026-08-22 lag dieselbe Regel DREIMAL nebeneinander (chat.css,
+   support.html inline, wissen.html inline) – jede mit eigenen Zahlen.
+   `.jv-cpu-bar` ist die eine Fassung; die Farbreihe ist bewusst fest und
+   nicht themenabhaengig: sie bedeutet gruen=frei bis rot=ausgelastet.
+   ═══════════════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════════════
+   Marken-Logo als Weg zum Portal (Vorgabe des Nutzers, 2026-08-26)
+
+   Nur das Aussehen. WELCHE Logos das bekommen, entscheidet
+   `frontend/js/logo_home.js` – naemlich die, deren Seite ueberhaupt einen Weg
+   zum Portal hat. Die Klasse wird von dort gesetzt, damit ein Logo ohne
+   Funktion nicht wie ein Knopf aussieht.
+
+   Steht in theme.css und NICHT in style.css/chat.css: das Logo steht auf jeder
+   Bereichsseite, jene beiden laden nur /settings + /wissen bzw. /chat +
+   /userchat (Register).
+   ═══════════════════════════════════════════════════════════════════════ */
+.jv-logo-home {
+    cursor: pointer;
+    /* Nur eine Andeutung: das Logo ist eine Marke, kein Bedienelement, und
+       soll beim Zeigen nicht wie ein Knopf aufblitzen. */
+    transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.jv-logo-home:hover { opacity: 0.85; }
+.jv-logo-home:active { transform: scale(0.96); }
+/* Sichtbarer Fokus NUR fuer die Tastatur: `:focus` allein setzte nach jedem
+   Mausklick einen Rahmen ums Logo, der bis zum naechsten Klick stehenbleibt. */
+.jv-logo-home:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.jv-cpu-bar {
+    width: 130px;
+    height: 18px;
+    /* KEIN eigener Rand: alle fuenf Wirt-Container arbeiten mit `gap`, ein
+       zusaetzliches `margin-left` addiert sich darauf. Auf /portal waren das
+       10 + 8 = 18 px, waehrend daneben 10 px stehen – ein gemeinsamer
+       Baustein darf seinen Abstand nicht selbst mitbringen. */
+    border-radius: 999px;
+    background: rgba(148, 163, 184, .14);
+    border: 1px solid rgba(148, 163, 184, .55);
+    position: relative;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+.jv-cpu-bar .cpu-bar-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #10b981, #22c55e, #84cc16, #eab308, #f97316, #ef4444);
+    background-size: 300% 100%;
+    transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.jv-cpu-bar .cpu-bar-label {
+    position: absolute;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 0.62rem;
+    font-weight: 600;
+    font-family: var(--font-mono, monospace);
+    color: var(--text-primary);
+    white-space: nowrap;
+    z-index: 1;
+}
+
+/* ── SAP-Serverzertifikat pruefen/verankern (frontend/js/sapcert.js) ──────────
+   Steht in theme.css und NICHT in style.css: der Baustein erscheint auf
+   /settings UND auf /sap – style.css laedt aber nur /settings und /wissen
+   (gleiche Lehre wie bei `select option`, 2026-07-29). */
+.sapcert { margin-top: 8px; }
+.sapcert-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sapcert-btn {
+    flex: 0 0 auto;                 /* .btn-primary/.btn-secondary setzen width:100% */
+    padding: 5px 12px;
+    font-size: .82rem;
+    border-radius: 7px;
+    cursor: pointer;
+    background: rgba(var(--fg-rgb), .06);
+    border: 1px solid rgba(var(--fg-rgb), .18);
+    color: var(--text-primary);
+}
+.sapcert-btn:hover:not(:disabled) { background: rgba(var(--fg-rgb), .12); }
+.sapcert-btn:disabled { opacity: .55; cursor: default; }
+.sapcert-btn.is-primary {
+    margin-top: 10px;
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+.sapcert-state { font-size: .8rem; color: var(--text-secondary); }
+.sapcert-state.is-ok { color: var(--success); }
+.sapcert-state.is-err { color: var(--danger); }
+
+/* Deckende Flaeche: der Kasten liegt ueber Formularinhalt, halbtransparent
+   scheint der Text darunter durch (Lehre von den Panels). */
+.sapcert-box {
+    margin-top: 10px;
+    padding: 10px 12px;
+    border: 1px solid rgba(var(--fg-rgb), .16);
+    border-radius: 8px;
+    background: var(--bg-secondary);
+}
+.sapcert-grid {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 4px 12px;
+    font-size: .82rem;
+}
+.sapcert-k { color: var(--text-secondary); }
+.sapcert-v { color: var(--text-primary); word-break: break-word; min-width: 0; }
+.sapcert-fp {
+    font-family: var(--font-mono, monospace);
+    font-size: .76rem;
+    word-break: break-all;          /* 71 Zeichen muessen umbrechen duerfen */
+}
+.sapcert-verdict { margin: 10px 0 0; font-size: .82rem; line-height: 1.45; }
+.sapcert-verdict.is-ok { color: var(--success); }
+.sapcert-verdict.is-warn { color: var(--warning); }
+.sapcert-verdict.is-err { color: var(--danger); }
+/* Im Hell-Modus sind die Signalfarben auf Weiss zu schwach – gemessen 2,2:1
+   (Warnung), 2,6:1 (Erfolg), 3,8:1 (Fehler). Dieser eine Satz entscheidet, ob
+   jemand ein Zertifikat verankert; er muss lesbar sein. Nur hier abgedunkelt,
+   nicht projektweit: die Signalfarben werden an vielen Stellen als Text
+   benutzt, das waere eine eigene Aufraeumaktion. */
+body.light .sapcert-verdict.is-ok { color: color-mix(in srgb, var(--success) 72%, #000); }
+body.light .sapcert-verdict.is-warn { color: color-mix(in srgb, var(--warning) 62%, #000); }
+body.light .sapcert-verdict.is-err { color: color-mix(in srgb, var(--danger) 78%, #000); }
+body.light .sapcert-state.is-ok { color: color-mix(in srgb, var(--success) 72%, #000); }
+body.light .sapcert-state.is-err { color: color-mix(in srgb, var(--danger) 78%, #000); }
+/* Hinweis-Kaesten mit Signalfarbe (Firmenverzeichnis-Status u. a.). Der Rahmen
+   folgt der Schrift (border-color: currentColor), die Flaeche ist ein Hauch der
+   Farbe. Im Hell-Modus abgedunkelt wie .sapcert-verdict (gleiche Messung). */
+.jv-hinweis-warn { color: var(--warning); background: rgba(var(--warning-rgb), 0.07); border-color: currentColor; }
+.jv-hinweis-ok { color: var(--success); background: rgba(var(--success-rgb), 0.07); border-color: currentColor; }
+.jv-hinweis-info { color: var(--accent-hover); background: rgba(var(--accent-rgb), 0.07); border-color: currentColor; }
+.jv-hinweis-err { color: var(--danger); background: rgba(var(--danger-rgb), 0.07); border-color: currentColor; }
+body.light .jv-hinweis-warn { color: color-mix(in srgb, var(--warning) 62%, #000); }
+body.light .jv-hinweis-ok { color: color-mix(in srgb, var(--success) 72%, #000); }
+body.light .jv-hinweis-info { color: var(--accent-dark); }
+body.light .jv-hinweis-err { color: color-mix(in srgb, var(--danger) 78%, #000); }
+/* Statuspunkt (ersetzt die farbigen Kreis-Emojis im Sicherheits-Reiter): Farbe aus dem Thema,
+   die Aussage steht immer zusaetzlich als Text daneben. */
+.jv-punkt { display: inline-block; width: .62em; height: .62em; border-radius: 50%;
+            vertical-align: middle; background: var(--text-muted); }
+.jv-punkt-ok { background: var(--success); }
+.jv-punkt-warn { background: var(--warning); }
+.jv-punkt-err { background: var(--danger); }
+.jv-punkt-aus { background: var(--text-muted); }
+.sapcert-hint {
+    margin: 8px 0 0;
+    font-size: .76rem;
+    color: var(--text-muted, var(--text-secondary));
+    line-height: 1.4;
+}
+.sapcert-pinned {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    padding: 5px 10px;
+    border-radius: 7px;
+    border: 1px solid rgba(var(--success-rgb), .35);
+    background: rgba(var(--success-rgb), .10);
+    font-size: .78rem;
+}
+.sapcert-pinned-txt { flex: 1 1 auto; min-width: 0; word-break: break-word; }
+.sapcert-icon {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    background: none;
+    border: none;
+    padding: 2px;
+    cursor: pointer;
+    color: var(--text-secondary);
+}
+.sapcert-icon:hover { color: var(--danger); }
+
+/* ── Badge am Einstellungs-Zahnrad (settings_btn.js) ────────────────────────
+ * Offene Root-Freigaben und gesperrte Konten. Steht HIER und nicht in
+ * style.css: das Zahnrad sitzt auf elf Seiten, style.css laden aber nur
+ * /settings und /wissen (gleiche Lehre wie bei `select option`, 2026-07-29).
+ *
+ * Die Hoehe wird NICHT am Knopf verankert – vier verschiedene Knopf-Klassen
+ * tragen ihn (.btn-theme, .pt-btn, .wi-icon-btn, .ad-btn). Das JS setzt
+ * stattdessen `.jv-gear-host`, damit `position: absolute` einen Bezug hat,
+ * ohne dass eine dieser vier Klassen angefasst werden muss. */
+.jv-gear-host { position: relative; }
+.jv-gear-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    box-sizing: border-box;
+    border-radius: 8px;
+    background: var(--warning);
+    color: var(--on-signal);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 16px;
+    text-align: center;
+    /* Ring in der Seitenfarbe, damit die Badge auch auf dem Zahnrad-Symbol
+     * ablesbar bleibt. */
+    box-shadow: 0 0 0 2px var(--bg-primary);
+    /* Absicht: NICHT `none`. Nur mit Zeigerereignissen erscheint der Tooltip,
+     * und der Klick blubbert weiterhin an den Knopf (= /settings). */
+    pointer-events: auto;
+    cursor: pointer;
+}
+/* Eine Sperre ist dringlicher als eine offene Freigabe. */
+.jv-gear-badge.is-danger { background: var(--danger); }
+
+/* ── Mouseover am Zahnrad-Badge: was hinter der Zahl steckt ─────────────────
+ * Bauform des Issues-Badge-Panels (`.jv-iss-tip`), aber EIGENE Klassen und
+ * hier statt dort: jenes CSS spritzt issues.js zur Laufzeit ein, und das Modul
+ * liegt nicht auf allen Seiten mit Zahnrad. Eine geteilte Klasse waere eine
+ * Abhaengigkeit, die genau auf der Seite ausfaellt, die issues.js nicht laedt.
+ *
+ * DECKENDE Flaeche (Register): das Panel liegt ueber der Seite. Es haengt an
+ * `body` und ist `fixed` – in der Titelleiste eingehaengt bliebe es an deren
+ * overflow/Stapelkontext haengen und waere auf schmalen Fenstern abgeschnitten.
+ * z-index knapp unter dem Issues-Panel (99990) und unter jedem Modal. */
+.jv-gear-tip {
+    position: fixed;
+    z-index: 99988;
+    display: none;
+    width: min(360px, calc(100vw - 16px));
+    max-height: min(60vh, 420px);
+    overflow-y: auto;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 1px solid rgba(var(--accent-rgb), .35);
+    border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(var(--shadow-rgb), .5);
+    font-size: 12px;
+    padding: 8px;
+    text-align: left;
+}
+.jv-gear-tip-h {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    padding: 2px 4px 6px;
+}
+.jv-gear-tip-row {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    border-radius: 7px;
+    padding: 7px 8px;
+    cursor: pointer;
+    color: inherit;
+    font: inherit;
+}
+.jv-gear-tip-row:hover,
+.jv-gear-tip-row:focus-visible { background: rgba(var(--accent-rgb), .10); outline: none; }
+.jv-gear-tip-top { display: flex; align-items: center; gap: 6px; }
+/* `min-width: 0` ist Pflicht, nicht Kosmetik: ein Flex-Kind schrumpft von sich
+ * aus nicht unter seine Inhaltsbreite – ohne die Zeile schiebt ein langer
+ * Root-Befehl die Pille aus dem Panel, statt dass die Ellipse greift. */
+.jv-gear-tip-t {
+    font-weight: 600;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-primary);
+}
+/* Signalfarben sind bei 9 px auf Weiss unlesbar (var(--warning) misst 2,15:1).
+ * Abgedunkelt wie beim Issues-Panel; die Pille bringt ihre eigene Flaeche mit,
+ * der Wert gilt deshalb in BEIDEN Themes. */
+.jv-gear-tip-k {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    padding: 1px 6px;
+    border-radius: 9px;
+    color: #fff;
+    background: #4b5563;
+    flex: 0 0 auto;
+}
+.jv-gear-tip-k.root    { background: #b45309; }
+.jv-gear-tip-k.blocked { background: #b91c1c; }
+.jv-gear-tip-sub { color: var(--text-secondary); font-size: 11px; margin-top: 2px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* --text-muted waere hier 3,72:1 bei 10-11 px – fuer eine Zeile, die eine
+ * Kuerzung erklaert, zu wenig. --text-secondary misst 7,53:1. */
+.jv-gear-tip-more {
+    color: var(--text-secondary);
+    font-size: 11px;
+    padding: 6px 8px 2px;
+    border-top: 1px solid rgba(var(--fg-rgb), .08);
+    margin-top: 4px;
+}
+.jv-gear-tip-hint { color: var(--text-secondary); font-size: 10px; padding: 4px 8px 0; }
+
+/* ── Prompt-Pruefung (frontend/js/prompt_check.js) ──────────────────────────
+   IN theme.css UND NICHT in style.css/chat.css: der Knopf sitzt in mehreren
+   Bereichsseiten (/tracks, /email, Einstellungen), und die laden style.css
+   bzw. chat.css nicht alle. Eine Regel in der falschen Datei wirkt dort
+   stillschweigend nicht (Register: globale UI-Regeln gehoeren hierher). */
+.jv-pc-overlay {
+    position: fixed;
+    inset: 0;
+    /* DECKENDE Toenung, kein reines rgba(0,0,0,.5): darunter liegen Formulare
+       mit Text, der sonst durchscheint (Register). */
+    background: rgba(var(--shadow-rgb), 0.62);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    z-index: 4000;
+}
+.jv-pc-overlay[hidden] { display: none; }
+
+.jv-pc-box {
+    /* DECKEND, nicht --bg-glass: eine halbtransparente Flaeche ueber einem
+       Formular macht den eigenen Text unlesbar. */
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 18px 48px rgba(var(--shadow-rgb), 0.45);
+    width: min(720px, 100%);
+    /* Am SICHTFENSTER gemessen, nicht an einer festen Zahl – dieselbe Lehre wie
+       bei der Update-Pill: 440px passen auf einem kleinen Fenster ebenfalls
+       nicht. */
+    max-height: calc(100vh - 48px);
+    display: flex;
+    flex-direction: column;
+}
+.jv-pc-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border);
+    flex: 0 0 auto;
+}
+.jv-pc-head h3 { margin: 0; font-size: 1.02rem; }
+
+/* Der Koerper scrollt, Kopf und Fuss stehen fest. `min-height: 0` ist Pflicht:
+   ohne das schrumpft ein Flex-Kind nicht unter seine Inhaltshoehe, overflow
+   bleibt wirkungslos und die Fusszeile wird aus dem Kasten gedrueckt. */
+.jv-pc-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 16px 18px;
+}
+.jv-pc-foot {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 18px;
+    border-top: 1px solid var(--border);
+}
+/* .btn-primary/.btn-secondary tragen width:100% – in einer Knopfzeile fressen
+   sie sonst die ganze Breite (Register). */
+.jv-pc-foot .btn-primary,
+.jv-pc-foot .btn-secondary { width: auto; flex: 0 0 auto; }
+.jv-pc-model {
+    margin-left: auto;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+}
+
+.jv-pc-sect { margin-bottom: 16px; }
+.jv-pc-sect:last-child { margin-bottom: 0; }
+.jv-pc-sect h4 {
+    margin: 0 0 6px;
+    font-size: 0.86rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+}
+.jv-pc-sect p { margin: 0; line-height: 1.5; }
+.jv-pc-sect ul { margin: 0; padding-left: 20px; }
+.jv-pc-sect li { margin-bottom: 4px; line-height: 1.45; }
+/* Zustand doppelt tragen – Farbe allein ist keine Information (Register):
+   die Ueberschriften benennen "offen" und "Risiko" im Text. */
+.jv-pc-ass h4 { color: var(--warning); }
+.jv-pc-risk h4 { color: var(--danger); }
+.jv-pc-warn {
+    margin: 0 0 12px;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    background: rgba(var(--warning-rgb), 0.12);
+    border: 1px solid rgba(var(--warning-rgb), 0.35);
+}
+.jv-pc-pre {
+    margin: 0;
+    padding: 10px 12px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: inherit;
+    font-size: 0.9rem;
+    line-height: 1.45;
+    /* Wide content scrollt in seinem eigenen Container – der Kasten selbst
+       darf nicht waagerecht scrollen. */
+    overflow-x: auto;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Installierte Pakete (syspackages.js) – ⓘ rechts neben der CPU-Anzeige
+
+   Steht in theme.css und NICHT in style.css/chat.css: der Knopf sitzt auf
+   JEDER Seite mit Titelleiste, jene beiden laden nur /settings + /wissen bzw.
+   /chat + /userchat (Register).
+
+   Der Knopf bringt bewusst KEINEN eigenen Aussenabstand mit: alle fuenf
+   Wirt-Container arbeiten mit `gap`, ein `margin-left` addierte sich darauf
+   (auf /portal waren das seinerzeit 10 + 8 = 18 px). Den Abstand setzt der
+   Wirt – dieselbe Lehre wie bei `.jv-cpu-bar`.
+   ═══════════════════════════════════════════════════════════════════════ */
+.jv-pkg-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted, #888899);
+    padding: 3px 5px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    line-height: 0;
+    transition: color .15s ease, background .15s ease;
+}
+.jv-pkg-btn:hover { background: rgba(var(--accent-rgb), .12); color: var(--text-primary); }
+.jv-pkg-btn:focus-visible { outline: 2px solid rgba(var(--accent-rgb), .8); outline-offset: 2px; }
+
+/* Der Kasten liegt ueber der ganzen Seite: eine Paketliste braucht Platz, und
+   ein Aufklapp-Panel in der Titelleiste waere fuer 2800 Zeilen die falsche
+   Bauform. */
+.jv-pkg-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 99990;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 16px;
+    /* DECKENDE Abdunklung: darunter liegen Karten mit Text (Register). */
+    background: rgba(0, 0, 0, .55);
+}
+.jv-pkg-overlay.an { display: flex; }
+.jv-pkg-box {
+    display: flex;
+    flex-direction: column;
+    width: min(1100px, 100%);
+    max-height: 100%;
+    /* DECKEND, nicht `--bg-glass`: sonst scheint die Seite durch die Tabelle. */
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, .45);
+    padding: 14px 16px 12px;
+    /* ⚠ `min-height: 0` ist Pflicht, kein Feinschliff: ohne die Zeile schrumpft
+       der scrollende Koerper nicht unter seine Inhaltshoehe, `overflow-y`
+       bleibt wirkungslos und die Fusszeile wird aus dem Kasten gedrueckt
+       (dieselbe Stelle wie beim Update-Popup). */
+    min-height: 0;
+}
+.jv-pkg-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.jv-pkg-h { font-size: 1.02rem; font-weight: 700; }
+/* Schiebt Download und × nach rechts – und `margin-left: auto` am ersten
+   nachfolgenden Element statt eines Abstandhalter-Elements. */
+.jv-pkg-head .jv-pkg-dl { margin-left: auto; }
+.jv-pkg-dl {
+    background: rgba(var(--accent-rgb), .16);
+    border: 1px solid rgba(var(--accent-rgb), .45);
+    color: var(--text-primary);
+    border-radius: 8px;
+    padding: 5px 12px;
+    font: inherit;
+    font-size: .82rem;
+    cursor: pointer;
+}
+.jv-pkg-dl:hover { background: rgba(var(--accent-rgb), .28); }
+.jv-pkg-close {
+    margin-left: 4px;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 1.2rem;
+    line-height: 1;
+    padding: 2px 8px;
+    border-radius: 8px;
+    cursor: pointer;
+}
+.jv-pkg-close:hover { background: rgba(var(--accent-rgb), .12); color: var(--text-primary); }
+.jv-pkg-head .jv-pkg-close:only-of-type { margin-left: auto; }
+.jv-pkg-meta { font-size: .78rem; color: var(--text-secondary); margin-bottom: 8px; }
+.jv-pkg-suche {
+    width: 100%;
+    box-sizing: border-box;
+    margin-bottom: 8px;
+    padding: 7px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-primary, var(--bg-secondary));
+    color: var(--text-primary);
+    font: inherit;
+    font-size: .85rem;
+}
+.jv-pkg-scroll {
+    flex: 1 1 auto;
+    min-height: 0;             /* s.o. – sonst scrollt der Kasten statt der Tabelle */
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+.jv-pkg-tab { width: 100%; border-collapse: collapse; font-size: .8rem; }
+/* Der Kopf bleibt beim Scrollen stehen – sticky an den ZELLEN, nicht an der
+   Zeile, und mit DECKENDER Flaeche: bei `border-collapse: collapse` bleiben die
+   Zellen sonst nicht zuverlaessig beim Kopf, und halbtransparent scheint die
+   erste Datenzeile durch (Register: genau dieser Fall im Audit-Log). */
+.jv-pkg-tab thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background-color: var(--bg-secondary);
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-secondary);
+    padding: 7px 9px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    white-space: nowrap;
+    user-select: none;
+}
+.jv-pkg-tab thead th:hover { color: var(--text-primary); }
+.jv-pkg-tab td { padding: 5px 9px; border-bottom: 1px solid rgba(var(--fg-rgb, 148,163,184), .10); vertical-align: top; }
+.jv-pkg-tab tbody tr:hover td { background: rgba(var(--accent-rgb), .07); }
+.jv-pkg-n { font-family: var(--font-mono, monospace); white-space: nowrap; }
+.jv-pkg-v { font-family: var(--font-mono, monospace); font-size: .95em; color: var(--text-secondary); white-space: nowrap; }
+.jv-pkg-r { text-align: right; white-space: nowrap; }
+.jv-pkg-d { white-space: nowrap; color: var(--text-secondary); }
+.jv-pkg-s { color: var(--text-secondary); }
+.jv-pkg-hold {
+    font-size: .7rem;
+    padding: 0 5px;
+    border-radius: 6px;
+    background: rgba(245, 158, 11, .22);
+    border: 1px solid rgba(245, 158, 11, .5);
+    color: var(--text-primary);
+}
+/* ⚠ `flex: 0 0 auto`: die Fusszeile traegt jetzt den Aufklapp-Bereich und darf
+   NICHT gestaucht werden – ein Flex-Kind ist von sich aus `0 1 auto` und gibt
+   unter Druck als Erstes nach. Die Tabelle darueber hat `min-height: 0` und
+   schrumpft stattdessen, was hier richtig ist. */
+.jv-pkg-fuss { font-size: .74rem; color: var(--text-secondary); padding-top: 8px; flex: 0 0 auto; }
+.jv-pkg-lade, .jv-pkg-fehler { padding: 26px 4px; text-align: center; color: var(--text-secondary); }
+.jv-pkg-fehler { color: var(--danger, #ef4444); }
+
+/* ── „Wie diese Liste entsteht" ─────────────────────────────────────────────
+   Herkunft der Zahlen samt Einzeilern zum Nachrechnen. Zugeklappt kostet der
+   Abschnitt eine Zeile; aufgeklappt bekommt er einen EIGENEN Deckel mit eigenem
+   Scroll – ohne den koennte er auf einem niedrigen Fenster die Tabelle ganz
+   verdraengen, also genau das wegdruecken, worum es im Kasten geht. */
+.jv-pkg-wie { margin-top: 6px; }
+.jv-pkg-wie > summary {
+    cursor: pointer;
+    color: var(--text-secondary);
+    padding: 3px 0;
+    user-select: none;
+    border-radius: 6px;
+}
+.jv-pkg-wie > summary:hover { color: var(--text-primary); }
+.jv-pkg-wie > summary:focus-visible { outline: 2px solid rgba(var(--accent-rgb), .8); outline-offset: 2px; }
+.jv-pkg-wie-in {
+    max-height: 38vh;
+    overflow-y: auto;
+    margin-top: 4px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    /* DECKEND: der Bereich liegt im Kasten ueber nichts, aber er soll sich vom
+       Tabellenrahmen darueber absetzen (Register: nie halbtransparent). */
+    background: var(--bg-primary, var(--bg-secondary));
+}
+.jv-pkg-wie-in p { margin: 0 0 8px; line-height: 1.5; }
+.jv-pkg-wie-in p:last-child { margin-bottom: 0; }
+
+.jv-pkg-cmdrow {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 0 0 10px;
+}
+.jv-pkg-cmd {
+    /* ⚠ `min-width: 0` ist Pflicht: ein Flex-Kind schrumpft von sich aus nicht
+       unter seine Inhaltsbreite, und der Befehl ist eine lange Zeile – ohne die
+       Zeile schoebe er den Kopier-Knopf aus dem Kasten (Register). */
+    flex: 1 1 auto;
+    min-width: 0;
+    font-family: var(--font-mono, monospace);
+    font-size: .74rem;
+    line-height: 1.45;
+    /* Umbrechen statt waagerecht scrollen: der Befehl soll VOLLSTAENDIG lesbar
+       sein – er ist der Beleg. `anywhere`, weil das Formatargument ein einziger
+       langer Lauf ohne Leerzeichen ist und sonst ueber den Rand liefe. */
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+}
+.jv-pkg-copy {
+    flex: 0 0 auto;
+    background: rgba(var(--accent-rgb), .14);
+    border: 1px solid rgba(var(--accent-rgb), .40);
+    color: var(--text-primary);
+    border-radius: 6px;
+    padding: 5px 10px;
+    font: inherit;
+    font-size: .74rem;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.jv-pkg-copy:hover { background: rgba(var(--accent-rgb), .26); }
+.jv-pkg-copy:focus-visible { outline: 2px solid rgba(var(--accent-rgb), .8); outline-offset: 2px; }
+/* Der Fehlschlag traegt seine Aussage doppelt (Farbe UND Text) – Farbe allein
+   ist keine Information (Projektregel). */
+.jv-pkg-copy.ist-fehler {
+    background: rgba(239, 68, 68, .16);
+    border-color: rgba(239, 68, 68, .5);
+}
+
+@media (max-width: 720px) {
+    /* Auf schmalen Fenstern faellt die Beschreibung heraus – sie ist die
+       laengste Spalte und die am ehesten verzichtbare. Die Suche findet sie
+       weiterhin. */
+    .jv-pkg-tab .jv-pkg-s, .jv-pkg-tab th[data-sort="summary"] { display: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Systemauslastung hinter der CPU-Anzeige (frontend/js/sysload.js)
+
+   Rahmen, Kopf, Tabelle und Fusszeile kommen vom Paket-Fenster (`.jv-pkg-*`);
+   hier steht nur, was dazukommt: die vier Kacheln mit Verlauf und die
+   CPU-Spalte der Prozessliste. Nur Administratoren sehen den Klick.
+   ═══════════════════════════════════════════════════════════════════════ */
+.jv-cpu-bar.jv-cpu-klick { cursor: pointer; }
+.jv-cpu-bar.jv-cpu-klick:hover { border-color: var(--accent); }
+.jv-cpu-bar.jv-cpu-klick:focus-visible { outline: 2px solid rgba(var(--accent-rgb), .8); outline-offset: 2px; }
+
+.jv-load-box { width: min(1180px, 100%); }
+/* Der Koerper scrollt als Ganzes: vier Kacheln + 20 Zeilen passen auf einem
+   Laptop nicht untereinander. `min-height: 0` aus demselben Grund wie in
+   `.jv-pkg-box`. */
+.jv-load-body { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
+.jv-load-body .jv-pkg-scroll { flex: 0 0 auto; overflow-x: auto; }
+.jv-load-live { font-size: .72rem; color: var(--success); margin-right: auto; }
+.jv-load-live::before { content: '●'; margin-right: 4px; }
+.jv-load-live:empty { display: none; }
+.jv-load-live.ist-fehler { color: var(--danger); }
+
+.jv-load-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 10px;
+    margin-bottom: 12px;
+}
+.jv-load-tile {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 9px 11px 8px;
+    background: rgba(var(--fg-rgb, 148,163,184), .04);
+    min-width: 0;
+}
+.jv-load-tile-h { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.jv-load-tile-h span { font-size: .8rem; color: var(--text-secondary); font-weight: 600; }
+.jv-load-tile-h b { font-size: 1.15rem; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+.jv-load-sub { font-size: .72rem; color: var(--text-secondary); margin-top: 5px; font-variant-numeric: tabular-nums; }
+
+.jv-load-spark { display: block; width: 100%; height: 56px; }
+.jv-load-base { stroke: rgba(var(--fg-rgb, 148,163,184), .25); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.jv-load-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.jv-load-line.s1 { stroke: var(--accent); }
+.jv-load-line.s2 { stroke: var(--warning); stroke-dasharray: 4 3; }
+.jv-load-area.s1 { fill: rgba(var(--accent-rgb), .16); stroke: none; }
+.jv-load-hit { fill: transparent; }
+.jv-load-hit:hover { fill: rgba(var(--fg-rgb, 148,163,184), .12); }
+
+.jv-load-leg { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: .72rem; color: var(--text-secondary); margin-top: 4px; }
+.jv-load-leg b { color: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
+.jv-load-dot { display: inline-block; width: 10px; height: 3px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+.jv-load-dot.s1 { background: var(--accent); }
+.jv-load-dot.s2 { background: var(--warning); }
+
+.jv-load-meter {
+    height: 8px;
+    border-radius: 999px;
+    background: rgba(var(--fg-rgb, 148,163,184), .14);
+    overflow: hidden;
+    margin-top: 6px;
+}
+.jv-load-meter.klein { height: 5px; margin-top: 3px; }
+.jv-load-meter-fill { height: 100%; border-radius: 999px; background: var(--accent); transition: width .5s ease; }
+.jv-load-meter-fill.hoch { background: var(--warning); }
+.jv-load-meter-fill.kritisch { background: var(--danger); }
+
+.jv-load-cores { display: flex; gap: 2px; height: 26px; align-items: flex-end; margin-top: 6px; }
+.jv-load-core {
+    flex: 1 1 0;
+    min-width: 3px;
+    height: 100%;
+    display: flex;
+    align-items: flex-end;
+    border-radius: 3px;
+    background: rgba(var(--fg-rgb, 148,163,184), .12);
+    overflow: hidden;
+}
+.jv-load-core > div { width: 100%; background: var(--accent); border-radius: 3px 3px 0 0; transition: height .5s ease; }
+
+.jv-load-part { margin-top: 6px; }
+.jv-load-part-h { display: flex; justify-content: space-between; gap: 8px; font-size: .72rem; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.jv-load-mono { font-family: var(--font-mono, monospace); }
+
+.jv-load-top-h { font-size: .86rem; font-weight: 700; margin: 2px 0 6px; }
+.jv-load-tab td { vertical-align: middle; }
+.jv-load-rang { color: var(--text-secondary); width: 2em; }
+.jv-load-cmd {
+    font-family: var(--font-mono, monospace);
+    font-size: .72rem;
+    color: var(--text-secondary);
+    max-width: 520px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.jv-load-cpucell { min-width: 110px; }
+.jv-load-cpuwert { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+@media (max-width: 720px) {
+    .jv-load-cmd { max-width: 180px; }
+    .jv-load-tab th:nth-child(4), .jv-load-tab td:nth-child(4),
+    .jv-load-tab th:nth-child(7), .jv-load-tab td:nth-child(7) { display: none; }
+}
+
+
+/* ─── Bestaetigung vor dem Anzeigen eines Geheimnisses (BSI M5, pwreveal.js) ──
+   Eigene Knopfklassen statt .btn-*: style.css (dort stehen die) laedt nur auf
+   /settings und /wissen, der Dialog erscheint aber auf jeder Seite mit einem
+   Auge. Deckende Flaeche (Register: was ueber Inhalt liegt, braucht sie). */
+.jv-reauth {
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(var(--shadow-rgb), 0.55);
+}
+.jv-reauth-karte {
+    width: 100%;
+    max-width: 380px;
+    box-sizing: border-box;
+    padding: 20px;
+    border-radius: 12px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-hover);
+    box-shadow: 0 12px 40px rgba(var(--shadow-rgb), 0.45);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.jv-reauth-titel { margin: 0; font-size: 1.05em; color: var(--text-primary); }
+.jv-reauth-text { margin: 0; font-size: 0.9em; line-height: 1.45; color: var(--text-secondary); }
+.jv-reauth-feld { display: flex; flex-direction: column; gap: 4px; font-size: 0.9em;
+                  color: var(--text-secondary); }
+.jv-reauth-feld input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    border-radius: 7px;
+    border: 1px solid var(--border-hover);
+    background: var(--bg-input);
+    color: var(--text-primary);
+    font: inherit;
+}
+/* Das Auge (pwreveal.js) legt einen Wrapper mit der GEMESSENEN Feldbreite in
+   px um das Kennwortfeld – im schmalen Fenster ragte das Feld damit ueber die
+   Karte hinaus (Screenshot 380 px). Im Dialog gilt immer die volle Breite. */
+.jv-reauth-feld .jv-pw-wrap { width: 100% !important; }
+.jv-reauth-feld .jv-pw-wrap > input { width: 100% !important; }
+.jv-reauth-fehler { font-size: 0.9em; color: var(--text-primary);
+                    border-left: 3px solid var(--danger); padding: 4px 8px;
+                    background: rgba(var(--danger-rgb), 0.12); }
+.jv-reauth-knoepfe { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.jv-reauth-knopf {
+    flex: 0 0 auto;
+    padding: 8px 16px;
+    border-radius: 7px;
+    border: 1px solid var(--border-hover);
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+    font: inherit;
+}
+.jv-reauth-knopf:hover { background: var(--bg-input); }
+.jv-reauth-haupt { background: var(--accent); border-color: var(--accent); color: #ffffff; /* Text auf Akzentflaeche – gilt in beiden Themes */ }
+.jv-reauth-haupt:hover { background: var(--accent-dark); }
+.jv-reauth-knopf:disabled { opacity: .6; cursor: wait; }
+
+/* ─── Auge am Kennwortfeld (frontend/js/pwreveal.js) ─────────────────────────
+   In theme.css und NICHT in style.css: Kennwortfelder gibt es auf jeder Seite
+   (Login, /email, /sap, /vemas, /jira-addon, die Office-Aufgabenfenster) –
+   style.css laedt nur /settings und /wissen. Register: globale Regeln gehoeren
+   hierher, sonst greift die Regel auf den uebrigen Seiten nicht. */
+.jv-pw-wrap { position: relative; display: block; }
+.jv-pw-host { position: relative; }
+
+/* Das Feld braucht Platz fuer den Knopf, sonst liegt er auf dem Text.
+   `!important` ist hier begruendet: viele dieser Felder tragen ein
+   Inline-`style` mit eigenem padding (gewachsener Bestand), und ein
+   Inline-Style gewinnt gegen jede Klassenregel. */
+.jv-pw-wrap > input[type="password"],
+.jv-pw-wrap > input[type="text"],
+.jv-pw-host > input[type="password"],
+.jv-pw-host > input[type="text"] { padding-right: 38px !important; }
+
+.jv-pw-eye {
+    position: absolute;
+    top: 50%;
+    right: 8px;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    padding: 4px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-muted, #888);
+    opacity: .8;
+    /* Ueber dem Feld, aber unter Dialogen/Popups. */
+    z-index: 2;
+    line-height: 1;
+}
+.jv-pw-eye:hover { opacity: 1; }
+/* :focus-visible, NICHT :focus – sonst bleibt nach jedem Mausklick ein
+   Rahmen stehen (Register). */
+.jv-pw-eye:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.jv-pw-eye .jv-ico { width: 15px; height: 15px; }
+
+/* ── Netzwerkpfad einer Wissensquelle (Chat, /support, /sap) ──────────────────
+ * Er wird von renderMarkdown verlinkt (chatlib.js). Die Regel gehoert in
+ * theme.css und nicht in chat.css: renderMarkdown laeuft auch auf /support,
+ * /sap und im Skill-Dialog – in chat.css waere die Zeile dort wirkungslos.
+ *
+ * `overflow-wrap: anywhere` ist kein Feinschliff: ein UNC-Pfad ist ein Wort
+ * ohne Trennstelle ("\\10.0.0.10\OneNote_text_Ablage\0001_Projekt\…") und
+ * sprengt sonst die Blase bzw. erzeugt einen waagerechten Ueberlauf. */
+.jv-netzquelle {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+/* ── Titelleisten brechen um, statt ueberzulaufen ────────────────────────────
+   ⚠ GEMESSEN 2026-09-22 im echten Chrome, nicht geschaetzt: bei 520 px
+   Fensterbreite lief /portal um 344 px ueber, /chat um 328, /wissen um 129,
+   /sap um 98, /claude um 61, /vemas um 53 und /support um 47 – /portal und
+   /chat sogar bei 700 px noch (164 bzw. 148). Die Ursache ist ueberall
+   dieselbe: die Symbolreihe der Leiste bricht nicht um, und der Titel daneben
+   schrumpft nicht unter seine Inhaltsbreite – ein Flex-Kind tut das von sich
+   aus nicht (Register).
+
+   ⚠ DIE LEISTEN SIND JE SEITE INLINE DEFINIERT, eine gemeinsame Quelle gibt es
+   nicht: zwoelf Seiten teilen sich `.topbar`/`.topbar-title`/`.topbar-right`,
+   dazu vier Sonderformen (`wi-`, `pt-`, `sa-`, `ad-`). Die Aufzaehlung hier ist
+   aus dem Markup GEZAEHLT, nicht geraten – und dass sie vollstaendig ist, wird
+   NICHT gepflegt, sondern GEMESSEN: `tests/live_topbar_umbruch_dev.py` faehrt
+   jede Bereichsseite bei 520 px an und verlangt Ueberlauf 0. Eine kuenftige
+   Seite mit eigener Leisten-Klasse faellt damit von selbst auf, ohne dass
+   jemand diese Zeile pflegt.
+
+   ⚠ BEI NORMALER BREITE AENDERT SICH NICHTS – bei 900 px gemessen 0 vorher wie
+   nachher: `flex-wrap` wirkt erst, wenn es sonst ueberlaufen WUERDE. */
+.topbar, .wi-topbar, .pt-topbar, .sa-topbar, .ad-top { flex-wrap: wrap; }
+/* ⚠ `.topbar-left` GEHOERT DAZU – gemessen, nicht angenommen: nach der Regel
+   oben blieben auf /chat noch 4 px Ueberlauf, breitestes Element war diese
+   linke Gruppe (Verlaufsknopf, Avatar, Titel, Statuspunkt, CPU-Balken). Im
+   echten Chrome bei 520 px durchgespielt: `min-width: 0` und `flex-wrap: wrap`
+   fuehren EINZELN zum selben Ergebnis (337 -> 317 px, 0 px Ueberlauf). Beide
+   zu setzen waere die Zeile, deren Entfernen nichts aendert. Gewaehlt ist
+   `flex-wrap`, weil es dieselbe Regel wie fuer die Symbolgruppe rechts ist und
+   nichts abschneidet, sondern umbrechen laesst. `jira_addon.css` loest es fuer
+   dieselbe Klasse ueber `min-width: 0` – beides ist richtig, nur nicht beides
+   zusammen. */
+
+/* Der Titel ist das Kind, das nachgeben soll – ohne `min-width: 0` schrumpft es
+   nicht unter seine Inhaltsbreite und zwingt die Symbole aus der Zeile. */
+.topbar-title, .wi-title, .pt-title, .sa-title, .ad-title { min-width: 0; }
+
+/* Die Symbolgruppe bricht SELBST um. Noetig, wo sie allein schon breiter ist
+   als das Fenster (/support: 536 px bei 520 px Fensterbreite) – dort genuegt
+   der Umbruch der Leiste nicht, und ein halb abgeschnittener Knopf waere
+   schlechter als eine zweite Zeile. */
+.topbar-right, .wi-top-icons, .pt-top-icons, .sa-top-icons, .ad-top-icons,
+.topbar-left {
+    flex-wrap: wrap;
+}
+
+/* ── Seite maximieren (Knopf ⛶ oben rechts ueber den Kacheln) ─────────────
+   Vorbild /wissen (Vorgabe 2026-09-28): der Knopf sitzt AUSSERHALB der
+   Container ganz oben in der Seite, maximiert faellt die Breiten-Deckelung des
+   Inhaltsbereichs weg (`data-jv-breit`). Logik in `js/seite_breit.js`.
+   Bauform 1:1 von `.wi-max-btn` (/wissen) – dasselbe Bedienelement soll
+   ueberall gleich aussehen.
+
+   Spezifitaet (0,2,1) schlaegt die Seitenregeln der Form `.xx-wrap
+   { max-width }` (0,1,0), auch wenn diese im <style> der Seite NACH theme.css
+   stehen – ohne `!important`. */
+body.jv-breit [data-jv-breit] { max-width: none; }
+.jv-max-row { display: flex; justify-content: flex-end; align-items: center;
+    margin: 0 0 10px; }
+.jv-max-btn { background: none; border: 1px solid var(--border);
+    color: var(--text-secondary); width: 28px; height: 28px; border-radius: 8px;
+    cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+    font-size: 16px; line-height: 1; padding: 0; flex-shrink: 0; font-family: inherit; }
+.jv-max-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+/* Der gedrueckte Zustand ist am KNOPF zu sehen, nicht nur am Zeichen. */
+.jv-max-btn.active { border-color: var(--accent); color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.jv-max-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ── Fokus-/Hover-Hervorhebung ohne Inline-Handler ───────────────────────
+   BSI H4, CSP ohne Inline-Skript (2026-10-04): bis hierher setzten
+   onfocus/onblur bzw. onmouseover/onmouseout diese Werte per Skript direkt in
+   den style der Elemente. Die CSP laesst solche Handler nicht mehr zu – jetzt
+   dieselbe Wirkung als CSS. `!important` ist hier noetig, weil die Elemente
+   Rahmen/Farbe/Deckkraft als INLINE-style tragen und der sonst gewinnt
+   (frueher ueberschrieb das Skript eben diesen Inline-Wert). */
+.login-form #login-username:focus,
+.login-form #login-password:focus,
+.login-form #login-totp:focus {
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.2) !important;
+}
+.login-form #btn-toggle-login-pw:hover { color: var(--text-primary) !important; }
+#btn-discover-models:hover { opacity: 1 !important; }
+
+/* Loeschkonzept (BSI M9) – System-Einstellungen */
+.lk-zeile { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; }
+.lk-label { flex: 1 1 220px; min-width: 0; font-size: 0.82rem; color: var(--text-secondary); }
+.lk-wert { width: 90px; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border);
+           background: var(--bg-glass); color: var(--text-primary); font-size: 0.85rem; }
+.lk-info { flex: 1 1 200px; font-size: 0.78rem; color: var(--text-muted); }
+.lk-mem { display: flex; gap: 8px; align-items: flex-start; padding: 6px 0;
+          border-bottom: 1px solid var(--border); }
+.lk-mem-text { flex: 1 1 auto; min-width: 0; font-size: 0.82rem; color: var(--text-primary);
+               overflow-wrap: anywhere; }
+.lk-mem-wert { color: var(--text-secondary); }
+.lk-mem-zeit { font-size: 0.72rem; color: var(--text-muted); margin-top: 2px; }
+.lk-leer { font-size: 0.82rem; color: var(--text-muted); }
+.lk-fehler { font-size: 0.78rem; color: var(--danger); margin-top: 4px; }
+/* --danger haelt als Schrift nur auf dunkler Flaeche (Register fallstricke.md) */
+body.light .lk-fehler { color: color-mix(in srgb, var(--danger) 78%, #000); }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Anmeldemaske waehrend der Sitzungspruefung verbergen (sitzung.js setzt die
+   Klasse nur, wenn ein Token vorliegt, und nimmt sie zurueck, bevor eine
+   Seite die Maske zeigt). visibility statt display: die Seiten steuern die
+   Maske selbst ueber display (.hidden / .screen.active / style) – die Regel
+   darf deren Zustand nicht ueberschreiben, nur das Zeichnen aufschieben.
+   ═══════════════════════════════════════════════════════════════════════ */
+html.jv-sitzung-pruefen #login-screen { visibility: hidden; }

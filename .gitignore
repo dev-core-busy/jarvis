@@ -1,0 +1,278 @@
+# ─── Secrets & Konfiguration ────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+settings.json
+
+# ─── SSL-Zertifikate (werden beim Start auto-generiert) ─────────────────────
+certs/
+*.key
+*.pem
+*.crt
+*.cer
+
+# ─── Google Auth & OAuth-Tokens ─────────────────────────────────────────────
+/root/.config/gogcli/
+
+# ─── WhatsApp Bridge Auth ───────────────────────────────────────────────────
+services/whatsapp-bridge/auth/
+services/whatsapp-bridge/.wwebjs_auth/
+# Adressbuch, das die Bridge im Betrieb selbst schreibt (Namen und Nummern der
+# Gespraechspartner) - Laufzeitdaten pro Server, und in einem OEFFENTLICHEN
+# Repo haben sie ohnehin nichts zu suchen. Sie waren bis 2026-09-02 nur
+# deshalb nicht drin, weil `deploy/abgleich.py` sie als "verirrt" meldete.
+services/whatsapp-bridge/contacts.json
+
+# ─── Daten & Logs ───────────────────────────────────────────────────────────
+# ALLES unter data/ ist Laufzeit bzw. Server-Hoheit - ausgenommen die wenigen
+# mitgelieferten Vorlagen. REGEL STATT LISTE: hier standen 34 Einzeleintraege,
+# und jeder Laufzeit-Ordner, der seither dazukam, fehlte darin - auf DEV
+# gemessen 44 untracked Posten, `git status` dort unbrauchbar. Im Rauschen
+# geht die eine echte Abweichung unter, auf die es ankommt.
+#
+# Warum die Live-Instruktionen dazugehoeren: sie werden pro Server gepflegt
+# (Oberflaeche bzw. reflection-Tool) und duerfen NICHT aus dem Repo
+# ueberschrieben werden - der Update-Pill machte aus ihnen sonst bei jedem
+# Pull einen Merge-Konflikt (Vorfall 2026-07-13 auf ECHT). Die Vorgaben liegen
+# versioniert unter data/instructions_default/ und werden beim ERSTEN Start
+# kopiert.
+#
+# ⚠ Die Ausnahmen muessen das VERZEICHNIS zuerst zurueckholen: ein mit
+# `/data/**` ignorierter Ordner wird von git gar nicht erst betreten, und
+# jede `!`-Regel darin bliebe wirkungslos.
+/data/*
+!/data/instructions_default/
+!/data/workflows/
+!/data/google_auth/
+/data/google_auth/*
+!/data/google_auth/credentials.json.example
+# ⚠ data/knowledge/ ist der WISSENSSPEICHER DES KUNDEN – hier liegt NICHTS aus
+# dem Repo (Vorgabe 2026-09-13). Bis dahin standen drei Ausnahmen darunter, die
+# genau das unterliefen: browser_automation.md, projektinfo.md und
+# whatsapp_workflow.md. Alle drei waren VERFAHRENSwissen des Agenten und
+# lagen damit in derselben Vektor-DB wie Kundenhandbuecher – zwei davon
+# zusaetzlich DOPPELT, weil es sie als Instruktion ohnehin gibt
+# (browser_automation.md byte-identisch, projektinfo.md in einer veralteten
+# Zweitfassung mit unaufgeloestem ${SERVER_IP}). Wer eine Verhaltensregel
+# ausliefern will, legt sie nach data/instructions_default/ – von dort geht
+# sie in JEDEN Prompt, statt nur gefunden zu werden, wenn die semantische
+# Suche zufaellig anschlaegt. Waechter: tests/test_erfahrung_getrennt.py.
+!/data/knowledge/
+/data/knowledge/*
+
+# Ablage fuer die Info-Dokumente im Portal: legt der Dienst beim Start selbst
+# an (`startup_info_files_dir`), gefuellt wird sie vom Administrator und ist
+# pro Server verschieden - in einem oeffentlichen Repo hat der Inhalt nichts
+# zu suchen.
+/frontend_info_files/
+
+*.log
+
+# ─── Python ─────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+dist/
+build/
+venv/
+env/
+.venv/
+.Python
+
+# ─── Node.js ────────────────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ─── IDEs & Editoren ────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ─── Binaries (separat installieren) ────────────────────────────────────────
+skills/openclaw_gmail/gog
+skills_from_openclaw/
+*.exe
+
+# ─── Downloads (werden on-the-fly bereitgestellt) ────────────────────────────
+
+# ─── Claude Code interne Dateien ─────────────────────────────────────────────
+# AUSNAHME .claude/skills/: Skills sind Arbeitsanweisungen und gehoeren ins Repo
+# (jeder Klon soll sie haben). Deshalb `.claude/*` und NICHT `.claude/` – bei
+# einem ignorierten VERZEICHNIS steigt git nicht hinein und jede Negation
+# darunter bleibt wirkungslos. Alles andere bleibt draussen: settings.local.json
+# ist maschinenspezifisch (Berechtigungen, Hooks), worktrees/ und *.lock ohnehin.
+#
+# .claude/rules/ ist seit 2026-08-30 AUSGENOMMEN und bleibt draussen: die vier
+# Dateien sind ausgelagerte Kapitel von CLAUDE.md (Bereichs-Landkarte), also
+# dasselbe Projektgedaechtnis - und das gehoert aus denselben Gruenden nicht in
+# ein oeffentliches Repo. Sie bleiben LOKAL vorhanden und werden von Claude Code
+# weiter ueber die `paths:`-Frontmatter geladen; ein frischer Klon hat sie nicht.
+.claude/*
+!.claude/skills/
+!.claude/hooks/
+# ⚠ EINE AUSNAHME VON DER AUSNAHME: `code-delegate` ist KEINE Arbeitsanweisung
+# des Projekts, sondern eine pro INSTALLATION erzeugte Kopie – der Server stellt
+# sie unter /claude/skill.md aus, bereits auf seine Adresse ausgestellt. Genau
+# deshalb hatte sie am 2026-08-30 die DEV-Adresse VIERMAL fest eingesetzt (steht
+# als Leck-Befund in CLAUDE.md). Sie gehoert neben den Schluessel: ausserhalb des
+# Repos. Wer sie braucht, laedt sie im Bereich /claude herunter.
+.claude/skills/code-delegate/
+
+# ─── Temp & Entwicklungsdateien ─────────────────────────────────────────────
+patch_main.py
+todo.txt
+=0.39.0
+verhalte_dich_wie_claude.md
+implementation_plan.md
+test_agent.py
+*.tmp
+
+# ─── Projektgedaechtnis: CLAUDE.md UND JEDE KOPIE ───────────────────────────
+# Dieses Repo ist OEFFENTLICH. CLAUDE.md enthaelt Server-Rollen, interne
+# Adressen und die Chronik jedes Vorfalls samt der Zeitraeume, in denen eine
+# Luecke offen stand. Das gehoert nicht hierher.
+#
+# ⚠ VORFALL 2026-08-30: der Eintrag stand hier seit dem Initial Public Release
+# und war WIRKUNGSLOS - .gitignore greift nicht bei bereits VERFOLGTEN Dateien.
+# Die Datei lag dadurch 136 Commits lang oeffentlich; bereinigt per
+# git-filter-repo. Ein Eintrag hier ist KEIN Nachweis, dass eine Datei draussen
+# ist - `git ls-files <datei>` ist es.
+#
+# Die Muster decken auch Sicherungen und Editor-Reste ab: eine Kopie unter
+# anderem Namen (CLAUDE.md.bak, CLAUDE-alt.md) waere wieder verfolgbar.
+CLAUDE.md
+CLAUDE.md.*
+CLAUDE-*.md
+CLAUDE_*.md
+# Punkt-getrennte Varianten: das Kompakt-Verfahren legt CLAUDE.<yyyymmdd>.md als
+# Archiv und CLAUDE.compact.md als Anleitung an. Die Muster darueber treffen die
+# NICHT (Bindestrich/Unterstrich), beides waere also verfolgbar geworden.
+CLAUDE.*.md
+claude.md
+claude.md.*
+*_CLAUDE.md
+.CLAUDE.md.sw?
+
+# Ausgelagerte Kapitel von CLAUDE.md (Verfahren: CLAUDE.compact.md). Sie sind
+# dasselbe Projektgedaechtnis und gehoeren genauso wenig ins oeffentliche Repo.
+# Der Rechner wird vollstaendig gesichert - Git ist hier nicht die Sicherung.
+#   .claude/rules/*.md und .claude/kompakt-split.py deckt bereits `.claude/*` ab.
+# ⚠ docs/historie/ BRAUCHT diesen Eintrag: die Chronik lag nur deshalb draussen,
+# weil ihr Dateiname zufaellig mit "CLAUDE-" beginnt und `CLAUDE-*.md` traf. Eine
+# anders benannte Chronik waere verfolgbar geworden - und `docs/` ist sonst
+# absichtlich IM Repo (landing-page, outlook-addin.md), also nur dieser Unterordner.
+docs/historie/
+# AUSDRUECKLICH NICHT erfasst und bewusst im Repo:
+#   .claude/rules/*.md              - ausgelagerte Bereichsregeln (geprueft sauber)
+#   deploy/.../claude-md-diaet.md   - eine ANLEITUNG, keine Kopie (0 Zitate)
+windows-app-go/Jarvis.exe
+windows-app-go/dist/
+windows-app/
+windows-app-go/jarvis-windows
+
+# Frueherer FTPS-Zugang (deploy_ftps.py, entfernt 2026-10-12) – bleibt
+# ignoriert, damit eine liegengebliebene Kopie nie im Repo landet
+windows-app-go/.ftps_credentials
+.ftps_credentials
+
+# Generierte Bilder (Bildgenerierung)
+
+# jsdom fuer die UI-Riegel der Delegation (backend/jsdom_bereit.py).
+# Liegt NEBEN dem Repo, nicht darin: 58 Pakete / 13,2 MB / 1512 Dateien wuerden
+# bei jedem Auftrag mitgeklont (git clone --depth 1) – fuer einen Lauf von
+# 30-60 Sekunden der teuerste Teil.
+
+# Benutzerhandbuch: enthaelt Screenshots vom Echt-System mit potenziell privaten Daten – NIE committen (Repo ist public); Quelle der Wahrheit ist Confluence-Seite 315077818
+Benutzerhandbuch/
+
+# Lokale Sitzungs-Startskripte (session.sh, session_main.sh, …) – Arbeitsumgebung des Entwicklers, nicht Teil des Projekts
+session*.sh
+# Erzeugte/hinterlegte PowerPoint-Vorlagen: pro Server gepflegt (Branding-Farben
+# bzw. echte Firmenvorlage) – gleiche Begruendung wie data/instructions/.
+
+# Lizenz-Ausgabestelle: enthaelt den PRIVATEN Signierschluessel und die
+# Kundendatenbank (Firma, Ansprechpartner, Mail). Gehoert niemals ins Repo –
+# das Repo ist public, und mit dem Schluessel koennte jeder Lizenzen ausstellen.
+license-manager/
+# Lizenz-Zustand einer Installation (Schluessel, Bindung, letzter Statusabruf).
+# Rollen-Definitionen der spezialisierten Agenten (Skill "Agent Orchestrator").
+# Pro Server gepflegt wie data/instructions/ – und der dort gespeicherte Prompt
+# wirkt in kuenftigen Laeufen. Vorgaben liegen versioniert in
+# skills/agent_orchestrator/main.py (VORGABE_ROLLEN in backend/agent_roles.py).
+
+# Zugangsdaten von Benutzern: Kennwortdateien + die zugehoerigen Schluessel.
+# Sie tauchen sonst als untracked auf und koennen bei einem `git add -A`
+# im OEFFENTLICHEN Repo landen (nachgestellt: alle vier standen in
+# `git status`). Der Schluessel ohne die Datei ist nutzlos und umgekehrt –
+# also muessen BEIDE ignoriert sein.
+# Short Tracks: die Ablagen ("Dumps") samt Prompts und Werkzeug-Zuschnitt sowie
+# das Lauf-Protokoll. Beides ist Server-Zustand je Installation – wie
+# data/instructions und data/email_rules.json – und enthaelt die Prompts ALLER
+# Benutzer (Dateinamen und Ergebnistexte im Protokoll).
+
+# Android-Signaturschluessel. Bis 2026-08-17 lag android/jarvis-release.jks samt
+# Kennwort ("***ENTFERNT***" in build.gradle.kts) im OEFFENTLICHEN Repo - wer beides
+# hat, kann APKs signieren, die Android als Update der echten App akzeptiert.
+# Der Schluessel wurde getauscht; der neue darf NIE eingecheckt werden.
+*.jks
+*.keystore
+android/keystore.properties
+keystore.properties
+
+# Fremd-Binaerdateien, die per deploy/*-Skript geholt werden.
+# tika-app.jar ist 65 MB und wird fuer den OneNote-Import (*.one) gebraucht;
+# ein oeffentliches Repo ist nicht der Ort dafuer -> deploy/tika_setup.sh.
+vendor/
+
+# ⚠ ABER NICHT DIE FRONTEND-BIBLIOTHEKEN: die werden an den Browser
+# AUSGELIEFERT, es gibt kein Deploy-Skript, das sie holt - sie muessen im Repo
+# liegen. Die Regel darueber zielt auf Groesse und Deploy-Bezug (65-90 MB, per
+# Skript beschafft), nicht auf Seiten-Assets von wenigen hundert KB.
+# Ohne diese Ausnahme greift `vendor/` auch hier, und genau das ist am
+# 2026-10-04 passiert: eine lokal abgelegte `qrcode.min.js` wurde STILL nicht
+# mitcommittet - `git status` zeigt eine ignorierte Datei nicht an. Auf dem
+# Rechner, der sie hat, funktioniert alles; in jedem frischen Klon und in jedem
+# neuen Arbeitsbaum fehlt sie. Die vier aelteren Dateien hier sind nur deshalb
+# verfolgt, weil sie VOR der `vendor/`-Regel committet wurden.
+!frontend/js/vendor/
+!frontend/js/vendor/**
+
+# AI Mouse (C#/.NET, ai-mouse/) – Build-Artefakte. Die fertige EXE gehoert
+# NICHT ins Repo (70–90 MB, und dieses Repo ist oeffentlich); sie liegt unter
+# vendor/ai-mouse/ – wie vendor/tika-app.jar.
+ai-mouse/**/bin/
+ai-mouse/**/obj/
+ai-mouse/publish/
+*.user
+.vs/
+
+# Hauswerte der AI-Maus-Anwendung (Marke, Akzentfarbe, Serveradresse, Sprache).
+# ERZEUGT, nicht gepflegt: `backend/ai_mouse.py::_hauswerte_schreiben` schreibt
+# sie vor JEDEM Bau aus dem Branding des Servers - die Datei sagt das im eigenen
+# Kopf ("⚠ ERZEUGT - nicht von Hand aendern").
+#
+# ⚠ SIE WAR VERFOLGT, UND DAS IST AUF EINEM SERVER MIT AUTO-UPDATE EINE
+# ZUENDSCHNUR. Auf ECHT stand sie dauerhaft als geaendert im Arbeitsbaum (der
+# Bau schreibt die Hauswerte hinein); die Update-Pille macht stash -> pull ->
+# stash pop, und genau so entstanden am 2026-09-14 Konfliktmarker in 20 Dateien
+# und eine Neustart-Schleife des Dienstes. Eine erzeugte Datei gehoert nicht in
+# die Versionierung - gleiche Begruendung wie data/instructions/ und
+# data/vorlagen/.
+#
+# Ein frischer Klon hat sie nicht; das ist unkritisch, weil jeder Bau-Weg
+# (Startup-Hook, Bootstrap 6g, Bedarf, deploy/ai_mouse_build.sh) sie zuvor
+# erzeugt. Kann er das nicht, bricht der Bau MIT GRUND ab statt in einem
+# Compilerfehler zu sterben.
+/ai-mouse/src/AiMouse/Configuration/Vorgaben.cs
+
+# Klartext-Proben der Echtwert-Gegenprobe (nur lokal beim Betreiber)
+tests/echtwerte_proben.local.txt

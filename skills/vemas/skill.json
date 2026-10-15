@@ -1,0 +1,139 @@
+{
+    "name": "VEMAS",
+    "description": "Zugriff auf VEMAS.NET (MS Consulting) ueber dessen REST-Webservice: Kunden, Projekte, Zeiten, Hotline-Vorgaenge, Vertraege und Abrechnung. Vorgefertigte Auswertungen im Bereich /vemas, persoenlicher Zugang je Benutzer. Vorgabe: nur lesend.",
+    "version": "1.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": ["vemas_test_connection", "vemas_resources", "vemas_discover", "vemas_query", "vemas_get", "vemas_write", "vemas_reporting_endpoints"],
+    "category": "daten",
+    "icon": "database",
+    "system": false,
+    "enabled": false,
+    "dependencies": [],
+    "optional_dependencies": [],
+    "config_schema": {
+        "base_url": {
+            "type": "string",
+            "label": "VEMAS Basis-URL",
+            "description": "Basis der REST-Schnittstelle, z.B. https://vemas.firma.de/api (ohne Ressourcenpfad). Diese Adresse gilt fuer ALLE Benutzer – ein persoenlicher Zugang liefert nur die Anmeldedaten, nie die Adresse.",
+            "default": "",
+            "required": true
+        },
+        "vemas_product": {
+            "type": "string",
+            "label": "Version/Auspraegung (informativ)",
+            "description": "z.B. 'Vemas.NextGen 2026' – erscheint nur in der Anzeige.",
+            "default": ""
+        },
+        "read_only": {
+            "type": "boolean",
+            "label": "Nur lesend",
+            "description": "Vorgabe AN. Ausgeschaltet duerfen Agentenlaeufe auch schreiben (POST/PUT/PATCH; DELETE nie). ACHTUNG: geschrieben wird ausschliesslich mit dem PERSOENLICHEN Zugang eines Benutzers – ueber den gemeinsamen Zugang bleibt es bei Nur-Lesen, damit jeder Schreibvorgang in VEMAS zuzuordnen ist.",
+            "default": true
+        },
+        "auth_kind": {
+            "type": "string",
+            "label": "Anmeldeart (basic | bearer | login)",
+            "description": "basic = Benutzer/Kennwort im Authorization-Header. bearer = fester API-Token. login = POST auf einen Anmelde-Endpunkt, die Antwort liefert ein Token. Welche Art VEMAS verlangt, steht nicht in der oeffentlichen Doku – im Zweifel mit 'basic' beginnen und den Verbindungstest benutzen.",
+            "default": "basic"
+        },
+        "username": {
+            "type": "string",
+            "label": "Benutzer (Sammelzugang)",
+            "default": ""
+        },
+        "password": {
+            "type": "string",
+            "label": "Kennwort (Sammelzugang)",
+            "secret": true,
+            "default": ""
+        },
+        "api_token": {
+            "type": "string",
+            "label": "API-Token (bei Anmeldeart 'bearer')",
+            "secret": true,
+            "default": ""
+        },
+        "login_path": {
+            "type": "string",
+            "label": "Anmelde-Pfad (nur bei Anmeldeart 'login')",
+            "description": "Relativ zur Basis-URL, z.B. auth/login.",
+            "default": ""
+        },
+        "login_user_field": {
+            "type": "string",
+            "label": "Feldname Benutzer im Anmelde-Rumpf",
+            "description": "Wie das JSON-Feld heisst, in dem der Benutzername gesendet wird.",
+            "default": "username"
+        },
+        "login_pass_field": {
+            "type": "string",
+            "label": "Feldname Kennwort im Anmelde-Rumpf",
+            "default": "password"
+        },
+        "token_json_path": {
+            "type": "string",
+            "label": "Pfad zum Token in der Anmelde-Antwort",
+            "description": "Punktschreibweise, z.B. 'token' oder 'data.accessToken'. Passt der Pfad nicht, nennt die Fehlermeldung die tatsaechlich vorhandenen Felder.",
+            "default": "token"
+        },
+        "token_header": {
+            "type": "string",
+            "label": "Kopfzeile fuer das Token",
+            "default": "Authorization"
+        },
+        "token_prefix": {
+            "type": "string",
+            "label": "Praefix vor dem Token",
+            "description": "Ueblich 'Bearer ' (mit Leerzeichen). Leer lassen, wenn der Token roh gesendet wird.",
+            "default": "Bearer "
+        },
+        "mandant": {
+            "type": "string",
+            "label": "Mandant (optional)",
+            "default": ""
+        },
+        "mandant_param": {
+            "type": "string",
+            "label": "Name des Mandanten-Parameters",
+            "description": "Nur wirksam, wenn auch ein Mandant gesetzt ist. Wird jeder Abfrage als Query-Parameter angehaengt.",
+            "default": ""
+        },
+        "verify_ssl": {
+            "type": "boolean",
+            "label": "SSL-Zertifikat pruefen",
+            "description": "Nur ein Administrator darf das abschalten. Ein Benutzer kann es an seinem persoenlichen Zugang nicht.",
+            "default": true
+        },
+        "test_path": {
+            "type": "string",
+            "label": "Pfad fuer den Verbindungstest (optional)",
+            "description": "Eine Ressource, die es auf diesem System sicher gibt. Leer = der Test probiert die erste hinterlegte Ressource und die Selbstauskunft des Servers.",
+            "default": ""
+        },
+        "resources": {
+            "type": "string",
+            "label": "Ressourcen (Name = Pfad, eine je Zeile)",
+            "description": "DIE WICHTIGSTE EINSTELLUNG. Die REST-Schnittstelle von VEMAS ist nicht oeffentlich dokumentiert und je Installation verschieden – ohne diese Zuordnung muss der Agent Pfade raten. Beispiel: 'Projekte = projects', 'Kunden = customers', 'Zeiten = timeentries'. Zeilen mit # sind Kommentare.",
+            "default": ""
+        }
+    },
+    "knowledge_docs": [],
+    "permissions": [],
+    "help": {
+        "details": "Bindet VEMAS.NET (MS Consulting) ueber dessen REST-Webservice an. Der Reiter *Einstellungen → Vemas* haelt Serveradresse, Anmeldeart und die Zuordnung der Ressourcen; die Benutzer hinterlegen im Bereich VEMAS (Portal-Kachel) ihre EIGENEN Zugangsdaten und arbeiten damit – dann sieht jeder genau die Daten, fuer die er in VEMAS berechtigt ist. Ohne eigenen Zugang gilt der gemeinsame Zugang. Nur-Lesen ist die Vorgabe; Schreibzugriffe kann ein Administrator freigeben, sie wirken dann ausschliesslich fuer Benutzer mit eigenem Zugang. Wichtig: die REST-API ist herstellerseitig nicht oeffentlich dokumentiert – tragen Sie die Ressourcen-Zuordnung ein, sonst muss der Agent Pfade raten.",
+        "tools": [
+            {"name": "vemas_resources", "label": "Ressourcen anzeigen", "desc": "Zeigt die hinterlegte Zuordnung Name → Pfad. Der Agent ruft das vor jeder Abfrage auf."},
+            {"name": "vemas_discover", "label": "Schnittstelle erkunden", "desc": "Liest die OpenAPI-/Swagger-Selbstauskunft des Servers, falls vorhanden."},
+            {"name": "vemas_query", "label": "Datensaetze lesen", "desc": "Liest Datensaetze einer Ressource mit optionalen Filtern (nur GET)."},
+            {"name": "vemas_write", "label": "Datensatz anlegen/aendern", "desc": "Nur bei Freigabe durch den Administrator UND mit persoenlichem Zugang. Kein Loeschen."}
+        ],
+        "use_cases": [
+            "Teste die VEMAS-Verbindung",
+            "Welche Projekte laufen gerade aus dem Budget?",
+            "Zeig mir die offenen Hotline-Vorgaenge aelter als sieben Tage",
+            "Welche erbrachten Leistungen sind noch nicht fakturiert?"
+        ],
+        "notes": "Der Bereich /vemas und die vemas_*-Werkzeuge sind ausdruecklich freizuschalten (Einstellungen → Sicherheit → Berechtigungen → VEMAS-Zugriff). Leer = niemand, auch keine lokalen Administratoren."
+    }
+}

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    BSI M11 (2026-10-12): vertraut werden der System-Speicher UND vom Benutzer
+    bzw. per MDM installierte Zertifizierungsstellen (Firmen-CA). Server mit
+    selbst ausgestelltem Zertifikat (z.B. per IP) laufen ueber die Bestaetigung
+    des Fingerabdrucks in der App (data/tls/ServerVertrauen.kt) – NICHT ueber
+    eine Ausnahme hier. Die fruehere domain-config fuer "100.0.0.0/8" war
+    wirkungslos: <domain> kennt keine IP-Bereiche.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

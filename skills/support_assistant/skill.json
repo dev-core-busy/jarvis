@@ -1,0 +1,67 @@
+{
+    "name": "Support Assistent",
+    "description": "Eigene Support-Oberflaeche (/support) mit RAG- und Jira-Ticket-Suche. Ergebnisse werden nach Relevanz gewichtet; ein konfigurierbares Prompt wird LLM-Anfragen vorangestellt.",
+    "version": "1.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": [],
+    "category": "wissen",
+    "icon": "lifebuoy",
+    "system": false,
+    "enabled": false,
+    "config_schema": {
+        "system_prompt": {
+            "type": "string",
+            "label": "Vorangestelltes Prompt (LLM-Instruktion)",
+            "description": "Mehrzeiliges Prompt, das LLM-Anfragen des Support-Assistenten als Instruktion vorangestellt wird.",
+            "required": false
+        },
+        "summary_lines": {
+            "type": "number",
+            "label": "Länge der KI-Zusammenfassung (Sätze)",
+            "description": "Maximale Länge der KI-Zusammenfassung in Sätzen (Standard 5); zugleich die Laenge der per Button 'KI-Zusammenfassung' erzeugten Ticket-Analyse.",
+            "default": 5,
+            "required": false
+        },
+        "jira_limit": {
+            "type": "number",
+            "label": "Jira-Treffer (max.)",
+            "description": "Maximale Anzahl angezeigter Jira-Tickets pro Anfrage; dieser Wert ist die Obergrenze, die Benutzer im Feld 'Ticketanzahl' waehlen koennen (Standard 12, max. 1000).",
+            "default": 12,
+            "required": false
+        },
+        "rag_results": {
+            "type": "number",
+            "label": "Wissens-/RAG-Treffer (max.)",
+            "description": "Maximale Anzahl der aus der Wissensdatenbank (RAG) je Anfrage geholten Treffer (Standard 8, max. 50).",
+            "default": 8,
+            "required": false
+        },
+        "confluence_results": {
+            "type": "number",
+            "label": "Confluence-Treffer (max.)",
+            "description": "Maximale Anzahl der je Anfrage geholten Confluence-Seiten (Standard 6, max. 50).",
+            "default": 6,
+            "required": false
+        },
+        "summary_sources": {
+            "type": "number",
+            "label": "KI-Ueberblick: einbezogene Top-Treffer (max.)",
+            "description": "Wie viele der bestbewerteten Treffer der KI-Gesamtueberblick beruecksichtigt (Standard 10, max. 50). Die angezeigte Trefferliste bleibt davon unberuehrt.",
+            "default": 10,
+            "required": false
+        }
+    },
+    "knowledge_docs": [],
+    "dependencies": [],
+    "permissions": [],
+    "help": {
+        "details": "Aktiviert die Support-Oberflaeche unter /support (analog /chat). Dort koennen mehrzeilige Anfragen gestellt werden, die wahlweise die Wissensdatenbank (RAG) und/oder Jira-Tickets durchsuchen. Treffer werden nach 'Zutreffend in %' gewichtet, absteigend sortiert und als Bloecke (Ueberschrift + Kurzfassung) angezeigt. Ein im Konfigurationsreiter hinterlegtes Prompt wird LLM-Anfragen vorangestellt.",
+        "tools": [],
+        "use_cases": [
+            "Support-Oberflaeche unter /support oeffnen",
+            "Anfrage mit RAG und Jira-Tickets beantworten"
+        ],
+        "notes": "Die Jira-Checkbox erscheint nur, wenn der Jira-Skill aktiv ist. Das vorangestellte Prompt wird im Konfigurationsreiter gepflegt."
+    }
+}

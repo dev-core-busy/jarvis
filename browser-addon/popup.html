@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<!-- `neutral` ist der AUSGANGSZUSTAND, nicht die Ausnahme: solange keine
+     Hausfarbe bekannt ist, trägt der Hauptknopf einen schlichten Umriss statt
+     einer Produktfarbe. popup.js NIMMT die Klasse weg, sobald eine Farbe da
+     ist – die Richtung ist Absicht: fällt das Skript aus oder ist gar kein
+     Branding eingerichtet, bleibt es neutral. Umgekehrt (Klasse per JS setzen)
+     würde bei jedem Öffnen kurz die falsche Farbe aufblitzen. -->
+<html lang="de" class="neutral">
+<head>
+  <meta charset="UTF-8">
+  <title>{marke} für Jira</title>
+  <!-- DIE MARKE STEHT ALS VORGABE IM PAKET – und das ist der Kern des Fixes:
+       beim allerersten Öffnen ist noch keine Serveradresse hinterlegt, das
+       Fenster kann `/api/branding` also gar nicht fragen. Genau dann sieht
+       jemand die ANMELDEMASKE zum ersten Mal, und dort stand deshalb der
+       eingebaute Rückfall.
+       Gefüllt wird das Feld beim Bauen des ZIP (jira_assist._popup_gebrandet);
+       im Repo bleibt es LEER, damit hier keine zweite Wahrheit neben dem
+       Branding entsteht. Ohne Eintrag gilt unverändert der Rückfall aus
+       popup.js. -->
+  <meta name="marke" content="">
+  <!-- DIE HAUSFARBE AUS DEMSELBEN GRUND. Gemeldet 2026-08-28: "der Anmelden-
+       Knopf ist weiterhin nicht in der Branding-Farbe". Zu Recht – die Farbe
+       kam bis dahin AUSSCHLIESSLICH aus `/api/branding`, und der Abruf startet
+       erst, wenn eine Adresse im Feld steht. Auf der Anmeldemaske gibt es die
+       noch nicht: genau dort war der Knopf also nie gebrandet.
+       Erlaubt ist nur `#rgb`/`#rrggbb` – der Wert wird als CSS gesetzt, ein
+       freier Text darin wäre eine Einschleusung. Leer = neutraler Knopf. -->
+  <meta name="akzent" content="">
+  <!-- DIE SERVERADRESSE, aus demselben Grund und für denselben Fix wie das
+       Host-Recht im Manifest (jira_assist._manifest_gebrandet): steht sie
+       schon im Feld, tippt niemand eine abweichende Schreibweise ein, für die
+       das vorbelegte Zugriffsrecht nicht gilt – und die Berechtigungsabfrage,
+       an der die erste Anmeldung scheiterte, bleibt aus.
+       Gefüllt beim Bauen des ZIP; im Repo LEER. Eine bereits hinterlegte
+       Adresse wird davon NICHT überschrieben (popup.js::start). -->
+  <meta name="basis" content="">
+  <!-- Setzt die Klasse `leiste` am <html>, BEVOR gezeichnet wird. Eigene Datei
+       statt Inline-Skript, weil die Content-Security-Policy von
+       Erweiterungsseiten (`script-src 'self'`) Skriptruempfe im HTML
+       verbietet – der sonst im Projekt uebliche Anti-Flacker-Weg scheidet hier
+       also aus. Begruendung im Kopf von ansicht.js. -->
+  <script src="ansicht.js"></script>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="kopf">
+    <!-- Marke und Logo folgen dem Branding des Servers (popup.js::setzeBranding).
+         Bis dahin trägt der Platzhalter die Vorgabe aus dem Paket (siehe
+         <meta name="marke">) und erst danach den eingebauten Rückfall – das
+         Fenster ist sichtbar, bevor irgendein Abruf zurück ist. -->
+    <img class="marke-logo" id="marke-logo" alt="" hidden>
+    <span class="marke" id="marke">{marke}</span>
+    <span class="ticket" id="ticket-anzeige"></span>
+    <!-- ZURUECKSETZEN. Es gibt „Leeren" im Ergebnisbereich, aber der ist nur da,
+         WENN ein Ergebnis da ist – wer eine haengende Anzeige loswerden will,
+         findet ihn genau dann nicht. Dieser Knopf steht immer.
+         Er setzt die ARBEITSFLAECHE zurueck, nicht die Einrichtung: Anmeldung,
+         Adresse, Ansicht und die Automatik-EINSTELLUNG bleiben (fuer die
+         Anmeldung gibt es den Knopf daneben). -->
+    <!-- SYMBOL STATT TEXT (Vorgabe 2026-09-02) – und zwar das im Projekt
+         etablierte „neu herstellen" (settings.html::btn-wa-reconnect). Zwei
+         Kreispfeile heissen im ganzen Haus „von vorn", das ist genau die
+         Aussage. Der Titel nennt ausdruecklich, WAS zurueckgesetzt wird und
+         was nicht: ohne diesen Satz ist ein Symbol neben „Abmelden" eine
+         Einladung zum Fehlklick. -->
+    <button type="button" id="btn-reset" class="leise ico" data-ohne-ticket
+            title="Zurücksetzen: Text, Zusatzwunsch und Vorlagenwahl (Anmeldung bleibt)"
+            aria-label="Zurücksetzen: Text, Zusatzwunsch und Vorlagenwahl (Anmeldung bleibt)"
+            hidden><svg viewBox="0 0 24 24" width="14" height="14" fill="none"
+      stroke="currentColor" stroke-width="2" aria-hidden="true"><path
+      d="M1 4v6h6M23 20v-6h-6"/><path
+      d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg></button>
+    <!-- DASSELBE SYMBOL WIE IM PORTAL (Vorgabe 2026-09-02), und derselbe
+         Titel „[Benutzer] abmelden" (portal.html::pt-logout). Zwei Gruende:
+         der Knopf ist als Abmelden wiedererkennbar, ohne Text zu tragen – und
+         im 380 px breiten Kopf steht neben Marke, Ticketnummer und Reset kein
+         Wort mehr zur Verfuegung.
+         Der Benutzername kommt aus dem Zustand des Hintergrunds; solange er
+         unbekannt ist, bleibt es beim schlichten „Abmelden" (popup.js). -->
+    <button type="button" id="btn-abmelden" class="leise ico" data-ohne-ticket
+            title="Abmelden" aria-label="Abmelden" hidden><svg viewBox="0 0 24 24"
+      width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"
+      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path
+      d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line
+      x1="21" y1="12" x2="9" y2="12"/></svg></button>
+  </header>
+
+  <!-- ⚠ NEUE FASSUNG VERFUEGBAR (Vorgabe 2026-09-02).
+       Die Erweiterung aktualisiert sich NICHT von selbst - sie ist nicht aus
+       einem Store installiert, sondern von Hand geladen. Bisher erfuhr das
+       niemand: das Fenster lief einfach weiter, und ein Fehler, der laengst
+       behoben war, blieb wochenlang stehen (die Stand-Warnung greift nur bei
+       einem halb aktualisierten Paket, nicht bei einem alten).
+       Verglichen wird die Version des PAKETS auf dem Server mit der eigenen
+       (popup.js::updateHinweis). Der Kasten steht AUSSERHALB von Anmeldung und
+       Arbeitsbereich: er gilt in beiden Lagen. -->
+  <p class="hinweis update-hinweis" id="update-hinweis" hidden></p>
+
+  <!-- Einrichtung / Anmeldung -->
+  <section id="bereich-login">
+    <label class="feld">
+      <span>{marke}-Adresse</span>
+      <input type="url" id="f-basis" placeholder="https://dp.firma.de" autocomplete="off">
+    </label>
+    <p class="hinweis">
+      Genau der Name, auf den das Serverzertifikat lautet – nicht die IP-Adresse.
+    </p>
+    <label class="feld">
+      <span>Benutzer</span>
+      <input type="text" id="f-benutzer" autocomplete="username">
+    </label>
+    <label class="feld">
+      <span>Kennwort</span>
+      <input type="password" id="f-kennwort" autocomplete="current-password">
+    </label>
+    <label class="feld">
+      <span>Code der Zwei-Faktor-App <em>(nur falls eingerichtet)</em></span>
+      <input type="text" id="f-totp" inputmode="numeric" autocomplete="one-time-code">
+    </label>
+    <button type="button" id="btn-anmelden" class="haupt" data-ohne-ticket>Anmelden</button>
+    <!-- Fehlt das Zugriffsrecht auf den Server, steht die Erklärung HIER –
+         über dem Knopf, der die Abfrage auslöst, und nicht erst als Meldung
+         hinterher. Der Browser kann das Fenster dabei schließen; wer das
+         vorher gelesen hat, hält es nicht für einen Absturz.
+         popup.js blendet den Absatz ein (siehe zugriffAnzeigen). -->
+    <p class="hinweis" id="zugriff-hinweis" hidden></p>
+  </section>
+
+  <!-- Arbeitsbereich
+       ⚠ OHNE ERKANNTES TICKET SIND HIER ALLE KNOEPFE GESPERRT (Vorgabe des
+       Nutzers 2026-08-30). Ausgenommen ist nur, was `data-ohne-ticket` traegt:
+       Anmelden, Abmelden, die Schliessen-Knoepfe der beiden Dialoge, die
+       Zugriffsabfrage der Seitenleiste und die GANZE Vorlagen-Verwaltung.
+       Ein Fenster, aus dem man sich auf einem fremden Tab nicht mehr abmelden
+       kann, waere eine Falle statt einer Schranke - und ein gesperrter
+       Schliessen-Knopf laesst einen offenen Dialog stehen, den niemand mehr
+       wegbekommt.
+       Das Attribut wirkt auch an einem CONTAINER und gilt dann fuer alles
+       darin (popup.js sucht per `closest`) - so sind auch die erst beim
+       Zeichnen entstehenden Zeilen-Knoepfe der Vorlagenliste erfasst, ohne
+       dass jemand eine zweite Liste im JS pflegen muss.
+       Die Richtung bleibt fail-closed: ein neuer Knopf ausserhalb eines
+       markierten Bereichs ist ohne Ticket gesperrt (Begruendung in
+       popup.js::knoepfeAktualisieren). -->
+  <section id="bereich-arbeit" hidden>
+    <!-- ── DIE VORLAGE IST DIE AKTION ────────────────────────────────────
+         Bis 2026-09-02 standen hier zwei Knöpfe („Zusammenfassen“, „Antwort
+         vorschlagen“). Beide sind jetzt Vorlagen: das Dreieck führt die
+         gewählte aus, und was dabei herauskommt, sagt ihre Art
+         (jira_vorlagen.ARTEN). Deshalb steht die Zeile ganz oben – sie ist
+         nicht mehr eine Einstellung neben der Aktion, sie IST die Aktion.
+
+         Das Zahnrad öffnet die Verwaltung; eigene Vorlagen darf jeder anlegen,
+         gemeinsame nur ein Administrator. -->
+    <label class="feld">
+      <span title="Die Vorlage bestimmt, was das Dreieck tut: eine Zusammenfassung für dich oder einen Antwortentwurf für den Melder. Freigeschaltete Nachschlage-Bereiche gelten für jede Auswertung.">Vorlage</span>
+      <div class="feld-zeile">
+        <!-- STARTEN. Nur ein Symbol – die Beschriftung daneben steht schon im
+             Pulldown, und in 380 Pixel Breite wäre ein Knopf mit Text neben
+             einem Auswahlfeld und einem Zahnrad nicht mehr unterzubringen.
+             INLINE-SVG, kein Zeichen und kein Emoji: ▶ (U+25B6) wird je nach
+             System als farbiges Emoji gerendert und folgt dann keinem Thema –
+             dieselbe Begründung wie beim Mülleimer in der Vorlagenliste.
+             `title`/`aria-label` setzt popup.js NACH der gewählten Art: ein
+             Knopf, der zwei verschiedene Dinge tun kann, muss sagen welches. -->
+        <button type="button" id="btn-start" class="haupt ico-start"
+                title="Antwort erstellen" aria-label="Antwort erstellen"><svg
+          viewBox="0 0 24 24" width="13" height="13" fill="currentColor"
+          aria-hidden="true"><polygon points="6 4 20 12 6 20"/></svg></button>
+        <!-- ⚠ DER ERSTE EINTRAG NENNT DIE AKTION, NICHT DAS FEHLEN EINER
+             VORLAGE (Vorgabe 2026-09-02). „Ohne Vorlage“ beschrieb, was NICHT
+             gewählt ist – was dabei herauskommt, musste ein Satz darunter
+             erklären. „Zusammenfassen“ sagt es selbst, und der Satz ist damit
+             weg. Dahinter steckt weiter der eingebaute Zusammenfassungs-Prompt
+             (Wert bleibt leer, `jira_assist` kennt den Fall) – bearbeitbar
+             sind nur die Vorlagen darunter.
+             Und ausdrücklich NICHT „Standard“: seit eine Vorlage als Standard
+             markierbar ist, hieße dasselbe Wort zwei verschiedene Dinge.
+             ⚠ DERSELBE TEXT STEHT IN popup.js::vorlagenZeichnen – die Liste
+             wird beim Laden neu aufgebaut, und dann gewinnt der dortige. Ein
+             Test vergleicht beide (Drift-Schranke). -->
+        <select id="f-vorlage">
+          <option value="">Zusammenfassen</option>
+        </select>
+        <!-- ⚠ `data-ohne-ticket`: Vorlagen pflegt man UNABHAENGIG von einem
+             Ticket (gemeldet 2026-08-31). Bis dahin fiel das Zahnrad unter die
+             Ticket-Sperre - wer auf einer beliebigen Seite eine Vorlage
+             anlegen oder aendern wollte, musste erst irgendein Ticket
+             oeffnen. Die Verwaltung liest kein Ticket und schreibt keines. -->
+        <button type="button" id="btn-vorlagen" class="leise ico" data-ohne-ticket
+                title="Vorlagen verwalten" aria-label="Vorlagen verwalten">⚙</button>
+      </div>
+    </label>
+
+    <!-- Vorlagen-Verwaltung: bleibt im selben Fenster, damit die Auswahl
+         daneben sichtbar bleibt. -->
+    <!-- `data-ohne-ticket` steht am CONTAINER, nicht an jedem Knopf einzeln:
+         Speichern, Neu, Stern, Bearbeiten und Loeschen sind allesamt
+         Vorlagen-Pflege und brauchen kein Ticket - und Stern/Bearbeiten/
+         Loeschen entstehen ueberhaupt erst beim Zeichnen der Liste, koennten
+         das Attribut im Markup also gar nicht tragen. -->
+    <div id="vorlagen-box" data-ohne-ticket hidden>
+      <div class="vorl-kopf">
+        <b>Vorlagen</b>
+        <button type="button" id="btn-vorlagen-zu" class="leise" data-ohne-ticket title="Schließen"
+                aria-label="Schließen">&times;</button>
+      </div>
+      <ul class="vorl-liste" id="vorl-liste"></ul>
+      <!-- „Neu" steht AUSSERHALB des Formulars, und das ist keine Kosmetik:
+           das Formular ist versteckt, solange niemand bearbeitet – ein „Neu"
+           darin wäre mit ihm verborgen, und es gäbe keinen Weg, eine Vorlage
+           anzulegen. Es ist ohnehin eine Aktion der LISTE. -->
+      <div class="knopfreihe">
+        <button type="button" id="btn-vorl-neu" class="leise" data-ohne-ticket>Neu</button>
+      </div>
+      <!-- ⚠ DAS FORMULAR WANDERT (Vorgabe 2026-09-02).
+           „Bearbeiten“ hängt es DIREKT UNTER die angeklickte Zeile, statt es am
+           Ende der Liste stehen zu lassen – bei zwanzig Vorlagen war sonst
+           nicht erkennbar, welche gerade bearbeitet wird.
+           Es ist genau EIN Container, der verschoben wird (popup.js::_formPlatz),
+           nicht zwei Formulare: zwei wären zwei Wege zum Speichern, die
+           auseinanderlaufen. Der Heimatplatz ist hier, direkt hinter der Liste;
+           dorthin kehrt es für „Neu“ und vor jedem Neuaufbau der Liste zurück –
+           `liste.innerHTML = ""` würde es sonst MITLÖSCHEN.
+
+           ⚠ UND ES IST ZU, SOLANGE NIEMAND BEARBEITET (Vorgabe 2026-09-02:
+           „nochmaliger Klick auf Bearbeiten muss die Felder wieder schließen“).
+           Vorher standen die Felder immer da – beim Öffnen der Verwaltung sah
+           man ein leeres Formular ohne Bezug, und ein zweiter Klick auf ✎ tat
+           nichts Sichtbares. popup.js schaltet `hidden`. -->
+      <div id="vorl-form" hidden>
+      <label class="feld">
+        <span>Name</span>
+        <input type="text" id="f-vorl-name" maxlength="60" placeholder="z. B. Kurz für die Leitung">
+      </label>
+      <!-- WAS DIE VORLAGE TUT. Sie bestimmt seit 2026-09-02 den Modus des
+           Laufs: „Zusammenfassung“ schreibt für den Mitarbeiter, „Antwort an
+           den Melder“ einen Entwurf für den Kunden – mit eigenen Schutzregeln
+           im System-Prompt (nichts zusagen, keine Termine, keine Platzhalter).
+           Vorgabe ist die Zusammenfassung; dieselbe fail-safe Richtung wie in
+           jira_vorlagen.art_von. -->
+      <label class="feld">
+        <span>Art</span>
+        <select id="f-vorl-art" class="voll">
+          <option value="zusammenfassung">Zusammenfassung (für mich)</option>
+          <option value="antwort">Antwort an den Melder</option>
+        </select>
+      </label>
+      <label class="feld">
+        <span>Anweisung</span>
+        <textarea id="f-vorl-text" rows="4"
+                  placeholder="Worauf soll das Ergebnis hinauslaufen?"></textarea>
+      </label>
+      <!-- Werkzeug-Bereiche DIESER Vorlage. Der Block bleibt VERSTECKT, solange
+           der Administrator nichts freigeschaltet hat (Einstellungen → Jira →
+           Werkzeug-Bereiche freischalten) – dann gibt es nichts zu wählen, und
+           ein leerer Kasten mit Erklärung würde das 380 Pixel breite Fenster
+           nur verlängern. Die Kästchen baut popup.js aus dem Katalog des
+           Servers; Name und Hinweis kommen von dort, damit Text und Wirkung
+           nicht auseinanderlaufen. -->
+      <div class="feld" id="vorl-ber-zeile" hidden>
+        <span>Nachschlagen erlauben</span>
+        <p class="hinweis" id="vorl-ber-hinweis">Gilt auch beim Überarbeiten
+           deines Kommentars; der Anweisungstext oben dort nicht. Der Haken
+           <em>erlaubt</em> das Nachschlagen – verlangen muss es die
+           Anweisung.</p>
+        <div id="vorl-bereiche"></div>
+      </div>
+      <label class="feld" id="vorl-global-zeile" hidden>
+        <span><input type="checkbox" id="f-vorl-global"> Für alle Benutzer (Administrator)</span>
+      </label>
+      <div class="knopfreihe">
+        <button type="button" id="btn-vorl-speichern" class="haupt" data-ohne-ticket>Speichern</button>
+        <!-- Schliesst das Formular, ohne zu speichern. Ein zweiter Klick auf ✎
+             derselben Zeile tut dasselbe – zwei Wege zum selben Ziel, weil man
+             den einen erwartet und den anderen sucht. -->
+        <button type="button" id="btn-vorl-abbrechen" class="leise" data-ohne-ticket>Abbrechen</button>
+      </div>
+      </div><!-- /vorl-form -->
+      <!-- Die Rückmeldung bleibt BEWUSST ausserhalb des wandernden Formulars:
+           sie gilt auch für Löschen und Stern, die gar kein Formular öffnen –
+           und sie soll immer an derselben Stelle stehen, nicht mal hier und
+           mal unter der siebten Zeile. -->
+      <p class="hinweis" id="vorl-hinweis"></p>
+
+      <!-- ⚠ VORLAGENWECHSEL AUTOMATISCH AUSFUEHREN (Vorgabe 2026-09-14).
+           Angehakt startet ein Wechsel im Pulldown oben den Lauf von selbst –
+           wer drei Vorlagen auf denselben Vorgang vergleichen will, spart damit
+           drei Klicks auf das Dreieck.
+
+           WARUM HIER UND NICHT IM EINSTELLUNGEN-ABSCHNITT: der Ort ist die
+           Vorgabe des Betreibers, und er traegt – die Einstellung beschreibt
+           das Verhalten GENAU DIESES Pulldowns, und wer Vorlagen vergleicht,
+           steht ohnehin in dieser Box. Eigene Fusszeile mit Trennstrich, damit
+           sie nicht wie eine Eigenschaft der gerade bearbeiteten Vorlage
+           aussieht: darueber werden DATEN gepflegt (auf dem Server), hier wird
+           ein VERHALTEN dieses Browsers eingestellt.
+
+           ⚠ SIE LIEGT AUSSERHALB VON `#vorl-form`. Das Formular wandert unter
+           die bearbeitete Zeile und ist zu, solange niemand bearbeitet – eine
+           Einstellung darin waere die meiste Zeit unsichtbar und stuende sonst
+           mal hier, mal unter der siebten Vorlage.
+
+           ⚠ VORGABE IST AN (Vorgabe des Betreibers 2026-09-14) – anders als bei
+           der Ticket-Automatik daneben, die AUS bleibt. Der Unterschied ist die
+           ABSICHT: dort startet etwas, ohne dass jemand etwas getan hat (ein
+           Tab-Wechsel genuegt); hier hat der Benutzer gerade ausdruecklich eine
+           andere Vorlage gewaehlt – auf genau dieses Ticket, mit genau dieser
+           Absicht. Der Klick auf das Dreieck danach war die Wiederholung einer
+           Entscheidung, die schon gefallen war.
+
+           ⚠ DAS `checked` STEHT IM MARKUP, NICHT IM SKRIPT – dieselbe Richtung
+           wie `class="neutral"` am <html> oben: die Vorgabe gilt, bevor
+           irgendein Abruf zurueck ist. popup.js NIMMT den Haken weg, wenn
+           gespeichert AUS steht. Umgekehrt (per JS setzen) blitzte bei jedem
+           Oeffnen kurz der falsche Zustand auf, und ein ausgefallenes Skript
+           liesse die Vorgabe ins Gegenteil kippen. -->
+      <div class="vorl-fuss">
+        <label class="vorl-auto">
+          <input type="checkbox" id="f-vorl-wechsel" checked>
+          <span>Vorlagenwechsel automatisch ausführen</span>
+        </label>
+        <!-- WAS DER HAKEN TUT UND KOSTET, GEHOERT DARUNTER. Ohne den Satz ist
+             nicht erkennbar, dass hinter jedem Wechsel ein Serverlauf steht –
+             und dass ein versehentlich verstellter Eintrag einen ausloest. -->
+        <p class="hinweis" id="vorl-wechsel-hinweis">
+          Ein Wechsel im Pulldown oben startet den Lauf dann von selbst. Jeder
+          Lauf kostet eine Auswertung; ohne erkanntes Ticket passiert nichts.
+        </p>
+      </div>
+    </div>
+
+    <!-- DER ZUSATZWUNSCH GEHOERT VOR DAS ERGEBNIS (Vorgabe 2026-09-02).
+         Er wird VOR dem Klick gefüllt – hinter dem Ergebnisfeld stand er dort,
+         wo man ihn erst liest, wenn es zu spät ist. Jetzt: wählen, präzisieren,
+         starten – und das Ergebnis erscheint direkt darunter. -->
+    <label class="feld">
+      <span>Zusatzwunsch <em>(optional)</em></span>
+      <input type="text" id="f-hinweis" placeholder="z. B. kurz halten, auf Englisch">
+    </label>
+
+    <!-- ⚠ MELDUNGEN STEHEN DIREKT VOR DEM ANTWORT-FELD (Vorgabe 2026-09-02).
+         Vorher hingen sie am FUSS des Fensters, hinter Überarbeiten-Knopf und
+         Automatik: „Kein Jira-Ticket in diesem Tab" stand damit vier Felder
+         unter dem Knopf, den man gerade gedrückt hatte – im 600 px hohen Popup
+         oft ausserhalb des Sichtfensters. Jetzt steht die Auskunft dort, wo man
+         nach dem Klick hinsieht, und das Ergebnis erscheint direkt darunter.
+
+         ⚠ ES IST EIN WANDERNDES ELEMENT, und das ist Pflicht, nicht Eleganz:
+         dieser Platz liegt IM Arbeitsbereich, und der ist bis zur Anmeldung
+         `hidden`. Jede Meldung des Anmeldewegs („Die Adresse muss mit https://
+         beginnen.", der ganze Fehlerzweig) wäre hier unsichtbar – der
+         Anmelde-Knopf sähe tot aus. `popup.js::meldungPlatzieren` hängt es
+         deshalb unter die Anmeldemaske, solange der Arbeitsbereich versteckt
+         ist. EIN Element, nicht zwei: zwei hiessen zwei Meldewege. -->
+    <p id="meldung" class="meldung" hidden></p>
+
+    <!-- DAS ERGEBNIS STEHT OBEN – direkt hinter dem Start-Hinweis (Vorgabe
+         2026-09-02). Vorher lag es hinter Zusatzwunsch, Überarbeiten-Knopf und
+         Automatik: wer das Dreieck drückte, musste den erzeugten Text vier
+         Felder weiter unten suchen. -->
+    <div id="ergebnis" hidden>
+      <!-- RICH-TEXT, nicht Textarea: `**Lösung:**` soll fett DASTEHEN, nicht als
+           Sternchen. Das Feld bleibt bearbeitbar – es ist die Fläche, deren
+           Inhalt anschließend im Kommentar beim Kunden landet.
+           Aufgebaut wird ausschließlich über Knoten (popup.js::textZuFeld),
+           NIE über innerHTML: der Text stammt aus einem Modell, das
+           Kundentext verarbeitet hat.
+           `role`/`aria-multiline` sind Pflicht – ein <div> ist von sich aus
+           kein Eingabefeld und würde von Hilfsmitteln als Fließtext gelesen. -->
+      <div id="f-ergebnis" contenteditable="true" role="textbox"
+           aria-multiline="true" spellcheck="true"
+           data-platzhalter="Hier steht gleich der Vorschlag."></div>
+      <div class="knopfreihe">
+        <button type="button" id="btn-einfuegen">Als Kommentar übernehmen</button>
+        <button type="button" id="btn-kopieren" class="leise">Kopieren</button>
+        <!-- Von Hand leeren. Steht hier, weil hier der Text steht, den man
+             loswerden will – und er räumt auch das GEDÄCHTNIS ab, nicht nur
+             die Anzeige (siehe popup.js::felderLeeren). -->
+        <button type="button" id="btn-leeren" class="leise" title="Text und Zusatzwunsch verwerfen">Leeren</button>
+      </div>
+      <!-- ÜBERSCHREIBEN GEHÖRT ANGESAGT (Vorgabe 2026-08-31). Der Knopf
+           ersetzt den Inhalt des Kommentarfeldes – das ist gewollt (der Text
+           hier IST in der Regel die überarbeitete Fassung genau dieses
+           Entwurfs), aber niemand darf davon überrascht werden. Rückgängig
+           machen geht in Jira mit Strg+Z, weil über die Auswahl ersetzt wird
+           und nicht am DOM vorbei. -->
+      <p class="hinweis" id="uebernehmen-hinweis">
+        <b>Als Kommentar übernehmen</b> <b>ersetzt</b> den bisherigen Inhalt des
+        Kommentarfeldes. In Jira holt Strg+Z ihn zurück.
+      </p>
+      <p class="fussnote" id="ergebnis-fuss"></p>
+    </div>
+
+    <!-- Rückfrage, wenn der gemerkte Text zu einem anderen Ticket gehört.
+         Eigener Dialog statt confirm() – siehe popup.js::frageJaNein. -->
+    <div class="ja-nein" id="ja-nein" hidden>
+      <p id="jn-text">Der Text gehört zu einem <b>anderen Ticket</b>. Trotzdem übernehmen?</p>
+      <div class="knopfreihe">
+        <button type="button" id="jn-nein" class="leise" data-ohne-ticket>Abbrechen</button>
+        <button type="button" id="jn-ja" data-ohne-ticket>Trotzdem einfügen</button>
+      </div>
+    </div>
+
+
+    <!-- ⚠ DER TRENNSTRICH IST NICHT SCHMUCK (Vorgabe 2026-09-02). Oben steht
+         EINE Aufgabe: Vorlage wählen, starten, Ergebnis übernehmen. Darunter
+         eine ANDERE: den eigenen Kommentarentwurf überarbeiten lassen – mit
+         eigener Voraussetzung (der Cursor muss im Kommentarfeld gestanden
+         haben). Ohne die Linie liest sich beides als eine Reihe von Knöpfen,
+         die dasselbe tun. Gleiche Bauform wie der Fuss der Ansicht. -->
+    <div class="abschnitt">
+      <div class="knopfreihe">
+        <button type="button" id="btn-ueberarbeiten" class="haupt">Meinen Kommentar überarbeiten</button>
+      </div>
+    <!-- Die Voraussetzung ist unsichtbar und muss deshalb dastehen: das Feld
+         wird über den zuletzt gesetzten Cursor gefunden. Ohne diesen Satz
+         drückt jemand den Knopf und bekommt „kein Text gefunden“, ohne zu
+         wissen, was er anders machen soll. -->
+    <p class="hinweis" id="ueberarb-hinweis">
+      <b>Meinen Kommentar überarbeiten</b> liest den Entwurf aus dem
+      Kommentarfeld, in dem zuletzt der Cursor stand, und gleicht ihn mit dem
+      Ticketverlauf ab.
+    </p>
+
+    <!-- NUR IN DER SEITENLEISTE, und nur wenn das Recht wirklich fehlt.
+         Das Popup kommt mit `activeTab` aus: der Klick auf das Symbol erteilt
+         das Recht fuer genau den Tab, in dem gearbeitet wird. Die Leiste bleibt
+         dagegen ueber den Tab-Wechsel hinaus offen – fuer den NAECHSTEN Tab
+         gilt `activeTab` nicht mehr, und „Überarbeiten" wie „Einfügen" liefen
+         in einen Fehler, den niemand deuten kann.
+         Der Knopf ist Absicht: `permissions.request` verlangt eine
+         Benutzergeste, und die gibt es nur bei einem echten Klick. Aus einem
+         Fehlerzweig heraus (nach `await`) lehnt Chrome die Abfrage ab. -->
+    <p class="hinweis zugriff-zeile" id="leiste-zugriff" hidden>
+      <span id="leiste-zugriff-text"></span>
+      <button type="button" id="btn-leiste-zugriff" data-ohne-ticket>Zugriff erlauben</button>
+    </p>
+
+    </div><!-- /abschnitt -->
+
+    <!-- ── EINSTELLUNGEN ────────────────────────────────────────────────
+         Trennstrich und Überschrift, weil darunter keine AKTION mehr steht,
+         sondern eine EINSTELLUNG dieses Browsers: sie wird einmal getroffen und
+         gilt über das Fenster hinaus. Ohne die Linie liest sich das Pulldown wie
+         ein weiteres Feld der Auswertung darüber.
+         Gleiche Bauform wie der Trennstrich über „Meinen Kommentar
+         überarbeiten" und wie der Fuss der Ansicht (.abschnitt).
+         Das Zahnrad ist DASSELBE Zeichen wie am Vorlagen-Knopf – zwei Zahnräder
+         in verschiedener Darstellung sähen nach einem Fehler aus. Es trägt
+         keine eigene Aussage und ist für Hilfsmittel deshalb versteckt. -->
+    <!-- ⚠ DIE UEBERSCHRIFT IST EIN <button>, kein klickbares <h2>. Ein <h2>
+         ist von sich aus weder fokussierbar noch als Bedienelement erkennbar –
+         der Abschnitt waere mit der Tastatur nicht aufklappbar.
+         ⚠ UND ER TRAEGT `data-ohne-ticket`. Die Ticket-Sperre sperrt pauschal
+         JEDEN <button> ohne dieses Attribut (fail-closed, popup.js::
+         knoepfeAktualisieren). Ohne es waere der ganze Abschnitt auf einem Tab
+         ohne erkanntes Ticket UNERREICHBAR – genau der Fehler, der am
+         2026-08-31 fuer das Zahnrad der Vorlagen gemeldet wurde: eine
+         Einstellung dieses Browsers hat mit dem offenen Tab nichts zu tun. -->
+    <div class="abschnitt">
+      <h2 class="abschnitt-titel">
+        <button type="button" id="btn-einst" class="abschnitt-knopf"
+                aria-expanded="false" aria-controls="einst-inhalt"
+                data-ohne-ticket>
+          <span aria-hidden="true">⚙</span>
+          <span class="abschnitt-wort">Einstellungen</span>
+          <span class="abschnitt-pfeil" id="einst-pfeil" aria-hidden="true">▸</span>
+        </button>
+      </h2>
+
+      <!-- Startet ZU und der Zustand wird gemerkt (storage.local, Feld
+           `einst_offen`). Die Einstellungen werden einmal getroffen und gelten
+           darueber hinaus; sie muessen nicht bei jedem Oeffnen Platz kosten.
+           Der Seitenleisten-Schalter bleibt bewusst DRAUSSEN (siehe unten) –
+           er muss auch ohne Anmeldung erreichbar sein, dieser Abschnitt liegt
+           im Arbeitsbereich. -->
+      <div id="einst-inhalt" hidden>
+
+    <!-- AUTOMATIK BEI NEUEM TICKET.
+         Bewusst KEIN Knopf, sondern eine Einstellung: sie gilt über das
+         Fenster hinaus. Und bewusst OHNE `data-ohne-ticket` – ein <select>
+         wird von der Ticket-Sperre gar nicht erfasst (die greift nur auf
+         <button>), und das ist hier richtig: wer auf einem fremden Tab steht,
+         muss die Automatik trotzdem AUSschalten können.
+         „Meinen Kommentar überarbeiten" steht bewusst NICHT zur Wahl: es
+         braucht einen Entwurf, den man selbst ins Kommentarfeld geschrieben
+         hat – bei einem gerade erst geöffneten Ticket gibt es den per
+         Definition nicht.
+         ⚠ ZUR WAHL STEHEN VORLAGEN, nicht mehr zwei feste Aktionen: die Liste
+         füllt popup.js aus denselben Vorlagen wie das Pulldown darüber
+         (autoOptionenZeichnen). Gespeichert wird die KENNUNG der Vorlage. -->
+    <label class="feld">
+      <span>Bei neuem Ticket automatisch</span>
+      <select id="f-auto" class="voll">
+        <option value="">Nichts – nur auf Knopfdruck</option>
+      </select>
+    </label>
+    <p class="hinweis" id="auto-hinweis">
+      Läuft höchstens <b>einmal je Ticket</b> und kostet jedes Mal eine
+      Auswertung. Ein zweiter Lauf ist ein Klick auf den Knopf.
+    </p>
+      </div><!-- /einst-inhalt -->
+    </div><!-- /abschnitt Einstellungen -->
+
+
+
+  </section>
+
+  <!-- Popup oder Seitenleiste. Steht bewusst ausserhalb von Anmeldung und
+       Arbeitsbereich: die Ansicht ist eine Einstellung des Fensters, keine der
+       Aufgabe – und wer sie in der Leiste zurueckstellen will, muss das auch
+       koennen, ohne angemeldet zu sein.
+       Bleibt verborgen, wenn der Browser gar keine Leiste kennt (popup.js). -->
+  <footer class="ansicht-fuss" id="ansicht-zeile" hidden>
+    <label class="ansicht-schalter">
+      <input type="checkbox" id="f-ansicht">
+      <span>Als Seitenleiste öffnen</span>
+    </label>
+    <p class="hinweis" id="ansicht-hinweis" hidden></p>
+  </footer>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

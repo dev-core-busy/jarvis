@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Excel-Assistent</title>
+    <link rel="stylesheet" href="/static/css/theme.css?v=34">
+    <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
+    <link rel="stylesheet" href="/static/css/avatar.css?v=10">
+    <link rel="icon" href="/static/excel-addin/icon-32.png" type="image/png">
+    <!--
+        ═══════════════════════════════════════════════════════════════════
+        Excel-Assistent – Benutzerseite
+        ───────────────────────────────────────────────────────────────────
+        WOFUER ES DIESE SEITE GIBT: das eigentliche Werkzeug ist das
+        Aufgabenfenster IN Excel. Ein freigegebener Benutzer muss es aber
+        erst dort hineinbekommen – und dafuer braucht er das Manifest und
+        die Schritte, es einzubinden. Bis 2026-08-20 lag beides nur im
+        Administrator-Reiter; wer freigeschaltet war, sah im Portal nichts
+        und hatte keinen Weg zum Add-in (gemeldet).
+
+        Die Seite macht deshalb genau drei Dinge: Zustand zeigen, Manifest
+        anbieten, den Weg erklaeren. Sie ist KEIN zweiter Chat – gefragt wird
+        in Excel, nicht hier.
+
+        Praefix `xp-` (excel portal), damit nichts mit `xl-` (Aufgabenfenster)
+        oder `xa-` (Admin-Reiter) kollidiert.
+        ═══════════════════════════════════════════════════════════════════
+    -->
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: var(--font-body); background: var(--bg-primary);
+               color: var(--text-primary); min-height: 100vh; }
+        .hidden { display: none !important; }
+
+        /* ── Titelleiste ──
+           WORTGLEICH zu /email, /tracks, /sap und /support. Bis 2026-08-21
+           hatte diese Seite eine eigene Fassung (`.xp-top`, `.xp-iconbtn`,
+           ein einzelner DE/EN-Umschalter, kein Abmelden) – gemeldet wurde sie
+           als "das Home Symbol fehlt", tatsaechlich wich die ganze Leiste ab.
+           Wer zwischen den Bereichen wechselt, muss die Knoepfe am selben
+           Platz und in derselben Form finden; hier etwas Eigenes zu bauen ist
+           kein Gestaltungsspielraum, sondern Drift. */
+        .topbar { display: flex; align-items: center; justify-content: space-between;
+            padding: 10px 16px; border-bottom: 1px solid var(--border);
+            background: var(--bg-glass); backdrop-filter: blur(8px);
+            position: sticky; top: 0; z-index: 30; }
+        .topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+        .topbar-right { display: flex; align-items: center; gap: 4px; }
+        .topbar-avatar { width: 32px; height: 32px; border-radius: 50%;
+            background: var(--gradient); display: flex; align-items: center;
+            justify-content: center; font-size: 14px; font-weight: 700; color: #fff;
+            flex-shrink: 0; overflow: hidden; }
+        .topbar-avatar img { display: block; }
+        .topbar-title { font-size: 19px; font-weight: 600; white-space: nowrap; }
+
+        /* `text-decoration: none` ist Pflicht, weil der Haus-Knopf ein <a> ist
+           (er navigiert, dafuer braucht es kein JS) und weiter unten `a` die
+           Akzentfarbe samt Unterstreichung bekommt. Gleiche Falle wie bei
+           `.xp-btn` darunter und beim Download-Knopf in /email. */
+        .btn-theme { background: none; border: none; color: var(--text-muted);
+            padding: 4px 8px; border-radius: 8px; cursor: pointer;
+            text-decoration: none;
+            display: flex; align-items: center; justify-content: center;
+            transition: color .2s, background .2s; }
+        .btn-theme:hover { background: rgba(var(--accent-rgb), .12); color: var(--accent); }
+        .btn-theme svg { width: 20px; height: 20px; }
+
+        .lang-toggle { display: flex; gap: 2px; background: rgba(var(--fg-rgb, 148,163,184), .05);
+            border: 1px solid rgba(var(--fg-rgb, 148,163,184), .1); border-radius: 8px; padding: 2px; }
+        .lang-toggle-btn { background: transparent; border: none; color: var(--text-secondary);
+            font-size: .72rem; font-weight: 700; letter-spacing: .04em; padding: 3px 10px;
+            border-radius: 6px; cursor: pointer; font-family: var(--font-body);
+            transition: background .15s, color .15s; }
+        .lang-toggle-btn:hover { color: var(--text-primary); }
+        .lang-toggle-btn.active { background: rgba(var(--accent-rgb), .35); color: var(--text-primary); }
+
+        .xp-wrap { max-width: 860px; margin: 0 auto; padding: 22px 20px 60px; }
+        .xp-lead { color: var(--text-secondary); line-height: 1.65; font-size: .92rem;
+            margin-bottom: 20px; }
+        .xp-card { border: 1px solid var(--border); border-radius: 12px;
+            background: var(--bg-secondary); padding: 16px 18px; margin-bottom: 16px; }
+        .xp-card h2 { font-size: 1rem; font-weight: 600; margin-bottom: 8px; }
+        .xp-card p { color: var(--text-secondary); line-height: 1.6; font-size: .86rem; }
+
+        /* Zustands-Pille: `align-self` ist Pflicht, sonst wird sie im
+           senkrechten Flex-Container ueber die ganze Breite gezogen und sieht
+           wie ein Eingabefeld aus (Fehler vom 2026-08-11 beim Standort-Sync). */
+        .xp-pill { display: inline-flex; align-items: center; gap: 6px;
+            align-self: flex-start; padding: 3px 10px; border-radius: 12px;
+            font-size: .76rem; font-weight: 600; white-space: nowrap;
+            background: rgba(var(--fg-rgb), .06); border: 1px solid var(--border);
+            color: var(--text-secondary); margin-bottom: 10px; }
+        .xp-pill.is-ok { color: var(--success);
+            border-color: color-mix(in srgb, var(--success) 45%, transparent);
+            background: color-mix(in srgb, var(--success) 12%, transparent); }
+        .xp-pill.is-off { color: var(--danger);
+            border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+            background: color-mix(in srgb, var(--danger) 12%, transparent); }
+
+        .xp-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+            margin-top: 12px; }
+        /* `.btn-primary` gibt es hier nicht (theme.css), deshalb eigene Knoepfe.
+           Der Download ist ein LINK – der Endpunkt liefert Content-Disposition,
+           es braucht kein JS. Ohne `text-decoration:none` waere er
+           unterstrichen (Lehre von .em-btn und .ad-upd a). */
+        .xp-btn { display: inline-block; text-decoration: none; flex: 0 0 auto;
+            padding: 9px 16px; border-radius: 9px; font-size: .86rem;
+            font-weight: 600; cursor: pointer; font-family: inherit;
+            background: var(--gradient); color: #fff; border: none; }
+        .xp-btn:hover { filter: brightness(1.08); color: #fff; }
+        .xp-btn-sec { background: none; border: 1px solid var(--border);
+            color: var(--text-secondary); font-weight: 400; }
+        .xp-btn-sec:hover { border-color: var(--accent); color: var(--text-primary);
+            filter: none; }
+        .xp-hint { font-size: .78rem; color: var(--text-muted); line-height: 1.5; }
+
+        /* Der Katalog-Pfad. Monospace und umbrechend, weil UNC-Pfade lang sind
+           und Zeichen enthalten, die in einer Proportionalschrift kaum
+           auseinanderzuhalten sind (l/I/1, O/0). DECKENDE Flaeche – der Kasten
+           liegt auf Karteninhalt (gleiche Lehre wie .cs-key und .em-paused). */
+        .xp-pfad { margin-top: 10px; padding: 10px 12px; border-radius: 8px;
+            background: var(--bg-primary); border: 1px solid var(--accent);
+            font-family: var(--font-mono, monospace); font-size: .84rem;
+            line-height: 1.5; color: var(--text-primary);
+            word-break: break-all; user-select: all; }
+        /* `.xp-row` ist ein Flex-Container und wuerde das hidden-Attribut
+           ueberstimmen (Fehler vom 2026-08-17 bei .sp-row). Hier greift das
+           zwar keinen der beiden Bloecke, die Regel steht aber vorsorglich –
+           der naechste Block bekommt sonst denselben Fehler. */
+        .xp-row[hidden], .xp-steps[hidden] { display: none; }
+
+        /* Zwischenueberschrift der zwei Einbau-Wege. Eigene Klasse und nicht
+           `h3` global: die Karte hat schon `h2`, und ein globaler h3-Stil
+           wuerde auf allen Seiten mitgezogen. */
+        .xp-sub { font-size: .88rem; font-weight: 600; margin: 16px 0 0;
+                  color: var(--text-primary); }
+        .xp-steps { margin: 10px 0 0 0; padding-left: 1.35rem; line-height: 1.75;
+            font-size: .86rem; color: var(--text-secondary); }
+        .xp-steps li { margin-bottom: 8px; }
+        .xp-steps b { color: var(--text-primary); }
+        .xp-facts { margin: 8px 0 0 0; padding-left: 1.2rem; line-height: 1.65;
+            font-size: .84rem; color: var(--text-secondary); }
+        .xp-facts li { margin-bottom: 7px; }
+        .xp-facts b { color: var(--text-primary); }
+
+        .xp-warn { border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+            background: color-mix(in srgb, var(--danger) 8%, transparent);
+            border-radius: 10px; padding: 12px 14px; font-size: .86rem;
+            line-height: 1.6; margin-bottom: 16px; }
+        .xp-warn b { color: var(--danger); }
+
+        code { font-size: .88em; padding: 1px 5px; border-radius: 4px;
+            background: rgba(var(--fg-rgb), .08); word-break: break-all; }
+        a { color: var(--accent); }
+    </style>
+</head>
+<body>
+<script src="/static/js/theme_frueh.js?v=1"></script>
+
+<!-- ═══ Titelleiste ═══
+     BAUGLEICH zu /email, /tracks, /sap und /support – Aufbau, Klassen,
+     Reihenfolge und Symbole. Gemeldet wurde am 2026-08-21 "das Home Symbol
+     fehlt"; tatsaechlich wich die ganze Leiste ab (eigene Klassen, ein
+     einzelner DE/EN-Umschalter, kein Abmelden, links ein Zurueck-Pfeil).
+
+     Sprache und Thema brauchen hier KEINEN eigenen Code: `i18n.js` verdrahtet
+     `.lang-toggle-btn` samt Aktiv-Zustand, `theme.js` `#btn-theme-toggle`
+     samt Sonne/Mond. Die frueheren Eigenbauten in excel_portal.js waren
+     Verdopplung mit abweichendem Verhalten. -->
+<header class="topbar">
+    <div class="topbar-left">
+        <div class="topbar-avatar">J</div>
+        <span class="topbar-title"><span class="brand-app-name">Jarvis</span>
+            <span data-i18n="xp.title">Excel-Assistent</span></span>
+    </div>
+    <div class="topbar-right">
+        <div class="lang-toggle" id="xp-lang-toggle">
+            <button class="lang-toggle-btn" data-lang="de" data-setlang="de" title="Deutsch">DE</button>
+            <button class="lang-toggle-btn" data-lang="en" data-setlang="en" title="English">EN</button>
+        </div>
+        <button class="btn-theme jv-issues-btn" id="xp-issues-btn" data-i18n-title="sup.issues" title="Issues / Feedback"
+                data-issues-oeffnen>
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        </button>
+        <button class="btn-theme" id="btn-theme-toggle" title="Hell/Dunkel umschalten" data-i18n-title="chat.theme">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        </button>
+        <!-- Als <a>, nicht als Knopf mit JS: die Seite navigiert nur. So macht
+             es auch /sap; /email und /tracks nehmen dafuer einen Knopf, das
+             Zeichen und der Platz sind identisch. -->
+        <a href="/portal" class="btn-theme" title="Startseite" data-i18n-title="nav.home">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        </a>
+        <!-- Einstellungen: nur fuer Admins, wird per is_admin eingeblendet -->
+        <button class="btn-theme" id="xp-settings-btn" data-jarvis-settings="/excel" data-i18n-title="nav.settings" title="Einstellungen" style="display:none;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+        <button class="btn-theme" id="xp-logout-btn" title="Abmelden" data-i18n-title="chat.logout">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        </button>
+    </div>
+</header>
+
+<div class="xp-wrap" data-jv-breit>
+    <!-- Seite maximieren (Vorbild /wissen, Vorgabe 2026-09-28): der Knopf
+         sitzt AUSSERHALB der Kacheln ganz oben; maximiert nutzen ALLE
+         Kacheln die volle Fensterbreite. Logik in seite_breit.js. -->
+    <div class="jv-max-row">
+        <button type="button" class="jv-max-btn" id="jv-max" data-seite="excel" aria-pressed="false"
+                data-i18n-title="common.maximize" data-i18n-aria="common.maximize"
+                title="Maximieren" aria-label="Maximieren">&#9974;</button>
+    </div>
+    <!-- Fehlt die Freigabe, steht der Grund GANZ OBEN – und die Seite bietet
+         den Download trotzdem nicht an. Ein Manifest, das man einbindet und
+         das sich danach nicht anmelden laesst, ist die schlechtere Erfahrung. -->
+    <div class="xp-warn hidden" id="xp-noaccess"></div>
+
+    <p class="xp-lead" data-i18n-html="xp.lead">Der Assistent arbeitet <b>in Excel</b>: du öffnest ein Fenster neben deiner Tabelle, stellst dort deine Frage und bekommst eine Antwort – oder einen Änderungsvorschlag, den du vor dem Schreiben Zelle für Zelle siehst. Damit das geht, muss das Add-in einmalig in dein Excel eingebunden werden.</p>
+
+    <div class="xp-card" id="xp-dl-card">
+        <!-- ZWEI SICH AUSSCHLIESSENDE FAELLE, gesteuert von excel_portal.js:
+             hat die Administration einen Katalog-Pfad hinterlegt, ist der
+             Download der falsche Weg (der Benutzer laedt eine zweite Kopie
+             herunter, die niemand aktualisiert). Dann steht hier der Pfad. -->
+        <h2 id="xp-get-head" data-i18n="xp.get_head">1. Add-in holen</h2>
+
+        <div id="xp-dl-block">
+            <p data-i18n="xp.get_text">Lade die Manifest-Datei herunter und lege sie in einen Ordner, den du in Excel als Katalog einträgst. Falls deine Administration das bereits für alle eingerichtet hat, kannst du diesen Schritt überspringen – dann findest du den Assistenten direkt unter „Add-Ins“.</p>
+            <div class="xp-row">
+                <a class="xp-btn" id="xp-download" href="/excel-addin/manifest.xml"
+                   data-i18n="xp.download">Manifest herunterladen</a>
+                <span class="xp-hint" id="xp-version"></span>
+            </div>
+        </div>
+
+        <div id="xp-pfad-block" hidden>
+            <p data-i18n="xp.pfad_text">Deine Administration hat das Add-in bereits im Netz abgelegt – du musst nichts herunterladen. Trage in Excel diesen Ordner als Katalog ein:</p>
+            <div class="xp-pfad" id="xp-pfad"></div>
+            <div class="xp-row" style="margin-top:10px;">
+                <button type="button" class="xp-btn" id="xp-pfad-copy"
+                        data-i18n="xp.pfad_copy">Pfad kopieren</button>
+                <span class="xp-hint" id="xp-pfad-status"></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="xp-card">
+        <h2 data-i18n="xp.steps_head">2. In Excel einbinden</h2>
+        <!-- GEMELDET AUS DEM ECHTEN BETRIEB (2026-08-24, Office 365): "es wird
+             kein Netzlaufwerk angeboten, nur der Store". Zutreffend – der neue
+             Knopf "Add-Ins" im Menueband oeffnet zuerst den Store; der Reiter
+             FREIGEGEBENER ORDNER steckt dahinter unter "Erweitert" (Excel als
+             Programm) bzw. "Weitere Einstellungen" (Excel im Browser). Genau
+             dieser Zwischenschritt fehlte hier, und zwei weitere Punkte auch:
+             der Knopf "Katalog hinzufuegen" im Trust Center und dass es ein
+             NETZWERKPFAD sein muss – ein lokaler Ordner erscheint nie.
+             Quelle: Microsoft Learn, "Sideload Office Add-ins on Windows from a
+             network share" und "… to Office on the web". -->
+        <p class="xp-hint" data-i18n-html="xp.steps_intro"><b>Der Knopf „Add-Ins“ zeigt zuerst nur den Store.</b> Das ist normal – der Weg zum eigenen Add-in liegt eine Ebene tiefer. Am schnellsten geht es im Browser.</p>
+
+        <h3 class="xp-sub" data-i18n="xp.web_head">Weg 1: Excel im Browser (ohne Administration)</h3>
+        <ol class="xp-steps" data-i18n-html="xp.steps_web">
+            <li>Die Tabelle in <b>Excel im Browser</b> öffnen (office.com oder das Firmenportal).</li>
+            <li><b>Start → Add-Ins → Weitere Einstellungen</b>.</li>
+            <li>Im Fenster „Office-Add-Ins“ auf <b>Mein Add-In hochladen</b>, die Manifest-Datei wählen und <b>Hochladen</b>.</li>
+            <li>Der Knopf steht danach im Menüband unter <b>Start</b>. Beim ersten Öffnen meldest du dich mit deinen gewohnten Zugangsdaten an.</li>
+        </ol>
+        <p class="xp-hint" data-i18n-html="xp.web_note">Das gilt pro Browser: die Datei liegt im Speicher des Browsers. Nach „Browserdaten löschen“ oder in einem anderen Browser lädst du sie erneut hoch.</p>
+
+        <h3 class="xp-sub" data-i18n="xp.desk_head">Weg 2: Excel als Programm (Windows)</h3>
+        <!-- Erster Schritt hat zwei Fassungen: mit hinterlegtem Katalog-Pfad
+             waere "Datei in einen Ordner legen" das Gegenteil dessen, was oben
+             steht ("du musst nichts herunterladen"). Zwei getrennte Listen und
+             nicht eine, in der JS ein <li> austauscht – `applyLang()` setzt
+             `data-i18n-html` bei jedem Sprachwechsel neu und wuerde die
+             Aenderung wortlos zurueckdrehen. -->
+        <ol class="xp-steps" id="xp-steps-dl" data-i18n-html="xp.steps">
+            <li>Die Datei in einen <b>freigegebenen Ordner im Netz</b> legen und dessen Netzwerkpfad notieren (<code>\\Server\Ordner</code>). <b>Ein Ordner auf dem eigenen Rechner funktioniert nicht</b> – frag im Zweifel die Administration nach einer Freigabe.</li>
+            <li>In Excel: <b>Datei → Optionen → Trust Center → Einstellungen für das Trust Center → Kataloge vertrauenswürdiger Add-Ins</b>.</li>
+            <li>Den Netzwerkpfad eintragen, auf <b>Katalog hinzufügen</b> klicken, beim neuen Eintrag <b>Im Menü anzeigen</b> ankreuzen, mit <b>OK</b> bestätigen – und Excel <b>schließen und neu öffnen</b>.</li>
+            <li>In Excel: <b>Start → Add-Ins → Erweitert</b> – oben im Fenster den Reiter <b>FREIGEGEBENER ORDNER</b> wählen, den Assistenten auswählen und hinzufügen.</li>
+            <li>Der Knopf steht danach im Menüband unter <b>Start</b>. Beim ersten Öffnen meldest du dich mit deinen gewohnten Zugangsdaten an.</li>
+        </ol>
+        <ol class="xp-steps" id="xp-steps-pfad" data-i18n-html="xp.steps_pfad" hidden>
+            <li>In Excel: <b>Datei → Optionen → Trust Center → Einstellungen für das Trust Center → Kataloge vertrauenswürdiger Add-Ins</b>.</li>
+            <li>Den Pfad von oben eintragen, auf <b>Katalog hinzufügen</b> klicken, beim neuen Eintrag <b>Im Menü anzeigen</b> ankreuzen, mit <b>OK</b> bestätigen – und Excel <b>schließen und neu öffnen</b>.</li>
+            <li>In Excel: <b>Start → Add-Ins → Erweitert</b> – oben im Fenster den Reiter <b>FREIGEGEBENER ORDNER</b> wählen, den Assistenten auswählen und hinzufügen.</li>
+            <li>Der Knopf steht danach im Menüband unter <b>Start</b>. Beim ersten Öffnen meldest du dich mit deinen gewohnten Zugangsdaten an.</li>
+        </ol>
+        <p class="xp-hint" data-i18n-html="xp.desk_note">Fehlt der Reiter <b>FREIGEGEBENER ORDNER</b> weiterhin, ist der Katalog nicht angekommen: Pfad ohne <b>Katalog hinzufügen</b> eingetragen, <b>Im Menü anzeigen</b> nicht angekreuzt, Excel nicht neu gestartet – oder es war kein Netzwerkpfad.</p>
+        <p class="xp-hint" style="margin-top:10px;" data-i18n-html="xp.trust_note"><b>Meldet Office, es könne dem Add-in nicht vertrauen?</b> Dann passt die Adresse im Manifest nicht zum Sicherheitszertifikat des Servers – das kannst du nicht selbst beheben. Wende dich an die Administration; sie muss das Manifest über den richtigen Servernamen erzeugen oder das Zertifikat nachziehen.</p>
+        <p class="xp-hint" style="margin-top:10px;" data-i18n-html="xp.steps_note"><b>Zur Anmeldung:</b> Das Fenster in Excel hat einen eigenen Speicher – eine Anmeldung im Browser gilt dort nicht. Du meldest dich einmal im Fenster an, danach bleibt es angemeldet.</p>
+    </div>
+
+    <div class="xp-card">
+        <h2 data-i18n="xp.use_head">3. Was du fragen kannst</h2>
+        <ul class="xp-facts" data-i18n-html="xp.use_list">
+            <li>„Was fällt an Spalte D auf?“ – der Assistent sieht den Aufbau deiner Blätter und deine aktuelle Markierung.</li>
+            <li>„Trage in G2:G40 die Marge aus Netto und Einkauf ein“ – du bekommst einen Vorschlag mit altem und neuem Inhalt je Zelle und entscheidest, ob er übernommen wird.</li>
+            <li>„Erklär mir, was die Formel in B12 rechnet.“</li>
+            <li>„Prüf die Summenzeile auf Fehler.“</li>
+        </ul>
+        <p class="xp-hint" style="margin-top:10px;" data-i18n-html="xp.use_note"><b>Es wird nie ohne deine Bestätigung geschrieben.</b> Und passt etwas doch nicht: <b>Strg+Z</b> in Excel holt die Änderung zurück – auch mehrere Schritte weit. In <i>Excel im Web</i> ist das nicht zugesichert; dort prüfe jeden Vorschlag lieber vorher.</p>
+    </div>
+</div>
+
+<!-- icons.js steht auf JEDER Seite als ERSTES Skript. Es fehlte hier seit der
+     Entstehung der Seite; heute ruft excel_portal.js noch kein `JarvisIcons`,
+     aber die Aufrufe stecken projektweit in Template-Strings – ein fehlendes
+     Modul waere dort ein harter Fehler mitten im Zusammenbauen und die Liste
+     bliebe leer (so geschehen in tracks.js). -->
+<script src="/static/js/sitzung.js?v=3"></script>
+<script src="/static/js/konto_hinweise.js?v=2"></script>
+<script src="/static/js/icons.js?v=8"></script>
+<script src="/static/js/pwreveal.js?v=4"></script>
+<script src="/static/js/dlkey.js?v=4"></script>
+<script src="/static/js/cpubar.js?v=2"></script>
+<script src="/static/js/syspackages.js?v=3"></script>
+<script src="/static/js/sysload.js?v=5"></script>
+<script src="/static/js/i18n.js?v=339"></script>
+<script src="/static/js/seite_breit.js?v=1"></script>
+<script src="/static/js/theme.js?v=3"></script>
+<script src="/static/js/branding.js?v=27"></script>
+<!-- sessions.js liefert `JarvisSession.logout()`: das Abmelde-Signal MUSS
+     raus, BEVOR der Token verworfen wird (danach ist es nicht mehr
+     authentifizierbar), und mit `keepalive`, weil die Seite unmittelbar
+     danach wegnavigiert. Ohne diese Datei bliebe der Benutzer in der
+     Anwesenheitsliste bis zu zwei Minuten als "online" stehen. -->
+<script src="/static/js/sessions.js?v=9"></script>
+<script src="/static/js/logo_home.js?v=1"></script>
+<script src="/static/js/excel_portal.js?v=5"></script>
+<script src="/static/js/settings_btn.js?v=5"></script>
+<!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist).
+     Der Ein/Aus-Schalter haengt sich VOR #btn-theme-toggle – deshalb muss der
+     Theme-Knopf oben diese Id tragen. -->
+<script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
+<script src="/static/vendor/clippy/clippy.min.js"></script>
+<script src="/static/js/stt.js?v=3"></script>
+<script src="/static/js/avatar.js?v=17"></script>
+<script src="/static/js/activity.js?v=3"></script>
+<script src="/static/js/issues.js?v=14"></script>
+</body>
+</html>

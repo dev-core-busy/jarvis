@@ -1,0 +1,986 @@
+/* Support-Assistent – Seitenlogik (/support)
+   Login (Token-Fallback), Status (Jira-Checkbox), Suche + Ergebnis-Rendering. */
+(function () {
+    'use strict';
+
+    var TOKEN_KEYS = window.JarvisSitzung.tokenSchluessel();
+    function token() {
+        for (var i = 0; i < TOKEN_KEYS.length; i++) {
+            var v = localStorage.getItem(TOKEN_KEYS[i]);
+            if (v) return v;
+        }
+        return '';
+    }
+    function authHeaders(extra) {
+        return Object.assign({ 'Authorization': 'Bearer ' + token() }, extra || {});
+    }
+    function $(id) { return document.getElementById(id); }
+    function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+        });
+    }
+    // Übersetzung mit Fallback (deutscher Text), falls i18n nicht geladen
+    function T(key, def) { return (window.t && window.t(key)) || def; }
+    // CPU-Auslastung: liegt seit 2026-08-22 in frontend/js/cpubar.js – die
+    // eigene Fassung hier war eine von vier gleichlautenden Kopien.
+    // Karten bei mehr als 6 Zeilen einklappen + 'mehr'/'weniger'-Umschalter –
+    // gilt für KI-Zusammenfassungen (Gesamt + je Ticket) und Ergebnis-Karten
+    var _CLAMP_LINES = 6;
+    // Frueheren Einklapp-Zustand eines Elements entfernen (vor Neu-Befuellung)
+    function _resetClamp(el) {
+        el._clamped = false;
+        el.classList.remove('sup-ai-collapsed');
+        el.style.maxHeight = '';
+        var sib = el.nextElementSibling;
+        if (sib && sib.classList && sib.classList.contains('sup-ai-more')) sib.remove();
+    }
+    // Klappt ein Element per max-height auf 6 Zeilen ein (KI-Texte, freie Hoehe)
+    function _applyHeightClamp(el) {
+        if (!el || el._clamped) return;
+        var cs = window.getComputedStyle(el);
+        var lh = parseFloat(cs.lineHeight);
+        if (!lh || isNaN(lh)) lh = (parseFloat(cs.fontSize) || 15) * 1.55;
+        var maxH = Math.round(lh * _CLAMP_LINES);
+        if (el.scrollHeight <= maxH + 8) return;   // ≤6 Zeilen → nichts tun
+        el._clamped = true;
+        el.classList.add('sup-ai-collapsed');
+        el.style.maxHeight = maxH + 'px';
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'sup-ai-more';
+        btn.textContent = T('sup.more', 'mehr');
+        btn.addEventListener('click', function () {
+            if (el.classList.contains('sup-ai-collapsed')) {
+                el.classList.remove('sup-ai-collapsed');
+                el.style.maxHeight = 'none';
+                btn.textContent = T('sup.less', 'weniger');
+            } else {
+                el.classList.add('sup-ai-collapsed');
+                el.style.maxHeight = maxH + 'px';
+                btn.textContent = T('sup.more', 'mehr');
+                var card = el.closest('.sup-ai-card, .sup-block'); if (card) card.scrollIntoView({ block: 'nearest' });
+            }
+        });
+        el.parentNode.insertBefore(btn, el.nextSibling);
+    }
+    function _applyAiClamp() { _applyHeightClamp(document.querySelector('.sup-ai-text.sup-ai-md')); }
+    // Ergebnis-Karten: ab >6 Zeilen 'mehr'/'weniger' – gleiche Hoehen-Kappung wie
+    // die KI-Zusammenfassung (max-height statt -webkit-line-clamp, da der Inhalt
+    // als Markdown mit Block-Elementen gerendert wird).
+    function _clampBlocks() {
+        var bodies = document.querySelectorAll('#sup-blocks .sup-block-body');
+        Array.prototype.forEach.call(bodies, function (bodyEl) { _applyHeightClamp(bodyEl); });
+    }
+    // Basis-URL der Jira-Instanz (vom Backend) – fuer Ticket-Key-Links
+    var _jiraBase = '';
+    // Escapen + http(s)-URLs UND Jira-Ticket-Keys (z.B. NXDISPATHO-19706) verlinken
+    function escLink(s) {
+        var html = esc(s);
+        // 1) http(s)-URLs sichern (Platzhalter), damit die Ticket-Erkennung sie
+        //    nicht im href/Text zerreisst.
+        var urls = [];
+        html = html.replace(/(https?:\/\/[^\s<]+)/g, function (u) {
+            var tail = '';
+            var m = u.match(/[)\].,;:!?]+$/);
+            if (m) { tail = m[0]; u = u.slice(0, -tail.length); }
+            urls.push('<a href="' + u + '" target="_blank" rel="noopener" '
+                + 'style="color:var(--accent-hover);word-break:break-all;">' + u + '</a>' + tail);
+            return '@@URL' + (urls.length - 1) + '@@';
+        });
+        // 2) Ticket-Keys (PROJEKT-NUMMER) als Links, wenn Jira-Basis bekannt
+        if (_jiraBase) {
+            html = html.replace(/\b([A-Z][A-Z0-9]+-\d+)\b/g, function (key) {
+                return '<a href="' + _jiraBase + '/browse/' + key + '" target="_blank" '
+                    + 'rel="noopener" style="color:var(--accent-hover);">' + key + '</a>';
+            });
+        }
+        // 3) gesicherte URLs wiederherstellen
+        return html.replace(/@@URL(\d+)@@/g, function (_, i) { return urls[+i]; });
+    }
+    // Nackte Jira-Ticket-Keys (PROJEKT-NUMMER) zu Markdown-Links machen – aber nur,
+    // wenn nicht bereits Teil eines Links/Pfads (kein '[' oder '/' davor).
+    function _linkifyKeys(t) {
+        if (!_jiraBase) return t;
+        return t.replace(/(^|[^\[\/\w-])([A-Z][A-Z0-9]+-\d+)(?![\w\]-])/g,
+            function (_, pre, key) { return pre + '[' + key + '](' + _jiraBase + '/browse/' + key + ')'; });
+    }
+    // Treffer-Text als Markdown rendern (Überschriften, **fett**, Tabellen, Listen)
+    // – wie die KI-Zusammenfassung; Fallback: nur Escapen + Verlinken.
+    function renderBlockBody(text) {
+        var s = String(text == null ? '' : text);
+        if (window.JarvisChatLib && window.JarvisChatLib.renderMarkdown) {
+            return window.JarvisChatLib.renderMarkdown(_linkifyKeys(s));
+        }
+        return escLink(s);
+    }
+
+    // Hebt Filter-Begriffe im fertig gerenderten Block-HTML hervor (<mark>). Wirkt nur
+    // auf sichtbaren Text: HTML-Tags (<a …>) und Entities (&amp; …) bleiben unangetastet,
+    // damit weder Attribute/URLs noch Sonderzeichen zerstoert werden. Alle Begriffe
+    // werden in EINEM Durchgang (Alternation) ersetzt – kein Treffer im eingefuegten Markup.
+    function highlightTerms(html, terms) {
+        if (!terms || !terms.length) return html;
+        var re = new RegExp('(' + terms.map(function (t) {
+            return t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        }).join('|') + ')', 'gi');
+        return html.replace(/(<[^>]+>)|([^<]+)/g, function (m, tag, text) {
+            if (tag) return tag;                       // Tag unveraendert
+            return text.replace(/(&[a-zA-Z#0-9]{1,8};)|([^&]+)/g, function (mm, ent, plain) {
+                return ent ? ent : plain.replace(re, '<mark class="sup-hl">$1</mark>');
+            });
+        });
+    }
+
+    // Wissensgruppen-Filter (aufklappbare Checkbox-Liste in der Options-Leiste)
+    var _kbFilter = null;
+    function ensureKbFilter() {
+        if (_kbFilter || !window.KbGroupFilter) return;
+        var slot = $('kb-filter-slot');
+        if (!slot) return;
+        _kbFilter = window.KbGroupFilter.mount({ anchor: slot, place: 'append', direction: 'down', key: 'support' });
+    }
+
+    function showApp() {
+        $('sup-login').classList.add('hidden');
+        $('sup-app').classList.remove('hidden');
+        loadStatus();
+        bind();
+        ensureKbFilter();
+        ensureProfileSelect();
+        startLlmStatus();
+        if (window.refreshBranding) try { window.refreshBranding(); } catch (e) {}
+    }
+
+    // ── LLM-Verbindungsanzeige (wie jarvis/chat): Punkt gruen/rot, alle 30s ──
+    var _llmStatusTimer = null;
+    function checkLlmStatus() {
+        var dot = $('sup-status-dot');
+        if (!dot) return;
+        fetch('/api/llm/active-status', { headers: authHeaders() })
+            .then(function (r) { if (!r.ok) throw new Error('http'); return r.json(); })
+            .then(function (d) {
+                var reachable = (d.status === 'ok' || d.status === 'degraded');
+                dot.className = 'sup-status-dot ' + (reachable ? 'connected' : 'disconnected');
+                var name = d.profile_name ? ' – ' + d.profile_name : '';
+                dot.title = (d.status === 'ok' ? T('sup.llm_ok', 'LLM erreichbar')
+                    : d.status === 'degraded' ? T('sup.llm_degraded', 'LLM erreichbar (Modell fehlt)')
+                    : T('sup.llm_down', 'LLM nicht erreichbar')) + name;
+            })
+            .catch(function () {
+                dot.className = 'sup-status-dot disconnected';
+                dot.title = T('sup.llm_down', 'LLM nicht erreichbar');
+            });
+    }
+    function startLlmStatus() {
+        checkLlmStatus();
+        if (!_llmStatusTimer) _llmStatusTimer = setInterval(checkLlmStatus, 30000);
+    }
+    // KI-Profil-Pulldown in den erweiterten Einstellungen (gemeinsames Modul)
+    var _profSel = null;
+    function ensureProfileSelect() {
+        if (_profSel || !window.ProfileSwitcher) return;
+        var slot = $('sup-profile-slot');
+        if (!slot) return;
+        _profSel = window.ProfileSwitcher.mount({
+            anchor: slot, place: 'append',
+            headers: function () { return authHeaders(); },
+            onChange: function () { checkLlmStatus(); }
+        });
+    }
+
+    // ── Checkbox-Vorbelegung pro Browser/Session merken ──
+    function getPref(key, def) {
+        var v = localStorage.getItem('jarvis_support_' + key);
+        if (v === null) return def === undefined ? true : def;  // Default: an (sofern nicht anders angegeben)
+        return v === '1';
+    }
+    function setPref(key, on) {
+        localStorage.setItem('jarvis_support_' + key, on ? '1' : '0');
+    }
+    function clampNum(v, lo, hi) { v = parseInt(v, 10); if (isNaN(v)) v = hi; return Math.max(lo, Math.min(v, hi)); }
+    function getNumPref(key) { var v = localStorage.getItem('jarvis_support_' + key); return v === null ? null : parseInt(v, 10); }
+    function setNumPref(key, n) { localStorage.setItem('jarvis_support_' + key, String(n)); }
+    var _supMax = { sum: 5, res: 2, tickets: 50 };
+    var _supDefault = { tickets: 12 };
+    var _me = null;  // angemeldeter Benutzer (fuer benutzerbasierte Prefs)
+
+    function loadStatus() {
+        fetch('/api/support/status', { headers: authHeaders() })
+            .then(function (r) { if (r.status === 401) { logout(); return null; } return r.json(); })
+            .then(function (d) {
+                if (!d) return;
+                // Sichtbarkeit je nach aktivem Skill
+                $('sup-opt-jira-wrap').classList.toggle('hidden', !d.jira_active);
+                $('sup-opt-open-wrap').classList.toggle('hidden', !d.jira_active);
+                $('sup-opt-conf-wrap').classList.toggle('hidden', !d.confluence_active);
+                // Gespeicherte Vorbelegung anwenden (Default: an)
+                $('sup-opt-jira').checked = getPref('jira');
+                $('sup-opt-conf').checked = getPref('conf');
+                $('sup-opt-rag').checked = getPref('rag');
+                // IBS-Tickets: nur klickbar, wenn URL + API-Key der Kundenverwaltung hinterlegt sind; Default AUS
+                var ibsEl = $('sup-opt-ibs');
+                if (ibsEl) {
+                    ibsEl.disabled = !d.ibs_configured;
+                    ibsEl.checked = d.ibs_configured ? getPref('ibs', false) : false;
+                    var ibsWrap = $('sup-opt-ibs-wrap');
+                    if (ibsWrap) {
+                        ibsWrap.style.opacity = d.ibs_configured ? '' : '0.45';
+                        ibsWrap.title = d.ibs_configured ? '' : T('sup.opt_ibs_hint', 'Erst URL und API-Key der Kundenverwaltung in den Einstellungen hinterlegen');
+                    }
+                }
+                // Fachsysteme (SAP/VEMAS) – zwei getrennte Zustaende, und die
+                // Unterscheidung ist der Punkt: OHNE Freigabe gibt es das
+                // Kaestchen gar nicht (es geht den Benutzer nichts an), MIT
+                // Freigabe aber ohne hinterlegten Zugang steht es abgeblendet
+                // da und sagt im Titel, was fehlt. Verschwaende man beides zu
+                // 'weg', suchte ein Freigegebener den Fehler bei sich.
+                ['sap', 'vemas'].forEach(function (k) {
+                    var el = $('sup-opt-' + k), wrap = $('sup-opt-' + k + '-wrap');
+                    if (!el || !wrap) return;
+                    var erlaubt = !!d[k + '_allowed'], bereit = !!d[k + '_configured'];
+                    wrap.classList.toggle('hidden', !erlaubt);
+                    el.disabled = !bereit;
+                    // Default AUS: jede Auswertung ist ein Agentenlauf gegen ein
+                    // Fachsystem und dauert Sekunden bis Minuten – das darf nur
+                    // laufen, wenn es jemand ausdruecklich angehakt hat.
+                    el.checked = bereit && getPref(k, false);
+                    wrap.style.opacity = bereit ? '' : '0.45';
+                    wrap.title = bereit ? T('sup.opt_fach_hint', 'Wertet die Anfrage im Fachsystem aus (Agentenlauf, dauert länger als eine Suche)')
+                        : T('sup.opt_fach_unconf', 'Für dich ist kein Zugang zu diesem Fachsystem hinterlegt (Einstellungen bzw. eigener Zugang im Bereich)');
+                });
+                $('sup-opt-ai').checked = getPref('ai');
+                $('sup-opt-open').checked = getPref('open');
+                // Exklusiv: nie 'alle' UND 'offene' zugleich → Standard 'offene'
+                if ($('sup-opt-jira').checked && $('sup-opt-open').checked) {
+                    $('sup-opt-jira').checked = false; setPref('jira', false);
+                }
+                // Darstellungs-Parameter: Maxima vom Server, Nutzerwert aus localStorage
+                _supMax.sum = parseInt(d.summary_lines_max, 10) || 5;
+                _supMax.tickets = parseInt(d.ticket_count_max, 10) || 50;
+                _supDefault.tickets = parseInt(d.ticket_count_default, 10) || 12;
+                var sEl = $('sup-u-sumlines'), tEl = $('sup-u-tickets');
+                if (sEl) {
+                    sEl.max = _supMax.sum;
+                    var sp = getNumPref('sumlines'); sEl.value = clampNum(sp === null ? _supMax.sum : sp, 2, _supMax.sum);
+                }
+                if (tEl) {
+                    tEl.max = _supMax.tickets;
+                    var tp = getNumPref('tickets'); tEl.value = clampNum(tp === null ? _supDefault.tickets : tp, 1, _supMax.tickets);
+                }
+                var hint = $('sup-u-hint');
+                if (hint) hint.textContent = '(max. ' + _supMax.sum + ' Sätze)';
+                var thint = $('sup-u-thint');
+                if (thint && tEl) thint.textContent = '(' + tEl.value + '/' + _supMax.tickets + ')';
+            })
+            .catch(function () {});
+    }
+
+    function logout() {
+        if (window.JarvisSession) window.JarvisSession.logout();
+        TOKEN_KEYS.forEach(function (k) { localStorage.removeItem(k); });
+        $('sup-app').classList.add('hidden');
+        $('sup-login').classList.remove('hidden');
+    }
+
+    var _bound = false;
+    function bind() {
+        if (_bound) return; _bound = true;
+        $('sup-search-btn').addEventListener('click', search);
+        var _cancelBtn = $('sup-cancel-btn');
+        if (_cancelBtn) _cancelBtn.addEventListener('click', function () {
+            if (_searchAbort) { try { _searchAbort.abort(); } catch (e) {} }
+        });
+        $('sup-input').addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); search(); }
+        });
+        // Checkbox-Werte als Vorbelegung fuer die naechste Session merken
+        // 'alle Jira' und 'offene Jira' schliessen sich gegenseitig aus
+        $('sup-opt-jira').addEventListener('change', function () {
+            if (this.checked && $('sup-opt-open').checked) { $('sup-opt-open').checked = false; setPref('open', false); }
+            setPref('jira', this.checked);
+        });
+        $('sup-opt-open').addEventListener('change', function () {
+            if (this.checked && $('sup-opt-jira').checked) { $('sup-opt-jira').checked = false; setPref('jira', false); }
+            setPref('open', this.checked);
+        });
+        $('sup-opt-conf').addEventListener('change', function () { setPref('conf', this.checked); });
+        $('sup-opt-rag').addEventListener('change', function () { setPref('rag', this.checked); });
+        if ($('sup-opt-ibs')) $('sup-opt-ibs').addEventListener('change', function () { setPref('ibs', this.checked); });
+        ['sap', 'vemas'].forEach(function (k) {
+            var el = $('sup-opt-' + k);
+            if (el) el.addEventListener('change', function () { setPref(k, this.checked); });
+        });
+        $('sup-opt-ai').addEventListener('change', function () { setPref('ai', this.checked); });
+        // Abmelden (global: alle Token-Keys) -> zurueck zum Portal
+        var _lo = $('sup-logout-btn');
+        if (_lo) _lo.addEventListener('click', function () {
+            TOKEN_KEYS.forEach(function (k) { localStorage.removeItem(k); });
+            // Benutzernamen aus derselben Quelle: ein kuenftig hinzukommender
+            // Schluessel bliebe sonst beim Abmelden stehen.
+            window.JarvisSitzung.benutzerSchluessel()
+                .forEach(function (k) { localStorage.removeItem(k); });
+            window.location.href = '/portal';
+        });
+        // LLM-Status-Pill: nur fuer Admins klickbar -> Einstellungen (LLM-Profile)
+        fetch('/api/me', { headers: authHeaders() })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d) return;
+                // Angemeldeten Benutzer merken -> erweiterte Einstellungen benutzerbasiert
+                if (d.username) { _me = d.username; applyAdvState(); }
+                // Angemeldeten Benutzer als Tooltip am Logout-Button ('<user> abmelden')
+                var lo = $('sup-logout-btn');
+                if (lo && d.username) lo.title = d.username + ' abmelden';
+            }).catch(function () {});
+        // CPU-Auslastung: cpubar.js laeuft von selbst, sobald ein Token vorliegt
+        // Sprachwechsel: statische Labels via applyLang (i18n.js), dynamische Treffer neu rendern
+        if (window.setLang && !window._supLangWrapped) {
+            window._supLangWrapped = true;
+            var _origSetLang = window.setLang;
+            window.setLang = function (l) {
+                _origSetLang(l);
+                try { if (_lastData) render(_lastData); } catch (e) {}
+            };
+        }
+        // Darstellungs-Parameter (Nutzerwert 2 … Maximum, sitzungsüberdauernd)
+        var sEl = $('sup-u-sumlines');
+        if (sEl) sEl.addEventListener('change', function () {
+            var v = clampNum(this.value, 2, _supMax.sum); this.value = v; setNumPref('sumlines', v);
+        });
+        var tEl = $('sup-u-tickets');
+        if (tEl) tEl.addEventListener('change', function () {
+            var v = clampNum(this.value, 1, _supMax.tickets); this.value = v; setNumPref('tickets', v);
+            var th = $('sup-u-thint'); if (th) th.textContent = '(' + v + '/' + _supMax.tickets + ')';
+        });
+        // Eingrenzungs-Pulldowns → Ergebnis live neu filtern (clientseitig)
+        ['sup-f-source', 'sup-f-rel', 'sup-f-sort', 'sup-f-limit'].forEach(function (id) {
+            var el = $(id);
+            if (el) el.addEventListener('change', renderBlocks);
+        });
+        // Volltext-Live-Filter (rechts in der Ergebniszeile): tippt der Nutzer, werden
+        // die angezeigten Treffer sofort eingegrenzt; Leeren zeigt wieder alle.
+        var ftEl = $('sup-filter-text');
+        if (ftEl) {
+            ftEl.addEventListener('input', renderBlocks);
+            ftEl.addEventListener('search', renderBlocks);  // natives ×-Löschen (type=search)
+        }
+        // Verlauf (benutzerabhaengig)
+        $('sup-hist-btn').addEventListener('click', function (e) {
+            e.stopPropagation();
+            var panel = $('sup-hist-panel');
+            if (panel.classList.contains('hidden')) { loadHistory(); panel.classList.remove('hidden'); }
+            else panel.classList.add('hidden');
+        });
+        $('sup-hist-clear').addEventListener('click', clearHistory);
+        document.addEventListener('click', function (e) {
+            var w = document.querySelector('.sup-hist-wrap');
+            if (w && !w.contains(e.target)) $('sup-hist-panel').classList.add('hidden');
+        });
+        // Dokument-Viewer (lokale Wissensquellen)
+        $('sup-results').addEventListener('click', function (e) {
+            var a = e.target.closest ? e.target.closest('.sup-doc-link') : null;
+            if (a) { e.preventDefault(); openDoc(a.getAttribute('data-doc'), a.getAttribute('data-label')); return; }
+            var btn = e.target.closest ? e.target.closest('.sup-ai-btn') : null;
+            if (btn) { e.preventDefault(); summarizeTicket(btn); }
+        });
+        $('sup-doc-close').addEventListener('click', closeDoc);
+        if ($('sup-doc-max')) $('sup-doc-max').addEventListener('click', toggleDocMax);
+        $('sup-doc-modal').addEventListener('click', function (e) { if (e.target === this) closeDoc(); });
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') { closeDoc(); $('sup-help-modal').classList.add('hidden'); }
+        });
+        // Hilfe-Popup (Score & Trefferzahl)
+        $('sup-help-btn').addEventListener('click', function () { $('sup-help-modal').classList.remove('hidden'); });
+        $('sup-help-close').addEventListener('click', function () { $('sup-help-modal').classList.add('hidden'); });
+        $('sup-help-modal').addEventListener('click', function (e) { if (e.target === this) this.classList.add('hidden'); });
+
+        // ── Eigene Anweisungen (userspezifisch, dauerhaft) ──
+        if ($('sup-instr-btn')) $('sup-instr-btn').addEventListener('click', openInstructions);
+        if ($('sup-instr-close')) $('sup-instr-close').addEventListener('click', function () { $('sup-instr-overlay').classList.add('hidden'); });
+        if ($('sup-instr-overlay')) $('sup-instr-overlay').addEventListener('click', function (e) { if (e.target === this) this.classList.add('hidden'); });
+        if ($('sup-instr-save')) $('sup-instr-save').addEventListener('click', saveInstructions);
+
+        // ── Erweiterte Einstellungen ein-/ausklappen (benutzerbasiert gespeichert) ──
+        var advBtn = $('sup-adv-toggle');
+        if (advBtn) advBtn.addEventListener('click', function () { setAdvOpen(!_advOpen); });
+        applyAdvState();
+    }
+
+    // Zustand der erweiterten Einstellungen: benutzerbasiert (Key enthaelt Benutzername)
+    var _advOpen = false;
+    function _advKey() { return 'jarvis_support_adv_open_' + (_me || 'anon'); }
+    function applyAdvState() {
+        var v = localStorage.getItem(_advKey());
+        setAdvOpen(v === '1', true);  // Default: eingeklappt
+    }
+    function setAdvOpen(open, silent) {
+        _advOpen = !!open;
+        var panel = $('sup-adv'), btn = $('sup-adv-toggle');
+        if (panel) panel.classList.toggle('hidden', !_advOpen);
+        if (btn) btn.setAttribute('aria-expanded', _advOpen ? 'true' : 'false');
+        if (!silent) localStorage.setItem(_advKey(), _advOpen ? '1' : '0');
+    }
+
+    function openInstructions() {
+        var st = $('sup-instr-status'); if (st) st.textContent = T('common.loading', 'Lädt…');
+        $('sup-instr-overlay').classList.remove('hidden');
+        fetch('/api/support/instructions', { headers: authHeaders() })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                $('sup-instr-text').value = (d && d.instructions) || '';
+                var wrap = $('sup-instr-admin'), box = $('sup-instr-admin-box');
+                var adm = (d && d.admin_prompt) || '';
+                if (wrap && box) {
+                    if (adm) { box.textContent = adm; wrap.classList.remove('hidden'); }
+                    else { box.textContent = ''; wrap.classList.add('hidden'); }
+                }
+                if (st) st.textContent = '';
+            })
+            .catch(function () { if (st) st.textContent = '✗ ' + T('sup.instr_load_fail', 'Laden fehlgeschlagen'); });
+    }
+
+    function saveInstructions() {
+        var st = $('sup-instr-status'); if (st) st.textContent = T('common.saving', 'Speichert…');
+        fetch('/api/support/instructions', {
+            method: 'POST',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ instructions: $('sup-instr-text').value })
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (d && d.ok) {
+                    if (st) { st.textContent = '✓ ' + T('sup.instr_saved', 'Gespeichert'); st.style.color = 'var(--success)'; }
+                    setTimeout(function () { if (st) { st.textContent = ''; st.style.color = ''; } $('sup-instr-overlay').classList.add('hidden'); }, 1200);
+                } else {
+                    if (st) { st.textContent = '✗ ' + ((d && d.error) || T('sup.instr_save_fail', 'Speichern fehlgeschlagen')); st.style.color = 'var(--danger)'; }
+                }
+            })
+            .catch(function (e) { if (st) { st.textContent = '✗ ' + e.message; st.style.color = 'var(--danger)'; } });
+    }
+
+    var _docBlobUrl = null;   // aktuelle Blob-URL des Viewers (zum Freigeben)
+    function _clearDocEmbed() {
+        if (_docBlobUrl) { try { URL.revokeObjectURL(_docBlobUrl); } catch (e) {} _docBlobUrl = null; }
+        var emb = $('sup-doc-embed'); if (emb) { emb.innerHTML = ''; emb.classList.add('hidden'); }
+    }
+    function closeDoc() { $('sup-doc-modal').classList.add('hidden'); _clearDocEmbed(); }
+    // Viewer vergroessern / zurueck (Zustand bleibt fuer weitere Aufrufe erhalten)
+    function toggleDocMax() {
+        var card = document.querySelector('#sup-doc-modal .sup-doc-card');
+        if (!card) return;
+        var max = card.classList.toggle('sup-doc-max');
+        var btn = $('sup-doc-max');
+        if (btn) {
+            btn.textContent = max ? '❐' : '⛶';
+            btn.title = max ? T('sup.doc_restore', 'Verkleinern') : T('sup.doc_maximize', 'Vergrößern');
+        }
+    }
+
+    var _DOC_IMG_EXT = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'];
+    function _docExt(path) {
+        return ((path || '').split('?')[0].split('.').pop() || '').toLowerCase();
+    }
+    // Laedt die Originaldatei (Binaer, mit Token-Auth) und stoesst einen Download an
+    function _downloadDoc(path, name) {
+        fetch('/api/knowledge/file_raw?path=' + encodeURIComponent(path), { headers: authHeaders() })
+            .then(function (r) { if (!r.ok) throw new Error(r.status); return r.blob(); })
+            .then(function (blob) {
+                var url = URL.createObjectURL(blob);
+                var a = document.createElement('a');
+                a.href = url; a.download = name || 'dokument';
+                document.body.appendChild(a); a.click(); a.remove();
+                setTimeout(function () { try { URL.revokeObjectURL(url); } catch (e) {} }, 4000);
+            })
+            .catch(function () {});
+    }
+
+    function openDoc(path, label) {
+        var modal = $('sup-doc-modal');
+        $('sup-doc-title').textContent = label || 'Dokument';
+        var body = $('sup-doc-body'), emb = $('sup-doc-embed');
+        _clearDocEmbed();
+        modal.classList.remove('hidden');
+        var ext = _docExt(path);
+        var isPdf = ext === 'pdf';
+        var isImg = _DOC_IMG_EXT.indexOf(ext) >= 0;
+
+        // PDFs/Bilder eingebettet anzeigen (per Blob, da file_raw Token-Auth braucht)
+        if (isPdf || isImg) {
+            body.classList.add('hidden');
+            emb.classList.remove('hidden');
+            emb.innerHTML = '<div class="sup-doc-note"><span class="sup-spinner"></span> ' + esc(T('sup.loading', 'Lädt…')) + '</div>';
+            fetch('/api/knowledge/file_raw?path=' + encodeURIComponent(path), { headers: authHeaders() })
+                .then(function (r) { if (!r.ok) throw new Error(r.status); return r.blob(); })
+                .then(function (blob) {
+                    _docBlobUrl = URL.createObjectURL(blob);
+                    emb.innerHTML = isPdf
+                        ? '<iframe class="sup-doc-frame" src="' + _docBlobUrl + '"></iframe>'
+                        : '<img class="sup-doc-img" src="' + _docBlobUrl + '" alt="">';
+                })
+                .catch(function () {
+                    emb.innerHTML = '<div class="sup-doc-note">' + esc(T('sup.doc_load_fail', 'Dokument konnte nicht geladen werden.')) + '</div>';
+                });
+            return;
+        }
+
+        // Textdokumente wie bisher als Text anzeigen
+        body.classList.remove('hidden');
+        emb.classList.add('hidden');
+        body.innerHTML = '<span class="sup-spinner"></span> ' + esc(T('sup.loading', 'Lädt…'));
+        fetch('/api/knowledge/file_read?path=' + encodeURIComponent(path), { headers: authHeaders() })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d || !d.ok) {
+                    // Nicht als Text lesbar (z.B. Binaerdatei) -> Download anbieten
+                    var nm = (path || '').split('/').pop();
+                    body.innerHTML = esc((d && d.error) || T('sup.doc_load_fail', 'Dokument konnte nicht geladen werden.'))
+                        + ' <a href="#" class="sup-doc-dl-link">' + esc(T('sup.doc_download', 'Herunterladen')) + '</a>';
+                    var dl = body.querySelector('.sup-doc-dl-link');
+                    if (dl) dl.addEventListener('click', function (e) { e.preventDefault(); _downloadDoc(path, nm); });
+                    return;
+                }
+                var content = d.content || '';
+                try { content = JSON.stringify(JSON.parse(content), null, 2); } catch (e) {}
+                body.innerHTML = escLink(content);
+            })
+            .catch(function () { body.textContent = T('sup.doc_load_fail', 'Dokument konnte nicht geladen werden.'); });
+    }
+
+    // Jira liefert ISO-8601-Strings (z.B. "2024-03-15T10:30:00.000+0100").
+    // Festes Format tt.mm.jjjj HH:MM (24h, null-gepolstert); leer/ungueltig -> ''.
+    function fmtDate(iso) {
+        if (!iso) return '';
+        var d = new Date(iso);
+        if (isNaN(d.getTime())) return '';
+        function p(n) { return (n < 10 ? '0' : '') + n; }
+        return p(d.getDate()) + '.' + p(d.getMonth() + 1) + '.' + d.getFullYear()
+            + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+    }
+
+    function relTime(ts) {
+        var diff = Math.floor(Date.now() / 1000) - (ts || 0);
+        var en = (localStorage.getItem('jarvis_lang') || 'de') === 'en';
+        var pre = en ? '' : 'vor ', post = en ? ' ago' : '';
+        if (diff < 60) return T('sup.now', 'gerade eben');
+        if (diff < 3600) return pre + Math.floor(diff / 60) + ' ' + T('sup.min', 'Min') + post;
+        if (diff < 86400) return pre + Math.floor(diff / 3600) + ' ' + T('sup.hours', 'Std') + post;
+        if (diff < 604800) return pre + Math.floor(diff / 86400) + ' ' + T('sup.days', 'Tg') + post;
+        try { return new Date(ts * 1000).toLocaleDateString(); } catch (e) { return ''; }
+    }
+
+    function loadHistory() {
+        var list = $('sup-hist-list');
+        list.innerHTML = '<div class="sup-hist-empty"><span class="sup-spinner"></span></div>';
+        fetch('/api/support/history', { headers: authHeaders() })
+            .then(function (r) { if (r.status === 401) { logout(); return null; } return r.json(); })
+            .then(function (d) {
+                if (!d) return;
+                var entries = (d && d.entries) || [];
+                if (!entries.length) { list.innerHTML = '<div class="sup-hist-empty">' + esc(T('sup.hist_empty', 'Noch keine Anfragen.')) + '</div>'; return; }
+                list.innerHTML = '';
+                entries.forEach(function (e) {
+                    var item = document.createElement('div');
+                    item.className = 'sup-hist-item';
+                    // Text in einem eigenen Kind: der Muelleimer sitzt daneben,
+                    // und ohne den Wrapper (mit min-width:0) greift das Ellipsis
+                    // der langen Anfrage im Flex-Container nicht mehr.
+                    var txt = document.createElement('div');
+                    txt.className = 'sup-hist-text';
+                    txt.innerHTML = '<div class="sup-hist-q">' + esc(e.query) + '</div>'
+                        + '<div class="sup-hist-meta">' + relTime(e.ts)
+                        + (typeof e.total === 'number' ? ' · ' + e.total + ' ' + T('sup.hits', 'Treffer') : '') + '</div>';
+                    item.appendChild(txt);
+                    item.appendChild(histDelButton(e.query));
+                    item.addEventListener('click', function () {
+                        $('sup-hist-panel').classList.add('hidden');
+                        $('sup-input').value = e.query;
+                        search();
+                    });
+                    list.appendChild(item);
+                });
+            })
+            .catch(function () { list.innerHTML = '<div class="sup-hist-empty">' + esc(T('sup.hist_err', 'Fehler beim Laden.')) + '</div>'; });
+    }
+
+    // MUELLEIMER, kein x: hier wird ein GESPEICHERTER Eintrag dauerhaft
+    // entfernt (Symbol-Semantik 2026-08-19). Die Bedeutung traegt der title,
+    // das Symbol selbst ist Dekoration.
+    function histDelButton(query) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'sup-hist-del';
+        b.innerHTML = window.JarvisIcons.trash();
+        var lbl = T('sup.hist_del', 'Eintrag löschen');
+        b.title = lbl;
+        b.setAttribute('aria-label', lbl);
+        b.addEventListener('click', function (ev) {
+            // PFLICHT, nicht Kosmetik: ohne stopPropagation liefe der Klick
+            // weiter an den Eintrag – der wuerde die Anfrage uebernehmen und
+            // eine neue Suche starten, waehrend der Eintrag geloescht wird.
+            ev.stopPropagation();
+            ev.preventDefault();
+            deleteHistoryEntry(query);
+        });
+        return b;
+    }
+
+    // Loescht GENAU EINEN Eintrag. Der Benutzer steckt in der Anmeldung, nicht
+    // im Rumpf – geschickt wird nur, WELCHE Anfrage gemeint ist.
+    function deleteHistoryEntry(query) {
+        fetch('/api/support/history/entry', {
+            method: 'DELETE',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ query: query })
+        })
+            .then(function (r) { if (r.status === 401) { logout(); return null; } return r.json(); })
+            .then(function (d) {
+                if (!d) return;
+                // Neu laden statt die Zeile nur auszublenden: der Server ist
+                // die Wahrheit, und ein Fehlschlag darf nicht wie ein Erfolg
+                // aussehen.
+                if (d.ok) loadHistory();
+                else showHistError();
+            })
+            .catch(showHistError);
+    }
+    function showHistError() {
+        var list = $('sup-hist-list');
+        if (list) list.innerHTML = '<div class="sup-hist-empty">'
+            + esc(T('sup.hist_del_err', 'Löschen fehlgeschlagen.')) + '</div>';
+    }
+
+    function clearHistory() {
+        fetch('/api/support/history', { method: 'DELETE', headers: authHeaders() })
+            .then(function () { loadHistory(); })
+            .catch(function () {});
+    }
+
+    var _searchAbort = null;
+    // UI nach Abschluss/Abbruch zuruecksetzen (Such-Button aktiv, Abbrechen aus)
+    function _endSearch() {
+        var btn = $('sup-search-btn'); if (btn) btn.disabled = false;
+        var cb = $('sup-cancel-btn'); if (cb) cb.classList.add('hidden');
+        _searchAbort = null;
+    }
+
+    function search() {
+        var text = ($('sup-input').value || '').trim();
+        if (!text) { $('sup-input').focus(); return; }
+        // Laufende Suche abbrechen, bevor eine neue startet
+        if (_searchAbort) { try { _searchAbort.abort(); } catch (e) {} }
+        _searchAbort = new AbortController();
+        var jiraWrap = $('sup-opt-jira-wrap');
+        var confWrap = $('sup-opt-conf-wrap');
+        var jiraHidden = jiraWrap.classList.contains('hidden');
+        // Zwei exklusive Modi: alle Jira-Tickets ODER nur offene (oder keins)
+        var allJira = !jiraHidden && $('sup-opt-jira').checked;
+        var openJira = !jiraHidden && $('sup-opt-open').checked;
+        var useConf = !confWrap.classList.contains('hidden') && $('sup-opt-conf').checked;
+        var useRag = $('sup-opt-rag').checked;
+        var useIbs = $('sup-opt-ibs') ? $('sup-opt-ibs').checked : false;
+        // Ein ausgeblendetes oder abgeblendetes Kaestchen darf nichts ausloesen –
+        // sonst startete ein Agentenlauf, den niemand angehakt hat. Die
+        // Berechtigung entscheidet ohnehin der Server.
+        function fachAn(k) {
+            var el = $('sup-opt-' + k), wrap = $('sup-opt-' + k + '-wrap');
+            return !!(el && wrap && !wrap.classList.contains('hidden') && !el.disabled && el.checked);
+        }
+        var useSap = fachAn('sap'), useVemas = fachAn('vemas');
+        var useAi = $('sup-opt-ai').checked;
+        // Wissensgruppen-Filter: null = alle (Feld weglassen), [] = keine, [ids] = nur diese
+        var kbSel = _kbFilter ? _kbFilter.getSelection() : null;
+
+        var btn = $('sup-search-btn'); btn.disabled = true;
+        var cancelBtn = $('sup-cancel-btn'); if (cancelBtn) cancelBtn.classList.remove('hidden');
+        var meta = $('sup-meta'); meta.classList.remove('hidden');
+        meta.innerHTML = '<span class="sup-spinner"></span>' + esc(T('sup.searching', 'Suche läuft…'));
+        var box = $('sup-results');
+        box.innerHTML = useAi
+            ? '<div class="sup-ai-card"><div class="sup-ai-label">' + esc(T('sup.ai_label', 'KI-Gesamtzusammenfassung')) + '</div>'
+              + '<div class="sup-ai-text"><span class="sup-spinner"></span>' + esc(T('sup.evaluating', 'Quellen werden ausgewertet…')) + '</div></div>'
+            : '<div class="sup-empty"><span class="sup-spinner"></span>' + esc(T('sup.searching', 'Suche läuft…')) + '</div>';
+
+        fetch('/api/support/query', {
+            method: 'POST',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify(Object.assign({ text: text, jira_all: allJira, jira_open: openJira,
+                                   confluence: useConf, rag: useRag, ibs: useIbs,
+                                   sap: useSap, vemas: useVemas, ai: useAi,
+                                   lang: (localStorage.getItem('jarvis_lang') || 'de'),
+                                   jira_limit: clampNum(getNumPref('tickets') === null ? _supDefault.tickets : getNumPref('tickets'), 1, _supMax.tickets),
+                                   summary_lines: clampNum(getNumPref('sumlines') === null ? _supMax.sum : getNumPref('sumlines'), 2, _supMax.sum) },
+                                   kbSel !== null ? { kb_groups: kbSel } : {})),
+            signal: _searchAbort.signal
+        })
+            .then(function (r) { if (r.status === 401) { logout(); return null; } return r.json(); })
+            .then(function (d) {
+                _endSearch();
+                if (!d) return;
+                if (!d.ok) {
+                    meta.textContent = '';
+                    box.innerHTML = '<div class="sup-empty">' + esc(d.error || T('sup.search_failed', 'Suche fehlgeschlagen.')) + '</div>';
+                    return;
+                }
+                render(d);
+            })
+            .catch(function (e) {
+                _endSearch();
+                // Vom Nutzer abgebrochen: dezenter Hinweis statt Fehlermeldung
+                if (e && e.name === 'AbortError') {
+                    meta.textContent = '';
+                    box.innerHTML = '<div class="sup-empty">' + esc(T('sup.cancelled', 'Suche abgebrochen.')) + '</div>';
+                    return;
+                }
+                meta.textContent = '';
+                box.innerHTML = '<div class="sup-empty">' + esc(T('sup.search_failed', 'Suche fehlgeschlagen.')) + '</div>';
+            });
+    }
+
+    var _lastData = null;
+
+    function render(d) {
+        _lastData = d;
+        var ftEl = $('sup-filter-text'); if (ftEl) ftEl.value = '';  // neue Suche -> Filter leeren
+        if (d.jira_base) _jiraBase = d.jira_base;   // fuer Ticket-Key-Links in Texten
+        // Karten zeigen eingeklappt hoechstens 6 Zeilen (fixe CSS-Kappung); laengerer
+        // Inhalt bekommt in _clampBlocks() einen 'mehr'/'weniger'-Umschalter. Der
+        // vollstaendige Text wird immer geladen (keine Antwortzeilen-Begrenzung mehr).
+        var html = '';
+        if (d.ai_summary) {
+            // Volles Markdown rendern (Tabellen/Überschriften/Listen/**fett**/Links);
+            // Fallback: nur **fett**, falls der Renderer nicht geladen ist.
+            var _sum = (window.JarvisChatLib && window.JarvisChatLib.renderMarkdown)
+                ? window.JarvisChatLib.renderMarkdown(d.ai_summary)
+                : escLink(d.ai_summary).replace(/\*\*([^\n*][^*]*?)\*\*/g, '<strong>$1</strong>');
+            html += '<div class="sup-ai-card"><div class="sup-ai-label">' + esc(T('sup.ai_label', 'KI-Gesamtzusammenfassung')) + '</div>'
+                + '<div class="sup-ai-text sup-ai-md">' + _sum + '</div></div>';
+        }
+        html += '<div id="sup-blocks"></div>';
+        $('sup-results').innerHTML = html;
+        renderBlocks();
+        _applyAiClamp();
+    }
+
+    // Mouse-over am Relevanz-Badge: erklaert je Quelle, wie der %-Wert ermittelt wird
+    function scoreTitle(b) {
+        if (b.source === 'JIRA') {
+            return T('sup.score_info_jira', 'Relevanz: Jira sortiert die Treffer nach Relevanz – der beste Treffer startet bei 85 %, jeder weitere Rang -8. Enthält der Ticket-Titel viele der Suchwörter, hebt deren Anteil den Wert an (Bereich 20–96 %).');
+        }
+        if (b.source === 'SAP' || b.source === 'VEMAS') {
+            // Ein Fachsystem liefert eine AUSWERTUNG, keinen Rang in einer
+            // sortierten Trefferliste – hier waere jede Prozentzahl eine
+            // Behauptung. Der Tooltip sagt das, statt Genauigkeit vorzutaeuschen.
+            return T('sup.score_info_fach', 'Fester Anzeigewert – keine gemessene Relevanz: Dieser Block ist die Antwort einer Auswertung im Fachsystem, kein Treffer in einer nach Relevanz sortierten Liste.');
+        }
+        if (b.source === 'CONFLUENCE') {
+            return T('sup.score_info_conf', 'Relevanz: Confluence sortiert die Treffer nach Relevanz – der beste Treffer startet bei 86 %, jeder weitere Rang -9. Enthalten Titel/Textauszug viele der Suchwörter, hebt deren Anteil den Wert an (Bereich 20–96 %).');
+        }
+        return T('sup.score_info_rag', 'Relevanz: Textähnlichkeit zwischen Anfrage und diesem Wissens-Abschnitt. Bei Vektor-Suche ist der Wert die absolute Ähnlichkeit (100 % = nahezu identischer Text) – auch der beste Treffer kann darunter liegen. Bei TF-IDF-Suche wird relativ zum besten Treffer auf 100 % skaliert.');
+    }
+
+    function blockHtml(b, i) {
+        var label = b.source_label || b.title || 'Quelle';
+        var inner;
+        var isExternal = b.link && /^https?:\/\//i.test(b.link);
+        if (isExternal) {
+            inner = '<a href="' + esc(b.link) + '" target="_blank" rel="noopener">' + esc(label) + ' ↗</a>';
+        } else if (b.doc) {
+            // lokales Wissensdokument → im Viewer öffnen (Token-Auth via fetch);
+            // der interne file_read-Link in b.link ist nur fuer API-Aufrufer gedacht.
+            var dl = label + (b.doc_name ? ' (' + b.doc_name + ')' : '');
+            inner = '<a href="#" class="sup-doc-link" data-doc="' + esc(b.doc)
+                + '" data-label="' + esc(dl) + '">' + esc(dl) + '</a>';
+        } else if (b.link) {
+            inner = '<a href="' + esc(b.link) + '" target="_blank" rel="noopener">' + esc(label) + ' ↗</a>';
+        } else {
+            inner = esc(label);
+        }
+        var srcHtml = '<div class="sup-block-src">' + esc(T('sup.source_prefix', 'Quelle:')) + ' ' + inner + '</div>';
+        // Jira: Erstellungs- und Änderungsdatum unter der Quelle anzeigen
+        var datesHtml = '';
+        var cDate = fmtDate(b.created), uDate = fmtDate(b.updated);
+        if (cDate || uDate) {
+            var parts = [];
+            if (cDate) parts.push(esc(T('sup.created', 'Erstellt')) + ': ' + esc(cDate));
+            if (uDate) parts.push(esc(T('sup.updated', 'Geändert')) + ': ' + esc(uDate));
+            datesHtml = '<div class="sup-block-dates">' + parts.join(' · ') + '</div>';
+        }
+        // Jira-Tickets: On-Demand-Button "KI-Zusammenfassung" rechts in der Kopfzeile
+        var aiBtn = '';
+        if (b.source === 'JIRA' && (b.key || b.title)) {
+            aiBtn = '<button type="button" class="sup-ai-btn" data-key="' + esc(b.key || b.title) + '">'
+                + esc(T('sup.ai_btn', 'KI-Zusammenfassung')) + '</button>';
+        }
+        // IBS-Ereignisse sind roher Verlaufstext (u.a. SQL mit Unterstrichen) –
+        // NICHT als Markdown rendern (sonst werden '_' als Kursiv gedeutet),
+        // sondern escapt mit erhaltenen Zeilenumbruechen (wie im Einstellungs-Reiter).
+        var bodyHtml = (b.source === 'IBS')
+            ? '<div class="sup-block-body" style="white-space:pre-wrap;word-break:break-word;">' + esc(b.summary) + '</div>'
+            : '<div class="sup-block-body sup-ai-md">' + renderBlockBody(b.summary) + '</div>';
+        return '<div class="sup-block">'
+            + '<div class="sup-block-head">'
+            + '<span class="sup-block-num">' + (i + 1) + '.</span>'
+            + '<span class="sup-block-title">' + esc(b.title) + '</span>'
+            + '<span class="sup-badge-src">' + esc(b.source) + '</span>'
+            + '<span class="sup-badge-score" title="' + esc(scoreTitle(b)) + '">' + b.score + '%</span>'
+            + aiBtn
+            + '</div>'
+            + bodyHtml
+            + srcHtml
+            + datesHtml
+            + '</div>';
+    }
+
+    // Eine Liste, nach Relevanz (%) sortiert; Pulldown-Filter
+    // (Quelle, Relevanz, Sortierung, Anzahl) wirken auf die gesamte Liste.
+    function renderBlocks() {
+        if (!_lastData) return;
+        var all = (_lastData.blocks || []).slice();
+        var src = $('sup-f-source') ? $('sup-f-source').value : '';
+        var minRel = parseInt(($('sup-f-rel') ? $('sup-f-rel').value : '0'), 10) || 0;
+        var sort = $('sup-f-sort') ? $('sup-f-sort').value : 'score';
+        var limit = parseInt(($('sup-f-limit') ? $('sup-f-limit').value : '0'), 10) || 0;
+
+        // Volltext-Live-Filter: Suchfeld nur bei vorhandenen Treffern zeigen; leerer
+        // Text = alle. Mehrere Wörter werden UND-verknüpft (jedes muss vorkommen).
+        var ftEl = $('sup-filter-text');
+        if (ftEl) ftEl.classList.toggle('hidden', !all.length);
+        var terms = (ftEl ? ftEl.value : '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+
+        var list = all.filter(function (b) {
+            if (src && b.source !== src) return false;
+            if (minRel && b.score < minRel) return false;
+            if (terms.length) {
+                // Nur SICHTBARE Felder durchsuchen (Titel, Kurzfassung, Key, Quelle,
+                // Dokumentname) – sonst passieren Blöcke den Filter, ohne dass die
+                // Hervorhebung irgendetwas markieren kann (full_text wird nie gerendert).
+                var hay = [b.title, b.summary, b.key, b.source_label, b.doc_name,
+                           b.source].join(' ').toLowerCase();
+                for (var i = 0; i < terms.length; i++) {
+                    if (hay.indexOf(terms[i]) === -1) return false;
+                }
+            }
+            return true;
+        });
+        if (sort === 'source') list.sort(function (a, b) {
+            return a.source === b.source ? b.score - a.score : a.source.localeCompare(b.source);
+        });
+        else if (sort === 'title') list.sort(function (a, b) {
+            return String(a.title).localeCompare(String(b.title), 'de');
+        });
+        else list.sort(function (a, b) { return b.score - a.score; });
+        if (limit) list = list.slice(0, limit);
+
+        var metaStr = T('sup.result_for', 'Ergebnis für') + ' <strong>"' + esc(_lastData.query) + '"</strong> ('
+            + list.length + ' ' + T('sup.of', 'von') + ' ' + all.length + ' ' + T('sup.hits', 'Treffer')
+            + (_lastData.took_ms ? ' · ' + _lastData.took_ms + ' ms' : '') + ')';
+        // Jira-Gesamtzahl (vor 12er-Deckelung) anzeigen, wenn mehr gefunden als angezeigt
+        var _capped = false;
+        if (_lastData.jira_total != null) {
+            var jiraShown = list.filter(function (b) { return b.source === 'JIRA'; }).length;
+            if (jiraShown && _lastData.jira_total > jiraShown) {
+                var word = _lastData.open_only ? T('sup.open_word', 'offenen') : T('sup.found_word', 'gefunden');
+                metaStr += ' · Jira: ' + jiraShown + ' ' + T('sup.of', 'von') + ' ' + _lastData.jira_total + ' ' + word;
+                // Hinweis: es gibt mehr Treffer als geladen -> Ticketanzahl-Deckel
+                metaStr += ' · <a href="#" id="sup-more-tickets" class="sup-meta-more">'
+                    + esc(T('sup.more_tickets', 'Ticketanzahl erhöhen')) + '</a>';
+                _capped = true;
+            }
+        }
+        $('sup-meta').innerHTML = metaStr;
+        if (_capped) {
+            var moreLink = $('sup-more-tickets');
+            if (moreLink) moreLink.addEventListener('click', function (e) {
+                e.preventDefault();
+                setAdvOpen(true);                       // erweiterte Einstellungen aufklappen
+                var tEl = $('sup-u-tickets');
+                if (tEl) {
+                    try { tEl.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (_e) {}
+                    tEl.focus(); if (tEl.select) tEl.select();
+                }
+            });
+        }
+
+        var box = $('sup-blocks');
+        if (!box) return;
+        if (!list.length) {
+            box.innerHTML = '<div class="sup-empty">'
+                + esc(all.length ? T('sup.no_filter', 'Keine Treffer mit diesen Filtern.')
+                                 : T('sup.no_results', 'Keine passenden Quellen gefunden.'))
+                + '</div>';
+            return;
+        }
+        var htmlOut = list.map(blockHtml).join('');
+        if (terms.length) htmlOut = highlightTerms(htmlOut, terms);  // Filter-Treffer markieren
+        box.innerHTML = htmlOut;
+        _clampBlocks();   // 'mehr'/'weniger' an gekappte Karten haengen
+    }
+
+    // On-Demand-KI-Zusammenfassung eines Jira-Tickets (Button je Ergebnisbox)
+    function summarizeTicket(btn) {
+        var key = btn.getAttribute('data-key');
+        if (!key || btn.disabled) return;
+        var block = btn.closest ? btn.closest('.sup-block') : null;
+        var bodyEl = block ? block.querySelector('.sup-block-body') : null;
+        if (!bodyEl) return;
+        var orig = btn.textContent;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="sup-spinner"></span>' + esc(T('sup.analyzing', 'Analysiere…'));
+        // Laenge der KI-Ticket-Zusammenfassung folgt den 'Sätze (Zusammenfassung)'
+        var lines = clampNum(getNumPref('sumlines') === null ? _supMax.sum : getNumPref('sumlines'), 2, _supMax.sum);
+        fetch('/api/support/summarize', {
+            method: 'POST',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ key: key, source: 'JIRA',
+                lang: (localStorage.getItem('jarvis_lang') || 'de'), lines: lines })
+        })
+            .then(function (r) { if (r.status === 401) { logout(); return null; } return r.json(); })
+            .then(function (d) {
+                btn.disabled = false;
+                if (!d) return;
+                if (!d.ok) {
+                    btn.textContent = orig;
+                    _resetClamp(bodyEl);
+                    bodyEl.innerHTML = '<span style="color:var(--danger);">'
+                        + esc(d.error || T('sup.search_failed', 'Suche fehlgeschlagen.')) + '</span>';
+                    return;
+                }
+                if (d.jira_base) _jiraBase = d.jira_base;
+                _resetClamp(bodyEl);
+                bodyEl.innerHTML = renderBlockBody(d.summary);
+                _applyHeightClamp(bodyEl);   // KI-Ticket-Zusammenfassung: ab >6 Zeilen einklappen
+                btn.textContent = T('sup.ai_btn_again', 'Neu zusammenfassen');
+                btn.classList.add('done');   // farblich abgesetzter Zustand
+            })
+            .catch(function () { btn.disabled = false; btn.textContent = orig; });
+    }
+
+    // ── Login ──
+    function bindLogin() {
+        $('sup-login-form').addEventListener('submit', function (e) {
+            e.preventDefault();
+            var u = $('sup-login-user').value.trim();
+            var p = $('sup-login-pass').value;
+            $('sup-login-err').textContent = '';
+            fetch('/api/login', {
+                method: 'POST', headers: window.JarvisSitzung.anmeldeKopf({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ username: u, password: p })
+            }).then(function (r) { return r.json(); })
+              .then(function (d) {
+                  if (d && d.success && d.token) {
+                      localStorage.setItem('jarvis_token', d.token);
+                      showApp();
+                  } else {
+                      $('sup-login-err').textContent = (d && d.error) || 'Anmeldung fehlgeschlagen';
+                  }
+              })
+              .catch(function () { $('sup-login-err').textContent = 'Netzwerkfehler'; });
+        });
+    }
+
+    // ── Init ──
+    bindLogin();
+    if (token()) showApp();
+    else $('sup-login').classList.remove('hidden');
+})();

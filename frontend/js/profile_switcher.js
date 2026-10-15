@@ -1,0 +1,127 @@
+// ─────────────────────────────────────────────────────────────────────────
+//  KI-Profil-Pulldown
+//  Loest das fruehere Popup-Menue auf der Status-Pill ab. Rendert ein <select>
+//  mit den fuer den Benutzer nutzbaren LLM-Profilen + einen dezenten
+//  Erreichbarkeits-Punkt (gruen/gelb/rot) fuer das gewaehlte Profil.
+//
+//  mount(opts) -> { el, getSelected(), setSelected(id,{activate}), refresh() }
+//    opts.anchor    Zielcontainer
+//    opts.place     'append' (Default) | 'before'
+//    opts.headers   ()=>({...})  Auth-Header
+//    opts.onChange  (id)=>{}     nach erfolgreicher Aktivierung durch den Nutzer
+// ─────────────────────────────────────────────────────────────────────────
+(function () {
+    'use strict';
+
+    function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+    function tt(key, fallback) {
+        if (window.t) { var v = window.t(key); if (v && v !== key) return v; }
+        return fallback;
+    }
+
+    var _styled = false;
+    function injectStyles() {
+        if (_styled) return; _styled = true;
+        var css = ''
+            + '.llmps-wrap{display:inline-flex;align-items:center;gap:6px;flex:0 0 auto;}'
+            + '.llmps-select{max-width:220px;padding:6px 10px;border-radius:10px;font:inherit;font-size:.82rem;'
+            + 'cursor:pointer;line-height:1;color:var(--text-primary,#e2e8f0);'
+            + 'border:1px solid var(--border,rgba(255,255,255,.14));background:var(--bg-glass,rgba(255,255,255,.05));}'
+            + '.llmps-select:hover{border-color:rgba(var(--accent-rgb,155,89,182),.5);}'
+            + '.llmps-select:disabled{opacity:.55;cursor:default;}';
+        var s = document.createElement('style');
+        s.textContent = css;
+        document.head.appendChild(s);
+    }
+
+    function mount(opts) {
+        opts = opts || {};
+        injectStyles();
+        var headers = function () { return (opts.headers && opts.headers()) || {}; };
+        var st = { profiles: [], activeId: '' };
+
+        var wrap = document.createElement('div');
+        wrap.className = 'llmps-wrap';
+        // Kein sichtbares "KI-Profil"-Label mehr; der Zweck bleibt als Tooltip am Select.
+        var sel = document.createElement('select');
+        sel.className = 'llmps-select';
+        sel.title = tt('profile.pulldown_label', 'KI-Profil');
+        wrap.appendChild(sel);
+
+        var anchor = opts.anchor;
+        if (opts.place === 'before' && anchor && anchor.parentNode) anchor.parentNode.insertBefore(wrap, anchor);
+        else if (anchor) anchor.appendChild(wrap);
+
+        function renderOptions() {
+            sel.innerHTML = st.profiles.map(function (p) {
+                // `locked` = laeuft, ist aber fuer diesen Benutzer nicht waehlbar
+                // (Profil auf andere AD-Benutzer/-Gruppen eingeschraenkt). Es MUSS
+                // sichtbar sein, sonst zeigt der Umschalter nichts, obwohl der Chat
+                // mit diesem Profil arbeitet – der gemeldete Fehler vom 2026-08-10.
+                // `disabled` am <option>: sichtbar, auswaehlbar nur als aktueller
+                // Stand, ein Wechsel dorthin waere ohnehin 403.
+                return '<option value="' + esc(p.id) + '"'
+                    + (p.id === st.activeId ? ' selected' : '')
+                    + (p.locked && p.id !== st.activeId ? ' disabled' : '')
+                    + '>' + esc(p.name) + (p.locked ? ' 🔒' : '') + '</option>';
+            }).join('');
+            sel.value = st.activeId;
+            // Bedienbar, sobald es mindestens zwei WAEHLBARE Profile gibt. Ein
+            // gesperrtes zaehlt nicht mit: sonst waere das Feld aktiv und jeder
+            // Wechselversuch scheiterte.
+            var waehlbar = st.profiles.filter(function (p) { return !p.locked; }).length;
+            sel.disabled = waehlbar < 2;
+            sel.title = (waehlbar < 1 && st.profiles.length)
+                ? tt('profile.pulldown_locked',
+                     'Dieses KI-Profil ist fuer deinen Benutzer nicht umschaltbar')
+                : tt('profile.pulldown_label', 'KI-Profil');
+            wrap.style.display = st.profiles.length ? '' : 'none';
+        }
+        function activate(id) {
+            return fetch('/api/llm/profiles/' + encodeURIComponent(id) + '/activate',
+                { method: 'POST', headers: headers() })
+                .then(function (r) { return r.json(); })
+                .then(function (d) { return !!(d && d.ok); })
+                .catch(function () { return false; });
+        }
+
+        sel.addEventListener('change', function () {
+            var id = sel.value;
+            activate(id).then(function (ok) {
+                if (ok) { st.activeId = id; if (opts.onChange) opts.onChange(id); }
+                else { sel.value = st.activeId; window.alert(tt('chat.switch_failed', 'Profilwechsel fehlgeschlagen')); }
+            });
+        });
+
+        function load() {
+            return fetch('/api/llm/profiles', { headers: headers() })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    st.profiles = (d && d.profiles) || [];
+                    st.activeId = (d && d.active_id) || (st.profiles[0] && st.profiles[0].id) || '';
+                    renderOptions();
+                })
+                .catch(function () { wrap.style.display = 'none'; });
+        }
+        load();
+
+        return {
+            el: wrap,
+            getSelected: function () { return sel.value; },
+            // Auswahl setzen; mit {activate:true} auch serverseitig aktivieren.
+            setSelected: function (id, o) {
+                o = o || {};
+                if (!id || !st.profiles.some(function (p) { return p.id === id; })) return;
+                sel.value = id; st.activeId = id;
+                if (o.activate) activate(id);
+            },
+            refresh: load
+        };
+    }
+
+    window.ProfileSwitcher = { mount: mount };
+})();

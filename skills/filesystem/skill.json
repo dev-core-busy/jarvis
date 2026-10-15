@@ -1,0 +1,32 @@
+{
+    "name": "Dateisystem",
+    "description": "Dateien lesen, schreiben und verwalten",
+    "version": "1.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": ["filesystem"],
+    "category": "system",
+    "icon": "folder",
+    "system": true,
+    "enabled": true,
+    "config_schema": {},
+    "knowledge_docs": [],
+    "dependencies": [],
+    "permissions": ["filesystem"],
+    "help": {
+        "details": "Ermöglicht das Lesen, Schreiben, Anhängen und Verwalten von Dateien und Verzeichnissen auf dem Server. Der Zugriffsumfang hängt vom angemeldeten Benutzer ab: volle Rechte für lokale Administratoren, eingeschränkt für Netzwerk-/Domain-Benutzer – siehe Sicherheitsschicht unter Hinweise.",
+        "tools": [
+            {
+                "name": "filesystem",
+                "label": "Filesystem",
+                "desc": "Dateisystem-Operationen: 'read' (Datei lesen), 'write' (Datei erstellen/überschreiben), 'append' (Text anhängen), 'list' (Verzeichnis auflisten), 'exists' (Existenz prüfen), 'mkdir' (Verzeichnis anlegen)."
+            }
+        ],
+        "use_cases": [
+            "Lese den Inhalt von /etc/hosts",
+            "Erstelle eine Datei ~/notizen.txt mit folgendem Inhalt: ...",
+            "Liste alle Dateien im Verzeichnis /home/jarvis"
+        ],
+        "notes": "Sicherheitsschicht: Lokale Administratoren haben vollen Dateizugriff (als root). Für Netzwerk-/Domain-Benutzer gilt Confinement: Schreiben nur im Arbeitsbereich (/tmp und data/documents), Lesen/Auflisten nur in den Wissens-/Arbeitsverzeichnissen. Secrets (.env, settings.json, Schlüssel/Zertifikate), Root-, System- und App-interne Pfade sind gesperrt (Symlinks werden aufgelöst); verweigerte Zugriffe werden protokolliert und können bei Wiederholung das Konto sperren. Die obigen Beispiele (z. B. /etc/hosts, /home/jarvis) gelten daher nur für Administratoren."
+    }
+}

@@ -1,0 +1,1853 @@
+/* ═══════════════════════════════════════════════════════════════
+   Jarvis Chat UI – Android-identisches Design
+   Farben & Layout 1:1 aus ChatScreen.kt / Theme.kt
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ─── Variablen ──────────────────────────────────────────────── */
+:root {
+    /* --fg-rgb/--shadow-rgb, bg/text/accent kommen zentral aus theme.css.
+       Hier nur Aliase der chat-eigenen Namen auf die gemeinsamen Variablen
+       (so greifen Branding + Dark/Light einheitlich) + chat-spezifische Tokens. */
+    /* Akzent-Familie aliast auf theme.css (Markenfarbe, identisch in Dark/Light
+       → keine Alias-Aufloesungs-Falle). bg/surface/text bleiben chat-eigen mit
+       expliziten Dark/Light-Werten (Alias darauf wuerde auf :root zum Dunkelwert
+       aufloesen und body.light ignorieren → schwarzer Hintergrund). */
+    --purple:           var(--accent);       /* siehe body-Block unten! */
+    --purple-light:     var(--accent-hover);
+    --purple-dark:      var(--accent-dark);
+    --green:            var(--success);
+    --error:            var(--danger);
+    --muted:            #888899;
+
+    --bg:               #0A0A0F;
+    --surface:          #1A1A2E;
+    --surface-variant:  #16213E;
+    --on-surface:       #E0E0E0;
+    --on-surface-strong:#FFFFFF;
+    --outline:          #333355;
+
+    --bubble-user:      rgba(var(--accent-rgb), 0.45);
+    --bubble-bot:       rgba(var(--fg-rgb), 0.07);
+    --bubble-text:      #FFFFFF;
+    --msg-time-color:   rgba(var(--fg-rgb), .35);
+    --scrollbar-thumb:  rgba(var(--fg-rgb), .12);
+    --separator-line:   rgba(var(--fg-rgb), .12);
+    --separator-text:   rgba(var(--fg-rgb), .45);
+    --code-bg:          rgba(var(--fg-rgb), .1);
+    --pre-bg:           rgba(var(--shadow-rgb), .3);
+
+    --radius-bubble:    18px;
+    --radius-input:     24px;
+}
+
+/* ─── DIESELBEN ALIASE NOCH EINMAL AUF <body> ────────────────────────────
+   NICHT redundant, sondern noetig: eine Custom Property wird auf dem Element
+   BERECHNET, auf dem sie deklariert ist – danach wird nur noch der fertige
+   Wert vererbt. `branding.js` setzt die Markenfarbe per Inline-Style auf
+   <body>, also eine Ebene UNTER `:root` (= <html>). Die Aliase oben lesen
+   `var(--accent)` deshalb auf <html> und frieren dort auf Jarvis-Violett ein.
+
+   Im Browser gemessen (2026-08-18, Markenfarbe #b80f2e auf body):
+       --accent       #b80f2e   ✓ Branding wirkt
+       --purple       #9B59B6   ✗ Jarvis-Violett
+       --bubble-user  rgba(155, 89, 182, .45)   ✗ die eigene Chat-Blase!
+   Der Kommentar oben versprach das Gegenteil ("so greifen Branding +
+   Dark/Light einheitlich") – dieselbe Fehlerklasse und dieselbe Loesung wie
+   bei `--gradient` (theme.css). OHNE Branding kommt exakt dasselbe heraus wie
+   vorher, `--accent` ist dann der geerbte Vorgabewert.
+
+   Dark/Light ist hier unkritisch: `body.light` fasst die accent-Familie nicht
+   an (nachgesehen, nicht angenommen) – die Aliase koennen also gefahrlos eine
+   Ebene tiefer aufgeloest werden. */
+body {
+    --purple:           var(--accent);
+    --purple-light:     var(--accent-hover);
+    --purple-dark:      var(--accent-dark);
+    --bubble-user:      rgba(var(--accent-rgb), 0.45);
+}
+
+/* ─── Light Theme ────────────────────────────────────────────── */
+body.light {
+    /* Helle Flaechen/Text explizit (analog Echt-System /chat). --fg-rgb bleibt
+       auf Weiss → helle Overlays/Raender; --shadow-rgb reines Schwarz. */
+    --fg-rgb:           255, 255, 255;
+    --shadow-rgb:       0, 0, 0;
+    --bg:               #F5F5F7;
+    --surface:          #FFFFFF;
+    --surface-variant:  #E8E8EE;
+    --on-surface:       #333333;
+    --on-surface-strong:#111111;
+    --outline:          #D0D0DD;
+    --muted:            #777788;
+
+    --bubble-user:      rgba(var(--accent-rgb), 0.25);
+    --bubble-bot:       rgba(var(--shadow-rgb), 0.06);
+    --bubble-text:      #222222;
+    --msg-time-color:   rgba(var(--shadow-rgb), .40);
+    --scrollbar-thumb:  rgba(var(--shadow-rgb), .15);
+    --separator-line:   rgba(var(--shadow-rgb), .10);
+    --separator-text:   rgba(var(--shadow-rgb), .45);
+    --code-bg:          rgba(var(--shadow-rgb), .07);
+    --pre-bg:           rgba(var(--shadow-rgb), .05);
+}
+
+/* ─── Reset ──────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--on-surface-strong);
+    height: 100dvh;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    transition: background .3s, color .3s;
+}
+
+.hidden { display: none !important; }
+
+/* ═══════════════════════════════════════════════════════════════
+   LOGIN
+   ═══════════════════════════════════════════════════════════════ */
+.login-screen {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100dvh;
+    background: var(--bg);
+}
+
+.login-card {
+    width: 340px;
+    padding: 40px 32px;
+    text-align: center;
+}
+
+.login-avatar {
+    width: 64px; height: 64px;
+    margin: 0 auto 16px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--purple), var(--purple-dark));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 28px; font-weight: 700; color: #fff;
+}
+
+.login-title {
+    font-size: 24px; font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.login-subtitle {
+    font-size: 13px; color: var(--muted);
+    margin-bottom: 28px;
+}
+
+.login-card input {
+    display: block; width: 100%;
+    padding: 12px 16px;
+    margin-bottom: 12px;
+    border: 1px solid var(--outline);
+    border-radius: var(--radius-input);
+    background: var(--surface);
+    color: var(--on-surface-strong);
+    font-size: 14px;
+    outline: none;
+    transition: border-color .2s;
+}
+
+.login-card input:focus {
+    border-color: var(--purple);
+}
+
+.login-card input::placeholder { color: var(--muted); }
+
+.password-wrap {
+    position: relative;
+}
+
+.password-wrap input { padding-right: 44px; }
+
+/* eye-btn Styles sind am Ende der Datei definiert */
+
+.btn-login {
+    width: 100%;
+    padding: 12px;
+    border: none;
+    border-radius: var(--radius-input);
+    /* Direkt --accent statt der --purple-Alias-Kette: branding.js setzt --accent
+       auf <body>, waehrend "--purple: var(--accent)" in :root aufgeloest (und
+       damit auf den Default-Akzent eingefroren) wird. So folgt der primaere
+       Button der Markenfarbe (Dark + Light). */
+    background: var(--accent);
+    color: #fff;
+    font-size: 15px; font-weight: 600;
+    cursor: pointer;
+    transition: background .2s, opacity .2s;
+    margin-top: 4px;
+}
+
+.btn-login:hover { background: var(--accent-hover); }
+.btn-login:disabled { opacity: .5; cursor: not-allowed; }
+
+.login-error {
+    margin-top: 12px;
+    font-size: 13px;
+    color: var(--error);
+    min-height: 20px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   CHAT SCREEN LAYOUT
+   ═══════════════════════════════════════════════════════════════ */
+.chat-screen {
+    display: flex;
+    flex-direction: row;
+    height: 100dvh;
+    /* Breite der Verlaufsleiste. ⚠ SIE STEHT HIER UND NICHT AUF DER LEISTE
+       SELBST, und das ist der ganze Grund fuer die Variable: das JS setzt beim
+       Ziehen einen Inline-Style, und ein Inline-Style auf `.chat-sidebar` wuerde
+       die Einklapp-Regel `.chat-screen.sidebar-collapsed .chat-sidebar` schlagen
+       (Inline gewinnt gegen jede Klasse). Wer einmal gezogen haette, koennte die
+       Leiste danach nie wieder einklappen. Auf dem ELTERNTEIL gesetzt bleibt die
+       Kaskade auf der Leiste unangetastet. */
+    --cs-w: 240px;
+}
+.chat-main {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    height: 100dvh;
+}
+
+/* ─── Verlaufs-Sidebar (benutzereigene Chat-Sitzungen) ───────────── */
+.chat-sidebar {
+    flex: 0 0 var(--cs-w);
+    width: var(--cs-w);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 10px;
+    border-right: 1px solid var(--border);
+    background: var(--bg-glass);
+    overflow-y: auto;
+}
+.cs-new {
+    flex-shrink: 0;
+    padding: 9px 12px;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    background: var(--accent);
+    color: #fff;
+    font-weight: 600;
+    font-size: 0.86rem;
+    cursor: pointer;
+    transition: opacity .15s;
+}
+.cs-new:hover { opacity: 0.88; }
+/* ─── Werkzeugzeile der Verlaufsleiste (Auswahlmodus) ───────────────────────
+   ⚠ HIER KEINE .btn-*-KLASSEN. Die stehen in style.css, und /chat laedt nur
+   theme.css + chat.css – ein `.btn-secondary` waere dort ein nackter
+   Browser-Standardknopf (Register: derselbe Fehler traf /ai-mouse und
+   /jira-addon gleich dreimal). Die Zeile bringt ihre eigenen Klassen mit.
+   `flex-wrap` ist Pflicht: die Leiste ist ab 180px schmal, und "Löschen (12)"
+   neben "Abbrechen" laeuft dort sonst ueber den Rand hinaus. */
+.cs-tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    flex-shrink: 0;
+    min-height: 24px;
+}
+.cs-tools .cs-all {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-right: auto;          /* "Alle" links, Aktionen rechts */
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    cursor: pointer;
+    user-select: none;
+}
+/* ⚠ `.modal-card input` macht Kaestchen zeilenbreit (Anmeldefelder). Hier gilt
+   das nicht – die Zeile liegt nicht in einem Dialog –, die feste Groesse steht
+   trotzdem da, damit ein spaeterer Umzug in einen Dialog nichts quetscht. */
+.cs-tools .cs-all input[type="checkbox"] {
+    flex: 0 0 auto; width: 13px; height: 13px; margin: 0; cursor: pointer;
+    accent-color: var(--accent);
+}
+.cs-tool {
+    flex: 0 0 auto;
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 8px;
+    border-radius: 7px;
+    border: 1px solid var(--outline);
+    background: transparent;
+    color: var(--text-secondary);
+    font-family: inherit;
+    font-size: 0.78rem;
+    line-height: 1.4;
+    cursor: pointer;
+    transition: color .12s, border-color .12s, background .12s, opacity .12s;
+}
+.cs-tool:hover { color: var(--text-primary); border-color: var(--accent); background: rgba(var(--accent-rgb), 0.10); }
+/* ⚠ SIGNALROT IST NICHT AUTOMATISCH LESBAR – gemessen, nicht geschaetzt
+   (tests/live_chat_sammel_ui_dev.py, an den wirklichen Farben):
+     weisse Schrift auf --danger (#ef4444)   = 3,76:1  ← unter der Textgrenze
+     --danger auf der hellen Leiste          = 3,70:1  ← ebenfalls darunter
+     --danger auf der dunklen Leiste         = 4,92:1  ✓
+   Die Grenze fuer Text liegt bei 4,5:1. Abgedunkelt auf 78 % Rot sind es
+   5,66 bzw. 5,76:1 – dieselbe Abdunklung benutzt theme.css schon fuer die
+   SAP-Zertifikatsbefunde. Die FLAECHE beim Ueberfahren ist deshalb in BEIDEN
+   Themen das dunklere Rot, und im hellen Thema auch die ruhende Schrift.
+
+   ⚠ Die vierte Regel ist keine Dopplung: `body.light .cs-tool-del` (0,2,0)
+   steht SPAETER als `.cs-tool-del:hover` (0,2,0) und gewinnt bei gleicher
+   Spezifitaet – ohne sie faerbte sie beim Ueberfahren die Schrift wieder
+   dunkelrot, auf dunkelroter Flaeche. */
+.cs-tool-del { color: var(--danger); border-color: var(--danger); }
+.cs-tool-del:hover {
+    color: #fff;
+    background: color-mix(in srgb, var(--danger) 78%, #000);
+    border-color: color-mix(in srgb, var(--danger) 78%, #000);
+}
+body.light .cs-tool-del {
+    color: color-mix(in srgb, var(--danger) 78%, #000);
+    border-color: color-mix(in srgb, var(--danger) 78%, #000);
+}
+body.light .cs-tool-del:hover { color: #fff; }
+.cs-tool:disabled { opacity: .45; cursor: default; pointer-events: none; }
+.cs-tool .cs-tool-ico { display: inline-flex; width: 13px; height: 13px; }
+.cs-tool .cs-tool-ico svg { width: 13px; height: 13px; }
+
+.cs-list { display: flex; flex-direction: column; gap: 4px; }
+/* Auswahlmodus: das Kaestchen ersetzt die Aktionsknoepfe der Zeile. Ein
+   angehakter Eintrag bleibt auch ohne Mauszeiger erkennbar – Farbe allein
+   waere keine Information, die Aussage traegt das gesetzte Kaestchen. */
+.cs-item .cs-check {
+    flex: 0 0 auto; width: 13px; height: 13px; margin: 0; cursor: pointer;
+    accent-color: var(--accent);
+}
+.cs-item.cs-picked { background: rgba(var(--accent-rgb), 0.10); color: var(--text-primary); }
+.cs-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    transition: background .12s, color .12s;
+}
+.cs-item:hover { background: rgba(var(--fg-rgb), 0.06); color: var(--text-primary); }
+.cs-item.active { background: rgba(var(--accent-rgb), 0.14); border-color: rgba(var(--accent-rgb), 0.4); color: var(--text-primary); }
+.cs-item .cs-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-item .cs-act {
+    flex-shrink: 0; border: none; background: none; cursor: pointer; padding: 0 3px;
+    color: var(--text-muted); font-size: 0.9rem; line-height: 1; opacity: 0; transition: opacity .12s, color .12s;
+}
+.cs-item:hover .cs-act, .cs-item.active .cs-act { opacity: 1; }
+.cs-item .cs-act:hover { color: var(--text-primary); }
+.cs-item .cs-act.cs-del:hover { color: var(--danger); }
+/* ⚠ EIN HINTERLEGTER CHAT-PROMPT IST EIN ZUSTAND, KEINE AKTION.
+   Die uebrigen `.cs-act` stehen auf `opacity: 0` und erscheinen erst beim
+   Ueberfahren – fuer eine Anzeige waere das falsch: wer nicht mit der Maus
+   ueber jede Zeile faehrt, saehe nie, dass fuer diesen Chat ein eigener Prompt
+   gilt und sein persoenlicher Preprompt dort ausgesetzt ist. Die gesetzte
+   Sprechblase bleibt deshalb dauerhaft sichtbar; die LEERE verhaelt sich wie
+   die anderen Aktionen. Zusaetzlich die Markenfarbe – sie ist die zweite
+   Ebene, die Aussage traegt die gefuellte FORM und der title/aria-label. */
+.cs-item .cs-act.cs-prompt.is-gesetzt { opacity: 1; color: var(--accent); }
+.cs-empty { color: var(--text-muted); font-size: 0.82rem; padding: 8px 4px; }
+
+/* Fuss der Verlaufsleiste ("Beispiel-Prompts"). Er bleibt beim Scrollen stehen –
+   mit vielen Chats waere er sonst unerreichbar weit unten. Weil er dabei UEBER
+   den Eintraegen liegt, braucht er eine DECKENDE Flaeche: die Sidebar selbst
+   traegt --bg-glass (halbtransparent), der Text darunter schiene durch.
+   `bottom: -12px` + eigenes padding-bottom deckt das 12px-Polster der Sidebar mit
+   ab, sonst blitzt dort beim Scrollen ein Streifen der Liste hervor. Die
+   negativen Seitenraender ziehen den Fuss auf die volle Breite der Leiste.
+
+   ⚠ RAENDER HIER NICHT UEBER rgba(var(--fg-rgb), …) BAUEN. Im echten Chrome
+   gemessen: chat.css setzt in `body.light` bewusst `--fg-rgb: 255,255,255`
+   ("helle Overlays/Raender") – auf /chat ist --fg-rgb also in BEIDEN Themes
+   weiss, und damit sind --border/--border-hover aus theme.css auf der weissen
+   Flaeche des Fusses unsichtbar. Der erste Anlauf las sich im Screenshot
+   deshalb als blosse Beschriftung statt als Knopf. Richtig ist das
+   theme-bewusste --outline aus chat.css (dunkel #333355 / hell #D0D0DD). */
+.cs-foot {
+    position: sticky;
+    bottom: -12px;
+    margin-top: auto;           /* bei kurzer Liste unten stehen bleiben */
+    flex-shrink: 0;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--outline);
+    margin-left: -10px; margin-right: -10px;
+    padding: 8px 10px 12px;
+}
+.cs-welcome {
+    display: block; width: 100%;
+    padding: 7px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--outline);
+    background: rgba(var(--accent-rgb), 0.06);
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    font-family: inherit;
+    cursor: pointer;
+    transition: color .12s, border-color .12s, background .12s, opacity .12s;
+}
+.cs-welcome:hover {
+    color: var(--text-primary);
+    border-color: var(--accent);
+    background: rgba(var(--accent-rgb), 0.14);
+}
+.cs-welcome:disabled {
+    opacity: .55;
+    cursor: default;
+    pointer-events: none;
+}
+
+/* Einklappen der Verlaufs-Sidebar (nach links) */
+.chat-sidebar { transition: flex-basis .18s ease, width .18s ease, padding .18s ease, opacity .15s ease; }
+.cs-head { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.cs-head .cs-new { flex: 1; }
+.cs-collapse {
+    flex: 0 0 auto; width: 32px; height: 34px; border: 1px solid var(--border);
+    background: transparent; color: var(--text-secondary); border-radius: 8px;
+    cursor: pointer; font-size: 1rem; line-height: 1;
+}
+.cs-collapse:hover { color: var(--text-primary); border-color: var(--border-hover); }
+.cs-expand { display: none; }
+.chat-screen.sidebar-collapsed .chat-sidebar {
+    flex-basis: 0; width: 0; padding-left: 0; padding-right: 0;
+    border-right: none; opacity: 0; overflow: hidden; pointer-events: none;
+}
+.chat-screen.sidebar-collapsed .cs-expand { display: inline-flex; }
+
+/* ─── Ziehgriff zwischen Verlaufsleiste und Chat ──────────────────
+   Er ist GESCHWISTER der Leiste, nicht ihr Kind: die Leiste traegt
+   `overflow-y: auto`, ein Griff darin wuerde beim Scrollen mitwandern.
+
+   Die sichtbare Linie ist der 1px-Strich in der Mitte (`::before`), die
+   klickbare Flaeche ist 6px breit – eine 1px-Trefferflaeche findet mit der
+   Maus niemand. `touch-action: none` ist bei Pointer-Events PFLICHT: ohne das
+   nimmt der Browser die Geste als Scrollen und der Griff bewegt sich nicht.  */
+.cs-resize {
+    flex: 0 0 6px;
+    align-self: stretch;
+    position: relative;
+    z-index: 5;
+    cursor: col-resize;
+    background: transparent;
+    touch-action: none;
+    /* Der Griff liegt 3px UEBER der Leiste, damit die Trefferflaeche die
+       Randlinie mittig fasst und rechts kein Spalt zum Chat entsteht. */
+    margin-left: -3px;
+}
+.cs-resize::before {
+    content: '';
+    position: absolute;
+    top: 0; bottom: 0; left: 50%;
+    width: 2px;
+    transform: translateX(-50%);
+    border-radius: 2px;
+    background: transparent;
+    transition: background .12s;
+}
+.cs-resize:hover::before,
+.cs-resize:focus-visible::before,
+.cs-resize.is-zieht::before { background: var(--accent); }
+/* :focus-visible, nicht :focus – sonst bliebe nach jedem Mausklick ein
+   Strich stehen. Der eigene Rahmen entfaellt, die Linie IST die Rueckmeldung. */
+.cs-resize:focus { outline: none; }
+.cs-resize:focus-visible { outline: none; }
+/* Eingeklappt gibt es nichts zu ziehen – ein Griff an einer 0px-Leiste
+   wuerde sie aufziehen und den Einklapp-Zustand unerklaerbar machen. */
+.chat-screen.sidebar-collapsed .cs-resize { display: none; }
+
+/* Waehrend des Ziehens: keine Textauswahl, und vor allem KEINE Transition.
+   `.chat-sidebar` animiert `flex-basis`/`width` fuers Einklappen – beim Ziehen
+   liefe die Leiste dem Zeiger sichtbar hinterher. Der Zeiger bleibt ausserdem
+   `col-resize`, auch wenn er beim schnellen Ziehen ueber den Chat rutscht. */
+body.cs-resizing { user-select: none; cursor: col-resize; }
+body.cs-resizing .chat-sidebar { transition: none; }
+
+/* LLM-Profilumschalter (Popup an der Status-Pill) */
+.llm-pop {
+    position: fixed; z-index: 10050; min-width: 200px; max-width: 300px;
+    background: var(--bg-secondary); border: 1px solid var(--border);
+    border-radius: 12px; padding: 6px; box-shadow: 0 12px 40px rgba(var(--shadow-rgb), .45);
+}
+.llm-pop-head { font-size: .72rem; color: var(--text-secondary); padding: 4px 8px 6px; }
+.llm-pop-item {
+    display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+    padding: 7px 8px; border: none; background: none; color: var(--text-primary);
+    border-radius: 8px; cursor: pointer; font-size: .85rem; font-family: inherit;
+}
+.llm-pop-item:hover { background: rgba(var(--fg-rgb), .06); }
+.llm-pop-item.active { color: var(--accent); }
+.llm-pop-check { width: 14px; flex-shrink: 0; color: var(--accent); }
+.llm-pop-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (max-width: 720px) {
+    /* Nur die VORGABE, nicht die Leiste selbst: haette diese Regel weiter
+       `flex-basis` direkt gesetzt, gewaenne sie gegen einen gezogenen Wert
+       (gleiche Spezifitaet, spaeter in der Datei) und das Ziehen waere auf
+       schmalen Fenstern wirkungslos. Ein gezogener Wert steht inline auf dem
+       Screen und schlaegt diese Zeile; dass er nicht zu breit wird, haelt die
+       am FENSTER gerechnete Obergrenze in chat.js. */
+    .chat-screen { --cs-w: 168px; }
+}
+
+/* ─── Top Bar ────────────────────────────────────────────────── */
+.topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--outline);
+    flex-shrink: 0;
+}
+
+.topbar-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.topbar-avatar {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--purple), var(--purple-dark));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 700;
+}
+
+.topbar-title {
+    font-size: 19px; font-weight: 600;
+}
+
+.topbar-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--muted);
+    transition: background .3s;
+}
+
+.topbar-dot.connected    { background: var(--green); }
+.topbar-dot.connecting   { background: #FFFF00; }
+.topbar-dot.disconnected { background: var(--error); }
+
+/* Angemeldeter Benutzer im Header */
+.chat-own-badge {
+    display: inline-flex;
+    align-items: center;
+    max-width: 220px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    background: rgba(var(--fg-rgb), 0.06);
+    border: 1px solid rgba(var(--fg-rgb), 0.1);
+    color: var(--muted, #94a3b8);
+    font-size: 0.78rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.chat-own-badge:empty { display: none; }
+
+.btn-logout {
+    background: none; border: none;
+    color: var(--muted);
+    font-size: 20px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 8px;
+    transition: color .2s, background .2s;
+}
+
+.btn-logout:hover {
+    color: var(--error);
+    background: rgba(231, 76, 60, .1);
+}
+
+.btn-logout svg { width: 18px; height: 18px; display: block; }
+
+/* ─── Live-Aktivitäts-/Fortschrittszeile ─────────────────────── */
+.chat-activity {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 14px; margin: 2px 8px;
+    font-size: 0.8rem; color: var(--muted);
+}
+.chat-activity-spinner {
+    width: 13px; height: 13px; flex-shrink: 0;
+    border: 2px solid rgba(var(--accent-rgb), .25);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: chat-activity-spin .7s linear infinite;
+}
+@keyframes chat-activity-spin { to { transform: rotate(360deg); } }
+.chat-activity-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ─── Dezente Aktions-Buttons unter Bot-Bubbles (Kopieren / PDF) ─── */
+.bubble-actions {
+    display: flex; gap: 2px; margin-top: 3px;
+    opacity: 0.32; transition: opacity .15s;
+}
+.msg-row.bot:hover .bubble-actions,
+.bubble-actions:focus-within { opacity: 1; }
+.bubble-act-btn {
+    background: transparent; border: none; color: var(--muted);
+    cursor: pointer; padding: 3px; border-radius: 6px;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: color .15s, background .15s;
+}
+.bubble-act-btn:hover { color: var(--accent); background: rgba(var(--accent-rgb), .12); }
+.bubble-act-btn.ok { color: var(--green, #22c55e); }
+.bubble-act-btn svg { width: 15px; height: 15px; }
+
+/* ─── SSL-/Verbindungs-Sicherheit (Banner + Badge) ───────────── */
+.security-banner {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 2000;
+    background: linear-gradient(90deg, #ef4444, #f97316);
+    color: #fff;
+    padding: 0.5rem 1rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    display: none;
+    box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3);
+}
+.banner-content {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+.btn-banner-action {
+    background: rgba(255, 255, 255, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    color: #fff;
+    padding: 0.25rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+}
+.btn-banner-action:hover { background: #fff; color: #ef4444; }
+.btn-close-banner {
+    background: none; border: none; color: #fff;
+    font-size: 1.25rem; cursor: pointer; margin-left: auto; opacity: 0.7;
+}
+.btn-close-banner:hover { opacity: 1; }
+
+.security-badge {
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    cursor: pointer;
+    transition: all 0.3s;
+    flex-shrink: 0;
+}
+.security-badge.secure {
+    background: rgba(16, 185, 129, 0.1);
+    color: #10b981;
+    border-color: rgba(16, 185, 129, 0.2);
+}
+.security-badge:hover { transform: scale(1.1); filter: brightness(1.2); }
+
+/* CPU-Auslastung: die Regeln stehen seit 2026-08-22 als `.jv-cpu-bar`
+   in theme.css – sie erscheint auf JEDER Seite, chat.css laedt aber nur
+   /chat und /userchat. Hier lag eine von drei gleichlautenden Kopien. */
+
+/* ─── Messages Container ─────────────────────────────────────── */
+.messages {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 12px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    scroll-behavior: smooth;
+}
+
+/* Scrollbar */
+.messages::-webkit-scrollbar { width: 4px; }
+.messages::-webkit-scrollbar-track { background: transparent; }
+.messages::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 2px; }
+
+/* ─── Welcome ────────────────────────────────────────────────── */
+.welcome-msg {
+    text-align: center;
+    padding: 48px 20px;
+    color: var(--muted);
+}
+
+.welcome-msg p { font-size: 15px; font-weight: 500; color: var(--on-surface); }
+.welcome-msg .welcome-sub { font-size: 13px; color: var(--muted); margin-top: 4px; }
+
+/* ─── Willkommens-Karte "Beispiel Prompts" ───────────────────────
+   Wird im Verlauf "Beispiel Prompts" anstelle einer Bot-Bubble gerendert
+   (chat.js::_renderWelcomeCard). Farben ausschliesslich ueber Variablen,
+   damit Branding-Akzent und Hell/Dunkel automatisch greifen. */
+.welcome-card {
+    max-width: 760px;
+    margin: 18px auto 8px;
+    padding: 20px 20px 16px;
+    border: 1px solid var(--outline);
+    border-radius: var(--radius-bubble);
+    background: rgba(var(--fg-rgb), 0.04);
+}
+body.light .welcome-card { background: rgba(var(--shadow-rgb), 0.03); }
+
+.welcome-card-head {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--on-surface-strong);
+    margin-bottom: 6px;
+}
+.welcome-card-intro {
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: var(--on-surface);
+}
+.welcome-card-hint {
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--muted);
+    margin-top: 12px;
+}
+
+.wex-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 14px;
+}
+@media (max-width: 620px) {
+    .wex-grid { grid-template-columns: 1fr; }
+    .welcome-card { padding: 16px 14px 14px; }
+}
+
+.wex-chip {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 12px;
+    text-align: left;
+    font: inherit;
+    cursor: pointer;
+    border: 1px solid var(--outline);
+    border-radius: 12px;
+    background: var(--surface);
+    color: var(--on-surface);
+    transition: border-color .15s, background .15s, transform .15s;
+}
+.wex-chip:hover,
+.wex-chip:focus-visible {
+    border-color: rgba(var(--accent-rgb), 0.55);
+    background: rgba(var(--accent-rgb), 0.10);
+    transform: translateY(-1px);
+    outline: none;
+}
+.wex-chip:active { transform: none; }
+
+.wex-icon { font-size: 16px; line-height: 1.35; flex: 0 0 auto; }
+.wex-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wex-label {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--on-surface-strong);
+}
+.wex-desc { font-size: 12px; color: var(--muted); }
+
+/* ═══════════════════════════════════════════════════════════════
+   MESSAGE BUBBLES
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ─── Row Container ──────────────────────────────────────────── */
+.msg-row {
+    display: flex;
+    gap: 8px;
+    max-width: 100%;
+    animation: bubbleIn .25s ease-out;
+}
+
+.msg-row.user {
+    justify-content: flex-end;
+}
+
+.msg-row.bot {
+    justify-content: flex-start;
+}
+
+/* ─── Avatar (nur Bot) ───────────────────────────────────────── */
+.msg-avatar {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--purple), var(--purple-dark));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 700;
+    flex-shrink: 0;
+    align-self: flex-end;
+}
+
+/* ─── Col (flex-child der Row) ───────────────────────────────── */
+.msg-row.user > div {
+    max-width: min(420px, 85%);
+}
+.msg-row.bot > div {
+    max-width: 90%;
+}
+
+/* ─── Bubble ─────────────────────────────────────────────────── */
+.msg-bubble {
+    max-width: 100%;
+    width: fit-content;
+    padding: 10px 14px;
+    font-size: 15px;
+    font-weight: 500;
+    line-height: 22px;
+    color: var(--bubble-text);
+    overflow-wrap: break-word;
+}
+
+.msg-row.user .msg-bubble {
+    background: var(--bubble-user);
+    border-radius: 18px 4px 18px 18px;
+    /* ⚠ ZEILENUMBRUECHE DES BENUTZERS BLEIBEN STEHEN (gemeldet 2026-08-31).
+       Eigener Text wird mit `escapeHtml()` gerendert (chat.js) – richtig so,
+       das ist die Sicherheitsschranke –, und escapeHtml erzeugt KEIN <br>.
+       Ohne diese Zeile gilt `white-space: normal`, und HTML fasst jeden
+       Umbruch als Leerzeichen auf: ein eingefuegter Text mit drei Umbruechen
+       stand als EIN Absatz da (gemessen: 0 <br>, 3 statt 4 sichtbare Zeilen),
+       obwohl die \n im DOM und im gespeicherten Transkript vorhanden sind.
+       Bot-Blasen brauchen das nicht – `renderMarkdown` setzt dort <br>.
+
+       WARUM `pre-wrap` UND NICHT \n -> <br>: die Blase wird an drei Stellen
+       ueber `bubble.textContent` ZURUECKGELESEN (Bearbeiten, Wiederholen,
+       Kopieren) – und `textContent` liefert bei <br> keine Umbrueche. Der Text
+       waere beim Klick auf „Bearbeiten" wieder einzeilig, also derselbe Fehler
+       eine Ebene spaeter. Als Textknoten traegt er seine Umbrueche durch alle
+       drei Rueckleser, und Einrueckungen bleiben mit erhalten. */
+    white-space: pre-wrap;
+}
+
+/* `white-space` ERBT – und die Anhang-Chips und die Bildergalerie bringen ihr
+   Markup aus eingerueckten Template-Strings mit (chat.js::_renderFileChip).
+   Ohne diese Ruecknahme wuerde deren Einrueckung als Leerraum SICHTBAR.
+   Bewusst `> *` als REGEL statt einer Klassenliste: die Vorgabe gilt fuer den
+   TEXT der Nachricht, alles Element-Kind bringt seine eigene Formatierung mit –
+   damit ist auch ein kuenftiges Element in der Blase gedeckt. */
+.msg-row.user .msg-bubble > * { white-space: normal; }
+
+.msg-row.bot .msg-bubble {
+    background: var(--bubble-bot);
+    border-radius: 4px 18px 18px 18px;
+}
+
+/* ─── Timestamp ──────────────────────────────────────────────── */
+.msg-time {
+    font-size: 10px;
+    color: var(--msg-time-color);
+    padding: 0 4px 2px;
+}
+
+.msg-row.user .msg-time {
+    text-align: right;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    justify-content: flex-end;
+}
+.msg-row.bot .msg-time { text-align: left; }
+
+/* ─── Mehrfachauswahl (Checkbox-Loeschen) ────────────────────── */
+.msg-check {
+    flex: 0 0 auto;
+    align-self: center;
+    width: 18px; height: 18px;
+    margin: 0 2px;
+    cursor: pointer;
+    accent-color: var(--purple, var(--accent));
+}
+.messages.select-mode .msg-row { cursor: pointer; }
+.messages.select-mode .msg-row.user .msg-check { margin-right: auto; }
+.messages.select-mode .msg-edit-btn { display: none; }
+
+.msg-select-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 14px;
+    background: var(--bubble-bot, rgba(var(--fg-rgb), 0.06));
+    border-bottom: 1px solid rgba(127, 127, 127, 0.18);
+}
+.msg-select-bar[hidden] { display: none; }
+.msg-select-info { font-size: 0.82rem; color: var(--muted); margin-right: auto; }
+.msg-select-info #msg-select-count { font-weight: 700; color: var(--bubble-text); }
+.msg-select-btn {
+    padding: 4px 12px;
+    border-radius: 6px;
+    border: 1px solid rgba(127, 127, 127, 0.25);
+    background: rgba(127, 127, 127, 0.1);
+    color: inherit;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: background .15s, border-color .15s, opacity .15s;
+}
+.msg-select-btn:hover { background: rgba(127, 127, 127, 0.2); }
+.msg-select-btn.danger { border-color: rgba(239, 68, 68, 0.5); color: #e0524a; }
+.msg-select-btn.danger:hover:not(:disabled) {
+    background: rgba(239, 68, 68, 0.15);
+    border-color: rgba(239, 68, 68, 0.8);
+}
+.msg-select-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+#btn-select-msgs.active { color: var(--purple, var(--accent)); }
+
+/* ─── Mehrfachauswahl im Benutzer-Chat (uc-msg-row) ──────────── */
+.uc-msg-check {
+    flex: 0 0 auto;
+    align-self: center;
+    width: 18px; height: 18px;
+    margin: 0 2px;
+    cursor: pointer;
+    accent-color: var(--purple, var(--accent));
+}
+.uc-messages.select-mode .uc-msg-row.mine {
+    flex-direction: row;
+    justify-content: flex-start;
+    cursor: pointer;
+}
+.uc-messages.select-mode .uc-msg-row.theirs { opacity: 0.55; }
+
+/* ─── Edit-Button (nur User-Bubbles) ──────────────────────────── */
+.msg-edit-btn {
+    background: none;
+    border: none;
+    color: var(--msg-time-color);
+    cursor: pointer;
+    font-size: 12px;
+    padding: 0 2px;
+    line-height: 1;
+    transition: color .15s, opacity .15s;
+    opacity: .6;
+}
+.msg-row.user:hover .msg-edit-btn { opacity: 1; color: var(--text-primary); }
+.msg-edit-btn:hover { opacity: 1 !important; }
+.msg-edit-btn:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 3px;
+}
+
+/* Debug-Umschalter neben der Kontext-Pille.
+   Basis-Optik hier (NICHT inline im HTML) – sonst schlagen Inline-Styles die
+   .active-Regel und der Ein/Aus-Zustand ist optisch nicht unterscheidbar. */
+#ctx-debug-toggle {
+    background: transparent;
+    border: 1px solid rgba(var(--fg-rgb), 0.15);
+    color: var(--text-secondary);
+    transition: background .15s, border-color .15s, color .15s, box-shadow .15s;
+}
+#ctx-debug-toggle:hover { color: var(--text-primary); border-color: rgba(var(--accent-rgb), 0.5); }
+/* AN: deutlich abgesetzt – Akzent-Rahmen + Tönung + Ring + Akzent-Icon */
+#ctx-debug-toggle.active {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: rgba(var(--accent-rgb), 0.20);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.22);
+}
+
+/* ─── Edit-Modus innerhalb der Bubble ─────────────────────────── */
+/* ACHTUNG, hier gilt NICHT das Muster aus style.css: chat.css laesst --fg-rgb
+   im Hell-Theme bewusst auf Weiss stehen (siehe body.light oben). Eine Toenung
+   auf --fg-rgb waere hier also in BEIDEN Themes weiss – im Hellen ein
+   unsichtbares Eingabefeld. Deshalb wie die uebrigen Chat-Flaechen: Toenung auf
+   --shadow-rgb, den Hell-Wert ausdruecklich darunter (analog --code-bg). */
+.msg-edit-area {
+    width: 100%;
+    min-height: 60px;
+    background: rgba(var(--shadow-rgb), 0.25);
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1.5;
+    padding: 8px 11px;
+    resize: vertical;
+    outline: none;
+    box-sizing: border-box;
+}
+/* Im Hellen liegt das Feld auf einer hellen Bubble: 25 % Schwarz waeren ein
+   grauer Kasten (gemeldet 2026-08-20). Derselbe Wert wie --code-bg in Hell. */
+body.light .msg-edit-area { background: rgba(var(--shadow-rgb), 0.07); }
+.msg-edit-area:focus {
+    box-shadow: 0 0 8px rgba(var(--accent-rgb), .25);
+}
+.msg-edit-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+    justify-content: flex-end;
+}
+.msg-edit-actions button {
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    border: none;
+    color: #fff;
+    transition: opacity .15s;
+    font-family: inherit;
+}
+.msg-edit-save { background: var(--accent); }
+.msg-edit-cancel { background: rgba(var(--fg-rgb), .15); }
+.msg-edit-actions button:hover { opacity: .85; }
+.msg-edit-actions button:disabled { opacity: .4; cursor: not-allowed; }
+
+/* ─── Stats ──────────────────────────────────────────────────── */
+.msg-stats {
+    font-size: 11px;
+    color: var(--muted);
+    font-style: italic;
+    margin-top: 4px;
+}
+
+/* ─── Streaming Dots ─────────────────────────────────────────── */
+.streaming-dots {
+    font-size: 10px;
+    color: var(--muted);
+    animation: dotPulse .6s ease-in-out infinite alternate;
+}
+
+@keyframes dotPulse {
+    from { opacity: .3; }
+    to   { opacity: 1; }
+}
+
+/* ─── Status Messages (inline) ───────────────────────────────── */
+.msg-status {
+    font-size: 12px;
+    color: var(--muted);
+    text-align: center;
+    padding: 2px 0;
+}
+
+/* Meldung, die der Benutzer lesen MUSS (verfehlte Auslieferung, keine Antwort
+   vom LLM) – sie bleibt stehen, siehe `persist` in chat.js. Die Flaeche ist
+   DECKEND, weil die Zeile ueber dem Verlauf liegt.
+
+   ⚠ DIE SCHRIFTFARBE IST THEMENABHAENGIG, UND ZWAR GEMESSEN – nicht geschaetzt
+   und nicht aus einem Nachbarbefund uebernommen. Gegen `--bg-secondary`:
+       dunkel (#111827):  --danger 4,71:1 ✓  ·  78%-Abdunklung 3,08:1 ✗
+       hell   (#ffffff):  --danger 3,76:1 ✗  ·  78%-Abdunklung 5,76:1 ✓
+   Die Abdunklung aus theme.css (SAP-Zertifikatsbefunde) gilt also NUR fuer die
+   helle Flaeche – im dunklen Thema macht sie den Kontrast SCHLECHTER als das
+   nackte --danger. Die erste Fassung dieser Regel hatte genau diesen Fehler
+   (eine Farbe fuer beide Themen, im dunklen 3,08:1); gefunden hat ihn erst das
+   Nachrechnen, nicht das Lesen.
+   Die Themenregel steht SPAETER und ist spezifischer (0,2,0 gegen 0,1,0) –
+   sie gewinnt damit in beiden Lesarten. */
+.msg-status-warn {
+    font-size: 14px;
+    text-align: left;
+    color: var(--danger);
+    background: var(--bg-secondary);
+    border-left: 3px solid var(--danger);
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin: 6px 0;
+}
+
+body.light .msg-status-warn {
+    color: color-mix(in srgb, var(--danger) 78%, #000);
+}
+
+/* ─── Markdown in Bubbles ────────────────────────────────────── */
+.msg-bubble strong, .msg-bubble b {
+    font-weight: 700;
+}
+
+.msg-bubble em, .msg-bubble i {
+    font-style: italic;
+}
+
+.msg-bubble code {
+    background: var(--code-bg);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+}
+
+.msg-bubble pre {
+    background: var(--pre-bg);
+    padding: 10px 12px;
+    border-radius: 8px;
+    overflow-x: auto;
+    margin: 6px 0;
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.msg-bubble pre code {
+    background: none;
+    padding: 0;
+}
+
+/* ─── Markdown: Überschriften ────────────────────────────────── */
+.msg-bubble h1 { font-size: 1.25em; font-weight: 700; margin: 10px 0 4px; line-height: 1.3; }
+.msg-bubble h2 { font-size: 1.15em; font-weight: 700; margin: 8px 0 4px; line-height: 1.3; }
+.msg-bubble h3 { font-size: 1.05em; font-weight: 600; margin: 7px 0 3px; line-height: 1.3; }
+.msg-bubble h4 { font-size: 1em;    font-weight: 600; margin: 6px 0 3px; line-height: 1.3; }
+.msg-bubble h1:first-child,
+.msg-bubble h2:first-child,
+.msg-bubble h3:first-child,
+.msg-bubble h4:first-child { margin-top: 0; }
+
+/* ─── Markdown: Listen ───────────────────────────────────────── */
+.msg-bubble ul, .msg-bubble ol {
+    padding-left: 20px;
+    margin: 4px 0;
+}
+.msg-bubble li { margin: 2px 0; line-height: 1.5; }
+.msg-bubble ul li { list-style-type: disc; }
+.msg-bubble ol li { list-style-type: decimal; }
+
+/* ─── Markdown: Blockquote ───────────────────────────────────── */
+.msg-bubble blockquote {
+    border-left: 3px solid var(--purple);
+    padding: 4px 10px;
+    margin: 6px 0;
+    color: var(--muted);
+    font-style: italic;
+    border-radius: 0 4px 4px 0;
+    background: rgba(var(--accent-rgb), 0.06);
+}
+
+/* ─── Markdown: Links ────────────────────────────────────────── */
+.msg-bubble a {
+    color: var(--purple-light);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    word-break: break-all;
+}
+.msg-bubble a:hover { opacity: .8; }
+
+/* ⚠ IM HELLEN THEMA WAR JEDER LINK IN EINER BLASE UNLESBAR – gemessen im
+ * echten Chrome: --purple-light (rgb(187,134,252)) auf der hellen Blase ergibt
+ * 2,13:1, in einem <code> sogar 1,83:1. Die Grenze ist 4,5:1. Aufgefallen bei
+ * der Abnahme des Quell-Links (2026-09-08), betrifft aber ALLE Links im Chat.
+ *
+ * `color-mix` statt eines festen Tons, weil die Farbe brandingabhaengig ist:
+ * ein fester Violett-Ton saehe auf einer Installation mit roter Hausfarbe
+ * falsch aus. Dasselbe Mittel benutzt theme.css schon fuer die
+ * Zertifikats-Urteile. Nachgemessen im echten Chrome: 8,4:1 in der Blase und
+ * 7,2:1 im <code> – statt 2,13 bzw. 1,83.
+ *
+ * NUR im hellen Thema: im dunklen liegt derselbe Ton bei 6,47:1 bzw. 4,82:1.
+ *
+ * GRENZE, damit sie niemand fuer geloest haelt: keine feste Prozentzahl
+ * garantiert 4,5:1 fuer JEDE Hausfarbe – ein sehr HELLER Akzent (z.B. ein
+ * kraeftiges Gelb) liegt auch bei 55 % noch darunter (gerechnet 3,65:1). Fuer
+ * die Vorgabefarbe und die hier benutzte Hausfarbe ist es gemessen; wer eine
+ * helle Hausfarbe setzt, braucht hier einen eigenen Ton. */
+body.light .msg-bubble a { color: color-mix(in srgb, var(--accent) 55%, #000); }
+
+/* ─── Markdown: Trennlinie ───────────────────────────────────── */
+.msg-bubble hr {
+    border: none;
+    border-top: 1px solid var(--outline);
+    margin: 8px 0;
+}
+
+/* ─── Markdown: Durchgestrichen ─────────────────────────────── */
+.msg-bubble del { text-decoration: line-through; opacity: .7; }
+
+/* ─── Markdown: Tabelle ──────────────────────────────────────── */
+.msg-bubble table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 13px;
+    margin: 8px 0;
+    overflow-x: auto;
+    display: block;
+}
+.msg-bubble th, .msg-bubble td {
+    border: 1px solid var(--outline);
+    padding: 5px 10px;
+    text-align: left;
+    white-space: nowrap;
+}
+.msg-bubble th {
+    background: rgba(var(--accent-rgb), 0.12);
+    font-weight: 600;
+}
+.msg-bubble tr:nth-child(even) td {
+    background: rgba(var(--fg-rgb), 0.03);
+}
+
+/* ─── Date Separator ─────────────────────────────────────────── */
+.date-sep {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 0;
+}
+
+.date-sep::before, .date-sep::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--separator-line);
+}
+
+.date-sep span {
+    font-size: 11px;
+    color: var(--separator-text);
+    white-space: nowrap;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   INPUT BAR
+   ═══════════════════════════════════════════════════════════════ */
+.input-bar {
+    background: var(--surface);
+    border-top: 1px solid var(--outline);
+    padding: 8px 12px;
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+    flex-shrink: 0;
+}
+
+.input-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+}
+
+#msg-input {
+    flex: 1;
+    min-height: 42px;
+    max-height: 120px;
+    padding: 10px 16px;
+    border: 1px solid var(--outline);
+    border-radius: var(--radius-input);
+    background: transparent;
+    color: var(--on-surface-strong);
+    font-size: 15px;
+    font-family: inherit;
+    line-height: 20px;
+    resize: none;
+    outline: none;
+    transition: border-color .2s;
+}
+
+#msg-input:focus { border-color: var(--purple); }
+#msg-input::placeholder { color: var(--muted); }
+
+.btn-send {
+    width: 42px; height: 42px;
+    border: none;
+    border-radius: 50%;
+    background: var(--accent, var(--purple));
+    color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background .2s, opacity .2s;
+}
+
+.btn-send:disabled { opacity: .35; cursor: not-allowed; }
+.btn-send:not(:disabled):hover { background: var(--accent-hover, var(--purple-light)); }
+
+.btn-mic {
+    width: 42px; height: 42px;
+    border: 1px solid rgba(34, 197, 94, 0.35);
+    color: var(--text-muted);
+    background: transparent;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: color .2s, background .2s;
+}
+.btn-mic:hover { color: #22c55e; background: rgba(34,197,94,.15); border-color: #22c55e; }
+.btn-mic.recording {
+    color: #e74c3c;
+    background: rgba(231,76,60,.15);
+    animation: mic-pulse 1s ease-in-out infinite;
+}
+/* Aufnahme vorbei, der Server erkennt noch (lokales Whisper, einige Sekunden) */
+.btn-mic.transcribing {
+    color: var(--accent, var(--purple-light));
+    border-color: var(--accent, var(--purple-light));
+    cursor: progress;
+    animation: mic-wait 1.2s ease-in-out infinite;
+}
+@keyframes mic-wait { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+@keyframes mic-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(231,76,60,.4); }
+    50% { box-shadow: 0 0 0 6px rgba(231,76,60,0); }
+}
+
+.btn-stop {
+    width: 42px; height: 42px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(231, 76, 60, .15);
+    color: var(--error);
+    font-size: 18px; font-weight: 700;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background .2s;
+}
+
+.btn-stop:hover { background: rgba(231, 76, 60, .3); }
+
+/* ═══════════════════════════════════════════════════════════════
+   ANIMATIONS
+   ═══════════════════════════════════════════════════════════════ */
+@keyframes bubbleIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   RESPONSIVE
+   ═══════════════════════════════════════════════════════════════ */
+@media (min-width: 600px) {
+    .msg-row > div { max-width: min(480px, 65%); }
+    .messages { padding: 16px 24px; }
+    .input-bar { padding: 10px 24px; }
+}
+
+@media (min-width: 900px) {
+    .msg-row > div { max-width: min(600px, 65%); }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   TOTP / 2FA
+   ═══════════════════════════════════════════════════════════════ */
+
+/* TOTP-Eingabe im Login-Formular */
+.totp-row { margin-bottom: 12px; }
+.totp-row input { text-align: center; font-size: 22px; letter-spacing: 8px; font-weight: 600; }
+
+/* Topbar-Buttons */
+.topbar-right { display: flex; gap: 4px; align-items: center; }
+
+/* ─── TTS Stimme-Wrapper in Topbar ──────────────────────────── */
+.tts-voice-wrap {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: var(--surface);
+    border: 1px solid var(--outline);
+    border-radius: 8px;
+    padding: 3px 8px 3px 10px;
+}
+.tts-voice-label {
+    font-size: 0.72rem;
+    color: var(--muted);
+    white-space: nowrap;
+    user-select: none;
+    letter-spacing: 0.02em;
+}
+.tts-voice-select {
+    background: transparent;
+    border: none;
+    color: var(--on-surface);
+    font-size: 0.78rem;
+    max-width: 140px;
+    min-width: 70px;
+    cursor: pointer;
+    outline: none;
+    padding: 2px 0;
+    font-family: inherit;
+}
+.tts-voice-select option {
+    background: var(--surface);
+    color: var(--on-surface);
+}
+
+/* Globale Lesbarkeit aller Dropdown-Eintraege im /chat-Frontend */
+select option,
+select optgroup {
+    background-color: var(--surface, #111827);
+    color: var(--on-surface, #f8fafc);
+}
+select option:checked,
+select option:hover {
+    background-color: var(--surface-2, #1e293b);
+    color: #ffffff;
+}
+
+.btn-totp-setup {
+    background: none; border: none;
+    font-size: 18px; cursor: pointer;
+    padding: 4px 8px; border-radius: 8px;
+    transition: background .2s;
+}
+.btn-totp-setup:hover { background: rgba(var(--fg-rgb), .08); }
+
+/* ─── Modal Overlay ──────────────────────────────────────────── */
+.modal-overlay {
+    position: fixed; inset: 0;
+    background: rgba(var(--shadow-rgb), .7);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 1000;
+    backdrop-filter: blur(4px);
+}
+
+.modal-card {
+    background: var(--surface);
+    border: 1px solid var(--outline);
+    border-radius: 16px;
+    padding: 32px 28px;
+    width: 380px; max-width: 90vw;
+    text-align: center;
+}
+
+.modal-title {
+    font-size: 18px; font-weight: 600;
+    margin-bottom: 20px;
+}
+
+.totp-info {
+    font-size: 13px; color: var(--on-surface);
+    margin-bottom: 16px; line-height: 1.5;
+}
+
+.totp-qr { margin: 16px auto; }
+.totp-qr img { border-radius: 8px; }
+
+.totp-secret-label {
+    font-size: 11px; color: var(--muted);
+    margin-bottom: 4px;
+}
+
+.totp-secret-code {
+    display: block;
+    font-size: 14px; letter-spacing: 2px;
+    color: var(--purple-light);
+    background: rgba(var(--fg-rgb), .05);
+    padding: 8px 12px; border-radius: 8px;
+    user-select: all; cursor: pointer;
+    margin-bottom: 8px;
+}
+
+.modal-card input {
+    display: block; width: 100%;
+    padding: 12px 16px; margin-bottom: 12px;
+    border: 1px solid var(--outline);
+    border-radius: var(--radius-input);
+    background: var(--bg); color: var(--on-surface-strong);
+    font-size: 14px; outline: none;
+    transition: border-color .2s;
+}
+
+.modal-card input:focus { border-color: var(--purple); }
+.modal-card input::placeholder { color: var(--muted); }
+
+.modal-card input[inputmode="numeric"] {
+    text-align: center; font-size: 22px;
+    letter-spacing: 8px; font-weight: 600;
+}
+
+.btn-modal-close {
+    display: block; width: 100%;
+    margin-top: 12px; padding: 10px;
+    background: none; border: 1px solid var(--outline);
+    border-radius: var(--radius-input);
+    color: var(--muted); font-size: 14px;
+    cursor: pointer; transition: border-color .2s, color .2s;
+}
+.btn-modal-close:hover { border-color: var(--on-surface); color: var(--on-surface); }
+
+/* Das Zahnrad laedt den Dialog, bevor es ihn zeigt – ohne Rueckmeldung waere
+   der Klick in dieser Zeit von einem toten Knopf nicht zu unterscheiden. */
+.cs-collapse.is-busy { opacity: .55; cursor: progress; }
+
+/* ─── Einstellungen-Dialog in /chat (Preprompt + Wissens-Vorauswahl) ────────
+   .modal-card hat width:380px und text-align:center – fuer zwei Container mit
+   Textfeld und Gruppenliste zu schmal und falsch ausgerichtet. Die Hoehe ist am
+   SICHTFENSTER begrenzt und nur der Koerper scrollt: der Speichern-Knopf im
+   Fuss bleibt damit auch bei vielen Wissensgruppen erreichbar. `min-height: 0`
+   ist dabei Pflicht – ohne das schrumpft der Koerper nicht unter seine
+   Inhaltshoehe, `overflow-y` bleibt wirkungslos und der Fuss wird aus dem
+   Fenster gedrueckt (dieselbe Falle wie im Update-Popup). */
+.chs-card {
+    width: 620px;
+    text-align: left;
+    padding: 24px 22px 18px;
+    display: flex; flex-direction: column;
+    max-height: calc(100vh - 64px);
+    min-height: 0;
+}
+.chs-card .modal-title { text-align: center; margin-bottom: 16px; flex: 0 0 auto; }
+.chs-body { flex: 1 1 auto; overflow-y: auto; min-height: 0; padding-right: 4px; }
+
+/* Chatname im Titel des Prompt-Dialogs. Er wird von einer beliebigen Zeile aus
+   geoeffnet, auch von einer nicht aktiven – ohne den Namen waere nicht
+   erkennbar, welcher Chat gerade geaendert wird. `display: block` samt Ellipse,
+   weil ein langer Titel den Dialog sonst breiter zoege als das Fenster. */
+.cp-name {
+    display: block; margin-top: 4px;
+    font-size: 13px; font-weight: 500; color: var(--muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cp-name:empty { display: none; }
+
+.chs-sect {
+    border: 1px solid var(--outline);
+    border-radius: 12px;
+    padding: 14px 14px 16px;
+    margin-bottom: 14px;
+}
+.chs-sect:last-child { margin-bottom: 0; }
+.chs-sect-title {
+    font-size: 14px; font-weight: 600;
+    color: var(--on-surface-strong);
+    margin: 0;
+    cursor: pointer;
+    list-style-position: outside;
+}
+.chs-sect-title:focus-visible { outline: 2px solid var(--purple); outline-offset: 2px; }
+/* Abstand nur im OFFENEN Zustand: ein zugeklappter Kasten soll kompakt sein,
+   sonst steht unter dem Titel eine leere Zeile. */
+.chs-sect[open] > .chs-sect-title { margin-bottom: 8px; }
+/* Gleiche Begruendung fuer das untere Polster des Kastens selbst. */
+.chs-sect:not([open]) { padding-bottom: 12px; }
+.chs-desc {
+    font-size: 12.5px; color: var(--muted);
+    line-height: 1.55; margin: 0 0 10px;
+}
+.chs-ta {
+    width: 100%; box-sizing: border-box;
+    padding: 10px 12px;
+    font-size: 13px; font-family: inherit; line-height: 1.5;
+    background: var(--bg); color: var(--on-surface);
+    border: 1px solid var(--outline); border-radius: 10px;
+    resize: vertical;
+}
+.chs-ta:focus { border-color: var(--purple); outline: none; }
+
+.chs-kb-actions { display: flex; gap: 8px; margin-bottom: 8px; }
+.chs-kb-a {
+    flex: 1 1 auto;
+    padding: 6px 10px; border-radius: 8px;
+    border: 1px solid var(--outline); background: transparent;
+    color: var(--muted); font-size: 12.5px; font-family: inherit;
+    cursor: pointer; transition: border-color .2s, color .2s;
+}
+.chs-kb-a:hover { color: var(--on-surface); border-color: var(--on-surface); }
+.chs-kb-a:focus-visible { outline: 2px solid var(--purple); outline-offset: 2px; }
+
+.chs-kb-list {
+    display: flex; flex-direction: column; gap: 2px;
+    border: 1px solid var(--outline); border-radius: 10px;
+    padding: 6px; background: var(--bg);
+}
+.chs-kb-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 6px; border-radius: 8px;
+    font-size: 13px; color: var(--on-surface-strong);
+    cursor: pointer;
+}
+.chs-kb-row:hover { background: rgba(var(--fg-rgb), .06); }
+.chs-kb-row input {
+    flex: 0 0 auto; cursor: pointer;
+    display: inline-block; width: auto;
+    padding: 0; margin: 0;
+}
+.chs-kb-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+/* min-width:0 ist Pflicht: ohne das schiebt ein langer Gruppenname den
+   Farbpunkt und das Kaestchen aus der Zeile, statt zu kuerzen. */
+.chs-kb-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chs-kb-empty { padding: 8px 6px; font-size: 12.5px; color: var(--muted); }
+
+.chs-hint { margin-top: 8px; font-size: 12.5px; line-height: 1.5; }
+.chs-hint.is-warn { color: var(--warning); }
+/* --warning misst auf der hellen Flaeche nur 2,15:1 (Vermerk in theme.css) –
+   dort wird der Ton abgedunkelt, genau wie bei den Zertifikats-Urteilen. */
+body.light .chs-hint.is-warn { color: color-mix(in srgb, var(--warning) 62%, #000); }
+
+.chs-foot { flex: 0 0 auto; padding-top: 12px; }
+.chs-status { font-size: 12.5px; color: var(--muted); min-height: 18px; line-height: 1.4; }
+.chs-btns { display: flex; gap: 8px; margin-top: 4px; }
+/* .btn-login und .btn-modal-close bringen width:100% mit – in einer Flex-Zeile
+   fressen sie sonst die ganze Breite (Register). */
+.chs-save { flex: 1 1 auto; width: auto; }
+.chs-close { flex: 0 0 auto; width: auto; margin-top: 0; padding: 10px 18px; }
+
+.btn-danger { background: var(--error) !important; }
+.btn-danger:hover { opacity: .85; }
+
+/* ═══════════════════════════════════════════════════════════════
+   CERT MODAL TABS
+   ═══════════════════════════════════════════════════════════════ */
+.cert-tab {
+    flex: 1;
+    padding: 6px 10px;
+    background: var(--bg);
+    border: 1px solid var(--outline);
+    border-radius: 8px;
+    color: var(--muted);
+    font-size: 12px;
+    cursor: pointer;
+    transition: background .2s, color .2s, border-color .2s;
+}
+.cert-tab:hover { border-color: var(--purple); color: var(--on-surface); }
+.cert-tab.active { background: var(--purple); color: #fff; border-color: var(--purple); }
+
+/* ═══════════════════════════════════════════════════════════════
+   THEME TOGGLE
+   ═══════════════════════════════════════════════════════════════ */
+.btn-theme {
+    background: none; border: none;
+    color: var(--muted);
+    font-size: 18px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 8px;
+    transition: color .2s, background .2s;
+    display: flex; align-items: center; justify-content: center;
+}
+.btn-theme:hover { background: rgba(var(--accent-rgb), .12); color: var(--purple); }
+
+.login-theme-btn {
+    position: absolute;
+    top: 16px; right: 16px;
+}
+.btn-theme svg { width: 20px; height: 20px; }
+
+/* ═══════════════════════════════════════════════════════════════
+   EYE BUTTON (SVG)
+   ═══════════════════════════════════════════════════════════════ */
+.eye-btn {
+    position: absolute;
+    right: 8px; top: 50%; transform: translateY(-50%);
+    background: none; border: none;
+    cursor: pointer;
+    opacity: .5; transition: opacity .2s;
+    padding: 4px;
+    margin-bottom: 12px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--muted);
+}
+.eye-btn svg { width: 20px; height: 20px; }
+.eye-btn:hover { opacity: .8; }
+
+/* ═══════════════════════════════════════════════════════════════
+   LANGUAGE TOGGLE (DE/EN)
+   ═══════════════════════════════════════════════════════════════ */
+.lang-toggle {
+    display: flex;
+    gap: 2px;
+    background: rgba(var(--fg-rgb), 0.05);
+    border: 1px solid rgba(var(--fg-rgb), 0.1);
+    border-radius: 8px;
+    padding: 2px;
+}
+.lang-toggle-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 3px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: var(--font-body);
+    transition: background 0.15s, color 0.15s;
+}
+.lang-toggle-btn:hover { color: var(--text-primary); }
+.lang-toggle-btn.active {
+    background: rgba(var(--accent-rgb), 0.35);
+    color: var(--text-primary);
+}
+.lang-toggle.header-lang { border-color: rgba(var(--fg-rgb), 0.1); }
+
+/* ─── Datei-Anhang Button ───────────────────────────────────── */
+.btn-attach {
+    width: 42px; height: 42px;
+    border: 1px solid var(--outline);
+    background: transparent;
+    color: var(--muted);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; flex-shrink: 0;
+    transition: color .2s, background .2s, border-color .2s;
+    padding: 0;
+}
+.btn-attach:hover { color: var(--purple); background: rgba(var(--accent-rgb), .12); border-color: var(--purple); }
+.btn-attach.has-files { color: var(--purple); border-color: var(--purple); background: rgba(var(--accent-rgb), .1); }
+
+/* ─── Anhang-Vorschau ────────────────────────────────────────── */
+.attach-preview-bar {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    padding: 6px 0 4px;
+}
+.attach-chip {
+    display: flex; align-items: center; gap: 4px;
+    padding: 3px 6px 3px 4px;
+    border-radius: 8px; border: 1px solid var(--outline);
+    background: var(--surface); font-size: 0.78rem; color: var(--on-surface);
+    max-width: 150px;
+}
+.attach-chip img { width: 26px; height: 26px; object-fit: cover; border-radius: 4px; flex-shrink: 0; }
+.attach-chip-icon { font-size: 1.1rem; line-height: 1; flex-shrink: 0; }
+.attach-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.attach-chip-remove { background: none; border: none; cursor: pointer; color: var(--muted); font-size: 1rem; padding: 0 2px; line-height: 1; transition: color .15s; flex-shrink: 0; }
+.attach-chip-remove:hover { color: var(--error); }
+
+/* ─── Drag-Over ──────────────────────────────────────────────── */
+.messages.drag-over {
+    outline: 2px dashed var(--purple);
+    outline-offset: -4px;
+    background: rgba(var(--accent-rgb), 0.04);
+}
+
+/* ─── Toast ──────────────────────────────────────────────────── */
+#attach-toast {
+    position: fixed; bottom: 80px; left: 50%;
+    transform: translateX(-50%) translateY(10px);
+    background: var(--surface); border: 1px solid var(--outline);
+    border-left: 3px solid var(--error); color: var(--on-surface);
+    padding: 9px 15px; border-radius: 10px; font-size: 0.83rem;
+    white-space: nowrap; opacity: 0; pointer-events: none;
+    transition: opacity .2s, transform .2s; z-index: 9999;
+    box-shadow: 0 4px 16px rgba(var(--shadow-rgb), .35);
+}
+#attach-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ─── Bildergalerie (Anhang-Vorschau in Bubbles) ─────────────── */
+.uc-img-gallery { display: grid; gap: 2px; border-radius: 10px; overflow: hidden; cursor: pointer; margin-top: 4px; max-width: 260px; }
+.uc-ig-1 { grid-template-columns: 1fr; }
+.uc-ig-2 { grid-template-columns: 1fr 1fr; }
+.uc-ig-3, .uc-ig-4 { grid-template-columns: 1fr 1fr; }
+.uc-ig-cell { position: relative; aspect-ratio: 1; overflow: hidden; }
+.uc-ig-cell img { width: 100%; height: 100%; object-fit: cover; display: block; transition: filter .15s; }
+.uc-ig-cell:hover img { filter: brightness(0.88); }
+.uc-ig-more { position: absolute; inset: 0; background: rgba(var(--shadow-rgb), 0.55); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 1.5rem; font-weight: 700; pointer-events: none; }
+
+/* ─── Datei-Chips (Audio / Video / PDF / Sonstige) ───────────── */
+.uc-file-chip { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; padding: 8px 10px; border-radius: 10px; background: rgba(var(--fg-rgb), 0.06); border-left: 3px solid rgba(var(--fg-rgb), 0.15); cursor: default; }
+.uc-file-chip.pdf   { border-color: #ef4444; }
+.uc-file-chip.audio { border-color: #22c55e; }
+.uc-file-chip.video { border-color: #3b82f6; }
+.uc-file-chip.other { border-color: #94a3b8; }
+.uc-fc-icon  { font-size: 1.6rem; flex-shrink: 0; }
+.uc-fc-info  { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.uc-fc-name  { font-size: 0.82rem; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e2e8f0; }
+.uc-fc-badge { font-size: 0.7rem; color: #94a3b8; text-transform: uppercase; letter-spacing: .03em; }
+.uc-fc-dl    { color: var(--accent-hover); text-decoration: none; font-size: 1.15rem; padding: 2px 4px; flex-shrink: 0; }
+.uc-fc-dl:hover { color: var(--accent-light); }
+.uc-fc-player { width: 100%; height: 34px; min-width: 180px; flex-basis: 100%; margin-top: 2px; }
+
+/* ─── Lightbox ────────────────────────────────────────────────── */
+.uc-lightbox { position: fixed; inset: 0; background: rgba(var(--shadow-rgb), 0.93); z-index: 10000; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity .2s; }
+.uc-lightbox.open { opacity: 1; pointer-events: all; }
+.uc-lb-img { max-width: calc(100vw - 96px); max-height: calc(100vh - 96px); object-fit: contain; border-radius: 6px; user-select: none; }
+.uc-lb-close { position: absolute; top: 14px; right: 14px; background: rgba(var(--fg-rgb), 0.12); border: none; color: #fff; width: 38px; height: 38px; border-radius: 50%; cursor: pointer; font-size: 1.1rem; display: flex; align-items: center; justify-content: center; transition: background .15s; }
+.uc-lb-close:hover { background: rgba(var(--fg-rgb), 0.22); }
+.uc-lb-nav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(var(--fg-rgb), 0.12); border: none; color: #fff; width: 44px; height: 44px; border-radius: 50%; cursor: pointer; font-size: 1.6rem; display: flex; align-items: center; justify-content: center; transition: background .15s; }
+.uc-lb-nav:hover { background: rgba(var(--fg-rgb), 0.22); }
+#uc-lb-prev { left: 14px; }
+#uc-lb-next { right: 14px; }
+.uc-lb-counter { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); color: rgba(var(--fg-rgb), 0.6); font-size: 0.85rem; }
+.uc-lb-actions { position: absolute; bottom: 10px; right: 14px; display: flex; gap: 6px; }
+.uc-lb-btn { background: rgba(var(--fg-rgb), 0.12); border: none; color: #fff; padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 0.82rem; transition: background .15s; }
+.uc-lb-btn:hover { background: rgba(var(--fg-rgb), 0.22); }
+
+/* ─── Kontextmenü (Rechtsklick auf Anhang) ───────────────────── */
+.uc-ctx-menu { position: fixed; z-index: 9999; background: rgba(18,24,38,0.98); border: 1px solid rgba(var(--fg-rgb), 0.1); border-radius: 10px; box-shadow: 0 6px 24px rgba(var(--shadow-rgb), 0.5); min-width: 160px; overflow: hidden; opacity: 0; pointer-events: none; transition: opacity .12s, transform .12s; transform: scale(0.95); }
+.uc-ctx-menu.open { opacity: 1; pointer-events: all; transform: scale(1); }
+.uc-ctx-item { display: flex; align-items: center; gap: 9px; padding: 10px 14px; cursor: pointer; font-size: 0.88rem; color: #e2e8f0; border: none; background: none; width: 100%; text-align: left; transition: background .12s; }
+.uc-ctx-item:hover { background: rgba(var(--fg-rgb), 0.07); }
+
+/* ─── Interaktive Charts (```chartjs) + Mermaid ───────────────────
+   Die Regeln stehen seit 2026-08-06 in theme.css – NICHT hierher
+   zurueckkopieren: chat.css laedt nur chat.html/userchat.html, waehrend
+   charts.js auch auf sap.html laeuft (dort fehlte der Container komplett).
+   Duplikate wuerden ausserdem driften. */
+
+/* ─── Bestaetigung vor Aussen-/Loeschwirkung (BSI H9) ─────────────
+   Karte aus frontend/js/bestaetigung.js. Deckende Flaeche (liegt im
+   Verlauf zwischen Blasen), Signalfarbe NUR am Rand – als Schriftfarbe
+   haelt --danger in keinem Thema den Kontrast (Register). Die Aussage
+   traegt der Text der Karte, nicht die Farbe.
+   Raender und Feldflaechen ueber --outline/--surface-variant, NICHT ueber
+   --border/--bg-input: auf /chat bleibt --fg-rgb auch hell weiss (siehe
+   .cs-foot) – im hellen Thema waren Rahmen und Felder im Chrome-Bild weg. */
+.jv-best {
+    max-width: min(640px, 100%);
+    padding: 12px 14px;
+    border-radius: var(--radius-md);
+    background: var(--bg-secondary);
+    border: 1px solid var(--outline);
+    border-left: 4px solid var(--warning);
+    color: var(--text-primary);
+    font-size: 14px;
+    line-height: 1.45;
+}
+.jv-best.is-loeschen { border-left-color: var(--danger); }
+.jv-best-titel { font-weight: 700; font-size: 15px; }
+.jv-best-klasse { color: var(--text-secondary); margin-top: 2px; }
+.jv-best-aktion { font-weight: 600; margin-top: 8px; }
+.jv-best-args {
+    margin: 6px 0 0;
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 4px 10px;
+}
+.jv-best-args dt { color: var(--text-secondary); font-family: var(--font-mono); font-size: 12px; padding-top: 2px; }
+.jv-best-args dd {
+    margin: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: 240px;
+    overflow: auto;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    background: var(--surface-variant);
+    border-radius: var(--radius-sm);
+    padding: 4px 8px;
+}
+.jv-best-hinweis { color: var(--text-secondary); font-size: 12px; margin-top: 8px; }
+.jv-best-knoepfe { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.jv-best-btn {
+    padding: 7px 16px;
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: opacity .15s;
+}
+.jv-best-ja { background: var(--accent); border: 1px solid var(--accent); color: #fff; }
+.jv-best-nein { background: transparent; border: 1px solid var(--outline); color: var(--text-primary); }
+.jv-best-btn:hover:not(:disabled) { opacity: .85; }
+.jv-best-btn:disabled { opacity: .45; cursor: not-allowed; }
+.jv-best-status { margin-top: 8px; font-weight: 600; }
+.jv-best-status:empty { display: none; }
+.jv-best.is-erledigt .jv-best-knoepfe { display: none; }

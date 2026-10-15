@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jarvis – API-Dokumentation</title>
+    <link rel="stylesheet" href="/static/css/theme.css?v=34">
+    <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
+    <link rel="stylesheet" href="/static/css/avatar.css?v=10">
+    <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; background: var(--bg-primary, #0a0e17); color: var(--text-primary, #f8fafc);
+               font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+
+        /* Topbar */
+        .ad-top { display: flex; align-items: center; gap: 12px; padding: 10px 18px;
+                  border-bottom: 1px solid var(--border, rgba(255,255,255,.12));
+                  position: sticky; top: 0; z-index: 20; background: var(--bg-primary, #0a0e17); }
+        .ad-title { font-size: 1.1rem; font-weight: 700; }
+        .ad-title small { font-weight: 400; color: var(--text-secondary); font-size: .8rem; margin-left: 8px; }
+        .ad-spacer { flex: 1; }
+        /* Eigene Gruppe fuer die Symbole rechts: `.ad-top` hat gap 12px fuer
+           Logo/Titel – ohne Gruppe stuenden die Knoepfe dreimal so weit
+           auseinander wie auf den uebrigen Seiten (4px). */
+        .ad-top-icons { display: flex; align-items: center; gap: 4px; }
+        /* J-Logo (branding.js ersetzt Inhalt bei aktivem Branding via .topbar-avatar) */
+        .ad-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--gradient);
+                     display: flex; align-items: center; justify-content: center; font-size: 14px;
+                     font-weight: 700; color: #fff; flex-shrink: 0; overflow: hidden; }
+        .ad-avatar img { width: 100%; height: 100%; object-fit: contain; }
+        /* Wie `.btn-theme` auf den uebrigen Bereichsseiten (chat.css) – diese
+           Seite laedt chat.css nicht, deshalb dieselben Werte hier. Vorher war
+           `.ad-btn` ein gerahmtes 38x38-Kaestchen mit Glas-Hintergrund, waehrend
+           alle anderen Seiten rahmenlose Symbole zeigen; das war der gemeldete
+           Bruch im Gesamtbild. Wer chat.css hier ergaenzt, kann diesen Block
+           gegen `.btn-theme` tauschen. */
+        .ad-btn { background: none; border: none; color: var(--muted);
+                  font-size: 18px; cursor: pointer; padding: 4px 8px; border-radius: 8px;
+                  transition: color .2s, background .2s; text-decoration: none;
+                  display: inline-flex; align-items: center; justify-content: center; }
+        .ad-btn:hover { background: rgba(var(--accent-rgb), .12); color: var(--purple); }
+        .ad-btn svg { width: 20px; height: 20px; }
+
+        /* Controls */
+        .ad-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+                       padding: 12px 18px; position: sticky; top: 59px; z-index: 15;
+                       background: var(--bg-primary, #0a0e17); border-bottom: 1px solid var(--border, rgba(255,255,255,.08)); }
+        .ad-search { flex: 1; min-width: 220px; padding: 9px 12px; border-radius: 10px;
+                     background: var(--bg-glass); border: 1px solid var(--border); color: var(--text-primary); font-size: .9rem; }
+        .ad-mfilter { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+        .ad-mf { font-size: .72rem; font-weight: 700; padding: 4px 8px; border-radius: 6px; cursor: pointer;
+                 border: 1px solid var(--border); user-select: none; opacity: .45; }
+        .ad-mf.on { opacity: 1; }
+        .ad-hint { padding: 8px 18px; color: var(--text-secondary); font-size: .82rem; }
+        .ad-intro { padding: 12px 18px 2px; color: var(--text-secondary); font-size: .88rem; line-height: 1.5; max-width: 900px; }
+        .ad-warn { padding: 8px 18px; color: var(--danger, #ef4444); font-size: .8rem; }
+
+        .ad-wrap { padding: 8px 18px 60px; max-width: 1100px; margin: 0 auto; }
+        .ad-group > summary { list-style: none; cursor: pointer; padding: 12px 4px; font-size: 1.02rem;
+                              font-weight: 700; border-bottom: 1px solid var(--border, rgba(255,255,255,.1));
+                              display: flex; align-items: center; gap: 10px; }
+        .ad-group > summary::-webkit-details-marker { display: none; }
+        .ad-group > summary::before { content: '▸'; opacity: .6; font-size: .9rem; }
+        .ad-group[open] > summary::before { content: '▾'; }
+        .ad-gcount { font-weight: 400; color: var(--text-secondary); font-size: .8rem; }
+        /* Nicht-lokale (externe) Zugriffe auf die Gruppe seit letztem Neustart */
+        .ad-gforeign { font-weight: 700; color: rgb(var(--accent-rgb, 124,58,237)); font-size: .78rem;
+                       margin-left: 2px; cursor: help; }
+        /* dito pro einzelnem Endpunkt (in der Endpunkt-Kopfzeile) */
+        .ep-foreign { font-weight: 700; color: rgb(var(--accent-rgb, 124,58,237)); font-size: .74rem;
+                      cursor: help; flex-shrink: 0; }
+
+        .ep { border: 1px solid var(--border, rgba(255,255,255,.1)); border-radius: 10px; margin: 8px 0;
+              overflow: hidden; background: var(--bg-glass, rgba(255,255,255,.03)); }
+        .ep > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px;
+                        padding: 9px 12px; }
+        .ep > summary::-webkit-details-marker { display: none; }
+        .ep-method { font-size: .7rem; font-weight: 800; padding: 3px 7px; border-radius: 5px;
+                     min-width: 54px; text-align: center; flex-shrink: 0; letter-spacing: .5px; }
+        /* Schrift auf den Methodenfarben – fuer Kennung UND Filterknopf an EINER
+           Stelle (vorher setzte api_doku.js den Filterknopf per style.color). */
+        .ep-method, .ad-mf { color: #fff; }
+        .m-get { background: #10b981; } .m-post { background: #3b82f6; } .m-put { background: #f59e0b; }
+        .m-delete { background: #ef4444; } .m-patch { background: #a855f7; } .m-other { background: #64748b; }
+        .ep-path { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .85rem; }
+        .ep-sum { color: var(--text-secondary); font-size: .8rem; margin-left: auto; text-align: right;
+                  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%; }
+        .ep-body { padding: 4px 14px 14px; border-top: 1px solid var(--border, rgba(255,255,255,.08)); }
+        .ad-localonly { display: flex; align-items: center; gap: 8px; margin: 10px 0 4px; cursor: pointer;
+            font-size: .82rem; color: var(--text-secondary); user-select: none; }
+        .ad-localonly input { accent-color: var(--danger, #ef4444); width: 15px; height: 15px; cursor: pointer; }
+        .ad-localonly:hover { color: var(--text-primary); }
+        /* Schloss-Marker: nur sichtbar, wenn Endpunkt/Gruppe eingeschraenkt ist */
+        .ep-lock { display: none; margin-left: 8px; flex-shrink: 0; }
+        .ep.is-local-only > summary .ep-lock,
+        .ad-group.has-local-only > summary .ad-glock { display: inline; }
+        .ep.is-local-only > summary { border-left: 3px solid var(--danger, #ef4444);
+            background: rgba(239,68,68,.07); }
+        .ep-desc { color: var(--text-secondary); font-size: .86rem; line-height: 1.5; margin: 10px 0; white-space: pre-wrap; }
+        .ep-h { font-size: .72rem; text-transform: uppercase; letter-spacing: .6px; color: var(--text-secondary);
+                margin: 14px 0 6px; font-weight: 700; }
+        table.ad-params { width: 100%; border-collapse: collapse; font-size: .82rem; }
+        table.ad-params th, table.ad-params td { text-align: left; padding: 5px 8px;
+                border-bottom: 1px solid var(--border, rgba(255,255,255,.07)); vertical-align: top; }
+        table.ad-params th { color: var(--text-secondary); font-weight: 600; }
+        .ad-req { color: var(--danger, #ef4444); font-weight: 700; }
+        code, pre { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+        pre.ad-code { background: rgba(0,0,0,.35); border: 1px solid var(--border, rgba(255,255,255,.1));
+                      border-radius: 8px; padding: 10px 12px; font-size: .8rem; overflow-x: auto; margin: 0;
+                      white-space: pre; }
+        .ad-test { margin-top: 14px; border-top: 1px dashed var(--border, rgba(255,255,255,.15)); padding-top: 12px; }
+        .ad-field { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; }
+        .ad-field label { font-size: .78rem; color: var(--text-secondary); }
+        .ad-field label .ad-in { font-size: .7rem; opacity: .6; }
+        .ad-input, .ad-textarea { padding: 7px 10px; border-radius: 8px; background: var(--bg-primary);
+                border: 1px solid var(--border); color: var(--text-primary); font-size: .82rem; width: 100%; }
+        .ad-textarea { min-height: 96px; resize: vertical; font-family: ui-monospace, Menlo, monospace; }
+        .ad-send { background: var(--accent, #3b82f6); color: #fff; border: none; border-radius: 8px;
+                   padding: 8px 16px; font-size: .85rem; font-weight: 600; cursor: pointer; }
+        .ad-send:hover { filter: brightness(1.08); }
+        .ad-send:disabled { opacity: .5; cursor: default; }
+        .ad-resp { margin-top: 10px; display: none; }
+        .ad-resp-status { font-size: .8rem; font-weight: 700; margin-bottom: 6px; }
+        .ok { color: #10b981; } .bad { color: #ef4444; } .warn2 { color: #f59e0b; }
+        .ad-loading, .ad-error { padding: 40px 18px; text-align: center; color: var(--text-secondary); }
+
+        /* de/en-Umschalter wie in /portal */
+        .lang-toggle { display: flex; gap: 2px; background: rgba(var(--fg-rgb, 148,163,184), 0.05);
+            border: 1px solid rgba(var(--fg-rgb, 148,163,184), 0.1); border-radius: 8px; padding: 2px; }
+        .lang-toggle-btn { background: transparent; border: none; color: var(--text-secondary);
+            font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em; padding: 3px 10px;
+            border-radius: 6px; cursor: pointer; font-family: inherit;
+            transition: background .15s, color .15s; }
+        .lang-toggle-btn:hover { color: var(--text-primary); }
+        .lang-toggle-btn.active { background: rgba(var(--accent-rgb), 0.35); color: var(--text-primary); }
+    </style>
+</head>
+<body>
+<script src="/static/js/theme_frueh.js?v=1"></script>
+    <div class="ad-top">
+        <div class="ad-avatar topbar-avatar">J</div>
+        <span class="ad-title"><span class="brand-app-name">Jarvis</span> · <span data-i18n="api.title">API-Dokumentation</span><small id="ad-count"></small></span>
+        <span class="ad-spacer"></span>
+        <div class="ad-top-icons">
+            <div class="lang-toggle">
+                <button class="lang-toggle-btn" data-lang="de" title="Deutsch">DE</button>
+                <button class="lang-toggle-btn" data-lang="en" title="English">EN</button>
+            </div>
+            <button class="ad-btn jv-issues-btn" id="ad-issues-btn" data-i18n-title="sup.issues" title="Issues / Feedback"
+                    data-issues-oeffnen>
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            </button>
+            <button class="ad-btn" id="btn-theme-toggle" title="Hell/Dunkel umschalten" data-i18n-title="chat.theme">
+                <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                <svg class="theme-icon-sun" style="display:none;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            </button>
+            <a class="ad-btn" href="/portal" title="Startseite" aria-label="Startseite" data-i18n-title="nav.home" data-i18n-aria="nav.home">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            </a>
+            <!-- Einstellungen: eingeblendet von js/settings_btn.js aus /api/me.
+                 Diese Seite ist ohnehin Admin-only (Gate weiter unten), der Knopf
+                 startet aber wie ueberall verborgen. -->
+            <button class="ad-btn" id="ad-settings-btn" data-jarvis-settings="/api" data-i18n-title="nav.settings" title="Einstellungen" style="display:none;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </button>
+            <button class="ad-btn" id="ad-logout-btn" title="Abmelden" data-i18n-title="chat.logout">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            </button>
+        </div>
+    </div>
+
+    <div class="ad-controls">
+        <input type="text" class="ad-search" id="ad-search" placeholder="Endpunkt suchen (Pfad, Beschreibung)…" data-i18n-placeholder="api.search_ph">
+        <div class="ad-mfilter" id="ad-mfilter"></div>
+        <!-- Seite maximieren (Vorbild /wissen, Vorgabe 2026-09-28). NICHT in
+             #ad-wrap: render() schreibt sie per innerHTML neu und loeschte den
+             Knopf. Logik in seite_breit.js. -->
+        <button type="button" class="jv-max-btn" id="jv-max" data-seite="api" aria-pressed="false"
+                data-i18n-title="common.maximize" data-i18n-aria="common.maximize"
+                title="Maximieren" aria-label="Maximieren">&#9974;</button>
+    </div>
+    <div class="ad-intro" data-i18n="api.intro">Vollständige Übersicht aller REST-Endpunkte dieser {marke}-Instanz – automatisch aus dem live erzeugten OpenAPI-Schema.
+        Jeden Eintrag aufklappen für Beschreibung, Parameter, ein Beispiel (cURL) und einen direkten Testaufruf.</div>
+    <div class="ad-warn" data-i18n-html="api.warn_html">⚠️ Testaufrufe werden <b>echt</b> ausgeführt (inkl. POST/PUT/DELETE) und nutzen dein Admin-Token. Mit Bedacht verwenden.</div>
+
+    <div class="ad-wrap" id="ad-wrap" data-jv-breit>
+        <div class="ad-loading" id="ad-loading" data-i18n="api.loading">Lade API-Schema…</div>
+    </div>
+
+    <script src="/static/js/sitzung.js?v=3"></script>
+    <script src="/static/js/konto_hinweise.js?v=2"></script>
+    <script src="/static/js/icons.js?v=8"></script>
+    <script src="/static/js/pwreveal.js?v=4"></script>
+    <script src="/static/js/dlkey.js?v=4"></script>
+    <script src="/static/js/cpubar.js?v=2"></script>
+    <script src="/static/js/syspackages.js?v=3"></script>
+    <script src="/static/js/sysload.js?v=5"></script>
+    <script src="/static/js/i18n.js?v=339"></script>
+    <script src="/static/js/seite_breit.js?v=1"></script>
+    <script src="/static/js/theme.js?v=3"></script>
+    <script src="/static/js/branding.js?v=27"></script>
+    <!-- sessions.js liefert JarvisSession.logout (Abmeldung MUSS am Server
+         ankommen, bevor der Token verworfen wird); settings_btn.js blendet das
+         Zahnrad ein; issues.js verdrahtet den Issues-Knopf. -->
+    <script src="/static/js/sessions.js?v=9"></script>
+    <script src="/static/js/logo_home.js?v=1"></script>
+    <script src="/static/js/settings_btn.js?v=5"></script>
+    <script src="/static/js/issues.js?v=14"></script>
+    <script src="/static/js/api_doku.js?v=2"></script>
+<!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
+<script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
+<script src="/static/vendor/clippy/clippy.min.js"></script>
+<script src="/static/js/stt.js?v=3"></script>
+<script src="/static/js/avatar.js?v=17"></script>
+<script src="/static/js/activity.js?v=3"></script>
+</body>
+</html>

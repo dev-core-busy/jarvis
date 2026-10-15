@@ -1,0 +1,3206 @@
+/**
+ * Jarvis Haupt-App
+ * Verbindet Login, WebSocket, VNC und UI-Steuerung.
+ */
+(function () {
+    'use strict';
+
+    // ─── State ──────────────────────────────────────────────────
+    // Single-Sign-On ueber alle Seiten: jeder gueltige Login-Token (egal von
+    // welcher Seite gesetzt) wird akzeptiert und unter dem eigenen Key gespiegelt,
+    // damit kein erneuter Login bei Seitenwechsel noetig ist.
+    let token = window.JarvisSitzung.token();
+    if (token) localStorage.setItem('jarvis_token', token);
+
+    // Kennwortwechsel widerruft serverseitig ALLE Tokens des Benutzers (BSI H3)
+    // und liefert ein Ersatz-Token fuer dieses Geraet. Ohne Uebernahme waere
+    // man direkt nach dem Wechsel abgemeldet. Alle drei SSO-Schluessel, die
+    // oben gelesen werden, bekommen es – sonst liest eine andere Seite das alte.
+    function _uebernimmErsatzToken(neu) {
+        if (!neu) return;
+        token = neu;
+        try {
+            localStorage.setItem('jarvis_token', neu);
+            // Die Liste aus sitzung.js, nicht eine eigene: ein kuenftig
+            // hinzukommender Schluessel wuerde sonst still das ALTE Token
+            // behalten – und damit eine widerrufene Sitzung ueberleben.
+            window.JarvisSitzung.tokenSchluessel().forEach(function (k) {
+                if (localStorage.getItem(k)) localStorage.setItem(k, neu);
+            });
+        } catch (e) { /* Speicher gesperrt: Sitzung gilt bis zum Neuladen */ }
+    }
+    // Eindeutige Fenster-ID fuer Live-Sync (eigene Echo-Events ignorieren)
+    const _clientId = 'main-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    let currentUser = window.JarvisSitzung.benutzer();
+
+    // Diese App-Shell wird unter / UND unter /settings ausgeliefert. Unter
+    // /settings oeffnet sich direkt das Einstellungen-Modal (eigene Admin-Seite);
+    // unter / werden alle Rollen aufs Portal geleitet (Konsolidierung).
+    const _isSettingsPage = location.pathname.replace(/\/+$/, '') === '/settings';
+
+    // Rücksprung-Ziel beim Schliessen der Einstellungen: der auslösende Bereich
+    // (von chat/userchat/support/portal via sessionStorage gesetzt), sonst /portal.
+    function _settingsReturn() {
+        var allowed = ['/chat', '/userchat', '/support', '/portal'];
+        var r = '';
+        try { r = sessionStorage.getItem('jarvis_settings_return') || ''; } catch (e) {}
+        return allowed.indexOf(r) !== -1 ? r : '/portal';
+    }
+    // Abschnitte des Sicherheits-Reiters, in die eine Zeile des Zahnrad-Panels
+    // fuehren kann. Der Name kommt aus `jarvis_settings_focus` (settings_btn.js);
+    // ein unbekannter Wert wird VERWORFEN, nicht geraten – sonst klappt ein
+    // Tippfehler irgendeinen Abschnitt auf.
+    const _SETTINGS_SECTIONS = {
+        broker:    { hdr: 'sec-sect-broker-hdr',    body: 'sec-sect-broker-body' },
+        incidents: { hdr: 'sec-sect-incidents-hdr', body: 'sec-sect-incidents-body' },
+    };
+    function _oeffneAbschnitt(name) {
+        const s = _SETTINGS_SECTIONS[name];
+        if (!s) return;
+        const hdr = document.getElementById(s.hdr);
+        const body = document.getElementById(s.body);
+        if (!hdr) return;
+        // Aufklappen NUR, wenn er wirklich zu ist: ein blindes click() wuerde
+        // einen offenen Abschnitt ZUklappen – und die beiden Ziele starten
+        // verschieden ("Root-Freigaben" offen, "Sicherheitsvorfaelle" zu, dazu
+        // ein gemerkter Zustand je Container). Geklickt wird der vorhandene
+        // Kopfzeilen-Handler, damit die Merkung mitgeschrieben wird.
+        if (body && body.style.display === 'none') hdr.click();
+        // Erst im naechsten Frame springen: das Aufklappen aendert die Hoehen
+        // ueber dem Abschnitt, eine Messung davor zeigt auf die alte Position.
+        const spaeter = window.requestAnimationFrame
+            || function (cb) { return setTimeout(cb, 0); };
+        spaeter(function () {
+            try {
+                if (hdr.scrollIntoView) hdr.scrollIntoView({ block: 'start', behavior: 'smooth' });
+            } catch (e) { /* kein Sprung – der Reiter steht trotzdem richtig */ }
+        });
+    }
+
+    // Oeffnet NUR das Einstellungen-Modal (nicht den toten Haupt-Chat/-Desktop).
+    // Stufe 1 der Altlast-Bereinigung: der chat-/desktopspezifische Init-Chain aus
+    // showMainScreen() (WebSocket, VNC, Verlauf, Kontext-/LLM-Status, Header-TTS)
+    // laeuft auf /settings nicht mehr. Das Modal laedt seine Daten selbst (openModal).
+    function _enterSettingsPage() {
+        window.JarvisSitzung.maskeFreigeben();
+        if (loginScreen) loginScreen.classList.remove('active');
+        setTimeout(function () {
+            // Modal direkt oeffnen (ohne den entfernten Header-Zahnrad-Button)
+            const _auf = window._openSettingsModal ? window._openSettingsModal() : null;
+            // Direkt in einen bestimmten Reiter springen, wenn die aufrufende
+            // Seite einen gesetzt hat (settings_btn.js tut das beim Klick auf die
+            // Zahnrad-Badge: dort ist die Sicherheit gemeint, nicht der
+            // Vorgabe-Reiter).
+            //
+            // ERST NACH openModal(): die Funktion ist async und aktiviert an
+            // ihrem ENDE den ersten Reiter. Ein Klick davor wird dadurch
+            // ueberschrieben – gemessen: das Sicherheits-Panel war sichtbar,
+            // waehrend "KI & System" als ausgewaehlt aussah UND dessen Panel
+            // ebenfalls stehen blieb (der Reset raeumt die Panels nicht ab).
+            //
+            // EINMALIG: der Wert wird verbraucht, sonst landete jeder spaetere
+            // Aufruf der Einstellungen wieder dort, ohne dass jemand danach
+            // gefragt hat.
+            Promise.resolve(_auf).then(function () {
+                try {
+                    const _tab = sessionStorage.getItem('jarvis_settings_tab') || '';
+                    // Der ABSCHNITT innerhalb des Reiters (Mouseover-Panel am
+                    // Zahnrad-Badge: eine Zeile weiss, WAS sie erledigt).
+                    const _fokus = sessionStorage.getItem('jarvis_settings_focus') || '';
+                    sessionStorage.removeItem('jarvis_settings_tab');
+                    sessionStorage.removeItem('jarvis_settings_focus');
+                    if (!_tab) return;
+                    const _tb = document.querySelector(
+                        '.settings-tab-btn[data-settings-tab="' + _tab + '"]');
+                    // Kein Klick auf einen ausgeblendeten Reiter (Skill aus) –
+                    // das Panel waere leer und der Vorgabe-Reiter zugleich weg.
+                    if (_tb && _tb.style.display !== 'none') _tb.click();
+                    if (_fokus) _oeffneAbschnitt(_fokus);
+                } catch (e) { /* Speicher gesperrt: Vorgabe-Reiter, kein Fehler */ }
+            });
+            const c = document.getElementById('btn-close-settings');
+            if (c) c.addEventListener('click', function () { window.location.replace(_settingsReturn()); }, { once: true });
+            if (window.applyLang) window.applyLang();
+        }, 60);
+    }
+
+    // ─── DOM Elemente ───────────────────────────────────────────
+    const loginScreen = document.getElementById('login-screen');
+    const mainScreen = document.getElementById('main-screen');
+    const loginForm = document.getElementById('login-form');
+    const loginUsername = document.getElementById('login-username');
+    const loginPassword = document.getElementById('login-password');
+    const loginError = document.getElementById('login-error');
+    const loginBtn = document.getElementById('login-btn');
+
+
+    // ─── Partikel-Hintergrund (Login) ───────────────────────────
+    function initParticles() {
+        const container = document.getElementById('particles');
+        if (!container) return;
+
+        for (let i = 0; i < 30; i++) {
+            const particle = document.createElement('div');
+            particle.style.cssText = `
+                position: absolute;
+                width: ${2 + Math.random() * 4}px;
+                height: ${2 + Math.random() * 4}px;
+                background: rgba(var(--accent-rgb), ${0.1 + Math.random() * 0.3});
+                border-radius: 50%;
+                left: ${Math.random() * 100}%;
+                top: ${Math.random() * 100}%;
+                animation: float ${5 + Math.random() * 10}s ease-in-out infinite;
+                animation-delay: ${Math.random() * 5}s;
+            `;
+            container.appendChild(particle);
+        }
+
+        // Float Animation hinzufügen
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes float {
+                0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.3; }
+                25% { transform: translate(${20 + Math.random() * 30}px, -${20 + Math.random() * 40}px) scale(1.2); opacity: 0.6; }
+                50% { transform: translate(-${10 + Math.random() * 20}px, -${40 + Math.random() * 60}px) scale(0.8); opacity: 0.4; }
+                75% { transform: translate(${10 + Math.random() * 20}px, -${20 + Math.random() * 30}px) scale(1.1); opacity: 0.5; }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    // ─── Login ──────────────────────────────────────────────────
+    loginForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const username = loginUsername.value.trim();
+        const password = loginPassword.value.trim();
+        if (!username || !password) return;
+
+        loginBtn.querySelector('.btn-text').textContent = window.t ? window.t('common.connecting') : 'Verbinde...';
+        loginBtn.disabled = true;
+        loginError.hidden = true;
+
+        try {
+            const payload = { username, password };
+            // TOTP-Code mitschicken falls Feld sichtbar
+            const totpRow = document.getElementById('totp-row');
+            const totpInput = document.getElementById('login-totp');
+            // 2FA-Pflicht fuer Admins (BSI M3): Einrichtungs-Block ueber dem Codefeld
+            const totpSetup = document.getElementById('totp-setup');
+            if (totpRow && totpRow.style.display !== 'none' && totpInput && totpInput.value.trim()) {
+                payload.totp_code = totpInput.value.trim();
+            }
+
+            const res = await fetch('/api/login', {
+                method: 'POST',
+                headers: window.JarvisSitzung.anmeldeKopf({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                token = data.token;
+                currentUser = data.username || username;
+                localStorage.setItem('jarvis_token', token);
+                localStorage.setItem('jarvis_user', currentUser);
+                if (totpRow) totpRow.style.display = 'none';
+                if (totpInput) totpInput.value = '';
+                if (totpSetup) totpSetup.hidden = true;
+                if (data.account_blocked) {
+                    // Sicherheitsschicht: Konto gesperrt → nur Hinweis + Protokoll
+                    if (window.SecurityIncidents) {
+                        window.SecurityIncidents.showBlockedScreen(data.block_reason, data.block_incidents);
+                    }
+                } else if (data.must_change_password) {
+                    showChangePwModal(true);
+                } else if (_isSettingsPage) {
+                    // Eigene /settings-Seite: nur Admins; sonst aufs Portal.
+                    if (data.is_admin === false) window.location.replace('/portal');
+                    else _enterSettingsPage();
+                } else {
+                    // Konsolidierung: alle Rollen landen auf dem Portal (kein Haupt-Chat mehr).
+                    window.location.replace('/portal');
+                }
+            } else if (data.requires_totp_setup) {
+                // Admin ohne 2FA: QR + Schluessel zeigen, Code ins vorhandene Feld.
+                // Mit qr_code = frisch vorgemerkt (der Server-Text richtet sich
+                // dann an Clients ohne diese Maske und wird hier nicht gezeigt);
+                // ohne = falscher Code, der QR von eben bleibt stehen.
+                if (data.qr_code && totpSetup) {
+                    const qr = document.getElementById('totp-setup-qr');
+                    const sec = document.getElementById('totp-setup-secret');
+                    if (qr) {
+                        qr.src = data.qr_code;
+                        qr.alt = window.t ? window.t('login.totp_setup.qr_alt') : qr.alt;
+                    }
+                    if (sec) sec.textContent = data.secret || '';
+                    totpSetup.hidden = false;
+                    loginError.hidden = true;
+                } else if (data.error) {
+                    loginError.textContent = data.error;
+                    loginError.hidden = false;
+                }
+                if (totpRow) totpRow.style.display = '';
+                if (totpInput) { totpInput.value = ''; totpInput.focus(); }
+            } else if (data.requires_totp) {
+                // Passwort korrekt, 2FA-Code nötig → TOTP-Feld einblenden
+                if (totpRow) totpRow.style.display = '';
+                if (totpInput) totpInput.focus();
+                if (data.error && data.error !== '2FA-Code erforderlich') {
+                    loginError.textContent = data.error;
+                    loginError.hidden = false;
+                }
+            } else {
+                loginError.textContent = data.error || window.t('login.failed');
+                loginError.hidden = false;
+            }
+        } catch (err) {
+            loginError.textContent = window.t('login.server_error');
+            loginError.hidden = false;
+        } finally {
+            loginBtn.querySelector('.btn-text').textContent = window.t('login.submit');
+            loginBtn.disabled = false;
+        }
+    });
+
+    // ─── TOTP Auto-Submit: Formular schicken sobald 6 Ziffern eingegeben ──────
+    const _totpAutoInput = document.getElementById('login-totp');
+    if (_totpAutoInput) {
+        _totpAutoInput.addEventListener('input', () => {
+            const digits = _totpAutoInput.value.replace(/\D/g, '');
+            if (digits.length === 6 && !loginBtn.disabled) {
+                _totpAutoInput.value = digits;
+                loginForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+            }
+        });
+    }
+
+    // ─── Eye-Toggle Hilfsfunktion (global im IIFE) ──────────────
+    const _SVG_EYE_OPEN   = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
+    const _SVG_EYE_CLOSED = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
+
+    function _wireEyeBtn(btnId, inputEl) {
+        const btn = document.getElementById(btnId);
+        if (!btn || !inputEl) return;
+        btn.addEventListener('click', () => {
+            const isHidden = inputEl.type === 'password';
+            inputEl.type = isHidden ? 'text' : 'password';
+            btn.innerHTML = isHidden ? _SVG_EYE_CLOSED : _SVG_EYE_OPEN;
+        });
+    }
+
+    // Login-Kennwort Eye-Toggle
+    _wireEyeBtn('btn-toggle-login-pw', document.getElementById('login-password'));
+
+    // ─── Screen-Wechsel ─────────────────────────────────────────
+    const changePwModal = document.getElementById('change-password-modal');
+    const cpwOld     = document.getElementById('cpw-old');
+    const cpwNew     = document.getElementById('cpw-new');
+    const cpwConfirm = document.getElementById('cpw-confirm');
+    const cpwError   = document.getElementById('cpw-error');
+    const cpwStrength = document.getElementById('cpw-strength');
+    const cpwSubmit  = document.getElementById('cpw-submit');
+    const cpwCancel  = document.getElementById('cpw-cancel');
+    let _cpwMandatory = false; // true = Pflicht (erstes Login)
+
+    // Eye-Buttons im Change-Password-Modal verdrahten
+    _wireEyeBtn('btn-eye-cpw-old',     document.getElementById('cpw-old'));
+    _wireEyeBtn('btn-eye-cpw-new',     document.getElementById('cpw-new'));
+    _wireEyeBtn('btn-eye-cpw-confirm', document.getElementById('cpw-confirm'));
+
+    function showChangePwModal(mandatory) {
+        _cpwMandatory = mandatory;
+        if (changePwModal) changePwModal.classList.add('open');
+        // Abbrechen immer sichtbar – bei Pflicht-Änderung als Abmelden-Button
+        if (cpwCancel) {
+            cpwCancel.style.display = '';
+            if (mandatory) {
+                cpwCancel.textContent = 'Abmelden';
+                cpwCancel.removeAttribute('data-i18n');
+            } else {
+                cpwCancel.setAttribute('data-i18n', 'common.cancel');
+                cpwCancel.textContent = window.t ? window.t('common.cancel') : 'Abbrechen';
+            }
+        }
+        if (cpwOld) cpwOld.value = '';
+        if (cpwNew) { cpwNew.type = 'password'; cpwNew.value = ''; cpwNew.removeEventListener('input', _cpwStrengthCheck); cpwNew.addEventListener('input', _cpwStrengthCheck); }
+        if (cpwConfirm) { cpwConfirm.type = 'password'; cpwConfirm.value = ''; }
+        if (cpwOld) cpwOld.type = 'password';
+        // Eye-Icons zurücksetzen
+        ['btn-eye-cpw-old','btn-eye-cpw-new','btn-eye-cpw-confirm'].forEach(id => {
+            const b = document.getElementById(id); if (b) b.innerHTML = _SVG_EYE_OPEN;
+        });
+        if (cpwError) cpwError.style.display = 'none';
+        if (cpwStrength) cpwStrength.textContent = '';
+    }
+
+    function hideChangePwModal() {
+        if (changePwModal) changePwModal.classList.remove('open');
+    }
+
+    function _cpwStrengthCheck() {
+        if (!cpwStrength || !cpwNew) return;
+        const pw = cpwNew.value;
+        const checks = [
+            pw.length >= 8,
+            /[A-Z]/.test(pw),
+            /[a-z]/.test(pw),
+            /[0-9]/.test(pw),
+        ];
+        const score = checks.filter(Boolean).length;
+        const labels = [0,1,2,3,4].map(i => window.t('security.strength.' + i));
+        const colors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#16a34a'];
+        if (pw.length === 0) { cpwStrength.textContent = ''; return; }
+        cpwStrength.innerHTML = `<span style="color:${colors[score]}">● ${labels[score]}</span>`;
+    }
+
+    // Sicheres zufälliges Kennwort generieren (mittlere+ Stärke)
+    function _generateStrongPassword() {
+        const upper  = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+        const lower  = 'abcdefghjkmnpqrstuvwxyz';
+        const digits = '23456789';
+        const special = '!@#$%&*+-?';
+        const all = upper + lower + digits + special;
+        const arr = new Uint8Array(14);
+        crypto.getRandomValues(arr);
+        let pw = '';
+        // Mindestens je 1 aus jeder Gruppe sicherstellen
+        pw += upper[arr[0] % upper.length];
+        pw += lower[arr[1] % lower.length];
+        pw += digits[arr[2] % digits.length];
+        pw += special[arr[3] % special.length];
+        for (let i = 4; i < 14; i++) pw += all[arr[i] % all.length];
+        // Mischen
+        pw = pw.split('').sort(() => (crypto.getRandomValues(new Uint8Array(1))[0] % 3) - 1).join('');
+        return pw;
+    }
+
+    const cpwSuggest = document.getElementById('cpw-suggest');
+    if (cpwSuggest && cpwNew && cpwConfirm) {
+        cpwSuggest.addEventListener('click', () => {
+            const pw = _generateStrongPassword();
+            cpwNew.type = 'text';
+            cpwNew.value = pw;
+            cpwConfirm.value = pw;
+            _cpwStrengthCheck();
+        });
+    }
+
+    if (cpwCancel) {
+        cpwCancel.addEventListener('click', () => {
+            hideChangePwModal();
+            if (_cpwMandatory) {
+                // Pflicht-Kennwortänderung abgebrochen → Token löschen + Login-Screen
+                showLoginScreen();
+            }
+        });
+    }
+
+    if (cpwSubmit) {
+        cpwSubmit.addEventListener('click', async () => {
+            if (cpwError) cpwError.style.display = 'none';
+            const old_pw = cpwOld ? cpwOld.value : '';
+            const new_pw = cpwNew ? cpwNew.value : '';
+            const conf_pw = cpwConfirm ? cpwConfirm.value : '';
+            if (!old_pw || !new_pw || !conf_pw) {
+                if (cpwError) { cpwError.textContent = window.t('security.fill_fields'); cpwError.style.display = ''; }
+                return;
+            }
+            cpwSubmit.disabled = true;
+            cpwSubmit.textContent = window.t('common.saving');
+            try {
+                const res = await fetch('/api/change-password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ old_password: old_pw, new_password: new_pw, confirm_password: conf_pw }),
+                });
+                const data = await res.json();
+                if (data.success) {
+                    _uebernimmErsatzToken(data.token);
+                    hideChangePwModal();
+                    if (_cpwMandatory) {
+                        // Erst-Login abgeschlossen -> Portal (Konsolidierung, kein Haupt-Chat)
+                        window.location.replace('/portal');
+                    }
+                } else {
+                    if (cpwError) { cpwError.textContent = data.error || window.t('security.change_error'); cpwError.style.display = ''; }
+                }
+            } catch (e) {
+                if (cpwError) { cpwError.textContent = window.t('login.server_error'); cpwError.style.display = ''; }
+            } finally {
+                cpwSubmit.disabled = false;
+                cpwSubmit.textContent = window.t('security.save_pw');
+            }
+        });
+    }
+
+    // ─── Version laden und anzeigen ─────────────────────────────
+    async function _loadInstructions() {
+        const list = document.getElementById('instr-list');
+        if (!list) return;
+        const authHeader = { 'Authorization': `Bearer ${token}` };
+        try {
+            const res = await fetch('/api/instructions', { headers: authHeader });
+            const data = await res.json();
+            list.innerHTML = '';
+            if (!data.files || data.files.length === 0) {
+                list.innerHTML = `<p style="color:var(--text-muted); font-size:0.85rem;">${window.t('instructions.empty')}</p>`;
+                return;
+            }
+            data.files.forEach(f => {
+                const card = document.createElement('div');
+                card.style.cssText = 'background:var(--bg-glass);border:1px solid var(--border);border-radius:var(--radius-md);overflow:hidden;';
+                card.innerHTML = `
+                    <div class="instr-card-header" data-name="${f.name}" style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;cursor:pointer;user-select:none;">
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <span class="instr-arrow" style="font-size:0.7rem;color:var(--text-muted);transition:transform 0.2s;">▶</span>
+                            <strong style="color:var(--accent-hover);font-size:0.9rem;">${f.name}.md</strong>
+                        </div>
+                        <div style="display:flex;gap:6px;">
+                            <button class="btn-instr-save" data-name="${f.name}" style="padding:4px 12px;font-size:0.75rem;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;">${window.t('instructions.save')}</button>
+                            <button class="btn-instr-del" data-name="${f.name}" title="${window.t('instructions.delete')}" aria-label="${window.t('instructions.delete')}" style="width:28px;height:28px;font-size:1rem;line-height:1;background:rgba(var(--danger-rgb),0.15);color:var(--danger);border:1px solid rgba(var(--danger-rgb),0.3);border-radius:var(--radius-sm);cursor:pointer;flex-shrink:0;">${JarvisIcons.trash()}</button>
+                        </div>
+                    </div>
+                    <div class="instr-card-body" style="display:none;padding:0 14px 14px;">
+                        <textarea class="instr-editor" data-name="${f.name}" style="width:100%;min-height:360px;padding:10px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-family:var(--font-mono);font-size:0.8rem;resize:vertical;line-height:1.5;box-sizing:border-box;">${f.content}</textarea>
+                    </div>
+                `;
+                list.appendChild(card);
+            });
+            // Auf-/Zuklappen per Klick auf Header
+            list.querySelectorAll('.instr-card-header').forEach(header => {
+                header.addEventListener('click', e => {
+                    if (e.target.closest('button')) return; // Buttons nicht triggern
+                    const body = header.nextElementSibling;
+                    const arrow = header.querySelector('.instr-arrow');
+                    const open = body.style.display !== 'none';
+                    body.style.display = open ? 'none' : 'block';
+                    arrow.style.transform = open ? '' : 'rotate(90deg)';
+                });
+            });
+            // Event-Handler Speichern
+            list.querySelectorAll('.btn-instr-save').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const name = btn.dataset.name;
+                    const textarea = list.querySelector(`.instr-editor[data-name="${name}"]`);
+                    const res = await fetch(`/api/instructions/${name}`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json', ...authHeader},
+                        body: JSON.stringify({content: textarea.value})
+                    });
+                    if (res.ok) { btn.textContent = '✓'; btn.style.background = 'var(--success)'; setTimeout(() => { btn.textContent = window.t('instructions.save'); btn.style.background = ''; }, 1500); }
+                });
+            });
+            // Event-Handler Löschen
+            list.querySelectorAll('.btn-instr-del').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    if (!confirm(window.t('instructions.confirm_delete').replace('{name}', btn.dataset.name))) return;
+                    await fetch(`/api/instructions/${btn.dataset.name}`, {method: 'DELETE', headers: authHeader});
+                    _loadInstructions();
+                });
+            });
+        } catch (e) { list.innerHTML = `<p style="color:var(--danger);">${window.t('instructions.error')}</p>`; }
+    }
+
+    // Neue Instruktion erstellen
+    document.getElementById('btn-instr-new')?.addEventListener('click', async () => {
+        const nameInput = document.getElementById('instr-new-name');
+        const name = nameInput.value.trim();
+        if (!name) { nameInput.style.borderColor = 'var(--danger)'; setTimeout(() => nameInput.style.borderColor = '', 2000); return; }
+        await fetch(`/api/instructions/${name}`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`},
+            body: JSON.stringify({content: `# ${name}\n\nDeine Anweisungen hier eingeben...\n`})
+        });
+        nameInput.value = '';
+        _loadInstructions();
+    });
+
+    function showLoginScreen() {
+        // Sitzungsende beim Server melden, SOLANGE das Token noch gilt. Ist es
+        // bereits abgelaufen, lehnt der Server ab und es wird nichts vermerkt –
+        // genau richtig, denn dann war es keine Abmeldung.
+        if (window.JarvisSession) window.JarvisSession.logout(token);
+        mainScreen.classList.remove('active');
+        window.JarvisSitzung.maskeFreigeben();
+        loginScreen.classList.add('active');
+        token = '';
+        currentUser = '';
+        // Global abmelden (SSO): alle Seiten-Token entfernen
+        localStorage.removeItem('jarvis_token');
+        localStorage.removeItem('jarvis_chat_token');
+        localStorage.removeItem('jarvis_uc_token');
+        localStorage.removeItem('jarvis_user');
+    }
+
+    // (Alter Haupt-Chat-Code entfernt – der Chat lebt in /chat;
+    //  diese Seite ist nur noch Login-Einstieg + Settings-Modal.)
+
+    function escapeHtml(text) {
+        if (window.JarvisChatLib && window.JarvisChatLib.escapeHtml) {
+            return window.JarvisChatLib.escapeHtml(text);
+        }
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // ─── CPU Bar ────────────────────────────────────────────────
+    function setupSettings() {
+        const SVG_EYE_OPEN   = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
+        const SVG_EYE_CLOSED = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
+
+        const modal = document.getElementById('settings-modal');
+        const btnOpen = document.getElementById('btn-settings');
+        const btnClose = document.getElementById('btn-close-settings');
+        const settingsTitle = document.getElementById('settings-title');
+
+        // Ansichten
+        const listView = document.getElementById('profiles-list-view');
+        const editView = document.getElementById('profile-edit-view');
+        const profilesContainer = document.getElementById('profiles-container');
+
+        // Profil-Editor Felder
+        const inputName = document.getElementById('profile-name');
+        const selectProvider = document.getElementById('profile-provider');
+        const inputUrl = document.getElementById('profile-api-url');
+        const inputModel = document.getElementById('profile-model-input');
+        const modelSuggestions = document.getElementById('model-suggestions');
+        const promptToolGroup = document.getElementById('prompt-tool-group');
+        const checkPromptTool = document.getElementById('profile-prompt-tool-calling');
+        const inputTemperature = document.getElementById('profile-temperature');
+        const inputKey = document.getElementById('profile-api-key');
+        const inputSessionKey = document.getElementById('profile-session-key');
+        const apikeyHint = document.querySelector('.apikey-hint');
+        const checkTts = document.getElementById('setting-tts');
+        const selectTtsVoice = document.getElementById('setting-tts-voice');
+        const inputAgentKey = document.getElementById('setting-agent-api-key');
+        const btnGenKey = document.getElementById('btn-generate-apikey');
+        const btnCopyKey = document.getElementById('btn-copy-apikey');
+        const btnToggleKey = document.getElementById('btn-toggle-apikey');
+        const btnToggleProfileApiKey = document.getElementById('btn-toggle-profile-apikey');
+        const btnToggleProfileSessionKey = document.getElementById('btn-toggle-profile-sessionkey');
+        let _agentKeyVisible = false;
+        let _agentKeyValue = '';
+        const authMethodGroup = document.getElementById('auth-method-group');
+        const apikeyGroup = document.getElementById('apikey-group');
+        const sessionGroup = document.getElementById('session-group');
+        const radioApiKey = document.getElementById('auth-apikey');
+        const radioSession = document.getElementById('auth-session');
+
+        const btnAddProfile = document.getElementById('btn-add-profile');
+        const btnSaveProfile = document.getElementById('btn-save-profile');
+        const btnCancelProfile = document.getElementById('btn-cancel-profile');
+        const btnTestProfile = document.getElementById('btn-test-profile');
+        const profileTestResult = document.getElementById('profile-test-result');
+
+        let profiles = [];
+        let activeProfileId = '';
+        let defaults = {};
+        let editingProfileId = null; // null = neues Profil
+
+        // btnOpen (Header-Zahnrad) ist optional – /settings oeffnet das Modal ueber
+        // window._openSettingsModal. Nur das Modal selbst ist Pflicht.
+        if (!modal) return;
+
+        const PROVIDER_LABELS = {
+            'google': 'Google Gemini',
+            'openrouter': 'OpenRouter',
+            'anthropic': 'Anthropic Claude',
+            'openai_compatible': 'OpenAI-Kompatibel',
+        };
+
+        // ── Skill Manager ──
+        let skillManager = null;
+        if (window.JarvisSkillManager) {
+            skillManager = new window.JarvisSkillManager();
+            // Nach aussen sichtbar wie window.knowledgeManager/visionManager:
+            // das Suchfeld im Kopf der Einstellungen fragt darueber, WOHIN ein
+            // Skill fuehrt, und laesst ihn dorthin fuehren. Ohne die Zeile
+            // muesste es die Reiterzuordnung nachbauen – also eine zweite
+            // Fassung derselben Tabelle pflegen.
+            window.skillManager = skillManager;
+        }
+
+        // ── Wissen-Tab: Abschnitte einklappbar ──
+        // ── Generischer Collapse-Init ──────────────────────────────────────
+        function _collapseInit(sections) {
+            sections.forEach(({ hdr, body, tog }) => {
+                const hdrEl = document.getElementById(hdr);
+                if (!hdrEl || hdrEl._kbBound) return;
+                hdrEl._kbBound = true;
+                const bodyEl = document.getElementById(body);
+                const togEl  = document.getElementById(tog);
+                // Gemerkten Auf-/Zu-Zustand (pro Container) anwenden; ohne
+                // gespeicherten Wert gilt der HTML-Default (display:none = zu).
+                const key = 'jarvis_sect_collapse_' + hdr;
+                let saved = null;
+                try { saved = localStorage.getItem(key); } catch (e) {}
+                let collapsed = (saved === '1') ? true
+                    : (saved === '0') ? false
+                    : (bodyEl && bodyEl.style.display === 'none');
+                function apply(c) {
+                    if (bodyEl) bodyEl.style.display = c ? 'none' : '';
+                    if (togEl) togEl.textContent = c ? '▶' : '▼';
+                    hdrEl.classList.toggle('is-collapsed', c);
+                }
+                apply(collapsed);
+                hdrEl.addEventListener('click', (e) => {
+                    if (e.target.closest('button, input, label, .toggle-switch, a')) return;
+                    const nowCollapsed = bodyEl.style.display !== 'none';
+                    apply(nowCollapsed);
+                    try { localStorage.setItem(key, nowCollapsed ? '1' : '0'); } catch (e) {}
+                });
+            });
+        }
+
+        // ── Wissen-Tab Collapse ────────────────────────────────────────────
+        function _initKbCollapse() {
+            _collapseInit([
+                { hdr: 'kb-sect-stats-hdr',  body: 'kb-sect-stats-body',  tog: 'kb-sect-stats-tog'  },
+                { hdr: 'kb-sect-folder-hdr', body: 'kb-sect-folder-body', tog: 'kb-sect-folder-tog' },
+                { hdr: 'kb-sect-sync-hdr',   body: 'kb-sect-sync-body',   tog: 'kb-sect-sync-tog'   },
+                { hdr: 'kb-sect-webdav-hdr', body: 'kb-sect-webdav-body', tog: 'kb-sect-webdav-tog' },
+                { hdr: 'kb-sect-net-hdr',    body: 'kb-sect-net-body',    tog: 'kb-sect-net-tog'    },
+            ]);
+        }
+
+        // ── Sicherheit-Tab Collapse ────────────────────────────────────────
+        function _initSecCollapse() {
+            _collapseInit([
+                { hdr: 'sec-sect-pw-hdr',  body: 'sec-sect-pw-body',  tog: 'sec-sect-pw-tog'  },
+                { hdr: 'sec-sect-ad-hdr',  body: 'sec-sect-ad-body',  tog: 'sec-sect-ad-tog'  },
+                { hdr: 'sec-sect-2fa-hdr', body: 'sec-sect-2fa-body', tog: 'sec-sect-2fa-tog' },
+                { hdr: 'sec-sect-incidents-hdr', body: 'sec-sect-incidents-body', tog: 'sec-sect-incidents-tog' },
+                { hdr: 'sec-sect-broker-hdr', body: 'sec-sect-broker-body', tog: 'sec-sect-broker-tog' },
+                { hdr: 'sec-sect-ssh-hdr', body: 'sec-sect-ssh-body', tog: 'sec-sect-ssh-tog' },
+                { hdr: 'sec-sect-rem-hdr', body: 'sec-sect-rem-body', tog: 'sec-sect-rem-tog' },
+            ]);
+        }
+
+        // ── KI-Profile Collapse ────────────────────────────────────────────
+        function _initProfilesCollapse() {
+            _collapseInit([
+                { hdr: 'prof-sect-list-hdr', body: 'prof-sect-list-body', tog: 'prof-sect-list-tog' },
+                // Tuning fasst Sprachausgabe, Antwort-Timeout und maximale
+                // Antwortlaenge zusammen (vorher drei eigene Klappabschnitte).
+                { hdr: 'prof-sect-tuning-hdr', body: 'prof-sect-tuning-body', tog: 'prof-sect-tuning-tog' },
+                { hdr: 'prof-sect-api-hdr',  body: 'prof-sect-api-body',  tog: 'prof-sect-api-tog'  },
+                { hdr: 'prof-sect-ssl-hdr',  body: 'prof-sect-ssl-body',  tog: 'prof-sect-ssl-tog'  },
+            ]);
+        }
+
+        // ── WhatsApp-Tab Collapse ──────────────────────────────────────────
+        function _initWaCollapse() {
+            _collapseInit([
+                { hdr: 'wa-sect-status-hdr', body: 'wa-sect-status-body', tog: 'wa-sect-status-tog' },
+                { hdr: 'wa-sect-cfg-hdr',    body: 'wa-sect-cfg-body',    tog: 'wa-sect-cfg-tog'    },
+                { hdr: 'wa-sect-logs-hdr',   body: 'wa-sect-logs-body',   tog: 'wa-sect-logs-tog'   },
+            ]);
+        }
+
+        // ── E-Mail-Tab Collapse ────────────────────────────────────────────
+        // Bewusst ueber _collapseInit und nicht mit eigener Klapp-Logik im
+        // Modul: die Funktion hier merkt sich den Auf-/Zu-Zustand je Container
+        // im localStorage und nimmt Klicks auf Knoepfe/Felder in der Kopfzeile
+        // aus. Eine zweite Umsetzung waere Drift.
+        function _initEmailCollapse() {
+            _collapseInit([
+                { hdr: 'em-sect-conn-hdr',     body: 'em-sect-conn-body',     tog: 'em-sect-conn-tog'     },
+                { hdr: 'em-sect-areas-hdr',    body: 'em-sect-areas-body',    tog: 'em-sect-areas-tog'    },
+                { hdr: 'em-sect-addin-hdr',    body: 'em-sect-addin-body',    tog: 'em-sect-addin-tog'    },
+                { hdr: 'em-sect-explore-hdr',  body: 'em-sect-explore-body',  tog: 'em-sect-explore-tog'  },
+                { hdr: 'em-sect-accounts-hdr', body: 'em-sect-accounts-body', tog: 'em-sect-accounts-tog' },
+            ]);
+        }
+        window.initEmailCollapse = _initEmailCollapse;
+
+        // ── Short-Tracks-Tab Collapse ──────────────────────────────────────
+        // Ueber _collapseInit und nicht mit eigener Klapp-Logik im Modul: die
+        // Funktion merkt sich den Auf-/Zu-Zustand je Container im localStorage
+        // und nimmt Klicks auf Knoepfe/Felder in der Kopfzeile aus. Eine zweite
+        // Umsetzung waere Drift.
+        function _initTracksCollapse() {
+            _collapseInit([
+                { hdr: 'tr-sect-limits-hdr', body: 'tr-sect-limits-body', tog: 'tr-sect-limits-tog' },
+                { hdr: 'tr-sect-areas-hdr',  body: 'tr-sect-areas-body',  tog: 'tr-sect-areas-tog'  },
+                { hdr: 'tr-sect-over-hdr',   body: 'tr-sect-over-body',   tog: 'tr-sect-over-tog'   },
+            ]);
+        }
+        window.initTracksCollapse = _initTracksCollapse;
+
+        // ── Excel-Tab Collapse ─────────────────────────────────────────────
+        // Gleiche Begruendung wie bei Short Tracks: _collapseInit merkt sich den
+        // Auf-/Zu-Zustand je Container im localStorage und nimmt Klicks auf
+        // Knoepfe und Felder in der Kopfzeile aus. Ohne diesen Eintrag traegt das
+        // Markup zwar die Klassen kb-collapse-header/-body, aber NICHTS bindet
+        // sie – die Container lassen sich dann nicht auf- und zuklappen
+        // (gemeldet 2026-08-20).
+        function _initExcelCollapse() {
+            _collapseInit([
+                { hdr: 'xa-sect-install-hdr', body: 'xa-sect-install-body', tog: 'xa-sect-install-tog' },
+                { hdr: 'xa-sect-limits-hdr',  body: 'xa-sect-limits-body',  tog: 'xa-sect-limits-tog'  },
+                { hdr: 'xa-sect-info-hdr',    body: 'xa-sect-info-body',    tog: 'xa-sect-info-tog'    },
+            ]);
+        }
+        window.initExcelCollapse = _initExcelCollapse;
+
+        // ── Jira-Tab Collapse ──────────────────────────────────────────────
+        // Gleiche Begruendung wie bei Excel: das Markup traegt zwar die Klassen
+        // kb-collapse-header/-body, gebunden wird aber ausschliesslich hier.
+        // Ohne diesen Eintrag liessen sich die beiden Container nicht klappen.
+        function _initJiraCollapse() {
+            _collapseInit([
+                { hdr: 'ji-sect-conn-hdr', body: 'ji-sect-conn-body', tog: 'ji-sect-conn-tog' },
+                { hdr: 'ji-sect-share-hdr', body: 'ji-sect-share-body', tog: 'ji-sect-share-tog' },
+                { hdr: 'ji-sect-acc-hdr', body: 'ji-sect-acc-body', tog: 'ji-sect-acc-tog' },
+                { hdr: 'ji-sect-tools-hdr', body: 'ji-sect-tools-body', tog: 'ji-sect-tools-tog' },
+                { hdr: 'ji-sect-vorl-hdr', body: 'ji-sect-vorl-body', tog: 'ji-sect-vorl-tog' },
+            ]);
+        }
+
+        // ── AI-Maus-Tab Collapse ───────────────────────────────────────────
+        // ⚠ JEDE .kb-section des Reiters gehoert hier hinein. Eine vergessene
+        // bleibt zugeklappt und laesst sich nicht oeffnen – der Wächter prueft
+        // das als REGEL (test_jira_tab_ui tut dasselbe fuer den Jira-Reiter),
+        // weil eine gepflegte Liste genau die neue Sektion vergisst.
+        function _initAimouseCollapse() {
+            _collapseInit([
+                { hdr: 'am-sect-tools-hdr', body: 'am-sect-tools-body', tog: 'am-sect-tools-tog' },
+                { hdr: 'am-sect-share-hdr', body: 'am-sect-share-body', tog: 'am-sect-share-tog' },
+                { hdr: 'am-sect-sign-hdr', body: 'am-sect-sign-body', tog: 'am-sect-sign-tog' },
+                { hdr: 'am-sect-vorg-hdr', body: 'am-sect-vorg-body', tog: 'am-sect-vorg-tog' },
+                { hdr: 'am-sect-info-hdr', body: 'am-sect-info-body', tog: 'am-sect-info-tog' },
+            ]);
+        }
+
+        // ── Feedback-Tab Collapse ──────────────────────────────────────────
+        // ⚠ JEDE .kb-section des Reiters gehoert hier hinein (gleiche Regel wie
+        // beim AI-Maus- und Jira-Reiter): eine vergessene bleibt zugeklappt und
+        // laesst sich nicht oeffnen.
+        function _initFeedbackCollapse() {
+            _collapseInit([
+                { hdr: 'fb-sect-form-hdr', body: 'fb-sect-form-body', tog: 'fb-sect-form-tog' },
+                { hdr: 'fb-sect-abg-hdr',  body: 'fb-sect-abg-body',  tog: 'fb-sect-abg-tog'  },
+                { hdr: 'fb-sect-info-hdr', body: 'fb-sect-info-body', tog: 'fb-sect-info-tog' },
+            ]);
+        }
+
+        // ── Vision-Tab Collapse ────────────────────────────────────────────
+        function _initVisionCollapse() {
+            _collapseInit([
+                { hdr: 'vis-sect-feed-hdr',  body: 'vis-sect-feed-body',  tog: 'vis-sect-feed-tog'  },
+                { hdr: 'vis-sect-train-hdr', body: 'vis-sect-train-body', tog: 'vis-sect-train-tog' },
+                { hdr: 'vis-sect-faces-hdr', body: 'vis-sect-faces-body', tog: 'vis-sect-faces-tog' },
+                { hdr: 'vis-sect-cfg-hdr',   body: 'vis-sect-cfg-body',   tog: 'vis-sect-cfg-tog'   },
+            ]);
+        }
+
+        // ── Settings Tabs ──
+        const settingsTabs = document.querySelectorAll('.settings-tab-btn');
+        // ⚠ Der Knopf zu „KI & System" wird AUSDRUECKLICH gesucht, nicht als
+        // `settingsTabs[0]` angenommen. Seit die Reiter alphabetisch stehen
+        // (alpha_sort.js), ist der erste Knopf ein anderer – ein `[0]` wuerde
+        // den FALSCHEN Knopf hervorheben, waehrend darunter das Profil-Panel
+        // steht. Genau dieser Zustand (Knopf A markiert, Panel B offen) hat
+        // hier schon einmal Zeit gekostet.
+        const btnProfiles = document.querySelector('.settings-tab-btn[data-settings-tab="profiles"]');
+        const tabProfiles = document.getElementById('settings-tab-profiles');
+        const tabSkills = document.getElementById('settings-tab-skills');
+        const tabWhatsApp = document.getElementById('settings-tab-whatsapp');
+        const tabKnowledge = document.getElementById('settings-tab-knowledge');
+        const tabGoogle = document.getElementById('settings-tab-google');
+        const tabVision = document.getElementById('settings-tab-vision');
+        const tabBranding = document.getElementById('settings-tab-branding');
+        const tabMcp = document.getElementById('settings-tab-mcp');
+        const tabTelemetry = document.getElementById('settings-tab-telemetry');
+        const tabInstructions = document.getElementById('settings-tab-instructions');
+        const tabSecurity = document.getElementById('settings-tab-security');
+        const tabCron    = document.getElementById('settings-tab-cron');
+        const tabConfluence = document.getElementById('settings-tab-confluence');
+        const tabJira    = document.getElementById('settings-tab-jira');
+        const tabAimouse = document.getElementById('settings-tab-aimouse');
+        const tabFeedback = document.getElementById('settings-tab-feedback');
+        const tabSap     = document.getElementById('settings-tab-sap');
+        const tabVemas   = document.getElementById('settings-tab-vemas');
+        const tabKundenverwaltung = document.getElementById('settings-tab-kundenverwaltung');
+        const tabSupport = document.getElementById('settings-tab-support');
+        // Reiter, deren Inhalt generisch aus dem Skill-Manifest kommt (skillcfg.js)
+        const SKILLCFG_TABS = ['telegram', 'browser_control',
+                               'agent_orchestrator', 'agent_autonomy_kit', 'avatar',
+                               'claude_subagent'];
+        const tabsSkillCfg = SKILLCFG_TABS.map(n => document.getElementById('settings-tab-' + n));
+        const tabEmail   = document.getElementById('settings-tab-email');
+        const tabTracks  = document.getElementById('settings-tab-tracks');
+        const tabExcel   = document.getElementById('settings-tab-excel');
+        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabBranding, tabConfluence, tabJira, tabSap, tabVemas, tabEmail, tabTracks, tabExcel, tabFeedback, tabKundenverwaltung, tabSupport, tabMcp, tabTelemetry, tabSecurity, tabCron].concat(tabsSkillCfg);
+
+        settingsTabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                settingsTabs.forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+
+                const target = tab.dataset.settingsTab;
+                allSettingsTabs.forEach(t => {
+                    if (t) { t.style.display = 'none'; t.classList.remove('active'); }
+                });
+
+                if (target === 'profiles' && tabProfiles) {
+                    tabProfiles.style.display = '';
+                    tabProfiles.classList.add('active');
+                    _initProfilesCollapse();
+                    // Der Schalter "Automatische Sicherheitsupdates" liegt seit
+                    // 2026-07-28 in den System-Einstellungen dieses Reiters, seine
+                    // Logik aber weiter in security_incidents.js. Ohne diesen Aufruf
+                    // waeren die Knoepfe unverdrahtet und der Status leer, solange
+                    // der Sicherheits-Reiter nicht geoeffnet wurde.
+                    if (window.SecurityIncidents) window.SecurityIncidents.onShowUnattended();
+                    if (window.agentKeysOnShow) window.agentKeysOnShow();
+                } else if (target === 'instructions' && tabInstructions) {
+                    tabInstructions.style.display = '';
+                    tabInstructions.classList.add('active');
+                    _loadInstructions();
+                } else if (target === 'skills' && tabSkills) {
+                    tabSkills.style.display = '';
+                    tabSkills.classList.add('active');
+                    if (skillManager) skillManager.loadSkills();
+                } else if (target === 'whatsapp' && tabWhatsApp) {
+                    tabWhatsApp.style.display = '';
+                    tabWhatsApp.classList.add('active');
+                    _initWaCollapse();
+                    if (window.waManager) window.waManager.refresh();
+                    if (window.SkillCfg) window.SkillCfg.render('whatsapp');
+                } else if (target === 'knowledge' && tabKnowledge) {
+                    tabKnowledge.style.display = '';
+                    tabKnowledge.classList.add('active');
+                    _initKbCollapse();
+                    if (window.knowledgeManager) window.knowledgeManager.init();
+                    if (window.KnowledgeSync) window.KnowledgeSync.onShow();
+                    if (window.SkillCfg) window.SkillCfg.render('knowledge');
+                } else if (target === 'google' && tabGoogle) {
+                    tabGoogle.style.display = '';
+                    tabGoogle.classList.add('active');
+                    if (window.SkillCfg) window.SkillCfg.render('google');
+                    if (window.googleManager) window.googleManager.init();
+                } else if (SKILLCFG_TABS.includes(target)) {
+                    // Reiter mit rein manifest-generierter Konfiguration
+                    const panel = document.getElementById('settings-tab-' + target);
+                    if (panel) {
+                        panel.style.display = '';
+                        panel.classList.add('active');
+                        if (window.SkillCfg) window.SkillCfg.onShow(target);
+                        // Der Orchestrator-Reiter zeigt die Rollen-Verwaltung
+                        // (kein manifest-generiertes Formular). onShow/_bind sind
+                        // idempotent, ein zweiter Klick laedt nur neu.
+                        if (target === 'agent_orchestrator' && window.AgentRoles) {
+                            window.AgentRoles.onShow();
+                        }
+                    }
+                } else if (target === 'mcp' && tabMcp) {
+                    tabMcp.style.display = '';
+                    tabMcp.classList.add('active');
+                    if (window.mcpManager) window.mcpManager.refresh();
+                } else if (target === 'vision' && tabVision) {
+                    tabVision.style.display = '';
+                    tabVision.classList.add('active');
+                    _initVisionCollapse();
+                    if (window.visionManager) window.visionManager.refresh();
+                } else if (target === 'branding' && tabBranding) {
+                    tabBranding.style.display = '';
+                    tabBranding.classList.add('active');
+                    if (window.brandingAdmin) window.brandingAdmin.init();
+                } else if (target === 'confluence' && tabConfluence) {
+                    tabConfluence.style.display = '';
+                    tabConfluence.classList.add('active');
+                    if (window.ConfluenceManager) window.ConfluenceManager.onShow();
+                } else if (target === 'jira' && tabJira) {
+                    tabJira.style.display = '';
+                    tabJira.classList.add('active');
+                    _initJiraCollapse();
+                    if (window.JiraManager) window.JiraManager.onShow();
+                } else if (target === 'aimouse' && tabAimouse) {
+                    tabAimouse.style.display = '';
+                    tabAimouse.classList.add('active');
+                    _initAimouseCollapse();
+                    if (window.AiMouseAdmin) window.AiMouseAdmin.onShow();
+                } else if (target === 'feedback' && tabFeedback) {
+                    tabFeedback.style.display = '';
+                    tabFeedback.classList.add('active');
+                    _initFeedbackCollapse();
+                    if (window.FeedbackAdmin) window.FeedbackAdmin.onShow();
+                } else if (target === 'sap' && tabSap) {
+                    tabSap.style.display = '';
+                    tabSap.classList.add('active');
+                    if (window.SapManager) window.SapManager.onShow();
+                } else if (target === 'vemas' && tabVemas) {
+                    tabVemas.style.display = '';
+                    tabVemas.classList.add('active');
+                    if (window.VemasManager) window.VemasManager.onShow();
+                } else if (target === 'email' && tabEmail) {
+                    tabEmail.style.display = '';
+                    tabEmail.classList.add('active');
+                    if (window.EmailAdmin) window.EmailAdmin.onShow();
+                } else if (target === 'tracks' && tabTracks) {
+                    tabTracks.style.display = '';
+                    tabTracks.classList.add('active');
+                    if (window.TracksAdmin) window.TracksAdmin.onShow();
+                } else if (target === 'excel' && tabExcel) {
+                    tabExcel.style.display = '';
+                    tabExcel.classList.add('active');
+                    if (window.ExcelAdmin) window.ExcelAdmin.onShow();
+                } else if (target === 'kundenverwaltung' && tabKundenverwaltung) {
+                    tabKundenverwaltung.style.display = '';
+                    tabKundenverwaltung.classList.add('active');
+                    if (window.KundenverwaltungManager) window.KundenverwaltungManager.onShow();
+                } else if (target === 'support' && tabSupport) {
+                    tabSupport.style.display = '';
+                    tabSupport.classList.add('active');
+                    if (window.SupportAdminManager) window.SupportAdminManager.onShow();
+                } else if (target === 'telemetry' && tabTelemetry) {
+                    tabTelemetry.style.display = '';
+                    tabTelemetry.classList.add('active');
+                    if (window.telemetryManager) window.telemetryManager.init();
+                } else if (target === 'security' && tabSecurity) {
+                    tabSecurity.style.display = '';
+                    tabSecurity.classList.add('active');
+                    _initSecCollapse();
+                    _initSecurityTab();
+                    if (window.SecurityIncidents) window.SecurityIncidents.onShow();
+                    if (window.TotpAdmin) window.TotpAdmin.onShow();
+                    if (window.Fernzugang) window.Fernzugang.onShow();
+                } else if (target === 'cron' && tabCron) {
+                    tabCron.style.display = '';
+                    tabCron.classList.add('active');
+                    if (window.cronManager) window.cronManager.init();
+                }
+
+                // Polling stoppen wenn weg-navigiert
+                // (contextManager entfiel 2026-08-05 mit dem Abschnitt „Kontext / History";
+                //  er war der einzige 5-Sekunden-Poll im Telemetrie-Reiter.)
+                if (target !== 'vision'    && window.visionManager)   window.visionManager.stop();
+            });
+        });
+
+        // ── Reiter der manifest-konfigurierten Skills (Google, Telegram,
+        //    Browser, Orchestrator, Autonomie, Avatar, Claude-Subagent):
+        //    jeweils nur sichtbar, wenn der Skill aktiviert ist (skillcfg.js) ──
+        window.updateSkillCfgTabVisibility = function updateSkillCfgTabVisibility() {
+            if (window.SkillCfg) return window.SkillCfg.updateTabs();
+        };
+        // Alt-Name bleibt gueltig – der Google-Reiter haengt jetzt mit dran
+        window.updateGoogleTabVisibility = window.updateSkillCfgTabVisibility;
+
+        // ── WhatsApp-Tab-Button: nur sichtbar wenn 'whatsapp'-Skill aktiviert ──
+        const waTabBtn = document.getElementById('settings-tab-btn-whatsapp');
+
+        // ── Skill-Liste EINMAL holen ────────────────────────────────────────
+        // Acht Reiter-Sichtbarkeiten (+ skillcfg.js) fragten jede fuer sich
+        // /api/skills ab, und im Oeffnen-Pfad des Modals liegen sie HINTEREINANDER
+        // (await … await …). Bei 0,77 s je Abruf waren das rund 7 Sekunden, bevor
+        // die Einstellungsseite stand. Jetzt teilen sie sich EINE Antwort.
+        // TTL statt "einmal fuer immer": nach einem Skill-Toggle muss die
+        // Sichtbarkeit stimmen. skills.js ruft nach jeder Aenderung
+        // window.invalidateSkillsCache(); der TTL ist nur das Sicherheitsnetz.
+        let _skillsCache = null, _skillsCacheTs = 0, _skillsInflight = null;
+        const _SKILLS_TTL = 5000;
+        window.invalidateSkillsCache = function () { _skillsCache = null; _skillsInflight = null; };
+        async function _skillsOnce() {
+            if (_skillsCache && (Date.now() - _skillsCacheTs) < _SKILLS_TTL) return _skillsCache;
+            if (_skillsInflight) return _skillsInflight;      // parallele Aufrufer buendeln
+            const tk = window.JarvisSitzung.token();
+            _skillsInflight = fetch('/api/skills', { headers: { 'Authorization': `Bearer ${tk}` } })
+                .then(r => r.json())
+                .then(d => {
+                    const liste = d.skills || d || [];
+                    _skillsCache = Array.isArray(liste) ? liste : [];
+                    _skillsCacheTs = Date.now();
+                    _skillsInflight = null;
+                    return _skillsCache;
+                })
+                .catch(e => { _skillsInflight = null; throw e; });
+            return _skillsInflight;
+        }
+        // Dieselbe Antwort fuer alle Aufrufer – auch fuer Module ausserhalb
+        // dieser Datei (settings_search.js). Ein eigener Abruf dort waere ein
+        // zusaetzlicher Roundtrip auf dem heissen Pfad des Modal-Aufbaus und
+        // haette einen eigenen, abweichenden Zwischenspeicher.
+        window.jarvisSkillsOnce = _skillsOnce;
+
+        window.updateWhatsAppTabVisibility = async function updateWhatsAppTabVisibility() {
+            if (!waTabBtn) return;
+            try {
+                const skills = await _skillsOnce();
+                const waSkill = Array.isArray(skills)
+                    ? skills.find(s => s.dir_name === 'whatsapp')
+                    : null;
+                const isEnabled = waSkill && waSkill.enabled;
+                waTabBtn.style.display = isEnabled ? '' : 'none';
+                // Falls WhatsApp-Tab aktiv war und Skill deaktiviert → zu Profilen wechseln
+                if (!isEnabled && tabWhatsApp && tabWhatsApp.classList.contains('active')) {
+                    settingsTabs.forEach(t => t.classList.remove('active'));
+                    if (btnProfiles) btnProfiles.classList.add('active');
+                    allSettingsTabs.forEach(t => { if (t) { t.style.display = 'none'; t.classList.remove('active'); } });
+                    if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
+                }
+            } catch (e) {
+                // Fehler ignorieren – Tab bleibt versteckt
+            }
+        }
+
+        // ── Vision-Tab-Button: nur sichtbar wenn 'vision'-Skill aktiviert ──
+        const visionTabBtn = document.getElementById('settings-tab-btn-vision');
+
+        window.updateVisionTabVisibility = async function updateVisionTabVisibility() {
+            if (!visionTabBtn) return;
+            try {
+                const skills = await _skillsOnce();
+                const visionSkill = Array.isArray(skills)
+                    ? skills.find(s => s.dir_name === 'vision')
+                    : null;
+                const isEnabled = visionSkill && visionSkill.enabled;
+                visionTabBtn.style.display = isEnabled ? '' : 'none';
+                // Falls Vision-Tab aktiv war und Skill nun deaktiviert → zu Profilen wechseln
+                if (!isEnabled && tabVision && tabVision.classList.contains('active')) {
+                    settingsTabs.forEach(t => t.classList.remove('active'));
+                    if (btnProfiles) btnProfiles.classList.add('active');
+                    allSettingsTabs.forEach(t => { if (t) { t.style.display = 'none'; t.classList.remove('active'); } });
+                    if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
+                    if (window.visionManager) window.visionManager.stop();
+                }
+            } catch (e) {
+                // Fehler ignorieren – Tab bleibt versteckt
+            }
+        }
+
+        // ── Branding-Tab-Button: nur sichtbar wenn 'branding'-Skill aktiviert ──
+        const brandingTabBtn = document.getElementById('settings-tab-btn-branding');
+
+        window.updateBrandingTabVisibility = async function updateBrandingTabVisibility() {
+            if (!brandingTabBtn) return;
+            try {
+                const skills = await _skillsOnce();
+                const brSkill = Array.isArray(skills)
+                    ? skills.find(s => s.dir_name === 'branding')
+                    : null;
+                const isEnabled = brSkill && brSkill.enabled;
+                brandingTabBtn.style.display = isEnabled ? '' : 'none';
+                // Falls Branding-Tab aktiv war und Skill nun deaktiviert → zu Profilen wechseln
+                if (!isEnabled && tabBranding && tabBranding.classList.contains('active')) {
+                    settingsTabs.forEach(t => t.classList.remove('active'));
+                    if (btnProfiles) btnProfiles.classList.add('active');
+                    allSettingsTabs.forEach(t => { if (t) { t.style.display = 'none'; t.classList.remove('active'); } });
+                    if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
+                }
+            } catch (e) {
+                // Fehler ignorieren – Tab bleibt versteckt
+            }
+        }
+
+        const confluenceTabBtn = document.getElementById('settings-tab-btn-confluence');
+        window.updateConfluenceTabVisibility = async function updateConfluenceTabVisibility() {
+            if (!confluenceTabBtn) return;
+            try {
+                const skills = await _skillsOnce();
+                const cf = Array.isArray(skills)
+                    ? skills.find(s => s.dir_name === 'confluence')
+                    : null;
+                const isEnabled = cf && cf.enabled;
+                confluenceTabBtn.style.display = isEnabled ? '' : 'none';
+                // Die Confluence-Importquelle des Extraktors wurde hier bis
+                // 2026-07-21 mitgeschaltet. Der Extraktor liegt seit dem Umzug
+                // ins /wissen-Portal nicht mehr auf dieser Seite; dort regelt
+                // wissen.js die Sichtbarkeit selbst (cfbSpacesFertig).
+                if (!isEnabled && tabConfluence && tabConfluence.classList.contains('active')) {
+                    settingsTabs.forEach(t => t.classList.remove('active'));
+                    if (btnProfiles) btnProfiles.classList.add('active');
+                    allSettingsTabs.forEach(t => { if (t) { t.style.display = 'none'; t.classList.remove('active'); } });
+                    if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
+                }
+            } catch (e) {
+                // Fehler ignorieren – Tab bleibt versteckt
+            }
+        }
+
+        const jiraTabBtn = document.getElementById('settings-tab-btn-jira');
+        window.updateJiraTabVisibility = async function updateJiraTabVisibility() {
+            if (!jiraTabBtn) return;
+            try {
+                const skills = await _skillsOnce();
+                const jr = Array.isArray(skills)
+                    ? skills.find(s => s.dir_name === 'jira')
+                    : null;
+                const isEnabled = jr && jr.enabled;
+                jiraTabBtn.style.display = isEnabled ? '' : 'none';
+                if (!isEnabled && tabJira && tabJira.classList.contains('active')) {
+                    settingsTabs.forEach(t => t.classList.remove('active'));
+                    if (btnProfiles) btnProfiles.classList.add('active');
+                    allSettingsTabs.forEach(t => { if (t) { t.style.display = 'none'; t.classList.remove('active'); } });
+                    if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
+                }
+            } catch (e) {
+                // Fehler ignorieren – Tab bleibt versteckt
+            }
+        }
+
+        // ── SAP-Tab: nur sichtbar wenn 'sap'-Skill aktiviert ──
+        const sapTabBtn = document.getElementById('settings-tab-btn-sap');
+        window.updateSapTabVisibility = async function updateSapTabVisibility() {
+            if (!sapTabBtn) return;
+            try {
+                const skills = await _skillsOnce();
+                const sp = Array.isArray(skills)
+                    ? skills.find(s => s.dir_name === 'sap')
+                    : null;
+                const isEnabled = sp && sp.enabled;
+                sapTabBtn.style.display = isEnabled ? '' : 'none';
+                // SAP-Berechtigungsblock in Sicherheit → Berechtigungen nur bei aktivem Skill zeigen
+                const sapSecSub = document.getElementById('sec-sub-sap');
+                if (sapSecSub) sapSecSub.style.display = isEnabled ? '' : 'none';
+                if (!isEnabled && tabSap && tabSap.classList.contains('active')) {
+                    settingsTabs.forEach(t => t.classList.remove('active'));
+                    if (btnProfiles) btnProfiles.classList.add('active');
+                    allSettingsTabs.forEach(t => { if (t) { t.style.display = 'none'; t.classList.remove('active'); } });
+                    if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
+                }
+            } catch (e) {
+                // Fehler ignorieren – Tab bleibt versteckt
+            }
+        }
+
+        // ── VEMAS-Tab: nur sichtbar wenn 'vemas'-Skill aktiviert ──
+        // Gleiche Bauart wie beim SAP-Reiter: der Reiter selbst UND der
+        // Berechtigungsblock in Sicherheit haengen am Skill-Zustand – eine
+        // Freigabe fuer einen abgeschalteten Bereich waere eine Freigabe fuer
+        // nichts (gleiche Begruendung wie bei sec-sub-email/-sap).
+        const vemasTabBtn = document.getElementById('settings-tab-btn-vemas');
+        window.updateVemasTabVisibility = async function updateVemasTabVisibility() {
+            if (!vemasTabBtn) return;
+            try {
+                const skills = await _skillsOnce();
+                const vm = Array.isArray(skills)
+                    ? skills.find(s => s.dir_name === 'vemas')
+                    : null;
+                const isEnabled = vm && vm.enabled;
+                vemasTabBtn.style.display = isEnabled ? '' : 'none';
+                const vemasSecSub = document.getElementById('sec-sub-vemas');
+                if (vemasSecSub) vemasSecSub.style.display = isEnabled ? '' : 'none';
+                if (!isEnabled && tabVemas && tabVemas.classList.contains('active')) {
+                    settingsTabs.forEach(t => t.classList.remove('active'));
+                    if (btnProfiles) btnProfiles.classList.add('active');
+                    allSettingsTabs.forEach(t => { if (t) { t.style.display = 'none'; t.classList.remove('active'); } });
+                    if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
+                }
+            } catch (e) {
+                // Fehler ignorieren – Tab bleibt versteckt
+            }
+        }
+
+        // ── Short Tracks: Berechtigungsblock nur bei aktivem Skill ──
+        // Der REITER wird von skillcfg.js::updateTabs() geschaltet (er steht dort
+        // in TAB_BUTTONS). Hier geht es nur um den Block in Sicherheit →
+        // Berechtigungen: ohne aktiven Skill waere die Freigabe eine Freigabe fuer
+        // nichts – dieselbe Begruendung wie bei sec-sub-email und sec-sub-sap.
+        window.updateTracksSecVisibility = async function updateTracksSecVisibility() {
+            const box = document.getElementById('sec-sub-tracks');
+            if (!box) return;
+            try {
+                const skills = await _skillsOnce();
+                const sp = Array.isArray(skills)
+                    ? skills.find(s => s.dir_name === 'short-tracks')
+                    : null;
+                box.style.display = (sp && sp.enabled) ? '' : 'none';
+            } catch (e) {
+                // Fehler ignorieren – der Block bleibt versteckt
+            }
+        };
+
+        // ── Jira-Assistent: Berechtigungsblock nur bei aktivem Skill ──
+        // Gleiche Begruendung wie bei sec-sub-email/-sap/-tracks: ohne aktiven
+        // Jira-Skill gibt es weder Adresse noch Token, die Freigabe waere eine
+        // Freigabe fuer nichts.
+        window.updateJiraAssistSecVisibility = async function updateJiraAssistSecVisibility() {
+            const box = document.getElementById('sec-sub-jiraassist');
+            if (!box) return;
+            try {
+                const skills = await _skillsOnce();
+                const sp = Array.isArray(skills)
+                    ? skills.find(s => s.dir_name === 'jira')
+                    : null;
+                box.style.display = (sp && sp.enabled) ? '' : 'none';
+            } catch (e) {
+                // Fehler ignorieren – der Block bleibt versteckt
+            }
+        };
+
+        // ── AI-Maus: Berechtigungsblock nur bei aktivem Skill ──
+        // Gleiche Begruendung wie bei sec-sub-jiraassist/-email/-tracks: ohne
+        // aktiven Skill gibt es den Bereich gar nicht, die Freigabe waere eine
+        // Freigabe fuer nichts.
+        window.updateAimouseSecVisibility = async function updateAimouseSecVisibility() {
+            const box = document.getElementById('sec-sub-aimouse');
+            if (!box) return;
+            try {
+                const skills = await _skillsOnce();
+                const sp = Array.isArray(skills)
+                    ? skills.find(s => s.dir_name === 'ai_mouse')
+                    : null;
+                box.style.display = (sp && sp.enabled) ? '' : 'none';
+            } catch (e) {
+                // Fehler ignorieren – der Block bleibt versteckt
+            }
+        };
+
+        // ⚠ `updateFeedbackSecVisibility` ist am 2026-09-14 ERSATZLOS entfallen:
+        // der Feedback-Bereich haengt jetzt an den Wissens-Editoren, es gibt
+        // keinen eigenen Berechtigungsblock mehr, der ein- oder auszublenden
+        // waere. Eine Funktion ohne Bedienelement ist toter Code.
+
+        // ── Claude Subagent: Berechtigungsblock nur bei aktivem Skill ──
+        // Gleiche Begruendung wie bei sec-sub-email/-sap/-tracks: ohne aktiven
+        // Skill waere die Freigabe eine Freigabe fuer nichts.
+        window.updateClaudesubSecVisibility = async function updateClaudesubSecVisibility() {
+            const box = document.getElementById('sec-sub-claudesub');
+            if (!box) return;
+            try {
+                const skills = await _skillsOnce();
+                const sp = Array.isArray(skills)
+                    ? skills.find(s => s.dir_name === 'claude_subagent')
+                    : null;
+                box.style.display = (sp && sp.enabled) ? '' : 'none';
+            } catch (e) {
+                // Fehler ignorieren – der Block bleibt versteckt
+            }
+        };
+
+        // ── Excel-Assistent: Berechtigungsblock nur bei aktivem Skill ──
+        // Der REITER wird von skillcfg.js::updateTabs() geschaltet (er steht dort
+        // in TAB_BUTTONS). Hier geht es nur um den Block in Sicherheit →
+        // Berechtigungen – dieselbe Begruendung wie bei sec-sub-email,
+        // sec-sub-sap und sec-sub-tracks.
+        window.updateExcelSecVisibility = async function updateExcelSecVisibility() {
+            const box = document.getElementById('sec-sub-excel');
+            if (!box) return;
+            try {
+                const skills = await _skillsOnce();
+                const sp = Array.isArray(skills)
+                    ? skills.find(s => s.dir_name === 'excel-addin')
+                    : null;
+                box.style.display = (sp && sp.enabled) ? '' : 'none';
+            } catch (e) {
+                // Fehler ignorieren – der Block bleibt versteckt
+            }
+        };
+
+        // ── E-Mail-Tab: nur sichtbar wenn 'email'-Skill aktiviert ──
+        // Gleiches Muster wie beim SAP-Reiter, inklusive des Berechtigungsblocks
+        // in Sicherheit → Berechtigungen: ohne aktiven Skill waere die Freigabe
+        // eine Freigabe fuer nichts (dieselbe Begruendung wie bei sec-sub-sap
+        // und dem Erinnerungs-Abschnitt).
+        const emailTabBtn = document.getElementById('settings-tab-btn-email');
+        window.updateEmailTabVisibility = async function updateEmailTabVisibility() {
+            const emailSecSub = document.getElementById('sec-sub-email');
+            if (!emailTabBtn && !emailSecSub) return;
+            try {
+                const skills = await _skillsOnce();
+                const sp = Array.isArray(skills)
+                    ? skills.find(s => s.dir_name === 'email')
+                    : null;
+                const isEnabled = !!(sp && sp.enabled);
+                if (emailTabBtn) emailTabBtn.style.display = isEnabled ? '' : 'none';
+                if (emailSecSub) emailSecSub.style.display = isEnabled ? '' : 'none';
+                if (!isEnabled && tabEmail && tabEmail.classList.contains('active')) {
+                    settingsTabs.forEach(t => t.classList.remove('active'));
+                    if (btnProfiles) btnProfiles.classList.add('active');
+                    allSettingsTabs.forEach(t => { if (t) { t.style.display = 'none'; t.classList.remove('active'); } });
+                    if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
+                }
+            } catch (e) {
+                // Fehler ignorieren – Reiter bleibt versteckt
+            }
+        }
+
+        // ── „Erinnerungen per Messenger" (Sicherheit): nur sichtbar, wenn ueberhaupt
+        //    ein Messenger-Kanal aktiv ist. Ohne WhatsApp/Telegram kann niemand eine
+        //    Erinnerung setzen (es gibt keinen Absender 'wa:'/'tg:'), der Abschnitt
+        //    waere also eine Freigabe fuer nichts. Reine Anzeige-Frage: die Liste
+        //    bleibt gespeichert und wirkt sofort wieder, sobald ein Kanal zurueckkommt.
+        const REMINDER_SKILLS = ['whatsapp', 'telegram'];
+        window.updateReminderSectionVisibility = async function updateReminderSectionVisibility() {
+            const box = document.getElementById('sec-sect-rem-box');
+            if (!box) return;
+            try {
+                const skills = await _skillsOnce();
+                const active = Array.isArray(skills)
+                    ? skills.filter(s => REMINDER_SKILLS.includes(s.dir_name) && s.enabled)
+                    : [];
+                var wasHidden = box.style.display === 'none';
+                box.style.display = active.length ? '' : 'none';
+                // Sichtbar geworden (Kanal gerade eingeschaltet): Liste nachladen –
+                // loadReminders() bricht bei versteckter Box bewusst ab, sonst waere
+                // die Freigabeliste jetzt leer, obwohl Eintraege gespeichert sind.
+                if (active.length && wasHidden && window.SecurityIncidents) {
+                    window.SecurityIncidents.loadReminders();
+                }
+                // Hinweis nennt die tatsaechlich verfuegbaren Kanaele – sonst raet ein
+                // Admin, ob "Messenger" hier WhatsApp, Telegram oder beides meint.
+                const ch = document.getElementById('sec-rem-channels');
+                if (ch) {
+                    const names = active.map(s => s.name || s.dir_name);
+                    ch.textContent = names.length
+                        ? (window.t('security.reminders_channels') || 'Aktive Kanäle:') + ' ' + names.join(', ')
+                        : '';
+                }
+            } catch (e) {
+                // Fehler ignorieren – Abschnitt bleibt versteckt (fail-closed)
+            }
+        }
+
+        // ── Kundenverwaltungs-Tab: nur sichtbar wenn 'kundenverwaltung'-Skill aktiviert ──
+        const kvTabBtn = document.getElementById('settings-tab-btn-kundenverwaltung');
+        window.updateKundenverwaltungTabVisibility = async function updateKundenverwaltungTabVisibility() {
+            if (!kvTabBtn) return;
+            try {
+                const skills = await _skillsOnce();
+                const kv = Array.isArray(skills)
+                    ? skills.find(s => s.dir_name === 'kundenverwaltung')
+                    : null;
+                const isEnabled = kv && kv.enabled;
+                kvTabBtn.style.display = isEnabled ? '' : 'none';
+                if (!isEnabled && tabKundenverwaltung && tabKundenverwaltung.classList.contains('active')) {
+                    settingsTabs.forEach(t => t.classList.remove('active'));
+                    if (btnProfiles) btnProfiles.classList.add('active');
+                    allSettingsTabs.forEach(t => { if (t) { t.style.display = 'none'; t.classList.remove('active'); } });
+                    if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
+                }
+            } catch (e) {
+                // Fehler ignorieren – Tab bleibt versteckt
+            }
+        }
+
+        const supportTabBtn = document.getElementById('settings-tab-btn-support');
+        window.updateSupportTabVisibility = async function updateSupportTabVisibility() {
+            if (!supportTabBtn) return;
+            try {
+                const skills = await _skillsOnce();
+                const sp = Array.isArray(skills)
+                    ? skills.find(s => s.dir_name === 'support_assistant')
+                    : null;
+                const isEnabled = sp && sp.enabled;
+                supportTabBtn.style.display = isEnabled ? '' : 'none';
+                if (!isEnabled && tabSupport && tabSupport.classList.contains('active')) {
+                    settingsTabs.forEach(t => t.classList.remove('active'));
+                    if (btnProfiles) btnProfiles.classList.add('active');
+                    allSettingsTabs.forEach(t => { if (t) { t.style.display = 'none'; t.classList.remove('active'); } });
+                    if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
+                }
+            } catch (e) {
+                // Fehler ignorieren – Tab bleibt versteckt
+            }
+        }
+
+        // ── SSL-Status laden ──
+        async function loadSslStatus() {
+            try {
+                const r = await fetch('/api/settings/ssl', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const d = await r.json();
+                const el = document.getElementById('ssl-status-text');
+                if (!el) return;
+                if (d.is_letsencrypt) {
+                    el.innerHTML = `\u2705 Let's Encrypt: <strong>${d.domain}</strong> \u2013 g\u00fcltig bis ${d.expiry}`;
+                } else if (d.expiry) {
+                    el.innerHTML = window.t('profile.cert_self_signed') + ` ${d.expiry})`;
+                } else {
+                    el.innerHTML = window.t('profile.cert_self_signed_nodate');
+                }
+                // BSI M11: Fingerabdruck zum Abgleich in der Windows-/Android-App
+                if (d.fingerabdruck) {
+                    const fp = document.createElement('div');
+                    fp.style.marginTop = '6px';
+                    fp.style.wordBreak = 'break-all';
+                    const lbl = document.createElement('span');
+                    lbl.textContent = window.t('profile.cert_fingerprint') + ' ';
+                    const code = document.createElement('code');
+                    code.textContent = d.fingerabdruck;
+                    fp.append(lbl, code);
+                    el.appendChild(fp);
+                }
+            } catch (e) { /* ignorieren */ }
+        }
+
+        // ── Let's Encrypt Zertifikat beantragen ──
+        async function requestLetsEncrypt() {
+            const domain = (document.getElementById('le-domain') || {}).value?.trim();
+            const email = (document.getElementById('le-email') || {}).value?.trim();
+            if (!domain || !email) { alert(window.t('app.domain_email_required')); return; }
+
+            const btn = document.getElementById('btn-request-letsencrypt');
+            const progress = document.getElementById('le-progress');
+            if (btn) { btn.disabled = true; btn.textContent = 'L\u00e4uft...'; }
+            if (progress) { progress.style.display = 'block'; progress.textContent = ''; }
+
+            try {
+                const resp = await fetch('/api/settings/letsencrypt', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ domain, email })
+                });
+
+                const reader = resp.body.getReader();
+                const decoder = new TextDecoder();
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    if (progress) {
+                        progress.textContent += decoder.decode(value);
+                        progress.scrollTop = progress.scrollHeight;
+                    }
+                }
+            } catch (e) {
+                if (progress) progress.textContent += `\nFehler: ${e.message}\n`;
+            }
+
+            if (btn) { btn.disabled = false; btn.textContent = 'Zertifikat beantragen'; }
+            loadSslStatus();
+        }
+
+        // Button-Handler registrieren
+        const btnLE = document.getElementById('btn-request-letsencrypt');
+        if (btnLE) btnLE.addEventListener('click', requestLetsEncrypt);
+
+        // ── Modal öffnen/schließen ──
+        const openModal = async () => {
+            await loadProfiles();
+            await updateSkillCfgTabVisibility();
+            await updateWhatsAppTabVisibility();
+            await updateVisionTabVisibility();
+            await updateBrandingTabVisibility();
+            await updateConfluenceTabVisibility();
+            await updateJiraTabVisibility();
+            await updateSapTabVisibility();
+            await updateVemasTabVisibility();
+            await updateEmailTabVisibility();
+            await updateTracksSecVisibility();
+            await updateJiraAssistSecVisibility();
+            await updateAimouseSecVisibility();
+            await updateClaudesubSecVisibility();
+            await updateExcelSecVisibility();
+            await updateKundenverwaltungTabVisibility();
+            await updateSupportTabVisibility();
+            await updateReminderSectionVisibility();
+            loadSslStatus();
+            showListView();
+            // Ersten Tab aktivieren
+            settingsTabs.forEach(t => t.classList.remove('active'));
+            if (btnProfiles) btnProfiles.classList.add('active');
+            if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
+            _initProfilesCollapse();
+            // WICHTIG: „KI & System" ist der VOREINGESTELLT aktive Reiter – hier wird
+            // er ohne Klick geoeffnet. Der Hook im Klick-Handler greift dann nie,
+            // und die Knoepfe des Update-Schalters blieben unverdrahtet
+            // ("Klick macht nichts", 2026-07-28). Deshalb auch hier aufrufen;
+            // onShowUnattended/_bind sind idempotent.
+            if (window.SecurityIncidents) window.SecurityIncidents.onShowUnattended();
+            // Aus demselben Grund die Agent-API-Keys: ist ihr Abschnitt gemerkt
+            // aufgeklappt, fiel nie ein Klick auf die Kopfzeile und die Liste blieb
+            // auf "Laedt…" (2026-08-12 auf ECHT gemeldet).
+            if (window.agentKeysOnShow) window.agentKeysOnShow();
+            // LLM-Timeout speichern (einmalig verdrahten)
+            const _btnTm = document.getElementById('btn-save-llm-timeout');
+            if (_btnTm && !_btnTm._wired) {
+                _btnTm._wired = true;
+                _btnTm.addEventListener('click', async () => {
+                    const el = document.getElementById('setting-llm-timeout');
+                    const st = document.getElementById('llm-timeout-status');
+                    let v = parseInt(el && el.value, 10);
+                    if (isNaN(v) || v < 10) v = 10;
+                    if (v > 1800) v = 1800;
+                    if (el) el.value = v;
+                    try {
+                        await fetch('/api/settings', {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ llm_timeout: v })
+                        });
+                        if (st) { st.textContent = '✓ ' + (window.t ? window.t('profile.save_btn') : 'Gespeichert'); setTimeout(() => { st.textContent = ''; }, 2000); }
+                    } catch (e) {
+                        if (st) st.textContent = '✗';
+                    }
+                });
+            }
+            // Dienst neu starten (einmalig verdrahten).
+            // ⚠ DER ERFOLG WIRD GEMESSEN, NICHT BEHAUPTET: /api/health liefert
+            // `started_at` (Startzeit des Prozesses). Der Wert wird VOR dem
+            // Neustart geholt und danach verglichen – nur eine geaenderte
+            // Startzeit beweist, dass wirklich ein neuer Prozess laeuft.
+            // Ein blosses "wieder erreichbar" wuerde auch dann gemeldet, wenn
+            // der Neustart gar nicht stattgefunden hat (Broker-Op abgelehnt,
+            // Freigabe pending) – und das ist der Fall, in dem der Admin die
+            // Meldung am dringendsten braucht.
+            const _btnRs = document.getElementById('btn-service-restart');
+            if (_btnRs && !_btnRs._wired) {
+                _btnRs._wired = true;
+                const _health = async () => {
+                    // MIT Token: `started_at` liefert /api/health seit BSI N1
+                    // nur einer Administrator-Sitzung (anonym nur "ok").
+                    // `no-store`, weil ein zwischengespeicherter Wert den
+                    // Vergleich wertlos machen wuerde.
+                    const r = await fetch('/api/health', {
+                        cache: 'no-store',
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    if (!r.ok) throw new Error('http ' + r.status);
+                    return await r.json();
+                };
+                _btnRs.addEventListener('click', async () => {
+                    const st = document.getElementById('service-restart-status');
+                    const T = (k, d) => (window.t ? window.t(k) : null) || d;
+                    // Farbe ueber KLASSEN, nicht inline: die Signalfarben-Variablen
+                    // liegen im hellen Thema alle unter 4,5:1 auf dem Grund dieser
+                    // Zeile (gemessen: 2,33 / 1,97 / 3,45) und brauchen dort eigene
+                    // Toene – das geht nur in CSS, nicht in einem Inline-Style.
+                    const setz = (txt, art) => {
+                        if (!st) return;
+                        st.textContent = txt;
+                        st.classList.remove('svc-ok', 'svc-warn', 'svc-err');
+                        if (art) st.classList.add(art);
+                    };
+                    if (!window.confirm(T('profile.restart_confirm', 'Den Jarvis-Dienst jetzt neu starten?'))) return;
+
+                    let vorher = null;
+                    try { vorher = (await _health()).started_at || null; } catch (e) { /* messen, nicht scheitern */ }
+
+                    _btnRs.disabled = true;
+                    setz(T('profile.restart_sent', 'Neustart ausgelöst – warte auf den Dienst…'));
+                    try {
+                        const r = await fetch('/api/system/restart', {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${token}` }
+                        });
+                        if (!r.ok) throw new Error('http ' + r.status);
+                    } catch (e) {
+                        _btnRs.disabled = false;
+                        setz(T('profile.restart_failed', '✗ Neustart konnte nicht ausgelöst werden')
+                             + ' (' + (e && e.message ? e.message : '?') + ')', 'svc-err');
+                        return;
+                    }
+
+                    // Der Endpunkt antwortet SOFORT und startet erst danach
+                    // (1 s Verzoegerung im Backend) – wer hier gleich pollt,
+                    // erwischt den ALTEN Prozess und meldete Erfolg zu frueh.
+                    const t0 = Date.now();
+                    const DECKEL = 90000;      // bis der Dienst zurueck ist
+                    const OHNE_AUSFALL = 25000;  // ... aber nur so lange, wie ein
+                    //   Neustart ueberhaupt noch plausibel ist: hat der Dienst
+                    //   DURCHGEHEND geantwortet und immer dieselbe Startzeit
+                    //   gemeldet, ist er nie heruntergefahren. Dann weiter zu
+                    //   warten hiesse, den Admin 90 s auf eine Antwort warten
+                    //   zu lassen, die schon feststeht.
+                    const schlaf = (ms) => new Promise(r => setTimeout(r, ms));
+                    await schlaf(2500);
+                    let jetzt = null, ausfall = false;
+                    while (Date.now() - t0 < DECKEL) {
+                        try {
+                            const d = await _health();
+                            jetzt = d.started_at || null;
+                            // Ohne Vergleichswert (aelteres Backend ohne
+                            // `started_at`) genuegt die Erreichbarkeit – mehr
+                            // ist dann nicht messbar.
+                            if (vorher === null || jetzt === null || jetzt !== vorher) break;
+                            if (!ausfall && Date.now() - t0 > OHNE_AUSFALL) break;
+                        } catch (e) {
+                            // Der Dienst ist gerade weg. `jetzt` MUSS zurueck
+                            // auf null: sonst steht dort der Wert von VOR dem
+                            // Herunterfahren, und ein Dienst, der nicht
+                            // zurueckkommt, wuerde als "laeuft unveraendert
+                            // weiter" gemeldet – die falsche Diagnose.
+                            jetzt = null;
+                            ausfall = true;
+                        }
+                        await schlaf(1000);
+                    }
+                    const sek = Math.round((Date.now() - t0) / 1000);
+                    _btnRs.disabled = false;
+                    if (jetzt !== null && vorher !== null && jetzt === vorher) {
+                        setz(T('profile.restart_nochange', '⚠ Der Dienst läuft unverändert weiter.'),
+                             'svc-warn');
+                    } else if (jetzt === null && vorher !== null) {
+                        setz(T('profile.restart_slow', '⚠ Der Dienst antwortet noch nicht.')
+                             .split('{s}').join(String(sek)), 'svc-warn');
+                    } else {
+                        setz(T('profile.restart_back', '✓ Dienst wieder erreichbar')
+                             .split('{s}').join(String(sek)), 'svc-ok');
+                    }
+                });
+            }
+            // Maximale Antwortlaenge speichern (einmalig verdrahten).
+            // Grenzen wie im Backend (config.py): 256..131072.
+            const _btnMt = document.getElementById('btn-save-llm-max-tokens');
+            if (_btnMt && !_btnMt._wired) {
+                _btnMt._wired = true;
+                _btnMt.addEventListener('click', async () => {
+                    const el = document.getElementById('setting-llm-max-tokens');
+                    const st = document.getElementById('llm-max-tokens-status');
+                    let v = parseInt(el && el.value, 10);
+                    if (isNaN(v) || v < 256) v = 256;
+                    if (v > 131072) v = 131072;
+                    if (el) el.value = v;
+                    try {
+                        await fetch('/api/settings', {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ llm_max_tokens: v })
+                        });
+                        if (st) { st.textContent = '✓ ' + (window.t ? window.t('profile.save_btn') : 'Gespeichert'); setTimeout(() => { st.textContent = ''; }, 2000); }
+                    } catch (e) {
+                        if (st) st.textContent = '✗';
+                    }
+                });
+            }
+            // Bildprofil speichern (einmalig verdrahten). Sendet NUR sein eigenes
+            // Feld – der Server merged, ein voller Formularstand ueberschriebe
+            // die Nachbarfelder (Register).
+            const _btnIp = document.getElementById('btn-save-image-profile');
+            if (_btnIp && !_btnIp._wired) {
+                _btnIp._wired = true;
+                _btnIp.addEventListener('click', async () => {
+                    const el = document.getElementById('setting-image-profile');
+                    const st = document.getElementById('image-profile-status');
+                    const v = (el && el.value) || '';
+                    try {
+                        const r = await fetch('/api/settings', {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ image_profile_id: v })
+                        });
+                        if (!r.ok) throw new Error('HTTP ' + r.status);
+                        if (st) { st.textContent = '✓ ' + (window.t ? window.t('profile.save_btn') : 'Gespeichert'); setTimeout(() => { st.textContent = ''; }, 2000); }
+                    } catch (e) {
+                        if (st) st.textContent = '✗';
+                    }
+                });
+            }
+            // Kontext-Komprimierungs-Schwelle speichern (einmalig verdrahten).
+            // Grenzen wie im Backend (main.py::api_context_threshold): 4..200.
+            // ANDERER Endpunkt als die Nachbarfelder: /api/context/threshold setzt
+            // den Wert am laufenden Hauptagenten UND in settings.json. Ueber
+            // /api/settings zu speichern haette den Agenten-Teil verdoppelt – und
+            // ein Wert, der erst nach einem Dienstneustart wirkt, sieht wie eine
+            // Einstellung ohne Wirkung aus.
+            const _btnCt = document.getElementById('btn-save-compress-threshold');
+            if (_btnCt && !_btnCt._wired) {
+                _btnCt._wired = true;
+                _btnCt.addEventListener('click', async () => {
+                    const el = document.getElementById('setting-compress-threshold');
+                    const st = document.getElementById('compress-threshold-status');
+                    let v = parseInt(el && el.value, 10);
+                    if (isNaN(v) || v < 4) v = 4;
+                    if (v > 200) v = 200;
+                    if (el) el.value = v;
+                    try {
+                        const r = await fetch('/api/context/threshold', {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ threshold: v })
+                        });
+                        const d = await r.json().catch(() => null);
+                        // Auf die Rueckgabe pruefen: der Endpunkt verlangt Admin-Rechte,
+                        // ein 403 darf nicht als Erfolg erscheinen.
+                        if (!r.ok || !d || d.threshold === undefined) throw new Error(r.status);
+                        if (el) el.value = d.threshold;
+                        if (st) { st.textContent = '✓ ' + (window.t ? window.t('profile.save_btn') : 'Gespeichert'); setTimeout(() => { st.textContent = ''; }, 2000); }
+                    } catch (e) {
+                        if (st) st.textContent = '✗';
+                    }
+                });
+            }
+            // Lizenz-Panel (einmalig verdrahten). Eigener Endpunkt /api/license,
+            // NICHT /api/settings: der Schluessel wird beim Eintragen sofort
+            // geprueft (Signatur + Statusabruf beim Anbieter), das Ergebnis ist
+            // die Antwort. Ueber die Sammel-Einstellung gespeichert waere weder
+            // der Grund einer Ablehnung noch die neue Stufe sichtbar.
+            _initLicensePanel();
+            // Vorhaltezeit erzeugter Dokumente (einmalig verdrahten).
+            // Grenzen wie im Backend (config.py::_valid_retention): 0 oder 15..90.
+            const _retNum = document.getElementById('setting-docs-retention');
+            const _retChk = document.getElementById('setting-docs-retention-forever');
+            const _retSt = document.getElementById('docs-retention-status');
+            if (_retChk && !_retChk._wired) {
+                _retChk._wired = true;
+                // "dauerhaft" und Tageszahl schliessen sich aus – das Feld wird
+                // ausgegraut statt geleert, damit der alte Wert beim Abwaehlen
+                // wieder da ist und der Nutzer ihn nicht neu tippen muss.
+                _retChk.addEventListener('change', () => {
+                    if (_retNum) {
+                        _retNum.disabled = _retChk.checked;
+                        _retNum.style.opacity = _retChk.checked ? '0.45' : '1';
+                    }
+                });
+            }
+            const _btnRet = document.getElementById('btn-save-docs-retention');
+            if (_btnRet && !_btnRet._wired) {
+                _btnRet._wired = true;
+                _btnRet.addEventListener('click', async () => {
+                    let v;
+                    if (_retChk && _retChk.checked) {
+                        v = 0;
+                    } else {
+                        v = parseInt(_retNum && _retNum.value, 10);
+                        if (isNaN(v) || v < 15) v = 15;
+                        if (v > 90) v = 90;
+                        if (_retNum) _retNum.value = v;
+                    }
+                    try {
+                        const r = await fetch('/api/settings', {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ docs_retention_days: v })
+                        });
+                        const d = await r.json().catch(() => ({}));
+                        if (_retSt) {
+                            // Beim Verkuerzen der Frist raeumt der Server sofort auf –
+                            // die Anzahl zurueckmelden, sonst wirkt das Speichern folgenlos.
+                            let msg = '✓';
+                            if (d && d.docs_removed > 0) {
+                                msg += ' ' + (window.t ? window.t('profile.docsret_removed').replace('{n}', d.docs_removed)
+                                                       : d.docs_removed + ' Dateien entfernt');
+                            }
+                            _retSt.textContent = msg;
+                            setTimeout(() => { _retSt.textContent = ''; }, 4000);
+                        }
+                    } catch (e) {
+                        if (_retSt) _retSt.textContent = '✗';
+                    }
+                });
+            }
+            if (tabSkills) { tabSkills.style.display = 'none'; tabSkills.classList.remove('active'); }
+            if (tabWhatsApp) { tabWhatsApp.style.display = 'none'; tabWhatsApp.classList.remove('active'); }
+            if (tabKnowledge) { tabKnowledge.style.display = 'none'; tabKnowledge.classList.remove('active'); }
+            if (tabGoogle) { tabGoogle.style.display = 'none'; tabGoogle.classList.remove('active'); }
+            if (tabVision) { tabVision.style.display = 'none'; tabVision.classList.remove('active'); }
+            if (tabTelemetry) { tabTelemetry.style.display = 'none'; tabTelemetry.classList.remove('active'); }
+            // Suchfeld im Kopf. Idempotent; hier und nicht beim Laden der Seite,
+            // weil der Kopf erst mit dem Modal wirklich benutzbar ist.
+            if (window.SettingsSearch) window.SettingsSearch.init();
+            modal.classList.add('open');
+        };
+        const closeModal = () => {
+            modal.classList.remove('open');
+            if (window.visionManager) window.visionManager.stop();
+        };
+
+        // Von _enterSettingsPage genutzt, damit /settings das Modal ohne den
+        // (entfernten) Header-Zahnrad-Button oeffnen kann.
+        window._openSettingsModal = openModal;
+        if (btnOpen) btnOpen.addEventListener('click', openModal);
+        btnClose.addEventListener('click', closeModal);
+        // Kein Schließen bei Klick außerhalb oder versehentlichem Drag – nur explizit via X-Button
+
+        // ── Vollbild-Umschalter (gilt für alle Einstellungs-Tabs) ──
+        const btnMax = document.getElementById('btn-maximize-settings');
+        if (btnMax && !btnMax._bound) {
+            btnMax._bound = true;
+            const applyMax = (on) => {
+                modal.classList.toggle('settings-maximized', on);
+                btnMax.textContent = on ? '🗗' : '⛶';
+                btnMax.classList.toggle('active', on);
+            };
+            // Zustand aus localStorage wiederherstellen
+            applyMax(localStorage.getItem('jarvis_settings_maximized') === '1');
+            btnMax.addEventListener('click', () => {
+                const on = !modal.classList.contains('settings-maximized');
+                localStorage.setItem('jarvis_settings_maximized', on ? '1' : '0');
+                applyMax(on);
+            });
+        }
+
+        // ── Ansicht wechseln ──
+        function showListView() {
+            listView.style.display = '';
+            editView.style.display = 'none';
+            settingsTitle.textContent = window.t('settings.title');
+        }
+
+        function showEditView(isNew) {
+            listView.style.display = 'none';
+            editView.style.display = '';
+            settingsTitle.textContent = isNew ? window.t('profile.new') : window.t('profile.edit');
+        }
+
+        // ── Profile laden ──
+        // ─── Lizenz ────────────────────────────────────────────────────────
+        // Zeigt Stufe, Bindung und Verbrauch; traegt den Schluessel ein.
+        // Bewusst KEIN Poll-Timer: der Zustand aendert sich taeglich, nicht
+        // sekuendlich – geladen wird beim Oeffnen der Einstellungen und nach
+        // jeder Aktion. (Genau der Poll war beim entfernten Kontext-Abschnitt
+        // das Problem: er hat laufende Eingaben ueberschrieben.)
+        function _licSet(id, text) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = text;
+        }
+
+        function _licRender(d) {
+            const z = (d && d.lizenz) || {};
+            const v = (d && d.verbrauch) || {};
+            const box = document.getElementById('lic-status');
+            const T = (k, f) => (window.t ? window.t(k) : f) || f;
+            if (box) {
+                const art = z.art || 'FREE';
+                const teile = [T('license.level', 'Stufe') + ': ' + art];
+                if (z.firma) teile.push(z.firma + (z.abteilung ? ' / ' + z.abteilung : ''));
+                if (z.gueltig_bis) {
+                    teile.push(T('license.valid_until', 'gültig bis') + ' ' + z.gueltig_bis
+                        + (z.tage_bis_ablauf != null ? ' (' + z.tage_bis_ablauf + ' '
+                            + T('license.days', 'Tage') + ')' : ''));
+                } else if (z.gueltig) {
+                    teile.push(T('license.unlimited', 'unbegrenzt'));
+                }
+                if (z.grund) teile.push('⚠ ' + z.grund);
+                if (z.einfuehrung_karenz) {
+                    // Platzhalter GLOBAL ersetzen – String.replace mit einem
+                    // String tauscht nur das erste Vorkommen (siehe sessions.hint).
+                    teile.push(T('license.grace', 'Grenzen greifen in {n} Tagen')
+                        .replace(/\{n\}/g, z.einfuehrung_rest_tage));
+                }
+                if (z.letzter_erfolg) {
+                    teile.push(T('license.last_check', 'zuletzt geprüft')
+                        + ': ' + String(z.letzter_erfolg).replace('T', ' ').slice(0, 16));
+                }
+                box.textContent = teile.join(' · ');
+                box.style.color = z.gueltig ? 'var(--success)'
+                    : (z.banner ? 'var(--danger)' : 'var(--text-secondary)');
+            }
+            const lim = document.getElementById('lic-limits');
+            if (lim) {
+                const zeile = (name, o) => name + ': ' + o.ist + '/'
+                    + (o.max == null ? '∞' : o.max);
+                const teile = [];
+                if (v.profile) teile.push(zeile(T('license.profiles', 'Profile'), v.profile));
+                if (v.skills) teile.push(zeile(T('license.skills', 'Skills'), v.skills));
+                if (v.benutzer) teile.push(zeile(T('license.users', 'Benutzer'), v.benutzer));
+                if (v.rag) teile.push(zeile(T('license.rag', 'Wissensdateien'), v.rag));
+                if (v.updates) teile.push(T('license.updates', 'Updates') + ': ' + v.updates);
+                lim.textContent = teile.join(' · ');
+                lim.style.display = teile.length ? 'block' : 'none';
+            }
+            _licSet('lic-hwid', z.hwid || '–');
+            // Die Beschriftung folgt der BINDUNGSART: im Container ist das
+            // keine Hardware-Kennung, und "Hardware" zu schreiben waere eine
+            // Falschaussage. Umgestellt wird das data-i18n-ATTRIBUT, nicht nur
+            // der Text – sonst holt der naechste Sprachwechsel das alte Label
+            // zurueck.
+            (function () {
+                const instanz = z.bindungsart === 'instanz';
+                const lbl = document.querySelector('[data-i18n^="license.hwid_label"],[data-i18n="license.instanz_label"]');
+                if (lbl) {
+                    const key = instanz ? 'license.instanz_label' : 'license.hwid_label';
+                    lbl.setAttribute('data-i18n', key);
+                    lbl.textContent = T(key, instanz
+                        ? 'Instanz-Kennung dieses Systems (Container)'
+                        : 'Hardware-Kennung dieses Systems');
+                }
+                const hint = document.getElementById('lic-bind-hint');
+                if (hint) hint.hidden = !instanz;
+            })();
+            const ta = document.getElementById('lic-token');
+            // Das Eingabefeld NICHT ueberschreiben, waehrend jemand darin tippt.
+            if (ta && document.activeElement !== ta && !z.hat_token) ta.value = '';
+        }
+
+        async function _licLoad() {
+            try {
+                const r = await fetch('/api/license', { headers: { 'Authorization': `Bearer ${token}` } });
+                if (!r.ok) return;
+                _licRender(await r.json());
+            } catch (e) { /* Panel bleibt auf dem letzten Stand */ }
+        }
+
+        function _initLicensePanel() {
+            const btnSave = document.getElementById('btn-lic-save');
+            if (btnSave && !btnSave._wired) {
+                btnSave._wired = true;
+                const st = () => document.getElementById('lic-save-status');
+                const melde = (text, ok) => {
+                    const s = st();
+                    if (!s) return;
+                    s.textContent = text;
+                    s.style.color = ok ? 'var(--success)' : 'var(--danger)';
+                    if (ok) setTimeout(() => { s.textContent = ''; }, 4000);
+                };
+                btnSave.addEventListener('click', async () => {
+                    const ta = document.getElementById('lic-token');
+                    const wert = (ta && ta.value || '').trim();
+                    if (!wert) return melde('✗', false);
+                    melde('…', true);
+                    try {
+                        const r = await fetch('/api/license', {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ token: wert })
+                        });
+                        const d = await r.json().catch(() => null);
+                        if (d && d.lizenz) _licRender({ lizenz: d.lizenz });
+                        await _licLoad();
+                        if (!r.ok || !d || d.ok === false) {
+                            melde('✗ ' + ((d && d.error) || r.status), false);
+                        } else {
+                            melde('✓', true);
+                        }
+                    } catch (e) { melde('✗', false); }
+                });
+
+                const btnCheck = document.getElementById('btn-lic-check');
+                if (btnCheck) btnCheck.addEventListener('click', async () => {
+                    melde('…', true);
+                    try {
+                        const r = await fetch('/api/license/check', {
+                            method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
+                        });
+                        const d = await r.json().catch(() => null);
+                        if (!r.ok) throw new Error(r.status);
+                        if (d && d.lizenz) _licRender({ lizenz: d.lizenz });
+                        await _licLoad();
+                        melde('✓', true);
+                    } catch (e) { melde('✗', false); }
+                });
+
+                const btnClear = document.getElementById('btn-lic-clear');
+                if (btnClear) btnClear.addEventListener('click', async () => {
+                    const frage = window.t ? window.t('license.confirm_clear') : '';
+                    if (!confirm(frage || 'Lizenzschlüssel entfernen? Das System läuft danach mit den FREE-Grenzen.')) return;
+                    try {
+                        const r = await fetch('/api/license', {
+                            method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` }
+                        });
+                        if (!r.ok) throw new Error(r.status);
+                        const ta = document.getElementById('lic-token');
+                        if (ta) ta.value = '';
+                        await _licLoad();
+                        melde('✓', true);
+                    } catch (e) { melde('✗', false); }
+                });
+
+                const btnCopy = document.getElementById('btn-lic-copy-hwid');
+                if (btnCopy) btnCopy.addEventListener('click', () => {
+                    const el = document.getElementById('lic-hwid');
+                    const wert = el ? el.textContent.trim() : '';
+                    if (!wert || wert === '–') return;
+                    // clipboard.writeText braucht einen sicheren Kontext; das ist
+                    // hier immer HTTPS, ein Fehlschlag bleibt trotzdem still.
+                    try { navigator.clipboard.writeText(wert); } catch (e) { /* egal */ }
+                    melde('✓', true);
+                });
+            }
+            _licLoad();
+        }
+
+        async function loadProfiles() {
+            try {
+                const res = await fetch('/api/settings', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await res.json();
+                profiles = data.profiles || [];
+                activeProfileId = data.active_profile_id || '';
+                defaults = data.defaults || {};
+                // LLM-Timeout (global) ins Eingabefeld
+                const _tmEl = document.getElementById('setting-llm-timeout');
+                if (_tmEl) _tmEl.value = data.llm_timeout || 180;
+                // Maximale Antwortlaenge (global) ins Eingabefeld
+                const _mtEl = document.getElementById('setting-llm-max-tokens');
+                if (_mtEl) _mtEl.value = data.llm_max_tokens || 8192;
+                // Bildprofil: die Auswahlliste wird aus den GELADENEN Profilen
+                // gebaut. Eine getippte Kennung waere hier eine Fehlerquelle ohne
+                // Gegenwert, und eine zweite Profil-Abfrage ein Roundtrip zu viel.
+                const _ipEl = document.getElementById('setting-image-profile');
+                if (_ipEl) {
+                    const _leer = _ipEl.querySelector('option[value=""]');
+                    _ipEl.innerHTML = '';
+                    if (_leer) _ipEl.appendChild(_leer);
+                    (data.profiles || []).forEach(p => {
+                        const o = document.createElement('option');
+                        o.value = p.id || '';
+                        // textContent: der Profilname ist Freitext eines Admins
+                        o.textContent = (p.name || p.id || '') + (p.model ? ` · ${p.model}` : '');
+                        _ipEl.appendChild(o);
+                    });
+                    const _ipNeu = data.image_profile_id || '';
+                    // Zeigt die Einstellung ins Leere (Profil geloescht), faellt die
+                    // Auswahl sichtbar auf "wie das Chat-Profil" – und die Zeile
+                    // daneben SAGT es. Das entspricht dem Backend
+                    // (provider_fuer_bild ist fail-safe); eine Auswahl, die einen
+                    // Wert anzeigt, den es nicht mehr gibt, waere die schlechtere
+                    // Auskunft.
+                    const _ipDa = _ipNeu
+                        && Array.from(_ipEl.options).some(o => o.value === _ipNeu);
+                    _ipEl.value = _ipDa ? _ipNeu : '';
+                    if (_ipNeu && !_ipDa) {
+                        const st = document.getElementById('image-profile-status');
+                        if (st) st.textContent = window.t ? window.t('profile.imgprof_gone') : 'Profil nicht mehr vorhanden';
+                    }
+                }
+                // Kontext-Komprimierungs-Schwelle (global) ins Eingabefeld
+                const _ctEl = document.getElementById('setting-compress-threshold');
+                if (_ctEl) _ctEl.value = data.compress_threshold || 30;
+                // Vorhaltezeit: 0 = dauerhaft -> Haken setzen, Feld ausgrauen.
+                // Pruefung auf null/undefined, NICHT auf Falsyness – 0 ist gueltig.
+                const _rN = document.getElementById('setting-docs-retention');
+                const _rC = document.getElementById('setting-docs-retention-forever');
+                const _rv = (data.docs_retention_days == null) ? 30 : Number(data.docs_retention_days);
+                if (_rC) _rC.checked = (_rv === 0);
+                if (_rN) {
+                    if (_rv > 0) _rN.value = _rv;      // bei 0 den letzten Tageswert stehen lassen
+                    _rN.disabled = (_rv === 0);
+                    _rN.style.opacity = (_rv === 0) ? '0.45' : '1';
+                }
+                // Stimmen laden und gespeicherte Auswahl setzen
+                _loadTtsVoices(data.tts_voice || '');
+                // Agent API Key: BSI M5 – der Klartext kommt NICHT mehr beim Laden,
+                // sondern erst beim Klick aufs Auge (bzw. Kopieren), nach erneuter
+                // Anmeldung. Bis dahin Sterne als Zeichen "es ist einer gespeichert".
+                if (inputAgentKey) {
+                    _agentKeyValue = '';
+                    inputAgentKey.value = '';
+                    inputAgentKey.placeholder = data.agent_api_key ? '••••••••' : '';
+                    inputAgentKey.type = 'password';
+                    inputAgentKey.readOnly = true;
+                    _agentKeyVisible = false;
+                    if (btnToggleKey) btnToggleKey.innerHTML = SVG_EYE_OPEN;
+                }
+                renderProfileList();
+            } catch (err) {
+                console.error('Fehler beim Laden der Profile:', err);
+            }
+        }
+
+        // Dezente Zusammenfassung der Profil-Einschraenkung (erlaubte Benutzer/Gruppen)
+        // fuer die Listenanzeige – leer, wenn das Profil fuer alle offen ist.
+        function _profRestrictionSummary(p) {
+            const cn = (dn) => { const m = /^CN=([^,]+)/i.exec((dn || '').trim()); return m ? m[1] : (dn || '').trim(); };
+            const users = (p.allowed_users || '').split(',').map(s => s.trim()).filter(Boolean);
+            const groups = (p.allowed_group || '').split('\n').map(cn).filter(Boolean);
+            const all = users.concat(groups);
+            const lbl = escapeHtml(window.t('profile.perm_label'));
+            if (!all.length) {
+                const ev = escapeHtml(window.t('profile.perm_everyone'));
+                return ` <span class="profile-restriction" title="${lbl}: ${ev}">(${ev})</span>`;
+            }
+            const txt = all.join(', ');
+            return ` <span class="profile-restriction" title="${lbl}: ${escapeHtml(txt)}">(${escapeHtml(txt)})</span>`;
+        }
+
+        // ── Profilliste rendern ──
+        function renderProfileList() {
+            // Das Faehigkeiten-Panel haengt nach einem Klick IN einer Karte.
+            // Ohne dieses Heimholen raeumt `innerHTML = ''` es mit ab und
+            // `#model-caps-box` ist danach fuer immer weg (gleiche Falle wie bei
+            // der Extraktions-Vorschau in /wissen und dem Rollen-Formular).
+            if (window.ModelCaps && window.ModelCaps.heim) window.ModelCaps.heim();
+            profilesContainer.innerHTML = '';
+            profiles.forEach(p => {
+                const card = document.createElement('div');
+                card.className = 'profile-card' + (p.id === activeProfileId ? ' active' : '');
+                card.innerHTML = `
+                    <div class="profile-info" data-id="${p.id}">
+                        <span class="profile-name-row">
+                            <span class="llm-status-pill checking" data-id="${p.id}" title="${window.t('profile.status_checking')}"></span>
+                            <span class="profile-name">${escapeHtml(p.name)}</span>
+                        </span>
+                        <span class="profile-detail">${PROVIDER_LABELS[p.provider] || p.provider} · ${escapeHtml(p.model)}${_profRestrictionSummary(p)}</span>
+                    </div>
+                    <div class="profile-actions">
+                        <button class="btn-icon btn-small btn-caps-profile mc-info-btn" data-id="${p.id}" title="${window.t('caps.btn_title')}" aria-label="${window.t('caps.btn_title')}">ⓘ</button>
+                        <button class="btn-icon btn-small btn-perms-profile" data-id="${p.id}" title="${window.t('profile.perm_label')}">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                        </button>
+                        <button class="btn-icon btn-small btn-edit-profile" data-id="${p.id}" title="Bearbeiten">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                        </button>
+                        <button class="btn-icon btn-small btn-delete-profile" data-id="${p.id}" title="${window.t('common.delete')}">
+                            ${JarvisIcons.trash()}
+                        </button>
+                    </div>
+                `;
+                // Klick auf Info-Bereich = Profil aktivieren
+                card.querySelector('.profile-info').addEventListener('click', () => activateProfile(p.id));
+                // ⓘ = Faehigkeiten des Modells (model_caps.js). stopPropagation ist
+                // Pflicht: ein Klick auf die Karte AKTIVIERT sonst das Profil.
+                const capsBtn = card.querySelector('.btn-caps-profile');
+                if (capsBtn) capsBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    if (window.ModelCaps) window.ModelCaps.fuerProfil(p, card);
+                });
+                card.querySelector('.btn-perms-profile').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    editProfilePermissions(p.id);
+                });
+                card.querySelector('.btn-edit-profile').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    openEditView(p.id);
+                });
+                card.querySelector('.btn-delete-profile').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    deleteProfile(p.id);
+                });
+                profilesContainer.appendChild(card);
+            });
+            // Erreichbarkeit aller Profile asynchron prüfen (Ampel-Pills aktualisieren)
+            _refreshProfileStatuses();
+        }
+
+        // ── LLM-Erreichbarkeit pro Profil prüfen (grün/gelb/rot Pill) ──
+        async function _refreshProfileStatuses() {
+            await Promise.all(profiles.map(async (p) => {
+                const pill = profilesContainer.querySelector(`.llm-status-pill[data-id="${p.id}"]`);
+                if (!pill) return;
+                try {
+                    const res = await fetch(`/api/profiles/${p.id}/test`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    const d = await res.json();
+                    // status: ok (grün) | degraded (gelb) | down (rot)
+                    const status = d.status || (d.success ? 'ok' : 'down');
+                    pill.classList.remove('checking', 'ok', 'degraded', 'down');
+                    pill.classList.add(status);
+                    const latency = d.latency_ms != null ? ` (${d.latency_ms} ms)` : '';
+                    if (status === 'ok') {
+                        pill.title = window.t('profile.status_online') + latency;
+                    } else if (status === 'degraded') {
+                        pill.title = (d.message || window.t('profile.status_model_missing')) + latency;
+                    } else {
+                        pill.title = (d.error || window.t('profile.status_offline')) + latency;
+                    }
+                } catch (err) {
+                    pill.classList.remove('checking', 'ok', 'degraded', 'down');
+                    pill.classList.add('down');
+                    pill.title = window.t('profile.status_offline');
+                }
+            }));
+        }
+
+        // ── Profil aktivieren ──
+        async function activateProfile(id) {
+            try {
+                await fetch(`/api/profiles/${id}/activate`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                activeProfileId = id;
+                renderProfileList();
+                const profile = profiles.find(p => p.id === id);
+            } catch (err) {
+                console.error('Fehler beim Aktivieren:', err);
+            }
+        }
+
+        // ── Pro-Profil Berechtigungen (eigenes Fenster, analog Wissensgruppen) ──
+        function editProfilePermissions(id) {
+            const p = profiles.find(x => x.id === id);
+            if (!p) return;
+            const T = (k, d) => (window.t && window.t(k) !== k ? window.t(k) : d);
+
+            const old = document.getElementById('llm-perm-modal');
+            if (old) old.remove();
+
+            const m = document.createElement('div');
+            m.id = 'llm-perm-modal';
+            m.className = 'modal';
+            m.style.zIndex = '10001';
+            m.innerHTML = `
+                <div class="modal-content glass" style="max-width:620px;">
+                    <div class="modal-header">
+                        <h2>${T('profile.perm_label', 'Nutzung erlauben für')} – ${escapeHtml(p.name)}</h2>
+                        <button class="btn-icon" id="llm-perm-close" aria-label="${T('common.close', 'Schließen')}">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                        </button>
+                    </div>
+                    <div class="modal-body" style="overflow-y:auto;">
+                        <p class="kb-hint" style="margin-top:0;" data-i18n="profile.perm_hint">${T('profile.perm_hint', 'Leer lassen = alle dürfen dieses Profil nutzen und darauf wechseln. Sonst nur die genannten Benutzer/Gruppen (plus Administratoren).')}</p>
+                        <label class="kb-form-label" style="display:block;margin:12px 0 4px;" data-i18n="profile.perm_users">${T('profile.perm_users', 'Erlaubte AD-Benutzer')}</label>
+                        <input type="text" id="llm-perm-users" class="kb-input" style="width:100%;box-sizing:border-box;" data-i18n-placeholder="profile.perm_users_ph" placeholder="${T('profile.perm_users_ph', 'Benutzer (kommagetrennt)')}">
+                        <label class="kb-form-label" style="display:block;margin:16px 0 4px;" data-i18n="profile.perm_groups">${T('profile.perm_groups', 'Erlaubte AD-Gruppen')}</label>
+                        <textarea id="llm-perm-groups" class="kb-input" rows="2" style="width:100%;box-sizing:border-box;" data-i18n-placeholder="profile.perm_groups_ph" placeholder="${T('profile.perm_groups_ph', 'AD-Gruppen (eine pro Zeile)')}"></textarea>
+                        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;">
+                            <button type="button" id="llm-perm-cancel" class="btn-secondary" data-i18n="profile.cancel">${T('profile.cancel', 'Abbrechen')}</button>
+                            <button type="button" id="llm-perm-save" class="btn-primary" data-i18n="profile.save">${T('profile.save', 'Speichern')}</button>
+                        </div>
+                    </div>
+                </div>`;
+            document.body.appendChild(m);
+
+            const usersInp = m.querySelector('#llm-perm-users');
+            const groupsInp = m.querySelector('#llm-perm-groups');
+            // Werte VOR dem Attach setzen, damit die Chip-Liste sie sofort rendert
+            // (behebt: hinterlegter Benutzer wurde nicht angezeigt).
+            usersInp.value = p.allowed_users || '';
+            groupsInp.value = p.allowed_group || '';
+            if (window.LdapPicker) {
+                window.LdapPicker.attachField(usersInp, { kind: 'users', sep: ',' });
+                window.LdapPicker.attachField(groupsInp, { kind: 'groups', sep: '\n' });
+            }
+            if (window.applyLang) window.applyLang();
+
+            const close = () => m.remove();
+            m.querySelector('#llm-perm-close').onclick = close;
+            m.querySelector('#llm-perm-cancel').onclick = close;
+            m.addEventListener('click', (e) => { if (e.target === m) close(); });
+            m.querySelector('#llm-perm-save').onclick = async () => {
+                try {
+                    const res = await fetch(`/api/profiles/${id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({
+                            allowed_users: (usersInp.value || '').trim(),
+                            allowed_group: (groupsInp.value || '').trim(),
+                        }),
+                    });
+                    const data = await res.json();
+                    if (data && (data.success || data.id)) {
+                        await loadProfiles();
+                        close();
+                    } else {
+                        alert(window.t('common.error_unknown').replace('{msg}', (data && data.error) || '?'));
+                    }
+                } catch (e) {
+                    alert(window.t('common.connection_failed'));
+                }
+            };
+            requestAnimationFrame(() => m.classList.add('open'));
+        }
+
+        // ── Profil löschen ──
+        async function deleteProfile(id) {
+            if (profiles.length <= 1) {
+                alert(window.t('profile.cannot_delete_last'));
+                return;
+            }
+            const profile = profiles.find(p => p.id === id);
+            if (!confirm(window.t('profile.confirm_delete').replace('{name}', profile?.name || ''))) return;
+
+            try {
+                const res = await fetch(`/api/profiles/${id}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await res.json();
+                if (data.success) {
+                    await loadProfiles();
+                } else {
+                    alert(window.t('common.error_unknown').replace('{msg}', data.error || '?'));
+                }
+            } catch (err) {
+                alert(window.t('common.connection_failed'));
+            }
+        }
+
+        // ── Editor öffnen ──
+        function openEditView(id) {
+            editingProfileId = id || null;
+            // Fuer model_caps.js sichtbar machen: die Faehigkeits-Abfrage braucht
+            // die Id, um beim Backend den echten (unmaskierten) API-Key zu
+            // benutzen – das Formularfeld bleibt beim Bearbeiten absichtlich leer.
+            try { document.getElementById('profile-edit-view').dataset.profileId = id || ''; } catch (e) {}
+            const profile = id ? profiles.find(p => p.id === id) : null;
+
+            // Felder befüllen (zunächst mit maskierten Werten)
+            inputName.value = profile ? profile.name : '';
+            selectProvider.value = profile ? profile.provider : 'google';
+            inputUrl.value = profile ? profile.api_url : '';
+            inputKey.value = '';
+            if (inputSessionKey) inputSessionKey.value = '';
+
+            // Eye-Icons zurücksetzen (Auge-auf = verborgen)
+            inputKey.type = 'password';
+            if (btnToggleProfileApiKey) btnToggleProfileApiKey.innerHTML = SVG_EYE_OPEN;
+            if (inputSessionKey) inputSessionKey.type = 'password';
+            if (btnToggleProfileSessionKey) btnToggleProfileSessionKey.innerHTML = SVG_EYE_OPEN;
+
+            // Test-Ergebnis zurücksetzen
+            if (profileTestResult) { profileTestResult.style.display = 'none'; profileTestResult.textContent = ''; }
+
+            // BSI M5: der Schluessel wird NICHT mehr beim Oeffnen geladen. Das
+            // Feld bleibt leer (= unveraendert beim Speichern, Test/Modellsuche
+            // nehmen serverseitig den gespeicherten); Sterne zeigen, dass einer
+            // da ist. Das Auge holt ihn nach erneuter Anmeldung.
+            inputKey.placeholder = (profile && profile.api_key) ? '••••••••' : '';
+            if (inputSessionKey) inputSessionKey.placeholder = (profile && profile.session_key) ? '••••••••' : '';
+
+            // Auth-Methode
+            if (profile && profile.auth_method === 'session') {
+                radioSession.checked = true;
+            } else {
+                radioApiKey.checked = true;
+            }
+
+            // Provider-abhängige Felder initialisieren
+            updateProviderUI();
+
+            // Modell setzen (nach updateProviderUI)
+            if (profile) {
+                inputModel.value = profile.model || '';
+                if (checkPromptTool) {
+                    checkPromptTool.checked = !!profile.prompt_tool_calling;
+                }
+                // Temperature: Backend liefert "" (Standard), "auto" oder eine Zahl.
+                // 0 ist ein gueltiger Wert – daher explizit auf null/undefined pruefen
+                // und NICHT auf Falsyness, sonst wuerde 0 als "leer" angezeigt.
+                if (inputTemperature) {
+                    const _t = profile.temperature;
+                    inputTemperature.value = (_t === null || _t === undefined || _t === '') ? '' : String(_t);
+                }
+            } else {
+                if (checkPromptTool) checkPromptTool.checked = false;
+                if (inputTemperature) inputTemperature.value = '';
+            }
+
+            showEditView(!id);
+        }
+
+        // ── Provider-abhängige UI aktualisieren ──
+        function updateProviderUI() {
+            const provider = selectProvider.value;
+            const isAnthropic = provider === 'anthropic';
+            const isOpenAICompat = provider === 'openai_compatible';
+            const isSession = radioSession && radioSession.checked;
+
+            // Datalist mit Vorschlägen für aktuellen Provider befüllen
+            const models = (defaults[provider] && defaults[provider].models) || [];
+            modelSuggestions.innerHTML = '';
+            models.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m;
+                modelSuggestions.appendChild(opt);
+            });
+
+            // URL vorbefüllen wenn leer
+            if (!inputUrl.value && defaults[provider]) {
+                inputUrl.value = defaults[provider].url || '';
+            }
+
+            // Auth-Methode nur bei Anthropic
+            authMethodGroup.style.display = isAnthropic ? '' : 'none';
+
+            // API Key / Session Key
+            if (isAnthropic && isSession) {
+                apikeyGroup.style.display = 'none';
+                sessionGroup.style.display = '';
+            } else {
+                apikeyGroup.style.display = '';
+                sessionGroup.style.display = 'none';
+            }
+
+            // API Key Hinweis
+            if (apikeyHint) {
+                apikeyHint.textContent = isOpenAICompat ? window.t('app.apikey_optional_ollama') : '';
+            }
+
+            // Prompt-Tool-Calling nur bei openai_compatible anzeigen
+            if (promptToolGroup) {
+                promptToolGroup.style.display = isOpenAICompat ? '' : 'none';
+            }
+        }
+
+        // Event-Listener für Provider/Auth-Wechsel
+        selectProvider.addEventListener('change', () => {
+            // URL zurücksetzen bei Provider-Wechsel
+            const provider = selectProvider.value;
+            if (defaults[provider]) {
+                inputUrl.value = defaults[provider].url || '';
+            }
+            updateProviderUI();
+        });
+        if (radioApiKey) radioApiKey.addEventListener('change', updateProviderUI);
+        if (radioSession) radioSession.addEventListener('change', updateProviderUI);
+
+        // ── Neues Profil ──
+        btnAddProfile.addEventListener('click', () => openEditView(null));
+
+        // ── Profil speichern ──
+        btnSaveProfile.addEventListener('click', async () => {
+            const provider = selectProvider.value;
+            const isSession = provider === 'anthropic' && radioSession && radioSession.checked;
+            const model = inputModel.value;
+
+            if (!inputName.value.trim()) {
+                alert(window.t('profile.name_required'));
+                return;
+            }
+            if (!model.trim()) {
+                alert(window.t('profile.model_required'));
+                return;
+            }
+
+            const profileData = {
+                name: inputName.value.trim(),
+                provider: provider,
+                model: model,
+                api_url: inputUrl.value,
+                api_key: isSession ? '' : inputKey.value,
+                auth_method: isSession ? 'session' : 'api_key',
+                session_key: isSession && inputSessionKey ? inputSessionKey.value : '',
+                prompt_tool_calling: provider === 'openai_compatible' && checkPromptTool ? checkPromptTool.checked : false,
+                // Rohwert senden ("", "auto" oder Zahl als Text) – die Validierung
+                // und Begrenzung auf 0..2 macht das Backend (config._valid_temperature).
+                temperature: inputTemperature ? inputTemperature.value.trim() : '',
+            };
+
+            btnSaveProfile.textContent = window.t('common.saving');
+            btnSaveProfile.disabled = true;
+
+            try {
+                let res;
+                if (editingProfileId) {
+                    // Aktualisieren
+                    res = await fetch(`/api/profiles/${editingProfileId}`, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify(profileData)
+                    });
+                } else {
+                    // Neu erstellen
+                    res = await fetch('/api/profiles', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify(profileData)
+                    });
+                }
+                const data = await res.json();
+                if (data.success) {
+                    await loadProfiles();
+                    showListView();
+                } else if (data.code === 'geheimnis_neu_eingeben') {
+                    alert(window.t('common.secret_reenter'));
+                } else {
+                    alert(window.t('common.error_unknown').replace('{msg}', data.error || '?'));
+                }
+            } catch (err) {
+                alert(window.t('common.connection_failed'));
+            } finally {
+                btnSaveProfile.textContent = window.t('profile.save');
+                btnSaveProfile.disabled = false;
+            }
+        });
+
+        // ── Abbrechen (zurück zur Liste) ──
+        btnCancelProfile.addEventListener('click', showListView);
+        // × oben rechts im Profil-Formular – dieselbe Funktion wie "Abbrechen".
+        const btnCloseProfileEdit = document.getElementById('btn-close-profile-edit');
+        if (btnCloseProfileEdit) btnCloseProfileEdit.addEventListener('click', showListView);
+
+        // ── Verbindung testen ──
+        if (btnTestProfile) {
+            btnTestProfile.addEventListener('click', async () => {
+                btnTestProfile.disabled = true;
+                btnTestProfile.textContent = window.t('common.testing');
+                profileTestResult.style.display = '';
+                profileTestResult.style.background = 'rgba(var(--fg-rgb),0.05)';
+                profileTestResult.style.border = '1px solid rgba(var(--fg-rgb),0.1)';
+                profileTestResult.style.color = 'var(--text-muted)';
+                profileTestResult.textContent = window.t('profile.testing');
+                try {
+                    // Aktuelle Formularwerte verwenden (nicht die gespeicherten)
+                    const testPayload = {
+                        provider: selectProvider.value,
+                        api_url: inputUrl.value.trim(),
+                        api_key: inputKey.value.trim(),
+                        model: inputModel.value.trim() || '',
+                        auth_method: (radioSession && radioSession.checked) ? 'session' : 'api_key',
+                        session_key: inputSessionKey ? inputSessionKey.value.trim() : '',
+                        // leeres Schluesselfeld → Server nimmt den gespeicherten (BSI M5)
+                        profile_id: editingProfileId || '',
+                    };
+                    const res = await fetch(`/api/profiles/test`, {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify(testPayload),
+                    });
+                    const data = await res.json();
+                    // Datalist mit echten API-Modellen befüllen
+                    const availModels = data.available_models || data.models || [];
+                    if (availModels.length > 0) {
+                        modelSuggestions.innerHTML = '';
+                        availModels.forEach(m => {
+                            const opt = document.createElement('option');
+                            opt.value = m;
+                            modelSuggestions.appendChild(opt);
+                        });
+                    }
+                    if (data.success) {
+                        const ok = data.model_found !== false;
+                        profileTestResult.style.background = ok ? 'rgba(var(--success-rgb),0.15)' : 'rgba(var(--warning-rgb),0.15)';
+                        profileTestResult.style.border = ok ? '1px solid rgba(var(--success-rgb),0.4)' : '1px solid rgba(var(--warning-rgb),0.4)';
+                        profileTestResult.style.color = ok ? 'var(--success)' : 'var(--warning)';
+                        profileTestResult.textContent = `${ok ? '✓' : '⚠'} ${data.message}${data.latency_ms ? ` (${data.latency_ms} ms)` : ''}`;
+                        if (availModels.length > 0 && !ok) {
+                            profileTestResult.textContent += ' → ' + window.t('app.pick_model_from_list');
+                        }
+                    } else {
+                        profileTestResult.style.background = 'rgba(var(--danger-rgb),0.15)';
+                        profileTestResult.style.border = '1px solid rgba(var(--danger-rgb),0.4)';
+                        profileTestResult.style.color = 'var(--danger)';
+                        profileTestResult.textContent = `✗ ${data.error}${data.latency_ms ? ` (${data.latency_ms} ms)` : ''}`;
+                    }
+                } catch (e) {
+                    profileTestResult.style.background = 'rgba(var(--danger-rgb),0.15)';
+                    profileTestResult.style.border = '1px solid rgba(var(--danger-rgb),0.4)';
+                    profileTestResult.style.color = 'var(--danger)';
+                    profileTestResult.textContent = `✗ ${window.t('update.error').replace('{msg}', e.message)}`;
+                } finally {
+                    btnTestProfile.disabled = false;
+                    btnTestProfile.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px;"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>' + window.t('app.test_connection');
+                }
+            });
+        }
+
+        // ── Discover-Button: verfuegbare Modelle abrufen + per Klick uebernehmen ──
+        const btnDiscoverModels = document.getElementById('btn-discover-models');
+        const modelDiscoverList = document.getElementById('model-discover-list');
+        const _hideModelDiscover = () => { if (modelDiscoverList) modelDiscoverList.style.display = 'none'; };
+        if (btnDiscoverModels && modelDiscoverList) {
+            // Farben/Deckung direkt inline per !important setzen – unabhaengig von
+            // CSS-Datei/Service-Worker-Cache. Theme-bewusst (dark/light).
+            const _mdColors = () => {
+                const light = document.body.classList.contains('light');
+                return {
+                    bg:  light ? '#ffffff' : '#141a28',
+                    bgh: light ? '#eef0f4' : '#20283c',
+                    fg:  light ? '#1f2937' : '#e5e7eb',
+                    fgm: light ? '#475569' : '#cbd5e1',
+                    acc: light ? '#4f46e5' : '#a5b4fc',
+                    brd: light ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.18)',
+                };
+            };
+            const _mdSolid = (el, c, textColor) => {
+                el.style.setProperty('background-color', c.bg, 'important');
+                if (textColor) el.style.setProperty('color', textColor, 'important');
+            };
+            const _mdMsg = (txt, isErr) => {
+                const c = _mdColors();
+                modelDiscoverList.innerHTML = '';
+                const d = document.createElement('div');
+                d.textContent = txt;
+                d.style.cssText = 'padding:9px 12px;font-size:0.8rem;';
+                _mdSolid(d, c, isErr ? 'var(--danger)' : c.fgm);
+                modelDiscoverList.appendChild(d);
+            };
+            // Popup an document.body haengen + per position:fixed unter dem Eingabefeld
+            // platzieren. So entkommt es dem Stacking-Context von .input-group
+            // (backdrop-filter), der sonst nachfolgende Formularelemente DARUEBER malt.
+            const _mdPlace = () => {
+                const c = _mdColors();
+                if (modelDiscoverList.parentElement !== document.body) {
+                    document.body.appendChild(modelDiscoverList);
+                }
+                const r = inputModel.getBoundingClientRect();
+                const s = modelDiscoverList.style;
+                s.setProperty('position', 'fixed', 'important');
+                s.setProperty('top', (r.bottom + 4) + 'px', 'important');
+                s.setProperty('left', r.left + 'px', 'important');
+                s.setProperty('width', r.width + 'px', 'important');
+                s.setProperty('right', 'auto', 'important');
+                s.setProperty('max-height', '260px', 'important');
+                s.setProperty('overflow-y', 'auto', 'important');
+                s.setProperty('z-index', '2147483600', 'important');
+                s.setProperty('background-color', c.bg, 'important');
+                s.setProperty('border', '1px solid ' + c.brd, 'important');
+                s.setProperty('border-radius', '10px', 'important');
+                s.setProperty('box-shadow', '0 12px 34px rgba(0,0,0,0.7)', 'important');
+                s.setProperty('display', 'block', 'important');
+            };
+            btnDiscoverModels.addEventListener('click', async () => {
+                const c = _mdColors();
+                const origHtml = btnDiscoverModels.innerHTML;
+                btnDiscoverModels.disabled = true;
+                btnDiscoverModels.innerHTML = '⏳';
+                _mdPlace();
+                _mdMsg(window.t('app.loading_models'), false);
+                try {
+                    const payload = {
+                        provider: selectProvider.value,
+                        api_url: inputUrl.value.trim(),
+                        api_key: inputKey.value.trim(),
+                        auth_method: (radioSession && radioSession.checked) ? 'session' : 'api_key',
+                        session_key: inputSessionKey ? inputSessionKey.value.trim() : '',
+                        profile_id: editingProfileId || '',
+                    };
+                    const res = await fetch('/api/profiles/models', {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                    });
+                    const data = await res.json();
+                    const models = (data.success && Array.isArray(data.models)) ? data.models : [];
+                    if (models.length) {
+                        modelSuggestions.innerHTML = '';
+                        models.forEach(m => { const o = document.createElement('option'); o.value = m; modelSuggestions.appendChild(o); });
+                        modelDiscoverList.innerHTML = '';
+                        const head = document.createElement('div');
+                        head.textContent = models.length + ' ' + window.t('app.models_click_to_apply');
+                        head.style.cssText = 'position:sticky;top:0;padding:7px 12px;font-size:0.72rem;border-bottom:1px solid ' + c.brd + ';';
+                        _mdSolid(head, c, c.fgm);
+                        modelDiscoverList.appendChild(head);
+                        const cur = (inputModel.value || '').trim();
+                        models.forEach(m => {
+                            const item = document.createElement('div');
+                            item.textContent = m;
+                            item.style.cssText = 'padding:7px 12px;font-size:0.85rem;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+                            _mdSolid(item, c, m === cur ? c.acc : c.fg);
+                            if (m === cur) item.style.fontWeight = '600';
+                            item.addEventListener('mouseenter', () => item.style.setProperty('background-color', c.bgh, 'important'));
+                            item.addEventListener('mouseleave', () => item.style.setProperty('background-color', c.bg, 'important'));
+                            item.addEventListener('click', () => { inputModel.value = m; _hideModelDiscover(); });
+                            modelDiscoverList.appendChild(item);
+                        });
+                    } else {
+                        _mdMsg('✗ ' + (data.error || window.t('app.no_models_found')), true);
+                    }
+                } catch (e) {
+                    _mdMsg('✗ ' + e.message, true);
+                } finally {
+                    btnDiscoverModels.disabled = false;
+                    btnDiscoverModels.innerHTML = origHtml;
+                }
+            });
+            // Klick ausserhalb schliesst die Liste
+            document.addEventListener('click', (e) => {
+                if (modelDiscoverList.style.display !== 'none'
+                    && !modelDiscoverList.contains(e.target)
+                    && !btnDiscoverModels.contains(e.target)) {
+                    _hideModelDiscover();
+                }
+            });
+        }
+
+        // ── TTS-Stimmen laden ──
+        async function _loadTtsVoices(savedVoice) {
+            if (!selectTtsVoice) return;
+            try {
+                const resp = await fetch('/api/tts/voices', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!resp.ok) { selectTtsVoice.innerHTML = '<option value="">Standard</option>'; return; }
+                const voices = await resp.json();
+                selectTtsVoice.innerHTML = '<option value="">Standard (de-DE-ConradNeural)</option>';
+                voices.forEach(v => {
+                    const opt = document.createElement('option');
+                    opt.value = v.name;
+                    opt.textContent = v.display || v.name;
+                    selectTtsVoice.appendChild(opt);
+                });
+                if (savedVoice) selectTtsVoice.value = savedVoice;
+            } catch (e) {
+                if (selectTtsVoice) selectTtsVoice.innerHTML = '<option value="">Standard</option>';
+            }
+        }
+
+        // TTS-Enabled wird jetzt direkt vom btn-tts-Click-Handler persistiert (kein Checkbox mehr)
+
+        // ── TTS-Stimme speichern ──
+        if (selectTtsVoice) {
+            selectTtsVoice.addEventListener('change', async () => {
+                // Header-Stimme synchron halten
+                const hv = document.getElementById('hdr-tts-voice');
+                if (hv) hv.value = selectTtsVoice.value;
+                try {
+                    await fetch('/api/settings', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({ tts_voice: selectTtsVoice.value })
+                    });
+                } catch (err) {
+                    console.error('Fehler beim Speichern der TTS-Stimme:', err);
+                }
+            });
+        }
+
+        // ── TTS-Stimme Vorschau ──
+        const btnTtsPreview = document.getElementById('btn-tts-preview');
+        if (btnTtsPreview && selectTtsVoice) {
+            btnTtsPreview.addEventListener('click', async () => {
+                const voice = selectTtsVoice.value;
+                let previewText = window._lang === 'en'
+                    ? 'Hello, I am Jarvis, your autonomous AI assistant.'
+                    : 'Hallo, ich bin Jarvis, dein autonomer KI-Assistent.';
+                // Branding: separater Assistenten-Name ersetzt "Jarvis" in der Vorschau
+                if (window.brandAssistantName) previewText = previewText.replace(/Jarvis/g, window.brandAssistantName);
+                const origHtml = btnTtsPreview.innerHTML;
+                btnTtsPreview.disabled = true;
+                btnTtsPreview.innerHTML = '⏳';
+                try {
+                    const resp = await fetch('/api/tts', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({ text: previewText, voice: voice || '' })
+                    });
+                    if (!resp.ok) throw new Error('TTS-Fehler');
+                    const blob = await resp.blob();
+                    const url = URL.createObjectURL(blob);
+                    const audio = new Audio(url);
+                    btnTtsPreview.innerHTML = '🔊';
+                    audio.onended = () => {
+                        URL.revokeObjectURL(url);
+                        btnTtsPreview.innerHTML = origHtml;
+                        btnTtsPreview.disabled = false;
+                    };
+                    audio.onerror = () => {
+                        URL.revokeObjectURL(url);
+                        btnTtsPreview.innerHTML = origHtml;
+                        btnTtsPreview.disabled = false;
+                    };
+                    await audio.play();
+                } catch (e) {
+                    btnTtsPreview.innerHTML = '❌';
+                    setTimeout(() => { btnTtsPreview.innerHTML = origHtml; btnTtsPreview.disabled = false; }, 1500);
+                }
+            });
+        }
+
+        // ── Agent API Keys (mehrere, benannt) ──
+        (function initAgentKeys() {
+            const listEl = document.getElementById('agent-keys-list');
+            const addBtn = document.getElementById('btn-agent-key-add');
+            const nameInput = document.getElementById('agent-key-newname');
+            const hdr = document.getElementById('prof-sect-api-hdr');
+            if (!listEl) return;
+            const EYE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+            const COPY = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+            const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+            const api = (path, opts) => fetch(path, Object.assign({ headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token } }, opts || {}));
+
+            function render(keys) {
+                if (!keys.length) { listEl.innerHTML = `<div style="opacity:.6;font-size:.8rem;">${window.t('app.no_keys')}</div>`; return; }
+                listEl.innerHTML = '';
+                keys.forEach(k => {
+                    const row = document.createElement('div');
+                    row.style.cssText = 'display:flex;gap:6px;align-items:center;margin-bottom:6px;';
+                    row.dataset.id = k.id;
+                    row.innerHTML =
+                        '<input class="ak-name" value="' + esc(k.name) + '" title="Name" style="width:130px;">' +
+                        // BSI M5: die Liste traegt den Schluessel nicht mehr – nur die
+                        // letzten Zeichen zum Wiedererkennen. Auge/Kopieren holen ihn.
+                        '<input class="ak-key" type="password" value="" readonly placeholder="' + esc(k.key_gesetzt ? ('••••••••' + (k.key_ende || '')) : '') + '" style="flex:1;font-family:monospace;font-size:.78rem;">' +
+                        '<button class="btn-icon btn-small ak-show" title="Anzeigen/Verbergen">' + EYE + '</button>' +
+                        '<button class="btn-icon btn-small ak-copy" title="Kopieren">' + COPY + '</button>' +
+                        '<button class="btn-icon btn-small ak-regen" title="Neu generieren">🔄</button>' +
+                        '<button class="btn-icon btn-small ak-del" title="Löschen">' + JarvisIcons.trash() + '</button>';
+                    listEl.appendChild(row);
+                });
+            }
+            // BSI H8/H9-Rest: Freigabe der Agent-API fuer Aussen-/Loeschwirkung.
+            const aussenCb = document.getElementById('agent-api-aussen');
+            if (aussenCb) aussenCb.addEventListener('change', () => {
+                const soll = aussenCb.checked;
+                api('/api/agent/aussenwirkung', { method: 'POST', body: JSON.stringify({ aussenwirkung: soll }) })
+                    .then(r => r.json()).then(d => { aussenCb.checked = !!(d && d.aussenwirkung === true); })
+                    .catch(() => { aussenCb.checked = !soll; });
+            });
+            function load() {
+                api('/api/agent/keys').then(r => r.json()).then(d => {
+                    if (aussenCb) aussenCb.checked = !!(d && d.aussenwirkung === true);
+                    render((d && d.keys) || []);
+                })
+                    .catch(() => { listEl.innerHTML = `<div style="opacity:.6;font-size:.8rem;color:var(--danger);">${window.t('app.load_error')}</div>`; });
+            }
+            let _loaded = false;
+            function loadOnce() { if (_loaded) return; _loaded = true; load(); }
+            if (hdr) hdr.addEventListener('click', () => setTimeout(loadOnce, 50));
+
+            // WICHTIG: Der Klick-Hook allein genuegt NICHT. _collapseInit stellt den
+            // gemerkten Auf/Zu-Zustand wieder her (localStorage je Container) – wer
+            // den Abschnitt einmal aufgeklappt hat, findet ihn beim naechsten Oeffnen
+            // der Einstellungen BEREITS offen und klickt die Kopfzeile nie an. Die
+            // Liste blieb dann dauerhaft auf "Laedt…" stehen (auf ECHT gemeldet
+            // 2026-08-12, obwohl ein Key 'kundenverwaltung' vorhanden war).
+            // Dieselbe Falle wie bei den Update-Knoepfen (2026-07-28) und der
+            // Rollen-Liste (2026-08-10) – deshalb hier derselbe onShow-Weg.
+            // MUSS nach _initProfilesCollapse() laufen, sonst ist der Zustand des
+            // Koerpers noch nicht angewandt. Idempotent ueber _loaded.
+            window.agentKeysOnShow = function () {
+                const body = document.getElementById('prof-sect-api-body');
+                // Zugeklappt: nicht laden – dann uebernimmt der Klick-Hook. Ein
+                // Abruf fuer einen unsichtbaren Abschnitt waere verschenkt.
+                if (!body || body.style.display === 'none') return;
+                loadOnce();
+            };
+
+            listEl.addEventListener('click', e => {
+                const row = e.target.closest('[data-id]'); if (!row) return;
+                const id = row.dataset.id, keyInput = row.querySelector('.ak-key');
+                // Klartext nur auf Klick, ueber den Bestaetigungsweg (BSI M5)
+                const holen = () => keyInput.value ? Promise.resolve(keyInput.value)
+                    : _geheimHolen('/api/secret/reveal', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ bereich: 'agentkey', kennung: id }) }, 'wert')
+                      .then(w => { if (w) keyInput.value = w; return w; });
+                if (e.target.closest('.ak-show')) {
+                    if (keyInput.type === 'password') {
+                        holen().then(w => { if (w) keyInput.type = 'text'; });
+                    } else {
+                        keyInput.type = 'password';
+                    }
+                } else if (e.target.closest('.ak-copy')) {
+                    const b = e.target.closest('.ak-copy'), o = b.title;
+                    holen().then(w => {
+                        if (!w) return;
+                        navigator.clipboard.writeText(w);
+                        b.title = 'Kopiert'; setTimeout(() => b.title = o, 1500);
+                    });
+                } else if (e.target.closest('.ak-regen')) {
+                    if (!confirm('Diesen Key neu generieren? Der alte Key wird ungültig.')) return;
+                    api('/api/agent/keys/' + id, { method: 'PUT', body: JSON.stringify({ regenerate: true }) }).then(() => load());
+                } else if (e.target.closest('.ak-del')) {
+                    if (!confirm('Diesen Key löschen?')) return;
+                    api('/api/agent/keys/' + id, { method: 'DELETE' }).then(() => load());
+                }
+            });
+            listEl.addEventListener('change', e => {
+                if (e.target.classList.contains('ak-name')) {
+                    const row = e.target.closest('[data-id]');
+                    api('/api/agent/keys/' + row.dataset.id, { method: 'PUT', body: JSON.stringify({ name: e.target.value }) });
+                }
+            });
+            if (addBtn) addBtn.addEventListener('click', () => {
+                const name = (nameInput && nameInput.value.trim()) || '';
+                api('/api/agent/keys', { method: 'POST', body: JSON.stringify({ name: name }) })
+                    .then(r => r.json()).then(() => { if (nameInput) nameInput.value = ''; _loaded = true; load(); });
+            });
+        })();
+
+        // ── Agent API Key: Generieren (Legacy – Element entfernt, no-op) ──
+        if (btnGenKey) {
+            btnGenKey.addEventListener('click', async () => {
+                // Kryptographisch sicheren Key generieren (Browser Crypto API)
+                const buf = new Uint8Array(32);
+                crypto.getRandomValues(buf);
+                const newKey = btoa(String.fromCharCode(...buf))
+                    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+                _agentKeyValue = newKey;
+                _agentKeyVisible = true;
+                if (inputAgentKey) {
+                    inputAgentKey.value = newKey;
+                    inputAgentKey.readOnly = false;
+                }
+                // Sofort speichern
+                try {
+                    await fetch('/api/settings', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ agent_api_key: newKey })
+                    });
+                } catch (err) {
+                    console.error('Fehler beim Speichern des Agent API Keys:', err);
+                }
+            });
+        }
+
+        // ── Agent API Key: Kopieren ──
+        if (btnCopyKey) {
+            btnCopyKey.addEventListener('click', () => {
+                // BSI M5: der Wert liegt erst nach dem Abruf (mit Bestaetigung) vor
+                _agentKeyHolen().then(wert => {
+                    if (!wert) return;
+                    navigator.clipboard.writeText(wert).then(() => {
+                        btnCopyKey.title = window.t('common.copied');
+                        setTimeout(() => { btnCopyKey.title = window.t('common.copy'); }, 2000);
+                    });
+                });
+            });
+        }
+
+        // ── Einheitliche Eye-Toggle-Logik für alle Key-Felder ──
+        // BSI M5: ein leeres Feld holt den gespeicherten Wert beim Aufdecken –
+        // ueber JarvisPwEye.abruf, also mit dem Bestaetigungsdialog, falls der
+        // Server eine erneute Anmeldung verlangt. Abgebrochen: Feld bleibt zu.
+        function toggleKeyField(inputEl, btnEl, holen) {
+            const isHidden = inputEl.type === 'password';
+            inputEl.type = isHidden ? 'text' : 'password';
+            btnEl.innerHTML = isHidden ? SVG_EYE_CLOSED : SVG_EYE_OPEN;
+            if (!isHidden || inputEl.value || !holen) return;
+            holen().then(wert => {
+                if (wert) { inputEl.value = wert; return; }
+                inputEl.type = 'password';
+                btnEl.innerHTML = SVG_EYE_OPEN;
+            });
+        }
+        function _geheimHolen(url, opts, feld) {
+            if (!window.JarvisPwEye || !window.JarvisPwEye.abruf) return Promise.resolve('');
+            return window.JarvisPwEye.abruf(url, opts)
+                .then(e => (e.ok && e.d && typeof e.d[feld] === 'string') ? e.d[feld] : '')
+                .catch(() => '');
+        }
+        function _agentKeyHolen() {
+            if (_agentKeyValue) return Promise.resolve(_agentKeyValue);
+            return _geheimHolen('/api/settings/agentkey', {}, 'agent_api_key')
+                .then(w => { _agentKeyValue = w || ''; return _agentKeyValue; });
+        }
+        function _profilKeyHolen(feld) {
+            if (!editingProfileId) return Promise.resolve('');
+            return _geheimHolen(`/api/profiles/${encodeURIComponent(editingProfileId)}/key`, {}, feld);
+        }
+
+        if (btnToggleKey && inputAgentKey) {
+            btnToggleKey.addEventListener('click', () => toggleKeyField(inputAgentKey, btnToggleKey, _agentKeyHolen));
+        }
+        if (btnToggleProfileApiKey && inputKey) {
+            btnToggleProfileApiKey.addEventListener('click', () => toggleKeyField(inputKey, btnToggleProfileApiKey, () => _profilKeyHolen('api_key')));
+        }
+        if (btnToggleProfileSessionKey && inputSessionKey) {
+            btnToggleProfileSessionKey.addEventListener('click', () => toggleKeyField(inputSessionKey, btnToggleProfileSessionKey, () => _profilKeyHolen('session_key')));
+        }
+
+        // ── Agent API Key: Manuelle Eingabe speichern (bei blur) ──
+        if (inputAgentKey) {
+            inputAgentKey.addEventListener('blur', async () => {
+                if (!_agentKeyVisible) return; // Nur speichern wenn sichtbar (editierbar)
+                const val = inputAgentKey.value.trim();
+                if (val && val !== _agentKeyValue) {
+                    _agentKeyValue = val;
+                    try {
+                        await fetch('/api/settings', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                            body: JSON.stringify({ agent_api_key: val })
+                        });
+                    } catch (err) {
+                        console.error('Fehler beim Speichern des Agent API Keys:', err);
+                    }
+                }
+            });
+        }
+
+        // ── Sicherheits-Tab: Kennwort-Änderung ──
+        function _initSecurityTab() {
+            const oldEl    = document.getElementById('sec-cpw-old');
+            const newEl    = document.getElementById('sec-cpw-new');
+            const confEl   = document.getElementById('sec-cpw-confirm');
+            const errEl    = document.getElementById('sec-cpw-error');
+            const okEl     = document.getElementById('sec-cpw-success');
+            const strengthEl = document.getElementById('sec-cpw-strength');
+            const submitEl = document.getElementById('sec-cpw-submit');
+            if (!submitEl) return;
+
+            // Eye-Buttons einmalig verdrahten (idempotent via flag)
+            if (!tabSecurity._eyesWired) {
+                tabSecurity._eyesWired = true;
+                _wireEyeBtn('btn-eye-sec-old',     document.getElementById('sec-cpw-old'));
+                _wireEyeBtn('btn-eye-sec-new',     document.getElementById('sec-cpw-new'));
+                _wireEyeBtn('btn-eye-sec-confirm', document.getElementById('sec-cpw-confirm'));
+            }
+
+            // Felder leeren beim Öffnen
+            if (oldEl) { oldEl.type = 'password'; oldEl.value = ''; }
+            if (newEl) { newEl.type = 'password'; newEl.value = ''; newEl.oninput = () => _secStrengthCheck(newEl, strengthEl); }
+            if (confEl) { confEl.type = 'password'; confEl.value = ''; }
+            // Eye-Icons zurücksetzen
+            ['btn-eye-sec-old','btn-eye-sec-new','btn-eye-sec-confirm'].forEach(id => {
+                const b = document.getElementById(id); if (b) b.innerHTML = _SVG_EYE_OPEN;
+            });
+            if (errEl) errEl.style.display = 'none';
+            if (okEl) okEl.style.display = 'none';
+
+            // Vorschlagen-Button verdrahten
+            const suggestEl = document.getElementById('sec-cpw-suggest');
+            if (suggestEl && newEl && confEl) {
+                suggestEl.onclick = () => {
+                    const pw = _generateStrongPassword();
+                    newEl.type = 'text';
+                    newEl.value = pw;
+                    confEl.value = pw;
+                    _secStrengthCheck(newEl, strengthEl);
+                };
+            }
+
+            submitEl.onclick = async () => {
+                if (errEl) errEl.style.display = 'none';
+                if (okEl) okEl.style.display = 'none';
+                const old_pw  = oldEl ? oldEl.value : '';
+                const new_pw  = newEl ? newEl.value : '';
+                const conf_pw = confEl ? confEl.value : '';
+                if (!old_pw || !new_pw || !conf_pw) {
+                    if (errEl) { errEl.textContent = window.t('security.fill_fields'); errEl.style.display = ''; }
+                    return;
+                }
+                submitEl.disabled = true;
+                submitEl.textContent = window.t('common.saving');
+                try {
+                    const res = await fetch('/api/change-password', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ old_password: old_pw, new_password: new_pw, confirm_password: conf_pw }),
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        _uebernimmErsatzToken(data.token);
+                        if (oldEl) oldEl.value = '';
+                        if (newEl) newEl.value = '';
+                        if (confEl) confEl.value = '';
+                        if (strengthEl) strengthEl.textContent = '';
+                        if (okEl) { okEl.textContent = window.t('security.password_changed'); okEl.style.display = ''; }
+                    } else {
+                        if (errEl) { errEl.textContent = data.error || window.t('common.error'); errEl.style.display = ''; }
+                    }
+                } catch (e) {
+                    if (errEl) { errEl.textContent = window.t('common.connection_failed'); errEl.style.display = ''; }
+                } finally {
+                    submitEl.disabled = false;
+                    submitEl.textContent = window.t('security.save_pw');
+                }
+            };
+        }
+
+        function _secStrengthCheck(inputEl, outputEl) {
+            if (!outputEl) return;
+            const pw = inputEl.value;
+            const score = [pw.length >= 8, /[A-Z]/.test(pw), /[a-z]/.test(pw), /[0-9]/.test(pw)].filter(Boolean).length;
+            const labels = [window.t('security.strength.0'), window.t('security.strength.1'), window.t('security.strength.2'), window.t('security.strength.3'), window.t('security.strength.4')];
+            const colors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#16a34a'];
+            outputEl.innerHTML = pw.length ? `<span style="color:${colors[score]}">● ${labels[score]}</span>` : '';
+        }
+    }
+
+    // Auto-Login wenn Token vorhanden – serverseitig validieren
+    if (token) {
+        fetch('/api/verify-token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token }),
+        }).then(r => r.json()).then(data => {
+            if (data.valid) {
+                currentUser = data.username || currentUser;
+                if (data.must_change_password) {
+                    // Erst-Kennwort noch nicht geaendert -> Maske erzwingen.
+                    // Auch nach F5/Reload (serverseitig zusaetzlich gesperrt).
+                    window.JarvisSitzung.maskeFreigeben();
+                    showChangePwModal(true);
+                } else if (_isSettingsPage) {
+                    // Eigene /settings-Seite: nur Admins; sonst aufs Portal.
+                    if (data.is_admin === false) window.location.replace('/portal');
+                    else _enterSettingsPage();
+                } else {
+                    // Konsolidierung: Wurzel-Seite leitet alle Rollen aufs Portal
+                    // (kein Haupt-Chat mehr). Chat/Userchat/Support/Settings dort verlinkt.
+                    window.location.replace('/portal');
+                }
+            } else {
+                showLoginScreen();
+            }
+        }).catch(() => {
+            showLoginScreen();
+        });
+    }
+    function setupModal() {
+        const modal = document.getElementById('cert-modal');
+        const btnOpen = document.getElementById('btn-cert-help');
+        const btnClose = document.getElementById('btn-close-modal');
+        const btnBannerHelp = document.getElementById('btn-banner-help');
+        const securityIndicator = document.getElementById('security-indicator');
+
+        if (!modal || !btnOpen) return;
+
+        const openModal = () => modal.classList.add('open');
+        const closeModal = () => modal.classList.remove('open');
+
+        // Öffnen
+        btnOpen.addEventListener('click', openModal);
+        if (btnBannerHelp) btnBannerHelp.addEventListener('click', openModal);
+        if (securityIndicator) securityIndicator.addEventListener('click', openModal);
+
+        // Schließen
+        btnClose.addEventListener('click', closeModal);
+
+        // Schließen bei Klick außerhalb
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                closeModal();
+            }
+        });
+
+        // Tabs
+        const tabs = document.querySelectorAll('.tab-btn');
+        const contents = document.querySelectorAll('.tab-content');
+
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                // Aktiv-Status entfernen
+                tabs.forEach(t => t.classList.remove('active'));
+                contents.forEach(c => c.classList.remove('active'));
+
+                // Neuen Tab aktivieren
+                tab.classList.add('active');
+                const targetId = `tab-${tab.dataset.tab}`;
+                document.getElementById(targetId).classList.add('active');
+            });
+        });
+    }
+
+    function checkSecurity() {
+        const banner = document.getElementById('security-banner');
+        const bannerText = document.getElementById('security-banner-text');
+        const indicator = document.getElementById('security-indicator');
+        const btnClose = document.getElementById('btn-close-banner');
+
+        const isHttps = window.location.protocol === 'https:';
+        const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        const certDismissed = localStorage.getItem('jarvis_cert_dismissed') === 'true';
+
+        if (!isHttps && !isLocal) {
+            // Unsichere Verbindung – Banner anzeigen
+            banner.hidden = false;
+            banner.style.display = 'block';
+            bannerText.textContent = window.t('panel.security_banner');
+            if (indicator) {
+                indicator.className = 'security-badge';
+                indicator.title = window.t('panel.security_critical');
+            }
+
+            // Cert-Modal beim ersten Seitenaufruf automatisch öffnen (wie Klick auf den Button)
+            if (!certDismissed) {
+                setTimeout(() => {
+                    const certModal = document.getElementById('cert-modal');
+                    if (certModal && !certModal.classList.contains('open')) {
+                        certModal.classList.add('open');
+                    }
+                }, 600);
+            }
+        } else {
+            banner.hidden = true;
+            banner.style.display = 'none';
+            if (indicator) {
+                indicator.className = 'security-badge secure';
+                indicator.title = window.t('panel.security_secure');
+            }
+        }
+
+        if (btnClose) {
+            btnClose.addEventListener('click', () => {
+                banner.style.display = 'none';
+                // Merken, dass der Nutzer den Hinweis gesehen und geschlossen hat
+                localStorage.setItem('jarvis_cert_dismissed', 'true');
+            });
+        }
+    }
+
+
+    // ─── Init ───────────────────────────────────────────────────
+    initParticles();
+    setupModal();
+    setupSettings();
+    checkSecurity();
+
+})();
+

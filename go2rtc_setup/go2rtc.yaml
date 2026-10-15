@@ -1,0 +1,4 @@
+# go2rtc Konfiguration – NexiGo Webcam als Netzwerk-Stream
+streams:
+  webcam:
+    - ffmpeg:device?video=NexiGo N960E FHD Webcam&video_size=1280x720

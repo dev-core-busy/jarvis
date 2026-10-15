@@ -1,0 +1,15 @@
+# OpenSSL-Konfiguration des HTTPS-Servers (BSI H6-Rest, TR-02102-2).
+# Eingebunden ueber OPENSSL_CONF an jeder Startstelle; Erklaerung und die
+# EINE Quelle der Suiten: backend/tls_richtlinie.py (TLS13_SUITES).
+# Die Systemkonfiguration bleibt vollstaendig in Kraft – hier wird nur
+# ssl_conf ergaenzt, das Debian selbst nicht setzt.
+.include /etc/ssl/openssl.cnf
+
+[openssl_init]
+ssl_conf = jarvis_ssl_sect
+
+[jarvis_ssl_sect]
+system_default = jarvis_tls_sect
+
+[jarvis_tls_sect]
+Ciphersuites = TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256

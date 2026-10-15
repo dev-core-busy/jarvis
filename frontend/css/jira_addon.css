@@ -1,0 +1,563 @@
+/* Anleitungsseite /jira-addon.
+ *
+ * Nur Variablen aus theme.css – keine festen Farben (Projektkonvention). Die
+ * Seite ist eine reine Textseite, deshalb ist Lesbarkeit die einzige Vorgabe:
+ * begrenzte Zeilenlaenge, klare Abstufung zwischen Schritt und Hinweis.
+ */
+
+/* theme.css setzt den SEITENhintergrund bewusst nicht – jede Bereichsseite tut
+ * das selbst (tracks.html z.B. per Inline-Style). Ohne diese Regel bleibt der
+ * Grund im hellen Thema dunkel, weil die Vorgabe aus :root (dark) durchschlaegt.
+ * Hier in der CSS-Datei statt inline im HTML: das ist der Ort, an dem jemand
+ * danach sucht. */
+body {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    margin: 0;
+    min-height: 100vh;
+}
+
+/* ── Titelleiste ────────────────────────────────────────────────────────
+ * `.topbar` steht NICHT in theme.css – jede Bereichsseite bringt diese Regeln
+ * selbst mit (tracks.html/sap.html inline, /chat ueber chat.css). Ohne sie
+ * stapeln sich Titel und Symbole linksbuendig untereinander; im Screenshot
+ * sofort zu sehen, in jsdom nicht (dort wird kein Layout gerechnet).
+ * Uebernommen aus tracks.html, damit die Seiten gleich aussehen.
+ */
+.topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-glass);
+    backdrop-filter: blur(8px);
+    position: sticky;
+    top: 0;
+    z-index: 30;
+}
+.topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+/* 4px, NICHT die 10px der Titelleiste: eine Symbolgruppe braucht den engen
+ * Abstand, sonst wirkt sie nicht als Gruppe (gemeldeter Fehler auf /portal,
+ * Waechter: test_topbar_symbole_ui.js). */
+.topbar-right { display: flex; align-items: center; gap: 4px; }
+.topbar-avatar {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: var(--gradient);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 700; color: #fff;
+    flex-shrink: 0; overflow: hidden;
+}
+.topbar-title { font-size: 19px; font-weight: 600; white-space: nowrap; }
+
+/* Die Symbole SELBST brauchen ihre Regeln ebenfalls – derselbe Fallstrick wie
+ * bei .topbar, nur eine Ebene tiefer: `.lang-toggle` steht in theme.css gar
+ * nicht, `.btn-theme` nur unvollstaendig. Ohne das rendern die Knoepfe als
+ * nackte Browser-Buttons mit Rahmen und in falscher Groesse, waehrend die
+ * Struktur (Reihenfolge, Abstaende) voellig richtig ist – deshalb faellt es
+ * in jsdom nicht auf, nur im Bild.
+ * Woertlich aus tracks.html uebernommen, damit die Bereiche gleich aussehen. */
+.btn-theme {
+    background: none; border: none; color: var(--text-muted);
+    padding: 4px 8px; border-radius: 8px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: color .2s, background .2s;
+}
+.btn-theme:hover { background: rgba(var(--accent-rgb), .12); color: var(--accent); }
+.btn-theme svg { width: 20px; height: 20px; }
+
+.lang-toggle {
+    display: flex; gap: 2px;
+    background: rgba(var(--fg-rgb, 148,163,184), .05);
+    border: 1px solid rgba(var(--fg-rgb, 148,163,184), .1);
+    border-radius: 8px; padding: 2px;
+}
+.lang-toggle-btn {
+    background: transparent; border: none; color: var(--text-secondary);
+    font-size: .72rem; font-weight: 700; letter-spacing: .04em;
+    padding: 3px 10px; border-radius: 6px; cursor: pointer;
+    font-family: var(--font-body);
+    transition: background .15s, color .15s;
+}
+.lang-toggle-btn:hover { color: var(--text-primary); }
+.lang-toggle-btn.active { background: rgba(var(--accent-rgb), .35); color: var(--text-primary); }
+
+.ja-main {
+    max-width: 820px;          /* laengere Zeilen liest niemand mehr gern */
+    margin: 0 auto;
+    padding: 22px 18px 60px;
+}
+
+.ja-card {
+    background: var(--bg-secondary);
+    /* ⚠ DIE SCHRIFTFARBE MUSS HIER STEHEN. `body` traegt in BEIDEN Themes
+     * rgb(255,255,255) – im hellen Thema stand damit weisser Text auf weisser
+     * Karte, also unlesbar. Nur im Screenshot zu ahnen, sicher erst an den
+     * gemessenen Computed Styles (karteFg == karteBg == #fff).
+     * Auf der Karte gesetzt, nicht je Element: sonst ist jedes kuenftig
+     * ergaenzte Kind ohne eigene Farbe wieder unsichtbar. */
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+}
+
+.ja-card h2 {
+    margin: 0 0 10px;
+    font-size: 1.05rem;
+    color: var(--text-primary);
+}
+
+.ja-card p { margin: 0 0 10px; color: var(--text-primary); line-height: 1.55; }
+.ja-card p:last-child { margin-bottom: 0; }
+
+/* ── Container „Mein Jira-Zugang" / „Browser-Plugin" (2026-08-28) ───────
+ * Zwei Klappabschnitte statt einer langen Kartenreihe. Bauform wie die
+ * `.sp-sect` in /sap – dieselbe Aufgabe, dieselbe Optik: Bereiche, die man
+ * einmal einrichtet und danach selten wieder anfasst. */
+.ja-sect {
+    background: var(--bg-secondary);
+    /* Wie bei .ja-card: `body` traegt in BEIDEN Themes rgb(255,255,255), ohne
+     * diese Zeile stuende im hellen Thema weisser Text auf weisser Flaeche. */
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 16px;
+}
+.ja-sect > summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 20px;
+    font-size: 1.05rem;
+    font-weight: 600;
+    cursor: pointer;
+    /* `list-style: none` allein genuegt WebKit nicht – ohne das Pseudoelement
+     * bleibt dort das Standard-Dreieck neben unserem eigenen stehen. */
+    list-style: none;
+}
+.ja-sect > summary::-webkit-details-marker { display: none; }
+/* Eigenes Dreieck: es dreht sich mit dem Zustand, damit der Abschnitt als
+ * klappbar erkennbar ist – ein Titel ohne Zeichen sieht wie eine Ueberschrift
+ * aus, die man nicht anklickt. */
+.ja-sect > summary::before {
+    content: "▸";
+    flex: 0 0 auto;
+    color: var(--text-muted);
+    transition: transform .15s ease;
+}
+.ja-sect[open] > summary::before { transform: rotate(90deg); }
+.ja-sect > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ja-sect-body { padding: 0 20px 18px; }
+/* Die Karten IM Plugin-Container brauchen keinen zweiten Rahmen – sie liegen
+ * schon in einem. Ohne das entsteht der Kasten-im-Kasten-Eindruck. */
+.ja-sect-body .ja-card {
+    background: transparent;
+    border: 0;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+    padding: 14px 0 0;
+    margin-bottom: 14px;
+}
+.ja-sect-body .ja-card:first-child { border-top: 0; padding-top: 0; }
+.ja-sect-body .ja-card:last-child { margin-bottom: 0; }
+
+/* Zustands-Pille am Titel: sagt auf einen Blick, welcher Zugang gerade gilt.
+ * `margin-left: auto` schiebt sie nach rechts, `flex: 0 0 auto` verhindert,
+ * dass sie im Flex-Container auf volle Breite gezogen wird (derselbe Fehler
+ * wie bei der Zustands-Pille in knowledge_sync). */
+.ja-acc-pill {
+    flex: 0 0 auto;
+    margin-left: auto;
+    font-size: .74rem;
+    font-weight: 600;
+    padding: 2px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+}
+/* Ein leeres Element stuende sonst als nackter Rahmen da, solange der Zustand
+ * noch nicht geladen ist. */
+.ja-acc-pill:empty { display: none; }
+.ja-acc-pill.is-own { color: var(--success); border-color: var(--success); }
+.ja-acc-pill.is-warn { color: var(--danger); border-color: var(--danger); }
+
+.ja-acc-note {
+    display: none;
+    background: var(--bg-glass);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 9px 12px;
+    margin: 10px 0;
+    font-size: .88rem;
+    line-height: 1.5;
+}
+.ja-acc-note.is-on { display: block; }
+
+.ja-acc-row { display: flex; gap: 14px; flex-wrap: wrap; margin: 12px 0 10px; }
+/* `min-width: 0` ist Pflicht: ohne das schrumpft ein Flex-Kind nicht unter
+ * seine Inhaltsbreite und schiebt das zweite Feld aus dem Container. */
+.ja-acc-field { flex: 1 1 260px; min-width: 0; display: block; }
+.ja-acc-lab {
+    display: block;
+    font-size: .82rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+}
+.ja-acc-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-glass);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: .92rem;
+}
+.ja-acc-input:focus { outline: none; border-color: var(--accent); }
+/* Das Serverfeld ist Anzeige, kein Eingabefeld – es muss auch so aussehen,
+ * sonst tippt jemand hinein und wundert sich, dass nichts passiert. */
+.ja-acc-input[readonly] { color: var(--text-muted); cursor: default; }
+.ja-acc-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 4px 0 12px;
+    font-size: .9rem;
+}
+/* Ohne `width: auto` zoege eine Feldregel das Kaestchen auf volle Breite und
+ * die Beschriftung rutschte darunter (Register: erst die Klasse ansehen). */
+.ja-acc-check input { flex: 0 0 auto; width: auto; }
+
+/* Der Merksatz der Seite: er traegt die wichtigste Zusage und darf nicht wie
+ * Fliesstext aussehen. Akzentkante statt Farbflaeche – die waere in Hell und
+ * Dunkel nie gleichzeitig richtig. */
+.ja-merk {
+    border-left: 3px solid var(--accent);
+    padding-left: 10px;
+    font-weight: 600;
+}
+
+.ja-hint { font-size: .87rem; color: var(--text-muted); line-height: 1.5; }
+
+/* Warnung: Aussage doppelt – Farbe UND Text (Farbe allein ist keine
+ * Information). */
+.ja-warn {
+    border-left: 3px solid var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    padding: 8px 10px;
+    border-radius: 0 6px 6px 0;
+    font-size: .9rem;
+    line-height: 1.5;
+}
+
+/* ── Die Serveradresse in Schritt 3 ────────────────────────────────────────
+ * Die frueheren Regeln der Karte „Einsatzbereit?" (.ja-status/.ja-st*) sind
+ * mit ihr entfallen - toter Stil ist beim naechsten Feinschliff eine Falle,
+ * weil er wie eine benutzte Regel aussieht.
+ * Der Kasten sitzt IN einem Listenpunkt: eigener Abstand nach oben, damit die
+ * Adresse nicht am Satz darueber klebt. */
+.ja-adr { margin: 6px 0 2px; }
+.ja-adr .ja-pfad { margin: 0; }
+
+/* ── Schritte ──────────────────────────────────────────────────────────── */
+.ja-steps { margin: 6px 0 10px; padding-left: 22px; }
+.ja-steps li { margin-bottom: 8px; line-height: 1.55; color: var(--text-primary); }
+
+.ja-limits { margin: 0; padding-left: 20px; }
+.ja-limits li { margin-bottom: 9px; line-height: 1.55; color: var(--text-primary); }
+
+.ja-card code {
+    background: var(--bg-glass);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: .88em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* ── Klappabschnitte ───────────────────────────────────────────────────── */
+.ja-det {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 10px;
+}
+.ja-det > summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--text-primary);
+    list-style-position: outside;
+}
+.ja-det[open] > summary { margin-bottom: 8px; }
+
+/* Hinweistext neben oder unter einer Aussage.
+ * ⚠ DIESE KLASSE WAR NIRGENDS DEFINIERT (gefunden 2026-09-11) – sie steht seit
+ *   ihrer Einfuehrung an sieben Stellen in `ai_mouse.html` im Markup und hatte
+ *   keine einzige Regel: die Hinweise sahen aus wie gewoehnlicher Fliesstext.
+ *   Dieselbe Fehlerklasse wie `.ja-actions` (Register) – eine Klasse ohne Regel
+ *   faellt niemandem auf, weil nichts kaputtgeht, es sieht nur falsch aus.
+ * `--text-secondary` und NICHT `--text-muted`: letzteres liegt in beiden Themen
+ *   unter 4,5:1 – fuer eine Beschriftung vertretbar, fuer eine Versionsnummer,
+ *   die man ABLESEN soll, nicht. */
+.ja-note { color: var(--text-secondary); font-size: 13px; }
+
+/* ── Knoepfe ───────────────────────────────────────────────────────────── */
+.ja-dl { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0 8px; }
+/* `align-self` nur hier, nicht `align-items` am Container: `.ja-dl` traegt auch
+ * der Jira-Reiter, und dort stehen mehrere Knoepfe nebeneinander. Ohne die
+ * Zeile wuerde der Text auf Knopfhoehe gestreckt und stuende oben statt mittig. */
+#am-version { align-self: center; }
+.ja-btn {
+    /* flex:0 0 auto ist Pflicht: .btn-* aus dem Projekt tragen width:100% und
+     * fressen in einer Flex-Zeile die ganze Breite (Register). Deshalb hier
+     * eine eigene Klasse statt einer Bestandsklasse. */
+    flex: 0 0 auto;
+    padding: 9px 16px;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: var(--bg-glass);
+    color: var(--text-primary);
+    font: inherit;
+    cursor: pointer;
+}
+.ja-btn:hover:not(:disabled) { border-color: var(--accent); }
+.ja-btn:disabled { opacity: .55; cursor: default; }
+.ja-btn-haupt {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+.ja-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ── Netzwerkpfad statt Download ───────────────────────────────────────────
+ * Sobald ein Pfad angezeigt wird, wechselt der Block auf eine SPALTE: ein
+ * UNC-Pfad ist laenger als das Fenster breit ist und braucht die volle Zeile,
+ * sonst bricht er mitten im Servernamen um. */
+.ja-dl-spalte { flex-direction: column; align-items: stretch; }
+.ja-pfad {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: var(--bg-secondary);
+}
+/* Der Admin-Kasten setzt sich ab: er richtet sich an eine ANDERE Zielgruppe als
+ * alles darueber. Ohne die Trennlinie liest ihn jeder Sachbearbeiter als
+ * weiteren Schritt seiner Anleitung. */
+.ja-adminbau {
+    margin-top: 6px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--border);
+}
+.ja-adminbau .ja-dl { margin-bottom: 0; }
+.ja-pfad-lab { font-weight: 600; flex: 0 0 auto; }
+.ja-pfad-wert {
+    /* `all`: ein Klick markiert den GANZEN Pfad – wer die Zwischenablage nicht
+     * benutzen darf, kommt so trotzdem in einem Zug an ihn heran. */
+    user-select: all;
+    flex: 1 1 260px;
+    min-width: 0;
+    /* break-all statt break-word: ein Pfad hat keine Wortgrenzen, an denen ein
+     * Umbruch lesbar waere – ohne das ragt er aus der Karte heraus. */
+    word-break: break-all;
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: .82rem;
+    color: var(--text-primary);
+}
+
+/* ── Fragen und Antworten ──────────────────────────────────────────────── */
+.ja-faq { margin: 0; }
+.ja-faq dt {
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-top: 12px;
+}
+.ja-faq dt:first-child { margin-top: 0; }
+.ja-faq dd {
+    margin: 4px 0 0;
+    padding-left: 0;
+    color: var(--text-muted);
+    line-height: 1.55;
+}
+
+@media (max-width: 620px) {
+    .ja-main { padding: 14px 12px 40px; }
+    .ja-card { padding: 14px; }
+}
+
+/* ── AI Mouse (/ai-mouse) ─────────────────────────────────────────────────
+   Nur die Bereichsliste und die Fragen; alles uebrige benutzt die
+   .ja-*-Klassen dieser Datei mit. Eine eigene Datei waere eine zweite
+   Fassung derselben Kartenoptik - und die liefe beim naechsten Feinschliff
+   auseinander. */
+.am-bereich {
+    padding: 8px 0;
+    border-top: 1px solid var(--border);
+}
+.am-bereich:first-child { border-top: none; }
+
+/* Fragen-Verwaltung in der AI-Mouse-Kachel */
+.am-frage {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 0;
+    border-top: 1px solid var(--border);
+}
+.am-frage:first-child { border-top: none; }
+/* min-width: 0 ist Pflicht - ohne das schiebt ein langer Prompt die Knoepfe
+   aus der Zeile (Register). */
+.am-frage-txt { flex: 1; min-width: 0; }
+.am-frage-txt .nm { font-weight: 600; }
+.am-frage-txt .pr {
+    display: block;
+    color: var(--text-secondary);
+    font-size: 0.85em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.am-frage-marke {
+    font-size: 0.75em;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+.am-f-feld { margin-bottom: 10px; }
+.am-f-feld label { display: block; margin-bottom: 4px; font-size: 0.9em; }
+.am-f-feld input, .am-f-feld textarea { width: 100%; box-sizing: border-box; }
+.am-f-gem { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 10px; }
+
+/* ═══ AI-Maus: „Meine Fragen" ═══════════════════════════════════════════════
+   Bauform der Regelliste aus /email (Vorgabe 2026-09-09: „an das Design von
+   ‚Regeln für eingehende E-Mails' anpassen"). Dort steht das CSS INLINE in
+   email.html – eine gemeinsame Datei gäbe es erst, wenn man beide Seiten
+   umbaut; hier sind es eigene Klassen mit demselben Aussehen.
+
+   ⚠ Die KARTE umschließt Zeile UND Formular. Wenn zwei Dinge wie eines
+   aussehen sollen, gehört eines INS andere – sonst bleibt ein Spalt sichtbar,
+   egal wie die Radien gesetzt sind (im Projekt beim Rollen-Formular bezahlt). */
+.am-q-card { border: 1px solid var(--border); border-radius: var(--radius-md);
+    background: rgba(var(--fg-rgb), .02); margin-bottom: 10px; overflow: hidden; }
+.am-q-row { display: flex; align-items: center; gap: 10px; padding: 11px 14px; }
+/* min-width: 0 ist Pflicht – ohne das schiebt ein langer Prompt die Knöpfe
+   aus der Zeile, statt dass die Ellipse greift (Register). */
+.am-q-main { flex: 1 1 auto; min-width: 0; }
+.am-q-name { font-weight: 600; font-size: .92rem; }
+.am-q-meta { font-size: .76rem; color: var(--text-muted); margin-top: 2px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.am-q-acts { display: flex; gap: 4px; flex: 0 0 auto; }
+
+/* ── Reihenfolge ziehen (2026-09-11) ─────────────────────────────────────────
+   ⚠ `flex: 0 0 auto` ist Pflicht: der Griff steht in einer Flex-Zeile neben
+   `.am-q-main` (flex: 1 1 auto). Ohne das gibt er unter Druck als Erstes nach
+   und wird zu einem unklickbaren Strich.
+   ⚠ Die AUSGESCHALTETE Fassung behält die BREITE – sonst rutschen Titel und
+   Prompt bei gemeinsamen Einträgen um 20 px nach links, und die Liste sieht
+   nach einem Fehler aus. */
+.am-q-griff { flex: 0 0 auto; width: 20px; text-align: center;
+    color: var(--text-muted); cursor: grab; user-select: none;
+    font-size: 1.05rem; line-height: 1; border-radius: 6px; }
+.am-q-griff:hover { color: var(--text-primary); }
+/* :focus-visible, nicht :focus – sonst bleibt nach jedem Mausklick ein
+   Rahmen stehen (Register). Der Griff ist per Tastatur bedienbar
+   (Strg+Pfeil), deshalb MUSS er einen sichtbaren Fokus haben. */
+.am-q-griff:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px;
+    color: var(--text-primary); }
+.am-q-griff.is-aus { cursor: default; }
+.am-q-card.is-zieht { opacity: .45; }
+/* Das Ziel wird an der KANTE markiert, nicht durch eine Füllung: eine
+   eingefärbte Karte sieht wie "ausgewählt" aus, ein Strich wie "hier landet
+   es". */
+.am-q-card.is-ziel { border-color: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--accent); }
+/* Der Beispiel-Griff im Hinweistext – kein Bedienelement, nur ein Zeichen. */
+.am-q-griff-bsp { color: var(--text-secondary); }
+.am-q-zug { font-size: .8rem; color: var(--text-secondary);
+    margin: 0 0 8px; }
+.am-q-btn { background: none; border: 1px solid var(--border);
+    color: var(--text-secondary); width: 30px; height: 30px; border-radius: 8px;
+    cursor: pointer; display: inline-flex; align-items: center;
+    justify-content: center; font-size: .9rem; }
+.am-q-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+.am-q-btn:disabled { opacity: .4; cursor: not-allowed; }
+.am-q-btn.is-danger:hover { border-color: var(--danger); color: var(--danger);
+    background: color-mix(in srgb, var(--danger) 10%, transparent); }
+/* Das Formular sitzt IN der Karte, unter der Zeile. */
+.am-q-edit { padding: 0 14px 14px; border-top: 1px solid var(--border); }
+.am-q-edit.hidden { display: none; }
+.am-q-feld { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; }
+.am-q-feld label { font-size: .8rem; color: var(--text-secondary); }
+.am-q-feld input, .am-q-feld textarea { width: 100%; padding: 8px 10px;
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    background: var(--bg-secondary); color: var(--text-primary);
+    font-family: inherit; font-size: .88rem; }
+.am-q-feld textarea { resize: vertical; min-height: 76px; }
+.am-q-hint { font-size: .76rem; color: var(--text-muted); }
+.am-q-gem { display: inline-flex; align-items: center; gap: 6px;
+    margin-top: 10px; font-size: .82rem; color: var(--text-secondary); }
+/* inline-flex, nicht flex: sonst liefe die klickbare Fläche über die ganze
+   Breite und ein Klick weit rechts schaltete das Kästchen um (Register). */
+.am-q-gem input { width: auto; margin: 0; }
+.am-q-acts-form { display: flex; gap: 8px; align-items: center;
+    flex-wrap: wrap; margin-top: 12px; }
+.am-q-empty { padding: 22px 14px; text-align: center; color: var(--text-muted);
+    font-size: .86rem; line-height: 1.6; }
+/* Farbe UND Wort: die Farbe allein ist keine Information (Projektregel). */
+.am-q-badge { display: inline-block; padding: 1px 7px; border-radius: 10px;
+    font-size: .7rem; font-weight: 600; background: rgba(var(--fg-rgb), .08);
+    color: var(--text-secondary); margin-left: 6px; }
+
+/* ═══ AI-Maus: aufklappbare Container ═══════════════════════════════════════
+   Bauform der Karten in /email (`.em-card-head`/`.em-caret`) – dort steht das
+   CSS inline in der Seite, hier sind es eigene Klassen mit demselben Verhalten. */
+.ja-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    cursor: pointer;
+    user-select: none;
+    /* Gemessen waere die Zeile sonst 20 px hoch – das ist fuer eine
+       Klickflaeche am unteren Rand des Vertretbaren (Touch-Ziele gelten ab
+       24 px als brauchbar). Die Kopfzeile ist das EINZIGE Bedienelement des
+       Containers, also bekommt sie eine ordentliche Flaeche. */
+    min-height: 32px;
+}
+.ja-card-head:hover h2 { color: var(--accent); }
+/* :focus-visible, nicht :focus – sonst bliebe nach jedem Mausklick ein
+   Rahmen stehen (Projektregel). */
+.ja-card-head:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 6px;
+}
+.ja-card-head h2 { margin-bottom: 0; }
+.ja-caret {
+    color: var(--text-muted);
+    font-size: .8rem;
+    flex: 0 0 auto;
+    transition: transform .15s;
+}
+.ja-card.is-zu .ja-caret { transform: rotate(-90deg); }
+.ja-card.is-zu .ja-card-body { display: none; }
+/* Der Abstand gehoert an den KOERPER – an der Kopfzeile bliebe er im
+   zugeklappten Zustand als Luecke stehen. */
+.ja-card-body { padding-top: 4px; }
+/* Zwischentitel der verschobenen Abschnitte („Grenzen", „Einrichten"). Sie
+   sind Teil ihres Containers geworden und muessen sich von dessen Ueberschrift
+   unterscheiden – sonst liest es sich wie zwei gleichrangige Karten. */
+.ja-card-body h3 {
+    font-size: .95rem;
+    font-weight: 600;
+    margin: 18px 0 8px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+}

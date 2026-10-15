@@ -1,0 +1,6488 @@
+#!/usr/bin/env node
+/* Waechter fuer die Browser-Erweiterung (browser-addon/).
+ *
+ * Zwei Teile:
+ *  1. Struktur und Regeln – Manifeste, Rechte-Zuschnitt, Feldnamen, und die
+ *     Frage, wo gefetcht werden darf (das ist unter MV3 keine Stilfrage).
+ *  2. Das Einfuegen wird gegen ein nachgebautes Jira-DOM WIRKLICH AUSGEFUEHRT.
+ *     Ein Quelltext-Test wuerde hier nichts belegen: die Funktion wird von
+ *     scripting.executeScript serialisiert und in fremdem Kontext neu
+ *     ausgewertet – ob sie das ueberlebt, sieht man nur, wenn man es tut.
+ *
+ * jsdom rechnet KEIN Layout: `getBoundingClientRect` liefert ueberall Nullen.
+ * Die Sichtbarkeitspruefung wird deshalb im Test gezielt versorgt, statt sie
+ * auszubauen – sonst pruefte der Test eine andere Funktion als die echte.
+ */
+"use strict";
+
+const fs = require("fs");
+const path = require("path");
+const { JSDOM } = require("./lib/jsdom_laden")();
+
+const WURZEL = path.resolve(__dirname, "..");
+const ADDON = path.join(WURZEL, "browser-addon");
+
+let ok = 0, fail = 0;
+
+/* ⚠ EINE UNBEHANDELTE ZURUECKWEISUNG IST EIN FEHLSCHLAG, KEIN ZUFALL.
+ *
+ * Gefunden 2026-08-31 bei den Gegenproben zur Ticket-Automatik: eine
+ * geschnittene Funktion, die NICHT abgewartet wird (`autoAktionPruefen`), warf
+ * in einem Harness einen ReferenceError. Der landete als unbehandelte
+ * Zurueckweisung – und ob der Lauf daran abbrach oder sie gar nicht meldete,
+ * haengte allein daran, ob `process.exit()` schneller war. Zwei Gegenproben
+ * brachen deshalb ab, statt fehlzuschlagen: kein FAIL, keine Zaehlzeile, der
+ * Waechter sah aus, als waere er nicht gelaufen (Register).
+ * Jetzt wird sie gezaehlt, und vor der Zusammenfassung wird der Mikrotask-
+ * Puffer geleert, damit sie sicher vorher ankommt. */
+const zurueckweisungen = [];
+process.on("unhandledRejection", (e) => {
+  zurueckweisungen.push((e && e.stack) || String(e));
+  /* ⚠ EXIT-CODE SOFORT SETZEN. Ohne diese Zeile war der Wachhund schlimmer als
+   * gar keiner: die ganze Datei ist EINE async-IIFE – wirft etwas darin, wird
+   * alles bis zum Ende uebersprungen, auch die Zusammenfassung und
+   * `process.exit(fail ? 1 : 0)`. Der Zuhoerer verhinderte dann den Absturz,
+   * und der Lauf endete mit "0" und ohne jede Zaehlzeile: ein abgebrochener
+   * Test, der wie ein bestandener aussieht. Genau am 2026-08-31 passiert. */
+  process.exitCode = 1;
+  console.log("  FAIL Lauf abgebrochen: " + ((e && e.message) || e));
+});
+
+function check(bed, text, extra) {
+  if (bed) { ok++; console.log("  OK   " + text); }
+  else { fail++; console.log("  FAIL " + text + (extra ? " – " + extra : "")); }
+}
+function section(t) { console.log("\n═══ " + t); }
+
+const lies = (p) => fs.readFileSync(path.join(ADDON, p), "utf8");
+
+/* Kommentare weg – ein Waechter darf nicht seine eigene Begruendung lesen.
+ * Im Projekt neun belegte Faelle; in dieser Datei waere es besonders leicht,
+ * weil die Begruendungen die gesuchten Bezeichner woertlich nennen. */
+function ohneKommentare(t) {
+  return t.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+}
+
+const M_CHROME = JSON.parse(lies("manifest.json"));
+const M_FF = JSON.parse(lies("manifest.firefox.json"));
+const BG = lies("background.js");
+const POPUP_JS = lies("popup.js");
+const POPUP_HTML = lies("popup.html");
+const EINFUEGEN = lies("einfuegen.js");
+
+/* Modul-Konstanten, die die geschnittenen Funktionen brauchen. Sie stehen
+ * nicht in einem Funktionsrumpf und fallen deshalb aus jedem Schnitt heraus –
+ * fehlen sie, WIRFT der Lauf statt fehlzuschlagen (siehe LEISTE_PFAD). */
+const STAND_ZEILE = (POPUP_JS.match(/const STAND = \d+;/) || [""])[0];
+/* Dieselbe Falle, am 2026-08-31 erneut zugeschnappt: `_FETT_RE` und
+ * `_BLOCK_RE` stehen in keinem Funktionsrumpf. Ohne sie warf der Lauf mitten
+ * in `felderLeeren` – und weil die ganze Datei EINE async-IIFE ist, endete er
+ * ohne Zaehlzeile. */
+/* ⚠ DIESELBE FALLE, 2026-09-14 erneut: seit `felderLeeren` einen wartenden
+ * Vorlagenwechsel abraeumt, zieht JEDER Schnitt, der es mitnimmt, auch
+ * `wechselAbbrechen` – und dessen Modul-Merker stehen in keinem Funktionsrumpf.
+ * Ohne sie WIRFT der Lauf statt fehlzuschlagen ("_wechselTimer is not
+ * defined"), und weil die Datei EINE async-IIFE ist, endet er ohne Bilanz. */
+const WECHSEL_KONST = [
+  (POPUP_JS.match(/let _autoWechsel = .*;/) || [""])[0],
+  (POPUP_JS.match(/let _wechselTimer = .*;/) || [""])[0],
+  (POPUP_JS.match(/let _wechselKey = .*;/) || [""])[0],
+  (POPUP_JS.match(/const WECHSEL_VERZUG = .*;/) || [""])[0],
+].join("\n");
+
+const FELD_KONST = [
+  (POPUP_JS.match(/const _FETT_RE = .*;/) || [""])[0],
+  (POPUP_JS.match(/const _BLOCK_RE = .*;/) || [""])[0],
+].join("\n");
+
+/* ── Schnitt-Helfer fuer die funktionalen Laeufe ──────────────────────────
+ *
+ * Schneidet eine Funktion aus popup.js und zieht TRANSITIV alles mit, was sie
+ * aufruft und was popup.js selbst als Funktion definiert. Eine gepflegte Liste
+ * gab es hier bis 2026-08-30 – sie liess beim naechsten neuen Aufruf in
+ * `start()` genau eine Funktion fehlen, und der Lauf brach mit einem nackten
+ * ReferenceError ab: kein FAIL, keine Zaehlzeile, der Waechter sah aus, als
+ * waere er gar nicht gelaufen (Register).
+ */
+/** Schneidet EINE Funktion aus popup.js - mit Klammern-Zaehlung.
+ *
+ * ⚠ HIER STAND EIN REGEX AUF DAS ERSTE `\n}` - UND DER FRASS EINZEILER AUF.
+ * `function tabHerkunft() { return herkunftAus(_tabUrl); }` endet in DERSELBEN
+ * Zeile; das erste `\n}` steht erst am Ende der NAECHSTEN Funktion. Der
+ * Schnitt nahm sie also mit, samt deren Modul-Deklarationen - beim Messen
+ * schlug das als "Identifier already declared" zu, und in einem Waechter waere
+ * es schlimmer: er prueft dann fremden Code und ist trivial wahr (Register,
+ * dort schon mit 446 Zeilen bezahlt).
+ *
+ * Gezaehlt wird ab der oeffnenden Klammer; Zeichenketten und Kommentare
+ * bleiben unberuecksichtigt - fuer diesen Zweck genuegt das, und ein zu WEITER
+ * Schnitt faellt jetzt sofort auf (die Klammern gingen dann nicht auf).
+ */
+function schneidePopup(name) {
+  const kopf = new RegExp('(?:async )?function ' + name + '\\([^)]*\\)\\s*\\{');
+  const m = kopf.exec(POPUP_JS);
+  if (!m) return null;
+  let tiefe = 0;
+  for (let i = m.index + m[0].length - 1; i < POPUP_JS.length; i++) {
+    const c = POPUP_JS[i];
+    if (c === '{') tiefe++;
+    else if (c === '}') {
+      tiefe--;
+      if (tiefe === 0) return POPUP_JS.slice(m.index, i + 1);
+    }
+  }
+  return null;
+}
+
+function popupTeile(start, gestellt) {
+  const GESTELLT = new Set((gestellt || []).concat(['Function', 'JSON']));
+  const teile = [], drin = new Set(), offen = start.slice();
+  while (offen.length) {
+    const name = offen.shift();
+    if (drin.has(name) || GESTELLT.has(name)) continue;
+    const koerper = schneidePopup(name);
+    if (!koerper) continue;
+    drin.add(name);
+    teile.push(koerper);
+    // Jeder Bezeichner vor einer Klammer ist ein Aufruf-Kandidat; mitgenommen
+    // wird nur, was popup.js wirklich als Funktion definiert.
+    for (const t of koerper.match(/\b[A-Za-z_$][\w$]*(?=\s*\()/g) || []) {
+      if (!drin.has(t) && !GESTELLT.has(t) && schneidePopup(t)) offen.push(t);
+    }
+  }
+  return { teile, drin };
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("1) Manifeste: eine Erweiterung, zwei Bauformen");
+// ═══════════════════════════════════════════════════════════════════════════
+check(M_CHROME.manifest_version === 3 && M_FF.manifest_version === 3,
+      "beide sind Manifest V3");
+check(M_CHROME.version === M_FF.version,
+      "beide tragen dieselbe Version", M_CHROME.version + " / " + M_FF.version);
+
+// Firefox kennt background.service_worker NICHT (MDN: Event Pages statt
+// Service Worker). Ein Chrome-Manifest in Firefox laedt den Hintergrund gar
+// nicht – und die Erweiterung sieht aus, als tue sie nichts.
+check(!!(M_CHROME.background && M_CHROME.background.service_worker),
+      "Chrome/Edge: background.service_worker");
+check(!!(M_FF.background && Array.isArray(M_FF.background.scripts)),
+      "Firefox: background.scripts (Event Page)");
+check(!M_FF.background.service_worker,
+      "Firefox-Manifest hat KEINEN service_worker");
+check(!!(M_FF.browser_specific_settings
+         && M_FF.browser_specific_settings.gecko
+         && M_FF.browser_specific_settings.gecko.id),
+      "Firefox: gecko.id gesetzt (Pflicht zum Signieren)");
+
+// DER ZUSCHNITT DER RECHTE. Ein Content-Script auf https://*/* verlangt bei der
+// Installation "Alle deine Daten auf allen Websites lesen und aendern".
+for (const [name, m] of [["Chrome", M_CHROME], ["Firefox", M_FF]]) {
+  check(!m.content_scripts,
+        name + ": kein dauerhaftes Content-Script (activeTab statt Vollzugriff)");
+  // IM REPO keine festen host_permissions – die traegt erst der Server beim
+  // Bauen ein, und zwar SEINE Adresse (jira_assist._manifest_gebrandet).
+  // Stuende hier eine, waere sie auf jedem anderen Server falsch.
+  check(!m.host_permissions,
+        name + ": im Repo keine festen host_permissions");
+  check(Array.isArray(m.optional_host_permissions)
+        && m.optional_host_permissions.length > 0,
+        name + ": Host-Rechte sind sonst zur Laufzeit erfragbar");
+  check((m.permissions || []).includes("activeTab"),
+        name + ": activeTab");
+  check(!(m.permissions || []).includes("tabs"),
+        name + ": KEINE weitreichende tabs-Berechtigung");
+}
+
+/* KEINE SERVERADRESSE IM REPO-MANIFEST – aber sehr wohl im gebauten Paket.
+ *
+ * ⚠ HIER STAND EINE BEGRUENDUNG, DIE NICHT MEHR STIMMTE: "eine signierte Datei
+ * laesst sich nicht pro Server umschreiben". Das Paket ist laengst pro
+ * Installation verschieden – `_manifest_gebrandet` schreibt seit Langem den
+ * Markennamen hinein. Die Adresse herauszuhalten war damit eine Regel ohne
+ * Grund, und sie hat Geld gekostet: ohne Host-Recht musste das Fenster beim
+ * ersten Anmelden nachfragen, Chrome schloss dabei das Popup, und **die
+ * Anmeldung ging beim ersten Mal verloren** ("man muss sich 2x anmelden").
+ *
+ * Was bleibt und hier geprueft wird: im REPO steht keine Adresse. Sie entsteht
+ * beim Bauen aus `addin.basis_url(request)` – die Drift-Falle "eine Kopie je
+ * Installation im Repo" ist damit weiterhin zu. */
+const beideManifeste = JSON.stringify(M_CHROME) + JSON.stringify(M_FF);
+check(!/https:\/\/(?!\*)[a-z0-9.-]+\.[a-z]{2,}/i.test(beideManifeste),
+      "keine feste Serveradresse im Repo-Manifest");
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("2) Netzaufrufe NUR im Hintergrund");
+// ═══════════════════════════════════════════════════════════════════════════
+// Unter MV3 unterliegen Content-Scripts der CORS-Regel der Seite; host_permissions
+// wirken dort nicht (MDN: "Only backend scripts have elevated cross-domain
+// privileges"). Live gemessen antwortet der Jarvis-Server einem Preflight von
+// chrome-extension:// mit 400 – aus dem Hintergrund entsteht keiner.
+check(/\bfetch\s*\(/.test(ohneKommentare(BG)),
+      "background.js fetcht");
+check(!/\bfetch\s*\(/.test(ohneKommentare(POPUP_JS)),
+      "popup.js fetcht NICHT (sonst schliesst das Popup den Aufruf mit sich)");
+check(!/\bfetch\s*\(/.test(ohneKommentare(EINFUEGEN)),
+      "das injizierte Skript fetcht NICHT (dort gilt CORS der Jira-Seite)");
+check(/credentials:\s*["']omit["']/.test(BG),
+      "keine Cookies – Jarvis authentifiziert per Bearer-Header");
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("3) Der Feldname des 2FA-Codes");
+// ═══════════════════════════════════════════════════════════════════════════
+// Im Outlook-Add-in stand hier einmal `totp` statt `totp_code`. Ergebnis: eine
+// Anmeldeschleife OHNE Fehlermeldung – der Server sah schlicht keinen Code.
+const bgOhne = ohneKommentare(BG);
+check(/totp_code\s*:/.test(bgOhne), "der Login-Rumpf sendet totp_code");
+check(!/[^_]totp\s*:\s*(?:totp|nachricht)/.test(bgOhne.replace(/totp_code/g, "X")),
+      "es wird KEIN Feld namens 'totp' gesendet");
+
+// Gegenprobe an der Wahrheit: main.py liest genau diesen Namen.
+const MAIN = fs.readFileSync(path.join(WURZEL, "backend", "main.py"), "utf8");
+check(/["']totp_code["']/.test(MAIN),
+      "backend/main.py liest 'totp_code' – die Namen passen zusammen");
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("4) Anmeldung und Ergebnis ueberleben den Neustart");
+// ═══════════════════════════════════════════════════════════════════════════
+/* GEAENDERT auf Meldung aus dem Betrieb ("Anmeldung verschwindet generell bei
+ * Chrome Neustart"). Vorher lag das Token in `storage.session` – eine
+ * Strenge ohne Gegenwert: das Portal legt sein Token seit jeher in den
+ * localStorage, gleicher Rechner, gleiche Person. Die Erweiterung war also
+ * strenger als die Anwendung, fuer die sie arbeitet. */
+check(/storage\.local/.test(bgOhne), "Token und Adresse liegen in storage.local");
+check(!/storage\.session/.test(bgOhne),
+      "storage.session wird nicht mehr benutzt (ueberlebt den Neustart nicht)");
+
+// Was die Grenze weiterhin haelt – und das ist der Punkt, an dem die
+// Lockerung vertretbar wird:
+check(/status === 401/.test(bgOhne) && /sitzungSchreiben\(\{\}\)/.test(bgOhne),
+      "ein abgelaufenes Token (401) wird sofort verworfen");
+check(/case "abmelden"[\s\S]{0,220}sitzungSchreiben\(\{\}\)/.test(bgOhne),
+      "Abmelden loescht es");
+
+// Das Ergebnis ueberlebt das Schliessen des Fensters – ein Popup schliesst
+// beim Wechsel in den Jira-Tab, und eine Auswertung dauert ~13 Sekunden.
+check(/ergebnisSchreiben/.test(bgOhne), "das Ergebnis wird gemerkt");
+check(/case "abmelden"[\s\S]{0,320}ergebnisseLoeschen\(\)/.test(bgOhne),
+      "beim Abmelden gehen ALLE mit (es sind Ticketinhalte des vorigen "
+      + "Benutzers an diesem Rechner)");
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("5) Die injizierte Funktion ist SELBSTSTAENDIG");
+// ═══════════════════════════════════════════════════════════════════════════
+// scripting.executeScript serialisiert sie per toString und wertet sie in der
+// Seite neu aus. Jede Referenz nach draussen wird dort zu einem ReferenceError,
+// der im Popup als "Einfuegen fehlgeschlagen" ankommt.
+// Am NAMEN geschnitten, nicht an "export function": die Funktion ist seit
+// 2026-09-02 `async` (sie wartet auf den Kommentarbereich).
+const koerper = EINFUEGEN.slice(EINFUEGEN.search(/function einfuegenInJira/));
+check(!/\bimport\b/.test(koerper), "kein import in der Funktion");
+for (const fremd of ["api.", "chrome.", "browser.", "$(", "frage(", "melde("]) {
+  check(!koerper.includes(fremd),
+        "keine Referenz auf '" + fremd + "' (Modul-Scope)");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("6) Einfuegen gegen ein nachgebautes Jira – WIRKLICH ausgefuehrt");
+// ═══════════════════════════════════════════════════════════════════════════
+/* Die Funktion wird so geladen, wie der Browser sie sieht: als Quelltext, neu
+ * ausgewertet. Damit wird zugleich belegt, dass die Serialisierung traegt. */
+function ladeEinfuegen(fenster, name) {
+  /* /g – die Datei exportiert seit dem Editor-API-Weg MEHRERE Funktionen. Ohne
+   * das globale Flag bleibt das zweite `export` stehen und der ganze Abschnitt
+   * stirbt mit "Unexpected token 'export'".
+   * ⚠ UND NUR DAS SCHLUESSELWORT, nicht `export function`: seit
+   * `einfuegenInJira` auf den Kommentarbereich WARTET, heisst es dort `export
+   * async function` – die engere Ersetzung griff nicht mehr, und genau dieselbe
+   * Meldung kam zurueck. Das Muster darf nicht an einem zweiten Wort haengen,
+   * das sich aendern kann. */
+  const quelle = EINFUEGEN.replace(/\bexport\s+/g, "");
+  const f = new fenster.Function(
+    quelle + "\nreturn " + (name || "einfuegenInJira") + ";")();
+  return f;
+}
+
+function mitDom(html, arbeit, name) {
+  // runScripts ist Pflicht, nicht Beiwerk: ohne das liefert `window.Function`
+  // eine Funktion, deren globaler Scope NICHT das jsdom-Fenster ist – sie sieht
+  // dann kein `document` und stirbt mit ReferenceError. "outside-only" genuegt
+  // (die Seite selbst soll nichts ausfuehren).
+  const dom = new JSDOM(html, { url: "https://jira.test/browse/ABC-1",
+                                runScripts: "outside-only" });
+  const w = dom.window;
+  // jsdom rechnet kein Layout – ohne das haelt die Funktion JEDES Feld fuer
+  // unsichtbar und faellt immer auf den Fehlerzweig. Gemessen wird die echte
+  // Logik, nur die Geometrie wird gestellt.
+  w.Element.prototype.getBoundingClientRect = function () {
+    return this.hasAttribute("data-unsichtbar")
+      ? { width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0 }
+      : { width: 300, height: 80, top: 0, left: 0, right: 300, bottom: 80 };
+  };
+  w.Element.prototype.scrollIntoView = function () {};
+  // Ein Wurf darf den Lauf nicht ABBRECHEN – sonst sieht ein Fehler aus wie
+  // "nicht gelaufen" und eine Gegenprobe waere gruen aus dem falschen Grund
+  // (Register: eine Pruefung darf nicht werfen).
+  try {
+    return arbeit(w, ladeEinfuegen(w, name));
+  } catch (e) {
+    check(false, "Lauf gegen das nachgebaute DOM", String(e && e.message || e));
+    return null;
+  } finally {
+    w.close();
+  }
+}
+
+const TEXT = "Guten Tag,\n\ndas Problem ist behoben.\n\nViele Grüße";
+
+// a) Jira Server/DC, klassischer Editor
+mitDom('<form><textarea id="comment"></textarea></form>', (w, f) => {
+  const r = f(TEXT);
+  check(r.ok === true, "textarea #comment: Einfuegen meldet Erfolg", JSON.stringify(r));
+  check(w.document.getElementById("comment").value === TEXT,
+        "der Text steht wirklich im Feld");
+});
+
+// b) Der Wert muss als input-Ereignis ankommen – sonst merkt ein Framework
+//    nichts davon und das Feld ist beim Absenden wieder leer.
+mitDom('<textarea id="comment"></textarea>', (w, f) => {
+  let gesehen = 0;
+  w.document.getElementById("comment")
+    .addEventListener("input", () => { gesehen++; });
+  f(TEXT);
+  check(gesehen === 1, "genau ein input-Ereignis wird ausgeloest", "gesehen: " + gesehen);
+});
+
+// c) Alternative Feldnamen
+mitDom('<textarea name="comment"></textarea>', (w, f) => {
+  check(f(TEXT).ok === true, "textarea[name=comment] wird gefunden");
+});
+
+// d) Ein UNSICHTBARES Feld darf NICHT genommen werden – in Jira liegt oft ein
+//    verstecktes Formular im DOM, bevor der Benutzer "Kommentieren" klickt.
+mitDom('<textarea id="comment" data-unsichtbar></textarea>', (w, f) => {
+  const r = f(TEXT);
+  check(r.ok === false, "ein unsichtbares Feld wird uebergangen");
+  check(/Kommentarfeld/.test(r.fehler || ""),
+        "und der Grund wird im Klartext genannt");
+});
+
+// e) Gar kein Feld → ehrlicher Fehlschlag statt stillem Nichtstun
+mitDom("<p>Kein Formular hier.</p>", (w, f) => {
+  const r = f(TEXT);
+  check(r.ok === false, "ohne Kommentarfeld: kein falscher Erfolg");
+  check(/Kopieren/.test(r.fehler || ""),
+        "die Meldung nennt den Ausweg (Kopieren)");
+});
+
+// f) contenteditable (Jira Cloud / ProseMirror)
+mitDom('<div contenteditable="true"></div>', (w, f) => {
+  w.document.execCommand = () => false;   // jsdom kennt execCommand nicht
+  const r = f(TEXT);
+  check(r.ok === true, "contenteditable wird als letzter Weg genommen");
+  // Geprueft wird der INHALT, nicht die Zeichenkette: der Text wird bewusst in
+  // ABSAETZE zerlegt (ein HTML-Editor macht aus \n sonst nichts). Ein Vergleich
+  // auf Gleichheit haette hier eine Verbesserung als Fehler gemeldet.
+  const drin = w.document.querySelector("[contenteditable]").textContent;
+  check(TEXT.split(/\s+/).every((wort) => drin.includes(wort)),
+        "auch dort steht der Text", drin);
+});
+
+// g) Der Vorschlagstext ist MODELLTEXT und darf kein Markup einschleusen.
+mitDom('<iframe id="x_ifr"></iframe>', (w, f) => {
+  const rahmen = w.document.getElementById("x_ifr");
+  const doc = rahmen.contentDocument;
+  doc.body.contentEditable = "true";
+  Object.defineProperty(doc.body, "isContentEditable", { value: true });
+  const r = f("Hallo <img src=x onerror=alert(1)>\n\nZweiter Absatz");
+  check(r.ok === true, "TinyMCE-iframe wird bedient", JSON.stringify(r));
+  check(doc.body.querySelectorAll("img").length === 0,
+        "eingeschleustes Markup wird NICHT als HTML uebernommen");
+  check(doc.body.querySelectorAll("p").length === 2,
+        "Absaetze bleiben Absaetze");
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("6b) Branding: keine Marke und keine Farbe fest verdrahtet");
+// ═══════════════════════════════════════════════════════════════════════════
+/* Dies ist ein White-Label-Produkt. Ein Fenster, das im Browser jedes
+ * Sachbearbeiters "Jarvis" schreibt, verraet das Produkt hinter der Hausmarke –
+ * dieselbe Begruendung, aus der die Mail-Kategorie und der Name des
+ * Outlook-Add-ins dem Branding folgen. */
+const POPUP_CSS = lies("popup.css");
+const cssOhne = ohneKommentare(POPUP_CSS);
+
+// Die Kundenfarbe stand hier hart verdrahtet (#b80f2e) – sie gehoert zum
+// Server, nicht ins ausgelieferte Paket.
+const festeFarben = (cssOhne.match(/#[0-9a-fA-F]{3,8}\b/g) || [])
+    .filter(f => !['#fff', '#ffffff'].includes(f.toLowerCase()));
+check(!festeFarben.includes('#b80f2e'),
+      'keine Kundenfarbe im Paket', festeFarben.join(', '));
+// OHNE BRANDING GIBT ES GAR KEINE PRODUKTFARBE MEHR (Vorgabe 2026-08-28).
+// Erst stand hier eine Kundenfarbe, dann das Jarvis-Violett - beides ist in
+// einem ausgelieferten White-Label-Paket eine Aussage ueber das Produkt.
+check(!/--akzent:\s*#9b59b6/.test(cssOhne),
+      'der Jarvis-Ton ist als Rueckfall raus');
+check(/--akzent:\s*CanvasText/.test(cssOhne),
+      'der Rueckfall folgt dem Systemthema (hell = schwarz auf weiss)');
+check(/html\.neutral\s+button\.haupt\s*\{/.test(cssOhne),
+      'es gibt einen neutralen Knopf-Zustand');
+{
+  // Der Nutzer hat den Neutralknopf woertlich beschrieben: schwarze Schrift,
+  // schwarzer Rand, weisser Hintergrund. Geprueft wird die REGEL, nicht die
+  // Existenz der Klasse.
+  const m = cssOhne.match(/html\.neutral\s+button\.haupt\s*\{([^}]*)\}/);
+  const r = m ? m[1] : '';
+  check(/background:\s*Canvas\b/.test(r), 'neutral: heller Hintergrund', r);
+  check(/color:\s*CanvasText\b/.test(r), 'neutral: dunkle Schrift', r);
+  check(/border-color:\s*CanvasText\b/.test(r), 'neutral: dunkler Rand', r);
+}
+check(/setProperty\("--akzent"/.test(POPUP_JS),
+      'popup.js setzt die Akzentfarbe aus dem Branding');
+// Die Farben stehen in `colors`, nicht flach in der Antwort. Ein Zugriff auf
+// b.accent liefert undefined – und zwar STILL (das Fenster behaelt den
+// Standardton). Live gegen ein eingeschaltetes Branding gemessen.
+check(/b\.colors/.test(POPUP_JS),
+      'die Farben werden aus b.colors gelesen');
+check(!/\bb\.accent\b/.test(ohneKommentare(POPUP_JS)),
+      'NICHT flach aus b.accent (dort steht nichts)');
+// Gegenprobe an der Wahrheit: der Endpunkt liefert genau dieses Feld.
+const MAIN_SRC = fs.readFileSync(path.join(WURZEL, 'backend', 'main.py'), 'utf8');
+check(/"colors":\s*cfg\.get\("colors"/.test(MAIN_SRC),
+      '/api/branding liefert colors – die Namen passen zusammen');
+
+// ── Der Platzhalter {marke} wird WIRKLICH ersetzt ─────────────────────────
+// Kein Quelltext-Test: ein roher "{marke}"-Text im Fenster waere schlimmer als
+// der falsche Markenname. Geprueft wird in BEIDEN Faellen – ohne Branding
+// (Rueckfall) und mit.
+{
+  // markeAnwenden + setzeBranding aus popup.js schneiden und ausfuehren.
+  const teile = ['const _originale = new Map();'];
+  for (const name of ['_istHexFarbe', 'akzentSetzen', 'markeAnwenden', 'setzeBranding']) {
+    const m = POPUP_JS.match(new RegExp('function ' + name + '\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}'));
+    if (m) teile.push(m[0]);
+  }
+
+  /* JE FALL EIN FRISCHES DOM. Der erste Lauf ersetzt die Platzhalter durch den
+   * Rueckfall; ein zweiter Lauf auf demselben DOM faende keine mehr und waere
+   * gruen aus dem falschen Grund – genau so ist dieser Test beim ersten Mal
+   * fehlgeschlagen und hat einen Fehler im PRODUKTIONSCODE behauptet, den es
+   * nicht gab. (Register: ein neuer Testblock braucht ein frisches DOM.) */
+  const lauf = (branding) => {
+    const dom = new JSDOM(POPUP_HTML, { url: 'https://x.test/', runScripts: 'outside-only' });
+    const w = dom.window;
+    try {
+      const f = new w.Function('marke', 'branding', `
+          let _marke = marke;
+          const $ = (id) => document.getElementById(id);
+          const el = { basis: { value: '' } };
+          ${teile.join('\n')}
+          markeAnwenden();
+          if (branding) setzeBranding(branding);
+          return JSON.stringify({
+            text: document.body.textContent,
+            titel: document.title,
+            marke: document.getElementById('marke').textContent
+          });`);
+      return JSON.parse(f('Jarvis', branding));
+    } finally {
+      w.close();
+    }
+  };
+
+  const ohne = lauf(null);
+  check(!ohne.text.includes('{marke}'),
+        'ohne Branding: kein roher Platzhalter im Fenster');
+  check(ohne.text.includes('Jarvis-Adresse'),
+        'ohne Branding: Rueckfall auf Jarvis');
+  check(!ohne.titel.includes('{marke}'), 'ohne Branding: auch der Titel');
+
+  const mit = lauf({ assistant_name: 'Fabrikam', colors: { accent: '#b80f2e' } });
+
+  /* Der Test oben ruft markeAnwenden() SELBST auf – er belegt damit die
+   * Funktion, nicht ihren Aufruf. Eine Gegenprobe, die den Aufruf aus start()
+   * entfernte, blieb deshalb gruen. Also zusaetzlich: wird er ueberhaupt
+   * gerufen, und zwar VOR dem ersten await? Danach blitzt der rohe Platzhalter
+   * sichtbar auf, weil das Fenster schon gerendert ist. */
+  const startFn = (POPUP_JS.match(/async function start\(\)\s*\{[\s\S]*?\n\}/) || [''])[0];
+  check(/markeAnwenden\(\)/.test(startFn), 'start() ruft markeAnwenden()');
+  const vorAwait = startFn.slice(0, startFn.search(/\bawait\b/));
+  check(/markeAnwenden\(\)/.test(vorAwait),
+        'und zwar VOR dem ersten await (sonst blitzt {marke} auf)');
+  check(!mit.text.includes('{marke}'), 'mit Branding: kein roher Platzhalter');
+  check(mit.text.includes('Fabrikam-Adresse'),
+        'mit Branding: der Platzhalter traegt die Marke');
+  check(!mit.text.includes('Jarvis-Adresse'),
+        'mit Branding: kein "Jarvis" mehr im Text');
+  check(mit.marke === 'Fabrikam', 'die Kopfzeile traegt die Marke');
+  check(mit.titel === 'Fabrikam für Jira', 'der Fenstertitel ebenfalls');
+}
+
+/* ── DER GEMELDETE FALL: die ANMELDEMASKE ─────────────────────────────────
+ * "das Branding beim Login ist noch falsch". Zu Recht: die Marke kam
+ * ausschliesslich aus /api/branding, und der Abruf braucht eine Adresse. Beim
+ * allerersten Oeffnen ist keine hinterlegt – ausgerechnet auf der Maske, die
+ * jemand als Erstes sieht, stand deshalb der eingebaute Name.
+ * Der Server traegt die Marke jetzt beim Bauen des ZIP ein. Hier wird das
+ * OHNE jeden Abruf gemessen: ein gebrandetes Paket, kein Branding-Objekt. */
+{
+  const vorgabe  = POPUP_JS.match(/function _vorgabeMarke\(\)\s*\{[\s\S]*?\n\}/);
+  const anwenden = POPUP_JS.match(/function markeAnwenden\(\)\s*\{[\s\S]*?\n\}/);
+  check(!!vorgabe, 'popup.js liest eine Marken-Vorgabe aus dem Paket');
+  check(/<meta name="marke" content="">/.test(POPUP_HTML),
+        'im Repo ist das Feld LEER (keine zweite Wahrheit neben dem Branding)');
+  check(/_vorgabeMarke\(\)\s*\|\|\s*"Jarvis"/.test(POPUP_JS),
+        'ohne Vorgabe gilt weiterhin der eingebaute Rueckfall');
+
+  const html = POPUP_HTML.replace('<meta name="marke" content="">',
+                                  '<meta name="marke" content="Fabrikam">');
+  const dom = new JSDOM(html, { url: 'https://x.test/', runScripts: 'outside-only' });
+  const w = dom.window;
+  try {
+    const f = new w.Function(`
+        const _originale = new Map();
+        ${vorgabe ? vorgabe[0] : ''}
+        ${anwenden ? anwenden[0] : ''}
+        let _marke = _vorgabeMarke() || "Jarvis";
+        markeAnwenden();
+        return JSON.stringify({ text: document.body.textContent,
+                                titel: document.title });`);
+    const r = JSON.parse(f());
+    check(r.text.includes('Fabrikam-Adresse'),
+          'die Anmeldemaske traegt die Marke OHNE jeden Serverabruf');
+    check(!/Jarvis/.test(r.text),
+          'und nirgends mehr den eingebauten Namen', r.text.slice(0, 80));
+    check(r.titel === 'Fabrikam für Jira', 'der Fenstertitel ebenfalls');
+  } finally { w.close(); }
+
+  // Farbe und Logo kennt nur der Server – die sollen stehen, sobald eine
+  // Adresse eingetippt IST, nicht erst nach dem Anmelden.
+  check(/el\.basis\.addEventListener\("change"/.test(POPUP_JS),
+        'die eingetippte Adresse loest den Branding-Abruf schon vor dem Login aus');
+}
+
+/* ── DIE HAUSFARBE AUF DER ANMELDEMASKE ───────────────────────────────────
+ * Gemeldet 2026-08-28: "der Anmelden-Knopf ist weiterhin NICHT in der
+ * Branding-Farbe". Dieselbe Luecke wie bei der Marke, eine Ebene tiefer: die
+ * Farbe kam nur aus /api/branding, und der Abruf haengt am `change` des
+ * Adressfeldes – auf der Anmeldemaske steht dort noch nichts.
+ * GEMESSEN, nicht gelesen: die Funktionen werden wirklich ausgefuehrt. */
+{
+  const teile = [];
+  for (const name of ['_istHexFarbe', 'akzentSetzen']) {
+    const m = POPUP_JS.match(new RegExp('function ' + name + '\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}'));
+    check(!!m, 'popup.js hat ' + name + '()');
+    if (m) teile.push(m[0]);
+  }
+  check(/<meta name="akzent" content="">/.test(POPUP_HTML),
+        'im Repo ist das Farbfeld LEER (keine Produktfarbe im Paket)');
+  check(/class="neutral"/.test(POPUP_HTML),
+        'das Fenster startet im Neutralzustand');
+  // Die Richtung ist der Kern: die Klasse wird ENTFERNT, nie gesetzt. Sonst
+  // blitzt bei jedem Oeffnen kurz die falsche Farbe auf, und ohne JS waere der
+  // Knopf gefaerbt, obwohl niemand eine Farbe kennt.
+  check(/classList\.remove\("neutral"\)/.test(POPUP_JS),
+        'und verlaesst ihn nur, wenn eine Farbe da ist');
+  check(!/classList\.add\("neutral"\)/.test(POPUP_JS),
+        'die Klasse wird nie per JS gesetzt (fail-safe Richtung)');
+  /* ⚠ DER TEST UNTEN RUFT akzentSetzen() SELBST – er belegt damit die Funktion,
+   * nicht ihren AUFRUF. Eine Gegenprobe, die den Aufruf aus popup.js entfernte,
+   * blieb deshalb gruen (dieselbe Falle wie bei markeAnwenden weiter oben).
+   * Also zusaetzlich: steht er auf MODULEBENE, also vor jedem Rendern und vor
+   * jedem Netzaufruf? Ein Aufruf in einer Funktion waere zu spaet - dann
+   * blitzt der neutrale Knopf auf und faerbt sich nachtraeglich. */
+  check(/^akzentSetzen\(/m.test(ohneKommentare(POPUP_JS)),
+        'popup.js wendet die Vorgabe beim Laden an, nicht erst spaeter');
+  check(/^akzentSetzen\([^\n]*meta\[name="akzent"\]/m.test(ohneKommentare(POPUP_JS)),
+        'und zwar die Vorgabe aus dem Paket');
+
+  const lauf = (farbe) => {
+    const html = POPUP_HTML.replace('<meta name="akzent" content="">',
+                                    '<meta name="akzent" content="' + farbe + '">');
+    const dom = new JSDOM(html, { url: 'https://x.test/', runScripts: 'outside-only' });
+    const w = dom.window;
+    try {
+      const f = new w.Function(`
+          ${teile.join('\n')}
+          akzentSetzen((document.querySelector('meta[name="akzent"]') || {}).content);
+          return JSON.stringify({
+            neutral: document.documentElement.classList.contains('neutral'),
+            akzent: document.documentElement.style.getPropertyValue('--akzent'),
+            hover: document.documentElement.style.getPropertyValue('--akzent-hover')
+          });`);
+      return JSON.parse(f());
+    } finally { w.close(); }
+  };
+
+  const mit = lauf('#b80f2e');
+  check(mit.akzent === '#b80f2e',
+        'die Hausfarbe steht OHNE jeden Serverabruf im Fenster', mit.akzent);
+  check(mit.neutral === false, 'und der Neutralzustand ist beendet');
+  check(mit.hover.includes('#b80f2e'),
+        'ein Hover-Ton wird abgeleitet (sonst springt der Knopf zurueck)',
+        mit.hover);
+
+  const ohne = lauf('');
+  check(ohne.neutral === true && !ohne.akzent,
+        'ohne Vorgabe bleibt es neutral – keine Produktfarbe');
+
+  /* ⚠ DIE FARBE LANDET IN EINER CSS-EIGENSCHAFT. Maskieren nuetzt dort nichts,
+   * deshalb wird GEPRUEFT statt entschaerft: alles ausser #rgb/#rrggbb wird
+   * verworfen, und dann bleibt der neutrale Knopf. */
+  for (const boese of ['red;background:url(http://x/a.png)', 'url(javascript:1)',
+                       'expression(alert(1))', 'var(--x)', '#12', 'rot']) {
+    const r = lauf(boese);
+    check(r.neutral === true && !r.akzent,
+          'unbrauchbare/gefaehrliche Farbe wird verworfen: ' + boese,
+          r.akzent);
+  }
+
+  /* Und der Server fuellt die Felder auch wirklich – sonst ist alles obige tot.
+   *
+   * Geprueft wird, dass der NAME des Feldes belegt wird, nicht die Schreibweise
+   * des Regex: seit alle drei Felder ueber denselben Helfer laufen
+   * (`feld_setzen`), steht `name="akzent"` nirgends mehr woertlich da. Ein
+   * Waechter, der auf die Schreibweise zielt, meldet dann einen Fehler, den es
+   * nicht gibt – genau das ist hier beim Umbau passiert. Das VERHALTEN prueft
+   * `tests/test_jira_assist.py`, indem es das Paket wirklich baut. */
+  const JA_SRC = fs.readFileSync(path.join(WURZEL, 'backend', 'jira_assist.py'), 'utf8');
+  const fn = (JA_SRC.match(/def _popup_gebrandet\([\s\S]*?\n\n\n/) || [''])[0];
+  for (const feld of ['marke', 'akzent', 'basis']) {
+    check(new RegExp('"' + feld + '"').test(fn),
+          'jira_assist._popup_gebrandet belegt das Feld ' + feld);
+  }
+  check(/_HEXFARBE/.test(fn),
+        'und prueft die Farbe serverseitig ebenfalls');
+}
+
+/* ── DREHENDER KREIS BEI WARTEMELDUNGEN ───────────────────────────────────
+ * Vorgabe des Nutzers 2026-08-28: "Formuliere einen Antwortvorschlag …
+ * (dauert einige Sekunden)" stand reglos da. Ein stehender Satz ist von einem
+ * haengenden Fenster nicht zu unterscheiden – das Popup hat weder Titelleiste
+ * noch Ladebalken.
+ * GEMESSEN am echten DOM: melde() wird wirklich ausgefuehrt. */
+{
+  /* ⚠ TRANSITIV SCHNEIDEN, nicht `melde` allein. Bis 2026-09-02 stand hier
+   * ein eigener Regex-Schnitt genau dieser einen Funktion - und als `melde()`
+   * um den Aufruf `meldungPlatzieren()` wuchs, brach der ganze Lauf mit einem
+   * nackten ReferenceError ab: keine Bilanzzeile, kein FAIL, der Waechter sah
+   * aus, als waere er nie gelaufen. Dieselbe Falle steht im Register und ist
+   * in dieser Datei zum vierten Mal zugeschnappt. */
+  const { teile, drin } = popupTeile(['melde'], []);
+  check(drin.has('melde'), 'melde() ist schneidbar');
+  check(drin.has('meldungPlatzieren'),
+        'und der Schnitt nimmt meldungPlatzieren() mit (transitiv)');
+
+  const lauf = (rufe) => {
+    const dom = new JSDOM(POPUP_HTML, { url: 'https://x.test/', runScripts: 'outside-only' });
+    const w = dom.window;
+    try {
+      const f = new w.Function('rufe', `
+          const _marke = "Marke";
+          const el = { meldung: document.getElementById("meldung") };
+` + teile.join('\n') + `
+          for (const r of rufe) melde(r[0], r[1]);
+          return JSON.stringify({
+            kreise: el.meldung.querySelectorAll(".dreher").length,
+            text: el.meldung.textContent,
+            arbeitet: el.meldung.classList.contains("arbeitet"),
+            ariaVersteckt: (el.meldung.querySelector(".dreher") || {})
+                .getAttribute ? el.meldung.querySelector(".dreher").getAttribute("aria-hidden") : null,
+            erstesKind: el.meldung.firstChild && el.meldung.firstChild.className || ''
+          });`);
+      return JSON.parse(f(rufe));
+    } finally { w.close(); }
+  };
+
+  const wartet = lauf([['Formuliere einen Antwortvorschlag … (dauert einige Sekunden)', true]]);
+  check(wartet.kreise === 1, 'Wartemeldung: genau ein drehender Kreis', wartet.kreise);
+  check(wartet.erstesKind === 'dreher',
+        'und er steht VOR dem Text', wartet.erstesKind);
+  check(wartet.text.includes('Antwortvorschlag'),
+        'der Text bleibt vollstaendig erhalten', wartet.text);
+  check(wartet.arbeitet === true, 'die Meldung ist als arbeitend markiert');
+  check(wartet.ariaVersteckt === 'true',
+        'der Kreis wird Vorlesesoftware nicht als Inhalt angesagt');
+
+  const fertig = lauf([['Fertig.', false]]);
+  check(fertig.kreise === 0, 'normale Meldung: kein Kreis', fertig.kreise);
+
+  /* Der Wechsel ist der interessante Fall: bleibt ein Kreis stehen, dreht sich
+   * das Fenster nach dem Ergebnis weiter und behauptet Arbeit, die laengst
+   * fertig ist. */
+  const danach = lauf([['Lade …', true], ['Vorschlag – bitte lesen.', false]]);
+  check(danach.kreise === 0,
+        'nach dem Ergebnis ist der Kreis weg', danach.kreise);
+  check(danach.arbeitet === false, 'und die Markierung ebenfalls');
+  const zweimal = lauf([['Lade …', true], ['Lese …', true]]);
+  check(zweimal.kreise === 1,
+        'zwei Wartemeldungen hintereinander haeufen keine Kreise an', zweimal.kreise);
+
+  /* Der Text kommt teils aus dem Hintergrund - er darf nicht durch innerHTML.
+   * ⚠ OHNE ohneKommentare() liest der Waechter die eigene Begruendung im Code
+   * mit ("ginge sonst durch innerHTML") und meldet einen Fehler, den es nicht
+   * gibt - genau so ist diese Pruefung beim ersten Lauf fehlgeschlagen. */
+  check(!/innerHTML/.test(ohneKommentare(schneidePopup('melde') || 'innerHTML')),
+        'melde() setzt den Text nie per innerHTML');
+
+  /* Und die Wartetexte melden sich auch wirklich als solche an.
+   * Beim Auswerten steht der Text seit 0.8.0 in einem Ternaer (bei gewaehlter
+   * Vorlage entscheidet ihre ART den Modus, und die kennt erst die Antwort) -
+   * geprueft wird deshalb, dass ARBEITSTEXT ueberhaupt mit `true` gemeldet
+   * wird, nicht die Schreibweise des Ausdrucks. */
+  for (const stelle of [/melde\(\(?[\s\S]{0,200}?ARBEITSTEXT[\s\S]{0,200}?,\s*true\)/,
+                        /melde\("Melde an …",\s*true\)/,
+                        /melde\("Lese das Kommentarfeld …",\s*true\)/]) {
+    check(stelle.test(POPUP_JS),
+          'Wartetext ' + stelle.source.slice(0, 32) + '… ist als arbeitend gemeldet');
+  }
+
+  // CSS: Bauform wie .chat-activity-spinner im Hauptprojekt.
+  const dreher = (cssOhne.match(/\.dreher\s*\{([^}]*)\}/) || ['', ''])[1];
+  check(/animation:\s*[\w-]+\s/.test(dreher), 'der Kreis dreht sich wirklich', dreher);
+  check(/border-radius:\s*50%/.test(dreher), 'und ist rund', dreher);
+  check(/border-top-color:\s*var\(--akzent\)/.test(dreher),
+        'die drehende Kante folgt der Hausfarbe', dreher);
+  check(/@keyframes\s+dreher-drehen/.test(cssOhne), 'die Animation ist definiert');
+  check(/prefers-reduced-motion[\s\S]{0,120}\.dreher\s*\{\s*animation:\s*none/
+        .test(cssOhne),
+        'wer Bewegung abgestellt hat, bekommt keine');
+  check(/\.meldung\.arbeitet\s*\{[^}]*display:\s*flex/.test(cssOhne),
+        'Kreis und Text stehen nebeneinander, nicht uebereinander');
+}
+
+// Kein sichtbarer Text im Paket darf "Jarvis" fest verdrahtet haben – der
+// Rueckfall gehoert in EINE Variable, nicht in zwanzig Zeichenketten.
+for (const [datei, inhalt] of [['popup.html', POPUP_HTML],
+                               ['background.js', BG],
+                               ['popup.js', POPUP_JS]]) {
+  const sichtbar = ohneKommentare(inhalt)
+      // Der Rueckfall selbst ist erlaubt – aber nur EINMAL und nur hier.
+      .replace(/_vorgabeMarke\(\) \|\| "Jarvis";/, '')
+      .replace(/JarvisIcons|JarvisIssues/g, '');
+  check(!/Jarvis/.test(sichtbar),
+        datei + ': kein fest verdrahtetes "Jarvis" im Anzeigetext',
+        (sichtbar.match(/.{0,40}Jarvis.{0,40}/) || [''])[0].trim());
+}
+
+// Der Markenname wird gesetzt – und zwar per textContent (er kommt aus einem
+// Formular, also Fremdeingabe).
+check(/getElementById\("marke"\)|\$\("marke"\)/.test(POPUP_JS),
+      'popup.js setzt den Markennamen');
+check(!/marke[^\n]*innerHTML/.test(POPUP_JS),
+      'der Markenname geht NICHT durch innerHTML');
+check(/textContent = name/.test(POPUP_JS),
+      'sondern durch textContent');
+
+// /api/branding haengt an KEINER Anmeldung – deshalb kann die Marke schon vor
+// dem ersten Login stehen. Wuerde hier ein Token verlangt, saehe der Benutzer
+// beim allerersten Oeffnen die fremde Marke.
+check(/mitToken:\s*false/.test(bgOhne.slice(bgOhne.indexOf('/api/branding') - 200,
+                                            bgOhne.indexOf('/api/branding') + 200)),
+      '/api/branding wird OHNE Token geholt');
+
+// Serverseitig: das Manifest im ZIP traegt den Markennamen.
+const MAIN_PY = fs.readFileSync(path.join(WURZEL, 'backend', 'jira_assist.py'), 'utf8');
+const pyOhne = MAIN_PY.replace(/"""[\s\S]*?"""/g, '')
+                      .split('\n').map(z => z.split('#')[0]).join('\n');
+check(/def markenname/.test(pyOhne), 'der Server kennt einen Markennamen');
+check(/kategorie_name/.test(pyOhne),
+      'er kommt aus kategorie_name() – keine dritte Fassung derselben Frage');
+check(/json\.dumps/.test(pyOhne),
+      'das Manifest wird JSON-sicher gebaut (der Name ist Fremdeingabe)');
+check(!/\.replace\([^)]*"name"/.test(pyOhne),
+      'kein Zeichenketten-Ersatz am Manifest');
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("6c) Einfuegen: fokussiertes Feld, Editor-API, Diagnose");
+// ═══════════════════════════════════════════════════════════════════════════
+/* GEMELDET: "'in Kommentarfeld uebernehmen' fuegt NICHT in das Feld ein" –
+ * bei einem Jira mit WYSIWYG-Editor. */
+{
+  const TXT = "Guten Tag,\n\nerledigt.";
+
+  // a) Das ZULETZT FOKUSSIERTE Feld schlaegt jede Selektorliste. Wer einfuegen
+  //    will, hat vorher hineingeklickt – das funktioniert auch in einem Editor,
+  //    den niemand vorhergesehen hat.
+  mitDom('<div id="fremd" contenteditable="true"></div>'
+         + '<textarea id="comment"></textarea>', (w, f) => {
+    const ziel = w.document.getElementById("fremd");
+    // activeElement ist in jsdom nur ueber focus() setzbar.
+    ziel.focus();
+    Object.defineProperty(w.document, "activeElement", { value: ziel, configurable: true });
+    w.document.execCommand = () => false;
+    const r = f(TXT);
+    check(r.ok === true && /fokussiert/.test(r.weg || ""),
+          "das fokussierte Feld wird bevorzugt", JSON.stringify(r));
+    check(ziel.textContent.includes("erledigt"),
+          "und der Text landet dort – nicht in der textarea");
+    check(w.document.getElementById("comment").value === "",
+          "die textarea bleibt unberuehrt");
+  });
+
+  // b) WYSIWYG ohne Fokus: der contenteditable-Weg vor der versteckten textarea.
+  //    Genau das war der gemeldete Fall – `#comment` existiert, ist aber
+  //    unsichtbar und traegt beim Absenden nicht den sichtbaren Inhalt.
+  mitDom('<textarea id="comment" data-unsichtbar></textarea>'
+         + '<div id="comment-wiki-edit"><div contenteditable="true"></div></div>',
+         (w, f) => {
+    w.document.execCommand = () => false;
+    const r = f(TXT);
+    check(r.ok === true, "WYSIWYG wird gefunden, obwohl #comment existiert",
+          JSON.stringify(r));
+    check(w.document.querySelector("#comment-wiki-edit [contenteditable]")
+            .textContent.includes("erledigt"),
+          "der Text steht im sichtbaren Editor");
+    check(w.document.getElementById("comment").value === "",
+          "die unsichtbare textarea bleibt leer");
+  });
+
+  // c) Ein Fehlschlag muss sagen, WAS er gesehen hat – sonst ist der naechste
+  //    Anlauf wieder Raten.
+  mitDom('<textarea id="comment" data-unsichtbar></textarea>', (w, f) => {
+    const r = f(TXT);
+    check(r.ok === false, "unsichtbares Feld allein: kein falscher Erfolg");
+    check(Array.isArray(r.gesehen) && r.gesehen.length > 0,
+          "die Diagnose nennt die gefundenen Kandidaten", JSON.stringify(r.gesehen));
+    check(/unsichtbar/.test((r.gesehen || []).join(" ")),
+          "und sagt dazu, dass sie unsichtbar waren");
+    check(/Klicke zuerst/.test(r.fehler || ""),
+          "die Meldung nennt den Ausweg (erst hineinklicken)");
+  });
+
+  // d) Der zweite Weg laeuft in der SEITENWELT – von der isolierten Welt aus
+  //    ist `window.tinymce` unsichtbar, das ist keine Einstellung.
+  const zweitQuelle = EINFUEGEN.slice(EINFUEGEN.indexOf("export function einfuegenUeberEditorApi"));
+  check(!/document\.querySelectorAll\(/.test(zweitQuelle) || /tinymce/.test(zweitQuelle),
+        "die zweite Funktion benutzt die Editor-API");
+  check(/world:\s*["']MAIN["']/.test(POPUP_JS),
+        'popup.js ruft sie mit world: "MAIN"');
+  check(/tinymce_moeglich/.test(POPUP_JS) && /tinymce_moeglich/.test(EINFUEGEN),
+        "und nur, wenn der erste Weg das nahelegt");
+  // Die Diagnose muss beim Benutzer ankommen, nicht nur im Rueckgabewert.
+  check(/r\.gesehen/.test(POPUP_JS), "die Diagnose wird angezeigt");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("6e) Ueberarbeiten: das Kommentarfeld LESEN – ausgefuehrt");
+// ═══════════════════════════════════════════════════════════════════════════
+/* Der dritte Knopf holt den bereits getippten Entwurf aus dem Kommentarfeld.
+ * Gleiche Kaskade wie beim Einfuegen, ein Unterschied: es gewinnt das erste
+ * Feld MIT TEXT. */
+{
+  const lies = (html, arbeit) => mitDom(html, arbeit, "leseAusJira");
+
+  // a) Der einfache Fall – und die Absaetze muessen erhalten bleiben.
+  lies('<textarea id="comment">Hallo Herr Meier,\n\nerledigt.</textarea>',
+       (w, f) => {
+    const r = f();
+    check(r.ok === true, "textarea wird gelesen", JSON.stringify(r));
+    check(r.text === "Hallo Herr Meier,\n\nerledigt.",
+          "der Text kommt unveraendert – mit Absatz", JSON.stringify(r.text));
+  });
+
+  // b) Das FOKUSSIERTE Feld schlaegt die Selektorliste – wie beim Einfuegen.
+  lies('<div id="fremd" contenteditable="true"><p>Mein Entwurf.</p></div>'
+       + '<textarea id="comment">Etwas ganz anderes.</textarea>', (w, f) => {
+    const ziel = w.document.getElementById("fremd");
+    Object.defineProperty(w.document, "activeElement",
+                          { value: ziel, configurable: true });
+    const r = f();
+    check(r.ok === true && r.text === "Mein Entwurf.",
+          "der Text kommt aus dem fokussierten Feld", JSON.stringify(r));
+  });
+
+  /* c) ⚠ DER FALL, DER DIE REGEL BEGRUENDET: manche Jira-Editoren halten den
+   *    Fokus auf einer versteckten Spiegel-textarea, waehrend der sichtbare
+   *    Editor den Inhalt traegt. Wuerde das fokussierte, LEERE Feld sofort
+   *    gewinnen, meldete die Erweiterung "leer" – waehrend der Text sichtbar
+   *    auf dem Schirm steht. */
+  /*    ⚠ DAS FELD MUSS HIER SICHTBAR SEIN. Ein unsichtbares wird schon von der
+   *    Sichtbarkeitspruefung uebergangen – der Test liefe dann durch einen
+   *    ANDEREN Zweig und waere auch mit der naiven Fassung gruen (genau so beim
+   *    ersten Anlauf passiert: die Gegenprobe biss nicht). */
+  lies('<textarea id="comment"></textarea>'
+       + '<div id="comment-wiki-edit"><div contenteditable="true">'
+       + '<p>Der sichtbare Entwurf.</p></div></div>', (w, f) => {
+    const leer = w.document.getElementById("comment");
+    Object.defineProperty(w.document, "activeElement",
+                          { value: leer, configurable: true });
+    const r = f();
+    check(r.ok === true && r.text === "Der sichtbare Entwurf.",
+          "ein leeres fokussiertes Feld laesst die Suche WEITERLAUFEN",
+          JSON.stringify(r));
+    check((r.gesehen || []).length === 0 || r.ok === true,
+          "und der leere Fund fuehrt zu keiner Absage");
+  });
+
+  // d) Absaetze aus einem Editor: <p> und <br> sind Umbrueche, kein Leerzeichen.
+  //    textContent allein klebte "Guten Tag" und "erledigt" aneinander.
+  lies('<div contenteditable="true"><p>Guten Tag,</p><p>erledigt.<br>MfG</p></div>',
+       (w, f) => {
+    const r = f();
+    check(r.ok === true, "contenteditable wird gelesen", JSON.stringify(r));
+    check(/Guten Tag,\n+erledigt\.\nMfG/.test(r.text || ""),
+          "Absaetze und <br> werden zu Zeilenumbruechen",
+          JSON.stringify(r.text));
+  });
+
+  // e) `innerText` ist der bevorzugte Weg – jsdom kennt ihn nicht, deshalb
+  //    wird er gestellt. Ohne diese Pruefung waere im Browser ein anderer
+  //    Zweig aktiv als im Test.
+  lies('<div contenteditable="true"><p>x</p></div>', (w, f) => {
+    const el = w.document.querySelector("[contenteditable]");
+    Object.defineProperty(el, "innerText",
+                          { value: "Zeile 1\nZeile 2", configurable: true });
+    const r = f();
+    check(r.text === "Zeile 1\nZeile 2", "innerText wird bevorzugt",
+          JSON.stringify(r.text));
+  });
+
+  // f) LEER ist ein eigener Zustand – nicht "nicht gefunden". Die beiden
+  //    brauchen verschiedene Antworten: ein Bedienfehler mit klarem Weg gegen
+  //    einen Fund fuer die Fehlersuche.
+  lies('<textarea id="comment"></textarea>', (w, f) => {
+    const r = f();
+    check(r.ok === false && r.leer === true, "ein leeres Feld meldet 'leer'",
+          JSON.stringify(r));
+    check(/leer/i.test(r.fehler || "") && /Entwurf/.test(r.fehler || ""),
+          "und sagt, was zu tun ist");
+  });
+  lies("<p>Kein Formular hier.</p>", (w, f) => {
+    const r = f();
+    check(r.ok === false && !r.leer, "ohne Feld: NICHT 'leer', sondern nicht gefunden");
+    check(/Kommentarfeld/.test(r.fehler || ""), "die Meldung nennt das Feld");
+  });
+
+  // g) Unsichtbare Felder werden uebergangen – in Jira liegt oft ein
+  //    verstecktes Formular im DOM.
+  lies('<textarea id="comment" data-unsichtbar>Alter Entwurf</textarea>',
+       (w, f) => {
+    const r = f();
+    check(r.ok === false, "ein unsichtbares Feld wird NICHT gelesen",
+          JSON.stringify(r));
+  });
+
+  // h) Es wird TEXT gelesen, kein Markup: was der Server bekommt, soll der
+  //    getippte Entwurf sein und nicht der HTML-Rumpf des Editors.
+  lies('<div contenteditable="true"><p>Hallo <b>Welt</b></p>'
+       + '<script>var x = 1;<\/script></div>', (w, f) => {
+    const r = f();
+    check(!/[<>]/.test(r.text || ""), "kein Markup im Ergebnis",
+          JSON.stringify(r.text));
+    check(/Hallo Welt/.test(r.text || ""), "der sichtbare Text bleibt");
+  });
+
+  // i) Gelesen wird NUR das Kommentarfeld. Die Funktion laeuft in der Seite –
+  //    sie darf dort nichts anderes einsammeln und nichts nach draussen geben.
+  const leseQuelle = EINFUEGEN.slice(EINFUEGEN.indexOf("export function leseAusJira"),
+                                     EINFUEGEN.indexOf("export function lesenUeberEditorApi"));
+  for (const verboten of ["fetch(", "XMLHttpRequest", "localStorage", "cookie",
+                          "sendMessage", "document.forms"]) {
+    check(!leseQuelle.includes(verboten),
+          "die Lesefunktion benutzt kein '" + verboten + "'");
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("6f) Ueberarbeiten: Verdrahtung Knopf → Server");
+// ═══════════════════════════════════════════════════════════════════════════
+const popupOhne = ohneKommentare(POPUP_JS);
+check(/id="btn-ueberarbeiten"/.test(POPUP_HTML), "der Knopf steht im Fenster");
+check(/\$\("btn-ueberarbeiten"\)\.addEventListener/.test(popupOhne),
+      "und ist verdrahtet");
+// Die Voraussetzung (Cursor im Feld) ist unsichtbar – ohne den Hinweis drueckt
+// jemand den Knopf und weiss nach der Absage nicht, was er anders machen soll.
+check(/Cursor/.test(POPUP_HTML) && /Kommentarfeld/.test(POPUP_HTML),
+      "das Fenster nennt die Voraussetzung");
+check(/leseAusJira/.test(popupOhne) && /lesenUeberEditorApi/.test(popupOhne),
+      "beide Lesewege werden eingebunden");
+check(/world:\s*["']MAIN["'][\s\S]{0,120}lesenUeberEditorApi/.test(popupOhne),
+      "der Editor-API-Weg laeuft im Seitenkontext");
+check(/entwurf:\s*entwurf/.test(popupOhne), "der Entwurf geht an den Hintergrund");
+check(/entwurf:\s*nachricht\.entwurf/.test(bgOhne),
+      "und von dort an den Server");
+// DRIFT-SCHRANKE: der Modusname steht in zwei Welten. Passt er nicht, antwortet
+// der Server "Unbekannter Modus" – und die Ursache steht in einer anderen Datei.
+check(/MODI = \([^)]*"ueberarbeiten"/.test(MAIN_PY),
+      "der Server kennt genau diesen Modusnamen");
+check(/auswerten\("ueberarbeiten"/.test(popupOhne),
+      "das Fenster schickt ihn");
+
+/* DER ABGLEICH-HINWEIS DARF NICHT INS KOMMENTARFELD.
+ * Er ist eine Anmerkung an den Mitarbeiter ("das steht so nicht im Ticket").
+ * Landete er im bearbeitbaren Feld, ginge er mit dem naechsten Klick auf
+ * "Einfuegen" an einen Kunden. Getrennt wird am Server; hier wird geprueft,
+ * dass die Oberflaeche ihn NUR als Meldung anfasst. */
+check(/mitAbgleich/.test(popupOhne), "der Hinweis wird eigens behandelt");
+/* ⚠ DIESE PRUEFUNG HING AN DER SCHREIBWEISE `ergebnisFeld.value = …` – und
+ * wurde mit dem Rich-Text-Umbau zur TAUTOLOGIE: den Ausdruck gibt es nirgends
+ * mehr, der Regex war fuer immer wahr und prueste nichts. Gemessen wird jetzt
+ * die EIGENSCHAFT (Abschnitt 15e fuehrt sie aus); hier bleibt nur die billige
+ * Struktur-Aussage, entkoppelt vom Zuweisungs-Operator. */
+check(!/ergebnisFeld[^;\n]*\bhinweis\b/.test(popupOhne),
+      "der Hinweis wird nirgends an das Ergebnisfeld gegeben");
+/* Und die Gegenrichtung, damit der Umbau nicht heimlich zurueckrutscht: ein
+ * <div> nimmt `.value` klaglos als eigene Eigenschaft an – ohne Wurf, ohne
+ * Warnung, ohne roten Test. */
+check(!/ergebnisFeld\s*\.\s*value/.test(popupOhne),
+      "und niemand fasst das Feld ueber .value an (am <div> ein stiller No-op)");
+check(/melde\(mitAbgleich/.test(popupOhne), "sondern als Meldung angezeigt");
+check(/hinweis:\s*d\.hinweis/.test(bgOhne),
+      "und mitgemerkt (sonst fehlt er beim naechsten Oeffnen)");
+
+// Ein Fehlschlag beim Lesen muss sagen, WAS er gesehen hat – gleiche Lehre wie
+// beim Einfuegen.
+check(/r\.gesehen/.test(popupOhne), "die Diagnose des Lesens wird angezeigt");
+// Und er darf keinen Modellaufruf ausloesen: ohne Entwurf gibt es nichts zu
+// ueberarbeiten, ein Lauf waere bezahlte Zeit fuer eine erfundene Antwort.
+check(/if \(!r \|\| !r\.ok\)[\s\S]{0,300}return;/.test(popupOhne),
+      "ohne Entwurf wird gar nicht erst ausgewertet");
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("6d) Vorlagen und Ticketbezug");
+// ═══════════════════════════════════════════════════════════════════════════
+// Ein gemerkter Text zu Ticket A darf nicht unbemerkt in Ticket B landen –
+// er geht am Ende an einen Kunden.
+check(/_fremdesErgebnis/.test(POPUP_JS), "ein fremder Ticketbezug wird erkannt");
+
+/* ⚠ GEPRUEFT WIRD DIE EIGENSCHAFT, NICHT DIE SCHREIBWEISE.
+ *
+ * Hier stand bis 2026-08-30 ein Vergleich auf den Wortlaut
+ * `_fremdesErgebnis && !(await frageJaNein())`. Als die Schranke von einem
+ * Merker auf eine abgeleitete Pruefung umgestellt wurde – noetig, weil in der
+ * Seitenleiste der Tab waehrend der Anzeige wechseln kann und ein Merker dabei
+ * stehenbleibt –, meldete dieser Waechter einen Fehler, den es nicht gab.
+ * Dieselbe Lehre wie bei `test_kontext_schnitt` im Hauptprojekt (Register). */
+{
+  const m = POPUP_JS.match(/function fremd\(\)\s*\{[\s\S]*?\n\}/);
+  check(!!m, "popup.js hat fremd()");
+  if (m) {
+    // WIRKLICH AUSGEFUEHRT, nicht gelesen: nur so faellt auf, wenn die
+    // Ableitung eines Tages wieder nur den Merker liest.
+    const bau = (letztes, key, flag) => new Function(
+      "_letztes", "_key", "_fremdesErgebnis", m[0] + "; return fremd();"
+    )(letztes, key, flag);
+    check(bau(null, "A-1", true) === true,
+          "der gesetzte Merker allein genuegt weiterhin");
+    check(bau({ key: "A-1", text: "x" }, "B-2", false) === true,
+          "ein Text zu A-1 gilt bei offenem B-2 als fremd – OHNE Merker");
+    check(bau({ key: "A-1", text: "x" }, "A-1", false) === false,
+          "derselbe Vorgang gilt nicht als fremd");
+    check(bau(null, "A-1", false) === false, "ohne Text gibt es nichts Fremdes");
+    check(bau({ key: "A-1", text: "x" }, "", false) === false,
+          "ohne erkanntes Ticket im Tab wird nicht geraten");
+  }
+}
+// Und die Einfuege-Schranke muss diese Ableitung wirklich benutzen.
+{
+  const h = POPUP_JS.match(
+    /\$\("btn-einfuegen"\)\.addEventListener\([\s\S]*?\n\}\);/);
+  check(!!h, "der Einfuegen-Knopf ist verdrahtet");
+  check(!!h && /fremd\(\)\s*&&\s*!\(await frageJaNein\(\)\)/.test(h[0]),
+        "und fragt bei fremdem Ticketbezug zurueck");
+}
+check(!/\b(confirm|alert|prompt)\s*\(/.test(ohneKommentare(POPUP_JS)),
+      "die Rueckfrage ist ein eigener Dialog, kein confirm");
+check(/jn-nein"\)\.focus\(\)/.test(POPUP_JS),
+      "der Fokus liegt auf Abbrechen (die gefaehrlichere Wahl loest kein Tastendruck aus)");
+
+/* ⚠ HIER STAND: "die Vorlage geht nur bei der Zusammenfassung mit".
+ * Das war bis 2026-09-01 richtig und ist seit den Werkzeug-Bereichen falsch:
+ * ihr TEXT wirkt weiter nur beim Zusammenfassen (durchgesetzt am SERVER in
+ * `_system_prompt`), ihre BEREICHE gelten fuer alle drei Knoepfe. Ginge die
+ * Kennung nur bei einem Modus mit, waere die Freigabe fuer zwei von drei
+ * Knoepfen wirkungslos – und niemand koennte erklaeren, warum. */
+/* GEMESSEN AN DER EIGENSCHAFT, nicht an der Schreibweise: der Wert kommt seit
+ * 0.8.0 aus einem Ternaer, weil die Automatik eine ANDERE Vorlage fahren kann
+ * als die im Pulldown gewaehlte (`auswerten(..., vorlagenId)`). Entscheidend
+ * bleibt: die Kennung geht in JEDEM Modus mit, und ohne Uebergabe gilt das
+ * Feld. */
+{
+  const rumpf = schneidePopup('auswerten') || '';
+  const zeile = (rumpf.match(/vorlage:[\s\S]{0,180}?,\n/) || [''])[0];
+  check(/f-vorlage"\)\.value/.test(zeile) && /vorlagenId/.test(zeile),
+        "die Vorlage geht bei JEDEM Modus mit (ihre Bereiche gelten fuer alle)",
+        zeile.trim());
+  check(!/modus === "zusammenfassung"/.test(zeile),
+        "und wird nicht mehr auf einen Modus eingeschraenkt", zeile.trim());
+}
+// Namen sind Freitext aus einem Formular.
+check(!/innerHTML\s*=\s*[^;]*\bv\.name\b/.test(POPUP_JS),
+      "Vorlagennamen gehen nicht durch innerHTML");
+check(/o\.textContent = v\.name/.test(POPUP_JS), "sondern durch textContent");
+
+/* ── DIE PERSOENLICHE STANDARD-VORLAGE (gemeldet 2026-08-28) ──────────────
+ * "der user muss die Moeglichkeit haben eine Vorlage als seine 'Standard'
+ * Vorlage zu markieren". Das Fenster wird bei jedem Klick neu aufgebaut, die
+ * Auswahl stand also bei JEDEM Oeffnen wieder auf "ohne Vorlage".
+ *
+ * AUSGEFUEHRT, nicht gelesen: die haeufigste Ursache fuer eine wirkungslose
+ * Vorauswahl ist, dass sie beim naechsten Neuzeichnen wieder ueberschrieben
+ * wird – im Quelltext sieht man das nicht. */
+{
+  /* Transitiv geschnitten, nicht handverlesen: `vorlagenZeichnen` zieht die
+   * Knopf-Sperre nach (die Zeilen-Knoepfe entstehen erst hier), und eine feste
+   * Liste haette genau diese Funktion fehlen lassen – der Lauf waere mit einem
+   * nackten ReferenceError abgebrochen statt fehlzuschlagen. */
+  const { teile: t3, drin: d3 } = popupTeile(
+    ['vorlagenZeichnen'],
+    ['standardSetzen', 'vorlageLoeschen', 'frageJaNein',
+     // Das Automatik-Pulldown und der Knopf-Titel haengen an `melde`/`frage`
+     // und gehoeren in eigene Abschnitte – hier gestellt.
+     'autoOptionenZeichnen', 'startTitelSetzen']);
+  const zeichnen = t3.join('\n');
+  check(d3.has('vorlagenZeichnen'), 'popup.js hat vorlagenZeichnen()');
+  check(d3.has('knoepfeAktualisieren'),
+        'und zieht die Knopf-Sperre nach', [...d3].join(','));
+
+  const lauf = (standard, eigeneWahl, key) => {
+    const dom = new JSDOM(POPUP_HTML, { url: 'https://x.test/',
+                                        runScripts: 'outside-only' });
+    const w = dom.window;
+    try {
+      const f = new w.Function('standard', 'eigeneWahl', 'key', `
+        const $ = (id) => document.getElementById(id);
+        let _vorlBeruehrt = false;
+        let _bereiche = [];   // Modul-Variable; faellt aus dem Schnitt heraus
+        /* ACHTUNG EBENFALLS MODUL-VARIABLEN - und genau diese Falle hat beim
+         * Umbau auf das wandernde Formular zugeschnappt: _formHeimat fehlte,
+         * der Lauf brach mit einem nackten ReferenceError ab (kein FAIL, keine
+         * Zaehlzeile) und sah aus wie ein bestandener Test. Register.
+         * KEINE Backticks in diesem Prolog: er steht in einem
+         * Template-Literal und wuerde es beenden (Register, zweite Falle). */
+        let _formHeimat = null;
+        let _vorlBearbeitet = "";
+        function autoOptionenZeichnen() {}
+        function startTitelSetzen() {}
+        let _vorlagen = {
+          global: [{ id: "g1", name: "Kurz" }, { id: "g2", name: "Technisch" }],
+          eigene: [{ id: "e1", name: "Meine" }],
+          darf_global: true, standard,
+        };
+        function standardSetzen() {}
+        function vorlageLoeschen() {}
+        function frageJaNein() { return Promise.resolve(true); }
+        let _key = (key === undefined) ? "ABC-1" : key, _laeuft = false;
+` + zeichnen + `
+        vorlagenZeichnen();
+        if (eigeneWahl) {
+          $("f-vorlage").value = eigeneWahl;
+          _vorlBeruehrt = true;
+          vorlagenZeichnen();            // z. B. nach dem Speichern
+        }
+        const sterne = Array.from(
+          document.querySelectorAll("#vorl-liste .vorl-zeile button"))
+          .filter((b) => /^[★☆]$/u.test(b.textContent))
+          .map((b) => b.textContent);
+        /* AUS DER ZEILE, nicht aus der ganzen Liste: seit das Bearbeiten-
+         * Formular UNTER seine Zeile wandert, liegen Speichern und Neu
+         * zeitweise ebenfalls in der Liste - "alle Zeilen-Knoepfe gesperrt"
+         * waere dann eine Aussage ueber fremde Knoepfe. */
+        const zeilenKnoepfe = Array.from(
+          document.querySelectorAll("#vorl-liste .vorl-zeile button"));
+        return JSON.stringify({
+          gewaehlt: $("f-vorlage").value,
+          erste: $("f-vorlage").options[0].textContent,
+          sterne,
+          zeilenAnzahl: zeilenKnoepfe.length,
+          zeilenGesperrt: zeilenKnoepfe.every((b) => b.disabled),
+        });`);
+      return JSON.parse(f(standard, eigeneWahl, key));
+    } finally { w.close(); }
+  };
+
+  /* ⚠ DIE ZEILEN-KNOEPFE ENTSTEHEN ERST HIER - Stern, Bearbeiten, Loeschen.
+   * Ein einmaliger Durchlauf ueber `button` beim Tab-Wechsel erwischt sie
+   * nicht, und beim naechsten Neuzeichnen waeren sie wieder bedienbar.
+   * GEMESSEN, nicht am Schnitt abgelesen: die Pruefung "knoepfeAktualisieren
+   * steckt im geschnittenen Code" bleibt wahr, auch wenn ein `return` davor
+   * steht - die Gegenprobe biss damit nicht. */
+  {
+    const mit = lauf('', '', 'ABC-1');
+    const ohneTicket = lauf('', '', '');
+    check(mit.zeilenAnzahl > 0, 'die Vorlagenliste hat Zeilen-Knoepfe',
+          String(mit.zeilenAnzahl));
+    check(mit.zeilenGesperrt === false, 'mit Ticket sind sie bedienbar');
+    /* ⚠ SEIT 2026-08-31 UMGEKEHRT, auf Meldung: Vorlagen pflegt man
+     * unabhaengig von einem Ticket. Vorher waren Stern, Bearbeiten und
+     * Loeschen ohne Ticket gesperrt - zusammen mit dem Zahnrad, das die Box
+     * ueberhaupt erst oeffnet, war die Verwaltung damit unerreichbar.
+     * GEMESSEN am frisch gezeichneten DOM: die Knoepfe entstehen erst hier,
+     * die Ausnahme kommt vom Container - eine Quelltext-Pruefung saehe das
+     * nicht. */
+    check(ohneTicket.zeilenAnzahl === mit.zeilenAnzahl,
+          'ohne Ticket wird die Liste genauso gezeichnet',
+          String(ohneTicket.zeilenAnzahl));
+    check(ohneTicket.zeilenGesperrt === false,
+          'und die frisch gezeichneten Zeilen-Knoepfe sind bedienbar');
+  }
+
+  const ohne = lauf('', '');
+  check(ohne.gewaehlt === '',
+        'ohne Standard bleibt "ohne Vorlage" vorausgewaehlt', ohne.gewaehlt);
+  /* "Standard" hiesse jetzt zweierlei: der eingebaute Ablauf UND die Vorlage
+   * mit dem Stern. Deshalb wurde die erste Option umbenannt. */
+  check(!/^Standard$/.test(ohne.erste),
+        'die leere Option heisst nicht mehr "Standard"', ohne.erste);
+  check(ohne.sterne.length === 3 && ohne.sterne.every((s) => s === '☆'),
+        'jede Zeile traegt einen Stern, keiner ist gefuellt',
+        JSON.stringify(ohne.sterne));
+
+  const mit = lauf('g2', '');
+  check(mit.gewaehlt === 'g2',
+        'mit Standard ist er vorausgewaehlt – DAS ist der Sinn', mit.gewaehlt);
+  check(mit.sterne.join('') === '☆★☆',
+        'und genau seine Zeile traegt den gefuellten Stern',
+        JSON.stringify(mit.sterne));
+
+  /* ⚠ EINE EIGENE WAHL MUSS DEN STANDARD SCHLAGEN. Ohne den Merker holte
+   * jedes Neuzeichnen (Speichern, Loeschen, Stern) den Standard zurueck und
+   * verstellte die gerade getroffene Auswahl – ein Pulldown, das sich selbst
+   * zuruecksetzt, sieht wie ein Fehler aus. */
+  const gewaehlt = lauf('g2', 'e1');
+  check(gewaehlt.gewaehlt === 'e1',
+        'eine eigene Wahl ueberlebt das Neuzeichnen', gewaehlt.gewaehlt);
+}
+
+/* Drei Layout-Regeln, die NUR der Screenshot gezeigt hat. jsdom rechnet kein
+ * Layout – geprüft wird deshalb die Regel, nicht das Ergebnis. Alle drei
+ * ließen im 380 px breiten Fenster etwas herausragen, während die erste
+ * Messung „kein Überlauf“ meldete: sie verglich Kinder mit ihren Eltern statt
+ * das Dokument mit dem Viewport. */
+const cssRegel = (sel) => {
+  const m = new RegExp('(?:^|\\})\\s*' + sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                       + '\\s*\\{([^}]*)\\}', 'm').exec(cssOhne);
+  return m ? m[1] : '';
+};
+check(/width:\s*auto/.test(cssRegel('input[type="checkbox"], input[type="radio"]')),
+      'Kontrollkästchen sind nicht 100 % breit (sonst rutscht die Beschriftung um)');
+check(/flex-wrap:\s*wrap/.test(cssRegel('.knopfreihe')),
+      'Knopfreihen brechen um (zwei lange Beschriftungen passen nicht nebeneinander)');
+check(/min-width:\s*0/.test(cssRegel('.marke')),
+      'die Marke darf schrumpfen');
+check(/flex:\s*0 0 auto/.test(cssRegel('.kopf > button')),
+      'der Abmelden-Knopf nicht (sonst schiebt ihn eine lange Ticketnummer hinaus)');
+// ═══════════════════════════════════════════════════════════════════════════
+check(/type="module"/.test(POPUP_HTML),
+      "popup.js wird als Modul geladen (der Import von einfuegen.js braucht das)");
+// window.confirm/alert sind in Aufgabenfenstern unterdrueckt; in einem
+// Extension-Popup funktionieren sie zwar, sehen aber wie ein Browserdialog der
+// Seite aus. Eigene Meldungen statt Systemdialoge – wie im Rest des Projekts.
+check(!/\b(confirm|alert|prompt)\s*\(/.test(ohneKommentare(POPUP_JS)),
+      "keine Systemdialoge (confirm/alert/prompt)");
+check(/https:\\?\/\\?\//.test(POPUP_JS) && /muss mit https/.test(POPUP_JS),
+      "http wird abgelehnt – der Token darf nicht im Klartext reisen");
+// Rueckmeldung ist Pflicht: in der Zwischenablage sieht man nichts.
+check(/Kopieren fehlgeschlagen/.test(POPUP_JS),
+      "ein fehlgeschlagenes Kopieren wird gemeldet");
+check(/Zwischenablage kopiert/.test(POPUP_JS),
+      "ein erfolgreiches Kopieren ebenfalls");
+
+// Die Ticketnummer kommt aus der URL, nicht aus dem DOM (stabil ueber
+// Jira-Versionen hinweg – und den Inhalt holt ohnehin der Server).
+check(/\/browse\//.test(POPUP_JS), "die Ticketnummer wird aus /browse/ gelesen");
+check(!/document\.querySelector[^\n]*issue/i.test(POPUP_JS),
+      "die Ticketnummer wird NICHT aus dem Seiten-DOM geraten");
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("8) Die Ticketnummer-Erkennung – ausgefuehrt");
+// ═══════════════════════════════════════════════════════════════════════════
+{
+  // keyAusUrl ist modulintern; sie wird wie im Browser neu ausgewertet.
+  const m = POPUP_JS.match(/function keyAusUrl\(url\)\s*\{[\s\S]*?\n\}/);
+  check(!!m, "keyAusUrl gefunden");
+  if (m) {
+    const dom = new JSDOM("", { url: "https://jira.test/" });
+    const keyAusUrl = new dom.window.Function(
+      m[0] + "\nreturn keyAusUrl;")();
+    const faelle = [
+      ["https://jira.firma.de/browse/ABC-123", "ABC-123"],
+      ["https://jira.firma.de/browse/abc-123", "ABC-123"],
+      ["https://jira.firma.de/browse/PRJA-4711?filter=x", "PRJA-4711"],
+      ["https://jira.firma.de/secure/RapidBoard.jspa?selectedIssue=DEF-9", "DEF-9"],
+      ["https://jira.firma.de/secure/Dashboard.jspa", ""],
+      ["https://www.google.de/", ""],
+      ["", ""],
+      ["nicht-mal-eine-url", ""],
+    ];
+    for (const [u, erw] of faelle) {
+      const g = keyAusUrl(u);
+      check(g === erw, "URL " + (u || "(leer)").slice(0, 52) + " -> " + (erw || "(nichts)"),
+            "bekam: " + g);
+    }
+    dom.window.close();
+  }
+}
+
+(async () => {
+
+/* ── FELDER LEEREN, WENN DER TEXT NICHT ZUM TAB GEHÖRT ────────────────────
+ * Vorgabe des Nutzers 2026-08-28. Vorher blieb ein gemerkter Text stehen -
+ * mit Warnung, aber sichtbar und einfügbar. Ein Text im Feld ist eine
+ * Einladung, ihn zu benutzen; er geht am Ende an einen echten Kunden.
+ * GEMESSEN: start() wird mit echtem DOM ausgefuehrt. */
+{
+  /* ⚠ DIE FUNKTIONSLISTE WIRD TRANSITIV AUFGEBAUT, NICHT GEPFLEGT.
+   *
+   * Bis 2026-08-30 stand hier eine feste Aufzaehlung. Als `start()` um den
+   * Aufruf von `ansichtZeigen()` wuchs, brach dieser Lauf mit einem nackten
+   * ReferenceError ab – kein FAIL, keine Zaehlzeile, der Waechter sah aus, als
+   * waere er gar nicht gelaufen. Dieselbe Falle steht im Register
+   * (`live_bildrahmen_dev.py`): eine gepflegte Liste laesst genau die eine
+   * Funktion fehlen, die gerade dazugekommen ist.
+   *
+   * Gesammelt wird deshalb ab einem Startpunkt ueber die AUFRUFE: alles, was
+   * aus dem geschnittenen Code heraus gerufen wird und in popup.js als
+   * Funktion existiert, kommt dazu – ausser dem, was die Attrappe selbst
+   * stellt. */
+  const { teile, drin } = popupTeile(
+    ['melde', 'felderLeeren', 'zeigeGemerktes', 'mitAbgleich',
+     'zeige', 'start', 'markeAnwenden',
+     // Die Attrappe LIEST damit den Feldinhalt; aus dem geschnittenen Code
+     // heraus wird es nicht gerufen und faellt sonst aus dem Schnitt.
+     'feldZuText'],
+    ['frage', 'tabErmitteln', 'vorlagenLaden', 'brandingHolen']);
+  for (const n of ['melde', 'felderLeeren', 'zeigeGemerktes', 'mitAbgleich',
+                   'zeige', 'start', 'markeAnwenden']) {
+    check(drin.has(n), 'popup.js hat ' + n + '()');
+  }
+  check(drin.has('ticketLageAnwenden'),
+        'der Schnitt zieht ticketLageAnwenden mit', [...drin].join(','));
+
+  /* Der Lauf gibt zurueck, was NACH start() im Fenster steht - und was an den
+   * Hintergrund gemeldet wurde. Letzteres ist der eigentliche Punkt: nur das
+   * Feld zu leeren wuerde den Text beim naechsten Oeffnen zurueckbringen. */
+  // Die Attrappe muss `zustand` beantworten - sonst laeuft start() ins Leere.
+  const laufMit = async (tabKey, gemerkt, klickLeeren, bgStand) => {
+    const dom = new JSDOM(POPUP_HTML, { url: 'https://x.test/',
+                                        runScripts: 'outside-only' });
+    const w = dom.window;
+    try {
+      /* ⚠ DER CODE WIRD ANGEHAENGT, NICHT INTERPOLIERT.
+       *
+       * Bis 2026-08-30 stand hier eine Interpolation mitten in einem
+       * Template-Literal. Das ging zweimal schief, sobald der Schnitt groesser
+       * wurde: ein Backtick in einem Kommentar der geschnittenen Funktion
+       * beendet das Literal vorzeitig (harter SyntaxError, kein FAIL) – und,
+       * viel stiller, ein Regex-Backslash verliert im Template-Literal seine
+       * Bedeutung (\\d wird zu d). Der Waechter pruefte dann eine Funktion,
+       * die es so im Code gar nicht gibt.
+       * Zusammengehaengt kommt der Code Zeichen fuer Zeichen an. */
+      const f = new w.Function('tabKey', 'gemerkt', 'klickLeeren', 'bgStand', `
+          const gesendet = [];
+          const $ = (id) => document.getElementById(id);
+          const el = {
+            login: $("bereich-login"), arbeit: $("bereich-arbeit"),
+            basis: $("f-basis"), hinweis: $("f-hinweis"),
+            ergebnisFeld: $("f-ergebnis"), ergebnis: $("ergebnis"),
+            ergebnisFuss: $("ergebnis-fuss"), meldung: $("meldung"),
+            ticket: $("ticket-anzeige"), abmelden: $("btn-abmelden"),
+          };
+          let _marke = "Marke", _key = tabKey, _tabId = 1;
+          let _letztes = null, _fremdesErgebnis = false, _merkTimer = null;
+          // Siehe Abschnitt 10: ticketLageAnwenden stoesst die Automatik an.
+          let _autoVorlage = "";
+          /* Modul-Variablen, die start() ueber updateHinweis/healthHolen und
+           * ticketAnzeigen mitzieht. Ohne sie WIRFT der Lauf - kein FAIL,
+           * keine Bilanz (Register, in dieser Datei mehrfach bezahlt).
+           * KEINE BACKTICKS hier: dieser Vorspann steht in einem
+           * Template-Literal. */
+          let _health = null, _tabFehler = "";
+          let _zugriffHerkunft = "";
+          const _originale = new Map();
+          let _jiraBasis = "", _standAlt = false, _standGesehen;
+          /* ⚠ EIN value-ZUGRIFF AM <div> IST EIN STILLER ERFOLG: JS legt
+           * einfach eine Eigenschaft an, die mit dem Sichtbaren nichts zu tun
+           * hat. Eine zurueckgerutschte Zuweisung waere damit unsichtbar - und
+           * der schlimmste Ausgang ist der Antworttext zu Vorgang A im
+           * Kommentarfeld von Vorgang B, ohne Rueckfrage (die Fremd-Pruefung
+           * merkt nichts, weil das Gedaechtnis stimmt). Deshalb wirft es hier.
+           * KEINE BACKTICKS in diesem Vorspann - er steht selbst in einem
+           * Template-Literal und wuerde es beenden. */
+          Object.defineProperty(el.ergebnisFeld, "value", {
+            get() { throw new Error("value am Ergebnisfeld GELESEN"); },
+            set() { throw new Error("value am Ergebnisfeld GESETZT"); },
+          });
+` + STAND_ZEILE + `
+` + FELD_KONST + `
+` + WECHSEL_KONST + `
+          /* Die Leisten-Umgebung. Hier gilt der Popup-Fall (_leiste = false);
+           * den Leisten-Fall prueft Abschnitt 10.
+           * KEINE Backticks in diesem Vorspann - er steht selbst in einem
+           * Template-Literal und wuerde es beenden. */
+          let _leiste = false, _windowId = 7, _tabUrl = "https://jira.test/browse/" + (tabKey || "X-1");
+          let _laeuft = false;
+          const api = {
+            permissions: { contains: async () => true, request: async () => true },
+            tabs: { onActivated: { addListener() {} },
+                    onUpdated: { addListener() {} } },
+          };
+          /* ⚠ WIE DER ECHTE HINTERGRUND SEIT 2026-09-03: das Gedaechtnis
+           * liegt JE TICKET, und die Zustands-Antwort liefert es gar nicht
+           * mehr mit (dort ist noch unbekannt, welcher Vorgang offen ist).
+           * Gefragt wird gezielt - und geantwortet wird NUR bei passendem
+           * Schluessel. KEINE BACKTICKS in diesem Vorspann: er steht selbst in
+           * einem Template-Literal und wuerde es beenden (Register, vierter
+           * Fall). */
+          async function frage(n) {
+            gesendet.push(n);
+            if (n && n.art === "zustand") {
+              return { ok: true, basis: "https://s.test", angemeldet: true,
+                       stand: (bgStand === undefined) ? STAND : bgStand };
+            }
+            if (n && n.art === "ergebnis") {
+              return { ok: true,
+                       ergebnis: (gemerkt && gemerkt.key === n.key) ? gemerkt : null };
+            }
+            return { ok: true };
+          }
+          async function tabErmitteln() { el.ticket.textContent = _key || ""; }
+          let _bereiche = [];
+          function vorlagenLaden() {}
+          function brandingHolen() {}
+` + teile.join('\n') + `
+          return (async () => {
+            el.hinweis.value = "bitte kurz halten";
+            await start();
+            if (klickLeeren) await felderLeeren("Geleert.");
+            return JSON.stringify({
+              text: feldZuText(el.ergebnisFeld),
+              sichtbar: !el.ergebnis.hidden,
+              fuss: el.ergebnisFuss.textContent,
+              hinweis: el.hinweis.value,
+              meldung: el.meldung.hidden ? "" : el.meldung.textContent,
+              geloescht: gesendet.some(n => n && n.art === "ergebnis_merken"
+                                            && n.wert === null),
+            });
+          })();`);
+      return JSON.parse(await f(tabKey, gemerkt, klickLeeren, bgStand));
+    } finally { w.close(); }
+  };
+
+  /* ── HALB AKTUALISIERT: neues Fenster, alter Hintergrund ────────────────
+   * Gemeldet 2026-08-30 („Unbekannte Anfrage" beim Ansichts-Schalter). Chrome
+   * liest die Popup-SEITE bei jedem Oeffnen frisch, behaelt den
+   * Service-Worker aber im Speicher - wer aktualisiert, ohne in
+   * chrome://extensions neu zu laden, hat genau diesen Zustand. */
+  {
+    // AUSGEFUEHRT: passender Stand -> keine Warnung, abweichender -> Warnung.
+    const G = { key: "ABC-1", text: "Text", modus: "antwort",
+                zeit: Date.now(), kommentare: 1 };
+    {
+      const r = await laufMit("ABC-1", G, false);        // Stand passt
+      check(!/halb aktualisiert/.test(r.meldung),
+            "passender Stand: keine Warnung", r.meldung);
+    }
+    {
+      const r = await laufMit("ABC-1", G, false, 1);     // Hintergrund aelter
+      check(/halb aktualisiert/.test(r.meldung),
+            "alter Hintergrund: die Warnung steht da", r.meldung);
+      check(/chrome:\/\/extensions/.test(r.meldung),
+            "und nennt den Weg");
+      /* ⚠ SIE MUSS GEWINNEN. Die Warnung wird ganz am Ende von start()
+       * gesetzt - sonst ueberschreibt sie die naechste Routine-Meldung, und
+       * die wichtigste Auskunft des Fensters waere die einzige, die niemand
+       * sieht. Hier steht sonst „Gemerkter Vorschlag …". */
+      check(!/Gemerkter Vorschlag/.test(r.meldung),
+            "und ueberschreibt die Routine-Meldung, nicht umgekehrt", r.meldung);
+    }
+    {
+      // Eine Fassung OHNE das Feld ist per Definition aelter.
+      const r = await laufMit("ABC-1", G, false, null);
+      check(/halb aktualisiert/.test(r.meldung),
+            "fehlt das Feld ganz, gilt der Hintergrund als aelter", r.meldung);
+    }
+  }
+
+  const GEMERKT = { key: 'ABC-1', text: 'Sehr geehrte Damen und Herren …',
+                    modus: 'antwort', zeit: Date.now(), kommentare: 3 };
+
+  // 1) Passt zusammen -> der Text bleibt stehen (sonst waere das Gedaechtnis
+  //    wertlos: genau dafuer gibt es es).
+  {
+    const r = await laufMit('ABC-1', GEMERKT, false);
+    check(r.text === GEMERKT.text, 'gleiches Ticket: der Text bleibt', r.text);
+    check(r.sichtbar === true, 'und das Feld ist sichtbar');
+    check(r.geloescht === false, 'das Gedaechtnis wird NICHT geloescht');
+  }
+
+  /* 2) ANDERES Ticket -> die ANZEIGE ist leer, das GEDAECHTNIS bleibt.
+   *
+   * ⚠ HIER STAND "und das GEDAECHTNIS ist geloescht (sonst kommt der Text
+   * zurueck)". Genau das war der am 2026-09-03 gemeldete Datenverlust: "nach
+   * Reiterwechsel ist die Antwort leider wieder weg". Dass der Text
+   * zurueckkommt, ist seither die ZUSAGE - er liegt je Ticket, und die
+   * Schranke haelt trotzdem, weil nur der Eintrag zum OFFENEN Ticket
+   * angezeigt wird (das Fenster fragt gezielt danach). */
+  {
+    const r = await laufMit('XYZ-9', GEMERKT, false);
+    check(r.text === '', 'anderes Ticket: die Anzeige ist leer', r.text);
+    check(r.sichtbar === false, 'das Feld ist ausgeblendet');
+    check(r.fuss === '', 'die Fusszeile ebenfalls', r.fuss);
+    check(r.hinweis === '', 'auch der Zusatzwunsch', r.hinweis);
+    check(r.geloescht === false,
+          'das GEDAECHTNIS von ABC-1 bleibt (Zurueckwechseln holt es)');
+    check(r.meldung === '',
+          'und es gibt keine Meldung - ein frisches Ticket sieht so aus',
+          r.meldung);
+  }
+
+  /* 3) KEIN Ticket im Tab -> Anzeige leer, Gedaechtnis bleibt ebenfalls.
+   * Auch das war vorher ein Loeschbefehl: wer aus einem Ticket kurz ins
+   * Intranet wechselte, verlor die Auswertung. */
+  {
+    const r = await laufMit('', GEMERKT, false);
+    check(r.text === '', 'kein Ticket: die Anzeige ist leer', r.text);
+    check(r.geloescht === false, 'das Gedaechtnis bleibt auch hier');
+    check(/browse/.test(r.meldung),
+          'die Meldung sagt weiterhin, was zu tun ist', r.meldung);
+  }
+
+  // 4) Kein Ticket UND nichts gemerkt -> nur die Auskunft, kein Loeschbefehl
+  //    (ein Loeschen ohne Anlass waere ein Aufruf ins Leere).
+  {
+    const r = await laufMit('', null, false);
+    check(r.geloescht === false, 'ohne gemerkten Text wird nichts geloescht');
+    check(/browse/.test(r.meldung), 'die Auskunft steht trotzdem da', r.meldung);
+  }
+
+  // 5) Der Knopf leert von Hand - auch wenn alles zusammenpasst.
+  {
+    const r = await laufMit('ABC-1', GEMERKT, true);
+    check(r.text === '' && r.sichtbar === false,
+          'der Leeren-Knopf raeumt das Feld');
+    check(r.hinweis === '', 'und den Zusatzwunsch');
+    check(r.geloescht === true, 'und das Gedaechtnis');
+    check(r.meldung === 'Geleert.', 'mit Rueckmeldung', r.meldung);
+  }
+
+  check(/id="btn-leeren"/.test(POPUP_HTML), 'der Knopf steht im Fenster');
+  check(/btn-leeren[\s\S]{0,200}addEventListener/.test(POPUP_JS),
+        'und ist verdrahtet');
+  /* ⚠ DER LAUFENDE MERK-TIMER MUSS GESTOPPT WERDEN: wer den Vorschlag
+   * bearbeitet hat, hat einen Timer offen, der `_letztes` eine halbe Sekunde
+   * spaeter zurueckschreibt - das Gedaechtnis waere sofort wieder da.
+   *
+   * ⚠ SEIT 2026-09-03 STEHT DAS IN `anzeigeLeeren`, nicht mehr in
+   * `felderLeeren`. Geprueft wird deshalb die KETTE, nicht die Schreibweise:
+   * `felderLeeren` ruft `anzeigeLeeren`, und dort liegen Timer und Merker. Die
+   * frueheren Pruefungen suchten die Zeilen IM Rumpf und meldeten nach dem
+   * Aufteilen einen Fehler, den es nicht gab (Register). */
+  const fl = (POPUP_JS.match(/async function felderLeeren\([\s\S]*?\n\}/) || [''])[0];
+  const al = (POPUP_JS.match(/function anzeigeLeeren\([\s\S]*?\n\}/) || [''])[0];
+  check(!!al, 'popup.js hat anzeigeLeeren()');
+  check(/anzeigeLeeren\(\)/.test(fl),
+        'felderLeeren raeumt die Anzeige ueber anzeigeLeeren ab');
+  check(/clearTimeout\(_merkTimer\)/.test(al),
+        'und dort wird der laufende Merk-Timer gestoppt');
+  check(/wert:\s*null/.test(fl), 'felderLeeren loescht das Gedaechtnis wirklich');
+  check(/_letztes = null/.test(al), 'der lokale Merker faellt mit');
+  /* ⚠ UND DIE GEGENRICHTUNG: `anzeigeLeeren` darf das Gedaechtnis NICHT
+   * anfassen - genau daran hing der gemeldete Datenverlust beim
+   * Reiterwechsel. */
+  check(!/ergebnis_merken/.test(al),
+        'anzeigeLeeren fasst die Ablage NICHT an (Reiterwechsel darf nichts '
+        + 'loeschen)');
+  /* Ein `{wert: null}` OHNE Schluessel raeumt im Hintergrund bewusst nichts -
+   * felderLeeren muss also sagen, WAS weg soll. */
+  check(/alle: true/.test(fl) && /key/.test(fl),
+        'und sagt dabei, ob EIN Eintrag oder alle gemeint sind');
+}
+
+/* ── 9) ZUGRIFFSRECHT VOR ANMELDUNG – der Fix zu "man muss sich 2x anmelden"
+ *
+ * GEMELDET 2026-08-28. Die Ursache lag nicht in der Anmeldung: fehlte das
+ * Host-Recht, erfragte das Fenster es MITTEN im Anmelde-Ablauf – und Chrome
+ * schliesst dabei das Popup. Der Klick auf "Anmelden" endete im Nichts, die
+ * Zugangsdaten wurden nie abgeschickt. Beim zweiten Anlauf war das Recht da.
+ *
+ * GEMESSEN WIRD DIE REIHENFOLGE, nicht der Quelltext: erst merken, dann
+ * fragen, dann anmelden. Ein Test, der nur nach `permissions.request` sucht,
+ * bliebe gruen, wenn der Aufruf wieder hinter die Anmeldung rutscht – also
+ * genau bei dem Fehler, um den es hier geht. */
+section("9) Zugriffsrecht: erst merken, dann fragen, dann anmelden");
+{
+  /* Der Klick-Handler haengt an `addEventListener` auf Modulebene und laesst
+   * sich nicht als Funktion herausschneiden. Deshalb wird sein RUMPF
+   * geschnitten und als eigene Funktion ausgefuehrt – zusammen mit den
+   * Helfern, die er benutzt. */
+  const handler = (POPUP_JS.match(
+    /\$\("btn-anmelden"\)\.addEventListener\("click", async \(\) => \{([\s\S]*?)\n\}\);/) || [])[1];
+  check(!!handler, 'der Anmelden-Handler laesst sich schneiden');
+
+  /* Transitiv geschnitten. `sperre` zieht seit 2026-08-30 die Ticket-Sperre
+   * nach – mit der frueheren festen Liste fehlte `knoepfeAktualisieren`, und
+   * der Lauf brach mit einem nackten ReferenceError ab statt fehlzuschlagen.
+   * Vierter Harness in dieser Datei, in dem dieselbe Falle stand. */
+  const { teile: t4, drin: d4 } = popupTeile(
+    ['melde', 'sperre', 'zeige', 'hostMuster', 'hatZugriff',
+     'zugriffAnzeigen', 'zugriffSichern'],
+    ['frage', 'brandingHolen']);
+  for (const name of ['melde', 'sperre', 'zeige', 'hostMuster', 'hatZugriff',
+                      'zugriffAnzeigen', 'zugriffSichern']) {
+    check(d4.has(name), 'popup.js hat ' + name + '()');
+  }
+  const teile = t4;
+
+  /** Ein Anmelde-Klick mit gestellter Berechtigungslage.
+   *  `hat`: liegt das Recht schon vor? `erteilt`: sagt der Benutzer im
+   *  Browser-Dialog ja? */
+  const anmeldeKlick = async (hat, erteilt) => {
+    const dom = new JSDOM(POPUP_HTML, { url: 'https://x.test/',
+                                        runScripts: 'outside-only' });
+    const w = dom.window;
+    try {
+      const f = new w.Function('hat', 'erteilt', `
+        const spur = [];            // die REIHENFOLGE aller Ereignisse
+        let erlaubt = hat;
+        const api = { permissions: {
+          async contains() { return erlaubt; },
+          async request() {
+            spur.push("request");
+            if (erteilt) erlaubt = true;
+            return erteilt;
+          },
+        } };
+        const $ = (id) => document.getElementById(id);
+        const el = {
+          login: $("bereich-login"), arbeit: $("bereich-arbeit"),
+          basis: $("f-basis"), benutzer: $("f-benutzer"),
+          kennwort: $("f-kennwort"), totp: $("f-totp"),
+          meldung: $("meldung"), abmelden: $("btn-abmelden"),
+        };
+        let _marke = "Marke", _key = "ABC-1";
+        async function frage(n) {
+          spur.push(n.art);
+          if (n.art === "merken") return { ok: true };
+          if (n.art === "anmelden") return { ok: true, erlaubt: true, hinweis: "" };
+          return { ok: true };
+        }
+        function brandingHolen() {}
+        let _laeuft = false;
+` + teile.join('\n') + `
+        return (async () => {
+          el.basis.value = "https://s.test";
+          el.benutzer.value = "alice";
+          el.kennwort.value = "geheim";
+          await (async () => {${handler}})();
+          return JSON.stringify({
+            spur,
+            meldung: el.meldung.hidden ? "" : el.meldung.textContent,
+            kennwortFeld: el.kennwort.value,
+            angemeldet: !el.arbeit.hidden,
+          });
+        })();`);
+      return JSON.parse(await f(hat, erteilt));
+    } finally { w.close(); }
+  };
+
+  // a) Recht liegt vor (der Normalfall mit gebrandetem Paket): gar keine
+  //    Nachfrage, EINE Anmeldung.
+  {
+    const r = await anmeldeKlick(true, false);
+    check(!r.spur.includes('request'),
+          'mit vorhandenem Recht wird NICHT nachgefragt', JSON.stringify(r.spur));
+    check(r.spur.includes('anmelden'), 'und die Anmeldung laeuft durch');
+    check(r.angemeldet === true, 'der Arbeitsbereich ist danach offen');
+    check(r.kennwortFeld === '', 'das Kennwort verlaesst das Feld');
+  }
+
+  // b) Recht fehlt und wird erteilt: merken → fragen → anmelden, in DIESER
+  //    Reihenfolge. Das Merken MUSS vor der Nachfrage stehen – danach kann
+  //    das Fenster weg sein.
+  {
+    const r = await anmeldeKlick(false, true);
+    const iM = r.spur.indexOf('merken');
+    const iR = r.spur.indexOf('request');
+    const iA = r.spur.indexOf('anmelden');
+    check(iM >= 0, 'Adresse und Benutzer werden gemerkt', JSON.stringify(r.spur));
+    check(iM < iR, 'und zwar VOR der Berechtigungsabfrage', JSON.stringify(r.spur));
+    check(iR >= 0 && iR < iA,
+          'die Abfrage steht VOR der Anmeldung – nicht mittendrin',
+          JSON.stringify(r.spur));
+    check(iA >= 0, 'nach dem Erteilen wird angemeldet – ohne zweiten Klick');
+  }
+
+  // c) Recht fehlt und wird VERWEIGERT: es darf keine Anmeldung geben, und
+  //    der Grund muss dastehen. Ein stiller Abbruch ist genau das gemeldete
+  //    Symptom.
+  {
+    const r = await anmeldeKlick(false, false);
+    check(!r.spur.includes('anmelden'),
+          'ohne Recht wird gar nicht erst angemeldet', JSON.stringify(r.spur));
+    check(/Zugriffsrecht/.test(r.meldung),
+          'und der Grund steht im Fenster', r.meldung);
+    check(/Anmelden/.test(r.meldung),
+          'samt dem Weg zurueck (erneut druecken)', r.meldung);
+  }
+
+  /* Der Hinweis ueber dem Knopf: er muss VOR dem Klick dastehen, sonst liest
+   * ihn niemand rechtzeitig. */
+  check(/id="zugriff-hinweis"/.test(POPUP_HTML),
+        'das Fenster hat einen Platz fuer die Erklaerung');
+
+  /* WANN der Hinweis erscheint, wird AUSGEFUEHRT statt im Quelltext gelesen.
+   * Die erste Fassung dieses Waechters suchte nach "=== false" und meldete
+   * einen Fehler, obwohl dort "!== false" stand – dieselbe Aussage, andere
+   * Schreibweise. Ein Waechter, der die Schreibweise prueft, prueft nicht die
+   * Eigenschaft. */
+  const hinweisBei = async (lage) => {
+    const dom = new JSDOM(POPUP_HTML, { url: 'https://x.test/',
+                                        runScripts: 'outside-only' });
+    const w = dom.window;
+    try {
+      const f = new w.Function('lage', `
+        const api = { permissions: { async contains() {
+          if (lage === 'kaputt') throw new Error('geht nicht');
+          return lage === 'da';
+        } } };
+        const $ = (id) => document.getElementById(id);
+        const el = { basis: $("f-basis") };
+        ${teile.join('\n')}
+        return (async () => {
+          el.basis.value = "https://s.test";
+          await zugriffAnzeigen();
+          const p = $("zugriff-hinweis");
+          return JSON.stringify({ sichtbar: !p.hidden, text: p.textContent });
+        })();`);
+      return JSON.parse(await f(lage));
+    } finally { w.close(); }
+  };
+  check((await hinweisBei('fehlt')).sichtbar === true,
+        'fehlt das Recht, steht die Erklaerung ueber dem Knopf');
+  check(/schließt/.test((await hinweisBei('fehlt')).text),
+        'und sie kuendigt an, dass das Fenster dabei zugehen kann');
+  check((await hinweisBei('da')).sichtbar === false,
+        'mit vorhandenem Recht steht dort nichts');
+  /* "Nicht feststellbar" ist NICHT "fehlt" – eine Warnung auf Verdacht
+   * verunsichert bei einer funktionierenden Einrichtung. Meldet sich der
+   * Aufruf spaeter doch, steht der Grund im Meldungsfeld. */
+  check((await hinweisBei('kaputt')).sichtbar === false,
+        '"nicht feststellbar" erzeugt KEINE Warnung');
+
+  /* Die Adresse aus dem Paket – ohne sie tippt jemand eine abweichende
+   * Schreibweise ein, fuer die das vorbelegte Recht nicht gilt. */
+  check(/meta\[name="basis"\]/.test(POPUP_JS),
+        'popup.js liest die Adress-Vorgabe aus dem Paket');
+  const vb = (POPUP_JS.match(/function _vorgabeBasis\([\s\S]*?\n\}/) || [''])[0];
+  check(/https/.test(vb), 'und nimmt nur https-Adressen an');
+  check(/z\.basis \|\| _vorgabeBasis\(\)/.test(POPUP_JS),
+        'eine hinterlegte Adresse schlaegt die Vorgabe aus dem Paket');
+
+  /* Das Kennwort darf NIE gemerkt werden – der Benutzername schon. */
+  const BG_OHNE = ohneKommentare(BG);
+  check(/benutzer/.test(BG_OHNE) && !/kennwort:/.test(
+          (BG_OHNE.match(/async function einstSchreiben\([\s\S]*?\n\}/) || [''])[0]),
+        'der Hintergrund merkt den Benutzernamen, nie das Kennwort');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("10) Seitenleiste statt Popup (2026-08-30)");
+// ═══════════════════════════════════════════════════════════════════════════
+/* Zwei Meldungen aus dem Betrieb, eine Ursache: das Popup laesst sich nicht
+ * in der Groesse ziehen (der Browser zeichnet es um den Inhalt und klemmt es
+ * auf 800x600 - es gibt dafuer keine API), und wer neben dem Ticket arbeitet,
+ * will es ohnehin offen behalten. Die Leiste loest beides.
+ *
+ * DIE OBERFLAECHE BLEIBT DIESELBE DATEI. Eine zweite waere eine Kopie, und
+ * Kopien laufen auseinander - dieselbe Begruendung, aus der es nur zwei
+ * Manifeste und nicht zwei Codebasen gibt. */
+{
+  const ANS = lies("ansicht.js");
+
+  // ── a) Manifeste ────────────────────────────────────────────────────────
+  check(M_CHROME.permissions.includes("sidePanel"),
+        "Chrome deklariert die sidePanel-Berechtigung");
+  check(!!(M_CHROME.side_panel && M_CHROME.side_panel.default_path),
+        "Chrome traegt einen side_panel-Pfad");
+  check(!!(M_FF.sidebar_action && M_FF.sidebar_action.default_panel),
+        "Firefox traegt einen sidebar_action-Pfad");
+
+  /* `sidePanel` gibt es in Firefox NICHT. Eine unbekannte Berechtigung
+   * quittiert Firefox beim Installieren mit einer Warnung - auf einem Paket,
+   * das ohnehin einzeln signiert werden muss, ist das der falsche Auftakt. */
+  check(!(M_FF.permissions || []).includes("sidePanel"),
+        "Firefox deklariert sie NICHT - dort gibt es sie nicht");
+
+  /* ⚠ AB HIER NUR NOCH ABGESICHERT ZUGREIFEN. Ein fehlender Schluessel liess
+   * die Pruefungen darunter mit einem TypeError ABBRECHEN statt fehlzuschlagen
+   * - der ganze Lauf endete dann ohne Zaehlzeile und sah aus, als waere er gar
+   * nicht gelaufen (Register: nie ungeprueft dereferenzieren). */
+  const cPfad = (M_CHROME.side_panel || {}).default_path || "";
+  const fPfad = (M_FF.sidebar_action || {}).default_panel || "";
+
+  /* EINE Oberflaeche fuer beide Ansichten. */
+  check(cPfad === "popup.html" && fPfad === "popup.html",
+        "beide Leisten zeigen dieselbe popup.html", cPfad + " / " + fPfad);
+
+  /* ⚠ IM MANIFEST STEHT KEIN ABFRAGETEIL. Fuer `setOptions`/`setPanel` ist ein
+   * Pfad mit `?…` belegt, fuer die Manifest-Schluessel nicht - und ein
+   * Manifest, das der Browser ablehnt, macht die ganze Erweiterung
+   * uninstallierbar. Gesetzt wird er deshalb zur Laufzeit. */
+  check(!!cPfad && !!fPfad && !/\?/.test(cPfad) && !/\?/.test(fPfad),
+        "und zwar OHNE Abfrageteil - den setzt erst der Hintergrund");
+
+  /* Firefox klappt die Leiste sonst beim Installieren von selbst auf, obwohl
+   * die Vorgabe das Popup ist. */
+  check((M_FF.sidebar_action || {}).open_at_install === false,
+        "Firefox oeffnet die Leiste NICHT beim Installieren");
+
+  /* DIE VORGABE BLEIBT DAS POPUP - fuer Bestandsnutzer aendert sich nichts,
+   * bis sie den Schalter umlegen. */
+  check((M_CHROME.action || {}).default_popup === "popup.html",
+        "die Vorgabe bleibt das Popup (Chrome)");
+  check((M_FF.action || {}).default_popup === "popup.html",
+        "die Vorgabe bleibt das Popup (Firefox)");
+
+  // ── b) Drift-Schranke: jede eingebundene Datei muss in BEIDE Paketlisten ─
+  /* Die Dateiliste steht an DREI Orten: popup.html bindet ein, bauen.sh packt
+   * lokal, jira_assist.PAKET_DATEIEN packt der Server beim Abruf ueber die
+   * Kachel. Laufen sie auseinander, installiert sich das Paket klaglos und
+   * bricht erst beim Benutzen - hier waere die Leiste dann still 380 px
+   * schmal. Geprueft wird die REGEL, nicht eine Aufzaehlung: was popup.html
+   * einbindet, muss in beiden Listen stehen. */
+  const BAUEN = fs.readFileSync(path.join(ADDON, "bauen.sh"), "utf8");
+  const ASSIST = fs.readFileSync(
+    path.join(WURZEL, "backend", "jira_assist.py"), "utf8");
+  const paketListe = (ASSIST.match(/PAKET_DATEIEN\s*=\s*\(([\s\S]*?)\)/) || ["", ""])[1];
+  const bauenListe = (BAUEN.match(/DATEIEN\s*=\s*\[([\s\S]*?)\]/) || ["", ""])[1];
+  const eingebunden = [
+    ...POPUP_HTML.matchAll(/<script[^>]+src="([^"]+)"/g),
+    ...POPUP_HTML.matchAll(/<link[^>]+href="([^"]+)"/g),
+  ].map((m) => m[1].split("?")[0]).filter((d) => !/^https?:/.test(d));
+  check(eingebunden.length >= 3,
+        "popup.html bindet mehrere eigene Dateien ein", eingebunden.join(", "));
+  for (const d of eingebunden) {
+    check(paketListe.includes('"' + d + '"'),
+          "PAKET_DATEIEN enthaelt " + d);
+    check(bauenListe.includes('"' + d + '"'),
+          "bauen.sh enthaelt " + d);
+  }
+
+  // ── c) ansicht.js setzt die Klasse - wirklich ausgefuehrt ───────────────
+  /* Eigene Datei statt Inline-Skript: Erweiterungsseiten laufen unter
+   * `script-src 'self'`, ein Skriptrumpf im HTML wird wortlos geblockt. */
+  check(/<script src="ansicht\.js">/.test(POPUP_HTML),
+        "popup.html laedt ansicht.js");
+  check(POPUP_HTML.indexOf('src="ansicht.js"') < POPUP_HTML.indexOf("popup.css"),
+        "und zwar VOR dem Stylesheet - sonst blitzt die falsche Breite auf");
+  check(!/<script>[\s\S]*?ansicht/.test(POPUP_HTML),
+        "kein Inline-Skript - die CSP der Erweiterungsseite verbietet es");
+
+  const klasseBei = (suche) => {
+    const dom = new JSDOM("<html><head></head><body></body></html>",
+                          { url: "https://x.test/popup.html" + suche });
+    try {
+      new dom.window.Function("location", "document", ANS)(
+        { search: suche }, dom.window.document);
+      return dom.window.document.documentElement.classList.contains("leiste");
+    } finally { dom.window.close(); }
+  };
+  check(klasseBei("?ansicht=leiste") === true,
+        "mit ?ansicht=leiste entsteht die Klasse `leiste`");
+  check(klasseBei("") === false, "ohne Abfrageteil bleibt es beim Popup");
+  check(klasseBei("?ansicht=popup") === false, "und bei ?ansicht=popup ebenso");
+
+  // ── d) Der Umschalter im Hintergrund - wirklich ausgefuehrt ─────────────
+  /* `action.setPopup` IST der Umschalter: solange ein Popup gesetzt ist,
+   * gewinnt es, `openPanelOnActionClick` bleibt wirkungslos und `onClicked`
+   * feuert nicht. Erst ein LEERER Pfad gibt den Klick frei. */
+  const bgTeil = (name) => (BG.match(new RegExp(
+    "(?:async )?function " + name + "\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}")) || [null])[0];
+  /* Transitiv, wie in popup.js: `ansichtAnwenden` ruft seit 2026-08-30
+   * `zweig()`, und mit der frueheren festen Liste brach der Lauf mit einem
+   * nackten ReferenceError ab statt fehlzuschlagen. Fuenfter Harness in dieser
+   * Datei mit derselben Falle. */
+  const bgTeile = (start, gestellt) => {
+    const G = new Set(gestellt || []);
+    const teile = [], drin = new Set(), offen = start.slice();
+    while (offen.length) {
+      const n = offen.shift();
+      if (drin.has(n) || G.has(n)) continue;
+      const k = bgTeil(n);
+      if (!k) continue;
+      drin.add(n); teile.push(k);
+      for (const t of k.match(/\b[A-Za-z_$][\w$]*(?=\s*\()/g) || []) {
+        if (!drin.has(t) && !G.has(t) && bgTeil(t)) offen.push(t);
+      }
+    }
+    return { teile, drin };
+  };
+  const { teile: bgT, drin: bgD } = bgTeile(["ansichtAnwenden", "aktion"], []);
+  const anwenden = bgT.join("\n");
+  check(bgD.has("ansichtAnwenden") && bgD.has("aktion"),
+        "background.js hat ansichtAnwenden() und aktion()");
+  check(bgD.has("zweig") && bgD.has("_wurzeln"),
+        "der Schnitt zieht die API-Wurzelsuche mit", [...bgD].join(","));
+  /* Der Pfad ist eine Modul-Konstante und gehoert in den Schnitt. Fehlte er,
+   * warf `ansichtAnwenden` - und weil dort JEDER Schritt einzeln abgesichert
+   * ist, verschwand der Fehler im leeren catch: der Lauf meldete FAIL und es
+   * sah nach einem Codefehler aus, war aber ein Testmangel. */
+  const PFAD_ZEILE = (BG.match(/const LEISTE_PFAD = "[^"]+";/) || [""])[0];
+  check(/\?ansicht=leiste/.test(PFAD_ZEILE),
+        "background.js kennt den Leisten-Pfad", PFAD_ZEILE);
+
+  /* ⚠ DIE WELTEN WERDEN ALS ECHTE GLOBALE `chrome`/`browser` GESTELLT.
+   *
+   * Vorher stellte der Lauf nur ein `api`-Objekt - damit war der gemeldete
+   * Fehler gar nicht nachstellbar: `api` ist `browser ?? chrome`, und genau
+   * DIESE Aufloesung war das Problem. Chrome 152 definiert selbst ein
+   * `browser`-Objekt, in dem `sidePanel` NICHT vorkommt (Chrome-eigene API) -
+   * `api.sidePanel` war undefined, obwohl `chrome.sidePanel` da ist. */
+  const laufAnsicht = async (modus, welt) => {
+    const spur = [];
+    const panelStub = () => ({
+      setOptions: async (o) => { spur.push(["optionen", o.path, o.enabled]); },
+      setPanelBehavior: async (o) => {
+        spur.push(["verhalten", o.openPanelOnActionClick]); },
+    });
+    const aktionStub = () => ({
+      setPopup: async (o) => { spur.push(["popup", o.popup]); },
+    });
+    const runtimeStub = () => ({
+      getURL: (p) => "ext://x/" + p,
+      getManifest: () => ({ side_panel: { default_path: "popup.html" } }),
+    });
+    let C, B;
+    if (welt === "chrome") {
+      C = { action: aktionStub(), sidePanel: panelStub(), runtime: runtimeStub() };
+      B = undefined;
+    } else if (welt === "chrome152") {
+      // DER GEMELDETE FALL: `browser` ist da, kennt aber kein sidePanel.
+      C = { action: aktionStub(), sidePanel: panelStub(), runtime: runtimeStub() };
+      B = { action: aktionStub(), runtime: runtimeStub() };
+    } else {
+      C = undefined;
+      B = { action: aktionStub(), runtime: runtimeStub(),
+            sidebarAction: { setPanel: async (o) => { spur.push(["panel", o.panel]); } } };
+    }
+    const a = B || C;
+    await new Function("api", "chrome", "browser",
+                       PFAD_ZEILE + "\n" + anwenden
+                       + "\nreturn ansichtAnwenden(" + JSON.stringify(modus) + ");")(a, C, B);
+    return spur;
+  };
+
+  {
+    const s = await laufAnsicht("leiste", "chrome");
+    check(s.some((z) => z[0] === "popup" && z[1] === ""),
+          "Chrome/Leiste: der Popup-Pfad wird GELEERT", JSON.stringify(s));
+    check(s.some((z) => z[0] === "verhalten" && z[1] === true),
+          "und der Klick oeffnet das Panel");
+    check(s.some((z) => z[0] === "optionen" && /\?ansicht=leiste/.test(z[1])),
+          "der Panel-Pfad traegt den Abfrageteil");
+  }
+  {
+    const s = await laufAnsicht("popup", "chrome");
+    check(s.some((z) => z[0] === "popup" && z[1] === "popup.html"),
+          "Chrome/Popup: der Popup-Pfad wird wieder gesetzt", JSON.stringify(s));
+    check(s.some((z) => z[0] === "verhalten" && z[1] === false),
+          "und der Klick oeffnet kein Panel mehr");
+    /* ⚠ DER PFAD WIRD IN BEIDEN MODI GESETZT. Nur so ist er schon richtig,
+     * wenn der Benutzer den Schalter umlegt und die Leiste im selben Klick
+     * aufgeht - `setOptions` kaeme sonst zu spaet und die Leiste stuende in
+     * der Popup-Breite da. */
+    check(s.some((z) => z[0] === "optionen" && /\?ansicht=leiste/.test(z[1])),
+          "der Panel-Pfad wird AUCH im Popup-Modus gesetzt");
+  }
+  /* ⚠ DER GEMELDETE FALL (Chrome 152, 2026-08-30): `browser` ist definiert,
+   * kennt aber kein `sidePanel`. Ueber `api = browser ?? chrome` war die
+   * ganze Panel-Steuerung damit ein stiller No-op - der Klick aufs Symbol
+   * oeffnete nie die Leiste, und die Faehigkeitspruefung meldete "dieser
+   * Browser kann das nicht" auf einem Browser, der es kann. */
+  {
+    const s = await laufAnsicht("leiste", "chrome152");
+    check(s.some((z) => z[0] === "verhalten" && z[1] === true),
+          "browser OHNE sidePanel: die Panel-Steuerung wird trotzdem erreicht",
+          JSON.stringify(s));
+    check(s.some((z) => z[0] === "optionen" && /\?ansicht=leiste/.test(z[1])),
+          "und der Panel-Pfad wird gesetzt");
+    check(s.some((z) => z[0] === "popup" && z[1] === ""),
+          "der Popup-Pfad wird geleert");
+  }
+  {
+    const s = await laufAnsicht("leiste", "firefox");
+    check(s.some((z) => z[0] === "popup" && z[1] === ""),
+          "Firefox/Leiste: der Popup-Pfad wird geleert", JSON.stringify(s));
+    check(s.some((z) => z[0] === "panel" && /\?ansicht=leiste/.test(z[1])),
+          "und die Sidebar bekommt den Pfad mit Abfrageteil");
+    check(s.every((z) => z[0] !== "verhalten"),
+          "ohne sidePanel wird dort nichts davon gerufen");
+  }
+
+  /* Ein unbekannter Wert in der Ablage darf nicht in einem dritten Zustand
+   * enden - dann oeffnet gar nichts mehr und niemand sieht warum. */
+  {
+    const es = bgTeil("einstSchreiben");
+    check(!!es && /ansicht\s*=\s*\(teil\.ansicht === "leiste"\)/.test(es),
+          "einstSchreiben normalisiert die Ansicht auf zwei Werte");
+  }
+
+  /* Nach einem Browserstart (und unter MV3 nach jedem Ende des
+   * Service-Workers) muss der Modus wiederhergestellt werden - `setPopup` gilt
+   * nur fuer die laufende Sitzung. */
+  const bgOhneK = ohneKommentare(BG);
+  for (const wo of ["onInstalled", "onStartup"]) {
+    check(new RegExp("runtime\\." + wo + "[\\s\\S]{0,120}ansichtHerstellen").test(bgOhneK),
+          "die Ansicht wird bei " + wo + " wiederhergestellt");
+  }
+  check(/\nansichtHerstellen\(\);/.test(bgOhneK),
+        "und bei jedem Start des Hintergrunds");
+
+  /* ⚠ IM KLICK-ZUWEIGER DARF VOR DEM OEFFNEN KEIN `await` STEHEN. Beide APIs
+   * verlangen eine Benutzergeste, und die ist nach dem ersten `await` weg -
+   * der Aufruf wird dann abgelehnt und es passiert sichtbar gar nichts. */
+  {
+    const h = (bgOhneK.match(/onClicked\.addListener\(([\s\S]*?)\n  \}\);/) || [null])[0];
+    check(!!h, "der Klick auf das Symbol ist verdrahtet");
+    if (h) {
+      check(!/await/.test(h),
+            "und oeffnet OHNE vorheriges await - sonst ist die Benutzergeste weg");
+      check(/sidebarAction[\s\S]*toggle/.test(h) && /sidePanel[\s\S]*open/.test(h),
+            "er bedient beide Welten");
+    }
+  }
+
+  // ── e) popup.js: Beobachtung, Ableitung, Reihenfolge ────────────────────
+  /* ⚠ DIE KLASSE IST NUR DER ANFANGSWERT, NICHT DIE ANTWORT.
+   *
+   * Hier stand bis zur Meldung vom 2026-08-30 `const _leiste = …classList…`.
+   * Der Abfrageteil `?ansicht=leiste` kommt aber NUR mit, wenn die Leiste ueber
+   * unseren Weg aufgeht - ueber Chromes eigene Seitenleisten-Auswahl laedt sie
+   * `side_panel.default_path`, also popup.html ohne Abfrageteil. Das Fenster
+   * hielt sich dann fuer ein Popup und registrierte keinen Tab-Zuhoerer.
+   * Verbindlich antwortet jetzt der Hintergrund ueber runtime.getContexts. */
+  check(/let _leiste = document\.documentElement\.classList\.contains\("leiste"\)/
+        .test(POPUP_JS),
+        "die Klasse ist der Anfangswert der Ansicht");
+  const lf = schneidePopup("leisteFeststellen");
+  check(!!lf, "popup.js hat leisteFeststellen()");
+  check(!!lf && /SIDE_PANEL/.test(lf) && /_leiste = true/.test(lf),
+        "und macht aus der Kontextauskunft des Hintergrunds die Leiste");
+  /* NUR EINSCHALTEN, nie ausschalten: sagt der Hintergrund nichts (aeltere
+   * Browser, Firefox ohne getContexts), bleibt der Abfrageteil die einzige
+   * Auskunft, die es gibt. */
+  check(!!lf && !/_leiste = false/.test(lf),
+        "sie schaltet die Leiste nie AB - sonst faellt der Rueckfall aus");
+  check(/leisteFeststellen\(z\.kontext\)/.test(POPUP_JS),
+        "start() traegt die Auskunft nach");
+  {
+    const bg = ohneKommentare(BG);
+    check(/getContexts/.test(bg) && /contextType/.test(bg),
+          "der Hintergrund ermittelt die Kontextart ueber runtime.getContexts");
+    check(/kontext: await kontextArt\(absender\)/.test(bg),
+          "und schickt sie mit dem Zustand mit");
+  }
+
+  {
+    const lb = schneidePopup("leisteBeobachten");
+    check(!!lb, "popup.js hat leisteBeobachten()");
+    /* Im Popup wird NICHT beobachtet: dort gibt es keinen Tab-Wechsel zu
+     * sehen, und ein Zuhoerer, der nie feuert, ist nur eine Fehlerquelle. */
+    check(!!lb && /if \(!_leiste[\s\S]{0,60}return;/.test(lb),
+          "sie tut im Popup-Modus nichts");
+    check(!!lb && /onActivated/.test(lb) && /onUpdated/.test(lb),
+          "und haengt sich an Tab-Wechsel UND Adressaenderung");
+    /* Jira wechselt das Ticket ohne Neuladen - das meldet sich als info.url.
+     * Ein Filter auf `status: complete` verpasst genau diesen Fall. */
+    /* ⚠ OHNE KOMMENTARE PRUEFEN. Die Begruendungen im Code nennen die
+     * gesuchten Bezeichner woertlich - der Waechter fand seinen eigenen Text
+     * und meldete einen Fehler, den es nicht gab (belegter Fall im Projekt). */
+    const lbO = ohneKommentare(lb || "");
+    /* ⚠ HIER STAND EIN FILTER AUF `info.url` - UND DAS WAR DER FEHLER.
+     * `changeInfo.url` liefert der Browser nur mit der `tabs`-Berechtigung
+     * oder einem Host-Recht fuer genau diese Seite; die Erweiterung hat beides
+     * von Haus aus nicht. Der Zuhoerer war damit so gut wie tot (gemeldet
+     * 2026-08-30). Entschieden wird jetzt ueber den VERGLEICH in tabWechsel. */
+    check(!/info\.url/.test(lbO) && !/status/.test(lbO),
+          "der Zuhoerer filtert NICHT auf info.url - das braeuchte ein Host-Recht");
+    check(/tab\.active/.test(lbO),
+          "er beschraenkt sich aber auf den sichtbaren Tab");
+  }
+
+  /* ⚠ DER TAB-WECHSEL IST EINE SICHERHEITSFRAGE. Gemessen, nicht gelesen:
+   * `tabWechsel` wird mit echtem DOM ausgefuehrt. Ohne diese Pruefung stuende
+   * in der offenen Leiste ein fertiger Antwortentwurf zu TICKET-A neben dem
+   * geoeffneten TICKET-B - und der Text geht an einen echten Kunden. */
+  {
+    const { teile: t2, drin: d2 } = popupTeile(
+      // textZuFeld/feldZuText: die Attrappe baut und liest den Feldinhalt damit.
+      ["tabWechsel", "textZuFeld", "feldZuText"], ["tabErmitteln", "frage"]);
+    /* ⚠ `anzeigeLeeren`, NICHT `felderLeeren`: der Reiterwechsel blendet nur
+     * aus. Erreichte er `felderLeeren`, waere der gemeldete Datenverlust
+     * zurueck - deshalb steht die Gegenrichtung unten als eigene Pruefung. */
+    check(d2.has("ticketLageAnwenden") && d2.has("anzeigeLeeren"),
+          "der Schnitt um tabWechsel zieht die Leer-Logik mit",
+          [...d2].join(","));
+
+    const wechselLauf = async (vonKey, nachKey, gemerkt, laeuft) => {
+      const dom = new JSDOM(POPUP_HTML, { url: "https://x.test/",
+                                          runScripts: "outside-only" });
+      const w = dom.window;
+      try {
+        const f = new w.Function("vonKey", "nachKey", "gemerkt", "laeuft", `
+            const gesendet = [];
+            const $ = (id) => document.getElementById(id);
+            const el = {
+              ergebnisFeld: $("f-ergebnis"), ergebnis: $("ergebnis"),
+              ergebnisFuss: $("ergebnis-fuss"), meldung: $("meldung"),
+              ticket: $("ticket-anzeige"), hinweis: $("f-hinweis"),
+            };
+            let _key = vonKey, _letztes = gemerkt, _fremdesErgebnis = false;
+            let _merkTimer = null, _laeuft = laeuft, _marke = "Marke";
+            /* ticketLageAnwenden stoesst die Automatik an; ohne diese Variable
+             * wirft die geschnittene Funktion einen ReferenceError - und weil
+             * sie NICHT abgewartet wird, kaeme der als unbehandelte
+             * Zurueckweisung zurueck, die je nach Zeitpunkt den Lauf abbricht
+             * oder gar nicht auffaellt. Hier bedeutet "" = Automatik aus, also
+             * genau das Verhalten, das dieser Abschnitt messen will.
+             * Abschnitt 14 prueft die Automatik selbst. */
+            let _autoVorlage = "";
+            /* ⚠ ERST PRUEFEN, DANN DEREFERENZIEREN. Fehlt das Feld (etwa
+             * weil eine Gegenprobe das Markup verstellt), wirft
+             * defineProperty mit "called on non-object" - der Lauf bricht ab,
+             * liefert KEINE Bilanz und ist von "nicht gelaufen" nicht zu
+             * unterscheiden. Genau so passiert am 2026-09-02. Register. */
+            if (!el.ergebnisFeld) throw new Error(
+              "TESTAUFBAU: #f-ergebnis fehlt im Markup");
+            Object.defineProperty(el.ergebnisFeld, "value", {
+              get() { throw new Error("value am Ergebnisfeld GELESEN"); },
+              set() { throw new Error("value am Ergebnisfeld GESETZT"); },
+            });
+            let _jiraBasis = "", _leiste_unbenutzt = 0;
+            /* Modul-Variablen, die zugriffZeileAktualisieren ueber
+             * jiraBasisHolen/healthHolen mitzieht. Ohne sie WIRFT der Lauf.
+             * KEINE BACKTICKS hier (Template-Literal). */
+            let _health = null, _zugriffHerkunft = "";
+            const _leiste = true;
+            let _tabUrl = "https://jira.test/browse/" + (nachKey || "X-1");
+            let _windowId = 7, _tabId = 1;
+            const api = { permissions: { contains: async () => true } };
+            /* Das Gedaechtnis liegt JE TICKET und wird gezielt erfragt -
+             * geantwortet wird nur bei passendem Schluessel, wie im echten
+             * Hintergrund. KEINE BACKTICKS hier (Template-Literal). */
+            async function frage(n) {
+              gesendet.push(n);
+              if (n && n.art === "ergebnis") {
+                return { ok: true,
+                         ergebnis: (gemerkt && gemerkt.key === n.key) ? gemerkt : null };
+              }
+              return { ok: true };
+            }
+            async function tabErmitteln() {
+              _key = nachKey; el.ticket.textContent = _key || "";
+            }
+` + FELD_KONST + "\n" + WECHSEL_KONST + "\n" + t2.join("\n") + `
+            return (async () => {
+              textZuFeld(el.ergebnisFeld, (gemerkt && gemerkt.text) || "");
+              el.ergebnis.hidden = !(gemerkt && gemerkt.text);
+              await tabWechsel();
+              return JSON.stringify({
+                text: feldZuText(el.ergebnisFeld),
+                sichtbar: !el.ergebnis.hidden,
+                meldung: el.meldung.hidden ? "" : el.meldung.textContent,
+                geloescht: gesendet.some(n => n && n.art === "ergebnis_merken"
+                                              && n.wert === null),
+              });
+            })();`);
+        return JSON.parse(await f(vonKey, nachKey, gemerkt, laeuft));
+      } finally { w.close(); }
+    };
+
+    const G = { key: "ABC-1", text: "Sehr geehrte Damen und Herren …",
+                modus: "antwort", zeit: Date.now(), kommentare: 3 };
+
+    /* 1) Wechsel auf ein ANDERES Ticket -> die ANZEIGE geht, die Ablage
+     *    bleibt (Vorgabe 2026-09-03, gemeldet als "nach Reiterwechsel ist die
+     *    Antwort leider wieder weg").
+     * ⚠ DIE SCHRANKE HAELT WEITERHIN: was im Feld steht, gehoert immer zum
+     *    offenen Ticket - der fremde Entwurf erreicht das Fenster gar nicht,
+     *    weil es je Ticket fragt (die Attrappe antwortet nur bei passendem
+     *    Schluessel, genau wie der Hintergrund). */
+    {
+      const r = await wechselLauf("ABC-1", "XYZ-9", G, false);
+      check(r.text === "", "Tab-Wechsel auf ein anderes Ticket leert die Anzeige",
+            r.text);
+      check(r.sichtbar === false, "und blendet das Feld aus");
+      check(r.geloescht === false,
+            "das Gedaechtnis von ABC-1 bleibt - Zurueckwechseln holt es");
+    }
+    /* 1b) UND ZURUECK: derselbe Lauf mit dem Eintrag zum ZIEL-Ticket zeigt
+     *     ihn wieder. Das ist die eigentliche Zusage; ohne diese Pruefung
+     *     wuerde "loescht nicht" auch von einer Fassung erfuellt, die den Text
+     *     nie wieder findet. */
+    {
+      const Z = { key: "XYZ-9", text: "Antwort zu XYZ-9",
+                  modus: "antwort", zeit: Date.now(), kommentare: 1 };
+      const r = await wechselLauf("ABC-1", "XYZ-9", Z, false);
+      check(r.text === Z.text, "zurueck auf ein Ticket MIT Eintrag: er ist da",
+            r.text);
+      check(r.sichtbar === true, "und das Feld ist sichtbar");
+    }
+    // 2) Derselbe Vorgang bleibt derselbe - kein Wechsel, nichts passiert.
+    {
+      const r = await wechselLauf("ABC-1", "ABC-1", G, false);
+      check(r.text === G.text, "gleiches Ticket: der Text bleibt", r.text);
+      check(r.geloescht === false, "und das Gedaechtnis bleibt");
+    }
+    // 3) Tab ohne Ticket -> Anzeige leer, Ablage bleibt.
+    {
+      const r = await wechselLauf("ABC-1", "", G, false);
+      check(r.text === "", "Tab ohne Ticket: die Anzeige ist leer");
+      check(r.geloescht === false,
+            "auch ein Ausflug ins Intranet kostet die Auswertung nicht");
+    }
+    /* 4) WAEHREND EINER LAUFENDEN AUSWERTUNG WIRD NICHT GELEERT. Der Benutzer
+     *    wartet auf genau dieses Ergebnis; es wegzuwerfen, weil er nebenbei
+     *    nachgesehen hat, waere die teuerste Reaktion. Gewarnt wird trotzdem -
+     *    und die Einfuege-Schranke greift ohnehin ueber `fremd()`. */
+    {
+      const r = await wechselLauf("ABC-1", "XYZ-9", G, true);
+      check(r.text === G.text, "waehrend einer Auswertung bleibt der Text",
+            r.text);
+      check(r.geloescht === false, "und das Gedaechtnis unangetastet");
+      check(/⚠/.test(r.meldung), "gewarnt wird trotzdem", r.meldung);
+    }
+  }
+
+  // ── f) Zugriffsrecht: nur in der Leiste, nur https ──────────────────────
+  /* Das Popup kommt mit `activeTab` aus - der Klick erteilt das Recht fuer den
+   * Tab, in dem gearbeitet wird, und laenger lebt das Popup nicht. Die Leiste
+   * ueberlebt den Tab-Wechsel; fuer den naechsten Tab gilt `activeTab` nicht
+   * mehr. */
+  {
+    // Transitiv: `tabHerkunft` reicht seit 2026-08-30 an `herkunftAus` weiter,
+    // damit auch die Jira-Adresse aus dem Server durch dieselbe Pruefung geht.
+    const { teile: t5, drin: d5 } = popupTeile(["tabHerkunft"], []);
+    check(d5.has("tabHerkunft"), "popup.js hat tabHerkunft()");
+    check(d5.has("herkunftAus"),
+          "und die Herkunftspruefung liegt in EINER Funktion", [...d5].join(","));
+    const herkunft = (url) =>
+      new Function("_tabUrl", t5.join("\n") + "; return tabHerkunft();")(url);
+    check(herkunft("https://jira.test/browse/A-1") === "https://jira.test",
+          "https liefert die Herkunft");
+    check(herkunft("http://jira.test/browse/A-1") === "",
+          "http NICHT - optional_host_permissions deckt nur https");
+    check(herkunft("about:blank") === "", "und eine interne Seite ebenso wenig");
+    check(herkunft("") === "", "eine leere Adresse wirft nicht");
+
+    const zz = schneidePopup("zugriffZeileAktualisieren");
+    check(!!zz, "popup.js hat zugriffZeileAktualisieren()");
+    check(!!zz && /if \(!_leiste/.test(zz),
+          "die Zeile bleibt im Popup-Modus aus");
+    /* "Nicht feststellbar" wird wie "vorhanden" behandelt - dieselbe Regel wie
+     * bei zugriffAnzeigen: eine Aufforderung auf Verdacht verunsichert bei
+     * einer funktionierenden Einrichtung. */
+    check(!!zz && /da !== false/.test(zz),
+          '"nicht feststellbar" erzeugt keine Aufforderung');
+  }
+  /* ⚠ DIE ZEILE LIEF IM KREIS - gemeldet am 2026-08-30 als "Tab-Wechsel wird
+   * nicht erkannt". Ohne Host-Recht liefert `tabs.query` fuer einen fremden
+   * Tab GAR KEINE Adresse; damit gibt es keine Ticketnummer, und die Zeile
+   * haing an einer Ticketnummer: sie war ausgerechnet dann verborgen, wenn sie
+   * gebraucht wurde. AUSGEFUEHRT geprueft, nicht gelesen. */
+  {
+    const { teile: t6 } = popupTeile(
+      ["zugriffZeileAktualisieren"], ["frage"]);
+    const zeigeBei = async (leiste, tabUrl, key, hatRecht, basis) => {
+      const dom = new JSDOM(POPUP_HTML, { url: "https://x.test/",
+                                          runScripts: "outside-only" });
+      const w = dom.window;
+      try {
+        const f = new w.Function("leiste", "tabUrl", "key", "hatRecht", "basis", `
+          const $ = (id) => document.getElementById(id);
+          const gefragt = [];
+          let _leiste = leiste, _tabUrl = tabUrl, _key = key, _jiraBasis = "";
+          /* Modul-Variablen von healthHolen bzw. der Zugriffszeile. Ohne sie
+           * WIRFT der Lauf. KEINE BACKTICKS hier (Template-Literal). */
+          let _health = null, _zugriffHerkunft = "", _tabFehler = "";
+          const api = { permissions: {
+            async contains(o) { gefragt.push(o.origins[0]); return hatRecht; },
+          } };
+          async function frage(n) {
+            if (n.art === "health") return { ok: true, daten: { jira_basis: basis } };
+            return { ok: true };
+          }
+` + t6.join("\n") + `
+          return (async () => {
+            await zugriffZeileAktualisieren();
+            const p = $("leiste-zugriff");
+            return JSON.stringify({
+              sichtbar: !p.hidden,
+              text: $("leiste-zugriff-text").textContent,
+              gefragt,
+            });
+          })();`);
+        return JSON.parse(await f(leiste, tabUrl, key, hatRecht, basis));
+      } finally { w.close(); }
+    };
+
+    const JIRA = "https://jira.test";
+    // 1) DER GEMELDETE FALL: Leiste offen, Tab-Adresse NICHT lesbar.
+    {
+      const r = await zeigeBei(true, "", "", false, JIRA);
+      check(r.sichtbar === true,
+            "ohne lesbare Tab-Adresse ist die Zugriffszeile SICHTBAR");
+      check(r.gefragt[0] === JIRA + "/*",
+            "und fragt nach dem Jira-Server, nicht nach irgendetwas",
+            r.gefragt.join(","));
+      check(/nicht lesen/.test(r.text) && /kein Ticket/.test(r.text),
+            "der Text sagt, dass deshalb kein Ticket erkannt wird", r.text);
+    }
+    // 2) Recht schon da -> keine Aufforderung.
+    {
+      const r = await zeigeBei(true, "", "", true, JIRA);
+      check(r.sichtbar === false, "mit vorhandenem Recht bleibt sie aus");
+    }
+    // 3) Ticket erkannt -> die Herkunft des TABS, nicht die aus health.
+    {
+      const r = await zeigeBei(true, "https://jira-echt.test/browse/A-1", "A-1",
+                               false, JIRA);
+      check(r.gefragt[0] === "https://jira-echt.test/*",
+            "bei erkanntem Ticket gilt die Herkunft des Tabs", r.gefragt.join(","));
+    }
+    /* 4) KEIN erkanntes Ticket, aber eine lesbare fremde Adresse: es wird
+     *    NICHT nach dem fremden Host gefragt. Sonst bekaeme jemand, der die
+     *    Leiste im Intranet oeffnet, eine Abfrage fuer das Intranet - die ihm
+     *    nichts nuetzt und die er zu Recht ablehnt. */
+    {
+      const r = await zeigeBei(true, "https://intranet.test/start", "", false, JIRA);
+      check(r.gefragt[0] === JIRA + "/*",
+            "auf einem fremden Tab wird trotzdem nach Jira gefragt",
+            r.gefragt.join(","));
+    }
+    /* 5) Im Popup bleibt die Zeile aus, SOLANGE die Adresse lesbar ist - dort
+     *    traegt `activeTab`. Ist sie NICHT lesbar (gemeldet fuer Edge
+     *    2026-09-02), ist die Zeile der einzige Weg heraus und muss auch dort
+     *    erscheinen; das prueft Abschnitt 21. */
+    {
+      const r = await zeigeBei(false, "https://jira.firma.de/browse/ABC-1",
+                               "ABC-1", false, JIRA);
+      check(r.sichtbar === false,
+            "im Popup bleibt sie aus, solange die Adresse lesbar ist");
+      check(r.gefragt.length === 0, "und es wird gar nicht erst gefragt");
+    }
+    // 6) Ohne Auskunft vom Server wird NICHTS geraten.
+    {
+      const r = await zeigeBei(true, "", "", false, "");
+      check(r.sichtbar === false,
+            "ohne bekannte Jira-Adresse bleibt sie aus statt zu raten");
+    }
+  }
+
+  /* Nach dem Erteilen muss die Lage NEU ERMITTELT werden - der Tab ist jetzt
+   * lesbar und traegt womoeglich zum ersten Mal eine Ticketnummer. */
+  {
+    const h = (POPUP_JS.match(
+      /\$\("btn-leiste-zugriff"\)\.addEventListener\([\s\S]*?\n\}\);/) || [""])[0];
+    check(/tabErmitteln\(\)/.test(h) && /ticketLageAnwenden/.test(h),
+          "nach dem Erteilen wird der Tab neu ermittelt, nicht nur neu gezeichnet");
+  }
+
+  // Der Server muss die Jira-Adresse ueberhaupt herausgeben.
+  {
+    const m = MAIN.match(/def _jira_basis_url[\s\S]*?\n\n\n/);
+    check(!!m, "main.py hat _jira_basis_url()");
+    check(!!m && /https:\/\//.test(m[0]) && /return ""/.test(m[0]),
+          "sie nimmt nur https und gibt sonst nichts heraus");
+    check(/"jira_basis": _jira_basis_url\(user\)/.test(MAIN),
+          "und health liefert sie mit");
+  }
+
+  check(/id="btn-leiste-zugriff"/.test(POPUP_HTML),
+        "es gibt einen eigenen Knopf fuer die Abfrage");
+  {
+    /* Der Knopf ist Absicht: `permissions.request` verlangt eine
+     * Benutzergeste, und aus einem Fehlerzweig heraus (nach await) lehnt
+     * Chrome die Abfrage ab. */
+    const h = (POPUP_JS.match(
+      /\$\("btn-leiste-zugriff"\)\.addEventListener\([\s\S]*?\n\}\);/) || [null])[0];
+    check(!!h && /permissions\.request/.test(h),
+          "und er erfragt das Recht wirklich");
+  }
+
+  // ── g) Der Umschalter im Fenster ────────────────────────────────────────
+  check(/id="f-ansicht"/.test(POPUP_HTML), "das Fenster hat den Umschalter");
+  /* Er steht AUSSERHALB von Anmeldung und Arbeitsbereich: wer in der Leiste
+   * steht und zurueck will, muss das auch ohne Konto koennen. */
+  {
+    const login = POPUP_HTML.indexOf('id="bereich-login"');
+    const arbeitEnde = POPUP_HTML.indexOf('id="meldung"');
+    const schalter = POPUP_HTML.indexOf('id="ansicht-zeile"');
+    check(schalter > arbeitEnde && schalter > login,
+          "und zwar ausserhalb beider Bereiche");
+  }
+  check(/ansichtZeigen\(z\.ansicht, z\.leiste_moeglich\)/.test(POPUP_JS),
+        "start() belegt ihn aus dem Zustand des Hintergrunds");
+  {
+    /* ⚠ UMGEDREHT AM 2026-08-30. Hier stand „kennt der Browser keine Leiste,
+     * bleibt der Schalter verborgen". Die Meldung „keine Moeglichkeit die
+     * Seitenleiste auszuwaehlen" liess sich damit von aussen nicht deuten:
+     * fehlt der Schalter, wurde er ausgeblendet, oder liegt er nur ausserhalb
+     * des Sichtfensters? Ein unsichtbares Bedienelement ist unerklaerbar. */
+    const az = schneidePopup("ansichtZeigen");
+    /* ⚠ GEPRUEFT WIRD DIE ZEILE, NICHT JEDES `hidden` IM RUMPF. Hier stand
+     * `!/hidden = true/` ueber den GANZEN Rumpf - und schlug an, sobald der
+     * HINWEIS-Absatz darin versteckt wird (2026-09-03, Vorgabe "Die Breite
+     * ziehst du an der Kante der Leiste." raus). Der Waechter meldete damit
+     * einen Fehler, den es nicht gab: die Zeile blieb die ganze Zeit sichtbar.
+     * Register - die Eigenschaft messen, nicht ein Vorkommen irgendwo. */
+    check(!!az && /zeile\.hidden = false;/.test(az)
+          && !/zeile\.hidden = true/.test(az),
+          "die Ansichts-Zeile bleibt IMMER sichtbar");
+    /* ⚠ UND SIE WIRD NICHT GESPERRT. Die Faehigkeitspruefung war eine
+     * Vermutung und lag falsch (sie fragte `api.sidePanel`, das es in Chrome
+     * nicht gibt) - sie hat eine funktionierende Funktion blockiert. Ein
+     * faelschlich gesperrter Schalter macht das Feature unerreichbar, ein
+     * faelschlich freigegebener kostet einen Klick, der nichts tut. */
+    check(!!az && /kasten\.disabled = false/.test(az),
+          "und wird NIE gesperrt - die Faehigkeitspruefung ist keine Schranke");
+    check(!!az && /ab 114/.test(az),
+          "der Hinweis nennt die Voraussetzung trotzdem");
+  }
+  /* ⚠ REIHENFOLGE: erst absenden, dann oeffnen. Nach einem `await` fehlt die
+   * Benutzergeste fuer `sidePanel.open`; und ein Oeffnen VOR dem Absenden
+   * koennte das Popup toeten, bevor die Einstellung ueberhaupt unterwegs ist.
+   * Gemessen an den Positionen, nicht am Vorkommen. */
+  {
+    const h = (POPUP_JS.match(
+      /\$\("f-ansicht"\)\.addEventListener\([\s\S]*?\n\}\);/) || [null])[0];
+    check(!!h, "der Umschalter ist verdrahtet");
+    if (h) {
+      const senden = h.indexOf('frage({ art: "ansicht"');
+      const oeffnen = h.indexOf("leisteOeffnen()");
+      check(senden > -1 && oeffnen > -1 && senden < oeffnen,
+            "erst absenden, dann oeffnen", senden + " / " + oeffnen);
+      /* ⚠ UND ZWAR ABGEWARTET. Hier stand die Gegenregel ("OHNE await, sonst
+       * ist die Benutzergeste verbraucht") - sie war die Ursache der Meldung
+       * "ich kann die Seitenleiste nur ueber die plugin Steuerung oeffnen":
+       * Chrome zerstoert das Popup, sobald die Leiste aufgeht, die Nachricht
+       * war da noch unterwegs und die Einstellung wurde nie gespeichert. Der
+       * naechste Klick auf das Symbol oeffnete wieder das Popup.
+       * Eine nicht gespeicherte Einstellung macht den Schalter kaputt, eine
+       * verlorene Benutzergeste kostet einen Klick - und die Meldung sagt
+       * dann, welchen. */
+      check(/await frage\(\{ art: "ansicht"/.test(h),
+            "die Einstellung wird ABGEWARTET, bevor die Leiste aufgeht");
+      check(/Symbol/.test(h),
+            "und misslingt das Oeffnen, nennt die Meldung den Weg");
+    }
+    /* ── DAS POPUP SCHLIESST SICH NICHT VON SELBST ────────────────────────
+     * Gemeldet 2026-08-30: „nach dem Aktivieren der Seitenleiste bleibt das
+     * popup noch sichtbar" - man sieht beide nebeneinander. Ich hatte bis
+     * dahin das GEGENTEIL angenommen und sogar die Reihenfolge des Speicherns
+     * damit begruendet. Gemessen im Betrieb: es bleibt stehen.
+     * AUSGEFUEHRT geprueft, mit `window` als Attrappe. */
+    {
+      const rumpf = (POPUP_JS.match(
+        /\$\("f-ansicht"\)\.addEventListener\("change", async \(ereignis\) => \{([\s\S]*?)\n\}\);/)
+        || [])[1];
+      check(!!rumpf, "der Umschalter-Rumpf laesst sich schneiden");
+      const lauf = async (imLeiste, gehtAuf, anhaken) => {
+        const spur = [];
+        const fn = new Function(
+          "ereignis", "window", "frage", "ansichtZeigen", "melde",
+          "leisteOeffnen", "_leiste", "_standAlt",
+          "return (async () => {" + rumpf + "\n})();");
+        await fn(
+          { target: { checked: anhaken } },
+          { close: () => spur.push("zu") },
+          async (n) => { spur.push("gespeichert:" + n.wert);
+                         return { ok: true, wert: n.wert, leiste_moeglich: true }; },
+          () => {},
+          (t) => { if (t) spur.push("meldung"); },
+          async () => { spur.push("geoeffnet"); return gehtAuf; },
+          imLeiste, false);
+        return spur;
+      };
+
+      // 1) Aus dem POPUP heraus einschalten: speichern, oeffnen, schliessen.
+      {
+        const r = await lauf(false, true, true);
+        check(r.join(",") === "gespeichert:leiste,geoeffnet,zu",
+              "aus dem Popup: erst speichern, dann oeffnen, dann schliessen",
+              r.join(","));
+      }
+      /* 2) ⚠ GEHT DIE LEISTE NICHT AUF, DARF DAS POPUP NICHT ZUGEHEN - sonst
+       *    verschwindet die Meldung, die gerade erklaert, was zu tun ist. */
+      {
+        const r = await lauf(false, false, true);
+        check(r.indexOf("zu") === -1,
+              "misslingt das Oeffnen, bleibt das Popup stehen", r.join(","));
+        check(r.indexOf("meldung") > -1, "und sagt, was zu tun ist");
+      }
+      /* 3) ⚠ IN DER LEISTE NIEMALS SCHLIESSEN - `window.close()` wuerde genau
+       *    die Leiste schliessen, die der Benutzer eingeschaltet hat. */
+      {
+        const r = await lauf(true, true, true);
+        check(r.indexOf("zu") === -1,
+              "in der Leiste wird NICHT geschlossen", r.join(","));
+      }
+      // 4) Zurueck auf Popup: nur speichern, nichts oeffnen, nichts schliessen.
+      {
+        const r = await lauf(true, true, false);
+        check(r.join(",") === "gespeichert:popup,meldung",
+              "Zurueckstellen speichert und meldet, mehr nicht", r.join(","));
+      }
+    }
+    /* Und `window.close()` steht sonst NIRGENDS - eine zweite Stelle koennte
+     * die Leiste treffen. Ohne Kommentare, sonst zaehlt die Begruendung mit. */
+    check((ohneKommentare(POPUP_JS).match(/window\.close\(\)/g) || []).length === 1,
+          "window.close() steht genau EINMAL in popup.js");
+
+    const lo = ohneKommentare(schneidePopup("leisteOeffnen") || "");
+    /* ⚠ JEDER Zweig muss warten, nicht irgendeiner. Die erste Fassung dieser
+     * Pruefung suchte `await api.(sidePanel|sidebarAction)` - mit zwei Zweigen
+     * blieb sie gruen, obwohl in einem das `await` fehlte, und die Gegenprobe
+     * biss nicht. Geprueft wird jetzt die Eigenschaft: KEIN `open(` ohne
+     * unmittelbar davorstehendes `await`.
+     * Ohne Kommentare, sonst zaehlen die Begruendungen mit. */
+    check(/zweig\("sidebarAction"/.test(lo) && /zweig\("sidePanel"/.test(lo),
+          "leisteOeffnen sucht beide APIs an BEIDEN Wurzeln");
+    const offeneAufrufe = lo.match(/(\w+\s+)?\w+\.open\(/g) || [];
+    check(offeneAufrufe.length >= 2,
+          "leisteOeffnen() bedient beide Welten", String(offeneAufrufe.length));
+    check(offeneAufrufe.every((a) => /^await\s/.test(a)),
+          "und wartet in JEDEM Zweig das Ergebnis ab - sonst waere die Meldung geraten",
+          offeneAufrufe.join(" | "));
+    check(!!lo && /return false;/.test(lo),
+          "und meldet einen Fehlschlag zurueck, statt ihn zu verschlucken");
+
+  }
+
+  /* ── i) DIE WARTEMELDUNG MUSS WIEDER VERSCHWINDEN ──────────────────────
+   *
+   * Gemeldet 2026-08-30: „'Fasse das Ticket zusammen...' wird dauerhaft
+   * angezeigt". Ursache war NICHT ein haengender Lauf: `melde("")` setzte nur
+   * `hidden`, und `.meldung.arbeitet { display: flex }` UEBERSTIMMT das
+   * `hidden`-Attribut. Im echten Chrome gemessen: hidden=true, display=flex,
+   * offsetHeight>0, drehender Kreis noch da.
+   * Die Folge war schlimmer als der Schoenheitsfehler: der Kasten machte das
+   * Fenster hoeher und schob den Ansichts-Umschalter aus dem 600 px hohen
+   * Popup - „keine Moeglichkeit die Seitenleiste auszuwaehlen". */
+  {
+    const regel = /\.meldung\[hidden\]\s*\{([^}]*)\}/.exec(POPUP_CSS);
+    check(!!regel && /display:\s*none/.test(regel[1]),
+          "`.meldung[hidden]` setzt display:none - das Attribut muss gewinnen");
+    /* Die Regel muss NACH der Klasse stehen: gleiche Spezifitaet (0,2,0 gegen
+     * 0,2,0), da entscheidet die Reihenfolge.
+     * ⚠ AUF DER KOMMENTARFREIEN FASSUNG. Der erste Anlauf verglich Positionen
+     * im ROHEN CSS - und schlug fehl, sobald irgendein Kommentar weiter unten
+     * `.meldung.arbeitet` erwaehnte (genau so passiert, als eine neue Regel
+     * ihre Begruendung darauf stuetzte). Der Waechter las eine Erklaerung und
+     * meldete einen Fehler, den es nicht gab. Register, x-ter Fall. */
+    check(cssOhne.indexOf(".meldung[hidden]")
+          > cssOhne.lastIndexOf(".meldung.arbeitet"),
+          "und steht NACH .meldung.arbeitet - sonst verliert sie");
+
+    // Und der Zustand wird geraeumt, nicht nur versteckt.
+    /* ⚠ TRANSITIV, nicht `melde` allein: sie ruft `meldungPlatzieren()`, und
+     * ein Einzelschnitt liess den Lauf hier mit einem ReferenceError abbrechen
+     * (fuenfter Fall dieser Falle in dieser Datei, Register). */
+    const { teile: tMelde } = popupTeile(["melde"], []);
+    const m = tMelde.join("\n");
+    const mRein = schneidePopup("melde") || "";
+    check(!!mRein && /textContent = ""/.test(mRein)
+          && /classList\.remove\("arbeitet"\)/.test(mRein),
+          "melde(\"\") raeumt Text und Klasse mit ab");
+
+    // AUSGEFUEHRT: erst eine Wartemeldung, dann leeren.
+    {
+      const dom = new JSDOM(POPUP_HTML, { url: "https://x.test/",
+                                          runScripts: "outside-only" });
+      const w = dom.window;
+      try {
+        const r = JSON.parse(new w.Function(`
+          const $ = (id) => document.getElementById(id);
+          const el = { meldung: $("meldung") };
+          let _marke = "Marke";
+` + m + `
+          melde("Fasse das Ticket zusammen …", true);
+          const waehrend = { sichtbar: !el.meldung.hidden,
+                             dreher: !!el.meldung.querySelector(".dreher") };
+          melde("");
+          return JSON.stringify({ waehrend, danach: {
+            hidden: el.meldung.hidden,
+            text: el.meldung.textContent,
+            arbeitet: el.meldung.classList.contains("arbeitet"),
+            dreher: !!el.meldung.querySelector(".dreher"),
+          }});`)());
+        check(r.waehrend.sichtbar && r.waehrend.dreher,
+              "waehrend des Laufs steht die Meldung mit drehendem Kreis da");
+        check(r.danach.hidden === true, "danach ist sie versteckt");
+        check(r.danach.text === "", "der Text ist weg", r.danach.text);
+        check(r.danach.arbeitet === false, "die Klasse `arbeitet` ist weg");
+        check(r.danach.dreher === false, "und der Kreis ist weg");
+      } finally { w.close(); }
+    }
+  }
+
+  /* ── j) DER UMSCHALTER DARF NICHT AUS DEM BILD WANDERN ─────────────────
+   * Ein Popup ist auf 600 px geklemmt; bei langem Ergebnis lag die Oberkante
+   * der Zeile gemessen bei y=703. Sie ist dann da und trotzdem unauffindbar. */
+  {
+    const r = /\.ansicht-fuss\s*\{([^}]*)\}/.exec(POPUP_CSS);
+    check(!!r && /position:\s*sticky/.test(r[1]),
+          "der Ansichts-Fuss klebt am unteren Rand", (r || ["", ""])[1].trim());
+    /* DECKENDE Flaeche ist Pflicht - halbtransparent schiene der Text
+     * darunter durch (Projektregel). */
+    check(!!r && /background:\s*var\(--grund\)/.test(r[1]),
+          "und traegt eine deckende Flaeche");
+  }
+
+  /* ── k) HERSTELLEREIGENE APIs AN BEIDEN WURZELN ────────────────────────
+   *
+   * ⚠ DER FEHLER, DER DREI RUNDEN GEKOSTET HAT. `api` ist `browser ?? chrome`.
+   * Chrome 152 definiert selbst ein `browser`-Objekt - `sidePanel` steht dort
+   * NICHT drin, weil es eine Chrome-eigene API ist. `api.sidePanel` war damit
+   * undefined, obwohl `chrome.sidePanel` existiert: die ganze Panel-Steuerung
+   * war ein stiller No-op, und die Faehigkeitspruefung meldete "dieser Browser
+   * kann das nicht" auf einem Browser, der es kann.
+   * AUSGEFUEHRT geprueft - eine Quelltext-Pruefung haette denselben Denkfehler
+   * nur wiederholt. */
+  {
+    const schneideAus = (quelle, name) => (quelle.match(new RegExp(
+      "(?:async )?function " + name + "\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}")) || [null])[0];
+    /* ⚠ DER HELFER STEHT IN BEIDEN DATEIEN - und beide muessen geprueft
+     * werden. Eine Gegenprobe, die nur background.js verbog, blieb sonst
+     * gruen, weil der Lauf die Fassung aus popup.js ausfuehrte.
+     * Dazu eine DRIFT-SCHRANKE: zwei Fassungen derselben Funktion laufen
+     * auseinander (Register; im Projekt zuletzt bei `kanonisch()` der Lizenz).
+     * Geteilt werden kann der Code nicht: popup.js ist ein Modul, background.js
+     * laeuft in Firefox als klassisches Skript. */
+    const fassungen = [["popup.js", POPUP_JS], ["background.js", BG]];
+    const geschnitten = fassungen.map(([n, q]) =>
+      [n, schneideAus(q, "_wurzeln"), schneideAus(q, "zweig")]);
+    for (const [n, w_, z_] of geschnitten) {
+      check(!!w_ && !!z_, n + " hat zweig() und _wurzeln()");
+    }
+    check(geschnitten[0][1] === geschnitten[1][1]
+          && geschnitten[0][2] === geschnitten[1][2],
+          "beide Fassungen sind ZEICHENGLEICH - sonst laufen sie auseinander");
+
+    const sucheIn = (w, z) => (C, B, name, methode) => new Function(
+      "chrome", "browser", "name", "methode",
+      w + "\n" + z + "\nreturn zweig(name, methode) ? 'gefunden' : 'fehlt';"
+    )(C, B, name, methode);
+    // Gemessen wird gegen BEIDE Fassungen; `suche` prueft sie gemeinsam und
+    // meldet nur "gefunden", wenn beide es sagen.
+    const suche = (C, B, name, methode) => {
+      const e = geschnitten.map(([, w_, z_]) => sucheIn(w_, z_)(C, B, name, methode));
+      return (e[0] === e[1]) ? e[0] : ("uneinig: " + e.join("/"));
+    };
+
+    const MIT = { sidePanel: { setOptions() {}, open() {} } };
+    const OHNE = { runtime: {} };
+
+    check(suche(MIT, undefined, "sidePanel", "setOptions") === "gefunden",
+          "klassisches Chrome: sidePanel wird gefunden");
+    /* DER GEMELDETE FALL. */
+    check(suche(MIT, OHNE, "sidePanel", "setOptions") === "gefunden",
+          "Chrome 152 mit `browser` OHNE sidePanel: wird trotzdem gefunden");
+    check(suche(undefined, { sidebarAction: { setPanel() {} } },
+                "sidebarAction", "setPanel") === "gefunden",
+          "Firefox: sidebarAction wird gefunden");
+    check(suche(OHNE, OHNE, "sidePanel", "setOptions") === "fehlt",
+          "gibt es sie nirgends, wird nichts erfunden");
+    /* Ein Zweig OHNE die gesuchte Methode zaehlt nicht - sonst laeuft der
+     * Aufruf gleich darauf in einen TypeError. */
+    check(suche({ sidePanel: {} }, undefined, "sidePanel", "setOptions") === "fehlt",
+          "ein Zweig ohne die Methode zaehlt nicht");
+    check(suche(undefined, undefined, "sidePanel", "setOptions") === "fehlt",
+          "ganz ohne Wurzeln wirft es nicht");
+  }
+
+  /* Und die Faehigkeit wird aus dem MANIFEST gelesen, nicht nur aus der API -
+   * das ist die verlaesslichste Auskunft: hat der Browser die Erweiterung mit
+   * dem Leisten-Schluessel geladen, gibt es die Leiste. */
+  {
+    const lm = ohneKommentare((BG.match(
+      /function leisteMoeglich\(\)[\s\S]*?\n\}/) || [""])[0]);
+    check(/getManifest/.test(lm) && /side_panel/.test(lm),
+          "leisteMoeglich fragt zuerst das Manifest");
+    check(/zweig\(/.test(lm),
+          "und sucht die API an beiden Wurzeln");
+    check(!/api\.sidePanel/.test(lm),
+          "aber NICHT mehr ueber `api` - das ist browser ?? chrome");
+  }
+  /* Keine Stelle im Code darf noch ueber `api` an die herstellereigenen APIs
+   * gehen - GEPRUEFT ALS REGEL, damit auch eine kuenftige auffaellt. */
+  for (const [name, quelle] of [["background.js", BG], ["popup.js", POPUP_JS]]) {
+    const o = ohneKommentare(quelle);
+    check(!/api\.sidePanel/.test(o) && !/api\.sidebarAction/.test(o),
+          name + " greift nirgends ueber `api` auf sidePanel/sidebarAction zu");
+  }
+
+  /* ── l) HALB AKTUALISIERT: neues Fenster, alter Hintergrund ────────────
+   *
+   * Gemeldet 2026-08-30: Klick auf den Ansichts-Schalter antwortete
+   * „Unbekannte Anfrage." – der `default`-Zweig des Hintergrunds. Der Code war
+   * in Ordnung; es antwortete eine AELTERE Fassung.
+   * URSACHE (Chrome-Bauart, nicht Fehler): die Popup-SEITE liest Chrome bei
+   * jedem Oeffnen frisch von der Platte, den **Service-Worker** behaelt es im
+   * Speicher. Wer aktualisiert, ohne in chrome://extensions neu zu laden, hat
+   * genau diesen Zustand – und alle Symptome sehen aus wie Programmierfehler.
+   * Der Abgleich macht daraus eine Anweisung. */
+  {
+    const inPopup = (POPUP_JS.match(/const STAND = (\d+);/) || [])[1];
+    const inBg = (BG.match(/const STAND = (\d+);/) || [])[1];
+    check(!!inPopup && !!inBg, "beide Dateien tragen einen STAND",
+          inPopup + " / " + inBg);
+    check(inPopup === inBg, "und er ist derselbe - sonst warnt es dauernd",
+          inPopup + " / " + inBg);
+    check(/stand: STAND/.test(BG), "der Hintergrund schickt ihn im Zustand mit");
+
+    /* Der `default`-Zweig muss den WEG nennen. „Unbekannte Anfrage." war
+     * richtig und trotzdem wertlos. */
+    const dflt = (BG.match(/default:[\s\S]*?\}\);/) || [""])[0];
+    check(/chrome:\/\/extensions/.test(dflt) && /aeltere Fassung/.test(dflt),
+          "und der default-Zweig nennt den Weg statt nur 'unbekannt'",
+          dflt.slice(0, 60));
+
+  }
+
+  // ── h) CSS ──────────────────────────────────────────────────────────────
+  /* Im Popup bestimmt der Inhalt die Breite, in der Leiste der Browser. Eine
+   * feste Breite laeuft dort waagerecht ueber. */
+  {
+    const r = (POPUP_CSS.match(/html\.leiste body \{([\s\S]*?)\}/) || ["", ""])[1];
+    check(/width:\s*auto/.test(r),
+          "html.leiste body loest die feste Breite auf", r.trim());
+    check(/body \{[\s\S]*?width:\s*380px/.test(POPUP_CSS),
+          "das Popup behaelt seine 380 px");
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("11) Ohne Ticket ist alles gesperrt (Vorgabe 2026-08-30)");
+// ═══════════════════════════════════════════════════════════════════════════
+/* "alle buttons des jira browser plugins muessen deaktiviert sein, wenn kein
+ * Jira Ticket gefunden wird". Vorher waren nur die drei Auswertungsknoepfe
+ * abgesichert - und zwar erst IM Handler, mit einer Meldung nach dem Klick.
+ * Ein Knopf, der sich druecken laesst und dann sagt, dass er nicht kann, ist
+ * eine schlechtere Auskunft als ein grauer Knopf. */
+{
+  check(/id="ticket-anzeige"/.test(POPUP_HTML), "es gibt das Ticket-Infofeld");
+
+  const ta = schneidePopup("ticketAnzeigen");
+  const ka = schneidePopup("knoepfeAktualisieren");
+  check(!!ta, "popup.js hat ticketAnzeigen()");
+  check(!!ka, "popup.js hat knoepfeAktualisieren()");
+
+  /* Anzeige und Sperre haben dieselbe Ursache und werden deshalb in EINER
+   * Funktion gesetzt - sonst waere der Zustand denkbar, in dem die Knoepfe
+   * grau sind und im Kopf trotzdem eine Ticketnummer steht. */
+  check(!!ta && /knoepfeAktualisieren\(\)/.test(ta),
+        "die Anzeige zieht die Sperre nach");
+  check(/ticketAnzeigen\(\)/.test(
+          schneidePopup("tabErmitteln") || ""),
+        "und tabErmitteln setzt sie bei jeder Tab-Ermittlung");
+
+  /* AUSGEFUEHRT gegen die ECHTE popup.html: nur so faellt auf, wenn ein Knopf
+   * im Markup dazukommt und keiner daran denkt. */
+  const lageBei = (key, laeuft, vorherSperren) => {
+    const dom = new JSDOM(POPUP_HTML, { url: "https://x.test/",
+                                        runScripts: "outside-only" });
+    const w = dom.window;
+    try {
+      const f = new w.Function("key", "laeuft", "vorherSperren", `
+        const $ = (id) => document.getElementById(id);
+        const el = { ticket: $("ticket-anzeige"), meldung: $("meldung") };
+        let _key = key, _laeuft = false;
+        /* Modul-Variablen von ticketAnzeigen. Ohne sie WIRFT der Lauf mit
+         * einem nackten ReferenceError - kein FAIL, keine Bilanz, von "nicht
+         * gelaufen" nicht zu unterscheiden. Zum dritten Mal in dieser Datei
+         * (Register). KEINE BACKTICKS HIER: dieser Prolog steht in einem
+         * Template-Literal und wuerde es beenden - auch das schon dreimal. */
+        let _tabFehler = "";
+        let _health = null;   // Modul-Variable von healthHolen
+        function melde() {}
+` + [schneidePopup("sperre"), ka, ta].join("\n") + `
+        if (vorherSperren) sperre(true);
+        _laeuft = laeuft;
+        ticketAnzeigen();
+        if (vorherSperren && !laeuft) sperre(false);
+        const zustand = {};
+        for (const b of document.querySelectorAll("button")) {
+          zustand[b.id || b.className] = !!b.disabled;
+        }
+        return JSON.stringify({
+          text: el.ticket.textContent,
+          leer: el.ticket.classList.contains("leer"),
+          zustand,
+        });`);
+      return JSON.parse(f(key, laeuft, vorherSperren));
+    } finally { w.close(); }
+  };
+
+  // ── a) Das Infofeld sagt es im Klartext ────────────────────────────────
+  {
+    const r = lageBei("", false, false);
+    check(r.text === "Kein Ticket gefunden",
+          'ohne Ticket steht "Kein Ticket gefunden" im Feld', r.text);
+    check(r.leer === true, "und es ist als Zustandsmeldung gekennzeichnet");
+    /* ⚠ NICHT UEBER DIE FARBE: `.ticket` ist ohnehin schon gedaempft, eine
+     * Faerbung waere ein No-op - so stand es im ersten Anlauf da. Getrennt
+     * wird ueber die Schrift: Kennung in Monospace, Satz in Textschrift. */
+    const regelLeer = (POPUP_CSS.match(/\.ticket\.leer \{([^}]*)\}/) || ["", ""])[1];
+    const regelTicket = (POPUP_CSS.match(/\.ticket \{[^}]*monospace[^}]*\}/) || [""])[0];
+    check(/monospace/.test(regelTicket),
+          "eine Ticketnummer steht in Monospace");
+    check(/font-family/.test(regelLeer) && !/color/.test(regelLeer),
+          "der Leer-Zustand hebt das auf und faerbt NICHT nur um",
+          regelLeer.trim());
+  }
+  {
+    const r = lageBei("PRJB-17559", false, false);
+    check(r.text === "PRJB-17559", "mit Ticket steht die Nummer da", r.text);
+    check(r.leer === false, "ohne die Zustands-Kennzeichnung");
+  }
+
+  // ── b) Ohne Ticket ist JEDER Knopf gesperrt - bis auf die Ausnahmen ────
+  /* Die Ausnahmen sind im Markup markiert (`data-ohne-ticket`), nicht hier
+   * aufgezaehlt: eine zweite Liste im Test liefe beim naechsten Knopf
+   * auseinander. Geprueft wird die REGEL.
+   * ⚠ UEBER DEN DOM, NICHT PER REGEX (2026-08-31): das Attribut darf an einem
+   * CONTAINER stehen und gilt dann fuer alles darin. Eine Regex auf
+   * `<button ... data-ohne-ticket>` haette die Knoepfe der Vorlagen-Box
+   * uebersehen und faelschlich Alarm geschlagen. */
+  const ausnahme = (() => {
+    const dom = new JSDOM(POPUP_HTML, { url: "https://x.test/" });
+    try {
+      return new Set(Array.from(dom.window.document.querySelectorAll("button"))
+        .filter((b) => b.closest("[data-ohne-ticket]"))
+        .map((b) => b.id).filter(Boolean));
+    } finally { dom.window.close(); }
+  })();
+  check(ausnahme.size >= 6,
+        "im Markup sind die Ausnahmen gekennzeichnet", [...ausnahme].join(", "));
+
+  /* DIE SECHS, DIE DRINSTEHEN MUESSEN - und jede aus einem eigenen Grund.
+   * Sie sind hier namentlich genannt, weil ihr Fehlen ein Einbahnstrassen-
+   * Zustand waere: nicht hineinkommen, nicht hinaus, Dialog nicht schliessbar
+   * - oder eine Verwaltung, die ein Ticket verlangt, das sie nie benutzt. */
+  for (const [id, grund] of [
+    ["btn-anmelden", "sonst kaeme man von einem fremden Tab aus nie hinein"],
+    ["btn-abmelden", "sonst nie hinaus"],
+    ["btn-vorlagen-zu", "ein Dialog, den man nicht wegbekommt, ist eine Falle"],
+    ["jn-nein", "dito fuer die Rueckfrage beim Einfuegen"],
+    ["btn-vorlagen", "Vorlagen verwalten braucht kein Ticket (gemeldet 2026-08-31)"],
+    ["btn-vorl-speichern", "sonst laesst sich die geoeffnete Box nicht benutzen"],
+    ["btn-einst", "der Einstellungen-Abschnitt gehoert diesem Browser, nicht "
+                  + "dem offenen Tab (2026-09-03)"],
+  ]) {
+    check(ausnahme.has(id), id + " bleibt bedienbar - " + grund);
+  }
+
+  /* Und die Ausnahme haengt am CONTAINER, nicht an jedem Knopf: nur so sind
+   * die erst beim Zeichnen entstehenden Zeilen-Knoepfe erfasst. */
+  check(/<div id="vorlagen-box" data-ohne-ticket/.test(POPUP_HTML),
+        "die Vorlagen-Box traegt die Ausnahme als ganzer Bereich");
+  check(/b\.closest\("\[data-ohne-ticket\]"\)/.test(ka || ""),
+        "und knoepfeAktualisieren sucht sie ueber die Vorfahren");
+
+  {
+    const r = lageBei("", false, false);
+    const gesperrt = Object.entries(r.zustand).filter(([, d]) => d).map(([i]) => i);
+    const offen = Object.entries(r.zustand).filter(([, d]) => !d).map(([i]) => i);
+    check(offen.every((id) => ausnahme.has(id)),
+          "ohne Ticket ist NUR noch offen, was ausdruecklich ausgenommen ist",
+          offen.join(", "));
+    /* ⚠ KEINE FESTE ZAHL mehr (kostete beim Ausnehmen der Vorlagen-Box einen
+     * Fehlalarm): geprueft wird die EIGENSCHAFT - jeder nicht ausgenommene
+     * Knopf ist gesperrt, und es ist ueberhaupt einer dabei. Eine Untergrenze
+     * meldet sonst einen Fehler, sobald eine Ausnahme dazukommt. */
+    check(gesperrt.every((id) => !ausnahme.has(id)) && gesperrt.length > 0,
+          "alles uebrige ist gesperrt", gesperrt.length + ": " + gesperrt.join(", "));
+    check([...ausnahme].every((id) => r.zustand[id] !== true),
+          "und keine einzige Ausnahme ist gesperrt",
+          [...ausnahme].filter((id) => r.zustand[id] === true).join(", "));
+    /* Seit 0.8.0 sind es ZWEI Auswertungsknoepfe: das Startdreieck (es faehrt
+     * die gewaehlte Vorlage) und das Ueberarbeiten. `btn-zusammenfassung` und
+     * `btn-antwort` gibt es nicht mehr - beide sind Vorlagen. */
+    check(r.zustand["btn-start"] === true &&
+          r.zustand["btn-ueberarbeiten"] === true,
+          "die Auswertungsknoepfe sind gesperrt");
+    check(r.zustand["btn-einfuegen"] === true,
+          "und Einfuegen ebenfalls - ohne Ticket gibt es kein Kommentarfeld");
+    check(r.zustand["btn-anmelden"] === false,
+          "Anmelden bleibt bedienbar");
+    check(r.zustand["btn-abmelden"] === false,
+          "Abmelden bleibt bedienbar");
+  }
+
+  // ── c) Mit Ticket ist alles wieder frei ────────────────────────────────
+  {
+    const r = lageBei("ABC-1", false, false);
+    check(Object.values(r.zustand).every((d) => d === false),
+          "mit Ticket ist kein Knopf gesperrt",
+          Object.entries(r.zustand).filter(([, d]) => d).map(([i]) => i).join(", "));
+  }
+
+  // ── d) Zusammenspiel mit der Lauf-Sperre ───────────────────────────────
+  /* ⚠ `sperre(false)` DARF NICHT BLIND ALLES FREIGEBEN. Bis 2026-08-30 stand
+   * dort `b.disabled = an` fuer jeden Knopf - das Ende eines Laufs haette die
+   * Ticket-Sperre wieder aufgehoben, und zwar genau dann, wenn der Benutzer
+   * waehrenddessen auf einen fremden Tab gewechselt ist. */
+  {
+    const r = lageBei("", false, true);   // sperre(true) ... sperre(false)
+    check(r.zustand["btn-start"] === true,
+          "nach einem Lauf bleibt die Ticket-Sperre bestehen");
+    check(r.zustand["btn-abmelden"] === false,
+          "und die Ausnahme ist wieder frei");
+  }
+  {
+    // Waehrend eines Laufs entscheidet `sperre` allein - ein Tab-Wechsel
+    // mitten in der Auswertung darf die Knoepfe nicht freigeben.
+    const r = lageBei("ABC-1", true, true);
+    check(Object.values(r.zustand).every((d) => d === true),
+          "waehrend eines Laufs bleibt ALLES gesperrt, auch die Ausnahmen",
+          Object.entries(r.zustand).filter(([, d]) => !d).map(([i]) => i).join(", "));
+  }
+  check(!!ka && /if \(_laeuft\) return;/.test(ka),
+        "knoepfeAktualisieren haelt sich waehrend eines Laufs heraus");
+
+  // ── e) Die Schranke im Handler BLEIBT ──────────────────────────────────
+  /* Ein gesperrter Knopf ist Oberflaeche, keine Garantie: `_key` kann sich
+   * zwischen Zeichnen und Klick aendern (Tab-Wechsel in der Leiste), und ein
+   * `disabled` laesst sich aus den Entwicklerwerkzeugen entfernen. Die
+   * Pruefung im Handler ist die eigentliche Schranke. */
+  for (const id of ["btn-start", "btn-ueberarbeiten"]) {
+    const h = (POPUP_JS.match(new RegExp(
+      '\\$\\("' + id + '"\\)\\.addEventListener\\([\\s\\S]*?\\n\\}\\);')) || [""])[0];
+    // Entweder der Handler prueft selbst, oder er ruft `auswerten` - und das
+    // bricht ohne Ticket ab (Pruefung gleich darunter).
+    const auswerten = /auswerten\(/.test(h);
+    check(auswerten || /if \(!_key\)/.test(h),
+          id + " prueft weiterhin selbst auf ein Ticket");
+  }
+  check(/async function auswerten[\s\S]{0,200}if \(!_key\)/.test(POPUP_JS),
+        "auswerten() bricht ohne Ticket ab - die Schranke hinter der Oberflaeche");
+}
+
+/* ── 14) AUTOMATIK BEI NEUEM TICKET ────────────────────────────────────────
+ *
+ * Vorgabe des Nutzers 2026-08-31: eine der beiden Auswertungen soll bei einem
+ * NEUEN Ticket von selbst starten koennen.
+ *
+ * DIE ZUSAGE, DIE HIER HAENGT, IST "HOECHSTENS EINMAL JE TICKET" – und sie ist
+ * keine Sparmassnahme, sondern zwei verschiedene Schaeden:
+ *   a) ein automatischer Lauf ueber ein bereits BEARBEITETES Ergebnis wirft die
+ *      Arbeit des Benutzers weg, ohne dass er etwas gedrueckt hat;
+ *   b) ohne Ringspeicher feuert jeder Tab-Wechsel zurueck auf ein schon
+ *      gesehenes Ticket einen weiteren Modellaufruf.
+ * Beide Schranken werden deshalb AUSGEFUEHRT geprueft, nicht am Quelltext
+ * abgelesen.
+ */
+section("14) Automatik bei neuem Ticket");
+
+/* Schnitt aus dem HINTERGRUND. Bis hierher gab es nur `schneidePopup`; die
+ * Entscheidung "darf dieses Ticket automatisch laufen" liegt aber bewusst
+ * dort, weil Pruefen und Vermerken EIN Schritt sein muessen. */
+function schneideBg(name) {
+  const m = BG.match(new RegExp('(?:async )?function ' + name
+                                + '\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}'));
+  return m ? m[0] : null;
+}
+
+// ── a) Die Umbenennung ───────────────────────────────────────────────────
+{
+  const knopf = (POPUP_HTML.match(
+    /<button[^>]*id="btn-ueberarbeiten"[^>]*>([^<]*)<\/button>/) || ["", ""])[1];
+  check(knopf.trim() === "Meinen Kommentar überarbeiten",
+        'der Knopf heisst "Meinen Kommentar überarbeiten"', knopf);
+  check(!/>\s*Überarbeiten\s*</.test(POPUP_HTML)
+        && !/>\s*Antwort überarbeiten\s*</.test(POPUP_HTML),
+        "kein alter Name steht mehr im Fenster");
+  /* ⚠ DIE ZWEI ALTEN KNOEPFE SIND WEG (Vorgabe 2026-09-02). Bleiben sie im
+   * Markup stehen, waehrend popup.js sie nicht mehr verdrahtet, hat der
+   * Benutzer zwei Knoepfe, die nichts tun - und niemand sieht warum. */
+  for (const id of ["btn-zusammenfassung", "btn-antwort"]) {
+    check(POPUP_HTML.indexOf('id="' + id + '"') < 0,
+          id + " gibt es nicht mehr (die Aktion ist eine Vorlage)");
+    check(POPUP_JS.indexOf('"' + id + '"') < 0,
+          "und popup.js verdrahtet ihn auch nicht mehr");
+  }
+  // Der Hinweis darunter erklaert GENAU diesen Knopf - laeuft er auf den alten
+  // Namen, sucht der Benutzer ein Bedienelement, das es nicht mehr gibt.
+  const hinweis = (POPUP_HTML.match(
+    /id="ueberarb-hinweis"[^>]*>([\s\S]*?)<\/p>/) || ["", ""])[1];
+  check(/<b>Meinen Kommentar überarbeiten<\/b>/.test(hinweis),
+        "und der Hinweis darunter nennt ihn beim neuen Namen", hinweis.trim());
+}
+
+// ── b) Das Pulldown steht im Arbeitsbereich ──────────────────────────────
+{
+  const arbeit = (POPUP_HTML.match(
+    /<section id="bereich-arbeit"[\s\S]*?<\/section>/) || [""])[0];
+  check(/id="f-auto"/.test(arbeit),
+        "das Pulldown liegt im Arbeitsbereich (nur nach Anmeldung sichtbar)");
+
+  const sel = (arbeit.match(/<select id="f-auto"[\s\S]*?<\/select>/) || [""])[0];
+  const werte = [...sel.matchAll(/value="([^"]*)"/g)].map((m) => m[1]);
+  /* ⚠ IM MARKUP STEHT NUR NOCH "AUS" (Vorgabe 2026-09-02). Zur Wahl stehen
+   * VORLAGEN, und die kennt nur der Server – gezeichnet wird sie aus derselben
+   * Liste wie das Startfeld (autoOptionenZeichnen). Eine zweite, fest
+   * verdrahtete Option im Markup waere ein Wert, den es als Vorlage nicht
+   * gibt: gespeichert wuerde er, laufen wuerde nichts. */
+  check(werte.length === 1 && werte[0] === "",
+        "im Markup steht nur AUS - die Vorlagen kommen aus der Liste",
+        werte.join("|"));
+  const aoz = schneidePopup("autoOptionenZeichnen") || "";
+  check(/_vorlagen\.global/.test(aoz) && /_vorlagen\.eigene/.test(aoz),
+        "und gefuellt wird aus denselben Vorlagen wie das Startfeld");
+  check(/o\.textContent = v\.name/.test(aoz),
+        "Vorlagennamen gehen durch textContent (Freitext aus einem Formular)");
+  check(/o\.value = v\.id/.test(aoz),
+        "gespeichert wird die KENNUNG der Vorlage");
+
+  /* DRIFT-SCHRANKE ueber zwei Dateien, jetzt als FORM statt als Liste: der
+   * Hintergrund nimmt nur wohlgeformte Vorlagen-Kennungen an (fail-closed).
+   * Der ALTE Modus-Wert muss dabei herausfallen - sonst wuerde ein Bestand
+   * nach dem Update etwas anderes tun als bestellt. */
+  const idRe = (BG.match(/const AUTO_ID_RE = (\/[^\n;]*\/);/) || ["", ""])[1];
+  check(!!idRe, "der Hintergrund hat ein Muster fuer Vorlagen-Kennungen", idRe);
+  const pruef = new RegExp(idRe.slice(1, idRe.lastIndexOf("/")),
+                           idRe.slice(idRe.lastIndexOf("/") + 1));
+  check(pruef.test("a1b2c3d4e5f6"), "eine echte Kennung passt darauf");
+  check(!pruef.test("zusammenfassung") && !pruef.test("antwort"),
+        "der alte Modus-Wert NICHT - er gilt damit als AUS (fail-closed)");
+  check(!pruef.test("ueberarbeiten"),
+        "'ueberarbeiten' ebenso nicht: es braucht einen eigenen Entwurf, den es "
+        + "bei einem frisch geoeffneten Ticket per Definition nicht gibt");
+
+  /* Und es ist auch keine VORLAGEN-ART: waere es eine, liesse sich eine
+   * Vorlage anlegen, die als Automatik zwangslaeufig in "kein Text gefunden"
+   * laeuft. */
+  const artSel = (POPUP_HTML.match(/<select id="f-vorl-art"[\s\S]*?<\/select>/) || [""])[0];
+  const arten = [...artSel.matchAll(/value="([^"]*)"/g)].map((m) => m[1]);
+  check(JSON.stringify(arten) === JSON.stringify(["zusammenfassung", "antwort"]),
+        "eine Vorlage ist eine Zusammenfassung ODER eine Antwort", arten.join("|"));
+  check(arten[0] === "zusammenfassung",
+        "und die Zusammenfassung ist die Vorgabe (fail-safe: ein Antworttext "
+        + "geht an einen KUNDEN)");
+
+  /* Bewusst KEIN `data-ohne-ticket` noetig: die Ticket-Sperre greift nur auf
+   * <button>. Genau richtig - wer auf einem fremden Tab steht, muss die
+   * Automatik trotzdem AUSschalten koennen. Der Test haelt fest, dass es ein
+   * <select> bleibt und kein Knopf daraus wird. */
+  const ka = schneidePopup("knoepfeAktualisieren") || "";
+  check(/querySelectorAll\("button"\)/.test(ka),
+        "die Ticket-Sperre fasst nur Knoepfe an - das Pulldown bleibt bedienbar");
+}
+
+// ── c) Der Hintergrund entscheidet - AUSGEFUEHRT ─────────────────────────
+{
+  const namen = ["autoVorlage", "einstLesen", "einstSchreiben", "autoStart"];
+  const teile = namen.map(schneideBg);
+  for (let i = 0; i < teile.length; i++) {
+    check(!!teile[i], "background.js hat " + namen[i] + "()");
+  }
+  // Modul-Konstanten: sie stehen in keinem Funktionsrumpf und fallen aus jedem
+  // Schnitt heraus - fehlen sie, WIRFT der Lauf statt fehlzuschlagen.
+  const konst = [
+    (BG.match(/const EINST = "[^"]*";/) || [""])[0],
+    (BG.match(/const AUTO_ID_RE = \/[^\n;]*\/;/) || [""])[0],
+    (BG.match(/const AUTO_MERK_MAX = \d+;/) || [""])[0],
+  ];
+  check(konst.every((k) => k), "und die drei Modul-Konstanten dazu",
+        konst.join(" / "));
+
+  const bgLauf = new Function("start", "rufe", ""
+    + konst.join("\n") + "\n"
+    + "const ablage = Object.assign({}, start);\n"
+    + "const api = { storage: { local: {\n"
+    + "  get: async (k) => (ablage[k] === undefined ? {} : { [k]: ablage[k] }),\n"
+    + "  set: async (o) => { Object.assign(ablage, o); },\n"
+    + "} } };\n"
+    + teile.join("\n") + "\n"
+    + "return (async () => {\n"
+    + "  const spur = [];\n"
+    + "  for (const k of rufe) spur.push(await autoStart(k));\n"
+    + "  return JSON.stringify({ spur, ablage });\n"
+    + "})();");
+
+  const einst = (o) => ({ einstellungen: o });
+
+  // 1) Automatik AUS -> es startet nichts, und es wird nichts vermerkt.
+  {
+    const r = JSON.parse(await bgLauf(einst({}), ["ABC-1", "ABC-2"]));
+    check(r.spur.every((s) => s.starten === false),
+          "Vorgabe (kein auto_vorlage): es startet nichts");
+    check(r.spur.every((s) => s.vorlage === ""), "und die Vorlage ist leer");
+    check(!r.ablage.einstellungen.auto_gelaufen,
+          "es wird auch nichts vermerkt - der Ring bleibt unangetastet",
+          JSON.stringify(r.ablage.einstellungen));
+  }
+
+  // 2) DER KERN: je Ticket genau einmal.
+  {
+    const r = JSON.parse(await bgLauf(
+      einst({ auto_vorlage: "a1b2c3d4e5f6" }),
+      ["ABC-1", "ABC-1", "ABC-2", "ABC-1"]));
+    check(r.spur[0].starten === true, "erstes Ticket: es startet");
+    check(r.spur[0].vorlage === "a1b2c3d4e5f6",
+          "mit der eingestellten Vorlage", r.spur[0].vorlage);
+    check(r.spur[1].starten === false,
+          "DASSELBE Ticket ein zweites Mal: es startet NICHT mehr");
+    check(r.spur[2].starten === true, "ein anderes Ticket startet wieder");
+    check(r.spur[3].starten === false,
+          "und der Rueckwechsel auf das erste startet nicht erneut "
+          + "(genau das waere der Tab-Wechsel-Kreisel)");
+    check(r.spur[1].vorlage === "a1b2c3d4e5f6",
+          "die Vorlage steht auch dann drin, wenn nicht gestartet wird - "
+          + "'aus' und 'schon gelaufen' sind zweierlei");
+  /* ⚠ WAS die Vorlage tut, sagt der Hintergrund NICHT - das entscheidet der
+   * Server aus ihrer Art. Eine zweite Stelle, die aus einer Kennung einen
+   * Modus macht, waere eine zweite Wahrheit. */
+    check(r.spur[0].modus === undefined,
+          "und KEIN Modus - den leitet allein der Server aus der Vorlage ab");
+    check(JSON.stringify(r.ablage.einstellungen.auto_gelaufen)
+            === JSON.stringify(["ABC-1", "ABC-2"]),
+          "im Ring stehen beide Ticketnummern, jede einmal",
+          JSON.stringify(r.ablage.einstellungen.auto_gelaufen));
+  }
+
+  // 3) Ohne Ticketnummer passiert nichts (und es landet kein Leerwert im Ring).
+  {
+    const r = JSON.parse(await bgLauf(einst({ auto_vorlage: "abcdef" }), [""]));
+    check(r.spur[0].starten === false, "ohne Ticketnummer startet nichts");
+    check(!r.ablage.einstellungen.auto_gelaufen,
+          "und der Ring bekommt keinen Leerwert");
+  }
+
+  /* 4) Eine unbrauchbare Kennung ist AUS, nicht ein dritter Zustand - und der
+   *    ALTE Modus-Wert gehoert ausdruecklich dazu: nach dem Update auf 0.8.0
+   *    steht er noch in der Ablage jedes Benutzers, der die Automatik genutzt
+   *    hat. Er darf nicht umgedeutet werden. */
+  for (const alt of ["ueberarbeiten", "zusammenfassung", "antwort", "NICHT-HEX"]) {
+    const r = JSON.parse(await bgLauf(
+      einst({ auto_vorlage: alt }), ["ABC-1"]));
+    check(r.spur[0].vorlage === "" && r.spur[0].starten === false,
+          "'" + alt + "' gilt als AUS (fail-closed)",
+          JSON.stringify(r.spur[0]));
+  }
+
+  // 5) DER RING WAECHST NICHT UNBEGRENZT. Ohne Deckel steht die Ablage nach
+  //    einem Jahr voller Ticketnummern - und niemand sieht es.
+  {
+    const MAX = parseInt((BG.match(/const AUTO_MERK_MAX = (\d+);/) || [])[1], 10);
+    const viele = [];
+    for (let i = 0; i < MAX + 5; i++) viele.push("T-" + i);
+    const r = JSON.parse(await bgLauf(einst({ auto_vorlage: "abcdef" }), viele));
+    /* Kein `ring.length` auf einem moeglicherweise fehlenden Wert: eine
+     * Pruefung, die WIRFT statt fehlzuschlagen, bricht die Gegenprobe ab und
+     * sieht aus wie ein nicht gelaufener Test (Register). */
+    const ring = r.ablage.einstellungen.auto_gelaufen || [];
+    check(ring.length === MAX, "der Ring ist bei " + MAX + " gedeckelt",
+          String(ring.length));
+    check(ring[ring.length - 1] === "T-" + (MAX + 4),
+          "und behaelt die JUENGSTEN Eintraege", String(ring[ring.length - 1]));
+    check(ring.length > 0 && ring.indexOf("T-0") < 0,
+          "der aelteste ist herausgefallen");
+  }
+}
+
+// ── d) Das Fenster: wann es NICHT startet - AUSGEFUEHRT ──────────────────
+{
+  const { teile, drin } = popupTeile(
+    ["autoAktionPruefen", "autoZeigen"],
+    ["frage", "auswerten", "melde"]);
+  check(drin.has("autoAktionPruefen") && drin.has("autoZeigen"),
+        "popup.js hat autoAktionPruefen() und autoZeigen()");
+  // Kennung einer echten Vorlage - `autoZeigen` prueft die FORM.
+  const VID = "a1b2c3d4e5f6";
+
+  /* Der Lauf gibt zurueck, WAS an den Hintergrund ging und OB ausgewertet
+   * wurde. Beides ist noetig: bei ausgeschalteter Automatik darf nicht einmal
+   * gefragt werden (sonst kostet der Normalfall eine Nachricht je
+   * Tab-Wechsel). */
+  const lauf = async (o) => {
+    const dom = new JSDOM(POPUP_HTML, { url: "https://x.test/",
+                                        runScripts: "outside-only" });
+    const w = dom.window;
+    try {
+      const f = new w.Function("o", ""
+        + "const gesendet = [], gelaufen = [];\n"
+        + "const $ = (id) => document.getElementById(id);\n"
+        + "const el = { arbeit: $('bereich-arbeit'), meldung: $('meldung') };\n"
+        + "el.arbeit.hidden = !!o.abgemeldet;\n"
+        /* DIE OPTION MUSS DA SEIN, sonst kann das Pulldown die Kennung nicht
+         * anzeigen - in der Wirklichkeit zeichnet sie autoOptionenZeichnen aus
+         * der geladenen Vorlagenliste. Ohne diese Zeile prueft der Test eine
+         * Lage, die es nicht gibt. */
+        + "if (o.vorlage) { const x = document.createElement('option');\n"
+        + "  x.value = o.vorlage; x.textContent = 'V'; $('f-auto').appendChild(x); }\n"
+        + "let _autoVorlage = '', _key = o.key, _laeuft = !!o.laeuft;\n"
+        + "function melde() {}\n"
+        + "async function frage(n) {\n"
+        + "  gesendet.push(n);\n"
+        + "  if (o.wechseltTab) _key = 'ANDERS-9';\n"
+        + "  if (o.hintergrundAlt) throw new Error('Diese Anfrage kennt der Hintergrund nicht');\n"
+        + "  return { ok: true, vorlage: o.vorlage || '', starten: !!o.starten };\n"
+        + "}\n"
+        /* Was gefahren wird, ist die VORLAGE - der Modus daran ist nur ein
+         * Wunsch (der Server entscheidet). Aufgezeichnet wird deshalb die
+         * Kennung, nicht der Modus. */
+        + "async function auswerten(m, e, vid) { gelaufen.push(vid); }\n"
+        + teile.join("\n") + "\n"
+        + "return (async () => {\n"
+        + "  autoZeigen(o.vorlage);\n"
+        + "  await autoAktionPruefen(!!o.passt);\n"
+        + "  return JSON.stringify({\n"
+        + "    gefragt: gesendet.filter((n) => n && n.art === 'auto_start').length,\n"
+        + "    gelaufen, pulldown: $('f-auto').value,\n"
+        + "  });\n"
+        + "})();");
+      return JSON.parse(await f(o));
+    } finally { w.close(); }
+  };
+
+  // 1) Automatik aus -> es wird NICHT EINMAL GEFRAGT.
+  {
+    const r = await lauf({ key: "ABC-1", vorlage: "", starten: true });
+    check(r.gefragt === 0,
+          "Automatik aus: der Hintergrund wird gar nicht erst gefragt");
+    check(r.gelaufen.length === 0, "und es laeuft nichts");
+    check(r.pulldown === "", "das Pulldown steht auf AUS", r.pulldown);
+  }
+
+  // 2) Der Regelfall.
+  {
+    const r = await lauf({ key: "ABC-1", vorlage: VID, starten: true });
+    check(r.gefragt === 1, "neues Ticket: der Hintergrund wird gefragt");
+    check(JSON.stringify(r.gelaufen) === JSON.stringify([VID]),
+          "und es laeuft GENAU die eingestellte VORLAGE - nicht die im "
+          + "Pulldown gewaehlte", JSON.stringify(r.gelaufen));
+    check(r.pulldown === VID, "das Pulldown zeigt sie an", r.pulldown);
+  }
+
+  /* 3) ⚠ DIE WICHTIGSTE SCHRANKE. Liegt fuer dieses Ticket schon ein Ergebnis
+   *    vor, kann es der Benutzer BEARBEITET haben (der Text wird gedrosselt
+   *    mitgemerkt). Ein automatischer Lauf wuerde es ueberschreiben - seine
+   *    Arbeit waere weg, ohne dass er etwas gedrueckt hat. */
+  {
+    const r = await lauf({ key: "ABC-1", vorlage: VID, starten: true,
+                           passt: true });
+    check(r.gefragt === 0 && r.gelaufen.length === 0,
+          "liegt schon ein Ergebnis zu diesem Ticket vor, laeuft NICHTS "
+          + "(der Text kann bearbeitet sein)");
+  }
+
+  // 4) Waehrend einer Auswertung wird nichts angestossen.
+  {
+    const r = await lauf({ key: "ABC-1", vorlage: VID, starten: true,
+                           laeuft: true });
+    check(r.gefragt === 0 && r.gelaufen.length === 0,
+          "waehrend eines laufenden Auftrags startet nichts zusaetzlich");
+  }
+
+  // 5) Kein Ticket im Tab.
+  {
+    const r = await lauf({ key: "", vorlage: VID, starten: true });
+    check(r.gefragt === 0 && r.gelaufen.length === 0,
+          "ohne erkanntes Ticket startet nichts");
+  }
+
+  /* 6) Abgemeldet. Kann in der Seitenleiste vorkommen: ihre Tab-Zuhoerer
+   *    ueberleben eine Abmeldung, der Arbeitsbereich ist dann verborgen. */
+  {
+    const r = await lauf({ key: "ABC-1", vorlage: VID, starten: true,
+                           abgemeldet: true });
+    check(r.gefragt === 0 && r.gelaufen.length === 0,
+          "abgemeldet startet nichts");
+  }
+
+  /* 7) DER TAB WECHSELT WAEHREND DER RUECKFRAGE. `auswerten` liest `_key`
+   *    selbst - ohne die zweite Pruefung wuerde fuer das NEUE Ticket
+   *    ausgewertet, waehrend im Ring das alte vermerkt ist. */
+  {
+    const r = await lauf({ key: "ABC-1", vorlage: VID, starten: true,
+                           wechseltTab: true });
+    check(r.gefragt === 1, "gefragt wurde");
+    check(r.gelaufen.length === 0,
+          "aber nach einem Tab-Wechsel waehrend der Rueckfrage laeuft nichts");
+  }
+
+  /* 8) Aelterer Hintergrund: die Anfrage kennt er nicht. Still bleiben - es
+   *    hat niemand etwas gedrueckt, und die Stand-Warnung sagt es ohnehin. */
+  {
+    const r = await lauf({ key: "ABC-1", vorlage: VID, starten: true,
+                           hintergrundAlt: true });
+    check(r.gelaufen.length === 0,
+          "ein aelterer Hintergrund laesst die Automatik still aus");
+  }
+}
+
+// ── e) Verdrahtung ───────────────────────────────────────────────────────
+{
+  const tla = schneidePopup("ticketLageAnwenden") || "";
+  check(/autoAktionPruefen\(/.test(tla),
+        "ticketLageAnwenden stoesst die Automatik an - die EINE Stelle, an der "
+        + "Anzeige und Ticketbezug zusammenlaufen (start() UND tabWechsel)");
+  /* ⚠ OHNE `await`: `start()` registriert unmittelbar danach die Tab-Zuhoerer
+   * der Leiste, und die sind eine Sicherheitsschranke. Ein abgewarteter Lauf
+   * liesse die Leiste zehn Sekunden ohne Beobachtung des Tab-Wechsels. */
+  check(!/await\s+autoAktionPruefen\(/.test(tla),
+        "und wartet NICHT darauf (sonst haengen die Tab-Zuhoerer hinterher)");
+  check(/autoAktionPruefen\([\s\S]*?_key !== key/.test(POPUP_JS),
+        "dafuer prueft autoAktionPruefen die Ticketnummer nach der Rueckfrage "
+        + "ein zweites Mal");
+
+  const st = schneidePopup("start") || "";
+  check(/autoZeigen\(z\.auto_vorlage\)/.test(st),
+        "start() belegt das Pulldown aus dem gespeicherten Zustand");
+  check(st.indexOf("autoZeigen(") < st.indexOf("ticketLageAnwenden("),
+        "und zwar BEVOR die Ticketlage angewandt wird - sonst liest die "
+        + "Automatik einen leeren Modus");
+
+  check(/case "auto_start":/.test(BG),
+        "der Hintergrund kennt den Nachrichtenfall");
+  check(/auto_vorlage: autoVorlage\(e\.auto_vorlage\)/.test(BG),
+        "und gibt die Vorlage im Zustand heraus (sonst stuende das Pulldown "
+        + "nach jedem Oeffnen wieder auf AUS)");
+
+  /* ⚠ ABMELDEN RAEUMT DEN RING. Es sind die Ticketnummern des vorigen
+   * Benutzers; der naechste am selben Rechner bekaeme fuer sie keine
+   * Automatik. Die EINSTELLUNG bleibt - die gehoert zum Browser. */
+  /* ⚠ OHNE KOMMENTARE. Der erste Anlauf schlug hier fehl, und der Code war in
+   * Ordnung: die Begruendung IM Quelltext nennt `auto_modus` woertlich ("der
+   * Einstellung passiert nichts"). Der Waechter las seine eigene Begruendung -
+   * die Falle steht im Register und ist hier trotzdem zugeschnappt. */
+  const ab = (ohneKommentare(BG).match(/case "abmelden":[\s\S]*?break;/) || [""])[0];
+  check(/auto_gelaufen: \[\]/.test(ab), "Abmelden leert den Ring", ab.trim());
+  check(!/auto_vorlage/.test(ab),
+        "laesst die Einstellung aber stehen (sie gehoert zum Browser, "
+        + "nicht zu einer Anmeldung)", ab.trim());
+
+  /* DRIFT-SCHRANKE, und zwar als REGEL: jedes Feld, das das Fenster per
+   * `merken` schickt, muss `einstSchreiben` auch kennen. Sonst wird es dort
+   * WORTLOS verworfen - der Benutzer stellt etwas ein, es steht beim naechsten
+   * Oeffnen wieder auf der Vorgabe, und es gibt keine Fehlermeldung. Genau
+   * dieser Fall ist der Grund fuer STAND. */
+  const felder = new Set();
+  for (const m of POPUP_JS.matchAll(/\{\s*art:\s*"merken",([\s\S]*?)\}\)/g)) {
+    for (const f of m[1].matchAll(/(\w+)\s*[:,]/g)) felder.add(f[1]);
+  }
+  const es = schneideBg("einstSchreiben") || "";
+  check(felder.size >= 3, "das Fenster schickt Felder per merken",
+        [...felder].join(", "));
+  for (const f of felder) {
+    check(new RegExp("teil\\." + f + " !== undefined").test(es),
+          "einstSchreiben kennt das Feld " + f
+          + " (sonst wird es wortlos verworfen)");
+  }
+  check(felder.has("auto_vorlage"), "darunter auto_vorlage");
+  /* ⚠ UND DER ALTE FELDNAME IST WEG. Bliebe er im Fenster stehen, schriebe es
+   * in ein Feld, das `einstSchreiben` nicht mehr kennt - wortlos verworfen,
+   * genau der Fall, fuer den es STAND gibt. */
+  check(!felder.has("auto_modus") && !/auto_modus/.test(ohneKommentare(POPUP_JS)),
+        "der alte Feldname auto_modus wird nirgends mehr geschickt");
+}
+
+/* ── 15) DAS ERGEBNISFELD IST RICH-TEXT ────────────────────────────────────
+ *
+ * Vorgabe des Nutzers 2026-08-31: `**Loesung:**` soll FETT dastehen, und beim
+ * Einfuegen sollen echte `<strong>`-Knoten in den Jira-Editor.
+ *
+ * DIE KETTE ENDET BEIM KUNDEN – deshalb wird hier nichts am Quelltext
+ * abgelesen, sondern ausgefuehrt. Zwei Dinge muessen zugleich halten:
+ * was der Mitarbeiter SIEHT und was der Kunde BEKOMMT.
+ */
+section("15) Ergebnisfeld als Rich-Text");
+
+/* Baut die Feld-Funktionen aus der echten popup.js in ein jsdom-Fenster. */
+function feldWelt() {
+  const { teile, drin } = popupTeile(
+    ["zuBloecken", "hatFett", "ohneFett", "textZuFeld", "feldZuText"], []);
+  const dom = new JSDOM("<div id=e></div>", { runScripts: "outside-only" });
+  const w = dom.window;
+  const F = new w.Function(FELD_KONST + "\n" + WECHSEL_KONST + "\n" + teile.join("\n")
+    + "\nreturn { zuBloecken, hatFett, ohneFett, textZuFeld, feldZuText };")();
+  return { w, F, el: w.document.getElementById("e"), drin };
+}
+
+// ── a) Der Rundlauf Text -> Feld -> Text ─────────────────────────────────
+{
+  const { w, F, el, drin } = feldWelt();
+  for (const n of ["zuBloecken", "textZuFeld", "feldZuText", "ohneFett"]) {
+    check(drin.has(n), "popup.js hat " + n + "()");
+  }
+  /* ⚠ EIN PARSER FUER BEIDES. Liefe die Anzeige nach anderen Regeln als das
+   * Einfuegen, saehe der Mitarbeiter etwas anderes, als der Kunde bekommt. */
+  check(/zuBloecken\(/.test(schneidePopup("textZuFeld") || ""),
+        "textZuFeld baut aus demselben Parser wie das Einfuegen");
+
+  const RUND = [
+    "**Lösung:** Der Dienst wurde neu gestartet.",
+    "1. Worum es geht\n2. Was passiert ist\n\n- Punkt A\n- Punkt B",
+    "Sehr geehrte Damen und Herren,\n\nwir haben geprüft.\n\nMit freundlichen Grüßen",
+    "**Lösung:**\nDetails darunter.",
+    // Die drei Fallen, an denen ein naives Muster den Kundentext verstuemmelt.
+    "Preis 2 * 3 * 4 und Datei *.txt bleiben unangetastet",
+    "Sternchen ** allein ** mit Leerzeichen",
+    "***fett und kursiv***",
+    "**A** und **B** in einer Zeile",
+    "Ein <script>alert(1)</script> aus dem Ticket",
+    "",
+  ];
+  for (const t of RUND) {
+    F.textZuFeld(el, t);
+    const zurueck = F.feldZuText(el);
+    check(zurueck === t, "verlustfrei: " + JSON.stringify(t.slice(0, 42)),
+          "zurueck " + JSON.stringify(zurueck.slice(0, 60)));
+  }
+  w.close();
+}
+
+// ── b) Was ECHTE Browser beim Bearbeiten bauen ───────────────────────────
+/* ⚠ DIESE TABELLE IST GEMESSEN, NICHT AUSGEDACHT. Die Chrome-Formen stammen
+ * aus einem Lauf in echtem Chrome (contenteditable, execCommand-Operationen,
+ * innerHTML abgegriffen). Sie hat einen Fehler im ersten Entwurf gefunden: der
+ * Rueckweg verwarf `<br>` und zog damit zwei Zeilen stillschweigend zusammen.
+ *
+ * Die Firefox-Formen sind der zweite Grund fuer diese Tabelle: Firefox erzeugt
+ * beim Enter GAR KEIN `<div>`, sondern ein `<br>` auf oberster Ebene. Wer nur
+ * "div = Zeile" kennt, verliert dort JEDEN vom Benutzer gesetzten Umbruch -
+ * und beide Browser werden ausgeliefert. */
+{
+  const { w, F, el } = feldWelt();
+  const FORMEN = [
+    ["Chrome: Enter am Zeilenende",
+     "<div><strong>L:</strong> eins</div><div>neu</div><div>zwei</div>",
+     "**L:** eins\nneu\nzwei"],
+    ["Chrome: Shift+Enter -> br IN der Zeile",
+     "<div><strong>L:</strong> eins<br>neu</div><div>zwei</div>",
+     "**L:** eins\nneu\nzwei"],
+    ["Chrome: alles markiert und geloescht", "<br>", ""],
+    ["Chrome: leere Zeile", "<div>a</div><div><br></div><div>b</div>", "a\n\nb"],
+    ["Chrome: Fuellwerk-br am Blockende", "<div>a<br></div><div>b</div>", "a\nb"],
+    ["Chrome: Strg+B erzeugt <b>",
+     "<div><strong>L:</strong> <b>Der</b> Dienst</div>", "**L:** **Der** Dienst"],
+    ["Strg+B als span font-weight",
+     '<div><span style="font-weight:700">Fett</span> normal</div>',
+     "**Fett** normal"],
+    ["Fremdformat eingefuegt wird flachgeklopft",
+     '<div>a<i>kursiv</i> und <span style="color:red">rot</span></div>',
+     "akursiv und rot"],
+    ["FIREFOX: Enter erzeugt br, keine div", "eins<br>zwei<br>drei",
+     "eins\nzwei\ndrei"],
+    ["FIREFOX: mit Fett", "<strong>L:</strong> eins<br>zwei", "**L:** eins\nzwei"],
+    ["FIREFOX: alles geloescht", "<br>", ""],
+    /* Der HAEUFIGSTE Bearbeitungsfall: ein Leerzeichen hinter das fette Wort
+     * getippt. Naiv emittiert waere das `**Loesung: **`, und das erfuellt die
+     * Bedingung beim naechsten Aufbau nicht - das Fett waere nach dem
+     * naechsten Wiederherstellen spurlos weg. */
+    ["Leerzeichen im Fettlauf", "<div><strong>Lösung: </strong>Text</div>",
+     "**Lösung:** Text"],
+    /* Beim Loeschen an einer Fettgrenze entstehen zwei benachbarte Laeufe.
+     * `**A****B**` ist im Feld unsichtbar, im Text an den Server und in der
+     * textarea aber sichtbarer Muell. */
+    ["zwei Fettlaeufe nebeneinander",
+     "<div><strong>A</strong><strong>B</strong> c</div>", "**AB** c"],
+    ["geschuetztes Leerzeichen wird normal", "<div>a  b</div>", "a  b"],
+  ];
+  for (const [name, html, erwartet] of FORMEN) {
+    el.innerHTML = html;          // NUR im Test: stellt das Browser-Ergebnis nach
+    const t = F.feldZuText(el);
+    check(t === erwartet, name, "bekommen " + JSON.stringify(t)
+          + " statt " + JSON.stringify(erwartet));
+  }
+  w.close();
+}
+
+// ── c) Modelltext kann kein Element werden ───────────────────────────────
+/* Der Text stammt aus einem Modell, das Kundentext verarbeitet hat. Mit
+ * `innerHTML` waere ein `<img src=x onerror=…>` aus einem Ticket im Origin der
+ * Erweiterung ausfuehrbar - und dort liegt das Sitzungstoken. */
+{
+  const { w, F, el } = feldWelt();
+  const boese = 'Ein <img src=x onerror=alert(1)> und <script>alert(2)</script>'
+    + ' und <b>fett</b> aus dem Ticket';
+  F.textZuFeld(el, boese);
+  const fremd = [...el.querySelectorAll("*")]
+    .map((n) => n.nodeName).filter((n) => n !== "DIV" && n !== "STRONG");
+  check(fremd.length === 0,
+        "aus Modelltext entsteht KEIN fremdes Element", fremd.join(","));
+  check(el.textContent === boese,
+        "und der Text bleibt woertlich erhalten", el.textContent.slice(0, 50));
+  check(!/innerHTML/.test(schneidePopup("textZuFeld") || ""),
+        "textZuFeld benutzt kein innerHTML");
+  w.close();
+}
+
+// ── d) Eingefuegt und fallengelassen wird nur Klartext ───────────────────
+/* In echtem Chrome gemessen: ein Einfuegen aus der Zwischenablage traegt
+ * `<i>`, `<span style>` und beliebiges weiteres Markup in das Feld. */
+{
+  const ohne = ohneKommentare(POPUP_JS);
+  const einsetzen = schneidePopup("klartextEinsetzen") || "";
+  check(!!einsetzen, "popup.js hat klartextEinsetzen()");
+  check(/addEventListener\("paste"/.test(ohne), "ein paste-Zuhoerer ist da");
+  check(/addEventListener\("drop"/.test(ohne),
+        "und ein drop-Zuhoerer - Hineinziehen ist derselbe Fall");
+  check(/addEventListener\("dragover"/.test(ohne),
+        "mit dragover, sonst navigiert Chrome das Fenster weg");
+
+  const pasteRumpf = (ohne.match(
+    /addEventListener\("paste"[\s\S]*?\n\}\);/) || [""])[0];
+  check(/preventDefault\(\)/.test(pasteRumpf), "paste wird abgefangen");
+  check(/getData\("text\/plain"\)/.test(pasteRumpf),
+        "und NUR text/plain gelesen - nie text/html");
+  check(!/text\/html/.test(pasteRumpf), "text/html wird nirgends angefasst");
+  /* Ohne das Ereignis laeuft die Merk-Drossel nicht an, und das Eingesetzte
+   * waere beim naechsten Oeffnen weg - genau das Szenario, fuer das der Timer
+   * gebaut wurde. */
+  check(/dispatchEvent\(new Event\("input"/.test(einsetzen),
+        "der Range-Rueckfall feuert selbst ein input-Ereignis");
+}
+
+// ── e) Der Abgleich-Hinweis gehoert NICHT in den Kundentext ──────────────
+/* ⚠ AUSGEFUEHRT, nicht gelesen. Die alte Pruefung hing an der Schreibweise
+ * `ergebnisFeld.value = …` und wurde durch den Umbau zur Tautologie. Der
+ * Hinweis ist eine Anmerkung FUER den Mitarbeiter; landete er im Feld, ginge
+ * er mit dem naechsten Klick auf "Einfuegen" an einen Kunden. */
+{
+  const { teile } = popupTeile(["auswerten", "mitAbgleich", "textZuFeld",
+                                "feldZuText", "melde"],
+                               ["frage", "sperre"]);
+  const dom = new JSDOM(POPUP_HTML, { url: "https://x.test/",
+                                      runScripts: "outside-only" });
+  const w = dom.window;
+  try {
+    const f = new w.Function(""
+      + "const $ = (id) => document.getElementById(id);\n"
+      + "const el = { ergebnisFeld: $('f-ergebnis'), ergebnis: $('ergebnis'),\n"
+      + "             ergebnisFuss: $('ergebnis-fuss'), meldung: $('meldung'),\n"
+      + "             hinweis: $('f-hinweis') };\n"
+      + "let _key = 'ABC-1', _letztes = null, _fremdesErgebnis = false;\n"
+      + "let _marke = 'Marke', _laeuft = false, _leiste = false;\n"
+      + "let _merkTimer = null, _autoModus = '';\n"
+      + "const _originale = new Map();\n"
+      + "function sperre() {}\n"
+      + "async function frage() {\n"
+      + "  return { ok: true, daten: { key: 'ABC-1', modus: 'ueberarbeiten',\n"
+      + "    text: 'ANTWORTTEXT', hinweis: 'GEHEIMER-ABGLEICH', kommentare: 3,\n"
+      + "    modell: 'M' } };\n"
+      + "}\n"
+      /* Auch ARBEITSTEXT/FERTIGTEXT stehen in keinem Funktionsrumpf und
+       * fallen aus dem Schnitt - dieselbe Falle wie bei _FETT_RE. */
+      + (POPUP_JS.match(/const ARBEITSTEXT = \{[\s\S]*?\n\};/) || [""])[0] + "\n"
+      + (POPUP_JS.match(/const FERTIGTEXT = \{[\s\S]*?\n\};/) || [""])[0] + "\n"
+      + FELD_KONST + "\n" + WECHSEL_KONST + "\n" + teile.join("\n") + "\n"
+      + "return (async () => {\n"
+      + "  await auswerten('ueberarbeiten', 'entwurf');\n"
+      + "  return JSON.stringify({\n"
+      + "    sichtbar: el.ergebnisFeld.textContent,\n"
+      + "    kanonisch: feldZuText(el.ergebnisFeld),\n"
+      + "    meldung: el.meldung.textContent,\n"
+      + "  });\n"
+      + "})();");
+    const r = JSON.parse(await f());
+    check(r.sichtbar.indexOf("GEHEIMER-ABGLEICH") < 0,
+          "der Abgleich-Hinweis steht NICHT sichtbar im Feld", r.sichtbar);
+    check(r.kanonisch.indexOf("GEHEIMER-ABGLEICH") < 0,
+          "und auch nicht in dem, was gespeichert und eingefuegt wird",
+          r.kanonisch);
+    check(r.sichtbar.indexOf("ANTWORTTEXT") >= 0,
+          "der Antworttext dagegen schon (sonst waere gar nichts gelaufen)");
+    check(r.meldung.indexOf("GEHEIMER-ABGLEICH") >= 0,
+          "der Hinweis erscheint als MELDUNG", r.meldung);
+  } finally { w.close(); }
+}
+
+// ── f) Einfuegen: mit Fett, ohne Fett, in eine textarea ──────────────────
+/* ⚠ execCommand wird als AUFZEICHNER gestellt, nicht als `() => false`. Nur so
+ * ist messbar, welcher Weg wirklich genommen wurde - ohne die Attrappe misst
+ * man immer nur den Rueckfall, und die Zusage "ohne Fett aendert sich nichts"
+ * waere unpruefbar. */
+{
+  const bloeckeAus = (text) => {
+    const { w, F } = feldWelt();
+    const b = F.zuBloecken(text);
+    w.close();
+    return JSON.parse(JSON.stringify(b));   // wie ueber executeScript: JSON
+  };
+
+  const einfuegeLauf = (html, text, mitBloecken, execAntwort) => {
+    const dom = new JSDOM("<body>" + html + "</body>",
+      { url: "https://jira.test/browse/A-1", runScripts: "outside-only" });
+    const w = dom.window, doc = w.document;
+    w.Element.prototype.getBoundingClientRect = function () {
+      return this.hasAttribute("data-unsichtbar")
+        ? { width: 0, height: 0 } : { width: 300, height: 80 };
+    };
+    w.Element.prototype.scrollIntoView = function () {};
+    const ruf = [];
+    if (execAntwort !== null) {
+      doc.execCommand = (befehl, u, wert) => {
+        ruf.push(befehl);
+        if (!execAntwort) return false;
+        // Wie der Browser: an der Auswahl einsetzen.
+        const ziel = doc.querySelector("[contenteditable]")
+          || doc.activeElement;
+        if (ziel && befehl === "insertText") {
+          ziel.appendChild(doc.createTextNode(wert));
+        } else if (ziel && befehl === "insertHTML") {
+          const h = doc.createElement("div");
+          h.innerHTML = wert;
+          while (h.firstChild) ziel.appendChild(h.firstChild);
+        }
+        return true;
+      };
+    }
+    const f = ladeEinfuegen(w);
+    const r = mitBloecken ? f(text, bloeckeAus(text)) : f(text);
+    const ziel = doc.querySelector("[contenteditable]")
+      || doc.querySelector("textarea");
+    const erg = {
+      ok: r.ok, weg: r.weg, ruf,
+      inhalt: ziel ? (ziel.value !== undefined && ziel.tagName === "TEXTAREA"
+        ? ziel.value : ziel.textContent) : "",
+      fett: ziel ? ziel.querySelectorAll
+        ? ziel.querySelectorAll("strong").length : 0 : 0,
+    };
+    w.close();
+    return erg;
+  };
+
+  const MIT = "**Lösung:** Der Dienst laeuft.";
+  const OHNE = "Guten Tag,\n\nerledigt.";
+
+  // 1) OHNE Fett bleibt der bevorzugte Weg unangetastet.
+  {
+    const r = einfuegeLauf('<div contenteditable="true"></div>', OHNE, true, true);
+    check(r.ruf.indexOf("insertText") >= 0,
+          "ohne Fett wird weiterhin insertText benutzt", r.ruf.join(","));
+    check(r.ruf.indexOf("insertHTML") < 0, "und NICHT insertHTML");
+    check(r.inhalt.indexOf("erledigt.") >= 0, "der Text kommt an", r.inhalt);
+  }
+
+  // 2) MIT Fett: echte <strong> im Ziel.
+  {
+    const r = einfuegeLauf('<div contenteditable="true"></div>', MIT, true, true);
+    check(r.fett === 1, "mit Fett steht ein <strong> im Ziel", String(r.fett));
+    check(r.inhalt.indexOf("Lösung:") >= 0, "mit dem richtigen Wort", r.inhalt);
+    check(r.inhalt.indexOf("**") < 0,
+          "und OHNE Sternchen - die liest sonst der Kunde", r.inhalt);
+    check(/fett/i.test(String(r.weg)), "der Weg wird als Fett-Weg gemeldet", r.weg);
+  }
+
+  // 3) MIT Fett, aber der Editor nimmt execCommand nicht an -> Knoten.
+  {
+    const r = einfuegeLauf('<div contenteditable="true"></div>', MIT, true, false);
+    check(r.fett === 1, "auch ueber den Knotenweg kommt Fett an", String(r.fett));
+    check(r.inhalt.indexOf("**") < 0, "weiterhin ohne Sternchen", r.inhalt);
+  }
+
+  /* 4) EINE TEXTAREA KANN KEIN FETT. Dort geht der bereinigte Text hinein -
+   * ein `**` waere genau das, was der Kunde am Ende liest. */
+  {
+    const r = einfuegeLauf('<textarea id="comment"></textarea>', MIT, true, null);
+    check(r.inhalt.indexOf("**") < 0,
+          "textarea bekommt den Text OHNE Sternchen", r.inhalt);
+    check(r.inhalt.indexOf("Lösung:") >= 0, "aber vollstaendig", r.inhalt);
+  }
+
+  /* 5) ALTES FENSTER, NEUE einfuegen.js: ohne zweites Argument muss sich alles
+   * verhalten wie vor dem Umbau - sonst braeche jeder Bestandstest. */
+  {
+    const r = einfuegeLauf('<textarea id="comment"></textarea>', MIT, false, null);
+    check(r.ok === true && r.inhalt === MIT,
+          "ohne bloecke bleibt der Originaltext unangetastet", r.inhalt);
+  }
+}
+
+// ── g) Kopieren legt bereinigten Text ab ─────────────────────────────────
+{
+  const ohne = ohneKommentare(POPUP_JS);
+  const kop = (ohne.match(/btn-kopieren"\)\.addEventListener\([\s\S]*?\n\}\);/) || [""])[0];
+  check(/ohneFett\(/.test(kop),
+        "Kopieren legt den Text OHNE Sternchen ab - er wird von Hand eingefuegt");
+  const zweit = (ohne.match(/func: einfuegenUeberEditorApi,[\s\S]{0,120}/) || [""])[0];
+  check(/ohneFett\(/.test(zweit),
+        "und der Editor-API-Weg ebenfalls (er kann kein Fett tragen)", zweit.trim());
+}
+
+// ── h) Das Feld sieht aus wie ein Eingabefeld und waechst nicht davon ────
+{
+  const regel = (POPUP_CSS.match(/#f-ergebnis \{([^}]*)\}/) || ["", ""])[1];
+  check(!!regel.trim(), "es gibt eine eigene #f-ergebnis-Regel");
+  for (const [eig, grund] of [
+    ["white-space: pre-wrap", "Umbrueche und Einrueckungen des Modells"],
+    ["min-height", "sonst ist das Feld beim ersten Zeichen huefthoch"],
+    ["overflow", "Voraussetzung dafuer, dass resize ueberhaupt wirkt"],
+  ]) {
+    check(regel.indexOf(eig) >= 0, "#f-ergebnis setzt " + eig + " - " + grund);
+  }
+  /* ⚠ DER DECKEL IST DER WICHTIGE TEIL. Die abgeloeste textarea hatte
+   * rows="12", also eine FESTE Hoehe. Ein <div> waechst unbegrenzt und schoebe
+   * bei einer langen Antwort den Einfuegen-Knopf aus dem 600-px-Fenster. */
+  check(/max-height/.test(regel),
+        "und einen max-height-Deckel (sonst waechst es aus dem Fenster)");
+  const leiste = (POPUP_CSS.match(/html\.leiste #f-ergebnis \{([^}]*)\}/) || ["", ""])[1];
+  check(/min-height:\s*40vh/.test(leiste),
+        "in der Leiste bleibt der Hoehengewinn erhalten", leiste.trim());
+  check(/max-height/.test(leiste), "auch dort gedeckelt");
+  check(/#f-ergebnis:empty::before/.test(POPUP_CSS),
+        "ein leeres Feld zeigt einen Platzhalter (ein div kennt kein placeholder)");
+  // Das Markup selbst.
+  check(/id="f-ergebnis"[^>]*contenteditable="true"/.test(POPUP_HTML),
+        "das Feld ist contenteditable");
+  check(/id="f-ergebnis"[^>]*role="textbox"/.test(POPUP_HTML),
+        'und traegt role="textbox" - ein div hat keine implizite Rolle');
+  check(/id="f-ergebnis"[^>]*aria-multiline="true"/.test(POPUP_HTML),
+        "sowie aria-multiline");
+  check(/id="f-ergebnis"[^>]*spellcheck="true"/.test(POPUP_HTML),
+        "die Rechtschreibpruefung bleibt erhalten");
+  check(!/<textarea id="f-ergebnis"/.test(POPUP_HTML),
+        "und es ist keine textarea mehr");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section('16) „Als Kommentar uebernehmen" ERSETZT, statt anzuhaengen');
+// ═══════════════════════════════════════════════════════════════════════════
+/* VORGABE 2026-08-31: der Knopf hiess „Ins Kommentarfeld einfuegen" und haengte
+ * an – aber nur bei den EDITOR-Wegen; die textarea-Wege ersetzten schon immer.
+ * Dieselbe Beschriftung hatte also je Jira-Betriebsart eine andere Wirkung.
+ *
+ * ⚠ DIE ATTRAPPE FUER `execCommand` MUSS DIE AUSWAHL BEACHTEN. Die Attrappe in
+ * Abschnitt 6f haengt bedingungslos an – gegen sie waere „ersetzt" gar nicht
+ * messbar, und der Waechter waere mit der ANHAENGENDEN Fassung gruen. Hier wird
+ * deshalb der Browser nachgebaut: `insertText`/`insertHTML` LOESCHEN zuerst die
+ * markierte Auswahl (jsdom kann `Range.deleteContents`). */
+{
+  const bloeckeAus = (text) => {
+    const { w, F } = feldWelt();
+    const b = F.zuBloecken(text);
+    w.close();
+    return JSON.parse(JSON.stringify(b));   // wie ueber executeScript: JSON
+  };
+
+  /** @param execAntwort true = Editor nimmt execCommand an, false = nicht,
+   *                     null = es gibt kein execCommand (reine textarea). */
+  function uebernahme(html, text, execAntwort) {
+    const dom = new JSDOM("<body>" + html + "</body>",
+      { url: "https://jira.test/browse/A-1", runScripts: "outside-only" });
+    const w = dom.window, doc = w.document;
+    w.Element.prototype.getBoundingClientRect = () => ({ width: 300, height: 80 });
+    w.Element.prototype.scrollIntoView = function () {};
+    const ruf = [];
+    if (execAntwort !== null) {
+      doc.execCommand = (befehl, u, wert) => {
+        ruf.push(befehl);
+        if (!execAntwort) return false;
+        const ziel = doc.querySelector("[contenteditable]") || doc.activeElement;
+        if (!ziel) return false;
+        // WIE DER BROWSER: erst die Auswahl weg, dann einsetzen.
+        const sel = w.getSelection();
+        if (sel && sel.rangeCount) { try { sel.getRangeAt(0).deleteContents(); } catch (e) {} }
+        if (befehl === "insertText") {
+          ziel.appendChild(doc.createTextNode(wert));
+        } else if (befehl === "insertHTML") {
+          const h = doc.createElement("div");
+          h.innerHTML = wert;
+          while (h.firstChild) ziel.appendChild(h.firstChild);
+        } else { return false; }
+        return true;
+      };
+    }
+    const r = ladeEinfuegen(w)(text, bloeckeAus(text));
+    const ziel = doc.querySelector("[contenteditable]") || doc.querySelector("textarea");
+    const erg = {
+      ok: r.ok, weg: String(r.weg || ""), ruf,
+      inhalt: ziel
+        ? (ziel.tagName === "TEXTAREA" ? ziel.value : ziel.textContent)
+        : "",
+      fett: (ziel && ziel.querySelectorAll) ? ziel.querySelectorAll("strong").length : 0,
+    };
+    w.close();
+    return erg;
+  }
+
+  const ALT  = "Guten Tag Herr Mueller, das schauen wir uns an. MfG";
+  const NEU  = "Sehr geehrter Herr Mueller,\n\ndas Problem ist behoben.";
+  const NEUF = "**Loesung:** Das Problem ist behoben.";
+
+  // 1) contenteditable mit Entwurf, ohne Fett – der Regelweg.
+  {
+    const r = uebernahme('<div contenteditable="true">' + ALT + '</div>', NEU, true);
+    check(r.inhalt.indexOf("behoben.") >= 0, "der neue Text kommt an", r.inhalt);
+    check(r.inhalt.indexOf("Guten Tag Herr Mueller") < 0,
+          "und der alte Entwurf ist WEG (ersetzt, nicht angehaengt)", r.inhalt);
+    check(r.ruf.indexOf("insertText") >= 0,
+          "ueber insertText – geht durch den Editor und bleibt ruecknehmbar",
+          r.ruf.join(","));
+  }
+
+  // 2) Derselbe Fall ohne execCommand: der harte Weg muss ebenso ersetzen,
+  //    sonst haette EIN Knopf je Editor zwei verschiedene Wirkungen.
+  {
+    const r = uebernahme('<div contenteditable="true">' + ALT + '</div>', NEU, false);
+    check(r.inhalt.indexOf("behoben.") >= 0, "Knotenweg: der neue Text kommt an", r.inhalt);
+    check(r.inhalt.indexOf("Guten Tag Herr Mueller") < 0,
+          "Knotenweg: der alte Entwurf ist ebenfalls weg", r.inhalt);
+  }
+
+  // 3) Mit Fett ueber insertHTML.
+  {
+    const r = uebernahme('<div contenteditable="true">' + ALT + '</div>', NEUF, true);
+    check(r.fett === 1, "mit Fett steht ein <strong> im Ziel", String(r.fett));
+    check(r.inhalt.indexOf("Guten Tag Herr Mueller") < 0,
+          "und der alte Entwurf ist weg", r.inhalt);
+    check(/insertHTML\+fett/.test(r.weg), "gemeldet wird der insertHTML-Weg", r.weg);
+  }
+
+  // 4) Mit Fett, aber der Editor nimmt execCommand nicht an.
+  {
+    const r = uebernahme('<div contenteditable="true">' + ALT + '</div>', NEUF, false);
+    check(r.fett === 1, "Knotenweg: Fett kommt an", String(r.fett));
+    check(r.inhalt.indexOf("Guten Tag Herr Mueller") < 0,
+          "Knotenweg: der alte Entwurf ist weg", r.inhalt);
+  }
+
+  /* 5) ⚠ DER FALL, DER DIE RUECKLESEPROBE UMBAUEN MUSSTE: die uebernommene
+   * Fassung ist KUERZER als der Entwurf, den sie ersetzt. Die alte Probe hiess
+   * `jetzt.length > vorher.length` – damit haette sich der insertHTML-Weg
+   * selbst fuer wirkungslos erklaert und waere auf `insertText` OHNE Fett
+   * gefallen: Fett verloren, ohne dass etwas kaputt war. */
+  {
+    const lang = "Sehr geehrter Herr Mueller, ".repeat(12);
+    const r = uebernahme('<div contenteditable="true">' + lang + '</div>', NEUF, true);
+    check(/insertHTML\+fett/.test(r.weg),
+          "eine KUERZERE Ersetzung gilt trotzdem als angekommen", r.weg);
+    check(!/ohne Fett/.test(r.weg),
+          "und NICHT als Rueckfall ohne Fett – das war der alte length-Fehler", r.weg);
+    check(r.fett === 1, "das Fett bleibt dabei erhalten", String(r.fett));
+    check(r.inhalt.length < lang.length, "und der lange Entwurf ist ersetzt",
+          String(r.inhalt.length) + " vs " + lang.length);
+  }
+
+  // 6) textarea: verhielt sich schon immer ersetzend – das bleibt so.
+  {
+    const r = uebernahme('<textarea id="comment">' + ALT + '</textarea>', NEUF, null);
+    check(r.inhalt.indexOf("Guten Tag") < 0, "textarea: alter Inhalt ersetzt", r.inhalt);
+    check(r.inhalt.indexOf("Loesung:") >= 0 && r.inhalt.indexOf("**") < 0,
+          "textarea: neuer Text ohne Sternchen", r.inhalt);
+  }
+
+  // 7) Gegenrichtung: ein LEERES Feld verhaelt sich unveraendert.
+  {
+    const r = uebernahme('<div contenteditable="true"></div>', NEU, true);
+    check(r.ok === true && r.inhalt.indexOf("behoben.") >= 0,
+          "in ein leeres Feld wird wie bisher geschrieben", r.inhalt);
+  }
+}
+
+// ── b) Der iframe-Editor (Jira Server mit Rich-Text) ersetzt ebenfalls ───
+{
+  const dom = new JSDOM('<body><iframe id="ed"></iframe></body>',
+    { url: "https://jira.test/browse/A-1", runScripts: "outside-only" });
+  const w = dom.window, doc = w.document;
+  w.Element.prototype.getBoundingClientRect = () => ({ width: 300, height: 80 });
+  w.Element.prototype.scrollIntoView = function () {};
+  const rahmen = doc.getElementById("ed");
+  const idoc = rahmen.contentDocument;
+  idoc.body.setAttribute("contenteditable", "true");
+  idoc.body.textContent = "alter Entwurf im Rahmen";
+  const ruf = [];
+  idoc.execCommand = (befehl, u, wert) => {
+    ruf.push(befehl);
+    const sel = idoc.defaultView.getSelection();
+    if (sel && sel.rangeCount) { try { sel.getRangeAt(0).deleteContents(); } catch (e) {} }
+    if (befehl !== "insertText") return false;
+    idoc.body.appendChild(idoc.createTextNode(wert));
+    return true;
+  };
+  const r = ladeEinfuegen(w)("Neuer Text.", null);
+  check(r.ok === true && /iframe/.test(String(r.weg)),
+        "der iframe-Editor wird gefunden", JSON.stringify(r));
+  check(idoc.body.textContent.indexOf("alter Entwurf") < 0,
+        "und sein Inhalt wird ERSETZT, nicht ergaenzt", idoc.body.textContent);
+  check(idoc.body.textContent.indexOf("Neuer Text.") >= 0,
+        "der neue Text steht darin", idoc.body.textContent);
+  w.close();
+}
+
+// ── c) Der Editor-API-Weg benutzt setContent, nicht insertContent ────────
+/* `insertContent` haengt an der Cursorposition an – dieser Weg haette dann als
+ * einziger noch angehaengt, und ein Knopf mit editorabhaengiger Wirkung ist
+ * nicht erklaerbar. */
+{
+  const { w } = mitDom("<body></body>", (w) => w, "einfuegenUeberEditorApi");
+  const dom = new JSDOM("<body></body>", { runScripts: "outside-only" });
+  const fw = dom.window;
+  const ruf = [];
+  fw.tinymce = {
+    activeEditor: {
+      setContent: (h) => ruf.push("setContent:" + h),
+      insertContent: (h) => ruf.push("insertContent:" + h),
+    },
+  };
+  const f = ladeEinfuegen(fw, "einfuegenUeberEditorApi");
+  const r = f("Neuer Text.");
+  check(r.ok === true, "der Editor-API-Weg meldet Erfolg", JSON.stringify(r));
+  check(ruf.some((x) => x.indexOf("setContent:") === 0),
+        "es wird setContent gerufen (ersetzt)", ruf.join(" | "));
+  check(!ruf.some((x) => x.indexOf("insertContent:") === 0),
+        "und NICHT insertContent (das wuerde anhaengen)", ruf.join(" | "));
+  check(/setContent/.test(String(r.weg)), "der gemeldete Weg nennt setContent", r.weg);
+  fw.close();
+  if (w && w.close) w.close();
+}
+
+// ── d) Beschriftung und Rueckmeldung sagen, was passiert ─────────────────
+{
+  check(/id="btn-einfuegen">Als Kommentar übernehmen</.test(POPUP_HTML),
+        'der Knopf heisst „Als Kommentar übernehmen"');
+  // Der alte Wortlaut darf nirgends stehenbleiben – sonst beschreibt die
+  // Anleitung einen Knopf, den es nicht mehr gibt.
+  for (const [name, inhalt] of [["popup.html", POPUP_HTML], ["popup.js", POPUP_JS],
+                                ["popup.css", POPUP_CSS], ["einfuegen.js", EINFUEGEN]]) {
+    check(!/Ins Kommentarfeld einfügen/.test(inhalt),
+          name + ": der alte Wortlaut kommt nicht mehr vor");
+  }
+  check(/id="uebernehmen-hinweis"/.test(POPUP_HTML),
+        "im Fenster steht, dass der bisherige Inhalt ersetzt wird");
+  check(/uebernehmen-hinweis[\s\S]{0,240}ersetzt/.test(POPUP_HTML),
+        'und zwar mit dem Wort „ersetzt“');
+  const pj = ohneKommentare(POPUP_JS);
+  check(/melde\("Als Kommentar übernommen"/.test(pj),
+        'die Erfolgsmeldung heisst „übernommen“, nicht „eingefügt“');
+  check(/wurde ersetzt/.test(pj),
+        "und sie nennt das Ersetzen – sonst haelt es der Benutzer fuer einen Fehler");
+}
+
+// ── e) Version hochgezaehlt (Verhaltensaenderung, nicht nur Beschriftung) ─
+{
+  const vC = JSON.parse(lies("manifest.json")).version;
+  const vF = JSON.parse(lies("manifest.firefox.json")).version;
+  check(vC === vF, "beide Manifeste tragen dieselbe Version", vC + " / " + vF);
+  const zahl = (v) => v.split(".").map(Number);
+  const [a, b] = zahl(vC);
+  check(a > 0 || b >= 6,
+        "die Version ist ueber 0.5.0 hinaus – das Verhalten hat sich geaendert", vC);
+}
+
+// ── f) Die Anleitung im Portal nennt denselben Knopf ─────────────────────
+/* Der Waechter greift ueber `browser-addon/` hinaus, weil die Anleitung im
+ * Portal liegt: ein Text, der ein Bedienelement bei einem Namen nennt, den es
+ * nicht mehr gibt, schickt den Benutzer suchen (Register). */
+{
+  const FE = path.join(WURZEL, "frontend");
+  const i18n = fs.readFileSync(path.join(FE, "js/i18n.js"), "utf8");
+  const seite = fs.readFileSync(path.join(FE, "jira_addon.html"), "utf8");
+  check(!/Ins Kommentarfeld einfügen/.test(i18n),
+        "i18n.js kennt den alten Wortlaut nicht mehr");
+  check(!/Ins Kommentarfeld einfügen/.test(seite),
+        "das Rueckfall-Markup ebenfalls nicht");
+  check(!/Insert into comment field/.test(i18n),
+        "auch nicht in Englisch");
+  // Beide Sprachen muessen das Ersetzen nennen – es ist die Aenderung, die
+  // jemanden ueberraschen kann.
+  const de = (i18n.match(/'jaddon\.use_5':\s*'([^']*)'/) || ["", ""])[1];
+  const alleUse5 = [...i18n.matchAll(/'jaddon\.use_5':\s*'([^']*)'/g)].map((m) => m[1]);
+  check(alleUse5.length === 2, "es gibt jaddon.use_5 in DE und EN", String(alleUse5.length));
+  check(alleUse5.every((t) => /ersetzt|replaces/.test(t)),
+        "beide Fassungen nennen das Ersetzen", alleUse5.join(" ||| ").slice(0, 200));
+  check(de && seite.indexOf("Als Kommentar übernehmen") >= 0,
+        "das Rueckfall-Markup nennt den neuen Namen");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("17) Zeilenumbrueche ueberleben das Einfuegen");
+// ═══════════════════════════════════════════════════════════════════════════
+/* Gemeldet 2026-09-01 mit einem Screenshot: rechts im Fenster stand eine
+ * Timeline mit einem Eintrag je Zeile, links im Jira-Kommentarfeld war daraus
+ * EIN Fliesstextblock geworden.
+ *
+ * Ursache war `absaetze()`: ein einfacher Umbruch wurde zum Leerzeichen, nur
+ * eine LEERZEILE trennte. Das stammte aus der Zeit vor dem Rich-Text-Feld
+ * (`replace(/\n/g, " ")`) und widerspricht seither der Zusage des Umbaus – das
+ * Feld zeigt `white-space: pre-wrap`, also die Umbrueche.
+ *
+ * ⚠ GEMESSEN WIRD DIE EIGENSCHAFT, nicht das Markup: `gesehen()` rekonstruiert
+ * aus dem Ziel-DOM, was ein Mensch dort SIEHT. Ein Editor, der statt <br> ein
+ * <div> je Zeile baut, waere ebenso richtig – eine Suche nach "<br>" haette
+ * das faelschlich als Fehler gemeldet. */
+{
+  const bloeckeAus = (text) => {
+    const { w, F } = feldWelt();
+    const b = F.zuBloecken(text);
+    w.close();
+    return JSON.parse(JSON.stringify(b));   // wie ueber executeScript: JSON
+  };
+
+  function gesehen(el) {
+    if (!el) return "";
+    if (el.tagName === "TEXTAREA") return el.value;
+    let out = "";
+    (function lauf(k) {
+      for (const n of k.childNodes) {
+        if (n.nodeType === 3) { out += n.nodeValue; continue; }
+        if (n.nodeType !== 1) continue;
+        if (n.tagName === "BR") { out += "\n"; continue; }
+        const block = /^(P|DIV)$/.test(n.tagName);
+        if (block && out && !/\n\n$/.test(out)) out += "\n\n";
+        lauf(n);
+        if (block) out += "\n\n";
+      }
+    })(el);
+    return out.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  }
+
+  /* Wie in Abschnitt 16: die execCommand-Attrappe LOESCHT erst die Auswahl.
+   * Eine bedingungslos anhaengende Attrappe koennte "ersetzt" nicht messen. */
+  function einfuegen17(html, text, execAntwort) {
+    const dom = new JSDOM("<body>" + html + "</body>",
+      { url: "https://jira.test/browse/A-1", runScripts: "outside-only" });
+    const w = dom.window, doc = w.document;
+    w.Element.prototype.getBoundingClientRect = () => ({ width: 300, height: 80 });
+    w.Element.prototype.scrollIntoView = function () {};
+    if (execAntwort !== null) {
+      doc.execCommand = (befehl, u, wert) => {
+        if (!execAntwort) return false;
+        const ziel = doc.querySelector("[contenteditable]") || doc.activeElement;
+        if (!ziel) return false;
+        const sel = w.getSelection();
+        if (sel && sel.rangeCount) { try { sel.getRangeAt(0).deleteContents(); } catch (e) {} }
+        if (befehl === "insertText") {
+          ziel.appendChild(doc.createTextNode(wert));
+        } else if (befehl === "insertHTML") {
+          const h = doc.createElement("div");
+          h.innerHTML = wert;
+          while (h.firstChild) ziel.appendChild(h.firstChild);
+        } else { return false; }
+        return true;
+      };
+    }
+    const r = ladeEinfuegen(w)(text, bloeckeAus(text));
+    const ziel = doc.querySelector("[contenteditable]") || doc.querySelector("textarea");
+    const erg = { weg: String(r.weg || ""), text: gesehen(ziel),
+                  fett: (ziel && ziel.querySelectorAll) ? ziel.querySelectorAll("strong").length : 0 };
+    w.close();
+    return erg;
+  }
+
+  // Der gemeldete Fall: Fett UND ein Eintrag je Zeile.
+  const TIMELINE = "**Timeline**\n07.07. Weiterleitung an A. Liman\n"
+                 + "08.07. Koordinierung aller Beteiligten\n\n"
+                 + "**Bewertung**\nReaktive Kommunikation.";
+  const T_SOLL   = "Timeline\n07.07. Weiterleitung an A. Liman\n"
+                 + "08.07. Koordinierung aller Beteiligten\n\n"
+                 + "Bewertung\nReaktive Kommunikation.";
+  const OHNE     = "Zeile eins\nZeile zwei\n\nNeuer Absatz";
+
+  const EDIT = '<div contenteditable="true">Alter Entwurf</div>';
+
+  // a) Mit Fett ueber insertHTML – der Weg des gemeldeten Falls.
+  {
+    const r = einfuegen17(EDIT, TIMELINE, true);
+    check(r.text === T_SOLL,
+          "insertHTML+fett: jede Zeile bleibt eine Zeile", JSON.stringify(r.text));
+    const zeilen = r.text.split("\n").filter((z) => z.trim());
+    check(zeilen.length === 5,
+          "es sind wirklich 5 Zeilen, kein Fliesstextblock", String(zeilen.length));
+    check(r.fett === 2, "und die zwei Fettstellen sind erhalten", String(r.fett));
+    check(/insertHTML\+fett/.test(r.weg),
+          "der Umbruch kostet die Rueckleseprobe NICHT ihren Weg", r.weg);
+  }
+
+  // b) Derselbe Text, aber der Editor nimmt execCommand nicht an (Knotenweg).
+  {
+    const r = einfuegen17(EDIT, TIMELINE, false);
+    check(r.text === T_SOLL, "Knotenweg: dieselben Zeilen", JSON.stringify(r.text));
+    check(r.fett === 2, "Knotenweg: Fett erhalten", String(r.fett));
+  }
+
+  /* c) ⚠ DIE RUECKLESEPROBE WAR DER ZWEITE HALBE FEHLER. `<p>a<br>b</p>` gibt
+   * als textContent "ab", die Probe kommt aber aus `klartext()` ("a\nb").
+   * Mit der alten Normierung (\s+ -> " ") fand sie sich nie wieder: der Weg
+   * haette sich fuer wirkungslos erklaert und waere auf insertText OHNE Fett
+   * gefallen – Auszeichnung verloren, obwohl alles angekommen war. */
+  {
+    const r = einfuegen17(EDIT, TIMELINE, true);
+    check(!/ohne Fett/.test(r.weg),
+          "kein Rueckfall auf 'insertText ohne Fett' wegen der <br>", r.weg);
+  }
+
+  // d) Ohne Fett, ohne execCommand – der Klartext-Rueckfall.
+  {
+    const r = einfuegen17(EDIT, OHNE, false);
+    check(r.text === OHNE, "Klartext-Rueckfall: Umbrueche erhalten",
+          JSON.stringify(r.text));
+    check(r.fett === 0, "und kein Fett, wo keines war", String(r.fett));
+  }
+
+  // e) Gegenrichtung: die LEERZEILE trennt weiterhin Absaetze.
+  {
+    const r = einfuegen17(EDIT, OHNE, false);
+    check(/\n\n/.test(r.text), "die Leerzeile bleibt eine Absatzgrenze",
+          JSON.stringify(r.text));
+    check(r.text.indexOf("Zeile eins Zeile zwei") < 0,
+          "und nichts wird zu einem Leerzeichen zusammengezogen", r.text);
+  }
+
+  // f) textarea: schrieb schon immer `\n` – das darf sich nicht aendern.
+  {
+    const r = einfuegen17('<textarea id="comment">alt</textarea>', TIMELINE, null);
+    check(r.text === T_SOLL, "textarea: unveraendert mit Umbruechen",
+          JSON.stringify(r.text));
+  }
+
+  // g) Der iframe-Editor (Jira Server mit Rich-Text) – beide Zweige.
+  for (const mitFett of [true, false]) {
+    const quelle = mitFett ? TIMELINE : OHNE;
+    const soll   = mitFett ? T_SOLL   : OHNE;
+    const dom = new JSDOM('<body><iframe id="ed"></iframe></body>',
+      { url: "https://jira.test/browse/A-1", runScripts: "outside-only" });
+    const w = dom.window, doc = w.document;
+    w.Element.prototype.getBoundingClientRect = () => ({ width: 300, height: 80 });
+    w.Element.prototype.scrollIntoView = function () {};
+    const idoc = doc.getElementById("ed").contentDocument;
+    idoc.body.setAttribute("contenteditable", "true");
+    idoc.body.textContent = "alter Entwurf";
+    idoc.execCommand = () => false;          // erzwingt den Knoten-/Rueckfallweg
+    ladeEinfuegen(w)(quelle, bloeckeAus(quelle));
+    check(gesehen(idoc.body) === soll,
+          "iframe-Editor" + (mitFett ? " mit" : " ohne") + " Fett: Umbrueche erhalten",
+          JSON.stringify(gesehen(idoc.body)));
+    w.close();
+  }
+
+  /* h) Der Editor-API-Weg (world: "MAIN"). Seine beiden Zweige lagen
+   * auseinander: `tm.editors[0]` machte seit jeher `\n` -> <br>, der
+   * `activeEditor`-Zweig darueber machte ein Leerzeichen daraus. Derselbe
+   * Knopf hatte damit je Editor-Variante eine andere Wirkung. */
+  {
+    const dom = new JSDOM("<body></body>", { runScripts: "outside-only" });
+    const w = dom.window;
+    let gesetzt = "";
+    w.tinymce = { activeEditor: { setContent: (h) => { gesetzt = h; } } };
+    ladeEinfuegen(w, "einfuegenUeberEditorApi")(OHNE);
+    const box = w.document.createElement("div");
+    box.innerHTML = gesetzt;
+    check(gesehen(box) === OHNE, "tinymce.setContent: Umbrueche erhalten",
+          JSON.stringify(gesehen(box)));
+    check(gesetzt.indexOf("Zeile eins Zeile zwei") < 0,
+          "und kein Leerzeichen an der Umbruchstelle", gesetzt);
+    w.close();
+  }
+
+  /* i) DIE REGEL, nicht eine Liste von Stellen: nirgends in `einfuegen.js`
+   * darf ein einfacher Umbruch zu einem Leerzeichen werden. Kommentare werden
+   * vorher entfernt – sonst liest der Waechter seine eigene Begruendung
+   * (die erklaert genau dieses Muster) und meldet einen Fehler, den es nicht
+   * gibt. `\n` -> "<br>" bleibt ausdruecklich erlaubt. */
+  {
+    const nackt = ohneKommentare(EINFUEGEN);
+    const treffer = nackt.match(/replace\(\s*\/\\n\/g\s*,\s*" "\s*\)/g) || [];
+    check(treffer.length === 0,
+          "kein `replace(/\\n/g, \" \")` mehr in einfuegen.js",
+          treffer.join(" | "));
+    check(/replace\(\s*\/\\n\/g\s*,\s*"<br>"\s*\)/.test(nackt),
+          "der <br>-Weg von tm.editors[0] steht weiterhin da");
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("18) Werkzeug-Bereiche je Vorlage (2026-09-01)");
+// ═══════════════════════════════════════════════════════════════════════════
+/* Ein Administrator schaltet lesende Bereiche frei, der Benutzer hakt sie je
+ * VORLAGE an. Gemessen wird am echten DOM, nicht am Quelltext: gezeigt werden
+ * darf nur, was FREIGESCHALTET ist – ein Haken, den der Server abweist, ist
+ * eine Zusage, die nicht gilt. */
+{
+  const { teile, drin } = popupTeile(
+    ['bereicheZeichnen', 'bereicheGewaehlt', 'bereichsNamen',
+     'vorlageInsFormular'], []);
+  check(drin.has('bereicheZeichnen') && drin.has('bereicheGewaehlt'),
+        'popup.js hat bereicheZeichnen() und bereicheGewaehlt()');
+  const koerper = teile.join('\n');
+
+  const lauf = (katalog, vorlage) => {
+    const dom = new JSDOM(POPUP_HTML, { url: 'https://x.test/',
+                                        runScripts: 'outside-only' });
+    const w = dom.window;
+    try {
+      const f = new w.Function('katalog', 'vorlage', `
+        const $ = (id) => document.getElementById(id);
+        let _bereiche = katalog;
+        let _vorlBearbeitet = "";
+        /* Modul-Variable des wandernden Formulars: vorlageInsFormular ruft
+         * formPlatz, und ohne sie WIRFT der Lauf statt fehlzuschlagen. */
+        let _formHeimat = null;
+` + koerper + `
+        vorlageInsFormular(vorlage, false);
+        const kaesten = Array.from(
+          document.querySelectorAll("#vorl-bereiche input[data-ber]"));
+        return JSON.stringify({
+          versteckt: $("vorl-ber-zeile").hidden,
+          ids: kaesten.map((c) => c.dataset.ber),
+          an: kaesten.filter((c) => c.checked).map((c) => c.dataset.ber),
+          gewaehlt: bereicheGewaehlt(),
+          namen: bereichsNamen(vorlage ? vorlage.bereiche : []),
+          // Fremdtext darf nie als Markup ankommen.
+          fremd: document.querySelectorAll("#vorl-bereiche script, #vorl-bereiche img").length,
+          text: $("vorl-bereiche").textContent,
+        });`);
+      return JSON.parse(f(katalog, vorlage));
+    } finally { w.close(); }
+  };
+
+  const K = [
+    { id: 'wissen', name: 'Wissensdatenbank (lesend)', hinweis: 'Eigene Unterlagen.',
+      freigegeben: true },
+    { id: 'fach', name: 'Interne Fachsysteme (lesend)', hinweis: 'Nur lesend.',
+      freigegeben: false },
+  ];
+
+  // (a) Nichts freigeschaltet -> der Block bleibt weg.
+  let r = lauf([{ id: 'wissen', name: 'W', hinweis: '', freigegeben: false }], null);
+  check(r.versteckt === true,
+        'ohne Freigabe bleibt der ganze Block versteckt');
+  check(r.ids.length === 0, 'und es entsteht kein einziges Kaestchen');
+
+  // (b) Gar kein Katalog (aelterer Server) -> ebenfalls weg, kein Fehler.
+  r = lauf([], null);
+  check(r.versteckt === true && r.ids.length === 0,
+        'ein aelterer Server ohne Katalog aendert nichts');
+
+  // (c) Freigeschaltet -> nur das Freigegebene, ungehakt.
+  r = lauf(K, null);
+  check(r.versteckt === false, 'mit Freigabe erscheint der Block');
+  check(r.ids.join(',') === 'wissen',
+        'gezeigt wird NUR der freigeschaltete Bereich', r.ids.join(','));
+  check(r.an.length === 0, '"Neu" faengt ohne Haken an (fail-closed)');
+  check(r.text.indexOf('Eigene Unterlagen.') >= 0,
+        'Name und Hinweis kommen aus dem Katalog des Servers');
+
+  // (d) Bearbeiten -> die Haken der Vorlage stehen.
+  r = lauf(K, { id: 'v1', name: 'X', text: 'y', bereiche: ['wissen'] });
+  check(r.an.join(',') === 'wissen' && r.gewaehlt.join(',') === 'wissen',
+        'beim Bearbeiten sind die Bereiche der Vorlage angehakt');
+
+  // (e) EIN NICHT MEHR FREIGEGEBENER Bereich verschwindet – und wird auch
+  //     nicht als Marke behauptet. Er wirkt nicht mehr (der Server prueft zur
+  //     Laufzeit), eine Anzeige dafuer waere eine Faehigkeit, die es nicht gibt.
+  r = lauf(K, { id: 'v2', name: 'X', text: 'y', bereiche: ['wissen', 'fach'] });
+  check(r.ids.join(',') === 'wissen',
+        'ein zurueckgenommener Bereich taucht im Formular nicht auf');
+  check(r.namen === 'Wissensdatenbank (lesend)',
+        'und die Marke nennt nur die WIRKSAMEN Bereiche', r.namen);
+  r = lauf(K, { id: 'v3', name: 'X', text: 'y', bereiche: ['fach'] });
+  check(r.namen === '', 'ohne wirksamen Bereich gibt es keine Marke');
+
+  // (f) Einschleusen: der Katalog kommt vom Server, aber diese Datei fasst
+  //     keinen Fremdtext per innerHTML an.
+  r = lauf([{ id: 'wissen', name: '<img src=x onerror=1>', hinweis: '<script>x</script>',
+              freigegeben: true }], null);
+  check(r.fremd === 0, 'Katalogtexte erzeugen kein Markup (textContent)');
+}
+
+/* Das Speichern schickt die Bereiche IMMER mit – auch die leere Liste. Ein
+ * fehlendes Feld heisst am Server "unveraendert" (damit eine aeltere
+ * Erweiterung nichts loescht); waere es hier weggelassen, liesse sich ein Haken
+ * nie wieder abwaehlen. */
+check(/bereiche: bereicheGewaehlt\(\)/.test(POPUP_JS),
+      'das Speichern einer Vorlage schickt die Bereiche mit');
+/* Die Kaestchen sind <input>, keine <button> – die Ticket-Sperre fasst sie
+ * also nicht an, und das ist richtig: die Vorlagen-Pflege braucht kein Ticket
+ * (die Box traegt ohnehin `data-ohne-ticket`). */
+check(/data-ohne-ticket/.test(
+        POPUP_HTML.slice(POPUP_HTML.indexOf('id="vorlagen-box"') - 40,
+                         POPUP_HTML.indexOf('id="vorlagen-box"') + 40)),
+      'die Vorlagen-Box bleibt von der Ticket-Sperre ausgenommen');
+/* Der Klassenname der Kaestchen-Zeile darf nicht so heissen wie der Container:
+ * zwei Dinge mit demselben Namen sind beim Debuggen kaum zu unterscheiden. */
+check(/class="vorl-ber-opt"|"vorl-ber-opt"/.test(POPUP_JS)
+      && /\.vorl-ber-opt/.test(POPUP_CSS),
+      'die Kaestchen-Zeile hat eine eigene Klasse, und das CSS kennt sie');
+/* `.vorl-zeile > span` verteilt den Platz mit flex:1 1 auto – jede Marke in
+ * der Zeile braucht ausdruecklich 0 0 auto, sonst halbiert sie den Namen.
+ * Geprueft als REGEL ueber alle Marken der Zeile: die Art-Marke kam 2026-09-02
+ * dazu, und eine Aufzaehlung haette genau sie fehlen lassen. */
+for (const kl of ['vorl-ber', 'vorl-art']) {
+  const re = new RegExp('\\.vorl-zeile \\.' + kl + ' \\{[^}]*flex: 0 0 auto');
+  check(re.test(POPUP_CSS),
+        'die Marke .' + kl + ' verdraengt den Namen nicht (flex: 0 0 auto)');
+}
+/* Und die Zeile selbst ist der Flex-Container, NICHT das <li>: nur so kann das
+ * Bearbeiten-Formular unter seiner Zeile stehen statt daneben. */
+check(/\.vorl-zeile \{[^}]*display: flex/.test(POPUP_CSS),
+      '.vorl-zeile ist der Flex-Container');
+check(!/\.vorl-liste li \{[^}]*display: flex/.test(POPUP_CSS),
+      'das <li> ist es ausdruecklich nicht (sonst landet das Formular daneben)');
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("19) Die Vorlage ist die Aktion (2026-09-02)");
+// ═══════════════════════════════════════════════════════════════════════════
+/* Vorgabe des Nutzers: "'Zusammenfassen' durch ein 'Starten' Dreieck ersetzen.
+ * Das neue Symbol liegt dann links vom pulldown 'Vorlage' und fuehrt die
+ * gewaehlte Vorlage aus" – und "die Aktion hinter 'Antwort vorschlagen'" wird
+ * ebenfalls eine Vorlage.
+ *
+ * WAS HIER HAENGT, IST MEHR ALS EIN KNOPF: aus zwei Aktionen mit je eigenem
+ * Prompt wird EINE, deren Wirkung an der ART der Vorlage haengt. Verwechselt
+ * sie sich, entsteht statt einer internen Zusammenfassung ein Text, der an
+ * einen KUNDEN geht (oder umgekehrt). Deshalb wird die Kette ausgefuehrt und
+ * nicht am Quelltext abgelesen.
+ */
+
+// ── a) Der Startknopf: EINER, links vom Pulldown, mit Symbol ─────────────
+{
+  const zeile = (POPUP_HTML.match(
+    /<div class="feld-zeile">[\s\S]*?<\/div>/) || [""])[0];
+  check(/id="btn-start"/.test(zeile) && /id="f-vorlage"/.test(zeile),
+        "Startknopf und Vorlagen-Pulldown stehen in EINER Zeile");
+  /* LINKS DAVON – Vorgabe des Nutzers, und im Markup ist die Reihenfolge die
+   * Leserichtung: erst starten, dann waehlen, dann verwalten. */
+  check(zeile.indexOf('id="btn-start"') < zeile.indexOf('id="f-vorlage"')
+        && zeile.indexOf('id="f-vorlage"') < zeile.indexOf('id="btn-vorlagen"'),
+        "der Startknopf links, dann die Auswahl, dann das Zahnrad");
+
+  const knopf = (POPUP_HTML.match(
+    /<button[^>]*id="btn-start"[\s\S]*?<\/button>/) || [""])[0];
+  /* INLINE-SVG, kein Zeichen: ▶ (U+25B6) wird je nach System als farbiges
+   * Emoji gerendert und folgt dann keinem Thema – dieselbe Begruendung wie
+   * beim Muelleimer, und Projektregel. */
+  check(/<svg/.test(knopf) && /<polygon/.test(knopf),
+        "das Dreieck ist ein Inline-SVG");
+  check(!/[▶►➤]/u.test(knopf), "und kein Emoji-Zeichen", knopf.slice(0, 80));
+  check(/fill="currentColor"/.test(knopf),
+        "es folgt der Schriftfarbe des Knopfes (Thema hell und dunkel)");
+  check(/aria-hidden="true"/.test(knopf),
+        "das SVG selbst ist fuer Hilfsmittel unsichtbar - die Aussage steht im "
+        + "aria-label des Knopfes");
+  /* Ein Knopf OHNE Text braucht eine Beschriftung, sonst ist er fuer
+   * Hilfsmittel ein leerer Knopf. */
+  check(/aria-label="[^"]+"/.test(knopf) && /title="[^"]+"/.test(knopf),
+        "er traegt title UND aria-label");
+  check(/class="[^"]*haupt/.test(knopf),
+        "und ist als Hauptaktion gestaltet (gefuellte Flaeche)");
+  check(/button\.ico-start \{[^}]*flex: 0 0 auto/.test(POPUP_CSS),
+        "CSS: er teilt sich den Platz NICHT mit dem Auswahlfeld");
+
+  /* ── DER ERSTE EINTRAG NENNT DIE AKTION (Vorgabe 2026-09-02) ───────────
+   * Bis 0.8.3 hiess er "Ohne Vorlage" - eine Aussage darueber, was NICHT
+   * gewaehlt ist - und ein Satz darunter musste erklaeren, was dabei
+   * herauskommt. Beides ist ersetzt durch EIN Wort, das die Aktion nennt.
+   * Geprueft wird die EIGENSCHAFT, nicht der Wortlaut: der Wert bleibt leer
+   * (der eingebaute Prompt), die Beschriftung ist ein Verb, und der erklaerende
+   * Satz darf nicht zurueckkommen. */
+  const selBlock = (POPUP_HTML.match(/<select id="f-vorlage">[\s\S]*?<\/select>/)
+                    || [""])[0];
+  const leerHtml = (selBlock.match(/<option value="">([^<]*)<\/option>/)
+                    || ["", ""])[1].trim();
+  check(leerHtml === "Zusammenfassen",
+        "der erste Eintrag heisst 'Zusammenfassen' und nennt damit die Aktion",
+        leerHtml);
+  check(!/Ohne Vorlage|Standard/.test(leerHtml),
+        "und weder 'Ohne Vorlage' (sagt nur, was fehlt) noch 'Standard' "
+        + "(hiesse zweierlei, seit eine Vorlage als Standard markierbar ist)");
+  check(/<option value="">/.test(selBlock),
+        "der WERT bleibt leer - dahinter steckt weiter der eingebaute Prompt");
+
+  /* ⚠ DRIFT-SCHRANKE: derselbe Text steht in popup.js::vorlagenZeichnen, und
+   * DER gewinnt (die Liste wird beim Laden neu aufgebaut). Laufen sie
+   * auseinander, wechselt die Beschriftung nach dem ersten Laden vor den Augen
+   * des Benutzers - ein Fehler, den niemand einem Markup zuordnet. */
+  const leerJs = ((schneidePopup("vorlagenZeichnen") || "")
+                  .match(/ohne\.textContent\s*=\s*"([^"]*)"/) || ["", ""])[1];
+  check(leerJs === leerHtml,
+        "popup.js setzt denselben Text wie das Markup (Drift-Schranke)",
+        "html=" + leerHtml + " js=" + leerJs);
+
+  /* Der Satz "Das Dreieck fuehrt die gewaehlte Vorlage aus. Ohne Vorlage
+   * entsteht eine Zusammenfassung des Tickets." ist mit der Umbenennung
+   * obsolet und ausdruecklich ENTFERNT - ein Hinweis, der wiederholt, was der
+   * Eintrag daneben schon sagt, ist Rauschen. */
+  check(!/id="start-hinweis"/.test(POPUP_HTML),
+        "der erklaerende Satz darunter ist weg (obsolet)");
+  /* ⚠ OHNE KOMMENTARE GEMESSEN - der Waechter hat beim ersten Lauf seine
+   * EIGENE Begruendung gelesen: die Kommentare oben zitieren den alten Namen,
+   * um die Umbenennung zu erklaeren. Geprueft wird, was ein Benutzer SIEHT.
+   * (Diese Falle ist im Register vermerkt und trotzdem wieder zugeschnappt.) */
+  const htmlOhneKomm = POPUP_HTML.replace(/<!--[\s\S]*?-->/g, "");
+  check(htmlOhneKomm.length < POPUP_HTML.length - 500,
+        "Positivkontrolle: die Kommentare wurden wirklich entfernt",
+        (POPUP_HTML.length - htmlOhneKomm.length) + " Zeichen");
+  check(!/Ohne Vorlage/.test(htmlOhneKomm),
+        "und im sichtbaren Text kommt 'Ohne Vorlage' nicht mehr vor");
+}
+
+// ── b) Der Titel folgt der gewaehlten Vorlage – AUSGEFUEHRT ─────────────
+/* ⚠ EIN KNOPF, DER ZWEI VERSCHIEDENE DINGE TUN KANN, MUSS SAGEN WELCHES.
+ * Gemessen, nicht gelesen: die haeufigste Ursache fuer eine falsche Auskunft
+ * ist, dass der Titel beim Wechsel der Vorlage nicht nachgezogen wird. */
+{
+  const { teile, drin } = popupTeile(["startTitelSetzen", "vorlagenArt",
+                                      "vorlagenName"], []);
+  check(drin.has("startTitelSetzen") && drin.has("vorlagenArt"),
+        "popup.js hat startTitelSetzen() und vorlagenArt()");
+
+  const lauf = (wahl) => {
+    const dom = new JSDOM(POPUP_HTML, { url: "https://x.test/",
+                                        runScripts: "outside-only" });
+    const w = dom.window;
+    try {
+      const f = new w.Function("wahl", `
+        const $ = (id) => document.getElementById(id);
+        let _vorlagen = {
+          global: [{ id: "g1", name: "Kurz", art: "zusammenfassung" },
+                   { id: "g2", name: "Antwort an den Melder", art: "antwort" }],
+          eigene: [{ id: "e1", name: "Ohne Art" }],
+          darf_global: true, standard: "",
+        };
+` + teile.join("\n") + `
+        for (const v of _vorlagen.global.concat(_vorlagen.eigene)) {
+          const o = document.createElement("option");
+          o.value = v.id; o.textContent = v.name;
+          $("f-vorlage").appendChild(o);
+        }
+        $("f-vorlage").value = wahl;
+        startTitelSetzen();
+        return JSON.stringify({
+          titel: $("btn-start").title,
+          aria: $("btn-start").getAttribute("aria-label"),
+          art: vorlagenArt(wahl),
+        });`);
+      return JSON.parse(f(wahl));
+    } finally { w.close(); }
+  };
+
+  let r = lauf("");
+  check(r.art === "zusammenfassung", "leere Auswahl: Zusammenfassung");
+  /* Der Titel nennt das ERGEBNIS, nicht das Fehlen einer Vorlage - seit der
+   * Eintrag "Zusammenfassen" heisst, waere "ohne Vorlage" im Titel ein
+   * Widerspruch zur Beschriftung daneben. */
+  check(/Zusammenfassung/.test(r.titel) && !/ohne Vorlage/.test(r.titel),
+        "und der Titel nennt das Ergebnis, nicht das Fehlen einer Vorlage",
+        r.titel);
+  check(r.aria === r.titel, "aria-label und title sind identisch");
+
+  /* ⚠ „ANTWORT ERSTELLEN" IN JEDEM FALL – Vorgabe des Nutzers 2026-09-02.
+   * „Antwort" ist die Antwort DER ERWEITERUNG auf den Klick; was inhaltlich
+   * herauskommt, nennt der Titel dahinter (Vorlagenname + Art). Bis dahin hiess
+   * er „Zusammenfassung erstellen" bzw. „Antwortentwurf erstellen". */
+  check(/^Antwort erstellen/.test(r.titel),
+        "der Titel beginnt mit „Antwort erstellen“", r.titel);
+
+  r = lauf("g1");
+  check(/^Antwort erstellen/.test(r.titel) && /Kurz/.test(r.titel),
+        "Zusammenfassungs-Vorlage: Titel nennt sie beim Namen", r.titel);
+  check(/\(Zusammenfassung\)/.test(r.titel),
+        "und sagt, dass eine Zusammenfassung entsteht", r.titel);
+
+  r = lauf("g2");
+  check(r.art === "antwort" && /Antwort an den Melder/.test(r.titel),
+        "Antwort-Vorlage: der Titel sagt, dass sie an den Melder geht",
+        r.titel);
+
+  /* ⚠ FAIL-SAFE IN DIE STRENGERE RICHTUNG. Eine Vorlage ohne Feld `art` (jede,
+   * die vor dem 2026-09-02 entstand) und eine unbekannte Kennung gelten als
+   * Zusammenfassung – NIE als Antwort. Eine Zusammenfassung liest ein
+   * Mitarbeiter, ein Antworttext geht an einen Kunden. */
+  check(lauf("e1").art === "zusammenfassung",
+        "eine Vorlage ohne Art gilt als Zusammenfassung (Altbestand)");
+  check(lauf("gibtsnicht").art === "zusammenfassung",
+        "eine unbekannte Kennung ebenfalls (fail-safe)");
+
+  // Der Handler faehrt genau diese Art.
+  const h = (POPUP_JS.match(
+    /\$\("btn-start"\)\.addEventListener\([\s\S]*?\);/) || [""])[0];
+  check(/auswerten\(vorlagenArt\(\$\("f-vorlage"\)\.value\)\)/.test(h),
+        "der Startknopf faehrt die Art der gewaehlten Vorlage", h.trim());
+  // Und ein Wechsel im Pulldown zieht den Titel nach.
+  const ch = (POPUP_JS.match(
+    /\$\("f-vorlage"\)\.addEventListener\("change",[\s\S]*?\}\);/) || [""])[0];
+  check(/startTitelSetzen\(\)/.test(ch),
+        "ein Wechsel der Vorlage zieht den Titel nach", ch.trim());
+}
+
+// ── c) Das Bearbeiten-Formular steht UNTER seiner Zeile – AUSGEFUEHRT ────
+/* Vorgabe: "Klick auf 'Bearbeiten' muss die Bearbeitung direkt unterhalb des
+ * gewaehlten Eintrags anzeigen, nicht am Ende der Liste."
+ *
+ * GEMESSEN WIRD DIE EIGENSCHAFT: ist `#vorl-form` ein Nachfahre GENAU des
+ * angeklickten `<li>`? Eine Suche nach `appendChild` im Quelltext bliebe wahr,
+ * wenn das Formular unter der falschen Zeile landet.
+ *
+ * ⚠ UND DIE EIGENTLICHE FALLE IST DER NEUAUFBAU: `liste.innerHTML = ""` wuerde
+ * ein eingehaengtes Formular MITLOESCHEN. Danach gaebe es kein Namensfeld,
+ * keinen Speichern-Knopf und keine Fehlermeldung, die das erklaert. */
+{
+  const { teile, drin } = popupTeile(
+    ["vorlagenZeichnen", "vorlageInsFormular"],
+    ["standardSetzen", "vorlageLoeschen", "frageJaNein",
+     "autoOptionenZeichnen", "startTitelSetzen", "bereicheZeichnen"]);
+  check(drin.has("formPlatz"),
+        "der Schnitt zieht formPlatz mit (das Formular wandert)",
+        [...drin].join(","));
+
+  const lauf = (tun) => {
+    const dom = new JSDOM(POPUP_HTML, { url: "https://x.test/",
+                                        runScripts: "outside-only" });
+    const w = dom.window;
+    try {
+      const f = new w.Function("tun", `
+        const $ = (id) => document.getElementById(id);
+        let _vorlBeruehrt = false, _bereiche = [], _formHeimat = null;
+        let _vorlBearbeitet = "";
+        let _key = "ABC-1", _laeuft = false;
+        let _vorlagen = {
+          global: [{ id: "g1", name: "Eins", art: "zusammenfassung" },
+                   { id: "g2", name: "Zwei", art: "antwort" }],
+          eigene: [{ id: "e1", name: "Drei", art: "zusammenfassung" }],
+          darf_global: true, standard: "",
+        };
+        function standardSetzen() {}
+        function vorlageLoeschen() {}
+        function frageJaNein() { return Promise.resolve(true); }
+        function autoOptionenZeichnen() {}
+        function startTitelSetzen() {}
+        function bereicheZeichnen() {}
+        function knoepfeAktualisieren() {}
+` + teile.join("\n") + `
+        vorlagenZeichnen();
+        const zeile = (vid) => document.querySelector(
+          '#vorl-liste li[data-vid="' + vid + '"]');
+        // Der Bearbeiten-Knopf DIESER Zeile - gesucht ueber seine Aufgabe,
+        // nicht ueber einen Index (Register).
+        const bearb = (vid) => Array.from(
+          zeile(vid).querySelectorAll("button"))
+          .find((b) => b.title === "Bearbeiten");
+        if (tun.klick) bearb(tun.klick).click();
+        if (tun.neu) vorlageInsFormular(null, false);
+        if (tun.nochmal) vorlagenZeichnen();
+        const form = $("vorl-form");
+        const liWo = form && form.closest("li");
+        return JSON.stringify({
+          formDa: !!form,
+          felderDa: !!($("f-vorl-name") && $("f-vorl-art")
+                       && $("btn-vorl-speichern")),
+          unter: liWo ? liWo.dataset.vid : "",
+          nachZeile: !!(liWo && liWo.querySelector(".vorl-zeile")
+                        && liWo.querySelector(".vorl-zeile").compareDocumentPosition(form)
+                           & 4),
+          name: $("f-vorl-name").value,
+          art: $("f-vorl-art").value,
+          zeilen: document.querySelectorAll("#vorl-liste li").length,
+        });`);
+      return JSON.parse(f(tun));
+    } finally { w.close(); }
+  };
+
+  let r = lauf({});
+  check(r.zeilen === 3, "die Liste hat drei Zeilen", String(r.zeilen));
+  check(r.formDa && r.felderDa,
+        "Positivkontrolle: Formular und Felder sind ueberhaupt auffindbar "
+        + "(sonst waere jede Aussage darueber trivial)");
+  check(r.unter === "", "ohne Bearbeiten steht das Formular NICHT in der Liste");
+
+  r = lauf({ klick: "g2" });
+  check(r.unter === "g2",
+        "nach dem Klick auf Bearbeiten steht es unter GENAU dieser Zeile",
+        r.unter);
+  check(r.nachZeile === true,
+        "und zwar UNTERHALB des Zeileninhalts, nicht davor");
+  check(r.name === "Zwei", "das Formular ist mit dieser Vorlage gefuellt",
+        r.name);
+  check(r.art === "antwort", "samt ihrer Art", r.art);
+
+  r = lauf({ klick: "e1" });
+  check(r.unter === "e1", "auch bei einer eigenen Vorlage", r.unter);
+
+  // Ein zweiter Klick verschiebt es weiter - es bleibt EIN Container.
+  r = lauf({ klick: "g1" });
+  check(r.unter === "g1" && r.formDa,
+        "es ist immer dasselbe Formular, es wandert nur", r.unter);
+
+  /* ⚠ DER NEUAUFBAU. Genau hier haette `innerHTML = ""` das Formular
+   * mitgeloescht - und der Fehler waere STILL: die Felder fehlen, niemand
+   * sieht warum. */
+  r = lauf({ klick: "g2", nochmal: true });
+  check(r.formDa && r.felderDa,
+        "ein Neuaufbau der Liste loescht das Formular NICHT");
+  check(r.unter === "g2",
+        "und stellt es wieder unter seine Zeile", r.unter);
+
+  // "Neu" holt es an seinen Heimatplatz.
+  r = lauf({ klick: "g2", neu: true });
+  check(r.unter === "" && r.formDa,
+        "'Neu' holt es zurueck an den Heimatplatz (es gehoert dann zu keiner "
+        + "Zeile)");
+  check(r.name === "", "und leert die Felder", r.name);
+  check(r.art === "zusammenfassung",
+        "die Art faellt dabei auf die Vorgabe zurueck", r.art);
+
+  // CSS: es muss als zugehoerig ERKENNBAR sein, nicht nur da stehen.
+  check(/\.vorl-liste #vorl-form \{[^}]*border-left/.test(POPUP_CSS),
+        "CSS: in der Liste ist es sichtbar seiner Zeile zugeordnet");
+}
+
+// ── d) Die Art geht beim Speichern mit ──────────────────────────────────
+{
+  const sp = (POPUP_JS.match(
+    /\$\("btn-vorl-speichern"\)\.addEventListener\([\s\S]*?\n\}\);/) || [""])[0];
+  check(/art: \$\("f-vorl-art"\)\.value/.test(sp),
+        "der Speichern-Knopf schickt die Art mit");
+  /* IMMER, nicht nur wenn gesetzt: ein FEHLENDES Feld heisst am Server
+   * "unveraendert" (damit eine aeltere Erweiterung nichts umstellt) - dann
+   * liesse sich eine Antwort-Vorlage nie wieder zur Zusammenfassung machen. */
+  check(!/if \([^)]*f-vorl-art/.test(sp),
+        "und zwar bedingungslos - ein fehlendes Feld heisst am Server "
+        + "'unveraendert'");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("20) Nachbesserungen am Fenster (2026-09-02, zweite Runde)");
+// ═══════════════════════════════════════════════════════════════════════════
+/* Sechs Vorgaben des Nutzers, gemeldet nach der ersten Runde:
+ *   a) ein zweiter Klick auf "Bearbeiten" schliesst die Felder wieder
+ *   b) die Vorlagen-Verwaltung oeffnet DIREKT unter ihrem Knopf
+ *   c) ein "Reset" neben "Abmelden"
+ *   d) leeres Kommentarfeld -> Meldung (statt eines fremden Textes!)
+ *   e) der Tooltip des Dreiecks heisst "Antwort erstellen …"
+ *   f) der erzeugte Text steht direkt hinter dem Start-Hinweis
+ */
+
+// ── a) Bearbeiten ist ein UMSCHALTER – AUSGEFUEHRT ──────────────────────
+{
+  const { teile, drin } = popupTeile(
+    ["vorlagenZeichnen", "vorlageInsFormular", "vorlageFormularZu"],
+    ["standardSetzen", "vorlageLoeschen", "frageJaNein",
+     "autoOptionenZeichnen", "startTitelSetzen", "bereicheZeichnen"]);
+  check(drin.has("vorlageFormularZu"),
+        "popup.js hat vorlageFormularZu() – EIN Weg zum Schliessen");
+
+  const lauf = (klicks) => {
+    const dom = new JSDOM(POPUP_HTML, { url: "https://x.test/",
+                                        runScripts: "outside-only" });
+    const w = dom.window;
+    try {
+      const f = new w.Function("klicks", `
+        const $ = (id) => document.getElementById(id);
+        let _vorlBeruehrt = false, _bereiche = [], _formHeimat = null;
+        let _vorlBearbeitet = "";
+        let _key = "ABC-1", _laeuft = false;
+        let _vorlagen = {
+          global: [{ id: "g1", name: "Eins", art: "zusammenfassung" },
+                   { id: "g2", name: "Zwei", art: "antwort" }],
+          eigene: [], darf_global: true, standard: "",
+        };
+        function standardSetzen() {}
+        function vorlageLoeschen() {}
+        function frageJaNein() { return Promise.resolve(true); }
+        function autoOptionenZeichnen() {}
+        function startTitelSetzen() {}
+        function bereicheZeichnen() {}
+        function knoepfeAktualisieren() {}
+` + teile.join("\n") + `
+        vorlagenZeichnen();
+        const bearb = (vid) => Array.from(document.querySelector(
+          '#vorl-liste li[data-vid="' + vid + '"]').querySelectorAll("button"))
+          .find((b) => b.title === "Bearbeiten");
+        const spur = [];
+        for (const k of klicks) {
+          if (k === "neu") vorlageInsFormular(null, false);
+          else if (k === "zeichnen") vorlagenZeichnen();
+          else bearb(k).click();
+          const form = $("vorl-form");
+          const li = form.closest("li");
+          spur.push((form.hidden ? "zu" : "offen")
+                    + ":" + (li ? li.dataset.vid : "heim"));
+        }
+        return JSON.stringify({ spur, name: $("f-vorl-name").value });`);
+      return JSON.parse(f(klicks));
+    } finally { w.close(); }
+  };
+
+  /* ⚠ DAS FORMULAR IST ZU, BIS JEMAND BEARBEITET. Vorher standen die Felder
+   * immer da: beim Oeffnen der Verwaltung sah man ein leeres Formular ohne
+   * Bezug, und der zweite Klick auf ✎ tat nichts Sichtbares. */
+  check(JSON.parse(JSON.stringify(POPUP_HTML.includes('id="vorl-form" hidden'))),
+        "das Formular startet ZU (hidden im Markup)");
+
+  let r = lauf(["g1"]);
+  check(r.spur[0] === "offen:g1", "ein Klick oeffnet es unter seiner Zeile",
+        r.spur.join(" -> "));
+
+  r = lauf(["g1", "g1"]);
+  check(r.spur[1] === "zu:heim",
+        "ein ZWEITER Klick auf dieselbe Zeile schliesst es wieder "
+        + "(und holt es heim - sonst loescht der naechste Neuaufbau es mit)",
+        r.spur.join(" -> "));
+  check(r.name === "", "und leert die Felder", r.name);
+
+  r = lauf(["g1", "g2"]);
+  check(r.spur[1] === "offen:g2",
+        "ein Klick auf eine ANDERE Zeile verschiebt es dorthin (schliesst nicht)",
+        r.spur.join(" -> "));
+
+  r = lauf(["g1", "g1", "g1"]);
+  check(r.spur[2] === "offen:g1", "und ein dritter oeffnet wieder",
+        r.spur.join(" -> "));
+
+  // Neu oeffnet am Heimatplatz; ein Neuaufbau danach laesst es dort und ZU.
+  r = lauf(["neu"]);
+  check(r.spur[0] === "offen:heim", "'Neu' oeffnet am Heimatplatz");
+  r = lauf(["g1", "g1", "zeichnen"]);
+  check(r.spur[2] === "zu:heim",
+        "nach dem Schliessen bleibt es auch beim Neuaufbau zu", r.spur.join(" -> "));
+
+  /* „Neu" MUSS ausserhalb des Formulars liegen: sonst ist der Knopf mit dem
+   * Formular versteckt und es gibt keinen Weg, eine Vorlage anzulegen. */
+  const form = (POPUP_HTML.match(/<div id="vorl-form" hidden>[\s\S]*?<\/div><!-- \/vorl-form -->/) || [""])[0];
+  check(!!form, "der Formular-Container ist im Markup abgegrenzt");
+  check(form.indexOf('id="btn-vorl-neu"') < 0,
+        "'Neu' liegt AUSSERHALB des Formulars (sonst waere es mit ihm versteckt)");
+  check(form.indexOf('id="btn-vorl-speichern"') > 0
+        && form.indexOf('id="btn-vorl-abbrechen"') > 0,
+        "Speichern und Abbrechen liegen darin");
+  check(POPUP_HTML.indexOf('id="btn-vorl-neu"') > 0,
+        "und 'Neu' gibt es weiterhin");
+  // Register: wer einer Klasse `display` gibt, muss `[hidden]` mitnehmen.
+  check(/#vorl-form\[hidden\]\s*\{[^}]*display:\s*none/.test(cssOhne),
+        "CSS haelt das Verstecken strukturell (Register: [hidden] mitnehmen)");
+}
+
+/** Der Arbeitsbereich als Text - mit Kontrolle, dass der Schnitt wirklich sass. */
+function arbeitsbereich() {
+  const t = (POPUP_HTML.match(/<section id="bereich-arbeit"[\s\S]*?<\/section>/) || [""])[0];
+  check(t.length > 2000 && t.indexOf('id="btn-start"') > 0,
+        "Positivkontrolle: der Arbeitsbereich ist geschnitten",
+        String(t.length));
+  return t;
+}
+
+// ── b) Die Verwaltung oeffnet direkt unter ihrem Knopf ──────────────────
+{
+  const arbeit = arbeitsbereich();
+  const iZahnrad = arbeit.indexOf('id="btn-vorlagen"');
+  const iBox = arbeit.indexOf('id="vorlagen-box"');
+  const iWunsch = arbeit.indexOf('id="f-hinweis"');
+  const iUeberarb = arbeit.indexOf('id="btn-ueberarbeiten"');
+  const iAuto = arbeit.indexOf('id="f-auto"');
+  check(iZahnrad > 0 && iBox > iZahnrad,
+        "die Box steht hinter ihrem Knopf");
+  /* ⚠ UND VOR ALLEM ANDEREN. Sie lag hinter Zusatzwunsch, Ueberarbeiten-Knopf
+   * und Automatik – „Klick auf Vorlagen verwalten zeigt die Felder 4 Felder
+   * weiter". Gemessen wird die REIHENFOLGE, nicht ein Pixelabstand. */
+  check(iBox < iWunsch && iBox < iUeberarb && iBox < iAuto,
+        "und VOR Zusatzwunsch, Ueberarbeiten und Automatik",
+        [iBox, iWunsch, iUeberarb, iAuto].join("<"));
+}
+
+// ── c) Reset neben Abmelden ─────────────────────────────────────────────
+{
+  const kopf = (POPUP_HTML.match(/<header class="kopf">[\s\S]*?<\/header>/) || [""])[0];
+  check(/id="btn-reset"/.test(kopf), "der Reset-Knopf steht in der Kopfzeile");
+  /* SYMBOL STATT TEXT (Vorgabe 2026-09-02, zweite Runde) - und zwar das im
+   * Projekt etablierte "neu herstellen". Zwei Knoepfe mit Text passen neben
+   * Marke und Ticketnummer nicht in 380 px. */
+  {
+    const rk = (kopf.match(/<button[^>]*id="btn-reset"[\s\S]*?<\/button>/) || [""])[0];
+    check(/<svg/.test(rk), "und traegt ein Inline-SVG");
+    check(!/>\s*Reset\s*</.test(rk), "keinen Text mehr");
+    /* DASSELBE SYMBOL WIE IM HAUPTPROJEKT - sonst heisst dieselbe Handlung
+     * zweimal verschieden. Verglichen werden die Pfade. */
+    const set = fs.readFileSync(path.join(__dirname, "..", "frontend",
+                                          "settings.html"), "utf8");
+    const wa = (set.match(/id="btn-wa-reconnect"[\s\S]*?<\/svg>/) || [""])[0];
+    const pf = (t) => (t.match(/d="M[^"]+"/g) || []).join("|");
+    check(!!pf(wa) && pf(rk) === pf(wa),
+          "und zwar dasselbe wie btn-wa-reconnect im Hauptprojekt",
+          pf(rk) + "  gegen  " + pf(wa));
+    check(/aria-hidden="true"/.test(rk), "das SVG ist fuer Hilfsmittel unsichtbar");
+    /* ⚠ DER TITEL MUSS SAGEN, WAS BLEIBT. Ein Kreispfeil neben „Abmelden"
+     * sieht sonst wie „alles zuruecksetzen" aus - und wer seine Anmeldung
+     * verliert, weil er die Anzeige leeren wollte, drueckt ihn nie wieder. */
+    const t = (rk.match(/title="([^"]*)"/) || ["", ""])[1];
+    check(/Anmeldung bleibt/.test(t), "der Titel sagt, dass die Anmeldung bleibt", t);
+    check(/Text/.test(t) && /Vorlagen/.test(t),
+          "und was zurueckgesetzt wird", t);
+  }
+  check(kopf.indexOf('id="btn-reset"') < kopf.indexOf('id="btn-abmelden"'),
+        "links von Abmelden - die harmlosere Wahl steht vor der endgueltigen");
+  check(/id="btn-reset"[^>]*hidden/.test(kopf) || /hidden/.test(
+        (kopf.match(/<button[^>]*id="btn-reset"[\s\S]*?>/) || [""])[0]),
+        "und ist ohne Anmeldung verborgen (es gibt dann keine Arbeitsflaeche)");
+  const z = schneidePopup("zeige") || "";
+  check(/reset/.test(z), "zeige() schaltet ihn mit der Anmeldung",
+        z.replace(/\s+/g, " ").slice(0, 120));
+
+  const h = (POPUP_JS.match(/\$\("btn-reset"\)\.addEventListener\([\s\S]*?\n\}\);/) || [""])[0];
+  check(!!h, "und er ist verdrahtet");
+  const ho = ohneKommentare(h);
+  /* WAS ES ZURUECKSETZT: Text und Gedaechtnis (felderLeeren raeumt beides ab),
+   * die Verwaltung, die Vorlagenwahl und den Ring der Automatik. */
+  for (const [muster, was] of [
+    [/felderLeeren\(/, "den angezeigten UND gemerkten Text"],
+    [/vorlageFormularZu\(/, "das Bearbeiten-Formular"],
+    [/vorlagen-box"\)\.hidden = true/, "die geoeffnete Verwaltung"],
+    [/_vorlBeruehrt = false/, "die Vorlagenwahl (zurueck auf den Standard)"],
+    [/auto_gelaufen: \[\]/, "den Ring der Automatik"],
+  ]) {
+    check(muster.test(ho), "Reset raeumt " + was + " ab");
+  }
+  /* ⚠ UND WAS ES NICHT ANFASST. Ein Reset, der ungefragt die Anmeldung, die
+   * Adresse, die Ansicht oder die Automatik-EINSTELLUNG verwirft, ist ein
+   * Datenverlust mit freundlichem Namen - fuer die Anmeldung gibt es den Knopf
+   * daneben. */
+  for (const [muster, was] of [
+    [/art: "abmelden"/, "die Anmeldung"],
+    [/basis:/, "die Serveradresse"],
+    [/ansicht/, "die Ansicht (Popup/Leiste)"],
+    [/auto_vorlage/, "die Automatik-Einstellung"],
+  ]) {
+    check(!muster.test(ho), "Reset fasst " + was + " NICHT an");
+  }
+}
+
+// ── d) LEERES Kommentarfeld: Meldung statt fremdem Text – AUSGEFUEHRT ───
+/* ⚠ DER SCHWERSTE DER SECHS PUNKTE, und er war mehr als eine fehlende
+ * Meldung. `[contenteditable='true']` als letzter Selektor trifft JEDES
+ * editierbare Element - bei Jira ist unter anderem die BESCHREIBUNG des
+ * Tickets inline bearbeitbar. Gemessen: leeres Kommentarfeld plus ein solches
+ * Element ergab `ok:true` mit dem TICKETTEXT als "Entwurf". Der Benutzer
+ * bekam eine "ueberarbeitete Antwort" aus der Beschreibung - und die haette er
+ * als Kommentar an den KUNDEN uebernehmen koennen.
+ */
+{
+  const src = fs.readFileSync(path.join(ADDON, "einfuegen.js"), "utf8");
+  const fn = (src.match(/export function leseAusJira\(\)[\s\S]*?\n\}/) || [""])[0]
+    .replace("export ", "");
+  check(!!fn, "einfuegen.js hat leseAusJira()");
+
+  const lese = (markup) => {
+    const dom = new JSDOM("<body>" + markup + "</body>",
+                          { runScripts: "outside-only" });
+    const w = dom.window;
+    try {
+      /* jsdom rechnet kein Layout: `getBoundingClientRect` liefert ueberall 0,
+       * und die Sichtbarkeitspruefung verwuerfe damit JEDES Feld - der Test
+       * liefe durch einen Zweig, den es im Browser nicht gibt. Deshalb
+       * gestellt. */
+      w.Element.prototype.getBoundingClientRect = function () {
+        return { width: 200, height: 40, top: 0, left: 0, right: 200, bottom: 40 };
+      };
+      return new w.Function("return (" + fn + ")();")();
+    } finally { w.close(); }
+  };
+
+  const KOMM = '<div class="jira-editor-container"><div contenteditable="true">';
+  let r = lese(KOMM + "</div></div>");
+  check(r.ok === false && r.leer === true,
+        "leeres Kommentarfeld: kein Text, sondern die Auskunft 'leer'");
+  check(/Kommentarfeld ist leer/.test(r.fehler || ""),
+        "und die Meldung sagt genau das", r.fehler);
+
+  // DER GEMELDETE FALL.
+  r = lese(KOMM + '</div></div>'
+           + '<div contenteditable="true">Beschreibung des Tickets</div>');
+  check(r.ok === false && r.leer === true,
+        "leeres Kommentarfeld NEBEN einem fremden Editor: weiterhin 'leer' - "
+        + "der fremde Text wird NICHT als Entwurf genommen",
+        JSON.stringify(r.text || r.fehler || "").slice(0, 60));
+
+  r = lese('<textarea id="comment"></textarea>'
+           + '<div contenteditable="true">Beschreibung</div>');
+  check(r.ok === false && r.leer === true,
+        "dasselbe fuer eine leere textarea");
+
+  // Gegenrichtung: das Kommentarfeld MIT Text wird weiterhin gelesen.
+  r = lese(KOMM + "mein Entwurf</div></div>");
+  check(r.ok === true && r.text === "mein Entwurf",
+        "ein gefuelltes Kommentarfeld wird unveraendert gelesen", r.text);
+  check(!r.unsicher, "und gilt als sicher");
+
+  /* Das Auffangnetz BLEIBT - fuer unbekannte Jira-Varianten. Es markiert
+   * seinen Fund aber als unsicher, und das Fenster fragt dann nach. */
+  r = lese('<div contenteditable="true">irgendein Text</div>');
+  check(r.ok === true && r.unsicher === true,
+        "ohne erkanntes Kommentarfeld greift das Auffangnetz - als UNSICHER",
+        JSON.stringify(r));
+
+  const h = (POPUP_JS.match(
+    /\$\("btn-ueberarbeiten"\)\.addEventListener\([\s\S]*?\n\}\);/) || [""])[0];
+  const ho = ohneKommentare(h);
+  check(/r\.unsicher/.test(ho) && /frageJaNein\(/.test(ho),
+        "und das Fenster fragt vor dem Lauf nach");
+  check(/melde\(/.test(ho) && /r\.fehler/.test(ho),
+        "im Fehlerfall wird gemeldet, was der Fall war");
+}
+
+// ── e/f) Tooltip und Platz des Ergebnisses ──────────────────────────────
+{
+  const knopf = (POPUP_HTML.match(/<button[^>]*id="btn-start"[\s\S]*?>/) || [""])[0];
+  check(/title="Antwort erstellen"/.test(knopf),
+        "die Vorgabe im Markup heisst 'Antwort erstellen'", knopf.slice(0, 90));
+  const st = schneidePopup("startTitelSetzen") || "";
+  check(/Antwort erstellen/.test(st) && !/"Zusammenfassung erstellen/.test(st),
+        "und popup.js setzt keinen 'Zusammenfassung erstellen'-Titel mehr");
+
+  const arbeit = arbeitsbereich();
+  /* ⚠ ANKER IST DIE VORLAGEN-ZEILE, nicht mehr der Hinweissatz: der ist mit
+   * der Umbenennung des ersten Eintrags entfallen (Vorgabe 2026-09-02).
+   * Die Aussage bleibt dieselbe - das Ergebnis erscheint direkt hinter der
+   * Zeile, in der man die Auswertung startet. */
+  const iHinweis = arbeit.indexOf('id="f-vorlage"');
+  const iErg = arbeit.indexOf('id="ergebnis"');
+  const iWunsch = arbeit.indexOf('id="f-hinweis"');
+  const iUeberarb = arbeit.indexOf('id="btn-ueberarbeiten"');
+  const iAuto = arbeit.indexOf('id="f-auto"');
+  check(iHinweis >= 0, "die Vorlagen-Zeile ist der Anker der Reihenfolge");
+  check(iErg > iHinweis, "das Ergebnis steht hinter der Vorlagen-Zeile");
+  /* ⚠ UND VOR Ueberarbeiten und Automatik: „der generierte Text soll direkt
+   * hinter 'das Dreieck fuehrt die gewuenschte …' erscheinen".
+   * DER ZUSATZWUNSCH LIEGT DAZWISCHEN (Vorgabe 2026-09-02, zweite Runde): er
+   * wird VOR dem Klick gefuellt - hinter dem Ergebnisfeld stand er dort, wo
+   * man ihn erst liest, wenn es zu spaet ist. Leserichtung: waehlen,
+   * praezisieren, starten, Ergebnis. */
+  check(iWunsch > iHinweis && iWunsch < iErg,
+        "der Zusatzwunsch steht zwischen Vorlagen-Zeile und Ergebnis",
+        [iHinweis, iWunsch, iErg].join("<"));
+  check(iErg < iUeberarb && iErg < iAuto,
+        "und das Ergebnis VOR Ueberarbeiten und Automatik",
+        [iHinweis, iWunsch, iErg, iUeberarb, iAuto].join("<"));
+  // Die Rueckfrage gehoert zum Einfuegen und wandert mit.
+  check(arbeit.indexOf('id="ja-nein"') > iErg
+        && arbeit.indexOf('id="ja-nein"') < iUeberarb,
+        "die Einfuege-Rueckfrage steht beim Ergebnis");
+
+  /* ── DER TRENNSTRICH (Vorgabe 2026-09-02) ────────────────────────────────
+   * Oben EINE Aufgabe (Vorlage starten, Ergebnis uebernehmen), darunter eine
+   * ANDERE (den eigenen Entwurf ueberarbeiten lassen) - mit eigener
+   * Voraussetzung. Ohne Linie liest sich beides als eine Reihe von Knoepfen,
+   * die dasselbe tun. */
+  const iAbschnitt = arbeit.indexOf('class="abschnitt"');
+  check(iAbschnitt > iErg && iAbschnitt < iUeberarb,
+        "vor dem Ueberarbeiten-Knopf beginnt ein eigener Abschnitt",
+        [iErg, iAbschnitt, iUeberarb].join("<"));
+  check(/\.abschnitt \{[^}]*border-top:\s*1px solid var\(--rand\)/.test(cssOhne),
+        "und der traegt dieselbe Trennlinie wie der Fuss der Ansicht");
+  // Der Hinweis und die Zugriffszeile erklaeren DIESEN Knopf - sie gehoeren
+  // mit in den Abschnitt, nicht hinter die Linie.
+  const iAbEnde = arbeit.indexOf("/abschnitt");
+  check(iAbEnde > arbeit.indexOf('id="ueberarb-hinweis"')
+        && iAbEnde > arbeit.indexOf('id="leiste-zugriff"'),
+        "Hinweis und Zugriffszeile liegen im selben Abschnitt");
+  /* Die Zugriffszeile der Leiste erklaert die VORAUSSETZUNG des
+   * Ueberarbeiten-Knopfes - sie muss bei ihm stehen, nicht am Fensterende. */
+  const iZug = arbeit.indexOf('id="leiste-zugriff"');
+  check(iZug > iUeberarb && iZug < iAuto,
+        "und die Zugriffszeile bei dem Knopf, den sie erklaert",
+        [iUeberarb, iZug, iAuto].join("<"));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("21) 'In Edge wird kein Ticket erkannt' (2026-09-02)");
+// ═══════════════════════════════════════════════════════════════════════════
+/* ⚠ DRITTER FALL DERSELBEN KLASSE – und diesmal eine Ebene tiefer.
+ *
+ * `api` war `(typeof browser !== "undefined") ? browser : chrome`: das waehlt
+ * EINE WURZEL und benutzt sie fuer ALLES. Existiert `browser` nur als
+ * TEIL-Alias (ein Objekt mit `runtime`, ohne `tabs`), ist `api.tabs`
+ * undefined und `api.tabs.query` wirft. Gemessen: Anzeige LEER, kein Ticket,
+ * kein Hinweis – und weil `runtime` vorhanden war, funktionierten Anmeldung
+ * und Vorlagen weiter. Genau das gemeldete Bild.
+ *
+ * Vorher schon zweimal bezahlt: `api.sidePanel` (2026-08-30, drei Runden) und
+ * die Erkennung der Seitenleiste. Deshalb wird hier die REGEL geprueft, nicht
+ * ein Symptom.
+ */
+{
+  // Der Proxy steht in BEIDEN Dateien und muss zeichengleich sein - teilen
+  // geht nicht (popup.js ist ein Modul, background.js in Firefox ein
+  // klassisches Skript). Dieselbe Drift-Schranke wie bei `zweig`.
+  const holeProxy = (t) => (t.match(/const api = new Proxy\([\s\S]*?\n\}\);/) || [""])[0];
+  const pP = holeProxy(POPUP_JS), pB = holeProxy(BG);
+  check(!!pP && !!pB, "api wird in beiden Dateien je ZWEIG aufgeloest");
+  check(pP === pB, "und zwar zeichengleich (Drift-Schranke)");
+
+  /* ⚠ DIE REIHENFOLGE IST DIE EIGENTLICHE FALLE: `browser` ZUERST. In Firefox
+   * gibt es beide Wurzeln, aber nur `browser.*` liefert Promises - `chrome.*`
+   * ist dort die Callback-Variante. Wer `chrome` vorzieht, macht Firefox
+   * VOLLSTAENDIG kaputt, nicht nur an einer Stelle. */
+  check(pP.indexOf("browser[name]") < pP.indexOf("chrome[name]")
+        && pP.indexOf("browser[name]") > 0,
+        "browser wird ZUERST gefragt (sonst bricht Firefox)");
+  // Und das alte Muster ist weg - sonst lebt der Fehler an anderer Stelle weiter.
+  for (const [name, t] of [["popup.js", POPUP_JS], ["background.js", BG]]) {
+    check(!/\(typeof browser !== "undefined"\)\s*\?\s*browser\s*:\s*chrome/
+            .test(ohneKommentare(t)),
+          name + " hat kein `browser ?? chrome` mehr");
+  }
+
+  /* AUSGEFUEHRT gegen gestellte Wurzeln: findet der Proxy einen Zweig, den nur
+   * EINE Wurzel hat? Eine Quelltext-Pruefung saehe das nicht. */
+  /* ⚠ OHNE SCHNITT KEIN LAUF. Fehlt der Proxy (etwa weil jemand die alte
+   * Zeile zurueckgedreht hat), enthaelt der injizierte Code kein `api` und
+   * jeder Lauf wirft mit "api is not defined" - der Waechter braeche ab und
+   * lieferte KEINE Bilanz, obwohl er die Sache schon oben gemeldet hat
+   * (Register: eine Pruefung darf nicht werfen). */
+  const proxyLauf = (browserArg, chromeArg, frage, methode) => {
+    if (!pP) return "KEIN PROXY IM QUELLTEXT";
+    const f = new Function("browserArg", "chromeArg", "frage", "methode", `
+      const browser = browserArg, chrome = chromeArg;
+      ${pP}
+      const z = api[frage];
+      if (!z) return "ZWEIG FEHLT";
+      try { return String(z[methode]()); } catch (e) { return "WIRFT"; }
+    `);
+    try { return f(browserArg, chromeArg, frage, methode); }
+    catch (e) { return "WIRFT: " + ((e && e.message) || e); }
+  };
+  check(proxyLauf({ runtime: {} },
+                  { scripting: { executeScript: () => "da" } },
+                  "scripting", "executeScript") === "da",
+        "browser ohne den Zweig: er wird in chrome gefunden (der gemeldete Fall)");
+  check(proxyLauf({ tabs: { query: () => "browser" } },
+                  { tabs: { query: () => "chrome" } },
+                  "tabs", "query") === "browser",
+        "beide Wurzeln: browser gewinnt (Firefox bleibt heil)");
+  check(proxyLauf(undefined, { tabs: { query: () => "chrome" } },
+                  "tabs", "query") === "chrome",
+        "ohne browser: chrome wird genommen");
+  check(proxyLauf({ runtime: {} }, { runtime: {} }, "tabs", "query")
+        === "ZWEIG FEHLT",
+        "gibt es den Zweig nirgends, kommt undefined (kein stiller Ersatz)");
+
+  /* Und wenn ein Zweig wirklich fehlt, sagt es die Meldung im KLARTEXT und
+   * NENNT ihn - `Cannot read properties of undefined` ist fuer niemanden
+   * verwertbar. */
+  const br = schneidePopup("brauche") || "";
+  check(/throw new Error\(/.test(br) && /\+ name \+/.test(br),
+        "brauche() nennt den fehlenden Zweig beim Namen", br.slice(0, 80));
+}
+
+// ── Die Ticket-Erkennung in allen Lagen – AUSGEFUEHRT ───────────────────
+{
+  const { teile, drin } = popupTeile(
+    ["tabErmitteln", "brauche", "keyAusUrl", "ticketAnzeigen", "tabsAbfragen"],
+    ["knoepfeAktualisieren", "melde"]);
+  const bausteineDa = drin.has("tabsAbfragen") && drin.has("brauche");
+  check(bausteineDa, "popup.js hat tabsAbfragen() und brauche()",
+        [...drin].join(","));
+  const pP = (POPUP_JS.match(/const api = new Proxy\([\s\S]*?\n\}\);/) || [""])[0];
+  const WURZ = schneidePopup("_wurzeln") || "";
+  const ZW = schneidePopup("zweig") || "";
+
+  const TAB = { id: 7, windowId: 3, url: "https://jira.firma.de/browse/ABC-1234",
+                active: true };
+  const lauf = async (stellen) => {
+    const dom = new JSDOM(POPUP_HTML, { url: "https://x.test/",
+                                        runScripts: "outside-only" });
+    const w = dom.window;
+    try {
+      stellen(w);
+      const f = new w.Function(`
+        const $ = (id) => document.getElementById(id);
+        const el = { ticket: $("ticket-anzeige"), meldung: $("meldung") };
+        let _key = "", _tabId = null, _windowId = null, _tabUrl = "";
+        let _tabFehler = "", _laeuft = false;
+        /* Modul-Variable: der Grundtext haengt daran (im Popup ist "klick auf
+         * das Symbol" der Weg, in der Leiste das Host-Recht). Ohne sie WIRFT
+         * der Lauf - Register, x-ter Fall. */
+        let _leiste = false;
+        const gemeldet = [];
+        function melde(t) { gemeldet.push(String(t || "")); }
+        function knoepfeAktualisieren() {}
+        ${pP}
+        ${WURZ}
+        ${ZW}
+` + teile.join("\n") + `
+        return (async () => {
+          let hart = "";
+          try { await tabErmitteln(); } catch (e) { hart = (e && e.message) || String(e); }
+          return JSON.stringify({ key: _key, tabId: _tabId, hart,
+                                  anzeige: el.ticket.textContent,
+                                  grund: _tabFehler, gemeldet: gemeldet.length });
+        })();`);
+      return JSON.parse(await f());
+    } finally { w.close(); }
+  };
+
+  /* Die vier Umgebungen, in denen die Nummer ERKANNT werden muss. Lage 2 ist
+   * der gemeldete Edge-Fall, Lage 3 eine reine Callback-API, Lage 4 Firefox. */
+  const lagen = bausteineDa ? [
+    ["chrome mit Promise-tabs (Chrome/Edge heute)",
+     (w) => { w.chrome = { tabs: { query: () => Promise.resolve([TAB]) } }; }],
+    ["browser OHNE tabs, chrome mit (der gemeldete Fall)",
+     (w) => { w.chrome = { tabs: { query: () => Promise.resolve([TAB]) } };
+              w.browser = { runtime: { sendMessage: () => Promise.resolve({}) } }; }],
+    ["tabs.query nur mit CALLBACK",
+     (w) => { w.chrome = { tabs: { query: (q, cb) => cb([TAB]) } }; }],
+    ["Firefox: beide Wurzeln, browser mit Promise",
+     (w) => { w.chrome = { tabs: { query: (q, cb) => cb([TAB]) } };
+              w.browser = { tabs: { query: () => Promise.resolve([TAB]) } }; }],
+  ] : [];
+  if (!bausteineDa) {
+    check(false, "die Umgebungs-Laeufe entfallen - popup.js hat die Bausteine "
+                 + "nicht (siehe oben)");
+  }
+  for (const [was, stellen] of lagen) {
+    const r = await lauf(stellen);
+    check(r.key === "ABC-1234" && r.anzeige === "ABC-1234",
+          "Ticket erkannt: " + was, JSON.stringify(r));
+    check(!r.grund && r.gemeldet === 0,
+          "und keine Stoerungsmeldung dabei: " + was, r.grund);
+  }
+
+  /* ⚠ UND DIE DREI ECHTEN FEHLERLAGEN NENNEN EINEN GRUND. Vorher hiess
+   * „kein Ticket gefunden" zweierlei: „diese Seite ist kein Ticket" UND „die
+   * Adresse war nicht lesbar" - aus dem Fenster war das nicht zu
+   * unterscheiden, und niemand konnte ableiten, was zu tun ist. */
+  for (const [was, stellen, wort] of (bausteineDa ? [
+    ["kein aktiver Tab in der Antwort",
+     (w) => { w.chrome = { tabs: { query: () => Promise.resolve([]) } }; },
+     /nicht ermittelbar/],
+    ["Tab ohne Adresse (activeTab fehlt)",
+     (w) => { w.chrome = { tabs: { query: () => Promise.resolve([{ id: 7 }]) } }; },
+     /nicht\s+lesbar/],
+    ["query wirft",
+     (w) => { w.chrome = { tabs: { query: () => { throw new Error("Cannot access contents"); } } }; },
+     /Cannot access contents/],
+  ] : [])) {
+    const r = await lauf(stellen);
+    check(r.key === "" && !r.hart,
+          "kein Ticket, aber auch kein Absturz: " + was, JSON.stringify(r));
+    check(wort.test(r.grund || "") && r.gemeldet === 1,
+          "und der GRUND wird gemeldet: " + was, r.grund);
+    check(r.anzeige === "Tab nicht lesbar",
+          "die Kopfzeile unterscheidet das von 'Kein Ticket gefunden': " + was,
+          r.anzeige);
+  }
+
+  /* Gegenrichtung: eine Seite, die WIRKLICH kein Ticket ist, meldet KEINE
+   * Stoerung - sonst waere jede Nicht-Jira-Seite eine Fehlermeldung. */
+  const r = !bausteineDa ? { key: "", grund: "", gemeldet: 0, anzeige: "-" }
+    : await lauf((w) => {
+    w.chrome = { tabs: { query: () => Promise.resolve(
+      [{ id: 7, windowId: 3, url: "https://www.google.de/" }]) } };
+  });
+  check(r.key === "" && !r.grund && r.gemeldet === 0
+        && r.anzeige === "Kein Ticket gefunden",
+        "eine gewoehnliche Seite bleibt 'Kein Ticket gefunden' - ohne Stoerung",
+        JSON.stringify(r));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("22) Abmelde-Symbol und Update-Hinweis (2026-09-02)");
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── a) Abmelden traegt das Portal-Symbol und nennt den Benutzer ─────────
+{
+  const kopf = (POPUP_HTML.match(/<header class="kopf">[\s\S]*?<\/header>/) || [""])[0];
+  const knopf = (kopf.match(/<button[^>]*id="btn-abmelden"[\s\S]*?<\/button>/) || [""])[0];
+  check(/<svg/.test(knopf) && /<polyline/.test(knopf),
+        "der Abmelde-Knopf traegt ein Inline-SVG");
+  check(!/>\s*Abmelden\s*</.test(knopf),
+        "und keinen Text mehr (im 380 px breiten Kopf ist kein Wort frei)");
+  /* DASSELBE SYMBOL WIE IM PORTAL - sonst ist derselbe Vorgang zweimal
+   * verschieden gezeichnet. Verglichen wird der Pfad, nicht das Markup. */
+  const portal = fs.readFileSync(path.join(__dirname, "..", "frontend",
+                                           "portal.html"), "utf8");
+  const ptKnopf = (portal.match(/<button[^>]*id="pt-logout"[\s\S]*?<\/button>/) || [""])[0];
+  const pfade = (t) => (t.match(/points="[^"]+"|d="M[^"]+"/g) || []).join("|");
+  check(!!pfade(ptKnopf) && pfade(knopf) === pfade(ptKnopf),
+        "und zwar dasselbe wie im Portal (pt-logout)",
+        pfade(knopf) + "  gegen  " + pfade(ptKnopf));
+  check(/aria-hidden="true"/.test(knopf),
+        "das SVG ist fuer Hilfsmittel unsichtbar - die Aussage steht im aria-label");
+  check(/aria-label="[^"]+"/.test(knopf) && /title="[^"]+"/.test(knopf),
+        "der Knopf traegt title UND aria-label (er hat keinen Text)");
+
+  /* „[Benutzer] abmelden" - dasselbe Muster wie im Portal. Ohne bekannten
+   * Namen bleibt es beim schlichten Wort: „undefined abmelden" waere
+   * schlimmer als kein Name. */
+  /* AUSGEFUEHRT, nicht gelesen: eine Suche nach `z.benutzer` in `start()`
+   * trifft dort auch `z.benutzer_vorschlag` und bleibt gruen, obwohl der Name
+   * gar nicht mehr benutzt wird - genau so blieb die Gegenprobe zu dieser
+   * Pruefung beim ersten Lauf stumm (Register: die Eigenschaft messen). */
+  const at = new Function("return " + (schneidePopup("abmeldeTitel") || "null")
+                          + "; ")();
+  check(typeof at === "function", "popup.js hat abmeldeTitel()");
+  if (typeof at === "function") {
+    check(at("firma\\m.mustermann") === "firma\\m.mustermann abmelden",
+          "der Titel lautet '[Benutzer] abmelden'", at("firma\\m.mustermann"));
+    check(at("") === "Abmelden" && at(undefined) === "Abmelden"
+          && at(null) === "Abmelden",
+          "ohne Namen bleibt es 'Abmelden' (kein 'undefined abmelden')",
+          [at(""), at(undefined), at(null)].join("|"));
+    check(at("  bob  ") === "bob abmelden",
+          "Leerraum wird abgeschnitten (' abmelden' sieht wie ein Fehler aus)",
+          at("  bob  "));
+  }
+  const st = ohneKommentare(schneidePopup("start") || "");
+  check(/abmeldeTitel\(z\.benutzer\)/.test(st),
+        "und start() belegt ihn aus dem Benutzernamen des Zustands");
+  check(/benutzer: s\.benutzer \|\| ""/.test(BG),
+        "der Hintergrund gibt den Benutzernamen im Zustand heraus");
+}
+
+// ── b) Der Update-Hinweis – AUSGEFUEHRT ─────────────────────────────────
+/* ⚠ DIE ERWEITERUNG AKTUALISIERT SICH NICHT VON SELBST (von Hand geladen,
+ * nicht aus einem Store). Bisher erfuhr das niemand: ein laengst behobener
+ * Fehler blieb wochenlang stehen. Die Stand-Warnung deckt das NICHT ab - sie
+ * greift nur bei einem HALB aktualisierten Paket. */
+{
+  const uh = schneidePopup("updateHinweis") || "";
+  check(!!uh, "popup.js hat updateHinweis()");
+  check(/id="update-hinweis"/.test(POPUP_HTML), "und das Markup dazu");
+  check(/\.update-hinweis\[hidden\]\s*\{[^}]*display:\s*none/.test(cssOhne),
+        "CSS: [hidden] gewinnt (Register - wer Aussehen gibt, nimmt hidden mit)");
+  // Ein Server-Aufruf, zwei Verwendungen: kein zweiter Roundtrip, und KEIN
+  // neuer Nachrichtenfall - deshalb bleibt STAND unberuehrt.
+  check(/healthHolen\(\)/.test(uh)
+        && /healthHolen\(\)/.test(schneidePopup("jiraBasisHolen") || ""),
+        "Adresse und Version kommen aus EINEM health-Abruf");
+
+  const PROXY = (POPUP_JS.match(/const api = new Proxy\([\s\S]*?\n\}\);/) || [""])[0];
+  const lauf = async (eigene, server) => {
+    const dom = new JSDOM(POPUP_HTML, { url: "https://x.test/",
+                                        runScripts: "outside-only" });
+    const w = dom.window;
+    w.chrome = { runtime: { getManifest: () => ({ version: eigene }) } };
+    try {
+      const f = new w.Function("server", `
+        const $ = (id) => document.getElementById(id);
+        let _health = null;
+        ${PROXY}
+        async function frage() { return { ok: true, daten: { paket_version: server } }; }
+        ${schneidePopup("healthHolen")}
+        ${uh}
+        return (async () => {
+          await updateHinweis();
+          const p = $("update-hinweis");
+          return JSON.stringify({ sichtbar: !p.hidden, text: p.textContent });
+        })();`);
+      return JSON.parse(await f(server));
+    } finally { w.close(); }
+  };
+
+  for (const [was, eigene, server, soll] of [
+    ["gleiche Version", "0.8.2", "0.8.2", false],
+    ["Server neuer (Patch)", "0.8.2", "0.8.3", true],
+    ["Server neuer (Minor)", "0.8.2", "0.9.0", true],
+    /* ⚠ ZAHLEN, NICHT ZEICHENKETTEN: "0.10.0" ist neuer als "0.9.0", als Text
+     * waere es kleiner - und der Hinweis blieb aus, wenn er am dringendsten
+     * waere. */
+    ["zweistellige Minor-Version", "0.9.0", "0.10.0", true],
+    ["eigene neuer als Server", "0.9.0", "0.8.2", false],
+    ["Server meldet nichts", "0.8.2", "", false],
+    ["unlesbare Server-Version", "0.8.2", "kaputt", false],
+    ["eigene Version unbekannt", "", "0.9.0", false],
+  ]) {
+    const r = await lauf(eigene, server);
+    check(r.sichtbar === soll,
+          (soll ? "Hinweis: " : "still: ") + was,
+          "eigene=" + eigene + " server=" + server + " -> " + r.sichtbar);
+    if (soll) {
+      /* DER WEG GEHOERT IN DIE MELDUNG. "Es gibt eine neue Fassung" allein
+       * laesst den Benutzer suchen - und ohne das Neuladen antwortet der alte
+       * Service-Worker weiter (siehe STAND). */
+      check(r.text.indexOf(server) >= 0 && r.text.indexOf(eigene) >= 0,
+            "und nennt beide Versionen: " + was, r.text.slice(0, 60));
+      check(/neu/i.test(r.text) && /⟳|neu lade/i.test(r.text),
+            "und den Weg (Paket holen + Erweiterung neu laden): " + was);
+    }
+  }
+}
+
+// ── c) Der Server sagt, welche Fassung er ausliefert ────────────────────
+{
+  check(/"paket_version": jira_assist\.paket_version\(\)/.test(MAIN),
+        "health gibt die Paketversion heraus");
+  const q = (fs.readFileSync(path.join(__dirname, "..", "backend",
+                                       "jira_assist.py"), "utf8")
+    .match(/def paket_version\(\)[\s\S]*?\n\n\n/) || [""])[0];
+  check(!!q, "jira_assist.py hat paket_version()");
+  /* ⚠ `json` IST IN DIESEM MODUL NICHT GLOBAL IMPORTIERT - der NameError
+   * landete im breiten except und die Funktion gab IMMER "" zurueck (nur der
+   * Messwert hat es gezeigt, Register). */
+  check(/import json as/.test(q) || /^import json$/m.test(
+          fs.readFileSync(path.join(__dirname, "..", "backend",
+                                    "jira_assist.py"), "utf8")),
+        "und json ist dort erreichbar (sonst verschluckt das except den Fehler)");
+  check(/manifest\.json/.test(q),
+        "gelesen wird das Manifest des ausgelieferten Pakets");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("23) Der Kommentarbereich wird AUFGEKLAPPT (2026-09-02)");
+// ═══════════════════════════════════════════════════════════════════════════
+/* ⚠ GEMELDET: „traegt den Text in das Jira Feld ein, oeffnet es aber nicht.
+ * Dadurch wird auf einen Mausklick hin das Kommentarfeld geoeffnet, der Text
+ * aber wieder geloescht."
+ *
+ * In Jira Server ist der Bereich zugeklappt; das Feld EXISTIERT im DOM, ist
+ * aber unsichtbar. Der Text landete darin – und der Klick, mit dem der Benutzer
+ * den Bereich oeffnet, baute den Editor NEU auf. Die Arbeit einer Auswertung,
+ * weggeworfen von dem Klick, den er machen MUSS, um sie abzuschicken.
+ */
+{
+  const OEFF = (EINFUEGEN.match(
+    /export async function oeffneKommentarfeld\(\)[\s\S]*?\n\}/) || [""])[0]
+    .replace("export ", "");
+  check(!!OEFF, "einfuegen.js hat oeffneKommentarfeld()");
+  /* EIGENE FUNKTION, nicht Teil von `einfuegenInJira`: Warten heisst `async`,
+   * und an `einfuegenInJira` haengt die ganze Einfuege-Kaskade. Eine Funktion,
+   * eine Aufgabe. */
+  check(/^export function einfuegenInJira/m.test(EINFUEGEN),
+        "und einfuegenInJira bleibt SYNCHRON (dort haengt die Kaskade)");
+  check(!/\bimport\b/.test(OEFF) && !OEFF.includes("api.")
+        && !OEFF.includes("melde("),
+        "die injizierte Funktion ist selbststaendig (kein Modul-Scope)");
+
+  /* ⚠ OHNE SCHNITT KEIN LAUF. Fehlt die Funktion (etwa weil jemand sie
+   * entfernt hat - das WAERE der gemeldete Zustand), wirft `new Function` und
+   * der Waechter braeche ab: keine Bilanz, von "nicht gelaufen" nicht zu
+   * unterscheiden. Er hat die Sache oben ohnehin schon gemeldet. */
+  const lauf = async (markup) => {
+    if (!OEFF) return { r: { ok: false, grund: "FUNKTION FEHLT" },
+                        geklickt: false, feldSichtbar: false };
+    const dom = new JSDOM("<body>" + markup + "</body>",
+                          { runScripts: "outside-only" });
+    const w = dom.window;
+    let offen = false;
+    /* Der Kern der Nachstellung: ein Feld mit `data-zu` ist UNSICHTBAR, bis
+     * der Platzhalter geklickt wurde - genau wie in Jira. jsdom rechnet kein
+     * Layout, also wird die Geometrie gestellt. */
+    w.Element.prototype.getBoundingClientRect = function () {
+      const zu = this.dataset && this.dataset.zu === "1" && !offen;
+      return zu ? { width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0 }
+                : { width: 300, height: 60, top: 0, left: 0, right: 300, bottom: 60 };
+    };
+    const ph = w.document.getElementById("footer-comment-button");
+    if (ph) ph.addEventListener("click", () => { offen = true; });
+    try {
+      const f = new w.Function(OEFF + "\nreturn oeffneKommentarfeld();");
+      const r = await f();
+      const feld = w.document.querySelector("[contenteditable], textarea");
+      return { r, geklickt: offen,
+               feldSichtbar: !!feld && feld.getBoundingClientRect().height > 0 };
+    } finally { w.close(); }
+  };
+
+  // (a) DER GEMELDETE FALL.
+  let x = await lauf(`<div id="footer-comment-button">Klicken, um Kommentar
+    hinzuzufügen</div>
+    <div class="jira-editor-container"><div contenteditable="true" data-zu="1"></div></div>`);
+  check(x.geklickt && x.r.ok && x.r.geoeffnet === true,
+        "zugeklappt: der Bereich wird geoeffnet", JSON.stringify(x.r));
+  check(x.feldSichtbar,
+        "und danach ist das Kommentarfeld wirklich sichtbar");
+
+  // (b) War er schon offen, wird NICHT geklickt - sonst klappt er womoeglich zu.
+  x = await lauf(`<div id="footer-comment-button">x</div>
+    <div class="jira-editor-container"><div contenteditable="true"></div></div>`);
+  check(!x.geklickt && x.r.ok && x.r.geoeffnet === false,
+        "war er offen, bleibt der Oeffner unangetastet", JSON.stringify(x.r));
+
+  // (c) Auch der Wiki-Modus (textarea).
+  x = await lauf(`<div id="footer-comment-button">x</div>
+    <textarea id="comment" data-zu="1"></textarea>`);
+  check(x.geklickt && x.r.ok, "dasselbe fuer den Wiki-Modus (textarea)");
+
+  // (d) Kein Oeffner: ein GRUND, kein stilles false.
+  x = await lauf(`<div>nur Text</div>`);
+  check(x.r.ok === false && /öffnen/.test(x.r.grund || ""),
+        "ohne Oeffner kommt ein Grund im Klartext", x.r.grund);
+
+  /* (e) ⚠ GEWARTET WIRD AUF DAS FELD, NICHT AUF EINE FESTE ZEIT. Jira baut den
+   * Editor asynchron auf; eine Pause auf Verdacht ist entweder zu kurz (dann
+   * schreiben wir wieder ins Leere) oder verschenkt Zeit. */
+  check(/for \(let i = 0; i < \d+; i\+\+\)/.test(OEFF) && /setTimeout/.test(OEFF),
+        "gewartet wird in Schritten, bis das Feld da ist");
+  check(/return \{ ok: false, geoeffnet: true/.test(OEFF),
+        "und nach dem Deckel gibt es einen ehrlichen Fehlschlag");
+
+  // (f) Verdrahtung: VOR dem Einfuegen, und ein Fehlschlag bricht NICHT ab.
+  const h = (POPUP_JS.match(
+    /\$\("btn-einfuegen"\)\.addEventListener\([\s\S]*?\n\}\);/) || [""])[0];
+  const io_ = h.indexOf("oeffneKommentarfeld"), ie = h.indexOf("func: einfuegenInJira");
+  check(io_ > 0 && ie > 0 && io_ < ie,
+        "popup.js oeffnet ZUERST, dann wird eingefuegt", io_ + "<" + ie);
+  /* Ein Fehlschlag beim Oeffnen darf das Einfuegen nicht verhindern: war der
+   * Bereich schon offen oder gibt es keinen Oeffner, muss es trotzdem
+   * versuchen - die Rueckleseprobe merkt, wenn nichts ankam. */
+  const vor = h.slice(io_ - 200, ie);
+  check(/try \{/.test(vor) && /catch/.test(vor),
+        "und ein Fehlschlag beim Oeffnen bricht nicht ab");
+  check(/geoeffnet\.geoeffnet/.test(h),
+        "die Erfolgsmeldung sagt, wenn aufgeklappt wurde (der Benutzer soll "
+        + "nicht noch einmal klicken - genau das hat den Text geloescht)");
+  check(/Aufklappen: /.test(h),
+        "und im Fehlerfall steht der Oeffnungsversuch in der Diagnose");
+
+  /* DIESELBEN SELEKTOREN WIE BEIM SCHREIBEN. Wer hier andere nimmt, oeffnet
+   * womoeglich etwas, in das danach niemand schreibt - und der Text landet
+   * wieder im Nichts. */
+  for (const sel of ["#comment-wiki-edit [contenteditable='true']",
+                     ".jira-editor-container [contenteditable='true']",
+                     "#comment", "textarea[name='comment']"]) {
+    check(OEFF.indexOf(sel) >= 0 && EINFUEGEN.indexOf(sel) >= 0,
+          "der Oeffner kennt dasselbe Feld wie das Einfuegen: " + sel);
+  }
+}
+
+/* Erst den Puffer leeren: eine Zurueckweisung aus einem nicht abgewarteten
+ * Aufruf wird sonst womoeglich erst nach der Zusammenfassung gemeldet. */
+await new Promise((r) => setTimeout(r, 20));
+for (const z of zurueckweisungen) {
+  check(false, "unbehandelte Zurueckweisung im Lauf", z.split("\n")[0]);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("24) Einstellungen-Abschnitt und die wandernde Meldung");
+// ═══════════════════════════════════════════════════════════════════════════
+/* Zwei Vorgaben des Nutzers vom 2026-09-02:
+ *   a) "Trennlinie, dann Zahnrad-Symbol plus 'Einstellungen' vor 'Bei neuem
+ *      Ticket automatisch' einfuegen"
+ *   b) "das rote Feld 'Kein Jira-Ticket in diesem Tab. …' direkt vor das
+ *      Antwort Textfeld verschieben" */
+
+// ── a) Trennstrich, Zahnrad, Ueberschrift ───────────────────────────────
+{
+  const arbeit = arbeitsbereich();
+  const iUeberarb = arbeit.indexOf('id="btn-ueberarbeiten"');
+  const iTitel = arbeit.indexOf('class="abschnitt-titel"');
+  const iAuto = arbeit.indexOf('id="f-auto"');
+  check(iTitel > 0, "es gibt eine Abschnitts-Ueberschrift");
+  check(iTitel > iUeberarb && iTitel < iAuto,
+        "sie steht VOR 'Bei neuem Ticket automatisch' und hinter dem "
+        + "Ueberarbeiten-Knopf", [iUeberarb, iTitel, iAuto].join("<"));
+
+  /* DER TRENNSTRICH IST DIE KLASSE `.abschnitt` – gemessen wird, dass die
+   * Ueberschrift wirklich DARIN liegt, nicht bloss, dass beides vorkommt.
+   * Ohne den Container gaebe es keine Linie, und die Ueberschrift saehe wie
+   * eine weitere Feldbeschriftung aus. */
+  const dom0 = new JSDOM(POPUP_HTML, { url: "https://x.test/",
+                                       runScripts: "outside-only" });
+  const d0 = dom0.window.document;
+  const titel = d0.querySelector(".abschnitt-titel");
+  check(!!titel, "die Ueberschrift ist im DOM auffindbar");
+  const kasten = titel && titel.closest(".abschnitt");
+  check(!!kasten, "sie liegt in einem .abschnitt (das ist der Trennstrich)");
+  check(!!kasten && !!kasten.querySelector("#f-auto"),
+        "und das Automatik-Pulldown liegt im SELBEN Abschnitt");
+  check(/Einstellungen/.test(titel ? titel.textContent : ""),
+        "sie heisst 'Einstellungen'", titel && titel.textContent.trim());
+  /* Der Trennstrich selbst kommt aus dem CSS - eine Klasse ohne Regel waere
+   * eine Linie, die niemand sieht. */
+  check(/\.abschnitt\s*\{[^}]*border-top:/.test(ohneKommentare(POPUP_CSS)),
+        "CSS: .abschnitt zeichnet die Linie (border-top)");
+  check(/\.abschnitt-titel\s*\{/.test(ohneKommentare(POPUP_CSS)),
+        "CSS: .abschnitt-titel ist gestaltet");
+
+  /* ⚠ DASSELBE ZAHNRAD WIE AM VORLAGEN-KNOPF (Drift-Schranke): zwei Zahnraeder
+   * in verschiedener Darstellung - eines als Zeichen, eines als SVG - saehen
+   * nebeneinander nach einem Fehler aus. */
+  const zahnKnopf = (POPUP_HTML.match(/id="btn-vorlagen"[\s\S]*?>([^<]*)<\/button>/)
+                     || ["", ""])[1].trim();
+  const zahnTitel = titel ? (titel.querySelector("span[aria-hidden]") || {}).textContent : "";
+  check(!!zahnKnopf && zahnTitel === zahnKnopf,
+        "das Zahnrad der Ueberschrift ist zeichengleich mit dem am "
+        + "Vorlagen-Knopf", JSON.stringify([zahnTitel, zahnKnopf]));
+  /* Es traegt keine eigene Aussage - Hilfsmittel sollen "Einstellungen" lesen,
+   * nicht "Zahnrad Einstellungen". Gleiche Regel wie beim Start-Dreieck. */
+  check(!!titel && !!titel.querySelector('span[aria-hidden="true"]'),
+        "und ist fuer Hilfsmittel versteckt");
+  dom0.window.close();
+}
+
+// ── b) Die Meldung wandert – AUSGEFUEHRT ────────────────────────────────
+/* ⚠ DIE EIGENTLICHE ZUSAGE IST NICHT DER PLATZ, SONDERN DIE SICHTBARKEIT.
+ * Der verlangte Platz liegt IM Arbeitsbereich, und der ist bis zur Anmeldung
+ * `hidden`. Waere die Meldung starr dort, waere jede Auskunft des Anmeldewegs
+ * lautlos weg - der Knopf saehe tot aus. Gemessen wird deshalb in BEIDEN
+ * Lagen, und die harte Bedingung lautet: eine Meldung mit Text liegt NIEMALS
+ * in einem versteckten Abschnitt. */
+{
+  const { teile, drin } = popupTeile(["melde", "meldungPlatzieren", "zeige"], []);
+  check(drin.has("meldungPlatzieren"), "popup.js hat meldungPlatzieren()");
+  check(drin.has("melde") && drin.has("zeige"),
+        "und melde()/zeige() sind schneidbar");
+
+  const lauf = (angemeldet) => {
+    const dom = new JSDOM(POPUP_HTML, { url: "https://x.test/",
+                                        runScripts: "outside-only" });
+    const w = dom.window;
+    try {
+      const f = new w.Function("angemeldet", `
+        const $ = (id) => document.getElementById(id);
+        const _marke = "Marke";
+        const el = { meldung: $("meldung"), login: $("bereich-login"),
+                     arbeit: $("bereich-arbeit"), abmelden: $("btn-abmelden"),
+                     reset: $("btn-reset") };
+` + teile.join("\n") + `
+        zeige(angemeldet);
+        melde("Kein Jira-Ticket in diesem Tab. Öffne ein Ticket (…/browse/ABC-123).");
+        const m = $("meldung");
+        // Liegt sie in einem versteckten Vorfahren? DAS ist die Frage.
+        let p = m, versteckt = false, kette = [];
+        while (p && p !== document.documentElement) {
+          if (p.hidden) { versteckt = true; kette.push(p.id || p.tagName); }
+          p = p.parentElement;
+        }
+        return JSON.stringify({
+          text: m.textContent.slice(0, 30),
+          sichtbarLautAttribut: !m.hidden,
+          inVersteckt: versteckt, kette: kette.join(">"),
+          imArbeitsbereich: !!m.closest("#bereich-arbeit"),
+          direktVorErgebnis: m.nextElementSibling
+            && m.nextElementSibling.id === "ergebnis",
+          elternteil: m.parentElement.id || m.parentElement.tagName,
+        });`);
+      return JSON.parse(f(angemeldet));
+    } finally { w.close(); }
+  };
+
+  // Im Markup steht sie an ihrem verlangten Platz - das ist die Aussage, die
+  // ein Leser der Datei bekommt.
+  const arbeit = arbeitsbereich();
+  const iMeld = arbeit.indexOf('id="meldung"');
+  const iErgM = arbeit.indexOf('id="ergebnis"');
+  check(iMeld > 0, "im Markup liegt #meldung im Arbeitsbereich", iMeld);
+  /* ⚠ BEIDE INDIZES MUESSEN GEFUNDEN SEIN. `indexOf` gibt -1 zurueck, und
+   * `-1 < iErgebnis` ist IMMER wahr - die Pruefung waere dann gruen, gerade
+   * wenn das Element gar nicht mehr da ist. Register: eine Gegenprobe hat
+   * genau das aufgedeckt (sie biss nur mit einem statt zwei FAIL). */
+  check(iMeld > 0 && iErgM > 0 && iMeld < iErgM,
+        "und zwar VOR dem Antwort-Textfeld", [iMeld, iErgM].join("<"));
+
+  const an = lauf(true);
+  check(an.direktVorErgebnis,
+        "angemeldet: die Meldung steht DIREKT vor dem Antwort-Textfeld",
+        an.elternteil + " / next=" + JSON.stringify(an.direktVorErgebnis));
+  check(!an.inVersteckt,
+        "und in keinem versteckten Abschnitt", an.kette);
+  check(an.sichtbarLautAttribut, "sie ist nicht versteckt");
+
+  const aus = lauf(false);
+  check(!aus.inVersteckt,
+        "abgemeldet: die Meldung liegt NICHT in einem versteckten Abschnitt "
+        + "(sonst waere jeder Anmeldefehler unsichtbar)", aus.kette);
+  check(!aus.imArbeitsbereich,
+        "sie ist dafuer aus dem Arbeitsbereich heraus gewandert",
+        aus.elternteil);
+  check(/Kein Jira-Ticket/.test(aus.text) && /Kein Jira-Ticket/.test(an.text),
+        "und der Text kommt in beiden Lagen an");
+
+  /* Der Aufruf in `melde()` ist die fail-safe Haelfte: ohne ihn haengt die
+   * Sichtbarkeit daran, dass jeder kuenftige Umschalter `zeige()` benutzt. */
+  check(/meldungPlatzieren\(\)/.test(schneidePopup("melde") || ""),
+        "melde() platziert selbst (fail-safe, nicht nur zeige())");
+  check(/meldungPlatzieren\(\)/.test(schneidePopup("zeige") || ""),
+        "und zeige() ebenfalls - VOR der Meldung, die gleich darauf folgt");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("25) Die Seitenleiste ist die VORGABE (2026-09-03)");
+// ═══════════════════════════════════════════════════════════════════════════
+/* Vorgabe des Nutzers: "Start als 'Seitenleiste' soll bei Browsern Default
+ * Einstellung sein sofern es unterstuetzt wird."
+ *
+ * ⚠ GEMESSEN, NICHT GELESEN. Eine Quelltext-Pruefung ("kommt `leisteMoeglich`
+ * in `ansichtLesen` vor") bliebe gruen, wenn jemand die Reihenfolge dreht oder
+ * einen Zweig ueberspringt - und die Aussage haengt an genau dieser
+ * Reihenfolge: eine ausdrueckliche Wahl muss die Vorgabe SCHLAGEN, nicht
+ * umgekehrt.
+ */
+{
+  const teilBG = (name) => (BG.match(new RegExp(
+    "(?:async )?function " + name + "\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}")) || [null])[0];
+  /* Transitiv sammeln, nicht als gepflegte Liste: die feste Liste hat in
+   * dieser Datei fuenfmal dazu gefuehrt, dass der Lauf mit einem nackten
+   * ReferenceError ABBRACH statt fehlzuschlagen - kein FAIL, keine Zaehlzeile,
+   * der Waechter sah aus, als waere er nie gelaufen (Register). */
+  const sammle = (start) => {
+    const teile = [], drin = new Set(), offen = start.slice();
+    while (offen.length) {
+      const n = offen.shift();
+      if (drin.has(n)) continue;
+      const k = teilBG(n);
+      if (!k) continue;
+      drin.add(n); teile.push(k);
+      for (const t of k.match(/\b[A-Za-z_$][\w$]*(?=\s*\()/g) || []) {
+        if (!drin.has(t) && teilBG(t)) offen.push(t);
+      }
+    }
+    return { code: teile.join("\n"), drin };
+  };
+  const { code, drin } = sammle(["ansichtLesen"]);
+  check(drin.has("ansichtLesen"), "background.js hat ansichtLesen()");
+  check(drin.has("einstLesen") && drin.has("leisteMoeglich"),
+        "der Schnitt zieht einstLesen() und leisteMoeglich() mit",
+        [...drin].join(","));
+  check(drin.has("zweig") && drin.has("_wurzeln"),
+        "und die API-Wurzelsuche darunter");
+  /* Modul-Konstante - faellt aus JEDEM Funktions-Schnitt heraus. Fehlte sie,
+   * warf `einstLesen` einen ReferenceError (Register, sechster Fall). */
+  const EINST_ZEILE = (BG.match(/const EINST = "[^"]+";/) || [""])[0];
+  check(/^const EINST = "/.test(EINST_ZEILE),
+        "der Ablage-Schluessel steht im Schnitt", EINST_ZEILE);
+
+  /* Die Welten werden als ECHTE Globale gestellt (nicht als `api`-Objekt) -
+   * `zweig()` sucht an BEIDEN Wurzeln, und genau diese Aufloesung war 2026-09-02
+   * der gemeldete Fehler. */
+  const lauf = async (gespeichert, kannLeiste) => {
+    const einst = {};
+    if (gespeichert !== undefined) einst.ansicht = gespeichert;
+    const welt = {
+      storage: { local: { get: async (k) => ({ [k]: einst }) } },
+      runtime: { getManifest: () => (kannLeiste
+        ? { side_panel: { default_path: "popup.html" } } : {}) },
+    };
+    // Ohne Leisten-API an den Wurzeln entscheidet der Rueckfall in
+    // leisteMoeglich() - beide Wege muessen "keine Leiste" sagen.
+    const C = kannLeiste ? { sidePanel: { setOptions() {} } } : {};
+    return await new Function("api", "chrome", "browser",
+      EINST_ZEILE + "\n" + code + "\nreturn ansichtLesen();")(welt, C, undefined);
+  };
+
+  check(await lauf(undefined, true) === "leiste",
+        "nichts gewaehlt + Browser kann eine Leiste → LEISTE (die Aenderung)",
+        await lauf(undefined, true));
+  /* ⚠ DAS IST DIE HALBE FEHLERSTELLUNG, DIE ZAEHLT: auf einem Browser ohne
+   * Leiste leert `ansichtAnwenden` den Popup-Pfad, `onClicked` findet danach
+   * keine Leisten-API - und der Klick aufs Symbol oeffnet GAR NICHTS. */
+  check(await lauf(undefined, false) === "popup",
+        "nichts gewaehlt + keine Leiste → Popup (sonst oeffnet der Klick nichts)",
+        await lauf(undefined, false));
+  check(await lauf("popup", true) === "popup",
+        "eine ausdrueckliche Wahl SCHLAEGT die Vorgabe");
+  check(await lauf("leiste", true) === "leiste",
+        "und die ausdrueckliche Leiste bleibt die Leiste");
+  /* Ausdruecklich "leiste" auf einem Browser ohne Leiste bleibt "leiste" -
+   * bewusst. Die Faehigkeitspruefung hat 2026-08-30 nachweislich FALSCH
+   * gemeldet ("dieser Browser kann das nicht" auf einem, der es kann); sie
+   * darf deshalb eine Entscheidung des Benutzers nicht ueberstimmen. Fuer den
+   * Fall meldet `leisteOeffnen` den Fehlschlag im Klartext. */
+  check(await lauf("leiste", false) === "leiste",
+        "sie wird NICHT von der Faehigkeitspruefung ueberstimmt");
+  for (const muell of ["", "sidebar", "POPUP", "1"]) {
+    check(await lauf(muell, true) === "leiste",
+          "ein unbekannter Wert (" + JSON.stringify(muell)
+          + ") zaehlt wie 'nichts gewaehlt'");
+  }
+
+  /* ⚠ DRIFT-SCHRANKE: der `zustand`-Fall darf die Ansicht NICHT selbst
+   * ableiten. Dort stand derselbe Vergleich ein zweites Mal - seit die Leiste
+   * die Vorgabe ist, haette der Schalter im Fenster "Popup" angezeigt,
+   * waehrend der Klick aufs Symbol die Leiste oeffnet. Eine Anzeige, die einen
+   * anderen Zustand behauptet als den wirksamen, kostet in diesem Projekt
+   * regelmaessig Stunden. */
+  {
+    const zust = (ohneKommentare(BG).match(/case "zustand":[\s\S]*?\n        \}/)
+                  || [""])[0];
+    check(zust.length > 200, "der zustand-Fall wurde geschnitten",
+          zust.length + " Zeichen");
+    check(/ansicht:\s*await ansichtLesen\(\)/.test(zust),
+          "er liefert die Ansicht ueber ansichtLesen()");
+    check(zust.indexOf('"leiste"') < 0,
+          "und leitet sie nicht selbst ab (kein zweiter Vergleich)");
+  }
+
+  /* Die zwei Manifest-Schluessel, die trotz der neuen Vorgabe BLEIBEN. */
+  for (const [name, m] of [["Chrome", M_CHROME], ["Firefox", M_FF]]) {
+    check(!!(m.action && m.action.default_popup),
+          name + ": `action.default_popup` bleibt - Rueckfall, falls setPopup "
+          + "scheitert (sonst oeffnet gar nichts)");
+  }
+  check(M_FF.sidebar_action && M_FF.sidebar_action.open_at_install === false,
+        "Firefox: open_at_install bleibt false - die Vorgabe greift beim "
+        + "ersten KLICK, nicht beim Installieren");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("26) Der Einstellungen-Abschnitt klappt ein (2026-09-03)");
+// ═══════════════════════════════════════════════════════════════════════════
+/* Vorgabe des Nutzers: "Zahnrad und Text bleiben stehen, Rest wird
+ * ein/ausgeklappt" – Startzustand ZU, der Zustand wird gemerkt.
+ *
+ * ⚠ AUSGEFUEHRT GEGEN DIE ECHTE `popup.html`. Eine Quelltext-Pruefung waere
+ * hier besonders wertlos: dass `hidden` gesetzt wird, sagt nichts darueber,
+ * WELCHES Element es trifft – und genau das ist die Zusage (Kopf bleibt,
+ * Inhalt geht). */
+{
+  const { teile: einstT, drin: einstD } =
+    popupTeile(["einstAbschnittZeigen"], ["$", "frage"]);
+  check(einstD.has("einstAbschnittZeigen"),
+        "popup.js hat einstAbschnittZeigen()");
+  const hdl = (POPUP_JS.match(
+    /_btnEinst\.addEventListener\("click", \(\) => \{([\s\S]*?)\n  \}\);/)
+    || [null, null])[1];
+  check(!!hdl, "und der Klick auf die Ueberschrift ist verdrahtet");
+
+  /* ⚠ `_einstOffen` IST EINE MODUL-VARIABLE und faellt aus JEDEM
+   * Funktions-Schnitt heraus. Fehlte sie hier, braeche der Lauf mit einem
+   * nackten ReferenceError ab – kein FAIL, keine Zaehlzeile, der Waechter sah
+   * aus, als waere er nie gelaufen. In dieser Datei der siebte Fall. */
+  const lauf = (vorgabe) => {
+    const dom = new JSDOM(POPUP_HTML, { url: "https://x.test/",
+                                        runScripts: "outside-only" });
+    const w = dom.window;
+    const gemerkt = [];
+    try {
+      const bau = new w.Function("$", "frage",
+        "let _einstOffen = false;\n" + einstT.join("\n")
+        + "\nreturn { zeigen: einstAbschnittZeigen,"
+        + " klick: function () {" + hdl + "},"
+        + " offen: function () { return _einstOffen; } };");
+      const a = bau((id) => w.document.getElementById(id),
+                    (n) => { gemerkt.push(n); return Promise.resolve({ ok: true }); });
+      const lies = () => {
+        const k = w.document.getElementById("btn-einst");
+        const i = w.document.getElementById("einst-inhalt");
+        const p = w.document.getElementById("einst-pfeil");
+        return { zu: i.hidden, aria: k.getAttribute("aria-expanded"),
+                 pfeil: p.textContent.trim(), merker: a.offen(),
+                 // Bleibt der Kopf stehen? Er darf NICHT im Inhalt liegen.
+                 kopfDrin: i.contains(k),
+                 // Und was im Inhalt liegen MUSS.
+                 hatPulldown: !!i.querySelector("#f-auto"),
+                 hatHinweis: !!i.querySelector("#auto-hinweis") };
+      };
+      const anfang = lies();
+      a.zeigen(vorgabe);
+      const nach = lies();
+      a.klick();
+      const auf = lies();
+      a.klick();
+      const zu = lies();
+      return { anfang, nach, auf, zu, gemerkt };
+    } finally { w.close(); }
+  };
+
+  const r = lauf(false);
+  check(!!r, "der Lauf gegen das echte Markup ist durch");
+
+  /* ⚠ DAS MARKUP SELBST MUSS ZU STARTEN. Ohne `hidden` und
+   * `aria-expanded="false"` im HTML blitzte der Abschnitt bei JEDEM Oeffnen
+   * kurz auf, bevor der Zustand aus dem Hintergrund da ist – dieselbe Falle
+   * wie `sec-sect-rem-box` im Sicherheits-Reiter. */
+  check(r.anfang.zu === true,
+        "das Markup startet ZUGEKLAPPT (kein Aufblitzen)");
+  check(r.anfang.aria === "false",
+        "und sagt das auch Hilfsmitteln (aria-expanded)");
+
+  /* DIE ZUSAGE: Zahnrad und Wort bleiben stehen, der Rest faellt weg. */
+  check(r.anfang.kopfDrin === false,
+        "der Kopf (Zahnrad + Wort) liegt NICHT im einklappbaren Teil");
+  check(r.nach.hatPulldown && r.nach.hatHinweis,
+        "Pulldown und Hinweis liegen darin");
+
+  check(r.nach.zu === true && r.nach.merker === false,
+        "einst_offen=false laesst ihn zu");
+  check(r.auf.zu === false && r.auf.aria === "true" && r.auf.merker === true,
+        "ein Klick klappt auf", JSON.stringify(r.auf));
+  check(r.auf.pfeil === "▾" && r.anfang.pfeil === "▸",
+        "der Pfeil sagt den Zustand als ZEICHEN, nicht nur ueber aria",
+        r.anfang.pfeil + " / " + r.auf.pfeil);
+  check(r.zu.zu === true && r.zu.aria === "false" && r.zu.merker === false,
+        "und der zweite Klick wieder zu");
+
+  /* ⚠ DER ZUSTAND MUSS GEMERKT WERDEN. Dieses Fenster wird bei jedem Klick
+   * daneben zerstoert – ein Merker im Modul waere beim naechsten Oeffnen weg,
+   * und ein Abschnitt, der sich jedes Mal wieder zuklappt, ist genau die Sorte
+   * Bedienelement, die niemand benutzt. */
+  check(r.gemerkt.length === 2
+        && r.gemerkt.every((n) => n && n.art === "merken"),
+        "jeder Klick merkt sich den Zustand", JSON.stringify(r.gemerkt));
+  check(r.gemerkt[0] && r.gemerkt[0].einst_offen === true
+        && r.gemerkt[1] && r.gemerkt[1].einst_offen === false,
+        "und zwar mit dem NEUEN Wert", JSON.stringify(r.gemerkt));
+
+  const r2 = lauf(true);
+  check(r2 && r2.nach.zu === false && r2.nach.aria === "true",
+        "ein gemerktes einst_offen=true klappt ihn beim Oeffnen auf");
+
+  // Der Zustand kommt aus dem Hintergrund, nicht aus dem Fenster.
+  check(/einstAbschnittZeigen\(z\.einst_offen === true\)/.test(POPUP_JS),
+        "start() belegt ihn aus dem Zustand des Hintergrunds");
+  /* `=== true`, nicht `!!`: ein aelterer Hintergrund schickt das Feld nicht
+   * mit, und `undefined` muss dann "zu" heissen – die Vorgabe. */
+  check(/einst_offen: e\.einst_offen === true/.test(ohneKommentare(BG)),
+        "und der Hintergrund liefert es fail-closed aus der Ablage");
+
+  /* CSS: der Knopf muss wie eine Ueberschrift AUSSEHEN. */
+  const knopfRegel = (POPUP_CSS.match(/\.abschnitt-knopf \{([^}]*)\}/) || ["", ""])[1];
+  for (const [muster, was] of [
+    [/background:\s*none/, "keine Knopf-Flaeche"],
+    [/border:\s*0/, "kein Knopf-Rahmen"],
+    [/font:\s*inherit/, "die Schrift der Ueberschrift"],
+    [/cursor:\s*pointer/, "und einen Zeiger, der ihn als klickbar zeigt"],
+  ]) {
+    check(muster.test(knopfRegel), ".abschnitt-knopf hat " + was,
+          knopfRegel.trim().slice(0, 80));
+  }
+  /* Ohne `min-width: 0` schiebt ein laengerer Name den Pfeil aus dem 380 px
+   * breiten Fenster, statt dass der Text umbricht (Register). */
+  const wortRegel = (POPUP_CSS.match(/\.abschnitt-wort \{([^}]*)\}/) || ["", ""])[1];
+  check(/min-width:\s*0/.test(wortRegel),
+        ".abschnitt-wort hat min-width: 0", wortRegel.trim());
+
+  /* ── Der Leisten-Hinweis ist raus (Vorgabe 2026-09-03) ─────────────────
+   * "Die Breite ziehst du an der Kante der Leiste." war eine Auskunft an
+   * jemanden, der die Leiste vor sich hat und ihre Kante sieht. */
+  const az = schneidePopup("ansichtZeigen") || "";
+  check(!/Die Breite ziehst du/.test(ohneKommentare(az)),
+        "in der Leiste steht kein Hinweis mehr");
+  check(/h\.hidden = true/.test(az),
+        "der Hinweis-Absatz wird dort ausgeblendet (kein leerer Kasten)");
+  check(/Symbol in der Symbolleiste/.test(az),
+        "im Popup bleibt der Hinweis - dort ist die Wirkung nicht ablesbar");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("27) Ein gemerkter Lauf JE TICKET (2026-09-03)");
+// ═══════════════════════════════════════════════════════════════════════════
+/* Gemeldet: "nach Reiterwechsel ist die Antwort leider wieder weg (oder das
+ * Antwort-Feld einfach nur nicht mehr sichtbar?)". Gemessen im echten Chrome:
+ * wirklich weg - es gab EINEN Speicherplatz, und der Wechsel leerte ihn.
+ *
+ * ⚠ DIE ABLAGE WIRD AUSGEFUEHRT, nicht gelesen. Ring, Migration und die drei
+ * Loeschfaelle sind Verhalten; ein Quelltext-Test saehe nicht, ob der RICHTIGE
+ * Eintrag verdraengt wird. */
+{
+  const teilBG = (name) => (BG.match(new RegExp(
+    "(?:async )?function " + name + "\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}")) || [null])[0];
+  const sammle = (start) => {
+    const teile = [], drin = new Set(), offen = start.slice();
+    while (offen.length) {
+      const n = offen.shift();
+      if (drin.has(n)) continue;
+      const k = teilBG(n);
+      if (!k) continue;
+      drin.add(n); teile.push(k);
+      for (const t of k.match(/\b[A-Za-z_$][\w$]*(?=\s*\()/g) || []) {
+        if (!drin.has(t) && teilBG(t)) offen.push(t);
+      }
+    }
+    return { code: teile.join("\n"), drin };
+  };
+  const { code, drin } = sammle(["ergebnisLesen", "ergebnisSchreiben",
+                                 "ergebnisLoeschen", "ergebnisseLoeschen"]);
+  for (const f of ["ergebnisseLesen", "ergebnisLesen", "ergebnisSchreiben",
+                   "ergebnisLoeschen", "ergebnisseLoeschen"]) {
+    check(drin.has(f), "background.js hat " + f + "()");
+  }
+  /* Modul-Konstanten - fallen aus jedem Funktions-Schnitt heraus (Register). */
+  const KONST = (BG.match(/const ERGEBNIS = "[^"]+";/) || [""])[0] + "\n"
+    + (BG.match(/const ERGEBNISSE = "[^"]+";/) || [""])[0] + "\n"
+    + (BG.match(/const ERGEBNIS_MAX = \d+;/) || [""])[0];
+  check(/ERGEBNISSE/.test(KONST) && /ERGEBNIS_MAX/.test(KONST),
+        "die Ablage-Schluessel und der Deckel stehen im Schnitt", KONST.replace(/\n/g, " "));
+  const MAX = Number((KONST.match(/ERGEBNIS_MAX = (\d+)/) || [0, 0])[1]);
+  check(MAX >= 2, "der Deckel ist eine sinnvolle Zahl", String(MAX));
+
+  /* Eine Ablage, die sich wie `storage.local` verhaelt - inklusive der
+   * Array-Form von get/remove, die der echte Code benutzt. */
+  const welt = (anfang) => {
+    const ablage = Object.assign({}, anfang);
+    return {
+      ablage,
+      api: { storage: { local: {
+        get: async (k) => {
+          const keys = Array.isArray(k) ? k : [k];
+          const o = {};
+          for (const n of keys) if (n in ablage) o[n] = ablage[n];
+          return o;
+        },
+        set: async (o) => { Object.assign(ablage, o); },
+        remove: async (k) => {
+          for (const n of (Array.isArray(k) ? k : [k])) delete ablage[n];
+        },
+      } } },
+    };
+  };
+  const fahre = async (anfang, schritte) => {
+    const w = welt(anfang);
+    const f = new Function("api", KONST + "\n" + code
+      + "\nreturn (async (schritte) => { const aus = [];"
+      + " for (const s of schritte) aus.push(await s({ ergebnisLesen,"
+      + " ergebnisSchreiben, ergebnisLoeschen, ergebnisseLoeschen,"
+      + " ergebnisseLesen })); return aus; });")(w.api);
+    const aus = await f(schritte);
+    return { aus, ablage: w.ablage };
+  };
+  const lauf = (key, text, zeit) => ({ key, text, zeit, modus: "antwort" });
+
+  // ── a) Zwei Tickets nebeneinander - und BEIDE bleiben ──────────────────
+  {
+    const r = await fahre({}, [
+      (f) => f.ergebnisSchreiben(lauf("ABC-1", "Text A", 1000)),
+      (f) => f.ergebnisSchreiben(lauf("XYZ-9", "Text B", 2000)),
+      (f) => f.ergebnisLesen("ABC-1"),
+      (f) => f.ergebnisLesen("XYZ-9"),
+      (f) => f.ergebnisLesen("QRS-3"),
+    ]);
+    check(r.aus[2] && r.aus[2].text === "Text A",
+          "ABC-1 ist nach dem Lauf zu XYZ-9 immer noch da (DIE Aenderung)",
+          JSON.stringify(r.aus[2]));
+    check(r.aus[3] && r.aus[3].text === "Text B", "und XYZ-9 ebenfalls");
+    check(r.aus[4] === null,
+          "zu einem Ticket ohne Eintrag kommt NULL, nicht der letzte Text");
+  }
+
+  /* ⚠ b) DIE SCHRANKE: ein Eintrag mit falschem `key` im Rumpf wird NICHT
+   * ausgeliefert. Sonst haette ein von Hand verstellter Ablage-Eintrag den
+   * Text zu Vorgang A neben Vorgang B gestellt - und ein Klick auf "Als
+   * Kommentar uebernehmen" schickt ihn an den falschen Kunden. */
+  {
+    const r = await fahre({ ergebnisse: { "ABC-1": lauf("XYZ-9", "fremd", 1) } },
+                          [(f) => f.ergebnisLesen("ABC-1")]);
+    check(r.aus[0] === null,
+          "ein Eintrag, dessen key nicht passt, wird verworfen");
+  }
+  { // und ein Eintrag ohne Text ist kein Ergebnis
+    const r = await fahre({ ergebnisse: { "ABC-1": lauf("ABC-1", "", 1) } },
+                          [(f) => f.ergebnisLesen("ABC-1")]);
+    check(r.aus[0] === null, "ein leerer Text zaehlt nicht als Ergebnis");
+  }
+
+  // ── c) Der Deckel verdraengt den AELTESTEN ─────────────────────────────
+  {
+    const schritte = [];
+    for (let i = 1; i <= MAX + 2; i++) {
+      schritte.push((f) => f.ergebnisSchreiben(lauf("T-" + i, "Text " + i, i * 100)));
+    }
+    schritte.push((f) => f.ergebnisseLesen());
+    const r = await fahre({}, schritte);
+    const karte = r.aus[r.aus.length - 1];
+    check(Object.keys(karte).length === MAX,
+          "es bleiben genau " + MAX + " Eintraege", Object.keys(karte).join(","));
+    check(!karte["T-1"] && !karte["T-2"],
+          "und zwar OHNE die zwei aeltesten", Object.keys(karte).join(","));
+    check(!!karte["T-" + (MAX + 2)], "der neueste ist dabei");
+  }
+  { /* Ein Eintrag OHNE Zeitstempel gilt als aeltester - sonst waere er
+     * unloeschbar und der Deckel liesse sich damit aushebeln. */
+    const anfang = { ergebnisse: {} };
+    anfang.ergebnisse["ALT-0"] = { key: "ALT-0", text: "ohne Zeit" };
+    const schritte = [];
+    for (let i = 1; i <= MAX; i++) {
+      schritte.push((f) => f.ergebnisSchreiben(lauf("N-" + i, "x", i * 100)));
+    }
+    schritte.push((f) => f.ergebnisseLesen());
+    const r = await fahre(anfang, schritte);
+    check(!r.aus[r.aus.length - 1]["ALT-0"],
+          "ein Eintrag ohne Zeitstempel wird als aeltester verdraengt");
+  }
+
+  // ── d) Die drei Loeschfaelle ───────────────────────────────────────────
+  {
+    const anfang = { ergebnisse: { "ABC-1": lauf("ABC-1", "A", 1),
+                                   "XYZ-9": lauf("XYZ-9", "B", 2) } };
+    const r = await fahre(anfang, [
+      (f) => f.ergebnisLoeschen("ABC-1"),
+      (f) => f.ergebnisseLesen(),
+    ]);
+    const k = r.aus[1];
+    check(!k["ABC-1"] && !!k["XYZ-9"],
+          "'Leeren' nimmt GENAU einen Eintrag", Object.keys(k).join(","));
+  }
+  {
+    const anfang = { ergebnis: lauf("OLD-1", "alt", 1),
+                     ergebnisse: { "ABC-1": lauf("ABC-1", "A", 1) } };
+    const r = await fahre(anfang, [(f) => f.ergebnisseLoeschen()]);
+    check(!("ergebnisse" in r.ablage) && !("ergebnis" in r.ablage),
+          "Zuruecksetzen/Abmelden raeumt ALLES, auch den alten Einzelplatz",
+          Object.keys(r.ablage).join(","));
+  }
+
+  /* ── e) MIGRATION: ein vor dem Update gemerkter Lauf geht nicht verloren.
+   * Wer gerade eine Auswertung offen hatte, hat sie bezahlt. */
+  {
+    const r = await fahre({ ergebnis: lauf("ABC-1", "vor dem Update", 5) }, [
+      (f) => f.ergebnisLesen("ABC-1"),
+      (f) => f.ergebnisLesen("ABC-1"),
+    ]);
+    check(r.aus[0] && r.aus[0].text === "vor dem Update",
+          "der alte Einzelplatz wird uebernommen", JSON.stringify(r.aus[0]));
+    check(!("ergebnis" in r.ablage),
+          "und danach entfernt - keine zweite Wahrheit",
+          Object.keys(r.ablage).join(","));
+    check(r.aus[1] && r.aus[1].text === "vor dem Update",
+          "der zweite Aufruf liefert ihn weiter (idempotent)");
+  }
+
+  /* ── f) Der Reiterwechsel darf NICHT loeschen - als REGEL im Fenster.
+   * Ein `{wert: null}` OHNE Schluessel raeumt im Hintergrund nichts; genau so
+   * sah der Aufruf vor dem Fix aus, und er kam beim bloszen Wechsel. */
+  {
+    const bgOhneK = ohneKommentare(BG);
+    const em = (bgOhneK.match(/case "ergebnis_merken":[\s\S]*?break;/) || [""])[0];
+    check(em.length > 60, "der Fall ergebnis_merken wurde geschnitten",
+          String(em.length));
+    check(/nachricht\.alle/.test(em) && /nachricht\.key/.test(em),
+          "er unterscheidet 'alles' von 'genau dieses Ticket'", em.trim());
+    check(/case "ergebnis":/.test(bgOhneK),
+          "und es gibt einen Fall, der EIN Ticket erfragt");
+    /* ⚠ Die Zustands-Antwort darf das Ergebnis NICHT mehr mitschicken: dort
+     * ist noch unbekannt, welcher Vorgang offen ist. */
+    const zust = (bgOhneK.match(/case "zustand":[\s\S]*?\n        \}/) || [""])[0];
+    check(zust.length > 200, "der zustand-Fall wurde geschnitten");
+    check(!/ergebnis:/.test(zust),
+          "die Zustands-Antwort schickt keinen Text ohne belegten Ticketbezug");
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("28) Vorlagenwechsel automatisch ausfuehren (2026-09-14)");
+// ═══════════════════════════════════════════════════════════════════════════
+/* Vorgabe des Betreibers: „'Vorlagen verwalten' erweitern um checkbox:
+ * 'Vorlagenwechsel automatisch ausfuehren'" – und nachgeschoben: „baue als
+ * default ein 'automatisch ausfuehren'".
+ *
+ * ZWEI DINGE WERDEN HIER GEMESSEN, UND DAS ZWEITE IST DAS TEURERE:
+ *   1. dass ein Wechsel im Pulldown den Lauf ueberhaupt anstoesst, und
+ *   2. dass er ihn NICHT anstoesst, wo es Geld oder Arbeit kostet –
+ *      Pfeiltasten-Steppen, kein Ticket, laufender Lauf, gewechselter Tab.
+ * Eine Quelltext-Suche koennte keines von beidem beantworten; die Kette
+ * Ereignis → Verzoegerung → Lauf wird deshalb AUSGEFUEHRT.
+ */
+
+// ── a) Struktur: der Haken sitzt in der Box, nicht im wandernden Formular ──
+{
+  const html = ohneKommentare(POPUP_HTML);
+  const box = (html.match(/<div id="vorlagen-box"[\s\S]*?\n    <\/div>/) || [""])[0];
+  check(box.length > 200, "die Vorlagen-Box wurde geschnitten", String(box.length));
+  check(/id="f-vorl-wechsel"/.test(box),
+        "das Kaestchen steht IN der Vorlagen-Verwaltung (Vorgabe des Ortes)");
+
+  /* ⚠ UND NICHT IM FORMULAR. `#vorl-form` wandert unter die gerade bearbeitete
+   * Zeile und ist zu, solange niemand bearbeitet – eine Einstellung darin waere
+   * die meiste Zeit unsichtbar und stuende sonst mal hier, mal unter der
+   * siebten Vorlage. */
+  const form = (box.match(/<div id="vorl-form"[\s\S]*?<\/div><!-- \/vorl-form -->/) || [""])[0];
+  check(form.length > 200, "das Bearbeiten-Formular wurde geschnitten",
+        String(form.length));
+  check(!/f-vorl-wechsel/.test(form),
+        "aber NICHT im wandernden Bearbeiten-Formular");
+
+  // Ein Kontrollkaestchen ist ein SATZ: <label> um Kaestchen und Text, sonst
+  // trifft ein Klick auf die Beschriftung ins Leere.
+  check(/<label class="vorl-auto">[\s\S]*?id="f-vorl-wechsel"[\s\S]*?<span>/.test(box),
+        "Kaestchen und Text liegen in EINEM <label>");
+  const css = lies("popup.css");
+  check(/\.vorl-auto\s*\{[\s\S]*?min-width:\s*0|\.vorl-auto\s*>\s*span\s*\{[^}]*min-width:\s*0/
+        .test(css),
+        "und der Text darf schrumpfen (min-width: 0), sonst sprengt er die "
+        + "380 Pixel breite Zeile");
+  check(/\.vorl-fuss\s*\{[^}]*border-top/.test(css),
+        "ein Trennstrich scheidet die Einstellung von der Datenpflege darueber");
+}
+
+// ── b) DIE VORGABE IST AN – an allen drei Stellen ─────────────────────────
+/* ⚠ SIE STEHT DREIMAL, UND ALLE DREI MUESSEN ZUSAMMENPASSEN: im Markup (gilt,
+ * bevor ein Abruf zurueck ist), im Fenster-Merker (gilt, wenn ein aelterer
+ * Hintergrund das Feld gar nicht schickt) und im Hintergrund (gilt fuer einen
+ * Altbestand ohne das Feld). Faellt eine davon auf `false`, ist die Vorgabe
+ * fuer irgendeine Lage still ins Gegenteil gekippt – und niemand sieht es. */
+{
+  const html = ohneKommentare(POPUP_HTML);
+  const inp = (html.match(/<input type="checkbox" id="f-vorl-wechsel"[^>]*>/) || [""])[0];
+  check(/\bchecked\b/.test(inp),
+        "Markup: das Kaestchen ist vorbelegt", inp.trim());
+  check(/let _autoWechsel = true;/.test(ohneKommentare(POPUP_JS)),
+        "Fenster: _autoWechsel startet auf true");
+  const bgOhne = ohneKommentare(BG);
+  check(/auto_wechsel: e\.auto_wechsel !== false/.test(bgOhne),
+        "Hintergrund: `!== false` (ein Altbestand OHNE das Feld ergibt AN)");
+  check(!/auto_wechsel: e\.auto_wechsel === true/.test(bgOhne),
+        "und NICHT `=== true` – das waere die stille Abschaltung fuer jeden, "
+        + "der die Einstellung nie angefasst hat");
+  check(/teil\.auto_wechsel !== undefined/.test(bgOhne),
+        "einstSchreiben kennt das Feld (sonst wird es wortlos verworfen)");
+}
+
+// ── c) Die Kette Wechsel → Verzoegerung → Lauf – AUSGEFUEHRT ──────────────
+{
+  const chHandler = (POPUP_JS.match(
+    /\$\("f-vorlage"\)\.addEventListener\("change",[\s\S]*?\n\}\);/) || [""])[0];
+  check(/wechselAnstossen\(\)/.test(chHandler),
+        "der Wechsel-Handler stoesst an", chHandler.trim().slice(0, 80));
+
+  const { teile, drin } = popupTeile(
+    ["wechselAnstossen", "wechselAbbrechen", "wechselZeigen",
+     "startTitelSetzen"], ["auswerten", "frage"]);
+  /* ⚠ NAMENS-GUARD GANZ OBEN, und er ist kein Beiwerk: gegen einen ALTEN
+   * Stand gibt es diese Funktionen nicht. Ohne den Guard stirbt der Lauf an
+   * einem nackten „wechselZeigen is not defined" – kein FAIL, keine
+   * Bilanzzeile, und weil die Datei EINE async-IIFE ist, ist das von „gar
+   * nicht gelaufen" nicht zu unterscheiden. Genau so sah die Gegenprobe
+   * „kompletter Altstand" beim ersten Mal aus (Register). */
+  const daZuLaufen = drin.has("wechselAnstossen") && drin.has("wechselZeigen")
+                     && drin.has("wechselAbbrechen") && !!chHandler;
+  check(daZuLaufen,
+        "popup.js hat wechselAnstossen(), wechselZeigen() und den Handler");
+
+  /* Die Modul-Konstanten stehen in keinem Funktionsrumpf und fallen aus jedem
+   * Schnitt heraus – fehlen sie, WIRFT der Lauf statt fehlzuschlagen
+   * (Register, in dieser Datei mehrfach bezahlt). */
+  const VERZUG_ZEILE = (POPUP_JS.match(/const WECHSEL_VERZUG = \d+;/) || [""])[0];
+  check(!!VERZUG_ZEILE, "WECHSEL_VERZUG ist eine Modul-Konstante", VERZUG_ZEILE);
+
+  /** Ein Lauf im gestellten Fenster.
+   *
+   * ⚠ DIE ZEIT WIRD VIRTUALISIERT, NICHT ABGEWARTET. `setTimeout` merkt den
+   * Rueckruf, statt ihn zu planen – damit misst der Waechter zugleich die
+   * Eigenschaft, um die es geht: VOR dem Ausloesen darf noch NICHTS gelaufen
+   * sein. Echte 600 ms je Fall waeren nicht nur langsam, sie koennten diese
+   * Aussage gar nicht treffen.
+   */
+  const lauf = (aufbau, schritte) => {
+    const dom = new JSDOM(POPUP_HTML, { url: "https://x.test/",
+                                        runScripts: "outside-only" });
+    const w = dom.window;
+    try {
+      const f = new w.Function("aufbau", "schritte", `
+        const $ = (id) => document.getElementById(id);
+        const el = { arbeit: $("bereich-arbeit") };
+        let _vorlagen = {
+          global: [{ id: "g1", name: "Kurz", art: "zusammenfassung" },
+                   { id: "g2", name: "An den Melder", art: "antwort" }],
+          eigene: [], darf_global: false, standard: "",
+        };
+        let _vorlBeruehrt = false, _standAlt = false;
+        let _key = "", _laeuft = false;
+        /* Die Modul-Merker des Wechsels (_autoWechsel, _wechselTimer,
+         * _wechselKey, WECHSEL_VERZUG) – sie stehen in keinem Funktionsrumpf
+         * und fallen sonst aus dem Schnitt. */
+        ` + WECHSEL_KONST + `
+
+        // Aufzeichner statt echter Arbeit.
+        const laeufe = [], gemerkt = [], geloescht = [];
+        let _gemeldet = null;
+        function melde(t) { _gemeldet = t; }
+        async function auswerten(modus, entwurf, vorlagenId) {
+          laeufe.push({ modus, vorlagenId, wahl: $("f-vorlage").value });
+        }
+        let _frageFehler = null;
+        async function frage(n) {
+          if (_frageFehler) throw new Error(_frageFehler);
+          gemerkt.push(n); return { ok: true };
+        }
+
+        /* Virtualisierte Zeit: der Rueckruf wird gemerkt, nicht geplant. */
+        let _warte = null, _id = 0;
+        function setTimeout(fn, ms) { _warte = { fn, ms, id: ++_id }; return _id; }
+        function clearTimeout(id) {
+          geloescht.push(id);
+          if (_warte && _warte.id === id) _warte = null;
+        }
+        function ausloesen() { const t = _warte; _warte = null; if (t) t.fn(); }
+
+        ` + teile.join("\n") + `
+        ` + chHandler + `
+
+        // Das Pulldown fuellen wie im Betrieb.
+        for (const v of _vorlagen.global) {
+          const o = document.createElement("option");
+          o.value = v.id; o.textContent = v.name;
+          $("f-vorlage").appendChild(o);
+        }
+        const waehle = (wert) => {
+          $("f-vorlage").value = wert;
+          $("f-vorlage").dispatchEvent(new Event("change"));
+        };
+        const zustand = () => ({
+          laeufe: laeufe.slice(), wartet: !!_warte,
+          ms: _warte ? _warte.ms : 0, geloescht: geloescht.length,
+          gemeldet: _gemeldet, gemerkt: gemerkt.slice(),
+          haken: $("f-vorl-wechsel").checked, merker: _autoWechsel,
+        });
+        const api = { waehle, ausloesen, zustand,
+                      setKey: (k) => { _key = k; },
+                      setLaeuft: (b) => { _laeuft = b; },
+                      setArbeitVersteckt: (b) => { el.arbeit.hidden = b; },
+                      setFehler: (m) => { _frageFehler = m; },
+                      wechselZeigen, wechselAbbrechen };
+        aufbau(api);
+        for (const s of schritte) s(api);
+        return JSON.stringify(zustand());`);
+      return JSON.parse(f(aufbau, schritte));
+    } finally { w.close(); }
+  };
+
+  const bereit = (a) => { a.setKey("ABC-1"); a.setArbeitVersteckt(false); };
+
+  if (!daZuLaufen) {
+    check(false, "die ausgefuehrten Faelle wurden UEBERSPRUNGEN – der "
+          + "Wechsel-Weg fehlt in popup.js");
+  } else {
+
+  // — Der Regelfall: verzoegert, dann genau EIN Lauf —
+  {
+    let vorher = null;
+    const r = lauf(bereit, [
+      (a) => a.waehle("g2"),
+      (a) => { vorher = a.zustand(); },
+      (a) => a.ausloesen(),
+    ]);
+    check(vorher && vorher.laeufe.length === 0,
+          "der Wechsel startet NICHT sofort – er wartet",
+          JSON.stringify(vorher && vorher.laeufe));
+    check(vorher && vorher.wartet && vorher.ms >= 300,
+          "und zwar spuerbar lange (gegen Pfeiltasten-Steppen)",
+          String(vorher && vorher.ms));
+    check(r.laeufe.length === 1, "nach Ablauf laeuft genau EINER",
+          JSON.stringify(r.laeufe));
+    check(r.laeufe[0] && r.laeufe[0].modus === "antwort",
+          "mit der Art der gewaehlten Vorlage", JSON.stringify(r.laeufe[0]));
+    /* ⚠ OHNE `vorlagenId`: genau derselbe Aufruf wie beim Dreieck daneben –
+     * das Feld gilt. Eine mitgegebene Kennung waere ein zweiter Weg in
+     * denselben Lauf, und zwei Wege laufen beim naechsten Feinschliff
+     * auseinander. */
+    check(r.laeufe[0] && r.laeufe[0].vorlagenId === undefined,
+          "und ueber dasselbe Feld wie der Startknopf");
+  }
+
+  // — Steppen mit Pfeiltasten kostet EINEN Lauf, nicht drei —
+  /* ⚠ DAS IST DER TEUERSTE FALL. Ein <select> feuert `change` bei Tastatur-
+   * Navigation fuer JEDEN Schritt: ohne Timer waeren das drei bezahlte
+   * Auswertungen fuer zwei Vorlagen, die nur ueberflogen wurden. */
+  {
+    const r = lauf(bereit, [
+      (a) => a.waehle("g1"),
+      (a) => a.waehle("g2"),
+      (a) => a.waehle(""),
+      (a) => a.ausloesen(),
+    ]);
+    check(r.laeufe.length === 1,
+          "drei Wechsel hintereinander ergeben EINEN Lauf",
+          JSON.stringify(r.laeufe));
+    check(r.laeufe[0] && r.laeufe[0].wahl === "",
+          "und zwar den der ZULETZT gewaehlten Vorlage (der letzte gewinnt)",
+          JSON.stringify(r.laeufe[0]));
+    check(r.geloescht >= 2, "die vorigen Timer wurden zurueckgenommen",
+          String(r.geloescht));
+  }
+
+  // — Haken aus: nichts wartet, nichts laeuft —
+  {
+    const r = lauf((a) => { bereit(a); a.wechselZeigen(false); }, [
+      (a) => a.waehle("g1"),
+      (a) => a.ausloesen(),
+    ]);
+    check(r.laeufe.length === 0 && !r.wartet,
+          "abgehakt startet nichts – und es wartet auch kein Timer",
+          JSON.stringify(r));
+  }
+
+  // — Ohne erkanntes Ticket: still nichts —
+  /* Das Pulldown ist auch auf einer fremden Seite bedienbar (die Ticket-Sperre
+   * greift nur auf <button>), und das ist richtig: man stellt die Vorlage fuer
+   * spaeter ein. Eine Fehlermeldung bei jedem Wechsel waere Laerm. */
+  {
+    const r = lauf((a) => { a.setKey(""); a.setArbeitVersteckt(false); }, [
+      (a) => a.waehle("g1"),
+      (a) => a.ausloesen(),
+    ]);
+    check(r.laeufe.length === 0, "ohne Ticket laeuft nichts");
+    check(r.gemeldet === null,
+          "und es wird auch nicht gemeckert – gedrueckt hat niemand etwas",
+          String(r.gemeldet));
+  }
+
+  // — Waehrend eines Laufs wird nicht nachgelegt —
+  {
+    const r = lauf((a) => { bereit(a); a.setLaeuft(true); }, [
+      (a) => a.waehle("g1"),
+      (a) => a.ausloesen(),
+    ]);
+    check(r.laeufe.length === 0,
+          "waehrend eines laufenden Vorgangs startet kein zweiter");
+  }
+
+  /* ⚠ UND DIE PRUEFUNG STEHT IM TIMER, NICHT DAVOR: der Lauf kann erst nach
+   * dem Wechsel begonnen haben (Automatik bei neuem Ticket). Nur der Zustand
+   * ZUM ZEITPUNKT DES STARTS zaehlt. */
+  {
+    const r = lauf(bereit, [
+      (a) => a.waehle("g1"),
+      (a) => a.setLaeuft(true),
+      (a) => a.ausloesen(),
+    ]);
+    check(r.laeufe.length === 0,
+          "ein Lauf, der erst NACH dem Wechsel beginnt, verhindert ihn auch");
+  }
+
+  // — Der Tab hat gewechselt: der Wunsch galt einem anderen Vorgang —
+  {
+    const r = lauf(bereit, [
+      (a) => a.waehle("g1"),
+      (a) => a.setKey("XYZ-9"),
+      (a) => a.ausloesen(),
+    ]);
+    check(r.laeufe.length === 0,
+          "nach einem Tab-Wechsel laeuft die Vorlage NICHT auf dem neuen Ticket",
+          JSON.stringify(r.laeufe));
+  }
+
+  // — Abgemeldet (Leiste): der Arbeitsbereich ist verborgen —
+  {
+    const r = lauf((a) => { bereit(a); a.setArbeitVersteckt(true); }, [
+      (a) => a.waehle("g1"),
+      (a) => a.ausloesen(),
+    ]);
+    check(r.laeufe.length === 0, "bei verborgenem Arbeitsbereich laeuft nichts");
+  }
+
+  // — Zuruecksetzen nimmt einen wartenden Wechsel zurueck —
+  {
+    const r = lauf(bereit, [
+      (a) => a.waehle("g1"),
+      (a) => a.wechselAbbrechen(),
+      (a) => a.ausloesen(),
+    ]);
+    check(r.laeufe.length === 0 && !r.wartet,
+          "wechselAbbrechen() raeumt den wartenden Lauf ab");
+  }
+
+  // — wechselZeigen schaltet NUR AUS —
+  {
+    const r = lauf((a) => {
+      a.wechselZeigen(undefined);   // aelterer Hintergrund: Feld fehlt
+    }, []);
+    check(r.haken === true && r.merker === true,
+          "ein Hintergrund ohne das Feld laesst die Vorgabe AN",
+          JSON.stringify({ haken: r.haken, merker: r.merker }));
+    const r2 = lauf((a) => a.wechselZeigen(false), []);
+    check(r2.haken === false && r2.merker === false,
+          "ein gespeichertes AUS nimmt den Haken weg");
+    const r3 = lauf((a) => { a.wechselZeigen(false); a.wechselZeigen(true); }, []);
+    check(r3.haken === true, "und ein gespeichertes AN setzt ihn wieder");
+  }
+
+  }   // Ende daZuLaufen
+}
+
+// ── d) Der Haken selbst – AUSGEFUEHRT ─────────────────────────────────────
+/* ⚠ NIE SELBST UMSCHALTEN. Das Kaestchen sitzt in einem <label>; der Browser
+ * schaltet es bereits um, ein zusaetzliches `checked = !checked` hebt sich auf
+ * und der Klick taete unterm Strich GAR NICHTS (im Projekt beim AD-Picker
+ * bezahlt, Register).
+ *
+ * ⚠ GEMESSEN STATT GELESEN, und das war noetig: ein Regex auf `checked = !`
+ * meldete den FEHLERZWEIG als Verstoss – dort ist das Zuruecknehmen genau
+ * richtig. Die Eigenschaft lautet „ein Ereignis kehrt den Zustand nicht um",
+ * und die beantwortet nur der Lauf. */
+{
+  const cb = (POPUP_JS.match(
+    /\$\("f-vorl-wechsel"\)\.addEventListener\("change",[\s\S]*?\n\}\);/) || [""])[0];
+  const cbDa = cb.length > 100;
+  check(cbDa, "der Handler des Kaestchens wurde geschnitten", String(cb.length));
+  if (!cbDa) {
+    // Guard wie in c): ohne Handler bricht der Lauf sonst ohne Bilanz ab.
+    check(false, "die ausgefuehrten Faelle wurden UEBERSPRUNGEN – das "
+          + "Kaestchen ist nicht verdrahtet");
+  } else {
+
+  const { teile } = popupTeile(["wechselAbbrechen"], []);
+  const hakenLauf = async (fehler) => {
+    const dom = new JSDOM(POPUP_HTML, { url: "https://x.test/",
+                                        runScripts: "outside-only" });
+    const w = dom.window;
+    try {
+      const f = new w.Function("fehler", `
+        const $ = (id) => document.getElementById(id);
+        ` + WECHSEL_KONST + `
+        let _standAlt = false;
+        const gemerkt = [];
+        async function frage(n) {
+          if (fehler) throw new Error(fehler);
+          gemerkt.push(n); return { ok: true };
+        }
+        function setTimeout(fn, ms) { return 1; }
+        function clearTimeout(id) {}
+        ` + teile.join("\n") + `
+        ` + cb + `
+        return (async () => {
+          const c = $("f-vorl-wechsel");
+          // Wie der Browser im <label>: er schaltet um, DANN feuert change.
+          c.checked = false;
+          c.dispatchEvent(new Event("change"));
+          // Der Handler ist async – dem Microtask Zeit lassen.
+          await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+          return JSON.stringify({ haken: c.checked, merker: _autoWechsel,
+                                  gemerkt, hinweis: $("vorl-hinweis").textContent });
+        })();`);
+      return JSON.parse(await f(fehler));
+    } finally { w.close(); }
+  };
+
+  const r = await hakenLauf(null);
+  check(r.haken === false,
+        "ein Ereignis kehrt den Zustand NICHT um (kein Doppel-Toggle)",
+        String(r.haken));
+  check(r.merker === false, "der Merker folgt dem Kaestchen");
+  check(r.gemerkt.length === 1 && r.gemerkt[0].art === "merken"
+        && r.gemerkt[0].auto_wechsel === false,
+        "und die Einstellung wird sofort gespeichert",
+        JSON.stringify(r.gemerkt));
+
+  /* ⚠ EIN FEHLSCHLAG NIMMT SICH ZURUECK. Sonst behauptet der Haken einen
+   * Zustand, den es in der Ablage nicht gibt – beim naechsten Oeffnen stuende
+   * er wieder anders da, ohne dass jemand etwas getan hat. */
+  const rf = await hakenLauf("Netz weg");
+  check(rf.haken === true && rf.merker === true,
+        "schlaegt das Speichern fehl, kippt beides zurueck",
+        JSON.stringify({ haken: rf.haken, merker: rf.merker }));
+  check(!!rf.hinweis, "und der Grund steht dabei", rf.hinweis);
+
+  }   // Ende cbDa
+}
+
+// ── e) Zuruecksetzen raeumt den wartenden Wechsel ab – als Regel ──────────
+{
+  const fl = schneidePopup("felderLeeren") || "";
+  check(fl.length > 100, "felderLeeren wurde geschnitten", String(fl.length));
+  check(/wechselAbbrechen\(\)/.test(fl),
+        "„Leeren“, Reset und Tab-Wechsel nehmen einen wartenden Lauf zurueck – "
+        + "sonst fuellt er Sekunden spaeter genau das Feld, das gerade geleert wurde");
+}
+
+// ── f) Verhaltensaenderung: STAND und Version hochgezaehlt ────────────────
+/* Ein NEUES Feld in `merken`/`zustand` ist eine Aenderung an den
+ * Nachrichtenfaellen: ein alter Hintergrund verwirft es wortlos und gibt es im
+ * Zustand nicht heraus. Genau dafuer gibt es STAND. Und die Erweiterung
+ * aktualisiert sich nicht von selbst – ohne hoehere Version erfaehrt niemand,
+ * dass es etwas Neues gibt (der Update-Hinweis vergleicht Zahlen, 0.10.0 ist
+ * also korrekt groesser als 0.9.0). */
+{
+  const sp = (POPUP_JS.match(/const STAND = (\d+);/) || [0, "0"])[1];
+  const sb = (BG.match(/const STAND = (\d+);/) || [0, "0"])[1];
+  check(sp === sb, "beide STAND-Werte sind gleich", sp + " / " + sb);
+  check(parseInt(sp, 10) >= 9,
+        "und hochgezaehlt (neues Feld in merken/zustand)", sp);
+  const v = M_CHROME.version.split(".").map(Number);
+  check(v[0] > 0 || v[1] >= 10,
+        "die Paketversion ist hochgezaehlt", M_CHROME.version);
+}
+
+// ── g) Die Anleitung im Portal nennt den Haken ────────────────────────────
+/* Ein Bedienelement, von dem die Anleitung nichts weiss, findet niemand – und
+ * dieses aendert das Verhalten des Pulldowns, ohne dass man es sieht. Der
+ * ENGLISCHE Text nennt es bei seinem DEUTSCHEN Namen: das Fenster der
+ * Erweiterung ist einsprachig, ein uebersetzter Name liesse den Leser nach
+ * einem Eintrag suchen, den es nicht gibt. */
+{
+  const i18n = fs.readFileSync(path.join(WURZEL, "frontend/js/i18n.js"), "utf8");
+  const treffer = (i18n.match(/Vorlagenwechsel automatisch ausführen/g) || []).length;
+  check(treffer >= 2,
+        "die Anleitung nennt den Haken in DE und EN", String(treffer));
+}
+
+console.log("\n" + ok + " OK, " + fail + " FAIL");
+process.exit(fail ? 1 : 0);
+})();

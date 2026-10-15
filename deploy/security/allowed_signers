@@ -1,0 +1,6 @@
+# Schluessel, deren Signatur ein Update auf den Servern zulaesst (BSI H1).
+# Massgeblich auf dem Server ist /etc/jarvis/allowed_signers (root-eigen), gesetzt
+# von signatur_einrichten.sh mit ausdruecklich genanntem Fingerabdruck – NICHT diese
+# Datei: wer auf GitHub schreiben kann, kann auch sie aendern.
+#   jarvis-release  SHA256:+z3tS1d4c7KKO/Fd/XcIzckaT/txQWxEwyrR0OSnv6w  (seit 2026-09-30)
+jarvis-release namespaces="git" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBfHCUaONLCvKDaEoXBI2NsEDsoSozbUi7jKUNTKfWTI

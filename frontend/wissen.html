@@ -1,0 +1,935 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wissen – Jarvis</title>
+    <link rel="stylesheet" href="/static/css/theme.css?v=34">
+    <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
+    <link rel="stylesheet" href="/static/css/avatar.css?v=10">
+    <link rel="stylesheet" href="/static/css/style.css?v=200">
+    <link rel="icon" href="/static/favicon.png" type="image/png">
+    <style>
+        * { box-sizing: border-box; }
+        /* style.css setzt fuer die SPA html,body{height:100%;overflow:hidden} –
+           diese Standalone-Seite soll aber normal scrollen. */
+        html, body { height: auto; overflow: visible; }
+        body { font-family: var(--font-body); background: var(--bg-primary); color: var(--text-primary); margin: 0; min-height: 100vh; }
+        .wi-topbar { display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+            border-bottom: 1px solid var(--border); background: var(--bg-glass); backdrop-filter: blur(8px);
+            position: sticky; top: 0; z-index: 10; }
+        .wi-logo { width: 32px; height: 32px; border-radius: 50%; background: var(--gradient);
+            display: flex; align-items: center; justify-content: center; font-weight: 700; color: #fff;
+            flex-shrink: 0; overflow: hidden; }
+        .wi-logo img { width: 100%; height: 100%; object-fit: contain; }
+        .wi-title { font-size: 1.15rem; font-weight: 600; }
+        .wi-spacer { flex: 1; }
+        /* Symbol-Buttons in der Topbar (Home/Abmelden); Gruppe rechts mit 8px
+           Abstand wie .topbar-right auf den anderen Seiten (Topbar-gap ist 12px) */
+        /* Abstand der rechten Symbole wie in /chat (.topbar-right gap: 4px) */
+        .wi-top-icons { display: flex; align-items: center; gap: 4px; }
+        /* Titelleisten-Symbole 1:1 wie /chat (.btn-theme): randlos, padding 4px 8px, svg 20px */
+        .wi-icon-btn { background: none; border: none; color: var(--muted, var(--text-secondary));
+            font-size: 18px; cursor: pointer; padding: 4px 8px; border-radius: 8px;
+            transition: color .2s, background .2s; text-decoration: none;
+            display: flex; align-items: center; justify-content: center; }
+        .wi-icon-btn:hover { background: rgba(var(--accent-rgb), .12); color: var(--purple, var(--accent)); }
+        .wi-icon-btn svg { width: 20px; height: 20px; }
+        /* LLM-Status-Punkt in der Topbar (wie /chat und /support). Die
+           CPU-Anzeige liegt seit 2026-08-22 als `.jv-cpu-bar` in theme.css. */
+        .wi-status-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+            background: var(--text-muted); transition: background .3s ease; }
+        .wi-status-dot.connected { background: var(--success); box-shadow: 0 0 6px var(--success); }
+        .wi-status-dot.disconnected { background: var(--danger); }
+        .wi-wrap { max-width: 900px; margin: 0 auto; padding: 26px 18px 80px; }
+        /* Maximieren: der Knopf sitzt hinter "Angemeldet als ..." ganz oben in
+           der Seite; maximiert fallen die 900 px weg und ALLE Abschnitte nutzen
+           die volle Fensterbreite. Seit 2026-09-28 der gemeinsame Baustein aller
+           Seiten (`.jv-max-btn`/`body.jv-breit` in theme.css, seite_breit.js). */
+        .wi-scope-row { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+        .wi-scope-row > .wi-banner { flex: 1; min-width: 0; }
+
+        /* Login */
+        .wi-login { max-width: 380px; margin: 8vh auto 0; padding: 28px 26px;
+            background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-md); }
+        .wi-login h1 { font-size: 1.3rem; margin: 0 0 4px; }
+        .wi-login p.sub { color: var(--text-secondary); font-size: 0.9rem; margin: 0 0 18px; }
+        .wi-field { margin-bottom: 12px; }
+        .wi-field label { display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 4px; }
+        .wi-input { width: 100%; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--border);
+            background: rgba(var(--fg-rgb), 0.05); color: var(--text-primary); font-size: 0.95rem; outline: none; }
+        .wi-input:focus { border-color: var(--accent); }
+        .wi-err { color: var(--danger); font-size: 0.85rem; min-height: 1.1em; margin-top: 4px; }
+        /* Kleine Icon-Aktion neben einem Eingabefeld (z.B. Unterordner anlegen/umbenennen) */
+        .wi-btn-icon { flex: 0 0 auto; padding: 8px 10px; border-radius: 8px; cursor: pointer;
+            border: 1px solid var(--border); background: rgba(var(--fg-rgb), 0.05);
+            color: var(--text-primary); font-size: 0.95rem; line-height: 1; }
+        .wi-btn-icon:hover:not(:disabled) { border-color: var(--accent); }
+        .wi-btn-icon:disabled { opacity: 0.4; cursor: not-allowed; }
+        .hidden { display: none !important; }
+
+        /* Sektionen */
+        .wi-section { background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: var(--radius-lg); padding: 20px 22px; margin-bottom: 18px; box-shadow: var(--shadow-sm); }
+        .wi-section h2 { font-size: 1.1rem; margin: 0 0 4px; display: flex; align-items: center; gap: 8px;
+            cursor: pointer; user-select: none; }
+        .wi-section h2 .wi-sec-tog { margin-left: auto; font-size: 0.8rem; color: var(--text-secondary); }
+        .wi-section.collapsed > *:not(h2) { display: none !important; }
+        .wi-section.collapsed h2 { margin-bottom: 0; }
+        .wi-section .desc { color: var(--text-secondary); font-size: 0.86rem; margin: 0 0 16px; }
+        .wi-scope { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+        /* Gruppen-Chips: einfarbiger (Theme-)Text + bunter Rahmen – lesbar in Hell UND Dunkel */
+        .wi-chip { font-size: 0.78rem; padding: 3px 10px; border-radius: 999px; font-weight: 600;
+            border: 1px solid; color: var(--text-primary); }
+        .wi-banner { padding: 12px 16px; border-radius: 10px; font-size: 0.9rem;
+            background: rgba(var(--fg-rgb), 0.05); border: 1px solid var(--border); }
+        .wi-banner.warn { background: rgba(var(--warning-rgb), 0.12); border-color: rgba(var(--warning-rgb), 0.4); }
+        /* Zweite Zeile im Banner: Hinweis fuer Benutzer ohne Wissensbereich */
+        .wi-banner-sub { margin-top: 4px; font-size: 0.82rem; color: var(--text-secondary); }
+
+        .wi-drop { border: 2px dashed rgba(var(--fg-rgb), 0.25); border-radius: 12px; padding: 26px; text-align: center;
+            color: var(--text-secondary); cursor: pointer; transition: all var(--transition); }
+        .wi-drop:hover, .wi-drop.drag { border-color: var(--accent); background: rgba(var(--accent-rgb), 0.06); color: var(--text-primary); }
+        /* Ablage gesperrt (keine Gruppe gewaehlt / KI-Analyse laeuft) */
+        .wi-drop.disabled { opacity: .45; cursor: not-allowed; }
+        .wi-drop.disabled:hover { border-color: rgba(var(--fg-rgb), 0.25); background: transparent; color: var(--text-secondary); }
+        .wi-drop-hint { margin-top: 8px; font-size: 0.85rem; color: var(--warning); }
+        /* Prominente Warten-Anzeige waehrend Upload/KI-Analyse */
+        .wi-busy { display: flex; align-items: center; gap: 12px; margin-top: 14px; padding: 14px 18px;
+            border: 1px solid rgba(var(--accent-rgb), 0.5); border-radius: 12px;
+            background: rgba(var(--accent-rgb), 0.10); color: var(--text-primary);
+            font-size: 1rem; font-weight: 600; }
+        .wi-busy-spin { width: 22px; height: 22px; flex: 0 0 22px; border-radius: 50%;
+            border: 3px solid rgba(var(--accent-rgb), 0.25); border-top-color: var(--accent);
+            animation: wiSpin 0.9s linear infinite; }
+        @keyframes wiSpin { to { transform: rotate(360deg); } }
+        /* Laufanzeiger in der Import-Fortschrittszeile: ein per CSS gezeichneter
+           Ring in der Schriftfarbe (frueher ein Sanduhr-Emoji). */
+        @keyframes wiHourglass { to { transform: rotate(360deg); } }
+        .wi-hourglass { display: inline-block; width: .8em; height: .8em; margin-right: .4em;
+                        vertical-align: -.1em; border-radius: 50%; border: 2px solid currentColor;
+                        border-right-color: transparent; animation: wiHourglass .9s linear infinite; }
+        @media (prefers-reduced-motion: reduce) { .wi-hourglass { animation: none; } }
+        .wi-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-top: 14px; }
+        .wi-row > div { display: flex; flex-direction: column; gap: 4px; }
+        .wi-row label { font-size: 0.78rem; color: var(--text-secondary); }
+        select.wi-input { min-width: 200px; }
+        .wi-groups { display: flex; flex-wrap: wrap; gap: 8px; }
+        .wi-grpbox { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 8px;
+            border: 1px solid var(--border); cursor: pointer; font-size: 0.85rem; user-select: none; }
+        .wi-grpbox input { accent-color: var(--accent); }
+        /* "Alle"/"Keine" vor den Gruppen-Kaestchen (wissen.js groupBulkBar) */
+        .wi-grp-bulk { display: inline-flex; align-items: center; gap: 4px; margin-right: 4px; }
+        .wi-grp-bulk .sec-btn { padding: 3px 10px; font-size: 0.78rem; margin: 0; }
+        /* Suchfeld ueber der Dateiliste ("Mein Wissen") - Name, Ordner UND
+           Dateiinhalt, wie die Filter-Box der Massenzuordnung. Eigene Zeile
+           und NICHT in .wi-files-filter: jene wird ohne Wissensgruppen
+           ausgeblendet, die Suche waere dann unerreichbar. */
+        .wi-files-search { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+        .wi-files-search .wi-search-in { flex: 1; min-width: 0; }
+        .wi-search-hint { font-size: 0.74rem; color: var(--text-secondary); margin: 4px 0 0; }
+        /* Wissensgruppen-Filter ueber der Dateiliste ("Mein Wissen") */
+        .wi-files-filter { display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+            margin-top: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+        .wi-files-filter-lbl { font-size: 0.8rem; color: var(--text-secondary); }
+        .wi-files-filter-count { font-size: 0.78rem; color: var(--text-secondary); margin-left: auto; }
+        .wi-status { margin-top: 12px; font-size: 0.86rem; }
+        .wi-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+        .wi-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 8px;
+            border: 1px solid var(--border); background: rgba(var(--fg-rgb), 0.03); font-size: 0.88rem; }
+        .wi-item .nm { flex: 1; word-break: break-all; }
+        /* Name + Ordner als EIN Flex-Kind. `min-width: 0` ist Pflicht: ein
+           Flex-Kind schrumpft nicht unter seine Inhaltsbreite, ohne die Zeile
+           schiebt ein langer Ordnerpfad Gruppen-Marken und Muelleimer aus der
+           Zeile. (`.wi-item .nm { flex: 1 }` bleibt stehen – die Entwurfsliste
+           darunter benutzt `.nm` weiterhin als direktes Flex-Kind.) */
+        .wi-fmeta { flex: 1; min-width: 0; }
+        .wi-fpath { font-size: 0.74rem; color: var(--text-secondary); margin-top: 2px;
+            word-break: break-all; }
+        /* "Mein Wissen" als Tabelle (Vorgabe 2026-09-27): Name · Ordner ·
+           Wissensgruppen · Groesse, jede Spalte per Kopf sortierbar. Die
+           Tabelle scrollt waagerecht in ihrem Rahmen, nie die Seite. */
+        .wi-ftable-wrap { overflow-x: auto; margin-top: 6px; }
+        .wi-ftable { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+        .wi-ftable th { text-align: left; font-weight: 600; font-size: 0.78rem;
+            color: var(--text-secondary); border-bottom: 1px solid var(--border); padding: 0; }
+        .wi-ftable td { padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+        .wi-ftable tbody tr:hover td { background: rgba(var(--fg-rgb), 0.03); }
+        .wi-sortbtn { background: none; border: none; color: inherit; font: inherit; cursor: pointer;
+            padding: 7px 10px; width: 100%; text-align: inherit; white-space: nowrap; }
+        .wi-sortbtn:hover { color: var(--text-primary); }
+        .wi-sortbtn .wi-sortpfeil { display: inline-block; min-width: 1em; margin-left: 4px; }
+        th[aria-sort="ascending"] .wi-sortbtn, th[aria-sort="descending"] .wi-sortbtn { color: var(--text-primary); }
+        /* Name und Ordner sind Woerter ohne Trennstelle (Pfade) – ohne
+           overflow-wrap sprengt einer die Tabelle. */
+        .wi-ftable .wi-fname, .wi-ftable .wi-fpath { overflow-wrap: anywhere; }
+        .wi-ftable td.wi-fpath { font-size: 0.8rem; margin: 0; }
+        /* Gruppenmarken duerfen umbrechen: ohne das haelt ein langer
+           Gruppenname die Spalte breit, und auf schmalen Fenstern wird der
+           Dateiname auf wenige Zeichen je Zeile zerquetscht (Screenshot bei
+           520 px, die Ueberlauf-Messung war dabei gruen). Der Name bekommt
+           eine Mindestbreite – reicht der Platz nicht, scrollt der Rahmen. */
+        .wi-ftable .wi-fgrp .wi-chip { display: inline-block; margin: 0 4px 3px 0;
+            white-space: normal; overflow-wrap: anywhere; }
+        .wi-ftable td.wi-fname { min-width: 11em; }
+        .wi-ftable td.wi-fpath { min-width: 8em; }
+        .wi-ftable .wi-fsize, .wi-ftable th.wi-fsize { text-align: right; white-space: nowrap; }
+        .wi-ftable .wi-fdel { width: 1%; white-space: nowrap; text-align: right; }
+        a.wi-flink { color: var(--text-primary); text-decoration: none; cursor: pointer; }
+        a.wi-flink:hover { color: var(--accent); text-decoration: underline; }
+        .wi-empty { color: var(--text-muted); font-size: 0.86rem; padding: 8px 0; }
+
+        /* Confluence-Seitenbaum im Extraktor. Zweige sind per Vorgabe
+           eingeklappt (`.wi-cf-kids` ohne `.open`). Die Einrueckung kommt aus
+           der Verschachtelung der Listen, nicht aus einer festen Tiefe. */
+        .wi-cf-tree { max-height: 320px; overflow-y: auto; border: 1px solid var(--border);
+                      border-radius: 8px; padding: 6px 8px; background: var(--bg-secondary); }
+        .wi-cf-tree ul { list-style: none; margin: 0; padding: 0; }
+        .wi-cf-tree ul ul { padding-left: 18px; }
+        .wi-cf-kids { display: none; }
+        .wi-cf-kids.open { display: block; }
+        .wi-cf-node { display: flex; align-items: center; gap: 6px; padding: 2px 0;
+                      font-size: 0.86rem; color: var(--text-primary); min-width: 0; }
+        .wi-cf-node > label { display: inline-flex; align-items: center; gap: 6px;
+                              cursor: pointer; min-width: 0; overflow-wrap: anywhere; }
+        .wi-cf-node.wi-cf-all { font-weight: 600; border-bottom: 1px solid var(--border);
+                                padding-bottom: 5px; margin-bottom: 3px; }
+        .wi-cf-tree input[type="checkbox"] { accent-color: var(--accent); }
+        .wi-cf-tog { flex: 0 0 18px; width: 18px; height: 18px; padding: 0; border: none;
+                     background: none; color: var(--text-secondary); cursor: pointer;
+                     font-size: 0.75rem; line-height: 18px; text-align: center;
+                     transition: transform .12s; }
+        .wi-cf-tog[aria-expanded="true"] { transform: rotate(90deg); }
+        .wi-cf-tog:hover { color: var(--text-primary); }
+        .wi-cf-tog-leer { flex: 0 0 18px; }
+        .wi-cf-cnt { color: var(--text-muted); font-size: 0.75rem; }
+
+        /* Dynamische Confluence-Einbindung: Suchfeld ueber dem Baum, Knopfzeile
+           darunter. `flex-wrap` laesst die Knopfzeile auf schmalen Fenstern
+           umbrechen, statt ueberzulaufen. */
+        .wi-cfb-pick { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 6px; }
+        .wi-cfb-pick > input { flex: 1 1 240px; min-width: 0; }
+        .wi-cfb-tree { margin-top: 6px; }
+        /* Der Name klappt auf/zu (ohne Haken zu aendern) - er ist deshalb KEIN
+           <label>: ein Klick darauf wuerde sonst das Kaestchen umschalten. */
+        .wi-cfb-nm { cursor: pointer; min-width: 0; overflow-wrap: anywhere; }
+        .wi-cfb-nm:hover { color: var(--accent); }
+        .wi-cfb-key { color: var(--text-muted); font-size: 0.78rem; }
+        /* [+]/[-] steht HINTER dem Namen (Vorgabe) und bleibt als Zeichen
+           lesbar - der Zustand steht damit als Zeichen da, nicht nur als Drehung.
+           ⚠ NICHT IN --accent: im dunklen Thema gemessen 3,80:1 (unter 4,5:1).
+           Textfarbe + halbfett traegt das Zeichen, der Akzent nur beim Zeigen. */
+        .wi-cfb-tog { flex: 0 0 auto; padding: 0 3px; border: none; background: none;
+                      color: var(--text-primary); font-weight: 600; cursor: pointer;
+                      font-family: monospace; font-size: 0.82rem; line-height: 18px; }
+        .wi-cfb-tog:hover { color: var(--accent); }
+        /* Datum des letzten Imports: hinter [+]/[-] bzw. am Zeilenende. */
+        .wi-cfb-imp { flex: 0 0 auto; color: var(--text-muted); font-size: 0.75rem; white-space: nowrap; }
+        .wi-cfb-leer { color: var(--text-muted); font-size: 0.78rem; padding: 2px 0 2px 24px; }
+        .wi-cfb-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+                          justify-content: flex-end; margin-top: 8px; }
+        .wi-cfb-marked { font-size: 0.8rem; color: var(--text-secondary); margin-right: auto; }
+        .wi-cfb-editnote { font-size: 0.8rem; color: var(--text-primary); flex: 1 1 100%;
+                           border-left: 3px solid var(--accent); padding: 4px 10px; }
+        /* Die Knoepfe duerfen nicht mitwachsen: `.wi-cfb-actions` ist ein
+           Flex-Container. */
+        .wi-cfb-add { flex: 0 0 auto; }
+        .wi-cfb-newrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+                         margin-bottom: 8px; }
+        .wi-cfb-newrow > .wi-status { flex: 1 1 auto; min-width: 0; }
+        /* Eintrag in Bearbeitung: der Editor steht IN seiner Box, unter der
+           Kopfzeile (Name, Gruppen, Knoepfe). `flex-wrap` + `flex-basis: 100%`
+           setzen ihn auf eine eigene Zeile; der Akzentrand zeigt, WELCHER
+           Eintrag gerade bearbeitet wird. */
+        .wi-item.wi-cfb-editing { flex-wrap: wrap; border-color: var(--accent); }
+        .wi-item.wi-cfb-editing > .wi-cfb-editor { flex: 1 1 100%; min-width: 0;
+            border-top: 1px solid var(--border); padding-top: 8px; margin-top: 2px; }
+        .wi-cfb-sum { font-size: 0.75rem; color: var(--text-secondary); }
+        .wi-cfb-sync { font-size: 0.75rem; color: var(--text-secondary); }
+        .wi-cfb-sync.warn { color: var(--text-primary); border-left: 3px solid var(--warning);
+                            padding-left: 6px; }
+        /* Wissensgruppen-Pflicht: Beschriftung wie im Extraktor darueber
+           (dieselbe Groesse/Farbe), damit beide Bloecke als dasselbe gelesen
+           werden. `margin-bottom: 0` am Wrap, weil der Hinweistext darunter
+           seinen eigenen Abstand mitbringt. */
+        .wi-cfb-groups-wrap { margin-top: 6px; }
+        .wi-cfb-groups-wrap > label { display: block; font-size: 0.78rem;
+                                      color: var(--text-secondary); margin-bottom: 6px; }
+        /* Eine Zuordnung, deren Gruppe es nicht mehr gibt bzw. gar keine:
+           beides ist eine AUSSAGE und darf nicht wie ein gewoehnlicher Chip
+           aussehen. `--warning` statt `--danger`: es ist ein Rueckstand, kein
+           Fehlschlag – und der Text traegt die Aussage, die Farbe ist die
+           zweite Ebene. */
+        .wi-cfb-nogrp { font-size: 0.72rem; padding: 2px 8px; border-radius: 999px;
+                        border: 1px dashed var(--warning); color: var(--text-primary);
+                        white-space: nowrap; flex: 0 0 auto; }
+        /* Einbindung fremder Wissensgruppen: statt Bearbeiten/Muelleimer ein
+           ruhiger Hinweis - kein Rueckstand, deshalb ohne Warnfarbe. */
+        .wi-cfb-fremd { font-size: 0.72rem; padding: 2px 8px; border-radius: 999px;
+                        border: 1px solid var(--border); color: var(--text-secondary);
+                        white-space: nowrap; flex: 0 0 auto; cursor: help; }
+        /* ── Wissens-Destillat ──────────────────────────────────────────
+           AUSSCHLIESSLICH ueber Variablen: die Seite hat kein eigenes
+           `body.light`-Gegenstueck fuer diesen Container, und genau deshalb
+           darf hier keine feste Farbe stehen - sonst stimmt eines der beiden
+           Themen nicht. */
+        .wi-dest-feld { display: flex; flex-direction: column; gap: 4px; margin-top: 14px; }
+        .wi-dest-feld > label { font-size: 0.78rem; color: var(--text-secondary); }
+        /* `resize: vertical` statt `both`: waagerecht gezogen laeuft das Feld
+           aus dem Container (die Seite hat keinen waagerechten Scroller). */
+        .wi-dest-ta { font-family: inherit; line-height: 1.55; resize: vertical;
+                      min-height: 90px; }
+        .wi-dest-zaehler { font-size: 0.78rem; color: var(--text-secondary); text-align: right; }
+
+        /* Das Aufklapp-Feld der Auftraege. `--text-secondary`, NICHT
+           `--text-muted`: letzteres liegt in beiden Themen unter 4,5:1 - fuer
+           eine Beschriftung, die man lesen soll, zu wenig. */
+        .wi-dest-prompts { margin-top: 14px; border: 1px solid var(--border);
+                           border-radius: 10px; padding: 10px 14px; }
+        .wi-dest-prompts > summary { cursor: pointer; font-size: 0.86rem;
+                           color: var(--text-secondary); font-weight: 600; }
+        .wi-dest-prompts[open] > summary { margin-bottom: 6px; }
+        .wi-dest-prompts .sec-btn { margin-top: 10px; }
+        /* Dateifilter: zwei Felder nebeneinander, auf schmalen Fenstern
+           untereinander (auto-fit) - ohne Medienabfrage und ohne Ueberlauf. */
+        .wi-dest-filter { margin-bottom: 12px; }
+        .wi-dest-filter > .desc { margin: 4px 0 0; }
+        .wi-dest-filterfelder { display: grid; gap: 0 14px;
+                                grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+        .wi-dest-muster { font-family: monospace; min-height: 70px; }
+        .wi-dest-filterzahl { font-weight: 400; }
+        .wi-cfb-tags-wrap { margin-top: 12px; }
+        .wi-cfb-tags-wrap > input { width: 100%; box-sizing: border-box; }
+
+        /* Fortschrittsbalken. `overflow: hidden` haelt die Fuellung im Radius. */
+        .wi-dest-bar { margin-top: 12px; height: 6px; border-radius: 4px;
+                       background: rgba(var(--fg-rgb), 0.12); overflow: hidden; }
+        .wi-dest-fill { height: 100%; width: 0; background: var(--accent);
+                        transition: width .35s ease; }
+
+        /* Lesefortschritt der Dateien: Drehkreis (`.wi-busy-spin`, derselbe
+           wie beim Upload oben) + Text. Schlanker als `.wi-busy` – hier steht
+           er unter einer Dateiliste, nicht allein im Container. `min-width: 0`
+           + Ellipse: ein langer Ordnerpfad darf die Zeile nicht sprengen. */
+        .wi-dest-exbusy { display: flex; align-items: center; gap: 10px; margin-top: 12px;
+                          font-size: 0.9rem; color: var(--text-primary); }
+        .wi-dest-exbusy[hidden] { display: none; }
+        .wi-dest-exbusy > span:last-child { min-width: 0; overflow: hidden;
+                          text-overflow: ellipsis; white-space: nowrap; }
+        .wi-dest-exbusy .wi-busy-spin { width: 16px; height: 16px; flex: 0 0 16px; border-width: 2px; }
+        /* Laufanzeige in der Statuszeile ("Das Modell arbeitet", "Lege Entwurf
+           an"): derselbe kleine Drehkreis wie beim Lesen der Dateien. */
+        .wi-dest-busy { display: inline-flex; align-items: center; gap: 10px; color: var(--text-primary); }
+        .wi-dest-busy .wi-busy-spin { width: 16px; height: 16px; flex: 0 0 16px; border-width: 2px; }
+        .wi-dest-exzeile { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .wi-dest-exzeile .sec-btn { margin-top: 8px; padding: 4px 12px; font-size: 0.8rem; }
+        /* `.sec-btn` setzt `display` und schlaegt damit das hidden-Attribut –
+           der Knopf stand sonst schon WAEHREND des Lesens da (im Screenshot
+           gesehen; jsdom meldete `hidden === true`). */
+        .wi-dest-exzeile .sec-btn[hidden] { display: none; }
+        .wi-dest-log { margin-top: 8px; border: 1px solid var(--border); border-radius: 10px;
+                       padding: 6px 10px; max-height: 260px; overflow: auto;
+                       background: rgba(var(--fg-rgb), 0.03); font-size: 0.82rem; }
+        .wi-dest-logzeile { display: grid; grid-template-columns: 1.2em minmax(0, 1fr) minmax(0, 1.4fr);
+                            gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--border); }
+        .wi-dest-logzeile:last-child { border-bottom: 0; }
+        .wi-dest-logzeile .nm { overflow-wrap: anywhere; color: var(--text-primary); }
+        .wi-dest-logzeile .gr { overflow-wrap: anywhere; color: var(--text-secondary); }
+        /* Farbig nur das ZEICHEN, der Grund bleibt `--text-secondary`: --danger
+           liegt als Textfarbe in beiden Themen unter 4,5:1 (siehe oben). */
+        .wi-dest-logzeile .zei { font-weight: 700; text-align: center; }
+        .wi-dest-logzeile.ok .zei { color: var(--success); }
+        .wi-dest-logzeile.fehler .zei { color: var(--danger); }
+        .wi-dest-logzeile.uebersprungen .zei { color: var(--warning); }
+        .wi-dest-logzeile.gefiltert .zei { color: var(--text-secondary); }
+        @media (max-width: 560px) {
+            .wi-dest-logzeile { grid-template-columns: 1.2em minmax(0, 1fr); }
+            .wi-dest-logzeile .gr { grid-column: 2; }
+        }
+
+        .wi-dest-out { margin-top: 16px; border: 1px solid var(--border);
+                       border-radius: 12px; padding: 14px 16px;
+                       background: rgba(var(--fg-rgb), 0.03); }
+        .wi-dest-outhead { display: flex; align-items: baseline; gap: 10px;
+                       font-weight: 600; margin-bottom: 8px; flex-wrap: wrap; }
+        .wi-dest-meta { font-size: 0.78rem; color: var(--text-secondary);
+                        font-weight: 400; }
+        /* Das Ergebnis kann sehr lang werden - eigener Scrollbereich, sonst
+           schiebt es die Knoepfe darunter aus dem Sichtfeld.
+           `overflow-wrap: anywhere` gegen eine lange URL ohne Trennstelle. */
+        .wi-dest-md { max-height: 420px; overflow-y: auto; overflow-wrap: anywhere;
+                      font-size: 0.9rem; line-height: 1.6; padding-right: 6px; }
+        .wi-dest-md h1, .wi-dest-md h2, .wi-dest-md h3 { margin: 12px 0 6px;
+                      line-height: 1.3; }
+        .wi-dest-md h1 { font-size: 1.15rem; }
+        .wi-dest-md h2 { font-size: 1.02rem; }
+        .wi-dest-md h3 { font-size: 0.94rem; }
+        .wi-dest-md p, .wi-dest-md ul, .wi-dest-md ol { margin: 6px 0; }
+        .wi-dest-md ul, .wi-dest-md ol { padding-left: 22px; }
+        .wi-dest-md code { background: rgba(var(--fg-rgb), 0.08); border-radius: 4px;
+                      padding: 1px 5px; font-size: 0.86em; }
+        .wi-dest-md pre { background: rgba(var(--fg-rgb), 0.06); border-radius: 8px;
+                      padding: 10px; overflow-x: auto; }
+        .wi-dest-md pre code { background: none; padding: 0; }
+        .wi-dest-md img { max-width: 100%; border-radius: 8px; margin: 8px 0; }
+        .wi-dest-md hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
+        .wi-dest-md table { border-collapse: collapse; margin: 8px 0; }
+        .wi-dest-md th, .wi-dest-md td { border: 1px solid var(--border);
+                      padding: 5px 9px; text-align: left; }
+
+        .wi-dest-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+        /* ⚠ `.sec-btn` setzt `display` und SCHLAEGT damit das `hidden`-Attribut
+           (Register, am Protokoll-Knopf derselben Seite bezahlt). Ohne diese
+           Zeile stuende "Als neue Confluence-Seite" auch dann da, wenn der
+           Skill gar nicht aktiv ist. */
+        .wi-dest-actions .sec-btn[hidden] { display: none; }
+        .wi-dest-take { margin-top: 12px; border-top: 1px solid var(--border);
+                        padding-top: 12px; }
+        .wi-dest-take > label { display: block; font-size: 0.78rem;
+                        color: var(--text-secondary); margin-bottom: 6px; }
+        .wi-dest-takebtns { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+        /* Eine Dateizeile: `min-width: 0` am Textteil, sonst schiebt ein langer
+           Dateiname den Muelleimer aus der Zeile (Register). */
+        .wi-dest-file { display: flex; align-items: center; gap: 10px; }
+        .wi-dest-file .nm { flex: 1; min-width: 0; overflow: hidden;
+                        text-overflow: ellipsis; white-space: nowrap;
+                        line-height: 1.6; }
+        .wi-dest-file .sz { font-size: 0.78rem; color: var(--text-secondary);
+                        flex-shrink: 0; }
+        .wi-dest-file .er { font-size: 0.78rem; color: var(--danger); flex-shrink: 0; }
+        .wi-dest-dirbtn { margin-top: 10px; }
+
+        .wi-review { border: 1px solid rgba(var(--accent-rgb),0.4); border-radius: 10px; padding: 14px 16px; margin-top: 12px;
+            background: rgba(var(--accent-rgb), 0.05); }
+        .wi-review pre { white-space: pre-wrap; word-break: break-word; font-size: 0.82rem; max-height: 220px; overflow: auto;
+            background: rgba(var(--fg-rgb), 0.05); border-radius: 8px; padding: 10px; margin: 8px 0; }
+    </style>
+</head>
+<body>
+<script src="/static/js/theme_frueh.js?v=1"></script>
+
+    <div class="wi-topbar">
+        <div class="wi-logo topbar-avatar">J</div>
+        <div class="wi-title"><span class="brand-app-name">Jarvis</span> · <span data-i18n="wissen.nav">Wissen</span></div>
+        <!-- LLM-Status + CPU-Auslastung (nur angemeldet; gleiche Position wie /chat, /support) -->
+        <span class="wi-status-dot hidden" id="wi-status-dot" title="LLM-Status" data-i18n-title="portal.llm_status"></span>
+        <div class="jv-cpu-bar hidden" id="cpu-bar" title="CPU-Auslastung" data-i18n-title="wissen.cpu_load">
+            <div class="cpu-bar-fill" id="cpu-bar-fill" style="width:0%"></div>
+            <span class="cpu-bar-label" id="cpu-bar-label">CPU: 0%</span>
+        </div>
+        <div class="wi-spacer"></div>
+        <div class="wi-top-icons">
+            <!-- DE/EN: stand als einzige Bereichsseite nicht in der Leiste
+                 (beim Umsortieren am 2026-08-22 aufgefallen). Die Knoepfe
+                 brauchen keinen eigenen Code – i18n.js verdrahtet
+                 `.lang-toggle-btn` samt Aktiv-Zustand. -->
+            <div class="lang-toggle" id="wi-lang-toggle">
+                <button class="lang-toggle-btn" data-lang="de" data-setlang="de" title="Deutsch">DE</button>
+                <button class="lang-toggle-btn" data-lang="en" data-setlang="en" title="English">EN</button>
+            </div>
+            <!-- Issues/Feedback (fuer alle). Der Avatar-Schalter haengt sich zur
+                 Laufzeit direkt davor (avatar.js). -->
+            <button class="wi-icon-btn jv-issues-btn" id="wi-issues" type="button" data-i18n-title="sup.issues" title="Issues / Feedback" aria-label="Issues / Feedback" data-issues-oeffnen>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            </button>
+            <button class="btn-theme-toggle wi-icon-btn" id="btn-theme-toggle" type="button" data-i18n-title="chat.theme" title="Hell/Dunkel" aria-label="Hell/Dunkel">
+                <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                <svg class="theme-icon-sun" style="display:none;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            </button>
+            <a class="wi-icon-btn" href="/portal" data-i18n-title="nav.home" title="Startseite" aria-label="Startseite">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            </a>
+            <!-- Einstellungen: nur fuer Admins (zweites von rechts, direkt vor Logout) -->
+            <button class="wi-icon-btn hidden" id="wi-settings" data-jarvis-settings="/wissen" type="button" data-i18n-title="nav.settings" title="Einstellungen" aria-label="Einstellungen">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </button>
+            <button class="wi-icon-btn hidden" id="wi-logout" type="button" data-i18n-title="chat.logout" title="Abmelden" aria-label="Abmelden">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            </button>
+        </div>
+    </div>
+
+    <!-- Login -->
+    <div id="wi-login" class="wi-login hidden">
+        <h1 data-i18n="wissen.login_title">Anmelden</h1>
+        <p class="sub" data-i18n="wissen.login_sub">Melde dich mit deinem Domänen-Konto an, um Wissen deines Bereichs zu pflegen.</p>
+        <div class="wi-field">
+            <label for="wi-user" data-i18n="wissen.f_user">Benutzer</label>
+            <input class="wi-input" id="wi-user" type="text" autocomplete="username" autofocus>
+        </div>
+        <div class="wi-field">
+            <label for="wi-pass" data-i18n="wissen.f_pass">Passwort</label>
+            <input class="wi-input" id="wi-pass" type="password" autocomplete="current-password">
+        </div>
+        <div class="wi-field hidden" id="wi-totp-row">
+            <label for="wi-totp" data-i18n="wissen.f_totp">2FA-Code</label>
+            <input class="wi-input" id="wi-totp" type="text" inputmode="numeric" autocomplete="one-time-code">
+        </div>
+        <button class="sec-btn primary" id="wi-login-btn" type="button" data-i18n="wissen.login_title" style="width:100%;justify-content:center;margin-top:6px;">Anmelden</button>
+        <div class="wi-err" id="wi-login-err"></div>
+    </div>
+
+    <!-- App -->
+    <div id="wi-app" class="wi-wrap hidden" data-jv-breit>
+        <!-- Der Knopf ist ein GESCHWISTER des Banners, nicht sein Kind:
+             renderScope() schreibt das Banner per innerHTML neu. -->
+        <div class="wi-scope-row">
+            <div id="wi-scope-banner" class="wi-banner" data-i18n="common.loading">Lade…</div>
+            <button type="button" class="jv-max-btn" id="jv-max" data-seite="wissen"
+                    data-speicher="jarvis_wissen_breit" aria-pressed="false"
+                    data-i18n-title="common.maximize" data-i18n-aria="common.maximize"
+                    title="Maximieren" aria-label="Maximieren">&#9974;</button>
+        </div>
+
+        <!-- Massenzuordnung (1. Stelle) – NUR fuer globale Wissens-Editoren sichtbar -->
+        <div class="wi-section" id="wi-sec-matrix" style="display:none;">
+            <h2><span data-i18n="wissen.sec_matrix">Massenzuordnung</span><span class="wi-sec-tog">▼</span></h2>
+            <p class="desc" data-i18n="kbmatrix.launch_desc">Alle Dokumente in einer Tabelle auf einen Blick zuordnen (schnelle Massenbearbeitung):</p>
+            <button id="wi-matrix-btn" class="kb-grp-matrix-icon" type="button" title="Wissensgruppen-Tabelle öffnen" data-i18n-title="kbmatrix.open_title">▦</button>
+        </div>
+
+        <!-- Wissensgruppen (2. Stelle) – aus Einstellungen verschoben; nur für globale Wissens-Editoren -->
+        <div class="wi-section" id="wi-sec-groups" style="display:none;">
+            <h2><span data-i18n="kbgroups.section">Wissensgruppen</span><span class="wi-sec-tog">▼</span></h2>
+            <p class="desc" data-i18n="kbgroups.hint">Ordne Dokumente logischen Gruppen zu (Mehrfachzuordnung möglich). Eine Datei ohne Gruppe gilt als „ungruppiert".</p>
+            <div id="kb-groups-overview" class="kb-groups-overview"><div class="wi-empty" data-i18n="common.loading">Lade…</div></div>
+            <div id="kb-groups-files" class="kb-groups-files" style="display:none;"></div>
+            <div id="kb-notification" class="kb-notification" style="display:none;margin-top:8px;"></div>
+        </div>
+
+        <!-- Informationsextraktor (Dateien hochladen + Webseite analysieren) -->
+        <div class="wi-section" id="wi-sec-upload">
+            <h2><span data-i18n="wissen.sec_ext">Informationsextraktor</span><span class="wi-sec-tog">▼</span></h2>
+            <p class="desc" data-i18n="wissen.sec_ext_desc">Dateien hochladen und deinen Wissensgruppen zuordnen oder eine Webseite analysieren – die KI extrahiert daraus Wissen, das du prüfen und freigeben kannst.</p>
+            <!-- Eingabe-Tabs: URL / Datei / Confluence (analog Einstellungen → Wissen) -->
+            <div class="ext-input-tabs" id="wi-ext-tabs">
+                <button class="ext-input-tab active" id="wi-tab-url" type="button">🌐 <span data-i18n="wissen.tab_url">URL</span></button>
+                <button class="ext-input-tab" id="wi-tab-file" type="button">📄 <span data-i18n="wissen.tab_file">Datei</span></button>
+                <button class="ext-input-tab" id="wi-tab-cf" type="button" style="display:none;">📘 <span data-i18n="wissen.tab_cf">Confluence</span></button>
+            </div>
+
+            <!-- Panel: URL analysieren -->
+            <div id="wi-panel-url">
+                <div class="wi-row" style="margin-top:0;">
+                    <div style="flex:1;">
+                        <label data-i18n="wissen.url">Webseite (URL)</label>
+                        <input class="wi-input" id="wi-ext-url" type="text" placeholder="https://…">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Panel: Datei hochladen -->
+            <div id="wi-panel-file" style="display:none;">
+                <div class="wi-drop" id="wi-drop" data-i18n="wissen.drop">Dateien oder ZIP-Archiv hierher ziehen oder klicken zum Auswählen</div>
+                <div class="wi-drop-hint" id="wi-drop-hint" style="display:none;"></div>
+                <div class="wi-busy hidden" id="wi-busy"><span class="wi-busy-spin"></span><span id="wi-busy-text"></span></div>
+                <input type="file" id="wi-file-input" multiple class="hidden">
+                <div class="wi-row">
+                    <div>
+                        <label data-i18n="wissen.folder">Zielordner</label>
+                        <div style="display:flex;gap:6px;align-items:center;">
+                            <select class="wi-input" id="wi-folder" style="flex:1;"></select>
+                            <button type="button" class="wi-btn-icon" id="wi-folder-new"
+                                data-i18n-title="wissen.subfolder_new" title="Unterordner anlegen">➕</button>
+                            <!-- Leer: den Stift setzt wissen.js aus icons.js (JarvisIcons.setPencil).
+                                 Ein woertliches SVG hier wuerde vom zentralen Modul wegdriften. -->
+                            <button type="button" class="wi-btn-icon" id="wi-folder-rename"
+                                data-i18n-title="wissen.subfolder_rename" title="Unterordner umbenennen"></button>
+                            <button type="button" class="wi-btn-icon" id="wi-folder-move"
+                                data-i18n-title="wissen.subfolder_move" title="Unterordner verschieben">📂</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Panel: Confluence (ALLE sichtbaren Bereiche) -->
+            <div id="wi-panel-cf" style="display:none;">
+                <div id="wi-cf-block">
+                    <div style="margin-bottom:6px;">
+                        <label style="margin:0;" data-i18n="wissen.cf_label">Aus Confluence importieren</label>
+                    </div>
+                    <div class="wi-row" style="margin-top:0;">
+                        <div style="position:relative;flex:1;min-width:200px;">
+                            <input type="text" id="wi-cf-space-search" class="wi-input" placeholder="Bereich suchen…" autocomplete="off" style="width:100%;">
+                            <div id="wi-cf-space-dd" style="display:none;position:absolute;z-index:50;left:0;right:0;top:calc(100% + 2px);max-height:260px;overflow-y:auto;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(var(--shadow-rgb),0.4);"></div>
+                        </div>
+                        <button class="sec-btn" id="wi-cf-refresh" type="button" title="Bereiche neu laden">🔄</button>
+                    </div>
+                    <div class="wi-row" id="wi-cf-page-wrap" style="display:none;margin-top:8px;">
+                        <div style="flex:1;min-width:0;">
+                            <div class="wi-cf-tree" id="wi-cf-tree" role="tree"></div>
+                        </div>
+                    </div>
+                    <p class="desc" id="wi-cf-hint" style="display:none;margin-top:4px;" data-i18n="wissen.cf_hint">Pfeil klappt einen Zweig auf. Ein Haken an einer Seite setzt oder entfernt ihn bei allen Unterseiten mit; jede Unterseite lässt sich danach einzeln an- oder abwählen.</p>
+                    <div class="wi-status" id="wi-cf-status"></div>
+                </div>
+            </div>
+
+            <!-- Immer sichtbar für alle drei Eingabearten: Wissensgruppen, KI-Optionen,
+                 Profil und der Extrahieren-Button (die wechselnden Eingabefelder stehen darüber). -->
+            <div style="margin-top:14px;">
+                <label style="font-size:0.78rem;color:var(--text-secondary);" data-i18n="wissen.groups_label">Wissensgruppen (dein Bereich) *</label>
+                <div class="wi-groups" id="wi-upload-groups" style="margin-top:6px;"></div>
+            </div>
+            <!-- Reihe: KI-Optionen (Fragen & Antworten) -->
+            <div style="margin-top:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <label style="display:inline-flex;align-items:center;gap:6px;font-size:0.85rem;color:var(--text-primary);cursor:pointer;">
+                    <input type="checkbox" id="wi-genq" checked>
+                    <span data-i18n="wissen.genq">Fragen &amp; Antworten generieren (KI)</span>
+                </label>
+                <label style="display:inline-flex;align-items:center;gap:6px;font-size:0.8rem;color:var(--text-secondary);">
+                    <span data-i18n="wissen.genq_count">Anzahl Fragen</span>
+                    <input type="number" id="wi-genq-count" class="wi-input" min="1" max="30" value="20" style="width:70px;padding:5px 8px;">
+                </label>
+                <!-- KI-Profil-Pulldown (wissen.js mountet ProfileSwitcher) -->
+                <span id="wi-prof-slot" style="margin-left:10px;"></span>
+            </div>
+            <p class="desc" style="margin-top:6px;" data-i18n="wissen.genq_hint">Die generierten Fragen &amp; Antworten erscheinen unten unter „Deine Entwürfe" – dort kannst du sie löschen, korrigieren und freigeben.</p>
+            <!-- Eigene Zeile: Import-/Extraktions-Fortschritt (zwischen KI-Optionen
+                 und den Aktions-Buttons). Nur sichtbar, wenn Text vorhanden ist. -->
+            <div id="wi-extract-progress" class="wi-status" style="margin-top:10px;"></div>
+            <!-- Reihe: Aktions-Buttons -->
+            <div style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <button class="sec-btn primary" id="wi-extract-btn" type="button" data-i18n="wissen.extract">Extrahieren</button>
+                <button class="sec-btn danger" id="wi-extract-cancel" type="button" style="display:none;" data-i18n="common.cancel">Abbrechen</button>
+            </div>
+            <div class="wi-status" id="wi-upload-status"></div>
+            <div class="wi-status" id="wi-ext-status"></div>
+            <div id="wi-ext-review"></div>
+
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:18px 0 4px;">
+                <h3 style="font-size:0.95rem;margin:0;" data-i18n="wissen.drafts">Deine Entwürfe</h3>
+                <div id="wi-drafts-bulk" style="display:none;align-items:center;gap:8px;">
+                    <button class="sec-btn small" id="wi-drafts-selall" type="button" data-i18n="wissen.select_all">Alle markieren</button>
+                    <button class="sec-btn small primary" id="wi-drafts-appsel" type="button" disabled data-i18n="wissen.approve_selected">Auswahl übernehmen</button>
+                    <button class="sec-btn small danger" id="wi-drafts-delsel" type="button" disabled data-i18n="wissen.delete_selected">Auswahl löschen</button>
+                </div>
+            </div>
+            <!-- Zielgruppen-Auswahl fuer die Sammel-Uebernahme (nur beim Klick sichtbar).
+                 Eigener Praefix 'bulk', damit checkedGroups() nicht mit dem Review-
+                 Formular ('rev') kollidiert – das sucht global im Dokument. -->
+            <div id="wi-drafts-approve" class="wi-review" style="display:none;margin:6px 0 10px;">
+                <div style="font-weight:600;margin-bottom:6px;" id="wi-drafts-apptitle"></div>
+                <label style="font-size:0.78rem;color:var(--text-secondary);" data-i18n="wissen.target_groups">Zielgruppen</label>
+                <div class="wi-groups" id="wi-drafts-groups" style="margin:6px 0 10px;"></div>
+                <button class="sec-btn primary" id="wi-drafts-appgo" type="button" data-i18n="wissen.approve">Übernehmen</button>
+                <button class="sec-btn" id="wi-drafts-appcancel" type="button" data-i18n="common.cancel">Abbrechen</button>
+                <div class="wi-status" id="wi-drafts-appstatus"></div>
+            </div>
+            <div class="wi-list" id="wi-pending-list"><div class="wi-empty">—</div></div>
+        </div>
+
+        <!-- Wissens-Destillat (Import aus dev-core-busy/knowledge-distiller).
+             Sichtbarkeit GENAU WIE DER INFORMATIONSEXTRAKTOR darüber: an
+             SCOPE.groups gebunden (wissen.js::renderScope). Der Proxy-Teil des
+             Originals ist beim Import entfallen – er existiert nur, um von
+             AUSSEN an Jarvis zu kommen; hier sind wir angemeldet.
+             ⚠ KEINE Felder für Temperature/Max-Tokens (das Original hat sie):
+             beides ist in Jarvis Profil- bzw. Systemeinstellung und wäre hier
+             ein Versprechen, das der Provider-Pfad nicht einlöst. -->
+        <div class="wi-section" id="wi-sec-destillat">
+            <h2><span data-i18n="wissen.sec_dest">Wissens-Destillat</span><span class="wi-sec-tog">▼</span></h2>
+            <p class="desc" data-i18n="wissen.sec_dest_desc">Zerstreutes Wissen aus mehreren Dokumenten zu EINEM strukturierten Markdown zusammenführen – geeignet für Confluence oder als Entwurf für deine Wissensdatenbank.</p>
+
+            <!-- 0. Dateifilter (Vorgabe 2026-09-27): Black-/Whitelist aus
+                 Mustern, je Benutzer gespeichert. Er steht VOR der Ablage,
+                 weil er beim Ziehen/Waehlen greift - ausgelassene Dateien
+                 werden gar nicht erst uebertragen (wissen_destillat.js::
+                 filterGrund) und stehen mit Grund im Protokoll. Eingeklappt
+                 wie die Auftraege: im Regelfall braucht man ihn nicht, und die
+                 Zahl im Titel sagt auch zugeklappt, dass er wirkt. -->
+            <details class="wi-dest-prompts wi-dest-filter" id="wi-dest-filterbox">
+                <summary><span data-i18n="wissen.dest_filter">Dateien filtern (Whitelist / Blacklist)</span> <span class="wi-dest-filterzahl" id="wi-dest-filterzahl"></span></summary>
+                <p class="desc" data-i18n="wissen.dest_filter_hint">Ein Muster je Zeile: * steht für beliebig viele Zeichen, ? für genau eines – z. B. *.pdf oder *entwurf*. Geprüft wird gegen den Dateinamen und den Ordnerpfad, Groß- und Kleinschreibung spielen keine Rolle. Die Blacklist gewinnt; ist die Whitelist leer, sind alle Dateien erlaubt. Ausgelassene Dateien werden nicht übertragen und stehen im Protokoll. Der Filter wird für dich gespeichert.</p>
+                <div class="wi-dest-filterfelder">
+                    <div class="wi-dest-feld">
+                        <label for="wi-dest-weiss" data-i18n="wissen.dest_white">Whitelist – nur diese Dateien verarbeiten</label>
+                        <textarea class="wi-input wi-dest-ta wi-dest-muster" id="wi-dest-weiss" rows="4"
+                                  spellcheck="false" data-i18n-placeholder="wissen.dest_white_ph"
+                                  placeholder="*.pdf&#10;*.docx"></textarea>
+                    </div>
+                    <div class="wi-dest-feld">
+                        <label for="wi-dest-schwarz" data-i18n="wissen.dest_black">Blacklist – diese Dateien nie verarbeiten</label>
+                        <textarea class="wi-input wi-dest-ta wi-dest-muster" id="wi-dest-schwarz" rows="4"
+                                  spellcheck="false" data-i18n-placeholder="wissen.dest_black_ph"
+                                  placeholder="*entwurf*&#10;archiv/*"></textarea>
+                    </div>
+                </div>
+                <div class="wi-status" id="wi-dest-filterstatus"></div>
+            </details>
+
+            <!-- 1. Quellen -->
+            <div class="wi-drop" id="wi-dest-drop">
+                <div data-i18n="wissen.dest_drop">Dateien oder Ordner hierher ziehen oder klicken</div>
+                <div class="wi-drop-sub" data-i18n="wissen.dest_drop_sub">PDF, Word, Excel, PowerPoint, Text, Markdown – auch mehrere auf einmal</div>
+                <!-- Der Datei-Dialog des Browsers kann ENTWEDER Dateien ODER
+                     einen Ordner waehlen, nie beides – deshalb ein zweiter
+                     Eingang mit webkitdirectory hinter einem eigenen Knopf. -->
+                <button type="button" class="sec-btn wi-dest-dirbtn" id="wi-dest-dirbtn"
+                        data-i18n="wissen.dest_pick_dir">Ordner wählen</button>
+                <input type="file" id="wi-dest-files" multiple style="display:none;">
+                <input type="file" id="wi-dest-dir" webkitdirectory directory multiple style="display:none;">
+            </div>
+            <div class="wi-list" id="wi-dest-filelist"></div>
+            <!-- Lesefortschritt: der Server meldet je Datei "i von n" (NDJSON).
+                 Drehkreis + Balken wie beim Destillieren – ein OCR-PDF liest
+                 Minuten, ohne Anzeige ist das von "hängt" nicht zu trennen. -->
+            <div class="wi-dest-exbusy" id="wi-dest-exbusy" hidden>
+                <span class="wi-busy-spin"></span><span id="wi-dest-exbusy-text"></span>
+            </div>
+            <div class="wi-dest-bar" id="wi-dest-exbar" hidden><div class="wi-dest-fill" id="wi-dest-exfill"></div></div>
+            <div class="wi-dest-exzeile">
+                <div class="wi-status" id="wi-dest-exstatus"></div>
+                <button type="button" class="sec-btn" id="wi-dest-logbtn" hidden
+                        aria-expanded="false" aria-controls="wi-dest-log"
+                        data-i18n="wissen.dest_log_show">Protokoll anzeigen</button>
+            </div>
+            <div class="wi-dest-log" id="wi-dest-log" hidden></div>
+
+            <!-- 2. Text: gefüllt aus der Extraktion ODER frei eingegeben.
+                 Das Feld ist bewusst bearbeitbar – der Benutzer soll vor dem
+                 Lauf noch streichen und ergänzen können. -->
+            <div class="wi-dest-feld">
+                <label for="wi-dest-text" data-i18n="wissen.dest_text">Text (aus den Dateien extrahiert – bearbeitbar)</label>
+                <textarea class="wi-input wi-dest-ta" id="wi-dest-text" rows="8"
+                          data-i18n-placeholder="wissen.dest_text_ph"
+                          placeholder="Hier erscheint der extrahierte Text – oder gib direkt eigenen Text ein."></textarea>
+                <div class="wi-dest-zaehler" id="wi-dest-count"></div>
+            </div>
+
+            <!-- 3. Aufträge. Eingeklappt, weil sie eine Vorgabe haben, die im
+                 Regelfall trägt – wer sie braucht, klappt auf. -->
+            <details class="wi-dest-prompts" id="wi-dest-promptbox">
+                <summary data-i18n="wissen.dest_prompts">Aufträge an das Modell anpassen</summary>
+                <div class="wi-dest-feld">
+                    <label for="wi-dest-prompt" data-i18n="wissen.dest_prompt">Destillier-Auftrag</label>
+                    <textarea class="wi-input wi-dest-ta" id="wi-dest-prompt" rows="8"></textarea>
+                </div>
+                <div class="wi-dest-feld">
+                    <label for="wi-dest-gruppen" data-i18n="wissen.dest_gliederung">Gliederung (optional)</label>
+                    <textarea class="wi-input wi-dest-ta" id="wi-dest-gruppen" rows="6"></textarea>
+                </div>
+                <button type="button" class="sec-btn" id="wi-dest-reset"
+                        data-i18n="wissen.dest_reset">Aufträge zurücksetzen</button>
+            </details>
+
+            <div class="wi-row">
+                <div>
+                    <label for="wi-dest-mode" data-i18n="wissen.dest_mode">Verarbeitung</label>
+                    <select class="wi-input" id="wi-dest-mode">
+                        <option value="combined" data-i18n="wissen.dest_mode_all">Alles zusammen</option>
+                        <option value="file" data-i18n="wissen.dest_mode_file">Pro Datei getrennt</option>
+                    </select>
+                </div>
+                <button type="button" class="sec-btn primary" id="wi-dest-run"
+                        data-i18n="wissen.dest_run" disabled>Destillieren</button>
+            </div>
+
+            <!-- Fortschritt: ein Lauf dauert bei mehreren Blöcken Minuten. Ohne
+                 sichtbaren Fortschritt ist das von "hängt" nicht zu
+                 unterscheiden. -->
+            <div class="wi-dest-bar" id="wi-dest-bar" hidden><div class="wi-dest-fill" id="wi-dest-fill"></div></div>
+            <div class="wi-status" id="wi-dest-status"></div>
+
+            <!-- 4. Ergebnis -->
+            <div class="wi-dest-out" id="wi-dest-out" hidden>
+                <div class="wi-dest-outhead">
+                    <span data-i18n="wissen.dest_result">Destillat</span>
+                    <span class="wi-dest-meta" id="wi-dest-meta"></span>
+                </div>
+                <div class="wi-dest-md" id="wi-dest-md"></div>
+                <div class="wi-dest-actions">
+                    <button type="button" class="sec-btn" id="wi-dest-copy"
+                            data-i18n="wissen.dest_copy">Markdown kopieren</button>
+                    <button type="button" class="sec-btn" id="wi-dest-dl"
+                            data-i18n="wissen.dest_download">Herunterladen</button>
+                    <button type="button" class="sec-btn primary" id="wi-dest-take"
+                            data-i18n="wissen.dest_take">In die Wissensdatenbank</button>
+                    <!-- Nur sichtbar, wenn der Confluence-Skill aktiv UND
+                         konfiguriert ist. Den Zustand meldet wissen.js
+                         (cfDestMelden) – dieser Container fragt ihn nicht
+                         selbst ab. -->
+                    <button type="button" class="sec-btn" id="wi-dest-cf" hidden
+                            data-i18n="wissen.dest_cf">Als neue Confluence-Seite</button>
+                </div>
+                <!-- Wissensgruppen für die Übernahme. Sie stehen HIER und nicht
+                     oben, weil sie nur für diesen einen Knopf gebraucht werden –
+                     Kopieren und Herunterladen brauchen keine Gruppe. -->
+                <div class="wi-dest-take" id="wi-dest-takebox" hidden>
+                    <label data-i18n="wissen.groups_label">Wissensgruppen (dein Bereich) *</label>
+                    <div class="wi-groups" id="wi-dest-groups"></div>
+                    <p class="desc" data-i18n="wissen.dest_take_hint">Das Destillat wird als Entwurf abgelegt – du prüfst und gibst ihn unten unter „Deine Entwürfe" frei. Bilder werden dabei nicht eingebettet (sie würden den Suchindex mit Zeichenrauschen füllen); ihre Stelle im Text bleibt als Hinweis erhalten.</p>
+                    <div class="wi-dest-takebtns">
+                        <button type="button" class="sec-btn primary" id="wi-dest-takego"
+                                data-i18n="wissen.approve">Übernehmen</button>
+                        <button type="button" class="sec-btn" id="wi-dest-takecancel"
+                                data-i18n="common.cancel">Abbrechen</button>
+                    </div>
+                    <div class="wi-status" id="wi-dest-takestatus"></div>
+                </div>
+
+                <!-- Ziel der neuen Confluence-Seite. Steht HIER und nicht oben,
+                     aus demselben Grund wie die Wissensgruppen darueber: nur
+                     dieser eine Knopf braucht es, Kopieren und Herunterladen
+                     nicht. -->
+                <div class="wi-dest-take" id="wi-dest-cfbox" hidden>
+                    <div class="wi-dest-feld" style="margin-top:0;">
+                        <label for="wi-dest-cfspace" data-i18n="wissen.dest_cf_space">Bereich *</label>
+                        <select class="wi-input" id="wi-dest-cfspace"></select>
+                    </div>
+                    <div class="wi-dest-feld">
+                        <label for="wi-dest-cfparent" data-i18n="wissen.dest_cf_parent">Übergeordnete Seite</label>
+                        <select class="wi-input" id="wi-dest-cfparent"></select>
+                    </div>
+                    <div class="wi-dest-feld">
+                        <label for="wi-dest-cftitel" data-i18n="wissen.dest_cf_title">Seitentitel *</label>
+                        <input type="text" class="wi-input" id="wi-dest-cftitel"
+                               maxlength="255" autocomplete="off">
+                    </div>
+                    <p class="desc" data-i18n="wissen.dest_cf_hint">Die Seite wird neu angelegt – eine vorhandene wird nie überschrieben. Der Inhalt geht als HTML nach Confluence; Bilder werden als Anhänge hochgeladen und im Text eingebettet.</p>
+                    <div class="wi-dest-takebtns">
+                        <button type="button" class="sec-btn primary" id="wi-dest-cfgo"
+                                data-i18n="wissen.dest_cf_go">Seite anlegen</button>
+                        <button type="button" class="sec-btn" id="wi-dest-cfcancel"
+                                data-i18n="common.cancel">Abbrechen</button>
+                    </div>
+                    <div class="wi-status" id="wi-dest-cfstatus"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Dynamische Confluence-Einbindung.
+             Sichtbar NUR, wenn der Confluence-Skill installiert + aktiv ist UND
+             konfiguriert wurde (wissen.js::cfbRender, Zustand von
+             /api/wissen/confluence/bindung). Bis dahin display:none im Markup,
+             damit der Container beim Laden nicht aufblitzt. -->
+        <div class="wi-section" id="wi-sec-cfbind" style="display:none;">
+            <h2><span data-i18n="wissen.sec_cfbind">Dynamische Confluence-Einbindung</span><span class="wi-sec-tog">▼</span></h2>
+            <p class="desc" data-i18n="wissen.sec_cfbind_desc">Binde Confluence-Bereiche dauerhaft ein: markiere Bereiche und Unterbereiche im Baum und übernimm sie als Eintrag. Gespeicherte Einträge lassen sich jederzeit bearbeiten.</p>
+            <!-- ⚠ MINDESTENS EINE WISSENSGRUPPE IST PFLICHT (Vorgabe 2026-09-22).
+                 Sie steht ÜBER dem Baum, weil der Übernehmen-Knopf darunter
+                 klebt: alles, was er braucht, soll davor stehen. Der Schlüssel
+                 `wissen.groups_label` ist bewusst DERSELBE wie im
+                 Informationsextraktor: gleiche Bedeutung, gleicher Text. -->
+            <!-- ⚠ EDITOR = alles von den Gruppen bis zur Statuszeile (Vorgabe
+                 2026-09-27): beim BEARBEITEN verschiebt wissen.js
+                 (cfbEditorPlatzieren) diesen Block IN die Box des bearbeiteten
+                 Eintrags, bei der Neuanlage steht er hier. Er muss deshalb
+                 unmittelbar vor #wi-cfb-list stehen. -->
+            <!-- ⚠ DER EDITOR IST ZU, bis "Neuer Bereich" oder "Bearbeiten"
+                 geklickt wird (Vorgabe 2026-09-28) - wissen.js::cfbEditorZeigen.
+                 Die Statuszeile wandert mit: offen steht sie im Editor, zu
+                 hier unter dem Knopf (sonst waere "gespeichert" unsichtbar). -->
+            <div class="wi-cfb-newrow" id="wi-cfb-newrow">
+                <button type="button" class="sec-btn primary wi-cfb-add" id="wi-cfb-new"
+                        data-i18n="wissen.cfb_new">Neuer Bereich</button>
+            </div>
+            <div class="wi-cfb-editor" id="wi-cfb-editor" style="display:none;">
+            <div class="wi-cfb-groups-wrap">
+                <label data-i18n="wissen.groups_label">Wissensgruppen (dein Bereich) *</label>
+                <div class="wi-groups" id="wi-cfb-groups"></div>
+            </div>
+            <p class="desc" data-i18n="wissen.cfb_groups_hint">Das Wissen aus dem Eintrag wird diesen Wissensgruppen zugeordnet – mindestens eine ist Pflicht.</p>
+            <!-- Tags (Vorgabe 2026-09-27): gehoeren zum EINTRAG, nicht zum
+                 Benutzer - der Abgleich laeuft im Hintergrund fuer alle.
+                 Leer = alle markierten Seiten. Steht wie die Gruppen VOR dem
+                 Baum: alles, was der Übernehmen-Knopf mitnimmt, steht davor. -->
+            <div class="wi-cfb-groups-wrap wi-cfb-tags-wrap">
+                <label for="wi-cfb-tags" data-i18n="wissen.cfb_tags_label">Tags (optional)</label>
+                <input type="text" class="wi-input" id="wi-cfb-tags" autocomplete="off" spellcheck="false"
+                       placeholder="z. B. handbuch, freigegeben" data-i18n-placeholder="wissen.cfb_tags_ph">
+            </div>
+            <p class="desc" data-i18n="wissen.cfb_tags_hint">Nur Seiten, die mindestens einen dieser Confluence-Tags tragen, kommen ins Wissen. Ohne Tags kommen alle markierten Seiten. Mehrere Tags mit Komma oder Leerzeichen trennen.</p>
+            <!-- Baum statt Pulldown (Vorgabe 2026-09-27): [+] klappt auf und
+                 markiert samt Unterbereichen, [-] klappt zu und nimmt deren
+                 Markierung zurück, der NAME klappt nur auf/zu. Das frühere
+                 Kästchen „inkl. Unterseiten" entfällt damit.
+                 ⚠ ÜBERNOMMEN WIRD PER KNOPF, nie schon beim Markieren (Vorgabe
+                 2026-09-21): eine Auswahl ist kein Auftrag. -->
+            <div class="wi-cfb-pick">
+                <input type="text" class="wi-input" id="wi-cfb-such" autocomplete="off"
+                       placeholder="Bereich suchen…" data-i18n-placeholder="wissen.cfb_search_ph">
+            </div>
+            <div class="wi-cf-tree wi-cfb-tree" id="wi-cfb-tree" role="tree"><div class="wi-empty" data-i18n="common.loading">Lade…</div></div>
+            <p class="desc" data-i18n="wissen.cfb_tree_hint">[+] klappt einen Eintrag auf und markiert ihn samt allen Unterbereichen, [-] klappt ihn zu und nimmt die Markierung der Unterbereiche zurück. Ein Klick auf den Namen klappt auf oder zu, ohne Markierungen zu ändern; jeder Haken lässt sich einzeln setzen. Ist ein Zweig komplett markiert, kommen später in Confluence angelegte Unterseiten automatisch mit.</p>
+            <div class="wi-cfb-actions">
+                <span class="wi-cfb-marked" id="wi-cfb-marked"></span>
+                <span class="wi-cfb-editnote" id="wi-cfb-editnote" style="display:none;"></span>
+                <button type="button" class="sec-btn wi-cfb-add" id="wi-cfb-cancel" style="display:none;"
+                        data-i18n="common.cancel">Abbrechen</button>
+                <button type="button" class="sec-btn primary wi-cfb-add" id="wi-cfb-add"
+                        data-i18n="wissen.cfb_add" disabled>Übernehmen</button>
+            </div>
+            <div class="wi-status" id="wi-cfb-status"></div>
+            </div>
+            <div class="wi-list" id="wi-cfb-list"><div class="wi-empty">—</div></div>
+            <p class="desc" data-i18n="wissen.cfb_sync_hint">Gespeicherte Einträge prüft der Wissensabgleich alle 5 Minuten auf Änderungen und übernimmt sie direkt ins Wissen. Abgewählte oder in Confluence gelöschte Seiten verschwinden dabei wieder aus dem Wissen.</p>
+        </div>
+
+        <!-- Mein Wissen -->
+        <div class="wi-section" id="wi-sec-files">
+            <h2><span data-i18n="wissen.sec_files">Mein Wissen</span><span class="wi-sec-tog">▼</span></h2>
+            <p class="desc" data-i18n="wissen.sec_files_desc">Dateien, die deinen Wissensgruppen zugeordnet sind.</p>
+            <!-- Suche: Name/Ordner sofort, Dateiinhalt zusaetzlich ueber den Server -->
+            <div class="wi-files-search" id="wi-files-search" style="display:none;">
+                <input type="text" class="wi-input wi-search-in" id="wi-files-q"
+                       name="wissen-suche" autocomplete="off"
+                       placeholder="Suche (Name, Ordner &amp; Inhalt)…"
+                       data-i18n-placeholder="wissen.search_ph">
+            </div>
+            <p class="wi-search-hint" id="wi-files-search-hint" style="display:none;"
+               data-i18n="wissen.search_hint">Sucht in Dateiname und Ordner – und im Inhalt der Dateien.</p>
+            <!-- Wissensgruppen-Filter: schraenkt die Liste darunter ein (Zustand im Cookie) -->
+            <div class="wi-files-filter" id="wi-files-filter" style="display:none;">
+                <span class="wi-files-filter-lbl" data-i18n="wissen.filter_label">Anzeigen:</span>
+                <span id="wi-files-filter-boxes"></span>
+                <span class="wi-files-filter-count" id="wi-files-count"></span>
+            </div>
+            <div class="wi-list" id="wi-files-list"><div class="wi-empty" data-i18n="common.loading">Lade…</div></div>
+        </div>
+
+        <!-- Mein Gedaechtnis (BSI M9): das eigene Gedaechtnis einsehen und
+             einzeln loeschen – fuer JEDEN angemeldeten Benutzer, auch ohne
+             Wissensbereich (dann ist es der einzige Abschnitt der Seite).
+             2026-10-15 aus den System-Einstellungen hierher verschoben: /settings
+             erreichen nur Admins. Inhalt: js/gedaechtnis.js. -->
+        <div class="wi-section" id="wi-sec-gedaechtnis">
+            <h2><span data-i18n="wissen.sec_mem">Mein Gedächtnis</span><span class="wi-sec-tog">▼</span></h2>
+            <p class="desc" data-i18n="wissen.sec_mem_desc">Was sich {marke} aus deinen Unterhaltungen gemerkt hat. Nur du siehst diese Einträge; jeden kannst du einzeln löschen.</p>
+            <div id="wi-gedaechtnis-liste"><div class="wi-empty" data-i18n="common.loading">Lade…</div></div>
+        </div>
+    </div>
+
+    <script src="/static/js/sitzung.js?v=3"></script>
+    <script src="/static/js/konto_hinweise.js?v=2"></script>
+    <script src="/static/js/icons.js?v=8"></script>
+    <script src="/static/js/pwreveal.js?v=4"></script>
+    <script src="/static/js/dlkey.js?v=4"></script>
+    <script src="/static/js/cpubar.js?v=2"></script>
+    <script src="/static/js/syspackages.js?v=3"></script>
+    <script src="/static/js/sysload.js?v=5"></script>
+    <script src="/static/js/i18n.js?v=339"></script>
+    <script src="/static/js/seite_breit.js?v=1"></script>
+    <script src="/static/js/theme.js?v=3"></script>
+    <script src="/static/js/profile_switcher.js?v=5"></script>
+    <script src="/static/js/issues.js?v=14"></script>
+    <script src="/static/js/kbgroups.js?v=6"></script>
+    <script src="/static/js/kbmatrix.js?v=20"></script>
+    <script src="/static/js/ldap_picker.js?v=14"></script>
+    <script src="/static/js/knowledge.js?v=131"></script>
+    <script src="/static/js/sessions.js?v=9"></script>
+    <script src="/static/js/logo_home.js?v=1"></script>
+    <script src="/static/js/wissen_destillat.js?v=10"></script>
+    <script src="/static/js/gedaechtnis.js?v=2"></script>
+    <script src="/static/js/wissen.js?v=74"></script>
+<script src="/static/js/settings_btn.js?v=5"></script>
+    <script src="/static/js/branding.js?v=27"></script>
+<!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
+<script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
+<script src="/static/vendor/clippy/clippy.min.js"></script>
+<script src="/static/js/stt.js?v=3"></script>
+<script src="/static/js/avatar.js?v=17"></script>
+<script src="/static/js/activity.js?v=3"></script>
+</body>
+</html>

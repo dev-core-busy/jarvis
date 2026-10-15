@@ -1,0 +1,584 @@
+using System.Net;
+using System.Net.Http.Headers;
+using System.Text;
+using System.Text.Json;
+using AiMouse.Configuration;
+using AiMouse.Localization;
+
+using AiMouse;
+
+namespace AiMouse.Vision;
+
+/// <summary>Spricht mit dem Jarvis-Server: Anmeldung und Auswertung.
+///
+/// ⚠ ERSETZT DEN FRUEHEREN <c>VisionClient</c>, der direkt einen
+/// OpenAI-kompatiblen Server ansprach. Der Unterschied ist nicht nur die
+/// Adresse:
+///
+/// * **Kein Modell, kein System-Prompt, keine Temperatur mehr im Client.** Das
+///   entscheidet der Server. Stuende es hier, waere der System-Prompt an jedem
+///   Arbeitsplatz frei veraenderbar – und damit kein Schutz.
+/// * **Anmeldung mit Benutzer und Kennwort statt eines geteilten API-Keys.**
+///   Die Berechtigung haengt an der Person, greift auf die vorhandenen
+///   Freigabelisten zurueck und steht im Anwesenheits- und Audit-Log.
+/// * **Das Token liegt NUR im Arbeitsspeicher.** Es landet nicht in der
+///   settings.json: die Datei wird per Netzfreigabe verteilt und liegt im
+///   Klartext neben der Exe. Preis ist eine Anmeldung je Programmstart.
+/// </summary>
+internal sealed class JarvisClient : IDisposable
+{
+    private readonly HttpClient _http;
+    private readonly AppSettings _settings;
+    private string _token = string.Empty;
+
+    public JarvisClient(AppSettings settings)
+    {
+        _settings = settings;
+        _http = new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(Math.Clamp(settings.TimeoutSeconds, 5, 3600)),
+        };
+    }
+
+    /// <summary>Ist eine Sitzung vorhanden? Sagt NICHT, ob sie noch gilt.</summary>
+    public bool Angemeldet => _token.Length > 0;
+
+    /// <summary>Meldet ab – nur lokal. Der Server kennt keine Sitzungstabelle.</summary>
+    public void Abmelden() => _token = string.Empty;
+
+    /// <summary>Das aktuelle Sitzungstoken – zum Ablegen in der Registry.
+    ///
+    /// ⚠ NUR LESEN, und nur fuer diesen einen Zweck. Es traegt laut
+    /// Projektregel die VOLLE Sitzung; wer es weitergibt, gibt die Anmeldung
+    /// weiter. `ConfigStore.SaveToken` verschluesselt es deshalb per DPAPI.
+    /// </summary>
+    public string Token => _token;
+
+    /// <summary>Ein gespeichertes Token uebernehmen (Programmstart).
+    ///
+    /// Es wird NICHT geprueft – das kostete einen Serveraufruf beim Start und
+    /// beantwortete doch nur die Frage, die der erste echte Aufruf ohnehin
+    /// stellt. Ist es abgelaufen, antwortet der Server mit 401, und der
+    /// vorhandene Weg fragt neu (`AnmeldungNoetigException`).
+    /// </summary>
+    public void TokenSetzen(string? token)
+    {
+        _token = string.IsNullOrWhiteSpace(token) ? string.Empty : token.Trim();
+    }
+
+    /// <summary>Uebernimmt die Sitzung eines anderen Clients.
+    ///
+    /// ⚠ NOETIG, WEIL DER CLIENT BEI JEDER EINSTELLUNGSAENDERUNG NEU ENTSTEHT:
+    /// das Zeitlimit steckt im <see cref="HttpClient"/> und laesst sich nach
+    /// dem ersten Request nicht mehr aendern. Ohne diese Uebergabe verlor jedes
+    /// Speichern im Einstellungsdialog die Anmeldung – und der Benutzer wurde
+    /// beim naechsten Rahmen erneut gefragt (gemeldet am 2026-09-09).
+    ///
+    /// **NUR bei gleicher Serveradresse aufrufen.** Ein Token gilt fuer den
+    /// Server, an dem es entstanden ist; anderswo waere es ein 401, der wie ein
+    /// Serverfehler aussieht. Der Aufrufer prueft das.
+    /// </summary>
+    public void SitzungUebernehmen(JarvisClient anderer)
+    {
+        if (anderer is not null && anderer._token.Length > 0)
+        {
+            _token = anderer._token;
+        }
+    }
+
+    /// <summary>Anmeldung. Wirft <see cref="VisionException"/> mit Klartext.
+    ///
+    /// <paramref name="totp"/> bleibt leer, solange der Server keinen Code
+    /// verlangt; verlangt er einen, wirft der erste Versuch
+    /// <see cref="TotpNoetigException"/> und der Aufrufer fragt nach.
+    /// </summary>
+    public async Task AnmeldenAsync(string benutzer, string kennwort, string totp,
+                                    CancellationToken ct)
+    {
+        string basis = EndpointResolver.Basis(_settings.Endpoint);
+        if (basis.Length == 0)
+        {
+            throw new VisionException(Texte.KeinServer);
+        }
+
+        var rumpf = new Dictionary<string, string>
+        {
+            ["username"] = benutzer,
+            ["password"] = kennwort,
+        };
+        if (!string.IsNullOrWhiteSpace(totp))
+        {
+            rumpf["totp_code"] = totp.Trim();
+        }
+
+        using var inhalt = new StringContent(
+            JsonSerializer.Serialize(rumpf, AppJsonContext.Default.DictionaryStringString),
+            Encoding.UTF8, "application/json");
+
+        JsonElement wurzel;
+        try
+        {
+            using HttpResponseMessage antwort =
+                await _http.PostAsync(basis + "/api/login", inhalt, ct).ConfigureAwait(false);
+            string roh = await antwort.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            using JsonDocument doc = JsonDocument.Parse(roh);
+            wurzel = doc.RootElement.Clone();
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            // Der Rohtext bleibt in der Meldung: "nicht erreichbar" allein
+            // unterscheidet nicht zwischen falschem Namen, Zertifikat und
+            // fehlendem Netzweg – und genau das muss der Benutzer wissen.
+            throw new VisionException(Texte.NichtErreichbar + e.Message, e);
+        }
+
+        if (wurzel.TryGetProperty("success", out JsonElement erf) &&
+            erf.ValueKind == JsonValueKind.True)
+        {
+            _token = wurzel.TryGetProperty("token", out JsonElement t)
+                ? (t.GetString() ?? string.Empty) : string.Empty;
+            if (_token.Length == 0)
+            {
+                throw new VisionException(Texte.KeineAntwort);
+            }
+            return;
+        }
+
+        // Zweistufige Anmeldung: der Server sagt es ausdruecklich, statt einen
+        // falschen Fehler ("Kennwort falsch") zurueckzugeben.
+        if (wurzel.TryGetProperty("requires_totp", out JsonElement r) &&
+            r.ValueKind == JsonValueKind.True)
+        {
+            throw new TotpNoetigException(Fehlertext(wurzel, Texte.EinmalCode));
+        }
+
+        throw new VisionException(Fehlertext(wurzel, Texte.KeineAntwort));
+    }
+
+    /// <summary>Bildausschnitt und Frage auswerten.
+    ///
+    /// <paramref name="bereiche"/> nimmt auf, was der Lauf zusaetzlich
+    /// nachschlagen durfte – der Server liefert das mit, und das Fenster sagt
+    /// es dem Benutzer. Ohne diese Angabe ist eine Antwort mit nachgeschlagenem
+    /// Hintergrund von einer ohne nicht zu unterscheiden.
+    ///
+    /// ⚠ RUECKGABE IST SEIT 1.0.8 EIN <see cref="MausAntwort"/> UND KEIN STRING.
+    /// Grund ist das Feld <c>bild</c>: laesst der Benutzer den Text IM BILD
+    /// ersetzen ("uebersetze das Bild nach Deutsch"), erzeugt der Server ein
+    /// neues Bild und nennt dessen Adresse. Ein zweiter Sammelparameter neben
+    /// <paramref name="bereiche"/> waere die bequemere, aber schlechtere
+    /// Loesung – zwei Rueckgabewege fuer eine Antwort.
+    ///
+    /// Ein ALTER Server kennt das Feld nicht; dann bleibt <c>BildUrl</c> leer
+    /// und alles verhaelt sich wie bisher.
+    /// </summary>
+    public async Task<MausAntwort> AnalysierenAsync(string frage, string bildDataUri,
+                                                    List<string> bereiche,
+                                                    CancellationToken ct)
+    {
+        if (!Angemeldet)
+        {
+            throw new AnmeldungNoetigException(Texte.AnmeldungFehlt);
+        }
+        string basis = EndpointResolver.Basis(_settings.Endpoint);
+        if (basis.Length == 0)
+        {
+            throw new VisionException(Texte.KeinServer);
+        }
+
+        var rumpf = new Dictionary<string, string>
+        {
+            ["image"] = bildDataUri,
+            ["prompt"] = frage,
+            ["lang"] = Texte.IstEnglisch ? "en" : "de",
+        };
+
+        using var nachricht = new HttpRequestMessage(
+            HttpMethod.Post, basis + "/api/ai-mouse/analyze")
+        {
+            Content = new StringContent(
+                JsonSerializer.Serialize(rumpf, AppJsonContext.Default.DictionaryStringString),
+                Encoding.UTF8, "application/json"),
+        };
+        nachricht.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);
+
+        HttpResponseMessage antwort;
+        string roh;
+        try
+        {
+            antwort = await _http.SendAsync(nachricht, ct).ConfigureAwait(false);
+            roh = await antwort.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
+        {
+            throw new VisionException(Texte.NichtErreichbar + e.Message, e);
+        }
+
+        // 401 heisst: das Token gilt nicht mehr. Der Aufrufer soll die
+        // Anmeldemaske zeigen, nicht eine Fehlermeldung – deshalb ein eigener
+        // Ausnahmetyp und nicht der allgemeine.
+        if (antwort.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            _token = string.Empty;
+            antwort.Dispose();
+            throw new AnmeldungNoetigException(Texte.Abgelaufen);
+        }
+
+        JsonElement wurzel;
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(roh);
+            wurzel = doc.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            // Keine JSON-Antwort: ein Proxy oder eine Fehlerseite. Der Rohtext
+            // ist dann die einzige Spur – gekuerzt, damit kein HTML-Dokument
+            // im Meldungsfenster landet.
+            antwort.Dispose();
+            throw new VisionException(Texte.KeineAntwort + " (HTTP "
+                + (int)antwort.StatusCode + ") " + Kurz(roh));
+        }
+        antwort.Dispose();
+
+        if (wurzel.TryGetProperty("ok", out JsonElement okE) &&
+            okE.ValueKind == JsonValueKind.True)
+        {
+            if (wurzel.TryGetProperty("bereiche", out JsonElement b) &&
+                b.ValueKind == JsonValueKind.Array)
+            {
+                foreach (JsonElement e in b.EnumerateArray())
+                {
+                    string? s = e.GetString();
+                    if (!string.IsNullOrWhiteSpace(s)) { bereiche.Add(s); }
+                }
+            }
+            string text = wurzel.TryGetProperty("text", out JsonElement t)
+                ? (t.GetString() ?? string.Empty) : string.Empty;
+            string bild = wurzel.TryGetProperty("bild", out JsonElement bi)
+                ? (bi.GetString() ?? string.Empty) : string.Empty;
+
+            // ⚠ NUR WENN BEIDES FEHLT IST ES EIN FEHLSCHLAG. Ein Lauf, der
+            //    ausschliesslich ein Bild geliefert hat, ist erfolgreich –
+            //    beim Uebersetzen eines Bildes ist das Bild die Antwort.
+            if (text.Length == 0 && bild.Length == 0)
+            {
+                throw new VisionException(Texte.KeineAntwort);
+            }
+            return new MausAntwort(text, BildAdressePruefen(bild));
+        }
+
+        // 403 vom Freigabe-Gate: eigener Text mit dem Weg zur Abhilfe. Die
+        // Meldung des Servers steht dahinter, damit der Grund nicht verloren
+        // geht (er unterscheidet Freigabe von abgeschaltetem Skill).
+        string fehler = Fehlertext(wurzel, Texte.KeineAntwort);
+        if (antwort.StatusCode == HttpStatusCode.Forbidden)
+        {
+            throw new VisionException(Texte.KeineFreigabe + "\n\n" + fehler);
+        }
+        throw new VisionException(fehler);
+    }
+
+    /// <summary>Nimmt eine Bildadresse nur in der Form an, die der Server
+    /// vergibt – sonst leer.
+    ///
+    /// ⚠ EINE ERLAUBNISLISTE, KEINE SPERRLISTE, und die Form ist dieselbe, die
+    /// <c>main.get_generated_image</c> durchlaesst: <c>/api/generated/</c> +
+    /// 32 Hex + bekannte Endung. Was hier nicht passt, wird gar nicht erst
+    /// abgerufen – ohne diese Schranke wuerde aus einem Serverfehler (oder
+    /// einer manipulierten Antwort) ein Abruf an eine beliebige Adresse.
+    ///
+    /// Sie ersetzt NICHT die Pruefung am Server: die bleibt die harte Grenze.
+    /// Hier geht es darum, dass der Client nur dorthin greift, wohin er soll.
+    /// </summary>
+    private static string BildAdressePruefen(string? roh)
+    {
+        string wert = (roh ?? string.Empty).Trim();
+        const string Praefix = "/api/generated/";
+        if (!wert.StartsWith(Praefix, StringComparison.Ordinal))
+        {
+            return string.Empty;
+        }
+
+        string rest = wert.Substring(Praefix.Length);
+        int punkt = rest.LastIndexOf('.');
+        if (punkt != 32)
+        {
+            return string.Empty;
+        }
+
+        for (int i = 0; i < 32; i++)
+        {
+            char c = rest[i];
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
+            {
+                return string.Empty;
+            }
+        }
+
+        string endung = rest.Substring(punkt + 1).ToLowerInvariant();
+        return endung is "png" or "jpg" or "jpeg" or "gif" or "webp"
+            ? wert : string.Empty;
+    }
+
+    /// <summary>Holt ein erzeugtes Bild. Rueckgabe <c>null</c>, wenn es nicht
+    /// geht.
+    ///
+    /// ⚠ OHNE TOKEN – und das ist kein Versehen: <c>/api/generated/&lt;hash&gt;</c>
+    /// ist eine Capability-URL, der 32-stellige Name IST die Berechtigung. Ein
+    /// Bearer-Header schadet nicht, aber er verspricht eine Pruefung, die es
+    /// dort nicht gibt.
+    ///
+    /// **FAIL-SAFE: ein Fehlschlag wirft nicht.** Das Bild ist eine Zugabe zur
+    /// Antwort; ein Netzhaenger beim Nachladen darf nicht die Textantwort
+    /// kosten, die laengst da ist. Der Aufrufer zeigt dann nur den Text.
+    /// </summary>
+    public async Task<byte[]?> BildHolenAsync(string relativeAdresse, CancellationToken ct)
+    {
+        string adresse = BildAdressePruefen(relativeAdresse);
+        if (adresse.Length == 0)
+        {
+            return null;
+        }
+
+        string basis = EndpointResolver.Basis(_settings.Endpoint);
+        if (basis.Length == 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            byte[] daten = await _http.GetByteArrayAsync(basis + adresse, ct)
+                .ConfigureAwait(false);
+            return daten.Length > 0 ? daten : null;
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Holt die Fragen des angemeldeten Benutzers vom Server.
+    ///
+    /// ⚠ SIE LAGEN BIS 2026-09-09 IN EINER prompts.json NEBEN DER EXE. Jetzt
+    /// kommen sie vom Server: sie folgen dem BENUTZER und nicht dem Rechner,
+    /// und ein Administrator kann gemeinsame Fragen fuer alle setzen. Gepflegt
+    /// werden sie im Portal (Kachel "AI Mouse").
+    ///
+    /// Ein Fehlschlag ist NICHT toedlich: der Aufrufer behaelt die zuletzt
+    /// geholte Liste. Ohne Fragen waere die Geste nutzlos – eine leere Liste
+    /// nach einem Netzhaenger waere der schlechtere Ausgang.
+    /// </summary>
+    /// <summary>Die Version, die der SERVER fuer die Anwendung fuehrt.
+    ///
+    /// Aus <c>/api/ai-mouse/health</c>, dem Feld <c>klient_version</c>. Der
+    /// Server liest sie aus der Projektdatei des Clients – es gibt also nur
+    /// EINE Quelle, und Server und EXE koennen nicht auseinanderlaufen.
+    ///
+    /// ⚠ RUECKGABE "" HEISST "UNBEKANNT", NICHT "KEINE NEUE". Diese Methode
+    /// wirft deshalb NICHT bei einem Netz- oder Serverfehler: eine stille
+    /// Aktualisierung darf an einer nicht erreichbaren Antwort nicht
+    /// haengenbleiben, und ein leerer Wert laesst den Aufrufer nichts tun.
+    /// </summary>
+    public async Task<string> ServerVersionAsync(CancellationToken ct)
+    {
+        try
+        {
+            if (!Angemeldet)
+            {
+                return string.Empty;
+            }
+
+            string basis = EndpointResolver.Basis(_settings.Endpoint);
+            if (basis.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            using var nachricht = new HttpRequestMessage(
+                HttpMethod.Get, basis + "/api/ai-mouse/health");
+            nachricht.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);
+
+            using HttpResponseMessage antwort =
+                await _http.SendAsync(nachricht, ct).ConfigureAwait(false);
+            if (!antwort.IsSuccessStatusCode)
+            {
+                return string.Empty;
+            }
+
+            string roh = await antwort.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            using JsonDocument doc = JsonDocument.Parse(roh);
+            return doc.RootElement.TryGetProperty("klient_version", out JsonElement v)
+                   && v.ValueKind == JsonValueKind.String
+                ? (v.GetString() ?? string.Empty)
+                : string.Empty;
+        }
+        catch (Exception)
+        {
+            return string.Empty;
+        }
+    }
+
+    /// <summary>Das Anwendungspaket (ZIP) – fuer die stille Aktualisierung.
+    ///
+    /// ⚠ HIER KOMMT AUSFUEHRBARER CODE UEBER DIE LEITUNG. Getragen wird das
+    /// von der TLS-Pruefung dieses <see cref="HttpClient"/> (Standard, ohne
+    /// Ausnahme) und vom Sitzungstoken – dasselbe Vertrauensniveau wie beim
+    /// Download von Hand im Portal. Wer hier eine Zertifikats-Ausnahme
+    /// einbaut, macht daraus einen Weg zur Codeausfuehrung per
+    /// Man-in-the-Middle.
+    ///
+    /// ⚠ EIGENES, KURZES ZEITLIMIT: das Paket ist rund 66 MB, und der
+    /// gemeinsame <see cref="HttpClient"/> traegt das Zeitlimit der
+    /// AUSWERTUNG (bis zu einer Stunde). Ein haengender Download darf nicht
+    /// stundenlang eine Verbindung halten.
+    /// </summary>
+    public async Task<byte[]> PaketAsync(CancellationToken ct)
+    {
+        if (!Angemeldet)
+        {
+            throw new AnmeldungNoetigException(Texte.AnmeldungFehlt);
+        }
+
+        string basis = EndpointResolver.Basis(_settings.Endpoint);
+        if (basis.Length == 0)
+        {
+            throw new VisionException(Texte.KeinServer);
+        }
+
+        using var eigenesLimit = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+        using var zusammen = CancellationTokenSource.CreateLinkedTokenSource(
+            ct, eigenesLimit.Token);
+
+        using var nachricht = new HttpRequestMessage(
+            HttpMethod.Get, basis + "/api/ai-mouse/paket");
+        nachricht.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);
+
+        using HttpResponseMessage antwort = await _http.SendAsync(
+            nachricht, HttpCompletionOption.ResponseHeadersRead, zusammen.Token)
+            .ConfigureAwait(false);
+        if (antwort.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            _token = string.Empty;
+            throw new AnmeldungNoetigException(Texte.Abgelaufen);
+        }
+
+        if (!antwort.IsSuccessStatusCode)
+        {
+            // 409 heisst "wird gerade gebaut" – kein Fehler, nur nichts zu
+            // holen. Der naechste Anlauf bekommt die Datei.
+            throw new VisionException("HTTP " + (int)antwort.StatusCode);
+        }
+
+        return await antwort.Content.ReadAsByteArrayAsync(zusammen.Token)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<List<PromptItem>> FragenAsync(CancellationToken ct)
+    {
+        if (!Angemeldet)
+        {
+            throw new AnmeldungNoetigException(Texte.AnmeldungFehlt);
+        }
+        string basis = EndpointResolver.Basis(_settings.Endpoint);
+        if (basis.Length == 0)
+        {
+            throw new VisionException(Texte.KeinServer);
+        }
+
+        using var nachricht = new HttpRequestMessage(
+            HttpMethod.Get, basis + "/api/ai-mouse/fragen");
+        nachricht.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);
+
+        using HttpResponseMessage antwort =
+            await _http.SendAsync(nachricht, ct).ConfigureAwait(false);
+        if (antwort.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            _token = string.Empty;
+            throw new AnmeldungNoetigException(Texte.Abgelaufen);
+        }
+        string roh = await antwort.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+
+        var raus = new List<PromptItem>();
+        using JsonDocument doc = JsonDocument.Parse(roh);
+        if (doc.RootElement.TryGetProperty("fragen", out JsonElement arr)
+            && arr.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement e in arr.EnumerateArray())
+            {
+                string titel = e.TryGetProperty("titel", out JsonElement tt)
+                    ? (tt.GetString() ?? string.Empty) : string.Empty;
+                string prompt = e.TryGetProperty("prompt", out JsonElement pp)
+                    ? (pp.GetString() ?? string.Empty) : string.Empty;
+                // Beides muss da sein: ein Menueeintrag ohne Anweisung waere
+                // ein Knopf, der eine leere Frage stellt.
+                if (titel.Length > 0 && prompt.Length > 0)
+                {
+                    raus.Add(new PromptItem { Title = titel, Prompt = prompt });
+                }
+            }
+        }
+        return raus;
+    }
+
+    /// <summary>Zieht die Fehlermeldung aus einer Serverantwort.
+    ///
+    /// Jarvis benutzt <c>error</c> (eigene Endpunkte) und <c>detail</c>
+    /// (FastAPI bei 401/403/422) – beide werden gelesen. Nur eines zu kennen
+    /// hat im Projekt schon einmal dazu gefuehrt, dass eine vorhandene
+    /// Begruendung nicht angezeigt wurde.
+    /// </summary>
+    private static string Fehlertext(JsonElement wurzel, string rueckfall)
+    {
+        foreach (string feld in new[] { "error", "detail", "message" })
+        {
+            if (wurzel.TryGetProperty(feld, out JsonElement e) &&
+                e.ValueKind == JsonValueKind.String)
+            {
+                string? s = e.GetString();
+                if (!string.IsNullOrWhiteSpace(s)) { return s!; }
+            }
+        }
+        return rueckfall;
+    }
+
+    private static string Kurz(string s) =>
+        s.Length <= 300 ? s : s[..300] + "…";
+
+    public void Dispose() => _http.Dispose();
+}
+
+/// <summary>Die Sitzung fehlt oder gilt nicht mehr – Anmeldemaske zeigen.</summary>
+/// <summary>Was bei einer Auswertung herauskommt: Text und – falls der Lauf
+/// eines erzeugt hat – die Adresse des Bildes.
+///
+/// <c>BildUrl</c> ist RELATIV (<c>/api/generated/…</c>) und geprueft; leer
+/// heisst "kein Bild". Sie ist eine Capability-URL: der Name traegt die
+/// Berechtigung, ein Token braucht es nicht.
+/// </summary>
+internal sealed record MausAntwort(string Text, string BildUrl);
+
+internal sealed class AnmeldungNoetigException : VisionException
+{
+    public AnmeldungNoetigException(string message) : base(message) { }
+}
+
+/// <summary>Der Server verlangt zusaetzlich einen Einmal-Code.</summary>
+internal sealed class TotpNoetigException : VisionException
+{
+    public TotpNoetigException(string message) : base(message) { }
+}
+
+/// <summary>Fachlicher Fehlschlag mit einem Text fuer die Oberflaeche.
+///
+/// Lag bis 2026-09-09 in <c>VisionClient.cs</c> und ist mit dem Umbau
+/// hierher gewandert – der Name bleibt, damit die Aufrufer (Tray, Fenster)
+/// unveraendert fangen koennen.
+/// </summary>
+internal class VisionException : Exception
+{
+    public VisionException(string message) : base(message) { }
+
+    public VisionException(string message, Exception inner) : base(message, inner) { }
+}

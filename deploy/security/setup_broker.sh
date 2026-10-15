@@ -1,0 +1,209 @@
+#!/bin/bash
+# Jarvis: Migration auf getrennten Betrieb (unprivilegiertes Backend + Root-Broker)
+#
+# Idempotent. Als root auf dem Jarvis-Server ausfuehren:
+#   bash /opt/jarvis/deploy/security/setup_broker.sh [JARVIS_DIR] [SERVICE_USER]
+#
+# Schritte:
+#   1. Dienst-Benutzer pruefen (Standard: jarvis – der Desktop-Benutzer)
+#   2. Eigentuemerschaft Projektverzeichnis(se) + data/ + certs/ auf den Benutzer
+#   3. Gruppe fuer Kamera (video); adm/systemd-journal NICHT mehr (BSI M8)
+#   4. systemd-Units installieren: jarvis-broker.service (root) +
+#      jarvis.service (User=jarvis, CAP_NET_BIND_SERVICE)
+#   5. Dienste aktivieren/neustarten und verifizieren (Broker-Socket, euid)
+#
+# Rueckweg (Alt-Betrieb): das alte jarvis.service (User=root) wieder
+# installieren und jarvis-broker.service deaktivieren – der Code funktioniert
+# in beiden Betriebsarten (Broker-Client hat einen root-Fallback).
+
+set -u
+
+JARVIS_DIR="${1:-/opt/jarvis}"
+SVC_USER="${2:-jarvis}"
+UNIT_DIR="/etc/systemd/system"
+
+fail() { echo "❌ $*" >&2; exit 1; }
+step() { echo ""; echo "── $*"; }
+
+[ "$(id -u)" = "0" ] || fail "Bitte als root ausfuehren."
+[ -d "$JARVIS_DIR" ] || fail "Verzeichnis $JARVIS_DIR fehlt."
+[ -f "$JARVIS_DIR/backend/broker/daemon.py" ] || fail "Broker-Code fehlt in $JARVIS_DIR – erst Code deployen."
+id "$SVC_USER" >/dev/null 2>&1 || fail "Benutzer $SVC_USER existiert nicht."
+
+# Preflight: der Dienst-Benutzer muss das Elternverzeichnis BETRETEN koennen
+# (Traversal). Liegt Jarvis z.B. unter /root/jarvis (0700), wuerde die
+# Migration das Backend unstartbar machen (status=200/CHDIR) – deshalb hier
+# HART abbrechen, BEVOR irgendetwas veraendert wird.
+PARENT_DIR="$(dirname "$JARVIS_DIR")"
+if ! runuser -u "$SVC_USER" -- test -x "$PARENT_DIR" 2>/dev/null; then
+    fail "Preflight: Benutzer '$SVC_USER' kann $PARENT_DIR nicht betreten (z.B. Installation unter /root). Getrennter Betrieb ist mit diesem Layout nicht moeglich – es wurde NICHTS veraendert. Jarvis zuerst nach /opt/jarvis umziehen."
+fi
+
+step "1/5 Eigentuemerschaft: $JARVIS_DIR → $SVC_USER"
+chown -R "$SVC_USER:$SVC_USER" "$JARVIS_DIR"
+# Secrets bleiben eng (Eigentuemer darf, Gruppe/Andere nicht)
+for f in "$JARVIS_DIR/.env" "$JARVIS_DIR/data/settings.json" "$JARVIS_DIR/certs/server.key"; do
+    [ -f "$f" ] && chmod 600 "$f"
+done
+echo "   OK"
+
+step "2/5 Gruppen fuer $SVC_USER (Kamera)"
+# BSI M8: NICHT mehr adm/systemd-journal – damit las der Dienstbenutzer jedes
+# Systemprotokoll. Die Einsicht in die eigenen Dienste laeuft ueber die
+# Broker-Op journal_lesen; haertung_installieren.sh (Schritt 4) nimmt die
+# Gruppen auf Bestandssystemen weg.
+for grp in video; do
+    getent group "$grp" >/dev/null && usermod -aG "$grp" "$SVC_USER" 2>/dev/null && echo "   + $grp"
+done
+
+# Units und Installer aus dem Verzeichnis DIESES Skripts: laeuft es ueber die
+# Broker-Op, ist das die root-eigene Kopie, nicht der Baum des Dienstes (K1).
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+step "3/5 Root-eigene Broker-Laufzeit + systemd-Units"
+# Quelle der Broker-Kopie festlegen, falls noch keine gewaehlt ist: das
+# oeffentliche Repository, von root selbst geholt (siehe broker_installieren.sh).
+KONF=/etc/jarvis/broker.conf
+if [ ! -f "$KONF" ]; then
+    install -d -m 0755 -o root -g root /etc/jarvis
+    printf 'QUELLE=github\nBRANCH=master\nJARVIS_DIR=%s\n' "$JARVIS_DIR" > "$KONF"
+    chmod 0644 "$KONF"; chown root:root "$KONF"
+fi
+bash "$SELF_DIR/broker_installieren.sh" --jarvis-dir "$JARVIS_DIR"; _irc=$?
+if [ "$_irc" != "0" ] && [ "$_irc" != "3" ]; then
+    echo "   ⚠️  Quelle nicht erreichbar – installiere aus $JARVIS_DIR (einmalig, von Hand gestartet)"
+    bash "$SELF_DIR/broker_installieren.sh" --jarvis-dir "$JARVIS_DIR" --quelle lokal \
+        || fail "Broker-Laufzeit konnte nicht installiert werden."
+fi
+cp "$SELF_DIR/jarvis-broker.service" "$UNIT_DIR/jarvis-broker.service"
+cp "$SELF_DIR/jarvis.service" "$UNIT_DIR/jarvis.service"
+# Pfad/Benutzer anpassen, falls abweichend (die Broker-Unit zeigt fest auf die
+# root-eigene Kopie; nur JARVIS_DIR ist der Projektbaum)
+if [ "$JARVIS_DIR" != "/opt/jarvis" ]; then
+    sed -i "s|^Environment=JARVIS_DIR=.*|Environment=JARVIS_DIR=$JARVIS_DIR|" "$UNIT_DIR/jarvis-broker.service"
+    sed -i "s|/opt/jarvis|$JARVIS_DIR|g" "$UNIT_DIR/jarvis.service"
+fi
+# Die WhatsApp-Bridge laeuft aus dem Projektbaum – als root waere das derselbe
+# Weg zu root wie beim Broker (K1-a, auf ECHT gemessen: User=root).
+WA_UNIT="$UNIT_DIR/whatsapp-bridge.service"
+if [ -f "$WA_UNIT" ] && grep -q "$JARVIS_DIR" "$WA_UNIT"; then
+    if ! grep -qE "^User=$SVC_USER\$" "$WA_UNIT"; then
+        if grep -qE '^User=' "$WA_UNIT"; then
+            sed -i "s|^User=.*|User=$SVC_USER|" "$WA_UNIT"
+        else
+            sed -i "s|^\[Service\]|[Service]\nUser=$SVC_USER|" "$WA_UNIT"
+        fi
+        echo "   whatsapp-bridge.service laeuft jetzt als $SVC_USER"
+    fi
+fi
+# Weitere root-Units, die etwas aus dem Projektbaum starten, MELDEN – eine
+# stille Umstellung koennte einen Dienst lahmlegen, den dieses Skript nicht kennt.
+for _u in "$UNIT_DIR"/*.service; do
+    [ -f "$_u" ] || continue
+    case "$(basename "$_u")" in jarvis.service|jarvis-broker.service) continue ;; esac
+    if grep -qE "^Exec[A-Za-z]*=.*$JARVIS_DIR" "$_u" && ! grep -qE '^User=[^r]' "$_u"; then
+        echo "   ⚠️  $(basename "$_u") startet als root etwas aus $JARVIS_DIR – bitte auf User=$SVC_USER umstellen oder entfernen"
+    fi
+done
+if [ "$SVC_USER" != "jarvis" ]; then
+    sed -i "s|^User=jarvis$|User=$SVC_USER|;s|^Group=jarvis$|Group=$SVC_USER|" "$UNIT_DIR/jarvis.service"
+    sed -i "s|JARVIS_BROKER_GROUP=jarvis|JARVIS_BROKER_GROUP=$SVC_USER|" "$UNIT_DIR/jarvis-broker.service"
+fi
+chmod +x "$JARVIS_DIR/start_jarvis.sh"
+# systemd-Haertung (BSI M1) gleich mit – sonst griffe sie erst beim zweiten
+# Neustart (der Broker schreibt sie bei jedem Start erneut)
+bash "$SELF_DIR/haertung_installieren.sh" "$JARVIS_DIR" || true
+systemctl daemon-reload
+echo "   OK"
+
+step "4/5 Dienste starten"
+# Reihenfolge wichtig: erst jarvis.service neu starten (killt ein evtl. noch
+# im alten root-Dienst laufendes x11vnc in dessen cgroup), DANN den Broker
+# (neu) starten – sein Bootstrap sieht sonst das alte x11vnc und ueberspringt
+# den VNC-Start.
+systemctl enable jarvis-broker.service >/dev/null 2>&1
+systemctl restart jarvis.service
+systemctl enable jarvis.service >/dev/null 2>&1
+sleep 2
+systemctl restart jarvis-broker.service
+sleep 4
+
+step "5/5 Verifikation"
+ok=1
+if [ -S /run/jarvis-broker.sock ]; then
+    echo "   ✅ Broker-Socket vorhanden: /run/jarvis-broker.sock ($(stat -c '%U:%G %a' /run/jarvis-broker.sock))"
+else
+    echo "   ❌ Broker-Socket fehlt – journalctl -u jarvis-broker.service pruefen"; ok=0
+fi
+MAIN_PID="$(systemctl show -p MainPID --value jarvis.service)"
+if [ -n "$MAIN_PID" ] && [ "$MAIN_PID" != "0" ]; then
+    RUN_USER="$(ps -o user= -p "$MAIN_PID" | tr -d ' ')"
+    if [ "$RUN_USER" = "$SVC_USER" ]; then
+        echo "   ✅ Backend laeuft unprivilegiert als '$RUN_USER' (PID $MAIN_PID)"
+    else
+        echo "   ❌ Backend laeuft als '$RUN_USER' (erwartet: $SVC_USER)"; ok=0
+    fi
+else
+    echo "   ❌ jarvis.service laeuft nicht – journalctl -u jarvis.service pruefen"; ok=0
+fi
+for _i in 1 2 3 4 5 6 7 8 9 10; do
+    sleep 2
+    if curl -sk -m 5 https://localhost/api/config >/dev/null 2>&1; then
+        echo "   ✅ HTTPS (Port 443) erreichbar"
+        break
+    fi
+    [ "$_i" = "10" ] && { echo "   ❌ HTTPS nicht erreichbar"; ok=0; }
+done
+
+# Python-Module der Agent-Shell: bei einer Erstinstallation SICHTBAR und
+# synchron erledigen. Der Broker-Bootstrap (Schritt 6c) holt das ohnehin im
+# Hintergrund nach – hier soll der Administrator das Ergebnis aber SEHEN, weil
+# ein neuer Server sonst still ohne openpyxl/pdfplumber laeuft und der Agent
+# Excel- und PDF-Aufgaben erst dann nicht liefern kann, wenn ein Benutzer fragt.
+SANDBOX_PY="$SELF_DIR/../sandbox_python.sh"
+if [ -f "$SANDBOX_PY" ]; then
+    step "Python-Module der Agent-Shell"
+    if bash "$SANDBOX_PY" --pruefen >/dev/null 2>&1; then
+        echo "   ✅ alle Module vorhanden"
+    else
+        # Ausgabe erst einsammeln, DANN filtern: eine Pipeline liefert den
+        # Exit-Code des letzten Glieds, der Fehlschlag waere unsichtbar.
+        _sbout="$(bash "$SANDBOX_PY" 2>&1)"; _sbrc=$?
+        printf '%s\n' "$_sbout" | tail -n 14 | sed 's/^/   /'
+        # KEIN Abbruch der Migration: der getrennte Betrieb steht auch ohne diese
+        # Module, es fehlen dann nur Excel-/PDF-Faehigkeiten in der Shell.
+        [ "$_sbrc" -eq 0 ] \
+            || echo "   ⚠️  fehlgeschlagen – spaeter 'bash deploy/sandbox_python.sh' nachholen"
+    fi
+fi
+
+# Apache Tika (OneNote-Import): bei einer Erstinstallation SICHTBAR und synchron.
+# Der Broker-Bootstrap (Schritt 6e) holt es ohnehin im Hintergrund nach – hier
+# soll der Administrator es SEHEN, weil der erste Lauf eine Java-Laufzeit
+# installiert und 65 MB laedt. Gleiche Begruendung wie beim Block darueber.
+TIKA_SETUP="$SELF_DIR/../tika_setup.sh"
+if [ -f "$TIKA_SETUP" ]; then
+    step "Apache Tika (OneNote-Import)"
+    if JARVIS_DIR="$JARVIS_DIR" bash "$TIKA_SETUP" --pruefen >/dev/null 2>&1; then
+        echo "   ✅ Java und tika-app.jar vorhanden"
+    else
+        # Ausgabe erst einsammeln, DANN filtern (Pipeline-Exit-Code, s.o.).
+        _tkout="$(JARVIS_DIR="$JARVIS_DIR" bash "$TIKA_SETUP" 2>&1)"; _tkrc=$?
+        printf '%s\n' "$_tkout" | grep -E '^(  [✓✗]|✓|✗|⚠)' | tail -n 8 | sed 's/^/   /'
+        # KEIN Abbruch: ohne Tika laeuft alles weiter, nur *.one bleibt
+        # ungelesen – und der Indexer sagt das im Klartext.
+        [ "$_tkrc" -eq 0 ] \
+            || echo "   ⚠️  fehlgeschlagen – das Backend wiederholt es selbsttaetig (Start + erste .one-Datei)"
+    fi
+fi
+
+echo ""
+if [ "$ok" = "1" ]; then
+    echo "✅ Migration abgeschlossen: getrennter Betrieb aktiv."
+    echo "   Root-Freigaben verwalten: Einstellungen → Sicherheit → Root-Freigaben"
+    echo "   Freigaben brauchen dort einen Code – einmalig einrichten: jarvis-broker-admin totp-einrichten"
+    echo "   (oder direkt als root: jarvis-broker-admin liste | erlauben <Eintrag>)"
+else
+    echo "⚠️  Migration unvollstaendig – siehe Meldungen oben."
+    exit 1
+fi

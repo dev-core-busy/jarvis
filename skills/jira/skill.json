@@ -1,0 +1,114 @@
+{
+    "name": "Jira",
+    "description": "Verbindung zu Atlassian Jira (Server/Data-Center). Ticketsuche und Ticket-Arbeit ueber die Jira-REST-API (JQL) inkl. CRM-Kunden-Auswertungen (Profile, Analyse, Diagramme).",
+    "version": "1.2.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": ["jira_test_connection", "jira_search", "jira_customer_tickets", "jira_get_issue", "jira_org_profile", "jira_org_analysis", "jira_ticket_chart", "jira_list_projects", "jira_add_comment", "jira_create_issue"],
+    "category": "wissen",
+    "icon": "ticket",
+    "system": false,
+    "enabled": false,
+    "config_schema": {
+        "base_url": {
+            "type": "string",
+            "label": "Jira-URL",
+            "description": "Basis-URL der Jira-Instanz, z.B. https://servicedesk.firma.de (ohne /rest-Pfad)",
+            "required": true
+        },
+        "api_token": {
+            "type": "string",
+            "label": "Personal Access Token (PAT)",
+            "description": "In Jira unter Profil → Personal Access Tokens erzeugen. Wird als Bearer-Token gesendet.",
+            "secret": true,
+            "required": true
+        },
+        "max_results": {
+            "type": "number",
+            "label": "Max. Trefferzahl pro Suche",
+            "description": "Zentrale Obergrenze fuer die Ticketsuche des Agenten (z.B. 'alle Tickets von crm-XXXX'). Standard 50, Maximum 1000. Hoeher setzen, wenn vollstaendige Kunden-Auswertungen noetig sind.",
+            "default": 50
+        },
+        "addon_pfad_chrome": {
+            "type": "string",
+            "label": "Browser-Erweiterung: Netzwerkordner fuer Chrome/Edge",
+            "description": "Ordner auf einer Netzfreigabe, in dem das entpackte Paket liegt (z.B. \\\\server\\freigabe\\...\\jira-chrome). Leer = die Anleitung bietet stattdessen den Download an."
+        },
+        "addon_pfad_firefox": {
+            "type": "string",
+            "label": "Browser-Erweiterung: ZIP-Datei fuer Firefox",
+            "description": "Vollstaendiger Pfad zur ZIP-Datei auf der Netzfreigabe (z.B. \\\\server\\freigabe\\...\\jira-firefox.zip). Leer = die Anleitung bietet stattdessen den Download an."
+        },
+        "assist_bereiche": {
+            "type": "string",
+            "label": "Freigegebene Werkzeug-Bereiche fuer die Browser-Erweiterung",
+            "description": "Kommagetrennt: wissen, fach. LEER (Vorgabe) heisst: der Assistent hat keine Werkzeuge und wertet allein den Ticketinhalt aus. Der Benutzer kann je Vorlage NUR aus den hier freigegebenen Bereichen waehlen. Wird ueber die Kaestchen im Reiter gepflegt. Alle Bereiche sind nur LESEND; der Ticketinhalt ist Fremdtext, jeder freigeschaltete Bereich vergroessert die Angriffsflaeche einer praeparierten Kundenmail.",
+            "default": ""
+        }
+    },
+    "knowledge_docs": [],
+    "dependencies": [],
+    "permissions": [],
+    "help": {
+        "details": "Stellt eine Verbindung zu Atlassian Jira (Server/DC) her. Schwerpunkt ist die Ticketsuche nach Inhalten (Volltext/JQL) inkl. CRM-Kunden-Auswertungen (Profile, Eskalations-Analyse, Diagramme). Der Agent kann zusaetzlich einzelne Tickets lesen, Projekte auflisten, kommentieren und neue Tickets anlegen. Authentifizierung per Personal Access Token (Bearer). Konfiguration ueber den Konfigurations-Dialog des Skills (Zahnrad in der Skill-Karte).",
+        "tools": [
+            {
+                "name": "jira_test_connection",
+                "label": "Verbindung testen",
+                "desc": "Prueft URL und Token gegen die Jira-API und meldet den angemeldeten Benutzer."
+            },
+            {
+                "name": "jira_search",
+                "label": "Tickets suchen",
+                "desc": "Volltextsuche nach Tickets (optional gefiltert nach Projekt/Status/Typ/Bearbeiter oder per JQL)."
+            },
+            {
+                "name": "jira_get_issue",
+                "label": "Ticket abrufen",
+                "desc": "Holt ein Ticket per Key inkl. Beschreibung und letzten Kommentaren."
+            },
+            {
+                "name": "jira_customer_tickets",
+                "label": "Kunden-Tickets nach Schlagworten",
+                "desc": "Findet die zu 2-5 Schlagworten passenden Tickets EINES CRM-Kunden (offene und abgeschlossene) als kompakte Trefferliste."
+            },
+            {
+                "name": "jira_org_profile",
+                "label": "Kunden-Profil (alle Tickets)",
+                "desc": "Aggregiert ALLE Tickets einer Kunden-/Organisations-ID (Paginierung) zu Kennzahlen: Prioritaets-/Status-/Typ-Verteilung, Bearbeiter/Melder, Zeitraum, Ø-Bearbeitungsdauer. Ticket-Liste mit Anlagedatum/Schliessdatum/Dauer pro Ticket – auch fuer Diagramme ueber Ticket-Zeitverlaeufe."
+            },
+            {
+                "name": "jira_org_analysis",
+                "label": "Eskalationsprofil (Map-Reduce, alle Tickets)",
+                "desc": "Vollstaendige Kunden-Eskalationsprofil-Analyse ueber ALLE Tickets per serverseitigem Map-Reduce (Beschreibung+Kommentare batchweise); liefert das zusammenfassende JSON mit Scores 0-10."
+            },
+            {
+                "name": "jira_ticket_chart",
+                "label": "Ticket-Diagramm (fertiger chartjs-Block)",
+                "desc": "Aggregiert ALLE Tickets eines Kunden serverseitig (monatlich/quartalsweise/jaehrlich) und liefert ein FERTIGES Liniendiagramm als chartjs-Block (x=Zeit nach Anlagedatum, y=Ø-Bearbeitungsdauer + Anzahl). Fuer 'Diagramm der Tickets von crm-XXXX' – Block unveraendert ausgeben."
+            },
+            {
+                "name": "jira_list_projects",
+                "label": "Projekte auflisten",
+                "desc": "Listet sichtbare Jira-Projekte (Key und Name)."
+            },
+            {
+                "name": "jira_add_comment",
+                "label": "Kommentar hinzufuegen",
+                "desc": "Fuegt einem Ticket einen Kommentar hinzu."
+            },
+            {
+                "name": "jira_create_issue",
+                "label": "Ticket anlegen",
+                "desc": "Legt ein neues Ticket an (Projekt-Key, Titel, optional Beschreibung und Typ)."
+            }
+        ],
+        "use_cases": [
+            "Teste die Jira-Verbindung",
+            "Suche in Jira nach Tickets zu 'Befundkommunikation'",
+            "Suche offene Bugs im Projekt PROJ",
+            "Hole das Jira-Ticket PROJ-1234"
+        ],
+        "notes": "API-Token niemals teilen. Der Token wird in der Skill-Config gespeichert und als Bearer gesendet. Fokus liegt auf der Ticketsuche."
+    }
+}

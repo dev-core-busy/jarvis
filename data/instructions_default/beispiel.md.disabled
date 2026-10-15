@@ -1,0 +1,9 @@
+# Beispiel-Instruktion
+
+Hier kannst du dem LLM Anweisungen geben, die bei JEDEM Gespraech gelten.
+Benenne die Datei in beispiel.md um, damit sie geladen wird.
+
+Beispiele:
+- Antworte immer formal/informell
+- Nutze bestimmte Tools bevorzugt
+- Beachte bestimmte Sicherheitsregeln

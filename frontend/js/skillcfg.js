@@ -1,0 +1,429 @@
+/* ═══════════════════════════════════════════════════════════════════
+   Skill-Konfiguration in Settings-Reitern (generisch)
+   ───────────────────────────────────────────────────────────────────
+   Jeder Skill mit config_schema soll seine Einstellungen in einem
+   eigenen Reiter haben – das Zahnrad unter "Installierte Skills"
+   springt dorthin (skills.js: SKILL_TABS). Statt sechs handgeschriebene
+   Panels rendert dieses Modul die Felder direkt aus dem Manifest
+   (skill.json → config_schema), sodass neue Manifest-Felder ohne
+   Frontend-Aenderung erscheinen.
+
+   Reiter-Skills:  google, telegram, browser_control,
+                   agent_orchestrator, agent_autonomy_kit, avatar
+   Ergaenzungen:   whatsapp (alles ausser debug_mode – das hat schon
+                   einen Toggle im Logs-Abschnitt), knowledge
+                   (max_file_size_mb; folders/search_mode haben
+                   eigene Oberflaechen)
+
+   API:  GET  /api/skills                  → Schema + installed/enabled
+         GET  /api/skills/{name}/config    → aktuelle Werte
+         POST /api/skills/{name}/config    → speichern (Server merged,
+                                             also sind Teilmengen ok)
+   ═══════════════════════════════════════════════════════════════════ */
+(function () {
+    'use strict';
+
+    // Skill → Zielcontainer im Reiter. only/exclude begrenzen die Felder,
+    // wenn Teile der Config bereits eine eigene Oberflaeche haben.
+    const TARGETS = {
+        google:             { container: 'skcfg-google' },
+        telegram:           { container: 'skcfg-telegram' },
+        browser_control:    { container: 'skcfg-browser_control' },
+        agent_autonomy_kit: { container: 'skcfg-agent_autonomy_kit' },
+        avatar:             { container: 'skcfg-avatar' },
+        claude_subagent:    { container: 'skcfg-claude_subagent' },
+        whatsapp:           { container: 'skcfg-whatsapp', exclude: ['debug_mode'] },
+        knowledge:          { container: 'skcfg-knowledge', only: ['max_file_size_mb'] },
+    };
+
+    // Skills mit eigenem Reiter: Knopf-ID → nur sichtbar wenn Skill aktiv.
+    // agent_orchestrator steht hier, aber NICHT in TARGETS: sein Reiter zeigt die
+    // Rollen-Verwaltung (agent_roles.js), kein manifest-generiertes Formular.
+    // render() bricht bei fehlendem TARGETS-Eintrag sauber ab.
+    const TAB_BUTTONS = {
+        google:             'settings-tab-btn-google',
+        telegram:           'settings-tab-btn-telegram',
+        browser_control:    'settings-tab-btn-browser',
+        agent_orchestrator: 'settings-tab-btn-orchestrator',
+        agent_autonomy_kit: 'settings-tab-btn-autonomy',
+        avatar:             'settings-tab-btn-avatar',
+        claude_subagent:    'settings-tab-btn-claudesub',
+        // Wie agent_orchestrator: hier, aber NICHT in TARGETS – der Reiter zeigt
+        // eine handgebaute Oberflaeche (short_tracks_admin.js), kein
+        // manifest-generiertes Formular.
+        'short-tracks':     'settings-tab-btn-tracks',
+        // Wie short-tracks: hier, aber NICHT in TARGETS – der Reiter zeigt
+        // eine handgebaute Oberflaeche (excel_admin.js) mit dem
+        // Manifest-Download, kein manifest-generiertes Formular.
+        'excel-addin':      'settings-tab-btn-excel',
+        // Wie short-tracks/excel-addin: hier, aber NICHT in TARGETS – der
+        // Reiter zeigt eine handgebaute Oberflaeche (ai_mouse_admin.js).
+        ai_mouse:           'settings-tab-btn-aimouse',
+        // Wie ai_mouse: hier, aber NICHT in TARGETS – der Reiter zeigt
+        // eine handgebaute Oberflaeche (feedback_admin.js).
+        feedback:           'settings-tab-btn-feedback',
+    };
+
+
+    function token() { return window.JarvisSitzung.token(); }
+    function authHeaders(extra) {
+        return Object.assign({ 'Authorization': 'Bearer ' + token() }, extra || {});
+    }
+    function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"]/g, c =>
+            ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    }
+
+    // ── Hover-Vorschau fuer Anleitungen ─────────────────────────────────────
+    // In Skill-Beschreibungen stehen Pfade wie "skills/avatar/AVATAR-DESIGN.md".
+    // Als Text sind sie eine Sackgasse: der Admin sieht den Namen, kommt aber
+    // nicht an den Inhalt (die Datei liegt auf dem Server). Deshalb wird der
+    // Pfad zu einem Element, das beim Ueberfahren den Inhalt zeigt.
+    // WICHTIG: laeuft auf BEREITS escaptem Text – hier darf nichts mehr
+    // entschaerft werden, sonst waere die Ersetzung eine XSS-Luecke.
+    const DOC_RE = /skills\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.\/-]+\.md)/g;
+
+    function docLinks(escaped, skillName) {
+        return String(escaped).replace(DOC_RE, function (treffer, skill, datei) {
+            return '<span class="skcfg-doc" data-skill="' + skill + '" data-file="' + datei
+                + '" tabindex="0" role="button">' + treffer + '</span>';
+        });
+    }
+
+    let _docBox = null;
+    let _docCache = {};
+    let _docTimer = null;
+    // Der ROHTEXT der gerade gezeigten Datei. Bewusst in einer Variablen und
+    // nicht in einem data-Attribut: die Anleitung ist ~15 KB gross, das gehoert
+    // nicht ins DOM.
+    let _docText = '';
+
+    function docBox() {
+        if (_docBox) return _docBox;
+        _docBox = document.createElement('div');
+        _docBox.className = 'skcfg-docbox';
+        _docBox.setAttribute('hidden', '');
+        document.body.appendChild(_docBox);
+        // Die Vorschau selbst darf ueberfahren werden (Scrollen im Inhalt),
+        // ohne dass sie verschwindet.
+        _docBox.addEventListener('mouseenter', () => { if (_docTimer) clearTimeout(_docTimer); });
+        _docBox.addEventListener('mouseleave', docHide);
+        // Delegiert, weil der Kopf bei jedem Anzeigen neu gebaut wird.
+        _docBox.addEventListener('click', async (e) => {
+            const btn = e.target && e.target.closest ? e.target.closest('.skcfg-doc-copy') : null;
+            if (!btn) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const ok = window.JarvisChatLib && window.JarvisChatLib.copyTextToClipboard
+                ? await window.JarvisChatLib.copyTextToClipboard(_docText)
+                : false;
+            // Rueckmeldung am Knopf selbst – ein Kopieren ohne sichtbare
+            // Bestaetigung laesst den Benutzer im Zweifel und er klickt erneut.
+            btn.textContent = ok ? '✓' : '✕';
+            btn.classList.toggle('is-ok', ok);
+            btn.classList.toggle('is-fail', !ok);
+            btn.setAttribute('aria-label', ok
+                ? tr('skcfg.doc_copied', 'In die Zwischenablage kopiert')
+                : tr('skcfg.doc_copy_failed', 'Kopieren fehlgeschlagen'));
+            setTimeout(() => {
+                btn.textContent = '⧉';
+                btn.classList.remove('is-ok', 'is-fail');
+                btn.setAttribute('aria-label', tr('skcfg.doc_copy', 'In die Zwischenablage kopieren'));
+            }, 1400);
+        });
+        return _docBox;
+    }
+
+    function docHide() {
+        if (_docTimer) { clearTimeout(_docTimer); _docTimer = null; }
+        if (_docBox) _docBox.setAttribute('hidden', '');
+    }
+
+    async function docShow(el) {
+        const skill = el.getAttribute('data-skill');
+        const datei = el.getAttribute('data-file');
+        const key = skill + '/' + datei;
+        const box = docBox();
+        if (_docTimer) { clearTimeout(_docTimer); _docTimer = null; }
+
+        // Platzieren: unter dem Element, aber im Fenster gehalten.
+        const r = el.getBoundingClientRect();
+        box.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 620)) + 'px';
+        box.style.top = (r.bottom + window.scrollY + 6) + 'px';
+        box.removeAttribute('hidden');
+
+        if (_docCache[key] === undefined) {
+            box.innerHTML = '<div class="skcfg-doc-head">' + esc(datei) + '</div>'
+                + '<div class="skcfg-doc-body"><em>' + esc(tr('skcfg.doc_loading', 'Lade…')) + '</em></div>';
+            try {
+                const r2 = await fetch('/api/skills/doc?skill=' + encodeURIComponent(skill)
+                    + '&file=' + encodeURIComponent(datei), { headers: authHeaders() });
+                const d = await r2.json();
+                _docCache[key] = (d && d.ok) ? d.text : null;
+            } catch (e) {
+                _docCache[key] = null;
+            }
+        }
+        const text = _docCache[key];
+        if (text === null || text === undefined) {
+            _docText = '';
+            box.innerHTML = '<div class="skcfg-doc-head">' + esc(datei) + '</div>'
+                + '<div class="skcfg-doc-body">'
+                + esc(tr('skcfg.doc_missing', 'Datei nicht gefunden oder nicht lesbar.')) + '</div>';
+            return;
+        }
+        // Markdown ueber den gemeinsamen Renderer (chatlib) – faellt auf
+        // vorformatierten Text zurueck, wenn er nicht geladen ist.
+        let inhalt;
+        if (window.JarvisChatLib && window.JarvisChatLib.renderMarkdown) {
+            inhalt = window.JarvisChatLib.renderMarkdown(text);
+        } else {
+            inhalt = '<pre>' + esc(text) + '</pre>';
+        }
+        _docText = text;
+        const zeilen = text.split('\n').length;
+        const kopieren = '<button type="button" class="skcfg-doc-copy"'
+            + ' title="' + esc(tr('skcfg.doc_copy', 'In die Zwischenablage kopieren')) + '"'
+            + ' aria-label="' + esc(tr('skcfg.doc_copy', 'In die Zwischenablage kopieren')) + '"'
+            + '>⧉</button>';
+        box.innerHTML = '<div class="skcfg-doc-head">' + esc(datei)
+            + '<span class="skcfg-doc-meta">' + zeilen + ' '
+            + esc(tr('skcfg.doc_lines', 'Zeilen')) + '</span>' + kopieren + '</div>'
+            + '<div class="skcfg-doc-body">' + inhalt + '</div>';
+    }
+
+    // Delegiert: die Beschreibungen werden bei jedem Reiterwechsel neu gebaut.
+    function bindDocPreview() {
+        if (bindDocPreview._bound) return;
+        bindDocPreview._bound = true;
+        document.addEventListener('mouseover', (e) => {
+            const el = e.target && e.target.closest ? e.target.closest('.skcfg-doc') : null;
+            if (el) docShow(el);
+        });
+        document.addEventListener('mouseout', (e) => {
+            const el = e.target && e.target.closest ? e.target.closest('.skcfg-doc') : null;
+            if (!el) return;
+            // Nachlauf: der Weg vom Pfad zur Vorschau darf sie nicht schliessen.
+            _docTimer = setTimeout(docHide, 220);
+        });
+        // Tastatur: Fokus zeigt, Escape schliesst.
+        document.addEventListener('focusin', (e) => {
+            const el = e.target && e.target.closest ? e.target.closest('.skcfg-doc') : null;
+            if (el) docShow(el);
+        });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') docHide(); });
+    }
+    function tr(key, fallback) {
+        const v = window.t ? window.t(key) : null;
+        return (!v || v === key) ? fallback : v;
+    }
+
+    const Manager = {
+        _skills: null,      // Cache der /api/skills-Antwort
+        _pending: null,
+
+        // ── Skill-Liste (einmal laden, danach aus dem Cache) ──────────
+        async _loadSkills(force) {
+            if (this._skills && !force) return this._skills;
+            if (!this._pending || force) {
+                this._pending = fetch('/api/skills', { headers: authHeaders() })
+                    .then(r => r.json())
+                    .then(d => { this._skills = (d && d.skills) || []; return this._skills; })
+                    .catch(() => { this._skills = []; return this._skills; })
+                    .finally(() => { this._pending = null; });
+            }
+            return this._pending;
+        },
+
+        _find(skills, name) {
+            return skills.find(s => (s.dir_name || (s.path || '').split('/').pop()) === name);
+        },
+
+        // ── Reiter-Sichtbarkeit: Reiter nur bei aktivem Skill ─────────
+        async updateTabs() {
+            const skills = await this._loadSkills(true);
+            Object.keys(TAB_BUTTONS).forEach(name => {
+                const btn = document.getElementById(TAB_BUTTONS[name]);
+                if (!btn) return;
+                const sk = this._find(skills, name);
+                btn.style.display = (sk && sk.enabled) ? '' : 'none';
+            });
+        },
+
+        // ── Reiter geoeffnet ─────────────────────────────────────────
+        onShow(name) { this.render(name); },
+
+        // ── Formular aus dem Manifest-Schema bauen ───────────────────
+        async render(name) {
+            const target = TARGETS[name];
+            if (!target) return;
+            const box = document.getElementById(target.container);
+            if (!box) return;
+
+            box.innerHTML = '<div class="kb-hint">' + tr('common.loading', 'Lädt…') + '</div>';
+
+            const [skills, cfgResp] = await Promise.all([
+                this._loadSkills(),
+                fetch('/api/skills/' + encodeURIComponent(name) + '/config', { headers: authHeaders() })
+                    .then(r => r.json()).catch(() => ({})),
+            ]);
+
+            const skill  = this._find(skills, name) || {};
+            const schema = skill.config_schema || {};
+            const values = (cfgResp && cfgResp.config) || {};
+            // BSI M5: Geheimfelder kommen LEER; hier steht nur, welche gesetzt sind.
+            const gesetzt = new Set((cfgResp && cfgResp.geheim_gesetzt) || []);
+
+            let keys = Object.keys(schema);
+            if (target.only)    keys = keys.filter(k => target.only.includes(k));
+            if (target.exclude) keys = keys.filter(k => !target.exclude.includes(k));
+
+            if (!keys.length) {
+                box.innerHTML = '<div class="kb-hint">'
+                    + tr('skillcfg.no_options', 'Dieser Skill hat keine Einstellungen.') + '</div>';
+                return;
+            }
+
+            // Felder mit `enum_source` holen ihre Auswahl zur Laufzeit von einem
+            // Endpunkt statt aus dem Manifest. Noetig, wenn die moeglichen Werte
+            // erst auf dem Server feststehen – z.B. die Avatar-Grafiken, die aus
+            // den vorhandenen Sprite-Ordnern gelesen werden. Faellt der Abruf
+            // aus, greift das statische `enum` aus dem Manifest.
+            await Promise.all(keys.map(async key => {
+                const f = schema[key] || {};
+                if (!f.enum_source) return;
+                try {
+                    const d = await fetch(f.enum_source, { headers: authHeaders() }).then(r => r.json());
+                    const opts = Array.isArray(d) ? d : (d && d.options);
+                    if (Array.isArray(opts) && opts.length) f.enum = opts;
+                } catch (e) { /* statisches enum bleibt */ }
+            }));
+
+            let html = '';
+            keys.forEach(key => {
+                const f     = schema[key] || {};
+                const label = esc(f.label || key);
+                const hint  = f.description
+                    ? '<div class="kb-hint" style="margin-top:4px;">' + docLinks(esc(f.description), name) + '</div>' : '';
+                const val   = values[key] !== undefined ? values[key] : f.default;
+                const id    = 'skcfg-' + name + '-' + key;
+
+                if (f.type === 'boolean') {
+                    html += '<div class="form-group">'
+                        + '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">'
+                        + '<input type="checkbox" id="' + id + '" data-key="' + esc(key) + '" data-type="boolean"'
+                        + (val ? ' checked' : '') + '>'
+                        + '<span>' + label + '</span></label>' + hint + '</div>';
+                } else if (f.type === 'number') {
+                    // step="any": ein Default von 1.0 kommt aus JSON als 1 an, ist also
+                    // nicht von einer echten Ganzzahl zu unterscheiden. Mit step="1"
+                    // wuerde der Browser Dezimalwerte (z.B. send_delay 1.5) als
+                    // ungueltig markieren – deshalb keine Schrittweite erzwingen.
+                    html += '<div class="form-group"><label for="' + id + '">' + label + '</label>'
+                        + '<input type="number" step="any" id="' + id + '" class="config-input"'
+                        + ' data-key="' + esc(key) + '" data-type="number"'
+                        + ' value="' + esc(val != null ? val : '') + '"'
+                        + ' style="width:100%;box-sizing:border-box;">' + hint + '</div>';
+                } else if (Array.isArray(f.enum) && f.enum.length) {
+                    html += '<div class="form-group"><label for="' + id + '">' + label + '</label>'
+                        + '<select id="' + id + '" class="config-input" data-key="' + esc(key) + '"'
+                        + ' data-type="string" style="width:100%;box-sizing:border-box;">'
+                        + f.enum.map(o => '<option value="' + esc(o) + '"'
+                            + (String(val) === String(o) ? ' selected' : '') + '>' + esc(o) + '</option>').join('')
+                        + '</select>' + hint + '</div>';
+                } else if (f.type === 'text') {
+                    // Mehrzeiliges Feld (z.B. Avatar: eigene Antworten "Frage ||| Antwort")
+                    html += '<div class="form-group"><label for="' + id + '">' + label + '</label>'
+                        + '<textarea id="' + id + '" class="config-input" rows="8"'
+                        + ' data-key="' + esc(key) + '" data-type="string"'
+                        + ' style="width:100%;box-sizing:border-box;resize:vertical;'
+                        + 'font-family:inherit;line-height:1.45;">'
+                        + esc(val != null ? val : '') + '</textarea>' + hint + '</div>';
+                } else if (f.secret) {
+                    // BSI M5: das Feld bleibt LEER (der Server gibt den Wert nicht
+                    // mehr mit). Das Auge setzt pwreveal.js daneben; es holt den
+                    // gespeicherten Wert erst nach erneuter Anmeldung. Leer
+                    // speichern heisst "unveraendert" (Server).
+                    const hat = gesetzt.has(key);
+                    html += '<div class="form-group"><label for="' + id + '">' + label + '</label>'
+                        + '<input type="password" id="' + id + '" class="config-input" autocomplete="new-password"'
+                        + ' data-key="' + esc(key) + '" data-type="string" value=""'
+                        + ' data-pw-quelle="skill" data-pw-kennung="' + esc(name + ':' + key) + '"'
+                        + ' data-pw-gesetzt="' + (hat ? '1' : '0') + '"'
+                        + (hat ? ' placeholder="••••••••"' : '')
+                        + ' style="width:100%;box-sizing:border-box;">' + hint + '</div>';
+                } else {
+                    html += '<div class="form-group"><label for="' + id + '">' + label + '</label>'
+                        + '<input type="text" id="' + id + '" class="config-input"'
+                        + ' data-key="' + esc(key) + '" data-type="string"'
+                        + ' value="' + esc(val != null ? val : '') + '"'
+                        + ' style="width:100%;box-sizing:border-box;">' + hint + '</div>';
+                }
+            });
+
+            html += '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px;">'
+                + '<button class="btn-primary skcfg-save" type="button" data-i18n="common.save">'
+                + tr('common.save', 'Speichern') + '</button>'
+                + '<span class="skcfg-status" style="font-size:0.9em;"></span></div>';
+
+            box.innerHTML = html;
+
+            const saveBtn = box.querySelector('.skcfg-save');
+            if (saveBtn) saveBtn.addEventListener('click', () => this.save(name));
+            if (window.applyLang) window.applyLang();
+        },
+
+        // ── Speichern (nur die gerenderten Felder) ───────────────────
+        async save(name) {
+            const target = TARGETS[name];
+            const box    = target && document.getElementById(target.container);
+            if (!box) return;
+            const statusEl = box.querySelector('.skcfg-status');
+            const setStatus = (msg, kind) => {
+                if (!statusEl) return;
+                statusEl.textContent = msg || '';
+                statusEl.style.color = kind === 'error' ? 'var(--danger)'
+                    : kind === 'ok' ? 'var(--success)' : 'var(--text-secondary)';
+            };
+
+            const body = {};
+            box.querySelectorAll('[data-key]').forEach(inp => {
+                const key = inp.dataset.key;
+                if (inp.dataset.type === 'boolean')     body[key] = inp.checked;
+                else if (inp.dataset.type === 'number') body[key] = Number(inp.value);
+                else                                    body[key] = inp.value;
+            });
+
+            setStatus(tr('skillcfg.saving', 'Speichere…'));
+            try {
+                const resp = await fetch('/api/skills/' + encodeURIComponent(name) + '/config', {
+                    method: 'POST',
+                    headers: authHeaders({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify(body),
+                });
+                if (!resp.ok) {
+                    const d = await resp.json().catch(function () { return null; });
+                    if (d && d.code === 'geheimnis_neu_eingeben') {
+                        setStatus('✗ ' + tr('common.secret_reenter', d.error), 'error');
+                        return;
+                    }
+                    throw new Error('HTTP ' + resp.status);
+                }
+                setStatus('✓ ' + tr('skillcfg.saved', 'Gespeichert'), 'ok');
+                // Google schreibt Client-ID/Secret zusaetzlich in die .env –
+                // Statusanzeige des Google-Reiters danach neu laden.
+                if (name === 'google' && window.googleManager) window.googleManager.init();
+            } catch (e) {
+                setStatus('✗ ' + tr('skillcfg.save_failed', 'Speichern fehlgeschlagen'), 'error');
+            }
+        },
+    };
+
+    window.SkillCfg = Manager;
+
+    // Delegierte Listener der Anleitungs-Vorschau EINMALIG beim Laden setzen –
+    // nicht erst beim Rendern eines Reiters. Sonst haengt die Vorschau von
+    // einer Reihenfolge ab, die niemand garantiert (beim Test aufgefallen:
+    // Markup vorhanden, Hover ohne Wirkung).
+    bindDocPreview();
+})();

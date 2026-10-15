@@ -1,0 +1,661 @@
+/* Eigenstaendige Oberflaeche: die Erweiterung laeuft ausserhalb von Jarvis und
+ * kann theme.css nicht laden. Farben folgen deshalb dem Systemthema statt einer
+ * festen Palette – ein Popup, das im dunklen Chrome hell aufblitzt, ist eine
+ * Zumutung, und die Projektkonvention "keine hardcoded Farben" zielt genau auf
+ * dieses Problem. `color-scheme` ueberlaesst dem Browser Scrollbalken und
+ * Formularfelder.
+ */
+:root {
+  color-scheme: light dark;
+  --grund: Canvas;
+  --schrift: CanvasText;
+  --rand: color-mix(in srgb, CanvasText 22%, transparent);
+  --gedaempft: color-mix(in srgb, CanvasText 62%, transparent);
+  /* OHNE BRANDING GIBT ES KEINE PRODUKTFARBE. Hier stand erst eine Kundenfarbe
+   * hart verdrahtet (#b80f2e), danach das Jarvis-Violett (#9b59b6) – beides
+   * ist in einem White-Label-Paket eine Aussage ueber das Produkt dahinter,
+   * die niemand getroffen hat. Die Farbe gehoert zum SERVER: sie kommt aus dem
+   * Paket (<meta name="akzent">) oder aus /api/branding, sonst gar nicht.
+   *
+   * `CanvasText` statt eines festen Schwarz, weil das Fenster dem Systemthema
+   * folgt (color-scheme oben): im hellen Chrome ist das genau das gewuenschte
+   * Schwarz auf Weiss, im dunklen dreht es sich mit. Ein festes #000 waere im
+   * Dunkelmodus unlesbar. */
+  --akzent: CanvasText;
+  --akzent-hover: color-mix(in srgb, CanvasText 82%, Canvas);
+  --akzent-schrift: #fff;
+  --warn: color-mix(in srgb, var(--akzent) 12%, Canvas);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  width: 380px;
+  margin: 0;
+  padding: 12px;
+  background: var(--grund);
+  color: var(--schrift);
+  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.kopf {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--rand);
+}
+/* Die Marke darf schrumpfen, der Abmelden-Knopf nicht: sonst schiebt eine
+ * lange Ticketnummer den Knopf aus dem 380 px breiten Fenster (gemessen mit
+ * PRJB-17559 – er war abgeschnitten und das Fenster horizontal scrollbar). */
+.marke {
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kopf > button { flex: 0 0 auto; }
+.ticket { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* KEIN Ticket im Tab: das Feld sagt es im Klartext.
+ *
+ * ⚠ NICHT UEBER DIE FARBE. `.ticket` ist weiter unten ohnehin schon
+ * `--gedaempft` - eine Faerbung hier waere ein wirkungsloser No-op gewesen, und
+ * genau so stand es im ersten Anlauf da (nur der Screenshot hat es gezeigt, die
+ * Messung "Klasse ist gesetzt" war gruen).
+ * Unterschieden wird ueber die SCHRIFT: eine Ticketnummer ist eine Kennung und
+ * steht in Monospace, "Kein Ticket gefunden" ist ein Satz und gehoert in die
+ * Textschrift. Die Aussage traegt ohnehin der Text selbst.
+ * Zugleich sind dann alle Knoepfe gesperrt, die ein Ticket brauchen
+ * (popup.js::knoepfeAktualisieren) - Anzeige und Sperre haben dieselbe Ursache
+ * und werden in EINER Funktion gesetzt. */
+.ticket.leer { font-family: inherit; }
+/* Das Logo kommt vom Server und hat unbekannte Masse – die Hoehe begrenzt,
+ * das Seitenverhaeltnis bleibt. Ohne max-width sprengt ein breites
+ * Wort-Bild-Logo die 380 px des Fensters. */
+.marke-logo {
+  height: 20px;
+  max-width: 120px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+.ticket {
+  margin-left: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--gedaempft);
+}
+.kopf .leise { margin-left: 0; }
+
+.feld { display: block; margin-bottom: 8px; }
+.feld > span { display: block; margin-bottom: 3px; font-size: 12px; color: var(--gedaempft); }
+.feld em { font-style: normal; opacity: .75; }
+
+input, textarea {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--rand);
+  border-radius: 5px;
+  background: var(--grund);
+  color: var(--schrift);
+  font: inherit;
+}
+
+/* ⚠ `width: 100%` trifft sonst auch das Kästchen. Ein 100 % breites
+ * Kontrollkästchen schiebt seine Beschriftung in die nächste Zeile und sieht
+ * aus wie ein Eingabefeld – im Screenshot sofort zu sehen, in der Messung
+ * nicht. Dieselbe Falle wie `.input-group` im Hauptprojekt (Register). */
+input[type="checkbox"], input[type="radio"] {
+  width: auto;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+textarea { resize: vertical; min-height: 120px; font-size: 12.5px; }
+
+/* ── Das Ergebnisfeld ist ein <div>, kein <textarea> ───────────────────────
+ * Damit erbt es die Regeln oben NICHT mehr und braucht seine eigenen. Die
+ * Werte sind bewusst dieselben wie bei `textarea` – das Feld soll aussehen wie
+ * ein Eingabefeld, weil es eines ist.
+ *
+ * `white-space: pre-wrap` haelt Zeilenumbrueche und Einrueckungen des Modells;
+ * `overflow: auto` ist die Voraussetzung dafuer, dass `resize` ueberhaupt
+ * wirkt (in echtem Chrome nachgemessen). `overflow-wrap: anywhere` ist nach
+ * derselben Messung NICHT noetig – Chrome bricht auch ein unteilbares Wort aus
+ * 179 Zeichen von selbst; es steht hier, weil es nichts kostet und die
+ * Umbruch-Heuristik in Firefox abweichen kann. */
+#f-ergebnis {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--rand);
+  border-radius: 5px;
+  background: var(--grund);
+  color: var(--schrift);
+  font: inherit;
+  font-size: 12.5px;
+  min-height: 120px;
+  /* ⚠ DER DECKEL IST PFLICHT, KEINE KOSMETIK. Die abgeloeste `<textarea>` hatte
+   * `rows="12"`, also eine FESTE Hoehe, und scrollte intern. Ein <div> waechst
+   * unbegrenzt – bei einer langen Antwort schoebe es „Ins Kommentarfeld
+   * einfuegen" aus dem Fenster (das Popup ist bei 600 px zu Ende). Genau dieser
+   * Fehler ist hier schon einmal mit dem Ansichts-Umschalter passiert.
+   * 40vh entspricht bei 600 px etwa den zwoelf Zeilen von vorher. */
+  max-height: 40vh;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  resize: vertical;
+  overflow: auto;
+}
+
+#f-ergebnis:focus,
+#f-ergebnis:focus-visible {
+  outline: 2px solid var(--akzent);
+  outline-offset: 1px;
+}
+
+/* Ein contenteditable kennt kein `placeholder`. Greift nur, wenn das Feld
+ * WIRKLICH leer ist – deshalb legt `textZuFeld` bei leerem Text gar keinen
+ * Knoten an (ein <div><br></div> saehe leer aus, waere es aber nicht). */
+#f-ergebnis:empty::before {
+  content: attr(data-platzhalter);
+  color: var(--gedaempft);
+}
+input:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--akzent);
+  outline-offset: 1px;
+}
+
+button {
+  padding: 6px 10px;
+  border: 1px solid var(--rand);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--schrift);
+  font: inherit;
+  cursor: pointer;
+}
+button:hover:not(:disabled) { border-color: var(--akzent); }
+button:disabled { opacity: .5; cursor: default; }
+button.haupt { background: var(--akzent); border-color: var(--akzent); color: var(--akzent-schrift); }
+button.haupt:hover:not(:disabled) {
+  background: var(--akzent-hover);
+  border-color: var(--akzent-hover);
+}
+/* NEUTRALZUSTAND – solange keine Hausfarbe bekannt ist (Vorgabe des Nutzers
+ * 2026-08-28: "nimm wenigstens einen neutralen Knopf – schwarze Schrift,
+ * schwarzer Rand, weisser Hintergrund"). Bewusst ein UMRISS und keine gefuellte
+ * Flaeche: eine gefuellte Flaeche ist immer eine Farbaussage, ein Umriss nicht.
+ * `Canvas`/`CanvasText` sind im hellen Chrome genau Weiss und Schwarz und
+ * drehen sich im dunklen mit. Die Klasse haengt am <html> und wird von
+ * popup.js ENTFERNT, sobald eine Farbe da ist. */
+html.neutral button.haupt {
+  background: Canvas;
+  border-color: CanvasText;
+  color: CanvasText;
+}
+html.neutral button.haupt:hover:not(:disabled) {
+  background: color-mix(in srgb, CanvasText 8%, Canvas);
+  border-color: CanvasText;
+}
+button.leise { color: var(--gedaempft); }
+
+/* `wrap`: „Als Kommentar übernehmen“ neben „Kopieren“ passt bei 380 px
+ * nicht in eine Zeile – ohne Umbruch ragt der zweite Knopf hinaus. */
+.knopfreihe { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+/* Ohne das fressen die Knoepfe in einer Flex-Zeile die ganze Breite bzw.
+ * schrumpfen ungleich – dieselbe Falle wie bei .btn-primary im Hauptprojekt. */
+.knopfreihe > button { flex: 1 1 auto; }
+.knopfreihe > button.leise { flex: 0 0 auto; }
+
+.hinweis, .fussnote {
+  margin: -2px 0 8px;
+  font-size: 11.5px;
+  color: var(--gedaempft);
+}
+.fussnote { margin: 4px 0 0; }
+
+/* Meldungen tragen ihre Aussage doppelt – Farbe UND Text. Eine reine
+ * Farbcodierung ist keine Information (Projektregel). */
+.meldung {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--rand);
+  border-radius: 5px;
+  background: var(--warn);
+  white-space: pre-wrap;
+}
+.meldung.arbeitet { background: transparent; color: var(--gedaempft); }
+/* Wartemeldungen tragen einen drehenden Kreis – bei Laeufen von einigen
+ * Sekunden ist ein stehender Satz nicht von einem haengenden Fenster zu
+ * unterscheiden (Vorgabe des Nutzers 2026-08-28).
+ * Bauform wie `.chat-activity-spinner` im Hauptprojekt: gedaempfter Ring,
+ * eine Kante in der Akzentfarbe. Die Erweiterung kann chat.css nicht laden,
+ * die Regel steht deshalb hier – aber bewusst mit denselben Massen. */
+.meldung.arbeitet { display: flex; align-items: center; gap: 8px; }
+/* ⚠ UND DIESE ZEILE IST PFLICHT, NICHT KOSMETIK.
+ *
+ * `display: flex` ueberstimmt das `hidden`-ATTRIBUT. Ohne die Regel hier blieb
+ * eine einmal gezeigte Wartemeldung fuer immer stehen - mit drehendem Kreis -,
+ * obwohl `melde("")` sie laengst versteckt hatte. Gemeldet 2026-08-30
+ * („'Fasse das Ticket zusammen...' wird dauerhaft angezeigt") und im echten
+ * Chrome nachgemessen: `hidden=true`, `display=flex`, `offsetHeight>0`.
+ * Nebenwirkung war schlimmer als der Schoenheitsfehler: der Kasten machte das
+ * Fenster hoeher und schob den Ansichts-Umschalter aus dem 600 px hohen Popup
+ * heraus - „keine Moeglichkeit die Seitenleiste auszuwaehlen".
+ * Dieselbe Falle steht im Register (`.sp-row[hidden]`, `/sap`). Wer einer
+ * Klasse `display` gibt, muss `[hidden]` mitnehmen. */
+.meldung[hidden] { display: none; }
+.dreher {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  border: 2px solid color-mix(in srgb, var(--akzent) 25%, transparent);
+  border-top-color: var(--akzent);
+  border-radius: 50%;
+  animation: dreher-drehen .7s linear infinite;
+}
+@keyframes dreher-drehen { to { transform: rotate(360deg); } }
+/* Wer Bewegung abgestellt hat, bekommt keine – der Kreis bleibt als Marke
+ * stehen, die Meldung daneben sagt ohnehin, was laeuft. */
+@media (prefers-reduced-motion: reduce) {
+  .dreher { animation: none; }
+}
+
+/* Rückfrage-Kasten. Deckende Fläche und Akzentkante: er trägt eine Warnung,
+ * die nicht wie Fließtext aussehen darf. */
+.ja-nein {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--akzent);
+  border-radius: 6px;
+  background: var(--warn);
+}
+.ja-nein p { margin: 0 0 8px; }
+.ja-nein .knopfreihe { margin: 0; }
+
+/* ── Vorlagen ─────────────────────────────────────────────────────────── */
+/* Feld plus Symbolknopf in einer Zeile. `min-width: 0` ist Pflicht: ein
+ * Flex-Kind schrumpft sonst nicht unter seine Inhaltsbreite und schiebt das
+ * Zahnrad aus dem 380 px breiten Fenster. */
+.feld-zeile { display: flex; align-items: center; gap: 6px; }
+.feld-zeile select { flex: 1 1 auto; min-width: 0; }
+
+/* Ein <select> hat KEINE eigene Breite (anders als input/textarea, die oben
+ * auf 100% stehen). In `.feld-zeile` erledigt das der Flex-Container; steht es
+ * allein in einem `.feld`, bleibt es sonst so schmal wie sein laengster
+ * Eintrag – neben den vollbreiten Feldern darueber und darunter sieht das aus
+ * wie ein Fehler. */
+select.voll { width: 100%; }
+
+select {
+  padding: 6px 8px;
+  border: 1px solid var(--rand);
+  border-radius: 5px;
+  background: var(--grund);
+  color: var(--schrift);
+  font: inherit;
+}
+
+button.ico {
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  line-height: 1;
+}
+
+/* ── STARTEN ────────────────────────────────────────────────────────────────
+ *
+ * Der Knopf traegt nur ein Dreieck und muss trotzdem als Hauptaktion lesbar
+ * sein – deshalb `.haupt` (gefuellte Flaeche) statt `.ico` (Umriss).
+ *
+ * `flex: 0 0 auto` ist PFLICHT und keine Kosmetik: in `.feld-zeile` steht
+ * daneben ein `<select>` mit `flex: 1 1 auto`. Ohne die Zeile teilte sich der
+ * Knopf den Platz mit dem Auswahlfeld und das Dreieck wanderte in die Mitte
+ * einer breiten Flaeche – dieselbe Falle wie bei `.btn-primary` in einer
+ * Flex-Zeile im Hauptprojekt.
+ *
+ * Quadratisch ueber `min-width` statt einer festen Breite: das SVG ist 13px,
+ * die Hoehe kommt aus dem Polster des Auswahlfeldes daneben. `display: flex`
+ * zentriert das Dreieck in beiden Achsen – ein Inline-SVG sitzt sonst auf der
+ * Grundlinie und damit sichtbar zu tief. */
+button.ico-start {
+  flex: 0 0 auto;
+  /* GEMESSEN, nicht geschaetzt: mit `align-items: center` aus `.feld-zeile`
+   * blieb der Knopf 27 px hoch neben einem 34 px hohen Auswahlfeld – in einer
+   * Zeile aus zwei Bedienelementen sieht das nach einem Fehler aus.
+   * `align-self: stretch` zieht ihn auf die Zeilenhoehe, ohne eine Zahl zu
+   * verdrahten, die beim naechsten Schriftwechsel falsch waere. */
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  padding: 6px 8px;
+}
+
+#vorlagen-box {
+  margin: 10px 0 0;
+  padding: 10px;
+  border: 1px solid var(--rand);
+  border-radius: 6px;
+}
+.vorl-kopf {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.vorl-liste { list-style: none; margin: 0 0 10px; padding: 0; }
+/* ⚠ DAS <li> IST EIN BLOCK, NICHT DER FLEX-CONTAINER – und das ist die ganze
+ * Voraussetzung dafür, dass das Bearbeiten-Formular UNTER seiner Zeile stehen
+ * kann (Vorgabe 2026-09-02). Solange das `li` selbst `display: flex` trug,
+ * landete ein eingehängtes Formular NEBEN dem Namen statt darunter.
+ * Geflext wird jetzt eine Ebene tiefer, in `.vorl-zeile` – Aussehen der Zeile
+ * unverändert. */
+.vorl-liste li {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--rand);
+}
+.vorl-liste li:last-child { border-bottom: 0; }
+.vorl-zeile {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+/* Der Name nimmt den Platz, die Knöpfe bleiben rechts. */
+.vorl-zeile > span { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+
+/* ⚠ `[hidden]` MUSS MITGENOMMEN WERDEN, sobald einer Regel `display` gegeben
+ * wird – im Projekt zweimal bezahlt (`.meldung.arbeitet` liess die
+ * Wartemeldung fuer immer stehen, `.sp-row` in /sap dasselbe). Die Regeln
+ * unten setzen heute kein `display`; die Zeile steht trotzdem hier, damit eine
+ * kuenftige das Verstecken nicht still aushebelt. */
+/* ⚠ ABSTAND NACH UNTEN, seit der Ergebnisblock nach OBEN gezogen wurde
+ * (Vorgabe 2026-09-02). Er hat jetzt einen Nachbarn unter sich – im Screenshot
+ * klebte die Fusszeile ("ABC-1234 · 7 Kommentare …") am Label des
+ * Zusatzwunsches und las sich wie ein Teil davon. Vorher stand darunter nichts
+ * mehr, deshalb fiel es nie auf. */
+#ergebnis { margin-bottom: 14px; }
+
+#vorl-form[hidden] { display: none !important; }
+
+/* Das Formular UNTER seiner Zeile: abgesetzt und eingerückt, damit die
+ * Zugehörigkeit sichtbar ist. Am Heimatplatz (direkt hinter der Liste) trägt
+ * es nichts davon – dort gehört es zu keiner Zeile. */
+.vorl-liste #vorl-form {
+  margin: 6px 0 4px 10px;
+  padding: 8px 0 2px 10px;
+  border-left: 2px solid var(--akzent);
+}
+
+/* Der Stern der Standard-Vorlage.
+ *
+ * Er trägt die Aussage DOPPELT: gefüllt/leer UND Farbe. Nur die Farbe zu
+ * wechseln wäre für ein 13-Pixel-Zeichen zu wenig, und Farbe allein ist im
+ * Projekt ohnehin keine Information. Er steht VOR den Bearbeiten-Knöpfen und
+ * an jeder Zeile – auch an gemeinsamen Vorlagen, die man nicht ändern darf:
+ * markiert wird die eigene Wahl, nicht die Vorlage. */
+.vorl-zeile .stern { font-size: 13px; }
+.vorl-zeile .stern.an { color: var(--akzent); }
+
+/* ── Werkzeug-Bereiche einer Vorlage ───────────────────────────────────────
+ *
+ * DIE MARKE IN DER ZEILE DARF DEN NAMEN NICHT VERDRÄNGEN: `.vorl-liste li >
+ * span` verteilt den Platz mit `flex: 1 1 auto`, und ein zweites Feld mit
+ * derselben Regel halbierte ihn (dieselbe Falle wie bei `.btn-primary` in einer
+ * Flex-Zeile im Hauptprojekt). Deshalb ausdrücklich `flex: 0 0 auto`, ein
+ * Deckel auf die Breite und Ellipsis statt Umbruch mitten im Bereichsnamen. */
+.vorl-zeile .vorl-ber {
+  flex: 0 0 auto;
+  max-width: 45%;
+  font-size: 11px;
+  color: var(--akzent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── DIE ART EINER VORLAGE (seit 2026-09-02) ────────────────────────────────
+ *
+ * Sie steht nur an ANTWORT-Vorlagen: die Zusammenfassung ist die Vorgabe, und
+ * eine Marke an jeder Zeile wäre Rauschen. Gekennzeichnet wird also der Fall,
+ * bei dem der Text am Ende an einen KUNDEN geht – der Unterschied, auf den es
+ * ankommt.
+ *
+ * Bewusst KEINE Signalfarbe, sondern ein Rähmchen: es ist kein Warnzustand,
+ * sondern eine Eigenschaft. `flex: 0 0 auto` ist Pflicht – `.vorl-zeile > span`
+ * verteilt den Platz mit `flex: 1 1 auto`, und ein zweites Feld mit derselben
+ * Regel halbiert den Namen. */
+.vorl-zeile .vorl-art {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border: 1px solid var(--rand);
+  border-radius: 999px;
+  font-size: 10.5px;
+  color: var(--gedaempft);
+  white-space: nowrap;
+}
+
+/* Ein Kontrollkästchen ist ein SATZ, keine Feldbeschriftung – `.feld > span`
+ * (Block, gedämpft) würde den Text vom Kästchen lösen und grau färben. */
+.vorl-ber-opt {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--schrift);
+  cursor: pointer;
+}
+.vorl-ber-opt input { flex: 0 0 auto; margin-top: 2px; }
+.vorl-ber-opt > span { min-width: 0; overflow-wrap: anywhere; }
+.vorl-ber-opt b { display: block; font-weight: 600; }
+.vorl-ber-opt .hinweis { display: block; margin: 1px 0 0; }
+
+/* ── Fusszeile der Vorlagen-Verwaltung ──────────────────────────────────────
+ *
+ * DER TRENNSTRICH IST DIE AUSSAGE: darueber werden DATEN gepflegt (Vorlagen,
+ * die auf dem Server liegen und fuer andere gelten koennen), hier wird ein
+ * VERHALTEN dieses Browsers eingestellt. Ohne die Linie liest sich das
+ * Kaestchen wie eine weitere Eigenschaft der Liste darueber.
+ * Gleiche Bauform wie `.abschnitt` in der Seite, nur eine Ebene tiefer. */
+.vorl-fuss {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--rand);
+}
+/* Wie `.vorl-ber-opt`: ein Kontrollkaestchen ist ein SATZ, keine
+ * Feldbeschriftung – `.feld > span` (Block, gedaempft) wuerde den Text vom
+ * Kaestchen loesen und grau faerben. */
+.vorl-auto {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--schrift);
+  cursor: pointer;
+}
+.vorl-auto input { flex: 0 0 auto; margin-top: 2px; }
+/* `min-width: 0` ist Pflicht: ohne das schrumpft ein Flex-Kind nicht unter
+ * seine Inhaltsbreite, und der Satz sprengt im 380 Pixel breiten Fenster die
+ * Zeile, statt umzubrechen. */
+.vorl-auto > span { min-width: 0; overflow-wrap: anywhere; }
+#vorl-wechsel-hinweis { margin: 3px 0 0; }
+
+/* Der Kasten um die Kästchen. `.feld` ist ein <label> gewesen; hier ist es ein
+ * <div>, damit ein Klick auf die Überschrift nicht das erste Kästchen umschaltet. */
+#vorl-ber-zeile > span { display: block; margin-bottom: 3px; font-size: 12px; color: var(--gedaempft); }
+#vorl-ber-zeile #vorl-ber-hinweis { margin: -2px 0 6px; }
+
+/* ── Seitenleiste ───────────────────────────────────────────────────────────
+ *
+ * DIE BREITE BESTIMMT HIER DER BENUTZER, nicht das Stylesheet. Ein Popup hat
+ * kein Fenster, das sich bemessen liesse – der Browser zeichnet es um den
+ * gerenderten Inhalt und klemmt es auf 800 x 600; deshalb steht oben die feste
+ * Breite von 380 px. In der Leiste ist es genau andersherum: der Browser gibt
+ * die Breite vor (in Chrome ab etwa 360 px, per Ziehen an der Kante), und eine
+ * feste Angabe wuerde dort waagerecht ueberlaufen.
+ *
+ * Die Klasse setzt ansicht.js am <html>, noch vor dem ersten Zeichnen. */
+html.leiste body {
+  width: auto;
+  min-width: 0;
+}
+
+/* Die zusaetzliche HOEHE ist der eigentliche Gewinn der Leiste: das Popup ist
+ * bei 600 px zu Ende, die Leiste geht ueber die ganze Fensterhoehe. Ohne diese
+ * Zeile bliebe das Textfeld bei seinen zwoelf Zeilen und darunter staende
+ * leere Flaeche. */
+html.leiste #f-ergebnis {
+  min-height: 40vh;
+  /* Auch in der Leiste gedeckelt, sonst wandert der Ansichts-Fuss nach unten
+   * weg – dort ist mehr Platz, also mehr Deckel. */
+  max-height: 60vh;
+}
+
+/* ── Zugriffszeile (nur Leiste) ─────────────────────────────────────────────
+ * Text und Knopf gehoeren zusammen; der Knopf steht darunter, weil der Text
+ * mehrzeilig ist und ein Knopf am Zeilenende sonst irgendwo haengt. */
+.zugriff-zeile {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--rand);
+  border-radius: 6px;
+  background: var(--warn);
+}
+/* ⚠ DER TEXT MUSS EIN EIGENER BLOCK SEIN. Ein <p> ist ein Textfluss, und ein
+ * Knopf darin ist inline: im Screenshot stand er mitten im Satz („… aus dem
+ * Klick auf das Symbol. [Zugriff erlauben]"), nicht darunter. Die Messung
+ * „Zeile ist sichtbar" war dabei gruen – gesehen hat es erst das Bild. */
+.zugriff-zeile > span { display: block; }
+.zugriff-zeile > button { display: block; margin-top: 8px; }
+
+/* ── „Neue Fassung verfuegbar" ─────────────────────────────────────────────
+ *
+ * Deutlich, aber keine Fehlermeldung: es ist kein Schaden, sondern eine
+ * Auskunft. Deshalb der Akzentrahmen und keine Signalfarbe – und DECKENDE
+ * Flaeche, weil der Kasten ueber dem Arbeitsbereich sitzt (Projektregel). */
+.update-hinweis {
+  margin: 0 0 10px;
+  padding: 7px 9px;
+  border: 1px solid var(--akzent);
+  border-radius: 5px;
+  background: var(--grund);
+  color: var(--schrift);
+}
+/* Register: wer einer Klasse Aussehen gibt, muss `[hidden]` mitnehmen. */
+.update-hinweis[hidden] { display: none !important; }
+
+/* ── Abschnittsgrenze im Arbeitsbereich ────────────────────────────────────
+ *
+ * Dieselbe Linie wie am Fuss der Ansicht, und aus demselben Grund: sie sagt,
+ * dass darunter eine ANDERE Aufgabe beginnt. Oben "Vorlage starten und
+ * übernehmen", darunter "meinen eigenen Entwurf überarbeiten lassen" – zwei
+ * Dinge, die ohne Trennung wie eine Reihe gleichartiger Knöpfe aussehen
+ * (Vorgabe 2026-09-02). */
+.abschnitt {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rand);
+}
+/* Ueberschrift eines Abschnitts. Bewusst NICHT `.feld > span` (das ist eine
+ * FELDbeschriftung und wuerde die Ueberschrift zu einem weiteren Label machen):
+ * gleiche Groesse und Daempfung, aber halbfett - so ordnet sie das Feld
+ * darunter ein, statt daneben zu stehen.
+ * `gap` statt Leerzeichen zwischen Zahnrad und Text: ein Leerzeichen bricht in
+ * 380 px Breite unter Umstaenden um und laesst das Symbol allein in einer
+ * Zeile stehen. */
+.abschnitt-titel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gedaempft);
+}
+
+/* ── Einklappbarer Abschnitt (Vorgabe 2026-09-03) ──────────────────────────
+ *
+ * ⚠ EIN KNOPF, DER WIE EINE UEBERSCHRIFT AUSSEHEN MUSS. Alles, was ein Browser
+ * einem <button> von sich aus mitgibt (Rahmen, Flaeche, eigene Schrift,
+ * Mittelsatz), wird hier zurueckgenommen – der Abschnitt soll sich einordnen,
+ * nicht mit den Arbeitsknoepfen um Aufmerksamkeit ringen.
+ * `font: inherit` und `color: inherit` holen Groesse, Halbfett und Daempfung
+ * aus `.abschnitt-titel`: so gibt es die Werte genau EINMAL, und ein
+ * spaeterer Feinschliff dort wirkt hier mit.
+ * `width: 100%` ist Absicht – die ganze Zeile ist die Klickflaeche, nicht nur
+ * das Wort. Bewusst NICHT `.btn-*`: die tragen im Projekt ihre eigene
+ * Breiten- und Farbregel (Register). */
+.abschnitt-knopf {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+/* `:focus-visible`, nicht `:focus` – letzteres liesse nach jedem Mausklick
+ * einen Rahmen stehen. */
+.abschnitt-knopf:focus-visible {
+  outline: 2px solid var(--akzent);
+  outline-offset: 2px;
+}
+/* ⚠ `min-width: 0` IST PFLICHT, nicht Kosmetik: ein Flex-Kind schrumpft von
+ * sich aus nicht unter seine Inhaltsbreite – ohne diese Zeile schoebe ein
+ * laengerer Abschnittsname den Pfeil aus dem 380 px breiten Fenster, statt
+ * dass der Text umbricht (Register). */
+.abschnitt-wort {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* Der Pfeil sagt den Zustand als ZEICHEN, nicht nur ueber `aria-expanded`:
+ * eine Klappzeile ohne sichtbare Marke sieht wie eine blosse Ueberschrift aus,
+ * und niemand kommt auf die Idee, sie anzuklicken. */
+.abschnitt-pfeil {
+  flex: 0 0 auto;
+  font-size: 10px;
+  line-height: 1;
+}
+
+/* ── Umschalter Popup ↔ Seitenleiste ───────────────────────────────────────
+ * Steht am Fuss und ist bewusst leise gezeichnet: eine Einstellung, die man
+ * einmal trifft, darf nicht mit den Arbeitsknoepfen um Aufmerksamkeit ringen.
+ * Die Trennlinie sagt, dass sie nicht zum Arbeitsbereich darueber gehoert. */
+.ansicht-fuss {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--rand);
+  /* ⚠ ER BLEIBT STEHEN, egal wie lang der Inhalt darueber wird.
+   *
+   * Ein Popup ist auf 600 px geklemmt; bei einem langen Ergebnis rutschte der
+   * Umschalter darunter (gemessen: Oberkante bei y=703). Er ist dann zwar da,
+   * aber niemand findet ihn - und genau so wurde es gemeldet.
+   * DECKENDE Flaeche ist Pflicht, sonst scheint der Text darunter durch;
+   * `bottom: -12px` deckt das Polster des Fensters mit ab, sonst blitzt dort
+   * ein Streifen hervor (Bauform wie der Fuss der Verlaufsleiste in /chat). */
+  position: sticky;
+  bottom: -12px;
+  padding-bottom: 12px;
+  background: var(--grund);
+}
+.ansicht-schalter {
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  color: var(--gedaempft);
+  cursor: pointer;
+}
+/* `min-width: 0` ist Pflicht: ohne das schrumpft ein Flex-Kind nicht unter
+ * seine Inhaltsbreite und eine lange Beschriftung schiebt in einer schmalen
+ * Leiste das Kaestchen aus dem Bild (Register). */
+.ansicht-schalter > span { min-width: 0; }
+.ansicht-fuss .hinweis { margin: 4px 0 0; }
+/* Kann dieser Browser keine Leiste, bleibt die Zeile SICHTBAR und sagt warum -
+ * abgeschwaecht, damit sie nicht wie ein bedienbares Angebot aussieht. Die
+ * Aussage traegt der Hinweistext darunter, nicht die Deckkraft. */
+.ansicht-fuss.aus .ansicht-schalter { opacity: .55; cursor: default; }

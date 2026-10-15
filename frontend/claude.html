@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claude Subagent</title>
+    <link rel="stylesheet" href="/static/css/theme.css?v=34">
+    <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
+    <link rel="stylesheet" href="/static/css/avatar.css?v=10">
+    <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
+    <style>
+        /* ═══════════════════════════════════════════════════════════════
+           Bereich Claude Subagent (/claude)
+           ───────────────────────────────────────────────────────────────
+           Titelleiste bewusst identisch zu /email, /sap und /tracks – wer
+           zwischen den Bereichen wechselt, findet die Knoepfe am selben Platz.
+
+           Praefix `cs-` fuer alles hier.
+
+           Farben ausschliesslich ueber Theme-Variablen – kein hartes Violett
+           oder Weiss, sonst bricht das Branding und der Hell-Modus.
+           ═══════════════════════════════════════════════════════════════ */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: var(--font-body); background: var(--bg-primary);
+               color: var(--text-primary); min-height: 100vh; }
+        .hidden { display: none !important; }
+
+        /* ── Titelleiste ── */
+        .topbar { display: flex; align-items: center; justify-content: space-between;
+            padding: 10px 16px; border-bottom: 1px solid var(--border);
+            background: var(--bg-glass); backdrop-filter: blur(8px);
+            position: sticky; top: 0; z-index: 30; }
+        .topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+        .topbar-right { display: flex; align-items: center; gap: 4px; }
+        .topbar-avatar { width: 32px; height: 32px; border-radius: 50%;
+            background: var(--gradient); display: flex; align-items: center;
+            justify-content: center; font-size: 14px; font-weight: 700; color: #fff;
+            flex-shrink: 0; overflow: hidden; }
+        .topbar-title { font-size: 19px; font-weight: 600; white-space: nowrap; }
+
+        /* Zustands-Pille. `align-self: flex-start` ist Pflicht – im senkrechten
+           Flex-Container wuerde sie sonst auf die ganze Breite gezogen und
+           saehe wie ein Eingabefeld aus (Fehler vom 2026-08-11). */
+        .cs-pill { display: inline-flex; align-items: center; gap: 6px;
+            align-self: flex-start;
+            padding: 3px 10px; border-radius: 12px; font-size: .74rem; font-weight: 600;
+            background: rgba(var(--fg-rgb), .06); border: 1px solid var(--border);
+            color: var(--text-secondary); white-space: nowrap; }
+        .cs-pill.is-ok { color: var(--success);
+            border-color: color-mix(in srgb, var(--success) 45%, transparent);
+            background: color-mix(in srgb, var(--success) 12%, transparent); }
+        .cs-pill.is-off { color: var(--danger);
+            border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+            background: color-mix(in srgb, var(--danger) 12%, transparent); }
+
+        /* Farbe ueber die Theme-Variable, nicht als Festwert: die uebrigen
+           Bereichsseiten tragen hier historisch ein hartes #888899 samt
+           body.light-Ausnahme – mit `--text-muted` folgt der Knopf dem Branding
+           und braucht keine zweite Regel fuer den Hell-Modus. */
+        .btn-theme { background: none; border: none; color: var(--text-muted);
+            padding: 4px 8px; border-radius: 8px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: color .2s, background .2s; }
+        .btn-theme:hover { background: rgba(var(--accent-rgb), .12); color: var(--accent); }
+        .btn-theme svg { width: 20px; height: 20px; }
+
+        .lang-toggle { display: flex; gap: 2px; background: rgba(var(--fg-rgb, 148,163,184), .05);
+            border: 1px solid rgba(var(--fg-rgb, 148,163,184), .1); border-radius: 8px; padding: 2px; }
+        .lang-toggle-btn { background: transparent; border: none; color: var(--text-secondary);
+            font-size: .72rem; font-weight: 700; letter-spacing: .04em; padding: 3px 10px;
+            border-radius: 6px; cursor: pointer; font-family: var(--font-body);
+            transition: background .15s, color .15s; }
+        .lang-toggle-btn:hover { color: var(--text-primary); }
+        .lang-toggle-btn.active { background: rgba(var(--accent-rgb), .35); color: var(--text-primary); }
+
+        /* ── Karten ── */
+        .cs-wrap { max-width: 900px; margin: 0 auto; padding: 18px 16px 60px;
+            display: flex; flex-direction: column; gap: 14px; }
+        .cs-card { border: 1px solid var(--border); border-radius: 12px;
+            background: var(--bg-secondary); overflow: hidden; }
+        .cs-card-head { display: flex; align-items: center; justify-content: space-between;
+            gap: 10px; padding: 12px 14px; cursor: pointer; user-select: none; }
+        .cs-card-head h2 { font-size: 1rem; font-weight: 600; }
+        .cs-caret { color: var(--text-muted); font-size: .8rem; transition: transform .15s; }
+        .cs-card[data-zu="1"] .cs-caret { transform: rotate(-90deg); }
+        .cs-card[data-zu="1"] .cs-card-body { display: none; }
+        .cs-card-body { padding: 0 14px 14px; }
+        .cs-hint { font-size: .84rem; line-height: 1.55; color: var(--text-secondary); }
+        .cs-sep { height: 1px; background: var(--border); margin: 12px 0; }
+
+        /* ── Felder und Knoepfe ── */
+        .cs-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        /* `display:flex` ueberstimmt das hidden-Attribut – ohne diese Regel
+           steht ein verborgener Block trotzdem da (Fehler vom 2026-08-17 bei
+           .sp-row). Gleiche Klassen-Falle wie .input-group und .role-grid. */
+        .cs-row[hidden] { display: none; }
+        .cs-btn { background: none; border: 1px solid var(--border); color: var(--text-secondary);
+            height: 32px; padding: 0 12px; border-radius: 8px; cursor: pointer;
+            font-size: .85rem; display: inline-flex; align-items: center; gap: 6px;
+            font-family: var(--font-body); white-space: nowrap; text-decoration: none;
+            flex: 0 0 auto; }
+        .cs-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+        .cs-btn.is-primary { border-color: var(--accent); color: var(--text-primary);
+            background: color-mix(in srgb, var(--accent) 14%, transparent); }
+        .cs-btn.is-danger { border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+            color: var(--danger); }
+        .cs-btn[disabled] { opacity: .5; cursor: default; }
+
+        /* Der Schluessel selbst: dauerhaft sichtbar, Monospace, umbrechend.
+           Deckende Flaeche, weil er ueber Karteninhalt liegt. */
+        .cs-key { margin-top: 10px; padding: 10px 12px; border-radius: 8px;
+            background: var(--bg-primary); border: 1px solid var(--accent);
+            font-family: var(--font-mono, monospace); font-size: .8rem;
+            word-break: break-all; line-height: 1.5; color: var(--text-primary); }
+        .cs-key-warn { margin-top: 8px; font-size: .8rem; color: var(--warning, var(--accent));
+            font-weight: 600; }
+        .cs-meta { font-size: .8rem; color: var(--text-muted); margin-top: 6px; }
+
+        /* Womit die Laeufe rechnen. Deckende Flaeche, weil der Kasten ueber
+           Karteninhalt liegt (gleiche Lehre wie bei .em-paused und den Panels). */
+        .cs-modell { margin-top: 12px; padding: 10px 12px; border-radius: 8px;
+            background: var(--bg-primary); border: 1px solid var(--border);
+            font-size: .84rem; line-height: 1.55; color: var(--text-secondary); }
+        .cs-modell b { color: var(--text-primary); }
+        .cs-modell.is-warn { border-color: color-mix(in srgb, var(--warning, var(--accent)) 55%, transparent); }
+        .cs-modell-warn { margin-top: 6px; color: var(--warning, var(--accent)); }
+
+        /* ── ⓘ: aufklappender Text, kein schwebendes Popup ──
+           Ein positioniertes Popup wuerde auf schmalen Fenstern abgeschnitten
+           oder verdeckte das Feld. Ein `title`-Attribut scheidet aus – auf
+           Touch unerreichbar. Monochromes Textzeichen statt Emoji. */
+        .cs-info { background: none; border: none; cursor: pointer; padding: 0 0 0 5px;
+            color: var(--text-muted); font-size: .9rem; line-height: 1;
+            font-family: var(--font-body); vertical-align: baseline; }
+        .cs-info:hover, .cs-info[aria-expanded="true"] { color: var(--accent); }
+        .cs-help { display: none; margin-top: 6px; padding: 8px 10px;
+            border-radius: 8px; font-size: .8rem; line-height: 1.5;
+            color: var(--text-secondary); background: var(--bg-primary);
+            border: 1px solid var(--border); border-left: 3px solid var(--accent); }
+        .cs-help.is-open { display: block; }
+        /* Eigener Einzug: sonst stehen die Punkte links AUSSERHALB des Kastens. */
+        .cs-help ul { margin: 6px 0 2px; padding-left: 1.15rem; }
+        .cs-help li { margin-bottom: 4px; }
+        .cs-help b, .cs-help strong { color: var(--text-secondary); }
+        .cs-help code { font-family: var(--font-mono, monospace); font-size: .95em;
+            background: rgba(var(--fg-rgb), .1); padding: 1px 4px; border-radius: 4px; }
+        /* Code-Bloecke der Anleitung: eigener Grund, damit sie sich vom
+           Fliesstext abheben, und waagerecht scrollbar statt umbrechend –
+           ein umgebrochener Befehl laesst sich nicht kopieren. */
+        .cs-help pre { margin: 6px 0 10px; padding: 9px 11px; border-radius: 7px;
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            font-family: var(--font-mono, monospace); font-size: .78rem;
+            line-height: 1.5; overflow-x: auto; white-space: pre; }
+        .cs-help pre code { background: none; padding: 0; }
+        .cs-help h4 { font-size: .85rem; font-weight: 600; color: var(--text-primary);
+            margin: 14px 0 5px; }
+        .cs-help h4:first-child { margin-top: 0; }
+        .cs-help table { border-collapse: collapse; width: 100%; margin: 6px 0 10px;
+            font-size: .78rem; }
+        .cs-help th, .cs-help td { text-align: left; padding: 5px 8px;
+            border-bottom: 1px solid var(--border); vertical-align: top; }
+        .cs-help th { color: var(--text-primary); font-weight: 600; }
+        .cs-help .cs-num { font-family: var(--font-mono, monospace);
+            white-space: nowrap; }
+
+        /* ── Auftragsliste ── */
+        .cs-job { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+            margin-bottom: 8px; background: var(--bg-primary); }
+        .cs-job-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .cs-job-spec { font-size: .85rem; color: var(--text-primary); flex: 1 1 auto;
+            min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .cs-job-meta { font-size: .76rem; color: var(--text-muted); margin-top: 4px; }
+        .cs-leer { font-size: .84rem; color: var(--text-muted); padding: 6px 0; }
+
+        .cs-toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+            padding: 10px 16px; border-radius: 10px; background: var(--bg-secondary);
+            border: 1px solid var(--border); color: var(--text-primary);
+            font-size: .85rem; z-index: 60; pointer-events: none; }
+    </style>
+</head>
+<body>
+<script src="/static/js/theme_frueh.js?v=1"></script>
+
+<div id="cs-app" class="hidden">
+    <header class="topbar">
+        <div class="topbar-left">
+            <div class="topbar-avatar">J</div>
+            <span class="topbar-title"><span class="brand-app-name">Jarvis</span>
+                <span data-i18n="csub.portal_title">Claude Subagent</span></span>
+            <span class="cs-pill" id="cs-key-pill"></span>
+        </div>
+        <div class="topbar-right">
+            <div class="lang-toggle" id="cs-lang-toggle">
+                <button class="lang-toggle-btn" data-lang="de" data-setlang="de" title="Deutsch">DE</button>
+                <button class="lang-toggle-btn" data-lang="en" data-setlang="en" title="English">EN</button>
+            </div>
+            <button class="btn-theme jv-issues-btn" id="cs-issues-btn" data-i18n-title="sup.issues" title="Issues / Feedback"
+                    data-issues-oeffnen>
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            </button>
+            <button class="btn-theme" id="btn-theme-toggle" title="Hell/Dunkel umschalten" data-i18n-title="chat.theme">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            </button>
+            <button class="btn-theme" id="cs-portal-btn" title="Zum Portal" data-i18n-title="nav.home">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            </button>
+            <!-- Einstellungen: nur fuer Admins, wird von claude_portal.js eingeblendet -->
+            <button class="btn-theme" id="cs-settings-btn" data-jarvis-settings="/claude" data-i18n-title="nav.settings" title="Einstellungen" style="display:none;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </button>
+            <button class="btn-theme" id="cs-logout-btn" title="Abmelden" data-i18n-title="chat.logout">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            </button>
+        </div>
+    </header>
+
+    <div class="cs-wrap" data-jv-breit>
+        <!-- Seite maximieren (Vorbild /wissen, Vorgabe 2026-09-28): der Knopf
+             sitzt AUSSERHALB der Kacheln ganz oben; maximiert nutzen ALLE
+             Kacheln die volle Fensterbreite. Logik in seite_breit.js. -->
+        <div class="jv-max-row">
+            <button type="button" class="jv-max-btn" id="jv-max" data-seite="claude" aria-pressed="false"
+                    data-i18n-title="common.maximize" data-i18n-aria="common.maximize"
+                    title="Maximieren" aria-label="Maximieren">&#9974;</button>
+        </div>
+
+        <!-- ═══ Mein Delegations-Schluessel ═══ -->
+        <div class="cs-card" data-klapp="key">
+            <div class="cs-card-head" role="button" tabindex="0" aria-expanded="true">
+                <h2 data-i18n="csub.key_head">Mein Delegations-Schlüssel</h2>
+                <span class="cs-caret" aria-hidden="true">&#9662;</span>
+            </div>
+            <div class="cs-card-body">
+                <p class="cs-hint">
+                    <span data-i18n="csub.key_hint">Mit diesem Schlüssel darf dein Claude-Code-Werkzeug Codeaufgaben an {marke} abgeben. Die Aufträge laufen unter deiner Kennung.</span>
+                    <button type="button" class="cs-info" data-help="cs-help-key" aria-expanded="false"
+                            data-i18n-title="csub.info_title" title="Erklärung anzeigen">&#9432;</button>
+                </p>
+                <div class="cs-help" id="cs-help-key" data-i18n-html="csub.help_key">
+                    <b>Der Schlüssel bleibt hier sichtbar.</b>
+                    <ul>
+                        <li>Du kannst ihn jederzeit wieder nachsehen und kopieren – auch morgen noch. Ein Nachschlagen kostet dich also nicht den Schlüssel, den du schon eingerichtet hast.</li>
+                        <li>Sichtbar ist er <b>nur für dich</b>: {marke} gibt ihn an niemanden sonst heraus, auch nicht an einen Administrator.</li>
+                        <li>Behandle ihn wie ein Kennwort: wer ihn hat, kann in deinem Namen Aufträge starten. Er gehört nie ins Repo.</li>
+                        <li>Weitergegeben oder verloren? <b>Neuen Schlüssel erzeugen</b> – der alte wird dabei sofort ungültig. Das ist der Widerrufsweg.</li>
+                        <li>Du hast immer höchstens <b>einen</b> gültigen Schlüssel.</li>
+                    </ul>
+                </div>
+
+                <div class="cs-sep"></div>
+                <div class="cs-meta" id="cs-key-meta"></div>
+
+                <!-- Dauerhafte Anzeige. KEIN Inline-`display` hier: das
+                     hidden-Attribut wirkt nur, solange keine Regel und kein
+                     Inline-Style es ueberstimmt (Klassen-Falle wie bei
+                     .sp-row/.input-group – der Kasten stand sonst leer da). -->
+                <div id="cs-key-box" hidden>
+                    <div class="cs-key" id="cs-key-value"></div>
+                    <div class="cs-key-warn" data-i18n="csub.key_secret">Wie ein Kennwort behandeln: wer ihn hat, kann in deinem Namen Aufträge starten.</div>
+                    <div class="cs-row" style="margin-top:8px;">
+                        <button class="cs-btn" id="cs-key-copy" data-i18n="csub.key_copy">Kopieren</button>
+                    </div>
+                </div>
+                <!-- Altbestand aus der Hash-Zeit: gilt weiter, laesst sich aber
+                     nicht anzeigen. Das steht hier ausdruecklich, statt ein
+                     leeres Feld zu zeigen. -->
+                <div class="cs-meta" id="cs-key-alt" hidden data-i18n="csub.key_alt">Dieser Schlüssel wurde vor der Umstellung erzeugt und lässt sich nicht mehr anzeigen. Er gilt weiter – zum Nachsehen bitte einen neuen erzeugen.</div>
+
+                <div class="cs-row" style="margin-top:10px;">
+                    <button class="cs-btn is-primary" id="cs-key-new" data-i18n="csub.key_new">Schlüssel erzeugen</button>
+                    <button class="cs-btn is-danger" id="cs-key-del" data-i18n="csub.key_del" hidden>Schlüssel löschen</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ Wie es funktioniert ═══ -->
+        <div class="cs-card" data-klapp="info">
+            <div class="cs-card-head" role="button" tabindex="0" aria-expanded="true">
+                <h2 data-i18n="csub.how_head">Wie die Delegation abläuft</h2>
+                <span class="cs-caret" aria-hidden="true">&#9662;</span>
+            </div>
+            <div class="cs-card-body">
+                <div class="cs-help is-open" data-i18n-html="csub.how_body">
+                    <ul>
+                        <li>Claude beschreibt eine <b>eng umrissene</b> Aufgabe und nennt dabei, welche Dateien geändert werden dürfen und welche Testdatei das Ergebnis beweist.</li>
+                        <li>{marke} holt sich eine <b>frische Kopie</b> des Projekts in ein Wegwerf-Verzeichnis und arbeitet nur dort. An die laufende Installation kommt er dabei nicht heran.</li>
+                        <li>Danach rechnet <b>{marke} selbst</b> nach, was sich geändert hat, und führt den genannten Test aus.</li>
+                        <li>Nur wenn alles zusammenpasst, gilt der Auftrag als angenommen: es wurde wirklich etwas geändert, es wurde <i>nur</i> an den freigegebenen Dateien gearbeitet, und der Test ist grün.</li>
+                        <li>Claude bekommt die Änderung als Patch zurück, prüft sie und übernimmt sie bei dir lokal.</li>
+                    </ul>
+                    <b>Was bewusst nicht delegiert wird:</b> alles, wofür man die Projektregeln kennen muss, alles Sicherheitsrelevante – und Aufgaben, die mehrere Zustände durchlaufen („ändere, miss, mach rückgängig"). Dafür ist ein Auftrag der falsche Zuschnitt.
+                </div>
+                <!-- Womit die Laeufe rechnen. Wird von claude_portal.js gefuellt;
+                     bleibt leer, solange der Status nicht geladen ist – eine
+                     Behauptung ueber das Modell ohne Datenstand waere schlechter
+                     als keine. -->
+                <div class="cs-modell" id="cs-modell" hidden></div>
+            </div>
+        </div>
+
+        <!-- ═══ Anleitung ═══
+             Startet ZUGEKLAPPT: Nachschlagewerk, kein Erstkontakt. Wer die
+             Seite zum ersten Mal oeffnet, braucht den Schluessel und die kurze
+             Ablauf-Erklaerung darueber – nicht die Referenz. -->
+        <div class="cs-card" data-klapp="anleitung" data-zu="1">
+            <div class="cs-card-head" role="button" tabindex="0" aria-expanded="false">
+                <h2 data-i18n="csub.guide_head">Anleitung: Einrichtung und Nutzung in Claude Code</h2>
+                <span class="cs-caret" aria-hidden="true">&#9662;</span>
+            </div>
+            <div class="cs-card-body">
+                <div class="cs-help is-open" data-i18n-html="csub.guide_body">
+                    <h4>1. Schlüssel erzeugen</h4>
+                    <p>Oben in der Karte <b>Mein Delegations-Schlüssel</b> auf <b>Schlüssel erzeugen</b> klicken. Er bleibt dort sichtbar – du kannst ihn jederzeit wieder nachsehen.</p>
+
+                    <h4>2. Zugang auf deinem Rechner hinterlegen</h4>
+                    <p>Die drei Zeilen enthalten deinen echten Schlüssel und die Adresse dieser Installation – einfach kopieren und ausführen. Beide Dateien liegen <b>außerhalb</b> des Projektordners: ein Schlüssel gehört nie ins Repo.</p>
+                    <pre id="cs-guide-cmds"><code>printf '%s' '<span id="cs-guide-key">DEIN-SCHLUESSEL-SIEHE-OBEN</span>' &gt; ~/.{marke_slug}-csa-key
+printf '%s' '{adresse}' &gt; ~/.{marke_slug}-csa-url
+chmod 600 ~/.{marke_slug}-csa-key</code></pre>
+                    <p><button type="button" class="cs-btn" id="cs-guide-copy" data-i18n="csub.guide_copy">Die drei Zeilen kopieren</button></p>
+                    <p>Alternativ als Umgebungsvariablen <code>{MARKE}_CSA_KEY</code> und <code>{MARKE}_CSA_URL</code>. Eine feste Vorgabe für die Adresse gibt es bewusst nicht: derselbe Client arbeitet gegen jede {marke}-Installation, und eine falsche Adresse sähe wie ein Schlüsselproblem aus.</p>
+
+                    <h4>3. Skill in Claude Code ablegen</h4>
+                    <p><a class="cs-btn is-primary" href="/claude/skill.md" download="SKILL.md">SKILL.md herunterladen</a></p><p>Die Datei in deinem Projekt unter <code>.claude/skills/code-delegate/SKILL.md</code> ablegen – fertig. Sie ist bereits auf diese Installation ausgestellt. Claude findet den Skill dann selbst, sobald eine Aufgabe dazu passt; der Client <code>deploy/claude_subagent/delegiere.py</code> liegt versioniert im Projekt und muss nicht kopiert werden.</p>
+
+                    <h4>4. Regel in deine <code>CLAUDE.md</code> schreiben (empfohlen)</h4>
+                    <p>Claude findet den Skill zwar von selbst – <b>ob</b> es ihn nimmt, entscheidet es aber jedes Mal neu. Eine Regel in der <code>CLAUDE.md</code> deines Projekts macht daraus eine verbindliche Vorgabe. Zwei Sätze genügen:</p>
+                    <pre id="cs-guide-rule"><code>## Delegation an {marke}
+Fuer mechanische Breitenarbeiten (viele Dateien, einfache Aenderung,
+vorhandener Test) MUSST du den Skill `code-delegate` verwenden.
+Bei Fehlschlag sofort selbst machen - keine Nachbesserungsversuche.</code></pre>
+                    <p><button type="button" class="cs-btn" id="cs-guide-rule-copy" data-i18n="csub.guide_rule_copy">Regel kopieren</button></p>
+                    <p><b>Warum der zweite Satz genauso wichtig ist wie der erste:</b> ein Auftrag ist genau <i>ein</i> Zielzustand. Nachbessern kostet mehr Token, als die Aufgabe selbst zu machen – die Ersparnis wäre damit aufgebraucht. Und ein Fehlschlag hat meist einen Grund, den ein zweiter Versuch nicht behebt (fremde Datei angefasst, Riegel rot, Aufgabe zu groß geschnitten).</p>
+
+                    <h4>5. Loslegen – du sagst es Claude einfach</h4><p>Ab jetzt musst du nichts weiter tun. Bitte Claude ganz normal um eine Änderung; passt sie zum Zuschnitt, gibt Claude sie <b>von sich aus</b> ab und arbeitet mit dem geprüften Ergebnis weiter. Du siehst den Auftrag hier unter <b>Letzte Aufträge</b> auftauchen.</p><p>Willst du es ausdrücklich, genügt ein Satz wie: <i>„Gib das an {marke} ab."</i> Willst du es <i>nicht</i>, sag: <i>„Mach das selbst."</i></p><h4>6. Ergebnis übernehmen</h4>
+                    <p>Kommt ein Patch, prüft Claude ihn und wendet ihn mit <code>git apply</code> an. Kommt keiner, nennt die Meldung den Grund (leerer Patch, fremde Datei angefasst, Riegel rot) – dann macht Claude die Aufgabe selbst, statt nachzubessern.</p>
+
+                    <h4>Was das an Tokens spart</h4>
+                    <p>Gemessen an einer echten Kleinänderung (eine CSS-Variable, die an zwei Stellen zusammenpassen muss):</p>
+                    <table>
+                        <tr><th>Weg</th><th>Aufwand bei Claude</th></tr>
+                        <tr><td>Claude macht es selbst</td><td class="cs-num">≈ 4.000–6.000 Token</td></tr>
+                        <tr><td>Delegiert an {marke}</td><td class="cs-num">≈ 800 Token</td></tr>
+                    </table>
+                    <p>Also grob <b>Faktor 5 bis 7</b>. Der Aufwand bei Claude besteht dann nur noch aus der Aufgabenbeschreibung, dem kurzen Bericht und dem Lesen des Patches. Was wegfällt, ist das <b>Suchen und Lesen der Dateien</b> – und genau daraus entsteht die Ersparnis.</p>
+                    <p><b>Daraus folgt die wichtigste Regel:</b> Muss Claude den Code erst lesen, um die Aufgabe überhaupt beschreiben zu können, ist die Ersparnis schon ausgegeben. Dann lohnt sich die Delegation nicht.</p>
+                    <p>Je Auftrag laufen auf dem Server rund 30 bis 60 Sekunden. Die {marke}-Tokens sind kostenlos, die Rechenzeit nicht: jeder Auftrag belegt dasselbe Sprachmodell wie der Chat.</p>
+
+                    <h4>Wofür es sich lohnt</h4>
+                    <ul>
+                        <li>Dieselbe mechanische Änderung über viele Dateien ziehen.</li>
+                        <li>Eine kleine Änderung, für die es schon einen Test gibt.</li>
+                        <li>Zwei Stellen, die zusammenpassen müssen.</li>
+                    </ul>
+
+                    <h4>Wofür nicht</h4>
+                    <ul>
+                        <li><b>Alles, wofür man die Projektregeln kennen muss.</b> Die stehen in einem Dokument, das für das Modell zu umfangreich ist, um es zuverlässig anzuwenden.</li>
+                        <li><b>Alles Sicherheitsrelevante</b> – Berechtigungen, Zugriffsschranken, Anmeldung.</li>
+                        <li><b>Aufgaben mit mehreren Zuständen</b> („ändere, miss, mach rückgängig"). Eine Delegation ist genau ein Zielzustand.</li>
+                        <li><b>Alles ohne Test</b>, der das Ergebnis beweist.</li>
+                    </ul>
+
+                    <h4>Worauf du dich nicht verlassen darfst</h4>
+                    <p>Zahlen, die der Agent in seinem Bericht nennt („13 Dateien gefunden"), sind unzuverlässig – in der Erprobung war die selbst hergeleitete Zahl mehrfach falsch, obwohl die zugrunde liegenden Daten stimmten. Verlässlich sind nur Patch und Testergebnis, und die rechnet der Server selbst aus.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ Letzte Auftraege ═══ -->
+        <div class="cs-card" data-klapp="jobs">
+            <div class="cs-card-head" role="button" tabindex="0" aria-expanded="true">
+                <h2><span data-i18n="csub.jobs_head">Letzte Aufträge</span> <span id="cs-jobs-count" class="cs-meta"></span></h2>
+                <span class="cs-caret" aria-hidden="true">&#9662;</span>
+            </div>
+            <div class="cs-card-body">
+                <div id="cs-jobs-list"><div class="cs-leer" data-i18n="csub.loading">Lädt…</div></div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<script src="/static/js/sitzung.js?v=3"></script>
+<script src="/static/js/konto_hinweise.js?v=2"></script>
+<script src="/static/js/icons.js?v=8"></script>
+<script src="/static/js/pwreveal.js?v=4"></script>
+<script src="/static/js/dlkey.js?v=4"></script>
+<script src="/static/js/cpubar.js?v=2"></script>
+<script src="/static/js/syspackages.js?v=3"></script>
+<script src="/static/js/sysload.js?v=5"></script>
+<script src="/static/js/i18n.js?v=339"></script>
+<script src="/static/js/seite_breit.js?v=1"></script>
+<script src="/static/js/theme.js?v=3"></script>
+<script src="/static/js/branding.js?v=27"></script>
+<script src="/static/js/sessions.js?v=9"></script>
+<script src="/static/js/logo_home.js?v=1"></script>
+<script src="/static/js/claude_portal.js?v=8"></script>
+<script src="/static/js/settings_btn.js?v=5"></script>
+<script src="/static/js/activity.js?v=3"></script>
+<script src="/static/js/issues.js?v=14"></script>
+<!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist).
+     Der Ein/Aus-Schalter haengt sich VOR .jv-issues-btn – deshalb muss der
+     Issues-Knopf in der Titelleiste stehen, bevor avatar.js laeuft. -->
+<script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
+<script src="/static/vendor/clippy/clippy.min.js"></script>
+<script src="/static/js/stt.js?v=3"></script>
+<script src="/static/js/avatar.js?v=17"></script>
+</body>
+</html>

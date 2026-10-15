@@ -1,0 +1,98 @@
+# fastapi 0.141.1 ist die neueste Fassung OHNE harte opentelemetry-api>=1.44-
+# Abhaengigkeit (ab 0.142.0 reisst sie den auf 1.40.0/0.61b0 festgenagelten
+# OTel-Stack mit). Obergrenze deshalb bewusst, nicht aus Vorsicht.
+fastapi>=0.141.1,<0.142.0
+uvicorn[standard]==0.34.0
+google-genai==1.5.0
+anthropic>=0.39.0
+python-dotenv>=1.2.2   # Sicherheits-Untergrenze 2026-10-06 (BSI M6, pip-audit: CVE-2026-28684; vorher ==1.0.1)
+psutil==6.1.1
+# pyautogui wurde am 2026-07-31 ENTFERNT: es war nie importiert (die
+# Desktop-Steuerung laeuft ueber xdotool als Unterprozess, siehe
+# backend/tools/desktop.py), zog aber drei GPL-Pakete in den Backend-Prozess
+# (MouseInfo/PyMsgBox GPL-3.0+, python3-xlib GPL-2.0) – unvereinbar mit der
+# eigenen Apache-2.0. Nicht wieder aufnehmen, ohne das zu pruefen.
+pillow>=12.3.0         # Sicherheits-Untergrenze 2026-10-01 (vorher ==11.1.0)
+pytesseract==0.3.13   # Bild-OCR fuer Wissensbasis; benoetigt System-Paket: tesseract-ocr (+ tesseract-ocr-deu/-eng)
+pdf2image==1.17.0     # OCR-Fallback fuer gescannte PDFs (rendert Seiten zu Bildern); benoetigt System-Paket: poppler-utils
+python-multipart>=0.0.30   # Sicherheits-Untergrenze 2026-10-01 (vorher ==0.0.20)
+websockets==14.2
+python-pam>=2.0.2
+six>=1.16.0
+pdfplumber>=0.10.0
+python-docx>=1.0.0
+openpyxl>=3.1.0
+python-pptx>=0.6.23
+edge-tts>=7.2.7        # TTS im Chat: Stimmen-Liste (/api/tts/voices) + Sprachsynthese; ohne edge-tts nur eine "Standard"-Stimme
+wsgidav>=4.3.0
+# ── Am 2026-08-12 nachgetragen: bis dahin NICHT deklariert, obwohl im Backend
+# direkt importiert. Sie waren nur als Beigabe anderer Pakete vorhanden und
+# haetten bei jeder venv-Bereinigung verschwinden koennen – genau so ist der
+# PDF-Anhang auf ECHT gestorben (pypdf, siehe tests/test_pdf_attachment.py).
+# BEWUSST OHNE Versionsangabe: die Pakete sind auf allen Servern vorhanden, eine
+# Untergrenze koennte dort ein ungewolltes Upgrade ausloesen. Es geht um das
+# VORHANDENSEIN, nicht um eine Version.
+requests               # jira_client, sap_client, google_auth, web_extractor, ibs
+httpx                  # knowledge_sync (Standort-Sync), model_caps, file_watcher, web_extractor
+packaging              # abhaengigkeiten (Grenzen/Versionen pruefen); ohnehin Beigabe vieler Pakete
+# cryptography traegt als EINZIGES aus diesem Block eine Untergrenze – die
+# Sicherheitslage vom 2026-10-01 geht dem Vorsatz oben vor. ⚠ Die Warnung dieses
+# Blocks hat sich dabei bestaetigt: ein nacktes `>=46.0.7` holte 50.0.2, also vier
+# Hauptversionen. Auf DEV geprueft (Ed25519 signieren/pruefen samt Negativprobe,
+# Fernet, x509, pkcs12) – wer die Grenze anfasst, prueft dasselbe nach.
+cryptography>=46.0.7   # backend/license.py: Ed25519-Pruefung der Lizenz
+# urllib3 ist in backend/mail_client.py DIREKT importiert und stand bis zum
+# 2026-10-01 in keiner requirements.txt – derselbe Fall wie pypdf damals, nur
+# noch nicht eingetreten. tests/test_dependency_declarations.py meldete es die
+# ganze Zeit (der Lauf war deshalb rot); mit dieser Zeile ist der Befund erledigt.
+urllib3>=2.7.0         # mail_client (direkt) + Beigabe von requests
+# ── Rein TRANSITIVE Pakete, nur wegen einer Sicherheits-Untergrenze genannt
+# (2026-10-01). Sie werden hier nirgends direkt importiert; der Eintrag soll
+# allein verhindern, dass eine Neuinstallation unter die Grenze zurueckfaellt.
+# Wer sie entfernt, verliert die Grenze still – die Pakete bleiben ueber ihre
+# Mitnutzer trotzdem installiert (idna ueber requests/httpx/anyio/yarl,
+# aiohttp ueber edge-tts).
+idna>=3.15
+aiohttp>=3.14.1
+# starlette direkt genutzt in main.py (kommt sonst nur ueber fastapi).
+# Untergrenze 1.0.1 ist Pflicht: CVE-2026-48710 (BadHost) – Host-Header ohne
+# Pruefung vergiftet request.url.path, womit pfadbasierte Entscheidungen ins
+# Leere greifen (hier: _api_local_only_mw). Waechter: tests/test_starlette_badhost.py
+starlette>=1.0.1
+# Die WSGI->ASGI-Bruecke fuer den WebDAV-Mount (backend/webdav.py). Vorher kam sie
+# aus starlette.middleware.wsgi – das ist abgekuendigt, meldete seit dem Sprung auf
+# Starlette 1.7.0 eine StarletteDeprecationWarning beim Start und nennt a2wsgi
+# selbst als Ersatz. Ohne diesen Eintrag faellt WebDAV auf einem frisch
+# installierten Server aus (derselbe Fall wie pypdf 2026-08-12), obwohl der Import
+# in einem try/except ImportError steht.
+a2wsgi>=1.10.10
+# NICHT deklariert, mit Absicht: torch. Es kommt mit sentence-transformers, und
+# ein eigener Eintrag hier wuerde die CUDA-Variante zurueckholen, die am
+# 2026-07-19 auf ECHT bewusst gegen torch+cpu getauscht wurde (~4,6 GB).
+# face-recognition + opencv gehoeren zum Vision-Skill und werden bei dessen
+# Aktivierung installiert (skills/vision/skill.json → dependencies)
+faiss-cpu>=1.7.4
+sentence-transformers>=2.2.0,<4.0
+numpy<2.1
+# WICHTIG – torch VOR dieser Datei aus dem CPU-Index installieren:
+#   pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.10.0+cpu"
+# sentence-transformers zieht sonst das CUDA-Rad und damit 18 proprietaere
+# NVIDIA-Pakete (~6 GB) auf eine VM OHNE GPU – torch.cuda.is_available() ist hier
+# False, sie werden nie geladen. Nachgemessen 2026-07-31: venv 8,4 GB -> 2,4 GB.
+# Die Einbettungen sind bitgleich (gleicher SHA ueber den Vektor), ein Reindex ist
+# nach dem Wechsel also NICHT noetig.
+# Die Versionsangabe muss das lokale Suffix "+cpu" tragen: mit "torch==2.10.0"
+# haelt pip das bereits installierte CUDA-Rad fuer passend und tut nichts.
+# mcp: Untergrenze 1.28.1 aus pip-audit (BSI M6, 2026-10-06: CVE-2026-52869/-52870/
+# -59950, alle in den SERVER-Transporten – Jarvis nutzt nur den Client, die
+# Grenze haelt den Bestand trotzdem sauber). Die alte Obergrenze <1.26 stammte
+# vom 2026-03-25 ("1.26 zieht starlette 1.0, inkompatibel mit FastAPI 0.115") und
+# ist mit FastAPI 0.141/Starlette 1.x gegenstandslos. <2: mcp 2.x ist eine neue
+# Hauptversion und zog im Probelauf ein pydantic-BETA (2.14.0b2) nach.
+mcp>=1.28.1,<2
+sse-starlette>=3.0.0,<3.1
+ldap3>=2.9
+APScheduler>=3.10,<4.0
+watchdog>=3.0
+pyotp>=2.9.0
+qrcode[pil]>=7.4.2

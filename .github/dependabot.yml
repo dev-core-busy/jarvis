@@ -1,0 +1,93 @@
+# Dependabot (BSI M6): NUR Sicherheits-Updates als PR, keine Versionspflege.
+#
+# `open-pull-requests-limit: 0` schaltet die routinemaessigen Versionsvorschlaege
+# ab (das Repo soll nur master ohne offene Zweige fuehren). Sicherheits-Updates
+# sind davon ausdruecklich NICHT betroffen: die haengen an den Repo-Schaltern
+# "Dependabot alerts" + "Dependabot security updates", beide am 2026-10-10
+# eingeschaltet (vorher waren sie aus, d.h. es kam gar nichts).
+#
+# Die `ignore:`-Listen unten gelten weiter – sie greifen auch bei
+# Sicherheits-Updates, die Grenzen (numpy, torch, mcp) bleiben also scharf.
+#
+# Laufende Pruefung der Abhaengigkeiten bleibt .github/workflows/sicherheit.yml
+# (Waechter, pip-audit, npm audit) – die braucht Dependabot nicht.
+# Gemergt wird von Hand, nicht automatisch.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 0
+    ignore:
+      # numpy MUSS < 2.1 bleiben: die DEV-VM hat kein SSE4.2/X86_V2 (CLAUDE.md)
+      - dependency-name: numpy
+        versions: ['>=2.1']
+      # torch kommt aus dem CPU-Index mit lokalem Suffix (+cpu), nicht von PyPI –
+      # ein Vorschlag von dort holte die CUDA-Variante zurueck (~6 GB)
+      - dependency-name: torch
+      # Hauptversions-Spruenge der Einbettungs-Bibliothek sind ein eigener Umbau
+      # (Bewertung in deploy/security/pip_audit_ausnahmen.txt)
+      - dependency-name: sentence-transformers
+        update-types: ['version-update:semver-major']
+      - dependency-name: transformers
+        update-types: ['version-update:semver-major']
+      # mcp 2.x ist eine neue Hauptversion und zog im Probelauf ein pydantic-BETA
+      # nach (requirements.txt: mcp>=1.28.1,<2) – Wechsel nur als eigener Umbau
+      - dependency-name: mcp
+        versions: ['>=2']
+    commit-message:
+      prefix: 'chore(deps)'
+
+  - package-ecosystem: npm
+    directory: /services/whatsapp-bridge
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 0
+    commit-message:
+      prefix: 'chore(deps)'
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 0
+    commit-message:
+      prefix: 'chore(ci)'
+
+  - package-ecosystem: docker
+    directories:
+      - /
+      - /services/whatsapp-bridge
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 0
+    ignore:
+      # Node nur auf LTS-Linien (gerade Hauptversionen) – ein Sprung auf eine
+      # ungerade "Current"-Linie hat nach 6 Monaten kein Update mehr
+      - dependency-name: node
+        update-types: ['version-update:semver-major']
+    commit-message:
+      prefix: 'chore(docker)'
+
+  # gomod fehlte hier bis 2026-10-10. Folge: die Go-Abhaengigkeiten des
+  # Windows-Clients standen nie unter Beobachtung und fielen so weit zurueck
+  # (x/image 0.18 bei 0.41, x/net 0.25 bei 0.55), dass daraus ein HIGH-Befund
+  # wurde - TIFF-PackBits-Dekompression, und x/image/tiff IST im Windows-Build
+  # eingebunden (nachgemessen mit `go list -deps`), also kein toter Ballast.
+  #
+  # Der Eintrag ist NICHT bloss Dokumentation. Sicherheits-PRs legt Dependabot
+  # zwar auch ohne ihn an (die haengen am Dependency-Graph) - aber REBASIEREN
+  # kann er sie dann nicht: PR #21 blieb mit "The dependabot.yml entry that
+  # created this PR has been deleted so this PR can't be rebased" stehen und
+  # musste von Hand aufgeloest werden. Ein Oekosystem ohne Eintrag erzeugt also
+  # Sicherheits-PRs, die bei jedem Konflikt zur Handarbeit werden.
+  - package-ecosystem: gomod
+    directory: /windows-app-go
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 0
+    commit-message:
+      prefix: 'chore(deps)'

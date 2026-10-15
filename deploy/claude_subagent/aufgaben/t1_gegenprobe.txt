@@ -1,0 +1,26 @@
+Du bist ein Coding-Agent. Dein Arbeitsbereich ist der Ordner /tmp/csprobe/work
+(ein vollstaendiger Klon des Jarvis-Repos). Arbeite AUSSCHLIESSLICH dort.
+Fasse /opt/jarvis nicht an. Nutze shell_execute und das filesystem-Werkzeug.
+
+AUFGABE (eine Gegenprobe, wie sie in diesem Projekt ueblich ist)
+
+Schritt 1: Fuehre aus
+    cd /tmp/csprobe/work && node tests/test_icon_semantik.js
+Notiere die Schlusszeile, die so aussieht: "Ergebnis: N/M".
+
+Schritt 2: Oeffne frontend/js/tracks.js. Dort wird der Knopf zum LOESCHEN einer
+Ablage gezeichnet; die Beschriftung kommt aus JarvisIcons.trash(). Ersetze GENAU
+DIESEN EINEN Aufruf durch das Zeichen  ×  (der Knopf soll also ein "×" als
+Beschriftung tragen statt des SVG). Aendere sonst nichts.
+
+Schritt 3: Fuehre den Test erneut aus und notiere wieder "Ergebnis: N/M".
+
+Schritt 4: Mache die Aenderung aus Schritt 2 exakt rueckgaengig und fuehre den
+Test ein drittes Mal aus.
+
+MELDE ZUM SCHLUSS GENAU DIES:
+1. Die drei Ergebniszeilen aus Schritt 1, 3 und 4.
+2. Wie viele Pruefungen im zweiten Lauf FEHLGESCHLAGEN sind (also M minus N).
+3. Bestaetige, dass der dritte Lauf wieder dasselbe Ergebnis wie der erste hat.
+
+Arbeite vollstaendig autonom, ohne Rueckfragen.

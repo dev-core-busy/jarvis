@@ -1,0 +1,875 @@
+/* ═══════════════════════════════════════════════════════════════════
+   Jira-Reiter (Einstellungen) – Schwerpunkt Ticketsuche
+   ───────────────────────────────────────────────────────────────────
+   Verbindungskonfiguration (URL/Token), Verbindungstest und eine
+   Such-/Leseoberflaeche fuer Tickets (Volltext + optionale Filter / JQL).
+   Schreiboperationen (Kommentar, Ticket anlegen) laufen ueber die
+   Agent-Tools des Skills.
+   ═══════════════════════════════════════════════════════════════════ */
+(function () {
+    'use strict';
+
+    // BSI M5: Geheimfelder kommen LEER vom Server (nur "gesetzt ja/nein").
+    // Das Auge holt den gespeicherten Wert erst nach erneuter Anmeldung
+    // (pwreveal.js); leer speichern heisst "unveraendert".
+    function geheimFeld(id, kennung, gesetzt) {
+        var inp = document.getElementById(id); if (!inp) return;
+        if (window.JarvisPwEye && window.JarvisPwEye.geheim) {
+            window.JarvisPwEye.geheim(inp, 'skill', kennung, gesetzt);
+        } else {
+            inp.value = '';
+        }
+    }
+    function augeHolen(inp, knopf, offen, zu) {
+        if (!window.JarvisPwEye || !window.JarvisPwEye.holen) return;
+        window.JarvisPwEye.holen(inp).then(function () {
+            // abgebrochene Bestaetigung stellt das Feld zurueck – Symbol mitziehen
+            knopf.innerHTML = inp.type === 'password' ? offen : zu;
+        });
+    }
+
+    function token() { return window.JarvisSitzung.token(); }
+    function authHeaders(extra) {
+        return Object.assign({ 'Authorization': 'Bearer ' + token() }, extra || {});
+    }
+    function $(id) { return document.getElementById(id); }
+    function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+        });
+    }
+    // Jira liefert ISO-8601-Strings (z.B. "2024-03-15T10:30:00.000+0100").
+    // Festes Format tt.mm.jjjj HH:MM (24h, null-gepolstert); leer/ungueltig -> ''.
+    function fmtDate(iso) {
+        if (!iso) return '';
+        var d = new Date(iso);
+        if (isNaN(d.getTime())) return '';
+        function p(n) { return (n < 10 ? '0' : '') + n; }
+        return p(d.getDate()) + '.' + p(d.getMonth() + 1) + '.' + d.getFullYear()
+            + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+    }
+    /* Dateiname aus `Content-Disposition`. Der Name wird SERVERSEITIG aus der
+     * Marke gebildet (jira_assist.paket_dateiname) – hier wird er nur gelesen,
+     * damit es nicht zwei Fassungen derselben Namensregel gibt.
+     * Zugelassen ist nur [A-Za-z0-9._-]: der Kopf kommt zwar vom eigenen
+     * Server, aber der Markenname darin ist Fremdeingabe, und ein
+     * Schraegstrich waere im Download-Ordner ein Pfadanteil. */
+    function nameAusKopf(kopf) {
+        var m = /filename="?([^";]+)"?/i.exec(kopf || '');
+        var n = m ? m[1].trim() : '';
+        return /^[A-Za-z0-9._-]+$/.test(n) ? n : '';
+    }
+    function status(msg, kind) {
+        setStatus('jira-status', msg, kind);
+    }
+    function setStatus(id, msg, kind) {
+        var el = $(id); if (!el) return;
+        el.textContent = msg || '';
+        el.style.color = kind === 'error' ? 'var(--danger)'
+            : kind === 'ok' ? 'var(--success)' : 'var(--text-secondary)';
+    }
+    // Uebersetzung mit Rueckfall: der Reiter wird auch gerendert, wenn i18n.js
+    // (noch) nicht da ist – dann steht der deutsche Text statt eines leeren
+    // Feldes. Platzhalter werden hier ersetzt, window.t kennt keine.
+    function t(key, fallback, werte) {
+        var s = (window.t && window.t(key)) || '';
+        if (!s || s === key) s = fallback;
+        for (var k in (werte || {})) s = s.split('{' + k + '}').join(werte[k]);
+        return s;
+    }
+
+    var SVG_EYE_OPEN = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+    var SVG_EYE_CLOSED = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+
+    var Manager = {
+        _bound: false,
+
+        onShow: function () {
+            this._bind();
+            this.loadConfig();
+            this.loadVorlagen();
+            this.loadZugaenge();
+        },
+
+        _bind: function () {
+            if (this._bound) return;
+            this._bound = true;
+            var save = $('jira-save'); if (save) save.addEventListener('click', this.save.bind(this));
+            var test = $('jira-test'); if (test) test.addEventListener('click', this.test.bind(this));
+            var sb = $('jira-search-btn'); if (sb) sb.addEventListener('click', this.search.bind(this));
+            ['jira-search-q', 'jira-search-project', 'jira-search-jql'].forEach(function (id) {
+                var el = $(id);
+                if (el) el.addEventListener('keydown', function (e) { if (e.key === 'Enter') Manager.search(); });
+            });
+            var sh = $('jshare-save'); if (sh) sh.addEventListener('click', this.saveShare.bind(this));
+            ['chrome', 'firefox'].forEach(function (v) {
+                var b = $('jshare-dl-' + v);
+                if (b) b.addEventListener('click', function () { Manager.ladePaket(v, b); });
+            });
+            var vs = $('jvorl-save'); if (vs) vs.addEventListener('click', this.saveVorlage.bind(this));
+            var vn = $('jvorl-new');
+            if (vn) vn.addEventListener('click', function () { Manager.editVorlage(null, false, null); });
+            var vc = $('jvorl-cancel');
+            if (vc) vc.addEventListener('click', function () { Manager.closeVorlage(); });
+            var ts = $('jtool-save');
+            if (ts) ts.addEventListener('click', this.saveAreas.bind(this));
+            /* Der Katalog ist Servertext – ein Sprachwechsel muss ihn neu
+               holen. Neu GELADEN wird nur bei echtem Wechsel: zeichnen ruft
+               kein applyLang(), aber ein Abruf bei jedem Ereignis waere die
+               Sorte Schleife, die im Short-Tracks-Reiter 40 Abrufe in 250 ms
+               erzeugt hat. */
+            window.addEventListener('jarvis-lang-changed', function () {
+                var lg = (window._lang === 'en') ? 'en' : 'de';
+                if (Manager._bereicheLang && Manager._bereicheLang !== lg) {
+                    Manager.loadVorlagen();
+                }
+            });
+            // Auge: PAT anzeigen/verbergen (analog Confluence-Reiter)
+            var tt = $('jira-token-toggle');
+            if (tt) tt.addEventListener('click', function () {
+                var inp = $('jira-token'); if (!inp) return;
+                var hidden = inp.type === 'password';
+                inp.type = hidden ? 'text' : 'password';
+                tt.innerHTML = hidden ? SVG_EYE_CLOSED : SVG_EYE_OPEN;
+                if (hidden) augeHolen(inp, tt, SVG_EYE_OPEN, SVG_EYE_CLOSED);
+            });
+        },
+
+        loadConfig: function () {
+            fetch('/api/skills/jira/config', { headers: authHeaders() })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    var c = (d && d.config) || {};
+                    var gs = (d && d.geheim_gesetzt) || [];
+                    if ($('jira-url')) $('jira-url').value = c.base_url || '';
+                    geheimFeld('jira-token', 'jira:api_token', gs.indexOf('api_token') >= 0);
+                    if ($('jira-max-results')) $('jira-max-results').value = c.max_results || 50;
+                    if ($('jshare-chrome')) $('jshare-chrome').value = c.addon_pfad_chrome || '';
+                    if ($('jshare-firefox')) $('jshare-firefox').value = c.addon_pfad_firefox || '';
+                })
+                .catch(function () {});
+        },
+
+        save: function () {
+            var mr = parseInt(($('jira-max-results') ? $('jira-max-results').value : '') || '50', 10);
+            if (isNaN(mr) || mr < 1) mr = 50;
+            if (mr > 1000) mr = 1000;
+            // IBS-/Kundenverwaltungs-Felder pflegt der Kundenverwaltungs-Reiter
+            // (kundenverwaltung.js) – gleicher Config-Store, getrennte Teilschluessel.
+            var body = {
+                base_url: ($('jira-url') ? $('jira-url').value : '').trim(),
+                api_token: ($('jira-token') ? $('jira-token').value : '').trim(),
+                max_results: mr
+            };
+            status('Speichere…');
+            fetch('/api/skills/jira/config', {
+                method: 'POST',
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify(body)
+            }).then(function (r) {
+                return r.json().catch(function () { return {}; }).then(function (d) {
+                    // Ablehnung NICHT als "Gespeichert" melden (Code-Review 2026-10-07)
+                    if (!r.ok || (d && d.success === false)) throw d || {};
+                    return d;
+                });
+            })
+              .then(function () { status('✓ Gespeichert', 'ok'); })
+              .catch(function (e) {
+                status('✗ ' + (e && e.code === 'geheimnis_neu_eingeben'
+                    ? window.t('common.secret_reenter') : 'Fehler beim Speichern'), 'error');
+            });
+        },
+
+        /* Eigener Knopf, eigene TEILMENGE.
+         *
+         * `POST /api/skills/jira/config` merged serverseitig – ein Knopf darf
+         * deshalb nur seine eigenen Felder senden. Schickte er den ganzen
+         * Formularstand mit, ueberschriebe er den Stand des anderen Knopfes
+         * (im Projekt bezahlt, siehe Register „Zwei Knoepfe im selben Reiter"):
+         * ein leeres Token-Feld waere dann ein geloeschter Zugang.
+         */
+        saveShare: function () {
+            var s = $('jshare-status');
+            var setz = function (t, art) {
+                if (!s) return;
+                s.textContent = t || '';
+                s.style.color = art === 'ok' ? 'var(--success, #2ecc71)'
+                              : art === 'error' ? 'var(--danger, #e74c3c)' : '';
+            };
+            var body = {
+                addon_pfad_chrome: ($('jshare-chrome') ? $('jshare-chrome').value : '').trim(),
+                addon_pfad_firefox: ($('jshare-firefox') ? $('jshare-firefox').value : '').trim()
+            };
+            setz('Speichere…');
+            fetch('/api/skills/jira/config', {
+                method: 'POST',
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify(body)
+            }).then(function (r) { return r.json(); })
+              .then(function () { setz('✓ Gespeichert', 'ok'); })
+              .catch(function () { setz('✗ Fehler beim Speichern', 'error'); });
+        },
+
+        /* Das fertige Paket herunterladen – der Weg an die Datei, die auf die
+         * Freigabe gehoert.
+         *
+         * Bewusst per fetch + Blob statt <a href="…?token=">: ein Query-Token
+         * landet im Browser-Verlauf und in Proxy-Logs. Der Klick kann den
+         * Authorization-Header setzen, hier gibt es also keinen Grund dafuer.
+         */
+        ladePaket: function (variante, knopf) {
+            var s = $('jshare-dl-status');
+            var setz = function (t, art) {
+                if (!s) return;
+                s.textContent = t || '';
+                s.style.color = art === 'ok' ? 'var(--success, #2ecc71)'
+                              : art === 'error' ? 'var(--danger, #e74c3c)' : '';
+            };
+            var alt = knopf.textContent;
+            knopf.disabled = true;
+            knopf.textContent = 'wird erstellt…';
+            setz('');
+            // ⚠ BEI EINEM BLOB-DOWNLOAD ENTSCHEIDET `a.download`, NICHT der
+            // Kopf des Servers. Hier stand der Name deshalb hart als
+            // "jarvis-jira-…" – und blieb es auch, nachdem das Paket laengst
+            // gebrandet war (gemeldet 2026-08-28). Der Name kommt jetzt aus
+            // `Content-Disposition`, also aus derselben Quelle wie der Eintrag
+            // im Manifest.
+            var dateiname = '';
+            fetch('/api/jira/assist/paket?variante=' + encodeURIComponent(variante),
+                  { headers: authHeaders() })
+                .then(function (r) {
+                    if (r.ok) {
+                        dateiname = nameAusKopf(r.headers.get('Content-Disposition'));
+                        return r.blob();
+                    }
+                    // Der Server antwortet bei fachlichem Fehlschlag mit 400 und
+                    // Klartext – "HTTP 400" allein waere wertlos.
+                    return r.json().then(function (d) {
+                        throw new Error((d && d.error) || ('HTTP ' + r.status));
+                    }, function () { throw new Error('HTTP ' + r.status); });
+                })
+                .then(function (blob) {
+                    var url = URL.createObjectURL(blob);
+                    var a = document.createElement('a');
+                    a.href = url;
+                    // Rueckfall markenNEUTRAL: faellt der Kopf aus, ist ein
+                    // sachlicher Name richtig – "jarvis" waere auf einem
+                    // gebrandeten System wieder genau der gemeldete Fehler.
+                    a.download = dateiname || ('jira-erweiterung-' + variante + '.zip');
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    // Erst nach dem Klick freigeben, sonst ist der Blob schon weg.
+                    setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+                    setz('✓ Heruntergeladen', 'ok');
+                })
+                .catch(function (e) { setz('✗ ' + (e.message || e), 'error'); })
+                .then(function () { knopf.disabled = false; knopf.textContent = alt; });
+        },
+
+        test: function () {
+            status('Teste Verbindung…');
+            fetch('/api/jira/test', { headers: authHeaders() })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    if (d && d.ok) {
+                        status('✅ Verbunden als ' + (d.user || '?'), 'ok');
+                    } else if (d && d.configured === false) {
+                        status('Nicht konfiguriert – bitte zuerst speichern.', 'error');
+                    } else {
+                        status('❌ ' + ((d && d.error) || 'Verbindung fehlgeschlagen'), 'error');
+                    }
+                })
+                .catch(function () { status('❌ Verbindungstest fehlgeschlagen', 'error'); });
+        },
+
+        /* ── Vorlagen des Jira-Assistenten ──────────────────────────────────
+           Dieselben Endpunkte wie im Fenster der Erweiterung; die Schranke
+           „gemeinsame Vorlagen nur fuer Admins" sitzt im Backend
+           (jira_vorlagen.speichern). Hier wird sie nur ANGEZEIGT – eine
+           Oberflaeche, die das Haekchen versteckt, ist keine Schranke. */
+        _vorlagen: { global: [], eigene: [], darf_global: false, standard: '' },
+        _vorlBearbeitet: '',
+        _vorlHeim: null,        // Heimatplatz des wandernden Formulars
+        /* Werkzeug-Bereiche. Der Katalog kommt MIT den Vorlagen vom Server
+           (ein Roundtrip fuer beides) – Name und Hinweis stehen dort neben der
+           Werkzeugliste, damit Text und Wirkung nicht auseinanderlaufen.
+           Deshalb erreicht applyLang() sie nicht: bei einem Sprachwechsel wird
+           der Katalog neu geholt (_bereicheLang). */
+        _bereiche: [],
+        _bereicheLang: '',
+
+        /* ── Das Formular wandert, es gibt aber nur EINEN Container ──────────
+           Es wird beim Bearbeiten als KIND in die Karte des Eintrags gehaengt.
+           Bisher lag es statisch unter der Liste: "Bearbeiten" fuellte nur die
+           Felder, und man musste ans Ende des Abschnitts scrollen, um zu sehen,
+           was man gerade aendert. Muster und Fallstricke wie bei den
+           Rollen-Agenten (agent_roles.js), /wissen, /tracks und den
+           E-Mail-Regeln – hier war es die letzte Stelle ohne:
+
+             - Der Heimatplatz wird NUR beim ersten Verschieben gemerkt. Ein
+               spaeteres Auslesen wuerde die verschobene Position als "Heimat"
+               festschreiben, und das Formular blieb fuer immer in der Liste.
+             - Vor jedem Neuaufbau der Liste MUSS es heimgeholt werden, sonst
+               raeumt `innerHTML = ''` es mit ab und `$('jvorl-edit')` ist
+               danach null.
+             - KIND der Karte, nicht Geschwister: nur so ist es EINE Box. Als
+               Nachbar danebengesetzt bleibt eine sichtbare Fuge, und die
+               Zugehoerigkeit zum Eintrag ist geraten statt gezeigt. */
+        _platziereVorl: function (karte) {
+            var f = $('jvorl-edit');
+            if (!f) return;
+            if (!this._vorlHeim) {
+                this._vorlHeim = { parent: f.parentNode, next: f.nextSibling };
+            }
+            var box = $('jvorl-liste');
+            if (box) {
+                Array.prototype.forEach.call(box.querySelectorAll('.jvorl-card.is-editing'),
+                    function (k) { k.classList.remove('is-editing'); });
+            }
+            if (karte && karte.classList && karte.classList.contains('jvorl-card')) {
+                karte.appendChild(f);
+                karte.classList.add('is-editing');
+            } else if (this._vorlHeim.parent) {
+                this._vorlHeim.parent.insertBefore(f, this._vorlHeim.next);
+            }
+        },
+
+        /* ── Wer hat einen eigenen Jira-Token? (2026-08-28) ─────────────────
+           Seit der persoenliche Zugang existiert, ist der oben hinterlegte
+           Token nur noch der Rueckfall – und damit kann derselbe Vorgang zwei
+           Benutzern Verschiedenes zeigen. Diese Liste ist die Antwort auf
+           "warum sieht der andere etwas, das ich nicht sehe".
+           OHNE Token und ohne Adressen (der Endpunkt gibt sie gar nicht
+           heraus): wer welchen Jira-Benutzer verwendet, ist dessen Sache. */
+        loadZugaenge: function () {
+            var box = $('jacc-liste'); if (!box) return;
+            box.innerHTML = '<span class="kb-hint">' + esc(t('jacc.loading', 'Lade …')) + '</span>';
+            fetch('/api/jira/admin/accounts', { headers: authHeaders() })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    if (!d || d.ok === false) throw new Error((d && d.error) || 'Fehler');
+                    box.innerHTML = '';
+                    var alle = d.accounts || [];
+                    if (!alle.length) {
+                        box.innerHTML = '<span class="kb-hint">'
+                            + esc(t('jacc.empty', 'Niemand hat bisher einen eigenen Token hinterlegt – es gilt für alle der gemeinsame Zugang.'))
+                            + '</span>';
+                        return;
+                    }
+                    alle.forEach(function (a) {
+                        var row = document.createElement('div');
+                        row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;'
+                            + 'gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;'
+                            + 'background:var(--bg-glass);';
+                        var links = document.createElement('span');
+                        links.style.cssText = 'min-width:0;';
+                        var n = document.createElement('span');
+                        n.style.fontWeight = '600';
+                        // textContent: Benutzer- und Jira-Anzeigename sind Fremdtext.
+                        n.textContent = a.user || '';
+                        links.appendChild(n);
+                        if (a.anzeigename) {
+                            var j = document.createElement('span');
+                            j.className = 'kb-hint';
+                            j.style.marginLeft = '8px';
+                            j.textContent = '→ ' + a.anzeigename;
+                            links.appendChild(j);
+                        }
+                        if (a.letzter_fehler) {
+                            var f = document.createElement('div');
+                            f.className = 'kb-hint';
+                            f.style.cssText = 'color:var(--danger);word-break:break-word;';
+                            f.textContent = a.letzter_fehler;
+                            links.appendChild(f);
+                        }
+                        row.appendChild(links);
+                        // Aussage doppelt (Text UND Farbe) – Farbe allein ist
+                        // im Projekt keine Information.
+                        var pill = document.createElement('span');
+                        pill.className = 'kb-hint';
+                        pill.style.cssText = 'flex:0 0 auto;font-weight:600;';
+                        if (!a.aktiv) {
+                            pill.textContent = t('jacc.off', 'inaktiv');
+                        } else if (a.letzter_fehler) {
+                            pill.textContent = t('jacc.err', 'Token abgelehnt');
+                            pill.style.color = 'var(--danger)';
+                        } else {
+                            pill.textContent = t('jacc.on', 'eigener Zugang');
+                            pill.style.color = 'var(--success)';
+                        }
+                        row.appendChild(pill);
+                        box.appendChild(row);
+                    });
+                })
+                .catch(function (e) {
+                    box.innerHTML = '<span class="kb-hint" style="color:var(--danger);">'
+                        + esc(e.message || 'Zugänge konnten nicht geladen werden.') + '</span>';
+                });
+        },
+
+        /* ── Werkzeug-Bereiche ────────────────────────────────────────────
+           Zwei Ansichten auf denselben Katalog: die FREIGABE (was darf ein
+           Benutzer ueberhaupt waehlen – Admin-Sache) und die AUSWAHL je Vorlage.
+           Beide zeichnen aus `_bereiche`; getrennte Kataloge liefen beim
+           naechsten Bereich auseinander. */
+        renderAreas: function () {
+            var box = $('jtool-areas');
+            if (!box) return;
+            var bs = this._bereiche || [];
+            if (!bs.length) {
+                box.innerHTML = '<span class="kb-hint">'
+                    + esc(t('jtool.none', 'Keine Bereiche verfügbar.')) + '</span>';
+                return;
+            }
+            box.innerHTML = bs.map(function (b) {
+                return '<label class="checkbox-group" style="align-items:flex-start;">'
+                    + '<input type="checkbox" data-area="' + esc(b.id) + '"'
+                    + (b.freigegeben ? ' checked' : '') + '>'
+                    + '<span><b>' + esc(b.name) + '</b>'
+                    + '<span class="kb-hint" style="display:block;">' + esc(b.hinweis || '') + '</span>'
+                    + '<span class="kb-hint" style="display:block;opacity:.75;">'
+                    + esc((b.werkzeuge || []).join(', ')) + '</span>'
+                    + '</span></label>';
+            }).join('');
+        },
+
+        /* Eigener Knopf, eigene TEILMENGE – wie saveShare. Der Endpunkt sendet
+           nur das Freigabe-Feld; ein Knopf mit dem ganzen Formularstand
+           ueberschriebe den Jira-Zugang (Register). */
+        saveAreas: function () {
+            var gewaehlt = [];
+            document.querySelectorAll('#jtool-areas input[data-area]').forEach(function (c) {
+                if (c.checked) gewaehlt.push(c.getAttribute('data-area'));
+            });
+            setStatus('jtool-status', t('common.saving', 'Speichere…'));
+            fetch('/api/jira/admin/areas', {
+                method: 'POST',
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ bereiche: gewaehlt })
+            }).then(function (r) { return r.json(); })
+              .then(function (d) {
+                    if (!d || d.ok === false) throw new Error((d && (d.error || d.detail)) || 'Fehler');
+                    setStatus('jtool-status', t('jtool.saved', '✓ Freigegeben:') + ' '
+                        + ((d.bereiche || []).join(', ') || t('jtool.nothing', 'nichts')), 'ok');
+                    // Neu laden: die Kaestchen im Vorlagen-Formular haengen an
+                    // derselben Freigabe und muessen sofort stimmen.
+                    return Manager.loadVorlagen();
+              })
+              .catch(function (e) { setStatus('jtool-status', e.message, 'error'); });
+        },
+
+        /* Die Bereiche EINER Vorlage als Kaestchen. Gezeigt werden nur
+           FREIGESCHALTETE: ein Haken, den der Server abweist, ist eine Zusage,
+           die nicht gilt. Ist nichts freigeschaltet, verschwindet der ganze
+           Block – ein leeres Feld mit Erklaerung verlaengert nur das Formular.
+           Ein Bereich, der in der Vorlage STEHT, aber nicht mehr freigegeben
+           ist, wird ebenfalls nicht gezeigt: er wirkt nicht mehr
+           (jira_assist.wirksame_bereiche prueft zur Laufzeit). */
+        renderVorlBereiche: function (gewaehlt) {
+            var zeile = $('jvorl-ber-zeile');
+            var box = $('jvorl-bereiche');
+            var frei = (this._bereiche || []).filter(function (b) { return b.freigegeben; });
+            if (zeile) zeile.style.display = frei.length ? '' : 'none';
+            if (!box) return;
+            var an = {};
+            (gewaehlt || []).forEach(function (x) { an[x] = true; });
+            box.innerHTML = frei.map(function (b) {
+                return '<label class="checkbox-group" style="align-items:flex-start;">'
+                    + '<input type="checkbox" data-vber="' + esc(b.id) + '"'
+                    + (an[b.id] ? ' checked' : '') + '>'
+                    + '<span><b>' + esc(b.name) + '</b>'
+                    + '<span class="kb-hint" style="display:block;">' + esc(b.hinweis || '') + '</span>'
+                    + '</span></label>';
+            }).join('');
+        },
+
+        vorlBereicheGewaehlt: function () {
+            var raus = [];
+            document.querySelectorAll('#jvorl-bereiche input[data-vber]').forEach(function (c) {
+                if (c.checked) raus.push(c.getAttribute('data-vber'));
+            });
+            return raus;
+        },
+
+        loadVorlagen: function () {
+            var box = $('jvorl-liste'); if (!box) return;
+            // Formular heimholen, BEVOR die Liste ueberschrieben wird.
+            this._platziereVorl(null);
+            box.innerHTML = '<span class="kb-hint">' + esc(t('jvorl.loading', 'Lade Vorlagen …')) + '</span>';
+            // Sprache mitgeben: Name und Hinweis der Bereiche kommen uebersetzt
+            // vom Server – applyLang() erreicht sie nicht.
+            var lg = (window._lang === 'en') ? 'en' : 'de';
+            this._bereicheLang = lg;
+            return fetch('/api/jira/assist/vorlagen?lang=' + lg, { headers: authHeaders() })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    if (!d || d.ok === false) throw new Error((d && d.error) || 'Fehler');
+                    Manager._vorlagen = {
+                        global: d.global || [], eigene: d.eigene || [],
+                        darf_global: !!d.darf_global,
+                        standard: d.standard || ''
+                    };
+                    Manager._bereiche = d.bereiche || [];
+                    Manager.renderAreas();
+                    Manager.renderVorlagen();
+                })
+                .catch(function (e) {
+                    box.innerHTML = '<span class="kb-hint" style="color:var(--danger);">'
+                        + esc(e.message || 'Vorlagen konnten nicht geladen werden.') + '</span>';
+                });
+        },
+
+        renderVorlagen: function () {
+            var box = $('jvorl-liste'); if (!box) return;
+            // Zweites Netz: wer renderVorlagen kuenftig direkt ruft, darf das
+            // Formular nicht mitloeschen. Idempotent.
+            this._platziereVorl(null);
+            var v = this._vorlagen;
+            var zeile = $('jvorl-global-zeile');
+            // Wer keine gemeinsamen Vorlagen anlegen darf, sieht das Haekchen
+            // gar nicht erst – der Server wuerde ihn ohnehin abweisen.
+            if (zeile) zeile.style.display = v.darf_global ? '' : 'none';
+            box.innerHTML = '';
+            var alle = v.global.map(function (x) { return { v: x, global: true }; })
+                .concat(v.eigene.map(function (x) { return { v: x, global: false }; }));
+            if (!alle.length) {
+                box.innerHTML = '<span class="kb-hint">' + esc(t('jvorl.empty', 'Noch keine Vorlagen.')) + '</span>';
+                return;
+            }
+            alle.forEach(function (e) {
+                // Aendern darf man Eigenes immer, Gemeinsames nur als Admin.
+                var darf = !e.global || v.darf_global;
+                /* Karte traegt den Rahmen, die Zeile nur das Layout. Das ist
+                   der Unterschied zwischen "eine Box" und "zwei Boxen
+                   uebereinander" – Radien und Kanten zu kaschieren hat im
+                   Projekt schon zweimal nicht gereicht (siehe .role-card). */
+                var karte = document.createElement('div');
+                karte.className = 'jvorl-card';
+                var row = document.createElement('div');
+                row.className = 'jvorl-row';
+                var links = document.createElement('span');
+                links.className = 'jvorl-row-main';
+                // textContent: Name und Text sind Freitext aus einem Formular.
+                var titel = document.createElement('span');
+                titel.style.fontWeight = '600';
+                titel.textContent = e.v.name || '';
+                var art = document.createElement('span');
+                art.className = 'kb-hint';
+                art.style.marginLeft = '8px';
+                art.textContent = e.global ? t('jvorl.shared', 'Gemeinsam') : t('jvorl.mine', 'Nur für mich');
+                /* WAS DIE VORLAGE DARF, gehoert in die Zeile: eine Vorlage, die
+                   nachschlaegt, ist von einer, die nur das Ticket liest, sonst
+                   nicht zu unterscheiden – und der Unterschied ist genau der,
+                   den ein Administrator sehen will. Genannt werden nur WIRKSAME
+                   Bereiche (freigeschaltet): ein Rest aus einer
+                   zurueckgenommenen Freigabe wirkt nicht mehr und wuerde hier
+                   eine Faehigkeit behaupten, die es nicht gibt. */
+                var wirksam = (e.v.bereiche || []).filter(function (id) {
+                    return (Manager._bereiche || []).some(function (b) {
+                        return b.id === id && b.freigegeben;
+                    });
+                });
+                /* WAS DIE VORLAGE ERZEUGT, gehoert in die Zeile – aber nur der
+                   Fall, auf den es ankommt: bei einer Antwort-Vorlage geht der
+                   Text am Ende an einen KUNDEN. Die Zusammenfassung ist die
+                   Vorgabe; eine Marke an jeder Zeile waere Rauschen. */
+                var artm = null;
+                if (e.v.art === 'antwort') {
+                    artm = document.createElement('span');
+                    artm.className = 'kb-hint';
+                    artm.style.marginLeft = '8px';
+                    artm.textContent = t('jvorl.art_reply_mark', '· Antwort');
+                    artm.title = t('jvorl.art_reply_title',
+                                   'Erzeugt einen Antwortentwurf für den Melder');
+                }
+                if (wirksam.length) {
+                    var nam = wirksam.map(function (id) {
+                        var f = (Manager._bereiche || []).filter(function (b) { return b.id === id; })[0];
+                        return (f && f.name) || id;
+                    });
+                    var bm = document.createElement('span');
+                    bm.className = 'kb-hint';
+                    bm.style.marginLeft = '8px';
+                    bm.style.color = 'var(--accent)';
+                    bm.textContent = t('jvorl.ber_mark', 'Nachschlagen:') + ' ' + nam.join(', ');
+                    links.appendChild(titel); links.appendChild(art);
+                    if (artm) links.appendChild(artm);
+                    links.appendChild(bm);
+                } else {
+                    links.appendChild(titel); links.appendChild(art);
+                    if (artm) links.appendChild(artm);
+                }
+                var text = document.createElement('div');
+                text.className = 'kb-hint';
+                text.style.cssText = 'white-space:pre-wrap;word-break:break-word;';
+                text.textContent = e.v.text || '';
+                links.appendChild(text);
+                row.appendChild(links);
+
+                var knoepfe = document.createElement('span');
+                knoepfe.style.cssText = 'display:flex;gap:4px;flex:0 0 auto;';
+
+                /* DER STERN HAENGT NICHT AN `darf`. Markiert wird die EIGENE
+                   Wahl, nicht die Vorlage: wer eine gemeinsame Vorlage nicht
+                   aendern darf, darf sie sehr wohl zu seinem Standard machen.
+                   Der Standard ist immer persoenlich (jira_vorlagen.
+                   standard_setzen) - auch der eines Administrators. */
+                var ist = Manager._vorlagen.standard === e.v.id;
+                var s = document.createElement('button');
+                s.type = 'button';
+                s.className = 'kb-hdr-btn';
+                // Der Titel sagt, was der Klick TUT, nicht was gerade gilt.
+                s.title = ist ? t('jvorl.unstar', 'Standard aufheben')
+                              : t('jvorl.star', 'Als Standard markieren');
+                s.setAttribute('aria-pressed', ist ? 'true' : 'false');
+                // Aussage doppelt: Form UND Farbe - ein Farbwechsel allein
+                // waere an einem Zeichen dieser Groesse zu wenig.
+                s.textContent = ist ? '★' : '☆';
+                if (ist) s.style.color = 'var(--accent)';
+                s.addEventListener('click', function () {
+                    Manager.setStandard(ist ? '' : e.v.id);
+                });
+                knoepfe.appendChild(s);
+
+                if (darf) {
+                    var b = document.createElement('button');
+                    b.type = 'button';
+                    b.className = 'kb-hdr-btn';
+                    b.title = t('jvorl.edit', 'Bearbeiten');
+                    JarvisIcons.setPencil(b);
+                    b.addEventListener('click', function () { Manager.editVorlage(e.v, e.global, karte); });
+                    knoepfe.appendChild(b);
+                    var w = document.createElement('button');
+                    w.type = 'button';
+                    w.className = 'kb-hdr-btn';
+                    w.title = t('jvorl.del', 'Löschen');
+                    // Muelleimer = loeschen (Projektregel), als Inline-SVG aus
+                    // icons.js – nie ein Emoji, nie ein ×.
+                    w.innerHTML = (window.JarvisIcons && window.JarvisIcons.trash()) || '';
+                    w.addEventListener('click', function () { Manager.deleteVorlage(e.v); });
+                    knoepfe.appendChild(w);
+                }
+                // AUSSERHALB von `darf`: der Stern steht an jeder Zeile, also
+                // muss auch die Knopfleiste immer in die Zeile.
+                row.appendChild(knoepfe);
+                karte.appendChild(row);
+                box.appendChild(karte);
+            });
+        },
+
+        /* Persoenliche Standard-Vorlage setzen ('' hebt sie auf).
+           Danach wird NEU GELADEN statt der Stern umgemalt: der Server ist die
+           Wahrheit und weist eine Kennung ab, die er nicht kennt. Ein lokal
+           umgemalter Stern haette einen Standard behauptet, den es nicht gibt. */
+        setStandard: function (vid) {
+            fetch('/api/jira/assist/vorlagen/standard', {
+                method: 'POST',
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ id: vid || '' })
+            }).then(function (r) { return r.json(); })
+              .then(function (d) {
+                    if (!d || d.ok === false) throw new Error((d && (d.error || d.detail)) || 'Fehler');
+                    Manager.loadVorlagen();
+                    setStatus('jvorl-status', vid
+                        ? t('jvorl.starred', '✓ Als Standard markiert')
+                        : t('jvorl.unstarred', '✓ Standard aufgehoben'), 'ok');
+              })
+              .catch(function (e) { setStatus('jvorl-status', e.message, 'error'); });
+        },
+
+        /* `karte` ist die Karte des bearbeiteten Eintrags. Ohne sie (Knopf
+           "Neu") landet das Formular am Heimatplatz unter der Liste – dort
+           gibt es keinen Eintrag, zu dem es gehoeren koennte. */
+        editVorlage: function (v, global_, karte) {
+            this._vorlBearbeitet = v ? (v.id || '') : '';
+            this._platziereVorl(karte || null);
+            if ($('jvorl-name')) $('jvorl-name').value = v ? (v.name || '') : '';
+            if ($('jvorl-text')) $('jvorl-text').value = v ? (v.text || '') : '';
+            /* Ohne Angabe die Zusammenfassung – dieselbe Vorgabe wie am Server
+               (jira_vorlagen.art_von), damit ein Altbestand ohne das Feld nicht
+               ploetzlich als Antwort-Vorlage im Formular steht. */
+            if ($('jvorl-art')) {
+                $('jvorl-art').value = (v && v.art === 'antwort')
+                    ? 'antwort' : 'zusammenfassung';
+            }
+            if ($('jvorl-global')) $('jvorl-global').checked = !!global_;
+            this.renderVorlBereiche(v ? (v.bereiche || []) : []);
+            var tt = $('jvorl-edit-title');
+            if (tt) {
+                // Der Titel steht IM Formular, der Status oben in der Leiste:
+                // wenn das Formular tief in der Liste steckt, ist die Leiste
+                // womoeglich aus dem Bild gescrollt.
+                tt.textContent = v
+                    ? t('jvorl.edit', 'Bearbeiten') + ': ' + (v.name || '')
+                    : t('jvorl.new', 'Neu');
+            }
+            var f = $('jvorl-edit');
+            if (f) f.style.display = '';
+            setStatus('jvorl-status',
+                v ? t('jvorl.editing', 'Ändert „{name}“.', { name: v.name || '' }) : '');
+        },
+
+        /* Schliessen heisst: Felder leeren, verstecken UND heimholen – sonst
+           taucht das Formular beim naechsten "Neu" mitten in der Liste auf. */
+        closeVorlage: function () {
+            this._vorlBearbeitet = '';
+            if ($('jvorl-name')) $('jvorl-name').value = '';
+            if ($('jvorl-text')) $('jvorl-text').value = '';
+            if ($('jvorl-art')) $('jvorl-art').value = 'zusammenfassung';
+            if ($('jvorl-global')) $('jvorl-global').checked = false;
+            this.renderVorlBereiche([]);
+            var f = $('jvorl-edit');
+            if (f) f.style.display = 'none';
+            this._platziereVorl(null);
+        },
+
+        saveVorlage: function () {
+            var name = ($('jvorl-name') ? $('jvorl-name').value : '').trim();
+            var text = ($('jvorl-text') ? $('jvorl-text').value : '').trim();
+            if (!name || !text) {
+                setStatus('jvorl-status', t('jvorl.need', 'Name und Anweisung sind nötig.'), 'error');
+                return;
+            }
+            fetch('/api/jira/assist/vorlagen', {
+                method: 'POST',
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({
+                    id: this._vorlBearbeitet, name: name, text: text,
+                    global: !!($('jvorl-global') && $('jvorl-global').checked),
+                    // IMMER mitsenden – auch die leere Liste. Sie heisst "keine
+                    // Bereiche"; ein fehlendes Feld heisst "unveraendert", und
+                    // dann liesse sich ein Haken nie wieder abwaehlen.
+                    bereiche: this.vorlBereicheGewaehlt(),
+                    // Aus demselben Grund immer: ein fehlendes Feld heisst am
+                    // Server "unveraendert", und dann liesse sich eine
+                    // Antwort-Vorlage nie wieder zur Zusammenfassung machen.
+                    art: ($('jvorl-art') ? $('jvorl-art').value : 'zusammenfassung')
+                })
+            }).then(function (r) { return r.json(); })
+              .then(function (d) {
+                    if (!d || d.ok === false) throw new Error((d && (d.error || d.detail)) || 'Fehler');
+                    Manager.closeVorlage();
+                    Manager.loadVorlagen();
+                    setStatus('jvorl-status', t('jvorl.saved', '✓ Gespeichert'), 'ok');
+              })
+              .catch(function (e) { setStatus('jvorl-status', e.message, 'error'); });
+        },
+
+        deleteVorlage: function (v) {
+            if (!confirm(t('jvorl.del_ask', 'Vorlage „{name}“ wirklich löschen?',
+                           { name: v.name || '' }))) return;
+            fetch('/api/jira/assist/vorlagen/' + encodeURIComponent(v.id || ''), {
+                method: 'DELETE', headers: authHeaders()
+            }).then(function (r) { return r.json(); })
+              .then(function (d) {
+                    if (!d || d.ok === false) throw new Error((d && (d.error || d.detail)) || 'Fehler');
+                    if (Manager._vorlBearbeitet === v.id) Manager.closeVorlage();
+                    Manager.loadVorlagen();
+                    setStatus('jvorl-status', t('jvorl.deleted', '✓ Gelöscht'), 'ok');
+              })
+              .catch(function (e) { setStatus('jvorl-status', e.message, 'error'); });
+        },
+
+        search: function () {
+            var q = ($('jira-search-q') ? $('jira-search-q').value : '').trim();
+            var project = ($('jira-search-project') ? $('jira-search-project').value : '').trim();
+            var jql = ($('jira-search-jql') ? $('jira-search-jql').value : '').trim();
+            var box = $('jira-results');
+            if (!box) return;
+            box.innerHTML = '<span class="kb-hint">Suche…</span>';
+            if ($('jira-issue-view')) $('jira-issue-view').style.display = 'none';
+            var url = '/api/jira/search?limit=25'
+                + '&q=' + encodeURIComponent(q)
+                + '&project=' + encodeURIComponent(project)
+                + '&jql=' + encodeURIComponent(jql);
+            fetch(url, { headers: authHeaders() })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    if (!d || !d.ok) {
+                        box.innerHTML = '<span class="kb-hint" style="color:var(--danger);">'
+                            + esc((d && d.error) || 'Suche fehlgeschlagen') + '</span>';
+                        return;
+                    }
+                    var res = d.results || [];
+                    var head = '<div class="kb-hint" style="margin-bottom:8px;">' + (d.total || res.length)
+                        + ' Treffer · <code>' + esc(d.jql || '') + '</code></div>';
+                    if (!res.length) { box.innerHTML = head + '<span class="kb-hint">Keine Tickets.</span>'; return; }
+                    box.innerHTML = head;
+                    res.forEach(function (r) {
+                        var row = document.createElement('div');
+                        row.className = 'jira-result-row';
+                        row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;'
+                            + 'gap:10px;padding:8px 10px;margin-bottom:6px;border:1px solid var(--border);'
+                            + 'border-radius:8px;cursor:pointer;background:var(--bg-glass);';
+                        var rC = fmtDate(r.created), rU = fmtDate(r.updated);
+                        var meta = [r.status, r.type, r.priority ? ('Prio ' + r.priority) : '',
+                                    r.assignee ? ('→ ' + r.assignee) : '',
+                                    rC ? ('Erstellt ' + rC) : '',
+                                    rU ? ('Geändert ' + rU) : ''].filter(Boolean).join(' · ');
+                        row.innerHTML = '<span style="min-width:0;"><span style="font-weight:600;">'
+                            + esc(r.key) + '</span> ' + esc(r.summary || '')
+                            + '<br><span class="kb-hint">' + esc(meta) + '</span></span>'
+                            + (r.link ? '<a href="' + esc(r.link) + '" target="_blank" rel="noopener" '
+                                + 'class="kb-hint" '
+                                + 'style="white-space:nowrap;">↗</a>' : '');
+                        // BSI H4 (CSP ohne Inline-Skript, 2026-10-04): der Link oeffnet
+                        // nur den neuen Tab und darf den Zeilen-Klick nicht ausloesen -
+                        // frueher onclick-Attribut, jetzt Listener am Link selbst.
+                        var ext = row.querySelector('a.kb-hint');
+                        if (ext) ext.addEventListener('click', function (e) { e.stopPropagation(); });
+                        row.addEventListener('click', function () { Manager.viewIssue(r.key); });
+                        box.appendChild(row);
+                    });
+                })
+                .catch(function () { box.innerHTML = '<span class="kb-hint" style="color:var(--danger);">Suche fehlgeschlagen</span>'; });
+        },
+
+        viewIssue: function (key) {
+            var view = $('jira-issue-view'); if (!view) return;
+            view.style.display = '';
+            if ($('jira-issue-title')) $('jira-issue-title').textContent = 'Lade…';
+            if ($('jira-issue-text')) $('jira-issue-text').textContent = '';
+            if ($('jira-issue-comments')) $('jira-issue-comments').innerHTML = '';
+            fetch('/api/jira/issue?key=' + encodeURIComponent(key), { headers: authHeaders() })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    if (!d || !d.ok) {
+                        if ($('jira-issue-title')) $('jira-issue-title').textContent = 'Fehler';
+                        if ($('jira-issue-text')) $('jira-issue-text').textContent = (d && d.error) || 'Ticket konnte nicht geladen werden.';
+                        return;
+                    }
+                    var dC = fmtDate(d.created), dU = fmtDate(d.updated);
+                    var meta = [d.status, d.type, d.priority ? ('Prio ' + d.priority) : '',
+                                d.assignee ? ('Bearbeiter: ' + d.assignee) : '',
+                                dC ? ('Erstellt: ' + dC) : '',
+                                dU ? ('Geändert: ' + dU) : ''].filter(Boolean).join(' · ');
+                    if ($('jira-issue-title')) $('jira-issue-title').textContent = d.key + ' — ' + (d.summary || '');
+                    if ($('jira-issue-meta')) $('jira-issue-meta').textContent = meta;
+                    var link = $('jira-issue-link');
+                    if (link) { if (d.link) { link.href = d.link; link.style.display = ''; } else { link.style.display = 'none'; } }
+                    if ($('jira-issue-text')) $('jira-issue-text').textContent = d.description || '(keine Beschreibung)';
+                    var cbox = $('jira-issue-comments');
+                    if (cbox) {
+                        var cs = d.comments || [];
+                        cbox.innerHTML = cs.length ? ('<div class="kb-hint" style="margin:10px 0 4px;">💬 '
+                            + cs.length + ' Kommentar(e):</div>') : '';
+                        cs.forEach(function (cm) {
+                            var el = document.createElement('div');
+                            el.style.cssText = 'border-left:3px solid var(--accent);padding:4px 10px;margin:6px 0;'
+                                + 'background:rgba(var(--accent-rgb),.06);border-radius:0 6px 6px 0;';
+                            el.innerHTML = '<div style="font-weight:600;font-size:.82rem;">' + esc(cm.author || '?')
+                                + '</div><div style="white-space:pre-wrap;font-size:.85rem;">' + esc(cm.body || '') + '</div>';
+                            cbox.appendChild(el);
+                        });
+                    }
+                })
+                .catch(function () {
+                    if ($('jira-issue-title')) $('jira-issue-title').textContent = 'Fehler';
+                });
+        }
+    };
+
+    window.JiraManager = Manager;
+})();

@@ -1,0 +1,308 @@
+/* ============================================================
+ * chat-bubbles.css – Edit-Styles fuer das Hauptseiten-Chat
+ * (.jv-bubble-* Praefix, geladen von index.html).
+ *
+ * Frueher waren diese Regeln inline im _injectBubbleCss()-Block
+ * von app.js. Wurden ausgelagert, damit Bugfixes nicht im
+ * JS-Template-Literal stattfinden muessen.
+ *
+ * Pendant fuer das Standalone-Chat (.msg-edit-*) bleibt in
+ * frontend/css/chat.css (themed via CSS Custom Properties fuer
+ * Light/Dark-Mode).
+ *
+ * Siehe Protokoll-Block in backend/main.py vor
+ * _truncate_history_to_user_index() fuer den End-zu-End-Flow.
+ * ============================================================ */
+
+/* ── Geteilte Ansicht: verhindere, dass Chat-Bubbles ueber Panel-Grenze
+      hinausragen und Desktop ueberlagern. min-width:0 erlaubt Schrumpfen
+      unter Content-Breite, overflow-x:hidden kappt harte Ueberlaeufe. ── */
+.jv-bubble-row {
+    min-width: 0;
+    max-width: 100%;
+}
+.jv-bubble-col {
+    min-width: 0;
+    overflow: hidden;
+}
+.jv-bubble {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+.jv-bubble pre {
+    max-width: 100%;
+    overflow-x: auto;
+    /* white-space:pre belassen – Zeilenumbrueche bleiben, aber pre-Block
+       ist selbst breitenbeschraenkt + horizontal scrollbar. */
+}
+.jv-bubble img,
+.jv-bubble video,
+.jv-bubble canvas,
+.jv-bubble iframe {
+    max-width: 100%;
+    height: auto;
+}
+.jv-bubble table {
+    max-width: 100%;
+}
+
+/* ── Time-Zeile als Flex-Container, damit Edit-Button daneben sitzen kann ── */
+.jv-bubble-row.user .jv-bubble-time {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+/* ── Edit-Button (Stift aus icons.js) ── */
+.jv-bubble-edit-btn {
+    background: none;
+    border: none;
+    color: rgba(var(--fg-rgb), .25);
+    cursor: pointer;
+    font-size: 12px;
+    padding: 0 2px;
+    line-height: 1;
+    transition: color .15s, opacity .15s;
+    opacity: .6;
+    font-family: inherit;
+}
+.jv-bubble-row.user:hover .jv-bubble-edit-btn {
+    color: rgba(var(--fg-rgb), .65);
+    opacity: 1;
+}
+.jv-bubble-edit-btn:hover {
+    color: rgba(var(--fg-rgb), 1) !important;
+}
+.jv-bubble-edit-btn:focus-visible {
+    outline: 1px solid rgba(var(--accent-rgb), .7);
+    outline-offset: 2px;
+    border-radius: 3px;
+}
+
+/* ── Editier-Textarea innerhalb der Bubble ── */
+.jv-bubble-edit-area {
+    width: 100%;
+    min-height: 60px;
+    background: rgba(var(--shadow-rgb), .25);
+    border: 1px solid rgba(var(--accent-rgb), .55);
+    border-radius: 8px;
+    color: #fff;
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1.5;
+    padding: 8px 11px;
+    resize: vertical;
+    outline: none;
+    box-sizing: border-box;
+}
+.jv-bubble-edit-area:focus {
+    border-color: rgba(var(--accent-rgb), .9);
+    box-shadow: 0 0 8px rgba(var(--accent-rgb), .25);
+}
+
+/* ── Aktions-Buttons (Speichern / Abbrechen) ── */
+.jv-bubble-edit-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+    justify-content: flex-end;
+}
+.jv-bubble-edit-actions button {
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    border: none;
+    color: #fff;
+    transition: opacity .15s;
+    font-family: inherit;
+}
+.jv-bubble-edit-save {
+    background: var(--accent-dark);
+}
+.jv-bubble-edit-cancel {
+    background: rgba(var(--fg-rgb), .15);
+}
+.jv-bubble-edit-actions button:hover {
+    opacity: .85;
+}
+.jv-bubble-edit-actions button:disabled {
+    opacity: .4;
+    cursor: not-allowed;
+}
+
+/* ───────────────────────────────────────────────────────────── *
+ * Floating Kontextmenue (Rechtsklick / Long-Press auf Bubble)
+ * Wird einmal im document.body erzeugt und wiederverwendet.
+ * ───────────────────────────────────────────────────────────── */
+.jv-bubble-ctx-menu {
+    position: fixed;
+    z-index: 99999;
+    min-width: 180px;
+    background: rgba(20, 24, 36, 0.96);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(var(--fg-rgb), 0.12);
+    border-radius: 10px;
+    box-shadow: 0 14px 40px rgba(var(--shadow-rgb), 0.5);
+    padding: 6px;
+    opacity: 0;
+    transform: scale(0.96);
+    pointer-events: none;
+    transition: opacity .12s ease, transform .12s ease;
+    font-family: inherit;
+    color: #e7eaf3;
+}
+.jv-bubble-ctx-menu.open {
+    opacity: 1;
+    transform: scale(1);
+    pointer-events: auto;
+}
+.jv-bubble-ctx-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 12px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    font-size: 0.9rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background .1s;
+    font-family: inherit;
+}
+.jv-bubble-ctx-item:hover,
+.jv-bubble-ctx-item:focus-visible {
+    background: rgba(var(--fg-rgb), 0.08);
+    outline: none;
+}
+.jv-bubble-ctx-item.danger {
+    color: #ff6b7a;
+}
+.jv-bubble-ctx-item.danger:hover {
+    background: rgba(255, 80, 90, 0.14);
+}
+.jv-bubble-ctx-icon {
+    display: inline-block;
+    width: 18px;
+    text-align: center;
+    font-size: 1rem;
+    flex-shrink: 0;
+}
+
+/* ───────────────────────────────────────────────────────────── *
+ * User-Chat (DM) Edit-Mode – uc-edit-* Klassen
+ * Wird via enterEditMode(... { areaClass: 'uc-edit-area', ... })
+ * aus frontend/js/userchat.js erzeugt.
+ * ───────────────────────────────────────────────────────────── */
+.uc-edit-area {
+    width: 100%;
+    min-height: 60px;
+    background: rgba(var(--shadow-rgb), .25);
+    border: 1px solid rgba(var(--accent-rgb), .55);
+    border-radius: 8px;
+    color: #e7eaf3;
+    font-family: inherit;
+    font-size: 0.95rem;
+    line-height: 1.45;
+    padding: 8px 10px;
+    resize: vertical;
+    outline: none;
+    box-sizing: border-box;
+}
+.uc-edit-area:focus {
+    border-color: rgba(var(--accent-rgb), .9);
+    box-shadow: 0 0 8px rgba(var(--accent-rgb), .25);
+}
+.uc-edit-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+    justify-content: flex-end;
+}
+.uc-edit-actions button {
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    border: none;
+    color: #fff;
+    transition: opacity .15s;
+    font-family: inherit;
+}
+.uc-edit-save   { background: var(--accent); }
+.uc-edit-cancel { background: rgba(var(--fg-rgb), .15); }
+.uc-edit-actions button:hover { opacity: .85; }
+.uc-edit-actions button:disabled { opacity: .4; cursor: not-allowed; }
+
+.uc-edited {
+    opacity: .65;
+    font-size: 0.75em;
+    margin-left: 6px;
+    font-style: italic;
+}
+
+/* Office-Dokument Download-Chip (Word/Excel/PowerPoint/PDF) */
+.chat-doc-dl {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin: 6px 0;
+    padding: 8px 14px;
+    border-radius: 10px;
+    background: rgba(var(--accent-rgb), 0.14);
+    border: 1px solid rgba(var(--accent-rgb), 0.45);
+    color: var(--text-primary, #fff);
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.9em;
+    transition: background .15s, border-color .15s, transform .1s;
+}
+.chat-doc-dl:hover {
+    background: rgba(var(--accent-rgb), 0.28);
+    border-color: rgba(var(--accent-rgb), 0.7);
+}
+.chat-doc-dl:active { transform: scale(0.98); }
+.chat-doc-dl svg { flex-shrink: 0; opacity: .9; }
+
+/* ── Medien-Kontextmenue: kurze Rueckmeldung ─────────────────────────────────
+ * "Bild kopieren" ist ohne Rueckmeldung ein Klick ins Nichts – in der
+ * Zwischenablage sieht man nichts, und ein Fehlschlag (fehlende Berechtigung,
+ * unsicherer Kontext) waere voellig unsichtbar. DECKENDE Flaeche, weil der
+ * Hinweis ueber dem Chatverlauf liegt (gleiche Begruendung wie bei den Panels
+ * im Portal und der sticky Kopfzeile der Audit-Tabelle). */
+.jv-media-toast {
+    position: fixed;
+    left: 50%;
+    bottom: 84px;
+    transform: translate(-50%, 12px);
+    z-index: 100000;                      /* ueber dem Kontextmenue (99999) */
+    max-width: min(520px, 92vw);
+    padding: 10px 16px;
+    border-radius: 10px;
+    background: var(--bg-secondary);
+    border: 1px solid rgba(var(--fg-rgb), 0.18);
+    color: var(--text-primary);
+    font-size: 0.88rem;
+    line-height: 1.35;
+    box-shadow: 0 8px 24px rgba(var(--shadow-rgb), 0.35);
+    opacity: 0;
+    pointer-events: none;                 /* verdeckt nie einen Klick */
+    transition: opacity .18s ease, transform .18s ease;
+}
+.jv-media-toast.open { opacity: 1; transform: translate(-50%, 0); }
+.jv-media-toast.is-error {
+    border-color: rgba(var(--danger-rgb, 231, 76, 60), 0.6);
+}
+
+/* Datei-Chips lassen sich in Explorer/Outlook ziehen (DownloadURL). Der Zeiger
+ * bleibt bewusst `pointer`: der Chip ist ZUERST ein Download-Link (Klick), das
+ * Ziehen ist der Zusatz – ein `grab`-Zeiger wuerde das Klick-Angebot
+ * verschleiern. Der Hinweis steht im title-Attribut (chatlib.js::_chip). */
+.chat-doc-dl:active { cursor: grabbing; }

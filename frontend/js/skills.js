@@ -1,0 +1,1295 @@
+/**
+ * Jarvis Skill Manager – Zwei-Listen-UI (Installiert / Mögliche)
+ *
+ * Layout orientiert an KI-Profile + Wissen:
+ *  - "Installierte Skills"  = enabled:true  → profile-card-Stil, Toggle + Config + Info + Entfernen
+ *  - "Mögliche Skills"      = enabled:false → durchsuchbare Liste mit Kategorie-Pills
+ *  - "OpenClaw Marketplace" = aufklappbare Sektion unterhalb (alle LLM-Provider)
+ *
+ * API:
+ *  GET  /api/skills                → { skills: [...] }
+ *  POST /api/skills/{name}/enable  → aktivieren
+ *  POST /api/skills/{name}/disable → deaktivieren
+ *  GET  /api/skills/{name}/config  → { config: {...} }
+ *  POST /api/skills/{name}/config  → config speichern
+ *  GET  /api/openclaw/llm-check    → { local: bool, provider, reason }
+ *  GET  /api/openclaw/workflow-task?description=... → { task: string }
+ */
+(function () {
+    'use strict';
+
+    // ─── Icon-Map ─────────────────────────────────────────────────────
+    const ICON_MAP = {
+        terminal: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>',
+        monitor:  '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>',
+        folder:   '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>',
+        camera:   '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>',
+        book:     '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>',
+        brain:    '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9.5 2A5.5 5.5 0 0 0 4 7.5c0 1.5.5 2.8 1.3 3.8L12 21l6.7-9.7c.8-1 1.3-2.3 1.3-3.8A5.5 5.5 0 0 0 14.5 2 5.5 5.5 0 0 0 12 2.8 5.5 5.5 0 0 0 9.5 2z"></path></svg>',
+        globe:    '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>',
+        puzzle:   '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19.439 7.85c-.049.322.059.648.289.878l1.568 1.568c.47.47.706 1.087.706 1.704s-.235 1.233-.706 1.704l-1.611 1.611a.98.98 0 0 1-.837.276c-.47-.07-.802-.48-.968-.925a2.501 2.501 0 1 0-3.214 3.214c.446.166.855.497.925.968a.979.979 0 0 1-.276.837l-1.61 1.611a2.404 2.404 0 0 1-1.705.707 2.402 2.402 0 0 1-1.704-.706l-1.568-1.568a1.026 1.026 0 0 0-.877-.29c-.493.074-.84.504-1.02.968a2.5 2.5 0 1 1-3.237-3.237c.464-.18.894-.527.967-1.02a1.026 1.026 0 0 0-.289-.877l-1.568-1.568A2.402 2.402 0 0 1 1.998 12c0-.617.236-1.234.706-1.704L4.315 8.685a.98.98 0 0 1 .837-.276c.47.07.802.48.968.925a2.501 2.501 0 1 0 3.214-3.214c-.446-.166-.855-.497-.925-.968a.979.979 0 0 1 .276-.837l1.61-1.611a2.404 2.404 0 0 1 1.705-.707c.618 0 1.234.236 1.704.706l1.568 1.568c.23.23.556.338.877.29.493-.074.84-.504 1.02-.968a2.5 2.5 0 1 1 3.237 3.237c-.464.18-.894.527-.967 1.02z"></path></svg>',
+        mail:     '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"></rect><polyline points="2,4 12,13 22,4"></polyline></svg>',
+        message:  '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>',
+        palette:  '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="13.5" cy="6.5" r=".5"></circle><circle cx="17.5" cy="10.5" r=".5"></circle><circle cx="8.5" cy="7.5" r=".5"></circle><circle cx="6.5" cy="12.5" r=".5"></circle><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"></path></svg>',
+        ticket:   '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>',
+        lifebuoy: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="4"></circle><line x1="4.93" y1="4.93" x2="9.17" y2="9.17"></line><line x1="14.83" y1="14.83" x2="19.07" y2="19.07"></line><line x1="14.83" y1="9.17" x2="19.07" y2="4.93"></line><line x1="4.93" y1="19.07" x2="9.17" y2="14.83"></line></svg>',
+    };
+
+    // Große Icons für das Info-Popup (28px)
+    const ICON_MAP_LG = {
+        terminal: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>',
+        monitor:  '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>',
+        folder:   '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>',
+        camera:   '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>',
+        book:     '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>',
+        brain:    '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9.5 2A5.5 5.5 0 0 0 4 7.5c0 1.5.5 2.8 1.3 3.8L12 21l6.7-9.7c.8-1 1.3-2.3 1.3-3.8A5.5 5.5 0 0 0 14.5 2 5.5 5.5 0 0 0 12 2.8 5.5 5.5 0 0 0 9.5 2z"></path></svg>',
+        globe:    '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>',
+        puzzle:   '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M19.439 7.85c-.049.322.059.648.289.878l1.568 1.568c.47.47.706 1.087.706 1.704s-.235 1.233-.706 1.704l-1.611 1.611a.98.98 0 0 1-.837.276c-.47-.07-.802-.48-.968-.925a2.501 2.501 0 1 0-3.214 3.214c.446.166.855.497.925.968a.979.979 0 0 1-.276.837l-1.61 1.611a2.404 2.404 0 0 1-1.705.707 2.402 2.402 0 0 1-1.704-.706l-1.568-1.568a1.026 1.026 0 0 0-.877-.29c-.493.074-.84.504-1.02.968a2.5 2.5 0 1 1-3.237-3.237c.464-.18.894-.527.967-1.02a1.026 1.026 0 0 0-.289-.877l-1.568-1.568A2.402 2.402 0 0 1 1.998 12c0-.617.236-1.234.706-1.704L4.315 8.685a.98.98 0 0 1 .837-.276c.47.07.802.48.968.925a2.501 2.501 0 1 0 3.214-3.214c-.446-.166-.855-.497-.925-.968a.979.979 0 0 1 .276-.837l1.61-1.611a2.404 2.404 0 0 1 1.705-.707c.618 0 1.234.236 1.704.706l1.568 1.568c.23.23.556.338.877.29.493-.074.84-.504 1.02-.968a2.5 2.5 0 1 1 3.237 3.237c-.464.18-.894.527-.967 1.02z"></path></svg>',
+        mail:     '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="4" width="20" height="16" rx="2"></rect><polyline points="2,4 12,13 22,4"></polyline></svg>',
+        message:  '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>',
+        palette:  '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="13.5" cy="6.5" r=".5"></circle><circle cx="17.5" cy="10.5" r=".5"></circle><circle cx="8.5" cy="7.5" r=".5"></circle><circle cx="6.5" cy="12.5" r=".5"></circle><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"></path></svg>',
+        ticket:   '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>',
+        lifebuoy: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="4"></circle><line x1="4.93" y1="4.93" x2="9.17" y2="9.17"></line><line x1="14.83" y1="14.83" x2="19.07" y2="19.07"></line><line x1="14.83" y1="9.17" x2="19.07" y2="4.93"></line><line x1="4.93" y1="19.07" x2="9.17" y2="14.83"></line></svg>',
+    };
+
+    const CATEGORY_LABELS = {
+        system:        'System',
+        automation:    'Automation',
+        kommunikation: 'Kommunikation',
+        wissen:        'Wissen',
+        sonstige:      'Sonstige',
+    };
+
+    // Kategorie-Pills Konfiguration
+    const CATEGORY_PILLS = [
+        { key: 'all',          label: 'Alle' },
+        { key: 'system',       label: 'System' },
+        { key: 'automation',   label: 'Automation' },
+        { key: 'kommunikation',label: 'Kommunikation' },
+        { key: 'wissen',       label: 'Wissen' },
+        { key: 'sonstige',     label: 'Sonstige' },
+    ];
+
+    // Skills mit eigenem Settings-Reiter: Verzeichnisname → data-settings-tab.
+    // Das Zahnrad in "Installierte Skills" springt dorthin, statt den
+    // generischen Config-Dialog zu oeffnen (der Reiter kann deutlich mehr).
+    const SKILL_TABS = {
+        vision:            'vision',
+        'jarvis-vision':   'vision',
+        whatsapp:          'whatsapp',
+        branding:          'branding',
+        confluence:        'confluence',
+        jira:              'jira',
+        sap:               'sap',
+        vemas:             'vemas',
+        email:             'email',
+        ai_mouse:          'aimouse',
+        feedback:          'feedback',
+        'short-tracks':    'tracks',
+        'excel-addin':     'excel',
+        kundenverwaltung:  'kundenverwaltung',
+        support_assistant: 'support',
+        knowledge:         'knowledge',
+        cron:              'cron',
+        google:             'google',
+        telegram:           'telegram',
+        browser_control:    'browser_control',
+        claude_subagent:    'claude_subagent',
+        agent_orchestrator: 'agent_orchestrator',
+        agent_autonomy_kit: 'agent_autonomy_kit',
+        avatar:             'avatar',
+    };
+
+    // Alphabetisch nach dem ANGEZEIGTEN Namen sortieren (2026-08-27).
+    // Vorher kam die Reihenfolge roh vom Endpunkt – also aus der Reihenfolge
+    // des Verzeichnis-Durchlaufs. Bei ueber zwanzig Eintraegen sucht man einen
+    // bestimmten Skill damit Zeile fuer Zeile ab.
+    //
+    // localeCompare statt `<`: ein reiner Codepoint-Vergleich sortiert
+    // Grossbuchstaben vor Kleinbuchstaben und stellt Umlaute hinter das
+    // gesamte Alphabet ("Übersetzer" nach "Zeitplan"). `numeric` sorgt dafuer,
+    // dass "Skill 2" vor "Skill 10" steht.
+    //
+    // Die Liste wird VORHER kopiert: sortiert wird nur die Anzeige, nie
+    // this.skills – dort haengen Filter und Neuzeichnen dran.
+    function sortiereNachName(liste) {
+        const spr = (window._lang === 'en') ? 'en' : 'de';
+        return liste.slice().sort((a, b) => String(a && a.name || '')
+            .localeCompare(String(b && b.name || ''), spr,
+                           { sensitivity: 'base', numeric: true }));
+    }
+
+    // Liefert den Reiter-Knopf eines Skills – nur wenn er existiert UND sichtbar
+    // ist (ausgeschaltete Skills blenden ihren Reiter aus).
+    function tabButtonFor(dirName) {
+        const tab = SKILL_TABS[dirName];
+        if (!tab) return null;
+        const btn = document.querySelector(`.settings-tab-btn[data-settings-tab="${tab}"]`);
+        if (!btn) return null;
+        // NICHT ueber offsetParent pruefen: die Liste wird ggf. gerendert,
+        // waehrend das Settings-Modal noch geschlossen ist – dann waeren alle
+        // Reiter "unsichtbar". Die Sichtbarkeit steckt im inline-display.
+        if (btn.style.display === 'none') return null;
+        return btn;
+    }
+
+    // SVG-Buttons
+    const SVG_CFG  =`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.32 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>`;
+    const SVG_INFO =`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>`;
+
+    class JarvisSkillManager {
+        constructor() {
+            this.skills          = [];
+            this.searchVal       = '';
+            this.categoryFilter  = 'all';
+            this._ocCollapsed    = true;   // OpenClaw initial zugeklappt
+            this._availCollapsed = true;   // Mögliche Skills initial zugeklappt
+            this._instCollapsed  = true;   // Installierte Skills initial zugeklappt
+        }
+
+        // ─── Init ─────────────────────────────────────────────────────
+
+        async loadSkills() {
+            try {
+                // Jede Aenderung (Ein/Aus, Purge, Nachinstallation) laeuft hier
+                // durch. Den gemeinsamen Zwischenspeicher von app.js verwerfen,
+                // sonst zeigen die Reiter-Sichtbarkeiten bis zu 5 s den alten
+                // Stand (z.B. Reiter eines gerade aktivierten Skills fehlt).
+                if (typeof window.invalidateSkillsCache === 'function') window.invalidateSkillsCache();
+                const token = window.JarvisSitzung.token();
+                const resp  = await fetch('/api/skills', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data  = await resp.json();
+                this.skills = (data.skills || []).filter(s => !s.error);
+                this._bindSearch();
+                this._render();
+            } catch (e) {
+                console.error('Skills laden fehlgeschlagen:', e);
+            }
+        }
+
+        _bindSearch() {
+            const input = document.getElementById('sk-search');
+            if (!input || input._skBound) return;
+            input._skBound = true;
+            input.addEventListener('input', () => {
+                this.searchVal = input.value.toLowerCase().trim();
+                this._renderAvailable();
+            });
+        }
+
+        // ─── Render ───────────────────────────────────────────────────
+
+        _render() {
+            this._renderInstalled();
+            this._renderCategoryPills();
+            this._renderAvailable();
+            this._renderOpenClawSection();
+            this._bindSectionToggles();
+        }
+
+        // ── Aufklapp-Logik für Mögliche / Installierte Skills ─────────
+
+        _bindSectionToggles() {
+            // Einmalig binden (Flag auf dem Element)
+            const bind = (headerId, bodyId, toggleId, getCollapsed, setCollapsed) => {
+                const header = document.getElementById(headerId);
+                if (!header || header._skBound) return;
+                header._skBound = true;
+                header.addEventListener('click', () => {
+                    setCollapsed(!getCollapsed());
+                    const body   = document.getElementById(bodyId);
+                    const toggle = document.getElementById(toggleId);
+                    if (body)   body.style.display   = getCollapsed() ? 'none' : '';
+                    if (toggle) toggle.textContent    = getCollapsed() ? '▶' : '▼';
+                });
+            };
+
+            bind('sk-available-header', 'sk-available-body', 'sk-available-toggle',
+                () => this._availCollapsed,
+                (v) => { this._availCollapsed = v; });
+
+            bind('sk-installed-header', 'sk-installed-body', 'sk-installed-toggle',
+                () => this._instCollapsed,
+                (v) => { this._instCollapsed = v; });
+        }
+
+        // ── Installierte Skills ───────────────────────────────────────
+
+        _renderInstalled() {
+            const el = document.getElementById('sk-installed-list');
+            if (!el) return;
+            // "Installierte" = installiert (kann ein- ODER ausgeschaltet sein);
+            // Fallback auf enabled fuer Skills ohne installed-Flag.
+            const installed = this.skills.filter(s => (s.installed !== undefined ? s.installed : s.enabled));
+            if (installed.length === 0) {
+                el.innerHTML = `<div class="kb-empty">${window.t('skills.none_installed')}</div>`;
+                return;
+            }
+            el.innerHTML = '';
+            sortiereNachName(installed).forEach(s => el.appendChild(this._mkInstalledItem(s)));
+        }
+
+        _mkInstalledItem(skill) {
+            const dirName   = skill.dir_name || skill.path?.split('/').pop() || skill.name;
+            const icon      = ICON_MAP[skill.icon] || ICON_MAP.puzzle;
+            const isSystem  = skill.system || false;
+            // Zahnrad: entweder eigener Settings-Reiter (Vorrang) oder generischer Dialog
+            const tabBtn    = tabButtonFor(dirName);
+            const hasConfig = !!tabBtn || (skill.config_schema
+                && Object.keys(skill.config_schema).length > 0);
+            const cfgTitle  = tabBtn
+                ? `${window.t('skills.cfg_title')} – ${tabBtn.textContent.trim()}`
+                : window.t('skills.cfg_title');
+            const catLabel  = CATEGORY_LABELS[skill.category] || skill.category || '';
+            const toolCount = (skill.tools || []).length;
+
+            const isOpenClaw = skill.source === 'openclaw';
+            // Fehlende Abhaengigkeiten (vom Backend mitgeliefert): system_packages
+            // werden NUR beim Einschalten installiert – ein laengst aktiver Skill,
+            // der nachtraeglich eine Systemabhaengigkeit bekommt, braucht einen
+            // Reparatur-Knopf (sonst muesste man ihn aus- und wieder einschalten).
+            const fehlt = skill.missing || null;
+            const fehltListe = fehlt
+                ? [].concat(fehlt.apt || [], fehlt.pip || []).join(', ')
+                : '';
+
+            const item = document.createElement('div');
+            item.className = 'sk-item' + (isOpenClaw ? ' sk-item-oc' : '')
+                + (skill.enabled ? '' : ' sk-item-disabled');
+            // Adresse der Zeile. Ohne sie ist ein einzelner Eintrag von aussen
+            // nicht auffindbar – die Suche im Kopf der Einstellungen springt
+            // genau hierher, wenn ein Skill keinen eigenen Konfigurationspunkt
+            // hat (zeigeInListe).
+            item.setAttribute('data-skill', dirName);
+            item.innerHTML = `
+                <span class="sk-item-icon">${icon}</span>
+                <div class="sk-item-info">
+                    <span class="sk-item-name">${skill.name}</span>
+                    ${skill.enabled ? '' : `<span class="sk-badge-off">${window.t('skills.disabled')}</span>`}
+                    ${isSystem ? '<span class="sk-badge-sys">System</span>' : ''}
+                    ${isOpenClaw ? '<span class="sk-badge-oc">OpenClaw</span>' : ''}
+                    <span class="sk-item-cat">${catLabel}</span>
+                    <span class="sk-item-tools">${toolCount} Tool${toolCount !== 1 ? 's' : ''}</span>
+                    <span class="sk-item-desc">${skill.description || ''}</span>
+                    ${fehlt ? `<span class="sk-badge-missing" title="${fehltListe}">${window.t('skills.deps_missing')}</span>` : ''}
+                </div>
+                <div class="sk-item-actions">
+                    ${fehlt ? `<button class="sk-btn sk-btn-fix" title="${window.t('skills.deps_install')}: ${fehltListe}">⤓</button>` : ''}
+                    <button class="sk-btn sk-btn-info" title="${window.t('skills.show_info')}">${SVG_INFO}</button>
+                    ${hasConfig
+                        ? `<button class="sk-btn sk-btn-cfg" title="${cfgTitle}">${SVG_CFG}</button>`
+                        : '<span class="sk-btn sk-btn-ghost" aria-hidden="true"></span>'}
+                    <label class="skill-toggle" title="${isSystem ? 'System-Skill' : 'An / Aus'}">
+                        <input type="checkbox" ${skill.enabled ? 'checked' : ''}>
+                        <span class="skill-toggle-slider"></span>
+                    </label>
+                    ${!isSystem
+                        ? `<button class="sk-btn sk-btn-rm" title="${window.t('common.delete')}">${JarvisIcons.trash()}</button>`
+                        : '<span class="sk-btn sk-btn-ghost" aria-hidden="true"></span>'}
+                </div>`;
+
+            // Info
+            item.querySelector('.sk-btn-info').addEventListener('click', (e) => {
+                e.stopPropagation();
+                this._showInfo(skill);
+            });
+            // Toggle
+            item.querySelector('input[type="checkbox"]').addEventListener('change', (e) => {
+                if (!isSystem) this._applyDisabledState(item, e.target.checked);
+                this._toggle(e, dirName, e.target.checked, isSystem);
+            });
+            // Config
+            const cfgBtn = item.querySelector('.sk-btn-cfg');
+            if (cfgBtn) cfgBtn.addEventListener('click', () => this._openConfig(dirName));
+            // Entfernen
+            const rmBtn  = item.querySelector('.sk-btn-rm');
+            if (rmBtn)  rmBtn.addEventListener('click',  () => this._deactivate(dirName));
+            // Abhaengigkeiten nachinstallieren (Reparatur)
+            const fixBtn = item.querySelector('.sk-btn-fix');
+            if (fixBtn) fixBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this._installMissing(dirName);
+            });
+
+            return item;
+        }
+
+        // Deaktiviert-Optik (Klasse + Badge) live umschalten
+        _applyDisabledState(item, enabled) {
+            item.classList.toggle('sk-item-disabled', !enabled);
+            const info = item.querySelector('.sk-item-info');
+            if (!info) return;
+            let badge = info.querySelector('.sk-badge-off');
+            if (!enabled && !badge) {
+                badge = document.createElement('span');
+                badge.className = 'sk-badge-off';
+                badge.textContent = window.t('skills.disabled');
+                const nameEl = info.querySelector('.sk-item-name');
+                if (nameEl) nameEl.insertAdjacentElement('afterend', badge);
+            } else if (enabled && badge) {
+                badge.remove();
+            }
+        }
+
+        // ── Kategorie-Pills ───────────────────────────────────────────
+
+        _renderCategoryPills() {
+            // Bestehenden Container wiederverwenden oder neu erstellen
+            let pillsEl = document.getElementById('sk-pills-row');
+            if (!pillsEl) {
+                const availList = document.getElementById('sk-available-list');
+                if (!availList) return;
+                pillsEl = document.createElement('div');
+                pillsEl.id = 'sk-pills-row';
+                pillsEl.className = 'sk-category-pills';
+                availList.parentNode.insertBefore(pillsEl, availList);
+            }
+
+            pillsEl.innerHTML = CATEGORY_PILLS.map(cat => `
+                <button class="sk-cat-pill${this.categoryFilter === cat.key ? ' active' : ''}"
+                        data-cat="${cat.key}">${cat.label}</button>
+            `).join('');
+
+            pillsEl.querySelectorAll('.sk-cat-pill').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    this.categoryFilter = btn.dataset.cat;
+                    // Aktive Pill direkt umschalten ohne komplettes Re-render
+                    pillsEl.querySelectorAll('.sk-cat-pill').forEach(b =>
+                        b.classList.toggle('active', b.dataset.cat === this.categoryFilter));
+                    this._renderAvailable();
+                });
+            });
+        }
+
+        // ── Mögliche Skills (gefiltert) ───────────────────────────────
+
+        _renderAvailable() {
+            const el = document.getElementById('sk-available-list');
+            if (!el) return;
+            const available = this.skills.filter(s => !(s.installed !== undefined ? s.installed : s.enabled));
+
+            // Kategorie-Filter anwenden
+            let filtered = this.categoryFilter === 'all'
+                ? available
+                : available.filter(s => (s.category || 'sonstige') === this.categoryFilter);
+
+            // Suchbegriff-Filter
+            const q = this.searchVal;
+            if (q) {
+                filtered = filtered.filter(s =>
+                    s.name.toLowerCase().includes(q) ||
+                    (s.description || '').toLowerCase().includes(q) ||
+                    (s.category || '').toLowerCase().includes(q));
+            }
+
+            if (filtered.length === 0) {
+                el.innerHTML = `<div class="kb-empty">${
+                    available.length === 0
+                        ? window.t('skills.all_installed')
+                        : window.t('skills.none_found')
+                }</div>`;
+                return;
+            }
+            el.innerHTML = '';
+            sortiereNachName(filtered).forEach(s => el.appendChild(this._mkAvailableItem(s)));
+        }
+
+        _mkAvailableItem(skill) {
+            const dirName  = skill.dir_name || skill.path?.split('/').pop() || skill.name;
+            const icon     = ICON_MAP[skill.icon] || ICON_MAP.puzzle;
+            const catLabel = CATEGORY_LABELS[skill.category] || skill.category || '';
+
+            const item = document.createElement('div');
+            item.className = 'sk-avail-item';
+            item.setAttribute('data-skill', dirName);   // siehe _mkInstalledItem
+            item.innerHTML = `
+                <span class="sk-item-icon sk-item-icon-dim">${icon}</span>
+                <div class="sk-item-info">
+                    <span class="sk-item-name">${skill.name}</span>
+                    <span class="sk-item-cat">${catLabel}</span>
+                    <span class="sk-item-desc">${skill.description || ''}</span>
+                </div>
+                <div class="sk-item-actions">
+                    <button class="sk-btn sk-btn-info" title="${window.t('skills.show_info')}">${SVG_INFO}</button>
+                    <button class="sk-btn-add">${window.t('skills.add_btn')}</button>
+                </div>`;
+
+            item.querySelector('.sk-btn-info').addEventListener('click', (e) => {
+                e.stopPropagation();
+                this._showInfo(skill);
+            });
+            item.querySelector('.sk-btn-add')
+                .addEventListener('click', () => this._activate(dirName));
+            return item;
+        }
+
+        // ── OpenClaw Marketplace Sektion ──────────────────────────────
+
+        _renderOpenClawSection() {
+            // Nach der gesamten "Mögliche Skills"-Sektion einfügen
+            let ocEl = document.getElementById('sk-openclaw-section');
+            if (!ocEl) {
+                const availSection = document.getElementById('sk-available-section');
+                if (!availSection) return;
+                ocEl = document.createElement('div');
+                ocEl.id = 'sk-openclaw-section';
+                ocEl.className = 'sk-openclaw-section';
+                availSection.parentNode.insertBefore(ocEl, availSection.nextSibling);
+            }
+
+            const bodyHTML = this._ocCollapsed ? '' : `
+                <div class="sk-openclaw-body">
+                    <p class="sk-openclaw-hint">
+                        ${window.t('skills.mkt_hint') || 'Skills durchsuchen, prüfen und bei Bedarf importieren.'}
+                    </p>
+                    <label class="sk-openclaw-label">${window.t('skills.mkt_label') || 'Welchen Skill suchst du?'}
+                        <small>${window.t('skills.mkt_label_hint') || '(leer = populäre Skills anzeigen)'}</small>
+                    </label>
+                    <textarea id="sk-oc-description" class="sk-openclaw-textarea"
+                        placeholder='${window.t('skills.mkt_ph') || 'z. B. "Skill für Telegram" oder "PDF-Analyse"'}'
+                        rows="2"></textarea>
+                    <button id="sk-oc-search-btn" class="sk-openclaw-btn">
+                        🔍 ${window.t('skills.mkt_search_btn') || 'Skills suchen'}
+                    </button>
+                    <div id="sk-oc-results" class="sk-oc-results"></div>
+                </div>`;
+
+            ocEl.innerHTML = `
+                <div class="sk-openclaw-header" id="sk-oc-header">
+                    <span class="sk-openclaw-title">${window.t('skills.marketplace')}</span>
+                    <span class="sk-openclaw-toggle">${this._ocCollapsed ? '▶' : '▼'}</span>
+                </div>
+                ${bodyHTML}`;
+
+            // Header-Klick: aufklappen / zuklappen
+            ocEl.querySelector('#sk-oc-header').addEventListener('click', () => {
+                this._ocCollapsed = !this._ocCollapsed;
+                this._renderOpenClawSection();
+                if (!this._ocCollapsed) {
+                    // Marketplace aufgeklappt
+                }
+            });
+
+            // Such-Button nur wenn aufgeklappt
+            if (!this._ocCollapsed) {
+                const searchBtn = ocEl.querySelector('#sk-oc-search-btn');
+                if (searchBtn) {
+                    searchBtn.addEventListener('click', () => {
+                        const desc = ocEl.querySelector('#sk-oc-description')?.value || '';
+                        this._openClawSearch(desc);
+                    });
+                }
+                // Enter in Textarea löst Suche aus
+                const textarea = ocEl.querySelector('#sk-oc-description');
+                if (textarea) {
+                    textarea.addEventListener('keydown', (e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            searchBtn?.click();
+                        }
+                    });
+                }
+            }
+        }
+
+        async _checkLLM() {
+            const token    = window.JarvisSitzung.token();
+            const statusEl = document.getElementById('sk-oc-llm-status');
+            const importBtn = document.getElementById('sk-oc-import-btn');
+            if (!statusEl) return;
+            try {
+                const resp = await fetch('/api/openclaw/llm-check', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await resp.json();
+                if (data.local) {
+                    statusEl.className = 'sk-openclaw-llm-status sk-openclaw-llm-local';
+                    statusEl.textContent = window.t('skills.llm_local');
+                    if (importBtn) importBtn.disabled = false;
+                } else {
+                    statusEl.className = 'sk-openclaw-llm-status sk-openclaw-llm-cloud';
+                    statusEl.textContent = window.t('skills.llm_cloud');
+                    if (importBtn) importBtn.disabled = true;
+                }
+            } catch (e) {
+                if (statusEl) {
+                    statusEl.className = 'sk-openclaw-llm-status sk-openclaw-llm-cloud';
+                    statusEl.textContent = '❌ LLM-Check fehlgeschlagen';
+                }
+            }
+        }
+
+        async _openClawSearch(descriptionText) {
+            const token = window.JarvisSitzung.token();
+            const resultsEl = document.getElementById('sk-oc-results');
+            const searchBtn = document.getElementById('sk-oc-search-btn');
+            if (!resultsEl) return;
+
+            // Such-Feedback
+            if (searchBtn) { searchBtn.disabled = true; searchBtn.textContent = window.t('skills.searching'); }
+            resultsEl.innerHTML = '<div class="sk-oc-loading">🔍 Suche auf OpenClaw…</div>';
+
+            try {
+                const desc = encodeURIComponent(descriptionText.trim() || '');
+                const resp = await fetch(`/api/openclaw/search?q=${desc}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await resp.json();
+                const skills = data.results || [];
+
+                if (skills.length === 0) {
+                    resultsEl.innerHTML = `<div class="sk-oc-empty">${window.t('skills.mkt_none')}</div>`;
+                    return;
+                }
+
+                resultsEl.innerHTML = skills.map((s, i) => `
+                    <div class="sk-oc-card">
+                        <div class="sk-oc-card-info">
+                            <strong>${s.name || 'Unbenannt'}</strong>
+                            <span class="sk-oc-card-desc">${s.description || ''}</span>
+                            ${s.author ? `<span class="sk-oc-card-meta">von ${s.author}</span>` : ''}
+                            ${s.stars != null ? `<span class="sk-oc-card-meta">⭐ ${s.stars}</span>` : ''}
+                        </div>
+                        <button class="sk-oc-import-btn" data-idx="${i}">📥 Importieren</button>
+                    </div>`).join('');
+
+                // Import-Buttons
+                resultsEl.querySelectorAll('.sk-oc-import-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const idx = parseInt(btn.dataset.idx);
+                        const skill = skills[idx];
+                        btn.disabled = true;
+                        btn.textContent = '⏳ Import…';
+                        this._openClawImport(skill);
+                    });
+                });
+            } catch (e) {
+                console.error('OpenClaw Suche Fehler:', e);
+                resultsEl.innerHTML = '<div class="sk-oc-empty">❌ Suche fehlgeschlagen.</div>';
+            } finally {
+                if (searchBtn) { searchBtn.disabled = false; searchBtn.textContent = `🔍 ${window.t('skills.mkt_search_btn') || 'Skills suchen'}`; }
+            }
+        }
+
+        async _openClawImport(skillInfo) {
+            const token = window.JarvisSitzung.token();
+
+            let taskText = '';
+            try {
+                const desc = encodeURIComponent(skillInfo.name || skillInfo.description || '');
+                const taskResp = await fetch(`/api/openclaw/workflow-task?description=${desc}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const taskData = await taskResp.json();
+                taskText = taskData.task || '';
+            } catch (e) {
+                console.error('Workflow-Task Fehler:', e);
+                return;
+            }
+
+            this._showImportModal(taskText, skillInfo.name || 'OpenClaw Skill-Import');
+        }
+
+        // ── Import-Modal mit Mini-Chat ────────────────────────────────
+
+        _showImportModal(taskText, title) {
+            // Ggf. vorhandenes Modal entfernen
+            const existing = document.getElementById('sk-import-overlay');
+            if (existing) existing.remove();
+
+            const overlay = document.createElement('div');
+            overlay.id = 'sk-import-overlay';
+            overlay.innerHTML = `
+                <div class="sk-import-panel" role="dialog" aria-modal="true">
+                    <div class="sk-import-header">
+                        <span class="sk-import-title">🛒 OpenClaw Skill Import</span>
+                        <button class="sk-import-close" title="${window.t('common.close')}">✕</button>
+                    </div>
+                    <div class="sk-import-log" id="sk-import-log">
+                        <div class="sk-import-msg sk-import-msg-info">
+                            🤖 Jarvis startet den OpenClaw Skill-Import…
+                        </div>
+                    </div>
+                    <div class="sk-import-input-row">
+                        <textarea id="sk-import-input" class="sk-import-input"
+                            placeholder="Antwort eingeben (Enter = Senden, Shift+Enter = Zeilenumbruch)…"
+                            rows="2"></textarea>
+                        <button id="sk-import-send" class="sk-import-send-btn" title="Senden">➤</button>
+                    </div>
+                    <div class="sk-import-footer">
+                        <button id="sk-import-reload" class="btn-secondary sk-import-footer-btn">
+                            📋 Skills neu laden
+                        </button>
+                        <button id="sk-import-close2" class="btn-secondary sk-import-footer-btn">
+                            ${window.t('common.close')}
+                        </button>
+                    </div>
+                </div>`;
+
+            document.body.appendChild(overlay);
+
+            // Logging-Helper
+            const logEl = overlay.querySelector('#sk-import-log');
+            let _streamBuf = null; // Aktiver Streaming-Block
+
+            const addMsg = (html, type = 'agent') => {
+                _streamBuf = null; // Streaming-Puffer zurücksetzen
+                const msg = document.createElement('div');
+                msg.className = `sk-import-msg sk-import-msg-${type}`;
+                msg.innerHTML = html;
+                logEl.appendChild(msg);
+                logEl.scrollTop = logEl.scrollHeight;
+                return msg;
+            };
+
+            // WS-Listener – horcht auf jarvis-ws-message Events
+            const wsListener = (e) => {
+                const data = e.detail;
+                if (!data) return;
+
+                if (data.type === 'status') {
+                    // Status-Nachrichten vom Agenten (Haupt-Kanal für Jarvis-Antworten)
+                    const msg = data.message || '';
+                    if (!msg.trim()) return;
+
+                    // Tool-Aufrufe und technische Statusmeldungen etwas dezenter darstellen
+                    const isTool   = msg.startsWith('🔧') || msg.startsWith('📋');
+                    const isSystem = msg.startsWith('🚀') || msg.startsWith('🧠') ||
+                                     msg.startsWith('⏸') || msg.startsWith('▶') ||
+                                     msg.startsWith('⏹') || msg.startsWith('⚡');
+
+                    const type = isTool ? 'tool' : (isSystem ? 'sys' : 'agent');
+                    addMsg(`<span>${msg}</span>`, type);
+
+                } else if (data.type === 'error') {
+                    addMsg(`❌ ${data.message || 'Fehler'}`, 'error');
+                }
+            };
+            window.addEventListener('jarvis-ws-message', wsListener);
+
+            // Task an Agenten senden
+            if (typeof window.sendJarvisTask === 'function') {
+                window.sendJarvisTask(taskText);
+            } else {
+                addMsg(window.t('skills.ws_error'), 'error');
+            }
+
+            // Follow-up-Nachricht senden
+            const inputEl = overlay.querySelector('#sk-import-input');
+            const sendFollowup = () => {
+                const text = inputEl.value.trim();
+                if (!text) return;
+                addMsg(`<span>${text}</span>`, 'user');
+                inputEl.value = '';
+                if (typeof window.sendJarvisTask === 'function') {
+                    window.sendJarvisTask(text);
+                }
+            };
+            overlay.querySelector('#sk-import-send').addEventListener('click', sendFollowup);
+            inputEl.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendFollowup(); }
+            });
+
+            // Skills neu laden
+            overlay.querySelector('#sk-import-reload').addEventListener('click', async () => {
+                await this.loadSkills();
+                addMsg('📋 Skill-Liste neu geladen.', 'info');
+            });
+
+            // Schließen-Logik
+            const close = () => {
+                window.removeEventListener('jarvis-ws-message', wsListener);
+                overlay.remove();
+            };
+            overlay.querySelector('.sk-import-close').addEventListener('click', close);
+            overlay.querySelector('#sk-import-close2').addEventListener('click', close);
+
+            // Escape-Taste
+            const onKey = (e) => {
+                if (e.key === 'Escape') {
+                    close();
+                    document.removeEventListener('keydown', onKey);
+                }
+            };
+            document.addEventListener('keydown', onKey);
+        }
+
+        // ─── Info-Popup ───────────────────────────────────────────────
+
+        _showInfo(skill) {
+            // Doppeltes Öffnen verhindern
+            const existing = document.getElementById('sk-info-overlay');
+            if (existing) existing.remove();
+
+            const help     = skill.help || {};
+            const catLabel = CATEGORY_LABELS[skill.category] || skill.category || '';
+            const isSystem = skill.system || false;
+            const iconLg   = ICON_MAP_LG[skill.icon] || ICON_MAP_LG.puzzle;
+            const tools    = help.tools || (skill.tools || []).map(t => ({ name: t, label: t, desc: '' }));
+            const useCases = help.use_cases || [];
+            const details  = help.details || skill.description || '';
+
+            // Tools-HTML
+            const toolsHTML = tools.length
+                ? `<div class="sk-info-section">
+                    <div class="sk-info-section-title">${window.t('skills.available_tools')} (${tools.length})</div>
+                    <div class="sk-info-tools">
+                        ${tools.map(t => `
+                        <div class="sk-info-tool">
+                            <code class="sk-info-tool-name">${t.name}</code>
+                            ${t.label && t.label !== t.name ? `<span class="sk-info-tool-label">${t.label}</span>` : ''}
+                            ${t.desc ? `<p class="sk-info-tool-desc">${t.desc}</p>` : ''}
+                        </div>`).join('')}
+                    </div>
+                </div>`
+                : '';
+
+            // Use-Cases-HTML
+            const useCasesHTML = useCases.length
+                ? `<div class="sk-info-section">
+                    <div class="sk-info-section-title">Beispiel-Prompts</div>
+                    <ul class="sk-info-use-cases">
+                        ${useCases.map(uc => `<li>${uc}</li>`).join('')}
+                    </ul>
+                </div>`
+                : '';
+
+            // Setup-HTML
+            const setupHTML = help.setup
+                ? `<div class="sk-info-section sk-info-section-setup">
+                    <div class="sk-info-section-title">${window.t('skills.setup')}</div>
+                    <p class="sk-info-section-text">${help.setup}</p>
+                </div>`
+                : '';
+
+            // Notes-HTML
+            const notesHTML = help.notes
+                ? `<div class="sk-info-section sk-info-section-notes">
+                    <div class="sk-info-section-title">${window.t('skills.notes')}</div>
+                    <p class="sk-info-section-text">${help.notes}</p>
+                </div>`
+                : '';
+
+            // Footer
+            const footerParts = [];
+            if (skill.version) footerParts.push(`v${skill.version}`);
+            if (skill.author)  footerParts.push(skill.author);
+
+            const overlay = document.createElement('div');
+            overlay.id = 'sk-info-overlay';
+            overlay.innerHTML = `
+                <div class="sk-info-panel" role="dialog" aria-modal="true">
+                    <div class="sk-info-header">
+                        <span class="sk-info-icon-lg">${iconLg}</span>
+                        <div class="sk-info-title-group">
+                            <span class="sk-info-name">${skill.name}</span>
+                            <div class="sk-info-badges">
+                                ${isSystem ? '<span class="sk-badge-sys">System</span>' : ''}
+                                <span class="sk-info-cat">${catLabel}</span>
+                            </div>
+                        </div>
+                        <button class="sk-info-close" title="${window.t('common.close')}">✕</button>
+                    </div>
+                    <div class="sk-info-body">
+                        <p class="sk-info-details">${details}</p>
+                        ${toolsHTML}
+                        ${useCasesHTML}
+                        ${setupHTML}
+                        ${notesHTML}
+                    </div>
+                    ${footerParts.length ? `<div class="sk-info-footer">${footerParts.join(' · ')}</div>` : ''}
+                </div>`;
+
+            document.body.appendChild(overlay);
+
+            // Schließen via ×-Button (× = schliessen, siehe icons.js)
+            overlay.querySelector('.sk-info-close').addEventListener('click', () => overlay.remove());
+            // Schließen via Backdrop-Klick
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) overlay.remove();
+            });
+            // Schließen via Escape
+            const onKey = (e) => {
+                if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', onKey); }
+            };
+            document.addEventListener('keydown', onKey);
+        }
+
+        // ─── Aktionen ─────────────────────────────────────────────────
+
+        async _activate(name) {
+            const token = window.JarvisSitzung.token();
+            try {
+                const resp = await fetch(`/api/skills/${name}/enable`, {
+                    method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (data.installing) {
+                    // Abhaengigkeiten werden im Hintergrund installiert → Fortschritt zeigen
+                    this._showInstallProgress(name);
+                    return;
+                }
+                this._notify(`"${name}" ${window.t('skills.activated')}`, 'success');
+                await this.loadSkills();
+                if (typeof window.updateSkillCfgTabVisibility === 'function') window.updateSkillCfgTabVisibility();
+                if (typeof window.updateVisionTabVisibility === 'function') window.updateVisionTabVisibility();
+                if (typeof window.updateBrandingTabVisibility === 'function') window.updateBrandingTabVisibility();
+                if (typeof window.updateConfluenceTabVisibility === 'function') window.updateConfluenceTabVisibility();
+                if (typeof window.updateJiraTabVisibility === 'function') window.updateJiraTabVisibility();
+                if (typeof window.updateSapTabVisibility === 'function') window.updateSapTabVisibility();
+                if (typeof window.updateVemasTabVisibility === 'function') window.updateVemasTabVisibility();
+                if (typeof window.updateEmailTabVisibility === 'function') window.updateEmailTabVisibility();
+                if (typeof window.updateTracksSecVisibility === 'function') window.updateTracksSecVisibility();
+                if (typeof window.updateKundenverwaltungTabVisibility === 'function') window.updateKundenverwaltungTabVisibility();
+                if (typeof window.updateSupportTabVisibility === 'function') window.updateSupportTabVisibility();
+                // Messenger-Skill an/aus -> Abschnitt "Erinnerungen per Messenger" in Sicherheit
+                if (typeof window.updateReminderSectionVisibility === 'function') window.updateReminderSectionVisibility();
+                // Branding sofort anwenden bzw. (bei Deaktivierung) zuruecksetzen
+                if (name === 'branding' && typeof window.refreshBranding === 'function') window.refreshBranding();
+            } catch (e) { this._notify('Fehler: ' + e.message, 'error'); }
+        }
+
+        async _installMissing(name) {
+            const token = window.JarvisSitzung.token();
+            try {
+                const resp = await fetch(`/api/skills/${name}/install`, {
+                    method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (data.installing) {
+                    // Gleiche Fortschrittsanzeige wie beim Einschalten. Wichtig bei
+                    // apt-Paketen: laeuft der Root-Broker, braucht der Befehl ggf.
+                    // eine Freigabe – das Protokoll sagt es dann.
+                    this._showInstallProgress(name);
+                    return;
+                }
+                if (data.success) {
+                    this._notify(window.t('skills.deps_ok'), 'success');
+                    await this.loadSkills();
+                } else {
+                    this._notify(data.error || window.t('skills.deps_failed'), 'error');
+                }
+            } catch (e) { this._notify('Fehler: ' + e.message, 'error'); }
+        }
+
+        _deactivate(name) {
+            // 'x' = Dialog: nur aus Liste entfernen ODER vollstaendig deinstallieren
+            const overlay = document.createElement('div');
+            overlay.className = 'skill-config-overlay';
+            overlay.innerHTML = `
+                <div class="skill-config-dialog">
+                    <h3>${window.t('skills.purge_title')}: ${name}</h3>
+                    <form id="sk-purge-form">
+                        <div class="form-group">
+                            <label class="checkbox-group">
+                                <input type="radio" name="sk-purge-mode" value="remove" checked>
+                                <span>${window.t('skills.purge_opt_remove')}</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label class="checkbox-group">
+                                <input type="radio" name="sk-purge-mode" value="purge">
+                                <span>${window.t('skills.purge_opt_full')}</span>
+                            </label>
+                        </div>
+                        <div class="form-group" style="margin-left:1.5em;">
+                            <label class="checkbox-group">
+                                <input type="checkbox" name="sk-purge-data" disabled>
+                                <span>${window.t('skills.purge_data')}</span>
+                            </label>
+                        </div>
+                    </form>
+                    <p style="font-size:0.8em;color:var(--text-secondary);line-height:1.5;margin-top:6px;">
+                        ${window.t('skills.purge_hint')}
+                    </p>
+                    <div class="modal-actions">
+                        <button class="btn-primary" id="sk-purge-ok">${window.t('skills.purge_btn')}</button>
+                        <button class="btn-secondary" id="sk-purge-cancel">${window.t('common.cancel')}</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(overlay);
+
+            const dataCb = overlay.querySelector('[name="sk-purge-data"]');
+            overlay.querySelectorAll('[name="sk-purge-mode"]').forEach(r => {
+                r.addEventListener('change', () => {
+                    const purge = overlay.querySelector('[name="sk-purge-mode"]:checked').value === 'purge';
+                    dataCb.disabled = !purge;
+                    if (!purge) dataCb.checked = false;
+                });
+            });
+            overlay.querySelector('#sk-purge-cancel').addEventListener('click', () => overlay.remove());
+            overlay.querySelector('#sk-purge-ok').addEventListener('click', async () => {
+                const purge      = overlay.querySelector('[name="sk-purge-mode"]:checked').value === 'purge';
+                const removeData = dataCb.checked;
+                overlay.remove();
+                await this._doRemove(name, purge, removeData);
+            });
+        }
+
+        async _doRemove(name, purge, removeData) {
+            const token = window.JarvisSitzung.token();
+            try {
+                if (purge) {
+                    const resp = await fetch(`/api/skills/${name}/purge`, {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ remove_data: removeData })
+                    });
+                    const report = await resp.json().catch(() => ({}));
+                    this._showPurgeReport(name, report);
+                } else {
+                    await fetch(`/api/skills/${name}/remove`, {
+                        method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                }
+                this._notify(`"${name}" ${window.t('skills.uninstalled')}`, 'success');
+                await this.loadSkills();
+                if (typeof window.updateSkillCfgTabVisibility === 'function') window.updateSkillCfgTabVisibility();
+                if (typeof window.updateVisionTabVisibility === 'function') window.updateVisionTabVisibility();
+                if (typeof window.updateBrandingTabVisibility === 'function') window.updateBrandingTabVisibility();
+                if (typeof window.updateConfluenceTabVisibility === 'function') window.updateConfluenceTabVisibility();
+                if (typeof window.updateJiraTabVisibility === 'function') window.updateJiraTabVisibility();
+                if (typeof window.updateSapTabVisibility === 'function') window.updateSapTabVisibility();
+                if (typeof window.updateVemasTabVisibility === 'function') window.updateVemasTabVisibility();
+                if (typeof window.updateEmailTabVisibility === 'function') window.updateEmailTabVisibility();
+                if (typeof window.updateTracksSecVisibility === 'function') window.updateTracksSecVisibility();
+                if (typeof window.updateKundenverwaltungTabVisibility === 'function') window.updateKundenverwaltungTabVisibility();
+                if (typeof window.updateSupportTabVisibility === 'function') window.updateSupportTabVisibility();
+                // Messenger-Skill an/aus -> Abschnitt "Erinnerungen per Messenger" in Sicherheit
+                if (typeof window.updateReminderSectionVisibility === 'function') window.updateReminderSectionVisibility();
+                // Branding sofort anwenden bzw. (bei Deaktivierung) zuruecksetzen
+                if (name === 'branding' && typeof window.refreshBranding === 'function') window.refreshBranding();
+            } catch (e) { this._notify('Fehler: ' + e.message, 'error'); }
+        }
+
+        // Ergebnis der vollstaendigen Deinstallation anzeigen
+        _showPurgeReport(name, report) {
+            const rows = [];
+            const section = (title, items) => {
+                if (!items || !items.length) return;
+                rows.push(`<div class="sk-info-section-title">${title}</div>`);
+                rows.push(`<ul class="sk-info-use-cases">${items.map(i => `<li>${i}</li>`).join('')}</ul>`);
+            };
+            section(window.t('skills.purge_report_removed'), report.removed_packages);
+            section(window.t('skills.purge_report_kept'),
+                Object.entries(report.kept_packages || {}).map(([p, why]) => `${p} – ${why}`));
+            section(window.t('skills.purge_report_paths'), report.removed_paths);
+            section(window.t('skills.purge_report_errors'), report.errors);
+            if (!rows.length) rows.push(`<p>${window.t('skills.purge_report_none')}</p>`);
+
+            const overlay = document.createElement('div');
+            overlay.className = 'skill-config-overlay';
+            overlay.innerHTML = `
+                <div class="skill-config-dialog">
+                    <h3>${window.t('skills.purge_title')}: ${name}</h3>
+                    <div class="sk-info-section">${rows.join('')}</div>
+                    <div class="modal-actions">
+                        <button class="btn-primary" id="sk-purge-report-close">${window.t('common.close')}</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(overlay);
+            overlay.querySelector('#sk-purge-report-close').addEventListener('click', () => overlay.remove());
+        }
+
+        // Fortschritt der Hintergrund-Installation (Polling auf install-status)
+        _showInstallProgress(name) {
+            const token = window.JarvisSitzung.token();
+            const overlay = document.createElement('div');
+            overlay.className = 'skill-config-overlay';
+            overlay.innerHTML = `
+                <div class="skill-config-dialog">
+                    <h3>⏳ ${window.t('skills.installing').replace('{name}', name)}</h3>
+                    <pre id="sk-install-log" style="max-height:260px;overflow:auto;
+                        background:var(--bg-glass);color:var(--text-secondary);
+                        border-radius:8px;padding:10px;font-size:0.78em;
+                        white-space:pre-wrap;word-break:break-word;"></pre>
+                    <div class="modal-actions">
+                        <button class="btn-secondary" id="sk-install-hide">${window.t('common.close')}</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(overlay);
+
+            const logEl = overlay.querySelector('#sk-install-log');
+            let closed  = false;
+            const stop  = () => { closed = true; overlay.remove(); };
+            overlay.querySelector('#sk-install-hide').addEventListener('click', stop);
+
+            const poll = async () => {
+                if (closed) return;
+                try {
+                    const resp = await fetch(`/api/skills/${name}/install-status`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    const st = await resp.json();
+                    logEl.textContent = (st.log || []).join('\n');
+                    logEl.scrollTop = logEl.scrollHeight;
+                    if (st.running) { setTimeout(poll, 1500); return; }
+                    // Fertig → Ergebnis melden und Liste aktualisieren
+                    this._notify(st.ok
+                        ? `"${name}" ${window.t('skills.install_ok')}`
+                        : `"${name}" ${window.t('skills.install_fail')}`,
+                        st.ok ? 'success' : 'error');
+                    await this.loadSkills();
+                    if (typeof window.updateVisionTabVisibility === 'function') window.updateVisionTabVisibility();
+                    if (typeof window.updateSkillCfgTabVisibility === 'function') window.updateSkillCfgTabVisibility();
+                    if (st.ok) setTimeout(stop, 1200);
+                } catch (e) {
+                    if (!closed) setTimeout(poll, 3000);
+                }
+            };
+            poll();
+        }
+
+        async _toggle(e, name, enabled, isSystem) {
+            if (isSystem && !enabled) {
+                if (!confirm(`"${name}" ${window.t('skills.confirm_disable_system')}`)) {
+                    e.target.checked = true; return;
+                }
+            }
+            const token    = window.JarvisSitzung.token();
+            const endpoint = enabled ? 'enable' : 'disable';
+            try {
+                const resp = await fetch(`/api/skills/${name}/${endpoint}`, {
+                    method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (enabled && data.installing) {
+                    this._showInstallProgress(name);
+                    return;
+                }
+                await this.loadSkills();
+                // Tab-Sichtbarkeit nach Skill-Änderung aktualisieren
+                if (typeof window.updateSkillCfgTabVisibility === 'function') window.updateSkillCfgTabVisibility();
+                if (typeof window.updateVisionTabVisibility === 'function') window.updateVisionTabVisibility();
+                if (typeof window.updateBrandingTabVisibility === 'function') window.updateBrandingTabVisibility();
+                if (typeof window.updateConfluenceTabVisibility === 'function') window.updateConfluenceTabVisibility();
+                if (typeof window.updateJiraTabVisibility === 'function') window.updateJiraTabVisibility();
+                if (typeof window.updateSapTabVisibility === 'function') window.updateSapTabVisibility();
+                if (typeof window.updateVemasTabVisibility === 'function') window.updateVemasTabVisibility();
+                if (typeof window.updateEmailTabVisibility === 'function') window.updateEmailTabVisibility();
+                if (typeof window.updateTracksSecVisibility === 'function') window.updateTracksSecVisibility();
+                if (typeof window.updateKundenverwaltungTabVisibility === 'function') window.updateKundenverwaltungTabVisibility();
+                if (typeof window.updateSupportTabVisibility === 'function') window.updateSupportTabVisibility();
+                // Messenger-Skill an/aus -> Abschnitt "Erinnerungen per Messenger" in Sicherheit
+                if (typeof window.updateReminderSectionVisibility === 'function') window.updateReminderSectionVisibility();
+                // Branding sofort anwenden bzw. (bei Deaktivierung) zuruecksetzen
+                if (name === 'branding' && typeof window.refreshBranding === 'function') window.refreshBranding();
+            } catch (e) { console.error('Toggle fehlgeschlagen:', e); }
+        }
+
+        // ─── Konfiguration ────────────────────────────────────────────
+
+        // ── Konfigurationspunkt eines Skills ──────────────────────────
+        //
+        // ⚠ DIE DREI FUNKTIONEN HIER SIND DIE EINE REGEL DAFUER, WAS
+        // "Konfigurationspunkt" HEISST. Das Zahnrad in der Liste, das Suchfeld
+        // im Kopf der Einstellungen (settings_search.js) und jeder kuenftige
+        // Aufrufer bekommen dieselbe Antwort. Zwei Fassungen liefen beim
+        // naechsten Feinschliff auseinander – und dann fuehrt ein Treffer der
+        // Suche woandershin als das Zahnrad daneben, ohne dass es jemand
+        // erklaeren koennte.
+
+        /** Skill-Objekt zu einem Verzeichnisnamen (oder undefined). */
+        _findeSkill(name) {
+            return this.skills.find(
+                s => (s.dir_name || s.path?.split('/').pop() || s.name) === name);
+        }
+
+        /** WOHIN fuehrt dieser Skill? Reine Auskunft, veraendert nichts –
+         *  die Suche beschriftet ihre Treffer damit.
+         *  `skill` darf uebergeben werden, wenn der Aufrufer die Liste schon
+         *  hat (die Reiterliste hier kann leer sein, solange der Skills-Reiter
+         *  nie geoeffnet wurde).
+         *
+         *  'reiter'    – eigener Einstellungs-Reiter (hat Vorrang, er kann mehr)
+         *  'dialog'    – generischer Dialog aus dem config_schema
+         *  'liste'     – kein Konfigurationspunkt: nur der Eintrag in der Liste
+         *  'moegliche' – noch nicht installiert
+         */
+        zielFuer(name, skill) {
+            const s = skill || this._findeSkill(name);
+            // Kein Flag gesetzt = Altbestand; dann entscheidet enabled. Ist der
+            // Skill hier gar nicht bekannt, gilt "installiert" – sonst schickte
+            // eine unvollstaendige Liste den Benutzer faelschlich zu den
+            // moeglichen Skills.
+            const installiert = s
+                ? (s.installed !== undefined ? s.installed : s.enabled)
+                : true;
+            // Ein nicht installierter Skill hat noch KEINEN Konfigurationspunkt:
+            // der naechste Schritt ist das Hinzufuegen, nicht das Einstellen.
+            if (!installiert) return { art: 'moegliche', reiter: '' };
+            const tabBtn = tabButtonFor(name);
+            if (tabBtn) return { art: 'reiter', reiter: tabBtn.textContent.trim() };
+            if (s && s.config_schema && Object.keys(s.config_schema).length > 0) {
+                return { art: 'dialog', reiter: '' };
+            }
+            return { art: 'liste', reiter: '' };
+        }
+
+        /** Fuehrt wirklich dorthin. Rueckgabe = genommene Art (fuer Messungen). */
+        async zumKonfigurationspunkt(name) {
+            // Die Liste kann leer sein, wenn der Skills-Reiter nie geoeffnet
+            // wurde – dann faende der generische Dialog sein Schema nicht.
+            if (!this.skills.length) {
+                try { await this.loadSkills(); } catch (e) { /* Liste bleibt leer */ }
+            }
+            const ziel = this.zielFuer(name);
+            if (ziel.art === 'reiter' || ziel.art === 'dialog') {
+                await this._openConfig(name);
+                return ziel.art;
+            }
+            await this.zeigeInListe(name, ziel.art === 'liste');
+            return ziel.art;
+        }
+
+        /** Zeigt den Eintrag im Skills-Reiter: Reiter aktivieren, Abschnitt
+         *  aufklappen, Zeile anspringen und kurz hervorheben.
+         *
+         *  ⚠ BEI DEN MOEGLICHEN SKILLS GENUEGT DAS AUFKLAPPEN NICHT: jene Liste
+         *  ist zusaetzlich nach Kategorie UND Suchbegriff gefiltert – ein noch
+         *  gesetzter Filter liesse den gesuchten Eintrag gar nicht erst
+         *  entstehen, und der Klick saehe wirkungslos aus. Beide Filter werden
+         *  deshalb geloest, BEVOR neu gezeichnet wird.
+         */
+        async zeigeInListe(name, installiert) {
+            const tb = document.querySelector('.settings-tab-btn[data-settings-tab="skills"]');
+            if (tb && tb.style.display !== 'none') tb.click();
+            if (!installiert) {
+                this.categoryFilter = 'all';
+                this.searchVal = '';
+                const feld = document.getElementById('sk-search');
+                if (feld) feld.value = '';
+            }
+            try { await this.loadSkills(); } catch (e) { /* alte Liste bleibt stehen */ }
+            this._abschnittOeffnen(installiert);
+            // KEIN CSS-Selektor mit dem Namen darin: `CSS.escape` gibt es in
+            // jsdom nicht, und ein ungeschuetzter Name waere ausserdem ein
+            // Selektor-Bruch. Gesucht wird ueber den Attributwert.
+            let el = null;
+            const kandidaten = document.querySelectorAll('[data-skill]');
+            for (let i = 0; i < kandidaten.length; i++) {
+                if (kandidaten[i].getAttribute('data-skill') === name) { el = kandidaten[i]; break; }
+            }
+            if (!el) return false;
+            el.classList.add('sk-item-treffer');
+            if (typeof el.scrollIntoView === 'function') {
+                el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            }
+            // Die Hervorhebung ist eine ANTWORT auf den Klick ("hier ist er"),
+            // kein Zustand – sie verfaellt wieder.
+            setTimeout(() => el.classList.remove('sk-item-treffer'), 2600);
+            return true;
+        }
+
+        /** Klappt einen der beiden Abschnitte auf – NUR wenn er zu ist:
+         *  ein blindes click() klappte einen offenen Abschnitt ZU. Geklickt
+         *  wird die vorhandene Kopfzeile, damit der gemerkte Zustand mitlaeuft. */
+        _abschnittOeffnen(installiert) {
+            const zu = installiert ? this._instCollapsed : this._availCollapsed;
+            if (!zu) return;
+            const hdr = document.getElementById(
+                installiert ? 'sk-installed-header' : 'sk-available-header');
+            if (hdr) hdr.click();
+        }
+
+        async _openConfig(name) {
+            // Skills mit eigenem Settings-Reiter: direkt dorthin wechseln
+            const tabBtn = tabButtonFor(name);
+            if (tabBtn) {
+                tabBtn.click();
+                if (typeof tabBtn.scrollIntoView === 'function') {
+                    tabBtn.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+                }
+                return 'reiter';
+            }
+
+            const token = window.JarvisSitzung.token();
+            try {
+                const resp  = await fetch(`/api/skills/${name}/config`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data  = await resp.json();
+                const skill = this._findeSkill(name);
+                if (!skill?.config_schema) return null;
+                this._showConfigDialog(name, skill.config_schema, data.config || {});
+                return 'dialog';
+            } catch (e) { console.error('Config laden fehlgeschlagen:', e); }
+            return null;
+        }
+
+        _showConfigDialog(name, schema, currentConfig) {
+            const overlay = document.createElement('div');
+            overlay.className = 'skill-config-overlay';
+            const _e = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+            let formHTML = '';
+            for (const [key, def] of Object.entries(schema)) {
+                const val   = currentConfig[key] !== undefined ? currentConfig[key] : (def.default || '');
+                const label = def.label || key;
+                const hint  = def.description ? `<small class="config-hint">${_e(def.description)}</small>` : '';
+                if (def.type === 'boolean') {
+                    formHTML += `<div class="form-group"><label class="checkbox-group"><input type="checkbox" name="${key}" ${val ? 'checked' : ''}><span>${label}</span></label>${hint}</div>`;
+                } else if (def.type === 'number') {
+                    formHTML += `<div class="form-group"><label>${label}</label><input type="number" name="${key}" value="${_e(val)}" class="config-input">${hint}</div>`;
+                } else if (Array.isArray(def.enum) && def.enum.length) {
+                    // Auswahlliste (z.B. Avatar-Grafik/Position)
+                    const opts = def.enum.map(o => `<option value="${_e(o)}"${String(o) === String(val) ? ' selected' : ''}>${_e(o)}</option>`).join('');
+                    formHTML += `<div class="form-group"><label>${label}</label><select name="${key}" class="config-input">${opts}</select>${hint}</div>`;
+                } else if (def.type === 'text') {
+                    // Mehrzeiliges Feld (z.B. eigene Antworten des Avatars)
+                    formHTML += `<div class="form-group"><label>${label}</label><textarea name="${key}" rows="6" class="config-input" style="resize:vertical;font-family:inherit;">${_e(val)}</textarea>${hint}</div>`;
+                } else {
+                    formHTML += `<div class="form-group"><label>${label}</label><input type="text" name="${key}" value="${_e(val)}" class="config-input">${hint}</div>`;
+                }
+            }
+            overlay.innerHTML = `
+                <div class="skill-config-dialog">
+                    <h3>${window.t('skills.config_title').replace('{name}', name)}</h3>
+                    <form id="skill-config-form">${formHTML}</form>
+                    <div class="modal-actions">
+                        <button class="btn-primary" id="btn-save-skill-config">${window.t('common.save')}</button>
+                        <button class="btn-secondary" id="btn-cancel-skill-config">${window.t('common.cancel')}</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(overlay);
+            overlay.querySelector('#btn-cancel-skill-config').addEventListener('click', () => overlay.remove());
+            overlay.querySelector('#btn-save-skill-config').addEventListener('click',  () => this._saveConfig(name, schema, overlay));
+        }
+
+        async _saveConfig(name, schema, overlay) {
+            const form       = overlay.querySelector('#skill-config-form');
+            const configData = {};
+            for (const key of Object.keys(schema)) {
+                const input = form.querySelector(`[name="${key}"]`);
+                if (!input) continue;
+                if (schema[key].type === 'boolean')     configData[key] = input.checked;
+                else if (schema[key].type === 'number') configData[key] = Number(input.value);
+                else                                    configData[key] = input.value;
+            }
+            const token = window.JarvisSitzung.token();
+            try {
+                await fetch(`/api/skills/${name}/config`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify(configData)
+                });
+                overlay.remove();
+                await this.loadSkills();
+            } catch (e) { console.error('Config speichern fehlgeschlagen:', e); }
+        }
+
+        // ─── Hilfsmethoden ────────────────────────────────────────────
+
+        _notify(msg, type = 'info') {
+            const el = document.getElementById('sk-notification');
+            if (!el) return;
+            el.textContent = msg;
+            el.className = 'kb-notification kb-notification-' + type;
+            el.style.display = 'block';
+            setTimeout(() => { el.style.display = 'none'; }, 3000);
+        }
+    }
+
+    window.JarvisSkillManager = JarvisSkillManager;
+})();

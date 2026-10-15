@@ -1,0 +1,52 @@
+{
+    "name": "Browser Control",
+    "description": "Browser-Steuerung: Navigation, Tabs, Zoom (xdotool) + DOM, JS, Cookies, Formulare (CDP)",
+    "version": "2.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": [
+        "browser_control",
+        "browser_cdp"
+    ],
+    "category": "automation",
+    "icon": "globe",
+    "system": false,
+    "enabled": true,
+    "config_schema": {
+        "timeout": {
+            "type": "number",
+            "default": 30,
+            "label": "Timeout (Sekunden)"
+        },
+        "cdp_port": {
+            "type": "number",
+            "default": 9222,
+            "label": "Chrome CDP Port"
+        }
+    },
+    "knowledge_docs": [],
+    "dependencies": [],
+    "permissions": ["network", "desktop"],
+    "help": {
+        "details": "Vollständige Browsersteuerung auf zwei Ebenen: UI-Ebene via xdotool (Maus/Tastatur) und DOM-Ebene via Chrome DevTools Protocol. Damit kann Jarvis Webseiten öffnen, navigieren, Formulare ausfüllen, JavaScript ausführen, Cookies verwalten und Seiteninhalte auslesen.",
+        "tools": [
+            {
+                "name": "browser_control",
+                "label": "Browser Control (UI)",
+                "desc": "Steuert Chrome auf UI-Ebene: 'open' (Browser öffnen), 'navigate' (URL aufrufen), 'new_tab' / 'close_tab' / 'next_tab' / 'switch_tab' (Tab-Verwaltung), 'back' / 'forward' / 'refresh' (Navigation), 'zoom_in' / 'zoom_out' / 'zoom_reset', 'scroll_page', 'find_text' (Ctrl+F), 'fullscreen', 'get_url', 'close'."
+            },
+            {
+                "name": "browser_cdp",
+                "label": "Browser CDP (DOM)",
+                "desc": "Programmatischer Zugriff via Chrome DevTools Protocol: 'get_page_content' (Text oder HTML), 'get_page_info' (Titel, URL), 'get_element' / 'get_elements' (CSS-Selector), 'click_element', 'fill_field' (Formular), 'execute_js' (JavaScript), 'get_cookies' / 'set_cookie' / 'delete_cookies', 'wait_for' (auf Element warten), 'get_links', 'list_tabs', 'navigate'."
+            }
+        ],
+        "use_cases": [
+            "Öffne google.com und suche nach 'Python Tutorial'",
+            "Fülle das Anmeldeformular auf der aktuellen Seite aus",
+            "Lese den vollständigen Textinhalt der geöffneten Webseite aus"
+        ],
+        "setup": "Chrome muss auf dem Desktop gestartet sein. Für CDP-Funktionen muss Chrome mit --remote-debugging-port=9222 laufen (Standard-Konfiguration im Jarvis-Setup).",
+        "notes": "Für einfache Navigation genügt browser_control. Für Formularausfüllung, DOM-Manipulation oder JavaScript-Ausführung browser_cdp verwenden."
+    }
+}

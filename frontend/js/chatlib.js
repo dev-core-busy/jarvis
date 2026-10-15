@@ -1,0 +1,1626 @@
+/* ============================================================
+ * chatlib.js – Gemeinsame Helfer fuer alle AI-Chat-Frontends.
+ *
+ * Wird von index.html (Hauptseite, app.js) UND chat.html
+ * (Standalone-Chat, chat.js) geladen. Stellt einheitliche
+ * Implementierungen fuer:
+ *   - HTML-Escaping
+ *   - Markdown-Rendering
+ *   - Zeit-/Datums-Strings (de-DE)
+ *   - localStorage-Persistenz (save/load mit Truncate-Limit)
+ *   - History-Trim fuer "Nachricht editieren"
+ *   - DOM-Trim (Bubbles nach einer Row entfernen)
+ *   - Edit-Modus (Textarea + Save/Cancel) als generisches
+ *     Modul mit parametrisierten CSS-Klassen
+ *
+ * Vorher waren diese Funktionen ~280 Zeilen pro Datei dupliziert
+ * (in app.js und chat.js, jeweils mit minimalen Praefix-Unter-
+ * schieden). Jetzt: Single Source of Truth.
+ *
+ * Siehe auch Protokoll-Block in backend/main.py vor
+ * _truncate_history_to_user_index().
+ * ============================================================ */
+
+(function (global) {
+    'use strict';
+
+    /* ── HTML-Escape (XSS-sicher via textContent-Trick) ───────── */
+    function escapeHtml(str) {
+        const d = document.createElement('div');
+        d.textContent = String(str == null ? '' : str);
+        return d.innerHTML;
+    }
+
+    /* ── Zeit-/Datums-Strings (de-DE) ─────────────────────────── */
+    function timeStr(date) {
+        const d = date instanceof Date ? date : new Date();
+        return d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function currentDateStr(date) {
+        const d = date instanceof Date ? date : new Date();
+        return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    }
+
+    /* Wird vom onload eines Chat-Bildes aufgerufen: scrollt den scrollbaren
+       Vorfahren ans Ende, damit das frisch geladene Bild vollstaendig sichtbar ist.
+       Funktioniert in allen Web-Chats (eigener Scroll-Container je Chat). */
+    window.__jarvisImgScroll = function (el) {
+        try {
+            let p = el && el.parentElement;
+            while (p) {
+                const oy = getComputedStyle(p).overflowY;
+                if ((oy === 'auto' || oy === 'scroll') && p.scrollHeight > p.clientHeight) {
+                    p.scrollTop = p.scrollHeight;
+                    return;
+                }
+                p = p.parentElement;
+            }
+        } catch (_e) { /* ignore */ }
+    };
+
+    /* BSI H4 (CSP ohne Inline-Skript, 2026-10-04): frueher rief ein
+       onload-Attribut am <img> __jarvisImgScroll auf. Eine CSP mit
+       script-src 'self' blockiert das. Ersatz: EIN Capture-Listener am
+       document - 'load' bubbelt nicht, die Capture-Phase erreicht ihn aber
+       fuer jedes Bild im Dokument. Nur img.chat-img (erzeugt allein der
+       Markdown-Renderer unten), damit kein anderes Bild neu scrollt. Einmal
+       registriert, auch wenn chatlib.js doppelt geladen wuerde. */
+    if (!window.__jarvisImgScrollLauscher && typeof document !== 'undefined') {
+        window.__jarvisImgScrollLauscher = true;
+        document.addEventListener('load', function (ev) {
+            const el = ev.target;
+            if (el && el.tagName === 'IMG' && el.classList && el.classList.contains('chat-img')
+                    && window.__jarvisImgScroll) {
+                window.__jarvisImgScroll(el);
+            }
+        }, true);
+    }
+
+    /* ── Markdown-Renderer ────────────────────────────────────── *
+     *  Unterstuetzt: Ueberschriften (#–####), Listen (- / 1.),
+     *  Blockquotes (>), Links, Tabellen, **bold**, *italic*,
+     *  ~~del~~, `code`, ```block```                              */
+    function renderMarkdown(text) {
+        const _E = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+        // UTF-8-String -> base64 (fuer die Chart-Spec im data-Attribut, ohne
+        // deprecated unescape; Sonderzeichen stoeren so die Token-Ersetzung nicht)
+        const _toB64 = (str) => {
+            try {
+                const bytes = new TextEncoder().encode(str);
+                let bin = '';
+                for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+                return btoa(bin);
+            } catch (e) { return ''; }
+        };
+
+        // 1) Code-Bloecke extrahieren (vor HTML-Escape)
+        const codeBlocks = [];
+        let s = String(text == null ? '' : text).replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+            const idx = codeBlocks.length;
+            // ```chartjs / ```jarvis-chart -> interaktives Chart.js-Diagramm.
+            // Die Spec (JSON) wird base64-kodiert ins data-Attribut gelegt und
+            // spaeter von charts.js sicher (JSON.parse, kein eval) gerendert.
+            if (/^(chartjs|jarvis-chart|chart)$/i.test(lang)) {
+                codeBlocks.push(`<div class="jarvis-chart" data-spec="${_toB64(code.trim())}"></div>`);
+            } else if (/^(mermaid|mmd)$/i.test(lang)) {
+                // ```mermaid -> Schaubild (Fluss-, Sequenz-, Gantt-, ER-Diagramm).
+                // Wie beim Chart wandert die QUELLE base64-kodiert ins
+                // data-Attribut; mermaid_blocks.js rendert sie mit
+                // securityLevel 'strict' zu SVG (kein HTML aus Modelltext).
+                // Kein Chart.js-Ersatz: Mermaid kann keine x/y-Daten.
+                codeBlocks.push(`<div class="jarvis-mermaid" data-src="${_toB64(code.trim())}"></div>`);
+            } else {
+                codeBlocks.push(`<pre><code>${_E(code.trim())}</code></pre>`);
+            }
+            return `\x01CODE${idx}\x01`;
+        });
+
+        // 2) HTML-Escape den Rest
+        s = _E(s);
+
+        // 3) Inline-Code
+        s = s.replace(/`([^`\n]+)`/g, (_, c) => `<code>${c}</code>`);
+
+        // Download-Icon (Office-Chip)
+        const _DL_SVG = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>';
+
+        /* ── Dokument-URLs: Sitzungstoken ERST BEIM RENDERN anhaengen ──────
+         * /api/documents/<cap> verlangt seit 2026-07-28 eine Anmeldung. Ein
+         * <a download> und ein <img> koennen keinen Authorization-Header setzen,
+         * deshalb nimmt der Endpunkt zusaetzlich ?token= (require_auth_or_query).
+         *
+         * WICHTIG: Das Token darf NUR in das gerenderte DOM, niemals in den
+         * gespeicherten Markdown. Der Chat-Verlauf liegt auf der Platte, geht in
+         * den LLM-Kontext und wird exportiert – ein Sitzungstoken hat dort nichts
+         * zu suchen. Weil _inline() bei jeder Anzeige neu laeuft, genuegt das.
+         * Nur eigene Pfade werden ergaenzt, sonst wuerde das Token an fremde
+         * Hosts abfliessen. */
+        function _sessToken() {
+            try {
+                return window.JarvisSitzung.token()
+                    || window.JarvisSitzung.token()
+                    || window.JarvisSitzung.token();
+            } catch (e) { return ''; }
+        }
+
+        function _withToken(url) {
+            // /api/knowledge/netzquelle gehoert dazu: der Quell-Link im Chat ist
+            // eine Navigation ohne Header und verlangt (wie file_raw) ?token=.
+            if (!/^\/api\/(?:documents\/|knowledge\/netzquelle\?)/.test(url || '')) return url;
+            // Abruf-Schluessel statt Sitzungstoken (frontend/js/dlkey.js): ein weitergegebener Link ist damit 15 Minuten Lesezugriff, nicht 30 Tage volle Sitzung.
+            // Faellt das Modul aus (aeltere Seite ohne dlkey.js), bleibt es beim
+            // bisherigen Verhalten – ein toter Download-Chip waere schlechter als
+            // der bekannte Zustand.
+            if (window.JarvisDL) return window.JarvisDL.url(url);
+            const tk = _sessToken();
+            if (!tk) return url;
+            return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(tk);
+        }
+
+        /* ── Netzwerkpfad einer Wissensquelle als LINK ─────────────────────
+         * Die Chat-Antwort nennt als Quelle den Netzwerkpfad der Freigabe
+         * (`\\\\host\\freigabe\\…`, siehe backend/tools/knowledge.quell_anzeige).
+         * Er soll klickbar sein wie jede andere Adresse.
+         *
+         * ⚠ EIN `file://`-LINK LEISTET DAS NICHT – gemessen im echten Chrome:
+         * die Navigation von einer https-Seite aus wird verworfen, ohne
+         * Meldung und ohne Konsolenzeile. Der Klick tut sichtbar GAR NICHTS.
+         * Deshalb zeigt der Link auf `/api/knowledge/netzquelle`, das die
+         * Datei aus der Wissensdatenbank ausliefert; der SICHTBARE Text bleibt
+         * der Netzwerkpfad, damit der Benutzer weiss, wo das Original liegt
+         * (und ihn per Rechtsklick/Markieren kopieren kann).
+         *
+         * Erkannt werden dieselben Formen wie in `agent._NETZQUELLE_RE`:
+         * UNC und `host:/export/…` (NFS). Mindestens ZWEI Zeichen vor dem
+         * Doppelpunkt, sonst waere `C:/temp/x.pdf` eine Netzwerkquelle; und
+         * `(?!/)` danach, sonst schluckt das Muster jedes `https://` – das
+         * verlinkt der gewoehnliche Autolinker weiter unten.
+         *
+         * ⚠ DIE DATEIENDUNG IST DER ANKER, UND ZWAR ZWINGEND. Freigabe- und
+         * Dateinamen enthalten in Windows-Netzen staendig LEERZEICHEN
+         * ("…\\0001_Projekt\\Anleitungen SAP.one" – der gemeldete Fall). Ein
+         * Muster, das am Leerraum endet, schneidet den Pfad genau dort ab: der
+         * Link zeigte auf "…\\Anleitungen" und in Backticks entstand gar
+         * keiner. Im Fliesstext hat so ein Pfad kein anderes erkennbares Ende
+         * als seine Endung – deshalb sind Leerzeichen erlaubt und der Ausdruck
+         * endet LAZY an der ersten Endung nach dem letzten Trennzeichen.
+         * Nebeneffekt, gewollt: ein Pfad OHNE Endung wird NICHT verlinkt. Er
+         * liesse sich nicht begrenzen, und ein abgeschnittener Link ist
+         * schlimmer als reiner Text – er fuehrt auf einen 404. */
+        const _NETZ_UNC = '\\\\\\\\[^\\s\\\\<>"]+(?:\\\\[^\\\\<>"\\n]+)*\\\\[^\\\\<>"\\n]*?';
+        const _NETZ_NFS = '\\b[A-Za-z0-9][\\w.\\-]+:\\/(?!\\/)(?:[^\\/<>"\\n]+\\/)*[^\\/<>"\\n]*?';
+        const _NETZ_END = '(?:\\.[A-Za-z0-9]{1,8})+(?![A-Za-z0-9])';
+        const _NETZ_QUELL = '(?:' + _NETZ_UNC + '|' + _NETZ_NFS + ')' + _NETZ_END;
+        const _NETZ_RE = new RegExp(_NETZ_QUELL, 'g');
+
+        function _netzLink(pfad) {
+            // Kein Satzzeichen-Trim mehr: der Ausdruck endet an der Endung,
+            // damit liegt ein "." oder ")" dahinter von selbst ausserhalb
+            // (gemessen fuer "…SAP.one." und "(siehe …SAP.one)").
+            const rein = pfad;
+            const schwanz = '';
+            const roh = rein.replace(/&amp;/g, '&');
+            const url = _withToken('/api/knowledge/netzquelle?netz=' + encodeURIComponent(roh));
+            const tip = escapeHtml(_tt('media.netz_hint',
+                'Öffnet die Datei aus der Wissensdatenbank · Original:') + ' ' + roh);
+            return `<a href="${url}" target="_blank" rel="noopener noreferrer" `
+                 + `class="jv-netzquelle" title="${tip}">${rein}</a>` + schwanz;
+        }
+
+        function _inline(t) {
+            // Platzhalter fuer fertiges HTML, das die **/_/* -Formatierung UND das
+            // URL-Autolinking NICHT mehr anfassen duerfen (Bilder, Download-Chips):
+            // deren Attribut-URLs enthalten '__' (zerstoert die Kursiv-Regex) bzw.
+            // wuerden vom Autolinker ein zweites Mal verlinkt. Erst ganz am Ende zurueck.
+            const _ph = [];
+            const _hold = (htmlStr) => { _ph.push(htmlStr); return `\x02PH${_ph.length - 1}\x02`; };
+
+            // Inline-Code SOFORT sichern – vor jeder Formatierung. Sonst frisst die
+            // Kursiv-Regex weiter unten die Unterstriche im Code-Inhalt, z.B. wuerde
+            // `LOCAL_RECEIVE_PATH` als LOCAL<em>RECEIVE</em>PATH gerendert.
+            t = t.replace(/<code>([\s\S]*?)<\/code>/g, (m, inner) => {
+                // ⚠ GEMESSEN: das Modell setzt den Quellpfad in Backticks. Weil
+                // Inline-Code hier als ERSTES gesichert wird, saehe ein
+                // Autolinker weiter unten den Pfad NIE – der Link muss also
+                // schon hier entstehen. Nur wenn der Code-Inhalt GENAU ein
+                // Netzwerkpfad ist: ein Codeblock mit Text drumherum bleibt
+                // Code.
+                const p = inner.trim();
+                const g = new RegExp('^(?:' + _NETZ_QUELL + ')$');
+                if (p && g.test(p)) return _hold('<code>' + _netzLink(p) + '</code>');
+                return _hold(m);
+            });
+
+            // Bilder ![alt](url)
+            t = t.replace(/!\[([^\]\n]*)\]\(([^)\n]+)\)/g, (_, alt, url) => {
+                const raw = url.replace(/&amp;/g, '&');
+                const safe = /^https?:\/\/|^\/|^data:image\//.test(raw) ? _withToken(raw) : '';
+                if (!safe) return '';
+                return _hold(`<img src="${safe}" alt="${alt}" class="chat-img" loading="lazy" `
+                     // BSI H4: kein onload mehr - der Capture-Listener oben
+                     // (document, 'load') ruft __jarvisImgScroll fuer img.chat-img.
+                     + `style="max-width:100%;border-radius:10px;margin:6px 0;display:block;">`);
+            });
+            // Office-Download-Chips als Platzhalter extrahieren
+            const _chip = (label, url) => {
+                const safe = (label || 'Datei').replace(/^[📥\s]+/, '').trim() || 'Datei';
+                // Der title nennt den Weg, den man dem Chip nicht ansieht: Ziehen
+                // (DownloadURL → Explorer/Outlook). Das Kontextmenue wird hier
+                // ABSICHTLICH NICHT versprochen – es haengt an der Seite
+                // (chat.js bindet es ein, /support nicht), und eine Zusage, die
+                // je Seite stimmt oder nicht, ist schlimmer als keine.
+                const tip = escapeHtml(_tt('media.chip_hint',
+                    'Klick = herunterladen · Ziehen = in Explorer/Outlook'));
+                return _hold(`<a href="${_withToken(url)}" download class="chat-doc-dl" title="${tip}">`
+                           + `${_DL_SVG}<span>${safe}</span></a>`);
+            };
+            // Markdown-Form [label](/api/documents/..)
+            // Bildendungen gehoeren dazu (2026-10-12): das Backend schickt zu
+            // jeder Bild-Vorschau einen Download-Link; ohne sie wurde er ein
+            // gewoehnlicher Link, der das Bild in einem neuen Tab OEFFNET statt
+            // es herunterzuladen. `![..](..)` ist oben schon als Platzhalter
+            // gesichert, die Vorschau selbst trifft diese Regel also nicht.
+            t = t.replace(/\[([^\]\n]*)\]\((\/api\/documents\/[A-Za-z0-9_\-]+\.(?:docx|xlsx|pptx|pdf|png|jpe?g|gif|webp|bmp|svg))\)/g,
+                (_, tit, url) => _chip(tit, url));
+            // Nackte URL /api/documents/..
+            t = t.replace(/(^|[\s(])(\/api\/documents\/[A-Za-z0-9_\-]+\.(?:docx|xlsx|pptx|pdf))/g,
+                (_, pre, url) => pre + _chip('Download', url));
+
+            t = t.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+            t = t.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            t = t.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+            // '_' kursiviert NUR ausserhalb von Woertern (wie CommonMark). Sonst
+            // zerreisst jeder Bezeichner mit zwei Unterstrichen – LOCAL_RECEIVE_PATH,
+            // LOCAL_SEND_PATH, snake_case – zu "LOCALRECEIVEPATH".
+            t = t.replace(/(^|[^A-Za-z0-9_])_([^_\n]+)_(?![A-Za-z0-9_])/g, '$1<em>$2</em>');
+            t = t.replace(/~~(.+?)~~/g, '<del>$1</del>');
+            t = t.replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, (_, tit, url) => {
+                const raw = url.replace(/&amp;/g, '&');
+                // Auch hier Token anhaengen: per Liefer-Marker koennen Dateien
+                // beliebigen Typs (zip/csv/mp4 …) kommen, die kein Chip werden.
+                const safe = /^https?:\/\/|^\//.test(raw) ? _withToken(raw) : '#';
+                return `<a href="${safe}" target="_blank" rel="noopener noreferrer">${tit}</a>`;
+            });
+
+            // Nackte URLs (http/https/www) klickbar machen. Bestehende Markdown-<a>-
+            // Bereiche zuerst schuetzen, damit URLs in href-Attributen nicht ein
+            // zweites Mal (und kaputt) verlinkt werden.
+            // Bilder/Chips/Inline-Code sind hier bereits Platzhalter und daher
+            // automatisch geschuetzt.
+            const _prot = [];
+            const _protect = (re) => { t = t.replace(re, (m) => { _prot.push(m); return `\x03P${_prot.length - 1}\x03`; }); };
+            _protect(/<a\b[^>]*>[\s\S]*?<\/a>/g);
+            t = t.replace(/(https?:\/\/[^\s<>"{}|\\^`[\]]+|www\.[a-zA-Z0-9][^\s<>"{}|\\^`[\]]*)/gi, (url) => {
+                const raw = url.replace(/&amp;/g, '&');
+                const href = /^www\./i.test(raw) ? 'https://' + raw : raw;
+                return `<a href="${href}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+            });
+            // Nackte Netzwerkpfade – NACH _protect(<a>), damit ein bereits
+            // gebauter Link nicht ein zweites Mal verlinkt wird.
+            _NETZ_RE.lastIndex = 0;
+            t = t.replace(_NETZ_RE, (pfad) => _netzLink(pfad));
+            t = t.replace(/\x03P(\d+)\x03/g, (_, i) => _prot[+i]);
+
+            // Bilder/Chips ganz am Ende wiederherstellen (nach jeder Formatierung)
+            t = t.replace(/\x02PH(\d+)\x02/g, (_, i) => _ph[+i]);
+            return t;
+        }
+
+        const lines = s.split('\n');
+        const out = [];
+        let i = 0;
+        while (i < lines.length) {
+            const l = lines[i];
+            const hm = l.match(/^(#{1,4}) (.+)/);
+            if (hm) { out.push(`<h${hm[1].length}>${_inline(hm[2])}</h${hm[1].length}>`); i++; continue; }
+            if (/^---+$/.test(l.trim())) { out.push('<hr>'); i++; continue; }
+            if (l.startsWith('&gt; ')) { out.push(`<blockquote>${_inline(l.slice(5))}</blockquote>`); i++; continue; }
+            if (/^[ \t]*[-*+] /.test(l)) {
+                const its = [];
+                while (i < lines.length && /^[ \t]*[-*+] /.test(lines[i]))
+                    its.push(`<li>${_inline(lines[i++].replace(/^[ \t]*[-*+] /, ''))}</li>`);
+                out.push(`<ul>${its.join('')}</ul>`); continue;
+            }
+            if (/^[ \t]*\d+\. /.test(l)) {
+                const its = [];
+                while (i < lines.length && /^[ \t]*\d+\. /.test(lines[i]))
+                    its.push(`<li>${_inline(lines[i++].replace(/^[ \t]*\d+\. /, ''))}</li>`);
+                out.push(`<ol>${its.join('')}</ol>`); continue;
+            }
+            if (l.includes('|') && i + 1 < lines.length && /^\|?[\s\-:|]+\|/.test(lines[i + 1])) {
+                const tl = [];
+                while (i < lines.length && lines[i].includes('|')) tl.push(lines[i++]);
+                if (tl.length >= 2) {
+                    const hs = tl[0].split('|').map(c => c.trim()).filter(Boolean);
+                    const rs = tl.slice(2).map(r => r.split('|').map(c => c.trim()).filter(Boolean));
+                    let t = '<table><thead><tr>' + hs.map(h => `<th>${_inline(h)}</th>`).join('') + '</tr></thead><tbody>';
+                    rs.forEach(r => { t += '<tr>' + r.map(c => `<td>${_inline(c)}</td>`).join('') + '</tr>'; });
+                    out.push(t + '</tbody></table>'); continue;
+                }
+            }
+            if (!l.trim()) { if (out.length && out[out.length - 1] !== '<br>') out.push('<br>'); i++; continue; }
+            out.push(_inline(l) + '<br>'); i++;
+        }
+        let r = out.join('').replace(/\x01CODE(\d+)\x01/g, (_, n) => codeBlocks[+n]);
+        return r.replace(/^(<br>)+/, '').replace(/(<br>)+$/, '');
+    }
+
+    /* ── localStorage-Persistenz ──────────────────────────────── */
+    function saveHistory(key, list, maxItems) {
+        if (!key || !Array.isArray(list)) return false;
+        const max = (typeof maxItems === 'number' && maxItems > 0) ? maxItems : 200;
+        try {
+            const slice = list.length > max ? list.slice(-max) : list;
+            localStorage.setItem(key, JSON.stringify(slice));
+            return true;
+        } catch (_e) {
+            // QuotaExceeded oder Storage deaktiviert
+            return false;
+        }
+    }
+
+    function loadHistory(key) {
+        if (!key) return [];
+        try {
+            const raw = localStorage.getItem(key);
+            if (!raw) return [];
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (_e) {
+            return [];
+        }
+    }
+
+    /* ── Geteilte Anzeige-History (Backend, pro Benutzer) ─────────── *
+     *  Hauptfenster und jarvis/chat teilen denselben Verlauf serverseitig.
+     *  Neue Nachrichten werden ANGEHAENGT (additiv, fensteruebergreifend in
+     *  Ankunftsreihenfolge); beim Oeffnen/Aktualisieren wird geladen.        */
+    const _SHARED_URL = '/api/chat/shared-history';
+
+    async function sharedLoad(token) {
+        try {
+            const r = await fetch(_SHARED_URL, { headers: { 'Authorization': 'Bearer ' + token } });
+            if (!r.ok) return null;
+            const d = await r.json();
+            return Array.isArray(d.messages) ? d.messages : [];
+        } catch (_e) { return null; }
+    }
+
+    async function sharedAppend(token, msg, clientId) {
+        try {
+            await fetch(_SHARED_URL + '/append', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: msg, client_id: clientId || '' }),
+            });
+        } catch (_e) { /* offline -> nur lokal */ }
+    }
+
+    async function sharedReplace(token, messages, clientId) {
+        try {
+            await fetch(_SHARED_URL, {
+                method: 'PUT',
+                headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ messages: messages || [], client_id: clientId || '' }),
+            });
+        } catch (_e) { /* offline */ }
+    }
+
+    /* Einmalige Zusammenfuehrung der bisherigen getrennten localStorage-Verlaeufe
+       ins Backend (nur wenn dort noch leer). keys = beide alten History-Keys. */
+    async function sharedMigrate(token, keys) {
+        try {
+            if (localStorage.getItem('jarvis_shared_migrated') === '1') return;
+            const backend = await sharedLoad(token);
+            if (backend === null) return;          // Backend nicht erreichbar -> spaeter erneut
+            if (backend.length === 0) {
+                let merged = [];
+                (keys || []).forEach(function (k) {
+                    try {
+                        const raw = localStorage.getItem(k);
+                        if (raw) { const arr = JSON.parse(raw); if (Array.isArray(arr)) merged = merged.concat(arr); }
+                    } catch (_e) {}
+                });
+                merged.sort(function (a, b) { return ((a && a.ts) || 0) - ((b && b.ts) || 0); });
+                if (merged.length > 0) await sharedReplace(token, merged);
+            }
+            localStorage.setItem('jarvis_shared_migrated', '1');
+        } catch (_e) {}
+    }
+
+    /* ── History-Trim fuer "Nachricht editieren" ──────────────── *
+     *  Kuerzt eine History-Liste so, dass die ersten (userIndex+1)
+     *  User-Eintraege erhalten bleiben und alles danach entfernt
+     *  wird. Aktualisiert dabei den Text des betroffenen Eintrags.
+     *
+     *  history – Array von Objekten mit role + text (+ optional time/date)
+     *  userIndex – 0-basierter Index unter den role==='user' Eintraegen
+     *  newText – neuer Text fuer den editierten User-Eintrag
+     *  opts.timeStr / opts.dateStr – optional neue Zeit-/Datums-Strings
+     *
+     *  Mutiert die Liste IN PLACE. Rueckgabe: Anzahl entfernter Eintraege. */
+    function truncateHistoryToUserIndex(history, userIndex, newText, opts) {
+        if (!Array.isArray(history) || userIndex < 0) return 0;
+        opts = opts || {};
+        let userSeen = 0;
+        let cutAt = history.length;
+        for (let i = 0; i < history.length; i++) {
+            if (history[i] && history[i].role === 'user') {
+                if (userSeen === userIndex) {
+                    cutAt = i + 1;
+                    if (typeof newText === 'string') {
+                        history[i].text = newText;
+                        if (opts.timeStr) history[i].time = opts.timeStr;
+                        if (opts.dateStr) history[i].date = opts.dateStr;
+                    }
+                    break;
+                }
+                userSeen++;
+            }
+        }
+        const removed = history.length - cutAt;
+        if (removed > 0) history.length = cutAt;
+        return removed;
+    }
+
+    /* ── DOM-Trim: alle Siblings nach einer Row entfernen ─────── */
+    function removeRowsAfter(row) {
+        if (!row || !row.parentNode) return 0;
+        const toRemove = [];
+        let sibling = row.nextSibling;
+        while (sibling) {
+            const next = sibling.nextSibling;
+            toRemove.push(sibling);
+            sibling = next;
+        }
+        toRemove.forEach(el => el.parentNode && el.parentNode.removeChild(el));
+        return toRemove.length;
+    }
+
+    /* ── Edit-Modus: Bubble in Textarea verwandeln ────────────── *
+     *  Generischer Workflow. Praefixe via opts parametrisierbar.
+     *
+     *  Pflicht-Parameter:
+     *    row, bubble – DOM-Elemente der zu editierenden Bubble
+     *    opts.onCommit(newText) – Callback bei Save (neuer Text)
+     *
+     *  Optionale Parameter:
+     *    opts.isBlocked()        – z.B. () => agentRunning
+     *    opts.blockMessage       – Alert-Text wenn blockiert
+     *    opts.onCancel()         – Callback bei Abbruch
+     *    opts.editBtnSelector    – z.B. '.msg-edit-btn'
+     *    opts.areaClass          – z.B. 'msg-edit-area'
+     *    opts.actionsClass       – z.B. 'msg-edit-actions'
+     *    opts.saveClass          – z.B. 'msg-edit-save'
+     *    opts.cancelClass        – z.B. 'msg-edit-cancel'
+     *    opts.saveLabel / opts.cancelLabel – Button-Texte
+     *
+     *  Rueckgabe: true wenn Edit-Modus geoeffnet, false sonst. */
+    function enterEditMode(row, bubble, opts) {
+        opts = opts || {};
+        if (!row || !bubble) return false;
+        if (typeof opts.isBlocked === 'function' && opts.isBlocked()) {
+            alert(opts.blockMessage || (window.t ? window.t('bubble.block_running') : 'Bitte stoppe zuerst die laufende Aufgabe.'));
+            return false;
+        }
+
+        const editBtnSelector = opts.editBtnSelector || '.jv-bubble-edit-btn';
+        const areaClass    = opts.areaClass    || 'jv-bubble-edit-area';
+        const actionsClass = opts.actionsClass || 'jv-bubble-edit-actions';
+        const saveClass    = opts.saveClass    || 'jv-bubble-edit-save';
+        const cancelClass  = opts.cancelClass  || 'jv-bubble-edit-cancel';
+        const saveLabel    = opts.saveLabel    || 'Speichern & neu generieren';
+        const cancelLabel  = opts.cancelLabel  || 'Abbrechen';
+
+        const oldText = row.dataset.rawText || bubble.textContent || '';
+
+        bubble.dataset.origHtml = bubble.innerHTML;
+        bubble.innerHTML = '';
+        bubble.classList.add('editing');
+
+        const ta = document.createElement('textarea');
+        ta.className = areaClass;
+        ta.value = oldText;
+        ta.rows = Math.min(10, Math.max(2, oldText.split('\n').length + 1));
+        bubble.appendChild(ta);
+
+        const actions = document.createElement('div');
+        actions.className = actionsClass;
+        const saveBtn = document.createElement('button');
+        saveBtn.type = 'button';
+        saveBtn.className = saveClass;
+        saveBtn.textContent = saveLabel;
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = cancelClass;
+        cancelBtn.textContent = cancelLabel;
+        actions.appendChild(cancelBtn);
+        actions.appendChild(saveBtn);
+        bubble.appendChild(actions);
+
+        const editBtnEl = row.querySelector(editBtnSelector);
+        if (editBtnEl) editBtnEl.style.visibility = 'hidden';
+
+        ta.focus();
+        try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch (_e) {}
+
+        const _onCancel = typeof opts.onCancel === 'function' ? opts.onCancel : () => {};
+        const _onCommit = typeof opts.onCommit === 'function' ? opts.onCommit : () => {};
+
+        const finish = (commit) => {
+            if (commit) {
+                const newText = ta.value.trim();
+                if (!newText) { alert('Text darf nicht leer sein.'); return; }
+                if (newText === oldText) {
+                    exitEditMode(row, bubble, { editBtnSelector: editBtnSelector });
+                    _onCancel();
+                    return;
+                }
+                _onCommit(newText);
+            } else {
+                exitEditMode(row, bubble, { editBtnSelector: editBtnSelector });
+                _onCancel();
+            }
+        };
+
+        cancelBtn.addEventListener('click', () => finish(false));
+        saveBtn.addEventListener('click',   () => finish(true));
+        ta.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+            else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault(); finish(true);
+            }
+        });
+        return true;
+    }
+
+    /* ── Edit-Modus verlassen / Bubble zuruecksetzen ──────────── */
+    function exitEditMode(row, bubble, opts) {
+        opts = opts || {};
+        if (!bubble) return;
+        bubble.innerHTML = bubble.dataset.origHtml || '';
+        delete bubble.dataset.origHtml;
+        bubble.classList.remove('editing');
+        const editBtnSelector = opts.editBtnSelector || '.jv-bubble-edit-btn';
+        const editBtnEl = row && row.querySelector(editBtnSelector);
+        if (editBtnEl) editBtnEl.style.visibility = '';
+    }
+
+    /* ───────────────────────────────────────────────────────────── *
+     *  Bubble-Kontextmenue (Rechtsklick / Long-Press)
+     *
+     *  Erzeugt EIN globales Floating-Menu (#jv-bubble-ctx-menu) und
+     *  haengt es per `setupBubbleContextMenu(el, opts)` an jede Bubble-
+     *  Row. Die Aktionen werden pro Aufruf neu konfiguriert.
+     *
+     *  opts = {
+     *    items: [
+     *      { label: 'Bearbeiten', icon: JarvisIcons.pencil(), onClick: () => {...} },
+     *      { label: 'Loeschen',   icon: JarvisIcons.trash(), danger: true, onClick: ... },
+     *      { label: 'Kopieren',   icon: '⧉', onClick: ... },
+     *    ]
+     *  }
+     *  Items mit `onClick === null` werden uebersprungen (z.B. Bearbeiten
+     *  bei Bot-Bubbles weglassen).
+     * ───────────────────────────────────────────────────────────── */
+    let _ctxMenuEl = null;
+    function _ensureCtxMenu() {
+        if (_ctxMenuEl) return _ctxMenuEl;
+        _ctxMenuEl = document.createElement('div');
+        _ctxMenuEl.id = 'jv-bubble-ctx-menu';
+        _ctxMenuEl.className = 'jv-bubble-ctx-menu';
+        document.body.appendChild(_ctxMenuEl);
+        // Globale Close-Handler
+        document.addEventListener('click', () => _hideCtxMenu());
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') _hideCtxMenu();
+        });
+        window.addEventListener('blur', () => _hideCtxMenu());
+        window.addEventListener('resize', () => _hideCtxMenu());
+        return _ctxMenuEl;
+    }
+    function _hideCtxMenu() {
+        if (_ctxMenuEl) _ctxMenuEl.classList.remove('open');
+    }
+    function _showCtxMenuAt(x, y, items) {
+        const menu = _ensureCtxMenu();
+        menu.innerHTML = '';
+        const usable = items.filter(it => it && typeof it.onClick === 'function');
+        if (usable.length === 0) return;
+        for (const it of usable) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'jv-bubble-ctx-item' + (it.danger ? ' danger' : '');
+            const icon = it.icon ? `<span class="jv-bubble-ctx-icon">${it.icon}</span>` : '';
+            btn.innerHTML = `${icon}<span>${escapeHtml(it.label || '')}</span>`;
+            btn.addEventListener('click', (ev) => {
+                ev.stopPropagation();
+                _hideCtxMenu();
+                try { it.onClick(); } catch (e) { console.error('[CtxMenu]', e); }
+            });
+            menu.appendChild(btn);
+        }
+        // Positionierung (am Viewport-Rand abklemmen)
+        menu.classList.add('open');
+        const rect = menu.getBoundingClientRect();
+        const maxX = window.innerWidth  - rect.width  - 8;
+        const maxY = window.innerHeight - rect.height - 8;
+        menu.style.left = Math.max(4, Math.min(x, maxX)) + 'px';
+        menu.style.top  = Math.max(4, Math.min(y, maxY)) + 'px';
+    }
+
+    function setupBubbleContextMenu(targetEl, getItems) {
+        if (!targetEl || typeof getItems !== 'function') return;
+        targetEl.addEventListener('contextmenu', (e) => {
+            // Edit-Mode aktiv? Dann kein Menue
+            if (targetEl.classList.contains('editing') ||
+                targetEl.querySelector('.editing')) return;
+            // SHIFT laesst das BROWSER-Menue durch. Wer "Bild in neuem Tab",
+            // "Untersuchen" oder eine Erweiterung braucht, kommt sonst nicht mehr
+            // daran – ein eigenes Menue darf den Weg nicht endgueltig zumauern.
+            if (e.shiftKey) return;
+            // `getItems` bekommt das Ereignis: nur so laesst sich unterscheiden,
+            // ob auf ein Bild, ein Diagramm, einen Datei-Chip oder auf Text
+            // geklickt wurde. Bestehende Aufrufer ignorieren das Argument.
+            const items = getItems(e);
+            if (!items || items.length === 0) return;
+            e.preventDefault();
+            e.stopPropagation();
+            _showCtxMenuAt(e.clientX, e.clientY, items);
+        });
+        // Long-Press fuer Touch-Geraete (~550ms)
+        let _touchTimer = null;
+        let _touchStartXY = null;
+        targetEl.addEventListener('touchstart', (e) => {
+            if (!e.touches || e.touches.length !== 1) return;
+            const t = e.touches[0];
+            _touchStartXY = { x: t.clientX, y: t.clientY };
+            _touchTimer = setTimeout(() => {
+                // Auch hier das Ereignis mitgeben: Long-Press auf ein Bild muss
+                // dieselben Eintraege liefern wie ein Rechtsklick darauf.
+                const items = getItems(e);
+                if (!items || items.length === 0) return;
+                _showCtxMenuAt(_touchStartXY.x, _touchStartXY.y, items);
+                // haptisches Feedback (falls vorhanden)
+                try { navigator.vibrate && navigator.vibrate(30); } catch(_) {}
+            }, 550);
+        }, { passive: true });
+        const _cancelTouch = () => { if (_touchTimer) { clearTimeout(_touchTimer); _touchTimer = null; } };
+        targetEl.addEventListener('touchend',    _cancelTouch);
+        targetEl.addEventListener('touchcancel', _cancelTouch);
+        targetEl.addEventListener('touchmove', (e) => {
+            if (!_touchStartXY || !e.touches || e.touches.length !== 1) return _cancelTouch();
+            const t = e.touches[0];
+            const dx = Math.abs(t.clientX - _touchStartXY.x);
+            const dy = Math.abs(t.clientY - _touchStartXY.y);
+            if (dx > 8 || dy > 8) _cancelTouch();
+        }, { passive: true });
+    }
+
+    /* ───────────────────────────────────────────────────────────── *
+     *  Auswahlmodus (Mehrfachauswahl zum Loeschen von Nachrichten)
+     *
+     *  Kapselt den kompletten Lebenszyklus, der vorher in app.js,
+     *  chat.js und userchat.js jeweils nahezu identisch dupliziert war:
+     *    - Modus betreten/verlassen/umschalten
+     *    - Checkbox je Row einfuegen/entfernen
+     *    - Auswahl-Zaehler aktualisieren + Loesch-Button (de)aktivieren
+     *    - Vorauswahl aus dem Kontextmenue ("Loeschen")
+     *    - Bestaetigungsdialog (select.confirm)
+     *
+     *  Die SEITENSPEZIFISCHE Loeschlogik (lokale History filtern + DOM
+     *  entfernen vs. WebSocket dm_delete) wird per opts.onDelete(rows)
+     *  Callback delegiert.
+     *
+     *  opts = {
+     *    container,            // DOM-Element mit den Rows (Pflicht)
+     *    rowSelector,          // z.B. '.jv-bubble-row' (Pflicht)
+     *    checkboxClass,        // z.B. 'jv-msg-check'   (Pflicht)
+     *    selectModeClass,      // Klasse am Container, Default 'select-mode'
+     *    bar, countEl, delBtn, // Aktionsleiste, Zaehler, Loesch-Button
+     *    toggleBtn, cancelBtn, // optionale Buttons
+     *    canSelectRow(row),    // Filter: welche Rows bekommen eine Checkbox
+     *                          //   (Default: alle); userchat: nur eigene
+     *    onEnter(),            // Hook beim Betreten (z.B. Edit-Modus beenden)
+     *    onDelete(rows),       // Pflicht-Callback: loescht die markierten Rows
+     *  }
+     *
+     *  Rueckgabe: Controller mit isActive(), enter(), exit(), toggle(),
+     *  startSelectionDelete(row), addCheckboxToRow(row), updateCount(),
+     *  checkbox(row).
+     * ───────────────────────────────────────────────────────────── */
+    function createSelectionController(opts) {
+        opts = opts || {};
+        const container       = opts.container;
+        const rowSelector     = opts.rowSelector;
+        const checkboxClass   = opts.checkboxClass;
+        const selectModeClass = opts.selectModeClass || 'select-mode';
+        const bar       = opts.bar       || null;
+        const countEl   = opts.countEl   || null;
+        const delBtn      = opts.delBtn      || null;
+        const toggleBtn   = opts.toggleBtn   || null;
+        const cancelBtn   = opts.cancelBtn   || null;
+        const selectAllBtn = opts.selectAllBtn || null;
+        const canSelectRow = typeof opts.canSelectRow === 'function' ? opts.canSelectRow : () => true;
+        const onEnter  = typeof opts.onEnter  === 'function' ? opts.onEnter  : null;
+        const onDelete = typeof opts.onDelete === 'function' ? opts.onDelete : () => {};
+
+        if (!container || !rowSelector || !checkboxClass) {
+            console.error('[SelectionController] container/rowSelector/checkboxClass erforderlich');
+            const noop = () => {};
+            return { isActive: () => false, enter: noop, exit: noop, toggle: noop,
+                     startSelectionDelete: noop, addCheckboxToRow: noop, updateCount: noop,
+                     checkbox: () => null };
+        }
+
+        const checkSel = '.' + checkboxClass;
+        let active = false;
+
+        function checkbox(row) { return row ? row.querySelector(checkSel) : null; }
+
+        function updateCount() {
+            const n = container.querySelectorAll(checkSel + ':checked').length;
+            if (countEl) countEl.textContent = String(n);
+            if (delBtn) delBtn.disabled = (n === 0);
+        }
+
+        function addCheckboxToRow(row) {
+            if (!row || !canSelectRow(row) || checkbox(row)) return;
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.className = checkboxClass;
+            cb.addEventListener('change', updateCount);
+            // Checkbox als erstes Element der Row → immer links
+            row.insertBefore(cb, row.firstChild);
+        }
+
+        function enter() {
+            if (active) return;
+            if (onEnter) { try { onEnter(); } catch (_) {} }
+            active = true;
+            container.classList.add(selectModeClass);
+            container.querySelectorAll(rowSelector).forEach(addCheckboxToRow);
+            if (bar) bar.hidden = false;
+            if (toggleBtn) toggleBtn.classList.add('active');
+            updateCount();
+        }
+
+        function exit() {
+            active = false;
+            container.classList.remove(selectModeClass);
+            container.querySelectorAll(checkSel).forEach(cb => cb.remove());
+            if (bar) bar.hidden = true;
+            if (toggleBtn) toggleBtn.classList.remove('active');
+        }
+
+        function toggle() { active ? exit() : enter(); }
+
+        // Aus dem Kontextmenue "Loeschen": Modus starten und die
+        // angeklickte Nachricht direkt vorauswaehlen (wie Android/Windows-App).
+        function startSelectionDelete(row) {
+            enter();
+            if (row) {
+                const cb = checkbox(row);
+                if (cb) { cb.checked = true; updateCount(); }
+            }
+        }
+
+        // Alle auswaehlbaren Nachrichten markieren bzw. (wenn schon alle markiert)
+        // die Auswahl wieder aufheben.
+        function selectAll() {
+            const boxes = Array.from(container.querySelectorAll(checkSel));
+            const allChecked = boxes.length > 0 && boxes.every(cb => cb.checked);
+            boxes.forEach(cb => { cb.checked = !allChecked; });
+            updateCount();
+        }
+
+        function deleteSelected() {
+            const checked = Array.from(container.querySelectorAll(checkSel + ':checked'))
+                .map(cb => cb.closest(rowSelector))
+                .filter(Boolean);
+            if (checked.length === 0) return;
+            const q = window.t ? window.t('select.confirm') : 'Ausgewählte Nachrichten löschen?';
+            if (!confirm(q.replace('{n}', String(checked.length)))) return;
+            try { onDelete(checked); } catch (e) { console.error('[SelectionController] onDelete', e); }
+            exit();
+        }
+
+        if (toggleBtn)    toggleBtn.addEventListener('click', toggle);
+        if (cancelBtn)    cancelBtn.addEventListener('click', exit);
+        if (delBtn)       delBtn.addEventListener('click', deleteSelected);
+        if (selectAllBtn) selectAllBtn.addEventListener('click', selectAll);
+
+        return {
+            isActive: () => active,
+            enter: enter,
+            exit: exit,
+            toggle: toggle,
+            startSelectionDelete: startSelectionDelete,
+            addCheckboxToRow: addCheckboxToRow,
+            updateCount: updateCount,
+            selectAll: selectAll,
+            checkbox: checkbox,
+        };
+    }
+
+    /* ── Clipboard-Helfer (Best-Effort, fallback auf execCommand) ──── */
+    async function copyTextToClipboard(text) {
+        if (text == null) text = '';
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(text);
+                return true;
+            }
+        } catch (_) {}
+        try {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.opacity  = '0';
+            document.body.appendChild(ta);
+            ta.focus(); ta.select();
+            const ok = document.execCommand('copy');
+            document.body.removeChild(ta);
+            return ok;
+        } catch (_) { return false; }
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════ *
+     *  Medien im Chat: kopieren, speichern, herausziehen
+     *
+     *  WAS DER BROWSER ERLAUBT – und was nicht:
+     *  `navigator.clipboard.write()` nimmt nur eine kleine, feste Liste von
+     *  MIME-Typen an (text/plain, text/html, image/png; alles andere →
+     *  NotAllowedError "Type ... not supported"). **Eine .docx/.xlsx/.pdf laesst
+     *  sich also NICHT in die Zwischenablage legen**, auch nicht als Blob mit
+     *  korrektem Typ – das ist eine Browser-Grenze, kein fehlendes Feature.
+     *  Deshalb hier zwei getrennte Wege:
+     *    - BILDER (auch Diagramme und Mermaid-Schaubilder) → echtes
+     *      "Bild kopieren" als image/png. Beim <canvas> eines Chart.js-Diagramms
+     *      hat das Browser-Menue GAR KEIN "Bild kopieren" – dort ist der Gewinn
+     *      am groessten.
+     *    - DATEIEN → herunterladen, Link kopieren, oder per Drag&Drop
+     *      (`DownloadURL`) direkt in Explorer/Outlook ziehen. Das ist der einzige
+     *      Weg, eine Datei ohne Umweg ueber den Download-Ordner weiterzugeben.
+     * ═══════════════════════════════════════════════════════════════════ */
+
+    function _tt(key, fallback) {
+        try { return (global.t && global.t(key)) || fallback; } catch (_) { return fallback; }
+    }
+
+    // Kurze, unaufdringliche Rueckmeldung. Ohne sie ist "Bild kopieren" ein Klick
+    // ins Nichts: in der Zwischenablage sieht man nichts, und ein Fehlschlag
+    // (fehlende Berechtigung, unsicherer Kontext) waere voellig unsichtbar.
+    function _toast(text, fehler) {
+        try {
+            let el = document.getElementById('jv-media-toast');
+            if (!el) {
+                el = document.createElement('div');
+                el.id = 'jv-media-toast';
+                el.className = 'jv-media-toast';
+                document.body.appendChild(el);
+            }
+            el.textContent = text;
+            el.classList.toggle('is-error', !!fehler);
+            el.classList.add('open');
+            clearTimeout(el._t);
+            el._t = setTimeout(() => el.classList.remove('open'), fehler ? 5000 : 1800);
+        } catch (_) {}
+    }
+
+    function _dateiname(url, fallback) {
+        try {
+            const p = (url || '').split('?')[0].split('#')[0].split('/').pop() || '';
+            // Capability-Dateien heissen "<32-Hex>__<Anzeigename>" – der Hex-Teil
+            // ist fuer den Benutzer Rauschen.
+            const m = p.match(/^[0-9a-f]{16,}__(.+)$/i);
+            return decodeURIComponent(m ? m[1] : p) || fallback;
+        } catch (_) { return fallback; }
+    }
+
+    const _MIME = {
+        docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        pdf: 'application/pdf', csv: 'text/csv', txt: 'text/plain',
+        json: 'application/json', xml: 'application/xml', zip: 'application/zip',
+        png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+        webp: 'image/webp', svg: 'image/svg+xml',
+    };
+
+    function _mimeFuer(name) {
+        const ext = (name || '').split('.').pop().toLowerCase();
+        return _MIME[ext] || 'application/octet-stream';
+    }
+
+    /* Ein beliebiges Element als PNG in die Zwischenablage.
+     * Unterstuetzt <img>, <canvas> (Chart.js) und <svg> (Mermaid).
+     *
+     * WARUM IMMER UEBER EIN CANVAS: die Zwischenablage nimmt zuverlaessig nur
+     * image/png. Ein Bild kann aber webp/jpeg/gif sein, und ein <svg> ist
+     * ueberhaupt kein Rasterbild. Der Umweg ueber ein Canvas normalisiert beides.
+     * Beim <canvas> selbst wird direkt `toBlob` benutzt – nicht neu zeichnen,
+     * das kostete Qualitaet (devicePixelRatio 2, siehe charts.js).
+     */
+    async function copyElementAsImage(el) {
+        if (!el) return false;
+        try {
+            const blob = await _alsPngBlob(el);
+            if (!blob) throw new Error('kein Bild');
+            if (!(global.ClipboardItem && navigator.clipboard && navigator.clipboard.write)) {
+                throw new Error('Zwischenablage fuer Bilder nicht verfuegbar');
+            }
+            await navigator.clipboard.write([new global.ClipboardItem({ 'image/png': blob })]);
+            _toast(_tt('media.copied_img', 'Bild in die Zwischenablage kopiert'));
+            return true;
+        } catch (e) {
+            // Klartext statt Stille: die haeufigsten Gruende sind fehlende
+            // Berechtigung und ein nicht-sicherer Kontext (http).
+            _toast(_tt('media.copy_img_failed',
+                       'Bild konnte nicht kopiert werden (Browser-Berechtigung?). '
+                     + 'Alternative: "Bild speichern".'), true);
+            console.warn('[Media] Bild kopieren fehlgeschlagen:', e);
+            return false;
+        }
+    }
+
+    function _alsPngBlob(el) {
+        return new Promise((resolve, reject) => {
+            const tag = (el.tagName || '').toLowerCase();
+            if (tag === 'canvas') {
+                if (el.toBlob) el.toBlob(b => b ? resolve(b) : reject(new Error('toBlob leer')), 'image/png');
+                else reject(new Error('canvas.toBlob fehlt'));
+                return;
+            }
+            const zeichnen = (quelle, w, h) => {
+                try {
+                    const c = document.createElement('canvas');
+                    c.width = Math.max(1, w); c.height = Math.max(1, h);
+                    const ctx = c.getContext('2d');
+                    // Weisser Grund: PNG-Transparenz wird in Word/Outlook je nach
+                    // Version schwarz gefuellt – ein unlesbares Diagramm.
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(0, 0, c.width, c.height);
+                    ctx.drawImage(quelle, 0, 0, c.width, c.height);
+                    c.toBlob(b => b ? resolve(b) : reject(new Error('toBlob leer')), 'image/png');
+                } catch (err) { reject(err); }
+            };
+            if (tag === 'img') {
+                // Bereits geladen und same-origin → direkt zeichnen. Ein Bild von
+                // einem fremden Host wuerde das Canvas "verunreinigen" (toBlob
+                // wirft SecurityError) – dann bleibt nur "Bild speichern".
+                const w = el.naturalWidth || el.width, h = el.naturalHeight || el.height;
+                if (el.complete && w) return zeichnen(el, w, h);
+                const tmp = new Image();
+                tmp.crossOrigin = 'anonymous';
+                tmp.onload = () => zeichnen(tmp, tmp.naturalWidth, tmp.naturalHeight);
+                tmp.onerror = () => reject(new Error('Bild nicht ladbar'));
+                tmp.src = el.currentSrc || el.src;
+                return;
+            }
+            if (tag === 'svg') {
+                const xml = new XMLSerializer().serializeToString(el);
+                const r = el.getBoundingClientRect();
+                const img = new Image();
+                img.onload = () => zeichnen(img, r.width || 800, r.height || 600);
+                img.onerror = () => reject(new Error('SVG nicht ladbar'));
+                img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml);
+                return;
+            }
+            reject(new Error('Elementtyp ' + tag + ' nicht unterstuetzt'));
+        });
+    }
+
+    async function _bildSpeichern(el, name) {
+        try {
+            const blob = await _alsPngBlob(el);
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = (name || 'bild') + '.png';
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+        } catch (e) {
+            _toast(_tt('media.save_img_failed', 'Bild konnte nicht gespeichert werden'), true);
+        }
+    }
+
+    /* Absolute URL fuer die Zwischenablage.
+     * Das Sitzungstoken bleibt DRIN: `/api/documents/...` verlangt eine
+     * Anmeldung (require_auth_or_query), ohne Token ist der kopierte Link
+     * unbrauchbar. Der Benutzer kopiert bewusst; der Menuepunkt sagt es. Das
+     * unterscheidet sich von der Regel "Token nie in den gespeicherten
+     * Markdown" – dort passiert es unbemerkt und dauerhaft. */
+    function _absolut(url) {
+        try { return new URL(url, global.location.href).href; } catch (_) { return url || ''; }
+    }
+
+    /* Datei-Chips zum Herausziehen: `DownloadURL` ist der einzige Weg, eine
+     * Datei aus dem Browser in Explorer/Outlook/Teams zu bekommen (Chromium,
+     * Edge; Firefox ignoriert es und faellt auf den Link zurueck). Format:
+     * "<mime>:<dateiname>:<absolute URL>".
+     *
+     * EIN DELEGIERTER LISTENER statt Verdrahtung pro Chip: die Chips entstehen an
+     * vier Stellen in chat.js (Streaming, Wiederherstellen, Nachtragen) und
+     * ebenso in support.js/userchat.js – jede einzeln zu bedienen waere die
+     * Sorte Kopplung, die spaeter still ausfaellt, wenn eine fuenfte Stelle
+     * hinzukommt. Ein `<a href>` ist ohnehin von Natur aus ziehbar, es braucht
+     * also kein `draggable`-Attribut. */
+    let _dragInstalliert = false;
+    function installAttachmentDrag() {
+        if (_dragInstalliert || typeof document === 'undefined') return;
+        _dragInstalliert = true;
+        document.addEventListener('dragstart', (e) => {
+            const a = e.target && e.target.closest &&
+                      e.target.closest('a.chat-doc-dl, a[href*="/api/documents/"]');
+            if (!a || !e.dataTransfer) return;
+            try {
+                const url = _absolut(a.getAttribute('href') || '');
+                const name = _dateiname(url, (a.textContent || 'Datei').trim());
+                e.dataTransfer.setData('DownloadURL', _mimeFuer(name) + ':' + name + ':' + url);
+                e.dataTransfer.setData('text/uri-list', url);
+                e.dataTransfer.setData('text/plain', url);
+            } catch (_) { /* ohne DownloadURL bleibt das normale Link-Ziehen */ }
+        });
+    }
+    installAttachmentDrag();
+
+    /* Kontextmenue-Eintraege fuer das angeklickte Medium.
+     * Rueckgabe [] wenn nichts Passendes getroffen wurde – dann haengt der
+     * Aufrufer nur seine eigenen Eintraege (Text kopieren, Loeschen …) an. */
+    function mediaCtxItems(ev) {
+        const ziel = ev && (ev.target || (ev.touches && ev.touches[0] && ev.touches[0].target));
+        if (!ziel || !ziel.closest) return [];
+        const items = [];
+
+        // 1) Datei-Chip (Download) – der Fall "Anhang"
+        const chip = ziel.closest('a.chat-doc-dl, a[href*="/api/documents/"]');
+        if (chip) {
+            const url = _absolut(chip.getAttribute('href') || '');
+            const name = _dateiname(url, 'Datei');
+            items.push({
+                label: _tt('media.download', 'Datei herunterladen'), icon: '⤓',
+                onClick: () => { const a = document.createElement('a');
+                    a.href = chip.getAttribute('href'); a.download = name;
+                    document.body.appendChild(a); a.click(); a.remove(); },
+            });
+            items.push({
+                label: _tt('media.copy_link', 'Link kopieren (mit Sitzungstoken)'), icon: '⧉',
+                onClick: async () => {
+                    const ok = await copyTextToClipboard(url);
+                    _toast(ok ? _tt('media.copied_link', 'Link kopiert')
+                              : _tt('media.copy_failed', 'Kopieren fehlgeschlagen'), !ok);
+                },
+            });
+            items.push({
+                label: _tt('media.copy_name', 'Dateinamen kopieren'), icon: '⧉',
+                onClick: async () => {
+                    const ok = await copyTextToClipboard(name);
+                    _toast(ok ? _tt('media.copied_name', 'Dateiname kopiert')
+                              : _tt('media.copy_failed', 'Kopieren fehlgeschlagen'), !ok);
+                },
+            });
+            return items;
+        }
+
+        // 2) Bild, Diagramm (canvas) oder Schaubild (svg)
+        // ACHTUNG die Klassennamen: Diagramme liegen in `.jarvis-chart` (Canvas,
+        // charts.js), Schaubilder in `.jarvis-mermaid` (SVG, mermaid_blocks.js) –
+        // NICHT in `pre.mermaid`. Ein Selektor `.mermaid svg` trifft
+        // `jarvis-mermaid` NICHT (CSS-Klassen matchen ganze Namen).
+        let bild = ziel.closest('img.chat-img, .jarvis-chart canvas, .jarvis-mermaid svg');
+        if (!bild) {
+            // Klick NEBEN das Canvas (auf den Rahmen/die Werkzeugleiste) trifft
+            // den Container – bei einem Diagramm mit Knopfleiste der Normalfall.
+            const box = ziel.closest('.jarvis-chart, .jarvis-mermaid');
+            if (box) bild = box.querySelector('canvas, svg');
+        }
+        if (bild) {
+            const src = bild.tagName.toLowerCase() === 'img'
+                ? (bild.currentSrc || bild.getAttribute('src') || '') : '';
+            const name = src ? _dateiname(src, 'bild').replace(/\.[a-z0-9]+$/i, '')
+                             : (bild.tagName.toLowerCase() === 'canvas' ? 'diagramm' : 'schaubild');
+            items.push({
+                label: _tt('media.copy_img', 'Bild kopieren'), icon: '⧉',
+                onClick: () => copyElementAsImage(bild),
+            });
+            items.push({
+                label: _tt('media.save_img', 'Bild speichern'), icon: '⤓',
+                onClick: () => _bildSpeichern(bild, name),
+            });
+            if (src) {
+                items.push({
+                    label: _tt('media.open_img', 'Bild in neuem Tab öffnen'), icon: '↗',
+                    onClick: () => { try { global.open(_absolut(src), '_blank', 'noopener'); } catch (_) {} },
+                });
+            }
+            return items;
+        }
+        return [];
+    }
+
+    /* ───────────────────────────────────────────────────────────── *
+     *  Verlauf als PDF (eigenes Druckfenster)
+     *
+     *  Aufgerufen aus dem Bubble-Kontextmenue ("Chat als PDF"). Gebaut
+     *  wird ein EIGENES Fenster mit eigenem, hellem Druck-CSS – NICHT
+     *  ueber `body.printing-doc` wie die Dokument-Dialoge in /settings:
+     *  der Chat ist eine 100dvh-App mit fixer Titelleiste, scrollender
+     *  Liste, Seitenleiste und Agenten-Panel. Im eigenen Fenster steht
+     *  das Ergebnis fest, ohne dass ein vergessener @media-print-Block
+     *  die halbe Oberflaeche mitdruckt.
+     *
+     *  VIER DINGE, DIE MAN NICHT UEBERGEHEN DARF:
+     *
+     *  1) `open()` MUSS SYNCHRON in der Benutzergeste stehen. Nach dem
+     *     ersten `await` ist die Geste verbraucht, der Browser lehnt das
+     *     Fenster ab – und sichtbar passiert dann GAR NICHTS (dieselbe
+     *     Falle wie bei `sidePanel.open` in der Jira-Erweiterung).
+     *     Deshalb: Fenster zuerst, mit Ladehinweis (eine leere weisse
+     *     Flaeche sieht wie ein Fehler aus), Einbetten danach.
+     *
+     *  2) EIN <canvas> IST IM KLON LEER. `cloneNode(true)` kopiert das
+     *     Element, nicht seinen Bildinhalt – ein Chart.js-Diagramm waere
+     *     im PDF eine leere Flaeche. Es wird deshalb aus dem ORIGINAL
+     *     per `toDataURL()` gelesen und als <img> eingesetzt.
+     *
+     *  3) BILDER WERDEN EINGEBETTET (data:), nicht verlinkt. Zwei
+     *     Gruende, jeder allein hinreichend: der Abruf-Schluessel in
+     *     `/api/documents/...?token=JDL1...` gilt 15 Minuten – wer den
+     *     Druckdialog liegen laesst, druckt sonst leere Rahmen; und der
+     *     Druck startet nicht zuverlaessig erst nach dem Bildladen.
+     *     Schlaegt das Einbetten fehl, bleibt die absolute URL als
+     *     Rueckfall stehen und das PDF SAGT, wie viele Bilder betroffen
+     *     sind – ein stilles Loch waere schlimmer als der Hinweis.
+     *
+     *  4) DER GRUND UNTER DIAGRAMM UND SCHAUBILD FOLGT DEM THEMA.
+     *     Beide werden theme-abhaengig gerendert (charts.js liest
+     *     --bg-secondary, mermaid_blocks.js waehlt 'dark'/'default'):
+     *     im dunklen Thema ist die Schrift HELL. Pauschal Weiss zu
+     *     unterlegen – so macht es das Kopieren in die Zwischenablage –
+     *     ergaebe hier ein unlesbares Bild. Genommen wird deshalb die
+     *     GEMESSENE Hintergrundfarbe des Blocks.
+     * ───────────────────────────────────────────────────────────── */
+
+    // Deckel. Ohne sie sprengt ein Verlauf mit 200 Bildern den Speicher des
+    // Druckfensters; ueberzaehlige Bilder bleiben verlinkt statt eingebettet.
+    var PDF_MAX_BILDER = 60;
+    var PDF_MAX_BYTES  = 25 * 1024 * 1024;
+    var PDF_WARTEN_MS  = 5000;   // Deckel fuers Warten auf das Bildladen
+
+    /* Was im Druck nichts zu suchen hat: Bedienelemente und Abspieler.
+     * `style` steht ABSICHTLICH NICHT drin – ein Mermaid-<svg> traegt sein
+     * eigenes <style>, ohne das ist das Schaubild farblos. */
+    var PDF_WEG = [
+        '.bubble-actions', '.msg-edit-btn', '.msg-retry-btn', '.jv-msg-check',
+        '.jv-bubble-edit-btn', '.jarvis-chart-tools', '.uc-ig-more',
+        'button', 'input', 'audio', 'video', 'script',
+    ].join(',');
+
+    var _PDF_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"'
+        + ' stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+        + '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>'
+        + '<polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/>'
+        + '<polyline points="9 15 12 18 15 15"/></svg>';
+
+    function _cssWert(name, fallback) {
+        try {
+            var v = global.getComputedStyle(document.body).getPropertyValue(name);
+            return (v || '').trim() || fallback;
+        } catch (_) { return fallback; }
+    }
+
+    /* Gemessener Hintergrund eines Blocks. Transparent zaehlt NICHT als Farbe –
+     * sonst legt man Schwarz-auf-Transparent auf weisses Papier und wundert
+     * sich ueber ein leeres Rechteck. */
+    function _pdfGrund(el) {
+        var kette = [];
+        var n = el;
+        while (n && n.nodeType === 1 && kette.length < 6) { kette.push(n); n = n.parentNode; }
+        for (var i = 0; i < kette.length; i++) {
+            var c = '';
+            try { c = global.getComputedStyle(kette[i]).backgroundColor || ''; } catch (_) { c = ''; }
+            if (c && !/^(transparent|rgba\(0,\s*0,\s*0,\s*0\))$/.test(c.replace(/\s+/g, ' ').trim())) return c;
+        }
+        return _cssWert('--bg-secondary', '#ffffff');
+    }
+
+    /* Diagramm als PNG-Data-URL, mit dem gemessenen Grund darunter (siehe (4)). */
+    function _pdfCanvasBild(canvas) {
+        var grund = _pdfGrund(canvas.closest ? (canvas.closest('.jarvis-chart') || canvas) : canvas);
+        var c = document.createElement('canvas');
+        c.width = Math.max(1, canvas.width);
+        c.height = Math.max(1, canvas.height);
+        var ctx = c.getContext('2d');
+        ctx.fillStyle = grund;
+        ctx.fillRect(0, 0, c.width, c.height);
+        ctx.drawImage(canvas, 0, 0);
+        return c.toDataURL('image/png');
+    }
+
+    function _pdfZeit(row) {
+        var t = row.querySelector('.msg-time');
+        if (!t) return '';
+        // Bei Benutzer-Zeilen stehen im Zeitfeld auch Wiederholen- und
+        // Bearbeiten-Knopf. Am Klon entfernt, dann bleibt genau die Uhrzeit.
+        var k = t.cloneNode(true);
+        k.querySelectorAll('button').forEach(function (b) { b.remove(); });
+        return (k.textContent || '').replace(/\s+/g, ' ').trim();
+    }
+
+    /* Baut aus den uebergebenen Zeilen ein SAUBERES Druck-Markup.
+     * Bewusst eigene Klassen statt der Chat-Klassen: das Druckfenster laedt
+     * chat.css nicht, und eine halb uebernommene Sprechblasen-Optik saehe
+     * schlechter aus als ein schlichtes Protokoll.
+     * Synchron und ohne Netzzugriff – dadurch in einem Test messbar. */
+    function transcriptToPrintDom(rows, opts) {
+        opts = opts || {};
+        var liste = Array.prototype.slice.call(rows || []);
+        var wurzel = document.createElement('div');
+        wurzel.className = 'jv-pdf-verlauf';
+        var stats = { nachrichten: 0, diagramme: 0, schaubilder: 0, bilder: 0, trenner: 0 };
+        var botName  = opts.botName  || (global.jarvisMarke ? global.jarvisMarke() : 'Jarvis');
+        var userName = opts.userName || _tt('chatpdf.you', 'Du');
+
+        for (var i = 0; i < liste.length; i++) {
+            var row = liste[i];
+            if (!row || row.nodeType !== 1 || !row.classList) continue;
+
+            if (row.classList.contains('date-sep')) {
+                var d = document.createElement('div');
+                d.className = 'jv-pdf-datum';
+                d.textContent = (row.textContent || '').trim();
+                wurzel.appendChild(d);
+                stats.trenner++;
+                continue;
+            }
+            if (!row.classList.contains('msg-row')) continue;
+            var bubble = row.querySelector('.msg-bubble');
+            if (!bubble) continue;
+
+            var istUser = row.classList.contains('user');
+            var art = document.createElement('article');
+            art.className = 'jv-pdf-msg ' + (istUser ? 'user' : 'bot');
+
+            var kopf = document.createElement('div');
+            kopf.className = 'jv-pdf-kopf';
+            var wer = document.createElement('span');
+            wer.className = 'jv-pdf-wer';
+            wer.textContent = istUser ? userName : botName;
+            var wann = document.createElement('span');
+            wann.className = 'jv-pdf-wann';
+            wann.textContent = _pdfZeit(row);
+            kopf.appendChild(wer);
+            kopf.appendChild(wann);
+            art.appendChild(kopf);
+
+            var rumpf = document.createElement('div');
+            rumpf.className = 'jv-pdf-body';
+            var klon = bubble.cloneNode(true);
+            _pdfAufraeumen(bubble, klon, stats);
+            while (klon.firstChild) rumpf.appendChild(klon.firstChild);
+            art.appendChild(rumpf);
+
+            var st = row.querySelector('.msg-stats');
+            if (st && (st.textContent || '').trim()) {
+                var sz = document.createElement('div');
+                sz.className = 'jv-pdf-stats';
+                sz.textContent = st.textContent.trim();
+                art.appendChild(sz);
+            }
+
+            wurzel.appendChild(art);
+            stats.nachrichten++;
+        }
+        return { el: wurzel, stats: stats };
+    }
+
+    /* Klon druckfertig machen. `orig` ist noetig, weil der Bildinhalt eines
+     * <canvas> nur dort vorliegt (siehe (2)). Die Reihenfolge von
+     * `querySelectorAll` ist in Original und Klon dieselbe – deshalb genuegt
+     * der Index, ohne das Original anzufassen. */
+    function _pdfAufraeumen(orig, klon, stats) {
+        stats = stats || {};
+        klon.querySelectorAll(PDF_WEG).forEach(function (el) { el.remove(); });
+
+        var oc = orig.querySelectorAll('canvas');
+        var kc = klon.querySelectorAll('canvas');
+        for (var j = 0; j < kc.length; j++) {
+            var ersatz = null;
+            try {
+                var q = oc[j];
+                if (q && q.width && q.toDataURL) {
+                    var img = document.createElement('img');
+                    img.className = 'jv-pdf-bild';
+                    img.setAttribute('src', _pdfCanvasBild(q));
+                    ersatz = img;
+                }
+            } catch (_) { ersatz = null; }
+            if (!ersatz) {
+                // Ehrlicher Platzhalter statt einer leeren Flaeche: sonst haelt
+                // der Leser das PDF fuer vollstaendig.
+                ersatz = document.createElement('div');
+                ersatz.className = 'jv-pdf-fehlt';
+                ersatz.textContent = _tt('chatpdf.chart_missing', '[Diagramm nicht uebernommen]');
+            }
+            if (kc[j].parentNode) kc[j].parentNode.replaceChild(ersatz, kc[j]);
+            stats.diagramme = (stats.diagramme || 0) + 1;
+        }
+
+        // Schaubild (Mermaid-SVG): bleibt als SVG – das druckt scharf. Nur der
+        // Grund muss mit, sonst steht helle Schrift auf weissem Papier.
+        var os = orig.querySelectorAll('.jarvis-mermaid');
+        var ks = klon.querySelectorAll('.jarvis-mermaid');
+        for (var m = 0; m < ks.length; m++) {
+            try { ks[m].style.background = _pdfGrund(os[m] || ks[m]); } catch (_) {}
+            ks[m].style.padding = '8px';
+            ks[m].style.borderRadius = '8px';
+            stats.schaubilder = (stats.schaubilder || 0) + 1;
+        }
+
+        klon.querySelectorAll('img').forEach(function (im) {
+            im.classList.add('jv-pdf-bild');
+            im.removeAttribute('loading');
+            im.removeAttribute('onload');
+            stats.bilder = (stats.bilder || 0) + 1;
+        });
+        return klon;
+    }
+
+    function _blobDataUrl(blob) {
+        return new Promise(function (res, rej) {
+            try {
+                var fr = new FileReader();
+                fr.onload = function () { res(String(fr.result || '')); };
+                fr.onerror = function () { rej(new Error('FileReader')); };
+                fr.readAsDataURL(blob);
+            } catch (e) { rej(e); }
+        });
+    }
+
+    /* Bilder als data:-URI einbetten (siehe (3)). Rueckgabe: wie viele
+     * eingebettet und wie viele nur verlinkt sind – die zweite Zahl gehoert
+     * ins PDF, nicht in die Konsole. */
+    async function _pdfBilderEinbetten(el) {
+        var imgs = Array.prototype.slice.call(el.querySelectorAll('img'));
+        var eingebettet = 0, verlinkt = 0, bytes = 0;
+        for (var i = 0; i < imgs.length; i++) {
+            var im = imgs[i];
+            var src = im.getAttribute('src') || '';
+            if (!src) { im.remove(); continue; }
+            if (/^data:/.test(src)) { eingebettet++; continue; }
+            if (eingebettet >= PDF_MAX_BILDER || bytes >= PDF_MAX_BYTES) {
+                im.setAttribute('src', _absolut(src)); verlinkt++; continue;
+            }
+            try {
+                var r = await fetch(_absolut(src), { credentials: 'same-origin' });
+                if (!r || !r.ok) throw new Error('HTTP ' + (r && r.status));
+                var b = await r.blob();
+                bytes += (b && b.size) || 0;
+                im.setAttribute('src', await _blobDataUrl(b));
+                eingebettet++;
+            } catch (e) {
+                // Rueckfall aufs Netz: solange der Abruf-Schluessel gilt, kommt
+                // das Bild noch an. Gezaehlt wird es trotzdem als "nicht sicher".
+                im.setAttribute('src', _absolut(src));
+                verlinkt++;
+            }
+        }
+        return { eingebettet: eingebettet, verlinkt: verlinkt };
+    }
+
+    /* Druck-CSS des Fensters. Akzentfarbe wird aus der laufenden Oberflaeche
+     * GEMESSEN – damit folgt das PDF dem Branding, ohne es zu kopieren. */
+    function _pdfStil(akzent) {
+        return '@page{margin:16mm 14mm;}'
+            + 'html,body{background:#fff;}'
+            + 'body{font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;'
+            + 'line-height:1.55;color:#111;margin:0 auto;max-width:860px;padding:24px 18px 40px;'
+            + '-webkit-print-color-adjust:exact;print-color-adjust:exact;}'
+            + '.jv-pdf-bar{display:flex;gap:10px;align-items:center;margin-bottom:18px;}'
+            + '.jv-pdf-bar button{font:inherit;padding:7px 14px;border-radius:8px;border:1px solid ' + akzent + ';'
+            + 'background:' + akzent + ';color:#fff;cursor:pointer;}'
+            + '.jv-pdf-bar span{color:#555;font-size:.85rem;}'
+            + '.jv-pdf-titel{font-size:1.35rem;font-weight:700;margin:0 0 4px;}'
+            + '.jv-pdf-meta{color:#555;font-size:.85rem;margin:0 0 4px;}'
+            + '.jv-pdf-warn{color:#8a4b00;font-size:.85rem;margin:2px 0 0;}'
+            + '.jv-pdf-head{border-bottom:2px solid ' + akzent + ';padding-bottom:10px;margin-bottom:18px;}'
+            + '.jv-pdf-datum{text-align:center;color:#555;font-size:.8rem;margin:18px 0 10px;'
+            + 'border-top:1px solid #ddd;padding-top:8px;}'
+            + '.jv-pdf-msg{margin:0 0 15px;padding:2px 0 2px 12px;border-left:3px solid #cbd5e1;}'
+            + '.jv-pdf-msg.user{border-left-color:' + akzent + ';}'
+            /* NUR der Kopf wird zusammengehalten. `break-inside:avoid` auf die
+               ganze Nachricht wuerde eine lange Antwort auf die naechste Seite
+               schieben und halbe Seiten leer lassen. */
+            + '.jv-pdf-kopf{display:flex;gap:8px;align-items:baseline;margin-bottom:3px;'
+            + 'break-after:avoid;page-break-after:avoid;}'
+            + '.jv-pdf-wer{font-weight:700;font-size:.9rem;}'
+            + '.jv-pdf-wann{color:#666;font-size:.75rem;}'
+            + '.jv-pdf-stats{color:#666;font-size:.72rem;margin-top:3px;}'
+            + '.jv-pdf-body>*:first-child{margin-top:0;}'
+            + '.jv-pdf-body>*:last-child{margin-bottom:0;}'
+            /* max-height ist kein Schoenheitswert: ein hohes Bild plus
+               `break-inside:avoid` schiebt sich auf die naechste Seite und
+               laesst die halbe davor LEER – gemessen an einem echten Export. */
+            + 'img,svg,.jarvis-mermaid,.jv-pdf-bild{max-width:100%;height:auto;'
+            + 'max-height:16cm;break-inside:avoid;page-break-inside:avoid;}'
+            + 'pre{background:#f4f4f5;border-radius:8px;padding:12px;white-space:pre-wrap;'
+            + 'word-break:break-word;break-inside:avoid;page-break-inside:avoid;}'
+            + 'code{background:#f4f4f5;border-radius:4px;padding:1px 4px;}'
+            + 'pre code{padding:0;background:none;}'
+            + 'table{border-collapse:collapse;width:100%;break-inside:avoid;page-break-inside:avoid;}'
+            + 'td,th{border:1px solid #ccc;padding:5px 9px;text-align:left;}'
+            + 'a{color:#1d4ed8;word-break:break-all;}'
+            + 'h1,h2,h3{line-height:1.25;break-after:avoid;page-break-after:avoid;}'
+            + 'blockquote{border-left:3px solid #ddd;margin:8px 0;padding:2px 0 2px 10px;color:#333;}'
+            + '.jv-pdf-fehlt{color:#8a4b00;font-size:.85rem;font-style:italic;}'
+            + '.jv-pdf-laden{color:#555;}'
+            + '@media print{.jv-pdf-bar{display:none;}}';
+    }
+
+    function _pdfSkelett(titel, akzent, ladeText) {
+        return '<!doctype html><html lang="' + (global._lang === 'en' ? 'en' : 'de') + '"><head>'
+            + '<meta charset="utf-8">'
+            // Ohne <base> loesen relative Adressen (Bilder, die nicht eingebettet
+            // werden konnten) gegen "about:blank" auf und sind damit tot.
+            + '<base href="' + escapeHtml(global.location.origin + '/') + '">'
+            + '<title>' + escapeHtml(titel) + '</title>'
+            + '<style>' + _pdfStil(akzent) + '</style></head><body>'
+            + '<p class="jv-pdf-laden" id="jv-pdf-laden">' + escapeHtml(ladeText) + '</p>'
+            + '<div id="jv-pdf-wurzel"></div></body></html>';
+    }
+
+    /* Warten, bis alle Bilder im Druckfenster wirklich da sind. Ohne das
+     * druckt Chrome gelegentlich leere Rahmen. MIT DECKEL – ein einzelnes
+     * totes Bild darf den Druck nicht dauerhaft verhindern. */
+    function _pdfBilderFertig(w) {
+        var imgs = Array.prototype.slice.call(w.document.images || []);
+        var offen = imgs.filter(function (i) { return !i.complete; });
+        if (!offen.length) return Promise.resolve();
+        return new Promise(function (res) {
+            var rest = offen.length;
+            var fertig = function () { if (--rest <= 0) res(); };
+            offen.forEach(function (i) {
+                i.addEventListener('load', fertig, { once: true });
+                i.addEventListener('error', fertig, { once: true });
+            });
+            // Der Timer gehoert dem DRUCKFENSTER, nicht dieser Seite: schliesst
+            // der Benutzer es, verfaellt er mit, statt ins Leere zu laufen.
+            (w.setTimeout || setTimeout)(res, PDF_WARTEN_MS);
+        });
+    }
+
+    /**
+     * Den uebergebenen Verlauf als PDF anbieten (Druckfenster).
+     *
+     * opts = {
+     *   rows,                 // DOM-Zeilen (.msg-row / .date-sep) in Anzeigereihenfolge
+     *   titel,                // Sitzungstitel – wird auch der Fenstertitel und
+     *                         //   damit Chromes Vorschlag fuer den Dateinamen
+     *   botName, userName,    // Beschriftung der Sprecher
+     *   hinweise: [string],   // Zeilen, die im Kopf stehen muessen (z.B. was FEHLT)
+     * }
+     */
+    async function exportTranscriptPdf(opts) {
+        opts = opts || {};
+        var rows = Array.prototype.slice.call(opts.rows || []);
+        var hatNachricht = rows.some(function (r) {
+            return r && r.classList && r.classList.contains('msg-row') && r.querySelector('.msg-bubble');
+        });
+        if (!hatNachricht) {
+            _toast(_tt('chatpdf.empty', 'Dieser Verlauf ist leer – es gibt nichts zu exportieren.'), true);
+            return false;
+        }
+
+        var titel = (opts.titel || _tt('chatpdf.fallback_title', 'Chat')).trim()
+                 || _tt('chatpdf.fallback_title', 'Chat');
+        var stand = new Date();
+        var datei = titel + ' – ' + stand.toLocaleDateString();
+        var akzent = _cssWert('--accent', '#6366f1');
+
+        // (1) Fenster ZUERST, synchron. Kein await davor!
+        var w = null;
+        try { w = global.open('', '_blank'); } catch (_) { w = null; }
+        if (!w) {
+            _toast(_tt('bubble.popup_blocked', 'Bitte Pop-ups erlauben, um als PDF zu exportieren.'), true);
+            return false;
+        }
+        try {
+            w.document.write(_pdfSkelett(datei, akzent,
+                _tt('chatpdf.prep', 'Das PDF wird vorbereitet …')));
+            w.document.close();
+        } catch (e) {
+            _toast(_tt('chatpdf.failed', 'Der PDF-Export ist fehlgeschlagen.'), true);
+            return false;
+        }
+
+        var gebaut = transcriptToPrintDom(rows, opts);
+        var bilder = { eingebettet: 0, verlinkt: 0 };
+        try { bilder = await _pdfBilderEinbetten(gebaut.el); } catch (_) {}
+
+        var hinweise = (opts.hinweise || []).slice();
+        if (bilder.verlinkt > 0) {
+            hinweise.push(_tt('chatpdf.img_linked',
+                '{n} Bild(er) konnten nicht eingebettet werden – sie fehlen im PDF womöglich.')
+                .split('{n}').join(String(bilder.verlinkt)));
+        }
+
+        try {
+            var d = w.document;
+            var laden = d.getElementById('jv-pdf-laden');
+            if (laden) laden.remove();
+
+            var bar = d.createElement('div');
+            bar.className = 'jv-pdf-bar';
+            var btn = d.createElement('button');
+            btn.type = 'button';
+            btn.textContent = _tt('chatpdf.print_btn', 'Drucken / Als PDF speichern');
+            btn.addEventListener('click', function () { try { w.print(); } catch (_) {} });
+            var tip = d.createElement('span');
+            tip.textContent = _tt('chatpdf.hint', 'Im Druckdialog „Als PDF speichern" wählen.');
+            bar.appendChild(btn);
+            bar.appendChild(tip);
+
+            var kopf = d.createElement('div');
+            kopf.className = 'jv-pdf-head';
+            var h = d.createElement('p');
+            h.className = 'jv-pdf-titel';
+            h.textContent = titel;
+            kopf.appendChild(h);
+            var meta = d.createElement('p');
+            meta.className = 'jv-pdf-meta';
+            meta.textContent = _tt('chatpdf.exported', 'Exportiert am {d}').split('{d}').join(stand.toLocaleString())
+                + ' · ' + _tt('chatpdf.msgs', '{n} Nachrichten').split('{n}').join(String(gebaut.stats.nachrichten));
+            kopf.appendChild(meta);
+            hinweise.forEach(function (txt) {
+                if (!txt) return;
+                var p = d.createElement('p');
+                p.className = 'jv-pdf-warn';
+                p.textContent = txt;
+                kopf.appendChild(p);
+            });
+
+            var ziel = d.getElementById('jv-pdf-wurzel') || d.body;
+            ziel.parentNode.insertBefore(bar, ziel);
+            ziel.parentNode.insertBefore(kopf, ziel);
+            // importNode: der Baum gehoert einem ANDEREN Dokument.
+            ziel.appendChild(d.importNode(gebaut.el, true));
+        } catch (e) {
+            _toast(_tt('chatpdf.failed', 'Der PDF-Export ist fehlgeschlagen.'), true);
+            return false;
+        }
+
+        await _pdfBilderFertig(w);
+        try { w.focus(); w.print(); } catch (_) { /* der Knopf im Fenster bleibt */ }
+        return true;
+    }
+
+    /* ── Namespace exponieren ─────────────────────────────────── */
+    global.JarvisChatLib = {
+        escapeHtml: escapeHtml,
+        renderMarkdown: renderMarkdown,
+        timeStr: timeStr,
+        currentDateStr: currentDateStr,
+        saveHistory: saveHistory,
+        loadHistory: loadHistory,
+        sharedLoad: sharedLoad,
+        sharedAppend: sharedAppend,
+        sharedReplace: sharedReplace,
+        sharedMigrate: sharedMigrate,
+        truncateHistoryToUserIndex: truncateHistoryToUserIndex,
+        removeRowsAfter: removeRowsAfter,
+        enterEditMode: enterEditMode,
+        exitEditMode: exitEditMode,
+        setupBubbleContextMenu: setupBubbleContextMenu,
+        hideBubbleContextMenu: _hideCtxMenu,
+        copyTextToClipboard: copyTextToClipboard,
+        createSelectionController: createSelectionController,
+        mediaCtxItems: mediaCtxItems,
+        copyElementAsImage: copyElementAsImage,
+        installAttachmentDrag: installAttachmentDrag,
+        exportTranscriptPdf: exportTranscriptPdf,
+        transcriptToPrintDom: transcriptToPrintDom,
+        pdfIcon: function () { return _PDF_SVG; },
+    };
+})(typeof window !== 'undefined' ? window : this);

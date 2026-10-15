@@ -1,0 +1,393 @@
+package info.jarvisai.app.ui.chat
+
+import info.jarvisai.app.data.tls.ServerVertrauen
+import android.app.Application
+import android.app.DownloadManager
+import android.content.Context
+import android.content.Intent
+import android.os.Bundle
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import dagger.hilt.android.lifecycle.HiltViewModel
+import info.jarvisai.app.data.model.AgentInfo
+import info.jarvisai.app.data.model.AvatarMouthState
+import info.jarvisai.app.data.model.AvatarType
+import info.jarvisai.app.data.model.ChatMessage
+import info.jarvisai.app.data.model.ConnectionState
+import info.jarvisai.app.data.model.MessageRole
+import info.jarvisai.app.service.TtsManager
+import info.jarvisai.app.data.prefs.DEFAULT_QUICK_ACTIONS
+import info.jarvisai.app.data.prefs.SettingsDataStore
+import info.jarvisai.app.data.repository.ChatRepository
+import info.jarvisai.app.service.JarvisNotificationService
+import info.jarvisai.app.update.DownloadPhase
+import info.jarvisai.app.update.UpdateChecker
+import info.jarvisai.app.update.UpdateState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+import info.jarvisai.app.data.model.SegmentType
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
+
+enum class VoiceState { IDLE, LISTENING, ERROR }
+
+@HiltViewModel
+class ChatViewModel @Inject constructor(
+    application: Application,
+    private val repo: ChatRepository,
+    private val settingsDataStore: SettingsDataStore,
+    private val updateChecker: UpdateChecker,
+    private val ttsManager: TtsManager,
+) : AndroidViewModel(application) {
+
+    val messages: StateFlow<List<ChatMessage>> = repo.messages
+    val connectionState: StateFlow<ConnectionState> = repo.connectionState
+    val agents: StateFlow<List<AgentInfo>> = repo.agents
+    val isAgentRunning: StateFlow<Boolean> = repo.isAgentRunning
+    val settings = settingsDataStore.settings
+
+    // Avatar / TTS
+    val isSpeaking: StateFlow<Boolean> = ttsManager.isSpeaking
+    val avatarMouthState: StateFlow<AvatarMouthState> = ttsManager.mouthState
+
+    private val _ttsEnabled = MutableStateFlow(true)
+    val ttsEnabled: StateFlow<Boolean> = _ttsEnabled
+
+    private val _inputText = MutableStateFlow("")
+    val inputText: StateFlow<String> = _inputText
+
+    private val _voiceState = MutableStateFlow(VoiceState.IDLE)
+    val voiceState: StateFlow<VoiceState> = _voiceState
+
+    private val _quickActions = MutableStateFlow(DEFAULT_QUICK_ACTIONS)
+    val quickActions: StateFlow<List<String>> = _quickActions
+
+    private val _showAgentPanel = MutableStateFlow(false)
+    val showAgentPanel: StateFlow<Boolean> = _showAgentPanel
+
+    private val _avatarType = MutableStateFlow(AvatarType.IRONMAN)
+    val avatarType: StateFlow<AvatarType> = _avatarType
+
+    // ─── Nachrichtenauswahl (Long-Press) ──────────────────────────────
+    private val _selectionMode = MutableStateFlow(false)
+    val selectionMode: StateFlow<Boolean> = _selectionMode
+
+    private val _selectedIds = MutableStateFlow<Set<String>>(emptySet())
+    val selectedIds: StateFlow<Set<String>> = _selectedIds
+
+    private val _updateState = MutableStateFlow(UpdateState())
+    val updateState: StateFlow<UpdateState> = _updateState
+
+    private var speechRecognizer: SpeechRecognizer? = null
+    private var autoSendVoice = false
+    private var voiceSilenceMs = 1500
+    private var currentUiLang = "de"
+
+    init {
+        // Alle Settings-Änderungen live übernehmen
+        viewModelScope.launch {
+            settingsDataStore.settings.collect { s ->
+                _quickActions.value = s.quickActions
+                autoSendVoice = s.autoSendVoice
+                voiceSilenceMs = s.voiceSilenceMs
+                currentUiLang = s.uiLang
+                _avatarType.value = s.avatarType
+                _ttsEnabled.value = s.ttsEnabled
+                ttsManager.configure(
+                    serverTtsEnabled = s.serverTtsEnabled,
+                    serverUrl        = s.serverUrl,
+                    apiKey           = s.apiKey,
+                    serverVoice      = s.serverTtsVoice,
+                    androidVoice     = s.androidTtsVoice,
+                )
+            }
+        }
+        // Fertige Jarvis-Antworten vorlesen – SharedFlow garantiert einmalige Zustellung
+        viewModelScope.launch {
+            repo.speakText.collect { text ->
+                if (_avatarType.value == AvatarType.NONE) return@collect
+                if (!_ttsEnabled.value) return@collect
+                ttsManager.speak(text)
+            }
+        }
+        // Neu verbinden nur wenn URL oder Key sich ändert
+        viewModelScope.launch {
+            settingsDataStore.settings
+                .distinctUntilChanged { old, new ->
+                    old.serverUrl == new.serverUrl && old.apiKey == new.apiKey
+                }
+                .collectLatest { settings ->
+                    if (settings.serverUrl.isNotBlank() && settings.apiKey.isNotBlank()) {
+                        repo.connect()
+                    }
+                }
+        }
+        // Update-Check beim Start
+        viewModelScope.launch {
+            _updateState.value = updateChecker.check()
+        }
+        // Notifications wenn Agent fertig
+        viewModelScope.launch {
+            repo.messages.collect { msgs ->
+                val last = msgs.lastOrNull()
+                if (last != null && !last.isStreaming && last.role == MessageRole.JARVIS) {
+                    JarvisNotificationService.showIfBackground(
+                        getApplication(), last.text.take(100)
+                    )
+                }
+            }
+        }
+    }
+
+    fun onInputChange(text: String) { _inputText.value = text }
+
+    fun sendMessage() {
+        val text = _inputText.value.trim()
+        if (text.isBlank()) return
+        _inputText.value = ""
+        ttsManager.stop()   // Laufende Sprachausgabe unterbrechen
+        repo.sendMessage(text)
+    }
+
+    fun sendQuickAction(action: String) {
+        ttsManager.stop()
+        repo.sendMessage(action)
+    }
+
+    fun stopAgent() {
+        repo.sendStop()
+    }
+
+    fun toggleAgentPanel() { _showAgentPanel.value = !_showAgentPanel.value }
+
+    fun enterSelectionMode(msgId: String) {
+        _selectionMode.value = true
+        _selectedIds.value = setOf(msgId)
+    }
+
+    fun toggleSelection(msgId: String) {
+        val ids = _selectedIds.value
+        _selectedIds.value = if (msgId in ids) ids - msgId else ids + msgId
+        if (_selectedIds.value.isEmpty()) _selectionMode.value = false
+    }
+
+    fun selectAll() {
+        val allIds = messages.value.map { it.id }.toSet()
+        _selectedIds.value = if (_selectedIds.value.size == allIds.size) emptySet() else allIds
+        if (_selectedIds.value.isEmpty()) _selectionMode.value = false
+    }
+
+    fun exitSelectionMode() {
+        _selectionMode.value = false
+        _selectedIds.value = emptySet()
+    }
+
+    fun deleteSelected() {
+        repo.deleteMessages(_selectedIds.value)
+        exitSelectionMode()
+    }
+
+    /**
+     * Editiert eine eigene User-Nachricht: alle Folgenachrichten werden gelöscht
+     * und das Backend generiert die Antwort neu (mit gekürzter History).
+     */
+    fun editUserMessage(messageId: String, newText: String) {
+        ttsManager.stop()
+        repo.editUserMessage(messageId, newText)
+    }
+
+    fun downloadUpdate() {
+        val ctx = getApplication<Application>()
+        val downloadId = updateChecker.startDownload(ctx)
+        _updateState.value = _updateState.value.copy(
+            phase = DownloadPhase.DOWNLOADING,
+            progress = 0,
+            downloadId = downloadId,
+        )
+        viewModelScope.launch(Dispatchers.IO) {
+            val dm = ctx.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            while (true) {
+                val cursor = dm.query(DownloadManager.Query().setFilterById(downloadId))
+                if (cursor != null && cursor.moveToFirst()) {
+                    val status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                    val downloaded = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
+                    val total = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
+                    cursor.close()
+                    when (status) {
+                        DownloadManager.STATUS_SUCCESSFUL -> {
+                            _updateState.value = _updateState.value.copy(phase = DownloadPhase.READY, progress = 100)
+                            break
+                        }
+                        DownloadManager.STATUS_FAILED -> {
+                            _updateState.value = _updateState.value.copy(phase = DownloadPhase.ERROR)
+                            break
+                        }
+                        else -> {
+                            val pct = if (total > 0) (downloaded * 100 / total).toInt() else 0
+                            _updateState.value = _updateState.value.copy(progress = pct)
+                        }
+                    }
+                } else {
+                    cursor?.close()
+                }
+                delay(500)
+            }
+        }
+    }
+
+    fun dismissUpdate() {
+        _updateState.value = UpdateState()
+    }
+
+    fun reconnect() {
+        viewModelScope.launch { repo.connect() }
+    }
+
+    // ─── Spracheingabe ────────────────────────────────────────────────
+
+    fun startListening() {
+        val ctx = getApplication<Application>()
+        if (!SpeechRecognizer.isRecognitionAvailable(ctx)) {
+            _voiceState.value = VoiceState.ERROR
+            return
+        }
+        speechRecognizer?.destroy()
+        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(ctx).apply {
+            setRecognitionListener(object : RecognitionListener {
+                override fun onReadyForSpeech(params: Bundle?) {
+                    _voiceState.value = VoiceState.LISTENING
+                }
+                override fun onResults(results: Bundle?) {
+                    val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    val text = matches?.firstOrNull() ?: ""
+                    _voiceState.value = VoiceState.IDLE
+                    if (text.isNotBlank()) {
+                        if (autoSendVoice) {
+                            _inputText.value = ""
+                            repo.sendMessage(text)
+                        } else {
+                            _inputText.value = text
+                        }
+                    }
+                }
+                override fun onError(error: Int) { _voiceState.value = VoiceState.ERROR }
+                override fun onBeginningOfSpeech() {}
+                override fun onBufferReceived(buffer: ByteArray?) {}
+                override fun onEndOfSpeech() {}
+                override fun onEvent(eventType: Int, params: Bundle?) {}
+                override fun onPartialResults(partialResults: Bundle?) {
+                    if (autoSendVoice) return
+                    val partial = partialResults
+                        ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        ?.firstOrNull() ?: return
+                    _inputText.value = partial
+                }
+                override fun onRmsChanged(rmsdB: Float) {}
+            })
+        }
+        val speechLocale = if (currentUiLang == "en") "en-US" else "de-DE"
+        val speechPrompt = if (currentUiLang == "en") "Speak with Jarvis…" else "Sprich mit Jarvis…"
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, speechLocale)
+            putExtra(RecognizerIntent.EXTRA_PROMPT, speechPrompt)
+            putExtra("android.speech.extra.SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS", voiceSilenceMs.toLong())
+            putExtra("android.speech.extra.SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS", voiceSilenceMs.toLong())
+            putExtra("android.speech.extra.SPEECH_INPUT_MINIMUM_LENGTH_MILLIS", 500L)
+        }
+        speechRecognizer?.startListening(intent)
+    }
+
+    fun stopListening() {
+        speechRecognizer?.stopListening()
+        _voiceState.value = VoiceState.IDLE
+    }
+
+    /** Laufende TTS-Ausgabe sofort unterbrechen. */
+    fun stopTts() {
+        ttsManager.stop()
+    }
+
+    /** Sprachausgabe global an/aus schalten und persistieren. */
+    fun toggleTts() {
+        val newVal = !_ttsEnabled.value
+        _ttsEnabled.value = newVal
+        if (!newVal) ttsManager.stop()
+        viewModelScope.launch {
+            settingsDataStore.save(settingsDataStore.settings.first().copy(ttsEnabled = newVal))
+        }
+    }
+
+    /** Benutzer-Feedback für eine Jarvis-Antwort an den Server senden.
+     *  Negative/falsche Bewertungen: Server gibt LLM-Analyse zurück, die als Jarvis-Nachricht angezeigt wird. */
+    fun sendFeedback(msg: ChatMessage, rating: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val settings = settingsDataStore.settings.first()
+                val baseUrl = settings.serverUrl
+                    .replace("wss://", "https://")
+                    .replace("ws://", "http://")
+                    .removeSuffix("/ws")
+                    .removeSuffix("/ws/")
+                val botResp = msg.segments
+                    .filter { it.type == SegmentType.ANSWER }
+                    .joinToString(" ") { it.text }
+                val lastUserMsg = messages.value
+                    .lastOrNull { it.role == MessageRole.USER && it.timestamp < msg.timestamp }
+                    ?.text ?: ""
+
+                val body = JSONObject().apply {
+                    put("token", settings.apiKey)
+                    put("rating", rating)
+                    put("user_message", lastUserMsg)
+                    put("bot_response", botResp.take(500))
+                }.toString()
+
+                // Großzügiger Timeout: LLM-Analyse kann 20-40s dauern
+                // Zertifikat wie ueberall (BSI M11); vorher ganz ohne TLS-Einstellung,
+                // scheiterte also an jedem selbst ausgestellten Serverzertifikat
+                val client = ServerVertrauen.anwenden(OkHttpClient.Builder())
+                    .callTimeout(90, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+                val req = Request.Builder()
+                    .url("$baseUrl/api/feedback")
+                    .post(body.toRequestBody("application/json".toMediaType()))
+                    .build()
+                val response = client.newCall(req).execute()
+                val responseBody = response.body?.string() ?: return@launch
+                response.close()
+
+                // LLM-Analyse aus Response extrahieren und als Jarvis-Nachricht anzeigen
+                val respJson = org.json.JSONObject(responseBody)
+                val analysis = respJson.optString("analysis", "")
+                if (analysis.isNotBlank()) {
+                    repo.addLocalJarvisMessage(analysis)
+                }
+            } catch (e: Exception) {
+                // Feedback-Fehler still ignorieren
+            }
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        speechRecognizer?.destroy()
+        speechRecognizer = null
+        ttsManager.stop()
+    }
+}

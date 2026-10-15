@@ -1,0 +1,948 @@
+/* ============================================================
+ * issues.js – Issue-Tracker UI (shared)
+ *
+ * Wird in /chat, /userchat, /support, /portal und /settings geladen.
+ * Stellt einen Modal-Dialog mit Liste, Detail, Erstellen, Editieren,
+ * Attachments bereit und pflegt das Benachrichtigungs-Badge am Issues-Button.
+ *
+ * API:
+ *   JarvisIssues.open()         – Modal oeffnen (Listenansicht)
+ *   JarvisIssues.create()       – Modal oeffnen + direkt im Erstell-Modus
+ *   JarvisIssues.refreshBadge() – Badge-Zaehler sofort aktualisieren
+ *
+ * Auth: erwartet localStorage["jarvis_token"] (von app.js/chat.js gesetzt).
+ * ============================================================ */
+(function () {
+    'use strict';
+
+    if (window.JarvisIssues) return;  // doppeltes Laden vermeiden
+
+    // Reihenfolge: app.js (index.html), chat.js (chat.html), userchat.js (userchat.html)
+    const TOKEN_KEYS = window.JarvisSitzung.tokenSchluessel();
+
+    /* Abruf-Schluessel statt Sitzungstoken in ?token= (frontend/js/dlkey.js).
+       Rueckfall auf das Sitzungstoken nur, solange das Modul fehlt oder der
+       Schluessel noch unterwegs ist – sonst waere ein Bild/Download tot. */
+    function _dlk() {
+        return (window.JarvisDL && window.JarvisDL.schluessel())
+            || window.JarvisSitzung.token();
+    }
+
+    function _token() {
+        for (const k of TOKEN_KEYS) {
+            const v = localStorage.getItem(k);
+            if (v) return v;
+        }
+        return '';
+    }
+
+    function _headers(extra) {
+        const h = Object.assign({}, extra || {});
+        const t = _token();
+        if (t) h['Authorization'] = 'Bearer ' + t;
+        return h;
+    }
+
+    function _escape(s) {
+        const d = document.createElement('div');
+        d.textContent = s == null ? '' : String(s);
+        return d.innerHTML;
+    }
+
+    function _fmtDate(iso) {
+        if (!iso) return '';
+        try {
+            const d = new Date(iso);
+            return d.toLocaleString();
+        } catch (e) {
+            return iso;
+        }
+    }
+
+    function _typeLabel(t) {
+        return { bug: window.t('issues.type_bug'), feature: window.t('issues.type_feature'), improvement: window.t('issues.type_improvement') }[t] || t || '–';
+    }
+
+    function _statusLabel(s) {
+        return { open: window.t('issues.status_open'), in_progress: window.t('issues.status_in_progress'), closed: window.t('issues.status_closed') }[s] || s || '–';
+    }
+
+    function _statusColor(s) {
+        return { open: '#3b82f6', in_progress: 'var(--warning)', closed: 'var(--success)' }[s] || '#6b7280';
+    }
+
+    function _prioLabel(p) {
+        return { low: window.t('issues.prio_low'), medium: window.t('issues.prio_medium'), high: window.t('issues.prio_high') }[p] || p || '–';
+    }
+
+    // ─── State ────────────────────────────────────────────────────────
+    let _modal = null;
+    let _currentUser = '';
+    let _isAdmin = false;
+    let _detailIssueId = null;
+    // Bestand der zuletzt geladenen Liste + der Filter, der sie zeichnet.
+    // WARUM MODULWEIT: der Muelleimer an einer Zeile muss den Eintrag aus dem
+    // Bestand nehmen und NUR neu filtern koennen. Ein `_showList()` nach dem
+    // Loeschen wuerde den Filter auf die Vorgabe "offen" zuruecksetzen - genau
+    // beim Aufraeumen steht er aber auf "geschlossen", und jeder geloeschte
+    // Eintrag risse einen aus seiner Ansicht.
+    let _listIssues = [];
+    let _applyFilter = null;
+
+    // ─── CSS einfuegen ────────────────────────────────────────────────
+    function _injectCss() {
+        if (document.getElementById('jv-issues-css')) return;
+        const s = document.createElement('style');
+        s.id = 'jv-issues-css';
+        s.textContent = `
+.jv-iss-overlay{position:fixed;inset:0;background:rgba(var(--shadow-rgb),.6);z-index:99999;
+  display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);}
+.jv-iss-modal{background:var(--bg-secondary);color:var(--text-primary);
+  border:1px solid rgba(var(--accent-rgb),.4);
+  border-radius:12px;width:min(900px,95vw);max-height:90vh;display:flex;flex-direction:column;
+  box-shadow:0 20px 60px rgba(var(--shadow-rgb),.6);font-family:system-ui,-apple-system,sans-serif;}
+.jv-iss-header{display:flex;align-items:center;justify-content:space-between;
+  padding:14px 18px;border-bottom:1px solid rgba(var(--fg-rgb),.08);}
+.jv-iss-title{font-size:16px;font-weight:600;color:var(--text-primary);margin:0;}
+.jv-iss-close{background:none;border:none;color:var(--text-secondary);font-size:22px;cursor:pointer;
+  line-height:1;padding:0 4px;}
+.jv-iss-close:hover{color:var(--text-primary);}
+.jv-iss-body{padding:14px 18px;overflow-y:auto;flex:1;min-height:0;}
+.jv-iss-footer{padding:12px 18px;border-top:1px solid rgba(var(--fg-rgb),.08);
+  display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;}
+.jv-iss-btn{padding:7px 14px;border-radius:6px;font-size:13px;cursor:pointer;
+  border:1px solid rgba(var(--fg-rgb),.15);background:rgba(var(--fg-rgb),.06);color:var(--text-primary);
+  transition:background .15s,border-color .15s;font-family:inherit;}
+.jv-iss-btn:hover{background:rgba(var(--fg-rgb),.12);}
+.jv-iss-btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;}
+.jv-iss-btn.primary:hover{background:var(--accent-hover);}
+.jv-iss-btn.danger{background:var(--danger);border-color:var(--danger);color:#fff;}
+.jv-iss-btn.danger:hover{background:rgba(var(--danger-rgb),.85);}
+.jv-iss-btn:disabled{opacity:.4;cursor:not-allowed;}
+.jv-iss-toolbar{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;}
+.jv-iss-toolbar select,.jv-iss-toolbar input{background:rgba(var(--fg-rgb),.06);
+  border:1px solid rgba(var(--fg-rgb),.12);border-radius:5px;color:var(--text-primary);
+  padding:5px 9px;font-size:13px;font-family:inherit;}
+.jv-iss-toolbar label{font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:6px;}
+.jv-iss-list{display:flex;flex-direction:column;gap:6px;}
+.jv-iss-item{padding:10px 12px;border:1px solid rgba(var(--fg-rgb),.08);
+  border-radius:8px;background:rgba(var(--fg-rgb),.02);cursor:pointer;transition:background .15s;}
+.jv-iss-item:hover{background:rgba(var(--accent-rgb),.08);border-color:rgba(var(--accent-rgb),.3);}
+.jv-iss-item-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.jv-iss-item-title{font-weight:600;color:var(--text-primary);font-size:14px;flex:1;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+/* pointer-events:auto (frueher none) – der Badge MUSS den Zeiger annehmen,
+   sonst gibt es kein Mouseover. Ein Klick darauf geht durch Bubbling weiter an
+   den Knopf, der ihn ohnehin schon oeffnet. */
+.jv-iss-notif{position:absolute;top:-4px;right:-4px;min-width:16px;height:16px;border-radius:8px;
+  background:var(--danger);color:#fff;font-size:10px;font-weight:700;line-height:16px;text-align:center;
+  padding:0 4px;pointer-events:auto;cursor:pointer;box-shadow:0 0 0 2px var(--bg-primary,#0a0e17);}
+/* ── Mouseover am Badge: was hinter der Zahl steckt ──────────────────
+   DECKENDE Flaeche (Register): das Panel liegt ueber der Seite. Es haengt an
+   body und ist fixed positioniert – in der Titelleiste eingehaengt wuerde es
+   an deren overflow/Stapelkontext haengenbleiben und auf schmalen Fenstern
+   abgeschnitten. z-index UNTER dem Modal (99999): oeffnet sich der Dialog,
+   gehoert er nach vorn.
+   ACHTUNG: dieser Block steht IN einem Template-Literal – keine Backticks. */
+.jv-iss-tip{position:fixed;z-index:99990;display:none;width:min(360px,calc(100vw - 16px));
+  max-height:min(60vh,420px);overflow-y:auto;background:var(--bg-secondary);
+  color:var(--text-primary);border:1px solid rgba(var(--accent-rgb),.35);border-radius:10px;
+  box-shadow:0 12px 32px rgba(var(--shadow-rgb),.5);
+  font-family:system-ui,-apple-system,sans-serif;font-size:12px;padding:8px;}
+.jv-iss-tip-h{font-size:11px;font-weight:700;color:var(--text-secondary);
+  text-transform:uppercase;letter-spacing:.04em;padding:2px 4px 6px;}
+.jv-iss-tip-row{display:block;width:100%;text-align:left;background:none;border:none;
+  border-radius:7px;padding:7px 8px;cursor:pointer;color:inherit;font:inherit;}
+.jv-iss-tip-row:hover,.jv-iss-tip-row:focus-visible{background:rgba(var(--accent-rgb),.10);outline:none;}
+.jv-iss-tip-top{display:flex;align-items:center;gap:6px;}
+.jv-iss-tip-t{font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;color:var(--text-primary);}
+/* KONTRAST GEMESSEN, nicht geschaetzt (Chrome, Hell-Modus). Die naheliegenden
+   Signalfarben sind bei 9 px unlesbar: weiss auf var(--warning) = 2,15:1 und
+   weiss auf #3b82f6 = 3,68:1. Abgedunkelt auf 5,05:1 bzw. 5,12:1 - dieselbe
+   Korrektur wie beim SAP-Zertifikatsfeld. Die Pille bringt ihre eigene Flaeche
+   mit, der Wert gilt deshalb in BEIDEN Themes. */
+.jv-iss-tip-k{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;
+  padding:1px 6px;border-radius:9px;color:#fff;background:#4b5563;flex:0 0 auto;}
+.jv-iss-tip-k.edited{background:#b45309;}
+.jv-iss-tip-k.new{background:#2563eb;}
+.jv-iss-tip-sub{color:var(--text-secondary);font-size:11px;margin-top:2px;}
+.jv-iss-tip-c{color:var(--text-secondary);font-size:11px;margin-top:3px;font-style:italic;
+  overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;
+  -webkit-box-orient:vertical;}
+/* --text-muted waere hier 3,72:1 bei 10 px - fuer eine Zeile, die eine
+   Kuerzung erklaert, zu wenig. --text-secondary misst 7,53:1. */
+.jv-iss-tip-more{color:var(--text-secondary);font-size:11px;padding:6px 8px 2px;
+  border-top:1px solid rgba(var(--fg-rgb),.08);margin-top:4px;}
+.jv-iss-tip-hint{color:var(--text-secondary);font-size:10px;padding:4px 8px 0;}
+.jv-iss-badge{font-size:10px;padding:2px 7px;border-radius:10px;font-weight:600;
+  text-transform:uppercase;letter-spacing:.04em;color:#fff;background:#6b7280;}
+.jv-iss-badge.bug{background:var(--danger);}
+.jv-iss-badge.feature{background:#3b82f6;}
+.jv-iss-badge.improvement{background:var(--success);}
+.jv-iss-badge.prio-low{background:#6b7280;}
+.jv-iss-badge.prio-medium{background:var(--warning);}
+.jv-iss-badge.prio-high{background:var(--danger);}
+/* Muelleimer an der Listenzeile: nur fuer Berechtigte, und er darf die Zeile
+   NICHT oeffnen (der Klick wird im Handler gestoppt). Ruhend gedaempft, damit
+   eine Liste voller Loeschknoepfe nicht wie eine Warnung aussieht. */
+.jv-iss-item-del{background:none;border:none;color:var(--text-muted);cursor:pointer;
+  padding:0 2px;line-height:1;display:inline-flex;align-items:center;opacity:.6;
+  transition:color .15s,opacity .15s;}
+.jv-iss-item-del:hover{color:var(--danger);opacity:1;}
+.jv-iss-item-meta{font-size:11px;color:var(--text-muted);margin-top:3px;display:flex;
+  gap:10px;flex-wrap:wrap;}
+.jv-iss-item-author{color:var(--text-secondary);}
+.jv-iss-empty{text-align:center;padding:40px 16px;color:var(--text-muted);}
+.jv-iss-form-row{margin-bottom:12px;}
+.jv-iss-form-row label{display:block;font-size:12px;color:var(--text-secondary);
+  margin-bottom:4px;font-weight:500;}
+.jv-iss-form-row input[type="text"],
+.jv-iss-form-row textarea,
+.jv-iss-form-row select{width:100%;background:rgba(var(--fg-rgb),.06);
+  border:1px solid rgba(var(--fg-rgb),.12);border-radius:6px;color:var(--text-primary);
+  padding:7px 10px;font-size:13px;font-family:inherit;box-sizing:border-box;}
+.jv-iss-form-row textarea{min-height:100px;resize:vertical;line-height:1.5;}
+.jv-iss-form-row input:focus,
+.jv-iss-form-row textarea:focus,
+.jv-iss-form-row select:focus{outline:none;border-color:var(--accent);}
+.jv-iss-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.jv-iss-detail-section{margin-bottom:14px;}
+.jv-iss-detail-label{font-size:11px;color:var(--text-muted);text-transform:uppercase;
+  letter-spacing:.05em;margin-bottom:4px;}
+.jv-iss-detail-value{color:var(--text-primary);line-height:1.5;font-size:13px;white-space:pre-wrap;
+  word-break:break-word;}
+.jv-iss-jarvis-comment{background:rgba(var(--accent-rgb),.08);border-left:3px solid var(--accent);
+  border-radius:0 6px 6px 0;padding:10px 14px;}
+.jv-iss-attach-list{display:flex;flex-direction:column;gap:6px;margin-top:6px;}
+.jv-iss-attach-item{display:flex;align-items:center;gap:10px;padding:6px 10px;
+  background:rgba(var(--fg-rgb),.04);border-radius:6px;font-size:12px;}
+.jv-iss-attach-item a{color:var(--accent-hover);text-decoration:none;flex:1;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.jv-iss-attach-item a:hover{text-decoration:underline;}
+.jv-iss-attach-thumb{max-width:120px;max-height:120px;border-radius:4px;cursor:pointer;}
+.jv-iss-attach-del{background:none;border:none;color:var(--danger);cursor:pointer;
+  font-size:14px;padding:0 4px;}
+.jv-iss-attach-del:hover{color:rgba(var(--danger-rgb),.85);}
+.jv-iss-err{color:var(--danger);font-size:12px;padding:6px 0;}
+.jv-iss-ok{color:var(--success);font-size:12px;padding:6px 0;}
+@media(max-width:600px){
+  .jv-iss-form-grid{grid-template-columns:1fr;}
+  .jv-iss-modal{width:100vw;height:100vh;max-height:100vh;border-radius:0;}
+}
+        `;
+        document.head.appendChild(s);
+    }
+
+    // ─── Modal-Skelett ────────────────────────────────────────────────
+    function _ensureModal() {
+        _injectCss();
+        if (_modal) return _modal;
+        const overlay = document.createElement('div');
+        overlay.className = 'jv-iss-overlay';
+        overlay.style.display = 'none';
+        overlay.innerHTML = `
+            <div class="jv-iss-modal" role="dialog" aria-modal="true">
+                <div class="jv-iss-header">
+                    <h2 class="jv-iss-title" id="jv-iss-title">Issues</h2>
+                    <button class="jv-iss-close" aria-label="${window.t('common.close')}">&times;</button>
+                </div>
+                <div class="jv-iss-body" id="jv-iss-body"></div>
+                <div class="jv-iss-footer" id="jv-iss-footer"></div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+        overlay.querySelector('.jv-iss-close').addEventListener('click', close);
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) close();
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && overlay.style.display !== 'none') close();
+        });
+        _modal = overlay;
+        return overlay;
+    }
+
+    function open(initialView) {
+        _ensureModal();
+        _modal.style.display = 'flex';
+        // Mit dem Oeffnen gelten Status-/Kommentar-Aenderungen als gesehen
+        fetch('/api/issues/notifications/seen', { method: 'POST', headers: _headers() }).catch(() => {});
+        document.querySelectorAll('.jv-iss-notif').forEach(b => { b.style.display = 'none'; });
+        // Der gemerkte Stand gehoert mit weg – sonst zeigt ein Hover nach dem
+        // Schliessen eine Liste, die soeben als gesehen gemeldet wurde.
+        _notifCount = 0;
+        _notifItems = [];
+        _tipAus();
+        if (initialView === 'create') {
+            _showForm(null);
+        } else {
+            _showList();
+        }
+    }
+
+    function close() {
+        if (_modal) _modal.style.display = 'none';
+        _detailIssueId = null;
+    }
+
+    // ─── Liste ────────────────────────────────────────────────────────
+    async function _showList() {
+        document.getElementById('jv-iss-title').textContent = window.t('issues.title_list');
+        const body = document.getElementById('jv-iss-body');
+        const footer = document.getElementById('jv-iss-footer');
+        body.innerHTML = `<div class="jv-iss-empty">${window.t('issues.loading')}</div>`;
+        footer.innerHTML = `
+            <button class="jv-iss-btn primary" id="jv-iss-new-btn">${window.t('issues.new')}</button>
+        `;
+        document.getElementById('jv-iss-new-btn').onclick = () => _showForm(null);
+
+        try {
+            const res = await fetch('/api/issues', { headers: _headers() });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const data = await res.json();
+            _currentUser = data.current_user || '';
+            _isAdmin = !!data.is_admin;
+            _renderList(data.issues || []);
+        } catch (e) {
+            body.innerHTML = `<div class="jv-iss-err">${window.t('issues.load_error')}: ${_escape(e.message)}</div>`;
+        }
+    }
+
+    function _renderList(issues) {
+        const body = document.getElementById('jv-iss-body');
+        body.innerHTML = `
+            <div class="jv-iss-toolbar">
+                <label>${window.t('issues.f_status')}
+                    <select id="jv-iss-flt-status">
+                        <option value="">${window.t('issues.f_all')}</option>
+                        <option value="open" selected>${window.t('issues.status_open')}</option>
+                        <option value="in_progress">${window.t('issues.status_in_progress')}</option>
+                        <option value="closed">${window.t('issues.status_closed')}</option>
+                    </select>
+                </label>
+                <label>${window.t('issues.f_type')}
+                    <select id="jv-iss-flt-type">
+                        <option value="">${window.t('issues.f_all')}</option>
+                        <option value="bug">${window.t('issues.type_bug')}</option>
+                        <option value="feature">${window.t('issues.type_feature')}</option>
+                        <option value="improvement">${window.t('issues.type_improvement')}</option>
+                    </select>
+                </label>
+                <label><input type="checkbox" id="jv-iss-flt-mine"> ${window.t('issues.f_mine')}</label>
+                <span style="flex:1"></span>
+                <span id="jv-iss-count" style="font-size:11px;color:var(--text-muted);"></span>
+            </div>
+            <div class="jv-iss-list" id="jv-iss-list"></div>
+        `;
+
+        _listIssues = issues;
+
+        function _apply() {
+            const fs = document.getElementById('jv-iss-flt-status').value;
+            const ft = document.getElementById('jv-iss-flt-type').value;
+            const fm = document.getElementById('jv-iss-flt-mine').checked;
+            // Gefiltert wird ueber den BESTAND, nicht ueber das Argument von
+            // `_renderList`: sonst brächte der Muelleimer den Eintrag zwar aus
+            // `_listIssues`, die Liste zeichnete ihn aber wieder mit.
+            let filtered = _listIssues;
+            if (fs) filtered = filtered.filter(i => i.status === fs);
+            if (ft) filtered = filtered.filter(i => i.type === ft);
+            if (fm) filtered = filtered.filter(i =>
+                (i.author || '').toLowerCase() === _currentUser.toLowerCase());
+            // Der Zaehler nennt die ANGEZEIGTEN Eintraege, bei gesetztem Filter
+            // zusaetzlich den Gesamtbestand. Vorher stand dort immer die
+            // Gesamtzahl - mit dem Vorgabe-Filter "offen" waere das eine Zahl
+            // ueber eine Liste, die so gar nicht dasteht.
+            const cnt = document.getElementById('jv-iss-count');
+            if (cnt) {
+                cnt.textContent = filtered.length < _listIssues.length
+                    ? `${filtered.length} / ${_listIssues.length} ${window.t('issues.count_label')}`
+                    : `${_listIssues.length} ${window.t('issues.count_label')}`;
+            }
+            _renderItems(filtered);
+        }
+        _applyFilter = _apply;
+        document.getElementById('jv-iss-flt-status').onchange = _apply;
+        document.getElementById('jv-iss-flt-type').onchange = _apply;
+        document.getElementById('jv-iss-flt-mine').onchange = _apply;
+        // Vorgabe ist "offen": beim Oeffnen interessiert, was noch aussteht -
+        // geschlossene Eintraege sind Archiv und waren bisher die Mehrheit der
+        // Liste. Ueber das Pulldown bleibt "alle" einen Klick entfernt.
+        _apply();
+    }
+
+    function _renderItems(items) {
+        const list = document.getElementById('jv-iss-list');
+        if (!items.length) {
+            list.innerHTML = `<div class="jv-iss-empty">${window.t('issues.none_found')}</div>`;
+            return;
+        }
+        list.innerHTML = items.map(i => `
+            <div class="jv-iss-item" data-id="${_escape(i.id)}">
+                <div class="jv-iss-item-head">
+                    <span class="jv-iss-badge ${_escape(i.type)}">${_typeLabel(i.type)}</span>
+                    <span class="jv-iss-badge prio-${_escape(i.priority)}">${_prioLabel(i.priority)}</span>
+                    <span class="jv-iss-item-title">${_escape(i.title)}</span>
+                    <span class="jv-iss-badge" style="background:${_statusColor(i.status)}">${_statusLabel(i.status)}</span>
+                    ${i.can_delete ? `<button class="jv-iss-item-del" data-del="${_escape(i.id)}" title="${window.t('issues.delete')}" aria-label="${window.t('issues.delete')}">${JarvisIcons.trash()}</button>` : ''}
+                </div>
+                <div class="jv-iss-item-meta">
+                    <span class="jv-iss-item-author" title="${window.t('issues.reporter_title')}">👤 ${_escape(i.author || '—')}</span>
+                    <span>${_fmtDate(i.created)}</span>
+                    ${(i.attachments && i.attachments.length) ? `<span>📎 ${i.attachments.length}</span>` : ''}
+                </div>
+            </div>
+        `).join('');
+        list.querySelectorAll('.jv-iss-item').forEach(el => {
+            el.onclick = () => _showDetail(el.getAttribute('data-id'));
+        });
+        // Der Muelleimer liegt IN der klickbaren Zeile - ohne stopPropagation
+        // oeffnet derselbe Klick zusaetzlich die Detailansicht, und der Benutzer
+        // beantwortet die Rueckfrage vor einem Fenster, das schon gewechselt hat.
+        list.querySelectorAll('.jv-iss-item-del').forEach(btn => {
+            btn.onclick = async (ev) => {
+                ev.stopPropagation();
+                ev.preventDefault();
+                const id = btn.getAttribute('data-del');
+                if (!confirm(window.t('issues.delete_confirm'))) return;
+                btn.disabled = true;
+                try {
+                    const r = await fetch('/api/issues/' + encodeURIComponent(id),
+                        { method: 'DELETE', headers: _headers() });
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    // Nur den Bestand kuerzen und neu filtern: die Ansicht des
+                    // Aufraeumenden bleibt so stehen, wie er sie gewaehlt hat.
+                    _listIssues = _listIssues.filter(x => x.id !== id);
+                    if (_applyFilter) _applyFilter();
+                    refreshBadge();
+                } catch (e) {
+                    btn.disabled = false;
+                    alert(window.t('issues.delete_error') + ': ' + e.message);
+                }
+            };
+        });
+    }
+
+    // ─── Detail ───────────────────────────────────────────────────────
+    async function _showDetail(id) {
+        _detailIssueId = id;
+        document.getElementById('jv-iss-title').textContent = 'Issue-Details';
+        const body = document.getElementById('jv-iss-body');
+        const footer = document.getElementById('jv-iss-footer');
+        body.innerHTML = '<div class="jv-iss-empty">Lade …</div>';
+        footer.innerHTML = '';
+
+        try {
+            const res = await fetch('/api/issues/' + encodeURIComponent(id),
+                { headers: _headers() });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const data = await res.json();
+            _currentUser = data.current_user || '';
+            _isAdmin = !!data.is_admin;
+            _renderDetail(data.issue, data.can_edit, data.can_delete);
+        } catch (e) {
+            body.innerHTML = `<div class="jv-iss-err">Fehler: ${_escape(e.message)}</div>`;
+        }
+    }
+
+    function _renderDetail(issue, canEdit, canDelete) {
+        const body = document.getElementById('jv-iss-body');
+        const footer = document.getElementById('jv-iss-footer');
+        const attHtml = (issue.attachments || []).map(name => {
+            const url = `/api/issues/${encodeURIComponent(issue.id)}/attachments/${encodeURIComponent(name)}?token=${encodeURIComponent(_dlk())}`;
+            const isImg = /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(name);
+            const delBtn = canEdit
+                ? `<button class="jv-iss-attach-del" data-name="${_escape(name)}" title="Loeschen">${JarvisIcons.trash()}</button>`
+                : '';
+            if (isImg) {
+                return `<div class="jv-iss-attach-item">
+                    <img src="${url}" class="jv-iss-attach-thumb" alt="${_escape(name)}">
+                    <a href="${url}" download="${_escape(name)}">${_escape(name)}</a>
+                    ${delBtn}
+                </div>`;
+            }
+            return `<div class="jv-iss-attach-item">
+                <span>📎</span>
+                <a href="${url}" download="${_escape(name)}">${_escape(name)}</a>
+                ${delBtn}
+            </div>`;
+        }).join('');
+
+        body.innerHTML = `
+            <div class="jv-iss-detail-section">
+                <div class="jv-iss-item-head" style="margin-bottom:8px;">
+                    <span class="jv-iss-badge ${_escape(issue.type)}">${_typeLabel(issue.type)}</span>
+                    <span class="jv-iss-badge prio-${_escape(issue.priority)}">${_prioLabel(issue.priority)}</span>
+                    <span class="jv-iss-badge" style="background:${_statusColor(issue.status)}">${_statusLabel(issue.status)}</span>
+                </div>
+                <div class="jv-iss-detail-value" style="font-size:16px;font-weight:600;color:var(--text-primary);">${_escape(issue.title)}</div>
+                <div class="jv-iss-item-meta" style="margin-top:6px;">
+                    <span class="jv-iss-item-author" title="Melder">👤 Gemeldet von: ${_escape(issue.author || '—')}</span>
+                    <span>Erstellt: ${_fmtDate(issue.created)}</span>
+                    <span>Aktualisiert: ${_fmtDate(issue.updated)}</span>
+                </div>
+            </div>
+            <div class="jv-iss-detail-section">
+                <div class="jv-iss-detail-label">Beschreibung</div>
+                <div class="jv-iss-detail-value">${_escape(issue.body) || '<em style="color:var(--text-muted)">(leer)</em>'}</div>
+            </div>
+            ${issue.jarvis_comment ? `
+            <div class="jv-iss-detail-section">
+                <div class="jv-iss-detail-label">Antwort von Jarvis</div>
+                <div class="jv-iss-jarvis-comment jv-iss-detail-value">${_escape(issue.jarvis_comment)}</div>
+            </div>` : ''}
+            <div class="jv-iss-detail-section">
+                <div class="jv-iss-detail-label">Anhaenge</div>
+                ${attHtml ? `<div class="jv-iss-attach-list">${attHtml}</div>` :
+                    '<div style="color:var(--text-muted);font-size:12px;">(keine)</div>'}
+                ${canEdit ? `
+                    <div style="margin-top:8px;">
+                        <input type="file" id="jv-iss-att-input" multiple style="display:none;">
+                        <button class="jv-iss-btn" id="jv-iss-att-btn">+ Anhang hinzufuegen</button>
+                        <span id="jv-iss-att-status" style="margin-left:8px;font-size:11px;color:var(--text-muted);"></span>
+                    </div>` : ''}
+            </div>
+        `;
+
+        // Vorschaubild oeffnet den Anhang in neuem Tab. BSI H4 (CSP ohne
+        // Inline-Skript, 2026-10-04): frueher onclick-Attribut im Markup,
+        // jetzt Listener - die URL kommt aus dem src-Attribut (derselbe Wert).
+        body.querySelectorAll('img.jv-iss-attach-thumb').forEach(img => {
+            img.addEventListener('click', () => window.open(img.getAttribute('src'), '_blank'));
+        });
+
+        // Attachment-Loesch-Buttons
+        if (canEdit) {
+            body.querySelectorAll('.jv-iss-attach-del').forEach(btn => {
+                btn.onclick = async (e) => {
+                    e.stopPropagation();
+                    const name = btn.getAttribute('data-name');
+                    if (!confirm('Anhang "' + name + '" wirklich loeschen?')) return;
+                    try {
+                        const r = await fetch(
+                            `/api/issues/${encodeURIComponent(issue.id)}/attachments/${encodeURIComponent(name)}`,
+                            { method: 'DELETE', headers: _headers() }
+                        );
+                        if (!r.ok) throw new Error('HTTP ' + r.status);
+                        _showDetail(issue.id);
+                    } catch (err) {
+                        alert('Fehler: ' + err.message);
+                    }
+                };
+            });
+
+            const attBtn = document.getElementById('jv-iss-att-btn');
+            const attInput = document.getElementById('jv-iss-att-input');
+            const attStatus = document.getElementById('jv-iss-att-status');
+            attBtn.onclick = () => attInput.click();
+            attInput.onchange = async () => {
+                const files = Array.from(attInput.files || []);
+                if (!files.length) return;
+                attStatus.textContent = 'Lade hoch …';
+                let okCount = 0;
+                for (const f of files) {
+                    try {
+                        const fd = new FormData();
+                        fd.append('file', f);
+                        const r = await fetch(
+                            `/api/issues/${encodeURIComponent(issue.id)}/attachments`,
+                            { method: 'POST', headers: _headers(), body: fd }
+                        );
+                        if (r.ok) okCount++;
+                        else {
+                            const t = await r.text();
+                            attStatus.textContent = `Fehler bei ${f.name}: ${t}`;
+                        }
+                    } catch (err) {
+                        attStatus.textContent = `Fehler bei ${f.name}: ${err.message}`;
+                    }
+                }
+                if (okCount === files.length) {
+                    attStatus.textContent = '';
+                    _showDetail(issue.id);
+                }
+            };
+        }
+
+        // Footer-Buttons
+        const buttons = [`<button class="jv-iss-btn" id="jv-iss-back-btn">← Zurueck</button>`];
+        // 'editieren' = Ersteller aendert den Inhalt; 'bearbeiten' = Administrator
+        // pflegt den Loesungsbereich (Status + oeffentlicher Kommentar)
+        if (canEdit) buttons.push(`<button class="jv-iss-btn primary" id="jv-iss-edit-btn">editieren</button>`);
+        if (_isAdmin) buttons.push(`<button class="jv-iss-btn primary" id="jv-iss-jarvis-btn">bearbeiten</button>`);
+        if (canDelete) buttons.push(`<button class="jv-iss-btn danger" id="jv-iss-del-btn">${window.t('issues.delete')}</button>`);
+        footer.innerHTML = buttons.join('');
+
+        document.getElementById('jv-iss-back-btn').onclick = () => _showList();
+        if (canEdit) {
+            document.getElementById('jv-iss-edit-btn').onclick = () => _showForm(issue);
+        }
+        if (_isAdmin) {
+            document.getElementById('jv-iss-jarvis-btn').onclick = () => _showJarvisForm(issue);
+        }
+        if (canDelete) {
+            document.getElementById('jv-iss-del-btn').onclick = async () => {
+                if (!confirm(window.t('issues.delete_confirm'))) return;
+                try {
+                    const r = await fetch('/api/issues/' + encodeURIComponent(issue.id),
+                        { method: 'DELETE', headers: _headers() });
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    _showList();
+                    refreshBadge();
+                } catch (e) {
+                    alert(window.t('issues.delete_error') + ': ' + e.message);
+                }
+            };
+        }
+    }
+
+    // ─── Erstellen / Bearbeiten (User-Felder) ─────────────────────────
+    function _showForm(issue) {
+        const isEdit = !!issue;
+        document.getElementById('jv-iss-title').textContent = isEdit ? 'Issue editieren' : 'Neues Issue';
+        const body = document.getElementById('jv-iss-body');
+        const footer = document.getElementById('jv-iss-footer');
+
+        body.innerHTML = `
+            <div class="jv-iss-form-row">
+                <label>Titel *</label>
+                <input type="text" id="jv-iss-f-title" maxlength="200"
+                       value="${_escape(issue ? issue.title : '')}">
+            </div>
+            <div class="jv-iss-form-grid">
+                <div class="jv-iss-form-row">
+                    <label>Typ</label>
+                    <select id="jv-iss-f-type">
+                        <option value="bug">Bug</option>
+                        <option value="feature">Feature</option>
+                        <option value="improvement">Verbesserung</option>
+                    </select>
+                </div>
+                <div class="jv-iss-form-row">
+                    <label>Prioritaet</label>
+                    <select id="jv-iss-f-priority">
+                        <option value="low">Niedrig</option>
+                        <option value="medium">Mittel</option>
+                        <option value="high">Hoch</option>
+                    </select>
+                </div>
+            </div>
+            <div class="jv-iss-form-row">
+                <label>Beschreibung</label>
+                <textarea id="jv-iss-f-body" maxlength="20000">${_escape(issue ? issue.body : '')}</textarea>
+            </div>
+            <div id="jv-iss-form-err" class="jv-iss-err" style="display:none;"></div>
+        `;
+        document.getElementById('jv-iss-f-type').value = issue ? issue.type : 'bug';
+        document.getElementById('jv-iss-f-priority').value = issue ? issue.priority : 'medium';
+
+        footer.innerHTML = `
+            <button class="jv-iss-btn" id="jv-iss-cancel-btn">Abbrechen</button>
+            <button class="jv-iss-btn primary" id="jv-iss-save-btn">${isEdit ? 'Speichern' : 'Erstellen'}</button>
+        `;
+        document.getElementById('jv-iss-cancel-btn').onclick =
+            () => isEdit ? _showDetail(issue.id) : _showList();
+        document.getElementById('jv-iss-save-btn').onclick = async () => {
+            const errBox = document.getElementById('jv-iss-form-err');
+            errBox.style.display = 'none';
+            const payload = {
+                title: document.getElementById('jv-iss-f-title').value.trim(),
+                body: document.getElementById('jv-iss-f-body').value,
+                type: document.getElementById('jv-iss-f-type').value,
+                priority: document.getElementById('jv-iss-f-priority').value,
+            };
+            if (!payload.title) {
+                errBox.textContent = 'Titel ist erforderlich.';
+                errBox.style.display = 'block';
+                return;
+            }
+            try {
+                const url = isEdit ? '/api/issues/' + encodeURIComponent(issue.id) : '/api/issues';
+                const method = isEdit ? 'PATCH' : 'POST';
+                const r = await fetch(url, {
+                    method, headers: _headers({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify(payload),
+                });
+                if (!r.ok) {
+                    const t = await r.text();
+                    throw new Error(t || ('HTTP ' + r.status));
+                }
+                const data = await r.json();
+                _showDetail(data.issue.id);
+            } catch (e) {
+                errBox.textContent = e.message;
+                errBox.style.display = 'block';
+            }
+        };
+    }
+
+    // ─── Jarvis-Bereich (Status + Comment) ────────────────────────────
+    function _showJarvisForm(issue) {
+        document.getElementById('jv-iss-title').textContent = 'Issue bearbeiten (Lösungsbereich)';
+        const body = document.getElementById('jv-iss-body');
+        const footer = document.getElementById('jv-iss-footer');
+
+        body.innerHTML = `
+            <div class="jv-iss-detail-section" style="background:rgba(var(--fg-rgb),0.03);border-radius:8px;padding:12px;margin-bottom:14px;">
+                <div class="jv-iss-item-head" style="margin-bottom:8px;">
+                    <span class="jv-iss-badge ${_escape(issue.type)}">${_typeLabel(issue.type)}</span>
+                    <span class="jv-iss-badge prio-${_escape(issue.priority)}">${_prioLabel(issue.priority)}</span>
+                    <span class="jv-iss-badge" style="background:${_statusColor(issue.status)}">${_statusLabel(issue.status)}</span>
+                </div>
+                <div class="jv-iss-detail-value" style="font-size:15px;font-weight:600;color:var(--text-primary);">${_escape(issue.title)}</div>
+                <div class="jv-iss-item-meta" style="margin-top:6px;">
+                    <span>👤 ${_escape(issue.author || '—')}</span>
+                    <span>Erstellt: ${_fmtDate(issue.created)}</span>
+                </div>
+                <div class="jv-iss-detail-label" style="margin-top:10px;">Ursprünglicher Text</div>
+                <div class="jv-iss-detail-value" style="white-space:pre-wrap;">${_escape(issue.body) || '<em style="color:var(--text-muted)">(leer)</em>'}</div>
+            </div>
+            <div style="margin-bottom:14px;color:var(--text-secondary);font-size:12px;">
+                Hier koennen Administratoren den Status setzen und einen oeffentlichen Kommentar hinterlassen.
+            </div>
+            <div class="jv-iss-form-row">
+                <label>Status</label>
+                <select id="jv-iss-j-status">
+                    <option value="open">Offen</option>
+                    <option value="in_progress">In Arbeit</option>
+                    <option value="closed">Geschlossen</option>
+                </select>
+            </div>
+            <div class="jv-iss-form-row">
+                <label>Antwort/Kommentar an User (oeffentlich sichtbar)</label>
+                <textarea id="jv-iss-j-comment" maxlength="20000">${_escape(issue.jarvis_comment || '')}</textarea>
+            </div>
+            <div id="jv-iss-form-err" class="jv-iss-err" style="display:none;"></div>
+        `;
+        document.getElementById('jv-iss-j-status').value = issue.status || 'open';
+
+        footer.innerHTML = `
+            <button class="jv-iss-btn" id="jv-iss-cancel-btn">Abbrechen</button>
+            <button class="jv-iss-btn primary" id="jv-iss-save-btn">Speichern</button>
+        `;
+        document.getElementById('jv-iss-cancel-btn').onclick = () => _showDetail(issue.id);
+        document.getElementById('jv-iss-save-btn').onclick = async () => {
+            const errBox = document.getElementById('jv-iss-form-err');
+            errBox.style.display = 'none';
+            const payload = {
+                status: document.getElementById('jv-iss-j-status').value,
+                jarvis_comment: document.getElementById('jv-iss-j-comment').value,
+            };
+            try {
+                const r = await fetch('/api/issues/' + encodeURIComponent(issue.id), {
+                    method: 'PATCH',
+                    headers: _headers({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify(payload),
+                });
+                if (!r.ok) {
+                    const t = await r.text();
+                    throw new Error(t || ('HTTP ' + r.status));
+                }
+                _showDetail(issue.id);
+            } catch (e) {
+                errBox.textContent = e.message;
+                errBox.style.display = 'block';
+            }
+        };
+    }
+
+    // ─── Benachrichtigungs-Badge am Issues-Button ─────────────────────
+    // Roter Zaehler ueber dem Issues-Icon: eigene Issues, die seit dem letzten
+    // Ansehen von einem Admin bearbeitet wurden (Status/Kommentar). Wird auf
+    // allen Seiten automatisch aktiv, sobald einer der Buttons existiert.
+    const BADGE_BTN_IDS = ['btn-chat-issues', 'btn-uc-issues', 'sup-issues-btn', 'pt-issues-btn', 'btn-issues'];
+    let _badgeTimer = null;
+
+    function _badgeEls() {
+        const els = [];
+        for (const id of BADGE_BTN_IDS) {
+            const btn = document.getElementById(id);
+            if (!btn) continue;
+            let b = btn.querySelector('.jv-iss-notif');
+            if (!b) {
+                if (!btn.style.position) btn.style.position = 'relative';
+                b = document.createElement('span');
+                b.className = 'jv-iss-notif';
+                b.style.display = 'none';
+                // ⚠ LEERER title IST ABSICHT und keine Vergesslichkeit: der
+                // Knopf darunter traegt title="Issues / Feedback". Ohne das
+                // leere Attribut sucht der Browser beim Hovern des Badges beim
+                // Vorfahren weiter und zeigt SEINEN nativen Tooltip ZUSAETZLICH
+                // zu unserem Panel – zwei Kaesten uebereinander.
+                b.setAttribute('title', '');
+                b.addEventListener('mouseenter', () => _tipAn(b));
+                b.addEventListener('mouseleave', _tipAusGleich);
+                btn.appendChild(b);
+            }
+            els.push(b);
+        }
+        return els;
+    }
+
+    async function refreshBadge() {
+        const els = _badgeEls();
+        if (!els.length || !_token()) return;
+        try {
+            const r = await fetch('/api/issues/notifications', { headers: _headers() });
+            if (!r.ok) return;
+            const d = await r.json();
+            const n = d.count || 0;
+            _notifCount = n;
+            _notifItems = Array.isArray(d.items) ? d.items : [];
+            els.forEach(b => {
+                if (n > 0) { b.textContent = n > 99 ? '99+' : String(n); b.style.display = ''; }
+                else { b.style.display = 'none'; }
+            });
+            // Steht das Panel gerade offen, muss es dem neuen Stand folgen –
+            // sonst zeigt es nach dem 60-s-Takt eine Liste, die es nicht mehr
+            // gibt (Register: eine Anzeige darf keinen Zustand behaupten, den
+            // sie nicht kennt). Bei 0 verschwindet es mitsamt dem Badge.
+            if (_tip && _tip.style.display !== 'none') {
+                if (n > 0) _tipZeichnen(); else _tipAus();
+            }
+        } catch (e) { /* offline */ }
+    }
+
+    // ─── Mouseover am Badge: die Liste hinter der Zahl ────────────────
+    // WARUM UEBERHAUPT: der Badge sagt "3" und sonst nichts. Wer wissen will,
+    // WAS passiert ist, musste den Dialog oeffnen – und damit gilt alles als
+    // gesehen, der Badge ist weg, und die Frage "was war das nochmal?" ist
+    // nicht mehr beantwortbar. Das Panel zeigt es, OHNE etwas als gesehen zu
+    // markieren.
+    let _tip = null;
+    let _tipTimer = null;
+    let _notifItems = [];
+    let _notifCount = 0;
+
+    function _tipEl() {
+        if (_tip) return _tip;
+        _tip = document.createElement('div');
+        _tip.className = 'jv-iss-tip';
+        _tip.setAttribute('role', 'group');
+        // Der Zeiger muss vom Badge INS Panel wandern koennen (die Zeilen sind
+        // anklickbar). Deshalb haelt das Panel sich selbst offen.
+        _tip.addEventListener('mouseenter', () => clearTimeout(_tipTimer));
+        _tip.addEventListener('mouseleave', _tipAusGleich);
+        document.body.appendChild(_tip);
+        return _tip;
+    }
+
+    function _tipZeichnen() {
+        const el = _tipEl();
+        el.setAttribute('aria-label', window.t('issues.notif_title'));
+        const zeilen = _notifItems.map(it => {
+            const art = it.kind === 'new' ? 'new' : 'edited';
+            const marke = window.t(art === 'new' ? 'issues.notif_new' : 'issues.notif_edited');
+            // Fremdtext: Titel, Melder und Kommentar kommen aus einer fremden
+            // Meldung und werden ausnahmslos maskiert.
+            const sub = art === 'new'
+                ? window.t('issues.notif_from') + ' ' + _escape(it.author || '–')
+                : _statusLabel(it.status);
+            const komm = it.comment
+                ? `<div class="jv-iss-tip-c">${_escape(it.comment)}</div>` : '';
+            return `<button type="button" class="jv-iss-tip-row" data-id="${_escape(it.id)}">
+                <div class="jv-iss-tip-top">
+                    <span class="jv-iss-tip-k ${art}">${_escape(marke)}</span>
+                    <span class="jv-iss-tip-t">${_escape(it.title) || '–'}</span>
+                </div>
+                <div class="jv-iss-tip-sub">${sub} · ${_escape(_fmtDate(it.ts))}</div>
+                ${komm}
+            </button>`;
+        }).join('');
+        // ⚠ Die Restzahl MUSS dastehen: der Server deckelt die Uebertragung bei
+        // 12. Ohne diese Zeile haelt der Benutzer die gekuerzte Liste fuer
+        // vollstaendig, waehrend der Badge eine groessere Zahl zeigt.
+        const rest = _notifCount - _notifItems.length;
+        const mehr = rest > 0
+            ? `<div class="jv-iss-tip-more">${_escape(window.t('issues.notif_more').replace('{n}', String(rest)))}</div>`
+            : '';
+        el.innerHTML = `<div class="jv-iss-tip-h">${_escape(window.t('issues.notif_title'))} (${_notifCount})</div>`
+            + (zeilen || `<div class="jv-iss-tip-hint">${_escape(window.t('issues.none_found'))}</div>`)
+            + mehr
+            + `<div class="jv-iss-tip-hint">${_escape(window.t('issues.notif_hint'))}</div>`;
+        el.querySelectorAll('.jv-iss-tip-row').forEach(b => {
+            b.addEventListener('click', () => {
+                _tipAus();
+                openIssue(b.getAttribute('data-id'));
+            });
+        });
+    }
+
+    function _tipAn(anker) {
+        clearTimeout(_tipTimer);
+        if (!_notifCount) return;
+        const el = _tipEl();
+        _tipZeichnen();
+        el.style.display = 'block';
+        // Erst nach dem Einblenden messen – ein verstecktes Element hat die
+        // Breite 0, die Klammerung liefe ins Leere (Register).
+        const a = anker.getBoundingClientRect();
+        const b = el.getBoundingClientRect();
+        const rand = 8;
+        let links = a.right - b.width;               // rechtsbuendig zum Badge
+        links = Math.max(rand, Math.min(links, window.innerWidth - b.width - rand));
+        let oben = a.bottom + 8;
+        // Kein Platz nach unten? Dann darueber – sonst haengt das Panel im
+        // Nichts und ist unlesbar.
+        if (oben + b.height > window.innerHeight - rand) {
+            oben = Math.max(rand, a.top - b.height - 8);
+        }
+        el.style.left = links + 'px';
+        el.style.top = oben + 'px';
+    }
+
+    function _tipAus() {
+        clearTimeout(_tipTimer);
+        if (_tip) _tip.style.display = 'none';
+    }
+
+    // Verzoegert schliessen: der Weg vom Badge ins Panel fuehrt ueber ein paar
+    // Pixel Zwischenraum. Ohne die Frist waere keine Zeile je anklickbar.
+    function _tipAusGleich() {
+        clearTimeout(_tipTimer);
+        _tipTimer = setTimeout(_tipAus, 220);
+    }
+
+    /** Modal oeffnen und direkt eine bestimmte Meldung zeigen. */
+    function openIssue(id) {
+        if (!id) return open('list');
+        _ensureModal();
+        _modal.style.display = 'flex';
+        // Wie in open(): mit dem Oeffnen gilt alles als gesehen.
+        fetch('/api/issues/notifications/seen', { method: 'POST', headers: _headers() })
+            .catch(() => {});
+        document.querySelectorAll('.jv-iss-notif').forEach(b => { b.style.display = 'none'; });
+        _notifCount = 0;
+        _notifItems = [];
+        _showDetail(id);
+    }
+
+    function _startBadge() {
+        _injectCss();
+        refreshBadge();
+        if (!_badgeTimer) _badgeTimer = setInterval(refreshBadge, 60000);
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', _startBadge);
+    } else {
+        _startBadge();
+    }
+
+    // Issues-Knopf der Titelleisten (data-issues-oeffnen) – ersetzt das
+    // fruehere Inline-onclick (BSI H4: CSP ohne Inline-Handler). Delegiert,
+    // weil der Knopf auf manchen Seiten erst spaeter im DOM steht.
+    document.addEventListener('click', (e) => {
+        const b = e.target && e.target.closest ? e.target.closest('[data-issues-oeffnen]') : null;
+        if (b) open('list');
+    });
+
+    // ─── Public API ───────────────────────────────────────────────────
+    window.JarvisIssues = {
+        open: () => open('list'),
+        create: () => open('create'),
+        openIssue: openIssue,
+        close: close,
+        refreshBadge: refreshBadge,
+    };
+})();

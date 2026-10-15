@@ -1,0 +1,863 @@
+/* UI-Test fuer den Bereich "Claude Subagent" (/claude)
+ * ───────────────────────────────────────────────────────────────────────────
+ * jsdom gegen die ECHTEN Dateien (claude.html, claude_portal.js, i18n.js).
+ *
+ * WAS DIESER TEST FESTHAELT, in der Reihenfolge der Wichtigkeit:
+ *
+ * 1. DIE ANLEITUNG UEBERLEBT DEN SPRACHWECHSEL. Sie enthaelt <h4>, <pre> und
+ *    eine <table>; haenge sie an `data-i18n` statt `data-i18n-html`, setzt
+ *    applyLang() den textContent und die komplette Auszeichnung ist beim ersten
+ *    Sprachwechsel weg. Genau dieser Fehler ist im E-Mail-Reiter am 2026-08-13
+ *    passiert – ein reiner Schluessel-Abgleich sieht ihn NICHT.
+ * 2. Der Schluessel wird genau einmal gezeigt, mit Warnung, und das Panel
+ *    erscheint erst nach dem Erzeugen.
+ * 3. Fremdinhalt (Auftragstexte) wird maskiert.
+ * 4. `applyLang()` loest KEINE Endlosschleife aus (Vorfall 2026-08-18 im
+ *    Short-Tracks-Reiter: ueber 40 Abrufe in 250 ms).
+ *
+ * WICHTIG (Fallstrick 2026-07-30): am Ende window.close() + process.exit(),
+ * sonst halten Timer den Node-Prozess fuer immer offen.
+ *
+ * Lauf:  timeout 90 node tests/test_claude_subagent_ui.js
+ */
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+
+let JSDOM;
+JSDOM = require('./lib/jsdom_laden')().JSDOM;
+
+const ROOT = path.resolve(__dirname, '..');
+let ok = 0, fail = 0;
+
+function check(cond, label, detail) {
+    if (cond) { ok++; console.log('  OK   ' + label); }
+    else { fail++; console.log('  FAIL ' + label + (detail ? ' – ' + detail : '')); }
+}
+function section(t) { console.log('\n' + t); }
+const schlaf = (ms) => new Promise(r => setTimeout(r, ms));
+
+// ── Attrappe: die Antwortform stammt aus dem Endpunkt-Quelltext, nicht aus
+//    dem Gedaechtnis. Ein Mock mit falscher Form prueft nichts (Lehre 2026-08-12).
+function baueFetch(zustand) {
+    const rufe = [];
+    return {
+        rufe,
+        fn: function (url, opt) {
+            const pfad = String(url).split('?')[0];
+            rufe.push({ url: String(url), pfad, methode: (opt && opt.method) || 'GET' });
+            if (pfad === '/api/claude/status') {
+                if (zustand.status403) {
+                    return Promise.resolve({ status: 403, ok: false,
+                        json: () => Promise.resolve({ detail: 'kein Zugriff' }) });
+                }
+                return Promise.resolve({
+                    status: 200, ok: true, json: () => Promise.resolve({
+                        ok: true, skill_aktiv: true,
+                        schluessel: zustand.schluessel,
+                        jobs: zustand.jobs || [],
+                        grenzen: { gleichzeitig: 2, laufzeit_s: 600, max_dateien: 40,
+                                   spec_max: 12000, diff_max: 200000 },
+                        werkzeuge: ['filesystem', 'shell_execute'],
+                    })
+                });
+            }
+            if (pfad === '/api/claude/key') {
+                if ((opt && opt.method) === 'DELETE') {
+                    zustand.schluessel = null;
+                    return Promise.resolve({ status: 200, ok: true,
+                        json: () => Promise.resolve({ ok: true }) });
+                }
+                zustand.schluessel = { kennung: 'abc123', letzte4: 'WXYZ',
+                                       erstellt: 1787000000, zuletzt: 0,
+                                       schluessel: 'CSA-1.abc123.GEHEIMNISWXYZ',
+                                       alt: false };
+                return Promise.resolve({
+                    status: 200, ok: true, json: () => Promise.resolve({
+                        ok: true, schluessel: 'CSA-1.abc123.GEHEIMNISWXYZ',
+                        kennung: 'abc123', letzte4: 'WXYZ' })
+                });
+            }
+            return Promise.resolve({ status: 200, ok: true,
+                json: () => Promise.resolve({ ok: true }) });
+        }
+    };
+}
+
+async function baueSeite(zustand) {
+    const html = fs.readFileSync(path.join(ROOT, 'frontend/claude.html'), 'utf8');
+    const dom = new JSDOM(html, { url: 'https://jarvis.test/claude',
+                                  runScripts: 'outside-only' });
+    const w = dom.window;
+    w.localStorage.setItem('jarvis_token', 'test-token');
+    const f = baueFetch(zustand);
+    w.fetch = f.fn;
+    w.confirm = () => true;
+    w.navigator.clipboard = { writeText: () => Promise.resolve() };
+    // i18n zuerst – claude_portal.js benutzt window.t
+    // sitzung.js vor jedem Modul-Eval: die Module lesen den Sitzungstoken
+    // seit dem 2026-10-01 aus der gemeinsamen Quelle und rufen sie beim
+    // LADEN auf. Jede echte Seite laedt sie davor.
+    w.eval(require('fs').readFileSync(require('path').join(__dirname, '..', 'frontend/js/sitzung.js'), 'utf8'));
+    w.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8'));
+    w.eval(require('fs').readFileSync(require('path').join(__dirname, '..', 'frontend/js/sitzung.js'), 'utf8'));
+    w.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/claude_portal.js'), 'utf8'));
+    w.document.dispatchEvent(new w.Event('DOMContentLoaded'));
+    await schlaf(40);
+    return { dom, w, d: w.document, fetchInfo: f };
+}
+
+(async () => {
+
+    // ══════════════════════════════════════════════════════════════════════
+    section('1. Die Anleitung ueberlebt den Sprachwechsel');
+    {
+        const { dom, w, d } = await baueSeite({ schluessel: null, jobs: [] });
+        const kasten = d.querySelector('[data-i18n-html="csub.guide_body"]');
+        check(!!kasten, 'Anleitungs-Kasten vorhanden');
+        check(!d.querySelector('[data-i18n="csub.guide_body"]'),
+              'Sie haengt NICHT an data-i18n (das wuerde die Auszeichnung loeschen)');
+
+        for (const lang of ['de', 'en', 'de']) {
+            if (w.setLang) w.setLang(lang);
+            else if (w.applyLang) w.applyLang();
+            await schlaf(15);
+            const k = d.querySelector('[data-i18n-html="csub.guide_body"]');
+            check(!!k && k.querySelectorAll('h4').length >= 5,
+                  `[${lang}] Ueberschriften erhalten`,
+                  k ? String(k.querySelectorAll('h4').length) : 'Kasten weg');
+            // Die ZAHL ist nicht die Aussage – gepruft wird, dass die
+            // Auszeichnung den Sprachwechsel ueberlebt. Eine feste Zahl ist
+            // eine Zeitbombe (der Shell-Block aus Schritt 4 ist bewusst weg,
+            // weil ihn Claude ausfuehrt und nicht der Benutzer).
+            check(!!k && k.querySelectorAll('pre').length >= 1,
+                  `[${lang}] Code-Bloecke erhalten`,
+                  k ? String(k.querySelectorAll('pre').length) : '-');
+            check(!!k && k.querySelectorAll('table').length === 1,
+                  `[${lang}] Token-Tabelle erhalten`);
+            check(!!k && /800/.test(k.textContent),
+                  `[${lang}] Token-Zahl steht drin`);
+        }
+        // Die Anleitung startet ZUGEKLAPPT – sie ist Nachschlagewerk.
+        const karte = d.querySelector('.cs-card[data-klapp="anleitung"]');
+        check(!!karte && karte.getAttribute('data-zu') === '1',
+              'Anleitung startet zugeklappt');
+        dom.window.close();
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    section('2. Schluessel: dauerhafte Anzeige');
+    {
+        const { dom, w, d, fetchInfo } = await baueSeite({ schluessel: null, jobs: [] });
+        const box = d.getElementById('cs-key-box');
+        check(box && box.hidden, 'Schluessel-Kasten ist ohne Schluessel verborgen');
+        // Der Kasten darf KEIN Inline-`display` tragen: ein Inline-Style
+        // schlaegt jede Klassenregel, das hidden-Attribut waere dann wirkungslos
+        // und der Warnsatz stuende auch ohne Schluessel da (Klassen-Falle wie
+        // bei .sp-row/.input-group).
+        check(!!box && !box.getAttribute('style'), 'Kasten traegt keinen Inline-Style');
+        check(/keinen Schl/i.test(d.getElementById('cs-key-meta').textContent),
+              'Meldung "noch keinen Schluessel"');
+        check(/kein Schl/i.test(d.getElementById('cs-key-pill').textContent),
+              'Pille sagt "kein Schluessel"');
+        check(d.getElementById('cs-key-del').hidden, 'Loeschen-Knopf verborgen');
+        check(d.getElementById('cs-key-alt').hidden, 'Altbestand-Hinweis verborgen');
+
+        d.getElementById('cs-key-new').click();
+        await schlaf(60);
+        check(!d.getElementById('cs-key-box').hidden, 'Kasten erscheint nach dem Erzeugen');
+        check(d.getElementById('cs-key-value').textContent === 'CSA-1.abc123.GEHEIMNISWXYZ',
+              'Der Schluessel steht im Klartext da');
+        const posts = fetchInfo.rufe.filter(r => r.pfad === '/api/claude/key' && r.methode === 'POST');
+        check(posts.length === 1, 'Genau EIN POST auf /api/claude/key', String(posts.length));
+        check(!d.getElementById('cs-key-del').hidden, 'Loeschen-Knopf jetzt sichtbar');
+        check(!/nie wieder/i.test(d.querySelector('.cs-key-warn').textContent),
+              'KEINE Warnung mehr "wird nie wieder angezeigt"');
+        check(/Kennwort/i.test(d.querySelector('.cs-key-warn').textContent),
+              'Stattdessen der Kennwort-Hinweis');
+        check(/…WXYZ|WXYZ/.test(d.getElementById('cs-key-meta').textContent),
+              'Meta nennt weiterhin die letzten 4 Zeichen');
+        dom.window.close();
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    section('2b. Der Schluessel ist beim NAECHSTEN Aufruf wieder da');
+    {
+        // Genau das war der Anlass: bisher musste man einen neuen erzeugen
+        // (und damit den eingerichteten entwerten), nur um nachzusehen.
+        const { dom, d } = await baueSeite({
+            schluessel: { kennung: 'abc123', letzte4: 'WXYZ', erstellt: 1787000000,
+                          zuletzt: 1787001000, schluessel: 'CSA-1.abc123.GEHEIMNISWXYZ',
+                          alt: false },
+            jobs: []
+        });
+        check(!d.getElementById('cs-key-box').hidden,
+              'Kasten ist ohne Klick auf "erzeugen" sichtbar');
+        const wv = d.getElementById('cs-key-value');
+        check(!!wv && wv.textContent === 'CSA-1.abc123.GEHEIMNISWXYZ',
+              'Der gespeicherte Schluessel steht da');
+        check(/Neuen Schl/i.test(d.getElementById('cs-key-new').textContent),
+              'Der Knopf heisst jetzt "Neuen Schluessel erzeugen"');
+        dom.window.close();
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    section('2c. Altbestand: gilt weiter, laesst sich nicht anzeigen');
+    {
+        const { dom, d } = await baueSeite({
+            schluessel: { kennung: 'alt1', letzte4: 'OLDX', erstellt: 1780000000,
+                          zuletzt: 0, schluessel: null, alt: true },
+            jobs: []
+        });
+        // Ein leeres Feld waere hier die Behauptung "kein Schluessel" – und die
+        // stimmt nicht (gleiche Regel wie beim Trenner "Neue Sitzung").
+        check(d.getElementById('cs-key-box').hidden, 'Kein leerer Schluessel-Kasten');
+        check(!d.getElementById('cs-key-alt').hidden, 'Stattdessen der Altbestand-Hinweis');
+        check(/hinterlegt/i.test(d.getElementById('cs-key-pill').textContent),
+              'Die Pille sagt weiterhin "Schluessel hinterlegt"');
+        check(!d.getElementById('cs-key-del').hidden, 'Loeschen bleibt moeglich');
+        dom.window.close();
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    section('2d. Anleitung: die drei Zeilen sind fertig zum Ausfuehren');
+    {
+        const { dom, w, d } = await baueSeite({
+            schluessel: { kennung: 'abc123', letzte4: 'WXYZ', erstellt: 1787000000,
+                          zuletzt: 0, schluessel: 'CSA-1.abc123.GEHEIMNISWXYZ',
+                          alt: false },
+            jobs: []
+        });
+        const pre = d.getElementById('cs-guide-cmds');
+        check(!!pre, 'Der Befehlsblock hat eine Kennung');
+        const kz = d.getElementById('cs-guide-key');
+        check(!!kz && kz.textContent === 'CSA-1.abc123.GEHEIMNISWXYZ',
+              'Der echte Schluessel steht in der Befehlszeile');
+        const zeilen = (pre ? pre.textContent : '').trim().split('\n');
+        check(zeilen.length === 3, 'Es sind genau drei Zeilen', String(zeilen.length));
+        check(zeilen[0].indexOf('CSA-1.abc123.GEHEIMNISWXYZ') > 0,
+              'Zeile 1 traegt den Schluessel');
+        check(!!pre && !/dein Schl|DEIN-SCHLUESSEL|your key|YOUR-KEY/i.test(pre.textContent),
+              'Kein Platzhalter mehr im Block');
+
+        // Der Platzhalter darf KEINE geschweiften Klammern haben: branding.js
+        // merkt sich jeden Textknoten mit {…} samt Rohtext und wuerde den
+        // Schluessel bei seinem naechsten Durchlauf wieder ueberschreiben.
+        const roh = fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8');
+        const treffer = roh.match(/id="cs-guide-key">([^<]*)</g) || [];
+        check(treffer.length === 2, 'Platzhalter in DE und EN vorhanden',
+              String(treffer.length));
+        check(treffer.every(t => t.indexOf('{') < 0),
+              'Platzhalter enthaelt keine Branding-Klammern');
+
+        // Kopieren: der Knopf steckt IM i18n-Block und wird bei jedem
+        // Sprachlauf neu erzeugt – deshalb ein delegierter Listener.
+        let kopiert = '';
+        w.navigator.clipboard = { writeText: (t) => { kopiert = t; return Promise.resolve(); } };
+        const kk = d.getElementById('cs-guide-copy');
+        check(!!kk, 'Kopier-Knopf vorhanden');
+        if (kk) kk.click();
+        await schlaf(20);
+        check(kopiert.split('\n').length === 3, 'Kopiert werden drei Zeilen');
+        check(kopiert.indexOf('CSA-1.abc123.GEHEIMNISWXYZ') > 0,
+              'Der echte Schluessel ist mitkopiert');
+
+        // Sprachwechsel: applyLang() ersetzt das innerHTML des Kastens und
+        // bringt den Platzhalter zurueck – der Schluessel muss danach wieder
+        // drinstehen, sonst kopiert der Benutzer einen Platzhalter.
+        if (w.setLang) w.setLang('en');
+        await schlaf(30);
+        const kzEn = d.getElementById('cs-guide-key');
+        check(!!kzEn && kzEn.textContent === 'CSA-1.abc123.GEHEIMNISWXYZ',
+              '[en] Schluessel ueberlebt den Sprachwechsel');
+        const kkEn = d.getElementById('cs-guide-copy');
+        if (kkEn) kkEn.click();
+        await schlaf(20);
+        check(kopiert.indexOf('CSA-1.abc123.GEHEIMNISWXYZ') > 0,
+              '[en] Kopieren funktioniert weiterhin');
+        if (w.setLang) w.setLang('de');
+        await schlaf(30);
+        const kzDe = d.getElementById('cs-guide-key');
+        check(!!kzDe && kzDe.textContent === 'CSA-1.abc123.GEHEIMNISWXYZ',
+              '[de] ... und zurueck');
+
+        // Und der Fall, den ein reiner Sprachwechsel-Test NICHT abdeckt:
+        // applyLang() mit DERSELBEN Sprache. Es feuert `jarvis-lang-changed`
+        // bei JEDEM Aufruf und baut den Kasten neu auf – der Sprachvergleich
+        // laesst zeichne() dann aber aus. Ohne den zusaetzlichen Aufruf im
+        // Listener stuende hier wieder der Platzhalter.
+        if (w.applyLang) w.applyLang();
+        await schlaf(30);
+        const kzNach = d.getElementById('cs-guide-key');
+        check(!!kzNach && kzNach.textContent === 'CSA-1.abc123.GEHEIMNISWXYZ',
+              'applyLang() ohne Sprachwechsel laesst den Schluessel stehen');
+        dom.window.close();
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    section('2e. Die Regel fuer die CLAUDE.md des Benutzers');
+    {
+        const { dom, w, d } = await baueSeite({
+            schluessel: { kennung: 'abc123', letzte4: 'WXYZ', erstellt: 1787000000,
+                          zuletzt: 0, schluessel: 'CSA-1.abc123.GEHEIMNISWXYZ',
+                          alt: false },
+            jobs: []
+        });
+        const regel = d.getElementById('cs-guide-rule');
+        check(!!regel, 'Die Regel steht als eigener Block in der Anleitung');
+        const txt = regel ? regel.textContent : '';
+        // Beide Haelften sind noetig: die erste macht die Delegation
+        // verbindlich, die zweite verhindert Nachbesserungsschleifen – ohne sie
+        // ist die Token-Ersparnis wieder ausgegeben.
+        check(/MUSST/.test(txt), 'Sie ist verbindlich formuliert ("MUSST")', txt.slice(0, 60));
+        check(/code-delegate/.test(txt), 'Sie nennt den Skill beim Namen');
+        check(/Nachbesserung/i.test(txt), 'Sie verbietet Nachbesserungsversuche');
+        check(/Test/.test(txt), 'Sie nennt den vorhandenen Test als Bedingung');
+
+        // DRIFT-SCHRANKE: der Skill-Name in der Regel muss zu dem Ordner passen,
+        // in den die Anleitung die SKILL.md legen laesst. Laufen die beiden
+        // auseinander, findet Claude den Skill unter einem anderen Namen und die
+        // Regel zeigt ins Leere.
+        const kasten = d.querySelector('[data-i18n-html="csub.guide_body"]');
+        const ganz = kasten ? kasten.textContent : '';
+        const m = /\.claude\/skills\/([a-z0-9-]+)\//.exec(ganz);
+        check(!!m && txt.indexOf(m[1]) >= 0,
+              'Skill-Name in der Regel == Ordnername in Schritt 3',
+              m ? m[1] : 'Ordner nicht gefunden');
+
+        // Nummerierung: keine doppelte Zahl, luekenlos ab 1.
+        const nummern = Array.prototype.map.call(
+            kasten ? kasten.querySelectorAll('h4') : [], h => h.textContent)
+            .map(t => (/^(\d+)\./.exec(t) || [])[1]).filter(Boolean).map(Number);
+        check(nummern.length >= 6 && nummern.join(',') === nummern.map((_, i) => i + 1).join(','),
+              'Die Schritte sind fortlaufend nummeriert', nummern.join(','));
+
+        // Kopieren: delegierter Listener, muss den Sprachwechsel ueberleben.
+        let kopiert = '';
+        w.navigator.clipboard = { writeText: (t) => { kopiert = t; return Promise.resolve(); } };
+        const kb = d.getElementById('cs-guide-rule-copy');
+        check(!!kb, 'Kopier-Knopf fuer die Regel vorhanden');
+        if (kb) kb.click();
+        await schlaf(20);
+        check(/code-delegate/.test(kopiert), 'Der Klick kopiert die Regel', kopiert.slice(0, 40));
+        check(kopiert.indexOf('Regel kopieren') < 0,
+              '... und NICHT die Beschriftung des Knopfes mit');
+
+        if (w.setLang) w.setLang('en');
+        await schlaf(30);
+        const en = d.getElementById('cs-guide-rule');
+        check(!!en && /MUST/.test(en.textContent) && /code-delegate/.test(en.textContent),
+              '[en] Die Regel gibt es auch auf Englisch',
+              en ? en.textContent.slice(0, 60) : '-');
+        const kbEn = d.getElementById('cs-guide-rule-copy');
+        kopiert = '';
+        if (kbEn) kbEn.click();
+        await schlaf(20);
+        check(/code-delegate/.test(kopiert), '[en] Kopieren funktioniert weiterhin');
+        if (w.setLang) w.setLang('de');
+        await schlaf(30);
+        dom.window.close();
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    section('3. Auftragsliste: Fremdinhalt wird maskiert');
+    {
+        const boese = '<img src=x onerror=alert(1)>';
+        const { dom, d } = await baueSeite({
+            schluessel: { kennung: 'k', letzte4: 'WXYZ', erstellt: 1787000000, zuletzt: 0 },
+            jobs: [
+                { id: 'j1', status: 'fertig', spec: boese, riegel: 'tests/t.py',
+                  dateien: ['a.py'], erstellt: 1787000000 },
+                { id: 'j2', status: 'fehler', spec: 'zweiter', riegel: 'tests/t.js',
+                  dateien: [], erstellt: 1787000000, fehler: 'kaputt' },
+            ]
+        });
+        const liste = d.getElementById('cs-jobs-list');
+        check(liste.querySelectorAll('.cs-job').length === 2, 'Beide Auftraege gerendert');
+        check(liste.querySelectorAll('img').length === 0,
+              'Kein <img> aus dem Auftragstext (maskiert)');
+        check(liste.textContent.indexOf('onerror') >= 0,
+              'Der Text erscheint als Text');
+        check(/\(2\)/.test(d.getElementById('cs-jobs-count').textContent),
+              'Zaehler zeigt die Anzahl');
+        check(/kaputt/.test(liste.textContent), 'Fehlergrund wird angezeigt');
+        dom.window.close();
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    section('4. Kein Endlos-Neuladen bei applyLang');
+    {
+        const { dom, w, fetchInfo } = await baueSeite({ schluessel: null, jobs: [] });
+        const vorher = fetchInfo.rufe.filter(r => r.pfad === '/api/claude/status').length;
+        for (let i = 0; i < 5; i++) { if (w.applyLang) w.applyLang(); }
+        await schlaf(150);
+        const nachher = fetchInfo.rufe.filter(r => r.pfad === '/api/claude/status').length;
+        check(nachher === vorher,
+              'applyLang() loest keinen erneuten Statusabruf aus',
+              `${vorher} -> ${nachher}`);
+        check(vorher === 1, 'Beim Aufbau genau EIN Statusabruf', String(vorher));
+        dom.window.close();
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    section('5. Ohne Freigabe: Klartext statt leerer Seite');
+    {
+        const { dom, d } = await baueSeite({ status403: true });
+        check(/Kein Zugriff/i.test(d.body.textContent),
+              'Meldung nennt die fehlende Freigabe');
+        check(/Berechtigungen/i.test(d.body.textContent),
+              '... und den Weg dorthin');
+        dom.window.close();
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    section('6. Der Einstellungs-Reiter ist VOLLSTAENDIG verdrahtet');
+    // Ein Reiter braucht FUENF Eintraege an vier Stellen. Fehlt einer, gibt es
+    // ihn stillschweigend nicht – genau das ist hier passiert, obwohl Manifest
+    // und Berechtigungs-Hinweis ihn ausdruecklich nennen ("im Reiter Claude
+    // Subagent einstellen"). Wieder die Fehlerklasse "eine Zusage, die der Code
+    // nicht haelt".
+    {
+        const settings = fs.readFileSync(path.join(ROOT, 'frontend/settings.html'), 'utf8');
+        const skillcfg = fs.readFileSync(path.join(ROOT, 'frontend/js/skillcfg.js'), 'utf8');
+        const skillsjs = fs.readFileSync(path.join(ROOT, 'frontend/js/skills.js'), 'utf8');
+        const appjs    = fs.readFileSync(path.join(ROOT, 'frontend/js/app.js'), 'utf8');
+
+        check(/claude_subagent:\s*\{\s*container:\s*'skcfg-claude_subagent'/.test(skillcfg),
+              'skillcfg.js TARGETS kennt den Container');
+        check(/claude_subagent:\s*'settings-tab-btn-claudesub'/.test(skillcfg),
+              'skillcfg.js TAB_BUTTONS kennt den Knopf');
+        check(/claude_subagent:\s*'claude_subagent'/.test(skillsjs),
+              'skills.js SKILL_TABS kennt den Reiter (Zahnrad springt dorthin)');
+        check(/SKILLCFG_TABS[\s\S]{0,240}'claude_subagent'/.test(appjs),
+              'app.js SKILLCFG_TABS kennt den Reiter');
+        check(settings.indexOf('id="settings-tab-btn-claudesub"') >= 0,
+              'settings.html hat den Reiter-Knopf');
+        check(settings.indexOf('id="settings-tab-claude_subagent"') >= 0,
+              'settings.html hat das Reiter-Panel');
+        check(settings.indexOf('id="skcfg-claude_subagent"') >= 0,
+              'settings.html hat den Formular-Container');
+
+        // GENERISCH, damit der naechste Skill nicht denselben Weg geht: jede
+        // Knopf-ID aus TAB_BUTTONS und jeder Container aus TARGETS muss es im
+        // Markup wirklich geben. Eine ID, die nur in einer der beiden Dateien
+        // steht, faellt sonst niemandem auf.
+        const knopfIds = [...skillcfg.matchAll(/'(settings-tab-btn-[a-z0-9-]+)'/g)].map(m => m[1]);
+        const fehlendeKnoepfe = knopfIds.filter(id => settings.indexOf('id="' + id + '"') < 0);
+        check(fehlendeKnoepfe.length === 0,
+              `Alle ${knopfIds.length} TAB_BUTTONS-Knoepfe existieren im Markup`,
+              fehlendeKnoepfe.join(', '));
+
+        const container = [...skillcfg.matchAll(/container:\s*'(skcfg-[a-z0-9_-]+)'/g)].map(m => m[1]);
+        const fehlendeCont = container.filter(id => settings.indexOf('id="' + id + '"') < 0);
+        check(fehlendeCont.length === 0,
+              `Alle ${container.length} TARGETS-Container existieren im Markup`,
+              fehlendeCont.join(', '));
+
+        // ── UND ER MUSS AUCH WIRKLICH ERSCHEINEN ──────────────────────────
+        // Markup allein beweist nichts: der Knopf steht auf display:none und
+        // wird erst von SkillCfg.updateTabs() eingeblendet. Genau diese
+        // Pruefung fehlte, als der Reiter gemeldet wurde.
+        {
+            const dom2 = new JSDOM(settings, { url: 'https://jarvis.test/settings',
+                                               runScripts: 'outside-only' });
+            const w2 = dom2.window;
+            w2.localStorage.setItem('jarvis_token', 't');
+            w2.fetch = (u) => {
+                u = String(u).split('?')[0];
+                if (u === '/api/skills') return Promise.resolve({ ok: true, status: 200,
+                    json: () => Promise.resolve({ skills: [{
+                        dir_name: 'claude_subagent', name: 'Claude Subagent',
+                        enabled: true, installed: true,
+                        config_schema: { gleichzeitig: { type: 'number', default: 2 } } }] }) });
+                return Promise.resolve({ ok: true, status: 200,
+                    json: () => Promise.resolve({ config: {} }) });
+            };
+            w2.eval(require('fs').readFileSync(require('path').join(__dirname, '..', 'frontend/js/sitzung.js'), 'utf8'));
+            w2.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8'));
+            w2.eval(require('fs').readFileSync(require('path').join(__dirname, '..', 'frontend/js/sitzung.js'), 'utf8'));
+            w2.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/skillcfg.js'), 'utf8'));
+            const knopf = w2.document.getElementById('settings-tab-btn-claudesub');
+            check(knopf && knopf.style.display === 'none',
+                  'Reiter-Knopf startet verborgen');
+            if (w2.SkillCfg && w2.SkillCfg.updateTabs) await w2.SkillCfg.updateTabs();
+            await schlaf(120);
+            check(!!knopf && knopf.style.display !== 'none',
+                  'updateTabs() blendet ihn bei AKTIVEM Skill ein',
+                  knopf ? knopf.style.display : 'Knopf weg');
+            dom2.window.close();
+        }
+
+        // Die Beschriftung darf nicht als roher Text festhaengen.
+        const i18n = fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8');
+        check((i18n.match(/'settings\.tab\.claude_subagent'/g) || []).length === 2,
+              'Reiter-Beschriftung in DE und EN');
+
+        // Und die Zusage im Manifest muss zum Reiter passen.
+        const manifest = JSON.parse(fs.readFileSync(
+            path.join(ROOT, 'skills/claude_subagent/skill.json'), 'utf8'));
+        const nenntReiter = JSON.stringify(manifest).indexOf('Reiter') >= 0;
+        check(!nenntReiter || settings.indexOf('id="settings-tab-claude_subagent"') >= 0,
+              'Wenn das Manifest einen Reiter nennt, gibt es ihn auch');
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    section('7. Im Branding-Fall steht der Markenname da, nicht "Jarvis"');
+    // branding.js ersetzt "Jarvis" nur in .brand-app-name, im Seitentitel und in
+    // Platzhalter-Attributen. Text, den applyLang() aus i18n.js setzt, erreicht
+    // es NICHT – ein White-Label-System verriete dort das Produkt dahinter.
+    // Deshalb schreiben die Texte {marke}; branding.js loest es zentral auf.
+    {
+        const i18n = fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8');
+        const seite = fs.readFileSync(path.join(ROOT, 'frontend/claude.html'), 'utf8');
+
+        // Kein rohes "Jarvis" mehr in den eigenen Texten – ausser im
+        // brand-app-name-Span, den branding.js selbst bedient.
+        const eigene = [...i18n.matchAll(
+            /'(csub\.[a-z_]+|portal\.card_claudesub[a-z_]*)':\s*'((?:[^'\\]|\\.)*)'/g)];
+        check(eigene.length >= 20, 'Eigene i18n-Schluessel gefunden', String(eigene.length));
+        const mitJarvis = eigene.filter(m => m[2].indexOf('Jarvis') >= 0).map(m => m[1]);
+        check(mitJarvis.length === 0,
+              'Kein rohes "Jarvis" in den eigenen i18n-Texten',
+              [...new Set(mitJarvis)].join(', '));
+        // JS-BEZEICHNER sind kein Anzeigetext: `window.JarvisIssues` ist der
+        // globale Name aus issues.js und wird von sechs weiteren Seiten
+        // benutzt – ihn umzubenennen waere Unsinn. Geprueft wird der TEXT.
+        const ohneSpan = seite
+            .replace(/<span class="brand-app-name">Jarvis<\/span>/g, '')
+            .replace(/window\.Jarvis[A-Za-z]*/g, '')
+            .replace(/jarvis_theme/g, '');
+        check(ohneSpan.indexOf('Jarvis') < 0,
+              'Kein rohes "Jarvis" im ANZEIGETEXT von claude.html',
+              (ohneSpan.match(/.{0,25}Jarvis.{0,25}/) || [''])[0]);
+
+        // Die technischen Kennungen duerfen NICHT gebrandet werden – sie sind
+        // Teil des Protokolls bzw. Dateinamen auf dem Rechner des Benutzers.
+        // ── DIE KENNUNGEN TRAGEN DEN MARKENNAMEN ──────────────────────────
+        // NICHT neutralisieren (das war ein Missverstaendnis meinerseits): der
+        // Benutzer LIEST sie in der Anleitung, und der Schluessel selbst faengt
+        // damit an. Sie tragen deshalb den Platzhalter, den branding.js mit dem
+        // ASSISTENTEN-NAMEN fuellt.
+        check(i18n.indexOf('{MARKE}_CSA_KEY') >= 0 && i18n.indexOf('{marke_slug}-csa-url') >= 0,
+              'Anleitung nennt die Kennungen mit Marken-Platzhalter');
+        const neutral = ['SUBAGENT_KEY', 'SUBAGENT_URL', '.subagent-key', '.subagent-url'];
+        const nRest = neutral.filter(k => i18n.indexOf(k) >= 0 || seite.indexOf(k) >= 0);
+        check(nRest.length === 0, 'Keine neutralisierten Kennungen mehr', nRest.join(', '));
+
+        // ── VERHALTEN, nicht Schreibweise: loest branding.js den Platzhalter? ──
+        for (const fall of [
+            { label: 'ohne Branding', b: { active: false }, erwartet: 'Jarvis' },
+            // NUR Firmenname -> weiterhin "Jarvis". KEIN Rueckfall auf den
+            // Firmennamen (Vorgabe des Nutzers): das Feld heisst "Name des
+            // Assistenten" und ist genau dafuer da; der Firmenname ist das
+            // Unternehmen, nicht der Assistent.
+            { label: 'nur Firmenname', b: { active: true, company_name: 'Contoso AG' },
+              erwartet: 'Jarvis' },
+            { label: 'mit Assistenten-Name', b: { active: true, company_name: 'Contoso AG',
+              assistant_name: 'Nexi' }, erwartet: 'Nexi' },
+        ]) {
+            const dom3 = new JSDOM(
+                '<body><p data-i18n-html="x">Codeaufgaben an {marke} abgeben</p>' +
+                '<button title="an {marke} senden">k</button></body>',
+                { url: 'https://jarvis.test/claude', runScripts: 'outside-only' });
+            const w3 = dom3.window;
+            w3.fetch = () => Promise.resolve({ ok: true, status: 200,
+                                               json: () => Promise.resolve(fall.b) });
+            w3.eval(require('fs').readFileSync(require('path').join(__dirname, '..', 'frontend/js/sitzung.js'), 'utf8'));
+            w3.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/branding.js'), 'utf8'));
+            await schlaf(120);
+            const p3 = w3.document.querySelector('p');
+            check(p3.textContent.indexOf('{marke}') < 0,
+                  `[${fall.label}] Platzhalter ist aufgeloest`, p3.textContent);
+            check(p3.textContent.indexOf(fall.erwartet) >= 0,
+                  `[${fall.label}] "${fall.erwartet}" steht im Text`, p3.textContent);
+            const b3 = w3.document.querySelector('button');
+            check(b3.getAttribute('title').indexOf(fall.erwartet) >= 0,
+                  `[${fall.label}] auch im title-Attribut`, b3.getAttribute('title'));
+            // {adresse} muss die ECHTE Adresse zeigen, nicht "file://" oder
+            // "null" – ein Beispiel waere Arbeit fuer den Benutzer.
+            const pa = w3.document.createElement('p');
+            pa.textContent = 'url {adresse} ende';
+            w3.document.body.appendChild(pa);
+            if (w3.applyLang) { /* nur der Vollstaendigkeit halber */ }
+            w3.dispatchEvent(new w3.Event('jarvis-lang-changed'));
+            await schlaf(40);
+            check(/https:\/\/jarvis\.test/.test(pa.textContent),
+                  `[${fall.label}] {adresse} wird zur echten Adresse`, pa.textContent);
+            check(typeof w3.jarvisMarke === 'function' && w3.jarvisMarke() === fall.erwartet,
+                  `[${fall.label}] window.jarvisMarke() liefert den Namen`,
+                  typeof w3.jarvisMarke === 'function' ? w3.jarvisMarke() : 'fehlt');
+            dom3.window.close();
+        }
+
+        // applyLang() bringt den Platzhalter zurueck -> muss erneut greifen.
+        {
+            const dom4 = new JSDOM('<body><p id="z">an {marke} abgeben</p></body>',
+                { url: 'https://jarvis.test/claude', runScripts: 'outside-only' });
+            const w4 = dom4.window;
+            w4.fetch = () => Promise.resolve({ ok: true, status: 200,
+                json: () => Promise.resolve({ active: true, company_name: 'Contoso AG',
+                                             assistant_name: 'Nexi' }) });
+            w4.eval(require('fs').readFileSync(require('path').join(__dirname, '..', 'frontend/js/sitzung.js'), 'utf8'));
+            w4.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/branding.js'), 'utf8'));
+            await schlaf(120);
+            // So verhaelt sich applyLang: es setzt den i18n-Text NEU.
+            w4.document.getElementById('z').textContent = 'an {marke} abgeben';
+            w4.dispatchEvent(new w4.Event('jarvis-lang-changed'));
+            await schlaf(60);
+            check(w4.document.getElementById('z').textContent.indexOf('Nexi') >= 0,
+                  'Nach einem Sprachwechsel wird erneut eingesetzt',
+                  w4.document.getElementById('z').textContent);
+            dom4.window.close();
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    section('8. Titelleiste ist IDENTISCH zu den uebrigen Bereichsseiten');
+    // WARUM DAS EIN EIGENER WAECHTER IST: die Regeln fuer .topbar, .btn-theme
+    // und .lang-toggle stehen in JEDER Bereichsseite lokal im <style>-Block –
+    // es gibt sie nicht in theme.css. Wer eine neue Seite anlegt und nur das
+    // MARKUP kopiert, bekommt unformatierte Knoepfe: ein <svg> ohne
+    // `.btn-theme svg { width:20px }` hat keine Groesse. Genau so ist
+    // /claude entstanden, und es ist im Projekt nicht das erste Mal.
+    // Referenz ist tracks.html (die juengste Bereichsseite; email.html traegt
+    // beim Knopf noch ein hartes #888899 statt --text-muted).
+    {
+        const refQ = fs.readFileSync(path.join(ROOT, 'frontend/tracks.html'), 'utf8');
+        const ownQ = fs.readFileSync(path.join(ROOT, 'frontend/claude.html'), 'utf8');
+
+        // Deklarationen eines Selektors einsammeln (Reihenfolge egal,
+        // Leerraum normalisiert).
+        function regeln(quelle, selektor) {
+            const re = new RegExp('(?:^|\\})\\s*' +
+                selektor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') +
+                '\\s*\\{([^}]*)\\}', 'm');
+            const m = quelle.match(re);
+            if (!m) return null;
+            return m[1].split(';').map(s => s.replace(/\s+/g, ' ').trim())
+                       .filter(Boolean).sort().join('; ');
+        }
+
+        const pruefen = ['.topbar', '.topbar-left', '.topbar-right', '.topbar-avatar',
+                         '.topbar-title', '.btn-theme', '.btn-theme svg',
+                         '.lang-toggle', '.lang-toggle-btn'];
+        for (const sel of pruefen) {
+            const a = regeln(refQ, sel);
+            const b = regeln(ownQ, sel);
+            check(a !== null, `Referenz tracks.html definiert ${sel}`);
+            check(b !== null, `claude.html definiert ${sel}`);
+            if (a && b) {
+                check(a === b, `${sel} stimmt mit der Referenz ueberein`,
+                      b.length > 90 ? b.slice(0, 90) + '…' : b);
+            }
+        }
+
+        // Die Knopf-Reihenfolge in der Leiste ist Teil der Wiedererkennung:
+        // Sprache, Portal, Thema, Abmelden – wer zwischen den Bereichen
+        // wechselt, findet sie am selben Platz.
+        function leiste(quelle) {
+            const m = quelle.match(/<div class="topbar-right">([\s\S]*?)<\/header>/);
+            if (!m) return [];
+            return [...m[1].matchAll(/(lang-toggle|btn-theme)"[^>]*id="([a-z-]+)"/g)]
+                   .map(x => x[2].replace(/^(st|cs|em)-/, ''));
+        }
+        const lRef = leiste(refQ), lOwn = leiste(ownQ);
+        check(lRef.length >= 3 && lOwn.join(',') === lRef.join(','),
+              'Gleiche Knoepfe in gleicher Reihenfolge',
+              `${lOwn.join(',')} vs ${lRef.join(',')}`);
+
+        // ── DAS ZAHNRAD, AUF JEDER BEREICHSSEITE ───────────────────────────
+        // Fehlte auf /claude, /tracks, /email und /excel, waehrend /chat,
+        // /portal, /sap, /support, /userchat und /wissen es hatten. Wer aus
+        // einem Bereich in die Einstellungen will, musste dort ueber das
+        // Portal – auf jeder zweiten Seite anders. Zweimal vom Nutzer gemeldet.
+        //
+        // GENERISCH statt Aufzaehlung: JEDE Seite mit Titelleiste UND
+        // Abmelden-Knopf ist eine Bereichsseite und braucht das Zahnrad. Damit
+        // faellt auch eine KUENFTIGE Seite auf, ohne dass jemand diese Liste
+        // pflegt (Doku-Seiten wie api.html haben keine Titelleiste und fallen
+        // von selbst heraus).
+        {
+            const seiten = fs.readdirSync(path.join(ROOT, 'frontend'))
+                .filter(f => f.endsWith('.html') && f !== 'settings.html');
+            const bereiche = [];
+            for (const f of seiten) {
+                const q = fs.readFileSync(path.join(ROOT, 'frontend', f), 'utf8');
+                const lo = q.match(/id="([a-z-]*logout[a-z-]*)"/);
+                if (!/topbar-right/.test(q) || !lo) continue;
+                bereiche.push(f);
+                check(/id="[a-z-]*settings[a-z-]*"[^>]*data-i18n-title="nav\.settings"/.test(q)
+                      || /data-i18n-title="nav\.settings"/.test(q),
+                      `${f}: hat ein Zahnrad in der Titelleiste`);
+                // Issues/Feedback gehoert genauso auf JEDE Bereichsseite –
+                // es fehlte auf denselben vier Seiten wie das Zahnrad.
+                check(/data-i18n-title="sup\.issues"/.test(q),
+                      `${f}: hat den Issues-Knopf`);
+                check(/js\/issues\.js/.test(q),
+                      `${f}: bindet issues.js ein (sonst tut der Knopf nichts)`);
+                // Gleiche Reihenfolge wie ueberall: Issues -> Thema -> Home
+                // -> Zahnrad -> Abmelden (Vorgabe des Nutzers 2026-08-22).
+                const pIss = q.search(/data-i18n-title="sup\.issues"/);
+                const pSet = q.search(/data-i18n-title="nav\.settings"/);
+                check(pIss >= 0 && pSet >= 0 && pIss < pSet,
+                      `${f}: Issues steht vor den Einstellungen`);
+                // Der Avatar-Schalter haengt sich zur Laufzeit VOR den
+                // Issues-Knopf (avatar.js). Ohne diese Klasse landet er am
+                // Theme-Knopf und damit an der falschen Stelle – oder, auf
+                // einer Seite ohne beides, frei schwebend ueber dem Inhalt.
+                check(/class="[^"]*jv-issues-btn/.test(q),
+                      `${f}: Issues-Knopf traegt .jv-issues-btn (Anker fuer den Avatar)`);
+                // Die CPU-Anzeige gehoert auf JEDE Bereichsseite. Sie fehlte
+                // auf der Haelfte davon (gemeldet 2026-08-22); cpubar.js baut
+                // sie selbst auf, muss dafuer aber geladen werden.
+                check(/js\/cpubar\.js/.test(q),
+                      `${f}: bindet cpubar.js ein (CPU-Anzeige)`);
+            }
+            check(bereiche.length >= 6,
+                  `Bereichsseiten erkannt (${bereiche.length})`, bereiche.join(', '));
+
+            // ── EINE Reihenfolge fuer ALLE Seiten ──────────────────────────
+            // Es gab zwei: /chat, /sap, /support, /userchat hatten
+            // "Thema -> Home", /claude, /email, /excel, /tracks umgekehrt. Wer
+            // zwischen den Bereichen wechselt, greift dann jedes zweite Mal
+            // daneben. Mehrfach gemeldet.
+            //
+            // Die Folge steht seit 2026-08-22 fest (Vorgabe des Nutzers), von
+            // RECHTS nach links gelesen: Abmelden, Einstellungen, Startseite,
+            // Hell/Dunkel, Issues, Avatar, Sprachausgabe, Dokumente. Hier steht
+            // sie von links nach rechts, also genau andersherum.
+            //
+            // Der Avatar-Schalter fehlt in dieser Liste mit Absicht: er
+            // entsteht erst zur Laufzeit (avatar.js) und haengt sich vor
+            // `.jv-issues-btn` – geprueft wird dafuer die Klasse am Anker.
+            const ROLLE = [
+                [/lang-toggle/, 'Sprache'],
+                [/data-i18n-title="sup\.issues"|title="Issues \/ Feedback"/, 'Issues'],
+                [/id="btn-theme-toggle"|id="btn-theme"|theme-icon-|data-i18n-title="chat\.theme"/, 'Thema'],
+                [/data-i18n-title="nav\.home"|title="Zum Portal"|href="\/portal"/, 'Home'],
+                [/data-i18n-title="nav\.settings"/, 'Zahnrad'],
+                [/data-i18n-title="chat\.logout"|title="Abmelden"/, 'Abmelden'],
+            ];
+            const SOLL = ROLLE.map(r => r[1]);          // die kanonische Folge
+            const folgen = {};
+            for (const f of seiten) {
+                const q = fs.readFileSync(path.join(ROOT, 'frontend', f), 'utf8');
+                let m = q.match(/<div class="topbar-right">([\s\S]*?)<\/header>/);
+                // /portal und /wissen bauen ihre Leiste flach (kein
+                // `topbar-right`): dort ist der Abstandhalter der Anfang der
+                // Symbolgruppe und der Abmelden-Knopf ihr Ende. Ohne diesen
+                // Zweig fielen ausgerechnet die zwei Seiten heraus, die eine
+                // eigene Bauform haben – also die, bei denen ein Umbau am
+                // ehesten danebengeht.
+                if (!m) m = q.match(/<div class="(?:pt-spacer|wi-spacer)"><\/div>([\s\S]*?id="(?:pt-logout|wi-logout)"[\s\S]*?<\/button>)/);
+                if (!m) m = q.match(/<(?:header|div)[^>]*class="[^"]*topbar[^"]*"[^>]*>([\s\S]*?)<\/(?:header|div)>/);
+                if (!m) continue;
+                const tr = [];
+                for (const el of m[1].matchAll(/<(?:button|a|div)\b[^>]*>/g)) {
+                    for (const [re_, name] of ROLLE) {
+                        if (re_.test(el[0])) { if (!tr.includes(name)) tr.push(name); break; }
+                    }
+                }
+                if (tr.length < 3) continue;
+                folgen[f] = tr;
+                // Jede VORHANDENE Rolle muss in der kanonischen Reihenfolge
+                // stehen – fehlende Symbole sind erlaubt, Vertauschen nicht.
+                const erwartet = SOLL.filter(r => tr.includes(r));
+                check(tr.join(' → ') === erwartet.join(' → '),
+                      `${f}: Symbole in der kanonischen Reihenfolge`,
+                      `${tr.join(' → ')}  statt  ${erwartet.join(' → ')}`);
+            }
+            // Die Gleichheitspruefung gilt nur fuer UNTERSEITEN – erkennbar am
+            // Haus-Symbol. /portal ist die Startseite und hat es folgerichtig
+            // nicht; es mitzuzaehlen wuerde eine Abweichung melden, die keine
+            // ist. Die Reihenfolge selbst wurde oben trotzdem geprueft.
+            const unter = Object.fromEntries(
+                Object.entries(folgen).filter(([, v]) => v.includes('Home')));
+            const eindeutig = new Set(Object.values(unter).map(v => v.join('|')));
+            check(eindeutig.size === 1,
+                  `Alle ${Object.keys(unter).length} Unterseiten haben DIESELBE Reihenfolge`,
+                  [...eindeutig].join('   ///   '));
+            check(Object.keys(folgen).includes('portal.html')
+                  && Object.keys(folgen).includes('wissen.html'),
+                  'auch /portal und /wissen wurden geprueft (flache Leiste)',
+                  Object.keys(folgen).join(', '));
+
+            // ── Das SSL-Zertifikat gibt es NUR auf der Startseite ──────────
+            // Auf jeder Unterseite war es reine Wiederholung und stand an dem
+            // Platz, an dem dort das Haus-Symbol steht (Vorgabe 2026-08-22).
+            // Der Dialog #cert-modal in chat.html bleibt: ihn oeffnet das
+            // Sicherheits-Banner bei unverschluesselter Verbindung.
+            //
+            // Geprueft wird die GANZE Datei, nicht ein herausgeschnittener
+            // Leisten-Ausschnitt: ein Schnitt, der ins Leere greift, macht die
+            // Pruefung trivial gruen (dieselbe Falle wie beim Waechter am
+            // 2026-08-18). Der Schluessel steht projektweit nur am Symbol.
+            const mitZert = [];
+            for (const f of seiten) {
+                const q = fs.readFileSync(path.join(ROOT, 'frontend', f), 'utf8');
+                if (/data-i18n-title="chat\.ssl_cert"/.test(q)) mitZert.push(f);
+            }
+            check(mitZert.join(',') === 'portal.html',
+                  'Zertifikat-Symbol nur auf der Startseite',
+                  `gefunden auf: ${mitZert.join(', ') || '(nirgends)'}`);
+
+            // ── Die zwei Symbole, die es nur auf EINER Seite gibt ──────────
+            // Sie stehen links von Issues und damit vom Avatar-Schalter.
+            const chatQ = fs.readFileSync(path.join(ROOT, 'frontend', 'chat.html'), 'utf8');
+            check(chatQ.indexOf('id="btn-tts-chat"') >= 0
+                  && chatQ.indexOf('id="btn-tts-chat"') < chatQ.indexOf('id="btn-chat-issues"'),
+                  'chat.html: Sprachausgabe steht links von Issues');
+            const ptQ = fs.readFileSync(path.join(ROOT, 'frontend', 'portal.html'), 'utf8');
+            check(ptQ.indexOf('id="pt-info-btn"') >= 0
+                  && ptQ.indexOf('id="pt-info-btn"') < ptQ.indexOf('id="pt-issues-btn"'),
+                  'portal.html: Dokumente steht links von Issues');
+        }
+
+        for (const [name, quelle, pfx, ret] of [
+            ['claude.html', ownQ, 'cs', '/claude'],
+            ['tracks.html', refQ, 'st', '/tracks'],
+        ]) {
+            check(quelle.indexOf(`id="${pfx}-settings-btn"`) >= 0,
+                  `${name}: Zahnrad-Knopf vorhanden`);
+            // Es MUSS verborgen starten – sichtbar waere es fuer jeden
+            // Nicht-Admin ein Knopf, der in einen 403 laeuft.
+            const bl = quelle.match(
+                new RegExp(`<button[^>]*id="${pfx}-settings-btn"[^>]*>`));
+            check(!!bl && /display:\s*none/.test(bl[0]),
+                  `${name}: startet verborgen (nur Admins)`);
+            check(!!bl && /data-i18n-title="nav\.settings"/.test(bl[0]),
+                  `${name}: Beschriftung ueber den vorhandenen i18n-Key`);
+            // ... und es muss VOR dem Abmelden stehen, wie auf allen anderen.
+            check(quelle.indexOf(`id="${pfx}-settings-btn"`)
+                  < quelle.indexOf(`id="${pfx}-logout-btn"`),
+                  `${name}: steht vor dem Abmelden-Knopf`);
+        }
+        /* VERDRAHTUNG LIEGT SEIT 2026-08-23 ZENTRAL in js/settings_btn.js.
+         *
+         * Dieser Abschnitt verlangte vorher das GEGENTEIL: jedes Seiten-Skript
+         * musste den Knopf selbst verdrahten, und der Kommentar erklaerte
+         * `ist_admin` aus den Bereichs-Endpunkten ausdruecklich als richtig.
+         * Genau das war der Fehler – scheitert dieser Abruf (403 ohne
+         * Bereichs-Freigabe, Zeitlimit), lief die Einblendung nie, und der
+         * Administrator hatte keinen Weg in die Einstellungen, wo die Freigabe
+         * gesetzt wird. Ein Test, der ein ueberholtes Verhalten festschreibt,
+         * meldet spaeter einen Fehler, den es nicht gibt.
+         *
+         * Die Regel selbst prueft `tests/test_settings_btn.js` (Konvention
+         * `data-jarvis-settings` + /api/me + keine Doppelverdrahtung); hier
+         * bleibt nur die Zusicherung, dass diese beiden Seiten mitziehen. */
+        for (const [name, quelle, ret] of [['claude.html', ownQ, '/claude'],
+                                           ['tracks.html', refQ, '/tracks']]) {
+            check(quelle.indexOf(`data-jarvis-settings="${ret}"`) >= 0,
+                  `${name}: deklariert den Rueckweg ${ret} am Knopf`);
+            check(/<script[^>]+js\/settings_btn\.js/.test(quelle),
+                  `${name}: bindet die zentrale Verdrahtung ein`);
+        }
+    }
+
+    console.log('\n' + '='.repeat(62));
+    console.log(`  ${ok} OK, ${fail} FAIL`);
+    console.log('='.repeat(62));
+    process.exit(fail ? 1 : 0);
+})();

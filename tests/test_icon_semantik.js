@@ -1,0 +1,409 @@
+#!/usr/bin/env node
+/**
+ * Waechter: Muelleimer = LOESCHEN, × = SCHLIESSEN (Design-Entscheidung 2026-08-19).
+ *
+ * Vorher stand fuer BEIDES ein × – teils in derselben Zeile derselben
+ * Oberflaeche. Wer ein Panel schliessen wollte, konnte damit einen Eintrag
+ * loeschen. Dieser Test verhindert den Rueckfall.
+ *
+ * ER PRUEFT DIE REGEL, NICHT EINE LISTE VON FUNDSTELLEN: jeder Knopf, dessen
+ * Beschriftung (title/aria-label/label) ein Loesch-Wort traegt, muss den
+ * Muelleimer fuehren – auch ein Knopf, den es heute noch nicht gibt. Eine
+ * gepflegte Fundstellen-Liste waere beim naechsten Feature wieder unvollstaendig.
+ *
+ * Aufruf:  node tests/test_icon_semantik.js
+ */
+const fs = require('fs');
+const path = require('path');
+
+const ROOT = path.resolve(__dirname, '..');
+let ok = 0, fail = 0;
+
+function abschnitt(t) { console.log(`\n\x1b[1m${t}\x1b[0m`); }
+function pruefe(name, bedingung, detail) {
+    if (bedingung) { ok++; console.log(`  \x1b[32m✓\x1b[0m ${name}`); }
+    else { fail++; console.log(`  \x1b[31m✗\x1b[0m ${name}${detail ? '  →  ' + detail : ''}`); }
+}
+
+function dateien(basis, endungen) {
+    const out = [];
+    (function lauf(d) {
+        for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+            const p = path.join(d, e.name);
+            if (e.isDirectory()) { if (e.name !== 'node_modules' && e.name !== 'vendor') lauf(p); }
+            else if (endungen.includes(path.extname(e.name))) out.push(p);
+        }
+    })(path.join(ROOT, basis));
+    return out;
+}
+
+const UI = [...dateien('frontend', ['.html', '.js']), ...dateien('skills', ['.html', '.js'])];
+const rel = (p) => path.relative(ROOT, p);
+
+// Zeichen, die als LOESCHEN missverstanden werden koennen.
+// DAS `u`-FLAG IST PFLICHT: 🗙 liegt ausserhalb der BMP, ohne `u` zerlegt die
+// Zeichenklasse es in Surrogate und matcht dann die HALBE Einheit \uD83D –
+// also jedes beliebige Emoji, z.B. das 📂 des Verschieben-Knopfes. Genau
+// dieser Fehlalarm ist beim ersten Lauf aufgetreten (die Warnung dazu steht in
+// CLAUDE.md seit dem Add-in-Umbau).
+// Auch die HTML-ENTITIES, nicht nur die Zeichen. GEMELDET 2026-08-19: in
+// `tracks.js` stand `&#10005;` am Loeschen-Knopf – der Waechter war blind
+// dafuer und meldete nichts, obwohl die Regel verletzt war.
+const KREUZE = /[×✕✖⨯🗙]|&times;|&#215;|&#x?2715;?|&#10005;|&#10006;/iu;
+// Loesch-Woerter in Beschriftungen. Bewusst ENG: "clear" allein trifft sonst
+// CSS-Eigenschaften und "close" enthaelt kein Loeschen.
+const LOESCHWORT = /l[oö]sch|entfern|delete|remove|deinstall|uninstall|widerruf|purge|leeren/i;
+// Ausdrueckliche, begruendete Ausnahmen – jede einzeln, keine Sammelfreigabe.
+const AUSNAHMEN = [
+    // Chips/Anhangs-Vorschau: nimmt einen Eintrag aus einer NOCH NICHT
+    // gespeicherten Auswahl. Es wird nichts geloescht – der Anhang ist nicht
+    // hochgeladen, die Freigabeliste nicht gespeichert. Das ist "verwerfen",
+    // nicht "loeschen", und × ist dafuer die uebliche Form.
+    /class="token-x"/,
+    /attach-chip-remove|uc-attach-chip-rm/,
+    // Browsereigenes Leeren eines type=search-Feldes – nicht unser Knopf.
+    /natives ×-L/,
+];
+
+abschnitt('1 – Zentrales Modul');
+
+const ICONS = fs.readFileSync(path.join(ROOT, 'frontend/js/icons.js'), 'utf8');
+pruefe('frontend/js/icons.js vorhanden', ICONS.length > 0);
+pruefe('trash() liefert ein SVG (kein Emoji)',
+    /trash:\s*function\s*\(\)\s*\{\s*return MUELL;/.test(ICONS) && /<svg class="jv-ico jv-ico-trash"/.test(ICONS));
+pruefe('close() liefert ein SVG', /close:\s*function\s*\(\)\s*\{\s*return KREUZ;/.test(ICONS));
+/* ⚠ DIESE ZEILE SCHLIESST EINE LUECKE, DIE EINE GEGENPROBE GEZEIGT HAT.
+ * Abschnitt 5b zaehlt die AUFRUFER von pencil()/setPencil(). Nimmt man die
+ * Definition in icons.js weg, bleiben die Aufrufer stehen - 5b war damit
+ * gruen, waehrend jeder Aufruf zur Laufzeit ein TypeError mitten im Rendern
+ * waere (und im catch landet: leere Liste, keine Meldung). Geprueft gehoert
+ * also BEIDES: dass die Quelle da ist und dass die Knoepfe sie benutzen. */
+pruefe('pencil() liefert ein SVG (kein Emoji)',
+    /pencil:\s*function\s*\(\)\s*\{\s*return STIFT;/.test(ICONS)
+    && /setPencil:\s*function/.test(ICONS)
+    && /<svg class="jv-ico jv-ico-pencil"/.test(ICONS));
+// Ein Emoji folgt keiner Theme-Variablen und fehlt auf manchen Systemen.
+// GEPRUEFT WIRD DER CODE, NICHT DER KOMMENTAR: die Begruendung im Modulkopf
+// nennt 🗑️ ausdruecklich – ein Waechter, der seine eigene Begruendung liest,
+// schlaegt falsch an (im Projekt inzwischen der neunte Fall).
+const ohneKommentar = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+pruefe('kein Emoji-Muelleimer im Modul', !/🗑/u.test(ohneKommentar(ICONS)));
+pruefe('SVG erbt die Farbe (currentColor)', /stroke="currentColor"/.test(ICONS));
+pruefe('Symbol ist fuer Screenreader Dekoration', /aria-hidden="true"/.test(ICONS));
+
+const THEME = fs.readFileSync(path.join(ROOT, 'frontend/css/theme.css'), 'utf8');
+pruefe('.jv-ico steht in theme.css (jede Seite), nicht in style.css', /\.jv-ico\s*\{/.test(THEME));
+const STYLE = fs.readFileSync(path.join(ROOT, 'frontend/css/style.css'), 'utf8');
+pruefe('.jv-ico ist NICHT zusaetzlich in style.css (keine Drift)', !/\.jv-ico\s*\{/.test(STYLE));
+
+abschnitt('2 – icons.js ist auf jeder Seite geladen, und zwar zuerst');
+
+const SEITEN = UI.filter((p) => p.endsWith('.html') && !rel(p).startsWith('skills'));
+for (const s of SEITEN) {
+    const txt = fs.readFileSync(s, 'utf8');
+    if (!/<script src="\/static\/js\//.test(txt)) continue;   // Seite ohne eigene Skripte
+    pruefe(`${rel(s)} laedt icons.js`, txt.includes('js/icons.js'));
+}
+// Reihenfolge: ein Modul, das beim Rendern JarvisIcons.trash() aufruft, darf
+// nicht vor dem Modul stehen, das es definiert.
+const NUTZER = UI.filter((p) => p.endsWith('.js') && !p.endsWith('icons.js')
+    && fs.readFileSync(p, 'utf8').includes('JarvisIcons'));
+let reihenfolgeOk = true, wo = '';
+for (const s of SEITEN) {
+    const txt = fs.readFileSync(s, 'utf8');
+    if (!txt.includes('js/icons.js')) continue;
+    const pos = txt.indexOf('js/icons.js');
+    for (const n of NUTZER) {
+        const m = txt.match(new RegExp('src="[^"]*' + path.basename(n).replace('.', '\\.') + '\\?'));
+        if (m && m.index < pos) { reihenfolgeOk = false; wo = `${rel(s)} → ${path.basename(n)}`; }
+    }
+}
+pruefe('icons.js steht vor jedem Modul, das es benutzt', reihenfolgeOk, wo);
+pruefe('mindestens 15 Module benutzen das zentrale Modul', NUTZER.length >= 15, `${NUTZER.length}`);
+
+abschnitt('3 – DIE REGEL: Loesch-Beschriftung ⇒ Muelleimer, nie ×');
+
+// Reine Kommentarzeile – JS (`//`, `/*`, Fortsetzung `*`) und HTML (`<!--`).
+// Bewusst NUR der Zeilenanfang: was danach kommt, kann Code sein.
+const NUR_KOMMENTAR = /^\s*(\/\/|\/\*|\*(?!\/)|\*\/|<!--)/;
+
+const verstoesse = [];
+for (const p of UI) {
+    if (p.endsWith('icons.js') || rel(p).startsWith('tests')) continue;
+    const zeilen = fs.readFileSync(p, 'utf8').split('\n');
+    zeilen.forEach((z, i) => {
+        if (!KREUZE.test(z)) return;
+        // Eine reine KOMMENTARZEILE ist kein Bedienelement. Ohne diese Zeile
+        // meldet der Waechter ausgerechnet die Begruendung als Verstoss, die
+        // NEBEN einem korrekten Muelleimer erklaert, warum dort kein × steht –
+        // derselbe Fall wie oben, nur in der Gegenrichtung: falscher Alarm
+        // statt blinder Fleck.
+        if (NUR_KOMMENTAR.test(z)) return;
+        // FENSTER statt Einzelzeile: ein Knopf wird regelmaessig ueber mehrere
+        // Zeilen zusammengesetzt ('<button …' + title + '">×</button>'). Die
+        // zeilenweise Pruefung sah weder das `<button` noch die Beschriftung
+        // und liess `tracks.js` durch (gemeldet 2026-08-19).
+        // Kommentarzeilen im Fenster werden geleert – weder das Symbol noch das
+        // Loeschwort darf aus einer Erklaerung stammen.
+        const fenster = zeilen.slice(Math.max(0, i - 3), i + 2)
+            .map((f) => (NUR_KOMMENTAR.test(f) ? '' : f)).join('\n');
+        if (AUSNAHMEN.some((a) => a.test(fenster))) return;
+        if (!/<button|textContent|innerHTML|icon:\s*['"]/.test(fenster)) return;
+        if (!LOESCHWORT.test(fenster)) return;
+        verstoesse.push(`${rel(p)}:${i + 1}  ${z.trim().slice(0, 90)}`);
+    });
+}
+pruefe('kein Bedienelement mit Loesch-Beschriftung fuehrt ein ×',
+    verstoesse.length === 0, '\n      ' + verstoesse.join('\n      '));
+
+abschnitt('4 – Die Gegenrichtung: Schliessen bleibt ×, nie Muelleimer');
+
+const falscheMuell = [];
+for (const p of UI) {
+    if (p.endsWith('icons.js')) continue;
+    const zeilen = fs.readFileSync(p, 'utf8').split('\n');
+    zeilen.forEach((z, i) => {
+        if (!/jv-ico-trash|JarvisIcons\.trash|setTrash/.test(z)) return;
+        // "Schliessen"/"Abbrechen" an einem Muelleimer ist genau der
+        // umgekehrte Fehler und mindestens so gefaehrlich.
+        if (/schlie|close|abbrech|cancel/i.test(z) && !/icons\.js|Design|Entscheidung/i.test(z)) {
+            falscheMuell.push(`${rel(p)}:${i + 1}  ${z.trim().slice(0, 90)}`);
+        }
+    });
+}
+pruefe('kein Schliessen-/Abbrechen-Knopf fuehrt einen Muelleimer',
+    falscheMuell.length === 0, '\n      ' + falscheMuell.join('\n      '));
+
+abschnitt('5 – Kein Emoji-Muelleimer als Bedienelement');
+
+// 🗑️ wird je nach System farbig gerendert, folgt keinem Theme und fehlt auf
+// manchen Systemen ganz. In Meldungstexten (Toasts) ist es unkritisch, an
+// einem KNOPF nicht.
+const emojiKnopf = [];
+for (const p of UI) {
+    const zeilen = fs.readFileSync(p, 'utf8').split('\n');
+    zeilen.forEach((z, i) => {
+        if (!/🗑/u.test(z)) return;
+        if (/<button|textContent\s*=|icon:/.test(z)) emojiKnopf.push(`${rel(p)}:${i + 1}  ${z.trim().slice(0, 80)}`);
+    });
+}
+pruefe('kein Knopf traegt ein Muelleimer-EMOJI', emojiKnopf.length === 0,
+    '\n      ' + emojiKnopf.join('\n      '));
+
+abschnitt('5b – Kein Emoji-Stift als Bedienelement');
+
+/* Ein Stift-Zeichen an einem Bedienelement ist fontabhaengig: ✏️ (U+270F) wird
+ * je System FARBIG als Emoji gerendert und folgt keiner Theme-Variablen, ✎
+ * (U+270E) erbt zwar die Schriftfarbe, kann aber in einer Schrift fehlen. Am
+ * 2026-10-06 trugen **28** Bedienelemente eines davon - in cron.js und
+ * knowledge.js stand es in DERSELBEN Knopfzeile wie ein korrekter SVG-
+ * Muelleimer. Das SVG aus icons.js ist auf jedem System gleich.
+ *
+ * ⚠ GEPRUEFT WIRD DIE ZEICHENKLASSE, NICHT EIN ZEICHEN. Genau daran ist mein
+ * erstes Inventar gescheitert: der Grep suchte nur ✏ U+270F literal und
+ * verfehlte dadurch ✎ (ein ANDERES Zeichen), die escapte Form `✎` und die
+ * Entity `&#9998;` - email_portal.js und jira.js kamen gar nicht vor, aus 18
+ * gemeldeten wurden 28 echte Stellen. Wer ueber ein Zeichen prueft statt ueber
+ * die Klasse, baut sich den naechsten blinden Fleck.
+ *
+ * ⚠ UND ES WIRD EINZEILIG GEPRUEFT, NICHT IM FENSTER wie die ×-Regel oben.
+ * Grund, gemessen: die Emoji-AUSWAHLLISTE in userchat.js:1273 hat drei Zeilen
+ * darueber ein `icon: '💡'` (die Kategorie der Liste). Ein Fenster haette
+ * damit eine DATEN-Zeile als Bedienelement gemeldet - Fehlalarm an genau der
+ * Stelle, die bleiben MUSS. Alle echten Fundstellen waren einzeilig. */
+const _ST = '(?:[\\u270E\\u270F]\\uFE0F?|&#999[89];|\\\\u270[EFef])';
+const STIFT_ALS_SYMBOL = [
+    new RegExp('icon:\\s*[\'"]\\s*' + _ST + '\\s*[\'"]', 'u'),           // icon: '✏'
+    new RegExp('textContent\\s*=\\s*[\'"]\\s*' + _ST + '\\s*[\'"]', 'u'), // el.textContent = '✎'
+    new RegExp('>\\s*' + _ST + '\\s*<\\/button>', 'u'),                   // <button …>✎</button>
+];
+const stiftKnopf = [];
+for (const p of UI) {
+    if (p.endsWith('icons.js') || rel(p).startsWith('tests')) continue;
+    fs.readFileSync(p, 'utf8').split('\n').forEach((z, i) => {
+        if (NUR_KOMMENTAR.test(z)) return;
+        if (!STIFT_ALS_SYMBOL.some((r) => r.test(z))) return;
+        stiftKnopf.push(`${rel(p)}:${i + 1}  ${z.trim().slice(0, 80)}`);
+    });
+}
+pruefe('kein Bedienelement traegt ein Stift-EMOJI', stiftKnopf.length === 0,
+    '\n      ' + stiftKnopf.join('\n      '));
+
+/* POSITIVKONTROLLE: ein Suchmuster, das nichts findet, ist immer gruen - und
+ * waere hier besonders teuer, weil die Regel genau nach dem Aufraeumen scharf
+ * gestellt wurde. Gemessen wird am gepflanzten Verstoss, je Gestalt. */
+const pflanzung = [
+    `<button class="x" title="Bearbeiten">✏️</button>`,   // U+270F + VS16
+    `<button class="x" title="Bearbeiten">✎</button>`,     // U+270E
+    `'">&#9998;</button>'`,                                 // als HTML-Entity
+    `'">\\u270E</button>'`,                                 // escaped im Quelltext
+    `editBtn.textContent = '✏';`,
+    `b.textContent = '✎';`,
+    `{ label: 'Bearbeiten', icon: '✏', onClick: f },`,
+];
+pruefe('die Regel erkennt jede Gestalt wirklich (Positivkontrolle)',
+    pflanzung.every((z) => STIFT_ALS_SYMBOL.some((r) => r.test(z))),
+    pflanzung.map((z) => (STIFT_ALS_SYMBOL.some((r) => r.test(z)) ? 'ok' : 'VERFEHLT: ' + z)).join(' | '));
+
+/* Und die Gegenkontrolle zur Zeichenklasse: ein Dateityp-Symbol ist KEIN
+ * Bearbeiten-Knopf. 📝 steht an fuenf Stellen fuer "Word-Dokument" - wer die
+ * Klasse zu weit zieht, nimmt dem Dateibaum seine Symbole. */
+const nichtStift = [
+    `if (['doc','docx'].includes(ext)) return '📝';`,
+    `{ key: 'word',  icon: '📝' },`,
+];
+pruefe('ein Dateityp-Symbol faellt NICHT unter die Regel',
+    nichtStift.every((z) => !STIFT_ALS_SYMBOL.some((r) => r.test(z))));
+
+/* GEGENRICHTUNG, und sie ist der eigentliche Entwurf dieser Regel: eine
+ * Emoji-Auswahlliste ist DATEN, die der Benutzer waehlt - kein Bedienelement.
+ * Wer hier pauschal ersetzt, nimmt ihm den Stift aus der Palette. */
+const palette = fs.readFileSync(path.join(ROOT, 'frontend', 'js', 'userchat.js'), 'utf8')
+    .split('\n').filter((z) => /✏/u.test(z));
+pruefe('die Emoji-AUSWAHLLISTE wird nicht gemeldet (sie ist Daten)',
+    palette.length === 1 && !STIFT_ALS_SYMBOL.some((r) => r.test(palette[0])),
+    palette.length + ' Zeile(n): ' + (palette[0] || '').trim().slice(0, 60));
+
+/* Und die Umstellung muss WIRKLICH stattgefunden haben - ohne diese Zeile
+ * waere die Regel auch bei komplett entfernten Knoepfen gruen. */
+const mitStift = UI.filter((p) => !p.endsWith('icons.js'))
+    .filter((p) => /JarvisIcons\.(pencil|setPencil)/.test(fs.readFileSync(p, 'utf8')));
+pruefe('die Bedienelemente holen den Stift aus icons.js (>= 16 Module)',
+    mitStift.length >= 16, mitStift.map(rel).join(', '));
+
+abschnitt('6 – Die eigenstaendige Vision-Oberflaeche fuehrt dasselbe SVG');
+
+// Eigene Flask-App mit eigenem static/ – sie kann das zentrale Modul nicht
+// laden und traegt das SVG woertlich. Genau deshalb muss ein Test beide
+// vergleichen, sonst laufen sie beim naechsten Feinschliff auseinander.
+const VIS = fs.readFileSync(path.join(ROOT, 'skills/jarvis-vision/static/script.js'), 'utf8');
+const pfadAus = (t) => (t.match(/<path d="(M19 6v14[^"]*)"/) || [])[1];
+pruefe('Vision-Skript enthaelt den Muelleimer', /jv-ico-trash/.test(VIS));
+pruefe('Vision-SVG ist identisch zum zentralen', pfadAus(VIS) === pfadAus(ICONS),
+    `${pfadAus(VIS)} vs ${pfadAus(ICONS)}`);
+const VISCSS = fs.readFileSync(path.join(ROOT, 'skills/jarvis-vision/static/style.css'), 'utf8');
+pruefe('Vision-CSS kennt .jv-ico (sonst 24px-Riesensymbol)', /\.jv-ico\s*\{/.test(VISCSS));
+
+abschnitt('7 – Auswahl-Chips: × bleibt, aber die Beschriftung luegt nicht');
+
+// Der dritte Fall neben "loeschen" und "schliessen": ein Chip nimmt einen
+// Eintrag aus einer NOCH NICHT GESPEICHERTEN Auswahl. Dort ist × richtig –
+// aber solange die Beschriftung "Entfernen" sagt, sieht es wie ein Loeschen
+// aus. Live gemessen: genau sieben solcher Knoepfe standen in /settings.
+const I18N_ROH = fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8');
+pruefe('ldap.remove sagt "Aus Auswahl nehmen", nicht "Entfernen"',
+    /'ldap\.remove':\s*'Aus Auswahl nehmen'/.test(I18N_ROH));
+pruefe('englische Fassung ebenso',
+    /'ldap\.remove':\s*'Remove from selection'/.test(I18N_ROH));
+for (const [datei, klasse] of [['frontend/js/chat.js', 'attach-chip-remove'],
+                               ['frontend/js/userchat.js', 'uc-attach-chip-rm']]) {
+    const t = fs.readFileSync(path.join(ROOT, datei), 'utf8');
+    const i = t.indexOf(klasse);
+    pruefe(`${path.basename(datei)}: Anhangs-Chip hat eine Beschriftung`,
+        i > 0 && /common\.unselect/.test(t.slice(i, i + 400)));
+}
+
+abschnitt('8 – Erklaertexte nennen das richtige Symbol');
+
+const I18N = fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8');
+// Ein Hilfetext, der "× = löschen" sagt, ist nach dem Umbau schlicht falsch.
+const falscheTexte = [];
+I18N.split('\n').forEach((z, i) => {
+    if (/[×✕]\s*=\s*(l[oö]schen|delete)/i.test(z)) falscheTexte.push(`i18n.js:${i + 1}  ${z.trim().slice(0, 90)}`);
+});
+pruefe('kein i18n-Text behauptet "× = löschen"', falscheTexte.length === 0,
+    '\n      ' + falscheTexte.join('\n      '));
+pruefe('der Auditier-Hinweis nennt den Muelleimer', /Mülleimer = löschen/.test(I18N));
+pruefe('englische Fassung ebenso', /trash = delete/.test(I18N));
+
+abschnitt('9 – Weg zum Portal ist ueberall dasselbe HAUS');
+
+/* Gemeldet am 2026-08-21: "unter /excel fehlt das Home Symbol". Es fehlte
+   nicht wirklich – dort sass links ein ZURUECK-PFEIL, waehrend jede andere
+   Bereichsseite rechts in der Knopfleiste ein Haus fuehrt. Dieselbe Aussage
+   mit anderem Zeichen an anderer Stelle wird als fehlend wahrgenommen, und
+   genau so wurde sie gemeldet.
+
+   REGEL STATT LISTE, wie im ganzen Test: geprueft wird JEDE Seite, die ueber
+   ein Bedienelement aufs Portal fuehrt – eine kuenftige Seite ist damit
+   automatisch erfasst. Wer keines hat (portal.html selbst), wird nicht
+   geprueft. */
+const HAUS = 'M3 9l9-7 9 7v11';
+const ZURUECK_PFEIL = /M19 12H5/;            // <- der Pfeil aus dem Fehlerfall
+const PORTAL_STEUERELEMENT =
+    /<a\b[^>]*href="\/portal"[^>]*>[\s\S]{0,600}?<\/a>|<button\b[^>]*id="[a-z]+-portal-btn"[^>]*>[\s\S]{0,600}?<\/button>/gi;
+
+let geprueft = 0;
+for (const s of SEITEN) {
+    if (path.basename(s) === 'portal.html') continue;
+    // Kommentare raus: mein eigener Begruendungs-Kommentar in excel.html nennt
+    // `nav.home` und den alten Schluessel. Ein Waechter, der seine eigene
+    // Begruendung liest, prueft nichts – im Projekt schon mehrfach passiert.
+    const roh = fs.readFileSync(s, 'utf8').replace(/<!--[\s\S]*?-->/g, '');
+    const treffer = roh.match(PORTAL_STEUERELEMENT) || [];
+    if (!treffer.length) continue;
+    geprueft++;
+    for (const t of treffer) {
+        pruefe(`${path.basename(s)}: Portal-Knopf traegt das Haus`,
+            t.includes(HAUS), t.replace(/\s+/g, ' ').slice(0, 110));
+        pruefe(`${path.basename(s)}: Portal-Knopf traegt nav.home`,
+            /data-i18n-title="nav\.home"/.test(t), t.replace(/\s+/g, ' ').slice(0, 110));
+        pruefe(`${path.basename(s)}: kein Zurueck-Pfeil statt Haus`,
+            !ZURUECK_PFEIL.test(t), t.replace(/\s+/g, ' ').slice(0, 110));
+    }
+}
+// Ohne diese Zeile waere der ganze Abschnitt gruen, sobald das Suchmuster
+// nicht mehr trifft – ein Waechter, der nichts findet, meldet sonst Erfolg.
+pruefe('es wurden ueberhaupt Portal-Knoepfe gefunden', geprueft >= 4,
+    `nur ${geprueft} Seite(n)`);
+
+abschnitt('10 – Titelleiste der Bereichsseiten ist baugleich');
+
+/* Gemeldet am 2026-08-21 ("es sind weitere Unterschiede in /excel, z.B. DE/EN"):
+   die Seite hatte eine komplett eigene Leiste – eigene Klassen, ein EINZELNER
+   Umschaltknopf statt des DE|EN-Paars, kein Abmelden. Wer zwischen den
+   Bereichen wechselt, sucht dann jedes Mal neu.
+
+   GEPRUEFT WIRD EINE MINDESTAUSSTATTUNG, keine exakte Gleichheit: /sap traegt
+   zusaetzlich Verlauf, Anweisungen, Issues und Zertifikat und ist damit eine
+   Obermenge. Eine Gleichheitspruefung wuerde erzwingen, dass alle Seiten
+   dieselben Zusatzknoepfe haben – das waere Gleichmacherei statt Konsistenz.
+
+   Die Chat-artigen Seiten (/chat, /support, /userchat) stehen bewusst NICHT in
+   der Gruppe: sie sind aelter und benutzen ein eigenes Vokabular
+   (`header.theme`, `nav.settings`). Sie anzugleichen ist eine eigene Aufgabe. */
+const BEREICHSSEITEN = ['email.html', 'tracks.html', 'sap.html', 'excel.html'];
+const PFLICHT_KEYS = ['nav.home', 'chat.theme', 'chat.logout'];
+
+for (const name of BEREICHSSEITEN) {
+    const datei = path.join(ROOT, 'frontend', name);
+    if (!fs.existsSync(datei)) { pruefe(`${name} existiert`, false); continue; }
+    const roh = fs.readFileSync(datei, 'utf8').replace(/<!--[\s\S]*?-->/g, '');
+    const m = roh.match(/<header class="topbar">[\s\S]*?<\/header>/);
+    pruefe(`${name}: hat eine <header class="topbar">`, !!m);
+    // KEIN `continue`: fehlt die Leiste, sollen die Einzelpruefungen ebenfalls
+    // FEHLSCHLAGEN statt still uebersprungen zu werden. Eine Gegenprobe, die
+    // nur eine einzige Zeile rot faerbt, verschweigt das Ausmass – und ein
+    // Waechter, der ueberspringt, sieht aus wie einer, der bestanden hat.
+    const kopf = m ? m[0] : '';
+
+    const langBtns = (kopf.match(/class="lang-toggle-btn"/g) || []).length;
+    pruefe(`${name}: DE|EN als Paar (nicht ein Umschaltknopf)`, langBtns === 2,
+        `gefunden: ${langBtns}`);
+    pruefe(`${name}: DE und EN sind beide belegt`,
+        /data-lang="de"/.test(kopf) && /data-lang="en"/.test(kopf));
+    // theme.js verdrahtet genau diese Id – eine eigene waere ein Eigenbau.
+    pruefe(`${name}: Thema-Knopf traegt id="btn-theme-toggle"`,
+        /id="btn-theme-toggle"/.test(kopf));
+    for (const k of PFLICHT_KEYS) {
+        pruefe(`${name}: Leiste hat ${k}`,
+            kopf.includes(`data-i18n-title="${k}"`));
+    }
+    // Abmelden ohne sessions.js meldet sich nicht am Server ab – der Benutzer
+    // bliebe bis zu zwei Minuten als "online" stehen.
+    pruefe(`${name}: laedt sessions.js (fuer die Abmeldung)`,
+        /src="\/static\/js\/sessions\.js/.test(roh));
+}
+
+console.log(`\n\x1b[1mErgebnis: ${ok}/${ok + fail}\x1b[0m`);
+process.exit(fail === 0 ? 0 : 1);

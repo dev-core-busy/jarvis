@@ -1,0 +1,48 @@
+Fremdbibliotheken, die an den BROWSER ausgeliefert werden
+=========================================================
+
+Diese Dateien liegen bewusst IM REPO und nicht hinter einem Deploy-Skript: sie
+gehen mit der Seite an den Browser. Extern einzubinden ist in diesem Projekt
+ausdruecklich verboten - ein <link> auf fonts.googleapis.com hat hier schon
+einmal eine Admin-Oberflaeche gekostet (Ladezeit-Vorfall, im Register unter
+"Nie wieder extern einbinden"). Dazu laeuft Jarvis in Umgebungen mit
+Egress-Sperre: ein CDN-Aufruf scheitert dort, und zwar oft still.
+
+⚠ `.gitignore` enthaelt eine `vendor/`-Regel fuer die grossen, per Skript
+geholten Binaerdateien (tika-app.jar 65 MB, AI-Mouse-EXE 70-90 MB). Sie griff
+bis 2026-10-05 AUCH hier und hat eine lokal abgelegte qrcode.min.js still nicht
+mitcommittet - `git status` zeigt eine ignorierte Datei nicht an. Seitdem gibt
+es die Ausnahme `!frontend/js/vendor/**`. Wer hier eine Datei ergaenzt, prueft
+mit `git status`, dass sie wirklich auftaucht.
+
+
+qrcode.min.js
+-------------
+Paket     qrcodejs 1.0.0 (npm)
+Bezug     https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js
+Projekt   https://github.com/davidshimjs/qrcodejs
+Groesse   19927 Bytes
+SHA-256   c541ef06327885a8415bca8df6071e14189b4855336def4f36db54bde8484f36
+Geprueft  2026-10-05 - die vorgefundene lokale Datei war byte-identisch zur
+          CDN-Fassung (cmp + sha256), also unveraendert.
+Lizenz    MIT, Copyright (c) 2012 davidshimjs
+          Belegt aus der LICENSE des Upstream-Projekts, NICHT geraten:
+          das npm-Paket deklariert `license: None`, und die minifizierte
+          Datei traegt selbst KEINEN Lizenzkopf. MIT verlangt die Weitergabe
+          des Copyright-Hinweises - deshalb steht er hier.
+Benutzt   frontend/js/whatsapp.js (`_loadQRLib`) laedt sie bei Bedarf nach,
+          fuer den QR-Code der WhatsApp-Web-Anmeldung.
+
+Pruefen:
+  sha256sum frontend/js/vendor/qrcode.min.js
+
+
+⚠ KEINE HERKUNFTSANGABE fuer die vier aelteren Dateien
+-------------------------------------------------------
+chart.umd.min.js, chartjs-plugin-annotation.min.js,
+chartjs-plugin-datalabels.min.js und mermaid.min.js kamen mit `81fec2f2` bzw.
+spaeter ins Repo, ohne dass Version, Bezugsquelle, Pruefsumme oder Lizenz
+festgehalten wurden. Das ist eine offene Luecke und keine Entscheidung:
+nachtragen laesst sie sich nur, indem man die Versionen bestimmt und die
+Dateien gegen die veroeffentlichten Fassungen prueft. Benannt, statt den
+Eindruck zu erzeugen, diese Datei deckte alles ab.

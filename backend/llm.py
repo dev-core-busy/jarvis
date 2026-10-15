@@ -1,0 +1,2187 @@
+"""Jarvis LLM Provider Abstraktionsschicht."""
+
+import base64
+import asyncio
+import contextvars
+import json
+import re
+import httpx
+from abc import ABC, abstractmethod
+from collections import defaultdict, deque
+from dataclasses import dataclass
+from typing import Optional, List, Any
+from google import genai
+from google.genai import types
+
+
+@dataclass
+class LLMPart:
+    text: Optional[str] = None
+    function_call: Optional[Any] = None
+
+
+@dataclass
+class LLMResponse:
+    parts: List[LLMPart]
+    raw: Any
+    usage: dict = None  # {"input_tokens": N, "output_tokens": M}
+
+
+class MockFC:
+    """Einheitliches Function-Call Objekt (für alle Non-Gemini-Provider)."""
+    def __init__(self, name, args):
+        self.name = name
+        self.args = args
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TOOL-SYNTAX IM ANTWORTTEXT BERGEN UND ENTFERNEN
+#
+# DER VORFALL (2026-08-12, ECHT): Ein Benutzer bekam als Antwort auf eine
+# PDF-Auswertung das Selbstgespraech des Modells samt Bruchstuecken der
+# Aufruf-Syntax:
+#
+#     … Ich werde den Text aus dem Prompt in eine Datei schreiben und dann parsen.
+#     </parameter>
+#     </function>
+#     </tool_call>
+#
+# Hergang: Qwen3.6 hinter vLLM, natives Tool-Calling (prompt_tool_calling=false).
+# Das Modell schreibt seine Aufrufe im Hermes-/Qwen-XML-Format. vLLM hat den
+# Aufruf NUR TEILWEISE geparst - der Aufruf selbst lief (die Datei wurde
+# geschrieben), die schliessenden Marken blieben im `content` zurueck. Unser
+# Agent hatte damit einen Text ohne Function-Call in der Hand und hat ihn als
+# ENDANTWORT ausgegeben.
+#
+# Diese Klasse von Fehlern ist bei selbst gehosteten Modellen der Normalfall,
+# nicht die Ausnahme: jeder Server-Neustart mit anderem --tool-call-parser, jede
+# Modell-Aktualisierung und jedes Abschneiden an max_tokens kann sie ausloesen.
+# Deshalb wird hier NICHT das Modell gebeten, es besser zu machen, sondern die
+# Antwort maschinell geradegezogen:
+#   1. vollstaendige Aufrufe im Text werden GEBORGEN und als echter Function-Call
+#      zurueckgegeben (der Agent fuehrt sie dann normal aus),
+#   2. alle uebrigen Marken werden ENTFERNT,
+#   3. bleibt danach kein sinnvoller Text uebrig, wird gar kein Textteil
+#      geliefert - der Agent behandelt das als "keine Antwort" und holt eine
+#      richtige Antwort nach (_empty_finish, seit 2026-08-06).
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Marken, die niemals im Anzeigetext stehen duerfen. Bewusst breit: die Formate
+# unterscheiden sich je Modellfamilie (Hermes/Qwen, Llama, Mistral).
+_TOOL_MARKUP_RE = re.compile(
+    r"</?tool_call>|</?tool_response>|<\|tool_call\|>|<\|/?tool\|>"
+    r"|</?function(?:\s*=\s*[^>]*)?>|</?parameter(?:\s*=\s*[^>]*)?>"
+    r"|</?invoke(?:\s*name\s*=\s*[^>]*)?>|</?antml:\w+[^>]*>",
+    re.IGNORECASE)
+
+# Vollstaendiger Aufruf, JSON-Form:  <tool_call>{"name": …, "arguments": {…}}</tool_call>
+_TC_JSON_RE = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.DOTALL)
+# Vollstaendiger Aufruf, XML-Form:   <function=name><parameter=key>wert</parameter>…</function>
+_TC_XML_RE = re.compile(r"<function\s*=\s*([\w.\-]+)\s*>(.*?)</function>", re.DOTALL)
+_PARAM_RE = re.compile(r"<parameter\s*=\s*([\w.\-]+)\s*>(.*?)</parameter>", re.DOTALL)
+
+
+def _wert_deuten(rohtext: str):
+    """Parameterwert aus XML-Form: JSON, wenn moeglich – sonst Text.
+
+    ``true``/``42``/``{"a":1}`` sollen nicht als Zeichenkette beim Werkzeug
+    ankommen; ein Dateiinhalt mit Zeilenumbruechen aber unveraendert bleiben."""
+    t = rohtext.strip()
+    if t and (t[0] in "[{" or t in ("true", "false", "null")
+              or re.fullmatch(r"-?\d+(?:\.\d+)?", t)):
+        try:
+            return json.loads(t)
+        except Exception:
+            return rohtext
+    return rohtext
+
+
+def inhalt_als_text(inhalt) -> str:
+    """``message["content"]`` als TEXT – auch wenn der Server Bloecke schickt.
+
+    Die OpenAI-Schnittstelle erlaubt fuer ``content`` eine Liste von Bloecken
+    (``{"type": "text"|"image_url", …}``). Bis 2026-08-29 stand hier ein nacktes
+    ``str(...)`` – aus einer solchen Liste wurde damit die PYTHON-DARSTELLUNG,
+    also woertlich ``[{'type': 'image_url', 'image_url': {'url': 'data:…'}}]``.
+
+    AUF ECHT GEMESSEN (28.08.): genau so kam das Ergebnis der Rolle
+    ``image_builder`` zurueck – **2.481.887 Zeichen** Python-Repr statt einer
+    Antwort. Was der Benutzer davon sah, war der Anfang der Zeichenkette.
+
+    Bilder werden als **saubere Data-URL** durchgereicht, nicht weggeworfen:
+    die Auslagerung in eine Datei passiert eine Ebene hoeher
+    (``agent._bilddaten_bergen``), und die erkennt eine Data-URL – eine
+    Python-Darstellung erkennt sie nur zufaellig mit.
+    """
+    if isinstance(inhalt, str):
+        return inhalt
+    if not isinstance(inhalt, list):
+        return str(inhalt) if inhalt is not None else ""
+    stuecke = []
+    for block in inhalt:
+        if isinstance(block, str):
+            stuecke.append(block)
+            continue
+        if not isinstance(block, dict):
+            stuecke.append(str(block))
+            continue
+        if block.get("text"):
+            stuecke.append(str(block["text"]))
+            continue
+        bild = block.get("image_url")
+        url = bild.get("url") if isinstance(bild, dict) else bild
+        if url:
+            stuecke.append(str(url))
+    return "\n".join(s for s in stuecke if s)
+
+
+def berge_tool_syntax(text: str):
+    """``(text_ohne_marken, [MockFC, …])``.
+
+    Findet vollstaendige Aufrufe im Text und entfernt jede uebrige Tool-Marke.
+    Wirft nichts: bei unerwarteter Form bleibt der Text erhalten, nur bereinigt –
+    eine Ausnahme hier wuerde eine sonst brauchbare Antwort vernichten."""
+    if not text or "<" not in text:
+        return text, []
+    calls = []
+    rest = text
+    try:
+        for m in _TC_JSON_RE.finditer(text):
+            try:
+                d = json.loads(m.group(1))
+            except Exception:
+                continue
+            name = d.get("name") or d.get("function") or d.get("tool")
+            if not name:
+                continue
+            args = d.get("arguments", d.get("args", d.get("parameters", {})))
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except Exception:
+                    args = {"input": args}
+            calls.append(MockFC(name, args if isinstance(args, dict) else {}))
+            rest = rest.replace(m.group(0), "")
+
+        for m in _TC_XML_RE.finditer(rest):
+            name, rumpf = m.group(1), m.group(2)
+            args = {k: _wert_deuten(v) for k, v in _PARAM_RE.findall(rumpf)}
+            calls.append(MockFC(name, args))
+            rest = rest.replace(m.group(0), "")
+
+        rest = _TOOL_MARKUP_RE.sub("", rest)
+        # Ein einzelnes verwaistes "}" oder "{...}" aus einem halb geparsten
+        # Aufruf ist ebenfalls kein Antworttext.
+        rest = re.sub(r"^\s*[\{\}\[\]]+\s*$", "", rest, flags=re.MULTILINE)
+        rest = re.sub(r"\n{3,}", "\n\n", rest).strip()
+    except Exception:
+        return _TOOL_MARKUP_RE.sub("", text), calls
+    return rest, calls
+
+
+def ist_nur_selbstgespraech(text: str) -> bool:
+    """True, wenn der Text keine Antwort ist, sondern eine Absichtserklaerung.
+
+    Nach dem Bergen bleibt bei einem verstuemmelten Aufruf oft nur das
+    Selbstgespraech uebrig ("Ich werde jetzt …", "Lass mich …", "Aber warte -").
+    Als Endantwort ist das fuer den Benutzer wertlos; der Agent holt dann eine
+    echte Antwort nach. Absichtlich ENG gefasst - ein Text, der zusaetzlich ein
+    Ergebnis nennt, ist eine Antwort und wird nicht verworfen."""
+    if not text:
+        return True
+    t = text.strip()
+    if len(t) > 700:            # ausfuehrlicher Text ist im Zweifel eine Antwort
+        return False
+    muster = (
+        r"ich (werde|muss|kann|sollte|schreibe|erstelle|analysiere|pruefe|prüfe)\b",
+        r"lass (mich|uns)\b", r"aber warte\b", r"warte\b.*\bich\b",
+        r"jetzt (werde|schreibe|erstelle|rufe)\b", r"^(ok(ay)?|gut|alles klar)[.,: ]",
+        r"let me\b", r"i (will|need to|should)\b",
+    )
+    treffer = sum(1 for p in muster if re.search(p, t, re.IGNORECASE))
+    if not treffer:
+        return False
+    # Ein Ergebnis-Merkmal (Zahl mit Einheit, Aufzaehlung, Tabelle, Dateiname)
+    # spricht dafuer, dass doch etwas geliefert wird.
+    hat_ergebnis = re.search(r"^\s*[-*\d]\s|\|.*\||\b\d+\s*(Adressen|Zeilen|Eintraege|"
+                             r"Einträge|Treffer|Datensaetze|Datensätze)\b", t,
+                             re.IGNORECASE | re.MULTILINE)
+    return not hat_ergebnis
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Bildmasse: EINE Aufloesung fuer alle Provider
+# ═══════════════════════════════════════════════════════════════════
+# WARUM DAS ZENTRAL LIEGT (Befund 2026-09-02, gemeldet von ECHT)
+# ------------------------------------------------------------------
+# "Die Rolle 'Bild-Erzeuger' nimmt keine Anweisungen zur Aufloesung an" – und
+# zwar zu Recht: es gab im ganzen Bildpfad KEIN Aufloesungs-Konzept. Das
+# Werkzeug-Schema kannte nur `prompt`, die Provider-Signatur lautete
+# `generate_image(model, prompt)`, und die Imagen-Config reichte allein
+# `number_of_images=1` durch. Eine Groessenangabe landete damit hoechstens als
+# Wort IM Bildprompt und wurde dort als Bildinhalt gelesen.
+# GEMESSEN am echten FLUX-Server (vLLM, black-forest-labs/FLUX.2-klein-4B):
+#   Chat-Weg ohne Angabe            2 Laeufe -> 1024x1024
+#   Chat-Weg "Aufloesung 1536x640"  2 Laeufe -> 1024x1024  (Angabe wirkungslos)
+#   Chat-Weg englisch "1536x640 px" 1 Lauf   -> 1024x1024
+#   /v1/images/generations size=…   3 Laeufe -> 512x512, 1024x768, 1536x640
+# Der Server KANN es also punktgenau, Jarvis hat ihn nur nie danach gefragt.
+#
+# ZWEI PROVIDER, ZWEI SPRACHEN – DESHALB EINE UEBERSETZUNG
+# ------------------------------------------------------------------
+# OpenAI-kompatible Server nehmen PIXEL (`size: "1536x640"`), Google Imagen
+# nimmt ein VERHAELTNIS (`aspect_ratio: "16:9"`) plus eine Stufe
+# (`image_size: "1K"/"2K"`) und kennt gar keine freien Pixelmasse. Wer die
+# Umrechnung im Provider baut, hat sie zweimal – und beim naechsten Provider
+# ein drittes Mal. Hier steht sie einmal, und beide Richtungen kommen heraus.
+
+# Die einzigen Verhaeltnisse, die Google Imagen annimmt. Ein Wert daneben wird
+# NICHT geraten (siehe `bildmasse`), sondern auf den naechstliegenden abgebildet
+# und im Ergebnis benannt.
+BILD_VERHAELTNISSE = ("1:1", "3:4", "4:3", "9:16", "16:9")
+
+# Pixelmasse je Verhaeltnis, wenn der Nutzer NUR ein Verhaeltnis nennt.
+# Bewusst die ueblichen Diffusions-Buckets (alle durch 64 teilbar, Flaeche ~1 MP):
+# ein selbst gerechnetes 1365x768 ist bei FLUX/SDXL ein Kandidat fuer Artefakte,
+# und die 64er-Masse sind die, mit denen solche Modelle trainiert werden.
+BILD_BUCKETS = {
+    "1:1": (1024, 1024),
+    "4:3": (1152, 896),
+    "3:4": (896, 1152),
+    "16:9": (1344, 768),
+    "9:16": (768, 1344),
+}
+
+# Vielfaches, auf das Pixelmasse gerundet werden. Diffusionsmodelle arbeiten in
+# Latent-Bloecken; ein ungerades Mass wird serverseitig ohnehin gerundet oder
+# abgelehnt. 16 ist der kleinste Wert, den FLUX-/SD-Architekturen zuverlaessig
+# tragen (am echten Server gegengeprueft).
+BILD_RASTER = 16
+
+# Deckel je Kante – GEMESSEN, nicht geschaetzt (FLUX.2-klein-4B auf vLLM):
+#   1040x720   ->  9,6 s   (exakt geliefert; Raster 16 traegt, nicht erst 64)
+#   1024x1024  ->  8,8 s
+#   2048x2048  -> 78,2 s   (geht noch, ist aber die Schmerzgrenze)
+#   4096x4096  -> HTTP 000 nach 180 s: KEINE Antwort mehr
+# Der Deckel ist deshalb keine Bequemlichkeit: ein "4096x4096" aus einem
+# Modelltext belegt einen Slot des Bildservers minutenlang und liefert am Ende
+# nichts. Wird gekappt, steht es im Ergebnis (Projektregel: eine Kuerzung wird
+# ausgewiesen, nie stillschweigend).
+BILD_MAX_KANTE = 2048
+BILD_MIN_KANTE = 256
+
+_SIZE_RE = re.compile(r"^\s*(\d{2,5})\s*[x\u00d7*]\s*(\d{2,5})\s*(?:px|pixel)?\s*$", re.IGNORECASE)
+_RATIO_RE = re.compile(r"^\s*(\d{1,2})\s*[:/]\s*(\d{1,2})\s*$")
+
+
+class BildmassFehler(ValueError):
+    """Unbrauchbare Groessenangabe – wird ABGEWIESEN, nicht geraten.
+
+    Begruendung: ein stillschweigend verworfenes `size` erzeugt genau den
+    gemeldeten Fehler noch einmal, nur eine Ebene hoeher – der Nutzer nennt
+    eine Aufloesung, bekommt eine andere und kann es nicht erklaeren. Die
+    Meldung nennt stattdessen die erwartete Form, damit sich das Modell im
+    selben Schritt korrigieren kann (gleiches Muster wie der Repair-Loop von
+    `create_chart`).
+    """
+
+
+def _runde(n: int) -> int:
+    n = int(round(n / BILD_RASTER) * BILD_RASTER)
+    return max(BILD_MIN_KANTE, min(BILD_MAX_KANTE, n))
+
+
+def bildmasse(size=None, aspect_ratio=None) -> dict | None:
+    """Normalisiert eine Groessenangabe fuer JEDEN Bild-Provider.
+
+    Rueckgabe ``None``, wenn nichts angefordert wurde – dann sendet kein
+    Provider ein Groessenfeld und verhaelt sich exakt wie vorher. Das ist der
+    Grund, warum es fuer abgelehnte Groessen KEINEN stillen Rueckfall braucht:
+    ein Server ohne Groessen-Unterstuetzung sieht das Feld nie.
+
+    Sonst ein dict mit ``breite``, ``hoehe``, ``size`` ("BxH"), ``verhaeltnis``
+    ("16:9"), ``image_size`` ("1K"/"2K") und ``hinweis`` (Klartext, wenn
+    gerundet, gekappt oder ein Verhaeltnis ersetzt wurde – oder "").
+
+    ``size`` GEWINNT gegen ``aspect_ratio``: es ist die konkretere Angabe. Was
+    wirklich herauskam, steht im Ergebnis des Werkzeugs – niemand muss raten.
+    """
+    size = (str(size).strip() if size not in (None, "") else "")
+    aspect_ratio = (str(aspect_ratio).strip() if aspect_ratio not in (None, "") else "")
+    if not size and not aspect_ratio:
+        return None
+
+    hinweise: list[str] = []
+    breite = hoehe = 0
+
+    if size:
+        m = _SIZE_RE.match(size)
+        if not m:
+            # Ein Verhaeltnis im size-Feld ist ein haeufiger und harmloser
+            # Griff daneben – annehmen statt abweisen.
+            if _RATIO_RE.match(size):
+                aspect_ratio = aspect_ratio or size
+            else:
+                raise BildmassFehler(
+                    f"Groessenangabe '{size}' ist unbrauchbar. Erwartet wird "
+                    f"'BREITExHOEHE' in Pixeln (z.B. '1536x640') oder ein "
+                    f"Verhaeltnis in 'aspect_ratio' (z.B. '16:9')."
+                )
+        else:
+            breite, hoehe = int(m.group(1)), int(m.group(2))
+
+    if not breite and aspect_ratio:
+        m = _RATIO_RE.match(aspect_ratio)
+        if not m:
+            raise BildmassFehler(
+                f"Verhaeltnis '{aspect_ratio}' ist unbrauchbar. Erwartet wird "
+                f"'B:H' (z.B. '16:9'); moeglich sind {', '.join(BILD_VERHAELTNISSE)}."
+            )
+        a, b = int(m.group(1)), int(m.group(2))
+        if a <= 0 or b <= 0:
+            raise BildmassFehler(f"Verhaeltnis '{aspect_ratio}' ist unbrauchbar (0 ist keine Kante).")
+        gewuenscht = f"{a}:{b}"
+        nah = _naechstes_verhaeltnis(a / b)
+        if nah != gewuenscht:
+            hinweise.append(f"Verhaeltnis {gewuenscht} ist nicht verfuegbar, verwendet wurde {nah}")
+        breite, hoehe = BILD_BUCKETS[nah]
+
+    roh_b, roh_h = breite, hoehe
+    breite, hoehe = _runde(breite), _runde(hoehe)
+    if (roh_b, roh_h) != (breite, hoehe):
+        hinweise.append(f"{roh_b}x{roh_h} angepasst auf {breite}x{hoehe} "
+                        f"(Raster {BILD_RASTER} px, Grenzen {BILD_MIN_KANTE}-{BILD_MAX_KANTE} px)")
+
+    verh = _naechstes_verhaeltnis(breite / hoehe)
+    # Google kennt keine freien Pixelmasse: nur Verhaeltnis + Stufe. Die
+    # laengere Kante entscheidet ueber die Stufe.
+    image_size = "2K" if max(breite, hoehe) > 1536 else "1K"
+
+    return {
+        "breite": breite,
+        "hoehe": hoehe,
+        "size": f"{breite}x{hoehe}",
+        "verhaeltnis": verh,
+        "image_size": image_size,
+        "hinweis": "; ".join(hinweise),
+    }
+
+
+def _naechstes_verhaeltnis(quotient: float) -> str:
+    """Das naechstliegende von Google unterstuetzte Verhaeltnis."""
+    def _q(v: str) -> float:
+        a, b = v.split(":")
+        return int(a) / int(b)
+    return min(BILD_VERHAELTNISSE, key=lambda v: abs(_q(v) - quotient))
+
+
+class ImageGenNotSupported(Exception):
+    """Wird geworfen, wenn das aktive Profil keine Bildgenerierung beherrscht."""
+    def __init__(self, label: str = "Das aktive LLM-Profil"):
+        self.label = label
+        super().__init__(f"{label} kann keine Bilder generieren")
+
+
+class LLMProvider(ABC):
+    # Label fuer Fehlermeldungen (z.B. "Das aktive Google-Profil")
+    image_label: str = "Das aktive LLM-Profil"
+
+    @abstractmethod
+    async def generate_response(self, model: str, system_prompt: str, contents: list,
+                                tools: list = None, reasoning_effort: str | None = None,
+                                temperature=None) -> LLMResponse:
+        """reasoning_effort: Stufe aus REASONING_LEVELS oder None (Provider-Standard).
+        temperature: Zahl, "auto" (= Feld weglassen) oder None (= Standard 0.2).
+
+        Provider, die einen der Werte nicht kennen, nehmen ihn an und ignorieren ihn –
+        so bleibt der Aufruf im Agent-Loop fuer alle Provider identisch.
+        """
+        pass
+
+    async def generate_image(self, model: str, prompt: str, masse: dict | None = None) -> bytes:
+        """Generiert ein Bild (PNG-Bytes) aus einem Text-Prompt.
+
+        ``masse``: Ergebnis von :func:`bildmasse` oder ``None``. Bei ``None``
+        sendet kein Provider ein Groessenfeld – ein Server, der keines kennt,
+        verhaelt sich damit exakt wie vor 2026-09-02. Genau deshalb braucht es
+        fuer eine abgelehnte Groesse KEINEN stillen Rueckfall: ein Feld, das
+        niemand angefordert hat, wird nie gesendet, und eine angeforderte
+        Groesse darf nicht klammheimlich durch eine andere ersetzt werden.
+
+        Default: NICHT unterstuetzt – der jeweilige Provider muss dies ueberschreiben,
+        wenn er Bildgenerierung kann. Es wird NIEMALS auf ein anderes Profil gewechselt.
+        """
+        raise ImageGenNotSupported(self.image_label)
+
+
+def _parse_sse_to_completion(sse_text: str) -> dict:
+    """Konvertiert einen SSE (Server-Sent Events)-Stream in ein synthetisches non-stream JSON-Objekt.
+    Open WebUI antwortet manchmal als Stream auch wenn stream:false gesetzt ist."""
+    content = ""
+    tool_calls: dict = {}
+    finish_reason = "stop"
+    for line in sse_text.splitlines():
+        if not line.startswith("data:"):
+            continue
+        raw = line[5:].strip()
+        if raw == "[DONE]":
+            break
+        try:
+            chunk = json.loads(raw)
+        except Exception:
+            continue
+        choice = (chunk.get("choices") or [{}])[0]
+        delta = choice.get("delta", {})
+        if delta.get("content"):
+            content += delta["content"]
+        finish_reason = choice.get("finish_reason") or finish_reason
+        # Tool-Call-Deltas zusammensetzen
+        for tc in delta.get("tool_calls") or []:
+            idx = tc.get("index", 0)
+            if idx not in tool_calls:
+                tool_calls[idx] = {"id": tc.get("id", ""), "type": "function",
+                                   "function": {"name": "", "arguments": ""}}
+            if tc.get("id"):
+                tool_calls[idx]["id"] = tc["id"]
+            fn = tc.get("function", {})
+            if fn.get("name"):
+                tool_calls[idx]["function"]["name"] += fn["name"]
+            if fn.get("arguments"):
+                tool_calls[idx]["function"]["arguments"] += fn["arguments"]
+    message: dict = {"role": "assistant", "content": content or None}
+    if tool_calls:
+        message["tool_calls"] = list(tool_calls.values())
+    return {"choices": [{"message": message, "finish_reason": finish_reason}]}
+
+
+# Shared httpx.AsyncClient mit Connection-Pooling (vermeidet neue Verbindung pro Request)
+_shared_client: httpx.AsyncClient | None = None
+_client_lock = asyncio.Lock()
+
+
+def _llm_timeout() -> "httpx.Timeout":
+    """Read/Total-Timeout fuer LLM-Anfragen aus der (zur Laufzeit aenderbaren)
+    Konfiguration. connect/write bleiben fest; nur die eigentliche Antwortzeit
+    (read/total) ist ueber Einstellungen -> LLM anpassbar."""
+    try:
+        from backend.config import config
+        total = max(10, min(int(getattr(config, "LLM_TIMEOUT", 180) or 180), 1800))
+    except Exception:
+        total = 180
+    return httpx.Timeout(float(total), connect=10.0, read=float(total), write=30.0)
+
+
+def _llm_max_tokens() -> int:
+    """Obergrenze fuer die Antwortlaenge (max_tokens) OpenAI-kompatibler Aufrufe.
+
+    Wichtig bei Reasoning-Modellen (z.B. Qwen3): ohne Cap kann der Server einen
+    sehr langen Gedankengang generieren und dabei den Read-Timeout reissen. Der
+    Wert ist ueber Einstellungen -> LLM (config.LLM_MAX_TOKENS) anpassbar; der
+    Default begrenzt die Generierung auf ein Mass, das i.d.R. unter dem Timeout
+    bleibt. Das Feld existiert seit 2026-07-27 wirklich in config.py – vorher
+    griff hier immer der getattr-Default 8192."""
+    try:
+        from backend.config import config
+        return max(256, min(int(getattr(config, "LLM_MAX_TOKENS", 8192) or 8192), 131072))
+    except Exception:
+        return 8192
+
+
+# Profil-Sonderwert UND Standard: Parameter gar nicht senden, der Anbieter
+# entscheidet. Bis 2026-07-27 war stattdessen 0.2 an vier Stellen hart codiert;
+# seither ist "auto" der Standard, damit aktuelle Claude-Modelle nicht in den
+# 400-Fallback laufen (sie lehnen Sampling-Parameter ab).
+TEMPERATURE_AUTO = "auto"
+# Nur noch als benannte Konstante fuer Aufrufer, die bewusst den alten Wert
+# wollen – NICHT mehr der Fallback fuer leere Angaben.
+LEGACY_TEMPERATURE = 0.2
+# Interner Default der Provider-Hilfsmethoden: None = Feld weglassen.
+DEFAULT_TEMPERATURE = None
+
+# Meldung, wenn die Generierung mitten im Reasoning abgeschnitten wurde
+# (``finish_reason == "length"``, bei Reasoning-Modellen wie Qwen3 oft eine
+# Denk-Schleife). ALS KONSTANTE, nicht als Literal an der Fundstelle: Aufrufer
+# muessen diesen Fall ERKENNEN koennen. Der E-Mail-Regel-Lauf zaehlt ihn als
+# Fehlschlag (sonst gilt "keine Antwort" als Erfolg und die Nachricht ist
+# abgehakt, ohne bearbeitet zu sein – am 2026-08-12 genau so passiert). Wer den
+# Text aendert, muss `mail_runner._kein_ergebnis()` mitnehmen; ein Test haelt
+# fest, dass beide dieselbe Konstante benutzen.
+HINWEIS_UNVOLLSTAENDIG = (
+    "⚠️ Das Modell konnte die Antwort nicht abschließen "
+    "(max_tokens erreicht – vermutlich eine Reasoning-Schleife, "
+    "weil die nötigen Daten/Tools nicht verfügbar waren). "
+    "Bitte die Anfrage konkretisieren oder ein anderes Modell/Profil wählen."
+)
+
+
+# Im Prompt-Werkzeugmodus geht ein Werkzeugergebnis als Klartext-Nachricht ans
+# Modell und wird gekappt (kleine Kontexte). BSI H8-Nebenbefund 2026-10-04: die
+# Kappung schnitt bisher OHNE Hinweis bei 3000 Zeichen ab – das Modell hielt den
+# Ausschnitt fuer vollstaendig, und die Endzeile des H8-Rahmens
+# ([ENDE WERKZEUGERGEBNIS <Kennung>]) fehlte. Jetzt: Hinweis VOR dem Inhalt
+# (hinten gelesen kaeme er zu spaet, und die naechste Kappung schnitte ihn weg),
+# Anfang UND Ende bleiben stehen, ausgelassen wird die Mitte.
+PROMPT_WERKZEUG_MAX = 3000
+_PROMPT_WERKZEUG_ENDE = 400
+
+
+def werkzeug_ergebnis_kappen(text, grenze: int = PROMPT_WERKZEUG_MAX) -> str:
+    """Kappt ein Werkzeugergebnis auf ``grenze`` Zeichen Inhalt – beziffert.
+
+    Unter der Grenze kommt der Text unveraendert zurueck. Darueber: eine
+    Hinweiszeile vorn, dann Anfang, eine Auslassungsmarke und die letzten
+    Zeichen (dort steht die Rahmen-Endzeile).
+    """
+    text = "" if text is None else str(text)
+    if len(text) <= grenze:
+        return text
+    ende = min(_PROMPT_WERKZEUG_ENDE, grenze // 3)
+    anfang = grenze - ende
+    weg = len(text) - anfang - ende
+    return (f"[GEKÜRZT: {grenze} von {len(text)} Zeichen gezeigt – {weg} Zeichen in der "
+            f"Mitte ausgelassen. Der Inhalt ist NICHT vollständig.]\n"
+            + text[:anfang]
+            + f"\n[… {weg} Zeichen ausgelassen …]\n"
+            + text[-ende:])
+
+
+def clean_api_key(key) -> str:
+    """Normalisiert einen API-Key/Session-Key fuer die Verwendung in einem HTTP-Header.
+
+    Entfernt Rand-Leerzeichen (auch Zeilenumbrueche, wie sie beim Kopieren aus
+    einer Mail oder einem Terminal mitkommen), verwirft danach Steuerzeichen und
+    Nicht-ASCII.
+
+    **Warum das noetig ist:** Ein Header-Wert darf laut RFC 9110 kein
+    fuehrendes/abschliessendes Leerzeichen tragen. httpx/h11 pruefen das und
+    werfen ``LocalProtocolError: Illegal header value b'Bearer sk-… '`` – ein
+    einziges mitkopiertes Leerzeichen im Key laesst so JEDE Anfrage des Profils
+    scheitern, mit einer Meldung, die nach einem Serverfehler klingt. Ein
+    Zeilenumbruch MITTEN im Wert waere sogar eine Header-Injection, deshalb
+    werden Steuerzeichen entfernt und nicht nur die Raender getrimmt.
+
+    Muss an JEDER Stelle angewandt werden, die einen Key in einen Header
+    schreibt: Provider-Header, Verbindungstest UND Modell-Abruf – nicht nur beim
+    Speichern, sonst bleiben bereits gespeicherte Keys kaputt.
+    """
+    if not key or not isinstance(key, str):
+        return ""
+    return "".join(c for c in key.strip() if 32 <= ord(c) < 127)
+
+
+def scrub_secrets(text, *secrets) -> str:
+    """Ersetzt Geheimnisse in einem Fehlertext durch ``***``.
+
+    Fehlermeldungen der HTTP-Schicht zitieren den beanstandeten Header-Wert
+    WOERTLICH (``Illegal header value b'Bearer sk-…'``) und landen ueber
+    ``str(e)`` in der Oberflaeche und im Journal – der API-Key waere damit
+    sichtbar. Beide Formen werden ersetzt: der Rohwert und die um Rand-/
+    Steuerzeichen bereinigte Fassung.
+    """
+    out = str(text)
+    seen = set()
+    for s in secrets:
+        if not s or not isinstance(s, str):
+            continue
+        for variant in (s, s.strip(), clean_api_key(s)):
+            if len(variant) >= 8 and variant not in seen:
+                seen.add(variant)
+                out = out.replace(variant, "***")
+    return out
+
+
+def _resolve_temperature(value) -> float | None:
+    """Bringt eine Temperature-Angabe auf den Wert, der an den Provider geht.
+
+    Rueckgabe None bedeutet ausdruecklich "Feld weglassen" – nicht 0. Das ist
+    seit 2026-07-27 der Standard fuer leere/fehlende Angaben und der Weg fuer
+    aktuelle Claude-Modelle (Opus 5/4.8/4.7, Sonnet 5, Fable 5), die
+    Sampling-Parameter mit HTTP 400 ablehnen.
+
+    ACHTUNG Nebenwirkung: ohne Feld gilt der Anbieter-Default, und der liegt bei
+    vielen OpenAI-kompatiblen Servern und bei Gemini deutlich ueber 0.2. Wer
+    verlaessliche Tool-Aufrufe braucht, traegt im Profil eine Zahl ein.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        s = value.strip().lower()
+        if not s or s == TEMPERATURE_AUTO:
+            return None
+        try:
+            value = float(s.replace(",", "."))
+        except ValueError:
+            return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    if f != f:                     # NaN
+        return None
+    return max(0.0, min(f, 2.0))
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Reasoning-Steuerung (pro Anfrage)
+# ═══════════════════════════════════════════════════════════════════
+#
+# Jeder Provider nennt die Denktiefe anders (Anthropic: thinking + effort,
+# OpenAI: reasoning_effort, OpenRouter: reasoning.effort, Gemini:
+# thinking_budget in Token). Nach aussen – WebSocket-Feld `reasoning_effort`,
+# Profil-Feld, globale Einstellung – gilt deshalb EINE providerunabhaengige
+# Stufenleiter; die Uebersetzung passiert je Provider unten.
+
+REASONING_LEVELS = ("off", "low", "medium", "high", "max")
+
+# Schreibweisen, die von aussen akzeptiert werden. Absichtlich tolerant (DE/EN,
+# Synonyme), damit API-Aufrufer die Stufen nicht raten muessen.
+_EFFORT_ALIASES = {
+    "off": "off", "none": "off", "disabled": "off", "aus": "off", "0": "off",
+    "minimal": "low", "min": "low", "low": "low", "niedrig": "low",
+    "medium": "medium", "mid": "medium", "normal": "medium", "mittel": "medium",
+    "high": "high", "hoch": "high",
+    # xhigh liegt bei Anthropic zwischen high und max; hier auf max abgebildet,
+    # damit die Stufenleiter providerunabhaengig bleibt.
+    "xhigh": "max", "x_high": "max", "very_high": "max", "max": "max", "maximum": "max",
+}
+
+# Gemini rechnet in Denk-Token statt in Stufen.
+_GEMINI_THINKING_BUDGET = {"off": 0, "low": 1024, "medium": 4096, "high": 12288, "max": 24576}
+
+# OpenAI-kompatible Server kennen nur minimal|low|medium|high.
+_OPENAI_EFFORT = {"off": "minimal", "low": "low", "medium": "medium", "high": "high", "max": "high"}
+
+# Anthropic: output_config.effort. "max" existiert dort wirklich.
+_ANTHROPIC_EFFORT = {"low": "low", "medium": "medium", "high": "high", "max": "max"}
+
+# Ab dieser Stufe braucht Anthropic Platz zum Denken – max_tokens deckelt
+# Denk- UND Antworttoken gemeinsam, ein zu kleiner Wert schneidet die Antwort ab.
+_ANTHROPIC_THINKING_MIN_TOKENS = 16000
+
+
+def normalize_effort(value) -> str | None:
+    """Bringt eine Reasoning-Angabe auf eine kanonische Stufe aus REASONING_LEVELS.
+
+    Rueckgabe None = keine Angabe, es gilt der Provider-Standard. Unbekannte
+    Werte ergeben ebenfalls None: ein Tippfehler im API-Aufruf darf die Anfrage
+    nicht mit einem Provider-400 abbrechen.
+    """
+    if value is None:
+        return None
+    s = str(value).strip().lower().replace(" ", "_").replace("-", "_")
+    if not s:
+        return None
+    return _EFFORT_ALIASES.get(s)
+
+
+def _default_effort() -> str | None:
+    """Globaler Standard aus den Einstellungen (leer = Provider-Standard)."""
+    try:
+        from backend.config import config
+        return normalize_effort(getattr(config, "LLM_REASONING_EFFORT", "") or None)
+    except Exception:
+        return None
+
+
+def _resolve_effort(value) -> str | None:
+    """Pro-Anfrage-Wert, sonst globaler Standard."""
+    return normalize_effort(value) or _default_effort()
+
+
+# Fehlertext-Marker, die auf einen vom Modell/Server NICHT unterstuetzten
+# Reasoning- oder Sampling-Parameter hindeuten.
+_UNSUPPORTED_PARAM_MARKERS = (
+    "thinking", "reasoning", "output_config", "effort", "budget_tokens",
+    "temperature", "top_p", "unexpected keyword", "unknown field",
+    "unrecognized", "not supported", "unsupported parameter",
+    "extra inputs are not permitted", "additional properties",
+)
+
+
+def _is_unsupported_param_error(exc_or_text) -> bool:
+    """Erkennt, ob ein Provider einen der gesetzten Zusatzparameter ablehnt.
+
+    Aeltere Modelle kennen `thinking`/`output_config` nicht, neuere Claude-Modelle
+    lehnen umgekehrt `temperature` ab (400). Statt die Anfrage scheitern zu
+    lassen, wird sie einmal ohne diese Parameter wiederholt – der Nutzer bekommt
+    eine Antwort ohne Feinsteuerung statt einer Fehlermeldung.
+    """
+    txt = str(exc_or_text).lower()
+    if not ("400" in txt or "invalid" in txt or "bad request" in txt):
+        return False
+    return any(m in txt for m in _UNSUPPORTED_PARAM_MARKERS)
+
+
+async def _get_shared_client() -> httpx.AsyncClient:
+    """Gibt den shared AsyncClient zurueck (lazy init, thread-safe).
+
+    Der Default-Timeout des Clients wird pro Anfrage ohnehin durch
+    ``_get_timeout()`` ueberschrieben; hier nur als Fallback gesetzt."""
+    global _shared_client
+    if _shared_client is None or _shared_client.is_closed:
+        async with _client_lock:
+            if _shared_client is None or _shared_client.is_closed:
+                _shared_client = httpx.AsyncClient(
+                    timeout=_llm_timeout(),
+                    limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+                    follow_redirects=True,
+                )
+    return _shared_client
+
+
+async def _retry_with_backoff(coro_fn, max_retries: int = 3, base_delay: float = 1.0):
+    """Fuehrt eine Coroutine mit exponentiellem Backoff bei Retry-faehigen Fehlern aus."""
+    for attempt in range(max_retries + 1):
+        try:
+            return await coro_fn()
+        except Exception as e:
+            # Nur bei 429/503/502 und ConnectError erneut versuchen
+            # ReadTimeout NICHT retrien – bei langsamen lokalen Modellen würde das die Wartezeit vervielfachen
+            retryable = False
+            if isinstance(e, httpx.HTTPStatusError) and e.response.status_code in (429, 503, 502):
+                retryable = True
+            elif isinstance(e, httpx.ConnectError):
+                retryable = True
+            else:
+                # Gemini SDK wirft google.genai.errors.ServerError (kein httpx) – per String prüfen
+                msg = str(e)
+                if any(code in msg for code in ("503", "429", "502", "UNAVAILABLE", "RESOURCE_EXHAUSTED")):
+                    retryable = True
+
+            if not retryable or attempt >= max_retries:
+                raise
+            delay = base_delay * (2 ** attempt)
+            print(f"[LLM] Retry {attempt + 1}/{max_retries} nach {delay}s ({type(e).__name__}): {e}", flush=True)
+            await asyncio.sleep(delay)
+    raise RuntimeError("Retry-Limit erreicht")
+
+
+def _normalize_schema(schema: dict) -> dict:
+    """Konvertiert Gemini-Style Typen (OBJECT, STRING) zu JSON-Schema (object, string)."""
+    if not isinstance(schema, dict):
+        return schema
+
+    result = {}
+    for key, value in schema.items():
+        if key == "type" and isinstance(value, str):
+            result[key] = value.lower()
+        elif key == "properties" and isinstance(value, dict):
+            result[key] = {k: _normalize_schema(v) for k, v in value.items()}
+        elif key == "items" and isinstance(value, dict):
+            result[key] = _normalize_schema(value)
+        else:
+            result[key] = value
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Google Gemini (offiziell)
+# ═══════════════════════════════════════════════════════════════════
+
+class GeminiProvider(LLMProvider):
+    image_label = "Das aktive Google-Profil"
+
+    def __init__(self, api_key: str):
+        self.client = genai.Client(api_key=api_key)
+
+    async def generate_image(self, model: str, prompt: str, masse: dict | None = None) -> bytes:
+        """Bildgenerierung via Google Imagen – gleicher API-Key, KEIN Profilwechsel.
+
+        Das aktive Text-Modell (z.B. gemini-2.5-flash) generiert selbst keine Bilder;
+        der Google-Provider nutzt dafuer sein Bildmodell (Imagen). Schlaegt der Zugriff
+        fehl (Key ohne Imagen-Freigabe), wird der Fehler nach oben gereicht.
+
+        GROESSE: Imagen kennt KEINE freien Pixelmasse, sondern nur ein
+        Verhaeltnis (`aspect_ratio`) und eine Stufe (`image_size`). Beides
+        rechnet :func:`bildmasse` aus – deshalb steht die Umrechnung dort und
+        nicht hier. Der Gemini-Weg (`generateContent`) kennt gar kein
+        Groessenfeld; dort geht die Angabe als Klartext-Zeile in den Prompt,
+        was das Modell BEACHTEN KANN, aber nicht muss. Ein Verhaeltnis so zu
+        transportieren ist die einzige Moeglichkeit, die die API laesst – und
+        weil das Ergebnis des Werkzeugs die WIRKLICHEN Masse des fertigen
+        Bildes nennt, entsteht daraus keine falsche Zusage.
+        """
+        # ── Kandidaten in dieser Reihenfolge ────────────────────────────────
+        # 1. Das Modell des PROFILS, wenn es selbst ein Bildmodell ist. Das war
+        #    bis 2026-08-10 gar nicht moeglich: der Parameter `model` wurde
+        #    ignoriert und es liefen ausschliesslich zwei fest verdrahtete
+        #    Imagen-3-Namen. Ein Administrator, der bewusst ein Profil mit
+        #    `gemini-3.1-flash-image` anlegt, wurde davon nicht bedient.
+        # 2. Aktuelle Imagen-Modelle (`predict`).
+        # 3. Gemini-Bildmodelle (`generateContent` mit Bild-Ausgabe).
+        # 4. Erst wenn alles scheitert: EINMAL die Modellliste des Kontos
+        #    abfragen und ein Bildmodell suchen – Namen und Generationen wechseln,
+        #    eine fest verdrahtete Liste veraltet zwangslaeufig.
+        #
+        # GEMESSEN am 2026-08-10 auf DEV: `imagen-3.0-generate-001/002` gibt es
+        # nicht mehr (404 NOT_FOUND) – die Bildgenerierung war damit fuer JEDES
+        # Google-Profil tot, unabhaengig vom Key. Das Konto bot stattdessen
+        # imagen-4.0-generate-001 und sechs gemini-*-image-Modelle an.
+        prof_modell = (model or "").strip()
+        ist_bildmodell = any(t in prof_modell.lower() for t in ("imagen", "-image"))
+
+        def _via_imagen(m):
+            cfg: dict = {"number_of_images": 1}
+            if masse:
+                cfg["aspect_ratio"] = masse["verhaeltnis"]
+                cfg["image_size"] = masse["image_size"]
+            try:
+                config_obj = types.GenerateImagesConfig(**cfg)
+            except Exception:  # noqa: BLE001
+                # BREITES except MIT ABSICHT: GenerateImagesConfig ist ein
+                # pydantic-Modell, und `image_size` gibt es erst ab Imagen 4 /
+                # neueren google-genai-Versionen – eine aeltere Fassung wirft
+                # dort einen ValidationError (kein TypeError; gleiche Falle wie
+                # bei ThinkingConfig, siehe _thinking_config). Lieber das Bild
+                # im richtigen VERHAELTNIS ohne Stufe, als gar keins.
+                cfg.pop("image_size", None)
+                config_obj = types.GenerateImagesConfig(**cfg)
+            resp = self.client.models.generate_images(
+                model=m, prompt=prompt, config=config_obj,
+            )
+            imgs = getattr(resp, "generated_images", None) or []
+            if not imgs:
+                raise RuntimeError("Keine Bilddaten vom Modell erhalten")
+            return imgs[0].image.image_bytes
+
+        def _via_gemini(m):
+            """Gemini-Bildmodelle liefern das Bild als inline_data in der Antwort."""
+            # Kein Groessenfeld in dieser API – die Angabe kann nur als Text
+            # mitgehen. Bewusst ans ENDE des Prompts und als eigene Zeile: mitten
+            # im Motivtext gelesen wuerde "1536x640" zum Bildinhalt (genau der
+            # gemeldete Fehler). Wirkt nicht garantiert; die echten Masse nennt
+            # das Werkzeug hinterher.
+            text = prompt
+            if masse:
+                text = (f"{prompt}\n\nBildformat: Seitenverhaeltnis "
+                        f"{masse['verhaeltnis']} ({masse['size']} Pixel).")
+            resp = self.client.models.generate_content(model=m, contents=text)
+            for cand in (getattr(resp, "candidates", None) or []):
+                for part in (getattr(getattr(cand, "content", None), "parts", None) or []):
+                    blob = getattr(part, "inline_data", None)
+                    if blob is not None and getattr(blob, "data", None):
+                        return blob.data
+            raise RuntimeError("Keine Bilddaten vom Modell erhalten")
+
+        def _weg(m):
+            return _via_imagen if "imagen" in m.lower() else _via_gemini
+
+        kandidaten: list[str] = []
+        if ist_bildmodell:
+            kandidaten.append(prof_modell)
+        kandidaten += [
+            "imagen-4.0-generate-001", "imagen-4.0-fast-generate-001",
+            "gemini-3.1-flash-image", "gemini-2.5-flash-image",
+            # Alt-Namen bleiben hinten: auf einem aelteren Konto koennen sie
+            # noch die einzigen sein.
+            "imagen-3.0-generate-002", "imagen-3.0-generate-001",
+        ]
+
+        last_err = None
+        versucht: set[str] = set()
+        for m in kandidaten:
+            if not m or m in versucht:
+                continue
+            versucht.add(m)
+            try:
+                return await asyncio.to_thread(_weg(m), m)
+            except Exception as e:
+                last_err = e
+
+        # Rueckfall: was bietet dieses Konto ueberhaupt an?
+        try:
+            def _suche():
+                out = []
+                for mm in self.client.models.list():
+                    n = str(getattr(mm, "name", "")).replace("models/", "")
+                    if ("imagen" in n or "-image" in n) and "preview" not in n:
+                        out.append(n)
+                return out
+            gefunden = [n for n in await asyncio.to_thread(_suche) if n not in versucht]
+            print(f"[LLM] Gemini-Bildgenerierung: Kandidaten erschoepft, Konto bietet "
+                  f"{gefunden[:5]}", flush=True)
+            for m in gefunden[:3]:
+                try:
+                    return await asyncio.to_thread(_weg(m), m)
+                except Exception as e:
+                    last_err = e
+        except Exception as e:  # noqa: BLE001
+            print(f"[LLM] Gemini-Modellliste nicht abrufbar: {e}", flush=True)
+
+        raise RuntimeError(f"Bildgenerierung fehlgeschlagen: {last_err}")
+
+    def _thinking_config(self, effort: str | None):
+        """Uebersetzt eine Reasoning-Stufe in Geminis Token-Budget.
+
+        Rueckgabe None = Feld weglassen (Modell entscheidet selbst).
+
+        WICHTIG – breites except: die ThinkingConfig alter google-genai-Versionen
+        kennt `thinking_budget` nicht (1.5.0 hat nur `include_thoughts`). Weil
+        ThinkingConfig ein pydantic-Modell ist, kommt dann ein ValidationError und
+        NICHT TypeError/AttributeError. Ein zu enges except wuerde jeden
+        Gemini-Chat mit Reasoning-Vorgabe abbrechen statt die Vorgabe zu ignorieren.
+        """
+        if not effort:
+            return None
+        budget = _GEMINI_THINKING_BUDGET.get(effort)
+        if budget is None:
+            return None
+        try:
+            return types.ThinkingConfig(thinking_budget=budget)
+        except Exception as exc:  # noqa: BLE001 – siehe Docstring
+            print(f"[LLM] Gemini: ThinkingConfig(thinking_budget) nicht unterstuetzt "
+                  f"({type(exc).__name__}) – Reasoning-Vorgabe wird ignoriert. "
+                  f"Abhilfe: google-genai aktualisieren.", flush=True)
+            return None
+
+    async def generate_response(self, model: str, system_prompt: str, contents: list,
+                                tools: list = None, reasoning_effort: str | None = None,
+                                temperature=None) -> LLMResponse:
+        gemini_tools = [types.Tool(function_declarations=tools)] if tools else None
+        thinking = self._thinking_config(_resolve_effort(reasoning_effort))
+        _temp = _resolve_temperature(temperature)
+
+        # Harte Zeitgrenze: das Gemini-SDK laeuft in einem Thread OHNE eigenen
+        # Timeout – ein stehengebliebener Upstream-Call wuerde den Chat sonst
+        # unbegrenzt haengen lassen. wait_for wirft nach Ablauf TimeoutError
+        # (nicht retry-faehig -> wird als Fehler gemeldet, Nutzer kann wiederholen).
+        # config wird lokal importiert (llm.py hat keinen Modul-Import davon) –
+        # ohne diese Zeile scheiterte JEDER Gemini-Aufruf mit NameError.
+        from backend.config import config
+        _to = max(10, min(int(getattr(config, "LLM_TIMEOUT", 180) or 180), 1800))
+
+        def _build_config(with_thinking):
+            kwargs = {
+                "system_instruction": system_prompt,
+                "tools": gemini_tools,
+            }
+            if _temp is not None:      # None = Feld weglassen (Profil "auto")
+                kwargs["temperature"] = _temp
+            if with_thinking is None:
+                return types.GenerateContentConfig(**kwargs)
+            kwargs["thinking_config"] = with_thinking
+            try:
+                return types.GenerateContentConfig(**kwargs)
+            except Exception as exc:  # noqa: BLE001
+                # Aeltere SDKs kennen das Feld thinking_config nicht (pydantic
+                # ValidationError). Dann ohne Vorgabe bauen statt zu scheitern.
+                print(f"[LLM] Gemini: thinking_config vom SDK nicht akzeptiert "
+                      f"({type(exc).__name__}) – Vorgabe ignoriert", flush=True)
+                kwargs.pop("thinking_config", None)
+                return types.GenerateContentConfig(**kwargs)
+
+        async def _call():
+            try:
+                resp = await asyncio.wait_for(asyncio.to_thread(
+                    self.client.models.generate_content,
+                    model=model,
+                    contents=contents,
+                    config=_build_config(thinking),
+                ), timeout=_to)
+            except asyncio.TimeoutError:
+                raise
+            except Exception as exc:
+                # Nicht jedes Gemini-Modell laesst sich die Denktiefe vorgeben
+                # (2.5 Pro kann Thinking z.B. nicht auf 0 setzen). Dann einmal
+                # ohne thinking_config wiederholen statt den Chat abzubrechen.
+                if thinking is None or not _is_unsupported_param_error(exc):
+                    raise
+                print(f"[LLM] Gemini {model}: thinking_config abgelehnt ({exc}) "
+                      f"→ Wiederholung ohne Reasoning-Vorgabe", flush=True)
+                resp = await asyncio.wait_for(asyncio.to_thread(
+                    self.client.models.generate_content,
+                    model=model,
+                    contents=contents,
+                    config=_build_config(None),
+                ), timeout=_to)
+            parts = []
+            if resp.candidates and resp.candidates[0].content and resp.candidates[0].content.parts:
+                for p in resp.candidates[0].content.parts:
+                    parts.append(LLMPart(text=p.text, function_call=p.function_call))
+            usage = None
+            try:
+                um = resp.usage_metadata
+                usage = {
+                    "input_tokens": getattr(um, "prompt_token_count", 0) or 0,
+                    "output_tokens": getattr(um, "candidates_token_count", 0) or 0,
+                }
+            except Exception:
+                pass
+            return LLMResponse(parts=parts, raw=resp, usage=usage)
+
+        return await _retry_with_backoff(_call)
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  OpenAI-Kompatibel (Basis für OpenRouter + lokale LLMs)
+# ═══════════════════════════════════════════════════════════════════
+
+class OpenAICompatibleProvider(LLMProvider):
+    """Basis-Provider für OpenAI-kompatible APIs (Ollama, LM Studio, vLLM etc.).
+
+    prompt_tool_calling=True: Tools werden in den System-Prompt eingebettet und
+    die Antwort per Regex auf <tool_call>…</tool_call>-Blöcke geparst.
+    Nützlich für Modelle die keine native Function-Calling-API unterstützen.
+    """
+
+    def __init__(self, api_key: str = "", base_url: str = "http://localhost:11434/v1/chat/completions",
+                 prompt_tool_calling: bool = False):
+        self.api_key = api_key
+        self.prompt_tool_calling = prompt_tool_calling
+        # Automatisch /chat/completions anhängen falls noch nicht vorhanden
+        url = base_url.rstrip("/")
+        if not url.endswith("/chat/completions"):
+            url = url + "/chat/completions"
+        self.base_url = url
+
+    def _build_headers(self) -> dict:
+        headers = {"Content-Type": "application/json"}
+        clean_key = clean_api_key(self.api_key)
+        if clean_key:
+            headers["Authorization"] = f"Bearer {clean_key}"
+        return headers
+
+    def _get_timeout(self) -> httpx.Timeout:
+        # Lokale Modelle brauchen mehr Zeit als Cloud-APIs – Timeout konfigurierbar
+        # (Einstellungen -> LLM -> Timeout).
+        return _llm_timeout()
+
+    def _bild_url(self) -> str:
+        """``/v1/images/generations`` aus derselben Basis wie der Chat-Endpunkt."""
+        return self.base_url.rsplit("/chat/completions", 1)[0] + "/images/generations"
+
+    def _bild_timeout(self) -> httpx.Timeout:
+        """Bilder brauchen laenger als Text – EIGENES Timeout, mind. 300 s.
+
+        Gemessen am echten FLUX-Server: 1024x1024 = 8,8 s, aber 2048x2048 =
+        78,2 s. Das LLM-Timeout ist auf Text zugeschnitten (Vorgabe 180 s, per
+        Einstellung auch weniger) – ein knapper Wert dort wuerde ein grosses
+        Bild abschneiden, das der Server bereits rechnet, und der Nutzer saehe
+        einen Verbindungsfehler statt eines Bildes. Der Wert wird nur
+        VERLAENGERT, nie verkuerzt: wer bewusst 600 s eingestellt hat, behaelt sie.
+        """
+        t = _llm_timeout()
+        total = max(300.0, float(getattr(t, "read", None) or 300.0))
+        return httpx.Timeout(total, connect=10.0, read=total, write=30.0)
+
+    async def generate_image(self, model: str, prompt: str, masse: dict | None = None) -> bytes:
+        """Bildgenerierung ueber ``POST /v1/images/generations``.
+
+        WARUM ES DAS BRAUCHT (gemeldet von ECHT 2026-09-02)
+        ---------------------------------------------------
+        Dieser Provider hatte gar kein ``generate_image``, also griff die
+        Vorgabe der Basisklasse: ``ImageGenNotSupported``. Im Produktiv-venv
+        gegen das echte Rollen-Profil gemessen:
+
+            Profil: FLUX.2-klein-4B | provider: openai_compatible
+            generate_image ueberschrieben: False
+            ERGEBNIS: ImageGenNotSupported
+
+        Das Werkzeug war in der Bild-Rolle also TOT. Bilder entstanden trotzdem
+        – aber als Nebenprodukt des gewoehnlichen Chat-Aufrufs: das Bildmodell
+        antwortet auf jede Nachricht mit base64-Daten, die
+        ``agent.py::_bilddaten_bergen`` einsammelt. Ein Chat-Aufruf hat kein
+        Groessenfeld, und deshalb war JEDE Aufloesungsangabe wirkungslos
+        (5 von 5 Laeufen 1024x1024, deutsch und englisch). Ueber diesen
+        Endpunkt trafen 3 von 3 angeforderten Massen punktgenau.
+
+        Das ersetzt einen Zufallsweg durch einen Aufruf, dessen Wirkung
+        nachweisbar ist.
+
+        404/405 = dieser Server hat keine Bild-API -> ``ImageGenNotSupported``,
+        nicht "fehlgeschlagen": fuer OpenRouter und reine Text-Server ist das
+        die richtige, unveraenderte Aussage (sie erben diese Methode).
+        """
+        payload: dict = {"model": model, "prompt": prompt, "n": 1}
+        if masse:
+            payload["size"] = masse["size"]
+        # `response_format` wird BEWUSST NICHT gesendet: vLLM kennt das Feld
+        # nicht zwingend und wuerde mit 400 antworten. Gelesen werden beide
+        # Formen (b64_json und url) – der gemessene Server liefert b64_json von
+        # selbst, OpenAI/DALL-E per Vorgabe eine URL.
+        # DERSELBE Client wie der Chat-Weg – insbesondere MIT Zertifikatspruefung.
+        # Ein eigener `httpx.AsyncClient(verify=False)` waere hier eine stille
+        # Abschwaechung an einer Stelle, an der niemand sie sucht.
+        client = await _get_shared_client()
+        try:
+            resp = await client.post(self._bild_url(), headers=self._build_headers(),
+                                     json=payload, timeout=self._bild_timeout())
+        except Exception as e:  # noqa: BLE001
+            raise RuntimeError(f"Bild-Endpunkt nicht erreichbar: "
+                               f"{scrub_secrets(e, self.api_key)}") from e
+
+        if resp.status_code in (404, 405):
+            raise ImageGenNotSupported(self.image_label)
+        if resp.status_code != 200:
+            detail = scrub_secrets((resp.text or "")[:300], self.api_key)
+            if masse and "size" in detail.lower():
+                # KEIN stiller Rueckfall ohne `size`: der Nutzer bekaeme eine
+                # andere Aufloesung als verlangt und koennte es nicht erklaeren
+                # – genau der gemeldete Fehler, eine Ebene hoeher.
+                raise RuntimeError(
+                    f"Der Bild-Server hat die Groesse {masse['size']} abgelehnt "
+                    f"(HTTP {resp.status_code}): {detail}. "
+                    f"Ohne Groessenangabe laeuft die Erzeugung unveraendert."
+                )
+            raise RuntimeError(f"HTTP {resp.status_code} von {self._bild_url()}: {detail}")
+
+        try:
+            daten = (resp.json().get("data") or [])
+        except Exception as e:  # noqa: BLE001
+            raise RuntimeError(f"Antwort des Bild-Servers ist kein JSON: {e}") from e
+        if not daten:
+            raise RuntimeError("Keine Bilddaten vom Bild-Server erhalten")
+
+        eintrag = daten[0] or {}
+        b64 = eintrag.get("b64_json")
+        if b64:
+            try:
+                return base64.b64decode(b64)
+            except Exception as e:  # noqa: BLE001
+                raise RuntimeError(f"Bilddaten nicht dekodierbar: {e}") from e
+
+        url = eintrag.get("url")
+        if url:
+            r2 = await client.get(url, timeout=self._bild_timeout())
+            if r2.status_code != 200 or not r2.content:
+                raise RuntimeError(f"Bild-URL nicht abrufbar (HTTP {r2.status_code})")
+            return r2.content
+
+        raise RuntimeError("Antwort enthaelt weder b64_json noch url")
+
+    def _apply_reasoning(self, payload: dict, effort: str | None):
+        """Setzt die Reasoning-Stufe im Payload (OpenAI-Konvention).
+
+        `off` wird zu "minimal" – die breit unterstuetzte Stufenliste kennt nur
+        minimal|low|medium|high. Das ist bewusst eine Annaeherung: "minimal"
+        denkt noch etwas. Ein echtes Abschalten (neueres "none") wuerde von
+        vielen lokalen Servern mit 400 abgelehnt, und der 400-Fallback laesst den
+        Parameter dann ganz weg – das Ergebnis waere die VOLLE Denktiefe, also
+        das Gegenteil des Gewuenschten.
+
+        OpenRouter ueberschreibt das, weil es ein eigenes `reasoning`-Objekt nutzt.
+        """
+        if not effort:
+            return
+        mapped = _OPENAI_EFFORT.get(effort)
+        if mapped:
+            payload["reasoning_effort"] = mapped
+
+    def _reasoning_keys(self) -> tuple[str, ...]:
+        """Payload-Felder, die beim Fallback entfernt werden muessen."""
+        return ("reasoning_effort",)
+
+    async def generate_response(self, model: str, system_prompt: str, contents: list,
+                                tools: list = None, reasoning_effort: str | None = None,
+                                temperature=None) -> LLMResponse:
+        """Wählt zwischen nativem und Prompt-basiertem Tool-Calling (mit Retry bei 429/503)."""
+        effort = _resolve_effort(reasoning_effort)
+        temp = _resolve_temperature(temperature)
+
+        async def _call():
+            if self.prompt_tool_calling:
+                return await self._generate_prompt_mode(model, system_prompt, contents, tools or [], effort, temp)
+            return await self._generate_native(model, system_prompt, contents, tools, effort, temp)
+        return await _retry_with_backoff(_call)
+
+    # ── Nativer Modus (OpenAI tool_calls API) ────────────────────────
+
+    async def _generate_native(self, model: str, system_prompt: str, contents: list,
+                               tools: list = None, reasoning_effort: str | None = None,
+                               temperature: float | None = DEFAULT_TEMPERATURE) -> LLMResponse:
+        """temperature ist hier ein BEREITS aufgeloester Wert (Zahl oder None =
+        weglassen) – nicht der Rohwert aus dem Profil."""
+        messages = [{"role": "system", "content": system_prompt}]
+
+        # KRITISCH: Tool-Call-IDs muessen zwischen assistant-Message (tool_calls[i].id)
+        # und tool-Message (tool_call_id) konsistent sein. Wir generieren pro Tool-Name
+        # eine FIFO-Queue von IDs (genau wie AnthropicProvider) und vergeben sie strikt
+        # in der Reihenfolge wie sie auftreten. Ohne diese Verkettung sieht der LLM
+        # ein verwaistes Tool-Ergebnis und ruft das Tool erneut auf (Endlosschleife!).
+        from collections import deque, defaultdict
+        tool_id_queues: dict[str, deque] = defaultdict(deque)
+        _step_counter = 0
+
+        for content in contents:
+            _step_counter += 1
+            role = "assistant" if content.role == "model" else "user"
+            text_parts = []
+            fn_calls = []
+            fn_responses = []
+            image_blocks = []
+
+            for part in content.parts:
+                if getattr(part, "text", None):
+                    text_parts.append(part.text)
+                fc = getattr(part, "function_call", None)
+                if fc and getattr(fc, "name", None):
+                    fn_calls.append(fc)
+                fr = getattr(part, "function_response", None)
+                if fr and getattr(fr, "name", None):
+                    fn_responses.append(fr)
+                _id_obj = getattr(part, "inline_data", None)
+                if _id_obj:
+                    _mime = getattr(_id_obj, "mime_type", "")
+                    _data = getattr(_id_obj, "data", b"")
+                    if _mime and _data and _mime.startswith("image/"):
+                        import base64 as _b64m
+                        image_blocks.append({
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{_mime};base64,{_b64m.b64encode(_data).decode()}"}
+                        })
+
+            # ── 1) Tool-Result (role=tool): muss EINE eigene Message pro Result sein ──
+            if fn_responses:
+                for fr in fn_responses:
+                    ids = tool_id_queues.get(fr.name)
+                    if ids:
+                        tc_id = ids.popleft()
+                    else:
+                        # Orphan-Result (z.B. nach History-Kompression) – stabile ID,
+                        # damit der LLM die Verkettung wenigstens lokal erkennt.
+                        tc_id = f"call_{fr.name}_orphan_{_step_counter}"
+                    resp_data = fr.response if isinstance(fr.response, dict) else {"result": str(fr.response)}
+                    result_str = resp_data.get("result", json.dumps(resp_data, ensure_ascii=False))
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc_id,
+                        "content": str(result_str),
+                    })
+                continue
+
+            # ── 2) Assistant mit Tool-Call(s) ────────────────────────────────
+            if fn_calls:
+                tool_calls_block = []
+                for fc in fn_calls:
+                    tc_id = f"call_{fc.name}_{_step_counter}_{len(tool_calls_block)}"
+                    tool_id_queues[fc.name].append(tc_id)
+                    args = dict(fc.args) if fc.args else {}
+                    tool_calls_block.append({
+                        "id": tc_id,
+                        "type": "function",
+                        "function": {
+                            "name": fc.name,
+                            "arguments": json.dumps(args, ensure_ascii=False),
+                        },
+                    })
+                asst_msg = {
+                    "role": "assistant",
+                    # OpenAI-Spec: content darf bei tool_calls null sein – aber manche
+                    # OpenAI-kompatiblen Server (Ollama) brauchen leeren String.
+                    "content": "\n".join(text_parts) if text_parts else "",
+                    "tool_calls": tool_calls_block,
+                }
+                messages.append(asst_msg)
+                continue
+
+            # ── 3) Normaler Text (ggf. mit Bild) ─────────────────────────────
+            content_str = "\n".join(text_parts)
+            if image_blocks:
+                _content_list = []
+                if content_str:
+                    _content_list.append({"type": "text", "text": content_str})
+                _content_list.extend(image_blocks)
+                messages.append({"role": role, "content": _content_list})
+            elif content_str:
+                messages.append({"role": role, "content": content_str})
+
+        payload = {
+            "model": model,
+            "messages": messages,
+            "stream": False,   # Kein Streaming – wir lesen die komplette JSON-Antwort
+            # Cap gegen endlose Reasoning-Laeufe (sonst Read-Timeout bei Qwen3 & Co.)
+            "max_tokens": _llm_max_tokens(),
+        }
+        if temperature is not None:    # None = Feld weglassen (Profil "auto")
+            payload["temperature"] = temperature
+        self._apply_reasoning(payload, reasoning_effort)
+
+        if tools:
+            openai_tools = []
+            for t in tools:
+                # Die Werkzeuge deklarieren ihr Schema im Gemini-Stil ("OBJECT",
+                # "STRING"); JSON-Schema verlangt Kleinschreibung. vLLM und
+                # llama.cpp validieren das nicht und nehmen beides an – ein
+                # streng validierender Server (LM Studio: Express/Zod) lehnt den
+                # ganzen Request mit 400 ab, und zwar einmal je Werkzeug:
+                # "invalid_union_discriminator … Expected 'object'".
+                # Der Anthropic-Zweig normalisiert seit jeher, dieser nicht.
+                raw_schema = t.parameters_schema() if hasattr(t, "parameters_schema") else t.parameters
+                openai_tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": t.name,
+                        "description": t.description,
+                        "parameters": _normalize_schema(raw_schema),
+                    },
+                })
+            payload["tools"] = openai_tools
+
+        payload["stream"] = False
+        client = await _get_shared_client()
+        resp = await client.post(self.base_url, headers=self._build_headers(), json=payload, timeout=self._get_timeout())
+        if not resp.is_success:
+            try:
+                err_body = resp.json()
+                _err = err_body.get("error")
+                if isinstance(_err, dict):  # OpenAI-Stil: {"error": {"message": ...}}
+                    _err = _err.get("message") or _err.get("type") or str(_err)
+                err_detail = err_body.get("detail") or err_body.get("message") or _err or resp.text[:300]
+            except Exception:
+                err_detail = resp.text[:300]
+            # vLLM/llama.cpp ohne --enable-auto-tool-choice / --tool-call-parser lehnen
+            # tools-Requests mit 400 ab (z.B. Gemma-Server). In dem Fall transparent auf
+            # Prompt-basiertes Tool-Calling zurueckfallen – der Agent behaelt so volle
+            # Tool-Faehigkeit ueber das XML-Protokoll, ohne Server-Neustart noetig.
+            _d = str(err_detail).lower()
+            # Server ohne Reasoning-Unterstuetzung (aeltere vLLM/llama.cpp-Builds
+            # validieren streng und lehnen unbekannte Felder mit 400 ab): einmal
+            # ohne die Stufen-Vorgabe wiederholen, statt den Chat abzubrechen.
+            if resp.status_code == 400 and reasoning_effort and _is_unsupported_param_error(err_detail):
+                print(f"[LLM] {self.base_url}: Reasoning-Parameter abgelehnt "
+                      f"({err_detail}) → Wiederholung ohne Vorgabe", flush=True)
+                return await self._generate_native(model, system_prompt, contents, tools, None, temperature)
+            if resp.status_code == 400 and tools and (
+                "tool choice" in _d or "tool_choice" in _d
+                or "auto-tool-choice" in _d or "tool-call-parser" in _d
+                or "does not support tool" in _d or "tool calling" in _d
+            ):
+                print(f"[LLM] {self.base_url}: 400 bei nativem Tool-Calling "
+                      f"({err_detail}) → Fallback auf Prompt-Modus", flush=True)
+                return await self._generate_prompt_mode(model, system_prompt, contents, tools, reasoning_effort, temperature)
+            # "context size" / "exceed_context_size" ist die Schreibweise von
+            # LM Studio; ohne sie laeuft genau dieser Fall in die rohe
+            # HTTP-400-Meldung unten und der Grund ist nicht ablesbar.
+            if ("context length" in _d or "maximum context" in _d or "input_tokens" in _d
+                    or "max_model_len" in _d or "context size" in _d
+                    or "exceed_context_size" in _d):
+                raise ValueError(
+                    "Das gewählte Modell hat ein zu kleines Kontextfenster für den "
+                    "Jarvis-Agenten (System-Prompt + Tools passen nicht hinein). "
+                    f"Server-Meldung: {err_detail}. "
+                    "Abhilfe: vLLM-Server mit größerem --max-model-len starten, in "
+                    "LM Studio die Kontextlänge des geladenen Modells erhöhen oder ein "
+                    "Modell/Profil mit mehr Kontext verwenden."
+                )
+            raise ValueError(f"HTTP {resp.status_code} von {self.base_url}: {err_detail}")
+
+        try:
+            data = resp.json()
+        except Exception:
+            data = {}
+
+        # Modell unterstützt keine Tool-Calls → Fallback ohne Tools + Hinweis
+        if not isinstance(data, dict) and "tools" in payload:
+            payload_no_tools = {k: v for k, v in payload.items() if k != "tools"}
+            resp2 = await client.post(self.base_url, headers=self._build_headers(), json=payload_no_tools, timeout=self._get_timeout())
+            resp2.raise_for_status()
+            try:
+                data = resp2.json()
+            except Exception:
+                data = {}
+            if isinstance(data, dict):
+                warn = (f"⚠️ Modell '{model}' unterstützt keine nativen Tool-Calls. "
+                        "Aktiviere 'Prompt-basiertes Tool-Calling' im Profil oder wähle ein "
+                        "anderes Modell (llama3.1, qwen2.5, mistral-nemo).")
+                choices = data.get("choices") or []
+                if choices:
+                    choices[0].setdefault("message", {})
+                    existing = choices[0]["message"].get("content") or ""
+                    choices[0]["message"]["content"] = warn + "\n\n" + existing
+                else:
+                    data["choices"] = [{"message": {"content": warn}}]
+
+        if not isinstance(data, dict):
+            raise ValueError(
+                f"LLM-Antwort ist kein JSON-Objekt ('{resp.text[:100]}'). "
+                "Prüfe ob das Modell geladen ist – oder aktiviere 'Prompt-basiertes Tool-Calling'."
+            )
+
+        if "error" in data:
+            err = data["error"]
+            msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
+            raise ValueError(f"LLM-Fehler: {msg}")
+
+        parts = []
+        if "choices" in data and len(data["choices"]) > 0:
+            choice = data["choices"][0]
+            message = choice.get("message", {})
+
+            # Tool-Syntax im Text bergen/entfernen, BEVOR daraus ein Antwortteil
+            # wird (siehe berge_tool_syntax – Vorfall 2026-08-12). Der geborgene
+            # Aufruf wird unten wie ein nativer behandelt.
+            _geborgen = []
+            if message.get("content"):
+                _rein, _geborgen = berge_tool_syntax(inhalt_als_text(message["content"]))
+                if _rein:
+                    parts.append(LLMPart(text=_rein))
+                elif not message.get("tool_calls") and not _geborgen:
+                    print("[LLM] Antwort bestand nur aus Tool-Syntax – kein "
+                          "Textteil geliefert, der Agent holt eine Antwort nach.",
+                          flush=True)
+            if not message.get("content") and not message.get("tool_calls"):
+                # content=null OHNE Tool-Call → je nach finish_reason unterscheiden.
+                _finish = (choice.get("finish_reason") or "").lower()
+                _reasoning = message.get("reasoning") or message.get("reasoning_content")
+                if _finish == "length":
+                    # Generierung mitten im Reasoning abgeschnitten (max_tokens
+                    # erreicht – bei Reasoning-Modellen wie Qwen3 oft eine
+                    # Denk-Schleife). NIEMALS das rohe Reasoning an den Nutzer
+                    # dumpen; stattdessen klare Kurzmeldung.
+                    parts.append(LLMPart(text=HINWEIS_UNVOLLSTAENDIG))
+                elif _reasoning:
+                    # Sauber beendet (stop), aber Text nur im 'reasoning'-Feld –
+                    # dann ist das die eigentliche Antwort. Als Fallback nutzen,
+                    # damit der Agent nicht mit 0 Parts (leerer Antwort) endet.
+                    parts.append(LLMPart(text=_reasoning))
+
+            if message.get("tool_calls"):
+                for tc in message["tool_calls"]:
+                    fn = tc.get("function", {})
+                    try:
+                        args = json.loads(fn.get("arguments", "{}"))
+                    except Exception:
+                        args = {}
+                    parts.append(LLMPart(function_call=MockFC(fn.get("name"), args)))
+            # Aus dem Text geborgene Aufrufe NUR nutzen, wenn der Server keine
+            # gemeldet hat: sonst wuerde ein Aufruf doppelt ausgefuehrt.
+            if _geborgen and not message.get("tool_calls"):
+                for fc in _geborgen:
+                    print(f"[LLM] Tool-Aufruf aus dem Antworttext geborgen: {fc.name}",
+                          flush=True)
+                    parts.append(LLMPart(function_call=fc))
+
+        usage = None
+        try:
+            u = data.get("usage", {})
+            if u:
+                usage = {
+                    "input_tokens": u.get("prompt_tokens", 0) or 0,
+                    "output_tokens": u.get("completion_tokens", 0) or 0,
+                }
+        except Exception:
+            pass
+        return LLMResponse(parts=parts, raw=data, usage=usage)
+
+    # ── Prompt-Modus (Tools im System-Prompt, XML-Tag-Parsing) ───────
+
+    async def _generate_prompt_mode(self, model: str, system_prompt: str, contents: list, tools: list,
+                                    reasoning_effort: str | None = None,
+                                    temperature: float | None = DEFAULT_TEMPERATURE) -> LLMResponse:
+        """Prompt-basiertes Tool-Calling: keine tools-API, stattdessen XML-Tags im Text.
+
+        temperature ist ein BEREITS aufgeloester Wert (Zahl oder None = weglassen)."""
+        # Tools in System-Prompt einbetten
+        if tools:
+            tools_section = (
+                "\n\n## Tool-Nutzung\n"
+                "Du hast Zugriff auf folgende Tools. Um ein Tool aufzurufen, antworte "
+                "AUSSCHLIESSLICH mit einem <tool_call>-Block – kein anderer Text davor oder danach:\n\n"
+                "<tool_call>\n"
+                "{\"name\": \"TOOL_NAME\", \"arguments\": {\"param\": \"wert\"}}\n"
+                "</tool_call>\n\n"
+                "Wenn du kein Tool benoetigst, antworte normal – in der Sprache des Benutzers.\n\n"
+                "### Verfügbare Tools:\n"
+            )
+            for t in tools:
+                schema = t.parameters_schema() if hasattr(t, "parameters_schema") else {}
+                props   = schema.get("properties", {})
+                req     = set(schema.get("required", []))
+                params  = ", ".join(
+                    f"{k}{'*' if k in req else ''} ({v.get('type','any')}): {v.get('description','')}"
+                    for k, v in props.items()
+                )
+                tools_section += f"\n**{t.name}**: {t.description}\n  Parameter: {params or 'keine'}\n"
+            full_system = system_prompt + tools_section
+        else:
+            full_system = system_prompt
+
+        # Nachrichten aufbauen – Tool-Aufrufe/-Ergebnisse als Klartext
+        messages = [{"role": "system", "content": full_system}]
+        for content in contents:
+            parts_text = []
+            tool_result_msgs = []
+
+            for part in content.parts:
+                if part.text:
+                    parts_text.append(part.text)
+                elif hasattr(part, "function_call") and part.function_call:
+                    fc = part.function_call
+                    args_str = json.dumps(dict(fc.args) if fc.args else {}, ensure_ascii=False)
+                    parts_text.append(f'<tool_call>\n{{"name": "{fc.name}", "arguments": {args_str}}}\n</tool_call>')
+                elif hasattr(part, "function_response") and part.function_response:
+                    fr = part.function_response
+                    result = (
+                        fr.response.get("result", str(fr.response))
+                        if isinstance(fr.response, dict) else str(fr.response)
+                    )
+                    tool_result_msgs.append({
+                        "role": "user",
+                        "content": f"Tool-Ergebnis für '{fr.name}':\n{werkzeug_ergebnis_kappen(result)}"
+                    })
+
+            if parts_text:
+                role = "assistant" if content.role == "model" else "user"
+                messages.append({"role": role, "content": "\n".join(parts_text)})
+            messages.extend(tool_result_msgs)
+
+        payload = {"model": model, "messages": messages, "stream": False}
+        if temperature is not None:    # None = Feld weglassen (Profil "auto")
+            payload["temperature"] = temperature
+        self._apply_reasoning(payload, reasoning_effort)
+
+        client = await _get_shared_client()
+        resp = await client.post(self.base_url, headers=self._build_headers(), json=payload, timeout=self._get_timeout())
+        if not resp.is_success:
+            try:
+                err_body = resp.json()
+                _err = err_body.get("error")
+                if isinstance(_err, dict):  # OpenAI-Stil: {"error": {"message": ...}}
+                    _err = _err.get("message") or _err.get("type") or str(_err)
+                err_detail = err_body.get("detail") or err_body.get("message") or _err or resp.text[:300]
+            except Exception:
+                err_detail = resp.text[:300]
+            _d = str(err_detail).lower()
+            # Server ohne Reasoning-Unterstuetzung: einmal ohne Stufen-Vorgabe wiederholen.
+            if resp.status_code == 400 and reasoning_effort and _is_unsupported_param_error(err_detail):
+                print(f"[LLM] {self.base_url}: Reasoning-Parameter abgelehnt "
+                      f"({err_detail}) → Wiederholung ohne Vorgabe", flush=True)
+                return await self._generate_prompt_mode(model, system_prompt, contents, tools, None, temperature)
+            # Kontextfenster zu klein (z.B. vLLM --max-model-len 8192): klare, handlungs-
+            # bezogene Meldung statt rohem httpx-Fehler.
+            # "context size" / "exceed_context_size" ist die Schreibweise von
+            # LM Studio; ohne sie laeuft genau dieser Fall in die rohe
+            # HTTP-400-Meldung unten und der Grund ist nicht ablesbar.
+            if ("context length" in _d or "maximum context" in _d or "input_tokens" in _d
+                    or "max_model_len" in _d or "context size" in _d
+                    or "exceed_context_size" in _d):
+                raise ValueError(
+                    "Das gewählte Modell hat ein zu kleines Kontextfenster für den "
+                    "Jarvis-Agenten (System-Prompt + Tools passen nicht hinein). "
+                    f"Server-Meldung: {err_detail}. "
+                    "Abhilfe: vLLM-Server mit größerem --max-model-len starten, in "
+                    "LM Studio die Kontextlänge des geladenen Modells erhöhen oder ein "
+                    "Modell/Profil mit mehr Kontext verwenden."
+                )
+            raise ValueError(f"HTTP {resp.status_code} von {self.base_url}: {err_detail}")
+        try:
+            data = resp.json()
+        except Exception:
+            data = {}
+
+        if not isinstance(data, dict):
+            raise ValueError(f"LLM-Antwort ist kein JSON-Objekt: {resp.text[:200]}")
+        if "error" in data:
+            err = data["error"]
+            msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
+            raise ValueError(f"LLM-Fehler: {msg}")
+
+        parts = []
+        if "choices" in data and len(data["choices"]) > 0:
+            text = (data["choices"][0].get("message") or {}).get("content") or ""
+
+            # <tool_call>…</tool_call> extrahieren (erstes Match)
+            match = re.search(r"<tool_call>\s*(.*?)\s*</tool_call>", text, re.DOTALL)
+            if match:
+                pre_text = text[:match.start()].strip()
+                if pre_text:
+                    parts.append(LLMPart(text=pre_text))
+                try:
+                    call_data = json.loads(match.group(1))
+                    name = call_data.get("name", "")
+                    args = call_data.get("arguments", {})
+                    if isinstance(args, str):
+                        args = json.loads(args)
+                    parts.append(LLMPart(function_call=MockFC(name, args)))
+                except Exception:
+                    # JSON-Parsing fehlgeschlagen → als Text zurückgeben
+                    parts.append(LLMPart(text=text))
+            elif text.strip():
+                parts.append(LLMPart(text=text))
+
+        usage = None
+        try:
+            u = data.get("usage", {})
+            if u:
+                usage = {
+                    "input_tokens": u.get("prompt_tokens", 0) or 0,
+                    "output_tokens": u.get("completion_tokens", 0) or 0,
+                }
+        except Exception:
+            pass
+        return LLMResponse(parts=parts, raw=data, usage=usage)
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  OpenRouter (erbt von OpenAI-Kompatibel)
+# ═══════════════════════════════════════════════════════════════════
+
+class OpenRouterProvider(OpenAICompatibleProvider):
+    """OpenRouter-Provider mit zusätzlichen Headern."""
+
+    def __init__(self, api_key: str, base_url: str = "https://openrouter.ai/api/v1/chat/completions"):
+        super().__init__(api_key, base_url)
+
+    def _build_headers(self) -> dict:
+        headers = super()._build_headers()
+        headers["HTTP-Referer"] = "https://github.com/google-deepmind/antigravity"
+        headers["X-Title"] = "Jarvis Agent"
+        return headers
+
+    def _get_timeout(self) -> httpx.Timeout:
+        return _llm_timeout()
+
+    def _apply_reasoning(self, payload: dict, effort: str | None):
+        """OpenRouter nutzt ein eigenes `reasoning`-Objekt statt reasoning_effort.
+
+        `off` wird zu `{"enabled": false}` – die Stufen-Variante kennt kein "aus".
+        """
+        if not effort:
+            return
+        if effort == "off":
+            payload["reasoning"] = {"enabled": False}
+        else:
+            payload["reasoning"] = {"effort": _OPENAI_EFFORT[effort]}
+
+    def _reasoning_keys(self) -> tuple[str, ...]:
+        return ("reasoning",)
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Anthropic Claude – API Key (offiziell)
+# ═══════════════════════════════════════════════════════════════════
+
+class AnthropicProvider(LLMProvider):
+    """Direkter Anthropic Claude API Provider (mit API Key)."""
+
+    def __init__(self, api_key: str):
+        import anthropic
+        self.client = anthropic.AsyncAnthropic(api_key=api_key)
+
+    async def generate_response(self, model: str, system_prompt: str, contents: list,
+                                tools: list = None, reasoning_effort: str | None = None,
+                                temperature=None) -> LLMResponse:
+        messages = []
+        tool_id_queues: dict[str, deque] = defaultdict(deque)
+        step = 0
+
+        for content in contents:
+            step += 1
+            role = "assistant" if content.role == "model" else "user"
+
+            text_parts = []
+            fn_calls = []
+            fn_responses = []
+
+            inline_data_blocks = []  # Für Bild-Anhänge (Anthropic image blocks)
+            for part in content.parts:
+                if getattr(part, "text", None):
+                    text_parts.append(part.text)
+                fc = getattr(part, "function_call", None)
+                if fc and getattr(fc, "name", None):
+                    fn_calls.append(fc)
+                fr = getattr(part, "function_response", None)
+                if fr and getattr(fr, "name", None):
+                    fn_responses.append(fr)
+                _id_obj = getattr(part, "inline_data", None)
+                if _id_obj:
+                    _mime = getattr(_id_obj, "mime_type", "")
+                    _data = getattr(_id_obj, "data", b"")
+                    if _mime and _data and _mime.startswith("image/"):
+                        import base64 as _b64a
+                        inline_data_blocks.append({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": _mime,
+                                "data": _b64a.b64encode(_data).decode(),
+                            },
+                        })
+
+            if fn_responses:
+                tool_result_blocks = []
+                for fr in fn_responses:
+                    ids = tool_id_queues.get(fr.name, deque())
+                    tool_id = ids.popleft() if ids else f"call_{fr.name}_unknown"
+                    resp_data = fr.response if isinstance(fr.response, dict) else {"result": str(fr.response)}
+                    result_str = resp_data.get("result", json.dumps(resp_data, ensure_ascii=False))
+                    tool_result_blocks.append({
+                        "type": "tool_result",
+                        "tool_use_id": tool_id,
+                        "content": str(result_str),
+                    })
+                messages.append({"role": "user", "content": tool_result_blocks})
+
+            elif fn_calls:
+                content_blocks = []
+                if text_parts:
+                    content_blocks.append({"type": "text", "text": "\n".join(text_parts)})
+                for fc in fn_calls:
+                    tool_id = f"call_{fc.name}_{step}"
+                    tool_id_queues[fc.name].append(tool_id)
+                    args = dict(fc.args) if fc.args else {}
+                    content_blocks.append({
+                        "type": "tool_use",
+                        "id": tool_id,
+                        "name": fc.name,
+                        "input": args,
+                    })
+                messages.append({"role": "assistant", "content": content_blocks})
+
+            else:
+                text = "\n".join(text_parts)
+                if inline_data_blocks:
+                    # Bilder + Text als Content-Array (Anthropic-Format)
+                    _blocks = []
+                    if text:
+                        _blocks.append({"type": "text", "text": text})
+                    _blocks.extend(inline_data_blocks)
+                    messages.append({"role": role, "content": _blocks})
+                elif text:
+                    messages.append({"role": role, "content": text})
+
+        anthropic_tools = []
+        if tools:
+            for t in tools:
+                raw_schema = t.parameters_schema() if hasattr(t, "parameters_schema") else {}
+                anthropic_tools.append({
+                    "name": t.name,
+                    "description": t.description,
+                    "input_schema": _normalize_schema(raw_schema),
+                })
+
+        _effort = _resolve_effort(reasoning_effort)
+        _temp = _resolve_temperature(temperature)
+
+        def _build_kwargs(with_reasoning: bool) -> dict:
+            kw: dict = {
+                "model": model,
+                "max_tokens": 8096,
+                "system": system_prompt,
+                "messages": messages,
+            }
+            if anthropic_tools:
+                kw["tools"] = anthropic_tools
+            if not (with_reasoning and _effort):
+                # Ohne Reasoning-Vorgabe bleibt es beim bisherigen Verhalten.
+                # ACHTUNG: aktuelle Claude-Modelle (Opus 5/4.8/4.7, Sonnet 5)
+                # lehnen temperature mit 400 ab – der Fallback unten faengt das.
+                # Wer das vermeiden will, setzt im Profil temperature="auto".
+                if _temp is not None:
+                    kw["temperature"] = _temp
+                return kw
+            if _effort == "off":
+                # Kein output_config: "thinking aus" plus hohe Effort-Stufe ist bei
+                # Opus 5 eine ungueltige Kombination (400).
+                kw["thinking"] = {"type": "disabled"}
+                if _temp is not None:
+                    kw["temperature"] = _temp
+            else:
+                # Adaptives Thinking + Effort-Stufe. temperature wird bewusst NICHT
+                # gesetzt: die Modelle, die effort kennen, lehnen Sampling-Parameter ab.
+                kw["thinking"] = {"type": "adaptive"}
+                kw["output_config"] = {"effort": _ANTHROPIC_EFFORT[_effort]}
+                if _effort in ("high", "max"):
+                    # max_tokens deckelt Denk- UND Antworttoken gemeinsam.
+                    kw["max_tokens"] = max(kw["max_tokens"], _ANTHROPIC_THINKING_MIN_TOKENS)
+            return kw
+
+        def _to_value_error(exc) -> ValueError:
+            # Anthropic SDK-Exceptions in lesbare ValueError umwandeln
+            raw = str(exc)
+            # Typ aus Anthropic-Fehlerstruktur extrahieren
+            err_msg = getattr(getattr(exc, "body", None) or {}, "get", lambda k, d=None: d)("error", {})
+            if isinstance(err_msg, dict):
+                err_msg = err_msg.get("message", raw)
+            return ValueError(f"Anthropic API {getattr(exc, 'status_code', '')} – {err_msg or raw}")
+
+        try:
+            response = await self.client.messages.create(**_build_kwargs(True))
+        except Exception as exc:
+            # Zwei Faelle landen hier: ein aeltere Modell kennt thinking/output_config
+            # nicht, oder ein neues Modell lehnt temperature ab. Beides einmal ohne
+            # die strittigen Parameter wiederholen (nur model/messages/tools).
+            if not _is_unsupported_param_error(_to_value_error(exc)):
+                raise _to_value_error(exc) from exc
+            _minimal = {k: v for k, v in _build_kwargs(False).items() if k != "temperature"}
+            print(f"[LLM] Anthropic {model}: Zusatzparameter abgelehnt ({exc}) "
+                  f"→ Wiederholung ohne thinking/effort/temperature", flush=True)
+            try:
+                response = await self.client.messages.create(**_minimal)
+            except Exception as exc2:
+                raise _to_value_error(exc2) from exc2
+
+        parts = []
+        for block in response.content:
+            if block.type == "text":
+                parts.append(LLMPart(text=block.text))
+            elif block.type == "tool_use":
+                parts.append(LLMPart(function_call=MockFC(block.name, block.input)))
+
+        usage = None
+        try:
+            u = response.usage
+            usage = {
+                "input_tokens": getattr(u, "input_tokens", 0) or 0,
+                "output_tokens": getattr(u, "output_tokens", 0) or 0,
+            }
+        except Exception:
+            pass
+        return LLMResponse(parts=parts, raw=response, usage=usage)
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Anthropic Claude – Session (Pro-Abo über claude.ai)
+# ═══════════════════════════════════════════════════════════════════
+
+class AnthropicSessionProvider(LLMProvider):
+    """Claude-Zugriff über claude.ai Session-Cookie (Pro-Abo).
+
+    Nutzt die interne claude.ai API mit dem sessionKey-Cookie.
+    Tool-Calling wird über strukturierte Prompts simuliert, da
+    die interne API kein natives Function Calling unterstützt.
+
+    HINWEIS: Inoffiziell – kann bei API-Änderungen von Anthropic brechen.
+    """
+
+    BASE_URL = "https://claude.ai"
+
+    def __init__(self, session_key: str):
+        self.session_key = session_key
+        self.org_id: str | None = None
+        self.conversation_id: str | None = None
+        self._last_contents_len = 0
+
+    def _headers(self) -> dict:
+        return {
+            # clean_api_key auch hier: ein mitkopiertes Leerzeichen im Session-Key
+            # macht den Cookie-Header ungueltig (siehe clean_api_key).
+            "Cookie": f"sessionKey={clean_api_key(self.session_key)}",
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Origin": self.BASE_URL,
+            "Referer": f"{self.BASE_URL}/",
+        }
+
+    async def _ensure_org_id(self):
+        """Holt die Organisations-ID vom claude.ai Account."""
+        if self.org_id:
+            return
+        client = await _get_shared_client()
+        resp = await client.get(
+            f"{self.BASE_URL}/api/organizations",
+            headers=self._headers(),
+            timeout=30.0,
+        )
+        resp.raise_for_status()
+        orgs = resp.json()
+        if not orgs:
+            raise ValueError("Keine Organisation gefunden. Session-Key ungültig oder abgelaufen?")
+        self.org_id = orgs[0]["uuid"]
+
+    async def _create_conversation(self, model: str) -> str:
+        """Erstellt eine neue claude.ai Konversation."""
+        import uuid as uuid_lib
+        conv_uuid = str(uuid_lib.uuid4())
+        client = await _get_shared_client()
+        resp = await client.post(
+            f"{self.BASE_URL}/api/organizations/{self.org_id}/chat_conversations",
+            headers=self._headers(),
+            json={"name": "", "uuid": conv_uuid, "model": model},
+            timeout=30.0,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data["uuid"]
+
+    async def _send_message(self, model: str, message: str) -> str:
+        """Sendet eine Nachricht und sammelt die SSE-Antwort."""
+        headers = self._headers()
+        headers["Accept"] = "text/event-stream"
+
+        payload = {
+            "prompt": message,
+            "timezone": "Europe/Berlin",
+            "attachments": [],
+            "files": [],
+            "model": model,
+        }
+
+        full_response = ""
+        client = await _get_shared_client()
+        async with client.stream(
+            "POST",
+            f"{self.BASE_URL}/api/organizations/{self.org_id}/"
+            f"chat_conversations/{self.conversation_id}/completion",
+            headers=headers,
+            json=payload,
+            timeout=120.0,
+        ) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if line.startswith("data: "):
+                    try:
+                        data = json.loads(line[6:])
+                        if data.get("type") == "completion":
+                            full_response += data.get("completion", "")
+                    except json.JSONDecodeError:
+                        pass
+
+        return full_response
+
+    # ─── Haupt-Methode ──────────────────────────────────────────
+
+    async def generate_response(self, model: str, system_prompt: str, contents: list,
+                                tools: list = None, reasoning_effort: str | None = None,
+                                temperature=None) -> LLMResponse:
+        # reasoning_effort und temperature werden bewusst ignoriert: claude.ai kennt
+        # ueber die Session-Schnittstelle keine Sampling-Parameter.
+        await self._ensure_org_id()
+
+        is_first_call = self.conversation_id is None
+
+        if is_first_call:
+            self.conversation_id = await self._create_conversation(model)
+            message = self._build_full_prompt(system_prompt, contents, tools)
+        else:
+            # Nur die neuen Tool-Ergebnisse senden (Rest kennt claude.ai schon)
+            new_contents = contents[self._last_contents_len:]
+            message = self._build_followup(new_contents)
+
+        self._last_contents_len = len(contents)
+
+        try:
+            response_text = await self._send_message(model, message)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                raise ValueError("Session-Key ungültig oder abgelaufen. Bitte neu einloggen bei claude.ai.") from e
+            if e.response.status_code == 403:
+                raise ValueError("Zugriff verweigert. Eventuell hat sich das claude.ai API-Format geändert.") from e
+            raise
+
+        parts = self._parse_response(response_text)
+        return LLMResponse(parts=parts, raw=response_text)
+
+    # ─── Prompt-Builder ─────────────────────────────────────────
+
+    def _build_full_prompt(self, system_prompt: str, contents: list, tools: list | None) -> str:
+        """Baut den initialen Prompt mit System-Anweisungen + Tools."""
+        parts = [system_prompt]
+
+        if tools:
+            parts.append(self._format_tools_prompt(tools))
+
+        for content in contents:
+            for part in content.parts:
+                if getattr(part, "text", None):
+                    parts.append(part.text)
+
+        return "\n\n".join(parts)
+
+    def _build_followup(self, new_contents: list) -> str:
+        """Baut Follow-Up-Nachricht mit Tool-Ergebnissen."""
+        parts = []
+        for content in new_contents:
+            for part in content.parts:
+                fr = getattr(part, "function_response", None)
+                if fr:
+                    resp = fr.response if isinstance(fr.response, dict) else {"result": str(fr.response)}
+                    result_str = resp.get("result", json.dumps(resp, ensure_ascii=False))
+                    parts.append(f"[Tool-Ergebnis von {fr.name}]:\n{result_str}")
+                elif getattr(part, "text", None):
+                    parts.append(part.text)
+
+        if not parts:
+            return "Bitte fahre mit der Aufgabe fort."
+        return "\n\n".join(parts) + "\n\nBitte fahre mit der Aufgabe fort."
+
+    def _format_tools_prompt(self, tools: list) -> str:
+        """Formatiert Tool-Beschreibungen für den System-Prompt."""
+        lines = [
+            "Du hast folgende Tools zur Verfügung.",
+            "Wenn du ein Tool verwenden willst, antworte NUR mit einem JSON-Block:",
+            "",
+            "```tool_call",
+            '{"name": "tool_name", "args": {"parameter": "wert"}}',
+            "```",
+            "",
+            "Wichtig: Pro Antwort maximal EIN tool_call-Block. Nach dem Ergebnis kannst du den nächsten aufrufen.",
+            "",
+            "Verfügbare Tools:",
+        ]
+        for t in tools:
+            schema = t.parameters_schema() if hasattr(t, "parameters_schema") else {}
+            lines.append(f"\n**{t.name}**: {t.description}")
+            props = schema.get("properties", {})
+            required = schema.get("required", [])
+            for pname, pschema in props.items():
+                req = " (Pflicht)" if pname in required else " (optional)"
+                desc = pschema.get("description", "")
+                lines.append(f"  - {pname}: {desc}{req}")
+
+        return "\n".join(lines)
+
+    def _parse_response(self, text: str) -> list[LLMPart]:
+        """Parst die Antwort auf Text und simulierte Tool-Calls."""
+        parts = []
+
+        tool_pattern = r"```tool_call\s*\n(.*?)\n\s*```"
+        matches = list(re.finditer(tool_pattern, text, re.DOTALL))
+
+        if matches:
+            # Text vor dem ersten Tool-Call
+            before = text[: matches[0].start()].strip()
+            if before:
+                parts.append(LLMPart(text=before))
+
+            for match in matches:
+                try:
+                    data = json.loads(match.group(1).strip())
+                    parts.append(LLMPart(function_call=MockFC(data["name"], data.get("args", {}))))
+                except (json.JSONDecodeError, KeyError):
+                    parts.append(LLMPart(text=match.group(0)))
+
+            # Text nach dem letzten Tool-Call
+            after = text[matches[-1].end() :].strip()
+            if after:
+                parts.append(LLMPart(text=after))
+        else:
+            if text.strip():
+                parts.append(LLMPart(text=text.strip()))
+
+        return parts
+
+    def reset(self):
+        """Setzt die Konversation zurück (für neue Aufgaben)."""
+        self.conversation_id = None
+        self._last_contents_len = 0
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Provider-Factory
+# ═══════════════════════════════════════════════════════════════════
+
+# ─── Profil des LAUFENDEN Agenten ────────────────────────────────────────────
+# WARUM ES DAS BRAUCHT (Befund 2026-08-10):
+# Mehrere Werkzeuge bauten ihren Provider direkt aus `config.*`, also aus dem
+# GLOBAL aktiven Profil. Damit war in einem Agentenlauf sowohl das Profil eines
+# Rollen-Agenten als auch die benutzerbezogene Wahl (`config.profile_for_user`)
+# wirkungslos – gemessen bei `generate_image`: eine Rolle mit zugewiesenem
+# Bildmodell bekam trotzdem die Absage des Textmodells.
+#
+# `agent.py::_execute_tool` setzt diesen ContextVar fuer die Dauer EINES
+# Werkzeug-Aufrufs (try/finally, gleiches Muster wie `sandbox.set_tool_user`).
+# Ist er nicht gesetzt, gilt unveraendert das globale Profil – Endpunkte und
+# Hintergrundlaeufe aendern ihr Verhalten also nicht.
+#
+# BEWUSSTE AUSNAHME: `main.py::_sec_llm_classify` (Jailbreak-Klassifikator der
+# Sicherheitsschicht) benutzt WEITER das globale Profil. Haenge er am Profil des
+# Benutzers, koennte dieser die Sicherheitspruefung ueber ein eigenes Profil
+# aushebeln. Wer hier "vereinheitlicht", oeffnet eine Luecke.
+current_agent_profile: contextvars.ContextVar = contextvars.ContextVar(
+    "jarvis_agent_profile", default=None)
+
+
+def provider_fuer_lauf(prompt_tool_calling: bool | None = None):
+    """``(provider, model)`` aus dem Profil des laufenden Agenten – sonst global.
+
+    Der eine Weg fuer alle Werkzeuge, die selbst ein Modell aufrufen. Wer
+    stattdessen `config.current_*` liest, baut den Fehler von oben neu.
+    """
+    from backend.config import config
+    p = current_agent_profile.get()
+    if not isinstance(p, dict) or not p:
+        ptc = (config.current_prompt_tool_calling if prompt_tool_calling is None
+               else bool(prompt_tool_calling))
+        return (get_provider(config.LLM_PROVIDER, config.current_api_key,
+                             config.current_api_url,
+                             auth_method=config.current_auth_method,
+                             session_key=config.current_session_key,
+                             prompt_tool_calling=ptc),
+                config.current_model)
+    ptc = (bool(p.get("prompt_tool_calling")) if prompt_tool_calling is None
+           else bool(prompt_tool_calling))
+    return (get_provider(p.get("provider") or config.LLM_PROVIDER,
+                         clean_api_key(p.get("api_key") or ""),
+                         p.get("api_url") or config.current_api_url,
+                         auth_method=p.get("auth_method") or "api_key",
+                         session_key=clean_api_key(p.get("session_key") or ""),
+                         prompt_tool_calling=ptc),
+            p.get("model") or config.current_model)
+
+
+def provider_fuer_bild():
+    """``(provider, model)`` fuer die BILDGENERIERUNG.
+
+    Reihenfolge: das global eingestellte Bildprofil (``IMAGE_PROFILE_ID``),
+    sonst unveraendert :func:`provider_fuer_lauf`.
+
+    WARUM ES DAS BRAUCHT (gemeldet von ECHT 2026-09-02)
+    ---------------------------------------------------
+    Ein Bildmodell ist kein Gespraechsmodell, und beide Richtungen gehen schief:
+
+    * Laeuft der Agent (bzw. eine Rolle) AUF dem Bildmodell, kann er keine
+      Werkzeuge aufrufen – am Haus-Server gemessen: FLUX bekommt ``tools``
+      uebergeben und antwortet mit ``tool_calls: None`` plus einem Bild im
+      ``content``. ``generate_image`` ist damit unerreichbar, das Bild entsteht
+      aus der Modellantwort, und jede Groessenangabe verpufft (5 von 5 Laeufen
+      1024x1024, gleich was verlangt war).
+    * Laeuft er auf einem Textmodell, sagt ``generate_image`` grundsaetzlich ab.
+
+    Deshalb gewinnt das ausdruecklich eingestellte Bildprofil. Das weicht
+    bewusst von der Regel "Rolle > Benutzerwahl > global" ab, die fuer das
+    GESPRAECHSmodell gilt: welches Modell ein Bild malt, ist keine Eigenschaft
+    des Gespraechs, sondern eine Faehigkeit.
+
+    FAIL-SAFE: zeigt die Kennung ins Leere oder faellt das Lesen der
+    Konfiguration aus, wird das Laufprofil benutzt – also das Verhalten von
+    vorher. Eine Bildgenerierung, die wegen einer verwaisten Einstellung gar
+    nicht erst laeuft, waere der schlechtere Ausgang.
+    """
+    from backend.config import config
+    pid = str(getattr(config, "IMAGE_PROFILE_ID", "") or "").strip()
+    if not pid:
+        return provider_fuer_lauf(prompt_tool_calling=False)
+    try:
+        prof = next((p for p in (config.profiles or []) if p.get("id") == pid), None)
+    except Exception:  # noqa: BLE001
+        prof = None
+    if not prof:
+        print(f"[LLM] Bildprofil {pid} nicht gefunden – es gilt das Profil des Laufs",
+              flush=True)
+        return provider_fuer_lauf(prompt_tool_calling=False)
+    return (get_provider(prof.get("provider") or config.LLM_PROVIDER,
+                         clean_api_key(prof.get("api_key") or ""),
+                         prof.get("api_url") or config.current_api_url,
+                         auth_method=prof.get("auth_method") or "api_key",
+                         session_key=clean_api_key(prof.get("session_key") or ""),
+                         prompt_tool_calling=False),
+            prof.get("model") or config.current_model)
+
+
+def get_provider(
+    provider_name: str,
+    api_key: str,
+    api_url: str = None,
+    auth_method: str = "api_key",
+    session_key: str = None,
+    prompt_tool_calling: bool = False,
+) -> LLMProvider:
+    name = provider_name.lower()
+    if name == "google":
+        return GeminiProvider(api_key)
+    elif name == "openrouter":
+        return OpenRouterProvider(api_key, base_url=api_url) if api_url else OpenRouterProvider(api_key)
+    elif name == "anthropic":
+        if auth_method == "session" and session_key:
+            return AnthropicSessionProvider(session_key)
+        return AnthropicProvider(api_key)
+    elif name == "openai_compatible":
+        return OpenAICompatibleProvider(
+            api_key,
+            base_url=api_url or "http://localhost:11434/v1/chat/completions",
+            prompt_tool_calling=prompt_tool_calling,
+        )
+    raise ValueError(f"Unbekannter Provider: {provider_name}")

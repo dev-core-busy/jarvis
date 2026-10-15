@@ -1,0 +1,345 @@
+using AiMouse.Configuration;
+
+namespace AiMouse.Localization;
+
+/// <summary>Oberflaechentexte in Deutsch und Englisch.
+///
+/// WARUM EINE EIGENE TABELLE UND NICHT .resx: die Anwendung ist EINE portable
+/// Exe ohne Installation – Satellitenassemblies waeren zusaetzliche Dateien
+/// neben der Exe, die beim Kopieren verlorengehen. Die Tabelle liegt im
+/// Programm und kann nicht fehlen.
+///
+/// WARUM NICHT DIE SYSTEMSPRACHE: die Sprache kommt vom Server – sie wird beim
+/// Paketbau EINKOMPILIERT (`Vorgaben.Sprache`) – so bekommt ein Haus mit englischer
+/// Oberflaeche das Paket auf Englisch, unabhaengig davon, wie der einzelne
+/// Arbeitsplatz eingestellt ist. Der Benutzer kann sie im Einstellungsdialog
+/// umstellen.
+///
+/// ⚠ FEHLT EIN SCHLUESSEL, GILT DEUTSCH – nie ein leerer Text. Eine leere
+/// Beschriftung ist von einem kaputten Fenster nicht zu unterscheiden.
+/// </summary>
+internal static class Texte
+{
+    private static bool _englisch;
+
+    /// <summary>Aus den Einstellungen uebernehmen. Alles ausser "en" ist Deutsch.</summary>
+    public static void Anwenden(AppSettings settings)
+    {
+        _englisch = (settings.Sprache ?? string.Empty)
+            .Trim().StartsWith("en", StringComparison.OrdinalIgnoreCase);
+
+        string marke = (settings.Marke ?? string.Empty).Trim();
+        _marke = marke.Length > 0 ? marke : Vorgaben.Marke;
+    }
+
+    /// <summary>Der Name des Hauses – fuer Fenstertitel und Hinweisblasen.
+    ///
+    /// ⚠ HIER STAND AN SECHS STELLEN "AI Mouse" FEST IM CODE. Das ist nicht
+    /// nur ein uebersehener Text, sondern ein Branding-Fehler: der Titel des
+    /// Ergebnisfensters und jede Hinweisblase nannten den Vorgabenamen, waehrend
+    /// der Kopf des Dialogs daneben die Hausmarke trug. Die Marke kommt beim
+    /// Paketbau vom Server (`Vorgaben.Marke`) und liegt in den Einstellungen –
+    /// sie darf an keiner Stelle abgeschrieben werden.
+    ///
+    /// Rueckfall ist der einkompilierte Wert, nie ein leerer Titel: ein Fenster
+    /// ohne Namen ist von einem kaputten nicht zu unterscheiden.
+    /// </summary>
+    public static string Marke => _marke;
+
+    private static string _marke = Vorgaben.Marke;
+
+    public static bool IstEnglisch => _englisch;
+
+    /// <summary>Der eine Zugriff. <paramref name="de"/> ist zugleich der Rueckfall.</summary>
+    public static string T(string de, string en) => _englisch ? en : de;
+
+    // ── Anmeldung ───────────────────────────────────────────────────────────
+    public static string AnmeldenTitel => T("Anmelden", "Sign in");
+    public static string Benutzername => T("Benutzername", "User name");
+    public static string Kennwort => T("Kennwort", "Password");
+    public static string Gespeichert => T("Einstellungen gespeichert.", "Settings saved.");
+    public static string Angemeldet => T("Angemeldet. Deine Fragen sind geladen.",
+                                         "Signed in. Your questions have been loaded.");
+    public static string EinmalCode => T("Einmal-Code (2FA)", "One-time code (2FA)");
+    public static string Anmelden => T("Anmelden", "Sign in");
+    public static string Abbrechen => T("Abbrechen", "Cancel");
+    public static string AnmeldungLaeuft => T("Anmeldung läuft…", "Signing in…");
+
+    /// <summary>Beschriftung der Versionsanzeige im Marken-Kopf.
+    ///
+    /// ⚠ IN BEIDEN SPRACHEN GLEICH – das ist kein vergessener Eintrag, sondern
+    /// dasselbe Wort. Er steht deshalb ausdruecklich in `ERLAUBT_GLEICH` von
+    /// `tests/live_texte_dev.py`; die Regel "DE ≠ EN" bleibt fuer alles andere
+    /// scharf, weil die Ausnahme einzeln eingetragen und begruendet ist.
+    /// </summary>
+    public static string Version => T("Version", "Version");
+    public static string KeinServer => T(
+        "Es ist keine Serveradresse hinterlegt. Trage sie unter „Einstellungen“ ein.",
+        "No server address configured. Enter it under “Settings”.");
+    public static string AnmeldungFehlt => T(
+        "Bitte zuerst anmelden.", "Please sign in first.");
+
+    // ── Geste und Auswertung ────────────────────────────────────────────────
+    public static string Auswerten => T("Wird ausgewertet…", "Analysing…");
+    public static string Ergebnis => T("Ergebnis", "Result");
+    // ⚠ ZWEI KOPIER-KNOEPFE NEBENEINANDER MUESSEN SAGEN, WAS SIE KOPIEREN.
+    //   Bis 2026-09-10 hiess dieser schlicht „Kopieren" – das war eindeutig,
+    //   solange er allein stand. Neben „Bild kopieren" ist es die Frage, was
+    //   der andere denn kopiert.
+    public static string Kopieren => T("Text kopieren", "Copy text");
+    public static string BildKopierenKnopf => T("Bild kopieren", "Copy image");
+
+    // Derselbe Knopf, wenn der Lauf ein Bild ERZEUGT hat (Text im Bild
+    // ersetzt). Dann ist das Ergebnis gemeint und nicht der Ausschnitt – und
+    // das muss dranstehen, sonst kopiert der Benutzer das Falsche.
+    public static string ErgebnisBildKopierenKnopf =>
+        T("Ergebnis kopieren", "Copy result");
+
+    // Erscheint im Kopf, waehrend das erzeugte Bild geholt wird. Ein Fenster,
+    // in dem unter der Antwort noch nichts steht, sieht sonst fertig aus.
+    public static string BildWirdGeholt => T("Bild wird geladen…", "Loading image…");
+
+    // Der Lauf hat ein Bild erzeugt, es liess sich aber nicht holen. NICHT
+    // still lassen: der Text sagt dann "hier ist das Bild", und darunter waere
+    // nichts – von einem kaputten Fenster nicht zu unterscheiden.
+    public static string BildNichtGeholt => T(
+        "Das erzeugte Bild konnte nicht geladen werden.",
+        "The generated image could not be loaded.");
+
+    public static string Schliessen => T("Schließen", "Close");
+    public static string EigeneFrage => T("Eigene Frage…", "Custom question…");
+    public static string EigeneFrageTitel => T(
+        "Was soll mit dem Ausschnitt geschehen?",
+        "What should happen with this region?");
+    // ⚠ WENN DIE FRAGENLISTE FEHLT, MUSS DAS DRANSTEHEN. Bis 1.0.9 war der
+    // Fehlschlag still, und das Menue zeigte kommentarlos die drei eingebauten
+    // Fragen – der Benutzer hielt sie fuer seine Liste (dreimal gemeldet).
+    public static string FragenFehlen => T(
+        "⚠ Fragenliste nicht geladen –", "⚠ Question list not loaded –");
+    public static string FragenLeer => T(
+        "der Server hat keine geliefert. Klicken zum erneuten Versuch.",
+        "the server returned none. Click to retry.");
+
+    // ⚠ EINE NEUERE FASSUNG LIEGT VOR, ABER DIESE ANWENDUNG LAEUFT VON EINER
+    // NETZFREIGABE und darf sich deshalb nicht selbst ersetzen – sonst taeuscht
+    // ein beliebiger Arbeitsplatz die gemeinsame Datei fuer alle aus. {0} ist
+    // die Fassung auf dem Server, {1} die laufende.
+    //
+    // Der Text sagt BEIDES: dass es etwas Neues gibt, und wer es ausrollt.
+    // Ohne den zweiten Teil wuesste der Benutzer nicht, was er tun soll – und
+    // eine Warnung ohne Weg zur Abhilfe ist nur Laerm.
+    public static string UpdateNetzfreigabe => T(
+        "⚠ Version {0} liegt vor (hier läuft {1}). Diese Anwendung startet von "
+        + "einer Netzfreigabe und aktualisiert sich nicht selbst – deine "
+        + "Administration rollt den neuen Stand aus.",
+        "⚠ Version {0} is available (this is {1}). This copy runs from a "
+        + "network share and does not update itself – your administrators roll "
+        + "out the new build.");
+
+    public static string Nachgeschlagen => T(
+        "Für diese Antwort wurde zusätzlich nachgeschlagen: ",
+        "Additional sources were consulted for this answer: ");
+
+    // Adressen in der Antwort sind anklickbar. Geoeffnet wird NUR http/https –
+    // der Text stammt aus einem Bildschirmausschnitt, siehe `Ui/LinkZiel.cs`.
+    // Die Absage nennt Grund UND Ausweg: ein blauer Link, der beim Klick nichts
+    // tut, ist von einem kaputten Fenster nicht zu unterscheiden.
+    public static string LinkGeoeffnet => T("Link im Browser geöffnet.",
+                                            "Link opened in your browser.");
+    public static string LinkNichtGeoeffnet => T(
+        "Nur Web-Adressen (http/https) werden geöffnet – diese nicht. Text markieren und kopieren.",
+        "Only web addresses (http/https) are opened – this one is not. Select the text and copy it.");
+    public static string LinkFehler => T("Link ließ sich nicht öffnen:",
+                                         "Could not open the link:");
+
+    // ── Tray ────────────────────────────────────────────────────────────────
+    public static string Einstellungen => T("Einstellungen…", "Settings…");
+    public static string FragenBearbeiten => T("Fragen bearbeiten…", "Edit questions…");
+    public static string Abmelden => T("Abmelden", "Sign out");
+    public static string Beenden => T("Beenden", "Exit");
+    public static string TrayHinweis => T(
+        "Rechte Maustaste halten und einen Rahmen aufziehen.",
+        "Hold the right mouse button and drag a frame.");
+
+    // ── Einstellungen ───────────────────────────────────────────────────────
+    public static string Serveradresse => T("Serveradresse", "Server address");
+    public static string Sprache => T("Sprache", "Language");
+    public static string Ziehschwelle => T("Ziehschwelle (Pixel)", "Drag threshold (pixels)");
+    // Die Beschriftung nennt die WIRKUNG, nicht die Technik: „Rechtsklick
+    // durchreichen mit" waere richtig und fuer niemanden verstaendlich.
+    //
+    // ⚠ „Ziehen nur mit Taste" (Vorgabe 2026-09-11), vorher „Ziehen & Ablegen
+    // mit Taste". Der neue Wortlaut ist PARALLEL zu `GesteTaste` darunter
+    // („Ausschnitt nur mit Taste") – zwei Felder, die im Dialog untereinander
+    // stehen und Gegenstuecke sind, muessen auch gleich gebaut klingen. Die
+    // alte Fassung las sich wie ein eigenes Feature („Drag & Ablegen"), nicht
+    // wie die Bedingung, die sie beschreibt.
+    public static string RechtsziehTaste => T("Ziehen nur mit Taste",
+                                              "Drag only with key");
+    public static string RdKeine => T("(aus – Rechtsziehen gesperrt)",
+                                      "(off – right-drag blocked)");
+    public static string RdUmschalt => T("Umschalt", "Shift");
+
+    // ── Gestentaste (Vorgabe 2026-09-10) ───────────────────────────────────
+    // Die Beschriftung nennt die WIRKUNG. „Gestentaste" waere richtig und fuer
+    // niemanden verstaendlich.
+    public static string GesteTaste => T("Ausschnitt nur mit Taste",
+                                         "Capture only with key");
+    public static string GkKeine => T("(ohne Zusatztaste)", "(no extra key)");
+    public static string RdGesperrt => T(
+        "Nicht nötig: der Rechtsklick geht ohnehin an die Anwendung.",
+        "Not needed: the right-click already goes to the application.");
+    public static string Zeitlimit => T("Zeitlimit (Sekunden)", "Timeout (seconds)");
+    public static string ErgebnisKopieren => T(
+        "Ergebnis sofort in die Zwischenablage", "Copy result to clipboard immediately");
+    public static string Speichern => T("Speichern", "Save");
+    public static string VerbindungTesten => T("Verbindung testen", "Test connection");
+    public static string VerbindungOk => T("Verbindung steht.", "Connection works.");
+
+    /// <summary>Der Test ohne Kennwort bei fremder Adresse bzw. ohne Sitzung.
+    ///
+    /// Sie sagt, WAS zu tun ist – „nicht angemeldet" allein waere richtig und
+    /// nutzlos (Projektregel).</summary>
+    public static string KennwortFehlt => T(
+        "Trage dein Kennwort ein, dann kann die Verbindung geprüft werden.",
+        "Enter your password so the connection can be checked.");
+
+    // ── Fehler ──────────────────────────────────────────────────────────────
+    public static string FehlerTitel => T("Fehler", "Error");
+    public static string KeineAntwort => T(
+        "Der Server hat keine Antwort geliefert.", "The server returned no answer.");
+    public static string NichtErreichbar => T(
+        "Der Server ist nicht erreichbar: ", "The server cannot be reached: ");
+    public static string Abgelaufen => T(
+        "Die Anmeldung ist abgelaufen. Bitte erneut anmelden.",
+        "Your session has expired. Please sign in again.");
+    public static string KeineFreigabe => T(
+        $"Dein Konto ist für {Marke} nicht freigeschaltet. Ein Administrator "
+            + "trägt es unter Sicherheit → Berechtigungen ein.",
+        $"Your account is not enabled for {Marke}. An administrator can add it "
+            + "under Security → Permissions.");
+
+    // ── Auswahl-Menue ───────────────────────────────────────────────────────
+    // Gemeldet 2026-09-10 („die Menüs sind immer noch nicht i18n"): diese zwei
+    // Eintraege standen als einzige des Menues hart auf Englisch.
+    public static string BildKopieren => T("Bild in die Zwischenablage",
+                                           "Copy image to clipboard");
+    public static string BildSpeichern => T("Bild speichern unter…", "Save image as…");
+    public static string PngFilter => T("PNG-Bild|*.png", "PNG image|*.png");
+
+    // ── Ergebnisfenster ─────────────────────────────────────────────────────
+    public static string WarteAufModell => T("Warte auf das Modell…",
+                                             "Waiting for the model…");
+    public static string AnfrageFehlgeschlagen => T("Anfrage fehlgeschlagen",
+                                                    "Request failed");
+    // ⚠ DIE MELDUNG NENNT DEN GEGENSTAND: in der Zwischenablage sieht man
+    //   nicht, was drin liegt – bei zwei Kopier-Knoepfen ist „kopiert" allein
+    //   keine Auskunft.
+    public static string InZwischenablage => T("Text in die Zwischenablage kopiert.",
+                                               "Text copied to clipboard.");
+    public static string BildInZwischenablage =>
+        T("Bild in die Zwischenablage kopiert.", "Image copied to clipboard.");
+
+    /// <summary>Zeichenzahl der ANGEZEIGTEN Antwort.
+    ///
+    /// Gezaehlt wird, was im Fenster steht – also ohne die `**` der
+    /// Auszeichnung. Die Zahl soll zu dem passen, was der Benutzer sieht und
+    /// beim Kopieren bekommt.</summary>
+    public static string Zeichen(int n) => T($"{n} Zeichen", $"{n} characters");
+
+    // ── Meldungen aus dem Tray ──────────────────────────────────────────────
+    // Jede nennt den Grund; der technische Text des Systems haengt dahinter.
+    public static string AufnahmeFehler => T("Bildschirmaufnahme fehlgeschlagen: ",
+                                             "Screen capture failed: ");
+    public static string ZwischenablageBelegt => T(
+        "Die Zwischenablage ist gerade belegt: ", "The clipboard is busy: ");
+    public static string SpeichernFehler => T("Das Bild ließ sich nicht speichern: ",
+                                              "Could not save the image: ");
+    public static string OeffnenFehler => T("Ließ sich nicht öffnen: ",
+                                            "Could not open: ");
+    public static string UnerwarteterFehler => T("Unerwarteter Fehler:",
+                                                 "Unexpected error:");
+    public static string Unbekannt => T("unbekannt", "unknown");
+
+    /// <summary>UIPI hat die Weitergabe des Rechtsklicks abgelehnt.
+    ///
+    /// Der Klick des Benutzers ist in diesem Fall VERLOREN – die Meldung darf
+    /// deshalb nicht still bleiben und muss den Ausweg nennen.</summary>
+    public static string KlickNichtWeitergereichtAdmin => T(
+        $"Der Rechtsklick ließ sich nicht weiterreichen: das Fenster im Vordergrund "
+            + $"läuft mit erhöhten Rechten. Starte {Marke} als Administrator.",
+        $"The right-click could not be forwarded: the focused window runs elevated. "
+            + $"Start {Marke} as administrator.");
+    public static string KlickNichtWeitergereicht => T(
+        "Der Rechtsklick ließ sich nicht weiterreichen",
+        "The right-click could not be forwarded");
+
+    // ── Start: Tastenkombination und Autostart ──────────────────────────────
+
+    public static string StartAbschnitt => T("Start", "Startup");
+
+    public static string StartHotkey => T("Tastenkombination", "Keyboard shortcut");
+
+    /// <summary>Beschriftung des Aufnahmefeldes im Ruhezustand.</summary>
+    public static string HotkeyKeine => T("keine", "none");
+
+    /// <summary>Beschriftung des Knopfes, der die Kombination wieder loescht.
+    ///
+    /// ⚠ NICHT <see cref="HotkeyKeine"/> – der steht schon IM Feld daneben,
+    /// solange nichts belegt ist. Zwei Bedienelemente nebeneinander, die beide
+    /// „keine" sagen, sind nicht auseinanderzuhalten: das eine ist der
+    /// ZUSTAND, das andere eine AKTION (gemeldet 2026-09-14, Screenshot). Ein
+    /// Knopf sagt, was ein Klick TUT.
+    /// </summary>
+    public static string HotkeyLoeschen => T("Löschen", "Clear");
+
+    /// <summary>Waehrend das Feld auf einen Tastendruck wartet.</summary>
+    public static string HotkeyDruecken => T("Tasten drücken…", "Press keys…");
+
+    /// <summary>⚠ NENNT BEIDE EINSCHRAENKUNGEN, die sonst niemand erraten kann:
+    /// dass Strg+Alt Pflicht ist, und dass die Kombination ueber eine
+    /// Verknuepfung im Startmenue wirkt (die die Anwendung dafuer anlegt).</summary>
+    public static string HotkeyHinweis => T(
+        "Startet die Anwendung, wenn sie nicht läuft — sonst meldet sie sich. "
+            + "Möglich ist Strg+Alt+Taste (zusätzlich Umschalt). Dafür wird eine "
+            + "Verknüpfung im Startmenü angelegt; ohne sie kann Windows keine "
+            + "Tastenkombination auf ein Programm legen.",
+        "Starts the app when it is not running — otherwise it reports in. "
+            + "Ctrl+Alt+key is possible (plus Shift). This requires a shortcut in "
+            + "the Start menu; without one Windows cannot bind a key combination "
+            + "to a program.");
+
+    /// <summary>⚠ Sagt, was der Benutzer tun kann, wenn nichts passiert. Ein
+    /// `.lnk`-Hotkey meldet NICHT, wenn die Kombination schon belegt ist – er
+    /// tut dann einfach nichts, und ohne diesen Satz sucht man den Fehler in
+    /// der Anwendung.</summary>
+    public static string HotkeyBelegtHinweis => T(
+        "Passiert nichts, ist die Kombination bereits vergeben — wähle eine andere.",
+        "If nothing happens the combination is already taken — pick another one.");
+
+    public static string MitWindowsStarten => T("Mit Windows starten",
+                                                "Start with Windows");
+
+    public static string StartwegeFehler => T(
+        "Die Start-Einstellungen ließen sich nicht anwenden: ",
+        "The startup settings could not be applied: ");
+
+    /// <summary>Antwort der laufenden Instanz auf einen zweiten Start.</summary>
+    public static string LaeuftBereitsBlase => T(
+        "Läuft bereits. Ziehe mit der rechten Maustaste einen Ausschnitt auf.",
+        "Already running. Drag a region with the right mouse button.");
+
+    /// <summary>Nur noch fuer den Fall, dass das Signal NICHT ankommt.</summary>
+    public static string LaeuftBereits => T(
+        $"{Marke} läuft bereits — das Symbol steht im Infobereich.",
+        $"{Marke} is already running — look for its icon in the notification area.");
+
+    // ── Eingebaute Fragen (Rueckfall, wenn der Server keine liefert) ────────
+    // Der TITEL ist Oberflaeche und wird uebersetzt; der PROMPT geht an das
+    // Modell und bleibt englisch – dort ist die Sprache eine Eigenschaft des
+    // Auftrags, keine der Anzeige.
+    public static string FrageOcr => T("Text erkennen (OCR)", "Extract text (OCR)");
+    public static string FrageBeschreiben => T("Bild beschreiben", "Describe image");
+    public static string FrageFehler => T("Fehler / Code analysieren",
+                                          "Analyse error / code");
+}

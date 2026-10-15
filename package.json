@@ -1,0 +1,12 @@
+{
+  "name": "jarvis-pruefwerkzeug",
+  "private": true,
+  "description": "NUR die Werkzeuge der Waechter. Das Frontend hat bewusst keinen Build und keine Abhaengigkeiten - diese Datei beschreibt kein Paket, sondern nagelt jsdom und acorn auf EINE Fassung fest, damit Arbeitsplatz und CI dasselbe messen. Begruendung und Pruefung: tests/test_pruefwerkzeug_pin.js",
+  "devDependencies": {
+    "acorn": "8.8.1",
+    "jsdom": "25.0.1"
+  },
+  "scripts": {
+    "pruefwerkzeug": "npm install --no-save --no-audit --no-fund"
+  }
+}

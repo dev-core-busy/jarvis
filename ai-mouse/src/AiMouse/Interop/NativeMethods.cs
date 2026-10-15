@@ -1,0 +1,188 @@
+using System.Runtime.InteropServices;
+
+namespace AiMouse.Interop;
+
+/// <summary>P/Invoke surface for the global mouse hook and window management.</summary>
+internal static class NativeMethods
+{
+    internal const int WH_MOUSE_LL = 14;
+
+    internal const int WM_MOUSEMOVE = 0x0200;
+    internal const int WM_RBUTTONDOWN = 0x0204;
+    internal const int WM_RBUTTONUP = 0x0205;
+
+    internal const int ERROR_ACCESS_DENIED = 5;
+
+    /// <summary>Neuzeichnen eines Steuerelements aus- und wieder einschalten.
+    ///
+    /// Gebraucht beim stueckweisen Aufbau der Antwort im Ergebnisfenster: ohne
+    /// das flackert die RichTextBox bei jeder Fettstelle sichtbar.</summary>
+    internal const int WM_SETREDRAW = 0x000B;
+
+    /// <summary>Verweilzeit des Systems – „wie lange muss die Maus stillstehen".
+    ///
+    /// ⚠ DAS IST DER SYSTEMEIGENE WERT (Vorgabe 400 ms) und deshalb der
+    /// richtige fuer „gedrueckt halten, ohne zu bewegen". Eine eigene Zahl
+    /// waere auf einem Rechner mit angepassten Eingabehilfen falsch.</summary>
+    internal const uint SPI_GETMOUSEHOVERTIME = 0x0066;
+
+    /// <summary>Zieh-Toleranz des Systems (SM_CXDRAG / SM_CYDRAG, Vorgabe 4 px).
+    ///
+    /// „Ohne Bewegung" kann nicht null Pixel heissen – eine Hand zittert. Das
+    /// System hat dafuer bereits ein Mass, und genau daran misst auch jede
+    /// andere Anwendung, ob eine Bewegung ein Ziehen ist.</summary>
+    internal const int SM_CXDRAG = 68;
+    internal const int SM_CYDRAG = 69;
+
+    // Modifikatortasten fuer die Geste. `VK_CONTROL`/`VK_MENU`/`VK_SHIFT` sind
+    // die SEITENUNABHAENGIGEN Codes – links und rechts zaehlen also beide.
+    internal const int VK_SHIFT = 0x10;
+    internal const int VK_CONTROL = 0x11;
+    internal const int VK_MENU = 0x12;      // Alt
+
+    internal const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+    internal const uint TOKEN_QUERY = 0x0008;
+
+    internal const uint INPUT_MOUSE = 0;
+    internal const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
+    internal const uint MOUSEEVENTF_RIGHTUP = 0x0010;
+
+    internal const int WS_EX_TOPMOST = 0x00000008;
+    internal const int WS_EX_TRANSPARENT = 0x00000020;
+    internal const int WS_EX_TOOLWINDOW = 0x00000080;
+    internal const int WS_EX_NOACTIVATE = 0x08000000;
+
+    internal delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct POINT
+    {
+        public int x;
+        public int y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct MSLLHOOKSTRUCT
+    {
+        public POINT pt;
+        public uint mouseData;
+        public uint flags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct MOUSEINPUT
+    {
+        public int dx;
+        public int dy;
+        public uint mouseData;
+        public uint dwFlags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
+    /// <summary>
+    /// <c>INPUT</c> with only the <c>MOUSEINPUT</c> arm of the union declared — that is
+    /// the largest member, so the 40-byte 64-bit layout comes out right. The project
+    /// only ever publishes 64-bit runtimes.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct INPUT
+    {
+        public uint type;
+        public MOUSEINPUT mi;
+    }
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    internal static extern IntPtr SetWindowsHookExW(int idHook, LowLevelMouseProc lpfn, IntPtr hMod, uint dwThreadId);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern uint SendInput(uint cInputs, [In] INPUT[] pInputs, int cbSize);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool UnhookWindowsHookEx(IntPtr hhk);
+
+    [DllImport("user32.dll")]
+    internal static extern int GetSystemMetrics(int nIndex);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool SystemParametersInfoW(uint uiAction, uint uiParam,
+                                                      ref uint pvParam, uint fWinIni);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    internal static extern IntPtr SendMessageW(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    internal static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    internal static extern IntPtr GetModuleHandleW(string? lpModuleName);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    internal static extern IntPtr GetForegroundWindow();
+
+    /// <summary>Physischer Tastenzustand – und zwar der zum Zeitpunkt des Aufrufs.
+    ///
+    /// ⚠ `GetAsyncKeyState` und NICHT `GetKeyState`: letzteres liefert den
+    /// Zustand aus der Nachrichtenwarteschlange des AUFRUFENDEN Threads. Im
+    /// Hook-Callback ist das der Thread dieser Anwendung – er bekommt die
+    /// Tastatureingaben des Benutzers gar nicht, die gehen an das Fenster im
+    /// Vordergrund. `GetKeyState` meldete dort also dauerhaft „nicht gedrueckt".
+    /// </summary>
+    [DllImport("user32.dll")]
+    internal static extern short GetAsyncKeyState(int vKey);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool DestroyIcon(IntPtr hIcon);
+
+    [DllImport("user32.dll")]
+    internal static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    internal static extern IntPtr OpenProcess(uint dwDesiredAccess, [MarshalAs(UnmanagedType.Bool)] bool bInheritHandle, uint dwProcessId);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool OpenProcessToken(IntPtr ProcessHandle, uint DesiredAccess, out IntPtr TokenHandle);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool CloseHandle(IntPtr hObject);
+
+    /// <summary>Pseudo-Handle auf den eigenen Prozess – braucht KEIN
+    /// <see cref="CloseHandle"/> (es ist kein echtes Handle, sondern die
+    /// Konstante -1).</summary>
+    [DllImport("kernel32.dll")]
+    internal static extern IntPtr GetCurrentProcess();
+
+    /// <summary>Beendet den Prozess SOFORT, ohne Aufraeumen.
+    ///
+    /// ⚠ DAS IST DER UNTERSCHIED ZU <c>ExitProcess</c>, UND ER IST DER GANZE
+    /// ZWECK: `ExitProcess` nimmt den Loader-Lock und ruft in jeder geladenen
+    /// DLL `DLL_PROCESS_DETACH`. Haengt dabei ein Thread in einem ausgehenden
+    /// COM-Aufruf (Kernel-Wait) und haelt eine OLE32-interne Sperre, wird er
+    /// zwar terminiert – seine Sperre gibt er dabei NICHT frei. Die naechste
+    /// DLL, die sie im Detach braucht, laeuft in einen Deadlock, und der
+    /// Prozess bleibt als Zombie stehen: Fenster ohne Inhalt, Tray-Symbol,
+    /// und `taskkill /F` greift nicht mehr, weil die Beendigung laengst
+    /// laeuft und nur nicht fertig wird.
+    ///
+    /// `TerminateProcess` geht diesen Weg gar nicht erst: der Kernel raeumt
+    /// den Prozess ab, kein Detach, kein Loader-Lock, kein COM-Aufraeumen.
+    ///
+    /// ⚠ ES DARF ERST GERUFEN WERDEN, WENN ALLES PERSISTENTE GESCHRIEBEN IST.
+    /// Danach laeuft nichts mehr – kein Finalizer, kein `finally`, kein
+    /// Flush eines Dateistroms.
+    /// </summary>
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool TerminateProcess(IntPtr hProcess, uint uExitCode);
+}

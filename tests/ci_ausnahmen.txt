@@ -1,0 +1,35 @@
+# Waechter, die tests/ci_lauf.py in der CI NICHT als Fehlschlag zaehlt.
+# Je Zeile:  <dateiname>  # <Grund>   – eine Zeile ohne Grund bricht den Lauf ab.
+#
+# ⚠ DAS IST EIN RUECKSTAND, KEINE ERLAUBNIS. Beim Einrichten der Sicherheits-CI
+# (BSI M6, 2026-10-06) waren diese Waechter auf master 3c9472c1 bereits rot –
+# gemessen in einem sauberen Arbeitsbaum des Commits, mit der Projekt-venv und
+# mit einer frischen venv aus requirements.txt. Ohne diese Liste waere die CI vom
+# ersten Lauf an dauerhaft rot und damit wertlos fuer NEUE Fehler.
+# Mit --ausnahmen-pruefen laufen sie trotzdem; wer gruen wird, wird gemeldet und
+# gehoert dann HIER gestrichen.
+test_agent_roles.py                  # Altlast: auf master 3c9472c1 schon rot (vor M6)
+test_ai_mouse.py                     # Altlast: auf master 3c9472c1 schon rot (vor M6)
+test_benutzer_pfade.py               # Altlast: auf master 3c9472c1 schon rot (vor M6)
+test_bild_anzeige.py                 # Altlast: auf master 3c9472c1 schon rot (vor M6)
+test_bildmasse.py                    # Altlast: auf master 3c9472c1 schon rot (vor M6)
+test_cifs_anmeldung.py               # Altlast: auf master 3c9472c1 schon rot (vor M6)
+test_empty_answer.py                 # Altlast: auf master 3c9472c1 schon rot (vor M6)
+test_fs_gate_akteur.py               # Altlast: auf master 3c9472c1 schon rot (vor M6)
+test_instructions_seed.py            # Altlast: auf master 3c9472c1 schon rot (vor M6)
+test_kontext_schnitt.py              # Altlast: auf master 3c9472c1 schon rot (vor M6)
+test_mail_styles.py                  # Altlast: auf master 3c9472c1 schon rot (vor M6)
+test_onenote_import.py               # Altlast: auf master 3c9472c1 schon rot (vor M6)
+test_outlook_addin.py                # Altlast: auf master 3c9472c1 schon rot (vor M6)
+test_tool_markup.py                  # Altlast: auf master 3c9472c1 schon rot (vor M6)
+test_viol_anzeige.py                 # Altlast: auf master 3c9472c1 schon rot (vor M6)
+test_wissen_regression.py            # Altlast: auf master 3c9472c1 schon rot (vor M6)
+test_excel_diagnose_ui.js            # Altlast: auf master 3c9472c1 schon rot (vor M6)
+test_knowledge_sync_ui.js            # Altlast: auf master 3c9472c1 schon rot (vor M6)
+test_marke_i18n.js                   # Altlast: auf master 3c9472c1 schon rot (vor M6)
+test_pwreveal_ui.js                  # Altlast: auf master 3c9472c1 schon rot (vor M6)
+test_settings_btn.js                 # Altlast: auf master 3c9472c1 schon rot (vor M6)
+test_sitzung_eine_quelle.js          # Altlast: auf master 3c9472c1 schon rot (vor M6)
+test_theme_default.js                # Altlast: auf master 3c9472c1 schon rot (vor M6)
+test_waechter_bilanz.js              # Altlast: auf master 3c9472c1 schon rot (vor M6)
+test_similar_drafts.py               # Zusage entfallen (knowledge.py: Ausschluss gelernter Notizen seit 2026-09-13 weg); in alter venv nur zufaellig gruen

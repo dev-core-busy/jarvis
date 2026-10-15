@@ -1,0 +1,115 @@
+{
+    "name": "Avatar-Assistent",
+    "description": "Blendet eine sprechende Assistenten-Figur (klassischer Clippy oder ein austauschbarer Platzhalter) auf der Chat-Seite ein. Text- und Spracheingabe werden über die Jarvis-API beantwortet; bei Spracheingabe zusätzlich vorgelesen. Beim Deaktivieren verschwindet die Figur wieder.",
+    "version": "1.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": ["avatar_info"],
+    "category": "sonstige",
+    "icon": "smile",
+    "system": false,
+    "enabled": false,
+    "config_schema": {
+        "graphic": {
+            "type": "string",
+            "label": "Figur / Grafik",
+            "description": "Welche Figur angezeigt wird. 'placeholder' = schlichte SVG-Figur (übernimmt die Branding-Farben), 'branding' = das im Branding-Skill hochgeladene Firmenlogo, alle weiteren Einträge sind Sprite-Sätze im clippy.js-Format. Eigene Grafik: Ordner mit agent.js + map.png unter frontend/vendor/clippy/agents/<Name> ablegen – er erscheint hier automatisch, ohne Code-Änderung und ohne Dienst-Neustart. Vollständige Schritt-für-Schritt-Anleitung inkl. fertiger LLM-Prompts und Bau-Skript: skills/avatar/AVATAR-DESIGN.md (Skript: python3 skills/avatar/tools/build_agent.py <bilderordner> <Name>).",
+            "enum": ["placeholder", "branding", "Clippy"],
+            "enum_source": "/api/avatar/graphics",
+            "default": "Clippy",
+            "required": false
+        },
+        "position": {
+            "type": "string",
+            "label": "Bildschirmecke",
+            "description": "In welcher Ecke das Widget sitzt.",
+            "enum": ["bottom-right", "bottom-left"],
+            "default": "bottom-right",
+            "required": false
+        },
+        "title": {
+            "type": "string",
+            "label": "Anzeigename",
+            "description": "Name in der Kopfzeile des Widgets (leer = Standard 'Assistent' bzw. Branding-Name).",
+            "required": false
+        },
+        "greeting": {
+            "type": "text",
+            "label": "Begrüßung",
+            "description": "Text, den die Figur beim Öffnen anzeigt/spricht (leer = Standardbegrüßung).",
+            "required": false
+        },
+        "speak_on_voice": {
+            "type": "boolean",
+            "label": "Bei Spracheingabe vorlesen",
+            "description": "Wird die Frage per Mikrofon gestellt, wird die Antwort zusätzlich über den Lautsprecher vorgelesen (TTS). Bei Texteingabe erscheint die Antwort nur als Text. Unabhängig davon kann jeder Benutzer den Avatar über den Lautsprecher-Knopf in der Eingabezeile komplett stummschalten (Figur-Geräusche und Sprachausgabe); diese Wahl wird im Browser gemerkt.",
+            "default": true,
+            "required": false
+        },
+        "auto_open": {
+            "type": "boolean",
+            "label": "Beim Laden geöffnet",
+            "description": "Zeigt die Sprechblase des Avatars direkt beim Laden der Seite (sonst nur die Figur, Klick öffnet).",
+            "default": false,
+            "required": false
+        },
+        "answer_mode": {
+            "type": "string",
+            "label": "Antwortquelle",
+            "description": "'agent' = voller Assistent mit Werkzeugen und Wissensdatenbank (wie im Chat). 'sources' = antwortet AUSSCHLIESSLICH aus den eigenen Antworten unten und den hinterlegten Confluence-Seiten – ohne Werkzeuge und ohne eigenes Vorwissen. Das Sprachmodell wird dabei weiterhin genutzt, um die Frage zu verstehen und die Antwort zu formulieren.",
+            "enum": ["agent", "sources"],
+            "default": "agent",
+            "required": false
+        },
+        "confluence_pages": {
+            "type": "text",
+            "label": "Confluence-Seiten (nur bei Antwortquelle 'sources')",
+            "description": "Je Zeile eine Confluence-Seite – als URL aus dem Browser (…/pages/123456/Titel) oder als reine Seiten-ID. Benötigt einen konfigurierten Confluence-Skill.",
+            "required": false
+        },
+        "include_subpages": {
+            "type": "boolean",
+            "label": "Unterseiten mitlesen",
+            "description": "Liest zusätzlich alle Unterseiten der angegebenen Seiten (rekursiv, max. 40 je Startseite). Für mehrseitige Handbücher.",
+            "default": true,
+            "required": false
+        },
+        "use_rag": {
+            "type": "boolean",
+            "label": "Wissensdatenbank (RAG) einbeziehen",
+            "description": "Zieht im Modus 'sources' zusätzlich die interne Wissensdatenbank als Quelle heran. Aus = ausschließlich eigene Antworten und Confluence.",
+            "default": false,
+            "required": false
+        },
+        "no_answer_text": {
+            "type": "text",
+            "label": "Antwort, wenn nichts passt",
+            "description": "Wird ausgegeben, wenn weder die eigenen Antworten noch die Quellen die Frage abdecken (leer = Standardhinweis). Verhindert erfundene Antworten.",
+            "required": false
+        },
+        "overrides": {
+            "type": "text",
+            "label": "Eigene Antworten (Frage ||| Antwort)",
+            "description": "Feste Antworten auf bestimmte Fragen – je Zeile 'Frage | Antwort' (z.B. 'Öffnungszeiten | Mo–Fr 8–17 Uhr'). Sollen MEHRERE Fragen dieselbe Antwort bekommen, diese mit | aufzählen und die Antwort mit ||| abtrennen: 'öffnungszeiten | wann habt ihr auf ||| Mo–Fr 8–17 Uhr'. Treffer werden serverseitig ohne KI beantwortet. Leere Zeilen und mit # beginnende Zeilen werden ignoriert.",
+            "required": false
+        }
+    },
+    "knowledge_docs": [],
+    "dependencies": [],
+    "permissions": [],
+    "help": {
+        "details": "EIGENES DESIGN: Die vollständige Anleitung steht in skills/avatar/AVATAR-DESIGN.md – drei Wege (Firmenlogo, SVG-Platzhalter, eigener Sprite-Satz), das genaue Dateiformat, fünf harte Funktionsregeln, fertige Prompt-Vorlagen für Bild- und Code-Modelle sowie das Bau-Skript skills/avatar/tools/build_agent.py, das aus einzelnen PNG-Frames map.png + agent.js erzeugt. Der Avatar-Assistent zeigt eine schwebende Figur auf der Chat-Seite (/chat; /portal und /support folgen). Über ein eigenes Eingabefeld sind Text- und Spracheingabe möglich; die Anfrage wird über die normale Jarvis-API (Agent) beantwortet. Bei Texteingabe erscheint die Antwort als Text in der Sprechblase, bei Mikrofon-Eingabe wird sie zusätzlich vorgelesen. Die Grafik ist austauschbar: mitgeliefert sind der klassische 'Clippy' (Sprite-Animation) und ein neutraler SVG-'Platzhalter', der als Vorlage für eigene Grafiken dient. Feste Antworten auf spezielle Fragen lassen sich in den Einstellungen hinterlegen (Feld 'Eigene Antworten'). Alle Parameter stehen unter Einstellungen → Skills → Avatar-Assistent (Zahnrad). Beim Deaktivieren des Skills verschwindet die Figur.",
+        "tools": [
+            {
+                "name": "avatar_info",
+                "label": "Avatar-Status",
+                "desc": "Gibt die aktuelle Avatar-Konfiguration zurück (Grafik, Position, Anzahl eigener Antworten)."
+            }
+        ],
+        "use_cases": [
+            "Aktiviere den Avatar-Assistenten im Chat",
+            "Wie ist der Avatar konfiguriert?"
+        ],
+        "notes": "Hinweis: Der Avatar läuft mit den Rechten des angemeldeten Benutzers, aber bewusst unprivilegiert (keine System-/Root-Aktionen). Für privilegierte Aktionen den normalen Chat verwenden. Die Original-Clippy-Grafik ist Microsoft-Eigentum; die clippy.js-Bibliothek selbst steht unter MIT."
+    }
+}

@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jarvis – Start</title>
+    <link rel="stylesheet" href="/static/css/theme.css?v=34">
+    <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
+    <link rel="stylesheet" href="/static/css/avatar.css?v=10">
+    <link rel="stylesheet" href="/static/css/update_widget.css?v=4">
+    <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: var(--font-body); background: var(--bg-primary); color: var(--text-primary); min-height: 100vh; }
+        /* position+z-index: Topbar (mit backdrop-filter = eigener Stacking-Kontext)
+           MUSS über den Karten liegen, sonst rutscht das Update-Dropdown dahinter. */
+        .pt-topbar { display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+            border-bottom: 1px solid var(--border); background: var(--bg-glass); backdrop-filter: blur(8px);
+            position: relative; z-index: 30; }
+        .pt-logo { width: 32px; height: 32px; border-radius: 50%; background: var(--gradient);
+            display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; color: #fff;
+            flex-shrink: 0; overflow: hidden; }
+        .pt-title { font-size: 1.15rem; font-weight: 600; }
+        .pt-status-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+            background: var(--text-muted, #64748b); transition: background .3s ease; }
+        .pt-status-dot.connected { background: var(--success, #22c55e); box-shadow: 0 0 6px var(--success, #22c55e); }
+        .pt-status-dot.disconnected { background: var(--danger, #ef4444); }
+        .pt-spacer { flex: 1; }
+        /* Die Symbolgruppe rechts braucht einen EIGENEN Container.
+           `.pt-topbar` hat `gap: 10px` fuer Logo/Titel/Status – ohne
+           Gruppe erben die Knoepfe diesen Abstand und stehen mehr als
+           doppelt so weit auseinander wie auf jeder anderen Seite
+           (dort `.topbar-right`/`.wi-top-icons` mit 4px). Gemeldet
+           2026-08-22, und es ist derselbe Fall wie damals bei /excel:
+           eine Seite, die die Leiste flach baut statt in zwei Gruppen. */
+        .pt-top-icons { display: flex; align-items: center; gap: 4px; }
+        .pt-btn { background: none; border: none; color: #888899;
+            padding: 4px 8px; border-radius: 8px; cursor: pointer; font-size: 0.85rem;
+            display: flex; align-items: center; justify-content: center; gap: 6px; font-family: var(--font-body);
+            transition: color .2s, background .2s; }
+        .pt-btn:hover { background: rgba(var(--accent-rgb), .12); color: var(--text-primary); }
+        .pt-btn svg { width: 20px; height: 20px; }
+        body.light .pt-btn { color: #777788; }
+        /* de/en-Umschalter wie in /chat */
+        .lang-toggle { display: flex; gap: 2px; background: rgba(var(--fg-rgb, 148,163,184), 0.05);
+            border: 1px solid rgba(var(--fg-rgb, 148,163,184), 0.1); border-radius: 8px; padding: 2px; }
+        .lang-toggle-btn { background: transparent; border: none; color: var(--text-secondary);
+            font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em; padding: 3px 10px;
+            border-radius: 6px; cursor: pointer; font-family: var(--font-body);
+            transition: background .15s, color .15s; }
+        .lang-toggle-btn:hover { color: var(--text-primary); }
+        .lang-toggle-btn.active { background: rgba(var(--accent-rgb), 0.35); color: var(--text-primary); }
+        .hidden { display: none !important; }
+
+        .pt-wrap { max-width: 880px; margin: 0 auto; padding: 48px 20px 60px; }
+        .pt-hello { font-size: 1.5rem; font-weight: 700; margin-bottom: 6px; }
+        .pt-sub { color: var(--text-secondary); margin-bottom: 30px; }
+        .pt-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px; }
+        .pt-card { position: relative; display: flex; flex-direction: column; gap: 10px; text-decoration: none;
+            background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-lg);
+            padding: 22px; box-shadow: var(--shadow-md); transition: transform .15s, border-color .15s; }
+        .pt-card:hover { transform: translateY(-3px); border-color: rgba(var(--accent-rgb), .5); }
+        /* Ungelesen-Badge (z.B. Benutzerchat): oben rechts auf der Karte */
+        .pt-card-badge { position: absolute; top: 12px; right: 12px; min-width: 20px; height: 20px;
+            padding: 0 6px; border-radius: 10px; background: var(--danger, #ef4444); color: #fff;
+            font-size: 0.72rem; font-weight: 700; line-height: 20px; text-align: center;
+            box-shadow: 0 0 0 2px var(--bg-secondary); }
+        .pt-card-badge.hidden { display: none; }
+        /* Branding-Portal-Video als Karte: gleiche Optik wie .pt-card, aber ohne Hover-Effekt */
+        .pt-card-video { padding: 12px; cursor: default; justify-content: center; }
+        .pt-card-video:hover { transform: none; border-color: var(--border); }
+        .pt-card-icon { width: 46px; height: 46px; border-radius: 12px; display: flex; align-items: center;
+            justify-content: center; background: rgba(var(--accent-rgb), .15); color: var(--accent-hover); }
+        .pt-card-icon svg { width: 24px; height: 24px; }
+        .pt-card-title { font-size: 1.1rem; font-weight: 600; color: var(--text-primary); }
+        .pt-card-desc { font-size: 0.86rem; color: var(--text-secondary); line-height: 1.45; }
+        /* ── Kompakte Kacheln (Umschalter in der Titelleiste) ───────────────
+           Bei vielen freigeschalteten Bereichen passt die Kachelwand nicht mehr
+           auf einen Bildschirm. "klein" zeigt Symbol + Kurzbeschreibung (den
+           Titel); der laengere Beschreibungstext wandert in den Tooltip, damit
+           die Aussage nicht verloren geht, sondern nur ihren Platz wechselt.
+
+           Die Klasse haengt an `body`, nicht am Raster: so greifen auch Regeln
+           fuer Elemente ausserhalb von `.pt-cards`, und der Zustand ist mit
+           einem Klassenwechsel gesetzt (kein Umbauen von Inline-Styles, das nach
+           dem Zurueckschalten Reste hinterlaesst). */
+        body.pt-kompakt .pt-cards { grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 10px; }
+        body.pt-kompakt .pt-card { padding: 12px 10px; gap: 6px; align-items: center; text-align: center; }
+        body.pt-kompakt .pt-card-icon { width: 34px; height: 34px; border-radius: 9px; }
+        body.pt-kompakt .pt-card-icon svg { width: 19px; height: 19px; }
+        body.pt-kompakt .pt-card-title { font-size: 0.82rem; font-weight: 600; line-height: 1.25; }
+        /* Der lange Text wird NICHT geloescht, nur verborgen – er steckt zugleich
+           im title-Attribut, das `portalKacheln()` daraus setzt. */
+        body.pt-kompakt .pt-card-desc { display: none; }
+        /* Das Abzeichen (ungelesene Nachrichten) muss in der kleineren Kachel
+           mitwandern, sonst haengt es ausserhalb. */
+        body.pt-kompakt .pt-card-badge { top: 6px; right: 6px; }
+        /* DAS VIDEO WIRD NIE VERKLEINERT (Vorgabe): im engeren Raster belegt die
+           Karte zwei Spalten und behaelt damit ihre Breite, waehrend alle
+           uebrigen Kacheln schrumpfen. `min-width` faengt den Fall ab, dass nur
+           eine Spalte da ist (schmales Fenster). */
+        body.pt-kompakt .pt-card-video { grid-column: span 2; min-width: 220px;
+                                         padding: 12px; text-align: initial; }
+
+        /* Dezente Info-/Kontaktzeile unterhalb der Karten (Branding-Skill befuellbar) */
+        .pt-contact { margin-top: 26px; display: flex; justify-content: center; align-items: center;
+            gap: 8px; flex-wrap: wrap; font-size: 0.8rem; color: var(--text-secondary); opacity: .75; }
+        .pt-contact a { color: inherit; text-decoration: none; }
+        .pt-contact a:hover { color: var(--accent-hover); text-decoration: underline; }
+        .pt-contact-sep { opacity: .6; }
+
+        /* ── Sicherheitsstatus-Badge + Banner (von /chat verschoben) ── */
+        .security-badge { width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:rgba(239,68,68,.12);color:#ef4444;border:1px solid rgba(239,68,68,.25);cursor:pointer;transition:all .2s;flex-shrink:0; }
+        .security-badge.secure { background:rgba(16,185,129,.12);color:#10b981;border-color:rgba(16,185,129,.25); }
+        .security-badge:hover { transform:scale(1.1); }
+        .security-badge svg { width:14px;height:14px; }
+        .security-banner { position:fixed;top:0;left:0;right:0;z-index:2000;background:linear-gradient(90deg,#ef4444,#f97316);color:#fff;padding:.5rem 1rem;font-size:.85rem;font-weight:600;display:none;box-shadow:0 4px 15px rgba(239,68,68,.3); }
+        .banner-content { max-width:1200px;margin:0 auto;display:flex;align-items:center;gap:1rem; }
+        .btn-banner-action { background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.4);color:#fff;padding:.25rem .75rem;border-radius:6px;font-size:.75rem;font-weight:700;cursor:pointer;text-transform:uppercase; }
+        .btn-banner-action:hover { background:#fff;color:#ef4444; }
+        .btn-close-banner { background:none;border:none;color:#fff;font-size:1.25rem;cursor:pointer;margin-left:auto;opacity:.7; }
+        .btn-close-banner:hover { opacity:1; }
+
+        /* ── Modals: 2FA + Zertifikat (portal-nativ) ── */
+        .modal-overlay { position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:1000;backdrop-filter:blur(4px); }
+        .modal-overlay.hidden { display:none; }
+        .modal-card { background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;padding:28px 26px;width:400px;max-width:92vw;text-align:center;max-height:88vh;overflow:auto; }
+        .modal-title { font-size:18px;font-weight:600;margin-bottom:18px;color:var(--text-primary); }
+        .modal-card input { display:block;width:100%;padding:12px 16px;margin-bottom:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg-primary);color:var(--text-primary);font-size:14px;outline:none; }
+        .modal-card input:focus { border-color:var(--accent); }
+        .modal-card input[inputmode="numeric"] { text-align:center;font-size:22px;letter-spacing:8px;font-weight:600; }
+        .btn-login { width:100%;padding:12px;border:none;border-radius:10px;background:var(--accent);color:#fff;font-size:15px;font-weight:600;cursor:pointer;transition:background .2s,opacity .2s;margin-top:4px; }
+        .btn-login:hover { background:var(--accent-hover); }
+        .btn-danger { background:var(--danger) !important; }
+        .btn-modal-close { display:block;width:100%;margin-top:12px;padding:10px;background:none;border:1px solid var(--border);border-radius:10px;color:var(--text-secondary);font-size:14px;cursor:pointer; }
+        .btn-modal-close:hover { border-color:var(--text-primary);color:var(--text-primary); }
+        .login-error { margin-top:12px;font-size:13px;color:var(--danger);min-height:20px; }
+        .totp-info { font-size:13px;color:var(--text-primary);margin-bottom:16px;line-height:1.5; }
+        .totp-qr { margin:16px auto; } .totp-qr img { border-radius:8px;max-width:200px; }
+        .totp-secret-label { font-size:11px;color:var(--text-secondary);margin-bottom:4px; }
+        .totp-secret-code { display:block;font-size:14px;letter-spacing:2px;color:var(--accent-hover);background:rgba(var(--fg-rgb,148,163,184),.08);padding:8px 12px;border-radius:8px;user-select:all;cursor:pointer;margin-bottom:8px; }
+        /* ── Desktop/VNC-Overlay (von /chat verschoben): Warte-Overlay aus vnc.js ── */
+        .vnc-reconnect-overlay { position:absolute;inset:0;background:rgba(10,14,23,.92);backdrop-filter:blur(8px);
+            display:flex;align-items:center;justify-content:center;z-index:100; }
+        .vnc-reconnect-content { text-align:center;color:var(--text-primary); }
+        .vnc-reconnect-spinner { width:48px;height:48px;border:3px solid var(--border);border-top-color:var(--accent);
+            border-radius:50%;margin:0 auto 1.5rem;animation:vncSpin 1s linear infinite; }
+        @keyframes vncSpin { to { transform:rotate(360deg); } }
+        .vnc-reconnect-text { font-size:1.1rem;font-weight:500;margin-bottom:1.5rem;color:var(--text-primary); }
+        .vnc-reconnect-sub { font-size:.85rem;color:var(--text-secondary);margin-bottom:1.5rem; }
+        .vnc-reconnect-btn { padding:.5rem 1.5rem;background:transparent;border:1px solid var(--border-hover);
+            color:var(--text-secondary);border-radius:6px;cursor:pointer;font-size:.8rem;transition:all .2s ease; }
+        .vnc-reconnect-btn:hover { background:rgba(var(--accent-rgb),.15);border-color:var(--accent);color:var(--text-primary); }
+
+        .cert-tab { background:none;border:1px solid var(--border);color:var(--text-secondary);padding:5px 10px;border-radius:8px;cursor:pointer;font-size:.8rem; }
+        .cert-tab.active { background:rgba(var(--accent-rgb),.15);color:var(--accent-hover);border-color:var(--accent); }
+        .cert-tab-content.hidden { display:none; }
+
+        /* ── Info-Dokumente (Ordnersymbol oben rechts) ──────────────────────
+           Der Knopf ist per Vorgabe versteckt und wird nur eingeblendet, wenn
+           /api/info_files Dateien liefert. Das Panel haengt am Knopf (dessen
+           Wrapper ist position:relative), damit es beim Scrollen mitgeht. */
+        .pt-info-wrap { position:relative; display:flex; }
+        .pt-info-panel { position:absolute; top:calc(100% + 8px); right:0; z-index:60;
+            min-width:280px; max-width:min(420px, calc(100vw - 32px));
+            /* DECKEND, nicht Glas: ueber dem Panel liegen die Portal-Karten mit
+               Text – mit halbtransparentem Hintergrund scheint deren Schrift
+               durch die Dateinamen (im Test sichtbar geworden). backdrop-filter
+               hilft nicht zuverlaessig, er wird nicht in jeder Umgebung
+               gerendert. */
+            background:var(--bg-secondary);
+            border:1px solid var(--border); border-radius:12px;
+            box-shadow:0 12px 32px rgba(var(--shadow-rgb),.28); overflow:hidden; }
+        .pt-info-panel[hidden] { display:none; }
+        .pt-info-head { display:flex; align-items:center; gap:8px; padding:10px 12px;
+            border-bottom:1px solid var(--border); font-size:.82rem; font-weight:600;
+            color:var(--text-primary); }
+        .pt-info-head .pt-info-count { margin-left:auto; font-weight:500; font-size:.75rem;
+            color:var(--text-muted); }
+        .pt-info-list { max-height:min(60vh, 420px); overflow-y:auto; padding:6px; }
+        /* ── Angemeldete Benutzer (Admin) ── */
+        .pt-usr-wrap { position:relative; display:flex; }
+        /* DECKEND wie das Dokumente-Panel: darunter liegen die Portal-Karten mit
+           Text, der bei halbtransparentem Grund durch die Namen scheint. */
+        .pt-usr-panel { position:absolute; top:calc(100% + 8px); right:0; z-index:60;
+            min-width:320px; max-width:min(440px, calc(100vw - 32px));
+            background:var(--bg-secondary); border:1px solid var(--border);
+            border-radius:12px; box-shadow:0 12px 32px rgba(var(--shadow-rgb),.28);
+            overflow:hidden; }
+        .pt-usr-panel[hidden] { display:none; }
+        .pt-usr-head { display:flex; align-items:center; gap:8px; padding:10px 12px;
+            border-bottom:1px solid var(--border); font-size:.82rem; font-weight:600;
+            color:var(--text-primary); }
+        .pt-usr-count { margin-left:auto; font-weight:500; font-size:.75rem;
+            color:var(--text-muted); }
+        /* Filterfeld: bei vielen Anmeldungen der einzige Weg, einen bestimmten
+           Benutzer zu finden, ohne durch die Liste zu scrollen. */
+        .pt-usr-filter { padding:8px 10px; border-bottom:1px solid var(--border); }
+        .pt-usr-filter input { width:100%; box-sizing:border-box; padding:6px 9px;
+            font-size:.8rem; font-family:inherit; border-radius:8px;
+            border:1px solid var(--border); background:rgba(var(--fg-rgb),.05);
+            color:var(--text-primary); }
+        .pt-usr-filter input::placeholder { color:var(--text-muted); }
+        .pt-usr-filter input:focus { outline:none; border-color:var(--accent);
+            background:rgba(var(--fg-rgb),.08); }
+        .pt-usr-list { max-height:min(60vh, 420px); overflow-y:auto; padding:4px; }
+        /* KOMPAKT: zwei Zeilen à ~16 px statt eines umbrechenden Metablocks.
+           Bei zwanzig Anmeldungen ist Ueberblick wichtiger als Vollstaendigkeit –
+           die Zeitstempel stehen im title des Eintrags. */
+        .pt-usr-item { padding:4px 8px; border-radius:7px; }
+        .pt-usr-item:hover { background:rgba(var(--accent-rgb),.10); }
+        .pt-usr-top { display:flex; align-items:center; gap:7px; min-width:0; }
+        /* min-width:0 ist Pflicht: ein Flex-Kind schrumpft sonst nicht unter
+           seine Textbreite und der lange Name schiebt den ⋯-Knopf hinaus. */
+        .pt-usr-name { flex:0 1 auto; min-width:0; font-size:.82rem; line-height:1.3;
+            color:var(--text-primary); overflow:hidden; text-overflow:ellipsis;
+            white-space:nowrap; }
+        /* Die Pille traegt die Aussage doppelt (Farbe UND Text) – Farbe allein
+           waere fuer Farbfehlsichtige keine Information. */
+        .pt-usr-pill { flex:0 0 auto; font-size:.6rem; font-weight:700;
+            letter-spacing:.02em; padding:1px 6px; border-radius:999px;
+            text-transform:uppercase; }
+        .pt-usr-pill.is-on { background:color-mix(in srgb, var(--success, #22c55e) 22%, transparent);
+            color:var(--success, #22c55e);
+            border:1px solid color-mix(in srgb, var(--success, #22c55e) 45%, transparent); }
+        /* Dritte Stufe: verbunden, aber untaetig. Warnfarbe wie bei der
+           Untaetigkeits-Angabe, damit beide dieselbe Sprache sprechen. */
+        .pt-usr-pill.is-idle { background:color-mix(in srgb, var(--warning, #f59e0b) 22%, transparent);
+            color:var(--warning, #f59e0b); }
+        .pt-usr-pill.is-off { background:rgba(var(--fg-rgb),.07); color:var(--text-muted);
+            border:1px solid var(--border); }
+        .pt-usr-tag { font-size:.62rem; font-weight:700; padding:1px 6px; border-radius:6px;
+            background:rgba(var(--accent-rgb),.18); color:var(--text-secondary); }
+        /* EINE Zeile, kein Umbruch: sonst waechst der Eintrag je nach Textlaenge
+           auf zwei bis drei Zeilen und die Liste wird unregelmaessig hoch. */
+        .pt-usr-meta { font-size:.68rem; line-height:1.35; color:var(--text-muted);
+            white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+            padding-left:2px; }
+        .pt-usr-meta b { font-weight:600; color:var(--text-secondary); }
+        .pt-usr-meta i { font-style:normal; opacity:.85; }
+        .pt-usr-sep { opacity:.5; }
+        /* "untätig seit …" steht ab 5 Minuten da, faellt aber erst ab 30 auf:
+           in einer langen Liste ist die Mehrheit fast immer laenger als fuenf
+           Minuten untaetig – eine Warnfarbe, die fast ueberall steht, ist keine
+           Warnung mehr, sondern Tapete. Ohne .is-warn nur leichte Betonung. */
+        .pt-usr-idle { color:var(--text-secondary); font-weight:600; }
+        .pt-usr-idle.is-warn { color:var(--warning); }
+        .pt-usr-blocked { background:color-mix(in srgb, var(--danger) 22%, transparent);
+            color:var(--danger); }
+        /* Der ⋯-Knopf ist der SICHTBARE Weg ins Menue – ein Menue, das man nur
+           per Rechtsklick findet, findet niemand. */
+        .pt-usr-menubtn { margin-left:auto; flex:0 0 auto; background:none; border:none;
+            color:var(--text-muted); cursor:pointer; font-size:1rem; line-height:1;
+            padding:2px 6px; border-radius:6px; }
+        .pt-usr-menubtn:hover, .pt-usr-menubtn:focus {
+            background:rgba(var(--fg-rgb),.10); color:var(--text-primary); outline:none; }
+        .pt-usr-menu { position:fixed; z-index:10070; min-width:210px;
+            background:var(--bg-secondary); border:1px solid var(--border);
+            border-radius:10px; box-shadow:0 12px 32px rgba(var(--shadow-rgb),.35);
+            overflow:hidden; padding:4px; }
+        .pt-usr-menu-head { padding:6px 10px 7px; font-size:.72rem; font-weight:600;
+            color:var(--text-muted); border-bottom:1px solid var(--border);
+            margin:-4px -4px 4px; background:rgba(var(--fg-rgb),.04);
+            overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .pt-usr-menu-item { display:flex; align-items:center; gap:9px; width:100%;
+            padding:7px 10px; border:none; border-radius:7px; background:none;
+            color:var(--text-primary); font-size:.82rem; font-family:inherit;
+            text-align:left; cursor:pointer; }
+        .pt-usr-menu-item:hover, .pt-usr-menu-item:focus {
+            background:rgba(var(--accent-rgb),.16); outline:none; }
+        .pt-usr-menu-item.is-danger { color:var(--danger); }
+        .pt-usr-menu-item.is-danger:hover, .pt-usr-menu-item.is-danger:focus {
+            background:color-mix(in srgb, var(--danger) 16%, transparent); }
+        .pt-usr-menu-ico { width:1.1em; text-align:center; flex:0 0 auto; }
+        .pt-usr-empty { padding:14px 12px; font-size:.8rem; color:var(--text-muted); }
+        .pt-usr-hint { padding:8px 12px 10px; font-size:.68rem; line-height:1.35;
+            color:var(--text-muted); border-top:1px solid var(--border); }
+        .pt-info-item { display:flex; align-items:center; gap:10px; padding:8px 10px;
+            border-radius:8px; text-decoration:none; color:var(--text-primary);
+            transition:background .15s; }
+        .pt-info-item:hover { background:rgba(var(--accent-rgb),.12); }
+        .pt-info-item svg { width:20px; height:20px; flex-shrink:0; }
+        .pt-info-name { flex:1; min-width:0; font-size:.82rem; overflow:hidden;
+            text-overflow:ellipsis; white-space:nowrap; }
+        .pt-info-meta { font-size:.7rem; color:var(--text-muted); flex-shrink:0; }
+        /* Typ-Farben ueber Theme-Variablen (kein hartes Rot/Gruen) */
+        .pt-ico-pdf        { color:var(--danger); }
+        .pt-ico-word       { color:var(--accent); }
+        .pt-ico-excel      { color:var(--success); }
+        .pt-ico-powerpoint { color:var(--warning); }
+        .pt-ico-image      { color:var(--accent-hover, var(--accent)); }
+        .pt-ico-archive    { color:var(--warning); }
+        .pt-ico-video, .pt-ico-audio { color:var(--accent); }
+        .pt-ico-text, .pt-ico-code, .pt-ico-file { color:var(--text-secondary); }
+    </style>
+</head>
+<body>
+<script src="/static/js/theme_frueh.js?v=1"></script>
+<script src="/static/js/portal_tiles_frueh.js?v=2"></script>
+
+<!-- Sicherheits-Warnbanner bei unverschlüsselter Verbindung -->
+<div id="security-banner" class="security-banner" hidden>
+    <div class="banner-content">
+        <span>⚠️</span>
+        <span class="banner-text" id="security-banner-text">Verbindung unsicher</span>
+        <button class="btn-banner-action" id="btn-banner-help" data-i18n="cert.banner.btn">Zertifikat installieren</button>
+        <button class="btn-close-banner" id="btn-close-banner">&times;</button>
+    </div>
+</div>
+
+<div class="pt-topbar">
+    <div class="pt-logo topbar-avatar">J</div>
+    <div class="pt-title"><span class="brand-app-name">Jarvis</span> <span data-i18n="portal.title">KI-Portal</span></div>
+    <span class="pt-status-dot" id="pt-status-dot" title="LLM-Status" data-i18n-title="portal.llm_status"></span>
+    <div id="security-indicator" class="security-badge" title="Sicherheitsstatus" data-i18n-title="security.status">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+    </div>
+    <div class="update-widget-wrap" id="chat-update-wrap" style="display:none;">
+        <div id="version-pill" class="header-version-pill upd-pill-clickable" title="Updates &amp; Version">
+            <span id="update-version" class="upd-pill-ver">v?</span>
+            <span id="update-badge" class="update-badge" style="display:none;">●</span>
+        </div>
+        <div id="update-dropdown" class="update-dropdown hidden">
+            <div class="update-dropdown-header"><span><span class="brand-app-name">Jarvis</span> Updates</span><button id="upd-close" class="update-close-btn" data-i18n-title="common.close" title="Schließen">✕</button></div>
+            <div id="upd-body" class="update-dropdown-body"><p class="kb-hint" style="margin:0;">Prüfe…</p></div>
+        </div>
+    </div>
+    <div class="pt-spacer"></div>
+    <div class="pt-top-icons">
+        <div class="lang-toggle" id="pt-lang-toggle">
+            <button class="lang-toggle-btn" data-lang="de" data-setlang="de" title="Deutsch">DE</button>
+            <button class="lang-toggle-btn" data-lang="en" data-setlang="en" title="English">EN</button>
+        </div>
+        <!-- Desktop (VNC): nur fuer Admins (von /chat hierher verschoben);
+             gespiegelt wird immer die Desktop-Session des lokalen Benutzers 'jarvis' -->
+        <button class="pt-btn" id="pt-vnc-btn" title="Desktop (VNC)" data-i18n-title="chat.desktop" style="display:none;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        </button>
+        <!-- Angemeldete Benutzer: nur fuer Admins (wie der Desktop-Knopf daneben) -->
+        <div class="pt-usr-wrap" id="pt-usr-wrap" style="display:none;">
+            <button class="pt-btn" id="pt-usr-btn" title="Angemeldete Benutzer"
+                    data-i18n-title="sessions.title" aria-haspopup="true" aria-expanded="false">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            </button>
+            <div class="pt-usr-panel" id="pt-usr-panel" hidden>
+                <div class="pt-usr-head">
+                    <span data-i18n="sessions.title">Angemeldete Benutzer</span>
+                    <span class="pt-usr-count" id="pt-usr-count"></span>
+                </div>
+                <div class="pt-usr-filter" id="pt-usr-filter">
+                    <input type="search" id="pt-usr-search" autocomplete="off" spellcheck="false"
+                           placeholder="Benutzer filtern…" data-i18n-placeholder="sessions.search_ph"
+                           aria-label="Benutzerliste filtern" data-i18n-aria="sessions.search_aria">
+                </div>
+                <div class="pt-usr-list" id="pt-usr-list"></div>
+                <div class="pt-usr-hint" id="pt-usr-hint"></div>
+            </div>
+        </div>
+        <!-- Info-Dokumente: Ordnersymbol, nur sichtbar wenn frontend_info_files/ Dateien enthaelt -->
+        <div class="pt-info-wrap" id="pt-info-wrap" style="display:none;">
+            <button class="pt-btn" id="pt-info-btn" title="Dokumente" data-i18n-title="portal.info_files" aria-haspopup="true" aria-expanded="false">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            </button>
+            <div class="pt-info-panel" id="pt-info-panel" hidden>
+                <div class="pt-info-head">
+                    <span data-i18n="portal.info_files">Dokumente</span>
+                    <span class="pt-info-count" id="pt-info-count"></span>
+                </div>
+                <div class="pt-info-list" id="pt-info-list"></div>
+            </div>
+        </div>
+        <button class="pt-btn" id="btn-totp-setup" title="2FA einrichten" data-i18n-title="chat.setup_2fa" style="font-size:1rem;">🔐</button>
+        <!-- Issues/Feedback. Der Avatar-Schalter haengt sich zur Laufzeit
+             direkt davor (avatar.js) – Reihenfolge wie auf allen Unterseiten. -->
+        <button class="pt-btn jv-issues-btn" id="pt-issues-btn" title="Issues / Feedback" data-i18n-title="sup.issues" data-issues-oeffnen style="position:relative;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        </button>
+        <!-- Kachelgroesse umschalten. Steht VOR Hell/Dunkel, weil beides
+             Ansichts-Schalter sind und der haeufiger benutzte (Theme) am Rand
+             der Gruppe bleibt. Beschriftung und Symbol folgen dem Zustand – ein
+             Umschalter mit unveraenderlichem Text sieht beim Zurueckschalten wie
+             ein wirkungsloser Klick aus (Lehre vom Broker-Audit-Knopf). -->
+        <button class="pt-btn" id="pt-size-btn" title="Kacheln verkleinern" data-i18n-title="portal.tiles_small">
+            <!-- 3x3 = "kleiner, mehr davon"; 2x2 = "groesser". Zwei fast gleiche
+                 Symbole waeren nicht unterscheidbar - der Unterschied muss die
+                 AUSSAGE tragen, nicht nur den Zustand anzeigen. -->
+            <svg id="pt-size-ico-small" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="5" height="5"/><rect x="10" y="3" width="5" height="5"/><rect x="17" y="3" width="4" height="5"/><rect x="3" y="10" width="5" height="5"/><rect x="10" y="10" width="5" height="5"/><rect x="17" y="10" width="4" height="5"/><rect x="3" y="17" width="5" height="4"/><rect x="10" y="17" width="5" height="4"/><rect x="17" y="17" width="4" height="4"/></svg>
+            <svg id="pt-size-ico-large" style="display:none;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8"/><rect x="13" y="3" width="8" height="8"/><rect x="3" y="13" width="8" height="8"/><rect x="13" y="13" width="8" height="8"/></svg>
+        </button>
+        <button class="pt-btn" id="btn-theme-toggle" title="Hell/Dunkel umschalten" data-i18n-title="chat.theme">
+            <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            <svg class="theme-icon-sun" style="display:none;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        </button>
+        <!-- SSL-Zertifikat: gibt es NUR hier auf der Startseite. Auf den
+             Unterseiten war es reine Wiederholung und hat den Platz
+             verstellt, an dem dort die Startseite steht. -->
+        <a class="pt-btn" href="/api/cert" download data-i18n-title="chat.ssl_cert" title="SSL-Zertifikat" style="text-decoration:none;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </a>
+        <button class="pt-btn" id="pt-settings" data-jarvis-settings="/portal" title="Einstellungen" data-i18n-title="nav.settings" style="display:none;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+        <button class="pt-btn" id="pt-logout" title="Abmelden" data-i18n-title="chat.logout">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        </button>
+    </div>
+</div>
+
+<div class="pt-wrap">
+    <div class="pt-hello"><span data-i18n="portal.welcome">Willkommen</span><span id="pt-name"></span></div>
+    <div class="pt-sub brand-app-name-sub" data-i18n="portal.choose">Wähle einen Bereich:</div>
+    <!-- Lizenz-Warnung, nur für Administratoren und nur bei echtem Anlass
+         (Text kommt fertig aus /api/me). Deckende Fläche, weil sie über den
+         Karten liegt – halbtransparent würde der Kartentext durchscheinen. -->
+    <div id="pt-lic-banner" style="display:none;cursor:pointer;margin:0 0 16px;padding:10px 14px;border-radius:10px;border:1px solid var(--danger);background:var(--bg-secondary);color:var(--danger);font-size:0.88rem;"></div>
+    <!-- Konnte ein Bereich nicht geprüft werden (Neustart, Netzhänger, Serverfehler),
+         fehlt seine Kachel – und das sieht exakt aus wie eine fehlende Berechtigung.
+         Dieser Streifen sagt, dass der Zustand UNBEKANNT ist, und führt zurück.
+         Deckende Fläche wie beim Lizenz-Banner: er liegt über den Karten. -->
+    <div id="pt-load-banner" style="display:none;cursor:pointer;margin:0 0 16px;padding:10px 14px;border-radius:10px;border:1px solid var(--warning);background:var(--bg-secondary);color:var(--warning);font-size:0.88rem;"></div>
+    <div class="pt-cards">
+        <a class="pt-card" href="/chat">
+            <div class="pt-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+            <div class="pt-card-title" data-i18n="portal.card_chat">Chat</div>
+            <div class="pt-card-desc" data-i18n="portal.card_chat_desc">Mit dem KI-Assistenten chatten.</div>
+        </a>
+        <!-- Benutzer-Chat: haengt am Skill "userchat" (permissions.userchat).
+             Eine eigene Freigabeliste gibt es bewusst nicht – der Bereich
+             startet keinen Agenten und fuehrt keine Werkzeuge aus. -->
+        <a class="pt-card hidden" id="pt-card-userchat" href="/userchat">
+            <span class="pt-card-badge hidden" id="pt-userchat-badge" data-i18n-title="portal.unread_msgs" title="Ungelesene Nachrichten"></span>
+            <div class="pt-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
+            <div class="pt-card-title" data-i18n="chat.user_chat">Benutzer-Chat</div>
+            <div class="pt-card-desc" data-i18n="portal.card_userchat_desc">Mit anderen Benutzern austauschen.</div>
+        </a>
+        <a class="pt-card hidden" id="pt-card-support" href="/support">
+            <div class="pt-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><line x1="4.93" y1="4.93" x2="9.17" y2="9.17"/><line x1="14.83" y1="14.83" x2="19.07" y2="19.07"/><line x1="14.83" y1="9.17" x2="19.07" y2="4.93"/><line x1="4.93" y1="19.07" x2="9.17" y2="14.83"/></svg></div>
+            <div class="pt-card-title" data-i18n="portal.card_support">Support-Assistent</div>
+            <div class="pt-card-desc" data-i18n="portal.card_support_desc">Antworten aus Wissen, Jira und Confluence.</div>
+        </a>
+        <!-- SAP-Analysen: nur fuer SAP-berechtigte Benutzer (per JS eingeblendet,
+             Freigabe unter Einstellungen → Sicherheit → Berechtigungen → SAP) -->
+        <a class="pt-card hidden" id="pt-card-sap" href="/sap">
+            <div class="pt-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="3" y1="20" x2="21" y2="20"/></svg></div>
+            <div class="pt-card-title" data-i18n="portal.card_sap">SAP-Analysen</div>
+            <div class="pt-card-desc" data-i18n="portal.card_sap_desc">Auswertungen für die Geschäftsleitung aus SAP – lesend, mit Anbindung an das eigene BI-Werkzeug.</div>
+        </a>
+        <!-- VEMAS: nur fuer freigegebene Benutzer UND nur bei aktivem VEMAS-Skill
+             (beides steckt in permissions.vemas). Freigabe unter Einstellungen →
+             Sicherheit → Berechtigungen → VEMAS-Zugriff. -->
+        <a class="pt-card hidden" id="pt-card-vemas" href="/vemas">
+            <div class="pt-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/></svg></div>
+            <div class="pt-card-title" data-i18n="portal.card_vemas">VEMAS</div>
+            <div class="pt-card-desc" data-i18n="portal.card_vemas_desc">Auswertungen aus VEMAS.NET – Projekte, Zeiten, Kunden und Service, mit eigenem Zugang.</div>
+        </a>
+        <!-- E-Mail: nur fuer freigegebene Benutzer UND nur bei aktivem E-Mail-Skill
+             (beides steckt in permissions.email – eine Kachel, die auf eine
+             404-Seite fuehrt, ist schlimmer als keine Kachel). Freigabe unter
+             Einstellungen → Sicherheit → Berechtigungen → E-Mail-Zugriff. -->
+        <a class="pt-card hidden" id="pt-card-email" href="/email">
+            <div class="pt-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg></div>
+            <div class="pt-card-title" data-i18n="portal.card_email">E-Mail</div>
+            <div class="pt-card-desc" data-i18n="portal.card_email_desc">Eigenes Postfach anbinden und Regeln hinterlegen, die eingehende E-Mails automatisch bearbeiten.</div>
+        </a>
+        <!-- Excel-Assistent: fuehrt NICHT in einen Chat, sondern auf die Seite,
+             auf der der Benutzer das Add-in fuer sein Excel holt. Ohne diese
+             Kachel kaeme er an das Manifest gar nicht heran – der Download lag
+             bis 2026-08-20 nur im Admin-Reiter (gemeldet).
+             Sichtbar bei permissions.excel (Freigabe UND aktiver Skill). -->
+        <a class="pt-card hidden" id="pt-card-excel" href="/excel">
+            <div class="pt-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="19"/><line x1="15" y1="13" x2="9" y2="19"/></svg></div>
+            <div class="pt-card-title" data-i18n="portal.card_excel">Excel-Assistent</div>
+            <div class="pt-card-desc" data-i18n="portal.card_excel_desc">{marke} als Aufgabenfenster in Excel: Fragen zur geöffneten Tabelle stellen und Änderungen vorschlagen lassen.</div>
+        </a>
+        <!-- Short Tracks: Ablagen mit gespeichertem Prompt. Sichtbar, sobald der
+             Skill aktiv ist (permissions.tracks) – eine eigene Freigabeliste gibt
+             es bewusst nicht, der Bereich kann nichts, was der Benutzer nicht
+             auch im Chat koennte. Das Badge zeigt fertige, noch nicht angesehene
+             Laeufe; laeuft gerade etwas, steht dort ein Punkt. -->
+        <a class="pt-card hidden" id="pt-card-tracks" href="/tracks">
+            <span class="pt-card-badge hidden" id="pt-tracks-badge" data-i18n-title="portal.tracks_new" title="Fertige Läufe"></span>
+            <div class="pt-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg></div>
+            <div class="pt-card-title" data-i18n="portal.card_tracks">Short Tracks</div>
+            <div class="pt-card-desc" data-i18n="portal.card_tracks_desc">Ablagen mit hinterlegter Aufgabe: Datei darauf ziehen, Ergebnis abholen.</div>
+        </a>
+        <!-- Jira: haengt an Freigabe UND aktivem Jira-Skill
+             (permissions.jira_assist). Bewusst KEIN eigener Skill: der
+             Jira-Skill traegt das Feature bereits, ein zweiter kostete nur
+             einen Lizenz-Slot.
+             HIESS BIS 2026-08-28 "Jira-Assistent" und fuehrte nur auf die
+             Anleitung zur Browser-Erweiterung. Seit der Bereich auch den
+             PERSOENLICHEN Jira-Zugang traegt, waere der alte Name zu eng: dort
+             wird jetzt etwas eingerichtet, das im ganzen System wirkt (Chat,
+             Ticketsuche, Erweiterung).
+             ⚠ DIE IDS BLEIBEN `…jiraassist` – sie haengen an `permissions.
+             jira_assist` und an der Freigabeliste. Ein Umbenennen waere ein
+             stiller Bruch ohne jeden Gegenwert. -->
+        <a class="pt-card hidden" id="pt-card-jiraassist" href="/jira-addon">
+            <div class="pt-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg></div>
+            <div class="pt-card-title" data-i18n="portal.card_jiraassist">Jira</div>
+            <div class="pt-card-desc" data-i18n="portal.card_jiraassist_desc">Eigener Jira-Zugang und die Browser-Erweiterung für Ticket-Zusammenfassungen.</div>
+        </a>
+        <!-- Confluence: Gegenstueck zur Jira-Kachel, uebernommen 2026-09-29.
+             Traegt NUR den persoenlichen Zugang – eine Browser-Erweiterung gibt
+             es fuer Confluence nicht, der zweite Container der Jira-Seite hat
+             hier also keinen Gegenstand.
+             Haengt allein am aktiven Confluence-Skill (permissions.confluence):
+             eine eigene Freigabeliste gibt es bewusst nicht, der Token erweitert
+             keine Rechte, er ersetzt die des Sammelzugangs durch die eigenen
+             (Begruendung in require_confluence_account_access). Ohne den Skill
+             gaebe es nichts einzurichten – und eine Kachel, die in einen 403
+             fuehrt, ist schlimmer als keine. -->
+        <a class="pt-card hidden" id="pt-card-confluence" href="/confluence-addon">
+            <div class="pt-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="8" y1="7" x2="16" y2="7"/><line x1="8" y1="11" x2="13" y2="11"/></svg></div>
+            <div class="pt-card-title" data-i18n="portal.card_confluence">Confluence</div>
+            <div class="pt-card-desc" data-i18n="portal.card_confluence_desc">Eigener Confluence-Zugang: Seiten mit deinen Berechtigungen lesen und schreiben.</div>
+        </a>
+        <!-- AI-Maus: Freigabe UND aktiver Skill (wie /email, /sap, /tracks).
+             Eine Kachel, die in einen 403 fuehrt, ist schlimmer als keine. -->
+        <a class="pt-card hidden" id="pt-card-aimouse" href="/ai-mouse">
+            <div class="pt-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51z"/><path d="M13 13l6 6"/></svg></div>
+            <div class="pt-card-title" data-i18n="portal.card_aimouse">AI-Maus</div>
+            <div class="pt-card-desc" data-i18n="portal.card_aimouse_desc">Bildschirmausschnitt am Arbeitsplatz einrahmen und KI-Assistenten dazu fragen.</div>
+        </a>
+        <!-- Feedback: Freigabe UND aktiver Skill (wie /email, /sap, /ai-mouse).
+             Eine Kachel, die in einen 403 fuehrt, ist schlimmer als keine. -->
+        <a class="pt-card hidden" id="pt-card-feedback" href="/feedback">
+            <div class="pt-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11H5a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-4"/><polygon points="12 2 14.09 6.26 18.5 6.91 15.25 10.04 16.18 14.41 12 12.27 7.82 14.41 8.75 10.04 5.5 6.91 9.91 6.26 12 2"/></svg></div>
+            <div class="pt-card-title" data-i18n="portal.card_feedback">Feedback</div>
+            <div class="pt-card-desc" data-i18n="portal.card_feedback_desc">Formulare ausfüllen: Zeilen anlegen, bewerten und abschicken.</div>
+        </a>
+        <!-- Claude Subagent: haengt an Freigabe UND Skill-Zustand (wie /email,
+             /sap, /tracks) – eine Kachel, die in einen 403 fuehrt, ist
+             schlimmer als keine Kachel. -->
+        <a class="pt-card hidden" id="pt-card-claudesub" href="/claude">
+            <div class="pt-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></div>
+            <div class="pt-card-title" data-i18n="portal.card_claudesub">Claude Subagent</div>
+            <div class="pt-card-desc" data-i18n="portal.card_claudesub_desc">Schlüssel für dein Claude-Code-Werkzeug: Codeaufgaben an {marke} abgeben.</div>
+        </a>
+        <a class="pt-card hidden" id="pt-card-wissen" href="/wissen">
+            <div class="pt-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></div>
+            <div class="pt-card-title" data-i18n="portal.card_wissen">Wissen</div>
+            <div class="pt-card-desc" data-i18n="portal.card_wissen_desc">Dein Gedächtnis einsehen – mit Wissensbereich auch Dateien hochladen und pflegen.</div>
+        </a>
+        <!-- Support-Agent: BEWUSST FÜR ALLE AUSGEBLENDET (2026-08-19, Vorgabe des
+             Nutzers) – die Kachel wird umgebaut und ist bis dahin versteckt.
+             KEIN JS blendet sie ein: es gibt hier absichtlich keine Bedingung,
+             sondern einen festen Zustand. Die Seite /supportagent selbst bleibt
+             erreichbar (bestehende Lesezeichen/Links laufen weiter). Zum
+             Wiederanzeigen genügt es, `hidden` zu entfernen. -->
+        <a class="pt-card hidden" id="pt-card-agent" href="/supportagent">
+            <div class="pt-card-icon" style="background:transparent;padding:0;overflow:hidden;">
+                <img src="/static/jira_agent_symbol.png" alt="" style="width:44px;height:44px;object-fit:contain;">
+            </div>
+            <div class="pt-card-title" data-i18n="portal.card_agent">Support-Agent</div>
+            <div class="pt-card-desc" data-i18n="portal.card_agent_desc">Windows-Anwendung für Nicht-Swyx-Systeme: Spracherkennung + Jira-Support-Assistent zum Download.</div>
+        </a>
+        <!-- API-Dokumentation: nur für Admins (per JS eingeblendet) -->
+        <a class="pt-card hidden" id="pt-card-api" href="/api">
+            <div class="pt-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></div>
+            <div class="pt-card-title" data-i18n="portal.card_api">API-Dokumentation</div>
+            <div class="pt-card-desc" data-i18n="portal.card_api_desc">Alle Endpunkte durchsuchen, erklären und direkt testen (nur Admin).</div>
+        </a>
+        <!-- Marken-Animation (Branding-Skill): erscheint als KARTE im selben Karten-Raster
+             (nächste freie Zelle → i.d.R. zweite Zeile), statt in einer eigenen Zeile.
+             class="pt-card" -> Branding blendet sie per display:'' als flex-Karte ein
+             (gleiche Sichtbarkeitslogik wie die übrigen Karten). Nur bei hinterlegtem Video. -->
+        <div id="brand-portal-anim" class="pt-card pt-card-video" data-sort-last style="display:none;">
+            <video id="brand-portal-video" muted loop autoplay playsinline preload="metadata"
+                   style="width:100%;height:auto;object-fit:contain;border-radius:10px;display:block;"></video>
+        </div>
+    </div>
+    <!-- Dezente Info-/Kontaktzeile: Standardwerte stehen hier im Markup,
+         der Branding-Skill überschreibt sie zur Laufzeit (branding.js).
+         Telefon ist ohne Branding leer und daher ausgeblendet. -->
+    <div class="pt-contact" id="pt-contact">
+        <span id="pt-contact-info" data-i18n="portal.contact_info_default">universelles, modulares KI Portal</span>
+        <span class="pt-contact-sep hidden" id="pt-contact-phone-sep">·</span>
+        <span id="pt-contact-phone" class="hidden"><span data-i18n="portal.contact_phone_prefix">Tel.</span> <a id="pt-contact-phone-link" href=""></a></span>
+        <span class="pt-contact-sep" id="pt-contact-email-sep">·</span>
+        <span id="pt-contact-email"><a id="pt-contact-email-link" href="mailto:dev-core@web.de">dev-core@web.de</a></span>
+        <span class="pt-contact-sep hidden" id="pt-contact-manual-sep">·</span>
+        <span id="pt-contact-manual" class="hidden"><a id="pt-contact-manual-link" href="" target="_blank" rel="noopener" data-i18n="portal.contact_manual">Benutzerhandbuch</a></span>
+    </div>
+</div>
+
+<!-- ═══ Desktop/VNC-Overlay (nur Admin, von /chat hierher verschoben) ═══ -->
+<div id="vnc-overlay" style="display:none;position:fixed;inset:0;z-index:9000;background:var(--bg-primary,#0a0e17);flex-direction:column;">
+    <div style="display:flex;align-items:center;gap:12px;padding:8px 14px;border-bottom:1px solid var(--border,rgba(255,255,255,.12));">
+        <strong style="color:var(--text-primary,#f8fafc);">Desktop</strong>
+        <span class="vnc-status" id="vnc-status" style="font-size:0.8rem;color:var(--text-secondary,#94a3b8);" data-i18n="panel.desktop.notconn">Nicht verbunden</span>
+        <span style="flex:1;"></span>
+        <button class="pt-btn" id="vnc-close" title="Schließen" data-i18n-title="common.close">✕</button>
+    </div>
+    <div class="desktop-preview" id="desktop-preview" style="flex:1;position:relative;display:flex;align-items:center;justify-content:center;">
+        <div class="desktop-placeholder" id="desktop-placeholder" style="color:var(--text-secondary,#94a3b8);">Desktop wird geladen…</div>
+        <iframe id="vnc-iframe" class="vnc-iframe" hidden style="position:absolute;inset:0;width:100%;height:100%;border:0;"></iframe>
+    </div>
+</div>
+
+<!-- ═══ Konto-gesperrt-Bildschirm (Sicherheitsschicht, CSS-unabhängig) ═══ -->
+<div id="blocked-screen" style="display:none;position:fixed;inset:0;z-index:100000;background:rgba(2,6,23,0.82);backdrop-filter:blur(8px);align-items:center;justify-content:center;padding:16px;">
+    <div style="background:var(--bg-secondary,#111827);border:1px solid var(--border,rgba(255,255,255,.12));border-radius:16px;max-width:560px;width:100%;max-height:90vh;overflow:auto;box-shadow:0 25px 60px rgba(0,0,0,.55);padding:24px;">
+        <h2 style="margin:0 0 12px;color:var(--text-primary,#f8fafc);font-size:1.25rem;" data-i18n="security.blocked_title">🚫 Konto gesperrt</h2>
+        <p style="color:var(--text-secondary,#94a3b8);font-size:0.92rem;line-height:1.6;margin:0 0 14px;" data-i18n="security.blocked_msg">Dein Konto wurde wegen eines erkannten Sicherheitsverstoßes (Jailbreak-/Manipulationsversuch) gesperrt. Es ist nur noch diese Ansicht verfügbar. Bitte wende dich an einen lokalen Administrator, um das Konto wieder freischalten zu lassen.</p>
+        <div id="blocked-reason" style="font-size:0.88rem;color:var(--danger,#ef4444);margin-bottom:14px;"></div>
+        <h3 style="font-size:0.95rem;margin:0 0 8px;color:var(--text-primary,#f8fafc);" data-i18n="security.blocked_log">Protokoll der verdächtigen Aktivitäten</h3>
+        <div id="blocked-incidents" style="max-height:46vh;overflow-y:auto;border:1px solid var(--border,rgba(255,255,255,.12));border-radius:8px;padding:8px;background:var(--bg-primary,#0a0e17);"></div>
+        <div style="display:flex;justify-content:flex-end;margin-top:16px;">
+            <button id="blocked-logout" style="background:transparent;border:1px solid var(--border,rgba(255,255,255,.2));color:var(--text-secondary,#94a3b8);border-radius:8px;padding:8px 16px;cursor:pointer;font-family:inherit;" data-i18n="header.logout">Abmelden</button>
+        </div>
+    </div>
+</div>
+
+<!-- 2FA Setup Modal -->
+<div id="totp-modal" class="modal-overlay hidden">
+    <div class="modal-card">
+        <h2 class="modal-title" data-i18n="totp.title">Zwei-Faktor-Authentifizierung</h2>
+        <div id="totp-active" class="hidden">
+            <p class="totp-info" data-i18n-html="totp.active_html">✅ 2FA ist <strong>aktiviert</strong>.</p>
+            <input type="password" id="totp-disable-pass" placeholder="Kennwort zur Bestätigung" data-i18n-placeholder="totp.pw_ph">
+            <button class="btn-login btn-danger" id="btn-totp-disable" data-i18n="totp.disable">2FA deaktivieren</button>
+        </div>
+        <div id="totp-setup-flow" class="hidden">
+            <div id="totp-step1">
+                <p class="totp-info" data-i18n-html="totp.scan_html">Scanne den QR-Code mit <strong>Google Authenticator</strong>, Authy oder einer anderen TOTP-App.</p>
+                <div id="totp-qr" class="totp-qr"></div>
+                <p class="totp-secret-label" data-i18n="totp.manual">Oder manuell eingeben:</p>
+                <code id="totp-secret-code" class="totp-secret-code"></code>
+                <p class="totp-info" style="margin-top:16px" data-i18n="totp.enter_code">Gib den 6-stelligen Code aus der App ein:</p>
+                <input type="text" id="totp-verify-code" placeholder="000000" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code">
+                <button class="btn-login" id="btn-totp-verify" data-i18n="totp.verify">Bestätigen &amp; aktivieren</button>
+            </div>
+        </div>
+        <p class="login-error" id="totp-modal-error"></p>
+        <button class="btn-modal-close" id="btn-totp-close" data-i18n="common.close">Schließen</button>
+    </div>
+</div>
+
+<!-- SSL-Zertifikat Modal -->
+<div id="cert-modal" class="modal-overlay hidden">
+    <div class="modal-card" style="max-width:480px;text-align:left;">
+        <h2 class="modal-title" style="text-align:center;" data-i18n="cert.h3">SSL-Zertifikat installieren</h2>
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;padding:12px;background:var(--bg-primary);border-radius:12px;">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--success,#10b981)" stroke-width="1.5" style="flex-shrink:0;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+            <div>
+                <div style="font-size:14px;font-weight:600;color:var(--text-primary);" data-i18n="cert.selfsigned">Selbstsigniertes Zertifikat</div>
+                <div style="font-size:12px;color:var(--text-secondary);margin-top:2px;" data-i18n="cert.selfsigned_desc">Muss einmalig installiert werden, damit der Browser die Verbindung als sicher einstuft.</div>
+            </div>
+        </div>
+        <a href="/api/cert" class="btn-login" style="display:flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;margin-bottom:16px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <span data-i18n="cert.download">Zertifikat herunterladen (jarvis.cer)</span>
+        </a>
+        <div style="display:flex;gap:4px;margin-bottom:12px;">
+            <button class="cert-tab active" data-cert-tab="win">Windows</button>
+            <button class="cert-tab" data-cert-tab="linux">Linux</button>
+            <button class="cert-tab" data-cert-tab="browser">Browser</button>
+        </div>
+        <div id="cert-tab-win" class="cert-tab-content">
+            <ol style="font-size:13px;color:var(--text-primary);line-height:1.7;padding-left:18px;">
+                <li data-i18n-html="cert.pwin.1">Lade <code>jarvis.cer</code> herunter.</li>
+                <li data-i18n-html="cert.pwin.2">Rechtsklick → <strong>Zertifikat installieren</strong>.</li>
+                <li data-i18n-html="cert.pwin.3">Wähle <strong>Lokaler Computer</strong>.</li>
+                <li data-i18n-html="cert.pwin.4"><strong>Alle Zertifikate in folgendem Speicher speichern</strong> → Durchsuchen → <strong>Vertrauenswürdige Stammzertifizierungsstellen</strong>.</li>
+                <li data-i18n-html="cert.pwin.5">Fertigstellen + <strong>Browser komplett neu starten</strong>.</li>
+            </ol>
+        </div>
+        <div id="cert-tab-linux" class="cert-tab-content hidden">
+            <pre style="background:var(--bg-primary);padding:10px 12px;border-radius:8px;font-size:12px;color:var(--text-primary);overflow-x:auto;"><code>sudo cp jarvis.cer /usr/local/share/ca-certificates/jarvis.crt
+sudo update-ca-certificates</code></pre>
+        </div>
+        <div id="cert-tab-browser" class="cert-tab-content hidden">
+            <ol style="font-size:13px;color:var(--text-primary);line-height:1.7;padding-left:18px;">
+                <li data-i18n-html="cert.pbrowser.1">Browser-Einstellungen öffnen.</li>
+                <li data-i18n-html="cert.pbrowser.2">Nach <strong>Zertifikate</strong> suchen.</li>
+                <li data-i18n-html="cert.pbrowser.3"><strong>Importieren</strong> im Reiter Zertifizierungsstellen.</li>
+                <li data-i18n-html="cert.pbrowser.4">Datei <code>jarvis.cer</code> auswählen.</li>
+                <li data-i18n-html="cert.pbrowser.5">Haken bei <strong>Dieser CA vertrauen…</strong>.</li>
+            </ol>
+        </div>
+        <button class="btn-modal-close" id="btn-cert-close" data-i18n="common.close">Schließen</button>
+    </div>
+</div>
+
+<script src="/static/js/sitzung.js?v=3"></script>
+<script src="/static/js/konto_hinweise.js?v=2"></script>
+<script src="/static/js/icons.js?v=8"></script>
+<script src="/static/js/pwreveal.js?v=4"></script>
+<script src="/static/js/dlkey.js?v=4"></script>
+<script src="/static/js/cpubar.js?v=2"></script>
+<script src="/static/js/syspackages.js?v=3"></script>
+<script src="/static/js/sysload.js?v=5"></script>
+<script src="/static/js/i18n.js?v=339"></script>
+<script src="/static/js/theme.js?v=3"></script>
+<script src="/static/js/branding.js?v=27"></script>
+<script src="/static/js/security_incidents.js?v=38"></script>
+<script src="/static/js/update_widget.js?v=6"></script>
+<script src="/static/js/issues.js?v=14"></script>
+<script src="/static/js/info_files.js?v=6"></script>
+<script src="/static/js/sessions.js?v=9"></script>
+<script src="/static/js/vnc.js?v=21"></script>
+<script src="/static/js/settings_btn.js?v=5"></script>
+<script src="/static/js/portal_tiles.js?v=2"></script>
+<script src="/static/js/alpha_sort.js?v=2"></script>
+<script src="/static/js/portal_seite.js?v=3"></script>
+<!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
+<script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
+<script src="/static/vendor/clippy/clippy.min.js"></script>
+<script src="/static/js/stt.js?v=3"></script>
+<script src="/static/js/avatar.js?v=17"></script>
+<script src="/static/js/activity.js?v=3"></script>
+</body>
+</html>

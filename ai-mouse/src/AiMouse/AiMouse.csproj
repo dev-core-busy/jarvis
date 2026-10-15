@@ -1,0 +1,160 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>AiMouse</AssemblyName>
+    <RootNamespace>AiMouse</RootNamespace>
+    <!-- ⚠ DIE EINE QUELLE DER VERSION (seit 1.0.0, 2026-09-11).
+         Sie beschreibt den CLIENT-CODE, also gehoert sie zu ihm – nicht in eine
+         Backend-Konstante, die eine Kopie waere und driften wuerde. Der Server
+         LIEST sie hier (`ai_mouse.klient_version()`) und nennt sie in
+         `/api/ai-mouse/health`; die Anwendung liest ihre EIGENE Assembly. Damit
+         koennen Server und EXE nicht auseinanderlaufen, solange die EXE aus
+         dieser Datei gebaut ist – und dafuer sorgt `bau_noetig()`: `.csproj`
+         zaehlt in `quellen_stand()`, eine Erhoehung hier loest den Neubau aus.
+         ⚠ WER SIE HOCHZAEHLT, LOEST AUF JEDEM ARBEITSPLATZ EIN UPDATE AUS. -->
+    <!-- 1.0.1 (2026-09-11): Beschriftung „Ziehen nur mit Taste".
+         ⚠ EINE TEXTAENDERUNG IST EINE VERSION WERT. Ohne Erhoehung baut der
+         Server zwar neu (`.cs` zaehlt in `quellen_stand()`), aber ein
+         Arbeitsplatz mit 1.0.0 bekommt KEIN Update – die Serverversion waere
+         unveraendert, und `IstNeuer` sagt zu Recht nein. Der neue Text waere
+         damit nur fuer Neu-Downloads da. -->
+    <!-- 1.0.2 (2026-09-11): die Version steht jetzt im Marken-Kopf und in der
+         Portal-Kachel. Bis dahin war sie nur ueber die Windows-Dateieigenschaften
+         zu sehen – ausgerechnet die Nummer, die man beim Melden eines Fehlers
+         zuerst braucht. -->
+    <!-- 1.0.3 (2026-09-12): Tastenkombination zum STARTEN + Autostart.
+         Beides ueber eine Windows-VERKNUEPFUNG, nicht ueber `RegisterHotKey`:
+         ein nicht laufendes Programm kann keinen Hotkey registrieren, und
+         genau das soll die Kombination ja tun. Dazu meldet sich ein Zweitstart
+         bei der laufenden Instanz, statt einen modalen Dialog zu zeigen – seit
+         es den Hotkey gibt, ist der Zweitstart der NORMALFALL, und der Dialog
+         haette ihn zuverlaessig zur Fehlermeldung gemacht. -->
+    <!-- 1.0.4 (2026-09-14): der Einstellungsdialog zeigt wieder ALLE Zeilen.
+         Gemeldet als „ich kann keine Einstellung fuer die Tastenkombination
+         finden" – sie war seit 1.0.3 da, nur ausserhalb des Fensters: die
+         Zeilenzahl war seit dem Erstimport von 7 auf 14 gewachsen, die feste
+         `ClientSize` von 420 px nie mit. Ein `FixedDialog` ohne Rollbalken
+         schneidet nicht ab, er laesst weg – ohne jeden Hinweis. Die Hoehe wird
+         jetzt aus dem Inhalt gerechnet, `AutoScroll` faengt den Rest, und das
+         Fenster ist ziehbar. -->
+    <!-- 1.0.5 (2026-09-14): zwei gemeldete Fehler.
+         a) Das stille Update wechselte die Datei ein und startete NICHT neu:
+            `ReleaseMutex()` gibt die Besitzerschaft frei, nicht den NAMEN – die
+            neu gestartete Fassung hielt sich fuer einen Zweitstart und beendete
+            sich wortlos. Jetzt wird das Handle GESCHLOSSEN (Program.cs).
+         b) Der Einstellungsdialog war zerschossen: die automatische Platzierung
+            im TableLayoutPanel ueberspringt UNSICHTBARE Controls, und
+            `_rdHinweis` ist im Regelfall unsichtbar – ab dort rutschte alles um
+            eine Zelle. Jetzt werden die Zellen ausdruecklich angegeben, und
+            Zeilen ohne Beschriftung gehen ueber beide Spalten. -->
+    <!-- 1.0.6 (2026-09-14): die Anwendung liess sich nicht mehr beenden.
+         Gemeldet als „haengt sich so auf, dass sie nicht ohne System-Neustart
+         zu entfernen ist" – zwei Prozesse, leere Fenster, Tray-Symbole blieben,
+         `taskkill /F` wirkungslos, und selbst das Loeschen der EXE half nicht.
+         URSACHE: `ZiehbarPruefer` erzeugte JE ABFRAGE einen STA-Thread und gab
+         ihn nach der Zeitgrenze auf. Antwortet die Zielanwendung nicht, bleibt
+         der Thread im Kernel-Wait stehen – mit COM-Apartment und Proxy. Sie
+         haeuften sich unbegrenzt an; beim Beenden terminiert `ExitProcess` sie,
+         ohne dass sie ihre OLE32-Sperren freigeben, und die Detach-Sequenz
+         laeuft in einen Deadlock. Jetzt genau EIN wiederverwendeter Worker
+         (haengt er, wird uebersprungen statt nachgelegt), dazu als Netz
+         darunter ein hartes `TerminateProcess` am Ende und ein Wachhund ueber
+         dem Aufraeumen. -->
+    <!-- 1.0.7 (2026-09-14): die neue Fassung wurde ENDLOS geholt.
+         Gemeldet als „es wird JETZT JEDESMAL die neue exe auf den Rechner
+         kopiert" – zwischen zwei Screenshots im Abstand einer Minute lagen zwei
+         volle Zyklen zu je 66 MB. Auf Platte lag bereits 1.0.6, im Speicher
+         lief weiter 1.0.5.
+         ZWEI URSACHEN, beide behoben:
+         a) Der SERVER meldete eine Version, die er nicht auslieferte:
+            `klient_version()` liest die csproj (den QUELLTEXT), ausgeliefert
+            wird aber die gebaute EXE. Auf ECHT gemessen – csproj 10:39:48,
+            EXE 10:41:43: in diesen 1 min 55 s holte jeder Arbeitsplatz die
+            ALTE Anwendung, war danach unveraendert alt und fragte erneut. Das
+            Fenster geht bei JEDEM Rollout auf. Jetzt meldet der Server ""
+            (= unbekannt), solange ein Bau aussteht.
+         b) Dem Client fehlte ein GEDAECHTNIS. Die „liegt schon da"-Pruefung
+            greift nur, solange `.neu` daliegt; nach dem Einwechseln faengt
+            alles von vorn an, wenn die Anwendung danach trotzdem die alte
+            Fassung ist. Jetzt wird der Versuch als PAAR gemerkt (Ziel + eigene
+            Fassung): gleiche Ausgangslage = derselbe Fehlschlag, kein zweiter
+            Download. Heilt sich selbst, sobald ein Update wirklich ankommt.
+         Nebenbefund: `.alt` wurde nur aufgeraeumt, wenn eine `.neu` danebenlag
+         – die verdraengte Fassung blieb sonst fuer immer liegen. -->
+    <!-- 1.0.8 (2026-09-15): ein vom Lauf ERZEUGTES Bild wird angezeigt.
+         Gemeldet als „wenn AI-Maus ein Bild anfordert, muss das auch
+         dargestellt werden koennen (Beispiel: ersetze englisch im Bild durch
+         deutsch)". Die Kette war an DREI Stellen unterbrochen, nicht nur an
+         der Anzeige:
+         a) `bild_text_ersetzen` stand in keinem Bereich – der Lauf hatte das
+            Werkzeug gar nicht. Es kommt jetzt OHNE Freigabe dazu (Vorgabe des
+            Betreibers): es liest keine Hausdaten, es bearbeitet genau den
+            Ausschnitt, den der Benutzer selbst aufgezogen hat.
+         b) Der Ausschnitt ging nur als `inline_data` raus – es gab KEINEN
+            Pfad, und das Werkzeug verlangt einen (`pfad_parameter`). Genau
+            dieser Zustand hat im Chat am 2026-09-15 acht Schritte gekostet.
+            Jetzt legt der Server eine fluechtige Arbeitskopie an.
+         c) Das Ergebnisfenster war eine reine RichTextBox: eine
+            `/api/generated/…`-Adresse erschien dort als TEXT. Jetzt ein
+            SplitContainer, dessen zweites Feld nur bei einem Bild aufklappt.
+         Die Adresse kommt aus `agent.last_task_images`, NICHT aus dem
+         Antworttext – eine vom Modell genannte Adresse kann erfunden sein. -->
+    <!-- 1.0.9 (2026-09-15): der Fehlschlag beim Laden der Fragen war STILL.
+         Gemeldet, dreimal: „weiterhin OHNE das vollstaendige Fragen-Menue".
+         `FragenNachladenAsync` fing JEDE Ausnahme wortlos ab, und der Fall
+         „Server lieferte 0" ebenso – das Menue fiel dann auf die DREI
+         eingebauten Fragen zurueck, ohne ein Wort. Damit war der Grund weder
+         fuer den Benutzer noch bei der Fehlersuche sichtbar: drei Runden
+         Ratens. `promptsError` war dafuer vorgesehen und wurde NIE gesetzt.
+         Jetzt steht der Grund IM MENUE, dort wo die Fragen fehlen, und ein
+         Klick versucht es erneut. -->
+    <!-- 1.0.10 (2026-09-22): kein Selbst-Update von einer NETZFREIGABE.
+         Gefragt: „Ist sichergestellt, dass die AiMouse.exe updates vom
+         Netzwerkpfad holt?" Gemessen: die Aktualisierung holt immer vom SERVER
+         (richtig so), sie schreibt aber neben die LAUFENDE Datei. Wer die EXE
+         direkt von der Freigabe startet, legte damit `AiMouse.exe.neu` auf die
+         GEMEINSAME Datei und tauschte sie beim naechsten Start fuer alle aus –
+         von einem beliebigen Arbeitsplatz aus, waehrend andere sie womoeglich
+         gerade ausfuehren. Bei einer schreibgeschuetzten Freigabe war es nur
+         still: kein Update, kein Wort, monatelang eine alte Fassung.
+         Jetzt: `VonNetzfreigabe()` (UNC + Netzlaufwerk) schaltet die
+         Selbstaktualisierung ab UND das Tray-Menue nennt die vorliegende
+         Version samt Weg („deine Administration rollt den neuen Stand aus"). -->
+    <Version>1.0.10</Version>
+    <!-- DPI awareness is owned by app.manifest, not by ApplicationHighDpiMode: it has to
+         be in effect from process start, before any screen coordinate is read.
+         WFAC010 asks for the opposite; suppressed because that trade-off is intentional. -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <NoWarn>$(NoWarn);WFAC010</NoWarn>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <!-- Portable single-file publish.
+       Note: Native AOT / PublishTrimmed are NOT supported by WinForms, so the
+       spec's alternative (single-file publishing) is used instead. -->
+  <PropertyGroup>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <!-- Force System.Text.Json source generation; no reflection-based fallback. -->
+  <PropertyGroup>
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+  </ItemGroup>
+
+</Project>

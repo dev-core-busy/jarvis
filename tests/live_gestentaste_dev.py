@@ -1,0 +1,750 @@
+#!/usr/bin/env python3
+"""Live auf DEV: die Entscheidung „Lasso oder Rechtsziehen" WIRKLICH ausgeführt.
+
+Ein Quelltext-Grep beantwortet nicht, ob der Hook den Klick bei gehaltener
+Taste durchreicht und – der teure Teil – ob dabei ``_pressWithheld`` richtig
+steht: bleibt es fälschlich ``true``, verschluckt der spätere BUTTONUP den
+Klick, und der Benutzer verliert ihn ganz.
+
+Der Hook selbst haengt an ``SetWindowsHookEx`` und laeuft auf Linux nicht. Die
+ENTSCHEIDUNG haengt aber an nichts davon – sie wird hier aus der ECHTEN Datei
+in ein Konsolenprogramm gehoben und gegen die vier Tasten und beide
+Klick-Arten laufen gelassen. Nachgebildet wird nur, was der Hook UMGIBT
+(P/Invoke, InjectionGuard, InputReplay); die Verzweigung selbst ist Original.
+
+Aufruf auf DEV: cd /opt/jarvis && python3 tests/live_gestentaste_dev.py
+"""
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path("/opt/jarvis") if Path("/opt/jarvis/ai-mouse").is_dir() else \
+    Path(__file__).resolve().parent.parent
+# ⚠ MEHRERE ORTE, nicht einer: auf DEV liegt das SDK unter `vendor/`, auf der
+#   Arbeitsmaschine im PATH. Ein Waechter, der nur auf einem Rechner laeuft,
+#   ist ein halber (Register, dieselbe Lehre wie bei der jsdom-Suche).
+def _dotnet() -> Path | None:
+    import shutil as _sh
+    for kandidat in (Path("/opt/jarvis/vendor/dotnet/dotnet"),
+                     ROOT / "vendor" / "dotnet" / "dotnet"):
+        if kandidat.exists():
+            return kandidat
+    gefunden = _sh.which("dotnet")
+    return Path(gefunden) if gefunden else None
+
+
+DOTNET = _dotnet()
+HOOK = ROOT / "ai-mouse" / "src" / "AiMouse" / "Input" / "MouseGestureHook.cs"
+TASTE = ROOT / "ai-mouse" / "src" / "AiMouse" / "Input" / "GestenTaste.cs"
+
+_ok = _fail = 0
+
+
+def check(text, bed, info=""):
+    global _ok, _fail
+    if bed:
+        _ok += 1
+        print(f"  OK   {text}")
+    else:
+        _fail += 1
+        print(f"  FAIL {text}" + (f"  [{info}]" if info else ""))
+
+
+if DOTNET is None:
+    # Exit 2: "konnte nicht laufen" darf nie wie "bestanden" aussehen.
+    print("ABBRUCH: kein dotnet gefunden (vendor/dotnet oder PATH)")
+    sys.exit(2)
+
+roh = HOOK.read_text(encoding="utf-8")
+
+# ── Den ECHTEN HookProc + TasteGehalten herausschneiden ─────────────────────
+def block(quelle, kopf):
+    i = quelle.find(kopf)
+    if i < 0:
+        return ""
+    auf = quelle.find("{", i)
+    tief = 0
+    for j in range(auf, len(quelle)):
+        if quelle[j] == "{":
+            tief += 1
+        elif quelle[j] == "}":
+            tief -= 1
+            if tief == 0:
+                return quelle[i:j + 1]
+    return ""
+
+
+PROC = block(roh, "private IntPtr HookProc")
+TG = block(roh, "private static bool TasteGehalten")
+# ⚠ AUCH DIESER ZWEIG WIRD GESCHNITTEN, NICHT NACHGEBAUT: er entscheidet, ob
+#    der Klick der Anwendung gehoert – ein Nachbau pruefte meine Annahme.
+HALTEN = block(roh, "private void HaltenAbgelaufen")
+if not PROC or not TG:
+    print("ABBRUCH: HookProc/TasteGehalten nicht gefunden (umbenannt?).")
+    sys.exit(2)
+# ⚠ Positivkontrolle des Schnitts: ohne sie koennte er halben Code messen.
+if "WM_RBUTTONDOWN" not in PROC or "TasteGehalten(Durchreichen)" not in PROC:
+    print("ABBRUCH: der Schnitt enthaelt die zu messende Verzweigung nicht.")
+    sys.exit(2)
+
+ARB = Path(tempfile.mkdtemp(prefix="gtaste-", dir="/tmp"))
+try:
+    (ARB / "P.csproj").write_text("""<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework>
+  <Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings></PropertyGroup>
+</Project>""", encoding="utf-8")
+
+    shutil.copy(TASTE, ARB / "GestenTaste.cs")
+
+    # Die Umgebung des Hooks nachbilden – NICHT seine Entscheidung.
+    # ⚠ ZWEI DATEIEN: C# erlaubt nur EINEN file-scoped Namespace je Datei.
+    (ARB / "UmgebungInterop.cs").write_text("""
+namespace AiMouse.Interop;
+
+internal static class NativeMethods
+{
+    internal const int WM_MOUSEMOVE = 0x0200;
+    internal const int WM_RBUTTONDOWN = 0x0204;
+    internal const int WM_RBUTTONUP = 0x0205;
+    internal const int VK_SHIFT = 0x10;
+    internal const int VK_CONTROL = 0x11;
+    internal const int VK_MENU = 0x12;
+
+    /// <summary>Statt der echten Tastatur: der Test sagt, was gehalten wird.
+    /// `NurNachwirkung` setzt das NIEDRIGE Bit (0x0001) – Windows meldet damit
+    /// "war seit dem letzten Abruf einmal gedrueckt", NICHT "ist unten".</summary>
+    internal static int Gehalten = 0;
+    internal static bool NurNachwirkung;
+    internal static short GetAsyncKeyState(int vKey)
+        => vKey == Gehalten
+            ? (NurNachwirkung ? (short)0x0001 : unchecked((short)0x8000))
+            : (short)0;
+
+    internal static IntPtr CallNextHookEx(IntPtr h, int c, IntPtr w, IntPtr l) => (IntPtr)0;
+
+    internal struct POINT { public int x; public int y; }
+    internal struct MSLLHOOKSTRUCT { public POINT pt; public IntPtr dwExtraInfo; }
+}
+""", encoding="utf-8")
+
+    (ARB / "UmgebungInput.cs").write_text("""
+namespace AiMouse.Input;
+
+using AiMouse.Interop;
+
+internal static class InputReplay
+{
+    internal static int Nachgespielt;
+    public static bool IsOwnInput(in NativeMethods.MSLLHOOKSTRUCT d) => false;
+    public static string? SendRightClick() { Nachgespielt++; return null; }
+
+    // ⚠ Fuer den Halte-Zweig (2026-09-10). Der Name ist der des Originals,
+    //    damit der GESCHNITTENE Code unveraendert bleibt – wer den Aufruf im
+    //    Schnitt umschreibt, prueft nicht mehr den ausgelieferten Code.
+    internal static bool Scheitert;
+    internal static int Downs;
+    public static string? SendRightDown()
+    {
+        Downs++;
+        return Scheitert ? "abgelehnt" : null;
+    }
+}
+
+internal static class InjectionGuard
+{
+    internal static bool Blockt;
+    public static bool BlocksInjection() => Blockt;
+}
+""", encoding="utf-8")
+
+    # Der ECHTE Entscheidungsteil in einer schlanken Huelle.
+    huelle = """
+using System.Runtime.InteropServices;
+using AiMouse.Interop;
+
+namespace AiMouse.Input;
+
+/// ⚠ ATTRAPPE: die echte Fassung fragt user32. Gemessen wird hier der
+///    ENTSCHEIDUNGSZWEIG des Hooks, nicht die Systemabfrage.
+internal static class SystemWerte
+{
+    public static int Verweilzeit() => 400;
+    public static bool UeberToleranzWert;
+
+    /// ⚠ RECHNET WIRKLICH, statt eine Antwort zu diktieren: nur so ist
+    ///    ueberhaupt beobachtbar, GEGEN WELCHEN Punkt gemessen wird. Eine
+    ///    Attrappe, die die Argumente wegwirft, kann die Eigenschaft
+    ///    "der Anker wird nachgezogen" nicht zeigen - die Gegenprobe dazu blieb
+    ///    damit stumm (Register: eine Attrappe, die weniger kann als das
+    ///    Original, prueft eine Kette, die es nicht gibt).
+    public const int Tol = 4;
+    public static bool UeberToleranz(Point a, Point b)
+        => UeberToleranzWert
+           && (Math.Abs(b.X - a.X) > Tol || Math.Abs(b.Y - a.Y) > Tol);
+}
+
+internal sealed class Hook
+{
+    private int _threshold = 8;
+    private IntPtr _hookHandle;
+    private bool _pressWithheld;
+    private bool _isDragging;
+    private Point _start;
+    // ⚠ NEU 2026-09-10: die letzte Ruheposition. Ein Feld faellt aus jedem
+    //    Funktions-Schnitt heraus und muss hier stehen, sonst uebersetzt der
+    //    geschnittene Code nicht (Register).
+    private Point _haltenAnker;
+
+    public GestenTaste Durchreichen { get; set; } = GestenTaste.Keine;
+    public GestenTaste GesteVerlangt { get; set; } = GestenTaste.Keine;
+
+    // ⚠ ATTRAPPEN FUER DEN HALTE-ZWEIG (2026-09-10). Der `Timer` von WinForms
+    //    ist hier nicht instanziierbar; gebraucht wird von ihm ohnehin nur
+    //    `Enabled`/`Start`/`Stop`. `SystemWerte` haengt an user32.
+    internal sealed class TimerAttrappe
+    {
+        public bool Enabled;
+        public int Interval;
+        public int Starts;
+        public int Stops;
+        public void Start() { Enabled = true; Starts++; }
+        public void Stop() { Enabled = false; Stops++; }
+    }
+
+    private readonly TimerAttrappe _halten = new();
+    private bool _durchgereicht;
+
+    public TimerAttrappe Halten => _halten;
+    public bool Durchgereicht_ => _durchgereicht;
+    public Func<Point, bool>? LiegtObjektUnter { get; set; }
+    public event Action? Durchgereicht;
+
+    public event Action<Point>? DragStarted;
+    public event Action<Point>? DragMoved;
+    public event Action<Rectangle>? DragCompleted;
+    public event Action<string>? ReplayFailed;
+
+    public bool PressWithheld => _pressWithheld;
+    public void SetzeZieht(bool v) => _isDragging = v;
+    public void SetzeDurchgereicht(bool v) => _durchgereicht = v;
+
+    private void Post(Action a) => a();
+
+__PROC__
+
+__HALTEN__
+
+__TG__
+
+    // ⚠ NICHT geschnitten: `Normalise` ist expression-bodied (kein `{`), ein
+    // Klammer-Schnitt landet im naechsten Rumpf und zieht fremden Code mit
+    // (beim ersten Lauf genau so passiert). Sie ist reine Geometrie und nicht
+    // Gegenstand dieser Messung.
+    private static Rectangle Normalise(Point a, Point b) => Rectangle.FromLTRB(
+        Math.Min(a.X, b.X), Math.Min(a.Y, b.Y),
+        Math.Max(a.X, b.X), Math.Max(a.Y, b.Y));
+}
+
+internal readonly record struct Point(int X, int Y);
+internal readonly record struct Rectangle(int L, int T, int R, int B)
+{
+    public static Rectangle FromLTRB(int l, int t, int r, int b) => new(l, t, r, b);
+}
+
+internal static class Programm
+{
+    private static NativeMethods.MSLLHOOKSTRUCT Pt(int x, int y)
+        => new() { pt = new NativeMethods.POINT { x = x, y = y } };
+
+    private static object Lauf(GestenTaste taste, int gehalten, bool ziehen)
+    {
+        var h = new Hook { Durchreichen = taste };
+        NativeMethods.Gehalten = gehalten;
+        InputReplay.Nachgespielt = 0;
+        int lasso = 0;
+        h.DragStarted += _ => lasso++;
+
+        IntPtr Send(int msg, int x, int y)
+        {
+            var d = Pt(x, y);
+            IntPtr p = Marshal.AllocHGlobal(Marshal.SizeOf<NativeMethods.MSLLHOOKSTRUCT>());
+            Marshal.StructureToPtr(d, p, false);
+            IntPtr r = h.Test(0, (IntPtr)msg, p);
+            Marshal.FreeHGlobal(p);
+            return r;
+        }
+
+        IntPtr down = Send(NativeMethods.WM_RBUTTONDOWN, 100, 100);
+        if (ziehen)
+        {
+            Send(NativeMethods.WM_MOUSEMOVE, 160, 160);
+        }
+        IntPtr up = Send(NativeMethods.WM_RBUTTONUP, ziehen ? 160 : 100, ziehen ? 160 : 100);
+
+        return new
+        {
+            taste = taste.ToString(), gehalten, ziehen,
+            downGeschluckt = down == (IntPtr)1,
+            upGeschluckt = up == (IntPtr)1,
+            lasso, nachgespielt = InputReplay.Nachgespielt,
+            withheld = h.PressWithheld,
+        };
+    }
+
+    /// <summary>Ein Down OHNE Up (der Up geht verloren – z.B. ein UAC-Dialog
+    /// kommt dazwischen), danach ein Down MIT Taste und dessen Up. Nur so ist
+    /// messbar, ob der Durchreich-Zweig `_pressWithheld` wirklich zuruecksetzt:
+    /// bleibt es stehen, verschluckt dieser zweite Up den Klick des Benutzers
+    /// – er ist dann ganz weg.</summary>
+    private static object LaufNachHaenger(GestenTaste taste, int gehalten)
+    {
+        var h = new Hook { Durchreichen = taste };
+        NativeMethods.Gehalten = 0;
+        NativeMethods.NurNachwirkung = false;
+        InputReplay.Nachgespielt = 0;
+
+        IntPtr Send(int msg, int x, int y)
+        {
+            var d = Pt(x, y);
+            IntPtr p = Marshal.AllocHGlobal(Marshal.SizeOf<NativeMethods.MSLLHOOKSTRUCT>());
+            Marshal.StructureToPtr(d, p, false);
+            IntPtr r = h.Test(0, (IntPtr)msg, p);
+            Marshal.FreeHGlobal(p);
+            return r;
+        }
+
+        Send(NativeMethods.WM_RBUTTONDOWN, 100, 100);   // verschluckt, Up bleibt aus
+        NativeMethods.Gehalten = gehalten;
+        IntPtr down2 = Send(NativeMethods.WM_RBUTTONDOWN, 200, 200);
+        IntPtr up2 = Send(NativeMethods.WM_RBUTTONUP, 200, 200);
+        return new
+        {
+            fall = "nachHaenger", taste = taste.ToString(), gehalten,
+            downGeschluckt = down2 == (IntPtr)1, upGeschluckt = up2 == (IntPtr)1,
+            withheld = h.PressWithheld,
+        };
+    }
+
+    /// <summary>Taste war gedrueckt, ist es aber NICHT mehr (nur das niedrige
+    /// Bit). Das darf den Klick nicht durchreichen.</summary>
+    private static object LaufNachwirkung(GestenTaste taste, int gehalten)
+    {
+        var h = new Hook { Durchreichen = taste };
+        NativeMethods.Gehalten = gehalten;
+        NativeMethods.NurNachwirkung = true;
+        InputReplay.Nachgespielt = 0;
+        var d = Pt(100, 100);
+        IntPtr p = Marshal.AllocHGlobal(Marshal.SizeOf<NativeMethods.MSLLHOOKSTRUCT>());
+        Marshal.StructureToPtr(d, p, false);
+        IntPtr down = h.Test(0, (IntPtr)NativeMethods.WM_RBUTTONDOWN, p);
+        Marshal.FreeHGlobal(p);
+        NativeMethods.NurNachwirkung = false;
+        return new
+        {
+            fall = "nachwirkung", taste = taste.ToString(), gehalten,
+            downGeschluckt = down == (IntPtr)1,
+        };
+    }
+
+    /// Die GESTENTASTE: verlangt die Geste eine Taste, gehoert der Klick ohne
+    /// sie der Anwendung – die Umkehrung von `Durchreichen`.
+    static object Geste(GestenTaste verlangt, int gehalten)
+    {
+        var h = new Hook { GesteVerlangt = verlangt };
+        NativeMethods.Gehalten = gehalten;
+        int lasso = 0;
+        h.DragStarted += _ => lasso++;
+        IntPtr down = An(h, NativeMethods.WM_RBUTTONDOWN, 100, 100);
+        // Eine Bewegung, damit sich zeigt, ob ueberhaupt ein Lasso entsteht.
+        An(h, NativeMethods.WM_MOUSEMOVE, 200, 200);
+        IntPtr up = An(h, NativeMethods.WM_RBUTTONUP, 200, 200);
+        return new Dictionary<string, object?>
+        {
+            ["fall"] = "geste:" + verlangt + ":" + gehalten,
+            ["downGeschluckt"] = down == (IntPtr)1,
+            ["upGeschluckt"] = up == (IntPtr)1,
+            ["lasso"] = lasso,
+            ["withheld"] = h.PressWithheld,
+        };
+    }
+
+    /// Ein Ereignis an den Hook geben – wie `Lauf` es tut.
+    static IntPtr An(Hook h, int msg, int x, int y)
+    {
+        var d = Pt(x, y);
+        IntPtr p = Marshal.AllocHGlobal(Marshal.SizeOf<NativeMethods.MSLLHOOKSTRUCT>());
+        Marshal.StructureToPtr(d, p, false);
+        IntPtr r = h.Test(0, (IntPtr)msg, p);
+        Marshal.FreeHGlobal(p);
+        return r;
+    }
+
+    /// Der ECHTE `HaltenAbgelaufen`-Zweig gegen die Lagen, die zaehlen.
+    static object Halten(string name, bool ziehbar, bool zieht, bool schon, bool scheitert)
+    {
+        var h = new Hook();
+        InputReplay.Downs = 0;
+        InputReplay.Scheitert = scheitert;
+        h.LiegtObjektUnter = _ => ziehbar;
+        bool gemeldet = false;
+        h.Durchgereicht += () => gemeldet = true;
+        string? fehler = null;
+        h.ReplayFailed += m => fehler = m;
+
+        // Zustand herstellen wie nach einem verschluckten Druck.
+        An(h, NativeMethods.WM_RBUTTONDOWN, 10, 10);
+        h.SetzeZieht(zieht);
+        h.SetzeDurchgereicht(schon);
+
+        h.HaltenTest();
+        return new Dictionary<string, object?>
+        {
+            ["fall"] = name,
+            ["downs"] = InputReplay.Downs,
+            ["durchgereicht"] = h.Durchgereicht_,
+            ["gemeldet"] = gemeldet,
+            ["fehler"] = fehler,
+            ["withheld"] = h.PressWithheld,
+            ["timer"] = h.Halten.Enabled,
+        };
+    }
+
+    /// Bewegung waehrend des Haltens - und was danach passiert.
+    ///
+    /// ⚠ HIER STAND DIE FALSCHE ZUSAGE: der Waechter prueste bis 2026-09-10,
+    ///    dass eine Bewegung ueber die Zieh-Toleranz den Timer STOPPT - und
+    ///    genau das war der gemeldete Fehler. Abgebrochen gehoert er erst,
+    ///    wenn das Lasso wirklich beginnt; eine kleine Bewegung setzt ihn
+    ///    zurueck (Semantik von SPI_GETMOUSEHOVERTIME).
+    static object Bewegung(string name, bool ueber, int dx)
+    {
+        var h = new Hook();
+        h.LiegtObjektUnter = _ => true;
+        int lasso = 0;
+        h.DragStarted += _ => lasso++;
+        bool gemeldet = false;
+        h.Durchgereicht += () => gemeldet = true;
+        InputReplay.Downs = 0;
+        // ⚠ AUSDRUECKLICH ZURUECKSTELLEN: ein frueherer Fall setzt `Scheitert`
+        //    auf true, und ein Leck daraus meldet hier "nicht durchgereicht" -
+        //    ein Fehler, den der Code nicht hat (beim ersten Lauf genau so
+        //    passiert, Register).
+        InputReplay.Scheitert = false;
+        NativeMethods.Gehalten = 0;
+        NativeMethods.NurNachwirkung = false;
+
+        An(h, NativeMethods.WM_RBUTTONDOWN, 10, 10);
+        bool nachDown = h.Halten.Enabled;
+        int startsNachDown = h.Halten.Starts;
+
+        SystemWerte.UeberToleranzWert = ueber;
+        An(h, NativeMethods.WM_MOUSEMOVE, 10 + dx, 10);
+        // ⚠ EINE ZWEITE, KLEINE BEWEGUNG. Wird der Anker nachgezogen, liegt sie
+        //    innerhalb der Toleranz und startet den Timer NICHT erneut. Ohne
+        //    Nachziehen misst der Code weiter gegen den Druckpunkt und startet
+        //    ein zweites Mal - daran ist die Eigenschaft ueberhaupt erst zu
+        //    erkennen.
+        if (dx > 0 && dx < 8)
+        {
+            An(h, NativeMethods.WM_MOUSEMOVE, 10 + dx + 2, 10);
+        }
+        SystemWerte.UeberToleranzWert = false;
+
+        bool timerNachMove = h.Halten.Enabled;
+        int neustarts = h.Halten.Starts - startsNachDown;
+
+        // ⚠ NUR WENN DER TIMER NOCH LAEUFT. Ein gestoppter WinForms-Timer
+        //    feuert nicht; wer `HaltenAbgelaufen` trotzdem ruft, misst einen
+        //    Ablauf, den es im Betrieb gar nicht gibt - und die Gegenprobe
+        //    meldet dann faelschlich "durchgereicht" fuer einen Stand, in dem
+        //    der Benutzer vergeblich wartet (beim ersten Lauf genau so gesehen).
+        if (h.Halten.Enabled)
+        {
+            h.HaltenTest();
+        }
+
+        return new Dictionary<string, object?>
+        {
+            ["fall"] = name,
+            ["timer_nach_down"] = nachDown,
+            ["timer_nach_move"] = timerNachMove,
+            ["neustarts"] = neustarts,
+            ["lasso"] = lasso,
+            ["durchgereicht"] = h.Durchgereicht_,
+            ["gemeldet"] = gemeldet,
+            ["downs"] = InputReplay.Downs,
+        };
+    }
+
+    public static void Main()
+    {
+        var raus = new List<object>();
+        foreach (var g in new[] { GestenTaste.Keine, GestenTaste.Strg })
+        {
+            foreach (var gh in new[] { 0, NativeMethods.VK_CONTROL })
+            {
+                raus.Add(Geste(g, gh));
+            }
+        }
+        raus.Add(Halten("ziehbar -> durchgereicht", true, false, false, false));
+        raus.Add(Halten("nicht ziehbar -> Lasso bleibt", false, false, false, false));
+        raus.Add(Halten("schon am Ziehen -> nichts", true, true, false, false));
+        raus.Add(Halten("schon durchgereicht -> nichts", true, false, true, false));
+        raus.Add(Halten("Injektion scheitert -> zurueckgedreht", true, false, false, true));
+        // ⚠ dx=5 liegt UEBER der Zieh-Toleranz (4) und UNTER `_threshold` (8) -
+        //    genau das Fenster, in dem der gemeldete Fehler sass. dx=1 waere
+        //    gar keine Bewegung im Sinne der Pruefung gewesen.
+        raus.Add(Bewegung("kleine Bewegung, dann stillhalten", true, 5));
+        raus.Add(Bewegung("Zittern unter der Toleranz", true, 1));
+        // dx=20 ueberschreitet `_threshold` - ab hier ist es ein Rahmen.
+        raus.Add(Bewegung("echtes Lasso", true, 20));
+        raus.Add(LaufNachHaenger(GestenTaste.Strg, NativeMethods.VK_CONTROL));
+        raus.Add(LaufNachwirkung(GestenTaste.Strg, NativeMethods.VK_CONTROL));
+        foreach (var t in new[] { GestenTaste.Keine, GestenTaste.Strg,
+                                  GestenTaste.Alt, GestenTaste.Umschalt })
+        {
+            foreach (var g in new[] { 0, NativeMethods.VK_CONTROL,
+                                      NativeMethods.VK_MENU, NativeMethods.VK_SHIFT })
+            {
+                raus.Add(Lauf(t, g, false));
+                raus.Add(Lauf(t, g, true));
+            }
+        }
+        Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(raus));
+    }
+}
+"""
+    # HookProc ist privat – fuer den Lauf oeffnen (nur die Sichtbarkeit).
+    proc_offen = PROC.replace("private IntPtr HookProc", "public IntPtr Test", 1)
+    (ARB / "Hook.cs").write_text(
+        huelle.replace("__PROC__", proc_offen).replace("__TG__", TG)
+              .replace("__HALTEN__", HALTEN.replace(
+                  "private void HaltenAbgelaufen", "public void HaltenTest", 1)),
+        encoding="utf-8")
+
+    # ⚠ BENUTZERABHAENGIGES HOME, KEIN FESTES `/tmp/dotnethome` (Fix
+    #   2026-09-14). `/tmp` ist 1777: legt ein Lauf als root dort das
+    #   NuGet-Profil an, kann der Dienstbenutzer es danach nicht mehr lesen,
+    #   und JEDER weitere Lauf bricht mit „Access to the path
+    #   '.../NuGet.Config' is denied" ab – ein Rueckstand vom 10.09. hat den
+    #   Test hier vier Tage lang fuer `jarvis` unbenutzbar gemacht. Derselbe
+    #   Fallstrick wie beim `/tmp/abw.txt`-Vorfall (Register).
+    heim = Path("/tmp/dotnethome-%d" % os.getuid())
+    heim.mkdir(mode=0o700, exist_ok=True)
+    umg = dict(os.environ, DOTNET_CLI_TELEMETRY_OPTOUT="1", DOTNET_NOLOGO="1",
+               HOME=str(heim))
+    b = subprocess.run([str(DOTNET), "build", "-c", "Release", "--nologo"],
+                       cwd=ARB, capture_output=True, text=True, timeout=420, env=umg)
+    if b.returncode != 0:
+        print("ABBRUCH: Testprogramm liess sich nicht uebersetzen:")
+        print((b.stdout + b.stderr)[-2000:])
+        sys.exit(2)
+    dll = next(ARB.glob("bin/Release/net8.0/P.dll"), None)
+    r = subprocess.run([str(DOTNET), str(dll)], capture_output=True, text=True,
+                       timeout=120, env=umg)
+    if r.returncode != 0:
+        print("ABBRUCH: Lauf gescheitert:", (r.stdout + r.stderr)[-800:])
+        sys.exit(2)
+    erg = json.loads(r.stdout)
+
+    print("=" * 74)
+    print("LIVE: Lasso oder Rechtsziehen – die echte Verzweigung, ausgefuehrt")
+    print("=" * 74)
+
+    VK = {0: "keine", 0x11: "Strg", 0x12: "Alt", 0x10: "Umschalt"}
+
+    def hol(taste, gehalten, ziehen):
+        return next(e for e in erg if e.get("fall") is None and e["taste"] == taste
+                    and e["gehalten"] == gehalten and e["ziehen"] == ziehen)
+
+    # Die Tasten-Laeufe (ohne die neuen Halte-Faelle) – die Positivkontrollen
+    # weiter unten beziehen sich ausschliesslich auf sie.
+    tastenlaeufe = [e for e in erg if "downGeschluckt" in e]
+
+    # ══════════════════════════════════════════════════════════════════
+    # GESTENTASTE: die rechte Taste NUR mit Sondertaste (2026-09-10)
+    #
+    # ⚠ DAS IST DIE UMKEHRUNG von `Durchreichen`. Ohne Gestentaste nimmt die
+    #   Geste jeden Rechtsklick; MIT ihr gehoert er der Anwendung, ausser die
+    #   Taste wird gehalten. Beide gleichzeitig waeren widerspruechlich –
+    #   deshalb loest `TastenAus` das an EINER Stelle auf.
+    # ══════════════════════════════════════════════════════════════════
+    print("\n── Gestentaste: Lasso nur mit Sondertaste ──")
+
+    def gst(verlangt, gehalten):
+        return next(e for e in erg if e.get("fall") == f"geste:{verlangt}:{gehalten}")
+
+    e = gst("Keine", 0)
+    check("ohne Gestentaste: der Klick gehoert wie bisher der Geste",
+          e["downGeschluckt"] is True and e["lasso"] == 1)
+
+    # ⚠ DER FALL, DEN DER BETREIBER BESTELLT HAT.
+    e = gst("Strg", 0)
+    check("mit Gestentaste, ohne sie zu halten: der Klick geht an die Anwendung",
+          e["downGeschluckt"] is False and e["upGeschluckt"] is False)
+    check("  … und es entsteht KEIN Lasso", e["lasso"] == 0)
+    # ⚠ Der teure Fehler: bliebe `_pressWithheld` stehen, verschluckte der
+    #   naechste BUTTONUP den Klick des Benutzers.
+    check("  … und nichts bleibt zurueckgehalten", e["withheld"] is False)
+
+    e = gst("Strg", 0x11)
+    check("mit Gestentaste UND gehaltener Taste: die Geste greift",
+          e["downGeschluckt"] is True and e["lasso"] == 1)
+
+    e = gst("Keine", 0x11)
+    check("ohne Gestentaste stoert eine gehaltene Taste nicht",
+          e["downGeschluckt"] is True and e["lasso"] == 1)
+
+    # ══════════════════════════════════════════════════════════════════
+    # HALTEN OHNE BEWEGUNG → Rechtsziehen statt Lasso (2026-09-10)
+    #
+    # ⚠ GEMESSEN WIRD DER ECHTE `HaltenAbgelaufen`-ZWEIG, geschnitten aus der
+    #    ausgelieferten Datei. Die UIA-Abfrage selbst laesst sich hier nicht
+    #    ausfuehren (kein Windows) – sie ist als Delegat gestellt. Geprueft
+    #    wird also die ENTSCHEIDUNG und ihre Nachwirkung, nicht UIA.
+    # ══════════════════════════════════════════════════════════════════
+    print("\n── Halten ohne Bewegung: die Entscheidung ──")
+
+    def halt(name):
+        return next(e for e in erg if e.get("fall") == name)
+
+    e = halt("ziehbar -> durchgereicht")
+    check("liegt ein Objekt darunter: der Druck geht an die Anwendung",
+          e["downs"] == 1 and e["durchgereicht"] is True, json.dumps(e))
+    # ⚠ DER TEURE FALL: bliebe `_pressWithheld` stehen, verschluckte der
+    #   Hook den spaeteren BUTTONUP – der Benutzer haenge dann mitten im Zug.
+    check("  … und nichts bleibt zurueckgehalten",
+          e["withheld"] is False, json.dumps(e))
+    check("  … der Auswahlrahmen wird abgeraeumt (Ereignis gemeldet)",
+          e["gemeldet"] is True, json.dumps(e))
+    check("  … und der Timer laeuft nicht weiter", e["timer"] is False, json.dumps(e))
+
+    e = halt("nicht ziehbar -> Lasso bleibt")
+    check("liegt NICHTS Ziehbares darunter: nichts wird injiziert",
+          e["downs"] == 0 and e["durchgereicht"] is False, json.dumps(e))
+    check("  … und der Druck bleibt fuer das Lasso zurueckgehalten",
+          e["withheld"] is True, json.dumps(e))
+
+    e = halt("schon am Ziehen -> nichts")
+    check("wer bereits zieht, bekommt kein Drag untergeschoben",
+          e["downs"] == 0 and e["durchgereicht"] is False, json.dumps(e))
+
+    e = halt("schon durchgereicht -> nichts")
+    check("zweimal durchreichen kommt nicht vor",
+          e["downs"] == 0, json.dumps(e))
+
+    # ⚠ Scheitert die Injektion, ist der Klick des Benutzers VERLOREN – das
+    #   darf nicht still bleiben, und der Zustand muss zurueckgedreht werden.
+    e = halt("Injektion scheitert -> zurueckgedreht")
+    check("eine gescheiterte Injektion wird gemeldet",
+          e["fehler"] is not None, json.dumps(e))
+    check("  … und der Zustand wird zurueckgedreht",
+          e["durchgereicht"] is False, json.dumps(e))
+
+    # ⚠ DER GEMELDETE FALL (2026-09-10): rechte Taste druecken, die Maus rutscht
+    #   dabei ein paar Pixel mit, dann stillhalten. Bis dahin war der Timer
+    #   danach TOT - das Lasso beginnt aber erst ab `_threshold` (8 px), also
+    #   passierte im Fenster 5..8 px gar nichts mehr.
+    e = halt("kleine Bewegung, dann stillhalten")
+    check("der Halte-Timer startet beim Druecken",
+          e["timer_nach_down"] is True, json.dumps(e))
+    check("eine kleine Bewegung SETZT ihn zurueck, statt ihn abzubrechen",
+          e["timer_nach_move"] is True and e["neustarts"] == 1, json.dumps(e))
+    check("  … es ist dabei KEIN Lasso entstanden",
+          e["lasso"] == 0, json.dumps(e))
+    check("  … und danach wird wirklich durchgereicht",
+          e["durchgereicht"] is True and e["downs"] == 1, json.dumps(e))
+    check("  … das Durchreichen wird gemeldet (der Rahmen muss weg)",
+          e["gemeldet"] is True, json.dumps(e))
+
+    e = halt("Zittern unter der Toleranz")
+    check("Zittern unter der Toleranz laesst die Uhr WEITERlaufen",
+          e["timer_nach_move"] is True and e["neustarts"] == 0, json.dumps(e))
+    check("  … und reicht danach ebenfalls durch",
+          e["durchgereicht"] is True, json.dumps(e))
+
+    # Die Gegenrichtung: ein echtes Lasso beendet das Halten endgueltig.
+    e = halt("echtes Lasso")
+    check("ein Lasso ueber der Schwelle beendet das Halten",
+          e["timer_nach_move"] is False, json.dumps(e))
+    check("  … es entsteht ein Rahmen",
+          e["lasso"] == 1, json.dumps(e))
+    check("  … und NICHTS wird durchgereicht",
+          e["durchgereicht"] is False and e["downs"] == 0, json.dumps(e))
+
+    print("\n── Vorgabe Strg: die Taste gibt den Klick frei ──")
+    for ziehen in (False, True):
+        e = hol("Strg", 0x11, ziehen)
+        check(f"Strg gehalten, {'ziehen' if ziehen else 'klicken'}: Klick geht DURCH",
+              not e["downGeschluckt"] and not e["upGeschluckt"], json.dumps(e))
+        check(f"  … und es entsteht KEIN Lasso", e["lasso"] == 0, json.dumps(e))
+        # ⚠ Der teure Fehler: bliebe `_pressWithheld` stehen, verschluckte der
+        #   naechste BUTTONUP den Klick des Benutzers.
+        check("  … und nichts bleibt zurueckgehalten", e["withheld"] is False, json.dumps(e))
+        check("  … und es wird nichts nachgespielt (der Klick war nie weg)",
+              e["nachgespielt"] == 0, json.dumps(e))
+
+    print("\n── Ohne die Taste bleibt alles wie bisher ──")
+    e = hol("Strg", 0, True)
+    check("ohne Taste + ziehen: Lasso wie gehabt",
+          e["downGeschluckt"] and e["upGeschluckt"] and e["lasso"] == 1
+          and e["nachgespielt"] == 0, json.dumps(e))
+    e = hol("Strg", 0, False)
+    check("ohne Taste + klicken: Klick wird nachgespielt",
+          e["downGeschluckt"] and e["upGeschluckt"] and e["lasso"] == 0
+          and e["nachgespielt"] == 1, json.dumps(e))
+
+    print("\n── Eine ANDERE Taste greift nicht ──")
+    for g in (0x12, 0x10):
+        e = hol("Strg", g, True)
+        check(f"{VK[g]} gehalten (eingestellt ist Strg): Lasso wie gehabt",
+              e["downGeschluckt"] and e["lasso"] == 1, json.dumps(e))
+
+    print("\n── Die anderen Einstellungen ──")
+    for taste, vk in (("Alt", 0x12), ("Umschalt", 0x10)):
+        e = hol(taste, vk, True)
+        check(f"eingestellt {taste}, {taste} gehalten: Klick geht durch",
+              not e["downGeschluckt"] and e["lasso"] == 0 and e["withheld"] is False,
+              json.dumps(e))
+        e = hol(taste, 0x11, True)
+        check(f"eingestellt {taste}, Strg gehalten: Lasso (Strg zaehlt dort nicht)",
+              e["downGeschluckt"] and e["lasso"] == 1, json.dumps(e))
+
+    print("\n── 'Keine': das Verhalten von vor der Aenderung ──")
+    for g in (0, 0x11, 0x12, 0x10):
+        e = hol("Keine", g, True)
+        check(f"Keine + {VK[g]}: immer Lasso",
+              e["downGeschluckt"] and e["lasso"] == 1, json.dumps(e))
+
+    print("\n── Die Zustands-Invariante ──")
+    nh = next(e for e in erg if e.get("fall") == "nachHaenger")
+    check("nach einem haengengebliebenen Down reicht die Taste den naechsten Klick durch",
+          not nh["downGeschluckt"], json.dumps(nh))
+    # ⚠ DAS IST DER TEURE FALL: bliebe `_pressWithheld` stehen, verschluckte
+    #    dieser Up den Klick – der Benutzer verliert ihn ganz.
+    check("⚠ und der zugehoerige BUTTONUP wird NICHT verschluckt",
+          not nh["upGeschluckt"], json.dumps(nh))
+    check("nichts bleibt zurueckgehalten", nh["withheld"] is False, json.dumps(nh))
+
+    nw = next(e for e in erg if e.get("fall") == "nachwirkung")
+    check("⚠ eine losgelassene Taste (nur niedriges Bit) reicht NICHT durch",
+          nw["downGeschluckt"], json.dumps(nw))
+
+    # Positivkontrolle: der Aufbau KANN beide Ausgaenge erzeugen – sonst waeren
+    # die Pruefungen oben trivial.
+    check("Positivkontrolle: es gibt sowohl geschluckte als auch durchgereichte Klicks",
+          any(e["downGeschluckt"] for e in tastenlaeufe)
+      and any(not e["downGeschluckt"] for e in tastenlaeufe))
+
+finally:
+    shutil.rmtree(ARB, ignore_errors=True)
+
+print("\n" + "=" * 74)
+print(f"Ergebnis: {_ok} OK, {_fail} FAIL")
+print("=" * 74)
+sys.exit(1 if _fail else 0)

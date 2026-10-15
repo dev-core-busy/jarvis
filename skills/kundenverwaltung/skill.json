@@ -1,0 +1,32 @@
+{
+    "name": "Kundenverwaltung",
+    "description": "Anbindung an die Kundenverwaltung (IBS-API): Ticketsuche nach Schlagworten. Erste Ausbaustufe – Funktion 'tickets-by-buzzwords' derzeit als Dummy.",
+    "version": "1.1.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": ["kv_tickets_by_buzzwords"],
+    "category": "wissen",
+    "icon": "lifebuoy",
+    "system": false,
+    "enabled": false,
+    "config_schema": {},
+    "knowledge_docs": [],
+    "dependencies": [],
+    "permissions": [],
+    "help": {
+        "details": "Anbindung an die Kundenverwaltungs-API (IBS), unabhaengig von Jira. Erste Ausbaustufe: Ticketsuche nach Schlagworten ueber die API-Funktion 'tickets-by-buzzwords'. Die Funktion ist serverseitig noch nicht verfuegbar und derzeit als DUMMY umgesetzt – das Tool validiert Eingaben, zeigt den geplanten API-Aufruf und liefert gekennzeichnete Beispieldaten. Die Zugangsdaten (URL + API-Key) schalten zusaetzlich die Checkbox 'IBS Tickets' in der Support-Suche frei.",
+        "tools": [
+            {
+                "name": "kv_tickets_by_buzzwords",
+                "label": "Tickets suchen (Kundenverwaltung)",
+                "desc": "Sucht Tickets ueber die Kundenverwaltungs-API anhand von 1-5 Schlagworten. Derzeit Dummy mit Beispieldaten."
+            }
+        ],
+        "use_cases": [
+            "Suche in der Kundenverwaltung Tickets zu 'LDT Anbindung'",
+            "Kundenverwaltung: Tickets zu 'Drucker' und 'Fehler'"
+        ],
+        "setup": "Im Einstellungs-Reiter 'Kundenverwaltung' die URL der Kundenverwaltungs-API und den API-Key eintragen.",
+        "notes": "Die API-Funktion 'tickets-by-buzzwords' ist noch nicht angebunden (Dummy). Kundenauswertungen auf Jira-Basis (Profile, Eskalations-Analyse, Diagramme) liegen im Jira-Skill."
+    }
+}

@@ -1,0 +1,840 @@
+"""Zentrale, LLM-unabhaengige Zugriffskontrolle fuer nicht-privilegierte
+(Domain-/LDAP-)Benutzer.
+
+WICHTIG: Diese Pruefungen werden im Tool-Dispatch ERZWUNGEN – nicht im Prompt.
+Sie lassen sich daher NICHT per Prompt, Base64-Kodierung oder "gelernten Fakten"
+aushebeln. Prompt-Regeln sind nur zusaetzliche Hinweise; massgeblich ist dieser Code.
+
+Modell:
+- filesystem-Tool: Schreiben nur in einen Arbeitsbereich (/tmp, data/documents),
+  Lesen/Listen nur in einer Allowlist (Wissens-/Arbeitsverzeichnisse). Alles andere
+  (Root-, System-, App-interne Pfade, Secrets) ist gesperrt. Symlinks werden
+  aufgeloest (kein Escape ueber /tmp/link -> /etc/shadow).
+- shell-Tool: zusaetzlich zu den bestehenden Deny-Mustern werden Verschleierung
+  (base64/xxd/eval/pipe-in-shell) und Secret-/Root-Pfade gesperrt. Die HARTE
+  Garantie liefert die OS-Sandbox (runuser als unprivilegierter User).
+"""
+
+import contextvars
+import os
+import re
+import shlex
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DOCS_ROOT = (PROJECT_ROOT / "data" / "documents").resolve()
+
+# ── Benutzer des laufenden Werkzeug-Aufrufs ──────────────────────────────────
+# Wird im Dispatch (agent.py::_execute_tool) fuer die Dauer EINES Aufrufs
+# gesetzt. Werkzeuge, die selbst Dateien aufloesen (filesystem, office), fragen
+# darueber die Eigentuemer-Schranke ab, ohne dass der Benutzername durch jede
+# Signatur gereicht werden muss. LEER = keine Einschraenkung (privilegierte
+# Benutzer, Systemlaeufe) – die Schranke gilt nur fuer Domain-Benutzer, genau
+# wie die uebrigen Pruefungen in diesem Modul.
+_tool_user: contextvars.ContextVar = contextvars.ContextVar("jarvis_tool_user", default="")
+
+
+def set_tool_user(username: str):
+    """Setzt den Benutzer fuer diesen Werkzeug-Aufruf; Rueckgabe = Reset-Token."""
+    return _tool_user.set(username or "")
+
+
+def reset_tool_user(token) -> None:
+    try:
+        _tool_user.reset(token)
+    except Exception:
+        pass
+
+
+def tool_user() -> str:
+    return _tool_user.get()
+
+
+def may_see_document(name: str, username: str | None = None) -> bool:
+    """Darf dieser Benutzer die Datei in data/documents sehen?
+
+    Dieselbe Regel wie am HTTP-Endpunkt (`backend/documents.py::may_access`):
+    nur der Ersteller, fail-closed ohne Registry-Eintrag. Bis 2026-07-28 gab es
+    diese Schranke nur beim Download – ein `filesystem list data/documents` zeigte
+    dagegen JEDEM Domain-Benutzer die Dateinamen aller anderen (auf ECHT u.a.
+    Jira-Exporte mit Kundendaten und fremde Angebote).
+    """
+    user = tool_user() if username is None else username
+    if not user:
+        return True                      # privilegiert / kein Benutzerbezug
+    from backend import documents
+    return documents.may_access(name, user, is_admin=False)
+
+
+def may_list_entry(directory, name: str, username: str | None = None) -> bool:
+    """Filter fuer Verzeichnis-Auflistungen; greift NUR in data/documents."""
+    user = tool_user() if username is None else username
+    if not user:
+        return True
+    try:
+        if _resolve(directory) != DOCS_ROOT:
+            return True
+    except Exception:
+        return True
+    return may_see_document(name, user)
+
+
+def _roots(*paths):
+    out = []
+    for p in paths:
+        try:
+            out.append(Path(p).resolve())
+        except Exception:
+            pass
+    return out
+
+
+# Schreib-Arbeitsbereich fuer Domain-Nutzer
+WRITE_ROOTS = _roots("/tmp", str(PROJECT_ROOT / "data" / "documents"))
+# Lese-Allowlist fuer Domain-Nutzer (alles andere gesperrt -> Root/System dicht)
+# ⚠ DIE ALTEN ORTE BLEIBEN NEBEN DEN NEUEN STEHEN. Seit 2026-09-13 liegen
+# Wissensordner unter `data/rag` und Freigaben unter `/mnt/rag`. Der Umzug laeuft
+# beim Dienststart, ein bereits EINGEHAENGTER Mount bleibt aber bis zum naechsten
+# "Verbinden" an seinem alten Punkt – naehme man `/mnt/jarvis-kb` sofort heraus,
+# waere sein Inhalt fuer die Shell still unlesbar, und der Grund dafuer stuende
+# nirgends. Beide Orte tragen dieselbe Art Inhalt (Wissensdateien), die
+# Vertrauensstufe aendert sich also nicht.
+READ_ROOTS = _roots(
+    "/tmp", "/mnt/rag", "/mnt/jarvis-kb",
+    str(PROJECT_ROOT / "data" / "rag"),
+    str(PROJECT_ROOT / "data" / "knowledge"),
+    str(PROJECT_ROOT / "data" / "documents"),
+)
+
+_SECRET_NAMES = {
+    # .owners.json bildet Dokument -> Benutzer ab: verraet, WER was erzeugt hat.
+    # Datei ist zwar 0600, aber ausdruecklich sperren (und aus Auflistungen halten).
+    ".owners.json",
+    ".env", "settings.json", "memory.json", "auth_state.json",
+    "credentials.json", "id_rsa", "id_ed25519", "id_dsa", ".htpasswd",
+    ".netrc", "shadow", "gshadow", "sudoers",
+    # Signierschluessel der Sitzungstokens und Docker-Erstkennwort: wer sie
+    # liest, meldet sich als beliebiger Benutzer an (2026-09-28).
+    ".secret_key", ".erstkennwort",
+}
+_SECRET_SUFFIX = {".key", ".pem", ".crt", ".cer", ".p12", ".pfx", ".jks", ".keystore"}
+_SECRET_DIRPARTS = {".ssh", ".git", "certs"}
+# /run/credentials: dort legt systemd dem Dienst den Hauptschluessel der
+# Geheimnisse ab (BSI M5, LoadCredential); /etc/jarvis haelt das Original und
+# den Freigabe-Schluessel des Brokers. Beides root-/dienst-eigen – gesperrt,
+# damit ein Werkzeug es auch dann nicht liest, wenn die Rechte es zuliessen.
+_SYSTEM_DENY_PREFIX = ("/root", "/boot", "/proc", "/sys", "/run/credentials", "/etc/jarvis")
+# App-interne, sensible Pfade unterhalb des Projekts (relativ)
+_APP_DENY_REL = (
+    ".env", "settings.json", "data/settings.json", "data/memory.json",
+    # data/chats = Chat-Verlaeufe ALLER Benutzer. Stand bisher nur in PRIVATE_DIRS
+    # (OS-Rechte 0750), war hier aber nicht als sensibel gefuehrt: `authorize_fs`
+    # verweigerte den Zugriff nur mit der Begruendung "nicht im Arbeitsbereich".
+    # Seit 2026-08-05 macht das einen Unterschied – die Begruendung entscheidet,
+    # ob ein abgewiesener Zugriff als Angriffsindiz zaehlt (fs_target_sensitive).
+    "data/chats",
+    "data/instructions", "data/logs", "data/conv_log.jsonl",
+    "data/audit_log.jsonl", "certs",
+    # Zeitgesteuerte Auftraege/Trigger ALLER Benutzer + Sicherheits-Zustand:
+    # cron_list zeigt nur eigene Auftraege, ein direktes Lesen der Datei wuerde
+    # diese Schranke aushebeln.
+    "data/scheduled_jobs.json", "data/file_watchers.json", "data/security_state.json",
+    # Lizenz-Zustand: Firma, Abteilung, Ansprechpartner-Mail und die
+    # Hardware-Bindung. Geht einen Shell-Befehl in der Sandbox nichts an – und
+    # ein beschreibbarer Zustand waere der bequemste Weg, sich selbst eine
+    # hoehere Stufe zu geben.
+    "data/license.json",
+    # Instanz-Kennung im Container (backend/license.py). Anders als die
+    # Hardware-Kennung ist das ein GEHEIMNIS: wer sie liest, kann die
+    # Lizenzbindung auf ein anderes System uebertragen. Ein `cat` in der
+    # Sandbox – also ueber einen Chat-Auftrag – geht sie nichts an.
+    "data/.instanz",
+    # Rollen-Definitionen (backend/agent_roles.py): der dort gespeicherte Prompt
+    # geht in KUENFTIGE Laeufe – dasselbe Persistenz-Substrat wie
+    # data/instructions. Ein beschreibbarer Eintrag waere ein dauerhafter Kanal
+    # in den System-Prompt eines Rollen-Agenten.
+    "data/agent_roles.json",
+    # Prompt-Vorlagen des Jira-Assistenten (backend/jira_vorlagen.py). Gleiche
+    # Begruendung wie eine Zeile darueber: der Text geht in den System-Prompt
+    # JEDER Zusammenfassung, und die globalen Vorlagen gelten fuer alle
+    # Benutzer. Der Inhalt ist harmlos, die Schreibbarkeit nicht.
+    "data/jira_vorlagen.json",
+    # Feedback-Formulare und -Abgaben (backend/feedback.py). Die ABGABEN sind
+    # personenbezogen: jede traegt den Benutzernamen und die Aussagen eines
+    # Menschen ueber seine Arbeit. Die Oberflaeche trennt bewusst („Administrator
+    # sieht alle, Benutzer nur seine eigenen") – ein `cat` in der Sandbox wuerde
+    # genau diese Schranke aushebeln, dieselbe Lage wie bei `data/chats`.
+    # Die FORMULARE stehen mit, weil ein beschreibbarer Bestand Spalten
+    # unterschieben koennte, unter denen spaeter abgegeben wird.
+    "data/feedback_formulare.json", "data/feedback_abgaben.jsonl",
+    # Dynamische Confluence-Einbindung (backend/confluence_bindung.py): welche
+    # Confluence-Bereiche das Haus in seine Wissensdatenbank zieht. Lesen
+    # verraet die interne Confluence-Struktur; SCHREIBEN waere die kuerzeste
+    # Art, dem spaeteren Abgleich einen fremden Bereich unterzuschieben.
+    # Der Abgleichsstand daneben (backend/confluence_abgleich.py) fuehrt je
+    # Seite die Zieldatei: beschreibbar liesse er den Abgleich eine BELIEBIGE
+    # Datei als "nicht mehr gewollt" loeschen.
+    "data/confluence_bindung.json", "data/confluence_abgleich.json",
+    # Verankerte SAP-Serverzertifikate (backend/sap_cert.py). Der INHALT ist
+    # oeffentlich – die SCHREIBBARKEIT ist das Problem: wer hier eine eigene CA
+    # ablegt, laesst eine SAP-Verbindung gegen einen fremden Server laufen, ohne
+    # dass die Zertifikatspruefung anschlaegt.
+    "data/sap_certs",
+    # Login-Caches (main.py::_load_ad_caches): Gruppen-DNs und die Rechte-Flags
+    # kb_editor/internet/**admin** aller kuerzlich angemeldeten Benutzer. Lesen
+    # verraet die AD-Struktur; SCHREIBEN waere mit `{"admin": true}` der
+    # bequemste Weg zu Administratorrechten – deshalb sensibel, nicht bloss
+    # "nicht im Arbeitsbereich".
+    "data/ad_cache.json",
+    # Standort-Synchronisation (backend/knowledge_sync.py): enthaelt die
+    # Freigabe-Token DIESER Instanz und die Token FREMDER Standorte im Klartext.
+    # Ein Token ist der vollstaendige Lesezugriff auf einen fremden Wissensordner
+    # – so sensibel wie eine Skill-Zugangsdatei. SCHREIBEN waere zusaetzlich der
+    # Weg, einen eigenen "Standort" einzutragen und damit beliebige Dateien in
+    # einen Wissensordner zu spiegeln.
+    "data/knowledge_sync.json",
+    # E-Mail-Skill (backend/mail_accounts.py, mail_rules.py). Drei Gruende, jeder
+    # allein ausreichend:
+    #  - `email_accounts.json` + `.mailkey` sind zusammen das KLARTEXT-Kennwort
+    #    jedes hinterlegten Postfachs. Der Schluessel ohne die Datei ist nutzlos
+    #    und umgekehrt – also muessen BEIDE zu sein.
+    #  - `email_rules.json` enthaelt die Prompts aller Benutzer. SCHREIBEN waere
+    #    der Weg, einem fremden Benutzer eine Regel unterzuschieben, die spaeter
+    #    unter SEINER Kennung laeuft und aus SEINEM Postfach sendet – dasselbe
+    #    Persistenz-Substrat wie data/instructions, nur mit Briefkasten.
+    #  - `email_log.jsonl` enthaelt Absender und Betreffzeilen fremder Post.
+    "data/email_accounts.json", "data/.mailkey",
+    "data/email_rules.json", "data/email_state.json", "data/email_log.jsonl",
+    # Persoenliche SAP-Zugaenge (backend/sap_accounts.py): `sap_accounts.json` +
+    # `.sapkey` sind zusammen das KLARTEXT-Kennwort jedes hinterlegten
+    # SAP-Benutzers – der Schluessel ohne die Datei ist nutzlos und umgekehrt,
+    # also muessen BEIDE zu sein. SCHREIBEN waere zusaetzlich der Weg, einem
+    # fremden Benutzer einen Zugang auf einen fremden Server unterzuschieben
+    # (die Host-Freigabeliste prueft nur der Endpunkt, nicht das Dateisystem).
+    "data/sap_accounts.json", "data/.sapkey",
+    # Kennwoerter der Netzwerk-Freigaben (backend/mount_credentials.py):
+    # `.mountkey` entschluesselt die `password_enc`-Felder in settings.json.
+    # Die Ablage selbst steht weiter unten ohnehin drin; der SCHLUESSEL
+    # ist die zweite Haelfte – einer ohne den anderen ist nutzlos.
+    "data/.mountkey",
+    # Persoenliche Jira-Zugaenge (backend/jira_accounts.py): dieselbe Bauart und
+    # dieselbe Begruendung wie bei SAP – `jira_accounts.json` + `.jirakey` sind
+    # zusammen der KLARTEXT-Token jedes hinterlegten Jira-Benutzers. Ein
+    # Jira-PAT traegt die vollen Rechte seines Besitzers; SCHREIBEN waere der
+    # Weg, einem fremden Benutzer einen untergeschobenen Token zuzuordnen.
+    "data/jira_accounts.json", "data/.jirakey",
+    # Persoenliche Confluence-Zugaenge (backend/confluence_accounts.py): gleiche
+    # Bauart und gleiche Begruendung wie bei Jira – `confluence_accounts.json` +
+    # `.confluencekey` sind zusammen der KLARTEXT-Token jedes hinterlegten
+    # Benutzers. Ein Confluence-PAT traegt die vollen Rechte seines Besitzers,
+    # und weil die confluence_*-Werkzeuge auch SCHREIBEN (Seite anlegen,
+    # kommentieren, Anhang hochladen), waere ein untergeschobener Token der Weg,
+    # unter fremdem Namen in die Hausdokumentation zu schreiben.
+    "data/confluence_accounts.json", "data/.confluencekey",
+    # Persoenliche VEMAS-Zugaenge (backend/vemas_accounts.py): dieselbe Bauart
+    # und dieselbe Begruendung wie bei SAP und Jira – `vemas_accounts.json` +
+    # `.vemaskey` sind zusammen das KLARTEXT-Kennwort jedes hinterlegten
+    # VEMAS-Benutzers. SCHREIBEN waere der Weg, einem fremden Benutzer einen
+    # untergeschobenen Zugang zuzuordnen – und bei freigeschaltetem Schreiben
+    # buchte der naechste Lauf dann in dessen Namen.
+    "data/vemas_accounts.json", "data/.vemaskey",
+    # Code-Signatur der AI-Maus (backend/ai_mouse_signatur.py).
+    # ⚠ DAS IST DAS SCHWERSTE GEHEIMNIS IN DIESEM VERZEICHNIS: `.aimouse_sign
+    # .pfx` enthaelt den PRIVATEN SIGNIERSCHLUESSEL des Hauses, `.aimousesignkey`
+    # entschluesselt das Kennwort dazu. Wer beides liest, kann BELIEBIGEN Code
+    # im Namen der Firma signieren – und der laeuft auf jedem Domaenenrechner,
+    # der der Firmen-CA vertraut, ohne Herausgeber-Warnung. Das ist kein
+    # Zugangsdatum eines einzelnen Benutzers, sondern die Vertrauensgrundlage
+    # ALLER Arbeitsplaetze. SCHREIBEN waere der Weg, ein fremdes Zertifikat
+    # unterzuschieben und damit kuenftige Auslieferungen zu signieren.
+    "data/ai_mouse_signatur.json", "data/.aimousesignkey",
+    "data/.aimouse_sign.pfx",
+    # Outlook-Add-in (backend/addin_sso.py): ordnet Exchange-Postfaecher den
+    # Jarvis-Konten zu und ist damit die Grundlage der kennwortlosen Anmeldung.
+    # SCHREIBEN heisst hier: das eigene Postfach auf einen fremden – gern einen
+    # administrativen – Benutzer eintragen und sich anschliessend als dieser
+    # anmelden. Das ist die direkteste Rechteerhoehung im ganzen Verzeichnis.
+    "data/addin_links.json",
+    # Short Tracks (backend/short_tracks.py): `short_tracks.json` enthaelt die
+    # Prompts ALLER Benutzer samt ihrem Werkzeug-Zuschnitt. SCHREIBEN waere der
+    # Weg, sich einen Dump mit dem Bereich `shell` anzulegen (oder einen fremden
+    # darauf umzustellen) und ihn beim naechsten Ablegen unter der Kennung des
+    # dortigen Benutzers laufen zu lassen – dasselbe Persistenz-Substrat wie
+    # data/instructions und email_rules.json. `short_tracks_log.jsonl` enthaelt
+    # Dateinamen und Ergebnistexte fremder Laeufe.
+    "data/short_tracks.json", "data/short_tracks_log.jsonl",
+    # Claude Subagent (backend/claude_subagent.py): bildet Delegations-Schluessel
+    # auf BENUTZER ab. Seit 2026-08-23 steht der Schluessel dort im KLARTEXT
+    # (er wird dauerhaft angezeigt) – Lesen ist damit gleichbedeutend mit
+    # "fremde Vollmacht in der Hand". Schreiben bleibt die zweite Gefahr: ein
+    # eigener Eintrag laesst kuenftige Laeufe unter fremder Kennung starten.
+    # Deshalb steht die Datei zusaetzlich in PRIVATE_FILES_STRENG (0600).
+    "data/claude_subagent.json",
+    # ⚠ `data/generated_images` STEHT HIER ABSICHTLICH NICHT (geprueft 2026-09-24).
+    # Es ist seit demselben Tag in PRIVATE_DIRS (0750) – das schliesst den
+    # SHELL-Weg, und der war die Luecke. Der WERKZEUG-Weg ist ohnehin zu: der
+    # Ordner steht nicht in READ_ROOTS, `authorize_fs` weist read/list/write
+    # bereits ab ("Lesen ist nur in den Wissens-/Arbeitsverzeichnissen erlaubt").
+    # Ein Eintrag hier wuerde also NICHT die Sperre aendern, sondern nur die
+    # HAERTE: aus einem weichen Vermerk wuerde ein Angriffsindiz, und drei
+    # Versuche im 600-s-Fenster sperren das Konto.
+    # Das waere hier falsch, weil der Pfad NAHELIEGT: das Modell hat
+    # `/api/generated/<32 Hex>.png` in seinem Kontext, und "bearbeite das Bild
+    # von vorhin" laesst es plausibel `data/generated_images/<hash>.png` raten.
+    # Genau diese Klasse hat am 2026-09-04 ein Konto fuer drei Lesesuchen
+    # gesperrt und steht seit 2026-08-05 als Regel da: ein GERATENER Pfad ist
+    # weich, ein Secret-/System-Ziel hart. Wer das hier nachtraegt, tauscht eine
+    # geschlossene Luecke gegen Kontosperren fuer harmlose Auftraege.
+)
+
+
+# ── Dateirechte: fremde OS-Benutzer aussperren ───────────────────────────────
+# Die Eigentuemer-Schranke der Werkzeuge (may_see_document) wirkt nur IM Backend.
+# Shell-Befehle von Domain-Nutzern laufen ueber den Broker als `jarvis_sandbox`
+# (runuser) – ein `cat` dort umgeht jede Policy und braucht nur Leserechte im
+# Dateisystem. Mit 0755/0644 war das gegeben: jeder Domain-Nutzer konnte die
+# Ergebnisdateien UND die Chat-Verlaeufe aller anderen lesen (nachgewiesen auf DEV
+# 2026-07-28). Diese Verzeichnisse gehoeren dem Dienst allein.
+#
+# WICHTIG – was das NICHT leisten kann: alle Domain-Nutzer teilen EINEN
+# Sandbox-Benutzer. OS-Rechte koennen sie deshalb nicht voneinander trennen,
+# nur vom Dienst-Verzeichnis. Deswegen bekommt der Agent Anhaenge als
+# Arbeitskopie in /tmp (main.py) und nicht ueber data/documents.
+#
+# data/rag bleibt ABSICHTLICH lesbar: die Shell soll Wissensdateien verarbeiten
+# koennen (READ_ROOTS erlaubt es ausdruecklich). data/knowledge steht dort
+# weiterhin daneben – es ist seit 2026-09-13 reine Infrastruktur (pending/,
+# .groups.json), enthaelt aber auf einem noch nicht umgezogenen System Wissen.
+#
+# ⚠ data/generated_images GEHOERT DAZU – AUS EINEM EIGENEN GRUND (2026-09-24).
+# Dort liegen die erzeugten Bilder, und ihre Zugangskontrolle IST der Dateiname:
+# `/api/generated/<32 Hex>` kommt bewusst OHNE Anmeldung aus (ein <img> kann
+# keinen Authorization-Header setzen, und vier Clients holen die Adresse nativ –
+# Browser, AI-Maus, Android, windows-app-go). Ein AUFLISTBARER Ordner hebt damit
+# die ganze Capability-URL aus: wer die Namen hat, hat die URLs, und die gelten
+# fuer jeden Browser ohne Token.
+# Auf DEV gemessen (0755, vor diesem Fix): `runuser -u jarvis_sandbox -- ls`
+# lieferte alle 39 Namen, `od` den PNG-Kopf – waehrend data/documents korrekt
+# verweigerte. Ein Domain-Benutzer haette sich per shell_execute die Namen holen
+# und danach JEDES Bild JEDES Kollegen abrufen koennen; die Bilder entstehen aus
+# Chat-Auftraegen und Bildschirmausschnitten der AI-Maus.
+# Es ist dieselbe Fehlerklasse wie /tmp/jarvis-anhaenge am 2026-09-15: die
+# Eigentuemer-Trennung hielt, die Enumeration eine Ebene hoeher nicht.
+#
+# ⚠ ZWEITER ORT DER CHAT-VERLAEUFE (2026-09-29, auf ECHT gemessen): die
+# ANZEIGE-History liegt NICHT in data/chats, sondern in data/chat_history
+# (backend/chat_history.py) – 0755 mit <benutzer>.json 0644, also fuer
+# jarvis_sandbox lesbar. Dieselbe Fehlerklasse wie data/generated_images: der
+# eine Ordner war zu, der Nachbar mit demselben Inhalt nicht. Ebenso je Benutzer
+# abgelegt und damit personenbezogen: destillat_filter/, issue_attachments/
+# (Anhaenge der Meldungen), backups/ (die Sicherung der Benutzer-Migration
+# enthaelt Chats und Gedaechtnisse ALLER), learnings/ und erfahrung/ (aus
+# Werkzeug-Ergebnissen extrahierte Fakten). Keiner davon steht in READ_ROOTS –
+# die Shell darf sie ohnehin nicht lesen, das OS-Recht zieht nur nach.
+PRIVATE_DIRS = ("data/documents", "data/chats", "data/logs",
+                "data/generated_images",
+                "data/chat_history", "data/destillat_filter",
+                "data/issue_attachments", "data/backups",
+                "data/learnings", "data/erfahrung")
+PRIVATE_MODE = 0o750
+
+# Einzelne Dateien direkt in data/, die kein Domain-Nutzer lesen darf. Das
+# Verzeichnis data/ selbst bleibt begehbar (Wissensdateien!), deshalb greift hier
+# nur der Dateimodus. Inhalt: zeitgesteuerte Auftraege und Trigger ALLER Benutzer
+# (Aufgabentexte, Telefonnummern, Webhook-URLs) sowie der Sicherheits-Zustand
+# (wer wie oft auffaellig war). Die Werkzeug-Schranken in cron_tool.py filtern
+# fremde Auftraege – ein `cat` in der Sandbox umgeht das und braucht nur
+# Leserechte, genau wie 2026-07-28 bei data/chats.
+PRIVATE_FILES = ("data/scheduled_jobs.json", "data/file_watchers.json",
+                 "data/security_state.json", "data/license.json",
+                 "data/.instanz",
+                 "data/agent_roles.json", "data/ad_cache.json",
+                 "data/knowledge_sync.json", "data/jira_vorlagen.json",
+                 "data/email_accounts.json", "data/email_rules.json",
+                 "data/email_state.json", "data/email_log.jsonl",
+                 "data/addin_links.json", "data/sap_accounts.json",
+                 "data/jira_accounts.json", "data/vemas_accounts.json",
+                 "data/confluence_accounts.json",
+                 "data/short_tracks.json", "data/short_tracks_log.jsonl",
+                 # Feedback: die Abgaben sind personenbezogen (Benutzername +
+                 # Aussagen ueber die eigene Arbeit), die Formulare tragen
+                 # Betriebswissen. Gleiche Stufe wie die Cron-Auftraege darueber.
+                 "data/feedback_formulare.json", "data/feedback_abgaben.jsonl",
+                 # Confluence-Einbindung: Betriebswissen (interne Bereichsnamen)
+                 # und ein Bestand, der den spaeteren Wissensabgleich steuert.
+                 "data/confluence_bindung.json", "data/confluence_abgleich.json",
+                 # AI-Maus-Signatur: Metadaten des Zertifikats (Betreff,
+                 # Aussteller, Laufzeit) und das VERSCHLUESSELTE Kennwort. Das
+                 # Zertifikat selbst und seine Schluesseldatei sind strenger,
+                 # siehe PRIVATE_FILES_STRENG.
+                 "data/ai_mouse_signatur.json",
+                 # Personenbezogen, direkt in data/ und bis 2026-09-29 0644 (ECHT):
+                 # Userchat-Nachrichten, Support-Anfragen, wer wann von wo
+                 # angemeldet war, Meldungen, Bewertungen samt Frage/Antwort,
+                 # Token-Widerrufe, Fehler-Tracebacks mit Auftragstexten.
+                 "data/userchat_history.json", "data/support_history.json",
+                 "data/user_sessions.json", "data/issues.json",
+                 "data/issues_admin_seen.json", "data/feedback.json",
+                 "data/auth_revocations.json", "data/telemetry_errors.json",
+                 "data/memory.json",
+                 # Sitzungs-Buchhaltung je Token (BSI H3): nur Hashes, aber
+                 # "wer war wann aktiv" ist Personenbezug wie user_sessions.
+                 "data/auth_sitzungen.json",
+                 # Fehlversuche je IP und Konto (BSI M3): wer wann von wo
+                 # welches Konto durchprobiert hat – Personenbezug.
+                 "data/anmelde_schutz.json",
+                 # Zeitschritt des zuletzt angenommenen 2FA-Codes je Konto
+                 # (BSI N3): wer sich wann mit zweitem Faktor angemeldet hat.
+                 "data/totp_schritte.json",
+                 # Konversationsprotokoll vor 2026-08-04 (eine Datei, Auftragstexte
+                 # samt Benutzername). Auf Altinstallationen noch vorhanden, bis
+                 # conv_log._migrate_once es umbenennt.
+                 "data/conv_log.json",
+                 # Werkzeug-/LLM-Statistik samt Name dessen, der sie zuletzt
+                 # zurueckgesetzt hat – Betriebswissen, geht die Shell nichts an.
+                 "data/telemetry_stats.json")
+PRIVATE_FILE_MODE = 0o640
+
+# Dateien mit Benutzernamen im Namen – eine feste Liste kann sie nicht kennen.
+# Das Gedaechtnis je Benutzer (tools/memory.py) liegt als data/memory_<name>.json
+# direkt in data/, das begehbar bleiben muss (Wissen). Der Name ist erratbar
+# (vorname.nachname), ein 0711 auf data/ wuerde also nicht helfen.
+PRIVATE_FILE_GLOBS = ("data/memory_*.json", "data/memory_*.json.bak",
+                      "data/memory.json.bak")
+
+
+def _nebendatei_muster(muster: str) -> str:
+    """``<original>.*`` – Sicherungen, Migrations-Altbestand und Zwischenstaende
+    einer privaten Datei tragen dieselben Daten wie das Original und bekommen
+    dieselbe Stufe. Eine REGEL statt weiterer Listeneintraege: die Namen sind
+    nicht vorhersehbar. Am 2026-10-04 gemessen: ECHT ``conv_log.json.migrated``,
+    DEV ``memory_<benutzer>.json.bak-<zeit>`` und ``security_state.json.bak-<zeit>``
+    (Handsicherungen) – alle 0644, lesbar fuer jarvis_sandbox. Gilt auch, wenn
+    das Original selbst nicht mehr existiert."""
+    return muster + ".*"
+
+
+def privat_machen(pfad, modus: int = PRIVATE_FILE_MODE) -> None:
+    """Setzt eine einzelne Datei auf ``modus`` (Vorgabe 0640), still bei Fehler.
+
+    Fuer Schreibwege, die der Start-Haertung davonlaufen: ``tmp`` + ``replace``
+    legt bei JEDEM Speichern eine neue Datei mit der umask des Dienstes (0644)
+    an, und ein Gedaechtnis fuer einen neuen Benutzer entsteht ebenso. Aufrufen
+    VOR dem ``replace`` (auf die tmp-Datei), sonst bleibt ein Fenster offen.
+    """
+    try:
+        os.chmod(pfad, modus)
+    except Exception:  # noqa: BLE001 – Rechte sind Haertung, kein Grund zum Abbruch
+        pass
+
+# Die Schluesseldateien der E-Mail-/SAP-Zugangsdaten sind strenger als 0640: sie
+# entschluesseln die Kennwoerter. 0600 heisst, dass nicht einmal die Gruppe
+# `jarvis` sie lesen kann – ein zusaetzlicher Riegel, falls jemand einen weiteren
+# Dienst in diese Gruppe aufnimmt.
+# `claude_subagent.json` gehoert seit 2026-08-23 in dieselbe Stufe: der
+# Delegations-Schluessel wird dauerhaft angezeigt und liegt deshalb im Klartext
+# darin – wer ihn liest, kann Codeauftraege unter fremder Kennung starten.
+PRIVATE_FILES_STRENG = ("data/.mailkey", "data/.sapkey", "data/.jirakey",
+                        "data/.vemaskey", "data/.mountkey",
+                        "data/.confluencekey",
+                        "data/claude_subagent.json",
+                        # Der private Signierschluessel des Hauses und sein
+                        # Kennwort – die strengste Stufe ist hier das Mindeste.
+                        "data/.aimouse_sign.pfx", "data/.aimousesignkey",
+                        # SECRET_KEY signiert JEDES Sitzungstoken: wer ihn liest,
+                        # stellt sich ein Admin-Token aus. auth_state.json traegt
+                        # die 2FA-Geheimnisse, .erstkennwort das Docker-Erstkennwort.
+                        # Auf DEV am 2026-09-28 gemessen: alle drei 0644, lesbar
+                        # fuer jarvis_sandbox.
+                        "data/.secret_key", "data/auth_state.json",
+                        "data/.erstkennwort")
+PRIVATE_FILE_MODE_STRENG = 0o600
+
+
+def harden_data_dirs() -> list[str]:
+    """Setzt Dienst-Verzeichnisse auf 0750 und private Dateien auf 0640.
+    Idempotent, Rueckgabe = Aenderungen."""
+    geaendert = []
+    for rel in PRIVATE_DIRS:
+        d = PROJECT_ROOT / rel
+        try:
+            if not d.is_dir():
+                continue
+            ist = d.stat().st_mode & 0o777
+            if ist == PRIVATE_MODE:
+                continue
+            d.chmod(PRIVATE_MODE)
+            geaendert.append(f"{rel}: {oct(ist)} -> {oct(PRIVATE_MODE)}")
+        except Exception as e:  # noqa: BLE001
+            # Kein harter Fehler: laeuft das Backend nicht als Eigentuemer, bleibt
+            # es beim alten Modus – dann muss ein Admin es einmal setzen.
+            geaendert.append(f"{rel}: FEHLER {e}")
+    def _treffer(muster_liste) -> list[str]:
+        erg = []
+        for muster in muster_liste:
+            try:
+                erg += [str(p.relative_to(PROJECT_ROOT))
+                        for p in sorted(PROJECT_ROOT.glob(muster))]
+            except Exception as e:  # noqa: BLE001
+                geaendert.append(f"{muster}: FEHLER {e}")
+        return erg
+    glob_treffer = _treffer(tuple(PRIVATE_FILE_GLOBS) + tuple(
+        _nebendatei_muster(m) for m in tuple(PRIVATE_FILES) + tuple(PRIVATE_FILE_GLOBS)))
+    # Nebendateien der strengen Stufe bleiben streng (auth_state.json.bak traegt
+    # die 2FA-Geheimnisse wie das Original) – deshalb nicht in die 0640-Runde.
+    streng_neben = set(_treffer(_nebendatei_muster(m) for m in PRIVATE_FILES_STRENG))
+    glob_treffer = [r for r in glob_treffer if r not in streng_neben]
+    for rel in tuple(PRIVATE_FILES) + tuple(glob_treffer):
+        f = PROJECT_ROOT / rel
+        try:
+            if not f.is_file():
+                continue
+            ist = f.stat().st_mode & 0o777
+            if ist == PRIVATE_FILE_MODE:
+                continue
+            f.chmod(PRIVATE_FILE_MODE)
+            geaendert.append(f"{rel}: {oct(ist)} -> {oct(PRIVATE_FILE_MODE)}")
+        except Exception as e:  # noqa: BLE001
+            geaendert.append(f"{rel}: FEHLER {e}")
+    for rel in tuple(PRIVATE_FILES_STRENG) + tuple(sorted(streng_neben)):
+        f = PROJECT_ROOT / rel
+        try:
+            if not f.is_file():
+                continue
+            ist = f.stat().st_mode & 0o777
+            if ist == PRIVATE_FILE_MODE_STRENG:
+                continue
+            f.chmod(PRIVATE_FILE_MODE_STRENG)
+            geaendert.append(f"{rel}: {oct(ist)} -> {oct(PRIVATE_FILE_MODE_STRENG)}")
+        except Exception as e:  # noqa: BLE001
+            geaendert.append(f"{rel}: FEHLER {e}")
+    return geaendert
+
+
+def _resolve(path: str) -> Path:
+    # expanduser + absolut + Symlinks aufloesen (strict=False -> kein Fehler bei
+    # nicht existierendem Ziel, z.B. neue Datei in /tmp).
+    return Path(os.path.expanduser(str(path or ""))).resolve()
+
+
+def is_sensitive(rp: Path) -> bool:
+    """True fuer Secrets/Config/System-Dateien, die Domain-Nutzer nie sehen duerfen."""
+    name = rp.name.lower()
+    if name in _SECRET_NAMES or name.startswith(".env"):
+        return True
+    if rp.suffix.lower() in _SECRET_SUFFIX:
+        return True
+    parts = {p.lower() for p in rp.parts}
+    if parts & _SECRET_DIRPARTS:
+        return True
+    s = str(rp)
+    if s == "/root" or s.startswith(_SYSTEM_DENY_PREFIX):
+        return True
+    if s.startswith("/etc/sudoers"):
+        return True
+    for rel in _APP_DENY_REL:
+        base = str(PROJECT_ROOT / rel)
+        if s == base or s.startswith(base + os.sep):
+            return True
+    return False
+
+
+def _under(rp: Path, roots) -> bool:
+    for r in roots:
+        try:
+            rp.relative_to(r)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def _fremdes_arbeitsverzeichnis(rp: Path, benutzer: str) -> str:
+    """Begruendung, wenn der Pfad in den Arbeitsbereich eines ANDEREN gehoert.
+
+    Die Arbeitskopien der Anhaenge und die Arbeitsverzeichnisse liegen je Benutzer
+    unter ``/tmp/jarvis-anhaenge/<kennung>/`` bzw. ``/tmp/jarvis-arbeit/<kennung>/``.
+    Der Mount-Namespace verbirgt sie nur vor der SHELL; ein Werkzeug im
+    Dienstprozess (``filesystem``, ``office_read``, ``xlsx_read_range``,
+    ``create_chart``) laeuft daneben und koennte sie sonst einfach oeffnen –
+    lesend UND schreibend.
+
+    EINE Fassung fuer beide Richtungen: bis 2026-09-03 stand diese Pruefung nur im
+    read-Zweig, und der write-Zweig lief daran vorbei. Rueckgabe "" = in Ordnung
+    (auch fuer jeden Pfad ausserhalb dieser Wurzeln – dort stellt sich die Frage
+    nicht). Fehler beim Pruefen sind kein Verbot: ohne ``lauf_tmp`` gibt es die
+    Verzeichnisse gar nicht.
+    """
+    try:
+        from backend import lauf_tmp as _lt
+        # Die VERWALTUNGSWURZEL selbst: sie traegt die Liste der Kennungen aller
+        # Benutzer, und die Kennung ist aus dem Namen rueckrechenbar. Eine eigene
+        # Begruendung, weil "gehoert einem anderen" hier FALSCH waere – sie
+        # gehoert niemandem – und weil eine Meldung ohne Weg dazu fuehrt, dass
+        # das Modell Varianten desselben Zugriffs durchprobiert (Register).
+        if _lt.ist_verwaltungswurzel(rp):
+            return ("das ist ein internes Verwaltungsverzeichnis. Deine eigenen "
+                    "Anhänge nennt dir der Anhang-Hinweis mit vollem Pfad")
+        if _lt.gehoert_anhang(rp, benutzer) is False:
+            return "dieser Anhang gehört einem anderen Benutzer"
+        if _lt.gehoert_arbeitsbereich(rp, benutzer) is False:
+            return "diese Datei gehört einem anderen Benutzer"
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
+def authorize_fs(action: str, path: str, username: str | None = None) -> tuple[bool, str]:
+    """Zugriffsentscheidung fuers filesystem-Tool (nur Domain-Nutzer).
+
+    ``username`` GEHOERT UEBERGEBEN, wenn der Aufrufer den Akteur kennt. Der
+    Rueckfall auf ``tool_user()`` gilt nur fuer Aufrufe aus einem Werkzeug
+    heraus, wo der ContextVar nachweislich gesetzt ist.
+
+    WARUM DAS EIN PARAMETER IST UND KEIN UMGEBUNGSZUSTAND (Vorfall 2026-08-24):
+    die drei Pfad-Freigaben im Dispatch laufen VOR ``set_tool_user`` – dort war
+    ``tool_user()`` also der Vorgabewert ``""``. Folge in BEIDE Richtungen:
+    ``gehoert_anhang`` verglich gegen eine leere Kennung und wies damit JEDEN
+    Benutzer von seiner EIGENEN Arbeitskopie ab, waehrend ``may_see_document``
+    ein leeres ``user`` als "keine Einschraenkung" liest und die
+    Eigentuemer-Schranke in ``data/documents`` an dieser Stelle gar nicht
+    durchsetzte. Eine harte Schranke darf nicht davon abhaengen, wann sie
+    aufgerufen wird.
+
+    Rueckgabe (erlaubt, begruendung)."""
+    benutzer = tool_user() if username is None else username
+    rp = _resolve(path)
+    action = (action or "").lower()
+    if action in ("write", "append", "mkdir"):
+        if is_sensitive(rp):
+            return False, "geschützte Datei"
+        if not _under(rp, WRITE_ROOTS):
+            return False, "Schreiben ist nur im Arbeitsbereich (/tmp oder data/documents) erlaubt"
+        # DIE EIGENTUEMER-SCHRANKE GALT NUR FUERS LESEN (gefunden 2026-09-03).
+        # Der Umbau vom 23.08. hat den Backend-Weg fuer `read`/`list` geschlossen,
+        # den fuer `write` nicht: `filesystem write /tmp/jarvis-arbeit/<fremd>/
+        # ergebnis.xlsx` lief durch – das Verzeichnis ist 0770 mit der DIENSTgruppe,
+        # und das Werkzeug laeuft im Dienstprozess. Ein Domain-Benutzer konnte damit
+        # die Ergebnisdatei eines anderen ueberschreiben; die Namen sind ratbar
+        # (`ergebnis.xlsx`), und vor dem 23.08. nannte `filesystem list /tmp` sie ihm.
+        # Ohne diese Zeilen waere der EACCES-Rueckfall in filesystem.py (unlink +
+        # neu anlegen) sogar ein Weg, fremde Dateien zu LOESCHEN.
+        # data/documents ist hier ausgenommen: dort gilt "wer schreibt, besitzt"
+        # (documents.register_upload), und `may_see_document` ist fail-closed –
+        # eine NEUE Datei waere damit fuer ihren eigenen Erzeuger unschreibbar.
+        _fremd = _fremdes_arbeitsverzeichnis(rp, benutzer)
+        if _fremd:
+            return False, _fremd
+        return True, ""
+    # read / list / exists
+    if is_sensitive(rp):
+        return False, "geschützte/sensible Datei"
+    if not _under(rp, READ_ROOTS):
+        return False, ("Lesen ist nur in den Wissens-/Arbeitsverzeichnissen erlaubt – "
+                       "System-, Root- und App-interne Bereiche sind gesperrt")
+    # Eigentuemer-Schranke in data/documents: dort liegen die Ergebnis- und
+    # Anhangsdateien ALLER Benutzer. Das VERZEICHNIS bleibt auflistbar (der
+    # Inhalt wird in filesystem.py gefiltert), einzelne fremde Dateien nicht.
+    if rp != DOCS_ROOT and _under(rp, [DOCS_ROOT]) and not may_see_document(rp.name, benutzer):
+        return False, "diese Datei gehört einem anderen Benutzer"
+    # Dieselbe Schranke fuer die Arbeitskopien der Anhaenge. Sie liegen seit
+    # 2026-08-23 je Benutzer unter /tmp/jarvis-anhaenge/<kennung>/ – vorher
+    # direkt in /tmp, und damit konnte ein Domain-Benutzer den Anhang eines
+    # anderen ueber JEDES Backend-Werkzeug oeffnen (office_read,
+    # xlsx_read_range, create_chart), sobald er den Namen kannte. Den Namen
+    # nannte ihm `filesystem list /tmp`.
+    _fremd = _fremdes_arbeitsverzeichnis(rp, benutzer)
+    if _fremd:
+        return False, _fremd
+    return True, ""
+
+
+def fs_target_sensitive(path: str) -> bool:
+    """True, wenn der Pfad ein Secret-/System-/App-internes Ziel ist.
+
+    Fuer die Frage, ob ein abgewiesener filesystem-Zugriff ein ANGRIFFSINDIZ ist:
+    ``read /opt/jarvis/data/settings.json`` ist eines, ``list /opt/nxis`` (ein Pfad,
+    den das Modell geraten hat) nicht. Ohne diese Unterscheidung sperrte eine einzige
+    Anfrage wie "suche in allen CSV-Dateien" ein Konto, weil das Modell vier
+    Verzeichnisse durchprobierte (nachgewiesen 29.07.2026, ECHT).
+    Fail-closed: laesst sich der Pfad nicht aufloesen, gilt er als sensibel."""
+    try:
+        return is_sensitive(_resolve(path))
+    except Exception:  # noqa: BLE001
+        return True
+
+
+# ── Shell: Verschleierung + Secret-/Root-Pfade (Domain-Nutzer) ───────────────
+# Zwei Regexes, weil sie unterschiedlich geprueft werden MUESSEN:
+#  * SHELL_OBFUSCATION – ueberall im Befehl (auch in Anfuehrungszeichen): eine
+#    base64-Nutzlast steckt fast immer in einem Argument.
+#  * SHELL_EXEC_WORDS – nur AUSSERHALB von Anfuehrungszeichen: das sind Woerter,
+#    die als Befehl gefaehrlich und als Suchbegriff voellig harmlos sind.
+#    `grep -r "source" /tmp/doku.txt` galt bis 2026-08-05 als "verschleierte
+#    Ausfuehrung" – dieselbe Einstufung wie `curl … | bash`.
+SHELL_OBFUSCATION = re.compile(
+    r'\bbase64\b[^\n|]*(?:-d|--decode)|\bbase32\b[^\n|]*-d|'
+    r'\bxxd\b[^\n]*\s-r|\buudecode\b|\bopenssl\s+enc\b[^\n]*-d|'
+    # Pipe-in-Shell, aber NICHT das logische ODER: '||' bestand aus zwei Treffern
+    # fuer '\|', deshalb galt `python3 -c "import x" || python3 -c "import y"`
+    # (das Standardmuster fuer Faehigkeitspruefungen) als Verschleierung.
+    r'(?<!\|)\|(?!\|)\s*(?:bash|sh|zsh|dash|python3?|perl|ruby|php|node)\b',
+    re.IGNORECASE,
+)
+SHELL_EXEC_WORDS = re.compile(
+    r'\beval\b|\bsource\b|(?:^|\s)\.\s+/|'
+    r'\b(?:bash|sh|zsh|dash)\s+-c\b',
+    re.IGNORECASE,
+)
+
+
+def strip_quoted(cmd: str) -> str:
+    """Ersetzt Inhalte in Anfuehrungszeichen durch Leerzeichen.
+
+    Damit trifft eine Wort-Regel nur den BEFEHL, nicht einen Suchbegriff oder
+    Dateinamen. **Fail-closed:** ist ein Anfuehrungszeichen nicht geschlossen, wird
+    der Originaltext zurueckgegeben – dann prueft die Regel wieder alles.
+    (Die Umgehung ``ev"a"l`` bleibt moeglich, war es aber vorher genauso: die Regex
+    trifft den zerlegten Namen ohnehin nicht. Die harte Grenze ist der OS-Benutzer.)"""
+    out, i, n = [], 0, len(cmd or "")
+    while i < n:
+        ch = cmd[i]
+        if ch in "\"'":
+            k = cmd.find(ch, i + 1)
+            if k == -1:
+                return cmd                      # offenes Anfuehrungszeichen -> alles pruefen
+            out.append(" ")
+            i = k + 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+SHELL_SECRET_PATHS = re.compile(
+    r'\.env\b|settings\.json\b|memory\.json\b|auth_state\.json\b|credentials\.json\b|'
+    r'scheduled_jobs\.json\b|file_watchers\.json\b|security_state\.json\b|'
+    r'license\.json\b|license_root\.pub\b|agent_roles\.json\b|ad_cache\.json\b|'
+    r'/\.instanz\b|'
+    r'knowledge_sync\.json\b|'
+    # Hauptschluessel der Geheimnisse (BSI M5): Original in /etc/jarvis, die
+    # Kopie des Dienstes unter $CREDENTIALS_DIRECTORY (/run/credentials/...).
+    r'geheimnis\.key\b|/run/credentials\b|CREDENTIALS_DIRECTORY\b|'
+    # Prompt-Vorlagen des Jira-Assistenten: beschreibbar waere das ein
+    # dauerhafter Abschnitt im System-Prompt JEDER Zusammenfassung, fuer alle
+    # Benutzer (siehe _APP_DENY_REL).
+    r'jira_vorlagen\.json\b|'
+    # Feedback-Abgaben: personenbezogen. Die Oberflaeche trennt „Admin sieht
+    # alle, Benutzer nur seine eigenen" – ein `cat` in der Sandbox umginge das.
+    r'feedback_formulare\.json\b|feedback_abgaben\.jsonl\b|'
+    # Confluence-Einbindung: steuert, welche fremden Bereiche spaeter in die
+    # Wissensdatenbank fliessen – beschreibbar waere das eine Wissensquelle,
+    # die niemand bestellt hat.
+    r'confluence_bindung\.json\b|confluence_abgleich\.json\b|'
+    # E-Mail-Skill: Postfach-Kennwoerter (email_accounts.json + .mailkey ergeben
+    # zusammen den Klartext), fremde Regel-Prompts, fremde Absender/Betreffe.
+    r'email_accounts\.json\b|\.mailkey\b|email_rules\.json\b|'
+    r'email_state\.json\b|email_log\.jsonl\b|'
+    # Outlook-Add-in: Postfach → Jarvis-Konto. Beschreibbar waere das die
+    # kuerzeste Rechteerhoehung im Verzeichnis (siehe _APP_DENY_REL).
+    r'addin_links\.json\b|'
+    # Persoenliche SAP-Zugaenge: sap_accounts.json + .sapkey ergeben zusammen die
+    # Klartext-Kennwoerter der SAP-Benutzer. Dasselbe fuer Jira: jira_accounts
+    # .json + .jirakey ergeben die Klartext-Token, und ein PAT traegt die vollen
+    # Rechte seines Besitzers.
+    r'sap_accounts\.json\b|\.sapkey\b|'
+    r'jira_accounts\.json\b|\.jirakey\b|'
+    # Dasselbe fuer Confluence: confluence_accounts.json + .confluencekey
+    # ergeben die Klartext-Token, und mit ihnen laesst sich unter fremdem Namen
+    # in die Hausdokumentation schreiben.
+    r'confluence_accounts\.json\b|\.confluencekey\b|'
+    # Dasselbe fuer VEMAS: vemas_accounts.json + .vemaskey ergeben die
+    # Klartext-Kennwoerter der VEMAS-Benutzer.
+    r'vemas_accounts\.json\b|\.vemaskey\b|'
+    # AI-Maus-Signatur: .aimouse_sign.pfx ist der private Signierschluessel des
+    # Hauses, .aimousesignkey entschluesselt sein Kennwort. Zusammen erlauben
+    # sie, beliebigen Code im Namen der Firma zu signieren.
+    r'ai_mouse_signatur\.json\b|\.aimousesignkey\b|\.aimouse_sign\.pfx\b|'
+    # Kennwoerter der Netzwerk-Freigaben: .mountkey entschluesselt die
+    # password_enc-Felder in settings.json (das ohnehin gesperrt ist).
+    r'\.mountkey\b|'
+    # Signierschluessel der Sitzungstokens und Docker-Erstkennwort (2026-09-28)
+    r'\.secret_key\b|\.erstkennwort\b|'
+    # Short Tracks: fremde Dump-Prompts samt Werkzeug-Zuschnitt (beschreibbar
+    # waere das ein Dump mit `shell` unter fremder Kennung) und die
+    # Ergebnistexte fremder Laeufe.
+    r'short_tracks\.json\b|short_tracks_log\.jsonl\b|'
+    # Claude Subagent: Delegations-Schluessel -> Benutzer. Ein eigener Eintrag
+    # laesst kuenftige Laeufe unter fremder Kennung starten.
+    r'claude_subagent\.json\b|'
+    # data/chats: fremde Chat-Verlaeufe (in der Shell zusaetzlich per 0750 gesperrt)
+    r'data/chats\b|'
+    r'/root/|(?:^|\s)/root\b|\.ssh/|\bid_rsa\b|\bid_ed25519\b|\bid_dsa\b|\.netrc\b|'
+    r'/etc/shadow\b|/etc/gshadow\b|/etc/sudoers|'
+    r'\.key\b|\.pem\b|\.crt\b|\.p12\b|\.pfx\b|\.jks\b|'
+    r'/certs/|/\.git/',
+    re.IGNORECASE,
+)
+
+
+def authorize_shell(cmd: str) -> tuple[bool, str, str]:
+    """Zusatzpruefung fuer shell_execute (nur Domain-Nutzer), ergaenzt die
+    bestehenden Deny-Muster in agent.py.
+
+    Rueckgabe ``(erlaubt, begruendung, marke)``.
+
+    ⚠ DIE BEGRUENDUNG NENNT DEN TREFFER – und das ist kein Feinschliff, es ist
+    die Ursache eines Vorfalls (ECHT, 2026-09-04, 17:11): drei Lesesuchen in der
+    Wissensdatenbank auf ``/root/jarvis/data/knowledge`` (der Pfad stand in
+    einem alten Merksatz im Gedaechtnis des Agenten und existiert dort nicht)
+    wurden je mit "Zugriff auf ein geschuetztes Verzeichnis/eine Secret-Datei
+    ist gesperrt" abgewiesen. Weder der Benutzer noch das Modell konnten daraus
+    ableiten, WAS zu aendern ist – also kamen zwei Varianten DESSELBEN Pfades
+    hinterher, und **drei harte Verstoesse in drei Sekunden haben das Konto
+    gesperrt**. Dieselbe Fehlerklasse wie "curl/wget/ssh/git/…" bei der
+    Egress-Heuristik und "mount error(13)" bei den Freigaben: eine Meldung, die
+    richtig ist und trotzdem nicht sagt, was zu tun ist, kostet dasselbe wie
+    eine falsche.
+
+    Die ``marke`` benennt die getroffene SCHRANKE (nicht den Befehl). Der
+    Dispatch reicht sie an ``security_guard.record_violation`` weiter, damit
+    derselbe Riegel im Zeitfenster **einmal** zaehlt: dreimal an dieselbe Tuer
+    zu fassen ist ein Irrtum, drei verschiedene Tueren sind ein Muster.
+    """
+    cmd = cmd or ""
+    m = SHELL_OBFUSCATION.search(cmd) or SHELL_EXEC_WORDS.search(strip_quoted(cmd))
+    if m:
+        return (False,
+                f"verschleierte/dekodierte Ausführung ist gesperrt (getroffen: "
+                f"'{m.group(0).strip()[:60]}'; base64, eval, pipe-in-shell)",
+                "obfuskation")
+    m = SHELL_SECRET_PATHS.search(cmd)
+    if m:
+        treffer = m.group(0).strip()[:60]
+        # Ein VERZEICHNIS-Treffer ist fast immer ein falsch geratener Ort – dort
+        # gehoert der richtige Weg in die Meldung. Bei einer Secret-DATEI
+        # (settings.json, .env, *.key) waere derselbe Satz irrefuehrend: die ist
+        # gesperrt, egal wo sie liegt.
+        if treffer.startswith("/"):
+            hinweis = ("Lesende Suchen laufen im Arbeitsverzeichnis; die "
+                       "Wissensdatenbank durchsuchst du mit knowledge_search "
+                       "(ihre Dateien liegen unter data/rag).")
+        else:
+            hinweis = "Diese Datei ist unabhängig vom Ort gesperrt."
+        return False, f"'{treffer}' ist gesperrt. {hinweis}", "pfad:" + treffer.lower()
+
+    return True, "", ""
+
+
+def wrap_sandboxed(command: str, sandbox_user: str, lauf_dir=None,
+                   ro_binds=(), rw_binds=()) -> str:
+    """Verpackt einen Befehl so, dass er als unprivilegierter OS-User laeuft
+    (harte Grenze via OS-Rechte, unabhaengig von Base64/Python/etc.).
+
+    Mit ``lauf_dir`` kommt die Mount-Namespace-Isolation dazu: ``/tmp`` ist im
+    Lauf dann NUR dieses Verzeichnis (siehe ``backend/lauf_tmp.py``). Der Aufbau
+    des Aufrufs liegt bewusst dort und nicht hier – der Broker braucht ihn
+    genauso, und zwei Fassungen desselben bwrap-Aufrufs waeren in drei Wochen
+    auseinandergelaufen.
+    """
+    from backend import lauf_tmp as _lt
+    return _lt.sandbox_befehl(sandbox_user, command, lauf_dir, ro_binds,
+                              rw_binds=rw_binds)

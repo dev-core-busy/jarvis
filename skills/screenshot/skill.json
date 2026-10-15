@@ -1,0 +1,32 @@
+{
+    "name": "Screenshot",
+    "description": "Screenshots des Desktops erstellen",
+    "version": "1.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": ["screenshot"],
+    "category": "system",
+    "icon": "camera",
+    "system": true,
+    "enabled": true,
+    "config_schema": {},
+    "knowledge_docs": [],
+    "dependencies": [],
+    "permissions": ["desktop"],
+    "help": {
+        "details": "Erstellt Bildschirmfotos des X11-Desktops und übergibt sie an Jarvis zur visuellen Analyse. So kann Jarvis den aktuellen Bildschirminhalt sehen, UI-Elemente lokalisieren und auf das Geschehen auf dem Desktop reagieren.",
+        "tools": [
+            {
+                "name": "screenshot",
+                "label": "Screenshot",
+                "desc": "Nimmt einen Screenshot des gesamten Desktops (DISPLAY=:1) auf und gibt das Bild direkt zur Analyse zurück. Wird typischerweise vor Desktop-Aktionen verwendet, um Koordinaten von Buttons, Feldern oder Menüeinträgen zu ermitteln."
+            }
+        ],
+        "use_cases": [
+            "Mach einen Screenshot – was ist gerade auf dem Bildschirm zu sehen?",
+            "Zeige mir den aktuellen Zustand des geöffneten Programms",
+            "Wo befindet sich der Speichern-Button? (Screenshot + Klick)"
+        ],
+        "notes": "Wird automatisch im Zusammenspiel mit dem Desktop-Skill eingesetzt. Ein Screenshot vor jedem Klick verbessert die Präzision erheblich und verhindert Fehler durch überlagerte Fenster."
+    }
+}

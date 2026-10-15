@@ -1,0 +1,407 @@
+package info.jarvisai.app.data.repository
+
+import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
+import info.jarvisai.app.data.api.JarvisWebSocket
+import info.jarvisai.app.data.model.AgentInfo
+import info.jarvisai.app.data.model.ChatMessage
+import info.jarvisai.app.data.model.ConnectionState
+import info.jarvisai.app.data.model.MessageRole
+import info.jarvisai.app.data.model.MessageSegment
+import info.jarvisai.app.data.model.SegmentType
+import info.jarvisai.app.data.model.WsEvent
+import info.jarvisai.app.data.model.BlockInfo
+import info.jarvisai.app.data.prefs.SettingsDataStore
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.util.concurrent.TimeUnit
+import info.jarvisai.app.desktop.AndroidDesktopExecutor
+import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.Json
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.UUID
+import java.util.concurrent.CopyOnWriteArrayList
+import javax.inject.Inject
+import javax.inject.Singleton
+
+@Singleton
+class ChatRepository @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val ws: JarvisWebSocket,
+    private val settingsDataStore: SettingsDataStore,
+    private val okHttpClient: OkHttpClient,
+) {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+    private val msgFile get() = File(context.filesDir, "messages.json")
+
+    val connectionState: StateFlow<ConnectionState> = ws.connectionState
+    val agents: StateFlow<List<AgentInfo>> = ws.agents
+
+    private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
+    val messages: StateFlow<List<ChatMessage>> = _messages
+
+    // SharedFlow für TTS-Events: KEIN Conflate – jede Antwort wird exakt einmal gesendet
+    private val _speakText = MutableSharedFlow<String>(extraBufferCapacity = 5)
+    val speakText: SharedFlow<String> = _speakText
+
+    private val _isAgentRunning = MutableStateFlow(false)
+    val isAgentRunning: StateFlow<Boolean> = _isAgentRunning
+
+    // Sicherheitsschicht: gesetzt, wenn dieses Konto gesperrt wurde (UI zeigt Sperr-Screen)
+    private val _blockInfo = MutableStateFlow<BlockInfo?>(null)
+    val blockInfo: StateFlow<BlockInfo?> = _blockInfo
+
+    // @Volatile: sicher lesbar vom Main-Thread (sendMessage) und Dispatchers.Default (handleEvent)
+    @Volatile private var streamingMsgId: String? = null
+
+    // Aktuelle UI-Sprache – wird aus Settings-Flow befüllt (thread-sicher via @Volatile)
+    @Volatile private var currentLang: String = "de"
+
+    // Fallback-Timer: falls server kein agent_event:finished schickt, nach 1.5s auto-finalize
+    private var finalizeTimeoutJob: Job? = null
+
+    // CopyOnWriteArrayList: thread-sicher für gleichzeitigen Zugriff
+    private val pendingStatus = CopyOnWriteArrayList<MessageSegment>()
+
+    private val desktopExecutor = AndroidDesktopExecutor(context)
+
+    init {
+        loadMessages()
+        scope.launch { collectEvents() }
+        scope.launch { collectDesktopCommands() }
+        scope.launch { settingsDataStore.settings.collect { currentLang = it.uiLang } }
+    }
+
+    suspend fun connect() {
+        val settings = settingsDataStore.settings.first()
+        ws.connect(settings.serverUrl, settings.apiKey)
+    }
+
+    fun disconnect() = ws.disconnect()
+
+    // Holt die eigene Sperr-Info (Grund + Protokoll) vom Server. Nutzt den
+    // injizierten OkHttpClient (self-signed TLS bereits erlaubt). Auth: Bearer-Token.
+    private suspend fun fetchMyBlock() {
+        try {
+            val settings = settingsDataStore.settings.first()
+            val baseUrl = settings.serverUrl
+                .replace("wss://", "https://").replace("ws://", "http://")
+                .removeSuffix("/ws").removeSuffix("/ws/")
+            val client = okHttpClient.newBuilder()
+                .readTimeout(20, TimeUnit.SECONDS).build()
+            val req = Request.Builder()
+                .url("$baseUrl/api/security/my-block")
+                .header("Authorization", "Bearer ${settings.apiKey}")
+                .build()
+            client.newCall(req).execute().use { resp ->
+                val body = resp.body?.string()
+                if (resp.isSuccessful && body != null) {
+                    val info = json.decodeFromString(BlockInfo.serializer(), body)
+                    if (info.blocked) _blockInfo.value = info
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("ChatRepository", "fetchMyBlock fehlgeschlagen: ${e.message}")
+        }
+    }
+
+    fun sendMessage(text: String) {
+        pendingStatus.clear()
+        finalizeStream()
+        val now = System.currentTimeMillis()
+        val dayFmt = SimpleDateFormat("yyyyMMdd", Locale.getDefault())
+        val today = dayFmt.format(Date(now))
+        // Separator-Prüfung + User-Nachricht in einem einzigen atomaren Update:
+        // Kein Separator wenn (a) gleicher Tag wie letzte Nicht-Separator-Nachricht
+        //                   oder (b) der letzte Eintrag bereits ein Separator ist
+        _messages.update { current ->
+            val lastNonSepDay = current.lastOrNull { it.role != MessageRole.DATE_SEPARATOR }
+                ?.timestamp?.let { dayFmt.format(Date(it)) }
+            val lastIsSeparator = current.lastOrNull()?.role == MessageRole.DATE_SEPARATOR
+            val needsSeparator = (lastNonSepDay == null || lastNonSepDay != today) && !lastIsSeparator
+            val withSep = if (needsSeparator) {
+                val label = SimpleDateFormat("EEEE, d. MMMM yyyy", Locale.GERMAN).format(Date(now))
+                current + ChatMessage(role = MessageRole.DATE_SEPARATOR, text = label, timestamp = now)
+            } else current
+            withSep + ChatMessage(role = MessageRole.USER, text = text, timestamp = now)
+        }
+        _isAgentRunning.value = true
+        ws.sendTask(text, lang = currentLang)
+        saveMessages()
+    }
+
+    fun sendStop() {
+        _isAgentRunning.value = false
+        ws.sendStop()
+    }
+
+    private suspend fun collectEvents() {
+        ws.events.collect { event ->
+            try {
+                handleEvent(event)
+            } catch (e: Exception) {
+                Log.e("ChatRepository", "handleEvent Fehler: ${e.message}", e)
+            }
+        }
+    }
+
+    private suspend fun collectDesktopCommands() {
+        ws.desktopCommands.collect { event ->
+            val (output, error, exitCode) = desktopExecutor.execute(event)
+            ws.sendDesktopResult(event.request_id, event.action, output, error, exitCode)
+        }
+    }
+
+    private fun handleEvent(event: WsEvent) {
+        when (event.type) {
+            "status" -> {
+                val type = when {
+                    !event.highlight                          -> SegmentType.STATUS
+                    event.message.trimStart().startsWith("⏳") -> SegmentType.STATUS
+                    else                                       -> SegmentType.ANSWER
+                }
+                appendToStream(event.message, type)
+            }
+            "highlight" -> appendToStream(event.message, SegmentType.ANSWER)
+            "error" -> {
+                finalizeStream()
+                _isAgentRunning.value = false
+                _messages.update {
+                    it + ChatMessage(
+                        role = MessageRole.JARVIS,
+                        text = "Fehler: ${event.message}",
+                        segments = listOf(MessageSegment(SegmentType.ANSWER, "Fehler: ${event.message}")),
+                    )
+                }
+                saveMessages()
+            }
+            // Sicherheitsschicht: Konto wegen Jailbreak-/Sicherheitsverstoss gesperrt
+            "security_blocked" -> {
+                finalizeStream()
+                _isAgentRunning.value = false
+                // Sofort sperren (UI zeigt Sperr-Screen), Details (Protokoll) nachladen.
+                if (_blockInfo.value == null) {
+                    _blockInfo.value = BlockInfo(blocked = true, reason = event.message)
+                }
+                scope.launch { fetchMyBlock() }
+            }
+            "llm_stats" -> {
+                val sec = event.duration_ms / 1000.0
+                val sb = StringBuilder("⏱ ${"%.1f".format(sec)}s")
+                if (event.total_tokens > 0) {
+                    sb.append(" · ${event.input_tokens} → ${event.output_tokens} Tokens")
+                }
+                // Output-Token/s: Antwort-Geschwindigkeit (was der Nutzer spürt)
+                if (event.output_tokens > 0 && sec > 0.0) {
+                    val tps = event.output_tokens / sec
+                    val tpsStr = if (tps >= 100.0) "%.0f".format(tps) else "%.1f".format(tps)
+                    sb.append(" · $tpsStr tok/s")
+                }
+                if (event.steps > 0) {
+                    sb.append(" · ${event.steps} Schritt${if (event.steps != 1) "e" else ""}")
+                }
+                appendToStream(sb.toString(), SegmentType.STATS)
+            }
+            "agent_event" -> {
+                when (event.event) {
+                    "finished" -> {
+                        finalizeStream()
+                        _isAgentRunning.value = false
+                    }
+                    "started" -> _isAgentRunning.value = true
+                    else -> { }
+                }
+            }
+            "ping", "cpu", "agent_list" -> { }
+        }
+    }
+
+    private fun appendToStream(text: String, type: SegmentType) {
+        if (text.isBlank()) return
+        val segment = MessageSegment(type = type, text = text)
+        val id = streamingMsgId
+
+        if (id == null) {
+            if (type == SegmentType.STATUS) {
+                pendingStatus.add(segment)
+                return
+            }
+            val newId = UUID.randomUUID().toString()
+            streamingMsgId = newId
+            val allSegments = pendingStatus.toList() + segment
+            pendingStatus.clear()
+            _messages.update {
+                it + ChatMessage(
+                    id = newId,
+                    role = MessageRole.JARVIS,
+                    text = text,
+                    segments = allSegments,
+                    isStreaming = true,
+                )
+            }
+        } else {
+            _messages.update { msgs ->
+                msgs.map { msg ->
+                    if (msg.id == id) msg.copy(
+                        text = msg.text + "\n" + text,
+                        segments = msg.segments + segment,
+                    ) else msg
+                }
+            }
+        }
+        writeMessagesToDisk()
+
+        // Fallback: 1.5s nach letztem Chunk auto-finalize (falls kein agent_event:finished kommt)
+        finalizeTimeoutJob?.cancel()
+        finalizeTimeoutJob = scope.launch {
+            delay(1_500)
+            if (streamingMsgId != null) {
+                Log.d("ChatRepository", "finalizeStream via Timeout-Fallback")
+                finalizeStream()
+            }
+        }
+    }
+
+    private fun finalizeStream() {
+        finalizeTimeoutJob?.cancel()
+        finalizeTimeoutJob = null
+        pendingStatus.clear()
+        val id = streamingMsgId ?: return
+        streamingMsgId = null
+        _messages.update { msgs ->
+            msgs.map { msg ->
+                if (msg.id == id) msg.copy(isStreaming = false) else msg
+            }
+        }
+        // TTS via SharedFlow – garantiert einmalig zugestellt
+        val finalMsg = _messages.value.find { it.id == id }
+        val speakText = finalMsg?.segments
+            ?.filter { it.type == SegmentType.ANSWER }
+            ?.joinToString(" ") { it.text.trim() }
+            ?.trim()
+            ?.takeUnless { it.isBlank() }
+            ?: finalMsg?.text?.trim()
+            ?: ""
+        if (speakText.isNotBlank()) {
+            scope.launch { _speakText.emit(speakText) }
+        }
+        writeMessagesToDisk()
+    }
+
+    /** Fügt eine lokale Jarvis-Nachricht ein (z.B. Feedback-Analyse) – ohne WebSocket. */
+    fun addLocalJarvisMessage(text: String) {
+        _messages.update {
+            it + ChatMessage(
+                role = MessageRole.JARVIS,
+                text = text,
+                segments = listOf(MessageSegment(SegmentType.ANSWER, text)),
+                isStreaming = false,
+            )
+        }
+        saveMessages()
+    }
+
+    fun deleteMessages(ids: Set<String>) {
+        _messages.update { msgs -> msgs.filter { it.id !in ids } }
+        saveMessages()
+    }
+
+    /**
+     * Editiert eine User-Nachricht: Aktualisiert den Text, löscht alle Folgenachrichten
+     * (Antworten + spätere User-Nachrichten) und sendet die neue Nachricht ans Backend,
+     * welches die History entsprechend trimmt und die Antwort neu generiert.
+     *
+     * Gibt true zurück, wenn die Bearbeitung erfolgreich angestoßen wurde.
+     */
+    fun editUserMessage(messageId: String, newText: String): Boolean {
+        val trimmedNew = newText.trim()
+        if (trimmedNew.isBlank()) return false
+
+        // Laufenden Stream abbrechen, falls vorhanden
+        finalizeStream()
+        pendingStatus.clear()
+
+        val current = _messages.value
+        val idx = current.indexOfFirst { it.id == messageId && it.role == MessageRole.USER }
+        if (idx < 0) return false
+
+        // userMsgIndex: Anzahl USER-Nachrichten vor idx (0-basiert, entspricht Backend-Semantik)
+        var userMsgIndex = 0
+        for (i in 0 until idx) {
+            if (current[i].role == MessageRole.USER) userMsgIndex++
+        }
+
+        // Folgenachrichten löschen + Text aktualisieren
+        val now = System.currentTimeMillis()
+        val edited = current[idx].copy(text = trimmedNew, timestamp = now)
+        _messages.update { current.subList(0, idx) + edited }
+
+        _isAgentRunning.value = true
+        ws.sendTaskWithTruncate(trimmedNew, userMsgIndex, lang = currentLang)
+        saveMessages()
+        return true
+    }
+
+    fun clearMessages() {
+        _messages.update { emptyList() }
+        runCatching { msgFile.delete() }
+    }
+
+    private fun writeMessagesToDisk() {
+        runCatching {
+            val data = json.encodeToString(
+                ListSerializer(ChatMessage.serializer()),
+                _messages.value.takeLast(100),
+            )
+            msgFile.writeText(data)
+        }.onFailure { e ->
+            Log.e("ChatRepository", "Speichern fehlgeschlagen: ${e.message}", e)
+        }
+    }
+
+    private fun saveMessages() {
+        scope.launch(Dispatchers.IO) { writeMessagesToDisk() }
+    }
+
+    private fun loadMessages() {
+        runCatching {
+            if (msgFile.exists()) {
+                val msgs = json.decodeFromString(
+                    ListSerializer(ChatMessage.serializer()),
+                    msgFile.readText(),
+                )
+                val isLegacyFormat = msgs.any {
+                    it.role == MessageRole.JARVIS && it.segments.isEmpty() && it.text.isNotBlank()
+                }
+                if (isLegacyFormat) {
+                    msgFile.delete()
+                    return
+                }
+                // Aufeinanderfolgende Datums-Separatoren bereinigen (Duplikate aus alten Versionen)
+                val cleaned = msgs.filterIndexed { i, msg ->
+                    msg.role != MessageRole.DATE_SEPARATOR ||
+                    i == 0 ||
+                    msgs[i - 1].role != MessageRole.DATE_SEPARATOR
+                }
+                _messages.value = cleaned.map { it.copy(isStreaming = false) }
+            }
+        }
+    }
+}

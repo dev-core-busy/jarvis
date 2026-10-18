@@ -1,5 +1,6 @@
 package info.jarvisai.app.service
 
+import info.jarvisai.app.data.api.ServerAdresse
 import info.jarvisai.app.data.tls.ServerVertrauen
 import android.content.Context
 import android.media.MediaPlayer
@@ -34,12 +35,14 @@ class ServerTtsPlayer @Inject constructor(
         ServerVertrauen.anwenden(OkHttpClient.Builder()).build()
     }
 
-    // wss://host:port/ws → https://host:port
-    private fun toHttps(wsUrl: String): String {
-        var u = wsUrl.trimEnd('/').removeSuffix("/ws")
-        u = u.replace("wss://", "https://").replace("ws://", "http://")
-        return u
-    }
+    // Code-Review 2026-10-18: eigene Umrechnung toHttps() durch ServerAdresse ersetzt
+    private fun toHttps(wsUrl: String): String = ServerAdresse.httpBasis(wsUrl)
+
+    // Code-Review 2026-10-18: die laufende Wiedergabe wird gemerkt, damit eine neue
+    // sie beendet (frueher liefen Antworten uebereinander) und stop() sie abbrechen kann.
+    private val sperre = Any()
+    private var player: MediaPlayer? = null
+    private var playerDatei: File? = null
 
     /** Spricht Text via Server edge-tts. Gibt true zurück wenn erfolgreich. */
     suspend fun speak(serverUrl: String, apiKey: String, text: String, voice: String): Boolean =
@@ -55,14 +58,15 @@ class ServerTtsPlayer @Inject constructor(
                     .addHeader("X-API-Key", apiKey)
                     .post(body)
                     .build()
-                val resp = httpClient.newCall(req).execute()
-                if (!resp.isSuccessful) {
-                    Log.w(TAG, "Server TTS HTTP ${resp.code}")
-                    return@withContext false
+                // Code-Review 2026-10-18: Response per use{} schliessen (vorher offen gelassen)
+                val bytes = httpClient.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) {
+                        Log.w(TAG, "Server TTS HTTP ${resp.code}")
+                        return@withContext false
+                    }
+                    resp.body?.bytes() ?: return@withContext false
                 }
-                val bytes = resp.body?.bytes() ?: return@withContext false
                 playMp3Bytes(bytes)
-                true
             } catch (e: Exception) {
                 Log.e(TAG, "Server TTS error: ${e.message}")
                 false
@@ -83,9 +87,10 @@ class ServerTtsPlayer @Inject constructor(
                     .addHeader("X-API-Key", apiKey)
                     .get()
                     .build()
-                val resp = httpClient.newCall(req).execute()
-                if (!resp.isSuccessful) return@withContext emptyList()
-                val body = resp.body?.string() ?: return@withContext emptyList()
+                val body = httpClient.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withContext emptyList()
+                    resp.body?.string() ?: return@withContext emptyList()
+                }
                 val arr = org.json.JSONArray(body)
                 (0 until arr.length()).map { i ->
                     val o = arr.getJSONObject(i)
@@ -102,21 +107,60 @@ class ServerTtsPlayer @Inject constructor(
             }
         }
 
-    private fun playMp3Bytes(data: ByteArray) {
-        try {
-            val tmp = File.createTempFile("jarvis_tts_", ".mp3", context.cacheDir)
+    /** Beendet eine laufende Server-Wiedergabe und raeumt Player + Temp-Datei weg. */
+    fun stop() {
+        synchronized(sperre) { freigebenGesperrt(player) }
+    }
+
+    /** Gibt [mp] frei, falls er noch der aktuelle Player ist. Nur unter [sperre]. */
+    private fun freigebenGesperrt(mp: MediaPlayer?) {
+        if (mp == null || mp !== player) return
+        runCatching { mp.stop() }
+        runCatching { mp.release() }
+        playerDatei?.delete()
+        player = null
+        playerDatei = null
+    }
+
+    /**
+     * Code-Review 2026-10-18: frueher ohne setOnErrorListener - bei einem
+     * Wiedergabefehler blieben Player und Temp-Datei liegen, ebenso bei einer
+     * Ausnahme in prepare(). Jetzt werden beide in jedem Ausgang freigegeben.
+     * Rueckgabe: true, wenn die Wiedergabe gestartet wurde.
+     */
+    private fun playMp3Bytes(data: ByteArray): Boolean {
+        var tmp: File? = null
+        val mp = MediaPlayer()
+        return try {
+            tmp = File.createTempFile("jarvis_tts_", ".mp3", context.cacheDir)
             tmp.writeBytes(data)
-            val mp = MediaPlayer().apply {
-                setDataSource(tmp.absolutePath)
-                prepare()
-                setOnCompletionListener {
-                    it.release()
-                    tmp.delete()
-                }
-                start()
+            synchronized(sperre) {
+                // Vorherige Wiedergabe beenden statt ueberlappen zu lassen
+                freigebenGesperrt(player)
+                player = mp
+                playerDatei = tmp
             }
+            mp.setOnCompletionListener { synchronized(sperre) { freigebenGesperrt(it) } }
+            mp.setOnErrorListener { p, what, extra ->
+                Log.e(TAG, "MP3-Wiedergabefehler what=$what extra=$extra")
+                synchronized(sperre) { freigebenGesperrt(p) }
+                true
+            }
+            mp.setDataSource(tmp.absolutePath)
+            mp.prepare()
+            mp.start()
+            true
         } catch (e: Exception) {
             Log.e(TAG, "MP3 playback error: ${e.message}")
+            synchronized(sperre) {
+                if (player === mp) {
+                    freigebenGesperrt(mp)  // loescht auch die Temp-Datei
+                } else {
+                    runCatching { mp.release() }
+                    tmp?.delete()
+                }
+            }
+            false
         }
     }
 }

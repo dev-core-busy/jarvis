@@ -40,8 +40,8 @@ class SkillManager:
         self.post_install_hook = None
         self._load_enabled_skills()
 
-    def _load_enabled_skills(self):
-        """Lädt alle aktivierten Skills."""
+    def _load_enabled_skills(self, frisch: bool = False):
+        """Lädt alle aktivierten Skills (``frisch``: Module neu ausfuehren)."""
         self.loader.loaded_skills.clear()
         skill_states = config.get_skill_states()
 
@@ -56,7 +56,7 @@ class SkillManager:
 
             if enabled:
                 try:
-                    self.loader.load_skill(skill_name)
+                    self.loader.load_skill(skill_name, frisch=frisch)
                 except Exception as e:
                     print(f"Skill '{skill_name}' konnte nicht geladen werden: {e}")
 
@@ -134,7 +134,9 @@ class SkillManager:
 
         ok = True
         try:
-            self.loader.load_skill(name)
+            # frisch: ein beim Import gemerkter Zustand ("Paket fehlt") darf nach
+            # einer Installation nicht aus dem Zwischenspeicher kommen
+            self.loader.load_skill(name, frisch=True)
         except Exception as e:
             print(f"Skill '{name}' konnte nicht aktiviert werden: {e}")
             ok = False
@@ -300,7 +302,7 @@ class SkillManager:
 
             # Skill laden (auch bei Teil-Fehlern versuchen – Import entscheidet)
             try:
-                self.loader.load_skill(name)
+                self.loader.load_skill(name, frisch=True)
                 log.append(f"Skill '{name}' geladen.")
             except Exception as e:  # noqa: BLE001
                 log.append(f"Skill laden fehlgeschlagen: {e}")
@@ -338,9 +340,9 @@ class SkillManager:
         # Bewusst mit ';' statt '&&': schlaegt update teilweise fehl (ein Spiegel
         # nicht erreichbar), soll die Installation trotzdem versucht werden.
         # Der Rueckgabewert ist der des letzten Befehls, also der Installation.
-        # ACHTUNG: Der Broker-Policy-Key ist der KOMMANDOTEXT – wer diese Zeile
-        # aendert, erzeugt einen neuen Pending-Eintrag, der erneut freigegeben
-        # werden muss.
+        # ACHTUNG: Der Broker-Policy-Key ist der SHA-256 des KOMMANDOTEXTS – wer
+        # diese Zeile (auch nur im Leerraum) aendert, erzeugt einen neuen
+        # Pending-Eintrag, der erneut freigegeben werden muss.
         apt = "DEBIAN_FRONTEND=noninteractive apt-get"
         cmd = f"{apt} update; {apt} install -y " + " ".join(packages)
         res = broker_client.call_sync("shell_root", {"command": cmd},
@@ -658,5 +660,5 @@ class SkillManager:
         return False
 
     def reload_all(self):
-        """Lädt alle Skills neu."""
-        self._load_enabled_skills()
+        """Lädt alle Skills neu (Module werden neu ausgefuehrt)."""
+        self._load_enabled_skills(frisch=True)

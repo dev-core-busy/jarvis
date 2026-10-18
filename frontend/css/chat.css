@@ -1081,6 +1081,21 @@ body.light .msg-status-warn {
     color: color-mix(in srgb, var(--danger) 78%, #000);
 }
 
+/* Code-Review 2026-10-18: Verbindungszustand ueber der Eingabe (chat.js
+   _connHint). Schrift --text-primary auf deckender --bg-secondary – lesbar in
+   beiden Themen; die Signalfarbe steht nur am Rand, der Zustand steht im Text.
+   `display` nur ohne [hidden], sonst ueberstimmt die Regel das Attribut. */
+.chat-conn-hint:not([hidden]) {
+    display: block;
+    font-size: 13px;
+    color: var(--text-primary);
+    background: var(--bg-secondary);
+    border-left: 3px solid var(--warning);
+    border-radius: 6px;
+    padding: 6px 10px;
+    margin: 4px 10px;
+}
+
 /* ─── Markdown in Bubbles ────────────────────────────────────── */
 .msg-bubble strong, .msg-bubble b {
     font-weight: 700;

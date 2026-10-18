@@ -154,6 +154,8 @@ class TtsManager @Inject constructor(
     /** Aktuelle Sprachausgabe sofort abbrechen */
     fun stop() {
         tts?.stop()
+        // Code-Review 2026-10-18: auch eine laufende Server-Wiedergabe beenden
+        serverTtsPlayer.stop()
         _isSpeaking.value = false
         stopMouthAnimation()
     }

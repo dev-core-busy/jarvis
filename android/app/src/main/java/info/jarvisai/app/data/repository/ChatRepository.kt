@@ -3,6 +3,7 @@ package info.jarvisai.app.data.repository
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
 import info.jarvisai.app.data.api.JarvisWebSocket
+import info.jarvisai.app.data.api.ServerAdresse
 import info.jarvisai.app.data.model.AgentInfo
 import info.jarvisai.app.data.model.ChatMessage
 import info.jarvisai.app.data.model.ConnectionState
@@ -101,9 +102,8 @@ class ChatRepository @Inject constructor(
     private suspend fun fetchMyBlock() {
         try {
             val settings = settingsDataStore.settings.first()
-            val baseUrl = settings.serverUrl
-                .replace("wss://", "https://").replace("ws://", "http://")
-                .removeSuffix("/ws").removeSuffix("/ws/")
+            // Code-Review 2026-10-18: gemeinsame Umrechnung statt eigener Kopie
+            val baseUrl = ServerAdresse.httpBasis(settings.serverUrl)
             val client = okHttpClient.newBuilder()
                 .readTimeout(20, TimeUnit.SECONDS).build()
             val req = Request.Builder()

@@ -84,7 +84,7 @@ func main() {
 	SetTTSVoice(cfg.TTSVoice)
 	SetTTSServer(cfg.ServerURL, cfg.APIKey)
 	SetImageServer(cfg.ServerURL)
-	SetImageAuth(func() string { return cfg.APIKey })
+	SetImageAuth(cfg.SchluesselJetzt) // Code-Review 2026-10-18: Lesen unter Sperre
 
 	// Gewähltes STT-Modell setzen und Whisper-Server starten
 	SetActiveSTTModel(cfg.STTModel)
@@ -875,6 +875,7 @@ func (ja *JarvisApp) shutdown() {
 		}
 	}
 	_ = ja.cfg.Save()
+	FlushHistory() // Code-Review 2026-10-18: vorgemerkten Verlauf vor dem Beenden schreiben
 	StopWhisperServer()
 	ja.fyneApp.Quit()
 }

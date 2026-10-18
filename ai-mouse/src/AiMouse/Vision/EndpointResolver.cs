@@ -39,14 +39,36 @@ internal static class EndpointResolver
         // Ohne Schema ist es kein absoluter URI – https ergaenzen statt
         // abzulehnen. Ein Administrator, der "dp.example.de" eintippt, meint
         // keinen anderen Server, und http waere hier die falsche Vorgabe:
-        // ueber die Leitung geht ein Kennwort.
+        // ueber die Leitung geht ein Kennwort. Ein AUSDRUECKLICHES "http://"
+        // wird dagegen NICHT stillschweigend umgeschrieben, sondern unten
+        // abgelehnt: wer es eintippt, meint womoeglich wirklich einen
+        // Klartext-Port, und ein heimlich anderes Ziel waere ein Raetsel.
         if (!getrimmt.Contains("://", StringComparison.Ordinal))
         {
             getrimmt = "https://" + getrimmt;
         }
 
+        // ⚠ NUR https (Code-Review 2026-10-18). Bis dahin stand hier auch
+        // `Uri.UriSchemeHttp` – und JEDER Aufruf des Clients haengt an dieser
+        // einen Basis: die Anmeldung (Kennwort + Einmal-Code), jede Anfrage
+        // mit Bearer-Token und der Abruf des Anwendungspakets (ausfuehrbarer
+        // Code). Ein eingetragenes "http://" schickte also Kennwort und
+        // Sitzung im Klartext und liess eine EXE ohne TLS ein; die
+        // Begruendung "getragen von der TLS-Pruefung" in `PaketAsync` und
+        // `Aktualisierung` waere dann falsch gewesen.
+        //
+        // WARUM DIE GRENZE HIER UND NICHT JE AUFRUF: es gibt keinen Aufruf,
+        // der ohne Kennwort oder Token auskommt – eine Ausnahme fuer "nur
+        // lesende" Wege gaebe es also gar nicht. Und es gibt keinen Zweck fuer
+        // http: der Server spricht nur HTTPS (Port 80 leitet um), die
+        // eingebaute Vorgabe im Paket setzt er hart auf https
+        // (`backend/addin.py`, `basis_url`), Tests und Pruefstaende benutzen
+        // ausschliesslich https-Adressen, und eine
+        // localhost-Ausnahme waere eine zweite Regel, die jemand auf einen
+        // Weiterleitungs-Port ausdehnt. Abgelehnt heisst "unbrauchbar" (leer)
+        // – der Einstellungsdialog sagt dann, warum (`Texte.NurHttps`).
         if (!Uri.TryCreate(getrimmt, UriKind.Absolute, out Uri? uri) ||
-            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            uri.Scheme != Uri.UriSchemeHttps)
         {
             return string.Empty;
         }

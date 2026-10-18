@@ -64,20 +64,108 @@ def _save(data: dict) -> None:
     except Exception:  # noqa: BLE001
         pass
     os.replace(tmp, POLICY_FILE)
+    _cache_setzen(data)
+
+
+# ── Zaehler gebuendelt schreiben (Code-Review 2026-10-18) ──────────────────
+# Bis dahin las und schrieb check() bei JEDER Op die ganze Datei in /etc neu
+# (nur um count/last_used zu erhoehen) – je Shell-Befehl ein Voll-Rewrite unter
+# globalem Lock, O(Eintraege). Jetzt: Lesen ueber einen Zwischenspeicher, der
+# an mtime+Groesse haengt (eine Aenderung von Hand wird gesehen); Zaehler
+# sammeln sich im Speicher und gehen hoechstens alle ZAEHLER_FLUSH_S Sekunden
+# auf die Platte. Ein NEUER Eintrag und jede Entscheidung werden sofort
+# geschrieben – nur die Statistik darf hinterherhinken.
+ZAEHLER_FLUSH_S = 30
+# Deckel fuer OFFENE Eintraege: eine Prompt-Injection-Schleife konnte sonst
+# tausende 'pending'-Eintraege erzeugen und die Freigabeliste unbrauchbar
+# machen. Ueber dem Deckel wird nichts mehr angelegt – die Op laeuft nicht
+# (Ergebnis pending), und die Ablehnung steht im Journal.
+PENDING_MAX = 500
+_cache: dict = {"stempel": None, "daten": None}
+_offen: dict = {}            # key -> [anzahl, letzter_zeitpunkt]
+_letzter_flush = 0.0
+
+
+def _stempel():
+    try:
+        st = POLICY_FILE.stat()
+        return (st.st_mtime_ns, st.st_size, st.st_ino)
+    except FileNotFoundError:
+        return None
+
+
+def _cache_setzen(data: dict) -> None:
+    _cache["daten"] = data
+    _cache["stempel"] = _stempel()
+
+
+def _load_cached() -> dict:
+    """Wie ``_load``, aber ohne Neulesen, solange sich die Datei nicht geaendert hat."""
+    stempel = _stempel()
+    if _cache["daten"] is not None and stempel is not None and stempel == _cache["stempel"]:
+        return _cache["daten"]
+    data = _load()
+    _cache["daten"], _cache["stempel"] = data, stempel
+    return data
+
+
+def _zaehler_einrechnen(data: dict) -> None:
+    for key, (anzahl, zuletzt) in _offen.items():
+        entry = data["ops"].get(key)
+        if entry is not None:
+            entry["count"] = int(entry.get("count", 0)) + anzahl
+            entry["last_used"] = max(int(entry.get("last_used", 0)), zuletzt)
+    _offen.clear()
+
+
+def flush() -> None:
+    """Gesammelte Zaehler schreiben (Broker-Ende, Tests)."""
+    global _letzter_flush
+    with _lock:
+        if not _offen:
+            return
+        try:
+            data = _load()
+        except PolicyUnlesbar:
+            return
+        _zaehler_einrechnen(data)
+        _save(data)
+        _letzter_flush = time.monotonic()
 
 
 def check(key: str, op: str, description: str, user: str,
           default_allow: bool) -> str:
     """Entscheidung fuer eine Operation abrufen; legt den Eintrag beim ersten
     Auftauchen an ('wenn sie auftauchen'). Rueckgabe: allow|deny|pending."""
+    global _letzter_flush
     now = int(time.time())
     with _lock:
         try:
-            data = _load()
+            data = _load_cached()
         except PolicyUnlesbar as e:
             print("[Broker-Policy] " + MELDUNG_UNLESBAR % e, flush=True)
             return DENY
         entry = data["ops"].get(key)
+        if entry is not None:
+            z = _offen.setdefault(key, [0, 0])
+            z[0] += 1
+            z[1] = now
+            if user and not entry.get("requested_by"):
+                entry["requested_by"] = user
+                _zaehler_einrechnen(data)
+                _save(data)
+                _letzter_flush = time.monotonic()
+            elif time.monotonic() - _letzter_flush >= ZAEHLER_FLUSH_S:
+                _zaehler_einrechnen(data)
+                _save(data)
+                _letzter_flush = time.monotonic()
+            return entry.get("decision", PENDING)
+        if not default_allow:
+            offen = sum(1 for e in data["ops"].values() if e.get("decision") == PENDING)
+            if offen >= PENDING_MAX:
+                print(f"[Broker-Policy] {offen} offene Freigaben – neuer Eintrag NICHT angelegt "
+                      f"(Deckel {PENDING_MAX}): {key[:120]}", flush=True)
+                return PENDING
         if entry is None:
             entry = {
                 "key": key,
@@ -93,11 +181,11 @@ def check(key: str, op: str, description: str, user: str,
                 "last_used": 0,
             }
             data["ops"][key] = entry
-        entry["count"] = int(entry.get("count", 0)) + 1
+        entry["count"] = 1
         entry["last_used"] = now
-        if user and not entry.get("requested_by"):
-            entry["requested_by"] = user
+        _zaehler_einrechnen(data)
         _save(data)
+        _letzter_flush = time.monotonic()
         return entry.get("decision", PENDING)
 
 

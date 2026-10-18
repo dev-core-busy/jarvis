@@ -77,7 +77,10 @@ for n in _baum.body:
             "_ad_cache_nachladen", "_ad_cache_nachladen_falls_noetig",
             "_revalidate_ad_groups_once", "_member_of_any_group", "_group_cn_prefix",
             # seit 2026-09-30 (BSI H3) ruft die Revalidierung diesen Helfer
-            "_revalidierung_ueberspringen"):
+            "_revalidierung_ueberspringen",
+            # seit dem Code-Review 2026-10-18 vergleicht _member_of_any_group ueber
+            # diese beiden Helfer (genauer DN statt CN-Praefix)
+            "_dn_norm", "_gruppe_passt"):
         _holen[n.name] = "".join(MAIN_LINES[n.lineno - 1:n.end_lineno])
 
 for _p in ("_load_ad_caches", "_save_ad_caches", "_norm_login", "_touch_ad_caches",
@@ -115,6 +118,7 @@ _ns = {
     "_user_group_dns_cache": {}, "_knowledge_editor_cache": {},
     "_internet_access_cache": {}, "_admin_access_cache": {},
     "_ad_seen_users": {},
+    "_CN_TREFFER_GEMELDET": set(),
     # --- fuer Abschnitt 8 (Nachladen) --------------------------------------
     "asyncio": __import__("asyncio"),
     "sys": sys,
@@ -679,6 +683,7 @@ _ns9 = {
     "_norm_login": _ns["_norm_login"],
     "_member_of_any_group": _ns["_member_of_any_group"],
     "_group_cn_prefix": _ns["_group_cn_prefix"],
+    "_gruppe_passt": _ns["_gruppe_passt"],
     "_user_group_dns_cache": {}, "_knowledge_editor_cache": {},
     "_internet_access_cache": {}, "_admin_access_cache": {},
     # BSI M3: _user_is_admin fragt die Sitzung (hier: keine) und die Pflicht

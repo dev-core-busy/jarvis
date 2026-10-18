@@ -10,6 +10,8 @@ from backend.tools.base import BaseTool
 # Bridge laeuft lokal auf Port 3001
 BRIDGE_URL = "http://127.0.0.1:3001"
 
+from backend import wa_bruecke as _wa_bruecke  # noqa: E402  Geheimnis fuer jede Anfrage
+
 
 class WhatsAppSendTool(BaseTool):
     """Sendet eine WhatsApp-Nachricht ueber die Bridge."""
@@ -58,7 +60,7 @@ class WhatsAppSendTool(BaseTool):
             req = urllib.request.Request(
                 f"{BRIDGE_URL}/send",
                 data=data,
-                headers={"Content-Type": "application/json"},
+                headers={"Content-Type": "application/json", **_wa_bruecke.kopf()},
                 method="POST",
             )
             with urllib.request.urlopen(req, timeout=15) as resp:
@@ -115,7 +117,7 @@ class WhatsAppContactsTool(BaseTool):
 
         try:
             url = f"{BRIDGE_URL}/contacts?search={urllib.parse.quote(search)}"
-            req = urllib.request.Request(url, method="GET")
+            req = urllib.request.Request(url, method="GET", headers=_wa_bruecke.kopf())
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
 
@@ -171,7 +173,8 @@ class WhatsAppStatusTool(BaseTool):
     async def execute(self, **kwargs) -> str:
         """Fragt den Bridge-Status ab."""
         try:
-            req = urllib.request.Request(f"{BRIDGE_URL}/status", method="GET")
+            req = urllib.request.Request(f"{BRIDGE_URL}/status", method="GET",
+                                         headers=_wa_bruecke.kopf())
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
 

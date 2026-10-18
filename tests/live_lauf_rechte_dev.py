@@ -95,8 +95,12 @@ with lt.lauf_scope(BEN, privilegiert=False) as lauf:
           (lauf.verzeichnis / "vom_backend.csv").read_text(encoding="utf-8") == "kopf\nzeile\n")
 
     # ── 4) ALTBESTAND: 0644-Datei der Shell (wie vor dem Fix) ────────────────
-    sh("umask 022; echo alt > /tmp/altbestand.py; stat -c '%a' /tmp/altbestand.py")
     alt_p = lauf.verzeichnis / "altbestand.py"
+    # Das Arbeitsverzeichnis ueberlebt den Lauf (ARBEIT_ROOT/<kennung>): ohne
+    # Wegraeumen findet der naechste Lauf die 0666-Datei aus Schritt 4 vor, und
+    # `echo >` behaelt deren Modus – die Probe war nur beim ERSTEN Lauf gruen.
+    alt_p.unlink(missing_ok=True)
+    sh("umask 022; echo alt > /tmp/altbestand.py; stat -c '%a' /tmp/altbestand.py")
     check("Altbestand-Datei ist NICHT gruppen-beschreibbar (0644)",
           alt_p.is_file() and not (os.stat(alt_p).st_mode & stat.S_IWGRP))
     erg = fs("write", "/tmp/altbestand.py", "neu")

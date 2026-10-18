@@ -14,6 +14,7 @@ diesen Benutzer unlesbar sind – das prueft/erzwingt setup().
 Laeuft als root (jarvis.service). Fest verdrahtete Kommandos, kein
 benutzergesteuerter Shell-Input -> keine Injection.
 """
+import errno
 import os
 import pwd
 import shlex
@@ -186,12 +187,20 @@ def setup():
                 "steps": steps, "status": status()}
 
     # 2) Secret-Dateien absichern (600 = nur root)
+    # O_NOFOLLOW + fchmod (Code-Review 2026-10-18): der Projektbaum gehoert dem
+    # Dienstbenutzer – ein Symlink .env -> /etc/<datei> liess root sonst den
+    # Modus einer beliebigen Systemdatei auf 0600 setzen.
     for f in _secret_files():
         try:
-            f.chmod(0o600)
+            fd = os.open(f, os.O_RDONLY | os.O_NOFOLLOW)
+            try:
+                os.fchmod(fd, 0o600)
+            finally:
+                os.close(fd)
             step("Rechte gesetzt: " + f.name, True, "600")
-        except Exception as e:  # noqa: BLE001
-            step("Rechte gesetzt: " + f.name, False, str(e))
+        except OSError as e:
+            grund = "symbolischer Link – uebersprungen" if e.errno == errno.ELOOP else str(e)
+            step("Rechte gesetzt: " + f.name, False, grund)
     if not _secret_files():
         step("Secret-Dateien", True, "keine gefunden (nichts abzusichern)")
 

@@ -16,6 +16,7 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 
+	"jarvis-windows/hilfen"
 	"jarvis-windows/tlsvertrauen"
 )
 
@@ -61,7 +62,7 @@ func jarvisBearerGET(url, token string) ([]byte, error) {
 func (ja *JarvisApp) showBlockedDialog() {
 	go func() {
 		var info secBlockInfo
-		if data, err := jarvisBearerGET(wsURLToHTTPS(ja.cfg.ServerURL)+"/api/security/my-block", ja.cfg.APIKey); err == nil {
+		if data, err := jarvisBearerGET(hilfen.HTTPBasis(ja.cfg.ServerURLJetzt())+"/api/security/my-block", ja.cfg.SchluesselJetzt()); err == nil {
 			_ = json.Unmarshal(data, &info)
 		}
 

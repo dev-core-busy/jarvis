@@ -11,6 +11,8 @@ Genehmigt durch Benutzer am 2026-05-10.
 
 import asyncio
 import json
+
+from backend import atomar as _atomar  # atomar + fail-closed (Code-Review 2026-10-18)
 import re
 import shutil
 import subprocess
@@ -62,7 +64,7 @@ def _load_index() -> dict:
 
 def _save_index(index: dict):
     INDEX_FILE.parent.mkdir(parents=True, exist_ok=True)
-    INDEX_FILE.write_text(json.dumps(index, indent=2, ensure_ascii=False), encoding="utf-8")
+    _atomar.schreiben(INDEX_FILE, index)  # atomar (Code-Review 2026-10-18)
 
 
 def _slug(text: str) -> str:
@@ -110,9 +112,15 @@ def _try_notify_whatsapp(message: str):
         def _send():
             try:
                 import requests
+                from backend import wa_bruecke as _wa_bruecke
+                from backend.tools.whatsapp import BRIDGE_URL
+                # Bis 2026-10-18 "/api/send" – den Pfad kennt die Bridge nicht,
+                # und der Fehler verschwand im except: KEINE dieser Meldungen
+                # kam je an (Code-Review).
                 requests.post(
-                    "http://localhost:3001/api/send",
+                    f"{BRIDGE_URL}/send",
                     json={"to": number, "message": message},
+                    headers=_wa_bruecke.kopf(),
                     timeout=3,
                 )
             except Exception:

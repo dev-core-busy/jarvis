@@ -2,6 +2,8 @@
 
 import os
 import json
+import stat as _stat
+import threading
 import uuid
 from pathlib import Path
 try:
@@ -25,19 +27,39 @@ def _write_preserve_owner(path: Path, text: str) -> None:
     Wichtig fuer den Root-Broker: laeuft er (als root) z.B. sandbox_setup und
     speichert dabei eine Einstellung, darf settings.json nicht ploetzlich
     root gehoeren – sonst kann das unprivilegierte Backend (jarvis.service,
-    User=jarvis) seine eigenen Einstellungen nicht mehr schreiben."""
+    User=jarvis) seine eigenen Einstellungen nicht mehr schreiben.
+
+    ATOMAR und OHNE Symlinks zu folgen (Code-Review 2026-10-18): vorher
+    ``write_text`` + ``os.chown`` auf den Pfad – ein Absturz mitten im Schreiben
+    hinterliess eine halbe settings.json, und als root folgten beide einem
+    Symlink, den der Dienstbenutzer im Projektbaum anlegen kann. Jetzt
+    Temp-Datei im selben Verzeichnis, ``fchown``/``fchmod`` am Deskriptor,
+    ``os.replace`` (ersetzt den Verzeichniseintrag, nie ein Linkziel)."""
     st = None
     try:
-        if path.exists():
-            st = path.stat()
-    except Exception:  # noqa: BLE001
+        st = os.lstat(path)
+    except FileNotFoundError:
         st = None
-    path.write_text(text)
+    except OSError:
+        st = None
+    modus = (st.st_mode & 0o777) if st is not None and not _stat.S_ISLNK(st.st_mode) else 0o640
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     try:
-        if st is not None and os.geteuid() == 0 and (st.st_uid != 0 or st.st_gid != 0):
-            os.chown(path, st.st_uid, st.st_gid)
-    except Exception:  # noqa: BLE001
-        pass
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+            if st is not None and os.geteuid() == 0 and (st.st_uid != 0 or st.st_gid != 0):
+                os.fchown(f.fileno(), st.st_uid, st.st_gid)
+            os.fchmod(f.fileno(), modus)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _lies_settings_datei(path: Path) -> dict:

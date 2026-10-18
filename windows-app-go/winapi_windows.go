@@ -18,6 +18,7 @@ import (
 	"time"
 	"unsafe"
 
+	"jarvis-windows/hilfen"
 	"jarvis-windows/tlsvertrauen"
 )
 
@@ -821,19 +822,13 @@ func jarvisHTTP(method, url, token string, body interface{}) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-// wsURLToHTTPS konvertiert wss:// → https://, ws:// → http://.
-func wsURLToHTTPS(wsURL string) string {
-	u := strings.TrimSuffix(wsURL, "/ws")
-	u = strings.TrimSuffix(u, "/")
-	u = strings.ReplaceAll(u, "wss://", "https://")
-	u = strings.ReplaceAll(u, "ws://", "http://")
-	return u
-}
+// Code-Review 2026-10-18: wsURLToHTTPS entfiel (doppelt zu issuesBaseURL und
+// SetImageServer) – gemeinsamer Helfer ist hilfen.HTTPBasis.
 
 // FetchBackendVoices holt verfügbare TTS-Stimmen vom Backend (edge-tts).
 // Gibt (Namen, IDs) zurück – beide Slices gleich lang.
 func FetchBackendVoices(serverURL, apiKey string) (names []string, ids []string) {
-	url := wsURLToHTTPS(serverURL) + "/api/tts/voices"
+	url := hilfen.HTTPBasis(serverURL) + "/api/tts/voices"
 	data, err := jarvisHTTP("GET", url, apiKey, nil)
 	if err != nil {
 		return nil, nil
@@ -904,7 +899,8 @@ func PlayWAVBytes(data []byte) {
 	f.Close()
 	defer os.Remove(path)
 	path = strings.ReplaceAll(path, "/", "\\")
-	script := `(New-Object System.Media.SoundPlayer '` + path + `').PlaySync()`
+	// Code-Review 2026-10-18: Pfad maskiert einsetzen (Apostroph im Profilnamen)
+	script := `(New-Object System.Media.SoundPlayer ` + hilfen.PSZeichenkette(path) + `).PlaySync()`
 	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	_ = cmd.Run()
@@ -912,7 +908,7 @@ func PlayWAVBytes(data []byte) {
 
 // PlayBackendTTS generiert TTS-Audio über das Backend und spielt es ab (blockierend).
 func PlayBackendTTS(serverURL, apiKey, text, voiceID string) error {
-	url := wsURLToHTTPS(serverURL) + "/api/tts"
+	url := hilfen.HTTPBasis(serverURL) + "/api/tts"
 	data, err := jarvisHTTP("POST", url, apiKey, map[string]string{
 		"text":  text,
 		"voice": voiceID,

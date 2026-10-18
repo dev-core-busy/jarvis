@@ -139,6 +139,8 @@ _APP_DENY_REL = (
     # cron_list zeigt nur eigene Auftraege, ein direktes Lesen der Datei wuerde
     # diese Schranke aushebeln.
     "data/scheduled_jobs.json", "data/file_watchers.json", "data/security_state.json",
+    # Geheimnis zwischen Backend und WhatsApp-Bridge (backend/wa_bruecke.py)
+    "data/.wa_bridge_secret",
     # Lizenz-Zustand: Firma, Abteilung, Ansprechpartner-Mail und die
     # Hardware-Bindung. Geht einen Shell-Befehl in der Sandbox nichts an – und
     # ein beschreibbarer Zustand waere der bequemste Weg, sich selbst eine
@@ -446,7 +448,11 @@ PRIVATE_FILES_STRENG = ("data/.mailkey", "data/.sapkey", "data/.jirakey",
                         # Auf DEV am 2026-09-28 gemessen: alle drei 0644, lesbar
                         # fuer jarvis_sandbox.
                         "data/.secret_key", "data/auth_state.json",
-                        "data/.erstkennwort")
+                        "data/.erstkennwort",
+                        # Geheimnis zwischen Backend und WhatsApp-Bridge
+                        # (backend/wa_bruecke.py): wer es liest, sendet in
+                        # fremdem Namen und spielt Auftraege ein.
+                        "data/.wa_bridge_secret")
 PRIVATE_FILE_MODE_STRENG = 0o600
 
 
@@ -712,7 +718,7 @@ SHELL_SECRET_PATHS = re.compile(
     r'\.env\b|settings\.json\b|memory\.json\b|auth_state\.json\b|credentials\.json\b|'
     r'scheduled_jobs\.json\b|file_watchers\.json\b|security_state\.json\b|'
     r'license\.json\b|license_root\.pub\b|agent_roles\.json\b|ad_cache\.json\b|'
-    r'/\.instanz\b|'
+    r'/\.instanz\b|\.wa_bridge_secret\b|'
     r'knowledge_sync\.json\b|'
     # Hauptschluessel der Geheimnisse (BSI M5): Original in /etc/jarvis, die
     # Kopie des Dienstes unter $CREDENTIALS_DIRECTORY (/run/credentials/...).

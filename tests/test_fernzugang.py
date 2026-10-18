@@ -500,8 +500,13 @@ gesetzt = f is not None and any(
 check("Status-Endpunkt liefert die Adresse der Web-Sitzung (deine_adresse)", gesetzt)
 dm = ast.parse((ROOT / "backend" / "broker" / "daemon.py").read_text(encoding="utf-8"))
 im_thread = any(
-    isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "to_thread"
-    and n.args and isinstance(n.args[0], ast.Attribute) and n.args[0].attr == "behandeln"
+    (isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "to_thread"
+     and n.args and isinstance(n.args[0], ast.Attribute) and n.args[0].attr == "behandeln")
+    # seit 2026-10-18 im eigenen Pool: run_in_executor(_KURZ, functools.partial(meta.behandeln, …))
+    or (isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "run_in_executor"
+        and len(n.args) >= 2 and isinstance(n.args[1], ast.Call)
+        and getattr(n.args[1].func, "attr", "") == "partial" and n.args[1].args
+        and getattr(n.args[1].args[0], "attr", "") == "behandeln")
     for n in ast.walk(dm))
 direkt = any(
     isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "behandeln"

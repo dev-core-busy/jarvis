@@ -491,7 +491,7 @@ internal sealed class SettingsWindow : Form
         string basis = EndpointResolver.Basis(_endpoint.Text);
         if (basis.Length == 0)
         {
-            Complain(Texte.KeinServer, _endpoint);
+            Complain(Texte.KeinServerFuer(_endpoint.Text), _endpoint);
             return null;
         }
 

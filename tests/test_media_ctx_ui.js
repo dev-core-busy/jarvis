@@ -333,7 +333,8 @@ abschnitt('3. Kopieren landet wirklich in der Zwischenablage');
     const mz = /z-index:\s*(\d+)/.exec(CSS.slice(CSS.indexOf('.jv-bubble-ctx-menu {')));
     pruefe(tz && mz && Number(tz[1]) > Number(mz[1]),
            'Rueckmeldung liegt ueber dem Kontextmenue', tz && mz ? tz[1] + ' vs ' + mz[1] : '?');
-    pruefe(/title="\$\{tip\}"/.test(CHATLIB),
+    // seit 2026-10-18 mit Attribut-Escaper: title="${_A(tip)}"
+    pruefe(/title="\$\{(?:_A\()?tip\)?\}"/.test(CHATLIB),
            'der Datei-Chip traegt einen Hinweis-Tooltip (Ziehen/Rechtsklick)');
     pruefe(!/cursor:\s*grab;\s*\}/.test(CSS.slice(CSS.indexOf('.chat-doc-dl:active'))),
            'der Chip behaelt den Klick-Zeiger (Download ist die Hauptaktion)');

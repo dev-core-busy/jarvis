@@ -2,14 +2,28 @@ package main
 
 import (
 	"encoding/json"
-	"math"
+	"math/rand"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 
+	"jarvis-windows/hilfen"
 	"jarvis-windows/tlsvertrauen"
+)
+
+// Zeitgrenzen gegen halboffene Verbindungen.
+//
+// Code-Review 2026-10-18: ohne Lese-Deadline blieb ReadMessage nach einem
+// stillen Verbindungsabriss (WLAN-Wechsel, Standby, NAT-Timeout) beliebig
+// lange haengen – die App zeigte "verbunden", und gesendete Auftraege gingen
+// ins Leere. Jetzt schickt der Client alle wsPingAbstand einen Ping; kommt
+// binnen wsLeseFrist weder Pong noch Nachricht, gilt die Verbindung als tot.
+const (
+	wsLeseFrist    = 60 * time.Second
+	wsPingAbstand  = 25 * time.Second
+	wsSchreibFrist = 10 * time.Second
 )
 
 type WSMessage struct {
@@ -52,12 +66,12 @@ type WSClient struct {
 	stopCh    chan struct{}
 	sendCh    chan []byte
 
-	OnMessage          func(WSMessage)
-	OnConnected        func(bool)
-	OnTTSAudio         func([]byte)
-	OnWakeWordResult   func(transcript string, detected bool)
-	OnVoiceTranscript  func(transcript string) // Transkript einer Spracheingabe
-	OnDesktopCommand   func(DesktopCommand)    // Desktop-Steuerungsbefehle vom Backend
+	OnMessage         func(WSMessage)
+	OnConnected       func(bool)
+	OnTTSAudio        func([]byte)
+	OnWakeWordResult  func(transcript string, detected bool)
+	OnVoiceTranscript func(transcript string) // Transkript einer Spracheingabe
+	OnDesktopCommand  func(DesktopCommand)    // Desktop-Steuerungsbefehle vom Backend
 }
 
 func NewWSClient(cfg *Config) *WSClient {
@@ -88,7 +102,7 @@ func (c *WSClient) SendTask(text string, lang string) {
 	payload := map[string]string{
 		"type":  "task",
 		"text":  text,
-		"token": c.cfg.APIKey,
+		"token": c.cfg.SchluesselJetzt(),
 		"lang":  lang,
 	}
 	data, _ := json.Marshal(payload)
@@ -109,7 +123,7 @@ func (c *WSClient) SendTaskWithTruncate(text string, lang string, truncateUserMs
 	payload := map[string]interface{}{
 		"type":                    "task",
 		"text":                    text,
-		"token":                   c.cfg.APIKey,
+		"token":                   c.cfg.SchluesselJetzt(),
 		"lang":                    lang,
 		"truncate_user_msg_index": truncateUserMsgIndex,
 	}
@@ -124,7 +138,7 @@ func (c *WSClient) SendStop(agentID string) {
 	payload := map[string]interface{}{
 		"type":   "control",
 		"action": "stop",
-		"token":  c.cfg.APIKey,
+		"token":  c.cfg.SchluesselJetzt(),
 	}
 	if agentID != "" {
 		payload["agent_id"] = agentID
@@ -153,7 +167,7 @@ func (c *WSClient) SendScreenResult(action, data string) {
 func (c *WSClient) SendDesktopResult(res DesktopResult) {
 	b, _ := json.Marshal(map[string]interface{}{
 		"type":       "desktop_result",
-		"token":      c.cfg.APIKey,
+		"token":      c.cfg.SchluesselJetzt(),
 		"action":     res.Action,
 		"request_id": res.RequestID,
 		"output":     res.Output,
@@ -172,7 +186,7 @@ func (c *WSClient) sendRegister() {
 	payload := map[string]string{
 		"type":        "register",
 		"client_type": "windows_desktop",
-		"token":       c.cfg.APIKey,
+		"token":       c.cfg.SchluesselJetzt(),
 	}
 	b, _ := json.Marshal(payload)
 	select {
@@ -187,7 +201,7 @@ func (c *WSClient) SendTranscribeOnly(audioB64 string) {
 	payload := map[string]string{
 		"type":  "transcribe_only",
 		"audio": audioB64,
-		"token": c.cfg.APIKey,
+		"token": c.cfg.SchluesselJetzt(),
 	}
 	data, _ := json.Marshal(payload)
 	select {
@@ -202,7 +216,7 @@ func (c *WSClient) SendWakeWordCheck(audioB64, phrase string) {
 		"type":   "wakeword_check",
 		"audio":  audioB64,
 		"phrase": phrase,
-		"token":  c.cfg.APIKey,
+		"token":  c.cfg.SchluesselJetzt(),
 	}
 	data, _ := json.Marshal(payload)
 	select {
@@ -220,23 +234,31 @@ func (c *WSClient) connectLoop() {
 		default:
 		}
 		c.setConnected(false)
-		err := c.runConn()
-		if err != nil {
-			attempt++
-			delay := time.Duration(math.Min(float64(int(3)<<minInt(attempt, 6)), 60)) * time.Second
-			select {
-			case <-c.stopCh:
-				return
-			case <-time.After(delay):
-			}
-		} else {
+		verbunden, err := c.runConn()
+		// Code-Review 2026-10-18: der Zaehler wurde nie zurueckgesetzt, weil
+		// runConn auch nach einer langen, erfolgreichen Verbindung mit dem
+		// Lesefehler endet – nach ein paar Abrissen wartete der Client dann
+		// immer 60 s. Jetzt zaehlt nur, wer gar nicht erst verbinden konnte.
+		if verbunden {
 			attempt = 0
+		}
+		if err == nil {
+			continue
+		}
+		attempt++
+		delay := hilfen.Backoff(attempt, rand.Float64())
+		select {
+		case <-c.stopCh:
+			return
+		case <-time.After(delay):
 		}
 	}
 }
 
-func (c *WSClient) runConn() error {
-	url := c.cfg.ServerURL
+// runConn baut eine Verbindung auf und bedient sie bis zum Abbruch.
+// verbunden meldet, ob der Aufbau gelang (fuer den Backoff-Zaehler).
+func (c *WSClient) runConn() (verbunden bool, err error) {
+	url := c.cfg.ServerURLJetzt()
 	if strings.HasPrefix(url, "https://") {
 		url = "wss://" + url[8:]
 	} else if strings.HasPrefix(url, "http://") {
@@ -249,26 +271,57 @@ func (c *WSClient) runConn() error {
 	}
 	conn, _, err := dialer.Dial(url, nil)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer conn.Close()
+
+	// Code-Review 2026-10-18: done gehoert zu GENAU dieser Verbindung. Vorher
+	// lief die Sender-Goroutine der alten Verbindung nach einem Abriss weiter
+	// (sie kannte nur stopCh), griff Nachrichten der neuen Verbindung aus dem
+	// gemeinsamen sendCh und schrieb sie in den toten Socket – verloren.
+	// close(done) laeuft als Erstes beim Verlassen (defer-Reihenfolge).
+	done := make(chan struct{})
+	defer close(done)
 
 	c.mu.Lock()
 	c.conn = conn
 	c.mu.Unlock()
 	c.setConnected(true)
 
+	_ = conn.SetReadDeadline(time.Now().Add(wsLeseFrist))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(wsLeseFrist))
+	})
+
 	// Als Windows-Desktop-Client registrieren
 	go c.sendRegister()
 
-	// Sender-Goroutine
+	// Sender-Goroutine (einziger Schreiber dieser Verbindung, auch fuer Pings)
 	go func() {
+		ticker := time.NewTicker(wsPingAbstand)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-c.stopCh:
 				return
+			case <-done:
+				return
+			case <-ticker.C:
+				_ = conn.SetWriteDeadline(time.Now().Add(wsSchreibFrist))
+				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+					_ = conn.Close() // weckt den Leser auf
+					return
+				}
 			case data := <-c.sendCh:
+				_ = conn.SetWriteDeadline(time.Now().Add(wsSchreibFrist))
 				if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+					// Nachricht nicht verlieren: zurueck in die Warteschlange
+					// fuer die naechste Verbindung (ohne zu blockieren).
+					select {
+					case c.sendCh <- data:
+					default:
+					}
+					_ = conn.Close()
 					return
 				}
 			}
@@ -279,8 +332,10 @@ func (c *WSClient) runConn() error {
 	for {
 		msgType, data, err := conn.ReadMessage()
 		if err != nil {
-			return err
+			return true, err
 		}
+		// Jede Nachricht (auch das "ping" des Servers) belegt eine lebende Verbindung
+		_ = conn.SetReadDeadline(time.Now().Add(wsLeseFrist))
 		if msgType == websocket.BinaryMessage {
 			if c.OnTTSAudio != nil {
 				c.OnTTSAudio(data)
@@ -343,11 +398,4 @@ func (c *WSClient) setConnected(v bool) {
 	if c.OnConnected != nil {
 		c.OnConnected(v)
 	}
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

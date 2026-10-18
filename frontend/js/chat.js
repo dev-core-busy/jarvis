@@ -24,7 +24,16 @@
     const _agentInfos = {};   // agent_id -> {label, state, is_sub_agent}
     const _subBubbles = {};   // agent_id -> Streaming-Bubble eines Sub-Agenten
     let reconnectAttempts = 0;
-    const MAX_RECONNECT = 20;
+    // Code-Review 2026-10-18: frueher gab der Reconnect nach 20 Versuchen
+    // (rund 3 Minuten) STILL auf – danach blieb der Chat bis zum Neuladen tot,
+    // ohne jeden Hinweis. Jetzt unbegrenzt mit exponentiellem Backoff, Obergrenze
+    // und Jitter (damit nach einem Server-Neustart nicht alle Fenster im selben
+    // Takt anklopfen); der Zustand steht sichtbar ueber der Eingabe.
+    // Uebersetzung mit Rueckfall (fehlt der Schluessel, liefert window.t ihn selbst).
+    const _T = (k, d) => (window.t && window.t(k) !== k ? window.t(k) : d);
+    const RECONNECT_BASIS_MS = 1000;
+    const RECONNECT_MAX_MS   = 30000;
+    let _reconnectTimer = null;
     let agentRunning = false;
     let currentBotBubble = null;   // Streaming-Ziel
     let lastDate = '';
@@ -481,7 +490,24 @@
 
     function _startContextIndicator() {
         _updateContextIndicator();
-        _ctxTimer = setInterval(_updateContextIndicator, 8000);
+        // Code-Review 2026-10-18: frueher legte jede erneute Anmeldung im selben
+        // Fenster (showChat ohne Neuladen) einen ZWEITEN Takt an – derselbe
+        // Endpunkt wurde doppelt abgefragt. Die Hauptschranke ist _stoppeTakte()
+        // beim Abmelden; diese Sperre steht BEWUSST zusaetzlich (gleiche Form wie
+        // beim LLM-Status-Takt) fuer jeden weiteren showChat-Aufruf. Die
+        // Gegenprobe trifft sie deshalb nur zusammen mit _stoppeTakte.
+        if (!_ctxTimer) _ctxTimer = setInterval(_updateContextIndicator, 8000);
+    }
+
+    // Code-Review 2026-10-18: alle Takte dieses Moduls anhalten. Die Abmeldung
+    // laedt die Seite NICHT neu – ohne das liefen LLM-Status (30 s) und
+    // Kontext-Anzeige (8 s) mit leerem Token weiter (401 im Takt), und der
+    // Reconnect baute nach ws.close() wieder eine Verbindung auf.
+    function _stoppeTakte() {
+        if (_llmStatusTimer) { clearInterval(_llmStatusTimer); _llmStatusTimer = null; }
+        if (_ctxTimer) { clearInterval(_ctxTimer); _ctxTimer = null; }
+        _stopRunWatchdog();
+        _stopReconnect();
     }
 
     window._clearUserContext = async function () {
@@ -512,7 +538,10 @@
         localStorage.removeItem('jarvis_chat_token');
         localStorage.removeItem('jarvis_token');
         localStorage.removeItem('jarvis_uc_token');
-        if (ws) { ws.close(); ws = null; }
+        _stoppeTakte();
+        // onclose abhaengen: eine gewollte Trennung ist kein Verbindungsverlust
+        // (kein "Antwort verloren"-Hinweis, kein Reconnect).
+        if (ws) { ws.onclose = null; ws.close(); ws = null; }
         chatScreen.classList.add('hidden');
         window.JarvisSitzung.maskeFreigeben();
         loginScreen.classList.remove('hidden');
@@ -535,7 +564,7 @@
         // #status-dot zeigt den LLM-Profil-Status (s. _checkLlmStatus), nicht den WS-Status.
 
         ws.onopen = () => {
-            reconnectAttempts = 0;
+            _stopReconnect();
             // Beim Server registrieren (setzt Benutzer der WS) → Live-Sync-Events empfangen
             wsSend({ type: 'hello' });
         };
@@ -562,12 +591,61 @@
         ws.onerror = () => {};
     }
 
-    function scheduleReconnect() {
-        if (reconnectAttempts >= MAX_RECONNECT) return;
-        reconnectAttempts++;
-        const delay = 2000 * Math.min(reconnectAttempts, 5);
-        setTimeout(connectWS, delay);
+    /** Wartezeit vor Versuch n (1-basiert): 1 s, 2 s, 4 s … gedeckelt auf
+     *  RECONNECT_MAX_MS, davon 50–100 % (Jitter). */
+    function _reconnectDelay(n) {
+        const roh = Math.min(RECONNECT_MAX_MS, RECONNECT_BASIS_MS * Math.pow(2, Math.max(0, n - 1)));
+        return Math.round(roh * (0.5 + Math.random() * 0.5));
     }
+
+    // Code-Review 2026-10-18: sichtbarer Verbindungszustand. Das Element wird
+    // bei Bedarf angelegt (ganz oben in der Eingabeleiste) und ueber `hidden`
+    // geschaltet – die CSS-Regel setzt `display` nur fuer :not([hidden]).
+    function _connHint(text) {
+        let el = $('chat-conn-hint');
+        if (!text) { if (el) el.hidden = true; return; }
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'chat-conn-hint';
+            el.className = 'chat-conn-hint';
+            el.setAttribute('role', 'status');
+            el.setAttribute('aria-live', 'polite');
+            const bar = document.querySelector('.input-bar');
+            if (bar) bar.insertBefore(el, bar.firstChild);
+            else document.body.appendChild(el);
+        }
+        el.textContent = text;
+        el.hidden = false;
+    }
+
+    function _stopReconnect() {
+        if (_reconnectTimer) { clearTimeout(_reconnectTimer); _reconnectTimer = null; }
+        reconnectAttempts = 0;
+        _connHint('');
+    }
+
+    function scheduleReconnect() {
+        // Nach dem Abmelden kommt hier nichts an: logout() haengt onclose ab
+        // und raeumt einen anstehenden Termin ab (_stoppeTakte) – EINE Schranke.
+        if (_reconnectTimer) return;   // ein Versuch steht schon an
+        reconnectAttempts++;
+        const delay = _reconnectDelay(reconnectAttempts);
+        const sek = Math.max(1, Math.round(delay / 1000));
+        _connHint(_T('chat.conn_retry', 'Verbindung zum Server unterbrochen – neuer Versuch in {s} s (Versuch {n}).')
+            .replace('{s}', sek).replace('{n}', reconnectAttempts));
+        _reconnectTimer = setTimeout(function () {
+            _reconnectTimer = null;
+            connectWS();
+        }, delay);
+    }
+
+    // Netz wieder da: nicht bis zum naechsten (evtl. 30 s entfernten) Termin warten.
+    window.addEventListener('online', function () {
+        if (!_reconnectTimer) return;   // nur wenn ein Versuch ansteht
+        clearTimeout(_reconnectTimer);
+        _reconnectTimer = null;
+        connectWS();
+    });
 
     /** Sendet ueber den WebSocket. Rueckgabe: true = abgeschickt, false = keine
      *  offene Verbindung (die Freigabekarte zeigt dann "nicht gesendet"). */
@@ -3688,9 +3766,9 @@
         const row = document.createElement('div');
         row.className = 'msg-feedback-row';
         // SVG-Icons statt Emoji – konsistent zu Windows-App + Hauptfenster.
-        const SVG_UP   = `<svg viewBox="0 0 24 24" width="14" height="14" fill="#FFCA28"><path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>`;
-        const SVG_DOWN = `<svg viewBox="0 0 24 24" width="14" height="14" fill="#FFCA28"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>`;
-        const SVG_X    = `<svg viewBox="0 0 24 24" width="14" height="14" fill="#E74C3C"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>`;
+        const SVG_UP   = `<svg viewBox="0 0 24 24" width="14" height="14" class="msg-fb-ico"><path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>`;
+        const SVG_DOWN = `<svg viewBox="0 0 24 24" width="14" height="14" class="msg-fb-ico"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>`;
+        const SVG_X    = `<svg viewBox="0 0 24 24" width="14" height="14" class="msg-fb-ico msg-fb-ico-x"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>`;
         const _tGood  = window.t ? window.t('feedback.good')  : 'Gute Antwort';
         const _tBad   = window.t ? window.t('feedback.bad')   : 'Schlechte Antwort';
         const _tWrong = window.t ? window.t('feedback.wrong') : 'Falsche Antwort';
@@ -3740,6 +3818,10 @@
   width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;
   padding:0;cursor:pointer;transition:all .15s;line-height:0;}
 .msg-fb-btn svg{display:block;}
+/* Code-Review 2026-10-18: Symbolfarben aus den Theme-Variablen statt fest
+   eingetragener Hexwerte im SVG (#FFCA28/#E74C3C folgten keinem Thema). */
+.msg-fb-ico{fill:var(--warning);}
+.msg-fb-ico-x{fill:var(--danger);}
 .msg-fb-btn:hover:not(:disabled){border-color:var(--accent);background:var(--surface-variant);transform:scale(1.12);}
 .msg-fb-btn:disabled{cursor:default;opacity:.5;}
 .msg-fb-btn.msg-fb-active{border-color:rgba(var(--accent-rgb),.7);background:rgba(var(--accent-rgb),.2);}

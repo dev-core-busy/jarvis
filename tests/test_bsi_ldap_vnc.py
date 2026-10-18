@@ -465,9 +465,14 @@ check("Positivkontrolle Login: mit Anker angemeldet, Bind im Tunnel",
 _login = None
 for n in ast.walk(BAUM):
     if isinstance(n, ast.AsyncFunctionDef):
-        rufe = [c for c in ast.walk(n) if isinstance(c, ast.Call)
-                and isinstance(c.func, ast.Name) and c.func.id == "authenticate_linux_user"
-                and len(c.args) == 3]
+        # Direkt ODER ueber asyncio.to_thread(authenticate_linux_user, u, p, d)
+        # (seit 2026-10-18 im Thread, damit PAM/LDAP den Event-Loop nicht halten)
+        rufe = [c for c in ast.walk(n) if isinstance(c, ast.Call) and (
+                (isinstance(c.func, ast.Name) and c.func.id == "authenticate_linux_user"
+                 and len(c.args) == 3)
+                or (isinstance(c.func, ast.Attribute) and c.func.attr == "to_thread"
+                    and len(c.args) == 4 and isinstance(c.args[0], ast.Name)
+                    and c.args[0].id == "authenticate_linux_user"))]
         if rufe:
             _login = n
             break

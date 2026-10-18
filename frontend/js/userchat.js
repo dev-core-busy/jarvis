@@ -126,8 +126,10 @@
     const btnMsgSelCancel = $('btn-msg-sel-cancel');
 
     // ─── Hilfsfunktionen ────────────────────────────────────────
+    // Code-Review 2026-10-18: das Ergebnis landet in innerHTML-Vorlagen – ein
+    // Name, der mit `<` oder `&` beginnt, muss maskiert ankommen.
     function initial(name) {
-        return (name || '?').charAt(0).toUpperCase();
+        return escHtml((name || '?').charAt(0).toUpperCase());
     }
 
     // Normalisiert einen Login auf den blossen sAMAccountName (analog Backend
@@ -167,8 +169,12 @@
         return d.toLocaleDateString('de-DE');
     }
 
+    // Code-Review 2026-10-18: auch Anfuehrungszeichen maskieren – escHtml steht
+    // in title="…"/download="…"-Attributen (Dateiname eines Anhangs, vom
+    // Absender frei gewaehlt); ein `"` darin beendete das Attribut.
     function escHtml(s) {
-        return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+            .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
     }
 
     // ─── Eye-Button ─────────────────────────────────────────────
@@ -328,10 +334,16 @@
         });
     }
 
+    /** Rueckgabe: true = abgeschickt, false = keine offene Verbindung.
+     *  Code-Review 2026-10-18: frueher still verworfen (siehe sendMessage). */
     function wsSend(obj) {
         if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ ...obj, token }));
+            try {
+                ws.send(JSON.stringify({ ...obj, token }));
+                return true;
+            } catch (e) { return false; }
         }
+        return false;
     }
 
     // ─── Nachrichten-Handler ─────────────────────────────────────
@@ -957,7 +969,15 @@
             const pill = document.createElement('span');
             const isMine = users.includes(myUser);
             pill.className = 'uc-reaction-pill' + (isMine ? ' mine' : '');
-            pill.innerHTML = `<span>${emoji}</span><span class="uc-rp-count">${users.length}</span>`;
+            // Code-Review 2026-10-18: das Emoji kommt vom Server und stammt vom
+            // ABSENDER der Reaktion (bis 12 Zeichen frei waehlbar) – nie als HTML.
+            const _em = document.createElement('span');
+            _em.textContent = emoji;
+            const _cnt = document.createElement('span');
+            _cnt.className = 'uc-rp-count';
+            _cnt.textContent = String(users.length);
+            pill.appendChild(_em);
+            pill.appendChild(_cnt);
             pill.title = users.join(', ');
             pill.addEventListener('click', () => sendReaction(msgId, emoji));
             el.appendChild(pill);
@@ -1216,7 +1236,18 @@
         if (_ucPending.length > 0) {
             msg.attachments = _ucPending.map(a => ({ name: a.name, mime_type: a.mime_type, data: a.data }));
         }
-        wsSend(msg);
+        // Code-Review 2026-10-18: Eingabe und Anhaenge erst leeren, wenn die
+        // Nachricht wirklich abgeschickt wurde. Frueher verwarf wsSend sie bei
+        // geschlossener Verbindung still, und das Feld war trotzdem leer – die
+        // Nachricht war verloren, ohne dass der Benutzer es merkte.
+        if (!wsSend(msg)) {
+            showUcToast(window.t('userchat.not_sent') !== 'userchat.not_sent'
+                ? window.t('userchat.not_sent')
+                : 'Nicht gesendet – keine Verbindung zum Server. Die Nachricht bleibt im Eingabefeld.');
+            connectWS();   // sofort neu verbinden statt auf den Takt zu warten
+            inputEl.focus();
+            return;
+        }
         inputEl.value = '';
         inputEl.style.height = 'auto';
         _ucPending = [];

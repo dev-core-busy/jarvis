@@ -14,6 +14,8 @@ fortsetzen. Der Kontext-(De)Serializer liegt in agent.py; hier nur Datei-I/O.
 """
 
 import json
+
+from backend import atomar as _atomar  # atomar + fail-closed (Code-Review 2026-10-18)
 import threading
 import time
 import uuid
@@ -206,7 +208,7 @@ def _read_meta(sd: Path) -> dict | None:
 
 def _write_meta(sd: Path, meta: dict) -> None:
     sd.mkdir(parents=True, exist_ok=True)
-    (sd / "meta.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    _atomar.schreiben(sd / "meta.json", meta, indent=None, sicherung=False)  # atomar (Code-Review 2026-10-18)
 
 
 def list_sessions(user: str) -> list:
@@ -493,8 +495,8 @@ def save_transcript(user: str, sid: str, messages: list) -> list:
     with _LOCK:
         if not _valid(user, sid):
             return []
-        (_sess_dir(user, sid) / "transcript.json").write_text(
-            json.dumps(messages, ensure_ascii=False), encoding="utf-8")
+        _atomar.schreiben(_sess_dir(user, sid) / "transcript.json", messages,
+                          indent=None, sicherung=False)  # atomar (Code-Review 2026-10-18)
     return messages
 
 
@@ -520,5 +522,5 @@ def save_context(user: str, sid: str, content_dicts: list) -> None:
     with _LOCK:
         if not _valid(user, sid):
             return
-        (_sess_dir(user, sid) / "context.json").write_text(
-            json.dumps(content_dicts, ensure_ascii=False), encoding="utf-8")
+        _atomar.schreiben(_sess_dir(user, sid) / "context.json", content_dicts,
+                          indent=None, sicherung=False)  # atomar (Code-Review 2026-10-18)

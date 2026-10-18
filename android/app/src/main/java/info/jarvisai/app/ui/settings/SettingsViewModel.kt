@@ -3,6 +3,7 @@ package info.jarvisai.app.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import info.jarvisai.app.data.api.ServerAdresse
 import info.jarvisai.app.data.model.AvatarType
 import info.jarvisai.app.data.prefs.JarvisSettings
 import info.jarvisai.app.data.prefs.SettingsDataStore
@@ -92,22 +93,8 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    private fun basisUrl(serverUrl: String): String {
-        val httpUrl = serverUrl.trimEnd('/').let {
-            when {
-                it.startsWith("wss://") -> "https://" + it.removePrefix("wss://")
-                it.startsWith("ws://")  -> "http://"  + it.removePrefix("ws://")
-                it.isBlank()            -> ""
-                !it.startsWith("http")  -> "https://$it"
-                else                    -> it
-            }
-        }
-        return try {
-            val parsed = URI(httpUrl)
-            val port = if (parsed.port > 0) ":${parsed.port}" else ""
-            "${parsed.scheme}://${parsed.host}$port"
-        } catch (_: Exception) { httpUrl }
-    }
+    // Code-Review 2026-10-18: gemeinsame Umrechnung (Schema + Host + Port) statt eigener Kopie
+    private fun basisUrl(serverUrl: String): String = ServerAdresse.ursprung(serverUrl)
 
     init {
         viewModelScope.launch {
@@ -223,31 +210,23 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             _loginState.value = "loading"
             try {
-                val httpUrl = serverUrl.trimEnd('/').let {
-                    when {
-                        it.startsWith("wss://") -> "https://" + it.removePrefix("wss://")
-                        it.startsWith("ws://")  -> "http://"  + it.removePrefix("ws://")
-                        it.isBlank()            -> ""
-                        !it.startsWith("http")  -> "https://$it"
-                        else                    -> it
-                    }
-                }
-                // Pfad entfernen (z.B. /ws) – nur Schema + Host + Port behalten
-                val baseUrl = try {
-                    val parsed = URI(httpUrl)
-                    val port = if (parsed.port > 0) ":${parsed.port}" else ""
-                    "${parsed.scheme}://${parsed.host}$port"
-                } catch (_: Exception) { httpUrl }
+                // Pfad entfernen (z.B. /ws) - nur Schema + Host + Port behalten
+                val baseUrl = basisUrl(serverUrl)
 
                 if (baseUrl.isBlank()) {
                     _loginState.value = "error: Server-URL fehlt"
                     return@launch
                 }
-                val safeUser = username.replace("\\", "\\\\").replace("\"", "\\\"")
-                val safePass = password.replace("\\", "\\\\").replace("\"", "\\\"")
                 // "client" kennzeichnet die App: ein Admin-Konto bekommt hier eine
                 // Sitzung OHNE Admin-Rechte (die App kann keinen zweiten Faktor, BSI M3).
-                val bodyJson = """{"username":"$safeUser","password":"$safePass","client":"android"}"""
+                // Code-Review 2026-10-18: JSONObject statt Handbau - vorher wurden nur
+                // Backslash und Anfuehrungszeichen maskiert, Steuerzeichen (Zeilenumbruch,
+                // Tab) im Kennwort ergaben ungueltiges JSON.
+                val bodyJson = JSONObject()
+                    .put("username", username)
+                    .put("password", password)
+                    .put("client", "android")
+                    .toString()
                 val reqBody = bodyJson.toRequestBody("application/json".toMediaType())
                 val request = Request.Builder()
                     .url("$baseUrl/api/login")

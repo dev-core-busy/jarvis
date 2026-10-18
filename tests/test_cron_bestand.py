@@ -28,6 +28,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))   # backend.atomar fuer die Klasse
 QUELLE = ROOT / "backend" / "scheduler.py"
 
 _ok = _fail = 0
@@ -106,6 +107,8 @@ def baue(jobs_datei: Path):
         "Optional": __import__("typing").Optional,
         "_agent_manager": None, "_broadcast_fn": None,
         "print": print,
+        # seit 2026-10-18 schreibt der Scheduler ueber backend.atomar (atomar + .bak)
+        "_atomar": __import__("backend.atomar", fromlist=["schreiben"]),
     }
     if FEHLERKLASSE:
         exec(FEHLERKLASSE, ns)  # noqa: S102

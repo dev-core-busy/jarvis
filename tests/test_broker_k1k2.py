@@ -255,8 +255,53 @@ check("chpasswd fuer jarvis abgewiesen, wenn jarvis root werden kann",
 ops._kann_root_werden = lambda u: ""
 r = ops._op_chpasswd({"username": "jarvis", "password": "Geheim123"}, None)
 check("Positivkontrolle: chpasswd fuer unprivilegiertes jarvis laeuft", r.get("ok") is True and aufrufe == ["jarvis"])
+# Code-Review 2026-10-18: das KENNWORT ging ungeprueft an chpasswd, das
+# zeilenweise liest – "x\nroot:neu" haette root ein Kennwort gesetzt.
+for bez, pw in (("Zeilenumbruch", "Geheim123\nroot:Uebernommen1"), ("Wagenruecklauf", "Geheim\r123"),
+                ("NUL", "Geheim\x00123"), ("DEL", "Geheim\x7f123"), ("leer", ""),
+                ("zu lang", "A" * 257), ("kein Text", ["Geheim123"])):
+    aufrufe.clear()
+    r = ops._op_chpasswd({"username": "jarvis", "password": pw}, None)
+    check(f"chpasswd-Kennwort mit {bez} abgewiesen, chpasswd nie gerufen",
+          r.get("ok") is False and aufrufe == [])
+aufrufe.clear()
+r = ops._op_chpasswd({"username": "jarvis", "password": "Ge:heim 123!" + "ä" * 3}, None)
+check("Positivkontrolle: Doppelpunkt, Leerzeichen, Umlaut sind erlaubt", r.get("ok") is True and aufrufe == ["jarvis"])
 ops._kann_root_werden = _echt
 check("root ist root-faehig (echte Pruefung)", ops._kann_root_werden("root") != "")
+
+# Zweite Schranke im ausfuehrenden Modul (echtes desktop_control, chpasswd als Attrappe)
+import importlib.util  # noqa: E402
+_spec = importlib.util.spec_from_file_location("dc_echt", ROOT / "backend" / "desktop_control.py")
+dc_echt = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(dc_echt)
+_eingaben = []
+dc_echt.subprocess = types.SimpleNamespace(
+    run=lambda cmd, **kw: _eingaben.append((cmd, kw.get("input"))) or types.SimpleNamespace(returncode=0))
+check("desktop_control: Kennwort mit Zeilenumbruch -> False, chpasswd nie gerufen",
+      dc_echt.change_linux_password("jarvis", "a\nroot:b") is False and _eingaben == [])
+check("desktop_control: Name mit Zeilenumbruch -> False",
+      dc_echt.change_linux_password("jarvis\nroot", "Geheim123") is False and _eingaben == [])
+check("Positivkontrolle desktop_control: gueltige Eingabe erreicht chpasswd mit genau einer Zeile",
+      dc_echt.change_linux_password("jarvis", "Geheim123") is True
+      and _eingaben == [(["chpasswd"], "jarvis:Geheim123\n")])
+
+# ══ 4b. unlock_screen: Ziel nur aus _DESKTOP_USERS (Code-Review 2026-10-18) ══
+_entsperrt = []
+dc.unlock_desktop_screen = lambda u: _entsperrt.append(u)
+for ziel in ("root", "jarvis\nautologin-session=x", "s.fischer", "lightdm"):
+    _entsperrt.clear()
+    r = ops._op_unlock_screen({"target_user": ziel}, None)
+    check(f"unlock_screen mit Ziel {ziel!r} abgewiesen", r.get("ok") is False and _entsperrt == [])
+_entsperrt.clear()
+r = ops._op_unlock_screen({}, None)
+check("Positivkontrolle: unlock_screen ohne Ziel entsperrt jarvis", r.get("ok") is True and _entsperrt == ["jarvis"])
+_geschrieben = []
+dc_echt.subprocess = types.SimpleNamespace(run=lambda *a, **k: _geschrieben.append(a) or
+                                           types.SimpleNamespace(returncode=0, stdout="", stderr=""))
+dc_echt.unlock_desktop_screen("jarvis\n[Seat:*]\nautologin-user=root")
+check("desktop_control.unlock_desktop_screen weist ein Ziel mit Zeilenumbruch ab (kein Unterprozess)",
+      _geschrieben == [])
 check("unbekanntes Konto gilt als nicht setzbar", ops._kann_root_werden("gibt_es_nicht_k1k2") != "")
 
 # ══ 5. Verbindungen: nur root und der Dienstbenutzer ═════════════════════════
@@ -282,12 +327,61 @@ import pathlib  # noqa: E402
 _mkdir = pathlib.Path.mkdir
 pathlib.Path.mkdir = lambda self, *a, **k: None
 try:
-    ops._op_mount_share({"type": "nfs", "source": "server:/export", "mountpoint": "/mnt/rag/k1k2"}, None)
+    ops._op_mount_share({"type": "nfs", "source": "server:/export", "mountpoint": "/mnt/rag/share_997"}, None)
 finally:
     pathlib.Path.mkdir = _mkdir
     ops._run, ops._mp_freimachen = _run, _frei
 nfs = [c for c in befehle if "nfs" in c]
 check("NFS-Mount mit nosuid,nodev,noexec", bool(nfs) and ops.MOUNT_OPTS in nfs[0])
+
+# ══ 6c. shell_root-Freigabe gilt fuer GENAU einen Befehl (Code-Review 2026-10-18) ══
+_reg = ops._REGISTRY["shell_root"]
+_key = _reg[1]
+_basis = "export MPLBACKEND=Agg; " + "x" * 200
+check("Positivkontrolle: derselbe Befehl -> derselbe Schluessel",
+      _key({"command": _basis + " ; echo a"}) == _key({"command": _basis + " ; echo a"}))
+check("gleiche ersten 200 Zeichen, anderer Rest -> ANDERER Schluessel",
+      _key({"command": _basis + " ; echo a"}) != _key({"command": _basis + " ; rm -rf /"}))
+check("Unterschied nur im Leerraum -> ANDERER Schluessel",
+      _key({"command": "echo 'a  b'"}) != _key({"command": "echo 'a b'"}))
+_desc = _reg[2]({"command": _basis + "y" * 400 + " ; rm -rf /tmp/x"})   # laenger als die Anzeigegrenze
+check("Anzeige nennt die Kuerzung VORN und beziffert sie",
+      "Zeichen" in _desc.split(":")[0] and len(_desc) <= 500)
+
+# ══ 6b. Einhaengepunkt: feste Form, kein Symlink (Code-Review 2026-10-18) ════
+check("Positivkontrolle: /mnt/rag/share_1 ist zulaessig", ops._mountpunkt_fehler("/mnt/rag/share_1") == "")
+check("Altbasis /mnt/jarvis-kb/share_3 ist zulaessig", ops._mountpunkt_fehler("/mnt/jarvis-kb/share_3") == "")
+for mp in ("/mnt/rag/share_1/unter", "/mnt/etc", "/mnt/rag/../../etc", "/mnt/rag/share_1\n",
+           "/etc/rag/share_1", "/mnt/rag/share_x", "", "/mnt/rag/share_12345"):
+    check(f"Einhaengepunkt {mp!r} abgewiesen", ops._mountpunkt_fehler(mp) != "")
+import stat as _st  # noqa: E402
+_lstat = ops.os.lstat
+_echt_lstat = os.lstat
+
+
+def _lstat_attrappe(p):
+    if p == "/mnt/rag":
+        return os.stat_result((_st.S_IFLNK | 0o777, 0, 0, 1, 0, 0, 0, 0, 0, 0))
+    if p in ("/mnt",):
+        return os.stat_result((_st.S_IFDIR | 0o755, 0, 0, 1, 0, 0, 0, 0, 0, 0))
+    raise FileNotFoundError(p)
+
+
+ops.os.lstat = _lstat_attrappe
+try:
+    _f = ops._mountpunkt_fehler("/mnt/rag/share_1")
+finally:
+    ops.os.lstat = _echt_lstat
+check("Symlink in einer Pfadkomponente (/mnt/rag -> …) abgewiesen", "symbolischer Link" in _f)
+befehle.clear()
+ops._run = lambda cmd, **k: befehle.append(cmd) or {"ok": True, "rc": 0, "stdout": "", "stderr": ""}
+try:
+    r = ops._op_umount_share({"mountpoint": "/mnt/fremd"}, None)
+    r2 = ops._op_mount_share({"type": "nfs", "source": "server:/export", "mountpoint": "/mnt/x/../../etc"}, None)
+finally:
+    ops._run = _run
+check("umount_share mit fremdem Pfad: abgewiesen, kein umount", r.get("ok") is False and befehle == [])
+check("mount_share mit fremdem Pfad: abgewiesen, kein mount", r2.get("ok") is False and befehle == [])
 
 # ══ 7. Skripte kommen aus dem Broker-Code, Ziele aus dem Datenbaum ═══════════
 gesehen = []

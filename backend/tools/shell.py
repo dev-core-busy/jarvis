@@ -411,85 +411,120 @@ class ShellTool(BaseTool):
                 start_new_session=True,
             )
 
-            # Live-Streaming: stdout zeilenweise lesen und senden
-            print(f"[SHELL] callback={_status_callback is not None} stdout={proc.stdout is not None}", flush=True)
-            if _status_callback and proc.stdout:
-                stdout_lines = []
-                stderr_data = b""
+            # Code-Review 2026-10-18, drei Maengel in einem Zug behoben:
+            #  * Stopp: das Abbrechen des Laufs (CancelledError) liess den
+            #    Prozessbaum weiterlaufen – ``except Exception`` faengt es nicht.
+            #  * Zeitdeckel galt je ZEILE: ein Befehl, der alle timeout-1 s eine
+            #    Zeile schreibt, lief unbegrenzt. Jetzt eine absolute Frist.
+            #  * Ausgabe wurde unbegrenzt gesammelt (``yes``, ``cat`` einer
+            #    grossen Datei) und jede Zeile einzeln an den WebSocket
+            #    geschickt. Jetzt Deckel beim Sammeln, Statuszeilen gebuendelt.
+            try:
+                aus, fehl, abgelaufen, gekuerzt = await self._lesen(
+                    proc, timeout, _status_callback if (_status_callback and proc.stdout) else None)
+            except asyncio.CancelledError:
+                self._gruppe_beenden(proc)
+                raise
+            if abgelaufen:
+                self._gruppe_beenden(proc)
+                return f"⏰ Timeout nach {timeout}s. Befehl abgebrochen."
 
-                async def _read_stderr():
-                    nonlocal stderr_data
-                    if proc.stderr:
-                        stderr_data = await proc.stderr.read()
+            result = ""
+            if gekuerzt:
+                result += (f"[Ausgabe gekuerzt: mehr als {self.SAMMEL_MAX // 1024} KiB – "
+                           f"nur der Anfang ist gesammelt]\n")
+            if aus:
+                result += "STDOUT:\n" + aus
+            if fehl:
+                result += f"\nSTDERR:\n{fehl}"
+            if proc.returncode and proc.returncode != 0:
+                result += f"\nExit-Code: {proc.returncode}"
+            if _sandbox_user and self._grenze_lokal(proc.returncode):
+                result += self._grenz_hinweis(_grenzen)
 
-                stderr_task = asyncio.create_task(_read_stderr())
-
-                try:
-                    while True:
-                        try:
-                            line = await asyncio.wait_for(
-                                proc.stdout.readline(), timeout=timeout
-                            )
-                        except asyncio.TimeoutError:
-                            self._gruppe_beenden(proc)
-                            return f"⏰ Timeout nach {timeout}s. Befehl abgebrochen."
-
-                        if not line:
-                            break
-
-                        decoded = line.decode("utf-8", errors="replace").rstrip()
-                        stdout_lines.append(decoded)
-                        # Live an Frontend senden
-                        try:
-                            await _status_callback(f"💻 {decoded}")
-                        except Exception as cb_err:
-                            print(f"[SHELL] callback error: {cb_err}", flush=True)
-
-                    await asyncio.wait_for(proc.wait(), timeout=5)
-                    await stderr_task
-
-                except asyncio.TimeoutError:
-                    self._gruppe_beenden(proc)
-                    return f"⏰ Timeout nach {timeout}s. Befehl abgebrochen."
-
-                result = ""
-                if stdout_lines:
-                    result += f"STDOUT:\n" + "\n".join(stdout_lines)
-                if stderr_data:
-                    result += f"\nSTDERR:\n{stderr_data.decode('utf-8', errors='replace')}"
-                if proc.returncode and proc.returncode != 0:
-                    result += f"\nExit-Code: {proc.returncode}"
-                if _sandbox_user and self._grenze_lokal(proc.returncode):
-                    result += self._grenz_hinweis(_grenzen)
-
-                return _modul_hinweis(result.strip()) or "(Keine Ausgabe)"
-
-            else:
-                # Klassischer Modus: alles auf einmal
-                try:
-                    stdout, stderr = await asyncio.wait_for(
-                        proc.communicate(), timeout=timeout
-                    )
-                except asyncio.TimeoutError:
-                    self._gruppe_beenden(proc)
-                    return f"⏰ Timeout nach {timeout}s. Befehl abgebrochen."
-
-                result = ""
-                if stdout:
-                    result += f"STDOUT:\n{stdout.decode('utf-8', errors='replace')}"
-                if stderr:
-                    result += f"\nSTDERR:\n{stderr.decode('utf-8', errors='replace')}"
-                if proc.returncode != 0:
-                    result += f"\nExit-Code: {proc.returncode}"
-                if _sandbox_user and self._grenze_lokal(proc.returncode):
-                    result += self._grenz_hinweis(_grenzen)
-
-                return _modul_hinweis(result.strip()) or "(Keine Ausgabe)"
+            return _modul_hinweis(result.strip()) or "(Keine Ausgabe)"
 
         except Exception as e:
             return f"Fehler: {str(e)}"
         finally:
             self._temp_weg(_tempdateien)
+
+    # Hoechstmenge, die je Strom (stdout/stderr) gesammelt wird; der Rest wird
+    # gelesen und verworfen, damit der Prozess nicht an einer vollen Pipe haengt.
+    SAMMEL_MAX = 2 * 1024 * 1024
+    # Statuszeilen hoechstens so oft an die Oberflaeche (Sekunden)
+    STATUS_TAKT_S = 0.2
+
+    async def _lesen(self, proc, timeout, rueckruf=None):
+        """stdout/stderr lesen – absolute Frist, Mengendeckel, gebuendelte Statuszeilen.
+
+        Rueckgabe: (stdout, stderr, abgelaufen, gekuerzt)."""
+        loop = asyncio.get_running_loop()
+        frist = loop.time() + max(1, int(timeout or 1))
+        gesammelt = {"out": bytearray(), "err": bytearray()}
+        gekuerzt = False
+        offen: list = []
+        zuletzt = 0.0
+
+        async def _melden(alles=False):
+            nonlocal zuletzt
+            if not rueckruf or not offen:
+                return
+            jetzt = loop.time()
+            if not alles and jetzt - zuletzt < self.STATUS_TAKT_S:
+                return
+            zuletzt = jetzt
+            # Die Oberflaeche zeigt in der Aktivitaetszeile ohnehin nur die
+            # JUENGSTE Statuszeile (chat.js) – gebuendelt geht also nur sie raus.
+            text = f"💻 {offen[-1]}"
+            offen.clear()
+            try:
+                await rueckruf(text)
+            except Exception as cb_err:  # noqa: BLE001
+                print(f"[SHELL] callback error: {cb_err}", flush=True)
+
+        async def _strom(strom, ziel, zeilen):
+            nonlocal gekuerzt
+            if strom is None:
+                return
+            while True:
+                if zeilen:
+                    stueck = await strom.readline()
+                else:
+                    stueck = await strom.read(65536)
+                if not stueck:
+                    return
+                frei = self.SAMMEL_MAX - len(gesammelt[ziel])
+                if frei > 0:
+                    gesammelt[ziel] += stueck[:frei]
+                if len(stueck) > frei:
+                    gekuerzt = True
+                if zeilen and rueckruf:
+                    offen.append(stueck.decode("utf-8", errors="replace").rstrip())
+                    await _melden()
+
+        aufgaben = [asyncio.ensure_future(_strom(proc.stdout, "out", rueckruf is not None)),
+                    asyncio.ensure_future(_strom(proc.stderr, "err", False))]
+        try:
+            rest = frist - loop.time()
+            fertig, _ = await asyncio.wait(aufgaben, timeout=max(0.0, rest))
+            if len(fertig) < len(aufgaben):
+                self._gruppe_beenden(proc)
+                return "", "", True, gekuerzt
+            await asyncio.wait_for(proc.wait(), timeout=max(1.0, frist - loop.time()))
+        except asyncio.TimeoutError:
+            self._gruppe_beenden(proc)
+            return "", "", True, gekuerzt
+        finally:
+            for a in aufgaben:
+                if not a.done():
+                    a.cancel()
+        await _melden(alles=True)
+        dec = lambda b: bytes(b).decode("utf-8", errors="replace")  # noqa: E731
+        aus = dec(gesammelt["out"])
+        if rueckruf is not None:
+            aus = "\n".join(z.rstrip() for z in aus.splitlines())
+        return aus, dec(gesammelt["err"]), False, gekuerzt
 
     @staticmethod
     def _gruppe_beenden(proc) -> None:
@@ -563,6 +598,10 @@ class ShellTool(BaseTool):
             except asyncio.TimeoutError:
                 self._gruppe_beenden(proc)
                 return f"⏰ Timeout nach {timeout}s. Befehl abgebrochen."
+            except asyncio.CancelledError:
+                # Stopp-Knopf: Prozessbaum mitbeenden (Code-Review 2026-10-18)
+                self._gruppe_beenden(proc)
+                raise
             aus = o.decode("utf-8", errors="replace")
             err = (err + "\n" + e.decode("utf-8", errors="replace")).strip()
             rc = proc.returncode

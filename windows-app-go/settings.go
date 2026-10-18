@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"image/color"
 	"net/url"
@@ -297,7 +298,7 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 		restoreVoiceSel()
 	}
 	go func() {
-		bkNames, bkIDs := FetchBackendVoices(app.cfg.ServerURL, app.cfg.APIKey)
+		bkNames, bkIDs := FetchBackendVoices(app.cfg.Verbindung()) // Code-Review 2026-10-18: Goroutine liest unter Sperre
 		if len(bkNames) == 0 {
 			return
 		}
@@ -667,16 +668,18 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 	// Speichern-Button volle Breite (Android-Stil)
 	saveBtn := widget.NewButton(t("Speichern", "Save"), func() {
 		if hostEntry.Text == "" {
-			dialog.ShowError(fmt.Errorf(t("Bitte Server-URL eingeben", "Please enter a server URL")), win)
+			dialog.ShowError(errors.New(t("Bitte Server-URL eingeben", "Please enter a server URL")), win)
 			return
 		}
 		if keyEntry.Text == "" && !domainLoginOk {
-			dialog.ShowError(fmt.Errorf(t("Bitte entweder API-Key eingeben oder zuerst via Domain-Anmeldung anmelden",
+			dialog.ShowError(errors.New(t("Bitte entweder API-Key eingeben oder zuerst via Domain-Anmeldung anmelden",
 				"Please enter an API key or login via domain authentication first")), win)
 			return
 		}
-		app.cfg.ServerURL = serverToURL(hostEntry.Text)
-		app.cfg.APIKey = keyEntry.Text
+		// Code-Review 2026-10-18: unter Sperre schreiben, die WebSocket-Goroutinen
+		// lesen beide Felder gleichzeitig (siehe Config.Verbindung).
+		app.cfg.SetzeVerbindung(serverToURL(hostEntry.Text), keyEntry.Text)
+		SetImageServer(app.cfg.ServerURL)
 		app.cfg.DomainUsername = domainUserEntry.Text
 
 		selSp := speakerSel.Selected

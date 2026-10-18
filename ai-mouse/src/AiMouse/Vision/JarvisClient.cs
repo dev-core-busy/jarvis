@@ -21,9 +21,18 @@ namespace AiMouse.Vision;
 /// * **Anmeldung mit Benutzer und Kennwort statt eines geteilten API-Keys.**
 ///   Die Berechtigung haengt an der Person, greift auf die vorhandenen
 ///   Freigabelisten zurueck und steht im Anwesenheits- und Audit-Log.
-/// * **Das Token liegt NUR im Arbeitsspeicher.** Es landet nicht in der
-///   settings.json: die Datei wird per Netzfreigabe verteilt und liegt im
-///   Klartext neben der Exe. Preis ist eine Anmeldung je Programmstart.
+/// * **Das Token landet NICHT in der settings.json:** die Datei wird per
+///   Netzfreigabe verteilt und liegt im Klartext neben der Exe. Es wird
+///   stattdessen DPAPI-verschluesselt (an das Windows-Konto gebunden) in der
+///   Registry des Benutzers abgelegt (`ConfigStore.SaveToken`/`LoadToken`),
+///   damit nicht jeder Programmstart eine Anmeldung kostet.
+///   ⚠ BERICHTIGT (Code-Review 2026-10-18): hier stand "liegt NUR im
+///   Arbeitsspeicher, Preis ist eine Anmeldung je Programmstart" – das galt
+///   nur bis zur Ablage in der Registry. Wer das Token fuer fluechtig haelt,
+///   unterschaetzt, was ein Zugriff auf das Benutzerkonto preisgibt.
+/// * **Nur ueber https.** Kennwort, Token und Anwendungspaket gehen nie im
+///   Klartext ueber die Leitung – `EndpointResolver.Basis` lehnt jede andere
+///   Adresse ab, `PaketAsync` prueft es zusaetzlich selbst.
 /// </summary>
 internal sealed class JarvisClient : IDisposable
 {
@@ -98,7 +107,7 @@ internal sealed class JarvisClient : IDisposable
         string basis = EndpointResolver.Basis(_settings.Endpoint);
         if (basis.Length == 0)
         {
-            throw new VisionException(Texte.KeinServer);
+            throw new VisionException(Texte.KeinServerFuer(_settings.Endpoint));
         }
 
         var rumpf = new Dictionary<string, string>
@@ -183,7 +192,7 @@ internal sealed class JarvisClient : IDisposable
         string basis = EndpointResolver.Basis(_settings.Endpoint);
         if (basis.Length == 0)
         {
-            throw new VisionException(Texte.KeinServer);
+            throw new VisionException(Texte.KeinServerFuer(_settings.Endpoint));
         }
 
         var rumpf = new Dictionary<string, string>
@@ -441,6 +450,12 @@ internal sealed class JarvisClient : IDisposable
     /// einbaut, macht daraus einen Weg zur Codeausfuehrung per
     /// Man-in-the-Middle.
     ///
+    /// ⚠ TLS GIBT ES NUR MIT https (Code-Review 2026-10-18). Bis dahin liess
+    /// `EndpointResolver` auch http zu, und dann trug der Satz oben nichts:
+    /// die EXE kam im Klartext und war unterwegs austauschbar. Deshalb prueft
+    /// diese Methode das Schema SELBST noch einmal, statt sich allein auf
+    /// `EndpointResolver.Basis` zu verlassen.
+    ///
     /// ⚠ EIGENES, KURZES ZEITLIMIT: das Paket ist rund 66 MB, und der
     /// gemeinsame <see cref="HttpClient"/> traegt das Zeitlimit der
     /// AUSWERTUNG (bis zu einer Stunde). Ein haengender Download darf nicht
@@ -456,7 +471,23 @@ internal sealed class JarvisClient : IDisposable
         string basis = EndpointResolver.Basis(_settings.Endpoint);
         if (basis.Length == 0)
         {
-            throw new VisionException(Texte.KeinServer);
+            throw new VisionException(Texte.KeinServerFuer(_settings.Endpoint));
+        }
+
+        // ⚠ BEWUSST DOPPELT zu `EndpointResolver.Basis` (die verlangt https
+        // ebenfalls). Grund: das ist der EINE Aufruf, bei dem ein Klartext-Weg
+        // nicht nur Daten preisgibt, sondern fremden Code ausfuehren laesst.
+        // Wird die Basis-Regel je fuer einen Pruefstand gelockert, darf diese
+        // Stelle nicht still mitkippen. Abgelehnt heisst: kein Update (der
+        // Aufrufer `Aktualisierung.PruefenUndHolenAsync` faengt die Ausnahme
+        // und laesst die laufende Fassung unveraendert) plus eine
+        // Protokollzeile fuer die Fehlersuche – dem Benutzer wird nichts
+        // gemeldet, die Aktualisierung ist still.
+        if (!IstHttps(basis))
+        {
+            System.Diagnostics.Trace.WriteLine(
+                "AiMouse: Update verweigert – Serveradresse ist nicht https.");
+            throw new VisionException("Update nur ueber https");
         }
 
         using var eigenesLimit = new CancellationTokenSource(TimeSpan.FromMinutes(10));
@@ -496,7 +527,7 @@ internal sealed class JarvisClient : IDisposable
         string basis = EndpointResolver.Basis(_settings.Endpoint);
         if (basis.Length == 0)
         {
-            throw new VisionException(Texte.KeinServer);
+            throw new VisionException(Texte.KeinServerFuer(_settings.Endpoint));
         }
 
         using var nachricht = new HttpRequestMessage(
@@ -557,6 +588,12 @@ internal sealed class JarvisClient : IDisposable
 
     private static string Kurz(string s) =>
         s.Length <= 300 ? s : s[..300] + "…";
+
+    /// <summary>Traegt die Adresse das Schema https? Leer oder unlesbar heisst
+    /// nein (fail-closed).</summary>
+    internal static bool IstHttps(string adresse) =>
+        Uri.TryCreate(adresse, UriKind.Absolute, out Uri? uri)
+        && uri.Scheme == Uri.UriSchemeHttps;
 
     public void Dispose() => _http.Dispose();
 }

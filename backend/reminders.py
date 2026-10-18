@@ -208,11 +208,12 @@ def _send_whatsapp(to: str, message: str) -> str:
     Ein synchroner HTTP-Aufruf im Event-Loop friert den ganzen Dienst ein
     (siehe CLAUDE.md, WhatsApp-Integration).
     """
+    from backend import wa_bruecke as _wa_bruecke
     try:
         data = json.dumps({"to": to, "message": message}).encode("utf-8")
         req = urllib.request.Request(
             f"{_WA_BRIDGE}/send", data=data,
-            headers={"Content-Type": "application/json"}, method="POST")
+            headers={"Content-Type": "application/json", **_wa_bruecke.kopf()}, method="POST")
         with urllib.request.urlopen(req, timeout=15) as resp:
             result = json.loads(resp.read().decode("utf-8"))
         if result.get("success"):

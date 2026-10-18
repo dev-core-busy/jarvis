@@ -8,6 +8,8 @@ from backend.tools.base import BaseTool
 class SpawnAgentTool(BaseTool):
     """Startet einen Sub-Agent fuer eine parallele Teilaufgabe."""
 
+    liefert_agenten_auftrag = True   # Ergebnis traegt den Agenten-Auftrag (Marker)
+
     @property
     def name(self) -> str:
         return "spawn_agent"

@@ -110,4 +110,6 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
     debugImplementation(libs.androidx.ui.tooling)
+    // Reine JVM-Unit-Tests (z. B. ServerAdresse), Code-Review 2026-10-18
+    testImplementation(libs.junit)
 }

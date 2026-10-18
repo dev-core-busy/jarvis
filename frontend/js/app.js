@@ -348,7 +348,8 @@
         ];
         const score = checks.filter(Boolean).length;
         const labels = [0,1,2,3,4].map(i => window.t('security.strength.' + i));
-        const colors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#16a34a'];
+        // Code-Review 2026-10-18: Theme-Variablen statt fester Hexwerte.
+        const colors = ['var(--danger)', 'var(--danger)', 'var(--warning)', 'var(--success)', 'var(--success)'];
         if (pw.length === 0) { cpwStrength.textContent = ''; return; }
         cpwStrength.innerHTML = `<span style="color:${colors[score]}">● ${labels[score]}</span>`;
     }
@@ -449,21 +450,32 @@
             data.files.forEach(f => {
                 const card = document.createElement('div');
                 card.style.cssText = 'background:var(--bg-glass);border:1px solid var(--border);border-radius:var(--radius-md);overflow:hidden;';
+                // Code-Review 2026-10-18: Name und Inhalt kamen ungeschuetzt per
+                // innerHTML in das Markup – ein `</textarea>` im Inhalt beendete
+                // das Feld und lieferte den Rest als HTML aus, und Entitaeten wie
+                // `&amp;` wurden beim Laden dekodiert und als `&` zurueckgespeichert
+                // (der Inhalt aenderte sich durch blosses Speichern). Jetzt: Markup
+                // ohne Daten, Name per textContent/dataset, Inhalt per `value`.
                 card.innerHTML = `
-                    <div class="instr-card-header" data-name="${f.name}" style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;cursor:pointer;user-select:none;">
+                    <div class="instr-card-header" style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;cursor:pointer;user-select:none;">
                         <div style="display:flex;align-items:center;gap:8px;">
                             <span class="instr-arrow" style="font-size:0.7rem;color:var(--text-muted);transition:transform 0.2s;">▶</span>
-                            <strong style="color:var(--accent-hover);font-size:0.9rem;">${f.name}.md</strong>
+                            <strong class="instr-name" style="color:var(--accent-hover);font-size:0.9rem;"></strong>
                         </div>
                         <div style="display:flex;gap:6px;">
-                            <button class="btn-instr-save" data-name="${f.name}" style="padding:4px 12px;font-size:0.75rem;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;">${window.t('instructions.save')}</button>
-                            <button class="btn-instr-del" data-name="${f.name}" title="${window.t('instructions.delete')}" aria-label="${window.t('instructions.delete')}" style="width:28px;height:28px;font-size:1rem;line-height:1;background:rgba(var(--danger-rgb),0.15);color:var(--danger);border:1px solid rgba(var(--danger-rgb),0.3);border-radius:var(--radius-sm);cursor:pointer;flex-shrink:0;">${JarvisIcons.trash()}</button>
+                            <button class="btn-instr-save" style="padding:4px 12px;font-size:0.75rem;background:var(--accent);color:var(--text-on-accent);border:none;border-radius:var(--radius-sm);cursor:pointer;">${escapeHtml(window.t('instructions.save'))}</button>
+                            <button class="btn-instr-del" title="${escapeHtml(window.t('instructions.delete'))}" aria-label="${escapeHtml(window.t('instructions.delete'))}" style="width:28px;height:28px;font-size:1rem;line-height:1;background:rgba(var(--danger-rgb),0.15);color:var(--danger);border:1px solid rgba(var(--danger-rgb),0.3);border-radius:var(--radius-sm);cursor:pointer;flex-shrink:0;">${JarvisIcons.trash()}</button>
                         </div>
                     </div>
                     <div class="instr-card-body" style="display:none;padding:0 14px 14px;">
-                        <textarea class="instr-editor" data-name="${f.name}" style="width:100%;min-height:360px;padding:10px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-family:var(--font-mono);font-size:0.8rem;resize:vertical;line-height:1.5;box-sizing:border-box;">${f.content}</textarea>
+                        <textarea class="instr-editor" style="width:100%;min-height:360px;padding:10px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-family:var(--font-mono);font-size:0.8rem;resize:vertical;line-height:1.5;box-sizing:border-box;"></textarea>
                     </div>
                 `;
+                const name = String(f.name == null ? '' : f.name);
+                card.querySelector('.instr-name').textContent = name + '.md';
+                card.querySelectorAll('.instr-card-header, .btn-instr-save, .btn-instr-del, .instr-editor')
+                    .forEach(el => { el.dataset.name = name; });
+                card.querySelector('.instr-editor').value = String(f.content == null ? '' : f.content);
                 list.appendChild(card);
             });
             // Auf-/Zuklappen per Klick auf Header
@@ -481,8 +493,10 @@
             list.querySelectorAll('.btn-instr-save').forEach(btn => {
                 btn.addEventListener('click', async () => {
                     const name = btn.dataset.name;
-                    const textarea = list.querySelector(`.instr-editor[data-name="${name}"]`);
-                    const res = await fetch(`/api/instructions/${name}`, {
+                    // Code-Review 2026-10-18: das Feld ueber die eigene Karte finden,
+                    // nicht per Selektor aus dem Namen (ein `"` im Namen warf).
+                    const textarea = btn.closest('.instr-card-header').nextElementSibling.querySelector('.instr-editor');
+                    const res = await fetch(`/api/instructions/${encodeURIComponent(name)}`, {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json', ...authHeader},
                         body: JSON.stringify({content: textarea.value})
@@ -494,7 +508,7 @@
             list.querySelectorAll('.btn-instr-del').forEach(btn => {
                 btn.addEventListener('click', async () => {
                     if (!confirm(window.t('instructions.confirm_delete').replace('{name}', btn.dataset.name))) return;
-                    await fetch(`/api/instructions/${btn.dataset.name}`, {method: 'DELETE', headers: authHeader});
+                    await fetch(`/api/instructions/${encodeURIComponent(btn.dataset.name)}`, {method: 'DELETE', headers: authHeader});
                     _loadInstructions();
                 });
             });
@@ -1406,12 +1420,16 @@
                 const d = await r.json();
                 const el = document.getElementById('ssl-status-text');
                 if (!el) return;
+                // Code-Review 2026-10-18: Serverwerte (Domain, Datum) nicht mehr per
+                // innerHTML, und der Let's-Encrypt-Satz war fest deutsch (kein i18n).
                 if (d.is_letsencrypt) {
-                    el.innerHTML = `\u2705 Let's Encrypt: <strong>${d.domain}</strong> \u2013 g\u00fcltig bis ${d.expiry}`;
+                    const _le = window.t('profile.cert_letsencrypt');
+                    el.textContent = (_le !== 'profile.cert_letsencrypt' ? _le : "\u2705 Let's Encrypt: {domain} \u2013 g\u00fcltig bis {datum}")
+                        .replace('{domain}', d.domain || '').replace('{datum}', d.expiry || '');
                 } else if (d.expiry) {
-                    el.innerHTML = window.t('profile.cert_self_signed') + ` ${d.expiry})`;
+                    el.textContent = window.t('profile.cert_self_signed') + ` ${d.expiry})`;
                 } else {
-                    el.innerHTML = window.t('profile.cert_self_signed_nodate');
+                    el.textContent = window.t('profile.cert_self_signed_nodate');
                 }
                 // BSI M11: Fingerabdruck zum Abgleich in der Windows-/Android-App
                 if (d.fingerabdruck) {
@@ -2116,7 +2134,7 @@
                         <button class="btn-icon btn-small btn-perms-profile" data-id="${p.id}" title="${window.t('profile.perm_label')}">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
                         </button>
-                        <button class="btn-icon btn-small btn-edit-profile" data-id="${p.id}" title="Bearbeiten">
+                        <button class="btn-icon btn-small btn-edit-profile" data-id="${p.id}" title="${window.t('common.edit')}" aria-label="${window.t('common.edit')}">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
                         </button>
                         <button class="btn-icon btn-small btn-delete-profile" data-id="${p.id}" title="${window.t('common.delete')}">
@@ -2789,15 +2807,18 @@
                     const row = document.createElement('div');
                     row.style.cssText = 'display:flex;gap:6px;align-items:center;margin-bottom:6px;';
                     row.dataset.id = k.id;
+                    // Code-Review 2026-10-18: Knopf-Titel uebersetzt (waren fest deutsch),
+                    // Neu-generieren mit Symbol aus icons.js statt Emoji.
+                    const _tt = (k, d) => (window.t && window.t(k) !== k ? window.t(k) : d);
                     row.innerHTML =
-                        '<input class="ak-name" value="' + esc(k.name) + '" title="Name" style="width:130px;">' +
+                        '<input class="ak-name" value="' + esc(k.name) + '" title="' + esc(_tt('app.key_name', 'Name')) + '" style="width:130px;">' +
                         // BSI M5: die Liste traegt den Schluessel nicht mehr – nur die
                         // letzten Zeichen zum Wiedererkennen. Auge/Kopieren holen ihn.
                         '<input class="ak-key" type="password" value="" readonly placeholder="' + esc(k.key_gesetzt ? ('••••••••' + (k.key_ende || '')) : '') + '" style="flex:1;font-family:monospace;font-size:.78rem;">' +
-                        '<button class="btn-icon btn-small ak-show" title="Anzeigen/Verbergen">' + EYE + '</button>' +
-                        '<button class="btn-icon btn-small ak-copy" title="Kopieren">' + COPY + '</button>' +
-                        '<button class="btn-icon btn-small ak-regen" title="Neu generieren">🔄</button>' +
-                        '<button class="btn-icon btn-small ak-del" title="Löschen">' + JarvisIcons.trash() + '</button>';
+                        '<button class="btn-icon btn-small ak-show" title="' + esc(_tt('app.key_show', 'Anzeigen/Verbergen')) + '">' + EYE + '</button>' +
+                        '<button class="btn-icon btn-small ak-copy" title="' + esc(_tt('common.copy', 'Kopieren')) + '">' + COPY + '</button>' +
+                        '<button class="btn-icon btn-small ak-regen" title="' + esc(_tt('app.key_regen', 'Neu generieren')) + '">' + JarvisIcons.refresh() + '</button>' +
+                        '<button class="btn-icon btn-small ak-del" title="' + esc(_tt('common.delete', 'Löschen')) + '">' + JarvisIcons.trash() + '</button>';
                     listEl.appendChild(row);
                 });
             }
@@ -2858,13 +2879,13 @@
                     holen().then(w => {
                         if (!w) return;
                         navigator.clipboard.writeText(w);
-                        b.title = 'Kopiert'; setTimeout(() => b.title = o, 1500);
+                        b.title = (window.t && window.t('app.key_copied') !== 'app.key_copied') ? window.t('app.key_copied') : 'Kopiert'; setTimeout(() => b.title = o, 1500);
                     });
                 } else if (e.target.closest('.ak-regen')) {
-                    if (!confirm('Diesen Key neu generieren? Der alte Key wird ungültig.')) return;
+                    if (!confirm((window.t && window.t('app.key_regen_confirm') !== 'app.key_regen_confirm') ? window.t('app.key_regen_confirm') : 'Diesen Key neu generieren? Der alte Key wird ungültig.')) return;
                     api('/api/agent/keys/' + id, { method: 'PUT', body: JSON.stringify({ regenerate: true }) }).then(() => load());
                 } else if (e.target.closest('.ak-del')) {
-                    if (!confirm('Diesen Key löschen?')) return;
+                    if (!confirm((window.t && window.t('app.key_del_confirm') !== 'app.key_del_confirm') ? window.t('app.key_del_confirm') : 'Diesen Key löschen?')) return;
                     api('/api/agent/keys/' + id, { method: 'DELETE' }).then(() => load());
                 }
             });
@@ -3068,7 +3089,8 @@
             const pw = inputEl.value;
             const score = [pw.length >= 8, /[A-Z]/.test(pw), /[a-z]/.test(pw), /[0-9]/.test(pw)].filter(Boolean).length;
             const labels = [window.t('security.strength.0'), window.t('security.strength.1'), window.t('security.strength.2'), window.t('security.strength.3'), window.t('security.strength.4')];
-            const colors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#16a34a'];
+            // Code-Review 2026-10-18: Theme-Variablen statt fester Hexwerte.
+            const colors = ['var(--danger)', 'var(--danger)', 'var(--warning)', 'var(--success)', 'var(--success)'];
             outputEl.innerHTML = pw.length ? `<span style="color:${colors[score]}">● ${labels[score]}</span>` : '';
         }
     }

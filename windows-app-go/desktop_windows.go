@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"fmt"
 	"image"
@@ -466,9 +467,35 @@ func desktopClipboardGet() (string, error) {
 
 // ─── Shell ────────────────────────────────────────────────────────────────────
 
+// desktopShellFrist begrenzt einen Shell-Befehl vom Backend.
+//
+// Code-Review 2026-10-18: vorher ohne jede Frist – ein Befehl, der auf
+// Eingabe wartet ("pause", "ping -t", ein Dialog), blockierte die Goroutine
+// und hielt cmd.exe samt Kindern fuer immer am Leben. Das Backend wartet
+// selbst nur 30 s auf das Ergebnis (tools/windows_desktop.py); die Frist hier
+// ist bewusst groesser, damit ein laengerer, aber endlicher Befehl (Kopieren,
+// Installation) nicht mittendrin abgeschossen wird.
+const desktopShellFrist = 120 * time.Second
+
 func desktopShellExec(cmd string) (string, int, error) {
-	c := exec.Command("cmd.exe", "/C", cmd)
+	ctx, cancel := context.WithTimeout(context.Background(), desktopShellFrist)
+	defer cancel()
+	c := exec.CommandContext(ctx, "cmd.exe", "/C", cmd)
 	c.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	// Beim Fristablauf den ganzen Prozessbaum beenden: Kill trifft sonst nur
+	// cmd.exe, und ein Enkel (z.B. ping -t) liefe weiter.
+	c.Cancel = func() error {
+		if c.Process != nil {
+			tk := exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(c.Process.Pid))
+			tk.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+			_ = tk.Run()
+			return c.Process.Kill()
+		}
+		return nil
+	}
+	// Haelt ein uebrig gebliebener Enkel die Ausgabe-Pipe offen, kehrt Wait
+	// trotzdem spaetestens nach WaitDelay zurueck.
+	c.WaitDelay = 5 * time.Second
 	var out bytes.Buffer
 	c.Stdout = &out
 	c.Stderr = &out
@@ -480,6 +507,12 @@ func desktopShellExec(cmd string) (string, int, error) {
 		}
 	}
 	output := strings.TrimRight(out.String(), "\r\n")
+	if ctx.Err() == context.DeadlineExceeded {
+		if exitCode == 0 {
+			exitCode = -1
+		}
+		output += fmt.Sprintf("\n[abgebrochen: keine Rueckkehr nach %v]", desktopShellFrist)
+	}
 	if len(output) > 8000 {
 		output = output[:8000] + "\n[... abgeschnitten]"
 	}

@@ -657,6 +657,9 @@ _ANTHROPIC_EFFORT = {"low": "low", "medium": "medium", "high": "high", "max": "m
 # Ab dieser Stufe braucht Anthropic Platz zum Denken – max_tokens deckelt
 # Denk- UND Antworttoken gemeinsam, ein zu kleiner Wert schneidet die Antwort ab.
 _ANTHROPIC_THINKING_MIN_TOKENS = 16000
+# Obergrenze ohne Streaming: das SDK verweigert nicht gestreamte Anfragen, deren
+# erwartete Dauer zehn Minuten uebersteigt (abhaengig von max_tokens).
+_ANTHROPIC_MAX_TOKENS_OHNE_STREAM = 32000
 
 
 def normalize_effort(value) -> str | None:
@@ -1687,8 +1690,8 @@ class AnthropicProvider(LLMProvider):
                 if _id_obj:
                     _mime = getattr(_id_obj, "mime_type", "")
                     _data = getattr(_id_obj, "data", b"")
+                    import base64 as _b64a
                     if _mime and _data and _mime.startswith("image/"):
-                        import base64 as _b64a
                         inline_data_blocks.append({
                             "type": "image",
                             "source": {
@@ -1696,6 +1699,14 @@ class AnthropicProvider(LLMProvider):
                                 "media_type": _mime,
                                 "data": _b64a.b64encode(_data).decode(),
                             },
+                        })
+                    elif _mime == "application/pdf" and _data:
+                        # Code-Review 2026-10-18: PDF-Anhaenge kamen bei Claude gar
+                        # nicht an (nur image/ wurde uebernommen).
+                        inline_data_blocks.append({
+                            "type": "document",
+                            "source": {"type": "base64", "media_type": "application/pdf",
+                                       "data": _b64a.b64encode(_data).decode()},
                         })
 
             if fn_responses:
@@ -1710,14 +1721,25 @@ class AnthropicProvider(LLMProvider):
                         "tool_use_id": tool_id,
                         "content": str(result_str),
                     })
+                # Bilder einer Werkzeug-Antwort (Windows-Screenshot, agent.py haengt
+                # sie als Bild-Part an) gingen hier verloren – Claude "sah" den
+                # Screenshot nie (Code-Review 2026-10-18). Jetzt als Inhalt des
+                # letzten tool_result (Text + Bild/Dokument).
+                if inline_data_blocks and tool_result_blocks:
+                    letzter = tool_result_blocks[-1]
+                    letzter["content"] = ([{"type": "text", "text": letzter["content"]}]
+                                          + inline_data_blocks)
                 messages.append({"role": "user", "content": tool_result_blocks})
 
             elif fn_calls:
                 content_blocks = []
                 if text_parts:
                     content_blocks.append({"type": "text", "text": "\n".join(text_parts)})
-                for fc in fn_calls:
-                    tool_id = f"call_{fc.name}_{step}"
+                for _nr, fc in enumerate(fn_calls):
+                    # EINDEUTIG je Aufruf (Code-Review 2026-10-18): vorher
+                    # call_<name>_<step> – zwei parallele Aufrufe desselben
+                    # Werkzeugs bekamen dieselbe ID, die API verlangt eindeutige.
+                    tool_id = f"call_{fc.name}_{step}_{_nr}"
                     tool_id_queues[fc.name].append(tool_id)
                     args = dict(fc.args) if fc.args else {}
                     content_blocks.append({
@@ -1750,14 +1772,35 @@ class AnthropicProvider(LLMProvider):
                     "input_schema": _normalize_schema(raw_schema),
                 })
 
+        # Prompt-Caching (Code-Review 2026-10-18): bisher KEIN cache_control –
+        # Werkzeug-Schemata (~85) und System-Prompt gingen bei JEDEM Schritt
+        # eines Laufs voll bezahlt hinaus. Drei Haltepunkte in Cache-Reihenfolge
+        # tools -> system -> messages: das letzte Werkzeug, der System-Prompt
+        # (innerhalb eines Laufs gleich – der Zeithinweis wird je Lauf gebaut)
+        # und der juengste Block des Verlaufs (die Folgeschritte lesen den
+        # bisherigen Verlauf dann aus dem Cache).
+        _cache = {"type": "ephemeral"}
+        if anthropic_tools:
+            anthropic_tools[-1] = {**anthropic_tools[-1], "cache_control": _cache}
+        system_bloecke = ([{"type": "text", "text": system_prompt, "cache_control": _cache}]
+                          if system_prompt else system_prompt)
+        if messages:
+            _letzte = messages[-1]
+            if isinstance(_letzte.get("content"), str) and _letzte["content"]:
+                _letzte["content"] = [{"type": "text", "text": _letzte["content"], "cache_control": _cache}]
+            elif isinstance(_letzte.get("content"), list) and _letzte["content"]:
+                _letzte["content"][-1] = {**_letzte["content"][-1], "cache_control": _cache}
+
         _effort = _resolve_effort(reasoning_effort)
         _temp = _resolve_temperature(temperature)
 
         def _build_kwargs(with_reasoning: bool) -> dict:
             kw: dict = {
                 "model": model,
-                "max_tokens": 8096,
-                "system": system_prompt,
+                # Aus der Einstellung (vorher fest 8096, ein Tippfehler fuer 8192),
+                # gedeckelt: ohne Streaming lehnt das SDK sehr grosse Werte ab.
+                "max_tokens": min(_llm_max_tokens(), _ANTHROPIC_MAX_TOKENS_OHNE_STREAM),
+                "system": system_bloecke,
                 "messages": messages,
             }
             if anthropic_tools:
@@ -1817,6 +1860,11 @@ class AnthropicProvider(LLMProvider):
                 parts.append(LLMPart(text=block.text))
             elif block.type == "tool_use":
                 parts.append(LLMPart(function_call=MockFC(block.name, block.input)))
+        if getattr(response, "stop_reason", None) == "max_tokens":
+            # Gekappt – vorher still. Der Hinweis ist dieselbe Konstante, die
+            # der Agent fuer unvollstaendige Antworten auswertet.
+            print(f"[LLM] Anthropic {model}: Antwort bei max_tokens abgeschnitten", flush=True)
+            parts.append(LLMPart(text="\n\n" + HINWEIS_UNVOLLSTAENDIG))
 
         usage = None
         try:
@@ -1824,6 +1872,8 @@ class AnthropicProvider(LLMProvider):
             usage = {
                 "input_tokens": getattr(u, "input_tokens", 0) or 0,
                 "output_tokens": getattr(u, "output_tokens", 0) or 0,
+                "cache_read_input_tokens": getattr(u, "cache_read_input_tokens", 0) or 0,
+                "cache_creation_input_tokens": getattr(u, "cache_creation_input_tokens", 0) or 0,
             }
         except Exception:
             pass

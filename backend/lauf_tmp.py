@@ -1026,7 +1026,7 @@ def such_wurzeln() -> list:
 
 # ── Der bwrap-Aufruf ────────────────────────────────────────────────────────
 
-def binds_pruefen(rohe) -> list:
+def binds_pruefen(rohe, kennung: str = "") -> list:
     """Validiert die ro-Bindungen (ROOT-Seite, vor dem Ausfuehren).
 
     Die Liste kommt aus dem Backend, also aus demselben Vertrauensbereich – die
@@ -1034,8 +1034,18 @@ def binds_pruefen(rohe) -> list:
     ein Pfad aus einem Werkzeug-Argument stammen KOENNTE. Verlangt wird: unter
     ``/tmp``, vorhanden, kein Symlink-Umweg nach draussen und nicht fuer Fremde
     beschreibbar (sonst koennte ein zweiter Lauf die Quelle austauschen).
+
+    Code-Review 2026-10-18: anders als ``rw_binds_pruefen`` schloss diese
+    Pruefung die Verwaltungswurzeln NICHT aus. Eine lesende Bindung von
+    ANH_ROOT oder ARBEIT_ROOT haette die Arbeitskopien und -verzeichnisse
+    ALLER Domain-Benutzer in einen Lauf gebracht (sie gehoeren alle demselben
+    Sandbox-Konto – die Trennung haengt allein am Namespace). Jetzt: die
+    Wurzeln selbst und alles unter ARBEIT_ROOT nie; unter ANH_ROOT nur das
+    Verzeichnis der uebergebenen ``kennung`` (des Laufs).
     """
     ok = []
+    anh, arb = str(ANH_ROOT), str(ARBEIT_ROOT)
+    eigen = (anh + "/" + kennung) if _KENNUNG_RE.fullmatch(kennung or "") else None
     for eintrag in (rohe or []):
         try:
             p = Path(str(eintrag))
@@ -1043,6 +1053,11 @@ def binds_pruefen(rohe) -> list:
                 continue
             rp = p.resolve()
             if not str(rp).startswith("/tmp/") or not rp.exists():
+                continue
+            s = str(rp)
+            if s in (anh, arb, "/tmp") or s.startswith(arb + "/"):
+                continue
+            if s.startswith(anh + "/") and not (eigen and (s == eigen or s.startswith(eigen + "/"))):
                 continue
             st = os.stat(rp)
             if st.st_mode & 0o002:          # world-writable Quelle: nein

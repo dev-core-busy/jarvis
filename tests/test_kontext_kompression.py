@@ -85,7 +85,7 @@ def _methode(name):
 # sonst fehlt sie in der Attrappe und der AttributeError sieht wie ein Codefehler
 # aus. (Register; im Nachbarwaechter test_bilddaten_bergen.py schon einmal
 # passiert.)
-_METHODEN = ("_verworfene_anhaenge", "_compress_history")
+_METHODEN = ("_verworfene_anhaenge", "_compress_history", "_verlauf_zeichen", "_dialog_auswahl")
 for _m in _METHODEN:
     if _methode(_m) is None:
         abbruch(f"Methode {_m} fehlt in JarvisAgent – Fix nicht vorhanden?")
@@ -93,7 +93,7 @@ for _m in _METHODEN:
 # Klassen-Attribute NICHT einzeln aufzaehlen: eine gepflegte Liste laeuft beim
 # naechsten neuen Wert auseinander, und der Fehler sieht dann wie ein Codefehler
 # aus (AttributeError tief in der Methode).
-_ATTR_NAMEN = ("_ANHANG_MARKE_RE", "_NOTIZ_KOPF", "_NOTIZ_TRENNER")
+_ATTR_NAMEN = ("_ANHANG_MARKE_RE", "_NOTIZ_KOPF", "_NOTIZ_TRENNER", "_COMPRESS_ZEICHEN")
 _ATTRIBUTE = [_segment(n) for n in AGENT_KLS.body
               if isinstance(n, ast.Assign)
               and any(getattr(z, "id", "") in _ATTR_NAMEN for z in n.targets)]
@@ -354,6 +354,28 @@ _i_marke = _rt_q.find("[Anhang:")
 _i_bytes = _rt_q.find("from_bytes(data=_att_bytes")
 pruef(_i_marke != -1 and _i_bytes != -1 and _i_marke < _i_bytes,
       "die Marke wird NACH dem Datenteil angehaengt – dann passt die Zuordnung nicht")
+
+# ═══ Code-Review 2026-10-18: Auswahl und Umfangsschwelle ═════════════════════
+_a = agent()
+_zeilen = [f"Z{i}" for i in range(200)]
+_ausw = _a._dialog_auswahl(_zeilen)
+pruef("Z0" in _ausw and "Z9" in _ausw, "Zusammenfassung behaelt den ANFANG (Auftrag)")
+pruef("Z199" in _ausw and "Z150" in _ausw, "Zusammenfassung behaelt den JUENGSTEN Teil (vorher fiel er weg)")
+pruef(any("140 Zeilen ausgelassen" in z for z in _ausw), "die Luecke ist beziffert")
+pruef(_a._dialog_auswahl(["a", "b"]) == ["a", "b"], "kurze Listen bleiben vollstaendig")
+_gross = [Content("user", [Part(text="x" * 70_000)]), Content("model", [Part(text="y" * 70_000)]),
+          Content("user", [Part(text="a")]), Content("model", [Part(text="b")]),
+          Content("user", [Part(text="c")]), Content("model", [Part(text="d")])]
+_a2 = agent()
+_erg = asyncio.run(_a2._compress_history(_gross, "s"))
+pruef(len(_erg) < len(_gross) and _a2.provider.gesehen is not None,
+      "wenige, aber RIESIGE Eintraege werden verdichtet (Umfangsschwelle)")
+_lang_frage = Content("user", [Part(text="FRAGE " + "w" * 1500 + " ENDE")])
+_a3 = agent()
+asyncio.run(_a3._compress_history([_lang_frage] + fuellung(10), "s"))
+_txt = " ".join(getattr(p, "text", "") or "" for c in (_a3.provider.gesehen or {}).get("contents", [])
+                for p in getattr(c, "parts", []))
+pruef("ENDE" in _txt, "eine lange BENUTZER-Frage wird nicht auf 300 Zeichen gekappt")
 
 # ═══════════════════════════════════════════════════════════════════════════
 print(f"\n{'=' * 60}\n{_ok} bestanden, {_fail} fehlgeschlagen")

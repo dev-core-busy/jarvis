@@ -175,6 +175,38 @@ _LOCAL_PRIVILEGED_USERS = {"jarvis", "root", ""}
 # leerer Name "keine Einschraenkung" bedeuten wuerde.
 _ANON_ACTOR = "__unprivilegiert__"
 
+
+def besitzer_norm(name: str) -> str:
+    """Besitzer eines Sub-Agenten als blosser Kontoname (wie main._norm_login).
+
+    Eigene Fassung statt Import: agent.py darf main.py nicht importieren
+    (Kreisimport beim Start)."""
+    return (name or "").split("@")[0].split("\\")[-1].strip().lower()
+
+
+# Laufende Hintergrund-Aufgaben: asyncio haelt nur eine SCHWACHE Referenz auf
+# einen Task – ohne diese Menge kann der Garbage Collector ihn mitten im Lauf
+# einsammeln, und eine Ausnahme darin geht still verloren (Code-Review 2026-10-18).
+_HINTERGRUND: set = set()
+
+
+def _hintergrund(coro, was: str = "Hintergrund") -> "asyncio.Task":
+    """``asyncio.create_task`` mit gehaltener Referenz und protokollierter Ausnahme."""
+    task = asyncio.create_task(coro)
+    _HINTERGRUND.add(task)
+
+    def _fertig(t):
+        _HINTERGRUND.discard(t)
+        if not t.cancelled() and t.exception() is not None:
+            print(f"[AGENT] {was}-Aufgabe mit Fehler beendet: {t.exception()!r}", flush=True)
+    task.add_done_callback(_fertig)
+    return task
+
+
+# Hoechstzahl ruhender freier Sub-Agenten im Manager. Sie bleiben fuer
+# Folgeauftraege ansprechbar; ohne Deckel wuchs die Liste bis zum Neustart.
+SUB_AGENTEN_MAX_RUHEND = 20
+
 # Sentinel fuer run_task_headless(actor=...) – analog _KB_GROUPS_UNSET/_EFFORT_UNSET:
 # nicht uebergeben = fail-closed unprivilegiert; explizit None = bestehenden
 # Kontext beibehalten (nur fuer Laeufe, die schon in einem actor_scope stehen).
@@ -188,6 +220,91 @@ _ACTOR_UNSET = object()
 # asyncio.Task hat seine eigene Kopie, Sub-Agent-Tasks erben sie.
 # Wert: (username, privileged) oder None = keine Bindung.
 _actor_cv: contextvars.ContextVar = contextvars.ContextVar("jarvis_actor", default=None)
+# Werkzeug-Statistik DIESES Laufs (Auto-Learning). Code-Review 2026-10-18: sie
+# lag als Liste am geteilten Hauptagenten, wurde nie geleert und mischte alle
+# Benutzer seit Dienststart – nach dem ersten Fehlschlag loeste damit JEDER
+# mehrstufige Lauf einen zusaetzlichen vollen LLM-Aufruf aus.
+_lauf_stats_cv: contextvars.ContextVar = contextvars.ContextVar("jarvis_lauf_stats", default=None)
+
+
+# ── Lauf-Kontext (Code-Review 2026-10-18) ───────────────────────────────────
+# Rechte-Flags, Benutzer, Wissensgruppen, LLM-Profil & Co. lagen als Attribute
+# am GETEILTEN Hauptagenten. main.py setzte sie vor ``create_task(run_task)`` –
+# startete ein zweiter Benutzer dazwischen, lief der erste mit dessen Werten:
+# SAP-Freigabe, Gedaechtnis-Namensraum, LLM-Profil samt API-Schluessel.
+# Jetzt liegen diese Felder WAEHREND eines Laufs in einer ContextVar (je
+# asyncio-Task kopiert, je Agent-Instanz ein eigenes Woerterbuch); ausserhalb
+# eines Laufs gilt wie bisher der Wert an der Instanz.
+_lauf_kontext_cv: contextvars.ContextVar = contextvars.ContextVar("jarvis_lauf_kontext", default=None)
+
+
+class _LaufWert:
+    """Attribut, das waehrend eines Laufs dem Lauf gehoert, sonst der Instanz."""
+
+    def __set_name__(self, owner, name):
+        self.name = name
+        self.ablage = "_lw" + name
+
+    def __get__(self, obj, typ=None):
+        if obj is None:
+            return self
+        d = _lauf_kontext_cv.get()
+        if d is not None:
+            eigen = d.get(id(obj))
+            if eigen is not None and self.name in eigen:
+                return eigen[self.name]
+        try:
+            return obj.__dict__[self.ablage]
+        except KeyError:
+            raise AttributeError(self.name) from None
+
+    def __set__(self, obj, wert):
+        d = _lauf_kontext_cv.get()
+        if d is not None and id(obj) in d:
+            d[id(obj)][self.name] = wert
+        else:
+            obj.__dict__[self.ablage] = wert
+
+    def __delete__(self, obj):
+        d = _lauf_kontext_cv.get()
+        if d is not None and id(obj) in d:
+            d[id(obj)].pop(self.name, None)
+        else:
+            obj.__dict__.pop(self.ablage, None)
+
+
+def _lauf_kontext_oeffnen(agent, werte: dict | None = None):
+    """Eigenes Woerterbuch fuer ``agent`` in diesem Lauf; Rueckgabe: Token fuer reset."""
+    alt = _lauf_kontext_cv.get() or {}
+    return _lauf_kontext_cv.set({**alt, id(agent): dict(werte or {})})
+
+
+def _mit_lauf_kontext(fn):
+    """Dekorator: ``run_task`` laeuft in einem EIGENEN Lauf-Kontext (siehe _LaufWert).
+
+    Nimmt zusaetzlich ``rechte`` an: Felder, die ab Laufbeginn gelten
+    (``{"_current_user_internet": …, "_current_user_sap": …,
+    "_current_user_vemas": …}``). main.py uebergibt sie hier, statt sie vor
+    ``create_task`` an den geteilten Agenten zu schreiben – sonst gewaenne, wer
+    zuletzt gesetzt hat (Code-Review 2026-10-18). Ein Dekorator statt einer
+    Huelle mit anderem Namen: die Waechter messen den Lauf am Rumpf von
+    ``run_task``."""
+    import functools
+
+    @functools.wraps(fn)
+    async def huelle(self, *args, rechte: dict | None = None, **kwargs):
+        token = _lauf_kontext_oeffnen(self, rechte)
+        try:
+            return await fn(self, *args, **kwargs)
+        finally:
+            _lauf_kontext_cv.reset(token)
+    return huelle
+
+
+def _lauf_stats() -> list:
+    """Statistik des laufenden Laufs; ausserhalb eines Laufs eine Wegwerf-Liste."""
+    s = _lauf_stats_cv.get()
+    return s if s is not None else []
 # Lauf-lokaler Zustand des Werkzeug-Zuschnitts. ⚠ DIESELBE BEGRUENDUNG WIE BEI
 # `_actor_cv`: ein Cron-Lauf und ein Chat-Auftrag koennen GLEICHZEITIG auf
 # demselben Hauptagenten liegen. Als Objekt-Attribut wuerde der eine dem
@@ -349,6 +466,12 @@ _BLOCKED_TOOLS_FOR_LDAP = {
     # Shell-Sandbox vollstaendig umgangen; der BSI-Bericht nennt den Weg
     # ausdruecklich. Betreiberentscheid: fuer Domain-Benutzer gesperrt.
     "desktop_control", "browser_control", "browser_cdp",
+    # Code-Review 2026-10-18: der LESENDE Blick auf denselben Server-Desktop
+    # (scrot) und die Server-Zwischenablage (xclip) war offen – arbeitet ein
+    # Admin per noVNC, sah ein Domain-Benutzer dessen Bildschirm bzw. ein dort
+    # kopiertes Kennwort. Beide Werkzeuge greifen NUR auf den Server zu, nie
+    # auf den Client des Benutzers (tools/screenshot.py, tools/clipboard.py).
+    "screenshot", "wait_for_screen_change", "read_clipboard",
     # HINWEIS: 'filesystem' wird NICHT pauschal geblockt, sondern per
     # sandbox.authorize_fs pfadbezogen eingeschraenkt (Schreiben nur /tmp+documents,
     # Lesen nur Wissens-/Arbeitsverzeichnisse). Frueher stand hier faelschlich
@@ -1127,6 +1250,24 @@ def geheilter_sitzungskontext(username: str, session_id: str) -> list:
 class JarvisAgent:
     """Der Jarvis Agent – orchestriert LLM und Tools."""
 
+    # Lauf-Felder (siehe _LaufWert): waehrend eines Laufs je Lauf, sonst je Instanz.
+    _current_username = _LaufWert()
+    _current_actor_privileged = _LaufWert()
+    _current_user_internet = _LaufWert()
+    _current_user_sap = _LaufWert()
+    _current_user_vemas = _LaufWert()
+    _current_kb_groups = _LaufWert()
+    _current_reasoning_effort = _LaufWert()
+    _current_task = _LaufWert()
+    _current_client_ip = _LaufWert()
+    _current_client_type = _LaufWert()
+    _active_profile = _LaufWert()
+    provider = _LaufWert()
+    _delegations_used = _LaufWert()
+    _fallback_used = _LaufWert()
+    _buendel_voll = _LaufWert()
+    _buendel_prompt_neu = _LaufWert()
+
     SYSTEM_PROMPT = """Du bist Jarvis, ein autonomer KI-Agent auf einem Linux-System (Debian 13, X11).
 Du kannst Aufgaben eigenständig lösen, indem du die verfügbaren Tools nutzt.
 
@@ -1277,12 +1418,13 @@ KRITISCH – Autonomie-Regeln:
         self._stop_event = asyncio.Event()
         # Aktive Stop-Scopes des GETEILTEN Hauptagenten je Benutzer (run-key -> Scope).
         # Ermoeglicht benutzerbezogenen Abbruch, ohne fremde Anfragen zu stoeren.
-        self._stop_scopes: dict[str, _StopScope] = {}
+        # Je Benutzer eine MENGE von Scopes (Code-Review 2026-10-18): mit einem
+        # einzelnen Eintrag ueberschrieb der zweite Tab desselben Benutzers den
+        # ersten – ein Stopp traf dann nur den zuletzt gestarteten Lauf.
+        self._stop_scopes: dict[str, set] = {}
         self._speed = 1.0
         self._current_task: asyncio.Task | None = None
         self._created_at = time.time()
-        self._tool_stats: list[dict] = []  # Tool-Ausfuehrungslog fuer Auto-Learning
-        self._tool_cache: dict[str, str] = {}  # Tool-Ergebnis-Cache (lebt nur pro Task)
 
         # Kontext-Tracking (live während run_task; abfragbar via API)
         try:
@@ -2254,6 +2396,7 @@ KRITISCH – Autonomie-Regeln:
             )
         return declarations
 
+    @_mit_lauf_kontext
     async def run_task(self, task_text: str, ws: WebSocket, client_type: str = "browser", client_ip: str = "unknown", username: str = "", lang: str = "de", attachments: list = None, kb_groups=_KB_GROUPS_UNSET, session_id: str = "", is_final_attempt: bool = True, reasoning_effort=_EFFORT_UNSET, bestaetigung: bool | None = None):
         """Führt eine Aufgabe aus – der Agent-Loop.
 
@@ -2304,7 +2447,7 @@ KRITISCH – Autonomie-Regeln:
         # parallel laufenden Anfragen anderer Nutzer auf dem geteilten Hauptagenten.
         stop_scope = _StopScope()
         _rkey = self._run_key(self._current_username)
-        self._stop_scopes[_rkey] = stop_scope
+        self._stop_scopes.setdefault(_rkey, set()).add(stop_scope)
         _scope_token = _run_stop_scope.set(stop_scope)
         # BSI H9: Weg zur Bestaetigung je Lauf (ContextVar – der Hauptagent ist
         # geteilt). Ohne Angabe bleibt der Kanal des aufrufenden Laufs stehen.
@@ -2324,6 +2467,7 @@ KRITISCH – Autonomie-Regeln:
                               else ((not self._current_username)
                                     or self._current_username in _LOCAL_PRIVILEGED_USERS))
         _actor_token = _actor_cv.set((self._current_username, _lauf_privilegiert))
+        _stats_token = _lauf_stats_cv.set([])
         # Privates /tmp dieses Laufs (backend/lauf_tmp.py): unprivilegierte
         # Laeufe bekommen ein eigenes Verzeichnis, das im Namespace auf /tmp
         # gemountet wird – fremde Arbeitskopien sind darin nicht vorhanden.
@@ -2332,7 +2476,6 @@ KRITISCH – Autonomie-Regeln:
         _lauf_stack = contextlib.ExitStack()
         _lauf_stack.enter_context(_lauf_tmp.lauf_scope(
             self._current_username, _lauf_privilegiert))
-        self._tool_cache.clear()  # Cache für diesen Task-Run leeren
         # Delegations-Deckel gilt PRO AUFTRAG. Ohne diesen Reset waere der
         # geteilte Hauptagent nach acht Delegationen dauerhaft gesperrt.
         self._delegations_used = 0
@@ -2937,13 +3080,15 @@ KRITISCH – Autonomie-Regeln:
                     # Tool-Statistik tracken
                     is_error = any(marker in result_str[:200].lower() for marker in
                                    ['fehler', 'error', '❌', 'traceback', 'exception', 'not found', 'failed'])
-                    self._tool_stats.append({
+                    _lauf_stats().append({
                         "tool": tool_name, "step": steps,
                         "success": not is_error, "args_preview": json.dumps(tool_args, ensure_ascii=False)[:100]
                     })
 
-                    # Sub-Agent Spawn erkennen (spawn_agent, coding_agent, …) – nur Hauptagent
-                    if (not self.is_sub_agent) and "_spawn_agent" in result_str:
+                    # Sub-Agent Spawn erkennen (spawn_agent, coding_agent, …) – nur Hauptagent,
+                    # und NUR beim Werkzeug, das den Auftrag erzeugt (Prompt-Injection).
+                    if ((not self.is_sub_agent) and self._liefert_auftrag(tool_name)
+                            and "_spawn_agent" in result_str):
                         try:
                             spawn_data = json.loads(result_str)
                             _log(f"spawn_data: label={spawn_data.get('label')} task_len={len(spawn_data.get('task',''))} task_start={spawn_data.get('task','')[:120]}")
@@ -3205,14 +3350,15 @@ KRITISCH – Autonomie-Regeln:
                 if _conv_messages and steps >= 1:
                     try:
                         from backend import learning as _learning
-                        asyncio.create_task(
+                        _hintergrund(
                             _learning.learn_from_conversation(
                                 task=task_text,
                                 conv_messages=_conv_messages,
                                 provider=self.provider,
                                 model=self.current_model,
                                 benutzer=getattr(self, "_current_username", "") or "",
-                            )
+                            ),
+                            "Lernen"
                         )
                         _log("Background-Learning gestartet")
                     except Exception as learn_err:
@@ -3224,9 +3370,10 @@ KRITISCH – Autonomie-Regeln:
             # ausserhalb des Zuschnitts dieses Laufs liegen (Rolle, E-Mail-Regel).
             # Ohne das Werkzeug ist der ganze Zweig sinnlos: er kostet einen
             # weiteren LLM-Aufruf und endet mit "Tool nicht gefunden".
-            if steps >= 2 and self._tool_stats and self._werkzeug_nutzbar("memory_manage"):
-                failed = [s for s in self._tool_stats if not s["success"]]
-                succeeded = [s for s in self._tool_stats if s["success"]]
+            _st = _lauf_stats()
+            if steps >= 2 and _st and self._werkzeug_nutzbar("memory_manage"):
+                failed = [s for s in _st if not s["success"]]
+                succeeded = [s for s in _st if s["success"]]
                 if failed and succeeded:
                     # Es gab Fehlversuche gefolgt von Erfolg → lernenswert
                     _log(f"Auto-Learning: {len(failed)} Fehlversuche, {len(succeeded)} Erfolge bei {steps} Steps")
@@ -3239,15 +3386,17 @@ KRITISCH – Autonomie-Regeln:
                     )
                     # Letzten LLM-Aufruf mit Learning-Hint
                     try:
-                        chat_history.append(
-                            types.Content(role="user", parts=[types.Part.from_text(text=learning_hint)])
-                        )
+                        # Code-Review 2026-10-18: der Hinweis ging per append in den
+                        # PERSISTENTEN Verlauf (zwei User-Nachrichten hintereinander,
+                        # der Hinweis blieb im Kontext der Sitzung), und die Aufgabe
+                        # stand doppelt drin (chat_history traegt sie schon). Jetzt
+                        # eine Kopie, nur fuer diesen Aufruf.
                         learn_response = await self.provider.generate_response(
                             model=self.current_model,
                             system_prompt=system_prompt,
                             contents=[
-                                types.Content(role="user", parts=[types.Part.from_text(text=task_text)]),
                                 *chat_history,
+                                types.Content(role="user", parts=[types.Part.from_text(text=learning_hint)]),
                             ],
                             tools=self._llm_tools
                         )
@@ -3316,9 +3465,12 @@ KRITISCH – Autonomie-Regeln:
             if agent_span:
                 tracer.end_span(agent_span)
             self.state = AgentState.IDLE
-            # Stop-Scope dieses Laufs freigeben (nur wenn noch unserer)
-            if self._stop_scopes.get(_rkey) is stop_scope:
-                self._stop_scopes.pop(_rkey, None)
+            # Stop-Scope dieses Laufs freigeben
+            _menge = self._stop_scopes.get(_rkey)
+            if _menge is not None:
+                _menge.discard(stop_scope)
+                if not _menge:
+                    self._stop_scopes.pop(_rkey, None)
             try:
                 _run_stop_scope.reset(_scope_token)
             except Exception:
@@ -3336,6 +3488,10 @@ KRITISCH – Autonomie-Regeln:
             try:
                 _actor_cv.reset(_actor_token)
             except Exception:
+                pass
+            try:
+                _lauf_stats_cv.reset(_stats_token)
+            except Exception:  # noqa: BLE001
                 pass
             # Lauf-Verzeichnis abraeumen (nur der aeussere Lauf raeumt wirklich).
             # NACH _deliver_docs: die Auslieferung liest daraus.
@@ -3403,18 +3559,29 @@ KRITISCH – Autonomie-Regeln:
         """
         if actor is _ACTOR_UNSET:
             actor = {"user": _ANON_ACTOR, "privileged": False}
-        if actor is not None:
-            with self.actor_scope(
-                    str(actor.get("user") or _ANON_ACTOR),
-                    privileged=bool(actor.get("privileged")),
-                    internet=bool(actor.get("internet", True)),
-                    sap=bool(actor.get("sap", False)),
-                    vemas=bool(actor.get("vemas", False)),
-                    task=task_text):
-                return await self._run_headless(task_text, reasoning_effort)
-        # actor=None: bestehenden Kontext des Agenten bewusst weiterverwenden
-        # (nur fuer Sub-Laeufe, die schon in einem actor_scope stehen).
-        return await self._run_headless(task_text, reasoning_effort)
+        # Eigener Lauf-Kontext auch hier (Cron, Messenger, Notify laufen am
+        # geteilten Hauptagenten). actor=None erbt bewusst: es ist ein Sub-Lauf
+        # INNERHALB eines bestehenden Kontexts.
+        # (Kein Selbstaufruf: der H9-Waechter zaehlt jeden run_task_headless-
+        # Aufruf als Einstieg, der einen Auftrags-Entscheid braucht.)
+        token = (_lauf_kontext_oeffnen(self)
+                 if actor is not None and id(self) not in (_lauf_kontext_cv.get() or {}) else None)
+        try:
+            if actor is not None:
+                with self.actor_scope(
+                        str(actor.get("user") or _ANON_ACTOR),
+                        privileged=bool(actor.get("privileged")),
+                        internet=bool(actor.get("internet", True)),
+                        sap=bool(actor.get("sap", False)),
+                        vemas=bool(actor.get("vemas", False)),
+                        task=task_text):
+                    return await self._run_headless(task_text, reasoning_effort)
+            # actor=None: bestehenden Kontext des Agenten bewusst weiterverwenden
+            # (nur fuer Sub-Laeufe, die schon in einem actor_scope stehen).
+            return await self._run_headless(task_text, reasoning_effort)
+        finally:
+            if token is not None:
+                _lauf_kontext_cv.reset(token)
 
     async def _run_headless(self, task_text: str, reasoning_effort=None) -> str:
         self._current_reasoning_effort = reasoning_effort
@@ -3424,6 +3591,7 @@ KRITISCH – Autonomie-Regeln:
         _lauf_stack = contextlib.ExitStack()
         _lauf_stack.enter_context(_lauf_tmp.lauf_scope(
             self.actor_name(), self._actor_is_privileged()))
+        _lauf_stack.callback(_lauf_stats_cv.reset, _lauf_stats_cv.set([]))
         # Delegations-Deckel pro Auftrag (siehe run_task)
         self._delegations_used = 0
         self._buendel_voll = False
@@ -3433,7 +3601,19 @@ KRITISCH – Autonomie-Regeln:
         self._resolve_profile_for_user()
         self.state = AgentState.RUNNING
         self._stop_flag = False
-        self._stop_event.clear()
+        # Eigener Stop-Scope (Code-Review 2026-10-18): bis dahin setzte JEDER
+        # headless-Start ``_stop_event.clear()`` am geteilten Agenten zurueck –
+        # ein Cron-Start hob damit ein gerade gesendetes stop_all fuer andere
+        # Laeufe wieder auf. Laeuft der Aufruf innerhalb eines Laufs (Rolle,
+        # Delegation), gilt dessen Scope weiter: der Stopp des Auftraggebers
+        # erreicht ihn so.
+        _hl_scope = _run_stop_scope.get()
+        if _hl_scope is None:
+            _hl_scope = _StopScope()
+            _hl_key = f"_headless:{id(_hl_scope)}"
+            self._stop_scopes.setdefault(_hl_key, set()).add(_hl_scope)
+            _lauf_stack.callback(self._stop_scopes.pop, _hl_key, None)
+            _lauf_stack.callback(_run_stop_scope.reset, _run_stop_scope.set(_hl_scope))
         # BSI H8: auch ohne Oberflaeche gehen Werkzeugergebnisse gerahmt ans
         # Modell – Rollen-Agenten, Cron und Telegram lesen genauso Fremdtext.
         _laufkennung = _rahmen.laufkennung()
@@ -3526,7 +3706,7 @@ KRITISCH – Autonomie-Regeln:
 
             steps = 0
             while steps < self._max_steps():
-                if self._stop_flag:
+                if self._stop_flag or _hl_scope.event.is_set():
                     break
 
                 # response ist None, wenn _await_or_stop den Aufruf abgebrochen hat
@@ -3600,7 +3780,7 @@ KRITISCH – Autonomie-Regeln:
                     # Tool-Statistik tracken
                     is_error = any(marker in result_str[:200].lower() for marker in
                                    ['fehler', 'error', '❌', 'traceback', 'exception', 'not found', 'failed'])
-                    self._tool_stats.append({
+                    _lauf_stats().append({
                         "tool": tool_name, "step": steps,
                         "success": not is_error, "args_preview": json.dumps(tool_args, ensure_ascii=False)[:100]
                     })
@@ -3655,7 +3835,7 @@ KRITISCH – Autonomie-Regeln:
             # Max-Steps in headless: finalen No-Tools-Call erzwingen, damit
             # collected_texts mindestens eine Antwort enthält. Mehrstufiger
             # Fallback wie in run_task: erst mit History+Instruktion, dann Reset.
-            if steps >= self._max_steps() and not self._stop_flag:
+            if steps >= self._max_steps() and not (self._stop_flag or _hl_scope.event.is_set()):
                 async def _try_final_h(label: str, contents_, system_):
                     try:
                         _resp = await self.provider.generate_response(
@@ -3718,10 +3898,11 @@ KRITISCH – Autonomie-Regeln:
             # Ohne Oberflaeche ist das Gedaechtnis nur lesbar (tools/memory.py,
             # schreiben_gesperrt) – der Zweig waere dort ein LLM-Aufruf, dessen
             # Ergebnis das Werkzeug abweist.
-            if (steps >= 2 and self._tool_stats and self._werkzeug_nutzbar("memory_manage")
+            _st = _lauf_stats()
+            if (steps >= 2 and _st and self._werkzeug_nutzbar("memory_manage")
                     and not _memory_schreiben_gesperrt()):
-                failed = [s for s in self._tool_stats if not s["success"]]
-                succeeded = [s for s in self._tool_stats if s["success"]]
+                failed = [s for s in _st if not s["success"]]
+                succeeded = [s for s in _st if s["success"]]
                 if failed and succeeded:
                     _log(f"Auto-Learning (headless): {len(failed)} Fehlversuche, {len(succeeded)} Erfolge")
                     learning_hint = (
@@ -3730,14 +3911,12 @@ KRITISCH – Autonomie-Regeln:
                         f"mit memory_manage(action='save', key='strategie_...', value='...')."
                     )
                     try:
-                        chat_history.append(
-                            types.Content(role="user", parts=[types.Part.from_text(text=learning_hint)])
-                        )
+                        # Kopie statt persistentem Verlauf (siehe run_task)
                         learn_response = await self.provider.generate_response(
                             model=self.current_model, system_prompt=system_prompt,
                             contents=[
-                                types.Content(role="user", parts=[types.Part.from_text(text=task_text)]),
                                 *chat_history,
+                                types.Content(role="user", parts=[types.Part.from_text(text=learning_hint)]),
                             ],
                             tools=self._llm_tools
                         )
@@ -3808,8 +3987,14 @@ KRITISCH – Autonomie-Regeln:
             print(f"[AGENT {self.agent_id}] Chart-Marker nicht entfernt: {e}", flush=True)
         return _out
 
-    # Tools, deren Ergebnisse innerhalb eines Task-Runs gecacht werden können
-    _CACHEABLE_TOOLS = {"read_file", "screenshot", "read_clipboard"}
+    # KEIN Werkzeug-Cache mehr (Code-Review 2026-10-18): gecacht waren
+    # "screenshot" und "read_clipboard" – also ZUSTANDSABFRAGEN. Der Prompt
+    # empfiehlt selbst "screenshot -> Aktion -> screenshot zur Bestaetigung";
+    # der zweite Aufruf lieferte das alte Bild, das Modell "sah", dass der
+    # Klick nichts bewirkt hatte, und wiederholte ihn. Zudem griff die
+    # Rueckgabe aus dem Cache VOR allen Rechte-, LDAP- und H9-Pruefungen, am
+    # geteilten Hauptagenten auch ueber Benutzergrenzen. "read_file" gab es
+    # als Werkzeug gar nicht.
 
     def _broker_context(self) -> str:
         """Kurzer, rein informativer Ausloeser-Kontext fuers Broker-Audit:
@@ -3826,12 +4011,6 @@ KRITISCH – Autonomie-Regeln:
         import json as _json
         import time as _time
         from backend.telemetry import tracer
-
-        # Cache-Check für cacheable Tools
-        if name in self._CACHEABLE_TOOLS:
-            cache_key = f"{name}:{_json.dumps(args, sort_keys=True)}"
-            if cache_key in self._tool_cache:
-                return self._tool_cache[cache_key]
 
         tool = self.tools_map.get(name)
         if not tool:
@@ -4348,10 +4527,6 @@ KRITISCH – Autonomie-Regeln:
                             pass
             _dur_ms = int((_time.monotonic() - _t0) * 1000)
             tracer.end_span(span, status="ok")
-            # Ergebnis cachen wenn Tool cacheable ist
-            if name in self._CACHEABLE_TOOLS:
-                cache_key = f"{name}:{_json.dumps(args, sort_keys=True)}"
-                self._tool_cache[cache_key] = result
             # Audit-Log
             try:
                 from backend.audit_log import log_tool as _audit
@@ -4383,16 +4558,19 @@ KRITISCH – Autonomie-Regeln:
                 print(f"[AGENT] FEHLER: agent_manager ist None!", flush=True)
                 return f"Sub-Agent '{label}' konnte nicht gestartet werden (kein AgentManager)"
 
-            sub = agent_manager.spawn_sub_agent(label, task)
-            # SICHERHEIT: initiierenden Benutzer + Internet-Freigabe an den Sub-Agent
-            # vererben, damit die Rechte-Confinement (Domain-Nutzer) auch dort greift.
-            # Sonst liefe der Sub-Agent mit leerem Username = privilegiert (Escalation).
-            sub._current_username = getattr(self, '_current_username', '')
-            sub._current_actor_privileged = self._actor_is_privileged()
-            sub._current_user_internet = getattr(self, '_current_user_internet', True)
-            sub._current_user_sap = getattr(self, '_current_user_sap', True)
-            sub._current_user_vemas = getattr(self, '_current_user_vemas', True)
-            asyncio.create_task(agent_manager.run_sub_agent(sub, task, ws))
+            # SICHERHEIT: Auftraggeber DIESES Laufs (ContextVar, nicht das Attribut
+            # des geteilten Hauptagenten – das kann ein paralleler Lauf eines
+            # anderen Benutzers gerade ueberschrieben haben) samt Rechten vererben.
+            _bound = _actor_cv.get()
+            _name = _bound[0] if _bound is not None else getattr(self, '_current_username', '')
+            sub = agent_manager.spawn_sub_agent(
+                label, task, besitzer=_name or "",
+                privilegiert=self._actor_is_privileged(),
+                internet=getattr(self, '_current_user_internet', False),
+                sap=getattr(self, '_current_user_sap', False),
+                vemas=getattr(self, '_current_user_vemas', False),
+                kb_groups=getattr(self, '_current_kb_groups', None))
+            _hintergrund(agent_manager.run_sub_agent(sub, task, ws), "Sub-Agent")
             return f"Sub-Agent '{label}' gestartet (ID: {sub.agent_id})"
         except Exception as e:
             return f"Fehler beim Starten von Sub-Agent '{label}': {e}"
@@ -4565,6 +4743,15 @@ KRITISCH – Autonomie-Regeln:
             await self._send_status(ws, f"✅ {label} fertig")
         return f"Ergebnis der Rolle '{rolle['id']}':\n{ergebnis}"
 
+    def _liefert_auftrag(self, tool_name: str) -> bool:
+        """Darf das Ergebnis dieses Werkzeugs einen Agenten-Auftrag tragen?
+
+        Fail-closed: unbekanntes Werkzeug = nein. Gemessen wird ein Merkmal der
+        Werkzeug-KLASSE (``liefert_agenten_auftrag``), nicht der Text – den
+        kann jede gelesene Datei enthalten."""
+        werkzeug = getattr(self, "tools_map", {}).get(tool_name or "")
+        return bool(getattr(werkzeug, "liefert_agenten_auftrag", False))
+
     async def _maybe_delegate(self, result_str: str, ws=None, tool_name: str = "",
                               tool_args: dict | None = None) -> str:
         """Loest den Delegations-Marker auf – und faengt gescheiterte Werkzeuge ab,
@@ -4576,7 +4763,7 @@ KRITISCH – Autonomie-Regeln:
         """
         if getattr(self, "_role_id", ""):
             return result_str
-        if "_delegate" in result_str:
+        if self._liefert_auftrag(tool_name) and "_delegate" in result_str:
             try:
                 daten = json.loads(result_str)
                 if isinstance(daten, dict) and daten.get("_delegate"):
@@ -4840,10 +5027,43 @@ KRITISCH – Autonomie-Regeln:
             print(f"[AGENT] Verlaufs-Reparatur uebersprungen: {e}", flush=True)
             return 0
 
+    # Umfangsschwelle der Verdichtung (Zeichen im Verlauf, grob ~30k Token)
+    _COMPRESS_ZEICHEN = 120_000
+
+    def _verlauf_zeichen(self, chat_history: list) -> int:
+        """Grobe Groesse des Verlaufs in Zeichen (Text + Werkzeug-Ergebnisse)."""
+        n = 0
+        for entry in chat_history or []:
+            for p in getattr(entry, "parts", None) or []:
+                t = getattr(p, "text", None)
+                if t:
+                    n += len(t)
+                fr = getattr(p, "function_response", None)
+                if fr is not None:
+                    n += len(str(getattr(fr, "response", "")))
+        return n
+
+    def _dialog_auswahl(self, zeilen: list, anfang: int = 10, ende: int = 50) -> list:
+        """Welche Zeilen in die Zusammenfassung gehen: Anfang UND juengster Teil.
+
+        Code-Review 2026-10-18: bisher ``zeilen[:60]`` – die AELTESTEN 60. Bei
+        langen Laeufen fiel damit genau der Abschnitt direkt vor den behaltenen
+        vier Eintraegen weg. Jetzt die ersten ``anfang`` (Auftrag, Ausgangslage)
+        und die letzten ``ende``, dazwischen eine bezifferte Luecke."""
+        if len(zeilen) <= anfang + ende:
+            return list(zeilen)
+        weg = len(zeilen) - anfang - ende
+        return list(zeilen[:anfang]) + [f"[… {weg} Zeilen ausgelassen …]"] + list(zeilen[-ende:])
+
     async def _compress_history(self, chat_history: list, system_prompt: str) -> list:
         """Komprimiert lange Chat-Historien: Zusammenfassung der älteren Nachrichten."""
-        # Nur komprimieren wenn über dem Schwellwert
-        if len(chat_history) <= self._compress_threshold:
+        # Nur komprimieren wenn über dem Schwellwert – nach ANZAHL oder nach
+        # UMFANG (Code-Review 2026-10-18: ein Eintrag mit 50.000 Zeichen
+        # Anhangstext loeste bei 30 Eintraegen als Schwelle nichts aus).
+        if (len(chat_history) <= self._compress_threshold
+                and self._verlauf_zeichen(chat_history) <= self._COMPRESS_ZEICHEN):
+            return chat_history
+        if len(chat_history) <= 4:
             return chat_history
 
         # Letzte 4 Nachrichten behalten
@@ -4898,7 +5118,10 @@ KRITISCH – Autonomie-Regeln:
                     fc = getattr(p, "function_call", None)
                     fr = getattr(p, "function_response", None)
                     if t:
-                        dialog_text.append(f"[{role}] {t[:300]}")
+                        # Auftraege des BENUTZERS nicht auf 300 Zeichen kappen –
+                        # sonst blieb von der eigentlichen Frage eines langen
+                        # Laufs nur der Anfang (Code-Review 2026-10-18).
+                        dialog_text.append(f"[{role}] {t[:2000] if role == 'user' else t[:300]}")
                     elif fc is not None:
                         try:
                             args_preview = json.dumps(dict(fc.args), ensure_ascii=False)[:200] if fc.args else ""
@@ -4921,7 +5144,7 @@ KRITISCH – Autonomie-Regeln:
         summary_prompt = (
             "Fasse den folgenden Gesprächsabschnitt in maximal 300 Wörtern zusammen. "
             "Behalte alle wichtigen Fakten, Ergebnisse und Entscheidungen.\n\n"
-            + "\n".join(dialog_text[:60])  # Maximal 60 Zeilen
+            + "\n".join(self._dialog_auswahl(dialog_text))
         )
 
         try:
@@ -6472,16 +6695,17 @@ KRITISCH – Autonomie-Regeln:
         ungestoert weiter. Ohne ``username`` (eigene Sub-Agent-Instanz / stop_all):
         alle Scopes + Legacy-Signal, der Agent bleibt bereit (IDLE, nicht STOPPED)."""
         if username is not None:
-            scope = self._stop_scopes.get(self._run_key(username))
-            if scope is not None:
-                scope.event.set()   # nur den Lauf dieses Benutzers abbrechen
+            # nur die Laeufe DIESES Benutzers abbrechen (alle seine Tabs)
+            for scope in list(self._stop_scopes.get(self._run_key(username), ())):
+                scope.event.set()
             return
         # Voll-Stop (isolierte Instanz / stop_all): alles abbrechen
         self._stop_flag = True
         self.state = AgentState.IDLE
         self._stop_event.set()   # Legacy-Signal (headless/Fallback)
-        for scope in list(self._stop_scopes.values()):
-            scope.event.set()
+        for menge in list(self._stop_scopes.values()):
+            for scope in list(menge):
+                scope.event.set()
 
     def set_speed(self, speed: float):
         self._speed = max(0.1, min(5.0, speed))
@@ -6563,17 +6787,41 @@ class AgentManager:
             self.agents[self.main_agent.agent_id] = self.main_agent
         return self.main_agent
 
-    def spawn_sub_agent(self, label: str, task: str) -> JarvisAgent:
-        """Erstellt einen neuen Sub-Agent."""
+    def spawn_sub_agent(self, label: str, task: str, *, besitzer: str | None = None,
+                        privilegiert: bool | None = None, internet: bool | None = None,
+                        sap: bool | None = None, vemas: bool | None = None,
+                        kb_groups=None) -> JarvisAgent:
+        """Erstellt einen neuen Sub-Agent.
+
+        Code-Review 2026-10-18: die Identitaet kam IMMER vom geteilten
+        Hauptagenten – also vom zuletzt gelaufenen Benutzer, nach einem
+        Neustart von niemandem (= privilegiert). Wer den Sub-Agenten
+        veranlasst, uebergibt seine Identitaet jetzt AUSDRUECKLICH
+        (``besitzer`` + Rechte); sie bindet auch Folgeauftraege und Stopp
+        (``_besitzer``). Ohne Angabe bleibt der alte Weg ueber den
+        Hauptagenten – fail-closed: ohne bekannten Namen unprivilegiert."""
+        self._ruhende_sub_agenten_kappen()
         parent = self.main_agent
         agent = JarvisAgent(
             label=label,
             is_sub_agent=True,
             parent_id=parent.agent_id if parent else None,
         )
+        if besitzer is not None:
+            agent._current_username = besitzer
+            agent._current_actor_privileged = bool(privilegiert)
+            agent._current_user_internet = bool(internet)
+            agent._current_user_sap = bool(sap)
+            agent._current_user_vemas = bool(vemas)
+            agent._current_kb_groups = kb_groups
+            agent._besitzer = besitzer_norm(besitzer)
+            self.agents[agent.agent_id] = agent
+            return agent
         # Sicherheits-Kontext vom Eltern-Agent erben, sonst koennte ein gesperrter
         # Benutzer die Internet-/LDAP-Restriktion durch Delegation an einen frisch
         # gespawnten Sub-Agent umgehen (Default waere 'erlaubt').
+        agent._current_actor_privileged = False
+        agent._besitzer = _ANON_ACTOR
         if parent is not None:
             agent._current_user_internet = getattr(parent, '_current_user_internet', True)
             agent._current_user_sap = getattr(parent, '_current_user_sap', True)
@@ -6581,10 +6829,29 @@ class AgentManager:
             agent._current_username = getattr(parent, '_current_username', '')
             # Privileg-Bindung mitvererben: ein Sub-Agent eines unprivilegierten
             # Laufs (z.B. Cron-Job eines Domain-Nutzers) darf nicht ueber die
-            # Namens-Heuristik wieder privilegiert werden.
-            agent._current_actor_privileged = parent._actor_is_privileged()
+            # Namens-Heuristik wieder privilegiert werden. OHNE Namen (nach
+            # einem Neustart, ausserhalb eines Laufs) NICHT privilegiert – die
+            # Heuristik "leer = Dienst" galt hier fuer einen fremden Aufrufer.
+            agent._current_actor_privileged = (bool(agent._current_username)
+                                               and parent._actor_is_privileged())
+            agent._current_kb_groups = getattr(parent, "_current_kb_groups", None)
+            agent._besitzer = besitzer_norm(agent._current_username) or _ANON_ACTOR
         self.agents[agent.agent_id] = agent
         return agent
+
+    def _ruhende_sub_agenten_kappen(self) -> None:
+        """Entfernt die aeltesten RUHENDEN freien Sub-Agenten ueber dem Deckel."""
+        ruhend = [a for a in self.agents.values()
+                  if a.is_sub_agent and not getattr(a, "_role_id", "")
+                  and a.state != AgentState.RUNNING]
+        for a in ruhend[:max(0, len(ruhend) - SUB_AGENTEN_MAX_RUHEND + 1)]:
+            self.agents.pop(a.agent_id, None)
+
+    @staticmethod
+    def gehoert(agent: "JarvisAgent", benutzer: str) -> bool:
+        """Gehoert der Sub-Agent diesem Benutzer? Fail-closed ohne Besitzer."""
+        besitzer = getattr(agent, "_besitzer", "")
+        return bool(besitzer) and besitzer != _ANON_ACTOR and besitzer == besitzer_norm(benutzer)
 
     def spawn_role_agent(self, rolle: dict, parent: "JarvisAgent",
                          label: str = "") -> "JarvisAgent":
@@ -6634,13 +6901,18 @@ class AgentManager:
         """Gibt alle Sub-Agents zurueck."""
         return [a for a in self.agents.values() if a.is_sub_agent]
 
-    def get_all_info(self) -> list[dict]:
-        """Info aller Agents fuer Frontend."""
+    def get_all_info(self, fuer: str | None = None) -> list[dict]:
+        """Info aller Agents fuer Frontend.
+
+        ``fuer``: nur die Sub-Agenten dieses Benutzers (Code-Review 2026-10-18 –
+        die Liste nannte jedem die IDs fremder Sub-Agenten). ``None`` = alle,
+        nur fuer interne Aufrufer."""
         result = []
         if self.main_agent:
             result.append(self.main_agent.get_info())
         for a in self.get_sub_agents():
-            result.append(a.get_info())
+            if fuer is None or self.gehoert(a, fuer):
+                result.append(a.get_info())
         return result
 
     async def run_sub_agent(self, agent: JarvisAgent, task: str, ws: WebSocket):
@@ -6648,11 +6920,12 @@ class AgentManager:
         import sys
         print(f"[AGENT-MGR] run_sub_agent aufgerufen: id={agent.agent_id} label={agent.label} task={task[:80]}", flush=True)
         # Agent-Start ans Frontend melden
+        _fuer = getattr(agent, "_besitzer", "") or _ANON_ACTOR
         await ws.send_json({
             "type": "agent_event",
             "event": "spawned",
             "agent": agent.get_info(),
-            "agents": self.get_all_info(),
+            "agents": self.get_all_info(fuer=_fuer),
         })
 
         try:
@@ -6663,7 +6936,7 @@ class AgentManager:
                 "type": "agent_event",
                 "event": "finished",
                 "agent": agent.get_info(),
-                "agents": self.get_all_info(),
+                "agents": self.get_all_info(fuer=_fuer),
             })
 
     def stop_all(self):

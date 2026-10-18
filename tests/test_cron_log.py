@@ -184,7 +184,8 @@ try:
     ns = {"AsyncIOScheduler": lambda **k: _Sched(), "CronTrigger": _Trig,
           "JOBS_FILE": SAND / "jobs.json", "json": json, "uuid": __import__("uuid"),
           "time": time, "asyncio": asyncio, "Optional": __import__("typing").Optional,
-          "_agent_manager": am, "_broadcast_fn": None, "_LEGACY_ACTOR": "__x__", "print": print}
+          "_agent_manager": am, "_broadcast_fn": None, "_LEGACY_ACTOR": "__x__", "print": print,
+          "_atomar": __import__("backend.atomar", fromlist=["schreiben"])}   # seit 2026-10-18
     for k in ("JobsUnlesbar", "CronManager"):
         if k in teile:
             exec(teile[k], ns)  # noqa: S102

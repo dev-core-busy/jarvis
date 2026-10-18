@@ -41,9 +41,57 @@ READONLY_OPS = {"sandbox_status", "egress_status", "apt_upgrades_status",
                 "tika_status", "unlock_screen", "vnc_restart"}
 
 
+# Obergrenze fuer das Op-Argument ``timeout`` (Sekunden): dieselbe wie die
+# hoechste einstellbare Laufzeit eines Sandbox-Befehls (sandbox_grenzen).
+OP_TIMEOUT_MAX = 6 * 3600
+
+
+def timeout_arg(args: dict, vorgabe: int = 120) -> int:
+    """``timeout`` aus den Op-Argumenten, GEKLEMMT auf [1, OP_TIMEOUT_MAX].
+
+    Code-Review 2026-10-18: ``int(args.get("timeout") or 120)`` ohne Grenzen –
+    ein negativer Wert liess den Befehl sofort abbrechen, ein Text warf, ein
+    riesiger Wert hielt den Wachhund praktisch unbegrenzt."""
+    try:
+        t = int(args.get("timeout") or vorgabe)
+    except (TypeError, ValueError):
+        t = vorgabe
+    return max(1, min(t, OP_TIMEOUT_MAX))
+
+
 def _norm_cmd(cmd: str) -> str:
-    """Kommando fuer den Policy-Key normalisieren (Whitespace kollabieren)."""
+    """Kommando fuer ANZEIGEN normalisieren (Whitespace kollabieren, gekuerzt).
+
+    NICHT als Freigabeschluessel verwenden – siehe ``_shell_root_key``."""
     return re.sub(r"\s+", " ", (cmd or "").strip())[:200]
+
+
+SHELL_ROOT_ANZEIGE_MAX = 400
+
+
+def _shell_root_key(cmd: str) -> str:
+    """Freigabeschluessel eines Root-Shell-Befehls: SHA-256 des UNVERAENDERTEN Texts.
+
+    Code-Review 2026-10-18: der Schluessel war ``_norm_cmd`` – auf 200 Zeichen
+    gekuerzt und mit zusammengefasstem Leerraum. Ein einmal per TOTP
+    freigegebener langer Befehl gab damit JEDEN anderen mit denselben ersten
+    200 Zeichen frei (shell.py stellt ~70 Zeichen ``export …;`` voran), und
+    Befehle, die sich nur in Leerraum innerhalb von Anfuehrungszeichen
+    unterscheiden, galten als gleich. Jetzt gibt eine Freigabe genau EINEN
+    Befehl frei. Alt-Eintraege mit Textschluessel greifen nicht mehr – sie
+    muessen neu freigegeben werden (sicherer Rueckfall: pending)."""
+    import hashlib
+    return "shell_root:sha256:" + hashlib.sha256(str(cmd or "").encode("utf-8")).hexdigest()
+
+
+def _shell_root_beschreibung(cmd: str) -> str:
+    """Anzeige fuer die Freigabeliste: der Befehl, eine Kuerzung BEZIFFERT und VORN."""
+    cmd = str(cmd or "")
+    if len(cmd) <= SHELL_ROOT_ANZEIGE_MAX:
+        return "Root-Shell-Befehl: " + cmd
+    return (f"Root-Shell-Befehl ({len(cmd)} Zeichen, hier nur die ersten "
+            f"{SHELL_ROOT_ANZEIGE_MAX} – der Rest ist Teil der Freigabe): "
+            + cmd[:SHELL_ROOT_ANZEIGE_MAX])
 
 
 def _run(cmd, timeout=30, input_text=None, neutrale_sprache=False,
@@ -175,6 +223,13 @@ def _op_systemctl(args, stream):
         return _run(["systemctl", "daemon-reload"], timeout=30)
     if unit not in SYSTEMCTL_UNITS:
         return {"ok": False, "rc": -1, "stdout": "", "stderr": f"Unit nicht in Whitelist: {unit}"}
+    # Code-Review 2026-10-18: die Internet-Sperre liess sich ueber diese
+    # automatisch erlaubte Op ohne Freigabe abschalten – an egress_teardown
+    # (jetzt freigabepflichtig) vorbei. Abschalten nur noch ueber jene Op.
+    if unit == "jarvis-egress.service" and action in ("stop", "disable"):
+        return {"ok": False, "rc": -1, "stdout": "",
+                "stderr": "Die Internet-Sperre wird nur ueber 'egress_teardown' "
+                          "(mit Root-Freigabe) abgeschaltet."}
     cmd = ["systemctl", action, unit]
     if action in ("enable", "disable"):
         cmd = ["systemctl", action, "--now", unit] if args.get("now") else cmd
@@ -182,8 +237,21 @@ def _op_systemctl(args, stream):
 
 
 def _op_unlock_screen(args, stream):
+    """Bildschirmsperre aufheben – Ziel NUR ein Konto aus ``_DESKTOP_USERS``.
+
+    Code-Review 2026-10-18: ``target_user`` ging ungeprueft bis in die
+    LightDM-Konfiguration (``autologin-user=%s``). Die Op steht in
+    READONLY_OPS (Takt beim VNC-Verbinden, ohne Audit) – ein Zeilenumbruch im
+    Wert haette weitere Schluessel in eine Datei geschrieben, die LightDM als
+    root auswertet, an Whitelist und Audit von ``switch_session`` vorbei.
+    Der einzige Aufrufer (main.py) uebergibt ohnehin immer ``jarvis``."""
     from backend import desktop_control
-    desktop_control.unlock_desktop_screen(str(args.get("target_user") or "jarvis"))
+    ziel = str(args.get("target_user") or "jarvis")
+    if ziel not in _DESKTOP_USERS:
+        return {"ok": False, "rc": -1, "stdout": "",
+                "stderr": f"Ziel '{ziel[:40]!r}' nicht erlaubt (nur "
+                          f"{'/'.join(sorted(_DESKTOP_USERS))})."}
+    desktop_control.unlock_desktop_screen(ziel)
     return {"ok": True, "rc": 0, "stdout": "Bildschirm entsperrt", "stderr": ""}
 
 
@@ -274,6 +342,23 @@ def _kann_root_werden(username: str) -> str:
     return ""
 
 
+KENNWORT_MAX = 256
+
+
+def kennwort_eingabe_fehler(kennwort) -> str:
+    """Grund, warum ein Kennwort NICHT an chpasswd darf – leer = in Ordnung.
+
+    Steuerzeichen (< 0x20, 0x7f) sind ausgeschlossen, allen voran der
+    Zeilenumbruch: chpasswd verarbeitet jede Zeile als eigenen Auftrag."""
+    if not isinstance(kennwort, str) or not kennwort:
+        return "Kein Kennwort angegeben"
+    if len(kennwort) > KENNWORT_MAX:
+        return f"Kennwort zu lang (hoechstens {KENNWORT_MAX} Zeichen)"
+    if any(ord(c) < 32 or ord(c) == 127 for c in kennwort):
+        return "Kennwort enthaelt Steuerzeichen (z. B. Zeilenumbruch)"
+    return ""
+
+
 def _op_chpasswd(args, stream):
     """Linux-Kennwort setzen – NUR fuer das Desktop-/Anmeldekonto und nur, wenn
     es NICHT root werden kann.
@@ -286,13 +371,19 @@ def _op_chpasswd(args, stream):
     """
     from backend import desktop_control
     username = str(args.get("username", "")).strip()
-    password = str(args.get("password", ""))
+    password = args.get("password", "")   # KEIN str(): eine Liste ist kein Kennwort
     if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.\-]{0,31}", username):
         return {"ok": False, "rc": -1, "stdout": "", "stderr": "Ungueltiger Benutzername"}
     if username not in _DESKTOP_USERS:
         return {"ok": False, "rc": -1, "stdout": "",
                 "stderr": f"Kennwortwechsel ueber Jarvis ist nur fuer "
                           f"{'/'.join(sorted(_DESKTOP_USERS))} vorgesehen, nicht fuer '{username}'."}
+    # Code-Review 2026-10-18: das KENNWORT war ungeprueft. chpasswd liest
+    # zeilenweise – ein Zeilenumbruch im Kennwort ergab eine zweite Zeile
+    # "root:…" und hebelte die Konto-Pruefung oben komplett aus.
+    fehler = kennwort_eingabe_fehler(password)
+    if fehler:
+        return {"ok": False, "rc": -1, "stdout": "", "stderr": fehler}
     grund = _kann_root_werden(username)
     if grund:
         return {"ok": False, "rc": -1, "stdout": "",
@@ -349,7 +440,7 @@ def _op_sandbox_lauf(args, stream):
     import pwd
     user = str(args.get("user", "")).strip()
     command = str(args.get("command", ""))
-    timeout = int(args.get("timeout") or 120)
+    timeout = timeout_arg(args)
     if not user.startswith(SANDBOX_USER_PREFIX):
         return _abgelehnt(f"Kein Sandbox-User: {user}")
     try:
@@ -372,7 +463,7 @@ def _op_sandbox_lauf(args, stream):
             lauf_dir = _lt.arbeit_bereitstellen(kennung, user)
             if not lauf_dir:
                 return _abgelehnt("privates Arbeitsverzeichnis nicht bereitstellbar")
-            binds = _lt.binds_pruefen(args.get("ro_binds"))
+            binds = _lt.binds_pruefen(args.get("ro_binds"), kennung)
             rw = _lt.rw_binds_pruefen(args.get("rw_binds"))
             # Einhaengepunkte VORHER anlegen (root). Ueberlaesst man das bwrap,
             # gehoeren sie dem Sandbox-Benutzer samt eigener Gruppe und das
@@ -412,7 +503,7 @@ def _op_shell_root(args, stream):
     """Beliebiger Root-Shell-Befehl – laeuft NUR nach expliziter Admin-Freigabe
     (default_allow=False -> erster Aufruf erzeugt einen Pending-Eintrag)."""
     command = str(args.get("command", ""))
-    timeout = int(args.get("timeout") or 120)
+    timeout = timeout_arg(args)
     cwd = str(args.get("cwd") or "") or None
     if not command.strip():
         return {"ok": False, "rc": -1, "stdout": "", "stderr": "Kein Befehl angegeben"}
@@ -657,6 +748,40 @@ def _ist_eingehaengt(mp: str) -> bool:
     return False
 
 
+# Einhaengepunkte der Wissens-Freigaben – NUR diese Form (backend/rag_pfad.py:
+# MOUNT_BASIS /mnt/rag, Altbasis /mnt/jarvis-kb; main.py vergibt share_<n>).
+_MOUNTPUNKT_RE = re.compile(r"/mnt/(?:rag|jarvis-kb)/share_[0-9]{1,4}")
+
+
+def _mountpunkt_fehler(mp: str) -> str:
+    """Grund, warum ``mp`` kein zulaessiger Einhaengepunkt ist – leer = in Ordnung.
+
+    Code-Review 2026-10-18: geprueft war nur ``startswith("/mnt/")`` und kein
+    ``..``. Unterhalb eines bereits eingehaengten Netzlaufwerks bestimmt aber
+    der FREIGABE-SERVER die Verzeichniseintraege, auch Symlinks – ``mkdir``
+    und ``mount`` folgen ihnen, das Ziel konnte damit ausserhalb von /mnt
+    landen (und ``umount_share`` fremde Mounts loesen). Jetzt: feste Form UND
+    keine Komponente des Pfads ist ein Symlink (lstat, folgt nichts)."""
+    import stat as _stat
+    if not isinstance(mp, str) or not _MOUNTPUNKT_RE.fullmatch(mp):
+        return ("Ungueltiger Einhaengepunkt (erlaubt: /mnt/rag/share_<n>, "
+                "Altbestand /mnt/jarvis-kb/share_<n>)")
+    teile = mp.strip("/").split("/")
+    for i in range(1, len(teile) + 1):
+        stueck = "/" + "/".join(teile[:i])
+        try:
+            st = os.lstat(stueck)
+        except FileNotFoundError:
+            return ""   # Rest existiert noch nicht – mkdir legt ihn root-eigen an
+        except OSError:
+            # Abgestorbener Netz-Mount (EHOSTDOWN o. ae.): lstat auf einen
+            # SYMLINK wuerde nicht scheitern, das hier ist also keiner.
+            continue
+        if _stat.S_ISLNK(st.st_mode):
+            return f"Einhaengepunkt abgewiesen: {stueck} ist ein symbolischer Link"
+    return ""
+
+
 def _mp_freimachen(mp: str) -> str:
     """Einen bereits belegten Einhaengepunkt loesen. Rueckgabe: Hinweistext.
 
@@ -788,8 +913,11 @@ def _op_mount_share(args, stream):
     mp = str(args.get("mountpoint", "")).strip()
     username = str(args.get("username", ""))
     password = str(args.get("password", ""))
-    if not source or not mp.startswith(MOUNT_PREFIX) or ".." in mp:
-        return {"ok": False, "rc": -1, "stdout": "", "stderr": "Ungueltige Quelle/Mountpoint (nur /mnt/... erlaubt)"}
+    if not source:
+        return {"ok": False, "rc": -1, "stdout": "", "stderr": "Ungueltige Quelle"}
+    _mpf = _mountpunkt_fehler(mp)
+    if _mpf:
+        return {"ok": False, "rc": -1, "stdout": "", "stderr": _mpf}
     # Zweite Schranke: die Form der Quelle. main.py prueft sie bereits beim
     # Anlegen – hier steht sie noch einmal, weil der Broker auch von
     # Altbestand-Eintraegen und kuenftigen Aufrufern erreicht wird, und weil
@@ -1142,8 +1270,9 @@ def _op_mount_diagnose(args, stream):
 
 def _op_umount_share(args, stream):
     mp = str(args.get("mountpoint", "")).strip()
-    if not mp.startswith(MOUNT_PREFIX) or ".." in mp:
-        return {"ok": False, "rc": -1, "stdout": "", "stderr": "Ungueltiger Mountpoint (nur /mnt/... erlaubt)"}
+    _mpf = _mountpunkt_fehler(mp)
+    if _mpf:
+        return {"ok": False, "rc": -1, "stdout": "", "stderr": _mpf}
     return _run(["umount", mp], timeout=15, neutrale_sprache=True)
 
 
@@ -1215,49 +1344,45 @@ def _op_certbot_obtain(args, stream):
         return {"ok": False, "rc": 1, "stdout": r["stdout"],
                 "stderr": f"Zertifikatsdateien nicht gefunden unter /etc/letsencrypt/live/{domain}/"}
 
-    # 3. In certs/ kopieren + Dienst-Benutzer als Eigentuemer
+    # 3. In certs/ ablegen + Dienst-Benutzer als Eigentuemer – ueber
+    # Verzeichnis-Deskriptoren, ohne Symlinks zu folgen (zert_kopie.py,
+    # Code-Review 2026-10-18: copy2/chown folgten einem Link des Dienstbenutzers).
+    from backend.broker import zert_kopie as _zk
     uid, gid = _pw_dienst.pw_uid, _pw_dienst.pw_gid
     copied = []
-    for certs_dir in [PROJECT_ROOT / "certs"]:
-        if not certs_dir.parent.exists():
-            continue
-        certs_dir.mkdir(parents=True, exist_ok=True)
-        cert_dst, key_dst = certs_dir / "server.crt", certs_dir / "server.key"
-        for f in (cert_dst, key_dst):
-            if f.exists() and not f.is_symlink():
-                try:
-                    f.rename(f.with_suffix(".bak"))
-                except Exception:  # noqa: BLE001
-                    pass
-            if f.is_symlink():
-                f.unlink()
-        shutil.copy2(str(le_fullchain), str(cert_dst))
-        shutil.copy2(str(le_privkey), str(key_dst))
-        os.chmod(key_dst, 0o600)
-        os.chmod(cert_dst, 0o644)
-        if uid:
-            os.chown(cert_dst, uid, gid)
-            os.chown(key_dst, uid, gid)
+    certs_dir = PROJECT_ROOT / "certs"
+    if certs_dir.parent.exists():
+        try:
+            os.mkdir(certs_dir, 0o755)
+            os.chown(certs_dir, uid, gid)
+        except FileExistsError:
+            pass
+        try:
+            _zk.kopieren(domain, str(certs_dir), uid, gid)
+        except (OSError, ValueError) as e:
+            return {"ok": False, "rc": 1, "stdout": r["stdout"],
+                    "stderr": f"Zertifikat nicht abgelegt ({e}) – liegt unter "
+                              f"{certs_dir} ein symbolischer Link?"}
         copied.append(str(certs_dir))
-        say(f"📋 Zertifikat kopiert nach {certs_dir}/ (Eigentuemer: {service_user})")
+        say(f"📋 Zertifikat abgelegt in {certs_dir}/ (Eigentuemer: {service_user})")
 
     # 4. Renewal-Hook: bei certbot-Erneuerung erneut kopieren + Dienst neu starten
     hook_dir = Path("/etc/letsencrypt/renewal-hooks/deploy")
     try:
         hook_dir.mkdir(parents=True, exist_ok=True)
         hook = hook_dir / "jarvis-copy-certs.sh"
+        # Der Hook ruft zert_kopie.py aus der ROOT-EIGENEN Broker-Kopie
+        # (CODE_ROOT) – nie aus dem Projektbaum des Dienstbenutzers – und
+        # folgt damit keinem Symlink in certs/ (Code-Review 2026-10-18; vorher
+        # cp -L/chmod/chown als root auf Pfade des Dienstbenutzers).
+        skript = CODE_ROOT / "backend" / "broker" / "zert_kopie.py"
         hook.write_text(
             "#!/bin/bash\n"
-            "# Auto-generiert von Jarvis (backend/broker/ops.py): kopiert erneuerte\n"
-            "# Let's-Encrypt-Zertifikate ins Jarvis-certs/-Verzeichnis.\n"
-            f"for D in {shlex.quote(str(PROJECT_ROOT / 'certs'))}; do\n"
-            f"  [ -d \"$D\" ] || continue\n"
-            f"  cp -L /etc/letsencrypt/live/{domain}/fullchain.pem \"$D/server.crt\"\n"
-            f"  cp -L /etc/letsencrypt/live/{domain}/privkey.pem \"$D/server.key\"\n"
-            f"  chmod 644 \"$D/server.crt\"; chmod 600 \"$D/server.key\"\n"
-            f"  chown {shlex.quote(service_user + ':' + service_user)} \"$D/server.crt\" \"$D/server.key\" 2>/dev/null\n"
-            "done\n"
-            "systemctl restart jarvis.service\n")
+            "# Auto-generiert von Jarvis (backend/broker/ops.py): legt erneuerte\n"
+            "# Let's-Encrypt-Zertifikate in certs/ ab (ohne Symlinks zu folgen).\n"
+            f"/usr/bin/python3 -I {shlex.quote(str(skript))} {shlex.quote(domain)} "
+            f"{shlex.quote(str(PROJECT_ROOT / 'certs'))} {shlex.quote(service_user)} "
+            "&& systemctl restart jarvis.service\n")
         hook.chmod(0o755)
         say("🔁 Renewal-Hook installiert (automatische Erneuerung kopiert Zertifikate erneut)")
     except Exception as e:  # noqa: BLE001
@@ -1394,7 +1519,7 @@ _REGISTRY = {
     "egress_teardown": (
         _op_egress_teardown, lambda a: "egress_teardown",
         lambda a: "Internet-Egress-Sperre deaktivieren",
-        True, (),
+        False, (),   # LOCKERND (Code-Review 2026-10-18): nur nach Admin-Freigabe
     ),
     "egress_status": (
         _op_egress_status, lambda a: "egress_status",
@@ -1410,7 +1535,7 @@ _REGISTRY = {
     "apt_upgrades_teardown": (
         _op_apt_upgrades_teardown, lambda a: "apt_upgrades_teardown",
         lambda a: "Automatische Sicherheitsupdates ausschalten (Index-Refresh bleibt)",
-        True, (),
+        False, (),   # LOCKERND (Code-Review 2026-10-18): nur nach Admin-Freigabe
     ),
     "apt_upgrades_status": (
         _op_apt_upgrades_status, lambda a: "apt_upgrades_status",
@@ -1459,8 +1584,8 @@ _REGISTRY = {
     ),
     "shell_root": (
         _op_shell_root,
-        lambda a: "shell_root:" + _norm_cmd(str(a.get("command", ""))),
-        lambda a: "Root-Shell-Befehl: " + _norm_cmd(str(a.get("command", ""))),
+        lambda a: _shell_root_key(a.get("command", "")),
+        lambda a: _shell_root_beschreibung(a.get("command", "")),
         False, (),   # ← IMMER erst Admin-Freigabe (pending)
     ),
 }

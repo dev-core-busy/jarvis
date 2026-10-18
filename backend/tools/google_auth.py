@@ -12,6 +12,8 @@ Token wird gespeichert in:
 """
 
 import json
+
+from backend import atomar as _atomar  # atomar + fail-closed (Code-Review 2026-10-18)
 import os
 import threading
 from pathlib import Path
@@ -201,7 +203,7 @@ def _save_token(creds) -> None:
         "scopes":        list(creds.scopes or SCOPES),
     }
     with _lock:
-        TOKEN_FILE.write_text(json.dumps(data, indent=2))
+        _atomar.schreiben(TOKEN_FILE, data, modus=0o600, sicherung=False)  # atomar, nur Dienst (Code-Review 2026-10-18)
 
 
 def _maybe_refresh(creds) -> None:

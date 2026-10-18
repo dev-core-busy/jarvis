@@ -3,6 +3,8 @@
 import asyncio
 import fnmatch
 import json
+
+from backend import atomar as _atomar  # atomar + fail-closed (Code-Review 2026-10-18)
 import time
 import uuid
 from pathlib import Path
@@ -428,7 +430,7 @@ class WatcherManager:
             self._watchers = []
 
     def _save(self):
-        WATCHERS_FILE.write_text(json.dumps(self._watchers, indent=2, ensure_ascii=False))
+        _atomar.schreiben(WATCHERS_FILE, self._watchers)  # atomar (Code-Review 2026-10-18)
 
 
 # Singleton

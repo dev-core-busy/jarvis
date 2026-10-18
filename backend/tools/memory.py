@@ -1,6 +1,8 @@
 """Memory Tool – Persistenter Speicher für Fakten und Präferenzen."""
 
 import json
+
+from backend import atomar as _atomar  # atomar + fail-closed (Code-Review 2026-10-18)
 import re
 import shutil
 import threading
@@ -125,7 +127,7 @@ def _load_memory_dict(username: str = "") -> dict:
                 try:
                     data = json.loads(bak.read_text(encoding="utf-8"))
                     print(f"[MEMORY] Backup geladen ({len(data)} Eintraege)", flush=True)
-                    mem_file.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+                    _atomar.schreiben(mem_file, data, sicherung=False)  # atomar (Code-Review 2026-10-18)
                     privat_machen(mem_file)
                     _user_caches[cache_key] = data
                     if cache_key == "jarvis":
@@ -149,7 +151,8 @@ def _save_memory_dict(memory: dict, username: str = ""):
     if mem_file.exists():
         shutil.copy2(mem_file, mem_file.with_suffix(".json.bak"))
         privat_machen(mem_file.with_suffix(".json.bak"))
-    mem_file.write_text(json.dumps(memory, indent=2, ensure_ascii=False), encoding="utf-8")
+    # atomar (Code-Review 2026-10-18); die .bak legt copy2 oben schon an
+    _atomar.schreiben(mem_file, memory, sicherung=False)
     # Ein NEUER Benutzer bekommt die Datei hier zum ersten Mal – mit der umask des
     # Dienstes waere sie 0644 und bis zum naechsten Neustart fuer die Sandbox
     # lesbar (ECHT 2026-09-29: 27 Gedaechtnisse so). Siehe sandbox.PRIVATE_FILE_GLOBS.

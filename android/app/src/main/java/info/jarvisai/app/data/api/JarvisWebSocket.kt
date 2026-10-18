@@ -6,6 +6,7 @@ import info.jarvisai.app.data.model.ConnectionState
 import info.jarvisai.app.data.model.WsEvent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -13,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -23,11 +25,23 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.random.Random
 
 private const val TAG = "JarvisWS"
-private const val RECONNECT_DELAY_MS = 3000L
+
+// Code-Review 2026-10-18: exponentieller Backoff mit Jitter statt fester 3 s -
+// bei einem nicht erreichbaren Server hat jedes Geraet alle 3 s neu angeklopft,
+// nach einem Server-Neustart alle gleichzeitig.
+private const val RECONNECT_BASIS_MS = 1_000L
+private const val RECONNECT_MAX_MS = 60_000L
+
+// Code-Review 2026-10-18: Puffer fuer eingehende Ereignisse. Gross genug fuer
+// einen gestreamten Antwortschub; ist er trotzdem voll, wird NICHT verworfen,
+// sondern der Lese-Thread gebremst (siehe weiterreichen()).
+private const val EREIGNIS_PUFFER = 512
 
 @Serializable
 private data class WsOutgoing(
@@ -43,17 +57,29 @@ class JarvisWebSocket @Inject constructor(
     private val client: OkHttpClient,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var ws: WebSocket? = null
-    private var serverUrl: String = ""
-    private var apiKey: String = ""
+
+    // Code-Review 2026-10-18: @Volatile, weil OkHttp-Listener, Reconnect-Coroutine
+    // und Aufrufer aus der UI auf verschiedenen Threads lesen/schreiben.
+    @Volatile private var ws: WebSocket? = null
+    @Volatile private var serverUrl: String = ""
+    @Volatile private var apiKey: String = ""
+
+    // Code-Review 2026-10-18: jede Verbindung bekommt eine Generation. Callbacks
+    // eines alten (ersetzten oder manuell getrennten) Sockets sehen eine veraltete
+    // Nummer und duerfen weder den Zustand aendern noch einen Reconnect planen.
+    private val generation = AtomicInteger(0)
+    @Volatile private var manuellGetrennt = false
+    private val fehlversuche = AtomicInteger(0)
+    private var reconnectJob: Job? = null
+    private val sperre = Any()
 
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
     val connectionState: StateFlow<ConnectionState> = _connectionState
 
-    private val _events = MutableSharedFlow<WsEvent>(extraBufferCapacity = 64)
+    private val _events = MutableSharedFlow<WsEvent>(extraBufferCapacity = EREIGNIS_PUFFER)
     val events: SharedFlow<WsEvent> = _events
 
-    private val _desktopCommands = MutableSharedFlow<WsEvent>(extraBufferCapacity = 16)
+    private val _desktopCommands = MutableSharedFlow<WsEvent>(extraBufferCapacity = 64)
     val desktopCommands: SharedFlow<WsEvent> = _desktopCommands
 
     private val _agents = MutableStateFlow<List<AgentInfo>>(emptyList())
@@ -63,15 +89,33 @@ class JarvisWebSocket @Inject constructor(
 
     fun connect(serverUrl: String, apiKey: String) {
         if (serverUrl.isBlank() || apiKey.isBlank()) return
-        this.serverUrl = serverUrl
-        this.apiKey = apiKey
-        doConnect()
+        synchronized(sperre) {
+            // Bereits mit genau diesen Daten verbunden: nichts tun (z. B. neu
+            // erzeugtes ViewModel) - sonst entstuende eine zweite Verbindung.
+            if (ws != null && _connectionState.value == ConnectionState.CONNECTED &&
+                this.serverUrl == serverUrl && this.apiKey == apiKey) return
+            this.serverUrl = serverUrl
+            this.apiKey = apiKey
+            manuellGetrennt = false
+            fehlversuche.set(0)
+            reconnectJob?.cancel()
+            reconnectJob = null
+            verbindenGesperrt()
+        }
     }
 
     fun disconnect() {
-        ws?.close(1000, "Manuell getrennt")
-        ws = null
-        _connectionState.value = ConnectionState.DISCONNECTED
+        synchronized(sperre) {
+            // Code-Review 2026-10-18: Flag + neue Generation, damit onFailure/onClosed
+            // des getrennten Sockets keinen Reconnect mehr ausloesen.
+            manuellGetrennt = true
+            generation.incrementAndGet()
+            reconnectJob?.cancel()
+            reconnectJob = null
+            ws?.close(1000, "Manuell getrennt")
+            ws = null
+            _connectionState.value = ConnectionState.DISCONNECTED
+        }
     }
 
     fun sendTask(text: String, agentId: String = "", lang: String = "de") {
@@ -130,23 +174,32 @@ class JarvisWebSocket @Inject constructor(
         ws?.send(payload) ?: Log.w(TAG, "sendDesktopResult: WebSocket nicht verbunden")
     }
 
-    private fun buildWsUrl(url: String): String {
-        val base = when {
-            url.startsWith("wss://") || url.startsWith("ws://") -> url
-            url.startsWith("https://") -> "wss://${url.removePrefix("https://")}"
-            url.startsWith("http://")  -> "ws://${url.removePrefix("http://")}"
-            else -> "wss://$url"
-        }
-        return if (base.endsWith("/ws")) base else "${base.trimEnd('/')}/ws"
-    }
-
-    private fun doConnect() {
+    /**
+     * Baut eine neue Verbindung auf. Nur unter [sperre] aufrufen.
+     * Code-Review 2026-10-18: ein vorhandener Socket wird vorher geschlossen -
+     * frueher blieb er offen, jeder connect() ergab eine weitere Verbindung und
+     * damit doppelt eintreffende Nachrichten.
+     */
+    private fun verbindenGesperrt() {
+        val gen = generation.incrementAndGet()
+        ws?.close(1000, "Neue Verbindung")
+        ws = null
         _connectionState.value = ConnectionState.CONNECTING
-        val wsUrl = buildWsUrl(serverUrl)
+        val wsUrl = ServerAdresse.wsAdresse(serverUrl)
         val request = Request.Builder().url(wsUrl).build()
         ws = client.newWebSocket(request, object : WebSocketListener() {
 
+            // Gehoert dieser Callback zur aktuellen Verbindung? Abgleich ueber die
+            // Generation statt ueber `webSocket === ws`, weil onOpen schon feuern
+            // kann, bevor newWebSocket() zurueckkehrt und ws gesetzt ist.
+            private fun aktuell(): Boolean = gen == generation.get() && !manuellGetrennt
+
             override fun onOpen(webSocket: WebSocket, response: Response) {
+                if (!aktuell()) {
+                    webSocket.close(1000, "Veraltete Verbindung")
+                    return
+                }
+                fehlversuche.set(0)
                 Log.i(TAG, "Verbunden mit $wsUrl")
                 _connectionState.value = ConnectionState.CONNECTED
                 // Als Android-Client registrieren
@@ -159,14 +212,15 @@ class JarvisWebSocket @Inject constructor(
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
+                if (!aktuell()) return
                 try {
                     val event = json.decodeFromString<WsEvent>(text)
                     // Desktop-Befehle separat weiterleiten
                     if (event.type == "desktop_command") {
-                        scope.launch { _desktopCommands.emit(event) }
+                        weiterreichen(_desktopCommands, event)
                         return
                     }
-                    scope.launch { _events.emit(event) }
+                    weiterreichen(_events, event)
                     // Agent-Liste aktualisieren
                     if (event.type == "agent_list" && event.agents.isNotEmpty()) {
                         _agents.value = event.agents
@@ -183,26 +237,53 @@ class JarvisWebSocket @Inject constructor(
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.e(TAG, "WS-Fehler: ${t.message}")
+                // Code-Review 2026-10-18: Fehler eines alten/getrennten Sockets ignorieren
+                if (!aktuell()) return
                 _connectionState.value = ConnectionState.ERROR
-                scheduleReconnect()
+                scheduleReconnect(gen)
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 Log.i(TAG, "WS geschlossen: $code $reason")
-                if (_connectionState.value != ConnectionState.DISCONNECTED) {
-                    _connectionState.value = ConnectionState.ERROR
-                    scheduleReconnect()
-                }
+                if (!aktuell()) return
+                _connectionState.value = ConnectionState.ERROR
+                scheduleReconnect(gen)
             }
         })
     }
 
-    private fun scheduleReconnect() {
-        scope.launch {
-            delay(RECONNECT_DELAY_MS)
-            if (_connectionState.value != ConnectionState.CONNECTED) {
-                Log.i(TAG, "Reconnect-Versuch…")
-                doConnect()
+    /**
+     * Code-Review 2026-10-18: frueher `scope.launch { emit(event) }` pro Nachricht
+     * auf Dispatchers.IO - die Coroutinen liefen parallel, gestreamte Teile und
+     * "finished" konnten vertauscht ankommen. OkHttp ruft onMessage seriell auf
+     * seinem Lese-Thread auf; tryEmit direkt dort haelt die Reihenfolge ein.
+     * Ist der Puffer voll (Abnehmer haengt), wird NICHT still verworfen: dann
+     * blockiert emit() den Lese-Thread, bis Platz ist. Das bremst nur diese eine
+     * Verbindung (TCP-Gegendruck), verliert nichts und bleibt in Reihenfolge.
+     */
+    private fun weiterreichen(ziel: MutableSharedFlow<WsEvent>, event: WsEvent) {
+        if (ziel.tryEmit(event)) return
+        Log.w(TAG, "Ereignis-Puffer voll - Lese-Thread wartet auf den Abnehmer")
+        runBlocking { ziel.emit(event) }
+    }
+
+    /** Plant einen Reconnect fuer Generation [gen] mit exponentiellem Backoff + Jitter. */
+    private fun scheduleReconnect(gen: Int) {
+        synchronized(sperre) {
+            if (manuellGetrennt || gen != generation.get()) return
+            reconnectJob?.cancel()
+            val versuch = fehlversuche.getAndIncrement().coerceAtMost(16)
+            val basis = (RECONNECT_BASIS_MS shl versuch).coerceAtMost(RECONNECT_MAX_MS)
+            // Jitter: zufaellig in [basis/2, basis], damit nicht alle Geraete gleichzeitig kommen
+            val warte = basis / 2 + Random.nextLong(basis / 2 + 1)
+            Log.i(TAG, "Reconnect in $warte ms (Versuch ${versuch + 1})")
+            reconnectJob = scope.launch {
+                delay(warte)
+                synchronized(sperre) {
+                    if (manuellGetrennt || gen != generation.get()) return@launch
+                    Log.i(TAG, "Reconnect-Versuch…")
+                    verbindenGesperrt()
+                }
             }
         }
     }

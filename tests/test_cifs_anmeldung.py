@@ -70,7 +70,7 @@ def mounten(username, password):
     try:
         erg = ops._op_mount_share({
             "type": "smb", "source": "//server/freigabe/unter",
-            "mountpoint": "/mnt/rag/share_test",
+            "mountpoint": "/mnt/rag/share_998",
             "username": username, "password": password}, None)
     finally:
         ops._run, ops._mp_freimachen = alt_run, alt_frei

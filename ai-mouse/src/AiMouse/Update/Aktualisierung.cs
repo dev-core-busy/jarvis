@@ -33,6 +33,18 @@ namespace AiMouse.Update;
 /// beim Download von Hand aus dem Portal; ein neues Risiko entsteht nicht.
 /// Wer hier je eine Ausnahme fuer ein selbst ausgestelltes Zertifikat einbaut,
 /// macht daraus einen Weg zur Codeausfuehrung ueber einen Man-in-the-Middle.
+///
+/// ⚠ "TLS-GEPRUEFT" SETZT https VORAUS (Code-Review 2026-10-18). Bis dahin
+/// liess `EndpointResolver` auch eine http-Adresse zu – dann kam die EXE im
+/// Klartext, und der Absatz darueber war eine Behauptung ohne Grundlage.
+/// Jetzt gilt es an ZWEI Stellen: `EndpointResolver.Basis` nimmt nur https an,
+/// und `JarvisClient.PaketAsync` (der `paketHolen`-Rueckruf) verweigert jede
+/// andere Adresse selbst noch einmal. Diese Klasse kennt die Adresse nicht;
+/// eine Ablehnung kommt hier als Ausnahme an, landet im `catch` von
+/// <see cref="PruefenUndHolenAsync"/> und heisst: kein Update, die laufende
+/// Fassung bleibt. Eine Codesignatur-Pruefung der geladenen EXE gibt es
+/// bewusst NICHT (Betreiberentscheidung) – umso weniger darf der Transport
+/// nachgeben.
 /// </summary>
 internal static class Aktualisierung
 {

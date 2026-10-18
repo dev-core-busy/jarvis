@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+
+from backend import atomar as _atomar  # atomar + fail-closed (Code-Review 2026-10-18)
 import time
 import uuid
 from pathlib import Path
@@ -465,7 +467,7 @@ class CronManager:
                   "geladen. Das haette bestehende Auftraege geloescht.",
                   flush=True)
             return
-        JOBS_FILE.write_text(json.dumps(self._jobs, indent=2, ensure_ascii=False))
+        _atomar.schreiben(JOBS_FILE, self._jobs)  # atomar (Code-Review 2026-10-18)
 
 
 # Singleton

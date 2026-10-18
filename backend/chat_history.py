@@ -6,6 +6,8 @@ ANZEIGE-History (Bubbles); der KI-Kontext liegt separat in agent._user_histories
 """
 
 import json
+
+from backend import atomar as _atomar  # atomar + fail-closed (Code-Review 2026-10-18)
 import threading
 from pathlib import Path
 
@@ -51,7 +53,7 @@ def replace(user: str, messages: list) -> list:
     messages = messages[-_MAX:]
     with _LOCK:
         _DIR.mkdir(mode=0o750, parents=True, exist_ok=True)  # Chats: sandbox.PRIVATE_DIRS
-        _path(user).write_text(json.dumps(messages, ensure_ascii=False), encoding="utf-8")
+        _atomar.schreiben(_path(user), messages, indent=None, sicherung=False)  # atomar (Code-Review 2026-10-18)
     return messages
 
 
@@ -70,7 +72,7 @@ def append(user: str, message: dict) -> list:
             cur = []
         cur.append(message)
         cur = cur[-_MAX:]
-        p.write_text(json.dumps(cur, ensure_ascii=False), encoding="utf-8")
+        _atomar.schreiben(p, cur, indent=None, sicherung=False)  # atomar (Code-Review 2026-10-18)
     return cur
 
 

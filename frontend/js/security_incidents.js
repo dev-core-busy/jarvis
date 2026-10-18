@@ -774,11 +774,15 @@
                         var lines = (d.steps || []).map(function (s) {
                             return (s.ok ? '✓' : '✗') + ' ' + esc(s.name) + (s.detail && !s.ok ? ' – ' + esc(s.detail) : '');
                         }).join('<br>');
+                        // Seit 2026-10-18 freigabepflichtig: ohne Schritte steht der Grund in d.error
+                        if (!lines && d.error) lines = esc(d.error);
                         out.innerHTML = '<div style="font-weight:600;margin-bottom:4px;">'
-                            + (good ? 'Egress-Sperre deaktiviert.' : 'Deaktivierung unvollständig – Details:')
+                            + (good ? 'Egress-Sperre deaktiviert.'
+                                : (d.pending ? esc(T('security.freigabe_noetig', 'Root-Freigabe erforderlich'))
+                                    : 'Deaktivierung unvollständig – Details:'))
                             + '</div>' + lines;
                     }
-                    Mgr.renderEgress(d.status);
+                    if (d.status) Mgr.renderEgress(d.status);
                 })
                 .catch(function () {
                     if (out) { out.style.display = 'block'; out.innerHTML = 'Fehler bei der Deaktivierung.'; }
@@ -865,10 +869,13 @@
                         var lines = (d.steps || []).map(function (s) {
                             return (s.ok ? '✓' : '✗') + ' ' + esc(s.name) + (s.detail && !s.ok ? ' – ' + esc(s.detail) : '');
                         }).join('<br>');
+                        // Freigabepflichtige Ops (2026-10-18): ohne Schritte steht der Grund in d.error
+                        if (!lines && d.error) lines = esc(d.error);
                         out.innerHTML = '<div style="font-weight:600;margin-bottom:4px;">'
-                            + esc(good ? o.okMsg : o.failMsg) + '</div>' + lines;
+                            + esc(good ? o.okMsg : (d.pending ? T('security.freigabe_noetig', 'Root-Freigabe erforderlich')
+                                : o.failMsg)) + '</div>' + lines;
                     }
-                    if (o.render) o.render(d.status);
+                    if (o.render && d.status) o.render(d.status);
                 })
                 .catch(function () { if (out) { out.style.display = 'block'; out.innerHTML = 'Fehler bei der Ausführung.'; } })
                 .then(function () { if (btn) { btn.disabled = false; btn.textContent = orig || o.busy; } });

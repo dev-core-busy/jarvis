@@ -257,6 +257,8 @@ class EvolutionApplyTool(BaseTool):
 class EvolutionCycleTool(BaseTool):
     """Vollautomatischer Cognitive-Evolution-Zyklus via Sub-Agent."""
 
+    liefert_agenten_auftrag = True   # Ergebnis traegt den Agenten-Auftrag (Marker)
+
     @property
     def name(self) -> str:
         return "evolution_cycle"

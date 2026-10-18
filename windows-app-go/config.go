@@ -4,9 +4,49 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 
+	"jarvis-windows/hilfen"
 	"jarvis-windows/tlsvertrauen"
 )
+
+// verbindungMu schuetzt ServerURL und APIKey der Config.
+//
+// Code-Review 2026-10-18: der Einstellungsdialog schrieb beide Felder im
+// UI-Thread, waehrend die WebSocket-Goroutinen sie fuer jede Nachricht lasen
+// (Datenrennen, im schlimmsten Fall ein halb geschriebener String). Ein Mutex
+// IN der Struktur ginge nicht: Config wird per Wert kopiert (defaultConfig).
+// Wer beide Felder nebenlaeufig braucht, nimmt Verbindung(); geschrieben wird
+// nur ueber SetzeVerbindung(). Die uebrigen Felder werden nur im UI-Thread
+// geschrieben und sind davon nicht erfasst.
+var verbindungMu sync.RWMutex
+
+// Verbindung liefert einen konsistenten Schnappschuss von Server-Adresse und Schluessel.
+func (c *Config) Verbindung() (serverURL, apiKey string) {
+	verbindungMu.RLock()
+	defer verbindungMu.RUnlock()
+	return c.ServerURL, c.APIKey
+}
+
+// SchluesselJetzt liefert den aktuellen API-Key/Sitzungstoken (nebenlaeufig sicher).
+func (c *Config) SchluesselJetzt() string {
+	_, k := c.Verbindung()
+	return k
+}
+
+// ServerURLJetzt liefert die aktuelle Server-Adresse (nebenlaeufig sicher).
+func (c *Config) ServerURLJetzt() string {
+	u, _ := c.Verbindung()
+	return u
+}
+
+// SetzeVerbindung schreibt Server-Adresse und Schluessel unter Sperre.
+func (c *Config) SetzeVerbindung(serverURL, apiKey string) {
+	verbindungMu.Lock()
+	c.ServerURL = serverURL
+	c.APIKey = apiKey
+	verbindungMu.Unlock()
+}
 
 type Config struct {
 	ServerURL   string `json:"server_url"`
@@ -126,14 +166,18 @@ func (c *Config) ZertifikatBestaetigen(host, fingerabdruck string) error {
 }
 
 func (c *Config) Save() error {
+	verbindungMu.RLock()
 	data, err := json.MarshalIndent(c, "", "  ")
+	verbindungMu.RUnlock()
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(configPath(), data, 0600)
+	// Code-Review 2026-10-18: atomar schreiben – ein Absturz mitten im
+	// Schreiben hinterliess sonst eine leere config.json (Schluessel weg).
+	return hilfen.SchreibeAtomar(configPath(), data, 0600)
 }
 
 func (c *Config) IsFirstStart() bool {
 	_, err := os.Stat(configPath())
-	return os.IsNotExist(err) || c.APIKey == ""
+	return os.IsNotExist(err) || c.SchluesselJetzt() == ""
 }

@@ -556,7 +556,7 @@ func (c *ChatWidget) deleteSelected() {
 	c.messages = newMsgs
 	snap := append([]ChatMessage(nil), c.messages...)
 	c.mu.Unlock()
-	go SaveHistory(snap)
+	SaveHistory(snap) // entprellt, kehrt sofort zurueck (Code-Review 2026-10-18)
 	c.exitSelectionMode()
 }
 
@@ -668,7 +668,7 @@ func (c *ChatWidget) AddMessage(role MessageRole, text string) {
 	c.MsgBox.Add(row)
 	c.MsgBox.Refresh()
 	c.scrollToBottom()
-	go SaveHistory(snap)
+	SaveHistory(snap) // entprellt, kehrt sofort zurueck (Code-Review 2026-10-18)
 }
 
 // AppendToLast hängt Text an die letzte Jarvis-Nachricht an (Streaming).
@@ -690,7 +690,7 @@ func (c *ChatWidget) AppendToLast(text string) {
 		c.MsgBox.Refresh()
 	}
 	c.scrollToBottom()
-	go SaveHistory(snap)
+	SaveHistory(snap) // entprellt, kehrt sofort zurueck (Code-Review 2026-10-18)
 }
 
 // AddDebugMessage zeigt eine gedimmte Debug-Zeile (Agent-Denk-Nachrichten).
@@ -868,7 +868,7 @@ func (c *ChatWidget) editUserMessageAt(idx int, newText string) {
 
 	c.rebuildAll()
 	c.scrollToBottom()
-	go SaveHistory(snap)
+	SaveHistory(snap) // entprellt, kehrt sofort zurueck (Code-Review 2026-10-18)
 
 	// Backend informieren: History trimmen + neue Antwort generieren
 	if c.OnEditUserMessage != nil {

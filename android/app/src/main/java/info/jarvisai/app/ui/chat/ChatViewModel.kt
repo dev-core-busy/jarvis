@@ -1,6 +1,6 @@
 package info.jarvisai.app.ui.chat
 
-import info.jarvisai.app.data.tls.ServerVertrauen
+import info.jarvisai.app.data.api.ServerAdresse
 import android.app.Application
 import android.app.DownloadManager
 import android.content.Context
@@ -52,7 +52,18 @@ class ChatViewModel @Inject constructor(
     private val settingsDataStore: SettingsDataStore,
     private val updateChecker: UpdateChecker,
     private val ttsManager: TtsManager,
+    private val okHttpClient: OkHttpClient,
 ) : AndroidViewModel(application) {
+
+    // Code-Review 2026-10-18: frueher pro Feedback ein eigener OkHttpClient (eigener
+    // Verbindungs-Pool und Threads je Aufruf). Jetzt einmal vom gemeinsamen Client
+    // abgeleitet: newBuilder() teilt Pool, Dispatcher und Zertifikatspruefung
+    // (BSI M11), nur der grosszuegige Timeout fuer die LLM-Analyse (20-40 s) kommt dazu.
+    private val feedbackClient: OkHttpClient by lazy {
+        okHttpClient.newBuilder()
+            .callTimeout(90, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+    }
 
     val messages: StateFlow<List<ChatMessage>> = repo.messages
     val connectionState: StateFlow<ConnectionState> = repo.connectionState
@@ -339,11 +350,7 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val settings = settingsDataStore.settings.first()
-                val baseUrl = settings.serverUrl
-                    .replace("wss://", "https://")
-                    .replace("ws://", "http://")
-                    .removeSuffix("/ws")
-                    .removeSuffix("/ws/")
+                val baseUrl = ServerAdresse.httpBasis(settings.serverUrl)
                 val botResp = msg.segments
                     .filter { it.type == SegmentType.ANSWER }
                     .joinToString(" ") { it.text }
@@ -358,19 +365,14 @@ class ChatViewModel @Inject constructor(
                     put("bot_response", botResp.take(500))
                 }.toString()
 
-                // Großzügiger Timeout: LLM-Analyse kann 20-40s dauern
-                // Zertifikat wie ueberall (BSI M11); vorher ganz ohne TLS-Einstellung,
-                // scheiterte also an jedem selbst ausgestellten Serverzertifikat
-                val client = ServerVertrauen.anwenden(OkHttpClient.Builder())
-                    .callTimeout(90, java.util.concurrent.TimeUnit.SECONDS)
-                    .build()
                 val req = Request.Builder()
                     .url("$baseUrl/api/feedback")
                     .post(body.toRequestBody("application/json".toMediaType()))
                     .build()
-                val response = client.newCall(req).execute()
-                val responseBody = response.body?.string() ?: return@launch
-                response.close()
+                // Code-Review 2026-10-18: use{} schliesst die Response auch bei Fehlern
+                val responseBody = feedbackClient.newCall(req).execute().use { response ->
+                    response.body?.string()
+                } ?: return@launch
 
                 // LLM-Analyse aus Response extrahieren und als Jarvis-Nachricht anzeigen
                 val respJson = org.json.JSONObject(responseBody)

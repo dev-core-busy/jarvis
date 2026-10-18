@@ -14,6 +14,8 @@ import re
 import threading
 from pathlib import Path
 
+from backend import atomar as _atomar
+
 PROJECT_ROOT = Path(__file__).parent.parent
 MANIFEST_PATH = PROJECT_ROOT / "data" / "knowledge" / ".groups.json"
 
@@ -68,14 +70,15 @@ def _default_manifest() -> dict:
 # ─── Laden / Speichern ───────────────────────────────────────────────────────
 
 def _load_unlocked() -> dict:
-    if not MANIFEST_PATH.exists():
-        return _default_manifest()
-    try:
-        data = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return _default_manifest()
-    if not isinstance(data, dict):
-        return _default_manifest()
+    """Manifest lesen – FAIL-CLOSED (Code-Review 2026-10-18).
+
+    Bis dahin lieferte jeder Lesefehler (halb geschriebene Datei nach einem
+    Absturz, ``write_text`` war nicht atomar) die VORGABE – und der naechste
+    Schreibvorgang machte sie dauerhaft: alle Gruppenzuordnungen weg. Jetzt
+    liest ``atomar.lesen`` die Sicherung oder wirft ``atomar.Unlesbar``;
+    dann schreibt niemand."""
+    data = _atomar.lesen(MANIFEST_PATH, vorgabe=_default_manifest,
+                         pruefen=lambda d: isinstance(d, dict))
     data.setdefault("groups", [])
     data.setdefault("assignments", {})
     # Erst-Migration: leeres Manifest -> Startgruppen setzen.
@@ -85,10 +88,7 @@ def _load_unlocked() -> dict:
 
 
 def _save_unlocked(data: dict):
-    MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
-    MANIFEST_PATH.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    _atomar.schreiben(MANIFEST_PATH, data)
 
 
 def load() -> dict:

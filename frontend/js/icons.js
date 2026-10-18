@@ -81,6 +81,12 @@
     var STIFT = '<svg class="jv-ico jv-ico-pencil" ' + GEMEINSAM + '>' +
         '<path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>';
 
+    // Code-Review 2026-10-18: Kreispfeile statt des Emojis am Knopf
+    // "Schluessel neu generieren" (Einstellungen > Agent-API).
+    var KREISPFEILE = '<svg class="jv-ico jv-ico-refresh" ' + GEMEINSAM + '>' +
+        '<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>' +
+        '<path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>';
+
     function setzen(el, markup) {
         if (!el) return el;
         // innerHTML mit KONSTANTEM Markup – hier kommt nichts von aussen hinein.
@@ -157,6 +163,8 @@
         eye: function () { return AUGE; },
         /** Durchgestrichenes Auge – Eingabe wieder verbergen. */
         eyeOff: function () { return AUGE_ZU; },
+        /** Kreispfeile – neu erzeugen/erneuern (ersetzt einen Wert). */
+        refresh: function () { return KREISPFEILE; },
         /** Lupe – untersuchen/messen. Veraendert nichts. */
         lupe: function () { return LUPE; },
         /** Stift – NUR an einem Element, das wirklich bearbeiten kann. */

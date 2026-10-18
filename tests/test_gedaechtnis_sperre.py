@@ -228,7 +228,9 @@ for fn in _hl:
     for n in ast.walk(fn):
         if isinstance(n, ast.If):
             namen = {x.attr for x in ast.walk(n.test) if isinstance(x, ast.Attribute)}
-            if "_tool_stats" in namen and "_werkzeug_nutzbar" in {
+            # seit 2026-10-18 je Lauf: Name "_st" (aus _lauf_stats()) statt self._tool_stats
+            namen |= {x.id for x in ast.walk(n.test) if isinstance(x, ast.Name)}
+            if ("_tool_stats" in namen or "_st" in namen) and "_werkzeug_nutzbar" in {
                     getattr(x.func, "attr", "") for x in ast.walk(n.test) if isinstance(x, ast.Call)}:
                 _bed.append(n.test)
 check(len(_bed) == 1, "headless: genau ein Auto-Learning-Zweig gefunden", len(_bed))

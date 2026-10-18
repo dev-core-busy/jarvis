@@ -23,6 +23,8 @@ Import-Zyklus mit main.py / llm.py). Faellt er aus, wird NICHT gesperrt
 from __future__ import annotations
 
 import json
+
+from backend import atomar as _atomar  # atomar + fail-closed (Code-Review 2026-10-18)
 import re
 import threading
 import time
@@ -157,8 +159,7 @@ def _load() -> dict:
 def _save(state: dict):
     try:
         _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2),
-                               encoding="utf-8")
+        _atomar.schreiben(_STATE_FILE, state)  # atomar (Code-Review 2026-10-18)
     except Exception as e:
         print(f"[SecurityGuard] State speichern fehlgeschlagen: {e}", flush=True)
 

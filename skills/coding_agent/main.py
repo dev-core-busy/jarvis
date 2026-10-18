@@ -34,6 +34,8 @@ def _load_workflow() -> str:
 class CodingAgentTool(BaseTool):
     """Startet einen autonomen Coding-Agenten fuer eine Entwicklungsaufgabe."""
 
+    liefert_agenten_auftrag = True   # Ergebnis traegt den Agenten-Auftrag (Marker)
+
     @property
     def name(self) -> str:
         return "coding_agent"

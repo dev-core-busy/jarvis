@@ -41,7 +41,7 @@ PROBEN = [
      '                    if (authToken.isNotBlank()) header("Authorization", "Bearer $authToken")\n',
      '                    // header("Authorization", "Bearer $authToken")\n'),
     ("Windows-Client ohne Token", GO,
-     '\tif tok := imgToken(); tok != "" {\n\t\treq.Header.Set("Authorization", "Bearer "+tok)\n\t}\n', ''),
+     '\tif tok := imgTokenJetzt(); tok != "" {\n\t\treq.Header.Set("Authorization", "Bearer "+tok)\n\t}\n', ''),
     ("AI-Maus ohne Token", CS,
      '                anfrage.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);\n',
      '                // anfrage.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);\n'),

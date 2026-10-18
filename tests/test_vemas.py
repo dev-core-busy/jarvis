@@ -672,8 +672,10 @@ check("actor_scope nimmt vemas entgegen und stellt es zurueck",
 check("run_task_headless reicht actor['vemas'] durch",
       'vemas=bool(actor.get("vemas", False))' in AG)
 check("Sub-Agenten erben die Freigabe (sonst waere spawn ein Umweg)",
-      AG.count("_current_user_vemas = getattr(") >= 3,
-      AG.count("_current_user_vemas = getattr("))
+      # seit 2026-10-18 reicht _handle_spawn die Freigabe ausdruecklich als
+      # Argument an spawn_sub_agent durch (vemas=getattr(self, …)) – beide Formen zaehlen
+      AG.count("_current_user_vemas = getattr(") + AG.count("vemas=getattr(self, '_current_user_vemas'") >= 3,
+      AG.count("_current_user_vemas = getattr(") + AG.count("vemas=getattr(self, '_current_user_vemas'"))
 check("ContextVar wird je Werkzeug-Aufruf gesetzt",
       "from backend.vemas_accounts import current_vemas_user" in AG)
 check("... und im finally zurueckgenommen",

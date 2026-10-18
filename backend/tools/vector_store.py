@@ -223,13 +223,34 @@ class VectorStore:
         import faiss
         if self._index_path.exists() and self._meta_path.exists():
             try:
-                self._index = faiss.read_index(str(self._index_path))
+                index = faiss.read_index(str(self._index_path))
                 with open(self._meta_path, "r", encoding="utf-8") as f:
-                    self._meta = json.load(f)
+                    meta = json.load(f)
+                if not isinstance(meta, list):
+                    raise ValueError("Metadaten sind keine Liste")
+                if index.ntotal != len(meta):
+                    # Nur melden, nicht verwerfen: ob die Gleichheit in jedem
+                    # Bestand gilt, ist nicht gemessen – ein falscher Abbruch
+                    # hier legte die ganze Wissenssuche still.
+                    _log.warning(f"FAISS-Index: {index.ntotal} Vektoren, aber {len(meta)} "
+                                 f"Metadaten – Neu-Indizieren empfohlen")
+                self._index, self._meta = index, meta
                 self._gen += 1
                 return
             except Exception as e:
-                _log.warning(f"FAISS-Index konnte nicht geladen werden, neu anlegen: {e}")
+                # Code-Review 2026-10-18: bis dahin NUR eine Warnung und ein
+                # leerer Index – und der naechste _save() ueberschrieb die
+                # Dateien damit: still weg, ohne Spur. Jetzt werden die
+                # unlesbaren Dateien BEISEITE gelegt (nichts geht verloren) und
+                # der Zustand laut gemeldet; ein Neu-Indizieren baut den Index auf.
+                marke = time.strftime("%Y%m%d-%H%M%S")
+                for pfad in (self._index_path, self._meta_path):
+                    try:
+                        os.replace(pfad, pfad.with_name(f"{pfad.name}.defekt-{marke}"))
+                    except OSError:
+                        pass
+                _log.error(f"FAISS-Index NICHT lesbar ({e}) – Dateien als *.defekt-{marke} "
+                           f"beiseite gelegt, Wissenssuche leer bis zum Neu-Indizieren")
         self._reset_index()
 
     def _reset_index(self):
@@ -239,13 +260,31 @@ class VectorStore:
         self._gen += 1
 
     def _save(self):
+        """Index + Metadaten ATOMAR schreiben (Code-Review 2026-10-18).
+
+        Vorher direkt auf die Originale – ein Absturz zwischen den beiden
+        Schreibvorgaengen (oder mitten in einem) hinterliess Index und
+        Metadaten, die nicht zusammenpassen; beim naechsten Start folgte ein
+        leerer Index. Jetzt erst beide Temp-Dateien vollstaendig, dann zwei
+        ``os.replace`` direkt hintereinander."""
         import faiss
+        tmp_idx = self._index_path.with_name(self._index_path.name + f".{os.getpid()}.tmp")
+        tmp_meta = self._meta_path.with_name(self._meta_path.name + f".{os.getpid()}.tmp")
         try:
-            faiss.write_index(self._index, str(self._index_path))
-            with open(self._meta_path, "w", encoding="utf-8") as f:
+            faiss.write_index(self._index, str(tmp_idx))
+            with open(tmp_meta, "w", encoding="utf-8") as f:
                 json.dump(self._meta, f, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_idx, self._index_path)
+            os.replace(tmp_meta, self._meta_path)
         except Exception as e:
             _log.error(f"FAISS-Index speichern fehlgeschlagen: {e}")
+            for t in (tmp_idx, tmp_meta):
+                try:
+                    t.unlink()
+                except OSError:
+                    pass
 
     def _rebuild(self, meta: list[dict], vectors: np.ndarray, save: bool = True):
         """Baut den FAISS-Index aus einer neuen Meta+Vektor-Liste neu auf.

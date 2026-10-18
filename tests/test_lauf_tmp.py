@@ -210,6 +210,29 @@ try:
     pruef("Traversal abgewiesen", lt.binds_pruefen(["/tmp/../etc/shadow"]) == [])
     pruef("Nullwerte stoeren nicht", lt.binds_pruefen(None) == [] and lt.binds_pruefen([""]) == [])
     pruef("Deckel bei 64 Bindungen", len(lt.binds_pruefen([real] * 200)) == 64)
+    # Code-Review 2026-10-18: lesende Bindungen nie auf Verwaltungswurzeln,
+    # unter ANH_ROOT nur das Verzeichnis der eigenen Kennung.
+    _wz = Path(tempfile.mkdtemp(dir="/tmp", prefix="ltwz_"))
+    _anh_alt, _arb_alt = lt.ANH_ROOT, lt.ARBEIT_ROOT
+    try:
+        lt.ANH_ROOT, lt.ARBEIT_ROOT = _wz / "anh", _wz / "arb"
+        for _d in ("anh/aaaa1111", "anh/bbbb2222", "arb/aaaa1111"):
+            (_wz / _d).mkdir(parents=True)
+            os.chmod(_wz / _d, 0o755)
+        os.chmod(_wz / "anh", 0o755)
+        os.chmod(_wz / "arb", 0o755)
+        _eigen = str(_wz / "anh" / "aaaa1111")
+        pruef("ro-Bindung: eigenes Anhang-Verzeichnis erlaubt (Positivkontrolle)",
+              lt.binds_pruefen([_eigen], "aaaa1111") == [_eigen])
+        pruef("ro-Bindung: FREMDES Anhang-Verzeichnis abgewiesen",
+              lt.binds_pruefen([str(_wz / "anh" / "bbbb2222")], "aaaa1111") == [])
+        pruef("ro-Bindung: ANH_ROOT selbst abgewiesen", lt.binds_pruefen([str(_wz / "anh")], "aaaa1111") == [])
+        pruef("ro-Bindung: ARBEIT_ROOT und darunter abgewiesen",
+              lt.binds_pruefen([str(_wz / "arb"), str(_wz / "arb" / "aaaa1111")], "aaaa1111") == [])
+        pruef("ro-Bindung: ohne Kennung kein Anhang-Verzeichnis", lt.binds_pruefen([_eigen]) == [])
+    finally:
+        lt.ANH_ROOT, lt.ARBEIT_ROOT = _anh_alt, _arb_alt
+        shutil.rmtree(_wz, ignore_errors=True)
 finally:
     for f in (real, real_offen):
         try:
@@ -506,9 +529,19 @@ pruef("lokaler Zweig: eigene Prozessgruppe", "start_new_session=True" in sh)
 import ast as _ast_to
 _to_zweige = [h for h in _ast_to.walk(_ast_to.parse(sh)) if isinstance(h, _ast_to.ExceptHandler)
               and h.type is not None and _ast_to.unparse(h.type) == "asyncio.TimeoutError"]
+# Seit 2026-10-18 (Code-Review) lesen Streaming- und klassischer Modus ueber
+# EINEN Helfer (_lesen, absolute Frist) – also zwei Zweige: _lesen und der
+# Journal-Weg. Dazu dieselbe Regel fuer den Stopp (CancelledError).
 pruef("Timeout beendet die Gruppe (jeder TimeoutError-Zweig)",
-      len(_to_zweige) >= 3 and all("self._gruppe_beenden(proc)" in _ast_to.unparse(h) for h in _to_zweige),
-      "%d Zweige; beide Streaming-Zweige, der klassische Modus, der Journal-Weg" % len(_to_zweige))
+      len(_to_zweige) >= 2 and all("self._gruppe_beenden(proc)" in _ast_to.unparse(h) for h in _to_zweige),
+      "%d Zweige; der Lese-Helfer und der Journal-Weg" % len(_to_zweige))
+_stopp_zweige = [h for h in _ast_to.walk(_ast_to.parse(sh)) if isinstance(h, _ast_to.ExceptHandler)
+                 and h.type is not None and _ast_to.unparse(h.type) == "asyncio.CancelledError"]
+pruef("Stopp beendet die Gruppe (jeder CancelledError-Zweig, und es gibt sie)",
+      len(_stopp_zweige) >= 2 and all("self._gruppe_beenden(proc)" in _ast_to.unparse(h)
+                                      and any(isinstance(s, _ast_to.Raise) for s in h.body)
+                                      for h in _stopp_zweige),
+      "%d Zweige" % len(_stopp_zweige))
 
 ops = quelle("backend/broker/ops.py")
 pruef("Broker nutzt lauf_tmp (keine zweite bwrap-Fassung)",

@@ -109,7 +109,9 @@ print("\n=== 2. Quelltext: Frontend-Freigabe ===")
 
 CHAT = (ROOT / "frontend" / "js" / "chat.js").read_text()
 pruefe("function _releaseRun(" in CHAT, "_releaseRun vorhanden")
-i_close = CHAT.find("ws.onclose")
+# Code-Review 2026-10-18: auf die ZUWEISUNG des Handlers verankern – seit
+# logout() `ws.onclose = null` setzt, traf das blosse "ws.onclose" dort.
+i_close = CHAT.find("ws.onclose = () =>")
 pruefe(0 < i_close and "_releaseRun('conn')" in CHAT[i_close:i_close + 900],
        "Verbindungsabbruch gibt den Laufzustand frei (sonst bleibt die Eingabe blockiert)")
 pruefe("if (!agentRunning) return;" in CHAT,

@@ -83,7 +83,10 @@ fi
 
 "${SFTP[@]}" sichern downloads/jarvis.exe "jarvis-${LIVE_NAME}.exe.bak"
 "${SFTP[@]}" put jarvis.exe downloads/jarvis.exe
-printf '%s' "{\"versionCode\":$NUM,\"versionName\":\"$VERSION\",\"downloadUrl\":\"$BASIS/downloads/jarvis.exe\"}" \
+# sha256 der EXE (Code-Review 2026-10-18): der Client vergleicht ihn vor dem
+# Einwechseln (update.go) – eine abgeschnittene oder ersetzte Datei faellt so auf.
+EXE_SHA=$(sha256sum jarvis.exe | cut -d' ' -f1)
+printf '%s' "{\"versionCode\":$NUM,\"versionName\":\"$VERSION\",\"downloadUrl\":\"$BASIS/downloads/jarvis.exe\",\"sha256\":\"$EXE_SHA\"}" \
   | "${SFTP[@]}" putstr downloads/version_windows.json
 sed -i "s/Portable EXE · v[0-9]\+\.[0-9]\+/Portable EXE · v$VERSION/g" "$TMPHTML"
 "${SFTP[@]}" put "$TMPHTML" index.html

@@ -21,7 +21,10 @@ const CONTACTS_FILE = path.join(__dirname, 'contacts.json');
 const VOICE_DIR = '/tmp/jarvis_wa_voice';
 const LOG_LEVEL = process.env.LOG_LEVEL || 'warn';
 
-const LOG_DIR = path.join(__dirname, '..', '..', 'data', 'logs');
+const DATA_DIR = path.join(__dirname, '..', '..', 'data');
+const LOG_DIR = path.join(DATA_DIR, 'logs');
+// Geheimnis + Pfadschranke fuer die HTTP-API (Code-Review 2026-10-18)
+const schutz = require('./schutz').erzeuge(DATA_DIR);
 const BRIDGE_LOG_FILE = path.join(LOG_DIR, 'whatsapp-bridge.log');
 const MAX_LOG_LINES = 2000;
 
@@ -147,6 +150,9 @@ function bridgeLog(level, category, message, meta = null) {
 // ─── Express API ─────────────────────────────────────────────────
 const app = express();
 app.use(express.json());
+// JEDE Route nur mit dem gemeinsamen Geheimnis (backend/wa_bruecke.py) –
+// 127.0.0.1 allein trug nicht, seit Agenten-Shell und Skills im selben Host laufen.
+app.use(schutz.pruefen);
 
 // Status-Endpoint
 app.get('/status', (req, res) => {
@@ -209,12 +215,14 @@ app.post('/send-media', async (req, res) => {
     }
 
     try {
-        const fs = require('fs');
-        if (!fs.existsSync(media_path)) {
-            return res.status(404).json({ error: 'Datei nicht gefunden' });
+        // Nur erzeugte/gesuchte Bilder aus data/generated_images – vorher las
+        // die Route JEDEN Pfad, den der Dienst lesen darf (z. B. .env).
+        const echt = schutz.medienPfad(media_path);
+        if (!echt) {
+            return res.status(403).json({ error: 'Datei nicht erlaubt (nur erzeugte Bilder)' });
         }
         const jid = to.replace(/[^0-9]/g, '') + '@s.whatsapp.net';
-        const buffer = fs.readFileSync(media_path);
+        const buffer = fs.readFileSync(echt);
         const result = await sock.sendMessage(jid, { image: buffer, caption: caption || '' });
         if (result?.key?.id) {
             sentByBridge.add(result.key.id);
@@ -605,14 +613,12 @@ async function handleIncomingMessage(msg) {
 // ─── Webhook an Python-Backend ───────────────────────────────────
 async function sendWebhook(payload) {
     try {
-        const resp = await fetch(JARVIS_WEBHOOK, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-        });
+        // Mit Geheimnis und GEPINNTEM Zertifikat (schutz.webhookSenden) – keine
+        // prozessweite Abschaltung der TLS-Pruefung mehr (Code-Review 2026-10-18).
+        const resp = await schutz.webhookSenden(JARVIS_WEBHOOK, payload);
 
-        if (!resp.ok) {
-            bridgeLog('ERROR', 'webhook', `Webhook Fehler: ${resp.status} ${resp.statusText}`);
+        if (resp.status < 200 || resp.status >= 300) {
+            bridgeLog('ERROR', 'webhook', `Webhook Fehler: ${resp.status}`);
         }
     } catch (e) {
         // Backend nicht erreichbar - nicht kritisch beim Start

@@ -420,6 +420,17 @@ async def vnc_websocket_proxy(websocket: WebSocket):
         pass
 
 
+def _ws_systemweit(benutzer: str) -> bool:
+    """Darf dieser WebSocket-Benutzer systemweite Agent-Befehle geben (alle
+    stoppen, Unter-Agenten direkt starten, alle Unter-Agenten sehen)?
+
+    Dieselbe Grenze wie das Lauf-Privileg im Agenten (``_LOCAL_PRIVILEGED_USERS``):
+    nur das lokale Konto. Leer = NEIN – ein angemeldeter Socket hat immer einen
+    Namen, ein leerer waere ein Fehler und kein Administrator."""
+    from backend.agent import _LOCAL_PRIVILEGED_USERS
+    return bool(benutzer) and benutzer in _LOCAL_PRIVILEGED_USERS
+
+
 def _unlock_desktop_screen(target_user: str = "jarvis") -> None:
     """Bildschirmschoner/Sperre fuer den Desktop-Benutzer deaktivieren.
     Wird beim VNC-Connect und bei Session-Wechsel aufgerufen.
@@ -1136,7 +1147,9 @@ def _wa_bridge_request_safe(path: str) -> dict:
     """Sichere Bridge-Anfrage fuer Health-Check (faengt alle Fehler)."""
     try:
         import urllib.request as _ur
-        with _ur.urlopen(f"http://127.0.0.1:3001{path}", timeout=2) as resp:
+        from backend import wa_bruecke as _wab
+        _rq = _ur.Request(f"http://127.0.0.1:3001{path}", headers=_wab.kopf())
+        with _ur.urlopen(_rq, timeout=2) as resp:
             return json.loads(resp.read().decode())
     except Exception:
         return {"error": "nicht erreichbar"}
@@ -1343,6 +1356,55 @@ def _group_cn_prefix(group_dn: str) -> str:
     return f"cn={g.split(',')[0]},"
 
 
+def _dn_norm(dn: str) -> str:
+    """DN fuer den Vergleich: klein, Leerraum um ',' und '=' entfernt."""
+    teile = []
+    for rdn in str(dn or "").split(","):
+        k, _, v = rdn.partition("=")
+        teile.append(f"{k.strip().lower()}={v.strip().lower()}" if _ else rdn.strip().lower())
+    return ",".join(teile)
+
+
+_CN_TREFFER_GEMELDET: set = set()
+
+
+def _gruppe_passt(mitglied_dn: str, gewuenscht: str) -> bool:
+    """Ist ``mitglied_dn`` (aus memberOf) die konfigurierte Gruppe ``gewuenscht``?
+
+    Code-Review 2026-10-18: verglichen wurde nur das CN-Praefix – ein
+    konfigurierter voller DN ``cn=Admins,ou=IT,…`` passte damit auch auf eine
+    gleichnamige Gruppe in jeder ANDEREN OU (wer dort Gruppen anlegen darf,
+    machte sich zum Jarvis-Admin). Jetzt:
+      * genauer DN (normiert) -> passt
+      * nur ein Name / ``cn=X`` konfiguriert -> CN-Vergleich, wie bisher gewollt
+      * voller DN konfiguriert, aber nur der CN stimmt -> wird GEMELDET und
+        zaehlt NICHT (Vorgabe streng, Festlegung des Betreibers 2026-10-18).
+        Notschalter ``JARVIS_AD_GRUPPE_STRENG=0`` laesst den CN-Treffer wieder
+        gelten – fuer eine verschobene Gruppe, deren konfigurierter DN noch
+        nicht nachgezogen ist. Die Meldung steht in beiden Faellen im Journal,
+        damit ein abgewiesener Benutzer dort einen Grund findet."""
+    m, w = _dn_norm(mitglied_dn), _dn_norm(gewuenscht)
+    if not m or not w:
+        return False
+    if m == w:
+        return True
+    if not w.startswith("cn="):
+        w = "cn=" + w
+    voller_dn = "," in w
+    cn_teil = w.split(",")[0] + ","
+    if not m.startswith(cn_teil):
+        return False
+    if not voller_dn:
+        return True
+    schluessel = (m, w)
+    if schluessel not in _CN_TREFFER_GEMELDET and len(_CN_TREFFER_GEMELDET) < 500:
+        _CN_TREFFER_GEMELDET.add(schluessel)
+        print(f"[AUTH] WARNUNG: Gruppe '{gewuenscht}' nur ueber den CN getroffen – memberOf ist "
+              f"'{mitglied_dn}' (andere OU). Zaehlt NICHT; konfigurierten DN pruefen "
+              f"(Notschalter JARVIS_AD_GRUPPE_STRENG=0).", flush=True)
+    return os.environ.get("JARVIS_AD_GRUPPE_STRENG", "1").strip() == "0"
+
+
 def _member_of_any_group(member_of, groups_raw: str) -> bool:
     """True, wenn der Benutzer (member_of = Liste seiner Gruppen-DNs) Mitglied
     EINER der konfigurierten Gruppen ist. Mehrere Gruppen sind zeilengetrennt
@@ -1350,12 +1412,9 @@ def _member_of_any_group(member_of, groups_raw: str) -> bool:
     groups = [x.strip() for x in (groups_raw or "").splitlines() if x.strip()]
     if not groups:
         return False
-    member_lower = [g.lower() for g in (member_of or [])]
     for want in groups:
-        want_lower = want.lower()
-        want_prefix = _group_cn_prefix(want)
-        for gl in member_lower:
-            if gl == want_lower or gl.startswith(want_prefix):
+        for gl in (member_of or []):
+            if _gruppe_passt(str(gl), want):   # EINE Regel (s. _gruppe_passt)
                 return True
     return False
 
@@ -1838,6 +1897,12 @@ async def require_auth_pwchange(request: Request) -> str:
     username = verify_token(token)
     if not username:
         raise HTTPException(status_code=401, detail="Nicht authentifiziert")
+    # Gesperrt bleibt gesperrt – auch fuer den Kennwortwechsel (Code-Review
+    # 2026-10-18; vorher fehlten Sperre UND Anmeldefreigabe hier ganz).
+    if security_guard.is_blocked(username):
+        raise HTTPException(status_code=403, detail="ACCOUNT_BLOCKED")
+    if not _login_still_allowed(username):
+        raise HTTPException(status_code=403, detail="NOT_AUTHORIZED")
     return username
 
 
@@ -1871,6 +1936,11 @@ async def require_local_auth(request: Request) -> str:
         raise HTTPException(status_code=403, detail=_admin_verweigert_text(username))
     if _user_must_change(username):
         raise HTTPException(status_code=403, detail="Kennwort muss zuerst geaendert werden.")
+    # Code-Review 2026-10-18: die Kontosperre fehlte hier – ein gesperrtes
+    # Admin-Konto (z. B. nach einer Kompromittierung von Hand gesperrt) kam an
+    # allen rund 240 Admin-Routen weiter durch, waehrend require_auth es abwies.
+    if security_guard.is_blocked(username):
+        raise HTTPException(status_code=403, detail="ACCOUNT_BLOCKED")
     if not _login_still_allowed(username):
         raise HTTPException(status_code=403, detail="NOT_AUTHORIZED")
     return username
@@ -2684,12 +2754,9 @@ def _gruppen_passen(member_of, groups) -> str:
     VOR dem Bind (``_ad_vorab_freigabe``) – zwei Kopien desselben Vergleichs
     liefen frueher oder spaeter auseinander, und dann schickte die Vorabpruefung
     Kennwoerter zum DC, die die Nachpruefung ablehnt (oder umgekehrt)."""
-    member_lower = [str(g).lower() for g in (member_of or [])]
     for want in groups:
-        want_lower = want.lower()
-        want_prefix = _group_cn_prefix(want)
-        for gl in member_lower:
-            if gl == want_lower or gl.startswith(want_prefix):
+        for gl in (member_of or []):
+            if _gruppe_passt(str(gl), want):   # EINE Regel (s. _gruppe_passt)
                 return want
     return ""
 
@@ -3498,7 +3565,7 @@ async def _ad_cache_nachladen_falls_noetig(username: str) -> None:
     wie vorher auch, es geht nichts kaputt.
     """
     plain = _norm_login(username)
-    if not plain or username in ALLOWED_USERS or plain in ("jarvis", "root"):
+    if not plain or username in ALLOWED_USERS:
         return                                   # lokale Konten kennen kein AD
     if not _ad_cache_fehlt(plain):
         return                                   # der Normalfall, kostet nichts
@@ -3531,7 +3598,7 @@ def _revalidate_ad_groups_once() -> dict:
     now = time.time()
     users = sorted({u for u, ts in list(_ad_seen_users.items())
                     if now - ts < 86400
-                    and u not in ALLOWED_USERS and u not in ("jarvis", "root")
+                    and u not in ALLOWED_USERS   # kein "root"-Freibrief (s. _user_is_admin)
                     and not _revalidierung_ueberspringen(u, ts)})
     if not users:
         return res
@@ -3701,7 +3768,11 @@ def _user_is_admin(user: str) -> bool:
     # Sitzung – Pruefungen ueber fremde Konten bleiben unberuehrt.
     if _sitzung_ohne_admin(u):
         return False
-    if u in ALLOWED_USERS or u in {"jarvis", "root"}:
+    # NUR die lokalen Konten (Code-Review 2026-10-18): hier stand zusaetzlich
+    # {"jarvis", "root"}. "root" ist nicht in ALLOWED_USERS, eine Anmeldung als
+    # "root" geht also ans AD – ein gleichnamiges Domaenenkonto war damit Admin.
+    # "jarvis" ist in ALLOWED_USERS und wird lokal geprueft (kein AD-Rueckfall).
+    if u in ALLOWED_USERS:
         return True
     users_raw = config.get_setting("ad_admins", "").strip()
     grp = config.get_setting("ad_admins_group", "").strip()
@@ -3840,6 +3911,67 @@ def authenticate_linux_user(username: str, password: str, details: dict | None =
 # ─── Auth-State (Kennwort-Änderung / 2FA-Vorbereitung) ───────────────
 _AUTH_STATE_FILE = Path(__file__).parent.parent / "data" / "auth_state.json"
 
+class AuthStateUnlesbar(RuntimeError):
+    """auth_state.json ist vorhanden, aber weder sie noch die Sicherung lesbar."""
+
+    pass   # ausdruecklich: Waechter entfernen Docstrings vor dem Parsen
+
+
+def _auth_schluessel(username: str) -> str:
+    """Schluessel eines Kontos in auth_state.json: der blosse sAMAccountName.
+
+    Befund Code-Review 2026-10-18: der Zustand lag unter der EINGETIPPTEN
+    Schreibweise. AD nimmt ``alice``, ``firma\\alice`` und ``alice@domaene``
+    gleichermassen an – mit einer anderen Schreibweise kam man ohne zweiten
+    Faktor herein, und bei Admins richtete die Pflicht-Einrichtung ein NEUES
+    Secret ein (Kennwort genuegte). Eine Person = ein Eintrag."""
+    return _norm_login(username)
+
+
+def _auth_eintraege_zusammenfuehren(users: dict) -> tuple[dict, bool]:
+    """Fasst Eintraege verschiedener Schreibweisen derselben Person zusammen.
+
+    Vorrang hat der Eintrag mit AKTIVER 2FA (sonst haette die Migration selbst
+    die 2FA abgeschaltet), danach der bereits normalisierte Schluessel.
+    Felder, die dem Sieger fehlen, kommen aus den uebrigen Eintraegen.
+    Rueckgabe: (neue Abbildung, ob sich etwas geaendert hat)."""
+    gruppen: dict[str, list] = {}
+    for k in sorted(users):
+        st = users[k]
+        if not isinstance(st, dict):
+            continue
+        norm = _auth_schluessel(k)
+        if norm:
+            gruppen.setdefault(norm, []).append((k, st))
+    neu: dict = {}
+    geaendert = False
+    for norm, eintraege in gruppen.items():
+        if len(eintraege) == 1 and eintraege[0][0] == norm:
+            neu[norm] = eintraege[0][1]
+            continue
+        geaendert = True
+        def _rang(kv):
+            k, st = kv
+            aktiv = bool(st.get("totp_enabled") and st.get("totp_secret"))
+            return (0 if aktiv else 1, 0 if k == norm else 1, k)
+        eintraege.sort(key=_rang)
+        zusammen = dict(eintraege[0][1])
+        for _k, st in eintraege[1:]:
+            for feld, wert in st.items():
+                zusammen.setdefault(feld, wert)
+        neu[norm] = zusammen
+    if len(neu) != len(users):
+        geaendert = True
+    return neu, geaendert
+
+
+def _auth_state_datei_lesen(pfad: Path) -> dict:
+    roh = json.loads(pfad.read_text())
+    if not isinstance(roh, dict):
+        raise ValueError("kein JSON-Objekt")
+    return roh
+
+
 def _load_auth_state() -> dict:
     """Lädt den Auth-State aus der JSON-Datei.
 
@@ -3847,34 +3979,78 @@ def _load_auth_state() -> dict:
     Hauptschluessel verpackt (``JGS1:``) und werden hier geoeffnet; ein
     Altbestand im Klartext wird dabei einmal verpackt zurueckgeschrieben.
     Ohne Hauptschluessel bleibt ein verpackter Wert verpackt stehen – die
-    Anmeldung meldet das dann ausdruecklich (siehe ``_totp_secret_lesbar``)."""
+    Anmeldung meldet das dann ausdruecklich (siehe ``_totp_secret_lesbar``).
+
+    FAIL-CLOSED (Code-Review 2026-10-18): bis dahin lieferte jede Ausnahme
+    ``{}`` – eine beschaedigte Datei hiess damit "niemand hat eine 2FA". Jetzt:
+    fehlt die Datei, ist der Bestand leer (Neuinstallation); ist sie da und
+    unlesbar, gilt die Sicherung ``.bak`` vom letzten Schreiben; ist auch die
+    unlesbar, wirft ``AuthStateUnlesbar`` und die Anmeldung verweigert."""
+    from backend import geheimnis_tresor as _t
+    if not _AUTH_STATE_FILE.exists():
+        return {}
     try:
-        if _AUTH_STATE_FILE.exists():
-            from backend import geheimnis_tresor as _t
-            roh = json.loads(_AUTH_STATE_FILE.read_text())
-            state = _t.entschluessele_baum(roh)
-            if _t.hauptfernet() is not None and _t.klartext_felder(roh):
-                try:
-                    _save_auth_state(state)
-                    print("[Tresor] 2FA-Geheimnisse in auth_state.json verpackt", flush=True)
-                except Exception as e:  # noqa: BLE001
-                    print(f"[Tresor] auth_state.json nicht verpackt: {e}", flush=True)
-            return state
-    except Exception:
-        pass
-    return {}
+        roh = _auth_state_datei_lesen(_AUTH_STATE_FILE)
+    except Exception as e:  # noqa: BLE001
+        bak = _AUTH_STATE_FILE.with_name(_AUTH_STATE_FILE.name + ".bak")
+        try:
+            roh = _auth_state_datei_lesen(bak)
+        except Exception as e2:  # noqa: BLE001
+            print(f"[AUTH] auth_state.json UNLESBAR ({e}) und keine lesbare Sicherung "
+                  f"({e2}) – Anmeldung gesperrt, bis die Datei repariert ist.", flush=True)
+            raise AuthStateUnlesbar(str(e)) from e
+        print(f"[AUTH] auth_state.json unlesbar ({e}) – Sicherung {bak.name} verwendet.",
+              flush=True)
+    state = _t.entschluessele_baum(roh)
+    zurueckschreiben = []
+    if isinstance(state.get("users"), dict):
+        users, geaendert = _auth_eintraege_zusammenfuehren(state["users"])
+        if geaendert:
+            state["users"] = users
+            zurueckschreiben.append("Schreibweisen zusammengefuehrt")
+    if _t.hauptfernet() is not None and _t.klartext_felder(roh):
+        zurueckschreiben.append("2FA-Geheimnisse verpackt")
+    if zurueckschreiben:
+        try:
+            _save_auth_state(state)
+            print(f"[AUTH] auth_state.json: {', '.join(zurueckschreiben)}", flush=True)
+        except Exception as e:  # noqa: BLE001
+            print(f"[AUTH] auth_state.json nicht zurueckgeschrieben: {e}", flush=True)
+    return state
 
 def _save_auth_state(state: dict):
-    """Speichert den Auth-State in die JSON-Datei (Geheimfelder verpackt, BSI M5)."""
+    """Speichert den Auth-State ATOMAR (Geheimfelder verpackt, BSI M5).
+
+    Temp-Datei im selben Verzeichnis (0600 ab dem Anlegen) + ``os.replace``;
+    der vorige Stand bleibt als ``.bak`` – die Rueckfallstufe von
+    ``_load_auth_state``. Ein Absturz mitten im Schreiben laesst damit nie eine
+    halbe Datei zurueck (vorher: ``write_text`` auf das Original)."""
     from backend import geheimnis_tresor as _t
     _AUTH_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _AUTH_STATE_FILE.write_text(json.dumps(_t.verschluessele_baum(state), indent=4))
-    # 2FA-Geheimnisse: nur der Dienst (sandbox.PRIVATE_FILES_STRENG setzt es
-    # beim Start ebenfalls – hier fuer die NEU angelegte Datei, 2026-09-28)
+    daten = json.dumps(_t.verschluessele_baum(state), indent=4)
+    tmp = _AUTH_STATE_FILE.with_name(f".{_AUTH_STATE_FILE.name}.{os.getpid()}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
-        os.chmod(_AUTH_STATE_FILE, 0o600)
-    except OSError:
-        pass
+        with os.fdopen(fd, "w") as f:
+            f.write(daten)
+            f.flush()
+            os.fsync(f.fileno())
+        if _AUTH_STATE_FILE.exists():
+            # Sicherung nur von einem LESBAREN Vorstand – eine kaputte Datei
+            # darf die letzte gute Sicherung nicht ueberschreiben.
+            try:
+                _auth_state_datei_lesen(_AUTH_STATE_FILE)
+                bak = _AUTH_STATE_FILE.with_name(_AUTH_STATE_FILE.name + ".bak")
+                os.replace(_AUTH_STATE_FILE, bak)
+            except Exception:  # noqa: BLE001
+                pass
+        os.replace(tmp, _AUTH_STATE_FILE)
+    finally:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
 
 def _totp_secret_lesbar(secret) -> bool:
     """False, wenn das 2FA-Secret noch verpackt ist (Hauptschluessel fehlt)."""
@@ -3885,14 +4061,15 @@ def _get_user_auth_state(username: str) -> dict:
     """Gibt den Auth-State eines Benutzers zurück (Defaults: must_change_password=True)."""
     state = _load_auth_state()
     users = state.get("users", {})
-    return users.get(username, {
+    return users.get(_auth_schluessel(username), {
         "must_change_password": True,
         "totp_enabled": False,
         "totp_secret": None,
     })
 
 def _set_user_auth_state(username: str, updates: dict):
-    """Aktualisiert den Auth-State eines Benutzers."""
+    """Aktualisiert den Auth-State eines Benutzers (Schluessel: _auth_schluessel)."""
+    username = _auth_schluessel(username)
     state = _load_auth_state()
     if "users" not in state:
         state["users"] = {}
@@ -4695,7 +4872,15 @@ async def login(request: Request):
     Kennwort zum Domain-Controller ging."""
     _start = _anmelde_schutz.uhr()
     await _anmelde_schutz.bremse()
-    resp = await _login_ablauf(request)
+    try:
+        resp = await _login_ablauf(request)
+    except AuthStateUnlesbar:
+        # Fail-closed: ohne lesbaren 2FA-Bestand keine Anmeldung – sonst hiesse
+        # eine beschaedigte Datei "niemand hat einen zweiten Faktor".
+        resp = JSONResponse(
+            {"success": False, "error": "Anmeldung ist gerade nicht möglich (Anmeldedaten "
+             "des Servers nicht lesbar). Bitte den Administrator informieren."},
+            status_code=503)
     if getattr(resp, "status_code", 200) >= 400:
         await _anmelde_schutz.angleichen(_start)
     await _anmeldung_protokollieren(request, resp, "kennwort")
@@ -4743,7 +4928,9 @@ async def _login_ablauf(request: Request):
         )
 
     _auth_details: dict = {}
-    if not authenticate_linux_user(username, password, _auth_details):
+    # Im Thread: PAM und LDAP-Bind blockieren bis zu Sekunden – im Event-Loop
+    # stand waehrenddessen der ganze Dienst (Code-Review 2026-10-18).
+    if not await asyncio.to_thread(authenticate_linux_user, username, password, _auth_details):
         # Nicht freigegeben (vor oder nach dem Bind): DIESELBE Antwort und
         # derselbe Fehlversuch wie bei falschem Kennwort. Bis 2026-10-15 stand
         # hier 403 "Keine Anmeldeberechtigung" OHNE Fehlversuch – damit verriet
@@ -5249,7 +5436,7 @@ async def totp_disable(request: Request, username: str = Depends(require_auth)):
     schranke = _kennwort_schranke(request, username)
     if schranke is not None:
         return schranke
-    if not authenticate_linux_user(username, password):
+    if not await asyncio.to_thread(authenticate_linux_user, username, password):
         _kennwort_fehlversuch(request, username, "totp_disable")
         return JSONResponse({"success": False, "error": "Falsches Passwort"}, status_code=401)
     _anmelde_schutz.erfolg(_norm_login(username))
@@ -5317,6 +5504,8 @@ async def totp_admin_reset(request: Request, user: str = Depends(require_local_a
     kennwort = body.get("password") or ""
     if not ziel:
         return JSONResponse({"ok": False, "error": "Kein Benutzer angegeben."}, status_code=400)
+    # Eine Person = ein Schluessel (auch im Audit), egal wie das Ziel geschrieben ist
+    ziel = _auth_schluessel(ziel)
     if _norm_login(ziel) == _norm_login(user):
         return JSONResponse({"ok": False, "error": "SELF",
                              "detail": "Die eigene Zwei-Faktor-Anmeldung schaltest du unter "
@@ -5324,8 +5513,15 @@ async def totp_admin_reset(request: Request, user: str = Depends(require_local_a
     if not isinstance(kennwort, str) or not kennwort:
         return JSONResponse({"ok": False, "error": "Kennwort zur Bestätigung erforderlich."},
                             status_code=400)
+    # Dieselbe Fehlversuchsgrenze wie jeder andere Kennwortweg (BSI N4) – ohne
+    # sie liesse sich hier mit einer gestohlenen Admin-Sitzung das Admin-
+    # Kennwort durchprobieren (Code-Review 2026-10-18).
+    schranke = _kennwort_schranke(request, user)
+    if schranke is not None:
+        return schranke
     # ⚠ 403, nicht 401: ein 401 deutet die Oberflaeche als "Sitzung abgelaufen".
     if not await asyncio.to_thread(authenticate_linux_user, user, kennwort):
+        _kennwort_fehlversuch(request, user, "totp_reset")
         _totp_protokoll(user, ziel, "kennwort_falsch")
         return JSONResponse({"ok": False, "error": "Falsches Kennwort."}, status_code=403)
     if ziel not in _totp_aktive_benutzer():
@@ -5464,7 +5660,7 @@ async def change_password(request: Request, username: str = Depends(require_auth
     schranke = _kennwort_schranke(request, username)
     if schranke is not None:
         return schranke
-    if not authenticate_linux_user(username, old_password):
+    if not await asyncio.to_thread(authenticate_linux_user, username, old_password):
         _kennwort_fehlversuch(request, username, "kennwortwechsel")
         return JSONResponse({"success": False, "error": "Aktuelles Kennwort ist falsch."}, status_code=403)
     _anmelde_schutz.erfolg(_norm_login(username))
@@ -7898,6 +8094,13 @@ async def security_egress_teardown(user: str = Depends(require_local_auth)):
     """
     from backend import broker_client
     bres = await broker_client.call("egress_teardown", {}, user=user, timeout=60)
+    # Seit Code-Review 2026-10-18 freigabepflichtig (lockernd) – "pending"
+    # verstaendlich melden statt als Broker-Fehler.
+    if bres.get("decision") == "pending":
+        return JSONResponse({"ok": False, "pending": True,
+                             "error": "Internet-Sperre aufheben braucht eine Root-Freigabe: Einstellungen → "
+                                      "Sicherheit → Root-Freigaben, Eintrag freigeben und erneut "
+                                      "ausführen."}, status_code=202)
     if not bres.get("ok"):
         return JSONResponse({"ok": False, "error": bres.get("error") or bres.get("stderr")}, status_code=502)
     res = bres.get("result") or {}
@@ -7956,6 +8159,13 @@ async def security_unattended_teardown(user: str = Depends(require_local_auth)):
     """
     from backend import broker_client
     bres = await broker_client.call("apt_upgrades_teardown", {}, user=user, timeout=120)
+    # Seit Code-Review 2026-10-18 freigabepflichtig (lockernd) – "pending"
+    # verstaendlich melden statt als Broker-Fehler.
+    if bres.get("decision") == "pending":
+        return JSONResponse({"ok": False, "pending": True,
+                             "error": "Sicherheitsupdates abschalten braucht eine Root-Freigabe: Einstellungen → "
+                                      "Sicherheit → Root-Freigaben, Eintrag freigeben und erneut "
+                                      "ausführen."}, status_code=202)
     if not bres.get("ok"):
         return JSONResponse({"ok": False, "error": bres.get("error") or bres.get("stderr")},
                             status_code=502)
@@ -10535,7 +10745,8 @@ async def api_feedback(request: Request):
     })
     feedbacks = feedbacks[-500:]
     feedback_file.parent.mkdir(parents=True, exist_ok=True)
-    feedback_file.write_text(json.dumps(feedbacks, ensure_ascii=False, indent=2), encoding="utf-8")
+    from backend import atomar as _atomar
+    _atomar.schreiben(feedback_file, feedbacks)  # atomar (Code-Review 2026-10-18)
 
     if rating == "positive":
         return JSONResponse({"success": True, "message": "👍 Danke! Das freut mich.", "analysis": ""})
@@ -19105,6 +19316,20 @@ async def export_knowledge_zip(embeddings: int = 0, llm: int = 0, split: int = 0
                     headers={"Content-Disposition": f'attachment; filename="{fname}"'})
 
 
+
+def _liegt_unter(pfad: Path, basis: Path) -> bool:
+    """Liegt ``pfad`` (aufgeloest) innerhalb von ``basis``? Ueber ``relative_to``.
+
+    Code-Review 2026-10-18: drei Endpunkte prueften das per ``startswith`` auf
+    den Pfadtext – damit galt auch ein Nachbarverzeichnis wie
+    ``data/erfahrung2/`` als "innerhalb" (dieselbe Falle wie share_1/share_10)."""
+    try:
+        pfad.resolve().relative_to(basis.resolve())
+        return True
+    except (ValueError, OSError):
+        return False
+
+
 @app.get("/api/knowledge/file_read")
 async def read_knowledge_file(path: str, user: str = Depends(require_auth_or_agent)):
     """Liest den Inhalt einer Text-Datei aus dem Knowledge-Verzeichnis.
@@ -19114,7 +19339,7 @@ async def read_knowledge_file(path: str, user: str = Depends(require_auth_or_age
     from backend.learning import LEARNED_DIR
     resolved = (PROJECT_ROOT / path).resolve()
     # Sicherheitscheck: Datei muss in Knowledge- oder Learned-Verzeichnis liegen
-    allowed = str(resolved).startswith(str(LEARNED_DIR.resolve()))
+    allowed = _liegt_unter(resolved, LEARNED_DIR)   # nicht per Praefix (Code-Review 2026-10-18)
     if not allowed:
         for folder in _get_folders():
             try:
@@ -19146,7 +19371,7 @@ async def read_knowledge_file_raw(path: str, user: str = Depends(require_auth_or
     import mimetypes
     resolved = (PROJECT_ROOT / path).resolve()
     # Sicherheitscheck: Datei muss in Knowledge- oder Learned-Verzeichnis liegen
-    allowed = str(resolved).startswith(str(LEARNED_DIR.resolve()))
+    allowed = _liegt_unter(resolved, LEARNED_DIR)   # nicht per Praefix (Code-Review 2026-10-18)
     if not allowed:
         for folder in _get_folders():
             try:
@@ -19213,7 +19438,7 @@ async def write_knowledge_file(request: Request, user: str = Depends(require_kno
         return JSONResponse({"error": "Kein Pfad"}, status_code=400)
     resolved = (LRN_ROOT / path).resolve()
     # Nur Dateien innerhalb LEARNED_DIR dürfen geschrieben werden
-    if not str(resolved).startswith(str(LEARNED_DIR.resolve())):
+    if not _liegt_unter(resolved, LEARNED_DIR):
         return JSONResponse({"error": "Zugriff verweigert"}, status_code=403)
     if not resolved.exists():
         return JSONResponse({"error": "Datei nicht gefunden"}, status_code=404)
@@ -21454,7 +21679,9 @@ async def wissen_pending_approve(doc_id: str, request: Request, user: str = Depe
     if not ok:
         return JSONResponse({"error": err}, status_code=403)
     try:
-        result = approve_pending(doc_id, groups=req_groups)
+        # Im Thread (Code-Review 2026-10-18): schreibt Dateien und indiziert –
+        # im Event-Loop stand derweil der ganze Dienst.
+        result = await asyncio.to_thread(approve_pending, doc_id, groups=req_groups)
         return JSONResponse({"ok": True, **result})
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -23077,7 +23304,7 @@ async def knowledge_pending_approve(doc_id: str, request: Request, user: str = D
     except Exception:
         pass
     try:
-        result = approve_pending(doc_id, groups=groups)
+        result = await asyncio.to_thread(approve_pending, doc_id, groups=groups)   # Thread: s. o.
         return JSONResponse({"ok": True, **result})
     except FileNotFoundError:
         return JSONResponse({"error": "Nicht gefunden"}, status_code=404)
@@ -24956,16 +25183,17 @@ def _transcribe_audio(filepath: str, language: str = "de", initial_prompt: str =
 def _wa_bridge_request(path: str, method: str = "GET", data: dict = None) -> dict:
     """HTTP-Anfrage an die WhatsApp Bridge (synchron, fuer Thread-Pool)."""
     try:
+        from backend import wa_bruecke as _wab
         url = f"{WA_BRIDGE}{path}"
         if data:
             req = urllib.request.Request(
                 url,
                 data=json.dumps(data).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
+                headers={"Content-Type": "application/json", **_wab.kopf()},
                 method=method,
             )
         else:
-            req = urllib.request.Request(url, method=method)
+            req = urllib.request.Request(url, method=method, headers=_wab.kopf())
         with urllib.request.urlopen(req, timeout=3) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
@@ -25065,11 +25293,18 @@ async def wa_incoming(request: Request):
     - type=voice: Sprachnachricht → Whisper-Transkription → Agent-Task
     - type=image/other: nur loggen
 
-    Sicherheit: Nur von localhost erreichbar (Bridge auf 127.0.0.1:3001).
+    Sicherheit: nur von localhost UND nur mit dem Geheimnis der Bridge
+    (``backend/wa_bruecke.py``, Code-Review 2026-10-18 – vorher genuegte
+    127.0.0.1, also jeder lokale Prozess, um Auftraege "von einer
+    freigegebenen Nummer" einzuspielen).
     """
+    from backend import wa_bruecke as _wab
     client_ip = request.client.host if request.client else ""
     if client_ip not in ("127.0.0.1", "::1", "localhost"):
         return JSONResponse({"error": "Nur von localhost erreichbar"}, status_code=403)
+    if not _wab.pruefe(request.headers.get(_wab.KOPF)):
+        wa_log("WARN", "auth", "Webhook ohne gueltiges Bridge-Geheimnis abgewiesen")
+        return JSONResponse({"error": "Nicht autorisiert"}, status_code=403)
 
     body = await request.json()
 
@@ -25085,14 +25320,15 @@ async def wa_incoming(request: Request):
     sm = _get_skill_manager()
     wa_config = sm.get_skill_config("whatsapp")
 
-    # Whitelist prüfen
-    allowed = wa_config.get("allowed_numbers", "")
-    if allowed:
-        allowed_list = [n.strip().replace("+", "") for n in allowed.split(",") if n.strip()]
-        sender_clean = sender.replace("+", "")
-        if allowed_list and sender_clean not in allowed_list:
-            wa_log("WARN", "auth", f"Abgelehnt: +{sender} nicht in Whitelist")
-            return JSONResponse({"status": "rejected", "reason": "not_whitelisted"})
+    # Whitelist prüfen – LEER = NIEMAND (Code-Review 2026-10-18; vorher hiess
+    # eine leere Liste "jeder", entgegen der Regel fuer jedes Freigabefeld).
+    allowed = wa_config.get("allowed_numbers", "") or ""
+    allowed_list = [n.strip().replace("+", "") for n in str(allowed).split(",") if n.strip()]
+    sender_clean = str(sender).replace("+", "")
+    if sender_clean not in allowed_list:
+        wa_log("WARN", "auth", f"Abgelehnt: +{sender} nicht freigegeben"
+               + ("" if allowed_list else " (keine Nummer freigegeben)"))
+        return JSONResponse({"status": "rejected", "reason": "not_whitelisted"})
 
     task_text = None
     source_info = f"(WhatsApp von +{sender})"
@@ -25116,6 +25352,10 @@ async def wa_incoming(request: Request):
         media_path = body.get("media_path", "")
         duration = body.get("duration", 0)
 
+        # Nur aus dem Ablageordner der Bridge – die Datei wird unten GELOESCHT.
+        if not _wab.sprachdatei_erlaubt(media_path):
+            wa_log("WARN", "incoming", f"Voice-Pfad ausserhalb {_wab.SPRACH_DIR} abgewiesen")
+            return JSONResponse({"status": "error", "reason": "file_not_allowed"})
         if not media_path or not os.path.exists(media_path):
             wa_log("ERROR", "incoming", f"Voice-Datei nicht gefunden: {media_path}")
             return JSONResponse({"status": "error", "reason": "file_not_found"})
@@ -25829,13 +26069,27 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         _ws_internet = _user_has_internet_access(_ws_user)
         _ws_sap = _user_may_use_sap(_ws_user)
         _ws_vemas = _user_may_use_vemas(_ws_user)
+        # Rechte DIESES Laufs: als Argument an run_task (eigener Lauf-Kontext,
+        # agent._LaufWert) – nicht mehr nur an den geteilten Agenten geschrieben,
+        # wo ein zweiter Benutzer sie vor dem Laufstart ueberschreiben konnte
+        # (Code-Review 2026-10-18).
+        _ws_rechte = {"_current_user_internet": _ws_internet, "_current_user_sap": _ws_sap,
+                      "_current_user_vemas": _ws_vemas}
         if target_agent_id and agent_manager.get_agent(target_agent_id):
             target = agent_manager.get_agent(target_agent_id)
             if target.is_sub_agent:
+                # Code-Review 2026-10-18: ohne diese Pruefung uebernahm ein
+                # Folgeauftrag an eine FREMDE agent_id das Privileg des Erzeugers
+                # (Admin-Sub-Agent -> Domain-Benutzer ohne Sandbox).
+                if not agent_manager.gehoert(target, _ws_user):
+                    await ws.send_json({"type": "error", "agent_id": target_agent_id,
+                                        "message": "Dieser Unter-Agent gehört einem anderen Benutzer."})
+                    return
                 target._current_user_internet = _ws_internet
                 target._current_user_sap = _ws_sap
                 target._current_user_vemas = _ws_vemas
-                asyncio.create_task(target.run_task(task_text, ws, client_type=client_type, client_ip=client_ip, username=_ws_user, lang=ui_lang, attachments=image_attachments, kb_groups=kb_groups, reasoning_effort=reasoning_effort, bestaetigung=_kann_bestaetigen))
+                from backend.agent import _hintergrund
+                _hintergrund(target.run_task(task_text, ws, client_type=client_type, client_ip=client_ip, username=_ws_user, lang=ui_lang, attachments=image_attachments, kb_groups=kb_groups, reasoning_effort=reasoning_effort, bestaetigung=_kann_bestaetigen, rechte=_ws_rechte), "Folgeauftrag")
                 return
 
         agent = agent_manager.get_or_create_main()
@@ -25881,7 +26135,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
             "type": "agent_event",
             "event": "started",
             "agent": agent.get_info(),
-            "agents": agent_manager.get_all_info(),
+            "agents": agent_manager.get_all_info(fuer=None if _ws_systemweit(_ws_user) else _ws_user),
         })
 
         # Aufgabe im Hintergrund starten – sendet 'finished' wenn fertig (für Windows-TTS)
@@ -25901,7 +26155,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                         attachments=image_attachments, kb_groups=kb_groups,
                         session_id=chat_sid, is_final_attempt=_final,
                         reasoning_effort=reasoning_effort,
-                        bestaetigung=_kann_bestaetigen,
+                        bestaetigung=_kann_bestaetigen, rechte=_ws_rechte,
                     )
                     # Erfolg oder Benutzer-Stopp -> nicht wiederholen; letzter Versuch -> aufhören
                     if outcome in ("ok", "stopped") or _final:
@@ -25912,19 +26166,21 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                         "highlight": False,
                     })
                     await asyncio.sleep(_retry_delay)
-            except Exception:
-                pass
+            except Exception as _lauf_err:  # noqa: BLE001
+                # Vorher still verschluckt (Code-Review 2026-10-18)
+                print(f"[WS] Lauf mit Fehler beendet: {_lauf_err!r}", flush=True)
             finally:
                 try:
                     await ws.send_json({
                         "type": "agent_event",
                         "event": "finished",
                         "agent": agent.get_info(),
-                        "agents": agent_manager.get_all_info(),
+                        "agents": agent_manager.get_all_info(fuer=None if _ws_systemweit(_ws_user) else _ws_user),
                     })
                 except Exception:
                     pass
-        asyncio.create_task(_run_main_agent_and_notify())
+        from backend.agent import _hintergrund
+        _hintergrund(_run_main_agent_and_notify(), "Hauptlauf")
 
     elif msg_type == "spawn_agent":
         # Sub-Agent starten (vom Frontend oder Hauptagent)
@@ -25940,8 +26196,21 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
             await ws.send_json({"type": "error", "message": "Keine Aufgabe fuer Sub-Agent"})
             return
 
-        sub = agent_manager.spawn_sub_agent(label, task_text)
-        asyncio.create_task(agent_manager.run_sub_agent(sub, task_text, ws))
+        # Code-Review 2026-10-18: frei fuer jeden angemeldeten Benutzer, und der
+        # Sub-Agent erbte Name und Privileg vom GETEILTEN Hauptagenten (nach
+        # einem Neustart: niemand = privilegiert). Das Werkzeug spawn_agent ist
+        # fuer Domain-Benutzer gesperrt – dieser Weg jetzt genauso.
+        _sp_user = _get_ws_username(ws)
+        if not _ws_systemweit(_sp_user):
+            await ws.send_json({"type": "error", "message": "Unter-Agenten direkt starten darf "
+                                "nur der lokale Administrator."})
+            return
+        sub = agent_manager.spawn_sub_agent(
+            label, task_text, besitzer=_sp_user, privilegiert=True,
+            internet=_user_has_internet_access(_sp_user), sap=_user_may_use_sap(_sp_user),
+            vemas=_user_may_use_vemas(_sp_user))
+        from backend.agent import _hintergrund
+        _hintergrund(agent_manager.run_sub_agent(sub, task_text, ws), "Sub-Agent")
 
     elif msg_type == "control":
         # Steuerungsbefehle
@@ -25959,20 +26228,36 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
             await ws.send_json({"type": "error", "message": "Kein Agent aktiv"})
             return
 
+        _st_user = _get_ws_username(ws)
         if action == "stop":
             # Geteilter Hauptagent: nur den Lauf DIESES Benutzers abbrechen, damit
             # parallele Anfragen anderer Nutzer ungestoert weiterlaufen. Eigene
-            # Sub-Agent-Instanzen sind isoliert -> voll stoppen.
+            # Sub-Agent-Instanzen sind isoliert -> voll stoppen – aber nur die
+            # EIGENEN (Code-Review 2026-10-18).
             _is_main = (agent_manager and target is agent_manager.main_agent) or target is agent_instance
             if _is_main:
-                target.stop(username=_get_ws_username(ws))
+                target.stop(username=_st_user)
+            elif agent_manager and not (agent_manager.gehoert(target, _st_user)
+                                        or _ws_systemweit(_st_user)):
+                await ws.send_json({"type": "error", "agent_id": target.agent_id,
+                                    "message": "Dieser Unter-Agent gehört einem anderen Benutzer."})
+                return
             else:
                 target.stop()
             await ws.send_json({"type": "status", "message": "⏹️ Anfrage gestoppt",
                                 "agent_id": target.agent_id})
         elif action == "stop_all":
-            if agent_manager:
+            # Alle Laeufe ALLER Benutzer abbrechen darf nur der lokale
+            # Administrator; jeder andere stoppt damit nur seine eigenen
+            # (Code-Review 2026-10-18: vorher brach jeder alles ab).
+            if agent_manager and _ws_systemweit(_st_user):
                 agent_manager.stop_all()
+            elif agent_manager:
+                if agent_manager.main_agent is not None:
+                    agent_manager.main_agent.stop(username=_st_user)
+                for _sub in agent_manager.get_sub_agents():
+                    if agent_manager.gehoert(_sub, _st_user):
+                        _sub.stop()
             await ws.send_json({"type": "status", "message": "⏹️ Alle Agents gestoppt"})
 
     elif msg_type == "bestaetigung_antwort":
@@ -25985,7 +26270,9 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
 
     elif msg_type == "get_agents":
         # Agent-Liste anfordern
-        agents = agent_manager.get_all_info() if agent_manager else []
+        _gl_user = _get_ws_username(ws)
+        agents = (agent_manager.get_all_info(fuer=None if _ws_systemweit(_gl_user) else _gl_user)
+                  if agent_manager else [])
         await ws.send_json({"type": "agent_list", "agents": agents})
 
     elif msg_type == "register":

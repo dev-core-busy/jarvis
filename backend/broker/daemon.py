@@ -26,6 +26,8 @@ aus /opt/jarvis und nie mit dessen venv: beides gehoert dem Dienstbenutzer.
 """
 
 import asyncio
+import concurrent.futures
+import functools
 import grp
 import json
 import os
@@ -52,6 +54,29 @@ SERVICE_USER = os.environ.get("JARVIS_BROKER_SERVICE_USER", SOCKET_GROUP)
 MAX_REQUEST_BYTES = 512 * 1024
 DEFAULT_TIMEOUT = 120
 MAX_TIMEOUT = 900
+
+# Eigene Threadpools (Code-Review 2026-10-18): bis dahin liefen Meta-Ops UND
+# jede Op ueber asyncio.to_thread, also den Standard-Executor
+# (min(32, CPU+4) Threads). Lange Shell-Befehle der Domain-Benutzer
+# (sandbox_lauf, bis zu Stunden) belegten ihn – auf einer 4-Kern-VM reichten
+# 8 davon, und Ping, Freigaben und systemctl hingen. Jetzt:
+#   _KURZ: Meta-Ops und kurze Ops – bleibt bedienbar, auch unter Last
+#   _LANG: Ops, die Minuten bis Stunden laufen koennen, gedeckelt; ist er
+#          voll, wird abgewiesen statt endlos eingereiht.
+LANGE_OPS = frozenset({"sandbox_lauf", "shell_root", "certbot_obtain", "tika_setup",
+                       "apt_upgrades_setup", "mount_share", "mount_diagnose",
+                       "egress_setup", "sandbox_setup"})
+LANG_MAX = int(os.environ.get("JARVIS_BROKER_LANG_MAX", "24"))
+_KURZ = concurrent.futures.ThreadPoolExecutor(max_workers=8, thread_name_prefix="broker-kurz")
+_LANG = concurrent.futures.ThreadPoolExecutor(max_workers=LANG_MAX, thread_name_prefix="broker-lang")
+_lang_aktiv = 0
+
+
+def _zahl(wert, vorgabe: int) -> int:
+    try:
+        return int(wert if wert not in (None, "") else vorgabe)
+    except (TypeError, ValueError):
+        return vorgabe
 
 
 def _peer(writer) -> tuple[int | None, str]:
@@ -100,7 +125,14 @@ async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
             await send({"type": "result", "ok": False,
                         "error": "Aufrufer nicht zugelassen"})
             return
-        raw = await asyncio.wait_for(reader.readline(), timeout=30)
+        try:
+            raw = await asyncio.wait_for(reader.readline(), timeout=30)
+        except (asyncio.LimitOverrunError, ValueError):
+            # readline() wirft ueber dem Puffer (limit beim Serverstart) –
+            # vorher war das ein "Separator is not found…" ohne Hinweis.
+            await send({"type": "result", "ok": False,
+                        "error": f"Anfrage zu gross (hoechstens {MAX_REQUEST_BYTES // 1024} KiB)"})
+            return
         if not raw or len(raw) > MAX_REQUEST_BYTES:
             await send({"type": "result", "ok": False, "error": "Leere/zu grosse Anfrage"})
             return
@@ -113,12 +145,19 @@ async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         op = str(req.get("op", ""))
         args = req.get("args") or {}
         user = str(req.get("user", ""))
-        timeout = min(int(req.get("timeout") or DEFAULT_TIMEOUT), MAX_TIMEOUT)
+        if not isinstance(args, dict):
+            await send({"type": "result", "ok": False, "error": "args muss ein Objekt sein"})
+            return
+        timeout = max(1, min(_zahl(req.get("timeout"), DEFAULT_TIMEOUT), MAX_TIMEOUT))
+        # Wartezeit auf das Ergebnis: mindestens so lang wie das Op-Argument
+        # (gleich geklemmt wie in der Op selbst), sonst meldete der Daemon
+        # "Timeout", waehrend die Op weiterlief.
+        warte = max(timeout, ops.timeout_arg(args, timeout)) if op in LANGE_OPS else timeout
 
-        # Meta-Operationen direkt beantworten – im Thread: die SSH-/Firewall-
-        # Ops (fernzugang.py) laufen Sekunden und haetten sonst jede andere
-        # Verbindung des Brokers so lange angehalten
-        antwort = await asyncio.to_thread(meta.behandeln, op, args, peer=peer)
+        # Meta-Operationen direkt beantworten – im Thread des KURZ-Pools: die
+        # SSH-/Firewall-Ops (fernzugang.py) laufen Sekunden und haetten sonst
+        # jede andere Verbindung des Brokers so lange angehalten
+        antwort = await loop.run_in_executor(_KURZ, functools.partial(meta.behandeln, op, args, peer=peer))
         if antwort is not None:
             await send({"type": "result", **antwort})
             return
@@ -129,13 +168,28 @@ async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
                 send({"type": "stream", "line": str(line)[:4000]}), loop)
 
         print(f"[Broker] op={op} user={user} {peer} args={ops.redact_args(op, args)}", flush=True)
+        global _lang_aktiv
+        lang = op in LANGE_OPS
+        if lang and _lang_aktiv >= LANG_MAX:
+            await send({"type": "result", "ok": False,
+                        "error": f"Broker ausgelastet: {LANG_MAX} lange Befehle laufen bereits – "
+                                 f"bitte gleich erneut versuchen."})
+            return
+        if lang:
+            _lang_aktiv += 1
         try:
+            # ⚠ wait_for bricht den Thread NICHT ab (Register) – die Op selbst
+            # beendet ihren Prozessbaum ueber ihren eigenen Wachhund.
             result = await asyncio.wait_for(
-                asyncio.to_thread(ops.dispatch, op, args, user, stream_cb, peer),
-                timeout=timeout + 30,   # Puffer: Op-interne Timeouts greifen zuerst
+                loop.run_in_executor(_LANG if lang else _KURZ,
+                                     ops.dispatch, op, args, user, stream_cb, peer),
+                timeout=warte + 30,   # Puffer: Op-interne Timeouts greifen zuerst
             )
         except asyncio.TimeoutError:
-            result = {"ok": False, "error": f"Broker-Timeout nach {timeout}s"}
+            result = {"ok": False, "error": f"Broker-Timeout nach {warte}s"}
+        finally:
+            if lang:
+                _lang_aktiv -= 1
         await send({"type": "result", **result})
 
     except (asyncio.TimeoutError, ConnectionResetError, BrokenPipeError):
@@ -179,7 +233,10 @@ async def main():
     except FileNotFoundError:
         pass
 
-    server = await asyncio.start_unix_server(_handle, path=SOCKET_PATH)
+    # limit: Puffer fuer readline() – Standard waeren 64 KiB, MAX_REQUEST_BYTES
+    # war damit toter Code und jede groessere Anfrage scheiterte unverstaendlich.
+    server = await asyncio.start_unix_server(_handle, path=SOCKET_PATH,
+                                             limit=MAX_REQUEST_BYTES + 1)
 
     # Socket: root:<gruppe> 0660 – nur der Dienst-Benutzer darf verbinden
     try:
@@ -198,6 +255,11 @@ async def main():
         asyncio.get_running_loop().add_signal_handler(sig, stop.set)
     async with server:
         await stop.wait()
+    # Gesammelte Nutzungszaehler nicht verlieren (policy.ZAEHLER_FLUSH_S)
+    try:
+        policy.flush()
+    except Exception as e:  # noqa: BLE001
+        print(f"[Broker] Zaehler nicht geschrieben: {e}", flush=True)
     # Nur den EIGENEN Socket entfernen. Bis 2026-09-30 blind: ein verwaister
     # Alt-Broker (DEV, seit 11.08., sein Socket laengst durch den des Dienstes
     # ersetzt) loeschte beim Beenden den Pfad des LAUFENDEN Brokers – das

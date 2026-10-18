@@ -6,6 +6,7 @@ Enthaelt: Bildschirm entsperren, Desktop-Session wechseln, x11vnc-Neustart.
 """
 
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -208,7 +209,11 @@ def restart_vnc() -> str:
     return out
 
 
-def unlock_desktop_screen(target_user: str = "jarvis") -> None:
+_ENTSPERR_PAUSE_S = 10.0
+_zuletzt_entsperrt = -1e9
+
+
+def unlock_desktop_screen(target_user: str = "jarvis", erzwingen: bool = False) -> None:
     """Bildschirmschoner/Sperre fuer den Desktop-Benutzer deaktivieren.
     Wird beim VNC-Connect und bei Session-Wechsel aufgerufen.
 
@@ -219,6 +224,22 @@ def unlock_desktop_screen(target_user: str = "jarvis") -> None:
     4. D-Bus screensaver-Befehl als dieser User
     5. DPMS aufwecken mit korrekter XAUTHORITY
     """
+    # Der Name landet unten in der LightDM-Konfiguration (autologin-user=…) –
+    # nur ein schlichter Kontoname, nie ein Zeilenumbruch (Code-Review 2026-10-18).
+    if not isinstance(target_user, str) or not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", target_user):
+        print(f"[VNC] unlock_desktop_screen: ungueltiges Ziel {target_user!r:.40} – abgewiesen", flush=True)
+        return
+    # Takt-Bremse (Code-Review 2026-10-18): ein Aufruf kostet 12-15
+    # Unterprozesse und laeuft bei jedem VNC-Verbinden. Innerhalb von
+    # _ENTSPERR_PAUSE_S nach dem letzten Lauf hat sich am Zustand nichts
+    # Wesentliches geaendert – ueberspringen.
+    global _zuletzt_entsperrt
+    jetzt = time.monotonic()
+    # Nach einem Sitzungswechsel (erzwingen=True) NIE ueberspringen: die neue
+    # Sitzung braucht das Entsperren, auch wenn der letzte Lauf eben erst war.
+    if not erzwingen and jetzt - _zuletzt_entsperrt < _ENTSPERR_PAUSE_S:
+        return
+    _zuletzt_entsperrt = jetzt
     _XAUTH = "/var/run/lightdm/root/:0"
     _xenv = {"DISPLAY": ":0", "XAUTHORITY": _XAUTH}
 
@@ -227,9 +248,13 @@ def unlock_desktop_screen(target_user: str = "jarvis") -> None:
         subprocess.run(["loginctl", "unlock-sessions"], capture_output=True, timeout=5)
 
         # ── 2. Screensaver-Prozess direkt beenden ─────────────────────────
-        subprocess.run(["pkill", "-f", "cinnamon-screensaver"], capture_output=True, timeout=5)
-        subprocess.run(["pkill", "-f", "xscreensaver"],         capture_output=True, timeout=5)
-        subprocess.run(["pkill", "-f", "gnome-screensaver"],    capture_output=True, timeout=5)
+        # Verankert (Code-Review 2026-10-18): ``pkill -f xscreensaver`` traf JEDEN
+        # Prozess, dessen Kommandozeile das Wort enthaelt (auch ein Editor mit
+        # der Datei). ``-x`` geht nicht – der Prozessname ist auf 15 Zeichen
+        # gekuerzt ("cinnamon-screen").
+        subprocess.run(["pkill", "-f", r"^(\S*/)?(python3?(\.\d+)?\s+)?(\S*/)?(cinnamon-|gnome-)?screensaver(\s|$)"],
+                       capture_output=True, timeout=5)
+        subprocess.run(["pkill", "-f", r"^(\S*/)?xscreensaver(\s|$)"], capture_output=True, timeout=5)
 
         # ── 3. Aktiven Session-User auf :0 ermitteln ──────────────────────
         uid = None
@@ -351,7 +376,7 @@ def switch_desktop_session(username: str):
                 if props.get("Type") in ("x11", "wayland") and props.get("Display") and props.get("Seat") == "seat0":
                     subprocess.run(["loginctl", "activate", parts[0]], timeout=5)
                     log(f"[Session-Wechsel] Bestehende Session {parts[0]} für '{username}' aktiviert.")
-                    unlock_desktop_screen(username)
+                    unlock_desktop_screen(username, erzwingen=True)
                     restart_vnc()
                     return
 
@@ -392,7 +417,7 @@ def switch_desktop_session(username: str):
                     if props.get("Type") in ("x11", "wayland") and props.get("Display") and props.get("Seat") == "seat0":
                         log(f"[Session-Wechsel] Session für '{username}' erkannt (Display={props.get('Display')}), warte auf Stabilisierung...")
                         time.sleep(8)  # Display vollstaendig stabilisieren
-                        unlock_desktop_screen(username)
+                        unlock_desktop_screen(username, erzwingen=True)
                         restart_vnc()
                         log(f"[Session-Wechsel] ✅ '{username}' ist jetzt am Desktop angemeldet.")
                         return
@@ -412,7 +437,16 @@ def switch_desktop_session(username: str):
 
 
 def change_linux_password(username: str, new_password: str) -> bool:
-    """Setzt das Linux-Kennwort via chpasswd (braucht root). True bei Erfolg."""
+    """Setzt das Linux-Kennwort via chpasswd (braucht root). True bei Erfolg.
+
+    Zweite Schranke neben der Broker-Op (Code-Review 2026-10-18): chpasswd
+    liest zeilenweise, ein Zeilenumbruch in Name oder Kennwort waere ein
+    zweiter Auftrag – fuer ein beliebiges Konto."""
+    if (not isinstance(username, str) or not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.\-]{0,31}", username)
+            or not isinstance(new_password, str) or not new_password or len(new_password) > 256
+            or any(ord(c) < 32 or ord(c) == 127 for c in new_password)):
+        print("[AUTH] chpasswd abgewiesen: ungueltiger Name oder Kennwort mit Steuerzeichen", flush=True)
+        return False
     try:
         proc = subprocess.run(
             ['chpasswd'],

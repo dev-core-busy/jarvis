@@ -196,10 +196,32 @@ node = [p for d in ("services", "skills", "frontend/js")
         for p in (ROOT / d).rglob("*.js") if "node_modules" not in p.parts]
 if len(node) < 20:
     abbruch("nur %d JS-Dateien gefunden" % len(node))
+def _ohne_kommentare_js(q: str) -> str:
+    """Block- und Zeilenkommentare weg – sonst liest der Waechter die Begruendung
+    an der Stelle, die das Muster gerade ENTFERNT hat (schutz.js, 2026-10-18)."""
+    q = re.sub(r"/\*[\s\S]*?\*/", " ", q)
+    return re.sub(r"(?m)^\s*//.*$", " ", q)
+
+
+_NODE_MUSTER = r"rejectUnauthorized\s*:\s*false|NODE_TLS_REJECT_UNAUTHORIZED"
+check("(Positivkontrolle) Kommentarfilter laesst echten Code stehen",
+      re.search(_NODE_MUSTER, _ohne_kommentare_js("// NODE_TLS_REJECT_UNAUTHORIZED\nx = {rejectUnauthorized: false}"))
+      is not None and re.search(_NODE_MUSTER, _ohne_kommentare_js("// NODE_TLS_REJECT_UNAUTHORIZED")) is None)
 nfunde = [str(p.relative_to(ROOT)) for p in node
-          if re.search(r"rejectUnauthorized\s*:\s*false|NODE_TLS_REJECT_UNAUTHORIZED",
-                       p.read_text(encoding="utf-8", errors="replace"))]
+          if re.search(_NODE_MUSTER, _ohne_kommentare_js(p.read_text(encoding="utf-8", errors="replace")))]
 check("Node: kein rejectUnauthorized:false (%d Dateien)" % len(node), not nfunde, nfunde)
+# Startskripte, die Node-Prozesse starten (Code-Review 2026-10-18: docker/
+# entrypoint.sh setzte NODE_TLS_REJECT_UNAUTHORIZED=0 fuer die ganze Bridge –
+# der Geltungsbereich oben sah nur *.js). Kommentarzeilen zaehlen nicht.
+skripte = [p for d in ("docker", "deploy") for p in (ROOT / d).rglob("*.sh")] + \
+          [p for p in ROOT.glob("*.sh")]
+if len(skripte) < 3:
+    abbruch("nur %d Startskripte gefunden" % len(skripte))
+sfunde = [str(p.relative_to(ROOT)) for p in skripte
+          if any(re.search(r"NODE_TLS_REJECT_UNAUTHORIZED\s*=\s*['\"]?0", z)
+                 for z in p.read_text(encoding="utf-8", errors="replace").splitlines()
+                 if not z.lstrip().startswith("#"))]
+check("Skripte: kein NODE_TLS_REJECT_UNAUTHORIZED=0 (%d Dateien)" % len(skripte), not sfunde, sfunde)
 
 # ═════════════════════════════════════════════════════════════════════════════
 print("\n[B] Trigger-Webhook")

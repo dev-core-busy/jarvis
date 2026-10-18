@@ -367,7 +367,9 @@ abschnitt("6. Kern-Zweige, die ein Skill-Werkzeug selbst aufrufen")
 # `\(?` und `[^:]*`: der headless-Zweig steht seit 2026-10-12 in Klammern
 # ueber zwei Zeilen (zusaetzlich gebunden an die Schreibsperre des
 # Gedaechtnisses ohne Oberflaeche).
-_treffer = re.findall(r"if \(?steps >= 2 and self\._tool_stats([^:]*)",
+# Seit 2026-10-18 (Code-Review) ist die Statistik je Lauf (``_st = _lauf_stats()``)
+# statt ``self._tool_stats`` am geteilten Agenten.
+_treffer = re.findall(r"if \(?steps >= 2 and _st([^:]*)",
                       AGENT_SRC)
 pruefe(len(_treffer) == 2, "beide Auto-Learning-Zweige gefunden (run_task + headless)",
        str(_treffer))

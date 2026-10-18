@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"jarvis-windows/hilfen"
 )
 
 // persistedMessage ist das JSON-Format für gespeicherte Nachrichten.
@@ -24,8 +26,28 @@ func historyPath() string {
 	return filepath.Join(filepath.Dir(exe), "messages.json")
 }
 
-// SaveHistory speichert die letzten N Nachrichten (nur User + Jarvis, keine Status).
+// historySpeicher ist der EINE Schreiber fuer messages.json.
+//
+// Code-Review 2026-10-18: SaveHistory lief pro Streaming-Teil als eigene
+// Goroutine (AppendToLast) – bei einer langen Antwort Dutzende gleichzeitige
+// os.WriteFile auf dieselbe Datei, ein aelterer Stand konnte den neueren
+// ueberholen, und ein Abbruch mittendrin hinterliess eine halbe Datei. Jetzt
+// sammelt ein Entpreller die Staende und schreibt 500 ms nach dem letzten
+// Aufruf genau einmal, atomar ueber Temp-Datei + Umbenennen.
+var historySpeicher = hilfen.NeuerEntpreller(500*time.Millisecond, saveHistoryJetzt)
+
+// SaveHistory merkt den Stand zum Speichern vor (entprellt, kehrt sofort zurueck).
 func SaveHistory(messages []ChatMessage) {
+	historySpeicher.Setze(messages)
+}
+
+// FlushHistory schreibt einen vorgemerkten Stand sofort (beim Beenden).
+func FlushHistory() {
+	historySpeicher.Jetzt()
+}
+
+// saveHistoryJetzt speichert die letzten N Nachrichten (nur User + Jarvis, keine Status).
+func saveHistoryJetzt(messages []ChatMessage) {
 	var out []persistedMessage
 	for _, m := range messages {
 		if m.Role == RoleStatus {
@@ -45,7 +67,7 @@ func SaveHistory(messages []ChatMessage) {
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(historyPath(), data, 0644)
+	_ = hilfen.SchreibeAtomar(historyPath(), data, 0644)
 }
 
 // LoadHistory lädt gespeicherte Nachrichten und gibt sie als ChatMessage-Slice zurück.
@@ -75,5 +97,8 @@ func LoadHistory() []ChatMessage {
 
 // DeleteHistory löscht die gespeicherte Konversation von Disk.
 func DeleteHistory() {
+	// Code-Review 2026-10-18: einen noch vorgemerkten Stand verwerfen – sonst
+	// schriebe der Entpreller den geloeschten Verlauf 500 ms spaeter zurueck.
+	historySpeicher.Verwerfen()
 	_ = os.Remove(historyPath())
 }

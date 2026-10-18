@@ -153,7 +153,9 @@ if [[ -f "$WA_BRIDGE_DIR/index.js" ]] && command -v node &>/dev/null; then
     log "Starte WhatsApp-Bridge auf Port 3001..."
     cd "$WA_BRIDGE_DIR"
     export JARVIS_WEBHOOK="https://localhost/api/whatsapp/incoming"
-    export NODE_TLS_REJECT_UNAUTHORIZED=0
+    # KEIN NODE_TLS_REJECT_UNAUTHORIZED=0 mehr (Code-Review 2026-10-18): es galt
+    # fuer den ganzen Prozess, also auch fuer die Verbindungen zu WhatsApp. Der
+    # Webhook pinnt jetzt certs/server.crt (services/whatsapp-bridge/schutz.js).
     node index.js &
     WA_PID=$!
     sleep 1

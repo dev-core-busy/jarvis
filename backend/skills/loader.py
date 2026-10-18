@@ -10,6 +10,18 @@ from backend.tools.base import BaseTool
 
 SKILLS_DIR = Path(__file__).parent.parent.parent / "skills"
 
+# Zwischenspeicher der AUSGEFUEHRTEN Skill-Module (Code-Review 2026-10-18).
+# Bis dahin legte jeder neue JarvisAgent (jede Delegation, jeder freie
+# Sub-Agent, die Agenten je Lauf von AI-Maus/Jira/Short Tracks) einen eigenen
+# SkillManager an – und der fuehrte JEDES Skill-Modul per exec_module neu aus,
+# synchron im Event-Loop. Bei acht Delegationen je Auftrag achtmal der ganze
+# Bestand; modulweite Zustaende (Caches, Locks, Clients) gab es dabei mehrfach,
+# zwei Instanzen sahen das Lock der jeweils anderen nicht.
+# Schluessel: (Skill, Modulpfad); gueltig, solange mtime+Groesse gleich sind.
+# Neu ausgefuehrt wird bei geaenderter Datei oder ``frisch=True`` (Aktivieren,
+# Installieren, reload_all). Die Werkzeug-INSTANZEN entstehen weiter je Agent.
+_MODULE: dict = {}
+
 # Defaults für fehlende Manifest-Felder
 MANIFEST_DEFAULTS = {
     "category": "sonstige",
@@ -74,8 +86,9 @@ class SkillLoader:
 
         return skills
 
-    def load_skill(self, skill_name: str) -> list[BaseTool]:
-        """Lädt einen Skill und gibt seine Tools zurück."""
+    def load_skill(self, skill_name: str, frisch: bool = False) -> list[BaseTool]:
+        """Lädt einen Skill und gibt seine Tools zurück (Modul aus dem Zwischenspeicher,
+        ausser ``frisch`` oder die Datei hat sich geaendert)."""
         skill_dir = SKILLS_DIR / skill_name
         manifest = skill_dir / "skill.json"
 
@@ -90,11 +103,19 @@ class SkillLoader:
         if not module_path.exists():
             raise FileNotFoundError(f"Skill-Modul \"{module_path}\" nicht gefunden")
 
-        spec = importlib.util.spec_from_file_location(
-            f"skills.{skill_name}.{module_name}", str(module_path)
-        )
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        st = module_path.stat()
+        schluessel = (skill_name, str(module_path))
+        stempel = (st.st_mtime_ns, st.st_size)
+        eintrag = _MODULE.get(schluessel)
+        if not frisch and eintrag is not None and eintrag[0] == stempel:
+            module = eintrag[1]
+        else:
+            spec = importlib.util.spec_from_file_location(
+                f"skills.{skill_name}.{module_name}", str(module_path)
+            )
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            _MODULE[schluessel] = (stempel, module)
 
         # Tools aus dem Modul sammeln
         tools = []

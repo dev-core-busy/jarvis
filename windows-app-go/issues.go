@@ -22,6 +22,7 @@ import (
 	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/widget"
 
+	"jarvis-windows/hilfen"
 	"jarvis-windows/tlsvertrauen"
 )
 
@@ -59,13 +60,8 @@ type issueDetailResp struct {
 
 // ─── HTTP-Helper ──────────────────────────────────────────────────────
 
-func issuesBaseURL(serverURL string) string {
-	u := strings.TrimSuffix(serverURL, "/ws")
-	u = strings.TrimSuffix(u, "/")
-	u = strings.ReplaceAll(u, "wss://", "https://")
-	u = strings.ReplaceAll(u, "ws://", "http://")
-	return u
-}
+// Code-Review 2026-10-18: der eigene issuesBaseURL entfiel – die Basis-Adresse
+// kommt fuer alle Aufrufer aus hilfen.HTTPBasis (eine Regel statt drei).
 
 func issuesClient(adresse string) *http.Client {
 	return &http.Client{
@@ -179,8 +175,8 @@ func ShowIssuesWindow(ja *JarvisApp) {
 	var refresh func()
 
 	refresh = func() {
-		token := ja.cfg.APIKey
-		base := issuesBaseURL(ja.cfg.ServerURL)
+		token := ja.cfg.SchluesselJetzt()
+		base := hilfen.HTTPBasis(ja.cfg.ServerURLJetzt())
 		raw, code, err := issuesRequest("GET", base+"/api/issues", token, nil)
 		if err != nil {
 			statusLbl.SetText("Fehler: " + err.Error())
@@ -292,8 +288,8 @@ func showIssueDetail(ja *JarvisApp, id string, onListRefresh func()) {
 	w.Show()
 
 	loadAndRender := func() {
-		token := ja.cfg.APIKey
-		base := issuesBaseURL(ja.cfg.ServerURL)
+		token := ja.cfg.SchluesselJetzt()
+		base := hilfen.HTTPBasis(ja.cfg.ServerURLJetzt())
 		raw, code, err := issuesRequest("GET", base+"/api/issues/"+id, token, nil)
 		if err != nil {
 			body.RemoveAll()
@@ -371,10 +367,10 @@ func renderIssueDetail(ja *JarvisApp, w fyne.Window, body *fyne.Container,
 							return
 						}
 						go func() {
-							base := issuesBaseURL(ja.cfg.ServerURL)
+							base := hilfen.HTTPBasis(ja.cfg.ServerURLJetzt())
 							_, code, err := issuesRequest("DELETE",
 								base+"/api/issues/"+is.ID+"/attachments/"+name,
-								ja.cfg.APIKey, nil)
+								ja.cfg.SchluesselJetzt(), nil)
 							if err != nil {
 								dialog.ShowError(err, w)
 								return
@@ -424,9 +420,9 @@ func renderIssueDetail(ja *JarvisApp, w fyne.Window, body *fyne.Container,
 						return
 					}
 					go func() {
-						base := issuesBaseURL(ja.cfg.ServerURL)
+						base := hilfen.HTTPBasis(ja.cfg.ServerURLJetzt())
 						_, code, err := issuesRequest("DELETE",
-							base+"/api/issues/"+is.ID, ja.cfg.APIKey, nil)
+							base+"/api/issues/"+is.ID, ja.cfg.SchluesselJetzt(), nil)
 						if err != nil {
 							dialog.ShowError(err, w)
 							return
@@ -493,7 +489,7 @@ func showIssueForm(ja *JarvisApp, existing *Issue, onSaved func()) {
 				"priority": prioMap[prioSel.Selected],
 			}
 			body, _ := json.Marshal(payload)
-			base := issuesBaseURL(ja.cfg.ServerURL)
+			base := hilfen.HTTPBasis(ja.cfg.ServerURLJetzt())
 			url := base + "/api/issues"
 			method := "POST"
 			if existing != nil {
@@ -501,7 +497,7 @@ func showIssueForm(ja *JarvisApp, existing *Issue, onSaved func()) {
 				method = "PATCH"
 			}
 			go func() {
-				raw, code, err := issuesRequest(method, url, ja.cfg.APIKey, body)
+				raw, code, err := issuesRequest(method, url, ja.cfg.SchluesselJetzt(), body)
 				if err != nil {
 					errLbl.SetText("Fehler: " + err.Error())
 					errLbl.Show()
@@ -559,10 +555,10 @@ func showJarvisForm(ja *JarvisApp, is *Issue, onSaved func()) {
 			"jarvis_comment": commentEntry.Text,
 		}
 		body, _ := json.Marshal(payload)
-		base := issuesBaseURL(ja.cfg.ServerURL)
+		base := hilfen.HTTPBasis(ja.cfg.ServerURLJetzt())
 		go func() {
 			raw, code, err := issuesRequest("PATCH",
-				base+"/api/issues/"+is.ID, ja.cfg.APIKey, body)
+				base+"/api/issues/"+is.ID, ja.cfg.SchluesselJetzt(), body)
 			if err != nil {
 				errLbl.SetText("Fehler: " + err.Error())
 				errLbl.Show()
@@ -618,10 +614,10 @@ func uploadAttachment(ja *JarvisApp, parent fyne.Window, issueID string, onDone 
 		fw.Write(data)
 		mw.Close()
 
-		base := issuesBaseURL(ja.cfg.ServerURL)
+		base := hilfen.HTTPBasis(ja.cfg.ServerURLJetzt())
 		req, _ := http.NewRequest("POST",
 			base+"/api/issues/"+issueID+"/attachments", &buf)
-		req.Header.Set("Authorization", "Bearer "+ja.cfg.APIKey)
+		req.Header.Set("Authorization", "Bearer "+ja.cfg.SchluesselJetzt())
 		req.Header.Set("Content-Type", mw.FormDataContentType())
 		resp, err := issuesClient(base).Do(req)
 		if err != nil {
@@ -646,10 +642,10 @@ func downloadAttachment(ja *JarvisApp, parent fyne.Window, issueID, filename str
 			return
 		}
 		defer wc.Close()
-		base := issuesBaseURL(ja.cfg.ServerURL)
+		base := hilfen.HTTPBasis(ja.cfg.ServerURLJetzt())
 		raw, code, err := issuesRequest("GET",
 			base+"/api/issues/"+issueID+"/attachments/"+filename,
-			ja.cfg.APIKey, nil)
+			ja.cfg.SchluesselJetzt(), nil)
 		if err != nil {
 			dialog.ShowError(err, parent)
 			return

@@ -10,6 +10,12 @@ import info.jarvisai.app.data.model.WsEvent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+// Code-Review 2026-10-18: Grenzen fuer shell_exec (Zeit und gelesene Ausgabe).
+// Das Backend wartet 30 s auf desktop_result (backend/tools/android_desktop.py);
+// 25 s lassen Zeit, die Abbruchmeldung noch zurueckzuschicken.
+private const val SHELL_TIMEOUT_S = 25L
+private const val SHELL_MAX_BYTES = 64 * 1024
+
 class AndroidDesktopExecutor(private val context: Context) {
 
     suspend fun execute(event: WsEvent): Triple<String, String, Int> =
@@ -36,14 +42,57 @@ class AndroidDesktopExecutor(private val context: Context) {
     private fun shellExec(event: WsEvent): Triple<String, String, Int> {
         val command = event.cmd.ifBlank { event.text }
         if (command.isBlank()) return Triple("", "Kein Befehl angegeben (cmd)", 1)
+        // Code-Review 2026-10-18: frueher erst stdout, dann stderr komplett gelesen
+        // (Deadlock, sobald stderr die Pipe fuellt), waitFor() ohne Zeitgrenze und
+        // readText() ohne Groessengrenze. Jetzt: ein gemeinsamer Strom, begrenzt
+        // gelesen, mit Zeitlimit und hartem Abbruch.
+        var proc: Process? = null
         return try {
-            val proc = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
-            val stdout = proc.inputStream.bufferedReader().readText()
-            val stderr = proc.errorStream.bufferedReader().readText()
-            val exitCode = proc.waitFor()
-            val output = (stdout + if (stderr.isNotBlank()) "\n$stderr" else "").take(8000)
-            Triple(output, "", exitCode)
+            val p = ProcessBuilder("sh", "-c", command)
+                .redirectErrorStream(true)
+                .start()
+            proc = p
+            p.outputStream.close()  // keine Eingabe - Befehle, die stdin lesen, enden sofort
+            // Lesen in eigenem Thread, damit das Zeitlimit auch greift, wenn der
+            // Befehl nichts ausgibt und die Leseschleife blockiert.
+            val puffer = java.io.ByteArrayOutputStream()
+            var abgeschnitten = false
+            val leser = Thread {
+                try {
+                    p.inputStream.use { ein ->
+                        val block = ByteArray(8192)
+                        while (true) {
+                            val n = ein.read(block)
+                            if (n < 0) break
+                            val frei = SHELL_MAX_BYTES - puffer.size()
+                            if (frei > 0) puffer.write(block, 0, minOf(n, frei))
+                            // Weiterlesen und verwerfen, damit der Prozess nicht an
+                            // einer vollen Pipe haengt.
+                            if (n > frei) abgeschnitten = true
+                        }
+                    }
+                } catch (_: java.io.IOException) {
+                    // Strom nach destroyForcibly() geschlossen - Ende
+                }
+            }.apply { isDaemon = true; start() }
+
+            val fertig = p.waitFor(SHELL_TIMEOUT_S, java.util.concurrent.TimeUnit.SECONDS)
+            if (!fertig) p.destroyForcibly()
+            leser.join(2_000)
+            // Haelt ein Kindprozess die Pipe noch offen, Leser durch Schliessen loesen
+            if (leser.isAlive) runCatching { p.inputStream.close() }
+            val text = puffer.toString(Charsets.UTF_8.name())
+            val output = buildString {
+                append(text.take(8000))
+                if (abgeschnitten || text.length > 8000) append("\n[Ausgabe gekuerzt]")
+            }
+            if (!fertig) {
+                Triple(output, "Zeitlimit von $SHELL_TIMEOUT_S s ueberschritten - Befehl abgebrochen", 124)
+            } else {
+                Triple(output, "", p.exitValue())
+            }
         } catch (e: Exception) {
+            proc?.destroyForcibly()
             Triple("", "Shell-Fehler: ${e.message}", 1)
         }
     }

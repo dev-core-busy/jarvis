@@ -263,7 +263,7 @@ NS = {
     "_user_must_change": lambda u: False,
     "_standard_zugang": types.SimpleNamespace(ist_standardkennwort=lambda pw, u: False),
     "_user_sessions": types.SimpleNamespace(record_login=lambda *a, **k: None),
-    "security_guard": types.SimpleNamespace(get_block=lambda u: None),
+    "security_guard": types.SimpleNamespace(get_block=lambda u: None, is_blocked=lambda u: False),
     "switch_desktop_session": lambda u: None,
     "_konto_hinweis_abraeumen": lambda u: None,
     "_login_still_allowed": lambda u: True,

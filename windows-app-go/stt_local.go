@@ -16,6 +16,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"jarvis-windows/hilfen"
 )
 
 // exeDir gibt das Verzeichnis von jarvis.exe zurück.
@@ -394,10 +396,11 @@ func transcribeSAPI(wavData []byte) (string, error) {
 	f.Close()
 
 	winPath := strings.ReplaceAll(tmpPath, "/", "\\")
+	// Code-Review 2026-10-18: Pfad maskiert einsetzen (Apostroph im Profilnamen)
 	script := `
 Add-Type -AssemblyName System.Speech
 $rec = New-Object System.Speech.Recognition.SpeechRecognitionEngine
-$rec.SetInputToWaveFile('` + winPath + `')
+$rec.SetInputToWaveFile(` + hilfen.PSZeichenkette(winPath) + `)
 $g = New-Object System.Speech.Recognition.DictationGrammar
 $rec.LoadGrammar($g)
 $rec.BabbleTimeout = [TimeSpan]::FromSeconds(0)

@@ -83,6 +83,10 @@
      *  ~~del~~, `code`, ```block```                              */
     function renderMarkdown(text) {
         const _E = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        // Fuer ATTRIBUTWERTE zusaetzlich die Anfuehrungszeichen (Code-Review
+        // 2026-10-18): _E laesst " und ' stehen – aus ![x](https://a" onerror=…)
+        // wurden so weitere Attribute am <img> (in jsdom nachgestellt).
+        const _A = s => String(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
         // UTF-8-String -> base64 (fuer die Chart-Spec im data-Attribut, ohne
         // deprecated unescape; Sonderzeichen stoeren so die Token-Ersetzung nicht)
@@ -207,7 +211,7 @@
             const tip = escapeHtml(_tt('media.netz_hint',
                 'Öffnet die Datei aus der Wissensdatenbank · Original:') + ' ' + roh);
             return `<a href="${url}" target="_blank" rel="noopener noreferrer" `
-                 + `class="jv-netzquelle" title="${tip}">${rein}</a>` + schwanz;
+                 + `class="jv-netzquelle" title="${_A(tip)}">${rein}</a>` + schwanz;
         }
 
         function _inline(t) {
@@ -239,7 +243,7 @@
                 const raw = url.replace(/&amp;/g, '&');
                 const safe = /^https?:\/\/|^\/|^data:image\//.test(raw) ? _withToken(raw) : '';
                 if (!safe) return '';
-                return _hold(`<img src="${safe}" alt="${alt}" class="chat-img" loading="lazy" `
+                return _hold(`<img src="${_A(safe)}" alt="${_A(alt)}" class="chat-img" loading="lazy" `
                      // BSI H4: kein onload mehr - der Capture-Listener oben
                      // (document, 'load') ruft __jarvisImgScroll fuer img.chat-img.
                      + `style="max-width:100%;border-radius:10px;margin:6px 0;display:block;">`);
@@ -254,7 +258,7 @@
                 // je Seite stimmt oder nicht, ist schlimmer als keine.
                 const tip = escapeHtml(_tt('media.chip_hint',
                     'Klick = herunterladen · Ziehen = in Explorer/Outlook'));
-                return _hold(`<a href="${_withToken(url)}" download class="chat-doc-dl" title="${tip}">`
+                return _hold(`<a href="${_A(_withToken(url))}" download class="chat-doc-dl" title="${_A(tip)}">`
                            + `${_DL_SVG}<span>${safe}</span></a>`);
             };
             // Markdown-Form [label](/api/documents/..)
@@ -282,7 +286,7 @@
                 // Auch hier Token anhaengen: per Liefer-Marker koennen Dateien
                 // beliebigen Typs (zip/csv/mp4 …) kommen, die kein Chip werden.
                 const safe = /^https?:\/\/|^\//.test(raw) ? _withToken(raw) : '#';
-                return `<a href="${safe}" target="_blank" rel="noopener noreferrer">${tit}</a>`;
+                return `<a href="${_A(safe)}" target="_blank" rel="noopener noreferrer">${tit}</a>`;
             });
 
             // Nackte URLs (http/https/www) klickbar machen. Bestehende Markdown-<a>-
@@ -296,7 +300,7 @@
             t = t.replace(/(https?:\/\/[^\s<>"{}|\\^`[\]]+|www\.[a-zA-Z0-9][^\s<>"{}|\\^`[\]]*)/gi, (url) => {
                 const raw = url.replace(/&amp;/g, '&');
                 const href = /^www\./i.test(raw) ? 'https://' + raw : raw;
-                return `<a href="${href}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+                return `<a href="${_A(href)}" target="_blank" rel="noopener noreferrer">${url}</a>`;
             });
             // Nackte Netzwerkpfade – NACH _protect(<a>), damit ein bereits
             // gebauter Link nicht ein zweites Mal verlinkt wird.

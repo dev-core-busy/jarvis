@@ -162,13 +162,24 @@ fi
 NEU="$ZIEL.neu.$$"
 rm -rf "$NEU"
 mkdir -m 0755 "$NEU" || fehler "kann $NEU nicht anlegen"
-# -h: symbolische Links werden AUFGELOEST (Inhalt kopiert). Ein Link in die
-# beschreibbare Welt waere sonst ein Weg, den Inhalt nach der Installation zu
-# tauschen.
-if ! tar -C "$SRC" -chf - --exclude='__pycache__' --exclude='*.pyc' \
+# Symbolische Links in der Quelle: ABBRUCH (Code-Review 2026-10-18). Bis dahin
+# loeste `tar -h` sie auf – im Modus 'lokal' gehoert die Quelle dem
+# Dienstbenutzer, ein Link backend/x -> /etc/shadow waere als INHALT kopiert und
+# unten per chmod -R go=rX fuer alle lesbar gemacht worden. Ohne -h wuerde der
+# Link selbst kopiert und zeigte in die beschreibbare Welt. Beides darf nicht
+# sein; das Repo enthaelt keine Links.
+LINKS=$(find "$SRC/backend" "$SRC/deploy" "$SRC/start_jarvis_root.sh" "$SRC/jarvis.service" \
+        -type l 2>/dev/null | head -5)
+if [ -n "$LINKS" ]; then
+    rm -rf "$NEU"; fehler "Symbolische Links in der Quelle – Abbruch: $(echo $LINKS)"
+fi
+# Beide tar einzeln pruefen: ohne pipefail zaehlte nur der Exit des zweiten.
+tar -C "$SRC" -cf - --exclude='__pycache__' --exclude='*.pyc' \
         backend deploy start_jarvis_root.sh jarvis.service 2>/dev/null \
-     | tar -C "$NEU" -xf - --no-same-owner --no-same-permissions; then
-    rm -rf "$NEU"; fehler "Kopieren aus $SRC gescheitert"
+     | tar -C "$NEU" -xf - --no-same-owner --no-same-permissions
+TAR_RC=("${PIPESTATUS[@]}")
+if [ "${TAR_RC[0]}" != "0" ] || [ "${TAR_RC[1]}" != "0" ]; then
+    rm -rf "$NEU"; fehler "Kopieren aus $SRC gescheitert (tar: ${TAR_RC[*]})"
 fi
 chown -R root:root "$NEU"
 chmod -R u=rwX,go=rX "$NEU"

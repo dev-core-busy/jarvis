@@ -14,7 +14,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
-import java.net.URI
+import info.jarvisai.app.data.api.ServerAdresse
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -29,20 +29,8 @@ class IssuesRepository @Inject constructor(
     private val settings: SettingsDataStore,
 ) {
     private suspend fun baseUrl(): String {
-        val s = settings.settings.first()
-        val raw = s.serverUrl.trimEnd('/')
-        val httpUrl = when {
-            raw.startsWith("wss://") -> "https://" + raw.removePrefix("wss://")
-            raw.startsWith("ws://")  -> "http://"  + raw.removePrefix("ws://")
-            raw.isBlank()            -> ""
-            !raw.startsWith("http")  -> "https://$raw"
-            else                     -> raw
-        }
-        return try {
-            val parsed = URI(httpUrl)
-            val port = if (parsed.port > 0) ":${parsed.port}" else ""
-            "${parsed.scheme}://${parsed.host}$port"
-        } catch (_: Exception) { httpUrl }
+        // Code-Review 2026-10-18: gemeinsame Umrechnung statt eigener Kopie
+        return ServerAdresse.ursprung(settings.settings.first().serverUrl)
     }
 
     private suspend fun token(): String = settings.settings.first().apiKey

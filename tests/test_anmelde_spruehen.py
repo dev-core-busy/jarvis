@@ -22,6 +22,7 @@ WIRKUNG der vier Bausteine:
 """
 from __future__ import annotations
 
+import os
 import ast
 import asyncio
 import shutil
@@ -182,7 +183,8 @@ try:
     FN = {n.name: n for n in BAUM.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
     noetig = ["_ad_vorab_freigabe", "_gruppen_passen", "_ad_user_allowed",
               "authenticate_linux_user", "_login_ablauf", "login",
-              "_anmelde_schwellen_aktualisieren", "_ldap_escape", "_group_cn_prefix"]
+              "_anmelde_schwellen_aktualisieren", "_ldap_escape", "_group_cn_prefix",
+              "_dn_norm", "_gruppe_passt"]
     fehlt = [n for n in noetig if n not in FN]
     if fehlt:
         abbruch("in main.py nicht gefunden: %s" % fehlt)
@@ -239,8 +241,11 @@ try:
 
     NSB = {"config": _cfg.config, "time": time, "print": lambda *a, **k: None,
            "_norm_login": lambda n: (n or "").split("@")[0].split("\\")[-1].strip().lower(),
-           "_VORAB_DIENST_PAUSE_S": 600, "_vorab_dienst_pause": {"bis": 0.0}}
-    _laden(["_ldap_escape", "_group_cn_prefix", "_gruppen_passen", "_ad_vorab_freigabe"], NSB)
+           "_VORAB_DIENST_PAUSE_S": 600, "_vorab_dienst_pause": {"bis": 0.0},
+           "os": os, "_CN_TREFFER_GEMELDET": set()}
+    # _dn_norm/_gruppe_passt: seit 2026-10-18 die EINE Gruppenregel (DN-genau)
+    _laden(["_ldap_escape", "_group_cn_prefix", "_dn_norm", "_gruppe_passt", "_gruppen_passen",
+            "_ad_vorab_freigabe"], NSB)
     vorab = NSB["_ad_vorab_freigabe"]
     GRUPPE = "CN=Jarvis-Nutzer,OU=G,DC=firma,DC=local"
 

@@ -9,6 +9,8 @@ Workflow:
 """
 
 import json
+
+from backend import atomar as _atomar  # atomar + fail-closed (Code-Review 2026-10-18)
 import threading
 import time
 from pathlib import Path
@@ -276,7 +278,7 @@ def _load_token() -> Optional[dict]:
 def _save_token(token: dict):
     """Speichert Token als JSON."""
     TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
-    TOKEN_PATH.write_text(json.dumps(token, indent=2))
+    _atomar.schreiben(TOKEN_PATH, token, modus=0o600, sicherung=False)  # atomar, nur Dienst (Code-Review 2026-10-18)
 
 
 def _save_token_from_creds(creds, email: str):

@@ -33,8 +33,8 @@ SETTINGS = "frontend/settings.html"
 PROBEN = [
     # ── Backend ──
     ("Admin-Kennwort wird nicht geprueft", MAIN,
-     "    if not await asyncio.to_thread(authenticate_linux_user, user, kennwort):\n        _totp_protokoll(user, ziel, \"kennwort_falsch\")",
-     "    if False:\n        _totp_protokoll(user, ziel, \"kennwort_falsch\")", PY_W),
+     "    if not await asyncio.to_thread(authenticate_linux_user, user, kennwort):\n        _kennwort_fehlversuch(request, user, \"totp_reset\")",
+     "    if False:\n        _kennwort_fehlversuch(request, user, \"totp_reset\")", PY_W),
     ("Kennwort des ZIELKONTOS statt des Admins", MAIN,
      "    if not await asyncio.to_thread(authenticate_linux_user, user, kennwort):",
      "    if not await asyncio.to_thread(authenticate_linux_user, ziel, kennwort):", PY_W),

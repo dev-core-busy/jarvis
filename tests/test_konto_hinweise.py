@@ -58,7 +58,9 @@ ROUTEN = {("post", "/api/admin/totp/reset"): "reset", ("get", "/api/auth/hinweis
 HELFER = {"_totp_aktive_benutzer", "_totp_protokoll", "_norm_login", "_konto_hinweise",
           "_konto_hinweis_abraeumen", "_totp_fehlertext",
           # Code-Review 2026-10-07: verify weist App-Sitzungen ab
-          "_sitzung_ist_app", "_totp_app_sperre"}
+          "_sitzung_ist_app", "_totp_app_sperre",
+          # seit 2026-10-18: ein Konto = ein Schluessel (test_auth_schreibweise)
+          "_auth_schluessel", "_auth_eintraege_zusammenfuehren"}
 teile, namen = [], {}
 for n in baum.body:
     if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -91,11 +93,16 @@ ZUSTAND = {}
 
 
 def _load_auth_state():
+    # Wie der echte Lader seit 2026-10-18: Schreibweisen derselben Person werden
+    # zusammengefuehrt UND zurueckgeschrieben (Migration beim ersten Lesen).
+    if isinstance(ZUSTAND.get("users"), dict):
+        ZUSTAND["users"], _ = ns["_auth_eintraege_zusammenfuehren"](ZUSTAND["users"])
     return copy.deepcopy(ZUSTAND)
 
 
 def _set_user_auth_state(username, updates):
-    ZUSTAND.setdefault("users", {}).setdefault(username, {}).update(updates)
+    _load_auth_state()
+    ZUSTAND.setdefault("users", {}).setdefault(ns["_auth_schluessel"](username), {}).update(updates)
 
 
 class JSONResponse:
@@ -148,7 +155,9 @@ ns = {**_abh, "JSONResponse": JSONResponse, "Request": Anfrage, "Depends": lambd
       "_get_user_auth_state": lambda u: copy.deepcopy((ZUSTAND.get("users") or {}).get(u, {})),
       "authenticate_linux_user": lambda u, p, details=None: (u, p) == ("jarvis", "admin-geheim"),
       "_display_name": lambda u: "Anzeige " + u, "_note_activity": lambda u, r: None,
-      "_sitzung_kontext": contextvars.ContextVar("_sk", default=None)}
+      "_sitzung_kontext": contextvars.ContextVar("_sk", default=None),
+      # seit 2026-10-18 auch an der Admin-Ruecksetzung (BSI N4, test_totp_admin_reset)
+      "_kennwort_schranke": lambda r, u: None, "_kennwort_fehlversuch": lambda r, u, w: None}
 try:
     exec(compile(modul, str(MAIN), "exec"), ns)
 except Exception as e:  # noqa: BLE001
@@ -186,7 +195,7 @@ frisch()
 t0 = int(time.time())
 r = run("reset", {"user": "FIRMA\\m.muster", "password": "admin-geheim"}, "jarvis")
 check("(Positivkontrolle) Ruecksetzung 200", r.status_code == 200, str(r.content))
-v = ZUSTAND["users"]["FIRMA\\m.muster"].get("totp_zurueckgesetzt") or {}
+v = _load_auth_state()["users"]["m.muster"].get("totp_zurueckgesetzt") or {}   # ein Schluessel je Person
 check("Vermerk am Zielkonto: von (Anzeigename) und am", v.get("von") == "Anzeige jarvis" and t0 <= v.get("am", 0) <= t0 + 5, str(v))
 for schreibweise in ("FIRMA\\m.muster", "m.muster", "M.Muster@firma.local"):
     h = hinweise(schreibweise)

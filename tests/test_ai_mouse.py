@@ -2595,6 +2595,26 @@ _pa = _cl_u[_cl_u.find("public async Task<byte[]> PaketAsync"):]
 _pa = _pa[:_pa.find("public async Task<List<PromptItem>>")] if "public async Task<List<PromptItem>>" in _pa else _pa
 check("PaketAsync hat ein eigenes, kurzes Zeitlimit",
       "CancellationTokenSource(TimeSpan" in _pa)
+# ⚠ "TLS-GEPRUEFT" GILT NUR MIT https (Code-Review 2026-10-18): bis dahin nahm
+#   `EndpointResolver` auch http an – Kennwort, Token und die EXE gingen dann
+#   im Klartext. Die Basis-Regel laesst NUR https zu; `PaketAsync` prueft es
+#   bewusst noch einmal selbst, und zwar VOR dem Abruf. Ausgefuehrt gemessen
+#   wurde die Regel mit dotnet (7 Faelle, Gegenprobe am alten Stand 3 FAIL);
+#   hier steht, was der Quelltext beantworten kann.
+_er_u = "\n".join(
+    z for z in (ROOT / "ai-mouse" / "src" / "AiMouse" / "Vision"
+                / "EndpointResolver.cs").read_text(encoding="utf-8").split("\n")
+    if not z.lstrip().startswith("//") and not z.lstrip().startswith("///"))
+check("EndpointResolver laesst NUR https zu (kein UriSchemeHttp ohne s)",
+      "uri.Scheme != Uri.UriSchemeHttps" in _er_u
+      and re.search(r"UriSchemeHttp\b", _er_u) is None)
+_i_https = _pa.find("if (!IstHttps(basis))")
+_i_send = _pa.find("_http.SendAsync(")
+check("PaketAsync verweigert eine Nicht-https-Adresse VOR dem Abruf "
+      "(Pruefung@%d, Abruf@%d)" % (_i_https, _i_send), 0 <= _i_https < _i_send)
+check("…und IstHttps prueft das Schema fail-closed",
+      re.search(r"static bool IstHttps\(string adresse\)\s*=>\s*Uri\.TryCreate"
+                r"[\s\S]{0,120}uri\.Scheme == Uri\.UriSchemeHttps", _cl_u) is not None)
 check("ServerVersionAsync wirft nicht (leer = unbekannt)",
       "return string.Empty;" in _cl_u[_cl_u.find("ServerVersionAsync"):
                                       _cl_u.find("PaketAsync")])
@@ -4488,8 +4508,29 @@ _i_ans = _cs_tr32.find("window.ShowAnswer(answer,")
 _i_bild = _cs_tr32.find("ErgebnisBildZeigenAsync(window, ergebnis.BildUrl")
 check("der Text erscheint VOR dem Bildabruf (er ist fertig)",
       0 < _i_ans < _i_bild)
-check("auch der Wiederholungs-Zweig zeigt das Bild",
-      _cs_tr32.count("ErgebnisBildZeigenAsync(") >= 3)
+# ⚠ BIS 2026-10-18 STAND HIER `count("ErgebnisBildZeigenAsync(") >= 3` – ein
+#   VORKOMMEN, und es hat die Luecke daneben nicht gesehen: der
+#   Wiederholungsweg nach 401 zeigte das Bild, liess aber den Hinweis
+#   "Nachgeschlagen: …" weg (Code-Review 2026-10-18). Seitdem laufen beide
+#   Wege ueber EINEN Helfer, und gemessen wird genau das: beide Zweige rufen
+#   ihn, und der Helfer traegt Hinweis UND Bild.
+_klick32 = cs_block(_cs_tr32, "private async void OnPromptItemClicked")
+_wied32 = cs_block(_klick32, "catch (AnmeldungNoetigException)")
+_haupt32 = _klick32[:_klick32.find("catch (AnmeldungNoetigException)")] \
+    if "catch (AnmeldungNoetigException)" in _klick32 else ""
+_helf32 = cs_block(_cs_tr32, "private async Task AuswertenUndZeigenAsync")
+check("Positivkontrolle: Klick-Handler, Wiederholungs-Zweig und Helfer geschnitten",
+      len(_klick32) > 500 and len(_wied32) > 100 and len(_haupt32) > 100
+      and len(_helf32) > 100)
+check("der Hauptweg wertet ueber den gemeinsamen Helfer aus",
+      "AuswertenUndZeigenAsync(" in _haupt32
+      and "_client.AnalysierenAsync(" not in _haupt32)
+check("auch der Wiederholungs-Zweig (nach 401) laeuft ueber denselben Helfer",
+      "AuswertenUndZeigenAsync(" in _wied32
+      and "_client.AnalysierenAsync(" not in _wied32)
+check("…und der Helfer zeigt Hinweis 'Nachgeschlagen' UND das Bild",
+      "Texte.Nachgeschlagen" in _helf32
+      and "ErgebnisBildZeigenAsync(window, ergebnis.BildUrl" in _helf32)
 
 # Beide Sprachen – ein Text, den es nur auf Deutsch gibt, ist ein halber.
 _cs_tx32 = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Localization" / "Texte.cs").read_text(

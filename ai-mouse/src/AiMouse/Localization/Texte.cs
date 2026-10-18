@@ -76,6 +76,24 @@ internal static class Texte
     public static string KeinServer => T(
         "Es ist keine Serveradresse hinterlegt. Trage sie unter „Einstellungen“ ein.",
         "No server address configured. Enter it under “Settings”.");
+
+    /// <summary>Die Adresse ist da, aber ohne Verschluesselung.
+    ///
+    /// ⚠ EIGENER TEXT STATT `KeinServer` (Code-Review 2026-10-18): seit
+    /// `EndpointResolver` nur noch https annimmt, ist eine eingetragene
+    /// http-Adresse "unbrauchbar". Die Meldung "keine Serveradresse
+    /// hinterlegt" waere dann falsch – der Benutzer sieht die Adresse doch im
+    /// Feld stehen.</summary>
+    public static string NurHttps => T(
+        "Die Serveradresse muss mit https:// beginnen – ohne Verschlüsselung würden Kennwort und Anmeldung lesbar übertragen.",
+        "The server address must start with https:// – without encryption your password and sign-in would be sent readable.");
+
+    /// <summary>Der passende Grund, wenn `EndpointResolver.Basis` leer ist:
+    /// eine http-Adresse bekommt <see cref="NurHttps"/>, alles andere
+    /// <see cref="KeinServer"/>.</summary>
+    public static string KeinServerFuer(string? eingabe) =>
+        (eingabe ?? string.Empty).Trim().StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            ? NurHttps : KeinServer;
     public static string AnmeldungFehlt => T(
         "Bitte zuerst anmelden.", "Please sign in first.");
 

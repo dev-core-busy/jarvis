@@ -501,26 +501,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 return;
             }
 
-            var bereiche = new List<string>();
-            MausAntwort ergebnis = await _client.AnalysierenAsync(
-                prompt.Prompt, dataUri, bereiche, cts.Token).ConfigureAwait(true);
-
-            // WAS DER LAUF DURFTE, gehoert zur Antwort. Ohne diese Zeile ist
-            // eine Antwort mit nachgeschlagenem Hintergrund von einer ohne
-            // nicht zu unterscheiden - und genau das muss ein Mensch wissen,
-            // der den Text gleich weiterverwendet.
-            string answer = ergebnis.Text;
-            if (bereiche.Count > 0)
-            {
-                answer += "\n\n— " + Texte.Nachgeschlagen + string.Join(", ", bereiche);
-            }
-
-            if (!window.IsDisposed)
-            {
-                window.ShowAnswer(answer, _settings.CopyResultToClipboard);
-            }
-
-            await ErgebnisBildZeigenAsync(window, ergebnis.BildUrl, cts.Token)
+            await AuswertenUndZeigenAsync(window, prompt, dataUri, cts.Token)
                 .ConfigureAwait(true);
         }
         catch (OperationCanceledException)
@@ -537,18 +518,12 @@ internal sealed class TrayApplicationContext : ApplicationContext
             {
                 if (await SicherstellenAngemeldetAsync(cts.Token).ConfigureAwait(true))
                 {
-                    var bereiche2 = new List<string>();
-                    MausAntwort zweit = await _client.AnalysierenAsync(
-                        prompt.Prompt, ScreenCapture.ToDataUri(capture), bereiche2, cts.Token)
+                    // DERSELBE Helfer wie im Hauptweg – Hinweis "Nachgeschlagen"
+                    // und Ergebnisbild gibt es damit auch nach einer abgelaufenen
+                    // Sitzung (siehe Docstring von AuswertenUndZeigenAsync).
+                    await AuswertenUndZeigenAsync(
+                        window, prompt, ScreenCapture.ToDataUri(capture), cts.Token)
                         .ConfigureAwait(true);
-                    if (!window.IsDisposed)
-                    {
-                        window.ShowAnswer(zweit.Text, _settings.CopyResultToClipboard);
-                        // AUCH HIER – sonst gibt es das Bild nur bei einer
-                        // Sitzung, die zufaellig noch gilt.
-                        await ErgebnisBildZeigenAsync(window, zweit.BildUrl, cts.Token)
-                            .ConfigureAwait(true);
-                    }
                 }
                 else if (!window.IsDisposed)
                 {
@@ -574,6 +549,49 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 window.ShowError($"{ex.GetType().Name}: {ex.Message}");
             }
         }
+    }
+
+    /// <summary>Wertet aus und zeigt Antwort, Hinweis und Bild im Fenster.
+    ///
+    /// ⚠ EIN HELFER FUER HAUPTWEG UND WIEDERHOLUNG NACH 401 (Code-Review
+    /// 2026-10-18). Bis dahin stand der Ablauf zweimal in
+    /// <see cref="OnPromptItemClicked"/>, und die Kopie im Wiederholungsweg
+    /// liess den Hinweis "Nachgeschlagen: …" weg: dieselbe Antwort sagte je
+    /// nach Zufall der Sitzungsdauer, was der Lauf nachschlagen durfte – oder
+    /// eben nicht. Zwei Kopien fuer eine Zusage laufen auseinander; eine
+    /// Stelle kann das nicht.
+    ///
+    /// Ausnahmen (auch <see cref="AnmeldungNoetigException"/>) gehen
+    /// unveraendert an den Aufrufer – der entscheidet, ob neu angemeldet wird.
+    /// </summary>
+    private async Task AuswertenUndZeigenAsync(ResultWindow window, PromptItem prompt,
+                                               string dataUri, CancellationToken ct)
+    {
+        var bereiche = new List<string>();
+        MausAntwort ergebnis = await _client.AnalysierenAsync(
+            prompt.Prompt, dataUri, bereiche, ct).ConfigureAwait(true);
+
+        // WAS DER LAUF DURFTE, gehoert zur Antwort. Ohne diese Zeile ist
+        // eine Antwort mit nachgeschlagenem Hintergrund von einer ohne
+        // nicht zu unterscheiden - und genau das muss ein Mensch wissen,
+        // der den Text gleich weiterverwendet.
+        string answer = ergebnis.Text;
+        if (bereiche.Count > 0)
+        {
+            answer += "\n\n— " + Texte.Nachgeschlagen + string.Join(", ", bereiche);
+        }
+
+        if (window.IsDisposed)
+        {
+            return;
+        }
+
+        window.ShowAnswer(answer, _settings.CopyResultToClipboard);
+
+        // Das Bild NACH dem Text – und in BEIDEN Wegen, sonst gibt es es nur
+        // bei einer Sitzung, die zufaellig noch gilt.
+        await ErgebnisBildZeigenAsync(window, ergebnis.BildUrl, ct)
+            .ConfigureAwait(true);
     }
 
     /// <summary>Holt ein vom Lauf erzeugtes Bild nach und zeigt es an.

@@ -1235,7 +1235,8 @@ for _fn in ("regel_lauf", "nachricht_lauf"):
 agent_src = (ROOT / "backend/agent.py").read_text()
 check("def _werkzeug_nutzbar" in agent_src,
       "agent.py hat die Weiche _werkzeug_nutzbar")
-_lernstellen = agent_src.count('self._tool_stats and self._werkzeug_nutzbar("memory_manage")')
+# seit 2026-10-18 je Lauf (_st = _lauf_stats()) statt self._tool_stats am geteilten Agenten
+_lernstellen = agent_src.count('_st and self._werkzeug_nutzbar("memory_manage")')
 check(_lernstellen == 2,
       "beide Auto-Learning-Zweige (run_task UND headless) benutzen sie",
       str(_lernstellen))

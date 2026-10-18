@@ -359,7 +359,9 @@ def probe(aktion, haupt):
     env = dict(os.environ, DATA_DIR=str(DD), SECRET_KEY="t" * 64,
                JARVIS_GEHEIMNIS_DATEI=str(haupt), PYTHONDONTWRITEBYTECODE="1")
     env.pop("CREDENTIALS_DIRECTORY", None)
-    env.pop("AGENT_API_KEY", None)
+    # LEER statt entfernt: sonst setzt load_dotenv den Wert aus der .env des
+    # Servers wieder ein (DEV traegt AGENT_API_KEY), und ENV hat Vorrang
+    env["AGENT_API_KEY"] = ""
     r = subprocess.run([sys.executable, str(SKRIPT), str(ROOT), aktion], env=env,
                        capture_output=True, text=True, timeout=120, cwd=str(TMP))
     zeile = [z for z in r.stdout.splitlines() if z.startswith("ERGEBNIS=")]
@@ -909,8 +911,12 @@ AS.write_text(json.dumps({"users": {"jarvis": {"must_change_password": False, "t
                                                "totp_secret": "JBSWY3DPEHPK3PXP"},
                                     "anna": {"totp_enabled": False, "totp_secret": None,
                                              "totp_pending_secret": "KRSXG5CTMVRXEZLU"}}}))
-ns_a = {"json": json, "os": os, "_AUTH_STATE_FILE": AS, "print": lambda *a, **k: None}
-for fn in ("_save_auth_state", "_load_auth_state", "_totp_secret_lesbar"):
+ns_a = {"json": json, "os": os, "_AUTH_STATE_FILE": AS, "print": lambda *a, **k: None,
+        "Path": Path,
+        # seit 2026-10-18 fail-closed + Schreibweisen zusammengefuehrt (test_auth_schreibweise)
+        "AuthStateUnlesbar": type("AuthStateUnlesbar", (RuntimeError,), {})}
+for fn in ("_norm_login", "_auth_schluessel", "_auth_eintraege_zusammenfuehren", "_auth_state_datei_lesen",
+           "_save_auth_state", "_load_auth_state", "_totp_secret_lesbar"):
     if fn not in FN:
         abbruch("main.py: %s fehlt" % fn)
     schneide(fn, ns_a)

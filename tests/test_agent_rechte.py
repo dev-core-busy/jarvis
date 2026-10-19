@@ -65,6 +65,10 @@ if "backend.main" not in sys.modules:
     sys.modules["backend.main"] = fake
 AM = sys.modules["backend.main"].agent_manager
 
+# Vor dem Konstruktor: JarvisAgent() baut sofort einen Provider. Ohne
+# settings.json (CI, frischer Klon) waere das "google" ohne Schluessel -> ValueError.
+A.JarvisAgent.LLM_PROVIDER = property(lambda self: "openai_compatible")
+
 print("\n[1] AgentManager")
 haupt = A.JarvisAgent()
 AM.main_agent = haupt
@@ -168,7 +172,6 @@ async def _spawn(ws, label, task):
 
 
 haupt._handle_spawn = _spawn
-A.JarvisAgent.LLM_PROVIDER = property(lambda self: "openai_compatible")
 
 
 class Stub:

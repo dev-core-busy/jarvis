@@ -14,6 +14,7 @@ ueberschreibt, ist teurer als der Fehler, den er sucht.
 import ast
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -717,8 +718,13 @@ check("⚠ die Wissen-Kachel leitet sich aus `_editable_groups_for` ab",
       _scope_fn is not None and "_editable_groups_for" in _scope_fn)
 check("⚠ die Feedback-Kachel aus DEMSELBEN Praedikat",
       "_editable_groups_for" in (_perm_helfer or ""))
-check("die Wissen-Kachel haengt an genau diesem Feld (`groups`)",
-      'd.groups && d.groups.length' in (FRONT / "js" / "portal_seite.js").read_text(encoding="utf-8"),
+# ⚠ SEIT 2026-10-15 erscheint die Wissen-KACHEL fuer jeden angemeldeten Benutzer
+# (Container „Mein Gedaechtnis", BSI M9) – sie haengt nur noch an `d.ok`. Die
+# gemeinsame Quelle gilt seitdem fuer den Wissens-BEREICH (`groups` aus
+# `_editable_groups_for`, oben geprueft), nicht mehr fuer die Kachel selbst.
+_portal = (FRONT / "js" / "portal_seite.js").read_text(encoding="utf-8")
+check("die Wissen-Kachel erscheint mit gueltigem Scope (seit 2026-10-15 fuer jeden)",
+      re.search(r"/api/wissen/scope'\)\.then\(function\(d\)\{\s*if \(d && d\.ok\)", _portal) is not None,
       "die Einblende-Bedingung der Wissen-Kachel hat sich geaendert")
 st = (FRONT / "settings.html").read_text(encoding="utf-8")
 check("der Reiter-Knopf steht im Markup", 'id="settings-tab-btn-feedback"' in st)

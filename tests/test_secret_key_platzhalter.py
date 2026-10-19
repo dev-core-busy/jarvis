@@ -82,17 +82,24 @@ def datei(name):
 
 def werte_je_in_vorlage():
     """Alle SECRET_KEY-Werte, die je in .env.example standen (Git) + heute Vorlage/README."""
-    werte = set()
+    werte, git_werte = set(), set()
     r = subprocess.run(["git", "-C", str(WURZEL), "log", "--all", "-p", "--", ".env.example"],
                        capture_output=True, text=True)
     git_ok = r.returncode == 0 and "SECRET_KEY" in r.stdout
     for m in re.finditer(r"^\+SECRET_KEY=(.*)$", r.stdout, re.M):
-        werte.add(m.group(1).split("#")[0].strip())
+        git_werte.add(m.group(1).split("#")[0].strip())
+    werte |= git_werte
     for rel in (".env.example", "README.md"):
         txt = (WURZEL / rel).read_text(encoding="utf-8")
         for m in re.finditer(r"^SECRET_KEY=(.*)$", txt, re.M):
             werte.add(m.group(1).split("#")[0].strip())
-    return werte, git_ok
+    return werte, git_werte, git_ok
+
+
+# Werte, die VOR dem Neustart der Historie (2026-10-15, ein Wurzel-Commit) in
+# .env.example standen. Die alte Historie liegt nur noch im Sicherungs-Bundle,
+# `git log` findet sie nicht mehr – deshalb hier festgeschrieben statt erfragt.
+VOR_NEUSTART = {ALT}
 
 
 # ─── 1. aufloesen, ausgefuehrt ──────────────────────────────────────────────
@@ -133,11 +140,13 @@ check("mit dem GitHub-Wert gebaute Signatur ist UNGUELTIG", not hmac.compare_dig
 
 # ─── 2. jeder Wert, der je im Repo stand ────────────────────────────────────
 print("2. Werte aus Vorlage, README und Git-Historie")
-werte, git_ok = werte_je_in_vorlage()
+werte, git_werte, git_ok = werte_je_in_vorlage()
 if git_ok:
-    check("Positivkontrolle: Git-Historie liefert den alten Beispielwert", ALT in werte, str(werte))
+    check("Positivkontrolle: Git-Historie liefert SECRET_KEY-Zeilen (Parser greift)",
+          bool(git_werte), str(git_werte))
 else:
     print("  (Git-Historie nicht lesbar – nur heutige Dateien geprueft)")
+werte |= VOR_NEUSTART
 check("Positivkontrolle: mindestens zwei Fundstellen", len(werte) >= 2, str(werte))
 for i, w in enumerate(sorted(werte)):
     r = sicher(sk.aufloesen, w, datei(f"h{i}"))

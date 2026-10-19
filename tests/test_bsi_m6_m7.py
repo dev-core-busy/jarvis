@@ -629,9 +629,13 @@ finally:
 
 gli = [z.strip() for z in (ROOT / ".gitleaksignore").read_text().splitlines()
        if z.strip() and not z.startswith("#")]
-check(".gitleaksignore: nur Fingerabdruecke (commit:datei:regel:zeile), keine Pfad-Wildcards",
-      bool(gli) and all(re.fullmatch(r"[0-9a-f]{40}:[^:*]+:[a-z0-9-]+:\d+", z) for z in gli),
-      [z for z in gli if not re.fullmatch(r"[0-9a-f]{40}:[^:*]+:[a-z0-9-]+:\d+", z)][:3])
+# Commit-SHA optional: seit dem Neustart der Historie (2026-10-15) stehen die
+# Eintraege als globaler Fingerabdruck datei:regel:zeile – die SHA-Form hing an
+# Commits, die es nicht mehr gibt. gitleaks gleicht beide Formen ab.
+_GLI = r"(?:[0-9a-f]{40}:)?[^:*]+:[a-z0-9-]+:\d+"
+check(".gitleaksignore: nur Fingerabdruecke ([commit:]datei:regel:zeile), keine Pfad-Wildcards",
+      bool(gli) and all(re.fullmatch(_GLI, z) for z in gli),
+      [z for z in gli if not re.fullmatch(_GLI, z)][:3])
 
 abschnitt("M6.5 Untergrenzen aus pip-audit")
 try:

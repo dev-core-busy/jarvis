@@ -52,8 +52,10 @@ if "backend.main" not in sys.modules:
     fake = _pytypes.ModuleType("backend.main")
     fake.agent_manager = A.AgentManager()
     sys.modules["backend.main"] = fake
-haupt = A.JarvisAgent()
+# Vor dem Konstruktor: JarvisAgent() baut sofort einen Provider. Ohne
+# settings.json (CI, frischer Klon) waere das "google" ohne Schluessel -> ValueError.
 A.JarvisAgent.LLM_PROVIDER = property(lambda self: "openai_compatible")
+haupt = A.JarvisAgent()
 
 
 class Werkzeug(BaseTool):

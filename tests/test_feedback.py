@@ -700,14 +700,19 @@ check("und wird an `permissions.feedback` eingeblendet",
       # Portal-Logik seit BSI H4 (CSP ohne Inline-Skript, 2026-10-04) in js/portal_seite.js
       "permissions.feedback" in (FRONT / "js" / "portal_seite.js").read_text(encoding="utf-8"))
 
-# ══ DRIFT-SCHRANKE: Wissen- und Feedback-Kachel muessen DIESELBE Quelle haben ══
+# ══ DRIFT-SCHRANKE: Wissens-Bereich und Feedback muessen DIESELBE Quelle haben ══
 # ⚠ VORGABE DES BETREIBERS (Rueckfrage 2026-09-14): „gleiche Berechtigung und
-# Sichtbarkeit". Beide leiten sich deshalb aus `_editable_groups_for` ab – die
-# Wissen-Kachel ueber `/api/wissen/scope` (Feld `groups`), die Feedback-Kachel
+# Sichtbarkeit". Beide leiten sich deshalb aus `_editable_groups_for` ab – der
+# Wissens-Bereich ueber `/api/wissen/scope` (Feld `groups`), die Feedback-Kachel
 # ueber `permissions.feedback`. Wer eine der beiden Seiten auf ein anderes
-# Praedikat umhaengt, bricht die Zusage STILL: beide Kacheln sehen weiter
-# richtig aus, nur fuer verschiedene Leute. Gemessen wurde genau das – ein
-# Gruppen-Editor sah Wissen und kein Feedback.
+# Praedikat umhaengt, bricht die Zusage STILL: beide sehen weiter richtig aus,
+# nur fuer verschiedene Leute. Gemessen wurde genau das – ein Gruppen-Editor
+# sah Wissen und kein Feedback.
+# ⚠ GEAENDERT seit 2026-10-15, vom Betreiber bestaetigt am 2026-10-19: die
+# BERECHTIGUNG bleibt gemeinsam, die SICHTBARKEIT nicht mehr. Die Wissen-KACHEL
+# sieht jeder Angemeldete (Container „Mein Gedaechtnis", BSI M9); die
+# Feedback-Kachel weiterhin nur, wer Wissen bearbeiten darf. Das ist gewollt –
+# kein Drift, den man „reparieren" muesste.
 _scope_fn = None
 for _k in ast.walk(BAUM):
     if (isinstance(_k, (ast.FunctionDef, ast.AsyncFunctionDef))

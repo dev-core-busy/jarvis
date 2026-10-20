@@ -8457,6 +8457,36 @@ async def broker_ssh_netze(request: Request, user: str = Depends(require_local_a
     return await _broker_ssh_aktion(request, user, "broker.ssh_netze", ("netze",))
 
 
+@app.post("/api/broker/ssh/schluessel")
+async def broker_ssh_schluessel(request: Request, user: str = Depends(require_local_auth)):
+    """Oeffentlichen SSH-Schluessel fuer ein Administrator-Konto hinterlegen oder
+    entfernen (Admin, immer mit Freigabe-Code). Body: {aktion: hinzufuegen|entfernen,
+    konto, schluessel | fingerabdruck, nachweis}. Pruefen, Schreiben, Rechte und
+    Aussperr-Schutz macht der BROKER (fernzugang.schluessel)."""
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    aktion = str(body.get("aktion") or "").strip()
+    if aktion not in ("hinzufuegen", "entfernen"):
+        return JSONResponse({"ok": False, "error": "aktion: hinzufuegen|entfernen"},
+                            status_code=400)
+    args = {"aktion": aktion, "by": user,
+            "konto": str(body.get("konto") or "").strip()[:64],
+            "schluessel": str(body.get("schluessel") or "")[:16384],
+            "fingerabdruck": str(body.get("fingerabdruck") or "").strip()[:80],
+            "nachweis": str(body.get("nachweis") or "").strip()[:12]}
+    from backend import broker_client
+    res = await broker_client.call("broker.ssh_schluessel", args, user=user, timeout=60)
+    if not res.get("ok") and res.get("grund"):
+        return JSONResponse({"ok": False, "grund": res.get("grund"),
+                             "error": res.get("error", "")}, status_code=403)
+    return JSONResponse({"ok": bool(res.get("ok")), "neu": res.get("neu"),
+                         "fingerabdruck": res.get("fingerabdruck", ""),
+                         "meldung": res.get("meldung") or res.get("error", "")},
+                        status_code=200 if res.get("ok") else 409)
+
+
 @app.get("/api/broker/audit")
 async def broker_audit(n: int = 100, user: str = Depends(require_local_auth)):
     """Letzte n Eintraege des Broker-Audit-Logs (Admin, max 1000).

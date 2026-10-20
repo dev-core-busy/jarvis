@@ -7,8 +7,10 @@
    Weboberflaeche kann nicht pruefen, ob ein NEUES SSH-Login noch geht – das muss
    der Mensch in einem zweiten Terminal tun, bevor er bestaetigt.
 
-   Schluessel hinterlegen geht hier bewusst NICHT (neuer Weg zu root per SSH);
-   gezeigt werden Konten, Fingerabdruecke und eine Anleitung. */
+   Oeffentliche Schluessel hinterlegen/entfernen (seit 2026-10-20, vorher
+   bewusst nur Anleitung): immer mit Freigabe-Code, Pruefen, Schreiben und
+   Rechte macht der BROKER (fernzugang.schluessel). Der Fingerabdruck hier ist
+   nur die VORSCHAU zum Abgleich mit dem eigenen Rechner. */
 (function () {
     'use strict';
 
@@ -97,6 +99,38 @@
         s = Math.max(0, Math.floor(s || 0));
         return Math.floor(s / 60) + ':' + ('0' + (s % 60)).slice(-2);
     }
+    // ── Oeffentlichen Schluessel lesen (nur Vorschau) ───────────────────────
+    // Gibt {typ, daten, kommentar} oder {fehler: '<i18n-Kennung>'} zurueck.
+    // Massgeblich prueft der Broker (ssh-keygen); hier geht es um die sofortige
+    // Rueckmeldung und den Fingerabdruck zum Abgleich.
+    var SCHL_TYPEN = ['ssh-ed25519', 'sk-ssh-ed25519@openssh.com', 'ecdsa-sha2-nistp256',
+        'ecdsa-sha2-nistp384', 'ecdsa-sha2-nistp521', 'sk-ecdsa-sha2-nistp256@openssh.com', 'ssh-rsa'];
+    function schluesselLesen(text) {
+        var roh = String(text || '').trim();
+        if (!roh) return null;
+        if (roh.indexOf('PRIVATE KEY') >= 0) return { fehler: 'privat' };
+        if (/[\r\n]/.test(roh)) return { fehler: 'mehrere' };
+        var m = /^(\S+)\s+([A-Za-z0-9+/]+={0,3})(?:\s+(.*))?$/.exec(roh);
+        if (!m || SCHL_TYPEN.indexOf(m[1]) < 0) return { fehler: 'format' };
+        var blob;
+        try { blob = atob(m[2]); } catch (e) { return { fehler: 'kaputt' }; }
+        var laenge = blob.length >= 4
+            ? ((blob.charCodeAt(0) << 24) | (blob.charCodeAt(1) << 16) | (blob.charCodeAt(2) << 8) | blob.charCodeAt(3)) : -1;
+        if (laenge < 0 || blob.substr(4, laenge) !== m[1]) return { fehler: 'kaputt' };
+        return { typ: m[1], daten: m[2], kommentar: (m[3] || '').trim(), blob: blob };
+    }
+    // OpenSSH-Fingerabdruck: SHA256 ueber die Schluesseldaten, base64 ohne '='
+    function fingerabdruck(blob) {
+        var c = window.crypto && window.crypto.subtle;
+        if (!c) return Promise.resolve('');
+        var bytes = new Uint8Array(blob.length);
+        for (var i = 0; i < blob.length; i++) bytes[i] = blob.charCodeAt(i);
+        return c.digest('SHA-256', bytes).then(function (h) {
+            var s = '', a = new Uint8Array(h);
+            for (var j = 0; j < a.length; j++) s += String.fromCharCode(a[j]);
+            return 'SHA256:' + btoa(s).replace(/=+$/, '');
+        }).catch(function () { return ''; });
+    }
 
     var Fz = {
         _bound: false,
@@ -138,6 +172,31 @@
                 var k = e.target.closest && e.target.closest('[data-netz-dazu]');
                 if (k && !k.disabled) self.netzHinzu(k.getAttribute('data-netz-dazu'));
             });
+            // Schluessel: Muelleimer je Schluessel (Delegation), Eingabe + Datei
+            var konten = $('sec-ssh-konten');
+            if (konten) konten.addEventListener('click', function (e) {
+                var k = e.target.closest && e.target.closest('[data-schl-weg]');
+                if (k) self.schluesselEntfernen(k.getAttribute('data-konto'), k.getAttribute('data-schl-weg'));
+            });
+            an('sec-ssh-schl-add', function () { self.schluesselHinzu(); });
+            an('sec-ssh-schl-datei-btn', function () { var f = $('sec-ssh-schl-datei'); if (f) f.click(); });
+            var datei = $('sec-ssh-schl-datei');
+            if (datei) datei.addEventListener('change', function () {
+                var f = datei.files && datei.files[0];
+                if (!f) return;
+                // Ein oeffentlicher Schluessel hat wenige KB; alles darueber ist etwas anderes
+                if (f.size > 16384) { self._ergebnis('sec-ssh-schl-result', false, T('security.ssh_schl_zu_gross', 'Die Datei ist zu groß für einen öffentlichen Schlüssel.')); datei.value = ''; return; }
+                var r = new FileReader();
+                r.onload = function () {
+                    var feld = $('sec-ssh-schl-text');
+                    if (feld) feld.value = String(r.result || '').trim();
+                    datei.value = '';
+                    self.schluesselVorschau();
+                };
+                r.readAsText(f);
+            });
+            var text = $('sec-ssh-schl-text');
+            if (text) text.addEventListener('input', function () { self.schluesselVorschau(); });
         },
 
         laden: function () {
@@ -213,8 +272,12 @@
                     // root heisst schon so – die Art nur bei sudo-Konten dazuschreiben
                     var art = k.art === 'root' ? '' : ' · ' + esc(T('security.ssh_art_admin', 'Administrator (sudo)'));
                     var keys = (k.schluessel || []).map(function (s) {
-                        return '<div class="sec-ssh-key"><code>' + esc(s.fingerabdruck) + '</code> '
-                            + esc(s.typ) + (s.kommentar && s.kommentar !== 'no comment' ? ' · ' + esc(s.kommentar) : '') + '</div>';
+                        var weg = T('security.ssh_schl_weg', 'Schlüssel entfernen');
+                        return '<div class="sec-ssh-key"><span class="sec-ssh-key-text"><code>' + esc(s.fingerabdruck) + '</code> '
+                            + esc(s.typ) + (s.kommentar && s.kommentar !== 'no comment' ? ' · ' + esc(s.kommentar) : '') + '</span>'
+                            + '<button type="button" class="sec-ssh-chip-weg" data-konto="' + esc(k.name) + '" data-schl-weg="'
+                            + esc(s.fingerabdruck) + '" title="' + esc(weg) + '" aria-label="' + esc(weg) + ' ' + esc(s.fingerabdruck) + '">'
+                            + (window.JarvisIcons ? window.JarvisIcons.trash() : '') + '</button></div>';
                     }).join('');
                     if (!keys) keys = '<div class="sec-ssh-key sec-ssh-leer">'
                         + esc(T('security.ssh_kein_schluessel', 'kein Schlüssel hinterlegt')) + '</div>';
@@ -228,6 +291,20 @@
                 }).join('');
             }
             box.innerHTML = html;
+            // Kontowahl fuers Hinterlegen; eine getroffene Wahl bleibt beim Neuladen
+            var wahl = $('sec-ssh-schl-konto');
+            if (wahl) {
+                var vorher = wahl.value;
+                wahl.innerHTML = konten.map(function (k) {
+                    return '<option value="' + esc(k.name) + '">' + esc(k.name) + '</option>';
+                }).join('');
+                var namen = konten.map(function (k) { return k.name; });
+                var nichtRoot = namen.filter(function (n) { return n !== 'root'; });
+                wahl.value = namen.indexOf(vorher) >= 0 ? vorher : (nichtRoot[0] || namen[0] || '');
+                wahl.disabled = !konten.length;
+            }
+            var add = $('sec-ssh-schl-add');
+            if (add) add.disabled = !konten.length;
             // Anleitung von selbst aufklappen, solange niemand mit Schluessel hereinkaeme
             var zm = d.zugang_moeglich || {};
             var anl = $('sec-ssh-anleitung');
@@ -476,6 +553,75 @@
               .then(function () { if (knopf) knopf.disabled = false; return self.laden(); });
         },
 
+        // ── Schluessel hinterlegen / entfernen ───────────────────────────────
+        // Vorschau unter dem Feld: Typ + Fingerabdruck oder der Grund, warum es
+        // kein oeffentlicher Schluessel ist. Gibt das Promise der Rechnung zurueck.
+        schluesselVorschau: function () {
+            var self = this;
+            var box = $('sec-ssh-schl-vorschau');
+            var k = schluesselLesen(($('sec-ssh-schl-text') || {}).value);
+            this._schlFp = '';
+            function zeige(text, warn) {
+                if (!box) return;
+                box.textContent = text || '';
+                box.className = warn ? 'sec-ssh-hinweis' : 'kb-hint';
+                box.style.display = text ? '' : 'none';
+            }
+            if (!k) { zeige(''); return Promise.resolve(); }
+            if (k.fehler) {
+                zeige({
+                    privat: T('security.ssh_schl_privat', 'Das ist ein PRIVATER Schlüssel – er bleibt auf deinem Rechner. Hier gehört nur der Inhalt der Datei mit der Endung .pub hinein.'),
+                    mehrere: T('security.ssh_schl_mehrere', 'Bitte genau einen Schlüssel (eine Zeile) einfügen.'),
+                    format: T('security.ssh_schl_format', 'Kein unterstützter öffentlicher Schlüssel. Erwartet wird eine Zeile wie „ssh-ed25519 AAAA… name@rechner“.'),
+                    kaputt: T('security.ssh_schl_kaputt', 'Der Schlüssel ist unvollständig oder beschädigt.')
+                }[k.fehler], true);
+                return Promise.resolve();
+            }
+            return fingerabdruck(k.blob).then(function (fp) {
+                self._schlFp = fp;
+                zeige(T('security.ssh_schl_vorschau', 'Fingerabdruck: %f (%t) – vergleiche ihn mit ssh-keygen -lf auf deinem Rechner.')
+                    .replace('%f', fp || '?').replace('%t', k.typ));
+            });
+        },
+
+        schluesselHinzu: function () {
+            var self = this;
+            var konto = ($('sec-ssh-schl-konto') || {}).value || '';
+            var text = (($('sec-ssh-schl-text') || {}).value || '').trim();
+            var k = schluesselLesen(text);
+            if (!konto) return;
+            if (!k || k.fehler) {
+                if (!k) self._ergebnis('sec-ssh-schl-result', false, T('security.ssh_schl_leer', 'Bitte zuerst einen öffentlichen Schlüssel einfügen oder eine .pub-Datei wählen.'));
+                return this.schluesselVorschau();
+            }
+            return this.schluesselVorschau().then(function () {
+                if (!window.confirm(T('security.ssh_schl_confirm',
+                    'Wer den zugehörigen privaten Schlüssel besitzt, kann sich danach per SSH als %k anmelden und Administrator werden.\n\nFingerabdruck: %f\n\nNur hinterlegen, wenn es dein eigener Schlüssel ist. Fortfahren?')
+                    .replace('%k', konto).replace('%f', self._schlFp || '?'))) return;
+                var c = self._code();
+                if (c === null) return;
+                return self._senden('/api/broker/ssh/schluessel',
+                    { aktion: 'hinzufuegen', konto: konto, schluessel: text, nachweis: c },
+                    'sec-ssh-schl-result', 'sec-ssh-schl-add', function () {
+                        var feld = $('sec-ssh-schl-text');
+                        if (feld) feld.value = '';
+                        self.schluesselVorschau();
+                    });
+            });
+        },
+
+        schluesselEntfernen: function (konto, fp) {
+            if (!konto || !fp) return;
+            if (!window.confirm(T('security.ssh_schl_weg_confirm',
+                'Schlüssel %f von %k entfernen? Wer sich damit anmeldet, kommt danach nicht mehr per SSH herein.')
+                .replace('%f', fp).replace('%k', konto))) return;
+            var c = this._code();
+            if (c === null) return;
+            return this._senden('/api/broker/ssh/schluessel',
+                { aktion: 'entfernen', konto: konto, fingerabdruck: fp, nachweis: c },
+                'sec-ssh-konten-result', null);
+        },
+
         haertung: function (aktion) {
             var body = { aktion: aktion };
             if (aktion === 'test') {
@@ -523,6 +669,7 @@
     };
 
     // Rechenhelfer fuer den Waechter (tests/test_fernzugang_ui.js)
-    Fz._rechnen = { ipZuZahl: ipZuZahl, netzNormieren: netzNormieren, enthaelt: enthaelt };
+    Fz._rechnen = { ipZuZahl: ipZuZahl, netzNormieren: netzNormieren, enthaelt: enthaelt,
+                    schluesselLesen: schluesselLesen, fingerabdruck: fingerabdruck };
     window.Fernzugang = Fz;
 })();

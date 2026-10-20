@@ -470,6 +470,178 @@ check("ohne Daten: leere Listen, kein Fehler",
       leer == {"lokal": [], "tailscale": False, "anmeldungen": []}, leer)
 
 # ════════════════════════════════════════════════════════════════════════════
+abschnitt("6b. Schluessel hinterlegen / entfernen (seit 2026-10-20)")
+KONF.write_text("QUELLE=github\n")
+for t in TIMER.iterdir():
+    t.unlink()
+
+
+def neuer_schluessel(name: str, art: str = "ed25519", bits: str = "") -> tuple[str, str, str]:
+    """(oeffentliche Zeile, Fingerabdruck laut ssh-keygen, privater Text)."""
+    f = SK / f"neu_{name}"
+    befehl = ["ssh-keygen", "-q", "-t", art, "-N", "", "-C", f"{name}@rechner", "-f", str(f)]
+    if bits:
+        befehl[4:4] = ["-b", bits]
+    subprocess.run(befehl, check=True)
+    fp = subprocess.run(["ssh-keygen", "-lf", f"{f}.pub"], capture_output=True, text=True).stdout.split()[1]
+    return Path(f"{f}.pub").read_text().strip(), fp, Path(f).read_text()
+
+
+def ak(n: str, datei: str = "authorized_keys") -> Path:
+    return SK / "home" / n / ".ssh" / datei
+
+
+def lies(pf: Path) -> str:
+    return pf.read_text() if pf.exists() and not pf.is_symlink() else ""
+
+
+PUB, FP_NEU, PRIV = neuer_schluessel("anna")
+shutil.rmtree(SK / "home" / "anna" / ".ssh")
+r = fz.schluessel("hinzufuegen", "anna", PUB)
+check("hinzufuegen: ok, als neu gemeldet, Fingerabdruck = ssh-keygen",
+      r.get("ok") is True and r.get("neu") is True and r.get("fingerabdruck") == FP_NEU, r)
+check(".ssh fehlte: vom Broker mit 0700 angelegt",
+      (SK / "home" / "anna" / ".ssh").is_dir()
+      and ((SK / "home" / "anna" / ".ssh").stat().st_mode & 0o777) == 0o700,
+      oct((SK / "home" / "anna" / ".ssh").stat().st_mode) if (SK / "home" / "anna" / ".ssh").exists() else "fehlt")
+check("authorized_keys mit 0600", ak("anna").is_file() and (ak("anna").stat().st_mode & 0o777) == 0o600)
+check("Inhalt: genau die eine Zeile, Typ + Daten + Kommentar", lies(ak("anna")) == PUB + "\n", lies(ak("anna")))
+kn = {k["name"]: k for k in fz.status()["konten"]}
+check("Status: anna mit dem neuen Fingerabdruck, zaehlt jetzt",
+      [x["fingerabdruck"] for x in kn["anna"]["schluessel"]] == [FP_NEU] and kn["anna"]["zaehlt"] is True, kn["anna"])
+r = fz.schluessel("hinzufuegen", "anna", PUB)
+check("derselbe Schluessel nochmal: ok, nicht neu, keine zweite Zeile",
+      r.get("ok") is True and r.get("neu") is False and lies(ak("anna")).count("\n") == 1, r)
+
+# Abweisungen – jede ohne Aenderung an der Datei
+vorher_anna = lies(ak("anna"))
+typ, daten = PUB.split()[:2]
+PUB_RSA_KLEIN, _, _ = neuer_schluessel("klein", "rsa", "2048")
+PUB_RSA_OK, FP_RSA, _ = neuer_schluessel("gross", "rsa", "3072")
+boese = {
+    "privater Schluessel": (PRIV, "PRIVATER"),
+    "Option command= davor": (f'command="/bin/sh" {PUB}', "unterstützter"),
+    "Option from= davor": (f'from="0.0.0.0/0" {PUB}', "unterstützter"),
+    "zwei Zeilen": (PUB + "\n" + PUB_RSA_OK, "genau einen"),
+    "unbekannter Typ (ssh-dss)": (f"ssh-dss {daten}", "unterstützter"),
+    "Typ passt nicht zu den Daten": (f"ssh-rsa {daten} x", "Typangabe"),
+    "kaputtes base64": (f"{typ} {daten[:-5]}!!!!!", "unterstützter"),
+    "abgeschnittene Daten": (f"{typ} {daten[:20]}", "ssh-keygen lehnt"),
+    "RSA 2048": (PUB_RSA_KLEIN, "zu schwach"),
+    "leer": ("   ", "Kein Schlüssel"),
+}
+for name, (text, erwartet) in boese.items():
+    r = fz.schluessel("hinzufuegen", "anna", text)
+    check(f"abgewiesen: {name}", r.get("ok") is False and erwartet in r.get("meldung", "")
+          and lies(ak("anna")) == vorher_anna, r)
+r = fz.schluessel("hinzufuegen", "anna", PUB_RSA_OK)
+check("RSA 3072: angenommen", r.get("ok") is True and r.get("fingerabdruck") == FP_RSA, r)
+vorher_anna = lies(ak("anna"))
+pub_k, fp_k, _ = neuer_schluessel("kommentar")
+r = fz.schluessel("hinzufuegen", "anna", f"{pub_k.rsplit(' ', 1)[0]} a\x07b\x1b[31mc")
+zeile = lies(ak("anna")).splitlines()[-1] if r.get("ok") else ""
+check("Steuerzeichen im Kommentar werden entfernt",
+      r.get("ok") is True and zeile.endswith(" ab[31mc") and all(c.isprintable() for c in zeile), repr(zeile))
+
+for konto in ("dienst", "kollege", "../root", ""):
+    vorher_d = lies(ak("dienst"))
+    r = fz.schluessel("hinzufuegen", konto, PUB)
+    check(f"Konto {konto!r}: abgewiesen (nur die angezeigten Administrator-Konten)",
+          r.get("ok") is False and "Unbekanntes Konto" in r.get("meldung", "") and lies(ak("dienst")) == vorher_d, r)
+
+# Symlinks: root schreibt nie ueber einen Link hinaus
+ZIEL = SK / "fremd.txt"
+ZIEL.write_text("unberuehrt\n")
+admin_ak = ak("admin")
+admin_alt = admin_ak.read_text()
+admin_ak.rename(SK / "admin_ak.bak")
+admin_ak.symlink_to(ZIEL)
+r = fz.schluessel("hinzufuegen", "admin", PUB)
+check("authorized_keys ist ein Symlink: abgewiesen, Ziel unberuehrt",
+      r.get("ok") is False and ZIEL.read_text() == "unberuehrt\n" and admin_ak.is_symlink(), r)
+admin_ak.unlink()
+ssh_admin = SK / "home" / "admin" / ".ssh"
+ssh_admin.rename(SK / "admin_ssh.bak")
+(SK / "fremd_dir").mkdir()
+ssh_admin.symlink_to(SK / "fremd_dir")
+r = fz.schluessel("hinzufuegen", "admin", PUB)
+check(".ssh ist ein Symlink: abgewiesen, nichts im Ziel angelegt",
+      r.get("ok") is False and not any((SK / "fremd_dir").iterdir()), r)
+ssh_admin.unlink()
+(SK / "admin_ssh.bak").rename(ssh_admin)
+(SK / "admin_ak.bak").rename(admin_ak)
+check("Positivkontrolle: admin wiederhergestellt", admin_ak.read_text() == admin_alt)
+
+# Entfernen
+ak("anna").write_text("# Kommentarzeile bleibt\n" + lies(ak("anna")))
+r = fz.schluessel("entfernen", "anna", fingerabdruck=FP_NEU)
+rest = lies(ak("anna"))
+check("entfernen: ok, Zeile weg, Kommentar und andere Schluessel bleiben",
+      r.get("ok") is True and PUB.split()[1] not in rest and "# Kommentarzeile bleibt" in rest
+      and PUB_RSA_OK.split()[1] in rest, rest)
+check("entfernen: Rechte bleiben 0600", (ak("anna").stat().st_mode & 0o777) == 0o600)
+for fp_falsch, grund in (("SHA256:quatsch", "Ungültiger"), (FP_NEU, "nicht hinterlegt"),
+                         ("SHA256:" + "A" * 43, "nicht hinterlegt")):
+    r = fz.schluessel("entfernen", "anna", fingerabdruck=fp_falsch)
+    check(f"entfernen {fp_falsch[:16]}…: abgewiesen ({grund})",
+          r.get("ok") is False and grund in r.get("meldung", "") and lies(ak("anna")) == rest, r)
+r = fz.schluessel("entfernen", "dienst", fingerabdruck=FPS["dienst"])
+check("entfernen beim nologin-Konto: abgewiesen", r.get("ok") is False and lies(ak("dienst")), r)
+# authorized_keys2 zaehlt mit
+root2 = ak("root", "authorized_keys2")
+shutil.copy(SK / "key_root.pub", root2)
+r = fz.schluessel("entfernen", "root", fingerabdruck=FPS["root"])
+check("entfernen raeumt authorized_keys UND authorized_keys2",
+      r.get("ok") is True and FPS["root"] not in json.dumps(fz.status()["konten"]), r)
+
+# Aussperr-Schutz: Haertung an, root zaehlt nicht (SSH_ROOT=nein); anna vorher leeren,
+# damit admin das einzige zaehlende Konto ist
+fz.schluessel("entfernen", "anna", fingerabdruck=FP_RSA)
+fz.schluessel("entfernen", "anna", fingerabdruck=fp_k)
+KONF.write_text("SSH_HAERTUNG=an\n")
+r = fz.schluessel("entfernen", "admin", fingerabdruck=FPS["admin"])
+check("Aussperr-Schutz: letzter zaehlender Schluessel bleibt (Haertung an)",
+      r.get("ok") is False and "ABBRUCH" in r.get("meldung", "") and admin_ak.read_text() == admin_alt, r)
+KONF.write_text("QUELLE=github\n")
+(TIMER / "ssh-rollback.timer").write_text("x")
+r = fz.schluessel("entfernen", "admin", fingerabdruck=FPS["admin"])
+check("Aussperr-Schutz greift auch waehrend eines Tests",
+      r.get("ok") is False and "ABBRUCH" in r.get("meldung", ""), r)
+(TIMER / "ssh-rollback.timer").unlink()
+fz.schluessel("hinzufuegen", "anna", PUB)
+KONF.write_text("SSH_HAERTUNG=an\n")
+r = fz.schluessel("entfernen", "admin", fingerabdruck=FPS["admin"])
+check("…mit einem anderen zaehlenden Konto (anna) geht es",
+      r.get("ok") is True and FPS["admin"] not in lies(admin_ak), r)
+KONF.write_text("QUELLE=github\n")
+admin_ak.write_text(admin_alt)
+
+# Ueber meta.py: immer Code, Audit mit Fingerabdruck
+freigabe.ZUSTAND.unlink(missing_ok=True)   # Wiederholschutz/Sperre aus Abschnitt 5 (Sandkasten)
+vorher_anna = lies(ak("anna"))
+r = meta.behandeln("broker.ssh_schluessel", {"aktion": "entfernen", "konto": "anna",
+                                              "fingerabdruck": FP_NEU, "by": "admin"})
+check("meta: entfernen ohne Code abgewiesen", r.get("grund") == "nachweis_fehlt"
+      and lies(ak("anna")) == vorher_anna, r)
+pub_m, fp_m, _ = neuer_schluessel("meta")
+r = meta.behandeln("broker.ssh_schluessel", {"aktion": "hinzufuegen", "konto": "anna",
+                                              "schluessel": pub_m, "by": "admin", "nachweis": "000000"})
+check("meta: hinzufuegen mit falschem Code abgewiesen", r.get("ok") is False and r.get("grund")
+      and fp_m not in json.dumps(fz.status()["konten"]), r)
+freigabe.ZUSTAND.unlink(missing_ok=True)
+code = freigabe._code(schluessel, int(time.time() // freigabe.SCHRITT_S))
+r = meta.behandeln("broker.ssh_schluessel", {"aktion": "hinzufuegen", "konto": "anna",
+                                              "schluessel": pub_m, "by": "admin", "nachweis": code})
+check("meta: mit gueltigem Code hinterlegt", r.get("ok") is True and r.get("fingerabdruck") == fp_m, r)
+audit = [json.loads(z) for z in (SK / "audit.jsonl").read_text().splitlines() if z.strip()]
+check("Audit: Vorgang mit Konto und Fingerabdruck",
+      any(a.get("op") == "broker.ssh_schluessel" and a.get("decision") == "executed"
+          and a.get("key") == "broker.ssh_schluessel:hinzufuegen:anna"
+          and fp_m in (a.get("info") or "") for a in audit), audit[-1:])
+check("Audit: abgewiesener Versuch steht drin",
+      any(a.get("op") == "broker.ssh_schluessel" and a.get("decision") == "abgewiesen" for a in audit))
+
+# ════════════════════════════════════════════════════════════════════════════
 abschnitt("7. API und Broker-Prozess (AST)")
 baum = ast.parse((ROOT / "backend" / "main.py").read_text(encoding="utf-8"))
 routen = {}
@@ -490,7 +662,7 @@ def admin_pflicht(f: ast.AsyncFunctionDef) -> bool:
 
 
 for meth, pfad in (("get", "/api/broker/ssh/status"), ("post", "/api/broker/ssh/haertung"),
-                   ("post", "/api/broker/ssh/netze")):
+                   ("post", "/api/broker/ssh/netze"), ("post", "/api/broker/ssh/schluessel")):
     f = routen.get((meth, pfad))
     check(f"{meth.upper()} {pfad} vorhanden und nur fuer Admins", f is not None and admin_pflicht(f))
 f = routen.get(("get", "/api/broker/ssh/status"))

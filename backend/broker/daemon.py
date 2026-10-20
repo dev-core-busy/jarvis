@@ -21,6 +21,7 @@ Meta-Operationen (Admin-UI), Regeln in backend/broker/meta.py:
 - broker.ssh_status     – Fernzugang (SSH): Zustand, Konten, laufende Tests
 - broker.ssh_haertung   – {aktion, root_modus, nachweis}; Regeln in fernzugang.py
 - broker.ssh_netze      – {aktion, netze, nachweis}
+- broker.ssh_schluessel – {aktion: hinzufuegen|entfernen, konto, schluessel|fingerabdruck, nachweis}
 
 Start (seit 2026-09-29, Befund K1): aus der root-eigenen Kopie mit dem
 System-Python – /usr/local/lib/jarvis-broker/start_jarvis_root.sh. Nie mehr

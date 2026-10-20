@@ -5619,7 +5619,12 @@ body.light .kb-cl-spanne { color: #5b6678; }
 .sec-ssh-v { min-width: 0; flex: 1 1 200px; font-weight: 600; word-break: break-word; }
 .sec-ssh-konto { padding: 6px 0; border-bottom: 1px solid rgba(var(--fg-rgb), 0.06); font-size: 0.8rem;
     color: var(--text-primary); }
-.sec-ssh-key { margin: 2px 0 0 12px; font-size: 0.74rem; color: var(--text-secondary); word-break: break-all; }
+.sec-ssh-key { display: flex; align-items: center; gap: 4px; margin: 2px 0 0 12px; font-size: 0.74rem;
+    color: var(--text-secondary); word-break: break-all; }
+.sec-ssh-key-text { flex: 1 1 auto; min-width: 0; }
+.sec-ssh-key .sec-ssh-chip-weg { flex: 0 0 auto; }
+/* Schluessel hinterlegen: Feld fuer genau eine Zeile, die lang ist */
+.sec-ssh-schl-text { display: block; margin-top: 6px; resize: vertical; min-height: 3.2em; word-break: break-all; }
 .sec-ssh-key.sec-ssh-leer { font-style: italic; }
 .sec-ssh-marke { margin-left: 6px; font-size: 0.72rem; color: var(--text-muted); }
 .sec-ssh-marke.ok { color: var(--text-secondary); font-weight: 600; }

@@ -23,7 +23,7 @@
     <link rel="stylesheet" href="/static/css/theme.css?v=34">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=10">
-    <link rel="stylesheet" href="/static/css/style.css?v=200">
+    <link rel="stylesheet" href="/static/css/style.css?v=201">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=7">
     <!-- Feedback-Reiter. EINE Datei fuer /settings und /feedback: Tabelle,
          Sterne und Abgabe-Karte werden an beiden Orten gebraucht, zwei
@@ -5333,8 +5333,9 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <!-- ── Fernzugang (SSH), BSI M7 ───────────────────────────────
                              Logik: fernzugang.js, Broker: backend/broker/fernzugang.py.
                              Jede Aenderung erst als TEST mit Rueckfall nach 5 Minuten,
-                             dann bestaetigen. Schluessel HINTERLEGEN geht hier bewusst
-                             nicht (neuer Weg zu root) – nur Anzeige + Anleitung. -->
+                             dann bestaetigen. Oeffentliche Schluessel hinterlegen und
+                             entfernen (seit 2026-10-20) immer mit Freigabe-Code; Pruefen,
+                             Schreiben und Rechte macht der Broker. -->
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header" id="sec-sect-ssh-hdr">
                                 <h3><span data-i18n="security.section_ssh">Fernzugang (SSH)</span> <span id="sec-ssh-badge" class="sec-ssh-badge" style="display:none;"></span></h3>
@@ -5348,15 +5349,33 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <div id="sec-ssh-status" class="sec-ssh-status"></div>
 
                                 <h4 style="margin:16px 0 6px;" data-i18n="security.ssh_konten_h">Konten mit Schlüssel</h4>
-                                <p class="kb-hint" data-i18n="security.ssh_konten_desc">Diese Konten können Administrator (root) werden. Nach der Umstellung kommt nur herein, wer hier mit mindestens einem Schlüssel steht. Schlüssel werden aus Sicherheitsgründen nicht über die Oberfläche hinterlegt.</p>
+                                <p class="kb-hint" data-i18n="security.ssh_konten_desc">Diese Konten können Administrator (root) werden. Nach der Umstellung kommt nur herein, wer hier mit mindestens einem Schlüssel steht. Mit dem Mülleimer entfernst du einen Schlüssel.</p>
                                 <div id="sec-ssh-konten"></div>
+                                <div id="sec-ssh-konten-result" class="sec-ssh-result" style="display:none;"></div>
+
+                                <h5 style="margin:12px 0 6px;color:var(--text-primary);" data-i18n="security.ssh_schl_h">Schlüssel hinterlegen</h5>
+                                <div class="sec-ssh-schl-neu">
+                                    <div class="sec-ssh-neu" style="margin-top:0;">
+                                        <label class="kb-hint" style="margin:0;" for="sec-ssh-schl-konto" data-i18n="security.ssh_schl_konto">Für Konto</label>
+                                        <select id="sec-ssh-schl-konto" class="sec-ssh-feld"></select>
+                                        <button type="button" id="sec-ssh-schl-datei-btn" class="sec-btn" data-i18n="security.ssh_schl_datei">.pub-Datei wählen …</button>
+                                        <input type="file" id="sec-ssh-schl-datei" accept=".pub,text/plain" style="display:none;">
+                                    </div>
+                                    <textarea id="sec-ssh-schl-text" class="sec-ssh-feld sec-ssh-schl-text" rows="3" spellcheck="false" autocomplete="off"
+                                              placeholder="ssh-ed25519 AAAA… name@rechner" data-i18n-placeholder="security.ssh_schl_ph"
+                                              aria-label="Öffentlicher Schlüssel" data-i18n-aria="security.ssh_schl_label"></textarea>
+                                    <div id="sec-ssh-schl-vorschau" class="kb-hint" style="display:none;"></div>
+                                    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px;">
+                                        <button type="button" id="sec-ssh-schl-add" class="sec-btn primary" data-i18n="security.ssh_schl_add">Hinterlegen</button>
+                                    </div>
+                                    <div id="sec-ssh-schl-result" class="sec-ssh-result" style="display:none;"></div>
+                                </div>
                                 <details id="sec-ssh-anleitung" class="sec-ssh-anleitung">
                                     <summary data-i18n="security.ssh_anleitung_h">So hinterlegst du einen Schlüssel</summary>
                                     <ol>
                                         <li data-i18n-html="security.ssh_anl_1">Auf <b>deinem</b> Rechner einmalig ein Schlüsselpaar erzeugen (falls noch keins da ist): <code>ssh-keygen -t ed25519</code> – unter Windows in PowerShell, unter Linux/macOS im Terminal.</li>
-                                        <li data-i18n-html="security.ssh_anl_2">Den <b>öffentlichen</b> Teil auf den Server bringen, solange die Anmeldung per Kennwort noch geht: <code>ssh-copy-id &lt;konto&gt;@&lt;server&gt;</code>. Ohne ssh-copy-id (Windows): den Inhalt von <code>%USERPROFILE%\.ssh\id_ed25519.pub</code> als eigene Zeile an <code>~/.ssh/authorized_keys</code> des Kontos auf dem Server anhängen.</li>
-                                        <li data-i18n-html="security.ssh_anl_3">Rechte auf dem Server prüfen: <code>chmod 700 ~/.ssh</code> und <code>chmod 600 ~/.ssh/authorized_keys</code> – sonst ignoriert der Server den Schlüssel.</li>
-                                        <li data-i18n-html="security.ssh_anl_4">Hier auf <b>Aktualisieren</b> klicken: das Konto erscheint mit dem Fingerabdruck des Schlüssels. Vergleiche ihn mit <code>ssh-keygen -lf ~/.ssh/id_ed25519.pub</code> auf deinem Rechner.</li>
+                                        <li data-i18n-html="security.ssh_anl_2">Den <b>öffentlichen</b> Teil oben einfügen oder mit <b>.pub-Datei wählen</b> laden – unter Windows <code>%USERPROFILE%\.ssh\id_ed25519.pub</code>, unter Linux/macOS <code>~/.ssh/id_ed25519.pub</code>. Konto wählen und auf <b>Hinterlegen</b> klicken; Ordner, Datei und Rechte legt der Server selbst an.</li>
+                                        <li data-i18n-html="security.ssh_anl_3">Vor dem Speichern zeigt die Seite den Fingerabdruck. Vergleiche ihn mit <code>ssh-keygen -lf ~/.ssh/id_ed25519.pub</code> auf deinem Rechner.</li>
                                         <li data-i18n-html="security.ssh_anl_5">Den <b>privaten</b> Schlüssel (Datei ohne <code>.pub</code>) gibst du nie weiter und legst ihn nie auf den Server.</li>
                                     </ol>
                                 </details>
@@ -5485,7 +5504,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/icons.js?v=9"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/dlkey.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=342"></script>
+    <script src="/static/js/i18n.js?v=343"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=29"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -5518,7 +5537,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/branding.js?v=27"></script>
     <script src="/static/js/theme.js?v=3"></script>
     <script src="/static/js/security_incidents.js?v=39"></script>
-    <script src="/static/js/fernzugang.js?v=2"></script>
+    <script src="/static/js/fernzugang.js?v=3"></script>
     <script src="/static/js/totp_admin.js?v=3"></script>
     <script src="/static/js/ldap_picker.js?v=14"></script>
     <script src="/static/js/rechte_matrix.js?v=5"></script>

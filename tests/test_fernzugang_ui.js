@@ -15,7 +15,10 @@
  *   5. Verwerfen: ohne Code-Abfrage.
  *   6. Abgewiesener Code: Klartext AM Knopf (kein alert, bleibt stehen).
  *   7. Netze: Wert aus dem Feld, Paketfilter fehlt -> Knopf aus + Hinweis.
- *   8. Kein Schluessel-Upload: weder Feld noch Endpunkt im Abschnitt.
+ *   8. Schluessel hinterlegen/entfernen (seit 2026-10-20): Kontowahl, Vorschau
+ *      mit Fingerabdruck (gegen das ECHTE ssh-keygen gerechnet), Rueckfrage
+ *      und Code vor jedem POST, privater/mehrzeiliger Schluessel ohne POST,
+ *      Muelleimer je Schluessel; keine Handbefehle mehr in der Anleitung.
  */
 'use strict';
 const fs = require('fs');
@@ -120,7 +123,9 @@ function text(w, id) { const el = w.document.getElementById(id); return el ? el.
                              konten: [{ name: 'root', art: 'root', anzahl: 0, zaehlt: false, schluessel: [] }] }));
     check('niemand kaeme herein -> Anleitung offen', s.w.document.getElementById('sec-ssh-anleitung').open === true);
     const anl = text(s.w, 'sec-ssh-anleitung');
-    check('Anleitung nennt ssh-keygen und authorized_keys', /ssh-keygen -t ed25519/.test(anl) && /authorized_keys/.test(anl), anl);
+    check('Anleitung nennt ssh-keygen und die .pub-Datei', /ssh-keygen -t ed25519/.test(anl) && /id_ed25519\.pub/.test(anl), anl);
+    check('Anleitung verlangt keine Handarbeit auf dem Server mehr (ssh-copy-id, chmod, authorized_keys)',
+          !/ssh-copy-id|chmod|authorized_keys/.test(anl), anl);
     check('Anleitung warnt vor dem privaten Schlüssel', /privaten/.test(anl), anl);
     s.w.close();
 
@@ -306,14 +311,101 @@ function text(w, id) { const el = w.document.getElementById(id); return el ? el.
     check('ungueltig: 1.2.3, 1.2.3.4/33, a::b::c', !R.netzNormieren('1.2.3') && !R.netzNormieren('1.2.3.4/33') && !R.netzNormieren('a::b::c'));
     s.w.close();
 
-    console.log('\n── 8. Kein Schluessel-Upload');
+    console.log('\n── 8. Schluessel hinterlegen / entfernen');
     const sek = html.slice(html.indexOf('id="sec-sect-ssh-hdr"'), html.indexOf('id="sec-sect-rem-box"'));
     check('Positivkontrolle: Abschnitt geschnitten', sek.length > 1000 && sek.indexOf('sec-ssh-netze') > 0);
-    check('kein textarea/Datei-Feld im Abschnitt', !/<textarea|type="file"/.test(sek));
+    check('Eingabefeld und Datei-Feld im Abschnitt', /<textarea[^>]*id="sec-ssh-schl-text"/.test(sek) && /type="file"[^>]*id="sec-ssh-schl-datei"|id="sec-ssh-schl-datei"[^>]*type="file"/.test(sek));
     const js = lies('js/fernzugang.js').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
     const ziele = js.match(/['"]\/api\/[^'"]+['"]/g) || [];
-    check('fernzugang.js ruft nur status/haertung/netze',
-          ziele.length > 0 && ziele.every(z => /\/api\/broker\/ssh\/(status|haertung|netze)/.test(z)), ziele.join(' '));
+    check('fernzugang.js ruft nur status/haertung/netze/schluessel',
+          ziele.length > 0 && ziele.every(z => /\/api\/broker\/ssh\/(status|haertung|netze|schluessel)['"]/.test(z)), ziele.join(' '));
+
+    // Testschluessel: ECHTES ed25519-Paar, Fingerabdruck vom ECHTEN ssh-keygen
+    const cp = require('child_process'), os = require('os'), nc = require('crypto');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jv_fz_ui_'));
+    let pub = '', fpEcht = '', privat = '';
+    try {
+        cp.execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-C', 'ich@rechner', '-f', path.join(tmp, 'k')]);
+        pub = fs.readFileSync(path.join(tmp, 'k.pub'), 'utf-8').trim();
+        privat = fs.readFileSync(path.join(tmp, 'k'), 'utf-8');
+        fpEcht = cp.execFileSync('ssh-keygen', ['-lf', path.join(tmp, 'k.pub')]).toString().split(/\s+/)[1] || '';
+    } catch (e) { /* unten als Abbruch */ }
+    fs.rmSync(tmp, { recursive: true, force: true });
+    if (!/^SHA256:/.test(fpEcht) || !pub) { console.log('ABBRUCH: ssh-keygen nicht nutzbar (Messaufbau)'); process.exit(2); }
+
+    s = await seite(stand());
+    const W8 = s.w, D8 = W8.document;
+    // jsdom bringt kein WebCrypto mit – die ECHTE Implementierung aus Node einsetzen
+    if (!(W8.crypto && W8.crypto.subtle)) Object.defineProperty(W8, 'crypto', { value: nc.webcrypto, configurable: true });
+    const schlWahl = D8.getElementById('sec-ssh-schl-konto');
+    check('Kontowahl: die angezeigten Konten', schlWahl && Array.from(schlWahl.options).map(o => o.value).join(',') === 'root,admin,anna',
+          schlWahl && Array.from(schlWahl.options).map(o => o.value).join(','));
+    check('Kontowahl: vorbelegt mit dem ersten Nicht-root-Konto', schlWahl && schlWahl.value === 'admin', schlWahl && schlWahl.value);
+    const muell = D8.querySelectorAll('#sec-ssh-konten [data-schl-weg]');
+    check('Muelleimer je Schluessel (2), mit Symbol statt Emoji',
+          muell.length === 2 && Array.from(muell).every(b => b.querySelector('.jv-ico-trash')), muell.length);
+
+    const schlFeld = D8.getElementById('sec-ssh-schl-text');
+    schlFeld.value = pub;
+    await W8.Fernzugang.schluesselVorschau();
+    const vor = text(W8, 'sec-ssh-schl-vorschau');
+    const fpVor = (/SHA256:[A-Za-z0-9+/=]+/.exec(vor) || [''])[0];
+    check('Vorschau: Fingerabdruck = ssh-keygen -lf (gleich, nicht nur enthalten)', fpVor === fpEcht, fpVor + ' / ' + fpEcht);
+
+    const bestaetigt = [];
+    W8.confirm = (t) => { bestaetigt.push(t); return W8.__confirm; };
+    const posts = () => s.aufrufe.filter(a => a.pfad === '/api/broker/ssh/schluessel');
+    W8.__confirm = false;
+    await W8.Fernzugang.schluesselHinzu(); await warte(10);
+    check('Rueckfrage abgelehnt -> KEIN Aufruf', posts().length === 0);
+    check('Rueckfrage nennt Konto und Fingerabdruck', /als admin anmelden/.test(bestaetigt[0] || '') && (bestaetigt[0] || '').indexOf(fpEcht) >= 0, bestaetigt[0]);
+    W8.__confirm = true; W8.__prompt = null;
+    await W8.Fernzugang.schluesselHinzu(); await warte(10);
+    check('Code-Abfrage abgebrochen -> KEIN Aufruf', posts().length === 0);
+    W8.__prompt = '123456';
+    schlWahl.value = 'anna';
+    await W8.Fernzugang.schluesselHinzu(); await warte(30);
+    const p1 = posts()[0] || {};
+    check('POST hinzufuegen mit Konto, Schluessel und Code',
+          p1.body && p1.body.aktion === 'hinzufuegen' && p1.body.konto === 'anna' && p1.body.schluessel === pub && p1.body.nachweis === '123456',
+          JSON.stringify(p1.body));
+    check('nach Erfolg: Feld geleert, Ergebnis am Knopf', schlFeld.value === '' && sichtbar(W8, 'sec-ssh-schl-result'), schlFeld.value);
+
+    const vorher = posts().length;
+    schlFeld.value = privat;
+    await W8.Fernzugang.schluesselHinzu(); await warte(10);
+    check('privater Schluessel: Warnung, KEIN Aufruf', /PRIVATER/.test(text(W8, 'sec-ssh-schl-vorschau')) && posts().length === vorher,
+          text(W8, 'sec-ssh-schl-vorschau'));
+    schlFeld.value = pub + '\n' + pub;
+    await W8.Fernzugang.schluesselHinzu(); await warte(10);
+    check('zwei Zeilen: Warnung, KEIN Aufruf', /genau einen/.test(text(W8, 'sec-ssh-schl-vorschau')) && posts().length === vorher);
+    schlFeld.value = 'command="/bin/sh" ' + pub;
+    await W8.Fernzugang.schluesselHinzu(); await warte(10);
+    check('Optionen vor dem Schluessel: Warnung, KEIN Aufruf', /Kein unterstützter/.test(text(W8, 'sec-ssh-schl-vorschau')) && posts().length === vorher);
+    schlFeld.value = '';
+    await W8.Fernzugang.schluesselHinzu(); await warte(10);
+    check('leer: Hinweis am Knopf, KEIN Aufruf', /zuerst einen öffentlichen Schlüssel/.test(text(W8, 'sec-ssh-schl-result')) && posts().length === vorher);
+
+    // Entfernen per Muelleimer
+    W8.__confirm = false;
+    D8.querySelector('#sec-ssh-konten [data-schl-weg="SHA256:adminFP"]').click(); await warte(10);
+    check('Entfernen abgelehnt -> KEIN Aufruf', posts().length === vorher);
+    W8.__confirm = true;
+    D8.querySelector('#sec-ssh-konten [data-schl-weg="SHA256:adminFP"]').click(); await warte(30);
+    const p2 = posts()[vorher] || {};
+    check('POST entfernen mit Konto, Fingerabdruck und Code',
+          p2.body && p2.body.aktion === 'entfernen' && p2.body.konto === 'admin' && p2.body.fingerabdruck === 'SHA256:adminFP' && p2.body.nachweis === '123456',
+          JSON.stringify(p2.body));
+    check('Ergebnis des Entfernens direkt unter der Liste', sichtbar(W8, 'sec-ssh-konten-result'));
+    s.w.close();
+
+    // Abgewiesener Code: Klartext am Knopf
+    s = await seite(stand(), { '/api/broker/ssh/schluessel': { ok: false, grund: 'nachweis_falsch', error: 'x' } });
+    if (!(s.w.crypto && s.w.crypto.subtle)) Object.defineProperty(s.w, 'crypto', { value: nc.webcrypto, configurable: true });
+    s.w.document.getElementById('sec-ssh-schl-text').value = pub;
+    await s.w.Fernzugang.schluesselHinzu(); await warte(30);
+    check('abgewiesener Code: Klartext am Knopf', /Freigabe-Code ist falsch/.test(text(s.w, 'sec-ssh-schl-result')), text(s.w, 'sec-ssh-schl-result'));
+    s.w.close();
 
     fertig();
     console.log(`\nErgebnis: ${ok} OK, ${fail} FAIL`);

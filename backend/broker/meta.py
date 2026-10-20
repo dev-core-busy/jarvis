@@ -95,6 +95,23 @@ def _behandeln(op: str, args: dict, peer: str = "") -> dict | None:
         policy.audit(by, op, audit_key, "executed", rc=erg.get("rc"),
                      detail=str(erg.get("meldung", ""))[:200], info=info, peer=peer)
         return erg
+    # Schluessel hinterlegen/entfernen: IMMER mit Code – ein Schluessel ist ein
+    # dauerhafter Weg zu root, der Jarvis ueberlebt (Schranken in fernzugang.py)
+    if op == "broker.ssh_schluessel":
+        from backend.broker import fernzugang
+        aktion = str(args.get("aktion", ""))
+        konto = str(args.get("konto", ""))[:64]
+        audit_key = f"{op}:{aktion}:{konto}"
+        fehler = _nachweis(args, by, op, audit_key, peer)
+        if fehler:
+            return fehler
+        erg = fernzugang.schluessel(aktion, konto, str(args.get("schluessel", ""))[:16384],
+                                    str(args.get("fingerabdruck", ""))[:80])
+        policy.audit(by, op, audit_key, "executed" if erg.get("ok") else "abgewiesen",
+                     detail=str(erg.get("meldung", ""))[:200],
+                     info=f"fingerabdruck={erg.get('fingerabdruck') or args.get('fingerabdruck', '')}",
+                     peer=peer)
+        return erg
     # ── Zwei-Faktor-Code der ANMELDUNG gegen denselben Schluessel pruefen ──
     # Betreiberentscheid 2026-10-20: genau EIN Eintrag in der Authenticator-App.
     # Deshalb liegt das Geheimnis nur noch hier (root-eigen) und die Anmeldung

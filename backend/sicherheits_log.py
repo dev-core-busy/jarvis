@@ -63,7 +63,14 @@ SYSLOG_KENNUNG = "jarvis-security"
 _ENV_TAGE = "JARVIS_SICHERHEITS_LOG_TAGE"
 DEFAULT_TAGE = 365
 
-# syslog-Schwere je Ereignisart; alles andere ist "notice"
+# syslog-Schwere je Ereignisart; alles andere ist "notice".
+# ⚠ NOTICE GIBT ES IN PYTHONS logging NICHT. Stufe 25 heisst dort "Level 25",
+# und SysLogHandler bildet unbekannte Namen auf "warning" ab – gemessen
+# 2026-10-20: JEDES Sicherheitsereignis (auch dienst_start, anmeldung) stand als
+# Warnung im Journal, der Filter "Warnungen" war damit wertlos, und ein SIEM sah
+# lauter Warnungen. Die Abbildung auf "notice" setzt _syslog_logger am EIGENEN
+# Handler (kein logging.addLevelName – das waere eine globale Aenderung).
+NOTICE = logging.INFO + 5
 _SCHWERE = {
     "anmeldung_fehlgeschlagen": logging.WARNING,
     "konto_gesperrt": logging.WARNING,
@@ -161,17 +168,30 @@ def _prev_hash() -> str:
     return h
 
 
-def _syslog_logger() -> logging.Logger | None:
+def _syslog_handler(adresse) -> logging.handlers.SysLogHandler:
+    """Handler mit authpriv und der Abbildung NOTICE -> "notice" (siehe oben).
+
+    ``adresse``: Pfad des Syslog-Sockets oder (host, port) – Letzteres nur fuer
+    den Waechter, der die Datagramme mitliest."""
+    h = logging.handlers.SysLogHandler(
+        address=adresse, facility=logging.handlers.SysLogHandler.LOG_AUTHPRIV)
+    # Am INSTANZ-Woerterbuch, nicht an der Klasse: andere SysLogHandler im
+    # Prozess bleiben unberuehrt.
+    h.priority_map = dict(h.priority_map)
+    h.priority_map[logging.getLevelName(NOTICE)] = "notice"
+    return h
+
+
+def _syslog_logger(adresse="/dev/log") -> logging.Logger | None:
     global _syslog
     if _syslog is not None:
         return _syslog
-    if not os.path.exists("/dev/log"):
+    if isinstance(adresse, str) and not os.path.exists(adresse):
         return None
     lg = logging.getLogger("jarvis.sicherheit.syslog")
     lg.propagate = False
     lg.setLevel(logging.INFO)
-    h = logging.handlers.SysLogHandler(
-        address="/dev/log", facility=logging.handlers.SysLogHandler.LOG_AUTHPRIV)
+    h = _syslog_handler(adresse)
     h.setFormatter(logging.Formatter(SYSLOG_KENNUNG + ": %(message)s"))
     lg.addHandler(h)
     _syslog = lg
@@ -220,7 +240,7 @@ def ereignis(art: str, *, benutzer: str = "", ip: str = "", ergebnis: str = "",
     try:
         lg = _syslog_logger()
         if lg is not None:
-            lg.log(_SCHWERE.get(art, logging.INFO + 5),
+            lg.log(_SCHWERE.get(art, NOTICE),
                    json.dumps({k: v for k, v in eintrag.items() if k not in ("prev",)},
                               ensure_ascii=False))
     except Exception:  # noqa: BLE001

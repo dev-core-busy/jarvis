@@ -40,13 +40,21 @@ PROBEN = [
     ("Benutzerfilter achtet auf Gross/Klein", SL,
      'if benutzer and benutzer not in str(e.get("benutzer") or "").lower():',
      'if benutzer and benutzer not in str(e.get("benutzer") or ""):', PY),
+    ("Syslog: notice wird wieder warning", SL,
+     '    h.priority_map[logging.getLevelName(NOTICE)] = "notice"\n', "", PY),
+    ("Syslog-Abbildung aendert die KLASSE (global)", SL,
+     "    h.priority_map = dict(h.priority_map)\n", "", PY),
     ("Pruefmaterial geht hinaus", MA,
      'z = {k: v for k, v in e.items() if k not in ("prev", "hash", "mac")}',
      "z = dict(e)", PY),
     ("Kette immer als intakt gemeldet", MA,
      '"kette": {"ok": bool(kette.get("ok")),', '"kette": {"ok": True,', PY),
     ("Deckel entfernt", MA,
-     "    limit = max(1, min(int(limit or 200), 1000))\n", "    limit = int(limit or 200)\n", PY),
+     # Ueber den Docstring verankert: dieselbe Zeile steht auch in /api/logs/updates.
+     "    Die Datei wird im Thread gelesen (ein Jahr Protokoll ist kein Kleinkram).\n    \"\"\"\n"
+     "    limit = max(1, min(int(limit or 200), 1000))\n",
+     "    Die Datei wird im Thread gelesen (ein Jahr Protokoll ist kein Kleinkram).\n    \"\"\"\n"
+     "    limit = int(limit or 200)\n", PY),
     ("Loeschweg ergaenzt", MA, '@app.delete("/api/audit_log")', NEUE_DELETE_ROUTE, PY),
     ("Details per innerHTML", JS,
      "b.textContent = v.length > 160 ? v.slice(0, 160) + '…' : v;",

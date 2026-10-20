@@ -48,6 +48,7 @@ SAND = Path(tempfile.mkdtemp(prefix="sprot_test_"))
 SL.DATEI = SAND / "sicherheit.jsonl"
 SL._letzter_hash = None
 SL._letzte_datei = None
+_SYSLOG_ORIG = SL._syslog_logger           # fuer Abschnitt 4 (eigener Empfaenger)
 SL._syslog_logger = lambda: None          # nichts ins echte Journal
 SL.schluessel_setzen("test-geheimnis")
 if not str(SL.DATEI).startswith(str(SAND)):
@@ -142,6 +143,47 @@ pruefe(all(m == "get" for m, _, _ in routen), "nur GET – kein Loesch- oder Sch
        % [m for m, _, _ in routen])
 pruefe(all("require_local_auth" in ast.unparse(n.args) for _, _, n in routen),
        "haengt an require_local_auth (Administratoren)")
+
+print("\n== 4. Syslog-Schwere (Datagramme mitgelesen)")
+# Befund 2026-10-20: Stufe 25 hiess "Level 25" und SysLogHandler machte daraus
+# "warning" – jedes Sicherheitsereignis stand als Warnung im Journal. Gemessen
+# wird am DRAHT: PRI = Facility * 8 + Schwere (authpriv = 10).
+import logging  # noqa: E402
+import logging.handlers  # noqa: E402
+import socket  # noqa: E402
+
+empf = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+empf.bind(("127.0.0.1", 0))
+empf.settimeout(3)
+port = empf.getsockname()[1]
+SL._syslog = None
+SL._syslog_logger = lambda: _SYSLOG_ORIG(("127.0.0.1", port))
+
+
+def pri_von(art, **kw):
+    SL.ereignis(art, **kw)
+    try:
+        roh = empf.recv(65535).decode("utf-8", "replace")
+    except socket.timeout:
+        return None, ""
+    return (int(roh[1:roh.index(">")]) if roh.startswith("<") and ">" in roh else None), roh
+
+
+p1, roh1 = pri_von("anmeldung", benutzer="a.b", ergebnis="erfolg")
+pruefe(p1 is not None and "jarvis-security" in roh1,
+       "Positivkontrolle: Datagramm mit Kennung empfangen (%s)" % roh1[:40])
+pruefe(p1 == 10 * 8 + 5, "gewoehnliches Ereignis kommt als notice an (PRI %s, erwartet 85)" % p1)
+p2, _ = pri_von("anmeldung_fehlgeschlagen", ergebnis="401")
+pruefe(p2 == 10 * 8 + 4, "Fehlschlag bleibt warning (PRI %s, erwartet 84)" % p2)
+p3, _ = pri_von("konto_gesperrt", benutzer="a.b")
+pruefe(p3 == 84, "Kontosperre bleibt warning (PRI %s)" % p3)
+# Keine globale Aenderung: ein fremder SysLogHandler bildet Stufe 25 weiter
+# wie gewohnt ab (sonst haette der Fix das Verhalten anderer Module veraendert).
+fremd = logging.handlers.SysLogHandler(address=("127.0.0.1", port))
+pruefe(fremd.mapPriority(logging.getLevelName(SL.NOTICE)) == "warning",
+       "fremde SysLogHandler bleiben unberuehrt (kein addLevelName, keine Klassenaenderung)")
+fremd.close()
+empf.close()
 
 print("\nBILANZ: %d OK, %d FAIL" % (_ok, _fail))
 sys.exit(1 if _fail else 0)

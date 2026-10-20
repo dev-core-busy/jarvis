@@ -280,9 +280,19 @@ _tresor._zuruecksetzen_fuer_test()     # der Schluessel wird je Prozess gemerkt
 p("die Broker-Marke steht in der Klartext-Liste des Tresors",
   f.MARKE_IM_BROKER in getattr(_tresor, "KLARTEXT_WERTE", frozenset()))
 
+# Ein Platzhalter fuer "irgendein Wert, der KEIN Verweis ist". Bewusst lesbar
+# und mit Bindestrichen: ein zufaellig aussehender Base32-String (erst
+# "ABCDEFGHIJKLMNOP234567") hat Entropie 4,46 und schlaegt in gitleaks als
+# ``generic-api-key`` an – die CI war deswegen rot. Ein Eintrag in
+# ``.gitleaksignore`` waere der falsche Weg: er haengt an der ZEILENNUMMER und
+# meldet sich beim naechsten Einschub erneut (steht so in dessen Kopf).
+# Fuer die Pruefung zaehlt nur: nicht leer, kein ``JGS1:``, nicht in
+# KLARTEXT_WERTE – dann gilt der Wert als Klartext in einem geheimen Feld.
+PROBE_KEIN_VERWEIS = "erfundener-testwert-kein-geheimnis"
+
 # Positivkontrolle: verpackt der Tresor hier ueberhaupt? Ohne sie waere
 # "die Marke bleibt Klartext" erfuellt, weil gar nichts verpackt wird.
-_probe_geheim = _tresor.wert_verschluesseln("ABCDEFGHIJKLMNOP234567")
+_probe_geheim = _tresor.wert_verschluesseln(PROBE_KEIN_VERWEIS)
 if not _probe_geheim.startswith(_tresor.PRAEFIX_WERT):
     abbruch("wert_verschluesseln verpackt nicht einmal ein echtes Secret – "
             f"Messaufbau kaputt (Hauptschluessel: {_tresor.status()})")
@@ -299,7 +309,7 @@ p("die Marke uebersteht einen Schreib-/Lesezyklus unveraendert",
 # Die Marke gilt nicht als "noch zu verpackender Altbestand" – sonst schreibt
 # das Backend auth_state.json bei JEDEM Start neu und meldet es im Journal.
 _baum_marke = {"users": {"jarvis": {"totp_secret": f.MARKE_IM_BROKER}}}
-_baum_echt = {"users": {"jarvis": {"totp_secret": "ABCDEFGHIJKLMNOP234567"}}}
+_baum_echt = {"users": {"jarvis": {"totp_secret": PROBE_KEIN_VERWEIS}}}
 # Positivkontrolle zuerst: erkennt die Funktion einen ECHTEN Klartext-Rueckstand?
 if not _tresor.klartext_felder(_baum_echt):
     abbruch("klartext_felder findet nicht einmal ein echtes Klartext-Secret – "

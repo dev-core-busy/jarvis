@@ -63,8 +63,11 @@ PROBEN = [
     ("chat.js: wsSend meldet einen geschlossenen Socket nicht", CHAT,
      "        if (!ws || ws.readyState !== 1) return false;\n",
      "        if (!ws || ws.readyState !== 1) return;\n", W_H9),
+    # Seit 2026-10-20 je Zweck ein eigener Sperrzaehler (ein Authenticator-
+    # Eintrag fuer Anmeldung UND Freigaben) – der alte Anker ``z["gesperrt_bis"]``
+    # traf nichts mehr, und der Harness haette das als stumme Probe gemeldet.
     ("Freigabecode: Sperre wird nicht beachtet", FG,
-     "        if z[\"gesperrt_bis\"] > t:\n", "        if False:\n", W_K12),
+     "        if z[f\"gesperrt_bis_{zweck}\"] > t:\n", "        if False:\n", W_K12),
     ("Freigabecode: Fehlversuche sperren nie", FG,
      "        gesperrt_bis = t + SPERRE_S if fehl >= FEHL_MAX else 0\n",
      "        gesperrt_bis = 0\n", W_K12),

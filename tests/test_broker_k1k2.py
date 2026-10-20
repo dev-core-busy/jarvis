@@ -128,12 +128,13 @@ check("Positivkontrolle: die ersten Fehlversuche heissen 'nachweis_falsch'",
 check(f"nach {freigabe.FEHL_MAX} Fehlversuchen: RICHTIGER Code wird abgewiesen (gesperrt)",
       freigabe.pruefen(richtig, t0) == (False, "gesperrt"))
 check("Sperre steht im Zustand (ueberlebt Neustart)",
-      freigabe._zustand()["gesperrt_bis"] > t0)
+      freigabe._zustand()[f"gesperrt_bis_{freigabe.ZWECK_FREIGABE}"] > t0)
 check("Sperre hat einen Klartext", "gesperrt" in freigabe.MELDUNG.get("gesperrt", ""))
 t1 = t0 + freigabe.SPERRE_S + 31
 check("nach Ablauf der Sperre gilt ein richtiger Code wieder",
       freigabe.pruefen(freigabe._code(KEY, int(t1 // 30)), t1) == (True, "ok"))
-check("… und der Fehlzaehler steht wieder auf 0", freigabe._zustand()["fehl"] == 0)
+check("… und der Fehlzaehler steht wieder auf 0",
+      freigabe._zustand()[f"fehl_{freigabe.ZWECK_FREIGABE}"] == 0)
 t2 = t1 + 60
 for _ in range(freigabe.FEHL_MAX - 1):
     freigabe.pruefen(falsch, t2)

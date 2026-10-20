@@ -37,3 +37,8 @@ tests/test_knowledge_sync_ui.js:generic-api-key:298
 tests/test_knowledge_sync_ui.js:generic-api-key:428
 tests/test_knowledge_sync_ui.js:generic-api-key:466
 tests/test_totp_setup_knopf_ui.js:generic-api-key:73
+# Erfundener Base32-Testwert in der Positivkontrolle "verpackt der Tresor
+# ueberhaupt?" (2026-10-20). In der AKTUELLEN Fassung steht dort laengst ein
+# lesbarer Platzhalter ohne Entropie – dieser Eintrag deckt nur den Fund in
+# Commit c5d69120 ab, den die Historien-Pruefung weiterhin sieht.
+tests/test_broker_totp.py:generic-api-key:302

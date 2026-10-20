@@ -1627,6 +1627,7 @@ _ACTION_LABELS = [
     ("/api/excel/",            "Excel"),
     ("/api/ai-mouse/",         "AI-Maus"),
     ("/api/feedback",          "Feedback"),
+    ("/api/newsfeed/admin/",   "Einstellungen · Newsfeed"),
     ("/api/claude/",           "Claude"),
     ("/api/skills/",           "Einstellungen · Skills"),
     ("/api/mcp/",              "Einstellungen · MCP"),
@@ -7792,6 +7793,10 @@ async def get_me(user: str = Depends(require_auth)):
             # Das Portal blendet Kachel UND Ungelesen-Badge daran ein; ohne das
             # liefe der Badge-Poll bei ausgeschaltetem Skill in einen 403.
             "userchat": _skill_active(_UC_SKILL),
+            # Newsfeed: haengt NUR am Skill-Zustand – die Meldungen sind fuer
+            # alle gedacht, eine Freigabeliste gibt es bewusst nicht. Das
+            # Portal ruft /api/newsfeed nur bei True ab.
+            "newsfeed": _skill_active("newsfeed"),
             # Excel-Add-in: Freigabe UND aktiver Skill – gleiche Logik wie bei
             # sap/email/tracks. Das Aufgabenfenster fragt den Wert ab und sagt
             # im Klartext, was fehlt, statt den Benutzer bei jeder Frage in
@@ -17404,6 +17409,125 @@ async def feedback_seite():
     DATEN liegen ausschliesslich hinter `require_feedback_access`.
     """
     return FileResponse(FRONTEND_DIR / "feedback.html")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Newsfeed (Kurzmeldungen im Portal)
+# ═══════════════════════════════════════════════════════════════════════════
+# Logik in `backend/newsfeed.py`, hier nur Rechte und Transport.
+#
+# ⚠ ZWEI RECHTE-EBENEN:
+#   `/api/newsfeed`          require_auth + aktiver Skill – JEDER Angemeldete
+#   `/api/newsfeed/admin/*`  require_local_auth           – pflegen
+# Der Lesepfad hat bewusst keine eigene Freigabeliste: die Meldungen sind fuer
+# alle gedacht. Die Pflege haengt NICHT am Skill-Zustand, damit ein
+# Administrator Meldungen anlegen kann, BEVOR er den Skill einschaltet.
+#
+# ⚠ BEI AUSGESCHALTETEM SKILL 404, NICHT 403: das Portal deutet ein 403 als
+# entzogene Anmeldung und meldet ab (`holeGeschuetzt`). Ein Abruf, der nur
+# eine Zierkachel fuellt, darf niemanden abmelden.
+
+def _newsfeed_unlesbar() -> JSONResponse:
+    return JSONResponse({"ok": False, "error": "Der Newsfeed-Bestand ist unlesbar."},
+                        status_code=500)
+
+
+@app.get("/api/newsfeed")
+async def newsfeed_lesen(user: str = Depends(require_auth)):
+    """Die neuesten Meldungen samt Verweil- und Scrolldauer – fuer die Portal-Kachel."""
+    from backend import newsfeed as nf  # noqa: PLC0415
+    from backend import atomar  # noqa: PLC0415
+    if not _skill_active("newsfeed"):
+        return JSONResponse({"ok": False, "error": "Newsfeed ist nicht aktiv."},
+                            status_code=404)
+    try:
+        daten = await asyncio.to_thread(nf.anzeige)
+    except atomar.Unlesbar:
+        return _newsfeed_unlesbar()
+    return JSONResponse({"ok": True, **daten})
+
+
+@app.get("/api/newsfeed/admin")
+async def newsfeed_admin_lesen(user: str = Depends(require_local_auth)):
+    """Alle Meldungen (neueste zuerst), Einstellungen, Grenzen und Skill-Zustand."""
+    from backend import newsfeed as nf  # noqa: PLC0415
+    from backend import atomar  # noqa: PLC0415
+    try:
+        liste = await asyncio.to_thread(nf.alle)
+        einst = await asyncio.to_thread(nf.einstellungen)
+    except atomar.Unlesbar:
+        return _newsfeed_unlesbar()
+    return JSONResponse({
+        "ok": True, "eintraege": liste, "einstellungen": einst,
+        "grenzen": {"titel_max": nf.TITEL_MAX, "text_max": nf.TEXT_MAX,
+                    "anzeige": nf.ANZEIGE_ANZAHL,
+                    "verweil_min": nf.VERWEIL_MIN, "verweil_max": nf.VERWEIL_MAX,
+                    "scroll_min": nf.SCROLL_MIN, "scroll_max": nf.SCROLL_MAX},
+        "skill_aktiv": _skill_active("newsfeed"),
+    })
+
+
+@app.post("/api/newsfeed/admin/eintraege")
+async def newsfeed_admin_speichern(request: Request,
+                                   user: str = Depends(require_local_auth)):
+    """Meldung anlegen oder aendern. Body: ``{id?, titel, text}``.
+
+    Das Erstellungsdatum setzt der Server (Begruendung in `backend/newsfeed.py`).
+    """
+    from backend import newsfeed as nf  # noqa: PLC0415
+    from backend import atomar  # noqa: PLC0415
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungültiger JSON-Body."},
+                            status_code=400)
+    body = body if isinstance(body, dict) else {}
+    try:
+        eintrag = await asyncio.to_thread(
+            nf.eintrag_speichern, str(body.get("id") or "").strip(),
+            body.get("titel"), body.get("text"))
+    except nf.NewsfeedFehler as f:
+        return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
+    except atomar.Unlesbar:
+        return _newsfeed_unlesbar()
+    return JSONResponse({"ok": True, "eintrag": eintrag})
+
+
+@app.delete("/api/newsfeed/admin/eintraege/{eid}")
+async def newsfeed_admin_loeschen(eid: str, user: str = Depends(require_local_auth)):
+    """Meldung entfernen. Unbekannt → **404**."""
+    from backend import newsfeed as nf  # noqa: PLC0415
+    from backend import atomar  # noqa: PLC0415
+    try:
+        weg = await asyncio.to_thread(nf.eintrag_loeschen, eid)
+    except atomar.Unlesbar:
+        return _newsfeed_unlesbar()
+    if not weg:
+        return JSONResponse({"ok": False, "error": "Der Eintrag wurde nicht gefunden."},
+                            status_code=404)
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/newsfeed/admin/einstellungen")
+async def newsfeed_admin_einstellungen(request: Request,
+                                       user: str = Depends(require_local_auth)):
+    """Verweil- und Scrolldauer setzen. Body: ``{verweil_s, scroll_s}`` (Sekunden)."""
+    from backend import newsfeed as nf  # noqa: PLC0415
+    from backend import atomar  # noqa: PLC0415
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungültiger JSON-Body."},
+                            status_code=400)
+    body = body if isinstance(body, dict) else {}
+    try:
+        neu = await asyncio.to_thread(nf.einstellungen_setzen,
+                                      body.get("verweil_s"), body.get("scroll_s"))
+    except nf.NewsfeedFehler as f:
+        return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
+    except atomar.Unlesbar:
+        return _newsfeed_unlesbar()
+    return JSONResponse({"ok": True, "einstellungen": neu})
 
 
 # ─── Kundenverwaltung (IBS-API) ──────────────────────────────────────

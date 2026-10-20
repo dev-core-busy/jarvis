@@ -62,6 +62,8 @@
         // Wie ai_mouse: hier, aber NICHT in TARGETS – der Reiter zeigt
         // eine handgebaute Oberflaeche (feedback_admin.js).
         feedback:           'settings-tab-btn-feedback',
+        // Wie feedback: handgebaute Oberflaeche (newsfeed_admin.js).
+        newsfeed:           'settings-tab-btn-newsfeed',
     };
 
 

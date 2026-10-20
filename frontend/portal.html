@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=10">
     <link rel="stylesheet" href="/static/css/update_widget.css?v=4">
+    <link rel="stylesheet" href="/static/css/newsfeed.css?v=1">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -418,6 +419,13 @@
          Dieser Streifen sagt, dass der Zustand UNBEKANNT ist, und führt zurück.
          Deckende Fläche wie beim Lizenz-Banner: er liegt über den Karten. -->
     <div id="pt-load-banner" style="display:none;cursor:pointer;margin:0 0 16px;padding:10px 14px;border-radius:10px;border:1px solid var(--warning);background:var(--bg-secondary);color:var(--warning);font-size:0.88rem;"></div>
+    <!-- Newsfeed (Skill "newsfeed"): die drei neuesten Meldungen als Laufband.
+         BEWUSST AUSSERHALB von .pt-cards: dort wuerde sie alphabetisch
+         einsortiert (alphabetische Sortierung der Kacheln) und in der kompakten Ansicht verkleinert –
+         ein Blickfang gehoert an eine feste Stelle ueber den Bereichen.
+         Inhalt baut newsfeed.js; portal_seite.js startet es nur bei
+         permissions.newsfeed, ohne Meldung bleibt die Kachel verborgen. -->
+    <section id="pt-newsfeed" class="nf-kachel" hidden></section>
     <div class="pt-cards">
         <a class="pt-card" href="/chat">
             <div class="pt-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
@@ -691,7 +699,7 @@ sudo update-ca-certificates</code></pre>
 <script src="/static/js/cpubar.js?v=2"></script>
 <script src="/static/js/syspackages.js?v=3"></script>
 <script src="/static/js/sysload.js?v=5"></script>
-<script src="/static/js/i18n.js?v=343"></script>
+<script src="/static/js/i18n.js?v=344"></script>
 <script src="/static/js/theme.js?v=3"></script>
 <script src="/static/js/branding.js?v=27"></script>
 <script src="/static/js/security_incidents.js?v=39"></script>
@@ -703,7 +711,8 @@ sudo update-ca-certificates</code></pre>
 <script src="/static/js/settings_btn.js?v=5"></script>
 <script src="/static/js/portal_tiles.js?v=2"></script>
 <script src="/static/js/alpha_sort.js?v=2"></script>
-<script src="/static/js/portal_seite.js?v=3"></script>
+<script src="/static/js/newsfeed.js?v=2"></script>
+<script src="/static/js/portal_seite.js?v=4"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

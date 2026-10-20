@@ -128,6 +128,11 @@
             var fbCard = document.getElementById('pt-card-feedback');
             if (fbCard) fbCard.classList.remove('hidden');
         }
+        // Newsfeed: haengt NUR am Skill-Zustand (Meldungen fuer alle). Die
+        // Kachel blendet newsfeed.js erst ein, wenn es Meldungen gibt.
+        if (d.permissions && d.permissions.newsfeed && window.JarvisNewsfeed) {
+            window.JarvisNewsfeed.portalStart();
+        }
         // Jira-Assistent: Freigabe UND aktiver Jira-Skill.
         if (d.permissions && d.permissions.jira_assist) {
             var jaCard = document.getElementById('pt-card-jiraassist');

@@ -85,6 +85,7 @@
         email:             'email',
         ai_mouse:          'aimouse',
         feedback:          'feedback',
+        newsfeed:          'newsfeed',
         'short-tracks':    'tracks',
         'excel-addin':     'excel',
         kundenverwaltung:  'kundenverwaltung',

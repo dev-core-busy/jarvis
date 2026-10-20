@@ -791,6 +791,13 @@
         // ⚠ JEDE .kb-section des Reiters gehoert hier hinein (gleiche Regel wie
         // beim AI-Maus- und Jira-Reiter): eine vergessene bleibt zugeklappt und
         // laesst sich nicht oeffnen.
+        function _initNewsfeedCollapse() {
+            _collapseInit([
+                { hdr: 'nf-sect-list-hdr', body: 'nf-sect-list-body', tog: 'nf-sect-list-tog' },
+                { hdr: 'nf-sect-anz-hdr',  body: 'nf-sect-anz-body',  tog: 'nf-sect-anz-tog'  },
+            ]);
+        }
+
         function _initFeedbackCollapse() {
             _collapseInit([
                 { hdr: 'fb-sect-form-hdr', body: 'fb-sect-form-body', tog: 'fb-sect-form-tog' },
@@ -834,6 +841,7 @@
         const tabJira    = document.getElementById('settings-tab-jira');
         const tabAimouse = document.getElementById('settings-tab-aimouse');
         const tabFeedback = document.getElementById('settings-tab-feedback');
+        const tabNewsfeed = document.getElementById('settings-tab-newsfeed');
         const tabSap     = document.getElementById('settings-tab-sap');
         const tabVemas   = document.getElementById('settings-tab-vemas');
         const tabKundenverwaltung = document.getElementById('settings-tab-kundenverwaltung');
@@ -846,7 +854,7 @@
         const tabEmail   = document.getElementById('settings-tab-email');
         const tabTracks  = document.getElementById('settings-tab-tracks');
         const tabExcel   = document.getElementById('settings-tab-excel');
-        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabBranding, tabConfluence, tabJira, tabSap, tabVemas, tabEmail, tabTracks, tabExcel, tabFeedback, tabKundenverwaltung, tabSupport, tabMcp, tabTelemetry, tabSecurity, tabCron].concat(tabsSkillCfg);
+        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabBranding, tabConfluence, tabJira, tabSap, tabVemas, tabEmail, tabTracks, tabExcel, tabFeedback, tabNewsfeed, tabKundenverwaltung, tabSupport, tabMcp, tabTelemetry, tabSecurity, tabCron].concat(tabsSkillCfg);
 
         settingsTabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -941,6 +949,11 @@
                     tabFeedback.classList.add('active');
                     _initFeedbackCollapse();
                     if (window.FeedbackAdmin) window.FeedbackAdmin.onShow();
+                } else if (target === 'newsfeed' && tabNewsfeed) {
+                    tabNewsfeed.style.display = '';
+                    tabNewsfeed.classList.add('active');
+                    _initNewsfeedCollapse();
+                    if (window.NewsfeedAdmin) window.NewsfeedAdmin.onShow();
                 } else if (target === 'sap' && tabSap) {
                     tabSap.style.display = '';
                     tabSap.classList.add('active');

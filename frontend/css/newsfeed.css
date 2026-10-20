@@ -1,0 +1,128 @@
+/* ═══ Newsfeed-Laufband ══════════════════════════════════════════════════════
+   EINE Datei fuer /portal (die Kachel) und /settings (die Vorschau im Reiter
+   Newsfeed) – beide zeichnen mit `newsfeed.js`. Stuende das hier in der
+   <style>-Sektion von portal.html, saehe die Vorschau anders aus als das
+   Portal, und genau das soll sie nicht.
+
+   Blickfang, ohne zu stoeren:
+     * beim Erscheinen gleitet die Kachel ein und leuchtet zweimal auf,
+     * ein pulsierender Punkt im Kopf sagt „hier ist etwas Aktuelles",
+     * ein duenner Balken unten laeuft waehrend der Verweilzeit voll – man sieht,
+       wann die naechste Meldung kommt.
+   Wer im System „Bewegung reduzieren" eingestellt hat, bekommt nichts davon:
+   kein Puls, kein Balken, und die Meldungen werden ueberblendet statt
+   gerollt (Regel ganz unten und `newsfeed.js`). */
+
+.nf-kachel {
+    position: relative;
+    margin: 0 0 18px;
+    padding: 14px 18px 16px 22px;
+    background: var(--bg-secondary);
+    border: 1px solid rgba(var(--accent-rgb), .45);
+    border-radius: var(--radius-lg, 14px);
+    box-shadow: var(--shadow-md);
+    overflow: hidden;
+    animation: nf-einflug .6s ease-out both, nf-leuchten 1.6s ease-in-out .6s 2;
+}
+.nf-kachel[hidden] { display: none; }
+/* Akzentkante links: traegt die Markenfarbe, ohne die Flaeche zu faerben. */
+.nf-kachel::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 5px;
+    background: var(--gradient, var(--accent));
+}
+
+.nf-kopf {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-size: .74rem;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--accent-hover, var(--accent));
+}
+.nf-puls {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    flex: 0 0 auto;
+    animation: nf-puls 1.8s ease-out infinite;
+}
+.nf-zaehler {
+    margin-left: auto;
+    font-weight: 600;
+    letter-spacing: 0;
+    color: var(--text-muted);
+}
+
+/* Das Fenster schneidet ab, das Band darin wird verschoben. Die Hoehe setzt
+   `newsfeed.js` auf die hoechste Meldung; `min-height` ist das Netz, solange
+   noch nicht gemessen ist (und dort, wo es kein Layout gibt). */
+.nf-fenster {
+    position: relative;
+    overflow: hidden;
+    min-height: 4.6em;
+}
+.nf-band { will-change: transform; }
+.nf-block { box-sizing: border-box; padding: 2px 0; }
+.nf-datum {
+    font-size: .74rem;
+    color: var(--text-muted);
+    margin-bottom: 2px;
+}
+.nf-titel {
+    margin: 0 0 4px;
+    font-size: 1.02rem;
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+.nf-text {
+    margin: 0;
+    font-size: .88rem;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    overflow-wrap: anywhere;
+}
+
+/* Fortschritt der Verweilzeit. Die Dauer setzt `newsfeed.js` je Durchgang. */
+.nf-fortschritt {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    height: 3px;
+    background: rgba(var(--accent-rgb), .12);
+}
+.nf-fortschritt-balken {
+    height: 100%;
+    width: 0;
+    background: var(--accent);
+}
+.nf-fortschritt-balken.nf-laeuft { animation-name: nf-fuellen; animation-timing-function: linear;
+                                   animation-fill-mode: forwards; }
+/* Angehalten (Maus ueber der Kachel): der Balken bleibt stehen, wo er ist. */
+.nf-kachel.nf-pause .nf-fortschritt-balken { animation-play-state: paused; }
+
+@keyframes nf-einflug {
+    from { opacity: 0; transform: translateY(-10px); }
+    to   { opacity: 1; transform: none; }
+}
+@keyframes nf-leuchten {
+    0%, 100% { box-shadow: var(--shadow-md); }
+    50%      { box-shadow: var(--shadow-md), 0 0 0 4px rgba(var(--accent-rgb), .28); }
+}
+@keyframes nf-puls {
+    0%   { box-shadow: 0 0 0 0 rgba(var(--accent-rgb), .6); }
+    70%  { box-shadow: 0 0 0 8px rgba(var(--accent-rgb), 0); }
+    100% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0); }
+}
+@keyframes nf-fuellen { from { width: 0; } to { width: 100%; } }
+
+@media (prefers-reduced-motion: reduce) {
+    .nf-kachel, .nf-puls { animation: none; }
+    .nf-fortschritt { display: none; }
+}

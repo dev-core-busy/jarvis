@@ -1,0 +1,28 @@
+{
+    "name": "Newsfeed",
+    "description": "Zeigt allen Benutzern im Portal die drei neuesten Kurzmeldungen als animiertes Laufband. Administratoren pflegen die Meldungen (Überschrift + ein bis drei Sätze) und stellen Verweilzeit und Scrollgeschwindigkeit ein.",
+    "version": "1.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": [],
+    "category": "kommunikation",
+    "icon": "message",
+    "system": false,
+    "enabled": false,
+    "dependencies": [],
+    "system_packages": [],
+    "data_dirs": [],
+    "config_schema": {},
+    "knowledge_docs": [],
+    "permissions": [],
+    "help": {
+        "details": "Der Skill blendet im Portal eine Newsfeed-Kachel ein und gattert die Endpunkte /api/newsfeed/*. Die Meldungen werden unter Einstellungen → Newsfeed gepflegt: Überschrift und ein bis drei Sätze Text, das Erstellungsdatum setzt der Server. Das Portal zeigt die drei neuesten: eine Meldung bleibt die eingestellte Verweilzeit stehen (Vorgabe 3 Sekunden) und rollt dann nach oben aus der Kachel, die nächste rollt hinterher.\n\nSehen darf die Kachel JEDER angemeldete Benutzer - eine eigene Freigabeliste gibt es bewusst nicht, die Meldungen sind für alle gedacht. Pflegen dürfen nur Administratoren.\n\nES LAEUFT KEIN MODELL. Die Meldungen werden gespeichert und angezeigt, mehr nicht.",
+        "tools": [],
+        "use_cases": [
+            "Wartungsfenster oder Ausfälle ankündigen",
+            "Auf neue Funktionen oder Bereiche im Portal hinweisen",
+            "Kurze Hinweise für alle Mitarbeiter einblenden"
+        ],
+        "notes": "Ohne Meldung bleibt die Kachel unsichtbar. Wer im Betriebssystem 'Bewegung reduzieren' eingestellt hat, sieht die Meldungen ohne Rollbewegung (Überblendung). Fährt man mit der Maus über die Kachel, hält das Laufband an."
+    }
+}

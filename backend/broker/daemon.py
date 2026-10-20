@@ -16,6 +16,8 @@ Meta-Operationen (Admin-UI), Regeln in backend/broker/meta.py:
 - broker.policy_decide  – {key, decision, by[, nachweis]}; 'allow' nur mit Freigabe-Code
 - broker.policy_remove  – {key, nachweis} loeschen
 - broker.audit_tail     – {n} letzte Audit-Eintraege
+- broker.totp_pruefen   – {code, konto}; 2FA-Code der ANMELDUNG gegen denselben
+                          Schluessel wie die Freigaben (ein App-Eintrag, meta.py)
 - broker.ssh_status     – Fernzugang (SSH): Zustand, Konten, laufende Tests
 - broker.ssh_haertung   – {aktion, root_modus, nachweis}; Regeln in fernzugang.py
 - broker.ssh_netze      – {aktion, netze, nachweis}

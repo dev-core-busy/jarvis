@@ -279,6 +279,14 @@ exec(_funktionen("generate_token", "verify_token", "_epoche_widerrufen", "_admin
                  "_is_admin_user", "_admin_verweigert_text", "require_local_auth",
                  "_check_rate_limit", "_record_login_attempt", "_konto_sperre_antwort",
                  "_totp_vormerken", "login", "_login_ablauf", "_anmeldung_protokollieren",
+                 # Seit 2026-10-20 kann das 2FA-Geheimnis im ROOT-BROKER liegen
+                 # (ein Authenticator-Eintrag fuer Anmeldung UND Freigaben). Die
+                 # ECHTEN Funktionen mitschneiden, nicht nachbauen: eine Attrappe
+                 # haette den neuen Zweig dauerhaft unmessbar gemacht. Die Konten
+                 # hier tragen kein Broker-Geheimnis, der Zweig wird also nicht
+                 # betreten - fehlt er aber, stirbt der Lauf an einem NameError,
+                 # und der Folgefehler nennt eine voellig andere Zeile.
+                 "_totp_im_broker", "_totp_broker_pruefen", "_totp_broker_fehlertext",
                  "_antwort_json", "totp_disable", "_totp_fehlertext",
                  "_sitzung_ist_app", "_totp_app_sperre",
                  "_kennwort_schranke", "_kennwort_fehlversuch",

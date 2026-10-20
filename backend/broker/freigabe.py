@@ -52,6 +52,36 @@ STELLEN = 6
 FEHL_MAX = 5
 SPERRE_S = 15 * 60
 
+# Zwei Zwecke, EIN Schluessel (Betreiberentscheid 2026-10-20: genau ein Eintrag in
+# der Authenticator-App). Die Aufteilung ist nicht kosmetisch:
+#
+#   * Der WIEDERHOLSCHUTZ (``letzter_schritt``) ist GEMEINSAM. Ein Code, den die
+#     Anmeldung verbraucht hat, gilt fuer eine Freigabe nicht mehr – sonst waere
+#     der Umbau eine Verschlechterung: bisher ging ein gueltiger Code nur bei
+#     einer Freigabe durchs Backend (selten), jetzt bei jeder Anmeldung (oft),
+#     und der oben benannte Rest-Angriff ("kompromittiertes Backend verwendet
+#     den gerade eingetippten Code fuer etwas anderes") haette ein vielfach
+#     groesseres Zeitfenster.
+#   * Die FEHLVERSUCH-SPERRE ist GETRENNT, sonst legt ein fehlschlagender
+#     Anmeldeversuch die Root-Freigaben fuer SPERRE_S lahm.
+#     ⚠ NICHT, weil "die Anmeldemaske von aussen erreichbar" waere – das stand
+#     hier zuerst und ist FALSCH: im Login-Ablauf stehen IP-Drossel,
+#     Kontosperre und die KENNWORTPRUEFUNG vor dem 2FA-Zweig (nachgemessen am
+#     Quelltext, in dieser Reihenfolge). Ein Fremder erreicht diese Pruefung
+#     also gar nicht. Der Weg, der sie erreicht, ist der SOCKET: jeder Prozess
+#     des Dienstbenutzers kann ``broker.totp_pruefen`` direkt rufen, ohne
+#     Kennwort und ohne Anmeldung. Genau dafuer ist die Sperre da – und genau
+#     deshalb darf sie die Freigaben nicht mitnehmen.
+ZWECK_FREIGABE = "freigabe"
+ZWECK_LOGIN = "login"
+ZWECKE = (ZWECK_FREIGABE, ZWECK_LOGIN)
+
+# Steht als ``totp_secret`` eines Kontos in ``data/auth_state.json``, wenn dessen
+# Geheimnis HIER liegt und die Anmeldung den Broker fragt (Op
+# ``broker.totp_pruefen``). Kein Geheimnis, nur ein Verweis – und bewusst ein
+# Wert, der nie ein gueltiger Base32-Schluessel sein kann (Kleinbuchstaben).
+MARKE_IM_BROKER = "broker"
+
 # Pruefen und Merken des verbrauchten Schritts sind EIN Vorgang: der Broker
 # behandelt Anfragen parallel (asyncio.to_thread), ohne Sperre gingen zwei
 # gleichzeitige Anfragen mit demselben Code beide durch.
@@ -97,17 +127,35 @@ def _code(schluessel: bytes, zaehler: int) -> str:
     return str(wert % (10 ** STELLEN)).zfill(STELLEN)
 
 
+def _leerer_zustand() -> dict:
+    z = {"letzter_schritt": 0}
+    for zweck in ZWECKE:
+        z[f"fehl_{zweck}"] = 0
+        z[f"gesperrt_bis_{zweck}"] = 0.0
+    return z
+
+
 def _zustand() -> dict:
-    """``{letzter_schritt, fehl, gesperrt_bis}`` – fehlend/unlesbar: Nullwerte."""
+    """``{letzter_schritt, fehl_<zweck>, gesperrt_bis_<zweck>}`` – fehlend/unlesbar: Nullwerte.
+
+    ALTBESTAND: vor der Login-Pruefung hiessen die Felder ``fehl`` und
+    ``gesperrt_bis`` ohne Zweck und zaehlten fuer Freigaben. Sie gelten weiter –
+    eine laufende Sperre darf ein Deploy nicht aufheben.
+    """
     try:
         if _vertrauenswuerdig(ZUSTAND):
             roh = json.loads(ZUSTAND.read_text())
-            return {"letzter_schritt": int(roh.get("letzter_schritt", 0)),
-                    "fehl": int(roh.get("fehl", 0)),
-                    "gesperrt_bis": float(roh.get("gesperrt_bis", 0))}
+            z = _leerer_zustand()
+            z["letzter_schritt"] = int(roh.get("letzter_schritt", 0))
+            for zweck in ZWECKE:
+                alt_f = roh.get("fehl", 0) if zweck == ZWECK_FREIGABE else 0
+                alt_g = roh.get("gesperrt_bis", 0) if zweck == ZWECK_FREIGABE else 0
+                z[f"fehl_{zweck}"] = int(roh.get(f"fehl_{zweck}", alt_f))
+                z[f"gesperrt_bis_{zweck}"] = float(roh.get(f"gesperrt_bis_{zweck}", alt_g))
+            return z
     except Exception:  # noqa: BLE001
         pass
-    return {"letzter_schritt": 0, "fehl": 0, "gesperrt_bis": 0.0}
+    return _leerer_zustand()
 
 
 def _letzter_schritt() -> int:
@@ -127,9 +175,14 @@ def _schreibe_privat(p: Path, inhalt: str) -> None:
     os.replace(tmp, p)
 
 
-def pruefen(code, jetzt: float | None = None) -> tuple[bool, str]:
-    """(gueltig?, Grund). Jeder Code gilt genau EINMAL (Wiederholschutz);
-    nach FEHL_MAX falschen Codes ist fuer SPERRE_S jede Pruefung "gesperrt"."""
+def pruefen(code, jetzt: float | None = None,
+            zweck: str = ZWECK_FREIGABE) -> tuple[bool, str]:
+    """(gueltig?, Grund). Jeder Code gilt genau EINMAL – ueber BEIDE Zwecke hinweg
+    (gemeinsamer ``letzter_schritt``); nach FEHL_MAX falschen Codes ist fuer
+    SPERRE_S jede Pruefung DIESES Zwecks "gesperrt" (getrennte Zaehler)."""
+    if zweck not in ZWECKE:
+        # Kein ratbarer Zweck: ein Tippfehler darf keine Pruefung ohne Sperre erzeugen.
+        return False, "nachweis_falsch"
     schluessel = _lade()
     if schluessel is None:
         return False, "nicht_eingerichtet"
@@ -139,7 +192,7 @@ def pruefen(code, jetzt: float | None = None) -> tuple[bool, str]:
     t = time.time() if jetzt is None else jetzt
     with _SPERRE:
         z = _zustand()
-        if z["gesperrt_bis"] > t:
+        if z[f"gesperrt_bis_{zweck}"] > t:
             return False, "gesperrt"
         schritt = int(t // SCHRITT_S)
         for d in range(-FENSTER, FENSTER + 1):
@@ -147,18 +200,46 @@ def pruefen(code, jetzt: float | None = None) -> tuple[bool, str]:
             if hmac.compare_digest(_code(schluessel, s), code):
                 if s <= z["letzter_schritt"]:
                     return False, "nachweis_verbraucht"
-                _schreibe_privat(ZUSTAND, json.dumps(
-                    {"letzter_schritt": s, "fehl": 0, "gesperrt_bis": 0}))
+                z["letzter_schritt"] = s
+                z[f"fehl_{zweck}"] = 0
+                z[f"gesperrt_bis_{zweck}"] = 0
+                _schreibe_privat(ZUSTAND, json.dumps(z))
                 return True, "ok"
-        fehl = z["fehl"] + 1
+        fehl = z[f"fehl_{zweck}"] + 1
         gesperrt_bis = t + SPERRE_S if fehl >= FEHL_MAX else 0
-        _schreibe_privat(ZUSTAND, json.dumps(
-            {"letzter_schritt": z["letzter_schritt"],
-             "fehl": 0 if gesperrt_bis else fehl, "gesperrt_bis": gesperrt_bis}))
+        z[f"fehl_{zweck}"] = 0 if gesperrt_bis else fehl
+        z[f"gesperrt_bis_{zweck}"] = gesperrt_bis
+        _schreibe_privat(ZUSTAND, json.dumps(z))
         if gesperrt_bis:
-            print(f"[Broker] Freigabe-Code {FEHL_MAX}x falsch – Freigaben fuer "
+            print(f"[Broker] Code {FEHL_MAX}x falsch ({zweck}) – {zweck} fuer "
                   f"{SPERRE_S // 60} Minuten gesperrt", flush=True)
         return False, "nachweis_falsch"
+
+
+def uebernehmen(b32: str, jetzt: float | None = None) -> str:
+    """Einen BESTEHENDEN Base32-Schluessel uebernehmen (z. B. das vorhandene
+    2FA-Geheimnis eines Kontos), damit genau EIN Eintrag in der
+    Authenticator-App noetig ist. Rueckgabe: der normalisierte Schluessel.
+
+    Der laufende Zeitschritt gilt danach als VERBRAUCHT: wer das Geheimnis
+    gerade noch fuer eine Anmeldung benutzt hat, soll denselben Code nicht
+    unmittelbar danach fuer eine Freigabe verwenden koennen – der bisherige
+    Wiederholschutz der Anmeldung (``data/totp_schritte.json``) zaehlt hier
+    nicht mit.
+    """
+    roh = "".join(str(b32 or "").split()).upper()
+    try:
+        schluessel = base64.b32decode(roh + "=" * (-len(roh) % 8))
+    except Exception as e:  # noqa: BLE001
+        raise ValueError(f"kein gueltiger Base32-Schluessel: {e}") from e
+    if len(schluessel) < 16:
+        raise ValueError(f"Schluessel zu kurz ({len(schluessel)} Byte, mindestens 16)")
+    t = time.time() if jetzt is None else jetzt
+    _schreibe_privat(SCHLUESSEL, roh + "\n")
+    z = _leerer_zustand()
+    z["letzter_schritt"] = int(t // SCHRITT_S)
+    _schreibe_privat(ZUSTAND, json.dumps(z))
+    return roh
 
 
 def einrichten(konto: str = "root-freigaben") -> tuple[str, str]:
@@ -166,7 +247,7 @@ def einrichten(konto: str = "root-freigaben") -> tuple[str, str]:
     roh = secrets.token_bytes(20)
     b32 = base64.b32encode(roh).decode("ascii").rstrip("=")
     _schreibe_privat(SCHLUESSEL, b32 + "\n")
-    _schreibe_privat(ZUSTAND, json.dumps({"letzter_schritt": 0}))
+    _schreibe_privat(ZUSTAND, json.dumps(_leerer_zustand()))
     try:
         import socket
         host = socket.gethostname()

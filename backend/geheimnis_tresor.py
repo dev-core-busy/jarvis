@@ -294,9 +294,32 @@ def ist_geheimer_name(name) -> bool:
     return n in GEHEIME_NAMEN or n.endswith(GEHEIME_ENDUNGEN)
 
 
+# Werte, die in einem geheimen FELD stehen, aber kein Geheimnis SIND – sie
+# bleiben Klartext.
+#
+# ⚠ WARUM (gemessen auf DEV am 2026-10-20, Stunden nach dem Einbau): seit das
+# 2FA-Geheimnis eines Kontos im Root-Broker liegen kann, traegt
+# ``auth_state.json`` dort nur noch den Verweis ``"broker"``. Der steht im Feld
+# ``totp_secret``, und das ist ein geheimer Name – also hat ``_load_auth_state``
+# den Verweis fuer einen Klartext-Altbestand gehalten und VERPACKT. Es
+# funktionierte trotzdem (beim Lesen wird wieder entpackt), aber:
+#   * Fehlt der Hauptschluessel, bleibt ``JGS1:…`` stehen. Dann trifft weder
+#     ``_totp_im_broker`` noch ``_totp_secret_lesbar`` zu → 503, obwohl das
+#     Geheimnis root-eigen daneben liegt und der Broker antworten koennte.
+#     Genau dieses Fenster gab es am 2026-10-05 wirklich (Broker und Backend
+#     starteten zugleich, das Credential-Drop-in kam zwei Sekunden zu spaet).
+#   * Die Datei behauptet, dort laege ein Geheimnis. Es liegt keines dort.
+# Ein Verweis gehoert nicht verschluesselt. Die Ausnahme ist bewusst eine
+# WERTLISTE und keine Feldausnahme: ``totp_secret`` muss ein echtes Secret
+# weiterhin verpacken.
+KLARTEXT_WERTE = frozenset({"broker"})
+
+
 def wert_verschluesseln(wert: str) -> str:
     f = hauptfernet()
     if f is None or not isinstance(wert, str) or not wert or wert.startswith(PRAEFIX_WERT):
+        return wert
+    if wert in KLARTEXT_WERTE:
         return wert
     return PRAEFIX_WERT + f.encrypt(wert.encode("utf-8")).decode("ascii")
 
@@ -352,7 +375,15 @@ def entschluessele_baum(daten):
 
 
 def klartext_felder(daten) -> list[str]:
-    """Pfade geheimer Felder, die noch im Klartext stehen (fuer Migration/Status)."""
+    """Pfade geheimer Felder, die noch im Klartext stehen (fuer Migration/Status).
+
+    ``KLARTEXT_WERTE`` zaehlen NICHT mit – sie stehen absichtlich im Klartext.
+    ⚠ Ohne diese Ausnahme meldet ``_load_auth_state`` den Broker-Verweis bei
+    JEDEM Start als Altbestand, schreibt die Datei neu (samt neuer ``.bak``) und
+    gibt "2FA-Geheimnisse verpackt" ins Journal – eine Meldung im Normalbetrieb,
+    die das Journal entwertet. Auf DEV am 2026-10-20 bei drei Neustarts in Folge
+    gesehen.
+    """
     gefunden: list[str] = []
 
     def _geh(o, pfad, geheim_key=False):
@@ -360,6 +391,7 @@ def klartext_felder(daten) -> list[str]:
             for k, v in o.items():
                 p = f"{pfad}.{k}" if pfad else str(k)
                 if isinstance(v, str) and v and not v.startswith(PRAEFIX_WERT) \
+                        and v not in KLARTEXT_WERTE \
                         and (ist_geheimer_name(k) or (geheim_key and k == "key")):
                     gefunden.append(p)
                 elif isinstance(v, list):

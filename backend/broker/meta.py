@@ -95,6 +95,30 @@ def _behandeln(op: str, args: dict, peer: str = "") -> dict | None:
         policy.audit(by, op, audit_key, "executed", rc=erg.get("rc"),
                      detail=str(erg.get("meldung", ""))[:200], info=info, peer=peer)
         return erg
+    # ── Zwei-Faktor-Code der ANMELDUNG gegen denselben Schluessel pruefen ──
+    # Betreiberentscheid 2026-10-20: genau EIN Eintrag in der Authenticator-App.
+    # Deshalb liegt das Geheimnis nur noch hier (root-eigen) und die Anmeldung
+    # fragt den Broker, statt es selbst in ``data/auth_state.json`` zu halten –
+    # die Richtung ist entscheidend, denn andersherum (Broker prueft gegen das
+    # Geheimnis des Backends) waere Befund K2 wieder offen.
+    #
+    # ⚠ KEIN Nachweis-Aufruf hier: diese Op IST die Nachweispruefung. Sie ist
+    # damit ein Orakel, das jeder Prozess des Dienstbenutzers befragen kann –
+    # die einzige Schranke dagegen ist die Fehlversuch-Sperre in
+    # ``freigabe.pruefen`` (eigener Zaehler fuer ``login``, siehe dort).
+    #
+    # ⚠ DER SCHLUESSEL GILT JE SERVER, NICHT JE KONTO. ``konto`` steht nur im
+    # Audit. Mehrere Konten mit ``totp_secret == "broker"`` teilen sich denselben
+    # Code – das ist fuer EINEN Administrator gedacht; Waechter
+    # ``tests/test_broker_totp.py`` prueft, dass es bei einem bleibt.
+    if op == "broker.totp_pruefen":
+        konto = str(args.get("konto", ""))
+        audit_key = f"login:{konto}"
+        ok, grund = freigabe.pruefen(args.get("code"), zweck=freigabe.ZWECK_LOGIN)
+        policy.audit(by, op, audit_key, "ok" if ok else "abgewiesen",
+                     detail="" if ok else f"2FA-Code: {grund}", peer=peer)
+        return {"ok": ok, "grund": grund,
+                "error": "" if ok else freigabe.MELDUNG.get(grund, "Code ungueltig")}
     if op == "broker.policy_remove":
         fehler = _nachweis(args, by, op, key, peer)
         if fehler:

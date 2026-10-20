@@ -595,6 +595,14 @@ ns = {
 # zurueckgibt, machte genau die Pruefung trivial wahr, fuer die man den Zweig
 # ergaenzt.
 ns["_totp_schutz"] = _totp_schutz
+# Seit 2026-10-20 entscheidet `geheimnis_bestaetigen` zuerst, ob das 2FA-Geheimnis
+# im ROOT-BROKER liegt (ein Authenticator-Eintrag fuer Anmeldung UND Freigaben).
+# Auch hier die ECHTEN Funktionen schneiden statt sie nachzubauen - eine Attrappe
+# `lambda s: False` haette den Broker-Zweig dauerhaft unmessbar gemacht, und genau
+# dieser Zweig ist der neue. `anna` traegt kein Broker-Geheimnis, der Zweig wird
+# hier also nicht betreten; vorhanden sein muss er trotzdem (sonst NameError).
+ns["_totp_im_broker"] = schneide("_totp_im_broker", ns)
+ns["_totp_broker_pruefen"] = schneide("_totp_broker_pruefen", ns)
 best = schneide("geheimnis_bestaetigen", ns)
 r = LOOP.run_until_complete(best(Anfrage({"password": "falsch"}), user="anna"))
 check("falsches Kennwort: 403", r.status_code == 403, r.status_code)

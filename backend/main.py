@@ -4057,6 +4057,71 @@ def _totp_secret_lesbar(secret) -> bool:
     from backend import geheimnis_tresor as _t
     return isinstance(secret, str) and bool(secret) and not secret.startswith(_t.PRAEFIX_WERT)
 
+
+def _totp_im_broker(secret) -> bool:
+    """True, wenn das 2FA-Geheimnis dieses Kontos im ROOT-BROKER liegt und die
+    Anmeldung ihn fragen muss (``totp_secret == "broker"``).
+
+    Hintergrund: genau EIN Eintrag in der Authenticator-App fuer Anmeldung und
+    Root-Freigaben. Das Geheimnis liegt dafuer root-eigen in
+    ``/etc/jarvis/broker-freigabe.key``; das Backend kennt es nie – andersherum
+    (Broker prueft gegen das Geheimnis des Backends) waere Befund K2 wieder
+    offen. Umgestellt wird mit ``jarvis-broker-admin totp-uebernehmen <konto>``.
+    """
+    from backend.broker import freigabe as _f
+    return secret == _f.MARKE_IM_BROKER
+
+
+async def _totp_broker_pruefen(username: str, code: str) -> tuple[bool, str]:
+    """2FA-Code vom Broker pruefen lassen. (ok?, Grund).
+
+    FAIL-CLOSED: jeder Fehler – unerreichbar, alter Broker ohne die Op, kaputte
+    Antwort – ergibt False. Der Grund wird durchgereicht, damit die Maske
+    zwischen "falscher Code" (401) und "Server kann gerade nicht" (503)
+    unterscheiden kann.
+    """
+    from backend import broker_client
+    try:
+        res = await broker_client.call("broker.totp_pruefen",
+                                       {"code": code, "konto": _norm_login(username)},
+                                       user=username, timeout=15)
+    except Exception as e:  # noqa: BLE001
+        print(f"[AUTH] 2FA-Pruefung im Broker fehlgeschlagen fuer '{username}': {e}",
+              flush=True)
+        return False, "unreachable"
+    if not isinstance(res, dict):
+        return False, "unreachable"
+    if res.get("ok") is True:
+        return True, "ok"
+    grund = str(res.get("grund") or "")
+    if not grund:
+        # Alter Broker ("unbekannte Op") oder unerreichbar – beides kein Codefehler.
+        grund = "unreachable"
+        print(f"[AUTH] Broker kann 2FA nicht pruefen ({res.get('decision') or ''} "
+              f"{str(res.get('error'))[:200]}) – jarvis-broker.service neu gestartet? "
+              f"Notweg: jarvis-broker-admin totp-aus {_norm_login(username)}", flush=True)
+    return False, grund
+
+
+def _totp_broker_fehlertext(grund: str) -> str:
+    """Klartext fuer die Anmeldemaske. Ein 'gesperrt' muss die Wartezeit NENNEN –
+    sonst sieht es wie ein dauerhaft kaputter Code aus."""
+    from backend.broker import freigabe as _f
+    if grund == "unreachable":
+        return ("Die Zwei-Faktor-Prüfung ist auf dem Server gerade nicht möglich. "
+                "Bitte den Administrator verständigen.")
+    if grund == "nicht_eingerichtet":
+        return ("Auf dem Server fehlt der Zwei-Faktor-Schlüssel. "
+                "Bitte den Administrator verständigen.")
+    if grund == "gesperrt":
+        return (f"Zu viele falsche Codes – die Anmeldung ist für "
+                f"{_f.SPERRE_S // 60} Minuten gesperrt.")
+    if grund == "nachweis_verbraucht":
+        return "Dieser Code wurde schon verwendet – bitte den nächsten abwarten."
+    if grund == "nachweis_fehlt":
+        return "Bitte den 6-stelligen Code eingeben."
+    return "Der Code ist falsch oder abgelaufen."
+
 def _get_user_auth_state(username: str) -> dict:
     """Gibt den Auth-State eines Benutzers zurück (Defaults: must_change_password=True)."""
     state = _load_auth_state()
@@ -4985,25 +5050,43 @@ async def _login_ablauf(request: Request):
             # Passwort korrekt, aber 2FA-Code fehlt → Frontend zeigt TOTP-Eingabe
             return JSONResponse({"success": False, "requires_totp": True,
                                  "error": "2FA-Code erforderlich"})
-        if not _totp_secret_lesbar(user_state["totp_secret"]):
-            # BSI M5: das Secret liegt verpackt, der Hauptschluessel fehlt (oder
-            # passt nicht). pyotp wuerfe sonst einen nackten 500.
-            print(f"[AUTH] 2FA-Secret von '{username}' nicht lesbar – Hauptschluessel "
-                  "/etc/jarvis/geheimnis.key fehlt oder passt nicht", flush=True)
-            return JSONResponse(
-                {"success": False, "requires_totp": True,
-                 "error": "Die Zwei-Faktor-Prüfung ist auf dem Server gerade nicht möglich. "
-                          "Bitte den Administrator verständigen."},
-                status_code=503)
-        _totp_erg = _totp_schutz.pruefen(_norm_login(username), user_state["totp_secret"],
-                                         totp_code)
-        if _totp_erg != _totp_schutz.OK:
-            _record_login_attempt(client_ip, username)
-            return JSONResponse(
-                {"success": False, "requires_totp": True,
-                 "error": _totp_fehlertext(_totp_erg)},
-                status_code=401,
-            )
+        if _totp_im_broker(user_state["totp_secret"]):
+            # Das Geheimnis liegt root-eigen im Broker, damit EIN Eintrag in der
+            # Authenticator-App fuer Anmeldung UND Root-Freigaben genuegt
+            # (Betreiberentscheid 2026-10-20). Das Backend kennt es nie.
+            #
+            # ⚠ FAIL-CLOSED: ein nicht erreichbarer Broker heisst "keine
+            # Anmeldung", nicht "ohne zweiten Faktor hinein". Der Notweg dagegen
+            # ist die root-Konsole: jarvis-broker-admin totp-aus <konto>.
+            _brk_ok, _brk_grund = await _totp_broker_pruefen(username, totp_code)
+            if not _brk_ok:
+                _record_login_attempt(client_ip, username)
+                _status = 503 if _brk_grund in ("unreachable", "nicht_eingerichtet") else 401
+                return JSONResponse(
+                    {"success": False, "requires_totp": True,
+                     "error": _totp_broker_fehlertext(_brk_grund)},
+                    status_code=_status,
+                )
+        else:
+            if not _totp_secret_lesbar(user_state["totp_secret"]):
+                # BSI M5: das Secret liegt verpackt, der Hauptschluessel fehlt (oder
+                # passt nicht). pyotp wuerfe sonst einen nackten 500.
+                print(f"[AUTH] 2FA-Secret von '{username}' nicht lesbar – Hauptschluessel "
+                      "/etc/jarvis/geheimnis.key fehlt oder passt nicht", flush=True)
+                return JSONResponse(
+                    {"success": False, "requires_totp": True,
+                     "error": "Die Zwei-Faktor-Prüfung ist auf dem Server gerade nicht möglich. "
+                              "Bitte den Administrator verständigen."},
+                    status_code=503)
+            _totp_erg = _totp_schutz.pruefen(_norm_login(username), user_state["totp_secret"],
+                                             totp_code)
+            if _totp_erg != _totp_schutz.OK:
+                _record_login_attempt(client_ip, username)
+                return JSONResponse(
+                    {"success": False, "requires_totp": True,
+                     "error": _totp_fehlertext(_totp_erg)},
+                    status_code=401,
+                )
         _mit_2fa = True
     elif _admin_2fa_pflicht() and _is_admin_user(username):
         # BSI M3: Administratoren brauchen eine 2FA. Wer noch keine hat, richtet
@@ -8683,7 +8766,13 @@ async def geheimnis_bestaetigen(request: Request, user: str = Depends(require_au
         weg = "code"
         st = _get_user_auth_state(user)
         geheim = st.get("totp_secret") if st.get("totp_enabled") else ""
-        if geheim:
+        if _totp_im_broker(geheim):
+            # Das Geheimnis liegt im Broker (ein App-Eintrag, siehe
+            # ``_totp_im_broker``) – ohne diesen Zweig liefe hier
+            # ``pruefen(user, "broker", code)`` und koennte NIE zutreffen: die
+            # Bestaetigung per Code waere still kaputt, ohne Fehlermeldung.
+            ok, _grund = await _totp_broker_pruefen(user, code)
+        elif geheim:
             try:
                 ok = _totp_schutz.pruefen(_norm_login(user), geheim, code) == _totp_schutz.OK
             except Exception:  # noqa: BLE001

@@ -30,15 +30,23 @@ PROBEN = [
     ("Fehlversuch nur noch je IP", MAIN,
      '    if _anmelde_schutz.fehlversuch(ip, _norm_login(username) if username else ""):\n',
      '    if _anmelde_schutz.fehlversuch(ip, ""):\n'),
+    # ⚠ Die Einrueckung ist seit 2026-10-20 um eine Stufe tiefer: der Zweig liegt
+    # jetzt im ``else`` der Weiche "Geheimnis im Broker?" (ein Authenticator-
+    # Eintrag fuer Anmeldung UND Root-Freigaben). Der alte Anker mit acht
+    # Leerzeichen traf nichts mehr, und der Harness meldete dafuer
+    # "Anker 0x gefunden" – das sah in der Bilanz wie eine stumme Probe aus und
+    # hat eine halbe Stunde Fehlersuche am falschen Ende gekostet. Ein kuerzerer
+    # Anker geht nicht: ``_record_login_attempt(client_ip, username)`` kommt
+    # mehrfach vor (gemessen: 2x mit dieser, 5x mit geringerer Einrueckung).
     ("Falscher 2FA-Code zaehlt nur fuer die IP", MAIN,
-     "        if _totp_erg != _totp_schutz.OK:\n"
-     "            _record_login_attempt(client_ip, username)\n"
-     "            return JSONResponse(\n"
-     "                {\"success\": False, \"requires_totp\": True,\n",
-     "        if _totp_erg != _totp_schutz.OK:\n"
-     "            _record_login_attempt(client_ip)\n"
-     "            return JSONResponse(\n"
-     "                {\"success\": False, \"requires_totp\": True,\n"),
+     "            if _totp_erg != _totp_schutz.OK:\n"
+     "                _record_login_attempt(client_ip, username)\n"
+     "                return JSONResponse(\n"
+     "                    {\"success\": False, \"requires_totp\": True,\n",
+     "            if _totp_erg != _totp_schutz.OK:\n"
+     "                _record_login_attempt(client_ip)\n"
+     "                return JSONResponse(\n"
+     "                    {\"success\": False, \"requires_totp\": True,\n"),
     ("Erfolg setzt den Konto-Zaehler nicht zurueck", MAIN,
      "    token = generate_token(username, mit_2fa=_mit_2fa, ohne_admin=_ohne_admin)\n"
      "    _anmelde_schutz.erfolg(_norm_login(username))\n",

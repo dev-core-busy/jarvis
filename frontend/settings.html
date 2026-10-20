@@ -23,7 +23,7 @@
     <link rel="stylesheet" href="/static/css/theme.css?v=34">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=10">
-    <link rel="stylesheet" href="/static/css/style.css?v=201">
+    <link rel="stylesheet" href="/static/css/style.css?v=204">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=7">
     <!-- Feedback-Reiter. EINE Datei fuer /settings und /feedback: Tabelle,
          Sterne und Abgabe-Karte werden an beiden Orten gebraucht, zwei
@@ -4680,6 +4680,69 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                         </div>
 
+                        <!-- ── Sicherheitsprotokoll (backend/sicherheits_log.py) ──
+                             NUR LESEN: kein Loeschknopf. Das Protokoll ist per Hash-Kette
+                             gegen nachtraegliche Aenderung gesichert; Loeschen aus der
+                             Oberflaeche waere der Weg, Spuren zu beseitigen. Kein Symbol
+                             im Kopf: Emojis sind verboten, und keines aus icons.js traegt
+                             diese Bedeutung (das Schloss heisst dort "beschraenkt"). -->
+                        <div class="sk-openclaw-section" style="margin-top:10px;">
+                            <div class="kb-folder-header" style="cursor:pointer;" data-klick="sprot-klappen">
+                                <span class="kb-folder-path" style="font-weight:600;" data-i18n="telemetry.sprot_title">Sicherheitsprotokoll</span>
+                                <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
+                                    <button id="sprot-refresh-btn" class="kb-hdr-btn" data-i18n-title="telemetry.refresh_title" title="Aktualisieren">⟳</button>
+                                </span>
+                                <span class="kb-folder-arrow">▶</span>
+                            </div>
+                            <div id="sprot-section-body" style="display:none;padding:10px 0 4px;">
+                                <p class="kb-hint" style="margin:0 0 8px;" data-i18n-html="telemetry.sprot_hint">Anmeldungen, Sperren, Änderungen an Konten und Einstellungen. Das Protokoll ist gegen nachträgliche Änderung gesichert und lässt sich hier nur ansehen, nicht löschen. Eine zweite Ablage steht im Systemjournal (<code>journalctl -t jarvis-security</code>).</p>
+                                <div id="sprot-kette" class="sprot-kette" role="status"></div>
+                                <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;align-items:flex-end;">
+                                    <div class="kb-form-field" style="margin:0;flex:1;min-width:150px;">
+                                        <label class="kb-label" style="margin-bottom:2px;" for="sprot-filter-art" data-i18n="telemetry.sprot_art">Ereignis</label>
+                                        <select id="sprot-filter-art" class="kb-input sprot-feld">
+                                            <option value="" data-i18n="common.all">Alle</option>
+                                        </select>
+                                    </div>
+                                    <div class="kb-form-field" style="margin:0;flex:1;min-width:120px;">
+                                        <label class="kb-label" style="margin-bottom:2px;" for="sprot-filter-user" data-i18n="telemetry.audit_user_label">Benutzer</label>
+                                        <input id="sprot-filter-user" type="text" name="sicherheitsprotokoll-benutzer-filter" autocomplete="off" data-i18n-placeholder="common.all" placeholder="Alle" class="kb-input sprot-feld">
+                                    </div>
+                                    <div class="kb-form-field" style="margin:0;flex:1;min-width:110px;">
+                                        <label class="kb-label" style="margin-bottom:2px;" for="sprot-filter-ip" data-i18n="telemetry.sprot_ip">IP-Adresse</label>
+                                        <input id="sprot-filter-ip" type="text" name="sicherheitsprotokoll-ip-filter" autocomplete="off" data-i18n-placeholder="common.all" placeholder="Alle" class="kb-input sprot-feld">
+                                    </div>
+                                    <select id="sprot-limit" class="kb-input sprot-feld" style="flex:0 0 auto;width:90px;">
+                                        <option value="50">50</option>
+                                        <option value="100">100</option>
+                                        <option value="200" selected>200</option>
+                                        <option value="500">500</option>
+                                        <option value="1000">1000</option>
+                                    </select>
+                                    <button id="sprot-apply-btn" class="kb-btn-action sprot-feld" style="padding:0 12px;" data-i18n="common.apply">Anwenden</button>
+                                    <span id="sprot-count" class="kb-hint" style="margin:0;"></span>
+                                </div>
+                                <div id="sprot-fehler" class="sprot-fehler" role="alert" style="display:none;"></div>
+                                <div style="overflow-x:auto;max-height:400px;overflow-y:auto;">
+                                    <table id="sprot-table" class="audit-table">
+                                        <thead>
+                                            <tr>
+                                                <th data-i18n="telemetry.audit_col_time">Zeit</th>
+                                                <th data-i18n="telemetry.sprot_art">Ereignis</th>
+                                                <th data-i18n="telemetry.audit_user_label">Benutzer</th>
+                                                <th data-i18n="telemetry.sprot_ip">IP-Adresse</th>
+                                                <th data-i18n="telemetry.audit_col_result">Ergebnis</th>
+                                                <th data-i18n="telemetry.sprot_details">Details</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="sprot-tbody">
+                                            <tr><td colspan="6" class="audit-empty" data-i18n="common.loading">Lädt…</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
                         <div style="display:flex;gap:10px;margin-top:16px;">
                             <button class="vis-btn vis-btn-primary" id="btn-tele-refresh" data-i18n="telemetry.refresh">↻ Aktualisieren</button>
                             <button class="vis-btn" id="btn-tele-clear" style="color:var(--danger);border-color:rgba(var(--danger-rgb),0.4);" data-i18n="telemetry.reset">Zurücksetzen</button>
@@ -5553,16 +5616,17 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <!-- BSI H4 (CSP ohne Inline-Skript, 2026-10-04): Klick-Zuhoerer der frueheren
          onclick-Attribute (data-klick). VOR allen anderen Skripten, damit vision.js
          den Platz el.onclick wie bisher danach ueberschreiben kann. -->
-    <script src="/static/js/settings_bedienung.js?v=2"></script>
+    <script src="/static/js/settings_bedienung.js?v=3"></script>
     <script src="/static/js/konto_hinweise.js?v=2"></script>
     <script src="/static/js/icons.js?v=9"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/dlkey.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=345"></script>
+    <script src="/static/js/i18n.js?v=346"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=29"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
     <script src="/static/js/audit.js?v=5"></script>
+    <script src="/static/js/sicherheitsprotokoll.js?v=1"></script>
     <script src="/static/js/kbgroups.js?v=6"></script>
     <script src="/static/js/skills.js?v=50"></script>
     <script src="/static/js/chatlib.js?v=25"></script>

@@ -50,6 +50,7 @@ const AUSNAHMEN = {
     'security.ad_warn_none':            'der lokale Rueckweg ist das Konto jarvis',
     'security.ad_group_warning':        'nennt denselben lokalen Rueckweg: das Konto jarvis',
     'knowledge.index_failed_more':      'journalctl -u jarvis.service',
+    'telemetry.sprot_hint':             'journalctl -t jarvis-security (feste Syslog-Kennung, sicherheits_log.SYSLOG_KENNUNG)',
     'cert.download':                    'die Datei heisst jarvis.cer (Content-Disposition)',
     'security.ad_group_ph':             'Beispiel-DN im KUNDEN-AD, kein Produktname',
     'chat.greeting':                    'wird von branding.js::applyAssistantName ueber einen eigenen Selektor gebrandet',

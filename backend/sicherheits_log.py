@@ -316,11 +316,17 @@ def prune_older_than(cutoff_ts: float) -> int:
         return sum(1 for z in zeilen[:weg] if z.strip())
 
 
-def lesen(limit: int = 200, art: str = "") -> list[dict]:
-    """Juengste Ereignisse zuerst; Filter wirkt beim Lesen, nicht danach."""
+def lesen(limit: int = 200, art: str = "", benutzer: str = "", ip: str = "") -> list[dict]:
+    """Juengste Ereignisse zuerst; Filter wirkt beim Lesen, nicht danach.
+
+    ``art`` exakt, ``benutzer`` und ``ip`` als Teilstring ohne Ruecksicht auf
+    Gross/Klein – ein Domaenenname steht mal mit, mal ohne Praefix im Protokoll,
+    und wer nach ``mueller`` sucht, meint beide Schreibweisen."""
     aus: list[dict] = []
     if not DATEI.exists():
         return aus
+    benutzer = (benutzer or "").strip().lower()
+    ip = (ip or "").strip().lower()
     for zeile in reversed(DATEI.read_text(encoding="utf-8", errors="replace").splitlines()):
         if not zeile.strip():
             continue
@@ -330,10 +336,34 @@ def lesen(limit: int = 200, art: str = "") -> list[dict]:
             continue
         if art and e.get("art") != art:
             continue
+        if benutzer and benutzer not in str(e.get("benutzer") or "").lower():
+            continue
+        if ip and ip not in str(e.get("ip") or "").lower():
+            continue
         aus.append(e)
         if len(aus) >= limit:
             break
     return aus
+
+
+def arten() -> list[str]:
+    """Alle Ereignisarten, die im Protokoll VORKOMMEN (fuer die Auswahlliste).
+
+    Aus der Datei statt aus einer gepflegten Liste: eine neue Art taucht damit
+    von selbst im Filter auf, und es steht keine Art zur Wahl, die nie vorkam."""
+    gesehen: set[str] = set()
+    if not DATEI.exists():
+        return []
+    for zeile in DATEI.read_text(encoding="utf-8", errors="replace").splitlines():
+        if not zeile.strip():
+            continue
+        try:
+            a = json.loads(zeile).get("art")
+        except Exception:  # noqa: BLE001
+            continue
+        if isinstance(a, str) and a:
+            gesehen.add(a)
+    return sorted(gesehen)
 
 
 def zustand() -> dict:

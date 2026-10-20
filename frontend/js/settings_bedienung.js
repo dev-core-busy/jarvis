@@ -99,6 +99,9 @@
         'audit-klappen': function () {
             klappe(this, function () { if (window.auditManager) window.auditManager.init(); });
         },
+        'sprot-klappen': function () {
+            klappe(this, function () { if (window.sicherheitsProtokoll) window.sicherheitsProtokoll.init(); });
+        },
         // Bedienelement im Klappkopf: Klick darf den Abschnitt nicht umklappen
         'nicht-klappen': function (event) { event.stopPropagation(); },
 

@@ -6057,6 +6057,57 @@ body.light .kb-cl-spanne { color: #5b6678; }
 .audit-arg-key { color: var(--text-secondary); }
 .audit-arg-val { color: var(--text-primary); }
 
+/* Sicherheitsprotokoll (Telemetrie-Reiter). Schrift bleibt --text-primary:
+   --danger als Schriftfarbe haelt im hellen Thema den Kontrast nicht
+   (Register). Farbe traegt nie allein die Aussage – Text steht immer dabei. */
+.sprot-kette, .sprot-fehler {
+    font-size: 0.8rem;
+    padding: 6px 10px;
+    border-radius: 6px;
+    margin-bottom: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+}
+.sprot-kette:empty { display: none; }
+.sprot-kette-ok { border-color: rgba(var(--success-rgb), 0.5); background: rgba(var(--success-rgb), 0.08); }
+.sprot-kette-bruch, .sprot-fehler {
+    border-color: rgba(var(--danger-rgb), 0.6);
+    background: rgba(var(--danger-rgb), 0.10);
+    font-weight: 600;
+}
+.sprot-kette ul { margin: 4px 0 0 18px; padding: 0; font-weight: 400; }
+.sprot-kette-info { color: var(--text-secondary); font-size: 0.75rem; margin-top: 2px; font-weight: 400; }
+.sprot-art {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    white-space: nowrap;
+    color: var(--text-primary);
+    border: 1px solid transparent;
+}
+.sprot-art-warn    { background: rgba(var(--danger-rgb), 0.14);  border-color: rgba(var(--danger-rgb), 0.45); }
+.sprot-art-ok      { background: rgba(var(--success-rgb), 0.12); border-color: rgba(var(--success-rgb), 0.40); }
+.sprot-art-neutral { background: rgba(var(--fg-rgb), 0.07); }
+.sprot-zeile-warn td:first-child { box-shadow: inset 3px 0 0 rgba(var(--danger-rgb), 0.7); }
+.sprot-veraltet { font-weight: 600; }
+/* Einheitliche Hoehe fuer Filterfelder, Auswahl und Knopf. `.kb-input` bringt
+   0.5rem Innenabstand oben/unten mit: bei fester Hoehe ohne border-box blieb
+   der Auswahl kaum Platz fuer die Schrift (die "200" war unten abgeschnitten),
+   und verschieden hohe Felder schoben die Beschriftung "Ereignis" nach oben. */
+.sprot-feld {
+    /* .kb-input bringt flex: 1 mit; in der senkrechten .kb-form-field wird die
+       Hoehe damit zur Flex-Basis 0 und `height` uebergangen (gemessen: 17 px). */
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    height: 30px;
+    padding-top: 0;
+    padding-bottom: 0;
+    font-size: 0.8rem;
+}
+
 .audit-empty {
     text-align: center;
     padding: 2rem !important;

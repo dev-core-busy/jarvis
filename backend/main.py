@@ -27123,6 +27123,48 @@ async def audit_log_list(request: Request, limit: int = 200, user: str = "", too
     return JSONResponse(_mit_anzeigenamen(entries))
 
 
+@app.get("/api/security/log")
+async def sicherheitsprotokoll_lesen(limit: int = 200, art: str = "", benutzer: str = "",
+                                     ip: str = "", _u: str = Depends(require_local_auth)):
+    """Sicherheitsprotokoll (``backend/sicherheits_log.py``) fuer die Ansicht im
+    Telemetrie-Reiter – NUR LESEN.
+
+    ⚠ ES GIBT BEWUSST KEIN DELETE. Das Protokoll ist per Hash-Kette gegen
+    nachtraegliche Aenderung gesichert (BSI M2); ein Loeschknopf in der
+    Oberflaeche waere genau der Weg, Spuren zu beseitigen, den die Kette
+    sichtbar machen soll. Alte Zeilen entfernt allein die Aufbewahrungsfrist.
+
+    Mitgeliefert wird das Ergebnis der Kettenpruefung – eine Liste ohne diese
+    Aussage saehe vertrauenswuerdig aus, auch wenn jemand darin geaendert hat.
+    Die Datei wird im Thread gelesen (ein Jahr Protokoll ist kein Kleinkram).
+    """
+    limit = max(1, min(int(limit or 200), 1000))
+
+    def _lesen():
+        eintraege = _sicherheits_log.lesen(limit=limit, art=art.strip(),
+                                           benutzer=benutzer, ip=ip)
+        kette = _sicherheits_log.pruefen()
+        return eintraege, _sicherheits_log.arten(), kette, _sicherheits_log.zustand()
+
+    eintraege, arten, kette, zustand = await asyncio.to_thread(_lesen)
+    aus = []
+    for e in eintraege:
+        # prev/hash/mac sind Pruefmaterial, keine Anzeige
+        z = {k: v for k, v in e.items() if k not in ("prev", "hash", "mac")}
+        if z.get("benutzer"):
+            z["benutzer_anzeige"] = _display_name(str(z["benutzer"]))
+        aus.append(z)
+    brueche = kette.get("brueche") or []
+    return JSONResponse({
+        "ok": True, "eintraege": aus, "arten": arten,
+        "kette": {"ok": bool(kette.get("ok")), "zeilen": kette.get("zeilen", 0),
+                  "brueche": brueche[:10], "anzahl_brueche": len(brueche)},
+        "aufbewahrung_tage": zustand.get("aufbewahrung_tage"),
+        "syslog": bool(zustand.get("syslog")),
+        "schreibfehler": zustand.get("fehler") or {},
+    })
+
+
 @app.delete("/api/audit_log")
 async def audit_log_clear(_u: str = Depends(require_local_auth)):
     """Löscht das Audit-Log (aktive Datei und Rotations-Sicherung)."""

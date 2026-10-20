@@ -4196,9 +4196,7 @@ const _I18N = {
         'vis.reset_done':       'Zurückgesetzt',
 
         // ── Telemetry (dynamisch) ─────────────────────────────────────────────
-        'telemetry.refresh':          '↻ Aktualisieren',
-        'telemetry.reset':            'Zurücksetzen',
-        'telemetry.last_reset':       'Zuletzt zurückgesetzt',
+        'telemetry.refresh':          'Aktualisieren',
         'telemetry.by':               'von',
         'telemetry.no_convs':         'Noch keine Konversationen aufgezeichnet',
         'telemetry.no_errors':        'Keine Fehler aufgezeichnet ✓',
@@ -4207,7 +4205,6 @@ const _I18N = {
         'telemetry.steps_abbr':       'Schr.',
         'telemetry.no_messages':      'Keine Nachrichten',
         'telemetry.clear_convlog_confirm': 'LLM-Verlauf löschen?',
-        'telemetry.clear_all_confirm': 'Alle Telemetry-Daten zurücksetzen?',
         'telemetry.role_assistant':   '🤖 Assistent',
         'telemetry.error_badge':      'Fehler',
         'telemetry.no_error_msg':     '(keine Meldung)',
@@ -4229,9 +4226,6 @@ const _I18N = {
         'telemetry.ret_oldest':   'älteste',
         'telemetry.ret_audit':    '{n} Audit-Zeilen',
         'telemetry.ret_last':     'letzte Bereinigung',
-        'telemetry.ret_run':      'Jetzt bereinigen',
-        'telemetry.ret_running':  'Bereinige…',
-        'telemetry.ret_done':     'Bereinigung abgeschlossen: {n} Einträge entfernt.',
         // Vollständige Verlaufs-Einträge
         'telemetry.conv_task':      'Aufgabe (vollständig)',
         'telemetry.conv_sysprompt': 'System-Prompt',
@@ -8451,9 +8445,7 @@ const _I18N = {
         'vis.reset_done':       'Reset',
 
         // ── Telemetrie (dynamisch) ────────────────────────────────────────────
-        'telemetry.refresh':          '↻ Refresh',
-        'telemetry.reset':            'Reset',
-        'telemetry.last_reset':       'Last reset',
+        'telemetry.refresh':          'Refresh',
         'telemetry.by':               'by',
         'telemetry.no_convs':         'No conversations recorded yet',
         'telemetry.no_errors':        'No errors recorded ✓',
@@ -8462,7 +8454,6 @@ const _I18N = {
         'telemetry.steps_abbr':       'steps',
         'telemetry.no_messages':      'No messages',
         'telemetry.clear_convlog_confirm': 'Delete LLM history?',
-        'telemetry.clear_all_confirm': 'Reset all telemetry data?',
         'telemetry.role_assistant':   '🤖 Assistant',
         'telemetry.error_badge':      'Error',
         'telemetry.no_error_msg':     '(no message)',
@@ -8484,9 +8475,6 @@ const _I18N = {
         'telemetry.ret_oldest':   'oldest',
         'telemetry.ret_audit':    '{n} audit lines',
         'telemetry.ret_last':     'last cleanup',
-        'telemetry.ret_run':      'Clean up now',
-        'telemetry.ret_running':  'Cleaning…',
-        'telemetry.ret_done':     'Cleanup finished: {n} entries removed.',
         // Vollstaendige Verlaufseintraege
         'telemetry.conv_task':      'Task (complete)',
         'telemetry.conv_sysprompt': 'System prompt',

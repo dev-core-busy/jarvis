@@ -636,8 +636,11 @@ for _name in ("telemetry.js", "audit.js"):
 # (Vorgabe) – ihre Leeren-Knoepfe gibt es nicht mehr; die Endpunkte bleiben.
 for bid in ("tele-tool-clear-btn", "tele-llm-clear-btn", "tele-spans-clear-btn"):
     check(f"{bid} bleibt entfernt", f'id="{bid}"' not in html and bid not in js)
-for bid in ("tele-errors-clear-btn", "conv-log-clear-btn", "audit-clear-btn",
-            "tele-retention-run"):
+# "Jetzt bereinigen" (tele-retention-run) ist seit 2026-10-20 ENTFERNT (Vorgabe):
+# die Bereinigung laeuft nach jedem Start und taeglich; der Endpunkt bleibt.
+check("tele-retention-run bleibt entfernt", 'id="tele-retention-run"' not in html
+      and "tele-retention-run" not in js and "_runRetention" not in js)
+for bid in ("tele-errors-clear-btn", "conv-log-clear-btn", "audit-clear-btn"):
     check(f"{bid} im Markup", f'id="{bid}"' in html)
     check(f"{bid} in telemetry.js oder eigenem Modul verdrahtet",
           bid in js or any(bid in q for q in _JS_MODULE.values()))
@@ -674,8 +677,7 @@ check("Altbestands-Abzeichen vorhanden", "telemetry.legacy_badge" in js)
 new_keys = ["telemetry.clear_errors_confirm", "telemetry.clear_errors_title",
             "telemetry.area_cleared", "telemetry.ret_days", "telemetry.ret_forever",
             "telemetry.ret_convs", "telemetry.ret_oldest", "telemetry.ret_audit",
-            "telemetry.ret_last", "telemetry.ret_run", "telemetry.ret_running",
-            "telemetry.ret_done", "telemetry.conv_task", "telemetry.conv_sysprompt",
+            "telemetry.ret_last", "telemetry.conv_task", "telemetry.conv_sysprompt",
             "telemetry.truncated", "telemetry.chars", "telemetry.legacy_badge",
             "telemetry.legacy_hint"]
 for k in new_keys:

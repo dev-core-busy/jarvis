@@ -108,9 +108,12 @@ function makeFetch() {
     const { window } = dom;
     const doc = window.document;
 
-    // Nur i18n.js + telemetry.js einspielen – app.js wuerde fremde Poll-Timer
-    // starten und den Test unabhaengig vom Prueffall offen halten.
-    for (const f of ['frontend/js/i18n.js', 'frontend/js/telemetry.js']) {
+    // Nur i18n.js + die Module des Reiters einspielen – app.js wuerde fremde
+    // Poll-Timer starten und den Test unabhaengig vom Prueffall offen halten.
+    // audit/sicherheitsprotokoll/protokolle: "Aktualisieren" laedt seit
+    // 2026-10-20 auch deren geoeffnete Abschnitte (Abschnitt 9).
+    for (const f of ['frontend/js/i18n.js', 'frontend/js/telemetry.js', 'frontend/js/audit.js',
+                     'frontend/js/sicherheitsprotokoll.js', 'frontend/js/protokolle.js']) {
         // sitzung.js vor jedem Modul-Eval: die Module lesen den Sitzungstoken
         // seit dem 2026-10-01 aus der gemeinsamen Quelle (frontend/js/sitzung.js)
         // und rufen sie beim LADEN auf. Jede echte Seite laedt sie als erstes
@@ -136,8 +139,27 @@ function makeFetch() {
     check('Frist-Hinweis gefuellt', ret && ret.textContent.length > 10,
         ret ? JSON.stringify(ret.textContent) : 'fehlt');
     check('Frist nennt 90 Tage', /90/.test(ret.textContent), ret.textContent);
-    check('Bereinigen-Knopf sichtbar bei Frist > 0',
-        doc.getElementById('tele-retention-run').style.display !== 'none');
+    // "Jetzt bereinigen" ist seit 2026-10-20 entfernt (laeuft nach Start und taeglich)
+    check('Knopf "Jetzt bereinigen" gibt es nicht mehr', !doc.getElementById('tele-retention-run'));
+    check('Frist-Hinweis ohne Kalender-Emoji', !/\u{1F5D3}/u.test(ret.textContent), ret.textContent);
+    // Keine Textzeichen als Symbole im Reiter (Regel: Symbole aus icons.js)
+    const reiterHtml = doc.getElementById('settings-tab-telemetry').innerHTML;
+    check('kein ⟳ / ↻ / 🗓 im Reiter', !/[\u27F3\u21BB]|\u{1F5D3}/u.test(reiterHtml));
+    // Seit 2026-10-20 auch keine Emojis vor den Abschnittsnamen (Regel: keine Emojis).
+    // Die Klapppfeile (.kb-folder-arrow, "▶") zaehlen laut Unicode ebenfalls als
+    // Piktogramm, sind aber das Klappzeichen der ganzen Oberflaeche – erste
+    // Fassung der Regel meldete genau sie.
+    const kopie = doc.getElementById('settings-tab-telemetry').cloneNode(true);
+    kopie.querySelectorAll('.kb-folder-arrow').forEach((el) => el.remove());
+    const emo = kopie.textContent.match(/\p{Extended_Pictographic}/gu) || [];
+    check('kein Emoji als Abschnittssymbol im Reiter', !emo.length, emo.join(' '));
+    check('keine kb-folder-icon-Elemente mehr im Reiter', !kopie.querySelector('.kb-folder-icon'));
+    const akt = doc.getElementById('btn-tele-refresh');
+    check('Aktualisieren traegt das Symbol aus icons.js', !!(akt && akt.querySelector('svg.jv-ico-refresh')));
+    check('… und der Text steht in eigenem span (Sprachwechsel loescht das Symbol nicht)',
+        !!(akt && !akt.hasAttribute('data-i18n') && akt.querySelector('span[data-i18n="telemetry.refresh"]')));
+    window.applyLang && window.applyLang();
+    check('nach applyLang ist das Symbol noch da', !!(akt && akt.querySelector('svg.jv-ico-refresh')));
 
     // ── 2) Verlauf: Inhalt erst beim Aufklappen ──────────────────────────────
     section('2) Verlaufs-Inhalt wird erst beim Aufklappen geholt');
@@ -233,15 +255,9 @@ function makeFetch() {
         check(`${btnId} loescht nichts anderes`, del.length === 1, JSON.stringify(del));
     }
 
-    // Der globale Zuruecksetzen-Knopf bleibt daneben bestehen
-    const before = calls.length;
-    doc.getElementById('btn-tele-clear').dispatchEvent(
-        new window.MouseEvent('click', { bubbles: true }));
-    await sleep(40);
-    const globalDel = calls.slice(before).filter(c => c.method === 'DELETE');
-    check('Zuruecksetzen sendet DELETE /api/telemetry',
-        globalDel.length === 1 && globalDel[0].url === '/api/telemetry',
-        JSON.stringify(globalDel));
+    // Der globale Zuruecksetzen-Knopf ist ENTFERNT (Vorgabe 2026-10-20): er
+    // leerte nur unsichtbare Zaehler und das Fehler-Log, versprach im Reiter
+    // "Protokolle" aber, alles zurueckzusetzen. Abschnitt 8 prueft das.
 
     // ── 6) Nachweis "zuletzt geleert" ────────────────────────────────────────
     section('6) Hinweis "zuletzt geleert" je Abschnitt');
@@ -287,8 +303,31 @@ function makeFetch() {
         JSON.stringify(neu));
     check('⚠ Aktualisieren holt KEINE Spans mehr', !neu.some(u => u.startsWith('/api/telemetry/spans')),
         JSON.stringify(neu));
-    check('der Reset-Nachweis im Kopf bleibt (Zuruecksetzen gibt es weiter)',
-        !!doc.getElementById('tele-reset-info') && !!doc.getElementById('btn-tele-clear'));
+    // Bis 2026-10-20 stand hier "der Reset-Nachweis bleibt (Zuruecksetzen gibt
+    // es weiter)" – die Festlegung vom 2026-09-28. Neue Vorgabe: beides weg.
+    check('Knopf "Zuruecksetzen" gibt es nicht mehr (Vorgabe 2026-10-20)', !doc.getElementById('btn-tele-clear'));
+    check('Kopfzeile "Zuletzt zurueckgesetzt" gibt es nicht mehr', !doc.getElementById('tele-reset-info'));
+    check('kein sichtbarer Text "Zurücksetzen" / "zurückgesetzt" im Reiter',
+        !/Zurücksetzen|zurückgesetzt/.test(tabTxt), tabTxt.match(/.{0,30}(Zurücksetzen|zurückgesetzt).{0,30}/) || '');
+    check('Aktualisieren loest kein DELETE /api/telemetry aus',
+        !calls.slice(b3).some(c => c.method === 'DELETE'), JSON.stringify(calls.slice(b3)));
+
+    // ── 9) Aktualisieren laedt ALLE geoeffneten Abschnitte ──────────────────
+    section('9) Aktualisieren: alle geoeffneten Abschnitte, keine zugeklappten');
+    const auf = (id, ja) => { const b = doc.getElementById(id); if (b) b.style.display = ja ? 'block' : 'none'; return !!b; };
+    check('(Positivkontrolle) Abschnitte im Markup',
+        auf('audit-section-body', true) && auf('sprot-section-body', true)
+        && auf('plog-ssh-body', true) && auf('plog-journal-body', false));
+    const b4 = calls.length;
+    doc.getElementById('btn-tele-refresh').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    await sleep(80);
+    const geholt = calls.slice(b4).map(c => c.url.split('?')[0]);
+    for (const [pfad, was] of [['/api/audit_log', 'Tool-Audit-Log'], ['/api/security/log', 'Sicherheitsprotokoll'],
+                               ['/api/logs/ssh', 'SSH-Anmeldungen'], ['/api/telemetry/stats', 'Fehler-Log/Stats']]) {
+        check('geoeffnet und neu geladen: ' + was, geholt.includes(pfad), JSON.stringify(geholt));
+    }
+    check('zugeklappt bleibt zu und wird NICHT geladen: Dienst-Journal', !geholt.includes('/api/logs/journal'),
+        JSON.stringify(geholt));
 
     // ── Ergebnis ─────────────────────────────────────────────────────────────
     const bad = results.filter(r => !r.ok);

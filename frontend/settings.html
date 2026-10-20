@@ -4560,14 +4560,20 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 <!-- ═══ Tab: Protokolle (Kennung telemetry) ═══ -->
                 <div id="settings-tab-telemetry" class="settings-tab-content" style="display:none;">
                     <div class="kb-container">
-                        <div id="tele-reset-info" style="font-size:0.75rem;color:var(--text-muted);margin-bottom:6px;"></div>
+                        <!-- "Zuletzt zurueckgesetzt" und der Knopf "Zuruecksetzen" sind seit 2026-10-20
+                             ENTFERNT: der Knopf leerte nur Zaehler und Spans, die nirgends mehr
+                             angezeigt werden, und das Fehler-Log (das einen eigenen Knopf hat). Im
+                             Reiter "Protokolle" versprach er, ALLE Protokolle zurueckzusetzen. -->
                         <!-- Aufbewahrungsfrist: sagt an EINER Stelle fuer alle Abschnitte,
                              wie lange Diagnosedaten ueberhaupt vorliegen. Ohne diese Zeile
                              sieht ein leerer Abschnitt nach "nichts passiert" aus, obwohl
                              die Eintraege bloss abgelaufen sind. -->
                         <div id="tele-retention-info" style="font-size:0.75rem;color:var(--text-muted);margin-bottom:16px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
                             <span id="tele-retention-text"></span>
-                            <button id="tele-retention-run" class="kb-hdr-btn" style="display:none;" data-i18n="telemetry.ret_run">Jetzt bereinigen</button>
+                            <!-- "Jetzt bereinigen" ist seit 2026-10-20 ENTFERNT: die Bereinigung laeuft
+                                 60 s nach jedem Dienststart und danach taeglich, und die Frist
+                                 (JARVIS_LOG_RETENTION_DAYS) wirkt ohnehin erst nach einem Neustart.
+                                 POST /api/logs/retention/run bleibt als Schnittstelle. -->
                         </div>
                         <!-- Kacheln (Agent-Runs, Tool-Calls, LLM-Calls, Fehler, Dauer), „Tool-Statistiken",
                              „LLM-Statistiken" und „Letzte Spans" wurden am 2026-09-28 hier ENTFERNT
@@ -4576,7 +4582,6 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                              tool_stats|llm_stats bleiben; /stats liefert weiter die „zuletzt geleert"-Nachweise. -->
                         <div class="sk-openclaw-section">
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="tele-convlog-klappen">
-                                <span class="kb-folder-icon">💬</span>
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="telemetry.llm_history">LLM-Verlauf</span>
                                 <span style="margin-left:auto;margin-right:8px;">
                                     <select id="conv-log-user-filter" style="background:var(--bg-secondary);color:var(--text-secondary);border:1px solid var(--border);border-radius:6px;padding:2px 8px;font-size:0.78rem;" data-klick="nicht-klappen">
@@ -4585,7 +4590,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     <select id="conv-log-ip-filter" style="background:var(--bg-secondary);color:var(--text-secondary);border:1px solid var(--border);border-radius:6px;padding:2px 8px;font-size:0.78rem;margin-left:4px;" data-klick="nicht-klappen">
                                         <option value="" data-i18n="telemetry.all_ips">Alle IPs</option>
                                     </select>
-                                    <button id="conv-log-refresh-btn" class="kb-hdr-btn" style="margin-left:6px;" data-klick="nicht-klappen" data-i18n-title="telemetry.refresh_title" title="Aktualisieren">⟳</button>
+                                    <button id="conv-log-refresh-btn" class="kb-hdr-btn" style="margin-left:6px;" data-klick="nicht-klappen" data-i18n-title="telemetry.refresh_title" title="Aktualisieren"><svg class="jv-ico jv-ico-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
                                     <button id="conv-log-clear-btn" class="kb-hdr-btn is-danger" style="margin-left:4px;" data-klick="nicht-klappen" data-i18n-title="telemetry.convlog_clear" title="Verlauf löschen"><svg class="jv-ico jv-ico-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>
                                 </span>
                                 <span class="kb-folder-arrow">▶</span>
@@ -4594,7 +4599,6 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         </div>
                         <div class="sk-openclaw-section" style="margin-top:10px;">
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="tele-errors-klappen">
-                                <span class="kb-folder-icon">❌</span>
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="telemetry.error_log">Fehler-Log</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
                                     <button id="tele-errors-clear-btn" class="kb-hdr-btn is-danger" data-i18n-title="telemetry.clear_errors_title" title="Fehler-Log leeren"><svg class="jv-ico jv-ico-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>
@@ -4621,10 +4625,9 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <!-- ── Audit-Log ── -->
                         <div class="sk-openclaw-section" style="margin-top:10px;">
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="audit-klappen">
-                                <span class="kb-folder-icon">📋</span>
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="telemetry.audit_log">Tool-Audit-Log</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
-                                    <button id="audit-refresh-btn" class="kb-hdr-btn" data-i18n-title="telemetry.refresh_title" title="Aktualisieren">⟳</button>
+                                    <button id="audit-refresh-btn" class="kb-hdr-btn" data-i18n-title="telemetry.refresh_title" title="Aktualisieren"><svg class="jv-ico jv-ico-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
                                     <button id="audit-clear-btn" class="kb-hdr-btn is-danger" title="Log löschen" data-i18n-title="telemetry.audit_clear"><svg class="jv-ico jv-ico-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>
                                 </span>
                                 <span class="kb-folder-arrow">▶</span>
@@ -4692,7 +4695,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="sprot-klappen">
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="telemetry.sprot_title">Sicherheitsprotokoll</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
-                                    <button id="sprot-refresh-btn" class="kb-hdr-btn" data-i18n-title="telemetry.refresh_title" title="Aktualisieren">⟳</button>
+                                    <button id="sprot-refresh-btn" class="kb-hdr-btn" data-i18n-title="telemetry.refresh_title" title="Aktualisieren"><svg class="jv-ico jv-ico-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
                                 </span>
                                 <span class="kb-folder-arrow">▶</span>
                             </div>
@@ -4752,7 +4755,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="plog-klappen" data-plog="journal">
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="plog.journal.titel">Dienst-Journal</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
-                                    <button id="plog-journal-refresh" class="kb-hdr-btn" data-i18n-title="telemetry.refresh_title" title="Aktualisieren">⟳</button>
+                                    <button id="plog-journal-refresh" class="kb-hdr-btn" data-i18n-title="telemetry.refresh_title" title="Aktualisieren"><svg class="jv-ico jv-ico-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
                                 </span>
                                 <span class="kb-folder-arrow">▶</span>
                             </div>
@@ -4801,7 +4804,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="plog-klappen" data-plog="csp">
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="plog.csp.titel">Inhaltssicherheit (CSP-Verstöße)</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
-                                    <button id="plog-csp-refresh" class="kb-hdr-btn" data-i18n-title="telemetry.refresh_title" title="Aktualisieren">⟳</button>
+                                    <button id="plog-csp-refresh" class="kb-hdr-btn" data-i18n-title="telemetry.refresh_title" title="Aktualisieren"><svg class="jv-ico jv-ico-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
                                 </span>
                                 <span class="kb-folder-arrow">▶</span>
                             </div>
@@ -4834,7 +4837,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="plog-klappen" data-plog="updates">
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="plog.updates.titel">Update-Verlauf</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
-                                    <button id="plog-updates-refresh" class="kb-hdr-btn" data-i18n-title="telemetry.refresh_title" title="Aktualisieren">⟳</button>
+                                    <button id="plog-updates-refresh" class="kb-hdr-btn" data-i18n-title="telemetry.refresh_title" title="Aktualisieren"><svg class="jv-ico jv-ico-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
                                 </span>
                                 <span class="kb-folder-arrow">▶</span>
                             </div>
@@ -4865,7 +4868,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="plog-klappen" data-plog="ssh">
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="plog.ssh.titel">SSH-Anmeldungen</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
-                                    <button id="plog-ssh-refresh" class="kb-hdr-btn" data-i18n-title="telemetry.refresh_title" title="Aktualisieren">⟳</button>
+                                    <button id="plog-ssh-refresh" class="kb-hdr-btn" data-i18n-title="telemetry.refresh_title" title="Aktualisieren"><svg class="jv-ico jv-ico-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
                                 </span>
                                 <span class="kb-folder-arrow">▶</span>
                             </div>
@@ -4909,7 +4912,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="plog-klappen" data-plog="fixes">
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="plog.fixes.titel">Selbstkorrekturen des Agenten</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
-                                    <button id="plog-fixes-refresh" class="kb-hdr-btn" data-i18n-title="telemetry.refresh_title" title="Aktualisieren">⟳</button>
+                                    <button id="plog-fixes-refresh" class="kb-hdr-btn" data-i18n-title="telemetry.refresh_title" title="Aktualisieren"><svg class="jv-ico jv-ico-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
                                 </span>
                                 <span class="kb-folder-arrow">▶</span>
                             </div>
@@ -4940,7 +4943,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="plog-klappen" data-plog="abh">
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="plog.abh.titel">Abhängigkeitsprüfung</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
-                                    <button id="plog-abh-refresh" class="kb-hdr-btn" data-i18n-title="telemetry.refresh_title" title="Aktualisieren">⟳</button>
+                                    <button id="plog-abh-refresh" class="kb-hdr-btn" data-i18n-title="telemetry.refresh_title" title="Aktualisieren"><svg class="jv-ico jv-ico-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
                                 </span>
                                 <span class="kb-folder-arrow">▶</span>
                             </div>
@@ -4966,8 +4969,9 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         </div>
 
                         <div style="display:flex;gap:10px;margin-top:16px;">
-                            <button class="vis-btn vis-btn-primary" id="btn-tele-refresh" data-i18n="telemetry.refresh">↻ Aktualisieren</button>
-                            <button class="vis-btn" id="btn-tele-clear" style="color:var(--danger);border-color:rgba(var(--danger-rgb),0.4);" data-i18n="telemetry.reset">Zurücksetzen</button>
+                            <!-- Symbol aus icons.js (KREISPFEILE), Text in eigenem span: data-i18n am Knopf
+                                 selbst wuerde das Symbol beim Sprachwechsel ueberschreiben. -->
+                            <button class="vis-btn vis-btn-primary" id="btn-tele-refresh" style="display:inline-flex;align-items:center;gap:6px;"><svg class="jv-ico jv-ico-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg><span data-i18n="telemetry.refresh">Aktualisieren</span></button>
                         </div>
                     </div>
                 </div>
@@ -5843,7 +5847,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/icons.js?v=9"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/dlkey.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=347"></script>
+    <script src="/static/js/i18n.js?v=349"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=29"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -5876,7 +5880,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/newsfeed_admin.js?v=2"></script>
     <script src="/static/js/kundenverwaltung.js?v=10"></script>
     <script src="/static/js/support_admin.js?v=12"></script>
-    <script src="/static/js/telemetry.js?v=11"></script>
+    <script src="/static/js/telemetry.js?v=13"></script>
     <script src="/static/js/branding.js?v=27"></script>
     <script src="/static/js/theme.js?v=3"></script>
     <script src="/static/js/security_incidents.js?v=39"></script>

@@ -273,6 +273,16 @@ with connect(ws, open_timeout=20, max_size=60_000_000) as sock:
         audit_l = js(sock, "['audit-filter-user','audit-filter-tool'].map(function(i){return Math.round("
                            "document.querySelector('label[for=\"'+i+'\"]').getBoundingClientRect().top);})")
         check(f"Tool-Audit-Log: Beschriftungen auf einer Linie {audit_l}", audit_l and max(audit_l) - min(audit_l) <= 1)
+        # Vorgabe 2026-10-20: kein globales "Zuruecksetzen", keine Kopfzeile dazu
+        weg = js(sock, "[!document.getElementById('btn-tele-clear'), !document.getElementById('tele-reset-info')]")
+        check("kein Knopf \"Zuruecksetzen\", keine Kopfzeile \"Zuletzt zurueckgesetzt\"", weg == [True, True], str(weg))
+        for stelle, sel in (("kopf", "#settings-tab-telemetry"), ("fuss", "#btn-tele-refresh")):
+            js(sock, "(function(){var e=document.querySelector('%s');if(e)e.scrollIntoView({block:'%s'});})()"
+               % (sel, "start" if stelle == "kopf" else "end"))
+            time.sleep(0.3)
+            r = cdp(sock, "Page.captureScreenshot", format="png")
+            if r.get("data"):
+                (BILDER / f"plog-{stelle}-{thema}.png").write_bytes(base64.b64decode(r["data"]))
         ue = js(sock, "document.documentElement.scrollWidth - document.documentElement.clientWidth")
         check("kein waagerechter Ueberlauf der Seite", (ue or 0) <= 0, f"{ue} px")
         for n in ("audit", "journal", "updates", "ssh", "abh"):

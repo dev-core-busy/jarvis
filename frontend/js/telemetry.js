@@ -1,11 +1,17 @@
 /**
  * Jarvis Telemetry Manager – Frontend für Telemetry-Tab
- * Enthält: LLM-Verlauf, Fehler-Log, Aufbewahrungsfrist, Zuruecksetzen.
+ * Enthält: LLM-Verlauf, Fehler-Log, Aufbewahrungsfrist und den Knopf
+ * "Aktualisieren" fuer den ganzen Reiter (seit 2026-10-20 "Protokolle").
  *
  * Stat-Karten, Tool-Stats, LLM-Stats und Spans wurden am 2026-09-28 aus dem
  * Reiter ENTFERNT (Vorgabe des Betreibers). /api/telemetry/stats wird weiter
- * geholt: es traegt die Nachweise "zuletzt zurueckgesetzt/geleert", die der
- * Kopf und das Fehler-Log anzeigen.
+ * geholt: es traegt den Nachweis "zuletzt geleert", den das Fehler-Log zeigt.
+ *
+ * Der globale Knopf "Zuruecksetzen" und die Kopfzeile "Zuletzt zurueckgesetzt"
+ * sind seit 2026-10-20 ENTFERNT (Vorgabe des Betreibers): der Knopf leerte nur
+ * noch unsichtbare Zaehler/Spans und das Fehler-Log, versprach im Reiter
+ * "Protokolle" aber, alles zurueckzusetzen. DELETE /api/telemetry bleibt als
+ * Schnittstelle bestehen.
  */
 
 class JarvisTelemetryManager {
@@ -27,8 +33,7 @@ class JarvisTelemetryManager {
     _bind() {
         if (this._bound) return;
         this._bound = true;
-        document.getElementById('btn-tele-refresh')?.addEventListener('click', () => this.refresh());
-        document.getElementById('btn-tele-clear')?.addEventListener('click', () => this.clear());
+        document.getElementById('btn-tele-refresh')?.addEventListener('click', () => this.refreshAll());
 
         const ipSel = document.getElementById('conv-log-ip-filter');
         if (ipSel) ipSel.addEventListener('change', () => this._loadConvLog());
@@ -42,12 +47,9 @@ class JarvisTelemetryManager {
         const clearBtn = document.getElementById('conv-log-clear-btn');
         if (clearBtn) clearBtn.addEventListener('click', () => this._clearConvLog());
 
-        // Eigener Leeren-Knopf am Fehler-Log - getrennt vom globalen
-        // "Zuruecksetzen", das auch die (nicht mehr angezeigten) Zaehler leert.
+        // Eigener Leeren-Knopf am Fehler-Log.
         this._bindClear('tele-errors-clear-btn', '/api/telemetry/errors', 'telemetry.clear_errors_confirm');
 
-        document.getElementById('tele-retention-run')
-            ?.addEventListener('click', () => this._runRetention());
     }
 
     _bindClear(btnId, url, confirmKey) {
@@ -81,11 +83,31 @@ class JarvisTelemetryManager {
         if (body && body.style.display !== 'none') await this._loadConvLog();
     }
 
+    /** Knopf "Aktualisieren" unten im Reiter: ALLE geoeffneten Abschnitte neu laden.
+     *
+     * Vorher lud er nur Fehler-Log, Aufbewahrung und LLM-Verlauf – neben den
+     * Protokoll-Abschnitten der anderen Module (Tool-Audit, Sicherheit, Journal,
+     * SSH …) war das ein Knopf, der "alles" verspricht und die Haelfte laesst.
+     * Zugeklappte Abschnitte laden beim Aufklappen ohnehin frisch. */
+    async refreshAll() {
+        await this.refresh();
+        const offen = (id) => {
+            const b = document.getElementById(id);
+            return !!b && b.style.display !== 'none';
+        };
+        const auftraege = [];
+        if (offen('audit-section-body') && window.auditManager) auftraege.push(window.auditManager.init());
+        if (offen('sprot-section-body') && window.sicherheitsProtokoll) auftraege.push(window.sicherheitsProtokoll.init());
+        ['journal', 'csp', 'updates', 'ssh', 'fixes', 'abh'].forEach((n) => {
+            if (offen('plog-' + n + '-body') && window.Protokolle) auftraege.push(window.Protokolle.init(n));
+        });
+        await Promise.all(auftraege);
+    }
+
     // ── Aufbewahrungsfrist ────────────────────────────────────────────────────
 
     async _loadRetention() {
         const txt = document.getElementById('tele-retention-text');
-        const btn = document.getElementById('tele-retention-run');
         if (!txt) return;
         try {
             const res = await fetch('/api/logs/retention', {
@@ -94,9 +116,11 @@ class JarvisTelemetryManager {
             if (!res.ok) throw new Error('HTTP ' + res.status);
             const r = await res.json();
             const parts = [];
+            // Ohne Symbol: das fruehere Kalender-Emoji erschien als unlesbares
+            // Zeichen, und icons.js hat keinen Kalender (2026-10-20).
             parts.push(r.days > 0
-                ? '🗓 ' + window.t('telemetry.ret_days').replace('{n}', r.days)
-                : '🗓 ' + window.t('telemetry.ret_forever'));
+                ? window.t('telemetry.ret_days').replace('{n}', r.days)
+                : window.t('telemetry.ret_forever'));
             const cv = r.conv_log || {};
             if (cv.count) {
                 let s = window.t('telemetry.ret_convs').replace('{n}', cv.count);
@@ -112,28 +136,8 @@ class JarvisTelemetryManager {
                 + new Date(r.last_run_ts * 1000).toLocaleString('de-DE'));
             if (r.error) parts.push('⚠ ' + String(r.error).replace(/</g, '&lt;'));
             txt.innerHTML = parts.join(' · ');
-            if (btn) btn.style.display = r.days > 0 ? '' : 'none';
         } catch (e) {
             txt.textContent = '';
-            if (btn) btn.style.display = 'none';
-        }
-    }
-
-    async _runRetention() {
-        const btn = document.getElementById('tele-retention-run');
-        if (btn) { btn.disabled = true; btn.textContent = window.t('telemetry.ret_running'); }
-        try {
-            const res = await fetch('/api/logs/retention/run', {
-                method: 'POST', headers: { 'Authorization': 'Bearer ' + this._token() }
-            });
-            const r = await res.json();
-            const n = Object.values(r.removed || {}).reduce((a, b) => a + b, 0);
-            alert(window.t('telemetry.ret_done').replace('{n}', n));
-        } catch (e) {
-            alert(window.t('telemetry.error_prefix') + ' ' + e.message);
-        } finally {
-            if (btn) { btn.disabled = false; btn.textContent = window.t('telemetry.ret_run'); }
-            await this.refresh();
         }
     }
 
@@ -155,19 +159,6 @@ class JarvisTelemetryManager {
             });
             if (!res.ok) throw new Error('HTTP ' + res.status);
             const s = await res.json();
-
-            // Reset-Nachweis: wann und von wem zuletzt zurückgesetzt
-            const resetInfo = document.getElementById('tele-reset-info');
-            if (resetInfo) {
-                if (s.last_reset_ts) {
-                    const when = new Date(s.last_reset_ts * 1000).toLocaleString('de-DE');
-                    const who = (s.last_reset_by || '?').replace(/</g, '&lt;');
-                    resetInfo.innerHTML = '↺ ' + window.t('telemetry.last_reset') + ': '
-                        + when + ' · ' + window.t('telemetry.by') + ' ' + who;
-                } else {
-                    resetInfo.innerHTML = '';
-                }
-            }
 
             this._lastStats = s;
         } catch (e) {
@@ -459,15 +450,6 @@ class JarvisTelemetryManager {
         } catch (e) {
             if (body) body.innerHTML = `<div class="kb-files-error">${window.t('telemetry.error_prefix')} ${e.message}</div>`;
         }
-    }
-
-    async clear() {
-        if (!confirm(window.t('telemetry.clear_all_confirm'))) return;
-        await fetch('/api/telemetry', {
-            method: 'DELETE',
-            headers: { 'Authorization': 'Bearer ' + this._token() }
-        });
-        await this.refresh();
     }
 }
 

@@ -23,7 +23,7 @@
     <link rel="stylesheet" href="/static/css/theme.css?v=34">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=10">
-    <link rel="stylesheet" href="/static/css/style.css?v=204">
+    <link rel="stylesheet" href="/static/css/style.css?v=205">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=7">
     <!-- Feedback-Reiter. EINE Datei fuer /settings und /feedback: Tabelle,
          Sterne und Abgabe-Karte werden an beiden Orten gebraucht, zwei
@@ -1649,7 +1649,9 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 <button class="settings-tab-btn" data-settings-tab="agent_orchestrator" id="settings-tab-btn-orchestrator" style="display:none;" data-i18n="settings.tab.orchestrator">Orchestrator</button>
                 <button class="settings-tab-btn" data-settings-tab="agent_autonomy_kit" id="settings-tab-btn-autonomy" style="display:none;" data-i18n="settings.tab.autonomy">Autonomie</button>
                 <button class="settings-tab-btn" data-settings-tab="avatar" id="settings-tab-btn-avatar" style="display:none;" data-i18n="settings.tab.avatar">Avatar</button>
-                <button class="settings-tab-btn" data-settings-tab="telemetry" data-i18n="settings.tab.telemetry">Telemetry</button>
+                <!-- Beschriftung "Protokolle"/"Logs" seit 2026-10-20 (vorher "Telemetry"): der Reiter
+                     haelt fast nur noch Protokolle. Die Kennung "telemetry" bleibt (app.js, IDs). -->
+                <button class="settings-tab-btn" data-settings-tab="telemetry" data-i18n="settings.tab.telemetry">Protokolle</button>
                 <button class="settings-tab-btn" data-settings-tab="security" data-i18n="settings.tab.security">Sicherheit</button>
                 <button class="settings-tab-btn" data-settings-tab="cron" data-i18n="settings.tab.cron">Tasks</button>
             </div>
@@ -4555,7 +4557,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                     </div>
                 </div>
 
-                <!-- ═══ Tab: Telemetry ═══ -->
+                <!-- ═══ Tab: Protokolle (Kennung telemetry) ═══ -->
                 <div id="settings-tab-telemetry" class="settings-tab-content" style="display:none;">
                     <div class="kb-container">
                         <div id="tele-reset-info" style="font-size:0.75rem;color:var(--text-muted);margin-bottom:6px;"></div>
@@ -4644,19 +4646,19 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                              name-Wert nimmt der Heuristik die Grundlage; die
                                              Anzeige nennt zusaetzlich den wirklich angewandten
                                              Filter, damit ein solcher Widerspruch sichtbar ist. -->
-                                        <input id="audit-filter-user" type="text" name="audit-log-user-filter" autocomplete="off" data-i18n-placeholder="common.all" placeholder="Alle" class="kb-input" style="height:28px;font-size:0.8rem;">
+                                        <input id="audit-filter-user" type="text" name="audit-log-user-filter" autocomplete="off" data-i18n-placeholder="common.all" placeholder="Alle" class="kb-input log-feld">
                                     </div>
                                     <div class="kb-form-field" style="margin:0;flex:1;min-width:120px;">
                                         <label class="kb-label" style="margin-bottom:2px;" for="audit-filter-tool" data-i18n="telemetry.audit_tool_label">Tool</label>
-                                        <input id="audit-filter-tool" type="text" name="audit-log-tool-filter" autocomplete="off" data-i18n-placeholder="common.all" placeholder="Alle" class="kb-input" style="height:28px;font-size:0.8rem;">
+                                        <input id="audit-filter-tool" type="text" name="audit-log-tool-filter" autocomplete="off" data-i18n-placeholder="common.all" placeholder="Alle" class="kb-input log-feld">
                                     </div>
-                                    <select id="audit-limit" class="kb-input" style="flex:0 0 auto;width:90px;height:28px;font-size:0.8rem;">
+                                    <select id="audit-limit" class="kb-input log-feld" style="width:90px;">
                                         <option value="50">50</option>
                                         <option value="100">100</option>
                                         <option value="200" selected>200</option>
                                         <option value="500">500</option>
                                     </select>
-                                    <button id="audit-apply-btn" class="kb-btn-action" style="height:28px;font-size:0.8rem;padding:0 12px;" data-i18n="common.apply">Anwenden</button>
+                                    <button id="audit-apply-btn" class="kb-btn-action log-feld" style="padding:0 12px;" data-i18n="common.apply">Anwenden</button>
                                     <span id="audit-count" class="kb-hint" style="margin:0;"></span>
                                 </div>
                                 <div id="audit-notification" class="kb-notification" style="display:none;margin-bottom:6px;"></div>
@@ -4700,26 +4702,26 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;align-items:flex-end;">
                                     <div class="kb-form-field" style="margin:0;flex:1;min-width:150px;">
                                         <label class="kb-label" style="margin-bottom:2px;" for="sprot-filter-art" data-i18n="telemetry.sprot_art">Ereignis</label>
-                                        <select id="sprot-filter-art" class="kb-input sprot-feld">
+                                        <select id="sprot-filter-art" class="kb-input log-feld">
                                             <option value="" data-i18n="common.all">Alle</option>
                                         </select>
                                     </div>
                                     <div class="kb-form-field" style="margin:0;flex:1;min-width:120px;">
                                         <label class="kb-label" style="margin-bottom:2px;" for="sprot-filter-user" data-i18n="telemetry.audit_user_label">Benutzer</label>
-                                        <input id="sprot-filter-user" type="text" name="sicherheitsprotokoll-benutzer-filter" autocomplete="off" data-i18n-placeholder="common.all" placeholder="Alle" class="kb-input sprot-feld">
+                                        <input id="sprot-filter-user" type="text" name="sicherheitsprotokoll-benutzer-filter" autocomplete="off" data-i18n-placeholder="common.all" placeholder="Alle" class="kb-input log-feld">
                                     </div>
                                     <div class="kb-form-field" style="margin:0;flex:1;min-width:110px;">
                                         <label class="kb-label" style="margin-bottom:2px;" for="sprot-filter-ip" data-i18n="telemetry.sprot_ip">IP-Adresse</label>
-                                        <input id="sprot-filter-ip" type="text" name="sicherheitsprotokoll-ip-filter" autocomplete="off" data-i18n-placeholder="common.all" placeholder="Alle" class="kb-input sprot-feld">
+                                        <input id="sprot-filter-ip" type="text" name="sicherheitsprotokoll-ip-filter" autocomplete="off" data-i18n-placeholder="common.all" placeholder="Alle" class="kb-input log-feld">
                                     </div>
-                                    <select id="sprot-limit" class="kb-input sprot-feld" style="flex:0 0 auto;width:90px;">
+                                    <select id="sprot-limit" class="kb-input log-feld" style="flex:0 0 auto;width:90px;">
                                         <option value="50">50</option>
                                         <option value="100">100</option>
                                         <option value="200" selected>200</option>
                                         <option value="500">500</option>
                                         <option value="1000">1000</option>
                                     </select>
-                                    <button id="sprot-apply-btn" class="kb-btn-action sprot-feld" style="padding:0 12px;" data-i18n="common.apply">Anwenden</button>
+                                    <button id="sprot-apply-btn" class="kb-btn-action log-feld" style="padding:0 12px;" data-i18n="common.apply">Anwenden</button>
                                     <span id="sprot-count" class="kb-hint" style="margin:0;"></span>
                                 </div>
                                 <div id="sprot-fehler" class="sprot-fehler" role="alert" style="display:none;"></div>
@@ -4737,6 +4739,226 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                         </thead>
                                         <tbody id="sprot-tbody">
                                             <tr><td colspan="6" class="audit-empty" data-i18n="common.loading">Lädt…</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- ── Weitere Protokolle (2026-10-20). NUR LESEN, nur Administratoren.
+                             Logik: frontend/js/protokolle.js, Endpunkte /api/logs/* und
+                             /api/security/csp. Kein Symbol im Kopf (Emojis verboten). ── -->
+                        <div class="sk-openclaw-section" style="margin-top:10px;">
+                            <div class="kb-folder-header" style="cursor:pointer;" data-klick="plog-klappen" data-plog="journal">
+                                <span class="kb-folder-path" style="font-weight:600;" data-i18n="plog.journal.titel">Dienst-Journal</span>
+                                <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
+                                    <button id="plog-journal-refresh" class="kb-hdr-btn" data-i18n-title="telemetry.refresh_title" title="Aktualisieren">⟳</button>
+                                </span>
+                                <span class="kb-folder-arrow">▶</span>
+                            </div>
+                            <div id="plog-journal-body" style="display:none;padding:10px 0 4px;">
+                                <p class="kb-hint" style="margin:0 0 8px;" data-i18n="plog.journal.hint">Ausgaben der Dienste: Meldungen, Warnungen und Fehler, neueste zuerst. Gelesen wird über den Root-Broker; jede Abfrage wird dort protokolliert.</p>
+                                <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;align-items:flex-end;">
+                                    <div class="kb-form-field" style="margin:0;flex:1;min-width:140px;">
+                                        <label class="kb-label" style="margin-bottom:2px;" for="plog-journal-einheit" data-i18n="plog.journal.dienst">Dienst</label>
+                                        <select id="plog-journal-einheit" class="kb-input log-feld"><option value="jarvis" selected data-i18n="plog.journal.d_jarvis">Hauptdienst</option><option value="broker" data-i18n="plog.journal.d_broker">Root-Broker</option><option value="whatsapp" data-i18n="plog.journal.d_whatsapp">WhatsApp-Anbindung</option></select>
+                                    </div>
+                                    <div class="kb-form-field" style="margin:0;flex:1;min-width:180px;">
+                                        <label class="kb-label" style="margin-bottom:2px;" for="plog-journal-stufe" data-i18n="plog.journal.stufe">Stufe</label>
+                                        <select id="plog-journal-stufe" class="kb-input log-feld"><option value="" data-i18n="plog.journal.s_alle">Alle Meldungen</option><option value="warnung" selected data-i18n="plog.journal.s_warnung">Warnungen und Fehler</option><option value="fehler" data-i18n="plog.journal.s_fehler">Nur Fehler</option></select>
+                                    </div>
+                                    <div class="kb-form-field" style="margin:0;flex:1;min-width:140px;">
+                                        <label class="kb-label" style="margin-bottom:2px;" for="plog-journal-zeitraum" data-i18n="plog.zeitraum">Zeitraum</label>
+                                        <select id="plog-journal-zeitraum" class="kb-input log-feld"><option value="1h" data-i18n="plog.z_1h">Letzte Stunde</option><option value="24h" selected data-i18n="plog.z_24h">Letzte 24 Stunden</option><option value="7d" data-i18n="plog.z_7d">Letzte 7 Tage</option></select>
+                                    </div>
+                                    <div class="kb-form-field" style="margin:0;flex:1;min-width:120px;">
+                                        <label class="kb-label" style="margin-bottom:2px;" for="plog-journal-suche" data-i18n="plog.journal.suche">Enthält</label>
+                                        <input id="plog-journal-suche" type="text" name="protokoll-journal-suche" autocomplete="off" maxlength="200" class="kb-input log-feld">
+                                    </div>
+                                    <button id="plog-journal-apply" class="kb-btn-action log-feld" style="padding:0 12px;" data-i18n="common.apply">Anwenden</button>
+                                    <span id="plog-journal-count" class="kb-hint" style="margin:0;"></span>
+                                </div>
+                                <div id="plog-journal-status" class="plog-status" role="status"></div>
+                                <div id="plog-journal-fehler" class="sprot-fehler" role="alert" style="display:none;"></div>
+                                <div style="overflow-x:auto;max-height:420px;overflow-y:auto;">
+                                    <table id="plog-journal-table" class="audit-table">
+                                        <thead>
+                                            <tr>
+                                                <th data-i18n="telemetry.audit_col_time">Zeit</th>
+                                                <th data-i18n="plog.journal.prozess">Prozess</th>
+                                                <th data-i18n="plog.journal.meldung">Meldung</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="plog-journal-tbody">
+                                            <tr><td colspan="3" class="audit-empty" data-i18n="common.loading">Lädt…</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="sk-openclaw-section" style="margin-top:10px;">
+                            <div class="kb-folder-header" style="cursor:pointer;" data-klick="plog-klappen" data-plog="csp">
+                                <span class="kb-folder-path" style="font-weight:600;" data-i18n="plog.csp.titel">Inhaltssicherheit (CSP-Verstöße)</span>
+                                <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
+                                    <button id="plog-csp-refresh" class="kb-hdr-btn" data-i18n-title="telemetry.refresh_title" title="Aktualisieren">⟳</button>
+                                </span>
+                                <span class="kb-folder-arrow">▶</span>
+                            </div>
+                            <div id="plog-csp-body" style="display:none;padding:10px 0 4px;">
+                                <p class="kb-hint" style="margin:0 0 8px;" data-i18n="plog.csp.hint">Der Browser meldet hier, wenn eine Seite etwas laden oder ausführen wollte, das die Inhaltssicherheitsrichtlinie nicht erlaubt. Gleiche Verstöße werden je Tag einmal gespeichert und seit dem Dienststart gezählt.</p>
+                                <div id="plog-csp-status" class="plog-status" role="status"></div>
+                                <div id="plog-csp-fehler" class="sprot-fehler" role="alert" style="display:none;"></div>
+                                <div style="overflow-x:auto;max-height:420px;overflow-y:auto;">
+                                    <table id="plog-csp-table" class="audit-table">
+                                        <thead>
+                                            <tr>
+                                                <th data-i18n="telemetry.audit_col_time">Zeit</th>
+                                                <th data-i18n="plog.csp.seite">Seite</th>
+                                                <th data-i18n="plog.csp.regel">Regel</th>
+                                                <th data-i18n="plog.csp.blockiert">Blockiert</th>
+                                                <th data-i18n="plog.csp.quelle">Quelle</th>
+                                                <th data-i18n="plog.csp.anzahl">Anzahl</th>
+                                                <th data-i18n="plog.csp.browser">Browser</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="plog-csp-tbody">
+                                            <tr><td colspan="7" class="audit-empty" data-i18n="common.loading">Lädt…</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="sk-openclaw-section" style="margin-top:10px;">
+                            <div class="kb-folder-header" style="cursor:pointer;" data-klick="plog-klappen" data-plog="updates">
+                                <span class="kb-folder-path" style="font-weight:600;" data-i18n="plog.updates.titel">Update-Verlauf</span>
+                                <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
+                                    <button id="plog-updates-refresh" class="kb-hdr-btn" data-i18n-title="telemetry.refresh_title" title="Aktualisieren">⟳</button>
+                                </span>
+                                <span class="kb-folder-arrow">▶</span>
+                            </div>
+                            <div id="plog-updates-body" style="display:none;padding:10px 0 4px;">
+                                <p class="kb-hint" style="margin:0 0 8px;" data-i18n="plog.updates.hint">Jeder Wechsel des Programmstands – über den Knopf, das automatische Update oder von Hand – wird beim nächsten Dienststart festgehalten; Updates über den Knopf zusätzlich mit Auslöser und Ergebnis.</p>
+                                <div id="plog-updates-status" class="plog-status" role="status"></div>
+                                <div id="plog-updates-fehler" class="sprot-fehler" role="alert" style="display:none;"></div>
+                                <div style="overflow-x:auto;max-height:420px;overflow-y:auto;">
+                                    <table id="plog-updates-table" class="audit-table">
+                                        <thead>
+                                            <tr>
+                                                <th data-i18n="telemetry.audit_col_time">Zeit</th>
+                                                <th data-i18n="telemetry.sprot_art">Ereignis</th>
+                                                <th data-i18n="plog.updates.stand">Stand</th>
+                                                <th data-i18n="telemetry.audit_user_label">Benutzer</th>
+                                                <th data-i18n="telemetry.sprot_details">Details</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="plog-updates-tbody">
+                                            <tr><td colspan="5" class="audit-empty" data-i18n="common.loading">Lädt…</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="sk-openclaw-section" style="margin-top:10px;">
+                            <div class="kb-folder-header" style="cursor:pointer;" data-klick="plog-klappen" data-plog="ssh">
+                                <span class="kb-folder-path" style="font-weight:600;" data-i18n="plog.ssh.titel">SSH-Anmeldungen</span>
+                                <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
+                                    <button id="plog-ssh-refresh" class="kb-hdr-btn" data-i18n-title="telemetry.refresh_title" title="Aktualisieren">⟳</button>
+                                </span>
+                                <span class="kb-folder-arrow">▶</span>
+                            </div>
+                            <div id="plog-ssh-body" style="display:none;padding:10px 0 4px;">
+                                <p class="kb-hint" style="margin:0 0 8px;" data-i18n="plog.ssh.hint">Anmeldungen per SSH am Server – angenommen, fehlgeschlagen oder mit unbekanntem Benutzernamen. Gelesen wird über den Root-Broker; jede Abfrage wird dort protokolliert.</p>
+                                <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;align-items:flex-end;">
+                                    <div class="kb-form-field" style="margin:0;flex:1;min-width:140px;">
+                                        <label class="kb-label" style="margin-bottom:2px;" for="plog-ssh-tage" data-i18n="plog.zeitraum">Zeitraum</label>
+                                        <select id="plog-ssh-tage" class="kb-input log-feld"><option value="1" data-i18n="plog.z_1d">Letzter Tag</option><option value="7" selected data-i18n="plog.z_7d">Letzte 7 Tage</option><option value="30" data-i18n="plog.z_30d">Letzte 30 Tage</option></select>
+                                    </div>
+                                    <div class="kb-form-field" style="margin:0;flex:1;min-width:150px;">
+                                        <label class="kb-label" style="margin-bottom:2px;" for="plog-ssh-art" data-i18n="plog.ssh.ergebnis">Ergebnis</label>
+                                        <select id="plog-ssh-art" class="kb-input log-feld"><option value="" data-i18n="common.all">Alle</option><option value="angenommen" data-i18n="plog.ssh.angenommen">Angenommen</option><option value="fehlgeschlagen" data-i18n="plog.ssh.fehlgeschlagen">Fehlgeschlagen</option><option value="unbekannt" data-i18n="plog.ssh.unbekannt">Unbekannter Benutzer</option></select>
+                                    </div>
+                                    <button id="plog-ssh-apply" class="kb-btn-action log-feld" style="padding:0 12px;" data-i18n="common.apply">Anwenden</button>
+                                    <span id="plog-ssh-count" class="kb-hint" style="margin:0;"></span>
+                                </div>
+                                <div id="plog-ssh-status" class="plog-status" role="status"></div>
+                                <div id="plog-ssh-fehler" class="sprot-fehler" role="alert" style="display:none;"></div>
+                                <div style="overflow-x:auto;max-height:420px;overflow-y:auto;">
+                                    <table id="plog-ssh-table" class="audit-table">
+                                        <thead>
+                                            <tr>
+                                                <th data-i18n="telemetry.audit_col_time">Zeit</th>
+                                                <th data-i18n="plog.ssh.ergebnis">Ergebnis</th>
+                                                <th data-i18n="plog.ssh.konto">Konto</th>
+                                                <th data-i18n="telemetry.sprot_ip">IP-Adresse</th>
+                                                <th data-i18n="plog.ssh.verfahren">Verfahren</th>
+                                                <th data-i18n="plog.ssh.schluessel">Schlüssel</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="plog-ssh-tbody">
+                                            <tr><td colspan="6" class="audit-empty" data-i18n="common.loading">Lädt…</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="sk-openclaw-section" style="margin-top:10px;">
+                            <div class="kb-folder-header" style="cursor:pointer;" data-klick="plog-klappen" data-plog="fixes">
+                                <span class="kb-folder-path" style="font-weight:600;" data-i18n="plog.fixes.titel">Selbstkorrekturen des Agenten</span>
+                                <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
+                                    <button id="plog-fixes-refresh" class="kb-hdr-btn" data-i18n-title="telemetry.refresh_title" title="Aktualisieren">⟳</button>
+                                </span>
+                                <span class="kb-folder-arrow">▶</span>
+                            </div>
+                            <div id="plog-fixes-body" style="display:none;padding:10px 0 4px;">
+                                <p class="kb-hint" style="margin:0 0 8px;" data-i18n="plog.fixes.hint">Änderungen, die der Agent über seine Selbstreflexion am eigenen Programmcode vorgenommen hat – mit Grund und der Sicherung der vorigen Fassung.</p>
+                                <div id="plog-fixes-status" class="plog-status" role="status"></div>
+                                <div id="plog-fixes-fehler" class="sprot-fehler" role="alert" style="display:none;"></div>
+                                <div style="overflow-x:auto;max-height:420px;overflow-y:auto;">
+                                    <table id="plog-fixes-table" class="audit-table">
+                                        <thead>
+                                            <tr>
+                                                <th data-i18n="telemetry.audit_col_time">Zeit</th>
+                                                <th data-i18n="plog.fixes.datei">Datei</th>
+                                                <th data-i18n="plog.fixes.grund">Grund</th>
+                                                <th data-i18n="plog.fixes.backup">Sicherung</th>
+                                                <th data-i18n="plog.fixes.deployt">Ausgerollt nach</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="plog-fixes-tbody">
+                                            <tr><td colspan="5" class="audit-empty" data-i18n="common.loading">Lädt…</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="sk-openclaw-section" style="margin-top:10px;">
+                            <div class="kb-folder-header" style="cursor:pointer;" data-klick="plog-klappen" data-plog="abh">
+                                <span class="kb-folder-path" style="font-weight:600;" data-i18n="plog.abh.titel">Abhängigkeitsprüfung</span>
+                                <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
+                                    <button id="plog-abh-refresh" class="kb-hdr-btn" data-i18n-title="telemetry.refresh_title" title="Aktualisieren">⟳</button>
+                                </span>
+                                <span class="kb-folder-arrow">▶</span>
+                            </div>
+                            <div id="plog-abh-body" style="display:none;padding:10px 0 4px;">
+                                <p class="kb-hint" style="margin:0 0 8px;" data-i18n="plog.abh.hint">Ergebnis der letzten Prüfung der Programmbibliotheken auf bekannte Sicherheitslücken (beim Dienststart und danach täglich): was angehoben wurde, was offen ist und welche Befunde bewusst ausgenommen sind.</p>
+                                <div id="plog-abh-status" class="plog-status" role="status"></div>
+                                <div id="plog-abh-fehler" class="sprot-fehler" role="alert" style="display:none;"></div>
+                                <div style="overflow-x:auto;max-height:420px;overflow-y:auto;">
+                                    <table id="plog-abh-table" class="audit-table">
+                                        <thead>
+                                            <tr>
+                                                <th data-i18n="plog.abh.bereich">Bereich</th>
+                                                <th data-i18n="plog.abh.paket">Paket</th>
+                                                <th data-i18n="telemetry.sprot_details">Details</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="plog-abh-tbody">
+                                            <tr><td colspan="3" class="audit-empty" data-i18n="common.loading">Lädt…</td></tr>
                                         </tbody>
                                     </table>
                                 </div>
@@ -5616,17 +5838,18 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <!-- BSI H4 (CSP ohne Inline-Skript, 2026-10-04): Klick-Zuhoerer der frueheren
          onclick-Attribute (data-klick). VOR allen anderen Skripten, damit vision.js
          den Platz el.onclick wie bisher danach ueberschreiben kann. -->
-    <script src="/static/js/settings_bedienung.js?v=3"></script>
+    <script src="/static/js/settings_bedienung.js?v=4"></script>
     <script src="/static/js/konto_hinweise.js?v=2"></script>
     <script src="/static/js/icons.js?v=9"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/dlkey.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=346"></script>
+    <script src="/static/js/i18n.js?v=347"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=29"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
     <script src="/static/js/audit.js?v=5"></script>
     <script src="/static/js/sicherheitsprotokoll.js?v=1"></script>
+    <script src="/static/js/protokolle.js?v=3"></script>
     <script src="/static/js/kbgroups.js?v=6"></script>
     <script src="/static/js/skills.js?v=50"></script>
     <script src="/static/js/chatlib.js?v=25"></script>

@@ -19,6 +19,7 @@ Meta-Operationen (Admin-UI), Regeln in backend/broker/meta.py:
 - broker.totp_pruefen   – {code, konto}; 2FA-Code der ANMELDUNG gegen denselben
                           Schluessel wie die Freigaben (ein App-Eintrag, meta.py)
 - broker.ssh_status     – Fernzugang (SSH): Zustand, Konten, laufende Tests
+- broker.ssh_protokoll  – SSH-Anmeldungen lesen {tage, art}; auditiert (fernzugang.ssh_protokoll)
 - broker.ssh_haertung   – {aktion, root_modus, nachweis}; Regeln in fernzugang.py
 - broker.ssh_netze      – {aktion, netze, nachweis}
 - broker.ssh_schluessel – {aktion: hinzufuegen|entfernen, konto, schluessel|fingerabdruck, nachweis}

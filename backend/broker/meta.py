@@ -77,6 +77,16 @@ def _behandeln(op: str, args: dict, peer: str = "") -> dict | None:
     if op == "broker.ssh_status":
         from backend.broker import fernzugang
         return fernzugang.status()
+    # SSH-Anmeldungen lesen (Einstellungen -> Protokolle). Nur lesen, aber
+    # AUDITIERT – anders als ssh_status: wer wann die Anmeldedaten des Servers
+    # eingesehen hat, ist forensisch von Wert (wie journal_lesen, BSI M8).
+    if op == "broker.ssh_protokoll":
+        from backend.broker import fernzugang
+        art = str(args.get("art", ""))[:20]
+        erg = fernzugang.ssh_protokoll(args.get("tage", 7), art)
+        policy.audit(by, op, f"{op}:{art or 'alle'}", "executed" if erg.get("ok") else "fehler",
+                     info=f"tage={erg.get('tage', '')}", peer=peer)
+        return erg
     if op in ("broker.ssh_haertung", "broker.ssh_netze"):
         from backend.broker import fernzugang
         aktion = str(args.get("aktion", ""))

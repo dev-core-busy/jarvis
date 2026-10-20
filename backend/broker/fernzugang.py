@@ -250,6 +250,72 @@ def _vorschlaege() -> dict:
     return {"lokal": lokal, "tailscale": tailscale, "anmeldungen": anmeldungen}
 
 
+# ── SSH-Protokoll (Ansicht unter Einstellungen -> Protokolle) ────────────────
+# Gemessen an echten Zeilen (DEV, 2026-10-20): Debian 13 schreibt ueber
+# ``sshd-session[pid]`` statt ``sshd[pid]`` – die Muster haengen deshalb NICHT
+# am Prozessnamen. Am Ende einer Schluessel-Anmeldung steht der Fingerabdruck
+# ("ssh2: RSA SHA256:…") – er sagt, WELCHER Schluessel benutzt wurde.
+_SSH_ANGENOMMEN = re.compile(
+    r"^(\S+)\s.*?: Accepted (\S+) for (\S+) from (\S+) port \d+\S*(?: ssh2: (\S+) (\S+))?")
+_SSH_FEHLGESCHLAGEN = re.compile(
+    r"^(\S+)\s.*?: Failed (\S+) for (?:invalid user )?(\S+) from (\S+) port \d+")
+_SSH_UNBEKANNT = re.compile(r"^(\S+)\s.*?: Invalid user (\S*) from (\S+) port \d+")
+SSH_TAGE_MAX = 30
+SSH_EINTRAEGE_MAX = 1000
+SSH_ARTEN = ("angenommen", "fehlgeschlagen", "unbekannt")
+
+
+def ssh_zerlegen(text: str) -> list[dict]:
+    """journalctl-Ausgabe (short-iso) -> Ereignisse, in Reihenfolge der Zeilen.
+
+    Eigene Funktion ohne Systemaufruf, damit sie ohne Root und ohne Journal
+    pruefbar ist. Unbekannte Zeilen werden uebergangen, nicht geraten."""
+    aus = []
+    for z in (text or "").splitlines():
+        m = _SSH_ANGENOMMEN.search(z)
+        if m:
+            aus.append({"zeit": m.group(1), "art": "angenommen", "methode": m.group(2),
+                        "konto": m.group(3), "ip": m.group(4),
+                        "schluessel": ((m.group(5) or "") + " " + (m.group(6) or "")).strip()})
+            continue
+        m = _SSH_FEHLGESCHLAGEN.search(z)
+        if m:
+            aus.append({"zeit": m.group(1), "art": "fehlgeschlagen", "methode": m.group(2),
+                        "konto": m.group(3), "ip": m.group(4), "schluessel": ""})
+            continue
+        m = _SSH_UNBEKANNT.search(z)
+        if m:
+            aus.append({"zeit": m.group(1), "art": "unbekannt", "methode": "",
+                        "konto": m.group(2), "ip": m.group(3), "schluessel": ""})
+    return aus
+
+
+def ssh_protokoll(tage=7, art: str = "") -> dict:
+    """SSH-Anmeldungen der letzten ``tage`` Tage, JUENGSTE zuerst (nur lesen).
+
+    Gefiltert wird HIER und nicht in der Oberflaeche: auf DEV standen in 30
+    Tagen 5146 erfolgreiche Anmeldungen neben 6 Fehlschlaegen – mit Deckel und
+    Filter dahinter waeren die Fehlschlaege unter den Erfolgen verschwunden.
+    ``anzahl`` zaehlt je Art ueber den GANZEN Zeitraum, vor dem Deckel."""
+    try:
+        tage = max(1, min(int(tage), SSH_TAGE_MAX))
+    except (TypeError, ValueError):
+        tage = 7
+    art = art if art in SSH_ARTEN else ""
+    try:
+        r = _lauf(["journalctl", "-u", "ssh", "-u", "sshd", "--since", "-%dd" % tage,
+                   "--no-pager", "-o", "short-iso"], timeout=60)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": "journalctl: %s" % e}
+    alle = ssh_zerlegen(r.stdout)
+    anzahl = {a: sum(1 for e in alle if e["art"] == a) for a in SSH_ARTEN}
+    treffer = [e for e in alle if not art or e["art"] == art]
+    treffer.reverse()
+    return {"ok": True, "tage": tage, "art": art, "anzahl": anzahl,
+            "gekappt": max(0, len(treffer) - SSH_EINTRAEGE_MAX),
+            "eintraege": treffer[:SSH_EINTRAEGE_MAX]}
+
+
 def status() -> dict:
     konf = _konf()
     root_modus = "schluessel" if konf.get("SSH_ROOT") == "schluessel" else "nein"

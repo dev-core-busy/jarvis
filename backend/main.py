@@ -6031,7 +6031,15 @@ async def update_apply(user: str = Depends(require_local_auth)):
         return JSONResponse({"ok": False, "error": grund, "license": True},
                             status_code=403)
     from backend.update_manager import apply_update, restart_service_delayed
+    from backend import update_protokoll
+    _vorher = await asyncio.to_thread(update_protokoll.stand)
     result = await asyncio.to_thread(apply_update)
+    # Update-Verlauf: WER und mit welchem Ergebnis – auch bei einem Fehlschlag,
+    # bei dem der Start-Abgleich nichts sieht (der Stand bleibt ja gleich).
+    try:
+        await asyncio.to_thread(update_protokoll.knopf, user, _vorher, result)
+    except Exception as e:  # noqa: BLE001
+        print(f"[Update-Verlauf] nicht protokolliert: {e}", flush=True)
     if result["ok"]:
         # ⚠ auch_broker DURCHREICHEN: hat der Pull backend/broker/* angefasst,
         # muss der Root-Broker mit neu starten - er haelt eine eigene Kopie und
@@ -6381,6 +6389,24 @@ async def startup_harden_data_dirs():
             print(f"[security] Verzeichnisrechte {a}", flush=True)
     except Exception as e:  # noqa: BLE001
         print(f"[security] Verzeichnisrechte konnten nicht gesetzt werden: {e}", flush=True)
+
+
+@app.on_event("startup")
+async def startup_update_verlauf():
+    """Update-Verlauf: hat sich der Code-Stand seit dem letzten Start geaendert?
+
+    Beim START und nicht in apply_update: das Auto-Update ist ein Agenten-Auftrag,
+    der per Shell ``git pull`` ausfuehrt und apply_update nie beruehrt. Nur hier
+    sieht man JEDEN Wechsel (Knopf, Auto-Update, Pull von Hand). Details in
+    ``backend/update_protokoll.py``."""
+    try:
+        from backend import update_protokoll
+        e = await asyncio.to_thread(update_protokoll.beim_start)
+        if e:
+            print(f"[Update-Verlauf] {e.get('art')}: {e.get('vorher', '-')} -> {e.get('nachher')}",
+                  flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"[Update-Verlauf] Start-Abgleich fehlgeschlagen: {e}", flush=True)
 
 
 @app.on_event("startup")
@@ -27163,6 +27189,100 @@ async def sicherheitsprotokoll_lesen(limit: int = 200, art: str = "", benutzer: 
         "syslog": bool(zustand.get("syslog")),
         "schreibfehler": zustand.get("fehler") or {},
     })
+
+
+# ─── Weitere Protokolle (Einstellungen -> Protokolle) ────────────────────
+# Alle NUR LESEN und nur fuer Administratoren. Das Zerlegen steht in
+# backend/protokoll_quellen.py, hier nur Rechte und Transport.
+
+def _broker_antwort_text(res: dict) -> str:
+    """Klartext fuer eine Broker-Antwort, die KEIN Ergebnis traegt – eine leere
+    Liste saehe sonst aus wie "nichts passiert"."""
+    d = res.get("decision", "")
+    if d == "unknown-op" or "unbekannte Op" in str(res.get("error", "")):
+        return ("Der Root-Broker kennt diese Abfrage noch nicht (veralteter Stand). "
+                "Ein Administrator muss jarvis-broker.service neu starten.")
+    if d == "denied":
+        return "Unter Einstellungen → Sicherheit → Root-Freigaben gesperrt."
+    if d == "pending":
+        return "Wartet auf die Freigabe eines Administrators (Sicherheit → Root-Freigaben)."
+    return str(res.get("stderr") or res.get("error") or "Root-Broker nicht erreichbar")[:400]
+
+
+@app.get("/api/logs/journal")
+async def protokoll_journal(einheit: str = "jarvis", stufe: str = "", zeitraum: str = "24h",
+                            suche: str = "", zeilen: int = 300,
+                            user: str = Depends(require_local_auth)):
+    """Dienst-Journal einer Jarvis-Einheit ueber die Broker-Op ``journal_lesen``
+    (BSI M8: der Dienst selbst darf das Journal nicht lesen). Jede Abfrage
+    steht im Broker-Audit. Juengste Zeilen zuerst."""
+    from backend import broker_client, protokoll_quellen as pq
+    if einheit not in pq.EINHEITEN or stufe not in pq.STUFEN or zeitraum not in pq.ZEITRAEUME:
+        return JSONResponse({"ok": False, "error": "einheit/stufe/zeitraum ungueltig"},
+                            status_code=400)
+    args = {"einheit": pq.EINHEITEN[einheit], "zeilen": max(20, min(int(zeilen or 300), 2000)),
+            "seit": pq.ZEITRAEUME[zeitraum], "umgekehrt": True,
+            "_context": "Einstellungen → Protokolle"}
+    if pq.STUFEN[stufe]:
+        args["prioritaet"] = pq.STUFEN[stufe]
+    if suche.strip():
+        args["suche"] = suche.strip()[:200]
+    res = await broker_client.call("journal_lesen", args, user=user, timeout=90)
+    if "rc" not in res or (res.get("rc") not in (0, 1) and not res.get("stdout")):
+        return JSONResponse({"ok": False, "error": _broker_antwort_text(res)})
+    return JSONResponse({"ok": True, "einheit": args["einheit"],
+                         "gekappt": res.get("gekappt", 0),
+                         "eintraege": pq.journal_zerlegen(str(res.get("stdout") or ""))})
+
+
+@app.get("/api/logs/ssh")
+async def protokoll_ssh(tage: int = 7, art: str = "", user: str = Depends(require_local_auth)):
+    """SSH-Anmeldungen am Server (Broker-Meta-Op ``broker.ssh_protokoll``,
+    auditiert). ``art``: angenommen|fehlgeschlagen|unbekannt oder leer."""
+    from backend import broker_client
+    res = await broker_client.call("broker.ssh_protokoll",
+                                   {"tage": int(tage or 7), "art": str(art or "")[:20], "by": user},
+                                   user=user, timeout=90)
+    if not res.get("ok"):
+        return JSONResponse({"ok": False, "error": _broker_antwort_text(res)})
+    res.pop("type", None)
+    return JSONResponse(res)
+
+
+@app.get("/api/logs/updates")
+async def protokoll_updates(limit: int = 200, _u: str = Depends(require_local_auth)):
+    """Update-Verlauf (backend/update_protokoll.py) und der aktuelle Code-Stand."""
+    from backend import update_protokoll as up
+    limit = max(1, min(int(limit or 200), 1000))
+    stand, eintraege = await asyncio.to_thread(lambda: (up.stand(), up.lesen(limit)))
+    return JSONResponse({"ok": True, "stand": stand,
+                         "eintraege": _mit_anzeigenamen_feld(eintraege, "benutzer")})
+
+
+@app.get("/api/logs/code_fixes")
+async def protokoll_code_fixes(limit: int = 200, _u: str = Depends(require_local_auth)):
+    """Selbstkorrekturen des Agenten (data/learnings/code_fixes.log)."""
+    from backend import protokoll_quellen as pq
+    return JSONResponse(await asyncio.to_thread(pq.code_fixes_lesen, limit))
+
+
+@app.get("/api/logs/abhaengigkeiten")
+async def protokoll_abhaengigkeiten(_u: str = Depends(require_local_auth)):
+    """Zustand der letzten Abhaengigkeitspruefung (backend/abhaengigkeiten.py)."""
+    from backend import protokoll_quellen as pq
+    return JSONResponse(await asyncio.to_thread(pq.abhaengigkeiten_lesen))
+
+
+def _mit_anzeigenamen_feld(eintraege: list, feld: str) -> list:
+    """Anzeigenamen fuer ein Namensfeld, das nicht in ``_NAMENSFELDER`` steht –
+    ergaenzt als ``<feld>_anzeige``, der gespeicherte Wert bleibt unberuehrt."""
+    aus = []
+    for e in eintraege:
+        e = dict(e)
+        if e.get(feld):
+            e[feld + "_anzeige"] = _display_name(str(e[feld]))
+        aus.append(e)
+    return aus
 
 
 @app.delete("/api/audit_log")

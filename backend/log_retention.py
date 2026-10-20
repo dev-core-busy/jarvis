@@ -118,7 +118,8 @@ def run_all() -> dict:
                      ("email_log", _prune_email_log),
                      ("short_tracks_log", _prune_short_tracks_log),
                      ("cron_log", _prune_cron_log),
-                     ("csp_berichte", _prune_csp_berichte)):
+                     ("csp_berichte", _prune_csp_berichte),
+                     ("update_verlauf", _prune_update_verlauf)):
         try:
             removed[name] = int(fn(cut) or 0)
         except Exception as e:  # noqa: BLE001
@@ -206,3 +207,10 @@ def _prune_csp_berichte(cut: float) -> int:
     Diagnosespeicher-Typ, dieselbe Frist, keine Stueckzahlgrenze."""
     from backend import csp
     return csp.kuerzen(cut)
+
+
+def _prune_update_verlauf(cut: float) -> int:
+    """Update-Verlauf (data/logs/updates.jsonl) – derselbe Protokolltyp,
+    dieselbe Frist, keine Stueckzahlgrenze."""
+    from backend import update_protokoll
+    return update_protokoll.prune_older_than(cut)

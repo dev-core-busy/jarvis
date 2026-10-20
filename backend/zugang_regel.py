@@ -78,6 +78,7 @@ AUSNAHMEN: dict[tuple[str, str], tuple[str, str]] = {
     ("POST", "/api/login"): ("anmeldung", "Anmeldung"),
     ("POST", "/api/verify-token"): ("anmeldung", "Sitzung pruefen (liefert ohne Sitzung nur 'ungueltig')"),
     ("POST", "/api/addin/sso"): ("anmeldung", "Anmeldung des Outlook-Add-ins per Office-SSO"),
+    ("POST", "/api/login/windows"): ("anmeldung", "Windows-Anmeldung per Kerberos (AI-Maus)"),
     ("GET", "/api/security/my-block"): ("selbst", "eigene Sperr-Info – auch fuer gesperrte Konten, prueft das Token selbst"),
     # ── oeffentlich ──
     ("GET", "/api/health"): ("oeffentlich", "Zustandsabfrage, liefert nur ok"),

@@ -117,7 +117,9 @@ _SECRET_NAMES = {
     # liest, meldet sich als beliebiger Benutzer an (2026-09-28).
     ".secret_key", ".erstkennwort",
 }
-_SECRET_SUFFIX = {".key", ".pem", ".crt", ".cer", ".p12", ".pfx", ".jks", ".keystore"}
+# .keytab: Kerberos-Dienstschluessel (Windows-Anmeldung, backend/kerberos_anmeldung.py).
+_SECRET_SUFFIX = {".key", ".pem", ".crt", ".cer", ".p12", ".pfx", ".jks", ".keystore",
+                  ".keytab"}
 _SECRET_DIRPARTS = {".ssh", ".git", "certs"}
 # /run/credentials: dort legt systemd dem Dienst den Hauptschluessel der
 # Geheimnisse ab (BSI M5, LoadCredential); /etc/jarvis haelt das Original und
@@ -257,6 +259,11 @@ _APP_DENY_REL = (
     # administrativen – Benutzer eintragen und sich anschliessend als dieser
     # anmelden. Das ist die direkteste Rechteerhoehung im ganzen Verzeichnis.
     "data/addin_links.json",
+    # Windows-Anmeldung (backend/kerberos_anmeldung.py): die Keytab traegt den
+    # Dienstschluessel von HTTP/<server>. Wer sie LIEST, stellt sich selbst
+    # Tickets fuer Jarvis aus ("Silver Ticket") und meldet sich damit als
+    # BELIEBIGER Domaenenbenutzer an – ohne Kennwort, ohne DC, ohne Spur im AD.
+    "data/kerberos",
     # Short Tracks (backend/short_tracks.py): `short_tracks.json` enthaelt die
     # Prompts ALLER Benutzer samt ihrem Werkzeug-Zuschnitt. SCHREIBEN waere der
     # Weg, sich einen Dump mit dem Bereich `shell` anzulegen (oder einen fremden
@@ -336,7 +343,9 @@ PRIVATE_DIRS = ("data/documents", "data/chats", "data/logs",
                 "data/generated_images",
                 "data/chat_history", "data/destillat_filter",
                 "data/issue_attachments", "data/backups",
-                "data/learnings", "data/erfahrung")
+                "data/learnings", "data/erfahrung",
+                # Keytab der Windows-Anmeldung (siehe _APP_DENY_REL)
+                "data/kerberos")
 PRIVATE_MODE = 0o750
 
 # Einzelne Dateien direkt in data/, die kein Domain-Nutzer lesen darf. Das
@@ -452,7 +461,10 @@ PRIVATE_FILES_STRENG = ("data/.mailkey", "data/.sapkey", "data/.jirakey",
                         # Geheimnis zwischen Backend und WhatsApp-Bridge
                         # (backend/wa_bruecke.py): wer es liest, sendet in
                         # fremdem Namen und spielt Auftraege ein.
-                        "data/.wa_bridge_secret")
+                        "data/.wa_bridge_secret",
+                        # Kerberos-Keytab: wer sie liest, meldet sich als
+                        # beliebiger Domaenenbenutzer an (siehe _APP_DENY_REL).
+                        "data/kerberos/http.keytab")
 PRIVATE_FILE_MODE_STRENG = 0o600
 
 
@@ -741,6 +753,9 @@ SHELL_SECRET_PATHS = re.compile(
     # Outlook-Add-in: Postfach → Jarvis-Konto. Beschreibbar waere das die
     # kuerzeste Rechteerhoehung im Verzeichnis (siehe _APP_DENY_REL).
     r'addin_links\.json\b|'
+    # Windows-Anmeldung: die Keytab erlaubt, sich Tickets fuer Jarvis selbst
+    # auszustellen – also die Anmeldung als beliebiger Benutzer.
+    r'\.keytab\b|/kerberos/http\b|'
     # Persoenliche SAP-Zugaenge: sap_accounts.json + .sapkey ergeben zusammen die
     # Klartext-Kennwoerter der SAP-Benutzer. Dasselbe fuer Jira: jira_accounts
     # .json + .jirakey ergeben die Klartext-Token, und ein PAT traegt die vollen

@@ -132,7 +132,11 @@
          Betreibers: ohne Uebergangsfrist – eine 1.0.10 zeigt nur noch den Text,
          das Bild bleibt aus, bis die neue Fassung da ist (Selbstaktualisierung
          bzw. Ausrollen ueber die Freigabe). -->
-    <Version>1.0.11</Version>
+    <!-- 1.0.12 (2026-10-20): Anmeldung mit der Windows-Domaenenanmeldung
+         (Kerberos) vor der Kennwortmaske, beim Start und nach Ablauf der
+         Sitzung. Ohne SPN/Keytab auf dem Server aendert sich nichts: die
+         Maske kommt wie bisher. -->
+    <Version>1.0.12</Version>
     <!-- DPI awareness is owned by app.manifest, not by ApplicationHighDpiMode: it has to
          be in effect from process start, before any screen coordinate is read.
          WFAC010 asks for the opposite; suppressed because that trade-off is intentional. -->

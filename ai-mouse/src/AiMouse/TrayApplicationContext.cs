@@ -367,9 +367,19 @@ internal sealed class TrayApplicationContext : ApplicationContext
             // Ist eine Sitzung gemerkt, werden hier nur die Fragen geholt.
             // Ist sie abgelaufen, faellt das beim ersten echten Aufruf auf und
             // `SicherstellenAngemeldetAsync` fragt DANN.
+            //
+            // Ohne gemerkte Sitzung wird STILL die Windows-Anmeldung versucht
+            // (2026-10-20) – das ist kein Dialog, also kein Widerspruch zur
+            // Vorgabe oben. Scheitert sie, bleibt alles wie bisher.
             if (!_client.Angemeldet)
             {
-                return;
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                if (!WindowsKontoPasst(_settings) ||
+                    !await _client.WindowsAnmeldenAsync(cts.Token).ConfigureAwait(true))
+                {
+                    return;
+                }
+                ConfigStore.SaveToken(_client.Token);
             }
             await FragenNachladenAsync().ConfigureAwait(true);
         }
@@ -863,6 +873,31 @@ internal sealed class TrayApplicationContext : ApplicationContext
             : (string.Empty, string.Empty, string.Empty);
     }
 
+    /// <summary>Darf die Windows-Anmeldung versucht werden?
+    ///
+    /// Ja, wenn noch kein Benutzer gemerkt ist oder der gemerkte zum
+    /// angemeldeten Windows-Konto passt. Nein, wenn jemand hier ausdruecklich
+    /// mit einem ANDEREN Konto arbeitet (z. B. einem Testkonto): die
+    /// Windows-Anmeldung meldete ihn sonst still als sich selbst an. Verglichen
+    /// wird der blosse Kontoname – <c>DOMAENE\name</c> und <c>name@domaene</c>
+    /// zaehlen wie <c>name</c>.
+    /// </summary>
+    internal static bool WindowsKontoPasst(AppSettings s)
+    {
+        string gemerkt = (s.Benutzer ?? string.Empty).Trim();
+        if (gemerkt.Length == 0)
+        {
+            return true;
+        }
+        string konto = gemerkt.Split('@')[0];
+        int trenner = konto.LastIndexOf('\\');
+        if (trenner >= 0)
+        {
+            konto = konto[(trenner + 1)..];
+        }
+        return string.Equals(konto.Trim(), Environment.UserName, StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>Stellt sicher, dass eine Sitzung steht. <c>false</c> = abgebrochen.
     ///
     /// Der zweistufige Fall (Einmal-Code) wird HIER aufgeloest und nicht im
@@ -889,6 +924,19 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             ShowSettings();
             return _client.Angemeldet;
+        }
+
+        // ZUERST STILL MIT DER WINDOWS-ANMELDUNG (Kerberos, 2026-10-20). Gelingt
+        // sie, sieht der Benutzer keine Maske – auch nicht nach einer
+        // abgelaufenen Sitzung. Scheitert sie aus irgendeinem Grund, geht es
+        // unveraendert mit der Kennwortmaske weiter: sie ist der Rueckfall und
+        // bleibt es.
+        if (WindowsKontoPasst(_settings) &&
+            await _client.WindowsAnmeldenAsync(ct).ConfigureAwait(true))
+        {
+            ConfigStore.SaveToken(_client.Token);
+            await FragenNachladenAsync().ConfigureAwait(true);
+            return true;
         }
 
         // Die Adresse wird hier NICHT abgefragt: sie steht in den

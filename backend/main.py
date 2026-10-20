@@ -1608,6 +1608,7 @@ _ACTION_DETAILS = [
     ("POST",   r"/api/admin/anmeldeschutz",             "Einstellungen · 2FA-Pflicht für Admins geändert"),
     ("POST",   r"/api/admin/anmeldeschutz/aufheben",    "Einstellungen · Anmeldesperre aufgehoben"),
     ("POST",   r"/api/auth/hinweise/gelesen",           "Konto · Hinweis gelesen"),
+    ("POST",   r"/api/login/windows",                   "Konto · Windows-Anmeldung"),
 ]
 _ACTION_DETAILS = [(m, re.compile(muster), label) for m, muster, label in _ACTION_DETAILS]
 
@@ -5198,6 +5199,196 @@ async def _login_ablauf(request: Request):
     return _sitzung_antwort(request, {"success": True, "token": token, "username": username,
                                       "must_change_password": must_change,
                                       "is_admin": _is_admin_user(username)})
+
+
+def _ad_windows_freigabe(plain: str) -> str:
+    """Freigabe eines per Kerberos erkannten Kontos – ueber das DIENSTKONTO.
+
+    ``"ja"``, ``"nein"`` oder ``"fehler"`` (blocking – via asyncio.to_thread).
+
+    Die Kennwort-Anmeldung prueft Freigabe und Rollen mit der Verbindung des
+    Benutzers selbst; hier gibt es kein Kennwort, also binden wir mit dem
+    Dienstkonto. Gerechnet wird mit DENSELBEN Funktionen
+    (``_ad_rollen_aktualisieren``, ``_ad_user_allowed``) – eine zweite Fassung
+    der Rechtelogik liefe beim naechsten Rollenfeld auseinander.
+
+    Zusaetzlich: ein im AD DEAKTIVIERTES Konto ist ``"nein"``. Ein Ticket kann
+    bis zu seiner Laufzeit (Vorgabe 10 h) aelter sein als die Deaktivierung;
+    beim Kennwort-Bind lehnt das AD selbst ab, hier muessen wir nachsehen.
+
+    FAIL-CLOSED: ohne Dienst-Bind keine Anmeldung (``"fehler"``) – der Client
+    faellt dann auf die Kennwortmaske zurueck."""
+    from backend import ldap_directory
+    try:
+        conn, base_dn = ldap_directory._bind()
+    except Exception as e:  # noqa: BLE001
+        print(f"[AUTH] Windows-Anmeldung '{plain}': Dienst-Bind gescheitert ({e})", flush=True)
+        return "fehler"
+    try:
+        conn.search(search_base=base_dn,
+                    search_filter=f"(sAMAccountName={_ldap_escape(plain)})",
+                    attributes=["userAccountControl"])
+        if not conn.entries:
+            return "nein"
+        e = conn.entries[0]
+        uac = int(e["userAccountControl"].value or 0) if "userAccountControl" in e else 0
+        if uac & 0x2:
+            print(f"[AUTH] Windows-Anmeldung '{plain}': Konto im AD deaktiviert", flush=True)
+            return "nein"
+        status, _ = _ad_rollen_aktualisieren(conn, base_dn, plain)
+        if status == "fehler":
+            return "fehler"
+        if status == "nicht_gefunden":
+            return "nein"
+        erlaubt = _ad_user_allowed(conn, plain, base_dn)
+    except Exception as e:  # noqa: BLE001
+        print(f"[AUTH] Windows-Anmeldung '{plain}': Pruefung gescheitert ({e})", flush=True)
+        return "fehler"
+    finally:
+        try:
+            conn.unbind()
+        except Exception:  # noqa: BLE001
+            pass
+    # Wie nach dem Kennwort-Bind: Rollen ueberdauern einen Neustart, und die
+    # Revalidierung kennt den Benutzer ab jetzt.
+    _ad_seen_users[plain] = time.time()
+    _save_ad_caches(force=True)
+    return "ja" if erlaubt else "nein"
+
+
+@app.post("/api/login/windows")
+async def login_windows(request: Request):
+    """Siehe ``_login_windows_ablauf`` – hier der Rahmen wie bei ``/api/login``:
+    Bremse waehrend eines Spruehangriffs, Mindestdauer bei Fehlschlag,
+    Sicherheitsprotokoll (BSI M2).
+
+    Die nackte Aufforderung (401 + ``WWW-Authenticate: Negotiate``) ist KEIN
+    Fehlversuch, sondern der erste Schritt JEDER Windows-Anmeldung: sie geht
+    weder ins Protokoll noch durch Bremse und Mindestdauer – sonst stuende je
+    Anmeldung ein Fehlschlag im Sicherheitsprotokoll."""
+    if not (request.headers.get("authorization") or "").lower().startswith("negotiate "):
+        return await _login_windows_ablauf(request)
+    _start = _anmelde_schutz.uhr()
+    await _anmelde_schutz.bremse()
+    resp = await _login_windows_ablauf(request)
+    if getattr(resp, "status_code", 200) >= 400:
+        await _anmelde_schutz.angleichen(_start)
+    await _anmeldung_protokollieren(request, resp, "windows")
+    return resp
+
+
+async def _login_windows_ablauf(request: Request):
+    """Kennwortlose Anmeldung mit der Windows-Domaenenanmeldung (Kerberos).
+
+    **Bewusst ohne Dependency** – ein Anmeldeweg, es gibt noch keine Sitzung.
+    Ablauf: eingerichtet? → Ratenbegrenzung → Ticket (``kerberos_anmeldung``)
+    → Realm → kein lokales Konto → Kontosperre → AD-Freigabe ueber das
+    Dienstkonto → Lizenzgrenze → Sitzung.
+
+    **Die Sitzung hat NIE Admin-Rechte und keine 2FA** (Betreiberentscheid
+    2026-10-20: die AI-Maus braucht keine Admin-Rechte). Deshalb wird auch
+    kein Einmal-Code verlangt – anders als beim Outlook-SSO, das ein Konto mit
+    2FA abweist. Wer Admin-Rechte braucht, meldet sich mit Kennwort und Code an.
+
+    Jeder Fehlschlag ist fuer den Client das Signal, die Kennwortmaske zu
+    zeigen; der Grund steht im Journal (und in ``error``)."""
+    import base64
+    from backend import kerberos_anmeldung as _krb
+    client_ip = request.client.host if request.client else "unknown"
+
+    _ad_dom = (config.get_setting("ad_domain", "") or "").strip()
+    bereit, grund = _krb.eingerichtet()
+    if not (config.get_setting("ad_server", "") and _ad_dom):
+        bereit, grund = False, "kein AD konfiguriert"
+    if not bereit:
+        # Keine Aufforderung senden: sonst holte Windows ein Ticket fuer nichts.
+        return JSONResponse({"success": False, "nicht_eingerichtet": True,
+                             "error": "Die Windows-Anmeldung ist auf diesem Server nicht "
+                                      "eingerichtet (%s)." % grund}, status_code=503)
+
+    if not _check_rate_limit(client_ip):
+        return JSONResponse({"success": False,
+                             "error": "Zu viele Login-Versuche. Bitte warte 5 Minuten."},
+                            status_code=429)
+
+    kopf = (request.headers.get("authorization") or "").strip()
+    if not kopf.lower().startswith("negotiate "):
+        return JSONResponse({"success": False, "error": "Windows-Anmeldung erforderlich"},
+                            status_code=401, headers={"WWW-Authenticate": "Negotiate"})
+    try:
+        roh = base64.b64decode(kopf[len("negotiate "):].strip(), validate=True)
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"success": False, "error": "Negotiate-Token nicht lesbar"},
+                            status_code=400)
+
+    # Ab hier KEIN WWW-Authenticate mehr in Fehlerantworten: der Client soll
+    # aufhoeren und auf das Kennwort ausweichen, nicht dasselbe Ticket erneut
+    # schicken. Ein ungueltiges Ticket zaehlt nicht als Fehlversuch – es ist ein
+    # Einrichtungs-, kein Rateindiz (wie beim Outlook-SSO).
+    try:
+        principal, antwort = await asyncio.to_thread(_krb.pruefe, roh)
+        konto = _krb.konto_aus_principal(principal, _ad_dom)
+    except _krb.KerberosFehler as e:
+        print(f"[AUTH] Windows-Anmeldung abgewiesen ({client_ip}): {e}", flush=True)
+        return JSONResponse({"success": False,
+                             "error": "Windows-Anmeldung nicht möglich: %s" % e},
+                            status_code=401)
+
+    # Lokale Konten (jarvis, root …) gibt es nur mit Kennwort – ein
+    # gleichnamiges Domaenenkonto darf nicht zu ihnen werden.
+    if konto in ALLOWED_USERS:
+        print(f"[AUTH] Windows-Anmeldung abgewiesen: '{konto}' ist ein lokales Konto",
+              flush=True)
+        return JSONResponse({"success": False, "error": "Keine Anmeldeberechtigung"},
+                            status_code=403)
+
+    _gesperrt = _konto_sperre_antwort(konto)
+    if _gesperrt is not None:
+        return _gesperrt
+
+    freigabe = await asyncio.to_thread(_ad_windows_freigabe, konto)
+    if freigabe == "fehler":
+        return JSONResponse({"success": False,
+                             "error": "Die Anmeldeberechtigung ist gerade nicht prüfbar. "
+                                      "Bitte mit Kennwort anmelden."}, status_code=503)
+    if freigabe != "ja":
+        print(f"[AUTH] Windows-Anmeldung verweigert (keine Freigabe): {konto}", flush=True)
+        return JSONResponse({"success": False, "error": "Keine Anmeldeberechtigung"},
+                            status_code=403)
+
+    try:
+        from backend import license_enforce as _lic_enf
+        _lic_ok, _lic_grund = _lic_enf.darf_benutzer_anmelden(konto)
+    except Exception:  # noqa: BLE001
+        _lic_ok, _lic_grund = True, ""
+    if not _lic_ok:
+        print(f"[Lizenz] Windows-Anmeldung abgewiesen (Benutzergrenze): {konto}", flush=True)
+        return JSONResponse({"success": False, "error": _lic_grund}, status_code=403)
+
+    token = generate_token(konto, mit_2fa=False, ohne_admin=True)
+    _anmelde_schutz.erfolg(konto)
+    try:
+        _user_sessions.record_login(konto, client_ip, display=_display_name(konto))
+    except Exception:  # noqa: BLE001
+        pass
+    print(f"[AUTH] Windows-Anmeldung (Kerberos) erfolgreich: {konto} ({client_ip})", flush=True)
+    _sitzung_kontext.set((konto, False, True))
+    _block = security_guard.get_block(konto)
+    if _block:
+        daten = {"success": True, "token": token, "username": konto,
+                 "must_change_password": False, "is_admin": False,
+                 "account_blocked": True, "block_reason": _block.get("reason", ""),
+                 "block_incidents": _block.get("incidents", [])}
+    else:
+        # is_admin = Rechte DIESER Sitzung, und die hat nie Admin-Rechte
+        daten = {"success": True, "token": token, "username": konto,
+                 "must_change_password": False, "is_admin": False}
+    resp = _sitzung_antwort(request, daten)
+    # Gegenseitige Authentisierung: der Client prueft damit, dass er mit dem
+    # echten Dienst (Besitzer der Keytab) spricht.
+    if antwort:
+        resp.headers["WWW-Authenticate"] = "Negotiate " + base64.b64encode(antwort).decode()
+    return resp
 
 
 @app.post("/api/logout")

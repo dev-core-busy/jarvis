@@ -164,6 +164,74 @@ internal sealed class JarvisClient : IDisposable
         throw new VisionException(Fehlertext(wurzel, Texte.KeineAntwort));
     }
 
+    /// <summary>Anmeldung mit der Windows-Domaenenanmeldung (Kerberos), ohne Kennwort.
+    ///
+    /// <c>true</c> = die Sitzung steht. **JEDER Fehlschlag ist <c>false</c>**,
+    /// nie eine Ausnahme: kein SPN im AD, Server ohne Keytab, Rechner nicht in
+    /// der Domaene, DC nicht erreichbar, keine Freigabe – in allen Faellen ist
+    /// der naechste Schritt derselbe, die Kennwortmaske. Den Grund nennt das
+    /// Journal des Servers; hier gibt es niemanden, dem er nuetzte.
+    ///
+    /// ⚠ EIN EIGENER HttpClient, NICHT <c>_http</c>. Nur dieser eine Aufruf
+    /// darf die Windows-Anmeldung mitschicken; der normale Client kennt sie
+    /// nicht und kann sie damit auch an keine andere Adresse verlieren.
+    /// <c>AllowAutoRedirect = false</c> aus demselben Grund: eine Umleitung
+    /// wuerde das Ticket an ein anderes Ziel weiterreichen.
+    ///
+    /// Windows fragt das Ticket fuer <c>HTTP/&lt;host aus der Adresse&gt;</c> an
+    /// – die eingestellte Adresse muss also der Name sein, fuer den der SPN
+    /// registriert ist, keine IP. Mit einer IP faellt Windows auf NTLM zurueck,
+    /// und der Server lehnt das ab.
+    /// </summary>
+    public async Task<bool> WindowsAnmeldenAsync(CancellationToken ct)
+    {
+        string basis = EndpointResolver.Basis(_settings.Endpoint);
+        if (basis.Length == 0)
+        {
+            return false;
+        }
+        try
+        {
+            using var handler = new HttpClientHandler
+            {
+                UseDefaultCredentials = true,
+                AllowAutoRedirect = false,
+            };
+            using var httpWin = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(20) };
+            using var inhalt = new StringContent("{}", Encoding.UTF8, "application/json");
+            using HttpResponseMessage antwort = await httpWin
+                .PostAsync(basis + "/api/login/windows", inhalt, ct).ConfigureAwait(false);
+            if (antwort.StatusCode != HttpStatusCode.OK)
+            {
+                return false;
+            }
+            string roh = await antwort.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            using JsonDocument doc = JsonDocument.Parse(roh);
+            JsonElement wurzel = doc.RootElement;
+            if (!wurzel.TryGetProperty("success", out JsonElement erf) ||
+                erf.ValueKind != JsonValueKind.True ||
+                !wurzel.TryGetProperty("token", out JsonElement t))
+            {
+                return false;
+            }
+            string token = t.GetString() ?? string.Empty;
+            if (token.Length == 0)
+            {
+                return false;
+            }
+            _token = token;
+            return true;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
     /// <summary>Bildausschnitt und Frage auswerten.
     ///
     /// <paramref name="bereiche"/> nimmt auf, was der Lauf zusaetzlich

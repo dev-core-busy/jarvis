@@ -85,6 +85,13 @@ from backend.config import config  # noqa: E402
 # Wiederherstellung: Ein-/Ausschalten hinterliesse {'enabled': False,
 # 'installed': True}, und der Skill stuende danach unter „Installierte".
 VOR_EINTRAG = config.get_skill_states().get("newsfeed")
+# Ausblend-Zustand des Messkontos: wird am Ende EXAKT zurueckgestellt (auch
+# „kein Eintrag" ist ein Zustand). Der Dienst liest die Datei bei jedem Abruf
+# neu, haelt sie also nicht im RAM.
+from backend import newsfeed as NF  # noqa: E402
+from backend import atomar as ATOMAR  # noqa: E402
+_ausg = ATOMAR.lesen(NF.AUSGEBLENDET_DATEI, vorgabe=dict)
+VOR_AUSGEBLENDET = _ausg.get("jarvis")
 VOR_EINST = dict(adm.get("einstellungen") or {})
 VOR_IDS = {e["id"] for e in adm.get("eintraege") or []}
 print("vorgefunden: skill an=%r, einstellungen=%r, %d Meldungen" % (VOR_AN, VOR_EINST, len(VOR_IDS)))
@@ -103,6 +110,8 @@ try:
         ruf("/api/skills/newsfeed/disable", TOKEN, "POST", {})
     s, d = ruf("/api/newsfeed", TOKEN)
     c("Skill aus: /api/newsfeed -> 404 (nicht 403)", s == 404, s)
+    s, _ = ruf("/api/newsfeed/ausblenden", TOKEN, "POST", {"stand": "2026-01-01T00:00:00"})
+    c("Skill aus: Ausblenden -> 404 (nicht 403)", s == 404, s)
     s, me = ruf("/api/me", TOKEN)
     c("Skill aus: permissions.newsfeed == False",
       s == 200 and (me.get("permissions") or {}).get("newsfeed") is False, me and me.get("permissions"))
@@ -166,6 +175,40 @@ try:
         if s == 200:
             angelegt.pop(0)
 
+    print("\n7. Deaktivieren und Ausblenden")
+    time.sleep(1.1)
+    s, d = ruf("/api/newsfeed/admin/eintraege", TOKEN, "POST", {"titel": "Probe E", "text": "Zum Deaktivieren."})
+    pe = d["eintrag"]["id"] if s == 200 else ""
+    if pe:
+        angelegt.append(pe)
+    s, d = ruf("/api/newsfeed", TOKEN)
+    c("neue Meldung steht vorn", s == 200 and d["eintraege"][0]["id"] == pe, s)
+    s, d = ruf("/api/newsfeed/admin/eintraege/%s/deaktivieren" % pe, TOKEN, "POST", {})
+    c("Deaktivieren -> 200, aktiv=False", s == 200 and d["eintrag"].get("aktiv") is False, d)
+    s, d = ruf("/api/newsfeed", TOKEN)
+    c("deaktivierte fehlt im Portal", s == 200 and pe not in [e["id"] for e in d["eintraege"]])
+    s, d = ruf("/api/newsfeed/admin", TOKEN)
+    c("deaktivierte bleibt im Admin-Bereich",
+      any(e["id"] == pe and e.get("aktiv") is False for e in d.get("eintraege", [])))
+    c("Deaktivieren unbekannt -> 404", ruf("/api/newsfeed/admin/eintraege/gibtsnicht/deaktivieren", TOKEN, "POST", {})[0] == 404)
+    s, _ = ruf("/api/newsfeed/admin/eintraege/%s/deaktivieren" % pe, FREMD, "POST", {})
+    c("fremdes Konto: Deaktivieren abgewiesen (401/403)", s in (401, 403), s)
+    s, d = ruf("/api/newsfeed", TOKEN)
+    stand = d.get("stand", "")
+    c("Anzeige liefert einen Stand", bool(stand), d.get("stand"))
+    s, d = ruf("/api/newsfeed/ausblenden", TOKEN, "POST", {"stand": stand})
+    c("Ausblenden -> 200", s == 200, (s, d))
+    s, d = ruf("/api/newsfeed", TOKEN)
+    c("danach ausgeblendet", s == 200 and d.get("ausgeblendet") is True, d.get("ausgeblendet"))
+    c("Ausblenden mit Freitext-Stand -> 400",
+      ruf("/api/newsfeed/ausblenden", TOKEN, "POST", {"stand": "morgen"})[0] == 400)
+    time.sleep(1.1)
+    s, d = ruf("/api/newsfeed/admin/eintraege", TOKEN, "POST", {"id": pe, "titel": "Probe E", "text": "Wieder aktiv."})
+    c("Bearbeiten macht wieder aktiv", s == 200 and d["eintrag"].get("aktiv") is True, d)
+    s, d = ruf("/api/newsfeed", TOKEN)
+    c("nach Bearbeitung: wieder sichtbar und vorn",
+      s == 200 and d.get("ausgeblendet") is False and d["eintraege"][0]["id"] == pe, (d.get("ausgeblendet"), [e["id"] for e in d.get("eintraege", [])]))
+
     print("\n6. Ausgelieferte Seiten")
     s, html = ruf("/portal")
     c("/portal enthaelt die Kachel und das Modul",
@@ -185,6 +228,15 @@ finally:
     _jetzt_an = any(_ist_nf(x) and x.get("enabled") for x in _sk_jetzt.get("skills") or [])
     if _jetzt_an != VOR_AN:
         ruf("/api/skills/newsfeed/" + ("enable" if VOR_AN else "disable"), TOKEN, "POST", {})
+    _ausg = ATOMAR.lesen(NF.AUSGEBLENDET_DATEI, vorgabe=dict)
+    if VOR_AUSGEBLENDET is None:
+        _ausg.pop("jarvis", None)
+    else:
+        _ausg["jarvis"] = VOR_AUSGEBLENDET
+    if NF.AUSGEBLENDET_DATEI.exists() or _ausg:
+        ATOMAR.schreiben(NF.AUSGEBLENDET_DATEI, _ausg, modus=0o640)
+    c("Ausblend-Zustand des Messkontos wie vorgefunden",
+      ATOMAR.lesen(NF.AUSGEBLENDET_DATEI, vorgabe=dict).get("jarvis") == VOR_AUSGEBLENDET)
     if VOR_EINTRAG is None:
         config.remove_skill_state("newsfeed")
         print("  Skill-Eintrag entfernt (vorgefunden: keiner). Der Dienst haelt ihn noch"

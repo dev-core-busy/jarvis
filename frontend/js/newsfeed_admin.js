@@ -52,7 +52,7 @@
         _offen: null,        // Kennung des aufgeklappten Formulars ('' = neu)
         _vorschau: null,
 
-        onShow: function () { this._binden(); this.laden(); },
+        onShow: function () { this._binden(); return this.laden(); },
 
         _binden: function () {
             if (this._gebunden) return;
@@ -97,22 +97,38 @@
                 box.innerHTML = '<p class="kb-hint">'
                     + esc(t('nfadm.empty', 'Noch keine Meldungen.')) + '</p>';
             } else {
-                box.innerHTML = this._eintraege.map(function (e, i) {
-                    // Sichtbar im Portal sind die ersten n (der Server liefert
-                    // neueste zuerst) – als Text, nicht nur als Farbe.
-                    var marke = i < n
-                        ? ' <span class="kb-hint" style="color:var(--success);">· '
-                          + esc(t('nfadm.visible', 'im Portal sichtbar')) + '</span>'
+                var fmt = function (iso) {
+                    return window.JarvisNewsfeed ? window.JarvisNewsfeed.datum(iso) : iso;
+                };
+                var aktivZaehler = 0;
+                box.innerHTML = this._eintraege.map(function (e) {
+                    // Sichtbar im Portal sind die ersten n AKTIVEN (der Server
+                    // liefert juengsten Stand zuerst) – als Text, nicht nur als Farbe.
+                    var aktiv = e.aktiv !== false;
+                    var marke = '';
+                    if (!aktiv) {
+                        marke = ' <span class="kb-hint" style="color:var(--warning);">· '
+                            + esc(t('nfadm.inactive', 'deaktiviert – erscheint nach dem nächsten Bearbeiten wieder')) + '</span>';
+                    } else if (aktivZaehler++ < n) {
+                        marke = ' <span class="kb-hint" style="color:var(--success);">· '
+                            + esc(t('nfadm.visible', 'im Portal sichtbar')) + '</span>';
+                    }
+                    var geaendert = (e.geaendert && fmt(e.geaendert) !== fmt(e.erstellt))
+                        ? ' · ' + esc(t('nfadm.updated', 'bearbeitet')) + ': ' + esc(fmt(e.geaendert)) : '';
+                    var deakt = aktiv
+                        ? '<button type="button" class="am-vorg-act nf-adm-deakt" data-akt="deakt" title="'
+                          + esc(t('nfadm.deactivate_hint', 'Im Portal ausblenden – bleibt hier bearbeitbar. Nach dem nächsten Speichern ist die Meldung wieder sichtbar.'))
+                          + '">' + esc(t('nfadm.deactivate', 'Deaktivieren')) + '</button>'
                         : '';
-                    return '<div class="am-vorg-card" data-nid="' + esc(e.id) + '">'
+                    return '<div class="am-vorg-card' + (aktiv ? '' : ' nf-adm-inaktiv') + '" data-nid="' + esc(e.id) + '">'
                         + '<div class="am-vorg-row">'
                         + '<div class="am-vorg-main"><b>' + esc(e.titel) + '</b>'
                         + '<span class="kb-hint" style="display:block;">' + esc(e.text) + '</span>'
                         + '<span class="kb-hint" style="display:block;font-size:.8em;">'
-                        + esc(t('nfadm.created', 'Erstellt')) + ': '
-                        + esc(window.JarvisNewsfeed ? window.JarvisNewsfeed.datum(e.erstellt) : e.erstellt)
-                        + marke + '</span>'
+                        + esc(t('nfadm.created', 'Erstellt')) + ': ' + esc(fmt(e.erstellt))
+                        + geaendert + marke + '</span>'
                         + '</div>'
+                        + deakt
                         + '<button type="button" class="am-vorg-act" data-akt="edit" title="'
                         + esc(t('common.edit', 'Bearbeiten')) + '">' + window.JarvisIcons.pencil() + '</button>'
                         + '<button type="button" class="am-vorg-act" data-akt="del" title="'
@@ -123,7 +139,9 @@
                     b.addEventListener('click', function () {
                         var karte = b.closest('.am-vorg-card');
                         var nid = karte ? karte.getAttribute('data-nid') : '';
-                        if (b.getAttribute('data-akt') === 'del') self.loeschen(nid);
+                        var akt = b.getAttribute('data-akt');
+                        if (akt === 'del') self.loeschen(nid);
+                        else if (akt === 'deakt') self.deaktivieren(nid);
                         else self.formular(nid);
                     });
                 });
@@ -195,6 +213,20 @@
             });
         },
 
+        /** Deaktivieren – ohne Rueckfrage, es ist umkehrbar (Bearbeiten). */
+        deaktivieren: function (nid) {
+            var self = this;
+            return fetch('/api/newsfeed/admin/eintraege/' + encodeURIComponent(nid) + '/deaktivieren', {
+                method: 'POST', headers: kopf()
+            }).then(antwort).then(function () {
+                return self.laden().then(function () {
+                    status('nfadm-status', t('nfadm.deactivated', 'Deaktiviert'), 'ok');
+                });
+            }).catch(function (err) {
+                status('nfadm-status', err.message, 'error');
+            });
+        },
+
         loeschen: function (nid) {
             var e = this._eintraege.find(function (x) { return x.id === nid; });
             if (!e) return;
@@ -237,7 +269,8 @@
             if (!wurzel || !window.JarvisNewsfeed) return;
             if (this._vorschau) this._vorschau.stoppen();
             var leer = $('nfadm-vorschau-leer');
-            var liste = this._eintraege.slice(0, this._anzahl());
+            var liste = this._eintraege.filter(function (e) { return e.aktiv !== false; })
+                .slice(0, this._anzahl());
             if (leer) leer.style.display = liste.length ? 'none' : '';
             this._vorschau = window.JarvisNewsfeed.ticker(wurzel, liste, this._felder());
         }

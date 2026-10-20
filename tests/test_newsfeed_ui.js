@@ -18,6 +18,12 @@
  *      Band nicht zurueck, und ein Fehlschlag nimmt nichts weg.
  *   8. Verdrahtung (acorn): portal_seite.js ruft portalStart NUR im Zweig
  *      `permissions.newsfeed`; portal.html und settings.html binden ein.
+ *   9. Ausblenden im Portal: × schickt den GEZEIGTEN Stand, verbirgt erst nach
+ *      Bestaetigung, ein Fehlschlag bleibt sichtbar am Knopf; eine neue
+ *      Neuigkeit zeigt wieder. Ohne `schliessen` (Vorschau) gibt es kein ×.
+ *  10. Admin-Reiter (echtes settings.html-Markup): deaktivierte Meldung ist
+ *      gekennzeichnet, ohne Deaktivieren-Knopf, fehlt in der Vorschau und
+ *      zaehlt nicht zu „im Portal sichtbar"; Deaktivieren ruft den Endpunkt.
  *
  *   node tests/test_newsfeed_ui.js
  */
@@ -279,6 +285,114 @@ const zaehler = (w) => (w.document.querySelector('#w .nf-zaehler') || {}).textCo
         pruefe(/id="settings-tab-btn-newsfeed"/.test(st) && /id="settings-tab-newsfeed"/.test(st), 'settings.html: Reiter-Knopf + Inhalt');
         pruefe(/newsfeed:\s*'settings-tab-btn-newsfeed'/.test(lies('frontend/js/skillcfg.js')),
                'skillcfg.js: Reiter nur bei aktivem Skill');
+    }
+
+    abschnitt('9. Ausblenden im Portal');
+    {
+        const { w } = fenster();
+        // Ohne schliessen: kein × (Vorschau im Reiter).
+        w.JarvisNewsfeed.ticker(w.document.getElementById('w'), DREI, {});
+        pruefe(!w.document.querySelector('#w .nf-zu'), 'ohne schliessen kein ×-Knopf');
+    }
+    {
+        const { w } = fenster();
+        w.eval(lies('frontend/js/icons.js'));
+        const STAND = '2026-10-20T09:00:00';
+        let antwort = { ok: true, eintraege: DREI, verweil_s: 3, scroll_s: 0.8, stand: STAND, ausgeblendet: false };
+        let postOk = false, gesendet = null, intervall = null;
+        w.setInterval = (fn) => { intervall = fn; return 1; };
+        w.fetch = (url, o) => {
+            const pfad = url.split('?')[0];
+            if (pfad === '/api/newsfeed/ausblenden') {
+                gesendet = { methode: o && o.method, rumpf: JSON.parse((o && o.body) || 'null'),
+                             auth: o && o.headers && o.headers.Authorization };
+                return Promise.resolve({ ok: postOk, status: postOk ? 200 : 500, json: () => Promise.resolve({ ok: postOk }) });
+            }
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(antwort) });
+        };
+        const kachel = w.document.getElementById('pt-newsfeed');
+        await w.JarvisNewsfeed.portalStart();
+        const zu = kachel.querySelector('.nf-zu');
+        pruefe(!!zu && zu.querySelector('svg'), '×-Knopf mit Symbol aus icons.js');
+        pruefe(zu && /Ausblenden/.test(zu.title), 'Tooltip nennt die Wirkung', zu && zu.title);
+        const tick = () => new Promise((r) => setImmediate(r));
+        // Fehlschlag: Kachel bleibt, Knopf sagt es.
+        zu.click(); await tick(); await tick();
+        pruefe(gesendet && gesendet.methode === 'POST' && gesendet.rumpf && gesendet.rumpf.stand === STAND,
+               'POST mit dem GEZEIGTEN Stand', JSON.stringify(gesendet));
+        pruefe(gesendet && gesendet.auth === 'Bearer testtoken', 'mit Sitzungstoken');
+        pruefe(!kachel.hidden, 'Fehlschlag: Kachel bleibt sichtbar');
+        pruefe(zu.classList.contains('nf-zu-fehler') && /fehlgeschlagen/.test(zu.title) && !zu.disabled,
+               'Fehlschlag: am Knopf sichtbar, erneut klickbar', zu.title);
+        // Erfolg: Kachel weg.
+        postOk = true;
+        zu.click(); await tick(); await tick();
+        pruefe(kachel.hidden, 'nach Bestaetigung ausgeblendet');
+        // Nachladen: Server sagt ausgeblendet -> bleibt weg.
+        antwort = Object.assign({}, antwort, { ausgeblendet: true });
+        await intervall();
+        pruefe(kachel.hidden, 'Server meldet ausgeblendet: bleibt verborgen');
+        // Neue Meldung: Server sagt nicht mehr ausgeblendet -> kommt wieder.
+        antwort = { ok: true, eintraege: [{ titel: 'Neu', text: 'Ganz neu.', erstellt: '2026-10-21T08:00:00' }].concat(DREI.slice(0, 2)),
+                    verweil_s: 3, scroll_s: 0.8, stand: '2026-10-21T08:00:00', ausgeblendet: false };
+        await intervall();
+        pruefe(!kachel.hidden && kachel.querySelector('.nf-titel').textContent === 'Neu', 'neue Meldung: Kachel wieder da');
+    }
+    {
+        const { w } = fenster();
+        w.JarvisNewsfeed.ticker(w.document.getElementById('w'),
+            [{ titel: 'A', text: 'a.', erstellt: '2026-10-01T09:00:00', geaendert: '2026-10-20T09:00:00' },
+             { titel: 'B', text: 'b.', erstellt: '2026-10-02T09:00:00', geaendert: '2026-10-02T17:00:00' }], {});
+        const d = w.document.querySelectorAll('#w .nf-datum');
+        pruefe(d[0] && /01\.10\.2026.*aktualisiert 20\.10\.2026/.test(d[0].textContent), 'bearbeitet an anderem Tag: Zusatz „aktualisiert"', d[0] && d[0].textContent);
+        pruefe(d[1] && !/aktualisiert/.test(d[1].textContent), 'am selben Tag bearbeitet: kein Zusatz', d[1] && d[1].textContent);
+    }
+
+    abschnitt('10. Admin-Reiter');
+    {
+        const dom = new JSDOM(lies('frontend/settings.html'), { url: 'https://localhost/settings', runScripts: 'outside-only' });
+        const w = dom.window;
+        w.matchMedia = () => ({ matches: false, addListener() {}, removeListener() {} });
+        w.setInterval = () => 0;
+        w.confirm = () => true;
+        sitzungLaden(w, { token: 'testtoken' });
+        w.eval(lies('frontend/js/icons.js'));
+        w.eval(lies('frontend/js/newsfeed.js'));
+        w.eval(lies('frontend/js/newsfeed_admin.js'));
+        if (!w.NewsfeedAdmin || !w.document.getElementById('nfadm-liste')) {
+            console.log('ABBRUCH: NewsfeedAdmin oder #nfadm-liste fehlt'); process.exit(2);
+        }
+        const E = (id, aktiv, stand) => ({ id, titel: 'T-' + id, text: 'x.', erstellt: stand, aktiv });
+        let daten = { ok: true, skill_aktiv: true, einstellungen: { verweil_s: 3, scroll_s: 0.8 },
+            grenzen: { anzeige: 3, titel_max: 80, text_max: 400 },
+            eintraege: [E('a', true, '2026-10-20T10:00:00'), E('b', false, '2026-10-19T10:00:00'),
+                        E('c', true, '2026-10-18T10:00:00'), E('d', true, '2026-10-17T10:00:00'),
+                        E('e', true, '2026-10-16T10:00:00')] };
+        const aufrufe = [];
+        w.fetch = (url, o) => {
+            aufrufe.push([(o && o.method) || 'GET', url.split('?')[0]]);
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(url.indexOf('/deaktivieren') > -1 ? { ok: true } : daten) });
+        };
+        await w.NewsfeedAdmin.onShow();
+        const karte = (id) => w.document.querySelector('#nfadm-liste .am-vorg-card[data-nid="' + id + '"]');
+        // Positivkontrolle: die Liste ist gezeichnet.
+        if (!karte('a')) { console.log('ABBRUCH: Liste nicht gezeichnet'); process.exit(2); }
+        pruefe(karte('b').classList.contains('nf-adm-inaktiv') && /deaktiviert/.test(karte('b').textContent),
+               'deaktivierte Meldung als Text gekennzeichnet');
+        pruefe(!karte('b').querySelector('[data-akt="deakt"]'), 'deaktivierte ohne Deaktivieren-Knopf');
+        pruefe(!!karte('b').querySelector('[data-akt="edit"]'), 'deaktivierte bleibt bearbeitbar');
+        pruefe(!!karte('a').querySelector('[data-akt="deakt"]'), 'aktive mit Deaktivieren-Knopf');
+        const sichtbar = ['a', 'b', 'c', 'd', 'e'].filter((id) => /im Portal sichtbar/.test(karte(id).textContent));
+        pruefe(JSON.stringify(sichtbar) === '["a","c","d"]', '„im Portal sichtbar" = die ersten drei AKTIVEN', JSON.stringify(sichtbar));
+        const titel = [...w.document.querySelectorAll('#nfadm-vorschau .nf-block:not([aria-hidden]) .nf-titel')].map((x) => x.textContent);
+        pruefe(JSON.stringify(titel) === '["T-a","T-c","T-d"]', 'Vorschau ohne die deaktivierte', JSON.stringify(titel));
+        aufrufe.length = 0;
+        karte('c').querySelector('[data-akt="deakt"]').click();
+        await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r));
+        pruefe(aufrufe.some(([m, u]) => m === 'POST' && u === '/api/newsfeed/admin/eintraege/c/deaktivieren'),
+               'Deaktivieren ruft POST …/c/deaktivieren', JSON.stringify(aufrufe));
+        pruefe(aufrufe.some(([m, u]) => m === 'GET' && u === '/api/newsfeed/admin'), 'danach aus der Server-Antwort neu geladen');
+        w.close();
     }
 
     console.log(`\n${ok} OK, ${fail} FAIL`);

@@ -12,6 +12,10 @@ Zusagen:
   3. Leere/zu lange Felder und Einstellungen ausserhalb des Bereichs werden
      ABGEWIESEN (nicht still beschnitten); der Bestand bleibt dabei unveraendert.
   4. Ein unlesbarer Bestand wird nicht ueberschrieben (fail-closed).
+  4b. Bearbeiten rueckt nach vorn (Stand); Deaktivieren nimmt aus der Anzeige,
+     laesst den Stand stehen, nur Bearbeiten macht wieder aktiv.
+  4c. Ausblenden je Benutzer bis zum GEZEIGTEN Stand; neue Meldung oder
+     Bearbeitung zeigt wieder; Deaktivieren nicht.
   5. Endpunkte: Lesen haengt an require_auth + _skill_active("newsfeed") und
      antwortet bei aus mit 404 (NICHT 403 – das Portal meldet bei 403 ab);
      jede /api/newsfeed/admin-Route haengt an require_local_auth;
@@ -73,9 +77,11 @@ except Exception as e:  # noqa: BLE001
 SANDKASTEN = Path(tempfile.mkdtemp(prefix="nf_test_"))
 ECHT = (ROOT / "data" / "newsfeed.json").resolve()
 nf.DATEI = SANDKASTEN / "newsfeed.json"
+nf.AUSGEBLENDET_DATEI = SANDKASTEN / "newsfeed_ausgeblendet.json"
 # Positivkontrolle: wirklich umgelenkt, sonst schriebe der Lauf in den Bestand.
-if SANDKASTEN.resolve() not in nf.DATEI.resolve().parents or nf.DATEI.resolve() == ECHT:
-    abbruch("Ablage zeigt nicht in den Sandkasten")
+for _ziel in (nf.DATEI, nf.AUSGEBLENDET_DATEI):
+    if SANDKASTEN.resolve() not in _ziel.resolve().parents or _ziel.resolve().parent == ECHT.parent:
+        abbruch(f"Ablage {_ziel} zeigt nicht in den Sandkasten")
 
 try:
     print("\n1. Anlegen, Datum, Bearbeiten")
@@ -138,7 +144,76 @@ try:
           not wirft(nf.einstellungen_setzen, nf.VERWEIL_MIN, nf.SCROLL_MAX)
           and not wirft(nf.einstellungen_setzen, nf.VERWEIL_MAX, nf.SCROLL_MIN))
 
+    print("\n4b. Bearbeiten rueckt nach vorn, Deaktivieren")
+    def setze(eintraege):
+        nf.DATEI.write_text(json.dumps({"einstellungen": {}, "eintraege": eintraege}), encoding="utf-8")
+
+    def anz_ids(benutzer=""):
+        return [x["id"] for x in nf.anzeige(benutzer)["eintraege"]]
+
+    setze([{"id": f"e{i}", "erstellt": f"2026-10-0{i}T10:00:00", "titel": f"T{i}", "text": "x."}
+           for i in range(1, 6)])
+    check("Bestand ohne aktiv-Feld gilt als aktiv", anz_ids() == ["e5", "e4", "e3"], str(anz_ids()))
+    alt1 = next(x for x in nf.alle() if x["id"] == "e1")
+    neu1 = nf.eintrag_speichern("e1", "T1 neu", "y.")
+    check("Bearbeiten: Erstellungsdatum bleibt", neu1["erstellt"] == alt1["erstellt"])
+    check("Bearbeiten rueckt die aelteste nach vorn", anz_ids() == ["e1", "e5", "e4"], str(anz_ids()))
+    vor_stand = nf.anzeige()["stand"]
+    d4 = nf.eintrag_deaktivieren("e5")
+    check("Deaktivieren liefert den Eintrag mit aktiv=False", isinstance(d4, dict) and d4.get("aktiv") is False)
+    check("Deaktivierter fehlt in der Anzeige", "e5" not in anz_ids() and anz_ids() == ["e1", "e4", "e3"], str(anz_ids()))
+    check("Deaktivierter bleibt in alle()", any(x["id"] == "e5" and x.get("aktiv") is False for x in nf.alle()))
+    check("Deaktivieren aendert den Stand des Eintrags nicht",
+          next(x for x in nf.alle() if x["id"] == "e5").get("geaendert") is None)
+    check("Stand der Anzeige unveraendert (e1 bleibt juengster)", nf.anzeige()["stand"] == vor_stand)
+    check("Deaktivieren unbekannter Kennung -> None", nf.eintrag_deaktivieren("gibtsnicht") is None)
+    nf.eintrag_speichern("e5", "T5", "wieder da.")
+    check("Bearbeiten macht wieder aktiv und vorn", anz_ids()[0] == "e5"
+          and next(x for x in nf.alle() if x["id"] == "e5").get("aktiv") is True, str(anz_ids()))
+    check("Neuer Eintrag ist aktiv", nf.eintrag_speichern("", "Neu", "z.").get("aktiv") is True)
+
+    print("\n4c. Ausblenden je Benutzer")
+    setze([{"id": f"e{i}", "erstellt": f"2026-10-0{i}T10:00:00", "titel": f"T{i}", "text": "x."}
+           for i in range(1, 4)])
+    a = nf.anzeige("anna")
+    check("Stand = juengster sichtbarer Stand", a["stand"] == "2026-10-03T10:00:00", a["stand"])
+    check("vor dem Ausblenden sichtbar", a["ausgeblendet"] is False)
+    nf.ausblenden("anna", a["stand"])
+    check("nach dem Ausblenden ausgeblendet", nf.anzeige("anna")["ausgeblendet"] is True)
+    check("anderer Benutzer nicht betroffen", nf.anzeige("bert")["ausgeblendet"] is False)
+    check("ohne Benutzer nie ausgeblendet", nf.anzeige()["ausgeblendet"] is False)
+    nf.eintrag_deaktivieren("e3")
+    check("Deaktivieren zeigt NICHT wieder", nf.anzeige("anna")["ausgeblendet"] is True)
+    nf.eintrag_speichern("e1", "T1", "korrigiert.")
+    check("Bearbeitung zeigt wieder", nf.anzeige("anna")["ausgeblendet"] is False)
+    nf.ausblenden("anna", nf.anzeige("anna")["stand"])
+    check("erneut ausgeblendet", nf.anzeige("anna")["ausgeblendet"] is True)
+    gesehen = nf.anzeige("anna")["stand"]
+    import time as _t
+    _t.sleep(1.1)   # Stand hat Sekundenaufloesung
+    nf.eintrag_speichern("", "Ganz neu", "Neuigkeit.")
+    check("neue Meldung zeigt wieder", nf.anzeige("anna")["ausgeblendet"] is False)
+    nf.ausblenden("anna", gesehen)   # Client zeigte noch den ALTEN Stand
+    check("Ausblenden mit dem GEZEIGTEN (aelteren) Stand verschluckt die neue nicht",
+          nf.anzeige("anna")["ausgeblendet"] is False)
+    for stand, was in ((None, "fehlt"), ("", "leer"), ("morgen", "Freitext"), (123, "Zahl"),
+                       ("2026-10-03T10:00:00Z", "mit Zone")):
+        check(f"Stand {was} abgewiesen", wirft(nf.ausblenden, "anna", stand, art=nf.NewsfeedFehler))
+    check("leerer Benutzer abgewiesen", wirft(nf.ausblenden, "", gesehen, art=nf.NewsfeedFehler))
+    nf.AUSGEBLENDET_DATEI.write_text("{kaputt", encoding="utf-8")
+    bak2 = nf.AUSGEBLENDET_DATEI.with_name(nf.AUSGEBLENDET_DATEI.name + ".bak")
+    if bak2.exists():
+        bak2.unlink()
+    check("unlesbare Ausblend-Datei: Newsfeed wird gezeigt",
+          not wirft(nf.anzeige, "anna") and nf.anzeige("anna")["ausgeblendet"] is False)
+    check("unlesbare Ausblend-Datei: Ausblenden wirft Unlesbar",
+          wirft(nf.ausblenden, "anna", gesehen, art=atomar.Unlesbar))
+    check("unlesbare Ausblend-Datei NICHT ueberschrieben",
+          nf.AUSGEBLENDET_DATEI.read_text(encoding="utf-8") == "{kaputt")
+
     print("\n4. Loeschen und unlesbarer Bestand")
+    setze([{"id": f"e{i}", "erstellt": f"2026-10-0{i}T10:00:00", "titel": f"T{i}", "text": "x."}
+           for i in range(1, 6)])
     check("Loeschen einer bekannten Kennung", nf.eintrag_loeschen("e5") is True)
     check("e5 ist weg", "e5" not in [x["id"] for x in nf.alle()])
     check("Loeschen einer unbekannten Kennung -> False", nf.eintrag_loeschen("e5") is False)
@@ -208,6 +283,30 @@ for knoten in ast.walk(lesen):
                        for c in ast.walk(knoten) if isinstance(c, ast.Call) for kw in c.keywords
                        if kw.arg == "status_code")
 check("404 steht im Zweig `if not _skill_active(...)`", zweig_ok)
+
+aus = nf_routen.get(("post", "/api/newsfeed/ausblenden"))
+if aus is None:
+    check("Route POST /api/newsfeed/ausblenden vorhanden", False)
+else:
+    a_calls = [x for x in ast.walk(aus) if isinstance(x, ast.Call)]
+    check("Ausblenden prueft _skill_active('newsfeed')",
+          any(getattr(x.func, "id", "") == "_skill_active" for x in a_calls))
+    a_codes = {kw.value.value for x in a_calls for kw in x.keywords
+               if kw.arg == "status_code" and isinstance(kw.value, ast.Constant)}
+    check("Ausblenden: aus -> 404, nie 403", 404 in a_codes and 403 not in a_codes, str(a_codes))
+    # Der Benutzer ist _norm_login(user) aus der Anmeldung – nie ein Rumpffeld.
+    ziel = [x for x in a_calls if isinstance(x.func, ast.Name) and x.func.id == "to_thread"
+            or (isinstance(x.func, ast.Attribute) and x.func.attr == "to_thread")]
+    benutzer_ok = any(len(x.args) >= 2 and isinstance(x.args[1], ast.Call)
+                      and getattr(x.args[1].func, "id", "") == "_norm_login"
+                      and x.args[1].args and getattr(x.args[1].args[0], "id", "") == "user"
+                      for x in ziel)
+    check("Ausblenden: Benutzer = _norm_login(user) aus der Anmeldung", benutzer_ok)
+check("kein Endpunkt, der ohne Bearbeiten wieder aktiviert",
+      not any(p.rstrip("/").endswith("/aktivieren") for _, p in nf_routen))
+lesen_benutzer = any(isinstance(x, ast.Call) and len(x.args) >= 2 and isinstance(x.args[1], ast.Call)
+                     and getattr(x.args[1].func, "id", "") == "_norm_login" for x in ast.walk(lesen))
+check("Lesen reicht _norm_login(user) an die Anzeige", lesen_benutzer)
 
 me = routen.get(("get", "/api/me"))
 treffer = False

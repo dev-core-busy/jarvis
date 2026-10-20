@@ -89,6 +89,20 @@
         kopf.appendChild(kopfText);
         var zaehler = el('span', 'nf-zaehler');
         kopf.appendChild(zaehler);
+        // Schliessen (×) nur, wo der Aufrufer weiss, was es bedeutet – im
+        // Portal blendet es bis zur naechsten Neuigkeit aus, in der Vorschau
+        // des Reiters gibt es nichts zu schliessen.
+        var zu = null;
+        if (typeof opts.schliessen === 'function') {
+            zu = el('button', 'nf-zu');
+            zu.type = 'button';
+            zu.innerHTML = window.JarvisIcons ? window.JarvisIcons.close() : '\u00d7';
+            zu.addEventListener('click', function (ev) {
+                ev.preventDefault();
+                opts.schliessen(zu);
+            });
+            kopf.appendChild(zu);
+        }
         var fenster = el('div', 'nf-fenster');
         var band = el('div', 'nf-band');
         fenster.appendChild(band);
@@ -100,11 +114,27 @@
         wurzel.appendChild(fort);
         wurzel.setAttribute('aria-label', kopfText.textContent);
 
+        // Erstellungsdatum, bei einer Bearbeitung an einem ANDEREN Tag mit dem
+        // Zusatz „aktualisiert" – eine Bearbeitung rueckt die Meldung nach vorn,
+        // ohne den Zusatz saehe eine alte Meldung an erster Stelle wie ein
+        // Sortierfehler aus.
+        function datumText(erstellt, geaendert) {
+            var t = datum(erstellt), g = datum(geaendert);
+            return (g && g !== t) ? t + ' \u00b7 ' + T('newsfeed.updated', 'aktualisiert') + ' ' + g : t;
+        }
+        function zuTitel() {
+            if (!zu) return;
+            zu.title = T('newsfeed.hide', 'Ausblenden, bis es Neues gibt');
+            zu.setAttribute('aria-label', zu.title);
+        }
+        zuTitel();
+
         var datumsFelder = [];
         function block(e, kopie) {
             var b = el('article', 'nf-block');
-            var dz = el('div', 'nf-datum', datum(e.erstellt));
+            var dz = el('div', 'nf-datum', datumText(e.erstellt, e.geaendert));
             dz.setAttribute('data-erstellt', e.erstellt || '');
+            dz.setAttribute('data-geaendert', e.geaendert || '');
             datumsFelder.push(dz);
             b.appendChild(dz);
             b.appendChild(el('h3', 'nf-titel', e.titel || ''));
@@ -224,7 +254,10 @@
         function sprache() {
             kopfText.textContent = T('newsfeed.title', 'Neuigkeiten');
             wurzel.setAttribute('aria-label', kopfText.textContent);
-            datumsFelder.forEach(function (d) { d.textContent = datum(d.getAttribute('data-erstellt')); });
+            datumsFelder.forEach(function (d) {
+                d.textContent = datumText(d.getAttribute('data-erstellt'), d.getAttribute('data-geaendert'));
+            });
+            zuTitel();
         }
 
         wurzel.addEventListener('mouseenter', anhalten);
@@ -266,25 +299,59 @@
 
        Ein Fehlschlag laesst den bisherigen Zustand stehen: die Kachel ist
        Information, kein Zugang – ein Netzhaenger soll weder abmelden noch eine
-       schon sichtbare Meldung wegnehmen. */
+       schon sichtbare Meldung wegnehmen.
+
+       AUSBLENDEN: das × schickt den Stand, den DIESE Seite zeigt (nicht den
+       aktuellen des Servers – Begruendung in backend/newsfeed.py). Die Kachel
+       verschwindet erst nach der Bestaetigung; scheitert der Aufruf, bleibt sie
+       stehen und sagt es am Knopf – ein Klick, der stumm nichts tut, saehe wie
+       ein kaputter Knopf aus. */
     var _portal = null;
     function portalStart() {
         var wurzel = document.getElementById('pt-newsfeed');
         if (!wurzel || _portal) return;
         var laufend = null, signatur = '';
+        // Ohne Abfang: fehlt sitzung.js, soll das laut scheitern statt wie
+        // „nicht angemeldet" auszusehen (Begruendung in sitzung.js).
+        function kopfzeilen(extra) {
+            return Object.assign({ 'Authorization': 'Bearer ' + window.JarvisSitzung.token() }, extra || {});
+        }
+        function zeigen(d) {
+            if (laufend) laufend.stoppen();
+            laufend = null;
+            if (d.ausgeblendet) { wurzel.textContent = ''; wurzel.hidden = true; return; }
+            var opts = Object.assign({}, d, {
+                schliessen: function (knopf) { ausblenden(d.stand, knopf); }
+            });
+            laufend = ticker(wurzel, d.eintraege || [], opts);
+        }
+        function ausblenden(stand, knopf) {
+            knopf.disabled = true;
+            return fetch('/api/newsfeed/ausblenden', {
+                method: 'POST', headers: kopfzeilen({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ stand: stand })
+            }).then(function (r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                if (laufend) laufend.stoppen();
+                laufend = null;
+                wurzel.textContent = '';
+                wurzel.hidden = true;
+            }).catch(function () {
+                knopf.disabled = false;
+                knopf.classList.add('nf-zu-fehler');
+                knopf.title = T('newsfeed.hide_failed', 'Ausblenden fehlgeschlagen – bitte erneut versuchen.');
+                knopf.setAttribute('aria-label', knopf.title);
+            });
+        }
         function laden() {
-            // Ohne Abfang: fehlt sitzung.js, soll das laut scheitern statt wie
-            // „nicht angemeldet" auszusehen (Begruendung in sitzung.js).
-            var kopf = { 'Authorization': 'Bearer ' + window.JarvisSitzung.token() };
-            return fetch('/api/newsfeed', { headers: kopf })
+            return fetch('/api/newsfeed', { headers: kopfzeilen() })
                 .then(function (r) { return r.ok ? r.json() : null; })
                 .then(function (d) {
                     if (!d || !d.ok) return;
-                    var neu = JSON.stringify([d.eintraege, d.verweil_s, d.scroll_s]);
+                    var neu = JSON.stringify([d.eintraege, d.verweil_s, d.scroll_s, d.stand, !!d.ausgeblendet]);
                     if (neu === signatur) return;   // unveraendert: Band nicht zuruecksetzen
                     signatur = neu;
-                    if (laufend) laufend.stoppen();
-                    laufend = ticker(wurzel, d.eintraege || [], d);
+                    zeigen(d);
                 })
                 .catch(function () {});
         }

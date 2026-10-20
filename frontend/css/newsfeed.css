@@ -59,6 +59,28 @@
     color: var(--text-muted);
 }
 
+/* Schliessen (×) = bis zur naechsten Neuigkeit ausblenden. Ruhig in der
+   Grundfarbe des Kopfs, damit er nicht mit dem Blickfang konkurriert. */
+.nf-zu {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px; height: 24px;
+    margin: -4px -6px -4px 2px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+.nf-zu svg { width: 14px; height: 14px; }
+.nf-zu:hover, .nf-zu:focus-visible { background: rgba(var(--fg-rgb), .10); color: var(--text-primary); outline: none; }
+.nf-zu:disabled { opacity: .5; cursor: default; }
+/* Fehlschlag: Farbe UND Tooltip-Text (Farbe allein ist keine Information). */
+.nf-zu.nf-zu-fehler { color: var(--warning); }
+
 /* Das Fenster schneidet ab, das Band darin wird verschoben. Die Hoehe setzt
    `newsfeed.js` auf die hoechste Meldung; `min-height` ist das Netz, solange
    noch nicht gemessen ist (und dort, wo es kein Layout gibt). */
@@ -126,3 +148,18 @@
     .nf-kachel, .nf-puls { animation: none; }
     .nf-fortschritt { display: none; }
 }
+
+/* ── Einstellungen → Newsfeed (Liste) ───────────────────────────────────────
+   Hier und nicht in style.css: der Reiter laedt diese Datei ohnehin, und die
+   Regeln gehoeren zum selben Bauteil. */
+.am-vorg-act.nf-adm-deakt {
+    font-size: .78rem;
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-secondary);
+}
+.am-vorg-act.nf-adm-deakt:hover { color: var(--text-primary); border-color: var(--warning); }
+/* Deaktiviert: gedaempft, aber LESBAR – er bleibt bearbeitbar (Vorgabe). Der
+   Zustand steht zusaetzlich als Text in der Zeile. */
+.am-vorg-card.nf-adm-inaktiv .am-vorg-main { opacity: .7; }

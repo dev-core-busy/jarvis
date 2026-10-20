@@ -1593,6 +1593,8 @@ _ACTION_DETAILS = [
     ("POST",   r"/api/email/(signatures(/import)?|styles)", "E-Mail · Vorlage angelegt"),
     # Feedback, Meldungen
     ("POST",   r"/api/feedback(/abgabe)?",              "Feedback · abgegeben"),
+    ("POST",   r"/api/newsfeed/ausblenden",             "Newsfeed · ausgeblendet"),
+    ("POST",   rf"/api/newsfeed/admin/eintraege/{_ID}/deaktivieren", "Einstellungen · Newsfeed · Meldung deaktiviert"),
     ("POST",   r"/api/issues",                          "Meldungen · Meldung erstellt"),
     ("POST",   rf"/api/issues/{_ID}/attachments",       "Meldungen · Anhang hinzugefügt"),
     ("POST",   r"/api/issues/notifications/seen",       "Meldungen · gelesen"),
@@ -17417,7 +17419,8 @@ async def feedback_seite():
 # Logik in `backend/newsfeed.py`, hier nur Rechte und Transport.
 #
 # ⚠ ZWEI RECHTE-EBENEN:
-#   `/api/newsfeed`          require_auth + aktiver Skill – JEDER Angemeldete
+#   `/api/newsfeed`, `/api/newsfeed/ausblenden`
+#                            require_auth + aktiver Skill – JEDER Angemeldete
 #   `/api/newsfeed/admin/*`  require_local_auth           – pflegen
 # Der Lesepfad hat bewusst keine eigene Freigabeliste: die Meldungen sind fuer
 # alle gedacht. Die Pflege haengt NICHT am Skill-Zustand, damit ein
@@ -17441,10 +17444,38 @@ async def newsfeed_lesen(user: str = Depends(require_auth)):
         return JSONResponse({"ok": False, "error": "Newsfeed ist nicht aktiv."},
                             status_code=404)
     try:
-        daten = await asyncio.to_thread(nf.anzeige)
+        daten = await asyncio.to_thread(nf.anzeige, _norm_login(user))
     except atomar.Unlesbar:
         return _newsfeed_unlesbar()
     return JSONResponse({"ok": True, **daten})
+
+
+@app.post("/api/newsfeed/ausblenden")
+async def newsfeed_ausblenden(request: Request, user: str = Depends(require_auth)):
+    """Den Newsfeed fuer den ANGEMELDETEN Benutzer bis zum gezeigten Stand
+    ausblenden. Body: ``{stand}`` (der Stand aus ``GET /api/newsfeed``).
+
+    ⚠ DER BENUTZER KOMMT AUS DER ANMELDUNG, nie aus dem Rumpf – sonst koennte
+    jeder den Newsfeed fuer einen Kollegen ausblenden.
+    """
+    from backend import newsfeed as nf  # noqa: PLC0415
+    from backend import atomar  # noqa: PLC0415
+    if not _skill_active("newsfeed"):
+        return JSONResponse({"ok": False, "error": "Newsfeed ist nicht aktiv."},
+                            status_code=404)
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungültiger JSON-Body."},
+                            status_code=400)
+    body = body if isinstance(body, dict) else {}
+    try:
+        stand = await asyncio.to_thread(nf.ausblenden, _norm_login(user), body.get("stand"))
+    except nf.NewsfeedFehler as f:
+        return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
+    except atomar.Unlesbar:
+        return _newsfeed_unlesbar()
+    return JSONResponse({"ok": True, "stand": stand})
 
 
 @app.get("/api/newsfeed/admin")
@@ -17490,6 +17521,25 @@ async def newsfeed_admin_speichern(request: Request,
         return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
     except atomar.Unlesbar:
         return _newsfeed_unlesbar()
+    return JSONResponse({"ok": True, "eintrag": eintrag})
+
+
+@app.post("/api/newsfeed/admin/eintraege/{eid}/deaktivieren")
+async def newsfeed_admin_deaktivieren(eid: str, user: str = Depends(require_local_auth)):
+    """Meldung deaktivieren: bleibt im Reiter, verschwindet im Portal. Unbekannt → **404**.
+
+    Einen Gegen-Endpunkt gibt es bewusst nicht – wieder aktiv wird eine
+    Meldung nur durch Bearbeiten (Begruendung in `backend/newsfeed.py`).
+    """
+    from backend import newsfeed as nf  # noqa: PLC0415
+    from backend import atomar  # noqa: PLC0415
+    try:
+        eintrag = await asyncio.to_thread(nf.eintrag_deaktivieren, eid)
+    except atomar.Unlesbar:
+        return _newsfeed_unlesbar()
+    if eintrag is None:
+        return JSONResponse({"ok": False, "error": "Der Eintrag wurde nicht gefunden."},
+                            status_code=404)
     return JSONResponse({"ok": True, "eintrag": eintrag})
 
 

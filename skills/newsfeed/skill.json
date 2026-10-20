@@ -23,6 +23,6 @@
             "Auf neue Funktionen oder Bereiche im Portal hinweisen",
             "Kurze Hinweise für alle Mitarbeiter einblenden"
         ],
-        "notes": "Ohne Meldung bleibt die Kachel unsichtbar. Wer im Betriebssystem 'Bewegung reduzieren' eingestellt hat, sieht die Meldungen ohne Rollbewegung (Überblendung). Fährt man mit der Maus über die Kachel, hält das Laufband an."
+        "notes": "Jeder Benutzer kann den Newsfeed mit dem Kreuz ausblenden; er erscheint für ihn erst wieder, wenn eine neue Meldung angelegt oder eine bestehende bearbeitet wird. Ein Administrator kann eine Meldung deaktivieren: sie bleibt in den Einstellungen sichtbar und bearbeitbar, im Portal erscheint sie erst nach dem nächsten Bearbeiten wieder. Bearbeiten gilt als Neuigkeit - die Meldung rückt nach vorn, das Erstellungsdatum bleibt stehen.\n\nOhne Meldung bleibt die Kachel unsichtbar. Wer im Betriebssystem 'Bewegung reduzieren' eingestellt hat, sieht die Meldungen ohne Rollbewegung (Überblendung). Fährt man mit der Maus über die Kachel, hält das Laufband an."
     }
 }

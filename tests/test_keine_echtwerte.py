@@ -34,8 +34,10 @@ auch Netzwerkkomponenten: DNS-Server, Gateways, Exchange und andere Dienste.
 Generell gesperrt sind ``*.`` und ``*@`` unter den Firmendomaenen: die
 Sperrliste traegt die DOMAENE, und ``kandidaten()`` prueft jedes Punkt-Suffix -
 ``exchange.<firma>.de`` und ``wer@<firma>.int`` treffen damit, ohne dass jeder
-Rechnername einzeln eingetragen werden muss. Adressen im internen Netz faengt
-die Netzregel unten, auch wenn sie in keiner Liste stehen.
+Rechnername einzeln eingetragen werden muss. Seit 2026-10-20 ebenso jedes
+Punkt-PRAEFIX und jede CamelCase-Grenze, damit auch ``<firma>.atlassian.net``
+und ``<Firma>Adapter`` greifen (Begruendung an ``kandidaten()``). Adressen im
+internen Netz faengt die Netzregel unten, auch wenn sie in keiner Liste stehen.
 
 Exit 0 = sauber, 1 = Fund, 2 = konnte nicht laufen.
 """
@@ -128,6 +130,13 @@ AUSNAHMEN = {}
 # die Folge "FIRMA", "m.mustermann", "beispiel.de".
 RE_WORT = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?")
 
+# Grenze eines zusammengeschriebenen Bezeichners: Kleinbuchstabe/Ziffer vor
+# Grossbuchstabe, oder Akronym-Ende vor einem neuen Wort ("AGWert" -> "AG",
+# "Wert"). Siehe kandidaten(), Abschnitt "zusammengeschrieben".
+RE_CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+# Die unteilbaren Stuecke eines Wortes - Grundlage der CamelCase-Zerlegung.
+RE_ATOM = re.compile(r"[-_.]")
+
 # ── Zweite Regel: AD-Domaenenteile ──────────────────────────────────────────
 # Die Sperrliste kann den DN-Fall nicht vollstaendig abdecken: ein DN zerfaellt
 # in Einzelwoerter, und nicht jeder echte Domaenenteil steht auf der Liste. Die
@@ -162,7 +171,7 @@ def kuerzel(wort: str) -> str:
 
 
 def kandidaten(zeile: str):
-    """Jedes Wort und zusaetzlich seine Punkt-Suffixe.
+    """Jedes Wort und zusaetzlich seine Teilformen.
 
     ``dp-rechner.ai.beispiel.de`` ist EIN Wort; ohne die Suffixe wuerde der
     Eintrag fuer die Domaene darin nicht greifen.
@@ -172,23 +181,72 @@ def kandidaten(zeile: str):
     der Rueckstrich trennt das Wort, und der Eintrag greift nicht. Vier solche
     Stellen standen genau so im Bestand - in einer davon war die BESCHRIFTUNG der
     Pruefung ersetzt und der Ausdruck daneben nicht, was den Bericht wie einen
-    Selbstwiderspruch aussehen liess."""
+    Selbstwiderspruch aussehen liess.
+
+    ZWEI BLINDE FLECKEN, GESCHLOSSEN 2026-10-20
+    -------------------------------------------
+    Bis dahin entstanden nur das Wort, seine Punkt-SUFFIXE und die Teile an
+    Bindestrich/Unterstrich. Daraus folgten zwei Luecken, beide gemessen:
+
+    *Praefix vor dem ersten Punkt.* ``<firma>.de`` ist EIN Wort; sein einziges
+    Suffix ist ``de``, der Firmenname selbst entstand nie. Ein Host bei einem
+    FREMDEN Anbieter rutschte damit durch - ``<firma>.atlassian.net``,
+    ``<firma>.sharepoint.com`` - also genau die Form, die dieses Projekt mit
+    seinen Jira-, Confluence- und OneNote-Anbindungen erzeugen kann. Gesperrt
+    ist der Firmenname, nicht die Fremddomaene: ohne das Praefix greift kein
+    Eintrag. Deshalb entstehen jetzt Praefixe UND Suffixe, und bei mehr als
+    zwei Marken zusaetzlich jede Einzelmarke (die Mitte von ``a.<firma>.de``
+    ist weder Praefix noch Suffix).
+
+    *Zusammengeschrieben.* ``class <Firma>Adapter`` und ``const <firma>ApiUrl``
+    sind je ein Wort ohne Trennzeichen - die Zerlegung an ``[-_]`` fasst sie
+    nicht. Ein Bezeichner ist der naheliegendste Ort, an dem ein Firmenname in
+    Code landet. Zerlegt wird deshalb zusaetzlich an den CamelCase-Grenzen.
+
+    Der Preis ist gemessen, nicht geschaetzt: +14,3 % Kandidaten je Zeile
+    (3.277.991 -> 3.745.880 ueber 532.674 Zeilen, Stand 2026-10-20) und
+    **null** zusaetzliche Treffer auf dem sauberen Baum - die alte und die neue
+    Sonde liefen dafuer Zeile fuer Zeile gegeneinander. Diese Zahl steht hier,
+    weil ein Waechter mit Fehlalarmen abgeschaltet wird und diese Datei genau
+    daran schon einmal gescheitert ist (1508 Fehlalarme, siehe
+    Modul-Docstring)."""
     gesehen = set()
     for fassung in (zeile, zeile.replace("\\", "")):
         for wort in RE_WORT.findall(fassung):
             kette = [wort]
-            rest = wort
-            while "." in rest:
-                rest = rest.split(".", 1)[1]
-                if rest:
-                    kette.append(rest)
-            # Zusaetzlich die Teile an Bindestrich und Unterstrich: der Eintrag
-            # fuer einen Namen griff nur in EINER Schreibweise
-            # (``OneNote_text_<Name>``), ``OneNote-<Name>`` rutschte als ein
-            # einziges Wort durch (gefunden 2026-10-15).
-            kette += [x for x in re.split(r"[-_]", wort) if x and x != wort]
+            if "." in wort:
+                marken = wort.split(".")
+                for i in range(1, len(marken)):
+                    kette.append(".".join(marken[i:]))   # Suffixe
+                    kette.append(".".join(marken[:i]))   # Praefixe
+                if len(marken) > 2:
+                    kette += marken                      # Einzelmarken der Mitte
+            # Die Teile an Bindestrich und Unterstrich: der Eintrag fuer einen
+            # Namen griff nur in EINER Schreibweise (``OneNote_text_<Name>``),
+            # ``OneNote-<Name>`` rutschte als ein einziges Wort durch
+            # (gefunden 2026-10-15).
+            if "-" in wort or "_" in wort:
+                kette += [x for x in re.split(r"[-_]", wort) if x and x != wort]
+            # Zusammengeschrieben, auf den ATOMEN (an Punkt, Strich und
+            # Unterstrich getrennt). Die beiden Vorfilter sind nicht Kosmetik,
+            # sondern gemessen (derselbe Baum, je drei Laeufe): ohne sie kostet
+            # die Erweiterung +78 % Laufzeit, mit dem Gross-/Kleinwechsel-Test
+            # +41 %, mit dem Schnellweg fuer trennerfreie Woerter +14 % - also
+            # so viel, wie die Kandidatenzahl waechst. Keine Sekundenwerte hier:
+            # die haengen am Rechner und an der Baumgroesse (Register: eine
+            # feste Zahl in einem Verweis ist eine Zeitbombe). Ein Stueck ohne
+            # Gross-/Kleinwechsel kann gar keine CamelCase-Grenze haben, und das
+            # trennerfreie Wort ist der haeufigste Fall.
+            for stueck in (RE_ATOM.split(wort) if RE_ATOM.search(wort)
+                           else (wort,)):
+                if not stueck or stueck.islower() or stueck.isupper() \
+                        or stueck.isdigit():
+                    continue
+                teile = RE_CAMEL.split(stueck)
+                if len(teile) > 1:
+                    kette += teile
             for teil in kette:
-                if teil not in gesehen:
+                if teil and teil not in gesehen:
                     gesehen.add(teil)
                     yield teil
 
@@ -220,21 +278,54 @@ def ausgenommen(rel: str):
 # Suffixe, Kuerzel, Nachschlagen) gegen eine Probe-Sperrliste; dass die echte
 # Liste die echten Werte kennt, misst ``gegen_keine_echtwerte.py`` mit einer
 # gitignorierten Probendatei.
-_PROBE_GESPERRT = {kuerzel("sonde.invalid"), kuerzel("sondenname")}
+_PROBE_GESPERRT = {kuerzel("sonde.invalid"), kuerzel("sondenname"),
+                   kuerzel("sondenmarke")}
 PROBE = ("\\\\192.0.2.77\\Freigabe und Mail p.mueller@dp.sonde.invalid, "
          "Ordner OneNote-sondenname")
 # Getrennte Literale: die Quellzeile selbst darf kein "D"+"C=" tragen,
 # sonst meldet die DN-Regel ihre eigene Probe.
 PROBE_DN = "CN=X,D" "C=sondenfirma,D" "C=int"
+# Die Formen, die bis 2026-10-20 blind waren (siehe kandidaten()). Jede Probe
+# isoliert GENAU EINEN neuen Zweig - sonst ist die Kontrolle trivial wahr:
+#
+# ⚠ Die erste Fassung dieser Kontrolle benutzte ``sondenmarke.beispiel.de`` fuer
+# den Praefix-Fall. Das sind DREI Marken, und damit traf sie ueber den
+# Einzelmarken-Zweig: eine Sabotage, die die Praefixe entfernte, blieb GRUEN
+# (gemessen, Exit 0 statt 2). Die Probe muss die Stelle treffen, die sie meint -
+# zwei Marken fuer das Praefix, drei fuer die Mitte.
+PROBE_PRAEFIX = "host = 'sondenmarke.de'"          # nur ueber das Praefix
+PROBE_MARKE = "cdn = 'a.sondenmarke.de'"           # nur ueber die Einzelmarke
+PROBE_CAMEL = "class SondenmarkeAdapter:  # und ProSondenmarkeGmbH"
 
 _getroffen = {w for w in kandidaten(PROBE) if kuerzel(w) in _PROBE_GESPERRT}
 _getroffen_dn = ([t for t in RE_DC.findall(PROBE_DN) if t.lower() not in ERLAUBTE_DC]
                  if RE_DN_KONTEXT.search(PROBE_DN) else [])
+_getroffen_praefix = {w for w in kandidaten(PROBE_PRAEFIX)
+                      if kuerzel(w) in _PROBE_GESPERRT}
+_getroffen_marke = {w for w in kandidaten(PROBE_MARKE)
+                    if kuerzel(w) in _PROBE_GESPERRT}
+_getroffen_camel = {w for w in kandidaten(PROBE_CAMEL)
+                    if kuerzel(w) in _PROBE_GESPERRT}
 
 if len(_getroffen) < 2:
     print("ABBRUCH (Exit 2): die Sonde erkennt ihre Probe nicht.")
     print("  Gefunden: %r - erwartet waren Domaenen-Suffix UND Namensteil." % sorted(_getroffen))
     print("  Ohne funktionierende Sonde ist jeder gruene Lauf bedeutungslos.")
+    sys.exit(2)
+if not _getroffen_praefix:
+    print("ABBRUCH (Exit 2): die Sonde erkennt den Namen nicht als Praefix einer")
+    print("  fremden Domaene (<name>.de) - genau die Form, in der ein Host bei")
+    print("  einem Fremdanbieter steht. Bis 2026-10-20 war sie blind.")
+    sys.exit(2)
+if not _getroffen_marke:
+    print("ABBRUCH (Exit 2): die Sonde erkennt den Namen nicht als MITTLERE")
+    print("  Marke (a.<name>.de) - die ist weder Praefix noch Suffix und")
+    print("  braucht den eigenen Zweig fuer Woerter mit mehr als zwei Marken.")
+    sys.exit(2)
+if not _getroffen_camel:
+    print("ABBRUCH (Exit 2): die Sonde erkennt den Namen nicht in einem")
+    print("  zusammengeschriebenen Bezeichner (CamelCase) - der naheliegendste")
+    print("  Ort, an dem ein Name in Code landet. Bis 2026-10-20 blind.")
     sys.exit(2)
 if not all(re.fullmatch(r"[0-9a-f]{16}", x) for x in GESPERRT | GESPERRTE_NETZE):
     print("ABBRUCH (Exit 2): die Sperrliste enthaelt einen Eintrag, der kein Kuerzel ist.")
@@ -264,9 +355,11 @@ if _falsch:
     print("ABBRUCH (Exit 2): die Sonde meldet einen sauberen Text -> %r" % sorted(_falsch))
     sys.exit(2)
 
-print("Positivkontrolle: Sperrliste erkennt %d Echtwerte, die DN-Regel %d - "
-      "und der saubere Text loest nichts aus.\n"
-      % (len(_getroffen), len(_getroffen_dn)))
+print("Positivkontrolle: Sperrliste erkennt %d Echtwerte, die DN-Regel %d, "
+      "Praefix %d,\nEinzelmarke %d und CamelCase %d - und der saubere Text "
+      "loest nichts aus.\n"
+      % (len(_getroffen), len(_getroffen_dn), len(_getroffen_praefix),
+         len(_getroffen_marke), len(_getroffen_camel)))
 
 # ════════════════════════════════════════════════════════════════════════════
 # Verzeichnete UND noch nicht verzeichnete Dateien (ohne die ignorierten).

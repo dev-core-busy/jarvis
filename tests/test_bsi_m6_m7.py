@@ -350,8 +350,24 @@ if not (m_ziel and m_min):
 ziel, mindest = int(m_ziel.group(1)), int(m_min.group(1))
 check("MINDEST >= 22 (Node 20 seit 30.04.2026 ohne Updates)", mindest >= 22, mindest)
 check("ZIEL >= MINDEST und gerade (LTS-Linie)", ziel >= mindest and ziel % 2 == 0, ziel)
+# Das Haupt-Image installiert Node seit 2026-10-21 ueber node_aktualisieren.sh
+# selbst (Linie = ZIEL, Schluessel gegen Fingerabdruck) statt ueber das
+# NodeSource-setup-Skript per Pipe. Geprueft wird deshalb, dass es das Skript
+# KOPIERT UND AUSFUEHRT und keine eigene Node-Quelle mehr fuehrt.
+df = ohne_kommentare((ROOT / "Dockerfile").read_text(encoding="utf-8"))
+check("Dockerfile kopiert node_aktualisieren.sh ins Image",
+      re.search(r"(?m)^COPY\s+deploy/security/node_aktualisieren\.sh\s+(\S+)", df) is not None)
+_df_ziel = re.search(r"(?m)^COPY\s+deploy/security/node_aktualisieren\.sh\s+(\S+)", df)
+check("Dockerfile fuehrt das kopierte Skript aus",
+      bool(_df_ziel) and re.search(r"\bbash\s+%s\b" % re.escape(_df_ziel.group(1)), df) is not None)
+check("Dockerfile ohne eigene NodeSource-Quelle (setup_NN.x / node_NN.x)",
+      not re.search(r"(setup|node)_\d+\.x", df), re.findall(r"(?:setup|node)_\d+\.x", df))
+check("Dockerfile: kein Netz-Skript per Pipe in eine Shell",
+      not re.search(r"\|\s*(sudo\s+)?(ba)?sh\b", df))
+check("Dockerfile auf derselben Debian-Linie wie die Server (trixie)",
+      re.search(r"(?m)^FROM\s+debian:trixie(-slim)?\s*$", df) is not None,
+      re.findall(r"(?m)^FROM\s+\S+", df))
 quellen = {
-    "Dockerfile": re.findall(r"setup_(\d+)\.x", ohne_kommentare((ROOT / "Dockerfile").read_text())),
     "services/whatsapp-bridge/Dockerfile": re.findall(
         r"(?m)^FROM node:(\d+)", (ROOT / "services/whatsapp-bridge/Dockerfile").read_text()),
     "docs/install.sh": re.findall(r"setup_(\d+)\.x", ohne_kommentare((ROOT / "docs/install.sh").read_text())),

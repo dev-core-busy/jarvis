@@ -1,9 +1,11 @@
 # ──────────────────────────────────────────────────────────────────────────────
 # Jarvis AI Desktop Agent – Docker Image
-# Basis: Debian Bookworm Slim
+# Basis: Debian Trixie Slim – dieselbe Linie wie DEV und ECHT (Debian 13). Mit
+# bookworm lief das Image auf einer anderen Python-/Bibliotheksbasis als die
+# Server, ein Befund im Image sagte also nichts ueber den Betrieb (2026-10-21).
 # Schneller Start mit Openbox, optionales Cinnamon-Upgrade beim ersten Start
 # ──────────────────────────────────────────────────────────────────────────────
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 LABEL org.opencontainers.image.title="Jarvis AI Desktop Agent" \
       org.opencontainers.image.description="Autonomer KI-Agent mit Web-UI, VNC-Desktop und WhatsApp-Integration" \
@@ -35,11 +37,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     openssl \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# ── Node.js 24 LTS (fuer WhatsApp-Bridge / Baileys v7) ──────────────────────
-# Node 20 ist seit 30.04.2026 ohne Sicherheitsupdates (BSI M6). Gleiche Linie
-# wie deploy/security/node_aktualisieren.sh (ZIEL) und docs/install.sh.
-RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
+# ── Node.js (fuer WhatsApp-Bridge / Baileys v7) ─────────────────────────────
+# Ueber DASSELBE Skript wie auf den Servern: Linie (ZIEL), Signaturschluessel
+# gegen festgeschriebenen Fingerabdruck, Pin auf NodeSource. Vorher lief hier
+# `curl … setup_24.x | bash -` – ein Netz-Skript als root, ungeprueft, und eine
+# zweite Stelle fuer die Node-Linie, die mit dem Skript auseinanderlaufen kann.
+# apt-get update VORHER: das Skript laedt selbst nur die NodeSource-Liste neu.
+# JARVIS_DIR zeigt auf einen leeren Pfad – die Bridge liegt in diesem Schritt
+# noch nicht im Image, ihre Module baut der npm-Schritt weiter unten.
+COPY deploy/security/node_aktualisieren.sh /tmp/node_aktualisieren.sh
+RUN apt-get update \
+    && JARVIS_DIR=/nicht-vorhanden bash /tmp/node_aktualisieren.sh \
+    && rm -f /tmp/node_aktualisieren.sh \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # ── Python venv + Abhaengigkeiten ────────────────────────────────────────────

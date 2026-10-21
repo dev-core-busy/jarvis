@@ -175,6 +175,7 @@ jobs:
         working-directory: windows-app-go
     env:
       GOVULNCHECK_VERSION: 'v1.9.0'
+      CYCLONEDX_GOMOD_VERSION: 'v1.12.0'
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6 (Commit gepinnt, Code-Review 2026-10-18)
       - name: mingw-w64 (cgo-Cross-Bau fuer Windows)
@@ -188,6 +189,25 @@ jobs:
           CGO_ENABLED=1 GOOS=windows GOARCH=amd64 \
           CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ \
             "$(go env GOPATH)/bin/govulncheck" ./...
+      # SBOM im app-Modus mit -std: so steht auch die Standardbibliothek samt
+      # Fassung drin – genau die lag hier ungepatcht (2026-10-21), und der
+      # mod-Modus fuehrt sie nicht. Lokal scheitert das Werkzeug an einem Klon
+      # mit extensions.worktreeConfig; der frische CI-Checkout hat sie nicht.
+      - name: SBOM (CycloneDX)
+        if: always()
+        run: |
+          tc=$(awk '$1 == "toolchain" {print $2}' go.mod)
+          export GOTOOLCHAIN="$tc"
+          go install "github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@${CYCLONEDX_GOMOD_VERSION}"
+          CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc \
+            "$(go env GOPATH)/bin/cyclonedx-gomod" app -json -std -licenses=false \
+            -output ../sbom-go.cdx.json -main .
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  # v5 (Commit gepinnt, Code-Review 2026-10-18)
+        if: always()
+        with:
+          name: sbom-go
+          path: sbom-go.cdx.json
+          if-no-files-found: warn
 
   # ── SAST: bandit, nur hohe Schwere UND hohe Sicherheit ──────────────────────
   # Bewusst eng: der Lauf soll bei einem NEUEN schweren Fund rot werden, nicht

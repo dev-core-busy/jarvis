@@ -58,7 +58,12 @@ aiohttp>=3.14.1
 # Untergrenze 1.0.1 ist Pflicht: CVE-2026-48710 (BadHost) – Host-Header ohne
 # Pruefung vergiftet request.url.path, womit pfadbasierte Entscheidungen ins
 # Leere greifen (hier: _api_local_only_mw). Waechter: tests/test_starlette_badhost.py
-starlette>=1.0.1
+# Seit 2026-10-21 >=1.3.1 (OSV, nachgefragt nach einer Paket-Empfehlung): bis 1.3.0
+# offen sind CVE-2026-48817 (beliebige HTTP-Methode auf HTTPEndpoint-Attribute),
+# CVE-2026-48818 (StaticFiles/UNC, nur Windows), CVE-2026-54282 (Pfad vergiftet
+# request.url.hostname) und CVE-2026-54283 (form()-Grenzen bei urlencoded
+# ignoriert). DEV und ECHT laufen auf 1.7.0 – die Grenze loest dort nichts aus.
+starlette>=1.3.1
 # Die WSGI->ASGI-Bruecke fuer den WebDAV-Mount (backend/webdav.py). Vorher kam sie
 # aus starlette.middleware.wsgi – das ist abgekuendigt, meldete seit dem Sprung auf
 # Starlette 1.7.0 eine StarletteDeprecationWarning beim Start und nennt a2wsgi

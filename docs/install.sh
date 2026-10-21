@@ -317,8 +317,12 @@ else
     if ! command -v node &>/dev/null; then
         info "Installiere Node.js (für WhatsApp Bridge) ..."
         if [[ "$PKG_MGR" == "apt-get" ]]; then
-            curl -fsSL https://deb.nodesource.com/setup_24.x | $SUDO bash - >/dev/null 2>&1
-            $SUDO apt-get install -y nodejs >/dev/null 2>&1
+            # NICHT mehr per `curl … setup_24.x | bash` (Netz-Skript als root,
+            # ungeprueft): nach dem Klonen installiert deploy/security/
+            # node_aktualisieren.sh – Schluessel gegen Fingerabdruck, Pin, Linie
+            # = ZIEL, dasselbe Skript wie auf den Servern und im Dockerfile.
+            NODE_UEBER_SKRIPT=1
+            info "Node.js folgt nach dem Klonen (geprüfte Paketquelle)."
         elif [[ "$PKG_MGR" == "dnf" || "$PKG_MGR" == "yum" ]]; then
             curl -fsSL https://rpm.nodesource.com/setup_24.x | $SUDO bash - >/dev/null 2>&1
             $SUDO $INSTALL nodejs >/dev/null 2>&1
@@ -327,7 +331,9 @@ else
         else
             warn "Node.js nicht installiert – WhatsApp Bridge nicht verfügbar."
         fi
-        command -v node &>/dev/null && success "Node.js $(node --version) installiert" || warn "Node.js konnte nicht installiert werden"
+        if [[ "${NODE_UEBER_SKRIPT:-0}" != 1 ]]; then
+            command -v node &>/dev/null && success "Node.js $(node --version) installiert" || warn "Node.js konnte nicht installiert werden"
+        fi
     elif [[ "$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)" -lt 22 ]]; then
         # Node 20 und aelter: ohne Sicherheitsupdates (BSI M6). Nicht still
         # umstellen – der Laufzeitwechsel braucht einen Neustart der Bridge.
@@ -541,6 +547,17 @@ fi
 step "WhatsApp Bridge"
 
 WA_DIR="$INSTALL_DIR/services/whatsapp-bridge"
+
+# Node.js (apt) erst hier: das Skript liegt erst nach dem Klonen vor (Schritt 3).
+if [[ "${NODE_UEBER_SKRIPT:-0}" == 1 ]]; then
+    install_pkg gnupg gpg
+    if run_with_spinner "Node.js installieren (geprüfte Paketquelle)" 30 \
+        $SUDO env JARVIS_DIR="$INSTALL_DIR" bash "$INSTALL_DIR/deploy/security/node_aktualisieren.sh"; then
+        success "Node.js $(node --version) installiert"
+    else
+        warn "Node.js konnte nicht installiert werden – von Hand: sudo bash $INSTALL_DIR/deploy/security/node_aktualisieren.sh"
+    fi
+fi
 
 if [[ -d "$WA_DIR" ]] && command -v npm &>/dev/null; then
     if run_with_spinner "Node.js-Abhaengigkeiten installieren" 15 \

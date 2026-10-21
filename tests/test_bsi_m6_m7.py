@@ -374,6 +374,15 @@ quellen = {
 }
 for datei, funde in quellen.items():
     check(f"{datei}: Node {ziel} (gefunden {funde})", bool(funde) and all(int(f) == ziel for f in funde))
+# install.sh (apt): Node ueber das gepruefte Skript nach dem Klonen, nicht mehr
+# ueber deb.nodesource.com/setup per Pipe (2026-10-21). Der rpm-Zweig hat kein
+# solches Skript und bleibt bei setup_NN.x – der steht oben in quellen.
+inst = ohne_kommentare((ROOT / "docs/install.sh").read_text(encoding="utf-8"))
+check("install.sh: kein deb.nodesource-setup-Skript mehr (apt)",
+      "deb.nodesource.com/setup_" not in inst)
+check("install.sh: apt-Zweig fuehrt node_aktualisieren.sh aus",
+      re.search(r'bash\s+"\$INSTALL_DIR/deploy/security/node_aktualisieren\.sh"', inst) is not None
+      and re.search(r"(?m)^\s*NODE_UEBER_SKRIPT=1\s*$", inst) is not None)
 check("Schluessel-Fingerabdruck festgeschrieben (40 hex)",
       bool(re.search(r'(?m)^NODESOURCE_FPR="[0-9A-F]{40}"\s*$', ns)))
 check("kein Netz-Skript per Pipe in eine Shell", not re.search(r"\|\s*(sudo\s+)?(ba)?sh\b",
@@ -551,7 +560,8 @@ for titel, muster in (("Waechter-Sammellauf", r"tests/ci_lauf\.py"),
                       ("SBOM npm (CycloneDX)", r"cyclonedx-npm\b"),
                       ("SAST bandit", r"\bbandit\b.*-r\b"),
                       ("gitleaks", r"gitleaks\S* git\b"),
-                      ("govulncheck (Go-Client)", r"govulncheck\S*\"? \./\.\.\.")):
+                      ("govulncheck (Go-Client)", r"govulncheck\S*\"? \./\.\.\."),
+                      ("SBOM Go (CycloneDX, mit Standardbibliothek)", r"cyclonedx-gomod\S*\"? app\b.*-std\b")):
     check(f"Schritt: {titel}", job_mit(muster) is not None)
 gv = job_mit(r"govulncheck\S*\"? \./\.\.\.")
 
@@ -564,8 +574,13 @@ def toolchain_aus_gomod(run: str) -> bool:
     return bool(q) and re.search(r'GOTOOLCHAIN="?\$\{?%s\}?"?(\s|$)' % q.group(1), run) is not None
 
 
+# Gemessen am Schritt, der govulncheck AUSFUEHRT – nicht an irgendeinem Schritt
+# des Jobs: der SBOM-Schritt liest die Toolchain ebenfalls und haette eine
+# Sabotage am govulncheck-Schritt verdeckt (Gegenprobe 2026-10-21).
+gv_schritte = [s for s in schritte(gv[1]) if re.search(r"govulncheck\S*\"? \./\.\.\.", s.get("run") or "")] \
+    if gv else []
 check("govulncheck laeuft mit der Toolchain aus go.mod",
-      bool(gv) and any(toolchain_aus_gomod(s.get("run") or "") for s in schritte(gv[1])))
+      bool(gv_schritte) and all(toolchain_aus_gomod(s.get("run") or "") for s in gv_schritte))
 # Ohne toolchain-Zeile baut Go mit der nackten Fassung aus "go 1.x.0" - also ohne
 # Patch-Fassungen (2026-10-21: 38 erreichte Schwachstellen unter go1.25.0).
 check("go.mod legt die Toolchain fest",

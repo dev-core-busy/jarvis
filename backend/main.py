@@ -20047,6 +20047,43 @@ def _kb_find_config_folder(path_arg: str):
     return None, None
 
 
+def _kb_unterordner_rel(path_arg: str):
+    """Relativer Pfad eines VORHANDENEN Unterordners unterhalb eines
+    konfigurierten Wissensordners – sonst None (auch fuer die Wurzel selbst).
+
+    Grundlage dafuer, dass ein Unterordner Speicherordner einer Wissensgruppe
+    sein kann (2026-10-21). ⚠ ZWEI SCHRANKEN, ZWEI FRAGEN: ``..``/``.`` weist
+    die Zeichenketten-Pruefung ab; die AUFLOESUNG danach faengt einen Symlink
+    im Unterordner, der aus der Wurzel herauszeigt – der Name sieht harmlos
+    aus. ⚠ Beruehrt das Dateisystem – auf einer haengenden Freigabe
+    blockiert ``is_dir``; Aufrufer im Event-Loop begrenzen den Aufruf."""
+    from backend.tools.knowledge import _get_folders, PROJECT_ROOT
+    rel = _kb_norm_rel(path_arg)
+    # ``a/../b`` bleibt innerhalb der Wurzel und besteht die Aufloesung unten –
+    # gespeichert wuerde aber der ROHE Pfad, den keine Rechtepruefung je trifft
+    # (``_wissen_unter`` weist ``..`` ab). Live auf DEV gefunden, 2026-10-21.
+    if any(t in ("", ".", "..") for t in rel.split("/")):
+        return None
+    root = _kb_configured_root_for(rel)
+    if not rel or root is None or root == rel:
+        return None
+    for f in _get_folders():
+        try:
+            frel = str(f.relative_to(PROJECT_ROOT))
+        except ValueError:
+            frel = str(f)
+        if _kb_norm_rel(frel) != root:
+            continue
+        try:
+            basis = f.resolve()
+            ziel = (f / rel[len(root):].strip("/")).resolve()
+            ziel.relative_to(basis)
+        except (ValueError, OSError):
+            return None
+        return rel if ziel.is_dir() else None
+    return None
+
+
 def _kb_save_folder_list(folders: list[str]) -> bool:
     """Persistiert die Ordner-Liste in der Knowledge-Skill-Config."""
     # Eine LEERE Liste ist ab 2026-09-13 ein gueltiger Zustand: die Ordner
@@ -20872,13 +20909,21 @@ async def assign_knowledge_folder_groups(request: Request, user: str = Depends(r
     Body: ``{"path": "data/<ordner>", "groups": ["<gid>", ...]}`` – der Ordner
     wird bei den angegebenen Gruppen als Speicherordner (/wissen-Upload-Ziel)
     eingetragen und bei allen anderen Gruppen entfernt. Leere Liste = Ordner
-    aus allen Gruppen austragen."""
+    aus allen Gruppen austragen.
+
+    Seit 2026-10-21 darf ``path`` auch ein vorhandener UNTERORDNER eines
+    konfigurierten Ordners sein: zwei Gruppen teilen sich eine Wurzel, jede
+    bekommt ihren eigenen Unterordner."""
     from backend import knowledge_groups as kg
+    from backend.tools.knowledge import _bounded_call
     data = await request.json()
     path_arg = (data.get("path") or "").strip()
 
     folder, rel = _kb_find_config_folder(path_arg)
     if folder is None:
+        rel = await asyncio.to_thread(
+            _bounded_call, lambda: _kb_unterordner_rel(path_arg), 10, None)
+    if rel is None:
         return JSONResponse({"error": f"Ordner '{path_arg}' nicht konfiguriert"}, status_code=404)
 
     sperre = _kb_mirror_guard(rel)
@@ -21363,23 +21408,100 @@ _WISSEN_HIDDEN_FOLDERS: set[str] = set()
 
 
 def _wissen_group_folders(group: dict, configured: list) -> list:
-    """Gueltige Speicherordner einer Gruppe fuer /wissen (nur konfigurierte
-    Knowledge-Ordner, ohne den Default-Ordner). Keine Zuordnung = kein Ziel."""
-    return [f for f in group.get("folders", [])
-            if f in configured and f not in _WISSEN_HIDDEN_FOLDERS]
+    """Gueltige Speicherordner einer Gruppe fuer /wissen (ohne den Default-Ordner).
+    Keine Zuordnung = kein Ziel.
+
+    Ein Speicherordner ist ein konfigurierter Wurzelordner ODER – seit
+    2026-10-21 – ein Unterordner darunter (Vorgabe: zwei Gruppen teilen sich
+    einen Wurzelordner, jede bekommt ihren eigenen Unterordner).
+
+    ⚠ UNTERORDNER NUR UNTER data/: der Upload schreibt ausschliesslich dort
+    (``_kb_safe_within_data``). Ein Unterordner einer Netzwerk-Freigabe waere
+    hier angeboten und beim Speichern abgewiesen. Fuer ihn wirkt die
+    Zuordnung trotzdem – ueber die automatische Gruppenzuordnung neuer Dateien.
+    ⚠ DIE WURZEL WIRD WEITER NUR EXAKT VERGLICHEN. Eine Freigabe steht im
+    Manifest als ``mnt/rag/share_2``, konfiguriert als ``/mnt/rag/share_2``;
+    normalisiert verglichen, taucht sie in /wissen ploetzlich als Upload-Ziel
+    auf, das jeder Upload abweist."""
+    out = []
+    for f in group.get("folders", []):
+        if f in _WISSEN_HIDDEN_FOLDERS:
+            continue
+        if f in configured:
+            out.append(f)
+        elif (_kb_configured_root_for(f, configured) not in (None, _kb_norm_rel(f))
+              and _kb_safe_within_data(f) is not None):
+            out.append(f)
+    return out
+
+
+def _wissen_unter(rel_path: str, ordner: list) -> bool:
+    """True, wenn ``rel_path`` einer der ``ordner`` ist oder darunter liegt.
+
+    Die Rechtepruefung fragt seit 2026-10-21 nicht mehr "ist die WURZEL
+    erlaubt?", sondern "liegt der Pfad unter einem erlaubten Ordner?" – ein
+    Speicherordner kann ein Unterordner sein, und dessen Geschwister gehoeren
+    einer anderen Gruppe. Fuer Wurzelordner ist das dieselbe Antwort wie vorher.
+    Mit Schraegstrich verglichen: ``share_1`` ist sonst Praefix von ``share_10``.
+
+    ⚠ ``..`` UND ``.`` WERDEN ABGEWIESEN, NICHT AUFGELOEST. Der Vergleich ist
+    ein Zeichenketten-Vergleich: ``<nxREHA>/../nxDeutschland`` beginnt mit dem
+    erlaubten Ordner und liegt doch im fremden. ``_kb_safe_within_data`` hilft
+    dagegen nicht – es prueft nur "unter data/". Die Luecke bestand schon
+    zwischen Wurzelordnern (``ibs/../fremd``); mit Unterordnern als
+    Speicherordner trennt diese Zeile zwei Gruppen derselben Wurzel."""
+    rel = _kb_norm_rel(rel_path)
+    if not rel or any(t in ("", ".", "..") for t in rel.split("/")):
+        return False
+    for f in ordner:
+        fn = _kb_norm_rel(f)
+        if fn and (rel == fn or rel.startswith(fn + "/")):
+            return True
+    return False
 
 
 def _wissen_allowed_folders(user: str, groups: list) -> list:
     """Speicherordner, die ein /wissen-Nutzer fuer die gegebenen Gruppen nutzen
     darf: globale Wissens-Editoren alle konfigurierten Ordner, sonst die Union
-    der Speicherordner der Gruppen (Reihenfolge wie konfiguriert)."""
+    der Speicherordner der Gruppen (Reihenfolge wie konfiguriert, Unterordner
+    hierarchisch hinter ihrer Wurzel)."""
     configured = _kb_current_folder_list()
     if _may_edit_knowledge(user):
         return [f for f in configured if f not in _WISSEN_HIDDEN_FOLDERS]
     allowed = set()
     for g in groups:
         allowed.update(_wissen_group_folders(g, configured))
-    return [f for f in configured if f in allowed]
+    # Ein Ordner unter einem anderen erlaubten ist durch diesen schon abgedeckt –
+    # er stuende sonst doppelt in der Auswahl (als Anker UND als dessen Unterordner).
+    allowed = {f for f in allowed
+               if not any(a != f and _wissen_unter(f, [a]) for a in allowed)}
+    stelle = {_kb_norm_rel(f): i for i, f in enumerate(configured)}
+
+    def _schluessel(f):
+        wurzel = _kb_configured_root_for(f, configured)
+        return (stelle.get(wurzel, len(configured)), _kb_baum_key(_kb_norm_rel(f)))
+    return sorted(allowed, key=_schluessel)
+
+
+def _wissen_anker_im_weg(rel_path: str):
+    """Speicherordner einer Wissensgruppe, der ``rel_path`` selbst ist oder
+    darunter liegt – sonst None.
+
+    /wissen behandelt einen Speicherordner wie einen Wurzelordner: umbenennen
+    und verschieben nur in der Verwaltung. Sonst koennte ein Gruppen-Editor
+    seinen eigenen Ablageort (oder den einer FREMDEN Gruppe darunter) umhaengen
+    – die Zuordnung zoege zwar mit (``relocate_prefix``), aber der Ort, den der
+    Administrator der Gruppe gegeben hat, waere ein anderer."""
+    from backend import knowledge_groups as kg
+    rel = _kb_norm_rel(rel_path)
+    if not rel:
+        return None
+    for g in kg.load().get("groups", []):
+        for f in g.get("folders", []):
+            fn = _kb_norm_rel(f)
+            if fn and _wissen_unter(fn, [rel]):
+                return fn
+    return None
 
 
 def _wissen_ordner_anzeige(rel_path: str, configured: list) -> str:
@@ -21508,9 +21630,11 @@ async def wissen_upload(
         return JSONResponse({"error": f"Ordner '{folder}' nicht verfuegbar"}, status_code=400)
     # Speicherordner-Bindung der Gruppen serverseitig erzwingen: Nicht-Editoren
     # duerfen nur in die Speicherordner der gewaehlten Gruppen schreiben. Ein
-    # Unterordner erbt die Berechtigung seiner Wurzel -> ueber root_rel pruefen.
+    # Unterordner erbt die Berechtigung des Speicherordners darueber – geprueft
+    # wird der ZIELPFAD, nicht die Wurzel: der Speicherordner kann selbst ein
+    # Unterordner sein, dessen Geschwister einer anderen Gruppe gehoeren.
     sel_groups = [g for g in _editable_groups_for(user) if g["id"] in req_groups]
-    if root_rel not in _wissen_allowed_folders(user, sel_groups):
+    if not _wissen_unter(target_rel, _wissen_allowed_folders(user, sel_groups)):
         return JSONResponse(
             {"error": f"Ordner '{folder}' ist den gewählten Wissensgruppen nicht zugeordnet"},
             status_code=403)
@@ -21959,8 +22083,9 @@ def _wissen_may_write_path(user: str, rel_path: str):
     """Darf dieser /wissen-Nutzer unterhalb von ``rel_path`` schreiben?
 
     Grundlage ist dieselbe Bindung wie beim Upload: der Pfad muss unter einem
-    konfigurierten Wurzelordner liegen, der einer Wissensgruppe im Bereich des
-    Nutzers zugeordnet ist (Modell A – Unterordner erben die Wurzel-Rechte).
+    Speicherordner liegen, der einer Wissensgruppe im Bereich des Nutzers
+    zugeordnet ist – ein Wurzelordner oder ein Unterordner (Modell A –
+    Unterordner erben die Rechte des Speicherordners darueber).
     Rueckgabe: ``(ok: bool, fehlermeldung: str|None)``.
     """
     rel = _kb_norm_rel(rel_path)
@@ -21971,7 +22096,7 @@ def _wissen_may_write_path(user: str, rel_path: str):
         return False, f"'{rel}' ist kein Wissens-Ordner"
     if _kb_safe_within_data(rel) is None:      # Path-Traversal-Schutz
         return False, "Ungültiger Pfad"
-    if root_rel not in _wissen_allowed_folders(user, _editable_groups_for(user)):
+    if not _wissen_unter(rel, _wissen_allowed_folders(user, _editable_groups_for(user))):
         return False, f"Keine Berechtigung für '{rel}'"
     return True, None
 
@@ -22033,6 +22158,11 @@ async def wissen_rename_subfolder(request: Request, user: str = Depends(require_
     if rel == _kb_configured_root_for(rel):
         return JSONResponse({"error": "Wurzelordner können hier nicht umbenannt werden"},
                             status_code=400)
+    anker = _wissen_anker_im_weg(rel)
+    if anker:
+        return JSONResponse({"error": f"'{_rag.anzeige(anker)}' ist Speicherordner einer "
+                                      f"Wissensgruppe – umbenennen nur in der Verwaltung"},
+                            status_code=400)
     err = _kb_validate_folder_name(new_name)
     if err:
         return JSONResponse({"error": err}, status_code=400)
@@ -22081,6 +22211,11 @@ async def wissen_move_subfolder(request: Request, user: str = Depends(require_au
     ok, err = _wissen_may_write_path(user, dst)
     if not ok:
         return JSONResponse({"error": err}, status_code=403)
+    anker = _wissen_anker_im_weg(src)
+    if anker:
+        return JSONResponse({"error": f"'{_rag.anzeige(anker)}' ist Speicherordner einer "
+                                      f"Wissensgruppe – verschieben nur in der Verwaltung"},
+                            status_code=400)
 
     res, err, code = _kb_move_folder(src, dst)
     if err:
@@ -23295,8 +23430,23 @@ async def knowledge_groups_update(gid: str, request: Request, user: str = Depend
                 detail="Nur globale Wissens-Editoren dürfen Speicherordner zuordnen")
         if not isinstance(folders, list):
             return JSONResponse({"ok": False, "error": "folders muss eine Liste sein"}, status_code=400)
+        # ⚠ NICHT NUR KONFIGURIERTE WURZELN. Der Dialog "Berechtigungen" bietet
+        # nur Wurzeln an und schickt alle uebrigen Eintraege der Gruppe
+        # unveraendert mit – eine Freigabe (Manifest ``mnt/rag/share_2`` gegen
+        # konfiguriert ``/mnt/rag/share_2``) und seit 2026-10-21 Unterordner.
+        # Mit der alten Pruefung scheiterte jedes Speichern einer solchen
+        # Gruppe mit 400, sobald dort ein Haken geaendert wurde.
         known = set(_kb_current_folder_list())
-        bad = [f for f in folders if f not in known]
+        known_norm = {_kb_norm_rel(k) for k in known}
+        bisher = set((kg.get_group(gid) or {}).get("folders", []))
+        offen = [f for f in folders if not isinstance(f, str) or not (
+            f in known or _kb_norm_rel(f) in known_norm or f in bisher)]
+        from backend.tools.knowledge import _bounded_call
+        bad = await asyncio.to_thread(
+            _bounded_call,
+            lambda: [str(f) for f in offen
+                     if not isinstance(f, str) or _kb_unterordner_rel(f) is None],
+            10, [str(f) for f in offen])
         if bad:
             return JSONResponse({"ok": False,
                 "error": "Kein konfigurierter Knowledge-Ordner: " + ", ".join(bad)}, status_code=400)

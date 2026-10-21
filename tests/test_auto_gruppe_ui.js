@@ -73,6 +73,8 @@ const GRUPPEN = [
     { id: 'vertrieb', name: 'Vertrieb', color: '#3b82f6', order: 0,
       folders: ['data/rag/vertrieb', 'mnt/rag/share_2'] },
     { id: 'ibs', name: 'IBS', color: '#a855f7', order: 1, folders: ['data/rag/ibs'] },
+    // Unterordner als Speicherordner (2026-10-21) – die Wurzel gehoert IBS.
+    { id: 'reha', name: 'REHA', color: '#22c55e', order: 2, folders: ['data/rag/ibs/reha'] },
 ];
 const gesendet = [];
 const attrappe = (url, o) => {
@@ -157,9 +159,12 @@ await w.KbGroups.load();
 await km._editGroupPermissions('vertrieb');
 await sleep(20);
 let pm = dc.getElementById('kbgrp-perm-modal');
-check('Positivkontrolle: Editor offen, Freigabe NICHT in der Auswahl',
-      !!pm && !pm.querySelector('.kbgrp-perm-folder[value="mnt/rag/share_2"]')
-      && !!pm.querySelector('.kbgrp-perm-folder[value="data/rag/vertrieb"]'));
+check('Positivkontrolle: Editor offen, Wurzelordner angehakt',
+      !!pm && !!pm.querySelector('.kbgrp-perm-folder[value="data/rag/vertrieb"]:checked'));
+// Seit 2026-10-21 zeigt der Dialog ALLE Speicherordner der Gruppe – vorher war
+// die Freigabe (und ein Unterordner) zugeordnet, aber unsichtbar.
+check('die Freigabe steht angehakt in der Auswahl',
+      !!pm.querySelector('.kbgrp-perm-folder[value="mnt/rag/share_2"]:checked'));
 gesendet.length = 0;
 pm.querySelector('#kbgrp-perm-save').click();
 await sleep(50);
@@ -170,8 +175,8 @@ check('⚠ ohne Aenderung wird KEINE Ordnerliste gesendet',
 await km._editGroupPermissions('vertrieb');
 await sleep(20);
 pm = dc.getElementById('kbgrp-perm-modal');
-const cb = pm.querySelector('.kbgrp-perm-folder[value="data/rag/vertrieb"]');
-cb.checked = false;
+const cb = pm && pm.querySelector('.kbgrp-perm-folder[value="data/rag/vertrieb"]');
+if (cb) cb.checked = false;
 gesendet.length = 0;
 pm.querySelector('#kbgrp-perm-save').click();
 await sleep(50);
@@ -179,6 +184,65 @@ patch = gesendet.find((g) => g.methode === 'PATCH');
 check('⚠ abgewaehlter Ordner geht raus, die Freigabe bleibt drin',
       !!patch && JSON.stringify(patch.rumpf.folders) === '["mnt/rag/share_2"]',
       patch && JSON.stringify(patch.rumpf));
+
+section('5. Ein Unterordner als Speicherordner ist im Gruppen-Editor sichtbar');
+await km._editGroupPermissions('reha');
+await sleep(20);
+pm = dc.getElementById('kbgrp-perm-modal');
+const werte = pm ? [...pm.querySelectorAll('.kbgrp-perm-folder')].map((c) => c.value) : [];
+check('Positivkontrolle: Editor offen, beide Wurzeln angeboten',
+      werte.includes('data/rag/vertrieb') && werte.includes('data/rag/ibs'), JSON.stringify(werte));
+check('Unterordner steht angehakt in der Auswahl',
+      !!pm.querySelector('.kbgrp-perm-folder[value="data/rag/ibs/reha"]:checked'), JSON.stringify(werte));
+check('… direkt unter seinem Wurzelordner',
+      werte.indexOf('data/rag/ibs/reha') === werte.indexOf('data/rag/ibs') + 1, JSON.stringify(werte));
+check('… nur einmal', werte.filter((v) => v === 'data/rag/ibs/reha').length === 1);
+gesendet.length = 0;
+pm.querySelector('#kbgrp-perm-save').click();
+await sleep(50);
+patch = gesendet.find((g) => g.methode === 'PATCH');
+check('ohne Aenderung keine Ordnerliste', !!patch && !('folders' in patch.rumpf),
+      patch && JSON.stringify(patch.rumpf));
+await km._editGroupPermissions('reha');
+await sleep(20);
+pm = dc.getElementById('kbgrp-perm-modal');
+// Kein `.checked` auf ein womoeglich fehlendes Element: das WIRFT, der Lauf
+// endet ohne Bilanz und ist von "nicht gelaufen" nicht zu unterscheiden.
+const cbReha = pm && pm.querySelector('.kbgrp-perm-folder[value="data/rag/ibs/reha"]');
+if (cbReha) cbReha.checked = false;
+gesendet.length = 0;
+pm.querySelector('#kbgrp-perm-save').click();
+await sleep(50);
+patch = gesendet.find((g) => g.methode === 'PATCH');
+check('abgewaehlter Unterordner geht raus',
+      !!cbReha && !!patch && JSON.stringify(patch.rumpf.folders) === '[]', patch && JSON.stringify(patch.rumpf));
+
+section('6. Wurzelordner: Umbenennen und Gruppen getrennt (2026-10-21)');
+w.prompt = () => 'ibs-neu';
+km.fetchStats = async () => {};
+gesendet.length = 0;
+await km.renameFolder('data/rag/ibs');
+await sleep(20);
+let put = gesendet.find((g) => g.methode === 'PUT' && g.pfad === '/api/knowledge/folders');
+check('Bleistift: PUT /api/knowledge/folders mit Pfad und neuem Namen',
+      !!put && put.rumpf.path === 'data/rag/ibs' && put.rumpf.new_name === 'ibs-neu',
+      put && JSON.stringify(put.rumpf));
+check('… und keine Gruppen-Zuordnung nebenbei',
+      !gesendet.some((g) => g.pfad === '/api/knowledge/folders/groups'));
+gesendet.length = 0;
+await km.renameFolder('data/rag/ibs/reha');
+check('Unterordner geht NICHT ueber renameFolder (eigener Knopf)', gesendet.length === 0);
+await km.editFolder('data/rag/ibs');
+await sleep(20);
+const dlg = dc.getElementById('kbfld-edit-modal');
+check('Positivkontrolle: Gruppen-Dialog der Wurzel offen', !!dlg);
+check('… ohne Namensfeld', !!dlg && !dlg.querySelector('#kbfld-name'));
+gesendet.length = 0;
+dlg && dlg.querySelector('#kbfld-save').click();
+await sleep(50);
+check('Speichern: nur die Gruppen-Zuordnung, kein Umbenennen',
+      gesendet.some((g) => g.pfad === '/api/knowledge/folders/groups' && g.rumpf.path === 'data/rag/ibs')
+      && !gesendet.some((g) => g.methode === 'PUT'), JSON.stringify(gesendet.map((g) => g.methode + ' ' + g.pfad)));
 
 const ok = results.filter((r) => r.ok).length;
 const fail = results.length - ok;

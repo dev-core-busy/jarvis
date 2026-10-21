@@ -89,7 +89,7 @@ console.log('== knowledge.js: Ordner ==');
     const liste = d.getElementById('kb-folder-list');
     liste.innerHTML = km._folderNodeHtml(pfad, true, false, false);
     pruefe(onAttribute(liste).length === 0, 'Ordnerknoten ohne on*-Attribut', onAttribute(liste).join(', '));
-    const auf = spione(km, ['toggleDir', 'createSubfolder', 'renameSubfolder', 'moveSubfolder', 'deleteSubfolder']);
+    const auf = spione(km, ['toggleDir', 'createSubfolder', 'renameSubfolder', 'moveSubfolder', 'deleteSubfolder', 'editFolder']);
     let eltern = 0;
     liste.addEventListener('click', () => { eltern++; });
     const share = [];
@@ -121,6 +121,42 @@ console.log('== knowledge.js: Ordner ==');
     pruefe(auf.map(x => x[0]).join() === 'moveSubfolder,renameSubfolder'
            && auf.every(x => x[1][0] === pfad) && eltern === 0,
         'moveSubfolder/renameSubfolder mit Pfad, gestoppt', JSON.stringify(auf));
+
+    // Unterordner als eigener Speicherordner (2026-10-21): das Etikett oeffnet
+    // denselben Gruppen-Dialog wie beim Wurzelordner.
+    auf.length = 0;
+    const etikett = liste.querySelector('.kb-btn-groups');
+    etikett && etikett.click();
+    pruefe(!!etikett && auf.length === 1 && auf[0][0] === 'editFolder' && auf[0][1][0] === pfad
+           && eltern === 0,
+        'Unterordner: Etikett -> editFolder(pfad), gestoppt', JSON.stringify(auf));
+}
+
+// ── knowledge.js: Wurzelordner – Bleistift und Etikett getrennt (2026-10-21) ─
+console.log('== knowledge.js: Wurzelordner ==');
+{
+    const wurzel = `data/rag/O'Neil "x" & b`;
+    const liste = d.getElementById('kb-folder-list');
+    liste.innerHTML = km._folderNodeHtml(wurzel, true, true, false);
+    const auf = spione(km, ['renameFolder', 'editFolder', 'removeFolder', 'toggleDir']);
+    let eltern = 0;
+    liste.addEventListener('click', () => { eltern++; });
+    const stift = liste.querySelector('.kb-btn-rename');
+    const etikett = liste.querySelector('.kb-btn-groups');
+    pruefe(!!stift && !!etikett && !!stift.querySelector('.jv-ico-pencil') && stift !== etikett,
+        'Positivkontrolle: Wurzel traegt Bleistift UND Etikett als zwei Knoepfe');
+    stift && stift.click();
+    pruefe(auf.length === 1 && auf[0][0] === 'renameFolder' && auf[0][1][0] === wurzel && eltern === 0,
+        'Bleistift -> renameFolder(pfad), gestoppt', JSON.stringify(auf));
+    auf.length = 0;
+    etikett && etikett.click();
+    pruefe(auf.length === 1 && auf[0][0] === 'editFolder' && auf[0][1][0] === wurzel && eltern === 0,
+        'Etikett -> editFolder(pfad), gestoppt', JSON.stringify(auf));
+    // Eine Wurzel ausserhalb von data/rag kann der Server nicht umbenennen –
+    // dann gibt es keinen Bleistift statt eines Knopfes, der abgewiesen wird.
+    liste.innerHTML = km._folderNodeHtml('/srv/anderswo', true, true, false);
+    pruefe(!liste.querySelector('.kb-btn-rename') && !!liste.querySelector('.kb-btn-groups'),
+        'Wurzel ausserhalb data/rag: kein Bleistift, aber Etikett');
 }
 
 // ── knowledge.js: Datei-Zeile ──────────────────────────────────────────────

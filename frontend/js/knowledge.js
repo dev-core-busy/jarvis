@@ -310,11 +310,28 @@ class JarvisKnowledgeManager {
             kbFolders = ((await resp.json()).folders || []).map(f => f.path);
         } catch (e) { /* Sektion zeigt dann nur den Hinweis */ }
         const assigned = new Set(g.folders || []);
-        const folderRows = kbFolders.length
-            ? kbFolders.map(p => `
-                <label class="kb-grp-check" style="--grp:${esc(g.color)};">
+        // ⚠ AUCH DIE ZUGEORDNETEN ORDNER ZEIGEN, DIE KEINE WURZEL SIND. Die Liste
+        // aus /api/knowledge/stats kennt nur Wurzelordner (ohne Freigaben); ein
+        // Unterordner als Speicherordner (2026-10-21) oder eine Freigabe stand
+        // dadurch zwar in der Gruppe, war hier aber unsichtbar (gemeldet am
+        // selben Tag). Sie stehen direkt unter ihrem Wurzelordner, die uebrigen
+        // (Freigaben) am Ende.
+        const ohneSlash = p => String(p || '').replace(/^\/+/, '');
+        const wurzeln = new Set(kbFolders.map(ohneSlash));
+        const extra = (g.folders || []).filter(f => !wurzeln.has(ohneSlash(f)));
+        const angezeigt = [];
+        kbFolders.forEach(p => {
+            angezeigt.push({ p, unter: false });
+            extra.filter(f => ohneSlash(f).startsWith(ohneSlash(p) + '/')).sort()
+                .forEach(f => angezeigt.push({ p: f, unter: true }));
+        });
+        extra.filter(f => !angezeigt.some(a => a.p === f)).sort()
+            .forEach(f => angezeigt.push({ p: f, unter: false }));
+        const folderRows = angezeigt.length
+            ? angezeigt.map(({ p, unter }) => `
+                <label class="kb-grp-check" style="--grp:${esc(g.color)};${unter ? 'margin-left:22px;' : ''}">
                     <input type="checkbox" class="kbgrp-perm-folder" value="${esc(p)}"${assigned.has(p) ? ' checked' : ''}>
-                    <span>📁 ${esc(p)}</span>
+                    <span>${unter ? '↳ ' : ''}📁 ${esc(unter ? this._anzeigePfad(p) : p)}</span>
                 </label>`).join('')
             : `<span class="kb-hint" style="margin:0;">${T('knowledge.no_folders', 'Keine Ordner konfiguriert')}</span>`;
 
@@ -376,13 +393,14 @@ class JarvisKnowledgeManager {
             };
             // Speicherordner nur mitsenden, wenn geaendert (das Feld duerfen nur
             // globale Wissens-Editoren aendern – sonst lehnt der Server ab)
-            // ⚠ NUR UEBER DIE ANGEBOTENEN ORDNER ENTSCHEIDEN. Die Liste kommt aus
-            // /api/knowledge/stats und dort fehlen die Netzwerk-Freigaben; ohne
-            // diese Zeile nahm jedes Speichern hier eine Freigabe-Verknuepfung
-            // still wieder heraus (gefunden 2026-10-21).
-            const angeboten = new Set(kbFolders);
-            const pickedFolders = [...m.querySelectorAll('.kbgrp-perm-folder:checked')].map(c => c.value)
-                .concat((g.folders || []).filter(f => !angeboten.has(f)));
+            // ⚠ DIE HAKEN SIND DIE GANZE WAHRHEIT – weil der Dialog jeden
+            // zugeordneten Ordner zeigt (`angezeigt`, oben). Bis 2026-10-21 zeigte
+            // er nur Wurzeln, und jedes Speichern nahm eine Freigabe-Verknuepfung
+            // still wieder heraus; ein Nachtrag "nicht angebotene behalten" hielt
+            // sie fest, blieb aber unsichtbar. Wer hier wieder filtert, muss die
+            // Anzeige mitziehen, sonst geht beim Speichern verloren, was man
+            // nicht sieht.
+            const pickedFolders = [...m.querySelectorAll('.kbgrp-perm-folder:checked')].map(c => c.value);
             const before = (g.folders || []).slice().sort().join(',');
             if (pickedFolders.slice().sort().join(',') !== before) patch.folders = pickedFolders;
             const res = await KG.updateGroup(gid, patch);
@@ -2336,12 +2354,30 @@ class JarvisKnowledgeManager {
         const nameTeil = (spiegel || geteilt)
             ? `<span class="kb-folder-nameflex">${pfadSpan}${spiegelMark}${shareMark}</span>`
             : pfadSpan;
+        // Unterordner als EIGENER Speicherordner einer Wissensgruppe (2026-10-21):
+        // zwei Gruppen teilen sich einen Wurzelordner, jede bekommt ihren
+        // Unterordner. Derselbe Dialog wie beim Wurzelordner (`editFolder`) –
+        // dort ohne Umbenennen, das hat der Unterordner als eigenen Knopf.
+        const gruppen = `<button class="kb-btn-remove kb-btn-groups" title="${T('knowledge.subfolder_groups_title', 'Wissensgruppen zuordnen – Unterordner als eigener Speicherordner')}"
+                data-kb-aktion="editFolder" data-kb-pfad="${sp}">${JarvisIcons.tag()}</button>`;
+        // Wurzelordner wie Unterordner: Bleistift = UMBENENNEN, Etikett =
+        // Wissensgruppen (Vorgabe 2026-10-21; vorher oeffnete der Bleistift einen
+        // gemeinsamen Dialog fuer beides). Umbenennen geht nur fuer einen
+        // Wurzelordner direkt unter data/rag – ein anderer bekommt keinen Bleistift
+        // statt eines Knopfes, der beim Klick abgewiesen wird.
+        const RAG = 'data/rag/';
+        const umbenennbar = path.startsWith(RAG) && !path.slice(RAG.length).includes('/');
+        const stift = umbenennbar
+            ? `<button class="kb-btn-remove kb-btn-rename" title="${T('knowledge.folder_rename_title', 'Ordner umbenennen')}"
+                    data-kb-aktion="renameFolder" data-kb-pfad="${sp}">${JarvisIcons.pencil()}</button>`
+            : '';
+        const wurzelGruppen = `<button class="kb-btn-remove kb-btn-groups" title="${T('knowledge.share_groups_title', 'Wissensgruppen zuordnen')}"
+                data-kb-aktion="editFolder" data-kb-pfad="${sp}">${JarvisIcons.tag()}</button>`;
         const actions = isRoot
-            ? `<button class="kb-btn-remove kb-btn-rename" title="${T('knowledge.folder_edit_title', 'Bearbeiten')}"
-                    data-kb-aktion="editFolder" data-kb-pfad="${sp}">${JarvisIcons.pencil()}</button>${addSub}${share}<button class="kb-btn-remove" title="${T('knowledge.folder_remove_title', 'Ordner entfernen')}"
+            ? `${stift}${addSub}${share}${wurzelGruppen}<button class="kb-btn-remove" title="${T('knowledge.folder_remove_title', 'Ordner entfernen')}"
                     data-kb-aktion="removeFolder" data-kb-pfad="${sp}">${JarvisIcons.trash()}</button>`
             : `<button class="kb-btn-remove kb-btn-rename" title="${T('knowledge.subfolder_rename_title', 'Unterordner umbenennen')}"
-                    data-kb-aktion="renameSubfolder" data-kb-pfad="${sp}">${JarvisIcons.pencil()}</button>${addSub}${share}<button class="kb-btn-remove kb-btn-movesub" title="${T('knowledge.subfolder_move_title', 'Unterordner verschieben')}"
+                    data-kb-aktion="renameSubfolder" data-kb-pfad="${sp}">${JarvisIcons.pencil()}</button>${addSub}${share}${gruppen}<button class="kb-btn-remove kb-btn-movesub" title="${T('knowledge.subfolder_move_title', 'Unterordner verschieben')}"
                     data-kb-aktion="moveSubfolder" data-kb-pfad="${sp}">📂</button><button class="kb-btn-remove" title="${T('knowledge.subfolder_remove_title', 'Unterordner löschen')}"
                     data-kb-aktion="deleteSubfolder" data-kb-pfad="${sp}">${JarvisIcons.trash()}</button>`;
         return `
@@ -2608,6 +2644,34 @@ class JarvisKnowledgeManager {
 
     // Unterordner umbenennen. Gruppen werden weiter von der Wurzel geerbt (Modell A),
     // daher nur Umbenennen – kein Gruppen-Dialog wie bei Wurzelordnern.
+    // Wurzelordner unter data/rag umbenennen – das indizierte Wissen und die
+    // Gruppen-Zuordnungen zieht der Server mit (PUT /api/knowledge/folders).
+    // Bis 2026-10-21 ein Feld im Gruppen-Dialog, jetzt ein eigener Knopf wie
+    // beim Unterordner.
+    async renameFolder(folder) {
+        const RAG = 'data/rag/';
+        if (!folder.startsWith(RAG) || folder.slice(RAG.length).includes('/')) return;
+        const cur = folder.slice(RAG.length);
+        const frage = (window.t('knowledge.folder_rename_prompt') || 'Neuer Name für "{folder}":')
+            .replace('{folder}', cur);
+        const name = (window.prompt(frage, cur) || '').trim();
+        if (!name || name === cur) return;
+        try {
+            const resp = await fetch('/api/knowledge/folders', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (window.JarvisSitzung.token()) },
+                body: JSON.stringify({ path: folder, new_name: name })
+            });
+            const r = await resp.json().catch(() => ({}));
+            if (!resp.ok) throw new Error(r.error || 'HTTP ' + resp.status);
+            this._showNotification(window.t('knowledge.folder_renamed') || 'Ordner umbenannt', 'success');
+            await this.fetchStats();
+            if (window.KbGroups) await this._refreshGroups();
+        } catch (e) {
+            this._showNotification(window.t('common.error') + ': ' + e.message, 'error');
+        }
+    }
+
     async renameSubfolder(path) {
         const cur = path.split('/').pop();
         const name = (window.prompt(window.t('knowledge.subfolder_rename_prompt') || 'Neuer Name des Unterordners:', cur) || '').trim();
@@ -2937,9 +3001,10 @@ class JarvisKnowledgeManager {
         }
     }
 
-    // ─── Ordner bearbeiten: Wissensgruppen-Zuordnung + Umbenennen ─────
-    // Umbenennen nur fuer direkte data/-Unterordner (nicht der Default-Ordner);
-    // die Gruppen-Zuordnung (Speicherordner fuer /wissen) geht fuer JEDEN Ordner.
+    // ─── Ordner: Wissensgruppen zuordnen ─────────────────────────────
+    // Geht fuer JEDEN Ordner – Wurzel, Unterordner, Freigabe. Umbenennen hat
+    // seit 2026-10-21 einen eigenen Knopf (`renameFolder` / `renameSubfolder`);
+    // stuende es hier zusaetzlich, gaebe es zwei Wege fuer dieselbe Handlung.
 
     async editFolder(folder) {
         const KG = window.KbGroups;
@@ -2947,14 +3012,6 @@ class JarvisKnowledgeManager {
         const T = (k, d) => (window.t && window.t(k)) || d;
         const esc = KG ? KG.esc : (s => String(s == null ? '' : s).replace(/[&<>"]/g, c =>
             ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])));
-
-        // Umbenennen geht nur fuer einen WURZELordner unter data/rag – also
-        // genau eine Ebene tief. Unterordner haben ihren eigenen Knopf
-        // (`renameSubfolder`), Netzwerk-Freigaben werden ueber die Freigabe
-        // selbst verwaltet.
-        const RAG = 'data/rag/';
-        const renameable = folder.startsWith(RAG) && !folder.slice(RAG.length).includes('/');
-        const curName = renameable ? folder.slice(RAG.length) : this._anzeigePfad(folder);
 
         // Aktuelle Zuordnung: Gruppen, die diesen Ordner als Speicherordner fuehren.
         // ⚠ VERGLICHEN WIRD OHNE FUEHRENDEN SCHRAEGSTRICH: eine Freigabe kommt
@@ -2977,9 +3034,6 @@ class JarvisKnowledgeManager {
                 </label>`).join('')
             : `<span class="kb-hint" style="margin:0;">${T('kbgroups.none', 'Keine Gruppen angelegt.')}</span>`;
 
-        const nameRow = renameable ? `
-            <label class="kb-form-label" style="display:block;margin:12px 0 4px;">${T('knowledge.folder_name_label', 'Ordnername (umbenennen – das indizierte Wissen zieht mit)')}</label>
-            <input type="text" id="kbfld-name" class="kb-input" style="width:100%;box-sizing:border-box;" value="${esc(curName)}">` : '';
 
         document.getElementById('kbfld-edit-modal')?.remove();
         const m = document.createElement('div');
@@ -2989,13 +3043,12 @@ class JarvisKnowledgeManager {
         m.innerHTML = `
             <div class="modal-content glass" style="max-width:560px;">
                 <div class="modal-header">
-                    <h2>${T('knowledge.folder_edit_title', 'Ordner bearbeiten')} – ${esc(folder)}</h2>
+                    <h2>${T('knowledge.share_groups_title', 'Wissensgruppen zuordnen')} – ${esc(this._anzeigePfad(folder))}</h2>
                     <button class="btn-icon" id="kbfld-close" aria-label="Schließen">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                     </button>
                 </div>
                 <div class="modal-body" style="overflow-y:auto;">
-                    ${nameRow}
                     <label class="kb-form-label" style="display:block;margin:16px 0 4px;">${istFreigabe
                         ? T('knowledge.share_groups_label', 'Wissensgruppen dieser Freigabe')
                         : T('kbgroups.folders_label', 'Speicherordner (/wissen)')}</label>
@@ -3024,25 +3077,12 @@ class JarvisKnowledgeManager {
                 'Authorization': 'Bearer ' + (window.JarvisSitzung.token())
             };
             try {
-                // 1) Umbenennen (falls geaendert) – Server relokalisiert Index + Zuordnungen
-                let path = folder;
-                const nameInp = m.querySelector('#kbfld-name');
-                const newName = nameInp ? nameInp.value.trim() : '';
-                if (renameable && newName && newName !== curName) {
-                    const resp = await fetch('/api/knowledge/folders', {
-                        method: 'PUT', headers: auth,
-                        body: JSON.stringify({ path: folder, new_name: newName })
-                    });
-                    const r = await resp.json();
-                    if (!resp.ok) throw new Error(r.error || 'HTTP ' + resp.status);
-                    path = r.path;
-                }
-                // 2) Gruppen-Zuordnung setzen (zuordnen UND entfernen)
+                // Gruppen-Zuordnung setzen (zuordnen UND entfernen)
                 if (KG) {
                     const ids = [...m.querySelectorAll('.kbfld-grp:checked')].map(c => c.value);
                     const resp = await fetch('/api/knowledge/folders/groups', {
                         method: 'POST', headers: auth,
-                        body: JSON.stringify({ path, groups: ids })
+                        body: JSON.stringify({ path: folder, groups: ids })
                     });
                     const r = await resp.json();
                     if (!resp.ok) throw new Error(r.error || 'HTTP ' + resp.status);
@@ -4001,7 +4041,7 @@ JarvisKnowledgeManager.MOUNT_BEISPIEL = {
 // Ein Bubble-Listener am document liefe dagegen NACH denen der Eltern.
 (() => {
 const KB_STOP = new Set(['createSubfolder', 'openShare', 'editFolder', 'removeFolder',
-    'renameSubfolder', 'moveSubfolder', 'deleteSubfolder']);
+    'renameFolder', 'renameSubfolder', 'moveSubfolder', 'deleteSubfolder']);
 const KB_AKTIONEN = {
     toggleLearnedList:       (km) => km.toggleLearnedList(),
     downloadLearnedJson:     (km, el) => km.downloadLearnedJson(el),
@@ -4022,6 +4062,7 @@ const KB_AKTIONEN = {
     openShare:               (km, el, d) => window.KnowledgeSync && window.KnowledgeSync.openShare(d.kbPfad),
     editFolder:              (km, el, d) => km.editFolder(d.kbPfad),
     removeFolder:            (km, el, d) => km.removeFolder(d.kbPfad),
+    renameFolder:            (km, el, d) => km.renameFolder(d.kbPfad),
     renameSubfolder:         (km, el, d) => km.renameSubfolder(d.kbPfad),
     moveSubfolder:           (km, el, d) => km.moveSubfolder(d.kbPfad),
     deleteSubfolder:         (km, el, d) => km.deleteSubfolder(d.kbPfad),

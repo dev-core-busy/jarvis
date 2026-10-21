@@ -133,9 +133,12 @@ PROBEN = [
     ("Dialog vergleicht wieder roh (Freigabe ohne Haken)", KJS,
      "if ((g.folders || []).some(f => ohneSlash(f) === ohneSlash(folder))) assigned.add(g.id);",
      "if ((g.folders || []).includes(folder)) assigned.add(g.id);", W_UI),
-    ("Gruppen-Editor wirft nicht angebotene Ordner wieder weg", KJS,
-     "                .concat((g.folders || []).filter(f => !angeboten.has(f)));",
-     ";", W_UI),
+    # Seit 2026-10-21 zeigt der Editor JEDEN zugeordneten Ordner; die frueher
+    # hier sabotierte Zeile "nicht angebotene behalten" ist damit entfallen.
+    # Dieselbe Zusage (Freigabe ueberlebt das Speichern) haengt jetzt an der Anzeige.
+    ("Gruppen-Editor zeigt die Freigabe nicht (und verliert sie beim Speichern)", KJS,
+     "        const extra = (g.folders || []).filter(f => !wurzeln.has(ohneSlash(f)));",
+     "        const extra = [];", W_UI),
     ("Kein Knopf an der Freigabe-Zeile", KJS,
      """data-kb-aktion="editFolder" data-kb-pfad="${this._escHtml(m.mountpoint || '')}">""",
      """data-kb-aktion="nichts" data-kb-pfad="${this._escHtml(m.mountpoint || '')}">""", W_UI),

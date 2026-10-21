@@ -35,6 +35,7 @@ SEITE = """<!DOCTYPE html><html lang="de"><head><meta charset="utf-8">
 </head><body>
 <script>try{if(localStorage.getItem('jarvis_theme')!=='dark')document.body.classList.add('light');}catch(e){}</script>
 <script src="js/icons.js"></script>
+<script src="js/sitzung.js"></script>
 <script src="js/i18n.js"></script>
 <script>
 // Attrappen: nur die Endpunkte bzw. Schnittstellen, die kbmatrix.open() liest.

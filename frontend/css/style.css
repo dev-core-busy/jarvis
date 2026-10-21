@@ -2876,9 +2876,37 @@ body.light .rmx-status.rmx-status-fehler { color: color-mix(in srgb, var(--dange
     padding-top: 6px; padding-bottom: 6px;
 }
 .kbm-c-grp, .kbm-c-act { text-align: center; }
-.kbm-th-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
-.kbm-th-name { vertical-align: middle; }
-.kbm-th-count { display: inline-block; margin-left: 5px; font-size: 0.7rem; opacity: 0.7; }
+/* Alle Koepfe sitzen unten: die senkrechten Namen machen die Kopfzeile hoch,
+   und die waagerechten Beschriftungen gehoeren an die Grenze zur Tabelle. */
+.kbm-table thead th { vertical-align: bottom; }
+.kbm-table thead th.kbm-c-grp, .kbm-table thead th.kbm-c-act { padding-left: 2px; padding-right: 2px; }
+/* Senkrechter Spaltenname (von unten nach oben lesbar, wie in Tabellen-
+   kalkulationen). Die Hoehe ist gedeckelt; ein laengerer Name wird oben
+   gekuerzt, der volle Name steht im title. */
+.kbm-th-vert {
+    display: inline-block; writing-mode: vertical-rl; transform: rotate(180deg);
+    max-height: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    line-height: 1.2;
+}
+/* Punkt, Zaehler und Sortierpfeil bleiben waagerecht unter dem Namen; bei
+   grossen Zaehlern darf der Pfeil in eine zweite Zeile ausweichen. */
+.kbm-th-foot { display: block; margin-top: 4px; white-space: normal; line-height: 1.2; }
+.kbm-th-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 3px; vertical-align: middle; }
+.kbm-th-count { display: inline-block; font-size: 0.7rem; opacity: 0.7; vertical-align: middle; }
+.kbm-th-foot .kbm-sort-ind { margin-left: 2px; }
+/* Spaltenhinterlegung (Gruppenspalten). Die Flaeche liegt im scrollenden
+   Container ueber den Zellen, aber unter dem mitlaufenden Kopf (z-index 2);
+   der Kopf bekommt eine eigene, DECKENDE Hervorhebung. */
+.kbm-table-wrap { position: relative; }
+.kbm-col-hl {
+    position: absolute; z-index: 1; pointer-events: none;
+    background: rgba(var(--accent-rgb), 0.10);
+    box-shadow: inset 1px 0 0 rgba(var(--accent-rgb), 0.35), inset -1px 0 0 rgba(var(--accent-rgb), 0.35);
+}
+.kbm-table thead th.kbm-th-hl {
+    color: var(--text-primary);
+    background: color-mix(in srgb, var(--accent) 16%, var(--bg-secondary));
+}
 .kbm-table tbody tr:hover { background: rgba(var(--fg-rgb), 0.04); }
 .kbm-gcell { text-align: center; cursor: pointer; }
 .kbm-gcell .kbm-check {

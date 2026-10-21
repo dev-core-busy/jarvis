@@ -122,7 +122,7 @@ window.KbMatrix = (function () {
         // behauptete die Faehigkeit fuer JEDE Zeile - was je Zeile gilt, sagt
         // der Tooltip am Knopf (siehe _oeffnenTd).
         cols.push({ key: 'edit', label: T('kbmatrix.col_open', 'Öffnen'),   tip: T('kbmatrix.t_open', 'Extraktor-Dokumente bearbeiten, übrige Dateien anzeigen'), cls: 'kbm-c-act' });
-        cols.push({ key: 'del',  label: T('kbmatrix.col_delete', 'Lösch.'), tip: T('kbmatrix.t_delete', 'Dokument löschen'),    cls: 'kbm-c-act' });
+        cols.push({ key: 'del',  label: T('kbmatrix.col_delete', 'Löschen'), tip: T('kbmatrix.t_delete', 'Dokument löschen'),    cls: 'kbm-c-act' });
         return cols;
     }
 
@@ -200,21 +200,27 @@ window.KbMatrix = (function () {
 
         const colgroup = '<colgroup>' + cols.map(() => '<col>').join('') + '</colgroup>';
         const thead = '<thead><tr>' + cols.map((c, i) => {
-            let inner;
-            if (c.group) {
-                inner = `<span class="kbm-th-dot" style="background:${_attr(c.group.color)}"></span>`
-                    + `<span class="kbm-th-name" title="${_attr(c.group.name)}">${_esc(c.group.name)}</span>`
-                    + `<span class="kbm-th-count" data-gid="${_attr(c.group.id)}">${_groupCount(c.group.id)}</span>`;
-            } else {
-                inner = _esc(c.label);
-            }
             // Sortier-Indikator + klickbarer Kopf fuer sortierbare Spalten
             const arrow = (c.sort && _sortKey === c.key)
                 ? `<span class="kbm-sort-ind">${_sortDir === 1 ? '▲' : '▼'}</span>` : '';
+            let inner;
+            if (c.group) {
+                // Gruppen- und Aktionsspalten sind nur ~46 px breit: waagerecht
+                // stand dort nur "● …". Der NAME steht deshalb senkrecht (von
+                // unten nach oben lesbar), Punkt, Zaehler und Pfeil bleiben
+                // waagerecht darunter - eine gedrehte Zahl liest sich schlecht.
+                inner = `<span class="kbm-th-vert kbm-th-name" title="${_attr(c.group.name)}">${_esc(c.group.name)}</span>`
+                    + `<span class="kbm-th-foot"><span class="kbm-th-dot" style="background:${_attr(c.group.color)}"></span>`
+                    + `<span class="kbm-th-count" data-gid="${_attr(c.group.id)}">${_groupCount(c.group.id)}</span>${arrow}</span>`;
+            } else if (c.cls === 'kbm-c-act') {
+                inner = `<span class="kbm-th-vert">${_esc(c.label)}</span>${arrow}`;
+            } else {
+                inner = _esc(c.label) + arrow;
+            }
             const sortAttr = c.sort ? ` data-sortkey="${_attr(c.key)}"` : '';
             const sortCls  = c.sort ? ' kbm-sortable' : '';
             const rez = (i < cols.length - 1) ? `<span class="kbm-resizer" data-ci="${i}"></span>` : '';
-            return `<th class="${c.cls}${sortCls}"${sortAttr} title="${_attr(c.tip || '')}">${inner}${arrow}${rez}</th>`;
+            return `<th class="${c.cls}${sortCls}"${sortAttr} title="${_attr(c.tip || '')}">${inner}${rez}</th>`;
         }).join('') + '</tr></thead>';
 
         const tbody = '<tbody>' + _rows.map(row => {
@@ -363,6 +369,50 @@ window.KbMatrix = (function () {
 
         _bindResize(ov);
         _bindContentTip(ov);
+        _bindSpaltenMarke(ov);
+    }
+
+    /* Spaltenhinterlegung: bei 1000+ Zeilen sieht man im Kopf sonst nicht,
+       zu welcher Gruppe ein Haken weit unten gehoert. EINE absolut liegende
+       Flaeche statt einer Klasse an jeder Zelle - sonst waeren bei jedem
+       Spaltenwechsel tausende Zellen umzufaerben. Sie liegt im scrollenden
+       Container und wandert damit von selbst mit; Lage und Breite werden bei
+       jedem Spaltenwechsel neu gemessen, damit auch eine per Ziehgriff
+       veraenderte Breite stimmt. Nur Gruppenspalten - dort ist die Zuordnung
+       das Problem. */
+    function _bindSpaltenMarke(ov) {
+        const wrap  = ov.querySelector('.kbm-table-wrap');
+        const table = ov.querySelector('.kbm-table');
+        if (!wrap || !table) return;
+        const ths = ov.querySelectorAll('.kbm-table thead th');
+        const marke = document.createElement('div');
+        marke.className = 'kbm-col-hl';
+        marke.hidden = true;
+        wrap.appendChild(marke);
+        let aktiv = -1;
+        const aus = () => {
+            if (aktiv >= 0 && ths[aktiv]) ths[aktiv].classList.remove('kbm-th-hl');
+            aktiv = -1;
+            marke.hidden = true;
+        };
+        wrap.addEventListener('mouseover', e => {
+            const zelle = e.target.closest('td, th');
+            if (!zelle || !table.contains(zelle)) return;
+            if (!zelle.classList.contains('kbm-gcell') && !zelle.classList.contains('kbm-c-grp')) { aus(); return; }
+            const idx = zelle.cellIndex;
+            if (idx === aktiv) return;
+            aus();
+            const th = ths[idx];
+            if (!th) return;
+            aktiv = idx;
+            th.classList.add('kbm-th-hl');
+            marke.style.left   = (table.offsetLeft + th.offsetLeft) + 'px';
+            marke.style.width  = th.offsetWidth + 'px';
+            marke.style.top    = table.offsetTop + 'px';
+            marke.style.height = table.offsetHeight + 'px';
+            marke.hidden = false;
+        });
+        wrap.addEventListener('mouseleave', aus);
     }
 
     // JSON huebsch einrücken, wenn der Inhalt gültiges JSON ist – sonst Rohtext.

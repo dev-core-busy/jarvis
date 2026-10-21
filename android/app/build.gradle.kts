@@ -7,6 +7,7 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.hilt.android)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.cyclonedx)
 }
 
 android {
@@ -111,4 +112,10 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
     // Reine JVM-Unit-Tests (z. B. ServerAdresse), Code-Review 2026-10-18
     testImplementation(libs.junit)
+}
+
+// SBOM der App (CycloneDX, 2026-10-21): nur was in der AUSGELIEFERTEN App steckt –
+// ohne includeConfigs landeten auch junit/hamcrest aus den Test-Konfigurationen darin.
+tasks.named<org.cyclonedx.gradle.CyclonedxDirectTask>("cyclonedxDirectBom") {
+    includeConfigs.set(listOf("releaseRuntimeClasspath"))
 }

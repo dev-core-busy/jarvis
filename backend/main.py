@@ -2784,44 +2784,17 @@ _vorab_dienst_pause = {"bis": 0.0}
 
 def _ad_sperrrichtlinie_lesen() -> dict | None:
     """Sperrrichtlinie der Domaene ueber das Dienstkonto: {schwelle, fenster_s}.
-
-    ``lockoutThreshold`` = Fehlversuche bis zur Sperre (0 = nie),
-    ``lockOutObservationWindow`` = Zeitraum, in dem sie zaehlen. ldap3 liefert
-    das Fenster je nach Schema als ``timedelta`` oder als negative Zahl in
-    100-ns-Schritten – beides wird verstanden. None = nicht lesbar.
+    None = nicht lesbar. Die Abfrage selbst steht in ldap_directory.sperrrichtlinie().
 
     GRENZE: eine feinkoernige Kennwortrichtlinie (PSO) kann fuer einzelne
     Gruppen strenger sein; sie steht nicht am Domaenenobjekt. Deshalb ist die
     Untergrenze in ``anmelde_schutz`` 1 und die Rueckfallschwelle 2."""
     try:
         from backend import ldap_directory
-        import ldap3
-        conn, base_dn = ldap_directory._bind()
+        return ldap_directory.sperrrichtlinie()
     except Exception as e:  # noqa: BLE001
         print(f"[Anmeldeschutz] Sperrrichtlinie der Domaene nicht lesbar ({e})", flush=True)
         return None
-    try:
-        conn.search(search_base=base_dn, search_filter="(objectClass=domain)",
-                    search_scope=ldap3.BASE,
-                    attributes=["lockoutThreshold", "lockOutObservationWindow"])
-        if not conn.entries:
-            return None
-        e = conn.entries[0]
-        schwelle = int(e["lockoutThreshold"].value or 0) if "lockoutThreshold" in e else 0
-        roh = e["lockOutObservationWindow"].value if "lockOutObservationWindow" in e else 0
-        if hasattr(roh, "total_seconds"):
-            fenster = abs(roh.total_seconds())
-        else:
-            fenster = abs(int(roh or 0)) / 1e7
-        return {"schwelle": schwelle, "fenster_s": fenster}
-    except Exception as e:  # noqa: BLE001
-        print(f"[Anmeldeschutz] Sperrrichtlinie: Suche gescheitert ({e})", flush=True)
-        return None
-    finally:
-        try:
-            conn.unbind()
-        except Exception:  # noqa: BLE001
-            pass
 
 
 def _anmelde_schwellen_aktualisieren() -> None:
@@ -9841,19 +9814,9 @@ async def test_ad_connection(request: Request, _username: str = Depends(require_
     # Dienst stand), und die Verbindung wurde nie geschlossen (``conn.closed``
     # ist ein Attributzugriff) – jeder Klick auf "AD testen" liess einen
     # Socket offen.
-    def _erreichbar() -> None:
-        import ldap3
-        server = ldap3.Server(ad_server, get_info=ldap3.NONE, connect_timeout=5)
-        conn = ldap3.Connection(server, auto_bind=False)
-        try:
-            conn.open()
-        finally:
-            try:
-                conn.unbind()
-            except Exception:  # noqa: BLE001
-                pass
+    from backend import ldap_directory
     try:
-        await asyncio.to_thread(_erreichbar)
+        await asyncio.to_thread(ldap_directory.erreichbar, ad_server, 5)
     except ImportError:
         return JSONResponse({"reachable": False, "error": "ldap3 nicht installiert"})
     except Exception as e:
@@ -9958,14 +9921,8 @@ async def get_ad_status(user: str = Depends(require_local_auth)):
     if ad_server and ad_domain:
         def _probe() -> bool:
             try:
-                import ldap3
-                srv = ldap3.Server(ad_server, get_info=ldap3.NONE, connect_timeout=3)
-                conn = ldap3.Connection(srv, auto_bind=False)
-                conn.open()
-                try:
-                    conn.unbind()
-                except Exception:  # noqa: BLE001
-                    pass
+                from backend import ldap_directory
+                ldap_directory.erreichbar(ad_server, 3)
                 return True
             except Exception:  # noqa: BLE001
                 return False

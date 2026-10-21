@@ -32,6 +32,8 @@ PA = "deploy/security/pip_audit_ausnahmen.py"
 CI = "tests/ci_lauf.py"
 REQ = "requirements.txt"
 GOMOD = "windows-app-go/go.mod"
+AGR = "android/app/build.gradle.kts"
+GWP = "android/gradle/wrapper/gradle-wrapper.properties"
 
 PROBEN = [
     # ── M7: ssh_haertung.sh ──
@@ -139,6 +141,12 @@ PROBEN = [
     ("Go-SBOM ohne Standardbibliothek", WF,
      '            "$(go env GOPATH)/bin/cyclonedx-gomod" app -json -std -licenses=false \\\n',
      '            "$(go env GOPATH)/bin/cyclonedx-gomod" app -json -licenses=false \\\n'),
+    ("Android-SBOM entfernt", WF,
+     '        run: ./gradlew --no-daemon -q :app:cyclonedxDirectBom\n', '        run: "true"\n'),
+    ("Android-SBOM mit Test-Konfigurationen", AGR,
+     '    includeConfigs.set(listOf("releaseRuntimeClasspath"))\n', ''),
+    ("Gradle-Distribution ohne Pruefsumme", GWP,
+     'distributionSha256Sum=f397b287023acdba1e9f6fc5ea72d22dd63669d59ed4a289a29b1a76eee151c6\n', ''),
     ("go.mod ohne toolchain-Zeile", GOMOD, '\ntoolchain go1.27.3\n', '\n'),
     ("kein Pull-Request-Ausloeser", WF,
      '  pull_request:\n    branches: [master]\n', ''),
@@ -162,7 +170,7 @@ PROBEN = [
     ("mcp ohne Untergrenze", REQ, 'mcp>=1.28.1,<2\n', 'mcp>=1.5.0,<2\n'),
 ]
 
-DATEIEN = [SSH, FW, HI, NODE, SJR, DF, BDF, INST, WF, DB, PA, CI, REQ, GOMOD, "backend/main.py", "tests/test_bsi_m6_m7.py"]
+DATEIEN = [SSH, FW, HI, NODE, SJR, DF, BDF, INST, WF, DB, PA, CI, REQ, GOMOD, AGR, GWP, "backend/main.py", "tests/test_bsi_m6_m7.py"]
 
 
 def md5(pfad: str) -> str:

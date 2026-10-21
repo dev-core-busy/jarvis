@@ -561,9 +561,18 @@ for titel, muster in (("Waechter-Sammellauf", r"tests/ci_lauf\.py"),
                       ("SAST bandit", r"\bbandit\b.*-r\b"),
                       ("gitleaks", r"gitleaks\S* git\b"),
                       ("govulncheck (Go-Client)", r"govulncheck\S*\"? \./\.\.\."),
-                      ("SBOM Go (CycloneDX, mit Standardbibliothek)", r"cyclonedx-gomod\S*\"? app\b.*-std\b")):
+                      ("SBOM Go (CycloneDX, mit Standardbibliothek)", r"cyclonedx-gomod\S*\"? app\b.*-std\b"),
+                      ("SBOM Android (CycloneDX)", r"gradlew\b.*:app:cyclonedxDirectBom\b")):
     check(f"Schritt: {titel}", job_mit(muster) is not None)
 gv = job_mit(r"govulncheck\S*\"? \./\.\.\.")
+# Android-SBOM nur aus der ausgelieferten App, nicht aus den Test-Konfigurationen;
+# und die Gradle-Distribution, die die CI laedt, wird gegen ihre Pruefsumme geprueft.
+_app_gradle = (ROOT / "android" / "app" / "build.gradle.kts").read_text(encoding="utf-8")
+check("Android-SBOM auf releaseRuntimeClasspath begrenzt",
+      re.search(r'includeConfigs\.set\(listOf\("releaseRuntimeClasspath"\)\)', _app_gradle) is not None)
+check("Gradle-Wrapper prueft die Distribution (distributionSha256Sum)",
+      re.search(r"(?m)^distributionSha256Sum=[0-9a-f]{64}\s*$",
+                (ROOT / "android/gradle/wrapper/gradle-wrapper.properties").read_text(encoding="utf-8")) is not None)
 
 
 def toolchain_aus_gomod(run: str) -> bool:

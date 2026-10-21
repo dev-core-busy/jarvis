@@ -78,6 +78,7 @@ API = "frontend/js/api_doku.js"
 CRON = "frontend/js/cron.js"
 DES = "frontend/js/wissen_destillat.js"
 KNW = "frontend/js/knowledge.js"
+LDD = "backend/ldap_directory.py"
 WJS = "frontend/js/wissen.js"
 KH = "frontend/js/konto_hinweise.js"
 FB = "frontend/js/feedback.js"
@@ -85,7 +86,7 @@ CP = "frontend/js/claude_portal.js"
 AM = "frontend/js/ai_mouse.js"
 I18N = "frontend/js/i18n.js"
 ERFASST = [MAIN, ST, SL, POL, META, OPS, NODE, CA, AG, SAD, SEC, SYS, KAM, API, CRON, DES, KNW,
-           WJS, KH, FB, CP, AM, I18N]
+           WJS, KH, FB, CP, AM, I18N, LDD]
 
 PROBEN = [
     # ── Sitzung und Widerruf ──
@@ -135,11 +136,14 @@ PROBEN = [
      "                _transcribe_audio, pfad, sprache, \"Jarvis Sprachsteuerung:\", \"voice_browser\")\n",
      "        text = await asyncio.to_thread(\n"
      "            _transcribe_audio, pfad, sprache, \"Jarvis Sprachsteuerung:\", \"voice_browser\")\n", W_LOOP),
+    # Der Verbindungstest liegt seit 2026-10-21 in ldap_directory.erreichbar()
     ("AD testen: wieder im Event-Loop", MAIN,
-     "        await asyncio.to_thread(_erreichbar)\n", "        _erreichbar()\n", W_LOOP),
-    ("AD testen: Verbindung bleibt offen", MAIN,
-     "            try:\n                conn.unbind()\n            except Exception:  # noqa: BLE001\n                pass\n",
-     "            pass\n", W_LOOP),
+     "        await asyncio.to_thread(ldap_directory.erreichbar, ad_server, 5)\n",
+     "        ldap_directory.erreichbar(ad_server, 5)\n", W_LOOP),
+    ("AD testen: Verbindung bleibt offen", LDD,
+     "        conn.open()\n    finally:\n        try:\n            conn.unbind()\n"
+     "        except Exception:  # noqa: BLE001\n            pass\n",
+     "        conn.open()\n    finally:\n        pass\n", W_LOOP),
     ("Beschriftung: /api/stt ohne Eintrag", MAIN,
      "    (\"POST\",   r\"/api/stt\",                             \"Chat · Spracheingabe\"),\n", "", W_AB),
     # ── Broker ──

@@ -267,6 +267,20 @@ _lt._schliessen = lambda c: None
 _lt.uebergang = lambda: False
 sys.modules["backend.ldap_tls"] = _lt
 pkg.ldap_tls = _lt
+# Der Verbindungstest liegt seit 2026-10-21 in backend/ldap_directory.py
+# (erreichbar()). Geladen wird das ECHTE Modul – sonst misst die Pruefung
+# "Verbindung geschlossen" eine Attrappe. backend.config nur als Attrappe: der
+# echte Import schriebe die Live-settings.json zurueck.
+import importlib.util  # noqa: E402
+_cfg = types.ModuleType("backend.config")
+_cfg.config = types.SimpleNamespace(get_setting=lambda k, d=None: d)
+sys.modules["backend.config"] = _cfg
+pkg.config = _cfg
+_spec = importlib.util.spec_from_file_location("backend.ldap_directory", ROOT / "backend" / "ldap_directory.py")
+_ldd = importlib.util.module_from_spec(_spec)
+sys.modules["backend.ldap_directory"] = _ldd
+_spec.loader.exec_module(_ldd)
+pkg.ldap_directory = _ldd
 ns = {"JSONResponse": Antwort, "Request": Anfrage, "Depends": lambda x: None,
       "require_local_auth": None, "asyncio": asyncio}
 ad = schneide("test_ad_connection", ns)

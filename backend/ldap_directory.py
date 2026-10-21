@@ -60,6 +60,59 @@ def _bind(bind_user=None, bind_password=None):
     return conn, _base_dn(ad_domain)
 
 
+# ── Weitere ldap3-Zugriffe der Anwendung (aus main.py hierher, 2026-10-21) ──────
+# ldap3 ist seit 2021 ohne neue Fassung. Damit ein spaeterer Tausch auf diese
+# Datei und backend/ldap_tls.py begrenzt bleibt, liegen die direkten Aufrufe hier.
+
+def erreichbar(ad_server, timeout=5):
+    """Reiner Verbindungstest zum DC – OHNE Bind, ohne Anmeldedaten. Oeffnet und
+    schliesst die Verbindung (vorher blieb je Klick auf "AD testen" ein Socket
+    offen). Wirft ImportError, wenn ldap3 fehlt, sonst die Netzwerk-Ausnahme."""
+    import ldap3
+    server = ldap3.Server(ad_server, get_info=ldap3.NONE, connect_timeout=timeout)
+    conn = ldap3.Connection(server, auto_bind=False)
+    try:
+        conn.open()
+    finally:
+        try:
+            conn.unbind()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def sperrrichtlinie():
+    """Sperrrichtlinie der Domaene ueber das Dienstkonto: {schwelle, fenster_s},
+    None ohne Domaenenobjekt. Wirft RuntimeError, wenn Bind oder Suche scheitern.
+
+    ``lockoutThreshold`` = Fehlversuche bis zur Sperre (0 = nie),
+    ``lockOutObservationWindow`` = Zeitraum, in dem sie zaehlen. ldap3 liefert
+    das Fenster je nach Schema als ``timedelta`` oder als negative Zahl in
+    100-ns-Schritten – beides wird verstanden."""
+    import ldap3
+    conn, base_dn = _bind()
+    try:
+        conn.search(search_base=base_dn, search_filter="(objectClass=domain)",
+                    search_scope=ldap3.BASE,
+                    attributes=["lockoutThreshold", "lockOutObservationWindow"])
+        if not conn.entries:
+            return None
+        e = conn.entries[0]
+        schwelle = int(e["lockoutThreshold"].value or 0) if "lockoutThreshold" in e else 0
+        roh = e["lockOutObservationWindow"].value if "lockOutObservationWindow" in e else 0
+        if hasattr(roh, "total_seconds"):
+            fenster = abs(roh.total_seconds())
+        else:
+            fenster = abs(int(roh or 0)) / 1e7
+        return {"schwelle": schwelle, "fenster_s": fenster}
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(f"Suche gescheitert ({e})")
+    finally:
+        try:
+            conn.unbind()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def _val(entry, attr):
     try:
         if attr in entry and entry[attr]:

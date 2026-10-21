@@ -156,6 +156,19 @@ _sitzung_cookie.schluessel_quelle(lambda: config.SECRET_KEY)
 app.add_middleware(_sitzung_cookie.SitzungCookieMiddleware)
 
 
+def _routing_pfad(request) -> str:
+    """Der Pfad, nach dem das ROUTING entscheidet – Grundlage jeder pfadbasierten
+    Entscheidung hier (Sperren, Protokoll, Kopfzeilen, Cache).
+
+    NICHT ``request.url.path``: den baut Starlette aus dem Host-Header, und mit
+    CVE-2026-48710 ("BadHost") machte ein Host ``x/static`` aus ``/api/admin/...``
+    ein ``/static/api/admin/...``, waehrend der echte Endpunkt lief – die
+    Loopback-Sperre fiel weg. Behoben ist das in Starlette >= 1.0.1; dieser Helfer
+    haelt die Entscheidung auch ohne die Version beim aufgerufenen Endpunkt.
+    Waechter: tests/test_routing_pfad.py."""
+    return request.scope["path"]
+
+
 # Inhalts-Kennung fuer /static/ (2026-10-13): HTML-Seiten verweisen auf
 # `?v=<Hash des Inhalts>`, und NUR eine solche Adresse wird lang gecacht –
 # alles andere bleibt no-cache wie bisher. Begruendung in static_kennung.py.
@@ -168,7 +181,7 @@ async def no_cache_static(request: Request, call_next):
     """/static/: langer Cache nur unter passender Inhalts-Kennung, sonst
     no-cache. HTML-Antworten: /static/-Einbindungen auf die Kennung umschreiben."""
     response = await call_next(request)
-    pfad = request.url.path
+    pfad = _routing_pfad(request)
     if pfad.startswith("/static/"):
         response.headers["Cache-Control"] = _static_kennung.cache_kopf(
             pfad, request.query_params.get("v"))
@@ -202,7 +215,7 @@ _csp.einstellungen_quelle(config.get_setting)
 async def _csp_kopfzeilen(request: Request, call_next):
     response = await call_next(request)
     if response.headers.get("content-type", "").lower().startswith("text/html"):
-        for name, wert in _csp.kopfzeilen(request.url.path,
+        for name, wert in _csp.kopfzeilen(_routing_pfad(request),
                                           request.headers.get("host", "")).items():
             response.headers[name] = wert
     return response
@@ -221,7 +234,7 @@ _sicherheits_kopf.einstellungen_quelle(config.get_setting, _SERVER_ZERTIFIKAT)
 async def _sicherheits_kopfzeilen(request: Request, call_next):
     response = await call_next(request)
     for name, wert in _sicherheits_kopf.kopfzeilen(
-            request.url.path, request.url.scheme == "https").items():
+            _routing_pfad(request), request.url.scheme == "https").items():
         response.headers.setdefault(name, wert)
     return response
 
@@ -284,7 +297,7 @@ async def _api_local_only_mw(request: Request, call_next):
     zaehler pro Gruppe in der API-Doku). Gezaehlt werden nicht-lokale Zugriffe auf
     ALLE gerouteten Endpunkte (jede Doku-Gruppe), statische Assets ausgenommen; die
     403-Sperre gilt weiterhin nur fuer als 'nur lokal' markierte /api/-Endpunkte."""
-    path = request.url.path
+    path = _routing_pfad(request)
     if not _client_is_local(request) and not path.startswith("/static/"):
         key = _resolve_route_key(request)
         # Exempt-Endpunkte (Konfig/Doku-Polling) werden NICHT gezaehlt, sonst
@@ -1219,7 +1232,7 @@ def _admin_pruefung_merken(fn):
 
 @app.middleware("http")
 async def _sicherheits_protokoll_mw(request: Request, call_next):
-    if request.method not in _AENDERNDE_METHODEN or not request.url.path.startswith("/api/"):
+    if request.method not in _AENDERNDE_METHODEN or not _routing_pfad(request).startswith("/api/"):
         return await call_next(request)
     halter: dict = {}
     marke = _admin_anfrage.set(halter)
@@ -1228,7 +1241,7 @@ async def _sicherheits_protokoll_mw(request: Request, call_next):
     finally:
         _admin_anfrage.reset(marke)
     try:
-        pfad = request.url.path
+        pfad = _routing_pfad(request)
         ip = request.client.host if request.client else ""
         status = response.status_code
         if "admin" in halter:
@@ -1834,7 +1847,7 @@ def _note_activity(username: str, request: Request) -> None:
     """Anwesenheit immer, Handlung nur bei veraendernden Anfragen."""
     try:
         ip = request.client.host if request.client else ""
-        pfad = request.url.path
+        pfad = _routing_pfad(request)
         anzeige = _display_name(username)
         if (request.method in ("POST", "PUT", "PATCH", "DELETE")
                 and not pfad.startswith(_ACTION_IGNORE)):

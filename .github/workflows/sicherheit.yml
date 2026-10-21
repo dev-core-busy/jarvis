@@ -156,6 +156,39 @@ jobs:
           path: sbom-whatsapp-bridge.cdx.json
           if-no-files-found: warn
 
+  # ── Go: govulncheck des Windows-Clients ─────────────────────────────────────
+  # ⚠ WARUM (2026-10-21): go.mod stand auf "go 1.25.0" ohne toolchain-Zeile, also
+  # wurde mit GENAU go1.25.0 gebaut – ohne jede Patch-Fassung. govulncheck fand
+  # damit 38 vom Code ERREICHTE Schwachstellen (crypto/tls, x509, net/http …),
+  # Dependabot sieht die Standardbibliothek gar nicht. Die Toolchain kommt aus der
+  # toolchain-Zeile in go.mod, und govulncheck wird MIT ihr gebaut: ein aelteres
+  # govulncheck bricht an neueren Quelltexten der Standardbibliothek ab
+  # ("file requires newer Go version") statt zu pruefen.
+  # cgo + GOOS=windows wie in build.sh – ohne mingw fehlen fyne/malgo die Typen,
+  # und govulncheck meldet Uebersetzungsfehler statt Befunde.
+  go:
+    name: Go – govulncheck (Windows-Client)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: windows-app-go
+    env:
+      GOVULNCHECK_VERSION: 'v1.9.0'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6 (Commit gepinnt, Code-Review 2026-10-18)
+      - name: mingw-w64 (cgo-Cross-Bau fuer Windows)
+        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64
+      - name: govulncheck (Toolchain aus go.mod)
+        run: |
+          tc=$(awk '$1 == "toolchain" {print $2}' go.mod)
+          if [ -z "$tc" ]; then echo "go.mod ohne toolchain-Zeile" >&2; exit 1; fi
+          export GOTOOLCHAIN="$tc"
+          go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
+          CGO_ENABLED=1 GOOS=windows GOARCH=amd64 \
+          CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ \
+            "$(go env GOPATH)/bin/govulncheck" ./...
+
   # ── SAST: bandit, nur hohe Schwere UND hohe Sicherheit ──────────────────────
   # Bewusst eng: der Lauf soll bei einem NEUEN schweren Fund rot werden, nicht
   # dauerhaft rot sein. Bestehende, gewollte Stellen tragen "# nosec Bxxx" mit

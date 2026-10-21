@@ -31,6 +31,7 @@ DB = ".github/dependabot.yml"
 PA = "deploy/security/pip_audit_ausnahmen.py"
 CI = "tests/ci_lauf.py"
 REQ = "requirements.txt"
+GOMOD = "windows-app-go/go.mod"
 
 PROBEN = [
     # ── M7: ssh_haertung.sh ──
@@ -118,6 +119,11 @@ PROBEN = [
      '        run: venv/bin/python tests/ci_lauf.py --parallel 4 --zeitdeckel 300 --ausnahmen-pruefen\n',
      '        run: "true"\n'),
     ("bandit entfernt", WF, '      - run: bandit -q -r backend skills -lll -iii\n', '      - run: "true"\n'),
+    ("govulncheck entfernt", WF,
+     '            "$(go env GOPATH)/bin/govulncheck" ./...\n', '            true\n'),
+    ("govulncheck mit beliebiger Toolchain", WF,
+     '          export GOTOOLCHAIN="$tc"\n', '          export GOTOOLCHAIN=auto\n'),
+    ("go.mod ohne toolchain-Zeile", GOMOD, '\ntoolchain go1.27.3\n', '\n'),
     ("kein Pull-Request-Ausloeser", WF,
      '  pull_request:\n    branches: [master]\n', ''),
     ("Dependabot ohne numpy-Grenze", DB,
@@ -140,7 +146,7 @@ PROBEN = [
     ("mcp ohne Untergrenze", REQ, 'mcp>=1.28.1,<2\n', 'mcp>=1.5.0,<2\n'),
 ]
 
-DATEIEN = [SSH, FW, HI, NODE, SJR, DF, BDF, INST, WF, DB, PA, CI, REQ, "backend/main.py", "tests/test_bsi_m6_m7.py"]
+DATEIEN = [SSH, FW, HI, NODE, SJR, DF, BDF, INST, WF, DB, PA, CI, REQ, GOMOD, "backend/main.py", "tests/test_bsi_m6_m7.py"]
 
 
 def md5(pfad: str) -> str:

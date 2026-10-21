@@ -259,6 +259,8 @@ class _Req:
         self.client = _Client(ip)
         self.method = methode
         self.url = _Url(pfad, query)
+        # Form wie bei Starlette: main.py entscheidet ueber scope["path"] (_routing_pfad)
+        self.scope = {"type": "http", "path": pfad}
         self.headers = {}
 
     async def json(self):
@@ -282,7 +284,7 @@ NS = {
     "time": time,
 }
 exec(_ausfuehrbar("_antwort_json", "_anmeldung_protokollieren", "_record_login_attempt",
-                  "_admin_pruefung_merken", "_sicherheits_protokoll_mw",
+                  "_admin_pruefung_merken", "_sicherheits_protokoll_mw", "_routing_pfad",
                   zuweisungen=("_AENDERNDE_METHODEN", "_KONTO_PFADE")), NS)
 prot = NS["_anmeldung_protokollieren"]
 

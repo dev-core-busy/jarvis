@@ -44,6 +44,7 @@ HAERTUNG = SEC / "haertung_installieren.sh"
 NODE_SKRIPT = SEC / "node_aktualisieren.sh"
 WORKFLOW = ROOT / ".github" / "workflows" / "sicherheit.yml"
 DEPENDABOT = ROOT / ".github" / "dependabot.yml"
+GOMOD = ROOT / "windows-app-go" / "go.mod"
 
 OK = 0
 FAIL = 0
@@ -533,8 +534,26 @@ for titel, muster in (("Waechter-Sammellauf", r"tests/ci_lauf\.py"),
                       ("SBOM Python (CycloneDX)", r"cyclonedx-py\b"),
                       ("SBOM npm (CycloneDX)", r"cyclonedx-npm\b"),
                       ("SAST bandit", r"\bbandit\b.*-r\b"),
-                      ("gitleaks", r"gitleaks\S* git\b")):
+                      ("gitleaks", r"gitleaks\S* git\b"),
+                      ("govulncheck (Go-Client)", r"govulncheck\S*\"? \./\.\.\.")):
     check(f"Schritt: {titel}", job_mit(muster) is not None)
+gv = job_mit(r"govulncheck\S*\"? \./\.\.\.")
+
+
+def toolchain_aus_gomod(run: str) -> bool:
+    """GOTOOLCHAIN bekommt GENAU die Variable, die aus der toolchain-Zeile von go.mod
+    gelesen wurde - ein blosses Vorkommen von "GOTOOLCHAIN=" liesse auch =auto durch
+    (so in der Gegenprobe gesehen)."""
+    q = re.search(r"(\w+)=\$\(awk '\$1 == \"toolchain\" \{print \$2\}' go\.mod\)", run)
+    return bool(q) and re.search(r'GOTOOLCHAIN="?\$\{?%s\}?"?(\s|$)' % q.group(1), run) is not None
+
+
+check("govulncheck laeuft mit der Toolchain aus go.mod",
+      bool(gv) and any(toolchain_aus_gomod(s.get("run") or "") for s in schritte(gv[1])))
+# Ohne toolchain-Zeile baut Go mit der nackten Fassung aus "go 1.x.0" - also ohne
+# Patch-Fassungen (2026-10-21: 38 erreichte Schwachstellen unter go1.25.0).
+check("go.mod legt die Toolchain fest",
+      re.search(r"(?m)^toolchain go\d+\.\d+\.\d+\s*$", GOMOD.read_text(encoding="utf-8")) is not None)
 pa = job_mit(r"pip-audit\b")
 check("pip-audit liest die Ausnahmeliste",
       bool(pa) and any("pip_audit_ausnahmen.py" in (s.get("run") or "") for s in schritte(pa[1])))

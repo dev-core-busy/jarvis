@@ -88,9 +88,9 @@ PROBEN = [
      '            if kx is not None and kx[0] == _norm_login(user):\n                halter["benutzer"]',
      '            if kx is not None:\n                halter["benutzer"]'),
     ("Pfad samt Query (Tokens) im Protokoll", MA,
-     '        pfad = request.url.path\n        ip = request.client.host if request.client else ""\n'
+     '        pfad = _routing_pfad(request)\n        ip = request.client.host if request.client else ""\n'
      '        status = response.status_code\n',
-     '        pfad = request.url.path + "?" + request.url.query\n'
+     '        pfad = _routing_pfad(request) + "?" + request.url.query\n'
      '        ip = request.client.host if request.client else ""\n'
      '        status = response.status_code\n'),
     ("verweigerte Admin-Aktion nicht protokolliert", MA,

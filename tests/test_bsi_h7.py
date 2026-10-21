@@ -190,8 +190,16 @@ check("Middleware ist als @app.middleware(\"http\") registriert",
 mw.decorator_list = []
 for a in mw.args.args:
     a.annotation = None
+# Der ECHTE Helfer aus main.py, keine Attrappe: die Middleware entscheidet ueber
+# _routing_pfad (scope["path"]), siehe tests/test_routing_pfad.py.
+rp = next((n for n in BAUM.body if isinstance(n, ast.FunctionDef) and n.name == "_routing_pfad"), None)
+if rp is None:
+    abbruch("_routing_pfad nicht in main.py")
+rp.returns = None
+for a in rp.args.args:
+    a.annotation = None
 NS = {"_sicherheits_kopf": SK}
-exec(compile(ast.fix_missing_locations(ast.Module(body=[mw], type_ignores=[])), "main.py", "exec"), NS)
+exec(compile(ast.fix_missing_locations(ast.Module(body=[rp, mw], type_ignores=[])), "main.py", "exec"), NS)
 
 setze("ca_signiert.crt")
 

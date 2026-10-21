@@ -24,6 +24,7 @@ MARKE = ROOT / "tests" / ".gegen_bsi_m1_m2.laufmarke"
 SL = "backend/sicherheits_log.py"
 MA = "backend/main.py"
 LR = "backend/log_retention.py"
+LF = "backend/loeschfristen.py"
 PO = "backend/broker/policy.py"
 HI = "deploy/security/haertung_installieren.sh"
 SJ = "start_jarvis_root.sh"
@@ -32,9 +33,8 @@ SB = "deploy/security/setup_broker.sh"
 PROBEN = [
     # ── Sicherheitsprotokoll ──
     ("Hash ohne Vorgaenger (Kette nur Pruefsumme)", SL,
-     '    return hashlib.sha256((prev + _kanonisch(ohne)).encode("utf-8")).hexdigest()\n',
-     '    return hashlib.sha256(_kanonisch({k: v for k, v in ohne.items() if k != "prev"})'
-     '.encode("utf-8")).hexdigest()\n'),
+     '    daten = (prev + _kanonisch(ohne)).encode("utf-8")\n',
+     '    daten = _kanonisch({k: v for k, v in ohne.items() if k != "prev"}).encode("utf-8")\n'),
     ("pruefen() sieht keine Luecke", SL,
      '            elif prev is not None and e.get("prev") != prev:\n',
      '            elif False:\n'),
@@ -47,9 +47,12 @@ PROBEN = [
      '            if ts is None or ts >= cutoff_ts:\n                continue\n'),
     ("Kuerzen macht die Datei weltlesbar", SL,
      '        os.chmod(tmp, 0o600)\n', ''),
-    ("Unsinn-Frist heisst dauerhaft", SL,
-     '    except (TypeError, ValueError):\n        return DEFAULT_TAGE\n',
-     '    except (TypeError, ValueError):\n        return 0\n'),
+    # Seit BSI M9 entscheidet loeschfristen.tage() – der Umgebungs-Zweig in
+    # sicherheits_log.py ist nur noch ein Netz fuer einen gescheiterten Import und
+    # war deshalb von keiner Pruefung erreichbar (Probe blieb stumm, 2026-10-21).
+    ("Unsinn-Frist heisst dauerhaft", LF,
+     '            return _begrenzen(art, n)\n    return vorgabe\n',
+     '            return _begrenzen(art, n)\n    return 0\n'),
     ("Schreibfehler wirft", SL,
      '            _fehler["datei"] += 1\n', '            raise\n'),
     # ── Aufraeumlauf ──
@@ -136,7 +139,7 @@ PROBEN = [
      'bash "$SELF_DIR/haertung_installieren.sh" "$JARVIS_DIR" || true\n', ''),
 ]
 
-DATEIEN = [SL, MA, LR, PO, HI, SJ, SB, "tests/test_bsi_m1_m2.py"]
+DATEIEN = [SL, MA, LR, LF, PO, HI, SJ, SB, "tests/test_bsi_m1_m2.py"]
 
 WAECHTER = [
     (["python3", "tests/test_bsi_m1_m2.py"], r"Ergebnis: (\d+) OK, (\d+) FAIL"),

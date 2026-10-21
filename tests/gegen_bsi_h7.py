@@ -32,7 +32,7 @@ PROBEN = [
     ("HSTS auch ueber HTTP", SK,
      "    if https and hsts_aktiv():\n", "    if hsts_aktiv():\n"),
     ("Add-in-Seiten mit X-Frame-Options", SK,
-     "    if not any((pfad or \"\").startswith(p) for p in ADDIN_PRAEFIXE):\n", "    if True:\n"),
+     "    if not any(pfad.startswith(p) for p in ADDIN_PRAEFIXE):\n", "    if True:\n"),
     ("Referrer-Policy zu offen", SK,
      'REFERRER = "same-origin"\n', 'REFERRER = "unsafe-url"\n'),
     ("nosniff fehlt", SK,

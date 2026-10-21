@@ -13,6 +13,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -59,7 +60,10 @@ class SettingsDataStore @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
     private val KEY_SERVER_URL    = stringPreferencesKey("server_url")
+    // Klartext-Altform – wird beim ersten Lesen in KEY_API_KEY_ENC umgezogen und geloescht
     private val KEY_API_KEY       = stringPreferencesKey("api_key")
+    private val KEY_API_KEY_ENC   = stringPreferencesKey("api_key_enc")
+    private val tresor = SchluesselTresor.keystore()
     private val KEY_AUTO_SEND     = booleanPreferencesKey("auto_send_voice")
     private val KEY_QUICK_ACTIONS = stringPreferencesKey("quick_actions")
     private val KEY_BG_TYPE       = intPreferencesKey("bg_type")
@@ -77,10 +81,32 @@ class SettingsDataStore @Inject constructor(
     private val KEY_TTS_ENABLED        = booleanPreferencesKey("tts_enabled")
     private val KEY_UI_LANG            = stringPreferencesKey("ui_lang")
 
-    val settings: Flow<JarvisSettings> = context.dataStore.data.map { prefs ->
+    /**
+     * Zieht einen Klartext-Schluessel in die verschluesselte Form um. Ist der
+     * Keystore nicht nutzbar, bleibt der Klartext stehen – lieber unverschluesselt
+     * als ein Benutzer, dessen Schluessel verschwindet.
+     */
+    private suspend fun klartextUmziehen() {
+        context.dataStore.edit { prefs ->
+            val alt = prefs[KEY_API_KEY] ?: return@edit
+            if (alt.isEmpty()) {
+                prefs.remove(KEY_API_KEY)
+                return@edit
+            }
+            val verpackt = runCatching { tresor.verpacken(alt) }.getOrNull() ?: return@edit
+            prefs[KEY_API_KEY_ENC] = verpackt
+            prefs.remove(KEY_API_KEY)
+        }
+    }
+
+    /** Verschluesselte Form vor Altform; nicht entschluesselbar -> leer (neu eingeben). */
+    private fun apiKeyLesen(prefs: Preferences): String =
+        prefs[KEY_API_KEY_ENC]?.let { tresor.entpacken(it) } ?: prefs[KEY_API_KEY] ?: ""
+
+    val settings: Flow<JarvisSettings> = context.dataStore.data.onStart { klartextUmziehen() }.map { prefs ->
         JarvisSettings(
             serverUrl = prefs[KEY_SERVER_URL] ?: "",
-            apiKey    = prefs[KEY_API_KEY] ?: "",
+            apiKey    = apiKeyLesen(prefs),
             autoSendVoice = prefs[KEY_AUTO_SEND] ?: true,
             quickActions = prefs[KEY_QUICK_ACTIONS]
                 ?.split("||")?.filter { it.isNotBlank() }
@@ -109,7 +135,14 @@ class SettingsDataStore @Inject constructor(
                 if (it.isNotBlank() && !it.startsWith("http")) "https://$it" else it
             }
             prefs[KEY_SERVER_URL]    = url
-            prefs[KEY_API_KEY]       = settings.apiKey
+            // Nur verschluesselt speichern; schlaegt der Keystore fehl, bleibt es beim Klartext
+            val verpackt = if (settings.apiKey.isEmpty()) null
+                else runCatching { tresor.verpacken(settings.apiKey) }.getOrNull()
+            when {
+                settings.apiKey.isEmpty() -> { prefs.remove(KEY_API_KEY_ENC); prefs.remove(KEY_API_KEY) }
+                verpackt != null -> { prefs[KEY_API_KEY_ENC] = verpackt; prefs.remove(KEY_API_KEY) }
+                else -> { prefs[KEY_API_KEY] = settings.apiKey; prefs.remove(KEY_API_KEY_ENC) }
+            }
             prefs[KEY_AUTO_SEND]     = settings.autoSendVoice
             prefs[KEY_QUICK_ACTIONS] = settings.quickActions.joinToString("||")
             prefs[KEY_BG_TYPE]       = settings.backgroundType

@@ -153,6 +153,53 @@ RE_DN_KONTEXT = re.compile(r"\b(?:CN|OU)=|DC=[^,\s]+,\s*DC=", re.IGNORECASE)
 # mermaid.min.js. Solche Dateien schreibt hier niemand von Hand.
 RE_FREMDCODE = re.compile(r"(^|/)vendor/|\.min\.(js|css)$|^frontend/js/vendor/")
 
+# ── Dritte Regel: Kontonamen der Form vorname.nachname ──────────────────────
+# ⚠ WARUM (2026-10-21): in einem Kommentar von main.py standen zwei echte
+# AD-Konten samt Gruppenname, in einem Test zwei weitere aus einem Vorfall –
+# seit dem Neustart der Historie oeffentlich, und dieser Waechter war gruen.
+# Die Sperrliste kann sie strukturell nicht kennen: zwei der vier Konten waren
+# auf keinem Server mehr konfiguriert, eine Liste haette sie nie bekommen.
+# Deshalb die FORM: ein gaengiger Vorname, ein Punkt, ein Nachname. Zugelassen
+# sind nur ausdrueckliche Platzhalter. Ein Vorname allein ist kein Echtwert;
+# trotzdem fehlen hier ausdruecklich die Vornamen echter Personen aus dem
+# Betrieb (sie stehen auf der Sperrliste), und ``max`` fehlt, weil es als
+# Variablenname ueberall vorkommt (``max.replace(...)``).
+VORNAMEN = set("""
+    alexander andrea andreas angelika anja anke annette antje barbara bernd
+    bernhard bettina birgit brigitte carsten christian christina christine
+    christoph claudia daniel daniela dennis dieter dirk dominik doris elke
+    erik fabian felix florian frank franz gabriele georg gerhard gisela hans
+    harald heike heinz helga helmut holger ines ingrid irene jan jana
+    jens joachim jochen johannes jonas joerg jutta juergen julia julian karin
+    karl katharina katja kerstin klaus kurt lars laura lisa lukas manfred
+    manuela marco marcus maria marie marina marion mario markus martin
+    martina matthias melanie michael michaela monika nadine natalie nicole
+    niklas nils nina norbert olaf oliver patrick paul peter petra philipp
+    rainer ralf ralph regina reinhard renate robert roland rolf ruth
+    sabine sabrina sandra sarah sascha sebastian silke simon simone sonja
+    stefan stefanie steffen stephan susanne sven tanja thomas thorsten tobias
+    torsten udo ulrich ulrike ursula uwe verena volker walter werner wolfgang
+    yvonne anna lena
+""".split())
+ERLAUBTE_PERSONEN = {
+    "anna.beispiel", "anna.beispielmann", "anna.muster", "lena.musterfrau",
+    "max.muster", "max.mustermann", "max.mueller", "erika.musterfrau",
+}
+# Zweiter Teil, der ein Code-Zugriff oder eine Dateiendung ist (``anna.json``).
+TECHNISCH = {"length", "name", "value", "size", "text", "id", "json", "cls",
+             "txt", "md", "py", "js", "csv", "xlsx", "docx", "pdf", "png", "log"}
+RE_PERSON = re.compile(r"(?<![A-Za-z0-9_.@])([A-Za-z]{3,12})\.([A-Za-z]{3,24})(?![A-Za-z0-9_])")
+
+
+def personen(zeile: str):
+    """Kontonamen der Form vorname.nachname, die kein Platzhalter sind."""
+    for m in RE_PERSON.finditer(zeile):
+        vor, nach = m.group(1).lower(), m.group(2).lower()
+        wort = vor + "." + nach
+        if vor in VORNAMEN and nach not in TECHNISCH and wort not in ERLAUBTE_PERSONEN:
+            yield "<Kontoname %s>" % kuerzel(wort)
+
+
 _ok = _fail = 0
 
 
@@ -340,6 +387,21 @@ if (not list(netze("ziel=198.51.100.7", _probe_netz))
     print("ABBRUCH (Exit 2): die Netzregel erkennt ihre Probe nicht oder meldet")
     print("  eine Versionsnummer bzw. eine Beispieladresse.")
     sys.exit(2)
+# Kontonamen-Regel: synthetisch, mit einem Nachnamen, den es nicht gibt.
+# Klein (AD-Form), gross (Anzeigeform) und mit Domaenen-Praefix muessen treffen;
+# Platzhalter, Code-Zugriffe und Dateinamen duerfen es nicht.
+_probe_personen = [list(personen(z)) for z in (
+    # Getrennte Literale: die Quellzeile selbst darf nicht treffen.
+    "editors_users='jutta." "sondenfrau'", "fuer Jutta." "Sondenfrau:",
+    "FIRMA\\jutta." "sondenfrau")]
+_falsch_personen = [z for z in (
+    "user = 'anna.beispiel'", "anna.json", "peter.length", "self.name", "a.peter.b")
+    if list(personen(z))]
+if not all(_probe_personen) or _falsch_personen:
+    print("ABBRUCH (Exit 2): die Kontonamen-Regel erkennt ihre Probe nicht oder")
+    print("  meldet einen Platzhalter/Code-Zugriff -> %r / %r"
+          % ([bool(x) for x in _probe_personen], _falsch_personen))
+    sys.exit(2)
 if not _getroffen_dn:
     print("ABBRUCH (Exit 2): die DN-Regel erkennt ihre eigene Probe nicht.")
     print("  Genau diese Luecke hat die Gegenprobe einmal gefunden - der Fall,")
@@ -404,6 +466,9 @@ for rel in dateien:
                 funde.append((rel, nr, wort))
         for netz in netze(zeile):
             funde.append((rel, nr, netz))
+        if not fremd:
+            for person in personen(zeile):
+                funde.append((rel, nr, person))
         if not fremd and RE_DN_KONTEXT.search(zeile):
             for teil in RE_DC.findall(zeile):
                 if teil.lower() not in ERLAUBTE_DC:

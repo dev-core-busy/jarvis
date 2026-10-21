@@ -566,6 +566,24 @@ def signieren(exe: Path) -> tuple[bool, str]:
     return (False, letzter)
 
 
+def info_url(basis: str) -> str:
+    """Die Info-Adresse der Signatur (``-i``): die Anleitungsseite der AI-Maus.
+
+    ``basis`` ist die in die Anwendung einkompilierte Serveradresse – damit
+    zeigt der Link genau auf den Server, mit dem die EXE ohnehin spricht, und
+    es entsteht keine zweite Einstellung, die auseinanderlaufen kann.
+
+    ⚠ NUR https, sonst ``""`` (dann wird ohne ``-i`` signiert): die Adresse
+    steht unveraenderlich in der signierten Datei, und die Anwendung selbst
+    nimmt ebenfalls nur https an (``EndpointResolver.Basis``). Ein Link auf
+    http waere eine Einladung, ihn im Klartext umzulenken.
+    """
+    b = str(basis or "").strip().rstrip("/")
+    if not re.match(r"^https://[^\s/\"'<>]+(?:/[^\s\"'<>]*)?$", b):
+        return ""
+    return b + "/ai-mouse"
+
+
 def _signieren_einmal(exe: Path, kennwort: str, tsa: str) -> tuple[bool, str]:
     """Ein Aufruf von ``osslsigncode``. ``(erfolg, grund)``."""
     from backend import ai_mouse  # noqa: PLC0415
@@ -593,6 +611,11 @@ def _signieren_einmal(exe: Path, kennwort: str, tsa: str) -> tuple[bool, str]:
             "-in", str(exe),
             "-out", str(ziel),
         ]
+        info = info_url(ai_mouse.einkompilierte_basis())
+        if info:
+            # Erscheint in Windows als Link im Signaturdialog
+            # (SpcSpOpusInfo.moreInfo).
+            befehl += ["-i", info]
         if tsa:
             # `-ts` ist RFC 3161; `-t` waere der alte Authenticode-Weg.
             befehl += ["-ts", tsa]

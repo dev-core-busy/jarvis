@@ -1312,6 +1312,29 @@ def paket_bauen(basis: str = "", marke: str = "", akzent: str = "") -> tuple:
     return ("%s-ai-mouse.zip" % sicher.lower(), puffer.getvalue())
 
 
+def _vorgaben_pfad():
+    """Ort der erzeugten ``Vorgaben.cs`` (gitignoriert, je Haus geschrieben)."""
+    return (_projekt_wurzel() / "ai-mouse" / "src" / "AiMouse"
+            / "Configuration" / "Vorgaben.cs")
+
+
+def einkompilierte_basis(pfad=None) -> str:
+    """Die Serveradresse, die in der AKTUELLEN ``Vorgaben.cs`` steht.
+
+    ``""``, wenn die Datei fehlt oder keinen Wert traegt. Gelesen wird die
+    Datei und keine Einstellung: nur sie sagt, was in die EXE eingeht – auch
+    die Info-Adresse der Signatur (``ai_mouse_signatur.info_url``) haengt
+    daran und darf nicht auf eine andere Quelle zeigen als die Anwendung.
+    """
+    ziel = pfad or _vorgaben_pfad()
+    try:
+        text = ziel.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    m = re.search(r'Endpoint\s*=\s*"([^"]*)"', text)
+    return m.group(1) if m else ""
+
+
 def _hauswerte_schreiben(basis: str = "") -> bool:
     """Schreibt ``Vorgaben.cs`` aus der SERVER-Konfiguration.
 
@@ -1327,14 +1350,10 @@ def _hauswerte_schreiben(basis: str = "") -> bool:
 
     Rueckgabe: ob sich etwas geaendert hat.
     """
-    ziel = (_projekt_wurzel() / "ai-mouse" / "src" / "AiMouse"
-            / "Configuration" / "Vorgaben.cs")
+    ziel = _vorgaben_pfad()
     marke, akzent = branding()
-    alt_basis = basis
-    if not alt_basis and ziel.is_file():
-        # Den bisherigen Wert uebernehmen, statt ihn zu leeren.
-        m = re.search(r'Endpoint\s*=\s*"([^"]*)"', ziel.read_text(encoding="utf-8"))
-        alt_basis = m.group(1) if m else ""
+    # Fehlt die Angabe, den bisherigen Wert uebernehmen, statt ihn zu leeren.
+    alt_basis = basis or einkompilierte_basis()
     neu = vorgaben_cs(alt_basis, marke, akzent, sprache())
     if ziel.is_file() and ziel.read_text(encoding="utf-8") == neu:
         return False

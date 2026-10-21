@@ -676,6 +676,70 @@ if hlp is not None:
     check("  er wirkt nur als root", "geteuid" in q)
     check("  und er wirft nie", "except Exception" in q)
 
+print("\n=== 14c. Info-Adresse der Signatur (-i) ===")
+check("https-Basis ergibt die Anleitungsseite",
+      sig.info_url("https://jarvis.beispiel.de") == "https://jarvis.beispiel.de/ai-mouse")
+check("ein Schraegstrich am Ende wird nicht verdoppelt",
+      sig.info_url("https://jarvis.beispiel.de/") == "https://jarvis.beispiel.de/ai-mouse")
+check("⚠ http ergibt KEINE Info-Adresse",
+      sig.info_url("http://jarvis.beispiel.de") == "")
+check("leer ergibt keine", sig.info_url("") == "")
+check("ein Anfuehrungszeichen wird nicht durchgereicht",
+      sig.info_url('https://a.beispiel.de/"x') == "")
+
+_vcs = SAND / "Vorgaben.cs"
+_vcs.write_text(am.vorgaben_cs("https://jarvis.beispiel.de", "Contoso", "#123456"),
+                encoding="utf-8")
+check("die einkompilierte Basis wird aus Vorgaben.cs gelesen (Erzeuger: vorgaben_cs)",
+      am.einkompilierte_basis(_vcs) == "https://jarvis.beispiel.de")
+check("fehlt die Datei, ist sie leer",
+      am.einkompilierte_basis(SAND / "fehlt.cs") == "")
+
+# Der AUFRUF selbst: subprocess.run abfangen und die Befehlszeile ansehen.
+_befehle = []
+
+
+class _Lauf:
+    returncode = 1
+    stdout = ""
+    stderr = "attrappe"
+
+
+def _run_attrappe(befehl, **_kw):
+    _befehle.append(list(befehl))
+    return _Lauf()
+
+
+def _paare(befehl):
+    return list(zip(befehl, befehl[1:]))
+
+
+_echt_run = sig.subprocess.run
+_echt_brand = am.branding
+_echt_basis = am.einkompilierte_basis
+sig.subprocess.run = _run_attrappe
+am.branding = lambda: ("Contoso", "#123456")
+try:
+    am.einkompilierte_basis = lambda pfad=None: "https://jarvis.beispiel.de"
+    sicher(sig._signieren_einmal, SAND / "x.exe", "pw", "")
+    am.einkompilierte_basis = lambda pfad=None: "http://jarvis.beispiel.de"
+    sicher(sig._signieren_einmal, SAND / "x.exe", "pw", "")
+finally:
+    sig.subprocess.run = _echt_run
+    am.branding = _echt_brand
+    am.einkompilierte_basis = _echt_basis
+
+if len(_befehle) != 2:
+    print("POSITIVKONTROLLE: osslsigncode-Aufruf nicht abgefangen (%d) – Abbruch"
+          % len(_befehle))
+    sys.exit(2)
+_mit, _ohne = _befehle
+check("Positivkontrolle: der Aufruf traegt die Marke (-n)",
+      ("-n", "Contoso") in _paare(_mit))
+check("mit https-Basis wird -i mit der Anleitungsseite uebergeben",
+      ("-i", "https://jarvis.beispiel.de/ai-mouse") in _paare(_mit))
+check("⚠ mit http-Basis fehlt -i ganz", "-i" not in _ohne)
+
 print("\n=== 15. Aufraeumen ===")
 import shutil  # noqa: E402
 shutil.rmtree(SAND, ignore_errors=True)

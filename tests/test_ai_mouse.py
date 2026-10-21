@@ -1011,7 +1011,11 @@ check("_hauswerte_schreiben gefunden", len(hw) > 50)
 check("Marke und Akzent kommen aus branding()", "branding()" in hw)
 check("die Sprache aus sprache()", "sprache()" in hw)
 # Ohne Request bleibt die Adresse stehen, statt geleert zu werden.
-check("ohne Adresse wird die bisherige uebernommen", "Endpoint" in hw)
+# Gelesen wird ueber `einkompilierte_basis()` (auch die Signatur benutzt sie);
+# dass DIE den Endpoint aus Vorgaben.cs liest, misst test_ai_mouse_signatur
+# ausgefuehrt, Abschnitt 14c.
+check("ohne Adresse wird die bisherige uebernommen",
+      re.search(r"basis\s+or\s+einkompilierte_basis\(\)", hw) is not None)
 # EINE Stelle schreibt die Quelle – zwei liefen beim naechsten Feld auseinander.
 check("der Download-Weg benutzt dieselbe Funktion",
       "_hauswerte_schreiben(basis)" in py_schnitt("_vorgaben_sicherstellen"))

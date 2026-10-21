@@ -154,14 +154,16 @@ abschnitt('Teil 1: Container im Wissen-Reiter');
     const body = d.getElementById('kb-sect-sync-body');
     pruefe(!!hdr && !!body, 'Klapp-Container vorhanden');
     pruefe(body.style.display === 'none', 'startet zugeklappt');
-    // Reihenfolge: Ordner -> Pull-Synchronisation -> WebDAV
+    // Reihenfolge: Ordner -> Netzwerk-Freigaben -> WebDAV -> Pull-Synchronisation (letzter)
     const alle = [...d.querySelectorAll('#settings-tab-knowledge .kb-section-header')]
         .map(e => e.id);
     const iO = alle.indexOf('kb-sect-folder-hdr');
-    const iS = alle.indexOf('kb-sect-sync-hdr');
+    const iN = alle.indexOf('kb-sect-net-hdr');
     const iW = alle.indexOf('kb-sect-webdav-hdr');
-    pruefe(iO >= 0 && iS === iO + 1 && iW === iS + 1,
-        'sitzt zwischen „Ordner" und „WebDAV-Server"', alle.join(','));
+    const iS = alle.indexOf('kb-sect-sync-hdr');
+    pruefe(iO >= 0 && iN === iO + 1 && iW === iN + 1 && iS === iW + 1
+           && iS === alle.length - 1,
+        '„Netzwerk-Freigaben" direkt nach „Ordner", Pull-Synchronisation am Ende', alle.join(','));
     pruefe(!!d.getElementById('kbsync-share-modal'), 'Freigabe-Dialog im Markup');
     pruefe(d.getElementById('kbsync-share-modal').classList.contains('open') === false,
         'Freigabe-Dialog ist geschlossen');

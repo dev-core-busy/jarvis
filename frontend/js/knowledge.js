@@ -128,6 +128,10 @@ class JarvisKnowledgeManager {
                 <span class="kb-grp-manage-name" title="${T('kbgroups.show_files', 'Dokumente anzeigen')}">${T('kbgroups.ungrouped', 'ungruppiert')}</span>
                 <span class="kb-grp-count">${ung}</span>
             </div>` : '';
+        // Der Dateikasten kann gerade IN der Liste stehen (unter seiner Zeile) –
+        // vor dem Neuaufbau heimholen, sonst loescht innerHTML ihn mit.
+        const filesBox = document.getElementById('kb-groups-files');
+        if (filesBox && el.contains(filesBox)) el.after(filesBox);
         el.innerHTML = `
             <div class="kb-grp-manage">
                 <div class="kb-grp-add-row">
@@ -145,7 +149,7 @@ class JarvisKnowledgeManager {
 
         el.querySelectorAll('.kb-grp-manage-row[data-gid]').forEach(row => {
             const gid = row.dataset.gid;
-            row.querySelector('.kb-grp-manage-name').onclick = () => this._showGroupFiles(gid);
+            row.querySelector('.kb-grp-manage-name').onclick = () => this._toggleGroupFiles(gid);
             row.querySelector('.kb-grp-color-input').onchange = (e) => this._setGroupColor(gid, e.target.value);
             row.querySelector('.kb-grp-perms').onclick = () => this._editGroupPermissions(gid);
             row.querySelector('.kb-grp-rename').onclick = () => this._renameGroup(gid);
@@ -154,9 +158,54 @@ class JarvisKnowledgeManager {
 
         // "ungruppiert"-Zeile: Klick zeigt die Dateien ohne Gruppen-Zuordnung
         const ungName = el.querySelector('.kb-grp-row-ung .kb-grp-manage-name');
-        if (ungName) ungName.onclick = () => this._showUngroupedFiles();
+        if (ungName) ungName.onclick = () => this._toggleGroupFiles(this._UNG_KEY);
 
         this._initGroupReorder(el.querySelector('.kb-grp-manage-list'));
+        // War ein Dateikasten offen, sitzt er nach dem Neuaufbau wieder unter seiner Zeile.
+        if (this._grpFilesKey) this._placeGroupFiles(this._grpFilesKey);
+    }
+
+    // ── Dateikasten direkt unter der angeklickten Gruppenzeile ───────────
+    // Es gibt nur EIN #kb-groups-files; es wandert unter die Zeile, deren Dateien
+    // es zeigt (Muster wie die Entwurfs-Vorschau in wissen.js). Heimatplatz ist
+    // direkt hinter #kb-groups-overview.
+    get _UNG_KEY() { return '\u0000ungrouped'; }
+
+    _groupRowFor(key) {
+        const el = document.getElementById('kb-groups-overview');
+        if (!el) return null;
+        if (key === this._UNG_KEY) return el.querySelector('.kb-grp-row-ung');
+        return [...el.querySelectorAll('.kb-grp-manage-row[data-gid]')]
+            .find(r => r.dataset.gid === key) || null;
+    }
+
+    // Setzt den Kasten unter die Zeile von `key`. Gibt es die Zeile nicht mehr
+    // (Gruppe geloescht), wird der Kasten geschlossen statt am Listenende zu stehen.
+    _placeGroupFiles(key) {
+        const box = document.getElementById('kb-groups-files');
+        const el = document.getElementById('kb-groups-overview');
+        if (!box || !el) return null;
+        const row = this._groupRowFor(key);
+        if (!row) {
+            el.after(box);
+            box.style.display = 'none';
+            this._grpFilesKey = null;
+            return null;
+        }
+        row.after(box);
+        this._grpFilesKey = key;
+        return box;
+    }
+
+    _toggleGroupFiles(key) {
+        const box = document.getElementById('kb-groups-files');
+        if (box && this._grpFilesKey === key && box.style.display !== 'none') {
+            box.style.display = 'none';
+            this._grpFilesKey = null;
+            return;
+        }
+        if (key === this._UNG_KEY) this._showUngroupedFiles();
+        else this._showGroupFiles(key);
     }
 
     // ── Drag & Drop Sortierung der Wissensgruppen ─────────────────────────
@@ -172,12 +221,19 @@ class JarvisKnowledgeManager {
                 if (e.target.closest && e.target.closest('input, button')) { e.preventDefault(); return; }
                 dragRow = row;
                 row.classList.add('kb-grp-dragging');
+                // Der offene Dateikasten steht zwischen den Zeilen und wuerde beim
+                // Umsortieren von seiner Zeile getrennt – waehrend des Ziehens weg.
+                const fb = document.getElementById('kb-groups-files');
+                if (fb && list.contains(fb)) fb.style.display = 'none';
                 e.dataTransfer.effectAllowed = 'move';
                 try { e.dataTransfer.setData('text/plain', row.dataset.gid); } catch (_) { /* IE */ }
             });
             row.addEventListener('dragend', () => {
                 row.classList.remove('kb-grp-dragging');
                 list.querySelectorAll('.kb-grp-dropover').forEach(r => r.classList.remove('kb-grp-dropover'));
+                if (this._grpFilesKey && this._placeGroupFiles(this._grpFilesKey)) {
+                    document.getElementById('kb-groups-files').style.display = 'block';
+                }
                 if (dragRow) { dragRow = null; this._saveGroupOrder(list); }
             });
             row.addEventListener('dragover', (e) => {
@@ -392,6 +448,7 @@ class JarvisKnowledgeManager {
         if (ok) {
             const box = document.getElementById('kb-groups-files');
             if (box) box.style.display = 'none';
+            this._grpFilesKey = null;
             await this._refreshGroups();
             this._showNotification(window.t('kbgroups.deleted') || 'Gruppe gelöscht', 'success');
         } else {
@@ -426,8 +483,8 @@ class JarvisKnowledgeManager {
     }
 
     async _showGroupFiles(gid) {
+        if (!window.KbGroups || !this._placeGroupFiles(gid)) return;
         const box = document.getElementById('kb-groups-files');
-        if (!box || !window.KbGroups) return;
         const KG = window.KbGroups;
         box.style.display = 'block';
         box.innerHTML = `<div class="kb-files-loading">${window.t('knowledge.loading') || 'Lädt…'}</div>`;
@@ -486,8 +543,8 @@ class JarvisKnowledgeManager {
     }
 
     async _showUngroupedFiles() {
+        if (!window.KbGroups || !this._placeGroupFiles(this._UNG_KEY)) return;
         const box = document.getElementById('kb-groups-files');
-        if (!box || !window.KbGroups) return;
         const KG = window.KbGroups;
         const T = (k, d) => (window.t && window.t(k)) || d;
         box.style.display = 'block';

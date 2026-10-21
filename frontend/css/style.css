@@ -2699,6 +2699,12 @@ body.light .rmx-status.rmx-status-fehler { color: color-mix(in srgb, var(--dange
     background: rgba(var(--fg-rgb), 0.12); border-radius: 999px; padding: 1px 7px;
 }
 .kb-groups-files { margin-top: 12px; }
+/* Unter der angeklickten Gruppenzeile (knowledge.js::_placeGroupFiles): eingerueckt
+   und mit Linie, damit der Kasten sichtbar zu SEINER Zeile gehoert. */
+.kb-grp-manage-list > .kb-groups-files {
+    margin: 2px 0 10px 22px; padding: 6px 0 6px 12px;
+    border-left: 2px solid rgba(var(--accent-rgb), 0.45);
+}
 .kb-grp-files-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .kb-grp-file-row {
     display: flex; align-items: center; gap: 8px;

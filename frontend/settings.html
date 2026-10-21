@@ -23,7 +23,7 @@
     <link rel="stylesheet" href="/static/css/theme.css?v=34">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=10">
-    <link rel="stylesheet" href="/static/css/style.css?v=205">
+    <link rel="stylesheet" href="/static/css/style.css?v=206">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=7">
     <!-- Feedback-Reiter. EINE Datei fuer /settings und /feedback: Tabelle,
          Sterne und Abgabe-Karte werden an beiden Orten gebraucht, zwei
@@ -2399,6 +2399,65 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                         </div>
 
+                        <!-- Netzwerk-Freigaben -->
+                        <div class="kb-section">
+                            <div class="kb-section-header kb-collapse-header is-collapsed" id="kb-sect-net-hdr">
+                                <h3 data-i18n="knowledge.section_shares">Netzwerk-Freigaben</h3>
+                                <span class="sk-openclaw-toggle" id="kb-sect-net-tog">▶</span>
+                            </div>
+                            <div id="kb-sect-net-body" class="kb-collapse-body" style="display:none;">
+                                <p class="kb-hint" data-i18n="knowledge.shares_hint">Externe SMB/NFS/WebDAV-Freigaben als Wissensquellen einbinden.</p>
+                                <div id="kb-mount-list" class="kb-mount-list"></div>
+                                <button class="kb-btn-action" id="btn-kb-add-mount" data-i18n="knowledge.add_share_btn">+ Freigabe hinzufügen</button>
+                                <div id="kb-mount-form" class="kb-mount-form" style="display:none;">
+                                    <select id="kb-mount-type" class="kb-input">
+                                        <option value="smb">SMB/CIFS (Windows-Freigabe)</option>
+                                        <option value="nfs">NFS</option>
+                                        <option value="webdav">WebDAV</option>
+                                    </select>
+                                    <input type="text" id="kb-mount-source" class="kb-input" placeholder="//server/freigabe" />
+                                    <input type="text" id="kb-mount-user" class="kb-input" data-i18n-placeholder="knowledge.share_user_ph" placeholder="Benutzername (optional)" />
+                                    <input type="password" id="kb-mount-pass" class="kb-input" data-i18n-placeholder="knowledge.share_pass_ph" placeholder="Passwort (optional)" />
+                                    <div class="kb-mount-actions">
+                                        <button class="kb-btn-action" data-klick="mount-verbinden" data-i18n="knowledge.connect_btn">Verbinden</button>
+                                        <button class="kb-btn-secondary" data-klick="mount-abbrechen" data-i18n="common.cancel">Abbrechen</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- WebDAV-Server -->
+                        <div class="kb-section">
+                            <div class="kb-section-header kb-collapse-header is-collapsed" id="kb-sect-webdav-hdr">
+                                <h3 data-i18n="knowledge.section_webdav">WebDAV-Server</h3>
+                                <span class="sk-openclaw-toggle" id="kb-sect-webdav-tog">▶</span>
+                            </div>
+                            <div id="kb-sect-webdav-body" class="kb-collapse-body" style="display:none;">
+                            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="kb-webdav-toggle" />
+                                    <span class="toggle-slider"></span>
+                                </label>
+                                <span style="font-size:0.82rem;color:var(--text-secondary);" data-i18n="knowledge.webdav_enable">WebDAV aktivieren</span>
+                            </div>
+                            <p class="kb-hint" data-i18n="knowledge.webdav_hint">Wissensdatenbank als Netzlaufwerk einbinden (Windows/Mac/Linux Dateimanager).</p>
+                            <div id="kb-webdav-details" style="display:none;">
+                                <div class="kb-webdav-info">
+                                    <div class="kb-info-row"><span class="kb-info-label">URL:</span> <code id="kb-webdav-url"></code></div>
+                                    <div class="kb-info-row"><span class="kb-info-label" data-i18n="knowledge.webdav_user_label">Benutzer:</span> <code id="kb-webdav-user"></code></div>
+                                    <div class="kb-info-row"><span class="kb-info-label" data-i18n="knowledge.webdav_pass_label">Passwort:</span> <code id="kb-webdav-pass">••••••••</code> <button type="button" id="kb-webdav-pass-eye" class="btn-icon btn-small" title="Kennwort anzeigen" data-i18n-title="common.pw_show_stored" aria-label="Kennwort anzeigen"></button> <span class="kb-info-hint" data-i18n="knowledge.webdav_pass_hint">(eigenes WebDAV-Passwort, unabhängig vom System-Login)</span></div>
+                                    <div class="kb-info-row"><span class="kb-info-label" data-i18n="knowledge.webdav_shares_label">Shares:</span> <span id="kb-webdav-shares"></span></div>
+                                </div>
+                                <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap;">
+                                    <input type="text" id="kb-webdav-new-user" data-i18n-placeholder="knowledge.username_ph" placeholder="Benutzername" style="width:130px;padding:4px 8px;font-size:0.82rem;background:var(--bg-glass);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);">
+                                    <input type="password" id="kb-webdav-new-pass" data-i18n-placeholder="knowledge.new_pass_ph" placeholder="Neues Passwort" style="width:150px;padding:4px 8px;font-size:0.82rem;background:var(--bg-glass);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);">
+                                    <button class="kb-btn-action" data-klick="webdav-speichern" style="font-size:0.82rem;padding:4px 12px;" data-i18n="knowledge.webdav_save_btn">Speichern &amp; Neustart</button>
+                                </div>
+                                <p class="kb-hint" style="margin-top:8px;" data-i18n="knowledge.webdav_save_hint">⚠️ Nach dem Speichern wird der {marke}-Server neu gestartet, damit der WebDAV-Dienst die neuen Zugangsdaten übernimmt.</p>
+                            </div>
+                            </div><!-- /kb-sect-webdav-body -->
+                        </div>
+
                         <!-- Pull-Synchronisation mit anderen Jarvis-Standorten -->
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="kb-sect-sync-hdr">
@@ -2489,65 +2548,6 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                         </div>
                                     </div>
                                     <div id="kbsync-form-err" class="kbsync-err" style="display:none;"></div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- WebDAV-Server -->
-                        <div class="kb-section">
-                            <div class="kb-section-header kb-collapse-header is-collapsed" id="kb-sect-webdav-hdr">
-                                <h3 data-i18n="knowledge.section_webdav">WebDAV-Server</h3>
-                                <span class="sk-openclaw-toggle" id="kb-sect-webdav-tog">▶</span>
-                            </div>
-                            <div id="kb-sect-webdav-body" class="kb-collapse-body" style="display:none;">
-                            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="kb-webdav-toggle" />
-                                    <span class="toggle-slider"></span>
-                                </label>
-                                <span style="font-size:0.82rem;color:var(--text-secondary);" data-i18n="knowledge.webdav_enable">WebDAV aktivieren</span>
-                            </div>
-                            <p class="kb-hint" data-i18n="knowledge.webdav_hint">Wissensdatenbank als Netzlaufwerk einbinden (Windows/Mac/Linux Dateimanager).</p>
-                            <div id="kb-webdav-details" style="display:none;">
-                                <div class="kb-webdav-info">
-                                    <div class="kb-info-row"><span class="kb-info-label">URL:</span> <code id="kb-webdav-url"></code></div>
-                                    <div class="kb-info-row"><span class="kb-info-label" data-i18n="knowledge.webdav_user_label">Benutzer:</span> <code id="kb-webdav-user"></code></div>
-                                    <div class="kb-info-row"><span class="kb-info-label" data-i18n="knowledge.webdav_pass_label">Passwort:</span> <code id="kb-webdav-pass">••••••••</code> <button type="button" id="kb-webdav-pass-eye" class="btn-icon btn-small" title="Kennwort anzeigen" data-i18n-title="common.pw_show_stored" aria-label="Kennwort anzeigen"></button> <span class="kb-info-hint" data-i18n="knowledge.webdav_pass_hint">(eigenes WebDAV-Passwort, unabhängig vom System-Login)</span></div>
-                                    <div class="kb-info-row"><span class="kb-info-label" data-i18n="knowledge.webdav_shares_label">Shares:</span> <span id="kb-webdav-shares"></span></div>
-                                </div>
-                                <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap;">
-                                    <input type="text" id="kb-webdav-new-user" data-i18n-placeholder="knowledge.username_ph" placeholder="Benutzername" style="width:130px;padding:4px 8px;font-size:0.82rem;background:var(--bg-glass);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);">
-                                    <input type="password" id="kb-webdav-new-pass" data-i18n-placeholder="knowledge.new_pass_ph" placeholder="Neues Passwort" style="width:150px;padding:4px 8px;font-size:0.82rem;background:var(--bg-glass);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);">
-                                    <button class="kb-btn-action" data-klick="webdav-speichern" style="font-size:0.82rem;padding:4px 12px;" data-i18n="knowledge.webdav_save_btn">Speichern &amp; Neustart</button>
-                                </div>
-                                <p class="kb-hint" style="margin-top:8px;" data-i18n="knowledge.webdav_save_hint">⚠️ Nach dem Speichern wird der {marke}-Server neu gestartet, damit der WebDAV-Dienst die neuen Zugangsdaten übernimmt.</p>
-                            </div>
-                            </div><!-- /kb-sect-webdav-body -->
-                        </div>
-
-                        <!-- Netzwerk-Freigaben -->
-                        <div class="kb-section">
-                            <div class="kb-section-header kb-collapse-header is-collapsed" id="kb-sect-net-hdr">
-                                <h3 data-i18n="knowledge.section_shares">Netzwerk-Freigaben</h3>
-                                <span class="sk-openclaw-toggle" id="kb-sect-net-tog">▶</span>
-                            </div>
-                            <div id="kb-sect-net-body" class="kb-collapse-body" style="display:none;">
-                                <p class="kb-hint" data-i18n="knowledge.shares_hint">Externe SMB/NFS/WebDAV-Freigaben als Wissensquellen einbinden.</p>
-                                <div id="kb-mount-list" class="kb-mount-list"></div>
-                                <button class="kb-btn-action" id="btn-kb-add-mount" data-i18n="knowledge.add_share_btn">+ Freigabe hinzufügen</button>
-                                <div id="kb-mount-form" class="kb-mount-form" style="display:none;">
-                                    <select id="kb-mount-type" class="kb-input">
-                                        <option value="smb">SMB/CIFS (Windows-Freigabe)</option>
-                                        <option value="nfs">NFS</option>
-                                        <option value="webdav">WebDAV</option>
-                                    </select>
-                                    <input type="text" id="kb-mount-source" class="kb-input" placeholder="//server/freigabe" />
-                                    <input type="text" id="kb-mount-user" class="kb-input" data-i18n-placeholder="knowledge.share_user_ph" placeholder="Benutzername (optional)" />
-                                    <input type="password" id="kb-mount-pass" class="kb-input" data-i18n-placeholder="knowledge.share_pass_ph" placeholder="Passwort (optional)" />
-                                    <div class="kb-mount-actions">
-                                        <button class="kb-btn-action" data-klick="mount-verbinden" data-i18n="knowledge.connect_btn">Verbinden</button>
-                                        <button class="kb-btn-secondary" data-klick="mount-abbrechen" data-i18n="common.cancel">Abbrechen</button>
-                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -5860,7 +5860,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/skillcfg.js?v=13"></script>
     <script src="/static/js/google.js?v=15"></script>
     <script src="/static/js/whatsapp.js?v=20"></script>
-    <script src="/static/js/knowledge.js?v=132"></script>
+    <script src="/static/js/knowledge.js?v=133"></script>
     <!-- knowledge_sync NACH knowledge.js: die Ordnerliste fragt beim Zeichnen
          window.KnowledgeSync.sharedFolders() fuer den Zustand des 🔗-Symbols. -->
     <script src="/static/js/knowledge_sync.js?v=6"></script>

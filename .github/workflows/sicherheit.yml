@@ -63,9 +63,21 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/krb5-deb" "$RUNNER_TEMP/krb5"
           cd "$RUNNER_TEMP/krb5-deb"
-          apt-get download krb5-kdc krb5-admin-server krb5-user libkdb5-10t64 \
-            libkadm5srv-mit12 libkadm5clnt-mit12 libgssrpc4t64 libverto1t64 \
-            libverto-libev1t64 libev4t64
+          # ⚠ KEINE feste Paketliste: die Bibliotheksnamen weichen zwischen
+          # Debian und Ubuntu ab (libverto-libev1t64 gibt es auf 24.04 nicht,
+          # Lauf 39590372478). Geholt wird jede rekursive Abhaengigkeit, die
+          # auf dem Runner NICHT installiert ist – Systembibliotheken (libc)
+          # bleiben damit aussen vor. Fremdarchitekturen (":i386") ausgefiltert,
+          # sie ueberschreiben sonst die 64-Bit-Programme im Baum.
+          PAKETE="krb5-kdc krb5-admin-server krb5-user"
+          DEPS=$(apt-cache depends --recurse --no-recommends --no-suggests \
+            --no-conflicts --no-breaks --no-replaces --no-enhances $PAKETE \
+            | grep -E '^[a-z0-9][^:]*$' | sort -u)
+          FEHLEND=$(for d in $DEPS; do
+            dpkg-query -W -f='${Status}' "$d" 2>/dev/null | grep -q "install ok installed" || echo "$d"
+          done)
+          echo "hole: $FEHLEND"
+          apt-get download $FEHLEND
           for f in *.deb; do dpkg-deb -x "$f" "$RUNNER_TEMP/krb5"; done
           echo "KRB5_TESTWURZEL=$RUNNER_TEMP/krb5" >> "$GITHUB_ENV"
 

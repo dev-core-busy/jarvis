@@ -1,4 +1,4 @@
-/* Waechter: Berechtigungen zuweisen – alle Bereiche in einem Fenster
+/* Waechter: Berechtigungen zuweisen – alle Bereiche in einer Tabelle
  * (frontend/js/rechte_matrix.js, Sicherheit -> Berechtigungen).
  *
  * Gemessen an der ECHTEN settings.html mit den ECHTEN Modulen (i18n, icons,
@@ -10,9 +10,9 @@
  *   3. Uebernehmen schreibt nur Zu-/Abgaenge, Reihenfolge und Schreibweise
  *      vorhandener Eintraege bleiben, Gruppen-DNs mit Komma bleiben ganz.
  *   4. Neue Benutzer ueber den Verzeichnis-Picker.
- *   5. Speichern scheitert -> Fenster bleibt offen, Fehler bleibt stehen.
+ *   5. Speichern scheitert -> Auswahl bleibt, Fehler bleibt stehen.
  *   6. Fail-closed: Bestand nicht geladen -> kein Speichern.
- *   7. Escape bei offenem Picker schliesst nur den Picker.
+ *   7. Escape bei offenem Picker schliesst nur den Picker, die Tabelle bleibt.
  *   8. REGEL: jeder rmx.*-Schluessel des Moduls in DE und EN.
  *   9. Geerbte Berechtigungen: Mitglieder einer berechtigten Gruppe zeigen
  *      einen grauen, gesperrten Haken samt Gruppenname; live beim Umschalten
@@ -23,6 +23,10 @@
  *      Gruppe den Bereich gibt.
  *  9f. REGEL: der graue Haken ist per CSS gezeichnet.
  *  10. Sortieren: Name und jeder Bereich, Gruppen bleiben oben, gemerkt.
+ *  11. INLINE statt Popup (2026-10-21): die Tabelle steht ohne Klick da,
+ *      ein nachgelieferter Bestand und ein nachtraeglich eingeblendeter
+ *      Bereich kommen an, ein fremdes Speichern wirft offene Haken nicht
+ *      weg, und "Verwerfen" ersetzt das fruehere Schliessen.
  *
  *   node tests/test_rechte_matrix_ui.js
  * Exit 0 = gruen, 1 = Befund, 2 = konnte nicht laufen.
@@ -42,6 +46,18 @@ function check(name, cond, detail) {
 }
 function section(t) { console.log('\n\x1b[1m' + t + '\x1b[0m'); }
 function abbruch(g) { console.log('ABBRUCH: ' + g); process.exit(2); }
+// ⚠ EXIT 2 HEISST "KONNTE NICHT LAUFEN", NICHT "ICH BEISSE". Faellt eine
+// ZUSAGE weg (es gibt #rmx-host nicht, die Tabelle bleibt leer), ist das ein
+// BEFUND – die Folgeabschnitte koennen dann nur nicht mehr messen. Also:
+// Bilanz drucken und mit 1 enden, statt in einem spaeteren `abbruch` zu
+// sterben. Drei Gegenproben blieben genau daran stumm (2026-10-21).
+function fruehesEnde(grund) {
+    clearTimeout(WACH);
+    console.log('\n  (Folgeabschnitte entfallen: ' + grund + ')');
+    console.log(`\n${ok} OK, ${fail} FAIL`);
+    BILANZ = true;
+    process.exit(fail ? 1 : 2);
+}
 const schlaf = (ms) => new Promise(r => setTimeout(r, ms));
 const WACH = setTimeout(() => { console.log('ABBRUCH: Lauf haengt'); process.exit(2); }, 60000);
 process.on('exit', (c) => { if (!BILANZ && c === 0) { console.log('ABBRUCH ohne Bilanz'); process.exitCode = 2; } });
@@ -97,6 +113,10 @@ function zeilen(s) {
 function zeile(s, name) {
     return zeilen(s).find(tr => tr.querySelector('.rmx-wert').textContent === name) || null;
 }
+function spaltenNamen(s) {
+    return [...s.d.querySelectorAll('#rmx-tabwrap thead th')].slice(1, -1)
+        .map(th => th.textContent.replace(/[\u25B2\u25BC]/g, ''));
+}
 function spaltenIndex(s, label) {
     const ths = [...s.d.querySelectorAll('#rmx-tabwrap thead th')];
     // Sortierpfeil des aktiven Kopfes gehoert nicht zum Namen
@@ -120,12 +140,16 @@ function klick(s, cb) { if (!cb) { check('Kaestchen vorhanden', false, 'fehlt');
 section('1. Bestand einlesen: Zeilen, Spalten, ausgeblendete Bereiche');
 let s = await seite({});
 const t = (k) => s.w.t(k);
-if (!s.$('rmx-open')) abbruch('settings.html ohne Knopf #rmx-open');
 if (!s.w.RechteMatrix) abbruch('rechte_matrix.js nicht geladen');
 check('Positivkontrolle: Bestand geladen (_adGeladen, Feld gefuellt)',
       s.w._adGeladen === true && s.$('ad-allowed-users').value === 'Bob, carla', s.$('ad-allowed-users').value);
-s.$('rmx-open').click();
-check('Fenster offen (.modal.open, nicht nur display)', s.$('rmx-modal').classList.contains('open'));
+// Die Tabelle steht im Markup-Platzhalter – das ist eine Zusage, kein Messaufbau.
+check('settings.html hat den Platzhalter #rmx-host', !!s.$('rmx-host'));
+if (!s.$('rmx-host')) fruehesEnde('kein #rmx-host');
+// ⚠ KEIN OEFFNEN MEHR: seit 2026-10-21 steht die Tabelle auf der Seite.
+check('die Tabelle steht auf der Seite, ohne Klick', !!s.$('rmx-tabwrap')
+      && s.$('rmx-host').contains(s.$('rmx-tabwrap')));
+check('kein Popup mehr (#rmx-modal existiert nicht)', s.$('rmx-modal') === null);
 // Erwartung aus dem DOM gerechnet, nicht abgetippt: sichtbare Unter-Container
 const sichtbar = [...s.d.querySelectorAll('details.sec-sub[data-sub]')]
     .filter(d => d.style.display !== 'none').map(d => d.getAttribute('data-sub'))
@@ -141,6 +165,10 @@ for (const n of ['Bob', 'carla', 'admin1', 'Alle', 'IT, Team'])
 check('bob/Bob ist EINE Zeile (Gross-/Kleinschreibung)', namen.filter(n => n.toLowerCase() === 'bob').length === 1, namen.join('|'));
 check('vera (nur im ausgeblendeten Bereich) ist keine Zeile', !namen.includes('vera'));
 check('Gruppen vor Benutzern', namen.indexOf('Alle') < namen.indexOf('Bob') && namen.indexOf('IT, Team') < namen.indexOf('admin1'));
+// ⚠ EINE LEERE TABELLE BEI GELADENEM BESTAND IST EIN BEFUND. Ohne diese
+// Stelle stirbt der Lauf erst in Abschnitt 4b an einem `abbruch` (Exit 2).
+check('der geladene Bestand steht in der Tabelle', zeilen(s).length >= 5, String(zeilen(s).length));
+if (!zeilen(s).length) fruehesEnde('Tabelle leer');
 
 // ── 2. Kaestchen ───────────────────────────────────────────────────────────
 section('2. Kaestchen spiegeln den Bestand');
@@ -178,16 +206,17 @@ check('sap_allowed_users: "bob" entfernt, obwohl die Zeile "Bob" heisst', b.sap_
 check('ad_knowledge_editors_group = Alle-DN', b.ad_knowledge_editors_group === GRP_ALLE, JSON.stringify(b.ad_knowledge_editors_group));
 check('vemas_allowed_users unberuehrt', b.vemas_allowed_users === 'vera', b.vemas_allowed_users);
 check('ad_internet_group unberuehrt', b.ad_internet_group === GRP_ALLE, b.ad_internet_group);
-check('Fenster nach Erfolg zu', !s.$('rmx-modal').classList.contains('open'));
+check('nach Erfolg: Erfolgsmeldung ohne Fehlerklasse', s.$('rmx-status').textContent === t('rmx.saved')
+      && !s.$('rmx-status').classList.contains('rmx-status-fehler'), s.$('rmx-status').textContent);
+check('nach Erfolg: keine offene Aenderung mehr', s.$('rmx-apply').disabled === true
+      && s.$('rmx-apply').textContent === t('rmx.apply'), s.$('rmx-apply').textContent);
 
 // ── 4. Neue Benutzer ueber den Picker ──────────────────────────────────────
 section('4. Neue Benutzer ueber den Verzeichnis-Picker');
 s = await seite({});
-s.$('rmx-open').click();
 s.$('rmx-add-users').click();
 await schlaf(80);
-check('Picker offen ueber dem Fenster', s.$('ldap-picker-modal') && s.$('ldap-picker-modal').classList.contains('open')
-      && +s.$('ldap-picker-modal').style.zIndex > +s.$('rmx-modal').style.zIndex);
+check('Picker offen', s.$('ldap-picker-modal') && s.$('ldap-picker-modal').classList.contains('open'));
 const pRow = [...s.d.querySelectorAll('#ldap-picker-list .ldap-row')].find(r => r.getAttribute('data-key') === 'neu.nutzer');
 if (!pRow) abbruch('Picker-Liste ohne Treffer – Messaufbau');
 const pcb = pRow.querySelector('input'); pcb.checked = true; pcb.dispatchEvent(new s.w.Event('change', { bubbles: true }));
@@ -208,7 +237,6 @@ check('neu.nutzer in ad_allowed_users angehaengt', (s.posts[0] || {}).ad_allowed
 // ── 4b. Loeschen (Muelleimer) ──────────────────────────────────────────────
 section('4b. Muelleimer nimmt die Zeile aus der Liste');
 s = await seite({});
-s.$('rmx-open').click();
 await schlaf(40);
 check('Positivkontrolle: Bob steht in der Liste, mit Muelleimer-Symbol aus icons.js',
       zeile(s, 'Bob') && !!zeile(s, 'Bob').querySelector('.rmx-row-clear svg'));
@@ -219,8 +247,8 @@ check('Klick (auch aufs Symbol): Bob ist aus der Liste verschwunden', zeile(s, '
 check('Zaehler: 2 Aenderungen (Anmeldung + SAP)', s.$('rmx-apply').textContent === t('rmx.apply_n').replace('{n}', '2'),
       s.$('rmx-apply').textContent);
 check('noch nichts gespeichert', s.posts.length === 0);
-s.$('rmx-cancel').click(); s.$('rmx-open').click(); await schlaf(40);
-check('Abbrechen + wieder oeffnen: Bob ist zurueck, Haken wie vorher',
+s.$('rmx-cancel').click(); await schlaf(40);
+check('Verwerfen: Bob ist zurueck, Haken wie vorher',
       zeile(s, 'Bob') && kz(s, 'Bob', L).checked === true && kz(s, 'Bob', S).checked === true);
 { const x = zeile(s, 'Bob') && zeile(s, 'Bob').querySelector('.rmx-row-clear'); if (x) x.click(); }
 // erneut ueber den Picker gewaehlt -> wieder in der Liste (ohne Haken)
@@ -243,21 +271,21 @@ check('Uebernehmen: uebrige Bereiche unberuehrt', b4.ad_admins === 'admin1' && b
       b4.ad_admins + ' / ' + b4.ad_knowledge_editors);
 // alle Zeilen weg -> Leer-Hinweis, nicht "passt nicht zum Filter"
 s = await seite({});
-s.$('rmx-open').click(); await schlaf(40);
+await schlaf(40);
 let schutz = 50;
 while (s.d.querySelector('#rmx-tabwrap .rmx-row-clear') && schutz--) s.d.querySelector('#rmx-tabwrap .rmx-row-clear').click();
 check('alle geloescht: Leer-Hinweis statt Filter-Hinweis', s.$('rmx-tabwrap').textContent.includes(t('rmx.empty')),
       s.$('rmx-tabwrap').textContent.slice(0, 80));
 
 // ── 5. Speichern scheitert ─────────────────────────────────────────────────
-section('5. Speichern scheitert: Fenster bleibt, Fehler bleibt');
+section('5. Speichern scheitert: Auswahl bleibt, Fehler bleibt');
 s = await seite({ saveStatus: 500 });
-s.$('rmx-open').click();
 klick(s, kaestchen(s, 'carla', A));
 s.$('rmx-apply').click();
 await schlaf(80);
 check('Positivkontrolle: POST ging raus', s.posts.length === 1);
-check('Fenster bleibt offen', s.$('rmx-modal').classList.contains('open'));
+check('die Auswahl steht noch (Zaehler unveraendert)',
+      s.$('rmx-apply').textContent === t('rmx.apply_n').replace('{n}', '1'), s.$('rmx-apply').textContent);
 check('Fehlertext steht (Fehlerklasse)', s.$('rmx-status').classList.contains('rmx-status-fehler')
       && s.$('rmx-status').textContent === t('rmx.save_failed'), s.$('rmx-status').textContent);
 await schlaf(3200);
@@ -268,7 +296,6 @@ check('erneut uebernehmbar', s.$('rmx-apply').disabled === false);
 section('6. Bestand nicht geladen -> kein Speichern');
 s = await seite({ adStatus: () => Promise.reject(new Error('netz')) });
 check('Positivkontrolle: _adGeladen nicht gesetzt', !s.w._adGeladen);
-s.$('rmx-open').click();
 check('Hinweis "nicht geladen" sichtbar', s.$('rmx-status').textContent === t('rmx.not_loaded'));
 check('Uebernehmen gesperrt', s.$('rmx-apply').disabled === true);
 s.$('rmx-add-users').click(); await schlaf(80);
@@ -282,15 +309,17 @@ await schlaf(80);
 check('kein POST, selbst wenn der Knopf umgangen wird', s.posts.length === 0, s.posts.length);
 
 // ── 7. Escape ──────────────────────────────────────────────────────────────
-section('7. Escape bei offenem Picker');
+section('7. Escape bei offenem Picker (die Tabelle bleibt stehen)');
 s = await seite({});
-s.$('rmx-open').click();
 s.$('rmx-add-groups').click(); await schlaf(40);
 s.d.dispatchEvent(new s.w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 check('Picker zu', !s.$('ldap-picker-modal').classList.contains('open'));
-check('Zuweisungs-Fenster noch offen', s.$('rmx-modal').classList.contains('open'));
+check('die Tabelle steht weiter da', !!s.$('rmx-tabwrap'));
+// ⚠ ESCAPE DARF DIE TABELLE NICHT WEGRAEUMEN – frueher schloss ein zweites
+// Escape das Fenster; ohne Fenster gibt es dafuer kein Gegenstueck.
 s.d.dispatchEvent(new s.w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-check('zweites Escape schliesst das Fenster', !s.$('rmx-modal').classList.contains('open'));
+check('zweites Escape laesst die Tabelle unberuehrt', !!s.$('rmx-tabwrap')
+      && zeilen(s).length > 0, String(zeilen(s).length));
 check('keine JS-Fehler', s.fehler.length === 0, s.fehler.join(' | '));
 
 // ── 8. i18n-Regel ──────────────────────────────────────────────────────────
@@ -316,7 +345,6 @@ const MITGL = {
 };
 const gmOk = (q) => json({ members: MITGL[String(q.group).toLowerCase()] || [] });
 s = await seite({ gm: gmOk });
-s.$('rmx-open').click();
 await schlaf(80);
 check('Positivkontrolle: Mitglieder je Gruppe abgefragt', s.gm.length === 2, s.gm.map(q => q.group).join(' | '));
 const td = (n, sp) => { const c = kaestchen(s, n, sp); return c ? c.closest('td') : null; };
@@ -386,7 +414,6 @@ check('geerbte graue Haken schreiben nichts (ad_internet_users leer)', b9.ad_int
 // Schreibweisen wie im Backend (_norm_login): FIRMA\carla == carla
 section('9b. Schreibweisen: Domain-Praefix und UPN');
 s = await seite({ gm: gmOk, adStatus: () => json(Object.assign({}, AD, { allowed_users: 'FIRMA\\carla', sap_users: 'carla@firma.local' })) });
-s.$('rmx-open').click();
 await schlaf(80);
 const cz = zeilen(s).filter(tr => /carla/i.test(tr.querySelector('.rmx-wert').textContent));
 check('FIRMA\\carla und carla@firma.local sind EINE Zeile', cz.length === 1, cz.length);
@@ -399,7 +426,6 @@ check('Entfernen trifft "carla@firma.local" ueber den normierten Namen', (s.post
 
 section('9c. Ohne Verzeichnis-Zugang: "nicht ermittelt" statt "nicht berechtigt"');
 s = await seite({ gm: () => json({ error: 'NO_CREDENTIALS' }, 428) });
-s.$('rmx-open').click();
 await schlaf(80);
 check('Positivkontrolle: Abfrage lief', s.gm.length === 2);
 const info = s.$('rmx-erbe-info');
@@ -421,7 +447,6 @@ const reihe = (s) => zeilen(s).map(tr => tr.querySelector('.rmx-wert').textConte
 const kopfKnopf = (s, label) => [...s.d.querySelectorAll('#rmx-tabwrap thead .rmx-sort')].find(b => b.textContent.replace(/[▲▼]/g, '') === label) || null;
 const sortKlick = (s, label) => { const b = kopfKnopf(s, label); if (!b) { check('Kopf-Knopf ' + label, false, 'fehlt'); return; } b.click(); };
 s = await seite({ gm: gmOk });
-s.$('rmx-open').click();
 await schlaf(80);
 check('Vorgabe: nach Name A-Z, Gruppen zuerst', reihe(s).join('|') === 'Alle|IT, Team|admin1|Bob|carla', reihe(s).join('|'));
 check('Namensspalte traegt aria-sort=ascending', s.d.querySelector('#rmx-tabwrap thead th.rmx-name-th').getAttribute('aria-sort') === 'ascending');
@@ -440,19 +465,84 @@ check('Sortierung gemerkt (Bereich, nicht Spaltenindex)', gemerkt && gemerkt.nac
 klick(s, kaestchen(s, 'admin1', I));
 check('Haken setzen laesst die Reihenfolge stehen', reihe(s).join('|') === 'IT, Team|Alle|admin1|Bob|carla', reihe(s).join('|'));
 // Wiederoeffnen in derselben Seite
-s.$('rmx-cancel').click(); s.$('rmx-open').click(); await schlaf(80);
+s.$('rmx-cancel').click(); await schlaf(80);
 check('Wiederoeffnen: gemerkte Sortierung gilt', reihe(s).join('|') === 'IT, Team|Alle|admin1|Bob|carla', reihe(s).join('|'));
 // neue Seite mit gemerktem Wert im Speicher
 s = await seite({ gm: gmOk, vorab: (w) => w.localStorage.setItem('jarvis_rmx_sort', JSON.stringify({ nach: 'name', richtung: -1 })) });
-s.$('rmx-open').click(); await schlaf(80);
+await schlaf(80);
 check('frische Seite liest die gemerkte Sortierung', reihe(s).join('|') === 'IT, Team|Alle|carla|Bob|admin1', reihe(s).join('|'));
 // gemerkte Spalte gibt es hier nicht (VEMAS ausgeblendet) -> Name A-Z
 s = await seite({ gm: gmOk, vorab: (w) => w.localStorage.setItem('jarvis_rmx_sort', JSON.stringify({ nach: 'vemas', richtung: -1 })) });
-s.$('rmx-open').click(); await schlaf(80);
+await schlaf(80);
 check('gemerkte Spalte ausgeblendet: Rueckfall auf Name A-Z', reihe(s).join('|') === 'Alle|IT, Team|admin1|Bob|carla', reihe(s).join('|'));
 s = await seite({ gm: gmOk, vorab: (w) => w.localStorage.setItem('jarvis_rmx_sort', '{kaputt') });
-s.$('rmx-open').click(); await schlaf(80);
+await schlaf(80);
 check('kaputter Speicherwert: Vorgabe, kein Fehler', reihe(s).join('|') === 'Alle|IT, Team|admin1|Bob|carla' && s.fehler.length === 0, reihe(s).join('|'));
+
+// ── 11. Auf der Seite statt im Popup ───────────────────────────────────────
+// ⚠ DIE DREI RISIKEN DES UMBAUS VOM 2026-10-21. Im Popup wurde der Bestand
+// "beim Oeffnen" gelesen – ein Zeitpunkt, an dem alles fertig war. Inline gibt
+// es diesen Zeitpunkt nicht mehr.
+section('11. Inline: Bestand kommt nach, Bereiche kommen nach, Haken bleiben');
+{
+    // (a) Der Bestand kommt NACH dem Aufbau. Ohne das Signal aus settings_ad.js
+    //     zeigte die Tabelle dauerhaft die leeren Felder von vor dem Abruf –
+    //     ohne Fehlermeldung.
+    let spaet;
+    const warte = new Promise((r) => { spaet = r; });
+    s = await seite({ adStatus: () => warte.then(() => json(AD)) });
+    check('Positivkontrolle: vor dem Abruf steht "laedt" und keine Zeile',
+          s.$('rmx-status').textContent === t('rmx.loading') && zeilen(s).length === 0,
+          s.$('rmx-status').textContent + ' / ' + zeilen(s).length);
+    check('Positivkontrolle: Uebernehmen ist dabei gesperrt', s.$('rmx-apply').disabled === true);
+    spaet();
+    await schlaf(140);
+    check('der nachgelieferte Bestand fuellt die Tabelle',
+          zeilen(s).length >= 5 && !!zeile(s, 'Bob'), String(zeilen(s).length));
+    check('… und der Hinweis ist weg', s.$('rmx-status').textContent === '',
+          s.$('rmx-status').textContent);
+
+    // (b) Ein Bereich wird NACHTRAEGLICH eingeblendet (app.js tut das, sobald
+    //     die Skill-Liste da ist – unabhaengig vom AD-Abruf, also ohne
+    //     garantierte Reihenfolge).
+    check('Positivkontrolle: VEMAS ist noch keine Spalte',
+          !spaltenNamen(s).includes(t('rmx.col_vemas')), spaltenNamen(s).join('|'));
+    s.$('sec-sub-vemas').style.display = '';
+    await schlaf(140);
+    check('nachtraeglich eingeblendeter Bereich wird zur Spalte',
+          spaltenNamen(s).includes(t('rmx.col_vemas')), spaltenNamen(s).join('|'));
+    check('… und sein Bestand steht als Zeile da', !!zeile(s, 'vera'),
+          zeilen(s).map(tr => tr.querySelector('.rmx-wert').textContent).join('|'));
+
+    // (c) Jemand speichert woanders, waehrend hier Haken offen sind. Im Popup
+    //     war das unmoeglich (es lag darueber); inline ist beides bedienbar –
+    //     und ein stilles Wegwerfen waere Datenverlust ohne Meldung.
+    s = await seite({});
+    klick(s, kaestchen(s, 'carla', t('rmx.col_admins')));
+    check('Positivkontrolle: eine Aenderung steht offen',
+          s.$('rmx-apply').textContent === t('rmx.apply_n').replace('{n}', '1'),
+          s.$('rmx-apply').textContent);
+    await s.w._adSave();            // der Speichern-Knopf unter den Abschnitten
+    await schlaf(140);
+    check('fremdes Speichern wirft die offenen Haken NICHT weg',
+          kz(s, 'carla', t('rmx.col_admins')).checked === true
+          && s.$('rmx-apply').textContent === t('rmx.apply_n').replace('{n}', '1'),
+          s.$('rmx-apply').textContent);
+    check('… und es wird BENANNT statt verschwiegen',
+          s.$('rmx-status').textContent === t('rmx.reloaded_pending')
+          && s.$('rmx-status').classList.contains('rmx-status-fehler'),
+          s.$('rmx-status').textContent);
+
+    // (d) "Verwerfen" ersetzt das fruehere Schliessen – und hat nur dann etwas
+    //     zu tun, wenn etwas offen ist.
+    check('Verwerfen ist bedienbar, solange etwas offen ist', s.$('rmx-cancel').disabled === false);
+    s.$('rmx-cancel').click();
+    await schlaf(100);
+    check('Verwerfen nimmt die Haken zurueck',
+          kz(s, 'carla', t('rmx.col_admins')).checked === false);
+    check('… und ist danach selbst gesperrt', s.$('rmx-cancel').disabled === true);
+    check('keine JS-Fehler im ganzen Abschnitt', s.fehler.length === 0, s.fehler.join(' | '));
+}
 
 clearTimeout(WACH);
 console.log(`\n${ok} OK, ${fail} FAIL`);

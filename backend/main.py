@@ -19872,6 +19872,22 @@ async def read_knowledge_file(path: str, user: str = Depends(require_auth_or_age
     try:
         content = resolved.read_text(encoding="utf-8")
         return JSONResponse({"ok": True, "content": content})
+    except UnicodeDecodeError:
+        # ⚠ EINE PDF IST KEIN SERVERFEHLER. Bis 2026-10-21 flog der
+        # UnicodeDecodeError in das breite `except` darunter und wurde zu einem
+        # HTTP 500 mit dem Codec-Text ("'utf-8' codec can't decode byte 0xb2 in
+        # position 10"). Im Wissens-Portal fuehrte damit JEDER Klick auf das
+        # Auge einer PDF-/Office-Datei zu einer Fehlermeldung - also im
+        # Normalfall, denn Wissensordner enthalten ueberwiegend solche Dateien.
+        # Jetzt ist es eine geordnete Auskunft: der Aufrufer erfaehrt, DASS die
+        # Datei kein Text ist und WAS sie ist, und holt sie ueber
+        # /api/knowledge/file_raw. Der MIME-Typ kommt von hier, damit das
+        # Frontend keine eigene Endungsliste pflegen muss - eine Liste ist an
+        # dem Tag unvollstaendig, an dem eine neue Endung dazukommt.
+        import mimetypes
+        mime = mimetypes.guess_type(resolved.name)[0] or "application/octet-stream"
+        return JSONResponse({"ok": False, "binary": True, "mime": mime,
+                             "error": "Datei ist kein UTF-8-Text"})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 

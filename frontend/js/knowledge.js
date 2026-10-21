@@ -640,16 +640,24 @@ class JarvisKnowledgeManager {
         return '📄';
     }
 
+    /* Abruf-Schluessel statt Sitzungstoken in ?token= (frontend/js/dlkey.js).
+       Rueckfall auf das Sitzungstoken nur, solange das Modul fehlt oder der
+       Schluessel noch unterwegs ist – sonst waere ein Bild/Download tot.
+       ⚠ ALS METHODE, nicht als lokale Funktion in _bindFilePreview: viewFile
+       braucht sie seit 2026-10-21 ebenfalls, und eine zweite Fassung liefe beim
+       naechsten Feinschliff auseinander. Eine Funktion, die nur in einer
+       anderen Funktion steht, ist fuer jeden Aufrufer ausserhalb ein
+       ReferenceError – im catch verschluckt also eine leere Anzeige ohne
+       Meldung (Register, zweimal bezahlt). */
+    _dlKey() {
+        return (window.JarvisDL && window.JarvisDL.schluessel())
+            || window.JarvisSitzung.token();
+    }
+
     _bindFilePreview(box) {
         if (!box) return;
         const token = () => window.JarvisSitzung.token();
-        /* Abruf-Schluessel statt Sitzungstoken in ?token= (frontend/js/dlkey.js).
-       Rueckfall auf das Sitzungstoken nur, solange das Modul fehlt oder der
-       Schluessel noch unterwegs ist – sonst waere ein Bild/Download tot. */
-        function _dlk() {
-            return (window.JarvisDL && window.JarvisDL.schluessel())
-                || window.JarvisSitzung.token();
-        }
+        const _dlk = () => this._dlKey();
 
         const T = (k, d) => (window.t && window.t(k)) || d;
         if (!this._filePreviewCache) this._filePreviewCache = {};
@@ -2973,6 +2981,16 @@ class JarvisKnowledgeManager {
             const body = modal.querySelector('#kb-file-view-body');
             if (data.ok) {
                 body.textContent = data.content;
+            } else if (data.binary) {
+                // ⚠ KEIN FEHLER, SONDERN EIN ANDERES FORMAT. Hier stand bis
+                // 2026-10-21 die Fehlerzeile des Servers – und weil
+                // Wissensordner ueberwiegend PDFs und Office-Dateien
+                // enthalten, war das der NORMALFALL: das Auge in der
+                // Wissensgruppen-Tabelle fuehrte praktisch immer zu
+                // "'utf-8' codec can't decode byte 0xb2 in position 10".
+                // Die Datei kommt jetzt ueber /api/knowledge/file_raw, also
+                // ueber den Endpunkt, der genau dafuer gebaut ist.
+                this._zeigeNichtText(body, filePath, data.mime || '');
             } else {
                 body.style.color = 'var(--error, #f87171)';
                 body.textContent = data.error || window.t('knowledge.load_failed');
@@ -2982,6 +3000,43 @@ class JarvisKnowledgeManager {
             body.style.color = 'var(--error, #f87171)';
             body.textContent = window.t('common.error') + ': ' + e.message;
         }
+    }
+
+    /* Vorschau fuer alles, was kein UTF-8-Text ist.
+       ⚠ ENTSCHIEDEN WIRD AM MIME-TYP AUS DER ANTWORT, nicht an einer
+       Endungsliste im Frontend: eine Liste ist an dem Tag unvollstaendig, an
+       dem eine neue Endung dazukommt, und die fehlende Zeile meldet sich
+       nicht. Den Typ kennt der Server ohnehin – file_raw setzt ihn selbst. */
+    _zeigeNichtText(body, filePath, mime) {
+        const url = '/api/knowledge/file_raw?path=' + encodeURIComponent(filePath)
+            + '&token=' + encodeURIComponent(this._dlKey()) + '&disp=inline';
+        body.style.color = '';
+        body.style.whiteSpace = 'normal';
+        if (mime.indexOf('image/') === 0) {
+            body.innerHTML = '<img alt="" style="max-width:100%;max-height:60vh;'
+                + 'display:block;border-radius:6px;">';
+            body.querySelector('img').src = url;
+            return;
+        }
+        if (mime === 'application/pdf') {
+            body.innerHTML = '<iframe style="width:100%;height:60vh;border:0;'
+                + 'border-radius:6px;background:#fff;"></iframe>';
+            body.querySelector('iframe').src = url + '#toolbar=0';
+            return;
+        }
+        // Weder Bild noch PDF: ein Download ist der einzige ehrliche Weg –
+        // eine leere Flaeche waere von einem Fehler nicht zu unterscheiden.
+        const hin = document.createElement('p');
+        hin.style.cssText = 'margin:0 0 12px;color:var(--text-secondary);';
+        hin.textContent = window.t('knowledge.view_binary').replace('{typ}', mime || '?');
+        const a = document.createElement('a');
+        a.className = 'kb-btn-action';
+        a.href = url.replace('&disp=inline', '');
+        a.setAttribute('download', '');
+        a.textContent = window.t('knowledge.view_download');
+        body.innerHTML = '';
+        body.appendChild(hin);
+        body.appendChild(a);
     }
 
     // ─── Ordner neu anlegen (data/rag/<name>, physisch + in der Liste) ────

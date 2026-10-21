@@ -981,6 +981,33 @@ console.log('\n7. Regeln (Drift, Verdrahtung, i18n)');
     await tickCount(8);
     pruefe('ein Treffer IM Block klappt ihn ebenfalls auf',
            !!det && det.open === true, det ? String(det.open) : '(fehlt)');
+
+    // ⚠ EIN AUFGEKLAPPTER BLOCK IN EINEM ZUGEKLAPPTEN IST WEITER UNSICHTBAR.
+    // Seit die Bereichs-Bloecke in "alte Benutzerberechtigungen" liegen, hat
+    // der Treffer ZWEI <details> ueber sich – ein Sprung, der nur das innerste
+    // oeffnet, landet wieder auf einer geschlossenen Zeile. Geprueft wird die
+    // EIGENSCHAFT (kein Vorfahre ist zu), nicht ein benannter Container: eine
+    // dritte Ebene waere damit von selbst mitgemessen.
+    const aussen = [];
+    for (let p = det && det.parentNode; p && p !== doc.body; p = p.parentNode) {
+        if (p.tagName === 'DETAILS') aussen.push(p);
+    }
+    pruefe('Positivkontrolle: der Block liegt in mindestens einem weiteren <details>',
+           aussen.length >= 1, String(aussen.length));
+    pruefe('… und KEIN uebergeordnetes <details> ist nach dem Sprung zu',
+           aussen.every(x => x.open === true),
+           aussen.map(x => (x.getAttribute('data-sub') || '?') + '=' + x.open).join(' | '));
+    aussen.forEach(x => { x.open = false; });
+    if (det) det.open = false;
+    await tippe(w, 'internet-gruppe');
+    pruefe('… auch wenn ALLE Ebenen davor zu waren',
+           (await (async () => {
+               klick(zeile(w, 0), w);
+               await tickCount(8);
+               return det && det.open === true && aussen.every(x => x.open === true);
+           })()),
+           aussen.map(x => (x.getAttribute('data-sub') || '?') + '=' + x.open).join(' | ')
+           + ' / innen=' + (det ? det.open : '(fehlt)'));
 }
 
 // ── Abschnitt 10: die Regel steht im Code, nicht als Liste ─────────────────

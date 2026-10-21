@@ -303,22 +303,18 @@
         return n;
     }
 
-    // ── Fenster ───────────────────────────────────────────────────────────
-    function fensterAnlegen() {
-        if (el('rmx-modal')) return;
-        var m = document.createElement('div');
-        m.id = 'rmx-modal';
-        m.className = 'modal';
-        // unter dem Verzeichnis-Picker (10002), der daraus geoeffnet wird
-        m.style.zIndex = '10001';
-        m.innerHTML =
-            '<div class="modal-content glass rmx-inhalt">' +
-              '<div class="modal-header">' +
-                '<h2 data-i18n="rmx.title">' + esc(T('rmx.title')) + '</h2>' +
-                '<button type="button" class="btn-icon" id="rmx-close" data-i18n-aria="common.close" aria-label="' + esc(T('common.close')) + '"></button>' +
-              '</div>' +
-              '<div class="modal-body rmx-body">' +
-                '<p class="kb-hint" data-i18n="rmx.intro">' + esc(T('rmx.intro')) + '</p>' +
+    // ── Bereich auf der Seite ─────────────────────────────────────────────
+    // ⚠ BIS 2026-10-21 WAR DAS EIN POPUP (#rmx-modal) HINTER EINEM KNOPF.
+    // Jetzt steht es an dessen Stelle direkt im Abschnitt. Was damit entfaellt:
+    // Kopfzeile mit ×, Escape, Klick auf den Hintergrund und der z-index unter
+    // dem Verzeichnis-Picker – es gibt nichts mehr zu schliessen. Ueberschrift
+    // und Einleitung stehen im MARKUP (settings.html), damit die Suche im Kopf
+    // der Einstellungen sie findet; hier entsteht nur, was Zustand hat.
+    function bereichAnlegen() {
+        var host = el('rmx-host');
+        if (!host || host.dataset.rmx === '1') return !!host;
+        host.dataset.rmx = '1';
+        host.innerHTML =
                 '<div class="rmx-leiste">' +
                   '<button type="button" class="kb-btn-secondary" id="rmx-add-users" data-i18n="rmx.add_users">' + esc(T('rmx.add_users')) + '</button>' +
                   '<button type="button" class="kb-btn-secondary" id="rmx-add-groups" data-i18n="rmx.add_groups">' + esc(T('rmx.add_groups')) + '</button>' +
@@ -332,24 +328,14 @@
                 '<div class="rmx-erbe-info" id="rmx-erbe-info" role="status"></div>' +
                 '<div class="rmx-fuss">' +
                   '<span id="rmx-status" class="rmx-status" role="status"></span>' +
-                  '<button type="button" class="kb-btn-secondary" id="rmx-cancel" data-i18n="common.cancel">' + esc(T('common.cancel')) + '</button>' +
+                  '<button type="button" class="kb-btn-secondary" id="rmx-cancel" data-i18n="rmx.discard">' + esc(T('rmx.discard')) + '</button>' +
                   '<button type="button" class="kb-btn-action" id="rmx-apply"></button>' +
-                '</div>' +
-              '</div>' +
-            '</div>';
-        document.body.appendChild(m);
-        if (window.JarvisIcons) window.JarvisIcons.setClose(el('rmx-close'));
+                '</div>';
 
-        el('rmx-close').addEventListener('click', schliessen);
-        el('rmx-cancel').addEventListener('click', schliessen);
-        m.addEventListener('click', function (e) { if (e.target === m) schliessen(); });
-        document.addEventListener('keydown', function (e) {
-            if (e.key !== 'Escape' || !m.classList.contains('open')) return;
-            // Liegt der Verzeichnis-Picker darueber, schliesst Escape zuerst ihn
-            var p = el('ldap-picker-modal');
-            if (p && p.classList.contains('open')) return;
-            schliessen();
-        });
+        // "Verwerfen" statt "Abbrechen": ohne Fenster gibt es nichts zu
+        // schliessen. Der Knopf tut das, was frueher das Schliessen tat – die
+        // nicht uebernommenen Haken fallenlassen und den Bestand neu einlesen.
+        el('rmx-cancel').addEventListener('click', function () { aufbauen(); });
         el('rmx-filter').addEventListener('input', zeichnen);
         el('rmx-mitglieder').addEventListener('change', function () {
             _zeigeMitglieder = el('rmx-mitglieder').checked;
@@ -488,8 +474,11 @@
         var n = aenderungen();
         var btn = el('rmx-apply');
         btn.textContent = n ? T('rmx.apply_n').replace('{n}', n) : T('rmx.apply');
-        // ohne geladenen Bestand bleibt der Knopf gesperrt (siehe oeffnen)
+        // ohne geladenen Bestand bleibt der Knopf gesperrt (siehe aufbauen)
         btn.disabled = !n || !window._adGeladen;
+        // Verwerfen hat nur etwas zu tun, wenn etwas offen ist
+        var verw = el('rmx-cancel');
+        if (verw) verw.disabled = !n;
     }
 
     function status(text, fehler) {
@@ -498,28 +487,63 @@
         s.classList.toggle('rmx-status-fehler', !!fehler);
     }
 
-    function oeffnen() {
-        fensterAnlegen();
+    function aufbauen() {
+        if (!bereichAnlegen() && !el('rmx-tabwrap')) return;
         // Fail-closed: ohne geladenen Bestand wuerde "Uebernehmen" leere
         // Listen speichern und damit jede Freigabe loeschen.
         if (!window._adGeladen) {
-            status(T('rmx.not_loaded'), true);
+            status(T('rmx.loading'));
         } else {
             status('');
         }
-        _mitglieder = {};   // je Oeffnen frisch: die Gruppen koennen sich geaendert haben
+        _mitglieder = {};   // je Aufbau frisch: die Gruppen koennen sich geaendert haben
         sortLaden();
         bestandEinlesen();
         el('rmx-filter').value = '';
         el('rmx-mitglieder').checked = _zeigeMitglieder;
         zeichnen();
-        el('rmx-modal').classList.add('open');
         mitgliederLaden();
     }
 
-    function schliessen() {
-        var m = el('rmx-modal');
-        if (m) m.classList.remove('open');
+    // ⚠ EIN NACHLADEN DARF OFFENE HAKEN NICHT STILL WEGWERFEN. `_adLoad` laeuft
+    // auch, wenn jemand den Speichern-Knopf unter den Abschnitten drueckt –
+    // frueher lag darueber ein Fenster, jetzt ist beides gleichzeitig bedienbar.
+    // Steht etwas Unuebernommenes an, bleibt es stehen und wird BENANNT; nur der
+    // eigene Speicherlauf baut durch (danach ist der neue Stand der richtige).
+    var _eigenerSpeicherlauf = false;
+    function nachladen() {
+        if (!el('rmx-tabwrap')) return;
+        // Fail-closed: der Abruf ist durch und hat NICHT geklappt. Dann heisst
+        // die Lage "nicht geladen", nicht "laedt" – und Uebernehmen bliebe
+        // gesperrt, weil es sonst leere Listen speichern wuerde.
+        if (!window._adGeladen) { status(T('rmx.not_loaded'), true); fussAktualisieren(); return; }
+        if (_eigenerSpeicherlauf) { _eigenerSpeicherlauf = false; aufbauen(); return; }
+        if (aenderungen()) {
+            fussAktualisieren();
+            status(T('rmx.reloaded_pending'), true);
+            return;
+        }
+        aufbauen();
+    }
+
+    // Welche Bereiche es gibt, entscheiden die Skill-Schalter – und app.js setzt
+    // sie unabhaengig vom AD-Abruf. ⚠ EINE REIHENFOLGE ZWISCHEN BEIDEN GIBT ES
+    // NICHT; wer eine annimmt, misst den Glueckfall. Deshalb wird die
+    // Sichtbarkeit BEOBACHTET statt erwartet (MutationObserver auf das
+    // style-Attribut – anders als ResizeObserver arbeitet der auch headless).
+    function sichtbarkeitBeobachten() {
+        if (typeof MutationObserver !== 'function') return;
+        var stand = sichtbareBereiche().map(function (b) { return b.sub; }).join(',');
+        var mo = new MutationObserver(function () {
+            var neu = sichtbareBereiche().map(function (b) { return b.sub; }).join(',');
+            if (neu === stand) return;
+            stand = neu;
+            nachladen();
+        });
+        BEREICHE.forEach(function (b) {
+            var d = document.querySelector('details.sec-sub[data-sub="' + b.sub + '"]');
+            if (d) mo.observe(d, { attributes: true, attributeFilter: ['style'] });
+        });
     }
 
     async function uebernehmen() {
@@ -552,29 +576,33 @@
         var btn = el('rmx-apply');
         btn.disabled = true;
         status(T('common.saving'));
+        // `_adSave` ruft am Ende `_adLoad`, und das meldet "geladen" – dieser
+        // eine Neuaufbau ist gewollt, er zeigt den gespeicherten Stand.
+        _eigenerSpeicherlauf = true;
         var ok = await window._adSave();
         if (ok) {
-            status('');
-            schliessen();
+            status(T('rmx.saved'));
         } else {
             // Fehler bleibt stehen, bis jemand ihn gelesen hat
+            _eigenerSpeicherlauf = false;
             status(T('rmx.save_failed'), true);
             btn.disabled = false;
         }
     }
 
-    function knopfAnhaengen() {
-        var btn = el('rmx-open');
-        if (!btn || btn.dataset.rmx) return;
-        btn.dataset.rmx = '1';
-        btn.addEventListener('click', oeffnen);
+    function start() {
+        if (!el('rmx-host')) return;
+        aufbauen();
+        sichtbarkeitBeobachten();
+        // Der Bestand kommt asynchron (settings_ad.js meldet es).
+        document.addEventListener('jarvis-ad-geladen', nachladen);
     }
 
-    window.RechteMatrix = { oeffnen: oeffnen };
+    window.RechteMatrix = { aufbauen: aufbauen };
 
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', knopfAnhaengen);
+        document.addEventListener('DOMContentLoaded', start);
     } else {
-        knopfAnhaengen();
+        start();
     }
 })();

@@ -290,6 +290,14 @@ PROBEN = [
     ("der Sprung oeffnet das <details> nicht", "frontend/js/settings_search.js",
      "            else if (p.tagName === 'DETAILS' && !p.open) kette.unshift(p);",
      "            else if (false) kette.unshift(p);"),
+    # ⚠ NUR DAS INNERSTE <details>: seit die Bereichs-Bloecke in "alte
+    # Benutzerberechtigungen" liegen, hat ein Treffer ZWEI davon ueber sich.
+    # Wer die Kette beim ersten abbricht, oeffnet den Block in einem
+    # zugeklappten Container – sichtbar wird er damit nicht. Die Probe oben
+    # kann das nicht sehen: sie nimmt BEIDE Ebenen weg.
+    ("der Sprung oeffnet nur das INNERSTE <details>", "frontend/js/settings_search.js",
+     "            else if (p.tagName === 'DETAILS' && !p.open) kette.unshift(p);",
+     "            else if (p.tagName === 'DETAILS' && !p.open) { kette.unshift(p); break; }"),
     ("zwei Fassungen der Titel-Trennung", "frontend/js/settings_search.js",
      "            var zerlegt = teileAuf(lab);\n            if (!zerlegt) continue;",
      "            var zerlegt = (function (x) { var t = (x.textContent || '').trim();\n"

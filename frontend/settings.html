@@ -23,7 +23,7 @@
     <link rel="stylesheet" href="/static/css/theme.css?v=34">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=10">
-    <link rel="stylesheet" href="/static/css/style.css?v=207">
+    <link rel="stylesheet" href="/static/css/style.css?v=208">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=7">
     <!-- Feedback-Reiter. EINE Datei fuer /settings und /feedback: Tabelle,
          Sterne und Abgabe-Karte werden an beiden Orten gebraucht, zwei
@@ -5073,14 +5073,65 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     </div>
                                 </div>
 
+                                <!-- ⚠ EIGENER SPEICHERN-KNOPF, WEIL DER ANDERE ZUGEKLAPPT IST.
+                                     Der Knopf am Ende von "alte Benutzerberechtigungen" schreibt
+                                     diese Verbindungsfelder mit; ohne diesen hier muesste man den
+                                     Berechtigungs-Container aufklappen, um eine geaenderte
+                                     DC-Adresse zu speichern. Gleiche Klick-Marke, gleicher
+                                     Vorgang - es gibt nur EINEN Speichervorgang. -->
+                                <div style="display:flex;align-items:center;gap:10px;margin-top:12px;">
+                                    <button class="kb-btn-action" data-klick="ad-speichern" data-i18n="common.save">Speichern</button>
+                                    <button class="kb-btn-secondary" data-klick="ad-testen" data-i18n="profile.test">Verbindung testen</button>
+                                    <span class="ad-save-status" style="font-size:0.82rem;"></span>
+                                </div>
+                                <div id="ad-test-result" style="font-size:0.82rem;min-height:18px;margin-top:4px;"></div>
+
+                                <!-- Zertifikat des Domain-Controllers (BSI H5): Anmeldungen nur noch
+                                     verschluesselt + geprueft; Baustein rendert sich selbst (js/sapcert.js).
+                                     Steht hier, weil er genau den Server prueft, der oben eingetragen
+                                     ist – sapcert.js findet #ad-cert ueber die Id, die Stelle im
+                                     Dokument ist ihm gleich. -->
+                                <p class="kb-hint" style="margin:10px 0 4px;" data-i18n="security.ad_tls_hint">Anmeldungen über das Firmenverzeichnis laufen nur verschlüsselt und mit geprüftem Zertifikat des Domain-Controllers. Stammt es von einer internen Zertifizierungsstelle, hier prüfen und verankern.</p>
+                                <p id="ad-tls-uebergang" hidden style="margin:6px 0;font-size:0.82rem;color:var(--warning);"></p>
+                                <div class="sapcert" id="ad-cert"></div>
+
                                     </div>
                                 </details>
 
-                                <!-- ── Alle Bereiche in einem Fenster (js/rechte_matrix.js) ── -->
-                                <div class="rmx-einstieg">
-                                    <button type="button" class="kb-btn-secondary" id="rmx-open" data-i18n="rmx.open_btn">Berechtigungen zuweisen…</button>
-                                    <span class="kb-hint" data-i18n="rmx.open_hint">Benutzer und Gruppen aus dem Verzeichnis wählen und alle Bereiche auf einen Blick ankreuzen.</span>
-                                </div>
+                                <!-- ── Alle Bereiche in einer Tabelle (js/rechte_matrix.js) ──
+                                     Bis 2026-10-21 lag das in einem Popup hinter dem Knopf
+                                     "Berechtigungen zuweisen…". Jetzt steht es an dessen Stelle
+                                     direkt auf der Seite: der Regelweg braucht keinen Klick.
+                                     ⚠ UEBERSCHRIFT UND EINLEITUNG STEHEN IM MARKUP, nicht im
+                                     Modul – nur so findet die Suche im Kopf der Einstellungen
+                                     sie (sie liest <h3>/<h4>/<summary> aus dem lebenden DOM).
+                                     Die Tabelle samt Leiste und Fuss baut rechte_matrix.js in
+                                     #rmx-host.
+                                     FETT, weil das hier der Regelweg ist – die Kopfzeile von
+                                     "alte Benutzerberechtigungen" tritt dagegen zurueck. Die
+                                     Staerke steht INLINE und nicht als Regel: eine
+                                     Kaskaden-Zusage waere in jsdom nicht verlaesslich messbar
+                                     (dort gewinnt bei zwei passenden Regeln die spaetere, nicht
+                                     die spezifischere). -->
+                                <h4 id="rmx-titel" style="font-weight:600;margin:14px 0 4px;" data-i18n="rmx.title">Berechtigungen zuweisen</h4>
+                                <p class="kb-hint" data-i18n="rmx.intro">Jede Zeile ist ein Benutzer oder eine Gruppe, jede Spalte ein Bereich. Ein Häkchen gibt den Bereich frei – das wirkt genau wie ein Eintrag im jeweiligen Abschnitt darunter. Bereiche, deren Funktion ausgeschaltet ist, fehlen hier. Gespeichert wird erst mit „Übernehmen".</p>
+                                <div class="rmx-inline" id="rmx-host"></div>
+
+                                <!-- ── Unter-Container: alte Benutzerberechtigungen ──
+                                     Fasst die einzelnen Bereichs-Listen (Anmeldung bis
+                                     Administratoren) samt ihrem Speichern-Knopf zusammen. Der
+                                     Regelweg ist der Knopf "Berechtigungen zuweisen…" darueber;
+                                     die Einzelfelder bleiben erreichbar, treten aber zurueck.
+                                     ⚠ Verschachtelte <details>: die CSS-Regeln von .sec-sub
+                                     zielen mit > auf das DIREKTE Kind, die inneren Bloecke
+                                     behalten damit ihr Aussehen.
+                                     Die Kopfzeile steht bewusst NORMAL statt fett (die Regel
+                                     `details.sec-sub > summary` setzt 600): sie soll gegenueber
+                                     "Berechtigungen zuweisen…" zuruecktreten. Inline und nicht
+                                     als Regel – siehe Begruendung am Knopf oben. -->
+                                <details class="sec-sub" data-sub="altrechte">
+                                    <summary style="font-weight:400;"><span data-i18n="security.sub_altrechte">alte Benutzerberechtigungen</span><span class="sec-sub-hint" data-i18n="security.sub_altrechte_hint">– Einzellisten je Bereich, von Hand gepflegt</span></summary>
+                                    <div class="sec-sub-body">
 
                                 <!-- ── Unter-Container: Anmeldung (Login-Zugriff) ── -->
                                 <details class="sec-sub" data-sub="login">
@@ -5453,25 +5504,29 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     </div>
                                 </details>
 
+                                <!-- Speichern der Einzellisten. Derselbe Vorgang wie der Knopf
+                                     im Container "Verbindung" (beide schreiben den GANZEN
+                                     Koerper), deshalb dieselbe Klick-Marke. -->
+                                <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+                                    <button class="kb-btn-action" id="ad-save-btn" data-klick="ad-speichern" data-i18n="common.save">Speichern</button>
+                                    <span id="ad-save-status" class="ad-save-status" style="font-size:0.82rem;"></span>
+                                </div>
+
+                                    </div>
+                                </details>
+
                                 <!-- BSI H4 (CSP ohne Inline-Skript, 2026-10-04): ausgelagert nach js/settings_unterklappen.js,
                                      synchron an derselben Stelle – Zeitpunkt unveraendert. -->
                                 <script src="/static/js/settings_unterklappen.js?v=1"></script>
 
-                                <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
-                                    <button class="kb-btn-action" id="ad-save-btn" data-klick="ad-speichern" data-i18n="common.save">Speichern</button>
-                                    <button class="kb-btn-secondary" data-klick="ad-testen" data-i18n="profile.test">Verbindung testen</button>
-                                    <span id="ad-save-status" style="font-size:0.82rem;"></span>
-                                </div>
-                                <div id="ad-test-result" style="font-size:0.82rem;min-height:18px;margin-top:4px;"></div>
-                                <!-- Zertifikat des Domain-Controllers (BSI H5): Anmeldungen nur noch
-                                     verschluesselt + geprueft; Baustein rendert sich selbst (js/sapcert.js) -->
-                                <p class="kb-hint" style="margin:10px 0 4px;" data-i18n="security.ad_tls_hint">Anmeldungen über das Firmenverzeichnis laufen nur verschlüsselt und mit geprüftem Zertifikat des Domain-Controllers. Stammt es von einer internen Zertifizierungsstelle, hier prüfen und verankern.</p>
-                                <p id="ad-tls-uebergang" hidden style="margin:6px 0;font-size:0.82rem;color:var(--warning);"></p>
-                                <div class="sapcert" id="ad-cert"></div>
+                                <!-- ⚠ "Verbindung testen" samt Ergebniszeile UND der
+                                     Zertifikats-Baustein stehen jetzt IM Container "Verbindung
+                                     (Domain-Controller)": beides gehoert zu dem Server, dessen
+                                     Adresse ein paar Zeilen darueber eingetragen wird. -->
 
                                 <!-- BSI H4 (CSP ohne Inline-Skript, 2026-10-04): ausgelagert nach js/settings_ad.js,
                                      synchron an derselben Stelle – Zeitpunkt unveraendert. -->
-                                <script src="/static/js/settings_ad.js?v=3"></script>
+                                <script src="/static/js/settings_ad.js?v=5"></script>
                             </div>
                         </div>
 
@@ -5847,7 +5902,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/icons.js?v=10"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/dlkey.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=356"></script>
+    <script src="/static/js/i18n.js?v=358"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=29"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -5860,7 +5915,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/skillcfg.js?v=13"></script>
     <script src="/static/js/google.js?v=15"></script>
     <script src="/static/js/whatsapp.js?v=20"></script>
-    <script src="/static/js/knowledge.js?v=139"></script>
+    <script src="/static/js/knowledge.js?v=140"></script>
     <!-- knowledge_sync NACH knowledge.js: die Ordnerliste fragt beim Zeichnen
          window.KnowledgeSync.sharedFolders() fuer den Zustand des 🔗-Symbols. -->
     <script src="/static/js/knowledge_sync.js?v=6"></script>
@@ -5887,7 +5942,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/fernzugang.js?v=3"></script>
     <script src="/static/js/totp_admin.js?v=3"></script>
     <script src="/static/js/ldap_picker.js?v=14"></script>
-    <script src="/static/js/rechte_matrix.js?v=5"></script>
+    <script src="/static/js/rechte_matrix.js?v=6"></script>
     <script src="/static/js/excel_admin.js?v=9"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
     <script src="/static/js/sessions.js?v=9"></script>

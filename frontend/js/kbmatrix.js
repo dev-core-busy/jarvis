@@ -90,7 +90,17 @@ window.KbMatrix = (function () {
                     path: f.path,
                     name: (doc && doc.title) || f.name,
                     desc: (doc && doc.summary) || '',
-                    source: doc ? (doc.source_name || doc.url || '') : (folder.folder || ''),
+                    // ⚠ DER VOLLE DATEIPFAD, NICHT DER WURZELORDNER. Bis
+                    // 2026-10-21 stand hier `folder.folder` – also der
+                    // KONFIGURIERTE Wissensordner, nicht der Ort der Datei.
+                    // Fuer jede Datei in einem UNTERORDNER war das ein
+                    // abgeschnittener Pfad ("data/rag/beispiel" statt
+                    // "data/rag/beispiel/unterordner/notiz.md"), und seit
+                    // Unterordner eigene Speicherordner sein koennen, ist das
+                    // der Regelfall. Bei einem Extraktor-Dokument bleibt die
+                    // ECHTE Quelle stehen (Datei bzw. URL): sie sagt mehr als
+                    // der Ablageort der daraus erzeugten Markdown-Datei.
+                    source: doc ? (doc.source_name || doc.url || f.path) : f.path,
                     docId: doc ? doc.id : null,
                     doc: doc || null,
                 });

@@ -47,11 +47,23 @@
             ['ad-allowed-users','ad-allowed-group','ad-knowledge-editors','ad-knowledge-editors-group','ad-internet-users','ad-internet-group','ad-admins','ad-admins-group','sap-allowed-users','sap-allowed-group','vemas-allowed-users','vemas-allowed-group','email-allowed-users','email-allowed-group','tracks-allowed-users','tracks-allowed-group','jiraassist-allowed-users','jiraassist-allowed-group','aimouse-allowed-users','aimouse-allowed-group','excel-allowed-users','excel-allowed-group','claudesub-allowed-users','claudesub-allowed-group'].forEach(function(_id){ var _e=document.getElementById(_id); if(_e) _e.dispatchEvent(new Event('change')); });
             _adUpdateStatus(d);
             _adCertMount(d);
-            // Fuer das Zuweisungs-Fenster (rechte_matrix.js): erst mit geladenem
-            // Bestand darf von dort gespeichert werden, sonst gingen leere
-            // Listen an den Server.
+            // Fuer die Berechtigungs-Tabelle (rechte_matrix.js): erst mit
+            // geladenem Bestand darf von dort gespeichert werden, sonst gingen
+            // leere Listen an den Server.
             window._adGeladen = true;
-        } catch(e) {}
+        } catch(e) {
+        } finally {
+            // ⚠ DIE TABELLE STEHT SEIT 2026-10-21 AUF DER SEITE, nicht mehr in
+            // einem Popup – sie kann ihren Bestand also nicht mehr "beim
+            // Oeffnen" lesen. Ohne dieses Signal zeigte sie dauerhaft die
+            // leeren Felder von vor dem Abruf, und zwar ohne Fehlermeldung.
+            // ⚠ IM `finally`, NICHT IM `try`: faellt der Abruf aus, muss die
+            // Tabelle das ERFAHREN. Nur im Erfolgsfall gemeldet, bliebe sie
+            // ewig bei "wird geladen…" stehen – eine Anzeige, die einen
+            // Zustand behauptet, den sie nicht kennt.
+            document.dispatchEvent(new CustomEvent('jarvis-ad-geladen',
+                { detail: { ok: !!window._adGeladen } }));
+        }
     }
 
     // Serverzertifikat des DCs pruefen/verankern (gemeinsamer Baustein
@@ -155,11 +167,29 @@
                   d.admin_mode, 'security.ad_adm');
     }
 
+    // ⚠ DEN SPEICHERN-KNOPF GIBT ES ZWEIMAL: einmal im Container "Verbindung
+    // (Domain-Controller)", einmal am Ende von "alte Benutzerberechtigungen".
+    // Beide loesen DENSELBEN Vorgang aus (der Koerper unten enthaelt beides),
+    // deshalb werden beide gesperrt und BEIDE Statuszeilen beschrieben - sonst
+    // meldet nur der eine das Ergebnis, und wer den anderen geklickt hat, sieht
+    // nichts und haelt den Knopf fuer kaputt. Gesammelt wird ueber die
+    // Klick-Marke bzw. die Klasse, nicht ueber eine Liste von Ids: ein dritter
+    // Knopf waere damit von selbst mit versorgt.
+    function _saveKnoepfe() {
+        return Array.prototype.slice.call(document.querySelectorAll('[data-klick="ad-speichern"]'));
+    }
+    function _saveStatus(text, farbe) {
+        const sts = document.querySelectorAll('.ad-save-status');
+        for (let i = 0; i < sts.length; i++) {
+            sts[i].textContent = text;
+            sts[i].style.color = farbe || '';
+        }
+    }
+
     window._adSave = async function() {
-        const btn = document.getElementById('ad-save-btn');
-        const st  = document.getElementById('ad-save-status');
-        btn.disabled = true;
-        st.textContent = window.t('common.saving'); st.style.color = 'var(--text-muted)';
+        const btns = _saveKnoepfe();
+        btns.forEach(function (b) { b.disabled = true; });
+        _saveStatus(window.t('common.saving'), 'var(--text-muted)');
         try {
             const r = await fetch('/api/settings', {
                 method: 'POST',
@@ -196,14 +226,16 @@
                 })
             });
             if (!r.ok) throw new Error('HTTP ' + r.status);
-            st.textContent = window.t('security.ad_saved'); st.style.color = 'var(--success)';
-            setTimeout(() => { st.textContent = ''; }, 3000);
+            _saveStatus(window.t('security.ad_saved'), 'var(--success)');
+            // Ein Erfolg darf von selbst verschwinden, ein Fehler nicht - den
+            // muss man lesen und kopieren koennen.
+            setTimeout(() => { _saveStatus(''); }, 3000);
             await _adLoad();
             return true;
         } catch(e) {
-            st.textContent = window.t('security.ad_save_failed').replace('{grund}', e.message); st.style.color = 'var(--danger)';
+            _saveStatus(window.t('security.ad_save_failed').replace('{grund}', e.message), 'var(--danger)');
             return false;
-        } finally { btn.disabled = false; }
+        } finally { btns.forEach(function (b) { b.disabled = false; }); }
     };
 
     window._adTest = async function() {

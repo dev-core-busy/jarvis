@@ -53,28 +53,23 @@ RUN apt-get update \
 
 # ── Python venv + Abhaengigkeiten ────────────────────────────────────────────
 WORKDIR /app
-COPY requirements.txt .
+COPY requirements.txt requirements.lock ./
 
-# torch VOR requirements.txt aus dem CPU-Index: sentence-transformers zieht sonst
-# das CUDA-Rad samt ~6 GB NVIDIA-Paketen in ein Image ohne GPU (siehe Hinweis in
-# requirements.txt). Die Fassung steht dort EINMAL und wird hier gelesen – fehlt
-# sie, bricht der Bau ab, statt still das CUDA-Rad zu holen.
-# numpy ebenfalls vorab: "numpy<2.1" (VM ohne SSE4.2) hat fuer Python 3.13 KEIN
-# fertiges Rad und wird aus dem Quelltext gebaut – wie auf DEV und ECHT auch
-# (dort Tag linux_x86_64). Ohne Begrenzung startet meson einen Compiler je Kern;
-# in einer Bau-VM mit 2 GB und 12 Kernen brach das mit "Killed signal" ab
-# (2026-10-21). -j2 haelt den Bau unabhaengig vom Bau-Rechner.
+# Aus der LOCK-Datei mit Hash-Pruefung (2026-10-21): exakte Versionen, und pip
+# nimmt nur Dateien an, deren Pruefsumme darin steht. torch (+cpu) steht in der
+# Lock samt Hashes, kommt aber nur vom CPU-Index – deshalb --extra-index-url;
+# eine Datei vom Spiegel, die nicht zum Hash passt, lehnt pip ab. Damit entfallen
+# die frueheren Einzelschritte fuer torch, numpy und setuptools.
+# -j2: "numpy<2.1" (VM ohne SSE4.2) hat fuer Python 3.13 KEIN fertiges Rad und
+# wird aus dem Quelltext gebaut – wie auf DEV und ECHT auch. Ohne Begrenzung
+# startet meson einen Compiler je Kern; in einer Bau-VM mit 2 GB und 12 Kernen
+# brach das mit "Killed signal" ab. Gebaut wird aus der Lock NUR numpy (gemessen),
+# die Option erreicht also kein setuptools-Paket.
 RUN set -e; \
     python3 -m venv /venv; \
     /venv/bin/pip install --upgrade pip; \
-    /venv/bin/pip install --no-cache-dir 'setuptools<75'; \
-    TORCH="$(grep -oE '"torch==[0-9.]+\+cpu"' requirements.txt | head -1 | tr -d '"')"; \
-    [ -n "$TORCH" ] || { echo "torch-Fassung (+cpu) in requirements.txt nicht gefunden" >&2; exit 1; }; \
-    /venv/bin/pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu "$TORCH"; \
-    NUMPY="$(grep -oE '^numpy[<>=!~][^ #]*' requirements.txt | head -1)"; \
-    [ -n "$NUMPY" ] || { echo "numpy-Zeile in requirements.txt nicht gefunden" >&2; exit 1; }; \
-    /venv/bin/pip install --no-cache-dir -Ccompile-args=-j2 "$NUMPY"; \
-    /venv/bin/pip install --no-cache-dir -r requirements.txt
+    /venv/bin/pip install --no-cache-dir --require-hashes -Ccompile-args=-j2 \
+        --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.lock
 
 ENV PATH="/venv/bin:$PATH"
 

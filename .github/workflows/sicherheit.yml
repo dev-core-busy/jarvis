@@ -81,12 +81,15 @@ jobs:
           for f in *.deb; do dpkg-deb -x "$f" "$RUNNER_TEMP/krb5"; done
           echo "KRB5_TESTWURZEL=$RUNNER_TEMP/krb5" >> "$GITHUB_ENV"
 
-      - name: venv + Abhaengigkeiten (torch aus dem CPU-Index, wie in requirements.txt beschrieben)
+      # Aus der Lock mit Hash-Pruefung (2026-10-21) – pip-audit und SBOM sehen
+      # damit GENAU den festgelegten Stand. Vorher stand die torch-Fassung hier
+      # ein zweites Mal von Hand; jetzt kommt sie (samt Hash) aus der Lock.
+      - name: venv + Abhaengigkeiten (requirements.lock, --require-hashes)
         run: |
           python -m venv venv
-          venv/bin/pip install -q --upgrade pip setuptools
-          venv/bin/pip install -q --index-url https://download.pytorch.org/whl/cpu "torch==2.10.0+cpu"
-          venv/bin/pip install -q -r requirements.txt
+          venv/bin/pip install -q --upgrade pip
+          venv/bin/pip install -q --require-hashes -Ccompile-args=-j2 \
+            --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.lock
           venv/bin/pip check
 
       # Werkzeuge in EIGENER venv: in der Dienst-venv installiert, wuerde pip-audit

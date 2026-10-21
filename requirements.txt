@@ -1,3 +1,10 @@
+# ── LOCK-DATEI (2026-10-21): Docker und Sicherheits-CI installieren NICHT aus
+# dieser Datei, sondern aus requirements.lock (exakte Versionen + Hashes,
+# --require-hashes). Diese Datei bleibt die QUELLE: wer hier eine Grenze oder ein
+# Paket aendert, erzeugt die Lock neu – python3 deploy/lock_erneuern.py (uv
+# 0.12.23). tests/test_requirements_lock.py meldet eine Lock, die nicht mehr passt.
+# Die Server folgen der Lock erst mit Phase 2 (backend/abhaengigkeiten.py).
+
 # fastapi 0.141.1 ist die neueste Fassung OHNE harte opentelemetry-api>=1.44-
 # Abhaengigkeit (ab 0.142.0 reisst sie den auf 1.40.0/0.61b0 festgenagelten
 # OTel-Stack mit). Obergrenze deshalb bewusst, nicht aus Vorsicht.
@@ -79,6 +86,13 @@ a2wsgi>=1.10.10
 faiss-cpu>=1.7.4
 sentence-transformers>=2.2.0,<4.0
 numpy<2.1
+# setuptools<75: der Vision-Skill (face_recognition_models) und onnxruntime laden
+# pkg_resources zur Laufzeit, neuere setuptools entfernen es. Stand bisher nur in
+# skills/vision/skill.json und im Dockerfile; seit der Lock-Datei (2026-10-21)
+# hier, sonst sperrte die Lock setuptools 84 (via torch) und der Skill braeche.
+# Die bekannten Funde betreffen nur das BAUEN von Paketen und sind in
+# deploy/security/pip_audit_ausnahmen.txt bewertet.
+setuptools<75
 # WICHTIG – torch VOR dieser Datei aus dem CPU-Index installieren:
 #   pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.10.0+cpu"
 # sentence-transformers zieht sonst das CUDA-Rad und damit 18 proprietaere

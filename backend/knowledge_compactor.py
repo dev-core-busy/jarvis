@@ -18,8 +18,10 @@ Regeln der Verdichtung:
   data/backups/learned_archiv/YYYY-MM/ verschoben. Das Archiv liegt bewusst
   AUSSERHALB von data/knowledge/, damit der Index-Rebuild es nicht erneut
   indexiert.
-- FAISS: Original-Dateien werden aus dem Index entfernt, die konsolidierten
-  Dateien sofort neu indexiert (kein Bulk-Rebuild noetig)
+- Der Vektor-Index der Wissensdatenbank bekommt NICHTS: weder die Originale
+  noch die Themen-Dateien gehoeren dorthin (data/erfahrung/ liegt seit
+  2026-09-13 ausserhalb jedes Wissensordners). Entfernt wird dort nur, was
+  ein frueherer Lauf noch hineingeschrieben hat.
 - Alles-oder-nichts: schlaegt der LLM-Aufruf fehl, wird KEINE Datei
   angefasst.
 
@@ -218,16 +220,19 @@ def _slug(title: str) -> str:
 # ─── Datei-Operationen (laufen via asyncio.to_thread) ─────────────────────────
 
 def _apply_result(topics: list[tuple[str, str]], source_files: list[Path]) -> dict:
-    """Schreibt Themen-Dateien, archiviert Originale und pflegt den FAISS-Index."""
+    """Schreibt Themen-Dateien und archiviert Originale. Indiziert NICHT."""
     now = datetime.now()
     stamp = now.strftime("%Y-%m-%d %H:%M")
 
+    # Der Vektor-Index wird nur noch AUFGERAEUMT: Laeufe vor 2026-10-21 haben
+    # Themen-Dateien hineingeschrieben, die dann unter "Wissen" als
+    # ungruppierte Dokumente auftauchten.
     vs = None
     try:
-        from backend.tools.knowledge import _get_vector_store, _chunk_text
+        from backend.tools.knowledge import _get_vector_store
         vs = _get_vector_store()
     except Exception as e:
-        _log.warning(f"VectorStore nicht verfuegbar – Index wird nicht gepflegt: {e}")
+        _log.warning(f"VectorStore nicht verfuegbar – Index wird nicht aufgeraeumt: {e}")
 
     # 1) Alte Konsolidat-Dateien ersetzen (aus Index + Disk entfernen)
     KONSOLIDIERT_DIR.mkdir(parents=True, exist_ok=True)
@@ -239,10 +244,15 @@ def _apply_result(topics: list[tuple[str, str]], source_files: list[Path]) -> di
                 pass
         old.unlink(missing_ok=True)
 
-    # 2) Neue Themen-Dateien schreiben + sofort indexieren
+    # 2) Neue Themen-Dateien schreiben
     #    (Dateiname traegt NOTIZ_PRAEFIX → erscheint weiter in Liste/Statistik/Export)
+    # ⚠ HIER WIRD NICHT INDIZIERT. Bis 2026-10-21 stand hier `vs.add_chunks` –
+    # der dritte Weg in die Vektor-DB neben `_index_immediately` (learning.py)
+    # und dem Ordner-Scan, und der einzige, den der Umzug vom 2026-09-13 nicht
+    # geschlossen hat. Folge: die Themen-Dateien standen im Index, und die
+    # Wissensgruppen (sie lesen ihre Dateiliste aus dem Index) zeigten sie als
+    # "ungruppiert" an.
     written: list[Path] = []
-    chunk_total = 0
     for title, body in topics:
         fp = KONSOLIDIERT_DIR / f"{_KONS_PRAEFIX}{_slug(title)}.md"
         content = (
@@ -253,14 +263,6 @@ def _apply_result(topics: list[tuple[str, str]], source_files: list[Path]) -> di
         )
         fp.write_text(content, encoding="utf-8")
         written.append(fp)
-        if vs:
-            try:
-                chunks = _chunk_text(content)
-                if chunks:
-                    vs.add_chunks(str(fp), chunks, fp.stat().st_mtime)
-                    chunk_total += len(chunks)
-            except Exception as e:
-                _log.warning(f"Indexierung von {fp.name} fehlgeschlagen: {e}")
 
     # 3) Originale archivieren (ausserhalb data/knowledge/) + aus Index entfernen
     archived = 0
@@ -292,7 +294,6 @@ def _apply_result(topics: list[tuple[str, str]], source_files: list[Path]) -> di
         "topics": [t for t, _ in topics],
         "files_out": len(written),
         "archived": archived,
-        "chunks": chunk_total,
         "archiv_dir": str(ARCHIV_DIR.relative_to(PROJECT_ROOT)),
     }
 

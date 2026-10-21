@@ -6304,7 +6304,8 @@ async def startup_erfahrung_umzug():
     """
     try:
         from backend.learning import (migriere_aus_wissensdatenbank,
-                                     verfahrensdateien_aus_index_raeumen)
+                                     verfahrensdateien_aus_index_raeumen,
+                                     erfahrung_aus_index_raeumen)
         erg = await asyncio.to_thread(migriere_aus_wissensdatenbank)
         if erg.get("fehler"):
             print(f"[Erfahrung] Umzug mit Fehlern: {'; '.join(erg['fehler'][:3])}",
@@ -6314,6 +6315,12 @@ async def startup_erfahrung_umzug():
         erg2 = await asyncio.to_thread(verfahrensdateien_aus_index_raeumen)
         if erg2.get("fehler"):
             print(f"[Erfahrung] Index-Aufraeumen: {'; '.join(erg2['fehler'][:3])}",
+                  flush=True)
+        # Dritter Teil (2026-10-21): was die Verdichtung bis dahin unter
+        # data/erfahrung/ indiziert hat – erschien unter "Wissen" als ungruppiert.
+        erg3 = await asyncio.to_thread(erfahrung_aus_index_raeumen)
+        if erg3.get("fehler"):
+            print(f"[Erfahrung] Index-Aufraeumen: {'; '.join(erg3['fehler'][:3])}",
                   flush=True)
     except Exception as e:
         print(f"[Erfahrung] Umzug fehlgeschlagen: {e}", flush=True)

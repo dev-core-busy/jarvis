@@ -721,6 +721,50 @@ def verfahrensdateien_aus_index_raeumen() -> dict:
     return ergebnis
 
 
+def erfahrung_aus_index_raeumen() -> dict:
+    """Chunks aller Dateien unter ``LEARNED_DIR`` aus der Vektor-DB nehmen.
+
+    Anlass (2026-10-21): die Verdichtung (knowledge_compactor) hat ihre
+    Themen-Dateien bis dahin weiter indiziert – nach ``data/erfahrung/``, also
+    ausserhalb jedes Wissensordners. Die Wissensgruppen lesen ihre Dateiliste
+    aus dem Index und zeigten sie als "ungruppiert" an; die Suche lieferte sie
+    als Wissensdokument. Ein Voll-Reindex haette sie entfernt, der laeuft aber
+    nur auf Knopfdruck.
+
+    Anders als bei `verfahrensdateien_aus_index_raeumen` ist hier die
+    allgemeine Regel richtig: unter ``LEARNED_DIR`` gehoert per Definition
+    NICHTS in den Index, ob die Datei existiert oder nicht. ES WIRD KEINE
+    DATEI ANGEFASST – die Notizen bleiben, nur ihre Chunks gehen.
+
+    Gespeicherte Pfade koennen absolut oder relativ zu ``PROJECT_ROOT`` sein;
+    verglichen wird deshalb ueber den aufgeloesten Pfad, nicht per Praefix.
+    """
+    ergebnis = {"chunks_entfernt": 0, "fehler": []}
+    try:
+        from backend.tools.knowledge import _get_vector_store
+        vs = _get_vector_store()
+        if vs is None:
+            return ergebnis
+        indiziert = vs.get_indexed_files()
+        if not indiziert:
+            return ergebnis
+        wurzel = LEARNED_DIR.resolve()
+        weg = []
+        for pfad in indiziert:
+            p = Path(pfad)
+            if not p.is_absolute():
+                p = PROJECT_ROOT / p
+            if wurzel in p.resolve().parents:
+                weg.append(pfad)
+        if weg:
+            ergebnis["chunks_entfernt"] = vs.remove_files(weg)
+            _log.info("Erfahrungswissen aus dem Vektor-Index entfernt: %d Chunk(s) "
+                      "aus %d Datei(en)", ergebnis["chunks_entfernt"], len(weg))
+    except Exception as e:  # noqa: BLE001 – darf den Start nie aufhalten
+        ergebnis["fehler"].append(str(e))
+    return ergebnis
+
+
 # ─── Statistik-API ────────────────────────────────────────────────────────────
 
 def get_learned_stats() -> dict:

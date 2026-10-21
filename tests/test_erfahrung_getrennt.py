@@ -488,5 +488,88 @@ check("und den Umzug ebenfalls (Positivkontrolle)",
       "migriere_aus_wissensdatenbank" in _args8, str(sorted(_args8)))
 
 
+print("\n=== 9. Auch die Verdichtung indiziert NICHT (2026-10-21) ===")
+# Abschnitt 3 sah nur learning.py. Die Verdichtung schrieb ihre Themen-Dateien
+# nach data/erfahrung/konsolidiert/ UND per `vs.add_chunks` in den Index – die
+# Wissensgruppen lesen ihre Dateiliste aus dem Index und zeigten sie unter
+# "Wissen" als ungruppiert (auf ECHT gemeldet: 11 Dateien).
+kq9 = ohne_kommentare(quelle("backend/knowledge_compactor.py"))
+komp_gerufen = {getattr(n.func, "id", None) or getattr(n.func, "attr", None)
+                for n in ast.walk(ast.parse(kq9)) if isinstance(n, ast.Call)}
+check("Schnitt der Verdichtung enthaelt den Schreibvorgang (Positivkontrolle)",
+      "write_text" in komp_gerufen, str(sorted(komp_gerufen))[:200])
+check("die Verdichtung fuegt nirgends Chunks hinzu",
+      not ({"add_chunks", "add_chunks_deferred", "_chunk_text"} & komp_gerufen),
+      str({"add_chunks", "add_chunks_deferred", "_chunk_text"} & komp_gerufen))
+
+print("\n=== 10. Der Bestand im Index wird aufgeraeumt ===")
+fn10 = None
+for n in ast.walk(ast.parse(quelle("backend/learning.py"))):
+    if isinstance(n, ast.FunctionDef) and n.name == "erfahrung_aus_index_raeumen":
+        fn10 = n
+check("Aufraeumfunktion erfahrung_aus_index_raeumen gefunden", fn10 is not None)
+gerufen10 = set()
+if fn10 is not None:
+    for n in ast.walk(fn10):
+        if isinstance(n, ast.Call):
+            nm = getattr(n.func, "id", None) or getattr(n.func, "attr", None)
+            if nm:
+                gerufen10.add(nm)
+check("sie ruft nichts Schreibendes auf der Platte", not (gerufen10 & schreibend),
+      str(gerufen10 & schreibend))
+
+sk10 = Path(tempfile.mkdtemp(prefix="erfahrung_index_test_"))
+try:
+    erf10 = sk10 / "data" / "erfahrung"
+    for p in (erf10,):
+        if sk10 not in p.resolve().parents:
+            print(f"ABBRUCH: Pfad zeigt aus dem Sandkasten heraus: {p}")
+            sys.exit(2)
+    # Absolut UND relativ gespeichert, dazu zwei, die BLEIBEN muessen: ein
+    # Wissensdokument und ein Nachbarordner mit gleichem Praefix (die Falle
+    # share_1/share_10 – ein Praefix-Vergleich traefe ihn).
+    absolut = str(erf10 / "konsolidiert" / f"{L.NOTIZ_PRAEFIX}konsolidiert_a.md")
+    relativ = f"data/erfahrung/konsolidiert/{L.NOTIZ_PRAEFIX}konsolidiert_b.md"
+    nachbar = str(sk10 / "data" / "erfahrung2" / "x.md")
+    wissen = str(sk10 / "data" / "rag" / "handbuch.pdf")
+    entfernt10 = {"pfade": None}
+
+    class _VS10:
+        def get_indexed_files(self):
+            return {absolut: 1.0, relativ: 1.0, nachbar: 1.0, wissen: 1.0}
+
+        def remove_files(self, pfade):
+            entfernt10["pfade"] = set(pfade)
+            return len(entfernt10["pfade"])
+
+    import types as _t10
+    fake10 = _t10.ModuleType("backend.tools.knowledge")
+    fake10._get_vector_store = lambda: _VS10()
+    vorher10 = sys.modules.get("backend.tools.knowledge")
+    sys.modules["backend.tools.knowledge"] = fake10
+    alt_dir, alt_root = L.LEARNED_DIR, L.PROJECT_ROOT
+    L.LEARNED_DIR, L.PROJECT_ROOT = erf10, sk10
+    try:
+        erg10 = sicher(L.erfahrung_aus_index_raeumen) if fn10 is not None else None
+    finally:
+        L.LEARNED_DIR, L.PROJECT_ROOT = alt_dir, alt_root
+        if vorher10 is None:
+            sys.modules.pop("backend.tools.knowledge", None)
+        else:
+            sys.modules["backend.tools.knowledge"] = vorher10
+
+    check("Aufraeumen lief ohne Wurf und ohne Fehler",
+          isinstance(erg10, dict) and not erg10.get("fehler"), str(erg10))
+    check("entfernt wurde GENAU der Bestand unter LEARNED_DIR (absolut + relativ)",
+          entfernt10["pfade"] == {absolut, relativ}, str(entfernt10["pfade"]))
+    check("der Nachbarordner mit gleichem Praefix bleibt",
+          entfernt10["pfade"] is not None and nachbar not in entfernt10["pfade"])
+finally:
+    shutil.rmtree(sk10, ignore_errors=True)
+
+check("der Startup-Hook ruft sie wirklich",
+      "erfahrung_aus_index_raeumen" in _args8, str(sorted(_args8)))
+
+
 print(f"\n{'='*60}\nErgebnis: {OK} OK, {FAIL} FAIL\n{'='*60}")
 sys.exit(1 if FAIL else 0)

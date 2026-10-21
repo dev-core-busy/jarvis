@@ -81,6 +81,15 @@
     var STIFT = '<svg class="jv-ico jv-ico-pencil" ' + GEMEINSAM + '>' +
         '<path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>';
 
+    // ETIKETT = WISSENSGRUPPEN ZUORDNEN. Es ordnet zu – es bearbeitet keinen
+    // Inhalt (Stift), loescht nichts (Muelleimer) und sieht nur nach (Lupe).
+    // Eingefuehrt 2026-10-21 an den Netzwerk-Freigaben: dort gibt es schon
+    // einen Stift fuer die Verbindungsdaten, ein zweiter fuer die Gruppen
+    // waere nicht zu unterscheiden.
+    var ETIKETT = '<svg class="jv-ico jv-ico-tag" ' + GEMEINSAM + '>' +
+        '<path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>' +
+        '<line x1="7" y1="7" x2="7.01" y2="7"/></svg>';
+
     // Code-Review 2026-10-18: Kreispfeile statt des Emojis am Knopf
     // "Schluessel neu generieren" (Einstellungen > Agent-API).
     var KREISPFEILE = '<svg class="jv-ico jv-ico-refresh" ' + GEMEINSAM + '>' +
@@ -165,6 +174,8 @@
         eyeOff: function () { return AUGE_ZU; },
         /** Kreispfeile – neu erzeugen/erneuern (ersetzt einen Wert). */
         refresh: function () { return KREISPFEILE; },
+        /** Etikett – Wissensgruppen zuordnen. */
+        tag: function () { return ETIKETT; },
         /** Lupe – untersuchen/messen. Veraendert nichts. */
         lupe: function () { return LUPE; },
         /** Stift – NUR an einem Element, das wirklich bearbeiten kann. */

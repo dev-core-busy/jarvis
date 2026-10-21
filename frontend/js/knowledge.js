@@ -320,7 +320,13 @@ class JarvisKnowledgeManager {
             };
             // Speicherordner nur mitsenden, wenn geaendert (das Feld duerfen nur
             // globale Wissens-Editoren aendern – sonst lehnt der Server ab)
-            const pickedFolders = [...m.querySelectorAll('.kbgrp-perm-folder:checked')].map(c => c.value);
+            // ⚠ NUR UEBER DIE ANGEBOTENEN ORDNER ENTSCHEIDEN. Die Liste kommt aus
+            // /api/knowledge/stats und dort fehlen die Netzwerk-Freigaben; ohne
+            // diese Zeile nahm jedes Speichern hier eine Freigabe-Verknuepfung
+            // still wieder heraus (gefunden 2026-10-21).
+            const angeboten = new Set(kbFolders);
+            const pickedFolders = [...m.querySelectorAll('.kbgrp-perm-folder:checked')].map(c => c.value)
+                .concat((g.folders || []).filter(f => !angeboten.has(f)));
             const before = (g.folders || []).slice().sort().join(',');
             if (pickedFolders.slice().sort().join(',') !== before) patch.folders = pickedFolders;
             const res = await KG.updateGroup(gid, patch);
@@ -2893,10 +2899,19 @@ class JarvisKnowledgeManager {
         const renameable = folder.startsWith(RAG) && !folder.slice(RAG.length).includes('/');
         const curName = renameable ? folder.slice(RAG.length) : this._anzeigePfad(folder);
 
-        // Aktuelle Zuordnung: Gruppen, die diesen Ordner als Speicherordner fuehren
+        // Aktuelle Zuordnung: Gruppen, die diesen Ordner als Speicherordner fuehren.
+        // ⚠ VERGLICHEN WIRD OHNE FUEHRENDEN SCHRAEGSTRICH: eine Freigabe kommt
+        // hier als '/mnt/rag/share_2' an, das Manifest speichert sie ueber
+        // knowledge_groups._rel() als 'mnt/rag/share_2'. Mit dem rohen Vergleich
+        // stand bei einer Freigabe nie ein Haken – und wer speicherte, nahm die
+        // Verknuepfung damit still wieder heraus (gefunden 2026-10-21).
+        const ohneSlash = p => String(p || '').replace(/^\/+/, '');
         const assigned = new Set();
         const groups = KG ? KG.all() : [];
-        groups.forEach(g => { if ((g.folders || []).includes(folder)) assigned.add(g.id); });
+        groups.forEach(g => {
+            if ((g.folders || []).some(f => ohneSlash(f) === ohneSlash(folder))) assigned.add(g.id);
+        });
+        const istFreigabe = folder.startsWith('/');
         const groupRows = groups.length
             ? groups.map(g => `
                 <label class="kb-grp-check" style="--grp:${esc(g.color)};">
@@ -2924,9 +2939,14 @@ class JarvisKnowledgeManager {
                 </div>
                 <div class="modal-body" style="overflow-y:auto;">
                     ${nameRow}
-                    <label class="kb-form-label" style="display:block;margin:16px 0 4px;">${T('kbgroups.folders_label', 'Speicherordner (/wissen)')}</label>
-                    <p class="kb-hint" style="margin:0 0 6px;">${T('knowledge.folder_groups_hint',
-                        'Wissensgruppen, denen dieser Ordner als Speicherziel angeboten wird. Abwählen entfernt die Zuordnung.')}</p>
+                    <label class="kb-form-label" style="display:block;margin:16px 0 4px;">${istFreigabe
+                        ? T('knowledge.share_groups_label', 'Wissensgruppen dieser Freigabe')
+                        : T('kbgroups.folders_label', 'Speicherordner (/wissen)')}</label>
+                    <p class="kb-hint" style="margin:0 0 6px;">${istFreigabe
+                        ? T('knowledge.share_groups_hint',
+                            'Neue Dateien auf dieser Freigabe werden den gewählten Wissensgruppen automatisch zugeordnet. Dateien, die schon einmal zugeordnet oder ausgetragen wurden, bleiben, wie sie sind.')
+                        : T('knowledge.folder_groups_hint',
+                            'Wissensgruppen, denen dieser Ordner als Speicherziel angeboten wird. Neue Dateien darin werden ihnen automatisch zugeordnet. Abwählen entfernt die Zuordnung.')}</p>
                     <div class="kb-grp-checks">${groupRows}</div>
                     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;">
                         <button type="button" id="kbfld-cancel" class="kb-btn-action">${T('common.cancel', 'Abbrechen')}</button>
@@ -3613,6 +3633,8 @@ class JarvisKnowledgeManager {
                     </button>
                     <button class="btn-icon btn-small" title="${window.t('knowledge.share_diag_title')}"
                         data-kb-aktion="diagnoseMount" data-kb-idx="${i}">${JarvisIcons.lupe()}</button>
+                    <button class="btn-icon btn-small" title="${window.t('knowledge.share_groups_title')}"
+                        data-kb-aktion="editFolder" data-kb-pfad="${this._escHtml(m.mountpoint || '')}">${JarvisIcons.tag()}</button>
                     <button class="btn-icon btn-small" title="${window.t('knowledge.share_edit_title')}"
                         data-kb-aktion="showEditMount" data-kb-idx="${i}">${JarvisIcons.pencil()}</button>
                     <button class="btn-icon btn-small" title="${window.t('knowledge.share_remove_title')}"

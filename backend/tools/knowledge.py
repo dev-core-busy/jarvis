@@ -655,6 +655,21 @@ def _vector_index_lauf(vs, indexed, folders: list[Path], max_bytes: int,
     _set_progress(failed=failed)
     if changed or failed:
         _log.info(f"Vektor-Index aktualisiert: {changed} Datei(en), {failed} fehlgeschlagen")
+
+    # Neue Dateien in einem Speicherordner bekommen dessen Wissensgruppen
+    # (Regel und Begruendung in knowledge_groups.automatisch_zuordnen). Nur
+    # wenn etwas indiziert wurde oder ausdruecklich neu aufgebaut wird – im
+    # Suchpfad ohne Aenderung kostete es sonst bei JEDER Suche einen
+    # Manifest-Durchlauf. Ein Fehler hier darf den Indexlauf nicht kippen.
+    if changed or force:
+        try:
+            from backend import knowledge_groups as _kg
+            neu_zugeordnet = _kg.automatisch_zuordnen(vs.get_indexed_files())
+            if neu_zugeordnet:
+                _log.info(f"Wissensgruppen: {neu_zugeordnet} neue Datei(en) "
+                          f"ueber ihren Speicherordner zugeordnet")
+        except Exception as e:  # noqa: BLE001
+            _log.warning(f"Automatische Gruppenzuordnung fehlgeschlagen: {e}")
     return vs.chunk_count() > 0
 
 
@@ -2216,6 +2231,7 @@ def purge_file_index(file: Path) -> dict:
         if kg.get_assignment(file_s):
             kg.set_assignment(file_s, [])  # leere Liste = Zuordnung entfernen
             removed_group = True
+        kg.gesehen_verschieben(file_s)    # geloescht: Markierung der Automatik weg
     except Exception as e:
         _log.warning(f"Gruppen-Bereinigung fehlgeschlagen: {e}")
 
@@ -2270,6 +2286,7 @@ def relocate_file_index(old_file: Path, new_file: Path) -> dict:
             kg.set_assignment(new_rel, groups)
             kg.set_assignment(old_rel, [])
             moved_group = True
+        kg.gesehen_verschieben(old_rel, new_rel)
     except Exception as e:
         _log.warning(f"Gruppen-Relokation fehlgeschlagen: {e}")
 

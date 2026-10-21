@@ -20893,7 +20893,21 @@ async def assign_knowledge_folder_groups(request: Request, user: str = Depends(r
                             status_code=400)
 
     result = kg.set_folder_groups(rel, group_ids)
-    return JSONResponse({"ok": True, "path": rel, **result})
+    # Sofort wirken lassen statt auf den naechsten Indexlauf zu warten: wer
+    # einen Ordner verknuepft, erwartet die noch nie zugeordneten Dateien darin
+    # in der Gruppe. Bereits gesehene bleiben, wie sie sind (Regel in
+    # knowledge_groups.automatisch_zuordnen). Ein Fehler hier macht die
+    # gespeicherte Verknuepfung nicht ungueltig – der Indexlauf holt es nach.
+    zugeordnet = 0
+    try:
+        from backend.tools.knowledge import _get_vector_store
+        vs = _get_vector_store()
+        if vs is not None:
+            zugeordnet = await asyncio.to_thread(kg.automatisch_zuordnen,
+                                                 list(vs.get_indexed_files()))
+    except Exception as e:  # noqa: BLE001
+        print(f"[knowledge] automatische Gruppenzuordnung fehlgeschlagen: {e}", flush=True)
+    return JSONResponse({"ok": True, "path": rel, "zugeordnet": zugeordnet, **result})
 
 
 # ─── Pull-Synchronisation zwischen Standorten ────────────────────────────────

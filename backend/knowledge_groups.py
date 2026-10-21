@@ -33,6 +33,11 @@ UNGROUPED_ID = "ungrouped"
 # Reindex ab; eine angelegte Gruppe "Erlernt" bleibt leer stehen und kann
 # von Hand geloescht werden.
 
+# Manifest-Feld: Pfade, die die automatische Zuordnung schon einmal gesehen
+# hat (siehe `automatisch_zuordnen`). Liste, kein Dict – es traegt nur die
+# Aussage "erledigt", keinen Wert.
+AUTO_GESEHEN = "auto_gesehen"
+
 # Beim ersten Anlegen vorbelegte, feste Startgruppen.
 _SEED_GROUPS = [
     {"id": "ibs", "name": "IBS", "color": "#3b82f6", "order": 0},
@@ -275,6 +280,88 @@ def get_assignments_map() -> dict:
     return dict(data.get("assignments", {}))
 
 
+def automatisch_zuordnen(pfade) -> int:
+    """Neue Dateien in einem Speicherordner bekommen dessen Wissensgruppen.
+
+    ⚠ WARUM ES DAS GIBT (gemeldet 2026-10-21): Dateien, die direkt auf einer
+    Freigabe landen (Kundenlisten auf dem SMB-Server), wurden zwar indiziert,
+    aber keiner Gruppe zugeordnet – zugeordnet haben bis dahin nur Upload,
+    Standort-Sync, Confluence-Abgleich und Informationsextraktor. Der
+    Speicherordner einer Gruppe war ein reines Upload-Ziel; dass sein INHALT
+    der Gruppe gehoert, stand nirgends. Jede neue Datei musste von Hand
+    nachgezogen werden.
+
+    Die Regel, Datei fuer Datei:
+      * liegt sie unter keinem Speicherordner -> nichts, auch KEINE Markierung
+        (wird der Ordner spaeter verknuepft, ist sie dann noch "neu");
+      * steht sie in ``auto_gesehen`` -> nichts. **Das ist der Punkt:** wer eine
+        Datei von Hand aus der Gruppe nimmt, bekommt sie beim naechsten Lauf
+        NICHT zurueck. Ohne die Markierung waere "ungruppiert" in einem
+        Speicherordner kein haltbarer Zustand;
+      * hat sie schon eine Zuordnung -> nur markieren. Eine ausdrueckliche
+        Wahl (Upload, Confluence, Hand) gewinnt immer;
+      * sonst -> alle Gruppen, die einen passenden Speicherordner fuehren
+        (Vereinigung, in Gruppen-Reihenfolge), und markieren.
+
+    ⚠ DIE MARKIERUNG LIEGT IM MANIFEST, NICHT IM INDEX. Der naheliegende
+    Massstab "nicht im Index = neu" haelt nicht: ein Neuaufbau beginnt mit
+    ``vs.clear()``, danach ist JEDE Datei neu – und jede von Hand
+    ausgetragene kaeme zurueck.
+
+    ``pfade``: die indizierten Dateien (absolut oder relativ). Rueckgabe: Zahl
+    der NEU zugeordneten Dateien.
+    """
+    with _lock:
+        data = _load_unlocked()
+        ordner = []                       # (relativer Ordner, Gruppen-ID)
+        for g in sorted(data.get("groups", []), key=lambda g: g.get("order", 0)):
+            for f in g.get("folders", []):
+                rel = _rel(f).rstrip("/")
+                if rel:
+                    ordner.append((rel, g["id"]))
+        if not ordner:
+            return 0
+        gesehen = set(data.get(AUTO_GESEHEN, []))
+        assignments = data["assignments"]
+        neu = 0
+        markiert = False
+        for p in pfade:
+            key = _rel(p)
+            if key in gesehen:
+                continue
+            # Mit Schraegstrich: "share_1" ist sonst Praefix von "share_10".
+            gids = [gid for rel, gid in ordner if key.startswith(rel + "/")]
+            if not gids:
+                continue
+            gesehen.add(key)
+            markiert = True
+            if not assignments.get(key):
+                assignments[key] = list(dict.fromkeys(gids))
+                neu += 1
+        if markiert:
+            data[AUTO_GESEHEN] = sorted(gesehen)
+            _save_unlocked(data)
+        return neu
+
+
+def gesehen_verschieben(alt, neu=None) -> None:
+    """Markierung einer umbenannten/verschobenen Datei mitziehen – sonst gilt
+    sie am neuen Ort als neu und bekaeme eine ausgetragene Gruppe zurueck.
+    ``neu=None``: die Datei ist geloescht, die Markierung faellt weg (eine
+    spaeter gleichnamig abgelegte Datei ist eine NEUE Datei)."""
+    a = _rel(alt)
+    with _lock:
+        data = _load_unlocked()
+        gesehen = data.get(AUTO_GESEHEN, [])
+        if a not in gesehen:
+            return
+        rest = {x for x in gesehen if x != a}
+        if neu is not None:
+            rest.add(_rel(neu))
+        data[AUTO_GESEHEN] = sorted(rest)
+        _save_unlocked(data)
+
+
 def add_folder_to_groups(rel_folder, group_ids) -> int:
     """Traegt einen Speicherordner bei den angegebenen Gruppen ein (dedupliziert).
     Gibt die Anzahl der Gruppen zurueck, bei denen der Ordner NEU eingetragen wurde."""
@@ -356,8 +443,16 @@ def relocate_prefix(old_rel_prefix, new_rel_prefix) -> int:
                 else:
                     updated.append(f)
             g["folders"] = updated
-        if moved or folders_changed:
+        # Markierung der automatischen Zuordnung mitziehen – sonst gilt jede
+        # verschobene Datei am neuen Ort als neu.
+        gesehen = data.get(AUTO_GESEHEN, [])
+        neu_gesehen = sorted({new + _rel(x)[len(old):] if _rel(x).startswith(old) else x
+                              for x in gesehen})
+        gesehen_changed = neu_gesehen != sorted(gesehen)
+        if moved or folders_changed or gesehen_changed:
             data["assignments"] = new_assign
+            if gesehen_changed:
+                data[AUTO_GESEHEN] = neu_gesehen
             _save_unlocked(data)
         return moved
 
@@ -385,6 +480,11 @@ def remove_prefix(rel_prefix) -> int:
                     if not (_rel(f) == pref_dir or _rel(f).startswith(pref))]
             folders_changed += len(fl) - len(kept)
             g["folders"] = kept
+        gesehen = data.get(AUTO_GESEHEN, [])
+        kept_gesehen = [x for x in gesehen if not _rel(x).startswith(pref)]
+        if len(kept_gesehen) != len(gesehen):
+            data[AUTO_GESEHEN] = kept_gesehen
+            folders_changed += 1
         if removed or folders_changed:
             _save_unlocked(data)
         return removed
@@ -432,6 +532,13 @@ def prune(existing_rel_paths) -> int:
             p: gids for p, gids in data["assignments"].items() if _rel(p) in known
         }
         removed = before - len(data["assignments"])
-        if removed:
+        # Markierungen verschwundener Dateien ebenfalls abraeumen: kommt eine
+        # gleichnamige Datei spaeter wieder, ist sie eine NEUE Datei.
+        gesehen = data.get(AUTO_GESEHEN, [])
+        kept_gesehen = [x for x in gesehen if _rel(x) in known]
+        gesehen_weg = len(gesehen) - len(kept_gesehen)
+        if gesehen_weg:
+            data[AUTO_GESEHEN] = kept_gesehen
+        if removed or gesehen_weg:
             _save_unlocked(data)
     return removed

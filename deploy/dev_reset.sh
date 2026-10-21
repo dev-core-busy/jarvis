@@ -25,14 +25,15 @@
 # "Unzureichende Berechtigung ... .git/objects" (Register, am 2026-10-11 mit 45
 # root-eigenen Objekten wiedergefunden).
 #
-# Aufruf (als root auf DEV):
-#   deploy/dev_reset.sh --pruefen        nur melden, nie aendern
-#   deploy/dev_reset.sh                  sichern; bei Abweichungen abbrechen
-#   deploy/dev_reset.sh --uebernehmen    sichern UND zuruecksetzen
-#   deploy/dev_reset.sh --uebernehmen --wiederherstellen
+# Aufruf (als root auf DEV) ueber die feste Kopie /usr/local/sbin/jarvis-dev-reset
+# (einmalig: install -o root -g root -m 0755 deploy/dev_reset.sh <dort>):
+#   jarvis-dev-reset --pruefen           nur melden, nie aendern
+#   jarvis-dev-reset                     sichern; bei Abweichungen abbrechen
+#   jarvis-dev-reset --uebernehmen       sichern UND zuruecksetzen
+#   jarvis-dev-reset --uebernehmen --wiederherstellen
 #                                        sichern, zuruecksetzen, Arbeitsstand
 #                                        wieder drueberlegen (md5-belegt)
-#   deploy/dev_reset.sh --wiederherstellen [--kein-neustart]
+#   jarvis-dev-reset --wiederherstellen [--kein-neustart]
 #                                        nur die neueste Sicherung zurueckholen
 #   zusaetzlich: --dir <pfad> (Vorgabe /opt/jarvis), --dienst <name>,
 #                --kein-neustart
@@ -47,6 +48,7 @@ MODUS="sichern"          # sichern | pruefen | uebernehmen
 NEUSTART=1
 WIEDERHER=0
 SICHERUNG=""        # von --uebernehmen gesetzt; sonst die neueste
+INSTALLIERT="/usr/local/sbin/jarvis-dev-reset"   # feste, root-eigene Kopie
 
 meldung() { echo "[DEV-Reset] $*"; }
 fehler()  { echo "[DEV-Reset] FEHLER: $*" >&2; exit 1; }
@@ -74,14 +76,28 @@ SELF="$(readlink -f "$0")"
 for p in "$SELF" "$(dirname "$SELF")"; do
     if [ "$(stat -c '%u' "$p")" != "0" ] || [ $(( 0$(stat -c '%a' "$p") & 022 )) -ne 0 ]; then
         echo "[DEV-Reset] FEHLER: $p gehoert nicht root oder ist fremd beschreibbar." >&2
-        echo "            Vorher in einen root-eigenen Ort kopieren, z. B.:" >&2
-        echo "              install -o root -g root -m 0700 $SELF /root/dev_reset.sh" >&2
-        echo "              /root/dev_reset.sh $*" >&2
+        echo "            Einmalig (nach Durchsicht) fest installieren:" >&2
+        echo "              install -o root -g root -m 0755 $SELF $INSTALLIERT" >&2
+        echo "              $INSTALLIERT $*" >&2
         exit 2
     fi
 done
 [[ "$DIR" =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "--dir ungueltig" >&2; exit 2; }
 [ -d "$DIR/.git" ] || { echo "$DIR ist kein git-Arbeitsbaum" >&2; exit 2; }
+
+# ⚠ DIE INSTALLIERTE FASSUNG WIRD NIE AUTOMATISCH AUS DEM REPO ERNEUERT: das
+# hiesse wieder, dass root ausfuehrt, was der Dienstbenutzer hineinschreibt
+# (die Schranke oben). Weicht die Repo-Fassung ab, wird das LAUT gemeldet, mit
+# Diff und Befehl - erneuern ist eine Entscheidung nach Durchsicht. Weiter
+# gearbeitet wird trotzdem: auch eine aeltere Fassung bricht bei Abweichungen
+# ab, sie ist nicht gefaehrlich, nur nicht die neueste.
+REPO_FASSUNG="$DIR/deploy/dev_reset.sh"
+if [ -f "$REPO_FASSUNG" ] && ! cmp -s "$SELF" "$REPO_FASSUNG"; then
+    echo "[DEV-Reset] ⚠ $REPO_FASSUNG weicht von der laufenden Fassung ($SELF) ab:" >&2
+    diff -u "$SELF" "$REPO_FASSUNG" | head -40 | sed 's/^/            /' >&2
+    echo "            Nach Durchsicht erneuern:" >&2
+    echo "              install -o root -g root -m 0755 $REPO_FASSUNG $INSTALLIERT" >&2
+fi
 
 # Dienstbenutzer = Eigentuemer des Arbeitsbaums. NICHT geraten: ein falscher
 # Benutzer hinterlaesst genau die Eigentuemer-Schaeden, die oben stehen.

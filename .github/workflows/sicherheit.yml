@@ -55,6 +55,20 @@ jobs:
           # Debian (die Server) nicht. unshare -r / bwrap brauchen sie.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
 
+      # MIT-KDC fuer test_kerberos_kdc.py – ENTPACKT, nicht installiert: das
+      # Paket krb5-kdc wuerde beim Installieren einen Dienst ohne Realm starten
+      # wollen. Ohne diesen Schritt endet der Waechter mit Exit 2, und das faellt
+      # den ganzen Lauf (so seit dem Kerberos-Commit 2026-10-20 in jedem Lauf).
+      - name: MIT-KDC als Paketbaum (Kerberos-Durchstich)
+        run: |
+          mkdir -p "$RUNNER_TEMP/krb5-deb" "$RUNNER_TEMP/krb5"
+          cd "$RUNNER_TEMP/krb5-deb"
+          apt-get download krb5-kdc krb5-admin-server krb5-user libkdb5-10t64 \
+            libkadm5srv-mit12 libkadm5clnt-mit12 libgssrpc4t64 libverto1t64 \
+            libverto-libev1t64 libev4t64
+          for f in *.deb; do dpkg-deb -x "$f" "$RUNNER_TEMP/krb5"; done
+          echo "KRB5_TESTWURZEL=$RUNNER_TEMP/krb5" >> "$GITHUB_ENV"
+
       - name: venv + Abhaengigkeiten (torch aus dem CPU-Index, wie in requirements.txt beschrieben)
         run: |
           python -m venv venv

@@ -167,7 +167,10 @@ print("\n\033[1m3. REGEL: keine Adresse mehr mit dem Sitzungstoken\033[0m")
 # vnc.js ist ausgenommen: ein WebSocket hat einen eigenen Auth-Weg und seine
 # Adresse ist nichts, was jemand in eine Mail kopiert.
 AUSNAHMEN = {"dlkey.js", "vnc.js"}
-SPEISER = re.compile(r"_dlk\s*\(|JarvisDL")
+# ``_dlKey(`` ist die Methode in knowledge.js (seit 2026-10-21, viewFile braucht
+# sie ausserhalb von _bindFilePreview). Ein Name ist keine Wirkung – dass sie
+# wirklich aus JarvisDL liest, prueft die Zeile unter dem Fundstellen-Check.
+SPEISER = re.compile(r"_dlk\s*\(|_dlKey\s*\(|JarvisDL")
 
 
 def _leerraum(treffer):
@@ -258,6 +261,19 @@ for datei in sorted(list((WURZEL / "frontend" / "js").glob("*.js"))
             treffer.append(f"{datei.name}: {fund}")
 check("JEDE ?token=-Adresse wird aus dem Abruf-Schluessel gespeist",
       not treffer, " | ".join(treffer[:4]))
+# Der Name _dlKey ist oben als Speiser zugelassen – also muss jede Definition
+# davon den Abruf-Schluessel holen. Sonst genuegte es, eine Methode so zu
+# nennen und darin das Sitzungstoken zurueckzugeben.
+_dlkey_rumpf = []
+for d in sorted((WURZEL / "frontend" / "js").glob("*.js")):
+    _t = gefiltert(d)
+    for m in re.finditer(r"^\s*_dlKey\s*\(\s*\)\s*\{", _t, re.M):
+        _dlkey_rumpf.append((d.name, _t[m.end():_t.find("}", m.end())]))
+check("_dlKey ist definiert (Positivkontrolle zur naechsten Zeile)",
+      bool(_dlkey_rumpf), "keine Definition gefunden")
+check("jede _dlKey-Definition liest JarvisDL.schluessel()",
+      all("JarvisDL.schluessel()" in r for _, r in _dlkey_rumpf),
+      " | ".join(n for n, r in _dlkey_rumpf if "JarvisDL.schluessel()" not in r))
 # Positivkontrolle: die Suche findet ueberhaupt Stellen – sonst waere die
 # Zeile darueber gruen, weil das Muster nichts trifft.
 gefunden = sum(len(token_stellen(gefiltert(d)))

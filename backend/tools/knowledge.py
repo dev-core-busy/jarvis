@@ -2140,10 +2140,20 @@ def relocate_folder_index(old_folder: Path, new_folder: Path) -> dict:
     except Exception as e:
         _log.warning(f"Gruppen-Relokation fehlgeschlagen: {e}")
 
+    # Pull-Sync-Freigaben speichern ihren Ordner als Pfad – ohne diese Zeile
+    # zeigte eine Freigabe nach Umbenennen/Verschieben ins Leere.
+    moved_shares = 0
+    try:
+        from backend import knowledge_sync as ks
+        moved_shares = ks.freigaben_verschieben(_folder_rel(old_folder), _folder_rel(new_folder))
+    except Exception as e:
+        _log.warning(f"Freigaben-Relokation fehlgeschlagen: {e}")
+
     _log.info(f"Ordner-Index relokalisiert {old_s} -> {new_s}: "
-              f"{moved_tfidf} TF-IDF-Dateien, {moved_vec} Vektor-Chunks, {moved_groups} Gruppen-Zuordnungen")
+              f"{moved_tfidf} TF-IDF-Dateien, {moved_vec} Vektor-Chunks, {moved_groups} Gruppen-Zuordnungen, "
+              f"{moved_shares} Freigaben")
     return {"tfidf_files": moved_tfidf, "vector_chunks": moved_vec,
-            "group_assignments": moved_groups}
+            "group_assignments": moved_groups, "shares": moved_shares}
 
 
 def purge_folder_index(folder: Path, gruppen: bool = True) -> dict:

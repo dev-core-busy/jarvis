@@ -20337,8 +20337,16 @@ def _kb_unpack_zip(zip_source, target, all_exts: set,
     return written, rejected, len(created_dirs)
 
 
-def _kb_move_folder(src_rel: str, dst_parent_rel: str):
+def _kb_move_folder(src_rel: str, dst_parent_rel: str, wurzel_erlaubt: bool = False):
     """Verschiebt einen Unterordner unter einen anderen Wissens-Ordner.
+
+    ``wurzel_erlaubt`` (nur die Admin-Flaeche, seit 2026-10-21): auch ein
+    WURZELordner direkt unter ``data/rag`` darf in einen Ordner einer ANDEREN
+    Wurzel wandern – er wird dabei zum Unterordner und aus der Ordnerliste
+    ausgetragen; seine Gruppen-Speicherordner werden zu Unterordner-
+    Speicherordnern (``relocate_prefix``). /wissen setzt den Schalter nie.
+    Derselbe Schalter erlaubt die GEGENRICHTUNG: Ziel ``data/rag`` selbst – der
+    Unterordner wird eigener Wurzelordner und in die Ordnerliste eingetragen.
 
     Gemeinsame Pruef- und Ausfuehrungslogik fuer die Admin-Flaeche
     (``/api/knowledge/subfolders/move``) und das /wissen-Portal
@@ -20362,9 +20370,19 @@ def _kb_move_folder(src_rel: str, dst_parent_rel: str):
     src_root = _kb_configured_root_for(src)
     if src_root is None:
         return None, f"'{src}' ist kein Wissens-Ordner", 404
-    if src == src_root:
+    ist_wurzel = src == src_root
+    if ist_wurzel and not wurzel_erlaubt:
         return None, "Wurzelordner können nicht verschoben werden – nur Unterordner", 400
-    if _kb_configured_root_for(dst_parent) is None:
+    # Nur eine Wurzel DIREKT unter data/rag: eine Freigabe unter /mnt ist ein
+    # Einhaengepunkt, kein Verzeichnis, das man umhaengen koennte.
+    if ist_wurzel and (not _rag.ist_rag_ordner(src)
+                       or src.rsplit("/", 1)[0] != _rag.RAG_REL):
+        return None, f"Nur Wissens-Ordner direkt unter '{_rag.RAG_REL}/' können verschoben werden", 400
+    # Ziel data/rag: der Ordner wird eigene Wurzel (nur Verwaltung). data/rag
+    # ist selbst KEIN Wissensordner – ohne diese Ausnahme gaebe es keinen Weg
+    # zurueck, nachdem eine Wurzel in einen anderen Ordner verschoben wurde.
+    zur_wurzel = wurzel_erlaubt and dst_parent == _rag.RAG_REL
+    if not zur_wurzel and _kb_configured_root_for(dst_parent) is None:
         return None, f"Zielordner '{dst_parent}' ist kein Wissens-Ordner", 404
     if _kb_safe_within_data(src) is None or _kb_safe_within_data(dst_parent) is None:
         return None, "Ungültiger Pfad", 400
@@ -20398,6 +20416,11 @@ def _kb_move_folder(src_rel: str, dst_parent_rel: str):
     new_abs = PROJECT_ROOT / new_rel
     if new_abs.exists():
         return None, f"Im Zielordner existiert bereits ein Ordner '{name}'", 409
+    if zur_wurzel:
+        # Ein Wurzelordner unterliegt der strengeren Namensregel der Anlage.
+        fehler = _kb_validate_folder_name(name)
+        if fehler:
+            return None, fehler, 400
 
     # Ein laufender Reindex wuerde gleichzeitig ueber dieselben Metadaten laufen
     if get_index_progress().get("running"):
@@ -20408,8 +20431,34 @@ def _kb_move_folder(src_rel: str, dst_parent_rel: str):
     except OSError as e:
         return None, f"Verschieben fehlgeschlagen: {e}", 500
 
+    if zur_wurzel:
+        # ⚠ HIER ANDERSHERUM: ERST EINTRAGEN, DANN RELOKALISIEREN. Die neuen
+        # Pfade liegen unter KEINER bisherigen Wurzel; ein Indexlauf zwischen
+        # Relokation und Eintrag raeumte sie als verwaist ab. Scheitert das
+        # Eintragen, wandert das Verzeichnis zurueck – der Index ist dann
+        # noch unberuehrt.
+        if not _kb_save_folder_list(_kb_current_folder_list() + [new_rel]):
+            try:
+                new_abs.rename(old_abs)
+            except OSError as e:
+                return None, (f"Ordnerliste ließ sich nicht speichern, und '{_rag.anzeige(new_rel)}' "
+                              f"konnte nicht zurückverschoben werden: {e}"), 500
+            return None, "Ordnerliste ließ sich nicht speichern – nichts verschoben", 500
     moved = relocate_folder_index(old_abs, new_abs)
-    return {"ok": True, "path": new_rel, "from": src, "moved": moved}, None, 200
+    if ist_wurzel:
+        # ⚠ ERST NACH DER RELOKATION AUSTRAGEN. Andersherum saehe ein Indexlauf
+        # dazwischen Eintraege unter einem Pfad, der zu keinem Wissensordner
+        # mehr gehoert, und raeumte sie ab – das Wissen wuerde neu eingebettet.
+        # In der Reihenfolge hier steht die alte Wurzel kurz leer in der Liste;
+        # ein leerer Ordner mit Index-Eintraegen gilt bewusst als abgehaengt
+        # und wird nicht aufgeraeumt (Register).
+        liste = [f for f in _kb_current_folder_list() if _kb_norm_rel(f) != src]
+        if not _kb_save_folder_list(liste):
+            return None, (f"Ordner verschoben nach '{_rag.anzeige(new_rel)}', aber die "
+                          f"Ordnerliste ließ sich nicht speichern – bitte '{_rag.anzeige(src)}' "
+                          f"in der Ordnerverwaltung entfernen"), 500
+    return {"ok": True, "path": new_rel, "from": src, "moved": moved,
+            "was_root": ist_wurzel, "now_root": zur_wurzel}, None, 200
 
 
 def _kb_supported_exts() -> set:
@@ -20711,12 +20760,14 @@ async def move_knowledge_subfolder(request: Request, user: str = Depends(require
     """Verschiebt einen Unterordner unter einen anderen Wissens-Ordner – OHNE
     Neu-Embedding. Body: ``{"path": "data/<...>/<sub>", "target": "data/<...>"}``.
 
-    Nur echte Unterordner; ein konfigurierter Wurzelordner wird über die
-    Ordner-Verwaltung bearbeitet. Das indizierte Wissen (FAISS + TF-IDF) und die
-    Wissensgruppen-Zuordnungen ziehen prefix-sauber mit (``_kb_move_folder``).
+    Seit 2026-10-21 auch ein Wurzelordner direkt unter ``data/rag`` – er wird
+    zum Unterordner des Ziels und aus der Ordnerliste ausgetragen. Das
+    indizierte Wissen (FAISS + TF-IDF), die Wissensgruppen-Zuordnungen und die
+    Pull-Sync-Freigaben ziehen prefix-sauber mit (``_kb_move_folder``).
     """
     data = await request.json()
-    res, err, code = _kb_move_folder(data.get("path") or "", data.get("target") or "")
+    res, err, code = _kb_move_folder(data.get("path") or "", data.get("target") or "",
+                                     wurzel_erlaubt=True)
     if err:
         return JSONResponse({"error": err}, status_code=code)
     return JSONResponse(res)

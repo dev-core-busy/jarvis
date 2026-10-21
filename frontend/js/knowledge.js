@@ -2373,8 +2373,15 @@ class JarvisKnowledgeManager {
             : '';
         const wurzelGruppen = `<button class="kb-btn-remove kb-btn-groups" title="${T('knowledge.share_groups_title', 'Wissensgruppen zuordnen')}"
                 data-kb-aktion="editFolder" data-kb-pfad="${sp}">${JarvisIcons.tag()}</button>`;
+        // Wurzel verschieben (2026-10-21): sie wird Unterordner des Ziels und
+        // verlaesst die Ordnerliste. Nur wo auch umbenannt werden kann – der
+        // Server nimmt ausschliesslich Wurzeln direkt unter data/rag an.
+        const wurzelSchieben = umbenennbar
+            ? `<button class="kb-btn-remove kb-btn-movesub" title="${T('knowledge.folder_move_title', 'Ordner verschieben – wird Unterordner des Ziels')}"
+                    data-kb-aktion="moveSubfolder" data-kb-pfad="${sp}">📂</button>`
+            : '';
         const actions = isRoot
-            ? `${stift}${addSub}${share}${wurzelGruppen}<button class="kb-btn-remove" title="${T('knowledge.folder_remove_title', 'Ordner entfernen')}"
+            ? `${stift}${addSub}${share}${wurzelGruppen}${wurzelSchieben}<button class="kb-btn-remove" title="${T('knowledge.folder_remove_title', 'Ordner entfernen')}"
                     data-kb-aktion="removeFolder" data-kb-pfad="${sp}">${JarvisIcons.trash()}</button>`
             : `<button class="kb-btn-remove kb-btn-rename" title="${T('knowledge.subfolder_rename_title', 'Unterordner umbenennen')}"
                     data-kb-aktion="renameSubfolder" data-kb-pfad="${sp}">${JarvisIcons.pencil()}</button>${addSub}${share}${gruppen}<button class="kb-btn-remove kb-btn-movesub" title="${T('knowledge.subfolder_move_title', 'Unterordner verschieben')}"
@@ -2715,6 +2722,16 @@ class JarvisKnowledgeManager {
         // noch der aktuelle Elternordner sind sinnvolle Ziele.
         const options = folders.filter(f =>
             f.path !== path && !f.path.startsWith(path + '/') && f.path !== parent);
+        // Oberste Ebene (2026-10-21): ein Unterordner unter data/rag kann wieder
+        // eigener Wissensordner werden – die Gegenrichtung zu "Wurzel
+        // verschieben". data/rag steht in keiner Ordnerliste, deshalb hier von
+        // Hand und ganz oben. Fuer eine Wurzel waere es kein Ziel (liegt dort).
+        const RAG = 'data/rag';
+        if (path.startsWith(RAG + '/') && parent !== RAG) {
+            options.unshift({ path: RAG, depth: 0, is_root: true,
+                name: T('knowledge.move_top_level', 'Wissensordner (oberste Ebene)'),
+                display: T('knowledge.move_top_level_hint', 'wird eigener Wissensordner') });
+        }
         if (!options.length) {
             this._showNotification(T('knowledge.move_no_target', 'Kein anderer Zielordner vorhanden'), 'error');
             return;
@@ -2731,9 +2748,15 @@ class JarvisKnowledgeManager {
             const r = await resp.json().catch(() => ({}));
             if (!resp.ok) throw new Error(r.error || 'HTTP ' + resp.status);
             const chunks = (r.moved && r.moved.vector_chunks) || 0;
-            this._showNotification(
-                T('knowledge.subfolder_moved', 'Unterordner verschoben, {c} Chunks übernommen')
-                    .replace('{c}', chunks), 'success');
+            // Eine verschobene WURZEL verschwindet aus der Ordnerliste – das muss
+            // die Meldung sagen, sonst sieht es aus, als sei der Ordner weg.
+            const meldung = r.was_root
+                ? T('knowledge.folder_moved', 'Ordner verschoben – jetzt Unterordner von {ziel}, {c} Chunks übernommen')
+                    .replace('{ziel}', this._anzeigePfad(target))
+                : r.now_root
+                    ? T('knowledge.folder_now_root', 'Ordner verschoben – jetzt eigener Wissensordner, {c} Chunks übernommen')
+                    : T('knowledge.subfolder_moved', 'Unterordner verschoben, {c} Chunks übernommen');
+            this._showNotification(meldung.replace('{c}', chunks), 'success');
             await this._refreshDir(parent);
             await this._refreshDir(target);
             await this.fetchStats();

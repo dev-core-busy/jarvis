@@ -244,6 +244,84 @@ check('Speichern: nur die Gruppen-Zuordnung, kein Umbenennen',
       gesendet.some((g) => g.pfad === '/api/knowledge/folders/groups' && g.rumpf.path === 'data/rag/ibs')
       && !gesendet.some((g) => g.methode === 'PUT'), JSON.stringify(gesendet.map((g) => g.methode + ' ' + g.pfad)));
 
+section('7. Wurzel verschieben: die Meldung sagt, wohin sie gewandert ist');
+{
+    const meldungen = [];
+    km._showNotification = (t, art) => meldungen.push([t, art]);
+    km._pickFolder = async () => 'data/rag/ziel';
+    const altFetch = w.fetch;
+    const zeitweise = (url, o) => {
+        const pfad = String(url).split('?')[0];
+        if (pfad === '/api/knowledge/folder_tree') {
+            return antwort({ ok: true, folders: [{ path: 'data/rag/ziel', name: 'ziel', depth: 0 }] });
+        }
+        if (pfad === '/api/knowledge/subfolders/move') {
+            gesendet.push({ pfad, methode: 'POST', rumpf: JSON.parse(o.body) });
+            return antwort({ ok: true, path: 'data/rag/ziel/ibs', from: 'data/rag/ibs',
+                             was_root: true, moved: { vector_chunks: 3 } });
+        }
+        return altFetch(url, o);
+    };
+    w.fetch = zeitweise; global.fetch = zeitweise;
+    gesendet.length = 0;
+    await km.moveSubfolder('data/rag/ibs');
+    await sleep(30);
+    w.fetch = altFetch; global.fetch = altFetch;
+    const post = gesendet.find((g) => g.pfad === '/api/knowledge/subfolders/move');
+    check('Positivkontrolle: Verschieben wurde gesendet',
+          !!post && post.rumpf.path === 'data/rag/ibs' && post.rumpf.target === 'data/rag/ziel',
+          post && JSON.stringify(post.rumpf));
+    const m = meldungen.find((x) => x[1] === 'success');
+    check('Meldung nennt das Ziel und dass es jetzt ein Unterordner ist',
+          !!m && m[0].includes('ziel') && m[0].includes('Unterordner von') && m[0].includes('3'),
+          m && m[0]);
+}
+
+section('8. Unterordner zurueck auf die oberste Ebene (Ziel data/rag)');
+{
+    const meldungen = [];
+    km._showNotification = (t, art) => meldungen.push([t, art]);
+    let angeboten = [];
+    km._pickFolder = async (opts) => { angeboten = opts.map((o) => o.path); return 'data/rag'; };
+    const altFetch = w.fetch;
+    const zeitweise = (url, o) => {
+        const pfad = String(url).split('?')[0];
+        if (pfad === '/api/knowledge/folder_tree') {
+            return antwort({ ok: true, folders: [
+                { path: 'data/rag/ibs', name: 'ibs', depth: 0, is_root: true },
+                { path: 'data/rag/ibs/reha', name: 'reha', depth: 1, is_root: false },
+                // Zweite Wurzel: ohne sie hat die Wurzel 'ibs' gar kein Ziel, der
+                // Dialog oeffnet nicht, und "nicht angeboten" waere trivial wahr.
+                { path: 'data/rag/andere', name: 'andere', depth: 0, is_root: true }] });
+        }
+        if (pfad === '/api/knowledge/subfolders/move') {
+            gesendet.push({ pfad, methode: 'POST', rumpf: JSON.parse(o.body) });
+            return antwort({ ok: true, path: 'data/rag/reha', from: 'data/rag/ibs/reha',
+                             was_root: false, now_root: true, moved: { vector_chunks: 4 } });
+        }
+        return altFetch(url, o);
+    };
+    w.fetch = zeitweise; global.fetch = zeitweise;
+    gesendet.length = 0;
+    await km.moveSubfolder('data/rag/ibs/reha');
+    await sleep(30);
+    check('Unterordner: "oberste Ebene" wird zuerst angeboten',
+          angeboten.length > 0 && angeboten[0] === 'data/rag', JSON.stringify(angeboten));
+    const post = gesendet.find((g) => g.pfad === '/api/knowledge/subfolders/move');
+    check('… und als Ziel data/rag gesendet', !!post && post.rumpf.target === 'data/rag',
+          post && JSON.stringify(post.rumpf));
+    const m = meldungen.find((x) => x[1] === 'success');
+    check('Meldung: jetzt eigener Wissensordner',
+          !!m && m[0].includes('eigener Wissensordner') && m[0].includes('4'), m && m[0]);
+    angeboten = [];
+    km._pickFolder = async (opts) => { angeboten = opts.map((o) => o.path); return null; };
+    await km.moveSubfolder('data/rag/ibs');
+    await sleep(30);
+    check('Wurzel: "oberste Ebene" wird NICHT angeboten (liegt schon dort)',
+          angeboten.length > 0 && !angeboten.includes('data/rag'), JSON.stringify(angeboten));
+    w.fetch = altFetch; global.fetch = altFetch;
+}
+
 const ok = results.filter((r) => r.ok).length;
 const fail = results.length - ok;
 console.log(`\nErgebnis: ${ok} OK, ${fail} FAIL`);

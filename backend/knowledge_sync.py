@@ -266,6 +266,30 @@ def share_fuer_ordner(rel_folder: str) -> dict | None:
     return None
 
 
+def freigaben_verschieben(alt_rel: str, neu_rel: str) -> int:
+    """Zieht die Freigaben mit, wenn ein Ordner umbenannt oder verschoben wird.
+
+    ⚠ BIS 2026-10-21 GAB ES DAS NICHT: eine Freigabe speichert ihren Ordner als
+    Pfad, und weder das Umbenennen eines Wurzelordners noch das Verschieben
+    eines Unterordners fasste ihn an – der abholende Standort bekam danach
+    "Ordner nicht gefunden". Gerufen aus ``relocate_folder_index``, ueber das
+    alle drei Wege laufen. Praefix MIT Schraegstrich (``a`` ist nicht ``ab``).
+    Rueckgabe: Zahl der umgeschriebenen Freigaben."""
+    alt, neu = _rel(alt_rel), _rel(neu_rel)
+    if not alt or not neu or alt == neu:
+        return 0
+    n = 0
+    with _lock:
+        for s in _laden()["shares"]:
+            f = s.get("folder", "")
+            if f == alt or f.startswith(alt + "/"):
+                s["folder"] = neu + f[len(alt):]
+                n += 1
+        if n:
+            _speichern()
+    return n
+
+
 def create_share(rel_folder: str, label: str = "", benutzer: str = "") -> dict:
     """Legt eine Freigabe an und erzeugt ihr Token.
 

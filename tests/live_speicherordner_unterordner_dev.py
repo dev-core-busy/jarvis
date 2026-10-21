@@ -47,7 +47,9 @@ def check(text, bedingung, info=""):
         print("  OK   %s" % text)
     else:
         _fail += 1
-        print("  FAIL %s%s" % (text, ("  [%s]" % info) if info else ""))
+        # (info,) statt info: ein Tupel als Info wuerde sonst als Argumentliste
+        # gelesen, und die Fehlermeldung selbst WARF (live auf DEV gesehen).
+        print("  FAIL %s%s" % (text, ("  [%s]" % (info,)) if info else ""))
 
 
 from backend import main as M                                      # noqa: E402

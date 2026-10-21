@@ -493,10 +493,23 @@ abschnitt('Teil 4: 🔗-Symbol in der Ordnerliste');
     const unter = km._folderNodeHtml('data/knowledge/technik', true, false, false);
     pruefe(wurzel.includes('kb-btn-share'), 'Wurzelordner hat das Freigabe-Symbol');
     pruefe(unter.includes('kb-btn-share'), 'Unterordner hat es ebenfalls');
-    pruefe((wurzel.match(/kb-btn-remove/g) || []).length === 4,
-        'Wurzelzeile hat jetzt vier Symbole', String((wurzel.match(/kb-btn-remove/g) || []).length));
-    pruefe((unter.match(/kb-btn-remove/g) || []).length === 5,
-        'Unterordner-Zeile hat fuenf Symbole', String((unter.match(/kb-btn-remove/g) || []).length));
+    // ⚠ HIER STANDEN FESTE ZAHLEN ("vier"/"fuenf Symbole"). Gemeint war: das
+    //   Freigabe-Symbol kommt dazu, ohne ein anderes zu verdraengen. Mit dem
+    //   Etikett "Wissensgruppen zuordnen" (2026-10-21) meldete die Zahl einen
+    //   Fehler, den es nicht gab – Formel statt Konstante (Register). Geprueft
+    //   wird jetzt: genau EIN Freigabe-Symbol je Zeile, und kein Knopf ohne Aktion.
+    const knoepfe = (html) => {
+        const box = w.document.createElement('div');
+        box.innerHTML = html;
+        return [...box.querySelectorAll('.kb-folder-header > button.kb-btn-remove')];
+    };
+    for (const [name, html] of [['Wurzelzeile', wurzel], ['Unterordner-Zeile', unter]]) {
+        const k = knoepfe(html);
+        pruefe(k.filter(b => b.classList.contains('kb-btn-share')).length === 1,
+            name + ': genau ein Freigabe-Symbol', String(k.length));
+        pruefe(k.length > 1 && k.every(b => (b.dataset.kbAktion || '').length > 0),
+            name + ': jeder Knopf traegt eine Aktion', k.map(b => b.dataset.kbAktion).join(','));
+    }
     // BSI H4 (2026-10-04): kein Inline-onclick mehr - die WIRKUNG wird per
     // echtem Klick gemessen (delegierter Listener in knowledge.js).
     {

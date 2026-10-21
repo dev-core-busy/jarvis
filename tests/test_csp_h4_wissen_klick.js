@@ -138,7 +138,7 @@ console.log('== knowledge.js: Wurzelordner ==');
     const wurzel = `data/rag/O'Neil "x" & b`;
     const liste = d.getElementById('kb-folder-list');
     liste.innerHTML = km._folderNodeHtml(wurzel, true, true, false);
-    const auf = spione(km, ['renameFolder', 'editFolder', 'removeFolder', 'toggleDir']);
+    const auf = spione(km, ['renameFolder', 'editFolder', 'removeFolder', 'toggleDir', 'moveSubfolder']);
     let eltern = 0;
     liste.addEventListener('click', () => { eltern++; });
     const stift = liste.querySelector('.kb-btn-rename');
@@ -152,11 +152,18 @@ console.log('== knowledge.js: Wurzelordner ==');
     etikett && etikett.click();
     pruefe(auf.length === 1 && auf[0][0] === 'editFolder' && auf[0][1][0] === wurzel && eltern === 0,
         'Etikett -> editFolder(pfad), gestoppt', JSON.stringify(auf));
-    // Eine Wurzel ausserhalb von data/rag kann der Server nicht umbenennen –
-    // dann gibt es keinen Bleistift statt eines Knopfes, der abgewiesen wird.
+    // Verschieben (2026-10-21): die Wurzel wird Unterordner des Ziels.
+    auf.length = 0;
+    const schieben = liste.querySelector('.kb-btn-movesub');
+    schieben && schieben.click();
+    pruefe(!!schieben && auf.length === 1 && auf[0][0] === 'moveSubfolder' && auf[0][1][0] === wurzel
+           && eltern === 0, 'Wurzel: Verschieben -> moveSubfolder(pfad), gestoppt', JSON.stringify(auf));
+    // Eine Wurzel ausserhalb von data/rag kann der Server weder umbenennen noch
+    // verschieben – dann gibt es keinen Knopf statt eines, der abgewiesen wird.
     liste.innerHTML = km._folderNodeHtml('/srv/anderswo', true, true, false);
-    pruefe(!liste.querySelector('.kb-btn-rename') && !!liste.querySelector('.kb-btn-groups'),
-        'Wurzel ausserhalb data/rag: kein Bleistift, aber Etikett');
+    pruefe(!liste.querySelector('.kb-btn-rename') && !liste.querySelector('.kb-btn-movesub')
+           && !!liste.querySelector('.kb-btn-groups'),
+        'Wurzel ausserhalb data/rag: kein Bleistift, kein Verschieben, aber Etikett');
 }
 
 // ── knowledge.js: Datei-Zeile ──────────────────────────────────────────────

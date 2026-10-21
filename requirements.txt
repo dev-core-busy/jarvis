@@ -83,7 +83,11 @@ a2wsgi>=1.10.10
 # 2026-07-19 auf ECHT bewusst gegen torch+cpu getauscht wurde (~4,6 GB).
 # face-recognition + opencv gehoeren zum Vision-Skill und werden bei dessen
 # Aktivierung installiert (skills/vision/skill.json → dependencies)
-faiss-cpu>=1.7.4
+# faiss-cpu <1.14: 1.14.2 bricht auf der DEV-VM beim Import mit "Ungueltiger
+# Maschinenbefehl" ab (SIGILL, rc 132) – der CPU fehlen SSE4.2/POPCNT/AVX ganz,
+# derselbe Grund wie bei numpy<2.1. 1.13.2 laeuft dort (gemessen 2026-10-21, beim
+# ersten Lock-Lauf: Import-Test gescheitert, alles zurueckgesetzt).
+faiss-cpu>=1.7.4,<1.14
 sentence-transformers>=2.2.0,<4.0
 numpy<2.1
 # setuptools<75: der Vision-Skill (face_recognition_models) und onnxruntime laden
@@ -94,13 +98,16 @@ numpy<2.1
 # deploy/security/pip_audit_ausnahmen.txt bewertet.
 setuptools<75
 # WICHTIG – torch VOR dieser Datei aus dem CPU-Index installieren:
-#   pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.10.0+cpu"
+#   pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.12.0+cpu"
+# (2.12.0 seit 2026-10-21: der Stand von ECHT – sonst stufte der Lock-Modus ECHT
+# auf 2.10 herab, und dessen FAISS-Index ist mit 2.12 eingebettet. Die Fassung
+# hier ist die EINE Quelle: lock_erneuern.py und das Dockerfile lesen sie.)
 # sentence-transformers zieht sonst das CUDA-Rad und damit 18 proprietaere
 # NVIDIA-Pakete (~6 GB) auf eine VM OHNE GPU – torch.cuda.is_available() ist hier
 # False, sie werden nie geladen. Nachgemessen 2026-07-31: venv 8,4 GB -> 2,4 GB.
 # Die Einbettungen sind bitgleich (gleicher SHA ueber den Vektor), ein Reindex ist
 # nach dem Wechsel also NICHT noetig.
-# Die Versionsangabe muss das lokale Suffix "+cpu" tragen: mit "torch==2.10.0"
+# Die Versionsangabe muss das lokale Suffix "+cpu" tragen: mit "torch==2.12.0"
 # haelt pip das bereits installierte CUDA-Rad fuer passend und tut nichts.
 # mcp: Untergrenze 1.28.1 aus pip-audit (BSI M6, 2026-10-06: CVE-2026-52869/-52870/
 # -59950, alle in den SERVER-Transporten – Jarvis nutzt nur den Client, die

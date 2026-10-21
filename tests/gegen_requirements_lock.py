@@ -79,6 +79,7 @@ def main() -> int:
          req, df, wf, 1),
         ("CUDA-Paket in der Lock", lock + "nvidia-cublas-cu12==12.4.5.8 \\\n    --hash=sha256:" + "d" * 64 + "\n",
          req, df, wf, 1),
+        ("Vorabversion in der Lock", re.sub(r"(?m)^pydantic==\S+ ", "pydantic==2.14.0a1 ", lock), req, df, wf, 1),
         ("Kopf ohne Erzeuger-Hinweis", "# irgendwas\n" + lock, req, df, wf, 1),
         ("leere Lock -> konnte nicht laufen", "# leer\n", req, df, wf, 2),
         ("Dockerfile wieder aus requirements.txt", lock, req,

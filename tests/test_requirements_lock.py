@@ -147,6 +147,9 @@ pruefe(f"torch in der Fassung des Hinweises ({m.group(1)})",
        lock.get("torch", ("",))[0] == m.group(1), lock.get("torch"))
 cuda = sorted(n for n in lock if n.startswith("nvidia-") or n == "triton")
 pruefe("kein CUDA-Paket (nvidia-*, triton)", not cuda, cuda)
+vorab = sorted(f"{n}=={v}" for n, (v, _) in lock.items()
+               if Version(v).is_prerelease or Version(v).is_devrelease)
+pruefe("keine Vorab-/Entwicklungsversion (ECHT trug pydantic 2.14.0a1)", not vorab, vorab)
 
 print("\n\033[1mVerbraucher installieren aus der Lock\033[0m")
 

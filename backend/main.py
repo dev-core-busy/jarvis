@@ -6236,6 +6236,8 @@ async def startup_abhaengigkeiten():
     Aenderung eine ANDERE ist als beim vorigen Lauf (sonst liefe ein Paket,
     das sich nicht halten laesst, in eine Neustart-Schleife).
     Abschalten: JARVIS_ABH_AUTO=0 (dann nur pruefen und melden).
+    Lock-Modus (Server folgt requirements.lock, auch abwaerts): JARVIS_ABH_LOCK=1
+    – nur auf dem Server gesetzt, Vorgabe aus.
     """
     from backend import abhaengigkeiten as _abh
 

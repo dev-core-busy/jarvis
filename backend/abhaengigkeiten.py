@@ -34,6 +34,21 @@ ein Heben holte die CUDA-Variante zurueck, ~6 GB), und keine Hauptversions-
 Spruenge ueber Grenzen hinweg, die requirements.txt setzt.
 
 Abschalten: ``JARVIS_ABH_AUTO=0`` (nur pruefen und melden, nichts installieren).
+
+LOCK-MODUS (Phase 2 der Lock-Datei, 2026-10-21) – Schalter ``JARVIS_ABH_LOCK=1``:
+der Server folgt ``requirements.lock`` (exakte Versionen + Hashes) statt der
+Grenzen aus requirements.txt. Jede Abweichung – fehlt, aelter ODER NEUER – wird
+mit ``pip install --require-hashes -r requirements.lock`` auf den Lock-Stand
+gebracht; torch kommt dabei vom CPU-Index und wird hier mitgefuehrt. Damit ist
+die Regel "NIE HERABSTUFEN" in diesem Modus bewusst aufgehoben: DEV und ECHT
+liefen in 58 von 160 Paketen auseinander, weil jeder Server fuer sich hob.
+Schwachstellen werden weiter bei OSV abgefragt, aber NUR gemeldet – behoben
+werden sie ueber die Lock im Repo (deploy/lock_erneuern.py), damit alle Server
+denselben Stand haben. pip check / Import-Test / Ruecknahme gelten wie oben.
+Pakete AUSSERHALB der Lock (Skill-Pakete wie face-recognition) bleiben unberuehrt.
+⚠ Der Schalter liegt bewusst auf dem SERVER, nicht im Code: ECHT holt master
+selbst (pull --ff-only) – ein Vorgabewert "an" haette ECHT ohne Anweisung
+umgestellt. Ohne Schalter laeuft alles wie bisher.
 """
 from __future__ import annotations
 
@@ -53,6 +68,9 @@ from packaging.version import InvalidVersion, Version
 
 WURZEL = Path(__file__).resolve().parent.parent
 REQUIREMENTS = WURZEL / "requirements.txt"
+LOCK = WURZEL / "requirements.lock"
+# torch (+cpu) steht samt Hash in der Lock, liegt aber nur auf diesem Index
+TORCH_INDEX = "https://download.pytorch.org/whl/cpu"
 AUSNAHMEN = WURZEL / "deploy" / "security" / "pip_audit_ausnahmen.txt"
 ZUSTAND = Path(os.environ.get("JARVIS_ABH_ZUSTAND", str(WURZEL / "data" / "logs" / "abhaengigkeiten.json")))
 PYTHON = os.environ.get("JARVIS_ABH_PYTHON", sys.executable)
@@ -256,8 +274,13 @@ def _ziele(funde: list[dict]) -> dict[str, str]:
 
 
 def _import_test() -> tuple[bool, str]:
+    # Jedes Modul wird VOR dem Import auf stderr angesagt: stirbt der Prozess an
+    # einem Signal (SIGILL – der DEV-CPU fehlen SSE4.2/AVX), gibt es sonst KEINE
+    # Ausgabe. So geschehen beim ersten Lock-Lauf 2026-10-21 mit faiss 1.14.2: der
+    # Grund im Zustand war leer ("Import-Test: ").
     code = ("import importlib,sys\nfehl=[]\n"
             f"for m in {list(IMPORT_TEST)!r}:\n"
+            "    sys.stderr.write('@'+m+'\\n'); sys.stderr.flush()\n"
             "    try:\n        importlib.import_module(m)\n"
             "    except ModuleNotFoundError as e:\n"
             "        if e.name != m: fehl.append(m+': '+str(e))\n"
@@ -265,14 +288,23 @@ def _import_test() -> tuple[bool, str]:
             "print('\\n'.join(fehl)); sys.exit(1 if fehl else 0)\n")
     r = subprocess.run([PYTHON, "-c", code], capture_output=True, text=True, timeout=600,
                        cwd=str(WURZEL))
-    return r.returncode == 0, (r.stdout + r.stderr).strip()[-600:]
+    ansagen = [z[1:] for z in (r.stderr or "").splitlines() if z.startswith("@")]
+    rest = "\n".join(z for z in (r.stderr or "").splitlines() if not z.startswith("@"))
+    if r.returncode < 0 or r.returncode > 128:
+        sig = -r.returncode if r.returncode < 0 else r.returncode - 128
+        bei = ansagen[-1] if ansagen else "?"
+        return False, f"Prozess abgestuerzt bei '{bei}' (Signal {sig}, rc {r.returncode})"
+    return r.returncode == 0, (r.stdout + rest).strip()[-600:]
 
 
-def _zuruecksetzen(vorher: dict[str, str], nachher: dict[str, str]) -> list[str]:
-    alt = [f"{n}=={v}" for n, v in vorher.items() if nachher.get(n) != v and n not in NIE_HEBEN]
+def _zuruecksetzen(vorher: dict[str, str], nachher: dict[str, str],
+                   geschuetzt: set[str] = NIE_HEBEN) -> list[str]:
+    alt = [f"{n}=={v}" for n, v in vorher.items() if nachher.get(n) != v and n not in geschuetzt]
     neu = [n for n in nachher if n not in vorher]
     if alt:
-        _pip("install", "--no-deps", *alt)
+        # eine lokale Version (torch +cpu) gibt es nur auf dem CPU-Index
+        extra = ["--extra-index-url", TORCH_INDEX] if any("+" in a for a in alt) else []
+        _pip("install", "--no-deps", *alt, *extra)
     if neu:
         _pip("uninstall", "-y", *neu)
     return alt + [f"-{n}" for n in neu]
@@ -296,6 +328,127 @@ def _melden(art: str, **details) -> None:
         pass
 
 
+def lock_modus() -> bool:
+    """Lock-Modus nur mit Schalter AUF DEM SERVER und vorhandener Lock-Datei."""
+    return os.environ.get("JARVIS_ABH_LOCK", "0") == "1" and LOCK.is_file()
+
+
+def lock_versionen(text: str | None = None) -> dict[str, str]:
+    """Normierter Name -> Version aus requirements.lock (nur die ``name==version``-Zeilen)."""
+    text = LOCK.read_text(encoding="utf-8") if text is None else text
+    erg = {}
+    for z in text.splitlines():
+        m = re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==(\S+?)\s*(\\)?\s*$", z)
+        if m:
+            erg[_norm(m.group(1))] = m.group(2)
+    return erg
+
+
+def lock_abweichungen(inst: dict[str, str], soll: dict[str, str] | None = None) -> list[tuple]:
+    """(name, ist oder None, soll) fuer jedes Lock-Paket, das fehlt oder eine andere
+    Version hat – aelter UND neuer. Pakete ausserhalb der Lock zaehlen nicht."""
+    soll = lock_versionen() if soll is None else soll
+    return [(n, inst.get(n), v) for n, v in sorted(soll.items()) if inst.get(n) != v]
+
+
+def _lock_lauf(erg: dict, vorher: dict[str, str], installieren: bool) -> None:
+    """Der Lauf im Lock-Modus (siehe Modul-Docstring)."""
+    erg["modus"] = "lock"
+    soll = lock_versionen()
+    if len(soll) < 20:
+        raise RuntimeError(f"requirements.lock unvollstaendig ({len(soll)} Eintraege)")
+    ab = lock_abweichungen(vorher, soll)
+    erg["lock_abweichungen"] = [f"{n} {ist or '-'} -> {v}" for n, ist, v in ab]
+    try:
+        funde = schwachstellen(vorher)
+    except Exception as e:  # noqa: BLE001 – OSV nicht erreichbar: nur die Lock
+        funde = []
+        erg["fehler"] = f"OSV nicht erreichbar: {e}"
+    if installieren and ab:
+        r = _pip("install", "--require-hashes", "-Ccompile-args=-j2",
+                 "--extra-index-url", TORCH_INDEX, "-r", str(LOCK), timeout=3600)
+        if r.returncode != 0:
+            erg["fehler"] = "pip install (Lock): " + (r.stderr or r.stdout).strip()[-300:]
+        nachher = installiert()
+        pc = _pip("check", timeout=120)
+        imp_ok, imp_txt = _import_test()
+        if pc.returncode != 0 or not imp_ok:
+            # torch ist hier NICHT geschuetzt: die Lock hat es womoeglich bewegt
+            erg["zurueckgesetzt"] = _zuruecksetzen(vorher, nachher, geschuetzt=NIE_HEBEN - {"torch"})
+            erg["fehler"] = ("Zurueckgesetzt – " + ("pip check: " + pc.stdout.strip()[-300:]
+                             if pc.returncode != 0 else "Import-Test: " + imp_txt))
+            nachher = installiert()
+        erg["geaendert"] = sorted(f"{n} {vorher.get(n, '-')} -> {v}"
+                                  for n, v in nachher.items() if vorher.get(n) != v)
+        danach = schwachstellen(nachher) if erg["geaendert"] else funde
+    else:
+        nachher = vorher
+        danach = funde
+    erg["ausgenommen"] = sorted({f["id"] for f in danach if f["ausgenommen"]})
+    # Gemeldet, nicht gehoben: die Behebung gehoert in die Lock (alle Server gleich)
+    erg["offen"] += [{"paket": f["paket"], "version": f["version"], "id": f["id"],
+                      "behoben_in": f["behoben_in"], "weg": "Lock neu erzeugen (deploy/lock_erneuern.py)"}
+                     for f in danach if not f["ausgenommen"]]
+    erg["lock_abweichungen_danach"] = [f"{n} {ist or '-'} -> {v}"
+                                       for n, ist, v in lock_abweichungen(nachher, soll)]
+
+
+def _grenzen_lauf(erg: dict, vorher: dict[str, str], installieren: bool) -> None:
+    """Der Lauf ohne Lock-Modus: Grenzen aus requirements.txt, Hebung bei Funden,
+    nie herabstufen (siehe Modul-Docstring, Punkte 1-4)."""
+    erg["modus"] = "grenzen"
+    fehl = unerfuellt(vorher)
+    erg["unerfuellt"] = fehl
+    erg["ueber_grenze"] = [f"{r} (installiert {vorher.get(_norm(r.name))})"
+                           for r in einordnen(vorher)["zu_neu"]]
+    try:
+        funde = schwachstellen(vorher)
+    except Exception as e:  # noqa: BLE001 – OSV nicht erreichbar: nur requirements
+        funde = []
+        erg["fehler"] = f"OSV nicht erreichbar: {e}"
+    ziele = _ziele(funde)
+    erg["ausgenommen"] = sorted({f["id"] for f in funde if f["ausgenommen"]})
+    if installieren and (fehl or ziele):
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as cf:
+            cf.write(_constraints(vorher))
+        try:
+            basis = [str(r) for r in einordnen(vorher)["fehlt"] + einordnen(vorher)["zu_alt"]]
+            hebungen = [f"{n}=={v}" for n, v in ziele.items()]
+            r = _pip("install", "-c", cf.name, *basis, *hebungen)
+            if r.returncode != 0 and hebungen:
+                # Gemeinsam unloesbar (eine Hebung widerspricht einer Grenze):
+                # erst das Fehlende allein, dann jede Hebung einzeln
+                if basis:
+                    _pip("install", "-c", cf.name, *basis)
+                for h in hebungen:
+                    ri = _pip("install", "-c", cf.name, h)
+                    if ri.returncode != 0:
+                        erg["offen"].append({"paket": h.split("==")[0], "ziel": h.split("==")[1],
+                                             "grund": (ri.stderr or ri.stdout).strip()[-200:]})
+            elif r.returncode != 0:
+                erg["fehler"] = ("pip install: " + (r.stderr or r.stdout).strip()[-300:])
+        finally:
+            os.unlink(cf.name)
+        nachher = installiert()
+        pc = _pip("check", timeout=120)
+        imp_ok, imp_txt = _import_test()
+        if pc.returncode != 0 or not imp_ok:
+            erg["zurueckgesetzt"] = _zuruecksetzen(vorher, nachher)
+            erg["fehler"] = ("Zurueckgesetzt – " + ("pip check: " + pc.stdout.strip()[-300:]
+                             if pc.returncode != 0 else "Import-Test: " + imp_txt))
+            nachher = installiert()
+        erg["geaendert"] = sorted(f"{n} {vorher.get(n, '-')} -> {v}"
+                                  for n, v in nachher.items() if vorher.get(n) != v)
+        danach = schwachstellen(nachher) if funde else []
+    else:
+        danach = funde
+    erg["offen"] += [{"paket": f["paket"], "version": f["version"], "id": f["id"],
+                      "behoben_in": f["behoben_in"]}
+                     for f in danach if not f["ausgenommen"]]
+    erg["unerfuellt_danach"] = unerfuellt(installiert()) if erg["geaendert"] else fehl
+
+
 def abgleichen(installieren: bool | None = None) -> dict:
     """Ein Lauf. Rueckgabe/Zustand: geaendert (Liste), offen (Funde ohne Behebung
     oder mit gescheiterter Hebung), ausgenommen, fehler, zurueckgesetzt."""
@@ -307,56 +460,10 @@ def abgleichen(installieren: bool | None = None) -> dict:
                  "ausgenommen": [], "fehler": "", "zurueckgesetzt": [], "installieren": installieren}
     try:
         vorher = installiert()
-        fehl = unerfuellt(vorher)
-        erg["unerfuellt"] = fehl
-        erg["ueber_grenze"] = [f"{r} (installiert {vorher.get(_norm(r.name))})"
-                               for r in einordnen(vorher)["zu_neu"]]
-        try:
-            funde = schwachstellen(vorher)
-        except Exception as e:  # noqa: BLE001 – OSV nicht erreichbar: nur requirements
-            funde = []
-            erg["fehler"] = f"OSV nicht erreichbar: {e}"
-        ziele = _ziele(funde)
-        erg["ausgenommen"] = sorted({f["id"] for f in funde if f["ausgenommen"]})
-        if installieren and (fehl or ziele):
-            import tempfile
-            with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as cf:
-                cf.write(_constraints(vorher))
-            try:
-                basis = [str(r) for r in einordnen(vorher)["fehlt"] + einordnen(vorher)["zu_alt"]]
-                hebungen = [f"{n}=={v}" for n, v in ziele.items()]
-                r = _pip("install", "-c", cf.name, *basis, *hebungen)
-                if r.returncode != 0 and hebungen:
-                    # Gemeinsam unloesbar (eine Hebung widerspricht einer Grenze):
-                    # erst das Fehlende allein, dann jede Hebung einzeln
-                    if basis:
-                        _pip("install", "-c", cf.name, *basis)
-                    for h in hebungen:
-                        ri = _pip("install", "-c", cf.name, h)
-                        if ri.returncode != 0:
-                            erg["offen"].append({"paket": h.split("==")[0], "ziel": h.split("==")[1],
-                                                 "grund": (ri.stderr or ri.stdout).strip()[-200:]})
-                elif r.returncode != 0:
-                    erg["fehler"] = ("pip install: " + (r.stderr or r.stdout).strip()[-300:])
-            finally:
-                os.unlink(cf.name)
-            nachher = installiert()
-            pc = _pip("check", timeout=120)
-            imp_ok, imp_txt = _import_test()
-            if pc.returncode != 0 or not imp_ok:
-                erg["zurueckgesetzt"] = _zuruecksetzen(vorher, nachher)
-                erg["fehler"] = ("Zurueckgesetzt – " + ("pip check: " + pc.stdout.strip()[-300:]
-                                 if pc.returncode != 0 else "Import-Test: " + imp_txt))
-                nachher = installiert()
-            erg["geaendert"] = sorted(f"{n} {vorher.get(n, '-')} -> {v}"
-                                      for n, v in nachher.items() if vorher.get(n) != v)
-            danach = schwachstellen(nachher) if funde else []
+        if lock_modus():
+            _lock_lauf(erg, vorher, installieren)
         else:
-            danach = funde
-        erg["offen"] += [{"paket": f["paket"], "version": f["version"], "id": f["id"],
-                          "behoben_in": f["behoben_in"]}
-                         for f in danach if not f["ausgenommen"]]
-        erg["unerfuellt_danach"] = unerfuellt(installiert()) if erg["geaendert"] else fehl
+            _grenzen_lauf(erg, vorher, installieren)
         erg["ok"] = not erg["fehler"]
     except Exception as e:  # noqa: BLE001
         erg["ok"] = False

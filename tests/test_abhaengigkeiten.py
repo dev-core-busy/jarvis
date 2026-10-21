@@ -187,6 +187,124 @@ erg = A.abgleichen(installieren=False)
 check("nur pruefen: KEIN pip install, Fund als offen gemeldet",
       not any(x[0] == "install" for x in aufrufe) and erg.get("offen"), (aufrufe, erg.get("offen")))
 
+print("\n── 7. Lock-Modus (JARVIS_ABH_LOCK=1)")
+import os  # noqa: E402
+
+echte = A.lock_versionen((ROOT / "requirements.lock").read_text(encoding="utf-8"))
+check("Positivkontrolle: echte requirements.lock gelesen (>= 100 Pakete, torch +cpu)",
+      len(echte) >= 100 and echte.get("torch", "").endswith("+cpu"), (len(echte), echte.get("torch")))
+
+LK = SK / "requirements.lock"
+soll = {f"paket{i:02d}": "1.0" for i in range(20)}
+soll.update({"google-genai": "1.5.0", "torch": "2.10.0+cpu", "pyjwt": "2.12.1", "numpy": "2.0.2"})
+LK.write_text("# kopf\n" + "".join(
+    f"{n}=={v} \\\n    --hash=sha256:{'a' * 64}\n    # via x\n" for n, v in soll.items()))
+check("lock_versionen liest Eintraege samt Fortsetzungszeilen und +cpu",
+      A.lock_versionen(LK.read_text()) == soll, A.lock_versionen(LK.read_text()))
+
+ist = dict(soll, **{"google-genai": "1.72.0", "torch": "2.12.0+cpu", "dlib": "20.0.0"})
+del ist["paket00"]
+ist["paket01"] = "0.9"
+ab = {n: (i, s) for n, i, s in A.lock_abweichungen(ist, soll)}
+check("Abweichungen: fehlt, aelter UND neuer (auch torch) – kein Herabstufungsverbot",
+      ab == {"paket00": (None, "1.0"), "paket01": ("0.9", "1.0"),
+             "google-genai": ("1.72.0", "1.5.0"), "torch": ("2.12.0+cpu", "2.10.0+cpu")}, ab)
+check("…Paket ausserhalb der Lock (dlib, Skill) zaehlt nicht", "dlib" not in ab, ab)
+
+A.LOCK = LK
+os.environ.pop("JARVIS_ABH_LOCK", None)
+check("ohne Schalter KEIN Lock-Modus (Vorgabe aus – ECHT holt master selbst)", not A.lock_modus())
+os.environ["JARVIS_ABH_LOCK"] = "1"
+check("mit Schalter und Lock-Datei: Lock-Modus", A.lock_modus())
+A.LOCK = SK / "gibtsnicht.lock"
+check("mit Schalter, aber ohne Lock-Datei: kein Lock-Modus", not A.lock_modus())
+A.LOCK = LK
+
+zustand["inst"] = dict(ist)
+aufrufe.clear()
+
+
+def pip_lock(*args, timeout=900):
+    aufrufe.append(args)
+    if args[0] == "install" and "-r" in args:
+        zustand["inst"].update(soll)          # pip bringt alles auf den Lock-Stand
+    if args[0] == "install" and "--no-deps" in args:
+        for a_ in args[2:]:
+            if "==" in a_:
+                n, v = a_.split("==")
+                zustand["inst"][n] = v
+    return R(0)
+
+
+A._pip = pip_lock
+A._import_test = lambda: (True, "")
+A.schwachstellen = lambda inst, erlaubt=None: (
+    [{"paket": "pyjwt", "version": inst["pyjwt"], "id": "X", "aliase": ["X"],
+      "behoben_in": "2.15.0", "ausgenommen": False}])
+A.ZUSTAND = SK / "zustand_lock.json"
+erg = A.abgleichen(installieren=True)
+inst_lock = [x for x in aufrufe if x[0] == "install"]
+check("genau EIN pip install, aus der Lock mit --require-hashes und CPU-Index",
+      len(inst_lock) == 1 and "--require-hashes" in inst_lock[0] and "-r" in inst_lock[0]
+      and str(LK) in inst_lock[0] and A.TORCH_INDEX in inst_lock[0], inst_lock)
+check("…ohne Constraints (-c) und ohne Einzel-Hebung des Fundes (pyjwt==2.15.0)",
+      not any("-c" in x or "pyjwt==2.15.0" in x for x in inst_lock), inst_lock)
+check("geaendert: Herabstufung google-genai und torch gemeldet",
+      "google-genai 1.72.0 -> 1.5.0" in erg.get("geaendert", [])
+      and "torch 2.12.0+cpu -> 2.10.0+cpu" in erg.get("geaendert", []), erg.get("geaendert"))
+check("Skill-Paket ausserhalb der Lock bleibt (dlib)",
+      zustand["inst"].get("dlib") == "20.0.0" and not any(x[0] == "uninstall" for x in aufrufe), aufrufe)
+check("Fund nur GEMELDET, mit Weg ueber die Lock",
+      any(o.get("paket") == "pyjwt" and "lock_erneuern" in o.get("weg", "") for o in erg.get("offen", [])),
+      erg.get("offen"))
+check("danach keine Lock-Abweichung, Modus 'lock'",
+      erg.get("lock_abweichungen_danach") == [] and erg.get("modus") == "lock", erg)
+check("Zustand im Lock-Modus GESCHRIEBEN (kein Ruecksprung vor _speichern)",
+      A.zustand().get("modus") == "lock" and A.zustand().get("geaendert") == erg.get("geaendert"),
+      A.zustand())
+
+zustand["inst"] = dict(ist)
+aufrufe.clear()
+erg = A.abgleichen(installieren=False)
+check("nur pruefen: KEIN pip install, Abweichungen gemeldet",
+      not any(x[0] == "install" for x in aufrufe) and len(erg.get("lock_abweichungen", [])) == 4,
+      (aufrufe, erg.get("lock_abweichungen")))
+
+zustand["inst"] = dict(ist)
+aufrufe.clear()
+A._import_test = lambda: (False, "torch: ImportError")
+erg = A.abgleichen(installieren=True)
+rueck = [x for x in aufrufe if x[:2] == ("install", "--no-deps")]
+check("Import-Test scheitert -> Ruecknahme INKLUSIVE torch, vom CPU-Index",
+      rueck and "torch==2.12.0+cpu" in rueck[0] and A.TORCH_INDEX in rueck[0]
+      and zustand["inst"].get("torch") == "2.12.0+cpu", rueck)
+check("…und google-genai zurueck auf 1.72.0", zustand["inst"].get("google-genai") == "1.72.0",
+      zustand["inst"].get("google-genai"))
+check("…als Fehler gemeldet", not erg.get("ok") and "Import-Test" in erg.get("fehler", ""), erg)
+os.environ.pop("JARVIS_ABH_LOCK", None)
+
+print("\n── 8. Import-Test benennt einen Absturz (SIGILL auf DEV, faiss 1.14.2)")
+import importlib  # noqa: E402
+A = importlib.reload(A)          # echte Funktionen statt der Attrappen von oben
+(SK / "jv_absturz.py").write_text("import os, signal\nos.kill(os.getpid(), signal.SIGABRT)\n")
+A.IMPORT_TEST = ("json", "jv_absturz", "csv")
+A.PYTHON = sys.executable
+_pp = os.environ.get("PYTHONPATH")
+os.environ["PYTHONPATH"] = str(SK)
+try:
+    ok_, txt = A._import_test()
+finally:
+    if _pp is None:
+        os.environ.pop("PYTHONPATH", None)
+    else:
+        os.environ["PYTHONPATH"] = _pp
+check("Absturz per Signal: gescheitert UND das Modul benannt (nicht leer)",
+      not ok_ and "jv_absturz" in txt and "Signal" in txt, txt)
+A.IMPORT_TEST = ("json", "csv")
+ok_, txt = A._import_test()
+check("Gegenkontrolle: ohne Absturz besteht der Import-Test, keine Ansage-Zeilen im Text",
+      ok_ and "@" not in txt, (ok_, txt))
+
 print("\n" + "=" * 60)
 print(f"Ergebnis: {OK} OK, {FAIL} FAIL")
 print("=" * 60)

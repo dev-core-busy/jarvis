@@ -4501,6 +4501,15 @@ select.input-field {
     min-width: 180px;
     max-width: 100%;
 }
+/* Adresse unter der Auswahl (Spracheingabe). Bewusst OHNE display-Angabe:
+   das Feld wird ueber das hidden-Attribut ein- und ausgeblendet, ein
+   display:block wuerde es ueberstimmen. */
+.systab-url {
+    width: 100%;
+    min-width: 220px;
+    margin-top: 6px;
+    box-sizing: border-box;
+}
 .systab-check {
     display: flex;
     gap: 5px;

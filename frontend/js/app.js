@@ -2089,6 +2089,8 @@
                 }
                 // Stimmen laden und gespeicherte Auswahl setzen
                 _loadTtsVoices(data.tts_voice || '');
+                // Spracheingabe: eigener Endpunkt (nur Admin), unabhaengig von /api/settings
+                _loadSttEinstellung();
                 // Agent API Key: BSI M5 – der Klartext kommt NICHT mehr beim Laden,
                 // sondern erst beim Klick aufs Auge (bzw. Kopieren), nach erneuter
                 // Anmeldung. Bis dahin Sterne als Zeichen "es ist einer gespeichert".
@@ -2731,6 +2733,75 @@
             } catch (e) {
                 if (selectTtsVoice) selectTtsVoice.innerHTML = '<option value="">Standard</option>';
             }
+        }
+
+        // ── Spracheingabe (STT): lokal oder Fern-Dienst ──
+        // Das Adressfeld erscheint nur bei "fern". Der Server prueft beim
+        // Speichern die Erreichbarkeit; das Ergebnis steht am Knopf. Ein Fehler
+        // bleibt stehen (man muss ihn lesen koennen), ein Erfolg verschwindet.
+        const selectSttQuelle = document.getElementById('setting-stt-quelle');
+        const inputSttUrl = document.getElementById('setting-stt-url');
+        const sttStatus = document.getElementById('stt-status');
+        function _sttFeldZeigen() {
+            if (inputSttUrl && selectSttQuelle) inputSttUrl.hidden = selectSttQuelle.value !== 'fern';
+        }
+        function _sttMelden(text, bleibt) {
+            if (!sttStatus) return;
+            sttStatus.textContent = text;
+            clearTimeout(sttStatus._t);
+            if (!bleibt) sttStatus._t = setTimeout(() => { sttStatus.textContent = ''; }, 5000);
+        }
+        async function _loadSttEinstellung() {
+            if (!selectSttQuelle) return;
+            try {
+                const r = await fetch('/api/settings/stt', { headers: { 'Authorization': `Bearer ${token}` } });
+                if (!r.ok) return;
+                const d = await r.json();
+                selectSttQuelle.value = d.quelle === 'fern' ? 'fern' : 'lokal';
+                if (inputSttUrl) inputSttUrl.value = d.url || '';
+                _sttFeldZeigen();
+            } catch (e) { /* Zeile bleibt auf der Vorgabe */ }
+        }
+        if (selectSttQuelle && !selectSttQuelle._wired) {
+            selectSttQuelle._wired = true;
+            selectSttQuelle.addEventListener('change', _sttFeldZeigen);
+        }
+        const btnSaveStt = document.getElementById('btn-save-stt');
+        if (btnSaveStt && !btnSaveStt._wired) {
+            btnSaveStt._wired = true;
+            btnSaveStt.addEventListener('click', async () => {
+                const T = (k, f) => (window.t ? window.t(k) : f);
+                const quelle = selectSttQuelle ? selectSttQuelle.value : 'lokal';
+                const url = inputSttUrl ? inputSttUrl.value.trim() : '';
+                if (quelle === 'fern' && !url) {
+                    _sttMelden(T('profile.stt_url_fehlt', 'Bitte die Adresse des Dienstes eintragen.'), true);
+                    return;
+                }
+                btnSaveStt.disabled = true;
+                try {
+                    const r = await fetch('/api/settings/stt', {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ quelle, url })
+                    });
+                    const d = await r.json().catch(() => ({}));
+                    if (!r.ok) { _sttMelden('✗ ' + (d.error || r.status), true); return; }
+                    if (quelle === 'fern' && !(d.erreichbar && d.erreichbar.ok)) {
+                        _sttMelden(T('profile.stt_nicht_erreichbar', 'Gespeichert, aber der Dienst antwortet nicht.')
+                                   + (d.erreichbar && d.erreichbar.detail ? ' (' + d.erreichbar.detail + ')' : ''), true);
+                    } else if (quelle === 'fern') {
+                        const e = d.erreichbar;
+                        _sttMelden(T('profile.stt_erreichbar', '✓ gespeichert · Dienst antwortet')
+                                   + (e.modell ? ' · ' + e.modell + (e.geraet ? ' (' + e.geraet + ')' : '') : ''), false);
+                    } else {
+                        _sttMelden('✓', false);
+                    }
+                } catch (e) {
+                    _sttMelden('✗ ' + String(e && e.message || e), true);
+                } finally {
+                    btnSaveStt.disabled = false;
+                }
+            });
         }
 
         // TTS-Enabled wird jetzt direkt vom btn-tts-Click-Handler persistiert (kein Checkbox mehr)

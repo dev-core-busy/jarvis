@@ -117,6 +117,7 @@ class Whisper:
     def __init__(self):
         self.modell = object()
         self.antwort = "hallo welt"
+        self.fern = False
         self.wirft = None
         self.aufrufe = []
 
@@ -144,6 +145,9 @@ _abh = {n: object() for n in set(_re.findall(r"\bDepends\((require_[a-z_]+)\)", 
 ns = {**_abh, "JSONResponse": JSONResponse, "Request": Anfrage, "Depends": lambda f: None,
       "require_auth": object(), "asyncio": asyncio, "os": os,
       "_get_whisper_model": lambda source="chat": W.get_model(source),
+      # Quelle der Spracherkennung (Einstellung): Vorgabe lokal, im Abschnitt
+      # "Fern-Dienst" umgestellt.
+      "_stt_quelle_fern": lambda: W.fern,
       "_transcribe_audio": lambda *a, **k: W.transcribe(*a, **k)}
 try:
     exec(compile(modul, str(MAIN), "exec"), ns)
@@ -213,6 +217,14 @@ r = rufe(Anfrage(AUDIO))
 W.modell = object()
 check("ohne Whisper-Modell -> 503", r.status_code == 503, f"{r.status_code}")
 check("in keinem dieser Faelle wurde Whisper gerufen", len(W.aufrufe) == 0, f"{len(W.aufrufe)}")
+# Fern-Dienst eingestellt: das lokale Modell ist nur der Ersatz, sein Fehlen
+# darf die Aufnahme nicht abweisen (2026-10-22).
+W.modell, W.fern = None, True
+r = rufe(Anfrage(AUDIO))
+W.modell, W.fern = object(), False
+check("Fern-Dienst eingestellt, ohne lokales Modell -> trotzdem erkannt (200)",
+      r.status_code == 200 and len(W.aufrufe) == 1, f"{r.status_code}, {len(W.aufrufe)} Aufrufe")
+W.aufrufe.clear()
 
 # ── Sprache und Endung ──────────────────────────────────────────────────────
 print("\nSprache und Endung")

@@ -147,7 +147,8 @@ def _langsam_modell(source="chat"):
 
 ns = {"JSONResponse": Antwort, "Request": Anfrage, "Depends": lambda x: None,
       "require_auth": None, "asyncio": asyncio, "_STT_MAX_BYTES": 10 ** 6,
-      "_get_whisper_model": _langsam_modell, "_STT_ENDUNGEN": {}, "os": __import__("os")}
+      "_get_whisper_model": _langsam_modell, "_STT_ENDUNGEN": {}, "os": __import__("os"),
+      "_stt_quelle_fern": lambda: False}
 schneide("_rumpf_mit_deckel", ns)
 stt = schneide("stt_transcribe", ns)
 r, d, t = LOOP.run_until_complete(gemessen(lambda: stt(Anfrage(body=b"abc"), user="anna")))

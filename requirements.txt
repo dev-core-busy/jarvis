@@ -30,7 +30,10 @@ pdfplumber>=0.10.0
 python-docx>=1.0.0
 openpyxl>=3.1.0
 python-pptx>=0.6.23
-edge-tts>=7.2.7        # TTS im Chat: Stimmen-Liste (/api/tts/voices) + Sprachsynthese; ohne edge-tts nur eine "Standard"-Stimme
+edge-tts>=7.3.1        # TTS im Chat: Stimmen-Liste (/api/tts/voices) + Sprachsynthese; ohne edge-tts nur eine "Standard"-Stimme
+# Untergrenze 7.3.1 (2026-10-22): 7.2.8 bekommt vom Microsoft-Dienst nur noch
+# "403 Invalid response status" (auf DEV und mit derselben Fassung auf ECHT) –
+# die Sprachausgabe lieferte damit gar nichts mehr. 7.3.1 synthetisiert wieder.
 wsgidav>=4.3.0
 # ── Am 2026-08-12 nachgetragen: bis dahin NICHT deklariert, obwohl im Backend
 # direkt importiert. Sie waren nur als Beigabe anderer Pakete vorhanden und

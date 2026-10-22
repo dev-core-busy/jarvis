@@ -23,7 +23,7 @@
     <link rel="stylesheet" href="/static/css/theme.css?v=34">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=10">
-    <link rel="stylesheet" href="/static/css/style.css?v=208">
+    <link rel="stylesheet" href="/static/css/style.css?v=209">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=7">
     <!-- Feedback-Reiter. EINE Datei fuer /settings und /feedback: Tabelle,
          Sterne und Abgabe-Karte werden an beiden Orten gebraucht, zwei
@@ -1819,6 +1819,36 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             </tr>
                                             <tr class="systab-hint" hidden>
                                                 <td colspan="4"><small class="tab-note" data-i18n="profile.ctxthr_hint">Ab wie vielen Gesprächseinträgen der Verlauf eines Chats automatisch zusammengefasst wird, damit er in das Kontextfenster des Modells passt. Ein Eintrag ist eine Frage, eine Antwort oder ein Werkzeug-Ergebnis. Kleinere Werte sparen Token und Kosten, verlieren aber früher Details aus dem Gesprächsanfang; größere Werte behalten mehr, machen jede Anfrage aber teurer und langsamer. Erlaubt sind 4 bis 200 Einträge, Standard ist 30. Der Wert gilt global für alle Benutzer und alle Sitzungen; den aktuellen Füllstand einer Sitzung zeigt die Kontext-Anzeige im Chat.</small></td>
+                                            </tr>
+
+                                            <!-- Spracheingabe (STT): lokales Modell oder Fern-Dienst.
+                                                 Eigener Endpunkt /api/settings/stt (nur Admin); die
+                                                 Antwort meldet die Erreichbarkeit, die am Knopf steht. -->
+                                            <tr>
+                                                <td>
+                                                    <h4 class="tuning-group-title" data-i18n="profile.section_stt">Spracheingabe (STT)</h4>
+                                                    <label for="setting-stt-quelle" class="systab-label" data-i18n="profile.stt_quelle_label">Spracherkennung</label>
+                                                </td>
+                                                <td>
+                                                    <select id="setting-stt-quelle" class="systab-feld systab-select">
+                                                        <option value="lokal" data-i18n="profile.stt_quelle_lokal">Auf diesem Server</option>
+                                                        <option value="fern" data-i18n="profile.stt_quelle_fern">Spracherkennungs-Dienst im Netzwerk</option>
+                                                    </select>
+                                                    <input type="text" id="setting-stt-url" class="systab-feld systab-url" spellcheck="false" autocomplete="off"
+                                                           placeholder="ws://stt-dienst.firma.local:8090/ws/stt" data-i18n-placeholder="profile.stt_url_ph"
+                                                           title="Adresse des Spracherkennungs-Dienstes" data-i18n-title="profile.stt_url_label" hidden>
+                                                </td>
+                                                <td>
+                                                    <span data-i18n="profile.systab_stt_wirkung">Wo gesprochene Eingaben in Text umgewandelt werden – im Chat, im Windows-Client und bei Sprachnachrichten.</span>
+                                                    <button type="button" class="systab-mehr" data-klick="systab-details" aria-expanded="false" data-i18n="profile.systab_details">Details</button>
+                                                </td>
+                                                <td class="systab-save">
+                                                    <button class="btn-secondary btn-small" id="btn-save-stt" type="button" data-i18n="profile.save_btn">Speichern</button>
+                                                    <span id="stt-status" class="systab-status"></span>
+                                                </td>
+                                            </tr>
+                                            <tr class="systab-hint" hidden>
+                                                <td colspan="4"><small class="tab-note" data-i18n="profile.stt_hint">„Auf diesem Server“ erkennt die Sprache mit dem eingebauten Modell; die Aufnahme verlässt den Server nicht, die Genauigkeit hängt aber stark von der Rechenleistung ab. Mit dem Spracherkennungs-Dienst im Netzwerk wird die Aufnahme an die angegebene Adresse geschickt und dort – meist auf einer Grafikkarte mit einem großen Modell – deutlich genauer und schneller erkannt. Ist der Dienst nicht erreichbar, wird automatisch auf diesem Server erkannt. Beim Speichern wird geprüft, ob der Dienst antwortet.</small></td>
                                             </tr>
 
                                             <!-- Sprachausgabe (TTS): speichert beim Auswaehlen (app.js,
@@ -5902,7 +5932,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/icons.js?v=10"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/dlkey.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=358"></script>
+    <script src="/static/js/i18n.js?v=359"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=29"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -5952,7 +5982,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <!-- Suchfeld im Modal-Kopf. VOR app.js: dessen openModal ruft SettingsSearch.init(). -->
     <script src="/static/js/settings_search.js?v=4"></script>
     <script src="/static/js/loeschkonzept.js?v=2"></script>
-    <script src="/static/js/app.js?v=227"></script>
+    <script src="/static/js/app.js?v=228"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

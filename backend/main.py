@@ -1067,6 +1067,7 @@ async def startup_wirkung_bestand():
 from backend import anmelde_schutz as _anmelde_schutz
 from backend import wirkung as _wirkung_h9
 from backend import sicherheits_log as _sicherheits_log
+from backend import stt_fern as _stt_fern
 # Kette mit Schluessel (Code-Review 2026-10-07, siehe sicherheits_log)
 _sicherheits_log.schluessel_setzen(config.SECRET_KEY)
 
@@ -25699,6 +25700,46 @@ async def tts_voices(request: Request):
 
 # ─── STT API (Browser-Mikrofon) ──────────────────────────────────────────────
 
+def _stt_quelle_fern() -> bool:
+    """True, wenn die Spracherkennung auf den Fern-Dienst eingestellt ist."""
+    return _stt_fern.einstellung(config)[0] == _stt_fern.QUELLE_FERN
+
+
+@app.get("/api/settings/stt")
+async def stt_einstellung_lesen(user: str = Depends(require_local_auth)):
+    """Quelle der Spracherkennung (lokal | fern) und Adresse des Fern-Dienstes."""
+    quelle, url = _stt_fern.einstellung(config)
+    return JSONResponse({"quelle": quelle, "url": url, "quellen": list(_stt_fern.QUELLEN)})
+
+
+@app.post("/api/settings/stt")
+async def stt_einstellung_setzen(request: Request, user: str = Depends(require_local_auth)):
+    """Quelle und Adresse speichern; danach die Erreichbarkeit pruefen und
+    zurueckmelden – wer umschaltet, soll sofort sehen, ob der Dienst antwortet."""
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = None
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "Objekt erwartet"}, status_code=400)
+    quelle = str(body.get("quelle") or "").strip()
+    if quelle not in _stt_fern.QUELLEN:
+        return JSONResponse({"error": "quelle muss lokal oder fern sein"}, status_code=400)
+    url = str(body.get("url") or "").strip()
+    if url or quelle == _stt_fern.QUELLE_FERN:
+        try:
+            url = _stt_fern.url_pruefen(url)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+    config.save_setting("stt_fern_url", url)
+    config.save_setting("stt_quelle", quelle)
+    # Die Aufnahmen verlassen mit "fern" den Server – das gehoert ins
+    # Sicherheitsprotokoll, wie jede andere Aenderung an einem Datenweg.
+    _sicherheits_log.ereignis("stt_quelle_geaendert", benutzer=user, quelle=quelle, url=url)
+    erreichbar = await asyncio.to_thread(_stt_fern.gesundheit, url) if url else None
+    return JSONResponse({"ok": True, "quelle": quelle, "url": url, "erreichbar": erreichbar})
+
+
 # Notbremse je einzelner Aufnahme (keine Aufbewahrungsregel): der Browser stoppt
 # nach 60 s, Opus braucht dafuer weit unter 1 MB.
 _STT_MAX_BYTES = 25 * 1024 * 1024
@@ -25753,7 +25794,10 @@ async def stt_transcribe(request: Request, user: str = Depends(require_auth)):
     # threading.Lock, die das Vorladen beim Start Sekunden bis Minuten haelt,
     # und laedt selbst nach, wenn das Vorladen scheiterte – direkt im Event-Loop
     # stand dabei der ganze Dienst, fuer ALLE Benutzer.
-    if await asyncio.to_thread(_get_whisper_model, source="voice_browser") is None:
+    # Mit Fern-Dienst ist das lokale Modell nur der Ersatz – dessen Fehlen ist
+    # dann kein Grund abzulehnen (scheitern beide, meldet der Lauf 500).
+    if (not _stt_quelle_fern()
+            and await asyncio.to_thread(_get_whisper_model, source="voice_browser") is None):
         return JSONResponse({"detail": "Spracherkennung ist auf diesem Server nicht eingerichtet"},
                             status_code=503)
     sprache = request.query_params.get("lang", "")
@@ -25867,6 +25911,23 @@ def _transcribe_audio(filepath: str, language: str = "de", initial_prompt: str =
     landet der Eintrag im Journal (nicht im WhatsApp-Log), was der sichere Weg ist.
     """
     import time as _time
+    # Fern-Dienst (Einstellungen -> KI & System -> Spracheingabe). Scheitert er,
+    # rechnet das lokale Modell – laut im Journal, damit ein Ausfall nicht als
+    # "die Erkennung ist schlechter geworden" auffaellt.
+    _quelle, _fern_url = _stt_fern.einstellung(config)
+    if _quelle == _stt_fern.QUELLE_FERN:
+        try:
+            t0 = _time.time()
+            text = _stt_fern.transkribieren(filepath, _fern_url, language)
+            duration = round(_time.time() - t0, 2)
+            if text:
+                _tr_log("INFO", f"Fern-Transkription OK ({duration}s): {text[:100]}", source=source)
+                return text
+            _tr_log("WARN", "Keine Sprache erkannt (Fern-Dienst)", meta={"file": filepath}, source=source)
+            return "[Keine Sprache erkannt]"
+        except Exception as e:  # noqa: BLE001 – jeder Fehlschlag faellt auf lokal zurueck
+            _tr_log("WARN", f"Fern-Transkription fehlgeschlagen ({type(e).__name__}: {str(e)[:200]})"
+                            " – Ersatz: lokales Modell", source=source)
     model = _get_whisper_model(source=source)
     if model is None:
         _tr_log("ERROR", "Whisper-Modell nicht verfuegbar", source=source)

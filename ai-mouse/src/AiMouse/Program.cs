@@ -37,69 +37,84 @@ internal static class Program
         Prozessende.Hart(0);
     }
 
-    private static void Starten()
+    /// <summary>Die Einzelinstanz-Sperre. Ein FELD, kein lokales `using`: der
+    /// Neustart nach einem Update (`TrayApplicationContext`) muss sie
+    /// schliessen, bevor er die neue Fassung startet.</summary>
+    private static Mutex? _instanceLock;
+
+    /// <summary>Schliesst die Einzelinstanz-Sperre – NUR vor dem Neustart nach
+    /// einem Update, und nur vom UI-Thread (dem, der sie erworben hat).
+    ///
+    /// ⚠ GESCHLOSSEN, NICHT NUR FREIGEGEBEN (gemeldet 2026-09-14: „wird
+    /// umbenannt ... aber nicht automatisch gestartet"). `ReleaseMutex()` gibt
+    /// die BESITZERSCHAFT frei, nicht den NAMEN. Solange dieser Prozess das
+    /// Handle haelt, existiert das Kernel-Objekt weiter – und
+    /// `new Mutex(..., out createdNew)` meldet der frisch gestarteten neuen
+    /// Fassung `createdNew = false`. Sie hielte sich fuer einen ZWEITSTART und
+    /// beendete sich wortlos. Erst `Dispose()` schliesst das Handle und gibt
+    /// den Namen frei.
+    /// </summary>
+    internal static void EinzelinstanzFreigeben()
     {
-        Mutex? instanceLock = new Mutex(initiallyOwned: true, SingleInstanceName, out bool isOnlyInstance);
+        Mutex? m = _instanceLock;
+        _instanceLock = null;
+        if (m is null)
+        {
+            return;
+        }
+
         try
         {
-        // ⚠ DER EINWECHSEL STEHT HIER: HINTER DER EINZELINSTANZ-SPERRE UND VOR
-        // ALLEM ANDEREN. Hinter der Sperre, weil sonst zwei gleichzeitig
-        // gestartete Instanzen dieselbe Datei umbenennen wollen. Vor allem
-        // anderen, weil ab dem ersten Fenster etwas zu verlieren waere – hier
-        // ist noch nichts da, der Wechsel dauert Millisekunden, und der
-        // Benutzer sieht nur, dass das Tray-Symbol einmal erscheint.
-        /* ⚠ UNABHAENGIG VOM EINWECHSELN: die verdraengte Fassung wegraeumen.
-         * Sie entsteht beim Wechsel und ist erst danach loeschbar (eine
-         * laufende EXE laesst Windows umbenennen, nicht loeschen). Bis
-         * 2026-09-14 stand das Loeschen im Einwechsel-Zweig – der laeuft nur,
-         * wenn eine `.neu` danebenliegt, und so blieb die alte Fassung nach dem
-         * letzten Update fuer immer liegen (gemeldet mit 64 MB). */
+            m.ReleaseMutex();
+        }
+        catch (Exception)
+        {
+            // Schon freigegeben oder fremder Besitzer – das Schliessen
+            // darunter ist ohnehin das, worauf es ankommt.
+        }
+
+        m.Dispose();
+    }
+
+    /// <summary>Holt die Sperre zurueck, wenn der Neustart nach einem Update
+    /// NICHT gelang. Ohne das liefe diese Instanz ungeschuetzt weiter – und
+    /// ein zweiter Start erzeugte eine zweite Instanz.</summary>
+    internal static void EinzelinstanzZurueckholen()
+    {
+        if (_instanceLock is not null)
+        {
+            return;
+        }
+
+        try
+        {
+            _instanceLock = new Mutex(initiallyOwned: true, SingleInstanceName, out _);
+        }
+        catch (Exception)
+        {
+            _instanceLock = null;
+        }
+    }
+
+    private static void Starten()
+    {
+        _instanceLock = new Mutex(initiallyOwned: true, SingleInstanceName, out bool isOnlyInstance);
+        try
+        {
+        /* ⚠ DIE RESTE EINES AUSTAUSCHS WEGRAEUMEN – bei JEDEM Start, hinter der
+         * Einzelinstanz-Sperre. Die verdraengte Fassung (`.alt`) entsteht beim
+         * Update im laufenden Betrieb und ist erst loeschbar, wenn ihr Prozess
+         * weg ist (eine laufende EXE laesst Windows umbenennen, nicht loeschen).
+         * Hinter der Sperre, weil ein Zweitstart sonst die Datei einer
+         * laufenden Instanz anfassen wuerde.
+         *
+         * ⚠ HIER WIRD NICHTS MEHR EINGEWECHSELT (seit 1.0.13). Der Austausch
+         * passiert im laufenden Betrieb (`Update/Aktualisierung.cs`); der
+         * fruehere Einwechsel beim Programmstart hat in der Praxis nicht
+         * getragen. */
         if (isOnlyInstance)
         {
             Aktualisierung.RueckstandAufraeumen();
-        }
-
-        if (isOnlyInstance && Aktualisierung.NeueFassungLiegtBereit())
-        {
-            /* ⚠ GESCHLOSSEN, NICHT NUR FREIGEGEBEN – UND GENAU DAS WAR DER
-             * FEHLER (gemeldet 2026-09-14: „wird umbenannt ... aber nicht
-             * automatisch gestartet").
-             *
-             * `ReleaseMutex()` gibt die BESITZERSCHAFT frei, nicht den NAMEN.
-             * Solange dieser Prozess das Handle haelt, existiert das
-             * Kernel-Objekt weiter – und `new Mutex(..., out createdNew)`
-             * meldet jedem weiteren Prozess `createdNew = false`. Die frisch
-             * gestartete neue Fassung hielt sich damit fuer einen ZWEITSTART,
-             * suchte das Wecksignal der „laufenden" Instanz (das es nicht gibt,
-             * weil `AlsErsteInstanz()` im Update-Zweig nie erreicht wird) und
-             * beendete sich wortlos. Ergebnis genau wie gemeldet: die Dateien
-             * sind umbenannt, und es laeuft nichts.
-             *
-             * Erst `Dispose()` schliesst das Handle und gibt den Namen frei.
-             * Danach ist der Start deterministisch, kein Wettlauf mehr. */
-            try
-            {
-                instanceLock.ReleaseMutex();
-            }
-            catch (Exception)
-            {
-                // Schon freigegeben oder fremder Besitzer – das Schliessen
-                // darunter ist ohnehin das, worauf es ankommt.
-            }
-
-            instanceLock.Dispose();
-            instanceLock = null;
-
-            if (Aktualisierung.BeimStartEinwechseln())
-            {
-                return;     // die neue Fassung laeuft jetzt
-            }
-
-            /* Nicht gelungen (kein Schreibrecht, Ruecknahme): die Sperre
-             * ZURUECKHOLEN. Ohne das liefe diese Instanz ungeschuetzt weiter –
-             * und ein zweiter Start wuerde eine zweite Instanz erzeugen,
-             * obwohl gar kein Update stattgefunden hat. */
-            instanceLock = new Mutex(initiallyOwned: true, SingleInstanceName, out isOnlyInstance);
         }
 
         if (!isOnlyInstance)
@@ -172,10 +187,11 @@ internal static class Program
         }
         finally
         {
-            // Ersetzt das fruehere `using var`: der Mutex wird beim Einwechseln
-            // ZWISCHENDURCH geschlossen und danach ggf. neu erworben – ein
-            // `using` auf die Variable koennte das nicht abbilden.
-            instanceLock?.Dispose();
+            // Kein `using var`: der Mutex wird beim Neustart nach einem Update
+            // ZWISCHENDURCH geschlossen und ggf. neu erworben – ein `using`
+            // auf die Variable koennte das nicht abbilden.
+            _instanceLock?.Dispose();
+            _instanceLock = null;
         }
     }
 

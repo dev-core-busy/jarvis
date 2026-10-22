@@ -136,7 +136,15 @@
          (Kerberos) vor der Kennwortmaske, beim Start und nach Ablauf der
          Sitzung. Ohne SPN/Keytab auf dem Server aendert sich nichts: die
          Maske kommt wie bisher. -->
-    <Version>1.0.12</Version>
+    <!-- 1.0.13 (2026-10-22): Update im LAUFENDEN Betrieb statt beim naechsten
+         Start. Der Zweischritt (still als `.neu` bereitlegen, beim Programmstart
+         einwechseln) hat in der Praxis nicht getragen. Uebernommen ist der Weg
+         des STT-Support-Assistenten (`updater.go`): Rueckfrage, laden, die
+         laufende Datei auf `.alt` umbenennen, die neue an ihre Stelle (bei
+         Fehlschlag zurueck), Einzelinstanz-Sperre schliessen, neue Fassung
+         starten, hart beenden. Die neue raeumt `.alt` beim Start weg.
+         ⚠ Eine 1.0.12 kommt noch ueber den ALTEN Weg hierher. -->
+    <Version>1.0.13</Version>
     <!-- DPI awareness is owned by app.manifest, not by ApplicationHighDpiMode: it has to
          be in effect from process start, before any screen coordinate is read.
          WFAC010 asks for the opposite; suppressed because that trade-off is intentional. -->

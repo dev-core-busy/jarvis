@@ -38,7 +38,11 @@ def dotnet_wurzel():
         if (k / "dotnet").is_file():
             return k
     p = shutil.which("dotnet")
-    return Path(p).parent if p else None
+    # ⚠ AUFLOESEN: `/usr/bin/dotnet` ist meist ein Symlink. Als DOTNET_ROOT
+    # taugt nur das echte SDK-Verzeichnis – mit `/usr/bin` startet das
+    # Messprogramm nicht („Failed to resolve libhostfxr.so"), und der Lauf
+    # endet ohne Bilanz.
+    return Path(p).resolve().parent if p else None
 
 
 def main():

@@ -37,7 +37,7 @@ def check(text, bedingung, info=""):
 
 roh = QUELLE.read_text(encoding="utf-8")
 
-# Nur die reinen Rechenteile herausziehen – `BeimStartEinwechseln` und
+# Nur die reinen Rechenteile herausziehen – `Austauschen` und
 # `PruefenUndHolenAsync` fassen Dateien an und gehoeren nicht in eine Probe.
 def block(signatur: str) -> str:
     i = roh.find(signatur)

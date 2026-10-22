@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Gegenproben: Version 1.0.0, Paket ohne Kurzanleitung, stilles Update.
+"""Gegenproben: Version 1.0.0, Paket ohne Kurzanleitung, Selbstaktualisierung
+(seit 1.0.13: Rueckfrage und Austausch im laufenden Betrieb).
 
 Jede Probe dreht GENAU EINE Zusage zurueck und misst, ob der Waechter beisst.
 Eine Probe, die nicht beisst, ist ein Testmangel – kein Beweis.
@@ -48,16 +49,42 @@ ABLAGE.mkdir(mode=0o700, exist_ok=True)
 ZIELE["vorgaben"] = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Configuration"
                      / "Vorgaben.cs")
 
+# ⚠ EINE ERZEUGTE DATEI, DIE FEHLT, WIRD NICHT GESICHERT – sie ist
+# gitignoriert, ein frischer Arbeitsbaum hat sie nicht, und der gepruefte Lauf
+# legt sie selbst an und raeumt sie selbst weg. Ohne diese Schranke starb der
+# Harness hier mit FileNotFoundError (2026-10-22), und zwar NACHDEM er die
+# Rueckstaende schon zurueckgeschrieben hatte.
+if not ZIELE["vorgaben"].exists():
+    del ZIELE["vorgaben"]
+
+# ⚠ ZURUECKGENOMMEN WIRD NUR MIT LAUFMARKE (2026-10-22). Vorher galt JEDE
+# Sicherung in der Ablage als Rueckstand. Liegen dort Dateien eines Laufs, der
+# laengst vorbei ist (oder dessen Aufraeumen selbst abstuerzte), schreibt der
+# naechste Start den Stand von DAMALS ueber fertige Arbeit: am 2026-10-22 so
+# geschehen, sieben Dateien auf den Stand vom 14.09.–18.10. zurueck, darunter
+# drei, die niemand angefasst hatte. Die Marke entsteht beim Sichern und
+# verschwindet beim geordneten Ende – sie bleibt nur nach einem Abschuss
+# liegen, und nur dann ist die Sicherung ein Rueckstand (Register: „Ein
+# Start-zurueck() ohne LAUFMARKE macht fertige Arbeit zunichte").
+MARKE = ABLAGE / "LAUF"
+if MARKE.exists():
+    for name, ziel in ZIELE.items():
+        sich = ABLAGE / (name + ".bak")
+        if sich.exists() and md5(sich) != md5(ziel):
+            print("⚠ Rueckstand von %s gefunden (Laufmarke liegt) – stelle her."
+                  % name)
+            shutil.copy2(sich, ziel)
+else:
+    alte = sorted(x.name for x in ABLAGE.glob("*.bak"))
+    if alte:
+        print("Hinweis: alte Sicherungen ohne Laufmarke uebergangen (KEIN "
+              "Rueckstand, werden ersetzt): %s" % ", ".join(alte))
+
 SOLL = {}
 for name, ziel in ZIELE.items():
-    sich = ABLAGE / (name + ".bak")
-    if sich.exists():
-        if md5(sich) != md5(ziel):
-            print("⚠ Rueckstand von %s gefunden – stelle her." % name)
-            shutil.copy2(sich, ziel)
-        sich.unlink()
-    shutil.copy2(ziel, sich)
+    shutil.copy2(ziel, ABLAGE / (name + ".bak"))
     SOLL[name] = md5(ziel)
+MARKE.write_text("laeuft\n")
 
 
 def zurueck(*_a):
@@ -68,6 +95,7 @@ def zurueck(*_a):
             if md5(ziel) != SOLL[name]:
                 print("⚠⚠ %s NICHT BYTE-GLEICH wiederhergestellt!" % name)
             sich.unlink()
+    MARKE.unlink(missing_ok=True)
 
 
 atexit.register(zurueck)
@@ -146,8 +174,8 @@ probe("unbekannte Serverversion loest ein Update aus", "upd",
       "        if (string.IsNullOrWhiteSpace(ziel))\n        {\n            return false;\n        }",
       "        if (string.IsNullOrWhiteSpace(ziel))\n        {\n            return true;\n        }")
 
-# ── 4) Der Einwechsel ──────────────────────────────────────────────────────
-probe("Einwechsel LOESCHT die alte Fassung statt sie umzubenennen", "upd",
+# ── 4) Der Austausch (seit 1.0.13 im laufenden Betrieb) ───────────────────
+probe("Austausch LOESCHT die alte Fassung statt sie umzubenennen", "upd",
       "            File.Move(exe, alt, overwrite: true);",
       "            File.Delete(exe);")
 
@@ -155,37 +183,77 @@ probe("Fehlschlag wird NICHT zurueckgenommen", "upd",
       "                File.Move(alt, exe, overwrite: true);   // ZURUECKNEHMEN",
       "                _ = alt;")
 
-probe("eine winzige Datei wird eingewechselt", "upd",
-      "            if (new FileInfo(neu).Length < 1_000_000)",
+probe("eine winzige Datei wird eingetauscht", "upd",
+      "            if (new FileInfo(teil).Length < 1_000_000)",
       "            if (false)")
 
-probe("Einwechsel nach EnableVisualStyles", "prog",
-      "        if (isOnlyInstance && Aktualisierung.NeueFassungLiegtBereit())",
-      "        if (false && Aktualisierung.NeueFassungLiegtBereit())")
+probe("`Eingewechselt` auch nach gescheitertem Austausch", "upd",
+      "            if (!Austauschen(exe, neu))\n            {\n"
+      "                File.Delete(neu);\n"
+      '                return "Austausch fehlgeschlagen";\n            }',
+      "            Austauschen(exe, neu);")
+
+probe("Einwechsel beim Programmstart kehrt zurueck", "prog",
+      "        if (isOnlyInstance)\n        {\n"
+      "            Aktualisierung.RueckstandAufraeumen();\n        }",
+      "        if (isOnlyInstance)\n        {\n"
+      "            Aktualisierung.RueckstandAufraeumen();\n        }\n"
+      "        if (isOnlyInstance && Aktualisierung.NeueFassungLiegtBereit()) { }")
 
 probe("Einzelinstanz-Sperre wird nicht freigegeben", "prog",
-      "                instanceLock.ReleaseMutex();", "                _ = 1;")
+      "            m.ReleaseMutex();", "            _ = 1;")
 
-# ── 5) Das Holen bleibt still ──────────────────────────────────────────────
-probe("das Holen startet die Anwendung neu", "upd",
-      '            File.Move(teil, neu, overwrite: true);\n            return "bereitgelegt";',
-      '            File.Move(teil, neu, overwrite: true);\n'
-      "            Process.Start(EigenerPfad);\n"
-      '            return "bereitgelegt";')
+probe("Einzelinstanz-Sperre wird nur freigegeben, nicht geschlossen", "prog",
+      "        m.Dispose();\n", "")
 
-probe("schon geholte Fassung wird erneut geladen", "upd",
-      "            if (File.Exists(neu))\n            {\n"
-      '                return "liegt bereit";\n            }',
-      "            if (false)\n            {\n"
-      '                return "liegt bereit";\n            }')
+probe("neue Fassung startet VOR dem Schliessen der Sperre", "tray",
+      "        Program.EinzelinstanzFreigeben();\n\n"
+      "        if (Aktualisierung.NeueFassungStarten())\n"
+      "        {\n            Prozessende.Hart(0);\n        }",
+      "        bool gestartet = Aktualisierung.NeueFassungStarten();\n"
+      "        Program.EinzelinstanzFreigeben();\n\n"
+      "        if (gestartet)\n"
+      "        {\n            Prozessende.Hart(0);\n        }")
 
-probe("Schreibrecht erst NACH dem Download geprueft", "upd",
+probe("Neustart auch ohne gelungenen Austausch", "tray",
+      "            if (ergebnis == Aktualisierung.Eingewechselt)",
+      "            if (ergebnis.Length > 0)")
+
+probe("gescheiterter Start holt die Sperre nicht zurueck", "tray",
+      "        Program.EinzelinstanzZurueckholen();\n", "")
+
+# ── 5) Rueckfrage und Holen ────────────────────────────────────────────────
+probe("Download VOR der Rueckfrage", "upd",
+      "            if (!await nachfragen(ziel).ConfigureAwait(false))",
+      "            byte[] _vorab = await paketHolen(ct).ConfigureAwait(false);\n"
+      "            if (!await nachfragen(ziel).ConfigureAwait(false))")
+
+probe("ein Nein wird uebergangen", "upd",
+      '                return "abgelehnt";', "                _ = 0;")
+
+probe("Schreibrecht erst NACH der Rueckfrage geprueft", "upd",
       '            string probe = exe + ".schreibprobe";',
-      '            byte[] _vorab = await paketHolen(ct).ConfigureAwait(false);\n'
+      "            _ = await nachfragen(ziel).ConfigureAwait(false);\n"
       '            string probe = exe + ".schreibprobe";')
 
 probe("keine Nebendatei – direkt nach .neu schreiben", "upd",
-      '            string teil = exe + ".teil";', "            string teil = neu;")
+      "            string teil = exe + TeilSuffix;",
+      "            string teil = exe + NeuSuffix;")
+
+probe("das Holen startet die Anwendung selbst neu", "upd",
+      "            ConfigStore.MerkeUpdateVersuch(ziel, EigeneAnzeige);\n"
+      "            return Eingewechselt;",
+      "            ConfigStore.MerkeUpdateVersuch(ziel, EigeneAnzeige);\n"
+      "            Process.Start(EigenerPfad);\n"
+      "            return Eingewechselt;")
+
+probe("Rueckfrage: auch ein Nein zaehlt als Ja", "tray",
+      "antwort.TrySetResult(r == DialogResult.Yes);",
+      "antwort.TrySetResult(true);")
+
+probe("mehrere Pruefungen gleichzeitig (Riegel weg)", "tray",
+      "        if (Interlocked.Exchange(ref _aktualisierungLaeuft, 1) != 0)",
+      "        if (false)")
 
 probe("die Pruefung wird abgewartet (blockiert das Menue)", "tray",
       "        _ = AktualisierungPruefenAsync();",

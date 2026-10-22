@@ -1165,28 +1165,39 @@ internal sealed class TrayApplicationContext : ApplicationContext
             BuildPromptMenu();
         }
 
-        // Gleicher Anlass, andere Aufgabe: eine neue Fassung bereitlegen.
-        // ⚠ NICHT ABGEWARTET – der Download ist rund 66 MB, und niemand soll
-        // deshalb auf sein Fragenmenue warten. Ausgeloest wird hier, weil
-        // diese Stelle GENAU DANN laeuft, wenn eine Sitzung existiert (beim
-        // Start mit gemerktem Token und nach jeder Anmeldung).
+        // Gleicher Anlass, andere Aufgabe: nach einer neuen Fassung sehen.
+        // ⚠ NICHT ABGEWARTET – Rueckfrage und Download (rund 66 MB) duerfen das
+        // Fragenmenue nicht aufhalten. Ausgeloest wird hier, weil diese Stelle
+        // GENAU DANN laeuft, wenn eine Sitzung existiert (beim Start mit
+        // gemerktem Token und nach jeder Anmeldung).
         _ = AktualisierungPruefenAsync();
     }
 
-    /// <summary>Prueft still, ob der Server eine neuere Fassung fuehrt.
+    /// <summary>1 = eine Pruefung laeuft (samt offener Rueckfrage).</summary>
+    private int _aktualisierungLaeuft;
+
+    /// <summary>Prueft, ob der Server eine neuere Fassung fuehrt, fragt nach
+    /// und tauscht sie im laufenden Betrieb aus.
     ///
-    /// ⚠ ES WIRD NICHTS ERSETZT UND NICHTS NEU GESTARTET. Die neue Fassung
-    /// wird nur DANEBEN gelegt; eingewechselt wird beim naechsten
-    /// Programmstart (`Program.Main`). Das ist der Unterschied zwischen
-    /// "still" und "der Benutzer verliert sein offenes Ergebnisfenster" –
-    /// Begruendung im Kopf von `Update/Aktualisierung.cs`.
+    /// ⚠ DER BENUTZER WIRD GEFRAGT, BEVOR ETWAS GELADEN WIRD: der Neustart
+    /// schliesst ein offenes Ergebnisfenster. Ablauf und Begruendung im Kopf
+    /// von `Update/Aktualisierung.cs`.
     ///
-    /// ⚠ WIRFT NIE UND MELDET NICHTS. Eine Aktualisierung, die den Benutzer
-    /// mit einem Fehlerfenster behelligt, ist nicht still; und die Anwendung
-    /// funktioniert ohne sie unveraendert weiter.
+    /// ⚠ NUR EINE PRUEFUNG ZUR ZEIT. Jeder Klick auf „Fragen erneut laden"
+    /// laeuft hier vorbei – ohne Riegel stuenden zwei Rueckfragen
+    /// uebereinander, und zwei Downloads tauschten dieselbe Datei.
+    ///
+    /// ⚠ WIRFT NIE. Ein Fehlschlag beim Pruefen oder Laden bleibt still: die
+    /// Anwendung funktioniert ohne Update unveraendert weiter, und beim
+    /// naechsten Anmelden wird es erneut versucht.
     /// </summary>
     private async Task AktualisierungPruefenAsync()
     {
+        if (Interlocked.Exchange(ref _aktualisierungLaeuft, 1) != 0)
+        {
+            return;
+        }
+
         try
         {
             if (!_client.Angemeldet)
@@ -1194,14 +1205,30 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 return;
             }
 
-            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(12));
-            string serverVersion = await _client.ServerVersionAsync(cts.Token)
-                .ConfigureAwait(false);
+            string serverVersion;
+            using (var cts = new CancellationTokenSource(TimeSpan.FromMinutes(1)))
+            {
+                serverVersion = await _client.ServerVersionAsync(cts.Token)
+                    .ConfigureAwait(false);
+            }
+
+            // ⚠ KEIN GEMEINSAMES ZEITLIMIT UEBER RUECKFRAGE UND DOWNLOAD: die
+            //    Rueckfrage darf beliebig lange offen stehen. Ein Deckel ueber
+            //    beides liefe ab, waehrend der Benutzer in der Mittagspause ist,
+            //    und das „Ja" danach endete in einem abgebrochenen Download.
+            //    Der Download hat sein eigenes Limit (`PaketAsync`, 10 min).
             string netzVorher = Aktualisierung.NetzVersion;
-            await Aktualisierung.PruefenUndHolenAsync(
+            string ergebnis = await Aktualisierung.PruefenUndHolenAsync(
                 serverVersion,
+                AktualisierungNachfragenAsync,
                 t => _client.PaketAsync(t),
-                cts.Token).ConfigureAwait(false);
+                CancellationToken.None).ConfigureAwait(false);
+
+            if (ergebnis == Aktualisierung.Eingewechselt)
+            {
+                BeginInvokeOnOwner(NachAktualisierungNeuStarten);
+                return;
+            }
 
             // ⚠ DAS MENUE NEU BAUEN, WENN SICH DER HINWEIS GEAENDERT HAT
             //    (Review 2026-09-28 #14). `BuildPromptMenu` lief in
@@ -1219,6 +1246,90 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             // Still. Siehe Docstring.
         }
+        finally
+        {
+            Interlocked.Exchange(ref _aktualisierungLaeuft, 0);
+        }
+    }
+
+    /// <summary>Die Rueckfrage vor dem Update – auf dem UI-Thread, abgewartet
+    /// vom Hintergrund-Ablauf. Liefert <c>true</c> bei „Ja".
+    ///
+    /// ⚠ IM ZWEIFEL NEIN: ist das Besitzerfenster schon weg oder wirft der
+    /// Dialog, wird NICHT aktualisiert. Ein Neustart ohne Zustimmung waere
+    /// genau der Verlust, den die Rueckfrage verhindern soll.
+    /// </summary>
+    private Task<bool> AktualisierungNachfragenAsync(string zielVersion)
+    {
+        var antwort = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        if (_owner.IsDisposed)
+        {
+            antwort.TrySetResult(false);
+            return antwort.Task;
+        }
+
+        try
+        {
+            _owner.BeginInvoke(new Action(() =>
+            {
+                try
+                {
+                    NativeMethods.SetForegroundWindow(_owner.Handle);
+                    DialogResult r = MessageBox.Show(
+                        _owner,
+                        string.Format(Texte.UpdateFrage,
+                            Aktualisierung.EigeneAnzeige, zielVersion),
+                        Texte.UpdateTitel,
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Information,
+                        MessageBoxDefaultButton.Button1);
+                    antwort.TrySetResult(r == DialogResult.Yes);
+                }
+                catch (Exception)
+                {
+                    antwort.TrySetResult(false);
+                }
+            }));
+        }
+        catch (Exception)
+        {
+            antwort.TrySetResult(false);
+        }
+
+        return antwort.Task;
+    }
+
+    /// <summary>Startet die soeben eingewechselte Fassung und beendet diese.
+    /// Laeuft auf dem UI-Thread – dem, der die Einzelinstanz-Sperre haelt.
+    ///
+    /// ⚠ DIE REIHENFOLGE TRAEGT:
+    ///   1. Tray-Symbol weg – ein hart beendeter Prozess raeumt es nicht ab,
+    ///      und bis zum ersten Ueberfahren stuenden zwei Symbole da.
+    ///   2. Sperre SCHLIESSEN (nicht nur freigeben, siehe
+    ///      `Program.EinzelinstanzFreigeben`) – sonst haelt sich die neue
+    ///      Fassung fuer einen Zweitstart und beendet sich wortlos.
+    ///   3. Neue Fassung starten, dann SOFORT hart beenden (wie `os.Exit` im
+    ///      STT-Support-Assistenten). Zu speichern gibt es nichts: die
+    ///      Einstellungen schreibt der Dialog beim Speichern.
+    ///
+    /// Scheitert der Start, liegt die neue Fassung trotzdem schon an ihrem
+    /// Platz – sie gilt dann ab dem naechsten Start von Hand. Diese Instanz
+    /// holt sich die Sperre zurueck und laeuft weiter.
+    /// </summary>
+    private void NachAktualisierungNeuStarten()
+    {
+        _trayIcon.Visible = false;
+        Program.EinzelinstanzFreigeben();
+
+        if (Aktualisierung.NeueFassungStarten())
+        {
+            Prozessende.Hart(0);
+        }
+
+        Program.EinzelinstanzZurueckholen();
+        _trayIcon.Visible = true;
+        ShowTrayError(Texte.UpdateNeustartFehlt);
     }
 
     private void ShowTrayError(string message) => _trayIcon.ShowBalloonTip(5000, Texte.Marke, message, ToolTipIcon.Error);

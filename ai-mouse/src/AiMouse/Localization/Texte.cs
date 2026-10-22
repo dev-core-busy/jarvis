@@ -154,6 +154,32 @@ internal static class Texte
         + "network share and does not update itself – your administrators roll "
         + "out the new build.");
 
+    // ⚠ DIE RUECKFRAGE VOR DEM UPDATE (seit 1.0.13). Der Austausch startet die
+    // Anwendung neu, und ein offenes Ergebnisfenster ist danach weg – deshalb
+    // sagt der Text das. {0} ist die laufende Fassung, {1} die neue.
+    public static string UpdateTitel => T(
+        $"{Marke} – neue Version",
+        $"{Marke} – new version");
+
+    public static string UpdateFrage => T(
+        "Eine neue Version ist verfügbar:\r\n\r\n"
+        + "    Installiert:  {0}\r\n"
+        + "    Verfügbar:    {1}\r\n\r\n"
+        + "Jetzt herunterladen, installieren und neu starten?\r\n"
+        + "Ein offenes Ergebnisfenster wird dabei geschlossen.",
+        "A new version is available:\r\n\r\n"
+        + "    Installed:  {0}\r\n"
+        + "    Available:  {1}\r\n\r\n"
+        + "Download, install and restart now?\r\n"
+        + "An open result window will be closed.");
+
+    // Die neue Fassung liegt schon an ihrem Platz, nur der Start misslang.
+    public static string UpdateNeustartFehlt => T(
+        "Die neue Version ist installiert, ließ sich aber nicht starten. "
+        + "Sie gilt ab dem nächsten Programmstart.",
+        "The new version is installed but could not be started. "
+        + "It takes effect the next time the program starts.");
+
     public static string Nachgeschlagen => T(
         "Für diese Antwort wurde zusätzlich nachgeschlagen: ",
         "Additional sources were consulted for this answer: ");

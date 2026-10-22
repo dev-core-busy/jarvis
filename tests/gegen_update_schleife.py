@@ -58,11 +58,11 @@ PROBEN = [
      "            ConfigStore.MerkeUpdateVersuch(ziel, EigeneAnzeige);",
      "            // (nicht gemerkt)", "quelltext"),
 
-    ("Client: gemerkt VOR dem Laden statt nach dem Ablegen",
+    ("Client: gemerkt VOR dem Austausch statt danach",
      "ai-mouse/src/AiMouse/Update/Aktualisierung.cs",
-     "            File.Move(teil, neu, overwrite: true);",
+     "            if (!Austauschen(exe, neu))",
      "            ConfigStore.MerkeUpdateVersuch(ziel, EigeneAnzeige);\n"
-     "            File.Move(teil, neu, overwrite: true);", "quelltext"),
+     "            if (!Austauschen(exe, neu))", "quelltext"),
 
     ("Client: Gedaechtnis vergleicht die Ausgangslage nicht",
      "ai-mouse/src/AiMouse/Update/Aktualisierung.cs",

@@ -5,25 +5,34 @@ using AiMouse.Configuration;
 
 namespace AiMouse.Update;
 
-/// <summary>Stille Selbstaktualisierung der Anwendung (ab 1.0.0, 2026-09-11).
+/// <summary>Selbstaktualisierung der Anwendung (ab 1.0.0, 2026-09-11;
+/// Austausch seit 1.0.13 im laufenden Betrieb).
 ///
-/// ⚠ ZWEI SCHRITTE, UND DIE TRENNUNG IST DER GANZE ENTWURF:
+/// ⚠ DER AUSTAUSCH PASSIERT SOFORT, NICHT BEIM NAECHSTEN START (2026-10-22).
+/// Uebernommen aus dem STT-Support-Assistenten (`updater.go`), wo derselbe
+/// Weg seit vielen Fassungen zuverlaessig traegt:
 ///
-///   1. <see cref="PruefenUndHolenAsync"/> – im Hintergrund, nach der
-///      Anmeldung. Vergleicht die Version und legt bei Bedarf die neue EXE als
-///      <c>AiMouse.exe.neu</c> DANEBEN. Kein Neustart, kein Dialog, kein
-///      Flackern; der Benutzer merkt nichts.
-///   2. <see cref="BeimStartEinwechseln"/> – beim naechsten Programmstart, als
-///      ERSTES. Benennt um und startet neu.
+///   1. Version vergleichen, den Benutzer FRAGEN.
+///   2. Neue EXE als <c>AiMouse.exe.neu</c> daneben ablegen.
+///   3. Die LAUFENDE Datei auf <c>.alt</c> umbenennen (das erlaubt Windows,
+///      ueberschreiben nicht), die neue an ihre Stelle – bei Fehlschlag
+///      zurueck.
+///   4. Der Aufrufer gibt die Einzelinstanz-Sperre frei, startet die neue
+///      Fassung und beendet sich. Die neue raeumt <c>.alt</c> beim Start weg.
 ///
-/// WARUM NICHT SOFORT ERSETZEN UND NEU STARTEN: eine laufende Windows-EXE kann
-/// sich nicht selbst ueberschreiben, also muesste sie sich beenden. Genau das
-/// ist nicht still – ein offenes Ergebnisfenster waere weg, eine laufende
-/// Auswertung abgebrochen, und das Tray-Symbol verschwindet fuer einen Moment
-/// ohne erkennbaren Grund. Beim Programmstart ist dagegen nichts zu verlieren:
-/// dort dauert der Wechsel Millisekunden, und die Anwendung erscheint einfach
-/// einmal im Tray. Der Preis ist, dass eine neue Fassung erst beim naechsten
-/// Start gilt – bei einem Autostart-Programm also am naechsten Arbeitstag.
+/// WARUM NICHT MEHR DER ZWEISCHRITT (bis 1.0.12: still bereitlegen, beim
+/// naechsten Programmstart einwechseln): er hat in der Praxis nicht getragen.
+/// Gemeldet wurden nacheinander eine Endlosschleife (auf Platte 1.0.6, im
+/// Speicher 1.0.5), eine umbenannte, aber nie gestartete Fassung (Mutex) und
+/// eine liegengebliebene Altdatei – jeder Fehler sass im Einwechsel-Zweig beim
+/// Programmstart, und der liess sich ohne Windows nicht messen. Der
+/// Sofort-Austausch hat genau EINE Stelle, an der getauscht wird, und die
+/// laeuft, waehrend die Anwendung vollstaendig steht.
+///
+/// ⚠ DIE RUECKFRAGE IST DER PREIS DAFUER UND BLEIBT: ein Neustart schliesst ein
+/// offenes Ergebnisfenster. Deshalb entscheidet der Benutzer, wann – sagt er
+/// nein, wird beim naechsten Anmelden wieder gefragt (Betreiberentscheidung
+/// 2026-10-22).
 ///
 /// ⚠ WAS HIER GELADEN WIRD, IST AUSFUEHRBARER CODE. Getragen wird das von zwei
 /// Dingen, und beide muessen bleiben: die Verbindung ist TLS-geprueft (der
@@ -48,8 +57,13 @@ namespace AiMouse.Update;
 /// </summary>
 internal static class Aktualisierung
 {
-    /// <summary>Die neue Fassung liegt unter diesem Namen daneben.</summary>
+    /// <summary>Die neue Fassung liegt unter diesem Namen daneben – nur fuer
+    /// die Sekunden zwischen Download und Austausch.</summary>
     private const string NeuSuffix = ".neu";
+
+    /// <summary>Waehrend des Schreibens: erst wenn die Datei vollstaendig ist,
+    /// wird sie zur <c>.neu</c>.</summary>
+    private const string TeilSuffix = ".teil";
 
     /// <summary>Die Fassung, die auf dem Server liegt – gesetzt NUR, wenn sie
     /// neuer ist und diese Anwendung sie nicht selbst holen darf (Start von
@@ -105,7 +119,7 @@ internal static class Aktualisierung
     /// Wer sie trotzdem DIREKT von dort startet, laesst
     /// <see cref="PruefenUndHolenAsync"/> neben der GEMEINSAMEN Datei
     /// arbeiten: die neue Fassung landet als <c>AiMouse.exe.neu</c> auf der
-    /// Freigabe, und der naechste Start tauscht sie fuer ALLE aus – ausgeloest
+    /// Freigabe, und der Austausch traefe die Datei fuer ALLE – ausgeloest
     /// von einem beliebigen Arbeitsplatz, waehrend andere die Datei womoeglich
     /// gerade ausfuehren. Der Administrator verliert damit die Kontrolle
     /// darueber, welcher Stand verteilt wird; genau dafuer hat er die Freigabe.
@@ -224,106 +238,64 @@ internal static class Aktualisierung
         Math.Max(v.Major, 0), Math.Max(v.Minor, 0),
         Math.Max(v.Build, 0), Math.Max(v.Revision, 0));
 
-    /// <summary>Liegt eine neue Fassung bereit? Rein lesend, ohne Nebenwirkung.
-    ///
-    /// ⚠ EIGENE FUNKTION, weil `Program.Main` VOR dem Einwechseln die
-    /// Einzelinstanz-Sperre freigeben muss – und das darf nur passieren, wenn
-    /// wirklich etwas zu tun ist. Ohne diese Frage waere die Sperre bei JEDEM
-    /// Start kurz offen, fuer nichts.
-    /// </summary>
-    public static bool NeueFassungLiegtBereit()
-    {
-        try
-        {
-            string exe = EigenerPfad;
-            return exe.Length > 0 && File.Exists(exe + NeuSuffix);
-        }
-        catch (Exception)
-        {
-            return false;
-        }
-    }
+    /// <summary>Rueckgabe von <see cref="PruefenUndHolenAsync"/>, wenn die neue
+    /// Fassung an der Stelle der laufenden liegt. Dann – und NUR dann – muss
+    /// der Aufrufer neu starten (<see cref="NeueFassungStarten"/>).</summary>
+    public const string Eingewechselt = "eingewechselt";
 
-    /// <summary>Raeumt die verdraengte Fassung (<c>.alt</c>) weg.
+    /// <summary>Raeumt die Reste eines Austauschs weg: die verdraengte Fassung
+    /// (<c>.alt</c>) und einen abgebrochenen Download (<c>.neu</c>,
+    /// <c>.teil</c>). Bei JEDEM Start gerufen (<c>Program</c>).
     ///
-    /// ⚠ EIGENE METHODE UND BEI JEDEM START GERUFEN – vorher stand das
-    /// Loeschen IN <see cref="BeimStartEinwechseln"/>, und das laeuft nur, wenn
-    /// eine <c>.neu</c> danebenliegt. Folge: nach dem letzten Update blieb die
-    /// alte Fassung fuer immer liegen (im gemeldeten Fall vom 2026-09-14 mit
-    /// 64 MB). Der Rueckstand entsteht beim Einwechseln, also gehoert das
-    /// Aufraeumen an den Start – nicht an die Bedingung, die zufaellig
-    /// daneben stand.
+    /// ⚠ DER ERSTE VERSUCH NACH DEM NEUSTART KANN SCHEITERN: die alte Fassung
+    /// beendet sich, waehrend die neue schon startet, und solange ihr Prozess
+    /// noch steht, laesst Windows die <c>.alt</c> nicht loeschen. Dann bleibt
+    /// sie bis zum naechsten Start liegen – eine Datei zu viel neben der EXE
+    /// stoert den Betrieb nicht. (Dieselbe Abwaegung wie `cleanupOldBinary`
+    /// im STT-Support-Assistenten.)
     ///
-    /// Schlaegt es fehl (die Datei laeuft noch, Virenscanner haelt sie),
-    /// passiert nichts weiter: eine Datei zu viel neben der EXE stoert den
-    /// Betrieb nicht, und beim naechsten Start wird es erneut versucht.
+    /// ⚠ <c>.neu</c> MITLOESCHEN: bis 1.0.12 war sie die bereitgelegte Fassung
+    /// fuer den naechsten Start. Seit dem Sofort-Austausch lebt sie nur
+    /// Sekunden; liegt sie beim Start, ist sie ein abgebrochener Rest.
     /// </summary>
     public static void RueckstandAufraeumen()
-    {
-        try
-        {
-            string exe = EigenerPfad;
-            if (exe.Length == 0)
-            {
-                return;
-            }
-
-            string alt = exe + AltSuffix;
-            if (File.Exists(alt))
-            {
-                File.Delete(alt);
-            }
-        }
-        catch (Exception)
-        {
-            // Siehe Docstring: kein Grund, irgendetwas abzubrechen.
-        }
-    }
-
-    /// <summary>Wechselt eine bereitliegende neue Fassung ein und startet neu.
-    ///
-    /// Rueckgabe <c>true</c> = es wurde neu gestartet, der Aufrufer MUSS sich
-    /// beenden. <c>false</c> = nichts zu tun (der Regelfall).
-    ///
-    /// ⚠ DIE REIHENFOLGE IST DIE SICHERUNG: erst wird die laufende Datei auf
-    /// <c>.alt</c> umbenannt (das erlaubt Windows), dann die neue an ihre
-    /// Stelle. Schlaegt der zweite Schritt fehl, wird der erste
-    /// ZURUECKGENOMMEN – sonst bliebe gar keine EXE stehen und die Anwendung
-    /// waere auf diesem Arbeitsplatz endgueltig weg.
-    /// </summary>
-    public static bool BeimStartEinwechseln()
     {
         string exe = EigenerPfad;
         if (exe.Length == 0)
         {
-            return false;
+            return;
         }
 
-        string neu = exe + NeuSuffix;
-        string alt = exe + AltSuffix;
-
-        RueckstandAufraeumen();
-
-        if (!File.Exists(neu))
+        foreach (string rest in new[] { exe + AltSuffix, exe + NeuSuffix, exe + TeilSuffix })
         {
-            return false;
-        }
-
-        // Eine leere oder winzige Datei ist kein Programm – lieber wegwerfen
-        // als einwechseln. Ohne diese Pruefung koennte ein abgebrochener
-        // Download die Anwendung unbrauchbar machen.
-        try
-        {
-            if (new FileInfo(neu).Length < 1_000_000)
+            try
             {
-                File.Delete(neu);
-                return false;
+                if (File.Exists(rest))
+                {
+                    File.Delete(rest);
+                }
+            }
+            catch (Exception)
+            {
+                // Siehe Docstring: beim naechsten Start erneut.
             }
         }
-        catch (Exception)
-        {
-            return false;
-        }
+    }
+
+    /// <summary>Tauscht die laufende Datei gegen <paramref name="neu"/> aus.
+    ///
+    /// <c>true</c> = die neue Fassung liegt unter dem Namen der laufenden, die
+    /// alte als <c>.alt</c> daneben. <c>false</c> = es ist alles wie vorher.
+    ///
+    /// ⚠ DIE REIHENFOLGE IST DIE SICHERUNG: erst wird die laufende Datei auf
+    /// <c>.alt</c> umbenannt (das erlaubt Windows auch fuer eine laufende EXE),
+    /// dann die neue an ihre Stelle. Schlaegt der zweite Schritt fehl, wird der
+    /// erste ZURUECKGENOMMEN – sonst bliebe gar keine EXE stehen und die
+    /// Anwendung waere auf diesem Arbeitsplatz endgueltig weg.
+    /// </summary>
+    internal static bool Austauschen(string exe, string neu)
+    {
+        string alt = exe + AltSuffix;
 
         try
         {
@@ -331,14 +303,14 @@ internal static class Aktualisierung
         }
         catch (Exception)
         {
-            // Kein Schreibrecht im eigenen Verzeichnis (z. B. Programme-Ordner)
-            // – dann bleibt alles, wie es ist.
+            // Kein Schreibrecht, Virenscanner haelt die Datei – alles bleibt.
             return false;
         }
 
         try
         {
             File.Move(neu, exe, overwrite: true);
+            return true;
         }
         catch (Exception)
         {
@@ -354,29 +326,52 @@ internal static class Aktualisierung
 
             return false;
         }
+    }
+
+    /// <summary>Startet die (eingewechselte) Fassung unter dem eigenen Pfad.
+    ///
+    /// ⚠ DER AUFRUFER MUSS VORHER DIE EINZELINSTANZ-SPERRE SCHLIESSEN und sich
+    /// danach SOFORT beenden. Haelt dieser Prozess den Mutex noch, meldet er
+    /// der neuen Fassung <c>createdNew = false</c>; sie haelt sich fuer einen
+    /// Zweitstart und beendet sich wortlos (gemeldet 2026-09-14, 1.0.5).
+    /// </summary>
+    public static bool NeueFassungStarten()
+    {
+        string exe = EigenerPfad;
+        if (exe.Length == 0)
+        {
+            return false;
+        }
 
         try
         {
-            Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true });
-            return true;
+            using Process? p = Process.Start(new ProcessStartInfo(exe)
+            {
+                UseShellExecute = true,
+                WorkingDirectory = Path.GetDirectoryName(exe) ?? string.Empty,
+            });
+            return p is not null;
         }
         catch (Exception)
         {
-            // Eingewechselt, aber nicht gestartet: die neue Fassung gilt dann
-            // ab dem naechsten Start von Hand. Kein Grund, sich zu beenden.
             return false;
         }
     }
 
-    /// <summary>Prueft die Serverversion und legt die neue Fassung daneben.
+    /// <summary>Prueft die Serverversion, fragt nach, laedt und tauscht aus.
     ///
-    /// Rueckgabe: kurzer Grund fuer das Journal/den Tray-Titel ("" = nichts
-    /// getan). Wirft NIE – ein Fehlschlag darf die Anwendung nicht stoeren,
-    /// sie funktioniert ohne Update unveraendert weiter.
+    /// Rueckgabe: kurzer Grund fuer das Journal ("" = nichts zu tun).
+    /// <see cref="Eingewechselt"/> heisst: die neue Fassung liegt an der Stelle
+    /// der laufenden, der Aufrufer startet neu. Wirft NIE – ein Fehlschlag
+    /// darf die Anwendung nicht stoeren, sie funktioniert ohne Update
+    /// unveraendert weiter.
+    ///
+    /// <paramref name="nachfragen"/> bekommt die Serverversion und liefert
+    /// <c>true</c>, wenn der Benutzer jetzt aktualisieren will.
     /// </summary>
     public static async Task<string> PruefenUndHolenAsync(
-        string? serverVersion, Func<CancellationToken, Task<byte[]>> paketHolen,
-        CancellationToken ct)
+        string? serverVersion, Func<string, Task<bool>> nachfragen,
+        Func<CancellationToken, Task<byte[]>> paketHolen, CancellationToken ct)
     {
         try
         {
@@ -398,11 +393,10 @@ internal static class Aktualisierung
 
             /* ⚠ VON EINER NETZFREIGABE WIRD NICHT SELBST AKTUALISIERT.
              *
-             * Sonst legt ein beliebiger Arbeitsplatz `AiMouse.exe.neu` auf die
-             * GEMEINSAME Datei und tauscht sie beim naechsten Start fuer alle
-             * aus – waehrend andere sie womoeglich gerade ausfuehren. Welcher
-             * Stand verteilt wird, entscheidet der Administrator; genau dafuer
-             * gibt es die Freigabe.
+             * Sonst tauscht ein beliebiger Arbeitsplatz die GEMEINSAME Datei
+             * fuer alle aus – waehrend andere sie womoeglich gerade ausfuehren.
+             * Welcher Stand verteilt wird, entscheidet der Administrator; genau
+             * dafuer gibt es die Freigabe.
              *
              * ⚠ DIE PRUEFUNG STEHT HINTER `IstNeuer`: ohne eine neuere Fassung
              * gibt es nichts zu melden, und ein Hinweis, der bei jedem Start
@@ -414,51 +408,29 @@ internal static class Aktualisierung
             }
             NetzVersion = string.Empty;
 
-            string neu = exe + NeuSuffix;
-
-            // ⚠ LIEGT SIE SCHON DA, WIRD NICHT ERNEUT GELADEN. Sonst holt jede
-            // Anmeldung 66 MB, solange der Benutzer nicht neu startet.
-            if (File.Exists(neu))
-            {
-                return "liegt bereit";
-            }
-
-            /* ⚠ SCHLEIFEN-BREMSE – UND SIE IST DER EIGENTLICHE SCHUTZ HIER
-             * (gemeldet 2026-09-14: "es wird JEDESMAL die neue exe auf den
-             * Rechner kopiert").
+            /* ⚠ SCHLEIFEN-BREMSE (gemeldet 2026-09-14: "es wird JEDESMAL die
+             * neue exe auf den Rechner kopiert").
              *
-             * Die Pruefung darueber greift nur, SOLANGE `.neu` liegt. Nach dem
-             * Einwechseln ist sie weg – und wenn die Anwendung danach trotzdem
-             * die alte Fassung ist, faengt alles von vorn an: holen,
-             * einwechseln, unveraendert alt, holen. Gemessen wurde genau das:
-             * auf Platte lag bereits 1.0.6, im Speicher lief weiter 1.0.5, und
-             * zwischen zwei Screenshots im Abstand einer Minute lagen zwei
-             * volle Zyklen zu je 66 MB.
-             *
-             * Ein Update ohne Gedaechtnis ueber den letzten Versuch ist eine
-             * Endlosschleife – dieselbe Klasse wie "ein Zeitdeckel ohne
-             * Gedaechtnis ist eine wiederkehrende Rechnung" (OneNote, 06.09.),
-             * und die Antwort ist dieselbe: den Fehlschlag MERKEN.
-             *
-             * ⚠ WARUM NICHT AM SYMPTOM GEFLICKT: WARUM die alte Fassung
-             * weiterlief, laesst sich von hier aus nicht messen (es gibt kein
-             * Windows auf dem Bauserver). Diese Bremse wirkt unabhaengig davon.
-             * Sie kostet hoechstens ein verzoegertes Update, verhindert aber
-             * die Leitung im Kreis – die Halbfehlerstellungen sind nicht gleich
-             * schwer. */
+             * Meldet der Server eine Version, die das Paket gar nicht traegt,
+             * waere die eingewechselte Fassung wieder die alte – und jede
+             * Anmeldung finge von vorn an: fragen, 66 MB laden, tauschen,
+             * unveraendert alt. Ein Update ohne Gedaechtnis ueber den letzten
+             * Versuch ist eine Endlosschleife; die Antwort ist, den Versuch zu
+             * MERKEN. Gleiches Ziel bei gleicher Ausgangslage heisst: der
+             * vorige Austausch hat nichts bewirkt, ein zweiter aendert daran
+             * nichts. */
             (string gZiel, string gVon) = ConfigStore.LadeUpdateVersuch();
             string ziel = (serverVersion ?? string.Empty).Trim();
             if (gZiel.Length > 0
                 && string.Equals(gZiel, ziel, StringComparison.OrdinalIgnoreCase)
                 && string.Equals(gVon, EigeneAnzeige, StringComparison.OrdinalIgnoreCase))
             {
-                // Gleiches Ziel, gleiche Ausgangslage: der vorige Versuch hat
-                // nichts bewirkt. Ein zweiter aendert daran nichts.
                 return "schon versucht";
             }
 
-            // Schreibrecht VORHER pruefen – 66 MB zu laden, um dann am
-            // Speichern zu scheitern, ist verschwendete Leitung.
+            // Schreibrecht VORHER pruefen – nach einer Rueckfrage 66 MB zu
+            // laden, um dann am Speichern zu scheitern, waere die schlechteste
+            // Reihenfolge: der Benutzer hat ja gesagt, und es passiert nichts.
             string probe = exe + ".schreibprobe";
             try
             {
@@ -471,16 +443,23 @@ internal static class Aktualisierung
                 return "kein Schreibrecht";
             }
 
+            if (!await nachfragen(ziel).ConfigureAwait(false))
+            {
+                // Nicht gemerkt: beim naechsten Anmelden wird erneut gefragt.
+                return "abgelehnt";
+            }
+
             byte[] zip = await paketHolen(ct).ConfigureAwait(false);
             if (zip.Length < 1_000_000)
             {
                 return "Paket unbrauchbar";
             }
 
-            // ⚠ ZUERST IN EINE NEBENDATEI, DANN UMBENENNEN. Ein abgebrochener
-            // Schreibvorgang darf keine halbe `.neu` hinterlassen, die der
-            // naechste Start einwechselt.
-            string teil = exe + ".teil";
+            // ⚠ ZUERST IN EINE NEBENDATEI, DANN UMBENENNEN. Was als `.neu`
+            // liegt, ist vollstaendig geschrieben – ein abgebrochener
+            // Schreibvorgang hinterlaesst hoechstens eine `.teil`.
+            string teil = exe + TeilSuffix;
+            string neu = exe + NeuSuffix;
             using (var quelle = new MemoryStream(zip, writable: false))
             using (var archiv = new ZipArchive(quelle, ZipArchiveMode.Read))
             {
@@ -496,6 +475,8 @@ internal static class Aktualisierung
                 await drin.CopyToAsync(raus, ct).ConfigureAwait(false);
             }
 
+            // Eine leere oder winzige Datei ist kein Programm – lieber
+            // wegwerfen als einwechseln.
             if (new FileInfo(teil).Length < 1_000_000)
             {
                 File.Delete(teil);
@@ -504,16 +485,19 @@ internal static class Aktualisierung
 
             File.Move(teil, neu, overwrite: true);
 
-            /* ⚠ GEMERKT WIRD ERST HIER – NACH DEM ERFOLGREICHEN ABLEGEN, nicht
-             * vor dem Laden. Der Unterschied ist die Fehlerrichtung: ein
-             * abgebrochener Download ist ein NETZfehler und soll beim naechsten
-             * Mal wieder versucht werden. Was die Bremse treffen soll, ist der
-             * andere Fall – eine Fassung, die vollstaendig bereitliegt und
-             * trotzdem nicht wirksam wird. Vor dem Laden gemerkt wuerde ein
-             * einziger Verbindungsabbruch das Update bis zum naechsten
-             * Versionswechsel blockieren. */
+            if (!Austauschen(exe, neu))
+            {
+                File.Delete(neu);
+                return "Austausch fehlgeschlagen";
+            }
+
+            /* ⚠ GEMERKT WIRD ERST HIER – NACH DEM ERFOLGREICHEN AUSTAUSCH, nicht
+             * vor dem Laden. Ein abgebrochener Download ist ein NETZfehler und
+             * soll beim naechsten Mal wieder versucht werden; die Bremse soll
+             * nur den Fall treffen, in dem eine vollstaendig eingewechselte
+             * Fassung trotzdem nicht wirksam wird. */
             ConfigStore.MerkeUpdateVersuch(ziel, EigeneAnzeige);
-            return "bereitgelegt";
+            return Eingewechselt;
         }
         catch (Exception e)
         {
@@ -521,9 +505,10 @@ internal static class Aktualisierung
             try
             {
                 string exe = EigenerPfad;
-                if (exe.Length > 0 && File.Exists(exe + ".teil"))
+                if (exe.Length > 0)
                 {
-                    File.Delete(exe + ".teil");
+                    File.Delete(exe + TeilSuffix);
+                    File.Delete(exe + NeuSuffix);
                 }
             }
             catch (Exception)

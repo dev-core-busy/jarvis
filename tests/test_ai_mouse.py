@@ -2396,7 +2396,7 @@ check("beide neuen Texte gibt es in DE und EN",
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-print("\n[21] Version 1.0.0 und stille Aktualisierung (2026-09-11)")
+print("\n[21] Version 1.0.0 und Selbstaktualisierung (2026-09-11; Austausch im Betrieb seit 2026-10-22)")
 # ─────────────────────────────────────────────────────────────────────────────
 _proj = (ROOT / "ai-mouse" / "src" / "AiMouse" / "AiMouse.csproj").read_text(
     encoding="utf-8")
@@ -2479,15 +2479,41 @@ check("health liefert klient_version",
 # ── Der Client ───────────────────────────────────────────────────────────────
 _upd = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Update"
         / "Aktualisierung.cs").read_text(encoding="utf-8")
-_upd_code = "\n".join(z for z in _upd.split("\n")
-                      if not z.lstrip().startswith("//")
-                      and not z.lstrip().startswith("///"))
+
+
+def _cs_nurcode21(s):
+    """Ganze Kommentarzeilen raus – `//`, `///` UND Blockkommentare.
+
+    ⚠ DIE BLOCKKOMMENTARE GEHOEREN DAZU: die Begruendungen in
+    `Aktualisierung.cs` stehen ueberwiegend in `/* … */` und nennen die
+    Bausteine woertlich („fragen, 66 MB laden, tauschen"). Ein Filter nur fuer
+    `//` liesse den Waechter seine eigene Erklaerung lesen.
+    """
+    return "\n".join(z for z in s.split("\n")
+                     if not z.lstrip().startswith(("//", "/*", "*")))
+
+
+def _schnitt21(text, anfang, ende):
+    """Der Text von ``anfang`` bis vor ``ende`` – LEER, wenn ``anfang`` fehlt.
+
+    ⚠ NICHT `text[text.find(a):]`: fehlt der Anker, ist find -1, und der
+    Schnitt waere der GANZE Text – jede Pruefung darauf trivial wahr.
+    """
+    i = text.find(anfang)
+    if i < 0:
+        return ""
+    j = text.find(ende, i + len(anfang)) if ende else -1
+    return text[i:j] if j >= 0 else text[i:]
+
+
+_upd_code = _cs_nurcode21(_upd)
 check("Kommentar-Filter greift (Positivkontrolle, Update-Modul)",
-      "BeimStartEinwechseln" in _upd_code
-      and "Man-in-the-Middle" not in _upd_code)
+      "internal static bool Austauschen" in _upd_code
+      and "Man-in-the-Middle" not in _upd_code
+      and "SCHLEIFEN-BREMSE" in _upd and "SCHLEIFEN-BREMSE" not in _upd_code)
 
 # ⚠ DER EIGENE PFAD DARF NICHT UEBER Assembly.Location KOMMEN: bei
-# PublishSingleFile ist das ein LEERER String, und dann findet der Einwechsel
+# PublishSingleFile ist das ein LEERER String, und dann findet der Austausch
 # seine eigene Datei nicht.
 check("der eigene Pfad kommt aus Environment.ProcessPath",
       "Environment.ProcessPath" in _upd_code
@@ -2504,83 +2530,132 @@ check("  … und auf vier Teile normiert",
 # ⚠ DEN ZWEIG ISOLIEREN, nicht das Vorkommen zaehlen: `return false` steht in
 # diesem Modul mehrfach, die Gegenprobe ("unbekannte Version loest ein Update
 # aus") blieb deshalb gruen. Gemessen wird, was NACH der Bedingung kommt.
-_izweig = _upd_code[_upd_code.find("IsNullOrWhiteSpace(ziel)"):]
-_izweig = _izweig[:_izweig.find("TryParse")] if "TryParse" in _izweig else _izweig
+_izweig = _schnitt21(_upd_code, "IsNullOrWhiteSpace(ziel)", "TryParse")
 check("eine unbekannte Serverversion tut NICHTS (fail-safe)",
-      "IsNullOrWhiteSpace(ziel)" in _upd_code
-      and "return false;" in _izweig and "return true;" not in _izweig)
+      bool(_izweig) and "return false;" in _izweig
+      and "return true;" not in _izweig)
 
-# ⚠ DIE REIHENFOLGE IST DIE SICHERUNG: alte Datei erst umbenennen, dann die
-# neue an ihre Stelle – und bei Fehlschlag ZURUECKNEHMEN. Ohne die Ruecknahme
-# bliebe gar keine EXE stehen; die Anwendung waere auf diesem Arbeitsplatz weg.
-_ein = _upd_code[_upd_code.find("BeimStartEinwechseln"):]
-_ein = _ein[:_ein.find("PruefenUndHolenAsync")] if "PruefenUndHolenAsync" in _ein else _ein
-check("Einwechsel: alte Fassung wird umbenannt, nicht geloescht",
-      "File.Move(exe, alt" in _ein)
-check("Einwechsel: Fehlschlag wird ZURUECKGENOMMEN",
-      "File.Move(alt, exe" in _ein)
-check("Einwechsel: eine zu kleine Datei wird verworfen, nicht eingewechselt",
-      "1_000_000" in _ein)
+# ── Der Austausch (seit 1.0.13 im LAUFENDEN Betrieb, wie im
+#    STT-Support-Assistenten) ─────────────────────────────────────────────
+# ⚠ DIE REIHENFOLGE IST DIE SICHERUNG: die laufende Datei erst umbenennen,
+# dann die neue an ihre Stelle – und bei Fehlschlag ZURUECKNEHMEN. Ohne die
+# Ruecknahme bliebe gar keine EXE stehen; die Anwendung waere weg.
+_aus = _schnitt21(_upd_code, "internal static bool Austauschen",
+                  "public static bool NeueFassungStarten")
+_i_weg = _aus.find("File.Move(exe, alt")
+_i_hin = _aus.find("File.Move(neu, exe")
+_i_rueck = _aus.find("File.Move(alt, exe")
+check("Austausch: die laufende Fassung wird umbenannt, nicht geloescht",
+      _i_weg >= 0 and "File.Delete(exe" not in _aus)
+check("Austausch: erst weg, dann hin",
+      0 <= _i_weg < _i_hin)
+check("Austausch: ein Fehlschlag wird ZURUECKGENOMMEN",
+      0 <= _i_hin < _i_rueck)
 
-# ⚠ NICHTS WIRD SOFORT ERSETZT: das Ersetzen verlangt, dass sich die laufende
-# EXE beendet – und genau das ist nicht still (offenes Ergebnisfenster weg).
-# Geholt wird nur DANEBEN; eingewechselt beim naechsten Start.
-_hol = _upd_code[_upd_code.find("PruefenUndHolenAsync"):]
+# ⚠ BEIM PROGRAMMSTART WIRD NICHTS MEHR EINGEWECHSELT. Der Zweischritt hat
+# nicht getragen (Endlosschleife, nie gestartete Fassung, liegengebliebene
+# Altdatei) – kehrt er zurueck, gibt es wieder ZWEI Stellen, an denen getauscht
+# wird, und eine davon ist ohne Windows nicht messbar.
+check("es gibt keinen Einwechsel beim Programmstart mehr",
+      "BeimStartEinwechseln" not in _upd_code
+      and "NeueFassungLiegtBereit" not in _upd_code)
+
+_hol = _schnitt21(_upd_code, "public static async Task<string> PruefenUndHolenAsync", "")
+_i_probe = _hol.find("schreibprobe")
+_i_frage = _hol.find("nachfragen(")
+_i_laden = _hol.find("paketHolen(")
+_i_tausch = _hol.find("Austauschen(exe, neu)")
+check("Positivkontrolle: der Hol-Ablauf ist geschnitten",
+      _i_probe >= 0 and _i_frage >= 0 and _i_laden >= 0 and _i_tausch >= 0)
+# ⚠ ERST FRAGEN, DANN LADEN: wer nein sagt, soll keine 66 MB bezahlen – und
+# ein Austausch ohne Zustimmung schliesst ein offenes Ergebnisfenster.
+check("die Rueckfrage kommt VOR dem Download",
+      0 <= _i_frage < _i_laden)
+check("  … und ein Nein beendet den Ablauf",
+      re.search(r"if\s*\(\s*!\s*await\s+nachfragen\(\s*ziel\s*\)"
+                r"(?:\.ConfigureAwait\(false\))?\s*\)\s*\{"
+                r"[^}]*return\s+\"abgelehnt\"\s*;", _hol) is not None)
+# ⚠ Nach einem „Ja" am Schreibrecht zu scheitern ist die schlechteste
+# Reihenfolge: der Benutzer hat zugestimmt, und es passiert nichts.
+check("Schreibrecht wird VOR der Rueckfrage geprueft",
+      0 <= _i_probe < _i_frage)
+# ⚠ DIE ZUWEISUNG pruefen, nicht das Vorkommen von ".teil": der Name steht
+# auch im `catch`-Block (Aufraeumen).
+check("zuerst in eine Nebendatei, dann umbenennen, dann tauschen",
+      "string teil = exe + TeilSuffix;" in _hol
+      and 0 <= _hol.find("File.Move(teil, neu") < _i_tausch)
+check("eine zu kleine Datei wird verworfen, nicht eingetauscht",
+      0 <= _hol.find("new FileInfo(teil).Length < 1_000_000") < _i_tausch)
+check("nur ein gelungener Austausch meldet `Eingewechselt`",
+      re.search(r"if\s*\(\s*!\s*Austauschen\(exe,\s*neu\)\s*\)\s*\{[^}]*return\s+\"",
+                _hol) is not None
+      and 0 <= _i_tausch < _hol.find("return Eingewechselt;"))
+# ⚠ DIESE KLASSE STARTET NICHTS UND BEENDET NICHTS: den Neustart macht der
+# Aufrufer, weil nur er die Einzelinstanz-Sperre und das Tray-Symbol kennt.
 check("das Holen startet nichts neu und beendet nichts",
       "Process.Start" not in _hol and "Application.Exit" not in _hol
       and "Environment.Exit" not in _hol)
-check("bereits geholte Fassung wird nicht erneut geladen",
-      'File.Exists(neu)' in _hol)
-check("Schreibrecht wird VOR dem Download geprueft",
-      _hol.find("schreibprobe") < _hol.find("paketHolen("))
-# ⚠ DIE ZUWEISUNG pruefen, nicht das Vorkommen von ".teil": der Name steht
-# auch im `catch`-Block (Aufraeumen), und die Gegenprobe `string teil = neu;`
-# blieb deshalb gruen – dabei waere genau das der Fehler, den ein abgebrochener
-# Download hinterlaesst: eine halbe `.neu`, die der naechste Start einwechselt.
-check("zuerst in eine Nebendatei, dann umbenennen",
-      'string teil = exe + ".teil";' in _hol
-      and "File.Move(teil, neu" in _hol)
+_neust = _schnitt21(_upd_code, "public static bool NeueFassungStarten",
+                    "public static async Task<string> PruefenUndHolenAsync")
+check("der Neustart startet die Datei unter dem EIGENEN Pfad",
+      "string exe = EigenerPfad;" in _neust
+      and "Process.Start(new ProcessStartInfo(exe)" in _neust)
 
 _prog = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Program.cs").read_text(
     encoding="utf-8")
-_prog_code = "\n".join(z for z in _prog.split("\n")
-                       if not z.lstrip().startswith("//"))
-# ⚠ VOR ALLEM ANDEREN: ab dem ersten Fenster waere etwas zu verlieren.
-check("der Einwechsel steht vor Application.EnableVisualStyles",
-      0 < _prog_code.find("BeimStartEinwechseln")
-      < _prog_code.find("EnableVisualStyles"))
-# ⚠ UND ER DARF KEIN TOTER ZWEIG SEIN: die Gegenprobe `if (false && …)` liess
-# die POSITION unveraendert und blieb damit gruen – eine Pruefung auf die
-# Stelle beantwortet nicht, ob der Code je laeuft (Register: die Eigenschaft
-# messen, nicht das Vorkommen).
-check("  … und seine Bedingung ist kein toter Zweig",
-      "if (isOnlyInstance && Aktualisierung.NeueFassungLiegtBereit())"
-      in _prog_code)
-# ⚠ UND HINTER DER EINZELINSTANZ-SPERRE: zwei gleichzeitig gestartete
-# Instanzen wuerden sonst dieselbe Datei umbenennen.
-check("  … und hinter der Einzelinstanz-Sperre",
-      _prog_code.find("new Mutex(") < _prog_code.find("BeimStartEinwechseln"))
-# ⚠ Die Sperre MUSS vor dem Neustart freigegeben werden, sonst laeuft die neue
-# Instanz in die "laeuft bereits"-Meldung – genau dann, wenn aktualisiert wurde.
-check("die Einzelinstanz-Sperre wird vor dem Neustart freigegeben",
-      0 < _prog_code.find("ReleaseMutex")
-      < _prog_code.find("BeimStartEinwechseln()"))
+_prog_code = _cs_nurcode21(_prog)
+_starten = _schnitt21(_prog_code, "private static void Starten()",
+                      "private static void ReportFatal")
+# ⚠ DAS AUFRAEUMEN DER `.alt` laeuft bei JEDEM Start, hinter der Sperre und
+# vor dem ersten Fenster.
+check("Rueckstand wird beim Start aufgeraeumt, hinter der Einzelinstanz-Sperre",
+      0 <= _starten.find("new Mutex(") < _starten.find(
+          "Aktualisierung.RueckstandAufraeumen();")
+      < _starten.find("EnableVisualStyles"))
+check("  … und nur von der ERSTEN Instanz",
+      re.search(r"if\s*\(\s*isOnlyInstance\s*\)\s*\{\s*"
+                r"Aktualisierung\.RueckstandAufraeumen\(\);", _starten) is not None)
+check("Program.cs wechselt beim Start nichts mehr ein",
+      "BeimStartEinwechseln" not in _prog_code
+      and "NeueFassungLiegtBereit" not in _prog_code)
 
-_tray_u = "\n".join(z for z in cs_tray.split("\n")
-                    if not z.lstrip().startswith("//")
-                    and not z.lstrip().startswith("///"))
+_tray_u = _cs_nurcode21(cs_tray)
 check("die Pruefung haengt an der Stelle, an der eine Sitzung existiert",
-      "AktualisierungPruefenAsync" in _tray_u
-      and "_ = AktualisierungPruefenAsync();" in _tray_u)
-# ⚠ NICHT ABGEWARTET: 66 MB Download darf das Fragenmenue nicht aufhalten.
+      "_ = AktualisierungPruefenAsync();" in _tray_u)
+# ⚠ NICHT ABGEWARTET: Rueckfrage und Download duerfen das Fragenmenue nicht
+# aufhalten.
 check("die Pruefung wird NICHT abgewartet",
       "await AktualisierungPruefenAsync()" not in _tray_u)
-# ⚠ STILL heisst: kein Dialog, keine Blase, keine Fehlermeldung.
-_ap = _tray_u[_tray_u.find("private async Task AktualisierungPruefenAsync"):]
-_ap = _ap[:_ap.find("private void ShowTrayError")] if "private void ShowTrayError" in _ap else _ap
-check("die Pruefung meldet dem Benutzer NICHTS",
+_ap = _schnitt21(_tray_u, "private async Task AktualisierungPruefenAsync",
+                 "private Task<bool> AktualisierungNachfragenAsync")
+check("Positivkontrolle: der Pruef-Ablauf ist geschnitten",
+      "PruefenUndHolenAsync(" in _ap and len(_ap) < 6000)
+# ⚠ STILL BEI FEHLSCHLAG: ein Fehler beim Pruefen oder Laden meldet nichts –
+# der EINZIGE Kontakt zum Benutzer ist die Rueckfrage.
+check("Fehlschlaege beim Pruefen melden dem Benutzer nichts",
       "MessageBox" not in _ap and "ShowBalloonTip" not in _ap
       and "ShowTrayError" not in _ap)
+check("die Rueckfrage ist der Nachfrage-Rueckruf",
+      re.search(r"PruefenUndHolenAsync\(\s*serverVersion\s*,\s*"
+                r"AktualisierungNachfragenAsync\s*,", _ap) is not None)
+check("neu gestartet wird NUR nach `Eingewechselt`",
+      re.search(r"if\s*\(\s*ergebnis\s*==\s*Aktualisierung\.Eingewechselt\s*\)"
+                r"\s*\{\s*BeginInvokeOnOwner\(NachAktualisierungNeuStarten\);",
+                _ap) is not None
+      and _ap.count("NachAktualisierungNeuStarten") == 1)
+# ⚠ EIN RIEGEL: jeder Klick auf „Fragen erneut laden" laeuft hier vorbei –
+# zwei Rueckfragen uebereinander, zwei Downloads auf dieselbe Datei.
+check("nur eine Pruefung zur Zeit (Riegel, im finally geoeffnet)",
+      "Interlocked.Exchange(ref _aktualisierungLaeuft, 1) != 0" in _ap
+      and re.search(r"finally\s*\{\s*Interlocked\.Exchange\(ref "
+                    r"_aktualisierungLaeuft,\s*0\);", _ap) is not None)
+_nf = _schnitt21(_tray_u, "private Task<bool> AktualisierungNachfragenAsync",
+                 "private void NachAktualisierungNeuStarten")
+check("die Rueckfrage ist Ja/Nein, und nur Ja zaehlt",
+      "MessageBoxButtons.YesNo" in _nf
+      and "TrySetResult(r == DialogResult.Yes)" in _nf)
+check("  … und im Zweifel NEIN (Fenster weg oder Dialog wirft)",
+      _nf.count("TrySetResult(false)") >= 3)
 
 _cl_u = "\n".join(z for z in cs_client.split("\n")
                   if not z.lstrip().startswith("//")
@@ -3437,36 +3512,52 @@ check("Program.cs und SettingsWindow.cs wurden gelesen",
       len(_prog27) > 500 and len(_set27) > 500)
 
 # ── a) Der Mutex wird GESCHLOSSEN, nicht nur freigegeben ───────────────────
-# ⚠ DIE REIHENFOLGE IST DIE AUSSAGE: Dispose MUSS vor dem Einwechseln stehen.
-#   Danach gerufen waere es wirkungslos - der Name ist dann schon vergeben,
-#   wenn die neue Fassung startet.
-_i_rel = _prog27.find("ReleaseMutex")
-_i_disp = _prog27.find("instanceLock.Dispose()")
-_i_wechsel = _prog27.find("BeimStartEinwechseln()")
-check("Program.cs gibt den Mutex frei", _i_rel >= 0)
+# Seit 1.0.13 passiert das nicht mehr beim Programmstart, sondern im Neustart
+# nach dem Austausch (`TrayApplicationContext.NachAktualisierungNeuStarten`) –
+# die Lehre ist dieselbe: erst `Dispose()` gibt den NAMEN frei.
+_frei27 = _schnitt21(_prog27, "internal static void EinzelinstanzFreigeben()",
+                     "internal static void EinzelinstanzZurueckholen()")
+_zurueck27 = _schnitt21(_prog27, "internal static void EinzelinstanzZurueckholen()",
+                        "private static void Starten()")
+check("Positivkontrolle: Freigeben und Zurueckholen sind geschnitten",
+      len(_frei27) > 50 and len(_zurueck27) > 50)
+check("Program.cs gibt den Mutex frei", "ReleaseMutex()" in _frei27)
 check("UND schliesst ihn (Dispose) - erst das gibt den NAMEN frei",
-      _i_disp >= 0)
-check("und zwar VOR dem Einwechseln (sonst ist es wirkungslos)",
-      0 <= _i_disp < _i_wechsel)
-check("danach ist die Variable null (kein Zugriff auf ein totes Handle)",
-      "instanceLock = null;" in _prog27)
+      0 <= _frei27.find("ReleaseMutex()") < _frei27.find("m.Dispose();"))
+check("danach ist das Feld null (kein Zugriff auf ein totes Handle)",
+      0 <= _frei27.find("_instanceLock = null;") < _frei27.find("m.Dispose();"))
 
-# ⚠ SCHLAEGT DER WECHSEL FEHL, GEHOERT DIE SPERRE ZURUECK. Ohne das liefe diese
+# ⚠ DIE REIHENFOLGE IST DIE AUSSAGE: die Sperre MUSS geschlossen sein, BEVOR
+#   die neue Fassung startet – danach ist der Name schon vergeben. Und das
+#   Tray-Symbol geht vorher weg: ein hart beendeter Prozess raeumt es nicht ab.
+_tray27 = _cs_nurcode21(_quelle25("TrayApplicationContext.cs"))
+_ns27 = _schnitt21(_tray27, "private void NachAktualisierungNeuStarten()",
+                   "private void ShowTrayError")
+_i27 = [_ns27.find(x) for x in ("_trayIcon.Visible = false;",
+                                "Program.EinzelinstanzFreigeben();",
+                                "Aktualisierung.NeueFassungStarten()",
+                                "Prozessende.Hart(0);")]
+check("Neustart: Symbol weg -> Sperre zu -> neue Fassung -> hart beenden",
+      all(i >= 0 for i in _i27) and _i27 == sorted(_i27))
+check("  … und der Hart-Ausstieg haengt am GELUNGENEN Start",
+      re.search(r"if\s*\(\s*Aktualisierung\.NeueFassungStarten\(\)\s*\)\s*\{"
+                r"\s*Prozessende\.Hart\(0\);\s*\}", _ns27) is not None)
+
+# ⚠ SCHLAEGT DER START FEHL, GEHOERT DIE SPERRE ZURUECK. Ohne das liefe diese
 #   Instanz ungeschuetzt weiter - ein zweiter Start erzeugte eine zweite
-#   Instanz, obwohl gar kein Update stattgefunden hat.
-_nach = _prog27[_i_wechsel:] if _i_wechsel >= 0 else ""
-check("nach einem gescheiterten Wechsel wird die Sperre zurueckgeholt",
-      "new Mutex(initiallyOwned: true, SingleInstanceName, out isOnlyInstance)"
-      in _nach)
+#   Instanz.
+check("nach einem gescheiterten Start wird die Sperre zurueckgeholt",
+      _i27[3] >= 0 and _ns27.find("Program.EinzelinstanzZurueckholen();") > _i27[3]
+      and "new Mutex(initiallyOwned: true, SingleInstanceName" in _zurueck27)
 
-# ⚠ `using var` KANN DAS NICHT ABBILDEN: die Variable wird zwischendurch
-#   geschlossen und danach neu belegt. Ein `using var` disposed am Scope-Ende
-#   das NEUE Objekt und liesse das alte als Zombie stehen.
-check("die Sperre haengt nicht mehr an `using var` (die Neubelegung braucht "
+# ⚠ `using var` KANN DAS NICHT ABBILDEN: die Sperre wird zwischendurch
+#   geschlossen und ggf. neu belegt.
+check("die Sperre haengt nicht an `using var` (die Neubelegung braucht "
       "try/finally)",
-      "using var instanceLock" not in _prog27)
+      "using var instanceLock" not in _prog27
+      and "using var _instanceLock" not in _prog27)
 check("stattdessen wird sie im finally freigegeben",
-      "instanceLock?.Dispose();" in _prog27)
+      "_instanceLock?.Dispose();" in _prog27)
 
 # ── b) Die Zelle wird ANGEGEBEN, nicht der Reihe nach vergeben ─────────────
 _add27 = ""
@@ -3988,9 +4079,10 @@ check("und vergleicht BEIDES – Ziel und Ausgangslage",
 # ⚠ DIE REIHENFOLGE IST DIE FEHLERRICHTUNG: gemerkt wird NACH dem Ablegen.
 # Vor dem Laden gemerkt wuerde ein einziger Verbindungsabbruch das Update bis
 # zum naechsten Versionswechsel blockieren.
-_iMove29 = _aktc29.find("File.Move(teil, neu")
+# Seit 1.0.13 heisst „erfolgreich abgelegt": AUSGETAUSCHT (Sofort-Austausch).
+_iMove29 = _aktc29.find("Austauschen(exe, neu)")
 _iMerk29 = _aktc29.find("MerkeUpdateVersuch(")
-check("gemerkt wird NACH dem erfolgreichen Ablegen, nicht vor dem Laden",
+check("gemerkt wird NACH dem erfolgreichen Austausch, nicht vor dem Laden",
       0 <= _iMove29 < _iMerk29)
 
 # ── Der Rueckstand `.alt` ──────────────────────────────────────────────────

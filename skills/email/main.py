@@ -193,13 +193,40 @@ class EmailLesenTool(_Base):
 
 # ── Senden / Antworten ──────────────────────────────────────────────────────
 
+# Gemeinsame Beschreibung des Anhang-Felds: welche Verweise das Modell
+# uebergeben darf. Ein Prompt ist Code – jede hier genannte Form loest
+# ``backend.mail_anhang.aufloesen`` auch wirklich auf.
+_ANHANG_FELD = {
+    "type": "ARRAY", "items": {"type": "STRING"},
+    "description": (
+        "Dateien aus diesem Chat als Anhang (optional, hoechstens 10). Erlaubt: "
+        "der Pfad aus dem Anhang-Hinweis eines hochgeladenen Anhangs "
+        "(/tmp/jarvis-anhaenge/…) oder sein Name in data/documents; die Adresse "
+        "eines im Chat angezeigten Bildes oder einer gelieferten Datei "
+        "(/api/generated/…, /api/documents/…, /api/chat/attachment/…) – fuer den "
+        "Anhang darfst du sie aus dem Gespraechsverlauf uebernehmen; eine selbst "
+        "erzeugte Ergebnisdatei unter /tmp/…. Dateien aus Wissensordnern oder "
+        "Freigaben sind KEINE Anhaenge."),
+}
+
+
+def _anhaenge(kwargs) -> list:
+    """Anhaenge des Aufrufs laden (blockierend: liest Dateien, im Thread rufen)."""
+    from backend import mail_anhang
+    roh = kwargs.get("anhaenge")
+    if roh in (None, "", []):
+        roh = kwargs.get("anhang") or kwargs.get("attachments") or ""
+    return mail_anhang.laden(roh, _wer())
+
+
 class EmailSendenTool(_Base):
     @property
     def name(self): return "email_senden"
 
     @property
     def description(self):
-        return ("Sendet eine NEUE E-Mail aus dem eigenen Postfach. Nutze fuer die "
+        return ("Sendet eine NEUE E-Mail aus dem eigenen Postfach, auf Wunsch mit "
+                "Dateien aus diesem Chat als Anhang (Feld anhaenge). Nutze fuer die "
                 "Beantwortung einer eingegangenen Nachricht email_antworten – das "
                 "erhaelt den Gespraechsfaden.")
 
@@ -209,6 +236,7 @@ class EmailSendenTool(_Base):
             "betreff": {"type": "STRING"},
             "text": {"type": "STRING", "description": "Nachrichtentext (Nur-Text)."},
             "cc": {"type": "STRING", "description": "Kopie-Empfaenger (optional)."},
+            "anhaenge": _ANHANG_FELD,
         }, "required": ["an", "betreff", "text"]}
 
     async def execute(self, **kwargs):
@@ -216,9 +244,18 @@ class EmailSendenTool(_Base):
         betreff = str(kwargs.get("betreff") or kwargs.get("subject") or "").strip()
         text = str(kwargs.get("text") or kwargs.get("body") or "")
         cc = kwargs.get("cc") or ""
+        try:
+            # VOR dem Verbindungsaufbau: ein unzulaessiger Anhang soll keinen
+            # Anmeldeversuch am Exchange kosten (Sperrpolitik).
+            anh = await asyncio.to_thread(_anhaenge, kwargs)
+        except MailFehler as f:
+            return "❌ " + klartext(f)
 
         def _tun(c: MailClient):
-            return "✅ " + c.senden(an, betreff, text, cc=cc, entwurf=False)
+            from backend import mail_anhang
+            return ("✅ " + c.senden(an, betreff, text, cc=cc, entwurf=False,
+                                    anhaenge=anh)
+                    + mail_anhang.vermerk(anh))
         return await self._mit_client(_tun)
 
 
@@ -229,7 +266,8 @@ class EmailEntwurfTool(_Base):
     @property
     def description(self):
         return ("Speichert eine NEUE E-Mail als Entwurf im eigenen Postfach, ohne sie "
-                "zu senden. Der richtige Weg, wenn Angaben fehlen oder der Inhalt vom "
+                "zu senden – auf Wunsch mit Dateien aus diesem Chat als Anhang (Feld "
+                "anhaenge). Der richtige Weg, wenn Angaben fehlen oder der Inhalt vom "
                 "Postfach-Inhaber gegengelesen werden soll.")
 
     def parameters_schema(self):
@@ -238,16 +276,23 @@ class EmailEntwurfTool(_Base):
             "betreff": {"type": "STRING"},
             "text": {"type": "STRING"},
             "cc": {"type": "STRING"},
+            "anhaenge": _ANHANG_FELD,
         }, "required": ["betreff", "text"]}
 
     async def execute(self, **kwargs):
         an = kwargs.get("an") or ""
         betreff = str(kwargs.get("betreff") or "").strip()
         text = str(kwargs.get("text") or "")
+        try:
+            anh = await asyncio.to_thread(_anhaenge, kwargs)
+        except MailFehler as f:
+            return "❌ " + klartext(f)
 
         def _tun(c: MailClient):
-            return "✅ " + c.senden(an, betreff, text, cc=kwargs.get("cc") or "",
-                                   entwurf=True)
+            from backend import mail_anhang
+            return ("✅ " + c.senden(an, betreff, text, cc=kwargs.get("cc") or "",
+                                    entwurf=True, anhaenge=anh)
+                    + mail_anhang.vermerk(anh))
         return await self._mit_client(_tun)
 
 

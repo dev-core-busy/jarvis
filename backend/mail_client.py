@@ -32,6 +32,7 @@ import email
 import email.header
 import email.utils
 import imaplib
+import mimetypes
 import re
 import smtplib
 import ssl
@@ -651,7 +652,8 @@ class _Ews:
         return n
 
     # ── Schreiben ───────────────────────────────────────────────────────────
-    def senden(self, an, betreff: str, text: str, cc=None, entwurf: bool = False) -> str:
+    def senden(self, an, betreff: str, text: str, cc=None, entwurf: bool = False,
+               anhaenge=None) -> str:
         acc, xl = self._konto(), self._lib()
         an, cc = _adressliste(an), _adressliste(cc)
         if not entwurf:
@@ -665,6 +667,11 @@ class _Ews:
                 to_recipients=[xl.Mailbox(email_address=a) for a in an],
                 cc_recipients=[xl.Mailbox(email_address=a) for a in cc] or None,
             )
+            # An einer noch nicht gespeicherten Nachricht haengt `attach` nur an
+            # die Liste; `save`/`send_and_save` legen Nachricht und Anhaenge
+            # zusammen an (exchangelib 5.6.0, vor Exchange 2013 in zwei Schritten).
+            for name, inhalt in (anhaenge or []):
+                m.attach(xl.FileAttachment(name=name, content=inhalt))
             if entwurf:
                 m.save()
                 return "Entwurf im Ordner Entwuerfe gespeichert."
@@ -1146,7 +1153,7 @@ class _Imap:
             raise _einordnen(e, "smtp") from e
 
     def _bauen(self, an: list[str], betreff: str, text: str, cc: list[str],
-               bezug: str = "", html: str = "") -> EmailMessage:
+               bezug: str = "", html: str = "", anhaenge=None) -> EmailMessage:
         m = EmailMessage()
         m["From"] = self.konto.adresse
         m["To"] = ", ".join(an)
@@ -1165,14 +1172,23 @@ class _Imap:
             # leere Mail - deshalb `add_alternative` und nicht `set_content`
             # mit subtype html.
             m.add_alternative(html, subtype="html")
+        for name, inhalt in (anhaenge or []):
+            # Der Typ aus der Endung; ohne Treffer als neutrale Bytes – der
+            # Empfaenger bekommt die Datei dann trotzdem, nur ohne Vorschau.
+            typ = mimetypes.guess_type(name)[0] or "application/octet-stream"
+            haupt, _, unter = typ.partition("/")
+            m.add_attachment(inhalt, maintype=haupt, subtype=unter or "octet-stream",
+                             filename=name)
         return m
 
-    def senden(self, an, betreff: str, text: str, cc=None, entwurf: bool = False) -> str:
+    def senden(self, an, betreff: str, text: str, cc=None, entwurf: bool = False,
+               anhaenge=None) -> str:
         an, cc = _adressliste(an), _adressliste(cc)
         if entwurf:
-            return self._entwurf_ablegen(self._bauen(an, betreff, text, cc))
+            return self._entwurf_ablegen(self._bauen(an, betreff, text, cc,
+                                                     anhaenge=anhaenge))
         _pruefe_empfaenger(an)
-        m = self._bauen(an, betreff, text, cc)
+        m = self._bauen(an, betreff, text, cc, anhaenge=anhaenge)
         s = None
         try:
             s = self._smtp()
@@ -1472,8 +1488,12 @@ class MailClient:
     def lesen(self, msg_id: str, ordner: str = "") -> MailNachricht:
         return self._ruf("lesen", msg_id, ordner=ordner)
 
-    def senden(self, an, betreff: str, text: str, cc=None, entwurf: bool = False) -> str:
-        return self._ruf("senden", an, betreff, text, cc=cc, entwurf=entwurf)
+    def senden(self, an, betreff: str, text: str, cc=None, entwurf: bool = False,
+               anhaenge=None) -> str:
+        """``anhaenge``: ``[(dateiname, inhalt), …]`` – aufgeloest und geprueft
+        von ``backend.mail_anhang``, hier nur noch Bytes."""
+        return self._ruf("senden", an, betreff, text, cc=cc, entwurf=entwurf,
+                         anhaenge=anhaenge)
 
     def antworten(self, msg_id: str, text: str, allen: bool = False,
                   entwurf: bool = False, html: str = "") -> str:

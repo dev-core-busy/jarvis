@@ -90,7 +90,8 @@ D = SANDKASTEN / "data"
 (D / "chat_history").mkdir(parents=True)
 (D / "rag").mkdir()
 (D / "knowledge").mkdir()
-for p in (D, D / "chat_history", D / "rag", D / "knowledge"):
+(D / "support_instructions").mkdir()
+for p in (D, D / "chat_history", D / "rag", D / "knowledge", D / "support_instructions"):
     p.chmod(0o755)
 alt = {
     "chat_history/anna.muster.json": "[]",
@@ -117,6 +118,11 @@ alt = {
     # Gegenrichtung: eine Sicherung OHNE privates Original bleibt, wie sie ist
     "oeffentlich.json.bak": "{}",
     "rag/handbuch.txt": "Wissen",
+    # Auf ECHT am 2026-10-22 gemessen: Verzeichnis 0755, Dateien 0644, fuer
+    # einen fremden Benutzer lesbar – Dateiname ist der Benutzername.
+    "support_instructions/anna.muster.md": "Bitte immer auf Deutsch.",
+    # Altbestand ohne Schreibweg, ebenfalls 0644 auf ECHT.
+    "user_identity.txt": "anna.muster",
 }
 for rel, inhalt in alt.items():
     f = D / rel
@@ -145,6 +151,10 @@ for rel in ("memory_anna.muster.json", "memory_anna.muster.json.bak",
             "memory.json.bak-20260913-150733",
             "security_state.json.bak-20260805-195844"):
     check(f"{rel} nach Start-Haertung nicht fremd lesbar", not fremd_lesbar(D / rel))
+check("support_instructions/ fuer Fremde nicht mehr begehbar",
+      not (modus(D / "support_instructions") & (stat.S_IROTH | stat.S_IXOTH)))
+check("user_identity.txt nach Start-Haertung nicht fremd lesbar",
+      not fremd_lesbar(D / "user_identity.txt"))
 check("auth_state.json.bak bekommt die STRENGE Stufe des Originals (0600)",
       modus(D / "auth_state.json.bak") == 0o600)
 check("oeffentlich.json.bak (kein privates Original) bleibt lesbar",
@@ -242,6 +252,31 @@ check("neu angelegtes telemetry_stats.json nicht fremd lesbar",
       not fremd_lesbar(tm._STATS_FILE))
 check("neu angelegtes telemetry_errors.json nicht fremd lesbar",
       not fremd_lesbar(tm._ERRORS_FILE))
+
+# ══ 7. Support-Anweisungen: das Verzeichnis entsteht im Betrieb NEU ══════════
+# Auf einer frischen Installation legt erst das erste Speichern es an – nach der
+# Start-Haertung. Der ECHTE Rumpf aus main.py wird per AST geschnitten und
+# ausgefuehrt (main.py laesst sich hier nicht importieren).
+import ast                                           # noqa: E402
+_quelle = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
+_fn = next((n for n in ast.walk(ast.parse(_quelle))
+            if isinstance(n, ast.FunctionDef) and n.name == "_support_instr_path"), None)
+if _fn is None:
+    print("ABBRUCH: _support_instr_path nicht in main.py gefunden.")
+    sys.exit(2)
+SD = SANDKASTEN / "support" / "backend"
+SD.mkdir(parents=True)
+_ns = {"Path": Path, "__file__": str(SD / "main.py"),
+       "_benutzer": types.SimpleNamespace(pfad_teil=lambda n, f: n or f)}
+exec(compile(ast.Module(body=[_fn], type_ignores=[]), "main.py", "exec"), _ns)
+_ziel = _ns["_support_instr_path"]("anna.muster")
+# Positivkontrolle: der Pfad liegt im Sandkasten und das Verzeichnis entstand
+# WIRKLICH durch den Aufruf (sonst waere die Pruefung trivial)
+if not str(_ziel).startswith(str(SANDKASTEN)) or not _ziel.parent.is_dir():
+    print(f"ABBRUCH: Support-Pfad unerwartet: {_ziel}")
+    sys.exit(2)
+check("frisch angelegtes support_instructions/ fuer Fremde nicht begehbar",
+      not (modus(_ziel.parent) & (stat.S_IROTH | stat.S_IXOTH)))
 
 shutil.rmtree(SANDKASTEN, ignore_errors=True)
 print(f"\n{_ok} OK, {_fail} FAIL")

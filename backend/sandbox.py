@@ -345,7 +345,13 @@ PRIVATE_DIRS = ("data/documents", "data/chats", "data/logs",
                 "data/issue_attachments", "data/backups",
                 "data/learnings", "data/erfahrung",
                 # Keytab der Windows-Anmeldung (siehe _APP_DENY_REL)
-                "data/kerberos")
+                "data/kerberos",
+                # Persoenliche Support-Anweisungen, eine Datei je Benutzer mit
+                # dem Benutzernamen als Dateinamen. Auf ECHT am 2026-10-22
+                # gemessen: Verzeichnis 0755, Dateien 0644 – fuer jarvis_sandbox
+                # lesbar. Das geschlossene Verzeichnis ist die Schranke, die
+                # Namen kennt keine Liste.
+                "data/support_instructions")
 PRIVATE_MODE = 0o750
 
 # Einzelne Dateien direkt in data/, die kein Domain-Nutzer lesen darf. Das
@@ -402,7 +408,11 @@ PRIVATE_FILES = ("data/scheduled_jobs.json", "data/file_watchers.json",
                  "data/conv_log.json",
                  # Werkzeug-/LLM-Statistik samt Name dessen, der sie zuletzt
                  # zurueckgesetzt hat – Betriebswissen, geht die Shell nichts an.
-                 "data/telemetry_stats.json")
+                 "data/telemetry_stats.json",
+                 # Altbestand ohne heutigen Schreibweg (kein Code legt sie mehr
+                 # an), auf ECHT am 2026-10-22 gemessen 0644. Benutzerkennung –
+                 # der Inhalt wurde nicht gelesen, die Stufe folgt dem Namen.
+                 "data/user_identity.txt")
 PRIVATE_FILE_MODE = 0o640
 
 # Dateien mit Benutzernamen im Namen – eine feste Liste kann sie nicht kennen.

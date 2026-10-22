@@ -18301,7 +18301,7 @@ def _support_instr_path(user: str) -> Path:
     entschaerfte nur und liess den Domaenenanteil stehen.
     """
     d = Path(__file__).parent.parent / "data" / "support_instructions"
-    d.mkdir(parents=True, exist_ok=True)
+    d.mkdir(mode=0o750, parents=True, exist_ok=True)  # sandbox.PRIVATE_DIRS
     return d / (_benutzer.pfad_teil(user, "anon") + ".md")
 
 

@@ -48,6 +48,10 @@
         .xl-logo img { display: block; }
         .xl-title { font-weight: 600; font-size: 13px; flex: 1 1 auto; min-width: 0;
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        /* Die Fassung steht neben dem Titel, nicht in ihm: leiser gesetzt,
+           damit sie den Namen nicht verdraengt, und ohne eigenen Umbruch –
+           in der schmalen Leiste wird der TITEL abgeschnitten, nicht sie. */
+        .xl-ver { font-weight: 400; color: var(--text-secondary); font-size: 11px; }
         .xl-iconbtn { background: none; border: none; color: var(--text-secondary);
             cursor: pointer; padding: 4px; border-radius: 6px; line-height: 1;
             font-size: 12px; font-weight: 700; font-family: inherit; flex: 0 0 auto;
@@ -340,7 +344,7 @@
     <div class="xl-top">
         <div class="xl-logo topbar-avatar">J</div>
         <span class="xl-title"><span class="brand-app-name">Jarvis</span>
-            <span data-i18n="xl.title">Tabellen-Assistent</span></span>
+            <span data-i18n="xl.title">Tabellen-Assistent</span><span class="xl-ver"></span></span>
     </div>
     <div class="xl-body">
         <p class="xl-hint" id="xl-login-hint"></p>
@@ -374,7 +378,7 @@
     <div class="xl-top">
         <div class="xl-logo topbar-avatar">J</div>
         <span class="xl-title"><span class="brand-app-name">Jarvis</span>
-            <span data-i18n="xl.title">Tabellen-Assistent</span></span>
+            <span data-i18n="xl.title">Tabellen-Assistent</span><span class="xl-ver"></span></span>
         <!-- Sinnbilder als SVG, nicht als Textzeichen: '◐' und '⏻' werden je
              nach Schrift als Kaestchen oder winziger Punkt gerendert. Dieselben
              Pfade wie in taskpane.html des Outlook-Add-ins. -->
@@ -485,6 +489,6 @@
      (.topbar-avatar). /api/branding haengt an KEINER Anmeldung, die Marke steht
      also schon auf dem Anmeldebildschirm richtig da. -->
 <script src="/static/js/branding.js?v=27"></script>
-<script src="/static/excel-addin/excel.js?v=12"></script>
+<script src="/static/excel-addin/excel.js?v=13"></script>
 </body>
 </html>

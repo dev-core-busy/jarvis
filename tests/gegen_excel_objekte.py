@@ -35,6 +35,7 @@ DATEIEN = [
 WAECHTER = [
     ("py", "tests/test_excel_objekte.py"),
     ("js", "tests/test_excel_objekte_ui.js"),
+    ("js", "tests/test_excel_kommentar_ui.js"),
 ]
 
 
@@ -239,6 +240,30 @@ def _p19():
     patch("backend/excel_objekte.py",
           "    if _hat_eines(eintrag, _OBJEKT_FELDER):\n        return True",
           "    if False:\n        return True")
+
+
+@probe("Kommentar-Deduplizierung entfernt (Stand vor 2026-10-23)",
+       "frontend/excel-addin/excel.js")
+def _p20():
+    # Der ALTE Zustand: jedes Ziel bekommt seinen `add`. Bei drei Eintraegen
+    # auf dieselbe Ankerzelle wirft der zweite InvalidOperation.
+    patch("frontend/excel-addin/excel.js",
+          "                var kommentiert = Object.keys(jeAnker).map(function (k) {\n"
+          "                    return jeAnker[k];\n"
+          "                });",
+          "                var kommentiert = ziele.filter(function (z) {\n"
+          "                    return !!z.a.begruendung;\n"
+          "                });")
+
+
+@probe("Dedup ueber die ADRESSE statt die Ankerzelle",
+       "frontend/excel-addin/excel.js")
+def _p21():
+    # Die subtilere Haelfte: B12:AN12 und B12:B20 sind verschiedene Adressen
+    # mit DERSELBEN Ankerzelle – `comments.add` traefe trotzdem zweimal B12.
+    patch("frontend/excel-addin/excel.js",
+          "            String(a.adresse || '').split(':')[0].replace(/\\$/g, '').toUpperCase();",
+          "            String(a.adresse || '').replace(/\\$/g, '').toUpperCase();")
 
 
 @probe("Objekt-Fehler nur ins Protokoll, nicht in den Verlauf",

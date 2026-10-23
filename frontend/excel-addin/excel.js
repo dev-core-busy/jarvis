@@ -1788,6 +1788,15 @@
        Der Kommentar wird ERSETZT statt hinzugefuegt: `comments.add` auf eine
        Zelle, die schon einen traegt, wirft – und wer denselben Bereich zweimal
        bearbeitet (der Normalfall beim Nachbessern), traefe genau darauf. */
+    /* Schluessel der ANKERZELLE eines Eintrags – das obere linke Feld seines
+       Bereichs, also genau die Zelle, an der `comments.add` haengt. Das `$`
+       einer absoluten Adresse faellt weg, damit `$B$12` und `B12` denselben
+       Schluessel ergeben. */
+    function ankerSchluessel(a) {
+        return String(a.blatt || '').toUpperCase() + '!' +
+            String(a.adresse || '').split(':')[0].replace(/\$/g, '').toUpperCase();
+    }
+
     function kosmetik(aenderungen) {
         if (!markAn() || !_office || !window.Excel) return Promise.resolve();
         return Excel.run(function (ctx) {
@@ -1805,9 +1814,29 @@
             });
             return ctx.sync().then(function () {
                 if (!_kann110) return ctx.sync();
-                // Vorhandene Kommentare NACHSEHEN, statt blind anzulegen.
+                // ⚠ EIN LAUF KANN DENSELBEN BEREICH MEHRFACH TRAGEN, und das
+                // Nachsehen oben schuetzt nur gegen Kommentare aus FRUEHEREN
+                // Laeufen. Alle `getItemByCell` laufen VOR dem ersten `add`:
+                // bei drei Eintraegen auf dieselbe Zelle findet keiner etwas,
+                // und dann legen alle drei einen Kommentar auf B12 – der
+                // zweite wirft `InvalidOperation` (gemeldet 2026-10-23,
+                // `2026!B12:AN12`, dreimal im selben Vorschlag). Der ganze
+                // `ctx.sync()` faellt damit, also bleibt AUCH die Markierung
+                // der uebrigen Zellen aus.
+                // Dedupliziert wird auf die ANKERZELLE, nicht auf die Adresse:
+                // `comments.add` haengt am oberen linken Feld, und B12:AN12
+                // und B12:B20 haben dasselbe. Es gewinnt der LETZTE Eintrag –
+                // wie beim Zellinhalt, den der letzte Schreibvorgang setzt.
+                var jeAnker = {};
                 ziele.forEach(function (z) {
                     if (!z.a.begruendung) return;
+                    jeAnker[ankerSchluessel(z.a)] = z;
+                });
+                var kommentiert = Object.keys(jeAnker).map(function (k) {
+                    return jeAnker[k];
+                });
+                // Vorhandene Kommentare NACHSEHEN, statt blind anzulegen.
+                kommentiert.forEach(function (z) {
                     try {
                         z.k = ctx.workbook.comments.getItemByCell(
                             (z.a.blatt ? z.a.blatt + '!' : '') + z.a.adresse.split(':')[0]);
@@ -1818,8 +1847,7 @@
                 // Fehler faellt beim sync an und wird hier bewusst geschluckt:
                 // "kein Kommentar da" ist die Regel, nicht die Ausnahme.
                 return ctx.sync().catch(function () { }).then(function () {
-                    ziele.forEach(function (z) {
-                        if (!z.a.begruendung) return;
+                    kommentiert.forEach(function (z) {
                         var text = T('xl.comment_pre', 'Jarvis:') + ' ' + z.a.begruendung;
                         try {
                             if (z.k && z.k.id) { z.k.content = text; return; }
@@ -2352,6 +2380,32 @@
         }
     }
 
+    /* Schreibt die Fassung des Fensters hinter den Titel.
+
+       ⚠ SIE STEHT BEWUSST NICHT IM i18n-WERT UND NICHT IM MARKUP. Beides
+       waeren Pflegestellen, die beim naechsten Mal auseinanderlaufen: der
+       Titel kommt zweimal im Markup vor (Anmeldung und App) und zweimal in
+       `i18n.js` (DE/EN) – vier Orte fuer EINE Zahl. `XL_VERSION` ist die
+       einzige Quelle, `.xl-ver` nur ihr Platz.
+
+       Der eigene Span ist auch der Grund, warum die Version einen
+       Sprachwechsel ueberlebt: `applyLang()` setzt den textContent von
+       `[data-i18n]` – stuende die Zahl im Titel-Span, waere sie nach dem
+       ersten Klick auf DE/EN weg (Register: das Markup war die ganze Zeit
+       richtig und wurde beim ersten applyLang() falsch). */
+    var XL_VERSION = '1.00';
+
+    function versionAnschreiben() {
+        var text = ' (v' + XL_VERSION + ')';
+        var knoten = document.querySelectorAll('.xl-ver');
+        for (var i = 0; i < knoten.length; i++) knoten[i].textContent = text;
+        // Der Fenstertitel traegt sie ebenfalls – er steht im Protokoll der
+        // Office-Diagnose und in der Liste der Aufgabenfenster.
+        try {
+            if (document.title.indexOf('(v') === -1) document.title += text;
+        } catch (e) { }
+    }
+
     function start() {
         // JEDER Schritt einzeln abgesichert. Bis 2026-08-21 brach `start()`
         // beim ersten Fehler ab – und weil Anmeldung UND App verborgen
@@ -2359,6 +2413,9 @@
         // (genau so gemeldet). Ein Teilausfall darf hoechstens eine Funktion
         // kosten, nie die ganze Anzeige.
         try { binden(); } catch (e) { }
+        // VOR dem Trident-Ausstieg: auch das Fenster, das nur noch eine Absage
+        // anzeigt, soll sagen, welcher Stand sie anzeigt.
+        try { versionAnschreiben(); } catch (e) { }
 
         // Fehlendes `fetch` ist KEINE vage Vermutung, sondern die Signatur des
         // Trident-WebView (Internet Explorer). Den benutzen die KAUFVERSIONEN

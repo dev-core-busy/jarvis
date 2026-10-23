@@ -1764,14 +1764,40 @@ function angemeldetesFenster(opt) {
         const d = win.document;
         pruefe(!!d.getElementById('xl-anw'), '10 Eingabefeld fuer Vorgaben vorhanden');
         pruefe(!!d.getElementById('xl-anw-save'), '10 Speichern-Knopf vorhanden');
-        // Sie liegen in einem ZUGEKLAPPTEN Abschnitt – im Alltag nicht
-        // gebraucht, aber UEBER dem Eingabefeld, damit er nicht am Fensterende
-        // aus dem Sichtfenster wandert.
-        const abs = d.getElementById('xl-einst');
-        pruefe(!!abs && abs.tagName.toLowerCase() === 'details',
-               '10 sie liegen in einem einklappbaren Abschnitt');
-        pruefe(!!abs && !abs.hasAttribute('open'),
-               '10 der Abschnitt ist per Vorgabe ZU');
+        // Sie liegen in einem Bereich, der per Vorgabe ZU ist – im Alltag
+        // nicht gebraucht, aber UEBER dem Eingabefeld, damit er nicht am
+        // Fensterende aus dem Sichtfenster wandert.
+        //
+        // ⚠ GEPRUEFT WIRD DIE EIGENSCHAFT, NICHT DIE UMSETZUNG. Hier stand
+        // `tagName === 'details'` und `!hasAttribute('open')`. Beim Umbau auf
+        // zwei Reiter (2026-10-23) wurden daraus zwei FAIL, obwohl die Zusage
+        // unveraendert eingehalten war: der Bereich ist jetzt ein
+        // `.xl-tabpanel`, das per `hidden` geschlossen startet. Eine Zusage,
+        // die ein Tag oder ein Attribut festschreibt, meldet beim naechsten
+        // Umbau einen Fehler, den es nicht gibt (Register).
+        const feld = d.getElementById('xl-anw');
+        const bereich = feld && feld.closest('.xl-tabpanel, details');
+        pruefe(!!bereich, '10 sie liegen in einem eigenen, faltbaren Bereich');
+        const offen = !bereich ? true
+            : (bereich.tagName.toLowerCase() === 'details'
+                ? bereich.hasAttribute('open')
+                : !bereich.classList.contains('hidden'));
+        // ⚠ GEMESSEN WIRD HIER DER ZUSTAND NACH DER INITIALISIERUNG, und das
+        // ist Absicht: `binden()` ruft `reiterZeigen('')` und stellt Markup
+        // und aria-Zustand konsistent her. Eine Sabotage AM MARKUP heilt
+        // dieser Aufruf deshalb – wer sie hier erwartet, haelt die Pruefung
+        // fuer zahnlos. Den Markup-Startzustand prueft
+        // `test_excel_reiter_ui.js` ("schon im MARKUP sind beide Panels zu"),
+        // die Umschaltlogik dessen Gegenproben 44-46.
+        pruefe(!offen, '10 der Bereich ist nach dem Start ZU');
+        // Und er muss ERREICHBAR sein – ein geschlossener Bereich ohne
+        // Bedienelement waere schlimmer als ein offener.
+        const griff = bereich && (
+            bereich.previousElementSibling &&
+            bereich.previousElementSibling.querySelector('[aria-controls="' + bereich.id + '"], summary')
+        ) || (bereich && d.querySelector('[aria-controls="' + bereich.id + '"]'));
+        pruefe(!!griff || (bereich && bereich.querySelector('summary')),
+               '10 es gibt ein Bedienelement, das ihn oeffnet');
         pruefe(zustand.gesendet.some(g => g.pfad === '/api/excel/instructions'),
                '10 die Vorgaben werden beim Oeffnen GELADEN');
         // Der Ladeweg darf das Fenster nicht aufhalten – die Anwendung ist

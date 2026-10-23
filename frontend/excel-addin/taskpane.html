@@ -211,6 +211,39 @@
             background: var(--bg-secondary); border: 1px solid var(--border);
             border-radius: 6px; color: var(--text-primary); }
         .xl-log-n { font-size: 10.5px; color: var(--text-muted); margin-left: 4px; }
+
+        /* ── Reiter fuer Einstellungen und Protokoll ──
+           ZWEI KOEPFE, EIN KOERPER. Das Fenster ist 320 px schmal und der
+           Chat braucht die Hoehe: der Bereich startet deshalb GESCHLOSSEN
+           (kein Reiter aktiv), ein Klick oeffnet den gewaehlten, ein Klick auf
+           den offenen schliesst wieder. Vorher lagen die beiden Bereiche
+           INEINANDER (Protokoll als <details> im <details> "Einstellungen") –
+           wer das Protokoll suchte, musste erst die Einstellungen aufklappen.
+
+           Die Leiste ist KEIN <details>-summary mehr: zwei gleichrangige
+           Bereiche brauchen zwei gleichrangige Knoepfe, sonst ist der eine
+           dem anderen untergeordnet (genau der Zustand, der hier wegfaellt). */
+        .xl-tabs { display: flex; gap: 2px; margin: 8px 0 0;
+            border-top: 1px solid rgba(var(--fg-rgb), .10); padding-top: 7px; }
+        .xl-tab { flex: 1 1 auto; min-width: 0; background: none; border: none;
+            font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer;
+            color: var(--text-secondary); padding: 5px 6px; border-radius: 7px;
+            display: inline-flex; align-items: center; justify-content: center;
+            gap: 5px; white-space: nowrap; overflow: hidden;
+            text-overflow: ellipsis; }
+        .xl-tab:hover { background: rgba(var(--fg-rgb), .06); }
+        .xl-tab:focus-visible { outline: 2px solid var(--accent);
+            outline-offset: 2px; }
+        /* Der offene Reiter ist am Grund UND an der Schriftfarbe erkennbar –
+           Farbe allein ist keine Information (Register). */
+        .xl-tab[aria-selected="true"] { background: rgba(var(--accent-rgb), .14);
+            color: var(--accent); }
+        .xl-tab svg { width: 13px; height: 13px; flex: 0 0 auto; }
+        .xl-tabpanel { padding: 7px 0 2px; display: flex; flex-direction: column;
+            gap: 7px; }
+        .xl-tabpanel textarea { width: 100%; box-sizing: border-box;
+            font-family: inherit; font-size: 11.5px; resize: vertical;
+            min-height: 54px; }
         .xl-status { font-size: 11.5px; color: var(--text-muted); line-height: 1.45;
             word-break: break-word; }
 
@@ -395,54 +428,68 @@
 
     <div class="xl-chat" id="xl-chat"></div>
 
-    <details class="xl-sect" id="xl-einst">
-        <summary>
-            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
-                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <circle cx="12" cy="12" r="3"/>
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6 1.65 1.65 0 0 0 10 3.09V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-            </svg>
-            <span data-i18n="xl.settings">Einstellungen</span>
-        </summary>
-        <div class="xl-sect-body">
-            <label class="xl-check"><input type="checkbox" id="xl-mark" checked>
-                <span data-i18n="xl.mark">Geänderte Zellen hell markieren und mit einem Kommentar versehen</span></label>
-            <div>
-                <label for="xl-anw" class="xl-hint" data-i18n="xl.instr_label">Persönliche Vorgaben – gelten für jede Frage in Excel</label>
-                <textarea id="xl-anw" rows="3"
-                          data-i18n-placeholder="xl.instr_ph"
-                          placeholder="z. B. „Zahlen mit Tausenderpunkt und zwei Dezimalstellen“, „Kopfzeilen fett“, „Beträge immer in Euro“"></textarea>
-            </div>
-            <div class="xl-sect-row">
-                <button class="xl-btn" id="xl-anw-save" type="button" data-i18n="xl.instr_save">Vorgaben speichern</button>
-                <span class="xl-status" id="xl-anw-status"></span>
-            </div>
-            <div class="xl-hint" data-i18n="xl.instr_note">Vorgaben bestimmen die Form – sie lösen keine Änderung aus und heben keine Sicherheitsregel auf.</div>
+    <!-- ══ EINSTELLUNGEN UND PROTOKOLL ALS ZWEI REITER ══
+         Bis 2026-10-23 lagen sie INEINANDER: das Protokoll war ein <details>
+         innerhalb des <details> "Einstellungen". Wer bei einem Fehler das
+         Protokoll brauchte, musste also erst die Einstellungen aufklappen –
+         und die Protokollzeile, die einen Lauf erklaert, ist genau dann
+         wichtig, wenn jemand unter Druck sucht.
 
-            <!-- DIAGNOSE-PROTOKOLL. Ohne diese Ansicht ist ein Office.js-Fehler
-                 im Aufgabenfenster nicht zu beurteilen: "Interner Fehler
-                 während der Verarbeitung der Anforderung" nennt weder die
-                 Anweisung noch den Ort, und an die Entwicklerkonsole von
-                 WebView2 kommt am Arbeitsplatz niemand. Zugeklappt, damit sie
-                 im Regelfall nicht stört – die Zahl in der Kopfzeile sagt, ob
-                 sich das Aufklappen lohnt. -->
-            <details class="xl-sect xl-sect-in" id="xl-log">
-                <summary>
-                    <span data-i18n="xl.log">Diagnose-Protokoll</span>
-                    <span class="xl-log-n" id="xl-log-n"></span>
-                </summary>
-                <div class="xl-sect-body">
-                    <div class="xl-hint" data-i18n="xl.log_note">Enthält Fehlermeldungen von Excel samt der Anweisung, die gescheitert ist. Excel gibt dabei einen gekürzten Ausschnitt dieser Anweisung heraus – darin können Werte aus den betroffenen Zellen stehen. Vor dem Weitergeben kurz durchsehen.</div>
-                    <pre class="xl-log-out" id="xl-log-out"></pre>
-                    <div class="xl-sect-row">
-                        <button class="xl-btn" id="xl-log-copy" type="button" data-i18n="xl.log_copy">Protokoll kopieren</button>
-                        <button class="xl-btn" id="xl-log-clear" type="button" data-i18n="xl.log_clear">Leeren</button>
-                        <span class="xl-status" id="xl-log-status"></span>
-                    </div>
-                </div>
-            </details>
+         Der Bereich startet GESCHLOSSEN (kein Reiter aktiv): das Fenster ist
+         320 px schmal, die Hoehe gehoert dem Chat. Ein Klick oeffnet den
+         gewaehlten Reiter, ein Klick auf den offenen schliesst wieder. -->
+    <div class="xl-tabs" id="xl-tabs" role="tablist">
+        <button class="xl-tab" type="button" id="xl-tab-einst"
+                role="tab" aria-selected="false" aria-controls="xl-panel-einst"
+                data-xl-tab="einst">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6 1.65 1.65 0 0 0 10 3.09V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            <span data-i18n="xl.settings">Einstellungen</span>
+        </button>
+        <button class="xl-tab" type="button" id="xl-tab-proto"
+                role="tab" aria-selected="false" aria-controls="xl-panel-proto"
+                data-xl-tab="proto">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>
+            <span data-i18n="xl.log">Protokoll</span>
+            <span class="xl-log-n" id="xl-log-n"></span>
+        </button>
+    </div>
+
+    <div class="xl-tabpanel hidden" id="xl-panel-einst"
+         role="tabpanel" aria-labelledby="xl-tab-einst">
+        <label class="xl-check"><input type="checkbox" id="xl-mark" checked>
+            <span data-i18n="xl.mark">Geänderte Zellen hell markieren und mit einem Kommentar versehen</span></label>
+        <div>
+            <label for="xl-anw" class="xl-hint" data-i18n="xl.instr_label">Persönliche Vorgaben – gelten für jede Frage in Excel</label>
+            <textarea id="xl-anw" rows="3"
+                      data-i18n-placeholder="xl.instr_ph"
+                      placeholder="z. B. „Zahlen mit Tausenderpunkt und zwei Dezimalstellen“, „Kopfzeilen fett“, „Beträge immer in Euro“"></textarea>
         </div>
-    </details>
+        <div class="xl-sect-row">
+            <button class="xl-btn" id="xl-anw-save" type="button" data-i18n="xl.instr_save">Vorgaben speichern</button>
+            <span class="xl-status" id="xl-anw-status"></span>
+        </div>
+        <div class="xl-hint" data-i18n="xl.instr_note">Vorgaben bestimmen die Form – sie lösen keine Änderung aus und heben keine Sicherheitsregel auf.</div>
+    </div>
+
+    <!-- DIAGNOSE-PROTOKOLL. Ohne diese Ansicht ist ein Office.js-Fehler im
+         Aufgabenfenster nicht zu beurteilen: "Interner Fehler während der
+         Verarbeitung der Anforderung" nennt weder die Anweisung noch den Ort,
+         und an die Entwicklerkonsole von WebView2 kommt am Arbeitsplatz
+         niemand. Die Zahl am Reiter sagt, ob sich das Aufklappen lohnt. -->
+    <div class="xl-tabpanel hidden" id="xl-panel-proto"
+         role="tabpanel" aria-labelledby="xl-tab-proto">
+        <!-- ERSTE EINSTELLUNG DIESES REITERS. Sie gehoert hierher und nicht
+             zu den Einstellungen: sie bestimmt, was IM PROTOKOLL steht. -->
+        <label class="xl-check"><input type="checkbox" id="xl-debug">
+            <span data-i18n="xl.debug">Ausführliche Diagnose – protokolliert zusätzlich den gelesenen Tabellenaufbau und die Anfragen an den Server</span></label>
+        <div class="xl-hint" data-i18n="xl.log_note">Enthält Fehlermeldungen von Excel samt der Anweisung, die gescheitert ist. Excel gibt dabei einen gekürzten Ausschnitt dieser Anweisung heraus – darin können Werte aus den betroffenen Zellen stehen. Vor dem Weitergeben kurz durchsehen.</div>
+        <pre class="xl-log-out" id="xl-log-out"></pre>
+        <div class="xl-sect-row">
+            <button class="xl-btn" id="xl-log-copy" type="button" data-i18n="xl.log_copy">Protokoll kopieren</button>
+            <button class="xl-btn" id="xl-log-clear" type="button" data-i18n="xl.log_clear">Leeren</button>
+            <span class="xl-status" id="xl-log-status"></span>
+        </div>
+    </div>
 
     <div class="xl-input">
         <textarea id="xl-frage" rows="3"
@@ -489,6 +536,6 @@
      (.topbar-avatar). /api/branding haengt an KEINER Anmeldung, die Marke steht
      also schon auf dem Anmeldebildschirm richtig da. -->
 <script src="/static/js/branding.js?v=27"></script>
-<script src="/static/excel-addin/excel.js?v=13"></script>
+<script src="/static/excel-addin/excel.js?v=16"></script>
 </body>
 </html>

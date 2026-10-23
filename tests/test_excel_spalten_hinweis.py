@@ -60,7 +60,8 @@ except Exception as e:  # noqa: BLE001
     sys.exit(2)
 
 for name in ("_blatt_block", "_spalten_hinweis", "spaltenbuchstabe",
-             "MAX_SPALTEN_ANZEIGE", "MAX_BLOCK_LEN", "_VORSPANN"):
+             "MAX_SPALTEN_ANZEIGE", "MAX_SPALTEN_BEISPIEL",
+             "MAX_BLOCK_LEN", "_VORSPANN"):
     if not hasattr(ea, name):
         print("ABBRUCH: excel_ask.%s fehlt" % name)
         sys.exit(2)
@@ -86,21 +87,60 @@ def blatt(spalten: int, spalte_ab: int = 1, zeile_ab: int = 20,
             "probe": [kopf, [1234.5] * probe_breite]}
 
 
-# ── 0. Positivkontrolle: stellt der Aufbau die Lage ueberhaupt her? ───────
-# Ohne diesen Beleg sind alle folgenden Pruefungen trivial wahr – eine
-# Spaltenliste, die gar nicht gekuerzt ist, braucht keinen Hinweis.
-print("── 0. Positivkontrolle des Messaufbaus ─────────────────────────────")
-_breit = ea._blatt_block(blatt(242), True)
+# ── 0. DER GEMELDETE FALL WIRD GAR NICHT MEHR GEKUERZT ───────────────────
+# ⚠ DAS IST DIE EIGENTLICHE BEHEBUNG, und sie kam erst im dritten Versuch.
+# Zuerst endete die Liste stumm bei Spalte AN (40) – das Modell brach die
+# Arbeit dort ab. Dann BENANNTE ein Hinweis die Kuerzung – und das Modell
+# schrieb NULLEN in die Zielzellen, weil der passende Kopf rechts von AN lag
+# und „kein Match" schien. Eine 0 sieht aus wie ein Messwert; das ist
+# schlimmer als ein Abbruch. Ein Hinweis auf fehlende Daten ersetzt die Daten
+# nicht, wenn sie klein sind und die Aufgabe TRAEGT: Spaltenkoepfe sind ein
+# Wort je Spalte und die Grundlage jedes Mappings.
+print("── 0. Der gemeldete Fall (242 Spalten) wird VOLLSTAENDIG gelistet ──")
+_voll = ea._blatt_block(blatt(242, probe_breite=242), True)
+_v = re.findall(r"([A-Z]{1,3})=Kopf\d+", _voll)
+check("alle 242 Spalten sind gelistet (gezaehlt: %d)" % len(_v), len(_v) == 242)
+check("die erste ist A", bool(_v) and _v[0] == "A")
+check("die letzte ist IH", bool(_v) and _v[-1] == "IH")
+check("kein Kuerzungshinweis, weil nichts gekuerzt wurde", "⚠" not in _voll)
+check("keine Nachforderung noetig", "EXCEL_BRAUCHE" not in _voll)
+check("der Block bleibt im Budget (%d Zeichen)" % len(_voll),
+      len(_voll) <= ea.MAX_BLOCK_LEN)
+# ⚠ DIE BEISPIELZEILEN DUERFEN NICHT MITWACHSEN. 242 Werte je Zeile x 5
+# Zeilen waeren Rauschen, das die Koepfe erdrueckt – und die teuren
+# Eigenschaften (Formeln, Zahlenformate) holt das Fenster ohnehin nur fuer
+# die ersten Spalten.
+_dz = [z for z in _voll.splitlines() if z.strip().startswith("Zeile 21")]
+check("eine Beispiel-Datenzeile ist vorhanden", bool(_dz))
+_werte = re.findall(r"[A-Z]{1,3}=", _dz[0]) if _dz else []
+check("sie bleibt schmal (%d Werte, Deckel %d)"
+      % (len(_werte), ea.MAX_SPALTEN_BEISPIEL),
+      0 < len(_werte) <= ea.MAX_SPALTEN_BEISPIEL)
+
+# ── 0b. Positivkontrolle: eine ECHTE Kuerzung wird noch benannt ──────────
+# Der Hinweis bleibt – oberhalb des neuen Deckels. Ohne diesen Beleg waeren
+# alle folgenden Pruefungen trivial wahr.
+print("── 0b. Positivkontrolle: oberhalb des Deckels greift der Hinweis ───")
+_UEBER = DECKEL + 1
+_breit = ea._blatt_block(blatt(_UEBER), True)
 _gelistet = re.findall(r"([A-Z]{1,3})=Kopf\d+", _breit)
-if len(_gelistet) != DECKEL:
-    print("ABBRUCH: der Aufbau listet %d statt %d Spalten – die zu pruefende "
-          "Kuerzung findet gar nicht statt" % (len(_gelistet), DECKEL))
+# ⚠ ZWEI URSACHEN, ZWEI ANTWORTEN. Ein zu kleines MAX_BLOCK_LEN kappt den
+# Block mitten in der Spaltenliste – dann stimmt die Zahl auch nicht, aber das
+# ist ein BEFUND am Produkt und kein kaputter Messaufbau. Der erste Entwurf
+# brach in beiden Faellen mit Exit 2 ab: die Gegenprobe „Budget zurueck auf
+# 4000" meldete damit „konnte nicht laufen" statt zu beissen, und ein
+# abgebrochener Lauf ist von einem bestandenen nicht zu unterscheiden
+# (dieselbe Falle wie beim Schnitt-Guard eine Stunde vorher).
+if "Blatt-Überblick gekürzt" in _breit:
+    check("das Blatt-Budget reicht fuer die Spaltenliste (MAX_BLOCK_LEN=%d, "
+          "Block=%d Zeichen)" % (ea.MAX_BLOCK_LEN, len(_breit)), False)
+elif len(_gelistet) != DECKEL:
+    print("ABBRUCH: der Aufbau listet %d statt %d Spalten, und der Block wurde "
+          "NICHT gekappt – die zu pruefende Kuerzung findet gar nicht statt"
+          % (len(_gelistet), DECKEL))
     sys.exit(2)
-if _gelistet[-1] != "AN":
-    print("ABBRUCH: letzte gelistete Spalte ist %r, erwartet AN (der gemeldete "
-          "Fall)" % _gelistet[-1])
-    sys.exit(2)
-check("der Aufbau stellt den gemeldeten Fall her (A–AN von 242)", True)
+check("der Aufbau stellt eine echte Kuerzung her (%d von %d)"
+      % (DECKEL, _UEBER), True)
 
 print("── 1. Die Kuerzung wird BENANNT ────────────────────────────────────")
 # ⚠ GEMESSEN WIRD DER HINWEIS, NICHT DER BLOCK. Hier stand `"242" in _breit` –
@@ -108,12 +148,14 @@ print("── 1. Die Kuerzung wird BENANNT ────────────�
 # ("242 Spalten"). Eine Gegenprobe, die die Zahl aus dem Hinweis entfernte,
 # blieb deshalb stumm, und das sah nach einer schwachen Sabotage aus. Es war
 # die Pruefung, die ihre Stelle nicht traf (Register).
-_hinweis = ea._spalten_hinweis(blatt(242), 1)
+_hinweis = ea._spalten_hinweis(blatt(_UEBER), 1)
 check("ein Hinweis steht im Block", "⚠" in _breit)
 check("der Hinweis ist auch einzeln abrufbar", "⚠" in _hinweis)
-check("die GESAMTZAHL steht IM HINWEIS", "242" in _hinweis)
-check("die letzte gelistete Spalte wird genannt", "AN" in _hinweis)
-check("das Blattende wird genannt", "IH" in _hinweis)
+check("die GESAMTZAHL steht IM HINWEIS", str(_UEBER) in _hinweis)
+check("die letzte gelistete Spalte wird genannt",
+      ea.spaltenbuchstabe(DECKEL) in _hinweis)
+check("das Blattende wird genannt",
+      ea.spaltenbuchstabe(_UEBER) in _hinweis)
 # Die wichtigste Zeile: das Modell darf die Luecke nicht fuer ein Ende halten.
 check("der Hinweis sagt ausdruecklich, dass die Tabelle NICHT endet",
       "endet NICHT" in _hinweis)
@@ -123,12 +165,14 @@ m = re.search(r"\[\[EXCEL_BRAUCHE:\s*([^\]]+)\]\]", _hinweis)
 check("eine EXCEL_BRAUCHE-Adresse steht im Hinweis", bool(m))
 adr = (m.group(1).strip() if m else "")
 check("sie nennt das Blatt", adr.startswith("2026!"))
-check("sie beginnt bei der ERSTEN nicht gelisteten Spalte (AO)",
-      "!AO" in adr)
-check("sie reicht bis zum Blattende (IH)", "IH" in adr)
+check("sie beginnt bei der ERSTEN nicht gelisteten Spalte",
+      ("!" + ea.spaltenbuchstabe(DECKEL + 1)) in adr)
+check("sie reicht bis zum Blattende",
+      ea.spaltenbuchstabe(_UEBER) in adr)
 # Die Adresse muss die KOPFZEILE treffen – fuer ein Mapping fehlen die Koepfe,
 # nicht die Daten. Kopfzeile ist hier Zeile 20.
-check("sie beginnt in der Kopfzeile (20)", "AO20" in adr)
+check("sie beginnt in der Kopfzeile (20)",
+      (ea.spaltenbuchstabe(DECKEL + 1) + "20") in adr)
 # ⚠ UND SIE MUSS DURCH DIE EIGENE PRUEFUNG DES LESEWEGS GEHEN. Eine Adresse,
 # die `bereichLesen` verwirft, ist eine Sackgasse mit Anschein (Register: ein
 # Prompt, der einen Weg verspricht, bindet sich an dessen Existenz).
@@ -160,22 +204,23 @@ print("── 5. Der Bezugsrahmen wird mitgerechnet ─────────�
 # ⚠ DER BENUTZTE BEREICH BEGINNT NICHT IMMER BEI A1. Beginnt er bei B, ist die
 # 40. gelistete Spalte AO und die erste fehlende AP – wer ab A rechnet, nennt
 # eine Adresse, die eine Spalte daneben liegt, und das faellt NIEMANDEM auf.
-blk_b = ea._blatt_block(blatt(242, spalte_ab=2), True)
+blk_b = ea._blatt_block(blatt(_UEBER, spalte_ab=2), True)
 gel_b = re.findall(r"([A-Z]{1,3})=Kopf\d+", blk_b)
-check("bei Start in B endet die Liste bei AO", gel_b and gel_b[-1] == "AO")
+check("bei Start in B endet die Liste eine Spalte weiter",
+      bool(gel_b) and gel_b[-1] == ea.spaltenbuchstabe(DECKEL + 1))
 m_b = re.search(r"\[\[EXCEL_BRAUCHE:\s*([^\]]+)\]\]", blk_b)
-check("...und die Nachforderung beginnt bei AP",
-      bool(m_b) and "!AP" in m_b.group(1))
+check("...und die Nachforderung beginnt eine Spalte weiter",
+      bool(m_b) and ("!" + ea.spaltenbuchstabe(DECKEL + 2)) in m_b.group(1))
 # Auch die Zeilennummer folgt dem Rahmen.
-blk_z = ea._blatt_block(blatt(242, zeile_ab=7), True)
+blk_z = ea._blatt_block(blatt(_UEBER, zeile_ab=7), True)
 m_z = re.search(r"\[\[EXCEL_BRAUCHE:\s*([^\]]+)\]\]", blk_z)
 check("die Kopfzeile des Rahmens steht in der Adresse (7)",
-      bool(m_z) and "AO7" in m_z.group(1))
+      bool(m_z) and (ea.spaltenbuchstabe(DECKEL + 1) + "7") in m_z.group(1))
 
 print("── 6. Blattnamen mit Leerzeichen werden zitiert ────────────────────")
 # Ohne Anfuehrungszeichen liest das Fenster den Namen nur bis zum Leerzeichen
 # und holt den falschen (oder keinen) Bereich.
-blk_s = ea._blatt_block(blatt(242, name="Plan 2026"), True)
+blk_s = ea._blatt_block(blatt(_UEBER, name="Plan 2026"), True)
 m_s = re.search(r"\[\[EXCEL_BRAUCHE:\s*([^\]]+)\]\]", blk_s)
 check("der Name steht in Anfuehrungszeichen",
       bool(m_s) and m_s.group(1).startswith("'Plan 2026'!"))
@@ -184,11 +229,11 @@ print("── 7. Auch der ALT-Zweig (aelteres excel.js) bekommt ihn ────
 # ⚠ EINE LEHRE IN ZWEI VON DREI ZWEIGEN IST NICHT ANGEWANDT. Der Zweig fuer
 # das alte Feldformat (`kopf`/`typen`) ist der, den jeder offene Tab benutzt,
 # bis der Benutzer neu laedt – also genau im Ausrollfenster.
-alt = {"name": "2026", "bereich": "A20:IH500", "zeilen": 481, "spalten": 242,
-       "zeile_ab": 20, "spalte_ab": 1,
-       "kopf": ["Kopf%d" % k for k in range(1, 41)],
-       "typen": ["Zahl"] * 40,
-       "beispiele": [[1234.5] * 40]}
+alt = {"name": "2026", "bereich": "A20:IH500", "zeilen": 481,
+       "spalten": _UEBER, "zeile_ab": 20, "spalte_ab": 1,
+       "kopf": ["Kopf%d" % k for k in range(1, DECKEL + 1)],
+       "typen": ["Zahl"] * DECKEL,
+       "beispiele": [[1234.5] * DECKEL]}
 blk_alt = ea._blatt_block(alt, True)
 check("der Alt-Zweig listet Spalten", "    Spalten:" in blk_alt)
 check("...und benennt die Kuerzung", "⚠" in blk_alt and "242" in blk_alt)
@@ -218,8 +263,47 @@ check("...und nennt das Nachfordern als Pflicht, nicht als Option",
 
 print("── 9. Der Hinweis sprengt das Blatt-Budget nicht ───────────────────")
 check("ein Hinweis ist kuerzer als ein Zehntel des Blatt-Budgets",
-      len(ea._spalten_hinweis(blatt(242), 1)) < ea.MAX_BLOCK_LEN // 10)
+      len(ea._spalten_hinweis(blatt(_UEBER), 1)) < ea.MAX_BLOCK_LEN // 10)
 check("der Block bleibt im Budget", len(_breit) <= ea.MAX_BLOCK_LEN)
+
+print("── 10. REGEL: das Erfinden von Werten ist VERBOTEN ─────────────────")
+# ⚠ DER ZWEITE ANLAUF HAT DAS ERST NOETIG GEMACHT. Nachdem der Hinweis die
+# Kuerzung benannte, hat das Modell die Luecke mit NULLEN gefuellt – vier
+# Zielzellen bekamen 0 „da kein entsprechender Header existierte", obwohl die
+# Partner nur ausserhalb des Ausschnitts lagen. Eine erfundene 0 ist nicht von
+# einem Messwert zu unterscheiden; das ist schlimmer als eine fehlende Zelle.
+check("der Prompt verbietet erfundene Werte ausdruecklich",
+      "ERFINDE NIEMALS EINEN WERT" in ea._VORSPANN)
+check("...und benennt die 0 als den gemeinten Fall",
+      "Eine 0" in ea._VORSPANN)
+check("...und nennt den richtigen Weg (Zelle weglassen)",
+      "aus dem Vorschlag WEG" in ea._VORSPANN)
+check("...und verlangt, die offenen Spalten zu NENNEN",
+      "nicht zuordnen konntest" in ea._VORSPANN)
+check("...und stellt die Abwaegung klar (35 richtig > 39 geraten)",
+      "35 von 39" in ea._VORSPANN)
+
+print("── 11. REGEL: Fenster und Backend tragen DENSELBEN Deckel ──────────")
+# ⚠ ZWEI QUELLEN FUER EINEN DECKEL SIND DRIFT. Das Fenster LAEDT
+# PROBE_SPALTEN Spalten, das Backend ZEIGT MAX_SPALTEN_ANZEIGE – ist das
+# Fenster schmaler, nuetzt der groessere Backend-Wert nichts, und der Fehler
+# sieht aus wie ein Backend-Fehler. Gemessen wird am Quelltext des Fensters,
+# weil es keine gemeinsame Quelle gibt (das Fenster laedt kein Python).
+JS = (ROOT / "frontend" / "excel-addin" / "excel.js").read_text()
+m_js = re.search(r"var PROBE_SPALTEN = (\d+);", JS)
+check("PROBE_SPALTEN ist im Fenster gesetzt", bool(m_js))
+js_spalten = int(m_js.group(1)) if m_js else 0
+check("das Fenster laedt mindestens so viele Spalten, wie das Backend zeigt "
+      "(%d >= %d)" % (js_spalten, DECKEL), js_spalten >= DECKEL)
+m_det = re.search(r"var PROBE_SPALTEN_DETAIL = (\d+);", JS)
+check("der schmale Detail-Deckel ist gesetzt", bool(m_det))
+js_detail = int(m_det.group(1)) if m_det else 0
+check("er passt zum Beispiel-Deckel des Backends (%d == %d)"
+      % (js_detail, ea.MAX_SPALTEN_BEISPIEL),
+      js_detail == ea.MAX_SPALTEN_BEISPIEL)
+check("Formeln/Formate kommen aus dem SCHMALEN Bereich",
+      "i.probeDetail.formulas" in JS)
+check("...und die Werte aus dem breiten", "i.probe.values" in JS)
 
 print("\nErgebnis: %d OK, %d FAIL" % (_ok, _fail))
 sys.exit(1 if _fail else 0)

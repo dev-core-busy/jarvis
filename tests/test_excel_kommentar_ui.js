@@ -377,8 +377,14 @@ const E = (blatt, adresse, begruendung) => ({ blatt, adresse, begruendung, werte
         const treffer = JS.match(/var XL_VERSION = '([^']+)'/);
         pruefe(!!treffer, 'XL_VERSION ist in excel.js definiert');
         const ver = treffer ? treffer[1] : null;
-        pruefe(/^\d+\.\d{2}$/.test(ver || ''),
-               'die Fassung hat die Form N.NN (gefunden: ' + ver + ')');
+        // ⚠ DREI GRUPPEN: Haupt.Neben.BAUNUMMER (Festlegung 2026-10-23).
+        // Die dritte steigt bei jedem Neubau um eins – geprueft wird die FORM,
+        // nicht der Wert: eine feste Zahl in einem Waechter ist die Zeitbombe,
+        // die das Register beschreibt (sie wird beim naechsten Bau falsch).
+        pruefe(/^\d+\.\d{2}\.\d{2,}$/.test(ver || ''),
+               'die Fassung hat die Form N.NN.BB (gefunden: ' + ver + ')');
+        const bau = ver ? parseInt(ver.split('.')[2], 10) : 0;
+        pruefe(bau >= 1, 'die Baunummer ist mindestens 1 (gefunden: ' + bau + ')');
         // Jeder Titel im Markup traegt den Platz dafuer – sonst ist die
         // Version auf der Anmeldemaske unsichtbar und erscheint erst nach
         // dem Anmelden.

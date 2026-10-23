@@ -14186,11 +14186,17 @@ async def excel_ask_endpoint(request: Request,
                              "message": "Konto wegen eines Sicherheitsverstosses gesperrt."},
                             status_code=423)
 
+    # Der Deckel wird VOR dem Lauf gelesen, nicht erst bei der Auswertung: in
+    # der letzten Runde muss der Auftrag sagen, dass eine Nachforderung dort
+    # wirkungslos verfaellt (sonst schreibt das Modell nur den Marker und die
+    # Antwort ist leer - gemeldet 2026-10-23).
+    grenze_runden = excel_ask.max_runden()
     auftrag, _kennung = excel_ask.auftrag(
         frage, ueberblick,
         vorgeschichte=vorgeschichte if isinstance(vorgeschichte, list) else None,
         nachgeladen=nachgeladen if isinstance(nachgeladen, list) else None,
-        anweisungen=_load_excel_instructions(user))
+        anweisungen=_load_excel_instructions(user),
+        letzte_runde=runde >= grenze_runden)
 
     global _excel_agent
     from backend.agent import JarvisAgent
@@ -14243,10 +14249,11 @@ async def excel_ask_endpoint(request: Request,
     text, brauche = excel_ask.nachforderung_lesen(antwort or "")
     # Ab der letzten Runde wird nicht mehr nachgefordert – sonst laeuft ein
     # Modell, das immer weiter Bereiche verlangt, in eine Schleife, die den
-    # Benutzer nur Zeit kostet. Der Deckel ist im Admin-Reiter einstellbar und
-    # wird HIER gelesen, damit eine Aenderung ohne Dienstneustart greift.
-    grenze_runden = excel_ask.max_runden()
+    # Benutzer nur Zeit kostet. Der Deckel steht im Admin-Reiter und wurde oben
+    # gelesen, damit eine Aenderung ohne Dienstneustart greift.
+    verworfen: list = []
     if runde >= grenze_runden:
+        verworfen = list(brauche)
         brauche = []
 
     aenderungen: list = []
@@ -14257,6 +14264,45 @@ async def excel_ask_endpoint(request: Request,
         abgelehnt.extend(eintrag.get("abgelehnt") or [])
         if eintrag.get("zusammenfassung") and not zusammenfassung:
             zusammenfassung = eintrag["zusammenfassung"]
+
+    # ── Der Lauf darf nicht STILL leer enden ─────────────────────────────
+    # ⚠ GEMELDET 2026-10-23: der Benutzer bekam „Der Assistent hat keine
+    # Antwort formuliert. Formuliere die Frage bitte anders." – eine
+    # Schuldzuweisung fuer unseren eigenen Rundendeckel. Das Fenster zeigt
+    # diese Meldung, sobald WEDER Text NOCH Aenderungen ankommen; dass eine
+    # verworfene Nachforderung genau das erzeugt, konnte es nicht wissen.
+    # Der Auftrag sagt dem Modell inzwischen vorher, dass die letzte Runde
+    # laeuft (`letzte_runde`) – aber ein Prompt ist eine Bitte, kein Riegel.
+    # Deshalb wird hier aus dem bekannten Grund ein lesbarer Satz, statt die
+    # Leere durchzulassen. Der GRUND geht zusaetzlich als eigenes Feld hinaus,
+    # damit das Fenster nicht raten muss, wen es beschuldigt.
+    grund = ""
+    if not text and not aenderungen:
+        if verworfen:
+            grund = "runden_erschoepft"
+            text = ("Ich hätte für diese Antwort noch weitere Daten gebraucht "
+                    "(%s), aber die Zahl der möglichen Nachfragen ist "
+                    "erschöpft (%d). Das ist eine Grenze des Assistenten, "
+                    "nicht ein Fehler deiner Frage. Grenze die Frage auf "
+                    "einen kleineren Bereich ein – zum Beispiel auf einen Teil "
+                    "der Spalten – oder nenne den Bereich gleich in der Frage."
+                    % (", ".join(str(b)[:60] for b in verworfen[:3]),
+                       grenze_runden))
+        elif not (antwort or "").strip():
+            # Das Modell hat GAR NICHTS geliefert. Auch das ist kein Fehler
+            # der Frage, und es gehoert unterschieden: sonst sucht der naechste
+            # Bericht die Ursache wieder beim Benutzer.
+            grund = "modell_stumm"
+        else:
+            # Es kam etwas, aber nach dem Entfernen der Marker blieb nichts
+            # Lesbares. Selten, aber dann ist der Rohtext die einzige Spur.
+            grund = "nur_marker"
+    if grund:
+        print("[excel] Lauf ohne Ergebnis: grund=%s runde=%d/%d "
+              "rohlaenge=%d verworfen=%s" % (
+                  grund, runde, grenze_runden, len(antwort or ""),
+                  ",".join(str(b)[:40] for b in verworfen[:3]) or "-"),
+              flush=True)
 
     # ``max_runden`` geht MIT der Antwort hinaus, statt das Fenster einen
     # eigenen Endpunkt fragen zu lassen: der Wert wird genau dort gebraucht, wo
@@ -14271,7 +14317,14 @@ async def excel_ask_endpoint(request: Request,
                          "zusammenfassung": zusammenfassung,
                          "brauche": brauche,
                          "runde": runde,
-                         "max_runden": grenze_runden})
+                         "max_runden": grenze_runden,
+                         # Diagnose-Felder. Sie beschuldigen niemanden und
+                         # kosten nichts - ohne sie ist ein Lauf ohne Ergebnis
+                         # von aussen nicht unterscheidbar (der gemeldete Fall
+                         # hinterliess im Protokoll NUR "Excel bereit").
+                         "grund": grund,
+                         "verworfen": verworfen,
+                         "rohlaenge": len(antwort or "")})
 
 
 @app.get("/email", response_class=HTMLResponse)

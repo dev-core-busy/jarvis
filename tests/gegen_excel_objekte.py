@@ -25,16 +25,22 @@ ABLAGE = Path.home() / ".gegen-excel-objekte"
 MARKE = ABLAGE / "laeuft"
 
 DATEIEN = [
+    "frontend/excel-addin/taskpane.html",
     "backend/excel_objekte.py",
     "backend/excel_ask.py",
     "backend/excel_addin.py",
+    "backend/main.py",
     "backend/tools/excel_vorschlag.py",
     "frontend/excel-addin/excel.js",
+    "frontend/js/i18n.js",
 ]
 
 WAECHTER = [
     ("py", "tests/test_excel_objekte.py"),
     ("py", "tests/test_excel_spalten_hinweis.py"),
+    ("py", "tests/test_excel_leerlauf.py"),
+    ("js", "tests/test_excel_leerlauf_ui.js"),
+    ("js", "tests/test_excel_reiter_ui.js"),
     ("js", "tests/test_excel_objekte_ui.js"),
     ("js", "tests/test_excel_kommentar_ui.js"),
 ]
@@ -353,6 +359,185 @@ def _p28():
     patch("backend/excel_ask.py",
           "- **Die Spaltenliste ist gekürzt, wenn ein ⚠-Hinweis darüber steht.**",
           "- Die Spaltenliste zeigt die Spalten des Blattes.")
+
+
+@probe("letzte_runde wird nicht uebergeben (Wurzel-Fix tot)",
+       "backend/main.py")
+def _p29():
+    patch("backend/main.py",
+          "        letzte_runde=runde >= grenze_runden)",
+          "        letzte_runde=False)")
+
+
+@probe("Auftrag warnt nicht vor der letzten Runde", "backend/excel_ask.py")
+def _p30():
+    patch("backend/excel_ask.py",
+          "    if letzte_runde:\n"
+          '        teile.append(marke % "LETZTE RUNDE – KEINE NACHFORDERUNG MEHR MÖGLICH")',
+          "    if False:\n"
+          '        teile.append(marke % "LETZTE RUNDE – KEINE NACHFORDERUNG MEHR MÖGLICH")')
+
+
+@probe("verworfene Nachforderung laeuft wieder ins Leere (Guertel weg)",
+       "backend/main.py")
+def _p31():
+    patch("backend/main.py",
+          "        if verworfen:\n"
+          '            grund = "runden_erschoepft"',
+          "        if False:\n"
+          '            grund = "runden_erschoepft"')
+
+
+@probe("Grund wird nicht mitgeschickt (Fenster muss raten)",
+       "backend/main.py")
+def _p32():
+    patch("backend/main.py",
+          '                         "grund": grund,',
+          '                         "_grund_weg": grund,')
+
+
+@probe("Lauf wird nicht mehr protokolliert", "frontend/excel-addin/excel.js")
+def _p33():
+    patch("frontend/excel-addin/excel.js",
+          "        protokoll('lauf', 'runde ' + runde + '/'",
+          "        if (false) protokoll('lauf', 'runde ' + runde + '/'")
+
+
+@probe("alte Schuldzuweisung kehrt zurueck", "frontend/js/i18n.js")
+def _p34():
+    patch("frontend/js/i18n.js",
+          "'Der Assistent hat keine Antwort geliefert. Das muss nicht an deiner Frage liegen – versuche es noch einmal oder grenze die Frage auf einen kleineren Bereich ein.'",
+          "'Der Assistent hat keine Antwort formuliert. Formuliere die Frage bitte anders.'")
+
+
+@probe("Faelle werden im Fenster nicht unterschieden",
+       "frontend/excel-addin/excel.js")
+def _p35():
+    patch("frontend/excel-addin/excel.js",
+          "            if (d.grund === 'modell_stumm') {",
+          "            if (false && d.grund === 'modell_stumm') {")
+
+
+@probe("Spalten-Deckel zurueck auf 40 (Stand vor der Behebung)",
+       "backend/excel_ask.py")
+def _p36():
+    patch("backend/excel_ask.py",
+          "MAX_SPALTEN_ANZEIGE = 300      # Spalten je Blatt in der Spaltenliste",
+          "MAX_SPALTEN_ANZEIGE = 40       # Spalten je Blatt in der Spaltenliste")
+
+
+@probe("Fenster laedt wieder nur 40 Spalten (Drift zum Backend)",
+       "frontend/excel-addin/excel.js")
+def _p37():
+    patch("frontend/excel-addin/excel.js",
+          "    var PROBE_SPALTEN = 300;",
+          "    var PROBE_SPALTEN = 40;")
+
+
+@probe("Beispielzeilen wachsen mit (Koepfe werden erdrueckt)",
+       "backend/excel_ask.py")
+def _p38():
+    patch("backend/excel_ask.py",
+          "def _zeile_text(werte, spalte_ab: int, grenze: int = MAX_SPALTEN_BEISPIEL) -> str:",
+          "def _zeile_text(werte, spalte_ab: int, grenze: int = MAX_SPALTEN_ANZEIGE) -> str:")
+
+
+@probe("Formeln/Formate kommen wieder aus dem breiten Bereich",
+       "frontend/excel-addin/excel.js")
+def _p39():
+    patch("frontend/excel-addin/excel.js",
+          "                e.probeFormeln = i.probeDetail.formulas || [];",
+          "                e.probeFormeln = i.probe.formulas || [];")
+
+
+@probe("0-Verbot aus dem Prompt entfernt", "backend/excel_ask.py")
+def _p40():
+    patch("backend/excel_ask.py",
+          "- **ERFINDE NIEMALS EINEN WERT, WEIL DU EINEN PARTNER NICHT FINDEST.**",
+          "- Trage die Werte ein, die du zuordnen kannst.")
+
+
+@probe("Blatt-Budget zurueck auf 4000 (schneidet die Liste ab)",
+       "backend/excel_ask.py")
+def _p41():
+    patch("backend/excel_ask.py", "MAX_BLOCK_LEN = 14000", "MAX_BLOCK_LEN = 4000")
+
+
+@probe("debug schaltet Diagnose AB statt ZU", "frontend/excel-addin/excel.js")
+def _p42():
+    # Die tragende Zusage des Schalters: er nimmt nichts weg. Haengte die
+    # gewoehnliche Zeile an `debugAn()`, waere ein Protokoll ohne Schalter
+    # leer – genau der Zustand, der am 2026-10-23 die Fehlersuche blockierte.
+    patch("frontend/excel-addin/excel.js",
+          "    function protokoll(bereich, text) {\n        try {",
+          "    function protokoll(bereich, text) {\n        if (!debugAn()) return;\n        try {")
+
+
+@probe("Debug-Zeile kommt auch ohne Schalter", "frontend/excel-addin/excel.js")
+def _p43():
+    patch("frontend/excel-addin/excel.js",
+          "    function protokollDebug(bereich, textFn) {\n        if (!debugAn()) return;",
+          "    function protokollDebug(bereich, textFn) {\n        if (false) return;")
+
+
+@probe("Reiter oeffnen beide Panels", "frontend/excel-addin/excel.js")
+def _p44():
+    patch("frontend/excel-addin/excel.js",
+          "            var zu = (p.id !== 'xl-panel-' + offen);",
+          "            var zu = false;")
+
+
+@probe("aria-selected wird nicht mitgefuehrt", "frontend/excel-addin/excel.js")
+def _p45():
+    # Optisch richtig, fuer einen Screenreader falsch – zwei Quellen fuer
+    # einen Zustand.
+    patch("frontend/excel-addin/excel.js",
+          "            r.setAttribute('aria-selected', an ? 'true' : 'false');",
+          "            r.setAttribute('aria-selected', 'false');")
+
+
+@probe("Klick auf den offenen Reiter schliesst nicht",
+       "frontend/excel-addin/excel.js")
+def _p46():
+    patch("frontend/excel-addin/excel.js",
+          "        return reiterZeigen(war ? '' : name);",
+          "        return reiterZeigen(name);")
+
+
+@probe("debug-Zustand wird nicht gespeichert", "frontend/excel-addin/excel.js")
+def _p47():
+    patch("frontend/excel-addin/excel.js",
+          "        try { localStorage.setItem(DEBUG_KEY, v); } catch (e) { _speicherGeht = false; }",
+          "        try { /* sabotiert */ } catch (e) { }")
+
+
+@probe("Protokoll-Panel liegt wieder IM Einstellungs-Panel",
+       "frontend/excel-addin/taskpane.html")
+def _p48():
+    # Die alte Verschachtelung – der Benutzer muss erst die Einstellungen
+    # aufklappen, um an das Protokoll zu kommen.
+    #
+    # ⚠ DER ERSTE VERSUCH SETZTE NUR EIN ZUSATZ-ATTRIBUT und veraenderte damit
+    # GAR NICHTS an der Struktur: die Probe blieb stumm, und das sah nach einem
+    # blinden Waechter aus. Eine Sabotage muss die Eigenschaft wirklich
+    # aufheben (Register: die Sabotage war zu schwach, nicht der Waechter
+    # zahnlos). Hier wird das schliessende </div> des Einstellungs-Panels
+    # WEGGENOMMEN und hinter dem Protokoll-Panel wieder eingesetzt – damit
+    # wird proto zum Kind von einst, genau wie vor dem Umbau.
+    patch("frontend/excel-addin/taskpane.html",
+          '        <div class="xl-hint" data-i18n="xl.instr_note">Vorgaben bestimmen die Form'
+          ' – sie lösen keine Änderung aus und heben keine Sicherheitsregel auf.</div>\n'
+          '    </div>\n',
+          '        <div class="xl-hint" data-i18n="xl.instr_note">Vorgaben bestimmen die Form'
+          ' – sie lösen keine Änderung aus und heben keine Sicherheitsregel auf.</div>\n')
+    patch("frontend/excel-addin/taskpane.html",
+          '            <span class="xl-status" id="xl-log-status"></span>\n'
+          '        </div>\n'
+          '    </div>\n',
+          '            <span class="xl-status" id="xl-log-status"></span>\n'
+          '        </div>\n'
+          '    </div>\n'
+          '    </div>\n')
 
 
 @probe("Objekt-Fehler nur ins Protokoll, nicht in den Verlauf",

@@ -129,6 +129,19 @@
             logZeichnen();
         } catch (e) { }
     }
+    /* Zeile, die NUR bei eingeschalteter Diagnose erscheint.
+
+       Hier gehoert hin, was im Normalbetrieb Rauschen ist und bei einer
+       Fehlersuche die Frage beantwortet: wie sah der gelesene Aufbau aus, wie
+       gross war die Anfrage, welche Grenzen haben gegriffen. Der TEXT wird
+       nur gebaut, wenn der Schalter an ist – ein Aufruf mit einer teuren
+       Zeichenkette als Argument waere sonst immer teuer. */
+    function protokollDebug(bereich, textFn) {
+        if (!debugAn()) return;
+        try {
+            protokoll(bereich, typeof textFn === 'function' ? textFn() : textFn);
+        } catch (e) { }
+    }
     /* ⚠ EINE OFFICE.JS-ANWEISUNG TRAEGT IHRE WERTE MIT.
        `debugInfo.fullStatement` lautet nicht `range.formulas = …`, sondern
        `worksheet.getRange("G2").formulas = [["=E2*F2"]]` – bei einem
@@ -222,6 +235,46 @@
         if (!_log.length) return T('xl.log_empty', 'Noch nichts protokolliert.');
         return _log.join('\n');
     }
+    /* ── Reiter: Einstellungen | Protokoll ──
+       DREI ZUSTAENDE, und der dritte ist der Regelfall: GESCHLOSSEN. Das
+       Fenster ist 320 px schmal, die Hoehe gehoert dem Chat – ein dauerhaft
+       offener Einstellungsblock waere der Rueckschritt gegenueber dem
+       <details>, das hier vorher stand.
+
+       `aria-selected` ist nicht Zierde: ohne es sagt ein Screenreader nicht,
+       welcher Reiter offen ist, und die Klasse `hidden` allein ist fuer ihn
+       nicht erreichbar. Gesteuert wird BEIDES aus dieser einen Funktion –
+       zwei Stellen fuer denselben Zustand laufen auseinander, und dann luegt
+       die Anzeige (Register). */
+    function reiterZeigen(name) {
+        var reiter = document.querySelectorAll('.xl-tab');
+        var offen = '';
+        for (var i = 0; i < reiter.length; i++) {
+            var r = reiter[i];
+            var eigen = r.getAttribute('data-xl-tab');
+            var an = (eigen === name);
+            r.setAttribute('aria-selected', an ? 'true' : 'false');
+            if (an) offen = eigen;
+        }
+        var panels = document.querySelectorAll('.xl-tabpanel');
+        for (var j = 0; j < panels.length; j++) {
+            var p = panels[j];
+            var zu = (p.id !== 'xl-panel-' + offen);
+            p.classList.toggle('hidden', zu);
+        }
+        return offen;
+    }
+
+    /* Klick auf den OFFENEN Reiter schliesst – sonst gibt es keinen Weg
+       zurueck zur vollen Chat-Hoehe, und der Benutzer muesste das Fenster neu
+       laden. Rueckgabe ist der nun offene Reiter ('' = zu), damit der Aufrufer
+       und ein Pruefstand denselben Zustand lesen koennen. */
+    function reiterUmschalten(name) {
+        var el = document.querySelector('.xl-tab[data-xl-tab="' + name + '"]');
+        var war = el && el.getAttribute('aria-selected') === 'true';
+        return reiterZeigen(war ? '' : name);
+    }
+
     function logZeichnen() {
         var e = $('xl-log-out');
         if (e) e.textContent = logText();
@@ -269,6 +322,38 @@
         var v = an ? '1' : '0';
         _markRam = v;
         try { localStorage.setItem(MARK_KEY, v); } catch (e) { _speicherGeht = false; }
+    }
+
+    /* ── Ausfuehrliche Diagnose ("debug") ──
+       ERSTE EINSTELLUNG DES PROTOKOLL-REITERS.
+
+       ⚠ SIE SCHALTET ZUSAETZLICHE ZEILEN EIN UND NICHTS AB. Die Zeilen, die
+       einen Lauf oder einen Fehler erklaeren, kommen IMMER. Ein Schalter, der
+       im Normalfall Diagnose wegnimmt, macht genau den Bericht unmoeglich,
+       den man hinterher braucht – am 2026-10-23 bezahlt: ein
+       Fenster-Protokoll bestand aus EINER Zeile ("Excel bereit") und war
+       von einem Totalausfall nicht zu unterscheiden.
+
+       VORGABE AUS, und auch das ist eine Entscheidung: die zusaetzlichen
+       Zeilen enthalten Tabellenaufbau (Blattnamen, Spaltenkoepfe), und das
+       Protokoll wird kopiert und weitergegeben.
+
+       RAM-Rueckfall wie bei den Nachbarschaltern: in Excel im Web laeuft das
+       Fenster im iframe, und dort ist fremder Speicher je nach
+       Browsereinstellung gesperrt – ein stilles `setItem` waere ein Schalter,
+       der sich nicht merken laesst. */
+    var DEBUG_KEY = 'jarvis_xl_debug';
+    var _debugRam = '0';
+    function debugAn() {
+        try {
+            if (!_speicherGeht) return _debugRam === '1';
+            return localStorage.getItem(DEBUG_KEY) === '1';
+        } catch (e) { return _debugRam === '1'; }
+    }
+    function debugSetzen(an) {
+        var v = an ? '1' : '0';
+        _debugRam = v;
+        try { localStorage.setItem(DEBUG_KEY, v); } catch (e) { _speicherGeht = false; }
     }
 
     function token() {
@@ -463,7 +548,20 @@
        Ueberblick, dass Details fehlen, damit das Modell nachfordern kann. */
     var DETAIL_BLAETTER = 8;
     var PROBE_ZEILEN = 12;     // Suchtiefe der Kopfzeilen-Erkennung
-    var PROBE_SPALTEN = 40;
+    // ⚠ WAR 40 – UND 40 IST SPALTE AN. Ein Blatt mit 242 Spalten (bis IH)
+    // lieferte dem Modell damit 40 Koepfe; der Rest existierte fuer es nicht.
+    // Folge (gemeldet 2026-10-23): erst der Abbruch „ab AO keine Header
+    // erkennbar", dann – nach einem Hinweis auf die Kuerzung – NULLEN in den
+    // Zielzellen, weil der passende Kopf rechts von AN lag. Eine 0 sieht aus
+    // wie ein Messwert; das ist schlimmer als ein Abbruch.
+    //
+    // WERTE gehen jetzt breit, die TEUREN Eigenschaften bleiben schmal:
+    // `formulas` und `numberFormat` sind je Zelle ein String und waren der
+    // Grund fuer den alten Deckel (der Modulkopf nennt „ueber hundert
+    // Kilobyte"). Fuer ein Mapping zaehlt die Ueberschrift, nicht das
+    // Zahlenformat der 200. Spalte.
+    var PROBE_SPALTEN = 300;
+    var PROBE_SPALTEN_DETAIL = 40;   // = excel_ask.MAX_SPALTEN_BEISPIEL
     var UNTEN_ZEILEN = 3;      // Zeilen vom unteren Rand (Summenzeilen!)
     var MAX_FEHLER = 30;
 
@@ -564,8 +662,14 @@
                         if (i.detail) {
                             // Formeln und Zahlenformate nur fuer die Blaetter,
                             // die ausfuehrlich gehen – sie sind der teure Teil
-                            // der Antwort.
-                            i.probe.load('formulas,numberFormat');
+                            // der Antwort – UND nur fuer die ersten Spalten.
+                            // Eigener Bereich, damit die Koepfe breit gehen
+                            // koennen, ohne dass die Antwort mitwaechst.
+                            i.detailBreite = Math.min(spalten, PROBE_SPALTEN_DETAIL);
+                            i.probeDetail = i.sheet.getRangeByIndexes(
+                                i.used.rowIndex, i.used.columnIndex,
+                                zeilen, i.detailBreite);
+                            i.probeDetail.load('formulas,numberFormat');
                         }
 
                         // Untere Zeilen: Summen und Zwischentotale stehen dort.
@@ -644,9 +748,13 @@
         if (!e || !i.probe) return;
         try {
             e.probe = i.probe.values || [];
-            if (i.detail) {
-                e.probeFormeln = i.probe.formulas || [];
-                e.probeFormate = i.probe.numberFormat || [];
+            // ⚠ FORMELN UND FORMATE SIND SCHMALER ALS DIE WERTE. Das Backend
+            // liest sie je Spalte mit `k < len(...)`, kuerzere Zeilen sind
+            // also vorgesehen – aber nur, wenn sie am SELBEN Spaltenanfang
+            // beginnen. Beide Bereiche starten deshalb bei `columnIndex`.
+            if (i.detail && i.probeDetail) {
+                e.probeFormeln = i.probeDetail.formulas || [];
+                e.probeFormate = i.probeDetail.numberFormat || [];
             }
         } catch (err) { }
         if (i.unten) {
@@ -1076,6 +1184,32 @@
         laufStarten(text, [], 1);
     }
 
+    /* Schreibt EINE Protokollzeile je Runde.
+
+       ⚠ EIGENE FUNKTION, UND DAS IST KEIN STIL. Als Teil der `then`-Kette von
+       `laufStarten` liess sich die Zeile nur ueber den QUELLTEXT pruefen – und
+       eine Gegenprobe, die sie mit `if (false)` abschaltet, laesst den Text
+       stehen: der Waechter blieb gruen, waehrend das Protokoll stumm war
+       (Register: wer ein Vorkommen prueft, misst keine Wirkung – und wo ein
+       Zweig nur im Quelltext pruefbar ist, gehoert er in eine eigene
+       Funktion). Jetzt wird sie ausgefuehrt und ihre Ausgabe gezaehlt.
+
+       Protokolliert wird, was den Lauf ERKLAERT. Der gemeldete Fall vom
+       2026-10-23 bestand aus genau einer Zeile ("Excel bereit") – die Frage
+       "woran lag es?" war von aussen nicht beantwortbar, und der Benutzer
+       bekam stattdessen den Rat, seine Frage anders zu formulieren. */
+    function laufProtokollieren(d, runde) {
+        d = d || {};
+        protokoll('lauf', 'runde ' + runde + '/' + (d.max_runden || '?') +
+            ', text=' + String((d.text || '').length) + ' Zeichen' +
+            ', eintraege=' + ((d.aenderungen || []).length) +
+            ((d.abgelehnt || []).length ? ', abgelehnt=' + d.abgelehnt.length : '') +
+            ((d.brauche || []).length ? ', braucht=' + d.brauche.join(' ') : '') +
+            ((d.verworfen || []).length ? ', VERWORFEN=' + d.verworfen.join(' ') : '') +
+            (d.grund ? ', grund=' + d.grund : '') +
+            (typeof d.rohlaenge === 'number' ? ', roh=' + d.rohlaenge : ''));
+    }
+
     function laufStarten(frageText, nachgeladen, runde) {
         _laeuft = true;
         setzeLaeuft(true);
@@ -1086,6 +1220,22 @@
                 letzte.text = T('xl.thinking', 'Denkt nach …');
                 zeichneVerlauf();
             }
+            // ⚠ DIE FRAGE, DIE HEUTE DREIMAL GESTELLT WURDE: wie viele
+            // Spalten hat das Fenster ueberhaupt gelesen? Sie war von aussen
+            // nicht beantwortbar – weder Protokoll noch Journal hielten den
+            // gelesenen Aufbau fest, und die Fehlersuche lief deshalb am
+            // falschen Ende (erst im Modell, dann im Prompt, zuletzt am
+            // Deckel, wo sie hingehoerte).
+            protokollDebug('aufbau', function () {
+                var bl = (ueberblick && ueberblick.blaetter) || [];
+                return 'runde ' + runde + ', ' + bl.length + ' Blatt/Blaetter: ' +
+                    bl.slice(0, 6).map(function (b) {
+                        var koepfe = (b.probe && b.probe[0] && b.probe[0].length) || 0;
+                        return (b.name || '?') + ' ' + (b.bereich || '-') +
+                            ' (' + (b.spalten || 0) + ' Spalten, ' +
+                            koepfe + ' Koepfe gelesen)';
+                    }).join(' · ');
+            });
             return sende('/api/excel/ask', 'POST', {
                 frage: frageText,
                 ueberblick: ueberblick || {},
@@ -1098,6 +1248,21 @@
                 runde: runde
             });
         }).then(function (d) {
+            // ⚠ JEDER LAUF HINTERLAESST EINE ZEILE. Der gemeldete Fall vom
+            // 2026-10-23 bestand aus GENAU einer Protokollzeile ("Excel
+            // bereit") - die Frage "woran lag es?" war damit von aussen nicht
+            // beantwortbar, und der Benutzer bekam stattdessen den Rat, seine
+            // Frage anders zu formulieren. Protokolliert wird, was den Lauf
+            // erklaert: Runde, Textlaenge, Eintraege, Nachforderung, Grund.
+            laufProtokollieren(d, runde);
+            // Bei eingeschalteter Diagnose zusaetzlich der ROHE Antwortkopf.
+            // Genau diese Zeile hat heute gefehlt: ob das Modell geantwortet
+            // und nur nichts Lesbares geliefert hat, liess sich von aussen
+            // nicht unterscheiden.
+            protokollDebug('antwort', function () {
+                return 'zusammenfassung=' + (d.zusammenfassung || '-') +
+                    ' | text: ' + String(d.text || '').slice(0, 200);
+            });
             // Nachforderung: das Modell braucht einen Bereich, den es nicht
             // gesehen hat. Wir lesen ihn und fragen erneut – hoechstens so oft,
             // wie der Server erlaubt, sonst kann ein Modell in einer Schleife
@@ -1117,6 +1282,20 @@
                     if (!neu.length) {
                         // Kein Bereich lesbar – lieber mit dem antworten, was da
                         // ist, als eine zweite Runde ohne neue Daten zu starten.
+                        // ⚠ ABER NICHT STILL: hat das Modell nur den Marker
+                        // geschrieben, ist `d.text` leer, und `fertig()` machte
+                        // daraus "formuliere die Frage anders" – fuer einen
+                        // Bereich, den WIR nicht lesen konnten.
+                        protokoll('lauf', 'nachgeforderter Bereich nicht lesbar: ' +
+                            (d.brauche || []).join(' '));
+                        if (!d.text && !(d.aenderungen || []).length) {
+                            d = Object.assign({}, d, {
+                                grund: 'bereich_unlesbar',
+                                text: T('xl.range_unreadable',
+                                    'Der Assistent wollte dazu einen weiteren Bereich lesen ({b}), konnte ihn aber nicht öffnen. Prüfe den Blattnamen, oder nenne den Bereich direkt in der Frage.')
+                                    .replace('{b}', (d.brauche || []).join(', '))
+                            });
+                        }
                         fertig(d);
                         return;
                     }
@@ -1176,10 +1355,25 @@
             });
         }
         if (!d.text && !(d.aenderungen || []).length) {
-            _verlauf.push({
-                rolle: 'bot', fehler: true,
-                text: T('xl.empty', 'Der Assistent hat keine Antwort formuliert. Formuliere die Frage bitte anders.')
-            });
+            // ⚠ DIE MELDUNG DARF NICHT DEN BENUTZER BESCHULDIGEN, SOLANGE WIR
+            // DEN GRUND KENNEN. Bis 2026-10-23 stand hier in JEDEM Fall
+            // "Formuliere die Frage bitte anders" – auch wenn die Ursache
+            // unser eigener Rundendeckel war oder das Modell gar nichts
+            // geliefert hatte. Der Endpunkt schickt den Grund inzwischen mit;
+            // „unbekannt" bleibt eine eigene Stufe und raet nicht (Register:
+            // eine Anzeige darf keinen Zustand behaupten, den sie nicht kennt).
+            var txt;
+            if (d.grund === 'modell_stumm') {
+                txt = T('xl.empty_model',
+                    'Das Sprachmodell hat auf diese Anfrage nichts geantwortet. Das liegt nicht an deiner Frage – versuche es bitte noch einmal.');
+            } else if (d.grund === 'nur_marker') {
+                txt = T('xl.empty_marker',
+                    'Die Antwort des Assistenten enthielt keinen lesbaren Text. Das ist ein Fehler auf unserer Seite – versuche es bitte noch einmal.');
+            } else {
+                txt = T('xl.empty',
+                    'Der Assistent hat keine Antwort geliefert. Das muss nicht an deiner Frage liegen – versuche es noch einmal oder grenze die Frage auf einen kleineren Bereich ein.');
+            }
+            _verlauf.push({ rolle: 'bot', fehler: true, text: txt });
         }
         zeichneVerlauf();
     }
@@ -2313,6 +2507,34 @@
                 } else { nein(); }
             } catch (e2) { nein(); }
         });
+        // Reiter-Leiste. EIN Zuhoerer auf der Leiste statt einer je Knopf:
+        // ein spaeter ergaenzter dritter Reiter waere sonst still tot (die
+        // Lehre vom abgesicherten Aufruf, der nie lief).
+        if ((e = $('xl-tabs'))) e.addEventListener('click', function (ev) {
+            var ziel = ev.target && ev.target.closest
+                ? ev.target.closest('.xl-tab') : null;
+            if (!ziel) return;
+            reiterUmschalten(ziel.getAttribute('data-xl-tab'));
+        });
+        // Vorgabe: beide zu. Der Aufruf setzt zusaetzlich `aria-selected`
+        // konsistent zum Markup – stuende im Markup versehentlich "true",
+        // waere der Reiter fuer einen Screenreader offen und optisch zu.
+        reiterZeigen('');
+
+        if ((e = $('xl-debug'))) {
+            e.checked = debugAn();
+            e.addEventListener('change', function () {
+                debugSetzen(this.checked);
+                // Die Umschaltung selbst gehoert ins Protokoll: ohne sie
+                // laesst ein zugeschickter Auszug nicht erkennen, OB die
+                // ausfuehrliche Diagnose ueberhaupt an war – und dann sucht
+                // man fehlende Zeilen im Code statt im Schalter.
+                protokoll('diagnose', this.checked
+                    ? 'ausfuehrliche Diagnose EIN'
+                    : 'ausfuehrliche Diagnose AUS');
+            });
+        }
+
         if ((e = $('xl-log-clear'))) e.addEventListener('click', function () {
             _log = [];
             logZeichnen();
@@ -2392,8 +2614,18 @@
        Sprachwechsel ueberlebt: `applyLang()` setzt den textContent von
        `[data-i18n]` – stuende die Zahl im Titel-Span, waere sie nach dem
        ersten Klick auf DE/EN weg (Register: das Markup war die ganze Zeit
-       richtig und wurde beim ersten applyLang() falsch). */
-    var XL_VERSION = '1.00';
+       richtig und wurde beim ersten applyLang() falsch).
+
+       ⚠ DIE DRITTE GRUPPE IST DIE BAUNUMMER UND WIRD BEI JEDEM NEUBAU DES
+       ADD-INS UM EINS ERHOEHT (Festlegung des Betreibers 2026-10-23). Sie ist
+       kein Schmuck, sondern das einzige Mittel, mit dem ein Bericht aus dem
+       Betrieb einem Stand zugeordnet werden kann: WebView2 haelt die alte
+       `excel.js` im Cache, und ohne eine sichtbare Nummer ist ein
+       "funktioniert nicht" nicht von einem "alter Stand geladen" zu
+       unterscheiden – genau das hat an diesem Tag zweimal Zeit gekostet.
+       Zwei Stellen gehoeren deshalb immer zusammen hochgezaehlt: diese Nummer
+       UND der Cache-Buster `excel.js?v=N` in taskpane.html. */
+    var XL_VERSION = '1.00.01';
 
     function versionAnschreiben() {
         var text = ' (v' + XL_VERSION + ')';

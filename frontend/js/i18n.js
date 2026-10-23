@@ -1013,7 +1013,10 @@ const _I18N = {
         // Eintraege != Zellen: EIN Eintrag kann G2:G120 sein.
         'xl.entries':                   'Einträge',
         'xl.welcome':                   'Frag mich etwas zu dieser Tabelle. Ich sehe den Aufbau der Blätter und deine aktuelle Auswahl – Änderungen zeige ich dir immer erst zur Bestätigung.',
-        'xl.empty':                     'Der Assistent hat keine Antwort formuliert. Formuliere die Frage bitte anders.',
+        'xl.empty':                     'Der Assistent hat keine Antwort geliefert. Das muss nicht an deiner Frage liegen – versuche es noch einmal oder grenze die Frage auf einen kleineren Bereich ein.',
+        'xl.empty_model':               'Das Sprachmodell hat auf diese Anfrage nichts geantwortet. Das liegt nicht an deiner Frage – versuche es bitte noch einmal.',
+        'xl.empty_marker':              'Die Antwort des Assistenten enthielt keinen lesbaren Text. Das ist ein Fehler auf unserer Seite – versuche es bitte noch einmal.',
+        'xl.range_unreadable':          'Der Assistent wollte dazu einen weiteren Bereich lesen ({b}), konnte ihn aber nicht öffnen. Prüfe den Blattnamen, oder nenne den Bereich direkt in der Frage.',
         'xl.diff_head':                 'Vorgeschlagene Änderungen',
         'xl.rejected':                  'Nicht übernommen:',
         'xl.apply':                     'Übernehmen',
@@ -1033,7 +1036,10 @@ const _I18N = {
         // Verarbeitung der Anforderung" heraus – ohne diese Ansicht ist er im
         // Aufgabenfenster nicht zu beurteilen.
         'xl.write_failed_hint':         'Einzelheiten stehen unter „Einstellungen → Diagnose-Protokoll".',
-        'xl.log':                       'Diagnose-Protokoll',
+        // Reiter-Beschriftung – KURZ, weil zwei Reiter 320 px teilen. Die
+        // ausfuehrliche Erklaerung steht als Hinweis IM Reiter (xl.log_note).
+        'xl.log':                       'Protokoll',
+        'xl.debug':                     'Ausführliche Diagnose – protokolliert zusätzlich den gelesenen Tabellenaufbau und die Anfragen an den Server',
         'xl.log_note':                  'Enthält Fehlermeldungen von Excel samt der Anweisung, die gescheitert ist. Excel gibt dabei einen gekürzten Ausschnitt dieser Anweisung heraus – darin können Werte aus den betroffenen Zellen stehen. Vor dem Weitergeben kurz durchsehen.',
         'xl.log_empty':                 'Noch nichts protokolliert.',
         'xl.log_copy':                  'Protokoll kopieren',
@@ -5349,7 +5355,10 @@ const _I18N = {
         'xl.cells':                     'cells',
         'xl.entries':                   'entries',
         'xl.welcome':                   'Ask me anything about this spreadsheet. I can see the structure of the sheets and your current selection – changes are always shown for confirmation first.',
-        'xl.empty':                     'The assistant did not produce an answer. Please rephrase your question.',
+        'xl.empty':                     'The assistant did not return an answer. This may not be due to your question – please try again, or narrow it down to a smaller range.',
+        'xl.empty_model':               'The language model returned nothing for this request. This is not caused by your question – please try again.',
+        'xl.empty_marker':              'The assistant\'s answer contained no readable text. This is a fault on our side – please try again.',
+        'xl.range_unreadable':          'The assistant wanted to read an additional range ({b}) but could not open it. Check the sheet name, or name the range directly in your question.',
         'xl.diff_head':                 'Proposed changes',
         'xl.rejected':                  'Not applied:',
         'xl.apply':                     'Apply',
@@ -5365,7 +5374,8 @@ const _I18N = {
         'xl.write_failed':              'Writing failed:',
         'xl.applying':                  'Applying automatically ...',
         'xl.write_failed_hint':         'Details are under "Settings -> Diagnostic log".',
-        'xl.log':                       'Diagnostic log',
+        'xl.log':                       'Log',
+        'xl.debug':                     'Verbose diagnostics – additionally logs the table structure that was read and the requests sent to the server',
         'xl.log_note':                  'Contains error messages from Excel including the statement that failed. Excel returns a shortened excerpt of that statement - it may contain values from the cells involved. Please review before passing it on.',
         'xl.log_empty':                 'Nothing logged yet.',
         'xl.log_copy':                  'Copy log',

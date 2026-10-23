@@ -155,17 +155,65 @@ _ZWEI_WERTE = ("Between", "NotBetween")
 _FARBE_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 
+# Felder, die NUR ein Objekt-Eintrag traegt. Sie entscheiden bei einem
+# UNBEKANNTEN ``typ`` darueber, was gemeint war (siehe ``ist_objekt``).
+# ``wert`` steht BEWUSST nicht hier: es gehoert dem Zell-Eintrag und ist bei
+# 'bedingt' nur der Vergleichswert – dort traegt der Eintrag immer auch
+# ``regel`` oder ``operator``.
+_OBJEKT_FELDER = ("quelle", "name", "zeilenfelder", "spaltenfelder",
+                  "wertfelder", "art", "titel", "kopfzeile", "regel",
+                  "operator", "wert2", "farbe", "textfarbe")
+_ZELL_FELDER = ("formel", "werte", "wert", "format")
+
+
+def _hat_eines(eintrag: dict, felder) -> bool:
+    """Traegt der Eintrag eines dieser Felder mit Inhalt?
+
+    ``0`` und ``False`` zaehlen als Inhalt – `kopfzeile: 0` heisst
+    „automatisch", nicht „nicht angegeben" (Register: nie auf Falsyness
+    pruefen, wo die Null ein gueltiger Wert ist).
+    """
+    return any(eintrag.get(f) not in (None, "", [], {}) for f in felder)
+
+
 def ist_objekt(eintrag) -> bool:
-    """Traegt der Eintrag ein Feld ``typ``?
+    """Ist der Eintrag ein OBJEKT (Pivot, Diagramm, Tabelle, bedingt)?
 
     ⚠ **DIE VORGABE IST DER ZELL-EINTRAG.** Ein Eintrag OHNE ``typ`` laeuft
     unveraendert durch die bestehende Zell-Pruefung – byte-gleich zu vorher.
     Das ist die fail-safe Richtung: wer das Feld nicht kennt, bekommt das
     Verhalten von gestern.
+
+    ⚠ **EIN UNBEKANNTER ``typ`` IST KEINE OBJEKT-ABSICHT.** Bis 2026-10-23
+    genuegte das blosse VORHANDENSEIN des Feldes. Modelle beschriften einen
+    gewoehnlichen Zell-Eintrag aber gelegentlich mit der Art seiner Nutzdaten
+    (``typ: "werte"`` neben ``werte: [[…]]``) – das Schema nennt in EINEM Satz
+    „genau eines von formel/werte/wert" und zwei Saetze spaeter das Feld
+    ``typ``, und der ``enum`` wird nicht von jedem Anbieter durchgesetzt. Der
+    Eintrag landete dann im Objekt-Zweig und kam als *„'werte' ist kein
+    bekannter Eintragstyp"* zurueck, obwohl alles richtig gemeint war
+    (gemeldet aus dem Add-in: ``2026!B12:AN12``) – dieselbe Toleranz-Luecke
+    wie bei den als JSON-STRING gelieferten Listen.
+
+    Bei unbekanntem ``typ`` entscheidet deshalb die FELDLAGE, nicht das Wort:
+    traegt der Eintrag ein objekt-eigenes Feld (``quelle``, ``regel``,
+    ``wertfelder`` …), bleibt er ein Objekt und wird mit Grund abgelehnt – ein
+    verschriebenes ``bedingte_formatierung`` darf NICHT still seinen
+    Vergleichswert in jede Zelle des Bereichs schreiben. Nur wenn er
+    ausschliesslich Zell-Felder traegt, ist er eine Zellaenderung; das Feld
+    ``typ`` faellt dabei weg, weil ``aenderungen_pruefen`` den gueltigen
+    Eintrag neu aufbaut.
     """
     if not isinstance(eintrag, dict):
         return False
-    return bool(str(eintrag.get("typ") or "").strip())
+    typ = str(eintrag.get("typ") or "").strip().lower()
+    if not typ:
+        return False
+    if typ in API_MIN:
+        return True
+    if _hat_eines(eintrag, _OBJEKT_FELDER):
+        return True
+    return not _hat_eines(eintrag, _ZELL_FELDER)
 
 
 def _text(wert, grenze: int) -> str:

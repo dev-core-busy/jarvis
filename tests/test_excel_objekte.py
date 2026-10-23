@@ -150,6 +150,43 @@ check("typ=pivot ist ein Objekt", o.ist_objekt({"typ": "pivot"}))
 check("None ist kein Objekt", not o.ist_objekt(None))
 check("Liste ist kein Objekt", not o.ist_objekt([1, 2]))
 
+print("── 2b. Ein unbekannter typ ist keine Objekt-Absicht ────────────────")
+# ⚠ DER GEMELDETE FALL (2026-10-23): das Modell etikettiert einen
+# Zell-Eintrag mit der Art seiner Nutzdaten. Er traegt NUR Zell-Felder und
+# gehoert deshalb in den Zell-Zweig, nicht in eine Ablehnung.
+for feld, nutzdaten in (("werte", [[1, 2]]), ("formel", "=A1*2"),
+                        ("wert", 7), ("format", "0.00%")):
+    check("typ=%r neben %r ist kein Objekt" % (feld, feld),
+          not o.ist_objekt({"adresse": "B12:AN12", "typ": feld,
+                            feld: nutzdaten}))
+# ⚠ DIE GEGENRICHTUNG, und sie ist die teurere: ein VERSCHRIEBENER
+# Objekt-Typ traegt objekt-eigene Felder. Liefe er in den Zell-Zweig,
+# schriebe `wert` still in jede Zelle des Bereichs, statt abgelehnt zu
+# werden.
+check("verschriebenes 'bedingt' bleibt ein Objekt",
+      o.ist_objekt({"adresse": "B2:B50", "typ": "bedingte_formatierung",
+                    "regel": "zellwert", "operator": "groesser", "wert": 100}))
+check("verschriebenes 'pivot' bleibt ein Objekt",
+      o.ist_objekt({"typ": "pivottabelle", "quelle": "Daten!A1:E9",
+                    "zeilenfelder": ["R"], "wertfelder": ["U"]}))
+check("unbekannter typ ohne jedes Feld bleibt ein Objekt",
+      o.ist_objekt({"typ": "slicer"}))
+if _ask:
+    # Die Wirkung, nicht die Weiche: der etikettierte Eintrag muss als
+    # ZELLAENDERUNG ankommen – mit seiner Matrix und OHNE das Feld `typ`.
+    gut5, weg5 = excel_ask.aenderungen_pruefen(
+        [{"adresse": "B12:C12", "typ": "werte", "werte": [[1, 2]]}])
+    check("etikettierter Zell-Eintrag wird angenommen",
+          len(gut5) == 1 and not weg5)
+    check("...mit seiner Matrix", hole(gut5, 0, "werte") == [[1, 2]])
+    check("...und ohne das Feld 'typ'", hole(gut5, 0, "typ") is None)
+    gut6, weg6 = excel_ask.aenderungen_pruefen(
+        [{"adresse": "B2:B50", "typ": "bedingte_formatierung",
+          "regel": "zellwert", "operator": "groesser", "wert": 100}])
+    check("verschriebener Objekt-Typ wird ABGELEHNT", not gut6 and len(weg6) == 1)
+    check("...und schreibt nichts in die Zellen",
+          hole(weg6, 0, "grund") and "Eintragstyp" in hole(weg6, 0, "grund"))
+
 print("── 3. Pivot ────────────────────────────────────────────────────────")
 s, g = pruefe(PIVOT_OK)
 check("vollstaendiger Pivot wird angenommen", s is not None)

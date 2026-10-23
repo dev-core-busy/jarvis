@@ -129,11 +129,22 @@ class ExcelVorschlagTool(BaseTool):
                             # \u2500\u2500 Objekt-Eintraege \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
                             "typ": {
                                 "type": "STRING",
+                                # ⚠ DAS FELD WIRD ALS ETIKETT MISSVERSTANDEN:
+                                # gemeldet wurde `typ: "werte"` neben einer
+                                # Wertematrix (2026-10-23). Der Satz "nur diese
+                                # vier, sonst WEGLASSEN" steht deshalb hier und
+                                # nicht nur im enum - der wird nicht von jedem
+                                # Anbieter durchgesetzt.
                                 "description": "Legt ein OBJEKT an statt Zellen "
                                                "zu fuellen: 'pivot', 'diagramm', "
-                                               "'tabelle' oder 'bedingt'. Ohne "
-                                               "dieses Feld ist der Eintrag eine "
-                                               "gewoehnliche Zellaenderung.",
+                                               "'tabelle' oder 'bedingt'. NUR "
+                                               "diese vier Werte sind erlaubt. "
+                                               "Fuer eine gewoehnliche "
+                                               "Zellaenderung das Feld "
+                                               "WEGLASSEN - nicht die Art der "
+                                               "Nutzdaten hineinschreiben "
+                                               "('werte', 'formel', 'wert', "
+                                               "'format' sind KEINE Typen).",
                                 "enum": ["pivot", "diagramm", "tabelle", "bedingt"],
                             },
                             "quelle": {

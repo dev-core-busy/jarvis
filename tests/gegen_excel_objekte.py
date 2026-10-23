@@ -221,6 +221,26 @@ def _p16():
           "    if False:\n        return (\"Eine Pivot-Tabelle braucht mindestens ein Wertfeld \"")
 
 
+@probe("jeder typ gilt wieder als Objekt (Stand vor 2026-10-23)",
+       "backend/excel_objekte.py")
+def _p18():
+    # Der ALTE Zustand: das blosse Vorhandensein des Feldes entschied. Ein
+    # mit `typ: "werte"` etikettierter Zell-Eintrag wird dann abgelehnt.
+    patch("backend/excel_objekte.py",
+          "    if typ in API_MIN:\n        return True",
+          "    if typ:\n        return True")
+
+
+@probe("unbekannter typ gilt immer als Zelle (Gegenrichtung)",
+       "backend/excel_objekte.py")
+def _p19():
+    # Die gefaehrlichere Haelfte: ein verschriebenes 'bedingt' liefe damit in
+    # den Zell-Zweig und schriebe seinen Vergleichswert in den Bereich.
+    patch("backend/excel_objekte.py",
+          "    if _hat_eines(eintrag, _OBJEKT_FELDER):\n        return True",
+          "    if False:\n        return True")
+
+
 @probe("Objekt-Fehler nur ins Protokoll, nicht in den Verlauf",
        "frontend/excel-addin/excel.js")
 def _p17():

@@ -34,6 +34,7 @@ DATEIEN = [
 
 WAECHTER = [
     ("py", "tests/test_excel_objekte.py"),
+    ("py", "tests/test_excel_spalten_hinweis.py"),
     ("js", "tests/test_excel_objekte_ui.js"),
     ("js", "tests/test_excel_kommentar_ui.js"),
 ]
@@ -264,6 +265,94 @@ def _p21():
     patch("frontend/excel-addin/excel.js",
           "            String(a.adresse || '').split(':')[0].replace(/\\$/g, '').toUpperCase();",
           "            String(a.adresse || '').replace(/\\$/g, '').toUpperCase();")
+
+
+@probe("Spalten-Hinweis ganz weg (Stand vor 2026-10-23)",
+       "backend/excel_ask.py")
+def _p22():
+    patch("backend/excel_ask.py",
+          "    if gesamt <= MAX_SPALTEN_ANZEIGE:\n        return \"\"",
+          "    if True:\n        return \"\"")
+
+
+@probe("Hinweis ohne die ZAHL (nur 'gekuerzt')", "backend/excel_ask.py")
+def _p23():
+    # Eine Kuerzung ohne Bezifferung laesst das Modell raten, WIE viel fehlt.
+    # ⚠ DIE ZAHL MUSS WIRKLICH WEG. Der erste Versuch liess `%d` stehen und
+    # beiss deshalb nicht – gleichzeitig deckte er auf, dass der Waechter die
+    # Zahl im ganzen BLOCK suchte, wo der Blattkopf sie ohnehin nennt.
+    patch("backend/excel_ask.py",
+          '    return ("    ⚠ Unten sind nur die Spalten %s–%s von %d gelistet (das Blatt "\n'
+          '            "geht bis %s). Die Tabelle endet NICHT bei %s – die übrigen "\n'
+          '            "Spaltenköpfe wurden nur nicht mitgeschickt. Brauchst du sie, "\n'
+          '            "fordere sie nach: [[EXCEL_BRAUCHE: %s]]"\n'
+          '            % (erste, letzte, gesamt, ende, letzte, bereich))',
+          '    return ("    ⚠ Unten sind nur die Spalten %s–%s gelistet (das Blatt "\n'
+          '            "geht bis %s). Die Tabelle endet NICHT bei %s – die übrigen "\n'
+          '            "Spaltenköpfe wurden nur nicht mitgeschickt. Brauchst du sie, "\n'
+          '            "fordere sie nach: [[EXCEL_BRAUCHE: %s]]"\n'
+          '            % (erste, letzte, ende, letzte, bereich))')
+
+
+@probe("Hinweis ohne Nachforderung (nennt den Weg nicht)",
+       "backend/excel_ask.py")
+def _p24():
+    patch("backend/excel_ask.py",
+          '            "fordere sie nach: [[EXCEL_BRAUCHE: %s]]"',
+          '            "frage den Benutzer. %s"')
+
+
+@probe("Hinweis steht NACH der Liste (Kappung schneidet ihn weg)",
+       "backend/excel_ask.py")
+def _p25():
+    # ⚠ BEIDE Zweige umstellen – sonst beisst nur Abschnitt 3 oder nur 7, und
+    # man haelt den Waechter fuer schwach statt den Code fuer halb geaendert.
+    for anker in ('            if hinweis:\n'
+                  '                zeilen.append(hinweis)\n'
+                  '            zeilen.append("    Spalten: %s" % " | ".join(paare))\n'
+                  '        for k, zeile in enumerate((b.get("beispiele") or [])[:MAX_BEISPIELE]):',
+                  '            if hinweis:\n'
+                  '                zeilen.append(hinweis)\n'
+                  '            zeilen.append("    Spalten: %s" % " | ".join(paare))\n'
+                  '\n'
+                  '    # ── Datenzeilen vom oberen Rand ─────────────────────────────────────'):
+        neu = anker.replace(
+            '            if hinweis:\n'
+            '                zeilen.append(hinweis)\n'
+            '            zeilen.append("    Spalten: %s" % " | ".join(paare))',
+            '            zeilen.append("    Spalten: %s" % " | ".join(paare))\n'
+            '            if hinweis:\n'
+            '                zeilen.append(hinweis)')
+        patch("backend/excel_ask.py", anker, neu)
+
+
+@probe("Alt-Zweig bleibt ohne Hinweis (zwei von drei Zweigen)",
+       "backend/excel_ask.py")
+def _p26():
+    patch("backend/excel_ask.py",
+          '            if hinweis:\n'
+          '                zeilen.append(hinweis)\n'
+          '            zeilen.append("    Spalten: %s" % " | ".join(paare))\n'
+          '        for k, zeile in enumerate((b.get("beispiele") or [])[:MAX_BEISPIELE]):',
+          '            zeilen.append("    Spalten: %s" % " | ".join(paare))\n'
+          '        for k, zeile in enumerate((b.get("beispiele") or [])[:MAX_BEISPIELE]):')
+
+
+@probe("Spalten ab A gezaehlt statt ab dem benutzten Bereich",
+       "backend/excel_ask.py")
+def _p27():
+    # Der benutzte Bereich beginnt nicht immer bei A1 – die Nachforderung
+    # laege sonst eine Spalte daneben, und das faellt niemandem auf.
+    patch("backend/excel_ask.py",
+          "    naechste = spaltenbuchstabe(spalte_ab + MAX_SPALTEN_ANZEIGE)",
+          "    naechste = spaltenbuchstabe(1 + MAX_SPALTEN_ANZEIGE)")
+
+
+@probe("Prompt deutet den Hinweis nicht mehr", "backend/excel_ask.py")
+def _p28():
+    patch("backend/excel_ask.py",
+          "- **Die Spaltenliste ist gekürzt, wenn ein ⚠-Hinweis darüber steht.**",
+          "- Die Spaltenliste zeigt die Spalten des Blattes.")
 
 
 @probe("Objekt-Fehler nur ins Protokoll, nicht in den Verlauf",

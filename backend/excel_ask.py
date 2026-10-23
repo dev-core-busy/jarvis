@@ -644,6 +644,72 @@ def _formatname(fmt) -> str:
     return text[:24]
 
 
+def _zeilennummer(b: dict, *schluessel) -> int:
+    """Erste brauchbare Zeilennummer aus den genannten Feldern, sonst 1."""
+    for s in schluessel:
+        try:
+            n = int(b.get(s) or 0)
+        except Exception:  # noqa: BLE001
+            continue
+        if n > 0:
+            return n
+    return 1
+
+
+def _spalten_hinweis(b: dict, spalte_ab: int) -> str:
+    """Benennt eine gekuerzte Spaltenliste – oder gibt "" zurueck.
+
+    ⚠ **DER TEUERSTE EINZELFALL DIESES MODULS (gemeldet 2026-10-23).** Die
+    Spaltenliste endete stumm bei der 40. Spalte. Der Blattkopf nannte
+    gleichzeitig die WAHRE Breite (``242 Spalten``, ``benutzt A20:IH500``) –
+    das Modell sah also einen Widerspruch und waehlte die einzige Deutung, die
+    ihm offenstand: *„ab Spalte AO konnte ich keine passenden Header erkennen
+    und habe die Uebertragung dort beendet."* Es hat NICHT geraten und nichts
+    erfunden, sondern wahrheitsgemaess ueber seinen Eingang berichtet – 202 von
+    242 Spalten blieben unbearbeitet, und der Benutzer bekam eine Begruendung,
+    die wie eine Eigenschaft seiner Tabelle klang.
+
+    Zwei Deckel erzeugen dieselbe Luecke, und beide muessen hier auffallen:
+    ``excel.js::PROBE_SPALTEN`` (das Fenster LAEDT nur 40 Spalten) und
+    ``MAX_SPALTEN_ANZEIGE`` (das Backend ZEIGT nur 40). Gerechnet wird deshalb
+    gegen ``b["spalten"]`` – die echte Breite des benutzten Bereichs – und
+    nicht gegen die Laenge der Probe: sonst meldete der Hinweis nur den
+    zweiten Deckel, und der erste (der haeufigere) bliebe stumm.
+
+    Der Hinweis nennt die NACHFORDERUNG woertlich mit fertiger Adresse. Ein
+    blosses „gekuerzt" genuegt nicht: der Prompt sagt *„brauchst du Daten, die
+    nicht dastehen, rate NICHT"* – und genau das wusste das Modell ja nicht.
+    """
+    try:
+        gesamt = int(b.get("spalten") or 0)
+    except Exception:  # noqa: BLE001
+        gesamt = 0
+    if gesamt <= MAX_SPALTEN_ANZEIGE:
+        return ""
+    letzte = spaltenbuchstabe(spalte_ab + MAX_SPALTEN_ANZEIGE - 1)
+    erste = spaltenbuchstabe(spalte_ab)
+    naechste = spaltenbuchstabe(spalte_ab + MAX_SPALTEN_ANZEIGE)
+    ende = spaltenbuchstabe(spalte_ab + gesamt - 1)
+    # Die KOPFZEILE ist das, was fuer ein Mapping fehlt – die vorgeschlagene
+    # Adresse zeigt deshalb auf sie und die erste Datenzeile, nicht auf den
+    # ganzen Block (der waere gross und beantwortet die Frage nicht besser).
+    kopf_nr = _zeilennummer(b, "kopf_nr", "kopfZeile")
+    if kopf_nr == 1:
+        try:
+            kopf_nr = max(1, int(b.get("zeile_ab") or 1)) + \
+                max(0, int(b.get("kopfRel") or 1) - 1)
+        except Exception:  # noqa: BLE001
+            kopf_nr = 1
+    name = _zelltext(b.get("name"), 80)
+    blatt = ("'%s'" % name) if (" " in name or "!" in name) else name
+    bereich = "%s!%s%d:%s%d" % (blatt, naechste, kopf_nr, ende, kopf_nr + 1)
+    return ("    ⚠ Unten sind nur die Spalten %s–%s von %d gelistet (das Blatt "
+            "geht bis %s). Die Tabelle endet NICHT bei %s – die übrigen "
+            "Spaltenköpfe wurden nur nicht mitgeschickt. Brauchst du sie, "
+            "fordere sie nach: [[EXCEL_BRAUCHE: %s]]"
+            % (erste, letzte, gesamt, ende, letzte, bereich))
+
+
 def _zeile_text(werte, spalte_ab: int, grenze: int = MAX_SPALTEN_ANZEIGE) -> str:
     """Eine Datenzeile als Text – Werte mit ihrem Spaltenbuchstaben."""
     teile = []
@@ -707,6 +773,8 @@ def _blatt_block(b: dict, ausfuehrlich: bool) -> str:
     except Exception:  # noqa: BLE001
         zeile_ab = 1
 
+    hinweis = _spalten_hinweis(b, spalte_ab)
+
     probe = b.get("probe") if isinstance(b.get("probe"), list) else []
     probe_formeln = b.get("probeFormeln") if isinstance(b.get("probeFormeln"), list) else []
     # ``probeFormate`` ist eine MATRIX ueber dieselben Probezeilen, nicht eine
@@ -748,6 +816,12 @@ def _blatt_block(b: dict, ausfuehrlich: bool) -> str:
                 txt += " [%s]" % _zelltext(alt_typen[k], 12)
             paare.append(txt)
         if paare:
+            # Der Hinweis steht VOR der Liste: am Ende schneidet ihn die
+            # naechste Kappung selbst weg (Register), und das Modell liest
+            # erst "40 von 242" und dann die 40 - das ist auch die bessere
+            # Leserichtung.
+            if hinweis:
+                zeilen.append(hinweis)
             zeilen.append("    Spalten: %s" % " | ".join(paare))
         for k, zeile in enumerate((b.get("beispiele") or [])[:MAX_BEISPIELE]):
             if not isinstance(zeile, list):
@@ -775,6 +849,8 @@ def _blatt_block(b: dict, ausfuehrlich: bool) -> str:
                 txt += " [%s]" % ", ".join(merkmale)
             paare.append(txt)
         if paare:
+            if hinweis:
+                zeilen.append(hinweis)
             zeilen.append("    Spalten: %s" % " | ".join(paare))
 
     # ── Datenzeilen vom oberen Rand ─────────────────────────────────────
@@ -1041,6 +1117,13 @@ WAS DU SIEHST UND WAS NICHT
   vorhandene **Formeln**, die letzten Zeilen (Summen!), benannte Bereiche,
   Excel-Tabellen und Fehlerzellen. **Bilde Adressen ausschließlich daraus** –
   zähle keine Spalten ab, der benutzte Bereich beginnt nicht immer bei A1.
+- **Die Spaltenliste ist gekürzt, wenn ein ⚠-Hinweis darüber steht.** Dann hat
+  das Blatt MEHR Spalten, als unten gelistet sind – der Blattkopf nennt die
+  wahre Zahl. Eine Spalte, die nicht gelistet ist, ist deshalb **nicht leer und
+  nicht das Ende der Tabelle**; sie wurde nur nicht mitgeschickt. Brich eine
+  Aufgabe dort NIEMALS ab und begründe sie auch nicht damit: fordere die
+  fehlenden Köpfe mit der Adresse aus dem Hinweis nach. Soll über die ganze
+  Breite gearbeitet werden, ist das Nachfordern Pflicht, keine Option.
 - **Brauchst du Daten, die nicht dastehen, rate NICHT.** Schreibe stattdessen in
   eine eigene Zeile:
       [[EXCEL_BRAUCHE: Blattname!A1:D200]]

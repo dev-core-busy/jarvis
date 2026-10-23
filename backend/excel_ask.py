@@ -343,7 +343,8 @@ def format_normieren(fmt: str) -> str:
     return "".join(raus)
 
 
-def _matrix_pruefen(roh, zeilen: int, spalten: int) -> tuple[list | None, str]:
+def _matrix_pruefen(roh, zeilen: int, spalten: int,
+                    spalte_ab: int = 1) -> tuple[list | None, str]:
     """Formt ``werte`` in eine 2D-Liste passend zum Bereich – oder nennt den Grund.
 
     **Eine 1D-Liste wird anhand der BEREICHSFORM umgeformt** (Spalte oder Zeile).
@@ -375,10 +376,37 @@ def _matrix_pruefen(roh, zeilen: int, spalten: int) -> tuple[list | None, str]:
                 return (None, "'werte' mischt verschachtelte und flache Zeilen.")
             matrix.append(list(z))
 
+    # ⚠ EINE TRANSPONIERTE MATRIX IST KEIN FEHLER, SOLANGE SIE EINDEUTIG IST.
+    # Gemeldet 2026-10-23: `2026!B12:E12` bekam `[[1],[2],[3],[4]]` – also
+    # 4×1 fuer einen Bereich 1×4. Das ist dieselbe Datenmenge in der anderen
+    # Richtung, und die Absicht ist nicht zu verkennen; abgelehnt wurde sie
+    # trotzdem, obwohl die flache Liste daneben seit Langem umgeformt wird
+    # (dieselbe Toleranz, nur eine Verschachtelungsebene tiefer).
+    #
+    # NUR wenn eine der beiden Dimensionen 1 ist. Bei 2×3 gegen 3×2 waere
+    # nicht entscheidbar, welche Zahl wohin gehoert – dort zu raten hiesse,
+    # Werte an falsche Stellen zu schreiben, und das ist schlimmer als eine
+    # Ablehnung mit Grund.
+    hat_zeilen = len(matrix)
+    hat_spalten = max((len(z) for z in matrix), default=0)
+    if (hat_zeilen != zeilen or hat_spalten != spalten) \
+            and hat_zeilen == spalten and hat_spalten == zeilen \
+            and min(zeilen, spalten) == 1 \
+            and all(len(z) == hat_spalten for z in matrix):
+        matrix = [list(z) for z in zip(*matrix)]
+
     if len(matrix) != zeilen or any(len(z) != spalten for z in matrix):
         gef = "%d×%d" % (len(matrix), max((len(z) for z in matrix), default=0))
+        # Der Grund nennt die SPALTENBUCHSTABEN, nicht nur die Zahl: "45
+        # Spalten" laesst das Modell nachzaehlen, "B bis AT" nicht. Es bekommt
+        # den Grund zurueck und kann im selben Lauf korrigieren.
+        rahmen = ""
+        if zeilen == 1 and spalten > 1:
+            rahmen = (" Der Bereich umfasst die %d Spalten %s bis %s."
+                      % (spalten, spaltenbuchstabe(spalte_ab),
+                         spaltenbuchstabe(spalte_ab + spalten - 1)))
         return (None, "'werte' hat %s Zellen, der Bereich %d×%d – die Maße "
-                      "müssen übereinstimmen." % (gef, zeilen, spalten))
+                      "müssen übereinstimmen.%s" % (gef, zeilen, spalten, rahmen))
 
     for z in matrix:
         for w in z:
@@ -486,6 +514,7 @@ def aenderungen_pruefen(roh) -> tuple[list, list]:
                 continue
             m = _ADR_RE.match(adresse.strip())
             zz = ss = 1
+            ab = 1
             if m:
                 z1 = int(m.group(2))
                 r2 = int(m.group(4)) if m.group(4) else z1
@@ -493,7 +522,10 @@ def aenderungen_pruefen(roh) -> tuple[list, list]:
                 c2 = _spalte_zu_index(m.group(3)) if m.group(3) else c1
                 zz = abs(r2 - z1) + 1
                 ss = abs(c2 - c1) + 1
-            matrix, mgrund = _matrix_pruefen(werte_roh, zz, ss)
+                # Die ERSTE Spalte des Bereichs – der Ablehnungsgrund nennt
+                # damit die Buchstaben (B bis AT) statt nur eine Zahl.
+                ab = min(c1, c2)
+            matrix, mgrund = _matrix_pruefen(werte_roh, zz, ss, ab)
             if mgrund:
                 abgelehnt.append({"blatt": blatt, "adresse": adresse,
                                   "grund": mgrund})
@@ -515,6 +547,30 @@ def aenderungen_pruefen(roh) -> tuple[list, list]:
             abgelehnt.append({"blatt": blatt, "adresse": adresse,
                               "grund": "Weder Wert, Werte-Bereich, Formel noch "
                                        "Format angegeben."})
+            continue
+        elif _ist_fuellwert(wert) and zellen > MAX_FUELL_ZELLEN:
+            # ⚠ DER RIEGEL GEGEN DAS LUECKEN-FUELLEN (gemeldet 2026-10-23).
+            # `wert` setzt EINEN Wert in JEDE Zelle des Bereichs. Mit einer 0
+            # ueber 238 Zellen ist das kein Rechenergebnis, sondern das
+            # Ueberschreiben von Daten, fuer die das Modell keine Zuordnung
+            # gefunden hat – und eine erfundene 0 sieht aus wie ein Messwert.
+            #
+            # Der Grund nennt den WEG, nicht nur das Verbot: das Modell
+            # bekommt ihn zurueck und kann im selben Lauf korrigieren (genau
+            # dafuer liegt die Pruefung hier und nicht im Fenster).
+            abgelehnt.append({
+                "blatt": blatt, "adresse": adresse, "wert": str(wert)[:40],
+                "grund": ("Ein einzelner Platzhalterwert (%r) für %d Zellen "
+                          "wird nicht übernommen. Das überschreibt Daten, für "
+                          "die keine Zuordnung gefunden wurde – eine erfundene "
+                          "0 ist später nicht von einem Messwert zu "
+                          "unterscheiden. Lass die Zellen WEG, die du nicht "
+                          "zuordnen kannst, und nenne sie in deiner Antwort. "
+                          "Sollen wirklich alle %d Zellen denselben Wert "
+                          "tragen, gib ihn als 'werte'-Matrix an, damit jeder "
+                          "Eintrag ausdrücklich dasteht (höchstens %d Zellen "
+                          "über 'wert')."
+                          % (wert, zellen, zellen, MAX_FUELL_ZELLEN))})
             continue
         elif isinstance(wert, str):
             # Ein WERT, der wie eine Formel aussieht, IST in Excel eine Formel,
@@ -735,6 +791,49 @@ def _spalten_hinweis(b: dict, spalte_ab: int) -> str:
 # Trennung waere der Ueberblick fuenfmal so gross, ohne eine Frage besser zu
 # beantworten.
 MAX_SPALTEN_BEISPIEL = 40
+
+# ⚠ RIEGEL GEGEN DAS FUELLEN VON LUECKEN MIT EINEM PLATZHALTER.
+# Gemeldet 2026-10-23, nachdem der Spalten-Deckel gefallen war: das Modell
+# fand fuer einen Teil der Koepfe keinen Partner und schrieb
+#
+#     2026!F12:II12   wert=0   (238 Zellen)
+#     2026!AU12:II12  wert=0   (197 Zellen)
+#
+# mit der Begruendung „Fehlende Uebereinstimmungen wurden mit 0 befuellt".
+# Das Feld ``wert`` setzt EINEN Wert in JEDE Zelle des Bereichs – 238 Zellen
+# mit einer erfundenen Null, und eine Null ist von einem Messwert nicht zu
+# unterscheiden. Das Verbot stand zu diesem Zeitpunkt schon im Prompt; es
+# wurde ignoriert. **Ein Prompt ist eine Bitte, kein Riegel** – deshalb steht
+# die Grenze jetzt in der Pruefung.
+#
+# Die Zahl ist bewusst klein: ein BEWUSSTES Nullsetzen betrifft eine Handvoll
+# Zellen ("setze D5:D9 auf 0"), das Luecken-Fuellen ganze Zeilen. Wer wirklich
+# viele Zellen auf denselben Platzhalter setzen will, nennt sie als Werte-
+# Matrix – dann steht jede Null ausdruecklich da und ist kein Nebenprodukt.
+MAX_FUELL_ZELLEN = 25
+# Werte, die als „nichts gefunden" gelten. ``0`` und ``""`` sind die beiden,
+# die ein Modell als Platzhalter einsetzt; ``False`` kommt aus derselben
+# Verlegenheit. Eine ECHTE 0 in wenigen Zellen bleibt erlaubt (siehe Deckel).
+_FUELLWERTE = (0, 0.0, "", "0", "-", "n/a", "N/A", False, None)
+
+
+def _ist_fuellwert(wert) -> bool:
+    """Ist das ein Platzhalter, mit dem ein Modell eine Luecke fuellt?
+
+    ``0 == False`` in Python, und genau das ist hier gewollt – beide stehen
+    fuer „ich habe nichts gefunden". Geprueft wird mit ``type``-Vergleich fuer
+    Zeichenketten, damit ``"0"`` und ``0`` gleich behandelt werden, ohne dass
+    ein beliebiger Text mit Nullwert durchfaellt.
+    """
+    if wert is None:
+        return True
+    if isinstance(wert, str):
+        return wert.strip().lower() in ("", "0", "-", "n/a", "na", "null")
+    if isinstance(wert, bool):
+        return wert is False
+    if isinstance(wert, (int, float)):
+        return wert == 0
+    return False
 
 
 def _zeile_text(werte, spalte_ab: int, grenze: int = MAX_SPALTEN_BEISPIEL) -> str:

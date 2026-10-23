@@ -39,6 +39,7 @@ WAECHTER = [
     ("py", "tests/test_excel_objekte.py"),
     ("py", "tests/test_excel_spalten_hinweis.py"),
     ("py", "tests/test_excel_leerlauf.py"),
+    ("py", "tests/test_excel_fuellwert.py"),
     ("js", "tests/test_excel_leerlauf_ui.js"),
     ("js", "tests/test_excel_reiter_ui.js"),
     ("js", "tests/test_excel_objekte_ui.js"),
@@ -538,6 +539,63 @@ def _p48():
           '        </div>\n'
           '    </div>\n'
           '    </div>\n')
+
+
+@probe("Fuellwert-Riegel entfernt (Stand vor der Behebung)",
+       "backend/excel_ask.py")
+def _p49():
+    patch("backend/excel_ask.py",
+          "        elif _ist_fuellwert(wert) and zellen > MAX_FUELL_ZELLEN:",
+          "        elif False:")
+
+
+@probe("Riegel greift auch bei ECHTEN Werten (Funktionssperre)",
+       "backend/excel_ask.py")
+def _p50():
+    # Die Gegenrichtung: ein Riegel, der zu viel faengt, macht eine normale
+    # Aufgabe unmoeglich - und das faellt im Betrieb erst spaeter auf.
+    patch("backend/excel_ask.py",
+          "        elif _ist_fuellwert(wert) and zellen > MAX_FUELL_ZELLEN:",
+          "        elif zellen > MAX_FUELL_ZELLEN:")
+
+
+@probe("Fuellwert-Erkennung blind fuer die leere Zeichenkette",
+       "backend/excel_ask.py")
+def _p51():
+    patch("backend/excel_ask.py",
+          '        return wert.strip().lower() in ("", "0", "-", "n/a", "na", "null")',
+          '        return wert.strip().lower() in ("x-nie-x",)')
+
+
+@probe("Deckel so hoch, dass er nie greift", "backend/excel_ask.py")
+def _p52():
+    patch("backend/excel_ask.py", "MAX_FUELL_ZELLEN = 25",
+          "MAX_FUELL_ZELLEN = 100000")
+
+
+@probe("Transponierung entfernt (gemeldete Ablehnung kehrt zurueck)",
+       "backend/excel_ask.py")
+def _p53():
+    patch("backend/excel_ask.py",
+          "        matrix = [list(z) for z in zip(*matrix)]",
+          "        pass  # sabotiert: nicht gedreht")
+
+
+@probe("Transponierung raet auch bei Mehrdeutigkeit",
+       "backend/excel_ask.py")
+def _p54():
+    # 2x3 gegen 3x2 - dort zu drehen schreibt Werte an falsche Stellen.
+    patch("backend/excel_ask.py",
+          "            and min(zeilen, spalten) == 1 \\",
+          "            and True \\")
+
+
+@probe("Mass-Grund nennt die Spaltenbuchstaben nicht",
+       "backend/excel_ask.py")
+def _p55():
+    patch("backend/excel_ask.py",
+          '            rahmen = (" Der Bereich umfasst die %d Spalten %s bis %s."',
+          '            rahmen = ("%.0s%.0s%.0s"')
 
 
 @probe("Objekt-Fehler nur ins Protokoll, nicht in den Verlauf",

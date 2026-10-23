@@ -2625,7 +2625,7 @@
        unterscheiden – genau das hat an diesem Tag zweimal Zeit gekostet.
        Zwei Stellen gehoeren deshalb immer zusammen hochgezaehlt: diese Nummer
        UND der Cache-Buster `excel.js?v=N` in taskpane.html. */
-    var XL_VERSION = '1.00.01';
+    var XL_VERSION = '1.00.02';
 
     function versionAnschreiben() {
         var text = ' (v' + XL_VERSION + ')';

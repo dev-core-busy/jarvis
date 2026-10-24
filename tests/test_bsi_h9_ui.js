@@ -482,6 +482,102 @@ async function teil6() {
         wn2.close(); wo.close();
     }
 
+    // ── 6a2b. Die Herkunft wird NACHGEZOGEN ────────────────────────────────
+    // ⚠ CODE-REVIEW 2026-10-24: die Zeile wurde einmal beim Bauen der Karte
+    // gesetzt und danach nie wieder angefasst. Waehlte der Benutzer einen
+    // Adressbuch-Treffer, stand die rote Warnung "wurde NICHT im Adressbuch
+    // geprueft" weiter ueber einer Adresse, die er gerade nachgesehen hatte.
+    // Gemessen wird die WIRKUNG an der Zeile, nicht ein Aufruf im Quelltext.
+    {
+        const TRH = { ok: true, treffer: [
+            { name: 'Max Mustermann', adresse: 'max.mustermann@beispiel.de',
+              art: 'person' }] };
+        // Zwei Antworten: eine fuer die Suche beim Erscheinen der Karte (der
+        // Wert 'Andreas Bender' hat kein "@"), eine fuer das Tippen danach.
+        const wk = seite('de', [{ body: TRH }, { body: TRH }, { body: TRH }]);
+        const bk = wk.document.getElementById('messages');
+        wk.JarvisBestaetigung.anfrage({
+            id: 'hz1', werkzeug: 'email_senden', klasse: 'aussen',
+            argumente: [['an', 'uebernommen@beispiel.de']], aenderbar: ['an'],
+            herkunft: { an: 'uebernommen' }
+        }, { container: bk, senden: function () { return true; } });
+        const kk = bk.querySelector('[data-best-id="hz1"]');
+        // ⚠ EXIT 2 NUR, WENN DER MESSAUFBAU NICHT LAEUFT – nicht, wenn das
+        // PRODUKT etwas nicht erzeugt. Die erste Fassung brach hier ab, sobald
+        // Feld oder Warnzeile fehlten: damit meldeten DREI Gegenproben
+        // ("Karte beachtet die Freigabe nicht", "Karte zeigt die Herkunft
+        // nicht an", "uebernommen nicht als Warnung gekennzeichnet") statt
+        // eines Bisses "Waechter konnte nicht laufen (rc=2)" – ein
+        // abgebrochener Lauf ist von einem bestandenen nicht zu
+        // unterscheiden, und vorher bissen alle drei. Die Frage, die das
+        // verhindert: WELCHE Sabotagen treffen diesen Guard? Hier aussch-
+        // liesslich erwartbare Produktaenderungen – die gehoeren als FAIL
+        // gemeldet (Register, dreimal an einem Tag bezahlt).
+        if (!kk) {
+            console.log('ABBRUCH: Karte fehlt – Abschnitt 6a2b kann nichts messen');
+            bilanz(); process.exit(2);
+        }
+        const ik = kk.querySelector('.jv-best-feld');
+        let hk2 = kk.querySelector('.jv-best-herkunft');
+        // Positivkontrolle als FAIL: ohne Warnung waere jede Folgepruefung
+        // trivial – eine Zeile, die gar nicht als Warnung begann, kann nicht
+        // stehenbleiben. Ein fehlendes Feld bzw. eine fehlende Zeile ist ein
+        // BEFUND, kein Abbruchgrund.
+        check('Positivkontrolle: ein Eingabefeld ist da', !!ik);
+        check('Positivkontrolle: die Karte startet mit der WARNUNG',
+              !!hk2 && hk2.classList.contains('is-uebernommen'),
+              hk2 ? hk2.className : 'keine Zeile');
+
+        // Weg 1: aus dem Adressbuch waehlen
+        if (ik) {
+            ik.value = 'Muster';
+            ik.dispatchEvent(new wk.Event('input', { bubbles: true }));
+        }
+        await warten(wk);
+        const vk = kk.querySelector('.jv-best-vorschlag');
+        check('die Suche liefert einen Treffer zum Klicken', !!vk);
+        if (vk) vk.click();
+        hk2 = kk.querySelector('.jv-best-herkunft');
+        check('nach der Auswahl aus dem Adressbuch ist die Warnung WEG',
+              !!hk2 && !hk2.classList.contains('is-uebernommen'),
+              hk2 ? hk2.className : 'keine Zeile');
+        check('… und die Zeile sagt, dass der BENUTZER gewaehlt hat',
+              !!hk2 && hk2.classList.contains('is-gewaehlt')
+              && /Adressbuch/.test(hk2.textContent),
+              hk2 ? hk2.textContent : '-');
+
+        // Weg 2: von Hand tippen – auch das ist nicht mehr "uebernommen",
+        // aber auch nicht "im Adressbuch geprueft".
+        if (ik) {
+            ik.value = 'ganz@anders.de';
+            ik.dispatchEvent(new wk.Event('input', { bubbles: true }));
+        }
+        hk2 = kk.querySelector('.jv-best-herkunft');
+        check('nach dem Tippen steht "von Hand eingetragen"',
+              !!hk2 && hk2.classList.contains('is-getippt')
+              && !hk2.classList.contains('is-uebernommen'),
+              hk2 ? hk2.className : 'keine Zeile');
+        check('… und NICHT "im Adressbuch geprueft" (das waere eine Behauptung)',
+              !!hk2 && !hk2.classList.contains('is-aufgeloest')
+              && !hk2.classList.contains('is-gewaehlt'),
+              hk2 ? hk2.className : '-');
+
+        // Zurueck auf den Vorschlag des Modells: dann gilt auch wieder dessen
+        // Herkunft. Ohne das waere die Warnung nach einem Tippfehler samt
+        // Zuruecktippen dauerhaft verschwunden – also genau der Fall, fuer den
+        // sie gebaut ist, stillschweigend ohne Warnung.
+        if (ik) {
+            ik.value = 'uebernommen@beispiel.de';
+            ik.dispatchEvent(new wk.Event('input', { bubbles: true }));
+        }
+        hk2 = kk.querySelector('.jv-best-herkunft');
+        check('wer den Vorschlag wieder herstellt, bekommt die Warnung zurueck',
+              !!hk2 && hk2.classList.contains('is-uebernommen'),
+              hk2 ? hk2.className : 'keine Zeile');
+        await warten(wk);
+        wk.close();
+    }
+
     // ── 6a3. VERSENDEMASKE OHNE EMPFAENGER ─────────────────────────────────
     // Betreiberfestlegung: "versende das Bild als E-Mail" ohne Empfaenger
     // oeffnet die Maske mit Adressbuch – KEINE Textfrage. Der Aufruf kommt

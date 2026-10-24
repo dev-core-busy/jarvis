@@ -1739,6 +1739,152 @@ check("nicht ins Prompt" in _i18 or "nicht ins Prompt" in _pj,
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+section("12c. Jede Zusage am Feld muss das Feld auch EINLOESEN")
+# ⚠ CODE-REVIEW 2026-10-24: der Hinweis an den Empfaengerfeldern war EIN Text
+# an allen drei Sende-Werkzeugen – und damit an drei Stellen eine Zusage ohne
+# Deckung:
+#   * am `cc` versprach er die Versendemaske, die ein FEHLENDES cc nicht
+#     nachtraegt (`wirkung.PFLICHT` fuehrt nur `an`): die Kopie fiel still weg;
+#   * in `email_entwurf`/`email_weiterleiten` nannte er `email_senden`, also
+#     ein anderes Werkzeug als das aufgerufene;
+#   * in `email_entwurf` widersprach er der eigenen Beschreibung ("frage im
+#     TEXT nach" gegen "FRAGE NICHT im Text nach").
+#
+# Geprueft wird deshalb als REGEL am SCHEMA und an `wirkung`, nicht am
+# Wortlaut: wer die Maske verspricht, muss in `pflichtfelder` stehen. Eine
+# Pruefung auf den Satz selbst waere die Zeitbombe, die Abschnitt 12 oben
+# schon zweimal bezahlt hat.
+from backend import wirkung as _wi                                  # noqa: E402
+
+_SENDER = ("email_senden", "email_entwurf", "email_weiterleiten")
+# ⚠ DIE MARKE MUSS DIE ZUSAGE TREFFEN, NICHT DAS WORT. Der erste Versuch nahm
+# "Versendemaske" – und traf damit auch die GEGENAUSSAGE am cc-Feld
+# ("erscheint in der Versendemaske auch nicht"): zwei FAIL, die es im Produkt
+# nicht gab. Ein Teilstring ist keine Identitaet (Register). "FRAGE NICHT im
+# Text" steht ausschliesslich in der Masken-Zusage; das kleingeschriebene
+# "frage im Text nach" der Gegenaussage kollidiert damit nicht.
+_MASKE_MARKEN = ("FRAGE NICHT im Text",)
+
+_felder = {}            # (werkzeug, feld) -> beschreibung
+for _n in _SENDER:
+    for _f, _spec in ((_wz[_n].parameters_schema().get("properties")
+                       or {}).items()):
+        _felder[(_n, _f)] = str((_spec or {}).get("description") or "")
+check(len(_felder) >= 12,
+      "Positivkontrolle: Feldbeschreibungen der Sende-Werkzeuge eingelesen "
+      "(%d)" % len(_felder))
+
+# Regel 1 – die Masken-Zusage nur dort, wo die Maske das Feld nachtraegt.
+for (_n, _f), _b in sorted(_felder.items()):
+    if not any(m in _b for m in _MASKE_MARKEN):
+        continue
+    check(_f in _wi.pflichtfelder(_n),
+          "%s.%s verspricht die Maske – und steht in wirkung.pflichtfelder"
+          % (_n, _f),
+          "pflichtfelder(%s) = %s; eine Zusage ohne Deckung: das Feld wird "
+          "NICHT nachgetragen" % (_n, _wi.pflichtfelder(_n)))
+# Positivkontrolle der Regel selbst: EIN Feld muss sie ausloesen, sonst ist
+# die Schleife leer und alles trivial wahr.
+check(any(any(m in _b for m in _MASKE_MARKEN) for _b in _felder.values()),
+      "Positivkontrolle: irgendein Feld verspricht die Maske ueberhaupt")
+check(any(m in _felder.get(("email_senden", "an"), "") for m in _MASKE_MARKEN),
+      "und zwar email_senden.an (das Feld, fuer das PFLICHT greift)")
+
+# Regel 2 – ein aenderbares Feld, das die Maske NICHT nachtraegt, muss das
+# sagen. Sonst laesst das Modell es im Vertrauen auf die Maske leer.
+#
+# ⚠ NUR fuer Werkzeuge, die ueberhaupt eine Karte bekommen. `email_entwurf`
+# ist in `einstufen` NICHT eingestuft – dort gibt es keine Maske, in der
+# irgendetwas nachgetragen oder korrigiert werden koennte, und ein Satz
+# darueber waere eine Aussage ueber etwas, das es nicht gibt. Der Zustand
+# selbst ist unten eine eigene Regel, damit er nicht still bleibt.
+_MIT_KARTE = tuple(n for n in _SENDER if _wi.einstufen(n, {}) in _wi.KLASSEN)
+check("email_senden" in _MIT_KARTE and "email_entwurf" not in _MIT_KARTE,
+      "Positivkontrolle: email_senden bekommt eine Karte, email_entwurf nicht",
+      str(_MIT_KARTE))
+for _n in _MIT_KARTE:
+    for _f in _wi.AENDERBAR.get(_n, ()):
+        if _f in _wi.pflichtfelder(_n) or (_n, _f) not in _felder:
+            continue
+        _b = _felder[(_n, _f)]
+        check("nicht nachtragen" in _b or "erscheint in der Versendemaske "
+              "auch nicht" in _b,
+              "%s.%s sagt, dass die Maske es NICHT nachtraegt" % (_n, _f),
+              _b[-200:])
+
+# Regel 2b – ein Werkzeug in AENDERBAR, das gar keine Karte bekommt, ist eine
+# Zusage ohne Weg dorthin. Entweder weg oder BENANNT (Register: ein Zweig,
+# dessen Bedingung nicht erfuellbar ist, hinterlaesst eine Zusage).
+_WIQ = (ROOT / "backend" / "wirkung.py").read_text(encoding="utf-8")
+for _n in _wi.AENDERBAR:
+    if _wi.einstufen(_n, {}) in _wi.KLASSEN:
+        continue
+    check(_n in _WIQ.split("AENDERBAR: dict")[0][-2000:],
+          "%s steht in AENDERBAR ohne Einstufung – und der Grund steht "
+          "DARUEBER" % _n,
+          "ohne Begruendung liest das wie 'in der Karte korrigierbar', und "
+          "eine Karte gibt es nicht")
+    check(_f not in _wi.pflichtfelder(_n),
+          "… und pflichtfelder(%s) verspricht folgerichtig nichts" % _n,
+          str(_wi.pflichtfelder(_n)))
+
+# Regel 3 – kein Feld nennt ein FREMDES Sende-Werkzeug. `email_adresse_suchen`
+# darf genannt werden: es ist lesend und der vorgesehene Weg zur Adresse.
+for (_n, _f), _b in sorted(_felder.items()):
+    _fremd = [w for w in _SENDER if w != _n and w in _b]
+    check(not _fremd,
+          "%s.%s nennt kein fremdes Sende-Werkzeug" % (_n, _f),
+          "nennt %s – der Hinweis gehoert dem Werkzeug, in dem er steht"
+          % _fremd)
+
+# Regel 4 – kein Widerspruch INNERHALB eines Werkzeugs: wo die Beschreibung
+# die Textfrage verlangt, darf kein Feld sie verbieten.
+for _n in _SENDER:
+    _beschr = _wz[_n].description
+    if "frage im TEXT nach" not in _beschr:
+        continue
+    for _f, _b in ((f, b) for (w, f), b in _felder.items() if w == _n):
+        check("FRAGE NICHT im Text" not in _b,
+              "%s: Beschreibung verlangt die Textfrage, Feld %s verbietet sie "
+              "nicht" % (_n, _f), _b[:160])
+check("frage im TEXT nach" in _wz["email_entwurf"].description,
+      "Positivkontrolle: email_entwurf verlangt die Textfrage wirklich "
+      "(sonst ist Regel 4 leer)")
+
+# ─── Die Code-Haelfte: ohne Oberflaeche gibt es keine Maske ────────────────
+# Die Zusage "lass das Feld leer, die Maske fragt" ist in einem Lauf ohne
+# Mensch nicht einloesbar. Vorher lief das bis `_pruefe_empfaenger` und kam
+# als "kein Empfaenger angegeben" zurueck – richtig, aber ohne den naechsten
+# Schritt, und eine Regel zaehlt es als Fehlversuch.
+_mu2 = ma.current_mail_user.set("anna")
+try:
+    _wz_senden = _wz["email_senden"]
+    # KEIN Kanal gesetzt -> mail_anhang.mit_mensch() ist False
+    _r_ohne = _aio.run(_wz_senden.execute(betreff="B", text="T"))
+    check(_r_ohne.startswith("❌"),
+          "ohne Oberflaeche wird ein leerer Empfaenger abgewiesen",
+          _r_ohne[:120])
+    check("keine Versendemaske" in _r_ohne,
+          "… und der Grund nennt, dass es hier KEINE Maske gibt", _r_ohne[:200])
+    check("email_adresse_suchen" in _r_ohne and "rate" in _r_ohne.lower(),
+          "… und den naechsten Schritt, ohne zum Raten einzuladen",
+          _r_ohne[:260])
+    # Gegenkontrolle: MIT Kanal darf dieser Riegel NICHT greifen – sonst waere
+    # die Versendemaske abgeschafft, also genau die Betreiberfestlegung weg.
+    _kt = _wi.kanal_cv.set(_wi.Kanal(ws=object(), username="anna",
+                                     kann_bestaetigen=True))
+    try:
+        _r_mit = _aio.run(_wz_senden.execute(betreff="B", text="T"))
+        check("keine Versendemaske" not in _r_mit,
+              "Gegenkontrolle: MIT Oberflaeche greift der Riegel nicht (die "
+              "Maske bleibt der Weg)", _r_mit[:160])
+    finally:
+        _wi.kanal_cv.reset(_kt)
+finally:
+    ma.current_mail_user.reset(_mu2)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 print(f"\n{'=' * 62}")
 print(f"  {_ok} OK, {_fail} FAIL  (Sandkasten: {TMP})")
 print(f"{'=' * 62}")

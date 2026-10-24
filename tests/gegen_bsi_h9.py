@@ -152,6 +152,19 @@ PROBEN = [
     ("Lauf-Klammer fehlt (Riegel wirkungslos)", AG,
      "        _verweigert_token = _wirkung.lauf_oeffnen()\n",
      "        _verweigert_token = None\n"),
+    # ⚠ Die Luecke aus dem Code-Review 2026-10-24: `run_sub_agent` ruft
+    # `run_task` erneut, und ein unbedingtes `set(set())` gab dem Unter-Agenten
+    # ein frisches, LEERES Set – die Delegation war damit der Weg um den Riegel
+    # herum. Die AST-Pruefung ("Klammer wird genau einmal geoeffnet") war dabei
+    # gruen, deshalb muss diese Probe die WIRKUNG treffen.
+    ("Unter-Agent bekommt ein frisches Set (Delegation umgeht den Riegel)", WI,
+     "    if isinstance(verweigert_cv.get(), set):\n        return None\n"
+     "    return verweigert_cv.set(set())\n",
+     "    return verweigert_cv.set(set())\n"),
+    ("Adressbuch-Klammer erbt nicht (geprueft gilt als ungeprueft)", AB,
+     "    if isinstance(aufgeloest_cv.get(), set):\n        return None\n"
+     "    return aufgeloest_cv.set(set())\n",
+     "    return aufgeloest_cv.set(set())\n"),
     # ── Herkunft der Adresse ────────────────────────────────────────────────
     ("Herkunft wird nicht mitgeschickt", WI,
      "            \"herkunft\": herkunft_felder(name, args),\n", ""),
@@ -193,8 +206,29 @@ PROBEN = [
     # Harness als "???" aus.
     ("Tippen loest die Pflichtpruefung nicht aus", BJ,
      "            timer = setTimeout(function () { suchen(wert); }, TIPP_MS);\n"
-     "            if (typeof beiAenderung === 'function') beiAenderung();\n",
+     "            if (typeof beiAenderung === 'function') beiAenderung('getippt');\n",
      "            timer = setTimeout(function () { suchen(wert); }, TIPP_MS);\n"),
+    # ── Zusagen am Feld muessen das Feld einloesen (Code-Review 2026-10-24) ──
+    # Die erste Fassung hatte EINEN Hinweis an allen Empfaengerfeldern aller
+    # drei Werkzeuge. Jede dieser Proben stellt eine der drei Luecken her.
+    ("cc verspricht wieder die Versendemaske (Kopie faellt still weg)", EM,
+     '                   "description": ("Kopie-Empfaenger (optional)."\n'
+     '                                   + _AN_BASIS + _CC_HINWEIS)},\n',
+     '                   "description": ("Kopie-Empfaenger (optional)."\n'
+     '                                   + _AN_BASIS + _AN_MASKE)},\n'),
+    ("email_entwurf bekommt die Masken-Zusage (widerspricht sich selbst)", EM,
+     '                   "description": "Empfaenger (darf leer bleiben)." + _AN_BASIS},\n',
+     '                   "description": ("Empfaenger (darf leer bleiben)."\n'
+     '                                   + _AN_BASIS + _AN_MASKE)},\n'),
+    ("ohne Oberflaeche laeuft der leere Empfaenger weiter (Regel-Fehlversuch)", EM,
+     "            if not mail_anhang.mit_mensch():\n", "            if False:\n"),
+    # ── Herkunft nach einer Korrektur ───────────────────────────────────────
+    ("Herkunft wird nach der Korrektur nicht nachgezogen (Warnung bleibt)", BJ,
+     "            if (!hz || !felder[feld]) return;\n",
+     "            if (true) return;\n"),
+    ("der WEG der Korrektur wird nicht durchgereicht", BJ,
+     "                    if (typeof beiAenderung === 'function') beiAenderung('adressbuch');\n",
+     "                    if (typeof beiAenderung === 'function') beiAenderung();\n"),
 ]
 
 DATEIEN = [WI, AG, MA, CJ, BJ, AB, EM, "tests/test_bsi_h9.py",

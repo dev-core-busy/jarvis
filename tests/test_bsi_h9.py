@@ -401,6 +401,42 @@ async def teil3():
         W.lauf_schliessen(_tok_f)
         W.FRIST_S = _alt_frist
 
+    # ── Delegation ist kein Umweg um den Riegel ────────────────────────────
+    # ⚠ CODE-REVIEW 2026-10-24: `run_task` oeffnet die Klammer, und
+    # `AgentManager.run_sub_agent` ruft `run_task` ERNEUT (eigener
+    # asyncio-Task, ohne `bestaetigung` – der Kanal wird also geerbt). Ein
+    # unbedingtes `verweigert_cv.set(set())` gab dem Unter-Agenten damit ein
+    # frisches, LEERES Set: nach "Ablehnen" kam fuer dasselbe Werkzeug eine
+    # zweite Karte. Gemessen wird deshalb die WIRKUNG in genau diesem Aufbau –
+    # verschachtelte Klammer im eigenen Task – und nicht, dass `lauf_oeffnen`
+    # irgendwo gerufen wird (das prueft Abschnitt 6 am Syntaxbaum, und es war
+    # gruen, waehrend der Riegel offenstand).
+    _tok_dl = W.lauf_oeffnen()
+    try:
+        ws_g1 = WS(("anna", False))         # lehnt ab
+        r_g1 = await fall(W.Kanal(ws_g1, "anna", True), args={"an": "a@beispiel.de"})
+
+        async def _unteragent():
+            # Genau wie run_task: Klammer oeffnen, arbeiten, schliessen.
+            _tok_kind = W.lauf_oeffnen()
+            try:
+                _geerbt = W.verweigert_grund("email_senden")
+                ws_g2 = WS(("anna", True))  # wuerde sofort klicken
+                r = await fall(W.Kanal(ws_g2, "anna", True),
+                               args={"an": "a@beispiel.de"})
+                return _tok_kind, _geerbt, r, ws_g2
+            finally:
+                W.lauf_schliessen(_tok_kind)
+
+        _tok_kind, _geerbt, r_g2, ws_g2 = await asyncio.create_task(_unteragent())
+        # Nach dem Unter-Lauf muss die Marke des ELTERN-Laufs noch stehen:
+        # ein `reset` mit einem Token, das gar keinen Wert ersetzt hat, haette
+        # sie abgeraeumt (deshalb gibt `lauf_oeffnen` beim Erben None zurueck).
+        erg["riegel_delegation"] = (r_g1, _geerbt, r_g2, ws_g2, _tok_kind,
+                                    W.verweigert_grund("email_senden"))
+    finally:
+        W.lauf_schliessen(_tok_dl)
+
     # OHNE Lauf-Klammer greift der Riegel nicht (headless hat keine Karte)
     ws_d = WS(("anna", False))
     r_d1 = await fall(W.Kanal(ws_d, "anna", True), args={"an": "a@beispiel.de"})
@@ -585,6 +621,26 @@ pruefe([m for m in ws_f2.nachrichten
         if m.get("type") == "bestaetigung_anfrage"] == [],
        "und auch dann entsteht keine zweite Karte")
 
+r_g1, _geerbt, r_g2, ws_g2, _tok_kind, _nachher = E["riegel_delegation"]
+pruefe(_txt(r_g1).startswith("ABGELEHNT"),
+       "Positivkontrolle: im Eltern-Lauf wird abgelehnt", str(r_g1)[:60])
+pruefe(_geerbt == "abgelehnt",
+       "ein Unter-Agent ERBT die Verweigerung (eigene Lauf-Klammer, eigener "
+       "asyncio-Task)", repr(_geerbt))
+pruefe(_tok_kind is None,
+       "eine schon offene Klammer wird nicht ersetzt (lauf_oeffnen gibt None)",
+       repr(_tok_kind))
+pruefe(_txt(r_g2).startswith("NICHT AUSGEFÜHRT") and "schon vorgelegt" in _txt(r_g2),
+       "Delegation ist kein Umweg: der Unter-Agent wird ebenfalls abgewiesen",
+       str(r_g2)[:110])
+pruefe([m for m in ws_g2.nachrichten
+        if m.get("type") == "bestaetigung_anfrage"] == [],
+       "und im Unter-Agenten entsteht GAR KEINE zweite Karte",
+       str(len([m for m in ws_g2.nachrichten
+                if m.get("type") == "bestaetigung_anfrage"])))
+pruefe(_nachher == "abgelehnt",
+       "der Unter-Lauf raeumt die Marke des Eltern-Laufs NICHT ab", repr(_nachher))
+
 r_d1, r_d2, ws_e = E["ohne_klammer"]
 pruefe(_txt(r_d1).startswith("ABGELEHNT") and r_d2 is None,
        "ohne Lauf-Klammer greift der Riegel NICHT (headless entscheidet die "
@@ -621,6 +677,22 @@ try:
            "die Karte bekommt die Herkunft JE FELD", str(h))
     pruefe("betreff" not in h,
            "fuer nicht aenderbare Felder wird keine Herkunft behauptet", str(h))
+    # ⚠ CODE-REVIEW 2026-10-24: dieselbe Erb-Regel wie beim Riegel – ein
+    # Unter-Agent oeffnet die Klammer erneut. Mit einem frischen Set waere
+    # `ist_aufgeloest` dort FALSE, und die Karte haette eine im Eltern-Lauf
+    # nachgesehene Adresse als "nicht geprueft" gewarnt: eine Warnung im
+    # Regelfall, die den Fall nicht mehr traegt, fuer den sie gebaut ist.
+    _t_kind = _AB.lauf_oeffnen()
+    try:
+        pruefe(_t_kind is None,
+               "Adressbuch: eine offene Klammer wird geerbt, nicht ersetzt",
+               repr(_t_kind))
+        pruefe(_AB.ist_aufgeloest("x@beispiel.de") is True,
+               "ein Unter-Agent sieht die im Eltern-Lauf aufgeloeste Adresse")
+    finally:
+        _AB.lauf_schliessen(_t_kind)
+    pruefe(_AB.ist_aufgeloest("x@beispiel.de") is True,
+           "und der Unter-Lauf raeumt die Marke des Eltern-Laufs nicht ab")
 finally:
     _AB.lauf_schliessen(_t)
 

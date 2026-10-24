@@ -280,15 +280,29 @@ console.log('\n6. Kontrast in beiden Themen');
 {
     const THEME = lies('css/theme.css');
 
+    // ⚠ Kommentare heraus, BEVOR irgendetwas gesucht wird: die Begruendungen
+    // an diesen Regeln NENNEN `--danger`, `color-mix(… 78%, #000)` und die
+    // gemessenen Zahlen. Ein Waechter, der seine eigene Erklaerung liest,
+    // prueft nichts (Register).
+    const ohneKomm = (s) => s.replace(/\/\*[\s\S]*?\*\//g, ' ');
+    const THEME_C = ohneKomm(THEME), CSS_C = ohneKomm(CSS);
+
     // Eine Variable im :root- bzw. body.light-Block – an der STRUKTUR
     // geschnitten, damit nicht der erste Treffer irgendwo in der Datei gilt.
+    // Gesucht wird in theme.css UND chat.css: `--surface-variant` (die Flaeche
+    // der Herkunfts-Warnung) steht nur in chat.css, und eine Rechnung gegen
+    // die falsche Flaeche ist schlimmer als keine (Register: eine
+    // Kontrast-Loesung gilt nur fuer DIE Flaeche, fuer die sie gemessen wurde).
     function variable(block, name) {
-        const i = THEME.indexOf(block + ' {');
-        if (i < 0) return '';
-        const ende = THEME.indexOf('\n}', i);
-        const m = THEME.slice(i, ende).match(
-            new RegExp('--' + name + ':\\s*([^;]+);'));
-        return m ? m[1].trim() : '';
+        for (const quelle of [THEME_C, CSS_C]) {
+            const i = quelle.indexOf(block + ' {');
+            if (i < 0) continue;
+            const ende = quelle.indexOf('\n}', i);
+            const m = quelle.slice(i, ende).match(
+                new RegExp('--' + name + ':\\s*([^;]+);'));
+            if (m) return m[1].trim();
+        }
+        return '';
     }
     const srgb = (c) => { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
     const leucht = ([r, g, b]) => 0.2126 * srgb(r) + 0.7152 * srgb(g) + 0.0722 * srgb(b);
@@ -313,11 +327,10 @@ console.log('\n6. Kontrast in beiden Themen');
            JSON.stringify(danger));
 
     // Welche Farbe gilt je Thema? Aus chat.css gelesen, nicht angenommen.
-    const warnRegel = (praefix) => {
-        const sel = praefix + '.msg-status-warn';
-        const i = CSS.indexOf(sel + ' {');
+    const warnRegel = (praefix, sel) => {
+        const i = CSS_C.indexOf(praefix + sel + ' {');
         if (i < 0) return '';
-        const m = CSS.slice(i, CSS.indexOf('}', i)).match(/color:\s*([^;]+);/);
+        const m = CSS_C.slice(i, CSS_C.indexOf('}', i)).match(/color:\s*([^;]+);/);
         return m ? m[1].trim() : '';
     };
     const deuten = (ausdruck) => {
@@ -329,18 +342,40 @@ console.log('\n6. Kontrast in beiden Themen');
             ? mix(danger, zweite, parseInt(m[1], 10) / 100) : null;
     };
 
-    for (const [thema, block, praefix] of [['dunkel', ':root', ''],
-                                           ['hell', 'body.light', 'body.light ']]) {
-        const flaeche = hx(variable(block, 'bg-secondary'));
-        // Im hellen Thema gilt die Themenregel, sonst die Basisregel.
-        const ausdruck = warnRegel(praefix) || warnRegel('');
-        const schrift = deuten(ausdruck);
-        pruefe(`[${thema}] die Schriftfarbe ist auswertbar (${ausdruck})`,
-               !!schrift, ausdruck || 'keine color-Angabe gefunden');
-        if (!schrift) continue;
-        const k = kontrast(schrift, flaeche);
-        pruefe(`[${thema}] Kontrast ${k.toFixed(2)}:1 erreicht die Textgrenze 4,5:1`,
-               k >= 4.5, `Schrift ${JSON.stringify(schrift)} auf ${JSON.stringify(flaeche)}`);
+    /* Jede Warnschrift mit IHRER Flaeche. ⚠ Die Flaeche gehoert zur Zusage:
+     * `.jv-best-herkunft.is-uebernommen` liegt auf `--surface-variant`, nicht
+     * auf der Kartenflaeche – und dort haelt im dunklen Thema WEDER das nackte
+     * --danger (4,22:1) noch die Abdunklung (2,76:1), waehrend beide auf
+     * `--bg-secondary` je in einem Thema richtig sind. Genau diese Verwechslung
+     * hat der Code-Review 2026-10-24 gefunden; eine Pruefung ohne Flaeche
+     * haette sie nicht sehen koennen. */
+    const WARNSCHRIFTEN = [
+        ['.msg-status-warn', 'bg-secondary'],
+        // Bestaetigungskarte (BSI H9): beide Texte MUESSEN auffaellig sein –
+        // der eine sagt, dass der Empfaenger fehlt, der andere, dass die
+        // Adresse ungeprueft ist.
+        ['.jv-best-pflicht', 'bg-secondary'],
+        ['.jv-best-herkunft.is-uebernommen', 'surface-variant'],
+    ];
+    for (const [sel, flaechenVar] of WARNSCHRIFTEN) {
+        for (const [thema, block, praefix] of [['dunkel', ':root', ''],
+                                               ['hell', 'body.light', 'body.light ']]) {
+            const flaeche = hx(variable(block, flaechenVar));
+            pruefe(`[${thema}] Flaeche --${flaechenVar} ist gelesen`,
+                   flaeche.length === 3, variable(block, flaechenVar) || 'nicht gefunden');
+            if (flaeche.length !== 3) continue;
+            // Im hellen Thema gilt die Themenregel, sonst die Basisregel.
+            const ausdruck = warnRegel(praefix, sel) || warnRegel('', sel);
+            const schrift = deuten(ausdruck);
+            pruefe(`[${thema}] ${sel}: Schriftfarbe auswertbar (${ausdruck})`,
+                   !!schrift, ausdruck || 'keine color-Angabe gefunden');
+            if (!schrift) continue;
+            const k = kontrast(schrift, flaeche);
+            pruefe(`[${thema}] ${sel}: ${k.toFixed(2)}:1 erreicht die Textgrenze 4,5:1`,
+                   k >= 4.5,
+                   `Schrift ${JSON.stringify(schrift)} auf --${flaechenVar} `
+                   + `${JSON.stringify(flaeche)}`);
+        }
     }
 
     // Positivkontrolle der Rechnung: ein bekannt schlechtes Paar MUSS

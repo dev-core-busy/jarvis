@@ -47,7 +47,19 @@ aufgeloest_cv: contextvars.ContextVar = contextvars.ContextVar(
 
 
 def lauf_oeffnen():
-    """Marke fuer "in diesem Lauf aufgeloeste Adressen" anlegen."""
+    """Marke fuer "in diesem Lauf aufgeloeste Adressen" anlegen.
+
+    ⚠ EINE SCHON OFFENE KLAMMER WIRD GEERBT (Rueckgabe ``None``) – dieselbe
+    Regel und derselbe Grund wie bei ``wirkung.lauf_oeffnen``. Ein frisches
+    Set im Unter-Agenten waere hier nicht nur wirkungslos, sondern eine
+    FALSCHAUSSAGE: ``ist_aufgeloest`` lieferte dann ``False``, und die Karte
+    haette eine im Eltern-Lauf sauber nachgesehene Adresse als "nicht im
+    Adressbuch geprueft" markiert. Eine Warnung, die im Regelfall erscheint,
+    wird beim dritten Mal ueberlesen – dann traegt sie den Fall nicht mehr,
+    fuer den sie gebaut ist.
+    """
+    if isinstance(aufgeloest_cv.get(), set):
+        return None
     return aufgeloest_cv.set(set())
 
 

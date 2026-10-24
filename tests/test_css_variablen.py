@@ -217,6 +217,86 @@ for name in abgeleitet:
           "theme.css: %s wird in body.light neu berechnet" % name,
           "steht nur in :root -> friert auf dem Dunkel-Wert ein")
 
+# ── Dritte Regel: `body.<klasse>` muss eine Klasse treffen, die es GIBT ────
+# ⚠ BEZAHLTER VORFALL (Code-Review 2026-10-24): zwei frische Regeln in
+# chat.css hingen an `body.dark`. Dieses Projekt kennt nur `body.light` – hell
+# setzt die Klasse (theme.js), DUNKEL IST DIE VORGABE UND TRAEGT KEINE KLASSE.
+# Die Korrektur war damit still wirkungslos, und im Regelfall galt die
+# Basisregel: die abgedunkelte Warnschrift, die auf dunklem Grund nur 3,08:1
+# haelt (Register). Betroffen waren ausgerechnet die zwei Texte der
+# Bestaetigungskarte, die auffaellig sein MUESSEN.
+#
+# Dieselbe Fehlerklasse wie der Rest dieser Datei: CSS meldet einen falschen
+# Selektor nicht, es fehlt nur etwas. Deshalb eine REGEL ueber ALLE
+# body-Klassen und nicht eine Pruefung auf das Wort "dark" (Register: wer einen
+# Waechter fuer EINEN Namen baut, hat die Fehlerklasse nicht erledigt).
+#
+# GROSSZUEGIG mit Absicht: gefragt wird nur, ob die Klasse IRGENDWO im Frontend
+# gesetzt wird – nicht, ob sie auf `<body>` landet. Ein Nachweis des Empfaengers
+# ginge nur ueber eine Datenflussanalyse (`printing-doc` wird ueber die Variable
+# `koerper` gesetzt, ein enges `body.classList`-Muster verfehlt es und haette
+# 29 Fundstellen falsch gemeldet – beim Bau dieser Regel genau so gemessen).
+# Ein Fehlalarm ist hier die teurere Haelfte; gefangen wird der Tippfehler bzw.
+# die erfundene Klasse, und das ist der Fall, der vorkam.
+_aus_classlist: set[str] = set()
+_aus_classname: set[str] = set()
+_aus_markup: set[str] = set()
+for p in sorted(FE.rglob("*.js")):
+    if ist_fremd(p):
+        continue
+    t = p.read_text(encoding="utf-8", errors="replace")
+    for m in re.finditer(r"""classList\.(?:add|remove|toggle|replace)\(\s*['"]([\w-]+)['"]""", t):
+        _aus_classlist.add(m.group(1))
+    for m in re.finditer(r"""className\s*\+?=\s*['"]([^'"]*)['"]""", t):
+        _aus_classname.update(re.findall(r"[\w-]+", m.group(1)))
+for p in sorted(FE.rglob("*.html")):
+    if ist_fremd(p):
+        continue
+    for m in re.finditer(r"""class\s*=\s*["']([^"']*)["']""",
+                         p.read_text(encoding="utf-8", errors="replace")):
+        _aus_markup.update(re.findall(r"[\w-]+", m.group(1)))
+gesetzte_klassen = _aus_classlist | _aus_classname | _aus_markup
+
+# Positivkontrolle JE WEG, nicht ueber eine Namensliste: eine gepflegte Liste
+# ist an dem Tag unvollstaendig, an dem jemand seine Klasse anders nennt
+# (Register). Bleibt EIN Zweig leer, greift der Sammler dort ins Leere und die
+# Regel unten waere fuer alles, was nur so gesetzt wird, trivial gruen – genau
+# der Zustand, in dem ein echter Befund wie `body.dark` durchfaellt.
+for _weg, _menge in (("classList.add/toggle(...)", _aus_classlist),
+                     ("className = '...'", _aus_classname),
+                     ("class= im Markup", _aus_markup)):
+    check(len(_menge) >= 5,
+          "Sammelweg liefert Klassen: %s (%d)" % (_weg, len(_menge)))
+check(len(gesetzte_klassen) >= 50,
+      "Klassen aus JS/Markup eingelesen (%d)" % len(gesetzte_klassen))
+# Und zwei Namen, deren Weg je eine eigene Falle hat: `light` kippt das ganze
+# Thema und wird in `theme_frueh.js` VOR dem ersten Skript der Seite gesetzt;
+# `printing-doc` laeuft ueber eine Variable (`koerper.classList.add`) – ein
+# enges `body.classList`-Muster verfehlt es und meldete 29 Fundstellen falsch.
+for _kl, _weg in (("light", "theme.js/theme_frueh.js"),
+                  ("printing-doc", "classList.add ueber eine Variable")):
+    check(_kl in gesetzte_klassen, "Sammler findet '%s' (%s)" % (_kl, _weg))
+
+body_sel: dict[str, set] = {}
+for p in sorted(FE.rglob("*.css")):
+    if p == ALTBESTAND or ist_fremd(p):
+        continue
+    # Kommentare heraus: eine Begruendung, die `body.dark` ERWAEHNT, ist keine
+    # Regel – und dieser Waechter soll nicht seine eigene Erklaerung lesen
+    # (Register).
+    for m in re.finditer(r"\bbody\.([\w-]+)",
+                         entkommentieren(p.read_text(encoding="utf-8"))):
+        body_sel.setdefault(m.group(1), set()).add(p.name)
+
+check(len(body_sel) >= 5, "body.<klasse>-Selektoren gefunden (%d)" % len(body_sel),
+      str(sorted(body_sel)))
+for _kl in sorted(body_sel):
+    check(_kl in gesetzte_klassen,
+          "body.%s trifft eine Klasse, die gesetzt wird" % _kl,
+          "in %s – nirgends im Frontend gesetzt, die Regel ist still "
+          "wirkungslos (dunkel ist die VORGABE und traegt keine Klasse; "
+          "korrigiert wird 'body.light')" % ", ".join(sorted(body_sel[_kl])))
+
 print(f"\n{'=' * 62}")
 print(f"  {_ok} OK, {_fail} FAIL")
 print(f"{'=' * 62}")

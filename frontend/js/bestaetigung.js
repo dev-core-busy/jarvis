@@ -65,6 +65,11 @@
      *
      * Alle Werte aus dem Verzeichnis gehen ueber textContent ins DOM – sie sind
      * Daten, keine Auszeichnung (gleiche Regel wie fuer die Argumente oben).
+     *
+     * ``beiAenderung(weg)`` bekommt den WEG: 'adressbuch' (ein Treffer wurde
+     * angeklickt) oder 'getippt'. Das braucht die Karte, um die
+     * Herkunfts-Zeile nachzuziehen – ohne den Weg koennte sie nur "irgendetwas
+     * hat sich geaendert" sagen und muesste die Warnung stehenlassen.
      */
     function _feld(name, vorgabe, beiAenderung) {
         var box = _el('div', 'jv-best-feldbox');
@@ -129,7 +134,7 @@
                     leeren();
                     meldung.textContent = '';
                     inp.focus();
-                    if (typeof beiAenderung === 'function') beiAenderung();
+                    if (typeof beiAenderung === 'function') beiAenderung('adressbuch');
                 });
                 liste.appendChild(b);
             });
@@ -186,7 +191,7 @@
             if (timer) clearTimeout(timer);
             var wert = inp.value;
             timer = setTimeout(function () { suchen(wert); }, TIPP_MS);
-            if (typeof beiAenderung === 'function') beiAenderung();
+            if (typeof beiAenderung === 'function') beiAenderung('getippt');
         });
         knopf.addEventListener('click', function () {
             if (timer) clearTimeout(timer);
@@ -282,6 +287,47 @@
         var pflicht = Array.isArray(msg.pflicht) ? msg.pflicht : [];
         var felder = {};        // feldname -> { box, eingabe, festschreiben }
         var urwerte = {};       // feldname -> was das Modell vorschlug
+        var hzeilen = {};       // feldname -> die Herkunfts-Zeile (falls es eine gibt)
+
+        /* ⚠ DIE HERKUNFT GILT FUER DEN VORSCHLAG DES MODELLS, NICHT FUER DAS
+         * FELD (Code-Review 2026-10-24). Die Zeile wurde einmal beim Bauen der
+         * Karte gesetzt und danach nie wieder angefasst: waehlte der Benutzer
+         * einen Adressbuch-Treffer, stand die rote Warnung "wurde NICHT im
+         * Adressbuch geprueft" weiter ueber einer Adresse, die er gerade
+         * nachgesehen hatte. Eine Warnung, die im Regelfall erscheint, wird
+         * beim dritten Mal ueberlesen – dann traegt sie den Fall nicht mehr,
+         * fuer den sie gebaut ist (Register: eine Anzeige darf keinen Zustand
+         * behaupten, den sie nicht kennt).
+         *
+         * Tippt der Benutzer den Vorschlag wieder her, gilt auch die
+         * urspruengliche Herkunft wieder – deshalb wird sie nicht
+         * ueberschrieben, sondern je Zustand neu gesetzt. */
+        function _herkunftNachziehen(feld, weg) {
+            var hz = hzeilen[feld];
+            if (!hz || !felder[feld]) return;
+            var jetzt = String(felder[feld].eingabe.value || '').trim();
+            var ur = String(urwerte[feld] == null ? '' : urwerte[feld]).trim();
+            var stufe = (jetzt === ur) ? String(herkunft[feld] || '')
+                : (weg === 'adressbuch' ? 'gewaehlt' : 'getippt');
+            if (!stufe) return;
+            // ⚠ VOLLSTAENDIGE Rueckfalltexte, keine Schluesselnamen: der
+            // Cache-Buster von `i18n.js` wird hier bewusst NICHT hochgezaehlt
+            // (er steht in 19 Seiten, die gerade fremde Aenderungen tragen).
+            // Ein Browser mit altem i18n im Cache kennt die neuen Schluessel
+            // also noch nicht – und bekommt dann denselben Satz aus dem
+            // Rueckfall statt des nackten Wortes "gewaehlt".
+            var TEXTE = {
+                gewaehlt: 'Von dir aus dem Adressbuch gewählt.',
+                getippt: 'Von dir von Hand eingetragen.',
+                aufgeloest: 'Im Adressbuch aufgelöst.',
+                uebernommen: 'Diese Adresse wurde NICHT im Adressbuch geprüft '
+                    + '– sie stammt aus dem Gesprächsverlauf. Bitte nachsehen, '
+                    + 'bevor du freigibst.'
+            };
+            hz.className = 'jv-best-herkunft is-' + stufe;
+            hz.textContent = T('bestaetigung.herkunft.' + stufe,
+                               TEXTE[stufe] || stufe);
+        }
 
         var args = Array.isArray(msg.argumente) ? msg.argumente : [];
         if (args.length) {
@@ -308,12 +354,20 @@
                                 : 'Im Adressbuch aufgelöst.'));
                         hz.setAttribute('role', 'note');
                         dd.appendChild(hz);
+                        hzeilen[feld] = hz;   // zum Nachziehen nach einer Korrektur
                     }
-                    var f = _feld(feld, wert, function () { _pflichtPruefen(); });
-                    dd.appendChild(f.box);
-                    dl.appendChild(dd);
+                    // Reihenfolge: `felder`/`urwerte` stehen VOR dem ersten
+                    // Rueckruf – `_feld` sucht beim Erscheinen der Karte schon
+                    // (der gemeldete Fall "an Andreas Bender"), und
+                    // `_herkunftNachziehen` liest beide.
+                    var f = _feld(feld, wert, function (weg) {
+                        _pflichtPruefen();
+                        _herkunftNachziehen(feld, weg);
+                    });
                     felder[feld] = f;
                     urwerte[feld] = wert;
+                    dd.appendChild(f.box);
+                    dl.appendChild(dd);
                 } else {
                     dl.appendChild(_el('dd', null, wert));
                 }
@@ -339,11 +393,19 @@
                 dd3.appendChild(_el('div', 'jv-best-vorschlag-war',
                     T('bestaetigung.kein_vorschlag',
                       'Das Modell hat keinen Empfänger genannt – hier wählen.')));
-                var f3 = _feld(feld, '', function () { _pflichtPruefen(); });
-                dd3.appendChild(f3.box);
-                dl2.appendChild(dd3);
+                // Den Weg auch hier durchreichen, obwohl es (noch) keine
+                // Herkunfts-Zeile gibt: `_herkunftNachziehen` kehrt dann
+                // einfach zurueck. Ein Rueckruf mit anderer Stelligkeit als
+                // der daneben ist die Stelle, an der der naechste Umbau
+                // auseinanderlaeuft.
+                var f3 = _feld(feld, '', function (weg) {
+                    _pflichtPruefen();
+                    _herkunftNachziehen(feld, weg);
+                });
                 felder[feld] = f3;
                 urwerte[feld] = '';
+                dd3.appendChild(f3.box);
+                dl2.appendChild(dd3);
             });
         }
 

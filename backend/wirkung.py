@@ -187,6 +187,18 @@ def einstufen(name: str, args: dict, *, tool: Any = None,
 #     hat, waere eine Zusage ohne Wirkung.
 #   - `email_loeschen`/`email_verschieben`: eine Kennung oder ein Ordner ist
 #     keine Angabe, die ein Mensch sinnvoll frei tippt.
+#
+# ⚠ `email_entwurf` STEHT HIER OHNE WIRKUNG – benannt, nicht entfernt
+# (Code-Review 2026-10-24). Es ist in `KLASSEN`/`einstufen` NICHT eingestuft
+# (`einstufen("email_entwurf", …)` gibt None), bekommt also gar keine Karte:
+# ein Entwurf verlaesst das Haus nicht, und das ist Absicht. Damit ist die
+# Zeile heute toter Code. Sie bleibt, weil sie beim Einstufen von
+# `email_entwurf` sofort das Richtige tut – aber sie darf nicht als Zusage
+# gelesen werden: "in der Karte korrigierbar" gilt fuer den Entwurf NICHT, und
+# `pflichtfelder` liefert dort folgerichtig []. Wer das aendert, prueft
+# `tests/test_email_rules.py` Abschnitt 12c mit (die Regel dort haelt beide
+# Enden zusammen). Register: wer einen Zweig stehenlaesst, dessen Bedingung
+# nicht erfuellbar ist, hinterlaesst eine ZUSAGE, nicht nur toten Code.
 AENDERBAR: dict[str, tuple] = {
     "email_senden": ("an", "cc"),
     "email_entwurf": ("an", "cc"),
@@ -380,7 +392,24 @@ def lauf_oeffnen():
     greift der Riegel NICHT – das ist Absicht: ein Aufrufer, der keine
     Klammer setzt (headless, Agent-API), hat auch keine Karte, und dort
     entscheidet die Freigabe des Auftrags.
+
+    ⚠ EINE SCHON OFFENE KLAMMER WIRD GEERBT, NICHT ERSETZT – Rueckgabe ist
+    dann ``None`` (``lauf_schliessen`` tut damit nichts). Das ist die ganze
+    Wirkung gegen den Umweg ueber eine Delegation: ``run_sub_agent`` ruft
+    ``run_task`` erneut, und ein frisches, leeres Set haette dem Unter-Agenten
+    genau das Werkzeug wieder freigegeben, das der Mensch im Eltern-Lauf
+    soeben abgelehnt hat (gemessen 2026-10-24: Eltern 'abgelehnt' → Kind nach
+    einem unbedingten ``set(set())`` wieder ''). Dieselbe Erb-Regel wie beim
+    Kanal (``bestaetigung is None`` = erben) und bei den Lauf-Verzeichnissen
+    (``lauf_tmp``: verschachtelte Klammern erben).
+
+    Verschachtelte Klammern sind damit NICHT symmetrisch zum Set: der innere
+    Lauf traegt in dasselbe Set ein. Das ist gewollt – "in diesem Auftrag
+    verweigert" ist eine Aussage ueber den Auftrag des Menschen, nicht ueber
+    einen Agenten darin.
     """
+    if isinstance(verweigert_cv.get(), set):
+        return None
     return verweigert_cv.set(set())
 
 

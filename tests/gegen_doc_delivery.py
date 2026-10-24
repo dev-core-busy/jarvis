@@ -276,6 +276,38 @@ probe("chat.css: Flaeche durchscheinend (liegt ueber dem Verlauf)", "js",
       "    background: var(--bg-secondary);\n    border-left: 3px solid var(--danger);",
       "    border-left: 3px solid var(--danger);")
 
+# ─── Warnschriften der Bestaetigungskarte (Code-Review 2026-10-24) ──────────
+# Beide Texte MUESSEN auffaellig sein: der eine sagt, dass der Empfaenger
+# fehlt, der andere, dass die Adresse ungeprueft ist. Die erste Fassung hing
+# ihre Themen-Korrektur an `body.dark` – eine Klasse, die dieses Projekt
+# nirgends setzt. Im Regelfall (dunkel, ohne Klasse) galt damit die Abdunklung.
+probe("chat.css: Pflichthinweis im dunklen Thema abgedunkelt (3,08:1)", "js",
+      "frontend/css/chat.css",
+      "    color: var(--danger);\n}\nbody.light .jv-best-pflicht",
+      "    color: color-mix(in srgb, var(--danger) 78%, #000);\n}"
+      "\nbody.light .jv-best-pflicht")
+
+probe("chat.css: Pflichthinweis ohne Themenregel (hell 3,76:1)", "js",
+      "frontend/css/chat.css",
+      "\nbody.light .jv-best-pflicht { color: color-mix(in srgb, var(--danger) 78%, #000); }\n",
+      "\n")
+
+# ⚠ Diese Probe misst die FLAECHE: die Herkunfts-Warnung liegt auf
+# `--surface-variant`, wo das nackte --danger nur 4,22:1 haelt – auf der
+# Kartenflaeche waeren es 4,71:1 und damit in Ordnung. Eine Pruefung, die alle
+# Warnschriften gegen `--bg-secondary` rechnet, bleibt hier stumm.
+probe("chat.css: Herkunfts-Warnung dunkel ohne Aufhellung (4,22:1)", "js",
+      "frontend/css/chat.css",
+      "    color: color-mix(in srgb, var(--danger) 85%, #fff);",
+      "    color: var(--danger);")
+
+probe("chat.css: Herkunfts-Warnung ohne Themenregel (hell faellt auf die "
+      "Aufhellung zurueck)", "js",
+      "frontend/css/chat.css",
+      "\nbody.light .jv-best-herkunft.is-uebernommen {\n"
+      "    color: color-mix(in srgb, var(--danger) 78%, #000);\n}\n",
+      "\n")
+
 # D – der Prompt (c)
 probe("Prompt-Regel 'Namen erst nennen, wenn gesehen' entfernt", "py",
       "backend/agent.py",

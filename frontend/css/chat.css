@@ -1867,11 +1867,16 @@ body.light .chs-hint.is-warn { color: color-mix(in srgb, var(--warning) 62%, #00
     margin-top: 8px;
     font-size: 12px;
     font-weight: 600;
-    /* Hausweg fuer Warnschrift: nacktes --danger haelt im hellen Thema nur
-       3,70:1 (Register). */
-    color: color-mix(in srgb, var(--danger) 78%, #000);
+    /* ⚠ DIE VORGABE IST DAS DUNKLE THEMA – es traegt KEINE body-Klasse, hell
+       setzt `light` (theme.js). Die erste Fassung hing hier auf
+       `color-mix(… 78%, #000)` mit einer Korrektur an `body.dark`: eine Klasse,
+       die dieses Projekt nirgends setzt. Damit galt im Regelfall die
+       Abdunklung, und die haelt auf dunklem Grund nur 3,08:1 (Register:
+       gemessen gegen #111827, nacktes --danger 4,71:1). Also Basis nackt,
+       Korrektur im hellen Thema – dort sind es 3,70:1 gegen 5,66:1. */
+    color: var(--danger);
 }
-body.dark .jv-best-pflicht { color: var(--danger); }
+body.light .jv-best-pflicht { color: color-mix(in srgb, var(--danger) 78%, #000); }
 .jv-best-pflicht:empty { display: none; }
 .jv-best-status { margin-top: 8px; font-weight: 600; }
 .jv-best-status:empty { display: none; }
@@ -1898,15 +1903,33 @@ body.dark .jv-best-pflicht { color: var(--danger); }
     background: var(--surface-variant);
     overflow-wrap: anywhere;
 }
-.jv-best-herkunft.is-aufgeloest { color: var(--text-secondary); }
-/* Der Warnfall: KEIN nacktes var(--danger) als Schrift - das haelt im hellen
-   Thema nur 3,70:1. Der Hausweg ist die abgedunkelte Mischung (Register). */
+/* Ruhige Zustaende: aufgeloest (das Modell hat gesucht) und die beiden, die
+   nach einer Korrektur DURCH DEN MENSCHEN gelten. Alle drei sind keine
+   Warnung – `--text-secondary` haelt hier in beiden Themen (nachgerechnet
+   gegen --surface-variant: dunkel 6,20:1, hell 6,17:1). */
+.jv-best-herkunft.is-aufgeloest,
+.jv-best-herkunft.is-gewaehlt,
+.jv-best-herkunft.is-getippt { color: var(--text-secondary); }
+/* Der Warnfall. ⚠ ANDERE FLAECHE ALS `.jv-best-pflicht` OBEN, also eine andere
+   Rechnung: diese Zeile liegt auf `--surface-variant`, nicht auf der
+   Kartenflaeche – eine Kontrast-Loesung vom Nachbarn gilt nur fuer DESSEN
+   Flaeche (Register). Nachgerechnet gegen die wirklichen Werte:
+
+     dunkel (#16213E)  nacktes --danger 4,22:1 ✗   78%/#000  2,76:1 ✗
+     hell   (#E8E8EE)  nacktes --danger 3,08:1 ✗   78%/#000  4,72:1 ✓
+
+   Im dunklen Thema haelt hier also KEINE der beiden Varianten, die fuer die
+   Kartenflaeche richtig sind – es braucht eine AUFHELLUNG: 85 % --danger mit
+   Weiss ergibt #f16060 und 4,98:1. Die Textgrenze ist 4,5:1 (12 px / 600 ist
+   kein grosser Text). */
 .jv-best-herkunft.is-uebernommen {
-    color: color-mix(in srgb, var(--danger) 78%, #000);
+    color: color-mix(in srgb, var(--danger) 85%, #fff);
     border-color: var(--danger);
     font-weight: 600;
 }
-body.dark .jv-best-herkunft.is-uebernommen { color: var(--danger); }
+body.light .jv-best-herkunft.is-uebernommen {
+    color: color-mix(in srgb, var(--danger) 78%, #000);
+}
 .jv-best-vorschlag-war {
     color: var(--text-secondary);
     font-size: 12px;

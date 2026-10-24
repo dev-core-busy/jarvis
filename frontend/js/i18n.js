@@ -3397,6 +3397,12 @@ const _I18N = {
         'bestaetigung.pflicht_fehlt': 'Empfänger fehlt – aus dem Adressbuch wählen oder eintragen, dann freigeben.',
         'bestaetigung.kein_vorschlag': 'Das Modell hat keinen Empfänger genannt – hier wählen.',
         'bestaetigung.herkunft.uebernommen': 'Diese Adresse wurde NICHT im Adressbuch geprüft – sie stammt aus dem Gesprächsverlauf. Bitte nachsehen, bevor du freigibst.',
+        // Nach einer Korrektur DURCH DEN MENSCHEN gilt die Herkunft des
+        // Modell-Vorschlags nicht mehr: die Warnung oben darf dann nicht
+        // stehenbleiben, sonst warnt die Karte vor einer Adresse, die der
+        // Benutzer gerade selbst nachgesehen hat.
+        'bestaetigung.herkunft.gewaehlt': 'Von dir aus dem Adressbuch gewählt.',
+        'bestaetigung.herkunft.getippt': 'Von dir von Hand eingetragen.',
         'bestaetigung.ab_suche': 'Suche …',
         'bestaetigung.ab_leer': 'Kein Eintrag gefunden – Adresse von Hand eintragen.',
         'bestaetigung.ab_fehler': 'Adressbuch nicht erreichbar.',
@@ -7709,6 +7715,8 @@ const _I18N = {
         'bestaetigung.pflicht_fehlt': 'Recipient missing – pick one from the address book or type it, then approve.',
         'bestaetigung.kein_vorschlag': 'The model did not name a recipient – pick one here.',
         'bestaetigung.herkunft.uebernommen': 'This address was NOT checked against the address book – it comes from the conversation. Please verify before approving.',
+        'bestaetigung.herkunft.gewaehlt': 'Picked by you from the address book.',
+        'bestaetigung.herkunft.getippt': 'Entered by you manually.',
         'bestaetigung.ab_suche': 'Searching …',
         'bestaetigung.ab_leer': 'No entry found – enter the address manually.',
         'bestaetigung.ab_fehler': 'Address book unreachable.',

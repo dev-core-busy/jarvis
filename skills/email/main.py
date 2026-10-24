@@ -221,18 +221,50 @@ _ANHANG_FELD = {
 # Werkzeugnamen in einen Prompt schreibt, bindet sich an dessen Existenz, und
 # der Adressbuch-Bereich ist nicht in jedem Lauf dabei (eigener Bereich in
 # ``mail_rules.BEREICHE``, vom Administrator freizuschalten).
-_AN_HINWEIS = (" Kein Empfaenger bekannt? Dann lass das Feld LEER und rufe "
-               "email_senden trotzdem auf: der Benutzer bekommt die "
-               "Versendemaske mit Adressbuch und waehlt dort. FRAGE NICHT im "
-               "Text nach dem Empfaenger – das kostet eine Runde und bietet "
-               "kein Adressbuch. Nennt der Benutzer einen NAMEN ohne \"@\", "
-               "loese ihn mit email_adresse_suchen auf und setze die gefundene "
-               "Adresse ein; bei mehreren Treffern nimm das Feld LEER und lass "
-               "ihn in der Maske waehlen. Rate NIEMALS eine Adresse und setze "
-               "sie nicht aus Vorname, Nachname und einer Domaene zusammen. "
-               "Uebernimm auch NIEMALS eine Adresse, die weiter oben im "
-               "Gespraech fuer einen ANDEREN Empfaenger stand – lieber leer "
-               "lassen, die Maske fragt den Menschen.")
+#
+# ⚠ DREI BAUSTEINE, NICHT EINER (Code-Review 2026-10-24). Die erste Fassung
+# war EIN Text an allen Empfaengerfeldern aller drei Werkzeuge – und damit an
+# drei Stellen falsch:
+#   * Am `cc` versprach er eine Maske, die cc NICHT nachtraegt: `wirkung.PFLICHT`
+#     fuehrt nur `an`, und `aenderbare_felder` bietet cc blos an, wenn der
+#     Aufruf es schon hat. "Lass cc leer, der Benutzer waehlt dort" heisst
+#     deshalb: die Kopie faellt STILL weg, und niemand erfaehrt es.
+#   * In `email_entwurf` und `email_weiterleiten` nannte er namentlich
+#     `email_senden` – also ein anderes Werkzeug als das aufgerufene.
+#   * In `email_entwurf` widersprach er der eigenen Beschreibung vier Zeilen
+#     weiter oben ("frage im TEXT nach" gegen "FRAGE NICHT im Text nach").
+# Ein Prompt ist Code: eine Zusage, die nur fuer EIN Feld eines EINEN
+# Werkzeugs gilt, gehoert auch nur dorthin.
+
+# Gilt ueberall: aus einem Namen wird eine Adresse, und zwar durch Suchen –
+# nicht durch Raten. Im Code durchgesetzt von `_pruefe_empfaenger`.
+_AN_BASIS = (" Nennt der Benutzer einen NAMEN ohne \"@\", loese ihn mit "
+             "email_adresse_suchen auf und setze die gefundene Adresse ein. "
+             "Rate NIEMALS eine Adresse und setze sie nicht aus Vorname, "
+             "Nachname und einer Domaene zusammen – ein Versand ohne \"@\" "
+             "wird abgewiesen, eine geratene Adresse geht an den Falschen. "
+             "Uebernimm auch NIEMALS eine Adresse, die weiter oben im "
+             "Gespraech fuer einen ANDEREN Empfaenger stand.")
+
+# NUR am `an` von email_senden: dort – und nur dort – traegt `wirkung.PFLICHT`
+# das Feld in die Maske nach und sperrt "Ausfuehren", bis es gefuellt ist.
+# "im Chat" ist keine Floskel: ohne Oberflaeche (E-Mail-Regel, Cron) gibt es
+# keine Maske, und `execute` weist einen leeren Empfaenger dort mit Grund ab.
+_AN_MASKE = (" Kein Empfaenger bekannt? Dann lass das Feld LEER und rufe "
+             "email_senden im Chat trotzdem auf: der Benutzer bekommt die "
+             "Versendemaske mit Adressbuch und waehlt dort. FRAGE NICHT im "
+             "Text nach dem Empfaenger – das kostet eine Runde und bietet kein "
+             "Adressbuch. Auch bei mehreren Adressbuch-Treffern nimm das Feld "
+             "LEER und lass ihn in der Maske waehlen, statt einen auszusuchen.")
+
+# Am `cc`: die Gegenaussage zu _AN_MASKE. Ein FEHLENDES cc erscheint in der
+# Karte nicht, der Mensch kann es dort also nicht ergaenzen.
+_CC_HINWEIS = (" ⚠ Anders als beim Empfaenger: ein cc, das du NICHT setzt, "
+               "erscheint in der Versendemaske auch nicht – der Benutzer kann "
+               "es dort nicht nachtragen. Will er eine Kopie, dann setze das "
+               "Feld; kennst du die Adresse nicht, suche sie mit "
+               "email_adresse_suchen oder frage im Text nach. Leer lassen "
+               "heisst: es geht keine Kopie hinaus.")
 
 
 def _anhaenge(kwargs) -> list:
@@ -262,11 +294,13 @@ class EmailSendenTool(_Base):
     def parameters_schema(self):
         return {"type": "OBJECT", "properties": {
             "an": {"type": "STRING",
-                   "description": "Empfaenger, mehrere mit Komma." + _AN_HINWEIS},
+                   "description": ("Empfaenger, mehrere mit Komma."
+                                   + _AN_BASIS + _AN_MASKE)},
             "betreff": {"type": "STRING"},
             "text": {"type": "STRING", "description": "Nachrichtentext (Nur-Text)."},
             "cc": {"type": "STRING",
-                   "description": "Kopie-Empfaenger (optional)." + _AN_HINWEIS},
+                   "description": ("Kopie-Empfaenger (optional)."
+                                   + _AN_BASIS + _CC_HINWEIS)},
             "anhaenge": _ANHANG_FELD,
             # ⚠ `an` ist bewusst NICHT required: ohne Empfaenger soll der
             # Aufruf trotzdem zustande kommen, damit die Versendemaske mit
@@ -281,6 +315,25 @@ class EmailSendenTool(_Base):
         betreff = str(kwargs.get("betreff") or kwargs.get("subject") or "").strip()
         text = str(kwargs.get("text") or kwargs.get("body") or "")
         cc = kwargs.get("cc") or ""
+        # ⚠ OHNE OBERFLAECHE GIBT ES KEINE VERSENDEMASKE (Code-Review
+        # 2026-10-24). Seit `an` nicht mehr required ist, kommt der Aufruf ohne
+        # Empfaenger zustande – im Chat ist das gewollt (die Karte traegt das
+        # Feld nach), in einem Lauf ohne Mensch (E-Mail-Regel, Cron, Messenger)
+        # ist die Zusage des Prompts dort nicht einloesbar. Vorher lief das bis
+        # `_pruefe_empfaenger` und kam als "Es ist kein Empfaenger angegeben"
+        # zurueck: richtig, aber ohne den naechsten Schritt – und eine Regel
+        # zaehlt das als Fehlversuch, nach drei Durchgaengen bleibt die
+        # Nachricht liegen. Der Grund nennt deshalb, was in DIESEM Lauf gilt.
+        if not str(an or "").strip():
+            from backend import mail_anhang       # `mit_mensch()` lebt dort
+            if not mail_anhang.mit_mensch():
+                return ("❌ Es ist kein Empfaenger angegeben, und in diesem Lauf "
+                        "gibt es keine Versendemaske: hier sieht kein Mensch zu, "
+                        "der einen Empfaenger waehlen koennte. Ermittle die "
+                        "Adresse selbst (email_adresse_suchen, sofern vorhanden) "
+                        "oder nimm den Absender der vorliegenden Nachricht; rate "
+                        "sie NICHT. Geht das nicht, lass den Versand und sage im "
+                        "Ergebnis, dass der Empfaenger fehlt.")
         try:
             # VOR dem Verbindungsaufbau: ein unzulaessiger Anhang soll keinen
             # Anmeldeversuch am Exchange kosten (Sperrpolitik).
@@ -314,11 +367,16 @@ class EmailEntwurfTool(_Base):
 
     def parameters_schema(self):
         return {"type": "OBJECT", "properties": {
+            # ⚠ KEIN _AN_MASKE: `wirkung.PFLICHT` fuehrt email_entwurf bewusst
+            # nicht (ein Entwurf ohne Empfaenger ist ein zulaessiger, gaengiger
+            # Fall), die Karte traegt hier also nichts nach. Und der Satz
+            # "frage nicht im Text nach" widerspraeche der Beschreibung oben.
             "an": {"type": "STRING",
-                   "description": "Empfaenger (darf leer bleiben)." + _AN_HINWEIS},
+                   "description": "Empfaenger (darf leer bleiben)." + _AN_BASIS},
             "betreff": {"type": "STRING"},
             "text": {"type": "STRING"},
-            "cc": {"type": "STRING", "description": "Kopie-Empfaenger." + _AN_HINWEIS},
+            "cc": {"type": "STRING",
+                   "description": "Kopie-Empfaenger." + _AN_BASIS + _CC_HINWEIS},
             "anhaenge": _ANHANG_FELD,
         }, "required": ["betreff", "text"]}
 
@@ -405,8 +463,11 @@ class EmailWeiterleitenTool(_Base):
     def parameters_schema(self):
         return {"type": "OBJECT", "properties": {
             "mail_id": {"type": "STRING"},
+            # `an` ist hier required – also KEIN _AN_MASKE (das Feld leer zu
+            # lassen ist gar nicht vorgesehen, und der Satz nennte ausserdem
+            # ein anderes Werkzeug).
             "an": {"type": "STRING",
-                   "description": "Empfaenger, mehrere mit Komma." + _AN_HINWEIS},
+                   "description": "Empfaenger, mehrere mit Komma." + _AN_BASIS},
             "text": {"type": "STRING", "description": "Vorwort (optional)."},
             "entwurf": {"type": "BOOLEAN", "description": "true = nur als Entwurf."},
         }, "required": ["mail_id", "an"]}

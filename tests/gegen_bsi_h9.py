@@ -170,6 +170,31 @@ PROBEN = [
     ("uebernommen wird nicht als Warnung gekennzeichnet", BJ,
      "                        var hz = _el('div', 'jv-best-herkunft is-' + hk,\n",
      "                        var hz = _el('div', 'jv-best-herkunft',\n"),
+    # ── Versendemaske OHNE Empfaenger ───────────────────────────────────────
+    ("Pflichtfeld wird nicht angeboten (keine Maske ohne Empfaenger)", WI,
+     "    return [f for f in erlaubt if f in (args or {}) or f in muss]\n",
+     "    return [f for f in erlaubt if f in (args or {})]\n"),
+    ("Pflichtfelder werden der Karte nicht gemeldet", WI,
+     "            \"pflicht\": pflichtfelder(name),\n", ""),
+    ("ein gewaehlter Empfaenger wird verworfen (Pflicht ignoriert)", WI,
+     "        if f not in (ziel or {}) and f not in set(pflichtfelder(name)):\n",
+     "        if f not in (ziel or {}):\n"),
+    ("email_senden hat kein Pflichtfeld mehr", WI,
+     "    \"email_senden\": (\"an\",),\n    \"email_weiterleiten\": (\"an\",),\n", ""),
+    ("Karte traegt fehlende Pflichtfelder nicht nach", BJ,
+     "        if (_offeneP.length) {\n", "        if (false) {\n"),
+    ("Ausfuehren bleibt trotz leerem Pflichtfeld frei", BJ,
+     "            ja.disabled = !!fehlt;\n", "            ja.disabled = false;\n"),
+    ("die Karte sagt nicht, dass der Empfaenger fehlt", BJ,
+     "                _pflichtHinweis.textContent = fehlt\n",
+     "                _pflichtHinweis.textContent = false\n"),
+    # Anker mit der Vorzeile: der Rueckruf steht ZWEIMAL (Tippen und
+    # Vorschlags-Klick) – ein Anker ohne Kontext traf beide und faellt im
+    # Harness als "???" aus.
+    ("Tippen loest die Pflichtpruefung nicht aus", BJ,
+     "            timer = setTimeout(function () { suchen(wert); }, TIPP_MS);\n"
+     "            if (typeof beiAenderung === 'function') beiAenderung();\n",
+     "            timer = setTimeout(function () { suchen(wert); }, TIPP_MS);\n"),
 ]
 
 DATEIEN = [WI, AG, MA, CJ, BJ, AB, EM, "tests/test_bsi_h9.py",

@@ -193,6 +193,33 @@ AENDERBAR: dict[str, tuple] = {
     "email_weiterleiten": ("an",),
 }
 
+# ⚠ FELDER, DIE DIE MASKE IMMER ANBIETET – auch wenn das Modell sie nicht
+# gesetzt hat, und die vor dem Ausfuehren GEFUELLT sein muessen.
+#
+# WARUM (Betreiberfestlegung, dreimal eingefordert): auf "versende das Bild
+# als E-Mail" ohne Empfaenger soll NICHT im Text zurueckgefragt werden,
+# sondern die VERSENDEMASKE aufgehen – mit leerem Empfaengerfeld und dem
+# Adressbuch-Knopf. Der Mensch waehlt dort, nicht im Chatverlauf. Eine
+# Textfrage kostet eine ganze Runde und bietet kein Adressbuch.
+#
+# Folge fuer `aenderbare_felder`: diese Felder erscheinen auch dann, wenn sie
+# im Aufruf FEHLEN. Und `freigabe` meldet sie der Karte als `pflicht`, damit
+# "Ausfuehren" bis zum Fuellen gesperrt bleibt – sonst gaebe der Benutzer
+# einen Versand frei, den `_pruefe_empfaenger` danach abweist (genau die
+# Stelle, an der diese ganze Arbeit angefangen hat).
+PFLICHT: dict[str, tuple] = {
+    "email_senden": ("an",),
+    "email_weiterleiten": ("an",),
+    # email_entwurf NICHT: ein Entwurf ohne Empfaenger ist zulaessig und ein
+    # gaengiger Fall ("leg mir das als Entwurf hin").
+}
+
+
+def pflichtfelder(name: str) -> list:
+    """Felder, die die Maske gefuellt haben MUSS, bevor ausgefuehrt wird."""
+    return [f for f in PFLICHT.get(str(name or ""), ())
+            if f in AENDERBAR.get(str(name or ""), ())]
+
 # Obergrenze fuer einen uebernommenen Wert. Eine Empfaengerliste wird lang
 # (mehrere Adressen mit Komma), ein Fliesstext hat hier nichts zu suchen.
 AENDERBAR_MAX = 2000
@@ -206,7 +233,10 @@ def aenderbare_felder(name: str, args: dict) -> list:
     (``cc`` ist bei den meisten Aufrufen nicht dabei).
     """
     erlaubt = AENDERBAR.get(str(name or ""), ())
-    return [f for f in erlaubt if f in (args or {})]
+    muss = set(pflichtfelder(name))
+    # Ein Pflichtfeld wird IMMER angeboten – auch wenn es im Aufruf fehlt.
+    # Genau das macht die Versendemaske ohne Empfaenger moeglich.
+    return [f for f in erlaubt if f in (args or {}) or f in muss]
 
 
 def herkunft_felder(name: str, args: dict) -> dict:
@@ -262,9 +292,11 @@ def uebernehmen(name: str, ziel: dict, aenderungen) -> list:
             print(f"[H9] Korrektur an '{name}' fuer Feld '{f}' VERWORFEN: "
                   "nicht aenderbar", flush=True)
             continue
-        if f not in (ziel or {}):
+        if f not in (ziel or {}) and f not in set(pflichtfelder(name)):
+            # Ein Feld, das der Aufruf nicht hat und das auch kein Pflichtfeld
+            # der Maske ist, waere ein untergeschobenes Argument.
             print(f"[H9] Korrektur an '{name}' fuer Feld '{f}' VERWORFEN: "
-                  "im Aufruf nicht vorhanden", flush=True)
+                  "im Aufruf nicht vorhanden und kein Pflichtfeld", flush=True)
             continue
         # Zeilenumbrueche heraus: ein Empfaenger ist eine Zeile. Das ist
         # Hygiene an der Kopfzeile, keine Rechtegrenze – wer hier tippt, darf
@@ -615,6 +647,7 @@ async def freigabe(name: str, args: dict, klasse: str, exec_args: dict) -> "str 
             "argumente": anzeige_argumente(args),
             "aenderbar": aenderbare_felder(name, args),
             "herkunft": herkunft_felder(name, args),
+            "pflicht": pflichtfelder(name),
             "frist_s": FRIST_S,
             "agent_id": kanal.agent_id,
         }):

@@ -1646,9 +1646,27 @@ check("email_adresse_suchen" in _senden_an,
 check("SENDEN" in _senden_an or "senden" in _senden_an.lower().split("entwurf")[0],
       "email_senden.an verlangt nach der Aufloesung ausdruecklich das SENDEN",
       _senden_an[-170:])
-check("Entwurf" in _senden_an and "Ersatz" in _senden_an,
-      "email_senden.an sagt, dass ein Entwurf KEIN Ersatz fuer den Versand ist",
-      _senden_an[-170:])
+# ⚠ HIER STAND eine Pruefung auf die Woerter "Entwurf" und "Ersatz" IN
+# `email_senden.an`. Diese Zusage ist seit der Versendemaske an eine andere
+# Stelle gewandert (`email_entwurf`-Beschreibung, siehe unten) und der Hinweis
+# am Feld sagt jetzt etwas Staerkeres: kein Empfaenger → Feld LEER lassen und
+# die Maske fragen. Eine Pruefung auf den alten Wortlaut meldete damit einen
+# Fehler, den es nicht gab (zweite veraltete Zusage an einem Tag – Register:
+# wer einen Waechter auf einen WERT statt auf eine EIGENSCHAFT setzt, baut
+# eine Zeitbombe).
+check("LEER" in _senden_an or "leer" in _senden_an,
+      "email_senden.an verlangt bei unbekanntem Empfaenger ein LEERES Feld "
+      "(die Maske fragt, nicht der Text)", _senden_an[:200])
+check("Maske" in _senden_an and "FRAGE NICHT" in _senden_an,
+      "… und verbietet die Textfrage ausdruecklich", _senden_an[:200])
+# Strukturell: ohne das waere der Aufruf ohne Empfaenger gar nicht moeglich
+# und die Maske koennte nie aufgehen.
+_senden_schema = _wz["email_senden"].parameters_schema()
+check("an" not in (_senden_schema.get("required") or []),
+      "`an` ist NICHT required – der Aufruf ohne Empfaenger kommt zustande",
+      str(_senden_schema.get("required")))
+check(set(_senden_schema.get("required") or []) == {"betreff", "text"},
+      "Betreff und Text bleiben Pflicht", str(_senden_schema.get("required")))
 # Und das andere Ende: der Entwurf darf sich nicht als Loesung fuer eine
 # fehlende Adresse anbieten.
 check("email_senden" in _entwurf_beschr,
@@ -1673,9 +1691,9 @@ check("Entwurf wollte" in _entwurf_beschr or "ausdruecklich" in _entwurf_beschr,
 # Adresse aus dem Gespraechsverlauf HAT eines, also fiel die Aufloesung aus
 # und das Modell nahm den alten Empfaenger. Die Zusage gehoert deshalb an die
 # HERKUNFT des Empfaengers, nicht an seine Form.
-check("email_adresse_suchen" in _senden_an and "DIESEM Auftrag" in _senden_an,
-      "der Empfaenger darf NUR aus dem aktuellen Auftrag oder aus der "
-      "Adressbuch-Suche kommen", _senden_an[-240:])
+check("email_adresse_suchen" in _senden_an,
+      "der Empfaenger kommt aus der Adressbuch-Suche, wenn ein Name genannt "
+      "ist", _senden_an[:240])
 check("Gespraech" in _senden_an or "Verlauf" in _senden_an,
       "die Uebernahme einer Adresse aus dem Gespraechsverlauf ist ausdruecklich "
       "verboten", _senden_an[-240:])

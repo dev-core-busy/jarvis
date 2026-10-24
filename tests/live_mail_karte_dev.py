@@ -138,9 +138,14 @@ async def ein_lauf(auftrag: str) -> dict:
             if typ == "error":
                 beob["fehler"].append(str(m.get("message") or m.get("error") or ""))
             elif typ == "bestaetigung_anfrage":
+                # ⚠ JEDES Feld erfassen, das eine Pruefung spaeter braucht:
+                # `pflicht` fehlte hier, und die Pruefung darauf meldete
+                # 0/3 - ein Produktfehler, den es nicht gab. Dritter Fall
+                # dieser Art in dieser Probe.
                 beob["karten"].append({"werkzeug": m.get("werkzeug"),
                                        "aenderbar": m.get("aenderbar"),
                                        "herkunft": m.get("herkunft"),
+                                       "pflicht": m.get("pflicht"),
                                        "argumente": m.get("argumente")})
                 # ⚠ IMMER ablehnen: die Probe darf keine Mail verschicken.
                 await ws.send(json.dumps({"type": "bestaetigung_antwort",
@@ -273,6 +278,56 @@ if _beispiel is not None:
     pruefe("@" in str(args.get("an", "")),
            "der Empfaenger ist eine aufgeloeste Adresse, kein Name",
            "an=%r" % str(args.get("an"))[:40])
+
+# OHNE EMPFAENGER: die Versendemaske MUSS aufgehen.
+# Der gemeldete Fall, dreimal eingefordert: "versende das Bild als E-Mail"
+# ohne Empfaenger darf NICHT im Text zurueckfragen, sondern muss die Maske
+# mit Adressbuch oeffnen - also eine Karte fuer email_senden mit leerem,
+# aenderbarem und als PFLICHT gemeldetem Empfaengerfeld.
+AUFTRAG2 = ("Versende eine kurze Test-E-Mail mit Betreff 'Probe' und einem Satz "
+            "Text. Empfaenger sage ich dir nicht.")
+print("\n2. OHNE Empfaenger -> Maske mit Adressbuch, KEINE Textfrage")
+_m_karte = _m_pflicht = _m_leer = _m_textfrage = 0
+
+
+def _an_von(karte):
+    paare = dict((a[0], a[1]) for a in (karte.get("argumente") or [])
+                 if isinstance(a, list) and len(a) >= 2)
+    return str(paare.get("an") or "")
+
+
+for i in range(WIEDERHOLUNGEN):
+    try:
+        b = asyncio.run(ein_lauf(AUFTRAG2))
+    except Exception as e:  # noqa: BLE001
+        abbruch("Lauf %d nicht moeglich: %s: %s" % (i + 1, type(e).__name__, e))
+    ks = _karten_mit(b, "email_senden")
+    if ks:
+        _m_karte += 1
+        if "an" in (ks[0].get("pflicht") or []):
+            _m_pflicht += 1
+        if not _an_von(ks[0]).strip():
+            _m_leer += 1
+    elif "?" in b["antwort"]:
+        _m_textfrage += 1
+    print("   Lauf %d: Karten=%s pflicht=%s an=%s"
+          % (i + 1, [k.get("werkzeug") for k in b["karten"]],
+             [k.get("pflicht") for k in ks], [_an_von(k) for k in ks]))
+
+pruefe(_m_karte == WIEDERHOLUNGEN,
+       "OHNE Empfaenger kommt die Maske trotzdem (%d/%d)"
+       % (_m_karte, WIEDERHOLUNGEN),
+       "%d Lauf/Laeufe haben im TEXT nachgefragt - genau das soll die Maske "
+       "ersetzen" % _m_textfrage)
+pruefe(_m_textfrage == 0,
+       "KEIN Lauf fragt im Text nach dem Empfaenger",
+       "%d/%d" % (_m_textfrage, WIEDERHOLUNGEN))
+pruefe(_m_karte == 0 or _m_pflicht == _m_karte,
+       "die Maske meldet den Empfaenger als Pflichtfeld (%d/%d)"
+       % (_m_pflicht, _m_karte))
+pruefe(_m_karte == 0 or _m_leer == _m_karte,
+       "und das Feld ist LEER - der Mensch waehlt (%d/%d)" % (_m_leer, _m_karte),
+       "ein vom Modell gefuelltes Feld waere hier geraten")
 
 bilanz()
 sys.exit(0 if _fail == 0 else 1)

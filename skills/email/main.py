@@ -221,20 +221,18 @@ _ANHANG_FELD = {
 # Werkzeugnamen in einen Prompt schreibt, bindet sich an dessen Existenz, und
 # der Adressbuch-Bereich ist nicht in jedem Lauf dabei (eigener Bereich in
 # ``mail_rules.BEREICHE``, vom Administrator freizuschalten).
-_AN_HINWEIS = (" Nur vollstaendige Adressen – ein Name ist keine Adresse. Steht "
-               "kein \"@\" darin, loese ihn ZUERST mit email_adresse_suchen auf. "
-               "Danach SENDEN: ein Entwurf ist KEIN Ersatz fuer den Versand. "
-               "Laesst sich die Adresse nicht aufloesen oder ist sie mehrdeutig, "
-               "frage im TEXT nach und lege KEINEN Entwurf an. "
-               "DER EMPFAENGER KOMMT AUSSCHLIESSLICH aus der Angabe des "
-               "Benutzers in DIESEM Auftrag oder aus email_adresse_suchen. "
-               "Uebernimm NIEMALS eine Adresse, die weiter oben im Gespraech "
-               "fuer einen ANDEREN Empfaenger stand: nennt der Benutzer einen "
-               "Namen, wird DIESER Name aufgeloest oder erfragt – eine frueher "
-               "benutzte Adresse ist dafuer kein Ersatz. "
-               "Rate NIEMALS eine Adresse und setze sie nicht aus Vorname, "
-               "Nachname und einer Domaene zusammen – eine erfundene Adresse "
-               "geht entweder an einen Fremden oder nirgendwohin.")
+_AN_HINWEIS = (" Kein Empfaenger bekannt? Dann lass das Feld LEER und rufe "
+               "email_senden trotzdem auf: der Benutzer bekommt die "
+               "Versendemaske mit Adressbuch und waehlt dort. FRAGE NICHT im "
+               "Text nach dem Empfaenger – das kostet eine Runde und bietet "
+               "kein Adressbuch. Nennt der Benutzer einen NAMEN ohne \"@\", "
+               "loese ihn mit email_adresse_suchen auf und setze die gefundene "
+               "Adresse ein; bei mehreren Treffern nimm das Feld LEER und lass "
+               "ihn in der Maske waehlen. Rate NIEMALS eine Adresse und setze "
+               "sie nicht aus Vorname, Nachname und einer Domaene zusammen. "
+               "Uebernimm auch NIEMALS eine Adresse, die weiter oben im "
+               "Gespraech fuer einen ANDEREN Empfaenger stand – lieber leer "
+               "lassen, die Maske fragt den Menschen.")
 
 
 def _anhaenge(kwargs) -> list:
@@ -253,9 +251,13 @@ class EmailSendenTool(_Base):
     @property
     def description(self):
         return ("Sendet eine NEUE E-Mail aus dem eigenen Postfach, auf Wunsch mit "
-                "Dateien aus diesem Chat als Anhang (Feld anhaenge). Nutze fuer die "
-                "Beantwortung einer eingegangenen Nachricht email_antworten – das "
-                "erhaelt den Gespraechsfaden.")
+                "Dateien aus diesem Chat als Anhang (Feld anhaenge). Der Benutzer "
+                "bekommt vor dem Versand eine Versendemaske, in der er Empfaenger "
+                "pruefen, aus dem Adressbuch waehlen und freigeben kann – rufe das "
+                "Werkzeug deshalb AUCH OHNE bekannten Empfaenger auf (Feld an leer) "
+                "statt im Text nachzufragen. Nutze fuer die Beantwortung einer "
+                "eingegangenen Nachricht email_antworten – das erhaelt den "
+                "Gespraechsfaden.")
 
     def parameters_schema(self):
         return {"type": "OBJECT", "properties": {
@@ -266,7 +268,13 @@ class EmailSendenTool(_Base):
             "cc": {"type": "STRING",
                    "description": "Kopie-Empfaenger (optional)." + _AN_HINWEIS},
             "anhaenge": _ANHANG_FELD,
-        }, "required": ["an", "betreff", "text"]}
+            # ⚠ `an` ist bewusst NICHT required: ohne Empfaenger soll der
+            # Aufruf trotzdem zustande kommen, damit die Versendemaske mit
+            # Adressbuch aufgeht (Betreiberfestlegung). Gefuellt sein MUSS das
+            # Feld erst beim Ausfuehren – darueber wacht `wirkung.PFLICHT`
+            # (die Maske sperrt "Ausfuehren", solange es leer ist) und
+            # zuletzt `_pruefe_empfaenger` im Mail-Client.
+        }, "required": ["betreff", "text"]}
 
     async def execute(self, **kwargs):
         an = kwargs.get("an") or kwargs.get("to") or ""

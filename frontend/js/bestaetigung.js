@@ -66,7 +66,7 @@
      * Alle Werte aus dem Verzeichnis gehen ueber textContent ins DOM – sie sind
      * Daten, keine Auszeichnung (gleiche Regel wie fuer die Argumente oben).
      */
-    function _feld(name, vorgabe) {
+    function _feld(name, vorgabe, beiAenderung) {
         var box = _el('div', 'jv-best-feldbox');
         var zeile = _el('div', 'jv-best-feldzeile');
         var inp = document.createElement('input');
@@ -129,6 +129,7 @@
                     leeren();
                     meldung.textContent = '';
                     inp.focus();
+                    if (typeof beiAenderung === 'function') beiAenderung();
                 });
                 liste.appendChild(b);
             });
@@ -185,6 +186,7 @@
             if (timer) clearTimeout(timer);
             var wert = inp.value;
             timer = setTimeout(function () { suchen(wert); }, TIPP_MS);
+            if (typeof beiAenderung === 'function') beiAenderung();
         });
         knopf.addEventListener('click', function () {
             if (timer) clearTimeout(timer);
@@ -274,6 +276,10 @@
         // AUFFAELLIG gezeigt, nicht als Fussnote.
         var herkunft = (msg.herkunft && typeof msg.herkunft === 'object')
             ? msg.herkunft : {};
+        // Felder, die die Maske gefuellt haben MUSS. Ohne sie waere
+        // "Ausfuehren" eine Freigabe fuer einen Versand, den der Mail-Client
+        // danach abweist – der Benutzer haette geklickt und nichts erreicht.
+        var pflicht = Array.isArray(msg.pflicht) ? msg.pflicht : [];
         var felder = {};        // feldname -> { box, eingabe, festschreiben }
         var urwerte = {};       // feldname -> was das Modell vorschlug
 
@@ -303,7 +309,7 @@
                         hz.setAttribute('role', 'note');
                         dd.appendChild(hz);
                     }
-                    var f = _feld(feld, wert);
+                    var f = _feld(feld, wert, function () { _pflichtPruefen(); });
                     dd.appendChild(f.box);
                     dl.appendChild(dd);
                     felder[feld] = f;
@@ -315,10 +321,64 @@
             karte.appendChild(dl);
         }
 
+        // ⚠ FEHLENDE PFLICHTFELDER NACHTRAGEN. Die Schleife oben laeuft ueber
+        // `argumente` – ein Empfaenger, den das Modell GAR NICHT gesetzt hat,
+        // erzeugt dort keine Zeile und damit kein Eingabefeld. Genau dieser
+        // Fall ist aber der gemeinte: "versende das Bild als E-Mail" ohne
+        // Empfaenger soll die Versendemaske mit Adressbuch oeffnen.
+        var _offeneP = pflicht.filter(function (f) { return !felder[f]; });
+        if (_offeneP.length) {
+            var dl2 = karte.querySelector('.jv-best-args');
+            if (!dl2) {
+                dl2 = _el('dl', 'jv-best-args');
+                karte.appendChild(dl2);
+            }
+            _offeneP.forEach(function (feld) {
+                dl2.appendChild(_el('dt', null, feld));
+                var dd3 = _el('dd', 'jv-best-dd-feld');
+                dd3.appendChild(_el('div', 'jv-best-vorschlag-war',
+                    T('bestaetigung.kein_vorschlag',
+                      'Das Modell hat keinen Empfänger genannt – hier wählen.')));
+                var f3 = _feld(feld, '', function () { _pflichtPruefen(); });
+                dd3.appendChild(f3.box);
+                dl2.appendChild(dd3);
+                felder[feld] = f3;
+                urwerte[feld] = '';
+            });
+        }
+
         var minuten = Math.max(1, Math.round((Number(msg.frist_s) || 300) / 60));
         karte.appendChild(_el('div', 'jv-best-hinweis',
             T('bestaetigung.hinweis', 'Nichts geschieht ohne deinen Klick.')
                 .split('{min}').join(String(minuten))));
+
+        // ⚠ Reihenfolge: `ja` entsteht erst unten, deshalb haelt die Pruefung
+        // sich an `felder`/`pflicht` und wird nach dem Bau der Knoepfe EINMAL
+        // gerufen. Ein `_pflichtPruefen` vor der Knopf-Erzeugung waere ein
+        // Zugriff auf undefined.
+        var _pflichtHinweis = null;
+
+        function _pflichtFehlt() {
+            for (var i = 0; i < pflicht.length; i++) {
+                var f = felder[pflicht[i]];
+                if (f && !String(f.eingabe.value || '').trim()) return pflicht[i];
+            }
+            return '';
+        }
+
+        function _pflichtPruefen() {
+            var fehlt = _pflichtFehlt();
+            if (!ja) return;
+            if (karte.dataset.zustand !== 'offen') return;
+            ja.disabled = !!fehlt;
+            if (_pflichtHinweis) {
+                _pflichtHinweis.textContent = fehlt
+                    ? T('bestaetigung.pflicht_fehlt',
+                        'Empfänger fehlt – aus dem Adressbuch wählen oder '
+                        + 'eintragen, dann freigeben.')
+                    : '';
+            }
+        }
 
         var knoepfe = _el('div', 'jv-best-knoepfe');
         var ja = _el('button', 'jv-best-btn jv-best-ja',
@@ -331,9 +391,16 @@
         knoepfe.appendChild(nein);
         karte.appendChild(knoepfe);
 
+        _pflichtHinweis = _el('div', 'jv-best-pflicht');
+        _pflichtHinweis.setAttribute('role', 'status');
+        karte.appendChild(_pflichtHinweis);
+
         var status = _el('div', 'jv-best-status');
         status.setAttribute('role', 'status');
         karte.appendChild(status);
+
+        // Jetzt stehen Knoepfe und Felder: Sperre setzen, falls etwas fehlt.
+        _pflichtPruefen();
 
         function klick(erlaubt) {
             // Genau EINE Antwort: das Sperren beider Knoepfe traegt das – ein
@@ -383,6 +450,7 @@
                 nein.disabled = false;
                 status.textContent = T('bestaetigung.status.nicht_gesendet',
                                        'Antwort konnte nicht gesendet werden');
+                _pflichtPruefen();   // Sperre gilt weiter, falls etwas fehlt
                 // ⚠ Die Eingabefelder bleiben hier BEWUSST stehen: nach dem
                 // Wiederverbinden wird erneut geantwortet, und ein
                 // festgeschriebenes Feld haette den getippten Wert verloren.

@@ -408,6 +408,17 @@ async def teil3():
     r_d2 = await fall(W.Kanal(ws_e, "anna", True), args={"an": "a@beispiel.de"})
     erg["ohne_klammer"] = (r_d1, r_d2, ws_e)
 
+    # ── Versendemaske OHNE Empfaenger ──────────────────────────────────────
+    # Betreiberfestlegung: "versende das Bild als E-Mail" ohne Empfaenger darf
+    # NICHT im Text zurueckfragen, sondern muss die Maske mit Adressbuch
+    # oeffnen. Dafuer kommt der Aufruf OHNE `an` – die Karte bietet das Feld
+    # trotzdem an, und der Mensch traegt es dort ein.
+    a6 = {"betreff": "B", "text": "T"}        # KEIN `an`
+    e6 = dict(a6)
+    ws6 = WS(("anna", True), aenderungen={"an": "gewaehlt@beispiel.de"})
+    erg["ohne_empfaenger"] = (await fall(W.Kanal(ws6, "anna", True),
+                                         args=a6, exec_args=e6), e6, ws6)
+
     # Zeilenumbruch im getippten Wert wird entschaerft (Kopfzeilen-Hygiene)
     a5 = {"an": "alt@beispiel.de"}
     e5 = dict(a5)
@@ -612,6 +623,40 @@ try:
            "fuer nicht aenderbare Felder wird keine Herkunft behauptet", str(h))
 finally:
     _AB.lauf_schliessen(_t)
+
+# ── 3f. Versendemaske OHNE Empfaenger ───────────────────────────────────────
+abschnitt("3f. Maske ohne Empfaenger (Adressbuch statt Textfrage)")
+pruefe(W.pflichtfelder("email_senden") == ["an"],
+       "email_senden hat den Empfaenger als PFLICHTfeld der Maske",
+       str(W.pflichtfelder("email_senden")))
+pruefe(W.pflichtfelder("email_entwurf") == [],
+       "email_entwurf NICHT – ein Entwurf ohne Empfaenger ist zulaessig",
+       str(W.pflichtfelder("email_entwurf")))
+# Die Kernzusage: das Feld wird angeboten, OBWOHL der Aufruf es nicht hat.
+pruefe(W.aenderbare_felder("email_senden", {"betreff": "B", "text": "T"}) == ["an"],
+       "ein FEHLENDER Empfaenger wird trotzdem als aenderbares Feld angeboten",
+       str(W.aenderbare_felder("email_senden", {"betreff": "B", "text": "T"})))
+pruefe(W.aenderbare_felder("email_entwurf", {"betreff": "B"}) == [],
+       "beim Entwurf wird nichts erfunden, was der Aufruf nicht hat")
+
+r6, e6, ws6 = E["ohne_empfaenger"]
+pruefe(r6 is None, "Positivkontrolle: der Aufruf ohne Empfaenger wird "
+                   "freigegeben (die Maske kam)", str(r6)[:80])
+pruefe(e6.get("an") == "gewaehlt@beispiel.de",
+       "der in der Maske gewaehlte Empfaenger landet im AUSGEFUEHRTEN Satz",
+       str(e6))
+anf6 = next((m for m in ws6.nachrichten
+             if m.get("type") == "bestaetigung_anfrage"), {})
+pruefe(anf6.get("pflicht") == ["an"],
+       "die Karte erfaehrt, welches Feld gefuellt sein MUSS",
+       str(anf6.get("pflicht")))
+pruefe("an" in (anf6.get("aenderbar") or []),
+       "und dass der Empfaenger aenderbar ist", str(anf6.get("aenderbar")))
+# Ein Feld, das WEDER im Aufruf steht NOCH Pflichtfeld ist, bleibt gesperrt.
+_z = {"betreff": "Echt"}
+pruefe(W.uebernehmen("email_senden", _z, {"cc": "untergeschoben@beispiel.de"}) == []
+       and "cc" not in _z,
+       "ein fehlendes Feld OHNE Pflicht wird weiterhin verworfen", str(_z))
 
 # ── 3c. Die beiden Argumentsaetze duerfen nicht verwechselt werden ───────────
 abschnitt("3c. Anzeige-Satz gegen Ausfuehrungs-Satz (agent.py)")

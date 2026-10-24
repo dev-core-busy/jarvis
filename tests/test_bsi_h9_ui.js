@@ -482,6 +482,118 @@ async function teil6() {
         wn2.close(); wo.close();
     }
 
+    // ── 6a3. VERSENDEMASKE OHNE EMPFAENGER ─────────────────────────────────
+    // Betreiberfestlegung: "versende das Bild als E-Mail" ohne Empfaenger
+    // oeffnet die Maske mit Adressbuch – KEINE Textfrage. Der Aufruf kommt
+    // dann ohne `an`, die Karte muss das Feld trotzdem anbieten.
+    {
+        const TR2 = { ok: true, treffer: [
+            { name: 'Max Mustermann', adresse: 'max.mustermann@beispiel.de',
+              art: 'person' }] };
+        const wm = seite('de', [{ body: TR2 }, { body: TR2 }]);
+        const bm = wm.document.getElementById('messages');
+        const gm = [];
+        wm.JarvisBestaetigung.anfrage({
+            id: 'm1', werkzeug: 'email_senden', klasse: 'aussen',
+            argumente: [['betreff', 'Probe'], ['text', 'Hallo']],
+            aenderbar: ['an'], pflicht: ['an']
+        }, { container: bm, senden: function (o) { gm.push(o); return true; } });
+        const km = bm.querySelector('[data-best-id="m1"]');
+        if (!km) {
+            console.log('ABBRUCH: Karte fehlt – Abschnitt 6a3 kann nichts messen');
+            bilanz(); process.exit(2);
+        }
+        const im = km.querySelector('.jv-best-feld');
+        check('Positivkontrolle: OHNE Empfaenger im Aufruf entsteht trotzdem '
+              + 'ein Eingabefeld', !!im);
+        check('… und es ist leer', !!im && im.value === '', im ? im.value : '-');
+        check('… mit Adressbuch-Knopf daneben', !!km.querySelector('.jv-best-ab'));
+        check('die Karte sagt, dass das Modell keinen Empfaenger genannt hat',
+              /keinen Empfänger/.test(km.textContent), '-');
+
+        // Der Knopf MUSS gesperrt sein: eine Freigabe ohne Empfaenger waere
+        // ein Klick, den der Mail-Client danach abweist.
+        const jam = km.querySelector('.jv-best-ja');
+        check('"Ausfuehren" ist gesperrt, solange der Empfaenger fehlt',
+              !!jam && jam.disabled === true);
+        const hm = km.querySelector('.jv-best-pflicht');
+        check('… und die Karte sagt WARUM',
+              !!hm && /Empfänger fehlt/.test(hm.textContent),
+              hm ? hm.textContent : 'keine Zeile');
+        if (jam) jam.click();
+        check('ein Klick auf den gesperrten Knopf sendet NICHTS',
+              gm.length === 0, JSON.stringify(gm));
+
+        // Jetzt aus dem Adressbuch waehlen
+        if (im) {
+            im.value = 'Muster';
+            im.dispatchEvent(new wm.Event('input', { bubbles: true }));
+        }
+        await warten(wm);
+        const vm = km.querySelector('.jv-best-vorschlag');
+        check('die Suche im leeren Feld liefert Vorschlaege', !!vm);
+        if (vm) vm.click();
+        check('nach der Auswahl steht die Adresse im Feld',
+              !!im && im.value === 'max.mustermann@beispiel.de',
+              im ? im.value : '-');
+        check('… und "Ausfuehren" ist freigegeben',
+              !!jam && jam.disabled === false);
+        if (jam) jam.click();
+        check('der Klick sendet jetzt – mit der gewaehlten Adresse',
+              gm.length === 1 && !!gm[0].aenderungen
+              && gm[0].aenderungen.an === 'max.mustermann@beispiel.de',
+              JSON.stringify(gm[0]));
+        wm.close();
+
+        // ⚠ DER TIPPWEG, OHNE ADRESSBUCH. Oben wurde ueber einen VORSCHLAG
+        // gewaehlt – dessen Klick entsperrt den Knopf ebenfalls, der Tippweg
+        // blieb damit ungemessen (die Gegenprobe "Tippen loest die
+        // Pflichtpruefung nicht aus" biss nicht). Wer die Adresse von Hand
+        // eintraegt, muss freigeben koennen; sonst tippt er eine gueltige
+        // Adresse und kommt nicht weiter.
+        const wt = seite('de', [{ body: { ok: true, treffer: [] } }]);
+        const bt = wt.document.getElementById('messages');
+        const gt = [];
+        wt.JarvisBestaetigung.anfrage({
+            id: 'm2', werkzeug: 'email_senden', klasse: 'aussen',
+            argumente: [['betreff', 'Probe'], ['text', 'Hallo']],
+            aenderbar: ['an'], pflicht: ['an']
+        }, { container: bt, senden: function (o) { gt.push(o); return true; } });
+        const kt = bt.querySelector('[data-best-id="m2"]');
+        const it = kt.querySelector('.jv-best-feld');
+        const jat = kt.querySelector('.jv-best-ja');
+        check('Positivkontrolle: gesperrt, solange nichts getippt ist',
+              !!jat && jat.disabled === true);
+        if (it) {
+            it.value = 'selbst@beispiel.de';
+            it.dispatchEvent(new wt.Event('input', { bubbles: true }));
+        }
+        check('eine VON HAND getippte Adresse gibt "Ausfuehren" frei '
+              + '(ohne Adressbuch)', !!jat && jat.disabled === false);
+        if (jat) jat.click();
+        check('und sie geht als Korrektur mit',
+              gt.length === 1 && !!gt[0].aenderungen
+              && gt[0].aenderungen.an === 'selbst@beispiel.de',
+              JSON.stringify(gt[0]));
+        // Nur Leerzeichen zaehlt NICHT als Empfaenger.
+        const wl = seite('de', [{ body: { ok: true, treffer: [] } }]);
+        const bl = wl.document.getElementById('messages');
+        wl.JarvisBestaetigung.anfrage({
+            id: 'm3', werkzeug: 'email_senden', klasse: 'aussen',
+            argumente: [['betreff', 'P'], ['text', 'T']],
+            aenderbar: ['an'], pflicht: ['an']
+        }, { container: bl, senden: function () { return true; } });
+        const kl = bl.querySelector('[data-best-id="m3"]');
+        const il = kl.querySelector('.jv-best-feld');
+        if (il) {
+            il.value = '   ';
+            il.dispatchEvent(new wl.Event('input', { bubbles: true }));
+        }
+        check('nur Leerzeichen gibt NICHT frei',
+              kl.querySelector('.jv-best-ja').disabled === true);
+        wt.close(); wl.close();
+    }
+
     // ── 6b. OHNE KLICK AUF "AUSFUEHREN" GESCHIEHT NICHTS ───────────────────
     // Die Kernzusage von H9 – und die neuen Bedienelemente (Eingabefeld,
     // Adressbuch-Knopf, Vorschlaege) sind neue Flaeche, auf der ein

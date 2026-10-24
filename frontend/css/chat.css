@@ -1863,6 +1863,16 @@ body.light .chs-hint.is-warn { color: color-mix(in srgb, var(--warning) 62%, #00
 .jv-best-nein { background: transparent; border: 1px solid var(--outline); color: var(--text-primary); }
 .jv-best-btn:hover:not(:disabled) { opacity: .85; }
 .jv-best-btn:disabled { opacity: .45; cursor: not-allowed; }
+.jv-best-pflicht {
+    margin-top: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    /* Hausweg fuer Warnschrift: nacktes --danger haelt im hellen Thema nur
+       3,70:1 (Register). */
+    color: color-mix(in srgb, var(--danger) 78%, #000);
+}
+body.dark .jv-best-pflicht { color: var(--danger); }
+.jv-best-pflicht:empty { display: none; }
 .jv-best-status { margin-top: 8px; font-weight: 600; }
 .jv-best-status:empty { display: none; }
 .jv-best.is-erledigt .jv-best-knoepfe { display: none; }

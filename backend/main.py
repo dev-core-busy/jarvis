@@ -7108,11 +7108,35 @@ async def startup_benutzer_ablagen():
 
 @app.on_event("startup")
 async def startup_mcp():
-    """MCP-Server beim Start verbinden."""
+    """MCP-Server beim Start verbinden.
+
+    ⚠ LETZTE SCHRANKE, und sie muss BaseException-Abkoemmlinge mitnehmen.
+    `except Exception` allein hat den Dienst am 2026-10-24 auf DEV nicht
+    gerettet: der Transportfehler eines entfernten MCP-Servers kommt als
+    `asyncio.CancelledError` an (anyio-TaskGroup in `streamablehttp_client`),
+    und die erbt von BaseException. Folge: "Application startup failed.
+    Exiting.", Exit 3, systemd startete 34 Mal in sechs Minuten neu – wegen
+    EINES optionalen Servers, und im Journal stand KEINE Zeile
+    "[MCP] Startup-Fehler", weil der Handler nie griff.
+
+    MCP ist Beiwerk: der Dienst muss ohne jeden MCP-Server laufen. Deshalb
+    hier fail-open mit lauter Meldung. KeyboardInterrupt und SystemExit gehen
+    bewusst durch – ein Start, den jemand abbricht, soll abbrechen.
+    """
     try:
         await mcp_manager.connect_all()
-    except Exception as e:
-        print(f"[MCP] Startup-Fehler: {e}", flush=True)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except asyncio.CancelledError:
+        aufgabe = asyncio.current_task()
+        if aufgabe is not None and aufgabe.cancelling():
+            raise
+        print("[MCP] Startup-Fehler: Verbindungsaufbau abgebrochen – der Dienst "
+              "laeuft OHNE MCP-Werkzeuge weiter", flush=True)
+    except BaseException as e:  # noqa: BLE001
+        print(f"[MCP] Startup-Fehler: {type(e).__name__}: {e} – der Dienst "
+              f"laeuft OHNE MCP-Werkzeuge weiter", flush=True)
+
 
 @app.on_event("shutdown")
 async def shutdown_mcp():

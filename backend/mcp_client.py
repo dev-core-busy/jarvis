@@ -270,6 +270,40 @@ class McpServerConnection:
         except ImportError:
             self.error = "mcp-Paket nicht installiert (pip install mcp)"
             print(f"[MCP] {self.name}: {self.error}", flush=True)
+        except asyncio.CancelledError:
+            # ⚠ BEZAHLTER VORFALL (DEV 2026-10-24, 34 Neustarts in sechs
+            # Minuten): der Transportfehler eines ENTFERNTEN Servers kommt hier
+            # als CancelledError an, nicht als Exception. `streamablehttp_client`
+            # haelt intern eine anyio-TaskGroup; scheitert deren HTTP-Task (hier
+            # ein selbstsigniertes Zertifikat), cancelt der Scope unser
+            # wartendes `initialize()`. CancelledError erbt von BaseException –
+            # `except Exception` sieht sie NICHT. Sie lief damit durch
+            # connect_all und startup_mcp bis in den Starlette-Lifespan:
+            # "Application startup failed. Exiting.", Exit 3, systemd startet
+            # neu, und der ganze Dienst war wegen EINES optionalen Servers weg.
+            #
+            # WEITERGEWORFEN WIRD NUR DER ECHTE ABBRUCH: wurde unser eigener
+            # Task gecancelt (Shutdown), muss die Ausnahme durch, sonst haengt
+            # das Herunterfahren. `cancelling()` unterscheidet genau das – ein
+            # blindes Schlucken waere hier der schlechtere Fehler.
+            aufgabe = asyncio.current_task()
+            if aufgabe is not None and aufgabe.cancelling():
+                raise
+            self.error = ("Verbindung abgebrochen – der Server hat den Transport "
+                          "fallen lassen (Zertifikat, Netz oder Protokoll)")
+            self.connected = False
+            print(f"[MCP] {self.name}: {self.error}", flush=True)
+        except BaseExceptionGroup as gruppe:
+            # Dieselbe TaskGroup liefert beim Aufraeumen eine Gruppe (der
+            # ConnectError zusammen mit dem GeneratorExit des Streams). Eine
+            # BaseExceptionGroup erbt ebenfalls von BaseException, sobald ein
+            # Teil das tut – auch sie entkommt `except Exception`.
+            harte, _ = gruppe.split((KeyboardInterrupt, SystemExit))
+            if harte is not None:
+                raise
+            self.error = "; ".join(str(e) for e in gruppe.exceptions) or str(gruppe)
+            self.connected = False
+            print(f"[MCP] {self.name}: Verbindungsfehler – {self.error}", flush=True)
         except Exception as e:
             self.error = str(e)
             self.connected = False
@@ -370,10 +404,33 @@ class McpServerConnection:
         await self._session.initialize()
 
     async def disconnect(self):
-        """Trennt die Verbindung."""
+        """Trennt die Verbindung.
+
+        ⚠ Hier kommen dieselben BaseException-Abkoemmlinge an wie beim
+        Verbinden, und sie sind beim Trennen besonders unangenehm: der Aufruf
+        steht in ``connect_server`` VOR dem Neuaufbau und in ``disconnect_all``
+        im Shutdown. Im Journal von DEV stand am 2026-10-24 genau eine Zeile
+        "Fehler beim Trennen – Attempted to exit cancel scope in a different
+        task" – der RuntimeError war von ``except Exception`` noch gedeckt, die
+        CancelledError daneben NICHT. Das ``finally`` raeumt in jedem Fall auf:
+        ein halb offener Stack waere beim naechsten Versuch die zweite Fehler-
+        quelle.
+        """
         try:
             if self._exit_stack:
                 await self._exit_stack.aclose()
+        except asyncio.CancelledError:
+            aufgabe = asyncio.current_task()
+            if aufgabe is not None and aufgabe.cancelling():
+                # Im Shutdown MUSS der Abbruch durch – aber erst, nachdem das
+                # finally unten den Zustand saubergemacht hat.
+                raise
+            print(f"[MCP] {self.name}: Trennen abgebrochen", flush=True)
+        except BaseExceptionGroup as gruppe:
+            harte, _ = gruppe.split((KeyboardInterrupt, SystemExit))
+            if harte is not None:
+                raise
+            print(f"[MCP] {self.name}: Fehler beim Trennen – {gruppe}", flush=True)
         except Exception as e:
             print(f"[MCP] {self.name}: Fehler beim Trennen – {e}", flush=True)
         finally:
@@ -412,11 +469,36 @@ class McpClientManager:
         self._connections: dict[str, McpServerConnection] = {}
 
     async def connect_all(self):
-        """Verbindet alle aktivierten MCP-Server aus der Konfiguration."""
+        """Verbindet alle aktivierten MCP-Server aus der Konfiguration.
+
+        ⚠ JE SERVER ABGESICHERT, und das ist ein ANDERER Zweck als die
+        Schranke in ``McpServerConnection.connect``: dort geht es darum, dass
+        ein Transportfehler den DIENST nicht beendet, hier darum, dass ein
+        kaputter Server die ANDEREN nicht verhindert. Vor dem 2026-10-24 brach
+        die Schleife beim ersten Fehler ab – bei zwei Servern hing das Ergebnis
+        damit an der Reihenfolge in der Konfiguration.
+        """
         servers = config.get_mcp_servers()
         for srv in servers:
-            if srv.get("enabled", True):
+            if not srv.get("enabled", True):
+                continue
+            name = srv.get("name") or srv.get("id") or "?"
+            try:
                 await self.connect_server(srv["id"])
+            except Exception as e:  # noqa: BLE001
+                # ⚠ HIER BEWUSST NUR `Exception` – die BaseException-Faelle
+                # (CancelledError, BaseExceptionGroup) traegt `connect()`, und
+                # zwar als EINZIGE Stelle. Eine zweite Schranke fuer dieselbe
+                # Frage macht jede Gegenprobe stumm: man liest es als "der
+                # Waechter ist blind", obwohl der Code doppelt haelt (Register,
+                # hier beim Bau genau so gemessen – die Probe gegen diesen
+                # Zweig biss nicht).
+                # Was dieser Zweig traegt, ist etwas ANDERES: ein Fehler aus
+                # `connect_server` SELBST, bevor `connect()` laeuft – ein
+                # Eintrag ohne `id` (KeyError) oder eine kaputte
+                # Konfigurationsliste. Ohne ihn haengt bei zwei Servern das
+                # Ergebnis an der Reihenfolge in der Konfiguration.
+                print(f"[MCP] {name}: uebersprungen – {e}", flush=True)
 
     async def connect_server(self, server_id: str) -> bool:
         """Verbindet einen einzelnen Server."""

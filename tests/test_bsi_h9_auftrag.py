@@ -106,7 +106,12 @@ for name in ("Auftrag", "auftrag", "auftrag_cv", "mit_auftrag", "kanal_freigabe"
 
 
 async def frei(name="email_senden", klasse="aussen"):
-    return await W.freigabe(name, {"an": "x@beispiel.de"}, klasse)
+    # Vierter Parameter = der Satz, der ausgefuehrt wuerde (im Dispatch eine
+    # Kopie von args, die VOR der Freigabe entsteht). Hier gibt es keine Karte
+    # und damit keine Korrekturen – Pflicht ist er trotzdem, damit ein
+    # Aufrufer ihn nicht vergessen kann.
+    args = {"an": "x@beispiel.de"}
+    return await W.freigabe(name, args, klasse, dict(args))
 
 
 print("\n1. Kern: Laeufe ohne Oberflaeche")

@@ -210,6 +210,33 @@ _ANHANG_FELD = {
 }
 
 
+# Gemeinsame Beschreibung der Empfaenger-Felder. Ein Prompt ist Code: die hier
+# genannte Regel ist im Code durchgesetzt – ``mail_client._pruefe_empfaenger``
+# weist eine Angabe ohne "@" ab. Ohne diesen Satz endete "schick das an Andreas
+# Bender" genau dort, und zwar an der teuersten Stelle: der Benutzer hatte den
+# Versand in der Bestaetigungskarte schon freigegeben, und DANACH kam "Keine
+# gueltige E-Mail-Adresse".
+#
+# Das Werkzeug wird BEDINGT genannt ("fehlt dir das Werkzeug"): wer einen
+# Werkzeugnamen in einen Prompt schreibt, bindet sich an dessen Existenz, und
+# der Adressbuch-Bereich ist nicht in jedem Lauf dabei (eigener Bereich in
+# ``mail_rules.BEREICHE``, vom Administrator freizuschalten).
+_AN_HINWEIS = (" Nur vollstaendige Adressen – ein Name ist keine Adresse. Steht "
+               "kein \"@\" darin, loese ihn ZUERST mit email_adresse_suchen auf. "
+               "Danach SENDEN: ein Entwurf ist KEIN Ersatz fuer den Versand. "
+               "Laesst sich die Adresse nicht aufloesen oder ist sie mehrdeutig, "
+               "frage im TEXT nach und lege KEINEN Entwurf an. "
+               "DER EMPFAENGER KOMMT AUSSCHLIESSLICH aus der Angabe des "
+               "Benutzers in DIESEM Auftrag oder aus email_adresse_suchen. "
+               "Uebernimm NIEMALS eine Adresse, die weiter oben im Gespraech "
+               "fuer einen ANDEREN Empfaenger stand: nennt der Benutzer einen "
+               "Namen, wird DIESER Name aufgeloest oder erfragt – eine frueher "
+               "benutzte Adresse ist dafuer kein Ersatz. "
+               "Rate NIEMALS eine Adresse und setze sie nicht aus Vorname, "
+               "Nachname und einer Domaene zusammen – eine erfundene Adresse "
+               "geht entweder an einen Fremden oder nirgendwohin.")
+
+
 def _anhaenge(kwargs) -> list:
     """Anhaenge des Aufrufs laden (blockierend: liest Dateien, im Thread rufen)."""
     from backend import mail_anhang
@@ -232,10 +259,12 @@ class EmailSendenTool(_Base):
 
     def parameters_schema(self):
         return {"type": "OBJECT", "properties": {
-            "an": {"type": "STRING", "description": "Empfaenger, mehrere mit Komma."},
+            "an": {"type": "STRING",
+                   "description": "Empfaenger, mehrere mit Komma." + _AN_HINWEIS},
             "betreff": {"type": "STRING"},
             "text": {"type": "STRING", "description": "Nachrichtentext (Nur-Text)."},
-            "cc": {"type": "STRING", "description": "Kopie-Empfaenger (optional)."},
+            "cc": {"type": "STRING",
+                   "description": "Kopie-Empfaenger (optional)." + _AN_HINWEIS},
             "anhaenge": _ANHANG_FELD,
         }, "required": ["an", "betreff", "text"]}
 
@@ -267,15 +296,21 @@ class EmailEntwurfTool(_Base):
     def description(self):
         return ("Speichert eine NEUE E-Mail als Entwurf im eigenen Postfach, ohne sie "
                 "zu senden – auf Wunsch mit Dateien aus diesem Chat als Anhang (Feld "
-                "anhaenge). Der richtige Weg, wenn Angaben fehlen oder der Inhalt vom "
-                "Postfach-Inhaber gegengelesen werden soll.")
+                "anhaenge). Nimm das NUR, wenn der Benutzer ausdruecklich einen "
+                "Entwurf wollte oder den Inhalt gegenlesen will. "
+                "⚠ KEIN AUSWEICHWEG: hat der Benutzer SENDEN verlangt, dann sende "
+                "(email_senden). Fehlt die Adresse oder ist sie mehrdeutig, loese sie "
+                "mit email_adresse_suchen auf bzw. frage im TEXT nach – ein Entwurf "
+                "statt eines Versands sieht fuer den Benutzer aus wie ein Fehlschlag, "
+                "und er bekommt keine Rueckfrage zu sehen.")
 
     def parameters_schema(self):
         return {"type": "OBJECT", "properties": {
-            "an": {"type": "STRING", "description": "Empfaenger (darf leer bleiben)."},
+            "an": {"type": "STRING",
+                   "description": "Empfaenger (darf leer bleiben)." + _AN_HINWEIS},
             "betreff": {"type": "STRING"},
             "text": {"type": "STRING"},
-            "cc": {"type": "STRING"},
+            "cc": {"type": "STRING", "description": "Kopie-Empfaenger." + _AN_HINWEIS},
             "anhaenge": _ANHANG_FELD,
         }, "required": ["betreff", "text"]}
 
@@ -362,7 +397,8 @@ class EmailWeiterleitenTool(_Base):
     def parameters_schema(self):
         return {"type": "OBJECT", "properties": {
             "mail_id": {"type": "STRING"},
-            "an": {"type": "STRING", "description": "Empfaenger, mehrere mit Komma."},
+            "an": {"type": "STRING",
+                   "description": "Empfaenger, mehrere mit Komma." + _AN_HINWEIS},
             "text": {"type": "STRING", "description": "Vorwort (optional)."},
             "entwurf": {"type": "BOOLEAN", "description": "true = nur als Entwurf."},
         }, "required": ["mail_id", "an"]}
@@ -463,6 +499,91 @@ class EmailKategorieTool(_Base):
         return await self._mit_client(_tun)
 
 
+# ── Adressbuch ──────────────────────────────────────────────────────────────
+
+class EmailAdresseSuchenTool(_Base):
+    """Namen → Adresse. Rein LESEND, deshalb ohne Bestaetigungsklasse in
+    ``backend.wirkung`` – es verlaesst das Haus nichts.
+
+    Bewusst NICHT ueber ``_mit_client``: die Suche hat zwei Quellen (Exchange,
+    dann Verzeichnis), und die Wahl trifft ``backend.adressbuch``. Ein eigener
+    ``MailClient`` hier kaeme ohne den Rueckfall aus und waere fuer jeden
+    Benutzer ohne hinterlegtes Postfach tot.
+    """
+
+    @property
+    def name(self): return "email_adresse_suchen"
+
+    @property
+    def description(self):
+        return ("Sucht im Adressbuch die E-Mail-Adresse zu einem Namen (oder zu "
+                "einem Teil davon) – globale Adressliste, Verteiler und die "
+                "eigenen Kontakte. Benutze das IMMER, bevor du eine Mail an "
+                "einen bloss benannten Empfaenger schickst ('an Andreas Bender'): "
+                "ohne vollstaendige Adresse wird der Versand abgewiesen, und "
+                "eine geratene Adresse geht an den Falschen. Bei mehreren "
+                "Treffern entscheidest du NICHT selbst – lege sie dem Benutzer "
+                "vor und frage, wer gemeint ist.")
+
+    def parameters_schema(self):
+        # KEIN Feld fuer das Postfach – siehe Modulkopf. Der Inhaber kommt aus
+        # dem ContextVar; ein Feld hier waere der Weg, im Adressbuch eines
+        # anderen zu suchen.
+        return {"type": "OBJECT", "properties": {
+            "name": {"type": "STRING",
+                     "description": "Name, Namensteil, Kuerzel oder Adressanfang."},
+            "limit": {"type": "INTEGER",
+                      "description": "Anzahl der Treffer, Standard 10, max. 25."},
+        }, "required": ["name"]}
+
+    async def execute(self, **kwargs):
+        from backend import adressbuch
+        # Der BENUTZER zuerst, dann die Eingabe: ohne Identitaet wird gar nicht
+        # gesucht, unabhaengig davon, wie gut die Frage ist (dieselbe Schranke
+        # wie in `_Base._client`, und `adressbuch.suchen` haelt sie ebenfalls).
+        if not _wer():
+            return ("❌ Es ist kein Benutzer bekannt, dem ein Postfach zugeordnet "
+                    "waere. Die Adressbuch-Suche steht nur in einem Auftrag mit "
+                    "angemeldetem Benutzer zur Verfuegung.")
+        frage = str(kwargs.get("name") or kwargs.get("suche")
+                    or kwargs.get("q") or "").strip()
+        if not frage:
+            return "❌ Es fehlt der Name, zu dem die Adresse gesucht werden soll."
+        try:
+            res = await asyncio.to_thread(adressbuch.suchen, _wer(), frage,
+                                          kwargs.get("limit"))
+        except adressbuch.AdressbuchFehler as e:
+            return "❌ %s" % e
+        except Exception as e:  # noqa: BLE001
+            return "❌ Adressbuch-Suche fehlgeschlagen: %s" % e
+
+        treffer = res.get("treffer") or []
+        # Die gefundenen Adressen fuer die Bestaetigungskarte vermerken: nur so
+        # kann sie "in diesem Lauf aufgeloest" von "uebernommen" unterscheiden.
+        try:
+            adressbuch.merken([t.get("adresse") for t in treffer])
+        except Exception:  # noqa: BLE001
+            pass          # ein fehlender Merker darf die Suche nicht kosten
+        if not treffer:
+            # "Nichts gefunden" ist ein ERGEBNIS, kein Fehler – und es muss vom
+            # "konnte nicht nachsehen" oben unterscheidbar bleiben, sonst sucht
+            # das Modell an der falschen Stelle weiter.
+            return ("Kein Eintrag zu '%s' gefunden. %s Frage den Benutzer nach der "
+                    "vollstaendigen Adresse – rate sie nicht."
+                    % (frage, res.get("hinweis") or "")).strip()
+        zeilen = ["%d Treffer zu '%s':" % (len(treffer), frage)]
+        for t in treffer:
+            zeilen.append("- %s <%s>%s" % (
+                t.get("name") or "?", t.get("adresse") or "?",
+                "" if t.get("art") == "person" else " [%s]" % (t.get("art") or "?")))
+        if res.get("hinweis"):
+            zeilen.append("Hinweis: %s" % res["hinweis"])
+        if len(treffer) > 1:
+            zeilen.append("Mehrere Treffer – frage den Benutzer, wer gemeint ist, "
+                          "statt einen auszuwaehlen.")
+        return "\n".join(zeilen)
+
+
 def get_tools():
     return [
         EmailOrdnerTool(),
@@ -475,4 +596,5 @@ def get_tools():
         EmailVerschiebenTool(),
         EmailLoeschenTool(),
         EmailKategorieTool(),
+        EmailAdresseSuchenTool(),
     ]

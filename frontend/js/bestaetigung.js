@@ -25,6 +25,16 @@
 
     var KLASSEN = ['aussen', 'loeschen', 'shell', 'zeitplan'];
 
+    // Entprellung des Tippvorschlags. Jede Abfrage ist eine Anmeldung am
+    // Exchange bzw. eine Verzeichnis-Abfrage, trifft also fremde Infrastruktur
+    // – ohne Entprellung waere das eine Abfrage je Tastendruck. Das Backend
+    // bremst zusaetzlich (backend/adressbuch.drossel_ok), aber eine Bremse
+    // dort ist der Notnagel, nicht der Regelweg.
+    var TIPP_MS = 320;
+    // Dieselbe Untergrenze wie im Backend (adressbuch.MIN_FRAGE): unter zwei
+    // Zeichen wird gar nicht gefragt.
+    var MIN_FRAGE = 2;
+
     // Kennung -> Karte. Eine Karte, deren Anfrage erledigt ist, bleibt im
     // Verlauf stehen (man soll nachlesen koennen, was freigegeben wurde),
     // reagiert aber nicht mehr.
@@ -42,6 +52,171 @@
         var key = 'bestaetigung.wz.' + name;
         var v = (typeof window.t === 'function') ? window.t(key) : key;
         return (v && v !== key) ? v : String(name || '');
+    }
+
+    /**
+     * Ein Feld, das der Mensch korrigieren darf: Eingabe + Adressbuch-Knopf +
+     * Vorschlag beim Tippen.
+     *
+     * ⚠ Der VORSCHLAG DES MODELLS bleibt sichtbar (Zeile "Vorschlag: …") – die
+     * Zusage von BSI H9 ist "was du siehst, laeuft", und nach einer Korrektur
+     * muss nachlesbar bleiben, was das Modell wollte und was der Mensch daraus
+     * gemacht hat.
+     *
+     * Alle Werte aus dem Verzeichnis gehen ueber textContent ins DOM – sie sind
+     * Daten, keine Auszeichnung (gleiche Regel wie fuer die Argumente oben).
+     */
+    function _feld(name, vorgabe) {
+        var box = _el('div', 'jv-best-feldbox');
+        var zeile = _el('div', 'jv-best-feldzeile');
+        var inp = document.createElement('input');
+        inp.type = 'text';
+        inp.className = 'jv-best-feld';
+        inp.value = String(vorgabe == null ? '' : vorgabe);
+        inp.setAttribute('aria-label',
+                         T('bestaetigung.feld.' + name, name));
+        zeile.appendChild(inp);
+
+        var knopf = _el('button', 'jv-best-ab');
+        knopf.type = 'button';
+        // Lupe: "untersuchen, veraendert nichts" – genau das tut die Suche.
+        // Bewusst ein BESTEHENDES Symbol aus icons.js: ein neues haette fuenf
+        // Pruefstaende gebrochen, die JarvisIcons von Hand nachstellen.
+        try {
+            if (window.JarvisIcons && window.JarvisIcons.lupe) {
+                knopf.innerHTML = window.JarvisIcons.lupe();
+            } else {
+                knopf.textContent = '…';
+            }
+        } catch (e) {
+            knopf.textContent = '…';
+        }
+        knopf.title = T('bestaetigung.adressbuch', 'Im Adressbuch suchen');
+        knopf.setAttribute('aria-label', knopf.title);
+        zeile.appendChild(knopf);
+        box.appendChild(zeile);
+
+        var liste = _el('div', 'jv-best-vorschlaege');
+        liste.setAttribute('role', 'listbox');
+        box.appendChild(liste);
+        var meldung = _el('div', 'jv-best-feldmeldung');
+        meldung.setAttribute('role', 'status');
+        box.appendChild(meldung);
+
+        var timer = null;
+        var laufend = 0;
+
+        function leeren() {
+            while (liste.firstChild) liste.removeChild(liste.firstChild);
+        }
+
+        function zeigen(treffer, hinweis) {
+            leeren();
+            (treffer || []).forEach(function (t) {
+                var b = _el('button', 'jv-best-vorschlag');
+                b.type = 'button';
+                b.setAttribute('role', 'option');
+                // Name und Adresse in eigenen Elementen, damit die Adresse
+                // auch bei einem langen Namen lesbar bleibt.
+                b.appendChild(_el('span', 'jv-best-v-name', String(t.name || '')));
+                b.appendChild(_el('span', 'jv-best-v-adr', String(t.adresse || '')));
+                if (t.art && t.art !== 'person') {
+                    b.appendChild(_el('span', 'jv-best-v-art',
+                                      T('bestaetigung.art.' + t.art, String(t.art))));
+                }
+                b.addEventListener('click', function () {
+                    inp.value = String(t.adresse || '');
+                    leeren();
+                    meldung.textContent = '';
+                    inp.focus();
+                });
+                liste.appendChild(b);
+            });
+            meldung.textContent = hinweis || '';
+        }
+
+        function suchen(frage) {
+            var q = String(frage || '').trim();
+            if (q.length < MIN_FRAGE) { leeren(); meldung.textContent = ''; return; }
+            // Steht schon eine vollstaendige Adresse da, ist nichts zu loesen.
+            if (q.indexOf('@') >= 0) { leeren(); meldung.textContent = ''; return; }
+            var meine = ++laufend;
+            meldung.textContent = T('bestaetigung.ab_suche', 'Suche …');
+            var kopf = { 'Content-Type': 'application/json' };
+            try {
+                var tok = window.JarvisSitzung && window.JarvisSitzung.token();
+                if (tok) kopf['Authorization'] = 'Bearer ' + tok;
+            } catch (e) { /* ohne Token antwortet der Server mit 401 */ }
+            fetch('/api/email/adressbuch', {
+                method: 'POST', headers: kopf, body: JSON.stringify({ q: q })
+            }).then(function (r) {
+                return r.json().then(function (d) { return { ok: r.ok, d: d }; });
+            }).then(function (res) {
+                // Eine ueberholte Antwort darf eine neuere nicht ueberschreiben
+                // (der Benutzer tippt weiter, waehrend die Anfrage laeuft).
+                if (meine !== laufend) return;
+                if (!res.ok || !res.d || res.d.ok === false) {
+                    leeren();
+                    // ⚠ Ein Fehler verschwindet NICHT von selbst – man muss ihn
+                    // lesen und notfalls kopieren koennen (Register).
+                    meldung.textContent = String((res.d && res.d.error)
+                        || T('bestaetigung.ab_fehler',
+                             'Adressbuch nicht erreichbar'));
+                    return;
+                }
+                var tr = res.d.treffer || [];
+                if (!tr.length) {
+                    leeren();
+                    meldung.textContent = T('bestaetigung.ab_leer',
+                        'Kein Eintrag gefunden – Adresse von Hand eintragen.');
+                    return;
+                }
+                zeigen(tr, res.d.hinweis || '');
+            }).catch(function (e) {
+                if (meine !== laufend) return;
+                leeren();
+                meldung.textContent = String(
+                    T('bestaetigung.ab_fehler', 'Adressbuch nicht erreichbar')
+                    + ' (' + (e && e.message ? e.message : e) + ')');
+            });
+        }
+
+        inp.addEventListener('input', function () {
+            if (timer) clearTimeout(timer);
+            var wert = inp.value;
+            timer = setTimeout(function () { suchen(wert); }, TIPP_MS);
+        });
+        knopf.addEventListener('click', function () {
+            if (timer) clearTimeout(timer);
+            // Am Knopf wird OHNE die @-Schranke gesucht: wer ihn drueckt, will
+            // nachsehen, auch wenn schon etwas Adressartiges im Feld steht.
+            var q = String(inp.value || '').trim();
+            if (q.length < MIN_FRAGE) {
+                meldung.textContent = T('bestaetigung.ab_kurz',
+                    'Mindestens 2 Zeichen eingeben.');
+                return;
+            }
+            suchen(q.indexOf('@') >= 0 ? q.split('@')[0] : q);
+        });
+
+        // Ein Tippvorschlag gleich beim Erscheinen der Karte, WENN der Wert
+        // offensichtlich keine Adresse ist: genau der gemeldete Fall ("an
+        // Andreas Bender"). Steht eine Adresse da, passiert nichts.
+        if (String(vorgabe || '').indexOf('@') < 0
+                && String(vorgabe || '').trim().length >= MIN_FRAGE) {
+            suchen(vorgabe);
+        }
+
+        return {
+            box: box, eingabe: inp,
+            /** Den Kasten durch den endgueltigen Wert ersetzen (nach dem Klick). */
+            festschreiben: function () {
+                if (timer) clearTimeout(timer);
+                laufend++;                      // laufende Antwort verwerfen
+                var fest = _el('div', 'jv-best-feldfest', inp.value);
+                if (box.parentNode) box.parentNode.replaceChild(fest, box);
+            }
+        };
     }
 
     function _abschliessen(karte, grund) {
@@ -88,13 +263,54 @@
                               T('bestaetigung.klasse.' + klasse, klasse)));
         karte.appendChild(_el('div', 'jv-best-aktion', _werkzeugText(msg.werkzeug)));
 
+        // Welche Felder der Server zum Korrigieren freigibt (Weissliste
+        // `wirkung.AENDERBAR`). ⚠ Die Liste ist eine ANZEIGE-Erlaubnis, keine
+        // Schranke: der Server prueft jedes Feld beim Klick erneut. Ein hier
+        // erfundener Feldname wird dort verworfen und benannt.
+        var aenderbar = Array.isArray(msg.aenderbar) ? msg.aenderbar : [];
+        // Woher der Wert kommt: 'aufgeloest' (ueber das Adressbuch gesucht),
+        // 'uebernommen' (aus Gedaechtnis/Verlauf) oder 'unbekannt'. Eine
+        // uebernommene Adresse ist der gemeldete Fehlerfall – sie wird
+        // AUFFAELLIG gezeigt, nicht als Fussnote.
+        var herkunft = (msg.herkunft && typeof msg.herkunft === 'object')
+            ? msg.herkunft : {};
+        var felder = {};        // feldname -> { box, eingabe, festschreiben }
+        var urwerte = {};       // feldname -> was das Modell vorschlug
+
         var args = Array.isArray(msg.argumente) ? msg.argumente : [];
         if (args.length) {
             var dl = _el('dl', 'jv-best-args');
             args.forEach(function (paar) {
                 if (!Array.isArray(paar) || paar.length < 2) return;
-                dl.appendChild(_el('dt', null, String(paar[0])));
-                dl.appendChild(_el('dd', null, String(paar[1])));
+                var feld = String(paar[0]);
+                var wert = String(paar[1]);
+                dl.appendChild(_el('dt', null, feld));
+                if (aenderbar.indexOf(feld) >= 0) {
+                    var dd = _el('dd', 'jv-best-dd-feld');
+                    // Der Vorschlag des Modells bleibt lesbar – ein Feld, das
+                    // ihn nur noch als Vorbelegung traegt, verwischt, wer was
+                    // entschieden hat.
+                    dd.appendChild(_el('div', 'jv-best-vorschlag-war',
+                        T('bestaetigung.vorschlag', 'Vorschlag: {wert}')
+                            .split('{wert}').join(wert)));
+                    var hk = String(herkunft[feld] || '');
+                    if (hk === 'uebernommen' || hk === 'aufgeloest') {
+                        var hz = _el('div', 'jv-best-herkunft is-' + hk,
+                            T('bestaetigung.herkunft.' + hk, hk === 'uebernommen'
+                                ? 'Diese Adresse wurde NICHT im Adressbuch '
+                                  + 'geprüft – bitte nachsehen.'
+                                : 'Im Adressbuch aufgelöst.'));
+                        hz.setAttribute('role', 'note');
+                        dd.appendChild(hz);
+                    }
+                    var f = _feld(feld, wert);
+                    dd.appendChild(f.box);
+                    dl.appendChild(dd);
+                    felder[feld] = f;
+                    urwerte[feld] = wert;
+                } else {
+                    dl.appendChild(_el('dd', null, wert));
+                }
             });
             karte.appendChild(dl);
         }
@@ -126,13 +342,32 @@
             karte.dataset.zustand = 'gesendet';
             ja.disabled = true;
             nein.disabled = true;
+            // Nur WIRKLICH geaenderte Felder mitschicken. Ein unveraendertes
+            // Feld als "Korrektur" zu senden waere eine Zeile im Journal, die
+            // nichts bewirkt hat – und das Journal ist hier der Beleg, an
+            // welche Adresse die Mail ging.
+            var korrekturen = {};
+            var anzahl = 0;
+            Object.keys(felder).forEach(function (f) {
+                var neu = String(felder[f].eingabe.value || '').trim();
+                if (neu !== String(urwerte[f] == null ? '' : urwerte[f]).trim()) {
+                    korrekturen[f] = neu;
+                    anzahl++;
+                }
+            });
             status.textContent = erlaubt
                 ? T('bestaetigung.status.erlaubt', 'Freigegeben – wird ausgeführt')
                 : T('bestaetigung.status.abgelehnt', 'Abgelehnt – nicht ausgeführt');
             var gesendet;
             try {
-                gesendet = umgebung.senden({ type: 'bestaetigung_antwort', id: msg.id,
-                                             erlaubt: erlaubt === true });
+                var paket = { type: 'bestaetigung_antwort', id: msg.id,
+                              erlaubt: erlaubt === true };
+                // Bei "Ablehnen" wird nichts ausgefuehrt – dann gehoert auch
+                // keine Korrektur in die Nachricht (der Server verwirft sie
+                // ohnehin, aber eine Nachricht, die etwas mitschickt, das nie
+                // wirkt, ist eine Falschaussage).
+                if (erlaubt === true && anzahl) paket.aenderungen = korrekturen;
+                gesendet = umgebung.senden(paket);
             } catch (e) {
                 gesendet = false;
             }
@@ -148,7 +383,18 @@
                 nein.disabled = false;
                 status.textContent = T('bestaetigung.status.nicht_gesendet',
                                        'Antwort konnte nicht gesendet werden');
+                // ⚠ Die Eingabefelder bleiben hier BEWUSST stehen: nach dem
+                // Wiederverbinden wird erneut geantwortet, und ein
+                // festgeschriebenes Feld haette den getippten Wert verloren.
+                return;
             }
+            // Die Antwort ist raus: aus den Eingabefeldern wird Text. Die Karte
+            // bleibt im Verlauf stehen und soll nachlesbar zeigen, was
+            // freigegeben wurde – ein weiterhin tippbares Feld wuerde eine
+            // Aenderung versprechen, die nichts mehr bewirkt.
+            Object.keys(felder).forEach(function (f) {
+                try { felder[f].festschreiben(); } catch (e) { /* nur Anzeige */ }
+            });
         }
         ja.addEventListener('click', function () { klick(true); });
         nein.addEventListener('click', function () { klick(false); });

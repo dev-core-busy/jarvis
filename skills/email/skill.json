@@ -4,7 +4,7 @@
     "version": "1.0.0",
     "author": "Jarvis",
     "module": "main",
-    "tools": ["email_ordner", "email_liste", "email_lesen", "email_senden", "email_entwurf", "email_antworten", "email_weiterleiten", "email_verschieben", "email_loeschen", "email_kategorie"],
+    "tools": ["email_ordner", "email_liste", "email_lesen", "email_senden", "email_entwurf", "email_antworten", "email_weiterleiten", "email_verschieben", "email_loeschen", "email_kategorie", "email_adresse_suchen"],
     "category": "kommunikation",
     "icon": "mail",
     "system": false,
@@ -99,7 +99,7 @@
         "bereiche": {
             "type": "string",
             "label": "Freigegebene Werkzeug-Bereiche fuer Regeln",
-            "description": "Kommagetrennt: mail, wissen, fach, dokumente, voll. 'mail' ist immer dabei. Der Benutzer kann je Regel NUR aus den hier freigegebenen Bereichen waehlen. Wird ueber die Kaestchen im Reiter gepflegt - 'voll' bedeutet: der Regel-Lauf bekommt den ganzen Werkzeugkasten des Benutzers.",
+            "description": "Kommagetrennt: mail, adressbuch, wissen, fach, dokumente, voll. 'mail' ist immer dabei. Der Benutzer kann je Regel NUR aus den hier freigegebenen Bereichen waehlen. Wird ueber die Kaestchen im Reiter gepflegt - 'voll' bedeutet: der Regel-Lauf bekommt den ganzen Werkzeugkasten des Benutzers. ACHTUNG bei 'adressbuch': zusammen mit dem Versand kann eine praeparierte E-Mail damit Adressen aus dem Firmen-Adressbuch nach aussen tragen - fuer Regeln, die nur sortieren, nicht noetig.",
             "default": "mail"
         },
         "addin_ordner_pfad": {

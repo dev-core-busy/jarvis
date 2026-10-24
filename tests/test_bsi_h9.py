@@ -199,10 +199,13 @@ abschnitt("3. freigabe() und antwort()")
 
 
 class WS:
-    def __init__(self, antwort_mit=None, kaputt=False):
+    def __init__(self, antwort_mit=None, kaputt=False, aenderungen=None):
         self.nachrichten = []
         self.antwort_mit = antwort_mit      # (benutzer, erlaubt) – Klick-Attrappe
         self.kaputt = kaputt
+        # Korrekturen, die der Mensch in der Karte getippt hat. Die echte
+        # Oberflaeche schickt sie im selben Paket wie den Klick.
+        self.aenderungen = aenderungen
 
     async def send_json(self, m):
         if self.kaputt:
@@ -212,7 +215,7 @@ class WS:
             benutzer, erlaubt = self.antwort_mit
             # wie der echte Client: Antwort kommt SPAETER, als eigene Nachricht
             asyncio.get_running_loop().call_soon(
-                W.antwort, m["id"], benutzer, self, erlaubt)
+                W.antwort, m["id"], benutzer, self, erlaubt, self.aenderungen)
 
     def typen(self):
         return [m.get("type") for m in self.nachrichten]
@@ -250,9 +253,16 @@ async def _gedeckelt(aw):
         return HAENGT
 
 
-async def fall(kanal, *, warte_nachlauf=True):
-    r = await _gedeckelt(_mit_kanal(kanal, W.freigabe(
-        "email_senden", {"an": "a@beispiel.de"}, W.AUSSEN)))
+async def fall(kanal, *, warte_nachlauf=True, werkzeug="email_senden", args=None,
+               exec_args=None):
+    """Ein Freigabe-Durchlauf. ``exec_args`` ist der Satz, der AUSGEFUEHRT
+    wuerde – im echten Dispatch eine Kopie von ``args``, die VOR der Freigabe
+    entsteht. Genau diese Trennung muss der Pruefstand nachbilden, sonst kann
+    er nicht sehen, in welchen der beiden Saetze eine Korrektur geschrieben
+    wird (und ein Pruefstand mit EINEM Dict waere trivial gruen)."""
+    a = {"an": "a@beispiel.de"} if args is None else args
+    e = dict(a) if exec_args is None else exec_args
+    r = await _gedeckelt(_mit_kanal(kanal, W.freigabe(werkzeug, a, W.AUSSEN, e)))
     if warte_nachlauf:
         await _nachlauf()
     return r
@@ -260,11 +270,12 @@ async def fall(kanal, *, warte_nachlauf=True):
 
 async def teil3():
     erg = {}
-    erg["ohne_kanal"] = await W.freigabe("email_senden", {}, W.AUSSEN)
+    erg["ohne_kanal"] = await W.freigabe("email_senden", {}, W.AUSSEN, {})
     with W.auftrag("Test-Auftrag", True):
-        erg["ohne_kanal_frei"] = await W.freigabe("email_senden", {}, W.AUSSEN)
+        erg["ohne_kanal_frei"] = await W.freigabe("email_senden", {}, W.AUSSEN, {})
     with W.auftrag("Test-Auftrag", False):
-        erg["ohne_kanal_nicht_frei"] = await W.freigabe("email_senden", {}, W.AUSSEN)
+        erg["ohne_kanal_nicht_frei"] = await W.freigabe("email_senden", {},
+                                                        W.AUSSEN, {})
     ws = WS()
     erg["ohne_dialog"] = (await fall(W.Kanal(ws, "anna", False)), ws)
     ws = WS(("anna", True))
@@ -278,8 +289,8 @@ async def teil3():
 
     # fremder Benutzer klickt -> verworfen; danach der richtige
     ws = WS()
-    t = asyncio.ensure_future(_mit_kanal(W.Kanal(ws, "anna", True),
-                                         W.freigabe("email_loeschen", {}, W.LOESCHEN)))
+    t = asyncio.ensure_future(_mit_kanal(
+        W.Kanal(ws, "anna", True), W.freigabe("email_loeschen", {}, W.LOESCHEN, {})))
     await _nachlauf()
     kid = next((m["id"] for m in ws.nachrichten if m.get("type") == "bestaetigung_anfrage"), "")
     erg["fremd_zugestellt"] = W.antwort(kid, "bert", None, True)
@@ -292,7 +303,7 @@ async def teil3():
     # Stop waehrend des Wartens
     ws = WS()
     t = asyncio.ensure_future(_mit_kanal(W.Kanal(ws, "anna", True),
-                                         W.freigabe("email_senden", {}, W.AUSSEN)))
+                                         W.freigabe("email_senden", {}, W.AUSSEN, {})))
     await _nachlauf()
     t.cancel()
     try:
@@ -314,12 +325,96 @@ async def teil3():
     # API-Schluessel ohne Benutzer: nur dieselbe Verbindung
     ws = WS()
     t = asyncio.ensure_future(_mit_kanal(W.Kanal(ws, "", True),
-                                         W.freigabe("email_senden", {}, W.AUSSEN)))
+                                         W.freigabe("email_senden", {}, W.AUSSEN, {})))
     await _nachlauf()
     kid = next((m["id"] for m in ws.nachrichten if m.get("type") == "bestaetigung_anfrage"), "")
     erg["anon_fremde_verbindung"] = W.antwort(kid, "", object(), True)
     erg["anon_eigene_verbindung"] = W.antwort(kid, "", ws, True)
     erg["anon"] = await _gedeckelt(t)
+
+    # ── Korrektur eines Empfaengers in der Karte (AENDERBAR) ────────────────
+    # Gemessen wird die WIRKUNG: landet der getippte Wert in dem Satz, mit dem
+    # das Werkzeug gerufen wird? Deshalb zwei getrennte Dicts – im Dispatch
+    # sind es auch zwei (`exec_args = dict(args)` VOR der Freigabe).
+    a = {"an": "Max Mustermann", "betreff": "B", "text": "T"}
+    e = dict(a)
+    ws = WS(("anna", True), aenderungen={"an": "max.mustermann@beispiel.de"})
+    erg["korr_ok"] = (await fall(W.Kanal(ws, "anna", True), args=a, exec_args=e), a, e, ws)
+
+    # Ein Feld, das NICHT in AENDERBAR steht, muss verworfen werden
+    a2 = {"an": "x@beispiel.de", "betreff": "Echt", "text": "T"}
+    e2 = dict(a2)
+    ws = WS(("anna", True), aenderungen={"betreff": "Untergeschoben"})
+    erg["korr_fremdes_feld"] = (await fall(W.Kanal(ws, "anna", True),
+                                           args=a2, exec_args=e2), e2)
+
+    # Ein Werkzeug ohne aenderbare Felder nimmt gar nichts an
+    a3 = {"mail_id": "1"}
+    e3 = dict(a3)
+    ws = WS(("anna", True), aenderungen={"mail_id": "999"})
+    erg["korr_fremdes_werkzeug"] = (await fall(W.Kanal(ws, "anna", True),
+                                               werkzeug="email_loeschen",
+                                               args=a3, exec_args=e3), e3)
+
+    # ABLEHNEN mit getippter Korrektur: nichts wird uebernommen
+    a4 = {"an": "alt@beispiel.de"}
+    e4 = dict(a4)
+    ws = WS(("anna", False), aenderungen={"an": "neu@beispiel.de"})
+    erg["korr_abgelehnt"] = (await fall(W.Kanal(ws, "anna", True),
+                                        args=a4, exec_args=e4), e4)
+
+    # ── Eine abgelehnte Aktion kommt NICHT wieder ──────────────────────────
+    # Vorfall DEV 2026-10-23: nach "Ablehnen" rief das Modell email_senden im
+    # selben Lauf erneut, und es kam eine ZWEITE Karte. Gemessen wird die
+    # Wirkung: der zweite Anlauf darf GAR KEINE Karte erzeugen.
+    ws_a = WS(("anna", False))
+    kanal_a = W.Kanal(ws_a, "anna", True)
+    _tok = W.lauf_oeffnen()
+    try:
+        r1 = await fall(kanal_a, args={"an": "a@beispiel.de"})
+        # Zweiter Anlauf im SELBEN Lauf, eigener WS: wuerde eine Karte kommen,
+        # stuende sie in ws_b.
+        ws_b = WS(("anna", True))
+        r2 = await fall(W.Kanal(ws_b, "anna", True), args={"an": "a@beispiel.de"})
+        # Anderes Werkzeug, auch abgelehnt -> der Riegel gilt je WERKZEUG
+        ws_c = WS(("anna", True))
+        r3 = await fall(W.Kanal(ws_c, "anna", True), werkzeug="email_weiterleiten",
+                        args={"an": "a@beispiel.de"})
+        erg["riegel"] = (r1, r2, r3, ws_b, ws_c)
+    finally:
+        W.lauf_schliessen(_tok)
+
+    # Auch die FRIST sperrt den zweiten Anlauf: derselbe Mensch wuerde eine
+    # zweite Karte genauso nicht beantworten, und der Lauf haengt dann erneut
+    # bis zur Frist. (Diese Pruefung fehlte - die Gegenprobe "Frist wird nicht
+    # gemerkt" blieb deshalb stumm.)
+    _alt_frist = W.FRIST_S
+    W.FRIST_S = 0.05
+    _tok_f = W.lauf_oeffnen()
+    try:
+        ws_f1 = WS()                      # antwortet NIE -> Frist
+        rf1 = await fall(W.Kanal(ws_f1, "anna", True), args={"an": "a@beispiel.de"})
+        ws_f2 = WS(("anna", True))        # wuerde sofort klicken
+        rf2 = await fall(W.Kanal(ws_f2, "anna", True), args={"an": "a@beispiel.de"})
+        erg["riegel_frist"] = (rf1, rf2, ws_f2)
+    finally:
+        W.lauf_schliessen(_tok_f)
+        W.FRIST_S = _alt_frist
+
+    # OHNE Lauf-Klammer greift der Riegel nicht (headless hat keine Karte)
+    ws_d = WS(("anna", False))
+    r_d1 = await fall(W.Kanal(ws_d, "anna", True), args={"an": "a@beispiel.de"})
+    ws_e = WS(("anna", True))
+    r_d2 = await fall(W.Kanal(ws_e, "anna", True), args={"an": "a@beispiel.de"})
+    erg["ohne_klammer"] = (r_d1, r_d2, ws_e)
+
+    # Zeilenumbruch im getippten Wert wird entschaerft (Kopfzeilen-Hygiene)
+    a5 = {"an": "alt@beispiel.de"}
+    e5 = dict(a5)
+    ws = WS(("anna", True),
+            aenderungen={"an": "neu@beispiel.de\nBcc: heimlich@beispiel.de"})
+    erg["korr_umbruch"] = (await fall(W.Kanal(ws, "anna", True),
+                                      args=a5, exec_args=e5), e5)
     return erg
 
 
@@ -372,6 +467,213 @@ pruefe(E["anon_fremde_verbindung"] is False and E["anon_eigene_verbindung"] is T
        and E["anon"] is None,
        "ohne Benutzernamen gilt nur die Verbindung, die gefragt wurde")
 pruefe(W.offene_anzahl() == 0, f"keine offene Anfrage bleibt liegen ({W.offene_anzahl()})")
+
+# ── 3b. Korrektur eines Empfaengers in der Karte ─────────────────────────────
+abschnitt("3b. Korrektur in der Karte (wirkung.AENDERBAR)")
+
+# Positivkontrolle ZUERST: ohne sie sind die folgenden Pruefungen trivial wahr
+# (ein Aufruf, der gar nicht freigegeben wird, aendert selbstverstaendlich auch
+# nichts).
+#
+# ⚠ SIE IST ABER KEIN EXIT-2-GRUND – bezahlte Lehre aus dem ersten Lauf dieses
+# Abschnitts: die erste Fassung brach mit `SystemExit(2)` ab, wenn der Aufruf
+# nicht freigegeben wurde. Genau diese Bedingung stellt aber die Gegenprobe
+# "Kanal wird nie gelesen" her; sie meldete deshalb "konnte nicht laufen"
+# STATT eines Bisses, und ein abgebrochener Lauf ist von einem bestandenen
+# nicht zu unterscheiden. Die Frage, die das verhindert, ist immer dieselbe:
+# WELCHE Sabotagen treffen diesen Riegel? Eine erwartbare Produktaenderung
+# gehoert als FAIL mit Zahlen gemeldet; Exit 2 bleibt dem Fall, in dem der
+# MESSAUFBAU nicht laufen kann – hier: die Weissliste gibt es gar nicht.
+if not hasattr(W, "AENDERBAR") or not hasattr(W, "aenderbare_felder"):
+    print("ABBRUCH: wirkung.AENDERBAR / aenderbare_felder fehlen – dieser "
+          "Abschnitt kann nichts messen")
+    raise SystemExit(2)
+r, a, e, ws = E["korr_ok"]
+_frei = r is None
+pruefe(_frei, "Positivkontrolle: der korrigierte Aufruf wird freigegeben",
+       str(r)[:120])
+# Die folgenden Pruefungen werden NICHT uebersprungen, wenn die Kontrolle
+# faellt – eine uebersprungene Pruefung sieht wie eine bestandene aus. Sie
+# melden stattdessen mit dem Grund, dass sie nicht deutbar sind.
+_grund = "" if _frei else " [nicht deutbar: Aufruf nicht freigegeben]"
+pruefe(_frei and e.get("an") == "max.mustermann@beispiel.de",
+       "die getippte Adresse steht in dem Satz, der AUSGEFUEHRT wird",
+       str(e) + _grund)
+pruefe(a.get("an") == "Max Mustermann",
+       "der Vorschlag des Modells bleibt unveraendert (die Karte zeigt ihn)", str(a))
+anf = next((m for m in ws.nachrichten if m.get("type") == "bestaetigung_anfrage"), {})
+pruefe(anf.get("aenderbar") == ["an"],
+       "die Anfrage nennt genau die aenderbaren Felder dieses Aufrufs",
+       str(anf.get("aenderbar")))
+# ⚠ Dass der SERVER die Herkunft mitschickt, war ungemessen (die Gegenprobe
+# "Herkunft wird nicht mitgeschickt" blieb stumm): Abschnitt 3e prueft die
+# FUNKTION, der UI-Waechter speist das Feld von Hand ein. Beides sagt nichts
+# ueber die gesendete Nachricht.
+pruefe("herkunft" in anf,
+       "die Anfrage traegt die Herkunft der aenderbaren Felder", str(sorted(anf)))
+pruefe(isinstance(anf.get("herkunft"), dict) and "an" in (anf.get("herkunft") or {}),
+       "und zwar fuer das Empfaengerfeld", str(anf.get("herkunft")))
+
+r, e2 = E["korr_fremdes_feld"]
+pruefe(r is None and e2.get("betreff") == "Echt",
+       "ein Feld ausserhalb der Weissliste wird VERWORFEN", str(e2))
+pruefe(e2.get("an") == "x@beispiel.de", "und der Empfaenger bleibt unberuehrt")
+
+r, e3 = E["korr_fremdes_werkzeug"]
+pruefe(e3.get("mail_id") == "1",
+       "ein Werkzeug ohne aenderbare Felder nimmt keine Korrektur an", str(e3))
+
+r, e4 = E["korr_abgelehnt"]
+pruefe(_txt(r).startswith("ABGELEHNT") and e4.get("an") == "alt@beispiel.de",
+       "bei 'Ablehnen' wird NICHTS uebernommen", str(e4))
+
+r, e5 = E["korr_umbruch"]
+pruefe("\n" not in e5.get("an", "") and "\r" not in e5.get("an", ""),
+       "ein Zeilenumbruch im getippten Wert wird entschaerft", repr(e5.get("an")))
+
+# Die Weissliste selbst: `email_antworten` hat KEIN Empfaengerfeld, darf also
+# keines anbieten – eine Zusage ohne Wirkung waere schlimmer als keine.
+pruefe("email_antworten" not in W.AENDERBAR,
+       "email_antworten bietet kein Empfaengerfeld an (es hat keines)")
+pruefe(W.aenderbare_felder("email_senden", {"an": "x", "betreff": "b"}) == ["an"],
+       "nur Felder, die der Aufruf WIRKLICH hat, werden angeboten",
+       str(W.aenderbare_felder("email_senden", {"an": "x", "betreff": "b"})))
+pruefe(W.aenderbare_felder("shell_execute", {"command": "ls"}) == [],
+       "ein Werkzeug ausserhalb der Weissliste bietet nichts an")
+
+# ── 3d. Eine abgelehnte Aktion kommt nicht wieder ───────────────────────────
+abschnitt("3d. Riegel: kein zweiter Anlauf nach einer Ablehnung")
+r1, r2, r3, ws_b, ws_c = E["riegel"]
+# Positivkontrolle: der ERSTE Anlauf wurde ueberhaupt abgelehnt.
+pruefe(_txt(r1).startswith("ABGELEHNT"),
+       "Positivkontrolle: der erste Anlauf wird abgelehnt", str(r1)[:80])
+pruefe(_txt(r2).startswith("NICHT AUSGEFÜHRT") and "schon vorgelegt" in _txt(r2),
+       "der zweite Anlauf wird OHNE Karte abgewiesen", str(r2)[:110])
+_karten_b = [m for m in ws_b.nachrichten if m.get("type") == "bestaetigung_anfrage"]
+pruefe(_karten_b == [],
+       "und es entsteht GAR KEINE zweite Karte (kein Karten-Spam, kein "
+       "versehentlicher Klick)", str(len(_karten_b)))
+pruefe("ausgeschlossen" in _txt(r2) and "nächste Anweisung" in _txt(r2),
+       "die Antwort nennt den naechsten Schritt (Benutzer hat das Wort)",
+       str(r2)[:140])
+pruefe("anderem Empfänger" in _txt(r2),
+       "sie schliesst ausdruecklich auch den Versuch mit anderen Argumenten aus",
+       str(r2)[:140])
+# Der Riegel gilt JE WERKZEUG: ein anderes Werkzeug darf weiter fragen.
+_karten_c = [m for m in ws_c.nachrichten if m.get("type") == "bestaetigung_anfrage"]
+pruefe(r3 is None and len(_karten_c) == 1,
+       "ein ANDERES Werkzeug wird weiterhin vorgelegt (der Riegel sperrt nicht "
+       "den ganzen Lauf)", f"r3={str(r3)[:40]} karten={len(_karten_c)}")
+
+rf1, rf2, ws_f2 = E["riegel_frist"]
+pruefe(_txt(rf1).startswith("NICHT AUSGEFÜHRT") and "keine Bestätigung" in _txt(rf1),
+       "Positivkontrolle: der erste Anlauf laeuft in die Frist", str(rf1)[:80])
+pruefe(_txt(rf2).startswith("NICHT AUSGEFÜHRT") and "schon vorgelegt" in _txt(rf2),
+       "nach einer FRIST wird der zweite Anlauf ebenfalls abgewiesen", str(rf2)[:110])
+pruefe([m for m in ws_f2.nachrichten
+        if m.get("type") == "bestaetigung_anfrage"] == [],
+       "und auch dann entsteht keine zweite Karte")
+
+r_d1, r_d2, ws_e = E["ohne_klammer"]
+pruefe(_txt(r_d1).startswith("ABGELEHNT") and r_d2 is None,
+       "ohne Lauf-Klammer greift der Riegel NICHT (headless entscheidet die "
+       "Auftrags-Freigabe)", str(r_d2)[:60])
+pruefe(W.verweigert_grund("email_senden") == "",
+       "nach dem Lauf ist die Marke abgeraeumt (kein Nachwirken in den naechsten "
+       "Auftrag)", W.verweigert_grund("email_senden"))
+
+# ── 3e. Herkunft der Adresse ────────────────────────────────────────────────
+abschnitt("3e. Herkunft: aufgeloest gegen uebernommen")
+from backend import adressbuch as _AB                                # noqa: E402
+# Ohne Klammer: UNBEKANNT – und das ist nicht "uebernommen" (eine Anzeige darf
+# keinen Zustand behaupten, den sie nicht kennt).
+pruefe(_AB.ist_aufgeloest("x@beispiel.de") is None,
+       "ohne Lauf-Klammer ist die Herkunft UNBEKANNT (nicht 'uebernommen')")
+pruefe(W.herkunft_felder("email_senden", {"an": "x@beispiel.de"})
+       .get("an") == "unbekannt",
+       "und die Karte bekommt genau das gesagt")
+_t = _AB.lauf_oeffnen()
+try:
+    pruefe(_AB.ist_aufgeloest("x@beispiel.de") is False,
+           "im Lauf ohne Suche: NICHT aufgeloest")
+    _AB.merken(["x@beispiel.de"])
+    pruefe(_AB.ist_aufgeloest("x@beispiel.de") is True,
+           "nach der Suche: aufgeloest")
+    pruefe(_AB.ist_aufgeloest("X@Beispiel.DE") is True,
+           "ohne Ruecksicht auf Gross/Klein")
+    # ⚠ Mehrere Empfaenger: EINE uebernommene Adresse macht die Zeile ungeprueft
+    pruefe(_AB.ist_aufgeloest("x@beispiel.de, fremd@beispiel.de") is False,
+           "eine einzige uebernommene Adresse macht die ganze Zeile ungeprueft")
+    h = W.herkunft_felder("email_senden", {"an": "x@beispiel.de",
+                                           "cc": "fremd@beispiel.de"})
+    pruefe(h.get("an") == "aufgeloest" and h.get("cc") == "uebernommen",
+           "die Karte bekommt die Herkunft JE FELD", str(h))
+    pruefe("betreff" not in h,
+           "fuer nicht aenderbare Felder wird keine Herkunft behauptet", str(h))
+finally:
+    _AB.lauf_schliessen(_t)
+
+# ── 3c. Die beiden Argumentsaetze duerfen nicht verwechselt werden ───────────
+abschnitt("3c. Anzeige-Satz gegen Ausfuehrungs-Satz (agent.py)")
+#
+# Die teuerste denkbare Verwechslung an dieser Stelle: `freigabe` bekommt den
+# Satz, der ANGEZEIGT wurde, statt den, der AUSGEFUEHRT wird. Im Dispatch sind
+# das zwei Objekte (`exec_args = dict(args)` entsteht VOR der Freigabe) – eine
+# Korrektur ginge dann in die Anzeige und die Mail an die alte Adresse. Das ist
+# am Ergebnis NICHT zu sehen, deshalb wird es hier am Syntaxbaum gemessen.
+import ast as _ast2                                                  # noqa: E402
+_AGQ = (ROOT / "backend" / "agent.py").read_text(encoding="utf-8")
+_agb = _ast2.parse(_AGQ)
+_frg = [n for n in _ast2.walk(_agb)
+        if isinstance(n, _ast2.Call) and isinstance(n.func, _ast2.Attribute)
+        and n.func.attr == "freigabe"]
+pruefe(len(_frg) == 1, f"Positivkontrolle: genau ein freigabe()-Aufruf im Dispatch "
+                       f"({len(_frg)})")
+if len(_frg) == 1:
+    _a = [_ast2.unparse(x) for x in _frg[0].args]
+    pruefe(len(_a) == 4 and _a[3] == "exec_args",
+           "freigabe() bekommt den Satz, der AUSGEFUEHRT wird (exec_args)", str(_a))
+    # Und derselbe Name muss unten wirklich entpackt werden – ein `exec_args`,
+    # das nicht in `tool.execute(**…)` landet, waere ein zweiter toter Satz.
+    _exe = [n for n in _ast2.walk(_agb)
+            if isinstance(n, _ast2.Call) and isinstance(n.func, _ast2.Attribute)
+            and n.func.attr == "execute"
+            and any(isinstance(k, _ast2.keyword) and k.arg is None for k in n.keywords)]
+    _namen = {_ast2.unparse(k.value) for n in _exe for k in n.keywords if k.arg is None}
+    pruefe("exec_args" in _namen,
+           "und genau dieser Satz wird an das Werkzeug entpackt", str(_namen))
+# ⚠ Die Lauf-Klammern: ohne sie ist der Riegel wirkungslos und die Herkunft
+# dauerhaft "unbekannt". Das war ungemessen (die Gegenprobe "Lauf-Klammer
+# fehlt" blieb stumm), weil der Waechter seine Klammer SELBST oeffnet.
+# Geprueft wird deshalb am Syntaxbaum, dass `run_task` sie oeffnet UND
+# schliesst – eine geoeffnete Klammer ohne Reset haengt am Kontext des
+# naechsten Laufs.
+for _mod, _auf, _zu in (("_wirkung", "lauf_oeffnen", "lauf_schliessen"),
+                        ("_adrb", "lauf_oeffnen", "lauf_schliessen")):
+    _rufe = [n for n in _ast2.walk(_agb)
+             if isinstance(n, _ast2.Call) and isinstance(n.func, _ast2.Attribute)
+             and n.func.attr == _auf
+             and isinstance(n.func.value, _ast2.Name) and n.func.value.id == _mod]
+    pruefe(len(_rufe) == 1,
+           f"run_task oeffnet die Lauf-Klammer {_mod}.{_auf}() genau einmal",
+           str(len(_rufe)))
+    _resets = [n for n in _ast2.walk(_agb)
+               if isinstance(n, _ast2.Call) and isinstance(n.func, _ast2.Attribute)
+               and n.func.attr == _zu
+               and isinstance(n.func.value, _ast2.Name) and n.func.value.id == _mod]
+    pruefe(len(_resets) == 1,
+           f"und schliesst sie wieder ({_mod}.{_zu}())", str(len(_resets)))
+
+# Der Audit protokolliert, was WIRKLICH lief – nicht den Vorschlag des Modells.
+_aud = [n for n in _ast2.walk(_agb)
+        if isinstance(n, _ast2.Call) and isinstance(n.func, _ast2.Name)
+        and n.func.id == "_audit"]
+pruefe(len(_aud) == 1, f"Positivkontrolle: ein Audit-Aufruf im Dispatch ({len(_aud)})")
+if len(_aud) == 1:
+    _kw = next((k.value for k in _aud[0].keywords if k.arg == "args"), None)
+    pruefe(isinstance(_kw, _ast2.Name) and _kw.id == "exec_args",
+           "der Audit protokolliert exec_args (das Ausgefuehrte), nicht args",
+           _ast2.unparse(_kw) if _kw is not None else "fehlt")
 
 # ── 4. Echte Laeufe ──────────────────────────────────────────────────────────
 abschnitt("4. Echte Laeufe mit Attrappen-Provider")
@@ -633,7 +935,26 @@ for n in ast.walk(hwm or MB):
 pruefe(zweig is not None, "Zweig fuer 'bestaetigung_antwort' vorhanden")
 ant = [c for c in ast.walk(ast.Module(body=(zweig.body if zweig else []), type_ignores=[]))
        if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute) and c.func.attr == "antwort"]
-pruefe(len(ant) == 1 and len(ant[0].args) == 4, "der Zweig ruft wirkung.antwort(id, benutzer, ws, erlaubt)")
+pruefe(len(ant) == 1, "der Zweig ruft wirkung.antwort() genau einmal",
+       f"{len(ant)} Aufrufe")
+# ⚠ HIER STAND `len(args) == 4` – eine ZAHL, also eine Zeitbombe: mit den
+# Korrekturen aus der Karte sind es fuenf, und die Zahl haette einen Fehler
+# gemeldet, den es nicht gibt. Gemessen wird jetzt die EIGENSCHAFT, und die
+# wichtigste davon kann eine Argumentzahl ueberhaupt nicht sehen:
+_ruf = ant[0] if ant else None
+_quelltext = [ast.unparse(x) for x in (_ruf.args if _ruf else [])]
+# (a) Der BENUTZERNAME kommt aus der Verbindung, NICHT aus der Nachricht.
+#     Stuende dort `msg.get("user")`, koennte jeder Angemeldete eine fremde
+#     Aktion freigeben, indem er den Namen des Besitzers behauptet – die
+#     Pruefung in wirkung.antwort() waere dann gegen sich selbst gerichtet.
+pruefe(len(_quelltext) >= 2 and "_ws_usernames" in _quelltext[1]
+       and "msg" not in _quelltext[1],
+       "der Benutzername kommt aus der Verbindung, nicht aus der Nachricht",
+       _quelltext[1] if len(_quelltext) >= 2 else "fehlt")
+# (b) Die Korrekturen werden ueberhaupt durchgereicht – ohne das waere das
+#     Empfaengerfeld in der Karte eine Anzeige ohne Wirkung.
+pruefe(any("aenderungen" in s for s in _quelltext),
+       "die Korrekturen aus der Karte werden durchgereicht", str(_quelltext))
 if len(ant) == 1 and len(ant[0].args) == 4:
     a_ben, a_ws, a_erl = ant[0].args[1], ant[0].args[2], ant[0].args[3]
     pruefe("_ws_usernames" in ast.unparse(a_ben) and "id(ws)" in ast.unparse(a_ben),

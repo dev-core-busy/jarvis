@@ -163,6 +163,121 @@ def einstufen(name: str, args: dict, *, tool: Any = None,
     return regel if regel in KLASSEN else AUSSEN
 
 
+# ── Welche Felder der Mensch in der Karte korrigieren darf ──────────────────
+#
+# ⚠ DIESE LISTE IST DIE GANZE SCHRANKE. Was hier nicht steht, laesst sich aus
+# der Karte nicht aendern – ein Feldname, den die Oberflaeche schickt und der
+# hier fehlt, wird VERWORFEN und im Journal benannt (nicht stillschweigend
+# uebernommen).
+#
+# WARUM SO ENG: die Karte zeigt, was das MODELL vorgeschlagen hat, und die
+# Zusage von BSI H9 ist "was du siehst, laeuft". Ein frei beschreibbarer
+# Argumentsatz wuerde daraus "was du siehst, ist ein Vorschlag, und was
+# laeuft, hat die Oberflaeche zuletzt geschickt". Zugelassen sind deshalb nur
+# die EMPFAENGER-Felder der Mail-Werkzeuge: dort ist der Fall belegt, dass das
+# Modell einen Namen statt einer Adresse einsetzt, und der Mensch ist genau
+# die Instanz, die weiss, wer gemeint ist.
+#
+# NICHT zugelassen und mit Grund:
+#   - `betreff`/`text`: der Mensch soll den Inhalt nicht in der Karte
+#     umschreiben. Wer das will, laesst die Nachricht neu formulieren – sonst
+#     steht im Verlauf ein Text, den niemand erzeugt hat.
+#   - `email_antworten`: dort gibt es kein Empfaengerfeld, der Empfaenger ist
+#     der Absender des Originals. Ein Feld anzubieten, das der Aufruf nicht
+#     hat, waere eine Zusage ohne Wirkung.
+#   - `email_loeschen`/`email_verschieben`: eine Kennung oder ein Ordner ist
+#     keine Angabe, die ein Mensch sinnvoll frei tippt.
+AENDERBAR: dict[str, tuple] = {
+    "email_senden": ("an", "cc"),
+    "email_entwurf": ("an", "cc"),
+    "email_weiterleiten": ("an",),
+}
+
+# Obergrenze fuer einen uebernommenen Wert. Eine Empfaengerliste wird lang
+# (mehrere Adressen mit Komma), ein Fliesstext hat hier nichts zu suchen.
+AENDERBAR_MAX = 2000
+
+
+def aenderbare_felder(name: str, args: dict) -> list:
+    """Welche Felder DIESES Aufrufs die Karte zum Aendern anbieten darf.
+
+    Nur Felder, die der Aufruf auch HAT – ein angebotenes Feld, das das Modell
+    nicht gesetzt hat, waere ein leeres Eingabefeld ohne Bezug zum Aufruf
+    (``cc`` ist bei den meisten Aufrufen nicht dabei).
+    """
+    erlaubt = AENDERBAR.get(str(name or ""), ())
+    return [f for f in erlaubt if f in (args or {})]
+
+
+def herkunft_felder(name: str, args: dict) -> dict:
+    """Woher kommt der Wert der aenderbaren Felder? ``{feld: "aufgeloest" |
+    "uebernommen" | "unbekannt"}``.
+
+    Fuer die Karte: eine ueber das Adressbuch aufgeloeste Adresse und eine aus
+    dem Gespraech uebernommene sehen am Feld GLEICH aus (beide mit "@"). Der
+    Benutzer soll den Unterschied sehen, bevor er klickt – eine uebernommene
+    Adresse ist der Fall, der am 2026-10-23 an den falschen Empfaenger ging.
+
+    ``unbekannt`` ist eine eigene Stufe und NICHT "uebernommen": ohne offene
+    Lauf-Klammer weiss hier niemand etwas, und eine Anzeige darf keinen
+    Zustand behaupten, den sie nicht kennt (Register).
+    """
+    raus = {}
+    try:
+        from backend import adressbuch
+    except Exception:  # noqa: BLE001
+        return raus
+    for feld in aenderbare_felder(name, args):
+        wert = (args or {}).get(feld)
+        if not str(wert or "").strip():
+            continue
+        try:
+            ist = adressbuch.ist_aufgeloest(str(wert))
+        except Exception:  # noqa: BLE001
+            ist = None
+        raus[feld] = ("unbekannt" if ist is None
+                      else ("aufgeloest" if ist else "uebernommen"))
+    return raus
+
+
+def uebernehmen(name: str, ziel: dict, aenderungen) -> list:
+    """Korrekturen aus der Karte in den Argumentsatz schreiben, der AUSGEFUEHRT
+    wird. Rueckgabe: ``[(feld, alt, neu)]`` – die wirklich uebernommenen.
+
+    ⚠ ``ziel`` MUSS der Satz sein, mit dem das Werkzeug gerufen wird, nicht
+    der, der in der Karte stand. Im Dispatch sind das ZWEI Objekte
+    (``exec_args = dict(args)`` entsteht VOR der Freigabe); wer hier ``args``
+    beschreibt, korrigiert die Anzeige und sendet an die alte Adresse – eine
+    Luege, die niemand sieht. Deshalb hat ``freigabe`` dafuer einen eigenen,
+    PFLICHT-Parameter: ein vergessenes Argument ist ein TypeError und kein
+    stiller Ausfall.
+    """
+    if not isinstance(aenderungen, dict) or not aenderungen:
+        return []
+    erlaubt = set(AENDERBAR.get(str(name or ""), ()))
+    getan = []
+    for feld, wert in aenderungen.items():
+        f = str(feld or "")
+        if f not in erlaubt:
+            print(f"[H9] Korrektur an '{name}' fuer Feld '{f}' VERWORFEN: "
+                  "nicht aenderbar", flush=True)
+            continue
+        if f not in (ziel or {}):
+            print(f"[H9] Korrektur an '{name}' fuer Feld '{f}' VERWORFEN: "
+                  "im Aufruf nicht vorhanden", flush=True)
+            continue
+        # Zeilenumbrueche heraus: ein Empfaenger ist eine Zeile. Das ist
+        # Hygiene an der Kopfzeile, keine Rechtegrenze – wer hier tippt, darf
+        # ohnehin an beliebige Adressen senden.
+        neu = " ".join(str("" if wert is None else wert).split())[:AENDERBAR_MAX]
+        alt = str(ziel.get(f) or "")
+        if neu == alt:
+            continue
+        ziel[f] = neu
+        getan.append((f, alt, neu))
+    return getan
+
+
 def anzeige_argumente(args: dict) -> list:
     """Argumente fuer den Dialog: ``[[name, wert], …]`` in Aufrufreihenfolge.
 
@@ -201,6 +316,83 @@ class Kanal:
 
 kanal_cv: contextvars.ContextVar = contextvars.ContextVar(
     "jarvis_bestaetigung_kanal", default=None)
+
+
+# ── Eine abgelehnte Aktion kommt nicht wieder ───────────────────────────────
+#
+# ⚠ BEZAHLTER VORFALL (DEV, 2026-10-23): nach "Ablehnen" rief das Modell
+# `email_senden` im SELBEN Lauf ein zweites Mal – eine zweite Karte fuer
+# genau die Aktion, die der Mensch gerade verweigert hatte. Der Hinweistext
+# sagt ausdruecklich "Versuche sie NICHT auf anderem Weg"; ein Prompt ist
+# aber eine Bitte, und hier war der Schaden sichtbar (Karten-Spam, und im
+# zweiten Anlauf haette ein unachtsamer Klick die Aktion doch freigegeben).
+# Deshalb ein RIEGEL statt einer Bitte.
+#
+# Geblockt wird JE WERKZEUG, nicht je Argumentsatz: wer "sende diese Mail"
+# ablehnt, hat "sende Mail" abgelehnt – ein Modell, das Betreff oder Text
+# minimal aendert, bekaeme sonst eine neue Karte und haette den Riegel
+# umgangen. Der naechste Auftrag des Benutzers ist ein NEUER Lauf und damit
+# wieder frei.
+#
+# Die Marke ist ein SET, das der Lauf anlegt; `freigabe` fuellt es. Bewusst
+# den Inhalt veraendern und nicht die Variable neu setzen – eine Zuweisung in
+# einer inneren Aufgabe waere fuer den Aufrufer unsichtbar (Register).
+verweigert_cv: contextvars.ContextVar = contextvars.ContextVar(
+    "jarvis_bestaetigung_verweigert", default=None)
+
+
+def lauf_oeffnen():
+    """Marke fuer "in diesem Lauf verweigerte Werkzeuge" anlegen.
+
+    Rueckgabe ist das Token fuer ``lauf_schliessen``. Ohne offenen Lauf
+    greift der Riegel NICHT – das ist Absicht: ein Aufrufer, der keine
+    Klammer setzt (headless, Agent-API), hat auch keine Karte, und dort
+    entscheidet die Freigabe des Auftrags.
+    """
+    return verweigert_cv.set(set())
+
+
+def lauf_schliessen(token) -> None:
+    if token is None:
+        return
+    try:
+        verweigert_cv.reset(token)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _verweigert_merken(name: str, grund: str) -> None:
+    menge = verweigert_cv.get()
+    if isinstance(menge, set):
+        menge.add((str(name or ""), str(grund or "")))
+
+
+def verweigert_grund(name: str) -> str:
+    """Wurde ``name`` in diesem Lauf schon verweigert? Gibt den Grund oder ""."""
+    menge = verweigert_cv.get()
+    if not isinstance(menge, set):
+        return ""
+    for wz, grund in menge:
+        if wz == str(name or ""):
+            return grund
+    return ""
+
+
+def hinweis_schon_verweigert(name: str, grund: str) -> str:
+    """Antwort auf einen zweiten Anlauf – sie muss den NAECHSTEN SCHRITT nennen.
+
+    Ein blosses "abgelehnt" wuerde das Modell wieder probieren lassen; deshalb
+    steht hier ausdruecklich, dass in diesem Lauf nichts mehr geht und der
+    Benutzer das Wort hat.
+    """
+    was = ("soeben selbst abgelehnt" if grund == "abgelehnt"
+           else "nicht freigegeben (keine Antwort in der Frist)")
+    return (f"NICHT AUSGEFÜHRT: '{name}' wurde in diesem Auftrag schon vorgelegt und "
+            f"vom Benutzer {was}. Es wird KEINE zweite Bestätigung mehr angezeigt – "
+            "ein weiterer Versuch ist in diesem Auftrag ausgeschlossen, auch mit "
+            "anderem Betreff, anderem Text oder anderem Empfänger. Sage dem Benutzer "
+            "kurz, dass nichts geschehen ist, und warte auf seine nächste Anweisung; "
+            "weiche NICHT auf ein anderes Werkzeug, die Shell oder eine Delegation aus.")
 
 
 @dataclass
@@ -369,12 +561,19 @@ async def _senden(ws, nachricht: dict) -> bool:
         return False
 
 
-async def freigabe(name: str, args: dict, klasse: str) -> "str | None":
+async def freigabe(name: str, args: dict, klasse: str, exec_args: dict) -> "str | None":
     """Holt die Bestaetigung ein. ``None`` = ausfuehren, sonst das Ergebnis
     fuer das Modell (warum die Aktion unterblieb).
 
     Ohne Kanal (Lauf ohne Oberflaeche) entscheidet die Freigabe des Auftrags
     (``auftrag_cv``) – siehe Modulkopf.
+
+    ``args`` ist, was ANGEZEIGT wird (der Vorschlag des Modells); ``exec_args``
+    ist der Satz, mit dem das Werkzeug wirklich gerufen wird. Dass das zwei
+    Objekte sind, ist der Grund fuer den vierten Parameter: Korrekturen aus der
+    Karte (``AENDERBAR``) gehen in ``exec_args``. Wer ihn weglaesst, bekommt
+    einen TypeError – ein stiller Ausfall waere hier das teuerste Ergebnis
+    (Anzeige korrigiert, Mail an die alte Adresse).
     """
     kanal = kanal_cv.get()
     if kanal is None:
@@ -391,6 +590,16 @@ async def freigabe(name: str, args: dict, klasse: str) -> "str | None":
               "Client ohne Bestaetigungsdialog", flush=True)
         return hinweis_ohne_dialog(name)
 
+    # ⚠ RIEGEL: in diesem Lauf schon verweigert → gar keine zweite Karte.
+    # Steht VOR dem Anlegen der Anfrage: eine Karte, die niemand sehen soll,
+    # darf auch nicht entstehen (sonst wartet der Lauf bis zur Frist auf einen
+    # Klick, den es nicht geben darf).
+    _schon = verweigert_grund(name)
+    if _schon:
+        print(f"[H9] {name} ({klasse}) fuer '{kanal.username}': ZWEITER ANLAUF "
+              f"abgewiesen (zuvor {_schon}) – keine neue Karte", flush=True)
+        return hinweis_schon_verweigert(name, _schon)
+
     loop = asyncio.get_running_loop()
     kennung = secrets.token_urlsafe(12)
     eintrag = _Offen(zukunft=loop.create_future(), kanal=kanal,
@@ -404,6 +613,8 @@ async def freigabe(name: str, args: dict, klasse: str) -> "str | None":
             "werkzeug": name,
             "klasse": klasse,
             "argumente": anzeige_argumente(args),
+            "aenderbar": aenderbare_felder(name, args),
+            "herkunft": herkunft_felder(name, args),
             "frist_s": FRIST_S,
             "agent_id": kanal.agent_id,
         }):
@@ -412,15 +623,33 @@ async def freigabe(name: str, args: dict, klasse: str) -> "str | None":
         print(f"[H9] Bestaetigung angefragt: {name} ({klasse}) fuer "
               f"'{kanal.username}'", flush=True)
         try:
-            erlaubt = await asyncio.wait_for(eintrag.zukunft, FRIST_S)
+            erlaubt, korrekturen = await asyncio.wait_for(eintrag.zukunft, FRIST_S)
         except asyncio.TimeoutError:
             erledigt_grund = "frist"
             print(f"[H9] {name} fuer '{kanal.username}': keine Antwort in "
                   f"{FRIST_S} s – nicht ausgefuehrt", flush=True)
+            # Auch die Frist ist "keine Freigabe": eine zweite Karte wuerde
+            # derselbe Mensch genauso nicht beantworten.
+            _verweigert_merken(name, "frist")
             return hinweis_frist(name)
         erledigt_grund = "erlaubt" if erlaubt else "abgelehnt"
+        # ⚠ Korrekturen NUR bei Freigabe. Bei "Ablehnen" waere das Schreiben in
+        # exec_args wirkungslos (es wird nicht ausgefuehrt) – aber es stuende
+        # eine Aenderung im Journal, die nie gewirkt hat.
+        geaendert = uebernehmen(name, exec_args, korrekturen) if erlaubt else []
+        # Das Journal nennt den WIRKLICH benutzten Wert. Vorher stand hier nur
+        # "FREIGEGEBEN" – nach einer Korrektur in der Karte haette niemand
+        # nachlesen koennen, an welche Adresse die Mail ging.
+        # Den WIRKLICH benutzten Wert nennen. Vorher stand hier nur
+        # "FREIGEGEBEN" – nach einer Korrektur in der Karte haette niemand
+        # nachlesen koennen, an welche Adresse die Mail ging. Ins Audit kommt
+        # er ebenfalls: der Dispatch protokolliert seit derselben Aenderung
+        # `exec_args` statt `args` (siehe agent.py).
+        nachtrag = "".join(" | %s: '%s' → '%s'" % (f, a, n) for f, a, n in geaendert)
         print(f"[H9] {name} ({klasse}) fuer '{kanal.username}': "
-              f"{'FREIGEGEBEN' if erlaubt else 'ABGELEHNT'}", flush=True)
+              f"{'FREIGEGEBEN' if erlaubt else 'ABGELEHNT'}{nachtrag}", flush=True)
+        if not erlaubt:
+            _verweigert_merken(name, "abgelehnt")
         return None if erlaubt else hinweis_abgelehnt(name)
     finally:
         _offen.pop(kennung, None)
@@ -436,12 +665,18 @@ async def freigabe(name: str, args: dict, klasse: str) -> "str | None":
                 pass
 
 
-def antwort(kennung: str, username: str, ws: Any, erlaubt: bool) -> bool:
+def antwort(kennung: str, username: str, ws: Any, erlaubt: bool,
+            aenderungen=None) -> bool:
     """Klick aus der Oberflaeche zustellen. ``True`` = zugestellt.
 
     Antworten darf nur der Benutzer, dem die Anfrage gilt – ein zweiter
     angemeldeter Benutzer koennte sonst fremde Aktionen freigeben. Ohne
     Benutzernamen (API-Schluessel) nur dieselbe Verbindung.
+
+    ``aenderungen`` sind Korrekturen aus der Karte (``{feld: wert}``). Sie
+    werden hier NICHT angewandt, sondern nur weitergereicht: angewandt wird in
+    ``freigabe``, das den auszufuehrenden Argumentsatz kennt. Geprueft wird
+    gegen ``AENDERBAR`` – ein fremdes Feld wird verworfen und benannt.
     """
     eintrag = _offen.get(str(kennung or ""))
     if eintrag is None or eintrag.zukunft.done():
@@ -454,7 +689,8 @@ def antwort(kennung: str, username: str, ws: Any, erlaubt: bool) -> bool:
             return False
     elif ws is not eintrag.kanal.ws:
         return False
-    eintrag.zukunft.set_result(erlaubt is True)
+    eintrag.zukunft.set_result(
+        (erlaubt is True, aenderungen if isinstance(aenderungen, dict) else {}))
     return True
 
 

@@ -14795,6 +14795,43 @@ async def email_messages(ordner: str = "", limit: int = 15,
     return JSONResponse({"ok": True, "nachrichten": mails})
 
 
+@app.post("/api/email/adressbuch")
+async def email_adressbuch(request: Request,
+                           user: str = Depends(require_email_access)):
+    """Adressbuch-Suche fuer das EIGENE Postfach: Name → E-Mail-Adresse.
+
+    Body ``{q, [limit]}``, Antwort ``{ok, treffer:[{name,adresse,art}], quelle,
+    hinweis}``. Quelle ist ``ews`` (Exchange-Adressbuch des Benutzers) oder
+    ``ad`` (Verzeichnis, nur Personen) – siehe ``backend.adressbuch``.
+
+    Traegt die Freigabe des Bereichs (``require_email_access``, leer = niemand,
+    kein Admin-Bypass) und sucht IMMER im Adressbuch des aufrufenden Benutzers:
+    der Name kommt aus der Sitzung, nicht aus dem Body. Ein Feld dafuer waere
+    der Weg, im Adressbuch eines anderen zu suchen – dieselbe Begruendung wie
+    beim Postfach in den Werkzeugen.
+
+    Eine leere Trefferliste ist ein ERGEBNIS (200), kein Fehler: "niemand
+    dieses Namens" und "konnte nicht nachsehen" (400) fuehren den Benutzer zu
+    verschiedenen naechsten Schritten.
+    """
+    from backend import adressbuch
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    q = str((body or {}).get("q") or "").strip()
+    try:
+        res = await asyncio.to_thread(adressbuch.suchen, user, q,
+                                      (body or {}).get("limit"))
+    except adressbuch.AdressbuchFehler as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "treffer": res.get("treffer") or [],
+                         "quelle": res.get("quelle") or "",
+                         "hinweis": res.get("hinweis") or ""})
+
+
 @app.get("/api/email/rules")
 async def email_rules_list(lang: str = "de",
                            user: str = Depends(require_email_access)):
@@ -27099,8 +27136,12 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         # Das Token ist oben geprueft; wirkung.antwort() prueft zusaetzlich,
         # dass derselbe Benutzer antwortet, dem die Anfrage gilt.
         from backend import wirkung as _wirkung
+        # `aenderungen` sind Korrekturen aus der Karte (nur Empfaenger-Felder,
+        # Weissliste `wirkung.AENDERBAR`) – sie kommen aus dem Klick eines
+        # Menschen, nicht vom Modell: es kann diese Nachricht nicht erzeugen.
         _wirkung.antwort(str(msg.get("id") or ""), _ws_usernames.get(id(ws), ""),
-                         ws, msg.get("erlaubt") is True)
+                         ws, msg.get("erlaubt") is True,
+                         msg.get("aenderungen"))
 
     elif msg_type == "get_agents":
         # Agent-Liste anfordern

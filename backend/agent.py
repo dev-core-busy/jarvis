@@ -2456,6 +2456,24 @@ KRITISCH – Autonomie-Regeln:
             _kanal_token = _wirkung.kanal_cv.set(_wirkung.Kanal(
                 ws=ws, username=self._current_username,
                 kann_bestaetigen=bool(bestaetigung), agent_id=self.agent_id))
+        # ⚠ Klammer fuer "in diesem Lauf verweigert" (BSI H9). Ohne sie greift
+        # der Riegel gegen den zweiten Anlauf NICHT – er haengt an einem Set,
+        # das hier angelegt wird. Je LAUF, nicht je Werkzeugaufruf: nach einem
+        # "Ablehnen" soll dasselbe Werkzeug im selben Auftrag nicht wieder
+        # vorgelegt werden. Ein Rollen-/Unter-Agent ERBT das Set (ContextVar)
+        # – sonst waere die Delegation der Weg um den Riegel herum, genau wie
+        # beim Kanal darueber.
+        _verweigert_token = _wirkung.lauf_oeffnen()
+        # Klammer fuer "in diesem Lauf aufgeloeste Adressen" – Grundlage der
+        # Herkunfts-Anzeige in der Karte. Lazy importiert: `adressbuch` haengt
+        # am E-Mail-Skill, und ein Lauf ohne diesen Skill darf daran nicht
+        # scheitern.
+        _adr_token = None
+        try:
+            from backend import adressbuch as _adrb
+            _adr_token = _adrb.lauf_oeffnen()
+        except Exception:  # noqa: BLE001
+            _adrb = None
         # BSI H8: Kennung, mit der dieser Lauf seine Werkzeugergebnisse rahmt.
         _laufkennung = _rahmen.laufkennung()
         # Auftraggeber-Bindung dieses Laufs (lauf-isoliert, siehe _actor_cv):
@@ -3481,6 +3499,15 @@ KRITISCH – Autonomie-Regeln:
                 except Exception:  # noqa: BLE001
                     pass
             try:
+                _wirkung.lauf_schliessen(_verweigert_token)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                if _adrb is not None:
+                    _adrb.lauf_schliessen(_adr_token)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
                 self.last_task_images = list(_cti_run.get() or [])
                 _cti_run.reset(_img_token_run)
             except Exception:  # noqa: BLE001
@@ -4399,7 +4426,11 @@ KRITISCH – Autonomie-Regeln:
                     sandbox=bool(exec_args.get('_sandbox_user')),
                     fremd=_ist_mcp_tool(tool, name))
                 if _klasse:
-                    _nein = await _wirkung.freigabe(name, args, _klasse)
+                    # ⚠ `exec_args` MUSS mit – es ist der Satz, mit dem das
+                    # Werkzeug unten gerufen wird (`dict(args)`, entstanden VOR
+                    # dieser Zeile). Korrekturen aus der Karte landen dort;
+                    # wer `args` uebergibt, korrigiert nur die Anzeige.
+                    _nein = await _wirkung.freigabe(name, args, _klasse, exec_args)
                     if _nein is not None:
                         result = _nein
                         _ldap_blocked = True
@@ -4530,10 +4561,17 @@ KRITISCH – Autonomie-Regeln:
             # Audit-Log
             try:
                 from backend.audit_log import log_tool as _audit
+                # ⚠ `exec_args`, NICHT `args`: protokolliert gehoert, was
+                # WIRKLICH gelaufen ist. Die beiden gehen auseinander, sobald
+                # ein Mensch in der Bestaetigungskarte einen Empfaenger
+                # korrigiert (BSI H9, `wirkung.AENDERBAR`) – dann stand hier
+                # die Adresse des Modells, waehrend die Mail an die korrigierte
+                # ging. Ebenso bei umgeleiteten Lauf-Pfaden. Die internen
+                # `_`-Argumente filtert `log_tool` selbst heraus.
                 _audit(
                     user=_uname or 'unknown',
                     tool=name,
-                    args=args,
+                    args=exec_args,
                     result_len=len(result) if result else 0,
                     duration_ms=_dur_ms,
                 )

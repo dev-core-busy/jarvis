@@ -900,9 +900,38 @@ namen = {t.name for t in tools}
 manifest = json.loads((ROOT / "skills/email/skill.json").read_text())
 check(namen == set(manifest["tools"]), "Manifest und Code nennen dieselben Werkzeuge",
       str(namen ^ set(manifest["tools"])))
-check(namen == set(mr.MAIL_WERKZEUGE),
-      "mail_rules.MAIL_WERKZEUGE deckt sich mit dem Code",
-      str(namen ^ set(mr.MAIL_WERKZEUGE)))
+# ⚠ HIER STAND `namen == set(mr.MAIL_WERKZEUGE)` – eine Gleichheit, die
+# "bewusst zurueckgehalten" nicht von "vergessen" unterscheiden kann. Mit
+# `email_adresse_suchen` gibt es den ersten Fall wirklich: das Werkzeug liegt
+# absichtlich NICHT im Pflichtbereich `mail`, sondern im eigenen Bereich
+# `adressbuch`, den ein Administrator freischalten muss (Begruendung an
+# BEREICHE). Die Gleichheit haette das als Fehler gemeldet.
+# Geprueft wird deshalb die EIGENSCHAFT, und sie ist staerker als vorher:
+#   a) kein Werkzeug des Codes ist UEBERALL unerreichbar (das faengt das
+#      Vergessen – ein neues Werkzeug in keinem Bereich kann keine Regel nutzen),
+#   b) MAIL_WERKZEUGE nennt nur Werkzeuge, die es gibt (das faengt den
+#      Tippfehler und das Umbenennen),
+#   c) der Pflichtbereich `mail` ist weiterhin die VOLLE Postfach-Arbeit minus
+#      der benannten Ausnahmen – sonst koennte man ihn stillschweigend leeren.
+_AUSSER_MAIL = {"email_adresse_suchen": "adressbuch"}
+_in_bereichen = set()
+for _b, _d in mr.BEREICHE.items():
+    _in_bereichen.update(_d.get("tools") or [])
+check(not (namen - _in_bereichen), "jedes Werkzeug des Codes ist ueber einen "
+      "Bereich erreichbar", str(namen - _in_bereichen))
+check(not (set(mr.MAIL_WERKZEUGE) - namen), "MAIL_WERKZEUGE nennt nur Werkzeuge, "
+      "die es im Code gibt", str(set(mr.MAIL_WERKZEUGE) - namen))
+check(set(mr.MAIL_WERKZEUGE) == namen - set(_AUSSER_MAIL),
+      "der Pflichtbereich 'mail' ist die Postfach-Arbeit ohne die benannten "
+      "Ausnahmen", str(set(mr.MAIL_WERKZEUGE) ^ (namen - set(_AUSSER_MAIL))))
+for _wz, _soll in _AUSSER_MAIL.items():
+    check(_wz in (mr.BEREICHE.get(_soll, {}).get("tools") or []),
+          "%s liegt im Bereich '%s'" % (_wz, _soll))
+    check(_soll not in mr.VORGABE_BEREICHE,
+          "Bereich '%s' ist NICHT Vorgabe – ein Administrator muss ihn "
+          "freischalten" % _soll)
+    check(_wz not in (mr.werkzeuge_fuer(list(mr.VORGABE_BEREICHE)) or set()),
+          "%s ist mit der Vorgabe-Freigabe NICHT nutzbar" % _wz)
 
 verboten = {"postfach", "mailbox", "konto", "benutzer", "user", "account", "adresse",
             "email_address", "primary_smtp_address"}
@@ -1585,6 +1614,108 @@ _i18 = (ROOT / "frontend/js/i18n.js").read_text(encoding="utf-8")
 check("mail.f_from_hint" in _pj, "/email nennt den Hinweis am Absender-Feld")
 check("mail.f_from_hint" in _aj, "das Add-in ebenso")
 check(_i18.count("'mail.f_from_hint':") == 2, "Hinweis in DE UND EN uebersetzt")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+section("12. Der Entwurf ist KEIN Ausweichweg um den Versand")
+# ═══════════════════════════════════════════════════════════════════════════
+# ⚠ BEZAHLTER VORFALL (DEV, 2026-10-23, gemeldet als "wo ist der Button"):
+# Der Hinweis an `email_senden.an` bekam eine harte Vorbedingung ("ein Name
+# ist keine Adresse", "rate NIEMALS"). Daneben bot sich `email_entwurf` in
+# seiner eigenen Beschreibung als "der richtige Weg, wenn Angaben fehlen" an.
+# Auf "versende das bild per mail an <Name>" hat das Modell deshalb die
+# Adresse aufgeloest (email_adresse_suchen lief) und dann einen ENTWURF
+# angelegt. `email_entwurf` ist bewusst NICHT bestaetigungspflichtig – also
+# erschien keine Karte, und fuer den Benutzer war der Knopf verschwunden und
+# die Mail nicht gesendet.
+#
+# Register: "Ein Prompt, der einen AUSWEICHWEG erlaubt, muss dort dieselbe
+# Zusage wiederholen." Geprueft wird deshalb als REGEL, dass die Zusage an
+# BEIDEN Enden steht. Der Pruefgegenstand ist hier TEXT – ein Prompt ist das
+# Produkt, nicht seine Beschreibung.
+_wz = {t.name: t for t in tools}
+_senden_an = ((_wz["email_senden"].parameters_schema().get("properties") or {})
+              .get("an") or {}).get("description", "")
+_entwurf_beschr = _wz["email_entwurf"].description
+
+check(bool(_senden_an), "Positivkontrolle: email_senden.an hat eine Beschreibung")
+check("email_adresse_suchen" in _senden_an,
+      "email_senden.an nennt den Weg zur Aufloesung")
+# Die Vorbedingung darf keine Sackgasse sein: sie muss sagen, dass danach
+# GESENDET wird – sonst ist der Entwurf die naheliegende Alternative.
+check("SENDEN" in _senden_an or "senden" in _senden_an.lower().split("entwurf")[0],
+      "email_senden.an verlangt nach der Aufloesung ausdruecklich das SENDEN",
+      _senden_an[-170:])
+check("Entwurf" in _senden_an and "Ersatz" in _senden_an,
+      "email_senden.an sagt, dass ein Entwurf KEIN Ersatz fuer den Versand ist",
+      _senden_an[-170:])
+# Und das andere Ende: der Entwurf darf sich nicht als Loesung fuer eine
+# fehlende Adresse anbieten.
+check("email_senden" in _entwurf_beschr,
+      "email_entwurf verweist fuer den Versand auf email_senden",
+      _entwurf_beschr[:200])
+check("AUSWEICHWEG" in _entwurf_beschr or "Ausweichweg" in _entwurf_beschr,
+      "email_entwurf benennt sich ausdruecklich NICHT als Ausweichweg",
+      _entwurf_beschr[:200])
+check("richtige Weg, wenn Angaben fehlen" not in _entwurf_beschr,
+      "email_entwurf bietet sich NICHT mehr fuer 'Angaben fehlen' an "
+      "(genau dieser Satz hat den Vorfall ausgeloest)",
+      _entwurf_beschr[:200])
+# Gegenrichtung: der Entwurf bleibt erreichbar, wenn der Benutzer ihn WILL –
+# die Behebung darf das Werkzeug nicht faktisch abschaffen.
+check("Entwurf wollte" in _entwurf_beschr or "ausdruecklich" in _entwurf_beschr,
+      "email_entwurf bleibt fuer den gewollten Entwurf der richtige Weg",
+      _entwurf_beschr[:200])
+
+# ⚠ ZWEITER BEZAHLTER VORFALL AM SELBEN TAG (DEV, gemeldet: "wird an eine
+# vorher verwendete adresse gesendet und nicht wie gefordert eine adresse
+# abgefragt"). Der Hinweis griff nur bei einem Empfaenger OHNE "@" – eine
+# Adresse aus dem Gespraechsverlauf HAT eines, also fiel die Aufloesung aus
+# und das Modell nahm den alten Empfaenger. Die Zusage gehoert deshalb an die
+# HERKUNFT des Empfaengers, nicht an seine Form.
+check("email_adresse_suchen" in _senden_an and "DIESEM Auftrag" in _senden_an,
+      "der Empfaenger darf NUR aus dem aktuellen Auftrag oder aus der "
+      "Adressbuch-Suche kommen", _senden_an[-240:])
+check("Gespraech" in _senden_an or "Verlauf" in _senden_an,
+      "die Uebernahme einer Adresse aus dem Gespraechsverlauf ist ausdruecklich "
+      "verboten", _senden_an[-240:])
+
+# ── Das Werkzeug vermerkt seine Treffer WIRKLICH ────────────────────────────
+# ⚠ Ungemessen gewesen (Gegenprobe "die Suche vermerkt ihre Treffer nicht"
+# blieb stumm): die Herkunfts-Anzeige der Karte haengt daran, dass
+# `email_adresse_suchen` die gefundenen Adressen in die Lauf-Marke schreibt.
+# Geprueft wird FUNKTIONAL – nur die aeussere Suche wird ersetzt, die Marke
+# selbst bleibt echt. Ein Waechter auf das Vorkommen von "merken(" wuerde
+# nicht sehen, ob der Aufruf wirkt.
+import asyncio as _aio                                              # noqa: E402
+from backend import adressbuch as _AB                               # noqa: E402
+
+_wz_suche = _wz.get("email_adresse_suchen")
+check(_wz_suche is not None, "Positivkontrolle: email_adresse_suchen gibt es")
+if _wz_suche is not None:
+    _echt_suchen = _AB.suchen
+    _mu = ma.current_mail_user.set("anna.muster")
+    _marke = _AB.lauf_oeffnen()
+    try:
+        _AB.suchen = lambda benutzer, frage, limit=None: {
+            "treffer": [{"name": "Max Mustermann",
+                         "adresse": "max.mustermann@beispiel.de", "art": "person"}],
+            "quelle": "ews", "hinweis": ""}
+        check(_AB.ist_aufgeloest("max.mustermann@beispiel.de") is False,
+              "Positivkontrolle: vor der Suche gilt die Adresse als NICHT "
+              "aufgeloest")
+        _antwort = _aio.run(_wz_suche.execute(name="Mustermann"))
+        check("max.mustermann@beispiel.de" in _antwort,
+              "die Suche liefert den Treffer an das Modell", _antwort[:90])
+        check(_AB.ist_aufgeloest("max.mustermann@beispiel.de") is True,
+              "und vermerkt ihn in der Lauf-Marke – nur so kann die Karte "
+              "'aufgeloest' von 'uebernommen' unterscheiden")
+        check(_AB.ist_aufgeloest("fremd@beispiel.de") is False,
+              "eine NICHT gefundene Adresse gilt weiterhin als uebernommen")
+    finally:
+        _AB.suchen = _echt_suchen
+        _AB.lauf_schliessen(_marke)
+        ma.current_mail_user.reset(_mu)
 check("nicht ins Prompt" in _i18 or "nicht ins Prompt" in _pj,
       "der Hinweis sagt ausdruecklich 'nicht ins Prompt'")
 

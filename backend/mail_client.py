@@ -845,6 +845,82 @@ class _Ews:
                 "quelle": self._OWA_KONFIG,
                 "leer": not (_txt("signaturetext") or _txt("signaturehtml"))}
 
+    # Exchange-Postfacharten → unsere drei Woerter. Ein Verteiler ist fuer den
+    # Aufrufer eine andere Sache als eine Person (eine Mail dorthin erreicht
+    # viele), deshalb wird die Art mitgegeben und nicht eingeschmolzen.
+    _ARTEN = {"Mailbox": "person", "GroupMailbox": "verteiler",
+              "PublicDL": "verteiler", "PrivateDL": "verteiler",
+              "Contact": "kontakt"}
+
+    def adressen_suchen(self, frage: str, limit: int = 10) -> list[dict]:
+        """Adressbuch-Suche ueber die EWS-Operation ``ResolveNames``.
+
+        Das ist das ECHTE Exchange-Adressbuch: globale Adressliste, Verteiler
+        UND die persoenlichen Kontakte des Postfachs – ohne ``search_scope``
+        gilt die Vorgabe des Servers (Verzeichnis und Kontakte). Gesucht wird
+        mit den Zugangsdaten des Postfach-Inhabers, es sieht also genau das,
+        was dieser Mensch in Outlook auch sieht.
+
+        Rueckgabe ``[{"name", "adresse", "art"}, …]``.
+
+        ``ErrorNameResolutionNoResults`` faengt exchangelib selbst ab (die
+        Dienstklasse fuehrt es in ``ERRORS_TO_CATCH_IN_RESPONSE``), "nichts
+        gefunden" kommt also als leere Liste und nicht als Ausnahme. Wird ein
+        Antwortfehler trotzdem als Objekt durchgereicht, wird er uebersprungen
+        statt in ``str()`` zu landen – sonst stuende eine Fehlermeldung als
+        Name in der Trefferliste.
+        """
+        acc = self._konto()
+        try:
+            # ⚠ OHNE DIESE ZEILE STIRBT DER ERSTE AUFRUF EINER FRISCHEN
+            # VERBINDUNG mit "'NoneType' object has no attribute 'api_version'".
+            # `ResolveNames` liest die Serverfassung DIREKT aus
+            # `protocol.config.version` und umgeht die ermittelnde Eigenschaft –
+            # exchangelib sagt das in seinem eigenen Kommentar: "we can't use
+            # the self.protocol.version property". Ist sie noch nicht bekannt,
+            # ist sie None. Ein Zugriff auf die EIGENSCHAFT holt sie
+            # (Protocol.version -> Version.guess).
+            #
+            # Warum das fast durchgerutscht ist: jede andere Operation (Ordner,
+            # Liste, test) ermittelt die Fassung als Nebenwirkung. Eine Probe,
+            # die erst die Verbindung testet und dann sucht, sieht den Fehler
+            # NIE – im Betrieb baut aber jede Anfrage einen frischen Client,
+            # und die Suche ist dann die ERSTE Operation. Auf DEV genau so
+            # aufgefallen: im Prozess gruen, ueber HTTP Rueckfall aufs
+            # Verzeichnis (Register: ein Messaufbau, der eine Reihenfolge
+            # herstellt, die der echte Ablauf nicht garantiert, misst den
+            # Glueckfall).
+            _ = acc.protocol.version
+            roh = acc.protocol.resolve_names([frage])
+        except Exception as e:  # noqa: BLE001
+            raise _einordnen(e, "ews") from e
+        raus: list[dict] = []
+        gesehen: set[str] = set()
+        for t in roh or []:
+            if isinstance(t, Exception):
+                continue
+            # Ohne `return_full_contact_data` ist jeder Eintrag ein Mailbox,
+            # mit ihm ein Tupel – die erste Form wird benutzt, die zweite
+            # vertragen, damit ein spaeterer Aufrufer nicht hier abstuerzt.
+            if isinstance(t, tuple):
+                t = t[0]
+            adr = str(getattr(t, "email_address", "") or "").strip()
+            # Eintraege mit `routing_type = "EX"` tragen einen X500-Pfad statt
+            # einer Adresse (/o=…/cn=…) – damit kann kein Absender etwas
+            # anfangen. Das @-Mindestmerkmal sortiert sie aus.
+            if "@" not in adr:
+                continue
+            schluessel = adr.lower()
+            if schluessel in gesehen:
+                continue
+            gesehen.add(schluessel)
+            art = self._ARTEN.get(str(getattr(t, "mailbox_type", "") or ""), "unbekannt")
+            raus.append({"name": str(getattr(t, "name", "") or "").strip() or adr,
+                         "adresse": adr, "art": art})
+            if len(raus) >= limit:
+                break
+        return raus
+
     def test(self) -> dict:
         acc = self._konto()
         try:
@@ -1371,6 +1447,20 @@ class _Imap:
             "eine Eigenschaft von Exchange (OWA/Outlook im Web). Lege die Signatur "
             "unter 'Neue Signatur' von Hand an.", "kanal", "imap")
 
+    def adressen_suchen(self, frage: str, limit: int = 10) -> list[dict]:
+        """IMAP hat kein Adressbuch – und sagt das im Klartext.
+
+        Dieselbe Begruendung wie bei ``signatur_lesen``: eine leere Liste
+        zurueckzugeben hiesse "niemand dieses Namens gefunden", und das weiss
+        dieser Kanal gar nicht. Kategorie ``kanal``, damit
+        ``backend.adressbuch`` auf das Verzeichnis (AD) ausweichen kann –
+        genau wie die Kanalwahl des Clients auf IMAP ausweicht.
+        """
+        raise MailFehler(
+            "Ueber IMAP laesst sich kein Adressbuch durchsuchen – das ist eine "
+            "Eigenschaft von Exchange (EWS). Die Adresse muss vollstaendig "
+            "angegeben werden.", "kanal", "imap")
+
     def test(self) -> dict:
         c, name = self._waehlen(self.konto.ordner_eingang, schreibbar=False)
         try:
@@ -1391,7 +1481,7 @@ class _Imap:
 
 _OPERATIONEN = ("test", "ordner_liste", "liste", "lesen", "senden", "antworten",
                 "weiterleiten", "verschieben", "loeschen", "kategorie", "gelesen",
-                "signatur_lesen")
+                "signatur_lesen", "adressen_suchen")
 
 
 class MailClient:
@@ -1506,6 +1596,10 @@ class MailClient:
     def signatur_lesen(self) -> dict:
         """Im Postfach hinterlegte Signatur lesen (nur EWS, siehe ``_Ews``)."""
         return self._ruf("signatur_lesen")
+
+    def adressen_suchen(self, frage: str, limit: int = 10) -> list[dict]:
+        """Adressbuch des Postfachs durchsuchen (nur EWS, siehe ``_Ews``)."""
+        return self._ruf("adressen_suchen", frage, limit=limit)
 
     def verschieben(self, msg_id: str, ziel: str) -> str:
         return self._ruf("verschieben", msg_id, ziel)

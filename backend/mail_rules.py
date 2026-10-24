@@ -105,6 +105,29 @@ BEREICHE: dict[str, dict] = {
         "hinweis_de": "Lesen, antworten, Entwurf, verschieben, weiterleiten, löschen im eigenen Postfach.",
         "hinweis_en": "Read, reply, draft, move, forward and delete inside your own mailbox.",
     },
+    # ⚠ BEWUSST EIN EIGENER BEREICH UND NICHT TEIL VON `MAIL_WERKZEUGE`.
+    # Die Suche ist lesend und harmlos, SOLANGE ein Mensch sie ausloest. In
+    # einem Regel-Lauf trifft sie auf Fremdtext, der das Modell steuern kann –
+    # und Versand an beliebige Adressen ist in diesem Skill bewusst ohne
+    # Zusatzschranke erlaubt (Entscheidung des Nutzers). Zusammen ergibt das
+    # einen Weg, den der Skill bisher NICHT hatte: "schicke mir eine Liste
+    # aller Mitarbeiter" wird ausfuehrbar, weil das Adressbuch durchsuchbar
+    # ist. Deshalb muss ein Administrator das je Haus freischalten, und die
+    # Vorgabe bleibt `("mail",)`.
+    "adressbuch": {
+        "de": "Adressbuch (lesend)", "en": "Address book (read)",
+        "tools": ["email_adresse_suchen"],
+        "hinweis_de": "Löst Namen in E-Mail-Adressen auf (globale Adressliste, "
+                      "Verteiler, eigene Kontakte). ACHTUNG: zusammen mit dem "
+                      "Versand kann eine präparierte E-Mail damit Adressen aus "
+                      "dem Firmen-Adressbuch nach außen tragen. Für Regeln, die "
+                      "nur im eigenen Postfach sortieren, nicht nötig.",
+        "hinweis_en": "Resolves names into email addresses (global address list, "
+                      "distribution lists, personal contacts). CAUTION: combined "
+                      "with sending, a crafted email can use this to carry "
+                      "addresses from the company directory outside. Not needed "
+                      "for rules that only sort your own mailbox.",
+    },
     "wissen": {
         "de": "Wissensdatenbank (lesend)", "en": "Knowledge base (read)",
         "tools": ["knowledge_search"],

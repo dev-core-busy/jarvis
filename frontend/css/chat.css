@@ -1866,3 +1866,111 @@ body.light .chs-hint.is-warn { color: color-mix(in srgb, var(--warning) 62%, #00
 .jv-best-status { margin-top: 8px; font-weight: 600; }
 .jv-best-status:empty { display: none; }
 .jv-best.is-erledigt .jv-best-knoepfe { display: none; }
+
+/* Korrigierbares Feld in der Karte (Empfaenger). Die `dd`-Regel oben setzt
+   eine Monospace-Flaeche mit Innenabstand – fuer einen Kasten mit Eingabefeld
+   und Vorschlagsliste ist das die falsche Grundlage, deshalb hier zurueck. */
+.jv-best-args dd.jv-best-dd-feld {
+    background: transparent;
+    padding: 0;
+    max-height: none;
+    overflow: visible;
+    font-family: inherit;
+    font-size: 14px;
+    white-space: normal;
+}
+.jv-best-herkunft {
+    font-size: 12px;
+    margin-bottom: 4px;
+    padding: 3px 7px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--outline);
+    background: var(--surface-variant);
+    overflow-wrap: anywhere;
+}
+.jv-best-herkunft.is-aufgeloest { color: var(--text-secondary); }
+/* Der Warnfall: KEIN nacktes var(--danger) als Schrift - das haelt im hellen
+   Thema nur 3,70:1. Der Hausweg ist die abgedunkelte Mischung (Register). */
+.jv-best-herkunft.is-uebernommen {
+    color: color-mix(in srgb, var(--danger) 78%, #000);
+    border-color: var(--danger);
+    font-weight: 600;
+}
+body.dark .jv-best-herkunft.is-uebernommen { color: var(--danger); }
+.jv-best-vorschlag-war {
+    color: var(--text-secondary);
+    font-size: 12px;
+    margin-bottom: 4px;
+    overflow-wrap: anywhere;
+}
+.jv-best-feldzeile { display: flex; gap: 6px; align-items: stretch; }
+.jv-best-feld {
+    /* `flex: 1 1 auto` mit `min-width: 0`: ohne das waechst ein Eingabefeld in
+       einer Flex-Zeile ueber den Rand hinaus statt sich zu fuegen. */
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 6px 8px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--outline);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 13px;
+}
+.jv-best-feld:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.jv-best-ab {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--outline);
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+.jv-best-ab:hover { background: var(--surface-variant); }
+.jv-best-ab svg { width: 16px; height: 16px; }
+.jv-best-vorschlaege { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+.jv-best-vorschlaege:empty { display: none; }
+.jv-best-vorschlag {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 8px;
+    align-items: baseline;
+    text-align: left;
+    padding: 5px 8px;
+    border-radius: var(--radius-sm);
+    /* Deckende Flaeche: der Vorschlag liegt ueber Inhalt (Register). */
+    background: var(--surface-variant);
+    border: 1px solid var(--outline);
+    color: var(--text-primary);
+    font-size: 13px;
+    cursor: pointer;
+}
+.jv-best-vorschlag:hover { border-color: var(--accent); }
+.jv-best-v-name { font-weight: 600; }
+.jv-best-v-adr {
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+.jv-best-v-art {
+    color: var(--text-secondary);
+    font-size: 11px;
+    border: 1px solid var(--outline);
+    border-radius: var(--radius-sm);
+    padding: 0 5px;
+}
+.jv-best-feldmeldung { color: var(--text-secondary); font-size: 12px; margin-top: 4px; }
+.jv-best-feldmeldung:empty { display: none; }
+.jv-best-feldfest {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    background: var(--surface-variant);
+    border-radius: var(--radius-sm);
+    padding: 4px 8px;
+    overflow-wrap: anywhere;
+}

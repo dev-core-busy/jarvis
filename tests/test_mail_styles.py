@@ -544,7 +544,54 @@ class _StubClient:
 
 
 mrun.MailClient = _StubClient
-mrun._rechte = lambda owner: (False, False)
+# ⚠ DIE STELLIGKEIT KOMMT AUS DER ECHTEN FUNKTION, NICHT ABGETIPPT.
+# Hier stand `lambda owner: (False, False)`, waehrend `_rechte` seit der
+# VEMAS-Erweiterung DREI Werte liefert (`internet, sap, vemas`). Folge:
+# `antwort_vorschlag` starb mitten im Lauf mit
+# "ValueError: not enough values to unpack (expected 3, got 2)" – Exit 1 OHNE
+# Bilanzzeile, also von "konnte nicht laufen" nicht zu unterscheiden, und
+# JEDE Pruefung dahinter hat seitdem nichts mehr gemessen. Eine gepflegte
+# Attrappe veraltet still; eine ABGELEITETE kann es nicht.
+#
+# Hermetisch: ohne geladenes `backend.main` kehrt `_rechte` sofort mit dem
+# fail-closed-Tupel zurueck (dieser Test importiert main nie) – weder
+# Konfiguration noch Netz werden angefasst.
+# ⚠ DIE STELLIGKEIT KOMMT AUS DEN AUFRUFSTELLEN, NICHT AUS EINEM RUECKGABEWERT.
+# Hier stand `lambda owner: (False, False)`, waehrend `_rechte` drei Werte
+# liefert (`internet, sap, vemas`): `antwort_vorschlag` starb mitten im Lauf
+# mit "ValueError: not enough values to unpack (expected 3, got 2)" – Exit 1
+# OHNE Bilanzzeile, also von "konnte nicht laufen" nicht zu unterscheiden, und
+# 50 Pruefungen dahinter haben seitdem NICHTS gemessen.
+#
+# Der erste Behebungsversuch leitete die Stelligkeit aus `len(_rechte(...))`
+# ab – und war NACHWEISLICH unwirksam: `_rechte` kehrt ohne geladenes
+# `backend.main` ueber einen fail-closed-Zweig zurueck, der sein Tupel SELBST
+# schreibt. Eine Sabotage an der eigentlichen Rueckgabe aenderte die
+# Ableitung nicht. Gemessen gehoert, was WIRKLICH bricht: das ENTPACKEN an
+# den Aufrufstellen.
+_rechte_echt = mrun._rechte
+import ast as _ast                              # noqa: E402
+_mr_quelle = (ROOT / "backend" / "mail_runner.py").read_text(encoding="utf-8")
+_mr_baum = _ast.parse(_mr_quelle)
+_stelligkeiten = set()
+for _n in _ast.walk(_mr_baum):
+    if (isinstance(_n, _ast.Assign) and isinstance(_n.value, _ast.Call)
+            and isinstance(_n.value.func, _ast.Name)
+            and _n.value.func.id == "_rechte"
+            and len(_n.targets) == 1
+            and isinstance(_n.targets[0], _ast.Tuple)):
+        _stelligkeiten.add(len(_n.targets[0].elts))
+if len(_stelligkeiten) != 1:
+    # Entweder gar keine Aufrufstelle gefunden (Messaufbau blind) oder die
+    # Aufrufstellen widersprechen sich (dann ist das Produkt kaputt und keine
+    # Attrappe kann beide bedienen). Beides ist "konnte nicht laufen" MIT
+    # Grund – nicht ein Absturz ohne Bilanzzeile.
+    print("ABBRUCH: die Aufrufstellen von mail_runner._rechte entpacken %s "
+          "Werte – erwartet war genau eine Stelligkeit"
+          % (sorted(_stelligkeiten) or "keine"))
+    sys.exit(2)
+_rechte_stellig = _stelligkeiten.pop()
+mrun._rechte = lambda owner: tuple([False] * _rechte_stellig)
 async def _keine_pruefung(*a, **kw): return None
 mrun._injektion_pruefen = _keine_pruefung
 ma.konto_fuer = lambda user, trotz_aussetzer=False: _types.SimpleNamespace(
@@ -734,6 +781,31 @@ for datei, wo in ((EMHTML, "email.html"), (TP, "taskpane.html")):
 for _t in (I18N, EMHTML, TP):
     check("In Regeln gibt es das" not in _t and "Rules deliberately do not offer" not in _t,
           "kein Text behauptet noch, Regeln haetten die Automatik nicht")
+
+
+# ── _rechte: JEDE Rueckgabe passt zum Entpacken ─────────────────────────────
+# Eine PRODUKTzusage, kein Testdetail: `_rechte` hat einen fail-closed-Zweig
+# (`backend.main` nicht geladen), der sein Tupel SELBST schreibt. Haette der
+# eine andere Stelligkeit als die Aufrufstellen entpacken, stuerzte genau der
+# Sicherheitsweg im Betrieb mit ValueError ab – und zwar nur dann, also
+# selten und unerklaerlich. Dieselbe Fehlerklasse, die diesen Pruefstand
+# monatelang nach 131 Pruefungen hat abbrechen lassen.
+print("\n== _rechte: Rueckgaben und Entpacken passen zusammen ==")
+_fn_rechte = next((n for n in _ast.walk(_mr_baum)
+                   if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef))
+                   and n.name == "_rechte"), None)
+check(_fn_rechte is not None, "Positivkontrolle: _rechte ist im Syntaxbaum zu finden")
+if _fn_rechte is not None:
+    _rueck = [n for n in _ast.walk(_fn_rechte)
+              if isinstance(n, _ast.Return) and isinstance(n.value, _ast.Tuple)]
+    check(len(_rueck) >= 2,
+          "Positivkontrolle: _rechte hat mehrere Tupel-Rueckgaben (fail-closed "
+          "UND Regelweg)", str(len(_rueck)))
+    _stell_rueck = sorted({len(r.value.elts) for r in _rueck})
+    check(_stell_rueck == [_rechte_stellig],
+          "jede Tupel-Rueckgabe von _rechte hat die Stelligkeit des Entpackens "
+          "(%d)" % _rechte_stellig,
+          "Rueckgaben: %s, Entpacken: %d" % (_stell_rueck, _rechte_stellig))
 
 
 # ═══════════════════════════════════════════════════════════════════════════

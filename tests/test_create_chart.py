@@ -18,6 +18,11 @@ import asyncio
 import json
 import os
 import sys
+# ⚠ UEBERSPRUNGEN IST NICHT BESTANDEN (2026-10-25 gemessen: sechs Waechter
+# uebersprangen lokal ohne venv ganze Abschnitte und meldeten Exit 0 – hier
+# 154 von 220 Pruefungen). Was mangels Modul nicht laufen kann, wird vermerkt;
+# ohne echten Befund endet der Lauf dann mit Exit 2 ("konnte nicht laufen").
+_UEBERSPRUNGEN: list = []
 import tempfile
 from pathlib import Path
 
@@ -334,6 +339,7 @@ try:
     pruefe("Daten" in r and "Zweites" in r, "unbekanntes Blatt listet die vorhandenen auf")
 except ImportError:
     print("  … XLSX-Teil uebersprungen (openpyxl fehlt lokal)")
+    _UEBERSPRUNGEN.append("XLSX-Teil (openpyxl fehlt)")
 
 # ─────────────────────────────────────────────────────────────────────────────
 print("\n=== 6. Werkzeug-Beschreibung und Schema ===")
@@ -393,4 +399,7 @@ try:
     shutil.rmtree(tmp, ignore_errors=True)
 except Exception:
     pass
+if not _fail and _UEBERSPRUNGEN:
+    print("UNVOLLSTAENDIG (Exit 2): uebersprungen – " + "; ".join(_UEBERSPRUNGEN))
+    sys.exit(2)
 sys.exit(1 if _fail else 0)

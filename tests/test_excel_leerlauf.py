@@ -103,6 +103,10 @@ check("er verlangt, die Luecke zu benennen",
       "welche Daten dir fehlten" in a_letzte)
 check("er benennt die Folge einer leeren Antwort",
       "leere Antwort" in a_letzte)
+# Code-Review 2026-10-25: bei max_runden=1 stand "Nachfordern ist Pflicht"
+# neben "Nachforderung verfaellt" – ohne Vorrangregel ein Widerspruch.
+check("die letzte Runde hat ausdruecklich VORRANG vor der Nachforder-Pflicht",
+      "VORRANG" in a_letzte and "als offen" in a_letzte)
 # ⚠ DIE STELLUNG IST SEMANTIK: der Hinweis muss VOR der Frage stehen, wie alle
 # Regeln dieses Auftrags (das Register haelt den umgekehrten Fall – eine
 # Stilvorgabe VOR der Regel hob die Ausloesebedingung auf).
@@ -142,6 +146,13 @@ check("er nennt den Deckel mit Zahl", "grenze_runden)" in BLOCK)
 check("er nennt dem Benutzer einen naechsten Schritt",
       "kleineren Bereich" in BLOCK)
 check("ein stummes Modell wird unterschieden", '"modell_stumm"' in BLOCK)
+# Code-Review 2026-10-25: alles abgelehnt ist KEIN stummes Modell – sonst
+# stuende "hat nichts geantwortet" direkt unter der Ablehnungsliste.
+_m_ab = re.search(r"if abgelehnt:\s*\n(?:\s*#[^\n]*\n)*\s*grund = \"alles_abgelehnt\"\s*\n\s*text = ",
+                  BLOCK)
+check("alles abgelehnt: eigener Grund MIT Text", _m_ab is not None)
+check("...und dieser Zweig kommt VOR 'modell_stumm'",
+      _m_ab is not None and _m_ab.start() < BLOCK.find('grund = "modell_stumm"'))
 check("eine Antwort aus nur Markern wird unterschieden", '"nur_marker"' in BLOCK)
 
 print("── 3. Der Grund geht hinaus, das Fenster raet nicht ────────────────")

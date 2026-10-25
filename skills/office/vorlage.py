@@ -50,6 +50,8 @@ CI-Schrift. Deshalb tragen Theme und Textstile die Originalschriften
 """
 
 import re
+import threading
+import uuid
 import zipfile
 from pathlib import Path
 
@@ -271,6 +273,22 @@ def _theme_xml(alt: bytes, farben: dict,
     return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
 
 
+# ⚠ GLEICHZEITIGE ERZEUGUNG (Code-Review 2026-10-25): kurz nach einem Deploy
+# oder nach "Hausvorlage entfernen" erzeugten zwei gleichzeitige Auftraege die
+# Vorlage parallel – mit FESTEN Zwischennamen (".tmp.pptx", ".neu.docx"). Der
+# eine las das ZIP, waehrend der andere es neu schrieb (BadZipFile), oder
+# `replace` fand die Datei nicht mehr. Deshalb: eindeutige, VERSTECKTE
+# Zwischennamen (der Punkt vorn laesst sie aus jeder Liste fallen) und EINE
+# Sperre fuer "erzeugen, falls fehlt" – fuer PowerPoint UND Word.
+ERZEUGE_SPERRE = threading.Lock()
+
+
+def zwischenname(pfad: Path, endung: str) -> Path:
+    """Eindeutiger, versteckter Zwischenname neben ``pfad``."""
+    pfad = Path(pfad)
+    return pfad.with_name(".%s.%s%s" % (pfad.stem.lstrip("."), uuid.uuid4().hex[:12], endung))
+
+
 def _patch_theme(pptx_pfad: Path, farben: dict,
                  schrift_titel: str = SCHRIFT_TITEL,
                  schrift_text: str = SCHRIFT_TEXT) -> None:
@@ -279,7 +297,7 @@ def _patch_theme(pptx_pfad: Path, farben: dict,
     Es wird in eine TEMPORAERE Datei geschrieben und erst danach umbenannt –
     bricht der Vorgang ab, bleibt die alte (funktionierende) Vorlage stehen
     statt eines halben ZIPs."""
-    tmp = pptx_pfad.with_suffix(".tmp.pptx")
+    tmp = zwischenname(pptx_pfad, ".tmp.pptx")
     with zipfile.ZipFile(pptx_pfad) as quelle:
         namen = quelle.namelist()
         ziel_themes = [n for n in namen if re.fullmatch(r"ppt/theme/theme\d+\.xml", n)]
@@ -984,11 +1002,19 @@ def erzeuge(ziel: Path = None) -> Path:
     # aufnehmen (die Medien-Beziehung haengt an der Folie, nicht am Master),
     # und ein Logo auf JEDER Folie ist im Corporate-Design die Ausnahme –
     # ueblich ist gross auf dem Titel, dezent oder gar nicht danach.
-    prs.save(str(ziel))
-    # Theme (Farben + Schrift) erst NACH dem Speichern – python-pptx schreibt
-    # die Datei komplett neu und wuerde einen vorher gepatchten Theme-Part
-    # wieder mit dem Original ueberschreiben.
-    _patch_theme(ziel, farben)
+    # Erst in einen Zwischenstand speichern und patchen, dann ATOMAR an den
+    # Zielnamen – ein gleichzeitiger Leser sieht nie ein halbes ZIP.
+    neu = zwischenname(ziel, ".neu.pptx")
+    try:
+        prs.save(str(neu))
+        # Theme (Farben + Schrift) erst NACH dem Speichern – python-pptx schreibt
+        # die Datei komplett neu und wuerde einen vorher gepatchten Theme-Part
+        # wieder mit dem Original ueberschreiben.
+        _patch_theme(neu, farben)
+        neu.replace(ziel)
+    finally:
+        if neu.exists():
+            neu.unlink()
     return ziel
 
 
@@ -1001,7 +1027,12 @@ def sicherstellen(pfad: Path = None) -> Path:
     ziel = Path(pfad) if pfad else (VORLAGEN_DIR / STANDARD_NAME)
     if ziel.exists() and ziel.stat().st_size > 0:
         return ziel
-    return erzeuge(ziel)
+    with ERZEUGE_SPERRE:
+        # Erneut pruefen: wer auf die Sperre gewartet hat, findet die Datei
+        # meist schon fertig vor und darf sie nicht ein zweites Mal bauen.
+        if ziel.exists() and ziel.stat().st_size > 0:
+            return ziel
+        return erzeuge(ziel)
 
 
 def verfuegbare() -> list:

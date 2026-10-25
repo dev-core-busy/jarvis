@@ -12143,6 +12143,108 @@ _PPTX_TPL_EXTS = {"pptx", "potx"}
 # 25 MB: eine Vorlage enthaelt Masterfolien und ggf. Hintergrundbilder, aber
 # keine Inhalte. Wer mehr hochlaedt, hat eine fertige Praesentation erwischt.
 _PPTX_TPL_MAX_BYTES = 25 * 1024 * 1024
+# Deckel fuer die ENTPACKTE Groesse einer Vorlage (Code-Review 2026-10-25):
+# 25 MB gepackt sagen nichts ueber den Inhalt – ein ZIP mit hoher Kompression
+# wuerde beim Pruefen komplett in den Speicher gelesen.
+_VORLAGE_MAX_ENTPACKT = 200 * 1024 * 1024
+
+
+def _zip_entpackt_pruefen(daten: bytes) -> str:
+    """Leer = in Ordnung, sonst der Grund. Liest NUR das Inhaltsverzeichnis."""
+    import io
+    import zipfile as _zip
+    try:
+        with _zip.ZipFile(io.BytesIO(daten)) as z:
+            summe = sum(max(0, i.file_size) for i in z.infolist())
+    except Exception:  # noqa: BLE001
+        return ""          # kein ZIP: das meldet die eigentliche Pruefung
+    if summe > _VORLAGE_MAX_ENTPACKT:
+        return ("Die Datei ist entpackt zu gross (%d MB, erlaubt %d MB)"
+                % (summe // (1024 * 1024), _VORLAGE_MAX_ENTPACKT // (1024 * 1024)))
+    return ""
+
+
+def _vorlagen_dateiname(dateiname: str, endung: str) -> str:
+    """Sicherer Ablagename fuer eine hochgeladene Vorlage.
+
+    Nur der Basisname zaehlt und der wird entschaerft – der Name kommt aus
+    einem Datei-Dialog und darf keine Pfadanteile ins Verzeichnis tragen.
+
+    ⚠ KEINE PUNKTE IM STAMM, KEIN PUNKT VORN (Code-Review 2026-10-25): aus
+    "Angebot.neu.dotx" wurde "Angebot.neu.docx", aus ".intern.pptx" ein
+    versteckter Name – beides verwerfen die Vorlagenlisten als Zwischenstand.
+    Gemeldet wurde trotzdem Erfolg, und die Datei war weder waehlbar noch
+    ueber die Oberflaeche loeschbar.
+    """
+    rein = re.sub(r"[^A-Za-z0-9_\-. ]+", "", Path(dateiname or "vorlage").name)
+    stamm = rein.rsplit(".", 1)[0] if "." in rein else rein
+    stamm = stamm.strip().replace(" ", "_").replace(".", "_").lstrip("_-")
+    return f"{(stamm or 'vorlage')[:60]}{endung}"
+
+
+# ── Gemeinsame Ablage-Logik fuer PowerPoint- UND Word-Vorlagen ─────────────
+# Die ENDPUNKTE bleiben je Format getrennt (eine falsch adressierte Datei darf
+# nicht unter dem anderen Format landen), aber Liste, Ablegen und Loeschen
+# waren wortgleiche Kopien – und genau so lief der Fehler "Name als
+# Zwischenstand verworfen" in BEIDE Kopien (Code-Review 2026-10-25). Was je
+# Format verschieden ist (Pruefung, Hinweise, Zusatzfelder), bleibt am Endpunkt.
+
+def _vorlagen_eintraege(modul) -> list:
+    """Die hinterlegten Vorlagen eines Moduls fuer die Admin-Liste."""
+    eintraege = []
+    for name in modul.verfuegbare():
+        try:
+            st = (modul.VORLAGEN_DIR / name).stat()
+        except OSError:
+            continue
+        eintraege.append({"name": name, "size": st.st_size,
+                          "mtime": int(st.st_mtime),
+                          "is_default": name == modul.STANDARD_NAME})
+    return eintraege
+
+
+def _vorlage_ablegen(modul, daten: bytes, dateiname: str, endung: str,
+                     as_default) -> tuple:
+    """Legt eine GEPRUEFTE Vorlage ab. Rueckgabe ``(fehler_antwort, name, default)``.
+
+    ``as_default`` = Hausvorlage (``standard.<endung>``). Wer die Datei selbst
+    so nennt, meint ebenfalls die Hausvorlage. Erst danebenschreiben, dann
+    umbenennen: bricht der Vorgang ab, bleibt die alte (funktionierende)
+    Vorlage stehen statt einer halben Datei."""
+    default = str(as_default).lower() in ("1", "true", "yes", "on")
+    if default:
+        ziel_name = modul.STANDARD_NAME
+    else:
+        ziel_name = _vorlagen_dateiname(dateiname, endung)
+        if ziel_name == modul.STANDARD_NAME:
+            default = True
+    try:
+        modul.VORLAGEN_DIR.mkdir(parents=True, exist_ok=True)
+        ziel = modul.VORLAGEN_DIR / ziel_name
+        tmp = ziel.with_suffix(".upload.tmp")
+        tmp.write_bytes(daten)
+        tmp.replace(ziel)
+    except Exception as e:  # noqa: BLE001
+        return (JSONResponse({"success": False, "error": f"Speichern fehlgeschlagen ({e})"},
+                             status_code=500), ziel_name, default)
+    return None, ziel_name, default
+
+
+def _vorlage_loeschen(modul, name: str, endung: str):
+    """Entfernt eine Vorlage. Nur der Basisname zaehlt (kein Pfad); eine
+    unbekannte Vorlage ist 404 – ob sie existiert, IST die Antwort."""
+    sauber = Path(str(name or "")).name
+    if not sauber.lower().endswith(endung):
+        return JSONResponse({"success": False, "error": "Kein Vorlagenname"}, status_code=400)
+    ziel = modul.VORLAGEN_DIR / sauber
+    if not ziel.exists():
+        return JSONResponse({"success": False, "error": "Vorlage nicht gefunden"}, status_code=404)
+    try:
+        ziel.unlink()
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"success": False, "error": f"Loeschen fehlgeschlagen ({e})"},
+                            status_code=500)
+    return JSONResponse({"success": True, "removed": sauber})
 
 
 def _pptx_vorlagen_modul():
@@ -12179,6 +12281,9 @@ def _pptx_tpl_pruefen(daten: bytes, name: str) -> tuple[bool, str, dict]:
     if len(daten) > _PPTX_TPL_MAX_BYTES:
         return False, (f"Datei ist zu gross ({len(daten) // (1024 * 1024)} MB, "
                        f"erlaubt {_PPTX_TPL_MAX_BYTES // (1024 * 1024)} MB)"), {}
+    grund = _zip_entpackt_pruefen(daten)
+    if grund:
+        return False, grund, {}
     try:
         with _zip.ZipFile(io.BytesIO(daten)) as z:
             namen = set(z.namelist())
@@ -12221,20 +12326,8 @@ async def list_branding_pptx_templates(user: str = Depends(require_local_auth)):
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"success": False, "error": str(e),
                              "templates": []}, status_code=409)
-    eintraege = []
     try:
-        for name in v.verfuegbare():
-            p = v.VORLAGEN_DIR / name
-            try:
-                st = p.stat()
-            except OSError:
-                continue
-            eintraege.append({
-                "name": name,
-                "size": st.st_size,
-                "mtime": int(st.st_mtime),
-                "is_default": name == v.STANDARD_NAME,
-            })
+        eintraege = _vorlagen_eintraege(v)
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"success": False, "error": str(e), "templates": []}, status_code=500)
     farben = {}
@@ -12271,7 +12364,10 @@ async def upload_branding_pptx_template(file: UploadFile = File(...),
                              "error": f"Format .{ext} nicht erlaubt (nur .pptx oder .potx)"},
                             status_code=400)
     daten = await file.read()
-    ok, fehler, infos = _pptx_tpl_pruefen(daten, file.filename or "")
+    # Im Thread: ZIP oeffnen und python-pptx parsen dauert bei grossen
+    # Vorlagen Sekunden – im Event-Loop stuende solange der ganze Dienst.
+    ok, fehler, infos = await asyncio.to_thread(_pptx_tpl_pruefen, daten,
+                                                file.filename or "")
     if not ok:
         return JSONResponse({"success": False, "error": fehler}, status_code=400)
 
@@ -12280,30 +12376,11 @@ async def upload_branding_pptx_template(file: UploadFile = File(...),
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"success": False, "error": str(e)}, status_code=409)
 
-    default = str(as_default).lower() in ("1", "true", "yes", "on")
-    if default:
-        ziel_name = v.STANDARD_NAME
-    else:
-        # Nur der Basisname zaehlt und der wird entschaerft – der Name kommt aus
-        # einem Datei-Dialog und darf keine Pfadanteile ins Verzeichnis tragen.
-        rein = re.sub(r"[^A-Za-z0-9_\-. ]+", "", Path(file.filename or "vorlage").name)
-        rein = rein.rsplit(".", 1)[0].strip().replace(" ", "_") or "vorlage"
-        ziel_name = f"{rein[:60]}.pptx"
-        if ziel_name == v.STANDARD_NAME:
-            # Wer die Datei "standard.pptx" nennt, meint die Hausvorlage.
-            default = True
-
-    try:
-        v.VORLAGEN_DIR.mkdir(parents=True, exist_ok=True)
-        ziel = v.VORLAGEN_DIR / ziel_name
-        # Erst danebenschreiben, dann umbenennen: bricht der Vorgang ab, bleibt
-        # die alte (funktionierende) Vorlage stehen statt einer halben Datei.
-        tmp = ziel.with_suffix(".upload.tmp")
-        tmp.write_bytes(daten)
-        tmp.replace(ziel)
-    except Exception as e:  # noqa: BLE001
-        return JSONResponse({"success": False, "error": f"Speichern fehlgeschlagen ({e})"},
-                            status_code=500)
+    # .potx wird als .pptx abgelegt (siehe Docstring).
+    fehler_antwort, ziel_name, default = _vorlage_ablegen(
+        v, daten, file.filename, ".pptx", as_default)
+    if fehler_antwort is not None:
+        return fehler_antwort
 
     hinweise = []
     if infos.get("ratio") == "4:3":
@@ -12329,19 +12406,7 @@ async def delete_branding_pptx_template(name: str = "",
         v = _pptx_vorlagen_modul()
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
-    sauber = Path(str(name or "")).name
-    if not sauber.lower().endswith(".pptx"):
-        return JSONResponse({"success": False, "error": "Kein Vorlagenname"}, status_code=400)
-    ziel = v.VORLAGEN_DIR / sauber
-    if not ziel.exists():
-        # 404 statt 400: ob eine Datei existiert, ist die Antwort auf die Frage.
-        return JSONResponse({"success": False, "error": "Vorlage nicht gefunden"}, status_code=404)
-    try:
-        ziel.unlink()
-    except Exception as e:  # noqa: BLE001
-        return JSONResponse({"success": False, "error": f"Loeschen fehlgeschlagen ({e})"},
-                            status_code=500)
-    return JSONResponse({"success": True, "removed": sauber})
+    return _vorlage_loeschen(v, name, ".pptx")
 
 
 @app.post("/api/branding/pptx-template/regenerate")
@@ -12396,6 +12461,9 @@ def _docx_tpl_pruefen(daten: bytes) -> tuple[bool, str, dict, bytes]:
     if len(daten) > _DOCX_TPL_MAX_BYTES:
         return False, (f"Datei ist zu gross ({len(daten) // (1024 * 1024)} MB, "
                        f"erlaubt {_DOCX_TPL_MAX_BYTES // (1024 * 1024)} MB)"), {}, daten
+    grund = _zip_entpackt_pruefen(daten)
+    if grund:
+        return False, grund, {}, daten
     try:
         with _zip.ZipFile(io.BytesIO(daten)) as z:
             namen = set(z.namelist())
@@ -12434,14 +12502,10 @@ async def list_branding_docx_templates(user: str = Depends(require_local_auth)):
         vw = _docx_vorlagen_modul()
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"success": False, "error": str(e), "templates": []}, status_code=409)
-    eintraege = []
-    for name in vw.verfuegbare():
-        try:
-            st = (vw.VORLAGEN_DIR / name).stat()
-        except OSError:
-            continue
-        eintraege.append({"name": name, "size": st.st_size, "mtime": int(st.st_mtime),
-                          "is_default": name == vw.STANDARD_NAME})
+    try:
+        eintraege = _vorlagen_eintraege(vw)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"success": False, "error": str(e), "templates": []}, status_code=500)
     return JSONResponse({
         "success": True,
         "templates": eintraege,
@@ -12461,29 +12525,18 @@ async def upload_branding_docx_template(file: UploadFile = File(...),
         return JSONResponse({"success": False,
                              "error": f"Format .{ext} nicht erlaubt (nur .docx oder .dotx)"},
                             status_code=400)
-    ok, fehler, infos, daten = _docx_tpl_pruefen(await file.read())
+    # Im Thread – ZIP umschreiben und python-docx parsen blockierten sonst
+    # den Event-Loop (Code-Review 2026-10-25).
+    ok, fehler, infos, daten = await asyncio.to_thread(_docx_tpl_pruefen,
+                                                       await file.read())
     if not ok:
         return JSONResponse({"success": False, "error": fehler}, status_code=400)
     vw = _docx_vorlagen_modul()
-
-    default = str(as_default).lower() in ("1", "true", "yes", "on")
-    if default:
-        ziel_name = vw.STANDARD_NAME
-    else:
-        rein = re.sub(r"[^A-Za-z0-9_\-. ]+", "", Path(file.filename or "vorlage").name)
-        rein = rein.rsplit(".", 1)[0].strip().replace(" ", "_") or "vorlage"
-        ziel_name = f"{rein[:60]}.docx"
-        if ziel_name == vw.STANDARD_NAME:
-            default = True
-    try:
-        vw.VORLAGEN_DIR.mkdir(parents=True, exist_ok=True)
-        ziel = vw.VORLAGEN_DIR / ziel_name
-        tmp = ziel.with_suffix(".upload.tmp")
-        tmp.write_bytes(daten)
-        tmp.replace(ziel)
-    except Exception as e:  # noqa: BLE001
-        return JSONResponse({"success": False, "error": f"Speichern fehlgeschlagen ({e})"},
-                            status_code=500)
+    # .dotx ist schon in _docx_tpl_pruefen zur .docx umgeschrieben.
+    fehler_antwort, ziel_name, default = _vorlage_ablegen(
+        vw, daten, file.filename, ".docx", as_default)
+    if fehler_antwort is not None:
+        return fehler_antwort
 
     hinweise = []
     if infos.get("format") == "Letter":
@@ -12509,18 +12562,7 @@ async def delete_branding_docx_template(name: str = "",
         vw = _docx_vorlagen_modul()
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
-    sauber = Path(str(name or "")).name
-    if not sauber.lower().endswith(".docx"):
-        return JSONResponse({"success": False, "error": "Kein Vorlagenname"}, status_code=400)
-    ziel = vw.VORLAGEN_DIR / sauber
-    if not ziel.exists():
-        return JSONResponse({"success": False, "error": "Vorlage nicht gefunden"}, status_code=404)
-    try:
-        ziel.unlink()
-    except Exception as e:  # noqa: BLE001
-        return JSONResponse({"success": False, "error": f"Loeschen fehlgeschlagen ({e})"},
-                            status_code=500)
-    return JSONResponse({"success": True, "removed": sauber})
+    return _vorlage_loeschen(vw, name, ".docx")
 
 
 @app.post("/api/branding/docx-template/regenerate")
@@ -14647,7 +14689,17 @@ async def excel_ask_endpoint(request: Request,
     # damit das Fenster nicht raten muss, wen es beschuldigt.
     grund = ""
     if not text and not aenderungen:
-        if verworfen:
+        if abgelehnt:
+            # ⚠ DAS MODELL HAT GEANTWORTET – nur wurde alles abgewiesen
+            # (Code-Review 2026-10-25). Ohne diesen Zweig stand hier
+            # "modell_stumm", und das Fenster sagte unter der Ablehnungsliste
+            # "Das Sprachmodell hat nichts geantwortet" – eine Falschaussage
+            # direkt neben ihrem Gegenbeweis.
+            grund = "alles_abgelehnt"
+            text = ("Keine der vorgeschlagenen Änderungen konnte übernommen "
+                    "werden – die Gründe stehen unten. Frag gern noch einmal "
+                    "nach, gegebenenfalls mit einem kleineren Bereich.")
+        elif verworfen:
             grund = "runden_erschoepft"
             text = ("Ich hätte für diese Antwort noch weitere Daten gebraucht "
                     "(%s), aber die Zahl der möglichen Nachfragen ist "

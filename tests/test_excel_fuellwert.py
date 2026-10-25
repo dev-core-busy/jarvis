@@ -201,5 +201,33 @@ check("der Prompt verbietet das Erfinden weiterhin",
 check("...und nennt die 0 als den Fall", "Eine 0" in ea._VORSPANN)
 check("...und den Weg (Zelle weglassen)", "aus dem Vorschlag WEG" in ea._VORSPANN)
 
+# ── 9. Code-Review 2026-10-25: Format daneben ist KEIN Umweg ─────────────
+print("── 9. Format-Feld umgeht weder Riegel noch Sperrliste ──────────────")
+s, g = pruef({"blatt": "2026", "adresse": "F12:II12", "wert": 0, "format": "0"})
+check("0 ueber 238 Zellen MIT Format wird abgelehnt", s is None)
+s, g = pruef({"blatt": "2026", "adresse": "B2", "format": "@",
+              "wert": '=WEBSERVICE("http://beispiel.de/x")'})
+check("gesperrte Formel als 'wert' MIT Format wird abgelehnt", s is None)
+s, g = pruef({"blatt": "2026", "adresse": "F12:II12", "format": "#,##0.00"})
+check("reine Formatierung (ohne Wert) bleibt erlaubt",
+      bool(s is not None and "wert" not in s and s.get("format")))
+s, g = pruef({"blatt": "2026", "adresse": "B2", "wert": 42, "format": "0.00"})
+check("echter Wert MIT Format geht durch", s is not None and s.get("wert") == 42)
+
+# ── 10. Deutsche/Excel-Platzhalter und konstante Formeln ────────────────
+print("── 10. k.A., #NV, 0,00 und =0 sind ebenfalls Platzhalter ──────────")
+for w in ("k.A.", "keine Angabe", "#N/A", "#NV", "0,00", "0.0", "-0", "—"):
+    s, g = pruef({"blatt": "2026", "adresse": "F12:II12", "wert": w})
+    check("Platzhalter %r wird abgelehnt" % (w,), s is None)
+for f in ("=0", '=""', "0"):
+    s, g = pruef({"blatt": "2026", "adresse": "F12:II12", "formel": f})
+    check("konstante Formel %r ueber 238 Zellen wird abgelehnt" % (f,), s is None)
+for f in ("=A12*2", "=SUMME(A1:A9)", "=NA()"):
+    s, g = pruef({"blatt": "2026", "adresse": "F12:II12", "formel": f})
+    check("echte Formel %r ueber 238 Zellen geht durch" % (f,), s is not None)
+s, g = pruef({"blatt": "2026", "adresse": "B2:B4", "formel": "=0"})
+check("=0 in wenigen Zellen bleibt erlaubt", s is not None)
+check("_FUELLWERTE (tote zweite Quelle) ist entfernt", not hasattr(ea, "_FUELLWERTE"))
+
 print("\nErgebnis: %d OK, %d FAIL" % (_ok, _fail))
 sys.exit(1 if _fail else 0)

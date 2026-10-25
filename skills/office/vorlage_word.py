@@ -283,7 +283,7 @@ def _patch_theme(docx_pfad: Path, farben: dict) -> None:
 
     Dieselbe Funktion ``_theme_xml`` wie fuer die Folien – nur der Ort im ZIP
     unterscheidet sich (``word/theme/`` statt ``ppt/theme/``)."""
-    tmp = docx_pfad.with_suffix(".tmp.docx")
+    tmp = _pptx.zwischenname(docx_pfad, ".tmp.docx")
     with zipfile.ZipFile(docx_pfad) as quelle:
         with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as ziel:
             for eintrag in quelle.infolist():
@@ -319,12 +319,17 @@ def erzeuge(ziel: Path = None) -> Path:
     cp.comments = ""
     cp.last_modified_by = ""
 
-    tmp = ziel.with_suffix(".neu.docx")
-    doc.save(str(tmp))
-    # Theme erst NACH dem Speichern – python-docx schreibt den Theme-Part
-    # unveraendert aus seiner Standardvorlage.
-    _patch_theme(tmp, farben)
-    tmp.replace(ziel)
+    # Eindeutiger, versteckter Zwischenname (siehe vorlage.ERZEUGE_SPERRE).
+    tmp = _pptx.zwischenname(ziel, ".neu.docx")
+    try:
+        doc.save(str(tmp))
+        # Theme erst NACH dem Speichern – python-docx schreibt den Theme-Part
+        # unveraendert aus seiner Standardvorlage.
+        _patch_theme(tmp, farben)
+        tmp.replace(ziel)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
     return ziel
 
 
@@ -336,7 +341,11 @@ def sicherstellen(pfad: Path = None) -> Path:
     ziel = Path(pfad) if pfad else (VORLAGEN_DIR / STANDARD_NAME)
     if ziel.exists() and ziel.stat().st_size > 0:
         return ziel
-    return erzeuge(ziel)
+    # Dieselbe Sperre wie bei PowerPoint – gleichzeitige Erzeugung (siehe dort).
+    with _pptx.ERZEUGE_SPERRE:
+        if ziel.exists() and ziel.stat().st_size > 0:
+            return ziel
+        return erzeuge(ziel)
 
 
 def _ist_zwischenstand(name: str) -> bool:

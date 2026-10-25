@@ -51,6 +51,11 @@ Lauf:  python3 tests/test_bild_anzeige.py
 import ast
 import re
 import sys
+# ⚠ UEBERSPRUNGEN IST NICHT BESTANDEN (2026-10-25 gemessen: sechs Waechter
+# uebersprangen lokal ohne venv ganze Abschnitte und meldeten Exit 0 – hier
+# 154 von 220 Pruefungen). Was mangels Modul nicht laufen kann, wird vermerkt;
+# ohne echten Befund endet der Lauf dann mit Exit 2 ("konnte nicht laufen").
+_UEBERSPRUNGEN: list = []
 import textwrap
 from pathlib import Path
 
@@ -452,6 +457,7 @@ def teil4():
         from google.genai import types
     except Exception as e:  # noqa: BLE001
         print(f"  … uebersprungen: {type(e).__name__} ({e}) – auf DEV im venv ausfuehren")
+        _UEBERSPRUNGEN.append(f"Laeufe mit dem Agenten ({type(e).__name__}: {e})")
         return
 
     import tempfile as _tf
@@ -721,6 +727,9 @@ def main():
         print(f"\033[31m{_zaehler['ok']} ok, {_zaehler['fail']} Fehler ({n} Pruefungen)\033[0m")
         return 1
     print(f"\033[32m{_zaehler['ok']} ok, 0 Fehler ({n} Pruefungen)\033[0m")
+    if _UEBERSPRUNGEN:
+        print("UNVOLLSTAENDIG (Exit 2): uebersprungen – " + "; ".join(_UEBERSPRUNGEN))
+        return 2
     return 0
 
 

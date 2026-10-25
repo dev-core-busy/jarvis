@@ -39,6 +39,11 @@ import os
 import re
 import shutil
 import sys
+# ⚠ UEBERSPRUNGEN IST NICHT BESTANDEN (2026-10-25 gemessen: sechs Waechter
+# uebersprangen lokal ohne venv ganze Abschnitte und meldeten Exit 0 – hier
+# 154 von 220 Pruefungen). Was mangels Modul nicht laufen kann, wird vermerkt;
+# ohne echten Befund endet der Lauf dann mit Exit 2 ("konnte nicht laufen").
+_UEBERSPRUNGEN: list = []
 import tempfile
 from pathlib import Path
 
@@ -730,6 +735,7 @@ try:
 except Exception as e:  # noqa: BLE001
     machbar = False
     print(f"  … uebersprungen (kein venv?): {type(e).__name__}: {e}")
+    _UEBERSPRUNGEN.append(f"Echte Laeufe ({type(e).__name__}: {e})")
 
 if machbar:
     import asyncio
@@ -919,13 +925,26 @@ if machbar:
     shutil.rmtree(_tmp2, ignore_errors=True)
 
 _md5_nachher = _set_md5()
-pruefe(bool(_settings) and _md5_vorher == _md5_nachher,
-       f"settings.json wurde vom Test NICHT veraendert ({len(_settings)} Datei(en) geprueft)",
-       f"{_md5_vorher} -> {_md5_nachher}")
+# ⚠ OHNE settings.json (frischer Checkout, CI) gibt es nichts zu veraendern –
+# dann lautet die Zusage "der Test hat KEINE angelegt", und die ist genauso
+# messbar. Bis 2026-10-25 zaehlte "0 Dateien geprueft" als FAIL: in der CI war
+# der Waechter damit dauerhaft rot, aus einem Grund, der kein Befund ist.
+if _settings:
+    pruefe(_md5_vorher == _md5_nachher,
+           f"settings.json wurde vom Test NICHT veraendert ({len(_settings)} Datei(en) geprueft)",
+           f"{_md5_vorher} -> {_md5_nachher}")
+else:
+    _neu_angelegt = [str(p) for p in (ROOT / "settings.json", ROOT / "data" / "settings.json")
+                     if p.exists()]
+    pruefe(not _neu_angelegt, "ohne vorhandene settings.json: der Test legt KEINE an",
+           str(_neu_angelegt))
 pruefe(not (ROOT / "data" / "agent_roles.json").exists()
        or "maler" not in (ROOT / "data" / "agent_roles.json").read_text(),
        "die echte data/agent_roles.json enthaelt keine Testrollen")
 
 print(f"\n{'='*70}")
 print(f"Ergebnis: {_ok} bestanden, {_fail} fehlgeschlagen")
+if not _fail and _UEBERSPRUNGEN:
+    print("UNVOLLSTAENDIG (Exit 2): uebersprungen – " + "; ".join(_UEBERSPRUNGEN))
+    sys.exit(2)
 sys.exit(0 if _fail == 0 else 1)

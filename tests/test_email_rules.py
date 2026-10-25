@@ -27,6 +27,11 @@ import json
 import os
 import re
 import sys
+# ⚠ UEBERSPRUNGEN IST NICHT BESTANDEN (2026-10-25 gemessen: sechs Waechter
+# uebersprangen lokal ohne venv ganze Abschnitte und meldeten Exit 0 – hier
+# 154 von 220 Pruefungen). Was mangels Modul nicht laufen kann, wird vermerkt;
+# ohne echten Befund endet der Lauf dann mit Exit 2 ("konnte nicht laufen").
+_UEBERSPRUNGEN: list = []
 import tempfile
 import time
 import types
@@ -433,7 +438,8 @@ try:
     check("from backend.llm import HINWEIS_UNVOLLSTAENDIG" in run_q,
           "der Runner importiert dieselbe Konstante (kein Prosa-Vergleich)")
 except ImportError:
-    check(True, "llm-Konstante uebersprungen (Import nicht moeglich)")
+    # Frueher check(True, …): ein Ueberspringen zaehlte als BESTANDENE Pruefung.
+    _UEBERSPRUNGEN.append("llm-Konstante (Import nicht moeglich)")
 _l = (ROOT / "backend/mail_runner.py").read_text()
 check('reasoning_effort="low"' in _l,
       "bei einem Nicht-Ergebnis wird EINMAL mit knapper Denktiefe wiederholt")
@@ -692,7 +698,7 @@ try:
           and not issubclass(_kl, NoVerifyHTTPAdapter),
           "der gesetzte Adapter prueft (kein NoVerifyHTTPAdapter)", str(_kl))
 except ImportError:
-    check(True, "Adapter-Probe uebersprungen (exchangelib nicht installiert)")
+    _UEBERSPRUNGEN.append("Adapter-Probe (exchangelib nicht installiert)")
 
 # EWS-Item-Aufloesung: NIEMALS filter(id=...) – EWS macht daraus eine
 # Restriction und lehnt sie ab ("EWS does not support filtering on field 'id'").
@@ -1890,4 +1896,7 @@ print(f"  {_ok} OK, {_fail} FAIL  (Sandkasten: {TMP})")
 print(f"{'=' * 62}")
 import shutil                                # noqa: E402
 shutil.rmtree(TMP, ignore_errors=True)
+if not _fail and _UEBERSPRUNGEN:
+    print("UNVOLLSTAENDIG (Exit 2): uebersprungen – " + "; ".join(_UEBERSPRUNGEN))
+    sys.exit(2)
 sys.exit(1 if _fail else 0)

@@ -305,5 +305,34 @@ check("Formeln/Formate kommen aus dem SCHMALEN Bereich",
       "i.probeDetail.formulas" in JS)
 check("...und die Werte aus dem breiten", "i.probe.values" in JS)
 
+# ── 12. Code-Review 2026-10-25: gelieferte Breite und erkannte Kopfzeile ──
+print("── 12. Altes Fenster (40 Spalten geladen) und Titelzeilen ─────────")
+# (a) Ein Fenster mit altem excel.js im Cache laedt nur 40 Spalten. Bei 242
+# Spalten lag das unter dem Backend-Deckel – und der Hinweis blieb STUMM.
+_alt40 = ea._blatt_block(blatt(242, probe_breite=40), True)
+_gel40 = re.findall(r"([A-Z]{1,3})=Kopf\d+", _alt40)
+check("Aufbau: es sind wirklich nur 40 Koepfe gelistet (%d)" % len(_gel40),
+      len(_gel40) == 40)
+check("40 von 242 geladen: der Hinweis erscheint", "⚠" in _alt40)
+check("er nennt AN als letzte gelistete und AO als Start der Nachforderung",
+      "–AN von 242" in _alt40 and "EXCEL_BRAUCHE: 2026!AO" in _alt40)
+# (b) Titelzeilen ueber der Tabelle: die ERKANNTE Kopfzeile gehoert in die
+# Nachforder-Adresse, nicht zeile_ab (excel.js schickt kopf_nr gar nicht).
+_n = 40
+_titel = {"name": "2026", "bereich": "A1:IH500", "zeilen": 500, "spalten": 242,
+          "zeile_ab": 1, "spalte_ab": 1,
+          "probe": [["Jahresbericht 2026"] + [""] * (_n - 1), [""] * _n,
+                    ["Kopf%d" % k for k in range(1, _n + 1)], [1234.5] * _n,
+                    [99.0] * _n]}
+_tb = ea._blatt_block(_titel, True)
+_kz = re.search(r"Kopfzeile: Zeile (\d+)", _tb)
+if not _kz or _kz.group(1) == "1":
+    print("ABBRUCH: die Kopferkennung findet die Kopfzeile unter den Titeln "
+          "nicht (%s) – der Aufbau prueft dann nichts" % (_kz and _kz.group(0)))
+    sys.exit(2)
+check("Nachforder-Adresse zeigt auf die ERKANNTE Kopfzeile (%s), nicht Zeile 1"
+      % _kz.group(1),
+      ("EXCEL_BRAUCHE: 2026!AO%s:IH%d" % (_kz.group(1), int(_kz.group(1)) + 1)) in _tb)
+
 print("\nErgebnis: %d OK, %d FAIL" % (_ok, _fail))
 sys.exit(1 if _fail else 0)

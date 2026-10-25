@@ -153,7 +153,13 @@ function bauOffice() {
                     '!' + String(teile[teile.length - 1]).replace(/\$/g, '').toUpperCase();
                 const obj = {
                     _k: k, _geladen: false,
-                    load: function () { obj._geladen = true; },
+                    // ⚠ `load` wirkt wie im Original ERST beim sync() – und
+                    // faellt mit dem Batch aus, wenn davor etwas wirft
+                    // (Code-Review 2026-10-25). Die erste Fassung setzte
+                    // `_geladen` sofort: der Abbruch des Batches war damit
+                    // nicht darstellbar, und der Waechter konnte den Fehler
+                    // "Zelle ohne Kommentar VOR Zelle mit Kommentar" nie sehen.
+                    load: function () { ctx._offen.push(function () { obj._geladen = true; }); },
                     set content(v) { log.inhalt.push(k + ' :: ' + v); kommentare[k] = v; },
                     get id() {
                         if (!obj._geladen) throw new Error('PropertyNotLoaded');
@@ -339,6 +345,42 @@ const E = (blatt, adresse, begruendung) => ({ blatt, adresse, begruendung, werte
                'der Inhalt wurde EINMAL ersetzt (gezaehlt: ' + o.log.inhalt.length + ')');
         pruefe(o.kommentare['2026!B12'] === 'Jarvis: neuer',
                'es gilt der LETZTE Text (gefunden: ' + o.kommentare['2026!B12'] + ')');
+    }
+
+    console.log('── 6b. Zelle OHNE Kommentar VOR einer Zelle MIT Kommentar ─────────');
+    {
+        // Code-Review 2026-10-25: alle getItemByCell lagen in EINEM Batch. Das
+        // erwartete ItemNotFound der ersten Zelle brach ihn ab – die `load`
+        // der folgenden Zellen liefen nie, ihre vorhandenen Kommentare galten
+        // als "nicht da", und comments.add warf InvalidOperation.
+        const o = bauOffice();
+        o.ctx.workbook.comments.add({ _blatt: '2026', _adr: 'B12' }, 'alt');
+        await o.ctx.sync();
+        const vorher = o.log.add.length;
+        const protokolle = [];
+        const sandbox = {
+            Promise, Excel: o.Excel, window: { Excel: o.Excel },
+            _office: true, _kann110: true, MARK_FARBE: '#FFF2CC',
+            markAn: () => true, T: (k, f) => f,
+            protokoll: (b, t) => protokolle.push(b + ': ' + t),
+            fehlerDetails: (e) => 'code=' + (e && e.code)
+        };
+        const namen = Object.keys(sandbox);
+        // eslint-disable-next-line no-new-func
+        const fn = new Function(...namen,
+            code.ankerSchluessel + '\n' + code.kosmetik + '\nreturn kosmetik;');
+        await fn(...namen.map((n) => sandbox[n]))([
+            E('2026', 'C5', 'neu an C5'), E('2026', 'B12:AN12', 'neu an B12')
+        ]);
+        pruefe(o.log.addFehler === 0,
+               'kein comments.add ist gescheitert (gezaehlt: ' + o.log.addFehler + ')');
+        pruefe(o.log.add.length - vorher === 1 && o.kommentare['2026!C5'] === 'Jarvis: neu an C5',
+               'C5 bekommt einen NEUEN Kommentar (adds: ' + (o.log.add.length - vorher) + ')');
+        pruefe(o.kommentare['2026!B12'] === 'Jarvis: neu an B12',
+               'der VORHANDENE Kommentar an B12 wird ersetzt (gefunden: ' +
+               o.kommentare['2026!B12'] + ')');
+        pruefe(!protokolle.some((p) => p.indexOf('nicht gesetzt') >= 0),
+               'das Protokoll meldet KEIN "nicht gesetzt"');
     }
 
     console.log('── 7. Ohne Begruendung kein Kommentar ──────────────────────────────');

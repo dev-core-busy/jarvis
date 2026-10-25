@@ -2029,18 +2029,26 @@
                 var kommentiert = Object.keys(jeAnker).map(function (k) {
                     return jeAnker[k];
                 });
-                // Vorhandene Kommentare NACHSEHEN, statt blind anzulegen.
-                kommentiert.forEach(function (z) {
-                    try {
-                        z.k = ctx.workbook.comments.getItemByCell(
-                            (z.a.blatt ? z.a.blatt + '!' : '') + z.a.adresse.split(':')[0]);
-                        z.k.load('id');
-                    } catch (e) { z.k = null; }
-                });
-                // `getItemByCell` wirft bei einer Zelle OHNE Kommentar – der
-                // Fehler faellt beim sync an und wird hier bewusst geschluckt:
-                // "kein Kommentar da" ist die Regel, nicht die Ausnahme.
-                return ctx.sync().catch(function () { }).then(function () {
+                // Vorhandene Kommentare NACHSEHEN, statt blind anzulegen –
+                // JE ZELLE IN EINEM EIGENEN sync (Code-Review 2026-10-25).
+                // `getItemByCell` wirft bei einer Zelle OHNE Kommentar erst
+                // beim sync, und Office.js bricht dann den GANZEN Batch ab:
+                // lagen alle Abfragen in einem, liefen die `load` der Zellen
+                // DAHINTER nie. Ihre vorhandenen Kommentare galten als "nicht
+                // da", comments.add warf InvalidOperation, und es kam kein
+                // einziger Kommentar an. Der Fehler je Zelle wird bewusst
+                // geschluckt: "kein Kommentar da" ist die Regel.
+                var nachsehen = kommentiert.reduce(function (kette, z) {
+                    return kette.then(function () {
+                        try {
+                            z.k = ctx.workbook.comments.getItemByCell(
+                                (z.a.blatt ? z.a.blatt + '!' : '') + z.a.adresse.split(':')[0]);
+                            z.k.load('id');
+                        } catch (e) { z.k = null; return; }
+                        return ctx.sync().catch(function () { z.k = null; });
+                    });
+                }, Promise.resolve());
+                return nachsehen.then(function () {
                     kommentiert.forEach(function (z) {
                         // Ein Zellkommentar landet NICHT im DOM – der Platzhalter
                         // {marke} wird deshalb hier aufgeloest (test_marke_i18n).
@@ -2629,7 +2637,7 @@
        unterscheiden – genau das hat an diesem Tag zweimal Zeit gekostet.
        Zwei Stellen gehoeren deshalb immer zusammen hochgezaehlt: diese Nummer
        UND der Cache-Buster `excel.js?v=N` in taskpane.html. */
-    var XL_VERSION = '1.00.02';
+    var XL_VERSION = '1.00.03';
 
     function versionAnschreiben() {
         var text = ' (v' + XL_VERSION + ')';

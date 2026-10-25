@@ -24,6 +24,11 @@ Zwei Teile:
 import asyncio
 import re
 import sys
+# ⚠ UEBERSPRUNGEN IST NICHT BESTANDEN (2026-10-25 gemessen: sechs Waechter
+# uebersprangen lokal ohne venv ganze Abschnitte und meldeten Exit 0 – hier
+# 154 von 220 Pruefungen). Was mangels Modul nicht laufen kann, wird vermerkt;
+# ohne echten Befund endet der Lauf dann mit Exit 2 ("konnte nicht laufen").
+_UEBERSPRUNGEN: list = []
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -153,6 +158,7 @@ try:
 except Exception as e:  # noqa: BLE001
     HABEN_FASTAPI = False
     print(f"  … uebersprungen: {type(e).__name__} ({e}) – auf DEV im venv ausfuehren")
+    _UEBERSPRUNGEN.append(f"Laeufe mit fastapi ({type(e).__name__}: {e})")
 
 if HABEN_FASTAPI:
     class WSAttrappe:
@@ -214,11 +220,6 @@ if HABEN_FASTAPI:
         print("ABBRUCH: conv_log zeigt nicht in das Wegwerf-Verzeichnis.")
         sys.exit(2)
 
-    # EINEN echten Agenten bauen (kein __new__-Nachbau: run_task braucht ein
-    # vollstaendig eingerichtetes Objekt – Stop-Scopes, Telemetrie, Verlaufs-
-    # Buchhaltung).
-    _agent = A.JarvisAgent()
-
     # ── DER PROVIDER MUSS UEBER get_provider GEPATCHT WERDEN ──────────────
     # run_task setzt `self.provider = get_provider(...)` bei JEDEM Lauf neu
     # (agent.py:1255). Ein vorher zugewiesenes Attribut wird dabei
@@ -229,6 +230,21 @@ if HABEN_FASTAPI:
     # ausgeschlossen.
     _stub_halter = {"s": None}
     A.get_provider = lambda *a, **kw: _stub_halter["s"]
+
+    # ⚠ DER ANBIETER WIRD FESTGELEGT, nicht vom Server geborgt (2026-10-25):
+    # ohne data/ ist die Vorgabe "google", und dessen Zweig liest
+    # response.raw.candidates – das gibt es an der Attrappe nicht. Auf DEV
+    # unsichtbar (dort ist das aktive Profil OpenAI-kompatibel), in der CI
+    # 3 FAIL. Dieselbe Festlegung wie in test_agent_roles.
+    A.JarvisAgent.LLM_PROVIDER = property(lambda self: "openai_compatible")
+    # ⚠ ERST PATCHEN, DANN BAUEN (2026-10-25): der KONSTRUKTOR ruft
+    # get_provider bereits. Stand der Bau davor, griff er zum echten Anbieter –
+    # auf DEV unauffaellig (dort ist ein Schluessel konfiguriert), in der CI
+    # ohne data/ ein Absturz mit "Missing key inputs argument".
+    # EINEN echten Agenten bauen (kein __new__-Nachbau: run_task braucht ein
+    # vollstaendig eingerichtetes Objekt – Stop-Scopes, Telemetrie, Verlaufs-
+    # Buchhaltung).
+    _agent = A.JarvisAgent()
 
     def lauf(folge, verlauf_vorher=None):
         """Einen run_task-Lauf mit Stub fahren. Rueckgabe (outcome, ws, stub)."""
@@ -392,4 +408,7 @@ if HABEN_FASTAPI and machbar:
 print(f"\n{'=' * 62}\nErgebnis: {_ok}/{_ok + _fail} Pruefungen bestanden")
 if _fail:
     print(f"FEHLGESCHLAGEN: {_fail}")
+if not _fail and _UEBERSPRUNGEN:
+    print("UNVOLLSTAENDIG (Exit 2): uebersprungen – " + "; ".join(_UEBERSPRUNGEN))
+    sys.exit(2)
 sys.exit(1 if _fail else 0)

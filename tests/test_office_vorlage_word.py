@@ -185,6 +185,46 @@ try:
     vor = ziel.stat().st_mtime_ns
     pruefe(VW.sicherstellen() == ziel and ziel.stat().st_mtime_ns == vor,
            "sicherstellen() ueberschreibt eine vorhandene Vorlage nicht")
+
+    # ── Gleichzeitige Erzeugung (Code-Review 2026-10-25) ────────────────────
+    # Gezaehlt wird, wie oft ERZEUGT wird – "kein Absturz" allein waere
+    # Glueckssache (das Rennen tritt nicht in jedem Lauf auf).
+    import threading as _th
+    import zipfile as _zf
+    _ziel_par = TMP / "parallel.docx"
+    _echt_erz = VW.erzeuge
+    _zaehl = []
+    def _gezaehlt(z=None):
+        _zaehl.append(1)
+        return _echt_erz(z)
+    VW.erzeuge = _gezaehlt
+    _erg, _feh = [], []
+    def _los():
+        try:
+            _erg.append(VW.sicherstellen(_ziel_par))
+        except Exception as e:  # noqa: BLE001
+            _feh.append(repr(e))
+    try:
+        _faeden = [_th.Thread(target=_los) for _ in range(4)]
+        for _f in _faeden:
+            _f.start()
+        for _f in _faeden:
+            _f.join(180)
+    finally:
+        VW.erzeuge = _echt_erz
+    pruefe(not _feh and len(_erg) == 4 and all(e == _ziel_par for e in _erg),
+           "4 gleichzeitige sicherstellen(): alle bekommen die Vorlage, keiner scheitert",
+           str(_feh[:1]))
+    pruefe(len(_zaehl) == 1, "...und sie wird genau EINMAL erzeugt (Sperre)", str(len(_zaehl)))
+    _zip_ok = False
+    try:
+        with _zf.ZipFile(_ziel_par) as _z:
+            _zip_ok = _z.testzip() is None
+    except Exception:  # noqa: BLE001
+        pass
+    pruefe(_zip_ok, "...und ist ein unbeschaedigtes ZIP")
+    pruefe(not [p for p in TMP.iterdir() if p.name.startswith(".")],
+           "keine Zwischenstaende bleiben liegen")
     pruefe(VW.loese_vorlage("../../data/settings.json") == ziel,
            "Pfadanteile werden verworfen, Unbekanntes faellt auf die Hausvorlage")
     (VW.VORLAGEN_DIR / "x.tmp.docx").write_bytes(b"halb")

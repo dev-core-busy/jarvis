@@ -539,15 +539,27 @@ def aenderungen_pruefen(roh) -> tuple[list, list]:
                 abgelehnt.append({"blatt": blatt, "adresse": adresse,
                                   "formel": formel[:200], "grund": fgrund})
                 continue
+            # Eine KONSTANTE Formel (=0, ="") ist derselbe Platzhalter wie
+            # wert=0 – nur im anderen Feld (Code-Review 2026-10-25).
+            if _ist_fuellwert(formel.strip()[1:]) and zellen > MAX_FUELL_ZELLEN:
+                abgelehnt.append({"blatt": blatt, "adresse": adresse,
+                                  "formel": formel[:40],
+                                  "grund": _fuell_grund(formel, zellen)})
+                continue
         elif matrix is not None:
             pass                 # schon geprueft, kein Einzelwert noetig
-        elif hat_format:
-            pass                 # reine Formatierung ist eine vollstaendige Aenderung
         elif wert is None:
-            abgelehnt.append({"blatt": blatt, "adresse": adresse,
-                              "grund": "Weder Wert, Werte-Bereich, Formel noch "
-                                       "Format angegeben."})
-            continue
+            # ⚠ NUR OHNE WERT ist ein Format-Eintrag "reine Formatierung"
+            # (Code-Review 2026-10-25). Bis dahin stand hier `elif hat_format:
+            # pass` VOR den Wertpruefungen: mit einem Format daneben lief
+            # `wert` an der Formel-Sperrliste und am Fuell-Riegel vorbei und
+            # wurde trotzdem geschrieben – {wert:'=WEBSERVICE(…)', format:'@'}
+            # oder {wert:0, format:'0'} ueber 238 Zellen.
+            if not hat_format:
+                abgelehnt.append({"blatt": blatt, "adresse": adresse,
+                                  "grund": "Weder Wert, Werte-Bereich, Formel noch "
+                                           "Format angegeben."})
+                continue
         elif _ist_fuellwert(wert) and zellen > MAX_FUELL_ZELLEN:
             # ⚠ DER RIEGEL GEGEN DAS LUECKEN-FUELLEN (gemeldet 2026-10-23).
             # `wert` setzt EINEN Wert in JEDE Zelle des Bereichs. Mit einer 0
@@ -560,17 +572,7 @@ def aenderungen_pruefen(roh) -> tuple[list, list]:
             # dafuer liegt die Pruefung hier und nicht im Fenster).
             abgelehnt.append({
                 "blatt": blatt, "adresse": adresse, "wert": str(wert)[:40],
-                "grund": ("Ein einzelner Platzhalterwert (%r) für %d Zellen "
-                          "wird nicht übernommen. Das überschreibt Daten, für "
-                          "die keine Zuordnung gefunden wurde – eine erfundene "
-                          "0 ist später nicht von einem Messwert zu "
-                          "unterscheiden. Lass die Zellen WEG, die du nicht "
-                          "zuordnen kannst, und nenne sie in deiner Antwort. "
-                          "Sollen wirklich alle %d Zellen denselben Wert "
-                          "tragen, gib ihn als 'werte'-Matrix an, damit jeder "
-                          "Eintrag ausdrücklich dasteht (höchstens %d Zellen "
-                          "über 'wert')."
-                          % (wert, zellen, zellen, MAX_FUELL_ZELLEN))})
+                "grund": _fuell_grund(wert, zellen)})
             continue
         elif isinstance(wert, str):
             # Ein WERT, der wie eine Formel aussieht, IST in Excel eine Formel,
@@ -732,7 +734,8 @@ def _zeilennummer(b: dict, *schluessel) -> int:
     return 1
 
 
-def _spalten_hinweis(b: dict, spalte_ab: int) -> str:
+def _spalten_hinweis(b: dict, spalte_ab: int, kopf_nr: "int | None" = None,
+                     geliefert: "int | None" = None) -> str:
     """Benennt eine gekuerzte Spaltenliste – oder gibt "" zurueck.
 
     ⚠ **DER TEUERSTE EINZELFALL DIESES MODULS (gemeldet 2026-10-23).** Die
@@ -760,15 +763,29 @@ def _spalten_hinweis(b: dict, spalte_ab: int) -> str:
         gesamt = int(b.get("spalten") or 0)
     except Exception:  # noqa: BLE001
         gesamt = 0
-    if gesamt <= MAX_SPALTEN_ANZEIGE:
+    # ⚠ GEGEN DIE WIRKLICH GELIEFERTEN KOEPFE RECHNEN (Code-Review 2026-10-25):
+    # bis dahin stand hier nur MAX_SPALTEN_ANZEIGE (300). Ein Fenster mit altem
+    # excel.js im Cache laedt aber nur PROBE_SPALTEN=40 – bei 242 Spalten war
+    # 242 <= 300, der Hinweis blieb STUMM, und die Liste endete wieder still
+    # bei AN. Genau der Fall, den der Docstring abdecken will.
+    gelistet = MAX_SPALTEN_ANZEIGE
+    if isinstance(geliefert, int) and geliefert > 0:
+        gelistet = min(geliefert, MAX_SPALTEN_ANZEIGE)
+    if gesamt <= gelistet:
         return ""
-    letzte = spaltenbuchstabe(spalte_ab + MAX_SPALTEN_ANZEIGE - 1)
+    letzte = spaltenbuchstabe(spalte_ab + gelistet - 1)
     erste = spaltenbuchstabe(spalte_ab)
-    naechste = spaltenbuchstabe(spalte_ab + MAX_SPALTEN_ANZEIGE)
+    naechste = spaltenbuchstabe(spalte_ab + gelistet)
     ende = spaltenbuchstabe(spalte_ab + gesamt - 1)
     # Die KOPFZEILE ist das, was fuer ein Mapping fehlt – die vorgeschlagene
     # Adresse zeigt deshalb auf sie und die erste Datenzeile, nicht auf den
     # ganzen Block (der waere gross und beantwortet die Frage nicht besser).
+    # ⚠ Die ERKANNTE Kopfzeile (tabellenkopf in _blatt_block) gewinnt: die
+    # Felder kopf_nr/kopfZeile/kopfRel schickt excel.js gar nicht, der
+    # Rueckfall landete also immer auf zeile_ab – bei Titelzeilen ueber der
+    # Tabelle forderte das Modell die Titel nach statt der Koepfe.
+    if isinstance(kopf_nr, int) and kopf_nr > 0:
+        return _hinweis_text(b, erste, letzte, gesamt, ende, naechste, kopf_nr)
     kopf_nr = _zeilennummer(b, "kopf_nr", "kopfZeile")
     if kopf_nr == 1:
         try:
@@ -776,6 +793,12 @@ def _spalten_hinweis(b: dict, spalte_ab: int) -> str:
                 max(0, int(b.get("kopfRel") or 1) - 1)
         except Exception:  # noqa: BLE001
             kopf_nr = 1
+    return _hinweis_text(b, erste, letzte, gesamt, ende, naechste, kopf_nr)
+
+
+def _hinweis_text(b: dict, erste: str, letzte: str, gesamt: int, ende: str,
+                  naechste: str, kopf_nr: int) -> str:
+    """Der Wortlaut des Spaltenhinweises samt fertiger Nachforder-Adresse."""
     name = _zelltext(b.get("name"), 80)
     blatt = ("'%s'" % name) if (" " in name or "!" in name) else name
     bereich = "%s!%s%d:%s%d" % (blatt, naechste, kopf_nr, ende, kopf_nr + 1)
@@ -814,7 +837,30 @@ MAX_FUELL_ZELLEN = 25
 # Werte, die als „nichts gefunden" gelten. ``0`` und ``""`` sind die beiden,
 # die ein Modell als Platzhalter einsetzt; ``False`` kommt aus derselben
 # Verlegenheit. Eine ECHTE 0 in wenigen Zellen bleibt erlaubt (siehe Deckel).
-_FUELLWERTE = (0, 0.0, "", "0", "-", "n/a", "N/A", False, None)
+# Platzhalter als TEXT, klein und ohne Leerraum verglichen. Erweitert im
+# Code-Review 2026-10-25: die erste Fassung kannte nur englische Kuerzel – ein
+# deutschsprachiger Lauf schrieb "k.A." oder "#NV" ungebremst ueber 238 Zellen.
+# EINE Quelle; die fruehere Konstante _FUELLWERTE war toter Code und wich ab.
+_FUELL_TEXTE = frozenset({
+    "", "-", "–", "—", "n/a", "na", "null", "none", "nan",
+    "k.a.", "k. a.", "ka", "keine angabe", "keine angaben", "unbekannt",
+    "#n/a", "#nv", "#na", '""',
+})
+
+
+def _fuell_grund(wert, zellen: int) -> str:
+    """Ablehnungsgrund fuer einen Platzhalter ueber zu viele Zellen – mit WEG."""
+    return ("Ein einzelner Platzhalterwert (%r) für %d Zellen "
+            "wird nicht übernommen. Das überschreibt Daten, für "
+            "die keine Zuordnung gefunden wurde – eine erfundene "
+            "0 ist später nicht von einem Messwert zu "
+            "unterscheiden. Lass die Zellen WEG, die du nicht "
+            "zuordnen kannst, und nenne sie in deiner Antwort. "
+            "Sollen wirklich alle %d Zellen denselben Wert "
+            "tragen, gib ihn als 'werte'-Matrix an, damit jeder "
+            "Eintrag ausdrücklich dasteht (höchstens %d Zellen "
+            "über 'wert')."
+            % (wert, zellen, zellen, MAX_FUELL_ZELLEN))
 
 
 def _ist_fuellwert(wert) -> bool:
@@ -828,7 +874,13 @@ def _ist_fuellwert(wert) -> bool:
     if wert is None:
         return True
     if isinstance(wert, str):
-        return wert.strip().lower() in ("", "0", "-", "n/a", "na", "null")
+        t = wert.strip().lower()
+        if t in _FUELL_TEXTE:
+            return True
+        # Eine Null als Zahl geschrieben ("0", "0,00", "0.0", "-0") – deutsches
+        # Komma eingeschlossen. NICHT "00": ein Text mit fuehrenden Nullen ist
+        # ein Code (PLZ, Kostenstelle), kein Platzhalter (test_excel_fuellwert).
+        return re.fullmatch(r"[+-]?0(?:[.,]0+)?", t) is not None
     if isinstance(wert, bool):
         return wert is False
     if isinstance(wert, (int, float)):
@@ -920,6 +972,11 @@ def _blatt_block(b: dict, ausfuehrlich: bool) -> str:
         kopfwerte = []
     if not isinstance(datenwerte, list):
         datenwerte = []
+    # Erst JETZT sind Kopfzeile und gelieferte Breite bekannt (Code-Review
+    # 2026-10-25) – der Hinweis rechnet gegen beide.
+    if kopfwerte:
+        hinweis = _spalten_hinweis(b, spalte_ab, kopf_nr=kopf_nr,
+                                   geliefert=len(kopfwerte))
     formate = (probe_formate[daten_rel - 1]
                if 0 < daten_rel <= len(probe_formate)
                and isinstance(probe_formate[daten_rel - 1], list) else [])
@@ -934,6 +991,10 @@ def _blatt_block(b: dict, ausfuehrlich: bool) -> str:
     if not kopfwerte and isinstance(b.get("kopf"), list) and b.get("kopf"):
         alt_kopf = b.get("kopf") or []
         alt_typen = b.get("typen") if isinstance(b.get("typen"), list) else []
+        # Das alte Fenster laedt nur PROBE_SPALTEN – gegen die gelieferte
+        # Breite rechnen, sonst bleibt der Hinweis genau hier stumm.
+        hinweis = _spalten_hinweis(b, spalte_ab, kopf_nr=zeile_ab,
+                                   geliefert=len(alt_kopf))
         paare = []
         for k, spaltenname in enumerate(alt_kopf[:MAX_SPALTEN_ANZEIGE]):
             txt = "%s=%s" % (spaltenbuchstabe(spalte_ab + k),
@@ -1259,7 +1320,9 @@ WAS DU SIEHST UND WAS NICHT
   nicht das Ende der Tabelle**; sie wurde nur nicht mitgeschickt. Brich eine
   Aufgabe dort NIEMALS ab und begründe sie auch nicht damit: fordere die
   fehlenden Köpfe mit der Adresse aus dem Hinweis nach. Soll über die ganze
-  Breite gearbeitet werden, ist das Nachfordern Pflicht, keine Option.
+  Breite gearbeitet werden, ist das Nachfordern Pflicht, keine Option – AUSSER
+  der Auftrag sagt „LETZTE RUNDE“: dann nennst du die nicht gelisteten Spalten
+  als offen, statt nachzufordern.
 - **Brauchst du Daten, die nicht dastehen, rate NICHT.** Schreibe stattdessen in
   eine eigene Zeile:
       [[EXCEL_BRAUCHE: Blattname!A1:D200]]
@@ -1473,7 +1536,10 @@ def auftrag(frage: str, ueberblick: dict, vorgeschichte: list | None = None,
             "Benutzer tun kann (z. B. den Bereich kleiner wählen oder die "
             "Frage auf einen Teil der Spalten eingrenzen). Eine leere "
             "Antwort ist das schlechteste Ergebnis – sie sieht für den "
-            "Benutzer aus wie ein Fehler seiner Frage.")
+            "Benutzer aus wie ein Fehler seiner Frage. Das hat VORRANG vor "
+            "der Regel, gekürzte Spaltenlisten nachzufordern: bearbeite die "
+            "gelisteten Spalten und nenne die übrigen (den Bereich aus dem "
+            "⚠-Hinweis) ausdrücklich als offen.")
         teile.append("")
 
     teile.append(marke % "FRAGE DES BENUTZERS")

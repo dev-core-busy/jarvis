@@ -21,6 +21,11 @@ Teil 1 laeuft ueberall (Quelltext), Teil 2 nur mit python-pptx (DEV im venv).
 import asyncio
 import re
 import sys
+# ⚠ UEBERSPRUNGEN IST NICHT BESTANDEN (2026-10-25 gemessen: sechs Waechter
+# uebersprangen lokal ohne venv ganze Abschnitte und meldeten Exit 0 – hier
+# 154 von 220 Pruefungen). Was mangels Modul nicht laufen kann, wird vermerkt;
+# ohne echten Befund endet der Lauf dann mit Exit 2 ("konnte nicht laufen").
+_UEBERSPRUNGEN: list = []
 import zipfile
 from pathlib import Path
 
@@ -93,6 +98,7 @@ try:
 except Exception as e:  # noqa: BLE001
     HAT_PPTX = False
     print(f"  … uebersprungen: {type(e).__name__} ({e}) – auf DEV im venv ausfuehren")
+    _UEBERSPRUNGEN.append(f"erzeugte Vorlage ({type(e).__name__}: {e})")
 
 if HAT_PPTX:
     # _hex: Farbnormierung
@@ -254,6 +260,46 @@ if HAT_PPTX:
     gleich = VO.sicherstellen(ziel)
     pruefe(gleich == ziel and ziel.stat().st_mtime_ns == vor,
            "sicherstellen() erzeugt eine vorhandene Vorlage NICHT neu (Handaustausch bleibt)")
+
+    # ── Gleichzeitige Erzeugung (Code-Review 2026-10-25) ────────────────────
+    # Gezaehlt wird, wie oft ERZEUGT wird – "kein Absturz" allein waere
+    # Glueckssache (das Rennen tritt nicht in jedem Lauf auf).
+    import threading as _th
+    import zipfile as _zf
+    _ziel_par = tmp / "parallel.pptx"
+    _echt_erz = VO.erzeuge
+    _zaehl = []
+    def _gezaehlt(z=None):
+        _zaehl.append(1)
+        return _echt_erz(z)
+    VO.erzeuge = _gezaehlt
+    _erg, _feh = [], []
+    def _los():
+        try:
+            _erg.append(VO.sicherstellen(_ziel_par))
+        except Exception as e:  # noqa: BLE001
+            _feh.append(repr(e))
+    try:
+        _faeden = [_th.Thread(target=_los) for _ in range(4)]
+        for _f in _faeden:
+            _f.start()
+        for _f in _faeden:
+            _f.join(180)
+    finally:
+        VO.erzeuge = _echt_erz
+    pruefe(not _feh and len(_erg) == 4 and all(e == _ziel_par for e in _erg),
+           "4 gleichzeitige sicherstellen(): alle bekommen die Vorlage, keiner scheitert",
+           str(_feh[:1]))
+    pruefe(len(_zaehl) == 1, "...und sie wird genau EINMAL erzeugt (Sperre)", str(len(_zaehl)))
+    _zip_ok = False
+    try:
+        with _zf.ZipFile(_ziel_par) as _z:
+            _zip_ok = _z.testzip() is None
+    except Exception:  # noqa: BLE001
+        pass
+    pruefe(_zip_ok, "...und ist ein unbeschaedigtes ZIP")
+    pruefe(not [p for p in tmp.iterdir() if p.name.startswith(".")],
+           "keine Zwischenstaende bleiben liegen")
     echt = VO.VORLAGEN_DIR / VO.STANDARD_NAME
     pruefe(VO.loese_vorlage("../../data/settings.json").name.endswith(".pptx"),
            "Pfadanteile im Vorlagennamen werden verworfen")
@@ -382,18 +428,38 @@ pruefe("_pptx_tpl_pruefen" in fenster, "Upload prueft die Datei vor dem Ablegen"
 pruefe("ppt/presentation.xml" in MAIN,
        "Pruefung schaut in den ZIP-Inhalt (nicht nur auf die Endung)")
 pruefe("_PPTX_TPL_MAX_BYTES" in MAIN and "25 * 1024 * 1024" in MAIN, "Groessengrenze gesetzt")
-pruefe('re.sub(r"[^A-Za-z0-9_\\-. ]+"' in fenster,
+# Seit 2026-10-25 entschaerft EIN Helfer den Namen fuer pptx UND docx
+# (_vorlagen_dateiname); sein VERHALTEN misst test_vorlagen_upload.py mit
+# echten Namen ("Angebot.neu.dotx", ".intern.pptx", "../../etc/passwd").
+# Seit dem Zusammenlegen (2026-10-25) stehen Ablegen und Loeschen in
+# gemeinsamen Helfern fuer pptx UND docx – geprueft wird beides: der Endpunkt
+# ruft den Helfer mit SEINER Endung, und der Helfer haelt die Zusage. Die
+# Helfer werden per Syntaxbaum geschnitten, nicht ueber ein Zeichenfenster.
+import ast as _ast
+_mbaum = _ast.parse(MAIN)
+def _fn_src(name):
+    k = next((n for n in _mbaum.body if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef))
+              and n.name == name), None)
+    return _ast.get_source_segment(MAIN, k) if k else ""
+_hilf = _fn_src("_vorlagen_dateiname")
+_ablegen = _fn_src("_vorlage_ablegen")
+_loeschen = _fn_src("_vorlage_loeschen")
+fenster = _fn_src("upload_branding_pptx_template") or fenster
+pruefe('_vorlage_ablegen(' in fenster and '".pptx"' in fenster
+       and '_vorlagen_dateiname(dateiname, endung)' in _ablegen
+       and 're.sub(r"[^A-Za-z0-9_\\-. ]+"' in _hilf,
        "Dateiname wird entschaerft (kommt aus einem Datei-Dialog)")
-pruefe("Path(file.filename" in fenster and ".name" in fenster,
+pruefe("Path(dateiname" in _hilf and ".name" in _hilf,
        "nur der Basisname wird verwendet (keine Pfadanteile)")
-pruefe('ziel.with_suffix(".upload.tmp")' in fenster and "tmp.replace(ziel)" in fenster,
+pruefe('ziel.with_suffix(".upload.tmp")' in _ablegen and "tmp.replace(ziel)" in _ablegen,
        "erst danebenschreiben, dann umbenennen (keine halbe Vorlage bei Abbruch)")
-pruefe("potx" in MAIN and 'f"{rein[:60]}.pptx"' in fenster,
+pruefe("potx" in MAIN and '_vorlage_ablegen(' in fenster and '".pptx"' in fenster,
        ".potx wird als .pptx abgelegt (der Skill sucht *.pptx)")
-i_del = MAIN.find('@app.delete("/api/branding/pptx-template")')
-pruefe("Path(str(name or \"\")).name" in MAIN[i_del:i_del + 900],
+_del_ep = _fn_src("delete_branding_pptx_template")
+pruefe('_vorlage_loeschen(v, name, ".pptx")' in _del_ep
+       and "Path(str(name or \"\")).name" in _loeschen,
        "Loeschen akzeptiert keinen Pfad")
-pruefe("status_code=404" in MAIN[i_del:i_del + 1600], "unbekannte Vorlage -> 404")
+pruefe("status_code=404" in _loeschen, "unbekannte Vorlage -> 404")
 i_reg = MAIN.find('@app.post("/api/branding/pptx-template/regenerate")')
 pruefe("v.erzeuge()" in MAIN[i_reg:i_reg + 800],
        "Neuerzeugen ruft erzeuge() (nicht sicherstellen – das wuerde nichts tun)")
@@ -957,4 +1023,7 @@ if HAT_PPTX:
 print(f"\n{'=' * 62}\nErgebnis: {_ok}/{_ok + _fail} Pruefungen bestanden")
 if _fail:
     print(f"FEHLGESCHLAGEN: {_fail}")
+if not _fail and _UEBERSPRUNGEN:
+    print("UNVOLLSTAENDIG (Exit 2): uebersprungen – " + "; ".join(_UEBERSPRUNGEN))
+    sys.exit(2)
 sys.exit(1 if _fail else 0)

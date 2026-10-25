@@ -75,7 +75,13 @@ def sicher(fn, *a, **kw):
 def harness():
     baum = ast.parse(QUELLE.read_text(encoding="utf-8"))
     teile = []
-    gefunden = {"const": False, "reminder": False, "prop": False}
+    # ⚠ `_llm_tools` ruft seit 2026-10-25 `_gesperrte_weg` (SAP/VEMAS/MCP aus
+    # dem Angebot) – das ECHTE Stueck wird mitgeschnitten, samt seiner zwei
+    # Helfer, sonst stirbt der Pruefstand an einem AttributeError (Register:
+    # wer eine geteilte Funktion erweitert, zieht die Prologe mit).
+    gefunden = {"const": False, "reminder": False, "prop": False, "gesperrt": False,
+                "mcp_tool": False, "mcp_frei": False, "prefix": False}
+    methoden = []
     for knoten in baum.body:
         if isinstance(knoten, ast.Assign) and any(
                 isinstance(t, ast.Name) and t.id == "_BLOCKED_TOOLS_FOR_LDAP" for t in knoten.targets):
@@ -84,17 +90,30 @@ def harness():
         if isinstance(knoten, ast.FunctionDef) and knoten.name == "_reminder_exempt":
             teile.append(ast.get_source_segment(QUELLE.read_text(encoding="utf-8"), knoten))
             gefunden["reminder"] = True
+        if isinstance(knoten, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == "_MCP_TOOL_PREFIX" for t in knoten.targets):
+            teile.append(ast.get_source_segment(QUELLE.read_text(encoding="utf-8"), knoten))
+            gefunden["prefix"] = True
+        for fname, schl in (("_ist_mcp_tool", "mcp_tool"), ("_mcp_freigegeben", "mcp_frei")):
+            if isinstance(knoten, ast.FunctionDef) and knoten.name == fname:
+                teile.append(ast.get_source_segment(QUELLE.read_text(encoding="utf-8"), knoten))
+                gefunden[schl] = True
         if isinstance(knoten, ast.ClassDef):
             for m in knoten.body:
                 if isinstance(m, ast.FunctionDef) and m.name == "_llm_tools":
                     quelle = ast.get_source_segment(QUELLE.read_text(encoding="utf-8"), m)
                     # Dekorator (@property) steht nicht im Segment
-                    teile.append("class _Agent:\n    @property\n"
-                                 + "\n".join("    " + z for z in quelle.splitlines()))
+                    methoden.append("    @property\n"
+                                    + "\n".join("    " + z for z in quelle.splitlines()))
                     gefunden["prop"] = True
+                if isinstance(m, ast.FunctionDef) and m.name == "_gesperrte_weg":
+                    quelle = ast.get_source_segment(QUELLE.read_text(encoding="utf-8"), m)
+                    methoden.append("\n".join("    " + z for z in quelle.splitlines()))
+                    gefunden["gesperrt"] = True
     if not all(gefunden.values()):
         print(f"ABBRUCH: Schnitt unvollstaendig {gefunden}")
         sys.exit(2)
+    teile.append("class _Agent:\n" + "\n\n".join(methoden))
     ns = {}
     exec("\n\n".join(teile), ns)  # noqa: S102
     return ns
@@ -110,6 +129,8 @@ def agent(ns, tools, privilegiert=False, benutzer="firma\\test", rolle=None):
     a._tool_instances = [Werkzeug(n) for n in tools]
     a._actor_is_privileged = lambda: privilegiert
     a.actor_name = lambda: benutzer
+    # Der Buendel-Zuschnitt ist hier nicht Gegenstand – durchreichen.
+    a._buendel_zuschnitt = lambda tools: tools
     if rolle is not None:
         a._role_tools = rolle
     return a

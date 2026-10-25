@@ -1,20 +1,20 @@
 /* Jarvis – wiederverwendbares Freigabe-Popup (Benutzer UND Gruppen).
  *
  * Fuer jede Stelle, an der ein EINZELNER Eintrag (ein MCP-Server, kuenftig
- * weitere) eine eigene Freigabe traegt – dieselbe Bauform wie die Bereiche unter
+ * weitere) eine eigene Freigabe traegt – dieselbe Regel wie die Bereiche unter
  * Einstellungen -> Sicherheit -> Berechtigungen: Benutzerliste (kommagetrennt)
  * ODER Gruppen-DNs (zeilengetrennt, DNs enthalten Kommas), ODER-verknuepft,
- * leer = niemand. Optional eine dritte Stufe "alle Netzwerk-Benutzer".
+ * **leer = niemand, auch kein Administrator**. Bewusst KEINE Stufen wie
+ * "alle" oder "nur Administratoren" (Festlegung des Betreibers 2026-10-25):
+ * die gibt es bei keiner anderen Freigabe.
  *
  *   JarvisFreigabe.oeffnen({
  *       titel:     'Berechtigungen – theben',
  *       hinweis:   'Wer darf …',                     // optional
- *       mitAlle:   true,                              // Stufe "alle" anbieten
- *       alleBestaetigen: 'Wirklich alle …?',          // optional, Rueckfrage
- *       wert:      { alle: false, users: 'a, b', groups: 'CN=…\nCN=…' },
+ *       wert:      { users: 'a, b', groups: 'CN=…\nCN=…' },
  *       speichern: async (wert) => { … }             // wirft bei Fehler
  *   });
- *   JarvisFreigabe.zusammenfassung(wert)  -> 'nur Administratoren' | …
+ *   JarvisFreigabe.zusammenfassung(wert)  -> 'niemand' | '2 Benutzer · 1 Gruppe' 
  *
  * Die Verzeichnis-Suche kommt aus ldap_picker.js (attachField) – dieselben
  * Chip-Listen mit "Durchsuchen" wie in den Berechtigungen. Fehlt der Picker,
@@ -45,15 +45,12 @@
 
     function art(wert) {
         if (!wert) return 'keine';
-        if (wert.alle === true) return 'alle';
         if (teile(wert.users, 'users').length || teile(wert.groups, 'groups').length) return 'auswahl';
         return 'keine';
     }
 
     function zusammenfassung(wert) {
-        var a = art(wert);
-        if (a === 'alle') return T('frg.sum_all', 'alle Netzwerk-Benutzer');
-        if (a === 'keine') return T('frg.sum_none', 'nur Administratoren');
+        if (art(wert) === 'keine') return T('frg.sum_none', 'niemand');
         var nu = teile(wert.users, 'users').length;
         var ng = teile(wert.groups, 'groups').length;
         var teileTxt = [];
@@ -77,11 +74,6 @@
               '</div>' +
               '<div class="modal-body frg-body">' +
                 '<p class="frg-hinweis" id="frg-hinweis"></p>' +
-                '<div class="frg-stufen" role="radiogroup">' +
-                  '<label class="frg-stufe"><input type="radio" name="frg-art" value="keine"> <span id="frg-l-keine"></span></label>' +
-                  '<label class="frg-stufe" id="frg-stufe-alle"><input type="radio" name="frg-art" value="alle"> <span id="frg-l-alle"></span></label>' +
-                  '<label class="frg-stufe"><input type="radio" name="frg-art" value="auswahl"> <span id="frg-l-auswahl"></span></label>' +
-                '</div>' +
                 '<div class="frg-auswahl" id="frg-auswahl">' +
                   '<div class="frg-feld"><div class="frg-feld-titel" id="frg-l-users"></div>' +
                     '<div class="frg-feld-inhalt" id="frg-users-wrap"></div></div>' +
@@ -105,9 +97,6 @@
         el('frg-abbrechen').addEventListener('click', schliessen);
         el('frg-speichern').addEventListener('click', speichern);
         m.addEventListener('click', function (e) { if (e.target === m) schliessen(); });
-        m.querySelectorAll('input[name="frg-art"]').forEach(function (r) {
-            r.addEventListener('change', function () { stufeZeigen(); });
-        });
         document.addEventListener('keydown', function (e) {
             if (e.key !== 'Escape' || !offen()) return;
             // Der Verzeichnis-Picker liegt darueber und schliesst sich selbst.
@@ -146,11 +135,6 @@
         return inp;
     }
 
-    function stufeZeigen() {
-        var gew = document.querySelector('#frg-modal input[name="frg-art"]:checked');
-        el('frg-auswahl').style.display = (gew && gew.value === 'auswahl') ? '' : 'none';
-    }
-
     function oeffnen(opt) {
         aufbauen();
         _opt = opt || {};
@@ -158,26 +142,15 @@
         el('frg-titel').textContent = _opt.titel || T('frg.title', 'Berechtigungen');
         el('frg-hinweis').textContent = _opt.hinweis || '';
         el('frg-hinweis').style.display = _opt.hinweis ? '' : 'none';
-        el('frg-l-keine').textContent = T('frg.only_admins', 'Nur Administratoren');
-        el('frg-l-alle').textContent = T('frg.all', 'Alle Netzwerk-Benutzer');
-        el('frg-l-auswahl').textContent = T('frg.selected', 'Ausgewählte Benutzer und Gruppen');
         el('frg-l-users').textContent = T('frg.users', 'Benutzer');
         el('frg-l-groups').textContent = T('frg.groups', 'Gruppen');
-        el('frg-oder').textContent = T('frg.or_hint', 'Benutzer und Gruppen gelten zusammen: wer in einer der beiden Listen steht, darf.');
+        el('frg-oder').textContent = T('frg.or_hint', 'Wer in einer der beiden Listen steht, darf. Sind beide leer, darf niemand – auch kein Administrator.');
         el('frg-abbrechen').textContent = T('common.cancel', 'Abbrechen');
         el('frg-speichern').textContent = T('frg.save', 'Übernehmen');
         el('frg-zu').setAttribute('aria-label', T('common.close', 'Schließen'));
-        el('frg-stufe-alle').style.display = _opt.mitAlle ? '' : 'none';
         el('frg-fehler').textContent = '';
-
-        var a = art(wert);
-        if (a === 'alle' && !_opt.mitAlle) a = 'keine';
-        document.querySelectorAll('#frg-modal input[name="frg-art"]').forEach(function (r) {
-            r.checked = (r.value === a);
-        });
         feldAnlegen('frg-users-wrap', 'users', wert.users);
         feldAnlegen('frg-groups-wrap', 'groups', wert.groups);
-        stufeZeigen();
         el('frg-modal').classList.add('open');
     }
 
@@ -188,30 +161,17 @@
     }
 
     function lesen() {
-        var gew = document.querySelector('#frg-modal input[name="frg-art"]:checked');
-        var a = gew ? gew.value : 'keine';
         var u = document.querySelector('#frg-modal [data-frg="users"]');
         var g = document.querySelector('#frg-modal [data-frg="groups"]');
-        if (a === 'auswahl') {
-            return {
-                alle: false,
-                users: teile(u && u.value, 'users').join(JOIN.users),
-                groups: teile(g && g.value, 'groups').join(JOIN.groups)
-            };
-        }
-        // "Nur Administratoren" und "alle" leeren die Listen: eine liegen-
-        // gebliebene Liste unter "alle" waere eine Freigabe, die niemand sieht.
-        return { alle: a === 'alle', users: '', groups: '' };
+        return {
+            users: teile(u && u.value, 'users').join(JOIN.users),
+            groups: teile(g && g.value, 'groups').join(JOIN.groups)
+        };
     }
 
     async function speichern() {
         if (!_opt) return;
         var wert = lesen();
-        var vorher = art(_opt.wert || {});
-        if (wert.alle && vorher !== 'alle' && _opt.alleBestaetigen
-                && !window.confirm(_opt.alleBestaetigen)) {
-            return;
-        }
         var knopf = el('frg-speichern');
         knopf.disabled = true;
         el('frg-fehler').textContent = '';

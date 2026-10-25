@@ -711,12 +711,17 @@ body.light .model-discover-item:hover { background-color: #eef0f4 !important; }
     justify-content: space-between;
     align-items: center;
     gap: 0.5rem;
+    flex-wrap: wrap;
 }
+/* Viele Marken (Transport, Zertifikat, Freigabe, Schluessel …) brechen um,
+   statt die Aktionen aus der Karte zu schieben (Register: Flex-Leiste). */
 .mcp-card-title {
     display: flex;
     align-items: center;
     gap: 0.5rem;
     font-size: 0.95rem;
+    flex-wrap: wrap;
+    min-width: 0;
 }
 .mcp-card-actions {
     display: flex;
@@ -825,18 +830,43 @@ body.light .mcp-cert-fehler {
     font-size: 0.8rem; color: var(--text-secondary);
     cursor: pointer;
 }
-.mcp-toggle input { cursor: pointer; }
-/* Eigene Zeile unter dem Status (Berechtigungen, API-Schluessel) – nicht in
-   die Kopfzeile, dort steht schon der Aktiv-Schalter. */
-.mcp-zeile {
-    display: flex; flex-wrap: wrap; gap: 0.4rem;
-    margin-top: 0.4rem;
-    padding-top: 0.4rem;
+/* Kaestchen in der Markenfarbe statt Browser-Blau (Branding setzt --accent). */
+.mcp-toggle input, .mcp-form input[type="checkbox"] { cursor: pointer; accent-color: var(--accent); }
+/* Einstellungen IN der Karte (einklappbarer Teil): ohne eigenen Kasten-Rahmen,
+   abgesetzt durch eine Trennlinie – die Karte ist schon der Kasten. */
+.mcp-form-fach:empty { display: none; }
+.mcp-form.mcp-form-inline {
+    margin: 0.6rem 0 0;
+    padding: 0.7rem 0 0;
+    border: none;
     border-top: 1px solid var(--border);
+    border-radius: 0;
+    background: transparent;
 }
-.mcp-key:empty { display: none; }
-.mcp-key-box { margin: 0.5rem 0 0; }
-.mcp-key-box .mcp-btn-danger { display: inline-flex; align-items: center; gap: 0.2rem; }
+.mcp-form-inline h4 { font-size: 0.88rem; }
+/* Einklappbare Serverkarte: Kopfzeile und Status bleiben sichtbar, der Rest
+   (Zertifikat, Berechtigungen, Werkzeugliste) klappt weg. */
+.mcp-card.mcp-zu .mcp-card-body { display: none; }
+.mcp-card-header { cursor: pointer; }
+.mcp-klapp {
+    flex: 0 0 auto;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; padding: 0;
+    background: transparent; border: none; border-radius: 6px;
+    color: var(--text-secondary); cursor: pointer;
+}
+.mcp-klapp:hover { background: rgba(var(--fg-rgb), 0.08); color: var(--accent); }
+.mcp-klapp:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Pfeil aus zwei Kanten – kein Emoji (folgt Theme und Markenfarbe). */
+.mcp-klapp-pfeil {
+    width: 7px; height: 7px;
+    border-right: 2px solid currentColor; border-bottom: 2px solid currentColor;
+    transform: rotate(45deg); margin-top: -3px;
+    transition: transform 0.15s ease;
+}
+.mcp-card.mcp-zu .mcp-klapp-pfeil { transform: rotate(-45deg); margin-top: 0; margin-left: -3px; }
+.mcp-btn-ico { display: inline-flex; align-items: center; justify-content: center; }
+.mcp-btn-ico:hover { color: var(--accent); }
 .mcp-btn-sm {
     background: transparent;
     border: 1px solid var(--border);
@@ -851,17 +881,30 @@ body.light .mcp-cert-fehler {
 /* Text- statt Symbolknopf ("Zertifikat pruefen"): darf nicht umbrechen, sonst
    steht er zweizeilig neben den Symbolknoepfen und verschiebt die Zeile. */
 .mcp-btn-cert { white-space: nowrap; }
-.mcp-btn-danger:hover { background: rgba(239,68,68,0.2); color: #ef4444; }
+.mcp-btn-danger:hover { background: color-mix(in srgb, var(--danger) 20%, transparent); color: var(--danger); }
+body.light .mcp-btn-danger:hover { color: color-mix(in srgb, var(--danger) 78%, #000); }
+/* Hauptaktion in der Markenfarbe (Branding setzt --accent und --text-on-accent). */
 .mcp-btn-primary {
     background: var(--accent);
-    color: #fff;
+    color: var(--text-on-accent);
     border: none;
     border-radius: 8px;
     padding: 0.5rem 1.2rem;
     font-size: 0.9rem;
     cursor: pointer;
 }
-.mcp-btn-primary:hover { filter: brightness(1.15); }
+.mcp-btn-primary:hover { background: var(--accent-hover, var(--accent)); }
+.mcp-btn-primary:disabled { opacity: 0.6; cursor: default; }
+/* Erklaerung im MCP-Reiter: gleiche Flaeche wie die Serverkarten. */
+.mcp-erklaerung {
+    margin: 0 0 1rem;
+    padding: 0.6rem 0.9rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: rgba(var(--fg-rgb), 0.03);
+}
+.mcp-erklaerung summary { cursor: pointer; font-weight: 600; color: var(--text-primary); font-size: 0.88rem; }
+.mcp-erklaerung p { margin: 0.5rem 0 0; font-size: 0.84rem; line-height: 1.5; color: var(--text-secondary); }
 .mcp-tools-list {
     margin-top: 0.5rem;
     font-size: 0.8rem;

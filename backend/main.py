@@ -7179,6 +7179,10 @@ async def add_mcp_server(request: Request, user: str = Depends(require_local_aut
     # Der API-Schluessel verlaesst das Backend nie – nur ob einer hinterlegt ist.
     return JSONResponse(ohne_geheimnisse(server))
 
+# Felder, deren Aenderung KEINE neue Verbindung braucht (siehe update_mcp_server).
+MCP_NUR_FREIGABE = frozenset({"allowed_users", "allowed_group"})
+
+
 @app.put("/api/mcp/servers/{server_id}")
 async def update_mcp_server(server_id: str, request: Request, user: str = Depends(require_local_auth)):
     """Aktualisiert einen MCP-Server und verbindet bzw. trennt ihn je nach Aktivierungsstatus."""
@@ -7190,10 +7194,16 @@ async def update_mcp_server(server_id: str, request: Request, user: str = Depend
     result = config.update_mcp_server(server_id, data)
     if not result:
         return JSONResponse({"detail": "Server nicht gefunden"}, status_code=404)
-    # Neu verbinden wenn aktiviert. Der Neuaufbau ist hier PFLICHT und nicht nur
-    # Aufraeumen: `McpRemoteTool.erlaubt_netzwerk_benutzer` wird beim Bau des
-    # Werkzeugs aus der Server-Config gelesen – ohne Reconnect traegt ein
-    # bestehendes Werkzeug weiter die alte Freigabe.
+    # ⚠ NUR DIE FREIGABE GEAENDERT -> KEIN NEUAUFBAU (Code-Review 2026-10-25).
+    # `connect_server` trennt die laufende Sitzung: Werkzeugaufrufe ANDERER
+    # Benutzer auf demselben Server brachen ab, und der Request hing bis zum
+    # Verbindungsdeckel. Die Freigabe liest `McpRemoteTool.erlaubt_fuer` ohnehin
+    # bei jedem Aufruf neu – ein Neuaufbau aendert daran nichts.
+    if data and set(data) <= MCP_NUR_FREIGABE:
+        return JSONResponse(ohne_geheimnisse(result))
+    # Neu verbinden wenn aktiviert – Adresse, Schluessel und Zertifikat wirken
+    # erst mit einer neuen Verbindung. (Die Freigabe selbst liest
+    # `McpRemoteTool.erlaubt_fuer` bei jedem Aufruf neu aus der Konfiguration.)
     if result.get("enabled"):
         await mcp_manager.connect_server(server_id)
     else:
@@ -7229,6 +7239,37 @@ async def reconnect_mcp_server(server_id: str, user: str = Depends(require_local
     success = await mcp_manager.connect_server(server_id)
     _reload_agent_tools()
     return JSONResponse({"ok": success})
+
+
+@app.get("/api/mcp/servers/{server_id}/konfig")
+async def mcp_server_konfig(server_id: str, user: str = Depends(require_local_auth)):
+    """Konfiguration EINES Servers fuer das Bearbeiten-Formular – ohne Geheimnisse.
+
+    ⚠ ``env`` kann Zugangsdaten tragen (GITHUB_TOKEN & Co.) und ``api_key`` ist
+    eines: von beiden gehen nur die NAMEN bzw. "gesetzt" heraus. Das Formular
+    behandelt ein leeres Feld deshalb als "unveraendert" (Register: "leer =
+    unveraendert" ist eine Zusage, die die Oberflaeche nennen muss). Ein
+    Zertifikat als PEM-Block geht ebenfalls nicht heraus (lang, und in einer
+    Maske sucht niemand danach) – ein PFAD schon, er ist Konfiguration.
+    """
+    from backend.mcp_tls import ist_pem
+    srv = next((s for s in config.get_mcp_servers() if s.get("id") == server_id), None)
+    if srv is None:
+        return JSONResponse({"detail": "Server nicht gefunden"}, status_code=404)
+    ca = str(srv.get("ca_cert") or "").strip()
+    return JSONResponse({
+        "id": srv.get("id"), "name": srv.get("name", ""),
+        "transport": srv.get("transport", "stdio"),
+        "command": srv.get("command", ""), "args": list(srv.get("args") or []),
+        "url": srv.get("url", ""),
+        "sandbox": srv.get("sandbox") is not False,
+        "sandbox_paths": list(srv.get("sandbox_paths") or []),
+        "env_namen": sorted((srv.get("env") or {}).keys()),
+        "ca_cert_art": "pem" if ist_pem(ca) else ("pfad" if ca else ""),
+        "ca_cert_pfad": "" if ist_pem(ca) else ca,
+        "api_key_gesetzt": bool(str(srv.get("api_key") or "").strip()),
+        "api_key_header": srv.get("api_key_header", ""),
+    })
 
 
 @app.get("/api/mcp/servers/{server_id}/zertifikat")

@@ -585,6 +585,13 @@ def hinweis_ohne_dialog(name: str) -> str:
             "im Browser auslösen kann. Versuche sie NICHT auf anderem Weg.")
 
 
+def hinweis_pflicht_fehlt(name: str, felder: list) -> str:
+    return (f"NICHT AUSGEFÜHRT: '{name}' wurde freigegeben, aber das Pflichtfeld "
+            f"{', '.join(repr(f) for f in felder)} war leer. Frage den Benutzer nach "
+            "dem fehlenden Wert und rufe das Werkzeug dann erneut auf – die "
+            "Bestätigungskarte erscheint dabei wieder.")
+
+
 def hinweis_abgelehnt(name: str) -> str:
     # Die erste Fassung ("hat nicht freigegeben") las das Modell auf DEV als
     # RECHTEFRAGE und riet dem Benutzer, sich an einen Admin zu wenden
@@ -712,7 +719,20 @@ async def freigabe(name: str, args: dict, klasse: str, exec_args: dict) -> "str 
               f"{'FREIGEGEBEN' if erlaubt else 'ABGELEHNT'}{nachtrag}", flush=True)
         if not erlaubt:
             _verweigert_merken(name, "abgelehnt")
-        return None if erlaubt else hinweis_abgelehnt(name)
+            return hinweis_abgelehnt(name)
+        # ⚠ PFLICHTFELDER AUCH HIER PRUEFEN, nicht nur in der Oberflaeche
+        # (Code-Review 2026-10-25). Die Karte sperrt "Ausfuehren" bis zum
+        # Fuellen – aber ein Client mit altem Stand im Cache oder eine eigene
+        # WS-Nachricht schickt `erlaubt` auch ohne Empfaenger, und `uebernehmen`
+        # laesst einen Leerwert stehen. Dann liefe das Werkzeug ohne Empfaenger.
+        fehlt = [f for f in pflichtfelder(name)
+                 if not str((exec_args or {}).get(f) or "").strip()]
+        if fehlt:
+            erledigt_grund = "pflicht"
+            print(f"[H9] {name} fuer '{kanal.username}': freigegeben, aber "
+                  f"Pflichtfeld(er) leer {fehlt} – NICHT ausgefuehrt", flush=True)
+            return hinweis_pflicht_fehlt(name, fehlt)
+        return None
     finally:
         _offen.pop(kennung, None)
         # Die Oberflaeche erfaehrt, dass die Karte nicht mehr wartet – auch bei

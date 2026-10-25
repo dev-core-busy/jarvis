@@ -3,8 +3,8 @@
 
 Was festgehalten wird:
 
-1. ``mcp_rechte.darf_benutzen`` – drei Stufen (alle / Auswahl / niemand),
-   Benutzer UND Gruppen ODER-verknuepft, leer = niemand, fail-closed.
+1. ``mcp_rechte.darf_benutzen`` – Benutzer UND Gruppen ODER-verknuepft,
+   leer = niemand (auch kein Admin), kein "alle" mehr, fail-closed.
 2. ``norm_login`` ist dieselbe Regel wie ``main._norm_login`` (die Kopie
    existiert, damit das Modul ohne ``backend.main`` laeuft – also muss die
    Gleichheit GEMESSEN werden, nicht angenommen).
@@ -90,10 +90,9 @@ print("\n1. darf_benutzen")
 D = lambda srv, u, dns=None: R.darf_benutzen(srv, u, gruppen_dns=dns or [], gruppe_passt=_passt)
 check(D(None, "a") is False, "kein Server: nein")
 check(D({}, "a") is False, "leer = niemand")
-check(D({"allow_network_users": True}, "a") is True, "Stufe alle: ja")
-for wert in ("ja", 1, "true", None, False):
+for wert in (True, "ja", 1, "true", None, False):
     check(D({"allow_network_users": wert}, "a") is False,
-          f"allow_network_users={wert!r} ist keine Freigabe")
+          f"Altschalter allow_network_users={wert!r} gibt nichts frei")
 check(D({"allowed_users": "a.b, c.d"}, "C.D") is True, "Benutzerliste, Gross/Klein")
 check(D({"allowed_users": "FIRMA\\c.d"}, "c.d@firma.local") is True,
       "Normalisierung auf BEIDEN Seiten (Domain-Praefix gegen UPN)")
@@ -118,6 +117,40 @@ check(R.darf_benutzen({"allowed_group": G1}, "x", gruppe_passt=_wirft) is False,
 check(R.freigabe_art({"allowed_users": " , "}) == "keine",
       "Liste nur aus Trennern zaehlt als leer")
 
+# ── 1b. Altschalter wird beim Start gemeldet, nicht still ──────────────────
+print("\n1b. altschalter_ohne_freigabe")
+_alt = R.altschalter_ohne_freigabe([
+    {"name": "a", "allow_network_users": True},
+    {"name": "b", "allow_network_users": True, "allowed_users": "x"},
+    {"name": "c"}, {"name": "d", "allow_network_users": "ja"}, "kaputt"])
+check(_alt == ["a"], f"nur 'Altschalter UND leer' wird gemeldet ({_alt})")
+_ca = ast.unparse(_funktion((ROOT / "backend" / "mcp_client.py").read_text(encoding="utf-8"),
+                            "connect_all", klasse="McpClientManager"))
+# connect_all WIRKLICH ausfuehren und die Ausgabe abfangen – "der Aufruf
+# kommt vor" waere ein Vorkommen, keine Wirkung (Register; die Gegenprobe
+# `if False:` blieb damit stumm).
+import asyncio as _aio  # noqa: E402
+import contextlib as _ctx  # noqa: E402
+import io as _io  # noqa: E402
+_cafn = _funktion((ROOT / "backend" / "mcp_client.py").read_text(encoding="utf-8"),
+                  "connect_all", klasse="McpClientManager")
+
+
+class _CfgA:
+    def get_mcp_servers(self):
+        return [{"id": "1", "name": "altserver", "allow_network_users": True, "enabled": False}]
+
+
+_cans = {"config": _CfgA(), "mcp_rechte": R}
+exec(compile(ast.fix_missing_locations(ast.Module(body=[ast.ClassDef(
+    name="_M", bases=[], keywords=[], decorator_list=[], type_params=[], body=[_cafn])],
+    type_ignores=[])), "mcp", "exec"), _cans)
+_puf = _io.StringIO()
+with _ctx.redirect_stdout(_puf):
+    _aio.run(_cans["_M"]().connect_all())
+check("altserver" in _puf.getvalue() and "NIEMAND" in _puf.getvalue(),
+      "connect_all meldet den Altschalter beim Start im Journal (ausgefuehrt)")
+
 # ── 2. norm_login == main._norm_login ───────────────────────────────────────
 print("\n2. norm_login gleich main._norm_login")
 _ns = {}
@@ -130,10 +163,10 @@ for probe in ["FIRMA\\M.Muster", "m.muster@firma.local", "  M.MUSTER ", "",
 # ── 3. Freigabefelder normalisieren ─────────────────────────────────────────
 print("\n3. freigabe_normalisieren")
 n = R.freigabe_normalisieren({"allowed_users": " a , ,b ", "allowed_group": f"\n{G1}\n\n{G2} \n",
-                               "allow_network_users": "ja"})
+                               "allow_network_users": True})
 check(n.get("allowed_users") == "a, b", "Benutzer: getrimmt, leere weg")
 check(n.get("allowed_group") == f"{G1}\n{G2}", "Gruppen: zeilengetrennt, leere weg")
-check(n.get("allow_network_users") is False, '"ja" wird False')
+check("allow_network_users" not in n, "Altschalter wird nicht uebernommen")
 check(R.freigabe_normalisieren({}) == {}, "nicht gesendet = nicht angefasst (Teil-Update)")
 
 # ── 4. API-Schluessel ───────────────────────────────────────────────────────
@@ -198,25 +231,26 @@ me = _Self()
 srv = add(me, {"name": "t", "transport": "streamable_http", "url": "https://h/mcp",
                "api_key": " k1 ", "api_key_header": "X-API-Key",
                "allowed_users": "a, b", "allowed_group": G1, "allow_network_users": True})
+check("allow_network_users" not in srv, "add: Altschalter wird nicht geschrieben")
 check(srv["api_key"] == "k1" and srv["api_key_header"] == "X-API-Key",
       "add: Schluessel + Header gespeichert")
 check(srv["allowed_users"] == "a, b" and srv["allowed_group"] == G1,
       "add: Benutzer + Gruppen gespeichert")
-check(srv["allow_network_users"] is True, "add: Stufe alle gespeichert")
 srv2 = add(me, {"name": "u"})
 check(srv2.get("allowed_users") == "" and srv2.get("allowed_group") == ""
       and srv2.get("api_key") == "",
       "add ohne Angaben: leer (= nur Administratoren)")
 sid = srv["id"]
+me._mcp_servers[0]["allow_network_users"] = True   # Altbestand nachstellen
 upd(me, sid, {"url": "https://h2/mcp"})
 check(me._mcp_servers[0]["api_key"] == "k1", "update OHNE api_key laesst ihn stehen")
 check(me._mcp_servers[0]["allowed_users"] == "a, b", "update ohne Freigabe laesst sie stehen")
 upd(me, sid, {"api_key": "k2", "allowed_users": "c", "allowed_group": "",
-              "allow_network_users": False})
+              })
 s0 = me._mcp_servers[0]
 check(s0["api_key"] == "k2", "update setzt neuen Schluessel")
 check(s0["allowed_users"] == "c" and s0["allowed_group"] == "", "update setzt Freigabe")
-check(s0["allow_network_users"] is False, "update setzt Stufe alle zurueck")
+check("allow_network_users" not in s0, "update raeumt den Altschalter ab")
 upd(me, sid, {"api_key": ""})
 check(me._mcp_servers[0]["api_key"] == "", "ausdrueckliches '' entfernt den Schluessel")
 
@@ -232,7 +266,7 @@ for ep in ("add_mcp_server", "update_mcp_server"):
     gefiltert = [r for r in rueck if isinstance(r.value, ast.Call) and r.value.args
                  and isinstance(r.value.args[0], ast.Call)
                  and getattr(r.value.args[0].func, "id", "") == "ohne_geheimnisse"]
-    check(len(gefiltert) == 1, f"{ep}: Antwort geht durch ohne_geheimnisse")
+    check(len(gefiltert) >= 1, f"{ep}: Antwort geht durch ohne_geheimnisse")
     pruef = [c for c in ast.walk(f) if isinstance(c, ast.Call)
              and getattr(c.func, "id", "") == "header_name_gueltig"]
     check(bool(pruef), f"{ep}: Header-Name wird geprueft")
@@ -260,6 +294,152 @@ for meth, client in (("_connect_streamable_http", "streamablehttp_client"),
           and isinstance(kw[0].value, ast.Call)
           and getattr(kw[0].value.func, "attr", "") == "_auth_headers",
           f"{meth}: headers=self._auth_headers()")
+
+# ── 8. Angebot an das Modell = was der Dispatch zulaesst (DEV 2026-10-25) ──
+print("\n8. _gesperrte_weg / _mcp_prompt_block (agent.py)")
+AGENT_SRC = (ROOT / "backend" / "agent.py").read_text(encoding="utf-8")
+_ans = {"_MCP_TOOL_PREFIX": "mcp_"}
+_teile = [_funktion(AGENT_SRC, "_ist_mcp_tool"), _funktion(AGENT_SRC, "_mcp_freigegeben")]
+exec(compile(ast.Module(body=_teile, type_ignores=[]), "agent", "exec"), _ans)
+_klasse = ast.ClassDef(name="_A", bases=[], keywords=[], decorator_list=[], type_params=[],
+                       body=[_funktion(AGENT_SRC, "_gesperrte_weg", klasse="JarvisAgent"),
+                             _funktion(AGENT_SRC, "_mcp_prompt_block", klasse="JarvisAgent")])
+exec(compile(ast.fix_missing_locations(ast.Module(body=[_klasse], type_ignores=[])),
+             "agent", "exec"), _ans)
+
+
+class _W:
+    def __init__(self, name, mcp=False, frei=True, server=""):
+        self.name = name
+        if mcp:
+            self.ist_mcp = True
+            self._server_name = server
+            self.erlaubt_fuer = lambda b: frei
+
+
+class _Ag(_ans["_A"]):
+    def __init__(self, priv, sap=None, vemas=None, tools=()):
+        self._priv = priv
+        if sap is not None:
+            self._current_user_sap = sap
+        if vemas is not None:
+            self._current_user_vemas = vemas
+        self._tool_instances = list(tools)
+
+    def _actor_is_privileged(self):
+        return self._priv
+
+    def actor_name(self):
+        return "m.muster"
+
+
+W = [_W("sap_query"), _W("vemas_resources"), _W("vemas_discover"), _W("shell_execute"),
+     _W("mcp_theben_list_befunde", True, True, "theben"),
+     _W("mcp_geheim_x", True, False, "geheim")]
+namen = lambda ag: [t.name for t in ag._gesperrte_weg(W)]
+check([x for x in namen(_Ag(True)) if not x.startswith("mcp_")]
+      == [t.name for t in W if not t.name.startswith("mcp_")],
+      "ohne Laufwerte (Vorgabe True): SAP/VEMAS bleiben")
+n = namen(_Ag(True, sap=False, vemas=False))
+check("vemas_resources" not in n and "vemas_discover" not in n,
+      "keine VEMAS-Freigabe: vemas_* wird NICHT angeboten (der gemeldete Fall)")
+check("sap_query" not in n, "keine SAP-Freigabe: sap_* wird nicht angeboten")
+check("shell_execute" in n and "mcp_geheim_x" not in n,
+      "auch PRIVILEGIERT: nicht freigegebener MCP-Server faellt weg (kein Admin-Bypass)")
+n = namen(_Ag(False, sap=True, vemas=True))
+check("mcp_geheim_x" not in n and "mcp_theben_list_befunde" in n,
+      "unprivilegiert: nur freigegebene MCP-Server")
+check(namen(_Ag(True, sap=True, vemas=True)) == [t.name for t in W if t.name != "mcp_geheim_x"],
+      "mit Freigaben: alles Erlaubte bleibt, Reihenfolge unveraendert (Prompt-Cache)")
+
+_llm = ast.unparse(_funktion(AGENT_SRC, "_llm_tools", klasse="JarvisAgent"))
+check("self._gesperrte_weg(self._tool_instances)" in _llm,
+      "_llm_tools filtert VOR der Rollen-Whitelist (gilt auch fuer Rollen)")
+_bloecke = [c for c in ast.walk(ast.parse(AGENT_SRC)) if isinstance(c, ast.Call)
+            and getattr(c.func, "attr", "") == "_mcp_prompt_block"]
+check(len(_bloecke) == 2, f"MCP-Block in BEIDEN Prompt-Wegen (Chat + headless): {len(_bloecke)}")
+
+import types  # noqa: E402
+_fake = types.ModuleType("backend.mcp_client")
+
+
+class _Mgr:
+    def get_status(self):
+        return [{"name": "theben", "enabled": True, "connected": True},
+                {"name": "kaputt", "enabled": True, "connected": False,
+                 "error": "TLS-Pruefung: certificate is not valid for '192.0.2.8'",
+                 "allowed_users": "m.muster"},
+                {"name": "fremd", "enabled": True, "connected": False,
+                 "error": "401 Unauthorized", "allowed_users": "jemand.anders"},
+                {"name": "aus", "enabled": False, "connected": False,
+                 "allowed_users": "m.muster"}]
+
+
+_fake.mcp_manager = _Mgr()
+_alt = sys.modules.get("backend.mcp_client")
+sys.modules["backend.mcp_client"] = _fake
+try:
+    blk = _Ag(False, tools=W)._mcp_prompt_block()
+finally:
+    if _alt is None:
+        sys.modules.pop("backend.mcp_client", None)
+    else:
+        sys.modules["backend.mcp_client"] = _alt
+check("'theben': mcp_theben_list_befunde" in blk, "Block nennt Server -> Werkzeug")
+check("mcp_geheim_x" not in blk,
+      "Werkzeug eines nicht freigegebenen Servers erscheint NICHT")
+check("NICHT freigegeben" in blk and "• 'geheim'" in blk and "Berechtigungen" in blk,
+      "nicht freigegebener Server: Name + Weg zur Freigabe")
+check("• 'kaputt'" in blk, "freigegebener, nicht verbundener Server wird genannt")
+check("192.0.2.8" not in blk and "certificate" not in blk and "401" not in blk,
+      "KEIN Fehlertext im Prompt (interne Adressen; wechselt je Versuch)")
+check("'fremd'" not in blk, "nicht verbundener Server OHNE Freigabe wird nicht genannt")
+check("'aus'" not in blk, "abgeschalteter Server wird nicht genannt")
+check("VEMAS" in blk and "KEINE" in blk, "Block grenzt Fachsysteme ausdruecklich ab")
+
+# Position: hinter dem Gedaechtnis, vor der Benutzer-Anweisung (Prompt-Cache).
+_rt = AGENT_SRC[AGENT_SRC.find("async def run_task"):]
+_p_mem = _rt.find("system_prompt += gedaechtnis_block(memory_context)")
+_p_mcp = _rt.find("system_prompt += self._mcp_prompt_block()")
+_p_pre = _rt.find("system_prompt += _pre_block")
+check(-1 not in (_p_mem, _p_mcp, _p_pre) and _p_mem < _p_mcp < _p_pre,
+      "Chat: MCP-Block nach dem Gedaechtnis, vor der Benutzer-Anweisung")
+_basis = AGENT_SRC.find("system_prompt = _mit_plotstyle(self._base_system_prompt())\n")
+check(_basis != -1 and not AGENT_SRC[_basis:_basis + 200].count("_mcp_prompt_block"),
+      "headless: Block nicht mehr direkt hinter dem Basisprompt")
+
+# ── 8b. PUT nur mit Freigabe verbindet NICHT neu ───────────────────────────
+print("\n8b. Freigabe-PUT ohne Neuaufbau")
+_u = _funktion(MAIN_SRC, "update_mcp_server")
+_u_src = ast.unparse(_u)
+check("set(data) <= MCP_NUR_FREIGABE" in _u_src, "Weiche 'nur Freigabe' vorhanden")
+check(_u_src.find("MCP_NUR_FREIGABE") < _u_src.find("connect_server"),
+      "die Weiche steht VOR connect_server (frueher Ausstieg)")
+_nf = [k for k in ast.parse(MAIN_SRC).body if isinstance(k, ast.Assign)
+       and any(getattr(t, "id", "") == "MCP_NUR_FREIGABE" for t in k.targets)]
+_nfw = {e.value for k in _nf for e in ast.walk(k.value) if isinstance(e, ast.Constant)
+        and isinstance(e.value, str)}
+check(_nfw == {"allowed_users", "allowed_group"},
+      f"nur die Freigabefelder (sonst blieben Adresse/Schluessel ohne Wirkung): {_nfw}")
+
+# ── 9. GET .../konfig gibt keine Geheimnisse heraus ────────────────────────
+print("\n9. Konfig-Endpunkt")
+_k = _funktion(MAIN_SRC, "mcp_server_konfig")
+_dicts = [d for d in ast.walk(_k) if isinstance(d, ast.Dict) and len(d.keys) > 5]
+_schl = {k.value for d in _dicts for k in d.keys if isinstance(k, ast.Constant)}
+check(bool(_schl), "Antwort-Dict gefunden (Positivkontrolle)")
+for verboten in ("api_key", "env", "ca_cert"):
+    check(verboten not in _schl, f"Schluessel '{verboten}' NICHT in der Antwort")
+check("env_namen" in _schl and "api_key_gesetzt" in _schl,
+      "nur Namen bzw. 'gesetzt'")
+_dep = [k for k in ast.walk(_k) if isinstance(k, ast.Call)
+        and getattr(k.func, "id", "") == "Depends"
+        and any(getattr(a, "id", "") == "require_local_auth" for a in k.args)]
+check(len(_dep) == 1, "nur fuer Administratoren (require_local_auth)")
+
+if "backend.config" in sys.modules:
+    print("ABBRUCH: backend.config wurde waehrend des Laufs importiert.", file=sys.stderr)
+    raise SystemExit(2)
 
 print(f"\n{'=' * 60}\n{_ok} OK, {_fail} FAIL\n{'=' * 60}")
 sys.exit(1 if _fail else 0)

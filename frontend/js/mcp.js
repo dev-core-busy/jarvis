@@ -25,6 +25,31 @@
         constructor() {
             this._servers = [];
             this._initialized = false;
+            this._offen = new Set();
+            try {
+                const roh = JSON.parse(localStorage.getItem('jarvis_mcp_offen') || '[]');
+                if (Array.isArray(roh)) roh.forEach(x => this._offen.add(String(x)));
+            } catch (_) { /* privates Fenster o.ae. – dann eben alles zu */ }
+        }
+
+        /** Karte auf-/zuklappen – ohne Neuaufbau (offene Formulare bleiben). */
+        _klappen(id, auf) {
+            const karte = document.querySelector(`.mcp-card[data-id="${CSS.escape(id)}"]`);
+            if (!karte) return;
+            const jetztAuf = auf === undefined ? karte.classList.contains('mcp-zu') : auf;
+            karte.classList.toggle('mcp-zu', !jetztAuf);
+            const knopf = karte.querySelector('[data-action="klapp-knopf"]');
+            if (knopf) {
+                const txt = jetztAuf ? _tt('mcp.collapse', 'Einklappen') : _tt('mcp.expand', 'Aufklappen');
+                knopf.setAttribute('aria-expanded', jetztAuf ? 'true' : 'false');
+                knopf.title = txt;
+                knopf.setAttribute('aria-label', txt);
+            }
+            if (jetztAuf) this._offen.add(id); else this._offen.delete(id);
+            const fach = karte.querySelector('[data-form-for]');
+            if (jetztAuf && fach && !fach.firstChild) this._formLaden(id);
+            try { localStorage.setItem('jarvis_mcp_offen', JSON.stringify([...this._offen])); }
+            catch (_) { /* nur Bequemlichkeit */ }
         }
 
         async refresh() {
@@ -56,6 +81,9 @@
 
             list.innerHTML = this._servers.map(srv => this._renderCard(srv)).join('');
             this._bindEvents();
+            // Offene Karten tragen ihr Einstellungsformular (siehe _formLaden).
+            this._servers.filter(srv => this._offen.has(srv.id))
+                .forEach(srv => this._formLaden(srv.id));
         }
 
         _renderCard(srv) {
@@ -101,17 +129,14 @@
                 : (srv.sandbox === false
                     ? `<span class="mcp-badge mcp-badge-warn" title="${window.t('mcp.sandbox_hint')}">${window.t('mcp.sandbox_off')}</span>`
                     : '');
-            // Freigabe: drei Stufen (nur Admins / ausgewaehlte Benutzer und
-            // Gruppen / alle). Die Marke nennt die Stufe im TEXT; die Zahlen
+            // Freigabe wie bei SAP & Co.: Benutzer/Gruppen, leer = niemand (auch
+            // kein Administrator). Die Marke nennt den Stand im TEXT; die Zahlen
             // kommen aus derselben Zusammenfassung wie im Popup.
             const wert = this._freigabeWert(srv);
-            const art = window.JarvisFreigabe ? window.JarvisFreigabe.art(wert)
-                : (srv.allow_network_users ? 'alle' : 'keine');
-            const netMark = art === 'alle'
-                ? `<span class="mcp-badge mcp-badge-warn" title="${window.t('mcp.net_users_hint')}">${window.t('mcp.net_users_on')}</span>`
-                : (art === 'auswahl'
-                    ? `<span class="mcp-badge mcp-badge-warn" title="${window.t('mcp.net_users_hint')}">${_esc(_tt('mcp.rights_selected', 'freigegeben für') + ' ' + window.JarvisFreigabe.zusammenfassung(wert))}</span>`
-                    : `<span class="mcp-badge" title="${window.t('mcp.net_users_hint')}">${window.t('mcp.net_users_off')}</span>`);
+            const hatFreigabe = srv.freigabe === 'auswahl';
+            const netMark = hatFreigabe && window.JarvisFreigabe
+                ? `<span class="mcp-badge mcp-badge-warn" title="${_esc(window.t('mcp.net_users_hint'))}">${_esc(_tt('mcp.rights_selected', 'freigegeben für') + ' ' + window.JarvisFreigabe.zusammenfassung(wert))}</span>`
+                : `<span class="mcp-badge" title="${_esc(window.t('mcp.net_users_hint'))}">${_esc(_tt('mcp.rights_none', 'niemand freigegeben'))}</span>`;
             // API-Schluessel gibt es nur bei HTTP-Transporten. Angezeigt wird
             // nur, OB einer hinterlegt ist – der Wert verlaesst das Backend nie.
             const istHttp = srv.transport !== 'stdio';
@@ -119,6 +144,9 @@
                 ? `<span class="mcp-badge" title="${_esc(_tt('mcp.key_hint', 'Für diesen Server ist ein API-Schlüssel hinterlegt.'))}">${_esc(_tt('mcp.key_set_badge', 'API-Schlüssel'))}</span>`
                 : '';
 
+            // Zugeklappt ist die Vorgabe; aufgeklappte Karten merkt sich der
+            // Browser (Bequemlichkeit, kein Zustand, der woanders gebraucht wird).
+            const offen = this._offen.has(srv.id);
             const toolsList = srv.tools && srv.tools.length
                 ? `<div class="mcp-tools-list">
                     <details>
@@ -131,9 +159,13 @@
                 : '';
 
             return `
-                <div class="mcp-card" data-id="${id}">
-                    <div class="mcp-card-header">
+                <div class="mcp-card${offen ? '' : ' mcp-zu'}" data-id="${id}">
+                    <div class="mcp-card-header" data-action="klapp" data-id="${id}">
                         <div class="mcp-card-title">
+                            <button type="button" class="mcp-klapp" data-action="klapp-knopf" data-id="${id}"
+                                    aria-expanded="${offen ? 'true' : 'false'}"
+                                    title="${_esc(offen ? _tt('mcp.collapse', 'Einklappen') : _tt('mcp.expand', 'Aufklappen'))}"
+                                    aria-label="${_esc(offen ? _tt('mcp.collapse', 'Einklappen') : _tt('mcp.expand', 'Aufklappen'))}"><span class="mcp-klapp-pfeil"></span></button>
                             ${statusDot}
                             <strong>${_esc(srv.name)}</strong>
                             <span class="mcp-badge">${transportBadge}</span>
@@ -148,20 +180,17 @@
                                 <input type="checkbox" ${srv.enabled ? 'checked' : ''} data-action="toggle" data-id="${id}">
                                 <span>${toggleLabel}</span>
                             </label>
-                            <button class="mcp-btn-sm" data-action="reconnect" data-id="${id}" title="${window.t('mcp.reconnect')}">🔄</button>
+                            <button class="mcp-btn-sm mcp-btn-ico" data-action="rechte" data-id="${id}" title="${_esc(_tt('mcp.rights_manage', 'Berechtigungen verwalten'))}" aria-label="${_esc(_tt('mcp.rights_manage', 'Berechtigungen verwalten'))}">🔐</button>
+                            <button class="mcp-btn-sm mcp-btn-ico" data-action="reconnect" data-id="${id}" title="${window.t('mcp.reconnect')}" aria-label="${window.t('mcp.reconnect')}">${JarvisIcons.refresh()}</button>
                             <button class="mcp-btn-sm mcp-btn-danger" data-action="remove" data-id="${id}" title="${window.t('mcp.remove')}">${JarvisIcons.trash()}</button>
                         </div>
                     </div>
                     <div class="mcp-card-status">${statusText}</div>
-                    <div class="mcp-cert" data-cert-for="${id}"></div>
-                    <div class="mcp-zeile">
-                        <button class="mcp-btn-sm" data-action="rechte" data-id="${id}">${_esc(_tt('mcp.rights_btn', 'Berechtigungen …'))}</button>
-                        ${istHttp ? `<button class="mcp-btn-sm" data-action="key" data-id="${id}">${_esc(srv.api_key_gesetzt
-                            ? _tt('mcp.key_change', 'API-Schlüssel ändern …')
-                            : _tt('mcp.key_add', 'API-Schlüssel hinterlegen …'))}</button>` : ''}
+                    <div class="mcp-card-body">
+                        <div class="mcp-cert" data-cert-for="${id}"></div>
+                        <div class="mcp-form-fach" data-form-for="${id}"></div>
+                        ${toolsList}
                     </div>
-                    <div class="mcp-key" data-key-for="${id}"></div>
-                    ${toolsList}
                 </div>`;
         }
 
@@ -184,139 +213,269 @@
             list.querySelectorAll('[data-action="rechte"]').forEach(el => {
                 el.addEventListener('click', () => this._rechte(el.dataset.id));
             });
-            list.querySelectorAll('[data-action="key"]').forEach(el => {
-                el.addEventListener('click', () => this._schluesselForm(el.dataset.id));
+            // Klappen: die ganze Kopfzeile und der Pfeil. Bedienelemente IN der
+            // Kopfzeile (Zertifikat, Aktiv, Berechtigungen, Loeschen …) duerfen NICHT
+            // klappen – Klick-Ausnahme wie im Register gefordert.
+            list.querySelectorAll('[data-action="klapp"]').forEach(el => {
+                el.addEventListener('click', (e) => {
+                    const ziel = e.target.closest('button, input, label, a, select');
+                    if (ziel && !ziel.matches('[data-action="klapp-knopf"]')) return;
+                    this._klappen(el.dataset.id);
+                });
             });
         }
 
         showAddForm() {
+            this._formular(null);
+        }
+
+        /**
+         * Einstellungen eines Servers IN seine Karte laden (einklappbarer Teil).
+         * Laeuft beim Aufklappen und nach jedem Neuaufbau fuer offene Karten.
+         * Ein Fehler bleibt im Fach stehen (Register: Fehler verschwinden nicht).
+         */
+        async _formLaden(id) {
+            const fach = document.querySelector(`[data-form-for="${CSS.escape(id)}"]`);
+            if (!fach) return;
+            fach.replaceChildren();
+            try {
+                const token = window.JarvisSitzung.token();
+                const r = await fetch(`/api/mcp/servers/${encodeURIComponent(id)}/konfig`, {
+                    headers: { 'Authorization': `Bearer ${token}` },
+                });
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                this._formular(await r.json(), fach);
+            } catch (e) {
+                const d = document.createElement('div');
+                d.className = 'mcp-cert-fehler';
+                d.textContent = window.t('mcp.error').replace('{msg}', e.message || e);
+                fach.replaceChildren(d);
+            }
+        }
+
+        /**
+         * EIN Formular fuer Hinzufuegen (cfg = null, ueber der Liste) und
+         * Bearbeiten (cfg = Konfig, IN der Karte – `ziel` ist deren Fach).
+         * Felder werden INNERHALB des Formulars adressiert (data-f), nicht ueber
+         * feste IDs: mehrere Karten koennen gleichzeitig offen sein.
+         *
+         * ⚠ GEHEIMNISSE KOMMEN NICHT ZURUECK (GET .../konfig nennt nur Namen bzw.
+         * "gesetzt"): beim Bearbeiten heisst ein leeres Feld fuer API-Schluessel,
+         * Umgebungsvariablen und PEM-Zertifikat "unveraendert" – und der
+         * Platzhalter SAGT das (Register: "leer = unveraendert" ist eine Zusage,
+         * keine Dekoration). Entfernen ist jeweils ein ausdrueckliches Kaestchen.
+         * Werte aus der Konfiguration gehen ueber .value ins DOM, nie ins Markup.
+         */
+        _formular(cfg, ziel) {
             const list = document.getElementById('mcp-server-list');
             if (!list) return;
-
-            // Pruefen ob Form schon offen
-            if (document.getElementById('mcp-add-form')) return;
+            const neu = !cfg;
+            if (neu) document.getElementById('mcp-add-form')?.remove();
 
             const form = document.createElement('div');
-            form.id = 'mcp-add-form';
-            form.className = 'mcp-form';
+            if (neu) form.id = 'mcp-add-form';
+            form.className = neu ? 'mcp-form' : 'mcp-form mcp-form-inline';
+            if (!neu) form.dataset.id = cfg.id;
             form.innerHTML = `
-                <h4>${window.t('mcp.new_server')}</h4>
+                <h4 data-f="titel"></h4>
                 <div class="mcp-form-row">
                     <label>Name</label>
-                    <input type="text" id="mcp-f-name" placeholder="${window.t('mcp.name_ph')}" class="mcp-input">
+                    <input type="text" data-f="name" placeholder="${window.t('mcp.name_ph')}" class="mcp-input">
                 </div>
                 <div class="mcp-form-row">
                     <label>Transport</label>
-                    <select id="mcp-f-transport" class="mcp-input">
+                    <select data-f="transport" class="mcp-input">
                         <option value="stdio">${window.t('mcp.transport_stdio')}</option>
                         <option value="streamable_http">${window.t('mcp.transport_shttp')}</option>
                         <option value="sse">${window.t('mcp.transport_sse')}</option>
                     </select>
                 </div>
-                <div id="mcp-f-stdio-fields">
+                <div data-f="stdio-fields">
                     <div class="mcp-form-row">
                         <label>Command</label>
-                        <input type="text" id="mcp-f-command" placeholder="${window.t('mcp.command_ph')}" class="mcp-input">
+                        <input type="text" data-f="command" placeholder="${window.t('mcp.command_ph')}" class="mcp-input">
                     </div>
                     <div class="mcp-form-row">
                         <label>${window.t('mcp.args_label')}</label>
-                        <textarea id="mcp-f-args" class="mcp-input" rows="3" placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;/tmp"></textarea>
+                        <textarea data-f="args" class="mcp-input" rows="3" placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;/tmp"></textarea>
                     </div>
                     <label class="mcp-toggle">
-                        <input type="checkbox" id="mcp-f-sandbox" checked>
+                        <input type="checkbox" data-f="sandbox" checked>
                         <span>${window.t('mcp.sandbox_label')}</span>
                     </label>
                     <div class="mcp-hint">${window.t('mcp.sandbox_hint')}</div>
                     <div class="mcp-form-row">
                         <label>${window.t('mcp.sandbox_paths_label')}</label>
-                        <textarea id="mcp-f-sandbox-paths" class="mcp-input" rows="2" placeholder="/daten/freigabe"></textarea>
+                        <textarea data-f="sandbox-paths" class="mcp-input" rows="2" placeholder="/daten/freigabe"></textarea>
                     </div>
                 </div>
-                <div id="mcp-f-sse-fields" style="display:none;">
+                <div data-f="sse-fields" style="display:none;">
                     <div class="mcp-form-row">
                         <label>URL</label>
-                        <input type="text" id="mcp-f-url" placeholder="https://host/mcp" class="mcp-input">
+                        <input type="text" data-f="url" placeholder="https://host/mcp" class="mcp-input">
                     </div>
-                    <div class="mcp-form-row">
-                        <label>${window.t('mcp.ca_label')}</label>
-                        <textarea id="mcp-f-ca" class="mcp-input" rows="3"
-                                  placeholder="-----BEGIN CERTIFICATE-----"></textarea>
-                    </div>
-                    <div class="mcp-form-hint">${window.t('mcp.ca_form_hint')}</div>
                     <div class="mcp-form-row">
                         <label>${_tt('mcp.key_label', 'API-Schlüssel (optional)')}</label>
-                        <input type="password" id="mcp-f-key" class="mcp-input" autocomplete="new-password">
+                        <input type="password" data-f="key" class="mcp-input" autocomplete="new-password">
                     </div>
+                    <label class="mcp-toggle" data-f="key-weg-zeile" style="display:none;">
+                        <input type="checkbox" data-f="key-weg">
+                        <span>${_tt('mcp.key_remove', 'Schlüssel entfernen')}</span>
+                    </label>
                     <div class="mcp-form-row">
                         <label>${_tt('mcp.key_header_label', 'Header-Name')}</label>
-                        <input type="text" id="mcp-f-key-header" class="mcp-input" placeholder="Authorization">
+                        <input type="text" data-f="key-header" class="mcp-input" placeholder="Authorization">
                     </div>
-                    <div class="mcp-form-hint">${_tt('mcp.key_header_hint', 'Leer = „Authorization: Bearer <Schlüssel>“. Erwartet der Server einen eigenen Header (z. B. X-API-Key), hier dessen Namen eintragen.')}</div>
+                    <div class="mcp-form-hint">${_esc(_tt('mcp.key_header_hint', 'Leer = „Authorization: Bearer <Schlüssel>“. Erwartet der Server einen eigenen Header (z. B. X-API-Key), hier dessen Namen eintragen.'))}</div>
+                    <div class="mcp-form-row">
+                        <label>${window.t('mcp.ca_label')}</label>
+                        <textarea data-f="ca" class="mcp-input" rows="3"
+                                  placeholder="-----BEGIN CERTIFICATE-----"></textarea>
+                    </div>
+                    <label class="mcp-toggle" data-f="ca-weg-zeile" style="display:none;">
+                        <input type="checkbox" data-f="ca-weg">
+                        <span>${_tt('mcp.ca_remove', 'Eigenes Zertifikat entfernen')}</span>
+                    </label>
+                    <div class="mcp-form-hint">${window.t('mcp.ca_form_hint')}</div>
                 </div>
                 <div class="mcp-form-row">
                     <label>${window.t('mcp.env_label')}</label>
-                    <textarea id="mcp-f-env" class="mcp-input" rows="2" placeholder="API_KEY=xxx"></textarea>
+                    <textarea data-f="env" class="mcp-input" rows="2" placeholder="API_KEY=xxx"></textarea>
                 </div>
+                <div class="mcp-cert-fehler" data-f="fehler" role="alert"></div>
                 <div class="mcp-form-buttons">
-                    <button id="mcp-f-save" class="mcp-btn-primary">${window.t('mcp.add_btn')}</button>
-                    <button id="mcp-f-cancel" class="mcp-btn-sm">${window.t('common.cancel')}</button>
+                    <button data-f="save" class="mcp-btn-primary"></button>
+                    <button data-f="cancel" class="mcp-btn-sm">${window.t('common.cancel')}</button>
                 </div>`;
 
-            list.parentNode.insertBefore(form, list);
+            const $ = (sel) => form.querySelector(sel);
+            $('[data-f="titel"]').textContent = neu ? window.t('mcp.new_server')
+                : _tt('mcp.settings_title', 'Einstellungen');
+            $('[data-f="save"]').textContent = neu ? window.t('mcp.add_btn')
+                : _tt('mcp.edit_save', 'Speichern und neu verbinden');
 
-            // Transport-Wechsel
-            form.querySelector('#mcp-f-transport').addEventListener('change', (e) => {
-                const isStdio = e.target.value === 'stdio';
-                form.querySelector('#mcp-f-stdio-fields').style.display = isStdio ? '' : 'none';
-                form.querySelector('#mcp-f-sse-fields').style.display = isStdio ? 'none' : '';
-            });
+            if (!neu) {
+                $('[data-f="name"]').value = cfg.name || '';
+                // ⚠ DEN GESPEICHERTEN TRANSPORT BEWAHREN (Code-Review 2026-10-25):
+                // "http" (erst Streamable HTTP, bei Misserfolg SSE) hat keine eigene
+                // Option – frueher wurde daraus hier still 'streamable_http', und das
+                // naechste Speichern nahm einem SSE-Server seinen Rueckfall. Ein
+                // unbekannter Wert bekommt eine eigene Option statt eines Ersatzes.
+                const tr = cfg.transport || 'stdio';
+                const sel = $('[data-f="transport"]');
+                if (![...sel.options].some(o => o.value === tr)) {
+                    const o = document.createElement('option');
+                    o.value = tr;
+                    o.textContent = tr === 'http'
+                        ? _tt('mcp.transport_http', 'HTTP (automatisch: Streamable HTTP, sonst SSE)')
+                        : tr;
+                    sel.appendChild(o);
+                }
+                sel.value = tr;
+                $('[data-f="command"]').value = cfg.command || '';
+                $('[data-f="args"]').value = (cfg.args || []).join('\n');
+                $('[data-f="sandbox"]').checked = cfg.sandbox !== false;
+                $('[data-f="sandbox-paths"]').value = (cfg.sandbox_paths || []).join('\n');
+                $('[data-f="url"]').value = cfg.url || '';
+                $('[data-f="key-header"]').value = cfg.api_key_header || '';
+                if (cfg.api_key_gesetzt) {
+                    $('[data-f="key"]').placeholder = _tt('mcp.key_keep_ph', 'hinterlegt – leer lassen = unverändert');
+                    $('[data-f="key-weg-zeile"]').style.display = '';
+                }
+                if (cfg.ca_cert_art === 'pfad') {
+                    $('[data-f="ca"]').value = cfg.ca_cert_pfad || '';
+                } else if (cfg.ca_cert_art === 'pem') {
+                    $('[data-f="ca"]').placeholder = _tt('mcp.ca_keep_ph', 'Eigenes Zertifikat hinterlegt – leer lassen = unverändert');
+                    $('[data-f="ca-weg-zeile"]').style.display = '';
+                }
+                if ((cfg.env_namen || []).length) {
+                    $('[data-f="env"]').placeholder = _tt('mcp.env_keep_ph', 'Hinterlegt: {namen} – leer lassen = unverändert, eine Eingabe ersetzt alle')
+                        .replace('{namen}', cfg.env_namen.join(', '));
+                }
+            }
 
-            form.querySelector('#mcp-f-save').addEventListener('click', () => this._addServer());
-            form.querySelector('#mcp-f-cancel').addEventListener('click', () => form.remove());
+            const transportZeigen = () => {
+                const isStdio = $('[data-f="transport"]').value === 'stdio';
+                $('[data-f="stdio-fields"]').style.display = isStdio ? '' : 'none';
+                $('[data-f="sse-fields"]').style.display = isStdio ? 'none' : '';
+            };
+            $('[data-f="transport"]').addEventListener('change', transportZeigen);
+            transportZeigen();
+
+            $('[data-f="save"]').addEventListener('click', () => this._speichern(cfg, form));
+            if (neu) {
+                $('[data-f="cancel"]').addEventListener('click', () => form.remove());
+                list.parentNode.insertBefore(form, list);
+                $('[data-f="name"]').focus();
+            } else {
+                // In der Karte heisst "Abbrechen": Eingaben verwerfen, Stand neu laden.
+                $('[data-f="cancel"]').textContent = _tt('mcp.discard', 'Änderungen verwerfen');
+                $('[data-f="cancel"]').addEventListener('click', () => this._formLaden(cfg.id));
+                ziel.replaceChildren(form);
+            }
         }
 
-        async _addServer() {
-            const name = document.getElementById('mcp-f-name')?.value?.trim();
-            const transport = document.getElementById('mcp-f-transport')?.value;
-            const command = document.getElementById('mcp-f-command')?.value?.trim();
-            const argsText = document.getElementById('mcp-f-args')?.value || '';
-            const url = document.getElementById('mcp-f-url')?.value?.trim();
-            const envText = document.getElementById('mcp-f-env')?.value || '';
-
+        async _speichern(cfg, form) {
+            const neu = !cfg;
+            const wert = (k) => form.querySelector(`[data-f="${k}"]`)?.value ?? '';
+            const fehler = form.querySelector('[data-f="fehler"]');
+            if (fehler) fehler.textContent = '';
+            const name = wert('name').trim();
             if (!name) return alert(window.t('mcp.name_required'));
 
-            const args = argsText.split('\n').map(s => s.trim()).filter(Boolean);
+            const zeilen = (t) => t.split('\n').map(s => s.trim()).filter(Boolean);
+            const envText = wert('env');
             const env = {};
             envText.split('\n').forEach(line => {
                 const eq = line.indexOf('=');
                 if (eq > 0) env[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
             });
-            const sandbox = document.getElementById('mcp-f-sandbox')?.checked !== false;
-            const sandbox_paths = (document.getElementById('mcp-f-sandbox-paths')?.value || '')
-                .split('\n').map(s => s.trim()).filter(Boolean);
-
+            const data = {
+                name,
+                transport: wert('transport'),
+                command: wert('command').trim(),
+                args: zeilen(wert('args')),
+                url: wert('url').trim(),
+                sandbox: form.querySelector('[data-f="sandbox"]')?.checked !== false,
+                sandbox_paths: zeilen(wert('sandbox-paths')),
+                api_key_header: wert('key-header').trim(),
+            };
             // Eigenes Zertifikat: PEM-Block ODER absoluter Pfad, beides im
             // selben Feld (die Weiche steht im Backend, backend/mcp_tls.py).
             // Zeilenumbrueche bleiben erhalten – ein PEM-Block braucht sie.
-            const ca_cert = (document.getElementById('mcp-f-ca')?.value || '').trim();
-
-            const api_key = (document.getElementById('mcp-f-key')?.value || '').trim();
-            const api_key_header = (document.getElementById('mcp-f-key-header')?.value || '').trim();
-
-            const data = { name, transport, command, args, url, env, enabled: true,
-                           sandbox, sandbox_paths, ca_cert, api_key, api_key_header };
-            const token = window.JarvisSitzung.token();
+            const ca = wert('ca').trim();
+            const key = wert('key').trim();
+            if (neu) {
+                Object.assign(data, { env, enabled: true, ca_cert: ca, api_key: key });
+            } else {
+                // Leer = unveraendert (siehe _formular); Entfernen nur per Kaestchen.
+                if (form.querySelector('[data-f="key-weg"]')?.checked) data.api_key = '';
+                else if (key) data.api_key = key;
+                if (envText.trim()) data.env = env;
+                if (form.querySelector('[data-f="ca-weg"]')?.checked) data.ca_cert = '';
+                else if (cfg.ca_cert_art === 'pem') { if (ca) data.ca_cert = ca; }
+                else data.ca_cert = ca;     // Pfad stand im Feld – leer heisst entfernt
+            }
 
             try {
-                await fetch('/api/mcp/servers', {
-                    method: 'POST',
+                const token = window.JarvisSitzung.token();
+                const r = await fetch(neu ? '/api/mcp/servers'
+                                          : `/api/mcp/servers/${encodeURIComponent(cfg.id)}`, {
+                    method: neu ? 'POST' : 'PUT',
                     headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
                     body: JSON.stringify(data),
                 });
-                document.getElementById('mcp-add-form')?.remove();
+                if (!r.ok) {
+                    let d = null;
+                    try { d = await r.json(); } catch (_) { /* kein JSON */ }
+                    throw new Error((d && d.detail) || `HTTP ${r.status}`);
+                }
+                if (neu) form.remove();
                 await this.refresh();
             } catch (e) {
-                alert(window.t('mcp.error').replace('{msg}', e.message));
+                // Ein Fehler bleibt im Formular stehen, bis er gelesen ist.
+                const msg = window.t('mcp.error').replace('{msg}', e.message || e);
+                if (fehler) fehler.textContent = msg; else alert(msg);
             }
         }
 
@@ -332,13 +491,12 @@
 
         /** Freigabe-Wert eines Servers in der Form des Freigabe-Popups. */
         _freigabeWert(srv) {
-            return { alle: srv.allow_network_users === true,
-                     users: srv.allowed_users || '', groups: srv.allowed_group || '' };
+            return { users: srv.allowed_users || '', groups: srv.allowed_group || '' };
         }
 
         /**
          * Berechtigungen ueber das gemeinsame Freigabe-Popup (freigabe_dialog.js).
-         * Gesendet werden NUR die drei Freigabefelder – der Endpunkt merged,
+         * Gesendet werden NUR die zwei Freigabefelder – der Endpunkt merged,
          * ein voller Formularstand ueberschriebe sonst die Serverdaten.
          */
         _rechte(id) {
@@ -347,127 +505,19 @@
             window.JarvisFreigabe.oeffnen({
                 titel: _tt('mcp.rights_title', 'Berechtigungen') + ' – ' + (srv.name || ''),
                 hinweis: window.t('mcp.net_users_hint'),
-                mitAlle: true,
-                alleBestaetigen: window.t('mcp.net_users_confirm'),
                 wert: this._freigabeWert(srv),
                 speichern: async (w) => {
                     const token = window.JarvisSitzung.token();
                     const resp = await fetch(`/api/mcp/servers/${encodeURIComponent(id)}`, {
                         method: 'PUT',
                         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ allow_network_users: w.alle === true,
-                                               allowed_users: w.users,
+                        body: JSON.stringify({ allowed_users: w.users,
                                                allowed_group: w.groups }),
                     });
                     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                     await this.refresh();
                 },
             });
-        }
-
-        /**
-         * API-Schluessel (und Adresse) eines HTTP-Servers bearbeiten.
-         *
-         * Der gespeicherte Schluessel kommt NIE zurueck ins Frontend; ein leeres
-         * Feld heisst deshalb "unveraendert", und Entfernen ist ein eigener,
-         * ausdruecklicher Knopf. Alle Werte gehen ueber .value/.textContent ins
-         * DOM, nicht ueber innerHTML.
-         */
-        _schluesselForm(id) {
-            const kasten = document.querySelector(`[data-key-for="${CSS.escape(id)}"]`);
-            const srv = this._servers.find(s => s.id === id);
-            if (!kasten || !srv) return;
-            if (kasten.firstChild) { kasten.replaceChildren(); return; }   // zuklappen
-
-            const box = document.createElement('div');
-            box.className = 'mcp-form mcp-key-box';
-            const zeile = (beschriftung, feld) => {
-                const r = document.createElement('div');
-                r.className = 'mcp-form-row';
-                const l = document.createElement('label');
-                l.textContent = beschriftung;
-                r.append(l, feld);
-                return r;
-            };
-            const eingabe = (typ, wert, ph) => {
-                const i = document.createElement('input');
-                i.type = typ; i.className = 'mcp-input'; i.value = wert || '';
-                if (ph) i.placeholder = ph;
-                if (typ === 'password') i.autocomplete = 'new-password';
-                return i;
-            };
-            const fUrl = eingabe('text', srv.url, 'https://host/mcp');
-            const fHeader = eingabe('text', srv.api_key_header, 'Authorization');
-            const fKey = eingabe('password', '', srv.api_key_gesetzt
-                ? _tt('mcp.key_keep_ph', 'hinterlegt – leer lassen = unverändert')
-                : _tt('mcp.key_ph', 'API-Schlüssel'));
-            box.append(zeile('URL', fUrl),
-                       zeile(_tt('mcp.key_label_short', 'API-Schlüssel'), fKey),
-                       zeile(_tt('mcp.key_header_label', 'Header-Name'), fHeader));
-            const hint = document.createElement('div');
-            hint.className = 'mcp-form-hint';
-            hint.textContent = _tt('mcp.key_header_hint', 'Leer = „Authorization: Bearer <Schlüssel>“. Erwartet der Server einen eigenen Header (z. B. X-API-Key), hier dessen Namen eintragen.');
-            box.appendChild(hint);
-            const fehler = document.createElement('div');
-            fehler.className = 'mcp-cert-fehler';
-            fehler.setAttribute('role', 'alert');
-
-            const senden = async (daten) => {
-                fehler.textContent = '';
-                try {
-                    const token = window.JarvisSitzung.token();
-                    const r = await fetch(`/api/mcp/servers/${encodeURIComponent(id)}`, {
-                        method: 'PUT',
-                        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-                        body: JSON.stringify(daten),
-                    });
-                    if (!r.ok) {
-                        let d = null;
-                        try { d = await r.json(); } catch (_) { /* kein JSON */ }
-                        throw new Error((d && d.detail) || `HTTP ${r.status}`);
-                    }
-                    // Der PUT verbindet den Server bereits neu.
-                    await this.refresh();
-                } catch (e) {
-                    // Ein Fehler bleibt stehen, bis der Benutzer ihn gelesen hat.
-                    fehler.textContent = window.t('mcp.error').replace('{msg}', e.message || e);
-                }
-            };
-
-            const knoepfe = document.createElement('div');
-            knoepfe.className = 'mcp-form-buttons';
-            const speichern = document.createElement('button');
-            speichern.type = 'button';
-            speichern.className = 'mcp-btn-primary';
-            speichern.textContent = _tt('mcp.key_save', 'Speichern und neu verbinden');
-            speichern.addEventListener('click', () => {
-                const daten = { url: fUrl.value.trim(), api_key_header: fHeader.value.trim() };
-                if (fKey.value.trim()) daten.api_key = fKey.value.trim();
-                senden(daten);
-            });
-            const abbrechen = document.createElement('button');
-            abbrechen.type = 'button';
-            abbrechen.className = 'mcp-btn-sm';
-            abbrechen.textContent = window.t('common.cancel');
-            abbrechen.addEventListener('click', () => kasten.replaceChildren());
-            knoepfe.append(speichern, abbrechen);
-            if (srv.api_key_gesetzt) {
-                const weg = document.createElement('button');
-                weg.type = 'button';
-                weg.className = 'mcp-btn-sm mcp-btn-danger';
-                weg.innerHTML = JarvisIcons.trash();
-                const txt = document.createElement('span');
-                txt.textContent = ' ' + _tt('mcp.key_remove', 'Schlüssel entfernen');
-                weg.appendChild(txt);
-                weg.addEventListener('click', () => {
-                    if (!confirm(_tt('mcp.key_remove_confirm', 'Hinterlegten API-Schlüssel wirklich entfernen?'))) return;
-                    senden({ api_key: '' });
-                });
-                knoepfe.appendChild(weg);
-            }
-            box.append(knoepfe, fehler);
-            kasten.replaceChildren(box);
-            fKey.focus();
         }
 
         async _reconnect(id) {
@@ -496,6 +546,9 @@
         async _zertifikat(id) {
             const kasten = document.querySelector(`[data-cert-for="${id}"]`);
             if (!kasten) return;
+            // Der Kasten liegt im einklappbaren Teil – sonst kaeme das Ergebnis
+            // in einer zugeklappten Karte nie zum Vorschein.
+            this._klappen(id, true);
             const setzen = (el) => { kasten.replaceChildren(el); };
             const zeile = (klasse, text) => {
                 const d = document.createElement('div');

@@ -275,6 +275,8 @@ select option:hover {
 /* Der Muelleimer ist filigraner als das Kreuz und wirkt bei gleicher Groesse
    kleiner – minimal aufziehen, damit beide optisch gleich schwer sind. */
 .jv-ico-trash { width: 1.05em; height: 1.05em; }
+/* Symbolknoepfe der MCP-Serverkarte (gleiche Groesse wie der Muelleimer daneben). */
+.mcp-btn-ico .jv-ico { width: 1.05em; height: 1.05em; }
 
 /* ═══════════════════════════════════════════════════════════════════════
    CPU-Auslastung in der Titelleiste (frontend/js/cpubar.js)
@@ -1279,12 +1281,6 @@ html.jv-sitzung-pruefen #login-screen { visibility: hidden; }
 .frg-box { max-width: 620px; }
 .frg-body { overflow-y: auto; display: flex; flex-direction: column; gap: 0.8rem; }
 .frg-hinweis { margin: 0; font-size: 0.82rem; color: var(--text-secondary); }
-.frg-stufen { display: flex; flex-direction: column; gap: 0.35rem; }
-.frg-stufe {
-    display: flex; align-items: center; gap: 0.45rem;
-    font-size: 0.9rem; color: var(--text-primary); cursor: pointer;
-}
-.frg-stufe input { flex: 0 0 auto; width: auto; margin: 0; cursor: pointer; }
 .frg-auswahl {
     display: flex; flex-direction: column; gap: 0.7rem;
     padding: 0.7rem 0.8rem;

@@ -388,5 +388,24 @@ with _Umgebung(ews_treffer=EWS_TREFFER) as u:
         _fremd = False
     pruefe(_fremd, "die Bremse zaehlt JE BENUTZER, nicht global")
 
+# ── ist_aufgeloest: Herkunft eines Empfaengers (Code-Review 2026-10-25) ─────
+# "Name <adresse>" ist die uebliche Form, in der ein Modell eine nachgeschlagene
+# Adresse einsetzt – sie muss als aufgeloest gelten, sonst warnt die Karte im
+# Regelfall (und eine Dauerwarnung wird ueberlesen).
+_marke = A.aufgeloest_cv.set({"max@firma.local", "b@c.de"})
+try:
+    pruefe(A.ist_aufgeloest("max@firma.local") is True, "nackte Adresse: aufgeloest")
+    pruefe(A.ist_aufgeloest("Max Muster <max@firma.local>") is True,
+           "Form 'Name <adresse>': aufgeloest")
+    pruefe(A.ist_aufgeloest('"Muster, Max" <MAX@firma.local>; b@c.de') is True,
+           "Komma im Anzeigenamen + Semikolon-Trenner + Grossschreibung")
+    pruefe(A.ist_aufgeloest("Max <max@firma.local>, fremd@x.de") is False,
+           "eine nicht nachgeschlagene Adresse in der Zeile: NICHT aufgeloest")
+    pruefe(A.ist_aufgeloest("nur ein Name") is False, "ohne Adresse: nicht aufgeloest")
+finally:
+    A.aufgeloest_cv.reset(_marke)
+pruefe(A.ist_aufgeloest("max@firma.local") is None,
+       "ohne Lauf-Klammer: UNBEKANNT (None), nicht 'nein'")
+
 bilanz()
 sys.exit(0 if _fail == 0 else 1)

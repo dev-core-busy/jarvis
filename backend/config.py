@@ -665,13 +665,6 @@ class Config:
             "args": data.get("args", []),
             "url": data.get("url", ""),
             "env": data.get("env", {}),
-            # Duerfen Netzwerk-/Domain-Benutzer die Werkzeuge dieses Servers
-            # aufrufen? Vorgabe AUS (fail-closed): der Server arbeitet mit SEINEN
-            # hinterlegten Zugangsdaten, die Rechte des Anfragenden im Zielsystem
-            # spielen dabei keine Rolle. Nur ein ausdrueckliches True zaehlt –
-            # ein "ja"/1 aus einer handgeschriebenen settings.json ist keine
-            # bewusste Admin-Entscheidung.
-            "allow_network_users": data.get("allow_network_users") is True,
             # stdio-Server in einem Namespace ohne Sicht auf /opt und /home
             # starten (bwrap). Vorgabe AN – abschalten ist die bewusste Ausnahme,
             # deshalb `is not False` und nicht `is True`.
@@ -690,13 +683,13 @@ class Config:
             "api_key": str(data.get("api_key") or "").strip(),
             "api_key_header": str(data.get("api_key_header") or "").strip(),
             # Freigabe fuer einzelne Benutzer (kommagetrennt) und Gruppen-DNs
-            # (zeilengetrennt) – wie bei SAP & Co. Leer = nur Administratoren.
+            # (zeilengetrennt) – wie bei SAP & Co. Leer = NIEMAND, auch kein
+            # Administrator (der Server arbeitet mit SEINEN Zugangsdaten).
             "allowed_users": "",
             "allowed_group": "",
         }
         from backend.mcp_rechte import freigabe_normalisieren
-        server.update({k: v for k, v in freigabe_normalisieren(data).items()
-                       if k != "allow_network_users"})
+        server.update(freigabe_normalisieren(data))
         self._mcp_servers.append(server)
         self._save_to_file()
         return server
@@ -717,13 +710,15 @@ class Config:
                     srv["api_key"] = str(data["api_key"] or "").strip()
                 if "api_key_header" in data:
                     srv["api_key_header"] = str(data["api_key_header"] or "").strip()
-                if "allow_network_users" in data:
-                    srv["allow_network_users"] = data["allow_network_users"] is True
-                # Benutzer-/Gruppenfreigabe (backend/mcp_rechte.py)
+                # Benutzer-/Gruppenfreigabe (backend/mcp_rechte.py). Das alte
+                # "alle Netzwerk-Benutzer" wirkt nicht mehr – beim ersten
+                # Speichern der Freigabe raeumt es sich hier selbst ab, damit
+                # die Datei keinen Schalter behauptet, den es nicht gibt.
                 from backend.mcp_rechte import freigabe_normalisieren
-                for key, wert in freigabe_normalisieren(data).items():
-                    if key != "allow_network_users":
-                        srv[key] = wert
+                freigabe = freigabe_normalisieren(data)
+                if freigabe:
+                    srv.update(freigabe)
+                    srv.pop("allow_network_users", None)
                 if "sandbox" in data:
                     srv["sandbox"] = data["sandbox"] is not False
                 if "sandbox_paths" in data:

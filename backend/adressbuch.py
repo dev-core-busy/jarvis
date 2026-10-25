@@ -25,7 +25,6 @@ Event-Loop friert den ganzen Dienst ein.
 """
 
 import contextvars
-import re
 
 from backend.mail_client import MailFehler
 
@@ -97,11 +96,26 @@ def ist_aufgeloest(wert: str) -> "bool | None":
     menge = aufgeloest_cv.get()
     if not isinstance(menge, set):
         return None
-    teile = [x.strip().lower() for x in re.split(r"[,;]", str(wert or "")) if x.strip()]
-    adressen = [x for x in teile if "@" in x]
+    adressen = empfaenger_adressen(wert)
     if not adressen:
         return False
     return all(a in menge for a in adressen)
+
+
+def empfaenger_adressen(wert) -> list:
+    """Die nackten Adressen einer Empfaengerzeile, klein geschrieben.
+
+    ⚠ NICHT AM KOMMA ZERLEGEN UND DEN EINTRAG VERGLEICHEN (Code-Review
+    2026-10-25): ein Eintrag "Max Muster <max@firma.local>" ist die uebliche
+    Form, in der ein Modell eine nachgeschlagene Adresse einsetzt – verglichen
+    als Ganzes galt er NIE als aufgeloest, und die Karte warnte im Regelfall.
+    Und ein Komma im Anzeigenamen ("Muster, Max" <…>) zerlegte den Eintrag.
+    ``getaddresses`` kennt beide Formen; ";" ist im Mailalltag ebenfalls
+    Trenner und wird vorher zu "," gemacht.
+    """
+    from email.utils import getaddresses
+    roh = str(wert or "").replace(";", ",")
+    return [a.strip().lower() for _, a in getaddresses([roh]) if "@" in (a or "")]
 
 # Unter zwei Zeichen wird nicht gesucht: ein einzelner Buchstabe trifft im
 # Verzeichnis einer Firma fast jeden und macht aus der Suche einen Abzug des

@@ -324,8 +324,11 @@ async def teil3():
 
     # API-Schluessel ohne Benutzer: nur dieselbe Verbindung
     ws = WS()
+    # Mit Empfaenger: gemessen wird die VERBINDUNGSREGEL – ohne `an` griffe
+    # seit 2026-10-25 die Pflichtfeld-Pruefung und verdeckte sie.
     t = asyncio.ensure_future(_mit_kanal(W.Kanal(ws, "", True),
-                                         W.freigabe("email_senden", {}, W.AUSSEN, {})))
+                                         W.freigabe("email_senden", {"an": "a@beispiel.de"},
+                                                    W.AUSSEN, {"an": "a@beispiel.de"})))
     await _nachlauf()
     kid = next((m["id"] for m in ws.nachrichten if m.get("type") == "bestaetigung_anfrage"), "")
     erg["anon_fremde_verbindung"] = W.antwort(kid, "", object(), True)
@@ -454,6 +457,15 @@ async def teil3():
     ws6 = WS(("anna", True), aenderungen={"an": "gewaehlt@beispiel.de"})
     erg["ohne_empfaenger"] = (await fall(W.Kanal(ws6, "anna", True),
                                          args=a6, exec_args=e6), e6, ws6)
+
+    # ⚠ Freigabe OHNE gefuelltes Pflichtfeld (Code-Review 2026-10-25): ein
+    # Client mit altem Stand schickt "erlaubt" auch ohne Empfaenger – der
+    # Server prueft selbst und fuehrt NICHT aus.
+    a7 = {"betreff": "B", "text": "T"}        # KEIN `an`
+    e7 = dict(a7)
+    ws7 = WS(("anna", True))                  # Klick ohne Korrektur
+    erg["pflicht_leer"] = (await fall(W.Kanal(ws7, "anna", True),
+                                      args=a7, exec_args=e7), e7, ws7)
 
     # Zeilenumbruch im getippten Wert wird entschaerft (Kopfzeilen-Hygiene)
     a5 = {"an": "alt@beispiel.de"}
@@ -724,6 +736,15 @@ pruefe(anf6.get("pflicht") == ["an"],
        str(anf6.get("pflicht")))
 pruefe("an" in (anf6.get("aenderbar") or []),
        "und dass der Empfaenger aenderbar ist", str(anf6.get("aenderbar")))
+r7, e7, ws7 = E["pflicht_leer"]
+pruefe(isinstance(r7, str) and "NICHT AUSGEFÜHRT" in r7 and "'an'" in r7,
+       "Freigabe mit LEEREM Pflichtfeld: NICHT ausgefuehrt, Grund nennt das Feld",
+       str(r7)[:100])
+pruefe("an" not in e7, "der Ausfuehrungs-Satz bekommt keinen erfundenen Empfaenger", str(e7))
+_erl7 = [m for m in ws7.nachrichten if m.get("type") == "bestaetigung_erledigt"]
+pruefe(bool(_erl7) and _erl7[-1].get("grund") == "pflicht",
+       "die Karte schliesst mit eigenem Grund (nicht 'Freigegeben')",
+       str(_erl7[-1] if _erl7 else None))
 # Ein Feld, das WEDER im Aufruf steht NOCH Pflichtfeld ist, bleibt gesperrt.
 _z = {"betreff": "Echt"}
 pruefe(W.uebernehmen("email_senden", _z, {"cc": "untergeschoben@beispiel.de"}) == []

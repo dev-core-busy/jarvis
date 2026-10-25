@@ -224,9 +224,9 @@ class McpRemoteTool(BaseTool):
       pauschal und nicht je Server konfigurierbar: fail-closed. Auch ein
       stdio-Server ist ein Prozess, den ein Administrator konfiguriert hat, um an
       Daten von woanders zu kommen.
-    * `ist_mcp = True` + `erlaubt_netzwerk_benutzer` – Netzwerk-Benutzer duerfen
-      MCP-Werkzeuge nur, wenn ein Administrator den SERVER dafuer freigibt
-      (Vorgabe AUS). Grund ist das Muster "fremde Zugangsdaten als Vollmacht":
+    * `ist_mcp = True` + `erlaubt_fuer(benutzer)` – MCP-Werkzeuge darf nur, wer
+      fuer den SERVER freigegeben ist (Benutzer/Gruppen, leer = niemand, auch
+      kein Admin – backend/mcp_rechte.py). Grund ist das Muster "fremde Zugangsdaten als Vollmacht":
       der Server arbeitet mit seinem hinterlegten Token, die Rechte des
       anfragenden Benutzers im Zielsystem spielen keine Rolle. Genau das war
       eines der vier Fehlermuster der Endpunkt-Durchsicht vom 2026-08-04.
@@ -245,12 +245,9 @@ class McpRemoteTool(BaseTool):
         self._session = session
         _cfg = server_config or {}
         self.server_id = _cfg.get("id", "")
-        # Fail-closed: alles ausser einem echten True gilt als "nicht freigegeben"
-        # (ein aus JSON gelesenes "ja"/1 ist keine bewusste Admin-Entscheidung).
-        self.erlaubt_netzwerk_benutzer = _cfg.get("allow_network_users") is True
 
     def erlaubt_fuer(self, benutzer: str) -> bool:
-        """Darf dieser unprivilegierte Benutzer das Werkzeug aufrufen?
+        """Darf dieser Benutzer das Werkzeug aufrufen? (gilt auch fuer Admins)
 
         Liest die Freigabe des Servers AKTUELL aus der Konfiguration (nicht den
         Stand beim Bau des Werkzeugs) – eine geaenderte Benutzer-/Gruppenliste
@@ -306,7 +303,40 @@ class McpServerConnection:
         self._stopp: "asyncio.Event | None" = None
 
     async def connect(self):
-        """Verbindet mit dem MCP-Server – in einem EIGENEN BESITZER-TASK.
+        """Verbindet mit dem MCP-Server; Transport "http" mit SSE-Rueckfall.
+
+        ⚠ DER RUECKFALL BRAUCHT EINEN FRISCHEN BESITZER-TASK (Code-Review
+        2026-10-25). Bis dahin stand er als `except Exception` IN
+        ``_verbinden`` – toter Code: ein gescheiterter Streamable-HTTP-Versuch
+        kommt als CancelledError/BaseExceptionGroup an (siehe unten), und selbst
+        abgefangen liefe der SSE-Versuch im noch offenen, level-getriggerten
+        anyio-Scope und wuerde sofort wieder gecancelt. Jetzt ist jeder Versuch
+        ein eigener ``_ein_versuch`` mit eigenem Besitzer; scheitern beide, nennt
+        die Meldung BEIDE Gruende (Register: ein Grund, der eine Ursache
+        verschweigt, schickt auf die Suche).
+        """
+        transport = self.config.get("transport", "stdio")
+        if transport != "http":
+            await self._ein_versuch(transport)
+            return
+        # "http" ist der unscharfe Fall: bis 2026-08-14 lief er auf den ALTEN
+        # SSE-Transport, gemeint ist heute aber fast immer Streamable HTTP (SSE
+        # ist seit 2025-03-26 deprecated). Deshalb erst der aktuelle Standard,
+        # bei Misserfolg der alte.
+        await self._ein_versuch("streamable_http")
+        if self.connected:
+            return
+        erster = self.error or "unbekannter Fehler"
+        print(f"[MCP] {self.name}: Streamable HTTP fehlgeschlagen ({erster}), "
+              f"versuche SSE", flush=True)
+        self.error = None
+        self._zeitueberschreitung = False
+        await self._ein_versuch("sse")
+        if not self.connected:
+            self.error = f"Streamable HTTP: {erster} | SSE: {self.error or 'unbekannter Fehler'}"
+
+    async def _ein_versuch(self, transport: str):
+        """EIN Verbindungsversuch mit festem Transport – in einem EIGENEN BESITZER-TASK.
 
         ⚠ BEZAHLTER VORFALL, ZWEI ANLAEUFE (DEV 2026-10-24/25): der
         Transportfehler eines entfernten Servers (selbstsigniertes Zertifikat)
@@ -338,6 +368,7 @@ class McpServerConnection:
         ``disconnect()`` setzt das Stopp-Signal; der Besitzer schliesst dann
         seinen Stack selbst.
         """
+        self._transport_jetzt = transport
         self._stopp = asyncio.Event()
         bereit = asyncio.Event()
         self._besitzer = asyncio.create_task(
@@ -471,7 +502,10 @@ class McpServerConnection:
         Faengt jeden Fehler und traegt den Grund in ``self.error`` ein; er
         verlaesst den Besitzer nur als normales Ende.
         """
-        transport_type = self.config.get("transport", "stdio")
+        # Den Transport bestimmt der VERSUCH (connect -> _ein_versuch), nicht
+        # mehr die Konfiguration allein: "http" wird dort in zwei Versuche zerlegt.
+        transport_type = (getattr(self, "_transport_jetzt", None)
+                          or self.config.get("transport", "stdio"))
         try:
             from mcp import ClientSession
 
@@ -481,24 +515,6 @@ class McpServerConnection:
                 await self._connect_streamable_http()
             elif transport_type == "sse":
                 await self._connect_sse()
-            elif transport_type == "http":
-                # "http" ist der unscharfe Fall: bis 2026-08-14 lief er auf den
-                # ALTEN SSE-Transport, gemeint ist heute aber fast immer
-                # Streamable HTTP (SSE ist seit 2025-03-26 deprecated). Deshalb
-                # erst der aktuelle Standard, bei Misserfolg der alte – so
-                # funktionieren bestehende Konfigurationen weiter UND neue
-                # Server, die nur noch /mcp anbieten.
-                try:
-                    await self._connect_streamable_http()
-                except Exception as e:  # noqa: BLE001
-                    print(f"[MCP] {self.name}: Streamable HTTP fehlgeschlagen ({e}), "
-                          f"versuche SSE", flush=True)
-                    # Der erste Versuch hat womoeglich schon etwas im ExitStack –
-                    # sonst haengt beim naechsten Schliessen ein halb offener
-                    # Transport daran.
-                    await self._exit_stack.aclose()
-                    self._exit_stack = AsyncExitStack()
-                    await self._connect_sse()
             else:
                 self.error = f"Unbekannter Transport: {transport_type}"
                 return
@@ -672,16 +688,26 @@ class McpServerConnection:
 
         def _factory(headers=None, timeout=None, auth=None):
             import httpx
-            from mcp.shared._httpx_utils import create_mcp_http_client
-            # Die Zeitlimits der Bibliothek uebernehmen, NICHT neu erfinden:
-            # ein Server haelt den Antwortstrom offen (300 s Lesefrist), und
-            # eine eigene Zahl hier waere eine zweite Quelle fuer denselben
-            # Wert. Deshalb erst deren Client bauen und nur `verify` setzen.
-            vorgabe = create_mcp_http_client(headers=headers, timeout=timeout,
-                                             auth=auth)
-            return httpx.AsyncClient(verify=ctx, headers=vorgabe.headers,
-                                     timeout=vorgabe.timeout, auth=auth,
-                                     follow_redirects=False)
+            from mcp.shared._httpx_utils import (MCP_DEFAULT_SSE_READ_TIMEOUT,
+                                                 MCP_DEFAULT_TIMEOUT)
+            # Dieselben Vorgaben wie `create_mcp_http_client` (mcp 1.x), mit den
+            # Konstanten DER BIBLIOTHEK statt eigener Zahlen – ein Server haelt
+            # den Antwortstrom offen (300 s Lesefrist). Weiterleitungen bleiben
+            # wie dort auf der httpx-Vorgabe (aus); die Transporte folgen ihnen
+            # innerhalb des Ursprungs selbst.
+            # ⚠ KEIN ZWEITER CLIENT (Code-Review 2026-10-25): bis dahin wurde
+            # hier `create_mcp_http_client(...)` gebaut, nur um Header und
+            # Timeout abzulesen, und nie geschlossen – je Verbindungsversuch ein
+            # verwaister AsyncClient samt Pool.
+            if timeout is None:
+                timeout = httpx.Timeout(MCP_DEFAULT_TIMEOUT,
+                                        read=MCP_DEFAULT_SSE_READ_TIMEOUT)
+            kw = {"verify": ctx, "timeout": timeout}
+            if headers is not None:
+                kw["headers"] = headers
+            if auth is not None:
+                kw["auth"] = auth
+            return httpx.AsyncClient(**kw)
 
         return {"httpx_client_factory": _factory}
 
@@ -796,9 +822,6 @@ class McpServerConnection:
                             else ("pfad" if (self.config.get("ca_cert") or "").strip()
                                   else "")),
             "zertifikat_moeglich": _zertifikat_moeglich(self.config),
-            # Sichtbar machen, WER die Werkzeuge dieses Servers benutzen darf – ein
-            # Zustand, den man der Serverzeile sonst nicht ansieht.
-            "allow_network_users": self.config.get("allow_network_users") is True,
             **_zugang_status(self.config),
             # Nur bei stdio aussagekraeftig – ein entfernter Server laeuft
             # ohnehin nicht auf dieser Maschine.
@@ -826,6 +849,12 @@ class McpClientManager:
         damit an der Reihenfolge in der Konfiguration.
         """
         servers = config.get_mcp_servers()
+        alt = mcp_rechte.altschalter_ohne_freigabe(servers)
+        if alt:
+            print(f"[MCP] HINWEIS: {', '.join(alt)} – frueher fuer 'alle "
+                  f"Netzwerk-Benutzer' freigegeben; diese Stufe gibt es nicht mehr, "
+                  f"es darf jetzt NIEMAND (auch kein Administrator). Freigabe unter "
+                  f"Einstellungen -> MCP -> Berechtigungen setzen.", flush=True)
         for srv in servers:
             if not srv.get("enabled", True):
                 continue
@@ -913,7 +942,6 @@ class McpClientManager:
                                     else ("pfad" if (srv.get("ca_cert") or "").strip()
                                           else "")),
                     "zertifikat_moeglich": _zertifikat_moeglich(srv),
-                    "allow_network_users": srv.get("allow_network_users") is True,
                     **_zugang_status(srv),
                     "sandbox": (srv.get("sandbox") is not False
                                 if srv.get("transport", "stdio") == "stdio" else None),

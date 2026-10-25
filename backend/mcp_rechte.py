@@ -3,16 +3,18 @@
 Zwei Fragen, die in ``mcp_client`` (Verbindung) und ``agent`` (Dispatch)
 gebraucht werden und deshalb EINE Quelle haben:
 
-1. **Freigabe je Server** (seit 2026-10-25 Benutzer UND Gruppen, wie bei SAP,
-   E-Mail und den anderen Bereichen unter Einstellungen -> Berechtigungen):
+1. **Freigabe je Server** – dieselbe Regel wie SAP, VEMAS, E-Mail und die
+   anderen Bereiche unter Einstellungen -> Berechtigungen (Festlegung des
+   Betreibers 2026-10-25):
 
-   * ``allow_network_users is True`` – ALLE Netzwerk-Benutzer (Altbestand des
-     frueheren Kaestchens, bleibt als ausdrueckliche Stufe erhalten),
    * ``allowed_users`` – Logins, kommagetrennt (wie ``sap_allowed_users``),
-   * ``allowed_group`` – Gruppen-DNs, zeilengetrennt (DNs enthalten Kommas).
+   * ``allowed_group`` – Gruppen-DNs, zeilengetrennt (DNs enthalten Kommas),
+   * ODER-verknuepft; **leer = niemand, ausdruecklich auch kein
+     Administrator** (kein Admin-Bypass).
 
-   Alles leer = nur Administratoren. Administratoren selbst prueft diese Datei
-   nicht – der Dispatch fragt sie nur fuer unprivilegierte Laeufe.
+   Das fruehere Feld ``allow_network_users`` ("alle Netzwerk-Benutzer") hat
+   KEINE Wirkung mehr – eine Stufe "alle" gibt es bei keiner anderen Freigabe,
+   und "nur Administratoren" widersprach "leer = niemand".
 
 2. **API-Schluessel** fuer HTTP-Transporte: ``api_key`` (geheimer Name, also
    von ``geheimnis_tresor`` auf der Platte verpackt) und ``api_key_header``.
@@ -50,29 +52,37 @@ def gruppen_liste(raw) -> list[str]:
 
 
 def freigabe_art(srv: dict | None) -> str:
-    """``"alle"`` | ``"auswahl"`` | ``"keine"`` – fuer Anzeige und Pruefung."""
+    """``"auswahl"`` | ``"keine"`` – fuer Anzeige und Pruefung."""
     if not srv:
         return "keine"
-    if srv.get("allow_network_users") is True:
-        return "alle"
     if benutzer_liste(srv.get("allowed_users")) or gruppen_liste(srv.get("allowed_group")):
         return "auswahl"
     return "keine"
 
 
+def altschalter_ohne_freigabe(servers) -> list:
+    """Namen der Server, die NUR noch den alten Schalter "alle Netzwerk-Benutzer"
+    tragen und keine Benutzer/Gruppen – fuer sie gilt jetzt "niemand".
+
+    Fuer eine Journalzeile beim Start (Code-Review 2026-10-25): die Regel
+    "leer = niemand" ist gewollt, aber ein Server, der gestern fuer alle offen
+    war und heute fuer keinen, darf nicht STILL verstummen.
+    """
+    return [str(s.get("name") or s.get("id") or "?") for s in (servers or [])
+            if isinstance(s, dict) and s.get("allow_network_users") is True
+            and freigabe_art(s) == "keine"]
+
+
 def darf_benutzen(srv: dict | None, benutzer: str, gruppen_dns=None,
                   gruppe_passt=None) -> bool:
-    """Darf dieser (unprivilegierte) Benutzer die Werkzeuge des Servers aufrufen?
+    """Darf dieser Benutzer die Werkzeuge des Servers aufrufen? (auch Admins!)
 
     ``gruppen_dns``/``gruppe_passt`` sind fuer Tests einsetzbar; ohne sie wird
     der Gruppen-Cache aus ``backend.main`` benutzt – derselbe, mit dem SAP,
     E-Mail & Co. ihre Gruppen pruefen. Fail-closed: jeder Fehler heisst nein.
     """
     try:
-        art = freigabe_art(srv)
-        if art == "alle":
-            return True
-        if art == "keine":
+        if freigabe_art(srv) == "keine":
             return False
         plain = norm_login(benutzer)
         if not plain:
@@ -95,10 +105,6 @@ def darf_benutzen(srv: dict | None, benutzer: str, gruppen_dns=None,
 def freigabe_normalisieren(data: dict) -> dict:
     """Nur die gesendeten Freigabefelder, normalisiert (fuer add/update)."""
     aus: dict = {}
-    if "allow_network_users" in data:
-        # Nur ein echtes True zaehlt – ein "ja"/1 aus einer handgeschriebenen
-        # settings.json ist keine bewusste Admin-Entscheidung.
-        aus["allow_network_users"] = data["allow_network_users"] is True
     if "allowed_users" in data:
         aus["allowed_users"] = ", ".join(benutzer_liste(data["allowed_users"]))
     if "allowed_group" in data:

@@ -497,7 +497,7 @@ def _ist_mcp_tool(tool, name: str) -> bool:
 
 
 def _mcp_freigegeben(tool, benutzer: str) -> bool:
-    """Ist dieses MCP-Werkzeug fuer den unprivilegierten Benutzer freigegeben?
+    """Ist dieses MCP-Werkzeug fuer diesen Benutzer freigegeben? (kein Admin-Bypass)
 
     Gefragt wird das Werkzeug selbst (``erlaubt_fuer`` liest die AKTUELLE
     Benutzer-/Gruppenfreigabe seines Servers, backend/mcp_rechte.py).
@@ -1661,7 +1661,7 @@ KRITISCH – Autonomie-Regeln:
         Ohne Rolle, mit vorhandenen Rollen und fuer privilegierte Auftraggeber
         bleibt die Liste unveraendert – der bestehende Betrieb aendert sich nicht.
         """
-        tools = self._tool_instances
+        tools = self._gesperrte_weg(self._tool_instances)
         allow = getattr(self, "_role_tools", None)
         if allow is not None:
             return [t for t in tools if t.name in allow]
@@ -1678,6 +1678,121 @@ KRITISCH – Autonomie-Regeln:
             except Exception:  # noqa: BLE001
                 tools = [t for t in tools if t.name != "delegate"]
         return self._buendel_zuschnitt(tools)
+
+    def _gesperrte_weg(self, tools: list) -> list:
+        """Werkzeuge weglassen, die der Dispatch fuer DIESEN Lauf sicher abweist.
+
+        Dieselbe Lehre wie bei ``_BLOCKED_TOOLS_FOR_LDAP`` (siehe ``_llm_tools``),
+        hier fuer die Bereichs-Freigaben: SAP, VEMAS und MCP-Server ohne
+        Freigabe fuer den Auftraggeber – alle drei OHNE Admin-Bypass.
+
+        ⚠ WARUM (DEV 2026-10-25): "nutze den MCP Server 'theben'" – das Modell
+        bekam ``vemas_resources``/``vemas_discover`` angeboten, obwohl der
+        Benutzer keine VEMAS-Freigabe hat, griff danach (VEMAS kennt
+        "Ressourcen" und "Selbstauskunft" – fuer ein Modell nah an "Server
+        nutzen"), bekam zweimal "Zugriff verweigert" und gab danach auf. Ein
+        Werkzeug, das sicher abgewiesen wird, ist im Angebot nur ein Irrweg.
+
+        Die Bedingungen sind BEWUSST dieselben Ausdruecke wie im Dispatch
+        (``_execute_tool``) – Anzeige und Wirkung an demselben Praedikat. Der
+        Dispatch bleibt die harte Schranke.
+        """
+        sap_ok = getattr(self, '_current_user_sap', True)
+        vemas_ok = getattr(self, '_current_user_vemas', True)
+        uname = self.actor_name()
+        # Die Freigabe haengt am SERVER, nicht am Werkzeug: ein Urteil je
+        # server_id genuegt (Code-Review 2026-10-25 – bei vielen Werkzeugen sonst
+        # dieselbe Pruefung hundertfach je Schritt). Dasselbe Praedikat wie im
+        # Dispatch, nur gemerkt.
+        urteil: dict = {}
+        aus = []
+        for t in tools or []:
+            name = getattr(t, "name", "")
+            if name.startswith("sap_") and not sap_ok:
+                continue
+            if name.startswith("vemas_") and not vemas_ok:
+                continue
+            # MCP: kein Admin-Bypass – wie im Dispatch (leer = niemand).
+            if _ist_mcp_tool(t, name):
+                schl = getattr(t, "server_id", None) or id(t)
+                if schl not in urteil:
+                    urteil[schl] = _mcp_freigegeben(t, uname)
+                if not urteil[schl]:
+                    continue
+            aus.append(t)
+        return aus
+
+    def _mcp_prompt_block(self) -> str:
+        """Welche MCP-Server es gibt und welche Werkzeuge zu welchem gehoeren.
+
+        ⚠ WARUM (DEV 2026-10-25): "nutze den MCP Server 'theben'" – das
+        Werkzeug ``mcp_theben_list_befunde`` WAR im Angebot (das Modell zitierte
+        sogar das Beispiel 'an1' aus dessen Schema), und trotzdem antwortete es
+        "die verfuegbaren MCP-Tools sind alle vom Test-Server everything". Bei
+        ueber hundert Werkzeugen ist die Zuordnung Servername -> Werkzeug fuer
+        das Modell Raterei; hier steht sie ausdruecklich.
+
+        Drei Gruppen, alle nach DEMSELBEN Freigabe-Praedikat wie das
+        Werkzeugangebot (``_gesperrte_weg``):
+          * verbunden und freigegeben – mit Werkzeugnamen,
+          * verbunden, aber fuer DIESEN Benutzer gesperrt – nur der Name,
+          * freigegeben, aber nicht verbunden – nur der Name.
+
+        ⚠ KEINE FEHLERTEXTE (Code-Review 2026-10-25): der Verbindungsfehler
+        traegt interne Adressen und Ports ("certificate is not valid for
+        '<ip>'") – die gehoeren nicht in einen Prompt, den das Modell jedem
+        Benutzer wiedergeben kann. Und sie wechseln je Verbindungsversuch: im
+        Prompt waeren sie ein Cache-Brecher. Den Grund sieht ein Administrator
+        in der Serverzeile.
+        """
+        try:
+            uname = self.actor_name()
+            alle_mcp = [t for t in (self._tool_instances or [])
+                        if _ist_mcp_tool(t, getattr(t, "name", ""))]
+            erlaubt_ids = {id(t) for t in self._gesperrte_weg(alle_mcp)}
+            je_server: dict = {}
+            gesperrt: set = set()
+            for t in alle_mcp:
+                srv = getattr(t, "_server_name", "") or "?"
+                if id(t) in erlaubt_ids:
+                    je_server.setdefault(srv, []).append(t.name)
+                else:
+                    gesperrt.add(srv)
+            gesperrt -= set(je_server)
+            zeilen = [f"• '{srv}': {', '.join(namen)}" for srv, namen in je_server.items()]
+            offline = []
+            try:
+                from backend.mcp_client import mcp_manager
+                from backend.mcp_rechte import darf_benutzen
+                for st in mcp_manager.get_status():
+                    name = st.get("name")
+                    if (st.get("enabled", True) and not st.get("connected")
+                            and name not in je_server and darf_benutzen(st, uname)):
+                        offline.append(f"• '{name}'")
+            except Exception:  # noqa: BLE001
+                pass
+            if not zeilen and not offline and not gesperrt:
+                return ""
+            text = ("\n\nMCP-SERVER (externe Werkzeuge, eingerichtet unter Einstellungen -> MCP). "
+                    "Nennt der Benutzer einen dieser Server beim Namen, sind GENAU DIESE "
+                    "Werkzeuge gemeint – keine anderen (SAP, VEMAS, Jira usw. sind KEINE "
+                    "MCP-Server). Fehlen Pflichtangaben fuer einen Aufruf, frage gezielt "
+                    "danach, statt andere Werkzeuge zu probieren.")
+            if zeilen:
+                text += "\nVerbunden:\n" + "\n".join(zeilen)
+            if gesperrt:
+                text += ("\nVerbunden, aber fuer DIESEN Benutzer NICHT freigegeben (keine "
+                         "Werkzeuge verfuegbar – dem Benutzer sagen, dass ein Administrator "
+                         "ihn unter Einstellungen -> MCP -> Berechtigungen freigeben kann):\n"
+                         + "\n".join(f"• '{n}'" for n in sorted(gesperrt)))
+            if offline:
+                text += ("\nFreigegeben, aber derzeit NICHT erreichbar (keine Werkzeuge – "
+                         "dem Benutzer sagen, dass ein Administrator den Grund unter "
+                         "Einstellungen -> MCP sieht):\n" + "\n".join(offline))
+            return text
+        except Exception as e:  # noqa: BLE001
+            print(f"[AGENT] MCP-Prompt-Block nicht erzeugt: {e}", flush=True)
+            return ""
 
     def werkzeuge_fuer_anzeige(self) -> list:
         """Der VOLLE Werkzeugsatz - fuer Bilanzen und Anzeigen.
@@ -2751,6 +2866,12 @@ KRITISCH – Autonomie-Regeln:
             system_prompt += gedaechtnis_block(memory_context)
             await self._send_status(ws, "🧠 Memory geladen")
 
+        # MCP-Server WEIT HINTEN (Code-Review 2026-10-25): der Block haengt an
+        # Verbindungs- und Freigabestand und aendert sich damit oefter als alles
+        # davor – vorn stehend braeche er den Prompt-Cache fuer den ganzen Rest.
+        # Vor der Benutzer-Anweisung, die laut unten ZULETZT stehen muss.
+        system_prompt += self._mcp_prompt_block()
+
         # ⚠ DIE ANWEISUNG DES BENUTZERS KOMMT ZULETZT – Begruendung samt Messung
         # oben an der Stelle, die sie ermittelt. Sie MUSS hinter dem
         # Gedaechtnis-Block stehen: der ist als UNTRUSTED_CONTEXT gerahmt
@@ -3700,6 +3821,8 @@ KRITISCH – Autonomie-Regeln:
             # hier UNGERAHMT im System-Prompt – ausgerechnet in den Laeufen, die
             # ohne Zuschauer Fremdtext verarbeiten (BSI-Abgleich, Skill memory).
             system_prompt += gedaechtnis_block(memory_context)
+        # MCP-Server weit hinten – Begruendung wie im Chat-Weg (Prompt-Cache).
+        system_prompt += self._mcp_prompt_block()
 
         collected_texts = []
         # LLM-VERLAUF AUCH HEADLESS. Bis 2026-08-24 protokollierte nur `run_task`
@@ -4163,25 +4286,6 @@ KRITISCH – Autonomie-Regeln:
                     # Dieselbe Begruendung wie bei cron_create (2026-07-29): der
                     # Versuch steht im Journal, als Verstoss gilt er nicht.
                     _viol_soft = True
-                elif _ist_mcp_tool(tool, name) and not _mcp_freigegeben(tool, _uname):
-                    # MCP-Werkzeuge stammen aus FREMDEM Code und arbeiten mit den
-                    # Zugangsdaten des SERVERS – die Rechte des anfragenden
-                    # Benutzers im Zielsystem spielen keine Rolle ("fremde
-                    # Zugangsdaten als Vollmacht", eines der vier Fehlermuster der
-                    # Endpunkt-Durchsicht vom 2026-08-04). Freigabe deshalb je
-                    # Server und ausdruecklich (Einstellungen -> MCP), Vorgabe AUS.
-                    print(f"[AGENT] BLOCKED MCP-Tool '{name}' fuer Domain-User '{_uname}' "
-                          f"(Server fuer diesen Benutzer nicht freigegeben)", flush=True)
-                    result = ("Zugriff verweigert: Werkzeuge dieses MCP-Servers sind fuer "
-                              "deinen Benutzer nicht freigeschaltet. Ein Administrator kann dich "
-                              "(oder deine Gruppe) unter Einstellungen -> MCP -> Berechtigungen "
-                              "dafuer freigeben.")
-                    _ldap_blocked = True
-                    _viol = ("blocked-tool", name)
-                    # Weich, gleiche Begruendung wie bei _BLOCKED_TOOLS_FOR_LDAP: welches
-                    # Werkzeug aufgerufen wird, entscheidet das MODELL – der Benutzer kann
-                    # den Versuch weder vorhersehen noch vermeiden.
-                    _viol_soft = True
                 elif name == "filesystem":
                     # Pfad-Confinement: Schreiben nur /tmp+data/documents, Lesen nur
                     # in Wissens-/Arbeitsverzeichnissen; Secrets/System/Root gesperrt.
@@ -4377,6 +4481,23 @@ KRITISCH – Autonomie-Regeln:
                     and not getattr(self, '_current_user_vemas', True)):
                 print(f"[AGENT] BLOCKED VEMAS-Tool '{name}' fuer User '{_uname}' (kein VEMAS-Zugriff)", flush=True)
                 result = "Zugriff verweigert: VEMAS-Zugriff ist fuer deinen Benutzer nicht freigeschaltet."
+                _ldap_blocked = True
+
+            # MCP-Server: dieselbe Regel wie SAP/VEMAS (Festlegung 2026-10-25) –
+            # nur eingetragene Benutzer/Gruppen, leer = niemand, KEIN
+            # Admin-Bypass. Deshalb ausserhalb der `not _privileged`-Kette.
+            # MCP-Werkzeuge stammen aus FREMDEM Code und arbeiten mit den
+            # Zugangsdaten des SERVERS – die Rechte des Anfragenden im Zielsystem
+            # spielen keine Rolle ("fremde Zugangsdaten als Vollmacht", eines der
+            # vier Fehlermuster der Endpunkt-Durchsicht vom 2026-08-04).
+            if (not _ldap_blocked and _ist_mcp_tool(tool, name)
+                    and not _mcp_freigegeben(tool, _uname)):
+                print(f"[AGENT] BLOCKED MCP-Tool '{name}' fuer User '{_uname}' "
+                      f"(Server fuer diesen Benutzer nicht freigegeben)", flush=True)
+                result = ("Zugriff verweigert: Werkzeuge dieses MCP-Servers sind fuer "
+                          "deinen Benutzer nicht freigeschaltet. Ein Administrator kann dich "
+                          "(oder deine Gruppe) unter Einstellungen -> MCP -> Berechtigungen "
+                          "dafuer freigeben.")
                 _ldap_blocked = True
 
             # OS-Sandbox: Shell-Befehle als unprivilegierter OS-Benutzer ausfuehren

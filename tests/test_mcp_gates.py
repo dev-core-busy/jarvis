@@ -117,18 +117,14 @@ check(t.name.startswith("mcp_"), f"Name traegt den Praefix ({t.name})")
 check('getattr(tool, "requires_internet", False)' in AGENT_SRC,
       "Dispatch prueft requires_internet per getattr")
 
-# ── 2. Freigabe ist fail-closed ─────────────────────────────────────────────
-print("\n2. erlaubt_netzwerk_benutzer ist fail-closed")
-check(mk(None).erlaubt_netzwerk_benutzer is False, "ohne Server-Config: gesperrt")
-check(mk({}).erlaubt_netzwerk_benutzer is False, "leere Config: gesperrt")
-check(mk({"allow_network_users": True}).erlaubt_netzwerk_benutzer is True,
-      "ausdrueckliches True: frei")
-for wert, label in [(False, "False"), (None, "None"), ("ja", '"ja"'), (1, "1"),
-                    ("true", '"true"'), ([], "leere Liste")]:
-    check(mk({"allow_network_users": wert}).erlaubt_netzwerk_benutzer is False,
-          f"{label} zaehlt NICHT als Freigabe")
+# ── 2. Kein Altschalter mehr ────────────────────────────────────────────────
+# "alle Netzwerk-Benutzer" (allow_network_users) gibt es seit 2026-10-25 nicht
+# mehr – Freigabe wie bei SAP & Co., leer = niemand.
+print("\n2. Werkzeug traegt keinen Freigabe-Schnappschuss")
+check(not hasattr(mk({"allow_network_users": True}), "erlaubt_netzwerk_benutzer"),
+      "kein beim Bau eingefrorener Freigabewert am Werkzeug")
 
-# ── 2b. Freigabe zur LAUFZEIT (Benutzerliste, Stufe "alle") ───────────────
+# ── 2b. Freigabe zur LAUFZEIT (Benutzer/Gruppen, leer = niemand) ──────────
 print("\n2b. erlaubt_fuer liest die aktuelle Freigabe")
 
 
@@ -138,8 +134,8 @@ def _mit(cfg):
 
 
 check(_mit({}).erlaubt_fuer("m.muster") is False, "nichts freigegeben: gesperrt")
-check(_mit({"allow_network_users": True}).erlaubt_fuer("m.muster") is True,
-      "Stufe 'alle': frei")
+check(_mit({"allow_network_users": True}).erlaubt_fuer("m.muster") is False,
+      "Altschalter 'alle Netzwerk-Benutzer' gibt NICHTS mehr frei")
 check(_mit({"allowed_users": "a.b, M.Muster"}).erlaubt_fuer("FIRMA\\m.muster") is True,
       "Benutzerliste: Login normalisiert (Domain-Praefix, Gross/Klein)")
 check(_mit({"allowed_users": "a.b"}).erlaubt_fuer("m.muster") is False,
@@ -181,7 +177,7 @@ check(_ist_mcp_tool(_Dummy(), "dump_mcp_state") is False,
 
 # ── 4. Der Dispatch-Zweig ───────────────────────────────────────────────────
 print("\n4. Dispatch-Zweig in agent.py")
-_zweig = re.search(r'elif _ist_mcp_tool\(tool, name\).*?(?=\n                elif |\n                if )',
+_zweig = re.search(r'\n            if \(not _ldap_blocked and _ist_mcp_tool\(tool, name\).*?_ldap_blocked = True\n',
                    AGENT_SRC, re.S)
 check(bool(_zweig), "Zweig vorhanden")
 _z = _zweig.group(0) if _zweig else ""
@@ -194,7 +190,7 @@ _mf = _fns["_mcp_freigegeben"]
 
 
 class _OhneMethode:
-    erlaubt_netzwerk_benutzer = True
+    ist_mcp = True
 
 
 class _Wirft:
@@ -218,32 +214,28 @@ check(_mf(_Wirft(), "x") is False, "Pruefung wirft: gesperrt")
 check(_mf(_Ja(), "x") is True, "Pruefung sagt True: frei")
 check(_mf(_Truthy(), "x") is False, "nur ein echtes True zaehlt")
 check('_ldap_blocked = True' in _z, "setzt _ldap_blocked")
-check('_viol_soft = True' in _z,
-      "weicher Verstoss – das MODELL waehlt das Werkzeug, nicht der Benutzer")
+# Wie SAP/VEMAS: keine Verstoss-Zaehlung – das MODELL waehlt das Werkzeug.
+check('_viol' not in _z, "kein Verstoss-Eintrag (wie SAP/VEMAS)")
+check('_privileged' not in _z and 'is_admin' not in _z,
+      "kein Admin-Bypass im Zweig (leer = niemand, auch kein Administrator)")
 check('Zugriff verweigert' in _z, "Klartext-Absage an das Modell")
 check('Einstellungen' in _z, "Meldung nennt den Weg zur Freigabe")
 
-# Der Zweig MUSS in der Kette unter `if not _privileged:` haengen – sonst traefe
-# er auch Administratoren und den Systemlauf.
-_kette = AGENT_SRC.find("if not _privileged:\n                from backend import sandbox as _sbx")
-_pos = AGENT_SRC.find("elif _ist_mcp_tool(tool, name)")
-check(_kette != -1 and _pos > _kette,
-      "steht innerhalb der 'not _privileged'-Kette (Admins nicht betroffen)")
-# ... und NACH der Sperrlisten-Pruefung, damit ein Werkzeug aus beiden Gruppen
-# die spezifischere Meldung behaelt.
-check(AGENT_SRC.find("_BLOCKED_TOOLS_FOR_LDAP and not _reminder_exempt") < _pos,
-      "steht nach der _BLOCKED_TOOLS_FOR_LDAP-Pruefung")
+# Der Zweig steht AUSSERHALB der `if not _privileged:`-Kette – kein
+# Admin-Bypass, wie bei SAP/VEMAS (Festlegung 2026-10-25).
+_pos = AGENT_SRC.find("if (not _ldap_blocked and _ist_mcp_tool(tool, name)")
+_vemas = AGENT_SRC.find("BLOCKED VEMAS-Tool")
+check(_pos != -1 and AGENT_SRC.find("elif _ist_mcp_tool(tool, name)") == -1,
+      "kein Zweig mehr in der 'not _privileged'-Kette")
+check(_vemas != -1 and _pos > _vemas, "steht bei den Bereichs-Freigaben (nach VEMAS)")
 
 # ── 5. Konfiguration – das Feld an BEIDEN Stellen ───────────────────────────
 print("\n5. config.py")
 _add = _hol(r'def add_mcp_server\(.*?(?=\n    def )', CFG_SRC, "add_mcp_server")
 _upd = _hol(r'def update_mcp_server\(.*?(?=\n    def )', CFG_SRC, "update_mcp_server")
-check('"allow_network_users"' in _add, "add_mcp_server kennt das Feld")
-check('data.get("allow_network_users") is True' in _add,
-      "add_mcp_server normalisiert fail-closed (is True)")
-check('allow_network_users' in _upd, "update_mcp_server kennt das Feld")
-check('data["allow_network_users"] is True' in _upd,
-      "update_mcp_server normalisiert fail-closed")
+check('freigabe_normalisieren(data)' in _add and 'freigabe_normalisieren(data)' in _upd,
+      "Freigabefelder an BEIDEN Stellen (add und update)")
+check('"allow_network_users"' not in _add, "add schreibt den Altschalter nicht mehr")
 # Isolation: Vorgabe AN, deshalb `is not False` – bei `is True` waere ein
 # Altbestand-Server ohne das Feld ploetzlich ungeschuetzt.
 check('data.get("sandbox") is not False' in _add, "add_mcp_server: sandbox Vorgabe AN")
@@ -252,21 +244,18 @@ check("sandbox_paths" in _add and "sandbox_paths" in _upd,
       "sandbox_paths an BEIDEN Stellen")
 # Die Projektregel "neues Feld = ZWEI Stellen" ist genau der Fehler, an dem
 # prompt_tool_calling jahrelang wirkungslos war.
-check('if "allow_network_users" in data' in _upd,
-      "PUT unterscheidet 'nicht gesendet' von 'False' (Teil-Update moeglich)")
+check('srv.pop("allow_network_users", None)' in _upd,
+      "update raeumt den Altschalter beim Speichern der Freigabe ab")
 
 # ── 6. Status-Endpunkt zeigt den Zustand ────────────────────────────────────
 print("\n6. get_status")
-check(MCP_SRC.count('"allow_network_users"') >= 2,
-      "Feld in BEIDEN Status-Zweigen (verbunden und nicht verbunden)")
-_status = re.search(r'def get_status\(self\) -> dict:.*?(?=\n\n)', MCP_SRC, re.S)
-check(_status and 'is True' in _status.group(0),
-      "Status meldet fail-closed normalisiert")
+check('"allow_network_users"' not in MCP_SRC,
+      "Status meldet den Altschalter nicht mehr (die Freigabe kommt aus _zugang_status)")
 
 # ── 7. Werkzeugkasten wird nachgeladen ──────────────────────────────────────
 print("\n7. main.py – Agent erfaehrt von Aenderungen")
 # Ohne _reload_agent_tools() wirkt eine Freigabe erst nach Dienst-Neustart:
-# erlaubt_netzwerk_benutzer wird beim BAU des Werkzeugs gelesen. Gleiche Falle
+# Adresse/Schluessel/Zertifikat wirken erst mit neuer Verbindung. Gleiche Falle
 # wie beim Skill-Toggle (2026-08-10).
 for _ep in ["add_mcp_server", "update_mcp_server", "remove_mcp_server",
             "toggle_mcp_server", "reconnect_mcp_server"]:
@@ -365,20 +354,72 @@ check("streamablehttp_client" in MCP_SRC, "Streamable-HTTP-Client wird benutzt")
 _conn = _hol(r'async def _verbinden\(self\):.*?(?=\n    async def )', MCP_SRC, "_verbinden()")
 check('"streamable_http"' in _conn, "Transport 'streamable_http' waehlbar")
 check('transport_type == "sse"' in _conn, "'sse' waehlt weiterhin den alten Transport")
-# "http" lief bis 2026-08-14 faelschlich auf SSE.
-check('transport_type == "http"' in _conn, "'http' hat einen eigenen Zweig")
-_http = _conn[_conn.index('transport_type == "http"'):]
-check("_connect_streamable_http" in _http and "_connect_sse" in _http,
-      "'http': erst Streamable HTTP, dann SSE als Rueckfall")
-check(_http.index("_connect_streamable_http") < _http.index("_connect_sse"),
-      "der aktuelle Standard wird ZUERST versucht")
-check("aclose()" in _http,
-      "vor dem Rueckfall wird der halb offene Transport geschlossen")
+# "http": erst Streamable HTTP, dann SSE – seit dem Code-Review 2026-10-25 als
+# ZWEI Versuche mit je eigenem Besitzer-Task (der fruehere `except Exception`
+# in _verbinden war toter Code). Gemessen wird das VERHALTEN von connect():
+# die Funktion laeuft wirklich, `_ein_versuch` ist eine Attrappe.
+import ast as _ast
+import asyncio as _asyncio
+_cbaum = _ast.parse(MCP_SRC)
+_cfn = next((n for k in _cbaum.body if isinstance(k, _ast.ClassDef) and k.name == "McpServerConnection"
+             for n in k.body if isinstance(n, _ast.AsyncFunctionDef) and n.name == "connect"), None)
+if _cfn is None:
+    print("ABBRUCH: McpServerConnection.connect nicht gefunden", file=sys.stderr)
+    raise SystemExit(2)
+_cns = {}
+exec(compile(_ast.fix_missing_locations(_ast.Module(body=[_ast.ClassDef(
+    name="_C", bases=[], keywords=[], decorator_list=[], type_params=[], body=[_cfn])],
+    type_ignores=[])), "mcp", "exec"), _cns)
+
+
+class _Verb(_cns["_C"]):
+    def __init__(self, transport, gelingt):
+        self.config = {"transport": transport}
+        self.name = "x"
+        self.connected = False
+        self.error = None
+        self.versuche = []
+        self._gelingt = gelingt
+
+    async def _ein_versuch(self, t):
+        self.versuche.append(t)
+        self.connected = t in self._gelingt
+        self.error = None if self.connected else f"fehler-{t}"
+
+
+def _lauf(transport, gelingt):
+    v = _Verb(transport, gelingt)
+    _asyncio.run(v.connect())
+    return v
+
+
+v = _lauf("http", {"sse"})
+check(v.versuche == ["streamable_http", "sse"] and v.connected,
+      f"'http': erst Streamable HTTP, dann SSE als Rueckfall ({v.versuche})")
+v = _lauf("http", {"streamable_http"})
+check(v.versuche == ["streamable_http"], "'http': gelingt Streamable HTTP, kein SSE-Versuch")
+v = _lauf("http", set())
+check("fehler-streamable_http" in (v.error or "") and "fehler-sse" in (v.error or ""),
+      f"beide gescheitert: BEIDE Gruende in der Meldung ({v.error})")
+v = _lauf("sse", {"sse"})
+check(v.versuche == ["sse"], "'sse' ist genau EIN Versuch")
+v = _lauf("streamable_http", set())
+check(v.versuche == ["streamable_http"], "'streamable_http' faellt NICHT auf SSE zurueck")
+_vb = _hol(r'async def _verbinden\(self\):.*?(?=\n    async def )', MCP_SRC, "_verbinden()")
+check('"_transport_jetzt"' in _vb, "_verbinden nimmt den Transport des Versuchs")
 # Das Dreier-Tupel ist die Falle: sse_client liefert zwei Werte, dieser drei.
 _sh = _hol(r'async def _connect_streamable_http\(self\):.*?(?=\n    async def )',
            MCP_SRC, "_connect_streamable_http")
 check("transport[0], transport[1]" in _sh,
       "Dreier-Tupel wird korrekt ausgepackt (nicht 'a, b = transport')")
+
+# TLS-Factory (Code-Review 2026-10-25): kein Wegwerf-Client je Versuch.
+_th = _hol(r'def _tls_haken\(self\) -> dict:.*?(?=\n    async def )', MCP_SRC, "_tls_haken")
+_th_code = "\n".join(z for z in _th.splitlines() if not z.lstrip().startswith("#"))
+check(_th_code.count("AsyncClient(") == 1 and "create_mcp_http_client(" not in _th_code,
+      "Factory baut genau EINEN Client (kein ungeschlossener zweiter)")
+check("MCP_DEFAULT_TIMEOUT" in _th_code and "MCP_DEFAULT_SSE_READ_TIMEOUT" in _th_code,
+      "Zeitvorgaben aus den Konstanten der Bibliothek, keine eigenen Zahlen")
 
 # ── 8. Frontend – Fremdtext wird entschaerft ────────────────────────────────
 print("\n8. mcp.js")
@@ -391,35 +432,54 @@ for roh in ['${srv.name}', '${t.name}', '${t.description', '${srv.error}', '${sr
 check('_esc(srv.name)' in JS_SRC and '_esc(t.name)' in JS_SRC,
       "Servername und Werkzeugname entschaerft")
 check('data-action="rechte"' in JS_SRC, "Berechtigungs-Knopf vorhanden")
-check('id="mcp-f-sandbox"' in JS_SRC and "checked" in JS_SRC,
+check('data-f="sandbox" checked' in JS_SRC,
       "Isolations-Kaestchen im Formular, vorbelegt")
 check("checked !== false" in JS_SRC,
       "Formular sendet sandbox=true, solange nicht ausdruecklich abgewaehlt")
 check('value="streamable_http"' in JS_SRC, "Streamable HTTP im Transport-Pulldown")
 check("sandbox_paths" in JS_SRC, "Zusatzpfade im Formular")
 check("_rechte(" in JS_SRC, "Handler vorhanden")
+# Aufbau der Karte (Wunsch 2026-10-25): Berechtigungen in der KOPFZEILE, die
+# Einstellungen IM einklappbaren Teil – kein Zahnrad, kein Formular daneben.
+_karte = re.search(r'_renderCard\(srv\) \{.*?\n        \}\n', JS_SRC, re.S)
+_k = _karte.group(0) if _karte else ""
+_kopf = _k[_k.find('class="mcp-card-header"'):_k.find('class="mcp-card-status"')]
+_koerper = _k[_k.find('class="mcp-card-body"'):]
+check(bool(_kopf) and 'data-action="rechte"' in _kopf, "Berechtigungen-Knopf in der Kopfzeile")
+check('data-action="rechte"' not in _koerper, "kein zweiter Berechtigungen-Knopf im Koerper")
+check('data-form-for=' in _koerper, "Einstellungsformular im einklappbaren Teil")
+check('data-action="edit"' not in JS_SRC and "gear()" not in JS_SRC, "kein Zahnrad mehr")
+# Befund Code-Review 2026-10-25: der gespeicherte Transport bleibt erhalten
+# (frueher wurde 'http' im Formular still zu 'streamable_http').
+check("'streamable_http' : (cfg.transport" not in JS_SRC
+      and "sel.appendChild(o)" in JS_SRC
+      and re.search(r"^\s*sel\.value = tr;\s*$", JS_SRC, re.M) is not None,
+      "Bearbeiten bewahrt einen Transport ohne eigene Option ('http')")
+check(re.search(r'id="mcp-f-', JS_SRC) is None,
+      "Formularfelder ohne feste IDs (mehrere Karten koennen offen sein)")
 _set = re.search(r'\n        _rechte\(.*?(?=\n        /\*\*|\n        async |\n        _)', JS_SRC, re.S)
 _s = _set.group(0) if _set else ""
 check("JarvisFreigabe.oeffnen" in _s, "benutzt das gemeinsame Freigabe-Popup")
-check("alleBestaetigen: window.t('mcp.net_users_confirm')" in _s,
-      "Stufe 'alle' fragt nach (Rueckfrage im Popup)")
-check("JSON.stringify({ allow_network_users: w.alle === true," in _s
-      and "allowed_users: w.users" in _s and "allowed_group: w.groups" in _s,
-      "sendet NUR die drei Freigabefelder (der Endpunkt merged – ein voller "
+check("mitAlle" not in JS_SRC and "allow_network_users" not in JS_SRC,
+      "keine Stufe 'alle' mehr im Frontend")
+check("JSON.stringify({ allowed_users: w.users," in _s and "allowed_group: w.groups" in _s,
+      "sendet NUR die zwei Freigabefelder (der Endpunkt merged – ein voller "
       "Formularstand ueberschriebe die Serverdaten)")
 check("'PUT'" in _s, "per PUT")
 
 # ── 9. i18n in beiden Sprachen ──────────────────────────────────────────────
 print("\n9. i18n")
-for key in ["mcp.net_users_label", "mcp.net_users_on", "mcp.net_users_off",
-            "mcp.net_users_hint", "mcp.net_users_confirm",
+for key in ["mcp.net_users_hint", "mcp.rights_selected", "mcp.rights_none",
             "mcp.transport_shttp", "mcp.sandbox_label", "mcp.sandbox_on",
-            "mcp.sandbox_off", "mcp.sandbox_hint", "mcp.sandbox_paths_label"]:
+            "mcp.sandbox_off", "mcp.sandbox_hint", "mcp.sandbox_paths_label",
+            "frg.sum_none", "frg.or_hint"]:
     check(I18N_SRC.count(f"'{key}'") >= 2, f"{key} in DE und EN")
-# Die Marke traegt ihre Aussage im TEXT, nicht nur in der Farbe.
-_de = re.search(r"'mcp\.net_users_on':\s*'([^']*)'", I18N_SRC)
-check(_de and len(re.sub(r'[^\wäöüÄÖÜß ]', '', _de.group(1)).strip()) > 3,
-      "Marke hat einen Text, nicht nur ein Symbol")
+for alt in ["mcp.net_users_on", "mcp.net_users_off", "mcp.net_users_confirm",
+            "frg.only_admins", "frg.all", "frg.sum_all"]:
+    check(f"'{alt}'" not in I18N_SRC, f"{alt} entfernt (Stufe gibt es nicht mehr)")
+_de = re.search(r"'mcp\.net_users_hint':\s*'([^']*)'", I18N_SRC)
+check(bool(_de) and "auch kein Administrator" in _de.group(1),
+      "Hinweis nennt 'leer = niemand, auch kein Administrator'")
 
 print(f"\n{'='*60}\n{_ok} OK, {_fail} FAIL\n{'='*60}")
 sys.exit(1 if _fail else 0)

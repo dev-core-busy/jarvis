@@ -16,6 +16,7 @@
  *
  *   node tests/test_feedback_admin_editor_ui.js   (JSDOM_PATH setzt den jsdom-Ort)
  */
+require('./lib/bilanz')();   // Absturz -> Exit 2, nicht 1 (test_waechter_bilanz.js)
 const fs = require('fs');
 const { JSDOM } = require('./lib/jsdom_laden')();
 

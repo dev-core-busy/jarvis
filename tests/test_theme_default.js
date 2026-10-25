@@ -16,6 +16,7 @@
 
    Aufruf: node tests/test_theme_default.js
    ═══════════════════════════════════════════════════════════════════ */
+require('./lib/bilanz')();   // Absturz -> Exit 2, nicht 1 (test_waechter_bilanz.js)
 const fs = require('fs');
 const path = require('path');
 const { JSDOM } = require('./lib/jsdom_laden')();
@@ -45,21 +46,27 @@ const MIT_THEMA = SEITEN.filter(p => {
     const s = fs.readFileSync(p, 'utf8');
     return s.includes('theme.js') || s.includes('theme.css');
 });
+// ⚠ SEIT BSI H4 (CSP, kein Inline-Skript) steht das Frueh-Skript als DATEI
+// in jeder Seite: <script src="/static/js/theme_frueh.js?v=N"></script>
+// unmittelbar nach <body>, synchron. Dieser Abschnitt suchte noch den alten
+// Inline-Ausdruck in der Seite und meldete deshalb JEDE Seite als "fehlt"
+// (2026-10-25). Geprueft wird jetzt die Einbindung und ihre Stellung; die
+// Bedingung selbst wird unten AUSGEFUEHRT, nicht gelesen.
+const FRUEH_TAG = /<script src="\/static\/js\/theme_frueh\.js\?v=\d+"><\/script>/;
 let ohneSkript = [], altebedingung = [], falschePosition = [];
 for (const p of MIT_THEMA) {
     const s = fs.readFileSync(p, 'utf8');
     const rel = path.relative(ROOT, p);
     if (s.includes("jarvis_theme')==='light'")) altebedingung.push(rel);
-    if (!s.includes("jarvis_theme')!=='dark'")) { ohneSkript.push(rel); continue; }
+    const m = FRUEH_TAG.exec(s);
+    if (!m) { ohneSkript.push(rel); continue; }
     // Es MUSS vor dem Inhalt stehen – sonst rendert der Browser erst dunkel.
+    // Gemessen wird der Anfang des <script>-TAGS.
     const iBody = s.indexOf('<body');
-    const iAusdruck = s.indexOf("jarvis_theme')!=='dark'");
-    // Gemessen wird der Anfang des <script>-TAGS, nicht der Ausdruck darin –
-    // sonst zaehlt der Test die eigene Skript-Einleitung als "davor" und
-    // meldet auf JEDER Seite dieselben 37 Zeichen Abstand.
-    const iSkript = s.lastIndexOf('<script', iAusdruck);
+    const iSkript = m.index;
     const dazwischen = s.slice(s.indexOf('>', iBody) + 1, iSkript).trim();
-    if (iSkript < iBody || dazwischen.length > 0) falschePosition.push(rel + ' (' + dazwischen.length + ' Zeichen davor)');
+    if (iBody < 0 || iSkript < iBody || dazwischen.length > 0)
+        falschePosition.push(rel + ' (' + dazwischen.length + ' Zeichen davor)');
 }
 pruefe(ohneSkript.length === 0, 'jede Seite mit Thema hat das Skript' +
     (ohneSkript.length ? ' – FEHLT: ' + ohneSkript.join(', ') : ` (${MIT_THEMA.length} Seiten)`));
@@ -67,6 +74,27 @@ pruefe(altebedingung.length === 0, 'keine Seite prueft noch auf ===\'light\'' +
     (altebedingung.length ? ' – ALT: ' + altebedingung.join(', ') : ''));
 pruefe(falschePosition.length === 0, 'das Skript steht unmittelbar nach <body>' +
     (falschePosition.length ? ' – VERSPAETET: ' + falschePosition.join(', ') : ''));
+
+// theme_frueh.js AUSFUEHREN: ohne Wahl hell, ein gespeichertes "dark" bleibt
+// dunkel, und ein kaputter Speicher wirft nicht (try im Skript).
+const FRUEH_JS = fs.readFileSync(path.join(ROOT, 'frontend', 'js', 'theme_frueh.js'), 'utf8');
+function fruehLauf(wert, kaputt) {
+    const dom = new JSDOM('<!doctype html><html><body></body></html>',
+        { url: 'https://localhost/', runScripts: 'outside-only' });
+    Object.defineProperty(dom.window, 'localStorage', {
+        value: { getItem: k => { if (kaputt) throw new Error('gesperrt'); return k === 'jarvis_theme' ? wert : null; } },
+        configurable: true });
+    dom.window.eval(FRUEH_JS);
+    const hell = dom.window.document.body.classList.contains('light');
+    dom.window.close();
+    return hell;
+}
+pruefe(fruehLauf(null, false) === true, 'theme_frueh: ohne gespeicherte Wahl HELL');
+pruefe(fruehLauf('dark', false) === false, 'theme_frueh: "dark" bleibt dunkel');
+pruefe(fruehLauf('light', false) === true, 'theme_frueh: "light" ist hell');
+let _wirft = false;
+try { fruehLauf(null, true); } catch (e) { _wirft = true; }
+pruefe(!_wirft, 'theme_frueh: gesperrter Speicher wirft nicht');
 
 // ── 2 · theme.js WIRKLICH ausfuehren ─────────────────────────────────
 abschnitt('2 · theme.js entscheidet richtig (ausgefuehrt, nicht gelesen)');

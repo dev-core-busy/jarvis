@@ -13,6 +13,7 @@
  * vorkommt.
  */
 'use strict';
+require('./lib/bilanz')();   // Absturz -> Exit 2, nicht 1 (test_waechter_bilanz.js)
 const fs = require('fs');
 const path = require('path');
 

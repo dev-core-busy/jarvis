@@ -710,8 +710,17 @@ migr_roh = (WURZEL / "deploy" / "security" / "setup_broker.sh").read_text()
 migr = "\n".join(z for z in migr_roh.splitlines() if not z.lstrip().startswith("#"))
 check("Positivkontrolle: Kommentare der Migration sind entfernt",
       "SICHTBAR und synchron" in migr_roh and "SICHTBAR und synchron" not in migr)
+# Das Skript bestimmt seinen Ort seit dem Umbau ueber SELF_DIR (aus
+# BASH_SOURCE, robuster als $0 bei `source`). Beide Schreibweisen zeigen auf
+# dasselbe Ziel; der Waechter kannte nur die alte und war seitdem rot
+# (2026-10-25). Damit er nicht weicher wird, muss SELF_DIR WIRKLICH das
+# Skriptverzeichnis sein und das Ziel existieren.
+_self_ok = re.search(r'SELF_DIR="\$\(cd "\$\(dirname "\$\{BASH_SOURCE\[0\]\}"\)" && pwd\)"',
+                     migr) is not None
 check("die Erstinstallation zeigt auf das echte Skript",
-      re.search(r'TIKA_SETUP="\$\(dirname "\$0"\)/\.\./tika_setup\.sh"', migr) is not None,
+      (re.search(r'TIKA_SETUP="\$\(dirname "\$0"\)/\.\./tika_setup\.sh"', migr) is not None
+       or (_self_ok and re.search(r'TIKA_SETUP="\$SELF_DIR/\.\./tika_setup\.sh"', migr) is not None))
+      and (WURZEL / "deploy" / "tika_setup.sh").is_file(),
       "Zuweisung fehlt oder zeigt woanders hin")
 check("sie prueft erst und richtet nur bei Bedarf ein",
       '"$TIKA_SETUP" --pruefen' in migr)
@@ -1213,4 +1222,12 @@ print(f"\n\033[1mErgebnis: {OK}/{OK + FAIL}\033[0m"
       + (f"  \033[33m({UEBERSPRUNGEN} nicht geprueft – siehe oben)\033[0m" if UEBERSPRUNGEN else ""))
 if FAIL:
     print(f"\033[31m{FAIL} Pruefung(en) fehlgeschlagen\033[0m")
+# ⚠ NICHT GEPRUEFT IST NICHT BESTANDEN (2026-10-25, dieselbe Regel wie in
+# sechs anderen Waechtern): ohne tika-app.jar laufen fuenf Abschnitte nicht,
+# und der Lauf endete trotzdem mit Exit 0 – von "bestanden" nicht zu
+# unterscheiden. Ohne echten Befund jetzt Exit 2 ("konnte nicht laufen").
+if not FAIL and UEBERSPRUNGEN:
+    print(f"UNVOLLSTAENDIG (Exit 2): {UEBERSPRUNGEN} Abschnitt(e) nicht geprueft "
+          "(tika-app.jar fehlt – 'sudo bash deploy/tika_setup.sh')")
+    sys.exit(2)
 sys.exit(1 if FAIL else 0)

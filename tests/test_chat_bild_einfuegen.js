@@ -31,6 +31,7 @@
  *
  *   node tests/test_chat_bild_einfuegen.js
  */
+require('./lib/bilanz')();   // Absturz -> Exit 2, nicht 1 (test_waechter_bilanz.js)
 const fs = require('fs');
 const path = require('path');
 const ROOT = path.resolve(__dirname, '..');

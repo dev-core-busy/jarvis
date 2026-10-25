@@ -4,13 +4,23 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 # agent.py importieren ist teuer/abhaengig -> nur die zwei Funktionen nachbauen
 src = (ROOT / "backend" / "agent.py").read_text(encoding="utf-8")
-start = src.index("def _seed_instructions()")
-end = src.index("def load_instructions()")
+# ⚠ DIE FUNKTION UEBER DEN SYNTAXBAUM SCHNEIDEN, nicht als Textfenster von
+# "def _seed_instructions" bis "def load_instructions" (2026-10-25): zwischen
+# beiden steht inzwischen PLOTSTYLE_FILE mit `__file__`, das Fenster fuehrte
+# es mit aus, und der Test starb mit NameError – ohne Bilanzzeile, also von
+# "nicht gelaufen" nicht zu unterscheiden (Register: ein Prueffenster greift
+# in den Nachbarblock).
+import ast
+_fn = next((n for n in ast.parse(src).body
+            if isinstance(n, ast.FunctionDef) and n.name == "_seed_instructions"), None)
+if _fn is None:
+    print("ABBRUCH: _seed_instructions nicht gefunden")
+    sys.exit(2)
 ns = {"Path": pathlib.Path}
 tmp = tempfile.TemporaryDirectory(); T = pathlib.Path(tmp.name)
 ns["INSTRUCTIONS_DIR"] = T / "instructions"
 ns["INSTRUCTIONS_DEFAULT_DIR"] = T / "instructions_default"
-exec(src[start:end], ns)
+exec(compile(ast.Module(body=[_fn], type_ignores=[]), "agent", "exec"), ns)
 seed = ns["_seed_instructions"]
 ok = 0; fail = []
 def check(n, c, d=""):

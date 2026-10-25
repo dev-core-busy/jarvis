@@ -38,6 +38,7 @@ const JS = fs.readFileSync(path.join(WURZEL, "frontend/js/confluence_addon.js"),
 // Das ECHTE Modul, keine Attrappe - keine Abhaengigkeiten, kein DOM, nur
 // localStorage. Im Browser ist es das erste <script> der Seite.
 const SITZUNG = fs.readFileSync(path.join(WURZEL, "frontend/js/sitzung.js"), "utf8");
+const SETTINGS_BTN = fs.readFileSync(path.join(WURZEL, "frontend/js/settings_btn.js"), "utf8");
 
 let ok = 0, fail = 0;
 function check(bed, text, extra) {
@@ -112,6 +113,10 @@ async function seite({ konto = null, darf = true, istAdmin = false,
     // reicht Lesezugriffe an `w` durch, das Modul findet es also ueber beide.
     w.eval(SITZUNG);
     w.eval("(function(window){\n" + JS + "\n}).call(window.__stubWin, window.__stubWin);");
+    // Das Zahnrad blendet das ZENTRALE settings_btn.js ein (seit 2026-10-25
+    // nicht mehr das Seiten-Skript) – also wird es mitgeladen, wie im Browser.
+    // Sonst misst der Pruefstand eine Verdrahtung, die es nicht mehr gibt.
+    w.eval(SETTINGS_BTN);
   } catch (e) { fehler.push("eval: " + e.message); }
   await new Promise((r) => setTimeout(r, 60));
   const $ = (id) => w.document.getElementById(id);

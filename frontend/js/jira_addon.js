@@ -474,11 +474,9 @@
         var app = $('ja-app');
         if (app) app.classList.remove('hidden');
 
-        // Das Zahnrad nur fuer Administratoren – wie auf den anderen Bereichsseiten.
-        if (me && me.is_admin) {
-            var s = $('ja-settings-btn');
-            if (s) s.style.display = '';
-        }
+        // Das Zahnrad blendet settings_btn.js zentral ueber /api/me ein – hier
+        // stand eine zweite Verdrahtung derselben Frage (2026-10-25 entfernt,
+        // test_settings_btn: "kein Skript einer Zahnrad-Seite fasst den Knopf an").
 
         try {
             var h = await fetch('/api/jira/assist/health',

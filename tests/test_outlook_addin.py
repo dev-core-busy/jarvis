@@ -296,7 +296,15 @@ pruefe(not farben, "keine harten Farben ausser #fff – gefunden: %s" % farben)
 pruefe("var(--text-primary)" in TASKPANE and "var(--border)" in TASKPANE,
        "Farben kommen aus den Theme-Variablen")
 pruefe("theme.css" in TASKPANE, "theme.css ist eingebunden")
-pruefe("jarvis_theme" in TASKPANE, "Hell-Modus wird vor dem ersten Zeichnen gesetzt")
+# Seit BSI H4 (CSP, kein Inline-Skript) setzt theme_frueh.js den Modus – synchron
+# DIREKT nach <body>, also weiterhin vor dem ersten Zeichnen. Der Waechter
+# suchte das alte Inline-Skript ("jarvis_theme" in der Seite) und war seitdem
+# rot (2026-10-25). Geprueft wird jetzt die Stellung UND der Inhalt der Datei.
+_tf = (ROOT / "frontend" / "js" / "theme_frueh.js").read_text(encoding="utf-8")
+_nach_body = re.search(r"<body[^>]*>\s*<script src=\"/static/js/theme_frueh\.js\?v=\d+\"></script>",
+                       TASKPANE)
+pruefe(_nach_body is not None and "jarvis_theme" in _tf,
+       "Hell-Modus wird vor dem ersten Zeichnen gesetzt")
 
 # Emoji werden je nach System farbig gerendert und folgen keinem Theme.
 emoji = re.findall(r"[\U0001F300-\U0001FAFF☀-⛿]", TASKPANE + ADDINJS)
@@ -600,7 +608,10 @@ def _ohne_kommentare(js: str) -> str:
     # also ein BEZEICHNER und kein Oberflaechentext – er erscheint nirgends im
     # Fenster. Geprueft wird, was ein Benutzer LIEST; ohne diese Zeile schlaegt
     # der Waechter am Aufruf `JarvisIcons.trash()` an.
-    return ohne.replace("JarvisIcons", "")
+    # Dasselbe fuer JEDEN Modulnamen der Form Jarvis+Grossbuchstabe
+    # (JarvisSitzung, JarvisIcons …) – Fliesstext wie "Jarvis antwortet" bleibt
+    # erfasst. Mit nur "JarvisIcons" schlug der Waechter an `JarvisSitzung` an.
+    return re.sub(r"\bJarvis[A-Z]\w*", "", ohne)
 
 
 pruefe("Jarvis" not in _ohne_kommentare(ADDINJS),

@@ -201,10 +201,24 @@ pruefe("tool_user() if username is None else username" in rumpf,
 pruefe(rumpf.count("tool_user()") == 1,
        "danach wird tool_user() nicht noch einmal gelesen",
        f"{rumpf.count('tool_user()')} Vorkommen")
+# Seit die Anhang-/Arbeitsbereich-Schranken in `_fremdes_arbeitsverzeichnis`
+# stehen (auch der write-Zweig laeuft dort durch), steht ihr Aufruf nicht mehr
+# im Rumpf von authorize_fs – der Waechter suchte ihn dort und war seitdem
+# rot, obwohl der Benutzer korrekt durchgereicht wird (2026-10-25). Erlaubt
+# ist beides: der Aufruf direkt im Rumpf ODER ueber den Helfer, den der Rumpf
+# mit `benutzer` ruft und der `benutzer` weitergibt.
+_hf = next((n for n in ast.walk(_sb) if isinstance(n, ast.FunctionDef)
+            and n.name == "_fremdes_arbeitsverzeichnis"), None)
+_hilf_src = "\n".join(_zeilen[_hf.lineno - 1:_hf.end_lineno]) if _hf else ""
+_ueber_hilfe = "_fremdes_arbeitsverzeichnis(rp, benutzer)" in rumpf
+pruefe(_ueber_hilfe or "gehoert_anhang(rp, benutzer)" in rumpf,
+       "Positivkontrolle: die Anhang-Schranke ist von authorize_fs aus erreichbar")
 for f in ("may_see_document(rp.name, benutzer)",
           "gehoert_anhang(rp, benutzer)",
           "gehoert_arbeitsbereich(rp, benutzer)"):
-    pruefe(f in rumpf, f"{f.split('(')[0]} bekommt den aufgeloesten Benutzer")
+    direkt = f in rumpf
+    mittelbar = _ueber_hilfe and f in _hilf_src
+    pruefe(direkt or mittelbar, f"{f.split('(')[0]} bekommt den aufgeloesten Benutzer")
 
 
 print("\n=== 8. office_read/office_to_pdf liefen an der Freigabe VORBEI ===")
@@ -242,7 +256,18 @@ print("\n=== 9. Blosser Dateiname darf nicht am Gate sterben ===")
 # Gemeldet: xlsx_edit path='Monatsumsätze_2026.xlsx' -> "Lesen ist nur in den
 # Wissens-/Arbeitsverzeichnissen erlaubt". Der rohe Name loest gegen das
 # Arbeitsverzeichnis des Dienstes auf; gemeint war eine Datei in data/documents.
-ok, warum = frei("read", "Monatsumsätze_2026.xlsx", BEN)
+# ⚠ DER ROHE NAME LOEST GEGEN DAS ARBEITSVERZEICHNIS AUF – und das ist beim
+# Start des Waechters zufaellig. Lief er unter /tmp (erlaubter Arbeitsort),
+# war der Name dort "freigegeben" und die Ursache nicht nachstellbar
+# (2026-10-25 in einer CI-nahen Kopie gemessen). Deshalb fuer diese Probe ein
+# Ort, an dem ein roher Name sicher auf KEINEN erlaubten Pfad zeigt.
+import os as _os
+_vorher_cwd = _os.getcwd()
+try:
+    _os.chdir("/")
+    ok, warum = frei("read", "Monatsumsätze_2026.xlsx", BEN)
+finally:
+    _os.chdir(_vorher_cwd)
 pruefe(ok is False, "der ROHE Name ist tatsaechlich nicht freigegeben (Ursache)", str(warum))
 
 _schleife = quelle[quelle.index('for _pf in getattr(self.tools_map.get(name), "pfad_parameter"'):]

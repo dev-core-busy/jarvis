@@ -475,6 +475,23 @@ def teil4():
         sys.exit(2)
 
     BILD = "/api/generated/" + "d" * 32 + ".png"
+    # ⚠ DAS BILD MUSS ES GEBEN (2026-10-25). Der Pruefstand meldete es per
+    # record_task_image an, legte die Datei aber nie an – `_ohne_tote_bildrefs`
+    # entfernte darauf ZU RECHT den Verweis des Modells (ein Bild, das es nicht
+    # gibt), und `_mit_bildern` trug es mit dem Vorgabetext "Bild" nach. Fall B
+    # war damit seit Einfuehrung der Pruefung auf tote Verweise rot – ein
+    # Messaufbau, der den Regelfall nicht herstellt (Register). Im Betrieb legt
+    # generate_image die Datei an; hier geschieht das im SANDKASTEN, nicht im
+    # echten data/generated.
+    import backend.tools.image_gen as _IG
+    _ECHT_IMG = _IG._IMG_DIR
+    _IG._IMG_DIR = _SAND / "generated"
+    _IG._IMG_DIR.mkdir(parents=True, exist_ok=True)
+    (_IG._IMG_DIR / ("d" * 32 + ".png")).write_bytes(b"\x89PNG\r\n\x1a\n")
+    if Path(_IG._IMG_DIR).resolve() == Path(_ECHT_IMG).resolve() \
+            or _SAND not in Path(_IG._IMG_DIR).resolve().parents:
+        print("ABBRUCH: das Bildverzeichnis zeigt nicht in den Sandkasten.")
+        sys.exit(2)
 
     def teil_text(t):
         return LLMPart(text=t, function_call=None)
@@ -499,9 +516,16 @@ def teil4():
             parts = self.folge.pop(0) if self.folge else [teil_text("Standardantwort")]
             return LLMResponse(parts=parts, raw=None, usage={})
 
-    _agent = A.JarvisAgent()
+    # ⚠ ERST ATTRAPPE UND ANBIETER FESTLEGEN, DANN BAUEN (2026-10-25): der
+    # Konstruktor ruft get_provider bereits – ohne Server-Konfiguration (CI)
+    # griff er zum echten Google-Anbieter und starb an "Missing key inputs".
+    # Der Anbieter wird festgelegt statt vom Server geborgt: der google-Zweig
+    # liest response.raw.candidates, das die Attrappe nicht hat. Dieselbe
+    # Lehre wie in test_empty_answer und test_agent_roles.
     _halter = {"s": None}
     A.get_provider = lambda *a, **kw: _halter["s"]
+    A.JarvisAgent.LLM_PROVIDER = property(lambda self: "openai_compatible")
+    _agent = A.JarvisAgent()
 
     # Das "Werkzeug" traegt ein Bild ein – genau wie generate_image es tut.
     async def _fake_tool(self, name, args, ws=None, **kw):

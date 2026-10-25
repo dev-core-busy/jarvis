@@ -735,8 +735,9 @@
                 return null;
             }
             if (app) { app.classList.remove('hidden'); }
-            var sb = $('fb-settings-btn');
-            if (sb && me.is_admin) { sb.style.display = ''; }
+            // Das Zahnrad blendet settings_btn.js zentral ueber /api/me ein – hier
+            // stand eine zweite Verdrahtung derselben Frage (2026-10-25 entfernt,
+            // test_settings_btn: "kein Skript einer Zahnrad-Seite fasst den Knopf an").
             return hole('/api/feedback/formulare')
                 .then(function (r) { return r.ok ? r.json() : null; })
                 .then(function (d) {

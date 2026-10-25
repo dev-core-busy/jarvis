@@ -410,8 +410,24 @@ pruefe(_gemini_lauf("imagen-4.0-generate-001", bm("1536x640", None), s) == _PNG_
 cfg = s[0]["config"]
 sicher(lambda: getattr(cfg, "aspect_ratio", None) == "16:9",
        "aspect_ratio landet in der GenerateImagesConfig")
-sicher(lambda: getattr(cfg, "image_size", None) == "1K",
-       "image_size landet in der GenerateImagesConfig")
+# ⚠ ABHAENGIG VON DER INSTALLIERTEN FASSUNG (2026-10-25): google-genai 1.5.0
+# (requirements.txt) kennt `image_size` nicht – llm.py laesst es dann bewusst
+# weg (breites except, "lieber das richtige Verhaeltnis ohne Stufe als gar
+# kein Bild"). Der Waechter verlangte es trotzdem und war damit dauerhaft rot.
+# Gemessen wird jetzt BEIDES: kennt die Fassung das Feld, muss es ankommen;
+# sonst muss es sauber wegfallen, ohne das Verhaeltnis mitzunehmen.
+try:
+    from google.genai import types as _gt
+    _kennt_size = "image_size" in getattr(_gt.GenerateImagesConfig, "model_fields", {})
+except Exception:  # noqa: BLE001
+    _kennt_size = None
+if _kennt_size:
+    sicher(lambda: getattr(cfg, "image_size", None) == "1K",
+           "image_size landet in der GenerateImagesConfig")
+elif _kennt_size is False:
+    sicher(lambda: getattr(cfg, "image_size", None) is None
+           and getattr(cfg, "aspect_ratio", None) == "16:9",
+           "google-genai ohne image_size: Feld faellt weg, das Verhaeltnis bleibt")
 sicher(lambda: getattr(cfg, "number_of_images", None) == 1,
        "number_of_images bleibt 1")
 

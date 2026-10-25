@@ -126,22 +126,13 @@ def main():
                all(x["score"] >= mit["items"][0]["score"] * K.AEHNLICH_REL for x in mit["items"]),
                str([x["score"] for x in mit["items"]]))
 
-        abschnitt("4. Gelernte Notizen sind ausgeschlossen")
-        # Sie tragen die Benutzerfrage als Ueberschrift und waeren fuer eine
-        # Q&A-Abfrage immer der Top-Treffer – unabhaengig vom Inhalt.
-        # Der Pfad MUSS /knowledge/learned/ enthalten – daran erkennt
-        # _is_learned_note() sie. Ein beliebiges "learned"-Verzeichnis reicht
-        # nicht (erste Testfassung lief genau hier vorbei).
-        lern = tmp / "knowledge" / "learned"
-        lern.mkdir(parents=True)
-        vs.add_chunks(str(lern / "conv_x.md"),
-                      ["Urlaubsantrag stellen. Der Urlaubsantrag wird im Personalportal "
-                       "unter Abwesenheiten erfasst und von der Fuehrungskraft genehmigt."],
-                      0.0, save=False)
-        r3 = K.find_similar_existing(dublette)
-        pruefe("gelernte Notiz taucht nicht auf",
-               not any("learned" in x["file"] for x in r3["items"]),
-               str([x["file"] for x in r3["items"]]))
+        # ⚠ HIER STAND "4. Gelernte Notizen sind ausgeschlossen". Die Zusage ist
+        # seit 2026-09-13 BEWUSST entfallen: Erfahrungswissen wird gar nicht
+        # mehr indiziert (data/erfahrung/, ausserhalb jedes Wissensordners –
+        # Begruendung in backend/tools/knowledge.py). Der Abschnitt schob eine
+        # Lernnotiz von Hand in den Index und verlangte einen Filter, den es mit
+        # Absicht nicht mehr gibt; in einer alten venv war er nur zufaellig
+        # gruen (ci_ausnahmen.txt). Entfernt 2026-10-25.
 
         abschnitt("5. Robustheit")
         pruefe("leerer Entwurf wirft nicht",

@@ -318,12 +318,29 @@ def test_a1_freigabe_ohne_vollreindex():
 
 def _stub_channels(vs, ranking):
     """Laesst alle drei Kanaele dieselbe Reihenfolge liefern."""
-    vs._search_vector_idx = lambda q, k: [(i, 1.0) for i in ranking]
-    vs._search_lexical_idx = lambda q, k: [(i, 1.0) for i in ranking]
+    # ⚠ ECHTE SIGNATUR (query, k, allowed=None) – der dritte Parameter (die
+    # Freigabe-Filterung) kam nach diesem Pruefstand dazu, und die Attrappen
+    # starben mit TypeError (2026-10-25). Sie filtern auch wie das Original:
+    # eine Attrappe, die `allowed` verschluckt, prueft eine Kette ohne Schranke.
+    vs._search_vector_idx = lambda q, k, allowed=None: [
+        (i, 1.0) for i in ranking if allowed is None or i in allowed]
+    vs._search_lexical_idx = lambda q, k, allowed=None: [
+        (i, 1.0) for i in ranking if allowed is None or i in allowed]
+
+
+# ⚠ `knowledge._learned_weight` ist seit 2026-09-13 BEWUSST entfernt (das
+# Erfahrungswissen wird gar nicht mehr indiziert, siehe Kommentar in
+# backend/tools/knowledge.py). Der MECHANISMUS, den dieser Abschnitt misst –
+# `weight_fn` wirkt VOR dem Cut, der Spitzenwert wird normiert – steht aber
+# weiter in `search_hybrid`. Geprueft wird er jetzt mit einer eigenen
+# Gewichtsfunktion derselben Form, statt eine entfernte Funktion zu verlangen
+# (bis 2026-10-25 starb der Abschnitt mit AttributeError).
+def _gewicht_lernnotiz(file_path: str) -> float:
+    return 0.6 if "/learned/" in str(file_path) else 1.0
 
 
 def test_a5_gewicht_vor_dem_cut():
-    section("A-5  Abwertung gelernter Notizen")
+    section("A-5  weight_fn wirkt vor dem Cut (Beispiel: Lernnotiz abgewertet)")
     meta = [
         {"file_path": "/opt/jarvis/data/knowledge/learned/2026-07/conv_1.md", "text": "gelernt"},
         {"file_path": "/opt/jarvis/data/knowledge/handbuch.md", "text": "primaer"},
@@ -335,7 +352,7 @@ def test_a5_gewicht_vor_dem_cut():
     _stub_channels(vs, [0, 1, 2, 3, 4])         # Lernnotiz steht auf Platz 1
 
     ohne = vs.search_hybrid("frage", 5)
-    mit = vs.search_hybrid("frage", 5, weight_fn=K._learned_weight)
+    mit = vs.search_hybrid("frage", 5, weight_fn=_gewicht_lernnotiz)
 
     check("ohne Gewichtung fuehrt die Lernnotiz", "conv_1.md" in ohne[0][1], str(ohne[0][1]))
     check("mit Gewichtung fuehrt das Primaerdokument", "handbuch.md" in mit[0][1],
@@ -353,7 +370,7 @@ def test_a5_ohne_lernnotiz_unveraendert():
     vs = make_store(meta)
     _stub_channels(vs, [0, 1, 2, 3, 4])
     ohne = [r[1] for r in vs.search_hybrid("frage", 5)]
-    mit = [r[1] for r in vs.search_hybrid("frage", 5, weight_fn=K._learned_weight)]
+    mit = [r[1] for r in vs.search_hybrid("frage", 5, weight_fn=_gewicht_lernnotiz)]
     check("identische Reihenfolge", ohne == mit, f"{ohne} vs {mit}")
 
 
@@ -366,7 +383,7 @@ def test_a4_generationswechsel():
 
     zustand = {"n": 0}
 
-    def kippen(q, k):
+    def kippen(q, k, allowed=None):
         # Beim ERSTEN Durchgang aendert sich der Index zwischen den Kanaelen:
         # genau das Fenster, in dem sich die Positionen verschieben.
         zustand["n"] += 1
@@ -374,10 +391,12 @@ def test_a4_generationswechsel():
             with vs._lock:
                 vs._meta = [{"file_path": "/kb/ganz_andere.md", "text": "fremd"}] + vs._meta
                 vs._gen += 1
-        return [(0, 1.0), (1, 0.9)]
+        return [(i, s_) for i, s_ in [(0, 1.0), (1, 0.9)]
+                if allowed is None or i in allowed]
 
     vs._search_vector_idx = kippen
-    vs._search_lexical_idx = lambda q, k: [(0, 1.0)]
+    vs._search_lexical_idx = lambda q, k, allowed=None: [
+        (i, s_) for i, s_ in [(0, 1.0)] if allowed is None or i in allowed]
 
     out = vs.search_hybrid("frage", 3)
     # Alter Stand: Positionen aus dem ALTEN Zustand wurden gegen die NEUE Liste

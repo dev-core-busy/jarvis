@@ -22,6 +22,7 @@
  *
  * Aufruf:  node tests/test_settings_btn.js
  */
+require('./lib/bilanz')();   // Absturz -> Exit 2, nicht 1 (test_waechter_bilanz.js)
 const fs = require('fs');
 const path = require('path');
 
@@ -144,8 +145,17 @@ for (const datei of SEITEN) {
     const s = lies(path.join(FE, datei));
     const m = s.match(/data-jarvis-settings="([^"]*)"/);
     if (!m) continue;
-    const erwartet = '/' + datei.replace(/\.html$/, '');
-    pruefe(`${datei}: Rueckweg ${m[1]}`, m[1] === erwartet, 'erwartet ' + erwartet);
+    // ⚠ Der Rueckweg ist die ROUTE der Seite, nicht ihr Dateiname: ai_mouse.html
+    // wird unter /ai-mouse ausgeliefert. Abgeleitet aus dem Dateinamen meldete
+    // der Waechter drei richtige Seiten als falsch (2026-10-25). Geprueft wird
+    // jetzt: der Wert ist eine echte GET-Route in main.py, und sie ist der
+    // Dateiname in einer der beiden Schreibweisen.
+    const stamm = datei.replace(/\.html$/, '');
+    const kandidaten = ['/' + stamm, '/' + stamm.replace(/_/g, '-')];
+    const MAINPY = lies(path.join(ROOT, 'backend', 'main.py'));
+    const istRoute = r => MAINPY.includes(`@app.get("${r}"`);
+    pruefe(`${datei}: Rueckweg ${m[1]}`, kandidaten.includes(m[1]) && istRoute(m[1]),
+           'erwartet eine echte Route aus ' + kandidaten.join(' / '));
 }
 
 // ── 5. /api: Knopfleiste wie die uebrigen Seiten ───────────────────────────

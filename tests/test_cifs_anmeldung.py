@@ -123,8 +123,15 @@ check("⚠ das Kennwort steht NICHT in der Argumentliste (Komma, ps)",
       not any(KW in a or "password=ab" in a for a in cmd), " ".join(cmd))
 check("⚠ … sondern unveraendert in PASSWD der Umgebung",
       env.get("PASSWD") == KW, str(env))
+# nosuid/nodev/noexec sind GEWOLLT (Haertung K2-d, 2026-09-29, MOUNT_OPTS in
+# backend/broker/ops.py) – die erste Fassung dieser Pruefung kannte sie nicht
+# und war seitdem rot. Sie stehen jetzt in der erlaubten Menge UND werden
+# ausdruecklich verlangt: ein Rueckbau der Haertung soll HIER auffallen.
+_HAERTUNG = {"nosuid", "nodev", "noexec"}
 check("die Optionsliste bleibt zerlegbar (keine fremden Optionen)",
-      set(optionen(opts)) <= {"ro", "username", "domain"}, opts)
+      set(optionen(opts)) <= {"ro", "username", "domain"} | _HAERTUNG, opts)
+check("die Haertung (nosuid, nodev, noexec) ist gesetzt",
+      _HAERTUNG <= set(optionen(opts)), opts)
 
 # --- Gast und leeres Kennwort -----------------------------------------------
 opts, env, cmd, erg = mounten("", "")

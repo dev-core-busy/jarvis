@@ -156,6 +156,21 @@ check(f"mindestens 6 Fassungen wirklich geprueft (waren {gefunden})", gefunden >
 print("\n=== 3. REGEL: Benutzerpfade nur ueber pfad_teil ===")
 BENUTZER_PARAM = {"user", "username", "owner", "benutzer", "usr"}
 
+def ist_pfad_division(k) -> bool:
+    """Ein ``/``, das einen PFAD bildet – keine Rechnung.
+
+    ⚠ Bis 2026-10-25 zaehlte JEDE Division: ``ai_mouse_health`` gibt
+    ``round(MAX_BILD_BYTES / 1048576.0, 1)`` zurueck (Megabyte), und der
+    Waechter meldete das als Benutzerpfad ohne pfad_teil – ein Fehlalarm, der
+    den Waechter seit Einrichten der CI rot hielt. Eine Division mit einer
+    ZAHL als Operand ist Arithmetik.
+    """
+    if not (isinstance(k, ast.BinOp) and isinstance(k.op, ast.Div)):
+        return False
+    zahl = lambda x: isinstance(x, ast.Constant) and isinstance(x.value, (int, float)) \
+        and not isinstance(x.value, bool)
+    return not (zahl(k.left) or zahl(k.right))
+
 def pfadbildner(pfad: Path):
     """Funktionen, die aus einem benutzerartigen Parameter einen Pfad bilden.
 
@@ -175,14 +190,12 @@ def pfadbildner(pfad: Path):
         if not (params & BENUTZER_PARAM):
             continue
         # Bildet sie einen Pfad? -> BinOp mit "/" irgendwo im Rumpf
-        hat_pfad = any(isinstance(k, ast.BinOp) and isinstance(k.op, ast.Div)
-                       for k in ast.walk(fn))
+        hat_pfad = any(ist_pfad_division(k) for k in ast.walk(fn))
         if not hat_pfad:
             continue
         # Gibt sie einen Path zurueck oder legt sie ein Verzeichnis an?
         rueck = any(isinstance(k, ast.Return) and k.value is not None
-                    and any(isinstance(x, ast.BinOp) and isinstance(x.op, ast.Div)
-                            for x in ast.walk(k))
+                    and any(ist_pfad_division(x) for x in ast.walk(k))
                     for k in ast.walk(fn))
         if not rueck:
             continue

@@ -2,6 +2,7 @@
  * Aenderung auch in einer BEREITS ausgelieferten Sitzung (Backend liefert nur
  * kind:"welcome" + Notfalltext, die Karte wird bei jeder Anzeige neu gebaut)? */
 'use strict';
+require('./lib/bilanz')();   // Absturz -> Exit 2, nicht 1 (test_waechter_bilanz.js)
 const fs = require('fs'), path = require('path');
 const { JSDOM } = require('./lib/jsdom_laden')();
 const ROOT = path.resolve(__dirname, '..');

@@ -652,7 +652,18 @@ abschnitt('Teil 4b: Funktionsbeschreibung und Druckansicht');
     const btn = d.getElementById('kbsync-info-btn');
     pruefe(!!btn, '❓-Knopf sitzt in der Kopfzeile des Containers');
     pruefe(btn.closest('#kb-sect-sync-hdr') !== null, 'und zwar in DIESER Kopfzeile');
-    pruefe(/stopPropagation/.test(btn.getAttribute('onclick') || ''),
+    // Seit BSI H4 (CSP) gibt es kein Inline-onclick mehr: der Knopf traegt
+    // data-klick, der Verteiler (settings_bedienung.js) stoppt die Weitergabe,
+    // und die Klapp-Kopfzeile in app.js uebergeht Klicks auf Knoepfe ohnehin.
+    // Gesucht wurde noch das alte Inline-stopPropagation (2026-10-25).
+    const _BED = fs.readFileSync(path.join(ROOT, 'frontend', 'js', 'settings_bedienung.js'), 'utf8');
+    const _APP = fs.readFileSync(path.join(ROOT, 'frontend', 'js', 'app.js'), 'utf8');
+    const _eintrag = _BED.slice(_BED.indexOf("'kbsync-info-oeffnen'"),
+                                _BED.indexOf("'kbsync-info-oeffnen'") + 300);
+    pruefe(!btn.getAttribute('onclick')
+           && btn.getAttribute('data-klick') === 'kbsync-info-oeffnen'
+           && /stopPropagation/.test(_eintrag)
+           && /closest\('button, input, label/.test(_APP),
         'der Klick klappt den Abschnitt nicht zu');
     pruefe(!!modal && modal.classList.contains('is-print-doc'),
         'Dialog ist als druckbare Doku markiert');

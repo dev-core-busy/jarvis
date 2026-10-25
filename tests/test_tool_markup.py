@@ -26,6 +26,7 @@ geradegezogen statt das Modell zu bitten.
 
 Lauf:  python3 tests/test_tool_markup.py
 """
+import re
 import sys
 from pathlib import Path
 
@@ -65,6 +66,9 @@ ECHT_ANTWORT = (
 
 MARKEN = ("</tool_call>", "<tool_call>", "</function>", "<function=",
           "</parameter>", "<parameter=", "<|tool_call|>")
+
+
+_UEBERSPRUNGEN: list = []
 
 
 def main() -> int:
@@ -148,7 +152,12 @@ def main() -> int:
     abschnitt("6) Verdrahtung im Provider und im Agenten")
     llm_src = (ROOT / "backend" / "llm.py").read_text(encoding="utf-8")
     ag_src = (ROOT / "backend" / "agent.py").read_text(encoding="utf-8")
-    pruefe("Provider bereinigt den content", "berge_tool_syntax(str(message[" in llm_src)
+    # Seit llm.py den Inhalt ueber `inhalt_als_text(...)` liest (der kommt auch
+    # mit Inhalt als LISTE zurecht), stand hier eine veraltete Schreibweise –
+    # der Waechter war damit rot, obwohl bereinigt wird (2026-10-25).
+    pruefe("Provider bereinigt den content",
+           re.search(r"berge_tool_syntax\((?:str|inhalt_als_text)\(message\[", llm_src)
+           is not None)
     pruefe("geborgene Aufrufe werden zu Function-Calls",
            "_geborgen and not message.get(\"tool_calls\")" in llm_src)
     pruefe("kein doppelter Aufruf, wenn der Server schon geparst hat",
@@ -169,6 +178,7 @@ def main() -> int:
         machbar = True
     except Exception as e:                        # noqa: BLE001
         print(f"  (uebersprungen: {type(e).__name__}: {e})")
+        _UEBERSPRUNGEN.append(f"echter Lauf ({type(e).__name__}: {e})")
         machbar = False
 
     if machbar:
@@ -202,9 +212,13 @@ def main() -> int:
                 return LLMResponse(parts=parts, raw=None, usage={})
 
         try:
-            agent = A.JarvisAgent()
+            # ERST Attrappe und Anbieter festlegen, DANN bauen: der Konstruktor
+            # ruft get_provider – ohne Server-Konfiguration (CI) starb er am
+            # echten Google-Anbieter (2026-10-25, wie test_empty_answer).
             halter = {"s": None}
             A.get_provider = lambda *a, **kw: halter["s"]
+            A.JarvisAgent.LLM_PROVIDER = property(lambda self: "openai_compatible")
+            agent = A.JarvisAgent()
 
             # 1. Antwort: genau der gemeldete Muell. 2. Antwort: echtes Ergebnis
             # (das holt der Nachschlag).
@@ -235,6 +249,12 @@ def main() -> int:
             pruefe(f"echter Lauf durchfuehrbar ({type(e).__name__}: {e})", False)
 
     print(f"\n{ok} ok, {fehler} Fehler ({ok + fehler} Pruefungen)")
+    # Uebersprungen ist nicht bestanden (2026-10-25, Regel wie in den anderen
+    # Waechtern): ohne fastapi lief der echte Lauf nicht, und Exit 0 sah aus
+    # wie bestanden.
+    if not fehler and _UEBERSPRUNGEN:
+        print("UNVOLLSTAENDIG (Exit 2): uebersprungen – " + "; ".join(_UEBERSPRUNGEN))
+        return 2
     return 1 if fehler else 0
 
 

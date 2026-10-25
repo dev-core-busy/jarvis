@@ -10,6 +10,7 @@
  *
  *   node tests/test_ai_mouse_freigabe_ui.js     (JSDOM_PATH setzt den jsdom-Ort)
  */
+require('./lib/bilanz')();   // Absturz -> Exit 2, nicht 1 (test_waechter_bilanz.js)
 const sitzungLaden = require('./lib/sitzung_laden');
 const fs = require('fs');
 const { JSDOM } = require('./lib/jsdom_laden')();

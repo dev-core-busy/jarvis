@@ -9823,6 +9823,10 @@ async def get_settings(user: str = Depends(require_auth)):
         # Chat-Profil". Aufgefallen NUR in der Live-Probe gegen den echten
         # Endpunkt, nicht im Waechter (der prueste config.py).
         "image_profile_id": config.IMAGE_PROFILE_ID,
+        # Speicherbar war der Werkzeug-Zuschnitt seit jeher, LESBAR nie – ob er
+        # an ist, liess sich ueber die API nicht nachsehen (test_bildmasse,
+        # Regel "jedes speicherbare Feld ist lesbar", 2026-10-25 behoben).
+        "werkzeug_buendel": config.WERKZEUG_BUENDEL,
         "docs_retention_days": config.DOCS_RETENTION_DAYS,
         # Kontext-Komprimierungs-Schwelle: nur zum ANZEIGEN im Feld unter
         # „System-Einstellungen" (seit 2026-08-05 steht es dort, vorher im

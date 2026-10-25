@@ -5,6 +5,7 @@
  * Quelltext-Suche koennte nicht beantworten, ob am Ende das richtige Label
  * dasteht. Der Codeblock wird aus der ECHTEN app.js geschnitten.
  */
+require('./lib/bilanz')();   // Absturz -> Exit 2, nicht 1 (test_waechter_bilanz.js)
 const fs = require('fs'), path = require('path');
 const ROOT = path.resolve(__dirname, '..');
 let ok = 0, fail = 0, bilanz = false;

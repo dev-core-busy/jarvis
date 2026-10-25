@@ -389,8 +389,21 @@ print("\n10. Beim Loeschen einer Sitzung wird der RAM-Kontext des HAUPTAGENTEN v
 _mq2 = MAIN_PY.read_text(encoding="utf-8")
 _blk = _mq2[_mq2.index('@app.delete("/api/chat/sessions/{sid}")'):]
 _blk = _blk[:_blk.index("@app.get(")]
-pruef("agent_manager.main_agent" in _blk,
+# Seit die Loeschung an `_chat_kontext_vergessen` delegiert, steht der
+# Hauptagent im HELFER, nicht im Endpunkt – der Waechter suchte ihn dort und
+# war seitdem rot, obwohl der richtige Agent geraeumt wird (2026-10-25).
+# Geprueft wird jetzt: beide Loeschwege rufen den Helfer, und der Helfer
+# raeumt beim Hauptagenten.
+_hlf = _mq2[_mq2.index("def _chat_kontext_vergessen"):]
+_hlf = _hlf[:_hlf.index("\n\n\n")]
+pruef("agent_manager.main_agent" in _hlf and "_user_histories.pop" in _hlf,
       "die Sitzungs-Loeschung raeumt den Verlauf des falschen Agenten")
+pruef("_chat_kontext_vergessen(user, sid)" in _blk,
+      "die Einzel-Loeschung ruft den Helfer nicht")
+_viele = _mq2[_mq2.index("async def chat_sessions_delete_many"):]
+_viele = _viele[:_viele.index("\n@app.")]
+pruef("_chat_kontext_vergessen(" in _viele,
+      "die Sammel-Loeschung verwirft den RAM-Kontext nicht")
 pruef("agent_instance._user_histories" not in _blk,
       "es wird weiterhin agent_instance benutzt – dort liegen die Chat-Verlaeufe nicht")
 

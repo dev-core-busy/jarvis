@@ -13,6 +13,7 @@
  * und die Kachel verschwieg das.
  */
 'use strict';
+require('./lib/bilanz')();   // Absturz -> Exit 2, nicht 1 (test_waechter_bilanz.js)
 const sitzungLaden = require('./lib/sitzung_laden');
 const fs = require('fs');
 const path = require('path');

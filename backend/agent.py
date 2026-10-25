@@ -325,7 +325,8 @@ _EXTERNAL_WRITE_TOOLS = {
 
 # Wie viel eines Werkzeug-Ergebnisses in den Kontext geht. Ein Werkzeug darf
 # ueber das Attribut `ergebnis_max` mehr verlangen (z.B. jira_get_issue fuer
-# den vollstaendigen Kommentarverlauf).
+# den vollstaendigen Kommentarverlauf); ein NEGATIVER Wert heisst unbegrenzt
+# (MCP-Werkzeuge, deren Eintrag keine Grenze nennt – McpRemoteTool.ergebnis_max).
 _TOOL_ERGEBNIS_MAX = 5000
 
 # ── Base64-Bilddaten im Werkzeug-Ergebnis: auslagern statt abschneiden ────────
@@ -6253,6 +6254,8 @@ KRITISCH – Autonomie-Regeln:
         grenze = _TOOL_ERGEBNIS_MAX
         try:
             eigen = int(getattr(self.tools_map.get(tool_name), "ergebnis_max", 0) or 0)
+            if eigen < 0:
+                return text
             if eigen > 0:
                 grenze = eigen
         except Exception:  # noqa: BLE001

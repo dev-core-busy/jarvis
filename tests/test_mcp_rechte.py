@@ -226,6 +226,8 @@ _cns = {"uuid": __import__("uuid")}
 for name in ("add_mcp_server", "update_mcp_server"):
     f = _funktion(CFG_SRC, name, klasse="Config")
     exec(compile(ast.Module(body=[f], type_ignores=[]), "config", "exec"), _cns)
+exec(compile(ast.Module(body=[_funktion(CFG_SRC, "_ergebnis_max")], type_ignores=[]),
+             "config", "exec"), _cns)
 add, upd = _cns["add_mcp_server"], _cns["update_mcp_server"]
 me = _Self()
 srv = add(me, {"name": "t", "transport": "streamable_http", "url": "https://h/mcp",
@@ -253,6 +255,13 @@ check(s0["allowed_users"] == "c" and s0["allowed_group"] == "", "update setzt Fr
 check("allow_network_users" not in s0, "update raeumt den Altschalter ab")
 upd(me, sid, {"api_key": ""})
 check(me._mcp_servers[0]["api_key"] == "", "ausdrueckliches '' entfernt den Schluessel")
+check(srv["ergebnis_max"] == 0, "add ohne Grenze: 0 = unbegrenzt")
+upd(me, sid, {"ergebnis_max": "8.000"})
+check(me._mcp_servers[0]["ergebnis_max"] == 8000, "update setzt Ergebnisgrenze")
+upd(me, sid, {"url": "https://h3/mcp"})
+check(me._mcp_servers[0]["ergebnis_max"] == 8000, "update ohne Grenze laesst sie stehen")
+upd(me, sid, {"ergebnis_max": -3})
+check(me._mcp_servers[0]["ergebnis_max"] == 0, "negative Grenze wird zu unbegrenzt")
 
 # ── 6. main.py / mcp_client.py: Schluessel verlaesst das Backend nie ────────
 print("\n6. Antworten ohne Schluessel")

@@ -258,6 +258,24 @@ class McpRemoteTool(BaseTool):
         return mcp_rechte.darf_benutzen(srv, benutzer)
 
     @property
+    def ergebnis_max(self) -> int:
+        """Zeichengrenze fuer ein Ergebnis aus dem MCP-Eintrag (`ergebnis_max`).
+
+        Fehlt sie oder ist sie 0, gilt KEINE Grenze (-1 fuer
+        `agent.py::_ergebnis_kappen`) – nicht der allgemeine 5000er-Deckel. Ein
+        MCP-Server liefert typischerweise Datenlisten, die abgeschnitten wertlos
+        sind. Wie `erlaubt_fuer` AKTUELL aus der Konfiguration gelesen, eine
+        geaenderte Grenze wirkt also beim naechsten Aufruf.
+        """
+        srv = next((s for s in config.get_mcp_servers()
+                    if s.get("id") == self.server_id), None) or {}
+        try:
+            grenze = int(srv.get("ergebnis_max") or 0)
+        except (TypeError, ValueError):
+            grenze = 0
+        return grenze if grenze > 0 else -1
+
+    @property
     def name(self) -> str:
         safe_server = self._server_name.replace("-", "_").replace(" ", "_")
         safe_tool = self._tool_name.replace("-", "_").replace(" ", "_")

@@ -339,6 +339,12 @@
                     <div class="mcp-form-hint">${window.t('mcp.ca_form_hint')}</div>
                 </div>
                 <div class="mcp-form-row">
+                    <label>${_tt('mcp.ergebnis_max_label', 'Max. Zeichen je Ergebnis')}</label>
+                    <input type="number" min="0" step="1000" data-f="ergebnis-max" class="mcp-input"
+                           placeholder="${_esc(_tt('mcp.ergebnis_max_ph', 'unbegrenzt'))}">
+                </div>
+                <div class="mcp-form-hint">${_esc(_tt('mcp.ergebnis_max_hint', 'Leer oder 0 = unbegrenzt: Werkzeug-Ergebnisse dieses Servers gehen vollständig an das Modell. Eine Zahl kürzt längere Ergebnisse auf so viele Zeichen (mit Hinweis).'))}</div>
+                <div class="mcp-form-row">
                     <label>${window.t('mcp.env_label')}</label>
                     <textarea data-f="env" class="mcp-input" rows="2" placeholder="API_KEY=xxx"></textarea>
                 </div>
@@ -378,6 +384,7 @@
                 $('[data-f="sandbox-paths"]').value = (cfg.sandbox_paths || []).join('\n');
                 $('[data-f="url"]').value = cfg.url || '';
                 $('[data-f="key-header"]').value = cfg.api_key_header || '';
+                $('[data-f="ergebnis-max"]').value = cfg.ergebnis_max > 0 ? String(cfg.ergebnis_max) : '';
                 if (cfg.api_key_gesetzt) {
                     $('[data-f="key"]').placeholder = _tt('mcp.key_keep_ph', 'hinterlegt – leer lassen = unverändert');
                     $('[data-f="key-weg-zeile"]').style.display = '';
@@ -439,6 +446,8 @@
                 sandbox: form.querySelector('[data-f="sandbox"]')?.checked !== false,
                 sandbox_paths: zeilen(wert('sandbox-paths')),
                 api_key_header: wert('key-header').trim(),
+                // Leer = 0 = unbegrenzt (backend/config.py::_ergebnis_max)
+                ergebnis_max: parseInt(wert('ergebnis-max'), 10) || 0,
             };
             // Eigenes Zertifikat: PEM-Block ODER absoluter Pfad, beides im
             // selben Feld (die Weiche steht im Backend, backend/mcp_tls.py).

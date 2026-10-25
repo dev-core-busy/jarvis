@@ -164,6 +164,23 @@ def _valid_temperature(value):
     return max(TEMPERATURE_MIN, min(f, TEMPERATURE_MAX))
 
 
+def _ergebnis_max(value) -> int:
+    """Filtert die Ergebnisgrenze eines MCP-Servers: Zeichen > 0 oder 0 (unbegrenzt).
+
+    Leer, negativ und unbrauchbar werden zu 0 – ein Tippfehler im Formular darf
+    nicht still auf eine knappe Grenze fallen, die Daten abschneidet.
+    """
+    try:
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            n = int(value)
+        else:
+            # "5.000" aus einer deutschen Eingabe ist fuenftausend
+            n = int(str(value or "0").strip().replace(".", ""))
+    except (TypeError, ValueError, OverflowError):
+        return 0
+    return n if n > 0 else 0
+
+
 def _clean_profile_str(value) -> str:
     """Raeumt ein technisches Profil-Textfeld auf (api_key, session_key, api_url, model).
 
@@ -682,6 +699,9 @@ class Config:
             # leer = "Authorization: Bearer <key>" (backend/mcp_rechte.py).
             "api_key": str(data.get("api_key") or "").strip(),
             "api_key_header": str(data.get("api_key_header") or "").strip(),
+            # Hoechstzahl Zeichen je Werkzeug-Ergebnis; 0 = unbegrenzt
+            # (McpRemoteTool.ergebnis_max).
+            "ergebnis_max": _ergebnis_max(data.get("ergebnis_max")),
             # Freigabe fuer einzelne Benutzer (kommagetrennt) und Gruppen-DNs
             # (zeilengetrennt) – wie bei SAP & Co. Leer = NIEMAND, auch kein
             # Administrator (der Server arbeitet mit SEINEN Zugangsdaten).
@@ -710,6 +730,8 @@ class Config:
                     srv["api_key"] = str(data["api_key"] or "").strip()
                 if "api_key_header" in data:
                     srv["api_key_header"] = str(data["api_key_header"] or "").strip()
+                if "ergebnis_max" in data:
+                    srv["ergebnis_max"] = _ergebnis_max(data["ergebnis_max"])
                 # Benutzer-/Gruppenfreigabe (backend/mcp_rechte.py). Das alte
                 # "alle Netzwerk-Benutzer" wirkt nicht mehr – beim ersten
                 # Speichern der Freigabe raeumt es sich hier selbst ab, damit

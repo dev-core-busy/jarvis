@@ -7269,6 +7269,7 @@ async def mcp_server_konfig(server_id: str, user: str = Depends(require_local_au
         "ca_cert_pfad": "" if ist_pem(ca) else ca,
         "api_key_gesetzt": bool(str(srv.get("api_key") or "").strip()),
         "api_key_header": srv.get("api_key_header", ""),
+        "ergebnis_max": int(srv.get("ergebnis_max") or 0),
     })
 
 

@@ -9,6 +9,19 @@ from typing import Any
 
 from backend.tools.base import BaseTool
 from backend.config import config
+from backend.mcp_tls import CaFehler, ist_pem as _ca_ist_pem
+
+
+def _zertifikat_moeglich(srv: dict) -> bool:
+    """Hat dieser Server ueberhaupt ein Zertifikat zum Ansehen?
+
+    Nur https-Transporte. Die Frage wird HIER beantwortet und nicht in der
+    Oberflaeche: dort waere sie eine zweite Quelle, und `get_status` gibt die
+    Adresse bewusst nicht heraus.
+    """
+    if str(srv.get("transport") or "stdio") == "stdio":
+        return False
+    return str(srv.get("url") or "").strip().lower().startswith("https://")
 
 # Umgebungsvariablen, die ein stdio-MCP-Server erben darf. Bewusst eine
 # WHITELIST: was nicht hier steht, kommt nicht durch (fail-closed). Enthaelt
@@ -270,6 +283,16 @@ class McpServerConnection:
         except ImportError:
             self.error = "mcp-Paket nicht installiert (pip install mcp)"
             print(f"[MCP] {self.name}: {self.error}", flush=True)
+        except CaFehler as f:
+            # Das hinterlegte CA-Zertifikat ist unbrauchbar. Eigener Zweig,
+            # damit der Grund nicht wie ein Netz- oder Serverfehler aussieht:
+            # hier ist eine EINGABE falsch, und der Administrator soll das Feld
+            # korrigieren, statt am Server zu suchen. `CaFehler` nennt den
+            # naechsten Schritt bereits selbst.
+            self.error = str(f)
+            self.connected = False
+            print(f"[MCP] {self.name}: Zertifikat nicht verwendbar – {f}",
+                  flush=True)
         except asyncio.CancelledError:
             # ⚠ BEZAHLTER VORFALL (DEV 2026-10-24, 34 Neustarts in sechs
             # Minuten): der Transportfehler eines ENTFERNTEN Servers kommt hier
@@ -365,6 +388,49 @@ class McpServerConnection:
         )
         await self._session.initialize()
 
+    def _tls_haken(self) -> dict:
+        """``{"httpx_client_factory": …}`` – oder ``{}`` ohne eigenes CA-Zert.
+
+        ⚠ EIN LEERES DICT IST DER NORMALFALL und muss es bleiben: ohne
+        hinterlegtes Zertifikat wird die Vorgabe der Bibliothek benutzt
+        (``create_mcp_http_client``, mit deren Zeitlimits). Eine eigene Factory
+        "nur zur Sicherheit" zu uebergeben waere der Weg, bei einem
+        Bibliotheks-Update stillschweigend andere Timeouts zu fahren – genau
+        die Asymmetrie, an der hier schon einmal ein Threadpool haengenblieb
+        (Register: wer eine Bibliothek tauscht, liest den KONSTRUKTOR).
+
+        Die Factory bildet die Signatur von ``create_mcp_http_client`` NACH
+        (headers/timeout/auth) und reicht alles durch. Eine bequemere Signatur
+        waere eine Kette, die es nicht gibt: die Bibliothek ruft mit genau
+        diesen Schluesselwoertern.
+
+        Ein unbrauchbares Zertifikat wird hier NICHT verschluckt – ``CaFehler``
+        geht an ``connect()``, das daraus den Klartext-Grund fuer die
+        Serverzeile macht. Stillschweigend ohne das Zertifikat zu verbinden
+        hiesse, die Pruefung gegen die System-CAs laufen zu lassen und dem
+        Administrator "nicht verbunden" ohne Ursache zu zeigen.
+        """
+        from backend.mcp_tls import ssl_kontext
+
+        ctx = ssl_kontext(self.config.get("ca_cert"))
+        if ctx is None:
+            return {}
+
+        def _factory(headers=None, timeout=None, auth=None):
+            import httpx
+            from mcp.shared._httpx_utils import create_mcp_http_client
+            # Die Zeitlimits der Bibliothek uebernehmen, NICHT neu erfinden:
+            # ein Server haelt den Antwortstrom offen (300 s Lesefrist), und
+            # eine eigene Zahl hier waere eine zweite Quelle fuer denselben
+            # Wert. Deshalb erst deren Client bauen und nur `verify` setzen.
+            vorgabe = create_mcp_http_client(headers=headers, timeout=timeout,
+                                             auth=auth)
+            return httpx.AsyncClient(verify=ctx, headers=vorgabe.headers,
+                                     timeout=vorgabe.timeout, auth=auth,
+                                     follow_redirects=False)
+
+        return {"httpx_client_factory": _factory}
+
     async def _connect_streamable_http(self):
         """Streamable HTTP – der aktuelle Standard fuer entfernte Server.
 
@@ -379,7 +445,7 @@ class McpServerConnection:
 
         url = self.config.get("url", "")
         transport = await self._exit_stack.enter_async_context(
-            streamablehttp_client(url=url))
+            streamablehttp_client(url=url, **self._tls_haken()))
         read_stream, write_stream = transport[0], transport[1]
         self._session = await self._exit_stack.enter_async_context(
             ClientSession(read_stream, write_stream)
@@ -391,12 +457,20 @@ class McpServerConnection:
 
         Bleibt fuer Server, die nur noch das koennen; neue Ziele sollten
         ``streamable_http`` nutzen.
+
+        ⚠ DAS CA-ZERTIFIKAT GILT HIER GENAUSO. `sse_client` nimmt dieselbe
+        `httpx_client_factory` – wer den Haken nur am Streamable-Weg setzt,
+        laesst ihn fuer die HAELFTE der HTTPS-Transporte ausfallen, und der
+        `http`-Zweig oben faellt bei Misserfolg ausdruecklich hierher zurueck.
+        Dann waere das hinterlegte Zertifikat genau im Rueckfall wirkungslos
+        (Register: wer einen Fix anbringt, zaehlt die Wege).
         """
         from mcp import ClientSession
         from mcp.client.sse import sse_client
 
         url = self.config.get("url", "")
-        transport = await self._exit_stack.enter_async_context(sse_client(url=url))
+        transport = await self._exit_stack.enter_async_context(
+            sse_client(url=url, **self._tls_haken()))
         read_stream, write_stream = transport
         self._session = await self._exit_stack.enter_async_context(
             ClientSession(read_stream, write_stream)
@@ -446,10 +520,21 @@ class McpServerConnection:
             "name": self.name,
             "transport": self.config.get("transport", "stdio"),
             "connected": self.connected,
+            # Es gibt eine Verbindungsinstanz, also HAT es einen Versuch
+            # gegeben – im Gegensatz zum Ersatz-Dict im Manager.
+            "versucht": True,
             "error": self.error,
             "tool_count": len(self.tools),
             "tools": [{"name": t._tool_name, "description": t._description} for t in self.tools],
             "enabled": self.config.get("enabled", True),
+            # Liegt ein eigenes Zertifikat vor – und in welcher Form? NIE der
+            # PEM-Block selbst: er ist lang, und in einer Serverzeile sucht
+            # niemand danach. Die Pruefung ist dabei immer AN, es gibt kein
+            # "verify aus" (siehe backend/mcp_tls.py).
+            "ca_cert_art": ("pem" if _ca_ist_pem(self.config.get("ca_cert"))
+                            else ("pfad" if (self.config.get("ca_cert") or "").strip()
+                                  else "")),
+            "zertifikat_moeglich": _zertifikat_moeglich(self.config),
             # Sichtbar machen, WER die Werkzeuge dieses Servers benutzen darf – ein
             # Zustand, den man der Serverzeile sonst nicht ansieht.
             "allow_network_users": self.config.get("allow_network_users") is True,
@@ -550,10 +635,22 @@ class McpClientManager:
                     "name": srv.get("name", "?"),
                     "transport": srv.get("transport", "stdio"),
                     "connected": False,
+                    # ⚠ `None` heisst hier "es gab KEINEN Versuch", nicht "der
+                    # Versuch ist gescheitert" (Code-Review 2026-10-24,
+                    # gemeldet als "steht weiterhin Nicht verbunden"). Ohne
+                    # diese Unterscheidung macht die Oberflaeche aus einem
+                    # abgeschalteten Server denselben Text wie aus einem
+                    # fehlgeschlagenen – eine Anzeige, die einen Zustand
+                    # behauptet, den sie nicht kennt (Register).
+                    "versucht": False,
                     "error": None,
                     "tool_count": 0,
                     "tools": [],
                     "enabled": srv.get("enabled", True),
+                    "ca_cert_art": ("pem" if _ca_ist_pem(srv.get("ca_cert"))
+                                    else ("pfad" if (srv.get("ca_cert") or "").strip()
+                                          else "")),
+                    "zertifikat_moeglich": _zertifikat_moeglich(srv),
                     "allow_network_users": srv.get("allow_network_users") is True,
                     "sandbox": (srv.get("sandbox") is not False
                                 if srv.get("transport", "stdio") == "stdio" else None),

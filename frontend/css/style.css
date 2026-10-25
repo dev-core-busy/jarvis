@@ -749,6 +749,77 @@ body.light .model-discover-item:hover { background-color: #eef0f4 !important; }
     background: color-mix(in srgb, var(--warning, #f59e0b) 18%, transparent);
     color: var(--warning, #f59e0b);
 }
+/* ── Zertifikat ansehen, pruefen, erlauben ──────────────────────────────────
+   Der Fingerabdruck ist die eigentliche Information: er muss ZEICHENWEISE mit
+   dem verglichen werden, den der Betreiber nennt. Deshalb Monospace, grosser
+   Zeichenabstand und Umbruch an jeder Stelle – eine abgeschnittene Zeile waere
+   hier nicht nur haesslich, sondern unbenutzbar. */
+.mcp-cert:empty { display: none; }
+.mcp-cert-box {
+    margin-top: 0.5rem;
+    padding: 0.6rem 0.7rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 6px);
+    /* Deckend: der Kasten liegt ueber der Kartenflaeche (Register). */
+    background: var(--bg-secondary);
+}
+.mcp-cert-fp { margin-bottom: 0.35rem; }
+.mcp-cert-fp-label {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.mcp-cert-fp-wert {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.82rem;
+    letter-spacing: 0.06em;
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+    user-select: all;            /* ein Klick waehlt den ganzen Abdruck */
+}
+.mcp-cert-dl {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.15rem 0.6rem;
+    margin: 0.4rem 0;
+    font-size: 0.78rem;
+}
+.mcp-cert-dl dt { color: var(--text-muted); }
+.mcp-cert-dl dd { margin: 0; color: var(--text-primary); overflow-wrap: anywhere; }
+.mcp-cert-hint, .mcp-cert-wait {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-top: 0.3rem;
+}
+.mcp-cert-befunde {
+    margin: 0.2rem 0 0.4rem 1.1rem;
+    padding: 0;
+    font-size: 0.78rem;
+    color: var(--text-primary);
+}
+/* Warn- und Fehlerschrift: der Hausweg fuer --danger/--warning auf einer
+   dunklen Flaeche ist die nackte Variable, im hellen Thema die abgedunkelte
+   Mischung – nachgerechnet gegen --bg-secondary (dunkel 4,71:1, hell 5,76:1).
+   Dieselbe Kehre wie in chat.css; `body.dark` gibt es in diesem Projekt NICHT. */
+.mcp-cert-warn, .mcp-cert-fehler {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--danger);
+}
+body.light .mcp-cert-warn,
+body.light .mcp-cert-fehler {
+    color: color-mix(in srgb, var(--danger) 78%, #000);
+}
+.mcp-cert-ok {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+}
+.mcp-form-hint {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin: -0.2rem 0 0.5rem 0;
+}
 .mcp-toggle {
     display: flex; align-items: center; gap: 0.3rem;
     font-size: 0.8rem; color: var(--text-secondary);

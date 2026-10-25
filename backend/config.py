@@ -679,6 +679,11 @@ class Config:
             # Zusaetzliche, NUR LESBARE Pfade fuer den isolierten Prozess
             # (z.B. das Datenverzeichnis eines Dateisystem-Servers).
             "sandbox_paths": list(data.get("sandbox_paths") or []),
+            # Eigenes CA-/Server-Zertifikat fuer https-Transporte: PEM-Block
+            # oder absoluter Pfad. LEER = Vorgabe des Systems. Die Pruefung
+            # bleibt in jedem Fall AN – es gibt bewusst kein "verify aus"
+            # (Entscheidung 2026-10-24), siehe backend/mcp_tls.py.
+            "ca_cert": str(data.get("ca_cert") or ""),
         }
         self._mcp_servers.append(server)
         self._save_to_file()
@@ -690,7 +695,8 @@ class Config:
             if srv["id"] == server_id:
                 # ACHTUNG: neues Feld = ZWEI Stellen (add_mcp_server UND diese
                 # Whitelist). Fehlt eines, wird der Wert still verworfen.
-                for key in ["name", "enabled", "transport", "command", "args", "url", "env"]:
+                for key in ["name", "enabled", "transport", "command", "args",
+                            "url", "env", "ca_cert"]:
                     if key in data:
                         srv[key] = data[key]
                 if "allow_network_users" in data:

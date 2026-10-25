@@ -7210,6 +7210,49 @@ async def reconnect_mcp_server(server_id: str, user: str = Depends(require_local
     return JSONResponse({"ok": success})
 
 
+@app.get("/api/mcp/servers/{server_id}/zertifikat")
+async def mcp_zertifikat_ansehen(server_id: str,
+                                 user: str = Depends(require_local_auth)):
+    """Zertifikat des Servers holen und BEWERTEN – ohne ihm zu vertrauen.
+
+    ⚠ DIE ADRESSE KOMMT AUS DER GESPEICHERTEN KONFIGURATION, NICHT AUS DEM
+    REQUEST. Ein Endpunkt, der eine mitgeschickte URL kontaktiert, waere ein
+    SSRF-Werkzeug: ein Administrator (und jeder, der eine Admin-Sitzung
+    uebernimmt) koennte damit beliebige interne Adressen abklopfen und am
+    Zertifikat ablesen, was dort laeuft. Dieselbe Schranke wie beim
+    Mail-Explorer, der ebenfalls nur HINTERLEGTE Konten oeffnet.
+
+    Antwort ``{ok, zertifikat: {...}, schon_erlaubt: bool}``. Die Bewertung
+    (``befunde``) sagt, WARUM die regulaere Pruefung fehlschlaegt; eine leere
+    Liste heisst, dass Hinterlegen gar nicht noetig ist.
+
+    Rein LESEND – es wird nichts gespeichert. Das Erlauben ist ein eigener,
+    ausdruecklicher Schritt (PUT auf den Server mit ``ca_cert``), damit kein
+    Zertifikat durch blosses Ansehen vertrauenswuerdig wird.
+    """
+    from backend import mcp_tls
+    srv = next((s for s in config.get_mcp_servers() if s.get("id") == server_id),
+               None)
+    if srv is None:
+        # 404 wie bei fremden Mail-Regeln: kein Existenz-Orakel ueber IDs.
+        return JSONResponse({"ok": False, "error": "Unbekannter Server."},
+                            status_code=404)
+    try:
+        daten = await asyncio.to_thread(mcp_tls.zertifikat_abholen,
+                                        srv.get("url") or "")
+    except mcp_tls.CaFehler as f:
+        return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=502)
+    schon = mcp_tls.passt_zum_gespeicherten(srv.get("ca_cert"), daten.get("pem"))
+    print(f"[MCP] {srv.get('name')}: Zertifikat angesehen von '{user}' – "
+          f"{daten['host']}:{daten['port']}, Abdruck "
+          f"{daten['fingerprint_sha256'][:23]}…, Befunde: "
+          f"{len(daten['befunde'])}", flush=True)
+    return JSONResponse({"ok": True, "zertifikat": daten,
+                         "schon_erlaubt": schon})
+
+
 # ─── Telemetry API ─────────────────────────────────────────────────────────
 from backend.telemetry import tracer
 

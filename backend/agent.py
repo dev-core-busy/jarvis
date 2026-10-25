@@ -225,6 +225,12 @@ _actor_cv: contextvars.ContextVar = contextvars.ContextVar("jarvis_actor", defau
 # Benutzer seit Dienststart – nach dem ersten Fehlschlag loeste damit JEDER
 # mehrstufige Lauf einen zusaetzlichen vollen LLM-Aufruf aus.
 _lauf_stats_cv: contextvars.ContextVar = contextvars.ContextVar("jarvis_lauf_stats", default=None)
+# Was der BENUTZER in diesem Lauf geschrieben hat: {"text": Auftrag, "verlauf":
+# Live-Liste des Chatverlaufs oder None}. Gesetzt vom AEUSSERSTEN Lauf – ein
+# Sub-Agent oder eine Delegation bekommt einen vom MODELL formulierten Auftrag,
+# der zaehlt nicht als Benutzereingabe. Gelesen von `_mcp_argumente_pruefen`.
+_benutzer_eingabe_cv: contextvars.ContextVar = contextvars.ContextVar(
+    "jarvis_benutzer_eingabe", default=None)
 
 
 # ── Lauf-Kontext (Code-Review 2026-10-18) ───────────────────────────────────
@@ -571,6 +577,140 @@ def _mcp_freigegeben(tool, benutzer: str) -> bool:
     except Exception as e:  # noqa: BLE001
         print(f"[AGENT] MCP-Freigabe nicht pruefbar – verweigert: {e}", flush=True)
         return False
+
+
+# ── MCP-Argumente: Pflichtfelder und Schema-Beispiele ───────────────────────
+# ⚠ WARUM (DEV 2026-10-25): "liefere eine Befundliste vom Typ LDT3.2.18 der
+# letzten 5 Tage fuer theben an IP …" – das Schema von theben/list_befunde
+# verlangt `lab_code` (Beschreibung "Laborcode, z.B. 'an1'") und `port`. Der
+# Auftrag nannte keines von beiden. Das Modell setzte `lab_code: "an1"` – das
+# BEISPIEL aus der Beschreibung – und liess `port` ganz weg; vorgelegt wurde
+# das trotzdem als Bestaetigungskarte. Ein Verbot im Prompt waere eine Bitte
+# (Register: Excel-Nullen 2026-10-23); ein erfundener Laborcode fragt still das
+# falsche Labor ab. Deshalb ein Riegel VOR der Karte: der Aufruf geht mit Grund
+# ans Modell zurueck, und das fragt den Benutzer im selben Lauf.
+# Nur fuer MCP: deren Schemas schreibt ein FREMDER Server, mit Beispielen in
+# der Beschreibung, die wir nicht steuern.
+
+# Marke, hinter der eine Beschreibung Beispiele nennt.
+_BEISPIEL_MARKE_RE = re.compile(
+    r"(?:\bz\.\s?B\.|\bzum Beispiel\b|\bbeispielsweise\b|\bBeispiel:|\be\.g\.|"
+    r"\bfor example\b|\bexample:|\bsuch as\b)", re.IGNORECASE)
+# Ende des Beispiel-Abschnitts: Semikolon, Klammer zu, Zeilenumbruch oder ein
+# Satzende (Punkt + Leerraum + Grossbuchstabe). Ein Punkt allein beendet ihn
+# NICHT – Beispiele wie '192.0.2.5' oder 'LDT3.2.19' enthalten Punkte.
+_BEISPIEL_ENDE_RE = re.compile(r"[;)\n]|\.\s+[A-ZÄÖÜ]")
+_BEISPIEL_ZITAT_RE = re.compile(r"'([^']+)'|\"([^\"]+)\"|`([^`]+)`|„([^“”]+)[“”]")
+_BEISPIEL_WORT_RE = re.compile(r"[\w.:/@-]+")
+
+
+def _schema_beispiele(feld: dict) -> set[str]:
+    """Beispielwerte eines Schema-Felds (klein geschrieben).
+
+    Quellen: ``examples`` (JSON-Schema) und alles hinter einer Beispiel-Marke in
+    der ``description`` – zitierte Werte, und wenn keiner zitiert ist, das erste
+    Wort ("z.B. 3306"). ``default`` zaehlt NICHT: den setzt der Server ohnehin,
+    wenn das Feld fehlt; ihn ausdruecklich zu schicken erfindet nichts.
+    """
+    aus: set[str] = set()
+    if not isinstance(feld, dict):
+        return aus
+    ex = feld.get("examples")
+    if isinstance(ex, list):
+        aus.update(str(x).strip().lower() for x in ex
+                   if isinstance(x, (str, int, float)) and not isinstance(x, bool))
+    beschr = feld.get("description")
+    if isinstance(beschr, str):
+        for m in _BEISPIEL_MARKE_RE.finditer(beschr):
+            rest = beschr[m.end():]
+            ende = _BEISPIEL_ENDE_RE.search(rest)
+            abschnitt = rest[:ende.start()] if ende else rest
+            zitate = ["".join(g) for g in _BEISPIEL_ZITAT_RE.findall(abschnitt)]
+            if zitate:
+                aus.update(z.strip().lower() for z in zitate if z.strip())
+            else:
+                w = _BEISPIEL_WORT_RE.search(abschnitt)
+                if w:
+                    aus.add(w.group(0).rstrip(".,:").lower())
+    aus.discard("")
+    return aus
+
+
+def _benutzer_texte() -> str | None:
+    """Alles, was der Benutzer in diesem Lauf geschrieben hat – oder None.
+
+    None heisst "unbekannt" (kein Lauf gesetzt) und ist NICHT dasselbe wie ein
+    leerer Text: dann wird die Beispiel-Pruefung uebersprungen statt jeden Wert
+    abzulehnen. Im Verlauf zaehlen nur echte Benutzerfragen
+    (`ist_benutzerfrage`) – ein Werkzeug-Ergebnis traegt ebenfalls
+    ``role="user"``, und dort steht womoeglich genau das Schema-Beispiel.
+    """
+    e = _benutzer_eingabe_cv.get()
+    if not e:
+        return None
+    teile = [str(e.get("text") or "")]
+    for eintrag in (e.get("verlauf") or []):
+        if ist_benutzerfrage(eintrag):
+            teile.append("".join((getattr(p, "text", None) or "")
+                                 for p in (getattr(eintrag, "parts", None) or [])))
+    return "\n".join(teile)
+
+
+def _vom_benutzer_genannt(wert: str, texte: str) -> bool:
+    """Steht ``wert`` als eigenes Wort in den Benutzertexten? ('an1' nicht in 'plan1')."""
+    return re.search(r"(?<![A-Za-z0-9])" + re.escape(wert) + r"(?![A-Za-z0-9])",
+                     texte, re.IGNORECASE) is not None
+
+
+def _mcp_argumente_pruefen(tool, args: dict) -> str | None:
+    """Ablehnungsgrund fuer einen MCP-Aufruf – oder None, wenn er so raus darf.
+
+    1. Ein Pflichtfeld (``required``) fehlt oder ist leer.
+    2. Ein Wert ist ein BEISPIEL aus dem Schema und steht nirgends in dem, was
+       der Benutzer geschrieben hat.
+    Der Grund nennt den naechsten Schritt (den Benutzer fragen) – ein Grund
+    ohne Weg laesst das Modell den naechsten Wert raten.
+    """
+    try:
+        schema = tool.parameters_schema() if callable(getattr(tool, "parameters_schema", None)) else {}
+    except Exception:  # noqa: BLE001
+        schema = {}
+    if not isinstance(schema, dict):
+        return None
+    felder = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+    args = args if isinstance(args, dict) else {}
+
+    def _beschr(f: str) -> str:
+        d = (felder.get(f) or {}).get("description") if isinstance(felder.get(f), dict) else ""
+        return f"'{f}' ({d})" if d else f"'{f}'"
+
+    pflicht = schema.get("required") if isinstance(schema.get("required"), list) else []
+    fehlend = [f for f in pflicht
+               if isinstance(f, str) and args.get(f) in (None, "")]
+    erfunden = []
+    texte = _benutzer_texte()
+    if texte is not None:
+        for f, v in args.items():
+            if isinstance(v, bool) or not isinstance(v, (str, int, float)):
+                continue
+            s = str(v).strip()
+            if not s or s.lower() not in _schema_beispiele(felder.get(f) or {}):
+                continue
+            if not _vom_benutzer_genannt(s, texte):
+                erfunden.append((f, s))
+    if not fehlend and not erfunden:
+        return None
+    zeilen = ["Aufruf NICHT ausgefuehrt – es fehlen Angaben, die nur der Benutzer machen kann."]
+    if fehlend:
+        zeilen.append("Pflichtangaben fehlen: " + ", ".join(_beschr(f) for f in fehlend) + ".")
+    for f, s in erfunden:
+        zeilen.append(f"'{f}' = '{s}' ist das BEISPIEL aus der Schema-Beschreibung, "
+                      f"nicht eine Angabe des Benutzers.")
+    namen = [f for f in fehlend] + [f for f, _ in erfunden]
+    zeilen.append("Frage den Benutzer nach " + ", ".join(f"'{f}'" for f in namen)
+                  + " und rufe das Werkzeug erst mit seinen Angaben erneut auf. "
+                  "Setze KEINEN Beispiel- oder Platzhalterwert ein.")
+    return "\n".join(zeilen)
 
 
 def _reminder_exempt(tool_name: str, user: str) -> bool:
@@ -2703,6 +2843,14 @@ KRITISCH – Autonomie-Regeln:
                                     or self._current_username in _LOCAL_PRIVILEGED_USERS))
         _actor_token = _actor_cv.set((self._current_username, _lauf_privilegiert))
         _stats_token = _lauf_stats_cv.set([])
+        # Benutzereingaben dieses Laufs (MCP-Beispielpruefung). Nur der AEUSSERE
+        # Lauf setzt sie – ein Sub-Agent-Auftrag ist Modelltext. "verlauf" wird
+        # unten nachgetragen, sobald chat_history feststeht.
+        _eingabe = _benutzer_eingabe_cv.get()
+        _eingabe_token = None
+        if _eingabe is None:
+            _eingabe = {"text": task_text or "", "verlauf": None}
+            _eingabe_token = _benutzer_eingabe_cv.set(_eingabe)
         # Privates /tmp dieses Laufs (backend/lauf_tmp.py): unprivilegierte
         # Laeufe bekommen ein eigenes Verzeichnis, das im Namespace auf /tmp
         # gemountet wird – fremde Arbeitskopien sind darin nicht vorhanden.
@@ -2990,6 +3138,8 @@ KRITISCH – Autonomie-Regeln:
                         chat_history = geheilter_sitzungskontext(username, session_id)
                     self._user_histories[_history_key] = chat_history
             self._current_chat_history  = chat_history  # Live-Referenz für Context-Stats-API
+            if _eingabe_token is not None:
+                _eingabe["verlauf"] = chat_history
             # Schnappschuss des Verlaufs VOR diesem Lauf. Bricht der Lauf ohne
             # Antwort ab, wird darauf zurueckgesetzt: sonst bleibt die Nutzerfrage
             # (samt abgerissenem Werkzeug-Turn) unbeantwortet im Kontext stehen und
@@ -3753,6 +3903,11 @@ KRITISCH – Autonomie-Regeln:
                 _lauf_stats_cv.reset(_stats_token)
             except Exception:  # noqa: BLE001
                 pass
+            if _eingabe_token is not None:
+                try:
+                    _benutzer_eingabe_cv.reset(_eingabe_token)
+                except Exception:  # noqa: BLE001
+                    pass
             # Lauf-Verzeichnis abraeumen (nur der aeussere Lauf raeumt wirklich).
             # NACH _deliver_docs: die Auslieferung liest daraus.
             try:
@@ -3852,6 +4007,11 @@ KRITISCH – Autonomie-Regeln:
         _lauf_stack.enter_context(_lauf_tmp.lauf_scope(
             self.actor_name(), self._actor_is_privileged()))
         _lauf_stack.callback(_lauf_stats_cv.reset, _lauf_stats_cv.set([]))
+        # Ohne aeusseren Lauf (Cron, Short Tracks, E-Mail-Regel) ist der
+        # Auftragstext die Benutzereingabe; innerhalb eines Laufs gilt dessen.
+        if _benutzer_eingabe_cv.get() is None:
+            _lauf_stack.callback(_benutzer_eingabe_cv.reset, _benutzer_eingabe_cv.set(
+                {"text": task_text or "", "verlauf": None}))
         # Delegations-Deckel pro Auftrag (siehe run_task)
         self._delegations_used = 0
         self._buendel_voll = False
@@ -4598,6 +4758,17 @@ KRITISCH – Autonomie-Regeln:
                           "(oder deine Gruppe) unter Einstellungen -> MCP -> Berechtigungen "
                           "dafuer freigeben.")
                 _ldap_blocked = True
+
+            # MCP: Pflichtfelder und Schema-Beispiele VOR der Bestaetigungskarte
+            # (siehe `_mcp_argumente_pruefen`) – eine Karte mit erfundenem
+            # Laborcode verlagert die Pruefung auf den Benutzer.
+            if not _ldap_blocked and _ist_mcp_tool(tool, name):
+                _mcp_grund = _mcp_argumente_pruefen(tool, args)
+                if _mcp_grund:
+                    print(f"[AGENT] MCP-Aufruf '{name}' zurueckgewiesen (Angaben fehlen/"
+                          f"Schema-Beispiel): {_mcp_grund.splitlines()[1:2]}", flush=True)
+                    result = _mcp_grund
+                    _ldap_blocked = True
 
             # OS-Sandbox: Shell-Befehle als unprivilegierter OS-Benutzer ausfuehren
             # (harte Grenze via OS-Rechte – wirkt unabhaengig von Base64/Python/etc.).

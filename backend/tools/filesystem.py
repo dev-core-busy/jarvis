@@ -120,11 +120,22 @@ class FileSystemTool(BaseTool):
         self,
         action: str,
         path: str,
-        content: str = "",
+        content: str | None = None,
         **kwargs,
     ) -> str:
         """Dateisystem-Operation ausführen."""
         p = Path(path).expanduser()
+        # ⚠ WARUM (DEV 2026-10-25): ein abgeschnittener Werkzeugaufruf (270.000
+        # Zeichen CSV sollten als `content` wiederholt werden) kam OHNE `content`
+        # an – `write` legte eine 0-Byte-Datei an und meldete "✅ … (0 Zeichen)".
+        # Ein FEHLENDES Feld ist kein leerer Inhalt; ausdruecklich "" bleibt erlaubt.
+        if action in ("write", "append") and content is None:
+            return ("❌ 'content' fehlt – es wurde nichts geschrieben. Wahrscheinlich war "
+                    "der Inhalt zu lang für einen einzelnen Aufruf. Große Daten nicht "
+                    "abschreiben: liegt das Ergebnis schon als Datei vor, diese benutzen "
+                    "bzw. per Skript erzeugen.")
+        if content is None:
+            content = ""
 
         try:
             if action == "read":

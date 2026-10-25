@@ -329,6 +329,64 @@ _EXTERNAL_WRITE_TOOLS = {
 # (MCP-Werkzeuge, deren Eintrag keine Grenze nennt – McpRemoteTool.ergebnis_max).
 _TOOL_ERGEBNIS_MAX = 5000
 
+# ── Grosse MCP-Ergebnisse: zusaetzlich als Datei im Lauf-/tmp ─────────────────
+# ⚠ WARUM (DEV 2026-10-25): "liefere eine theben Befundliste … als csv". Das
+# MCP-Werkzeug lieferte 270.000 Zeichen CSV (Grenze unbegrenzt, so gewollt).
+# Um daraus eine Datei zu machen, musste das Modell den GANZEN Text als
+# `content` von `filesystem write` wieder ausgeben – das kann keine
+# Modellantwort. Zweimal je ~85 s Generierung, der Aufruf kam abgeschnitten
+# OHNE `content` an, `write` meldete "✅ … (0 Zeichen)", und das Modell holte
+# die Daten neu – mit einer zweiten Bestaetigungskarte. Jetzt liegt das
+# vollstaendige Ergebnis schon als Datei da; das Modell nennt nur den Pfad.
+_MCP_DATEI_AB = _TOOL_ERGEBNIS_MAX
+_ABLAGE_KOPF = "[VOLLSTAENDIGES ERGEBNIS GESPEICHERT: "
+
+
+def _ohne_ablagehinweis(text: str) -> str:
+    """Werkzeug-Ergebnis ohne den Ablage-Hinweis – fuer Anzeige und Auslieferung.
+
+    ⚠ WARUM (DEV 2026-10-25): der Hinweis nennt den /tmp-Pfad der Datei, und
+    `_deliver_docs` liefert jeden genannten Pfad einer VORHANDENEN Datei aus –
+    auch aus einem Werkzeug-Ergebnis. Die Datei ging damit mitten im Lauf als
+    Chip hinaus (und wurde nach data/documents VERSCHOBEN, der Pfad des Modells
+    war danach tot). Der Hinweis ist eine Arbeitsanweisung an das Modell; der
+    Benutzer bekommt die Datei erst, wenn das Modell sie ausliefert.
+    """
+    if not text.startswith(_ABLAGE_KOPF):
+        return text
+    ende = text.find("]\n\n")
+    return text[ende + 3:] if ende >= 0 else text
+
+
+def _csv_fuer_excel(text: str) -> str | None:
+    """CSV-Text als Semikolon-CSV fuer ein deutsches Excel – oder None, wenn es keines ist.
+
+    ⚠ WARUM GEPARST UND NICHT GEZAEHLT (DEV 2026-10-25): die theben-Liste ist
+    Komma-CSV mit Feldern in Anfuehrungszeichen, die selbst Kommas tragen
+    ("MVZ …, BSNR: …"). Eine Zaehlung der Trenner je Zeile sah dort ungleiche
+    Spalten und hielt die Liste fuer Text (.txt). Ein deutsches Excel trennt
+    beim Oeffnen an ';' – eine Komma-Datei landet dort in EINER Spalte.
+
+    Erkannt ist ein Trenner, wenn JEDE Zeile mit ihm dieselbe Feldzahl (>= 2)
+    ergibt. ';' zuerst: eine Datei, die schon so getrennt ist, bleibt wie sie ist.
+    """
+    import csv as _csv
+    import io as _io
+    for trenner in (";", ",", "\t"):
+        try:
+            zeilen = [z for z in _csv.reader(_io.StringIO(text), delimiter=trenner) if z]
+        except _csv.Error:
+            continue
+        breiten = {len(z) for z in zeilen}
+        if len(zeilen) < 2 or len(breiten) != 1 or breiten.pop() < 2:
+            continue
+        if trenner == ";":
+            return text
+        aus = _io.StringIO()
+        _csv.writer(aus, delimiter=";", lineterminator="\r\n").writerows(zeilen)
+        return aus.getvalue()
+    return None
+
 # ── Base64-Bilddaten im Werkzeug-Ergebnis: auslagern statt abschneiden ────────
 # Ein Bild als base64 ist fuer das Modell WERTLOS und fuer den Kontext toedlich:
 # ein 150-dpi-PNG sind rund 200.000 Zeichen, der Deckel oben zeigt davon 2,5 %.
@@ -3290,13 +3348,16 @@ KRITISCH – Autonomie-Regeln:
                     result_str = await self._maybe_delegate(
                         result_str, ws=ws, tool_name=tool_name, tool_args=tool_args)
 
+                    # Anzeige und Auslieferung OHNE den Ablage-Hinweis grosser
+                    # MCP-Ergebnisse (siehe `_ohne_ablagehinweis`).
+                    _sichtbar = _ohne_ablagehinweis(result_str)
                     await self._send_status(
-                        ws, f"📋 Ergebnis: {result_str[:300]}{'...' if len(result_str) > 300 else ''}"
+                        ws, f"📋 Ergebnis: {_sichtbar[:300]}{'...' if len(_sichtbar) > 300 else ''}"
                     )
 
                     # Office-Dokumente DIREKT als Download-Chip ausliefern (Seitenkanal,
                     # erkennt auch per Shell erzeugte Dateien in /tmp etc.).
-                    await self._deliver_docs(ws, result_str, _delivered_docs, username, since=_task_start_time)
+                    await self._deliver_docs(ws, _sichtbar, _delivered_docs, username, since=_task_start_time)
 
                     _conv_messages.append({"role": "tool", "tool": tool_name, "content": result_str})
 
@@ -6231,6 +6292,48 @@ KRITISCH – Autonomie-Regeln:
             print(f"[AGENT {self.agent_id}] Bilddaten-Bergung fehlgeschlagen: {e}", flush=True)
             return text
 
+    def _mcp_ergebnis_ablegen(self, tool_name: str, text: str) -> str | None:
+        """Schreibt ein MCP-Ergebnis in das /tmp des Laufs, gibt den MODELL-Pfad zurueck.
+
+        Der Modell-Pfad ist ``/tmp/<name>``; wo er auf dem Host liegt, entscheidet
+        ``lauf_tmp.aufloesen`` – dieselbe Uebersetzung wie bei ``filesystem``,
+        also finden Shell, Werkzeuge und ``JARVIS_DELIVER`` die Datei unter
+        demselben Namen. Ohne Lauf (privilegiert) liegt sie im echten /tmp und
+        ist dann 0600: der Inhalt kann Personendaten tragen.
+
+        Fail-safe: jeder Fehler -> None, das Ergebnis geht wie bisher ans Modell.
+        """
+        try:
+            inhalt, kodierung = text, "utf-8"
+            csv_text = None if text.lstrip()[:1] in "{[" else _csv_fuer_excel(text)
+            if text.lstrip()[:1] in "{[":
+                endung = ".json"
+            elif csv_text is not None:
+                # Mit BOM: ohne ihn liest Excel UTF-8 als ANSI, aus "Müller" wird
+                # "MÃ¼ller". pandas/csv mit utf-8-sig lesen es unveraendert.
+                endung, inhalt, kodierung = ".csv", csv_text, "utf-8-sig"
+            else:
+                endung = ".txt"
+            basis = re.sub(r"[^A-Za-z0-9_-]+", "_", tool_name)[:60] or "mcp"
+            name = "%s_%s_%s%s" % (basis, time.strftime("%Y%m%d-%H%M%S"),
+                                   uuid.uuid4().hex[:6], endung)
+            modell = "/tmp/" + name
+            _lauf_tmp.temp_verzeichnis()          # legt das Lauf-Verzeichnis an
+            host = Path(_lauf_tmp.aufloesen(modell))
+            import os as _os
+            fd = _os.open(str(host), _os.O_WRONLY | _os.O_CREAT | _os.O_EXCL, 0o600)
+            with _os.fdopen(fd, "w", encoding=kodierung, newline="") as f:
+                f.write(inhalt)
+            # Im Arbeitsverzeichnis auch fuer die Shell-Seite freigeben (dort ist
+            # das Verzeichnis die Schranke); im echten /tmp bleibt es bei 0600.
+            _lauf_tmp.im_lauf_freigeben(host)
+            print(f"[AGENT {self.agent_id}] MCP-Ergebnis '{tool_name}' abgelegt: "
+                  f"{host} ({len(text)} Zeichen)", flush=True)
+            return modell
+        except Exception as e:  # noqa: BLE001
+            print(f"[AGENT {self.agent_id}] MCP-Ergebnis nicht ablegbar: {e}", flush=True)
+            return None
+
     def _ergebnis_kappen(self, tool_name: str, result) -> str:
         """Werkzeug-Ergebnis auf die Kontextgrenze kuerzen – MIT Ausweis.
 
@@ -6251,20 +6354,50 @@ KRITISCH – Autonomie-Regeln:
         # zerschnitten – die magischen Bytes stehen am Anfang, das Bild aber
         # waere unvollstaendig und die Datei unbrauchbar.
         text = self._bilddaten_bergen(tool_name, text)
+        # Grosses MCP-Ergebnis: vollstaendig als Datei, Hinweis VORN – hinten
+        # laege er bei unbegrenzter Grenze hinter 270.000 Zeichen Daten.
+        kopf = ""
+        datei = None
+        try:
+            if (len(text) > _MCP_DATEI_AB
+                    and _ist_mcp_tool(self.tools_map.get(tool_name), tool_name)
+                    and not text.startswith("❌")):
+                datei = self._mcp_ergebnis_ablegen(tool_name, text)
+        except Exception:  # noqa: BLE001
+            datei = None
+        if datei:
+            # ⚠ KEIN Liefer-Marker in diesem Text (DEV 2026-10-25): `_deliver_docs`
+            # liest auch WERKZEUG-Ergebnisse. Ein fertiger Marker mit Platzhalter
+            # ("|<gewuenschter_name.txt>") wurde sofort ausgeliefert – als
+            # "gewuenschter_name.txt", vor dem korrekten Marker des Modells.
+            kopf = (
+                _ABLAGE_KOPF + "%s (%d Zeichen, %d Zeilen%s). "
+                "Soll der Benutzer es als Datei bekommen, liefere GENAU DIESE Datei mit "
+                "dem Liefer-Marker aus (Pfad %s, Anzeigename passend zum Auftrag, z.B. "
+                "%s) – sie darfst du ausliefern, obwohl du sie nicht selbst geschrieben "
+                "hast. Fuer eine andere Form (Filter, Spalten, Excel) diese Datei per "
+                "Werkzeug/Skript lesen. Den Inhalt NIEMALS per filesystem write "
+                "abschreiben: so viel Text kann keine Antwort wiedergeben, die Datei "
+                "bliebe leer. Den Abruf NICHT wiederholen, die Daten liegen vor.]\n\n"
+                % (datei, len(text), text.count("\n") + 1,
+                   ", als CSV mit Semikolon fuer Excel" if datei.endswith(".csv") else "",
+                   datei, re.sub(r"^mcp_", "", tool_name) + Path(datei).suffix))
         grenze = _TOOL_ERGEBNIS_MAX
         try:
             eigen = int(getattr(self.tools_map.get(tool_name), "ergebnis_max", 0) or 0)
             if eigen < 0:
-                return text
+                return kopf + text
             if eigen > 0:
                 grenze = eigen
         except Exception:  # noqa: BLE001
             pass
         if len(text) <= grenze:
-            return text
-        return (text[:grenze] +
-                "\n\n[… gekuerzt: %d von %d Zeichen gezeigt. Frage gezielt nach dem "
-                "fehlenden Teil, statt den Rest zu erraten.]" % (grenze, len(text)))
+            return kopf + text
+        rest = ("vollstaendig in %s" % datei if datei else
+                "Frage gezielt nach dem fehlenden Teil, statt den Rest zu erraten")
+        return (kopf + text[:grenze] +
+                "\n\n[… gekuerzt: %d von %d Zeichen gezeigt – %s.]"
+                % (grenze, len(text), rest))
 
     async def _deliver_docs(self, ws, text, delivered, username: str = "",
                             since: float = 0.0, melden: bool = False):

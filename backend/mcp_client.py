@@ -10,6 +10,7 @@ from typing import Any
 from backend.tools.base import BaseTool
 from backend.config import config
 from backend.mcp_tls import CaFehler, ist_pem as _ca_ist_pem
+from backend import mcp_rechte
 
 # Hoechstens so lange wartet ein Verbindungsaufbau auf den Server. Ein gesunder
 # MCP-Server antwortet auf `initialize` in Sekunden (der stdio-Testserver mit
@@ -66,6 +67,23 @@ def _zertifikat_moeglich(srv: dict) -> bool:
     if str(srv.get("transport") or "stdio") == "stdio":
         return False
     return str(srv.get("url") or "").strip().lower().startswith("https://")
+
+
+def _zugang_status(srv: dict) -> dict:
+    """Schluessel und Freigabe fuer die Serverzeile – in BEIDEN Status-Zweigen.
+
+    Der Schluessel selbst verlaesst das Backend nie, nur OB einer hinterlegt
+    ist. Die URL ist fuer Administratoren keine Geheimsache und wird fuer das
+    Bearbeiten im Schluessel-Feld gebraucht.
+    """
+    return {
+        "url": str(srv.get("url") or ""),
+        "api_key_gesetzt": bool(str(srv.get("api_key") or "").strip()),
+        "api_key_header": str(srv.get("api_key_header") or ""),
+        "allowed_users": str(srv.get("allowed_users") or ""),
+        "allowed_group": str(srv.get("allowed_group") or ""),
+        "freigabe": mcp_rechte.freigabe_art(srv),
+    }
 
 # Umgebungsvariablen, die ein stdio-MCP-Server erben darf. Bewusst eine
 # WHITELIST: was nicht hier steht, kommt nicht durch (fail-closed). Enthaelt
@@ -230,6 +248,17 @@ class McpRemoteTool(BaseTool):
         # Fail-closed: alles ausser einem echten True gilt als "nicht freigegeben"
         # (ein aus JSON gelesenes "ja"/1 ist keine bewusste Admin-Entscheidung).
         self.erlaubt_netzwerk_benutzer = _cfg.get("allow_network_users") is True
+
+    def erlaubt_fuer(self, benutzer: str) -> bool:
+        """Darf dieser unprivilegierte Benutzer das Werkzeug aufrufen?
+
+        Liest die Freigabe des Servers AKTUELL aus der Konfiguration (nicht den
+        Stand beim Bau des Werkzeugs) – eine geaenderte Benutzer-/Gruppenliste
+        wirkt damit sofort. Fail-closed: unbekannter Server = nein.
+        """
+        srv = next((s for s in config.get_mcp_servers()
+                    if s.get("id") == self.server_id), None)
+        return mcp_rechte.darf_benutzen(srv, benutzer)
 
     @property
     def name(self) -> str:
@@ -656,6 +685,12 @@ class McpServerConnection:
 
         return {"httpx_client_factory": _factory}
 
+    def _auth_headers(self) -> dict | None:
+        """API-Schluessel als Header – an BEIDEN HTTP-Transporten (wie das
+        Zertifikat: der "http"-Zweig faellt auf SSE zurueck, und dort fehlte
+        er sonst). ``None`` ohne Schluessel = Vorgabe der Bibliothek."""
+        return mcp_rechte.auth_header(self.config) or None
+
     async def _connect_streamable_http(self):
         """Streamable HTTP – der aktuelle Standard fuer entfernte Server.
 
@@ -670,7 +705,8 @@ class McpServerConnection:
 
         url = self.config.get("url", "")
         transport = await self._exit_stack.enter_async_context(
-            streamablehttp_client(url=url, **self._tls_haken()))
+            streamablehttp_client(url=url, headers=self._auth_headers(),
+                                  **self._tls_haken()))
         read_stream, write_stream = transport[0], transport[1]
         self._session = await self._exit_stack.enter_async_context(
             ClientSession(read_stream, write_stream)
@@ -695,7 +731,8 @@ class McpServerConnection:
 
         url = self.config.get("url", "")
         transport = await self._exit_stack.enter_async_context(
-            sse_client(url=url, **self._tls_haken()))
+            sse_client(url=url, headers=self._auth_headers(),
+                       **self._tls_haken()))
         read_stream, write_stream = transport
         self._session = await self._exit_stack.enter_async_context(
             ClientSession(read_stream, write_stream)
@@ -762,6 +799,7 @@ class McpServerConnection:
             # Sichtbar machen, WER die Werkzeuge dieses Servers benutzen darf – ein
             # Zustand, den man der Serverzeile sonst nicht ansieht.
             "allow_network_users": self.config.get("allow_network_users") is True,
+            **_zugang_status(self.config),
             # Nur bei stdio aussagekraeftig – ein entfernter Server laeuft
             # ohnehin nicht auf dieser Maschine.
             "sandbox": (self.config.get("sandbox") is not False
@@ -876,6 +914,7 @@ class McpClientManager:
                                           else "")),
                     "zertifikat_moeglich": _zertifikat_moeglich(srv),
                     "allow_network_users": srv.get("allow_network_users") is True,
+                    **_zugang_status(srv),
                     "sandbox": (srv.get("sandbox") is not False
                                 if srv.get("transport", "stdio") == "stdio" else None),
                 })

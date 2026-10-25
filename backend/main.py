@@ -7164,6 +7164,10 @@ async def get_mcp_servers(user: str = Depends(require_local_auth)):
 async def add_mcp_server(request: Request, user: str = Depends(require_local_auth)):
     """Legt einen neuen MCP-Server an und verbindet ihn, falls aktiviert."""
     data = await request.json()
+    from backend.mcp_rechte import header_name_gueltig, ohne_geheimnisse
+    if not header_name_gueltig(data.get("api_key_header")):
+        return JSONResponse({"detail": "Ungültiger Header-Name für den API-Schlüssel."},
+                            status_code=400)
     server = config.add_mcp_server(data)
     if data.get("enabled", True):
         await mcp_manager.connect_server(server["id"])
@@ -7172,12 +7176,17 @@ async def add_mcp_server(request: Request, user: str = Depends(require_local_aut
     # naechsten Dienst-Neustart neu gebaut. Gleiche Falle wie beim Skill-Toggle
     # (2026-08-10): Server verbunden, Werkzeuge trotzdem nicht vorhanden.
     _reload_agent_tools()
-    return JSONResponse(server)
+    # Der API-Schluessel verlaesst das Backend nie – nur ob einer hinterlegt ist.
+    return JSONResponse(ohne_geheimnisse(server))
 
 @app.put("/api/mcp/servers/{server_id}")
 async def update_mcp_server(server_id: str, request: Request, user: str = Depends(require_local_auth)):
     """Aktualisiert einen MCP-Server und verbindet bzw. trennt ihn je nach Aktivierungsstatus."""
     data = await request.json()
+    from backend.mcp_rechte import header_name_gueltig, ohne_geheimnisse
+    if not header_name_gueltig(data.get("api_key_header")):
+        return JSONResponse({"detail": "Ungültiger Header-Name für den API-Schlüssel."},
+                            status_code=400)
     result = config.update_mcp_server(server_id, data)
     if not result:
         return JSONResponse({"detail": "Server nicht gefunden"}, status_code=404)
@@ -7190,7 +7199,7 @@ async def update_mcp_server(server_id: str, request: Request, user: str = Depend
     else:
         await mcp_manager.disconnect_server(server_id)
     _reload_agent_tools()
-    return JSONResponse(result)
+    return JSONResponse(ohne_geheimnisse(result))
 
 @app.delete("/api/mcp/servers/{server_id}")
 async def remove_mcp_server(server_id: str, user: str = Depends(require_local_auth)):

@@ -684,7 +684,19 @@ class Config:
             # bleibt in jedem Fall AN – es gibt bewusst kein "verify aus"
             # (Entscheidung 2026-10-24), siehe backend/mcp_tls.py.
             "ca_cert": str(data.get("ca_cert") or ""),
+            # API-Schluessel fuer HTTP-Transporte. "api_key" ist ein geheimer
+            # Name – auf der Platte verpackt ihn geheimnis_tresor. Der Header
+            # leer = "Authorization: Bearer <key>" (backend/mcp_rechte.py).
+            "api_key": str(data.get("api_key") or "").strip(),
+            "api_key_header": str(data.get("api_key_header") or "").strip(),
+            # Freigabe fuer einzelne Benutzer (kommagetrennt) und Gruppen-DNs
+            # (zeilengetrennt) – wie bei SAP & Co. Leer = nur Administratoren.
+            "allowed_users": "",
+            "allowed_group": "",
         }
+        from backend.mcp_rechte import freigabe_normalisieren
+        server.update({k: v for k, v in freigabe_normalisieren(data).items()
+                       if k != "allow_network_users"})
         self._mcp_servers.append(server)
         self._save_to_file()
         return server
@@ -699,8 +711,19 @@ class Config:
                             "url", "env", "ca_cert"]:
                     if key in data:
                         srv[key] = data[key]
+                # API-Schluessel: nur ein GESENDETES Feld aendert ihn, ein
+                # leerer String entfernt ihn (ausdruecklicher Knopf "Entfernen").
+                if "api_key" in data:
+                    srv["api_key"] = str(data["api_key"] or "").strip()
+                if "api_key_header" in data:
+                    srv["api_key_header"] = str(data["api_key_header"] or "").strip()
                 if "allow_network_users" in data:
                     srv["allow_network_users"] = data["allow_network_users"] is True
+                # Benutzer-/Gruppenfreigabe (backend/mcp_rechte.py)
+                from backend.mcp_rechte import freigabe_normalisieren
+                for key, wert in freigabe_normalisieren(data).items():
+                    if key != "allow_network_users":
+                        srv[key] = wert
                 if "sandbox" in data:
                     srv["sandbox"] = data["sandbox"] is not False
                 if "sandbox_paths" in data:

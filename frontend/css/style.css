@@ -826,13 +826,17 @@ body.light .mcp-cert-fehler {
     cursor: pointer;
 }
 .mcp-toggle input { cursor: pointer; }
-/* Eigene Zeile unter dem Status – nicht in die Kopfzeile, dort steht schon der
-   Aktiv-Schalter und die beiden waeren nicht auseinanderzuhalten. */
-.mcp-net-toggle {
+/* Eigene Zeile unter dem Status (Berechtigungen, API-Schluessel) – nicht in
+   die Kopfzeile, dort steht schon der Aktiv-Schalter. */
+.mcp-zeile {
+    display: flex; flex-wrap: wrap; gap: 0.4rem;
     margin-top: 0.4rem;
     padding-top: 0.4rem;
     border-top: 1px solid var(--border);
 }
+.mcp-key:empty { display: none; }
+.mcp-key-box { margin: 0.5rem 0 0; }
+.mcp-key-box .mcp-btn-danger { display: inline-flex; align-items: center; gap: 0.2rem; }
 .mcp-btn-sm {
     background: transparent;
     border: 1px solid var(--border);

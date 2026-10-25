@@ -75,7 +75,22 @@ def _hol(pattern, quelle, was, flags=re.S):
     return m.group(0)
 
 
-_ns = {"BaseTool": object, "Any": object}
+# `erlaubt_fuer` liest die Freigabe zur Laufzeit aus `config` und wertet sie in
+# `mcp_rechte` aus. mcp_rechte importiert weder config noch main – es darf
+# echt geladen werden; config bleibt ein Stub mit veraenderbarer Serverliste.
+from backend import mcp_rechte as _mcp_rechte
+
+
+class _CfgStub:
+    servers: list = []
+
+    def get_mcp_servers(self):
+        return self.servers
+
+
+_cfg_stub = _CfgStub()
+_ns = {"BaseTool": object, "Any": object, "config": _cfg_stub,
+       "mcp_rechte": _mcp_rechte}
 exec(_hol(r'\nclass McpRemoteTool\(BaseTool\):.*?(?=\n# ─|\nclass McpServerConnection)',
           MCP_SRC, "McpRemoteTool in mcp_client.py"), _ns)
 McpRemoteTool = _ns["McpRemoteTool"]
@@ -113,6 +128,32 @@ for wert, label in [(False, "False"), (None, "None"), ("ja", '"ja"'), (1, "1"),
     check(mk({"allow_network_users": wert}).erlaubt_netzwerk_benutzer is False,
           f"{label} zaehlt NICHT als Freigabe")
 
+# ── 2b. Freigabe zur LAUFZEIT (Benutzerliste, Stufe "alle") ───────────────
+print("\n2b. erlaubt_fuer liest die aktuelle Freigabe")
+
+
+def _mit(cfg):
+    _cfg_stub.servers = [dict(cfg, id="s1")]
+    return mk({"id": "s1"})
+
+
+check(_mit({}).erlaubt_fuer("m.muster") is False, "nichts freigegeben: gesperrt")
+check(_mit({"allow_network_users": True}).erlaubt_fuer("m.muster") is True,
+      "Stufe 'alle': frei")
+check(_mit({"allowed_users": "a.b, M.Muster"}).erlaubt_fuer("FIRMA\\m.muster") is True,
+      "Benutzerliste: Login normalisiert (Domain-Praefix, Gross/Klein)")
+check(_mit({"allowed_users": "a.b"}).erlaubt_fuer("m.muster") is False,
+      "nicht in der Liste: gesperrt")
+check(_mit({"allowed_users": "m.muster"}).erlaubt_fuer("") is False,
+      "ohne Benutzernamen: gesperrt")
+# Die Freigabe wirkt OHNE Neubau des Werkzeugs – genau das ist der Sinn.
+_t = _mit({"allowed_users": "m.muster"})
+check(_t.erlaubt_fuer("m.muster") is True, "vorher frei")
+_cfg_stub.servers[0]["allowed_users"] = ""
+check(_t.erlaubt_fuer("m.muster") is False, "Liste geleert: sofort gesperrt")
+_cfg_stub.servers = []
+check(_t.erlaubt_fuer("m.muster") is False, "Server entfernt: gesperrt (fail-closed)")
+
 # ── 3. Erkennung im Dispatch ────────────────────────────────────────────────
 print("\n3. _ist_mcp_tool")
 
@@ -144,9 +185,38 @@ _zweig = re.search(r'elif _ist_mcp_tool\(tool, name\).*?(?=\n                eli
                    AGENT_SRC, re.S)
 check(bool(_zweig), "Zweig vorhanden")
 _z = _zweig.group(0) if _zweig else ""
-check('erlaubt_netzwerk_benutzer' in _z, "prueft die Server-Freigabe")
-check('getattr(tool, "erlaubt_netzwerk_benutzer", False)' in _z,
-      "per getattr mit Vorgabe False (fail-closed bei fremdem Werkzeug-Objekt)")
+check('_mcp_freigegeben(tool, _uname)' in _z,
+      "prueft die Freigabe fuer DIESEN Benutzer")
+_fns = {}
+exec(_hol(r'\ndef _mcp_freigegeben\(.*?(?=\ndef |\n# ──|\Z)', AGENT_SRC,
+          "_mcp_freigegeben in agent.py"), _fns)
+_mf = _fns["_mcp_freigegeben"]
+
+
+class _OhneMethode:
+    erlaubt_netzwerk_benutzer = True
+
+
+class _Wirft:
+    def erlaubt_fuer(self, b):
+        raise RuntimeError("kaputt")
+
+
+class _Ja:
+    def erlaubt_fuer(self, b):
+        return True
+
+
+class _Truthy:
+    def erlaubt_fuer(self, b):
+        return "ja"
+
+
+check(_mf(_OhneMethode(), "x") is False,
+      "fremdes Werkzeug-Objekt ohne erlaubt_fuer: gesperrt (fail-closed)")
+check(_mf(_Wirft(), "x") is False, "Pruefung wirft: gesperrt")
+check(_mf(_Ja(), "x") is True, "Pruefung sagt True: frei")
+check(_mf(_Truthy(), "x") is False, "nur ein echtes True zaehlt")
 check('_ldap_blocked = True' in _z, "setzt _ldap_blocked")
 check('_viol_soft = True' in _z,
       "weicher Verstoss – das MODELL waehlt das Werkzeug, nicht der Benutzer")
@@ -290,7 +360,9 @@ check(_st.index("_bwrap_wrappen") > _st.index("env.update(env_vars)"),
 # ── 7d. Transport: Streamable HTTP ──────────────────────────────────────────
 print("\n7d. Transport")
 check("streamablehttp_client" in MCP_SRC, "Streamable-HTTP-Client wird benutzt")
-_conn = _hol(r'async def connect\(self\):.*?(?=\n    async def )', MCP_SRC, "connect()")
+# Seit dem Besitzer-Task-Umbau (2026-10-24) waehlt `_verbinden` den Transport,
+# nicht mehr `connect` – der Schnitt folgt dem Code.
+_conn = _hol(r'async def _verbinden\(self\):.*?(?=\n    async def )', MCP_SRC, "_verbinden()")
 check('"streamable_http"' in _conn, "Transport 'streamable_http' waehlbar")
 check('transport_type == "sse"' in _conn, "'sse' waehlt weiterhin den alten Transport")
 # "http" lief bis 2026-08-14 faelschlich auf SSE.
@@ -318,21 +390,23 @@ for roh in ['${srv.name}', '${t.name}', '${t.description', '${srv.error}', '${sr
     check(roh not in JS_SRC, f"kein rohes {roh} im Markup")
 check('_esc(srv.name)' in JS_SRC and '_esc(t.name)' in JS_SRC,
       "Servername und Werkzeugname entschaerft")
-check('data-action="netusers"' in JS_SRC, "Freigabe-Schalter vorhanden")
+check('data-action="rechte"' in JS_SRC, "Berechtigungs-Knopf vorhanden")
 check('id="mcp-f-sandbox"' in JS_SRC and "checked" in JS_SRC,
       "Isolations-Kaestchen im Formular, vorbelegt")
 check("checked !== false" in JS_SRC,
       "Formular sendet sandbox=true, solange nicht ausdruecklich abgewaehlt")
 check('value="streamable_http"' in JS_SRC, "Streamable HTTP im Transport-Pulldown")
 check("sandbox_paths" in JS_SRC, "Zusatzpfade im Formular")
-check("_setNetUsers" in JS_SRC, "Handler vorhanden")
-_set = re.search(r'async _setNetUsers\(.*?(?=\n        async )', JS_SRC, re.S)
+check("_rechte(" in JS_SRC, "Handler vorhanden")
+_set = re.search(r'\n        _rechte\(.*?(?=\n        /\*\*|\n        async |\n        _)', JS_SRC, re.S)
 _s = _set.group(0) if _set else ""
-check("net_users_confirm" in _s, "fragt beim Einschalten nach")
-check("allow && !confirm" in _s, "Rueckfrage NUR beim Einschalten, nicht beim Abschalten")
-check("JSON.stringify({ allow_network_users: allow })" in _s,
-      "sendet NUR dieses Feld (der Endpunkt merged – ein voller Formularstand "
-      "ueberschriebe die Serverdaten)")
+check("JarvisFreigabe.oeffnen" in _s, "benutzt das gemeinsame Freigabe-Popup")
+check("alleBestaetigen: window.t('mcp.net_users_confirm')" in _s,
+      "Stufe 'alle' fragt nach (Rueckfrage im Popup)")
+check("JSON.stringify({ allow_network_users: w.alle === true," in _s
+      and "allowed_users: w.users" in _s and "allowed_group: w.groups" in _s,
+      "sendet NUR die drei Freigabefelder (der Endpunkt merged – ein voller "
+      "Formularstand ueberschriebe die Serverdaten)")
 check("'PUT'" in _s, "per PUT")
 
 # ── 9. i18n in beiden Sprachen ──────────────────────────────────────────────

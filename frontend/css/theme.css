@@ -1270,3 +1270,28 @@ body.light .lk-fehler { color: color-mix(in srgb, var(--danger) 78%, #000); }
    darf deren Zustand nicht ueberschreiben, nur das Zeichnen aufschieben.
    ═══════════════════════════════════════════════════════════════════════ */
 html.jv-sitzung-pruefen #login-screen { visibility: hidden; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Freigabe-Popup (js/freigabe_dialog.js) – Benutzer UND Gruppen fuer einen
+   einzelnen Eintrag (z.B. einen MCP-Server). Baut auf .modal/.modal-content
+   und den Chip-Listen aus ldap_picker.js auf.
+   ═══════════════════════════════════════════════════════════════════════ */
+.frg-box { max-width: 620px; }
+.frg-body { overflow-y: auto; display: flex; flex-direction: column; gap: 0.8rem; }
+.frg-hinweis { margin: 0; font-size: 0.82rem; color: var(--text-secondary); }
+.frg-stufen { display: flex; flex-direction: column; gap: 0.35rem; }
+.frg-stufe {
+    display: flex; align-items: center; gap: 0.45rem;
+    font-size: 0.9rem; color: var(--text-primary); cursor: pointer;
+}
+.frg-stufe input { flex: 0 0 auto; width: auto; margin: 0; cursor: pointer; }
+.frg-auswahl {
+    display: flex; flex-direction: column; gap: 0.7rem;
+    padding: 0.7rem 0.8rem;
+    border: 1px solid var(--border); border-radius: 10px;
+}
+.frg-feld-titel { font-size: 0.82rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.3rem; }
+.frg-fehler { color: var(--danger); font-size: 0.85rem; white-space: pre-wrap; }
+.frg-fehler:empty { display: none; }
+body.light .frg-fehler { color: color-mix(in srgb, var(--danger) 78%, #000); }
+.frg-knoepfe { display: flex; justify-content: flex-end; gap: 0.5rem; flex-wrap: wrap; }

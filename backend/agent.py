@@ -496,6 +496,24 @@ def _ist_mcp_tool(tool, name: str) -> bool:
     return bool(getattr(tool, "ist_mcp", False)) or name.startswith(_MCP_TOOL_PREFIX)
 
 
+def _mcp_freigegeben(tool, benutzer: str) -> bool:
+    """Ist dieses MCP-Werkzeug fuer den unprivilegierten Benutzer freigegeben?
+
+    Gefragt wird das Werkzeug selbst (``erlaubt_fuer`` liest die AKTUELLE
+    Benutzer-/Gruppenfreigabe seines Servers, backend/mcp_rechte.py).
+    Fail-closed: ein fremdes Werkzeug-Objekt ohne die Methode, oder eine
+    Methode, die wirft, heisst "nicht freigegeben".
+    """
+    pruefen = getattr(tool, "erlaubt_fuer", None)
+    if not callable(pruefen):
+        return False
+    try:
+        return pruefen(benutzer) is True
+    except Exception as e:  # noqa: BLE001
+        print(f"[AGENT] MCP-Freigabe nicht pruefbar – verweigert: {e}", flush=True)
+        return False
+
+
 def _reminder_exempt(tool_name: str, user: str) -> bool:
     """True, wenn 'cron_create' fuer diesen Absender ausnahmsweise erlaubt ist.
 
@@ -4145,7 +4163,7 @@ KRITISCH – Autonomie-Regeln:
                     # Dieselbe Begruendung wie bei cron_create (2026-07-29): der
                     # Versuch steht im Journal, als Verstoss gilt er nicht.
                     _viol_soft = True
-                elif _ist_mcp_tool(tool, name) and not getattr(tool, "erlaubt_netzwerk_benutzer", False):
+                elif _ist_mcp_tool(tool, name) and not _mcp_freigegeben(tool, _uname):
                     # MCP-Werkzeuge stammen aus FREMDEM Code und arbeiten mit den
                     # Zugangsdaten des SERVERS – die Rechte des anfragenden
                     # Benutzers im Zielsystem spielen keine Rolle ("fremde
@@ -4153,10 +4171,11 @@ KRITISCH – Autonomie-Regeln:
                     # Endpunkt-Durchsicht vom 2026-08-04). Freigabe deshalb je
                     # Server und ausdruecklich (Einstellungen -> MCP), Vorgabe AUS.
                     print(f"[AGENT] BLOCKED MCP-Tool '{name}' fuer Domain-User '{_uname}' "
-                          f"(Server nicht fuer Netzwerk-Benutzer freigegeben)", flush=True)
+                          f"(Server fuer diesen Benutzer nicht freigegeben)", flush=True)
                     result = ("Zugriff verweigert: Werkzeuge dieses MCP-Servers sind fuer "
-                              "Netzwerk-Benutzer nicht freigeschaltet. Ein Administrator kann den "
-                              "Server unter Einstellungen -> MCP dafuer freigeben.")
+                              "deinen Benutzer nicht freigeschaltet. Ein Administrator kann dich "
+                              "(oder deine Gruppe) unter Einstellungen -> MCP -> Berechtigungen "
+                              "dafuer freigeben.")
                     _ldap_blocked = True
                     _viol = ("blocked-tool", name)
                     # Weich, gleiche Begruendung wie bei _BLOCKED_TOOLS_FOR_LDAP: welches

@@ -101,9 +101,23 @@
                 : (srv.sandbox === false
                     ? `<span class="mcp-badge mcp-badge-warn" title="${window.t('mcp.sandbox_hint')}">${window.t('mcp.sandbox_off')}</span>`
                     : '');
-            const netMark = srv.allow_network_users
+            // Freigabe: drei Stufen (nur Admins / ausgewaehlte Benutzer und
+            // Gruppen / alle). Die Marke nennt die Stufe im TEXT; die Zahlen
+            // kommen aus derselben Zusammenfassung wie im Popup.
+            const wert = this._freigabeWert(srv);
+            const art = window.JarvisFreigabe ? window.JarvisFreigabe.art(wert)
+                : (srv.allow_network_users ? 'alle' : 'keine');
+            const netMark = art === 'alle'
                 ? `<span class="mcp-badge mcp-badge-warn" title="${window.t('mcp.net_users_hint')}">${window.t('mcp.net_users_on')}</span>`
-                : `<span class="mcp-badge" title="${window.t('mcp.net_users_hint')}">${window.t('mcp.net_users_off')}</span>`;
+                : (art === 'auswahl'
+                    ? `<span class="mcp-badge mcp-badge-warn" title="${window.t('mcp.net_users_hint')}">${_esc(_tt('mcp.rights_selected', 'freigegeben für') + ' ' + window.JarvisFreigabe.zusammenfassung(wert))}</span>`
+                    : `<span class="mcp-badge" title="${window.t('mcp.net_users_hint')}">${window.t('mcp.net_users_off')}</span>`);
+            // API-Schluessel gibt es nur bei HTTP-Transporten. Angezeigt wird
+            // nur, OB einer hinterlegt ist – der Wert verlaesst das Backend nie.
+            const istHttp = srv.transport !== 'stdio';
+            const keyMark = istHttp && srv.api_key_gesetzt
+                ? `<span class="mcp-badge" title="${_esc(_tt('mcp.key_hint', 'Für diesen Server ist ein API-Schlüssel hinterlegt.'))}">${_esc(_tt('mcp.key_set_badge', 'API-Schlüssel'))}</span>`
+                : '';
 
             const toolsList = srv.tools && srv.tools.length
                 ? `<div class="mcp-tools-list">
@@ -123,26 +137,30 @@
                             ${statusDot}
                             <strong>${_esc(srv.name)}</strong>
                             <span class="mcp-badge">${transportBadge}</span>
+                            ${istHttps ? `<button class="mcp-btn-sm mcp-btn-cert" data-action="cert" data-id="${id}">${_tt('mcp.cert_check', 'Zertifikat prüfen')}</button>` : ''}
                             ${netMark}
                             ${sbMark}
                             ${caMark}
+                            ${keyMark}
                         </div>
                         <div class="mcp-card-actions">
                             <label class="mcp-toggle">
                                 <input type="checkbox" ${srv.enabled ? 'checked' : ''} data-action="toggle" data-id="${id}">
                                 <span>${toggleLabel}</span>
                             </label>
-                            ${istHttps ? `<button class="mcp-btn-sm mcp-btn-cert" data-action="cert" data-id="${id}">${_tt('mcp.cert_check', 'Zertifikat prüfen')}</button>` : ''}
                             <button class="mcp-btn-sm" data-action="reconnect" data-id="${id}" title="${window.t('mcp.reconnect')}">🔄</button>
                             <button class="mcp-btn-sm mcp-btn-danger" data-action="remove" data-id="${id}" title="${window.t('mcp.remove')}">${JarvisIcons.trash()}</button>
                         </div>
                     </div>
                     <div class="mcp-card-status">${statusText}</div>
                     <div class="mcp-cert" data-cert-for="${id}"></div>
-                    <label class="mcp-toggle mcp-net-toggle">
-                        <input type="checkbox" ${srv.allow_network_users ? 'checked' : ''} data-action="netusers" data-id="${id}">
-                        <span>${window.t('mcp.net_users_label')}</span>
-                    </label>
+                    <div class="mcp-zeile">
+                        <button class="mcp-btn-sm" data-action="rechte" data-id="${id}">${_esc(_tt('mcp.rights_btn', 'Berechtigungen …'))}</button>
+                        ${istHttp ? `<button class="mcp-btn-sm" data-action="key" data-id="${id}">${_esc(srv.api_key_gesetzt
+                            ? _tt('mcp.key_change', 'API-Schlüssel ändern …')
+                            : _tt('mcp.key_add', 'API-Schlüssel hinterlegen …'))}</button>` : ''}
+                    </div>
+                    <div class="mcp-key" data-key-for="${id}"></div>
                     ${toolsList}
                 </div>`;
         }
@@ -163,8 +181,11 @@
             list.querySelectorAll('[data-action="remove"]').forEach(el => {
                 el.addEventListener('click', () => this._remove(el.dataset.id));
             });
-            list.querySelectorAll('[data-action="netusers"]').forEach(el => {
-                el.addEventListener('change', () => this._setNetUsers(el.dataset.id, el.checked));
+            list.querySelectorAll('[data-action="rechte"]').forEach(el => {
+                el.addEventListener('click', () => this._rechte(el.dataset.id));
+            });
+            list.querySelectorAll('[data-action="key"]').forEach(el => {
+                el.addEventListener('click', () => this._schluesselForm(el.dataset.id));
             });
         }
 
@@ -222,6 +243,15 @@
                                   placeholder="-----BEGIN CERTIFICATE-----"></textarea>
                     </div>
                     <div class="mcp-form-hint">${window.t('mcp.ca_form_hint')}</div>
+                    <div class="mcp-form-row">
+                        <label>${_tt('mcp.key_label', 'API-Schlüssel (optional)')}</label>
+                        <input type="password" id="mcp-f-key" class="mcp-input" autocomplete="new-password">
+                    </div>
+                    <div class="mcp-form-row">
+                        <label>${_tt('mcp.key_header_label', 'Header-Name')}</label>
+                        <input type="text" id="mcp-f-key-header" class="mcp-input" placeholder="Authorization">
+                    </div>
+                    <div class="mcp-form-hint">${_tt('mcp.key_header_hint', 'Leer = „Authorization: Bearer <Schlüssel>“. Erwartet der Server einen eigenen Header (z. B. X-API-Key), hier dessen Namen eintragen.')}</div>
                 </div>
                 <div class="mcp-form-row">
                     <label>${window.t('mcp.env_label')}</label>
@@ -270,8 +300,11 @@
             // Zeilenumbrueche bleiben erhalten – ein PEM-Block braucht sie.
             const ca_cert = (document.getElementById('mcp-f-ca')?.value || '').trim();
 
+            const api_key = (document.getElementById('mcp-f-key')?.value || '').trim();
+            const api_key_header = (document.getElementById('mcp-f-key-header')?.value || '').trim();
+
             const data = { name, transport, command, args, url, env, enabled: true,
-                           sandbox, sandbox_paths, ca_cert };
+                           sandbox, sandbox_paths, ca_cert, api_key, api_key_header };
             const token = window.JarvisSitzung.token();
 
             try {
@@ -297,28 +330,144 @@
             await this.refresh();
         }
 
-        async _setNetUsers(id, allow) {
-            // Beim Einschalten ausdruecklich nachfragen: es geht nicht um Bedienkomfort,
-            // sondern darum, dass ab dann JEDER Netzwerk-Benutzer mit den hinterlegten
-            // Zugangsdaten dieses Servers arbeiten kann.
-            if (allow && !confirm(window.t('mcp.net_users_confirm'))) {
-                await this.refresh();   // Kaestchen zuruecksetzen
-                return;
-            }
-            const token = window.JarvisSitzung.token();
-            try {
-                // NUR dieses Feld senden – der Endpunkt merged, ein voller
-                // Formularstand ueberschriebe sonst die Serverdaten.
-                const resp = await fetch(`/api/mcp/servers/${encodeURIComponent(id)}`, {
-                    method: 'PUT',
-                    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ allow_network_users: allow }),
+        /** Freigabe-Wert eines Servers in der Form des Freigabe-Popups. */
+        _freigabeWert(srv) {
+            return { alle: srv.allow_network_users === true,
+                     users: srv.allowed_users || '', groups: srv.allowed_group || '' };
+        }
+
+        /**
+         * Berechtigungen ueber das gemeinsame Freigabe-Popup (freigabe_dialog.js).
+         * Gesendet werden NUR die drei Freigabefelder – der Endpunkt merged,
+         * ein voller Formularstand ueberschriebe sonst die Serverdaten.
+         */
+        _rechte(id) {
+            const srv = this._servers.find(s => s.id === id);
+            if (!srv || !window.JarvisFreigabe) return;
+            window.JarvisFreigabe.oeffnen({
+                titel: _tt('mcp.rights_title', 'Berechtigungen') + ' – ' + (srv.name || ''),
+                hinweis: window.t('mcp.net_users_hint'),
+                mitAlle: true,
+                alleBestaetigen: window.t('mcp.net_users_confirm'),
+                wert: this._freigabeWert(srv),
+                speichern: async (w) => {
+                    const token = window.JarvisSitzung.token();
+                    const resp = await fetch(`/api/mcp/servers/${encodeURIComponent(id)}`, {
+                        method: 'PUT',
+                        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ allow_network_users: w.alle === true,
+                                               allowed_users: w.users,
+                                               allowed_group: w.groups }),
+                    });
+                    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                    await this.refresh();
+                },
+            });
+        }
+
+        /**
+         * API-Schluessel (und Adresse) eines HTTP-Servers bearbeiten.
+         *
+         * Der gespeicherte Schluessel kommt NIE zurueck ins Frontend; ein leeres
+         * Feld heisst deshalb "unveraendert", und Entfernen ist ein eigener,
+         * ausdruecklicher Knopf. Alle Werte gehen ueber .value/.textContent ins
+         * DOM, nicht ueber innerHTML.
+         */
+        _schluesselForm(id) {
+            const kasten = document.querySelector(`[data-key-for="${CSS.escape(id)}"]`);
+            const srv = this._servers.find(s => s.id === id);
+            if (!kasten || !srv) return;
+            if (kasten.firstChild) { kasten.replaceChildren(); return; }   // zuklappen
+
+            const box = document.createElement('div');
+            box.className = 'mcp-form mcp-key-box';
+            const zeile = (beschriftung, feld) => {
+                const r = document.createElement('div');
+                r.className = 'mcp-form-row';
+                const l = document.createElement('label');
+                l.textContent = beschriftung;
+                r.append(l, feld);
+                return r;
+            };
+            const eingabe = (typ, wert, ph) => {
+                const i = document.createElement('input');
+                i.type = typ; i.className = 'mcp-input'; i.value = wert || '';
+                if (ph) i.placeholder = ph;
+                if (typ === 'password') i.autocomplete = 'new-password';
+                return i;
+            };
+            const fUrl = eingabe('text', srv.url, 'https://host/mcp');
+            const fHeader = eingabe('text', srv.api_key_header, 'Authorization');
+            const fKey = eingabe('password', '', srv.api_key_gesetzt
+                ? _tt('mcp.key_keep_ph', 'hinterlegt – leer lassen = unverändert')
+                : _tt('mcp.key_ph', 'API-Schlüssel'));
+            box.append(zeile('URL', fUrl),
+                       zeile(_tt('mcp.key_label_short', 'API-Schlüssel'), fKey),
+                       zeile(_tt('mcp.key_header_label', 'Header-Name'), fHeader));
+            const hint = document.createElement('div');
+            hint.className = 'mcp-form-hint';
+            hint.textContent = _tt('mcp.key_header_hint', 'Leer = „Authorization: Bearer <Schlüssel>“. Erwartet der Server einen eigenen Header (z. B. X-API-Key), hier dessen Namen eintragen.');
+            box.appendChild(hint);
+            const fehler = document.createElement('div');
+            fehler.className = 'mcp-cert-fehler';
+            fehler.setAttribute('role', 'alert');
+
+            const senden = async (daten) => {
+                fehler.textContent = '';
+                try {
+                    const token = window.JarvisSitzung.token();
+                    const r = await fetch(`/api/mcp/servers/${encodeURIComponent(id)}`, {
+                        method: 'PUT',
+                        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify(daten),
+                    });
+                    if (!r.ok) {
+                        let d = null;
+                        try { d = await r.json(); } catch (_) { /* kein JSON */ }
+                        throw new Error((d && d.detail) || `HTTP ${r.status}`);
+                    }
+                    // Der PUT verbindet den Server bereits neu.
+                    await this.refresh();
+                } catch (e) {
+                    // Ein Fehler bleibt stehen, bis der Benutzer ihn gelesen hat.
+                    fehler.textContent = window.t('mcp.error').replace('{msg}', e.message || e);
+                }
+            };
+
+            const knoepfe = document.createElement('div');
+            knoepfe.className = 'mcp-form-buttons';
+            const speichern = document.createElement('button');
+            speichern.type = 'button';
+            speichern.className = 'mcp-btn-primary';
+            speichern.textContent = _tt('mcp.key_save', 'Speichern und neu verbinden');
+            speichern.addEventListener('click', () => {
+                const daten = { url: fUrl.value.trim(), api_key_header: fHeader.value.trim() };
+                if (fKey.value.trim()) daten.api_key = fKey.value.trim();
+                senden(daten);
+            });
+            const abbrechen = document.createElement('button');
+            abbrechen.type = 'button';
+            abbrechen.className = 'mcp-btn-sm';
+            abbrechen.textContent = window.t('common.cancel');
+            abbrechen.addEventListener('click', () => kasten.replaceChildren());
+            knoepfe.append(speichern, abbrechen);
+            if (srv.api_key_gesetzt) {
+                const weg = document.createElement('button');
+                weg.type = 'button';
+                weg.className = 'mcp-btn-sm mcp-btn-danger';
+                weg.innerHTML = JarvisIcons.trash();
+                const txt = document.createElement('span');
+                txt.textContent = ' ' + _tt('mcp.key_remove', 'Schlüssel entfernen');
+                weg.appendChild(txt);
+                weg.addEventListener('click', () => {
+                    if (!confirm(_tt('mcp.key_remove_confirm', 'Hinterlegten API-Schlüssel wirklich entfernen?'))) return;
+                    senden({ api_key: '' });
                 });
-                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-            } catch (e) {
-                alert(window.t('mcp.error').replace('{msg}', e.message));
+                knoepfe.appendChild(weg);
             }
-            await this.refresh();
+            box.append(knoepfe, fehler);
+            kasten.replaceChildren(box);
+            fKey.focus();
         }
 
         async _reconnect(id) {

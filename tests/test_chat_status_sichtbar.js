@@ -98,7 +98,7 @@ if (!/msg\.persist/.test(GESCHNITTEN) || !/_activityEl/.test(GESCHNITTEN)
 /* ── Die Buehne. jsdom rechnet kein Layout, wertet aber Stylesheets aus –
  * mehr braucht dieser Waechter nicht: gemessen wird, WELCHE Knoten nach dem
  * Laufende noch im DOM stehen. */
-function buehne() {
+function buehne(debug) {
     const dom = new JSDOM(
         `<!DOCTYPE html><html><head><style>${CSS}</style></head>`
         + '<body><div id="messages"></div></body></html>',
@@ -118,7 +118,7 @@ function buehne() {
         _activeSid: null,
         _ttsBuf: '',
         _lastBotResp: '',
-        _chatDebug: false,
+        _chatDebug: !!debug,
         _activityEl: null,
         blasen: [],
         subblasen: [],
@@ -385,6 +385,29 @@ console.log('\n6. Kontrast in beiden Themen');
     pruefe('die Kontrastrechnung erkennt ein schlechtes Paar',
            kontrast([239, 68, 68], [255, 255, 255]) < 4.5,
            String(kontrast([239, 68, 68], [255, 255, 255])));
+}
+
+// ═══ Debug-Ansicht: auch dort sieht man, dass gearbeitet wird ════════════
+// Vorfall DEV 2026-10-25: in der Debug-Ansicht wurde jeder Status nur als
+// Zeile angehaengt – es gab GAR KEINEN Spinner, ein Lauf mit langen
+// Modellschritten sah aus wie ein Stillstand.
+console.log('\nDebug-Ansicht: Zeile UND Spinner');
+{
+    const b = buehne(true);
+    b.handleStatus({ message: '🔧 Tool: shell_execute', state: 's' });
+    b.handleStatus({ message: '📋 Ergebnis: STDOUT', state: 's' });
+    pruefe('Positivkontrolle: die Debug-Ansicht schreibt die Status als Zeilen',
+           b.zeilen().length === 2, JSON.stringify(b.zeilen()));
+    pruefe('⚠ es laeuft GENAU EIN Spinner', b.aktivitaet() === 1, String(b.aktivitaet()));
+    const letztes = b.messagesEl.lastElementChild;
+    pruefe('der Spinner steht UNTER der neuesten Zeile',
+           !!letztes && letztes.classList.contains('chat-activity'),
+           letztes ? letztes.className : 'leer');
+    const txt = (b.messagesEl.querySelector('.chat-activity-text') || {}).textContent;
+    pruefe('ohne doppelten Text (der steht schon in der Zeile)', txt === '', JSON.stringify(txt));
+    b.clearActivity();
+    pruefe('am Laufende ist er weg, die Zeilen bleiben',
+           b.aktivitaet() === 0 && b.zeilen().length === 2);
 }
 
 console.log(`\n${'═'.repeat(70)}\nErgebnis: ${ok} OK, ${fail} FAIL`);

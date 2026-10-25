@@ -1345,8 +1345,13 @@
             if (text.startsWith('⏸') || text.startsWith('▶') || text.startsWith('⏹')) {
                 addStatusLine(text);
             } else if (_chatDebug) {
-                // Debug-Ansicht: Zwischenschritte dauerhaft als Status-Zeilen anzeigen
+                // Debug-Ansicht: Zwischenschritte dauerhaft als Status-Zeilen anzeigen.
+                // ⚠ DAZU der Spinner (ohne Text – der steht schon in der Zeile):
+                // bis 2026-10-25 gab es in dieser Ansicht GAR KEINE Laufanzeige,
+                // ein Lauf mit langen Modellschritten sah aus wie ein Stillstand.
+                // _setActivity haengt ihn ans Ende, also unter die neue Zeile.
                 addStatusLine(text);
+                _setActivity('');
             } else {
                 // Standard: laufende Aktivität nur als transiente Zeile (Spinner)
                 _setActivity(text);

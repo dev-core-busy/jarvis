@@ -126,6 +126,13 @@ class _Cfg:
         # ⚠ Das ist der Grund fuer die Erlaubnisliste: dieses Feld darf NIE
         # ueber den Endpunkt herauskommen.
         self.jwt_secret = "SIGNIERSCHLUESSEL"
+        # MCP-Server (seit 2026-10-25 mit Auge am API-Schluessel). Wie in der
+        # echten Config ueber get_mcp_servers(), nicht als Attribut.
+        self._mcp = [{"id": "m1", "name": "theben", "api_key": "McpKey!7"},
+                     {"id": "m2", "name": "ohne", "api_key": ""}]
+
+    def get_mcp_servers(self):
+        return self._mcp
 
     def get_setting(self, key, default=None):
         return self._extra.get(key, default)
@@ -212,6 +219,15 @@ w, f = sr.agentkey("k9")
 check("agentkey: eine unbekannte Kennung meldet den Grund", not w and bool(f), f)
 w, f = sr.skill("jira:api_token")
 check("skill: ein Geheimfeld kommt heraus", w == "SammelToken", "%r/%r" % (w, f))
+# MCP (2026-10-25): "'Kennwort anzeigen' ist ohne Funktion" – es gab keinen Weg.
+w, f = sr.mcp("m1:api_key")
+check("mcp: der API-Schluessel eines Servers kommt heraus", w == "McpKey!7", "%r/%r" % (w, f))
+w, f = sr.mcp("m2:api_key")
+check("mcp: ohne Schluessel meldet es den Grund", not w and bool(f), f)
+w, f = sr.mcp("m1:name")
+check("⚠ mcp: ein Nicht-Schluesselfeld wird abgewiesen", not w and bool(f), f)
+w, f = sr.mcp("m9:api_key")
+check("mcp: ein unbekannter Server meldet den Grund", not w and bool(f), f)
 w, f = sr.skill("jira:base_url")
 check("⚠ skill: ein Nicht-Geheimfeld wird abgewiesen (kein Lesezugang zu allem)",
       not w and "kein Geheimfeld" in f, f)
@@ -449,7 +465,8 @@ s, r = ruf("anna", "wolke", "x")
 check("⚠ ein unbekannter Bereich: 400, kein Rateweg", s == 400, "%s %s" % (s, r))
 for b, kennung, wert in (("profil", "p1:api_key", "sk-geheim"),
                          ("skill", "jira:api_token", "SammelToken"),
-                         ("agentkey", "k1", "AgentNeu!8")):
+                         ("agentkey", "k1", "AgentNeu!8"),
+                         ("mcp", "m1:api_key", "McpKey!7")):
     RECHTE["admin"] = set()
     RECHTE["kb"] = {"anna"}
     s, r = ruf("anna", b, kennung)
@@ -473,7 +490,8 @@ s, r = ruf("anna", "mail", "passwort")
 check("Positivkontrolle: bestaetigt kommt der Wert", s == 200 and r.get("wert"), "%s %s" % (s, r))
 BESTAETIGT[0] = False
 for b, kennung in (("mail", "passwort"), ("einstellung", "ad_bind_password"),
-                   ("profil", "p1:api_key"), ("skill", "jira:api_token")):
+                   ("profil", "p1:api_key"), ("skill", "jira:api_token"),
+                   ("mcp", "m1:api_key")):
     s, r = ruf("anna", b, kennung)
     check("⚠ %-11s ohne Bestaetigung: 403 mit reauth" % b,
           s == 403 and r.get("reauth") is True, "%s %s" % (s, r))

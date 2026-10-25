@@ -455,6 +455,11 @@ check("'streamable_http' : (cfg.transport" not in JS_SRC
       and "sel.appendChild(o)" in JS_SRC
       and re.search(r"^\s*sel\.value = tr;\s*$", JS_SRC, re.M) is not None,
       "Bearbeiten bewahrt einen Transport ohne eigene Option ('http')")
+# Auge am API-Schluessel (gemeldet 2026-10-25: "'Kennwort anzeigen' ohne
+# Funktion"): das Feld traegt Quelle und Kennung ueber den gemeinsamen Helfer.
+check("window.JarvisPwEye.geheim($('[data-f=\"key\"]'), 'mcp'," in JS_SRC
+      and "cfg.id + ':api_key'" in JS_SRC,
+      "Schluesselfeld hat eine Quelle fuer das Auge (Bereich 'mcp')")
 check(re.search(r'id="mcp-f-', JS_SRC) is None,
       "Formularfelder ohne feste IDs (mehrere Karten koennen offen sein)")
 _set = re.search(r'\n        _rechte\(.*?(?=\n        /\*\*|\n        async |\n        _)', JS_SRC, re.S)

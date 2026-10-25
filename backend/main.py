@@ -9204,7 +9204,7 @@ async def secret_reveal(request: Request, user: str = Depends(require_auth)):
     einstellung   nur Administratoren
     profil/       nur Administratoren (seit BSI M5: die Formulare
     agentkey/     laden ihre Geheimnisse nicht mehr mit)
-    skill
+    skill/mcp
     ============= =================================================
 
     **Seit BSI M5 (2026-10-05) nur nach erneuter Anmeldung** (Kennwort oder
@@ -9298,7 +9298,7 @@ async def secret_reveal(request: Request, user: str = Depends(require_auth)):
             return JSONResponse({"ok": False, "error": "Nur fuer Administratoren."},
                                 status_code=403)
         wert, fehler = await asyncio.to_thread(_sr.einstellung, kennung)
-    elif bereich in ("profil", "agentkey", "skill"):
+    elif bereich in ("profil", "agentkey", "skill", "mcp"):
         # Seit BSI M5 laden die Formulare ihre Geheimnisse NICHT mehr mit – also
         # gibt es diese Bereiche jetzt (Begruendung in backend/secret_reveal.py).
         # Rechte wie die Formulare selbst: require_local_auth == _user_is_admin.
@@ -9307,7 +9307,8 @@ async def secret_reveal(request: Request, user: str = Depends(require_auth)):
             return JSONResponse({"ok": False, "error": "Nur fuer Administratoren."},
                                 status_code=403)
         wert, fehler = await asyncio.to_thread(
-            {"profil": _sr.profil, "agentkey": _sr.agentkey, "skill": _sr.skill}[bereich],
+            {"profil": _sr.profil, "agentkey": _sr.agentkey, "skill": _sr.skill,
+             "mcp": _sr.mcp}[bereich],
             kennung)
     elif bereich == "webdav":
         # Wie GET /api/knowledge/webdav/status: Wissens-Editoren.

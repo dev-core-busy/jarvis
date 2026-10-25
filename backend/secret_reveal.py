@@ -162,6 +162,24 @@ def agentkey(kennung: str) -> tuple[str, str]:
     return "", "Diesen Schluessel gibt es nicht."
 
 
+def mcp(kennung: str) -> tuple[str, str]:
+    """``<server-id>:api_key`` – der API-Schluessel eines MCP-Servers.
+
+    Seit 2026-10-25 hat das Schluesselfeld im MCP-Formular ein Auge (gemeldet:
+    "'Kennwort anzeigen' ist ohne Funktion" – das Feld trug keine Quelle, das
+    Auge schaltete ein leeres Feld um). Rechte wie das Formular selbst: nur
+    Administratoren (main.py)."""
+    from backend.config import config
+    sid, _, feld = str(kennung or "").strip().rpartition(":")
+    if feld != "api_key" or not sid:
+        return "", "Kennung muss '<server-id>:api_key' sein."
+    for srv in config.get_mcp_servers() or []:
+        if isinstance(srv, dict) and srv.get("id") == sid:
+            wert = str(srv.get("api_key") or "")
+            return (wert, "") if wert else ("", "Fuer diesen Server ist kein Schluessel gespeichert.")
+    return "", "Diesen MCP-Server gibt es nicht."
+
+
 def _geheimfeld_name(name) -> bool:
     from backend import geheimnis_tresor as _t
     return _t.ist_geheimer_name(name)

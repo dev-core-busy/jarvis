@@ -385,8 +385,19 @@
                 $('[data-f="url"]').value = cfg.url || '';
                 $('[data-f="key-header"]').value = cfg.api_key_header || '';
                 $('[data-f="ergebnis-max"]').value = cfg.ergebnis_max > 0 ? String(cfg.ergebnis_max) : '';
-                if (cfg.api_key_gesetzt) {
+                // Das Auge (pwreveal.js) holt den GESPEICHERTEN Schluessel erst
+                // auf Klick ueber /api/secret/reveal (Bereich "mcp", nur Admins).
+                // Ohne Quelle schaltete es nur ein leeres Feld um – gemeldet als
+                // "'Kennwort anzeigen' ist ohne Funktion" (2026-10-25). Ueber den
+                // gemeinsamen Helfer, wie jira.js/confluence.js: Sterne als
+                // Platzhalter, "leer = unveraendert" im Hinweis.
+                if (window.JarvisPwEye && window.JarvisPwEye.geheim) {
+                    window.JarvisPwEye.geheim($('[data-f="key"]'), 'mcp',
+                                              cfg.id + ':api_key', !!cfg.api_key_gesetzt);
+                } else if (cfg.api_key_gesetzt) {
                     $('[data-f="key"]').placeholder = _tt('mcp.key_keep_ph', 'hinterlegt – leer lassen = unverändert');
+                }
+                if (cfg.api_key_gesetzt) {
                     $('[data-f="key-weg-zeile"]').style.display = '';
                 }
                 if (cfg.ca_cert_art === 'pfad') {

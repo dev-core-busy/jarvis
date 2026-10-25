@@ -2917,6 +2917,15 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <div id="br-docx-list" style="margin-top:10px;"></div>
                         </div>
 
+                        <h4 style="margin:18px 0 8px;" data-i18n="branding.font_heading">Schriften</h4>
+                        <p class="kb-hint" data-i18n="branding.font_hint">Die Vorlagen verwenden die Hausschrift. Ist sie auf dem Server nicht vorhanden, setzt der PDF-Export eine Ersatzschrift ein – Zeilenumbrüche und Textlängen weichen dann ab. Lade die Schriftdateien hier hoch; sie bleiben auf diesem Server. Nur Schriften hochladen, deren Lizenz die Nutzung auf einem Server erlaubt.</p>
+                        <div class="form-group">
+                            <label data-i18n="branding.font_upload">Schrift hochladen (.ttf, .otf, .ttc)</label>
+                            <input type="file" id="br-font-file" accept=".ttf,.otf,.ttc,.otc,font/ttf,font/otf,font/collection">
+                            <div id="br-font-status" style="margin-top:10px;"></div>
+                            <div id="br-font-list" style="margin-top:6px;"></div>
+                        </div>
+
                         <h4 style="margin:18px 0 8px;" data-i18n="branding.contact_heading">Kontakt &amp; Info (Portalseite)</h4>
                         <p class="kb-hint" data-i18n="branding.contact_hint">Dezente Info-Zeile unterhalb der Bereichsauswahl auf /portal. Leere Felder werden ausgeblendet; ohne aktives Branding erscheinen die Standard-Angaben.</p>
                         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;">
@@ -5948,7 +5957,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/icons.js?v=10"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/dlkey.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=364"></script>
+    <script src="/static/js/i18n.js?v=365"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=29"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -5982,7 +5991,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/kundenverwaltung.js?v=10"></script>
     <script src="/static/js/support_admin.js?v=12"></script>
     <script src="/static/js/telemetry.js?v=13"></script>
-    <script src="/static/js/branding.js?v=28"></script>
+    <script src="/static/js/branding.js?v=29"></script>
     <script src="/static/js/theme.js?v=3"></script>
     <script src="/static/js/security_incidents.js?v=39"></script>
     <script src="/static/js/fernzugang.js?v=3"></script>

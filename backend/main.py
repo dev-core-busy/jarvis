@@ -12483,6 +12483,67 @@ async def regenerate_branding_docx_template(user: str = Depends(require_local_au
                          "accent": farben.get("akzent", ""),
                          "size": pfad.stat().st_size if pfad.exists() else 0})
 
+
+# ─── Schriften (Branding-Reiter) ──────────────────────────────────────
+# Lizenzierte CI-Schrift fuer den PDF-Export der Office-Vorlagen. Ablage und
+# fontconfig-Einbindung: backend/branding_schriften.py (Dateien unter data/,
+# also nie im Repo).
+
+def _vorlagen_schriften() -> list[str]:
+    """Die Schriften, die die Office-Vorlagen verlangen (Titel, Text)."""
+    try:
+        v = _pptx_vorlagen_modul()
+        return list(dict.fromkeys([v.SCHRIFT_TITEL, v.SCHRIFT_TEXT]))
+    except Exception:  # noqa: BLE001
+        return []
+
+
+@app.on_event("startup")
+async def startup_branding_schriften():
+    """fontconfig-Eintrag nachziehen, wenn Schriften abgelegt sind.
+
+    Nach einer Ruecksicherung liegen die Dateien in data/, der Eintrag im HOME
+    des Dienstbenutzers fehlt aber – der PDF-Export nahm dann still wieder die
+    Ersatzschrift."""
+    try:
+        from backend import branding_schriften as _bs
+        if _bs.FONT_DIR.is_dir() and any(_bs.FONT_DIR.iterdir()):
+            _bs.sicherstellen()
+    except Exception as e:  # noqa: BLE001
+        print(f"[branding] Schrift-Einbindung nicht geprueft: {e}", flush=True)
+
+
+@app.get("/api/branding/fonts")
+async def list_branding_fonts(user: str = Depends(require_local_auth)):
+    """Abgelegte Schriften und welche Schrift die Vorlagen tatsaechlich bekommen."""
+    from backend import branding_schriften as _bs
+    zustand = await asyncio.to_thread(_bs.zustand, _vorlagen_schriften())
+    return JSONResponse(zustand)
+
+
+@app.post("/api/branding/font")
+async def upload_branding_font(file: UploadFile = File(...),
+                               user: str = Depends(require_local_auth)):
+    """Laedt eine Schriftdatei hoch (TTF/OTF/TTC; gleicher Name ersetzt)."""
+    from backend import branding_schriften as _bs
+    daten = await file.read()
+    ok, fehler, infos = await asyncio.to_thread(_bs.speichern, daten, file.filename or "")
+    if not ok:
+        return JSONResponse({"success": False, "error": fehler}, status_code=400)
+    vorlagen = await asyncio.to_thread(_bs.abdeckung, _vorlagen_schriften())
+    return JSONResponse({"success": True, **infos, "vorlagen": vorlagen})
+
+
+@app.delete("/api/branding/font")
+async def delete_branding_font(name: str, user: str = Depends(require_local_auth)):
+    """Entfernt eine hochgeladene Schrift."""
+    from backend import branding_schriften as _bs
+    ok, fehler = await asyncio.to_thread(_bs.entfernen, name)
+    if not ok:
+        return JSONResponse({"success": False, "error": fehler},
+                            status_code=404 if "nicht gefunden" in fehler else 400)
+    return JSONResponse({"success": True, "name": name})
+
 # ─── Confluence (für den Confluence-Reiter; teilt sich Client mit dem Skill) ──
 
 # Obergrenzen fuer Confluence-Listen (Code-Review 2026-10-07). Vorher fest 500:

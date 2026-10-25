@@ -776,6 +776,8 @@
             if (docInput) docInput.addEventListener('change', function (ev) { BrandingAdmin.uploadTemplate('docx', ev); });
             var docRegen = document.getElementById('br-docx-regen');
             if (docRegen) docRegen.addEventListener('click', function () { BrandingAdmin.regenerateTemplate('docx'); });
+            var fontInput = document.getElementById('br-font-file');
+            if (fontInput) fontInput.addEventListener('change', function (ev) { BrandingAdmin.uploadFont(ev); });
             // Live-Vorschau bei Farb-/Text-/Logo-Änderung
             ['br-accent', 'br-accent-hover', 'br-bg-primary', 'br-bg-secondary', 'br-text-primary',
              'br-bg-primary-light', 'br-bg-secondary-light', 'br-text-primary-light',
@@ -828,6 +830,7 @@
             // Farbfelder nicht leer laesst.
             this.loadPptxTemplates();
             this.loadTemplates('docx');
+            this.loadFonts();
         },
         refreshLogoPreview: function () {
             fetch('/api/branding')
@@ -1169,6 +1172,141 @@
                   }
                   BrandingAdmin.loadTemplates(art);
               }).catch(function () { if (st) st.textContent = '✗ Erzeugen fehlgeschlagen'; });
+        },
+        /* Schriften: Dateien fuer den PDF-Export der Vorlagen. Neben der
+         * Dateiliste steht, welche Schrift die Vorlagen TATSAECHLICH bekommen
+         * (fc-match auf dem Server) – "hochgeladen" allein sagt nicht, ob der
+         * Familienname zu dem passt, den die Vorlage verlangt. */
+        _fontT: function (key, fallback) {
+            var k = 'branding.font_' + key;
+            var v = window.t ? window.t(k) : '';
+            return (v && v !== k) ? v : fallback;
+        },
+        loadFonts: function () {
+            var box = document.getElementById('br-font-list');
+            if (!box) return;
+            fetch('/api/branding/fonts', {
+                headers: { 'Authorization': 'Bearer ' + token() }
+            }).then(function (r) { return r.json(); })
+              .then(function (d) { BrandingAdmin.renderFonts(d || {}); })
+              .catch(function () {
+                  box.textContent = BrandingAdmin._fontT('load_err', 'Schriften konnten nicht geladen werden.');
+              });
+        },
+        _fontZeile: function () {
+            var row = document.createElement('div');
+            row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:6px 0;'
+                + 'border-bottom:1px solid var(--border);';
+            return row;
+        },
+        _fontText: function (text, css) {
+            var el = document.createElement('span');
+            el.style.cssText = css;
+            // textContent: Datei- und Familiennamen stammen aus einem Upload.
+            el.textContent = text;
+            return el;
+        },
+        renderFonts: function (d) {
+            var st = document.getElementById('br-font-status');
+            var box = document.getElementById('br-font-list');
+            if (st) {
+                st.textContent = '';
+                (d.vorlagen || []).forEach(function (v) {
+                    var row = BrandingAdmin._fontZeile();
+                    row.appendChild(BrandingAdmin._fontText(v.name,
+                        'font-size:0.88rem;color:var(--text-primary);'));
+                    var text, farbe;
+                    if (!v.gemessen) {
+                        text = BrandingAdmin._fontT('unmeasured', 'nicht prüfbar (Schriftverwaltung des Servers fehlt)');
+                        farbe = 'var(--text-muted)';
+                    } else if (v.gefunden) {
+                        text = '✓ ' + BrandingAdmin._fontT('found', 'vorhanden') + (v.datei ? ' · ' + v.datei : '');
+                        farbe = 'var(--success)';
+                    } else {
+                        text = '✗ ' + BrandingAdmin._fontT('missing', 'fehlt – Ersatz:') + ' ' + (v.ersatz || '?');
+                        farbe = 'var(--warning)';
+                    }
+                    row.appendChild(BrandingAdmin._fontText(text,
+                        'font-size:0.8rem;margin-left:auto;color:' + farbe + ';'));
+                    st.appendChild(row);
+                });
+            }
+            if (!box) return;
+            box.textContent = '';
+            var liste = d.fonts || [];
+            if (!liste.length) {
+                var leer = document.createElement('p');
+                leer.className = 'kb-hint';
+                leer.style.margin = '0';
+                leer.textContent = BrandingAdmin._fontT('none', 'Noch keine Schrift hochgeladen.');
+                box.appendChild(leer);
+                return;
+            }
+            liste.forEach(function (f) {
+                var row = BrandingAdmin._fontZeile();
+                row.appendChild(BrandingAdmin._fontText(f.name,
+                    'font-size:0.88rem;color:var(--text-primary);'));
+                var schnitte = (f.schnitte || []).map(function (s) {
+                    return s.name || ((s.familien || [])[0] || '') + (s.stil ? ' ' + s.stil : '');
+                }).filter(Boolean);
+                if (schnitte.length) {
+                    row.appendChild(BrandingAdmin._fontText(schnitte.join(', '),
+                        'font-size:0.78rem;color:var(--text-secondary);'));
+                }
+                var kb = Math.max(1, Math.round((f.size || 0) / 1024));
+                row.appendChild(BrandingAdmin._fontText(kb + ' KB',
+                    'font-size:0.76rem;color:var(--text-muted);margin-left:auto;'));
+                var del = document.createElement('button');
+                del.type = 'button';
+                del.className = 'btn-secondary';
+                // flex:0 0 auto: .btn-secondary hat width:100% (siehe Vorlagenliste).
+                del.style.cssText = 'padding:3px 10px;font-size:0.78rem;flex:0 0 auto;width:auto;';
+                del.textContent = (window.t ? window.t('branding.remove') : 'Entfernen');
+                del.addEventListener('click', function () { BrandingAdmin.deleteFont(f.name); });
+                row.appendChild(del);
+                box.appendChild(row);
+            });
+        },
+        uploadFont: function (ev) {
+            var f = ev.target.files && ev.target.files[0];
+            if (!f) return;
+            var st = document.getElementById('br-status');
+            if (st) st.textContent = BrandingAdmin._fontT('uploading', '… Schrift wird geprüft');
+            var fd = new FormData();
+            fd.append('file', f);
+            fetch('/api/branding/font', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token() },
+                body: fd
+            }).then(function (r) { return r.json(); })
+              .then(function (d) {
+                  if (d && d.success) {
+                      var namen = (d.schnitte || []).map(function (s) { return s.name; }).filter(Boolean);
+                      if (st) st.textContent = '✓ ' + d.name + (namen.length ? ' – ' + namen.join(', ') : '');
+                  } else if (st) {
+                      st.textContent = '✗ ' + ((d && d.error) || 'Upload fehlgeschlagen');
+                  }
+                  BrandingAdmin.loadFonts();
+              }).catch(function () {
+                  if (st) st.textContent = '✗ Upload fehlgeschlagen';
+              })
+              .then(function () { try { ev.target.value = ''; } catch (e) {} });
+        },
+        deleteFont: function (name) {
+            if (!window.confirm(BrandingAdmin._fontT('del_confirm', 'Schrift entfernen? Dokumente nutzen danach wieder die Ersatzschrift.'))) return;
+            var st = document.getElementById('br-status');
+            fetch('/api/branding/font?name=' + encodeURIComponent(name), {
+                method: 'DELETE',
+                headers: { 'Authorization': 'Bearer ' + token() }
+            }).then(function (r) { return r.json(); })
+              .then(function (d) {
+                  if (st) {
+                      st.textContent = (d && d.success)
+                          ? '✓ ' + name + ' entfernt'
+                          : '✗ ' + ((d && d.error) || 'Entfernen fehlgeschlagen');
+                  }
+                  BrandingAdmin.loadFonts();
+              }).catch(function () { if (st) st.textContent = '✗ Entfernen fehlgeschlagen'; });
         },
         // Bisherige Namen (PowerPoint) – Aufrufer und Pruefstaende benutzen sie.
         loadPptxTemplates: function () { this.loadTemplates('pptx'); },

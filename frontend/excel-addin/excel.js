@@ -2042,7 +2042,11 @@
                 // "kein Kommentar da" ist die Regel, nicht die Ausnahme.
                 return ctx.sync().catch(function () { }).then(function () {
                     kommentiert.forEach(function (z) {
-                        var text = T('xl.comment_pre', 'Jarvis:') + ' ' + z.a.begruendung;
+                        // Ein Zellkommentar landet NICHT im DOM – der Platzhalter
+                        // {marke} wird deshalb hier aufgeloest (test_marke_i18n).
+                        var _marke = (window.jarvisMarke && window.jarvisMarke()) || 'Jarvis';
+                        var text = T('xl.comment_pre', '{marke}:').replace('{marke}', _marke)
+                            + ' ' + z.a.begruendung;
                         try {
                             if (z.k && z.k.id) { z.k.content = text; return; }
                         } catch (e) { }

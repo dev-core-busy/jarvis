@@ -801,6 +801,25 @@ if machbar:
     A.get_provider = lambda *a, **kw: _halter["s"]
 
     haupt = A.JarvisAgent()
+    # ⚠ `delegate` kommt NUR mit dem Skill "Agent Orchestrator". Dessen Schalter
+    # auf dem Pruefserver ist KEIN Messaufbau: auf DEV war er seit Wochen aus,
+    # und dieser Abschnitt meldete 10 FAIL ("Tool 'delegate' nicht gefunden"),
+    # die wie Produktfehler aussahen (2026-10-25). Den Schalter zum Messen
+    # umzulegen waere ein Eingriff in fremden Zustand (Register) – also legt
+    # der Pruefstand das ECHTE Werkzeug selbst in den Kasten. Nur die Klasse,
+    # nicht `get_tools()`: das saeht Vorgabe-Rollen in den echten Bestand.
+    if "delegate" not in haupt.tools_map:
+        import importlib.util as _ilu
+        _spec = _ilu.spec_from_file_location(
+            "_orchestrator_skill", ROOT / "skills" / "agent_orchestrator" / "main.py")
+        _orch = _ilu.module_from_spec(_spec)
+        _spec.loader.exec_module(_orch)
+        _dt = _orch.DelegateTool()
+        haupt._tool_instances.append(_dt)
+        haupt.tools_map[_dt.name] = _dt
+    if "delegate" not in haupt.tools_map:
+        print("ABBRUCH: delegate liess sich nicht in den Werkzeugkasten legen")
+        sys.exit(2)
     _am.main_agent = haupt
     _am.agents[haupt.agent_id] = haupt
 

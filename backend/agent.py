@@ -1794,6 +1794,30 @@ KRITISCH – Autonomie-Regeln:
             print(f"[AGENT] MCP-Prompt-Block nicht erzeugt: {e}", flush=True)
             return ""
 
+    @staticmethod
+    def _mcp_block_tauschen(prompt: str, alt: str, neu: str, pre_block: str = "") -> str:
+        """Den MCP-Block im laufenden Prompt auf den aktuellen Stand bringen.
+
+        ⚠ WARUM (Code-Review 2026-10-25, Register "Property je Schritt gegen
+        Prompt je Lauf"): der Prompt entsteht einmal je Lauf, das
+        Werkzeugangebot je Schritt. Aendert ein Administrator waehrend eines
+        Laufs die Freigabe (oder ein Server faellt aus), nannte der Prompt bis
+        zum Ende Werkzeuge, die laengst weg waren – das Modell rief sie, der
+        Dispatch wies ab.
+
+        Unveraendert = der Prompt bleibt BYTE-GLEICH (Prompt-Cache). Geaendert
+        wird nur der Block selbst; ein bisher leerer Block kommt VOR die
+        persoenliche Anweisung, die zuletzt stehen muss (wie beim
+        Buendel-Nachtrag).
+        """
+        if neu == alt:
+            return prompt
+        if alt and alt in prompt:
+            return prompt.replace(alt, neu, 1)
+        if pre_block and prompt.endswith(pre_block):
+            return prompt[:-len(pre_block)] + neu + pre_block
+        return prompt + neu
+
     def werkzeuge_fuer_anzeige(self) -> list:
         """Der VOLLE Werkzeugsatz - fuer Bilanzen und Anzeigen.
 
@@ -2870,7 +2894,9 @@ KRITISCH – Autonomie-Regeln:
         # Verbindungs- und Freigabestand und aendert sich damit oefter als alles
         # davor – vorn stehend braeche er den Prompt-Cache fuer den ganzen Rest.
         # Vor der Benutzer-Anweisung, die laut unten ZULETZT stehen muss.
-        system_prompt += self._mcp_prompt_block()
+        # Je Schritt nachgezogen (siehe _mcp_block_tauschen).
+        _mcp_block = self._mcp_prompt_block()
+        system_prompt += _mcp_block
 
         # ⚠ DIE ANWEISUNG DES BENUTZERS KOMMT ZULETZT – Begruendung samt Messung
         # oben an der Stelle, die sie ermittelt. Sie MUSS hinter dem
@@ -3334,6 +3360,11 @@ KRITISCH – Autonomie-Regeln:
                                      + _nachtrag + _pre_block)
                 else:
                     system_prompt += _nachtrag
+                # MCP-Stand je Schritt – das Werkzeugangebot wird es auch.
+                _mcp_neu = self._mcp_prompt_block()
+                system_prompt = self._mcp_block_tauschen(system_prompt, _mcp_block,
+                                                         _mcp_neu, _pre_block)
+                _mcp_block = _mcp_neu
 
                 # Kontextfenster-Management: lange Historien komprimieren
                 chat_history = await self._compress_history(chat_history, system_prompt)
@@ -3821,8 +3852,10 @@ KRITISCH – Autonomie-Regeln:
             # hier UNGERAHMT im System-Prompt – ausgerechnet in den Laeufen, die
             # ohne Zuschauer Fremdtext verarbeiten (BSI-Abgleich, Skill memory).
             system_prompt += gedaechtnis_block(memory_context)
-        # MCP-Server weit hinten – Begruendung wie im Chat-Weg (Prompt-Cache).
-        system_prompt += self._mcp_prompt_block()
+        # MCP-Server weit hinten – Begruendung wie im Chat-Weg (Prompt-Cache);
+        # je Schritt nachgezogen (siehe _mcp_block_tauschen).
+        _mcp_block = self._mcp_prompt_block()
+        system_prompt += _mcp_block
 
         collected_texts = []
         # LLM-VERLAUF AUCH HEADLESS. Bis 2026-08-24 protokollierte nur `run_task`
@@ -3979,6 +4012,10 @@ KRITISCH – Autonomie-Regeln:
                 chat_history.append(
                     types.Content(role="user", parts=function_response_parts)
                 )
+
+                _mcp_neu = self._mcp_prompt_block()
+                system_prompt = self._mcp_block_tauschen(system_prompt, _mcp_block, _mcp_neu)
+                _mcp_block = _mcp_neu
 
                 _stopped, response = await self._await_or_stop(
                     self.provider.generate_response(

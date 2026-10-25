@@ -58,6 +58,13 @@ const AUSNAHMEN = {
     // ist fest "JARVIS-KBS-1." – der Platzhalter zeigt, wie ein echtes Token
     // aussieht. Gebrandet waere der Hinweis schlicht falsch.
     'kbsync.f_token_ph':                'Token-Praefix JARVIS-KBS-1. (knowledge_sync.TOKEN_PREFIX)',
+    // Kennungen, die auf dem Server wirklich so heissen (2026-10-25 eingeordnet):
+    'amtool.st_nosdk':                  'Umgebungsvariable JARVIS_AIMOUSE_EXE',
+    'security.ssh_nicht_erreichbar':    'Dienstname jarvis-broker.service',
+    'security.ad_adm_none':             'das lokale Linux-Konto heisst jarvis',
+    'security.ad_adm_users':            'das lokale Linux-Konto heisst jarvis',
+    'security.ad_adm_group':            'das lokale Linux-Konto heisst jarvis',
+    'knowledge.autoindex_notaus':       'Umgebungsvariable JARVIS_RAG_AUTOINDEX (Notschalter)',
 };
 
 /* Nicht-DOM-Senken: dort wirkt der TreeWalker von branding.js nicht. */

@@ -357,7 +357,10 @@ check("self._gesperrte_weg(self._tool_instances)" in _llm,
       "_llm_tools filtert VOR der Rollen-Whitelist (gilt auch fuer Rollen)")
 _bloecke = [c for c in ast.walk(ast.parse(AGENT_SRC)) if isinstance(c, ast.Call)
             and getattr(c.func, "attr", "") == "_mcp_prompt_block"]
-check(len(_bloecke) == 2, f"MCP-Block in BEIDEN Prompt-Wegen (Chat + headless): {len(_bloecke)}")
+# je Weg einmal beim Aufbau und einmal je Schritt (siehe _mcp_block_tauschen)
+check(len(_bloecke) == 4, f"MCP-Block in BEIDEN Prompt-Wegen, Aufbau + je Schritt: {len(_bloecke)}")
+check(AGENT_SRC.count("_mcp_block = self._mcp_prompt_block()\n") == 2,
+      "beide Wege bauen den Block beim Aufbau")
 
 import types  # noqa: E402
 _fake = types.ModuleType("backend.mcp_client")
@@ -400,13 +403,32 @@ check("VEMAS" in blk and "KEINE" in blk, "Block grenzt Fachsysteme ausdruecklich
 # Position: hinter dem Gedaechtnis, vor der Benutzer-Anweisung (Prompt-Cache).
 _rt = AGENT_SRC[AGENT_SRC.find("async def run_task"):]
 _p_mem = _rt.find("system_prompt += gedaechtnis_block(memory_context)")
-_p_mcp = _rt.find("system_prompt += self._mcp_prompt_block()")
+_p_mcp = _rt.find("system_prompt += _mcp_block")
 _p_pre = _rt.find("system_prompt += _pre_block")
 check(-1 not in (_p_mem, _p_mcp, _p_pre) and _p_mem < _p_mcp < _p_pre,
       "Chat: MCP-Block nach dem Gedaechtnis, vor der Benutzer-Anweisung")
 _basis = AGENT_SRC.find("system_prompt = _mit_plotstyle(self._base_system_prompt())\n")
 check(_basis != -1 and not AGENT_SRC[_basis:_basis + 200].count("_mcp_prompt_block"),
       "headless: Block nicht mehr direkt hinter dem Basisprompt")
+
+# Je Schritt nachgezogen (Register: "Property je Schritt gegen Prompt je Lauf").
+_tns = {}
+_tf = _funktion(AGENT_SRC, "_mcp_block_tauschen", klasse="JarvisAgent")
+_tf.decorator_list = []
+exec(compile(ast.fix_missing_locations(ast.Module(body=[_tf], type_ignores=[])), "agent", "exec"), _tns)
+T_ = _tns["_mcp_block_tauschen"]
+_P = "BASIS" + "\n\nMCP-ALT" + "\n\nANWEISUNG"
+check(T_(_P, "\n\nMCP-ALT", "\n\nMCP-ALT", "\n\nANWEISUNG") is _P,
+      "unveraendert: Prompt bleibt dasselbe Objekt (byte-gleich, Cache)")
+check(T_(_P, "\n\nMCP-ALT", "\n\nMCP-NEU", "\n\nANWEISUNG") == "BASIS\n\nMCP-NEU\n\nANWEISUNG",
+      "geaendert: genau der Block wird ersetzt, Anweisung bleibt zuletzt")
+check(T_("BASIS\n\nANWEISUNG", "", "\n\nMCP-NEU", "\n\nANWEISUNG") == "BASIS\n\nMCP-NEU\n\nANWEISUNG",
+      "neu entstanden: VOR die persoenliche Anweisung")
+check(T_(_P, "\n\nMCP-ALT", "", "\n\nANWEISUNG") == "BASIS\n\nANWEISUNG",
+      "weggefallen: Block verschwindet")
+_n_tausch = len([c for c in ast.walk(ast.parse(AGENT_SRC)) if isinstance(c, ast.Call)
+                 and getattr(c.func, "attr", "") == "_mcp_block_tauschen"])
+check(_n_tausch == 2, f"in BEIDEN Schleifen (Chat + headless) aufgerufen: {_n_tausch}")
 
 # ── 8b. PUT nur mit Freigabe verbindet NICHT neu ───────────────────────────
 print("\n8b. Freigabe-PUT ohne Neuaufbau")

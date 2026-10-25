@@ -1599,7 +1599,10 @@
                         st.classList.remove('svc-ok', 'svc-warn', 'svc-err');
                         if (art) st.classList.add(art);
                     };
-                    if (!window.confirm(T('profile.restart_confirm', 'Den Jarvis-Dienst jetzt neu starten?'))) return;
+                    // confirm() ist keine DOM-Senke – {marke} hier selbst aufloesen.
+                    const _marke = (window.jarvisMarke && window.jarvisMarke()) || 'Jarvis';
+                    if (!window.confirm(T('profile.restart_confirm', 'Den {marke}-Dienst jetzt neu starten?')
+                            .split('{marke}').join(_marke))) return;
 
                     let vorher = null;
                     try { vorher = (await _health()).started_at || null; } catch (e) { /* messen, nicht scheitern */ }
